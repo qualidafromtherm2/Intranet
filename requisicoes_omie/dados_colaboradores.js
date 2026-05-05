@@ -31,6 +31,7 @@ function ensurePane(root){
           <div class="content-section-title">Cadastro de colaboradores</div>
           <div class="side-by-side">
             <input id="colabFilter" type="text" placeholder="Filtrar por usuário/ID/role">
+            <button id="btnPermissoesPorBotao" class="content-button status-button">Permissões</button>
             <button id="btnRecarregarColab" class="content-button status-button">Recarregar</button>
           </div>
         </div>
@@ -50,7 +51,7 @@ function ensurePane(root){
   const st = document.createElement('style');
   st.textContent = `
     /* Grid da lista em estilo tabela, mais limpo e profissional (escopado) */
-    #dadosColaboradores .colab-grid{display:grid;grid-template-columns:1.2fr 90px 180px 1.8fr 140px;gap:0;border:1px solid rgba(255,255,255,.08);border-radius:12px;overflow:hidden;background:rgba(17,20,28,.6);box-shadow:0 8px 26px rgba(0,0,0,.2)}
+    #dadosColaboradores .colab-grid{display:grid;grid-template-columns:1.2fr 90px 180px 1.8fr 180px;gap:0;border:1px solid rgba(255,255,255,.08);border-radius:12px;overflow:hidden;background:rgba(17,20,28,.6);box-shadow:0 8px 26px rgba(0,0,0,.2)}
     #dadosColaboradores .colab-grid .th,#dadosColaboradores .colab-grid .td{padding:12px 14px}
     #dadosColaboradores .colab-grid .th{font-weight:700;letter-spacing:.04em;text-transform:uppercase;font-size:12px;color:#a8b3d4;background:rgba(255,255,255,.03);border-bottom:1px solid rgba(255,255,255,.08)}
     #dadosColaboradores .colab-grid .td{border-bottom:1px solid rgba(255,255,255,.06);background:transparent}
@@ -67,7 +68,7 @@ function ensurePane(root){
   @keyframes spin{to{transform:rotate(360deg)}}
   .loading{position:relative}
   .loading::after{content:'';position:absolute;right:-6px;top:-6px;width:14px;height:14px;border:2px solid rgba(255,255,255,.6);border-top-color:transparent;border-radius:50%;animation:spin .8s linear infinite}
-  @media(max-width:1100px){#dadosColaboradores .colab-grid{grid-template-columns:1fr 70px 130px 1.4fr 110px}}
+  @media(max-width:1100px){#dadosColaboradores .colab-grid{grid-template-columns:1fr 70px 130px 1.4fr 150px}}
 
     /* Toolbar: filtro e botão recarregar */
     #dadosColaboradores .title-wrapper{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:10px}
@@ -117,6 +118,8 @@ function ensurePane(root){
       });
   pane.querySelector('#colabFilter')
       .addEventListener('input', () => aplicarFiltro(pane));
+  pane.querySelector('#btnPermissoesPorBotao')
+      .addEventListener('click', () => showPermissoesPorBotao());
 
   return pane;
 }
@@ -169,6 +172,10 @@ const iconFactories = {
     { d: 'M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25z' },
     { d: 'M20.71 7.04a1.003 1.003 0 0 0 0-1.42l-2.34-2.34a1.003 1.003 0 0 0-1.42 0l-1.83 1.83 3.75 3.75 1.84-1.82z' }
   ]),
+  shield: () => makeSvgIcon([
+    { d: 'M12 2l7 3v6c0 5.25-3.5 9.74-7 11-3.5-1.26-7-5.75-7-11V5l7-3z' },
+    { d: 'M10.2 12.3l1.7 1.7 3.9-3.9' }
+  ]),
   trash: () => makeSvgIcon([
     { d: 'M6 19a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V7H6v12z' },
     { d: 'M19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z' }
@@ -193,6 +200,21 @@ btnDet.addEventListener('click', async (ev) => {
   finally { b.disabled = false; b.classList.remove('loading'); }
 });
 c5.appendChild(btnDet);
+
+// Permissões (ícone escudo)
+const btnPerm = makeIconBtn('Permissões', 'shield');
+btnPerm.addEventListener('click', async (ev) => {
+  const b = ev.currentTarget;
+  b.classList.add('loading');
+  b.disabled = true;
+  try {
+    await showPermissoes(String(u.id), u.username);
+  } finally {
+    b.disabled = false;
+    b.classList.remove('loading');
+  }
+});
+c5.appendChild(btnPerm);
 
 // Excluir (ícone lixeira)
 const btnDel = makeIconBtn('Excluir', 'trash');
@@ -491,7 +513,59 @@ const ensurePermStyles = (() => {
       .colab-perm-modal{position:fixed;inset:0;padding:24px;background:rgba(0,0,0,.6);z-index:9999;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(4px)}
 
       /* ======= CAIXA PRINCIPAL ======= */
-      .colab-perm-box{width:min(780px,95vw);max-height:88vh;background:#161b26;border:1px solid rgba(255,255,255,.08);border-radius:16px;box-shadow:0 20px 60px rgba(0,0,0,.6);display:flex;flex-direction:column;overflow:hidden}
+      .colab-perm-box{width:min(1060px,96vw);height:87vh;max-height:87vh;background:#161b26;border:1px solid rgba(255,255,255,.08);border-radius:16px;box-shadow:0 20px 60px rgba(0,0,0,.6);display:flex;flex-direction:column;overflow:hidden}
+
+      /* ======= SPLIT PANEL ======= */
+      .colab-perm-split{display:flex;flex:1;overflow:hidden;min-height:0}
+
+      /* --- Painel esquerdo (árvore) --- */
+      .colab-perm-left{width:300px;flex-shrink:0;border-right:1px solid rgba(255,255,255,.06);display:flex;flex-direction:column;overflow:hidden}
+      .colab-perm-left-search{padding:10px 12px;border-bottom:1px solid rgba(255,255,255,.05)}
+      .colab-perm-left-search input{width:100%;padding:7px 10px;border-radius:7px;border:1px solid rgba(255,255,255,.1);background:rgba(255,255,255,.04);color:#e8ecff;font-size:13px;outline:none;box-sizing:border-box}
+      .colab-perm-left-search input:focus{border-color:rgba(80,109,255,.5)}
+      .colab-perm-left-tree{flex:1;overflow-y:auto;padding:6px 0}
+      .colab-perm-left-tree::-webkit-scrollbar{width:4px}
+      .colab-perm-left-tree::-webkit-scrollbar-thumb{background:rgba(255,255,255,.1);border-radius:2px}
+
+      /* --- Itens da árvore --- */
+      .perm-tree-group-lbl{font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:rgba(255,255,255,.3);padding:10px 14px 3px;display:block}
+      .perm-tree-item{display:flex;align-items:center;gap:6px;padding:6px 14px 6px 12px;cursor:pointer;user-select:none;transition:background .1s;border-right:2px solid transparent;position:relative}
+      .perm-tree-item:hover{background:rgba(255,255,255,.04)}
+      .perm-tree-item.active{background:rgba(80,109,255,.16);border-right-color:#506dff}
+      .perm-tree-arrow{width:14px;height:14px;color:rgba(255,255,255,.3);transition:transform .18s;flex-shrink:0}
+      .perm-tree-arrow.open{transform:rotate(90deg)}
+      .perm-tree-arrow-spacer{width:14px;flex-shrink:0}
+      .perm-tree-lbl{flex:1;font-size:13px;color:#d0d8ff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.4}
+      .perm-tree-item.is-parent .perm-tree-lbl{font-weight:600;color:#eef0ff}
+      .perm-tree-badge{min-width:20px;padding:1px 6px;border-radius:999px;font-size:10px;font-weight:700;background:rgba(80,109,255,.22);color:#dfe8ff;text-align:center;flex-shrink:0}
+      .perm-tree-children{overflow:hidden;display:none}
+      .perm-tree-children.open{display:block}
+
+      /* --- Painel direito (detalhe) --- */
+      .colab-perm-right{flex:1;display:flex;flex-direction:column;overflow:hidden;min-width:0}
+      .colab-perm-right-empty{flex:1;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:10px;color:rgba(255,255,255,.25);font-size:14px}
+      .colab-perm-right-header{padding:14px 20px 12px;border-bottom:1px solid rgba(255,255,255,.06);flex-shrink:0}
+      .colab-perm-right-title{margin:0 0 2px;font-size:16px;font-weight:600;color:#f5f7ff}
+      .colab-perm-right-breadcrumb{font-size:11px;color:rgba(255,255,255,.35);margin-bottom:10px}
+      .colab-perm-right-actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+      .colab-perm-right-body{flex:1;overflow-y:auto;padding:14px 20px 20px}
+      .colab-perm-right-body::-webkit-scrollbar{width:5px}
+      .colab-perm-right-body::-webkit-scrollbar-thumb{background:rgba(255,255,255,.1);border-radius:2px}
+
+      /* --- Cards de usuário --- */
+      .colab-perm-cards-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:8px;margin-bottom:14px}
+      .colab-perm-user-card{display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:10px;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.06);transition:background .12s}
+      .colab-perm-user-card:hover{background:rgba(255,255,255,.06)}
+      .colab-perm-user-avatar{width:30px;height:30px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:#fff;flex-shrink:0;text-transform:uppercase}
+      .colab-perm-user-info{flex:1;min-width:0}
+      .colab-perm-user-name-btn{display:block;font-size:12px;color:#e8ecff;background:none;border:none;padding:0;cursor:pointer;text-align:left;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
+      .colab-perm-user-name-btn:hover{text-decoration:underline;color:#fff}
+      .colab-perm-user-setor-lbl{display:block;font-size:10px;color:rgba(255,255,255,.35);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+      /* --- Separador de setor no painel direito --- */
+      .colab-perm-right-sector-sep{font-size:10px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:rgba(180,200,255,.45);margin:14px 0 6px;display:flex;align-items:center;gap:8px}
+      .colab-perm-right-sector-sep::after{content:'';flex:1;height:1px;background:rgba(255,255,255,.06)}
+      .colab-perm-right-no-users{color:rgba(255,255,255,.35);font-size:13px;padding:20px 0;text-align:center}
 
       /* ======= CABEÇALHO ======= */
       .colab-perm-head{display:flex;align-items:center;gap:12px;padding:20px 24px 16px;border-bottom:1px solid rgba(255,255,255,.06)}
@@ -532,6 +606,38 @@ const ensurePermStyles = (() => {
       .colab-perm-item input[type="checkbox"]{width:18px;height:18px;margin:0;flex:0 0 auto;accent-color:#506dff;cursor:pointer}
       .colab-perm-text{flex:1;line-height:1.35}
       .colab-perm-item.hidden-by-search{display:none}
+
+      /* ======= LISTA DE USUÁRIOS POR PERMISSÃO ======= */
+      .colab-perm-users{margin:4px 0 8px 34px;display:flex;flex-direction:column;gap:2px}
+      .colab-perm-sector-group{display:flex;flex-wrap:wrap;gap:6px;align-items:center;padding:2px 0}
+      .colab-perm-sector-label{font-size:10px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:rgba(180,200,255,.55);min-width:100%;margin-bottom:2px}
+      .colab-perm-user-chip{display:inline-flex;align-items:center;gap:6px;padding:4px 8px;border-radius:999px;border:1px solid rgba(97,132,255,.35);background:rgba(80,109,255,.16);color:#e8ecff;font-size:12px}
+      .colab-perm-user-chip:hover{background:rgba(80,109,255,.3);border-color:rgba(120,150,255,.55)}
+      .colab-perm-user-chip-name{border:none;background:transparent;color:inherit;font:inherit;cursor:pointer;padding:0}
+      .colab-perm-user-chip-name:hover{text-decoration:underline}
+      @keyframes colab-spin{to{transform:rotate(360deg)}}
+      .colab-perm-user-remove{display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:999px;border:none;background:rgba(255,90,90,.22);color:#fff;font-size:11px;line-height:1;cursor:pointer;padding:0;position:relative}
+      .colab-perm-user-remove:hover{background:rgba(255,90,90,.4)}
+      .colab-perm-user-remove.loading{color:transparent;pointer-events:none;cursor:default}
+      .colab-perm-user-remove.loading::after{content:'';position:absolute;inset:3px;border-radius:50%;border:2px solid rgba(255,255,255,.25);border-top-color:#fff;animation:colab-spin .65s linear infinite}
+      .colab-perm-user-empty{margin:4px 0 8px 34px;color:rgba(255,255,255,.45);font-size:12px}
+      .colab-perm-count-badge{display:inline-flex;align-items:center;justify-content:center;min-width:24px;padding:2px 8px;border-radius:999px;font-size:11px;font-weight:700;background:rgba(80,109,255,.22);color:#dfe8ff;margin-left:auto}
+      .colab-perm-bulk-actions{display:inline-flex;align-items:center;gap:6px;margin-left:8px;flex:0 0 auto}
+      .colab-perm-bulk-btn{display:inline-flex;align-items:center;justify-content:center;height:24px;padding:0 8px;border-radius:999px;border:1px solid rgba(97,132,255,.35);background:rgba(255,255,255,.06);color:#e8ecff;font-size:11px;font-weight:700;cursor:pointer;white-space:nowrap}
+      .colab-perm-bulk-btn:hover{background:rgba(255,255,255,.12);border-color:rgba(120,150,255,.55)}
+      .colab-perm-bulk-btn.danger{border-color:rgba(255,90,90,.3);background:rgba(255,90,90,.12);color:#ffd2d2}
+      .colab-perm-bulk-btn.danger:hover{background:rgba(255,90,90,.22)}
+      .colab-perm-add-user{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:999px;border:1px solid rgba(97,132,255,.4);background:rgba(80,109,255,.18);color:#fff;font-size:15px;font-weight:700;cursor:pointer;margin-left:8px;flex:0 0 auto}
+      .colab-perm-add-user:hover{background:rgba(80,109,255,.3);border-color:rgba(120,150,255,.55)}
+      .colab-perm-picker-overlay{position:fixed;inset:0;background:rgba(0,0,0,.52);display:flex;align-items:center;justify-content:center;z-index:10001;padding:18px}
+      .colab-perm-picker-box{width:min(480px,92vw);max-height:78vh;background:#161b26;border:1px solid rgba(255,255,255,.08);border-radius:14px;box-shadow:0 20px 60px rgba(0,0,0,.55);display:flex;flex-direction:column;overflow:hidden}
+      .colab-perm-picker-head{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:18px 18px 12px;border-bottom:1px solid rgba(255,255,255,.06)}
+      .colab-perm-picker-title{margin:0;font-size:16px;color:#f5f7ff}
+      .colab-perm-picker-search{margin:12px 18px 0;padding:9px 12px;border-radius:8px;border:1px solid rgba(255,255,255,.1);background:rgba(255,255,255,.04);color:#e8ecff;font-size:14px;outline:none}
+      .colab-perm-picker-list{padding:14px 18px 18px;overflow:auto;display:flex;flex-direction:column;gap:8px}
+      .colab-perm-picker-item{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 12px;border-radius:10px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.06)}
+      .colab-perm-picker-item-name{font-size:14px;color:#f0f3ff}
+      .colab-perm-picker-empty{padding:24px 12px;text-align:center;color:rgba(255,255,255,.45);font-size:13px}
 
       /* ======= FILHOS OCULTOS (colapsado) ======= */
       .colab-perm-children{overflow:hidden;max-height:0;transition:max-height .25s ease;padding-left:18px}
@@ -893,4 +999,607 @@ async function showPermissoes(userId, username) {
       btn.innerHTML = '<span class="btn-icon">💾</span> Salvar alterações';
     }
   };
+}
+
+async function showPermissoesPorBotao() {
+  ensurePermStyles();
+  const OWNER_USERNAME = 'leandro.s';
+
+  if (!window.__permByButtonModalEl) {
+    window.__permByButtonModalEl = document.createElement('div');
+    window.__permByButtonModalEl.className = 'colab-perm-modal';
+    document.body.appendChild(window.__permByButtonModalEl);
+  }
+
+  const $ = window.__permByButtonModalEl;
+  $.innerHTML = `
+    <div class="colab-perm-box" role="dialog" aria-modal="true">
+      <div class="colab-perm-head">
+        <h3 class="colab-perm-title">Permissões por botão <span>gerencie quem acessa cada função</span></h3>
+        <button id="permByBtnClose" class="colab-perm-btn">✕ Fechar</button>
+      </div>
+      <div class="colab-perm-split">
+        <div class="colab-perm-left">
+          <div class="colab-perm-left-search">
+            <input id="permByBtnSearch" type="text" placeholder="Buscar permissão..." autocomplete="off">
+          </div>
+          <div id="permByBtnTree" class="colab-perm-left-tree">
+            <div class="colab-perm-empty" style="padding:20px 14px;font-size:13px">Carregando...</div>
+          </div>
+        </div>
+        <div id="permByBtnDetail" class="colab-perm-right">
+          <div class="colab-perm-right-empty">
+            <span style="font-size:36px;opacity:.25">☰</span>
+            <span>Selecione uma permissão à esquerda</span>
+          </div>
+        </div>
+      </div>
+    </div>`;
+  $.style.display = 'flex';
+  $.onclick = ev => { if (ev.target === $) $.style.display = 'none'; };
+  $.querySelector('#permByBtnClose').onclick = () => ($.style.display = 'none');
+
+  const treeEl   = $.querySelector('#permByBtnTree');
+  const detailEl  = $.querySelector('#permByBtnDetail');
+  const parentNodeMap = new Map(); // nodeId → parentNodeId (para breadcrumb)
+  let selectedNodeId = null;
+
+  const normalizeUsername = (value) => String(value || '').trim().toLowerCase();
+  const isProtectedUser = (user) => normalizeUsername(user?.username) === OWNER_USERNAME;
+
+  async function setUserPermissionNode(userId, nodeId, allow) {
+    const rTree = await fetch(`/api/users/${encodeURIComponent(userId)}/permissions/tree`, { credentials: 'include' });
+    if (!rTree.ok) throw new Error('HTTP ' + rTree.status);
+    const json = await rTree.json();
+    const nodes = Array.isArray(json?.nodes) ? json.nodes : [];
+    const childMap = new Map();
+    nodes.forEach(node => {
+      const parentId = node?.parent_id != null ? Number(node.parent_id) : null;
+      if (parentId == null) return;
+      if (!childMap.has(parentId)) childMap.set(parentId, []);
+      childMap.get(parentId).push(Number(node.id));
+    });
+
+    const targetIds = new Set();
+    const stack = [Number(nodeId)];
+    while (stack.length) {
+      const current = stack.pop();
+      if (!Number.isInteger(current) || targetIds.has(current)) continue;
+      targetIds.add(current);
+      const children = childMap.get(current) || [];
+      children.forEach(childId => stack.push(childId));
+    }
+
+    const overrides = nodes.map(node => {
+      const id = Number(node.id);
+      return {
+        node_id: id,
+        allow: targetIds.has(id) ? !!allow : !!node.allowed
+      };
+    });
+
+    const rSave = await fetch(`/api/users/${encodeURIComponent(userId)}/permissions/override`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ overrides })
+    });
+    if (!rSave.ok) {
+      const err = await rSave.json().catch(() => ({}));
+      throw new Error(err.error || ('HTTP ' + rSave.status));
+    }
+  }
+
+  function closeUserPicker() {
+    window.__permUserPickerEl?.remove();
+    window.__permUserPickerEl = null;
+  }
+
+  function openUserPicker(node, allUsers, assignedUsers, onSelect) {
+    closeUserPicker();
+    const picker = document.createElement('div');
+    picker.className = 'colab-perm-picker-overlay';
+    const assignedIds = new Set((assignedUsers || []).map(u => String(u.id)));
+    picker.innerHTML = `
+      <div class="colab-perm-picker-box" role="dialog" aria-modal="true">
+        <div class="colab-perm-picker-head">
+          <h4 class="colab-perm-picker-title">Adicionar usuário em ${node.label}</h4>
+          <button type="button" class="colab-perm-btn js-close-picker">Fechar</button>
+        </div>
+        <input class="colab-perm-picker-search" type="text" placeholder="Buscar usuário..." autocomplete="off">
+        <div class="colab-perm-picker-list"></div>
+      </div>`;
+    document.body.appendChild(picker);
+    window.__permUserPickerEl = picker;
+
+    const list = picker.querySelector('.colab-perm-picker-list');
+    const search = picker.querySelector('.colab-perm-picker-search');
+
+    const render = () => {
+      const q = String(search.value || '').trim().toLowerCase();
+      const disponiveis = (allUsers || [])
+        .filter(user => !assignedIds.has(String(user.id)))
+        .filter(user => !q || String(user.username || '').toLowerCase().includes(q));
+
+      if (!disponiveis.length) {
+        list.innerHTML = '<div class="colab-perm-picker-empty">Nenhum usuário disponível para adicionar.</div>';
+        return;
+      }
+
+      list.innerHTML = '';
+      disponiveis
+        .slice()
+        .sort((a, b) => String(a.username || '').localeCompare(String(b.username || ''), 'pt'))
+        .forEach(user => {
+          const row = document.createElement('div');
+          row.className = 'colab-perm-picker-item';
+          row.innerHTML = `
+            <div class="colab-perm-picker-item-name">${user.username}</div>
+            <button type="button" class="colab-perm-btn primary">Adicionar</button>`;
+          row.querySelector('button').onclick = async () => {
+            const btn = row.querySelector('button');
+            btn.disabled = true;
+            btn.textContent = 'Adicionando...';
+            try {
+              await onSelect(user);
+              closeUserPicker();
+            } catch (err) {
+              alert('Falha ao adicionar usuário: ' + (err.message || err));
+              btn.disabled = false;
+              btn.textContent = 'Adicionar';
+            }
+          };
+          list.appendChild(row);
+        });
+    };
+
+    picker.onclick = (ev) => {
+      if (ev.target === picker) closeUserPicker();
+    };
+    picker.querySelector('.js-close-picker').onclick = () => closeUserPicker();
+    search.addEventListener('input', render);
+    render();
+    setTimeout(() => search.focus(), 30);
+  }
+
+  function getDescendantNodeIds(sourceNodes, nodeId) {
+    const byParent = new Map();
+    sourceNodes.forEach(node => {
+      const parentId = node?.parent_id != null ? Number(node.parent_id) : null;
+      if (parentId == null) return;
+      if (!byParent.has(parentId)) byParent.set(parentId, []);
+      byParent.get(parentId).push(Number(node.id));
+    });
+
+    const ids = new Set();
+    const stack = [Number(nodeId)];
+    while (stack.length) {
+      const current = stack.pop();
+      if (!Number.isInteger(current) || ids.has(current)) continue;
+      ids.add(current);
+      const children = byParent.get(current) || [];
+      children.forEach(childId => stack.push(childId));
+    }
+    return ids;
+  }
+
+  function updateLocalPermissionState(sourceNodes, user, nodeId, allow) {
+    const affectedIds = getDescendantNodeIds(sourceNodes, nodeId);
+    sourceNodes.forEach(node => {
+      if (!affectedIds.has(Number(node.id))) return;
+      const currentUsers = Array.isArray(node.users) ? node.users.slice() : [];
+      const withoutUser = currentUsers.filter(item => String(item.id) !== String(user.id));
+      node.users = allow ? withoutUser.concat([{ id: String(user.id), username: user.username }]) : withoutUser;
+    });
+  }
+
+  function updateSingleNodeLocalState(nodeRef, user, allow) {
+    const currentUsers = Array.isArray(nodeRef?.users) ? nodeRef.users.slice() : [];
+    const withoutUser = currentUsers.filter(item => String(item.id) !== String(user.id));
+    nodeRef.users = allow ? withoutUser.concat([{ id: String(user.id), username: user.username }]) : withoutUser;
+  }
+
+  function updateSingleNodeVisualState(nodeId) {
+    const nodeRef = allNodes.find(item => Number(item.id) === Number(nodeId));
+    if (!nodeRef) return;
+    const total = Array.isArray(nodeRef.users) ? nodeRef.users.length : 0;
+    const treeItem = treeEl.querySelector(`.perm-tree-item[data-node-id="${nodeId}"]`);
+    if (treeItem) {
+      const badge = treeItem.querySelector('.perm-tree-badge');
+      if (badge) badge.textContent = String(total);
+    }
+    if (Number(selectedNodeId) === Number(nodeId)) renderRightPanel(nodeRef);
+  }
+
+  // (refreshModal mantido para compatibilidade com openUserPicker)
+  function refreshModal() {
+    renderLeftTree();
+    if (selectedNodeId != null) {
+      const n = allNodes.find(item => Number(item.id) === Number(selectedNodeId));
+      if (n) renderRightPanel(n);
+    }
+  }
+
+  async function applyPermissionToUsers(userList, nodeId, allow) {
+    for (const user of userList) {
+      await setUserPermissionNode(user.id, nodeId, allow);
+    }
+  }
+
+  let users = [];
+  try {
+    const rUsers = await fetch('/api/users', { credentials: 'include' });
+    if (!rUsers.ok) throw new Error('HTTP ' + rUsers.status);
+    const arr = await rUsers.json();
+    users = (Array.isArray(arr) ? arr : [])
+      .map(u => ({ id: String(u.id || ''), username: String(u.username || '').trim(), setor: u.setor || null }))
+      .filter(u => u.id && u.username);
+  } catch (e) {
+    treeEl.innerHTML = `<div class="colab-perm-empty" style="padding:20px;color:#f66">Falha ao carregar usuários (${e.message || e}).</div>`;
+    return;
+  }
+
+  if (!users.length) {
+    treeEl.innerHTML = '<div class="colab-perm-empty" style="padding:20px">Nenhum usuário encontrado.</div>';
+    return;
+  }
+
+  const perUserTree = await Promise.all(users.map(async (u) => {
+    try {
+      const r = await fetch(`/api/users/${encodeURIComponent(u.id)}/permissions/tree`, { credentials: 'include' });
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      const json = await r.json();
+      return { user: u, nodes: Array.isArray(json?.nodes) ? json.nodes : [] };
+    } catch {
+      return { user: u, nodes: [] };
+    }
+  }));
+
+  const nodeAggMap = new Map();
+  for (const item of perUserTree) {
+    for (const n of item.nodes) {
+      const key = String(n.id || '');
+      if (!key) continue;
+      if (!nodeAggMap.has(key)) {
+        nodeAggMap.set(key, {
+          id: Number(n.id),
+          parent_id: n.parent_id != null ? Number(n.parent_id) : null,
+          label: String(n.label || ''),
+          pos: String(n.pos || 'side'),
+          sort: Number(n.sort || 0),
+          users: []
+        });
+      }
+      const entry = nodeAggMap.get(key);
+      if (n.allowed) entry.users.push(item.user);
+    }
+  }
+
+  const allNodes = Array.from(nodeAggMap.values());
+  if (!allNodes.length) {
+    treeEl.innerHTML = '<div class="colab-perm-empty" style="padding:20px">Nenhuma permissão encontrada.</div>';
+    return;
+  }
+
+  const byPos = {};
+  for (const node of allNodes) {
+    if (!byPos[node.pos]) byPos[node.pos] = [];
+    byPos[node.pos].push(node);
+  }
+
+  const posLabels = { side: 'Menu lateral', top: 'Menu superior' };
+
+  function buildTree(arr) {
+    const map = new Map();
+    const roots = [];
+    arr.forEach(item => map.set(item.id, { ...item, children: [] }));
+    map.forEach(node => {
+      if (node.parent_id && map.has(node.parent_id)) map.get(node.parent_id).children.push(node);
+      else roots.push(node);
+    });
+    const sortFn = (a, b) => ((a.sort ?? 0) - (b.sort ?? 0)) || (a.label || '').localeCompare(b.label || '', 'pt');
+    const sortTree = (nodes) => { nodes.sort(sortFn); nodes.forEach(n => sortTree(n.children)); };
+    sortTree(roots);
+    return roots;
+  }
+
+  // ===== Auxiliares avatar =====
+  const AVATAR_COLORS_P = ['#4f68e8','#7c4dff','#e84fa3','#26a69a','#ff7043','#42a5f5','#66bb6a','#ab47bc'];
+  function avatarColorP(u) { let h=0; for(let i=0;i<u.length;i++) h=u.charCodeAt(i)+((h<<5)-h); return AVATAR_COLORS_P[Math.abs(h)%AVATAR_COLORS_P.length]; }
+  function avatarInitialsP(u) { const p=String(u||'').replace(/[._-]/g,' ').split(' ').filter(Boolean); return p.length>=2?(p[0][0]+p[1][0]).toUpperCase():String(u||'?').slice(0,2).toUpperCase(); }
+
+  // ===== Mapa de pais (breadcrumb) =====
+  function buildParentMapFromTree(treeNodes, parentId) {
+    (treeNodes||[]).forEach(n => {
+      if (parentId != null) parentNodeMap.set(Number(n.id), Number(parentId));
+      if (Array.isArray(n.children) && n.children.length) buildParentMapFromTree(n.children, n.id);
+    });
+  }
+  function getBreadcrumb(nodeId) {
+    const path = [];
+    let cur = parentNodeMap.get(Number(nodeId));
+    while (cur != null) {
+      const n = allNodes.find(item => Number(item.id) === cur);
+      if (n) path.unshift(n.label);
+      cur = parentNodeMap.get(cur);
+    }
+    return path;
+  }
+
+  // ===== Painel direito =====
+  function renderRightPanel(node) {
+    detailEl.innerHTML = '';
+
+    const header = document.createElement('div');
+    header.className = 'colab-perm-right-header';
+
+    const titleEl = document.createElement('h4');
+    titleEl.className = 'colab-perm-right-title';
+    titleEl.textContent = node.label;
+    header.appendChild(titleEl);
+
+    const bc = getBreadcrumb(node.id);
+    if (bc.length) {
+      const bcEl = document.createElement('div');
+      bcEl.className = 'colab-perm-right-breadcrumb';
+      bcEl.textContent = bc.join(' › ');
+      header.appendChild(bcEl);
+    }
+
+    const actions = document.createElement('div');
+    actions.className = 'colab-perm-right-actions';
+
+    const addUserBtn = document.createElement('button');
+    addUserBtn.type = 'button';
+    addUserBtn.className = 'colab-perm-btn primary';
+    addUserBtn.innerHTML = '<b style="font-size:14px">+</b>&nbsp;Usuário';
+    addUserBtn.onclick = () => openUserPicker(node, users, node.users || [], async (user) => {
+      await setUserPermissionNode(user.id, node.id, true);
+      updateLocalPermissionState(allNodes, user, node.id, true);
+      updateSingleNodeVisualState(node.id);
+    });
+
+    const addAllBtn = document.createElement('button');
+    addAllBtn.type = 'button';
+    addAllBtn.className = 'colab-perm-bulk-btn';
+    addAllBtn.textContent = 'Adicionar todos';
+    addAllBtn.onclick = async () => {
+      const disponiveis = (users||[]).filter(u => !(node.users||[]).some(cur => String(cur.id)===String(u.id)));
+      if (!disponiveis.length) { alert('Todos os usuários já possuem esta permissão.'); return; }
+      if (!confirm(`Adicionar todos os usuários na permissão "${node.label}"?`)) return;
+      addAllBtn.disabled = true; addAllBtn.textContent = 'Adicionando...';
+      try {
+        await applyPermissionToUsers(disponiveis, node.id, true);
+        disponiveis.forEach(u => updateLocalPermissionState(allNodes, u, node.id, true));
+        updateSingleNodeVisualState(node.id);
+      } catch(err) { alert('Falha: '+(err.message||err)); }
+      finally { addAllBtn.disabled=false; addAllBtn.textContent='Adicionar todos'; }
+    };
+
+    const removeAllBtn = document.createElement('button');
+    removeAllBtn.type = 'button';
+    removeAllBtn.className = 'colab-perm-bulk-btn danger';
+    removeAllBtn.textContent = 'Remover todos';
+    removeAllBtn.onclick = async () => {
+      const vinculados = (Array.isArray(node.users)?node.users:[]).filter(u => !isProtectedUser(u));
+      if (!vinculados.length) { alert('Nenhum usuário removível possui esta permissão.'); return; }
+      if (!confirm(`Remover todos os usuários da permissão "${node.label}"?`)) return;
+      removeAllBtn.disabled = true; removeAllBtn.textContent = 'Removendo...';
+      detailEl.querySelectorAll('.colab-perm-user-remove:not([disabled])').forEach(btn => { btn.disabled=true; btn.classList.add('loading'); });
+      try {
+        await applyPermissionToUsers(vinculados, node.id, false);
+        vinculados.forEach(u => updateLocalPermissionState(allNodes, u, node.id, false));
+        updateSingleNodeVisualState(node.id);
+      } catch(err) { alert('Falha: '+(err.message||err)); }
+      finally { removeAllBtn.disabled=false; removeAllBtn.textContent='Remover todos'; }
+    };
+
+    actions.append(addUserBtn, addAllBtn, removeAllBtn);
+    header.appendChild(actions);
+    detailEl.appendChild(header);
+
+    const rightBody = document.createElement('div');
+    rightBody.className = 'colab-perm-right-body';
+
+    const usersAllowed = Array.isArray(node.users) ? node.users : [];
+    if (!usersAllowed.length) {
+      rightBody.innerHTML = '<div class="colab-perm-right-no-users">Nenhum usuário com esta permissão.</div>';
+    } else {
+      const sectorMap = new Map();
+      usersAllowed.slice().sort((a,b)=>a.username.localeCompare(b.username,'pt')).forEach(u => {
+        const key = u.setor||'—';
+        if (!sectorMap.has(key)) sectorMap.set(key,[]);
+        sectorMap.get(key).push(u);
+      });
+      const sortedSectors = [...sectorMap.keys()].sort((a,b) => {
+        if (a==='—') return 1; if (b==='—') return -1;
+        return a.localeCompare(b,'pt');
+      });
+
+      sortedSectors.forEach(sector => {
+        const sep = document.createElement('div');
+        sep.className = 'colab-perm-right-sector-sep';
+        sep.textContent = sector;
+        rightBody.appendChild(sep);
+
+        const grid = document.createElement('div');
+        grid.className = 'colab-perm-cards-grid';
+
+        sectorMap.get(sector).forEach(u => {
+          const card = document.createElement('div');
+          card.className = 'colab-perm-user-card';
+
+          const avatar = document.createElement('div');
+          avatar.className = 'colab-perm-user-avatar';
+          avatar.style.background = avatarColorP(u.username);
+          avatar.textContent = avatarInitialsP(u.username);
+
+          const info = document.createElement('div');
+          info.className = 'colab-perm-user-info';
+
+          const nameBtn = document.createElement('button');
+          nameBtn.type = 'button';
+          nameBtn.className = 'colab-perm-user-name-btn';
+          nameBtn.textContent = u.username;
+          nameBtn.title = `Abrir permissões de ${u.username}`;
+          nameBtn.onclick = async () => { await showPermissoes(u.id, u.username); };
+
+          const setorSpan = document.createElement('span');
+          setorSpan.className = 'colab-perm-user-setor-lbl';
+          setorSpan.textContent = u.setor||'';
+
+          info.append(nameBtn, setorSpan);
+
+          const removeBtn = document.createElement('button');
+          removeBtn.type = 'button';
+          removeBtn.className = 'colab-perm-user-remove';
+          if (isProtectedUser(u)) {
+            removeBtn.textContent = '*';
+            removeBtn.title = `${u.username} é usuário protegido`;
+            removeBtn.disabled = true;
+            removeBtn.style.cssText = 'opacity:.45;cursor:not-allowed';
+          } else {
+            removeBtn.textContent = 'x';
+            removeBtn.title = `Remover permissão de ${u.username}`;
+            removeBtn.setAttribute('aria-label', `Remover permissão de ${u.username}`);
+            removeBtn.onclick = async () => {
+              removeBtn.disabled = true;
+              removeBtn.classList.add('loading');
+              try {
+                await setUserPermissionNode(u.id, node.id, false);
+                updateSingleNodeLocalState(node, u, false);
+                card.remove();
+                if (!grid.children.length) grid.remove();
+                updateSingleNodeVisualState(node.id);
+              } catch(err) {
+                alert('Falha ao remover: '+(err.message||err));
+                removeBtn.disabled = false;
+                removeBtn.classList.remove('loading');
+              }
+            };
+          }
+
+          card.append(avatar, info, removeBtn);
+          grid.appendChild(card);
+        });
+
+        rightBody.appendChild(grid);
+      });
+    }
+
+    detailEl.appendChild(rightBody);
+  }
+
+  // ===== Selecionar nó =====
+  function selectNode(node) {
+    selectedNodeId = node.id;
+    treeEl.querySelectorAll('.perm-tree-item').forEach(el => el.classList.remove('active'));
+    const treeItem = treeEl.querySelector(`.perm-tree-item[data-node-id="${node.id}"]`);
+    if (treeItem) { treeItem.classList.add('active'); treeItem.scrollIntoView({ block: 'nearest' }); }
+    renderRightPanel(node);
+  }
+
+  // ===== Renderizar nó na árvore esquerda =====
+  function renderTreeNode(node, container, depth) {
+    const hasChildren = Array.isArray(node.children) && node.children.length > 0;
+
+    const item = document.createElement('div');
+    item.className = 'perm-tree-item' + (depth === 0 ? ' is-parent' : '');
+    item.dataset.nodeId = String(node.id);
+    item.dataset.search = `${node.label} ${(node.users||[]).map(u=>u.username).join(' ')}`.toLowerCase();
+    item.style.paddingLeft = `${12 + depth * 14}px`;
+
+    const lbl = document.createElement('span');
+    lbl.className = 'perm-tree-lbl';
+    lbl.textContent = node.label;
+
+    const badge = document.createElement('span');
+    badge.className = 'perm-tree-badge';
+    badge.textContent = String((node.users||[]).length);
+
+    if (hasChildren) {
+      const arrowSvg = document.createElementNS('http://www.w3.org/2000/svg','svg');
+      arrowSvg.setAttribute('viewBox','0 0 16 16');
+      arrowSvg.setAttribute('fill','none');
+      arrowSvg.setAttribute('stroke','currentColor');
+      arrowSvg.setAttribute('stroke-width','2');
+      arrowSvg.setAttribute('stroke-linecap','round');
+      arrowSvg.classList.add('perm-tree-arrow');
+      const path = document.createElementNS('http://www.w3.org/2000/svg','path');
+      path.setAttribute('d','M6 4l4 4-4 4');
+      arrowSvg.appendChild(path);
+
+      const childrenEl = document.createElement('div');
+      childrenEl.className = 'perm-tree-children';
+      if (depth === 0) { arrowSvg.classList.add('open'); childrenEl.classList.add('open'); }
+
+      arrowSvg.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const open = childrenEl.classList.toggle('open');
+        arrowSvg.classList.toggle('open', open);
+      });
+
+      item.append(arrowSvg, lbl, badge);
+      item.addEventListener('click', (e) => {
+        if (e.target === arrowSvg || arrowSvg.contains(e.target)) return;
+        selectNode(node);
+      });
+      node.children.forEach(child => renderTreeNode(child, childrenEl, depth + 1));
+      container.appendChild(item);
+      container.appendChild(childrenEl);
+    } else {
+      const spacer = document.createElement('span');
+      spacer.className = 'perm-tree-arrow-spacer';
+      item.append(spacer, lbl, badge);
+      item.addEventListener('click', () => selectNode(node));
+      container.appendChild(item);
+    }
+  }
+
+  // ===== Renderizar árvore esquerda =====
+  function renderLeftTree() {
+    treeEl.innerHTML = '';
+    parentNodeMap.clear();
+    const grouped = {};
+    allNodes.forEach(n => { if (!grouped[n.pos]) grouped[n.pos]=[]; grouped[n.pos].push(n); });
+
+    ['side','top'].forEach(pos => {
+      const nodes = grouped[pos];
+      if (!nodes || !nodes.length) return;
+      const grpLbl = document.createElement('span');
+      grpLbl.className = 'perm-tree-group-lbl';
+      grpLbl.textContent = posLabels[pos] || pos;
+      treeEl.appendChild(grpLbl);
+      const roots = buildTree(nodes);
+      buildParentMapFromTree(roots, null);
+      roots.forEach(root => renderTreeNode(root, treeEl, 0));
+    });
+
+    // Mantém item selecionado ativo após re-render
+    if (selectedNodeId != null) {
+      const treeItem = treeEl.querySelector(`.perm-tree-item[data-node-id="${selectedNodeId}"]`);
+      if (treeItem) treeItem.classList.add('active');
+    }
+    applySearchFilter();
+  }
+
+  // ===== Busca (painel esquerdo) =====
+  const searchInput = $.querySelector('#permByBtnSearch');
+
+  function applySearchFilter() {
+    const q = (searchInput.value||'').trim().toLowerCase();
+    treeEl.querySelectorAll('.perm-tree-item').forEach(nodeEl => {
+      const match = !q || String(nodeEl.dataset.search||'').includes(q);
+      nodeEl.style.display = match ? '' : 'none';
+    });
+    if (q) {
+      treeEl.querySelectorAll('.perm-tree-children').forEach(childEl => {
+        childEl.classList.add('open');
+        childEl.previousElementSibling?.querySelector('.perm-tree-arrow')?.classList.add('open');
+      });
+    }
+  }
+
+  renderLeftTree();
+  searchInput?.addEventListener('input', applySearchFilter);
 }

@@ -69,7 +69,8 @@ router.post('/:codigo/fotos', upload.single('foto'), async (req, res) => {
 
     const ext      = mime.extension(req.file.mimetype) || 'bin';
     const fileName = `${uuidv4()}.${ext}`;
-    const pathKey  = `${codigoNum}/${fileName}`; // sempre usa pasta do código numérico
+    // Mantém o padrão usado pelo sync de fotos: Fotos_produto/<codigo_produto>/<arquivo>
+    const pathKey  = `Fotos_produto/${codigoNum}/${fileName}`;
 
     // Envia para Supabase
     const { error: upErr } = await supabase

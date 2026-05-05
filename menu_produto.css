@@ -276,6 +276,65 @@ img {
   transition: 0.5s;
 }
 
+.floating-quick-menu {
+  position: fixed;
+  bottom: 50px;
+  right: 84px;
+  z-index: 4;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.floating-quick-btn {
+  position: relative;
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  border: none;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
+  color: #dbeafe;
+  box-shadow: -1px 3px 8px -1px rgba(0, 0, 0, 0.25);
+  transition: transform .2s ease, box-shadow .2s ease;
+}
+
+.floating-quick-btn:hover {
+  transform: scale(1.08);
+  box-shadow: -1px 5px 12px -1px rgba(0, 0, 0, 0.35);
+}
+
+.floating-quick-btn i {
+  font-size: 16px;
+  color: inherit;
+}
+
+.floating-quick-badge {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 5px;
+  border-radius: 10px;
+  background: #dc2626;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 20px;
+  text-align: center;
+  box-shadow: 0 1px 3px rgba(0,0,0,.35);
+  pointer-events: none;
+}
+
+.light-mode .floating-quick-btn {
+  background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
+  color: #eff6ff;
+}
+
 .light-mode .dark-light {
   background-color: #f3f4f6;
   border: 2px solid #e5e7eb;

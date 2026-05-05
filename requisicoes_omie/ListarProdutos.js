@@ -223,6 +223,26 @@ const __gridState = {
   loading: false
 };
 
+let __externalFilterFn = null;
+let __externalFilterLabel = '';
+
+function applyExternalFilter(itens) {
+  if (typeof __externalFilterFn !== 'function') return itens;
+  return (Array.isArray(itens) ? itens : []).filter(__externalFilterFn);
+}
+
+function renderListaFiltradaComTitulo(pane, itens) {
+  const itensFiltrados = applyExternalFilter(itens);
+  renderListaView(itensFiltrados);
+
+  const suffix = __externalFilterLabel ? ` - ${__externalFilterLabel}` : '';
+  const title = pane?.querySelector('.content-section-title');
+  if (title) title.textContent = `Lista de produtos (${itensFiltrados.length})${suffix}`;
+
+  const productCountEl = document.getElementById('productCount');
+  if (productCountEl) productCountEl.textContent = itensFiltrados.length;
+}
+
 function updateListaViewUI() {
   const { ul, grid, toggleBtn, pagination } = __listaRefs;
   if (!ul || !grid || !toggleBtn) return;
@@ -300,14 +320,8 @@ function renderFromCache() {
 
   setCache(window.__omieFullCache || []);
   const itens = getFiltered();
-  renderListaView(itens);
-
   const pane = document.getElementById(__listaPaneId);
-  const title = pane?.querySelector('.content-section-title');
-  if (title) title.textContent = `Lista de produtos (${itens.length})`;
-  // Atualiza badge da aba
-  const productCountEl = document.getElementById('productCount');
-  if (productCountEl) productCountEl.textContent = itens.length;
+  renderListaFiltradaComTitulo(pane, itens);
 }
 
 async function hardRefreshLista() {
@@ -450,9 +464,7 @@ export async function initListarProdutosUI(
     _filterBtn      : document.getElementById('filterBtn'),
     _filterPanel    : document.getElementById('filterPanel'),
     onFiltered: itens => {
-      renderListaView(itens);
-      const title = pane?.querySelector('.content-section-title');
-      if (title) title.textContent = `Lista de produtos (${itens.length})`;
+      renderListaFiltradaComTitulo(pane, itens);
     }
   });
   
@@ -554,14 +566,29 @@ window.__forceListaRefresh = async function () {
 
     // 3) redesenha a UL
     const pane = document.getElementById(__listaPaneId);
-    renderListaView(itens);
-
-    // 4) atualiza o título com a contagem
-    const title = pane?.querySelector('.content-section-title');
-    if (title) title.textContent = `Lista de produtos (${itens.length})`;
+    renderListaFiltradaComTitulo(pane, itens);
   } catch (e) {
     console.warn('forceListaRefresh falhou:', e);
   }
+};
+
+window.__setListaProdutosExternalFilter = function (fn, label = '') {
+  __externalFilterFn = typeof fn === 'function' ? fn : null;
+  __externalFilterLabel = (__externalFilterFn && label) ? String(label) : '';
+
+  const pane = document.getElementById(__listaPaneId);
+  setCache(window.__omieFullCache || []);
+  const itens = getFiltered();
+  renderListaFiltradaComTitulo(pane, itens);
+};
+
+window.__clearListaProdutosExternalFilter = function () {
+  __externalFilterFn = null;
+  __externalFilterLabel = '';
+  const pane = document.getElementById(__listaPaneId);
+  setCache(window.__omieFullCache || []);
+  const itens = getFiltered();
+  renderListaFiltradaComTitulo(pane, itens);
 };
 
 // Handler do menu: mostra a aba e força refresh SEM F5
@@ -572,6 +599,7 @@ window.__forceListaRefresh = async function () {
 
   btn.addEventListener('click', async (ev) => {
     try { ev.preventDefault(); } catch {}
+    try { window.__clearListaProdutosExternalFilter?.(); } catch {}
     // mostra a aba da lista
     const pane = document.getElementById(__listaPaneId);
     const hdr  = document.querySelector('.main-header');
@@ -599,6 +627,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const btn = document.getElementById('menuListaProdutos');
   btn?.addEventListener('click', async (ev) => {
     try { ev.preventDefault(); } catch {}
+    try { window.__clearListaProdutosExternalFilter?.(); } catch {}
     if (window.__listaReady && !__cacheDirty) {
       await window.__listaReady;
       renderFromCache();

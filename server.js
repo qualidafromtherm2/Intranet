@@ -5183,26 +5183,10 @@ async function sincronizarProdutoParaPostgres(produto) {
   ];
   
   await pool.query(sql, valores);
-  
-  // Sincroniza imagens do produto (se existirem)
-  if (produto.imagens && Array.isArray(produto.imagens) && produto.imagens.length > 0) {
-    const codigoProduto = produto.codigo_produto;
-    
-    // Remove imagens antigas
-    await pool.query('DELETE FROM produtos_omie_imagens WHERE codigo_produto = $1', [codigoProduto]);
-    
-    // Insere novas imagens
-    for (let pos = 0; pos < produto.imagens.length; pos++) {
-      const img = produto.imagens[pos];
-      if (img.url_imagem) {
-        await pool.query(
-          `INSERT INTO produtos_omie_imagens (codigo_produto, pos, url_imagem, path_key)
-           VALUES ($1, $2, $3, $4)`,
-          [codigoProduto, pos, img.url_imagem, img.path_key || null]
-        );
-      }
-    }
-  }
+
+  // Imagens NÃO são mais sincronizadas a partir da Omie.
+  // O storage oficial das fotos é o Supabase (bucket produtos/Fotos_produto/<codigo_produto>),
+  // gerenciado por /api/produtos/:codigo/fotos.
 }
 
 
@@ -5821,14 +5805,11 @@ app.post(['/webhooks/omie/produtos', '/api/webhooks/omie/produtos'],
       
       console.log(`[webhooks/omie/produtos] Processando evento "${topic}" para produto ${codigoProduto}`);
       
-      // Se produto foi excluído, remove imagens
+      // Mesmo se o produto foi excluído/inativado na Omie, NÃO mexemos nas imagens locais
+      // (o Supabase é a fonte oficial; remoções devem ser feitas via UI de fotos).
       if (topic === 'Produto.Excluido' || body.inativo === 'S' || body.bloqueado === 'S') {
-        await pool.query(
-          'DELETE FROM public.produtos_omie_imagens WHERE codigo_produto = $1',
-          [codigoProduto]
-        );
-        console.log(`[webhooks/omie/produtos] Imagens do produto ${codigoProduto} removidas (excluído/inativo)`);
-        return res.json({ ok: true, codigo_produto: codigoProduto, acao: 'removido' });
+        console.log(`[webhooks/omie/produtos] Produto ${codigoProduto} excluído/inativo na Omie — imagens locais preservadas`);
+        return res.json({ ok: true, codigo_produto: codigoProduto, acao: 'inativo_sem_remover_imagens' });
       }
       
       // Consulta produto na Omie para pegar imagens atualizadas
@@ -5871,36 +5852,14 @@ app.post(['/webhooks/omie/produtos', '/api/webhooks/omie/produtos'],
         console.error(`[webhooks/omie/produtos] Erro ao atualizar public.produtos_omie (${codigoProduto}):`, syncErr?.message || syncErr);
       }
       
-      // Remove imagens antigas
-      await pool.query(
-        'DELETE FROM public.produtos_omie_imagens WHERE codigo_produto = $1',
-        [codigoProduto]
-      );
-      
-      // Insere novas imagens
-      let totalImagens = 0;
-      if (omieData.imagens && Array.isArray(omieData.imagens) && omieData.imagens.length > 0) {
-        for (let pos = 0; pos < omieData.imagens.length; pos++) {
-          const img = omieData.imagens[pos];
-          if (img.url_imagem) {
-            await pool.query(
-              `INSERT INTO public.produtos_omie_imagens (codigo_produto, pos, url_imagem, path_key)
-               VALUES ($1, $2, $3, $4)`,
-              [codigoProduto, pos, img.url_imagem.trim(), img.path_key || null]
-            );
-            totalImagens++;
-          }
-        }
-      }
-      
-      const acao = totalImagens > 0 ? `atualizado (${totalImagens} imagens)` : 'atualizado (sem imagens)';
-      console.log(`[webhooks/omie/produtos] Produto ${codigoProduto} ${acao}`);
-      
-      res.json({ 
-        ok: true, 
+      // Imagens NÃO são mais atualizadas via Omie — Supabase é a fonte oficial.
+      console.log(`[webhooks/omie/produtos] Produto ${codigoProduto} cadastro atualizado (imagens ignoradas — gerenciadas pelo Supabase)`);
+
+      res.json({
+        ok: true,
         codigo_produto: codigoProduto,
-        acao: acao,
-        total_imagens: totalImagens 
+        acao: 'cadastro_atualizado',
+        imagens: 'gerenciadas pelo Supabase (bucket produtos/Fotos_produto/<codigo>)'
       });
     } catch (err) {
       console.error('[webhooks/omie/produtos] erro:', err);
@@ -15781,7 +15740,7 @@ app.get('/api/logistica/estoque/batch', async (req, res) => {
     if (!codigos.length) return res.json({ ok: true, dados: {} });
 
     const { rows } = await pool.query(
-      `SELECT e.codigo, e.local_nome, e.local_codigo, e.saldo, e.estoque_minimo,
+      `SELECT e.codigo, e.local_nome, e.local_codigo, e.saldo, e.fisico, e.estoque_minimo,
               p.unidade
        FROM logistica.estoque_atual e
        LEFT JOIN public.produtos_omie p ON p.codigo = e.codigo
@@ -15792,6 +15751,7 @@ app.get('/api/logistica/estoque/batch', async (req, res) => {
 
     const dados = {};
     const minimos = {};
+    const PORTA_PALLET_CODE = '10717096386';
 
     // Passo 1: coleta todos os dados
     for (const row of rows) {
@@ -15802,17 +15762,19 @@ app.get('/api/logistica/estoque/batch', async (req, res) => {
       const min = parseFloat(row.estoque_minimo) || 0;
       // Guarda o maior estoque_minimo encontrado para o produto
       if (min > minimos[row.codigo].min) minimos[row.codigo].min = min;
-      // Guarda saldo do local ALMOXARIFADO
-      if (row.local_nome && row.local_nome.toUpperCase().includes('ALMOXARIFADO')) {
-        minimos[row.codigo].saldoAlmox = parseFloat(row.saldo) || 0;
+      // Guarda saldo físico do PORTA PALLET (ALMOXARIFADO) — local 10717096386
+      if (String(row.local_codigo) === PORTA_PALLET_CODE) {
+        minimos[row.codigo].saldoAlmox = parseFloat(row.fisico) || 0;
       }
     }
 
     // Passo 2: calcula abaixo_minimo com o min correto
     for (const cod of Object.keys(minimos)) {
       const info = minimos[cod];
-      if (info.min > 0 && info.saldoAlmox !== null) {
-        info.abaixo = info.saldoAlmox < info.min;
+      // Se produto NÃO está no PORTA PALLET, considera saldo 0 → abaixo do mínimo
+      if (info.min > 0) {
+        const saldo = info.saldoAlmox === null ? 0 : info.saldoAlmox;
+        info.abaixo = saldo < info.min;
       }
     }
 
@@ -17107,10 +17069,18 @@ app.get('/api/produtos/detalhes/:codigo', async (req, res) => {
           descricao,
           lead_time,
           estoque_minimo,
-          url_imagem,
+          COALESCE(
+            to_jsonb(produtos_omie)->>'primeira_imagem',
+            to_jsonb(produtos_omie)->>'url_imagem',
+            ''
+          ) AS url_imagem,
           descricao_familia,
           codigo_familia,
-          saldo_estoque
+          COALESCE(
+            NULLIF(to_jsonb(produtos_omie)->>'saldo_estoque', ''),
+            NULLIF(to_jsonb(produtos_omie)->>'quantidade_estoque', ''),
+            '0'
+          ) AS saldo_estoque
         FROM public.produtos_omie 
         WHERE codigo = $1 
         LIMIT 1`,
@@ -17145,18 +17115,38 @@ app.get('/api/produtos/detalhes/:codigo', async (req, res) => {
       }
       
       // Atualiza apenas os campos permitidos
-      const updateResult = await pool.query(
-        `UPDATE public.produtos_omie 
-        SET 
-          descricao = COALESCE($1, descricao),
-          lead_time = $2,
-          estoque_minimo = $3,
-          url_imagem = $4,
-          updated_at = NOW()
-        WHERE codigo = $5
-        RETURNING *`,
-        [descricao, lead_time, estoque_minimo, url_imagem, codigo]
+      // A coluna de imagem pode variar entre ambientes (url_imagem ou primeira_imagem)
+      const colResult = await pool.query(
+        `SELECT column_name
+         FROM information_schema.columns
+         WHERE table_schema = 'public'
+           AND table_name = 'produtos_omie'
+           AND column_name IN ('primeira_imagem', 'url_imagem')
+         ORDER BY CASE WHEN column_name = 'primeira_imagem' THEN 0 ELSE 1 END
+         LIMIT 1`
       );
+
+      const imageColumnRaw = colResult.rows?.[0]?.column_name || null;
+      const imageColumn = ['primeira_imagem', 'url_imagem'].includes(imageColumnRaw)
+        ? imageColumnRaw
+        : null;
+
+      const params = [descricao, lead_time, estoque_minimo];
+      let sql = `UPDATE public.produtos_omie
+                 SET descricao = COALESCE($1, descricao),
+                     lead_time = $2,
+                     estoque_minimo = $3`;
+
+      if (imageColumn) {
+        params.push(url_imagem);
+        sql += `, ${imageColumn} = COALESCE($${params.length}, ${imageColumn})`;
+      }
+
+      sql += `, updated_at = NOW()`;
+      params.push(codigo);
+      sql += ` WHERE codigo = $${params.length} RETURNING *`;
+
+      const updateResult = await pool.query(sql, params);
       
       // Auditoria
       try {
@@ -25529,196 +25519,153 @@ app.get('/api/compras/catalogo-omie', async (req, res) => {
   }
 });
 
-// Fila para chamadas à Omie — serializa requisições com delay de 350ms (3 req/s max)
-const _omieImageQueue = (() => {
-  const DELAY_MS = 370; // um pouco acima de 333ms para margem de segurança
-  let _lastCall = 0;
-  let _pending = 0;
+// GET /api/produtos/no-minimo - Lista produtos com estoque físico abaixo do mínimo
+app.get('/api/produtos/no-minimo', async (req, res) => {
+  try {
+    const { rows } = await pool.query(`
+      SELECT
+        po.codigo_produto,
+        po.codigo,
+        po.descricao,
+        po.inativo,
+        po.bloqueado,
+        up.local_codigo,
+        up.local_nome,
+        up.fisico,
+        up.estoque_minimo,
+        (up.estoque_minimo - up.fisico) AS deficit,
+        up.data_posicao,
+        up.ingested_at
+      FROM public.produtos_omie po
+      JOIN LATERAL (
+        SELECT
+          COALESCE(p.fisico, 0) AS fisico,
+          COALESCE(p.estoque_minimo, 0) AS estoque_minimo,
+          COALESCE(
+            NULLIF(to_jsonb(p)->>'local_codigo', ''),
+            NULLIF(to_jsonb(p)->>'codigo_local_estoque', ''),
+            ''
+          ) AS local_codigo,
+          COALESCE(
+            NULLIF(to_jsonb(p)->>'local_nome', ''),
+            NULLIF(to_jsonb(p)->>'nome_local_estoque', ''),
+            ''
+          ) AS local_nome,
+          p.data_posicao,
+          p.ingested_at
+        FROM public.omie_estoque_posicao p
+        WHERE COALESCE(p.omie_prod_id::text, p.codigo) = po.codigo_produto::text
+        ORDER BY p.data_posicao DESC NULLS LAST, p.ingested_at DESC NULLS LAST, p.id DESC
+        LIMIT 1
+      ) up ON true
+      WHERE COALESCE(po.inativo, 'N') = 'N'
+        AND COALESCE(po.bloqueado, 'N') = 'N'
+        AND COALESCE(up.fisico, 0) < COALESCE(up.estoque_minimo, 0)
+      ORDER BY deficit DESC, po.descricao ASC
+      LIMIT 2000
+    `);
 
+    res.json({ ok: true, total: rows.length, itens: rows });
+  } catch (err) {
+    console.error('[produtos/no-minimo] erro:', err);
+    res.status(500).json({ ok: false, error: String(err?.message || err) });
+  }
+});
+
+// Alias sem conflito com /api/produtos/:codigo
+app.get('/api/logistica/produtos-no-minimo', async (req, res) => {
+  const client = await pool.connect();
+  try {
+    // Limita o tempo da query no servidor para evitar locks longos em produtos_omie
+    await client.query("SET LOCAL statement_timeout = '20000'");
+    const { rows } = await client.query(`
+      WITH minimos AS (
+        SELECT omie_prod_id, MAX(estoque_minimo) AS minimo
+        FROM logistica.estoque_atual
+        WHERE COALESCE(estoque_minimo, 0) > 0
+        GROUP BY omie_prod_id
+      )
+      SELECT
+        m.omie_prod_id                              AS codigo_produto,
+        COALESCE(pp.codigo, po.codigo)              AS codigo,
+        COALESCE(po.descricao, pp.descricao)        AS descricao,
+        '10717096386'                               AS local_codigo,
+        '2. PORTA PALLET (ALMOXARIFADO)'            AS local_nome,
+        COALESCE(pp.fisico, 0)                      AS fisico,
+        m.minimo                                    AS estoque_minimo,
+        (m.minimo - COALESCE(pp.fisico, 0))         AS deficit,
+        COALESCE(pp.updated_at, NOW())              AS data_posicao
+      FROM minimos m
+      JOIN public.produtos_omie po
+        ON po.codigo_produto = m.omie_prod_id
+      LEFT JOIN logistica.estoque_atual pp
+        ON pp.omie_prod_id = m.omie_prod_id
+       AND pp.local_codigo = '10717096386'
+      WHERE COALESCE(pp.fisico, 0) < m.minimo
+        AND COALESCE(po.descricao, pp.descricao, '') !~* '^\\s*(engenharia|obsoleto)'
+      ORDER BY deficit DESC, descricao ASC
+      LIMIT 2000
+    `);
+
+    res.json({ ok: true, total: rows.length, itens: rows });
+  } catch (err) {
+    console.error('[logistica/produtos-no-minimo] erro:', err?.message || err);
+    res.status(500).json({ ok: false, error: String(err?.message || err) });
+  } finally {
+    try { client.release(); } catch (_) {}
+  }
+});
+
+// Fila legada usada apenas por chamadas restantes à Omie (mantida para compatibilidade).
+const _omieImageQueue = (() => {
+  const DELAY_MS = 370;
+  let _lastCall = 0;
   return async function enqueue(fn) {
-    _pending++;
     const now = Date.now();
     const wait = Math.max(0, _lastCall + DELAY_MS - now);
     if (wait > 0) await new Promise(r => setTimeout(r, wait));
     _lastCall = Date.now();
-    try {
-      return await fn();
-    } finally {
-      _pending--;
-    }
+    return fn();
   };
 })();
 
-// GET /api/compras/imagem-fresca/:codigo_produto - Busca URL fresca da imagem direto da Omie
+// GET /api/compras/imagem-fresca/:codigo_produto
+// As imagens agora vivem 100% no Supabase. Esta rota apenas lê a URL pública mais recente
+// armazenada em public.produtos_omie_imagens (alimentada pelo bucket produtos/Fotos_produto).
 app.get('/api/compras/imagem-fresca/:codigo_produto', async (req, res) => {
   try {
-    const codigoProduto = req.params.codigo_produto;
+    const codigoProduto = String(req.params.codigo_produto || '').trim();
+    if (!codigoProduto) return res.json({ ok: true, url_imagem: null });
 
-    const omieData = await _omieImageQueue(async () => {
-      const omieBody = {
-        call: 'ConsultarProduto',
-        app_key: process.env.OMIE_APP_KEY,
-        app_secret: process.env.OMIE_APP_SECRET,
-        param: [{ codigo_produto: parseInt(codigoProduto) }]
-      };
+    const { rows } = await pool.query(
+      `SELECT TRIM(url_imagem) AS url_imagem
+         FROM public.produtos_omie_imagens
+        WHERE codigo_produto = $1
+          AND COALESCE(ativo, true) = true
+        ORDER BY pos NULLS LAST, id ASC
+        LIMIT 1`,
+      [codigoProduto]
+    );
 
-      const omieResp = await fetch('https://app.omie.com.br/api/v1/geral/produtos/', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(omieBody)
-      });
-
-      if (!omieResp.ok) {
-        const err = new Error(`HTTP_${omieResp.status}`);
-        err.httpStatus = omieResp.status;
-        throw err;
-      }
-
-      return omieResp.json();
-    });
-
-    // Verifica se houve erro na resposta da Omie
-    if (omieData.faultstring || omieData.faultcode) {
-      console.warn(`[Imagem Fresca] Erro Omie para produto ${codigoProduto}:`, omieData.faultstring);
-      return res.json({ ok: true, url_imagem: null });
-    }
-
-    // Atualiza URLs no banco se houver imagens
-    if (omieData.imagens && Array.isArray(omieData.imagens) && omieData.imagens.length > 0) {
-      await pool.query('DELETE FROM public.produtos_omie_imagens WHERE codigo_produto = $1', [codigoProduto]);
-
-      for (let pos = 0; pos < omieData.imagens.length; pos++) {
-        const img = omieData.imagens[pos];
-        if (img.url_imagem) {
-          await pool.query(
-            `INSERT INTO public.produtos_omie_imagens (codigo_produto, pos, url_imagem, path_key)
-             VALUES ($1, $2, $3, $4)`,
-            [codigoProduto, pos, img.url_imagem.trim(), img.path_key || null]
-          );
-        }
-      }
-
-      const primeiraImagem = omieData.imagens[0]?.url_imagem?.trim() || null;
-      res.json({ ok: true, url_imagem: primeiraImagem });
-    } else {
-      res.json({ ok: true, url_imagem: null });
-    }
+    res.json({ ok: true, url_imagem: rows[0]?.url_imagem || null });
   } catch (err) {
-    if (err.httpStatus === 429) {
-      console.warn(`[Imagem Fresca] Rate limit Omie para produto ${req.params.codigo_produto} — retornando sem imagem`);
-      return res.json({ ok: true, url_imagem: null });
-    }
-    if (err.httpStatus) {
-      console.error(`[Imagem Fresca] Erro HTTP ${err.httpStatus} ao consultar produto ${req.params.codigo_produto}`);
-      return res.status(500).json({ ok: false, error: 'Erro ao consultar Omie' });
-    }
     console.error('[Imagem Fresca] Erro ao buscar imagem:', err);
     res.status(500).json({ ok: false, error: 'Erro ao buscar imagem' });
   }
 });
 
-// POST /api/admin/sync/imagens-omie - Sincroniza TODAS as imagens dos produtos ativos
-app.post('/api/admin/sync/imagens-omie', express.json(), async (req, res) => {
-  const startTime = Date.now();
-  
-  try {
-    console.log('[Sync Imagens] Iniciando sincronização...');
-    
-    // Busca todos os produtos ativos que têm imagens na tabela atual
-    const { rows: produtos } = await pool.query(`
-      SELECT DISTINCT p.codigo_produto, p.codigo, p.descricao
-      FROM public.produtos_omie p
-      WHERE p.inativo = 'N' AND p.bloqueado = 'N'
-      ORDER BY p.codigo_produto
-    `);
-    
-    console.log(`[Sync Imagens] ${produtos.length} produtos ativos encontrados`);
-    
-    let sucessos = 0;
-    let erros = 0;
-    let semImagem = 0;
-    const DELAY_MS = 350; // Rate limit Omie: 3 req/seg = ~333ms, usando 350ms para segurança
-    
-    for (let i = 0; i < produtos.length; i++) {
-      const produto = produtos[i];
-      
-      try {
-        // Consulta produto na Omie para pegar URLs frescas
-        const omieBody = {
-          call: 'ConsultarProduto',
-          app_key: process.env.OMIE_APP_KEY,
-          app_secret: process.env.OMIE_APP_SECRET,
-          param: [{ codigo_produto: parseInt(produto.codigo_produto) }]
-        };
-        
-        const omieResp = await fetch('https://app.omie.com.br/api/v1/geral/produtos/', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(omieBody)
-        });
-        
-        if (!omieResp.ok) {
-          console.error(`[Sync Imagens] Erro HTTP ${omieResp.status} para produto ${produto.codigo}`);
-          erros++;
-          await new Promise(resolve => setTimeout(resolve, DELAY_MS));
-          continue;
-        }
-        
-        const omieData = await omieResp.json();
-        
-        // Se houver imagens, atualiza no banco
-        if (omieData.imagens && Array.isArray(omieData.imagens) && omieData.imagens.length > 0) {
-          // Remove imagens antigas
-          await pool.query('DELETE FROM public.produtos_omie_imagens WHERE codigo_produto = $1', [produto.codigo_produto]);
-          
-          // Insere novas imagens com URLs frescas
-          for (let pos = 0; pos < omieData.imagens.length; pos++) {
-            const img = omieData.imagens[pos];
-            if (img.url_imagem) {
-              await pool.query(
-                `INSERT INTO public.produtos_omie_imagens (codigo_produto, pos, url_imagem, path_key)
-                 VALUES ($1, $2, $3, $4)`,
-                [produto.codigo_produto, pos, img.url_imagem.trim(), img.path_key || null]
-              );
-            }
-          }
-          
-          sucessos++;
-          console.log(`[Sync Imagens] ${i + 1}/${produtos.length} - ${produto.codigo}: ${omieData.imagens.length} imagens atualizadas`);
-        } else {
-          semImagem++;
-          console.log(`[Sync Imagens] ${i + 1}/${produtos.length} - ${produto.codigo}: sem imagens`);
-        }
-        
-        // Aguarda para respeitar rate limit
-        if (i < produtos.length - 1) {
-          await new Promise(resolve => setTimeout(resolve, DELAY_MS));
-        }
-        
-      } catch (err) {
-        console.error(`[Sync Imagens] Erro ao processar produto ${produto.codigo}:`, err.message);
-        erros++;
-      }
-    }
-    
-    const tempoDecorrido = ((Date.now() - startTime) / 1000).toFixed(1);
-    const resultado = {
-      ok: true,
-      total: produtos.length,
-      sucessos,
-      erros,
-      semImagem,
-      tempoDecorrido: `${tempoDecorrido}s`
-    };
-    
-    console.log('[Sync Imagens] Concluído:', resultado);
-    res.json(resultado);
-    
-  } catch (err) {
-    console.error('[Sync Imagens] Erro geral:', err);
-    res.status(500).json({ ok: false, error: err.message });
-  }
+// POST /api/admin/sync/imagens-omie
+// Endpoint legado — sincronização via Omie foi descontinuada.
+// Imagens agora são gerenciadas via Supabase Storage (scripts/sync_fotos_produtos_supabase.js
+// para refazer toda a base; uploads incrementais via /api/produtos/:codigo/fotos).
+app.post('/api/admin/sync/imagens-omie', express.json(), (_req, res) => {
+  res.status(410).json({
+    ok: false,
+    error: 'Endpoint descontinuado. Use scripts/sync_fotos_produtos_supabase.js (Supabase) ou /api/produtos/:codigo/fotos para uploads.'
+  });
 });
+
+// GET /api/compras/minhas - Lista solicitações do usuário logado
 
 // GET /api/compras/minhas - Lista solicitações do usuário logado
 app.get('/api/compras/minhas', async (req, res) => {
@@ -29689,17 +29636,6 @@ async function montarPlanoAssociacaoNfePedido(numeroNfe, numeroPedido, chaveNfe 
     return { itensIde };
   });
 
-  const itensSemIdItemPedido = previewItens.filter(
-    (item) => !Number.isFinite(Number(item?.pedido_n_cod_item || NaN))
-  );
-
-  if (itensSemIdItemPedido.length > 0) {
-    throw new Error(
-      `Não foi possível mapear nIdItPedidoExistente para ${itensSemIdItemPedido.length} item(ns) da NF-e. ` +
-      'Verifique se os itens do pedido Omie correspondem aos itens do recebimento.'
-    );
-  }
-
   return {
     numero_nfe: String(recebimento?.cabec?.cNumeroNFe || '').trim() || String(numeroNfe || '').trim(),
     n_id_receb: Number(recebimento?.cabec?.nIdReceb || 0) || null,
@@ -29893,6 +29829,29 @@ app.post('/api/compras/pedidos-omie/nfe-associar-pedido', express.json(), async 
       if (seq > 0) overrideMap.set(seq, ov);
     }
 
+    // Valida que todos os itens da NF-e foram mapeados a um item do pedido Omie
+    // (considerando possíveis ajustes manuais vindos do frontend)
+    const itensSemMapeamento = Array.isArray(plano?.itens_preview)
+      ? plano.itens_preview.filter((it) => {
+        const seq = Number(it?.n_sequencia || 0);
+        const override = overrideMap.get(seq);
+        const codItemOverride = Number(override?.nIdItPedidoExistente || 0);
+        if (Number.isFinite(codItemOverride) && codItemOverride > 0) return false;
+        return !Number.isFinite(Number(it?.pedido_n_cod_item || NaN));
+      })
+      : [];
+    if (itensSemMapeamento.length > 0) {
+      return res.status(422).json({
+        ok: false,
+        error: `Não foi possível mapear ${itensSemMapeamento.length} item(ns) da NF-e ao pedido. Revise a prévia antes de confirmar.`,
+        itens_sem_match: itensSemMapeamento.map((it) => ({
+          n_sequencia: it?.n_sequencia,
+          nf_codigo_produto: it?.nf_codigo_produto,
+          nf_descricao_produto: it?.nf_descricao_produto
+        }))
+      });
+    }
+
     try {
       const pedidoNumero = plano.c_numero_pedido || numeroPedido || String(nCodPed || '');
       const paramPed = pedidoNumero
@@ -29921,7 +29880,24 @@ app.post('/api/compras/pedidos-omie/nfe-associar-pedido', express.json(), async 
     const aplicarEstoqueEspecial = nCodCC && CONTAS_ESPECIAIS.includes(nCodCC);
 
     // Itens conforme plano (ASSOCIAR-PEDIDO)
-    const itensParaEnviar = plano.itensRecebimentoEditar;
+    const itensParaEnviar = Array.isArray(plano?.itensRecebimentoEditar)
+      ? plano.itensRecebimentoEditar.map((itemEditar) => ({
+        ...itemEditar,
+        itensIde: { ...(itemEditar?.itensIde || {}) }
+      }))
+      : [];
+
+    // Aplica troca manual do item do pedido por sequência da NF-e
+    itensParaEnviar.forEach((itemEditar) => {
+      const seq = Number(itemEditar?.itensIde?.nSequencia || 0);
+      if (!seq) return;
+
+      const override = overrideMap.get(seq);
+      const codItemOverride = Number(override?.nIdItPedidoExistente || 0);
+      if (Number.isFinite(codItemOverride) && codItemOverride > 0) {
+        itemEditar.itensIde.nIdItPedidoExistente = codItemOverride;
+      }
+    });
 
     // Monta parcelas, infoAdicionais e estoque para TODAS as associações
     let financeiroParaEnviar = undefined;
