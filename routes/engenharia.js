@@ -533,5 +533,97 @@ module.exports = (pool) => {
     } finally { client.release(); }
   });
 
+  // PUT /api/engenharia/codigo-verificacoes/:id — edita texto da verificação
+  router.put('/codigo-verificacoes/:id', async (req, res) => {
+    const client = await pool.connect();
+    try {
+      const id = parseInt(req.params.id, 10);
+      const { verificacao } = req.body;
+      if (!id) return res.status(400).json({ error: 'ID inválido.' });
+      await client.query('UPDATE engenharia.codigo_verificacoes SET verificacao = $1 WHERE id = $2', [verificacao || null, id]);
+      res.json({ ok: true });
+    } catch (e) {
+      console.error('[PUT /codigo-verificacoes/:id] erro:', e);
+      res.status(500).json({ error: e.message });
+    } finally { client.release(); }
+  });
+
+  // -------------------------------------------------------------------------
+  // ARQUIVOS POR ENTIDADE (analise / solucao / verificacao)
+  // Paths: codigos-erro/{tipo}/{id}/{pasta}/{arquivo}
+  // -------------------------------------------------------------------------
+
+  async function listarArquivosEntidade(tipo, id) {
+    const supabase = getSupabase();
+    const resultado = {};
+    for (const pasta of PASTAS) {
+      const prefixo = `codigos-erro/${tipo}/${id}/${pasta}`;
+      const { data } = await supabase.storage.from(ENGENHARIA_BUCKET).list(prefixo);
+      resultado[pasta] = (data || [])
+        .filter(f => f.name && f.name !== '.emptyFolderPlaceholder')
+        .map(f => {
+          const filePath = `${prefixo}/${f.name}`;
+          const { data: pub } = supabase.storage.from(ENGENHARIA_BUCKET).getPublicUrl(filePath);
+          return { nome: f.name, url: pub.publicUrl, path: filePath, tamanho: f.metadata?.size || 0 };
+        });
+    }
+    return resultado;
+  }
+
+  // GET /api/engenharia/codigo-analise/:id/arquivos
+  router.get('/codigo-analise/:id/arquivos', async (req, res) => {
+    try {
+      const id = parseInt(req.params.id, 10);
+      if (!id) return res.status(400).json({ error: 'ID inválido.' });
+      res.json({ ok: true, arquivos: await listarArquivosEntidade('analise', id) });
+    } catch (e) {
+      console.error('[GET /codigo-analise/:id/arquivos]', e);
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // GET /api/engenharia/codigo-solucao/:id/arquivos
+  router.get('/codigo-solucao/:id/arquivos', async (req, res) => {
+    try {
+      const id = parseInt(req.params.id, 10);
+      if (!id) return res.status(400).json({ error: 'ID inválido.' });
+      res.json({ ok: true, arquivos: await listarArquivosEntidade('solucao', id) });
+    } catch (e) {
+      console.error('[GET /codigo-solucao/:id/arquivos]', e);
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // GET /api/engenharia/codigo-verificacoes/:id/arquivos
+  router.get('/codigo-verificacoes/:id/arquivos', async (req, res) => {
+    try {
+      const id = parseInt(req.params.id, 10);
+      if (!id) return res.status(400).json({ error: 'ID inválido.' });
+      res.json({ ok: true, arquivos: await listarArquivosEntidade('verificacao', id) });
+    } catch (e) {
+      console.error('[GET /codigo-verificacoes/:id/arquivos]', e);
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // DELETE /api/engenharia/entidade-arquivo — remove arquivo de qualquer entidade
+  // Body: { path: 'codigos-erro/analise/1/Fotos/img.jpg' }
+  router.delete('/entidade-arquivo', async (req, res) => {
+    try {
+      const { path: filePath } = req.body;
+      if (!filePath) return res.status(400).json({ error: 'Campo "path" obrigatório.' });
+      if (!String(filePath).startsWith('codigos-erro/')) {
+        return res.status(403).json({ error: 'Caminho não permitido.' });
+      }
+      const supabase = getSupabase();
+      const { error } = await supabase.storage.from(ENGENHARIA_BUCKET).remove([filePath]);
+      if (error) return res.status(500).json({ error: error.message });
+      res.json({ ok: true });
+    } catch (e) {
+      console.error('[DELETE /entidade-arquivo]', e);
+      res.status(500).json({ error: e.message });
+    }
+  });
+
   return router;
 };
