@@ -24744,14 +24744,14 @@ async function carregarDepartamentosCarrinho() {
     if (padrao) select.value = padrao;
 
     // Atualiza categorias do carrinho ao selecionar departamento
-    select.onchange = () => {
+    select.onchange = async () => {
       atualizarCategoriasPorDepartamento(select.value, 'carrinhoCentroCustoGlobal');
-      aplicarCategoriaPadraoCarrinho();
+      await aplicarCategoriaPadraoCarrinho();
     };
 
     // Inicializa categorias com o departamento atual (se houver)
     atualizarCategoriasPorDepartamento(select.value, 'carrinhoCentroCustoGlobal');
-    aplicarCategoriaPadraoCarrinho();
+    await aplicarCategoriaPadraoCarrinho({ render: false });
   } catch (err) {
     console.error('[CARRINHO] Erro ao carregar departamentos:', err);
     select.innerHTML = '<option value="">Selecione...</option>';
@@ -24760,17 +24760,39 @@ async function carregarDepartamentosCarrinho() {
 }
 
 // Define "Materia prima" como padrão no carrinho quando disponível
-function aplicarCategoriaPadraoCarrinho() {
+async function aplicarCategoriaPadraoCarrinho(options = {}) {
+  const opts = options || {};
   const select = document.getElementById('carrinhoCentroCustoGlobal');
-  if (!select || select.value) return;
+  if (!select) return;
 
-  const option = Array.from(select.options).find(opt =>
-    (opt.value || '').toLowerCase() === 'materia prima' ||
-    (opt.textContent || '').toLowerCase() === 'materia prima'
-  );
+  if (!select.value) {
+    const option = Array.from(select.options).find(opt =>
+      (opt.value || '').toLowerCase() === 'materia prima' ||
+      (opt.textContent || '').toLowerCase() === 'materia prima'
+    );
 
-  if (option) {
-    select.value = option.value;
+    if (option) {
+      select.value = option.value;
+    }
+  }
+
+  const centroCusto = (select.value || '').trim();
+  if (!centroCusto) return;
+
+  const carrinho = window.carrinhoCompras || [];
+  let alterouAlgumItem = false;
+  await Promise.all(carrinho.map(async (item) => {
+    item.centro_custo = centroCusto || item.centro_custo || '';
+    const alterouCategoria = aplicarCategoriaCompraOmieOperacionalNoItem(item, centroCusto);
+    if (alterouCategoria) {
+      alterouAlgumItem = true;
+      await atualizarItemCarrinhoNoBanco(item);
+    }
+  }));
+
+  if (alterouAlgumItem && opts.render !== false) {
+    renderCarrinhoCompras();
+    renderModalCarrinhoCompras();
   }
 }
 
