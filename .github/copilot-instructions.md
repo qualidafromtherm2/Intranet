@@ -58,33 +58,23 @@
 - Separar commit de infraestrutura/limpeza de commit funcional.
 - Sempre informar comando de validação executado e impacto esperado.
 
-## Protocolo obrigatório de commit ao final de cada tarefa (CRÍTICO)
-Este projeto é editado exclusivamente via GitHub Copilot Chat. Por isso, toda modificação de código DEVE ser commitada imediatamente após ser aplicada — nunca deixar arquivos apenas no working directory.
+## Protocolo de commit (CRÍTICO — só commitar quando o usuário pedir)
+Este projeto é editado exclusivamente via GitHub Copilot Chat.
 
-### Regra de ouro: toda sessão de trabalho deve terminar com tudo commitado.
+### Regra de ouro: NÃO commitar automaticamente. Commitar SOMENTE quando o usuário solicitar explicitamente.
 
-**Fluxo obrigatório ao final de cada conjunto de mudanças:**
+**Quando o usuário pedir para commitar, usar este fluxo:**
 1. Verificar arquivos modificados: `git status --short`
 2. Validar sintaxe dos arquivos JS alterados: `node --check <arquivo>.js`
 3. Fazer commit separado por tema (não misturar features diferentes no mesmo commit):
    - `git add <arquivos-da-feature> && git commit -m "feat/fix/chore(area): descrição"`
 4. Se houver arquivos de múltiplas features ainda não commitados, commitar cada grupo separadamente.
-5. Confirmar que `git status` está limpo (ou que os uncommitted são apenas arquivos já existentes não relacionados à tarefa).
 
 **Antes de começar qualquer nova tarefa:**
 - Executar `git status` para detectar arquivos modificados não commitados de sessões anteriores.
-- Se houver arquivos modificados não relacionados à nova tarefa, commitá-los primeiro com mensagem adequada antes de prosseguir.
-- Nunca sobrescrever arquivos com mudanças não commitadas sem alertar o usuário.
+- Se houver arquivos modificados não relacionados à nova tarefa, **avisar o usuário** sobre eles antes de prosseguir — nunca sobrescrever silenciosamente.
 
-**Por que isso é crítico:**
-- O Copilot Chat é o único agente que faz commits neste repositório.
-- Se uma sessão terminar sem commit e a próxima sessão editar o mesmo arquivo, as mudanças da sessão anterior serão perdidas permanentemente (não há histórico fora do git).
+**Por que o aviso prévio é crítico:**
+- Se uma sessão anterior deixou arquivos modificados sem commit e a nova sessão editar o mesmo arquivo, as mudanças anteriores são perdidas permanentemente.
 - Isso já causou perda real de funcionalidades neste projeto (ex.: filtro CFOP 6.905 e spinner de Vendas perdidos em mai/2026).
-
-**Exemplo de sequência correta ao final de uma sessão:**
-```bash
-git status --short
-node --check routes/sacEnvios.js
-git add routes/sacEnvios.js menu_produto.html menu_produto.js
-git commit -m "feat(vendas): filtro CFOP 6905 e spinner no mapa"
-```
+- A solução é: ao detectar uncommitted changes em arquivos que serão editados, alertar o usuário e perguntar se deve commitar antes de continuar.

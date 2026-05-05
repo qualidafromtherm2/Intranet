@@ -23,12 +23,13 @@ Guia operacional para agentes IA neste repositório (Codex/Chat):
 - Nunca versionar segredos, credenciais, tokens ou dumps sensíveis.
 - Respeitar `.gitignore` e não recriar arquivos acidentais/local-only.
 
-5. Commits e revisão — OBRIGATÓRIO AO FINAL DE CADA TAREFA
-- ⚠️ NUNCA terminar uma tarefa sem commitar. Arquivos só no working directory são perdidos permanentemente se a próxima sessão editar o mesmo arquivo.
+5. Commits e revisão — SOMENTE QUANDO O USUÁRIO PEDIR
+- ⚠️ NÃO commitar automaticamente ao terminar uma tarefa. Aguardar instrução explícita do usuário.
 - Separar commits por tema: limpeza, docs, funcionalidade.
 - Não misturar refatoração ampla com correção funcional.
 - Relatar claramente o que foi alterado e por quê.
-- Fluxo mínimo ao fechar uma tarefa:
+- ⚠️ ANTES de editar um arquivo, verificar se há mudanças não commitadas nele (`git status`). Se houver, alertar o usuário — nunca sobrescrever silenciosamente.
+- Fluxo quando o usuário pedir para commitar:
   1. `git status --short`
   2. `node --check <arquivos JS alterados>`
   3. `git add <arquivos> && git commit -m "tipo(area): descrição"`
