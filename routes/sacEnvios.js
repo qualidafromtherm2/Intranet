@@ -5955,6 +5955,209 @@ router.get('/vendas/graficos/valor-estado-mes', async (_req, res) => {
   }
 });
 
+// GET /vendas/graficos/mapa-brasil — mapa por estado (valor_total_pedido), com cliente destaque por UF
+router.get('/vendas/graficos/mapa-brasil', async (req, res) => {
+  try {
+    const periodo = Number.parseInt(String(req.query?.periodo ?? '3'), 10);
+    const periodoMeses = Number.isFinite(periodo) ? Math.max(0, periodo) : 3;
+    const etapaFiltro = String(req.query?.etapa ?? '').trim();
+    const timeline = ['1', 'true', 'yes', 'on'].includes(String(req.query?.timeline ?? '').trim().toLowerCase());
+
+    const params = [periodoMeses, etapaFiltro];
+    const { rows } = await pool.query(`
+      WITH base AS (
+        SELECT
+          COALESCE(NULLIF(TRIM(f.estado), ''), 'N/D') AS estado_raw,
+          COALESCE(
+            NULLIF(TRIM(f.nome_fantasia), ''),
+            NULLIF(TRIM(f.razao_social), ''),
+            'Cliente não identificado'
+          ) AS cliente_nome,
+          CASE TRIM(COALESCE(p.etapa::text, ''))
+            WHEN '00' THEN 'Proposta'
+            WHEN '10' THEN 'PDV (Em Aprovação)'
+            WHEN '20' THEN 'Entrega Futura'
+            WHEN '50' THEN 'Faturar'
+            WHEN '60' THEN 'Faturado'
+            WHEN '70' THEN 'Entregue'
+            WHEN '80' THEN 'Aprovado'
+            ELSE 'Sem descrição'
+          END AS etapa_descricao,
+          COALESCE(p.valor_total_pedido, 0)::numeric(14,2) AS valor_total,
+          p.updated_at AS created_at
+        FROM "Vendas".pedidos_venda p
+        LEFT JOIN omie.fornecedores f
+          ON TRIM(COALESCE(f.codigo_cliente_omie::text, '')) = TRIM(COALESCE(p.codigo_cliente::text, ''))
+        WHERE p.updated_at IS NOT NULL
+          AND TRIM(COALESCE(p.codigo_pedido::text, '')) NOT IN (
+            SELECT DISTINCT TRIM(COALESCE(i.codigo_pedido::text, ''))
+            FROM "Vendas".pedidos_venda_itens i
+            WHERE REGEXP_REPLACE(TRIM(COALESCE(i.cfop, '')), '\\D', '', 'g') = '6905'
+          )
+      ),
+      filtrada AS (
+        SELECT
+          CASE
+            WHEN UPPER(TRIM(estado_raw)) IN ('RO', 'RONDONIA', 'RONDÔNIA') THEN 'RO'
+            WHEN UPPER(TRIM(estado_raw)) IN ('AC', 'ACRE') THEN 'AC'
+            WHEN UPPER(TRIM(estado_raw)) IN ('AM', 'AMAZONAS') THEN 'AM'
+            WHEN UPPER(TRIM(estado_raw)) IN ('RR', 'RORAIMA') THEN 'RR'
+            WHEN UPPER(TRIM(estado_raw)) IN ('PA', 'PARA', 'PARÁ') THEN 'PA'
+            WHEN UPPER(TRIM(estado_raw)) IN ('AP', 'AMAPA', 'AMAPÁ') THEN 'AP'
+            WHEN UPPER(TRIM(estado_raw)) IN ('TO', 'TOCANTINS') THEN 'TO'
+            WHEN UPPER(TRIM(estado_raw)) IN ('MA', 'MARANHAO', 'MARANHÃO') THEN 'MA'
+            WHEN UPPER(TRIM(estado_raw)) IN ('PI', 'PIAUI', 'PIAUÍ') THEN 'PI'
+            WHEN UPPER(TRIM(estado_raw)) IN ('CE', 'CEARA', 'CEARÁ') THEN 'CE'
+            WHEN UPPER(TRIM(estado_raw)) IN ('RN', 'RIO GRANDE DO NORTE') THEN 'RN'
+            WHEN UPPER(TRIM(estado_raw)) IN ('PB', 'PARAIBA', 'PARAÍBA') THEN 'PB'
+            WHEN UPPER(TRIM(estado_raw)) IN ('PE', 'PERNAMBUCO') THEN 'PE'
+            WHEN UPPER(TRIM(estado_raw)) IN ('AL', 'ALAGOAS') THEN 'AL'
+            WHEN UPPER(TRIM(estado_raw)) IN ('SE', 'SERGIPE') THEN 'SE'
+            WHEN UPPER(TRIM(estado_raw)) IN ('BA', 'BAHIA') THEN 'BA'
+            WHEN UPPER(TRIM(estado_raw)) IN ('MG', 'MINAS GERAIS') THEN 'MG'
+            WHEN UPPER(TRIM(estado_raw)) IN ('ES', 'ESPIRITO SANTO', 'ESPÍRITO SANTO') THEN 'ES'
+            WHEN UPPER(TRIM(estado_raw)) IN ('RJ', 'RIO DE JANEIRO') THEN 'RJ'
+            WHEN UPPER(TRIM(estado_raw)) IN ('SP', 'SAO PAULO', 'SÃO PAULO') THEN 'SP'
+            WHEN UPPER(TRIM(estado_raw)) IN ('PR', 'PARANA', 'PARANÁ') THEN 'PR'
+            WHEN UPPER(TRIM(estado_raw)) IN ('SC', 'SANTA CATARINA') THEN 'SC'
+            WHEN UPPER(TRIM(estado_raw)) IN ('RS', 'RIO GRANDE DO SUL') THEN 'RS'
+            WHEN UPPER(TRIM(estado_raw)) IN ('MS', 'MATO GROSSO DO SUL') THEN 'MS'
+            WHEN UPPER(TRIM(estado_raw)) IN ('MT', 'MATO GROSSO') THEN 'MT'
+            WHEN UPPER(TRIM(estado_raw)) IN ('GO', 'GOIAS', 'GOIÁS') THEN 'GO'
+            WHEN UPPER(TRIM(estado_raw)) IN ('DF', 'DISTRITO FEDERAL') THEN 'DF'
+            ELSE 'N/D'
+          END AS uf,
+          cliente_nome,
+          etapa_descricao,
+          valor_total,
+          created_at
+        FROM base
+        WHERE etapa_descricao IN ('PDV (Em Aprovação)', 'Entrega Futura', 'Faturar', 'Faturado', 'Entregue', 'Aprovado')
+          AND ($1::int <= 0 OR (created_at >= (DATE_TRUNC('month', CURRENT_DATE) - make_interval(months => $1::int)) AND created_at < DATE_TRUNC('month', CURRENT_DATE)))
+          AND ($2::text = '' OR etapa_descricao = $2::text)
+      ),
+      agregado_uf AS (
+        SELECT uf, SUM(valor_total)::numeric(14,2) AS valor_total
+        FROM filtrada
+        WHERE uf <> 'N/D'
+        GROUP BY uf
+      ),
+      cliente_uf AS (
+        SELECT
+          uf,
+          cliente_nome,
+          SUM(valor_total)::numeric(14,2) AS valor_total,
+          ROW_NUMBER() OVER (PARTITION BY uf ORDER BY SUM(valor_total) DESC, cliente_nome) AS rn
+        FROM filtrada
+        WHERE uf <> 'N/D'
+        GROUP BY uf, cliente_nome
+      )
+      SELECT
+        a.uf,
+        a.valor_total,
+        c.cliente_nome AS cliente_destaque,
+        c.valor_total AS cliente_valor
+      FROM agregado_uf a
+      LEFT JOIN cliente_uf c
+        ON c.uf = a.uf AND c.rn = 1
+      ORDER BY a.valor_total DESC, a.uf
+    `, params);
+
+    let timelineRows = [];
+    if (timeline) {
+      const { rows: tRows } = await pool.query(`
+        WITH base AS (
+          SELECT
+            COALESCE(NULLIF(TRIM(f.estado), ''), 'N/D') AS estado_raw,
+            COALESCE(
+              NULLIF(TRIM(f.nome_fantasia), ''),
+              NULLIF(TRIM(f.razao_social), ''),
+              'Cliente não identificado'
+            ) AS cliente_nome,
+            CASE TRIM(COALESCE(p.etapa::text, ''))
+              WHEN '00' THEN 'Proposta'
+              WHEN '10' THEN 'PDV (Em Aprovação)'
+              WHEN '20' THEN 'Entrega Futura'
+              WHEN '50' THEN 'Faturar'
+              WHEN '60' THEN 'Faturado'
+              WHEN '70' THEN 'Entregue'
+              WHEN '80' THEN 'Aprovado'
+              ELSE 'Sem descrição'
+            END AS etapa_descricao,
+            COALESCE(p.valor_total_pedido, 0)::numeric(14,2) AS valor_total,
+            p.updated_at AS created_at
+          FROM "Vendas".pedidos_venda p
+          LEFT JOIN omie.fornecedores f
+            ON TRIM(COALESCE(f.codigo_cliente_omie::text, '')) = TRIM(COALESCE(p.codigo_cliente::text, ''))
+          WHERE p.updated_at IS NOT NULL
+            AND TRIM(COALESCE(p.codigo_pedido::text, '')) NOT IN (
+              SELECT DISTINCT TRIM(COALESCE(i.codigo_pedido::text, ''))
+              FROM "Vendas".pedidos_venda_itens i
+              WHERE REGEXP_REPLACE(TRIM(COALESCE(i.cfop, '')), '\\D', '', 'g') = '6905'
+            )
+        ),
+        filtrada AS (
+          SELECT
+            TO_CHAR(DATE_TRUNC('month', created_at), 'YYYY-MM') AS mes,
+            CASE
+              WHEN UPPER(TRIM(estado_raw)) IN ('RO', 'RONDONIA', 'RONDÔNIA') THEN 'RO'
+              WHEN UPPER(TRIM(estado_raw)) IN ('AC', 'ACRE') THEN 'AC'
+              WHEN UPPER(TRIM(estado_raw)) IN ('AM', 'AMAZONAS') THEN 'AM'
+              WHEN UPPER(TRIM(estado_raw)) IN ('RR', 'RORAIMA') THEN 'RR'
+              WHEN UPPER(TRIM(estado_raw)) IN ('PA', 'PARA', 'PARÁ') THEN 'PA'
+              WHEN UPPER(TRIM(estado_raw)) IN ('AP', 'AMAPA', 'AMAPÁ') THEN 'AP'
+              WHEN UPPER(TRIM(estado_raw)) IN ('TO', 'TOCANTINS') THEN 'TO'
+              WHEN UPPER(TRIM(estado_raw)) IN ('MA', 'MARANHAO', 'MARANHÃO') THEN 'MA'
+              WHEN UPPER(TRIM(estado_raw)) IN ('PI', 'PIAUI', 'PIAUÍ') THEN 'PI'
+              WHEN UPPER(TRIM(estado_raw)) IN ('CE', 'CEARA', 'CEARÁ') THEN 'CE'
+              WHEN UPPER(TRIM(estado_raw)) IN ('RN', 'RIO GRANDE DO NORTE') THEN 'RN'
+              WHEN UPPER(TRIM(estado_raw)) IN ('PB', 'PARAIBA', 'PARAÍBA') THEN 'PB'
+              WHEN UPPER(TRIM(estado_raw)) IN ('PE', 'PERNAMBUCO') THEN 'PE'
+              WHEN UPPER(TRIM(estado_raw)) IN ('AL', 'ALAGOAS') THEN 'AL'
+              WHEN UPPER(TRIM(estado_raw)) IN ('SE', 'SERGIPE') THEN 'SE'
+              WHEN UPPER(TRIM(estado_raw)) IN ('BA', 'BAHIA') THEN 'BA'
+              WHEN UPPER(TRIM(estado_raw)) IN ('MG', 'MINAS GERAIS') THEN 'MG'
+              WHEN UPPER(TRIM(estado_raw)) IN ('ES', 'ESPIRITO SANTO', 'ESPÍRITO SANTO') THEN 'ES'
+              WHEN UPPER(TRIM(estado_raw)) IN ('RJ', 'RIO DE JANEIRO') THEN 'RJ'
+              WHEN UPPER(TRIM(estado_raw)) IN ('SP', 'SAO PAULO', 'SÃO PAULO') THEN 'SP'
+              WHEN UPPER(TRIM(estado_raw)) IN ('PR', 'PARANA', 'PARANÁ') THEN 'PR'
+              WHEN UPPER(TRIM(estado_raw)) IN ('SC', 'SANTA CATARINA') THEN 'SC'
+              WHEN UPPER(TRIM(estado_raw)) IN ('RS', 'RIO GRANDE DO SUL') THEN 'RS'
+              WHEN UPPER(TRIM(estado_raw)) IN ('MS', 'MATO GROSSO DO SUL') THEN 'MS'
+              WHEN UPPER(TRIM(estado_raw)) IN ('MT', 'MATO GROSSO') THEN 'MT'
+              WHEN UPPER(TRIM(estado_raw)) IN ('GO', 'GOIAS', 'GOIÁS') THEN 'GO'
+              WHEN UPPER(TRIM(estado_raw)) IN ('DF', 'DISTRITO FEDERAL') THEN 'DF'
+              ELSE 'N/D'
+            END AS uf,
+            cliente_nome,
+            etapa_descricao,
+            valor_total,
+            created_at
+          FROM base
+          WHERE etapa_descricao IN ('PDV (Em Aprovação)', 'Entrega Futura', 'Faturar', 'Faturado', 'Entregue', 'Aprovado')
+            AND ($1::int <= 0 OR (created_at >= (DATE_TRUNC('month', CURRENT_DATE) - make_interval(months => $1::int)) AND created_at < DATE_TRUNC('month', CURRENT_DATE)))
+            AND ($2::text = '' OR etapa_descricao = $2::text)
+        )
+        SELECT
+          mes,
+          uf,
+          cliente_nome,
+          SUM(valor_total)::numeric(14,2) AS valor_total
+        FROM filtrada
+        WHERE uf <> 'N/D'
+        GROUP BY mes, uf, cliente_nome
+        ORDER BY mes ASC, uf ASC, valor_total DESC
+      `, params);
+      timelineRows = tRows;
+    }
+
+    return res.json({ ok: true, rows, timeline_rows: timelineRows, periodo_meses: periodoMeses, etapa: etapaFiltro || null });
+  } catch (err) {
+    console.error('[VENDAS] erro mapa-brasil:', err);
+    return res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 // GET /vendas/graficos/quantidade-familia-mes — quantidade de itens por família e mês (ignora CFOP 6905)
 router.get('/vendas/graficos/quantidade-familia-mes', async (_req, res) => {
   try {
