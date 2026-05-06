@@ -14938,6 +14938,16 @@ app.post('/api/logistica/itens_solicitados/separar-parcial', async (req, res) =>
 
     // Se não há restante, apenas marca tudo como Separado sem novo SEP
     if (qtyRemainder <= 0.0001) {
+      // Se veio embalagem fechada com quantidade maior que a solicitada,
+      // grava a quantidade real separada no carrinho para o Kanban refletir o total correto.
+      if (qtySep > qtyTotal + 0.0001) {
+        const extra = qtySep - qtyTotal;
+        const destino = carrs[carrs.length - 1];
+        await client.query(
+          `UPDATE logistica.carrinho SET quantidade = quantidade + $1 WHERE id = $2`,
+          [extra, destino.id]
+        );
+      }
       if (sIds.length > 0) {
         await client.query(
           `UPDATE solicitacao_produto.itens_solicitados SET status = 'Separado' WHERE id = ANY($1::bigint[])`, [sIds]
