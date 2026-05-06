@@ -64,3 +64,19 @@ cookies.txt
 *.p12
 intranet_db_*.sql
 data/users.json
+
+# AI/agent safety: local secrets, dumps and private artifacts
+.env
+.env.local
+.env.production
+.env.*.local
+config.server.js
+cookies.txt
+*.sql
+*.tar.gz
+*.db
+*.db-shm
+*.db-wal
+logs/
+backups/
+_local_private/
