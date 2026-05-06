@@ -30182,9 +30182,10 @@ app.post('/api/compras/pedidos-omie/nfe-associar-pedido', express.json(), async 
           ufNfeRegraCfop = ufNfe;
           if (ufNfe && cCategCompraReceb) {
             const dentroEstado = ufNfe === 'SC';
+            const categoriasMateriaPrima = new Set(['2.01.03', '2.14.94', '2.01.93']);
             if (cCategCompraReceb === '2.01.04') {
-              cfopCalculado = '1.102';
-            } else if (cCategCompraReceb === '2.01.03') {
+              cfopCalculado = '1.101';
+            } else if (categoriasMateriaPrima.has(cCategCompraReceb)) {
               cfopCalculado = dentroEstado ? '1.101' : '2.101';
             } else {
               cfopCalculado = dentroEstado ? '1.556' : '2.556';
