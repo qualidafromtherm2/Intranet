@@ -7911,20 +7911,6 @@ if (sacAtGraficosMenuLink) {
   });
 }
 
-const sacAtMapaMenuLink = document.getElementById('menu-sac-at-mapa');
-if (sacAtMapaMenuLink) {
-  sacAtMapaMenuLink.addEventListener('click', (e) => {
-    e.preventDefault();
-    document.querySelectorAll('.left-side .side-menu a').forEach(a => a.classList.remove('is-active'));
-    sacAtMapaMenuLink.classList.add('is-active');
-    showMainTab('sacAtPane');
-    setSacAtModoVisual('at');
-    // Abre o modal de mapa de técnicos diretamente
-    const mapaBtn = document.getElementById('atOsMapaBtn');
-    if (mapaBtn) mapaBtn.click();
-  });
-}
-
 const vendasGraficosMenuLink = document.getElementById('menu-vendas-graficos');
 if (vendasGraficosMenuLink) {
   vendasGraficosMenuLink.addEventListener('click', (e) => {
@@ -60947,377 +60933,338 @@ document.addEventListener('DOMContentLoaded', () => {
   }); // DOMContentLoaded
 })();
 
-// ── Mapa de Vendas por Estado (Leaflet choropleth + timeline) ─────────────────
-window._iniciarMapaVendasPagina = (() => {
-  let _iniciado = false;
-  let _dadosBrutos = [];      // todos os rows da API
-  let _mesesDisponiveis = []; // ex: ['2026-01','2026-02',...]
-  let _mesesSelecionados = []; // subconjunto filtrado pelo período
-  let _idxAtual = 0;          // índice do mês corrente na timeline
-  let _mapaInst = null;
-  let _geoLayer = null;
-  let _geojsonData = null;
-  let _playTimer = null;
-  let _periodoAtual = 3;
+// === Vendas: Mapa do Brasil por estado =====================================
+(() => {
+  const pane = document.getElementById('vendasMapaPane');
+  const status = document.getElementById('vendasMapaStatus');
+  const mapaEl = document.getElementById('vendasMapaBrasil');
+  const mapaLoading = document.getElementById('vendasMapaLoading');
+  const rankingTbody = document.getElementById('vendasMapaRankingTbody');
+  const mesAtualEl = document.getElementById('vendasMapaMesAtual');
+  const refreshBtn = document.getElementById('vendasMapaRefreshBtn');
+  const timelineBtn = document.getElementById('vendasMapaTimelineBtn');
+  const etapaSelect = document.getElementById('vendasMapaEtapaFiltro');
+  const periodoBtns = Array.from(document.querySelectorAll('.vendas-mapa-periodo-btn'));
 
-  // Mapa de sigla→nome do estado (para tooltip)
-  const _nomeEstado = {
-    AC:'Acre',AL:'Alagoas',AP:'Amapá',AM:'Amazonas',BA:'Bahia',CE:'Ceará',
-    DF:'Distrito Federal',ES:'Espírito Santo',GO:'Goiás',MA:'Maranhão',
-    MT:'Mato Grosso',MS:'Mato Grosso do Sul',MG:'Minas Gerais',PA:'Pará',
-    PB:'Paraíba',PR:'Paraná',PE:'Pernambuco',PI:'Piauí',RJ:'Rio de Janeiro',
-    RN:'Rio Grande do Norte',RS:'Rio Grande do Sul',RO:'Rondônia',RR:'Roraima',
-    SC:'Santa Catarina',SP:'São Paulo',SE:'Sergipe',TO:'Tocantins'
-  };
+  if (!pane || !mapaEl) return;
 
-  function _nomeMes(yyyymm) {
-    const [y, m] = yyyymm.split('-');
-    const nomes = ['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'];
-    return `${nomes[parseInt(m, 10) - 1]}/${y}`;
+  const moeda = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
+  let iniciado = false;
+  let carregando = false;
+  let periodoMeses = 3;
+  let ultimoRows = [];
+  let googleChartsPromise = null;
+  let timelineTimer = null;
+  let timelineAtiva = false;
+
+  function esc(v) {
+    return String(v ?? '')
+      .replaceAll('&', '&amp;')
+      .replaceAll('<', '&lt;')
+      .replaceAll('>', '&gt;')
+      .replaceAll('"', '&quot;')
+      .replaceAll("'", '&#39;');
   }
 
-  function _moeda(v) {
-    return Number(v).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', minimumFractionDigits: 0, maximumFractionDigits: 0 });
+  function setStatus(msg, tipo = 'info') {
+    if (!status) return;
+    status.style.display = msg ? 'block' : 'none';
+    if (!msg) return;
+    status.textContent = msg;
+    status.style.color = tipo === 'error' ? '#f87171' : (tipo === 'warn' ? '#fbbf24' : 'var(--inactive-color)');
   }
 
-  // Retorna os N meses antes do mês atual
-  function _calcularMeses(n) {
-    const hoje = new Date();
-    const meses = [];
-    for (let i = n; i >= 1; i--) {
-      const d = new Date(hoje.getFullYear(), hoje.getMonth() - i, 1);
-      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-      meses.push(key);
-    }
-    return meses;
+  function setMapaLoading(loading) {
+    if (!mapaLoading) return;
+    mapaLoading.style.display = loading ? 'flex' : 'none';
   }
 
-  function _filtrarPeriodo(per) {
-    _periodoAtual = per;
-    const todos = [...new Set(_dadosBrutos.map(r => r.mes).filter(Boolean))].sort();
-    if (per === 0) {
-      _mesesSelecionados = todos;
-    } else {
-      const limite = _calcularMeses(per);
-      // Pega os meses da API que estão no período calculado OU os últimos N se não bater exato
-      _mesesSelecionados = todos.filter(m => limite.includes(m));
-      if (_mesesSelecionados.length === 0) {
-        // Fallback: usa os últimos N meses disponíveis
-        _mesesSelecionados = todos.slice(-per);
-      }
-    }
-    _idxAtual = 0;
-  }
-
-  function _somaAteMes(idx) {
-    // Acumula valores dos meses 0..idx
-    const mesesInclusos = _mesesSelecionados.slice(0, idx + 1);
-    const mapa = {};
-    for (const row of _dadosBrutos) {
-      if (!mesesInclusos.includes(row.mes)) continue;
-      const uf = (row.estado || 'N/D').toUpperCase();
-      mapa[uf] = (mapa[uf] || 0) + parseFloat(row.valor_total || 0);
-    }
-    return mapa;
-  }
-
-  function _escalasCor(maxVal) {
-    if (maxVal <= 0) return () => '#1e293b';
-    // Escala azul: 5 faixas
-    const faixas = [
-      { limite: maxVal * 0.80, cor: '#1e40af' },
-      { limite: maxVal * 0.60, cor: '#2563eb' },
-      { limite: maxVal * 0.40, cor: '#3b82f6' },
-      { limite: maxVal * 0.20, cor: '#93c5fd' },
-      { limite: 0,             cor: '#dbeafe' },
-    ];
-    return (val) => {
-      if (!val || val <= 0) return '#1e293b';
-      for (const f of faixas) {
-        if (val >= f.limite) return f.cor;
-      }
-      return '#dbeafe';
-    };
-  }
-
-  function _renderizarMapa(idx) {
-    if (!_mapaInst || !_geoLayer) return;
-    const valores = _somaAteMes(idx);
-    const maxVal = Math.max(...Object.values(valores), 1);
-    const getCor = _escalasCor(maxVal);
-    const mesesStr = _mesesSelecionados.slice(0, idx + 1).map(_nomeMes).join(', ');
-
-    // Atualizar slider e label
-    const slider = document.getElementById('vendasMapaSlider');
-    const label  = document.getElementById('vendasMapaMesLabel');
-    const mesesEl = document.getElementById('vendasMapaMesesSelecionados');
-    if (slider) slider.value = idx;
-    if (label) label.textContent = _nomeMes(_mesesSelecionados[idx]);
-    if (mesesEl) mesesEl.textContent = mesesStr;
-
-    // Atualizar camada GeoJSON
-    _geoLayer.setStyle((feature) => {
-      const sigla = (feature.properties.sigla || feature.properties.UF_05 || '').toUpperCase();
-      const val = valores[sigla] || 0;
-      return {
-        fillColor: getCor(val),
-        fillOpacity: val > 0 ? 0.85 : 0.18,
-        color: '#334155',
-        weight: 1,
-      };
-    });
-
-    // Atualizar tooltips
-    _geoLayer.eachLayer((layer) => {
-      const sigla = (layer.feature.properties.sigla || layer.feature.properties.UF_05 || '').toUpperCase();
-      const val = valores[sigla] || 0;
-      const nome = _nomeEstado[sigla] || sigla;
-      layer.bindTooltip(
-        `<div style="font-family:sans-serif;font-size:13px;">
-          <strong>${nome} (${sigla})</strong><br>
-          Vendas: <b>${_moeda(val)}</b>
-        </div>`,
-        { sticky: true }
-      );
-    });
-
-    _renderizarLegenda(maxVal, getCor);
-    _renderizarRanking(valores);
-  }
-
-  function _renderizarLegenda(maxVal, getCor) {
-    const wrap = document.getElementById('vendasMapaLegendaWrap');
-    const el   = document.getElementById('vendasMapaLegendaItens');
-    if (!wrap || !el) return;
-    wrap.style.display = 'block';
-    const faixas = [
-      { label: `≥ ${_moeda(maxVal * 0.80)}`,  cor: '#1e40af' },
-      { label: `≥ ${_moeda(maxVal * 0.60)}`,  cor: '#2563eb' },
-      { label: `≥ ${_moeda(maxVal * 0.40)}`,  cor: '#3b82f6' },
-      { label: `≥ ${_moeda(maxVal * 0.20)}`,  cor: '#93c5fd' },
-      { label: `> R$ 0`,                       cor: '#dbeafe' },
-      { label: 'Sem vendas',                   cor: '#1e293b' },
-    ];
-    el.innerHTML = faixas.map(f =>
-      `<div style="display:flex;align-items:center;gap:8px;">
-        <div style="width:18px;height:14px;border-radius:3px;background:${f.cor};border:1px solid #334155;flex-shrink:0;"></div>
-        <span style="font-size:11px;color:#94a3b8;">${f.label}</span>
-      </div>`
-    ).join('');
-  }
-
-  function _renderizarRanking(valores) {
-    const wrap = document.getElementById('vendasMapaRankingWrap');
-    const el   = document.getElementById('vendasMapaRankingItens');
-    if (!wrap || !el) return;
-    const top = Object.entries(valores)
-      .filter(([, v]) => v > 0)
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 8);
-    if (top.length === 0) { wrap.style.display = 'none'; return; }
-    wrap.style.display = 'block';
-    el.innerHTML = top.map(([sigla, val], i) =>
-      `<div style="display:flex;align-items:center;gap:8px;">
-        <span style="font-size:11px;color:#475569;min-width:16px;text-align:right;">${i + 1}.</span>
-        <span style="font-size:12px;font-weight:700;color:#38bdf8;min-width:28px;">${sigla}</span>
-        <div style="flex:1;height:6px;border-radius:3px;background:#1e293b;">
-          <div style="height:100%;border-radius:3px;background:#3b82f6;width:${Math.round((val / top[0][1]) * 100)}%;"></div>
-        </div>
-        <span style="font-size:11px;color:#94a3b8;white-space:nowrap;">${_moeda(val)}</span>
-      </div>`
-    ).join('');
-  }
-
-  function _atualizarBotoeresPeriodo() {
-    document.querySelectorAll('.vendas-mapa-periodo-btn').forEach(btn => {
-      const ativo = parseInt(btn.dataset.per, 10) === _periodoAtual;
+  function aplicarEstadoPeriodoAtivo() {
+    periodoBtns.forEach((btn) => {
+      const ativo = Number.parseInt(btn.dataset.per, 10) === periodoMeses;
       btn.style.borderColor = ativo ? '#0ea5e9' : '#374151';
-      btn.style.background  = ativo ? 'rgba(14,165,233,.22)' : 'rgba(255,255,255,.04)';
-      btn.style.color       = ativo ? '#7dd3fc' : '#9ca3af';
+      btn.style.background = ativo ? 'rgba(14,165,233,.22)' : 'rgba(255,255,255,.04)';
+      btn.style.color = ativo ? '#7dd3fc' : '#9ca3af';
     });
   }
 
-  function _pararPlay() {
-    if (_playTimer) { clearInterval(_playTimer); _playTimer = null; }
-    const icon = document.getElementById('vendasMapaPlayIcon');
-    const lbl  = document.getElementById('vendasMapaPlayLabel');
-    if (icon) { icon.className = 'fa-solid fa-play'; }
-    if (lbl) lbl.textContent = 'Play';
+  function _labelMes(yyyymm) {
+    const [y, m] = String(yyyymm || '').split('-');
+    if (!y || !m) return String(yyyymm || '');
+    const nomes = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
+    return `${nomes[Math.max(0, Number(m) - 1)]}/${String(y).slice(-2)}`;
   }
 
-  function _iniciarPlay() {
-    if (_mesesSelecionados.length === 0) return;
-    const vel = parseInt(document.getElementById('vendasMapaVelocidade')?.value || '800', 10);
-    const icon = document.getElementById('vendasMapaPlayIcon');
-    const lbl  = document.getElementById('vendasMapaPlayLabel');
-    if (icon) { icon.className = 'fa-solid fa-pause'; }
-    if (lbl) lbl.textContent = 'Pausar';
-    _playTimer = setInterval(() => {
-      if (_idxAtual >= _mesesSelecionados.length - 1) {
-        _pararPlay();
+  function setTimelineBtnState(ativa) {
+    if (!timelineBtn) return;
+    timelineBtn.style.borderColor = ativa ? '#22c55e' : '#374151';
+    timelineBtn.style.background = ativa ? 'rgba(34,197,94,.16)' : 'rgba(255,255,255,.04)';
+    timelineBtn.style.color = ativa ? '#86efac' : '#9ca3af';
+    timelineBtn.innerHTML = ativa
+      ? '<i class="fa-solid fa-stopwatch"></i> Parar timeline'
+      : '<i class="fa-solid fa-timeline"></i> Timeline';
+  }
+
+  function setMesAtualMapa(label) {
+    if (!mesAtualEl) return;
+    const txt = String(label || '').trim();
+    mesAtualEl.textContent = `Mês no mapa: ${txt || '-'}`;
+  }
+
+  function pararTimeline() {
+    timelineAtiva = false;
+    if (timelineTimer) {
+      clearInterval(timelineTimer);
+      timelineTimer = null;
+    }
+    setTimelineBtnState(false);
+  }
+
+  function montarFramesTimeline(rowsTimeline = []) {
+    if (!Array.isArray(rowsTimeline) || !rowsTimeline.length) return [];
+    const meses = [...new Set(rowsTimeline.map((r) => String(r.mes || '').trim()).filter(Boolean))].sort();
+    if (!meses.length) return [];
+    const frames = [];
+
+    meses.forEach((mes) => {
+      const blocoMes = rowsTimeline.filter((r) => String(r.mes || '') === mes);
+      const totaisUf = new Map();
+      const totaisUfCliente = new Map();
+      blocoMes.forEach((r) => {
+        const uf = String(r.uf || '').trim().toUpperCase();
+        const cliente = String(r.cliente_nome || 'Cliente não identificado').trim();
+        const valor = Number(r.valor_total || 0);
+        if (!uf || uf === 'N/D' || !Number.isFinite(valor) || valor <= 0) return;
+
+        totaisUf.set(uf, (totaisUf.get(uf) || 0) + valor);
+
+        const porCliente = totaisUfCliente.get(uf) || new Map();
+        porCliente.set(cliente, (porCliente.get(cliente) || 0) + valor);
+        totaisUfCliente.set(uf, porCliente);
+      });
+
+      const rows = Array.from(totaisUf.entries())
+        .map(([uf, valor_total]) => {
+          const porCliente = totaisUfCliente.get(uf) || new Map();
+          let cliente_destaque = 'Cliente não identificado';
+          let cliente_valor = 0;
+          porCliente.forEach((v, nome) => {
+            if (v > cliente_valor) {
+              cliente_valor = v;
+              cliente_destaque = nome;
+            }
+          });
+          return { uf, valor_total, cliente_destaque, cliente_valor };
+        })
+        .sort((a, b) => Number(b.valor_total) - Number(a.valor_total));
+
+      frames.push({ mes, rows });
+    });
+
+    return frames;
+  }
+
+  function renderRanking(rows = []) {
+    if (!rankingTbody) return;
+    if (!rows.length) {
+      rankingTbody.innerHTML = '<tr><td colspan="3" style="padding:10px;text-align:center;color:#64748b;">Sem dados para o filtro atual.</td></tr>';
+      return;
+    }
+    rankingTbody.innerHTML = rows.map((r) => `
+      <tr>
+        <td style="padding:6px;border-bottom:1px solid rgba(51,65,85,.45);color:#cbd5e1;font-weight:700;">${esc(r.uf || '-')}</td>
+        <td style="padding:6px;border-bottom:1px solid rgba(51,65,85,.45);color:#cbd5e1;">${esc(r.cliente_destaque || '-')}</td>
+        <td style="padding:6px;border-bottom:1px solid rgba(51,65,85,.45);text-align:right;color:#93c5fd;white-space:nowrap;">${moeda.format(Number(r.valor_total || 0))}</td>
+      </tr>
+    `).join('');
+  }
+
+  function carregarGoogleCharts() {
+    if (window.google?.charts?.load && window.google?.visualization?.GeoChart) {
+      return Promise.resolve();
+    }
+    if (googleChartsPromise) return googleChartsPromise;
+
+    googleChartsPromise = new Promise((resolve, reject) => {
+      const concluir = () => {
+        try {
+          window.google.charts.load('current', { packages: ['geochart'] });
+          window.google.charts.setOnLoadCallback(() => resolve());
+        } catch (err) {
+          reject(err);
+        }
+      };
+
+      const existente = document.querySelector('script[data-google-charts="1"]');
+      if (existente) {
+        if (window.google?.charts?.load) concluir();
+        else existente.addEventListener('load', concluir, { once: true });
         return;
       }
-      _idxAtual++;
-      _renderizarMapa(_idxAtual);
-    }, vel);
+
+      const script = document.createElement('script');
+      script.src = 'https://www.gstatic.com/charts/loader.js';
+      script.async = true;
+      script.dataset.googleCharts = '1';
+      script.onload = concluir;
+      script.onerror = () => reject(new Error('Falha ao carregar biblioteca do mapa.'));
+      document.head.appendChild(script);
+    });
+
+    return googleChartsPromise;
   }
 
-  async function _carregarLeaflet() {
-    if (window.L) return;
-    if (!document.querySelector('link[href*="leaflet"]')) {
-      const link = document.createElement('link');
-      link.rel = 'stylesheet';
-      link.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
-      document.head.appendChild(link);
+  function desenharMapa(rows = []) {
+    if (!rows.length) {
+      mapaEl.innerHTML = '<div style="height:100%;display:flex;align-items:center;justify-content:center;color:#64748b;font-size:13px;">Sem dados para o filtro atual.</div>';
+      return;
     }
-    await new Promise((resolve, reject) => {
-      const s = document.createElement('script');
-      s.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
-      s.onload = resolve; s.onerror = reject;
-      document.head.appendChild(s);
+
+    const dt = new window.google.visualization.DataTable();
+    dt.addColumn('string', 'Estado');
+    dt.addColumn('number', 'Valor');
+    dt.addColumn({ type: 'string', role: 'tooltip' });
+
+    rows.forEach((r) => {
+      const uf = String(r.uf || '').trim().toUpperCase();
+      if (!uf || uf === 'N/D') return;
+      const valor = Number(r.valor_total || 0);
+      const tip = `${uf}\n${r.cliente_destaque || 'Sem cliente'}\n${moeda.format(valor)}`;
+      dt.addRow([`BR-${uf}`, valor, tip]);
+    });
+
+    const chart = new window.google.visualization.GeoChart(mapaEl);
+    chart.draw(dt, {
+      region: 'BR',
+      resolution: 'provinces',
+      legend: { textStyle: { color: '#000000', fontSize: 11, bold: false } },
+      backgroundColor: 'transparent',
+      datalessRegionColor: '#0f172a',
+      defaultColor: '#0f172a',
+      colorAxis: { colors: ['#bfdbfe', '#60a5fa', '#2563eb'] },
+      tooltip: { textStyle: { color: '#111827', fontSize: 12 } },
+    });
+
+    mapaEl.querySelectorAll('svg text').forEach((el) => {
+      el.setAttribute('fill', '#000000');
+      el.setAttribute('font-weight', '400');
+      el.style.fill = '#000000';
+      el.style.fontWeight = '400';
     });
   }
 
-  async function _carregarGeoJSON() {
-    if (_geojsonData) return _geojsonData;
-    // GeoJSON dos estados brasileiros com propriedade "sigla" (UF)
-    const url = 'https://raw.githubusercontent.com/giuliano-macedo/geodata-br-states/main/geojson/br_states.json';
-    const r = await fetch(url);
-    if (!r.ok) throw new Error('Falha ao carregar GeoJSON');
-    _geojsonData = await r.json();
-    return _geojsonData;
-  }
-
-  async function _inicializar(forcarRecarga) {
-    const statusEl = document.getElementById('vendasMapaStatus');
-    const timelineWrap = document.getElementById('vendasMapaTimelineWrap');
-
-    if (forcarRecarga || _dadosBrutos.length === 0) {
-      if (statusEl) { statusEl.style.display = ''; statusEl.textContent = 'Carregando dados...'; }
-      const resp = await fetch('/api/sac/vendas/graficos/valor-estado-mes', { credentials: 'include' });
-      const json = await resp.json();
-      if (!json.ok) throw new Error(json.error || 'Erro na API');
-      _dadosBrutos = json.rows || [];
-    }
-
-    if (_dadosBrutos.length === 0) {
-      if (statusEl) statusEl.textContent = 'Sem dados de vendas por estado.';
-      return;
-    }
-
-    _filtrarPeriodo(_periodoAtual);
-    _atualizarBotoeresPeriodo();
-
-    // Configurar slider
-    const slider = document.getElementById('vendasMapaSlider');
-    if (slider) {
-      slider.max  = _mesesSelecionados.length - 1;
-      slider.min  = 0;
-      slider.value = _idxAtual;
-    }
-    if (timelineWrap) timelineWrap.style.display = _mesesSelecionados.length > 1 ? '' : 'none';
-
-    if (statusEl) { statusEl.style.display = 'none'; }
-
-    // Inicializar Leaflet se necessário
-    await _carregarLeaflet();
-
-    const mapaDiv = document.getElementById('vendasMapaLeaflet');
-    if (!mapaDiv) return;
-
-    if (!_mapaInst) {
-      _mapaInst = window.L.map(mapaDiv, { zoomControl: true, attributionControl: false })
-        .setView([-14.24, -51.93], 4);
-      window.L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-        maxZoom: 10, minZoom: 3
-      }).addTo(_mapaInst);
-    }
-
-    // Carregar e renderizar GeoJSON
-    const geoData = await _carregarGeoJSON();
-    if (_geoLayer) { _mapaInst.removeLayer(_geoLayer); }
-    _geoLayer = window.L.geoJSON(geoData, {
-      style: { fillColor: '#1e293b', fillOpacity: 0.18, color: '#334155', weight: 1 },
-    }).addTo(_mapaInst);
-
-    _renderizarMapa(_idxAtual);
-  }
-
-  return async function iniciar(forcarRecarga = false) {
-    if (_iniciado && !forcarRecarga) {
-      // Só re-renderiza
-      _renderizarMapa(_idxAtual);
-      return;
-    }
-    _iniciado = true;
+  async function carregarMapa() {
+    pararTimeline();
+    setMesAtualMapa('Consolidado');
+    if (carregando) return;
+    carregando = true;
+    setMapaLoading(true);
+    setStatus('Carregando mapa de vendas...');
+    if (rankingTbody) rankingTbody.innerHTML = '<tr><td colspan="3" style="padding:10px;text-align:center;color:#64748b;">Carregando...</td></tr>';
 
     try {
-      await _inicializar(forcarRecarga);
+      const etapa = (etapaSelect?.value || '').trim();
+      const url = `/api/sac/vendas/graficos/mapa-brasil?periodo=${encodeURIComponent(periodoMeses)}&etapa=${encodeURIComponent(etapa)}`;
+      const resp = await fetch(url, { credentials: 'include' });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok || data.ok === false) throw new Error(data.error || 'Erro ao carregar mapa.');
+
+      const rows = Array.isArray(data.rows) ? data.rows : [];
+      ultimoRows = rows;
+      renderRanking(rows);
+
+      await carregarGoogleCharts();
+      desenharMapa(rows);
+      setStatus(rows.length ? '' : 'Sem dados para o filtro atual.', rows.length ? 'info' : 'warn');
     } catch (err) {
-      console.error('[MapaVendas] erro:', err);
-      const s = document.getElementById('vendasMapaStatus');
-      if (s) { s.style.display = ''; s.textContent = `Erro: ${err.message}`; }
+      setStatus(err.message || 'Erro ao carregar mapa.', 'error');
+      if (mapaEl) {
+        mapaEl.innerHTML = '<div style="height:100%;display:flex;align-items:center;justify-content:center;color:#fca5a5;font-size:13px;">Falha ao carregar o mapa.</div>';
+      }
+      renderRanking(ultimoRows);
+    } finally {
+      setMapaLoading(false);
+      carregando = false;
+    }
+  }
+
+  async function iniciarTimeline() {
+    if (timelineAtiva) {
+      pararTimeline();
+      setStatus('Timeline interrompida.', 'warn');
+      return;
     }
 
-    // Eventos — botões de período
-    document.querySelectorAll('.vendas-mapa-periodo-btn').forEach(btn => {
-      btn.addEventListener('click', () => {
-        _pararPlay();
-        _filtrarPeriodo(parseInt(btn.dataset.per, 10));
-        _atualizarBotoeresPeriodo();
-        const slider = document.getElementById('vendasMapaSlider');
-        if (slider) { slider.max = _mesesSelecionados.length - 1; slider.value = 0; }
-        const tl = document.getElementById('vendasMapaTimelineWrap');
-        if (tl) tl.style.display = _mesesSelecionados.length > 1 ? '' : 'none';
-        _renderizarMapa(_idxAtual);
-      });
-    });
+    if (carregando) return;
+    setStatus('Preparando timeline do mapa...');
 
-    // Refresh
-    const refreshBtn = document.getElementById('vendasMapaRefreshBtn');
-    if (refreshBtn && !refreshBtn._vmBound) {
-      refreshBtn._vmBound = true;
-      refreshBtn.addEventListener('click', () => {
-        _pararPlay();
-        _dadosBrutos = [];
-        _iniciado = false;
-        window._iniciarMapaVendasPagina(true);
-      });
-    }
+    try {
+      const etapa = (etapaSelect?.value || '').trim();
+      const url = `/api/sac/vendas/graficos/mapa-brasil?periodo=${encodeURIComponent(periodoMeses)}&etapa=${encodeURIComponent(etapa)}&timeline=1`;
+      const resp = await fetch(url, { credentials: 'include' });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok || data.ok === false) throw new Error(data.error || 'Erro ao preparar timeline.');
 
-    // Play/Pause
-    const playBtn = document.getElementById('vendasMapaPlayBtn');
-    if (playBtn && !playBtn._vmBound) {
-      playBtn._vmBound = true;
-      playBtn.addEventListener('click', () => {
-        if (_playTimer) { _pararPlay(); }
-        else {
-          if (_idxAtual >= _mesesSelecionados.length - 1) _idxAtual = 0;
-          _iniciarPlay();
+      const frames = montarFramesTimeline(data.timeline_rows || []);
+      if (!frames.length) {
+        setStatus('Sem dados mensais para o período selecionado.', 'warn');
+        return;
+      }
+
+      await carregarGoogleCharts();
+
+      let idx = 0;
+      timelineAtiva = true;
+      setTimelineBtnState(true);
+
+      const renderFrame = () => {
+        const frame = frames[idx];
+        if (!frame) return;
+        ultimoRows = frame.rows || [];
+        renderRanking(ultimoRows);
+        desenharMapa(ultimoRows);
+        setMesAtualMapa(_labelMes(frame.mes));
+        setStatus(`Timeline: ${_labelMes(frame.mes)} (${idx + 1}/${frames.length})`);
+      };
+
+      renderFrame();
+
+      timelineTimer = setInterval(() => {
+        if (!timelineAtiva) return;
+        idx += 1;
+        if (idx >= frames.length) {
+          pararTimeline();
+          setStatus('Timeline concluída.');
+          return;
         }
+        renderFrame();
+      }, 2000);
+    } catch (err) {
+      pararTimeline();
+      setStatus(err.message || 'Erro ao executar timeline.', 'error');
+    }
+  }
+
+  window._iniciarMapaVendasPagina = function () {
+    if (!iniciado) {
+      iniciado = true;
+
+      aplicarEstadoPeriodoAtivo();
+      periodoBtns.forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const per = Number.parseInt(btn.dataset.per, 10);
+          if (!Number.isFinite(per)) return;
+          periodoMeses = per;
+          aplicarEstadoPeriodoAtivo();
+          carregarMapa();
+        });
       });
+
+      if (etapaSelect) etapaSelect.addEventListener('change', carregarMapa);
+      if (refreshBtn) refreshBtn.addEventListener('click', carregarMapa);
+      if (timelineBtn) timelineBtn.addEventListener('click', iniciarTimeline);
     }
 
-    // Reset
-    const resetBtn = document.getElementById('vendasMapaResetBtn');
-    if (resetBtn && !resetBtn._vmBound) {
-      resetBtn._vmBound = true;
-      resetBtn.addEventListener('click', () => {
-        _pararPlay();
-        _idxAtual = 0;
-        _renderizarMapa(_idxAtual);
-      });
-    }
-
-    // Slider manual
-    const slider = document.getElementById('vendasMapaSlider');
-    if (slider && !slider._vmBound) {
-      slider._vmBound = true;
-      slider.addEventListener('input', () => {
-        _pararPlay();
-        _idxAtual = parseInt(slider.value, 10);
-        _renderizarMapa(_idxAtual);
-      });
-    }
+    carregarMapa();
   };
 })();
