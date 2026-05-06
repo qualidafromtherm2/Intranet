@@ -21722,6 +21722,7 @@ async function upsertRecebimentoNFe(recebimento, eventoWebhook = '', messageId =
     
     for (const item of itens) {
       const itemCabec = item.itensCabec || {};
+      const itemAjustes = item.itensAjustes || {};
       const itemInfoAdic = item.itensInfoAdic || {};
       
       await client.query(`
@@ -21759,7 +21760,7 @@ async function upsertRecebimentoNFe(recebimento, eventoWebhook = '', messageId =
         itemCabec.cNcm || null,
         itemCabec.nQtdeNFe || null,
         itemCabec.cUnidadeNFe || null,
-        itemCabec.nQtdeRecebida || null,
+        itemCabec.nQtdeRecebida || itemAjustes.nQtdeRecebida || null,
         itemCabec.nQtdeDivergente || null,
         itemCabec.nPrecoUnit || null,
         itemCabec.vTotalItem || null,
@@ -21775,12 +21776,12 @@ async function upsertRecebimentoNFe(recebimento, eventoWebhook = '', messageId =
         itemInfoAdic.nNumPedCompra || null,
         itemCabec.nIdPedido || null,
         itemCabec.nIdItPedido || null,
-        itemInfoAdic.cCfopEntrada || null,
+        itemInfoAdic.cCfopEntrada || itemAjustes.cCFOPEntrada || null,
         itemInfoAdic.cCategoriaItem || null,
-        itemInfoAdic.codigoLocalEstoque || null,
-        itemInfoAdic.cLocalEstoque || null,
-        itemInfoAdic.cNaoGerarFinanceiro || null,
-        itemInfoAdic.cNaoGerarMovEstoque || null,
+        itemInfoAdic.codigoLocalEstoque || itemAjustes.codigoLocalEstoque || itemAjustes.codigo_local_estoque || null,
+        itemInfoAdic.cLocalEstoque || itemAjustes.cLocalEstoque || null,
+        itemInfoAdic.cNaoGerarFinanceiro || itemAjustes.cNaoGerarFinanceiro || null,
+        itemInfoAdic.cNaoGerarMovEstoque || itemAjustes.cNaoGerarMovEstoque || null,
         itemInfoAdic.cObsItem || null
       ]);
     }
@@ -30331,7 +30332,7 @@ app.post('/api/compras/pedidos-omie/nfe-associar-pedido', express.json(), async 
       }
     }
 
-    // ─── Passo 3: EDITAR itens com cUnidade + nQtde (+ codigo_local_estoque se especial) ───
+    // ─── Passo 3: EDITAR itens com cUnidade + CFOP + local #D Recebimento ───
     if (itensEditarEstoque && itensEditarEstoque.length > 0) {
       try {
         const payloadEstoque = {
