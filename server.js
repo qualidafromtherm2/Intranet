@@ -8,6 +8,7 @@ const OMIE_WEBHOOK_TOKEN = process.env.OMIE_WEBHOOK_TOKEN || null; // se NULL, n
 // local padrão para a UI (pode setar ALMOX_LOCAL_PADRAO no Render)
 const ALMOX_LOCAL_PADRAO     = process.env.ALMOX_LOCAL_PADRAO     || '10408201806';
 const PRODUCAO_LOCAL_PADRAO  = process.env.PRODUCAO_LOCAL_PADRAO  || '10564345392';
+const RECEBIMENTO_NFE_LOCAL_ESTOQUE_PADRAO = Number(process.env.RECEBIMENTO_NFE_LOCAL_ESTOQUE_PADRAO || ALMOX_LOCAL_PADRAO) || 10408201806;
 // outros requires de rotas...
 
 // no topo: já deve ter dotenv/express carregados
@@ -21769,6 +21770,7 @@ async function upsertRecebimentoNFe(recebimento, eventoWebhook = '', messageId =
     
     for (const item of itens) {
       const itemCabec = item.itensCabec || {};
+      const itemAjustes = item.itensAjustes || {};
       const itemInfoAdic = item.itensInfoAdic || {};
       
       await client.query(`
@@ -21806,7 +21808,7 @@ async function upsertRecebimentoNFe(recebimento, eventoWebhook = '', messageId =
         itemCabec.cNcm || null,
         itemCabec.nQtdeNFe || null,
         itemCabec.cUnidadeNFe || null,
-        itemCabec.nQtdeRecebida || null,
+        itemCabec.nQtdeRecebida || itemAjustes.nQtdeRecebida || null,
         itemCabec.nQtdeDivergente || null,
         itemCabec.nPrecoUnit || null,
         itemCabec.vTotalItem || null,
@@ -21822,12 +21824,12 @@ async function upsertRecebimentoNFe(recebimento, eventoWebhook = '', messageId =
         itemInfoAdic.nNumPedCompra || null,
         itemCabec.nIdPedido || null,
         itemCabec.nIdItPedido || null,
-        itemInfoAdic.cCfopEntrada || null,
+        itemInfoAdic.cCfopEntrada || itemAjustes.cCFOPEntrada || null,
         itemInfoAdic.cCategoriaItem || null,
-        itemInfoAdic.codigoLocalEstoque || null,
-        itemInfoAdic.cLocalEstoque || null,
-        itemInfoAdic.cNaoGerarFinanceiro || null,
-        itemInfoAdic.cNaoGerarMovEstoque || null,
+        itemInfoAdic.codigoLocalEstoque || itemAjustes.codigoLocalEstoque || itemAjustes.codigo_local_estoque || null,
+        itemInfoAdic.cLocalEstoque || itemAjustes.cLocalEstoque || null,
+        itemInfoAdic.cNaoGerarFinanceiro || itemAjustes.cNaoGerarFinanceiro || null,
+        itemInfoAdic.cNaoGerarMovEstoque || itemAjustes.cNaoGerarMovEstoque || null,
         itemInfoAdic.cObsItem || null
       ]);
     }
@@ -29953,9 +29955,7 @@ app.post('/api/compras/pedidos-omie/nfe-associar-pedido', express.json(), async 
     //   • nIdConta = nCodCC do pedido
     //   • cUnidade e nQtde do pedido (ou override do usuário) em cada item
     //   • dVencimento dinâmico conforme compras.contas_omie (tipo CR, melhor_data, fechamento_conta)
-    //   • Se conta especial (GLP/Frigelar): codigo_local_estoque = ESTOQUE_LOCAL_ESPECIAL
-    const CONTAS_ESPECIAIS = [10507452702, 10440916421];
-    const ESTOQUE_LOCAL_ESPECIAL = 10408201806;
+    //   • codigo_local_estoque = #D Recebimento em todos os itens
     let nCodCC = null;
 
     // Lê itens_override do frontend (Qtd/Unid editados pelo user na prévia)
@@ -30014,8 +30014,6 @@ app.post('/api/compras/pedidos-omie/nfe-associar-pedido', express.json(), async 
       console.warn('[Compras/NFeAssociarPedido] Falha ao buscar nCodCC do pedido:', errPed?.message);
     }
 
-    const aplicarEstoqueEspecial = nCodCC && CONTAS_ESPECIAIS.includes(nCodCC);
-
     // Itens conforme plano (ASSOCIAR-PEDIDO)
     const itensParaEnviar = Array.isArray(plano?.itensRecebimentoEditar)
       ? plano.itensRecebimentoEditar.map((itemEditar) => ({
@@ -30052,7 +30050,7 @@ app.post('/api/compras/pedidos-omie/nfe-associar-pedido', express.json(), async 
       return `${dd}/${mm}/${d.getFullYear()}`;
     })();
 
-    if (nCodCC) {
+    if (nCodCC || RECEBIMENTO_NFE_LOCAL_ESTOQUE_PADRAO) {
       try {
         // Busca dados atuais do recebimento + unidades do pedido
         const [recebAtual, pedidoConsulta] = await Promise.all([
@@ -30212,7 +30210,7 @@ app.post('/api/compras/pedidos-omie/nfe-associar-pedido', express.json(), async 
         infoAdicionaisParaEnviar = {
           cCategCompra: categoriaParaInforAdic,
           dRegistro: dHoje,
-          nIdConta: nCodCC
+          ...(nCodCC ? { nIdConta: nCodCC } : {})
         };
 
         // --- CFOP calculado por regra: UF da NF-e (extraída da chave) + cCategCompra ---
@@ -30232,9 +30230,10 @@ app.post('/api/compras/pedidos-omie/nfe-associar-pedido', express.json(), async 
           ufNfeRegraCfop = ufNfe;
           if (ufNfe && cCategCompraReceb) {
             const dentroEstado = ufNfe === 'SC';
+            const categoriasMateriaPrima = new Set(['2.01.03', '2.14.94', '2.01.93']);
             if (cCategCompraReceb === '2.01.04') {
-              cfopCalculado = '1.102';
-            } else if (cCategCompraReceb === '2.01.03') {
+              cfopCalculado = '1.101';
+            } else if (categoriasMateriaPrima.has(cCategCompraReceb)) {
               cfopCalculado = dentroEstado ? '1.101' : '2.101';
             } else {
               cfopCalculado = dentroEstado ? '1.556' : '2.556';
@@ -30245,8 +30244,8 @@ app.post('/api/compras/pedidos-omie/nfe-associar-pedido', express.json(), async 
           console.warn('[Compras/NFeAssociarPedido] Falha ao calcular CFOP:', errCfop?.message);
         }
 
-        // --- EDITAR cada item: cUnidade + nQtde (do pedido ou override do user) ---
-        // Se conta especial, também aplica codigo_local_estoque
+        // --- EDITAR cada item: local de estoque + cUnidade (do pedido ou override do user) ---
+        // Toda NF-e vinculada a pedido de compra deve entrar no local #D Recebimento.
         itensEditarEstoque = plano.itensRecebimentoEditar.map(itemEditar => {
           const nSeq = itemEditar.itensIde?.nSequencia;
           const nIdItPed = itemEditar.itensIde?.nIdItPedidoExistente;
@@ -30256,8 +30255,9 @@ app.post('/api/compras/pedidos-omie/nfe-associar-pedido', express.json(), async 
           const override = overrideMap.get(nSeq);
           const cUnidadeFinal = override?.cUnidade || cUnidadePedido || null;
 
-          const ajustes = {};
-          if (aplicarEstoqueEspecial) ajustes.codigo_local_estoque = ESTOQUE_LOCAL_ESPECIAL;
+          const ajustes = {
+            codigo_local_estoque: RECEBIMENTO_NFE_LOCAL_ESTOQUE_PADRAO
+          };
           if (cUnidadeFinal) ajustes.cUnidade = cUnidadeFinal;
           if (cfopCalculado) ajustes.cCFOPEntrada = cfopCalculado;
           // Nota: nQtde não é campo válido em itensAjustes da Omie
@@ -30272,7 +30272,7 @@ app.post('/api/compras/pedidos-omie/nfe-associar-pedido', express.json(), async 
         }).filter(Boolean);
 
         recebimentoCache = recebAtual;
-        console.log(`[Compras/NFeAssociarPedido] nIdConta=${nCodCC} estoqueEspecial=${aplicarEstoqueEspecial} dVencimento=${dVencimento} parcelas=${parcelasLista.length} itensEditar=${itensEditarEstoque.length} overrides=${overrideMap.size}`);
+        console.log(`[Compras/NFeAssociarPedido] nIdConta=${nCodCC} localEstoqueRecebimento=${RECEBIMENTO_NFE_LOCAL_ESTOQUE_PADRAO} dVencimento=${dVencimento} parcelas=${parcelasLista.length} itensEditar=${itensEditarEstoque.length} overrides=${overrideMap.size}`);
       } catch (errPrep) {
         console.warn('[Compras/NFeAssociarPedido] Falha ao preparar dados de associação:', errPrep?.message);
       }
@@ -30381,7 +30381,7 @@ app.post('/api/compras/pedidos-omie/nfe-associar-pedido', express.json(), async 
       }
     }
 
-    // ─── Passo 3: EDITAR itens com cUnidade + nQtde (+ codigo_local_estoque se especial) ───
+    // ─── Passo 3: EDITAR itens com cUnidade + CFOP + local #D Recebimento ───
     if (itensEditarEstoque && itensEditarEstoque.length > 0) {
       try {
         const payloadEstoque = {
@@ -30571,6 +30571,7 @@ app.post('/api/compras/pedidos-omie/nfe-associar-pedido', express.json(), async 
         nfe_vinculada: numeroNfeVinculada || null,
         etapa_nf_omie: etapaFinalRecebimento || null,
         etapa_nf_pedido: etapaPedidoNf || null,
+        local_estoque_recebimento: RECEBIMENTO_NFE_LOCAL_ESTOQUE_PADRAO,
         valor_total_pedido: Number.isFinite(valorTotalPedido) ? valorTotalPedido : null,
         valor_recebido_pedido: Number.isFinite(valorRecebidoPedido) ? valorRecebidoPedido : null,
         retorno_etapa_omie: respostaEtapaFinal || null,
