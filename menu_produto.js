@@ -47299,7 +47299,7 @@ function criarModalAssociarPedidoNfeSeNecessario() {
       </div>
 
       <div style="padding:16px;display:flex;flex-direction:column;gap:12px;overflow:auto;">
-        <div style="display:flex;flex-direction:column;gap:6px;">
+        <div style="display:flex;flex-direction:column;gap:5px;min-width:0;">
           <label for="modalAssociarNfeNumeroInput" style="font-size:12px;color:#334155;font-weight:700;">Número da NF-e</label>
           <div style="display:flex;gap:8px;">
             <input id="modalAssociarNfeNumeroInput" type="text" placeholder="Ex.: 3542" style="flex:1;padding:10px 12px;border:1px solid #cbd5e1;border-radius:8px;font-size:14px;color:#0f172a;" />
@@ -59268,25 +59268,28 @@ document.addEventListener('DOMContentLoaded', () => {
   ov.style.cssText = 'display:none;position:fixed;inset:0;background:rgba(0,0,0,.65);z-index:10300;align-items:flex-end;justify-content:center;';
 
   ov.innerHTML = `
-    <div id="modalCarrinhoSepPanel" style="width:min(720px,96%);background:#1c1c1c;border-radius:20px 20px 0 0;padding:0;max-height:94vh;display:flex;flex-direction:column;transform:translateY(40px);transition:transform .22s ease;overflow:hidden;">
+    <div id="modalCarrinhoSepPanel" style="width:min(760px,94%);background:#1c1c1c;border-radius:18px 18px 0 0;padding:0;max-height:88vh;display:flex;flex-direction:column;transform:translateY(40px);transition:transform .22s ease;overflow:hidden;">
       <!-- Header -->
-      <div style="display:flex;align-items:center;justify-content:space-between;padding:20px 20px 14px;border-bottom:1px solid #2a2a2a;flex-shrink:0;">
-        <h2 style="margin:0;font-size:1.05rem;color:#f0f0f0;font-weight:700;">Sol. de separação</h2>
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 18px;border-bottom:1px solid #2a2a2a;flex-shrink:0;">
+        <div style="display:flex;align-items:center;gap:10px;min-width:0;">
+          <h2 style="margin:0;font-size:1.05rem;color:#f0f0f0;font-weight:700;white-space:nowrap;">Sol. de separação</h2>
+          <span id="modalCarrinhoSepCount" style="background:#111827;color:#9ca3af;border:1px solid #273244;border-radius:999px;padding:3px 9px;font-size:.74rem;font-weight:700;white-space:nowrap;">0 itens</span>
+        </div>
         <button id="modalCarrinhoSepClose" style="background:none;border:none;cursor:pointer;color:#9ca3af;font-size:22px;line-height:1;padding:4px 8px;">&#x2715;</button>
       </div>
       <!-- Itens do carrinho -->
-      <div id="modalCarrinhoSepItems" style="flex:1;overflow-y:auto;padding:16px 20px;display:flex;flex-direction:column;gap:10px;"></div>
+      <div id="modalCarrinhoSepItems" style="flex:1;min-height:170px;overflow-y:auto;padding:10px 18px 8px;display:flex;flex-direction:column;gap:7px;"></div>
       <div id="modalCarrinhoSepEmpty" style="display:none;color:#6b7280;font-size:.9rem;padding:24px 20px;text-align:center;">Nenhum produto adicionado.</div>
       <!-- Formulário de envio -->
-      <div id="modalCarrinhoSepForm" style="border-top:1px solid #2a2a2a;padding:18px 20px 24px;display:flex;flex-direction:column;gap:14px;flex-shrink:0;">
-        <div style="display:flex;flex-direction:column;gap:6px;">
+      <div id="modalCarrinhoSepForm" style="border-top:1px solid #2a2a2a;padding:10px 18px 12px;display:flex;flex-direction:column;gap:9px;flex-shrink:0;">
+        <div id="modalCarrinhoSepFields" style="display:grid;grid-template-columns:1.1fr 1fr 1.1fr;gap:9px;align-items:end;">
+        <div style="display:flex;flex-direction:column;gap:5px;min-width:0;">
           <label style="color:#d1d5db;font-size:.85rem;font-weight:600;">Resp. retirada</label>
-          <select id="modalCarrinhoSepRequester" style="background:#2a2a2a;color:#f0f0f0;border:1px solid #3a3a3a;border-radius:10px;padding:10px 12px;font-size:.9rem;width:100%;"></select>
-          <small style="color:#6b7280;font-size:.78rem;">Caso necessário altere o user que vai receber.</small>
+          <select id="modalCarrinhoSepRequester" style="background:#2a2a2a;color:#f0f0f0;border:1px solid #3a3a3a;border-radius:10px;padding:8px 12px;font-size:.9rem;width:100%;"></select>
         </div>
-        <div style="display:flex;flex-direction:column;gap:6px;">
+        <div style="display:flex;flex-direction:column;gap:5px;min-width:0;">
           <label style="color:#d1d5db;font-size:.85rem;font-weight:600;">Motivo da solicitação</label>
-          <select id="modalCarrinhoSepMotivo" style="background:#2a2a2a;color:#f0f0f0;border:1px solid #3a3a3a;border-radius:10px;padding:10px 12px;font-size:.9rem;width:100%;">
+          <select id="modalCarrinhoSepMotivo" style="background:#2a2a2a;color:#f0f0f0;border:1px solid #3a3a3a;border-radius:10px;padding:8px 12px;font-size:.9rem;width:100%;">
             <option value="Produção" selected>Produção</option>
             <option value="Engenharia">Engenharia</option>
             <option value="venda">venda</option>
@@ -59295,28 +59298,46 @@ document.addEventListener('DOMContentLoaded', () => {
         </div>
         <div style="display:flex;flex-direction:column;gap:6px;">
           <label style="color:#d1d5db;font-size:.85rem;font-weight:600;">Data prevista</label>
-          <div style="display:flex;gap:10px;">
-            <input id="modalCarrinhoSepDate" type="date" style="flex:1;background:#2a2a2a;color:#f0f0f0;border:1px solid #3a3a3a;border-radius:10px;padding:10px 12px;font-size:.9rem;" />
-            <select id="modalCarrinhoSepHorario" style="background:#2a2a2a;color:#f0f0f0;border:1px solid #3a3a3a;border-radius:10px;padding:10px 12px;font-size:.9rem;">
+          <div style="display:flex;gap:8px;">
+            <input id="modalCarrinhoSepDate" type="date" style="flex:1;background:#2a2a2a;color:#f0f0f0;border:1px solid #3a3a3a;border-radius:10px;padding:8px 12px;font-size:.9rem;" />
+            <select id="modalCarrinhoSepHorario" style="background:#2a2a2a;color:#f0f0f0;border:1px solid #3a3a3a;border-radius:10px;padding:8px 12px;font-size:.9rem;">
               <option value="08:00">08:00</option>
               <option value="12:00">12:00</option>
               <option value="17:30" selected>17:30</option>
             </select>
           </div>
-          <small style="color:#6b7280;font-size:.78rem;">Corte 14h: após esse horário, entrega sugerida na próxima janela (17h30 do dia seguinte).</small>
+          <small style="color:#6b7280;font-size:.75rem;">Corte 14h: próxima janela.</small>
         </div>
-        <div style="display:flex;flex-direction:column;gap:6px;">
-          <label style="color:#d1d5db;font-size:.85rem;font-weight:600;">Observação (opcional)</label>
-          <textarea id="modalCarrinhoSepObs" rows="3" placeholder="Instruções adicionais para o almoxarifado" style="background:#2a2a2a;color:#f0f0f0;border:1px solid #3a3a3a;border-radius:10px;padding:10px 12px;font-size:.9rem;resize:vertical;"></textarea>
         </div>
-        <button id="modalCarrinhoSepClear" type="button" style="background:transparent;color:#f87171;font-weight:700;border:1px solid #7f1d1d;border-radius:10px;padding:10px 12px;width:100%;font-size:.92rem;cursor:pointer;">Excluir lista</button>
-        <button id="modalCarrinhoSepSend" style="background:#ffb400;color:#1a1200;font-weight:700;border:none;border-radius:12px;padding:14px;width:100%;font-size:1rem;cursor:pointer;letter-spacing:.02em;">Enviar separação</button>
+        <details id="modalCarrinhoSepObsWrap" style="border:1px solid #2f2f2f;border-radius:10px;background:#161616;">
+          <summary style="cursor:pointer;color:#d1d5db;font-size:.84rem;font-weight:700;padding:8px 10px;list-style:none;">+ Adicionar observação geral</summary>
+          <textarea id="modalCarrinhoSepObs" rows="2" placeholder="Instruções adicionais para o almoxarifado" style="width:100%;box-sizing:border-box;background:#202020;color:#f0f0f0;border:0;border-top:1px solid #2f2f2f;border-radius:0 0 10px 10px;padding:8px 10px;font-size:.86rem;resize:vertical;"></textarea>
+        </details>
+        <div id="modalCarrinhoSepActions" style="display:grid;grid-template-columns:minmax(120px,.7fr) minmax(220px,1.3fr);gap:10px;align-items:center;">
+          <button id="modalCarrinhoSepClear" type="button" style="background:transparent;color:#f87171;font-weight:700;border:1px solid #7f1d1d;border-radius:10px;padding:10px 12px;width:100%;font-size:.9rem;cursor:pointer;">Excluir lista</button>
+          <button id="modalCarrinhoSepSend" style="background:#ffb400;color:#1a1200;font-weight:800;border:none;border-radius:12px;padding:12px;width:100%;font-size:1rem;cursor:pointer;letter-spacing:.02em;">Enviar separação</button>
+        </div>
       </div>
     </div>
   `;
   document.body.appendChild(ov);
 
   const panel = document.getElementById('modalCarrinhoSepPanel');
+  const responsiveStyle = document.createElement('style');
+  responsiveStyle.textContent = `
+    @media (max-width: 760px) {
+      #modalCarrinhoSepFields { grid-template-columns: 1fr !important; }
+      #modalCarrinhoSepPanel { width: 100% !important; max-height: 92vh !important; }
+      .sep-cart-row { grid-template-columns: minmax(0,1fr) auto !important; }
+      .sep-cart-thumb { display: none !important; }
+      .sep-cart-info-grid { grid-template-columns: 1fr !important; }
+      .sep-cart-actions-row { flex-wrap: wrap !important; }
+    }
+    @media (max-width: 520px) {
+      #modalCarrinhoSepActions { grid-template-columns: 1fr !important; }
+    }
+  `;
+  document.head.appendChild(responsiveStyle);
 
   function fechar() {
     panel.style.transform = 'translateY(40px)';
@@ -59328,10 +59349,71 @@ document.addEventListener('DOMContentLoaded', () => {
     return Number.isInteger(n) ? String(n) : n.toFixed(3).replace(/\.?0+$/, '');
   }
 
+  function _parseQty(value) {
+    const normalizado = String(value || '').replace(',', '.').trim();
+    const n = parseFloat(normalizado);
+    return Number.isFinite(n) && n > 0 ? n : null;
+  }
+
+  async function _salvarQuantidadeItem(item, quantidade, input, row) {
+    const qty = _parseQty(quantidade);
+    if (!qty) {
+      input.value = _fmtQty(item.quantidade);
+      alert('Informe uma quantidade maior que zero.');
+      return;
+    }
+
+    input.disabled = true;
+    row.dataset.savingQty = '1';
+    try {
+      const resp = await fetch(`/api/logistica/carrinho/${item.id}/quantidade`, {
+        method: 'PATCH',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ quantidade: qty })
+      });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok || data.ok === false) throw new Error(data.error || 'Falha ao salvar quantidade.');
+      item.quantidade = qty;
+      input.value = _fmtQty(qty);
+    } catch (e) {
+      input.value = _fmtQty(item.quantidade);
+      alert(e.message || 'Erro ao salvar quantidade.');
+    } finally {
+      input.disabled = false;
+      delete row.dataset.savingQty;
+    }
+  }
+
+  async function _salvarComentarioItem(item, textarea, statusEl) {
+    const comentario = String(textarea.value || '').trim();
+    statusEl.textContent = 'Salvando...';
+    textarea.disabled = true;
+    try {
+      const resp = await fetch(`/api/logistica/carrinho/${item.id}/comentario`, {
+        method: 'PATCH',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ comentario })
+      });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok || !data.ok) throw new Error(data.error || 'Falha ao salvar comentário.');
+      item.comentario = comentario;
+      statusEl.textContent = comentario ? 'Comentário salvo' : 'Sem comentário';
+    } catch (e) {
+      statusEl.textContent = 'Erro ao salvar';
+      alert(e.message || 'Erro ao salvar comentário.');
+    } finally {
+      textarea.disabled = false;
+    }
+  }
+
   function _renderItens(itens) {
     const container = document.getElementById('modalCarrinhoSepItems');
     const empty     = document.getElementById('modalCarrinhoSepEmpty');
     const form      = document.getElementById('modalCarrinhoSepForm');
+    const countEl   = document.getElementById('modalCarrinhoSepCount');
+    if (countEl) countEl.textContent = `${itens.length} ${itens.length === 1 ? 'item' : 'itens'}`;
     container.innerHTML = '';
     if (!itens.length) {
       empty.style.display = 'block';
@@ -59342,10 +59424,12 @@ document.addEventListener('DOMContentLoaded', () => {
     form.style.display  = 'flex';
     itens.forEach(item => {
       const row = document.createElement('div');
-      row.style.cssText = 'display:flex;align-items:center;gap:12px;padding:12px;border:1px solid #2a2a2a;border-radius:12px;background:#171717;';
+      row.className = 'sep-cart-row';
+      row.style.cssText = 'display:grid;grid-template-columns:48px minmax(0,1fr) auto;gap:9px;padding:8px 10px;border:1px solid #2a2a2a;border-radius:12px;background:#171717;align-items:start;';
       // Thumb imagem
       const thumb = document.createElement('div');
-      thumb.style.cssText = 'width:64px;height:64px;border-radius:10px;background:#0f0f0f;overflow:hidden;flex-shrink:0;';
+      thumb.className = 'sep-cart-thumb';
+      thumb.style.cssText = 'width:48px;height:48px;border-radius:9px;background:#0f0f0f;overflow:hidden;flex-shrink:0;';
       const imgEl = document.createElement('img');
       imgEl.src   = `/imagens_produtos/${item.codigo_produto}.jpg`;
       imgEl.style.cssText = 'width:100%;height:100%;object-fit:cover;';
@@ -59353,58 +59437,66 @@ document.addEventListener('DOMContentLoaded', () => {
       thumb.appendChild(imgEl);
       // Info
       const info = document.createElement('div');
-      info.style.cssText = 'flex:1;min-width:0;display:flex;flex-direction:column;gap:2px;';
+      info.style.cssText = 'min-width:0;display:flex;flex-direction:column;gap:5px;';
       info.innerHTML = `
-        <span style="font-weight:700;font-size:.85rem;color:#f59e0b;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${item.codigo_produto}</span>
-        <span style="font-size:.82rem;color:#d1d5db;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${item.descricao || '—'}</span>
-        <span style="font-size:.78rem;color:#9ca3af;">${_fmtQty(item.quantidade)} ${item.unidade || 'UN'}</span>
-        ${item.comentario ? `<span class="sep-item-coment" style="font-size:.76rem;color:#93c5fd;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">Obs: ${item.comentario}</span>` : '<span class="sep-item-coment" style="display:none;"></span>'}
+        <div style="min-width:0;">
+          <span style="display:block;font-weight:700;font-size:.85rem;color:#f59e0b;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${item.codigo_produto}</span>
+          <span style="display:block;font-size:.82rem;color:#d1d5db;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${item.descricao || '—'}</span>
+        </div>
+        <div class="sep-cart-info-grid" style="display:grid;grid-template-columns:auto minmax(180px,1fr);gap:9px;align-items:start;">
+        <div class="sep-cart-actions-row" style="display:flex;align-items:center;gap:7px;">
+          <span style="font-size:.72rem;color:#9ca3af;font-weight:800;text-transform:uppercase;letter-spacing:.04em;">Qtd.</span>
+          <button type="button" class="sep-cart-qty-dec" style="width:28px;height:28px;border:none;border-radius:7px;background:#27272a;color:#f8fafc;font-weight:900;cursor:pointer;">-</button>
+          <input class="sep-cart-qty-input" type="text" inputmode="decimal" value="${_fmtQty(item.quantidade)}" style="width:70px;height:28px;background:#101010;color:#f8fafc;border:1px solid #3a3a3a;border-radius:8px;text-align:center;font-size:.86rem;font-weight:700;" />
+          <button type="button" class="sep-cart-qty-inc" style="width:28px;height:28px;border:none;border-radius:7px;background:#27272a;color:#f8fafc;font-weight:900;cursor:pointer;">+</button>
+          <span style="font-size:.78rem;color:#9ca3af;">${item.unidade || 'UN'}</span>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:4px;">
+          <textarea class="sep-cart-comment" rows="1" placeholder="Comentário deste item" style="width:100%;box-sizing:border-box;background:#101010;color:#e5e7eb;border:1px solid #333;border-radius:9px;padding:6px 9px;font-size:.78rem;resize:vertical;min-height:32px;">${typeof escapeHtml === 'function' ? escapeHtml(item.comentario || '') : (item.comentario || '')}</textarea>
+          <span class="sep-cart-comment-status" style="font-size:.72rem;color:#6b7280;">${item.comentario ? 'Comentário salvo' : 'Sem comentário'}</span>
+        </div>
+        </div>
       `;
-      const obsEl = info.querySelector('.sep-item-coment');
+      const qtyInput = info.querySelector('.sep-cart-qty-input');
+      const btnDec = info.querySelector('.sep-cart-qty-dec');
+      const btnInc = info.querySelector('.sep-cart-qty-inc');
+      const commentEl = info.querySelector('.sep-cart-comment');
+      const commentStatusEl = info.querySelector('.sep-cart-comment-status');
       // Ações da linha
       const actions = document.createElement('div');
-      actions.style.cssText = 'display:flex;align-items:center;gap:8px;flex-shrink:0;';
-      const btnComent = document.createElement('button');
-      btnComent.innerHTML = '<i class="fa-solid fa-comment"></i>';
-      btnComent.style.cssText = 'background:#1f2937;border:none;border-radius:8px;color:#93c5fd;padding:8px 10px;cursor:pointer;';
-      btnComent.title = 'Adicionar comentário';
-      btnComent.addEventListener('click', async () => {
-        const novo = prompt('Comentário do item:', item.comentario || '');
-        if (novo === null) return;
-        const comentario = String(novo || '').trim();
-        btnComent.disabled = true;
-        try {
-          const resp = await fetch(`/api/logistica/carrinho/${item.id}/comentario`, {
-            method: 'PATCH',
-            credentials: 'include',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ comentario })
-          });
-          const data = await resp.json().catch(() => ({}));
-          if (!resp.ok || !data.ok) throw new Error(data.error || 'Falha ao salvar comentário.');
-          item.comentario = comentario;
-          if (comentario) {
-            obsEl.style.display = '';
-            obsEl.textContent = `Obs: ${comentario}`;
-            obsEl.style.fontSize = '.76rem';
-            obsEl.style.color = '#93c5fd';
-            obsEl.style.whiteSpace = 'nowrap';
-            obsEl.style.overflow = 'hidden';
-            obsEl.style.textOverflow = 'ellipsis';
-          } else {
-            obsEl.style.display = 'none';
-            obsEl.textContent = '';
-          }
-        } catch (e) {
-          alert(e.message || 'Erro ao salvar comentário.');
-        } finally {
-          btnComent.disabled = false;
+      actions.style.cssText = 'display:flex;align-items:flex-start;gap:6px;flex-shrink:0;';
+      const alterarQtd = (delta) => {
+        const atual = _parseQty(qtyInput.value) || _parseQty(item.quantidade) || 1;
+        const proxima = Math.max(1, atual + delta);
+        qtyInput.value = _fmtQty(proxima);
+        _salvarQuantidadeItem(item, proxima, qtyInput, row);
+      };
+      btnDec.addEventListener('click', () => alterarQtd(-1));
+      btnInc.addEventListener('click', () => alterarQtd(1));
+      qtyInput.addEventListener('change', () => _salvarQuantidadeItem(item, qtyInput.value, qtyInput, row));
+      qtyInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          qtyInput.blur();
+        }
+      });
+
+      let commentTimer = null;
+      commentEl.addEventListener('input', () => {
+        commentStatusEl.textContent = 'Alteração pendente...';
+        clearTimeout(commentTimer);
+        commentTimer = setTimeout(() => _salvarComentarioItem(item, commentEl, commentStatusEl), 650);
+      });
+      commentEl.addEventListener('blur', () => {
+        clearTimeout(commentTimer);
+        if (String(commentEl.value || '').trim() !== String(item.comentario || '').trim()) {
+          _salvarComentarioItem(item, commentEl, commentStatusEl);
         }
       });
       // Botão remover
       const btn = document.createElement('button');
       btn.innerHTML = '<i class="fa-solid fa-trash-can"></i>';
-      btn.style.cssText = 'background:#2a1b1b;border:none;border-radius:8px;color:#f87171;padding:8px 10px;cursor:pointer;flex-shrink:0;';
+      btn.style.cssText = 'background:#2a1b1b;border:none;border-radius:8px;color:#f87171;padding:7px 9px;cursor:pointer;flex-shrink:0;';
       btn.title = 'Remover';
       btn.addEventListener('click', async () => {
         btn.disabled = true;
@@ -59418,6 +59510,11 @@ document.addEventListener('DOMContentLoaded', () => {
             badge.textContent = n;
             if (n === 0) badge.style.display = 'none';
           }
+          const countEl = document.getElementById('modalCarrinhoSepCount');
+          if (countEl) {
+            const n = container.children.length;
+            countEl.textContent = `${n} ${n === 1 ? 'item' : 'itens'}`;
+          }
           // Verifica se ficou vazio
           if (!container.children.length) {
             empty.style.display = 'block';
@@ -59430,7 +59527,6 @@ document.addEventListener('DOMContentLoaded', () => {
       });
       row.appendChild(thumb);
       row.appendChild(info);
-      actions.appendChild(btnComent);
       actions.appendChild(btn);
       row.appendChild(actions);
       container.appendChild(row);
