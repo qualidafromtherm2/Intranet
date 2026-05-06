@@ -19532,6 +19532,54 @@ async function ensureComprasSchema() {
         ('Outros')
       ON CONFLICT (nome) DO NOTHING
     `);
+
+    // Garante a categoria operacional no vínculo configurável de Produção usado pelo carrinho.
+    await pool.query(`
+      DO $$
+      DECLARE
+        v_departamento_id INTEGER;
+        v_ordem INTEGER;
+      BEGIN
+        IF EXISTS (
+          SELECT 1
+          FROM information_schema.tables
+          WHERE table_schema = 'configuracoes'
+            AND table_name = 'categoria_departamento'
+        ) THEN
+          SELECT id
+            INTO v_departamento_id
+            FROM configuracoes.departamento
+           WHERE nome = 'Produção'
+           LIMIT 1;
+
+          IF v_departamento_id IS NOT NULL
+             AND NOT EXISTS (
+               SELECT 1
+                 FROM configuracoes.categoria_departamento
+                WHERE departamento_id = v_departamento_id
+                  AND LOWER(TRIM(nome)) = LOWER('Embalagem dos produtos')
+             ) THEN
+            SELECT COALESCE(ordem, 0)
+              INTO v_ordem
+              FROM configuracoes.categoria_departamento
+             WHERE departamento_id = v_departamento_id
+               AND LOWER(TRIM(nome)) = LOWER('Materia prima')
+             ORDER BY ordem
+             LIMIT 1;
+
+            IF v_ordem IS NULL THEN
+              SELECT COALESCE(MAX(ordem), 0) + 1
+                INTO v_ordem
+                FROM configuracoes.categoria_departamento
+               WHERE departamento_id = v_departamento_id;
+            END IF;
+
+            INSERT INTO configuracoes.categoria_departamento (departamento_id, nome, ordem, ativo)
+            VALUES (v_departamento_id, 'Embalagem dos produtos', v_ordem, true);
+          END IF;
+        END IF;
+      END $$;
+    `);
     
     // Cria tabela de status de compras
     await pool.query(`
