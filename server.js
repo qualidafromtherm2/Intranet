@@ -227,6 +227,7 @@ app.use('/api/qualidade', require('./routes/qualidadeFotos'));
 app.use('/api/registros', require('./routes/registros'));
 app.use('/api/sac', require('./routes/sacEnvios'));
 app.use('/api/ai', require('./routes/ai_assistant'));
+app.use('/api/producao', require('./routes/producao'));
 
 app.get('/api/produtos/stream', (req, res) => {
   const accept = String(req.headers?.accept || '');
@@ -12866,6 +12867,78 @@ app.post('/api/armazem/almoxarifado', express.json(), async (req, res) => {
   } catch (err) {
     console.error('[almoxarifado SQL]', err);
     res.status(500).json({ ok:false, error:String(err.message || err) });
+  }
+});
+
+// ── GET /api/estoque/posicao-por-data ──────────────────────────────────────
+// Retorna posição de estoque para uma data específica
+// Query params: data (YYYY-MM-DD), pagina (opcional), limite (opcional)
+app.get('/api/estoque/posicao-por-data', async (req, res) => {
+  try {
+    const { data, pagina = 1, limite = 200 } = req.query;
+    if (!data || !/^\d{4}-\d{2}-\d{2}$/.test(data)) {
+      return res.status(400).json({ ok: false, error: 'Parâmetro data inválido (use YYYY-MM-DD).' });
+    }
+    const pg = Math.max(1, parseInt(pagina) || 1);
+    const lim = Math.min(500, Math.max(1, parseInt(limite) || 200));
+    const offset = (pg - 1) * lim;
+
+    const { rows: countRows } = await pool.query(`
+      SELECT COUNT(*) AS total
+      FROM public.omie_estoque_posicao
+      WHERE data_posicao = $1
+    `, [data]);
+    const total = parseInt(countRows[0].total) || 0;
+
+    const { rows } = await pool.query(`
+      SELECT
+        p.codigo,
+        p.descricao,
+        p.local_codigo,
+        p.fisico,
+        p.saldo,
+        p.cmc,
+        p.estoque_minimo
+      FROM public.omie_estoque_posicao p
+      WHERE p.data_posicao = $1
+      ORDER BY p.descricao NULLS LAST, p.codigo
+      LIMIT $2 OFFSET $3
+    `, [data, lim, offset]);
+
+    const dados = rows.map(r => ({
+      codigo       : r.codigo        || '',
+      descricao    : r.descricao     || '',
+      local_codigo : r.local_codigo  || '',
+      fisico       : Number(r.fisico)        || 0,
+      saldo        : Number(r.saldo)         || 0,
+      cmc          : Number(r.cmc)           || 0,
+      min          : Number(r.estoque_minimo) || 0,
+    }));
+
+    res.json({ ok: true, data, pagina: pg, totalRegistros: total, totalPaginas: Math.ceil(total / lim), dados });
+  } catch (err) {
+    console.error('[posicao-por-data SQL]', err);
+    res.status(500).json({ ok: false, error: String(err.message || err) });
+  }
+});
+
+// ── GET /api/estoque/datas-disponiveis ──────────────────────────────────────
+// Retorna datas distintas que existem na tabela omie_estoque_posicao
+app.get('/api/estoque/datas-disponiveis', async (req, res) => {
+  try {
+    const { rows } = await pool.query(`
+      SELECT DISTINCT data_posicao
+      FROM public.omie_estoque_posicao
+      ORDER BY data_posicao DESC
+      LIMIT 365
+    `);
+    const datas = rows.map(r => r.data_posicao instanceof Date
+      ? r.data_posicao.toISOString().slice(0, 10)
+      : String(r.data_posicao).slice(0, 10));
+    res.json({ ok: true, datas });
+  } catch (err) {
+    console.error('[datas-disponiveis SQL]', err);
+    res.status(500).json({ ok: false, error: String(err.message || err) });
   }
 });
 

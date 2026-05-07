@@ -197,6 +197,39 @@
   </div>
 </div>
 
+<!-- Nova categoria: Produção -->
+<div class="side-wrapper">
+  <div class="side-title"
+       data-nav-key="side:producao"
+       data-nav-pos="side"
+       data-nav-label="Produção">Produção</div>
+
+  <div class="side-menu">
+    <a href="#"
+       id="menu-producao-primeira-peca-ok"
+       class="menu-link"
+       data-nav-key="side:producao:primeira-peca-ok"
+       data-nav-parent="side:producao"
+       data-nav-pos="side"
+       data-nav-label="1° pç ok"
+       data-nav-selector="#menu-producao-primeira-peca-ok">
+      <i class="fa-solid fa-circle-check" style="margin-right:8px;"></i>
+      1° pç ok
+    </a>
+    <a href="#"
+       id="menu-registrar-producao"
+       class="menu-link"
+       data-nav-key="side:producao:registrar"
+       data-nav-parent="side:producao"
+       data-nav-pos="side"
+       data-nav-label="Registrar produção"
+       data-nav-selector="#menu-registrar-producao">
+      <i class="fa-solid fa-industry" style="margin-right:8px;"></i>
+      Registrar produção
+    </a>
+  </div>
+</div>
+
 <div class="side-wrapper">
   <div class="side-title"
        data-nav-key="side:rh"
@@ -7788,6 +7821,9 @@
     <a href="#" data-arm-tab="armazem3d" class="main-header-link">
       <i class="fa-solid fa-warehouse" style="margin-right:5px;"></i>Armazém 3D
     </a>
+    <a href="#" data-arm-tab="posicao-estoque" class="main-header-link">
+      <i class="fa-solid fa-calendar-days" style="margin-right:5px;"></i>Posição de Estoque
+    </a>
   </div>
 </div>
 
@@ -7987,6 +8023,49 @@
 
   </div><!-- /arm3d-outer -->
 </div><!-- /conteudo-armazem3d -->
+
+<!-- ===================== PAINEL POSIÇÃO DE ESTOQUE ===================== -->
+<div id="conteudo-posicao-estoque" class="armazem-page" style="display:none;">
+  <div class="content-wrapper">
+    <div class="content-section">
+      <div class="title-wrapper" style="display:flex; flex-direction:column; gap:12px;">
+        <div class="content-section-title" style="margin:0;">Posição de Estoque por Data</div>
+        <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
+          <label for="posicaoEstoqueDataInput" style="font-weight:600;">Data:</label>
+          <input type="date" id="posicaoEstoqueDataInput" class="transfer-select" style="min-width:180px;" />
+          <button id="posicaoEstoqueBuscarBtn" class="btn primary" style="padding:6px 18px;">
+            <i class="fa-solid fa-magnifying-glass"></i> Buscar
+          </button>
+          <input type="text" id="posicaoEstoqueSearch" placeholder="Pesquisar por código ou descrição…" class="search-box" style="max-width:280px;" />
+          <span id="posicaoEstoqueInfo" style="color:#aaa; font-size:13px;"></span>
+        </div>
+      </div>
+      <div class="almox-wrapper" style="margin-top:12px;">
+        <table id="tbl-posicao-estoque" class="tabela padrao">
+          <thead>
+            <tr>
+              <th>Código</th>
+              <th class="desc-col">Descrição</th>
+              <th>Local</th>
+              <th>Físico</th>
+              <th>Saldo</th>
+              <th>CMC</th>
+              <th>Mín</th>
+            </tr>
+          </thead>
+          <tbody id="posicaoEstoqueTbody">
+            <tr><td colspan="7" style="text-align:center; color:#aaa;">Selecione uma data e clique em Buscar.</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="almox-pager" style="margin-top:8px;">
+        <button id="posicaoEstoquePrev" class="btn tiny">◀</button>
+        <span id="posicaoEstoquePageInfo">1 / 1</span>
+        <button id="posicaoEstoqueNext" class="btn tiny">▶</button>
+      </div>
+    </div>
+  </div>
+</div><!-- /conteudo-posicao-estoque -->
 
 <style>
 /* ======================================================
@@ -8434,16 +8513,92 @@
 
 
 
+        <!-- Painel Produção: Registrar produção (Ordens de Produção IAPP) -->
+        <div id="registrarProducaoPane" class="tab-pane" style="display:none;">
+          <div class="content-wrapper">
+            <div class="content-wrapper-header">
+              <div class="content-wrapper-context">
+                <h3 class="img-content" style="display:flex;align-items:center;gap:8px;">
+                  <i class="fa-solid fa-industry" style="color:#6366f1;"></i>
+                  <span>Ordens de Produção</span>
+                </h3>
+                <div class="content-text">Dados em tempo real do IAPP — status A Produzir.</div>
+              </div>
+              <div style="display:flex;gap:8px;align-items:center;">
+                <button id="producaoRecarregarBtn" type="button"
+                  style="display:inline-flex;align-items:center;gap:8px;padding:7px 16px;background:linear-gradient(135deg,#6366f1 0%,#4f46e5 100%);color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;">
+                  <i class="fa-solid fa-rotate-right"></i> Atualizar
+                </button>
+              </div>
+            </div>
+
+            <!-- Spinner de carregamento -->
+            <div id="producaoSpinner" style="display:none;text-align:center;padding:32px 0;color:#6366f1;">
+              <i class="fa-solid fa-spinner fa-spin" style="font-size:28px;"></i>
+              <div style="margin-top:10px;font-size:13px;color:var(--inactive-color);" id="producaoSpinnerMsg">Carregando...</div>
+            </div>
+
+            <!-- Mensagem de erro -->
+            <div id="producaoErro" style="display:none;padding:16px;background:#450a0a;border:1px solid #dc2626;border-radius:10px;color:#fca5a5;font-size:13px;margin-bottom:12px;"></div>
+
+            <!-- Filtro por operação de serviço -->
+            <div id="producaoFiltroBar" style="display:none;margin-bottom:12px;">
+              <select id="producaoFiltroOperacao"
+                style="width:100%;max-width:420px;padding:7px 12px;background:#1e2233;color:#e2e8f0;border:1px solid rgba(99,102,241,.4);border-radius:8px;font-size:13px;cursor:pointer;">
+                <option value="">Todas as operações de serviço</option>
+              </select>
+            </div>
+
+            <!-- Kanban de OPs -->
+            <div id="producaoKanban" style="display:flex;gap:16px;align-items:flex-start;overflow-x:auto;padding:4px 0 16px 0;">
+
+              <!-- Coluna: Programado -->
+              <div style="flex:0 0 340px;min-width:300px;">
+                <div style="display:flex;align-items:center;gap:8px;padding:10px 14px;background:#1e1b4b;border-radius:10px 10px 0 0;border:1px solid #3730a3;border-bottom:none;">
+                  <span style="width:10px;height:10px;border-radius:50%;background:#6366f1;display:inline-block;flex-shrink:0;"></span>
+                  <span style="font-size:12px;font-weight:700;color:#a5b4fc;text-transform:uppercase;letter-spacing:.5px;">Programado</span>
+                  <span id="kanbanProgramadoCount" style="margin-left:auto;font-size:11px;background:#312e81;color:#c7d2fe;padding:2px 9px;border-radius:10px;font-weight:600;">0</span>
+                </div>
+                <div id="kanbanProgramado" style="min-height:220px;background:rgba(99,102,241,.04);border:1px solid #3730a3;border-top:none;border-radius:0 0 10px 10px;padding:10px;display:flex;flex-direction:column;gap:10px;">
+                  <div style="text-align:center;padding:24px 0;color:var(--inactive-color);font-size:12px;">Clique em "Recarregar" para carregar.</div>
+                </div>
+              </div>
+
+              <!-- Coluna: Produzindo -->
+              <div style="flex:0 0 340px;min-width:300px;">
+                <div style="display:flex;align-items:center;gap:8px;padding:10px 14px;background:#052e16;border-radius:10px 10px 0 0;border:1px solid #166534;border-bottom:none;">
+                  <span style="width:10px;height:10px;border-radius:50%;background:#22c55e;display:inline-block;flex-shrink:0;"></span>
+                  <span style="font-size:12px;font-weight:700;color:#86efac;text-transform:uppercase;letter-spacing:.5px;">Produzindo</span>
+                  <span id="kanbanProduzindoCount" style="margin-left:auto;font-size:11px;background:#14532d;color:#bbf7d0;padding:2px 9px;border-radius:10px;font-weight:600;">0</span>
+                </div>
+                <div id="kanbanProduzindo" style="min-height:220px;background:rgba(34,197,94,.04);border:1px solid #166534;border-top:none;border-radius:0 0 10px 10px;padding:10px;display:flex;flex-direction:column;gap:10px;">
+                  <div style="text-align:center;padding:24px 0;color:var(--inactive-color);font-size:12px;">Nenhuma OP em produção.</div>
+                </div>
+              </div>
+
+              <!-- Coluna: Aguardando Retirada -->
+              <div style="flex:0 0 340px;min-width:300px;">
+                <div style="display:flex;align-items:center;gap:8px;padding:10px 14px;background:#431407;border-radius:10px 10px 0 0;border:1px solid #9a3412;border-bottom:none;">
+                  <span style="width:10px;height:10px;border-radius:50%;background:#f97316;display:inline-block;flex-shrink:0;"></span>
+                  <span style="font-size:12px;font-weight:700;color:#fdba74;text-transform:uppercase;letter-spacing:.5px;">Aguardando Retirada</span>
+                  <span id="kanbanAguardandoCount" style="margin-left:auto;font-size:11px;background:#7c2d12;color:#fed7aa;padding:2px 9px;border-radius:10px;font-weight:600;">0</span>
+                </div>
+                <div id="kanbanAguardando" style="min-height:220px;background:rgba(249,115,22,.04);border:1px solid #9a3412;border-top:none;border-radius:0 0 10px 10px;padding:10px;display:flex;flex-direction:column;gap:10px;">
+                  <div style="text-align:center;padding:24px 0;color:var(--inactive-color);font-size:12px;">Nenhuma OP aguardando retirada.</div>
+                </div>
+              </div>
+
+            </div>
+
+            <!-- Rodapé de contagem -->
+            <div id="producaoRodape" style="display:none;margin-top:4px;font-size:12px;color:var(--inactive-color);text-align:right;padding:0 4px;"></div>
+          </div>
+        </div>
+
       </div> <!-- /.main-container -->
 
 
-
-
-
     </div> <!-- /.wrapper -->
-
-    <div class="overlay-app" id="authOverlay"></div>
-  </div> <!-- /.app -->
 
 
 

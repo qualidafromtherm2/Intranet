@@ -92,6 +92,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // 1) Pega o container onde injetaremos o HTML do login
   const overlay = document.getElementById('authOverlay');
+  if (!overlay) return; // página sem #authOverlay (ex: login.html standalone)
   
   // ⚡ OTIMIZAÇÃO: Habilita o botão profile-icon IMEDIATAMENTE
   const profileArea = document.getElementById('profile-icon');

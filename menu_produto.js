@@ -5871,6 +5871,9 @@ else if (nome === 'transferencia') {
 else if (nome === 'armazem3d') {
   initArmazem3D();
 }
+else if (nome === 'posicao-estoque') {
+  initPosicaoEstoque();
+}
 
 }
 
@@ -52183,8 +52186,21 @@ async function applyCurrentUserPermissionsToUI(){
     if (raw) {
       const cached = JSON.parse(raw);
       if (cached && Array.isArray(cached.nodes)) {
-        _applyPermissionTreeToUI(cached);
-        appliedFromCache = true;
+        // Valida cache: verifica se todos os nós do DOM com selector estão presentes.
+        // Se faltar algum, a cache está desatualizada — descarta e busca fresh.
+        const cachedSelectors = new Set(cached.nodes.map(n => n.selector).filter(Boolean));
+        const domNodes = document.querySelectorAll('[data-nav-selector]');
+        const allPresent = Array.from(domNodes).every(el => {
+          const sel = el.dataset.navSelector;
+          return !sel || cachedSelectors.has(sel);
+        });
+        if (allPresent) {
+          _applyPermissionTreeToUI(cached);
+          appliedFromCache = true;
+        } else {
+          // Cache desatualizada (novos menus foram adicionados) — limpa e busca fresh
+          try { localStorage.removeItem(cacheKey); } catch {}
+        }
       }
     }
   } catch {}
@@ -52204,7 +52220,7 @@ async function applyCurrentUserPermissionsToUI(){
     // Não bloqueia o boot: revalida em segundo plano
     refresh();
   } else {
-    // Sem cache: precisamos esperar para não revelar UI vazia
+    // Sem cache ou cache desatualizada: aguarda para não revelar UI vazia
     await refresh();
   }
 }
@@ -52342,6 +52358,11 @@ window.syncNavNodes = async function(force = false) {
       console.warn('[nav-sync]', r.status, e);
     } else {
       window.__navSync.last = Date.now();
+      // Invalida cache de permissões e reaplica, pois podem ter sido adicionados novos nós
+      if (window.__sessionUser) {
+        try { localStorage.removeItem(`perm-tree:${window.__sessionUser.id}`); } catch {}
+        try { await window.applyCurrentUserPermissionsToUI?.(); } catch {}
+      }
     }
   } catch (e) {
     console.warn('[nav-sync] falhou', e);
@@ -61400,4 +61421,359 @@ document.addEventListener('DOMContentLoaded', () => {
 
     carregarMapa();
   };
+})();
+
+/* ============================================================
+ * PRODUÇÃO — Ordens de Produção IAPP (Kanban)
+ * ============================================================ */
+(function () {
+  const menuBtn = document.getElementById('menu-registrar-producao');
+  if (!menuBtn) return;
+
+  const spinner       = document.getElementById('producaoSpinner');
+  const spinnerMsg    = document.getElementById('producaoSpinnerMsg');
+  const erroDiv       = document.getElementById('producaoErro');
+  const rodape        = document.getElementById('producaoRodape');
+  const recarrBtn     = document.getElementById('producaoRecarregarBtn');
+  const filtroBar     = document.getElementById('producaoFiltroBar');
+  const filtroSelect  = document.getElementById('producaoFiltroOperacao');
+
+  const colProgramado = document.getElementById('kanbanProgramado');
+  const cntProgramado = document.getElementById('kanbanProgramadoCount');
+
+  // Cache das ordens carregadas para re-renderizar sem nova requisição
+  let ordensCarregadas = [];
+
+  function fmtData(str) {
+    if (!str) return '—';
+    const m = str.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (m) return `${m[3]}/${m[2]}/${m[1]}`;
+    return str;
+  }
+
+  function fmtMoeda(v) {
+    if (v == null || v === '') return '—';
+    return 'R$ ' + Number(v).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  }
+
+  function fmtQtde(v) {
+    if (v == null || v === '') return '—';
+    const n = parseFloat(v);
+    return isNaN(n) ? String(v) : n.toLocaleString('pt-BR', { maximumFractionDigits: 4 }).replace(/,?0+$/, '').replace(/,$/, '') || String(n);
+  }
+
+  function badgeOS(status) {
+    const cores = {
+      'ENCERRADA':    { bg: '#1e293b', txt: '#94a3b8' },
+      'ABERTA':       { bg: '#1d4ed8', txt: '#bfdbfe' },
+      'EM ANDAMENTO': { bg: '#065f46', txt: '#6ee7b7' },
+      'PAUSADA':      { bg: '#92400e', txt: '#fcd34d' },
+    };
+    const s = (status || '').toUpperCase();
+    const c = cores[s] || { bg: '#374151', txt: '#d1d5db' };
+    return `<span style="flex-shrink:0;display:inline-block;padding:1px 6px;border-radius:4px;font-size:10px;font-weight:700;background:${c.bg};color:${c.txt};">${status || '—'}</span>`;
+  }
+
+  function renderGrupo(prodId, ops) {
+    const prod = ops[0].produto || {};
+    const qtdeTotal = ops.reduce((s, op) => s + (Number(op.qtde) || 0), 0);
+
+    const opsHtml = ops.map(op => {
+      const osHtml = (op.ordens_servico || []).map(os =>
+        `<div style="background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.06);border-radius:5px;padding:5px 8px;display:flex;flex-direction:column;gap:3px;">
+          <div style="display:flex;align-items:center;gap:6px;">
+            <span style="font-size:10px;color:#94a3b8;min-width:70px;font-weight:600;flex-shrink:0;">${os.identificacao || ('#' + os.id)}</span>
+            <span style="font-size:10px;color:#cbd5e1;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${(os.operacao || '').replace(/"/g,'&quot;')}">${os.operacao || '—'}</span>
+            ${badgeOS(os.status)}
+          </div>
+          <div style="display:flex;flex-wrap:wrap;gap:10px;padding-left:2px;">
+            ${os.data_abertura     ? `<span style="font-size:10px;color:#64748b;">Abertura: <b style="color:#94a3b8;">${fmtData(os.data_abertura)}</b></span>` : ''}
+            ${os.data_inicio       ? `<span style="font-size:10px;color:#64748b;">Início: <b style="color:#94a3b8;">${fmtData(os.data_inicio)}</b></span>` : ''}
+            ${os.data_final        ? `<span style="font-size:10px;color:#64748b;">Final: <b style="color:#94a3b8;">${fmtData(os.data_final)}</b></span>` : ''}
+            ${os.data_encerramento ? `<span style="font-size:10px;color:#64748b;">Encerramento: <b style="color:#94a3b8;">${fmtData(os.data_encerramento)}</b></span>` : ''}
+          </div>
+        </div>`
+      ).join('');
+
+      const detalhesId = `op-det-${op.id}`;
+
+      return `<div data-op-id="${op.id}" style="background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);border-radius:8px;padding:10px 12px;margin-top:8px;">
+        <!-- Cabeçalho sempre visível -->
+        <div style="display:flex;align-items:flex-start;gap:8px;">
+          <div style="flex:1;min-width:0;">
+            <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;">
+              <span style="font-size:10px;color:#475569;font-weight:600;">#${op.id}</span>
+              <span style="font-size:13px;font-weight:700;color:#e2e8f0;">OP ${op.identificacao || '—'}</span>
+              <span style="font-size:11px;color:#94a3b8;margin-left:auto;">Qtde: <b style="color:#f1f5f9;">${fmtQtde(op.qtde)}</b></span>
+            </div>
+            <div style="display:flex;flex-wrap:wrap;gap:8px;">
+              ${op.data_abertura             ? `<span style="font-size:10px;color:#64748b;">Abertura: <b style="color:#94a3b8;">${fmtData(op.data_abertura)}</b></span>` : ''}
+              ${op.data_inicio               ? `<span style="font-size:10px;color:#64748b;">Início: <b style="color:#94a3b8;">${fmtData(op.data_inicio)}</b></span>` : ''}
+              ${op.data_final                ? `<span style="font-size:10px;color:#64748b;">Final: <b style="color:#94a3b8;">${fmtData(op.data_final)}</b></span>` : ''}
+              ${op.data_previsao_faturamento  ? `<span style="font-size:10px;color:#64748b;">Prev. fat.: <b style="color:#a5f3fc;">${fmtData(op.data_previsao_faturamento)}</b></span>` : ''}
+              ${op.data_previsao_entrega     ? `<span style="font-size:10px;color:#64748b;">Prev. entrega: <b style="color:#a5f3fc;">${fmtData(op.data_previsao_entrega)}</b></span>` : ''}
+            </div>
+          </div>
+          <button onclick="(function(btn){var d=document.getElementById('${detalhesId}');var aberto=d.style.display!=='none';d.style.display=aberto?'none':'flex';btn.innerHTML=aberto?'<i class=\\'fa-solid fa-chevron-down\\'></i>':'<i class=\\'fa-solid fa-chevron-up\\'></i>';})(this)"
+            style="flex-shrink:0;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.12);border-radius:6px;color:#94a3b8;width:26px;height:26px;display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:11px;margin-top:2px;">
+            <i class="fa-solid fa-chevron-down"></i>
+          </button>
+        </div>
+        <!-- Detalhes recolhidos por padrão -->
+        <div id="${detalhesId}" style="display:none;flex-direction:column;gap:4px;margin-top:10px;padding-top:10px;border-top:1px solid rgba(255,255,255,.06);">
+          ${op.data_encerramento ? `<div style="font-size:10px;color:#64748b;">Encerramento: <b style="color:#94a3b8;">${fmtData(op.data_encerramento)}</b></div>` : ''}
+          ${op.ficha_tecnica     ? `<div style="font-size:11px;color:#94a3b8;">Ficha técnica: <span style="color:#c7d2fe;">${op.ficha_tecnica}</span></div>` : ''}
+          ${op.obs               ? `<div style="font-size:11px;color:#94a3b8;">Obs: <span style="color:#fef3c7;">${op.obs}</span></div>` : ''}
+          ${osHtml ? `<div style="display:flex;flex-direction:column;gap:4px;margin-top:4px;">${osHtml}</div>` : '<div style="font-size:11px;color:#475569;">Sem ordens de serviço.</div>'}
+        </div>
+      </div>`;
+    }).join('');
+
+    const descEscapada = (prod.descricao || '').replace(/"/g, '&quot;');
+
+    return `<div style="background:var(--content-bg,#1e2233);border:1px solid rgba(255,255,255,.1);border-radius:10px;padding:12px;">
+      <div style="display:flex;align-items:flex-start;gap:8px;margin-bottom:6px;">
+        <div style="flex:1;min-width:0;">
+          <div style="font-size:13px;font-weight:700;color:#f59e0b;letter-spacing:.3px;">${prod.identificacao || prodId}</div>
+          <div style="font-size:12px;color:#e2e8f0;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;margin-top:2px;line-height:1.4;" title="${descEscapada}">${prod.descricao || '—'}</div>
+          <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:4px;">
+            ${prod.tipo ? `<span style="font-size:10px;color:#94a3b8;">${prod.tipo}</span>` : ''}
+            ${prod.valor_custo != null ? `<span style="font-size:10px;color:#6ee7b7;font-weight:600;">${fmtMoeda(prod.valor_custo)}</span>` : ''}
+          </div>
+        </div>
+        <span style="flex-shrink:0;font-size:12px;font-weight:700;background:#312e81;color:#c7d2fe;padding:3px 10px;border-radius:12px;">QTD ${fmtQtde(qtdeTotal)}</span>
+      </div>
+      ${opsHtml}
+    </div>`;
+  }
+
+  // Renderiza o kanban com o subconjunto de ordens fornecido
+  function renderKanban(ordens) {
+    const operacaoFiltro = filtroSelect ? filtroSelect.value : '';
+
+    // Aplica filtro por operação se selecionado
+    const filtradas = operacaoFiltro
+      ? ordens.filter(op =>
+          (op.ordens_servico || []).some(os => os.operacao === operacaoFiltro)
+        )
+      : ordens;
+
+    const aProduzir = filtradas.filter(op => op.status === 'A PRODUZIR');
+
+    // Agrupa por produto.identificacao
+    const grupos = {};
+    for (const op of aProduzir) {
+      const key = op.produto?.identificacao || String(op.id);
+      if (!grupos[key]) grupos[key] = [];
+      grupos[key].push(op);
+    }
+
+    if (Object.keys(grupos).length === 0) {
+      colProgramado.innerHTML = '<div style="text-align:center;padding:24px 0;color:var(--inactive-color);font-size:12px;">'
+        + (operacaoFiltro ? `Nenhuma OP com a operação "${operacaoFiltro}".` : 'Nenhuma OP programada.')
+        + '</div>';
+    } else {
+      colProgramado.innerHTML = Object.entries(grupos)
+        .map(([key, ops]) => renderGrupo(key, ops))
+        .join('');
+    }
+
+    if (cntProgramado) cntProgramado.textContent = aProduzir.length;
+  }
+
+  async function carregarOrdens() {
+    if (!spinner || !colProgramado) return;
+    spinner.style.display = 'block';
+    if (spinnerMsg) spinnerMsg.textContent = 'Consultando IAPP...';
+    erroDiv.style.display = 'none';
+    if (rodape) rodape.style.display = 'none';
+    if (filtroBar) filtroBar.style.display = 'none';
+    colProgramado.innerHTML = '<div style="text-align:center;padding:24px 0;color:var(--inactive-color);font-size:12px;">Carregando...</div>';
+
+    try {
+      const resp = await fetch('/api/producao/ordens');
+      const data = await resp.json();
+
+      if (!resp.ok || !data.success) throw new Error(data.error || 'Erro ao consultar ordens de produção');
+
+      ordensCarregadas = data.ordens || [];
+
+      // Coleta operações únicas de todos as OSs
+      const operacoesSet = new Set();
+      for (const op of ordensCarregadas) {
+        for (const os of (op.ordens_servico || [])) {
+          if (os.operacao) operacoesSet.add(os.operacao);
+        }
+      }
+      const operacoes = [...operacoesSet].sort();
+
+      // Popula o select de filtro
+      if (filtroSelect) {
+        const valorAtual = filtroSelect.value;
+        filtroSelect.innerHTML = '<option value="">Todas as operações de serviço</option>'
+          + operacoes.map(op => `<option value="${op.replace(/"/g,'&quot;')}"${op === valorAtual ? ' selected' : ''}>${op}</option>`).join('');
+        if (filtroBar) filtroBar.style.display = operacoes.length > 0 ? 'block' : 'none';
+      }
+
+      renderKanban(ordensCarregadas);
+
+      if (rodape) {
+        rodape.style.display = 'block';
+        const sincTs = data.sincronizado_em ? ` · Consultado em: ${fmtData(String(data.sincronizado_em))}` : '';
+        rodape.textContent = `${data.total_ativas} ordem(ns) ativa(s).${sincTs}`;
+      }
+    } catch (err) {
+      erroDiv.style.display = 'block';
+      erroDiv.textContent = 'Erro: ' + (err.message || 'Falha ao carregar ordens de produção.');
+      colProgramado.innerHTML = '';
+    } finally {
+      spinner.style.display = 'none';
+    }
+  }
+
+  // Filtro: re-renderiza sem nova requisição ao mudar operação
+  if (filtroSelect) {
+    filtroSelect.addEventListener('change', () => renderKanban(ordensCarregadas));
+  }
+
+  menuBtn.addEventListener('click', (e) => {
+    e.preventDefault();
+    document.querySelectorAll('.left-side .side-menu a').forEach(a => a.classList.remove('is-active'));
+    menuBtn.classList.add('is-active');
+    showMainTab('registrarProducaoPane');
+    carregarOrdens();
+  });
+
+  if (recarrBtn) {
+    recarrBtn.addEventListener('click', () => carregarOrdens());
+  }
+})();
+
+/* =====================================================================
+   POSIÇÃO DE ESTOQUE POR DATA
+   ===================================================================== */
+(function () {
+  let posicaoAllDados = [];
+  let posicaoPagAtual = 1;
+  let posicaoTotalPag = 1;
+  let posicaoDatasDisponiveis = new Set();
+  let posicaoIniciado = false;
+
+  async function initPosicaoEstoque() {
+    if (!posicaoIniciado) {
+      posicaoIniciado = true;
+      await carregarDatasDisponiveis();
+      configurarCalendario();
+      configurarEventos();
+    }
+  }
+  window.initPosicaoEstoque = initPosicaoEstoque;
+
+  async function carregarDatasDisponiveis() {
+    try {
+      const resp = await fetch('/api/estoque/datas-disponiveis');
+      const json = await resp.json();
+      if (json.ok) {
+        posicaoDatasDisponiveis = new Set(json.datas);
+        const inp = document.getElementById('posicaoEstoqueDataInput');
+        if (inp && json.datas.length > 0) {
+          inp.value = json.datas[0]; // data mais recente como padrão
+        }
+      }
+    } catch (e) {
+      console.warn('[posicao-estoque] erro ao carregar datas:', e);
+    }
+  }
+
+  function configurarCalendario() {
+    const inp = document.getElementById('posicaoEstoqueDataInput');
+    if (!inp) return;
+    // Destacar datas disponíveis via change listener já é suficiente
+    // para input[type=date nativo]. Apenas informamos o usuário.
+    const info = document.getElementById('posicaoEstoqueInfo');
+    if (info && posicaoDatasDisponiveis.size > 0) {
+      const datas = [...posicaoDatasDisponiveis].sort();
+      info.textContent = `Datas disponíveis: ${datas[0]} até ${datas[datas.length - 1]}`;
+    }
+  }
+
+  function configurarEventos() {
+    const btnBuscar = document.getElementById('posicaoEstoqueBuscarBtn');
+    if (btnBuscar) {
+      btnBuscar.addEventListener('click', () => buscarPosicao(1));
+    }
+    const inp = document.getElementById('posicaoEstoqueDataInput');
+    if (inp) {
+      inp.addEventListener('keydown', e => { if (e.key === 'Enter') buscarPosicao(1); });
+    }
+    const inpSearch = document.getElementById('posicaoEstoqueSearch');
+    if (inpSearch) {
+      inpSearch.addEventListener('input', () => filtrarPosicaoLocal());
+    }
+    const btnPrev = document.getElementById('posicaoEstoquePrev');
+    const btnNext = document.getElementById('posicaoEstoqueNext');
+    if (btnPrev) btnPrev.addEventListener('click', () => { if (posicaoPagAtual > 1) buscarPosicao(posicaoPagAtual - 1); });
+    if (btnNext) btnNext.addEventListener('click', () => { if (posicaoPagAtual < posicaoTotalPag) buscarPosicao(posicaoPagAtual + 1); });
+  }
+
+  async function buscarPosicao(pagina) {
+    const inp = document.getElementById('posicaoEstoqueDataInput');
+    const tbody = document.getElementById('posicaoEstoqueTbody');
+    const info = document.getElementById('posicaoEstoqueInfo');
+    const pageInfo = document.getElementById('posicaoEstoquePageInfo');
+    if (!inp || !inp.value) {
+      if (info) info.textContent = 'Selecione uma data.';
+      return;
+    }
+    if (tbody) tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;">⏳ Carregando...</td></tr>';
+    try {
+      const resp = await fetch(`/api/estoque/posicao-por-data?data=${inp.value}&pagina=${pagina}&limite=200`);
+      const json = await resp.json();
+      if (!json.ok) throw new Error(json.error || 'Erro desconhecido');
+      posicaoAllDados = json.dados;
+      posicaoPagAtual = json.pagina;
+      posicaoTotalPag = json.totalPaginas;
+      if (info) info.textContent = `${json.totalRegistros} registros para ${inp.value}`;
+      if (pageInfo) pageInfo.textContent = `${posicaoPagAtual} / ${posicaoTotalPag}`;
+      renderPosicaoTabela(posicaoAllDados);
+    } catch (err) {
+      if (tbody) tbody.innerHTML = `<tr><td colspan="7" style="color:#f66;text-align:center;">Erro: ${err.message}</td></tr>`;
+    }
+  }
+
+  function filtrarPosicaoLocal() {
+    const q = (document.getElementById('posicaoEstoqueSearch')?.value || '').toLowerCase().trim();
+    if (!q) {
+      renderPosicaoTabela(posicaoAllDados);
+      return;
+    }
+    const filtrado = posicaoAllDados.filter(r =>
+      r.codigo.toLowerCase().includes(q) || r.descricao.toLowerCase().includes(q)
+    );
+    renderPosicaoTabela(filtrado);
+  }
+
+  function fmtNum(v) {
+    return Number(v).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 4 });
+  }
+
+  function renderPosicaoTabela(dados) {
+    const tbody = document.getElementById('posicaoEstoqueTbody');
+    if (!tbody) return;
+    if (!dados.length) {
+      tbody.innerHTML = '<tr><td colspan="7" style="text-align:center; color:#aaa;">Nenhum item encontrado.</td></tr>';
+      return;
+    }
+    tbody.innerHTML = dados.map(r => `
+      <tr>
+        <td>${r.codigo}</td>
+        <td>${r.descricao}</td>
+        <td>${r.local_codigo}</td>
+        <td style="text-align:right;">${fmtNum(r.fisico)}</td>
+        <td style="text-align:right;">${fmtNum(r.saldo)}</td>
+        <td style="text-align:right;">${r.cmc ? fmtNum(r.cmc) : '—'}</td>
+        <td style="text-align:right;">${r.min ? fmtNum(r.min) : '—'}</td>
+      </tr>
+    `).join('');
+  }
 })();
