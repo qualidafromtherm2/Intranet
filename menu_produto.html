@@ -7837,6 +7837,9 @@
     <a href="#" data-arm-tab="posicao-estoque" class="main-header-link">
       <i class="fa-solid fa-calendar-days" style="margin-right:5px;"></i>Posição de Estoque
     </a>
+    <a href="#" data-arm-tab="oscilacao-estoque" class="main-header-link">
+      <i class="fa-solid fa-chart-line" style="margin-right:5px;"></i>Oscilação
+    </a>
   </div>
 </div>
 
@@ -8091,6 +8094,47 @@
     </div>
   </div>
 </div><!-- /conteudo-posicao-estoque -->
+
+<!-- ═══════════════════════════════════════════════════════════════════════
+     Oscilação de Estoque por Dia
+═══════════════════════════════════════════════════════════════════════════ -->
+<div id="conteudo-oscilacao-estoque" class="armazem-page" style="display:none;">
+  <div class="content-wrapper">
+    <div class="content-section" style="margin-top:0;">
+      <div class="title-wrapper" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:0;">
+        <div class="content-section-title" style="display:flex;align-items:center;gap:8px;">
+          <i class="fa-solid fa-chart-line" style="color:#38bdf8;"></i>
+          Oscilação de Estoque por Armazém
+        </div>
+        <div style="display:flex;gap:8px;align-items:center;margin-left:auto;">
+          <div style="display:flex;gap:6px;">
+            <button class="osci-periodo-btn" data-per="30"
+              style="padding:5px 12px;border-radius:8px;border:1px solid #0ea5e9;background:rgba(14,165,233,.22);color:#7dd3fc;font-size:12px;cursor:pointer;">30 dias</button>
+            <button class="osci-periodo-btn" data-per="60"
+              style="padding:5px 12px;border-radius:8px;border:1px solid #374151;background:rgba(255,255,255,.04);color:#9ca3af;font-size:12px;cursor:pointer;">60 dias</button>
+            <button class="osci-periodo-btn" data-per="90"
+              style="padding:5px 12px;border-radius:8px;border:1px solid #374151;background:rgba(255,255,255,.04);color:#9ca3af;font-size:12px;cursor:pointer;">90 dias</button>
+            <button class="osci-periodo-btn" data-per="tudo"
+              style="padding:5px 12px;border-radius:8px;border:1px solid #374151;background:rgba(255,255,255,.04);color:#9ca3af;font-size:12px;cursor:pointer;">Tudo</button>
+          </div>
+          <button id="osciRefreshBtn" type="button" title="Atualizar"
+            style="padding:6px 12px;border-radius:8px;border:1px solid #374151;background:rgba(255,255,255,.04);color:#9ca3af;cursor:pointer;display:flex;align-items:center;gap:6px;font-size:13px;">
+            <i class="fa-solid fa-rotate"></i>
+          </button>
+        </div>
+      </div>
+
+      <div style="background:rgba(255,255,255,.03);border:1px solid #1e293b;border-radius:12px;padding:16px;margin-top:16px;">
+        <div style="font-size:13px;font-weight:700;color:#38bdf8;display:flex;align-items:center;gap:6px;margin-bottom:12px;">
+          <i class="fa-solid fa-warehouse"></i>
+          Estoque Físico Total por Armazém — dia a dia
+        </div>
+        <div id="osciGrafStatus" style="font-size:12px;color:var(--inactive-color);margin-bottom:8px;">Carregando...</div>
+        <div style="position:relative;height:380px;"><canvas id="osciGrafCanvas"></canvas></div>
+      </div>
+    </div>
+  </div>
+</div><!-- /conteudo-oscilacao-estoque -->
 
 <style>
 /* ======================================================
@@ -8702,7 +8746,8 @@
 
     </div> <!-- /.wrapper -->
 
-
+    <div class="overlay-app" id="authOverlay"></div>
+  </div> <!-- /.app -->
 
 <!-- Modal de etiquetas ----------------------------->
 <div id="etiquetasModal" class="modal">
@@ -8728,7 +8773,7 @@
   <!-- Interceptor de sessão: precisa carregar ANTES de qualquer módulo que faça fetch -->
   <script src="/public/js/sessao_resiliente.js?v=20260422a"></script>
   <script type="module" src="login/login.js"></script>
-  <script type="module" src="menu_produto.js?v=20260505g"></script>
+  <script type="module" src="menu_produto.js?v=20260507a"></script>
   
   <script type="module" src="./requisicoes_omie/filtro_produto.js"></script>
   <script type="module" src="./requisicoes_omie/ListarProdutos.js"></script>

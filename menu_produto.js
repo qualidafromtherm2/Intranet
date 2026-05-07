@@ -5875,8 +5875,11 @@ else if (nome === 'armazem3d') {
 else if (nome === 'posicao-estoque') {
   initPosicaoEstoque();
 }
-
+else if (nome === 'oscilacao-estoque') {
+  initOscilacaoEstoque();
 }
+} // fim showArmazemTab
+
 
 /* ====================================================== */
 /*  Armazém — seleção de rua/lado (2D)                   */
@@ -62316,4 +62319,172 @@ document.addEventListener('DOMContentLoaded', () => {
       </tr>
     `).join('');
   }
+})();
+
+/* =========================================================
+   Oscilação de Estoque por Armazém — gráfico de linha diário
+   ========================================================= */
+window.initOscilacaoEstoque = (function () {
+  'use strict';
+
+  const CORES = [
+    '#38bdf8', '#34d399', '#f59e0b', '#f87171',
+    '#a78bfa', '#fb923c', '#e879f9', '#4ade80',
+    '#facc15', '#60a5fa', '#2dd4bf', '#e11d48'
+  ];
+
+  let _chartInstance  = null;
+  let _periodoAtivo   = '30';
+  let _isLoading      = false;
+
+  function setStatus(msg) {
+    const el = document.getElementById('osciGrafStatus');
+    if (el) el.textContent = msg;
+  }
+
+  function setActiveBtn(per) {
+    document.querySelectorAll('.osci-periodo-btn').forEach(b => {
+      const active = b.dataset.per === String(per);
+      b.style.background  = active ? 'rgba(14,165,233,.22)' : 'rgba(255,255,255,.04)';
+      b.style.color       = active ? '#7dd3fc' : '#9ca3af';
+      b.style.borderColor = active ? '#0ea5e9' : '#374151';
+    });
+  }
+
+  async function carregar() {
+    if (_isLoading) return;
+    _isLoading = true;
+    setStatus('Carregando...');
+
+    try {
+      const url = `/api/estoque/oscilacao-diaria?periodo=${encodeURIComponent(_periodoAtivo)}`;
+      const resp = await fetch(url);
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const json = await resp.json();
+      if (!json.ok) throw new Error(json.error || 'Erro desconhecido');
+
+      const { rows } = json;
+
+      if (!rows || rows.length === 0) {
+        setStatus('Nenhum dado encontrado para o período selecionado.');
+        if (_chartInstance) { _chartInstance.destroy(); _chartInstance = null; }
+        return;
+      }
+
+      // Montar datasets: 1 dataset por armazém
+      const datas     = [...new Set(rows.map(r => r.data))].sort();
+      const armazens  = [...new Set(rows.map(r => r.armazem))].sort();
+
+      // Índice rápido: data+armazem → valor
+      const idx = {};
+      rows.forEach(r => { idx[`${r.data}|${r.armazem}`] = r.total_fisico; });
+
+      const datasets = armazens.map((arm, i) => ({
+        label   : arm,
+        data    : datas.map(d => idx[`${d}|${arm}`] ?? null),
+        borderColor     : CORES[i % CORES.length],
+        backgroundColor : CORES[i % CORES.length] + '22',
+        pointRadius     : datas.length <= 45 ? 3 : 0,
+        pointHoverRadius: 5,
+        borderWidth     : 2,
+        tension         : 0.3,
+        spanGaps        : true,
+      }));
+
+      const canvas = document.getElementById('osciGrafCanvas');
+      if (!canvas) { setStatus('Canvas não encontrado.'); return; }
+
+      if (_chartInstance) _chartInstance.destroy();
+
+      _chartInstance = new Chart(canvas.getContext('2d'), {
+        type: 'line',
+        data: { labels: datas, datasets },
+        options: {
+          responsive       : true,
+          maintainAspectRatio: false,
+          interaction: { mode: 'index', intersect: false },
+          plugins: {
+            legend: {
+              display : true,
+              position: 'bottom',
+              labels  : {
+                color    : '#94a3b8',
+                font     : { size: 11 },
+                boxWidth : 14,
+                padding  : 12,
+              }
+            },
+            tooltip: {
+              backgroundColor: 'rgba(15,23,42,0.92)',
+              titleColor: '#e2e8f0',
+              bodyColor : '#94a3b8',
+              borderColor: '#334155',
+              borderWidth: 1,
+              callbacks: {
+                label(ctx) {
+                  const v = ctx.parsed.y;
+                  return ` ${ctx.dataset.label}: ${v != null ? v.toLocaleString('pt-BR', { maximumFractionDigits: 0 }) : '—'}`;
+                }
+              }
+            }
+          },
+          scales: {
+            x: {
+              grid  : { color: 'rgba(255,255,255,.05)' },
+              ticks : {
+                color     : '#64748b',
+                maxTicksLimit: 15,
+                maxRotation: 45,
+              }
+            },
+            y: {
+              grid  : { color: 'rgba(255,255,255,.07)' },
+              ticks : {
+                color: '#64748b',
+                callback(v) {
+                  return v >= 1e6
+                    ? (v / 1e6).toFixed(1) + 'M'
+                    : v >= 1e3
+                      ? (v / 1e3).toFixed(1) + 'k'
+                      : v.toFixed(0);
+                }
+              }
+            }
+          }
+        }
+      });
+
+      setStatus(`${rows.length} registros · ${datas.length} datas · ${armazens.length} armazéns`);
+    } catch (err) {
+      console.error('[oscilacao-estoque]', err);
+      setStatus('Erro ao carregar: ' + err.message);
+    } finally {
+      _isLoading = false;
+    }
+  }
+
+  return function initOscilacaoEstoque() {
+    // Botões de período
+    document.querySelectorAll('.osci-periodo-btn').forEach(btn => {
+      // Remove listener antigo clonando
+      const novo = btn.cloneNode(true);
+      btn.parentNode.replaceChild(novo, btn);
+      novo.addEventListener('click', () => {
+        _periodoAtivo = novo.dataset.per;
+        setActiveBtn(_periodoAtivo);
+        carregar();
+      });
+    });
+
+    // Botão refresh
+    const btnRefresh = document.getElementById('osciRefreshBtn');
+    if (btnRefresh) {
+      const novoBtn = btnRefresh.cloneNode(true);
+      btnRefresh.parentNode.replaceChild(novoBtn, btnRefresh);
+      novoBtn.addEventListener('click', carregar);
+    }
+
+    setActiveBtn(_periodoAtivo);
+    carregar();
+  };
 })();
