@@ -12818,32 +12818,34 @@ app.post('/api/omie/estoque/ajuste', express.json(), async (req, res) => {
 //------------------------------------------------------------------
 app.post('/api/armazem/almoxarifado', express.json(), async (req, res) => {
   try {
+    await ensureEstoqueAtualTable();
+
     const rawLocal = req.query.local ?? req.body?.local;
     const local = String(rawLocal ?? '').trim() || ALMOX_LOCAL_PADRAO;
 
-    // Usa apenas a tabela principal de posições do Omie, filtrando pelo local informado.
+    // Usa a mesma fonte atualizada da Lista de produtos: posição consolidada por produto/local.
     const { rows } = await pool.query(`
-      SELECT DISTINCT ON (COALESCE(p.omie_prod_id::text, p.codigo))
-        p.codigo,
-        p.descricao,
-        p.estoque_minimo,
-        p.fisico,
-        p.reservado,
-        p.saldo,
-        p.cmc,
-        p.omie_prod_id,
-        p.cod_int,
-        p.data_posicao,
-        p.ingested_at,
+      SELECT
+        e.codigo,
+        COALESCE(e.descricao, po.descricao) AS descricao,
+        e.estoque_minimo,
+        e.fisico,
+        e.reservado,
+        e.saldo,
+        e.cmc,
+        e.omie_prod_id,
+        e.cod_int,
+        e.updated_at AS data_posicao,
+        e.updated_at AS ingested_at,
         po.codigo_familia,
         po.descricao_familia,
         po.preco_definido
-      FROM public.omie_estoque_posicao p
+      FROM logistica.estoque_atual e
       LEFT JOIN public.produtos_omie po
-        ON po.codigo_produto = p.omie_prod_id
-      WHERE p.local_codigo = $1
-        AND COALESCE(p.saldo, 0) != 0
-      ORDER BY COALESCE(p.omie_prod_id::text, p.codigo), p.data_posicao DESC, p.ingested_at DESC, p.id DESC
+        ON po.codigo = e.codigo
+      WHERE e.local_codigo = $1
+        AND COALESCE(e.saldo, 0) != 0
+      ORDER BY e.codigo
     `, [local]);
 
     const dados = rows.map(r => ({

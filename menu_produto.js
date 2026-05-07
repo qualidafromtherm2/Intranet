@@ -2727,6 +2727,7 @@ import * as KanbanViews from './kanban/kanban.js';
 let almoxCurrentPage = 1;
 
 let almoxAllDados = [];   // mantém o array completo para filtro
+let almoxDataLoaded = false;
 /* — Filtro por Família (Estoque) — */
 let almoxFamiliasMap    = new Map();   // codigo -> nome da família
 let almoxFamiliasAtivas = new Set();   // códigos atualmente exibidos
@@ -6013,6 +6014,37 @@ async function ensureAlmoxDadosCarregados() {
   }
 }
 
+function obterAliasLocalEstoque(locOuCodigo) {
+  const raw = typeof locOuCodigo === 'object' && locOuCodigo !== null
+    ? String(locOuCodigo.codigo || locOuCodigo.codigo_local_estoque || '')
+    : String(locOuCodigo || '');
+  const codigo = raw.trim();
+  const aliases = {
+    '10408201806': '#D',
+    '10440426539': '#EXP',
+    '10564345392': '#KEEPERS',
+    '10717096386': '#ALMOX',
+    '10431538872': '#PROD'
+  };
+  if (aliases[codigo]) return aliases[codigo];
+
+  const loc = transferLocais.find(item => String(item.codigo_local_estoque || '') === codigo);
+  const codigoTexto = String(loc?.codigo || '').trim();
+  if (codigoTexto) return codigoTexto.startsWith('#') ? codigoTexto : `#${codigoTexto}`;
+  return codigo ? `#${codigo}` : '';
+}
+
+function formatarLocalEstoqueLabel(locOuCodigo) {
+  const loc = typeof locOuCodigo === 'object' && locOuCodigo !== null
+    ? locOuCodigo
+    : transferLocais.find(item => String(item.codigo_local_estoque || '') === String(locOuCodigo || '').trim());
+  const codigoLocal = String(loc?.codigo_local_estoque || locOuCodigo || '').trim();
+  const alias = obterAliasLocalEstoque(loc || codigoLocal);
+  const descricao = String(loc?.descricao || '').trim();
+  const partes = [alias, codigoLocal].filter(Boolean).join(' ');
+  return `${partes}${descricao ? ` — ${descricao}` : ''}`.trim();
+}
+
 function preencherTransferLocais() {
   const selects = [
     document.getElementById('transferOrigem'),
@@ -6033,8 +6065,9 @@ function preencherTransferLocais() {
       opt.value = codigoLocal;
       opt.dataset.codigo = loc.codigo || '';
       opt.dataset.inativo = loc.inativo ? 'S' : 'N';
-      opt.title = label;
-      opt.textContent = label;
+      const labelFinal = `${formatarLocalEstoqueLabel(loc)}${loc.inativo ? ' (inativo)' : ''}`.trim() || label;
+      opt.title = labelFinal;
+      opt.textContent = labelFinal;
       if (loc.inativo) opt.classList.add('is-inactive');
       sel.appendChild(opt);
     });
@@ -6128,6 +6161,7 @@ function preencherEstoqueListbox(select) {
     const opt = document.createElement('option');
     opt.value = loc.codigo_local_estoque;
     opt.textContent = `${loc.codigo} — ${loc.descricao}`;
+    opt.textContent = formatarLocalEstoqueLabel(loc);
     select.appendChild(opt);
   });
 
@@ -17168,6 +17202,12 @@ document.addEventListener('DOMContentLoaded', async () => {
   const transferSelectAllBtn = document.getElementById('transferSelectAllBtn');
   const transferQtdBulk = document.getElementById('transferQtdBulk');
   const transferAcaoBtn = document.getElementById('transferenciaBtn');
+  const transferImportarBtn = document.getElementById('transferImportarBtn');
+  const transferDataMov = document.getElementById('transferDataMov');
+
+  if (transferDataMov && !transferDataMov.value) {
+    transferDataMov.value = new Date().toISOString().slice(0, 10);
+  }
 
   if (transferQtdBulk && !transferQtdBulk.__transferBound) {
     transferQtdBulk.__transferBound = true;
@@ -17186,6 +17226,18 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
   }
 
+  const transferOrigemSelect = document.getElementById('transferOrigem');
+  if (transferOrigemSelect && !transferOrigemSelect.__transferReloadBound) {
+    transferOrigemSelect.__transferReloadBound = true;
+    transferOrigemSelect.addEventListener('change', async () => {
+      almoxLocalAtual = transferOrigemSelect.value || TRANSFER_DEFAULT_ORIGEM;
+      almoxAllDados = [];
+      almoxDataLoaded = false;
+      await carregarAlmoxarifado().catch(() => {});
+      atualizarItensTransferenciaDoAlmox();
+    });
+  }
+
   if (transferSelectAllBtn && !transferSelectAllBtn.__transferBound) {
     transferSelectAllBtn.__transferBound = true;
     transferSelectAllBtn.addEventListener('click', (ev) => {
@@ -17200,6 +17252,14 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
   }
 
+  if (transferImportarBtn && !transferImportarBtn.__transferBound) {
+    transferImportarBtn.__transferBound = true;
+    transferImportarBtn.addEventListener('click', (ev) => {
+      ev.preventDefault();
+      abrirModalImportacaoTransferencia();
+    });
+  }
+
   if (transferAcaoBtn && !transferAcaoBtn.__transferBound) {
     transferAcaoBtn.__transferBound = true;
     transferAcaoBtn.addEventListener('click', async () => {
@@ -17211,8 +17271,10 @@ document.addEventListener('DOMContentLoaded', async () => {
 
       const origemSel = document.getElementById('transferOrigem');
       const destinoSel = document.getElementById('transferDestino');
+      const dataMovSel = document.getElementById('transferDataMov');
       const origem = String(origemSel?.value || '').trim() || TRANSFER_DEFAULT_ORIGEM;
       const destino = String(destinoSel?.value || '').trim() || TRANSFER_DEFAULT_DESTINO;
+      const dataMovimentacao = String(dataMovSel?.value || '').trim() || new Date().toISOString().slice(0, 10);
 
       if (!origem || !destino) {
         alert('Informe origem e destino da transferência.');
@@ -17226,11 +17288,13 @@ document.addEventListener('DOMContentLoaded', async () => {
       const payload = {
         origem,
         destino,
+        data_movimentacao: dataMovimentacao,
         solicitante,
         itens: selecionados.map(item => ({
           codigo: item.codigo,
           descricao: item.descricao,
           qtd: item.qtd,
+          cmc: normalizaNumeroParaApi(item.cmc),
           codigo_produto: item.codOmie || item.codigo_produto || null,
           codOmie: item.codOmie || null
         }))
@@ -17429,6 +17493,10 @@ document.addEventListener('DOMContentLoaded', async () => {
         return;
       }
 
+      const reprovar = btn.classList.contains('btn-reject-transfer');
+      const motivo = reprovar ? prompt('Informe o motivo para reprovar/excluir esta solicitaÃ§Ã£o:', '') : '';
+      if (reprovar && motivo === null) return;
+
       const originalLabel = btn.textContent;
       btn.disabled = true;
       btn.textContent = 'Aprovando…';
@@ -17456,6 +17524,54 @@ document.addEventListener('DOMContentLoaded', async () => {
         btn.disabled = false;
         btn.textContent = originalLabel;
         return;
+      }
+    });
+  }
+  if (solicitacoesTbody && !solicitacoesTbody.__rejectBound) {
+    solicitacoesTbody.__rejectBound = true;
+    solicitacoesTbody.addEventListener('click', async (ev) => {
+      const btn = ev.target.closest('.btn-reject-transfer');
+      if (!btn) return;
+
+      const id = Number(btn.dataset.id);
+      if (!Number.isInteger(id)) {
+        alert('NÃ£o foi possÃ­vel identificar a solicitaÃ§Ã£o selecionada.');
+        return;
+      }
+
+      const usuario = String(document.getElementById('userNameDisplay')?.textContent || '').trim();
+      if (!usuario || usuario === 'UsuÃ¡rio' || usuario === 'â€”') {
+        alert('NÃ£o foi possÃ­vel identificar o usuÃ¡rio atual. FaÃ§a login novamente.');
+        return;
+      }
+
+      const motivo = prompt('Informe o motivo para reprovar/excluir esta solicitaÃ§Ã£o:', '');
+      if (motivo === null) return;
+
+      const originalLabel = btn.textContent;
+      btn.disabled = true;
+      btn.textContent = 'Reprovandoâ€¦';
+
+      try {
+        const resp = await fetch(`/api/transferencias/${id}/reprovar`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ reprovadoPor: usuario, motivo })
+        });
+
+        const json = await resp.json().catch(() => ({}));
+        if (!resp.ok || !json?.ok) {
+          const msg = json?.error || `Falha ao reprovar (HTTP ${resp.status}).`;
+          throw new Error(msg);
+        }
+
+        alert('SolicitaÃ§Ã£o reprovada.');
+        await carregarSolicitacoesTransferencias(true);
+      } catch (err) {
+        console.error('[transferencias] reprovar', err);
+        alert(err?.message || 'Falha ao reprovar a solicitaÃ§Ã£o.');
+        btn.disabled = false;
+        btn.textContent = originalLabel;
       }
     });
   }
@@ -19037,6 +19153,16 @@ function normalizaNumeroParaBR(val) {
   return Number.isFinite(num) ? fmtBR.format(num) : '0,00';
 }
 
+function normalizaNumeroParaApi(val) {
+  if (val === null || val === undefined || val === '') return 0;
+  if (typeof val === 'number') return Number.isFinite(val) ? val : 0;
+  const texto = String(val).trim();
+  const num = texto.includes(',')
+    ? Number(texto.replace(/\./g, '').replace(',', '.').replace(/[^\d.-]/g, ''))
+    : Number(texto.replace(/[^\d.-]/g, ''));
+  return Number.isFinite(num) ? num : 0;
+}
+
 function escapeHtml(str) {
   return String(str ?? '').replace(/[&<>"']/g, c => ({
     '&': '&amp;',
@@ -19193,6 +19319,185 @@ function updateTransferControlsState() {
   }
 }
 
+function preencherSelectImportacaoTransferencia(select, valorAtual) {
+  if (!select) return;
+  select.innerHTML = '<option value="">Selecione...</option>';
+  transferLocais
+    .filter(loc => !loc.inativo)
+    .forEach(loc => {
+      const opt = document.createElement('option');
+      opt.value = String(loc.codigo_local_estoque || '');
+      opt.textContent = formatarLocalEstoqueLabel(loc);
+      select.appendChild(opt);
+    });
+  if (valorAtual && Array.from(select.options).some(opt => opt.value === valorAtual)) {
+    select.value = valorAtual;
+  }
+}
+
+function ensureTransferImportModal() {
+  let modal = document.getElementById('transferImportModal');
+  if (modal) return modal;
+
+  modal = document.createElement('div');
+  modal.id = 'transferImportModal';
+  modal.style.cssText = 'position:fixed;inset:0;z-index:9999;display:none;align-items:center;justify-content:center;background:rgba(3,7,18,.72);backdrop-filter:blur(4px);';
+  modal.innerHTML = `
+    <div style="width:min(720px, calc(100vw - 28px));max-height:calc(100vh - 42px);overflow:auto;background:#121722;border:1px solid #2b3548;border-radius:18px;box-shadow:0 24px 70px rgba(0,0,0,.45);color:#e5e7eb;">
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:18px 22px;border-bottom:1px solid #253044;">
+        <div>
+          <div style="font-size:18px;font-weight:800;">Importar transferencia em massa</div>
+          <div style="font-size:12px;color:#93a4bd;margin-top:4px;">Cole uma linha por item: codigo + TAB + quantidade.</div>
+        </div>
+        <button id="transferImportClose" type="button" class="icon-btn" aria-label="Fechar"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+      <div style="padding:18px 22px;display:grid;gap:14px;">
+        <textarea id="transferImportTextarea" rows="10" spellcheck="false" placeholder="05.MP.I.80044\t300&#10;09.MC.N.10106\t24" style="width:100%;resize:vertical;min-height:180px;background:#0b1020;color:#e5e7eb;border:1px solid #334155;border-radius:12px;padding:12px;font-family:Consolas, monospace;font-size:13px;line-height:1.45;"></textarea>
+        <div style="display:grid;grid-template-columns:1fr 1fr 180px;gap:12px;">
+          <label style="display:grid;gap:6px;font-size:12px;font-weight:700;color:#9ca3af;">Origem
+            <select id="transferImportOrigem" class="transfer-select"></select>
+          </label>
+          <label style="display:grid;gap:6px;font-size:12px;font-weight:700;color:#9ca3af;">Destino
+            <select id="transferImportDestino" class="transfer-select"></select>
+          </label>
+          <label style="display:grid;gap:6px;font-size:12px;font-weight:700;color:#9ca3af;">Data mov.
+            <input id="transferImportDataMov" type="date" class="transfer-select">
+          </label>
+        </div>
+        <div id="transferImportFeedback" style="display:none;font-size:12px;line-height:1.45;border-radius:10px;padding:10px 12px;"></div>
+        <div style="display:flex;justify-content:flex-end;gap:10px;">
+          <button id="transferImportCancel" type="button" class="btn tiny">Cancelar</button>
+          <button id="transferImportApply" type="button" class="btn">Importar itens</button>
+        </div>
+      </div>
+    </div>`;
+  document.body.appendChild(modal);
+
+  const fechar = () => { modal.style.display = 'none'; };
+  modal.querySelector('#transferImportClose')?.addEventListener('click', fechar);
+  modal.querySelector('#transferImportCancel')?.addEventListener('click', fechar);
+  modal.addEventListener('click', ev => {
+    if (ev.target === modal) fechar();
+  });
+  modal.querySelector('#transferImportApply')?.addEventListener('click', importarTransferenciaEmMassa);
+  return modal;
+}
+
+async function abrirModalImportacaoTransferencia() {
+  await carregarLocaisEstoque().catch(() => {});
+  const modal = ensureTransferImportModal();
+  const origemAtual = String(document.getElementById('transferOrigem')?.value || TRANSFER_DEFAULT_ORIGEM);
+  const destinoAtual = String(document.getElementById('transferDestino')?.value || TRANSFER_DEFAULT_DESTINO);
+  const dataAtual = String(document.getElementById('transferDataMov')?.value || new Date().toISOString().slice(0, 10));
+  preencherSelectImportacaoTransferencia(modal.querySelector('#transferImportOrigem'), origemAtual);
+  preencherSelectImportacaoTransferencia(modal.querySelector('#transferImportDestino'), destinoAtual);
+  const dataInput = modal.querySelector('#transferImportDataMov');
+  if (dataInput) dataInput.value = dataAtual;
+  const feedback = modal.querySelector('#transferImportFeedback');
+  if (feedback) {
+    feedback.style.display = 'none';
+    feedback.textContent = '';
+  }
+  modal.style.display = 'flex';
+  setTimeout(() => modal.querySelector('#transferImportTextarea')?.focus(), 50);
+}
+
+function parseLinhasImportacaoTransferencia(texto) {
+  return String(texto || '')
+    .split(/\r?\n/)
+    .map((linha, idx) => ({ linha: idx + 1, raw: linha.trim() }))
+    .filter(item => item.raw)
+    .map(item => {
+      const partes = item.raw.includes('\t')
+        ? item.raw.split('\t')
+        : item.raw.split(/[;, ]+/);
+      return {
+        linha: item.linha,
+        codigo: String(partes[0] || '').trim(),
+        qtd: sanitizeQtd(partes[1], null)
+      };
+    });
+}
+
+async function importarTransferenciaEmMassa() {
+  const modal = document.getElementById('transferImportModal');
+  if (!modal) return;
+  const feedback = modal.querySelector('#transferImportFeedback');
+  const setFeedback = (msg, tipo = 'erro') => {
+    if (!feedback) return;
+    feedback.style.display = 'block';
+    feedback.style.background = tipo === 'ok' ? 'rgba(22,163,74,.14)' : 'rgba(239,68,68,.13)';
+    feedback.style.border = tipo === 'ok' ? '1px solid rgba(34,197,94,.35)' : '1px solid rgba(248,113,113,.35)';
+    feedback.style.color = tipo === 'ok' ? '#86efac' : '#fecaca';
+    feedback.innerHTML = msg;
+  };
+
+  const textarea = modal.querySelector('#transferImportTextarea');
+  const origem = String(modal.querySelector('#transferImportOrigem')?.value || '').trim();
+  const destino = String(modal.querySelector('#transferImportDestino')?.value || '').trim();
+  const dataMov = String(modal.querySelector('#transferImportDataMov')?.value || '').trim();
+  const linhas = parseLinhasImportacaoTransferencia(textarea?.value || '');
+
+  if (!origem || !destino) {
+    setFeedback('Informe origem e destino.');
+    return;
+  }
+  if (!linhas.length) {
+    setFeedback('Cole pelo menos uma linha no formato codigo + TAB + quantidade.');
+    return;
+  }
+
+  const errosFormato = linhas.filter(item => !item.codigo || item.qtd === null || item.qtd <= 0);
+  if (errosFormato.length) {
+    setFeedback(`Revise as linhas com codigo/quantidade invalidos: ${errosFormato.map(i => i.linha).join(', ')}.`);
+    return;
+  }
+
+  const origemSelect = document.getElementById('transferOrigem');
+  const destinoSelect = document.getElementById('transferDestino');
+  const dataInput = document.getElementById('transferDataMov');
+  if (origemSelect) origemSelect.value = origem;
+  if (destinoSelect) destinoSelect.value = destino;
+  if (dataInput && dataMov) dataInput.value = dataMov;
+
+  almoxLocalAtual = origem;
+  almoxAllDados = [];
+  almoxDataLoaded = false;
+  await carregarAlmoxarifado().catch(() => {});
+
+  const naoEncontrados = [];
+  linhas.forEach(item => {
+    const extra = almoxAllDados.find(d => String(d.codigo || '').trim().toUpperCase() === item.codigo.toUpperCase());
+    if (!extra) {
+      naoEncontrados.push(item.codigo);
+      return;
+    }
+    adicionarItemTransferencia({
+      codigo: extra.codigo || item.codigo,
+      descricao: extra.descricao || '',
+      min: extra.min ?? 0,
+      fisico: extra.fisico ?? 0,
+      saldo: extra.saldo ?? 0,
+      cmc: extra.cmc ?? 0,
+      codOmie: extra.codOmie ?? '',
+      qtd: item.qtd
+    });
+    const inserido = transferenciaLista.find(i => String(i.codigo || '').trim().toUpperCase() === item.codigo.toUpperCase());
+    if (inserido) inserido.qtd = item.qtd;
+  });
+
+  if (naoEncontrados.length) {
+    window.renderTransferenciaLista?.();
+    setFeedback(`Importei os itens encontrados, mas estes codigos nao apareceram no estoque da origem escolhida: ${naoEncontrados.map(escapeHtml).join(', ')}.`);
+    return;
+  }
+
+  window.renderTransferenciaLista?.();
+  setFeedback(`${linhas.length} item(ns) importado(s) para a lista.`, 'ok');
+  setTimeout(() => { modal.style.display = 'none'; }, 500);
+  showArmazemTab('transferencia');
+}
+
 function renderTransferenciaLista() {
   const tbody = document.getElementById('transferenciaTbody');
   if (!tbody) return;
@@ -19202,7 +19507,7 @@ function renderTransferenciaLista() {
   if (!transferenciaLista.length) {
     const tr = document.createElement('tr');
     tr.className = 'transferencia-placeholder';
-    tr.innerHTML = '<td colspan="7">Nenhum item selecionado para transferência.</td>';
+    tr.innerHTML = '<td colspan="8">Nenhum item selecionado para transferência.</td>';
     tbody.appendChild(tr);
     updateTransferControlsState();
     return;
@@ -19226,6 +19531,7 @@ function renderTransferenciaLista() {
       <td class="desc-cell" title="${escapeHtml(descricaoCompleta)}">${escapeHtml(descricaoCurta)}</td>
       <td>${escapeHtml(item.codOmie || '')}</td>
       <td class="qtd-cell"><input type="number" min="0" step="0.01" value="${formatQtdInput(item.qtd)}" data-codigo="${codigoSeguro}" class="transfer-qtd"></td>
+      <td class="num">R$ ${escapeHtml(String(item.cmc ?? '0,00'))}</td>
       <td class="num">${escapeHtml(String(item.fisico ?? '0'))}</td>
       <td class="num">${escapeHtml(String(item.saldo ?? '0'))}</td>`;
     tbody.appendChild(tr);
@@ -19244,19 +19550,29 @@ function renderSolicitacoesTransferencias() {
 
   if (!solicitacoesTransferencias.length) {
     const tr = document.createElement('tr');
-    tr.innerHTML = '<td colspan="10">Nenhuma solicitação registrada.</td>';
+    tr.innerHTML = '<td colspan="12">Nenhuma solicitação registrada.</td>';
     tbody.appendChild(tr);
     return;
   }
 
   solicitacoesTransferencias.forEach(item => {
     const quantidade = Number(item.qtd);
+    const cmc = Number(item.cmc);
     const qtdFormatada = Number.isFinite(quantidade) ? fmtQtd.format(quantidade) : '-';
+    const cmcFormatado = Number.isFinite(cmc) ? `R$ ${fmtBR.format(cmc)}` : '-';
+    const dataMovimentacao = item.data_movimentacao
+      ? new Date(item.data_movimentacao).toLocaleDateString('pt-BR', { timeZone: 'UTC' })
+      : '-';
     const descricaoCompleta = String(item.descricao || '');
     const statusAtual = String(item.status || '');
     const podeAprovar = statusAtual.toLowerCase() !== 'transferido';
+    const origemLabel = formatarLocalEstoqueLabel(item.origem || '');
+    const destinoLabel = formatarLocalEstoqueLabel(item.destino || '');
     const botaoHtml = podeAprovar
-      ? `<button type="button" class="btn tiny btn-approve-transfer" data-id="${escapeHtml(String(item.id ?? ''))}">Aprovar</button>`
+      ? `<div style="display:flex;gap:6px;flex-wrap:wrap;">
+           <button type="button" class="btn tiny btn-approve-transfer" data-id="${escapeHtml(String(item.id ?? ''))}">Aprovar</button>
+           <button type="button" class="btn tiny btn-reject-transfer" data-id="${escapeHtml(String(item.id ?? ''))}" style="border-color:#ef4444;color:#fecaca;">Reprovar</button>
+         </div>`
       : '<span>Transferido</span>';
     const tr = document.createElement('tr');
     tr.innerHTML = `
@@ -19264,8 +19580,10 @@ function renderSolicitacoesTransferencias() {
       <td>${escapeHtml(item.codigo || '')}</td>
       <td class="desc-cell" title="${escapeHtml(descricaoCompleta)}">${escapeHtml(truncateText(descricaoCompleta, 40))}</td>
       <td class="num">${escapeHtml(qtdFormatada)}</td>
-      <td>${escapeHtml(item.origem || '')}</td>
-      <td>${escapeHtml(item.destino || '')}</td>
+      <td>${escapeHtml(dataMovimentacao)}</td>
+      <td class="num">${escapeHtml(cmcFormatado)}</td>
+      <td>${escapeHtml(origemLabel || item.origem || '')}</td>
+      <td>${escapeHtml(destinoLabel || item.destino || '')}</td>
       <td>${escapeHtml(item.solicitante || '')}</td>
       <td>${escapeHtml(statusAtual)}</td>
       <td>${escapeHtml(item.aprovado_pro || '-')}</td>
@@ -19287,7 +19605,7 @@ async function carregarSolicitacoesTransferencias(forceReload = false) {
 
   solicitacoesTransferenciasCarregando = true;
   if (spinner) spinner.style.display = 'block';
-  tbody.innerHTML = '<tr><td colspan="10">Carregando solicitações…</td></tr>';
+  tbody.innerHTML = '<tr><td colspan="12">Carregando solicitações…</td></tr>';
 
   try {
     const resp = await fetch('/api/transferencias');
@@ -19296,12 +19614,15 @@ async function carregarSolicitacoesTransferencias(forceReload = false) {
     if (!json.ok) throw new Error(json.error || 'Falha ao carregar lista.');
 
   const registros = Array.isArray(json.registros) ? json.registros : [];
-  solicitacoesTransferencias = registros.filter(item => String(item.status || '').toLowerCase() !== 'transferido');
+  solicitacoesTransferencias = registros.filter(item => {
+    const status = String(item.status || '').toLowerCase();
+    return status !== 'transferido' && status !== 'reprovado';
+  });
     solicitacoesTransferenciasLoaded = true;
     renderSolicitacoesTransferencias();
   } catch (err) {
     console.error('[transferencias] falha ao carregar solicitações', err);
-  tbody.innerHTML = '<tr><td colspan="10">⚠️ Falha ao carregar solicitações de transferência.</td></tr>';
+  tbody.innerHTML = '<tr><td colspan="12">⚠️ Falha ao carregar solicitações de transferência.</td></tr>';
   } finally {
     solicitacoesTransferenciasCarregando = false;
     if (spinner) spinner.style.display = 'none';
