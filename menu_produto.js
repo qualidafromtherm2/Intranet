@@ -61800,7 +61800,11 @@ document.addEventListener('DOMContentLoaded', () => {
     const qtdeTotal = ops.reduce((s, op) => s + (Number(op.qtde) || 0), 0);
 
     const opsHtml = ops.map(op => {
-      const osHtml = (op.ordens_servico || []).map(os =>
+      const _filtroOp = filtroSelect ? filtroSelect.value : '';
+      const _osVis = _filtroOp
+        ? (op.ordens_servico || []).filter(os => os.operacao === _filtroOp)
+        : (op.ordens_servico || []);
+      const osHtml = _osVis.map(os =>
         `<div style="background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.06);border-radius:5px;padding:5px 8px;display:flex;flex-direction:column;gap:3px;">
           <div style="display:flex;align-items:center;gap:6px;">
             <span style="font-size:10px;color:#94a3b8;min-width:70px;font-weight:600;flex-shrink:0;">${os.identificacao || ('#' + os.id)}</span>
@@ -61967,6 +61971,221 @@ document.addEventListener('DOMContentLoaded', () => {
 
   if (recarrBtn) {
     recarrBtn.addEventListener('click', () => carregarOrdens());
+  }
+})();
+
+
+/* ============================================================
+ * PRODUÇÃO MONTAGEM — Ordens de Produção IAPP (Kanban)
+ * ============================================================ */
+(function () {
+  const menuBtn = document.getElementById('menu-monta-producao');
+  if (!menuBtn) return;
+
+  const spinner      = document.getElementById('montaSpinner');
+  const spinnerMsg   = document.getElementById('montaSpinnerMsg');
+  const erroDiv      = document.getElementById('montaErro');
+  const rodape       = document.getElementById('montaRodape');
+  const recarrBtn    = document.getElementById('montaRecarregarBtn');
+  const filtroBar    = document.getElementById('montaFiltroBar');
+  const filtroSelect = document.getElementById('montaFiltroOperacao');
+
+  const colProgramado = document.getElementById('montaColProgramado');
+  const cntProgramado = document.getElementById('montaColProgramadoCount');
+  const colProduzindo = document.getElementById('montaColProduzindo');
+  const cntProduzindo = document.getElementById('montaColProduzindoCount');
+  const colOutros     = document.getElementById('montaColOutros');
+  const cntOutros     = document.getElementById('montaColOutrosCount');
+
+  let ordensCarregadas = [];
+
+  function fmtData(str) {
+    if (!str) return '—';
+    const m = str.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (m) return `${m[3]}/${m[2]}/${m[1]}`;
+    return str;
+  }
+
+  function fmtMoeda(v) {
+    if (v == null || v === '') return '—';
+    return 'R$ ' + Number(v).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  }
+
+  function fmtQtde(v) {
+    if (v == null || v === '') return '—';
+    const n = parseFloat(v);
+    return isNaN(n) ? String(v) : n.toLocaleString('pt-BR', { maximumFractionDigits: 4 }).replace(/,?0+$/, '').replace(/,$/, '') || String(n);
+  }
+
+  function badgeOS(status) {
+    const cores = {
+      'ENCERRADA':    { bg: '#1e293b', txt: '#94a3b8' },
+      'ABERTA':       { bg: '#1d4ed8', txt: '#bfdbfe' },
+      'EM ANDAMENTO': { bg: '#065f46', txt: '#6ee7b7' },
+      'PAUSADA':      { bg: '#92400e', txt: '#fcd34d' },
+    };
+    const s = (status || '').toUpperCase();
+    const c = cores[s] || { bg: '#374151', txt: '#d1d5db' };
+    return `<span style="flex-shrink:0;display:inline-block;padding:1px 6px;border-radius:4px;font-size:10px;font-weight:700;background:${c.bg};color:${c.txt};">${status || '—'}</span>`;
+  }
+
+  function renderGrupo(prodId, ops) {
+    const prod = ops[0].produto || {};
+    const qtdeTotal = ops.reduce((s, op) => s + (Number(op.qtde) || 0), 0);
+
+    const opsHtml = ops.map(op => {
+      const _filtroOp = filtroSelect ? filtroSelect.value : '';
+      const _osVis = _filtroOp
+        ? (op.ordens_servico || []).filter(os => os.operacao === _filtroOp)
+        : (op.ordens_servico || []);
+      const osHtml = _osVis.map(os =>
+        `<div style="background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.06);border-radius:5px;padding:5px 8px;display:flex;flex-direction:column;gap:3px;">
+          <div style="display:flex;align-items:center;gap:6px;">
+            <span style="font-size:10px;color:#94a3b8;min-width:70px;font-weight:600;flex-shrink:0;">${os.identificacao || ('#' + os.id)}</span>
+            <span style="font-size:10px;color:#cbd5e1;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${(os.operacao || '').replace(/"/g,'&quot;')}">${os.operacao || '—'}</span>
+            ${badgeOS(os.status)}
+          </div>
+          <div style="display:flex;flex-wrap:wrap;gap:10px;padding-left:2px;">
+            ${os.data_abertura     ? `<span style="font-size:10px;color:#64748b;">Abertura: <b style="color:#94a3b8;">${fmtData(os.data_abertura)}</b></span>` : ''}
+            ${os.data_inicio       ? `<span style="font-size:10px;color:#64748b;">Início: <b style="color:#94a3b8;">${fmtData(os.data_inicio)}</b></span>` : ''}
+            ${os.data_final        ? `<span style="font-size:10px;color:#64748b;">Final: <b style="color:#94a3b8;">${fmtData(os.data_final)}</b></span>` : ''}
+            ${os.data_encerramento ? `<span style="font-size:10px;color:#64748b;">Encerramento: <b style="color:#94a3b8;">${fmtData(os.data_encerramento)}</b></span>` : ''}
+          </div>
+        </div>`
+      ).join('');
+
+      const detId = `monta-op-det-${op.id}`;
+
+      return `<div data-op-id="${op.id}" style="background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);border-radius:8px;padding:10px 12px;margin-top:8px;">
+        <div style="display:flex;align-items:flex-start;gap:8px;">
+          <div style="flex:1;min-width:0;">
+            <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;">
+              <span style="font-size:10px;color:#475569;font-weight:600;">#${op.id}</span>
+              <span style="font-size:13px;font-weight:700;color:#e2e8f0;">OP ${op.identificacao || '—'}</span>
+              <span style="font-size:11px;color:#94a3b8;margin-left:auto;">Qtde: <b style="color:#f1f5f9;">${fmtQtde(op.qtde)}</b></span>
+            </div>
+            <div style="display:flex;flex-wrap:wrap;gap:8px;">
+              ${op.data_abertura            ? `<span style="font-size:10px;color:#64748b;">Abertura: <b style="color:#94a3b8;">${fmtData(op.data_abertura)}</b></span>` : ''}
+              ${op.data_previsao_entrega    ? `<span style="font-size:10px;color:#64748b;">Prev. entrega: <b style="color:#a5f3fc;">${fmtData(op.data_previsao_entrega)}</b></span>` : ''}
+            </div>
+          </div>
+          <button onclick="(function(btn){var d=document.getElementById('${detId}');var aberto=d.style.display!=='none';d.style.display=aberto?'none':'flex';btn.innerHTML=aberto?'<i class=\\'fa-solid fa-chevron-down\\'></i>':'<i class=\\'fa-solid fa-chevron-up\\'></i>';})(this)"
+            style="flex-shrink:0;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.12);border-radius:6px;color:#94a3b8;width:26px;height:26px;display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:11px;margin-top:2px;">
+            <i class="fa-solid fa-chevron-down"></i>
+          </button>
+        </div>
+        <div id="${detId}" style="display:none;flex-direction:column;gap:4px;margin-top:10px;padding-top:10px;border-top:1px solid rgba(255,255,255,.06);">
+          ${op.obs ? `<div style="font-size:11px;color:#94a3b8;">Obs: <span style="color:#fef3c7;">${op.obs}</span></div>` : ''}
+          ${osHtml ? `<div style="display:flex;flex-direction:column;gap:4px;margin-top:4px;">${osHtml}</div>` : '<div style="font-size:11px;color:#475569;">Sem ordens de serviço.</div>'}
+        </div>
+      </div>`;
+    }).join('');
+
+    const descEscapada = (prod.descricao || '').replace(/"/g, '&quot;');
+
+    return `<div data-group-id="${prodId}" style="background:var(--content-bg,#1e2233);border:1px solid rgba(255,255,255,.1);border-radius:10px;padding:12px;">
+      <div style="display:flex;align-items:flex-start;gap:8px;margin-bottom:6px;">
+        <div style="flex:1;min-width:0;">
+          <div style="font-size:13px;font-weight:700;color:#34d399;letter-spacing:.3px;">${prod.identificacao || prodId}</div>
+          <div style="font-size:12px;color:#e2e8f0;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;margin-top:2px;line-height:1.4;" title="${descEscapada}">${prod.descricao || '—'}</div>
+        </div>
+        <span style="flex-shrink:0;font-size:12px;font-weight:700;background:#064e3b;color:#6ee7b7;padding:3px 10px;border-radius:12px;">QTD ${fmtQtde(qtdeTotal)}</span>
+      </div>
+      ${opsHtml}
+    </div>`;
+  }
+
+  function renderCol(colEl, cntEl, items, msgVazia) {
+    if (!colEl) return;
+    const operacaoFiltro = filtroSelect ? filtroSelect.value : '';
+    const filtradas = operacaoFiltro
+      ? items.filter(op => (op.ordens_servico || []).some(os => os.operacao === operacaoFiltro))
+      : items;
+
+    if (filtradas.length === 0) {
+      colEl.innerHTML = `<div style="text-align:center;padding:24px 0;color:var(--inactive-color);font-size:12px;">${operacaoFiltro ? `Nenhuma OP com "${operacaoFiltro}".` : msgVazia}</div>`;
+    } else {
+      const grupos = {};
+      for (const op of filtradas) {
+        const key = op.produto?.identificacao || String(op.id);
+        if (!grupos[key]) grupos[key] = [];
+        grupos[key].push(op);
+      }
+      colEl.innerHTML = Object.entries(grupos).map(([k, ops]) => renderGrupo(k, ops)).join('');
+    }
+    if (cntEl) cntEl.textContent = filtradas.length;
+  }
+
+  function renderKanban(ordens) {
+    const aProduzir = ordens.filter(op => op.status === 'A PRODUZIR');
+    const produzindo = ordens.filter(op => op.status === 'EM PRODUÇÃO' || op.status === 'PRODUZINDO');
+    const outros     = ordens.filter(op => op.status !== 'A PRODUZIR' && op.status !== 'EM PRODUÇÃO' && op.status !== 'PRODUZINDO');
+
+    renderCol(colProgramado, cntProgramado, aProduzir,  'Nenhuma OP a produzir.');
+    renderCol(colProduzindo, cntProduzindo, produzindo, 'Nenhuma OP em produção.');
+    renderCol(colOutros,     cntOutros,     outros,     'Nenhuma OP em outros status.');
+  }
+
+  async function carregarMontagem() {
+    if (!spinner || !colProgramado) return;
+    spinner.style.display = 'block';
+    if (spinnerMsg) spinnerMsg.textContent = 'Consultando IAPP...';
+    erroDiv.style.display = 'none';
+    if (rodape) rodape.style.display = 'none';
+    if (filtroBar) filtroBar.style.display = 'none';
+    colProgramado.innerHTML = '<div style="text-align:center;padding:24px 0;color:var(--inactive-color);font-size:12px;">Carregando...</div>';
+
+    try {
+      const resp = await fetch('/api/producao/ordens-montagem');
+      const data = await resp.json();
+
+      if (!resp.ok || !data.success) throw new Error(data.error || 'Erro ao consultar ordens de montagem');
+
+      ordensCarregadas = data.ordens || [];
+
+      const operacoesSet = new Set();
+      for (const op of ordensCarregadas) {
+        for (const os of (op.ordens_servico || [])) {
+          if (os.operacao) operacoesSet.add(os.operacao);
+        }
+      }
+      const operacoes = [...operacoesSet].sort();
+
+      if (filtroSelect) {
+        const valorAtual = filtroSelect.value;
+        filtroSelect.innerHTML = '<option value="">Todas as operações de serviço</option>'
+          + operacoes.map(op => `<option value="${op.replace(/"/g,'&quot;')}"${op === valorAtual ? ' selected' : ''}>${op}</option>`).join('');
+        if (filtroBar) filtroBar.style.display = operacoes.length > 0 ? 'block' : 'none';
+      }
+
+      renderKanban(ordensCarregadas);
+
+      if (rodape) {
+        rodape.style.display = 'block';
+        rodape.textContent = `${data.total_ativas || ordensCarregadas.length} ordem(ns) carregada(s).`;
+      }
+    } catch (err) {
+      erroDiv.style.display = 'block';
+      erroDiv.textContent = 'Erro: ' + (err.message || 'Falha ao carregar ordens de montagem.');
+    } finally {
+      spinner.style.display = 'none';
+    }
+  }
+
+  if (filtroSelect) {
+    filtroSelect.addEventListener('change', () => renderKanban(ordensCarregadas));
+  }
+
+  menuBtn.addEventListener('click', (e) => {
+    e.preventDefault();
+    document.querySelectorAll('.left-side .side-menu a').forEach(a => a.classList.remove('is-active'));
+    menuBtn.classList.add('is-active');
+    showMainTab('montaProducaoPane');
+    carregarMontagem();
+  });
+
+  if (recarrBtn) {
+    recarrBtn.addEventListener('click', () => carregarMontagem());
   }
 })();
 
