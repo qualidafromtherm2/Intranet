@@ -12944,6 +12944,38 @@ app.get('/api/estoque/datas-disponiveis', async (req, res) => {
   }
 });
 
+
+// ── GET /api/estoque/oscilacao-diaria ──────────────────────────────────────
+app.get('/api/estoque/oscilacao-diaria', async (req, res) => {
+  try {
+    const { periodo } = req.query; // '30', '60', '90', 'tudo'
+    let whereData = '';
+    if (periodo && periodo !== 'tudo') {
+      const dias = parseInt(periodo, 10);
+      if (!isNaN(dias) && dias > 0) {
+        whereData = `AND p.data_posicao >= CURRENT_DATE - INTERVAL '${dias} days'`;
+      }
+    }
+    const { rows } = await pool.query(`
+      SELECT
+        p.data_posicao::text AS data,
+        l.nome               AS armazem,
+        SUM(p.fisico)::float AS total_fisico
+      FROM public.omie_estoque_posicao p
+      JOIN public.omie_locais_estoque l
+        ON l.local_codigo = p.local_codigo::text
+      WHERE l.ativo = TRUE
+        ${whereData}
+      GROUP BY p.data_posicao, l.nome
+      ORDER BY p.data_posicao, l.nome
+    `);
+    res.json({ ok: true, rows });
+  } catch (err) {
+    console.error('[oscilacao-diaria SQL]', err);
+    res.status(500).json({ ok: false, error: String(err.message || err) });
+  }
+});
+
 async function listarLocaisViaDb() {
   const { rows } = await pool.query(`
     SELECT
