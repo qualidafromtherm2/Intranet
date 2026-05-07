@@ -201,6 +201,18 @@ function _solFmtDataPrevista(d) {
   if (parts.length !== 3) return '';
   return `${parts[2]}/${parts[1]}/${parts[0]}`;
 }
+function _solFmtDataHora(d) {
+  if (!d) return '';
+  const dt = new Date(d);
+  if (Number.isNaN(dt.getTime())) return '';
+  return dt.toLocaleString('pt-BR', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit'
+  });
+}
 function _solStatusBadge(status) {
   const map = {
     'pendente':  { color: '#6b7280', bg: '#1f2937', label: 'Pendente' },
@@ -349,9 +361,11 @@ window._loadSolicitacoesTab = async function() {
             const dataPrev = _solFmtDataPrevista(sep.data_prevista);
             const horario  = sep.horario || '';
             const dataHora = [dataPrev, horario].filter(Boolean).join(' ');
+            const criadoEm = _solFmtDataHora(sep.criado_em_min);
             const cursor   = col.acao ? 'cursor:pointer;' : 'cursor:default;';
             const hint     = col.acao === 'iniciar'
-              ? `<button class="solic-sep-start-btn" data-n-solic="${sep.n_solic}" style="margin-top:6px;padding:4px 8px;border:none;border-radius:6px;background:#1d4ed8;color:#dbeafe;font-size:.68rem;font-weight:700;cursor:pointer;"><i class="fa-solid fa-play" style="margin-right:3px;"></i>Iniciar separação</button>`
+              ? `<span style="font-size:.65rem;color:#22c55e88;margin-top:3px;display:block;"><i class="fa-solid fa-eye" style="margin-right:2px;"></i>Clique para ver itens</span>
+                 <button class="solic-sep-start-btn" data-n-solic="${sep.n_solic}" style="margin-top:6px;padding:4px 8px;border:none;border-radius:6px;background:#1d4ed8;color:#dbeafe;font-size:.68rem;font-weight:700;cursor:pointer;"><i class="fa-solid fa-play" style="margin-right:3px;"></i>Iniciar separação</button>`
               : col.acao === 'modal'
                 ? `<span style="font-size:.65rem;color:#22c55e55;margin-top:3px;display:block;"><i class="fa-solid fa-eye" style="margin-right:2px;"></i>Ver itens</span>`
                 : '';
@@ -372,6 +386,11 @@ window._loadSolicitacoesTab = async function() {
                 <div style="margin-top:4px;display:flex;align-items:center;gap:5px;">
                   <i class="fa-regular fa-calendar" style="color:#6b7280;font-size:.72rem;flex-shrink:0;"></i>
                   <span style="font-size:.72rem;color:#9ca3af;">${dataHora}</span>
+                </div>` : ''}
+                ${criadoEm ? `
+                <div style="margin-top:4px;display:flex;align-items:center;gap:5px;">
+                  <i class="fa-regular fa-clock" style="color:#6b7280;font-size:.72rem;flex-shrink:0;"></i>
+                  <span style="font-size:.70rem;color:#6b7280;">Solicitado em ${criadoEm}</span>
                 </div>` : ''}
                 <div style="margin-top:4px;font-size:.71rem;color:#4b5563;">${sep.total_itens} ${sep.total_itens === 1 ? 'item' : 'itens'}</div>
                 ${hint}
@@ -408,7 +427,13 @@ window._loadSolicitacoesTab = async function() {
 
       cardEl.addEventListener('click', async () => {
         if (cardEl._loading) return;
-        if (acao === 'iniciar') return;
+        if (acao === 'iniciar') {
+          _abrirModalAguardandoRetiradaSep(nSolic, {
+            tituloColuna: 'Solicitado',
+            permitirRecebido: false
+          });
+          return;
+        }
         cardEl._loading = true;
         try {
           const ri = await fetch(`/api/logistica/kanban/itens?n_solic=${encodeURIComponent(nSolic)}`, { credentials: 'include' });
@@ -685,7 +710,7 @@ function _abrirModalSeparacao(grupoAtual, gruposConflito) {
         </div>
         <div style="padding:12px 16px;border-top:1px solid #2a2a2a;display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end;background:#171717;">
           <button id="btnAcaoSepTudo" style="padding:7px 12px;border:none;border-radius:8px;background:#166534;color:#dcfce7;font-weight:700;font-size:.82rem;cursor:pointer;">Separei tudo</button>
-          <button id="btnAcaoSepParcial" style="padding:7px 12px;border:none;border-radius:8px;background:#b45309;color:#ffedd5;font-weight:700;font-size:.82rem;cursor:pointer;">Separei parcial</button>
+          <button id="btnAcaoSepParcial" style="padding:7px 12px;border:none;border-radius:8px;background:#b45309;color:#ffedd5;font-weight:700;font-size:.82rem;cursor:pointer;">Informar quantidade</button>
           ${status !== 'Stund-by' ? `<button id="btnAcaoNaoSep" style="padding:7px 12px;border:none;border-radius:8px;background:#7c2d12;color:#ffedd5;font-weight:700;font-size:.82rem;cursor:pointer;">Não separei</button>` : ''}
         </div>
       </div>`;
@@ -720,14 +745,20 @@ function _abrirModalSeparacao(grupoAtual, gruposConflito) {
 
     document.getElementById('btnAcaoSepParcial').addEventListener('click', async () => {
       closeModal();
-      const qtyInput = prompt(`Quantidade separada (máx ${_solFmtQty(qtyTotal)} ${unidade}):`, _solFmtQty(qtyTotal));
+      const qtyInput = prompt(`Quantidade separada (${unidade}). Pode ser maior que o solicitado quando a embalagem fechada vier com mais unidades:`, _solFmtQty(qtyTotal));
       if (qtyInput === null) return;
       const qtySep = parseFloat(String(qtyInput).replace(',', '.'));
-      if (!Number.isFinite(qtySep) || qtySep <= 0 || qtySep >= qtyTotal) {
-        alert('Quantidade parcial inválida. Use um valor maior que 0 e menor que a quantidade original.');
+      if (!Number.isFinite(qtySep) || qtySep <= 0) {
+        alert('Quantidade inválida. Use um valor maior que 0.');
         return;
       }
-      const motivo = prompt('Motivo da separação parcial:', '') || '';
+      if (qtySep > qtyTotal) {
+        const ok = confirm(`Você informou ${_solFmtQty(qtySep)} ${unidade}, maior que o solicitado (${_solFmtQty(qtyTotal)} ${unidade}). Confirmar esta quantidade separada?`);
+        if (!ok) return;
+      }
+      const motivo = qtySep < qtyTotal
+        ? (prompt('Motivo da separação parcial:', '') || '')
+        : '';
 
       try {
         const r = await fetch('/api/logistica/itens_solicitados/separar-parcial', {
@@ -1101,6 +1132,7 @@ window._loadKanbanSolicitacoesTab = async function() {
         ? `<div style="padding:14px;text-align:center;color:${emptyColor};font-size:.73rem;">Nenhum</div>`
         : cards.map(card => {
             const dataPrev = _solFmtDataPrevista(card.data_prevista);
+            const criadoEm = _solFmtDataHora(card.criado_em_min);
             const sepLabel = card.n_solic
               ? `<span style="font-weight:800;font-size:.85rem;color:${sepColor};letter-spacing:.03em;">${card.n_solic}</span>`
               : `<span style="font-weight:700;font-size:.78rem;color:${noCarrinhoColor};font-style:italic;">No carrinho</span>`;
@@ -1129,6 +1161,11 @@ window._loadKanbanSolicitacoesTab = async function() {
                 <div style="margin-top:4px;display:flex;align-items:center;gap:5px;">
                   <i class="fa-regular fa-calendar" style="color:${iconColor};font-size:.72rem;flex-shrink:0;"></i>
                   <span style="font-size:.72rem;color:${dateColor};">${dataPrev}</span>
+                </div>` : ''}
+                ${criadoEm ? `
+                <div style="margin-top:4px;display:flex;align-items:center;gap:5px;">
+                  <i class="fa-regular fa-clock" style="color:${iconColor};font-size:.72rem;flex-shrink:0;"></i>
+                  <span style="font-size:.70rem;color:${dateColor};">Solicitado em ${criadoEm}</span>
                 </div>` : ''}
                 ${editHint}
               </div>`;
