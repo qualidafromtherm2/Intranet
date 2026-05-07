@@ -412,104 +412,109 @@ async function syncEncerradosBackground() {
 }
 
 /* ---------------------------------------------------------------
+ * fromDb(onlyMontagem)
+ * Lê ordens do cache DB (rápido). Usado na carga inicial do kanban.
+ * onlyMontagem=false → status='A PRODUZIR'
+ * onlyMontagem=true  → status!='ENCERRADO' + produto.tipo='04 - Produto Acabado'
+ * --------------------------------------------------------------- */
+async function fromDb(onlyMontagem = false) {
+  const whereExtra = onlyMontagem
+    ? `AND op.status != 'ENCERRADO' AND TRIM(COALESCE(p.tipo,'')) = '04 - Produto Acabado'`
+    : `AND op.status = 'A PRODUZIR'`;
+
+  const { rows } = await dbQuery(`
+    SELECT
+      op.iapp_id                         AS id,
+      op.identificacao,
+      op.status,
+      op.qtde::text                      AS qtde,
+      op.tempo_total,
+      op.ficha_tecnica,
+      op.linha_producao,
+      op.obs,
+      op.cliente,
+      op.projeto,
+      op.origem,
+      op.documento,
+      op.data_abertura::text             AS data_abertura,
+      op.data_inicio::text               AS data_inicio,
+      op.data_final::text                AS data_final,
+      op.data_encerramento::text         AS data_encerramento,
+      op.data_previsao_faturamento::text AS data_previsao_faturamento,
+      op.data_previsao_entrega::text     AS data_previsao_entrega,
+      op.data_ultima_atualizacao::text   AS data_ultima_atualizacao,
+      op.sincronizado_em::text           AS sincronizado_em,
+      CASE WHEN p.produto_id IS NOT NULL THEN json_build_object(
+        'id',             p.produto_id,
+        'identificacao',  p.identificacao,
+        'descricao',      p.descricao,
+        'tipo',           p.tipo,
+        'valor_custo',    p.valor_custo::text,
+        'valor_venda',    p.valor_venda::text,
+        'unidade_medida', p.unidade_medida,
+        'status',         p.status
+      ) ELSE NULL END AS produto,
+      COALESCE(
+        json_agg(json_build_object(
+          'id',                os.os_id,
+          'identificacao',     os.identificacao,
+          'status',            os.status,
+          'operacao',          os.operacao,
+          'tempo_total',       os.tempo_total::text,
+          'data_abertura',     os.data_abertura::text,
+          'data_inicio',       os.data_inicio::text,
+          'data_final',        os.data_final::text,
+          'data_encerramento', os.data_encerramento::text
+        ) ORDER BY os.os_id) FILTER (WHERE os.os_id IS NOT NULL),
+        '[]'::json
+      ) AS ordens_servico
+    FROM "IAPP_API".op_iapp op
+    LEFT JOIN "IAPP_API".op_iapp_produto p  ON p.produto_id  = op.produto_id
+    LEFT JOIN "IAPP_API".op_iapp_os      os ON os.op_iapp_id = op.iapp_id
+    WHERE 1=1 ${whereExtra}
+    GROUP BY
+      op.iapp_id, op.identificacao, op.status, op.qtde, op.tempo_total,
+      op.ficha_tecnica, op.linha_producao, op.obs, op.cliente, op.projeto,
+      op.origem, op.documento, op.data_abertura, op.data_inicio, op.data_final,
+      op.data_encerramento, op.data_previsao_faturamento, op.data_previsao_entrega,
+      op.data_ultima_atualizacao, op.sincronizado_em,
+      p.produto_id, p.identificacao, p.descricao, p.tipo,
+      p.valor_custo, p.valor_venda, p.unidade_medida, p.status
+    ORDER BY op.data_abertura DESC NULLS LAST
+  `);
+  return rows;
+}
+
+/* ---------------------------------------------------------------
  * GET /api/producao/ordens
- * Busca DIRETAMENTE do IAPP com filtro status=A PRODUZIR (dado sempre preciso).
- * Após responder ao cliente, dispara sync de ENCERRADOS em background.
+ * Carga rápida do cache DB. Front chama /sync-ativas em seguida.
  * --------------------------------------------------------------- */
 router.get('/ordens', async (req, res) => {
   try {
-    if (!tabelaGarantida) {
-      await garantirTabela();
-      tabelaGarantida = true;
-    }
-
-    if (!process.env.IAPP_TOKEN || !process.env.IAPP_SECRET) {
-      return res.status(500).json({ error: 'IAPP_TOKEN e IAPP_SECRET não configurados.' });
-    }
-
-    const OFFSET    = 100;
-    const INTERVALO = Math.ceil(1000 / 3); // 3 req/s
-
-    // Busca todas as páginas com status A PRODUZIR direto do IAPP
-    const todasOPs = [];
-    let page = 1;
-    while (true) {
-      if (page > 1) await sleep(INTERVALO);
-      const r = await iappGet('/manufatura/ordens-producao/lista', {
-        offset:    OFFSET,
-        sort_by:   'data_abertura',
-        sort_type: 'DESC',
-        status:    'A PRODUZIR',
-        page
-      });
-      const records = Array.isArray(r.response) ? r.response : [];
-      // Filtra client-side como segurança caso a API ignore o filtro
-      const ativas = records.filter(op => op.status === 'A PRODUZIR');
-      todasOPs.push(...ativas);
-      if (records.length < OFFSET) break;
-      page++;
-    }
-
-    console.log(`[producao] IAPP live: ${todasOPs.length} ordens "A PRODUZIR" em ${page} página(s).`);
-
-    // Normaliza a estrutura esperada pelo front
-    const agora = new Date().toISOString();
-    const ordens = todasOPs.map(op => ({
-      id:                        op.id,
-      identificacao:             op.identificacao,
-      status:                    op.status,
-      qtde:                      op.qtde,
-      tempo_total:               op.tempo_total,
-      ficha_tecnica:             op.ficha_tecnica,
-      linha_producao:            op.linha_producao,
-      obs:                       op.obs,
-      cliente:                   op.cliente,
-      projeto:                   op.projeto,
-      origem:                    op.origem,
-      documento:                 op.documento,
-      data_abertura:             op.data_abertura,
-      data_inicio:               op.data_inicio,
-      data_final:                op.data_final,
-      data_encerramento:         op.data_encerramento,
-      data_previsao_faturamento: op.data_previsao_faturamento,
-      data_previsao_entrega:     op.data_previsao_entrega,
-      data_ultima_atualizacao:   op.data_ultima_atualizacao,
-      sincronizado_em:           agora,
-      produto: op.produto ? {
-        id:            op.produto.id,
-        identificacao: op.produto.identificacao,
-        descricao:     op.produto.descricao,
-        tipo:          op.produto.tipo,
-        valor_custo:   op.produto.valor_custo,
-        valor_venda:   op.produto.valor_venda,
-        unidade_medida:op.produto.unidade_medida,
-        status:        op.produto.status
-      } : null,
-      ordens_servico: Array.isArray(op.ordens_servico) ? op.ordens_servico.map(os => ({
-        id:               os.id,
-        identificacao:    os.identificacao,
-        status:           os.status,
-        operacao:         os.operacao,
-        tempo_total:      os.tempo_total,
-        data_abertura:    os.data_abertura,
-        data_inicio:      os.data_inicio,
-        data_final:       os.data_final,
-        data_encerramento:os.data_encerramento
-      })) : []
-    }));
-
-    // Responde ao usuário e em background atualiza ENCERRADOS no DB
+    if (!tabelaGarantida) { await garantirTabela(); tabelaGarantida = true; }
+    const ordens = await fromDb(false);
+    const agora  = new Date().toISOString();
     setImmediate(() => syncEncerradosBackground());
-
-    return res.json({
-      success:          true,
-      total_consultado: ordens.length,
-      total_ativas:     ordens.length,
-      ordens,
-      sincronizado_em:  agora
-    });
+    return res.json({ success: true, total_consultado: ordens.length, total_ativas: ordens.length, ordens, sincronizado_em: agora, from_db: true });
   } catch (err) {
-    console.error('[producao] Erro ao buscar ordens do IAPP:', err.message);
+    console.error('[producao] Erro ao ler ordens do DB:', err.message);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+/* ---------------------------------------------------------------
+ * GET /api/producao/ordens-montagem
+ * Carga rápida do cache DB (produto.tipo='04 - Produto Acabado').
+ * --------------------------------------------------------------- */
+router.get('/ordens-montagem', async (req, res) => {
+  try {
+    if (!tabelaGarantida) { await garantirTabela(); tabelaGarantida = true; }
+    const ordens = await fromDb(true);
+    const agora  = new Date().toISOString();
+    setImmediate(() => syncEncerradosBackground());
+    return res.json({ success: true, total_consultado: ordens.length, total_ativas: ordens.length, ordens, sincronizado_em: agora, from_db: true });
+  } catch (err) {
+    console.error('[producao] Erro ao ler montagem do DB:', err.message);
     return res.status(500).json({ error: err.message });
   }
 });
@@ -521,6 +526,73 @@ router.get('/ordens', async (req, res) => {
 router.post('/sync', async (req, res) => {
   setImmediate(() => syncEncerradosBackground());
   return res.json({ success: true, message: 'Sync de ENCERRADOS iniciado em background.' });
+});
+
+/* ---------------------------------------------------------------
+ * GET /api/producao/sync-ativas
+ * Busca registros ativos direto do IAPP, faz upsert no DB e retorna
+ * a lista atualizada. Chamado pelo front após carga rápida do DB.
+ * Query param: ?montagem=1 para painel Produção Montagem.
+ * --------------------------------------------------------------- */
+router.get('/sync-ativas', async (req, res) => {
+  const onlyMontagem = req.query.montagem === '1';
+  try {
+    if (!tabelaGarantida) { await garantirTabela(); tabelaGarantida = true; }
+
+    if (!process.env.IAPP_TOKEN || !process.env.IAPP_SECRET) {
+      return res.status(500).json({ error: 'IAPP_TOKEN e IAPP_SECRET não configurados.' });
+    }
+
+    const OFFSET    = 100;
+    const INTERVALO = Math.ceil(1000 / 3); // 3 req/s
+    const TIPO_ALVO = '04 - Produto Acabado';
+    const todasOPs  = [];
+    let   page      = 1;
+
+    if (onlyMontagem) {
+      // Todos os status (smart-stop quando página inteira ENCERRADO)
+      while (true) {
+        if (page > 1) await sleep(INTERVALO);
+        const r = await iappGet('/manufatura/ordens-producao/lista', {
+          offset: OFFSET, sort_by: 'data_abertura', sort_type: 'DESC', page
+        });
+        const records = Array.isArray(r.response) ? r.response : [];
+        if (records.length === 0) break;
+        if (records.every(op => op.status === 'ENCERRADO')) break;
+        todasOPs.push(...records.filter(op => op.status !== 'ENCERRADO'));
+        if (records.length < OFFSET) break;
+        page++;
+      }
+    } else {
+      // Somente A PRODUZIR
+      while (true) {
+        if (page > 1) await sleep(INTERVALO);
+        const r = await iappGet('/manufatura/ordens-producao/lista', {
+          offset: OFFSET, sort_by: 'data_abertura', sort_type: 'DESC', status: 'A PRODUZIR', page
+        });
+        const records = Array.isArray(r.response) ? r.response : [];
+        todasOPs.push(...records.filter(op => op.status === 'A PRODUZIR'));
+        if (records.length < OFFSET) break;
+        page++;
+      }
+    }
+
+    console.log(`[producao] sync-ativas (montagem=${onlyMontagem}): ${todasOPs.length} OPs em ${page} pág.`);
+
+    // Upsert no DB para manter cache atualizado
+    if (todasOPs.length > 0) await upsertOps(todasOPs);
+
+    // Retorna lista atualizada do DB (já inclui os recém-upsertados)
+    const ordens = await fromDb(onlyMontagem);
+    const agora  = new Date().toISOString();
+
+    setImmediate(() => syncEncerradosBackground());
+
+    return res.json({ success: true, total_consultado: ordens.length, total_ativas: ordens.length, ordens, sincronizado_em: agora, from_iapp: true });
+  } catch (err) {
+    console.error('[producao] Erro em sync-ativas:', err.message);
+    return res.status(500).json({ error: err.message });
+  }
 });
 
 module.exports = router;
