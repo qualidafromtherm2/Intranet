@@ -76,5 +76,11 @@ Este projeto é editado exclusivamente via GitHub Copilot Chat.
 
 **Por que o aviso prévio é crítico:**
 - Se uma sessão anterior deixou arquivos modificados sem commit e a nova sessão editar o mesmo arquivo, as mudanças anteriores são perdidas permanentemente.
-- Isso já causou perda real de funcionalidades neste projeto (ex.: filtro CFOP 6.905 e spinner de Vendas perdidos em mai/2026).
+- Isso já causou perda real de funcionalidades neste projeto (ex.: filtro CFOP 6.905, spinner de Vendas, e painel "Produção Montagem" perdidos em mai/2026).
 - A solução é: ao detectar uncommitted changes em arquivos que serão editados, alertar o usuário e perguntar se deve commitar antes de continuar.
+
+**Ao concluir qualquer tarefa que modificou arquivos:**
+- Sempre verificar `git status --short` ao final.
+- Se houver arquivos modificados sem commit, **sugerir proativamente ao usuário**: "Quer que eu commite as mudanças desta sessão antes de fechar?"
+- Arquivos de alto risco (sempre verificar): `menu_produto.html`, `menu_produto.js`, `routes/producao.js`, `server.js`.
+- O projeto usa PRs no GitHub com `git pull` local após merge — esse fluxo sobrescreve silenciosamente qualquer modificação local não commitada.
