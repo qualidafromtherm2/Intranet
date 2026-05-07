@@ -6,6 +6,22 @@ const { OMIE_APP_KEY, OMIE_APP_SECRET } = require('../config.server');
 
 const STATUS_AGUARDANDO = 'Aguardando aprovação';
 const STATUS_TRANSFERIDO = 'Transferido';
+const STATUS_REPROVADO = 'Reprovado';
+
+let schemaTransferenciasOk = false;
+
+async function ensureTransferenciasSchema() {
+  if (schemaTransferenciasOk) return;
+  await dbQuery(`
+    ALTER TABLE mensagens.transferencias
+      ADD COLUMN IF NOT EXISTS data_movimentacao DATE,
+      ADD COLUMN IF NOT EXISTS cmc NUMERIC(18,4),
+      ADD COLUMN IF NOT EXISTS reprovado_por TEXT,
+      ADD COLUMN IF NOT EXISTS reprovado_em TIMESTAMPTZ,
+      ADD COLUMN IF NOT EXISTS motivo_reprovacao TEXT
+  `);
+  schemaTransferenciasOk = true;
+}
 
 // Resolve o identificador numérico do produto (codigo_produto) usando o código Omie textual ou numérico.
 async function resolveCodigoProduto(codigoParam) {
@@ -72,13 +88,52 @@ function normalizaNumeroParaOmie(value) {
 }
 
 function formatarDataBR(data = new Date()) {
-  const dia = String(data.getDate()).padStart(2, '0');
-  const mes = String(data.getMonth() + 1).padStart(2, '0');
-  const ano = String(data.getFullYear());
+  const valor = data instanceof Date ? data : new Date(data);
+  const dia = String(valor.getDate()).padStart(2, '0');
+  const mes = String(valor.getMonth() + 1).padStart(2, '0');
+  const ano = String(valor.getFullYear());
   return `${dia}/${mes}/${ano}`;
 }
 
-async function incluirAjusteEstoqueOmie({ origem, destino, codigo_produto, qtd, codigo, id }, aprovadoPor) {
+function normalizarDataMovimentacao(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return new Date();
+
+  const isoMatch = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (isoMatch) {
+    const [, ano, mes, dia] = isoMatch;
+    return new Date(Number(ano), Number(mes) - 1, Number(dia));
+  }
+
+  const brMatch = raw.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+  if (brMatch) {
+    const [, dia, mes, ano] = brMatch;
+    return new Date(Number(ano), Number(mes) - 1, Number(dia));
+  }
+
+  const parsed = new Date(raw);
+  return Number.isNaN(parsed.getTime()) ? new Date() : parsed;
+}
+
+function formatarDataSql(data = new Date()) {
+  return `${data.getFullYear()}-${String(data.getMonth() + 1).padStart(2, '0')}-${String(data.getDate()).padStart(2, '0')}`;
+}
+
+async function buscarCmcAtual({ codigo, origem }) {
+  if (!codigo || !origem) return null;
+  const { rows } = await dbQuery(
+    `SELECT cmc
+       FROM logistica.estoque_atual
+      WHERE codigo = $1
+        AND local_codigo = $2
+      LIMIT 1`,
+    [String(codigo).trim(), String(origem).trim()]
+  );
+  const cmc = normalizaNumeroParaOmie(rows?.[0]?.cmc);
+  return cmc && cmc > 0 ? cmc : null;
+}
+
+async function incluirAjusteEstoqueOmie({ origem, destino, codigo_produto, qtd, codigo, id, cmc, data_movimentacao }, aprovadoPor) {
   if (!OMIE_APP_KEY || !OMIE_APP_SECRET) {
     const err = new Error('Credenciais da Omie ausentes.');
     err.status = 500;
@@ -90,6 +145,16 @@ async function incluirAjusteEstoqueOmie({ origem, destino, codigo_produto, qtd, 
   const idProdutoNumero = normalizaNumeroParaOmie(codigo_produto);
   const quantidadeNumero = normalizaNumeroParaOmie(qtd) ?? 0;
   const quantidadeValida = quantidadeNumero > 0 ? quantidadeNumero : 0;
+  const valorCmcInformado = normalizaNumeroParaOmie(cmc);
+  const valorCmc = valorCmcInformado && valorCmcInformado > 0
+    ? valorCmcInformado
+    : await buscarCmcAtual({ codigo, origem });
+  if (!valorCmc || valorCmc <= 0) {
+    const err = new Error(`CMC ausente ou invalido para o produto ${codigo || codigo_produto}. Nao e seguro movimentar estoque sem valor do produto.`);
+    err.status = 400;
+    throw err;
+  }
+  const dataMovimentacao = normalizarDataMovimentacao(data_movimentacao);
 
   const payload = {
     call: 'IncluirAjusteEstoque',
@@ -100,13 +165,13 @@ async function incluirAjusteEstoqueOmie({ origem, destino, codigo_produto, qtd, 
         codigo_local_estoque: origemNumero ?? origem ?? '',
         codigo_local_estoque_destino: destinoNumero ?? destino ?? '',
         id_prod: idProdutoNumero ?? codigo_produto,
-        data: formatarDataBR(),
+        data: formatarDataBR(dataMovimentacao),
         quan: String(quantidadeValida || quantidadeNumero || qtd || '0'),
         obs: `Solicitação de transferência #${id} do produto ${codigo || ''}. Aprovado por ${aprovadoPor}.`,
         origem: 'AJU',
         tipo: 'TRF',
         motivo: 'TRF',
-        valor: quantidadeValida > 0 ? quantidadeValida : 1
+        valor: valorCmc
       }
     ]
   };
@@ -116,6 +181,7 @@ async function incluirAjusteEstoqueOmie({ origem, destino, codigo_produto, qtd, 
     origem: payload.param[0].codigo_local_estoque,
     destino: payload.param[0].codigo_local_estoque_destino,
     produto: payload.param[0].id_prod,
+    data: payload.param[0].data,
     quantidadeOriginal: qtd,
     quantidadeNormalizada: quantidadeNumero,
     quantidadeFinal: payload.param[0].quan,
@@ -163,6 +229,7 @@ function sanitizeNumero(value) {
 
 router.get('/', async (_req, res) => {
   try {
+    await ensureTransferenciasSchema();
     const { rows } = await dbQuery(
       `SELECT id,
               codigo_produto,
@@ -171,9 +238,14 @@ router.get('/', async (_req, res) => {
               qtd,
               origem,
               destino,
+              data_movimentacao,
+              cmc,
               solicitante,
               status,
-              aprovado_pro
+              aprovado_pro,
+              reprovado_por,
+              reprovado_em,
+              motivo_reprovacao
          FROM mensagens.transferencias
         ORDER BY id DESC
         LIMIT 250`
@@ -188,8 +260,12 @@ router.get('/', async (_req, res) => {
 
 router.post('/', express.json(), async (req, res) => {
   try {
+    await ensureTransferenciasSchema();
     const origem = String(req.body?.origem || '').trim();
     const destino = String(req.body?.destino || '').trim();
+    const dataMovimentacaoRaw = String(req.body?.data_movimentacao || req.body?.dataMovimentacao || '').trim();
+    const dataMovimentacao = normalizarDataMovimentacao(dataMovimentacaoRaw);
+    const dataMovimentacaoSql = formatarDataSql(dataMovimentacao);
     const solicitante = String(req.body?.solicitante || '').trim() || null;
     const itens = Array.isArray(req.body?.itens) ? req.body.itens : [];
 
@@ -208,11 +284,17 @@ router.post('/', express.json(), async (req, res) => {
       const codigo = String(item.codigo || '').trim();
       const descricao = String(item.descricao || '').trim();
       const qtd = sanitizeNumero(item.qtd);
+      const cmcInformado = sanitizeNumero(item.cmc);
       if (!codigo) {
         return res.status(400).json({ error: 'Item sem código informado.' });
       }
       if (qtd === null || qtd <= 0) {
         return res.status(400).json({ error: `Quantidade inválida para o produto ${codigo}.` });
+      }
+
+      const cmc = (cmcInformado && cmcInformado > 0) ? cmcInformado : await buscarCmcAtual({ codigo, origem });
+      if (!cmc || cmc <= 0) {
+        return res.status(400).json({ error: `CMC ausente ou invalido para o produto ${codigo}. Corrija o estoque atual antes de registrar a transferencia.` });
       }
 
       const candidatos = [
@@ -254,6 +336,8 @@ router.post('/', express.json(), async (req, res) => {
         qtd,
         origem,
         destino,
+        data_movimentacao: dataMovimentacaoSql,
+        cmc,
         solicitante
       });
     }
@@ -264,7 +348,7 @@ router.post('/', express.json(), async (req, res) => {
 
     const params = [];
     const valuesSql = preparados.map((item, idx) => {
-      const base = idx * 8;
+      const base = idx * 10;
       params.push(
         item.codigo_produto,
         item.codigo,
@@ -272,17 +356,19 @@ router.post('/', express.json(), async (req, res) => {
         item.qtd,
         item.origem,
         item.destino,
+        item.data_movimentacao,
+        item.cmc,
         item.solicitante,
         STATUS_AGUARDANDO
       );
-      return `($${base + 1}, $${base + 2}, $${base + 3}, $${base + 4}, $${base + 5}, $${base + 6}, $${base + 7}, $${base + 8})`;
+      return `($${base + 1}, $${base + 2}, $${base + 3}, $${base + 4}, $${base + 5}, $${base + 6}, $${base + 7}, $${base + 8}, $${base + 9}, $${base + 10})`;
     }).join(', ');
 
     const insertSql = `
       INSERT INTO mensagens.transferencias
-        (codigo_produto, codigo, descricao, qtd, origem, destino, solicitante, status)
+        (codigo_produto, codigo, descricao, qtd, origem, destino, data_movimentacao, cmc, solicitante, status)
       VALUES ${valuesSql}
-      RETURNING id, codigo_produto, codigo, descricao, qtd, origem, destino, solicitante, status, aprovado_pro
+      RETURNING id, codigo_produto, codigo, descricao, qtd, origem, destino, data_movimentacao, cmc, solicitante, status, aprovado_pro
     `;
 
     const resultado = await dbQuery(insertSql, params);
@@ -299,6 +385,7 @@ router.post('/', express.json(), async (req, res) => {
 
 router.patch('/:id/aprovar', express.json(), async (req, res) => {
   try {
+    await ensureTransferenciasSchema();
     const id = Number(req.params.id);
     if (!Number.isInteger(id) || id <= 0) {
       return res.status(400).json({ error: 'Identificador inválido.' });
@@ -317,6 +404,8 @@ router.patch('/:id/aprovar', express.json(), async (req, res) => {
              qtd,
              origem,
              destino,
+             data_movimentacao,
+             cmc,
              solicitante,
              status,
              aprovado_pro
@@ -348,6 +437,8 @@ router.patch('/:id/aprovar', express.json(), async (req, res) => {
                  qtd,
                  origem,
                  destino,
+                 data_movimentacao,
+                 cmc,
                  solicitante,
                  status,
                  aprovado_pro`;
@@ -364,6 +455,71 @@ router.patch('/:id/aprovar', express.json(), async (req, res) => {
     console.error('[transferencias] falha ao aprovar transferência', err);
     res.status(err.status || 500).json({
       error: err.message || 'Falha ao aprovar solicitação de transferência.'
+    });
+  }
+});
+
+router.patch('/:id/reprovar', express.json(), async (req, res) => {
+  try {
+    await ensureTransferenciasSchema();
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) {
+      return res.status(400).json({ error: 'Identificador invÃ¡lido.' });
+    }
+
+    const reprovadoPor = String(req.body?.reprovadoPor || req.body?.usuario || '').trim();
+    const motivo = String(req.body?.motivo || '').trim() || null;
+    if (!reprovadoPor) {
+      return res.status(400).json({ error: 'Informe o nome de quem reprovou.' });
+    }
+
+    const { rows: encontrados } = await dbQuery(
+      `SELECT id, status
+         FROM mensagens.transferencias
+        WHERE id = $1
+        LIMIT 1`,
+      [id]
+    );
+
+    if (!encontrados.length) {
+      return res.status(404).json({ error: 'SolicitaÃ§Ã£o nÃ£o encontrada.' });
+    }
+
+    const statusAtual = String(encontrados[0].status || '').toLowerCase();
+    if (statusAtual === STATUS_TRANSFERIDO.toLowerCase()) {
+      return res.status(409).json({ error: 'Esta solicitaÃ§Ã£o jÃ¡ foi transferida e nÃ£o pode ser reprovada.' });
+    }
+
+    const { rows } = await dbQuery(
+      `UPDATE mensagens.transferencias
+          SET status = $1,
+              reprovado_por = $2,
+              reprovado_em = NOW(),
+              motivo_reprovacao = $3
+        WHERE id = $4
+        RETURNING id,
+                  codigo_produto,
+                  codigo,
+                  descricao,
+                  qtd,
+                  origem,
+                  destino,
+                  data_movimentacao,
+                  cmc,
+                  solicitante,
+                  status,
+                  aprovado_pro,
+                  reprovado_por,
+                  reprovado_em,
+                  motivo_reprovacao`,
+      [STATUS_REPROVADO, reprovadoPor, motivo, id]
+    );
+
+    res.json({ ok: true, registro: rows[0] });
+  } catch (err) {
+    console.error('[transferencias] falha ao reprovar transferÃªncia', err);
+    res.status(err.status || 500).json({
+      error: err.message || 'Falha ao reprovar solicitaÃ§Ã£o de transferÃªncia.'
     });
   }
 });

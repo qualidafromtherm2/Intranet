@@ -7026,6 +7026,8 @@
                           <th>Código</th>
                           <th class="desc-col">Descrição</th>
                           <th>Qtd</th>
+                          <th>Data mov.</th>
+                          <th>CMC</th>
                           <th>Origem</th>
                           <th>Destino</th>
                           <th>Solicitante</th>
@@ -7036,7 +7038,7 @@
                       </thead>
                       <tbody id="solicitacoesTransferTbody">
                         <tr>
-                          <td colspan="10">Nenhuma solicitação carregada ainda.</td>
+                          <td colspan="12">Nenhuma solicitação carregada ainda.</td>
                         </tr>
                       </tbody>
                     </table>
@@ -7933,9 +7935,20 @@
               <option value="">Selecione…</option>
             </select>
           </div>
+          <div class="destino-group">
+            <label for="transferDataMov">Data movimentaÃ§Ã£o</label>
+            <input id="transferDataMov" type="date" class="transfer-select" title="Data enviada no ajuste de estoque da Omie" />
+          </div>
           <div class="transferencia-actions">
             <label>&nbsp;</label>
             <div class="destino-inline">
+              <button id="transferImportarBtn"
+                      type="button"
+                      class="icon-btn"
+                      title="Importar lista: codigo + TAB + quantidade"
+                      aria-label="Importar lista de transferÃªncia">
+                <i class="fa-solid fa-file-import"></i>
+              </button>
               <input id="transferQtdBulk" type="number" min="0" step="0.01" placeholder="Qtd" class="transfer-qtd-bulk" title="Aplicar quantidade para todos" />
               <button id="transferSelectAllBtn"
                       type="button"
@@ -7974,13 +7987,14 @@
                 <th class="desc-col">Descrição</th>
                 <th>Cod Omie</th>
                 <th>Qtd</th>
+                <th>CMC</th>
                 <th>Físico</th>
                 <th>Saldo</th>
               </tr>
             </thead>
             <tbody id="transferenciaTbody">
               <tr class="transferencia-placeholder">
-                <td colspan="7">Nenhum item selecionado para transferência.</td>
+                <td colspan="8">Nenhum item selecionado para transferência.</td>
               </tr>
             </tbody>
           </table>
