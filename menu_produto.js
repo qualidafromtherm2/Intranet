@@ -17163,7 +17163,17 @@ document.addEventListener('click', async (e) => {
 });
 
 document.getElementById('solicitacoesTransferRefresh')?.addEventListener('click', () => {
-  carregarSolicitacoesTransferencias(true);
+  if (typeof window.carregarSolicitacoesTransferencias === 'function') {
+    window.carregarSolicitacoesTransferencias(true);
+  }
+});
+
+document.getElementById('solicitacoesTransferApproveAll')?.addEventListener('click', async () => {
+  if (typeof window.aprovarSolicitacoesTransferenciaEmSequencia === 'function') {
+    await window.aprovarSolicitacoesTransferenciaEmSequencia();
+  } else {
+    alert('A tela de transferencias ainda esta carregando. Tente novamente em alguns segundos.');
+  }
 });
 
 document.getElementById('recebimentoRefreshBtn')?.addEventListener('click', async () => {
@@ -17429,10 +17439,27 @@ document.addEventListener('DOMContentLoaded', async () => {
   const transferQtdBulk = document.getElementById('transferQtdBulk');
   const transferAcaoBtn = document.getElementById('transferenciaBtn');
   const transferImportarBtn = document.getElementById('transferImportarBtn');
+  const transferImportarListaBtn = document.getElementById('transferImportarListaBtn');
   const transferDataMov = document.getElementById('transferDataMov');
+  const transferDataMovLabel = document.querySelector('label[for="transferDataMov"]');
 
   if (transferDataMov && !transferDataMov.value) {
     transferDataMov.value = new Date().toISOString().slice(0, 10);
+  }
+  if (transferDataMovLabel) {
+    transferDataMovLabel.textContent = 'Data movimentacao';
+  }
+  if (transferImportarBtn) {
+    transferImportarBtn.style.display = 'none';
+  }
+  if (transferAcaoBtn && !transferAcaoBtn.__labelFixed) {
+    transferAcaoBtn.__labelFixed = true;
+    transferAcaoBtn.classList.remove('icon-btn');
+    transferAcaoBtn.classList.add('btn');
+    transferAcaoBtn.title = 'Enviar solicitacao de transferencia dos itens selecionados';
+    transferAcaoBtn.setAttribute('aria-label', 'Enviar solicitacao de transferencia');
+    transferAcaoBtn.style.cssText = 'display:inline-flex;align-items:center;gap:8px;min-width:230px;justify-content:center;background:#22c55e;color:#06120a;font-weight:800;border-color:#86efac;';
+    transferAcaoBtn.innerHTML = '<i class="fa-solid fa-right-left"></i><span>Enviar solicitacao</span>';
   }
 
   if (transferQtdBulk && !transferQtdBulk.__transferBound) {
@@ -17481,6 +17508,13 @@ document.addEventListener('DOMContentLoaded', async () => {
   if (transferImportarBtn && !transferImportarBtn.__transferBound) {
     transferImportarBtn.__transferBound = true;
     transferImportarBtn.addEventListener('click', (ev) => {
+      ev.preventDefault();
+      abrirModalImportacaoTransferencia();
+    });
+  }
+  if (transferImportarListaBtn && !transferImportarListaBtn.__transferBound) {
+    transferImportarListaBtn.__transferBound = true;
+    transferImportarListaBtn.addEventListener('click', (ev) => {
       ev.preventDefault();
       abrirModalImportacaoTransferencia();
     });
@@ -17545,7 +17579,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
 
         if (!resp.ok || !resposta?.ok) {
-          const msg = resposta?.error || resposta?.detail || `Falha ao registrar transferência (HTTP ${resp.status}).`;
+          const msg = resposta?.detail || resposta?.error || `Falha ao registrar transferência (HTTP ${resp.status}).`;
           throw new Error(msg);
         }
 
@@ -17701,6 +17735,55 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   const solicitacoesTbody = document.getElementById('solicitacoesTransferTbody');
+  if (solicitacoesTbody && !solicitacoesTbody.__rejectCleanBound) {
+    solicitacoesTbody.__rejectCleanBound = true;
+    solicitacoesTbody.addEventListener('click', async (ev) => {
+      const btn = ev.target.closest('.btn-reject-transfer');
+      if (!btn) return;
+      ev.preventDefault();
+      ev.stopImmediatePropagation();
+
+      const id = Number(btn.dataset.id);
+      if (!Number.isInteger(id)) {
+        alert('Nao foi possivel identificar a solicitacao selecionada.');
+        return;
+      }
+
+      const usuario = String(document.getElementById('userNameDisplay')?.textContent || '').trim();
+      if (!usuario || usuario === 'Usuario' || usuario === 'UsuÃ¡rio' || usuario === '—' || usuario === 'â€”') {
+        alert('Nao foi possivel identificar o usuario atual. Faca login novamente.');
+        return;
+      }
+
+      const motivo = prompt('Informe o motivo para reprovar/excluir esta solicitacao:', '');
+      if (motivo === null) return;
+
+      const originalLabel = btn.textContent;
+      btn.disabled = true;
+      btn.textContent = 'Reprovando...';
+
+      try {
+        const resp = await fetch(`/api/transferencias/${id}/reprovar`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ reprovadoPor: usuario, motivo })
+        });
+
+        const json = await resp.json().catch(() => ({}));
+        if (!resp.ok || !json?.ok) {
+          throw new Error(json?.error || `Falha ao reprovar (HTTP ${resp.status}).`);
+        }
+
+        alert('Solicitacao reprovada.');
+        await carregarSolicitacoesTransferencias(true);
+      } catch (err) {
+        console.error('[transferencias] reprovar', err);
+        alert(err?.message || 'Falha ao reprovar a solicitacao.');
+        btn.disabled = false;
+        btn.textContent = originalLabel;
+      }
+    }, true);
+  }
   if (solicitacoesTbody && !solicitacoesTbody.__approveBound) {
     solicitacoesTbody.__approveBound = true;
     solicitacoesTbody.addEventListener('click', async (ev) => {
@@ -19567,18 +19650,30 @@ function ensureTransferImportModal() {
 
   modal = document.createElement('div');
   modal.id = 'transferImportModal';
-  modal.style.cssText = 'position:fixed;inset:0;z-index:9999;display:none;align-items:center;justify-content:center;background:rgba(3,7,18,.72);backdrop-filter:blur(4px);';
+  modal.style.cssText = 'position:fixed;inset:0;z-index:9999;display:none;align-items:center;justify-content:center;background:rgba(3,7,18,.72);backdrop-filter:blur(4px);padding:18px;';
   modal.innerHTML = `
-    <div style="width:min(720px, calc(100vw - 28px));max-height:calc(100vh - 42px);overflow:auto;background:#121722;border:1px solid #2b3548;border-radius:18px;box-shadow:0 24px 70px rgba(0,0,0,.45);color:#e5e7eb;">
+    <div style="width:min(980px, calc(100vw - 28px));max-height:calc(100vh - 42px);overflow:auto;background:#121722;border:1px solid #2b3548;border-radius:18px;box-shadow:0 24px 70px rgba(0,0,0,.45);color:#e5e7eb;">
       <div style="display:flex;align-items:center;justify-content:space-between;padding:18px 22px;border-bottom:1px solid #253044;">
         <div>
-          <div style="font-size:18px;font-weight:800;">Importar transferencia em massa</div>
-          <div style="font-size:12px;color:#93a4bd;margin-top:4px;">Cole uma linha por item: codigo + TAB + quantidade.</div>
+          <div style="font-size:20px;font-weight:800;">Importar lista da planilha</div>
+          <div style="font-size:13px;color:#93a4bd;margin-top:4px;">Copie varias linhas do Excel/Sheets e cole aqui. Formato: codigo, TAB, quantidade.</div>
         </div>
         <button id="transferImportClose" type="button" class="icon-btn" aria-label="Fechar"><i class="fa-solid fa-xmark"></i></button>
       </div>
       <div style="padding:18px 22px;display:grid;gap:14px;">
-        <textarea id="transferImportTextarea" rows="10" spellcheck="false" placeholder="05.MP.I.80044\t300&#10;09.MC.N.10106\t24" style="width:100%;resize:vertical;min-height:180px;background:#0b1020;color:#e5e7eb;border:1px solid #334155;border-radius:12px;padding:12px;font-family:Consolas, monospace;font-size:13px;line-height:1.45;"></textarea>
+        <div style="display:grid;grid-template-columns:1fr auto;gap:14px;align-items:start;">
+          <label style="display:grid;gap:8px;font-size:12px;font-weight:800;color:#9ca3af;letter-spacing:.03em;text-transform:uppercase;">
+            Lista para importar
+            <textarea id="transferImportTextarea" rows="16" spellcheck="false" placeholder="05.MP.I.80044	300&#10;09.MC.N.10106	24&#10;01.MP.N.51001	12" style="width:100%;resize:vertical;min-height:340px;background:#0b1020;color:#e5e7eb;border:1px solid #334155;border-radius:12px;padding:14px;font-family:Consolas, monospace;font-size:14px;line-height:1.55;"></textarea>
+          </label>
+          <div style="min-width:230px;background:#0b1020;border:1px solid #263349;border-radius:12px;padding:14px;color:#cbd5e1;font-size:12px;line-height:1.55;">
+            <div style="font-weight:800;color:#e5e7eb;margin-bottom:8px;">Como colar</div>
+            <div>1. Na planilha, selecione duas colunas: codigo e quantidade.</div>
+            <div>2. Copie com CTRL+C.</div>
+            <div>3. Cole nesta caixa. Cada linha vira um item.</div>
+            <div style="margin-top:10px;color:#93c5fd;">Exemplo:<br><code>05.MP.I.80044&nbsp;&nbsp;300</code><br><code>09.MC.N.10106&nbsp;&nbsp;24</code></div>
+          </div>
+        </div>
         <div style="display:grid;grid-template-columns:1fr 1fr 180px;gap:12px;">
           <label style="display:grid;gap:6px;font-size:12px;font-weight:700;color:#9ca3af;">Origem
             <select id="transferImportOrigem" class="transfer-select"></select>
@@ -19768,6 +19863,93 @@ function renderTransferenciaLista() {
 
 window.renderTransferenciaLista = renderTransferenciaLista;
 
+function delayTransferencia(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function obterUsuarioAtualTransferencia() {
+  const usuario = String(document.getElementById('userNameDisplay')?.textContent || '').trim();
+  if (!usuario || usuario === 'Usuario' || usuario === 'UsuÃ¡rio' || usuario === '—' || usuario === 'â€”') {
+    return '';
+  }
+  return usuario;
+}
+
+async function aprovarTransferenciaPorId(id, usuario) {
+  const resp = await fetch(`/api/transferencias/${id}/aprovar`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ aprovadoPor: usuario })
+  });
+  const json = await resp.json().catch(() => ({}));
+  if (!resp.ok || !json?.ok) {
+    throw new Error(json?.error || json?.detail || `Falha ao aprovar transferencia #${id} (HTTP ${resp.status}).`);
+  }
+  return json;
+}
+
+async function aprovarSolicitacoesTransferenciaEmSequencia() {
+  const usuario = obterUsuarioAtualTransferencia();
+  if (!usuario) {
+    alert('Nao foi possivel identificar o usuario atual. Faca login novamente.');
+    return;
+  }
+
+  await carregarSolicitacoesTransferencias(true);
+  const pendentes = solicitacoesTransferencias
+    .filter(item => String(item.status || '').toLowerCase() !== 'transferido')
+    .filter(item => String(item.status || '').toLowerCase() !== 'reprovado')
+    .filter(item => Number.isInteger(Number(item.id)));
+
+  if (!pendentes.length) {
+    alert('Nao ha solicitacoes pendentes para aprovar.');
+    return;
+  }
+
+  if (!confirm(`Aprovar ${pendentes.length} solicitacao(oes) uma por uma? O sistema vai enviar para a Omie em sequencia, sem chamadas paralelas.`)) {
+    return;
+  }
+
+  const btn = document.getElementById('solicitacoesTransferApproveAll');
+  const originalLabel = btn?.textContent || '';
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = `Aprovando 0/${pendentes.length}`;
+  }
+
+  const erros = [];
+  let aprovadas = 0;
+  try {
+    for (const item of pendentes) {
+      const id = Number(item.id);
+      if (btn) btn.textContent = `Aprovando ${aprovadas + 1}/${pendentes.length}`;
+      try {
+        await aprovarTransferenciaPorId(id, usuario);
+        aprovadas++;
+      } catch (err) {
+        erros.push(`#${id} ${item.codigo || ''}: ${err?.message || err}`);
+      }
+      if (aprovadas + erros.length < pendentes.length) {
+        await delayTransferencia(1500);
+      }
+    }
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = originalLabel || 'Aprovar pendentes';
+    }
+    await carregarSolicitacoesTransferencias(true);
+  }
+
+  if (erros.length) {
+    alert(`Aprovadas: ${aprovadas}. Falharam: ${erros.length}.\n${erros.slice(0, 5).join('\n')}${erros.length > 5 ? '\n...' : ''}`);
+    return;
+  }
+  alert(`Todas as ${aprovadas} solicitacoes foram aprovadas.`);
+}
+
+window.aprovarSolicitacoesTransferenciaEmSequencia = aprovarSolicitacoesTransferenciaEmSequencia;
+
 function renderSolicitacoesTransferencias() {
   const tbody = document.getElementById('solicitacoesTransferTbody');
   if (!tbody) return;
@@ -19797,7 +19979,7 @@ function renderSolicitacoesTransferencias() {
     const botaoHtml = podeAprovar
       ? `<div style="display:flex;gap:6px;flex-wrap:wrap;">
            <button type="button" class="btn tiny btn-approve-transfer" data-id="${escapeHtml(String(item.id ?? ''))}">Aprovar</button>
-           <button type="button" class="btn tiny btn-reject-transfer" data-id="${escapeHtml(String(item.id ?? ''))}" style="border-color:#ef4444;color:#fecaca;">Reprovar</button>
+           <button type="button" class="btn tiny btn-reject-transfer" data-id="${escapeHtml(String(item.id ?? ''))}" style="background:#dc2626;border-color:#f87171;color:#ffffff;font-weight:800;">Reprovar</button>
          </div>`
       : '<span>Transferido</span>';
     const tr = document.createElement('tr');
@@ -19854,6 +20036,8 @@ async function carregarSolicitacoesTransferencias(forceReload = false) {
     if (spinner) spinner.style.display = 'none';
   }
 }
+
+window.carregarSolicitacoesTransferencias = carregarSolicitacoesTransferencias;
 
 async function openSolicitacoesTransferencia(forceReload = false) {
   if (typeof hideKanban === 'function') hideKanban();

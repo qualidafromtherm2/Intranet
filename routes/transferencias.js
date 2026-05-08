@@ -20,10 +20,27 @@ async function ensureTransferenciasSchema() {
       ADD COLUMN IF NOT EXISTS reprovado_em TIMESTAMPTZ,
       ADD COLUMN IF NOT EXISTS motivo_reprovacao TEXT
   `);
+  await dbQuery(`
+    ALTER TABLE mensagens.transferencias
+      DROP CONSTRAINT IF EXISTS transferencias_codigo_produto_fkey
+  `);
   schemaTransferenciasOk = true;
 }
 
 // Resolve o identificador numérico do produto (codigo_produto) usando o código Omie textual ou numérico.
+async function buscarProdutoPorCodigoProduto(codigoProduto) {
+  const id = Number(codigoProduto);
+  if (!Number.isFinite(id)) return null;
+  const { rows } = await dbQuery(
+    `SELECT codigo_produto
+       FROM public.produtos_omie
+      WHERE codigo_produto = $1
+      LIMIT 1`,
+    [id]
+  );
+  return rows.length ? Number(rows[0].codigo_produto) : null;
+}
+
 async function resolveCodigoProduto(codigoParam) {
   const raw = String(codigoParam || '').trim();
   if (!raw) {
@@ -33,8 +50,8 @@ async function resolveCodigoProduto(codigoParam) {
   }
 
   if (/^\d+$/.test(raw)) {
-    const parsed = Number(raw);
-    if (Number.isFinite(parsed)) return parsed;
+    const existente = await buscarProdutoPorCodigoProduto(raw);
+    if (existente) return existente;
   }
 
   const sql = `
@@ -50,6 +67,16 @@ async function resolveCodigoProduto(codigoParam) {
     throw err;
   }
   return Number(rows[0].codigo_produto);
+}
+
+async function resolverCodigoProdutoTransferencia(candidatos, codigo) {
+  for (const candidato of candidatos) {
+    const str = candidato !== undefined && candidato !== null ? String(candidato).trim() : '';
+    if (!str || !/^\d+$/.test(str)) continue;
+    const existente = await buscarProdutoPorCodigoProduto(str);
+    if (existente) return existente;
+  }
+  return resolveCodigoProduto(codigo);
 }
 
 function normalizaNumeroParaOmie(value) {
@@ -133,6 +160,18 @@ async function buscarCmcAtual({ codigo, origem }) {
   return cmc && cmc > 0 ? cmc : null;
 }
 
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function isErroOmieRetryable({ httpStatus, texto }) {
+  const body = String(texto || '');
+  return httpStatus === 425
+    || httpStatus === 429
+    || httpStatus >= 500
+    || /too many|rate limit|consumo redundante|requisi/i.test(body);
+}
+
 async function incluirAjusteEstoqueOmie({ origem, destino, codigo_produto, qtd, codigo, id, cmc, data_movimentacao }, aprovadoPor) {
   if (!OMIE_APP_KEY || !OMIE_APP_SECRET) {
     const err = new Error('Credenciais da Omie ausentes.');
@@ -188,6 +227,80 @@ async function incluirAjusteEstoqueOmie({ origem, destino, codigo_produto, qtd, 
     valorFinal: payload.param[0].valor
   };
   console.info('[transferencias][omie] Enviando ajuste', resumoEnvio);
+
+  const delays = [3000, 6000, 12000, 24000, 45000];
+  let ultimoErro = null;
+
+  for (let tentativa = 0; tentativa <= delays.length; tentativa++) {
+    let respRetry;
+    let texto = '';
+    try {
+      respRetry = await fetch('https://app.omie.com.br/api/v1/estoque/ajuste/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      texto = await respRetry.text();
+    } catch (fetchErr) {
+      ultimoErro = fetchErr;
+      if (tentativa < delays.length) {
+        await sleep(delays[tentativa]);
+        continue;
+      }
+      const err = new Error(`Falha ao comunicar com a Omie: ${fetchErr.message || fetchErr}`);
+      err.status = 502;
+      throw err;
+    }
+
+    let jsonRetry;
+    try {
+      jsonRetry = texto ? JSON.parse(texto) : {};
+    } catch (parseErr) {
+      ultimoErro = parseErr;
+      if (isErroOmieRetryable({ httpStatus: respRetry.status, texto }) && tentativa < delays.length) {
+        console.warn('[transferencias][omie] retry por resposta invalida/rate-limit', {
+          transferenciaId: id,
+          tentativa: tentativa + 1,
+          httpStatus: respRetry.status
+        });
+        await sleep(delays[tentativa]);
+        continue;
+      }
+      const err = new Error(`Resposta invalida da Omie. HTTP ${respRetry.status}.`);
+      err.status = respRetry.status >= 400 ? respRetry.status : 502;
+      throw err;
+    }
+
+    if (respRetry.ok && String(jsonRetry?.codigo_status || '') === '0') {
+      return jsonRetry;
+    }
+
+    const retryable = isErroOmieRetryable({
+      httpStatus: respRetry.status,
+      texto: texto || jsonRetry?.descricao_status || jsonRetry?.faultstring
+    });
+    if (retryable && tentativa < delays.length) {
+      console.warn('[transferencias][omie] retry por limite/erro temporario', {
+        transferenciaId: id,
+        tentativa: tentativa + 1,
+        httpStatus: respRetry.status,
+        descricao: jsonRetry?.descricao_status || jsonRetry?.faultstring || texto?.slice?.(0, 180)
+      });
+      await sleep(delays[tentativa]);
+      continue;
+    }
+
+    const msg = jsonRetry?.descricao_status
+      || jsonRetry?.faultstring
+      || `Falha ao comunicar com a Omie (HTTP ${respRetry.status}).`;
+    const err = new Error(msg);
+    err.status = respRetry.status >= 400 ? respRetry.status : 502;
+    throw err;
+  }
+
+  const err = new Error(`Omie nao confirmou a transferencia apos novas tentativas. ${ultimoErro?.message || ''}`.trim());
+  err.status = 429;
+  throw err;
 
   const resp = await fetch('https://app.omie.com.br/api/v1/estoque/ajuste/', {
     method: 'POST',
@@ -306,27 +419,19 @@ router.post('/', express.json(), async (req, res) => {
         item.codigo_omie
       ];
 
-      let codigoProduto = null;
-      for (const candidato of candidatos) {
-        const str = candidato !== undefined && candidato !== null ? String(candidato).trim() : '';
-        if (!str) continue;
-        if (/^\d+$/.test(str)) {
-          const parsed = Number(str);
-          if (Number.isFinite(parsed)) {
-            codigoProduto = parsed;
-            break;
-          }
-        }
-      }
-
+      const chave = codigo;
+      let codigoProduto = cache.get(chave);
       if (!codigoProduto) {
-        const chave = codigo;
-        if (cache.has(chave)) {
-          codigoProduto = cache.get(chave);
-        } else {
-          codigoProduto = await resolveCodigoProduto(codigo);
-          cache.set(chave, codigoProduto);
+        try {
+          codigoProduto = await resolverCodigoProdutoTransferencia(candidatos, codigo);
+        } catch (resolveErr) {
+          const fallbackNumerico = candidatos
+            .map(candidato => String(candidato ?? '').trim())
+            .find(str => /^\d+$/.test(str));
+          if (!fallbackNumerico) throw resolveErr;
+          codigoProduto = Number(fallbackNumerico);
         }
+        cache.set(chave, codigoProduto);
       }
 
       preparados.push({
@@ -376,9 +481,12 @@ router.post('/', express.json(), async (req, res) => {
     res.json({ ok: true, registros: resultado.rows });
   } catch (err) {
     console.error('[transferencias] falha ao registrar transferência', err);
+    const detalhe = err.code === '23503' && err.constraint === 'transferencias_codigo_produto_fkey'
+      ? 'Produto sem cadastro valido em public.produtos_omie. Atualize o cadastro/cache de produtos antes de registrar a transferencia.'
+      : (err.message || String(err));
     res.status(err.status || 500).json({
       error: 'Falha ao registrar transferência de itens.',
-      detail: err.message || String(err)
+      detail: detalhe
     });
   }
 });
