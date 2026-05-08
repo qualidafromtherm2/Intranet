@@ -12958,9 +12958,10 @@ app.get('/api/estoque/oscilacao-diaria', async (req, res) => {
     }
     const { rows } = await pool.query(`
       SELECT
-        p.data_posicao::text AS data,
-        l.nome               AS armazem,
-        SUM(p.fisico)::float AS total_fisico
+        p.data_posicao::text                        AS data,
+        l.nome                                      AS armazem,
+        SUM(p.fisico)::float                        AS total_fisico,
+        SUM(p.fisico * COALESCE(p.cmc, 0))::float  AS total_valor
       FROM public.omie_estoque_posicao p
       JOIN public.omie_locais_estoque l
         ON l.local_codigo = p.local_codigo::text
@@ -15234,7 +15235,13 @@ app.get('/api/logistica/kanban/itens', async (req, res) => {
                c.data_prevista::text, c.horario, c.criado_em::text,
                c.cod_omie,
                COALESCE(c.retirada_por, c.nome_user) AS nome_user,
-               rt.codigo_produto_ant, rt.descricao_ant, rt.codigo_produto_novo, rt.descricao_novo
+               rt.codigo_produto_ant, rt.descricao_ant, rt.codigo_produto_novo, rt.descricao_novo,
+               (
+                 SELECT json_agg(json_build_object('rua', ep.rua, 'andar', ep.andar, 'edificio', ep.edificio, 'apartamento', ep.apartamento) ORDER BY ep.completo)
+                   FROM logistica."Endereço_pp" ep
+                  WHERE c.cod_omie IS NOT NULL
+                    AND ep.codigo_produto::text = c.cod_omie
+               ) AS enderecos_pp
           FROM solicitacao_produto.itens_solicitados i
           JOIN logistica.carrinho c ON c.id = i.id_carr
           LEFT JOIN solicitacao_produto.Registro_troca rt ON rt.id_item_original = i.id

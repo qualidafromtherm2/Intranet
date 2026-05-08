@@ -4041,6 +4041,24 @@ router.post('/at', async (req, res) => {
   }
 });
 
+// GET /at/nfe-pendentes-count — NFes com URL preenchida em ATs ainda abertos
+router.get('/at/nfe-pendentes-count', async (_req, res) => {
+  try {
+    const { rows } = await pool.query(`
+      SELECT COUNT(*) AS total
+      FROM sac.fechamento f
+      JOIN sac.at a ON a.id = f.id_at
+      WHERE f.nfe_url IS NOT NULL
+        AND f.nfe_url <> ''
+        AND (a.status IS NULL OR a.status <> 'Fechado')
+    `);
+    res.json({ total: parseInt(rows[0].total, 10) });
+  } catch (err) {
+    console.error('[AT] nfe-pendentes-count:', err.message);
+    res.status(500).json({ error: 'Erro interno' });
+  }
+});
+
 router.get('/at/atendimentos', async (_req, res) => {
   try {
     const t0 = Date.now();
@@ -4086,6 +4104,9 @@ router.get('/at/atendimentos', async (_req, res) => {
            f.data_conclusao_servico   AS fech_data_conclusao,
            f.observacoes              AS fech_obs,
            f.midias_servico           AS fech_midias,
+           f.nfe_url                  AS fech_nfe_url,
+           f.data_envio_nfe           AS fech_data_envio_nfe,
+           f.observacao_tecnico       AS fech_observacao_tecnico,
            f.status_os                AS status_os,
            a.status                   AS status,
            ct.nome                    AS tecnico_nome,
