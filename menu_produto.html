@@ -7023,6 +7023,7 @@
                   <div class="title-wrapper">
                     <div class="content-section-title">Solicitações de transferência</div>
                     <div class="actions" style="display:flex; gap:8px; align-items:center;">
+                      <button id="solicitacoesTransferApproveAll" class="btn tiny" type="button" style="background:#22c55e;color:#06120a;border-color:#86efac;font-weight:800;">Aprovar pendentes</button>
                       <button id="solicitacoesTransferRefresh" class="btn tiny" type="button">Atualizar</button>
                     </div>
                   </div>
@@ -7983,6 +7984,15 @@
           </div>
         </div>
         <div class="transferencia-controls">
+          <button id="transferImportarListaBtn"
+                  type="button"
+                  class="btn"
+                  title="Cole uma lista copiada da planilha: codigo + TAB + quantidade"
+                  aria-label="Importar lista de transferencia em massa"
+                  style="display:inline-flex;align-items:center;gap:8px;white-space:nowrap;">
+            <i class="fa-solid fa-table-list"></i>
+            Importar lista da planilha
+          </button>
           <div class="transferencia-search">
             <input id="transferSearch" type="text"
                    placeholder="Adicionar item por código ou descrição…"
@@ -7992,7 +8002,7 @@
             </div>
           </div>
         </div>
-        <div class="transferencia-wrapper">
+        <div class="transferencia-wrapper" style="max-height:calc(100vh - 330px);overflow:auto;border:1px solid #334155;border-radius:10px;">
           <table class="tabela padrao transferencia-table">
             <thead>
               <tr>
