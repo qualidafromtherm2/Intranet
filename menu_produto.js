@@ -538,6 +538,24 @@ function _abrirModalSeparacao(grupoAtual, gruposConflito) {
     const swapHistory = it.codigo_produto_ant && it.codigo_produto_novo 
       ? `<div style="font-size:.70rem;color:#a78bfa;margin-top:2px;display:flex;align-items:center;gap:4px;"><i class="fa-solid fa-arrows-rotate" style="color:#a78bfa;"></i><span>${it.codigo_produto_ant} → ${it.codigo_produto_novo}</span></div>`
       : '';
+    // Renderizar endereços
+    const endList = it.enderecos_pp;
+    let enderecoHtml = '';
+    if (endList && Array.isArray(endList) && endList.length > 0) {
+      const cards = endList.map(e => `
+        <div style="display:inline-flex;flex-direction:column;gap:1px;background:#1e293b;border:1px solid #334155;border-radius:4px;padding:3px 6px;font-size:.63rem;line-height:1.5;white-space:nowrap;">
+          <span><span style="color:#6b7280;">rua:</span> <span style="color:#67e8f9;font-weight:700;">${e.rua || '—'}</span></span>
+          <span><span style="color:#6b7280;">andar:</span> <span style="color:#67e8f9;font-weight:700;">${e.andar || '—'}</span></span>
+          <span><span style="color:#6b7280;">edif.:</span> <span style="color:#67e8f9;font-weight:700;">${e.edificio || '—'}</span></span>
+          <span><span style="color:#6b7280;">apto:</span> <span style="color:#67e8f9;font-weight:700;">${e.apartamento || '—'}</span></span>
+        </div>`).join('');
+      enderecoHtml = `<div style="display:flex;flex-wrap:wrap;gap:4px;margin-top:3px;align-items:flex-start;">
+        <i class="fa-solid fa-location-dot" style="color:#6b7280;font-size:.65rem;margin-top:3px;"></i>
+        ${cards}
+      </div>`;
+    } else {
+      enderecoHtml = `<div style="margin-top:2px;font-size:.65rem;color:#6b7280;font-style:italic;"><i class="fa-solid fa-location-dot" style="margin-right:3px;"></i>Não endereçado</div>`;
+    }
     // Itens de sub-SEPs (já Separado) não têm input de quantidade editável
     const qtyHtml = isSep
       ? `<span style="font-size:.80rem;font-weight:700;color:#f0f0f0;">${_solFmtQty(qty)} ${it.unidade || 'UN'}</span>`
@@ -571,8 +589,8 @@ function _abrirModalSeparacao(grupoAtual, gruposConflito) {
             ${hasObs ? `<span title="Item com observação" style="display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:999px;background:#f97316;color:#111;font-weight:800;font-size:.70rem;line-height:1;">!</span>` : ''}
           </div>
           ${swapHistory}
+          ${enderecoHtml}
         </div>
-        <div style="display:flex;flex-direction:column;align-items:flex-end;gap:5px;flex-shrink:0;">
           ${qtyHtml}
           ${isSep
             ? `<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;justify-content:flex-end;">
@@ -589,26 +607,38 @@ function _abrirModalSeparacao(grupoAtual, gruposConflito) {
                    <i class="fa-solid fa-arrows-rotate" style="margin-right:3px;"></i>Trocar
                  </button>
                </div>`
-            : `<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;justify-content:flex-end;">
-                 <button class="btn-item-acao" title="Ações do item"
-                   style="padding:4px 10px;border:none;border-radius:6px;background:#374151;color:#d1d5db;font-weight:700;font-size:.72rem;cursor:pointer;white-space:nowrap;transition:all .2s;">
-                   <i class="fa-solid fa-gear" style="margin-right:4px;"></i>Ação
-                 </button>
-                 ${isEmSeparacao
-                   ? `<button class="btn-item-trocar" title="Trocar este produto"
-                        style="padding:4px 9px;border:none;border-radius:6px;background:#7c3aed;color:#f3e8ff;font-weight:700;font-size:.70rem;cursor:pointer;white-space:nowrap;">
-                        <i class="fa-solid fa-arrows-rotate" style="margin-right:3px;"></i>Trocar
-                      </button>`
-                   : ''}
+            : `<div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;">
+                 <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;width:100%;">
+                   <button class="btn-item-sep-tudo"
+                     style="padding:4px 6px;border:none;border-radius:6px;background:#166534;color:#dcfce7;font-weight:700;font-size:.67rem;cursor:pointer;white-space:nowrap;text-align:center;">
+                     <i class="fa-solid fa-check" style="margin-right:2px;"></i>Separei tudo
+                   </button>
+                   <button class="btn-item-sep-parcial"
+                     style="padding:4px 6px;border:none;border-radius:6px;background:#b45309;color:#ffedd5;font-weight:700;font-size:.67rem;cursor:pointer;white-space:nowrap;text-align:center;">
+                     <i class="fa-solid fa-scale-balanced" style="margin-right:2px;"></i>Informar qtd
+                   </button>
+                   ${isEmSeparacao ? `
+                   <button class="btn-item-nao-sep"
+                     style="padding:4px 6px;border:none;border-radius:6px;background:#7c2d12;color:#ffedd5;font-weight:700;font-size:.67rem;cursor:pointer;white-space:nowrap;text-align:center;">
+                     <i class="fa-solid fa-xmark" style="margin-right:2px;"></i>Não separei
+                   </button>
+                   <button class="btn-item-trocar" title="Trocar este produto"
+                     style="padding:4px 6px;border:none;border-radius:6px;background:#7c3aed;color:#f3e8ff;font-weight:700;font-size:.67rem;cursor:pointer;white-space:nowrap;text-align:center;">
+                     <i class="fa-solid fa-arrows-rotate" style="margin-right:2px;"></i>Trocar
+                   </button>` : ''}
+                 </div>
+                 ${obsText ? `<div style="font-size:.63rem;color:#93c5fd;text-align:right;max-width:200px;word-break:break-word;"><i class="fa-solid fa-comment" style="margin-right:3px;color:#6b7280;"></i>${obsText}</div>` : ''}
                </div>`}
-        </div>
       </div>`;
   }
 
   let aggItens = _aggItens(grupoAtual.itens);
 
   // Recarrega o SEP original do servidor e re-renderiza lista (sem sub-SEPs — .1 vai para fila pendente)
+  let _reloadPending = false;
   async function reloadItems() {
+    if (_reloadPending) return;
+    _reloadPending = true;
     try {
       const r = await fetch(`/api/logistica/kanban/itens?n_solic=${encodeURIComponent(grupoAtual.n_solic)}`, { credentials: 'include' });
       const d = await r.json();
@@ -617,7 +647,7 @@ function _abrirModalSeparacao(grupoAtual, gruposConflito) {
       aggItens = _aggItens(mapped);
       const lista = document.getElementById('modalSepItemsList');
       if (lista) lista.innerHTML = aggItens.map(it => _renderAggItem(it, grupoAtual.n_solic)).join('');
-    } catch (_) {}
+    } catch (_) {} finally { _reloadPending = false; }
   }
 
   function fecharModal() {
@@ -1028,11 +1058,90 @@ function _abrirModalSeparacao(grupoAtual, gruposConflito) {
       return;
     }
 
-    const btnAcao = e.target.closest('.btn-item-acao');
-    if (btnAcao && !btnAcao.disabled) {
-      const row = btnAcao.closest('[data-item-row]');
+    const btnSepTudo = e.target.closest('.btn-item-sep-tudo');
+    if (btnSepTudo && !btnSepTudo.disabled) {
+      const row = btnSepTudo.closest('[data-item-row]');
       if (!row) return;
-      await _abrirModalAcaoItemSep(row, row.dataset.status);
+      const solicIds = JSON.parse(row.dataset.solicIds || '[]');
+      const htmlOrig = btnSepTudo.innerHTML;
+      btnSepTudo.disabled = true;
+      btnSepTudo.innerHTML = '<i class="fa-solid fa-spinner fa-spin" style="margin-right:3px;"></i>...';
+      try {
+        const r = await fetch('/api/logistica/itens_solicitados/separar', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ solic_ids: solicIds })
+        });
+        const d = await r.json();
+        if (!d.ok) throw new Error(d.error || 'Erro ao registrar item separado.');
+        houveMudanca = true;
+        await reloadItems();
+      } catch (err) {
+        alert('Erro: ' + (err.message || err));
+        btnSepTudo.disabled = false;
+        btnSepTudo.innerHTML = htmlOrig;
+      }
+      return;
+    }
+
+    const btnSepParcial = e.target.closest('.btn-item-sep-parcial');
+    if (btnSepParcial && !btnSepParcial.disabled) {
+      const row = btnSepParcial.closest('[data-item-row]');
+      if (!row) return;
+      const solicIds = JSON.parse(row.dataset.solicIds || '[]');
+      const carrIds  = JSON.parse(row.dataset.carrIds  || '[]');
+      const unidade  = row.dataset.unidade || 'UN';
+      const qtyTotal = parseFloat(row.dataset.qtyTotal || '0') || 0;
+      const qtyInput = prompt(`Quantidade separada (${unidade}). Pode ser maior que o solicitado quando a embalagem fechada vier com mais unidades:`, _solFmtQty(qtyTotal));
+      if (qtyInput === null) return;
+      const qtySep = parseFloat(String(qtyInput).replace(',', '.'));
+      if (!Number.isFinite(qtySep) || qtySep <= 0) { alert('Quantidade inválida. Use um valor maior que 0.'); return; }
+      if (qtySep > qtyTotal) {
+        const ok = confirm(`Você informou ${_solFmtQty(qtySep)} ${unidade}, maior que o solicitado (${_solFmtQty(qtyTotal)} ${unidade}). Confirmar esta quantidade separada?`);
+        if (!ok) return;
+      }
+      const motivo = qtySep < qtyTotal ? (prompt('Motivo da separação parcial:', '') || '') : '';
+      try {
+        const r = await fetch('/api/logistica/itens_solicitados/separar-parcial', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ solic_ids: solicIds, carr_ids: carrIds, quantidade_separada: qtySep, motivo })
+        });
+        const d = await r.json();
+        if (!d.ok) throw new Error(d.error || 'Erro ao processar separação parcial.');
+        houveMudanca = true;
+        await reloadItems();
+      } catch (err) {
+        alert('Erro: ' + (err.message || err));
+      }
+      return;
+    }
+
+    const btnNaoSep = e.target.closest('.btn-item-nao-sep');
+    if (btnNaoSep && !btnNaoSep.disabled) {
+      const row = btnNaoSep.closest('[data-item-row]');
+      if (!row) return;
+      const solicIds = JSON.parse(row.dataset.solicIds || '[]');
+      const ok = confirm('Confirmar que este item não foi separado?');
+      if (!ok) return;
+      try {
+        for (const sid of solicIds) {
+          const r = await fetch('/api/logistica/itens_solicitados/nao-separar', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
+            body: JSON.stringify({ solic_id: sid })
+          });
+          const d = await r.json();
+          if (!d.ok) throw new Error(d.error || 'Erro ao marcar item como não separado.');
+        }
+        houveMudanca = true;
+        await reloadItems();
+      } catch (err) {
+        alert('Erro: ' + (err.message || err));
+      }
       return;
     }
 
@@ -1301,15 +1410,35 @@ async function _abrirModalAguardandoRetiradaSep(nSolic, opts = {}) {
 
   document.getElementById('modalAguardandoRetiradaSep')?.remove();
 
-  const renderLinha = (it) => `
+  const renderLinha = (it) => {
+    let endAddr;
+    const endList = it.enderecos_pp;
+    if (endList && Array.isArray(endList) && endList.length > 0) {
+      const cards = endList.map(e => `
+        <div style="display:inline-flex;flex-direction:column;gap:1px;background:#1e293b;border:1px solid #334155;border-radius:4px;padding:3px 6px;font-size:.65rem;line-height:1.5;white-space:nowrap;">
+          <span><span style="color:#6b7280;">rua:</span> <span style="color:#67e8f9;font-weight:700;">${e.rua || '—'}</span></span>
+          <span><span style="color:#6b7280;">andar:</span> <span style="color:#67e8f9;font-weight:700;">${e.andar || '—'}</span></span>
+          <span><span style="color:#6b7280;">edif.:</span> <span style="color:#67e8f9;font-weight:700;">${e.edificio || '—'}</span></span>
+          <span><span style="color:#6b7280;">apto:</span> <span style="color:#67e8f9;font-weight:700;">${e.apartamento || '—'}</span></span>
+        </div>`).join('');
+      endAddr = `<div style="display:flex;flex-wrap:wrap;gap:4px;margin-top:2px;">${cards}</div>`;
+    } else {
+      endAddr = `<span style="color:#6b7280;font-style:italic;font-size:.68rem;">Não endereçado</span>`;
+    }
+    return `
     <div style="display:flex;align-items:flex-start;gap:10px;padding:10px 12px;border-top:1px solid #222;">
       <div style="flex:1;min-width:0;">
         <div style="font-weight:700;font-size:.78rem;color:#f59e0b;">${it.codigo_produto || '—'}</div>
         <div style="font-size:.75rem;color:#d1d5db;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${it.descricao || '—'}</div>
+        <div style="margin-top:3px;display:flex;align-items:flex-start;gap:4px;">
+          <i class="fa-solid fa-location-dot" style="color:#6b7280;font-size:.68rem;margin-top:3px;"></i>
+          ${endAddr}
+        </div>
       </div>
       <div style="font-size:.74rem;font-weight:700;color:#f0f0f0;white-space:nowrap;">${_solFmtQty(it.quantidade)} ${it.unidade || 'UN'}</div>
       <div style="font-size:.70rem;color:#9ca3af;white-space:nowrap;">${it.status || '—'}</div>
     </div>`;
+  };
 
   const renderLinhaDerivado = (it) => `
     <div style="display:flex;align-items:flex-start;gap:10px;padding:9px 12px;border-top:1px solid #1f2937;">
@@ -1348,7 +1477,9 @@ async function _abrirModalAguardandoRetiradaSep(nSolic, opts = {}) {
       </div>
 
       <div style="padding:12px 16px;border-top:1px solid #2a2a2a;display:flex;justify-content:flex-end;gap:8px;background:#171717;">
-        <button id="btnAguardRetCancelar" style="padding:7px 14px;border:1px solid #4b5563;border-radius:8px;background:transparent;color:#d1d5db;font-weight:700;font-size:.82rem;cursor:pointer;">Fechar</button>
+        ${tituloColuna === 'Solicitado'
+          ? `<button id="btnAguardRetIniciarSep" style="padding:7px 14px;border:none;border-radius:8px;background:#1d4ed8;color:#dbeafe;font-weight:700;font-size:.82rem;cursor:pointer;"><i class="fa-solid fa-play" style="margin-right:4px;"></i>Iniciar separação</button>`
+          : `<button id="btnAguardRetCancelar" style="padding:7px 14px;border:1px solid #4b5563;border-radius:8px;background:transparent;color:#d1d5db;font-weight:700;font-size:.82rem;cursor:pointer;">Fechar</button>`}
         ${permitirRecebido
           ? `<button id="btnAguardRetRecebido" style="padding:7px 14px;border:none;border-radius:8px;background:#16a34a;color:#dcfce7;font-weight:700;font-size:.82rem;cursor:pointer;">
                <i class="fa-solid fa-box-open" style="margin-right:4px;"></i>Recebido
@@ -1363,6 +1494,47 @@ async function _abrirModalAguardandoRetiradaSep(nSolic, opts = {}) {
   document.getElementById('btnModalAguardRetFechar')?.addEventListener('click', closeModal);
   document.getElementById('btnAguardRetCancelar')?.addEventListener('click', closeModal);
   modal.addEventListener('click', (ev) => { if (ev.target === modal) closeModal(); });
+
+  document.getElementById('btnAguardRetIniciarSep')?.addEventListener('click', async () => {
+    const solicIds = itens.map(it => parseInt(it.solic_id, 10)).filter(id => !isNaN(id));
+    if (!solicIds.length) {
+      alert('Não foi possível identificar os itens para iniciar separação.');
+      return;
+    }
+    const btn = document.getElementById('btnAguardRetIniciarSep');
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin" style="margin-right:4px;"></i>Iniciando...';
+    try {
+      const r = await fetch('/api/logistica/itens_solicitados/separacao', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ solic_ids: solicIds })
+      });
+      const d = await r.json();
+      if (!d.ok) throw new Error(d.error || 'Erro ao iniciar separação.');
+
+      closeModal();
+
+      // Recarrega os itens atualizados e abre direto o modal Em Separação
+      const ri = await fetch(`/api/logistica/kanban/itens?n_solic=${encodeURIComponent(nSolic)}`, { credentials: 'include' });
+      const di = await ri.json();
+      if (!di.ok) throw new Error(di.error || 'Erro ao buscar itens após iniciar separação.');
+      const itensAtualizados = (di.itens || []).map(it => ({ ...it, solic_ids: [it.solic_id], carr_ids: [it.carr_id] }));
+      if (itensAtualizados.length) {
+        _abrirModalSeparacao({ nome_user: itensAtualizados[0]?.nome_user || nSolic, n_solic: nSolic, itens: itensAtualizados, origem_status: 'Separação' }, []);
+      }
+
+      window._loadSolicitacoesTab.force = true;
+      window._loadSolicitacoesTab();
+      window._loadKanbanSolicitacoesTab.force = true;
+      window._loadKanbanSolicitacoesTab();
+    } catch (err) {
+      alert('Erro: ' + (err.message || err));
+      btn.disabled = false;
+      btn.innerHTML = '<i class="fa-solid fa-play" style="margin-right:4px;"></i>Iniciar separação';
+    }
+  });
 
   document.getElementById('btnAguardRetRecebido')?.addEventListener('click', async () => {
     const solicIds = itens.map(it => parseInt(it.solic_id, 10)).filter(id => !isNaN(id));
@@ -12694,6 +12866,17 @@ function _abrirAtEditModal(id) {
   setV('atEmFechServico',    row.fech_descricao);
   setV('atEmFechObs',        row.fech_obs);
   setV('atEmFechMidias',     row.fech_midias);
+  setV('atEmFechObsTecnico', row.fech_observacao_tecnico);
+  setV('atEmFechNfeUrl',     row.fech_nfe_url);
+  // Link NFe
+  const nfeLinkEl = document.getElementById('atEmFechNfeLink');
+  if (nfeLinkEl) {
+    if (row.fech_nfe_url) { nfeLinkEl.href = row.fech_nfe_url; nfeLinkEl.style.display = ''; }
+    else                  { nfeLinkEl.href = '#';              nfeLinkEl.style.display = 'none'; }
+  }
+  setV('atEmFechDataEnvioNfe', row.fech_data_envio_nfe
+    ? new Date(row.fech_data_envio_nfe).toLocaleString('pt-BR') : '');
+  setV('atEmFechTecnico',    row.tecnico_nome);
 
   // Dados da Busca (at_busca_selecionada)
   _atSetEditBuscaFieldValue('atEmPedido', row.pedido);
@@ -12913,7 +13096,47 @@ async function carregarAtAtendimentos() {
     renderAtAtendimentosRows([]);
     setAtAtendimentosStatus(err?.message || 'Erro ao carregar atendimentos.', true);
   }
+  // Atualiza indicador de NFe aguardando fechamento em paralelo
+  _atAtualizarNfePendenteCount();
 }
+
+async function _atAtualizarNfePendenteCount() {
+  try {
+    const resp = await fetch('/api/sac/at/nfe-pendentes-count', { credentials: 'include' });
+    if (!resp.ok) return;
+    const { total } = await resp.json();
+    const btn   = document.getElementById('atNfePendenteBtn');
+    const badge = document.getElementById('atNfePendenteBadge');
+    if (!btn || !badge) return;
+    badge.textContent = total;
+    btn.style.display = total > 0 ? 'flex' : 'none';
+  } catch (_) { /* silencioso */ }
+}
+
+function _atAplicarFiltroNfePendente() {
+  // Filtra in-memory: NFe preenchida + AT aberto
+  const filtrado = _atAllRows.filter(r =>
+    r.fech_nfe_url && String(r.fech_nfe_url).trim() !== '' &&
+    (!r.status || r.status !== 'Fechado')
+  );
+  // Renderiza diretamente no modo ativo (card ou tabela)
+  if (_atViewMode === 'card') {
+    _renderAtCards(filtrado);
+  } else {
+    _renderAtTabela(filtrado);
+  }
+  // Atualiza texto de status
+  setAtAtendimentosStatus(`${filtrado.length} AT(s) com NFe aguardando fechamento`, false);
+  // Destaca o botão
+  const btn = document.getElementById('atNfePendenteBtn');
+  if (btn) { btn.style.borderColor = '#ef4444'; btn.style.background = 'rgba(239,68,68,.18)'; btn.style.color = '#f87171'; }
+  // Limpa o input de pesquisa livre para não confundir
+  const inp = document.getElementById('atAtendimentosFiltro');
+  if (inp) { inp.value = ''; }
+  const limpar = document.getElementById('atAtendimentosFiltroLimpar');
+  if (limpar) limpar.style.display = 'none';
+}
+window._atAplicarFiltroNfePendente = _atAplicarFiltroNfePendente;
 
 function abrirTelaAtAtendimentos() {
   setSacAtModoVisual('at');
@@ -39415,7 +39638,7 @@ window.renderizarCatalogoOmie = renderizarCatalogoOmie;
 
   document.getElementById('modalAcoesBtnEditar').addEventListener('click', () => { const c = _ctx.codigo; fechar(); abrirModalEditarProduto(c); });
   document.getElementById('modalAcoesBtnCompras').addEventListener('click', () => { const {codigo_produto, codigo, descricao} = _ctx; fechar(); abrirModalUltimasCompras(codigo_produto, codigo, descricao); });
-  document.getElementById('modalAcoesBtnSeparacao').addEventListener('click', async () => {
+  document.getElementById('modalAcoesBtnSeparacao').addEventListener('click', () => {
     const qtdInput = document.getElementById('modalAcoesQtd');
     const unidadeNorm = String(_ctx.unidade || 'UN').toUpperCase();
     let qtd = Number(String(qtdInput?.value || '').replace(',', '.'));
@@ -39427,37 +39650,48 @@ window.renderizarCatalogoOmie = renderizarCatalogoOmie;
       qtd = Math.max(1, Math.round(qtd));
     }
 
-    const btn = document.getElementById('modalAcoesBtnSeparacao');
-    btn.disabled = true;
-    btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Adicionando...';
-    try {
-      const resp = await fetch('/api/logistica/separacao', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({
-          codigo: _ctx.codigo,
-          descricao: _ctx.descricao,
-          quantidade: qtd,
-          unidade: unidadeNorm
-        })
-      });
-      const data = await resp.json();
-      if (!data.ok) throw new Error(data.error || 'tente novamente.');
+    // Capta contexto antes de fechar o modal
+    const codigo   = _ctx.codigo;
+    const descricao = _ctx.descricao;
 
-      const badge = document.getElementById('listaSeparacaoCount');
-      if (badge) {
-        const atual = parseInt(badge.textContent) || 0;
-        const incremento = data.merged ? 0 : 1;
-        const total = atual + incremento;
+    // Fecha imediatamente — não bloqueia o usuário
+    fechar();
+
+    // Atualiza badge otimisticamente (+1 provisório)
+    const badge = document.getElementById('listaSeparacaoCount');
+    if (badge) {
+      const total = (parseInt(badge.textContent) || 0) + 1;
+      badge.textContent = total;
+      badge.style.display = '';
+    }
+
+    // Envia em segundo plano
+    fetch('/api/logistica/separacao', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ codigo, descricao, quantidade: qtd, unidade: unidadeNorm })
+    })
+    .then(r => r.json())
+    .then(data => {
+      if (!data.ok) throw new Error(data.error || 'tente novamente.');
+      // Se o item foi somado a um existente (merged), desfaz o +1 provisório
+      if (data.merged && badge) {
+        const total = Math.max(0, (parseInt(badge.textContent) || 0) - 1);
         badge.textContent = total;
         badge.style.display = total > 0 ? '' : 'none';
       }
-      fechar();
-    } catch (err) {
+    })
+    .catch(err => {
+      // Desfaz o +1 provisório e avisa
+      if (badge) {
+        const total = Math.max(0, (parseInt(badge.textContent) || 0) - 1);
+        badge.textContent = total;
+        badge.style.display = total > 0 ? '' : 'none';
+      }
+      console.error('[Separação] Erro ao registrar:', err.message || err);
       alert('Erro ao registrar separação: ' + (err.message || err));
-      resetBotaoSeparacao();
-    }
+    });
   });
   document.getElementById('modalAcoesBtnMovimentar').addEventListener('click', () => { const {codigo, descricao} = _ctx; fechar(); abrirModalMovimentacao(codigo, descricao); });
   document.getElementById('modalAcoesBtnCarrinho').addEventListener('click', () => {
@@ -62333,9 +62567,11 @@ window.initOscilacaoEstoque = (function () {
     '#facc15', '#60a5fa', '#2dd4bf', '#e11d48'
   ];
 
-  let _chartInstance  = null;
-  let _periodoAtivo   = '30';
-  let _isLoading      = false;
+  let _chartInstance = null;
+  let _periodoAtivo  = '30';
+  let _modoAtivo     = 'qtd'; // 'qtd' | 'brl'
+  let _isLoading     = false;
+  let _dadosCache    = null;  // { rows, datas, armazens }
 
   function setStatus(msg) {
     const el = document.getElementById('osciGrafStatus');
@@ -62348,6 +62584,109 @@ window.initOscilacaoEstoque = (function () {
       b.style.background  = active ? 'rgba(14,165,233,.22)' : 'rgba(255,255,255,.04)';
       b.style.color       = active ? '#7dd3fc' : '#9ca3af';
       b.style.borderColor = active ? '#0ea5e9' : '#374151';
+    });
+  }
+
+  function atualizarToggleBtn() {
+    const btn = document.getElementById('osciToggleModoBtn');
+    if (!btn) return;
+    if (_modoAtivo === 'qtd') {
+      btn.innerHTML = '<i class="fa-solid fa-arrow-right-arrow-left" style="margin-right:5px;"></i>Qtd';
+      btn.style.borderColor = '#7c3aed';
+      btn.style.background  = 'rgba(124,58,237,.18)';
+      btn.style.color       = '#c4b5fd';
+    } else {
+      btn.innerHTML = '<i class="fa-solid fa-arrow-right-arrow-left" style="margin-right:5px;"></i>R$';
+      btn.style.borderColor = '#15803d';
+      btn.style.background  = 'rgba(21,128,61,.2)';
+      btn.style.color       = '#86efac';
+    }
+  }
+
+  function renderChart() {
+    if (!_dadosCache) return;
+    const { rows, datas, armazens } = _dadosCache;
+    const modoValor = _modoAtivo === 'brl';
+    const campo     = modoValor ? 'total_valor' : 'total_fisico';
+
+    const idx = {};
+    rows.forEach(r => { idx[`${r.data}|${r.armazem}`] = r[campo]; });
+
+    const datasets = armazens.map((arm, i) => ({
+      label           : arm,
+      data            : datas.map(d => idx[`${d}|${arm}`] ?? null),
+      borderColor     : CORES[i % CORES.length],
+      backgroundColor : CORES[i % CORES.length] + '22',
+      pointRadius     : datas.length <= 45 ? 3 : 0,
+      pointHoverRadius: 5,
+      borderWidth     : 2,
+      tension         : 0.3,
+      spanGaps        : true,
+    }));
+
+    const canvas = document.getElementById('osciGrafCanvas');
+    if (!canvas) return;
+
+    if (_chartInstance) _chartInstance.destroy();
+
+    _chartInstance = new Chart(canvas.getContext('2d'), {
+      type: 'line',
+      data: { labels: datas, datasets },
+      options: {
+        responsive          : true,
+        maintainAspectRatio : false,
+        interaction: { mode: 'index', intersect: false },
+        plugins: {
+          legend: {
+            display : true,
+            position: 'bottom',
+            labels  : { color: '#94a3b8', font: { size: 11 }, boxWidth: 14, padding: 12 }
+          },
+          tooltip: {
+            backgroundColor: 'rgba(15,23,42,0.92)',
+            titleColor : '#e2e8f0',
+            bodyColor  : '#94a3b8',
+            borderColor: '#334155',
+            borderWidth: 1,
+            callbacks: {
+              label(ctx) {
+                const v = ctx.parsed.y;
+                if (v == null) return ` ${ctx.dataset.label}: —`;
+                if (modoValor) {
+                  return ` ${ctx.dataset.label}: R$ ${v.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+                }
+                return ` ${ctx.dataset.label}: ${v.toLocaleString('pt-BR', { maximumFractionDigits: 0 })} un`;
+              }
+            }
+          }
+        },
+        scales: {
+          x: {
+            grid : { color: 'rgba(255,255,255,.05)' },
+            ticks: { color: '#64748b', maxTicksLimit: 15, maxRotation: 45 }
+          },
+          y: {
+            grid : { color: 'rgba(255,255,255,.07)' },
+            ticks: {
+              color: '#64748b',
+              callback(v) {
+                if (modoValor) {
+                  return v >= 1e6
+                    ? 'R$ ' + (v / 1e6).toFixed(1) + 'M'
+                    : v >= 1e3
+                      ? 'R$ ' + (v / 1e3).toFixed(1) + 'k'
+                      : 'R$ ' + v.toFixed(0);
+                }
+                return v >= 1e6
+                  ? (v / 1e6).toFixed(1) + 'M'
+                  : v >= 1e3
+                    ? (v / 1e3).toFixed(1) + 'k'
+                    : v.toFixed(0);
+              }
+            }
+          }
+        }
+      }
     });
   }
 
@@ -62368,92 +62707,15 @@ window.initOscilacaoEstoque = (function () {
       if (!rows || rows.length === 0) {
         setStatus('Nenhum dado encontrado para o período selecionado.');
         if (_chartInstance) { _chartInstance.destroy(); _chartInstance = null; }
+        _dadosCache = null;
         return;
       }
 
-      // Montar datasets: 1 dataset por armazém
-      const datas     = [...new Set(rows.map(r => r.data))].sort();
-      const armazens  = [...new Set(rows.map(r => r.armazem))].sort();
+      const datas   = [...new Set(rows.map(r => r.data))].sort();
+      const armazens = [...new Set(rows.map(r => r.armazem))].sort();
+      _dadosCache = { rows, datas, armazens };
 
-      // Índice rápido: data+armazem → valor
-      const idx = {};
-      rows.forEach(r => { idx[`${r.data}|${r.armazem}`] = r.total_fisico; });
-
-      const datasets = armazens.map((arm, i) => ({
-        label   : arm,
-        data    : datas.map(d => idx[`${d}|${arm}`] ?? null),
-        borderColor     : CORES[i % CORES.length],
-        backgroundColor : CORES[i % CORES.length] + '22',
-        pointRadius     : datas.length <= 45 ? 3 : 0,
-        pointHoverRadius: 5,
-        borderWidth     : 2,
-        tension         : 0.3,
-        spanGaps        : true,
-      }));
-
-      const canvas = document.getElementById('osciGrafCanvas');
-      if (!canvas) { setStatus('Canvas não encontrado.'); return; }
-
-      if (_chartInstance) _chartInstance.destroy();
-
-      _chartInstance = new Chart(canvas.getContext('2d'), {
-        type: 'line',
-        data: { labels: datas, datasets },
-        options: {
-          responsive       : true,
-          maintainAspectRatio: false,
-          interaction: { mode: 'index', intersect: false },
-          plugins: {
-            legend: {
-              display : true,
-              position: 'bottom',
-              labels  : {
-                color    : '#94a3b8',
-                font     : { size: 11 },
-                boxWidth : 14,
-                padding  : 12,
-              }
-            },
-            tooltip: {
-              backgroundColor: 'rgba(15,23,42,0.92)',
-              titleColor: '#e2e8f0',
-              bodyColor : '#94a3b8',
-              borderColor: '#334155',
-              borderWidth: 1,
-              callbacks: {
-                label(ctx) {
-                  const v = ctx.parsed.y;
-                  return ` ${ctx.dataset.label}: ${v != null ? v.toLocaleString('pt-BR', { maximumFractionDigits: 0 }) : '—'}`;
-                }
-              }
-            }
-          },
-          scales: {
-            x: {
-              grid  : { color: 'rgba(255,255,255,.05)' },
-              ticks : {
-                color     : '#64748b',
-                maxTicksLimit: 15,
-                maxRotation: 45,
-              }
-            },
-            y: {
-              grid  : { color: 'rgba(255,255,255,.07)' },
-              ticks : {
-                color: '#64748b',
-                callback(v) {
-                  return v >= 1e6
-                    ? (v / 1e6).toFixed(1) + 'M'
-                    : v >= 1e3
-                      ? (v / 1e3).toFixed(1) + 'k'
-                      : v.toFixed(0);
-                }
-              }
-            }
-          }
-        }
-      });
-
+      renderChart();
       setStatus(`${rows.length} registros · ${datas.length} datas · ${armazens.length} armazéns`);
     } catch (err) {
       console.error('[oscilacao-estoque]', err);
@@ -62466,7 +62728,6 @@ window.initOscilacaoEstoque = (function () {
   return function initOscilacaoEstoque() {
     // Botões de período
     document.querySelectorAll('.osci-periodo-btn').forEach(btn => {
-      // Remove listener antigo clonando
       const novo = btn.cloneNode(true);
       btn.parentNode.replaceChild(novo, btn);
       novo.addEventListener('click', () => {
@@ -62475,6 +62736,18 @@ window.initOscilacaoEstoque = (function () {
         carregar();
       });
     });
+
+    // Botão alternância Qtd / R$
+    const btnToggle = document.getElementById('osciToggleModoBtn');
+    if (btnToggle) {
+      const novoToggle = btnToggle.cloneNode(true);
+      btnToggle.parentNode.replaceChild(novoToggle, btnToggle);
+      novoToggle.addEventListener('click', () => {
+        _modoAtivo = _modoAtivo === 'qtd' ? 'brl' : 'qtd';
+        atualizarToggleBtn();
+        renderChart();
+      });
+    }
 
     // Botão refresh
     const btnRefresh = document.getElementById('osciRefreshBtn');
@@ -62485,6 +62758,7 @@ window.initOscilacaoEstoque = (function () {
     }
 
     setActiveBtn(_periodoAtivo);
+    atualizarToggleBtn();
     carregar();
   };
 })();

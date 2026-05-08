@@ -3392,6 +3392,15 @@
                     </div>
                   </div>
 
+                  <!-- Indicador NFe aguardando fechamento -->
+                  <button id="atNfePendenteBtn" title="NFe aguardando fechamento de OS" type="button"
+                    style="display:none;position:relative;padding:6px 12px;border-radius:8px;border:1px solid #d97706;background:rgba(217,119,6,.12);color:#f59e0b;cursor:pointer;align-items:center;gap:6px;font-size:13px;white-space:nowrap;"
+                    onclick="_atAplicarFiltroNfePendente()">
+                    <i class="fa-solid fa-file-invoice"></i>
+                    <span>NFe Tec</span>
+                    <span id="atNfePendenteBadge" style="background:#ef4444;color:#fff;font-size:10px;font-weight:700;border-radius:20px;padding:1px 7px;min-width:18px;text-align:center;">0</span>
+                  </button>
+
                   <div style="display:flex;gap:4px;">
                     <button id="atViewTabela" title="Modo tabela" type="button"
                       style="padding:6px 10px;border-radius:8px 0 0 8px;border:1px solid var(--border-color,#374151);background:#0ea5e9;color:#fff;cursor:pointer;">
@@ -3746,8 +3755,27 @@
                     <textarea id="atEmFechObs" class="at-em-input" rows="2" style="width:100%;box-sizing:border-box;" placeholder="Observações..."></textarea>
                   </div>
                   <div class="at-em-wrap" style="grid-column:1/-1;">
+                    <label class="at-em-lbl">Obs. do Técnico</label>
+                    <textarea id="atEmFechObsTecnico" class="at-em-input" rows="2" style="width:100%;box-sizing:border-box;opacity:.8;cursor:default;" placeholder="—" readonly></textarea>
+                  </div>
+                  <div class="at-em-wrap" style="grid-column:1/-1;">
                     <label class="at-em-lbl">Mídias (URLs)</label>
                     <input type="text" id="atEmFechMidias" class="at-em-input" placeholder="URLs separadas por vírgula">
+                  </div>
+                  <div class="at-em-wrap">
+                    <label class="at-em-lbl">URL da NFe</label>
+                    <div id="atEmFechNfeUrlWrap" style="display:flex;align-items:center;gap:8px;">
+                      <input type="text" id="atEmFechNfeUrl" class="at-em-input" placeholder="—" readonly style="opacity:.8;cursor:default;flex:1;">
+                      <a id="atEmFechNfeLink" href="#" target="_blank" style="display:none;white-space:nowrap;font-size:12px;color:#38bdf8;text-decoration:none;" title="Abrir NFe">📄 Abrir</a>
+                    </div>
+                  </div>
+                  <div class="at-em-wrap">
+                    <label class="at-em-lbl">Data Envio NFe</label>
+                    <input type="text" id="atEmFechDataEnvioNfe" class="at-em-input" placeholder="—" readonly style="opacity:.8;cursor:default;">
+                  </div>
+                  <div class="at-em-wrap" style="grid-column:1/-1;">
+                    <label class="at-em-lbl">Técnico</label>
+                    <input type="text" id="atEmFechTecnico" class="at-em-input" placeholder="—" readonly style="opacity:.8;cursor:default;">
                   </div>
                 </div>
               </div>
@@ -8117,6 +8145,10 @@
             <button class="osci-periodo-btn" data-per="tudo"
               style="padding:5px 12px;border-radius:8px;border:1px solid #374151;background:rgba(255,255,255,.04);color:#9ca3af;font-size:12px;cursor:pointer;">Tudo</button>
           </div>
+          <button id="osciToggleModoBtn" type="button"
+            style="padding:5px 14px;border-radius:8px;border:1px solid #7c3aed;background:rgba(124,58,237,.18);color:#c4b5fd;font-size:12px;cursor:pointer;font-weight:600;letter-spacing:.5px;">
+            <i class="fa-solid fa-arrow-right-arrow-left" style="margin-right:5px;"></i>Qtd
+          </button>
           <button id="osciRefreshBtn" type="button" title="Atualizar"
             style="padding:6px 12px;border-radius:8px;border:1px solid #374151;background:rgba(255,255,255,.04);color:#9ca3af;cursor:pointer;display:flex;align-items:center;gap:6px;font-size:13px;">
             <i class="fa-solid fa-rotate"></i>
