@@ -9435,7 +9435,24 @@ const sacEnvioStatus = document.getElementById('sacEnvioStatus');
 const sacObservacao = document.getElementById('sacObservacao');
 const sacNumeroSep = document.getElementById('sacNumeroSep');
 const sacRefreshBtn = document.getElementById('sacRefreshBtn');
+const sacRelatorioBtn = document.getElementById('sacRelatorioBtn');
 const sacTabelaBody = document.getElementById('sacTabelaBody');
+const sacRelatorioGraficoWrapper = document.getElementById('sacRelatorioGraficoWrapper');
+const sacRelatorioGraficoCanvas = document.getElementById('sacRelatorioGraficoCanvas');
+const sacRelatorioGraficoVazio = document.getElementById('sacRelatorioGraficoVazio');
+const sacRelatorioConteudoGraficoCanvas = document.getElementById('sacRelatorioConteudoGraficoCanvas');
+const sacRelatorioConteudoGraficoVazio = document.getElementById('sacRelatorioConteudoGraficoVazio');
+const sacRelatorioConteudoUsuarioSelect = document.getElementById('sacRelatorioConteudoUsuarioSelect');
+const sacRelatorioDrilldownWrapper = document.getElementById('sacRelatorioDrilldownWrapper');
+const sacRelatorioDrilldownTitulo = document.getElementById('sacRelatorioDrilldownTitulo');
+const sacRelatorioDrilldownBody = document.getElementById('sacRelatorioDrilldownBody');
+const sacRelatorioVoltarBtn = document.getElementById('sacRelatorioVoltarBtn');
+const sacRelatorioDownloadBtn = document.getElementById('sacRelatorioDownloadBtn');
+const sacPeriodo3mBtn = document.getElementById('sacPeriodo3mBtn');
+const sacPeriodo4mBtn = document.getElementById('sacPeriodo4mBtn');
+const sacPeriodo6mBtn = document.getElementById('sacPeriodo6mBtn');
+const sacPeriodo12mBtn = document.getElementById('sacPeriodo12mBtn');
+const sacPeriodoTudoBtn = document.getElementById('sacPeriodoTudoBtn');
 const atTipoAtendimentoInput = document.getElementById('atTipoAtendimento');
 const atNomeRevendaClienteInput = document.getElementById('atNomeRevendaCliente');
 const atTelefoneInput = document.getElementById('atTelefone');
@@ -16728,8 +16745,622 @@ async function carregarSacSolicitacoes(targetBody, { hideDone = false, titleOnly
   }
 }
 
+let _sacRelatorioUsuariosChart = null;
+let _sacRelatorioConteudoChart = null;
+let _sacRelatorioRowsCache = [];
+let _sacRelatorioPeriodoMeses = 4;
+let _sacRelatorioConteudoUsuarioSelecionado = '';
+let _sacRelatorioConteudoTopItens = [];
+let _sacRelatorioDrilldownItensCache = [];
+let _sacRelatorioDrilldownTituloCache = 'Registros da barra selecionada';
+
+function _sacCorPorIndice(i) {
+  const cores = ['#6366f1', '#10b981', '#f59e0b', '#ef4444', '#06b6d4', '#8b5cf6', '#14b8a6', '#f97316', '#22c55e', '#eab308'];
+  return cores[i % cores.length];
+}
+
+function _sacPeriodoMesAno(dateValue) {
+  const d = new Date(dateValue);
+  if (Number.isNaN(d.getTime())) return 'Sem data';
+  const mes = String(d.getMonth() + 1).padStart(2, '0');
+  return `${mes}/${d.getFullYear()}`;
+}
+
+function _sacRotuloCurto(nome, limite = 44) {
+  const texto = String(nome || '').trim().replace(/\s+/g, ' ');
+  if (texto.length <= limite) return texto;
+  return `${texto.slice(0, limite - 1)}...`;
+}
+
+function _sacPeriodoKey(dateValue) {
+  const d = new Date(dateValue);
+  if (Number.isNaN(d.getTime())) return null;
+  return (d.getFullYear() * 100) + (d.getMonth() + 1);
+}
+
+function _sacAplicarPeriodo(rows, meses) {
+  const lista = Array.isArray(rows) ? rows : [];
+  if (!meses || meses <= 0) return lista;
+  const chaves = lista
+    .map((r) => _sacPeriodoKey(r?.created_at))
+    .filter((v) => Number.isFinite(v));
+  if (!chaves.length) return lista;
+  const maxKey = Math.max(...chaves);
+  const maxAno = Math.floor(maxKey / 100);
+  const maxMes = maxKey % 100;
+  const maxData = new Date(maxAno, maxMes - 1, 1);
+  const minData = new Date(maxData.getFullYear(), maxData.getMonth() - (meses - 1), 1);
+  return lista.filter((r) => {
+    const d = new Date(r?.created_at);
+    if (Number.isNaN(d.getTime())) return false;
+    const dm = new Date(d.getFullYear(), d.getMonth(), 1);
+    return dm >= minData && dm <= maxData;
+  });
+}
+
+function _sacSetPeriodoBotaoAtivo() {
+  const mapa = [
+    [sacPeriodo3mBtn, 3],
+    [sacPeriodo4mBtn, 4],
+    [sacPeriodo6mBtn, 6],
+    [sacPeriodo12mBtn, 12],
+    [sacPeriodoTudoBtn, 0]
+  ];
+  mapa.forEach(([btn, valor]) => {
+    if (!btn) return;
+    const ativo = valor === _sacRelatorioPeriodoMeses;
+    btn.style.background = ativo
+      ? 'linear-gradient(135deg,#4f46e5 0%,#4338ca 100%)'
+      : '#1f2937';
+    btn.style.color = ativo ? '#ffffff' : '#cbd5e1';
+  });
+}
+
+function _sacAtualizarSelectUsuario(rowsPeriodo) {
+  if (!sacRelatorioConteudoUsuarioSelect) return;
+  const rows = Array.isArray(rowsPeriodo) ? rowsPeriodo : [];
+  const usuarios = Array.from(new Set(rows
+    .map((r) => String(r?.usuario || '').trim())
+    .filter(Boolean)))
+    .sort((a, b) => a.localeCompare(b, 'pt-BR'));
+
+  const valorAtual = _sacRelatorioConteudoUsuarioSelecionado;
+  const existeAtual = valorAtual && usuarios.includes(valorAtual);
+  if (valorAtual && !existeAtual) _sacRelatorioConteudoUsuarioSelecionado = '';
+
+  sacRelatorioConteudoUsuarioSelect.innerHTML = [
+    '<option value="">Todos</option>',
+    ...usuarios.map((u) => `<option value="${String(u).replace(/"/g, '&quot;')}">${u}</option>`)
+  ].join('');
+
+  sacRelatorioConteudoUsuarioSelect.value = _sacRelatorioConteudoUsuarioSelecionado;
+}
+
+function _sacLimparDrilldown() {
+  if (!sacRelatorioDrilldownWrapper || !sacRelatorioDrilldownBody || !sacRelatorioDrilldownTitulo) return;
+  sacRelatorioDrilldownWrapper.style.display = 'none';
+  sacRelatorioDrilldownTitulo.textContent = 'Registros da barra selecionada';
+  sacRelatorioDrilldownBody.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:14px;color:var(--inactive-color);">Clique em uma barra para ver os conteúdos.</td></tr>';
+  _sacRelatorioDrilldownItensCache = [];
+  _sacRelatorioDrilldownTituloCache = 'Registros da barra selecionada';
+}
+
+function _sacExpandirConteudoDosRegistros(rows, seletorItem) {
+  const lista = Array.isArray(rows) ? rows : [];
+  const itens = [];
+  lista.forEach((r) => {
+    const extraidos = _sacExtrairItensDoConteudo(r?.conteudo || '');
+    extraidos.forEach((it) => {
+      const nome = String(it?.nome || '').trim();
+      const quantidade = Number(it?.quantidade || 0) || 1;
+      if (!nome) return;
+      if (typeof seletorItem === 'function' && !seletorItem(nome, r)) return;
+      itens.push({
+        id: r?.id,
+        created_at: r?.created_at,
+        usuario: r?.usuario,
+        observacao: r?.observacao,
+        conteudo: nome,
+        quantidade
+      });
+    });
+  });
+  return itens;
+}
+
+function _sacRenderDrilldown(titulo, itensConteudo) {
+  if (!sacRelatorioDrilldownWrapper || !sacRelatorioDrilldownBody || !sacRelatorioDrilldownTitulo) return;
+  const lista = Array.isArray(itensConteudo) ? itensConteudo : [];
+  sacRelatorioDrilldownWrapper.style.display = '';
+  sacRelatorioDrilldownTitulo.textContent = titulo || 'Registros da barra selecionada';
+  _sacRelatorioDrilldownItensCache = lista;
+  _sacRelatorioDrilldownTituloCache = titulo || 'Registros da barra selecionada';
+
+  if (!lista.length) {
+    sacRelatorioDrilldownBody.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:14px;color:var(--inactive-color);">Nenhum conteúdo encontrado para esta barra.</td></tr>';
+    return;
+  }
+
+  sacRelatorioDrilldownBody.innerHTML = lista.map((item) => {
+    const criadoEm = item?.created_at ? new Date(item.created_at).toLocaleString('pt-BR') : '—';
+    const usuario = String(item?.usuario || 'Sem usuário');
+    const observacao = String(item?.observacao || '—');
+    const conteudo = String(item?.conteudo || '—');
+    const qtd = Number(item?.quantidade || 0);
+    return `
+      <tr>
+        <td>${item?.id ?? '—'}</td>
+        <td>${criadoEm}</td>
+        <td>${escapeHtml(usuario)}</td>
+        <td title="${escapeHtml(conteudo)}" style="max-width:340px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(conteudo)}</td>
+        <td>${qtd}</td>
+        <td title="${escapeHtml(observacao)}" style="max-width:360px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(observacao)}</td>
+      </tr>`;
+  }).join('');
+}
+
+function _sacEscaparExcelHtml(v) {
+  return String(v ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function _sacMontarItensConteudoParaExportacao() {
+  const rowsPeriodo = _sacAplicarPeriodo(_sacRelatorioRowsCache, _sacRelatorioPeriodoMeses);
+  const rowsConteudo = _sacRelatorioConteudoUsuarioSelecionado
+    ? rowsPeriodo.filter((r) => String(r?.usuario || '').trim() === _sacRelatorioConteudoUsuarioSelecionado)
+    : rowsPeriodo;
+  return _sacExpandirConteudoDosRegistros(rowsConteudo);
+}
+
+function _sacBaixarRelatorioExcel() {
+  const itens = _sacRelatorioDrilldownItensCache?.length
+    ? _sacRelatorioDrilldownItensCache
+    : _sacMontarItensConteudoParaExportacao();
+
+  if (!itens.length) {
+    alert('Não há dados para exportar no relatório.');
+    return;
+  }
+
+  const titulo = _sacRelatorioDrilldownItensCache?.length
+    ? _sacRelatorioDrilldownTituloCache
+    : 'Registros - Conteúdo: Todos os itens';
+
+  const linhasHtml = itens.map((item) => {
+    const criadoEm = item?.created_at ? new Date(item.created_at).toLocaleString('pt-BR') : '';
+    return `
+      <tr>
+        <td>${_sacEscaparExcelHtml(item?.id ?? '')}</td>
+        <td>${_sacEscaparExcelHtml(criadoEm)}</td>
+        <td>${_sacEscaparExcelHtml(item?.usuario || '')}</td>
+        <td>${_sacEscaparExcelHtml(item?.conteudo || '')}</td>
+        <td>${_sacEscaparExcelHtml(Number(item?.quantidade || 0))}</td>
+        <td>${_sacEscaparExcelHtml(item?.observacao || '')}</td>
+      </tr>`;
+  }).join('');
+
+  const planilhaHtml = `
+<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">
+  <head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="Content-Type" content="application/vnd.ms-excel; charset=UTF-8" />
+    <title>${_sacEscaparExcelHtml(titulo)}</title>
+  </head>
+  <body>
+    <table border="1">
+      <tr>
+        <th colspan="6" style="font-size:16px;">${_sacEscaparExcelHtml(titulo)}</th>
+      </tr>
+      <tr>
+        <th>ID Registro</th>
+        <th>Criado em</th>
+        <th>Usuário</th>
+        <th>Conteúdo</th>
+        <th>Quantidade</th>
+        <th>Observação</th>
+      </tr>
+      ${linhasHtml}
+    </table>
+  </body>
+</html>`;
+
+  const blob = new Blob([`\uFEFF${planilhaHtml}`], { type: 'application/vnd.ms-excel;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  const data = new Date().toISOString().slice(0, 10);
+  a.href = url;
+  a.download = `relatorio_sac_conteudo_${data}.xls`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+function _renderizarRelatorioSacPorUsuario() {
+  if (!sacRelatorioGraficoCanvas || !sacRelatorioConteudoGraficoCanvas) return;
+
+  const rows = _sacAplicarPeriodo(_sacRelatorioRowsCache, _sacRelatorioPeriodoMeses);
+  _sacAtualizarSelectUsuario(rows);
+  _sacLimparDrilldown();
+
+  // -------------------- GRÁFICO 1: POR USUÁRIO --------------------
+  const agrupado = new Map(); // periodo -> usuario -> total
+  const usuariosSet = new Set();
+
+  rows.forEach((r) => {
+    const periodo = _sacPeriodoMesAno(r?.created_at);
+    const usuario = String(r?.usuario || 'Sem usuário').trim() || 'Sem usuário';
+    const itens = _sacExtrairItensDoConteudo(r?.conteudo || '');
+    const totalItens = itens.reduce((sum, it) => sum + (Number(it?.quantidade || 0) || 1), 0);
+    if (!agrupado.has(periodo)) agrupado.set(periodo, new Map());
+    const mapaUser = agrupado.get(periodo);
+    mapaUser.set(usuario, (mapaUser.get(usuario) || 0) + totalItens);
+    usuariosSet.add(usuario);
+  });
+
+  const periodos = Array.from(agrupado.keys()).sort((a, b) => {
+    const [ma, ya] = a.split('/').map(Number);
+    const [mb, yb] = b.split('/').map(Number);
+    return (ya - yb) || (ma - mb);
+  });
+
+  const usuarios = Array.from(usuariosSet)
+    .map((u) => ({
+      nome: u,
+      total: periodos.reduce((sum, p) => sum + (agrupado.get(p)?.get(u) || 0), 0)
+    }))
+    .sort((a, b) => b.total - a.total)
+    .slice(0, 2);
+
+  const datasets = usuarios.map((user, idx) => ({
+    label: _sacRotuloCurto(user.nome, 26),
+    _fullLabel: user.nome,
+    data: periodos.map((p) => agrupado.get(p)?.get(user.nome) || 0),
+    backgroundColor: idx === 0 ? '#22c55e' : '#38bdf8',
+    borderRadius: 6,
+    maxBarThickness: 42
+  }));
+
+  if (!periodos.length || !usuarios.length) {
+    if (_sacRelatorioUsuariosChart) {
+      _sacRelatorioUsuariosChart.destroy();
+      _sacRelatorioUsuariosChart = null;
+    }
+    sacRelatorioGraficoCanvas.style.display = 'none';
+    if (sacRelatorioGraficoVazio) {
+      sacRelatorioGraficoVazio.style.display = '';
+      sacRelatorioGraficoVazio.textContent = 'Nenhum dado encontrado para o período selecionado.';
+    }
+  } else {
+    if (_sacRelatorioUsuariosChart) {
+      _sacRelatorioUsuariosChart.destroy();
+      _sacRelatorioUsuariosChart = null;
+    }
+
+    sacRelatorioGraficoCanvas.style.display = '';
+    if (sacRelatorioGraficoVazio) sacRelatorioGraficoVazio.style.display = 'none';
+
+    _sacRelatorioUsuariosChart = new Chart(sacRelatorioGraficoCanvas.getContext('2d'), {
+      type: 'bar',
+      data: { labels: periodos, datasets },
+      options: {
+        onClick: (_event, elements, chart) => {
+          if (!elements?.length) return;
+          const el = elements[0];
+          const periodo = chart.data.labels?.[el.index];
+          const ds = chart.data.datasets?.[el.datasetIndex];
+          const usuario = String(ds?._fullLabel || ds?.label || '');
+          const rowsBarra = rows.filter((r) => _sacPeriodoMesAno(r?.created_at) === periodo && String(r?.usuario || '').trim() === usuario);
+          const itensBarra = _sacExpandirConteudoDosRegistros(rowsBarra);
+          _sacRenderDrilldown(
+            `Registros - Usuário: ${usuario} | Período: ${periodo}`,
+            itensBarra
+          );
+        },
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: {
+            position: 'top',
+            labels: { color: '#cbd5e1', boxWidth: 14, boxHeight: 14 }
+          },
+          tooltip: {
+            callbacks: {
+              title: (items) => `Período: ${items?.[0]?.label || ''}`,
+              label: (item) => `${item.dataset._fullLabel || item.dataset.label}: ${item.raw} item(ns)`
+            }
+          }
+        },
+        scales: {
+          x: {
+            stacked: false,
+            ticks: { color: '#94a3b8' },
+            grid: { color: 'rgba(148,163,184,0.15)' }
+          },
+          y: {
+            stacked: false,
+            beginAtZero: true,
+            ticks: { color: '#94a3b8', precision: 0 },
+            grid: { color: 'rgba(148,163,184,0.15)' }
+          }
+        }
+      }
+    });
+  }
+
+  // -------------------- GRÁFICO 2: CONTEÚDO (ITEM X QUANTIDADE) --------------------
+  const agrupadoConteudo = new Map(); // periodo -> item -> quantidade
+  const itensSet = new Set();
+
+  const rowsConteudo = _sacRelatorioConteudoUsuarioSelecionado
+    ? rows.filter((r) => String(r?.usuario || '').trim() === _sacRelatorioConteudoUsuarioSelecionado)
+    : rows;
+
+  rowsConteudo.forEach((r) => {
+    const periodo = _sacPeriodoMesAno(r?.created_at);
+    const itens = _sacExtrairItensDoConteudo(r?.conteudo || '');
+    if (!agrupadoConteudo.has(periodo)) agrupadoConteudo.set(periodo, new Map());
+    const mapaItens = agrupadoConteudo.get(periodo);
+
+    itens.forEach((it) => {
+      const nome = String(it?.nome || '').trim();
+      const qtd = Number(it?.quantidade || 0) || 1;
+      if (!nome) return;
+      itensSet.add(nome);
+      mapaItens.set(nome, (mapaItens.get(nome) || 0) + qtd);
+    });
+  });
+
+  const periodosConteudo = Array.from(agrupadoConteudo.keys()).sort((a, b) => {
+    const [ma, ya] = a.split('/').map(Number);
+    const [mb, yb] = b.split('/').map(Number);
+    return (ya - yb) || (ma - mb);
+  });
+  const itens = Array.from(itensSet);
+
+  if (!periodosConteudo.length || !itens.length) {
+    if (_sacRelatorioConteudoChart) {
+      _sacRelatorioConteudoChart.destroy();
+      _sacRelatorioConteudoChart = null;
+    }
+    sacRelatorioConteudoGraficoCanvas.style.display = 'none';
+    if (sacRelatorioConteudoGraficoVazio) {
+      sacRelatorioConteudoGraficoVazio.style.display = '';
+      sacRelatorioConteudoGraficoVazio.textContent = _sacRelatorioConteudoUsuarioSelecionado
+        ? `Nenhum dado de conteúdo para o usuário "${_sacRelatorioConteudoUsuarioSelecionado}" no período selecionado.`
+        : 'Nenhum dado encontrado para o gráfico de conteúdo.';
+    }
+    return;
+  }
+
+  const topItens = itens
+    .map((nome) => ({
+      nome,
+      total: periodosConteudo.reduce((sum, p) => sum + (agrupadoConteudo.get(p)?.get(nome) || 0), 0)
+    }))
+    .sort((a, b) => b.total - a.total)
+    .slice(0, 8);
+  _sacRelatorioConteudoTopItens = topItens.map((x) => x.nome);
+
+  const totalOutros = itens
+    .filter((nome) => !topItens.some((top) => top.nome === nome))
+    .reduce((acc, nome) => acc + periodosConteudo.reduce((sum, p) => sum + (agrupadoConteudo.get(p)?.get(nome) || 0), 0), 0);
+
+  const datasetsConteudo = topItens.map((item, idx) => ({
+    label: _sacRotuloCurto(item.nome, 34),
+    _fullLabel: item.nome,
+    data: periodosConteudo.map((p) => agrupadoConteudo.get(p)?.get(item.nome) || 0),
+    backgroundColor: _sacCorPorIndice(idx),
+    borderRadius: 6,
+    maxBarThickness: 36
+  }));
+
+  if (totalOutros > 0) {
+    datasetsConteudo.push({
+      label: 'Outros itens',
+      _fullLabel: 'Outros itens',
+      data: periodosConteudo.map((p) => {
+        const topSet = new Set(topItens.map((it) => it.nome));
+        return itens
+          .filter((nome) => !topSet.has(nome))
+          .reduce((sum, nome) => sum + (agrupadoConteudo.get(p)?.get(nome) || 0), 0);
+      }),
+      backgroundColor: '#64748b',
+      borderRadius: 6,
+      maxBarThickness: 36
+    });
+  }
+
+  if (_sacRelatorioConteudoChart) {
+    _sacRelatorioConteudoChart.destroy();
+    _sacRelatorioConteudoChart = null;
+  }
+
+  sacRelatorioConteudoGraficoCanvas.style.display = '';
+  if (sacRelatorioConteudoGraficoVazio) sacRelatorioConteudoGraficoVazio.style.display = 'none';
+
+  _sacRelatorioConteudoChart = new Chart(sacRelatorioConteudoGraficoCanvas.getContext('2d'), {
+    type: 'bar',
+    data: { labels: periodosConteudo, datasets: datasetsConteudo },
+    options: {
+      onClick: (_event, elements, chart) => {
+        if (!elements?.length) return;
+        const el = elements[0];
+        const periodo = chart.data.labels?.[el.index];
+        const ds = chart.data.datasets?.[el.datasetIndex];
+        const itemLabel = String(ds?._fullLabel || ds?.label || '');
+        const topSet = new Set(_sacRelatorioConteudoTopItens || []);
+
+        const rowsBarra = rowsConteudo.filter((r) => {
+          if (_sacPeriodoMesAno(r?.created_at) !== periodo) return false;
+          const itensRow = _sacExtrairItensDoConteudo(r?.conteudo || '');
+          if (itemLabel === 'Outros itens') {
+            return itensRow.some((it) => !topSet.has(String(it?.nome || '').trim()));
+          }
+          return itensRow.some((it) => String(it?.nome || '').trim() === itemLabel);
+        });
+
+        const itensBarra = _sacExpandirConteudoDosRegistros(rowsBarra, (nome) => {
+          if (itemLabel === 'Outros itens') return !topSet.has(String(nome || '').trim());
+          return String(nome || '').trim() === itemLabel;
+        });
+
+        _sacRenderDrilldown(
+          `Registros - Conteúdo: ${itemLabel} | Período: ${periodo}`,
+          itensBarra
+        );
+      },
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: {
+          position: 'top',
+          labels: { color: '#cbd5e1', boxWidth: 14, boxHeight: 14 }
+        },
+        tooltip: {
+          callbacks: {
+            title: (items) => `Período: ${items?.[0]?.label || ''}`,
+            label: (item) => `${item.dataset._fullLabel || item.dataset.label}: ${item.raw} unidade(s)`
+          }
+        }
+      },
+      scales: {
+        x: {
+          stacked: true,
+          ticks: { color: '#94a3b8' },
+          grid: { color: 'rgba(148,163,184,0.15)' }
+        },
+        y: {
+          stacked: true,
+          beginAtZero: true,
+          ticks: { color: '#94a3b8', precision: 0 },
+          grid: { color: 'rgba(148,163,184,0.15)' }
+        }
+      }
+    }
+  });
+}
+
+function _sacExtrairItensDoConteudo(conteudoRaw) {
+  const saida = [];
+  const conteudo = String(conteudoRaw || '').trim();
+  if (!conteudo) return saida;
+
+  try {
+    const parsed = JSON.parse(conteudo);
+    if (Array.isArray(parsed)) {
+      parsed.forEach((item) => {
+        const nome = String(item?.conteudo || item?.item || '').trim();
+        const quantidade = Number(item?.quantidade || 0) || 1;
+        if (nome) saida.push({ nome, quantidade });
+      });
+      if (saida.length) return saida;
+    }
+  } catch (_) {
+    // segue para parse em texto livre
+  }
+
+  const reItens = /Item\s+\d+\s*:\s*([\s\S]*?)\s+Quantidade\s+(\d+)(?=\s*Item\s+\d+\s*:|$)/gi;
+  let m;
+  while ((m = reItens.exec(conteudo)) !== null) {
+    const nome = String(m[1] || '').trim().replace(/\s+/g, ' ');
+    const quantidade = Number(m[2] || 0) || 1;
+    if (nome) saida.push({ nome, quantidade });
+  }
+  if (saida.length) return saida;
+
+  const reQtdFinal = /^([\s\S]*?)\s*-\s*Quantidade\s*(\d+)$/i;
+  const matchFinal = conteudo.match(reQtdFinal);
+  if (matchFinal) {
+    const nome = String(matchFinal[1] || '').trim();
+    const quantidade = Number(matchFinal[2] || 0) || 1;
+    if (nome) return [{ nome, quantidade }];
+  }
+
+  return [{ nome: conteudo.replace(/\s+/g, ' ').trim(), quantidade: 1 }];
+}
+
+async function _abrirRelatorioSac() {
+  if (!sacRelatorioGraficoWrapper || !sacRelatorioGraficoCanvas || !sacTabelaBody) return;
+  if (typeof Chart === 'undefined') {
+    alert('Biblioteca de gráfico não disponível no momento.');
+    return;
+  }
+
+  const tabelaWrapper = sacTabelaBody.closest('.tabela-wrapper');
+  sacRelatorioGraficoWrapper.style.display = '';
+  if (tabelaWrapper) tabelaWrapper.style.display = 'none';
+
+  if (sacRelatorioGraficoVazio) {
+    sacRelatorioGraficoVazio.style.display = 'none';
+    sacRelatorioGraficoVazio.textContent = 'Carregando dados...';
+  }
+
+  try {
+    const resp = await fetch('/api/sac/solicitacoes');
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok || data?.ok === false) {
+      throw new Error(data?.error || 'Erro ao carregar dados do relatório.');
+    }
+    _sacRelatorioRowsCache = Array.isArray(data?.rows) ? data.rows : [];
+    _sacSetPeriodoBotaoAtivo();
+    _renderizarRelatorioSacPorUsuario();
+  } catch (err) {
+    if (_sacRelatorioUsuariosChart) {
+      _sacRelatorioUsuariosChart.destroy();
+      _sacRelatorioUsuariosChart = null;
+    }
+    if (_sacRelatorioConteudoChart) {
+      _sacRelatorioConteudoChart.destroy();
+      _sacRelatorioConteudoChart = null;
+    }
+    sacRelatorioGraficoCanvas.style.display = 'none';
+    if (sacRelatorioConteudoGraficoCanvas) sacRelatorioConteudoGraficoCanvas.style.display = 'none';
+    if (sacRelatorioGraficoVazio) {
+      sacRelatorioGraficoVazio.style.display = '';
+      sacRelatorioGraficoVazio.textContent = err?.message || 'Erro ao gerar relatório.';
+    }
+    if (sacRelatorioConteudoGraficoVazio) {
+      sacRelatorioConteudoGraficoVazio.style.display = '';
+      sacRelatorioConteudoGraficoVazio.textContent = err?.message || 'Erro ao gerar relatório de conteúdo.';
+    }
+  }
+}
+
+function _fecharRelatorioSac() {
+  const tabelaWrapper = sacTabelaBody?.closest('.tabela-wrapper');
+  if (sacRelatorioGraficoWrapper) sacRelatorioGraficoWrapper.style.display = 'none';
+  if (tabelaWrapper) tabelaWrapper.style.display = '';
+  _sacLimparDrilldown();
+}
+
+function _setRelatorioSacPeriodo(meses) {
+  _sacRelatorioPeriodoMeses = meses;
+  _sacSetPeriodoBotaoAtivo();
+  _renderizarRelatorioSacPorUsuario();
+}
+
+if (sacRelatorioConteudoUsuarioSelect) {
+  sacRelatorioConteudoUsuarioSelect.addEventListener('change', () => {
+    _sacRelatorioConteudoUsuarioSelecionado = String(sacRelatorioConteudoUsuarioSelect.value || '');
+    _renderizarRelatorioSacPorUsuario();
+  });
+}
+
 // Painel SAC: filtra por usuário logado (filterByUser: true)
 sacRefreshBtn?.addEventListener('click', () => carregarSacSolicitacoes(sacTabelaBody, { hideDone: false, filterByUser: true }));
+sacRelatorioBtn?.addEventListener('click', _abrirRelatorioSac);
+sacRelatorioVoltarBtn?.addEventListener('click', _fecharRelatorioSac);
+sacRelatorioDownloadBtn?.addEventListener('click', _sacBaixarRelatorioExcel);
+sacPeriodo3mBtn?.addEventListener('click', () => _setRelatorioSacPeriodo(3));
+sacPeriodo4mBtn?.addEventListener('click', () => _setRelatorioSacPeriodo(4));
+sacPeriodo6mBtn?.addEventListener('click', () => _setRelatorioSacPeriodo(6));
+sacPeriodo12mBtn?.addEventListener('click', () => _setRelatorioSacPeriodo(12));
+sacPeriodoTudoBtn?.addEventListener('click', () => _setRelatorioSacPeriodo(0));
 // Painel Envio de Mercadoria: mostra todos os registros (filterByUser: false)
 envioMercadoriaRefreshBtnTop?.addEventListener('click', () => carregarSacSolicitacoes(envioMercadoriaTabelaBodyPane, { hideDone: true, filterByUser: false }));
 
