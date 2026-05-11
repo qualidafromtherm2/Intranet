@@ -5767,7 +5767,7 @@ router.get('/at/graficos/por-mes', async (req, res) => {
 // GET /at/graficos/relatorio — dados para relatório PDF (últimos 3 meses), breakdown por tag × mês
 router.get('/at/graficos/relatorio', async (req, res) => {
   try {
-    const [rQ, rR, rM] = await Promise.all([
+    const [rQ, rR, rM, rMod] = await Promise.all([
       // OS aberta (Qualidade) — por tag × mês
       pool.query(`
         SELECT
@@ -5808,6 +5808,18 @@ router.get('/at/graficos/relatorio', async (req, res) => {
         GROUP BY 1, 2
         ORDER BY tag, mes
       `),
+      // Top Modelos — todos os tipos, por modelo × mês
+      pool.query(`
+        SELECT
+          COALESCE(NULLIF(TRIM(modelo),''), '(sem modelo)') AS tag,
+          TO_CHAR(DATE_TRUNC('month', data), 'YYYY-MM')     AS mes,
+          COUNT(*)::int                                      AS total
+        FROM sac.at
+        WHERE data >= DATE_TRUNC('month', CURRENT_DATE) - INTERVAL '3 months'
+          AND data <  DATE_TRUNC('month', CURRENT_DATE)
+        GROUP BY 1, 2
+        ORDER BY tag, mes
+      `),
     ]);
 
     // Meses do eixo X (YYYY-MM e label legível)
@@ -5828,6 +5840,7 @@ router.get('/at/graficos/relatorio', async (req, res) => {
       qualidade: rQ.rows,
       rapido:    rR.rows,
       mencoes:   rM.rows,
+      modelos:   rMod.rows,
     });
   } catch (err) {
     console.error('[SAC/AT] erro relatorio:', err);

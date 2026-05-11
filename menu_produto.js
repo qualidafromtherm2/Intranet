@@ -15008,7 +15008,7 @@ document.querySelectorAll('#atTabelaWrapper thead th[data-col]').forEach(th => {
         }
         const totaisPorTag = {};
         rows.forEach(r => { totaisPorTag[r.tag] = (totaisPorTag[r.tag] || 0) + r.total; });
-        const tags = Object.keys(totaisPorTag).sort((a, b) => totaisPorTag[b] - totaisPorTag[a]);
+        const tags = Object.keys(totaisPorTag).sort((a, b) => totaisPorTag[b] - totaisPorTag[a]).slice(0, 10);
 
         const thMeses = meses.map(m =>
           `<th class="th-mes" style="background:${cor};">${m.label}</th>`
@@ -15211,7 +15211,13 @@ document.querySelectorAll('#atTabelaWrapper thead th[data-col]').forEach(th => {
     <h1>Relatório — Gráfico AT</h1>
     <div class="sub">Gerado em ${new Date().toLocaleString('pt-BR')}</div>
   </div>
-  <div class="badge">Período: ${periodo}</div>
+  <div style="display:flex;align-items:center;gap:12px;">
+    <button onclick="window.print()" class="no-print"
+      style="padding:9px 22px;background:#1e3a5f;color:#fff;border:none;border-radius:7px;cursor:pointer;font-size:13px;font-weight:600;">
+      &#128438; Imprimir / Salvar PDF
+    </button>
+    <div class="badge">Período: ${periodo}</div>
+  </div>
 </div>
 
 <div class="graficos-row">
@@ -15228,13 +15234,7 @@ document.querySelectorAll('#atTabelaWrapper thead th[data-col]').forEach(th => {
 ${pivotHtml('OS aberta', '#1d6a2f', data.qualidade)}
 ${pivotHtml('Atendimento Rápido', '#7c2d12', data.rapido)}
 ${pivotHtml('Menções (Pós abertura de OS)', '#4c1d95', data.mencoes)}
-
-<div class="no-print" style="margin-top:24px;padding-top:16px;border-top:1px solid #e5e7eb;">
-  <button onclick="window.print()"
-    style="padding:9px 22px;background:#1e3a5f;color:#fff;border:none;border-radius:7px;cursor:pointer;font-size:13px;font-weight:600;">
-    &#128438; Imprimir / Salvar PDF
-  </button>
-</div>
+${pivotHtml('Top 10 Modelos', '#0c4a6e', data.modelos)}
 
 </body>
 </html>`;
