@@ -14727,11 +14727,34 @@ document.querySelectorAll('#atTabelaWrapper thead th[data-col]').forEach(th => {
         borderRadius: 4,
       }));
 
+      const _dataLabelsGraf1 = {
+        id: 'dataLabelsGraf1',
+        afterDatasetsDraw(chart) {
+          const ctx2 = chart.ctx;
+          chart.data.datasets.forEach((_ds, di) => {
+            const meta = chart.getDatasetMeta(di);
+            if (meta.hidden) return;
+            meta.data.forEach((bar, idx) => {
+              const val = chart.data.datasets[di].data[idx];
+              if (!val) return;
+              ctx2.save();
+              ctx2.font = 'bold 11px Segoe UI,Arial,sans-serif';
+              ctx2.fillStyle = '#e2e8f0';
+              ctx2.textAlign = 'center';
+              ctx2.textBaseline = 'bottom';
+              ctx2.fillText(val, bar.x, bar.y - 2);
+              ctx2.restore();
+            });
+          });
+        },
+      };
+
       if (_pg1Instance) { _pg1Instance.destroy(); _pg1Instance = null; }
       const ctx = canvas.getContext('2d');
       _pg1Instance = new Chart(ctx, {
         type: 'bar',
         data: { labels, datasets },
+        plugins: [_dataLabelsGraf1],
         options: {
           responsive: true,
           maintainAspectRatio: false,
@@ -14977,18 +15000,23 @@ document.querySelectorAll('#atTabelaWrapper thead th[data-col]').forEach(th => {
         return tmp.toDataURL('image/png');
       }
 
-      const saved1 = _salvarOpcoes(_pg1Instance);
-      const saved2 = _salvarOpcoes(_pg2Instance);
+      const saved1  = _salvarOpcoes(_pg1Instance);
+      const saved2  = _salvarOpcoes(_pg2Instance);
+      const saved0  = _salvarOpcoes(_pg0Instance);
       _aplicarOpcoesPrint(_pg1Instance);
       _aplicarOpcoesPrint(_pg2Instance);
+      _aplicarOpcoesPrint(_pg0Instance);
 
       const c1 = document.getElementById('atGrafPg1Canvas');
       const c2 = document.getElementById('atGrafPg2Canvas');
-      const img1 = _canvasParaImg(c1);
-      const img2 = _canvasParaImg(c2);
+      const c0 = document.getElementById('atGrafPg0Canvas');
+      const img1  = _canvasParaImg(c1);
+      const img2  = _canvasParaImg(c2);
+      const img0  = _canvasParaImg(c0);
 
       _restaurarOpcoes(_pg1Instance, saved1);
       _restaurarOpcoes(_pg2Instance, saved2);
+      _restaurarOpcoes(_pg0Instance, saved0);
 
       // ── 2) Busca dados com breakdown por mês ──
       const resp = await fetch('/api/sac/at/graficos/relatorio', { credentials: 'include' });
@@ -15228,6 +15256,13 @@ document.querySelectorAll('#atTabelaWrapper thead th[data-col]').forEach(th => {
   <div class="grafico-card">
     <div class="gc-title">Gráfico 2 — Picos de Atendimento por Mês</div>
     ${img2 ? `<img src="${img2}" alt="Gráfico 2">` : '<p style="color:#aaa;font-size:11px;">Gráfico não disponível.</p>'}
+  </div>
+</div>
+
+<div class="graficos-row" style="margin-top:18px;">
+  <div class="grafico-card" style="flex:1;">
+    <div class="gc-title">Gráfico 3 — Top Modelos por Mês (Qualidade)</div>
+    ${img0 ? `<img src="${img0}" alt="Gráfico 3">` : '<p style="color:#aaa;font-size:11px;">Gráfico não disponível.</p>'}
   </div>
 </div>
 
