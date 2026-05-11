@@ -14488,7 +14488,6 @@ document.querySelectorAll('#atTabelaWrapper thead th[data-col]').forEach(th => {
   let _pg01Instance = null;
   let _pg1Instance = null;
   let _pg2Instance = null;
-  let _pg4Instance = null;
   let _pgMesesSet  = [];
   let _pgPeriodo   = 3;
   let _pgTipo      = 'Qualidade';
@@ -14818,11 +14817,10 @@ document.querySelectorAll('#atTabelaWrapper thead th[data-col]').forEach(th => {
       if (_pg2Instance) { _pg2Instance.destroy(); _pg2Instance = null; }
       const ctx = canvas.getContext('2d');
 
-      // Quando um tipo específico está selecionado, ocultar as outras séries
-      const _tipoLower = (_pgTipo || '').toLowerCase();
-      const dsQ = { label: 'Qualidade',              data: valQ, borderColor: '#34d399', backgroundColor: 'rgba(52,211,153,.10)', borderWidth: 2, pointRadius: 4, pointHoverRadius: 6, tension: 0.3, fill: true,  hidden: _tipoLower && _tipoLower !== 'qualidade' };
-      const dsR = { label: 'Atend. Rápido',          data: valR, borderColor: '#fb923c', backgroundColor: 'rgba(251,146,60,.10)',  borderWidth: 2, pointRadius: 4, pointHoverRadius: 6, tension: 0.3, fill: false, hidden: _tipoLower && !_tipoLower.startsWith('atendimento') };
-      const dsM = { label: 'Menções (OS não-rápido)', data: valM, borderColor: '#a855f7', backgroundColor: 'rgba(168,85,247,.10)',  borderWidth: 2, pointRadius: 4, pointHoverRadius: 6, tension: 0.3, fill: false, hidden: !!_tipoLower, borderDash: [5,4] };
+      // Gráfico 2 sempre exibe as 3 séries independente do filtro de tipo
+      const dsQ = { label: 'Qualidade',              data: valQ, borderColor: '#34d399', backgroundColor: 'rgba(52,211,153,.10)', borderWidth: 2, pointRadius: 4, pointHoverRadius: 6, tension: 0.3, fill: true };
+      const dsR = { label: 'Atend. Rápido',          data: valR, borderColor: '#fb923c', backgroundColor: 'rgba(251,146,60,.10)',  borderWidth: 2, pointRadius: 4, pointHoverRadius: 6, tension: 0.3, fill: false };
+      const dsM = { label: 'Menções (OS não-rápido)', data: valM, borderColor: '#a855f7', backgroundColor: 'rgba(168,85,247,.10)',  borderWidth: 2, pointRadius: 4, pointHoverRadius: 6, tension: 0.3, fill: false, borderDash: [5,4] };
 
       _pg2Instance = new Chart(ctx, {
         type: 'line',
@@ -14853,106 +14851,6 @@ document.querySelectorAll('#atTabelaWrapper thead th[data-col]').forEach(th => {
           scales: {
             x: { ticks: { color: '#94a3b8', font: { size: 11 } }, grid: { color: 'rgba(255,255,255,.05)' } },
             y: { beginAtZero: true, ticks: { color: '#94a3b8', stepSize: 1 }, grid: { color: 'rgba(255,255,255,.07)' } },
-          },
-        },
-      });
-      if (status) status.style.display = 'none';
-    } catch (err) {
-      if (status) { status.textContent = err.message || 'Erro.'; status.style.color = '#f87171'; }
-    }
-  }
-
-  // ── Gráfico 4 — Proporção OS / Vendas por Modelo ───────────────────────
-  async function _carregarPg4() {
-    const status = document.getElementById('atGrafPg4Status');
-    const canvas = document.getElementById('atGrafPg4Canvas');
-    if (!canvas) return;
-    if (status) { status.style.display = 'block'; status.textContent = 'Carregando...'; status.style.color = ''; }
-
-    try {
-      const tipoParam   = encodeURIComponent(_pgTipo || 'Qualidade');
-      const mesesParam  = _pgPeriodo > 0 ? _pgPeriodo : 36;
-      const resp = await fetch(`/api/sac/at/graficos/proporcao-modelo-vendas?tipo=${tipoParam}&meses=${mesesParam}`, { credentials: 'include' });
-      const data = await resp.json().catch(() => ({}));
-      if (!resp.ok || data.ok === false) throw new Error(data.error || 'Erro ao carregar.');
-
-      const rows = (data.rows || []).filter(r => r.qtd_vendida > 0).slice(0, 12);
-
-      if (_pg4Instance) { _pg4Instance.destroy(); _pg4Instance = null; }
-
-      if (!rows.length) {
-        if (status) { status.style.display = 'block'; status.textContent = 'Sem dados de proporção para o filtro selecionado.'; status.style.color = '#94a3b8'; }
-        return;
-      }
-
-      const labels   = rows.map(r => r.modelo);
-      const propData = rows.map(r => r.proporcao_pct !== null ? parseFloat(r.proporcao_pct) : 0);
-      const osData   = rows.map(r => r.os_count);
-      const vendData = rows.map(r => r.qtd_vendida);
-
-      const CORES = ['#f472b6','#fb923c','#ef4444','#a78bfa','#38bdf8','#34d399','#fbbf24','#6366f1','#10b981','#f59e0b','#84cc16','#06b6d4'];
-
-      const ctx = canvas.getContext('2d');
-      _pg4Instance = new Chart(ctx, {
-        type: 'bar',
-        data: {
-          labels,
-          datasets: [{
-            label: '% OS por unidade vendida',
-            data: propData,
-            backgroundColor: CORES.map(c => c + 'cc'),
-            borderColor: CORES,
-            borderWidth: 1,
-            borderRadius: 5,
-          }],
-        },
-        plugins: [{
-          id: 'propLabels',
-          afterDatasetsDraw(chart) {
-            const ctx2 = chart.ctx;
-            chart.data.datasets.forEach((_ds, di) => {
-              const meta = chart.getDatasetMeta(di);
-              if (meta.hidden) return;
-              meta.data.forEach((bar, idx) => {
-                const val = chart.data.datasets[di].data[idx];
-                if (!val) return;
-                ctx2.save();
-                ctx2.font = 'bold 11px Segoe UI,Arial,sans-serif';
-                ctx2.fillStyle = '#e2e8f0';
-                ctx2.textAlign = 'center';
-                ctx2.textBaseline = 'bottom';
-                ctx2.fillText(val.toFixed(2) + '%', bar.x, bar.y - 2);
-                ctx2.restore();
-              });
-            });
-          },
-        }],
-        options: {
-          responsive: true,
-          maintainAspectRatio: false,
-          plugins: {
-            legend: { display: false },
-            tooltip: {
-              callbacks: {
-                label: (_item, idx) => {
-                  const i = _item.dataIndex;
-                  return [
-                    ` Proporção: ${propData[i].toFixed(2)}% (1 OS a cada ${propData[i] > 0 ? (100/propData[i]).toFixed(0) : '∞'} unidades)`,
-                    ` OS abertas: ${osData[i]}`,
-                    ` Unidades vendidas: ${vendData[i]}`,
-                  ];
-                },
-              },
-            },
-          },
-          scales: {
-            x: { ticks: { color: '#94a3b8', font: { size: 11 } }, grid: { color: 'rgba(255,255,255,.05)' } },
-            y: {
-              beginAtZero: true,
-              title: { display: true, text: '% OS / Vendas', color: '#64748b', font: { size: 11 } },
-              ticks: { color: '#94a3b8', callback: v => v + '%' },
-              grid: { color: 'rgba(255,255,255,.07)' },
-            },
           },
         },
       });
@@ -15120,7 +15018,7 @@ document.querySelectorAll('#atTabelaWrapper thead th[data-col]').forEach(th => {
       _restaurarOpcoes(_pg0Instance, saved0);
 
       // ── 2) Busca dados com breakdown por mês ──
-      const resp = await fetch('/api/sac/at/graficos/relatorio', { credentials: 'include' });
+      const resp = await fetch(`/api/sac/at/graficos/relatorio?meses=${_pgPeriodo}`, { credentials: 'include' });
       const data = await resp.json().catch(() => ({}));
       if (!resp.ok || data.ok === false) throw new Error(data.error || 'Erro ao carregar dados.');
 
@@ -15411,7 +15309,6 @@ ${pivotHtml('Top 10 Modelos', '#0c4a6e', data.modelos)}
           _carregarPg01();
           _carregarPg1();
           _carregarPg2();
-          _carregarPg4();
         });
       });
 
@@ -15428,13 +15325,11 @@ ${pivotHtml('Top 10 Modelos', '#0c4a6e', data.modelos)}
           _carregarPg0();
           _carregarPg01();
           _carregarPg1();
-          _carregarPg2();
-          _carregarPg4();
         });
       });
 
       const refreshBtn = document.getElementById('atGrafPgRefreshBtn');
-      if (refreshBtn) refreshBtn.addEventListener('click', () => { _carregarPg0(); _carregarPg01(); _carregarPg1(); _carregarPg2(); _carregarPg4(); });
+      if (refreshBtn) refreshBtn.addEventListener('click', () => { _carregarPg0(); _carregarPg01(); _carregarPg1(); _carregarPg2(); });
 
       const relatorioBtn = document.getElementById('atGrafPgRelatorioBtn');
       if (relatorioBtn) relatorioBtn.addEventListener('click', _gerarRelatorioGrafAt);
@@ -15514,7 +15409,6 @@ ${pivotHtml('Top 10 Modelos', '#0c4a6e', data.modelos)}
     _carregarPg01();
     _carregarPg1();
     _carregarPg2();
-    _carregarPg4();
   };
 })();
 
@@ -16903,6 +16797,7 @@ async function carregarSacSolicitacoes(targetBody, { hideDone = false, titleOnly
 
 let _sacRelatorioUsuariosChart = null;
 let _sacRelatorioConteudoChart = null;
+let _sacRelatorioOcultarOutros = false;
 let _sacRelatorioRowsCache = [];
 let _sacRelatorioPeriodoMeses = 4;
 let _sacRelatorioConteudoUsuarioSelecionado = '';
@@ -17315,7 +17210,7 @@ function _renderizarRelatorioSacPorUsuario() {
     maxBarThickness: 36
   }));
 
-  if (totalOutros > 0) {
+  if (totalOutros > 0 && !_sacRelatorioOcultarOutros) {
     datasetsConteudo.push({
       label: 'Outros itens',
       _fullLabel: 'Outros itens',
@@ -17386,12 +17281,12 @@ function _renderizarRelatorioSacPorUsuario() {
       },
       scales: {
         x: {
-          stacked: true,
+          stacked: false,
           ticks: { color: '#94a3b8' },
           grid: { color: 'rgba(148,163,184,0.15)' }
         },
         y: {
-          stacked: true,
+          stacked: false,
           beginAtZero: true,
           ticks: { color: '#94a3b8', precision: 0 },
           grid: { color: 'rgba(148,163,184,0.15)' }
@@ -17506,6 +17401,41 @@ if (sacRelatorioConteudoUsuarioSelect) {
     _renderizarRelatorioSacPorUsuario();
   });
 }
+
+// Filtro "Outros itens" do Gráfico 2
+(function () {
+  const btn      = document.getElementById('sacConteudoFiltroBtn');
+  const dropdown = document.getElementById('sacConteudoFiltroDropdown');
+  const checkbox = document.getElementById('sacConteudoOcultarOutros');
+  if (!btn || !dropdown || !checkbox) return;
+
+  // Abre/fecha dropdown ao clicar no botão filtro
+  btn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const aberto = dropdown.style.display !== 'none';
+    dropdown.style.display = aberto ? 'none' : 'block';
+  });
+
+  // Fecha ao clicar fora
+  document.addEventListener('click', (e) => {
+    if (!dropdown.contains(e.target) && e.target !== btn) {
+      dropdown.style.display = 'none';
+    }
+  });
+
+  // Sincroniza estado inicial
+  checkbox.checked = _sacRelatorioOcultarOutros;
+
+  // Aplica filtro e redesenha ao mudar
+  checkbox.addEventListener('change', () => {
+    _sacRelatorioOcultarOutros = checkbox.checked;
+    // Atualiza visual do botão quando filtro está ativo
+    btn.style.borderColor     = _sacRelatorioOcultarOutros ? '#6366f1' : 'rgba(148,163,184,0.3)';
+    btn.style.color           = _sacRelatorioOcultarOutros ? '#a5b4fc' : '#94a3b8';
+    btn.style.background      = _sacRelatorioOcultarOutros ? 'rgba(99,102,241,.18)' : 'rgba(255,255,255,.06)';
+    _renderizarRelatorioSacPorUsuario();
+  });
+})();
 
 // Painel SAC: filtra por usuário logado (filterByUser: true)
 sacRefreshBtn?.addEventListener('click', () => carregarSacSolicitacoes(sacTabelaBody, { hideDone: false, filterByUser: true }));
