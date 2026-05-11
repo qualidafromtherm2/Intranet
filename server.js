@@ -30248,11 +30248,24 @@ app.post('/api/compras/pedidos-omie/nfe-associar-pedido', express.json(), async 
           }
         }
 
-        // Mapa de unidade por nCodItem do pedido
+        // Mapa de unidade/quantidade por nCodItem do pedido
         const unidadePorCodItem = {};
+        const quantidadePorCodItem = {};
         (pedidoConsulta?.produtos_consulta || []).forEach(p => {
           if (p.nCodItem) {
             unidadePorCodItem[String(p.nCodItem)] = p.cUnidade;
+            quantidadePorCodItem[String(p.nCodItem)] = Number(p.nQtde);
+          }
+        });
+        (plano?.itens_preview || []).forEach(itemPreview => {
+          const nCodItemPreview = Number(itemPreview?.pedido_n_cod_item || 0);
+          if (!Number.isFinite(nCodItemPreview) || nCodItemPreview <= 0) return;
+          const chaveItem = String(nCodItemPreview);
+          if (!unidadePorCodItem[chaveItem] && itemPreview?.pedido_unidade) {
+            unidadePorCodItem[chaveItem] = itemPreview.pedido_unidade;
+          }
+          if (!Number.isFinite(quantidadePorCodItem[chaveItem]) && Number.isFinite(Number(itemPreview?.pedido_qtde))) {
+            quantidadePorCodItem[chaveItem] = Number(itemPreview.pedido_qtde);
           }
         });
 
@@ -30374,15 +30387,21 @@ app.post('/api/compras/pedidos-omie/nfe-associar-pedido', express.json(), async 
           const nSeq = itemEditar.itensIde?.nSequencia;
           const nIdItPed = itemEditar.itensIde?.nIdItPedidoExistente;
           const cUnidadePedido = nIdItPed ? unidadePorCodItem[String(nIdItPed)] : null;
+          const nQtdePedido = nIdItPed ? quantidadePorCodItem[String(nIdItPed)] : null;
 
           // Override do user tem prioridade sobre o valor do pedido
           const override = overrideMap.get(nSeq);
           const cUnidadeFinal = override?.cUnidade || cUnidadePedido || null;
+          const nQtdeOverride = Number(override?.nQtde);
+          const nQtdeRecebidaFinal = Number.isFinite(nQtdeOverride) && nQtdeOverride > 0
+            ? nQtdeOverride
+            : (Number.isFinite(nQtdePedido) && nQtdePedido > 0 ? nQtdePedido : null);
 
           const ajustes = {
             codigo_local_estoque: RECEBIMENTO_NFE_LOCAL_ESTOQUE_PADRAO
           };
           if (cUnidadeFinal) ajustes.cUnidade = cUnidadeFinal;
+          if (nQtdeRecebidaFinal) ajustes.nQtdeRecebida = nQtdeRecebidaFinal;
           if (cfopCalculado) ajustes.cCFOPEntrada = cfopCalculado;
           // Nota: nQtde não é campo válido em itensAjustes da Omie
 
