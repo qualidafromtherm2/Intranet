@@ -5764,9 +5764,20 @@ router.get('/at/graficos/por-mes', async (req, res) => {
   }
 });
 
-// GET /at/graficos/relatorio — dados para relatório PDF (últimos 3 meses), breakdown por tag × mês
+// GET /at/graficos/relatorio — dados para relatório PDF, breakdown por tag × mês
+// ?meses=N  (0 = tudo sem filtro; 3/6/12 = últimos N meses completos)
 router.get('/at/graficos/relatorio', async (req, res) => {
   try {
+    const mesesN = parseInt(req.query.meses || '3', 10);
+    const filtroData = mesesN > 0
+      ? `AND data >= DATE_TRUNC('month', CURRENT_DATE) - INTERVAL '${mesesN} months'
+           AND data <  DATE_TRUNC('month', CURRENT_DATE)`
+      : '';
+    const filtroMencoes = mesesN > 0
+      ? `AND m.criado_em >= DATE_TRUNC('month', CURRENT_DATE) - INTERVAL '${mesesN} months'
+           AND m.criado_em <  DATE_TRUNC('month', CURRENT_DATE)`
+      : '';
+
     const [rQ, rR, rM, rMod] = await Promise.all([
       // OS aberta (Qualidade) — por tag × mês
       pool.query(`
@@ -5776,8 +5787,7 @@ router.get('/at/graficos/relatorio', async (req, res) => {
           COUNT(*)::int                                         AS total
         FROM sac.at
         WHERE LOWER(TRIM(tipo)) = 'qualidade'
-          AND data >= DATE_TRUNC('month', CURRENT_DATE) - INTERVAL '3 months'
-          AND data <  DATE_TRUNC('month', CURRENT_DATE)
+          ${filtroData}
         GROUP BY 1, 2
         ORDER BY tag, mes
       `),
@@ -5789,8 +5799,7 @@ router.get('/at/graficos/relatorio', async (req, res) => {
           COUNT(*)::int                                         AS total
         FROM sac.at
         WHERE LOWER(TRIM(tipo)) IN ('atendimento rapido','atendimento rápido')
-          AND data >= DATE_TRUNC('month', CURRENT_DATE) - INTERVAL '3 months'
-          AND data <  DATE_TRUNC('month', CURRENT_DATE)
+          ${filtroData}
         GROUP BY 1, 2
         ORDER BY tag, mes
       `),
@@ -5802,9 +5811,8 @@ router.get('/at/graficos/relatorio', async (req, res) => {
           COUNT(*)::int                                           AS total
         FROM sac.mencoes m
         JOIN sac.at a ON a.id = m.id_at
-        WHERE m.criado_em >= DATE_TRUNC('month', CURRENT_DATE) - INTERVAL '3 months'
-          AND m.criado_em <  DATE_TRUNC('month', CURRENT_DATE)
-          AND LOWER(TRIM(a.tipo)) NOT IN ('atendimento rapido','atendimento rápido')
+        WHERE LOWER(TRIM(a.tipo)) NOT IN ('atendimento rapido','atendimento rápido')
+          ${filtroMencoes}
         GROUP BY 1, 2
         ORDER BY tag, mes
       `),
@@ -5816,22 +5824,33 @@ router.get('/at/graficos/relatorio', async (req, res) => {
           COUNT(*)::int                                      AS total
         FROM sac.at
         WHERE LOWER(TRIM(tipo)) = 'qualidade'
-          AND data >= DATE_TRUNC('month', CURRENT_DATE) - INTERVAL '3 months'
-          AND data <  DATE_TRUNC('month', CURRENT_DATE)
+          ${filtroData}
         GROUP BY 1, 2
         ORDER BY tag, mes
       `),
     ]);
 
     // Meses do eixo X (YYYY-MM e label legível)
-    const meses = [];
     const nomesMes = ['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'];
-    for (let i = 3; i >= 1; i--) {
-      const d = new Date();
-      d.setDate(1);
-      d.setMonth(d.getMonth() - i);
-      const yyyymm = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
-      meses.push({ yyyymm, label: `${nomesMes[d.getMonth()]}/${String(d.getFullYear()).slice(-2)}` });
+    let meses = [];
+
+    if (mesesN > 0) {
+      // Meses fixos baseados no período solicitado
+      for (let i = mesesN; i >= 1; i--) {
+        const d = new Date();
+        d.setDate(1);
+        d.setMonth(d.getMonth() - i);
+        const yyyymm = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+        meses.push({ yyyymm, label: `${nomesMes[d.getMonth()]}/${String(d.getFullYear()).slice(-2)}` });
+      }
+    } else {
+      // Tudo: derivar meses únicos dos dados retornados
+      const allRows = [...rQ.rows, ...rR.rows, ...rM.rows, ...rMod.rows];
+      const unique = [...new Set(allRows.map(r => r.mes))].sort();
+      meses = unique.map(yyyymm => {
+        const [y, mo] = yyyymm.split('-').map(Number);
+        return { yyyymm, label: `${nomesMes[mo-1]}/${String(y).slice(-2)}` };
+      });
     }
 
     res.json({
@@ -5935,59 +5954,6 @@ router.get('/at/graficos/por-tag-problema-mes', async (req, res) => {
     return res.json({ ok: true, rows });
   } catch (err) {
     console.error('[SAC/AT] erro graficos por-tag-problema-mes:', err);
-    return res.status(500).json({ ok: false, error: err.message });
-  }
-});
-
-// GET /at/graficos/proporcao-modelo-vendas — proporção OS/vendas por modelo
-router.get('/at/graficos/proporcao-modelo-vendas', async (req, res) => {
-  try {
-    const tipo  = String(req.query.tipo  || 'Qualidade').trim();
-    const meses = parseInt(req.query.meses || '3', 10);
-    const params = [tipo];
-    const whereData = meses > 0
-      ? `AND a.data >= DATE_TRUNC('month', CURRENT_DATE) - INTERVAL '${meses} months'
-         AND a.data <  DATE_TRUNC('month', CURRENT_DATE)`
-      : '';
-
-    const { rows } = await pool.query(`
-      WITH os_por_modelo AS (
-        SELECT
-          UPPER(TRIM(COALESCE(a.modelo, ''))) AS modelo,
-          COUNT(*)::int                        AS os_count
-        FROM sac.at a
-        WHERE LOWER(TRIM(a.tipo)) = LOWER($1)
-          AND TRIM(COALESCE(a.modelo, '')) != ''
-          ${whereData}
-        GROUP BY 1
-      ),
-      vendas_por_modelo AS (
-        SELECT
-          UPPER(TRIM(i.codigo))  AS modelo,
-          SUM(i.quantidade)      AS qtd_vendida
-        FROM "Vendas".pedidos_venda_itens i
-        JOIN "Vendas".pedidos_venda p ON p.codigo_pedido = i.codigo_pedido
-        WHERE TRIM(p.etapa::text) IN ('70','80')
-          AND TRIM(COALESCE(i.codigo, '')) != ''
-        GROUP BY 1
-      )
-      SELECT
-        o.modelo,
-        o.os_count,
-        COALESCE(v.qtd_vendida, 0)::int                               AS qtd_vendida,
-        CASE WHEN COALESCE(v.qtd_vendida, 0) > 0
-          THEN ROUND(o.os_count::numeric / v.qtd_vendida * 100, 2)
-          ELSE NULL
-        END AS proporcao_pct
-      FROM os_por_modelo o
-      LEFT JOIN vendas_por_modelo v ON v.modelo = o.modelo
-      ORDER BY o.os_count DESC
-      LIMIT 15
-    `, params);
-
-    return res.json({ ok: true, rows });
-  } catch (err) {
-    console.error('[SAC/AT] erro graficos proporcao-modelo-vendas:', err);
     return res.status(500).json({ ok: false, error: err.message });
   }
 });
