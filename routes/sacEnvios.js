@@ -5916,21 +5916,78 @@ router.get('/at/graficos/por-modelo-mes', async (req, res) => {
 // GET /at/graficos/por-tag-problema-mes — quantidade de atendimentos por tag_problema agrupada por mês/ano
 router.get('/at/graficos/por-tag-problema-mes', async (req, res) => {
   try {
+    const tipo = String(req.query.tipo || '').trim();
+    const params = [];
+    const whereExtra = tipo ? ` AND LOWER(TRIM(tipo)) = LOWER($1)` : `\n        AND LOWER(TRIM(COALESCE(tipo, ''))) != 'atendimento rápido'`;
+    if (tipo) params.push(tipo);
+
     const { rows } = await pool.query(`
       SELECT
         COALESCE(NULLIF(TRIM(tag_problema), ''), '(sem tag)') AS tag_problema,
         TO_CHAR(DATE_TRUNC('month', data), 'YYYY-MM')         AS mes,
         COUNT(*)::int                                         AS total
       FROM sac.at
-      WHERE data IS NOT NULL
-        AND LOWER(TRIM(COALESCE(tipo, ''))) != 'atendimento rápido'
+      WHERE data IS NOT NULL${whereExtra}
       GROUP BY 1, 2
       ORDER BY 2, 1
-    `);
+    `, params);
 
     return res.json({ ok: true, rows });
   } catch (err) {
     console.error('[SAC/AT] erro graficos por-tag-problema-mes:', err);
+    return res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// GET /at/graficos/proporcao-modelo-vendas — proporção OS/vendas por modelo
+router.get('/at/graficos/proporcao-modelo-vendas', async (req, res) => {
+  try {
+    const tipo  = String(req.query.tipo  || 'Qualidade').trim();
+    const meses = parseInt(req.query.meses || '3', 10);
+    const params = [tipo];
+    const whereData = meses > 0
+      ? `AND a.data >= DATE_TRUNC('month', CURRENT_DATE) - INTERVAL '${meses} months'
+         AND a.data <  DATE_TRUNC('month', CURRENT_DATE)`
+      : '';
+
+    const { rows } = await pool.query(`
+      WITH os_por_modelo AS (
+        SELECT
+          UPPER(TRIM(COALESCE(a.modelo, ''))) AS modelo,
+          COUNT(*)::int                        AS os_count
+        FROM sac.at a
+        WHERE LOWER(TRIM(a.tipo)) = LOWER($1)
+          AND TRIM(COALESCE(a.modelo, '')) != ''
+          ${whereData}
+        GROUP BY 1
+      ),
+      vendas_por_modelo AS (
+        SELECT
+          UPPER(TRIM(i.codigo))  AS modelo,
+          SUM(i.quantidade)      AS qtd_vendida
+        FROM "Vendas".pedidos_venda_itens i
+        JOIN "Vendas".pedidos_venda p ON p.codigo_pedido = i.codigo_pedido
+        WHERE TRIM(p.etapa::text) IN ('70','80')
+          AND TRIM(COALESCE(i.codigo, '')) != ''
+        GROUP BY 1
+      )
+      SELECT
+        o.modelo,
+        o.os_count,
+        COALESCE(v.qtd_vendida, 0)::int                               AS qtd_vendida,
+        CASE WHEN COALESCE(v.qtd_vendida, 0) > 0
+          THEN ROUND(o.os_count::numeric / v.qtd_vendida * 100, 2)
+          ELSE NULL
+        END AS proporcao_pct
+      FROM os_por_modelo o
+      LEFT JOIN vendas_por_modelo v ON v.modelo = o.modelo
+      ORDER BY o.os_count DESC
+      LIMIT 15
+    `, params);
+
+    return res.json({ ok: true, rows });
+  } catch (err) {
+    console.error('[SAC/AT] erro graficos proporcao-modelo-vendas:', err);
     return res.status(500).json({ ok: false, error: err.message });
   }
 });
