@@ -5808,14 +5808,15 @@ router.get('/at/graficos/relatorio', async (req, res) => {
         GROUP BY 1, 2
         ORDER BY tag, mes
       `),
-      // Top Modelos — todos os tipos, por modelo × mês
+      // Top Modelos — somente tipo Qualidade, por modelo × mês
       pool.query(`
         SELECT
           COALESCE(NULLIF(TRIM(modelo),''), '(sem modelo)') AS tag,
           TO_CHAR(DATE_TRUNC('month', data), 'YYYY-MM')     AS mes,
           COUNT(*)::int                                      AS total
         FROM sac.at
-        WHERE data >= DATE_TRUNC('month', CURRENT_DATE) - INTERVAL '3 months'
+        WHERE LOWER(TRIM(tipo)) = 'qualidade'
+          AND data >= DATE_TRUNC('month', CURRENT_DATE) - INTERVAL '3 months'
           AND data <  DATE_TRUNC('month', CURRENT_DATE)
         GROUP BY 1, 2
         ORDER BY tag, mes
