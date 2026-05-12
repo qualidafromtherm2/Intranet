@@ -30169,6 +30169,12 @@ app.post('/api/compras/pedidos-omie/nfe-associar-pedido', express.json(), async 
         itensIde: { ...(itemEditar?.itensIde || {}) }
       }))
       : [];
+    const seqsServicoAssociacao = new Set(
+      (plano?.itens_preview || [])
+        .filter((item) => item?.item_servico)
+        .map((item) => Number(item?.n_sequencia || 0))
+        .filter((seq) => Number.isFinite(seq) && seq > 0)
+    );
 
     // Aplica troca manual do item do pedido por sequência da NF-e
     itensParaEnviar.forEach((itemEditar) => {
@@ -30468,8 +30474,11 @@ app.post('/api/compras/pedidos-omie/nfe-associar-pedido', express.json(), async 
     const payloadAlterar = {
       ide: { nIdReceb: Number(plano.n_id_receb) },
       itensRecebimentoEditar: itensParaEnviar.filter((itemEditar) => {
-        if (itemEditar?.itensIde?.cAcao !== 'ASSOCIAR-PRODUTO') return true;
-        return Number(itemEditar?.itensIde?.nIdProdutoExistente || 0) > 0;
+        const seq = Number(itemEditar?.itensIde?.nSequencia || 0);
+        const acao = String(itemEditar?.itensIde?.cAcao || '').toUpperCase();
+        const isServico = seqsServicoAssociacao.has(seq);
+        if (!isServico) return true;
+        return acao === 'ASSOCIAR-PRODUTO' && Number(itemEditar?.itensIde?.nIdProdutoExistente || 0) > 0;
       }),
       ...(novaCategoriaCompra && infoAdicionaisParaEnviar ? { infoAdicionais: infoAdicionaisParaEnviar } : {})
     };
