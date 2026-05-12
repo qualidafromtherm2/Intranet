@@ -30177,6 +30177,18 @@ app.post('/api/compras/pedidos-omie/nfe-associar-pedido', express.json(), async 
       if (Number.isFinite(codItemOverride) && codItemOverride > 0) {
         itemEditar.itensIde.nIdItPedidoExistente = codItemOverride;
       }
+      const idProdutoServico = Number(override?.nIdProdutoServico || 0);
+      const codigoProdutoServico = String(override?.codigoProdutoServico || '').trim();
+      const descricaoProdutoServico = String(override?.descricaoProdutoServico || '').trim();
+      if (Number.isFinite(idProdutoServico) && idProdutoServico > 0) {
+        itemEditar.itensCabec = {
+          ...(itemEditar.itensCabec || {}),
+          nIdProduto: idProdutoServico,
+          cAssociarExistente: 'S',
+          ...(codigoProdutoServico ? { cCodigoProduto: codigoProdutoServico } : {}),
+          ...(descricaoProdutoServico ? { cDescricaoProduto: descricaoProdutoServico } : {})
+        };
+      }
     });
 
     // Monta parcelas, infoAdicionais e estoque para TODAS as associações

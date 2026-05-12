@@ -48379,8 +48379,11 @@ function renderPreviewAssociacaoPedidoNfe(preview) {
 
   const linhasHtml = itens.length
     ? itens.map((item) => {
+        const isServico = !!item?.item_servico;
         const encontrou = !!item?.pedido_item_encontrado;
-        const criterio = item?.criterio_match === 'id_produto'
+        const criterio = isServico
+          ? 'Servico por CFOP'
+          : item?.criterio_match === 'id_produto'
           ? 'ID produto'
           : item?.criterio_match === 'codigo_produto'
             ? 'Código produto'
@@ -48416,13 +48419,22 @@ function renderPreviewAssociacaoPedidoNfe(preview) {
             <td style="padding:7px 8px;font-size:11px;color:${corUnid};background:${bgUnid};text-align:center;white-space:nowrap;font-weight:${divergiuUnidade ? '700' : '400'};">${escapeHtml(String(item?.nf_unidade || '-'))}</td>
             <td style="padding:7px 8px;font-size:11px;text-align:right;font-weight:700;color:${divergiuValor ? '#b91c1c' : '#0f172a'};background:${divergiuValor ? '#fee2e2' : 'transparent'};border-right:3px solid #cbd5e1;">${escapeHtml(formatarValorRecebimento(item?.nf_valor_total))}</td>
             <td colspan="2" style="padding:7px 8px;font-size:11px;color:#0f172a;max-width:380px;line-height:1.35;">
+              ${isServico ? `
+              <div style="display:flex;align-items:center;gap:8px;padding:6px 8px;border:1px solid #bae6fd;border-radius:8px;background:#f0f9ff;">
+                <i class="fa-solid fa-screwdriver-wrench" style="color:#0369a1;"></i>
+                <div style="min-width:0;flex:1;">
+                  <div style="font-size:11px;font-weight:800;color:#075985;">${escapeHtml(String(item?.servico_produto_codigo || item?.nf_codigo_produto || 'Servico'))}</div>
+                  <div style="font-size:11px;color:#334155;line-height:1.35;">${escapeHtml(String(item?.servico_produto_descricao || item?.nf_descricao_produto || ''))}</div>
+                </div>
+                <button type="button" class="assoc-servico-produto-btn" data-seq="${seq}" style="border:1px solid #38bdf8;background:#0284c7;color:#fff;border-radius:7px;padding:5px 8px;font-size:11px;font-weight:700;cursor:pointer;">Selecionar</button>
+              </div>` : `
               <div class="assoc-pedido-draggable" data-seq="${seq}" draggable="true" style="display:flex;align-items:flex-start;gap:8px;padding:6px 8px;border:1px dashed #cbd5e1;border-radius:8px;background:#ffffff;cursor:grab;">
                 <i class="fa-solid fa-grip-vertical" style="margin-top:1px;color:#64748b;"></i>
                 <div style="display:flex;flex-direction:column;gap:2px;min-width:0;">
                   <div style="font-size:11px;font-weight:700;color:#0f172a;">${escapeHtml(String(item?.pedido_codigo_produto || '-'))}</div>
                   <div style="font-size:11px;color:#334155;line-height:1.35;max-width:320px;" title="${escapeHtml(String(item?.pedido_descricao_produto || '-'))}">${escapeHtml(String(item?.pedido_descricao_produto || '-'))}</div>
                 </div>
-              </div>
+              </div>`}
             </td>
             <td style="padding:7px 8px;font-size:11px;color:${corQtd};background:${bgQtd};text-align:right;white-space:nowrap;">${
               (divergiuQtd || divergiuUnidade)
@@ -48482,6 +48494,63 @@ function renderPreviewAssociacaoPedidoNfe(preview) {
     input.addEventListener('input', snapshotEdicoesQtdUnidAssociacaoNfe);
     input.addEventListener('change', snapshotEdicoesQtdUnidAssociacaoNfe);
   });
+  previewConteudo.querySelectorAll('.assoc-servico-produto-btn').forEach((btn) => {
+    btn.addEventListener('click', () => abrirModalProdutoServicoAssociacaoNfe(Number(btn.dataset.seq || 0)));
+  });
+}
+
+function abrirModalProdutoServicoAssociacaoNfe(seq) {
+  if (!seq) return;
+  let modal = document.getElementById('modalProdutoServicoAssociacaoNfe');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'modalProdutoServicoAssociacaoNfe';
+    modal.style.cssText = 'position:fixed;inset:0;z-index:10050;background:rgba(15,23,42,.55);display:flex;align-items:center;justify-content:center;padding:20px;';
+    modal.innerHTML = `
+      <div style="width:min(760px,95vw);max-height:85vh;overflow:auto;background:#fff;border-radius:14px;box-shadow:0 20px 60px rgba(0,0,0,.25);padding:16px;">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
+          <strong style="font-size:16px;color:#0f172a;">Selecionar produto/servico cadastrado</strong>
+          <button type="button" id="modalServicoProdutoFechar" style="border:0;background:transparent;font-size:22px;cursor:pointer;">&times;</button>
+        </div>
+        <input id="modalServicoProdutoBusca" placeholder="Pesquisar por codigo, nome ou descricao" style="width:100%;padding:10px;border:1px solid #cbd5e1;border-radius:8px;margin-bottom:10px;">
+        <div id="modalServicoProdutoResultados" style="display:grid;gap:6px;"></div>
+      </div>`;
+    document.body.appendChild(modal);
+    modal.querySelector('#modalServicoProdutoFechar').onclick = () => modal.remove();
+  }
+  const input = modal.querySelector('#modalServicoProdutoBusca');
+  const resultados = modal.querySelector('#modalServicoProdutoResultados');
+  input.value = '';
+  resultados.innerHTML = '<div style="font-size:12px;color:#64748b;">Digite ao menos 2 caracteres para buscar.</div>';
+  input.oninput = async () => {
+    const q = input.value.trim();
+    if (q.length < 2) {
+      resultados.innerHTML = '<div style="font-size:12px;color:#64748b;">Digite ao menos 2 caracteres para buscar.</div>';
+      return;
+    }
+    resultados.innerHTML = '<div style="font-size:12px;color:#64748b;">Buscando...</div>';
+    const resp = await fetch('/api/produtos/busca', { method:'POST', headers:{'Content-Type':'application/json'}, credentials:'include', body: JSON.stringify({ q }) });
+    const data = await resp.json().catch(() => ({}));
+    const itens = Array.isArray(data?.itens) ? data.itens.slice(0, 40) : [];
+    resultados.innerHTML = itens.length ? itens.map(p => `
+      <button type="button" data-cp="${escapeHtml(String(p.codigo_produto || ''))}" data-codigo="${escapeHtml(String(p.codigo || ''))}" data-desc="${escapeHtml(String(p.descricao || ''))}" style="text-align:left;border:1px solid #e2e8f0;background:#f8fafc;border-radius:8px;padding:9px;cursor:pointer;">
+        <div style="font-weight:800;color:#0f172a;">${escapeHtml(String(p.codigo || '-'))}</div>
+        <div style="font-size:12px;color:#475569;">${escapeHtml(String(p.descricao || '-'))}</div>
+      </button>`).join('') : '<div style="font-size:12px;color:#b91c1c;">Nenhum produto encontrado.</div>';
+    resultados.querySelectorAll('button[data-cp]').forEach(btn => {
+      btn.onclick = () => {
+        const item = (window.__associarNfePreviewEstadoItens || []).find(i => Number(i?.n_sequencia || 0) === seq);
+        if (item) {
+          item.servico_produto_codigo_produto = Number(btn.dataset.cp || 0) || null;
+          item.servico_produto_codigo = btn.dataset.codigo || '';
+          item.servico_produto_descricao = btn.dataset.desc || '';
+        }
+        modal.remove();
+        renderPreviewAssociacaoPedidoNfe(window.__associarNfePreviewAtual?.preview || {});
+      };
+    });
+  };
+  setTimeout(() => input.focus(), 50);
 }
 
 async function previsualizarAssociacaoPedidoNfeOmie() {
@@ -48704,6 +48773,16 @@ async function confirmarAssociacaoPedidoNfeOmie() {
 
     itensEstado.forEach((item) => {
       const seq = Number(item?.n_sequencia || 0);
+      if (item?.item_servico) {
+        itensOverrideMap.set(seq, {
+          n_sequencia: seq,
+          item_servico: true,
+          nIdProdutoServico: Number(item?.servico_produto_codigo_produto || 0) || null,
+          codigoProdutoServico: String(item?.servico_produto_codigo || item?.nf_codigo_produto || '').trim(),
+          descricaoProdutoServico: String(item?.servico_produto_descricao || item?.nf_descricao_produto || '').trim()
+        });
+        return;
+      }
       const nIdItPedidoExistente = Number(item?.pedido_n_cod_item || 0);
       if (!seq || !Number.isFinite(nIdItPedidoExistente) || nIdItPedidoExistente <= 0) return;
       itensOverrideMap.set(seq, { n_sequencia: seq, nIdItPedidoExistente });
