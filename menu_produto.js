@@ -48520,36 +48520,45 @@ function abrirModalProdutoServicoAssociacaoNfe(seq) {
   }
   const input = modal.querySelector('#modalServicoProdutoBusca');
   const resultados = modal.querySelector('#modalServicoProdutoResultados');
-  input.value = '';
-  resultados.innerHTML = '<div style="font-size:12px;color:#64748b;">Digite ao menos 2 caracteres para buscar.</div>';
-  input.oninput = async () => {
-    const q = input.value.trim();
+  const itemAtual = (window.__associarNfePreviewEstadoItens || []).find(i => Number(i?.n_sequencia || 0) === seq);
+
+  async function buscarProdutosServicoAssociacao(q) {
+    q = String(q || '').trim();
     if (q.length < 2) {
       resultados.innerHTML = '<div style="font-size:12px;color:#64748b;">Digite ao menos 2 caracteres para buscar.</div>';
       return;
     }
     resultados.innerHTML = '<div style="font-size:12px;color:#64748b;">Buscando...</div>';
-    const resp = await fetch('/api/produtos/busca', { method:'POST', headers:{'Content-Type':'application/json'}, credentials:'include', body: JSON.stringify({ q }) });
-    const data = await resp.json().catch(() => ({}));
-    const itens = Array.isArray(data?.itens) ? data.itens.slice(0, 40) : [];
-    resultados.innerHTML = itens.length ? itens.map(p => `
-      <button type="button" data-cp="${escapeHtml(String(p.codigo_produto || ''))}" data-codigo="${escapeHtml(String(p.codigo || ''))}" data-desc="${escapeHtml(String(p.descricao || ''))}" style="text-align:left;border:1px solid #e2e8f0;background:#f8fafc;border-radius:8px;padding:9px;cursor:pointer;">
-        <div style="font-weight:800;color:#0f172a;">${escapeHtml(String(p.codigo || '-'))}</div>
-        <div style="font-size:12px;color:#475569;">${escapeHtml(String(p.descricao || '-'))}</div>
-      </button>`).join('') : '<div style="font-size:12px;color:#b91c1c;">Nenhum produto encontrado.</div>';
-    resultados.querySelectorAll('button[data-cp]').forEach(btn => {
-      btn.onclick = () => {
-        const item = (window.__associarNfePreviewEstadoItens || []).find(i => Number(i?.n_sequencia || 0) === seq);
-        if (item) {
-          item.servico_produto_codigo_produto = Number(btn.dataset.cp || 0) || null;
-          item.servico_produto_codigo = btn.dataset.codigo || '';
-          item.servico_produto_descricao = btn.dataset.desc || '';
-        }
-        modal.remove();
-        renderPreviewAssociacaoPedidoNfe(window.__associarNfePreviewAtual?.preview || {});
-      };
-    });
-  };
+    try {
+      const resp = await fetch('/api/produtos/busca', { method:'POST', headers:{'Content-Type':'application/json'}, credentials:'include', body: JSON.stringify({ q }) });
+      const data = await resp.json().catch(() => ({}));
+      const itens = Array.isArray(data?.itens) ? data.itens.slice(0, 40) : [];
+      resultados.innerHTML = itens.length ? itens.map(p => `
+        <button type="button" data-cp="${escapeHtml(String(p.codigo_produto || ''))}" data-codigo="${escapeHtml(String(p.codigo || ''))}" data-desc="${escapeHtml(String(p.descricao || ''))}" style="text-align:left;border:1px solid #e2e8f0;background:#f8fafc;border-radius:8px;padding:9px;cursor:pointer;">
+          <div style="font-weight:800;color:#0f172a;">${escapeHtml(String(p.codigo || '-'))}</div>
+          <div style="font-size:12px;color:#475569;">${escapeHtml(String(p.descricao || '-'))}</div>
+        </button>`).join('') : '<div style="font-size:12px;color:#b91c1c;">Nenhum produto encontrado.</div>';
+      resultados.querySelectorAll('button[data-cp]').forEach(btn => {
+        btn.onclick = () => {
+          const item = (window.__associarNfePreviewEstadoItens || []).find(i => Number(i?.n_sequencia || 0) === seq);
+          if (item) {
+            item.servico_produto_codigo_produto = Number(btn.dataset.cp || 0) || null;
+            item.servico_produto_codigo = btn.dataset.codigo || '';
+            item.servico_produto_descricao = btn.dataset.desc || '';
+          }
+          modal.remove();
+          renderPreviewAssociacaoPedidoNfe(window.__associarNfePreviewAtual?.preview || {});
+        };
+      });
+    } catch (err) {
+      resultados.innerHTML = `<div style="font-size:12px;color:#b91c1c;">Falha ao buscar produtos: ${escapeHtml(String(err?.message || err))}</div>`;
+    }
+  }
+
+  input.value = String(itemAtual?.servico_produto_codigo || itemAtual?.nf_codigo_produto || itemAtual?.nf_descricao_produto || '').trim();
+  resultados.innerHTML = '<div style="font-size:12px;color:#64748b;">Buscando sugestoes...</div>';
+  input.oninput = () => buscarProdutosServicoAssociacao(input.value);
+  buscarProdutosServicoAssociacao(input.value);
   setTimeout(() => input.focus(), 50);
 }
 
