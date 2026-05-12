@@ -48502,22 +48502,22 @@ function renderPreviewAssociacaoPedidoNfe(preview) {
 function abrirModalProdutoServicoAssociacaoNfe(seq) {
   if (!seq) return;
   let modal = document.getElementById('modalProdutoServicoAssociacaoNfe');
-  if (!modal) {
-    modal = document.createElement('div');
-    modal.id = 'modalProdutoServicoAssociacaoNfe';
-    modal.style.cssText = 'position:fixed;inset:0;z-index:10050;background:rgba(15,23,42,.55);display:flex;align-items:center;justify-content:center;padding:20px;';
-    modal.innerHTML = `
-      <div style="width:min(760px,95vw);max-height:85vh;overflow:auto;background:#fff;border-radius:14px;box-shadow:0 20px 60px rgba(0,0,0,.25);padding:16px;">
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
-          <strong style="font-size:16px;color:#0f172a;">Selecionar produto/servico cadastrado</strong>
-          <button type="button" id="modalServicoProdutoFechar" style="border:0;background:transparent;font-size:22px;cursor:pointer;">&times;</button>
-        </div>
-        <input id="modalServicoProdutoBusca" placeholder="Pesquisar por codigo, nome ou descricao" style="width:100%;padding:10px;border:1px solid #cbd5e1;border-radius:8px;margin-bottom:10px;">
-        <div id="modalServicoProdutoResultados" style="display:grid;gap:6px;"></div>
-      </div>`;
-    document.body.appendChild(modal);
-    modal.querySelector('#modalServicoProdutoFechar').onclick = () => modal.remove();
-  }
+  if (modal) modal.remove();
+  modal = document.createElement('div');
+  modal.id = 'modalProdutoServicoAssociacaoNfe';
+  modal.style.cssText = 'position:fixed;inset:0;z-index:2147483647;background:rgba(15,23,42,.70);display:flex;align-items:center;justify-content:center;padding:20px;';
+  modal.innerHTML = `
+    <div style="width:min(820px,95vw);max-height:85vh;overflow:auto;background:#fff;border:2px solid #0284c7;border-radius:16px;box-shadow:0 24px 80px rgba(0,0,0,.35);padding:18px;">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+        <strong style="font-size:18px;color:#0f172a;">Escolha o produto/servico cadastrado</strong>
+        <button type="button" id="modalServicoProdutoFechar" style="border:0;background:transparent;font-size:26px;cursor:pointer;color:#334155;">&times;</button>
+      </div>
+      <div style="font-size:12px;color:#475569;margin-bottom:12px;">Pesquise e clique em <strong>Usar este produto</strong> para vincular ao item de servico da NF-e.</div>
+      <input id="modalServicoProdutoBusca" placeholder="Pesquisar por codigo, nome ou descricao" style="width:100%;padding:11px;border:1px solid #cbd5e1;border-radius:9px;margin-bottom:12px;font-size:14px;">
+      <div id="modalServicoProdutoResultados" style="display:grid;gap:8px;"></div>
+    </div>`;
+  document.body.appendChild(modal);
+  modal.querySelector('#modalServicoProdutoFechar').onclick = () => modal.remove();
   const input = modal.querySelector('#modalServicoProdutoBusca');
   const resultados = modal.querySelector('#modalServicoProdutoResultados');
   const itemAtual = (window.__associarNfePreviewEstadoItens || []).find(i => Number(i?.n_sequencia || 0) === seq);
@@ -48534,9 +48534,12 @@ function abrirModalProdutoServicoAssociacaoNfe(seq) {
       const data = await resp.json().catch(() => ({}));
       const itens = Array.isArray(data?.itens) ? data.itens.slice(0, 40) : [];
       resultados.innerHTML = itens.length ? itens.map(p => `
-        <button type="button" data-cp="${escapeHtml(String(p.codigo_produto || ''))}" data-codigo="${escapeHtml(String(p.codigo || ''))}" data-desc="${escapeHtml(String(p.descricao || ''))}" style="text-align:left;border:1px solid #e2e8f0;background:#f8fafc;border-radius:8px;padding:9px;cursor:pointer;">
-          <div style="font-weight:800;color:#0f172a;">${escapeHtml(String(p.codigo || '-'))}</div>
-          <div style="font-size:12px;color:#475569;">${escapeHtml(String(p.descricao || '-'))}</div>
+        <button type="button" data-cp="${escapeHtml(String(p.codigo_produto || ''))}" data-codigo="${escapeHtml(String(p.codigo || ''))}" data-desc="${escapeHtml(String(p.descricao || ''))}" style="display:flex;align-items:center;justify-content:space-between;gap:14px;text-align:left;border:1px solid #bae6fd;background:#f0f9ff;border-radius:10px;padding:10px;cursor:pointer;">
+          <span style="min-width:0;">
+            <div style="font-weight:800;color:#0f172a;">${escapeHtml(String(p.codigo || '-'))}</div>
+            <div style="font-size:12px;color:#475569;">${escapeHtml(String(p.descricao || '-'))}</div>
+          </span>
+          <span style="white-space:nowrap;background:#0284c7;color:white;border-radius:8px;padding:7px 10px;font-size:12px;font-weight:800;">Usar este produto</span>
         </button>`).join('') : '<div style="font-size:12px;color:#b91c1c;">Nenhum produto encontrado.</div>';
       resultados.querySelectorAll('button[data-cp]').forEach(btn => {
         btn.onclick = () => {
