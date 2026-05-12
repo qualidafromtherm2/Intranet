@@ -48393,14 +48393,14 @@ function renderPreviewAssociacaoPedidoNfe(preview) {
               ? 'Item único do pedido'
               : (encontrou ? 'Match identificado' : 'Sem match');
         const nfValor = Number(item?.nf_valor_total || 0);
-        const pedidoValor = Number(item?.pedido_valor_total || 0);
+        const pedidoValor = Number((isServico ? item?.nf_valor_total : item?.pedido_valor_total) || 0);
         const divergiuValor = Number.isFinite(nfValor) && Number.isFinite(pedidoValor) && Math.abs(nfValor - pedidoValor) > 0.01;
         const seq = Number(item?.n_sequencia || 0);
         const overrideCampos = window.__associarNfeCamposEditados?.[seq] || {};
         const qtdPedidoBase = item?.pedido_qtde ?? '-';
-        const qtdPedido = overrideCampos?.nQtde ?? qtdPedidoBase;
+        const qtdPedido = isServico ? (item?.nf_qtde ?? '-') : (overrideCampos?.nQtde ?? qtdPedidoBase);
         const unidadePedidoBase = obterUnidadePedidoPreviewAssociacao(item);
-        const unidadePedido = overrideCampos?.cUnidade || unidadePedidoBase;
+        const unidadePedido = isServico ? (item?.nf_unidade || '-') : (overrideCampos?.cUnidade || unidadePedidoBase);
         const divergiuQtd = compararQuantidadePreview({ ...item, pedido_qtde: qtdPedido });
         const divergiuUnidade = compararUnidadePreview(item, unidadePedido);
         const temDivergencia = divergiuValor || divergiuQtd || divergiuUnidade;
@@ -48437,16 +48437,16 @@ function renderPreviewAssociacaoPedidoNfe(preview) {
               </div>`}
             </td>
             <td style="padding:7px 8px;font-size:11px;color:${corQtd};background:${bgQtd};text-align:right;white-space:nowrap;">${
-              (divergiuQtd || divergiuUnidade)
+              (!isServico && (divergiuQtd || divergiuUnidade))
                 ? `<input type="text" class="assoc-override-qtd" data-seq="${seq}" value="${escapeHtml(String(qtdPedido))}" style="width:60px;padding:2px 4px;font-size:11px;font-weight:700;color:#b91c1c;border:1px solid #fca5a5;border-radius:4px;text-align:right;background:#fff5f5;" title="Edite a quantidade para associação">`
                 : escapeHtml(String(qtdPedido))
             }</td>
             <td style="padding:7px 8px;font-size:11px;color:${corUnid};background:${bgUnid};text-align:center;white-space:nowrap;">${
-              (divergiuQtd || divergiuUnidade)
+              (!isServico && (divergiuQtd || divergiuUnidade))
                 ? `<input type="text" class="assoc-override-unid" data-seq="${seq}" value="${escapeHtml(String(unidadePedido || ''))}" style="width:50px;padding:2px 4px;font-size:11px;font-weight:700;color:#b91c1c;border:1px solid #fca5a5;border-radius:4px;text-align:center;background:#fff5f5;text-transform:uppercase;" title="Edite a unidade para associação">`
                 : escapeHtml(String(unidadePedido || '-'))
             }</td>
-            <td style="padding:7px 8px;font-size:11px;text-align:right;font-weight:700;color:${divergiuValor ? '#b91c1c' : '#0f172a'};background:${divergiuValor ? '#fee2e2' : 'transparent'};">${escapeHtml(formatarValorRecebimento(item?.pedido_valor_total))}</td>
+            <td style="padding:7px 8px;font-size:11px;text-align:right;font-weight:700;color:${divergiuValor ? '#b91c1c' : '#0f172a'};background:${divergiuValor ? '#fee2e2' : 'transparent'};">${escapeHtml(formatarValorRecebimento(isServico ? item?.nf_valor_total : item?.pedido_valor_total))}</td>
             <td style="padding:7px 8px;font-size:11px;text-align:center;color:${temDivergencia ? '#b91c1c' : (encontrou ? '#166534' : '#9a3412')};font-weight:700;">${escapeHtml(criterio)}</td>
           </tr>
         `;
@@ -48779,7 +48779,9 @@ async function confirmarAssociacaoPedidoNfeOmie() {
           item_servico: true,
           nIdProdutoServico: Number(item?.servico_produto_codigo_produto || 0) || null,
           codigoProdutoServico: String(item?.servico_produto_codigo || item?.nf_codigo_produto || '').trim(),
-          descricaoProdutoServico: String(item?.servico_produto_descricao || item?.nf_descricao_produto || '').trim()
+          descricaoProdutoServico: String(item?.servico_produto_descricao || item?.nf_descricao_produto || '').trim(),
+          nQtde: Number(item?.nf_qtde || 0) || null,
+          cUnidade: String(item?.nf_unidade || '').trim().toUpperCase() || null
         });
         return;
       }
