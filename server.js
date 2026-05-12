@@ -29886,9 +29886,12 @@ async function montarPlanoAssociacaoNfePedido(numeroNfe, numeroPedido, chaveNfe 
 
     const itensIde = {
       nSequencia: Number.isFinite(nSequencia) && nSequencia > 0 ? nSequencia : (idx + 1),
-      cAcao: servicoCfop.servico ? 'EDITAR' : 'ASSOCIAR-PEDIDO'
+      cAcao: servicoCfop.servico ? 'ASSOCIAR-PRODUTO' : 'ASSOCIAR-PEDIDO'
     };
     if (!servicoCfop.servico) itensIde.nIdPedidoExistente = nCodPed;
+    if (servicoCfop.servico && Number.isFinite(nIdProdutoRec) && nIdProdutoRec > 0) {
+      itensIde.nIdProdutoExistente = nIdProdutoRec;
+    }
 
     const nCodItem = Number(itemPedidoVinculo?.n_cod_item);
     if (Number.isFinite(nCodItem) && nCodItem > 0) {
@@ -30178,16 +30181,9 @@ app.post('/api/compras/pedidos-omie/nfe-associar-pedido', express.json(), async 
         itemEditar.itensIde.nIdItPedidoExistente = codItemOverride;
       }
       const idProdutoServico = Number(override?.nIdProdutoServico || 0);
-      const codigoProdutoServico = String(override?.codigoProdutoServico || '').trim();
-      const descricaoProdutoServico = String(override?.descricaoProdutoServico || '').trim();
       if (Number.isFinite(idProdutoServico) && idProdutoServico > 0) {
-        itemEditar.itensCabec = {
-          ...(itemEditar.itensCabec || {}),
-          nIdProduto: idProdutoServico,
-          cAssociarExistente: 'S',
-          ...(codigoProdutoServico ? { cCodigoProduto: codigoProdutoServico } : {}),
-          ...(descricaoProdutoServico ? { cDescricaoProduto: descricaoProdutoServico } : {})
-        };
+        itemEditar.itensIde.cAcao = 'ASSOCIAR-PRODUTO';
+        itemEditar.itensIde.nIdProdutoExistente = idProdutoServico;
       }
     });
 
@@ -30471,7 +30467,10 @@ app.post('/api/compras/pedidos-omie/nfe-associar-pedido', express.json(), async 
     // A Omie pode validar a categoria antiga já no vínculo do pedido antes do Passo 2.
     const payloadAlterar = {
       ide: { nIdReceb: Number(plano.n_id_receb) },
-      itensRecebimentoEditar: itensParaEnviar,
+      itensRecebimentoEditar: itensParaEnviar.filter((itemEditar) => {
+        if (itemEditar?.itensIde?.cAcao !== 'ASSOCIAR-PRODUTO') return true;
+        return Number(itemEditar?.itensIde?.nIdProdutoExistente || 0) > 0;
+      }),
       ...(novaCategoriaCompra && infoAdicionaisParaEnviar ? { infoAdicionais: infoAdicionaisParaEnviar } : {})
     };
 
