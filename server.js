@@ -29628,6 +29628,13 @@ function unidadesEquivalentesMatch(unidadeA, unidadeB) {
   return canonicaA === canonicaB;
 }
 
+function normalizarCfopServicoRecebimento(valor) {
+  const cfop = String(valor || '').replace(/\D/g, '');
+  if (cfop === '5933') return { servico: true, cfopEntrada: '1.933' };
+  if (cfop === '6933') return { servico: true, cfopEntrada: '2.933' };
+  return { servico: false, cfopEntrada: null };
+}
+
 function calcularScoreAssociacaoNfePedido(itemReceb, itemPedido) {
   const itensCabec = itemReceb?.itensCabec || {};
   const codigoRecBruto = String(itensCabec?.cCodigoProduto || '').trim();
@@ -29818,6 +29825,16 @@ async function montarPlanoAssociacaoNfePedido(numeroNfe, numeroPedido, chaveNfe 
       || ''
     ).trim();
     const nIdProdutoRec = Number(itensCabec?.nIdProduto);
+    const cfopNf = String(
+      itensCabec?.cCFOP
+      || itensCabec?.cCfop
+      || itensInfoAdic?.cCFOP
+      || itensInfoAdic?.cCfop
+      || itensInfoAdic?.cCFOPEntrada
+      || itensInfoAdic?.cCfopEntrada
+      || ''
+    ).trim();
+    const servicoCfop = normalizarCfopServicoRecebimento(cfopNf);
 
     let itemPedidoVinculo = null;
     let criterioMatch = null;
@@ -29869,9 +29886,9 @@ async function montarPlanoAssociacaoNfePedido(numeroNfe, numeroPedido, chaveNfe 
 
     const itensIde = {
       nSequencia: Number.isFinite(nSequencia) && nSequencia > 0 ? nSequencia : (idx + 1),
-      cAcao: 'ASSOCIAR-PEDIDO',
-      nIdPedidoExistente: nCodPed
+      cAcao: servicoCfop.servico ? 'EDITAR' : 'ASSOCIAR-PEDIDO'
     };
+    if (!servicoCfop.servico) itensIde.nIdPedidoExistente = nCodPed;
 
     const nCodItem = Number(itemPedidoVinculo?.n_cod_item);
     if (Number.isFinite(nCodItem) && nCodItem > 0) {
@@ -29884,8 +29901,11 @@ async function montarPlanoAssociacaoNfePedido(numeroNfe, numeroPedido, chaveNfe 
       nf_descricao_produto: descricaoProdutoRec || null,
       nf_qtde: itensCabec?.nQtdeNFe ?? null,
       nf_unidade: String(itensCabec?.cUnidadeNfe || '').trim() || null,
+      nf_cfop: cfopNf || null,
+      item_servico: servicoCfop.servico,
+      servico_cfop_entrada: servicoCfop.cfopEntrada,
       nf_valor_total: itensCabec?.vTotalItem ?? null,
-      pedido_item_encontrado: !!itemPedidoVinculo,
+      pedido_item_encontrado: !!itemPedidoVinculo || servicoCfop.servico,
       pedido_n_cod_item: Number.isFinite(nCodItem) && nCodItem > 0 ? nCodItem : null,
       pedido_codigo_produto: String(itemPedidoVinculo?.c_produto || '').trim() || null,
       pedido_descricao_produto: String(itemPedidoVinculo?.c_descricao || '').trim() || null,
@@ -30098,6 +30118,7 @@ app.post('/api/compras/pedidos-omie/nfe-associar-pedido', express.json(), async 
         const override = overrideMap.get(seq);
         const codItemOverride = Number(override?.nIdItPedidoExistente || 0);
         if (Number.isFinite(codItemOverride) && codItemOverride > 0) return false;
+        if (it?.item_servico) return false;
         return !Number.isFinite(Number(it?.pedido_n_cod_item || NaN));
       })
       : [];
@@ -30386,6 +30407,8 @@ app.post('/api/compras/pedidos-omie/nfe-associar-pedido', express.json(), async 
         itensEditarEstoque = plano.itensRecebimentoEditar.map(itemEditar => {
           const nSeq = itemEditar.itensIde?.nSequencia;
           const nIdItPed = itemEditar.itensIde?.nIdItPedidoExistente;
+          const previewItem = (plano?.itens_preview || []).find(p => Number(p?.n_sequencia || 0) === Number(nSeq || 0));
+          const cfopServicoEntrada = previewItem?.item_servico ? previewItem?.servico_cfop_entrada : null;
           const cUnidadePedido = nIdItPed ? unidadePorCodItem[String(nIdItPed)] : null;
           const nQtdePedido = nIdItPed ? quantidadePorCodItem[String(nIdItPed)] : null;
 
@@ -30402,7 +30425,7 @@ app.post('/api/compras/pedidos-omie/nfe-associar-pedido', express.json(), async 
           };
           if (cUnidadeFinal) ajustes.cUnidade = cUnidadeFinal;
           if (nQtdeRecebidaFinal) ajustes.nQtdeRecebida = nQtdeRecebidaFinal;
-          if (cfopCalculado) ajustes.cCFOPEntrada = cfopCalculado;
+          if (cfopServicoEntrada || cfopCalculado) ajustes.cCFOPEntrada = cfopServicoEntrada || cfopCalculado;
           // Nota: nQtde não é campo válido em itensAjustes da Omie
 
           // Só incluir o item se tiver ajustes
