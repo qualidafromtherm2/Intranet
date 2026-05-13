@@ -15541,29 +15541,108 @@ app.patch('/api/logistica/itens_solicitados/aguardando-retirada', async (req, re
     await ensureSchemaMigrated();
     const id_user = req.session?.user?.id;
     if (!id_user) return res.status(401).json({ ok: false, error: 'Não autenticado.' });
-    const { solic_ids } = req.body;
+    const { solic_ids, cod_local, nome_local, quantidade } = req.body;
     if (!Array.isArray(solic_ids) || !solic_ids.length)
       return res.status(400).json({ ok: false, error: 'solic_ids inválido.' });
     const ids = solic_ids.map(id => parseInt(id, 10)).filter(id => !isNaN(id));
 
     // Log do evento "Conferido" no terminal
-    const sep = '─'.repeat(60);
-    console.log(`\n┌${sep}`);
+    const _sep = '─'.repeat(60);
+    console.log(`\n┌${_sep}`);
     console.log(`│ [CONFERIDO] Botão "Conferido" clicado`);
     console.log(`│ usuário   : ${req.session?.user?.username || req.session?.user?.nome || id_user}`);
     console.log(`│ solic_ids : ${JSON.stringify(ids)}`);
-    console.log(`│ ⚠ Esta rota NÃO envia dados à Omie — apenas atualiza status no banco`);
-    console.log(`└${sep}`);
+    console.log(`│ cod_local (origem): ${cod_local || '—'}  nome_local: ${nome_local || '—'}`);
+    console.log(`│ quantidade: ${quantidade || '(não informada)'}`);
+    console.log(`└${_sep}`);
+
+    // Transferência Omie: origem = armazém selecionado no modal (cod_local do body),
+    // destino = cod_local atual no DB (definido na criação da SEP)
+    if (cod_local) {
+      try {
+        const { rows: itemRows } = await pool.query(
+          `SELECT i.id, i.n_solic, i.cod_local AS cod_destino,
+                  c.codigo_produto, c.nome_user, c.quantidade AS qtd_solic
+           FROM solicitacao_produto.itens_solicitados i
+           JOIN logistica.carrinho c ON c.id = i.id_carr
+           WHERE i.id = ANY($1::bigint[])`,
+          [ids]
+        );
+        const nomeLogado = req.session?.user?.nome || req.session?.user?.username || req.session?.user?.login || '';
+        const hoje = new Date();
+        const dataOmie = `${String(hoje.getDate()).padStart(2,'0')}/${String(hoje.getMonth()+1).padStart(2,'0')}/${hoje.getFullYear()}`;
+        for (const item of itemRows) {
+          const codDestino = item.cod_destino;
+          if (!codDestino || String(codDestino) === String(cod_local)) {
+            console.log(`\n┌${_sep}\n│ [CONFERIDO] Item ${item.n_solic} sem destino ou origem=destino, pulando TRF Omie\n└${_sep}`);
+            continue;
+          }
+          const { rows: prodRows } = await pool.query(
+            `SELECT p.codigo_produto,
+                    COALESCE(
+                      NULLIF(e.cmc, 0),
+                      NULLIF(e.preco_unitario, 0),
+                      NULLIF(p.valor_unitario, 0),
+                      0.01
+                    ) AS valor_unit
+             FROM public.produtos_omie p
+             LEFT JOIN logistica.estoque_atual e
+               ON e.codigo = p.codigo AND e.local_codigo = $2
+             WHERE p.codigo = $1
+             LIMIT 1`,
+            [item.codigo_produto, String(cod_local)]
+          );
+          if (!prodRows.length) {
+            console.warn(`[CONFERIDO] Produto ${item.codigo_produto} não encontrado em produtos_omie, pulando TRF`);
+            continue;
+          }
+          const idProd = Number(prodRows[0].codigo_produto);
+          const valor = parseFloat(prodRows[0].valor_unit) || 0.01;
+          const qtd = parseFloat(quantidade) || parseFloat(item.qtd_solic) || 1;
+          const obs = `Sep. ${item.n_solic} | Solic.: ${item.nome_user} | Conf.: ${nomeLogado}`;
+          const omiePayload = {
+            call: 'IncluirAjusteEstoque',
+            app_key: OMIE_APP_KEY,
+            app_secret: OMIE_APP_SECRET,
+            param: [{
+              codigo_local_estoque: String(cod_local),
+              id_prod: idProd,
+              data: dataOmie,
+              tipo: 'TRF',
+              quan: qtd,
+              valor,
+              obs,
+              origem: 'AJU',
+              motivo: 'TRF',
+              codigo_local_estoque_destino: String(codDestino)
+            }]
+          };
+          console.log(`\n┌${_sep}\n│ [CONFERIDO] Omie TRF ${item.codigo_produto}: ${cod_local} → ${codDestino} (${qtd} un)\n└${_sep}`);
+          await omieCall('https://app.omie.com.br/api/v1/estoque/ajuste/', omiePayload);
+        }
+      } catch (omieErr) {
+        console.warn(`\n┌${_sep}\n│ [CONFERIDO] ⚠ Omie IncluirAjusteEstoque falhou: ${omieErr?.faultstring || omieErr?.message || omieErr}\n└${_sep}`);
+        // Não bloqueia o fluxo se a integração Omie falhar
+      }
+    }
 
     await registrarMovimentacaoKanbanItens(pool, ids, 'Aguardando retirada', req);
-    await pool.query(
-      `UPDATE solicitacao_produto.itens_solicitados SET status = 'Aguardando retirada' WHERE id = ANY($1::bigint[])`, [ids]
-    );
+    if (cod_local || nome_local) {
+      await pool.query(
+        `UPDATE solicitacao_produto.itens_solicitados
+         SET status = 'Aguardando retirada',
+             cod_local  = COALESCE($2, cod_local),
+             nome_local = COALESCE($3, nome_local)
+         WHERE id = ANY($1::bigint[])`,
+        [ids, cod_local ? String(cod_local) : null, nome_local ? String(nome_local) : null]
+      );
+    } else {
+      await pool.query(
+        `UPDATE solicitacao_produto.itens_solicitados SET status = 'Aguardando retirada' WHERE id = ANY($1::bigint[])`, [ids]
+      );
+    }
 
-    console.log(`\n┌${sep}`);
-    console.log(`│ [CONFERIDO] ✓ Status atualizado para "Aguardando retirada"  ids=${JSON.stringify(ids)}`);
-    console.log(`└${sep}`);
-
+    console.log(`\n┌${_sep}\n│ [CONFERIDO] ✓ Status atualizado para "Aguardando retirada"  ids=${JSON.stringify(ids)}\n└${_sep}`);
     res.json({ ok: true });
   } catch (err) {
     console.error('[logistica/aguardando-retirada] erro:', err);
