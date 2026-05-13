@@ -9015,7 +9015,7 @@
   <!-- Interceptor de sessão: precisa carregar ANTES de qualquer módulo que faça fetch -->
   <script src="/public/js/sessao_resiliente.js?v=20260422a"></script>
   <script type="module" src="login/login.js"></script>
-  <script type="module" src="menu_produto.js?v=20260507a"></script>
+  <script type="module" src="menu_produto.js?v=20260513b"></script>
   
   <script type="module" src="./requisicoes_omie/filtro_produto.js"></script>
   <script type="module" src="./requisicoes_omie/ListarProdutos.js"></script>
@@ -13110,9 +13110,11 @@ function attachDropZone(ul) {
   window.fecharModalLocalizarNfe = fecharModal;
 
   btnFechar && btnFechar.addEventListener('click', fecharModal);
-  modal.addEventListener('click', (e) => { if (e.target === modal) fecharModal(); });
-  document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && modal.style.display === 'block') fecharModal();
+  modal.addEventListener('click', (e) => {
+    if (e.target === modal) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
   });
 
   // ── Utilitários ──────────────────────────────────────────────
@@ -13302,6 +13304,25 @@ function attachDropZone(ul) {
     return '<span style="background:#fff7ed;color:#c2410c;border:1px solid #fed7aa;border-radius:6px;padding:2px 8px;font-size:11px;font-weight:700;">Faturada (etapa '+esc(c||'-')+')</span>';
   };
 
+  const nfeJaRecebidaOuConcluida = (nfe) => {
+    const etapa = String(nfe?.c_etapa || '').trim();
+    const recebido = String(nfe?.c_recebido || '').toUpperCase() === 'S';
+    const desc = String(nfe?.c_etapa_descricao || nfe?.etapa_descricao || nfe?.status || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+    return recebido || etapa === '60' || etapa === '80' || desc.includes('concluid') || desc.includes('recebid');
+  };
+
+  const renderAvisoNfeSomenteConsulta = (nfe) => {
+    const etapa = esc(nfe?.c_etapa || '-');
+    const label = String(nfe?.c_etapa || '').trim() === '80' ? 'NF-e concluida' : `NF-e recebida (etapa ${etapa})`;
+    return `<div style="margin:0 0 12px;padding:14px 16px;border:2px solid #86efac;background:#ecfdf5;color:#14532d;border-radius:10px;display:flex;align-items:flex-start;gap:12px;">
+      <i class="fa-solid fa-circle-check" style="font-size:22px;color:#16a34a;margin-top:1px;"></i>
+      <div>
+        <div style="font-size:16px;font-weight:800;line-height:1.2;">${label}</div>
+        <div style="font-size:12px;margin-top:4px;color:#166534;">Esta nota ja foi recebida/concluida. A tela fica somente para consulta; pedidos sugeridos e nova associacao ficam ocultos ate a NF-e voltar de etapa.</div>
+      </div>
+    </div>`;
+  };
+
   // ── Card de pedido reutilizável ───────────────────────────────
   const renderPedidoCard = (ped, chaveNfe, numeroNfe, badgeExtra, justEl) => {
     badgeExtra = badgeExtra || '';
@@ -13338,7 +13359,6 @@ function attachDropZone(ul) {
         const numeroNfe= card.dataset.numeroNfe|| '';
         let itensCard = [];
         try { itensCard = JSON.parse(card.dataset.itens || '[]'); } catch (_) {}
-        fecharModal();
         if (window.abrirModalAssociarPedidoNfeComContexto) {
           window.abrirModalAssociarPedidoNfeComContexto({
             numero_nfe: numeroNfe, numero_pedido: cnumero,
@@ -13376,6 +13396,7 @@ function attachDropZone(ul) {
       ultimaNfeCtx = { nfe, itens };
 
       const jaVinculado  = itens.some(i => i.n_id_pedido && Number(i.n_id_pedido) > 0);
+      const somenteConsulta = nfeJaRecebidaOuConcluida(nfe);
       const totalItens   = itens.reduce((acc, i) => acc + (Number(i.vlr_item) || 0), 0);
       const statusHtml   = renderEtapaBadge(nfe.c_etapa, nfe.c_recebido, nfe.c_cancelada);
 
@@ -13397,7 +13418,9 @@ function attachDropZone(ul) {
       </div>`;
 
       let pedidosHtml = '';
-      if (pedidos.length > 0) {
+      if (somenteConsulta) {
+        pedidosHtml = '';
+      } else if (pedidos.length > 0) {
         // Calcula score local e ordena antes de renderizar
         const pedidosComScore = pedidos.map(ped => ({
           ...ped,
@@ -13427,7 +13450,7 @@ function attachDropZone(ul) {
         pedidosHtml = '<div style="padding:10px;background:#f8fafc;border:1px solid #e2e8f0;color:#64748b;border-radius:8px;font-size:13px;"><i class="fa-solid fa-info-circle" style="margin-right:6px;"></i>Nenhum pedido de compra correspondente localizado.</div>';
       }
 
-      conteudo.innerHTML = cabecHtml + pedidosHtml;
+      conteudo.innerHTML = (somenteConsulta ? renderAvisoNfeSomenteConsulta(nfe) : '') + cabecHtml + pedidosHtml;
       attachCardListeners();
 
       const btnRanquear = document.getElementById('locNfeBtnRanquear');
