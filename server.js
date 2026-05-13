@@ -15229,7 +15229,7 @@ app.get('/api/logistica/kanban/itens', async (req, res) => {
     if (n_solic) {
       // Itens de uma SEP específica
       const { rows } = await pool.query(`
-        SELECT c.id AS carr_id, i.id AS solic_id, i.status, i.observacao, i.nome_local,
+        SELECT c.id AS carr_id, i.id AS solic_id, i.status, i.observacao, i.nome_local, i.cod_local,
                c.codigo_produto, c.descricao, c.unidade,
                c.quantidade::numeric AS quantidade,
                c.data_prevista::text, c.horario, c.criado_em::text,
@@ -15254,7 +15254,7 @@ app.get('/api/logistica/kanban/itens', async (req, res) => {
       if (includeDerivados === '1' || includeDerivados === 'true' || includeDerivados === 'yes') {
         const baseNSolic = String(n_solic).replace(/\.\d+$/, '');
         const { rows: derivRows } = await pool.query(`
-             SELECT c.id AS carr_id, i.id AS solic_id, i.n_solic, i.status, i.observacao, i.nome_local,
+             SELECT c.id AS carr_id, i.id AS solic_id, i.n_solic, i.status, i.observacao, i.nome_local, i.cod_local,
                  c.codigo_produto, c.descricao, c.unidade,
                  c.quantidade::numeric AS quantidade,
                  c.data_prevista::text, c.horario, c.criado_em::text,
@@ -15416,10 +15416,25 @@ app.patch('/api/logistica/itens_solicitados/aguardando-retirada', async (req, re
     if (!Array.isArray(solic_ids) || !solic_ids.length)
       return res.status(400).json({ ok: false, error: 'solic_ids inválido.' });
     const ids = solic_ids.map(id => parseInt(id, 10)).filter(id => !isNaN(id));
+
+    // Log do evento "Conferido" no terminal
+    const sep = '─'.repeat(60);
+    console.log(`\n┌${sep}`);
+    console.log(`│ [CONFERIDO] Botão "Conferido" clicado`);
+    console.log(`│ usuário   : ${req.session?.user?.username || req.session?.user?.nome || id_user}`);
+    console.log(`│ solic_ids : ${JSON.stringify(ids)}`);
+    console.log(`│ ⚠ Esta rota NÃO envia dados à Omie — apenas atualiza status no banco`);
+    console.log(`└${sep}`);
+
     await registrarMovimentacaoKanbanItens(pool, ids, 'Aguardando retirada', req);
     await pool.query(
       `UPDATE solicitacao_produto.itens_solicitados SET status = 'Aguardando retirada' WHERE id = ANY($1::bigint[])`, [ids]
     );
+
+    console.log(`\n┌${sep}`);
+    console.log(`│ [CONFERIDO] ✓ Status atualizado para "Aguardando retirada"  ids=${JSON.stringify(ids)}`);
+    console.log(`└${sep}`);
+
     res.json({ ok: true });
   } catch (err) {
     console.error('[logistica/aguardando-retirada] erro:', err);
