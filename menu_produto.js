@@ -187,6 +187,11 @@ document.addEventListener('DOMContentLoaded', () => {
       window._loadKanbanSolicitacoesTab();
     });
   }
+
+  // Atualiza contadores das guias ao carregar a página
+  if (typeof window._updateTabCounters === 'function') {
+    window._updateTabCounters();
+  }
 });
 
 // Helpers compartilhados pela aba de solicitações
@@ -317,6 +322,52 @@ function _solRenderItemRow(item, mode) {
     </div>`;
 }
 
+// ============================================================================
+// FUNÇÕES DE ATUALIZAÇÃO DE CONTADORES DAS GUIAS
+// ============================================================================
+
+// Atualiza os contadores das guias "Tela de separação" e "Kanban solicitações"
+window._updateTabCounters = async function() {
+  try {
+    // Contador para "Tela de separação": Solicitado + Em Separação + Separado
+    const solicitacoesCountEl = document.getElementById('solicitacoesCount');
+    if (solicitacoesCountEl) {
+      try {
+        const respSol = await fetch('/api/logistica/solicitacoes-kanban', { credentials: 'include' });
+        if (respSol.ok) {
+          const dataSol = await respSol.json();
+          const colunas = dataSol.colunas || {};
+          const contSol = 
+            (colunas['Solicitado']?.length || 0) +
+            (colunas['Em Separação']?.length || 0) +
+            (colunas['Separado']?.length || 0);
+          solicitacoesCountEl.textContent = contSol;
+        }
+      } catch (err) {
+        console.warn('[UPDATE-COUNTERS] Erro ao atualizar contador solicitações:', err);
+      }
+    }
+
+    // Contador para "Kanban solicitações": apenas "Aguardando retirada"
+    const kanbanSolicitacoesCountEl = document.getElementById('kanbanSolicitacoesCount');
+    if (kanbanSolicitacoesCountEl) {
+      try {
+        const respKan = await fetch('/api/logistica/kanban', { credentials: 'include' });
+        if (respKan.ok) {
+          const dataKan = await respKan.json();
+          const colunas = dataKan.colunas || {};
+          const contKan = colunas['Aguardando retirada']?.length || 0;
+          kanbanSolicitacoesCountEl.textContent = contKan;
+        }
+      } catch (err) {
+        console.warn('[UPDATE-COUNTERS] Erro ao atualizar contador kanban:', err);
+      }
+    }
+  } catch (err) {
+    console.warn('[UPDATE-COUNTERS] Erro geral:', err);
+  }
+};
+
 // Carrega e renderiza a aba de solicitações como kanban do separador
 window._loadSolicitacoesTab = async function() {
   const board    = document.getElementById('solicitacoesKanbanBoard');
@@ -347,10 +398,16 @@ window._loadSolicitacoesTab = async function() {
 
     board.innerHTML = '';
     let totalCards = 0;
+    let contarSolicitacoes = 0;  // Contador específico: Solicitado + Em Separação + Separado
 
     COLS.forEach(col => {
       const cards = colunas[col.key] || [];
       totalCards += cards.length;
+      
+      // Conta apenas para as 3 colunas específicas
+      if (['Solicitado', 'Em Separação', 'Separado'].includes(col.key)) {
+        contarSolicitacoes += cards.length;
+      }
 
       const colEl = document.createElement('div');
       colEl.style.cssText = 'flex:0 0 200px;display:flex;flex-direction:column;';
@@ -412,7 +469,7 @@ window._loadSolicitacoesTab = async function() {
       board.appendChild(colEl);
     });
 
-    if (countEl) countEl.textContent = totalCards;
+    if (countEl) countEl.textContent = contarSolicitacoes;
     if (statusEl) {
       const agora = new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
       statusEl.textContent = `Atualizado às ${agora} · ${totalCards} SEP(s)`;
@@ -556,6 +613,41 @@ function _abrirModalSeparacao(grupoAtual, gruposConflito) {
     } else {
       enderecoHtml = `<div style="margin-top:2px;font-size:.65rem;color:#6b7280;font-style:italic;"><i class="fa-solid fa-location-dot" style="margin-right:3px;"></i>Não endereçado</div>`;
     }
+
+    // Seletor de armazém — só para itens já Separados
+    let armazemHtml = '';
+    if (isSep) {
+      const locais = (estoqueBatch[it.codigo_produto] || [])
+        .filter(l => Number(l.saldo) > 0)
+        .slice()
+        .sort((a, b) => String(a.local_codigo) === PRINC_ARMZ ? -1 : String(b.local_codigo) === PRINC_ARMZ ? 1 : 0);
+      if (locais.length) {
+        const btns = locais.map((l, idx) => {
+          const isDefault = String(l.local_codigo) === PRINC_ARMZ || (idx === 0);
+          const cod = String(l.local_codigo);
+          const nome = l.local_nome || cod;
+          const qty2 = Number(l.saldo).toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+          return `<button class="armazem-btn" data-cod="${cod}" data-nome="${nome.replace(/"/g,'&quot;')}" data-selected="${isDefault ? '1' : '0'}"
+            style="padding:3px 9px;border-radius:5px;font-size:.65rem;font-weight:700;cursor:pointer;white-space:nowrap;
+                   border:2px solid ${isDefault ? '#16a34a' : '#374151'};
+                   background:${isDefault ? '#14532d' : '#111827'};
+                   color:${isDefault ? '#86efac' : '#9ca3af'};">
+            ${nome} · ${qty2} ${l.unidade || 'UN'}
+          </button>`;
+        }).join('');
+        armazemHtml = `<div class="armazem-sel-wrap" style="margin-top:6px;">
+          <div style="font-size:.60rem;color:#475569;margin-bottom:4px;font-weight:600;text-transform:uppercase;letter-spacing:.04em;">
+            <i class="fa-solid fa-warehouse" style="margin-right:4px;color:#3b82f6;"></i>Armazém de retirada
+          </div>
+          <div style="display:flex;flex-wrap:wrap;gap:4px;">${btns}</div>
+        </div>`;
+      } else if (Object.keys(estoqueBatch).length > 0) {
+        armazemHtml = `<div style="margin-top:5px;font-size:.63rem;color:#fbbf24;font-style:italic;">
+          <i class="fa-solid fa-triangle-exclamation" style="margin-right:3px;"></i>Sem armazém com saldo positivo
+        </div>`;
+      }
+    }
+
     // Itens de sub-SEPs (já Separado) não têm input de quantidade editável
     const qtyHtml = isSep
       ? `<span style="font-size:.80rem;font-weight:700;color:#f0f0f0;">${_solFmtQty(qty)} ${it.unidade || 'UN'}</span>`
@@ -576,8 +668,8 @@ function _abrirModalSeparacao(grupoAtual, gruposConflito) {
            data-descricao="${encodeURIComponent(it.descricao || '')}"
            data-observacao="${encodeURIComponent(obsText)}"
            data-unidade="${String(it.unidade || 'UN').replace(/"/g, '&quot;')}"
-           style="display:flex;align-items:center;gap:12px;padding:10px 16px;border-top:1px solid #222;">
-        <div style="width:40px;height:40px;border-radius:8px;background:#0f0f0f;overflow:hidden;flex-shrink:0;">
+           style="display:flex;align-items:flex-start;gap:12px;padding:10px 16px;border-top:1px solid #222;">
+        <div style="width:40px;height:40px;border-radius:8px;background:#0f0f0f;overflow:hidden;flex-shrink:0;margin-top:2px;">
           <img src="/imagens_produtos/${it.codigo_produto}.jpg" style="width:100%;height:100%;object-fit:cover;" onerror="this.style.display='none'">
         </div>
         <div style="flex:1;min-width:0;">
@@ -590,10 +682,11 @@ function _abrirModalSeparacao(grupoAtual, gruposConflito) {
           </div>
           ${swapHistory}
           ${enderecoHtml}
+          ${armazemHtml}
         </div>
           ${qtyHtml}
           ${isSep
-            ? `<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;justify-content:flex-end;">
+            ? `<div style="display:flex;gap:6px;align-items:flex-start;flex-wrap:wrap;justify-content:flex-end;flex-shrink:0;">
                  <button class="btn-item-conferido" title="Enviar para Aguardando retirada"
                    style="padding:4px 9px;border:none;border-radius:6px;background:#16a34a;color:#dcfce7;font-weight:700;font-size:.70rem;cursor:pointer;white-space:nowrap;">
                    <i class="fa-solid fa-clipboard-check" style="margin-right:3px;"></i>Conferido
@@ -633,6 +726,24 @@ function _abrirModalSeparacao(grupoAtual, gruposConflito) {
   }
 
   let aggItens = _aggItens(grupoAtual.itens);
+  const PRINC_ARMZ = '10717096386';
+  let estoqueBatch = {};
+
+  function _renderLista() {
+    const lista = document.getElementById('modalSepItemsList');
+    if (lista) lista.innerHTML = aggItens.map(it => _renderAggItem(it, grupoAtual.n_solic)).join('');
+  }
+
+  async function _carregarEstoque() {
+    const codigos = [...new Set(aggItens.map(it => it.codigo_produto).filter(Boolean))];
+    if (!codigos.length) return;
+    try {
+      const re = await fetch('/api/logistica/estoque/batch?codigos=' + encodeURIComponent(codigos.join(',')), { credentials: 'include' });
+      const de = await re.json();
+      if (de.ok) estoqueBatch = de.dados || {};
+    } catch (_) {}
+    _renderLista();
+  }
 
   // Recarrega o SEP original do servidor e re-renderiza lista (sem sub-SEPs — .1 vai para fila pendente)
   let _reloadPending = false;
@@ -645,8 +756,7 @@ function _abrirModalSeparacao(grupoAtual, gruposConflito) {
       if (!d.ok) return;
       const mapped = (d.itens || []).map(it => ({ ...it, solic_ids: [it.solic_id], carr_ids: [it.carr_id] }));
       aggItens = _aggItens(mapped);
-      const lista = document.getElementById('modalSepItemsList');
-      if (lista) lista.innerHTML = aggItens.map(it => _renderAggItem(it, grupoAtual.n_solic)).join('');
+      await _carregarEstoque();
     } catch (_) {} finally { _reloadPending = false; }
   }
 
@@ -705,6 +815,9 @@ function _abrirModalSeparacao(grupoAtual, gruposConflito) {
     </div>`;
 
   document.body.appendChild(modal);
+
+  // Carrega estoque assim que modal abre
+  _carregarEstoque();
 
   document.getElementById('btnModalSepFechar')?.addEventListener('click', () => fecharModal());
   modal.addEventListener('click', e => { if (e.target === modal) fecharModal(); });
@@ -984,6 +1097,21 @@ function _abrirModalSeparacao(grupoAtual, gruposConflito) {
 
   // Delegação de clique — ações do item
   modalInner.addEventListener('click', async (e) => {
+    // Seleção de armazém inline
+    const btnArm = e.target.closest('.armazem-btn');
+    if (btnArm) {
+      const wrap = btnArm.closest('.armazem-sel-wrap');
+      if (!wrap) return;
+      wrap.querySelectorAll('.armazem-btn').forEach(b => {
+        const active = b === btnArm;
+        b.dataset.selected = active ? '1' : '0';
+        b.style.border = '2px solid ' + (active ? '#16a34a' : '#374151');
+        b.style.background = active ? '#14532d' : '#111827';
+        b.style.color = active ? '#86efac' : '#9ca3af';
+      });
+      return;
+    }
+
     const btnConferido = e.target.closest('.btn-item-conferido');
     if (btnConferido && !btnConferido.disabled) {
       const row = btnConferido.closest('[data-item-row]');
@@ -991,15 +1119,22 @@ function _abrirModalSeparacao(grupoAtual, gruposConflito) {
       const solicIds = JSON.parse(row.dataset.solicIds || '[]');
       if (!solicIds.length) return;
 
+      // Lê armazém selecionado no DOM (botão com data-selected="1")
+      const selBtn = row.querySelector('.armazem-btn[data-selected="1"]');
+      const cod_local  = selBtn ? selBtn.dataset.cod  : null;
+      const nome_local = selBtn ? selBtn.dataset.nome : null;
+      const quantidade = parseFloat(row.dataset.qtyTotal) || 1;
+
       btnConferido.disabled = true;
       const htmlOrig = btnConferido.innerHTML;
       btnConferido.innerHTML = '<i class="fa-solid fa-spinner fa-spin" style="margin-right:3px;"></i>...';
+
       try {
         const r = await fetch('/api/logistica/itens_solicitados/aguardando-retirada', {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
           credentials: 'include',
-          body: JSON.stringify({ solic_ids: solicIds })
+          body: JSON.stringify({ solic_ids: solicIds, cod_local, nome_local, quantidade })
         });
         const d = await r.json();
         if (!d.ok) throw new Error(d.error || 'Erro ao marcar como aguardando retirada.');
@@ -1389,6 +1524,7 @@ async function _abrirModalAguardandoRetiradaSep(nSolic, opts = {}) {
 
   let itens = [];
   let itensDerivados = [];
+  let estoqueBatch = {};
   try {
     const r = await fetch(`/api/logistica/kanban/itens?n_solic=${encodeURIComponent(nSolic)}&include_derivados=1`, { credentials: 'include' });
     const d = await r.json();
@@ -1398,6 +1534,16 @@ async function _abrirModalAguardandoRetiradaSep(nSolic, opts = {}) {
     }
     itens = Array.isArray(d.itens) ? d.itens : [];
     itensDerivados = Array.isArray(d.itens_derivados) ? d.itens_derivados : [];
+
+    // Carrega estoque por armazém para todos os produtos da solicitação
+    const codigos = [...new Set(itens.map(it => it.codigo_produto).filter(Boolean))];
+    if (codigos.length) {
+      try {
+        const re = await fetch('/api/logistica/estoque/batch?codigos=' + encodeURIComponent(codigos.join(',')), { credentials: 'include' });
+        const de = await re.json();
+        if (de.ok) estoqueBatch = de.dados || {};
+      } catch (_) { /* silencia */ }
+    }
   } catch (err) {
     alert('Erro de rede ao carregar a solicitação.');
     return;
@@ -1411,28 +1557,52 @@ async function _abrirModalAguardandoRetiradaSep(nSolic, opts = {}) {
   document.getElementById('modalAguardandoRetiradaSep')?.remove();
 
   const renderLinha = (it) => {
-    let endAddr;
+    // Card de endereço (localização física)
+    let endCard = '';
     const endList = it.enderecos_pp;
     if (endList && Array.isArray(endList) && endList.length > 0) {
-      const cards = endList.map(e => `
-        <div style="display:inline-flex;flex-direction:column;gap:1px;background:#1e293b;border:1px solid #334155;border-radius:4px;padding:3px 6px;font-size:.65rem;line-height:1.5;white-space:nowrap;">
+      endCard = endList.map(e => `
+        <div style="display:inline-flex;flex-direction:column;gap:1px;background:#1e293b;border:1px solid #334155;border-radius:4px;padding:3px 6px;font-size:.65rem;line-height:1.6;white-space:nowrap;">
           <span><span style="color:#6b7280;">rua:</span> <span style="color:#67e8f9;font-weight:700;">${e.rua || '—'}</span></span>
           <span><span style="color:#6b7280;">andar:</span> <span style="color:#67e8f9;font-weight:700;">${e.andar || '—'}</span></span>
           <span><span style="color:#6b7280;">edif.:</span> <span style="color:#67e8f9;font-weight:700;">${e.edificio || '—'}</span></span>
           <span><span style="color:#6b7280;">apto:</span> <span style="color:#67e8f9;font-weight:700;">${e.apartamento || '—'}</span></span>
         </div>`).join('');
-      endAddr = `<div style="display:flex;flex-wrap:wrap;gap:4px;margin-top:2px;">${cards}</div>`;
     } else {
-      endAddr = `<span style="color:#6b7280;font-style:italic;font-size:.68rem;">Não endereçado</span>`;
+      endCard = `<span style="color:#6b7280;font-style:italic;font-size:.68rem;">Não endereçado</span>`;
     }
+
+    // Armazéns — local_codigo 10717096386 sempre primeiro
+    const PRINCIPAL = '10717096386';
+    let locais = (estoqueBatch[it.codigo_produto] || []).slice();
+    locais.sort((a, b) => {
+      if (String(a.local_codigo) === PRINCIPAL) return -1;
+      if (String(b.local_codigo) === PRINCIPAL) return  1;
+      return 0;
+    });
+    let estoqueColuna = '';
+    if (locais.length) {
+      estoqueColuna = locais.map(l =>
+        `<div style="display:flex;flex-direction:column;line-height:1.3;padding:2px 0;">
+          <span style="font-size:.63rem;color:#86efac;">${l.local_nome || l.local_codigo}</span>
+          <span style="font-size:.68rem;color:#f0f0f0;font-weight:700;">${Number(l.saldo).toLocaleString('pt-BR',{minimumFractionDigits:0,maximumFractionDigits:2})} ${l.unidade||'UN'}</span>
+        </div>`
+      ).join('');
+    } else {
+      estoqueColuna = `<span style="font-size:.63rem;color:#6b7280;font-style:italic;">Sem estoque</span>`;
+    }
+
     return `
     <div style="display:flex;align-items:flex-start;gap:10px;padding:10px 12px;border-top:1px solid #222;">
       <div style="flex:1;min-width:0;">
         <div style="font-weight:700;font-size:.78rem;color:#f59e0b;">${it.codigo_produto || '—'}</div>
         <div style="font-size:.75rem;color:#d1d5db;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${it.descricao || '—'}</div>
-        <div style="margin-top:3px;display:flex;align-items:flex-start;gap:4px;">
-          <i class="fa-solid fa-location-dot" style="color:#6b7280;font-size:.68rem;margin-top:3px;"></i>
-          ${endAddr}
+        <div style="margin-top:4px;display:flex;align-items:flex-start;gap:8px;">
+          <i class="fa-solid fa-location-dot" style="color:#6b7280;font-size:.68rem;margin-top:3px;flex-shrink:0;"></i>
+          ${endCard}
+          <div style="display:flex;flex-direction:column;gap:3px;border-left:1px solid #374151;padding-left:8px;min-width:130px;">
+            ${estoqueColuna}
+          </div>
         </div>
       </div>
       <div style="font-size:.74rem;font-weight:700;color:#f0f0f0;white-space:nowrap;">${_solFmtQty(it.quantidade)} ${it.unidade || 'UN'}</div>
@@ -9435,24 +9605,7 @@ const sacEnvioStatus = document.getElementById('sacEnvioStatus');
 const sacObservacao = document.getElementById('sacObservacao');
 const sacNumeroSep = document.getElementById('sacNumeroSep');
 const sacRefreshBtn = document.getElementById('sacRefreshBtn');
-const sacRelatorioBtn = document.getElementById('sacRelatorioBtn');
 const sacTabelaBody = document.getElementById('sacTabelaBody');
-const sacRelatorioGraficoWrapper = document.getElementById('sacRelatorioGraficoWrapper');
-const sacRelatorioGraficoCanvas = document.getElementById('sacRelatorioGraficoCanvas');
-const sacRelatorioGraficoVazio = document.getElementById('sacRelatorioGraficoVazio');
-const sacRelatorioConteudoGraficoCanvas = document.getElementById('sacRelatorioConteudoGraficoCanvas');
-const sacRelatorioConteudoGraficoVazio = document.getElementById('sacRelatorioConteudoGraficoVazio');
-const sacRelatorioConteudoUsuarioSelect = document.getElementById('sacRelatorioConteudoUsuarioSelect');
-const sacRelatorioDrilldownWrapper = document.getElementById('sacRelatorioDrilldownWrapper');
-const sacRelatorioDrilldownTitulo = document.getElementById('sacRelatorioDrilldownTitulo');
-const sacRelatorioDrilldownBody = document.getElementById('sacRelatorioDrilldownBody');
-const sacRelatorioVoltarBtn = document.getElementById('sacRelatorioVoltarBtn');
-const sacRelatorioDownloadBtn = document.getElementById('sacRelatorioDownloadBtn');
-const sacPeriodo3mBtn = document.getElementById('sacPeriodo3mBtn');
-const sacPeriodo4mBtn = document.getElementById('sacPeriodo4mBtn');
-const sacPeriodo6mBtn = document.getElementById('sacPeriodo6mBtn');
-const sacPeriodo12mBtn = document.getElementById('sacPeriodo12mBtn');
-const sacPeriodoTudoBtn = document.getElementById('sacPeriodoTudoBtn');
 const atTipoAtendimentoInput = document.getElementById('atTipoAtendimento');
 const atNomeRevendaClienteInput = document.getElementById('atNomeRevendaCliente');
 const atTelefoneInput = document.getElementById('atTelefone');
@@ -14490,7 +14643,6 @@ document.querySelectorAll('#atTabelaWrapper thead th[data-col]').forEach(th => {
   let _pg2Instance = null;
   let _pgMesesSet  = [];
   let _pgPeriodo   = 3;
-  let _pgTipo      = 'Qualidade';
   let _pgInicializado = false;
 
   // Helpers locais (réplica das funções da IIFE principal)
@@ -14535,7 +14687,7 @@ document.querySelectorAll('#atTabelaWrapper thead th[data-col]').forEach(th => {
     if (status) { status.style.display = 'block'; status.textContent = 'Carregando...'; status.style.color = ''; }
 
     try {
-      const resp = await fetch(`/api/sac/at/graficos/por-modelo-mes?tipo=${encodeURIComponent(_pgTipo)}`, { credentials: 'include' });
+      const resp = await fetch('/api/sac/at/graficos/por-modelo-mes?tipo=Qualidade', { credentials: 'include' });
       const data = await resp.json().catch(() => ({}));
       if (!resp.ok || data.ok === false) throw new Error(data.error || 'Erro ao carregar.');
 
@@ -14613,7 +14765,7 @@ document.querySelectorAll('#atTabelaWrapper thead th[data-col]').forEach(th => {
     if (status) { status.style.display = 'block'; status.textContent = 'Carregando...'; status.style.color = ''; }
 
     try {
-      const resp = await fetch(`/api/sac/at/graficos/por-tag-problema-mes?tipo=${encodeURIComponent(_pgTipo)}`, { credentials: 'include' });
+      const resp = await fetch('/api/sac/at/graficos/por-tag-problema-mes', { credentials: 'include' });
       const data = await resp.json().catch(() => ({}));
       if (!resp.ok || data.ok === false) throw new Error(data.error || 'Erro ao carregar.');
 
@@ -14691,7 +14843,7 @@ document.querySelectorAll('#atTabelaWrapper thead th[data-col]').forEach(th => {
     if (status) { status.style.display = 'block'; status.textContent = 'Carregando...'; status.style.color = ''; }
 
     try {
-      const resp = await fetch(`/api/sac/at/graficos/por-estado-mes?tipo=${encodeURIComponent(_pgTipo)}`, { credentials: 'include' });
+      const resp = await fetch('/api/sac/at/graficos/por-estado-mes?tipo=Qualidade', { credentials: 'include' });
       const data = await resp.json().catch(() => ({}));
       if (!resp.ok || data.ok === false) throw new Error(data.error || 'Erro ao carregar.');
 
@@ -14728,34 +14880,11 @@ document.querySelectorAll('#atTabelaWrapper thead th[data-col]').forEach(th => {
         borderRadius: 4,
       }));
 
-      const _dataLabelsGraf1 = {
-        id: 'dataLabelsGraf1',
-        afterDatasetsDraw(chart) {
-          const ctx2 = chart.ctx;
-          chart.data.datasets.forEach((_ds, di) => {
-            const meta = chart.getDatasetMeta(di);
-            if (meta.hidden) return;
-            meta.data.forEach((bar, idx) => {
-              const val = chart.data.datasets[di].data[idx];
-              if (!val) return;
-              ctx2.save();
-              ctx2.font = 'bold 11px Segoe UI,Arial,sans-serif';
-              ctx2.fillStyle = '#e2e8f0';
-              ctx2.textAlign = 'center';
-              ctx2.textBaseline = 'bottom';
-              ctx2.fillText(val, bar.x, bar.y - 2);
-              ctx2.restore();
-            });
-          });
-        },
-      };
-
       if (_pg1Instance) { _pg1Instance.destroy(); _pg1Instance = null; }
       const ctx = canvas.getContext('2d');
       _pg1Instance = new Chart(ctx, {
         type: 'bar',
         data: { labels, datasets },
-        plugins: [_dataLabelsGraf1],
         options: {
           responsive: true,
           maintainAspectRatio: false,
@@ -14775,7 +14904,7 @@ document.querySelectorAll('#atTabelaWrapper thead th[data-col]').forEach(th => {
     }
   }
 
-  // ── Gráfico 2 — linhas (3 séries com filtro de tipo) ───────────────────
+  // ── Gráfico 2 — linhas (3 séries) ──────────────────────────────────────
   async function _carregarPg2() {
     const status = document.getElementById('atGrafPg2Status');
     const canvas = document.getElementById('atGrafPg2Canvas');
@@ -14817,14 +14946,16 @@ document.querySelectorAll('#atTabelaWrapper thead th[data-col]').forEach(th => {
       if (_pg2Instance) { _pg2Instance.destroy(); _pg2Instance = null; }
       const ctx = canvas.getContext('2d');
 
-      // Gráfico 2 sempre exibe as 3 séries independente do filtro de tipo
-      const dsQ = { label: 'Qualidade',              data: valQ, borderColor: '#34d399', backgroundColor: 'rgba(52,211,153,.10)', borderWidth: 2, pointRadius: 4, pointHoverRadius: 6, tension: 0.3, fill: true };
-      const dsR = { label: 'Atend. Rápido',          data: valR, borderColor: '#fb923c', backgroundColor: 'rgba(251,146,60,.10)',  borderWidth: 2, pointRadius: 4, pointHoverRadius: 6, tension: 0.3, fill: false };
-      const dsM = { label: 'Menções (OS não-rápido)', data: valM, borderColor: '#a855f7', backgroundColor: 'rgba(168,85,247,.10)',  borderWidth: 2, pointRadius: 4, pointHoverRadius: 6, tension: 0.3, fill: false, borderDash: [5,4] };
-
       _pg2Instance = new Chart(ctx, {
         type: 'line',
-        data: { labels, datasets: [dsQ, dsR, dsM] },
+        data: {
+          labels,
+          datasets: [
+            { label: 'Qualidade',              data: valQ, borderColor: '#34d399', backgroundColor: 'rgba(52,211,153,.10)', borderWidth: 2, pointRadius: 4, pointHoverRadius: 6, tension: 0.3, fill: true },
+            { label: 'Atend. Rápido',          data: valR, borderColor: '#fb923c', backgroundColor: 'rgba(251,146,60,.10)',  borderWidth: 2, pointRadius: 4, pointHoverRadius: 6, tension: 0.3, fill: false },
+            { label: 'Menções (OS não-rápido)', data: valM, borderColor: '#a855f7', backgroundColor: 'rgba(168,85,247,.10)',  borderWidth: 2, pointRadius: 4, pointHoverRadius: 6, tension: 0.3, fill: false, borderDash: [5,4] },
+          ],
+        },
         options: {
           responsive: true,
           maintainAspectRatio: false,
@@ -14999,26 +15130,21 @@ document.querySelectorAll('#atTabelaWrapper thead th[data-col]').forEach(th => {
         return tmp.toDataURL('image/png');
       }
 
-      const saved1  = _salvarOpcoes(_pg1Instance);
-      const saved2  = _salvarOpcoes(_pg2Instance);
-      const saved0  = _salvarOpcoes(_pg0Instance);
+      const saved1 = _salvarOpcoes(_pg1Instance);
+      const saved2 = _salvarOpcoes(_pg2Instance);
       _aplicarOpcoesPrint(_pg1Instance);
       _aplicarOpcoesPrint(_pg2Instance);
-      _aplicarOpcoesPrint(_pg0Instance);
 
       const c1 = document.getElementById('atGrafPg1Canvas');
       const c2 = document.getElementById('atGrafPg2Canvas');
-      const c0 = document.getElementById('atGrafPg0Canvas');
-      const img1  = _canvasParaImg(c1);
-      const img2  = _canvasParaImg(c2);
-      const img0  = _canvasParaImg(c0);
+      const img1 = _canvasParaImg(c1);
+      const img2 = _canvasParaImg(c2);
 
       _restaurarOpcoes(_pg1Instance, saved1);
       _restaurarOpcoes(_pg2Instance, saved2);
-      _restaurarOpcoes(_pg0Instance, saved0);
 
       // ── 2) Busca dados com breakdown por mês ──
-      const resp = await fetch(`/api/sac/at/graficos/relatorio?meses=${_pgPeriodo}`, { credentials: 'include' });
+      const resp = await fetch('/api/sac/at/graficos/relatorio', { credentials: 'include' });
       const data = await resp.json().catch(() => ({}));
       if (!resp.ok || data.ok === false) throw new Error(data.error || 'Erro ao carregar dados.');
 
@@ -15035,7 +15161,7 @@ document.querySelectorAll('#atTabelaWrapper thead th[data-col]').forEach(th => {
         }
         const totaisPorTag = {};
         rows.forEach(r => { totaisPorTag[r.tag] = (totaisPorTag[r.tag] || 0) + r.total; });
-        const tags = Object.keys(totaisPorTag).sort((a, b) => totaisPorTag[b] - totaisPorTag[a]).slice(0, 10);
+        const tags = Object.keys(totaisPorTag).sort((a, b) => totaisPorTag[b] - totaisPorTag[a]);
 
         const thMeses = meses.map(m =>
           `<th class="th-mes" style="background:${cor};">${m.label}</th>`
@@ -15238,13 +15364,7 @@ document.querySelectorAll('#atTabelaWrapper thead th[data-col]').forEach(th => {
     <h1>Relatório — Gráfico AT</h1>
     <div class="sub">Gerado em ${new Date().toLocaleString('pt-BR')}</div>
   </div>
-  <div style="display:flex;align-items:center;gap:12px;">
-    <button onclick="window.print()" class="no-print"
-      style="padding:9px 22px;background:#1e3a5f;color:#fff;border:none;border-radius:7px;cursor:pointer;font-size:13px;font-weight:600;">
-      &#128438; Imprimir / Salvar PDF
-    </button>
-    <div class="badge">Período: ${periodo}</div>
-  </div>
+  <div class="badge">Período: ${periodo}</div>
 </div>
 
 <div class="graficos-row">
@@ -15258,17 +15378,16 @@ document.querySelectorAll('#atTabelaWrapper thead th[data-col]').forEach(th => {
   </div>
 </div>
 
-<div class="graficos-row" style="margin-top:18px;">
-  <div class="grafico-card" style="flex:1;">
-    <div class="gc-title">Gráfico 3 — Top Modelos por Mês (Qualidade)</div>
-    ${img0 ? `<img src="${img0}" alt="Gráfico 3">` : '<p style="color:#aaa;font-size:11px;">Gráfico não disponível.</p>'}
-  </div>
-</div>
-
 ${pivotHtml('OS aberta', '#1d6a2f', data.qualidade)}
 ${pivotHtml('Atendimento Rápido', '#7c2d12', data.rapido)}
 ${pivotHtml('Menções (Pós abertura de OS)', '#4c1d95', data.mencoes)}
-${pivotHtml('Top 10 Modelos', '#0c4a6e', data.modelos)}
+
+<div class="no-print" style="margin-top:24px;padding-top:16px;border-top:1px solid #e5e7eb;">
+  <button onclick="window.print()"
+    style="padding:9px 22px;background:#1e3a5f;color:#fff;border:none;border-radius:7px;cursor:pointer;font-size:13px;font-weight:600;">
+    &#128438; Imprimir / Salvar PDF
+  </button>
+</div>
 
 </body>
 </html>`;
@@ -15309,22 +15428,6 @@ ${pivotHtml('Top 10 Modelos', '#0c4a6e', data.modelos)}
           _carregarPg01();
           _carregarPg1();
           _carregarPg2();
-        });
-      });
-
-      // Botões de tipo
-      document.querySelectorAll('.at-graf-tipo-btn-pg').forEach(btn => {
-        btn.addEventListener('click', () => {
-          _pgTipo = btn.dataset.tipo || '';
-          document.querySelectorAll('.at-graf-tipo-btn-pg').forEach(b => {
-            const ativo = b === btn;
-            b.style.borderColor = ativo ? '#10b981' : '#374151';
-            b.style.background  = ativo ? 'rgba(16,185,129,.22)' : 'rgba(255,255,255,.04)';
-            b.style.color       = ativo ? '#6ee7b7' : '#9ca3af';
-          });
-          _carregarPg0();
-          _carregarPg01();
-          _carregarPg1();
         });
       });
 
@@ -16795,658 +16898,8 @@ async function carregarSacSolicitacoes(targetBody, { hideDone = false, titleOnly
   }
 }
 
-let _sacRelatorioUsuariosChart = null;
-let _sacRelatorioConteudoChart = null;
-let _sacRelatorioOcultarOutros = false;
-let _sacRelatorioRowsCache = [];
-let _sacRelatorioPeriodoMeses = 4;
-let _sacRelatorioConteudoUsuarioSelecionado = '';
-let _sacRelatorioConteudoTopItens = [];
-let _sacRelatorioDrilldownItensCache = [];
-let _sacRelatorioDrilldownTituloCache = 'Registros da barra selecionada';
-
-function _sacCorPorIndice(i) {
-  const cores = ['#6366f1', '#10b981', '#f59e0b', '#ef4444', '#06b6d4', '#8b5cf6', '#14b8a6', '#f97316', '#22c55e', '#eab308'];
-  return cores[i % cores.length];
-}
-
-function _sacPeriodoMesAno(dateValue) {
-  const d = new Date(dateValue);
-  if (Number.isNaN(d.getTime())) return 'Sem data';
-  const mes = String(d.getMonth() + 1).padStart(2, '0');
-  return `${mes}/${d.getFullYear()}`;
-}
-
-function _sacRotuloCurto(nome, limite = 44) {
-  const texto = String(nome || '').trim().replace(/\s+/g, ' ');
-  if (texto.length <= limite) return texto;
-  return `${texto.slice(0, limite - 1)}...`;
-}
-
-function _sacPeriodoKey(dateValue) {
-  const d = new Date(dateValue);
-  if (Number.isNaN(d.getTime())) return null;
-  return (d.getFullYear() * 100) + (d.getMonth() + 1);
-}
-
-function _sacAplicarPeriodo(rows, meses) {
-  const lista = Array.isArray(rows) ? rows : [];
-  if (!meses || meses <= 0) return lista;
-  const chaves = lista
-    .map((r) => _sacPeriodoKey(r?.created_at))
-    .filter((v) => Number.isFinite(v));
-  if (!chaves.length) return lista;
-  const maxKey = Math.max(...chaves);
-  const maxAno = Math.floor(maxKey / 100);
-  const maxMes = maxKey % 100;
-  const maxData = new Date(maxAno, maxMes - 1, 1);
-  const minData = new Date(maxData.getFullYear(), maxData.getMonth() - (meses - 1), 1);
-  return lista.filter((r) => {
-    const d = new Date(r?.created_at);
-    if (Number.isNaN(d.getTime())) return false;
-    const dm = new Date(d.getFullYear(), d.getMonth(), 1);
-    return dm >= minData && dm <= maxData;
-  });
-}
-
-function _sacSetPeriodoBotaoAtivo() {
-  const mapa = [
-    [sacPeriodo3mBtn, 3],
-    [sacPeriodo4mBtn, 4],
-    [sacPeriodo6mBtn, 6],
-    [sacPeriodo12mBtn, 12],
-    [sacPeriodoTudoBtn, 0]
-  ];
-  mapa.forEach(([btn, valor]) => {
-    if (!btn) return;
-    const ativo = valor === _sacRelatorioPeriodoMeses;
-    btn.style.background = ativo
-      ? 'linear-gradient(135deg,#4f46e5 0%,#4338ca 100%)'
-      : '#1f2937';
-    btn.style.color = ativo ? '#ffffff' : '#cbd5e1';
-  });
-}
-
-function _sacAtualizarSelectUsuario(rowsPeriodo) {
-  if (!sacRelatorioConteudoUsuarioSelect) return;
-  const rows = Array.isArray(rowsPeriodo) ? rowsPeriodo : [];
-  const usuarios = Array.from(new Set(rows
-    .map((r) => String(r?.usuario || '').trim())
-    .filter(Boolean)))
-    .sort((a, b) => a.localeCompare(b, 'pt-BR'));
-
-  const valorAtual = _sacRelatorioConteudoUsuarioSelecionado;
-  const existeAtual = valorAtual && usuarios.includes(valorAtual);
-  if (valorAtual && !existeAtual) _sacRelatorioConteudoUsuarioSelecionado = '';
-
-  sacRelatorioConteudoUsuarioSelect.innerHTML = [
-    '<option value="">Todos</option>',
-    ...usuarios.map((u) => `<option value="${String(u).replace(/"/g, '&quot;')}">${u}</option>`)
-  ].join('');
-
-  sacRelatorioConteudoUsuarioSelect.value = _sacRelatorioConteudoUsuarioSelecionado;
-}
-
-function _sacLimparDrilldown() {
-  if (!sacRelatorioDrilldownWrapper || !sacRelatorioDrilldownBody || !sacRelatorioDrilldownTitulo) return;
-  sacRelatorioDrilldownWrapper.style.display = 'none';
-  sacRelatorioDrilldownTitulo.textContent = 'Registros da barra selecionada';
-  sacRelatorioDrilldownBody.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:14px;color:var(--inactive-color);">Clique em uma barra para ver os conteúdos.</td></tr>';
-  _sacRelatorioDrilldownItensCache = [];
-  _sacRelatorioDrilldownTituloCache = 'Registros da barra selecionada';
-}
-
-function _sacExpandirConteudoDosRegistros(rows, seletorItem) {
-  const lista = Array.isArray(rows) ? rows : [];
-  const itens = [];
-  lista.forEach((r) => {
-    const extraidos = _sacExtrairItensDoConteudo(r?.conteudo || '');
-    extraidos.forEach((it) => {
-      const nome = String(it?.nome || '').trim();
-      const quantidade = Number(it?.quantidade || 0) || 1;
-      if (!nome) return;
-      if (typeof seletorItem === 'function' && !seletorItem(nome, r)) return;
-      itens.push({
-        id: r?.id,
-        created_at: r?.created_at,
-        usuario: r?.usuario,
-        observacao: r?.observacao,
-        conteudo: nome,
-        quantidade
-      });
-    });
-  });
-  return itens;
-}
-
-function _sacRenderDrilldown(titulo, itensConteudo) {
-  if (!sacRelatorioDrilldownWrapper || !sacRelatorioDrilldownBody || !sacRelatorioDrilldownTitulo) return;
-  const lista = Array.isArray(itensConteudo) ? itensConteudo : [];
-  sacRelatorioDrilldownWrapper.style.display = '';
-  sacRelatorioDrilldownTitulo.textContent = titulo || 'Registros da barra selecionada';
-  _sacRelatorioDrilldownItensCache = lista;
-  _sacRelatorioDrilldownTituloCache = titulo || 'Registros da barra selecionada';
-
-  if (!lista.length) {
-    sacRelatorioDrilldownBody.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:14px;color:var(--inactive-color);">Nenhum conteúdo encontrado para esta barra.</td></tr>';
-    return;
-  }
-
-  sacRelatorioDrilldownBody.innerHTML = lista.map((item) => {
-    const criadoEm = item?.created_at ? new Date(item.created_at).toLocaleString('pt-BR') : '—';
-    const usuario = String(item?.usuario || 'Sem usuário');
-    const observacao = String(item?.observacao || '—');
-    const conteudo = String(item?.conteudo || '—');
-    const qtd = Number(item?.quantidade || 0);
-    return `
-      <tr>
-        <td>${item?.id ?? '—'}</td>
-        <td>${criadoEm}</td>
-        <td>${escapeHtml(usuario)}</td>
-        <td title="${escapeHtml(conteudo)}" style="max-width:340px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(conteudo)}</td>
-        <td>${qtd}</td>
-        <td title="${escapeHtml(observacao)}" style="max-width:360px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(observacao)}</td>
-      </tr>`;
-  }).join('');
-}
-
-function _sacEscaparExcelHtml(v) {
-  return String(v ?? '')
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
-}
-
-function _sacMontarItensConteudoParaExportacao() {
-  const rowsPeriodo = _sacAplicarPeriodo(_sacRelatorioRowsCache, _sacRelatorioPeriodoMeses);
-  const rowsConteudo = _sacRelatorioConteudoUsuarioSelecionado
-    ? rowsPeriodo.filter((r) => String(r?.usuario || '').trim() === _sacRelatorioConteudoUsuarioSelecionado)
-    : rowsPeriodo;
-  return _sacExpandirConteudoDosRegistros(rowsConteudo);
-}
-
-function _sacBaixarRelatorioExcel() {
-  const itens = _sacRelatorioDrilldownItensCache?.length
-    ? _sacRelatorioDrilldownItensCache
-    : _sacMontarItensConteudoParaExportacao();
-
-  if (!itens.length) {
-    alert('Não há dados para exportar no relatório.');
-    return;
-  }
-
-  const titulo = _sacRelatorioDrilldownItensCache?.length
-    ? _sacRelatorioDrilldownTituloCache
-    : 'Registros - Conteúdo: Todos os itens';
-
-  const linhasHtml = itens.map((item) => {
-    const criadoEm = item?.created_at ? new Date(item.created_at).toLocaleString('pt-BR') : '';
-    return `
-      <tr>
-        <td>${_sacEscaparExcelHtml(item?.id ?? '')}</td>
-        <td>${_sacEscaparExcelHtml(criadoEm)}</td>
-        <td>${_sacEscaparExcelHtml(item?.usuario || '')}</td>
-        <td>${_sacEscaparExcelHtml(item?.conteudo || '')}</td>
-        <td>${_sacEscaparExcelHtml(Number(item?.quantidade || 0))}</td>
-        <td>${_sacEscaparExcelHtml(item?.observacao || '')}</td>
-      </tr>`;
-  }).join('');
-
-  const planilhaHtml = `
-<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">
-  <head>
-    <meta charset="UTF-8" />
-    <meta http-equiv="Content-Type" content="application/vnd.ms-excel; charset=UTF-8" />
-    <title>${_sacEscaparExcelHtml(titulo)}</title>
-  </head>
-  <body>
-    <table border="1">
-      <tr>
-        <th colspan="6" style="font-size:16px;">${_sacEscaparExcelHtml(titulo)}</th>
-      </tr>
-      <tr>
-        <th>ID Registro</th>
-        <th>Criado em</th>
-        <th>Usuário</th>
-        <th>Conteúdo</th>
-        <th>Quantidade</th>
-        <th>Observação</th>
-      </tr>
-      ${linhasHtml}
-    </table>
-  </body>
-</html>`;
-
-  const blob = new Blob([`\uFEFF${planilhaHtml}`], { type: 'application/vnd.ms-excel;charset=utf-8;' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  const data = new Date().toISOString().slice(0, 10);
-  a.href = url;
-  a.download = `relatorio_sac_conteudo_${data}.xls`;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
-}
-
-function _renderizarRelatorioSacPorUsuario() {
-  if (!sacRelatorioGraficoCanvas || !sacRelatorioConteudoGraficoCanvas) return;
-
-  const rows = _sacAplicarPeriodo(_sacRelatorioRowsCache, _sacRelatorioPeriodoMeses);
-  _sacAtualizarSelectUsuario(rows);
-  _sacLimparDrilldown();
-
-  // -------------------- GRÁFICO 1: POR USUÁRIO --------------------
-  const agrupado = new Map(); // periodo -> usuario -> total
-  const usuariosSet = new Set();
-
-  rows.forEach((r) => {
-    const periodo = _sacPeriodoMesAno(r?.created_at);
-    const usuario = String(r?.usuario || 'Sem usuário').trim() || 'Sem usuário';
-    const itens = _sacExtrairItensDoConteudo(r?.conteudo || '');
-    const totalItens = itens.reduce((sum, it) => sum + (Number(it?.quantidade || 0) || 1), 0);
-    if (!agrupado.has(periodo)) agrupado.set(periodo, new Map());
-    const mapaUser = agrupado.get(periodo);
-    mapaUser.set(usuario, (mapaUser.get(usuario) || 0) + totalItens);
-    usuariosSet.add(usuario);
-  });
-
-  const periodos = Array.from(agrupado.keys()).sort((a, b) => {
-    const [ma, ya] = a.split('/').map(Number);
-    const [mb, yb] = b.split('/').map(Number);
-    return (ya - yb) || (ma - mb);
-  });
-
-  const usuarios = Array.from(usuariosSet)
-    .map((u) => ({
-      nome: u,
-      total: periodos.reduce((sum, p) => sum + (agrupado.get(p)?.get(u) || 0), 0)
-    }))
-    .sort((a, b) => b.total - a.total)
-    .slice(0, 2);
-
-  const datasets = usuarios.map((user, idx) => ({
-    label: _sacRotuloCurto(user.nome, 26),
-    _fullLabel: user.nome,
-    data: periodos.map((p) => agrupado.get(p)?.get(user.nome) || 0),
-    backgroundColor: idx === 0 ? '#22c55e' : '#38bdf8',
-    borderRadius: 6,
-    maxBarThickness: 42
-  }));
-
-  if (!periodos.length || !usuarios.length) {
-    if (_sacRelatorioUsuariosChart) {
-      _sacRelatorioUsuariosChart.destroy();
-      _sacRelatorioUsuariosChart = null;
-    }
-    sacRelatorioGraficoCanvas.style.display = 'none';
-    if (sacRelatorioGraficoVazio) {
-      sacRelatorioGraficoVazio.style.display = '';
-      sacRelatorioGraficoVazio.textContent = 'Nenhum dado encontrado para o período selecionado.';
-    }
-  } else {
-    if (_sacRelatorioUsuariosChart) {
-      _sacRelatorioUsuariosChart.destroy();
-      _sacRelatorioUsuariosChart = null;
-    }
-
-    sacRelatorioGraficoCanvas.style.display = '';
-    if (sacRelatorioGraficoVazio) sacRelatorioGraficoVazio.style.display = 'none';
-
-    _sacRelatorioUsuariosChart = new Chart(sacRelatorioGraficoCanvas.getContext('2d'), {
-      type: 'bar',
-      data: { labels: periodos, datasets },
-      options: {
-        onClick: (_event, elements, chart) => {
-          if (!elements?.length) return;
-          const el = elements[0];
-          const periodo = chart.data.labels?.[el.index];
-          const ds = chart.data.datasets?.[el.datasetIndex];
-          const usuario = String(ds?._fullLabel || ds?.label || '');
-          const rowsBarra = rows.filter((r) => _sacPeriodoMesAno(r?.created_at) === periodo && String(r?.usuario || '').trim() === usuario);
-          const itensBarra = _sacExpandirConteudoDosRegistros(rowsBarra);
-          _sacRenderDrilldown(
-            `Registros - Usuário: ${usuario} | Período: ${periodo}`,
-            itensBarra
-          );
-        },
-        responsive: true,
-        maintainAspectRatio: false,
-        plugins: {
-          legend: {
-            position: 'top',
-            labels: { color: '#cbd5e1', boxWidth: 14, boxHeight: 14 }
-          },
-          tooltip: {
-            callbacks: {
-              title: (items) => `Período: ${items?.[0]?.label || ''}`,
-              label: (item) => `${item.dataset._fullLabel || item.dataset.label}: ${item.raw} item(ns)`
-            }
-          }
-        },
-        scales: {
-          x: {
-            stacked: false,
-            ticks: { color: '#94a3b8' },
-            grid: { color: 'rgba(148,163,184,0.15)' }
-          },
-          y: {
-            stacked: false,
-            beginAtZero: true,
-            ticks: { color: '#94a3b8', precision: 0 },
-            grid: { color: 'rgba(148,163,184,0.15)' }
-          }
-        }
-      }
-    });
-  }
-
-  // -------------------- GRÁFICO 2: CONTEÚDO (ITEM X QUANTIDADE) --------------------
-  const agrupadoConteudo = new Map(); // periodo -> item -> quantidade
-  const itensSet = new Set();
-
-  const rowsConteudo = _sacRelatorioConteudoUsuarioSelecionado
-    ? rows.filter((r) => String(r?.usuario || '').trim() === _sacRelatorioConteudoUsuarioSelecionado)
-    : rows;
-
-  rowsConteudo.forEach((r) => {
-    const periodo = _sacPeriodoMesAno(r?.created_at);
-    const itens = _sacExtrairItensDoConteudo(r?.conteudo || '');
-    if (!agrupadoConteudo.has(periodo)) agrupadoConteudo.set(periodo, new Map());
-    const mapaItens = agrupadoConteudo.get(periodo);
-
-    itens.forEach((it) => {
-      const nome = String(it?.nome || '').trim();
-      const qtd = Number(it?.quantidade || 0) || 1;
-      if (!nome) return;
-      itensSet.add(nome);
-      mapaItens.set(nome, (mapaItens.get(nome) || 0) + qtd);
-    });
-  });
-
-  const periodosConteudo = Array.from(agrupadoConteudo.keys()).sort((a, b) => {
-    const [ma, ya] = a.split('/').map(Number);
-    const [mb, yb] = b.split('/').map(Number);
-    return (ya - yb) || (ma - mb);
-  });
-  const itens = Array.from(itensSet);
-
-  if (!periodosConteudo.length || !itens.length) {
-    if (_sacRelatorioConteudoChart) {
-      _sacRelatorioConteudoChart.destroy();
-      _sacRelatorioConteudoChart = null;
-    }
-    sacRelatorioConteudoGraficoCanvas.style.display = 'none';
-    if (sacRelatorioConteudoGraficoVazio) {
-      sacRelatorioConteudoGraficoVazio.style.display = '';
-      sacRelatorioConteudoGraficoVazio.textContent = _sacRelatorioConteudoUsuarioSelecionado
-        ? `Nenhum dado de conteúdo para o usuário "${_sacRelatorioConteudoUsuarioSelecionado}" no período selecionado.`
-        : 'Nenhum dado encontrado para o gráfico de conteúdo.';
-    }
-    return;
-  }
-
-  const topItens = itens
-    .map((nome) => ({
-      nome,
-      total: periodosConteudo.reduce((sum, p) => sum + (agrupadoConteudo.get(p)?.get(nome) || 0), 0)
-    }))
-    .sort((a, b) => b.total - a.total)
-    .slice(0, 8);
-  _sacRelatorioConteudoTopItens = topItens.map((x) => x.nome);
-
-  const totalOutros = itens
-    .filter((nome) => !topItens.some((top) => top.nome === nome))
-    .reduce((acc, nome) => acc + periodosConteudo.reduce((sum, p) => sum + (agrupadoConteudo.get(p)?.get(nome) || 0), 0), 0);
-
-  const datasetsConteudo = topItens.map((item, idx) => ({
-    label: _sacRotuloCurto(item.nome, 34),
-    _fullLabel: item.nome,
-    data: periodosConteudo.map((p) => agrupadoConteudo.get(p)?.get(item.nome) || 0),
-    backgroundColor: _sacCorPorIndice(idx),
-    borderRadius: 6,
-    maxBarThickness: 36
-  }));
-
-  if (totalOutros > 0 && !_sacRelatorioOcultarOutros) {
-    datasetsConteudo.push({
-      label: 'Outros itens',
-      _fullLabel: 'Outros itens',
-      data: periodosConteudo.map((p) => {
-        const topSet = new Set(topItens.map((it) => it.nome));
-        return itens
-          .filter((nome) => !topSet.has(nome))
-          .reduce((sum, nome) => sum + (agrupadoConteudo.get(p)?.get(nome) || 0), 0);
-      }),
-      backgroundColor: '#64748b',
-      borderRadius: 6,
-      maxBarThickness: 36
-    });
-  }
-
-  if (_sacRelatorioConteudoChart) {
-    _sacRelatorioConteudoChart.destroy();
-    _sacRelatorioConteudoChart = null;
-  }
-
-  sacRelatorioConteudoGraficoCanvas.style.display = '';
-  if (sacRelatorioConteudoGraficoVazio) sacRelatorioConteudoGraficoVazio.style.display = 'none';
-
-  _sacRelatorioConteudoChart = new Chart(sacRelatorioConteudoGraficoCanvas.getContext('2d'), {
-    type: 'bar',
-    data: { labels: periodosConteudo, datasets: datasetsConteudo },
-    options: {
-      onClick: (_event, elements, chart) => {
-        if (!elements?.length) return;
-        const el = elements[0];
-        const periodo = chart.data.labels?.[el.index];
-        const ds = chart.data.datasets?.[el.datasetIndex];
-        const itemLabel = String(ds?._fullLabel || ds?.label || '');
-        const topSet = new Set(_sacRelatorioConteudoTopItens || []);
-
-        const rowsBarra = rowsConteudo.filter((r) => {
-          if (_sacPeriodoMesAno(r?.created_at) !== periodo) return false;
-          const itensRow = _sacExtrairItensDoConteudo(r?.conteudo || '');
-          if (itemLabel === 'Outros itens') {
-            return itensRow.some((it) => !topSet.has(String(it?.nome || '').trim()));
-          }
-          return itensRow.some((it) => String(it?.nome || '').trim() === itemLabel);
-        });
-
-        const itensBarra = _sacExpandirConteudoDosRegistros(rowsBarra, (nome) => {
-          if (itemLabel === 'Outros itens') return !topSet.has(String(nome || '').trim());
-          return String(nome || '').trim() === itemLabel;
-        });
-
-        _sacRenderDrilldown(
-          `Registros - Conteúdo: ${itemLabel} | Período: ${periodo}`,
-          itensBarra
-        );
-      },
-      responsive: true,
-      maintainAspectRatio: false,
-      plugins: {
-        legend: {
-          position: 'top',
-          labels: { color: '#cbd5e1', boxWidth: 14, boxHeight: 14 }
-        },
-        tooltip: {
-          callbacks: {
-            title: (items) => `Período: ${items?.[0]?.label || ''}`,
-            label: (item) => `${item.dataset._fullLabel || item.dataset.label}: ${item.raw} unidade(s)`
-          }
-        }
-      },
-      scales: {
-        x: {
-          stacked: false,
-          ticks: { color: '#94a3b8' },
-          grid: { color: 'rgba(148,163,184,0.15)' }
-        },
-        y: {
-          stacked: false,
-          beginAtZero: true,
-          ticks: { color: '#94a3b8', precision: 0 },
-          grid: { color: 'rgba(148,163,184,0.15)' }
-        }
-      }
-    }
-  });
-}
-
-function _sacExtrairItensDoConteudo(conteudoRaw) {
-  const saida = [];
-  const conteudo = String(conteudoRaw || '').trim();
-  if (!conteudo) return saida;
-
-  try {
-    const parsed = JSON.parse(conteudo);
-    if (Array.isArray(parsed)) {
-      parsed.forEach((item) => {
-        const nome = String(item?.conteudo || item?.item || '').trim();
-        const quantidade = Number(item?.quantidade || 0) || 1;
-        if (nome) saida.push({ nome, quantidade });
-      });
-      if (saida.length) return saida;
-    }
-  } catch (_) {
-    // segue para parse em texto livre
-  }
-
-  const reItens = /Item\s+\d+\s*:\s*([\s\S]*?)\s+Quantidade\s+(\d+)(?=\s*Item\s+\d+\s*:|$)/gi;
-  let m;
-  while ((m = reItens.exec(conteudo)) !== null) {
-    const nome = String(m[1] || '').trim().replace(/\s+/g, ' ');
-    const quantidade = Number(m[2] || 0) || 1;
-    if (nome) saida.push({ nome, quantidade });
-  }
-  if (saida.length) return saida;
-
-  const reQtdFinal = /^([\s\S]*?)\s*-\s*Quantidade\s*(\d+)$/i;
-  const matchFinal = conteudo.match(reQtdFinal);
-  if (matchFinal) {
-    const nome = String(matchFinal[1] || '').trim();
-    const quantidade = Number(matchFinal[2] || 0) || 1;
-    if (nome) return [{ nome, quantidade }];
-  }
-
-  return [{ nome: conteudo.replace(/\s+/g, ' ').trim(), quantidade: 1 }];
-}
-
-async function _abrirRelatorioSac() {
-  if (!sacRelatorioGraficoWrapper || !sacRelatorioGraficoCanvas || !sacTabelaBody) return;
-  if (typeof Chart === 'undefined') {
-    alert('Biblioteca de gráfico não disponível no momento.');
-    return;
-  }
-
-  const tabelaWrapper = sacTabelaBody.closest('.tabela-wrapper');
-  sacRelatorioGraficoWrapper.style.display = '';
-  if (tabelaWrapper) tabelaWrapper.style.display = 'none';
-
-  if (sacRelatorioGraficoVazio) {
-    sacRelatorioGraficoVazio.style.display = 'none';
-    sacRelatorioGraficoVazio.textContent = 'Carregando dados...';
-  }
-
-  try {
-    const resp = await fetch('/api/sac/solicitacoes');
-    const data = await resp.json().catch(() => ({}));
-    if (!resp.ok || data?.ok === false) {
-      throw new Error(data?.error || 'Erro ao carregar dados do relatório.');
-    }
-    _sacRelatorioRowsCache = Array.isArray(data?.rows) ? data.rows : [];
-    _sacSetPeriodoBotaoAtivo();
-    _renderizarRelatorioSacPorUsuario();
-  } catch (err) {
-    if (_sacRelatorioUsuariosChart) {
-      _sacRelatorioUsuariosChart.destroy();
-      _sacRelatorioUsuariosChart = null;
-    }
-    if (_sacRelatorioConteudoChart) {
-      _sacRelatorioConteudoChart.destroy();
-      _sacRelatorioConteudoChart = null;
-    }
-    sacRelatorioGraficoCanvas.style.display = 'none';
-    if (sacRelatorioConteudoGraficoCanvas) sacRelatorioConteudoGraficoCanvas.style.display = 'none';
-    if (sacRelatorioGraficoVazio) {
-      sacRelatorioGraficoVazio.style.display = '';
-      sacRelatorioGraficoVazio.textContent = err?.message || 'Erro ao gerar relatório.';
-    }
-    if (sacRelatorioConteudoGraficoVazio) {
-      sacRelatorioConteudoGraficoVazio.style.display = '';
-      sacRelatorioConteudoGraficoVazio.textContent = err?.message || 'Erro ao gerar relatório de conteúdo.';
-    }
-  }
-}
-
-function _fecharRelatorioSac() {
-  const tabelaWrapper = sacTabelaBody?.closest('.tabela-wrapper');
-  if (sacRelatorioGraficoWrapper) sacRelatorioGraficoWrapper.style.display = 'none';
-  if (tabelaWrapper) tabelaWrapper.style.display = '';
-  _sacLimparDrilldown();
-}
-
-function _setRelatorioSacPeriodo(meses) {
-  _sacRelatorioPeriodoMeses = meses;
-  _sacSetPeriodoBotaoAtivo();
-  _renderizarRelatorioSacPorUsuario();
-}
-
-if (sacRelatorioConteudoUsuarioSelect) {
-  sacRelatorioConteudoUsuarioSelect.addEventListener('change', () => {
-    _sacRelatorioConteudoUsuarioSelecionado = String(sacRelatorioConteudoUsuarioSelect.value || '');
-    _renderizarRelatorioSacPorUsuario();
-  });
-}
-
-// Filtro "Outros itens" do Gráfico 2
-(function () {
-  const btn      = document.getElementById('sacConteudoFiltroBtn');
-  const dropdown = document.getElementById('sacConteudoFiltroDropdown');
-  const checkbox = document.getElementById('sacConteudoOcultarOutros');
-  if (!btn || !dropdown || !checkbox) return;
-
-  // Abre/fecha dropdown ao clicar no botão filtro
-  btn.addEventListener('click', (e) => {
-    e.stopPropagation();
-    const aberto = dropdown.style.display !== 'none';
-    dropdown.style.display = aberto ? 'none' : 'block';
-  });
-
-  // Fecha ao clicar fora
-  document.addEventListener('click', (e) => {
-    if (!dropdown.contains(e.target) && e.target !== btn) {
-      dropdown.style.display = 'none';
-    }
-  });
-
-  // Sincroniza estado inicial
-  checkbox.checked = _sacRelatorioOcultarOutros;
-
-  // Aplica filtro e redesenha ao mudar
-  checkbox.addEventListener('change', () => {
-    _sacRelatorioOcultarOutros = checkbox.checked;
-    // Atualiza visual do botão quando filtro está ativo
-    btn.style.borderColor     = _sacRelatorioOcultarOutros ? '#6366f1' : 'rgba(148,163,184,0.3)';
-    btn.style.color           = _sacRelatorioOcultarOutros ? '#a5b4fc' : '#94a3b8';
-    btn.style.background      = _sacRelatorioOcultarOutros ? 'rgba(99,102,241,.18)' : 'rgba(255,255,255,.06)';
-    _renderizarRelatorioSacPorUsuario();
-  });
-})();
-
 // Painel SAC: filtra por usuário logado (filterByUser: true)
 sacRefreshBtn?.addEventListener('click', () => carregarSacSolicitacoes(sacTabelaBody, { hideDone: false, filterByUser: true }));
-sacRelatorioBtn?.addEventListener('click', _abrirRelatorioSac);
-sacRelatorioVoltarBtn?.addEventListener('click', _fecharRelatorioSac);
-sacRelatorioDownloadBtn?.addEventListener('click', _sacBaixarRelatorioExcel);
-sacPeriodo3mBtn?.addEventListener('click', () => _setRelatorioSacPeriodo(3));
-sacPeriodo4mBtn?.addEventListener('click', () => _setRelatorioSacPeriodo(4));
-sacPeriodo6mBtn?.addEventListener('click', () => _setRelatorioSacPeriodo(6));
-sacPeriodo12mBtn?.addEventListener('click', () => _setRelatorioSacPeriodo(12));
-sacPeriodoTudoBtn?.addEventListener('click', () => _setRelatorioSacPeriodo(0));
 // Painel Envio de Mercadoria: mostra todos os registros (filterByUser: false)
 envioMercadoriaRefreshBtnTop?.addEventListener('click', () => carregarSacSolicitacoes(envioMercadoriaTabelaBodyPane, { hideDone: true, filterByUser: false }));
 
@@ -17880,17 +17333,7 @@ document.addEventListener('click', async (e) => {
 });
 
 document.getElementById('solicitacoesTransferRefresh')?.addEventListener('click', () => {
-  if (typeof window.carregarSolicitacoesTransferencias === 'function') {
-    window.carregarSolicitacoesTransferencias(true);
-  }
-});
-
-document.getElementById('solicitacoesTransferApproveAll')?.addEventListener('click', async () => {
-  if (typeof window.aprovarSolicitacoesTransferenciaEmSequencia === 'function') {
-    await window.aprovarSolicitacoesTransferenciaEmSequencia();
-  } else {
-    alert('A tela de transferencias ainda esta carregando. Tente novamente em alguns segundos.');
-  }
+  carregarSolicitacoesTransferencias(true);
 });
 
 document.getElementById('recebimentoRefreshBtn')?.addEventListener('click', async () => {
@@ -18156,27 +17599,10 @@ document.addEventListener('DOMContentLoaded', async () => {
   const transferQtdBulk = document.getElementById('transferQtdBulk');
   const transferAcaoBtn = document.getElementById('transferenciaBtn');
   const transferImportarBtn = document.getElementById('transferImportarBtn');
-  const transferImportarListaBtn = document.getElementById('transferImportarListaBtn');
   const transferDataMov = document.getElementById('transferDataMov');
-  const transferDataMovLabel = document.querySelector('label[for="transferDataMov"]');
 
   if (transferDataMov && !transferDataMov.value) {
     transferDataMov.value = new Date().toISOString().slice(0, 10);
-  }
-  if (transferDataMovLabel) {
-    transferDataMovLabel.textContent = 'Data movimentacao';
-  }
-  if (transferImportarBtn) {
-    transferImportarBtn.style.display = 'none';
-  }
-  if (transferAcaoBtn && !transferAcaoBtn.__labelFixed) {
-    transferAcaoBtn.__labelFixed = true;
-    transferAcaoBtn.classList.remove('icon-btn');
-    transferAcaoBtn.classList.add('btn');
-    transferAcaoBtn.title = 'Enviar solicitacao de transferencia dos itens selecionados';
-    transferAcaoBtn.setAttribute('aria-label', 'Enviar solicitacao de transferencia');
-    transferAcaoBtn.style.cssText = 'display:inline-flex;align-items:center;gap:8px;min-width:230px;justify-content:center;background:#22c55e;color:#06120a;font-weight:800;border-color:#86efac;';
-    transferAcaoBtn.innerHTML = '<i class="fa-solid fa-right-left"></i><span>Enviar solicitacao</span>';
   }
 
   if (transferQtdBulk && !transferQtdBulk.__transferBound) {
@@ -18225,13 +17651,6 @@ document.addEventListener('DOMContentLoaded', async () => {
   if (transferImportarBtn && !transferImportarBtn.__transferBound) {
     transferImportarBtn.__transferBound = true;
     transferImportarBtn.addEventListener('click', (ev) => {
-      ev.preventDefault();
-      abrirModalImportacaoTransferencia();
-    });
-  }
-  if (transferImportarListaBtn && !transferImportarListaBtn.__transferBound) {
-    transferImportarListaBtn.__transferBound = true;
-    transferImportarListaBtn.addEventListener('click', (ev) => {
       ev.preventDefault();
       abrirModalImportacaoTransferencia();
     });
@@ -18296,7 +17715,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
 
         if (!resp.ok || !resposta?.ok) {
-          const msg = resposta?.detail || resposta?.error || `Falha ao registrar transferência (HTTP ${resp.status}).`;
+          const msg = resposta?.error || resposta?.detail || `Falha ao registrar transferência (HTTP ${resp.status}).`;
           throw new Error(msg);
         }
 
@@ -18452,55 +17871,6 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   const solicitacoesTbody = document.getElementById('solicitacoesTransferTbody');
-  if (solicitacoesTbody && !solicitacoesTbody.__rejectCleanBound) {
-    solicitacoesTbody.__rejectCleanBound = true;
-    solicitacoesTbody.addEventListener('click', async (ev) => {
-      const btn = ev.target.closest('.btn-reject-transfer');
-      if (!btn) return;
-      ev.preventDefault();
-      ev.stopImmediatePropagation();
-
-      const id = Number(btn.dataset.id);
-      if (!Number.isInteger(id)) {
-        alert('Nao foi possivel identificar a solicitacao selecionada.');
-        return;
-      }
-
-      const usuario = String(document.getElementById('userNameDisplay')?.textContent || '').trim();
-      if (!usuario || usuario === 'Usuario' || usuario === 'UsuÃ¡rio' || usuario === '—' || usuario === 'â€”') {
-        alert('Nao foi possivel identificar o usuario atual. Faca login novamente.');
-        return;
-      }
-
-      const motivo = prompt('Informe o motivo para reprovar/excluir esta solicitacao:', '');
-      if (motivo === null) return;
-
-      const originalLabel = btn.textContent;
-      btn.disabled = true;
-      btn.textContent = 'Reprovando...';
-
-      try {
-        const resp = await fetch(`/api/transferencias/${id}/reprovar`, {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ reprovadoPor: usuario, motivo })
-        });
-
-        const json = await resp.json().catch(() => ({}));
-        if (!resp.ok || !json?.ok) {
-          throw new Error(json?.error || `Falha ao reprovar (HTTP ${resp.status}).`);
-        }
-
-        alert('Solicitacao reprovada.');
-        await carregarSolicitacoesTransferencias(true);
-      } catch (err) {
-        console.error('[transferencias] reprovar', err);
-        alert(err?.message || 'Falha ao reprovar a solicitacao.');
-        btn.disabled = false;
-        btn.textContent = originalLabel;
-      }
-    }, true);
-  }
   if (solicitacoesTbody && !solicitacoesTbody.__approveBound) {
     solicitacoesTbody.__approveBound = true;
     solicitacoesTbody.addEventListener('click', async (ev) => {
@@ -20367,30 +19737,18 @@ function ensureTransferImportModal() {
 
   modal = document.createElement('div');
   modal.id = 'transferImportModal';
-  modal.style.cssText = 'position:fixed;inset:0;z-index:9999;display:none;align-items:center;justify-content:center;background:rgba(3,7,18,.72);backdrop-filter:blur(4px);padding:18px;';
+  modal.style.cssText = 'position:fixed;inset:0;z-index:9999;display:none;align-items:center;justify-content:center;background:rgba(3,7,18,.72);backdrop-filter:blur(4px);';
   modal.innerHTML = `
-    <div style="width:min(980px, calc(100vw - 28px));max-height:calc(100vh - 42px);overflow:auto;background:#121722;border:1px solid #2b3548;border-radius:18px;box-shadow:0 24px 70px rgba(0,0,0,.45);color:#e5e7eb;">
+    <div style="width:min(720px, calc(100vw - 28px));max-height:calc(100vh - 42px);overflow:auto;background:#121722;border:1px solid #2b3548;border-radius:18px;box-shadow:0 24px 70px rgba(0,0,0,.45);color:#e5e7eb;">
       <div style="display:flex;align-items:center;justify-content:space-between;padding:18px 22px;border-bottom:1px solid #253044;">
         <div>
-          <div style="font-size:20px;font-weight:800;">Importar lista da planilha</div>
-          <div style="font-size:13px;color:#93a4bd;margin-top:4px;">Copie varias linhas do Excel/Sheets e cole aqui. Formato: codigo, TAB, quantidade.</div>
+          <div style="font-size:18px;font-weight:800;">Importar transferencia em massa</div>
+          <div style="font-size:12px;color:#93a4bd;margin-top:4px;">Cole uma linha por item: codigo + TAB + quantidade.</div>
         </div>
         <button id="transferImportClose" type="button" class="icon-btn" aria-label="Fechar"><i class="fa-solid fa-xmark"></i></button>
       </div>
       <div style="padding:18px 22px;display:grid;gap:14px;">
-        <div style="display:grid;grid-template-columns:1fr auto;gap:14px;align-items:start;">
-          <label style="display:grid;gap:8px;font-size:12px;font-weight:800;color:#9ca3af;letter-spacing:.03em;text-transform:uppercase;">
-            Lista para importar
-            <textarea id="transferImportTextarea" rows="16" spellcheck="false" placeholder="05.MP.I.80044	300&#10;09.MC.N.10106	24&#10;01.MP.N.51001	12" style="width:100%;resize:vertical;min-height:340px;background:#0b1020;color:#e5e7eb;border:1px solid #334155;border-radius:12px;padding:14px;font-family:Consolas, monospace;font-size:14px;line-height:1.55;"></textarea>
-          </label>
-          <div style="min-width:230px;background:#0b1020;border:1px solid #263349;border-radius:12px;padding:14px;color:#cbd5e1;font-size:12px;line-height:1.55;">
-            <div style="font-weight:800;color:#e5e7eb;margin-bottom:8px;">Como colar</div>
-            <div>1. Na planilha, selecione duas colunas: codigo e quantidade.</div>
-            <div>2. Copie com CTRL+C.</div>
-            <div>3. Cole nesta caixa. Cada linha vira um item.</div>
-            <div style="margin-top:10px;color:#93c5fd;">Exemplo:<br><code>05.MP.I.80044&nbsp;&nbsp;300</code><br><code>09.MC.N.10106&nbsp;&nbsp;24</code></div>
-          </div>
-        </div>
+        <textarea id="transferImportTextarea" rows="10" spellcheck="false" placeholder="05.MP.I.80044\t300&#10;09.MC.N.10106\t24" style="width:100%;resize:vertical;min-height:180px;background:#0b1020;color:#e5e7eb;border:1px solid #334155;border-radius:12px;padding:12px;font-family:Consolas, monospace;font-size:13px;line-height:1.45;"></textarea>
         <div style="display:grid;grid-template-columns:1fr 1fr 180px;gap:12px;">
           <label style="display:grid;gap:6px;font-size:12px;font-weight:700;color:#9ca3af;">Origem
             <select id="transferImportOrigem" class="transfer-select"></select>
@@ -20580,93 +19938,6 @@ function renderTransferenciaLista() {
 
 window.renderTransferenciaLista = renderTransferenciaLista;
 
-function delayTransferencia(ms) {
-  return new Promise(resolve => setTimeout(resolve, ms));
-}
-
-function obterUsuarioAtualTransferencia() {
-  const usuario = String(document.getElementById('userNameDisplay')?.textContent || '').trim();
-  if (!usuario || usuario === 'Usuario' || usuario === 'UsuÃ¡rio' || usuario === '—' || usuario === 'â€”') {
-    return '';
-  }
-  return usuario;
-}
-
-async function aprovarTransferenciaPorId(id, usuario) {
-  const resp = await fetch(`/api/transferencias/${id}/aprovar`, {
-    method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ aprovadoPor: usuario })
-  });
-  const json = await resp.json().catch(() => ({}));
-  if (!resp.ok || !json?.ok) {
-    throw new Error(json?.error || json?.detail || `Falha ao aprovar transferencia #${id} (HTTP ${resp.status}).`);
-  }
-  return json;
-}
-
-async function aprovarSolicitacoesTransferenciaEmSequencia() {
-  const usuario = obterUsuarioAtualTransferencia();
-  if (!usuario) {
-    alert('Nao foi possivel identificar o usuario atual. Faca login novamente.');
-    return;
-  }
-
-  await carregarSolicitacoesTransferencias(true);
-  const pendentes = solicitacoesTransferencias
-    .filter(item => String(item.status || '').toLowerCase() !== 'transferido')
-    .filter(item => String(item.status || '').toLowerCase() !== 'reprovado')
-    .filter(item => Number.isInteger(Number(item.id)));
-
-  if (!pendentes.length) {
-    alert('Nao ha solicitacoes pendentes para aprovar.');
-    return;
-  }
-
-  if (!confirm(`Aprovar ${pendentes.length} solicitacao(oes) uma por uma? O sistema vai enviar para a Omie em sequencia, sem chamadas paralelas.`)) {
-    return;
-  }
-
-  const btn = document.getElementById('solicitacoesTransferApproveAll');
-  const originalLabel = btn?.textContent || '';
-  if (btn) {
-    btn.disabled = true;
-    btn.textContent = `Aprovando 0/${pendentes.length}`;
-  }
-
-  const erros = [];
-  let aprovadas = 0;
-  try {
-    for (const item of pendentes) {
-      const id = Number(item.id);
-      if (btn) btn.textContent = `Aprovando ${aprovadas + 1}/${pendentes.length}`;
-      try {
-        await aprovarTransferenciaPorId(id, usuario);
-        aprovadas++;
-      } catch (err) {
-        erros.push(`#${id} ${item.codigo || ''}: ${err?.message || err}`);
-      }
-      if (aprovadas + erros.length < pendentes.length) {
-        await delayTransferencia(1500);
-      }
-    }
-  } finally {
-    if (btn) {
-      btn.disabled = false;
-      btn.textContent = originalLabel || 'Aprovar pendentes';
-    }
-    await carregarSolicitacoesTransferencias(true);
-  }
-
-  if (erros.length) {
-    alert(`Aprovadas: ${aprovadas}. Falharam: ${erros.length}.\n${erros.slice(0, 5).join('\n')}${erros.length > 5 ? '\n...' : ''}`);
-    return;
-  }
-  alert(`Todas as ${aprovadas} solicitacoes foram aprovadas.`);
-}
-
-window.aprovarSolicitacoesTransferenciaEmSequencia = aprovarSolicitacoesTransferenciaEmSequencia;
-
 function renderSolicitacoesTransferencias() {
   const tbody = document.getElementById('solicitacoesTransferTbody');
   if (!tbody) return;
@@ -20696,7 +19967,7 @@ function renderSolicitacoesTransferencias() {
     const botaoHtml = podeAprovar
       ? `<div style="display:flex;gap:6px;flex-wrap:wrap;">
            <button type="button" class="btn tiny btn-approve-transfer" data-id="${escapeHtml(String(item.id ?? ''))}">Aprovar</button>
-           <button type="button" class="btn tiny btn-reject-transfer" data-id="${escapeHtml(String(item.id ?? ''))}" style="background:#dc2626;border-color:#f87171;color:#ffffff;font-weight:800;">Reprovar</button>
+           <button type="button" class="btn tiny btn-reject-transfer" data-id="${escapeHtml(String(item.id ?? ''))}" style="border-color:#ef4444;color:#fecaca;">Reprovar</button>
          </div>`
       : '<span>Transferido</span>';
     const tr = document.createElement('tr');
@@ -20753,8 +20024,6 @@ async function carregarSolicitacoesTransferencias(forceReload = false) {
     if (spinner) spinner.style.display = 'none';
   }
 }
-
-window.carregarSolicitacoesTransferencias = carregarSolicitacoesTransferencias;
 
 async function openSolicitacoesTransferencia(forceReload = false) {
   if (typeof hideKanban === 'function') hideKanban();
@@ -40382,10 +39651,7 @@ window.renderizarCatalogoOmie = renderizarCatalogoOmie;
             <i class="fa-solid fa-clipboard-list"></i> Adicionar separação
           </button>
         </div>
-        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;">
-          <button id="modalAcoesBtnEditar" style="background:#fef3c7;color:#d97706;border:1px solid #fbbf24;padding:10px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600;display:flex;align-items:center;justify-content:center;gap:6px;">
-            <i class="fa-solid fa-pencil"></i> Editar
-          </button>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
           <button id="modalAcoesBtnCompras" style="background:#ede9fe;color:#7c3aed;border:1px solid #c4b5fd;padding:10px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600;display:flex;align-items:center;justify-content:center;gap:6px;">
             <i class="fa-solid fa-receipt"></i> Últimas Compras
           </button>
@@ -40537,7 +39803,6 @@ window.renderizarCatalogoOmie = renderizarCatalogoOmie;
   document.getElementById('modalManuaisVoltar').addEventListener('click', mostrarBotoes);
   document.getElementById('modalManualBtnEnviar').addEventListener('click', enviarManual);
 
-  document.getElementById('modalAcoesBtnEditar').addEventListener('click', () => { const c = _ctx.codigo; fechar(); abrirModalEditarProduto(c); });
   document.getElementById('modalAcoesBtnCompras').addEventListener('click', () => { const {codigo_produto, codigo, descricao} = _ctx; fechar(); abrirModalUltimasCompras(codigo_produto, codigo, descricao); });
   document.getElementById('modalAcoesBtnSeparacao').addEventListener('click', () => {
     const qtdInput = document.getElementById('modalAcoesQtd');
@@ -42052,8 +41317,6 @@ function abrirModalEditarProduto(codigoProduto) {
 }
 
 // ===== CONFIGURAÇÃO DE CATEGORIAS E DEPARTAMENTOS =====
-
-// Abre painel de configuração (não é mais modal)
 function abrirPainelConfiguracaoCateg() {
   try {
     // Limpa tudo
@@ -60898,12 +60161,9 @@ document.addEventListener('DOMContentLoaded', () => {
           <select id="modalCarrinhoSepRequester" style="background:#2a2a2a;color:#f0f0f0;border:1px solid #3a3a3a;border-radius:10px;padding:8px 12px;font-size:.9rem;width:100%;"></select>
         </div>
         <div style="display:flex;flex-direction:column;gap:5px;min-width:0;">
-          <label style="color:#d1d5db;font-size:.85rem;font-weight:600;">Motivo da solicitação</label>
+          <label style="color:#d1d5db;font-size:.85rem;font-weight:600;">Local de estoque</label>
           <select id="modalCarrinhoSepMotivo" style="background:#2a2a2a;color:#f0f0f0;border:1px solid #3a3a3a;border-radius:10px;padding:8px 12px;font-size:.9rem;width:100%;">
-            <option value="Produção" selected>Produção</option>
-            <option value="Engenharia">Engenharia</option>
-            <option value="venda">venda</option>
-            <option value="Assistencia tecnica">Assistencia tecnica</option>
+            <option value="">— carregando... —</option>
           </select>
         </div>
         <div style="display:flex;flex-direction:column;gap:6px;">
@@ -61143,6 +60403,30 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
+  async function _carregarLocaisEstoqueSep() {
+    const sel = document.getElementById('modalCarrinhoSepMotivo');
+    if (!sel) return;
+    sel.innerHTML = '<option value="">— carregando... —</option>';
+    try {
+      let locais = window.__locaisEstoqueCache;
+      if (!locais) {
+        const resp = await fetch('/api/armazem/locais?fonte=omie', { credentials: 'include' });
+        const data = await resp.json();
+        locais = (data.locais || []).filter(l => l.inativo !== 'S');
+        window.__locaisEstoqueCache = locais;
+      }
+      if (!locais.length) {
+        sel.innerHTML = '<option value="">— nenhum local encontrado —</option>';
+        return;
+      }
+      sel.innerHTML = '<option value="">\u2014 Selecione o local \u2014</option>' + locais
+        .map(l => `<option value="${l.codigo_local_estoque}" data-descricao="${l.descricao}">${l.nIdent ? l.nIdent + '. ' : ''}${l.descricao}</option>`)
+        .join('');
+    } catch {
+      sel.innerHTML = '<option value="">— erro ao carregar —</option>';
+    }
+  }
+
   async function _carregarUsuarios() {
     const sel = document.getElementById('modalCarrinhoSepRequester');
     const sendBtn = document.getElementById('modalCarrinhoSepSend');
@@ -61206,7 +60490,8 @@ document.addEventListener('DOMContentLoaded', () => {
           }
         } catch { _renderItens([]); }
       })(),
-      _carregarUsuarios()
+      _carregarUsuarios(),
+      _carregarLocaisEstoqueSep()
     ]);
   }
 
@@ -61219,6 +60504,14 @@ document.addEventListener('DOMContentLoaded', () => {
       return;
     }
 
+    const selLocal = document.getElementById('modalCarrinhoSepMotivo');
+    const localEstoque = selLocal?.value || '';
+    const localEstoqueNome = selLocal?.options[selLocal.selectedIndex]?.text || '';
+    if (!localEstoque) {
+      alert('Selecione o local de estoque.');
+      return;
+    }
+
     const btn = document.getElementById('modalCarrinhoSepSend');
     btn.disabled = true;
     btn.textContent = 'Enviando...';
@@ -61228,8 +60521,9 @@ document.addEventListener('DOMContentLoaded', () => {
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
         body: JSON.stringify({
-          solicitado_para: solicitadoPara,
-          motivo:         document.getElementById('modalCarrinhoSepMotivo')?.value || 'Produção',
+          solicitado_para:    solicitadoPara,
+          local_estoque:      localEstoque,
+          local_estoque_nome: localEstoqueNome,
           data_prevista:   document.getElementById('modalCarrinhoSepDate').value || null,
           horario:         document.getElementById('modalCarrinhoSepHorario').value,
           observacao:      document.getElementById('modalCarrinhoSepObs').value.trim() || null

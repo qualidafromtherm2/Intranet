@@ -2585,14 +2585,10 @@
                     <i class="fa-solid fa-list" style="color:#a855f7;"></i>
                     Registro de envios
                   </div>
-                    <button id="sacRefreshBtn" class="content-button" type="button" style="display:flex;align-items:center;gap:6px;">
-                      <i class="fa-solid fa-rotate"></i>
-                      <span>Recarregar</span>
-                    </button>
-                    <button id="sacRelatorioBtn" class="content-button" type="button" style="display:flex;align-items:center;gap:6px;background:linear-gradient(135deg,#0ea5e9 0%,#0284c7 100%);color:white;">
-                      <i class="fa-solid fa-chart-bar"></i>
-                      <span>Relatório</span>
-                    </button>
+                  <button id="sacRefreshBtn" class="content-button" type="button" style="display:flex;align-items:center;gap:6px;">
+                    <i class="fa-solid fa-rotate"></i>
+                    <span>Recarregar</span>
+                  </button>
                 </div>
 
                 <div class="tabela-wrapper" style="overflow:auto; margin-top:12px;">
@@ -2615,85 +2611,6 @@
                     </tbody>
                   </table>
                 </div>
-                  <!-- Container do gráfico SAC (inicialmente oculto) -->
-                  <div id="sacRelatorioGraficoWrapper" style="display:none; margin-top:24px; background:#181f2a; border-radius:14px; box-shadow:0 2px 12px rgba(0,0,0,0.08); padding:24px;">
-                    <div style="display:flex;align-items:center;gap:12px; margin-bottom:18px;flex-wrap:wrap;">
-                      <h3 style="margin:0;font-size:17px;font-weight:700;color:#38bdf8;display:flex;align-items:center;gap:8px;">
-                        <i class="fa-solid fa-chart-bar"></i>
-                        Relatório de Itens Enviados (SAC)
-                      </h3>
-                      <div id="sacRelatorioPeriodoBtns" style="margin-left:auto;display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
-                        <button id="sacPeriodo3mBtn" class="content-button" type="button" style="padding:6px 10px;font-size:12px;background:#1f2937;color:#cbd5e1;">3 meses</button>
-                        <button id="sacPeriodo4mBtn" class="content-button" type="button" style="padding:6px 10px;font-size:12px;background:linear-gradient(135deg,#4f46e5 0%,#4338ca 100%);color:white;">4 meses</button>
-                        <button id="sacPeriodo6mBtn" class="content-button" type="button" style="padding:6px 10px;font-size:12px;background:#1f2937;color:#cbd5e1;">6 meses</button>
-                        <button id="sacPeriodo12mBtn" class="content-button" type="button" style="padding:6px 10px;font-size:12px;background:#1f2937;color:#cbd5e1;">12 meses</button>
-                        <button id="sacPeriodoTudoBtn" class="content-button" type="button" style="padding:6px 10px;font-size:12px;background:#1f2937;color:#cbd5e1;">Tudo</button>
-                      </div>
-                      <button id="sacRelatorioVoltarBtn" class="content-button" type="button" style="background:#334155;color:#fff;gap:6px;">
-                        <i class="fa-solid fa-arrow-left"></i>
-                        <span>Voltar</span>
-                      </button>
-                      <button id="sacRelatorioDownloadBtn" class="content-button" type="button" style="background:linear-gradient(135deg,#16a34a 0%,#15803d 100%);color:#fff;gap:6px;">
-                        <i class="fa-solid fa-download"></i>
-                        <span>Baixar relatório</span>
-                      </button>
-                    </div>
-                    <div style="margin-bottom:14px;color:#94a3b8;font-size:12px;font-weight:700;letter-spacing:.3px;">Gráfico 1 - Quantidade por Usuário</div>
-                    <div style="position:relative;height:320px;max-height:320px;min-height:320px;overflow:hidden;">
-                      <canvas id="sacRelatorioGraficoCanvas" style="width:100%;height:100%;"></canvas>
-                    </div>
-                    <div id="sacRelatorioGraficoVazio" style="display:none;text-align:center;color:#94a3b8;font-size:15px;margin-top:12px;">Nenhum dado encontrado para o gráfico por usuário.</div>
-
-                    <div style="margin-top:22px;margin-bottom:14px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
-                      <div style="color:#94a3b8;font-size:12px;font-weight:700;letter-spacing:.3px;">Gráfico 2 - Conteúdo (Itens x Quantidade)</div>
-                      <div style="display:flex;align-items:center;gap:8px;margin-left:auto;">
-                        <label for="sacRelatorioConteudoUsuarioSelect" style="color:#94a3b8;font-size:12px;font-weight:600;">Usuário:</label>
-                        <select id="sacRelatorioConteudoUsuarioSelect" style="padding:6px 10px;border:1px solid rgba(148,163,184,0.35);border-radius:8px;background:#0f172a;color:#e2e8f0;font-size:12px;min-width:180px;">
-                          <option value="">Todos</option>
-                        </select>
-                        <!-- Filtro Outros itens -->
-                        <div style="position:relative;display:inline-block;">
-                          <button id="sacConteudoFiltroBtn" title="Filtros do gráfico"
-                            style="background:rgba(255,255,255,.06);border:1px solid rgba(148,163,184,0.3);border-radius:8px;padding:6px 10px;cursor:pointer;color:#94a3b8;font-size:13px;display:flex;align-items:center;gap:5px;">
-                            <i class="fa-solid fa-filter"></i>
-                          </button>
-                          <div id="sacConteudoFiltroDropdown"
-                            style="display:none;position:absolute;right:0;top:calc(100% + 4px);z-index:200;background:#1e293b;border:1px solid rgba(148,163,184,0.25);border-radius:10px;padding:10px 14px;min-width:190px;box-shadow:0 8px 24px rgba(0,0,0,.4);">
-                            <div style="color:#94a3b8;font-size:11px;font-weight:700;margin-bottom:8px;letter-spacing:.3px;text-transform:uppercase;">Itens visíveis</div>
-                            <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:12px;color:#cbd5e1;padding:4px 0;">
-                              <input type="checkbox" id="sacConteudoOcultarOutros" style="accent-color:#6366f1;width:14px;height:14px;">
-                              Ocultar "Outros itens"
-                            </label>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                    <div style="position:relative;height:320px;max-height:320px;min-height:320px;overflow:hidden;">
-                      <canvas id="sacRelatorioConteudoGraficoCanvas" style="width:100%;height:100%;"></canvas>
-                    </div>
-                    <div id="sacRelatorioConteudoGraficoVazio" style="display:none;text-align:center;color:#94a3b8;font-size:15px;margin-top:12px;">Nenhum dado encontrado para o gráfico de conteúdo.</div>
-
-                    <div id="sacRelatorioDrilldownWrapper" style="display:none;margin-top:20px;border:1px solid rgba(148,163,184,0.25);border-radius:10px;background:#0f172a;padding:14px;">
-                      <div id="sacRelatorioDrilldownTitulo" style="color:#cbd5e1;font-size:13px;font-weight:700;margin-bottom:10px;">Registros da barra selecionada</div>
-                      <div class="tabela-wrapper" style="overflow:auto;max-height:260px;">
-                        <table class="tabela padrao" style="min-width:900px;">
-                          <thead>
-                            <tr>
-                              <th>ID Registro</th>
-                              <th>Criado em</th>
-                              <th>Usuário</th>
-                              <th>Conteúdo</th>
-                              <th>Quantidade</th>
-                              <th>Observação</th>
-                            </tr>
-                          </thead>
-                          <tbody id="sacRelatorioDrilldownBody">
-                            <tr><td colspan="6" style="text-align:center;padding:14px;color:var(--inactive-color);">Clique em uma barra para ver os conteúdos.</td></tr>
-                          </tbody>
-                        </table>
-                      </div>
-                    </div>
-                  </div>
               </div>
             </div>
           </div>
@@ -4520,19 +4437,12 @@
                   <i class="fa-solid fa-chart-line" style="color:#818cf8;"></i>
                   Gráfico AT
                 </div>
-                <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-left:auto;">
-                  <!-- Filtro Período -->
+                <div style="display:flex;gap:8px;align-items:center;margin-left:auto;">
                   <div style="display:flex;gap:6px;">
                     <button class="at-graf-periodo-btn-pg" data-per="3" style="padding:5px 12px;border-radius:8px;border:1px solid #4f46e5;background:rgba(79,70,229,.25);color:#a5b4fc;font-size:12px;cursor:pointer;">3 meses</button>
                     <button class="at-graf-periodo-btn-pg" data-per="6" style="padding:5px 12px;border-radius:8px;border:1px solid #374151;background:rgba(255,255,255,.04);color:#9ca3af;font-size:12px;cursor:pointer;">6 meses</button>
                     <button class="at-graf-periodo-btn-pg" data-per="12" style="padding:5px 12px;border-radius:8px;border:1px solid #374151;background:rgba(255,255,255,.04);color:#9ca3af;font-size:12px;cursor:pointer;">12 meses</button>
                     <button class="at-graf-periodo-btn-pg" data-per="0" style="padding:5px 12px;border-radius:8px;border:1px solid #374151;background:rgba(255,255,255,.04);color:#9ca3af;font-size:12px;cursor:pointer;">Tudo</button>
-                  </div>
-                  <!-- Filtro Tipo -->
-                  <div style="display:flex;gap:6px;border-left:1px solid #1e293b;padding-left:8px;">
-                    <button class="at-graf-tipo-btn-pg" data-tipo="Qualidade" style="padding:5px 12px;border-radius:8px;border:1px solid #10b981;background:rgba(16,185,129,.22);color:#6ee7b7;font-size:12px;cursor:pointer;">Qualidade</button>
-                    <button class="at-graf-tipo-btn-pg" data-tipo="Atendimento Rápido" style="padding:5px 12px;border-radius:8px;border:1px solid #374151;background:rgba(255,255,255,.04);color:#9ca3af;font-size:12px;cursor:pointer;">Atend. Rápido</button>
-                    <button class="at-graf-tipo-btn-pg" data-tipo="" style="padding:5px 12px;border-radius:8px;border:1px solid #374151;background:rgba(255,255,255,.04);color:#9ca3af;font-size:12px;cursor:pointer;">Todos</button>
                   </div>
                   <button id="atGrafPgRefreshBtn" type="button" title="Atualizar"
                     style="padding:6px 12px;border-radius:8px;border:1px solid #374151;background:rgba(255,255,255,.04);color:#9ca3af;cursor:pointer;display:flex;align-items:center;gap:6px;font-size:13px;">
@@ -4545,19 +4455,19 @@
                 </div>
               </div>
 
-              <!-- Gráfico 1 — Top Modelos -->
+              <!-- Gráfico 1 -->
               <div style="background:rgba(255,255,255,.03);border:1px solid #1e293b;border-radius:12px;padding:16px;margin-top:16px;">
-                <div style="font-size:13px;font-weight:700;color:#f59e0b;margin-bottom:12px;display:flex;align-items:center;gap:6px;">
-                  <i class="fa-solid fa-award"></i>
-                  Gráfico 1 — Top Modelos por Mês
+                <div style="font-size:13px;font-weight:700;color:#a5b4fc;margin-bottom:12px;display:flex;align-items:center;gap:6px;">
+                  <i class="fa-solid fa-map-location-dot"></i>
+                  Gráfico 1 — Atendimentos por Estado / Mês (Qualidade)
                 </div>
-                <div id="atGrafPg0Status" style="font-size:12px;color:var(--inactive-color);margin-bottom:8px;display:none;">Carregando...</div>
-                <div style="position:relative;height:300px;">
-                  <canvas id="atGrafPg0Canvas"></canvas>
+                <div id="atGrafPg1Status" style="font-size:12px;color:var(--inactive-color);margin-bottom:8px;display:none;">Carregando...</div>
+                <div style="position:relative;height:340px;">
+                  <canvas id="atGrafPg1Canvas"></canvas>
                 </div>
               </div>
 
-              <!-- Gráfico 2 — Picos -->
+              <!-- Gráfico 2 -->
               <div style="background:rgba(255,255,255,.03);border:1px solid #1e293b;border-radius:12px;padding:16px;margin-top:18px;">
                 <div style="font-size:13px;font-weight:700;color:#34d399;margin-bottom:12px;display:flex;align-items:center;gap:6px;">
                   <i class="fa-solid fa-chart-line"></i>
@@ -4566,18 +4476,6 @@
                 <div id="atGrafPg2Status" style="font-size:12px;color:var(--inactive-color);margin-bottom:8px;display:none;">Carregando...</div>
                 <div style="position:relative;height:280px;">
                   <canvas id="atGrafPg2Canvas"></canvas>
-                </div>
-              </div>
-
-              <!-- Gráfico 3 — Por Estado/Mês -->
-              <div style="background:rgba(255,255,255,.03);border:1px solid #1e293b;border-radius:12px;padding:16px;margin-top:18px;">
-                <div style="font-size:13px;font-weight:700;color:#a5b4fc;margin-bottom:12px;display:flex;align-items:center;gap:6px;">
-                  <i class="fa-solid fa-map-location-dot"></i>
-                  Gráfico 3 — Atendimentos por Estado / Mês
-                </div>
-                <div id="atGrafPg1Status" style="font-size:12px;color:var(--inactive-color);margin-bottom:8px;display:none;">Carregando...</div>
-                <div style="position:relative;height:340px;">
-                  <canvas id="atGrafPg1Canvas"></canvas>
                 </div>
               </div>
 
@@ -5630,7 +5528,7 @@
                 </button>
                 <button class="lp-tab-btn" data-lp-tab="kanbanSolicitacoesConteudo">
                   <i class="fa-solid fa-columns"></i>
-                  Kanban solicitações
+                  Kanban solicitações (<span id="kanbanSolicitacoesCount">0</span>)
                 </button>
                 <div id="productSpinner" data-pct="0" style="display:none;margin-left:auto;">
                   <svg id="svg" viewBox="0 0 200 200" preserveAspectRatio="xMidYMid meet">
@@ -7153,7 +7051,6 @@
                   <div class="title-wrapper">
                     <div class="content-section-title">Solicitações de transferência</div>
                     <div class="actions" style="display:flex; gap:8px; align-items:center;">
-                      <button id="solicitacoesTransferApproveAll" class="btn tiny" type="button" style="background:#22c55e;color:#06120a;border-color:#86efac;font-weight:800;">Aprovar pendentes</button>
                       <button id="solicitacoesTransferRefresh" class="btn tiny" type="button">Atualizar</button>
                     </div>
                   </div>
@@ -8114,15 +8011,6 @@
           </div>
         </div>
         <div class="transferencia-controls">
-          <button id="transferImportarListaBtn"
-                  type="button"
-                  class="btn"
-                  title="Cole uma lista copiada da planilha: codigo + TAB + quantidade"
-                  aria-label="Importar lista de transferencia em massa"
-                  style="display:inline-flex;align-items:center;gap:8px;white-space:nowrap;">
-            <i class="fa-solid fa-table-list"></i>
-            Importar lista da planilha
-          </button>
           <div class="transferencia-search">
             <input id="transferSearch" type="text"
                    placeholder="Adicionar item por código ou descrição…"
@@ -8132,7 +8020,7 @@
             </div>
           </div>
         </div>
-        <div class="transferencia-wrapper" style="max-height:calc(100vh - 330px);overflow:auto;border:1px solid #334155;border-radius:10px;">
+        <div class="transferencia-wrapper">
           <table class="tabela padrao transferencia-table">
             <thead>
               <tr>
