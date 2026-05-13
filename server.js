@@ -13606,6 +13606,126 @@ function inferNotaEntradaStatusFromTopic(topic = '') {
   return 'Desconhecida';
 }
 
+function normalizarTextoWebhookRecebimento(valor = '') {
+  return String(valor || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .trim();
+}
+
+function topicRecebimentoConcluido(topic = '') {
+  return normalizarTextoWebhookRecebimento(topic).includes('concluid');
+}
+
+function topicRecebimentoRevertido(topic = '') {
+  return normalizarTextoWebhookRecebimento(topic).includes('revertid');
+}
+
+function extrairNumeroPedidoCompraRecebimento(texto = '') {
+  const normalizado = String(texto || '').trim();
+  if (!normalizado) return null;
+
+  const padroes = [
+    /pedido\s*de\s*compra\s*(?:numero|n[uú]mero|n[ºo.]?)?\s*[-:#]?\s*(\d+)/i,
+    /pedido\s*(?:numero|n[uú]mero|n[ºo.]?)?\s*[-:#]?\s*(\d+)/i,
+    /\bpc\s*[-:#]?\s*(\d+)\b/i
+  ];
+
+  for (const padrao of padroes) {
+    const match = normalizado.match(padrao);
+    if (match?.[1]) return match[1].replace(/^0+/, '') || '0';
+  }
+
+  return null;
+}
+
+async function ensurePedidoRecebidoWebhookColumns(db = pool) {
+  await db.query(`
+    ALTER TABLE compras.pedidos_omie
+      ADD COLUMN IF NOT EXISTS "Pedido recebido" BOOLEAN DEFAULT FALSE,
+      ADD COLUMN IF NOT EXISTS "Pedido recebido em" TIMESTAMP NULL,
+      ADD COLUMN IF NOT EXISTS "Pedido recebido webhook" TEXT NULL
+  `);
+}
+
+async function atualizarPedidoRecebidoPorWebhookRecebimento(db, {
+  topic = '',
+  nIdReceb = null,
+  numeroPedido = null,
+  cDadosAdicionais = null,
+  messageId = null
+} = {}) {
+  const concluido = topicRecebimentoConcluido(topic);
+  const revertido = topicRecebimentoRevertido(topic);
+  if (!concluido && !revertido) return { ok: true, updated: 0, skipped: 'topic_sem_alteracao_pedido' };
+
+  await ensurePedidoRecebidoWebhookColumns(db);
+
+  const pedidos = new Set();
+  const numeroExtraido = numeroPedido || extrairNumeroPedidoCompraRecebimento(cDadosAdicionais);
+  if (numeroExtraido) pedidos.add(String(numeroExtraido));
+
+  if (nIdReceb) {
+    const { rows } = await db.query(`
+      SELECT DISTINCT n_id_pedido::text AS n_id_pedido
+        FROM logistica.recebimentos_nfe_itens
+       WHERE n_id_receb = $1
+         AND n_id_pedido IS NOT NULL
+    `, [nIdReceb]);
+    rows.forEach((row) => {
+      if (row.n_id_pedido) pedidos.add(String(row.n_id_pedido));
+    });
+  }
+
+  if (pedidos.size === 0) return { ok: true, updated: 0, skipped: 'pedido_nao_identificado' };
+
+  const valores = Array.from(pedidos);
+  const pedidosNormalizados = valores.map((valor) => String(valor).replace(/^0+/, '') || '0');
+  const { rowCount } = concluido
+    ? await db.query(`
+        UPDATE compras.pedidos_omie
+           SET "Pedido recebido" = TRUE,
+               "Pedido recebido em" = NOW(),
+               "Pedido recebido webhook" = $1,
+               updated_at = NOW()
+         WHERE n_cod_ped::text = ANY($2::text[])
+            OR regexp_replace(COALESCE(c_numero, ''), '^0+', '') = ANY($2::text[])
+      `, [messageId || topic || null, pedidosNormalizados])
+    : await db.query(`
+        WITH alvo AS (
+          SELECT n_cod_ped
+            FROM compras.pedidos_omie
+           WHERE n_cod_ped::text = ANY($2::text[])
+              OR regexp_replace(COALESCE(c_numero, ''), '^0+', '') = ANY($2::text[])
+        ),
+        status_recebido AS (
+          SELECT a.n_cod_ped,
+                 EXISTS (
+                   SELECT 1
+                     FROM logistica.recebimentos_nfe_itens i
+                     JOIN logistica.recebimentos_nfe_omie r ON r.n_id_receb = i.n_id_receb
+                    WHERE i.n_id_pedido = a.n_cod_ped
+                      AND COALESCE(r.c_cancelada, 'N') <> 'S'
+                      AND (
+                        COALESCE(r.c_recebido, 'N') = 'S'
+                        OR COALESCE(BTRIM(r.c_etapa), '') IN ('60', '80', '100')
+                      )
+                 ) AS ainda_recebido
+            FROM alvo a
+        )
+        UPDATE compras.pedidos_omie p
+           SET "Pedido recebido" = sr.ainda_recebido,
+               "Pedido recebido em" = CASE WHEN sr.ainda_recebido THEN COALESCE(p."Pedido recebido em", NOW()) ELSE NULL END,
+               "Pedido recebido webhook" = $1,
+               updated_at = NOW()
+          FROM status_recebido sr
+         WHERE p.n_cod_ped = sr.n_cod_ped
+      `, [messageId || topic || null, pedidosNormalizados]);
+
+  return { ok: true, updated: rowCount, recebido: concluido, revertido, pedidos: valores };
+}
+
 function inferNotaEntradaStatusFromSnapshot(cabec = {}, infoCadastro = {}) {
   const cancelada = String(
     infoCadastro.cCancelada
@@ -13998,6 +14118,7 @@ async function upsertRecebimentoFromWebhookPayload(rawBody = {}) {
     || cab.c_dados_adicionais
     || cab.cObsNFe
     || null;
+  const numeroPedidoWebhook = extrairNumeroPedidoCompraRecebimento(cDadosAdicionais);
 
   const fornecedorResolvido = await resolverFornecedorRecebimentoFallback({
     cChaveNfe,
@@ -14104,6 +14225,14 @@ async function upsertRecebimentoFromWebhookPayload(rawBody = {}) {
 
   const client = await pool.connect();
   try {
+    await atualizarPedidoRecebidoPorWebhookRecebimento(client, {
+      topic,
+      nIdReceb: nIdRecebValido ? nIdReceb : null,
+      numeroPedido: numeroPedidoWebhook,
+      cDadosAdicionais,
+      messageId
+    });
+
     await upsertNotaEntradaEstado(client, {
       nIdReceb: nIdRecebValido ? nIdReceb : null,
       cChaveNfe,
@@ -22049,6 +22178,13 @@ async function upsertRecebimentoNFe(recebimento, eventoWebhook = '', messageId =
       ]);
     }
 
+    await atualizarPedidoRecebidoPorWebhookRecebimento(client, {
+      topic: eventoWebhook,
+      nIdReceb,
+      cDadosAdicionais: cDadosAdicionaisFinal,
+      messageId
+    });
+
     await upsertNotaEntradaEstado(client, {
       nIdReceb,
       cChaveNfe: cChaveNfeFinal,
@@ -29731,6 +29867,66 @@ function calcularScoreAssociacaoNfePedido(itemReceb, itemPedido) {
   return score;
 }
 
+function obterAssinaturaItemRecebimentoParaAgrupar(itemReceb) {
+  const cab = itemReceb?.itensCabec || {};
+  const codigo = normalizarTextoAssociacaoNfePedido(String(
+    cab.cCodigoProduto || cab.cCodProduto || ''
+  )).replace(/\s+/g, '');
+  const descricao = normalizarTextoAssociacaoNfePedido(String(
+    cab.cDescricaoProduto || cab.cDescricao || ''
+  ));
+  return `${codigo}|${descricao}`;
+}
+
+function valoresProximosAssociacao(valorA, valorB, tolerancia = 0.01) {
+  const a = Number(valorA);
+  const b = Number(valorB);
+  return Number.isFinite(a) && Number.isFinite(b) && Math.abs(a - b) <= tolerancia;
+}
+
+function montarMapaItensPedidoReutilizaveis(itensReceb = [], itensPedido = []) {
+  const grupos = new Map();
+  itensReceb.forEach((item) => {
+    const chave = obterAssinaturaItemRecebimentoParaAgrupar(item);
+    if (!chave || chave === '|') return;
+    if (!grupos.has(chave)) {
+      grupos.set(chave, { itens: [], qtdTotal: 0, valorTotal: 0 });
+    }
+    const grupo = grupos.get(chave);
+    const cab = item?.itensCabec || {};
+    grupo.itens.push(item);
+    grupo.qtdTotal += Number(cab.nQtdeNFe || 0) || 0;
+    grupo.valorTotal += Number(cab.vTotalItem || 0) || 0;
+  });
+
+  const reutilizaveis = new Map();
+  grupos.forEach((grupo, chave) => {
+    if (grupo.itens.length < 2) return;
+
+    let melhor = null;
+    let melhorScore = -Infinity;
+    itensPedido.forEach((itemPedido) => {
+      const score = grupo.itens.reduce(
+        (acc, itemReceb) => acc + calcularScoreAssociacaoNfePedido(itemReceb, itemPedido),
+        0
+      );
+      const qtdBate = valoresProximosAssociacao(grupo.qtdTotal, itemPedido?.n_qtde, 0.0001);
+      const valorBate = valoresProximosAssociacao(grupo.valorTotal, itemPedido?.n_val_tot, 0.05);
+      const scoreFinal = score + (qtdBate ? 500 : 0) + (valorBate ? 500 : 0);
+      if (scoreFinal > melhorScore) {
+        melhorScore = scoreFinal;
+        melhor = { itemPedido, qtdBate, valorBate };
+      }
+    });
+
+    if (melhor?.itemPedido && (melhor.qtdBate || melhor.valorBate)) {
+      reutilizaveis.set(chave, melhor.itemPedido);
+    }
+  });
+
+  return reutilizaveis;
+}
+
 async function montarPlanoAssociacaoNfePedido(numeroNfe, numeroPedido, chaveNfe = null, nCodPedInformado = null) {
   const nCodPedNumerico = Number(nCodPedInformado);
   const usarIdDireto = Number.isFinite(nCodPedNumerico) && nCodPedNumerico > 0;
@@ -29791,6 +29987,7 @@ async function montarPlanoAssociacaoNfePedido(numeroNfe, numeroPedido, chaveNfe 
   });
   const mapaPorCodigoProduto = new Map();
   const mapaPorIdProduto = new Map();
+  const mapaItensPedidoReutilizaveis = montarMapaItensPedidoReutilizaveis(itensReceb, itensPedido);
 
   for (const item of itensPedido) {
     const codigo = String(item?.c_produto || '').trim();
@@ -29869,8 +30066,16 @@ async function montarPlanoAssociacaoNfePedido(numeroNfe, numeroPedido, chaveNfe 
     let itemPedidoVinculo = null;
     let criterioMatch = null;
     let scoreMatch = 0;
+    const assinaturaRecebimento = obterAssinaturaItemRecebimentoParaAgrupar(item);
+    const itemPedidoReutilizavel = mapaItensPedidoReutilizaveis.get(assinaturaRecebimento);
 
-    if (Number.isFinite(nIdProdutoRec) && nIdProdutoRec > 0 && mapaPorIdProduto.has(nIdProdutoRec)) {
+    if (itemPedidoReutilizavel) {
+      itemPedidoVinculo = itemPedidoReutilizavel;
+      criterioMatch = 'agrupamento_mesmo_item_pedido';
+      scoreMatch = Math.max(calcularScoreAssociacaoNfePedido(item, itemPedidoReutilizavel), 1500);
+    }
+
+    if (!itemPedidoVinculo && Number.isFinite(nIdProdutoRec) && nIdProdutoRec > 0 && mapaPorIdProduto.has(nIdProdutoRec)) {
       const candidatos = mapaPorIdProduto.get(nIdProdutoRec);
       const { item: melhorPorId, score } = escolherMelhorCandidatoPedido(item, candidatos);
       if (melhorPorId) {
@@ -29928,6 +30133,17 @@ async function montarPlanoAssociacaoNfePedido(numeroNfe, numeroPedido, chaveNfe 
       itensIde.nIdItPedidoExistente = nCodItem;
     }
 
+    const matchAgrupadoMesmoItem = criterioMatch === 'agrupamento_mesmo_item_pedido';
+    const pedidoQtdePreview = matchAgrupadoMesmoItem
+      ? (itensCabec?.nQtdeNFe ?? null)
+      : (itemPedidoVinculo?.n_qtde ?? null);
+    const pedidoValorPreview = matchAgrupadoMesmoItem
+      ? (itensCabec?.vTotalItem ?? null)
+      : (itemPedidoVinculo?.n_val_tot ?? null);
+    const pedidoUnidadePreview = matchAgrupadoMesmoItem
+      ? (String(itensCabec?.cUnidadeNfe || itensCabec?.cUnidadeNFe || itemPedidoVinculo?.c_unidade || '').trim() || null)
+      : (String(itemPedidoVinculo?.c_unidade || '').trim() || null);
+
     previewItens.push({
       n_sequencia: itensIde.nSequencia,
       nf_codigo_produto: codigoProdutoRec || null,
@@ -29942,9 +30158,11 @@ async function montarPlanoAssociacaoNfePedido(numeroNfe, numeroPedido, chaveNfe 
       pedido_n_cod_item: Number.isFinite(nCodItem) && nCodItem > 0 ? nCodItem : null,
       pedido_codigo_produto: String(itemPedidoVinculo?.c_produto || '').trim() || null,
       pedido_descricao_produto: String(itemPedidoVinculo?.c_descricao || '').trim() || null,
-      pedido_qtde: itemPedidoVinculo?.n_qtde ?? null,
-      pedido_unidade: String(itemPedidoVinculo?.c_unidade || '').trim() || null,
-      pedido_valor_total: itemPedidoVinculo?.n_val_tot ?? null,
+      pedido_qtde: pedidoQtdePreview,
+      pedido_unidade: pedidoUnidadePreview,
+      pedido_valor_total: pedidoValorPreview,
+      pedido_qtde_original: itemPedidoVinculo?.n_qtde ?? null,
+      pedido_valor_total_original: itemPedidoVinculo?.n_val_tot ?? null,
       criterio_match: criterioMatch,
       score_match: scoreMatch
     });
@@ -30143,6 +30361,51 @@ app.post('/api/compras/pedidos-omie/nfe-associar-pedido', express.json(), async 
       if (seq > 0) overrideMap.set(seq, ov);
     }
 
+    const overridesValorPedido = [];
+    for (const itemPreview of (Array.isArray(plano?.itens_preview) ? plano.itens_preview : [])) {
+      const seq = Number(itemPreview?.n_sequencia || 0);
+      const override = overrideMap.get(seq);
+      const valorTotalNovo = parseValorDecimalNfe(override?.nValTot);
+      if (!seq || !Number.isFinite(valorTotalNovo) || valorTotalNovo < 0) continue;
+
+      const nCodItem = Number(override?.nIdItPedidoExistente || itemPreview?.pedido_n_cod_item || 0);
+      if (!Number.isFinite(nCodItem) || nCodItem <= 0) continue;
+
+      const qtdBase = parseValorDecimalNfe(override?.nQtde ?? itemPreview?.pedido_qtde);
+      const valorUnitNovo = Number.isFinite(qtdBase) && qtdBase > 0
+        ? Number((valorTotalNovo / qtdBase).toFixed(6))
+        : null;
+
+      overridesValorPedido.push({ nCodItem, valorTotalNovo, valorUnitNovo });
+      itemPreview.pedido_valor_total = valorTotalNovo;
+    }
+
+    if (overridesValorPedido.length > 0) {
+      for (const ovValor of overridesValorPedido) {
+        await pool.query(
+          `UPDATE compras.pedidos_omie_produtos
+              SET n_val_tot = $1,
+                  n_val_unit = COALESCE($2, n_val_unit),
+                  updated_at = NOW()
+            WHERE n_cod_ped = $3
+              AND n_cod_item = $4`,
+          [ovValor.valorTotalNovo, ovValor.valorUnitNovo, plano.n_cod_ped, ovValor.nCodItem]
+        );
+      }
+
+      await pool.query(
+        `UPDATE compras.pedidos_omie p
+            SET n_valor = COALESCE((
+                  SELECT SUM(COALESCE(pp.n_val_tot, 0))
+                    FROM compras.pedidos_omie_produtos pp
+                   WHERE pp.n_cod_ped = p.n_cod_ped
+                ), 0),
+                updated_at = NOW()
+          WHERE p.n_cod_ped = $1`,
+        [plano.n_cod_ped]
+      );
+    }
+
     // Valida que todos os itens da NF-e foram mapeados a um item do pedido Omie
     // (considerando possíveis ajustes manuais vindos do frontend)
     const itensSemMapeamento = Array.isArray(plano?.itens_preview)
@@ -30316,6 +30579,8 @@ app.post('/api/compras/pedidos-omie/nfe-associar-pedido', express.json(), async 
         // Mapa de unidade/quantidade por nCodItem do pedido
         const unidadePorCodItem = {};
         const quantidadePorCodItem = {};
+        const quantidadeRecebidaPorSeq = {};
+        const unidadeRecebidaPorSeq = {};
         (pedidoConsulta?.produtos_consulta || []).forEach(p => {
           if (p.nCodItem) {
             unidadePorCodItem[String(p.nCodItem)] = p.cUnidade;
@@ -30331,6 +30596,13 @@ app.post('/api/compras/pedidos-omie/nfe-associar-pedido', express.json(), async 
           }
           if (!Number.isFinite(quantidadePorCodItem[chaveItem]) && Number.isFinite(Number(itemPreview?.pedido_qtde))) {
             quantidadePorCodItem[chaveItem] = Number(itemPreview.pedido_qtde);
+          }
+          if (itemPreview?.criterio_match === 'agrupamento_mesmo_item_pedido') {
+            const seqPreview = Number(itemPreview?.n_sequencia || 0);
+            if (seqPreview) {
+              quantidadeRecebidaPorSeq[String(seqPreview)] = Number(itemPreview?.nf_qtde ?? itemPreview?.pedido_qtde);
+              unidadeRecebidaPorSeq[String(seqPreview)] = itemPreview?.nf_unidade || itemPreview?.pedido_unidade || unidadePorCodItem[chaveItem] || null;
+            }
           }
         });
 
@@ -30455,14 +30727,18 @@ app.post('/api/compras/pedidos-omie/nfe-associar-pedido', express.json(), async 
           const cfopServicoEntrada = previewItem?.item_servico ? previewItem?.servico_cfop_entrada : null;
           const cUnidadePedido = nIdItPed ? unidadePorCodItem[String(nIdItPed)] : null;
           const nQtdePedido = nIdItPed ? quantidadePorCodItem[String(nIdItPed)] : null;
+          const nQtdeAgrupada = Number(quantidadeRecebidaPorSeq[String(nSeq)]);
+          const cUnidadeAgrupada = unidadeRecebidaPorSeq[String(nSeq)] || null;
 
           // Override do user tem prioridade sobre o valor do pedido
           const override = overrideMap.get(nSeq);
-          const cUnidadeFinal = override?.cUnidade || cUnidadePedido || null;
+          const cUnidadeFinal = override?.cUnidade || cUnidadeAgrupada || cUnidadePedido || null;
           const nQtdeOverride = Number(override?.nQtde);
           const nQtdeRecebidaFinal = Number.isFinite(nQtdeOverride) && nQtdeOverride > 0
             ? nQtdeOverride
-            : (Number.isFinite(nQtdePedido) && nQtdePedido > 0 ? nQtdePedido : null);
+            : (Number.isFinite(nQtdeAgrupada) && nQtdeAgrupada > 0
+              ? nQtdeAgrupada
+              : (Number.isFinite(nQtdePedido) && nQtdePedido > 0 ? nQtdePedido : null));
 
           const ajustes = {
             codigo_local_estoque: RECEBIMENTO_NFE_LOCAL_ESTOQUE_PADRAO

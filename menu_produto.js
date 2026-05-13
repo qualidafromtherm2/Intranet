@@ -6935,10 +6935,21 @@ document.getElementById('menu-solicitacao-transferencia')?.addEventListener('cli
   await window.openSolicitacoesTransferencia?.();
 });
 
+function abrirLocalizarNfePeloMenuRecebimento() {
+  const inputNfe = document.getElementById('modalLocalizarNfeInput');
+  const inputPedido = document.getElementById('modalLocalizarPedidoInput');
+  if (inputNfe) inputNfe.value = '';
+  if (inputPedido) inputPedido.value = '';
+  document.getElementById('locNfeTabNfe')?.click();
+  if (typeof window.abrirModalLocalizarNfe === 'function') {
+    window.abrirModalLocalizarNfe();
+  }
+}
+
 document.getElementById('menu-recebimento')?.addEventListener('click', async e => {
   e.preventDefault();
-  showMainTab('recebimentoPane');
-  // await loadComprasRecebimento(); // COMENTADO - usando nova implementação inline no HTML
+  e.stopImmediatePropagation();
+  abrirLocalizarNfePeloMenuRecebimento();
 });
 
 // QUALIDADE: abre painel de Qualidade Fábrica
@@ -42939,7 +42950,8 @@ function vincularFiltrosRecebimento() {
 
   document.getElementById('menu-recebimento')?.addEventListener('click', async (event) => {
     event.preventDefault();
-    await loadComprasRecebimento();
+    event.stopImmediatePropagation();
+    abrirLocalizarNfePeloMenuRecebimento();
   });
 
   document.getElementById('recebimentoRefreshBtn')?.addEventListener('click', async () => {
@@ -47251,7 +47263,18 @@ function setStatusModalAssociarPedidoNfe(mensagem, tipo = 'info') {
   statusEl.style.background = tema.bg;
   statusEl.style.border = `1px solid ${tema.border}`;
   statusEl.style.color = tema.color;
-  statusEl.textContent = mensagem || '';
+  if (mensagem && /^<div\s/i.test(String(mensagem).trim())) {
+    statusEl.innerHTML = mensagem;
+  } else {
+    statusEl.textContent = mensagem || '';
+  }
+}
+
+function resetBotaoAssociarPedidoNfe(disabled = true) {
+  const btnAssociar = document.getElementById('modalAssociarPedidoBtnConfirmar');
+  if (!btnAssociar) return;
+  btnAssociar.disabled = disabled;
+  btnAssociar.innerHTML = '<i class="fa-solid fa-check"></i> Associar';
 }
 
 async function carregarSeletorCategoriasAssociarNfe(categoriaAtualCodigo, categoriaAtualDescricao) {
@@ -47459,7 +47482,7 @@ function snapshotEdicoesQtdUnidAssociacaoNfe() {
     window.__associarNfeCamposEditados = {};
   }
 
-  previewConteudo.querySelectorAll('.assoc-override-qtd, .assoc-override-unid').forEach((input) => {
+  previewConteudo.querySelectorAll('.assoc-override-qtd, .assoc-override-unid, .assoc-override-valor').forEach((input) => {
     const seq = Number(input.dataset.seq || 0);
     if (!seq) return;
 
@@ -47474,6 +47497,11 @@ function snapshotEdicoesQtdUnidAssociacaoNfe() {
 
     if (input.classList.contains('assoc-override-unid')) {
       window.__associarNfeCamposEditados[seq].cUnidade = String(input.value || '').trim().toUpperCase() || null;
+    }
+
+    if (input.classList.contains('assoc-override-valor')) {
+      const valor = parseFloat(String(input.value || '').replace(/\./g, '').replace(',', '.'));
+      window.__associarNfeCamposEditados[seq].nValTot = Number.isFinite(valor) ? valor : null;
     }
   });
 }
@@ -47620,17 +47648,25 @@ function renderPreviewAssociacaoPedidoNfe(preview) {
   const itensSemMatch = itens.length - itensComMatch;
 
   const divergenciasValor = itens.filter((item) => {
+    if (item?.criterio_match === 'agrupamento_mesmo_item_pedido') return false;
     const nfValor = Number(item?.nf_valor_total || 0);
     const pedidoValor = Number(item?.pedido_valor_total || 0);
     return Number.isFinite(nfValor) && Number.isFinite(pedidoValor) && Math.abs(nfValor - pedidoValor) > 0.01;
   }).length;
   const divergenciasQtdUnid = itens.filter((item) => {
+    if (item?.criterio_match === 'agrupamento_mesmo_item_pedido') return false;
     const unidadePedido = obterUnidadePedidoPreviewAssociacao(item);
     return compararQuantidadePreview(item) || compararUnidadePreview(item, unidadePedido);
   }).length;
+  const gruposMesmoItem = itens.filter((item) => item?.criterio_match === 'agrupamento_mesmo_item_pedido').length;
 
   const totalValorNfPreview = itens.reduce((acc, item) => acc + (Number(item?.nf_valor_total || 0) || 0), 0);
-  const totalValorPedidoPreview = itens.reduce((acc, item) => acc + (Number(item?.pedido_valor_total || 0) || 0), 0);
+  const totalValorPedidoPreview = itens.reduce((acc, item) => {
+    const seq = Number(item?.n_sequencia || 0);
+    const overrideCampos = window.__associarNfeCamposEditados?.[seq] || {};
+    const valorOverride = Number(overrideCampos?.nValTot);
+    return acc + (Number.isFinite(valorOverride) ? valorOverride : (Number(item?.pedido_valor_total || 0) || 0));
+  }, 0);
 
   const resumoHtml = `
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;margin-bottom:10px;">
@@ -47675,19 +47711,25 @@ function renderPreviewAssociacaoPedidoNfe(preview) {
               ? 'Ajuste manual'
             : item?.criterio_match === 'fallback_item_unico_pedido'
               ? 'Item único do pedido'
+            : item?.criterio_match === 'agrupamento_mesmo_item_pedido'
+              ? 'Item agrupado'
               : (encontrou ? 'Match identificado' : 'Sem match');
         const nfValor = Number(item?.nf_valor_total || 0);
         const pedidoValor = Number((isServico ? item?.nf_valor_total : item?.pedido_valor_total) || 0);
+        const agrupadoMesmoItem = item?.criterio_match === 'agrupamento_mesmo_item_pedido';
         const divergiuValor = Number.isFinite(nfValor) && Number.isFinite(pedidoValor) && Math.abs(nfValor - pedidoValor) > 0.01;
         const seq = Number(item?.n_sequencia || 0);
         const overrideCampos = window.__associarNfeCamposEditados?.[seq] || {};
         const qtdPedidoBase = item?.pedido_qtde ?? '-';
         const qtdPedido = isServico ? (item?.nf_qtde ?? '-') : (overrideCampos?.nQtde ?? qtdPedidoBase);
+        const valorPedidoEditado = isServico ? item?.nf_valor_total : (overrideCampos?.nValTot ?? item?.pedido_valor_total);
         const unidadePedidoBase = obterUnidadePedidoPreviewAssociacao(item);
         const unidadePedido = isServico ? (item?.nf_unidade || '-') : (overrideCampos?.cUnidade || unidadePedidoBase);
-        const divergiuQtd = compararQuantidadePreview({ ...item, pedido_qtde: qtdPedido });
-        const divergiuUnidade = compararUnidadePreview(item, unidadePedido);
-        const temDivergencia = divergiuValor || divergiuQtd || divergiuUnidade;
+        const divergiuQtd = !isServico && !agrupadoMesmoItem && compararQuantidadePreview({ ...item, pedido_qtde: qtdPedido });
+        const divergiuUnidade = !isServico && !agrupadoMesmoItem && compararUnidadePreview(item, unidadePedido);
+        const pedidoValorComparacao = Number(valorPedidoEditado || 0);
+        const divergiuValorEditado = !isServico && !agrupadoMesmoItem && Number.isFinite(nfValor) && Number.isFinite(pedidoValorComparacao) && Math.abs(nfValor - pedidoValorComparacao) > 0.01;
+        const temDivergencia = divergiuValorEditado || divergiuQtd || divergiuUnidade;
         const qtdNf = item?.nf_qtde ?? '-';
         const corQtd = divergiuQtd ? '#b91c1c' : '#0f172a';
         const bgQtd = divergiuQtd ? '#fee2e2' : 'transparent';
@@ -47730,7 +47772,11 @@ function renderPreviewAssociacaoPedidoNfe(preview) {
                 ? `<input type="text" class="assoc-override-unid" data-seq="${seq}" value="${escapeHtml(String(unidadePedido || ''))}" style="width:50px;padding:2px 4px;font-size:11px;font-weight:700;color:#b91c1c;border:1px solid #fca5a5;border-radius:4px;text-align:center;background:#fff5f5;text-transform:uppercase;" title="Edite a unidade para associação">`
                 : escapeHtml(String(unidadePedido || '-'))
             }</td>
-            <td style="padding:7px 8px;font-size:11px;text-align:right;font-weight:700;color:${divergiuValor ? '#b91c1c' : '#0f172a'};background:${divergiuValor ? '#fee2e2' : 'transparent'};">${escapeHtml(formatarValorRecebimento(isServico ? item?.nf_valor_total : item?.pedido_valor_total))}</td>
+            <td style="padding:7px 8px;font-size:11px;text-align:right;font-weight:700;color:${divergiuValorEditado ? '#b91c1c' : '#0f172a'};background:${divergiuValorEditado ? '#fee2e2' : 'transparent'};">${
+              divergiuValorEditado
+                ? `<input type="text" class="assoc-override-valor" data-seq="${seq}" value="${escapeHtml(Number(valorPedidoEditado || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }))}" style="width:82px;padding:2px 4px;font-size:11px;font-weight:700;color:#b91c1c;border:1px solid #fca5a5;border-radius:4px;text-align:right;background:#fff5f5;" title="Edite o valor total do item do pedido">`
+                : escapeHtml(formatarValorRecebimento(valorPedidoEditado))
+            }</td>
             <td style="padding:7px 8px;font-size:11px;text-align:center;color:${temDivergencia ? '#b91c1c' : (encontrou ? '#166534' : '#9a3412')};font-weight:700;">${escapeHtml(criterio)}</td>
           </tr>
         `;
@@ -47739,6 +47785,7 @@ function renderPreviewAssociacaoPedidoNfe(preview) {
 
   previewConteudo.innerHTML = `
     ${resumoHtml}
+    ${gruposMesmoItem > 0 ? `<div style="margin:0 0 10px;padding:10px 12px;border:1px solid #bbf7d0;background:#ecfdf5;color:#166534;border-radius:8px;font-size:12px;font-weight:700;"><i class="fa-solid fa-layer-group" style="margin-right:6px;"></i>${gruposMesmoItem} linha(s) da NF-e foram agrupadas no mesmo item do pedido. A conferência usa a soma das linhas, não cada linha isolada.</div>` : ''}
     <div style="margin:0 0 10px;padding:9px 12px;border:1px solid #bae6fd;background:#f0f9ff;color:#0c4a6e;border-radius:8px;font-size:12px;font-weight:700;">Arraste o bloco do item do Pedido (coluna azul com ícone <i class="fa-solid fa-grip-vertical"></i>) para outra linha da NF-e para trocar a associação.</div>
     ${(divergenciasValor > 0 || divergenciasQtdUnid > 0) ? `<div style="margin:0 0 10px;padding:10px 12px;border:1px solid #fecaca;background:#fff1f2;color:#b91c1c;border-radius:8px;font-size:12px;font-weight:700;">Existem divergências de valor, quantidade ou unidade entre a NF-e e o pedido.${divergenciasQtdUnid > 0 ? ' Edite os campos de Qtd/Unid. do Pedido (em vermelho) antes de associar.' : ' Os campos divergentes estão destacados em vermelho.'}</div>` : ''}
     <div style="max-height:340px;overflow:auto;border:1px solid #e2e8f0;border-radius:10px;">
@@ -47774,7 +47821,7 @@ function renderPreviewAssociacaoPedidoNfe(preview) {
 
   previewWrap.style.display = 'block';
   habilitarDragDropAssociacaoPedidoNfe(preview);
-  previewConteudo.querySelectorAll('.assoc-override-qtd, .assoc-override-unid').forEach((input) => {
+  previewConteudo.querySelectorAll('.assoc-override-qtd, .assoc-override-unid, .assoc-override-valor').forEach((input) => {
     input.addEventListener('input', snapshotEdicoesQtdUnidAssociacaoNfe);
     input.addEventListener('change', snapshotEdicoesQtdUnidAssociacaoNfe);
   });
@@ -47928,10 +47975,10 @@ async function previsualizarAssociacaoPedidoNfeOmie() {
         `Prévia gerada. ${qtdSemMatch} item(ns) da NF-e não foram mapeados ao pedido — revise antes de confirmar.`,
         'erro'
       );
-      btnAssociar.disabled = true;
+      resetBotaoAssociarPedidoNfe(true);
     } else {
       setStatusModalAssociarPedidoNfe('Prévia gerada. Itens prontos para associação.', 'sucesso');
-      btnAssociar.disabled = false;
+      resetBotaoAssociarPedidoNfe(false);
     }
   } catch (err) {
     setStatusModalAssociarPedidoNfe(err?.message || 'Erro ao gerar prévia de associação.', 'erro');
@@ -48053,7 +48100,7 @@ async function confirmarAssociacaoPedidoNfeOmie() {
     return;
   }
 
-  const textoOriginal = btnAssociar.innerHTML;
+  let associacaoConcluida = false;
   btnAssociar.disabled = true;
   btnAssociar.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
   setStatusModalAssociarPedidoNfe('Associando NF-e ao pedido na Omie...', 'info');
@@ -48088,7 +48135,7 @@ async function confirmarAssociacaoPedidoNfeOmie() {
 
     const previewConteudo = document.getElementById('modalAssociarPedidoNfePreviewConteudo');
     if (previewConteudo) {
-      previewConteudo.querySelectorAll('.assoc-override-qtd, .assoc-override-unid').forEach(input => {
+      previewConteudo.querySelectorAll('.assoc-override-qtd, .assoc-override-unid, .assoc-override-valor').forEach(input => {
         const seq = Number(input.dataset.seq || 0);
         if (!seq) return;
         let entry = itensOverrideMap.get(seq);
@@ -48101,6 +48148,10 @@ async function confirmarAssociacaoPedidoNfeOmie() {
         }
         if (input.classList.contains('assoc-override-unid')) {
           entry.cUnidade = String(input.value || '').trim().toUpperCase() || null;
+        }
+        if (input.classList.contains('assoc-override-valor')) {
+          const valor = parseFloat(String(input.value || '').replace(/\./g, '').replace(',', '.'));
+          entry.nValTot = Number.isFinite(valor) ? valor : null;
         }
       });
     }
@@ -48128,11 +48179,43 @@ async function confirmarAssociacaoPedidoNfeOmie() {
     if (!resp.ok || !data?.ok) {
       throw new Error(data?.error || `Falha ao associar NF-e (HTTP ${resp.status})`);
     }
+    associacaoConcluida = true;
 
     setStatusModalAssociarPedidoNfe(
-      data?.message || `NF-e ${numeroNfe} associada com sucesso ao pedido ${numeroPedido}.`,
+      `<div style="display:flex;align-items:flex-start;gap:12px;">
+        <i class="fa-solid fa-circle-check" style="font-size:26px;color:#16a34a;margin-top:2px;"></i>
+        <div style="flex:1;">
+          <div style="font-size:17px;font-weight:800;line-height:1.2;">NF-e associada com sucesso</div>
+          <div style="font-size:13px;margin-top:5px;">${escapeHtml(data?.message || `NF-e ${numeroNfe} associada ao pedido ${numeroPedido}.`)}</div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;">
+            <button type="button" id="modalAssociarNovaBuscaBtn" style="border:none;border-radius:8px;background:#7c3aed;color:#fff;font-weight:700;padding:9px 13px;cursor:pointer;display:inline-flex;align-items:center;gap:6px;">
+              <i class="fa-solid fa-magnifying-glass"></i> Buscar outra NF-e
+            </button>
+            <button type="button" id="modalAssociarFecharSucessoBtn" style="border:1px solid #86efac;border-radius:8px;background:#ffffff;color:#166534;font-weight:700;padding:9px 13px;cursor:pointer;">
+              Fechar
+            </button>
+          </div>
+        </div>
+      </div>`,
       'sucesso'
     );
+
+    document.getElementById('modalAssociarNovaBuscaBtn')?.addEventListener('click', () => {
+      fecharModalAssociarPedidoNfe();
+      if (typeof window.abrirModalLocalizarNfe === 'function') {
+        window.abrirModalLocalizarNfe();
+      }
+      const inputLocalizar = document.getElementById('modalLocalizarNfeInput');
+      if (inputLocalizar) {
+        inputLocalizar.value = '';
+        inputLocalizar.focus();
+      }
+      const conteudoLocalizar = document.getElementById('modalLocalizarNfeConteudo');
+      if (conteudoLocalizar) {
+        conteudoLocalizar.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;color:#94a3b8;font-size:13px;padding:24px 0;gap:8px;"><i class="fa-solid fa-file-invoice"></i><span>Digite o numero da NF-e e clique em Buscar.</span></div>';
+      }
+    });
+    document.getElementById('modalAssociarFecharSucessoBtn')?.addEventListener('click', fecharModalAssociarPedidoNfe);
 
     if (typeof loadComprasRecebimento === 'function') {
       loadComprasRecebimento(true).catch(() => {});
@@ -48143,8 +48226,12 @@ async function confirmarAssociacaoPedidoNfeOmie() {
   } catch (err) {
     setStatusModalAssociarPedidoNfe(err?.message || 'Erro ao associar NF-e ao pedido.', 'erro');
   } finally {
-    btnAssociar.disabled = false;
-    btnAssociar.innerHTML = textoOriginal;
+    if (associacaoConcluida) {
+      btnAssociar.disabled = true;
+      btnAssociar.innerHTML = '<i class="fa-solid fa-circle-check"></i> Associado';
+    } else {
+      resetBotaoAssociarPedidoNfe(false);
+    }
   }
 }
 
@@ -48234,7 +48321,7 @@ function criarModalAssociarPedidoNfeSeNecessario() {
   document.getElementById('modalAssociarPedidoBtnConfirmar')?.addEventListener('click', confirmarAssociacaoPedidoNfeOmie);
 
   const btnAssociar = document.getElementById('modalAssociarPedidoBtnConfirmar');
-  if (btnAssociar) btnAssociar.disabled = true;
+  resetBotaoAssociarPedidoNfe(true);
 
   const inputNfe = document.getElementById('modalAssociarNfeNumeroInput');
   inputNfe?.addEventListener('keydown', (ev) => {
@@ -48246,8 +48333,7 @@ function criarModalAssociarPedidoNfeSeNecessario() {
 
   const inputPedido = document.getElementById('modalAssociarPedidoNumeroInput');
   inputPedido?.addEventListener('input', () => {
-    const btnAssociar = document.getElementById('modalAssociarPedidoBtnConfirmar');
-    if (btnAssociar) btnAssociar.disabled = true;
+    resetBotaoAssociarPedidoNfe(true);
     if (window.__associarNfePreviewAtual) window.__associarNfePreviewAtual = null;
   });
   inputPedido?.addEventListener('keydown', (ev) => {
@@ -48291,6 +48377,7 @@ async function abrirModalAssociarPedidoNfeComContexto(contexto = {}) {
   if (pedidoInput) pedidoInput.value = String(contexto?.numero_pedido || '').trim();
   if (blocoPedido) blocoPedido.style.display = 'block';
   if (btnAssociar) btnAssociar.disabled = true;
+  resetBotaoAssociarPedidoNfe(true);
 
   setStatusModalAssociarPedidoNfe('Prévia profissional carregando para revisão da vinculação...', 'info');
 
