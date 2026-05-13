@@ -14718,7 +14718,7 @@ async function initSolicitacaoProdutoSchema() {
 
     }
 
-    await pool.query(`ALTER TABLE solicitacao_produto.itens_solicitados ADD COLUMN IF NOT EXISTS motivo TEXT`);
+    await pool.query(`ALTER TABLE solicitacao_produto.itens_solicitados ADD COLUMN IF NOT EXISTS nome_local TEXT`);
 
     await pool.query(`
       CREATE TABLE IF NOT EXISTS solicitacao_produto.movimentacoes_kanban_itens (
@@ -15229,7 +15229,7 @@ app.get('/api/logistica/kanban/itens', async (req, res) => {
     if (n_solic) {
       // Itens de uma SEP específica
       const { rows } = await pool.query(`
-        SELECT c.id AS carr_id, i.id AS solic_id, i.status, i.observacao, i.motivo,
+        SELECT c.id AS carr_id, i.id AS solic_id, i.status, i.observacao, i.nome_local,
                c.codigo_produto, c.descricao, c.unidade,
                c.quantidade::numeric AS quantidade,
                c.data_prevista::text, c.horario, c.criado_em::text,
@@ -15254,7 +15254,7 @@ app.get('/api/logistica/kanban/itens', async (req, res) => {
       if (includeDerivados === '1' || includeDerivados === 'true' || includeDerivados === 'yes') {
         const baseNSolic = String(n_solic).replace(/\.\d+$/, '');
         const { rows: derivRows } = await pool.query(`
-             SELECT c.id AS carr_id, i.id AS solic_id, i.n_solic, i.status, i.observacao, i.motivo,
+             SELECT c.id AS carr_id, i.id AS solic_id, i.n_solic, i.status, i.observacao, i.nome_local,
                  c.codigo_produto, c.descricao, c.unidade,
                  c.quantidade::numeric AS quantidade,
                  c.data_prevista::text, c.horario, c.criado_em::text,
@@ -15722,11 +15722,11 @@ app.post('/api/logistica/separacao/enviar', express.json(), async (req, res) => 
     const id_user   = req.session?.user?.id;
     const nome_user = req.session?.user?.username || req.session?.user?.nome || 'desconhecido';
     if (!id_user) return res.status(401).json({ ok: false, error: 'Não autenticado.' });
-    const { solicitado_para, motivo, data_prevista, horario, observacao } = req.body || {};
+    const { solicitado_para, motivo, local_estoque, local_estoque_nome, data_prevista, horario, observacao } = req.body || {};
 
-    const motivoRaw = String(motivo || '').trim();
-    const motivosPermitidos = new Set(['Produção', 'Engenharia', 'venda', 'Assistencia tecnica']);
-    const motivoSolicitacao = motivosPermitidos.has(motivoRaw) ? motivoRaw : 'Produção';
+    const motivoSolicitacao = String(motivo || '').trim() || null;
+    const localEstoqueVal   = String(local_estoque || '').trim() || null;
+    const nomeLocalVal      = String(local_estoque_nome || '').trim() || null;
 
     await client.query('BEGIN');
 
@@ -15738,7 +15738,22 @@ app.post('/api/logistica/separacao/enviar', express.json(), async (req, res) => 
       `ALTER TABLE solicitacao_produto.itens_solicitados ADD COLUMN IF NOT EXISTS observacao TEXT`
     );
     await client.query(
-      `ALTER TABLE solicitacao_produto.itens_solicitados ADD COLUMN IF NOT EXISTS motivo TEXT`
+      `ALTER TABLE solicitacao_produto.itens_solicitados ADD COLUMN IF NOT EXISTS nome_local TEXT`
+    );
+    await client.query(`
+      DO $$ BEGIN
+        IF EXISTS (SELECT 1 FROM information_schema.columns
+                   WHERE table_schema='solicitacao_produto' AND table_name='itens_solicitados' AND column_name='motivo')
+        THEN ALTER TABLE solicitacao_produto.itens_solicitados RENAME COLUMN motivo TO nome_local;
+        END IF;
+        IF EXISTS (SELECT 1 FROM information_schema.columns
+                   WHERE table_schema='solicitacao_produto' AND table_name='itens_solicitados' AND column_name='local_estoque')
+        THEN ALTER TABLE solicitacao_produto.itens_solicitados RENAME COLUMN local_estoque TO cod_local;
+        END IF;
+      END $$
+    `);
+    await client.query(
+      `ALTER TABLE solicitacao_produto.itens_solicitados ADD COLUMN IF NOT EXISTS cod_local TEXT`
     );
     await client.query(
       `ALTER TABLE logistica.carrinho ADD COLUMN IF NOT EXISTS comentario TEXT`
@@ -15839,9 +15854,9 @@ app.post('/api/logistica/separacao/enviar', express.json(), async (req, res) => 
          data_prevista || null, horario || null, item.comentario || null]
       );
       await client.query(
-        `INSERT INTO solicitacao_produto.itens_solicitados (id_carr, n_solic, status, observacao, motivo)
-         VALUES ($1, $2, 'pendente', $3, $4)`,
-        [item.id, nSolic, observacao || null, motivoSolicitacao]
+        `INSERT INTO solicitacao_produto.itens_solicitados (id_carr, n_solic, status, observacao, nome_local, cod_local)
+         VALUES ($1, $2, 'pendente', $3, $4, $5)`,
+        [item.id, nSolic, observacao || null, nomeLocalVal, localEstoqueVal]
       );
     }
 
@@ -15881,7 +15896,7 @@ app.get('/api/logistica/estoque/batch', async (req, res) => {
     // Passo 1: coleta todos os dados
     for (const row of rows) {
       if (!dados[row.codigo]) dados[row.codigo] = [];
-      dados[row.codigo].push({ local_nome: row.local_nome || row.local_codigo, saldo: row.saldo, unidade: row.unidade || '' });
+      dados[row.codigo].push({ local_nome: row.local_nome || row.local_codigo, local_codigo: String(row.local_codigo || ''), saldo: row.saldo, unidade: row.unidade || '' });
 
       if (!minimos[row.codigo]) minimos[row.codigo] = { min: 0, saldoAlmox: null, abaixo: false };
       const min = parseFloat(row.estoque_minimo) || 0;
@@ -34911,3 +34926,29 @@ app.get('/api/_where', (req, res) => {
   }
 });
 // ==========================================================================
+
+// ─── Global error handler ────────────────────────────────────────────────────
+// Captura erros lançados por middlewares (ex.: session store em recovery mode)
+// e retorna resposta amigável em vez da tela branca padrão do Express.
+// eslint-disable-next-line no-unused-vars
+app.use((err, req, res, next) => {
+  console.error('[global-error]', err?.message || err);
+  const isApi = req.path.startsWith('/api/');
+  if (isApi) {
+    return res.status(500).json({ ok: false, error: err?.message || 'Erro interno' });
+  }
+  res.status(503).send(`
+    <!DOCTYPE html>
+    <html lang="pt-BR">
+    <head><meta charset="UTF-8"><title>Serviço indisponível</title>
+    <style>body{font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;background:#f5f5f5}
+    .box{background:#fff;padding:2rem 3rem;border-radius:8px;box-shadow:0 2px 8px rgba(0,0,0,.15);text-align:center}
+    h2{color:#d32f2f}p{color:#555}</style>
+    </head>
+    <body><div class="box">
+      <h2>Serviço temporariamente indisponível</h2>
+      <p>O banco de dados está inicializando. Aguarde alguns segundos e <a href="javascript:location.reload()">recarregue a página</a>.</p>
+    </div></body>
+    </html>
+  `);
+});
