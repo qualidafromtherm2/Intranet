@@ -29886,9 +29886,12 @@ async function montarPlanoAssociacaoNfePedido(numeroNfe, numeroPedido, chaveNfe 
 
     const itensIde = {
       nSequencia: Number.isFinite(nSequencia) && nSequencia > 0 ? nSequencia : (idx + 1),
-      cAcao: servicoCfop.servico ? 'EDITAR' : 'ASSOCIAR-PEDIDO'
+      cAcao: servicoCfop.servico ? 'ASSOCIAR-PRODUTO' : 'ASSOCIAR-PEDIDO'
     };
     if (!servicoCfop.servico) itensIde.nIdPedidoExistente = nCodPed;
+    if (servicoCfop.servico && Number.isFinite(nIdProdutoRec) && nIdProdutoRec > 0) {
+      itensIde.nIdProdutoExistente = nIdProdutoRec;
+    }
 
     const nCodItem = Number(itemPedidoVinculo?.n_cod_item);
     if (Number.isFinite(nCodItem) && nCodItem > 0) {
@@ -30166,6 +30169,12 @@ app.post('/api/compras/pedidos-omie/nfe-associar-pedido', express.json(), async 
         itensIde: { ...(itemEditar?.itensIde || {}) }
       }))
       : [];
+    const seqsServicoAssociacao = new Set(
+      (plano?.itens_preview || [])
+        .filter((item) => item?.item_servico)
+        .map((item) => Number(item?.n_sequencia || 0))
+        .filter((seq) => Number.isFinite(seq) && seq > 0)
+    );
 
     // Aplica troca manual do item do pedido por sequência da NF-e
     itensParaEnviar.forEach((itemEditar) => {
@@ -30176,6 +30185,11 @@ app.post('/api/compras/pedidos-omie/nfe-associar-pedido', express.json(), async 
       const codItemOverride = Number(override?.nIdItPedidoExistente || 0);
       if (Number.isFinite(codItemOverride) && codItemOverride > 0) {
         itemEditar.itensIde.nIdItPedidoExistente = codItemOverride;
+      }
+      const idProdutoServico = Number(override?.nIdProdutoServico || 0);
+      if (Number.isFinite(idProdutoServico) && idProdutoServico > 0) {
+        itemEditar.itensIde.cAcao = 'ASSOCIAR-PRODUTO';
+        itemEditar.itensIde.nIdProdutoExistente = idProdutoServico;
       }
     });
 
@@ -30459,7 +30473,13 @@ app.post('/api/compras/pedidos-omie/nfe-associar-pedido', express.json(), async 
     // A Omie pode validar a categoria antiga já no vínculo do pedido antes do Passo 2.
     const payloadAlterar = {
       ide: { nIdReceb: Number(plano.n_id_receb) },
-      itensRecebimentoEditar: itensParaEnviar,
+      itensRecebimentoEditar: itensParaEnviar.filter((itemEditar) => {
+        const seq = Number(itemEditar?.itensIde?.nSequencia || 0);
+        const acao = String(itemEditar?.itensIde?.cAcao || '').toUpperCase();
+        const isServico = seqsServicoAssociacao.has(seq);
+        if (!isServico) return true;
+        return acao === 'ASSOCIAR-PRODUTO' && Number(itemEditar?.itensIde?.nIdProdutoExistente || 0) > 0;
+      }),
       ...(novaCategoriaCompra && infoAdicionaisParaEnviar ? { infoAdicionais: infoAdicionaisParaEnviar } : {})
     };
 

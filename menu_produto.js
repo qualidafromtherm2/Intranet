@@ -48379,8 +48379,11 @@ function renderPreviewAssociacaoPedidoNfe(preview) {
 
   const linhasHtml = itens.length
     ? itens.map((item) => {
+        const isServico = !!item?.item_servico;
         const encontrou = !!item?.pedido_item_encontrado;
-        const criterio = item?.criterio_match === 'id_produto'
+        const criterio = isServico
+          ? 'Servico por CFOP'
+          : item?.criterio_match === 'id_produto'
           ? 'ID produto'
           : item?.criterio_match === 'codigo_produto'
             ? 'Código produto'
@@ -48390,14 +48393,14 @@ function renderPreviewAssociacaoPedidoNfe(preview) {
               ? 'Item único do pedido'
               : (encontrou ? 'Match identificado' : 'Sem match');
         const nfValor = Number(item?.nf_valor_total || 0);
-        const pedidoValor = Number(item?.pedido_valor_total || 0);
+        const pedidoValor = Number((isServico ? item?.nf_valor_total : item?.pedido_valor_total) || 0);
         const divergiuValor = Number.isFinite(nfValor) && Number.isFinite(pedidoValor) && Math.abs(nfValor - pedidoValor) > 0.01;
         const seq = Number(item?.n_sequencia || 0);
         const overrideCampos = window.__associarNfeCamposEditados?.[seq] || {};
         const qtdPedidoBase = item?.pedido_qtde ?? '-';
-        const qtdPedido = overrideCampos?.nQtde ?? qtdPedidoBase;
+        const qtdPedido = isServico ? (item?.nf_qtde ?? '-') : (overrideCampos?.nQtde ?? qtdPedidoBase);
         const unidadePedidoBase = obterUnidadePedidoPreviewAssociacao(item);
-        const unidadePedido = overrideCampos?.cUnidade || unidadePedidoBase;
+        const unidadePedido = isServico ? (item?.nf_unidade || '-') : (overrideCampos?.cUnidade || unidadePedidoBase);
         const divergiuQtd = compararQuantidadePreview({ ...item, pedido_qtde: qtdPedido });
         const divergiuUnidade = compararUnidadePreview(item, unidadePedido);
         const temDivergencia = divergiuValor || divergiuQtd || divergiuUnidade;
@@ -48416,25 +48419,34 @@ function renderPreviewAssociacaoPedidoNfe(preview) {
             <td style="padding:7px 8px;font-size:11px;color:${corUnid};background:${bgUnid};text-align:center;white-space:nowrap;font-weight:${divergiuUnidade ? '700' : '400'};">${escapeHtml(String(item?.nf_unidade || '-'))}</td>
             <td style="padding:7px 8px;font-size:11px;text-align:right;font-weight:700;color:${divergiuValor ? '#b91c1c' : '#0f172a'};background:${divergiuValor ? '#fee2e2' : 'transparent'};border-right:3px solid #cbd5e1;">${escapeHtml(formatarValorRecebimento(item?.nf_valor_total))}</td>
             <td colspan="2" style="padding:7px 8px;font-size:11px;color:#0f172a;max-width:380px;line-height:1.35;">
+              ${isServico ? `
+              <div style="display:flex;align-items:center;gap:8px;padding:6px 8px;border:1px solid #bae6fd;border-radius:8px;background:#f0f9ff;">
+                <i class="fa-solid fa-screwdriver-wrench" style="color:#0369a1;"></i>
+                <div style="min-width:0;flex:1;">
+                  <div style="font-size:11px;font-weight:800;color:#075985;">${escapeHtml(String(item?.servico_produto_codigo || item?.nf_codigo_produto || 'Servico'))}</div>
+                  <div style="font-size:11px;color:#334155;line-height:1.35;">${escapeHtml(String(item?.servico_produto_descricao || item?.nf_descricao_produto || ''))}</div>
+                </div>
+                <button type="button" class="assoc-servico-produto-btn" data-seq="${seq}" style="border:1px solid #38bdf8;background:#0284c7;color:#fff;border-radius:7px;padding:5px 8px;font-size:11px;font-weight:700;cursor:pointer;">Selecionar</button>
+              </div>` : `
               <div class="assoc-pedido-draggable" data-seq="${seq}" draggable="true" style="display:flex;align-items:flex-start;gap:8px;padding:6px 8px;border:1px dashed #cbd5e1;border-radius:8px;background:#ffffff;cursor:grab;">
                 <i class="fa-solid fa-grip-vertical" style="margin-top:1px;color:#64748b;"></i>
                 <div style="display:flex;flex-direction:column;gap:2px;min-width:0;">
                   <div style="font-size:11px;font-weight:700;color:#0f172a;">${escapeHtml(String(item?.pedido_codigo_produto || '-'))}</div>
                   <div style="font-size:11px;color:#334155;line-height:1.35;max-width:320px;" title="${escapeHtml(String(item?.pedido_descricao_produto || '-'))}">${escapeHtml(String(item?.pedido_descricao_produto || '-'))}</div>
                 </div>
-              </div>
+              </div>`}
             </td>
             <td style="padding:7px 8px;font-size:11px;color:${corQtd};background:${bgQtd};text-align:right;white-space:nowrap;">${
-              (divergiuQtd || divergiuUnidade)
+              (!isServico && (divergiuQtd || divergiuUnidade))
                 ? `<input type="text" class="assoc-override-qtd" data-seq="${seq}" value="${escapeHtml(String(qtdPedido))}" style="width:60px;padding:2px 4px;font-size:11px;font-weight:700;color:#b91c1c;border:1px solid #fca5a5;border-radius:4px;text-align:right;background:#fff5f5;" title="Edite a quantidade para associação">`
                 : escapeHtml(String(qtdPedido))
             }</td>
             <td style="padding:7px 8px;font-size:11px;color:${corUnid};background:${bgUnid};text-align:center;white-space:nowrap;">${
-              (divergiuQtd || divergiuUnidade)
+              (!isServico && (divergiuQtd || divergiuUnidade))
                 ? `<input type="text" class="assoc-override-unid" data-seq="${seq}" value="${escapeHtml(String(unidadePedido || ''))}" style="width:50px;padding:2px 4px;font-size:11px;font-weight:700;color:#b91c1c;border:1px solid #fca5a5;border-radius:4px;text-align:center;background:#fff5f5;text-transform:uppercase;" title="Edite a unidade para associação">`
                 : escapeHtml(String(unidadePedido || '-'))
             }</td>
-            <td style="padding:7px 8px;font-size:11px;text-align:right;font-weight:700;color:${divergiuValor ? '#b91c1c' : '#0f172a'};background:${divergiuValor ? '#fee2e2' : 'transparent'};">${escapeHtml(formatarValorRecebimento(item?.pedido_valor_total))}</td>
+            <td style="padding:7px 8px;font-size:11px;text-align:right;font-weight:700;color:${divergiuValor ? '#b91c1c' : '#0f172a'};background:${divergiuValor ? '#fee2e2' : 'transparent'};">${escapeHtml(formatarValorRecebimento(isServico ? item?.nf_valor_total : item?.pedido_valor_total))}</td>
             <td style="padding:7px 8px;font-size:11px;text-align:center;color:${temDivergencia ? '#b91c1c' : (encontrou ? '#166534' : '#9a3412')};font-weight:700;">${escapeHtml(criterio)}</td>
           </tr>
         `;
@@ -48482,6 +48494,75 @@ function renderPreviewAssociacaoPedidoNfe(preview) {
     input.addEventListener('input', snapshotEdicoesQtdUnidAssociacaoNfe);
     input.addEventListener('change', snapshotEdicoesQtdUnidAssociacaoNfe);
   });
+  previewConteudo.querySelectorAll('.assoc-servico-produto-btn').forEach((btn) => {
+    btn.addEventListener('click', () => abrirModalProdutoServicoAssociacaoNfe(Number(btn.dataset.seq || 0)));
+  });
+}
+
+function abrirModalProdutoServicoAssociacaoNfe(seq) {
+  if (!seq) return;
+  let modal = document.getElementById('modalProdutoServicoAssociacaoNfe');
+  if (modal) modal.remove();
+  modal = document.createElement('div');
+  modal.id = 'modalProdutoServicoAssociacaoNfe';
+  modal.style.cssText = 'position:fixed;inset:0;z-index:2147483647;background:rgba(15,23,42,.70);display:flex;align-items:center;justify-content:center;padding:20px;';
+  modal.innerHTML = `
+    <div style="width:min(820px,95vw);max-height:85vh;overflow:auto;background:#fff;border:2px solid #0284c7;border-radius:16px;box-shadow:0 24px 80px rgba(0,0,0,.35);padding:18px;">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+        <strong style="font-size:18px;color:#0f172a;">Escolha o produto/servico cadastrado</strong>
+        <button type="button" id="modalServicoProdutoFechar" style="border:0;background:transparent;font-size:26px;cursor:pointer;color:#334155;">&times;</button>
+      </div>
+      <div style="font-size:12px;color:#475569;margin-bottom:12px;">Pesquise e clique em <strong>Usar este produto</strong> para vincular ao item de servico da NF-e.</div>
+      <input id="modalServicoProdutoBusca" placeholder="Pesquisar por codigo, nome ou descricao" style="width:100%;padding:11px;border:1px solid #cbd5e1;border-radius:9px;margin-bottom:12px;font-size:14px;">
+      <div id="modalServicoProdutoResultados" style="display:grid;gap:8px;"></div>
+    </div>`;
+  document.body.appendChild(modal);
+  modal.querySelector('#modalServicoProdutoFechar').onclick = () => modal.remove();
+  const input = modal.querySelector('#modalServicoProdutoBusca');
+  const resultados = modal.querySelector('#modalServicoProdutoResultados');
+  const itemAtual = (window.__associarNfePreviewEstadoItens || []).find(i => Number(i?.n_sequencia || 0) === seq);
+
+  async function buscarProdutosServicoAssociacao(q) {
+    q = String(q || '').trim();
+    if (q.length < 2) {
+      resultados.innerHTML = '<div style="font-size:12px;color:#64748b;">Digite ao menos 2 caracteres para buscar.</div>';
+      return;
+    }
+    resultados.innerHTML = '<div style="font-size:12px;color:#64748b;">Buscando...</div>';
+    try {
+      const resp = await fetch('/api/produtos/busca', { method:'POST', headers:{'Content-Type':'application/json'}, credentials:'include', body: JSON.stringify({ q }) });
+      const data = await resp.json().catch(() => ({}));
+      const itens = Array.isArray(data?.itens) ? data.itens.slice(0, 40) : [];
+      resultados.innerHTML = itens.length ? itens.map(p => `
+        <button type="button" data-cp="${escapeHtml(String(p.codigo_produto || ''))}" data-codigo="${escapeHtml(String(p.codigo || ''))}" data-desc="${escapeHtml(String(p.descricao || ''))}" style="display:flex;align-items:center;justify-content:space-between;gap:14px;text-align:left;border:1px solid #bae6fd;background:#f0f9ff;border-radius:10px;padding:10px;cursor:pointer;">
+          <span style="min-width:0;">
+            <div style="font-weight:800;color:#0f172a;">${escapeHtml(String(p.codigo || '-'))}</div>
+            <div style="font-size:12px;color:#475569;">${escapeHtml(String(p.descricao || '-'))}</div>
+          </span>
+          <span style="white-space:nowrap;background:#0284c7;color:white;border-radius:8px;padding:7px 10px;font-size:12px;font-weight:800;">Usar este produto</span>
+        </button>`).join('') : '<div style="font-size:12px;color:#b91c1c;">Nenhum produto encontrado.</div>';
+      resultados.querySelectorAll('button[data-cp]').forEach(btn => {
+        btn.onclick = () => {
+          const item = (window.__associarNfePreviewEstadoItens || []).find(i => Number(i?.n_sequencia || 0) === seq);
+          if (item) {
+            item.servico_produto_codigo_produto = Number(btn.dataset.cp || 0) || null;
+            item.servico_produto_codigo = btn.dataset.codigo || '';
+            item.servico_produto_descricao = btn.dataset.desc || '';
+          }
+          modal.remove();
+          renderPreviewAssociacaoPedidoNfe(window.__associarNfePreviewAtual?.preview || {});
+        };
+      });
+    } catch (err) {
+      resultados.innerHTML = `<div style="font-size:12px;color:#b91c1c;">Falha ao buscar produtos: ${escapeHtml(String(err?.message || err))}</div>`;
+    }
+  }
+
+  input.value = String(itemAtual?.servico_produto_codigo || itemAtual?.nf_codigo_produto || itemAtual?.nf_descricao_produto || '').trim();
+  resultados.innerHTML = '<div style="font-size:12px;color:#64748b;">Buscando sugestoes...</div>';
+  input.oninput = () => buscarProdutosServicoAssociacao(input.value);
+  buscarProdutosServicoAssociacao(input.value);
+  setTimeout(() => input.focus(), 50);
 }
 
 async function previsualizarAssociacaoPedidoNfeOmie() {
@@ -48704,6 +48785,18 @@ async function confirmarAssociacaoPedidoNfeOmie() {
 
     itensEstado.forEach((item) => {
       const seq = Number(item?.n_sequencia || 0);
+      if (item?.item_servico) {
+        itensOverrideMap.set(seq, {
+          n_sequencia: seq,
+          item_servico: true,
+          nIdProdutoServico: Number(item?.servico_produto_codigo_produto || 0) || null,
+          codigoProdutoServico: String(item?.servico_produto_codigo || item?.nf_codigo_produto || '').trim(),
+          descricaoProdutoServico: String(item?.servico_produto_descricao || item?.nf_descricao_produto || '').trim(),
+          nQtde: Number(item?.nf_qtde || 0) || null,
+          cUnidade: String(item?.nf_unidade || '').trim().toUpperCase() || null
+        });
+        return;
+      }
       const nIdItPedidoExistente = Number(item?.pedido_n_cod_item || 0);
       if (!seq || !Number.isFinite(nIdItPedidoExistente) || nIdItPedidoExistente <= 0) return;
       itensOverrideMap.set(seq, { n_sequencia: seq, nIdItPedidoExistente });
