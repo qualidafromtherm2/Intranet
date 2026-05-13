@@ -635,9 +635,13 @@ function _abrirModalSeparacao(grupoAtual, gruposConflito) {
             ${nome} · ${qty2} ${l.unidade || 'UN'}
           </button>`;
         }).join('');
+        const destLabel = it.nome_local || it.cod_local || '';
         armazemHtml = `<div class="armazem-sel-wrap" style="margin-top:6px;">
-          <div style="font-size:.60rem;color:#475569;margin-bottom:4px;font-weight:600;text-transform:uppercase;letter-spacing:.04em;">
-            <i class="fa-solid fa-warehouse" style="margin-right:4px;color:#3b82f6;"></i>Armazém de retirada
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;flex-wrap:wrap;">
+            <span style="font-size:.60rem;color:#475569;font-weight:600;text-transform:uppercase;letter-spacing:.04em;">
+              <i class="fa-solid fa-warehouse" style="margin-right:4px;color:#3b82f6;"></i>Armazém de retirada
+            </span>
+            ${destLabel ? `<span style="font-size:.60rem;color:#6b7280;">→</span><span style="font-size:.60rem;font-weight:600;text-transform:uppercase;letter-spacing:.04em;padding:2px 6px;border-radius:4px;background:#1e1b4b;color:#a78bfa;border:1px solid #312e81;"><i class="fa-solid fa-location-arrow" style="margin-right:3px;color:#a78bfa;"></i>${destLabel}</span>` : ''}
           </div>
           <div style="display:flex;flex-wrap:wrap;gap:4px;">${btns}</div>
         </div>`;
@@ -14643,6 +14647,7 @@ document.querySelectorAll('#atTabelaWrapper thead th[data-col]').forEach(th => {
   let _pg2Instance = null;
   let _pgMesesSet  = [];
   let _pgPeriodo   = 3;
+  let _pgTipo      = 'Qualidade';
   let _pgInicializado = false;
 
   // Helpers locais (réplica das funções da IIFE principal)
@@ -14687,7 +14692,7 @@ document.querySelectorAll('#atTabelaWrapper thead th[data-col]').forEach(th => {
     if (status) { status.style.display = 'block'; status.textContent = 'Carregando...'; status.style.color = ''; }
 
     try {
-      const resp = await fetch('/api/sac/at/graficos/por-modelo-mes?tipo=Qualidade', { credentials: 'include' });
+      const resp = await fetch('/api/sac/at/graficos/por-modelo-mes?tipo=' + encodeURIComponent(_pgTipo), { credentials: 'include' });
       const data = await resp.json().catch(() => ({}));
       if (!resp.ok || data.ok === false) throw new Error(data.error || 'Erro ao carregar.');
 
@@ -14765,7 +14770,7 @@ document.querySelectorAll('#atTabelaWrapper thead th[data-col]').forEach(th => {
     if (status) { status.style.display = 'block'; status.textContent = 'Carregando...'; status.style.color = ''; }
 
     try {
-      const resp = await fetch('/api/sac/at/graficos/por-tag-problema-mes', { credentials: 'include' });
+      const resp = await fetch('/api/sac/at/graficos/por-tag-problema-mes?tipo=' + encodeURIComponent(_pgTipo), { credentials: 'include' });
       const data = await resp.json().catch(() => ({}));
       if (!resp.ok || data.ok === false) throw new Error(data.error || 'Erro ao carregar.');
 
@@ -14843,7 +14848,7 @@ document.querySelectorAll('#atTabelaWrapper thead th[data-col]').forEach(th => {
     if (status) { status.style.display = 'block'; status.textContent = 'Carregando...'; status.style.color = ''; }
 
     try {
-      const resp = await fetch('/api/sac/at/graficos/por-estado-mes?tipo=Qualidade', { credentials: 'include' });
+      const resp = await fetch('/api/sac/at/graficos/por-estado-mes?tipo=' + encodeURIComponent(_pgTipo), { credentials: 'include' });
       const data = await resp.json().catch(() => ({}));
       if (!resp.ok || data.ok === false) throw new Error(data.error || 'Erro ao carregar.');
 
@@ -15428,6 +15433,22 @@ ${pivotHtml('Menções (Pós abertura de OS)', '#4c1d95', data.mencoes)}
           _carregarPg01();
           _carregarPg1();
           _carregarPg2();
+        });
+      });
+
+      // Botões de tipo
+      document.querySelectorAll('.at-graf-tipo-btn-pg').forEach(btn => {
+        btn.addEventListener('click', () => {
+          _pgTipo = btn.dataset.tipo;
+          document.querySelectorAll('.at-graf-tipo-btn-pg').forEach(b => {
+            const ativo = b === btn;
+            b.style.borderColor = ativo ? '#10b981' : '#374151';
+            b.style.background  = ativo ? 'rgba(16,185,129,.22)' : 'rgba(255,255,255,.04)';
+            b.style.color       = ativo ? '#6ee7b7' : '#9ca3af';
+          });
+          _carregarPg0();
+          _carregarPg01();
+          _carregarPg1();
         });
       });
 
