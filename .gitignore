@@ -28,10 +28,9 @@ Thumbs.db
 .env.development.local
 .env.test.local
 .env.production.local
-etiquetas/*.zpl
-etiquetas/*.zpl
-etiquetas/*.zpl
-etiquetas/*.zpl
+etiquetas/**/*.zpl
+server.js.backup_*
+*.py
 
 # nunca versionar o antigo cache
 data/kanban_preparacao.json
