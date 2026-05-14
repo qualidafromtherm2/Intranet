@@ -23568,45 +23568,349 @@ window.openRegistros = async function() {
   }
 };
 
-  /* –– IMPRESSORA –– */
-printBtn?.addEventListener('click', async e => {
-  e.preventDefault(); e.stopPropagation();
+  /* –– IMPRESSORA: modal de etiquetas pendentes –– */
 
-  listaEtiq.innerHTML = '<li>carregando…</li>';
-  try {
-    const resp = await fetch('/api/etiquetas');
-    if (!resp.ok) throw new Error('HTTP ' + resp.status);
-    const files = await resp.json();  // ex.: ["etiqueta_F06250019.zpl"]
+  // ── Estado do modal ────────────────────────────────────────────────────
+  let _etqSelecionadas = new Set(); // ids selecionados
+  let _etqDebounce = null;
 
-    if (files.length === 0) {
-      listaEtiq.innerHTML = '<li>Nenhuma etiqueta encontrada</li>';
-    } else {
-      listaEtiq.innerHTML = files.map(f => `
-        <li>
-          <span>${f}</span>
-          <button class="btn-print" data-file="${f}">Imprimir</button>
-        </li>`).join('');
+  const etqModal     = document.getElementById('etiquetasModal');
+  const etqGrid      = document.getElementById('etiquetasModalGrid');
+  const etqStatus    = document.getElementById('etiquetasModalStatus');
+  const etqBusca     = document.getElementById('etiquetasBuscaInput');
+  const etqBtnSel    = document.getElementById('etiquetasImprimirSelecionadas');
+  const etqSelCount  = document.getElementById('etiquetasSelCount');
+  const etqFechar    = document.getElementById('etiquetasModalFechar');
+
+  function _etqAtualizarBotaoSel() {
+    if (!etqBtnSel || !etqSelCount) return;
+    const n = _etqSelecionadas.size;
+    etqSelCount.textContent = String(n);
+    etqBtnSel.style.display = n > 0 ? 'flex' : 'none';
+  }
+
+  function _etqRenderCards(etiquetas) {
+    if (!etqGrid) return;
+    if (!etiquetas || etiquetas.length === 0) {
+      etqGrid.innerHTML = '<div class="etiquetas-loading">Nenhuma etiqueta pendente encontrada.</div>';
+      if (etqStatus) etqStatus.textContent = '';
+      return;
     }
-  } catch (err) {
-    console.error(err);
-    listaEtiq.innerHTML = '<li>Falha ao buscar etiquetas</li>';
+
+    if (etqStatus) etqStatus.textContent = `${etiquetas.length} etiqueta(s) pendente(s)`;
+
+    etqGrid.innerHTML = etiquetas.map(e => {
+      const cod   = escapeHtml(String(e.codigo_produto  || '—'));
+      const desc  = escapeHtml(String(e.descricao_produto || '—'));
+      const lote  = escapeHtml(String(e.lote || '—'));
+      const qtd   = escapeHtml(String(e.qtd  != null ? e.qtd : ''));
+      const unid  = escapeHtml(String(e.unidade || ''));
+      const data  = escapeHtml(String(e.data_emissao || ''));
+      const id    = Number(e.id);
+      const qtdRaw = e.qtd != null ? Number(e.qtd) || 0 : 0;
+      return `
+      <div class="etq-card" data-id="${id}" data-qtd="${qtdRaw}" data-cod="${cod}" data-desc="${desc}" data-lote="${lote}" data-unid="${unid}" data-data="${data}">
+        <div class="etq-card-thumbnail">
+          <div class="etq-thumb-row">
+            <div class="etq-thumb-qr"><i class="fa-solid fa-qrcode" style="font-size:18px;color:#888;"></i></div>
+            <div class="etq-thumb-dados">
+              <div class="etq-thumb-line label">Cod. Produto:</div>
+              <div class="etq-thumb-line value">${cod}</div>
+              <div class="etq-thumb-line label">Descricao:</div>
+              <div class="etq-thumb-line value">${desc.length > 22 ? desc.slice(0,22)+'…' : desc}</div>
+              <div class="etq-thumb-line">Qtd: ${qtd} ${unid}</div>
+              <div class="etq-thumb-line">Lote: ${lote.length > 18 ? lote.slice(0,18)+'…' : lote}</div>
+              ${data ? `<div class="etq-thumb-line">Emissao: ${data}</div>` : ''}
+            </div>
+          </div>
+        </div>
+        <div class="etq-card-footer">
+          <div class="etq-card-cod">${cod}</div>
+          <div class="etq-card-desc" title="${desc}">${desc}</div>
+          <div class="etq-card-lote">Lote: ${lote}</div>
+        </div>
+        <div class="etq-card-actions">
+          <input type="checkbox" class="etq-check-sel" data-id="${id}" title="Selecionar">
+          <button class="etq-btn-imprimir-unit" data-id="${id}" title="Imprimir esta etiqueta">
+            <i class="fa-solid fa-print"></i> Imprimir
+          </button>
+          <button class="etq-btn-multiplo" data-id="${id}" title="Dividir em múltiplas etiquetas">
+            <i class="fa-solid fa-layer-group"></i> Múltiplo
+          </button>
+        </div>
+      </div>`;
+    }).join('');
+
+    // Clique no card seleciona
+    etqGrid.querySelectorAll('.etq-card').forEach(card => {
+      card.addEventListener('click', e => {
+        if (e.target.matches('.etq-check-sel') || e.target.matches('.etq-btn-imprimir-unit') || e.target.closest('.etq-btn-imprimir-unit') || e.target.matches('.etq-btn-multiplo') || e.target.closest('.etq-btn-multiplo')) return;
+        const id = Number(card.dataset.id);
+        const cb = card.querySelector('.etq-check-sel');
+        if (_etqSelecionadas.has(id)) {
+          _etqSelecionadas.delete(id);
+          card.classList.remove('selecionado');
+          if (cb) cb.checked = false;
+        } else {
+          _etqSelecionadas.add(id);
+          card.classList.add('selecionado');
+          if (cb) cb.checked = true;
+        }
+        _etqAtualizarBotaoSel();
+      });
+    });
+
+    // Checkbox individual
+    etqGrid.querySelectorAll('.etq-check-sel').forEach(cb => {
+      cb.addEventListener('change', () => {
+        const id = Number(cb.dataset.id);
+        const card = cb.closest('.etq-card');
+        if (cb.checked) { _etqSelecionadas.add(id); card?.classList.add('selecionado'); }
+        else            { _etqSelecionadas.delete(id); card?.classList.remove('selecionado'); }
+        _etqAtualizarBotaoSel();
+      });
+    });
+
+    // Botão imprimir unitário
+    etqGrid.querySelectorAll('.etq-btn-imprimir-unit').forEach(btn => {
+      btn.addEventListener('click', async e => {
+        e.stopPropagation();
+        const id = Number(btn.dataset.id);
+        await _etqImprimirIds([id], btn);
+      });
+    });
+
+    // Botão Múltiplo
+    etqGrid.querySelectorAll('.etq-btn-multiplo').forEach(btn => {
+      btn.addEventListener('click', e => {
+        e.stopPropagation();
+        const card = btn.closest('.etq-card');
+        _etqMplAbrir(
+          Number(btn.dataset.id),
+          Number(card?.dataset.qtd) || 0,
+          card?.dataset.cod || '',
+          card?.dataset.desc || '',
+          card?.dataset.lote || '',
+          card?.dataset.unid || '',
+          card?.dataset.data || '',
+        );
+      });
+    });
   }
 
-  etiquetasModal.classList.add('is-active');
-});
-
-document
-  .querySelector('#etiquetasModal .close-modal')
-  .addEventListener('click', () =>
-    etiquetasModal.classList.remove('is-active')
-  );
-
-listaEtiq.addEventListener('click', e => {
-  if (e.target.matches('.btn-print')) {
-    const file = e.target.dataset.file;
-    window.open(`/etiquetas/printed/${encodeURIComponent(file)}`, '_blank');
+  async function _etqCarregar(q = '') {
+    if (!etqGrid) return;
+    etqGrid.innerHTML = '<div class="etiquetas-loading"><i class="fa-solid fa-spinner fa-spin"></i> Carregando...</div>';
+    _etqSelecionadas.clear();
+    _etqAtualizarBotaoSel();
+    try {
+      const url = '/api/etiquetas/recebimento/pendentes' + (q ? `?q=${encodeURIComponent(q)}` : '');
+      const resp = await fetch(url, { credentials: 'include' });
+      if (!resp.ok) throw new Error(`Erro ${resp.status}`);
+      const data = await resp.json();
+      _etqRenderCards(data.etiquetas || []);
+    } catch (err) {
+      if (etqGrid) etqGrid.innerHTML = `<div class="etiquetas-loading" style="color:#f87171;">Erro ao carregar: ${escapeHtml(err.message)}</div>`;
+    }
   }
-});
+
+  async function _etqImprimirIds(ids, btnRef) {
+    if (!ids || ids.length === 0) return;
+    const orig = btnRef ? btnRef.innerHTML : '';
+    if (btnRef) { btnRef.disabled = true; btnRef.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>'; }
+    try {
+      const resp = await fetch('/api/etiquetas/recebimento/imprimir-modal', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ ids }),
+      });
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({}));
+        throw new Error(err.error || `Erro ${resp.status}`);
+      }
+      const data = await resp.json();
+      if (etqStatus) {
+        etqStatus.textContent = `${data.impressas || ids.length} etiqueta(s) enviada(s) para a impressora.`;
+        etqStatus.style.color = '#4ade80';
+        setTimeout(() => { if (etqStatus) { etqStatus.textContent = ''; etqStatus.style.color = ''; } }, 4000);
+      }
+      // Recarrega a lista após imprimir
+      await _etqCarregar(etqBusca?.value || '');
+    } catch (err) {
+      if (etqStatus) {
+        etqStatus.textContent = 'Erro: ' + err.message;
+        etqStatus.style.color = '#f87171';
+        setTimeout(() => { if (etqStatus) { etqStatus.textContent = ''; etqStatus.style.color = ''; } }, 4000);
+      }
+    } finally {
+      if (btnRef) { btnRef.disabled = false; btnRef.innerHTML = orig; }
+    }
+  }
+
+  // Abre o modal
+  printBtn?.addEventListener('click', async e => {
+    e.preventDefault(); e.stopPropagation();
+    if (!etqModal) return;
+    etqModal.style.display = 'flex';
+    if (etqBusca) etqBusca.value = '';
+    await _etqCarregar();
+  });
+
+  // Fechar
+  etqFechar?.addEventListener('click', () => { if (etqModal) etqModal.style.display = 'none'; });
+  etqModal?.addEventListener('click', e => { if (e.target === etqModal) etqModal.style.display = 'none'; });
+
+  // Busca com debounce
+  etqBusca?.addEventListener('input', () => {
+    clearTimeout(_etqDebounce);
+    _etqDebounce = setTimeout(() => _etqCarregar(etqBusca.value.trim()), 350);
+  });
+
+  // Imprimir selecionadas
+  etqBtnSel?.addEventListener('click', async () => {
+    const ids = [..._etqSelecionadas];
+    if (ids.length === 0) return;
+    await _etqImprimirIds(ids, etqBtnSel);
+  });
+
+  // ── Sub-modal: Definir Múltiplo ────────────────────────────────────────────
+  const etqMplModal    = document.getElementById('etqMultiploModal');
+  const etqMplFechar   = document.getElementById('etqMultiploFechar');
+  const etqMplCancel   = document.getElementById('etqMultiploCancelar');
+  const etqMplInput    = document.getElementById('etqMultiploInput');
+  const etqMplChips    = document.getElementById('etqMultiploChips');
+  const etqMplPreview  = document.getElementById('etqMultiploPreview');
+  const etqMplGerar    = document.getElementById('etqMultiploGerar');
+  const etqMplQtdTotal = document.getElementById('etqMultiploQtdTotal');
+  const etqMplMiniatura= document.getElementById('etqMultiploMiniatura');
+
+  let _etqMplIdAtual  = null;
+  let _etqMplQtdAtual = 0;
+
+  function calcularDivisores(qtd) {
+    const n = Math.floor(Math.abs(qtd));
+    if (!n || n <= 0) return [1];
+    const set = new Set();
+    for (let i = 1; i <= Math.ceil(Math.sqrt(n)); i++) {
+      if (n % i === 0) { set.add(i); set.add(n / i); }
+    }
+    const arr = [...set].sort((a, b) => a - b);
+    if (arr.length > 16) {
+      const step = Math.ceil(arr.length / 16);
+      const filtered = arr.filter((_, i) => i % step === 0);
+      if (!filtered.includes(arr[arr.length - 1])) filtered.push(arr[arr.length - 1]);
+      return filtered;
+    }
+    return arr;
+  }
+
+  function _etqMplAtualizarPreview() {
+    const m = Number(etqMplInput?.value);
+    if (!m || m <= 0 || !_etqMplQtdAtual) {
+      if (etqMplPreview) etqMplPreview.textContent = 'Informe um múltiplo válido.';
+      if (etqMplGerar) etqMplGerar.disabled = true;
+      return;
+    }
+    const n = Math.max(1, Math.round(_etqMplQtdAtual / m));
+    if (etqMplPreview) {
+      etqMplPreview.innerHTML =
+        `Serão geradas <strong style="color:#a78bfa">${n}</strong> etiqueta(s),
+         cada uma com quantidade <strong style="color:#a78bfa">${m}</strong> ${escapeHtml(_etqMplUnidAtual || '')}.`;
+    }
+    if (etqMplGerar) etqMplGerar.disabled = false;
+    etqMplChips?.querySelectorAll('.etq-multiplo-chip').forEach(c => {
+      c.classList.toggle('ativo', Number(c.dataset.val) === m);
+    });
+  }
+
+  let _etqMplUnidAtual = '';
+
+  function _etqMplAbrir(id, qtd, cod, desc, lote, unid, data) {
+    _etqMplIdAtual   = id;
+    _etqMplQtdAtual  = qtd;
+    _etqMplUnidAtual = unid;
+
+    if (etqMplMiniatura) {
+      etqMplMiniatura.innerHTML = `
+        <div class="etq-thumb-row">
+          <div class="etq-thumb-qr"><i class="fa-solid fa-qrcode" style="font-size:18px;color:#888;"></i></div>
+          <div class="etq-thumb-dados">
+            <div class="etq-thumb-line label">Cod. Produto:</div>
+            <div class="etq-thumb-line value">${escapeHtml(String(cod||''))}</div>
+            <div class="etq-thumb-line label">Descricao:</div>
+            <div class="etq-thumb-line value">${escapeHtml(String(desc||'').slice(0,32))}</div>
+            <div class="etq-thumb-line">Qtd Total: <strong>${escapeHtml(String(qtd||''))} ${escapeHtml(String(unid||''))}</strong></div>
+            <div class="etq-thumb-line">Lote: ${escapeHtml(String(lote||'').slice(0,22))}</div>
+            ${data ? `<div class="etq-thumb-line">Emissao: ${escapeHtml(String(data||''))}</div>` : ''}
+          </div>
+        </div>`;
+    }
+
+    if (etqMplQtdTotal) etqMplQtdTotal.textContent = String(qtd || '?');
+
+    if (etqMplChips) {
+      const divisores = qtd > 0 ? calcularDivisores(qtd) : [1];
+      etqMplChips.innerHTML = divisores.map(d =>
+        `<button class="etq-multiplo-chip" data-val="${d}">${d}</button>`
+      ).join('');
+      etqMplChips.querySelectorAll('.etq-multiplo-chip').forEach(c => {
+        c.addEventListener('click', () => {
+          if (etqMplInput) etqMplInput.value = c.dataset.val;
+          _etqMplAtualizarPreview();
+        });
+      });
+    }
+
+    if (etqMplInput)   etqMplInput.value = '';
+    if (etqMplPreview) etqMplPreview.textContent = 'Selecione ou digite um múltiplo para ver a prévia.';
+    if (etqMplGerar)   etqMplGerar.disabled = true;
+    if (etqMplModal)   etqMplModal.style.display = 'flex';
+  }
+
+  function _etqMplFecharFn() {
+    if (etqMplModal) etqMplModal.style.display = 'none';
+    _etqMplIdAtual = null;
+  }
+
+  etqMplFechar?.addEventListener('click', _etqMplFecharFn);
+  etqMplCancel?.addEventListener('click', _etqMplFecharFn);
+  etqMplModal?.addEventListener('click', e => { if (e.target === etqMplModal) _etqMplFecharFn(); });
+  etqMplInput?.addEventListener('input', _etqMplAtualizarPreview);
+
+  etqMplGerar?.addEventListener('click', async () => {
+    const m = Number(etqMplInput?.value);
+    if (!_etqMplIdAtual || !m || m <= 0) return;
+    const origHtml = etqMplGerar.innerHTML;
+    etqMplGerar.disabled = true;
+    etqMplGerar.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Gerando...';
+    try {
+      const resp = await fetch('/api/etiquetas/recebimento/imprimir-multiplo', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ id: _etqMplIdAtual, multiplo: m }),
+      });
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({}));
+        throw new Error(err.error || `Erro ${resp.status}`);
+      }
+      const data = await resp.json();
+      _etqMplFecharFn();
+      if (etqStatus) {
+        etqStatus.textContent = `${data.impressas} etiqueta(s) enviada(s) para a impressora.`;
+        etqStatus.style.color = '#4ade80';
+        setTimeout(() => { if (etqStatus) { etqStatus.textContent = ''; etqStatus.style.color = ''; } }, 4000);
+      }
+      await _etqCarregar(etqBusca?.value || '');
+    } catch (err) {
+      if (etqMplPreview) {
+        etqMplPreview.innerHTML = `<span style="color:#f87171;">Erro: ${escapeHtml(err.message)}</span>`;
+      }
+      etqMplGerar.disabled = false;
+      etqMplGerar.innerHTML = origHtml;
+    }
+  });
 
   /* –– NUVEM –– */
   cloudBtn?.addEventListener('click', e => {
@@ -48059,6 +48363,83 @@ async function localizarNfeParaAssociacaoOmie() {
   }
 }
 
+// ── Pré-visualização de etiqueta de recebimento (ZPL → PDF via backend) ──
+async function imprimirEtiquetaRecebimentoPreview() {
+  const nfe    = String(document.getElementById('modalAssociarNfeNumeroInput')?.value || '').trim();
+  const pedido = String(document.getElementById('modalAssociarPedidoNumeroInput')?.value || '').trim();
+
+  if (!nfe) {
+    setStatusModalAssociarPedidoNfe('Informe o número da NF-e antes de imprimir.', 'erro');
+    return;
+  }
+  if (!pedido) {
+    setStatusModalAssociarPedidoNfe('Informe o número do pedido antes de imprimir.', 'erro');
+    return;
+  }
+
+  const preview = window.__associarNfePreviewAtual?.preview || {};
+  const itensPreview = Array.isArray(preview.itens) ? preview.itens : [];
+
+  // Coleta todos os itens do pedido que possuem código de produto identificado
+  const itensParaImprimir = itensPreview
+    .filter(it => it?.pedido_codigo_produto)
+    .map(it => ({
+      codigo_produto:    String(it.pedido_codigo_produto  || '').trim(),
+      descricao_produto: String(it.pedido_descricao_produto || '').trim(),
+      qtd:     String(it.pedido_qtde  ?? it.nf_qtde  ?? ''),
+      unidade: String(it.pedido_unidade ?? it.nf_unidade ?? '').trim(),
+    }));
+
+  if (itensParaImprimir.length === 0) {
+    setStatusModalAssociarPedidoNfe('Nenhum item com código de produto identificado. Gere a prévia antes de imprimir.', 'erro');
+    return;
+  }
+
+  const payload = { nfe, pedido, itens: itensParaImprimir };
+
+  const btn = document.getElementById('modalAssociarPedidoBtnImprimir');
+  const textoOriginal = btn ? btn.innerHTML : '';
+  if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>'; }
+
+  try {
+    const resp = await fetch('/api/etiquetas/recebimento/preview', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify(payload),
+    });
+
+    // 409 = todas as etiquetas já existem no banco
+    if (resp.status === 409) {
+      const err = await resp.json().catch(() => ({}));
+      setStatusModalAssociarPedidoNfe(err?.error || 'Etiquetas já geradas anteriormente para esta NF-e/Pedido.', 'info');
+      return;
+    }
+
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      throw new Error(err?.error || `Erro ${resp.status}`);
+    }
+
+    const geradas  = resp.headers.get('X-Etiquetas-Geradas')  || itensParaImprimir.length;
+    const ignoradas = resp.headers.get('X-Etiquetas-Ignoradas') || '0';
+
+    const blob = await resp.blob();
+    const url  = URL.createObjectURL(blob);
+    window.open(url, '_blank');
+    setTimeout(() => URL.revokeObjectURL(url), 5 * 60 * 1000);
+
+    const msg = Number(ignoradas) > 0
+      ? `${geradas} etiqueta(s) gerada(s). ${ignoradas} já existia(m) e foram ignoradas.`
+      : `${geradas} etiqueta(s) gerada(s) com sucesso.`;
+    setStatusModalAssociarPedidoNfe(msg, 'sucesso');
+  } catch (err) {
+    setStatusModalAssociarPedidoNfe('Erro ao gerar etiquetas: ' + (err?.message || err), 'erro');
+  } finally {
+    if (btn) { btn.disabled = false; btn.innerHTML = textoOriginal || '<i class="fa-solid fa-print"></i> Imprimir'; }
+  }
+}
+
 async function confirmarAssociacaoPedidoNfeOmie() {
   const nfeInput = document.getElementById('modalAssociarNfeNumeroInput');
   const pedidoInput = document.getElementById('modalAssociarPedidoNumeroInput');
@@ -48180,6 +48561,37 @@ async function confirmarAssociacaoPedidoNfeOmie() {
       throw new Error(data?.error || `Falha ao associar NF-e (HTTP ${resp.status})`);
     }
     associacaoConcluida = true;
+
+    // ── Registra etiquetas automaticamente após associar ─────────────────
+    try {
+      const _previewEtq = window.__associarNfePreviewAtual?.preview || {};
+      const _itensEtq   = Array.isArray(_previewEtq.itens) ? _previewEtq.itens : [];
+      const _itensParaEtq = _itensEtq
+        .filter(it => it?.pedido_codigo_produto)
+        .map(it => ({
+          codigo_produto:    String(it.pedido_codigo_produto  || '').trim(),
+          descricao_produto: String(it.pedido_descricao_produto || '').trim(),
+          qtd:     String(it.pedido_qtde  ?? it.nf_qtde  ?? ''),
+          unidade: String(it.pedido_unidade ?? it.nf_unidade ?? '').trim(),
+        }));
+      if (_itensParaEtq.length > 0) {
+        fetch('/api/etiquetas/recebimento/preview', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ nfe: numeroNfe, pedido: numeroPedido, itens: _itensParaEtq }),
+        }).then(async r => {
+          if (r.ok) {
+            const geradas = r.headers.get('X-Etiquetas-Geradas') || _itensParaEtq.length;
+            console.log(`[etiquetas] ${geradas} etiqueta(s) registrada(s) para NF-e ${numeroNfe} / pedido ${numeroPedido}`);
+          }
+          // descarta o PDF — apenas registra no banco
+        }).catch(e => console.warn('[etiquetas] falha ao registrar etiquetas:', e?.message));
+      }
+    } catch (_etqErr) {
+      console.warn('[etiquetas] falha ao preparar etiquetas:', _etqErr?.message);
+    }
+    // ─────────────────────────────────────────────────────────────────────
 
     setStatusModalAssociarPedidoNfe(
       `<div style="display:flex;align-items:flex-start;gap:12px;">
