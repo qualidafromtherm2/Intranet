@@ -10505,16 +10505,35 @@ fs.mkdirSync(path.join(etiquetasRoot, 'Recebimento', 'Printed'), { recursive: tr
         usuario_criacao   TEXT,
         status            TEXT    NOT NULL DEFAULT 'pendente',
         criado_em         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-        impresso_em       TIMESTAMPTZ,
-        impresso_modal_em TIMESTAMPTZ
+        impressa          BOOLEAN NOT NULL DEFAULT FALSE
       )
     `);
-    // Migração: garante a coluna impresso_modal_em em tabelas já existentes
+    // Migração: adiciona coluna impressa (booleano) se ainda não existir
+    await pool.query(`ALTER TABLE etiqueta."ETQ_recebimento" ADD COLUMN IF NOT EXISTS impressa BOOLEAN NOT NULL DEFAULT FALSE`);
+    // Migração: remove colunas antigas de timestamp de impressão
+    await pool.query(`ALTER TABLE etiqueta."ETQ_recebimento" DROP COLUMN IF EXISTS impresso_em`).catch(() => {});
+    await pool.query(`ALTER TABLE etiqueta."ETQ_recebimento" DROP COLUMN IF EXISTS impresso_modal_em`).catch(() => {});
+    // Tabela de registro de cada impressão realizada
     await pool.query(`
-      ALTER TABLE etiqueta."ETQ_recebimento"
-        ADD COLUMN IF NOT EXISTS impresso_modal_em TIMESTAMPTZ
+      CREATE TABLE IF NOT EXISTS etiqueta."ETQ_rec_impresso" (
+        id                SERIAL PRIMARY KEY,
+        origem_id         INT REFERENCES etiqueta."ETQ_recebimento"(id),
+        qtd               NUMERIC,
+        unidade           TEXT,
+        data_emissao      TEXT,
+        conteudo_zpl      TEXT,
+        usuario_criacao   TEXT,
+        impresso_em       TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
     `);
-    console.log('[etiqueta] Schema e tabela ETQ_recebimento garantidos');
+    // Migração: remove colunas redundantes (dados já existem em ETQ_recebimento via origem_id)
+    for (const col of ['numero_nfe','numero_pedido','lote','codigo_produto','descricao_produto','fornecedor']) {
+      await pool.query(`ALTER TABLE etiqueta."ETQ_rec_impresso" DROP COLUMN IF EXISTS ${col}`).catch(() => {});
+    }
+    // Migração: colunas de armazenamento
+    await pool.query(`ALTER TABLE etiqueta."ETQ_rec_impresso" ADD COLUMN IF NOT EXISTS endereco TEXT`);
+    await pool.query(`ALTER TABLE etiqueta."ETQ_rec_impresso" ADD COLUMN IF NOT EXISTS complemento TEXT`);
+    console.log('[etiqueta] Schema e tabelas ETQ_recebimento / ETQ_rec_impresso garantidos');
   } catch (err) {
     console.error('[etiqueta] Falha ao garantir schema/tabela:', err?.message || err);
   }
@@ -11203,8 +11222,9 @@ app.get('/api/preparacao/eventos.csv', async (req, res) => {
 });
 
 
-// ── Helper: gera um bloco ZPL para uma etiqueta de recebimento ─────────────
-function _gerarZplRecebimentoBloco({ codProd, descProd, qtdTxt, unidTxt, loteTxt, dataExibir, qrContent }) {
+// ── Helper: gera um bloco ZPL para salvar no banco (ETQ_recebimento) ─────────
+function _gerarZplRecebimentoBloco({ codProd, descProd, loteTxt, dataExibir, idEtq }) {
+  const qrContent = `${codProd}|${descProd.slice(0, 40)}|${loteTxt}|ID${idEtq}`;
   return [
     '^XA',
     '^CI28',
@@ -11215,7 +11235,38 @@ function _gerarZplRecebimentoBloco({ codProd, descProd, qtdTxt, unidTxt, loteTxt
     `^FO360,10^A0N,20,20^FD${codProd}^FS`,
     '^FO170,34^A0N,20,20^FDDescricao:^FS',
     `^FO170,58^A0N,20,20^FD${descProd.slice(0, 30)}^FS`,
-    `^FO170,82^A0N,20,20^FDQtd: ${qtdTxt} ${unidTxt}^FS`,
+    `^FO170,82^A0N,20,20^FDLote: ${loteTxt}^FS`,
+    `^FO170,106^A0N,20,20^FDEmissao: ${dataExibir}^FS`,
+    '^XZ',
+  ].join('\n');
+}
+
+// ── Helper: traduz erros técnicos do lpr para mensagens amigáveis ──────────
+function _friendlyLprError(msg) {
+  const s = String(msg || '');
+  if (/does not exist/i.test(s))       return `Impressora "${process.env.PRINTER || 'ZebraZD220'}" não encontrada. Verifique se ela está instalada no sistema.`;
+  if (/unable to connect/i.test(s))    return 'Não foi possível conectar à impressora. Verifique se ela está ligada e acessível na rede.';
+  if (/permission denied/i.test(s))    return 'Sem permissão para acessar a impressora. Verifique as permissões do usuário.';
+  if (/connection refused/i.test(s))   return 'Conexão com a impressora recusada. Verifique se o serviço de impressão está ativo.';
+  return 'Falha na comunicação com a impressora. Verifique se ela está ligada e configurada corretamente.';
+}
+
+// ── Helper: gera ZPL para IMPRESSÃO física (mostra ID da impressão, sem qtd) ──
+// QR code: cod|desc|lote|idImpresso  — sem quantidade
+// Linha no label: "ID: 123" em vez de "Qtd: X UN"
+function _gerarZplParaImpressao({ codProd, descProd, idImpresso, loteTxt, dataExibir }) {
+  const qr = `${codProd}|${descProd.slice(0, 40)}|${loteTxt}|ID${idImpresso}`;
+  return [
+    '^XA',
+    '^CI28',
+    '^PW812',
+    '^LL165',
+    `^FO10,10^BQN,2,4^FDLA,${qr}^FS`,
+    '^FO170,10^A0N,20,20^FDCod. Produto:^FS',
+    `^FO360,10^A0N,20,20^FD${codProd}^FS`,
+    '^FO170,34^A0N,20,20^FDDescricao:^FS',
+    `^FO170,58^A0N,20,20^FD${descProd.slice(0, 30)}^FS`,
+    `^FO170,82^A0N,20,20^FDID: ${idImpresso}^FS`,
     `^FO170,106^A0N,20,20^FDLote: ${loteTxt}^FS`,
     `^FO170,130^A0N,20,20^FDEmissao: ${dataExibir}^FS`,
     '^XZ',
@@ -11234,7 +11285,7 @@ app.post('/api/etiquetas/recebimento/preview', express.json(), async (req, res) 
       itens  = [],
     } = req.body || {};
 
-    const usuario = req.session?.usuario || req.session?.user?.login || null;
+    const usuario = req.body?.usuario || req.session?.usuario || req.session?.user?.login || null;
 
     if (!nfe)    return res.status(400).json({ error: 'Informe o número da NF-e.' });
     if (!pedido) return res.status(400).json({ error: 'Informe o número do pedido.' });
@@ -11299,11 +11350,9 @@ app.post('/api/etiquetas/recebimento/preview', express.json(), async (req, res) 
       const descProd = sanitize(descProdRaw, 70);
       const qtdTxt   = sanitize(qtdRaw,  15);
       const unidTxt  = sanitize(unidRaw, 10);
-      const qrContent = `${codProd}|${descProd.slice(0, 40)}|${loteTxt}`;
 
-      const zpl = _gerarZplRecebimentoBloco({ codProd, descProd, qtdTxt, unidTxt, loteTxt, dataExibir, qrContent });
-
-      // ── Salva no banco ────────────────────────────────────────────────────
+      // ── Salva no banco primeiro para obter o ID ───────────────────────────
+      let idEtq = null;
       try {
         const ins = await pool.query(
           `INSERT INTO etiqueta."ETQ_recebimento"
@@ -11315,12 +11364,27 @@ app.post('/api/etiquetas/recebimento/preview', express.json(), async (req, res) 
             String(nfe), String(pedido), lote,
             codProdRaw, descProdRaw,
             qtdRaw !== '' ? Number(String(qtdRaw).replace(',', '.')) || null : null,
-            unidRaw, dataExibir, zpl, usuario,
+            unidRaw, dataExibir, '', usuario,
           ]
         );
-        gerados.push({ cod: codProdRaw, id: ins.rows[0]?.id });
+        idEtq = ins.rows[0]?.id;
+        gerados.push({ cod: codProdRaw, id: idEtq });
       } catch (dbErr) {
         console.error('[etiquetas/recebimento/preview] falha ao salvar item:', codProdRaw, dbErr?.message || dbErr);
+        continue;
+      }
+
+      // ── Gera ZPL com o ID já conhecido ────────────────────────────────────
+      const zpl = _gerarZplRecebimentoBloco({ codProd, descProd, loteTxt, dataExibir, idEtq });
+
+      // ── Atualiza conteudo_zpl com o ZPL final ─────────────────────────────
+      try {
+        await pool.query(
+          `UPDATE etiqueta."ETQ_recebimento" SET conteudo_zpl=$1 WHERE id=$2`,
+          [zpl, idEtq]
+        );
+      } catch (updErr) {
+        console.error('[etiquetas/recebimento/preview] falha ao atualizar zpl id:', idEtq, updErr?.message || updErr);
       }
 
       zplBlocks.push(zpl);
@@ -11363,7 +11427,7 @@ app.post('/api/etiquetas/recebimento/preview', express.json(), async (req, res) 
 
 // ── Etiquetas pendentes de impressão via modal ────────────────────────────────
 // GET /api/etiquetas/recebimento/pendentes?q=texto
-// Retorna registros onde impresso_modal_em IS NULL, filtrando por lote/codigo/descricao
+// Retorna registros onde impressa = false, filtrando por lote/codigo/descricao
 app.get('/api/etiquetas/recebimento/pendentes', async (req, res) => {
   try {
     const q = String(req.query.q || '').trim();
@@ -11374,7 +11438,7 @@ app.get('/api/etiquetas/recebimento/pendentes', async (req, res) => {
         `SELECT id, numero_nfe, numero_pedido, lote, codigo_produto,
                 descricao_produto, qtd, unidade, data_emissao, criado_em
            FROM etiqueta."ETQ_recebimento"
-          WHERE impresso_modal_em IS NULL
+          WHERE impressa = false
             AND (lote ILIKE $1 OR codigo_produto ILIKE $1 OR descricao_produto ILIKE $1)
           ORDER BY criado_em DESC
           LIMIT 200`,
@@ -11386,7 +11450,7 @@ app.get('/api/etiquetas/recebimento/pendentes', async (req, res) => {
         `SELECT id, numero_nfe, numero_pedido, lote, codigo_produto,
                 descricao_produto, qtd, unidade, data_emissao, criado_em
            FROM etiqueta."ETQ_recebimento"
-          WHERE impresso_modal_em IS NULL
+          WHERE impressa = false
           ORDER BY criado_em DESC
           LIMIT 200`
       );
@@ -11399,54 +11463,336 @@ app.get('/api/etiquetas/recebimento/pendentes', async (req, res) => {
   }
 });
 
+// GET /api/etiquetas/impressoras
+// Lista impressoras disponíveis no sistema via lpstat
+app.get('/api/etiquetas/impressoras', async (req, res) => {
+  try {
+    const lista = await new Promise((resolve) => {
+      execFile('lpstat', ['-a'], (err, stdout) => {
+        if (err || !stdout) { resolve([]); return; }
+        // Cada linha: "NomeDaImpressora accepting requests since ..."
+        const nomes = stdout.split('\n')
+          .map(l => l.split(' ')[0].trim())
+          .filter(n => n.length > 0);
+        resolve(nomes);
+      });
+    });
+    res.json({ impressoras: lista, padrao: process.env.PRINTER || 'ZebraZD220' });
+  } catch (err) {
+    res.json({ impressoras: [], padrao: process.env.PRINTER || 'ZebraZD220' });
+  }
+});
+
+// GET /api/etiquetas/recebimento/pdf-download?ids=1,2,3[&multiplo=50][&usuario=xxx]
+// Gera PDF das etiquetas via Labelary, regenerando ZPL a partir dos campos do banco.
+// Quando `multiplo` é informado, aplica lógica floor+remainder igual ao imprimir-multiplo.
+app.get('/api/etiquetas/recebimento/pdf-download', async (req, res) => {
+  try {
+    const ids     = String(req.query.ids || '').split(',').map(Number).filter(n => n > 0);
+    const multiplo = Number(req.query.multiplo) || 0;
+    if (!ids.length) return res.status(400).json({ error: 'Informe os ids.' });
+
+    const result = await pool.query(
+      `SELECT id, codigo_produto, descricao_produto, lote, data_emissao, qtd, unidade
+         FROM etiqueta."ETQ_recebimento"
+        WHERE id = ANY($1::int[]) ORDER BY id`,
+      [ids]
+    );
+    if (!result.rows.length) return res.status(404).json({ error: 'Nenhuma etiqueta encontrada.' });
+
+    const sanitize = (v, max = 999) => String(v || '').slice(0, max).replace(/[\\^~]/g, ' ');
+    // Aceita usuario via query param (GET) ou sessão
+    const usuarioImpressao = String(req.query.usuario || req.session?.user?.login || req.session?.usuario || '').trim();
+    const zplBlocks = [];
+
+    for (const row of result.rows) {
+      const codProd    = sanitize(row.codigo_produto, 30);
+      const descProd   = sanitize(row.descricao_produto, 70);
+      const loteTxt    = sanitize(row.lote, 40);
+      const dataExibir = sanitize(row.data_emissao, 10);
+
+      // Se multiplo informado: floor+remainder igual ao imprimir-multiplo
+      let lotes;
+      if (multiplo > 0) {
+        const qtdTotal = Number(row.qtd) || 0;
+        const nCheias  = Math.floor(qtdTotal / multiplo);
+        const resto    = qtdTotal % multiplo;
+        lotes = [];
+        for (let i = 0; i < nCheias; i++) lotes.push(multiplo);
+        if (resto > 0) lotes.push(resto);
+        if (lotes.length === 0) lotes.push(qtdTotal || 1);
+      } else {
+        lotes = [Number(row.qtd) || 1];
+      }
+
+      for (const qtdEtq of lotes) {
+        const ins = await pool.query(
+          `INSERT INTO etiqueta."ETQ_rec_impresso"
+             (origem_id, qtd, unidade, data_emissao, conteudo_zpl, usuario_criacao)
+           VALUES ($1,$2,$3,$4,'',$5)
+           RETURNING id`,
+          [row.id, qtdEtq, row.unidade, row.data_emissao, usuarioImpressao]
+        );
+        const idImpresso = ins.rows[0].id;
+
+        const zpl = _gerarZplParaImpressao({ codProd, descProd, idImpresso, loteTxt, dataExibir });
+
+        await pool.query(
+          `UPDATE etiqueta."ETQ_rec_impresso" SET conteudo_zpl = $1 WHERE id = $2`,
+          [zpl, idImpresso]
+        );
+
+        zplBlocks.push(zpl);
+      }
+    }
+
+    // Marca todas as etiquetas como impressas
+    await pool.query(
+      `UPDATE etiqueta."ETQ_recebimento" SET qtd = 0, impressa = true WHERE id = ANY($1::int[])`,
+      [ids]
+    );
+
+    const zplCombinado = zplBlocks.join('\n');
+
+    const labelaryResp = await fetch(
+      'http://api.labelary.com/v1/printers/8dpmm/labels/4x6/',
+      {
+        method: 'POST',
+        headers: { 'Accept': 'application/pdf', 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: zplCombinado,
+      }
+    );
+
+    if (!labelaryResp.ok) {
+      const txt = await labelaryResp.text().catch(() => '');
+      throw new Error(`Labelary retornou ${labelaryResp.status}: ${txt.slice(0, 120)}`);
+    }
+
+    const pdfBuffer = Buffer.from(await labelaryResp.arrayBuffer());
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="etiquetas_${ids.join('-')}.pdf"`);
+    res.setHeader('Cache-Control', 'no-store');
+    res.send(pdfBuffer);
+  } catch (err) {
+    console.error('[etiquetas/recebimento/pdf-download]', err);
+    res.status(500).json({ error: err?.message || 'Falha ao gerar PDF' });
+  }
+});
+
+// GET /api/etiquetas/rec-impresso?q=texto
+// Retorna registros já impressos de ETQ_rec_impresso, com filtro opcional
+app.get('/api/etiquetas/rec-impresso', async (req, res) => {
+  try {
+    const q = String(req.query.q || '').trim();
+    let rows;
+    const baseSql = `
+      SELECT i.id, r.numero_nfe, r.numero_pedido, r.lote, r.codigo_produto,
+             r.descricao_produto, i.qtd, r.unidade, r.fornecedor, r.data_emissao,
+             i.impresso_em, i.usuario_criacao
+        FROM etiqueta."ETQ_rec_impresso" i
+        JOIN etiqueta."ETQ_recebimento"  r ON r.id = i.origem_id`;
+    if (q) {
+      const like = `%${q}%`;
+      const result = await pool.query(
+        `${baseSql}
+         WHERE (i.endereco IS NULL OR i.endereco = '')
+           AND (r.lote ILIKE $1 OR r.codigo_produto ILIKE $1 OR r.descricao_produto ILIKE $1)
+         ORDER BY i.impresso_em DESC
+         LIMIT 200`,
+        [like]
+      );
+      rows = result.rows;
+    } else {
+      const result = await pool.query(
+        `${baseSql}
+         WHERE (i.endereco IS NULL OR i.endereco = '')
+         ORDER BY i.impresso_em DESC
+         LIMIT 200`
+      );
+      rows = result.rows;
+    }
+    res.json({ etiquetas: rows });
+  } catch (err) {
+    console.error('[etiquetas/rec-impresso]', err);
+    res.status(500).json({ error: err?.message || 'Falha ao buscar etiquetas impressas' });
+  }
+});
+
+// PATCH /api/etiquetas/rec-impresso/:id/endereco
+// Body: { endereco: "A1-B2" } — registra o local de armazenamento e faz TRF Omie
+app.patch('/api/etiquetas/rec-impresso/:id/endereco', express.json(), async (req, res) => {
+  const _sep = '─'.repeat(60);
+  try {
+    const id = Number(req.params.id);
+    const endereco    = String(req.body?.endereco    || '').trim();
+    const complemento = String(req.body?.complemento || '').trim();
+    if (!id || !endereco) return res.status(400).json({ error: 'id e endereco são obrigatórios.' });
+
+    // 1. Salva endereço (e complemento opcional) e busca dados do produto
+    const result = await pool.query(
+      `UPDATE etiqueta."ETQ_rec_impresso" SET endereco = $1, complemento = $2 WHERE id = $3 RETURNING id, endereco, complemento, origem_id, qtd`,
+      [endereco, complemento || null, id]
+    );
+    if (!result.rows.length) return res.status(404).json({ error: 'Registro não encontrado.' });
+    const { origem_id, qtd } = result.rows[0];
+
+    // 2. Busca dados do produto no recebimento para o TRF Omie
+    const { rows: recRows } = await pool.query(
+      `SELECT codigo_produto, numero_nfe, lote FROM etiqueta."ETQ_recebimento" WHERE id = $1`,
+      [origem_id]
+    );
+
+    // 3. TRF Omie: RECEBIMENTO (10408201806) → PORTA PALLET ALMOXARIFADO (10717096386)
+    if (recRows.length) {
+      const { codigo_produto, numero_nfe, lote } = recRows[0];
+      const COD_ORIGEM  = '10408201806'; // Recebimento de Produtos
+      const COD_DESTINO = '10717096386'; // Porta Pallet (Almoxarifado)
+      try {
+        const { rows: prodRows } = await pool.query(
+          `SELECT p.codigo_produto AS id_prod,
+                  COALESCE(
+                    NULLIF(e.cmc, 0),
+                    NULLIF(e.preco_unitario, 0),
+                    NULLIF(p.valor_unitario, 0),
+                    0.01
+                  ) AS valor_unit
+           FROM public.produtos_omie p
+           LEFT JOIN logistica.estoque_atual e
+             ON e.codigo = p.codigo AND e.local_codigo = $2
+           WHERE p.codigo = $1
+           LIMIT 1`,
+          [codigo_produto, COD_ORIGEM]
+        );
+
+        if (prodRows.length) {
+          const idProd  = Number(prodRows[0].id_prod);
+          const valor   = parseFloat(prodRows[0].valor_unit) || 0.01;
+          const qtdNum  = parseFloat(qtd) || 1;
+          const hoje    = new Date();
+          const dataOmie = `${String(hoje.getDate()).padStart(2,'0')}/${String(hoje.getMonth()+1).padStart(2,'0')}/${hoje.getFullYear()}`;
+          const obs     = `Armazenar. NF: ${numero_nfe || '-'} | Lote: ${lote || '-'} | End: ${endereco}`;
+
+          const omiePayload = {
+            call: 'IncluirAjusteEstoque',
+            app_key: OMIE_APP_KEY,
+            app_secret: OMIE_APP_SECRET,
+            param: [{
+              codigo_local_estoque:          COD_ORIGEM,
+              id_prod:                       idProd,
+              data:                          dataOmie,
+              tipo:                          'TRF',
+              quan:                          qtdNum,
+              valor,
+              obs,
+              origem:                        'AJU',
+              motivo:                        'TRF',
+              codigo_local_estoque_destino:  COD_DESTINO
+            }]
+          };
+
+          console.log(`\n┌${_sep}\n│ [ARMAZENAR] Omie TRF ${codigo_produto}: ${COD_ORIGEM} → ${COD_DESTINO} (${qtdNum} un)\n│ NF: ${numero_nfe || '-'} | Lote: ${lote || '-'} | Endereço: ${endereco}\n└${_sep}`);
+          await omieCall('https://app.omie.com.br/api/v1/estoque/ajuste/', omiePayload);
+          console.log(`\n┌${_sep}\n│ [ARMAZENAR] ✓ TRF Omie concluída  id_rec=${id}  cod=${codigo_produto}  qtd=${qtdNum}\n└${_sep}`);
+        } else {
+          console.warn(`\n┌${_sep}\n│ [ARMAZENAR] ⚠ Produto ${codigo_produto} não encontrado em produtos_omie — TRF Omie ignorada\n└${_sep}`);
+        }
+      } catch (omieErr) {
+        console.warn(`\n┌${_sep}\n│ [ARMAZENAR] ⚠ Omie IncluirAjusteEstoque falhou: ${omieErr?.faultstring || omieErr?.message || omieErr}\n└${_sep}`);
+        // Não bloqueia o fluxo se a integração Omie falhar
+      }
+    }
+
+    res.json({ ok: true, id: result.rows[0].id, endereco: result.rows[0].endereco });
+  } catch (err) {
+    console.error('[etiquetas/rec-impresso/endereco]', err);
+    res.status(500).json({ error: err?.message || 'Falha ao registrar endereço' });
+  }
+});
+
 // ── Imprime etiqueta(s) pelo modal direto via ZPL → lpr ─────────────────────
 // POST /api/etiquetas/recebimento/imprimir-modal
-// Body: { ids: [1, 2, ...] }  → envia cada ZPL para a impressora e marca impresso_modal_em
+// Body: { ids: [1, 2, ...], printer?: string, usuario?: string }
+// Fluxo por etiqueta:
+//   1. Insere linha em ETQ_rec_impresso (ZPL placeholder) → obtém o id gerado
+//   2. Gera ZPL definitivo com esse id (sem qtd, QR com ID do impresso)
+//   3. Atualiza conteudo_zpl em ETQ_rec_impresso
+//   4. Envia ZPL para lpr
+//   5. Zera qtd em ETQ_recebimento e marca impresso_modal_em
 app.post('/api/etiquetas/recebimento/imprimir-modal', express.json(), async (req, res) => {
   try {
     const ids = Array.isArray(req.body?.ids) ? req.body.ids.map(Number).filter(n => n > 0) : [];
     if (ids.length === 0) return res.status(400).json({ error: 'Nenhum id informado.' });
 
     const result = await pool.query(
-      `SELECT id, conteudo_zpl, codigo_produto FROM etiqueta."ETQ_recebimento"
+      `SELECT id, lote, codigo_produto, descricao_produto,
+              qtd, unidade, data_emissao
+         FROM etiqueta."ETQ_recebimento"
         WHERE id = ANY($1::int[])`,
       [ids]
     );
     if (result.rows.length === 0) return res.status(404).json({ error: 'Nenhuma etiqueta encontrada.' });
 
+    const sanitize = (v, max = 999) => String(v || '').slice(0, max).replace(/[\\^~]/g, ' ');
     const dirPrint = path.join(__dirname, 'etiquetas', 'Recebimento', 'Printed');
     fs.mkdirSync(dirPrint, { recursive: true });
-
-    const printerName = process.env.PRINTER || 'ZebraZD220';
+    const printerName = String(req.body?.printer || process.env.PRINTER || 'ZebraZD220').trim();
+    const usuarioImpressao = String(req.body?.usuario || req.session?.user?.login || req.session?.usuario || '').trim();
     const erros = [];
 
-    // Envia cada etiqueta individualmente para a impressora
     for (const row of result.rows) {
-      const fname = `receb_${row.id}_${Date.now()}.zpl`;
+      const codProd    = sanitize(row.codigo_produto, 30);
+      const descProd   = sanitize(row.descricao_produto, 70);
+      const loteTxt    = sanitize(row.lote, 40);
+      const dataExibir = sanitize(row.data_emissao, 10);
+
+      // 1. Insere placeholder para obter o id da impressão
+      const ins = await pool.query(
+        `INSERT INTO etiqueta."ETQ_rec_impresso"
+           (origem_id, qtd, unidade, data_emissao, conteudo_zpl, usuario_criacao)
+         VALUES ($1,$2,$3,$4,'',$5)
+         RETURNING id`,
+        [row.id, row.qtd, row.unidade, row.data_emissao, usuarioImpressao]
+      );
+      const idImpresso = ins.rows[0].id;
+
+      // 2. Gera ZPL definitivo com ID (sem qtd)
+      const zpl = _gerarZplParaImpressao({ codProd, descProd, idImpresso, loteTxt, dataExibir });
+
+      // 3. Atualiza ZPL no registro
+      await pool.query(
+        `UPDATE etiqueta."ETQ_rec_impresso" SET conteudo_zpl = $1 WHERE id = $2`,
+        [zpl, idImpresso]
+      );
+
+      // 4. Envia para a impressora
+      const fname = `receb_${row.id}_imp${idImpresso}_${Date.now()}.zpl`;
       const fpath = path.join(dirPrint, fname);
-      fs.writeFileSync(fpath, row.conteudo_zpl, 'utf8');
+      fs.writeFileSync(fpath, zpl, 'utf8');
       await new Promise((resolve) => {
         const args = printerName ? ['-P', printerName, '-o', 'raw', fpath] : ['-o', 'raw', fpath];
         execFile('lpr', args, (err) => {
           if (err) {
-            erros.push(`id ${row.id}: ${err.message}`);
+            erros.push(_friendlyLprError(err.message));
             console.error(`[etiquetas/imprimir-modal] lpr falhou id=${row.id}:`, err.message);
+            // Remove o registro criado para que re-tentativa não gere duplicata
+            pool.query('DELETE FROM etiqueta."ETQ_rec_impresso" WHERE id = $1', [idImpresso]).catch(() => {});
           } else {
-            console.log(`[etiquetas/imprimir-modal] impressão enviada id=${row.id} (${row.codigo_produto})`);
+            console.log(`[etiquetas/imprimir-modal] impressão enviada id=${row.id} idImpresso=${idImpresso}`);
           }
           resolve();
         });
       });
     }
 
+    // Se TODAS falharam, retorna erro amigável sem HTTP 500
     if (erros.length === result.rows.length) {
-      throw new Error(`Falha ao enviar para a impressora: ${erros[0]}`);
+      return res.status(200).json({ ok: false, error: erros[0] });
     }
 
-    // Marca como impressas via modal
+    // 5. Zera qtd e marca como impressa
     await pool.query(
       `UPDATE etiqueta."ETQ_recebimento"
-          SET impresso_modal_em = NOW()
+          SET qtd = 0, impressa = true
         WHERE id = ANY($1::int[])`,
       [ids]
     );
@@ -11465,84 +11811,151 @@ app.post('/api/etiquetas/recebimento/imprimir-modal', express.json(), async (req
 // ── Imprimir etiqueta com divisão em múltiplos ────────────────────────────────
 // POST /api/etiquetas/recebimento/imprimir-multiplo
 // Body: { id: number, multiplo: number }
-// Gera N ZPL labels onde N = round(qtd / multiplo) e cada label tem qtd = multiplo
+// Lógica: floor(qtd/multiplo) etiquetas completas + 1 etiqueta com o resto (se > 0)
+// Cada etiqueta recebe ID único de ETQ_rec_impresso; QR sem qtd.
+// Subtrai toda a quantidade de ETQ_recebimento (zera o saldo).
 app.post('/api/etiquetas/recebimento/imprimir-multiplo', express.json(), async (req, res) => {
   try {
-    const id      = Number(req.body?.id)      || 0;
+    const id       = Number(req.body?.id)      || 0;
     const multiplo = Number(req.body?.multiplo) || 0;
 
     if (!id)      return res.status(400).json({ error: 'Informe o id da etiqueta.' });
     if (!multiplo || multiplo <= 0) return res.status(400).json({ error: 'Informe um múltiplo válido (> 0).' });
 
     const result = await pool.query(
-      `SELECT id, numero_nfe, numero_pedido, lote, codigo_produto, descricao_produto,
-              qtd, unidade, data_emissao, conteudo_zpl
+      `SELECT id, lote, codigo_produto, descricao_produto,
+              qtd, unidade, data_emissao
          FROM etiqueta."ETQ_recebimento" WHERE id = $1`,
       [id]
     );
     if (result.rows.length === 0) return res.status(404).json({ error: 'Etiqueta não encontrada.' });
 
-    const etq = result.rows[0];
+    const etq      = result.rows[0];
     const qtdTotal = Number(etq.qtd) || 0;
-    const n = Math.max(1, Math.round(qtdTotal / multiplo));
+    const nCheias  = Math.floor(qtdTotal / multiplo);   // etiquetas completas
+    const resto    = qtdTotal % multiplo;               // sobra (< multiplo)
 
-    const sanitize = (v, max = 999) => String(v || '').slice(0, max).replace(/[\\^~]/g, ' ');
+    // Lista de quantidades: n etiquetas de `multiplo` + opcionalmente 1 de `resto`
+    const lotes = [];
+    for (let i = 0; i < nCheias; i++) lotes.push(multiplo);
+    if (resto > 0) lotes.push(resto);
 
-    const codProd  = sanitize(etq.codigo_produto,  30);
-    const descProd = sanitize(etq.descricao_produto, 70);
-    const loteTxt  = sanitize(etq.lote, 40);
-    const unidTxt  = sanitize(etq.unidade, 10);
+    if (lotes.length === 0) {
+      return res.status(400).json({ error: 'Quantidade insuficiente para gerar etiquetas.' });
+    }
+
+    const sanitize   = (v, max = 999) => String(v || '').slice(0, max).replace(/[\\^~]/g, ' ');
+    const codProd    = sanitize(etq.codigo_produto,  30);
+    const descProd   = sanitize(etq.descricao_produto, 70);
+    const loteTxt    = sanitize(etq.lote, 40);
     const dataExibir = sanitize(etq.data_emissao, 10);
-    const qtdTxt   = sanitize(String(multiplo), 15);
-    const qrContent = `${codProd}|${descProd.slice(0, 40)}|${loteTxt}`;
 
-    // Gera N blocos ZPL idênticos com qtd = multiplo
-    const zplBlocks = Array.from({ length: n }, () =>
-      _gerarZplRecebimentoBloco({ codProd, descProd, qtdTxt, unidTxt, loteTxt, dataExibir, qrContent })
-    );
-
-    const dirPrint = path.join(__dirname, 'etiquetas', 'Recebimento', 'Printed');
+    const dirPrint    = path.join(__dirname, 'etiquetas', 'Recebimento', 'Printed');
     fs.mkdirSync(dirPrint, { recursive: true });
+    const printerName = String(req.body?.printer || process.env.PRINTER || 'ZebraZD220').trim();
+    const usuarioImpressao = String(req.body?.usuario || req.session?.user?.login || req.session?.usuario || '').trim();
+    const erros       = [];
 
-    const printerName = process.env.PRINTER || 'ZebraZD220';
-    const erros = [];
+    for (let i = 0; i < lotes.length; i++) {
+      const qtdEtq = lotes[i];
 
-    // Envia cada etiqueta individualmente para a impressora
-    for (let i = 0; i < zplBlocks.length; i++) {
-      const fname = `receb_multiplo_${id}_${i + 1}_${Date.now()}.zpl`;
+      // 1. Insere placeholder → obtém id da impressão
+      const ins = await pool.query(
+        `INSERT INTO etiqueta."ETQ_rec_impresso"
+           (origem_id, qtd, unidade, data_emissao, conteudo_zpl, usuario_criacao)
+         VALUES ($1,$2,$3,$4,'',$5)
+         RETURNING id`,
+        [etq.id, qtdEtq, etq.unidade, etq.data_emissao, usuarioImpressao]
+      );
+      const idImpresso = ins.rows[0].id;
+
+      // 2. Gera ZPL com ID (sem qtd)
+      const zpl = _gerarZplParaImpressao({ codProd, descProd, idImpresso, loteTxt, dataExibir });
+
+      // 3. Atualiza ZPL
+      await pool.query(
+        `UPDATE etiqueta."ETQ_rec_impresso" SET conteudo_zpl = $1 WHERE id = $2`,
+        [zpl, idImpresso]
+      );
+
+      // 4. Envia para a impressora
+      const fname = `receb_multiplo_${id}_imp${idImpresso}_${Date.now()}.zpl`;
       const fpath = path.join(dirPrint, fname);
-      fs.writeFileSync(fpath, zplBlocks[i], 'utf8');
+      fs.writeFileSync(fpath, zpl, 'utf8');
       await new Promise((resolve) => {
         const args = printerName ? ['-P', printerName, '-o', 'raw', fpath] : ['-o', 'raw', fpath];
         execFile('lpr', args, (err) => {
           if (err) {
-            erros.push(`etiqueta ${i + 1}: ${err.message}`);
+            erros.push(_friendlyLprError(err.message));
             console.error(`[etiquetas/imprimir-multiplo] lpr falhou etiqueta ${i + 1}:`, err.message);
+            // Remove o registro criado para que re-tentativa não gere duplicata
+            pool.query('DELETE FROM etiqueta."ETQ_rec_impresso" WHERE id = $1', [idImpresso]).catch(() => {});
+          } else {
+            console.log(`[etiquetas/imprimir-multiplo] impressão enviada idImpresso=${idImpresso} qtd=${qtdEtq}`);
           }
           resolve();
         });
       });
     }
 
-    if (erros.length === zplBlocks.length) {
-      throw new Error(`Falha ao enviar para a impressora: ${erros[0]}`);
+    // Se TODAS falharam, retorna erro amigável sem HTTP 500
+    if (erros.length === lotes.length) {
+      return res.status(200).json({ ok: false, error: erros[0] });
     }
 
-    // Marca como impressa via modal
+    // 5. Zera qtd e marca como impressa
     await pool.query(
-      `UPDATE etiqueta."ETQ_recebimento" SET impresso_modal_em = NOW() WHERE id = $1`,
+      `UPDATE etiqueta."ETQ_recebimento"
+          SET qtd = 0, impressa = true
+        WHERE id = $1`,
       [id]
     );
 
     res.json({
       ok: true,
-      impressas: zplBlocks.length - erros.length,
+      impressas: lotes.length - erros.length,
+      etiquetas_cheias: nCheias,
+      etiqueta_resto: resto > 0 ? 1 : 0,
       multiplo,
       erros: erros.length > 0 ? erros : undefined,
     });
   } catch (err) {
     console.error('[etiquetas/imprimir-multiplo]', err);
     res.status(500).json({ error: err?.message || 'Falha ao gerar etiquetas' });
+  }
+});
+
+// Ocupação do armazém 3D — retorna estoque por endereço para colorir o mapa
+app.get('/api/etiquetas/ocupacao', async (req, res) => {
+  try {
+    const { rows } = await pool.query(`
+      SELECT
+        i.endereco,
+        r.codigo_produto,
+        SUM(i.qtd)     AS qtd_total,
+        MAX(i.unidade) AS unidade
+      FROM etiqueta."ETQ_rec_impresso" i
+      JOIN etiqueta."ETQ_recebimento"  r ON r.id = i.origem_id
+      WHERE i.endereco IS NOT NULL AND i.endereco <> ''
+      GROUP BY i.endereco, r.codigo_produto
+      ORDER BY i.endereco, r.codigo_produto
+    `);
+
+    /* Agrupa por endereço: { "01-04-01-001": [{codigo_produto, qtd_total, unidade}, ...] } */
+    const mapa = {};
+    for (const row of rows) {
+      const key = row.endereco;
+      if (!mapa[key]) mapa[key] = [];
+      mapa[key].push({
+        codigo_produto: row.codigo_produto,
+        qtd:            Number(row.qtd_total),
+        unidade:        row.unidade || ''
+      });
+    }
+    res.json({ ok: true, ocupacao: mapa });
+  } catch (err) {
+    console.error('[etiquetas/ocupacao]', err);
+    res.status(500).json({ ok: false, error: err?.message || 'Falha ao buscar ocupação' });
   }
 });
 

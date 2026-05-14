@@ -6231,9 +6231,69 @@ else if (nome === 'oscilacao-estoque') {
 /*  Armazém — seleção de rua/lado (2D)                   */
 /* ====================================================== */
 let _arm3dInited = false;
+let _arm3dOcupacao = null; // cache { "01-04-01-001": [{codigo_produto, qtd, unidade}, ...] }
+
+async function _arm3dCarregarOcupacao() {
+  try {
+    const resp = await fetch('/api/etiquetas/ocupacao');
+    const json = await resp.json();
+    if (json.ok) _arm3dOcupacao = json.ocupacao;
+  } catch (e) {
+    console.warn('[arm3d] Não foi possível carregar ocupação:', e);
+    _arm3dOcupacao = {};
+  }
+  _arm3dPopularBadges();
+}
+
+/* Agrega itens de todos os endereços de uma rua+lado e popula o badge */
+function _arm3dPopularBadges() {
+  if (!_arm3dOcupacao) return;
+
+  document.querySelectorAll('.arm3d-rua-slot').forEach(slot => {
+    const rua  = slot.dataset.rua;
+    const lado = slot.dataset.lado; // "E" ou "D"
+    const badge = slot.querySelector('.arm3d-rua-badge');
+    if (!badge) return;
+
+    const ruaStr = String(rua).padStart(2, '0');
+    const prefix  = `${ruaStr}-`;
+
+    /* Soma por código de produto */
+    /* E → CC ímpar; D → CC par */
+    const totais = {};
+    for (const [end, itens] of Object.entries(_arm3dOcupacao)) {
+      if (!end.startsWith(prefix)) continue;
+      const partes = end.split('-');
+      if (partes.length !== 4) continue;
+      const ccNum = parseInt(partes[2], 10);
+      const isImpar = ccNum % 2 === 1;
+      if (lado === 'E' && !isImpar) continue;
+      if (lado === 'D' &&  isImpar) continue;
+      for (const item of itens) {
+        if (!totais[item.codigo_produto]) totais[item.codigo_produto] = { qtd: 0, unidade: item.unidade };
+        totais[item.codigo_produto].qtd += item.qtd;
+      }
+    }
+
+    const linhas = Object.entries(totais);
+    if (linhas.length === 0) { badge.style.display = 'none'; return; }
+
+    badge.innerHTML = linhas.map(([cod, v]) =>
+      `<div class="arm3d-rua-badge-row">
+         <span class="arm3d-rua-badge-cod" title="${cod}">${cod}</span>
+         <span class="arm3d-rua-badge-qtd">${v.qtd} ${v.unidade}</span>
+       </div>`
+    ).join('');
+    badge.style.display = 'block';
+  });
+}
+
 function initArmazem3D() {
   if (_arm3dInited) return;
   _arm3dInited = true;
+
+  /* Carrega ocupação imediatamente para popular as badges na vista inicial */
+  _arm3dCarregarOcupacao();
 
   const photoWrap = document.getElementById('arm3dPhotoWrap');
   const panel     = document.getElementById('arm3dRuaPanel');
@@ -6244,6 +6304,36 @@ function initArmazem3D() {
   const ROWS = 6;  // níveis (cima → baixo no DOM, nível 1 = baixo)
 
   const ladoNome = { E: 'Esquerda', D: 'Direita' };
+
+  /* ── Tooltip flutuante ── */
+  const tooltip = document.createElement('div');
+  tooltip.className = 'arm3d-tooltip';
+  tooltip.style.display = 'none';
+  document.body.appendChild(tooltip);
+
+  function mostrarTooltip(card, itens) {
+    const linhas = itens.map(i =>
+      `<div class="arm3d-tip-row"><span class="arm3d-tip-cod">${i.codigo_produto}</span><span class="arm3d-tip-qtd">${i.qtd} ${i.unidade}</span></div>`
+    ).join('');
+    tooltip.innerHTML = `<div class="arm3d-tip-title">${card.dataset.endereco}</div>${linhas}`;
+    tooltip.style.display = 'block';
+  }
+
+  function moverTooltip(e) {
+    const margin = 12;
+    let x = e.clientX + margin;
+    let y = e.clientY + margin;
+    const tw = tooltip.offsetWidth;
+    const th = tooltip.offsetHeight;
+    if (x + tw > window.innerWidth)  x = e.clientX - tw - margin;
+    if (y + th > window.innerHeight) y = e.clientY - th - margin;
+    tooltip.style.left = x + 'px';
+    tooltip.style.top  = y + 'px';
+  }
+
+  function esconderTooltip() {
+    tooltip.style.display = 'none';
+  }
 
   function gerarGridEstante(rua, lado) {
     const body = document.getElementById('arm3dRuaPanelBody');
@@ -6274,15 +6364,34 @@ function initArmazem3D() {
         cell.className = 'arm3d-cell';
 
         ['e', 'd'].forEach(sub => {
+          const ruaStr    = String(rua).padStart(2, '0');
+          const nivelStr  = String(rowNum).padStart(2, '0');
+          // Edifício: rack E → número ímpar (2*col-1), rack D → número par (2*col)
+          const edificioNum = lado === 'E' ? (2 * colNum - 1) : (2 * colNum);
+          const colunaStr   = String(edificioNum).padStart(2, '0');
+          const ladoStr     = sub === 'e' ? '001' : '002';
+          const endereco    = `${ruaStr}-${nivelStr}-${colunaStr}-${ladoStr}`;
+
           const card = document.createElement('button');
           card.className = 'arm3d-cell-card';
-          card.innerHTML = `<span class="arm3d-card-label">E${colNum}.${rowNum}${sub}</span>`;
-          card.title = `Rua ${rua} ${ladoNome[lado]} — Coluna ${colNum} Nível ${rowNum} ${sub === 'e' ? 'Esquerda' : 'Direita'}`;
+          card.innerHTML = `<span class="arm3d-card-label"><span>${ruaStr}-${nivelStr}</span><span>${colunaStr}-${ladoStr}</span></span>`;
+          card.title = `Endereço: ${endereco} | Rua ${rua} | Nível ${rowNum} | Edifício ${colunaStr} | ${sub === 'e' ? 'Esquerda' : 'Direita'}`;
           card.dataset.rua = rua;
           card.dataset.lado = lado;
           card.dataset.coluna = colNum;
           card.dataset.nivel = rowNum;
           card.dataset.sub = sub;
+          card.dataset.endereco = endereco;
+
+          /* ── Ocupação ── */
+          const itens = _arm3dOcupacao ? (_arm3dOcupacao[endereco] || null) : null;
+          if (itens && itens.length > 0) {
+            card.classList.add('arm3d-card-ocupado');
+            card.addEventListener('mouseenter', e => { mostrarTooltip(card, itens); moverTooltip(e); });
+            card.addEventListener('mousemove',  moverTooltip);
+            card.addEventListener('mouseleave', esconderTooltip);
+          }
+
           cell.appendChild(card);
         });
 
@@ -6294,14 +6403,17 @@ function initArmazem3D() {
     body.appendChild(wrap);
   }
 
-  function abrirPainel(rua, lado) {
+  async function abrirPainel(rua, lado) {
     if (photoWrap) photoWrap.classList.remove('a3-visible');
     if (panelTitle) panelTitle.textContent = `Rua ${rua} — ${ladoNome[lado] || lado}`;
+    /* Garante que ocupação está carregada (uma só vez) */
+    if (_arm3dOcupacao === null) await _arm3dCarregarOcupacao();
     gerarGridEstante(rua, lado);
     if (panel) panel.style.display = 'flex';
   }
 
   function fecharPainel() {
+    esconderTooltip();
     if (panel) panel.style.display = 'none';
     if (photoWrap) photoWrap.classList.add('a3-visible');
   }
@@ -23589,6 +23701,83 @@ window.openRegistros = async function() {
     etqBtnSel.style.display = n > 0 ? 'flex' : 'none';
   }
 
+  // ── Seletor de impressora alternativa ──────────────────────────────────
+  // Mostra no etqStatus um select com impressoras disponíveis + botão Tentar.
+  // Chama onConfirm(printerName) quando o usuário confirma.
+  async function _etqMostrarSeletorImpressora(msgErro, onConfirm, container) {
+    // container opcional: quando chamado de dentro de um modal, passar o elemento interno
+    // para que o seletor apareça dentro do modal e não atrás do overlay.
+    const el = container || etqStatus;
+    if (!el) return;
+    el.innerHTML = '<i class="fa-solid fa-spinner fa-spin" style="color:#facc15;"></i> Buscando impressoras...';
+    if (!container) el.style.color = '#facc15';
+
+    let lista = [];
+    try {
+      const r = await fetch('/api/etiquetas/impressoras', { credentials: 'include' });
+      const d = await r.json();
+      lista = d.impressoras || [];
+    } catch (_) {}
+
+    // PDF está sempre disponível, independente de impressoras físicas
+    const optPdf = '<option value="__PDF__">📄 PDF (baixar arquivo)</option>';
+
+    if (lista.length === 0) {
+      // Sem impressoras físicas: oferece apenas PDF
+      if (!container) el.style.color = '';
+      el.innerHTML = `
+        ${msgErro ? `<span style="color:#f87171;font-size:.85rem;">${escapeHtml(msgErro)}</span>` : ''}
+        <div style="display:flex;align-items:center;gap:8px;margin-top:6px;flex-wrap:wrap;">
+          <label style="color:#94a3b8;font-size:.8rem;white-space:nowrap;">Sem impressoras físicas. Salvar como:</label>
+          <select id="_etqSelectImpressora" style="background:#1e293b;color:#f1f5f9;border:1px solid #334155;border-radius:6px;padding:4px 8px;font-size:.85rem;flex:1;min-width:120px;">
+            ${optPdf}
+          </select>
+          <button id="_etqBtnTentarImpressora" style="background:#7c3aed;color:#fff;border:none;border-radius:6px;padding:5px 12px;font-size:.82rem;cursor:pointer;white-space:nowrap;">
+            <i class="fa-solid fa-file-pdf"></i> Baixar PDF
+          </button>
+          <button id="_etqBtnCancelarImpressora" style="background:#374151;color:#94a3b8;border:none;border-radius:6px;padding:5px 10px;font-size:.82rem;cursor:pointer;">
+            Cancelar
+          </button>
+        </div>`;
+      document.getElementById('_etqBtnTentarImpressora')?.addEventListener('click', () => {
+        el.innerHTML = ''; if (!container) el.style.color = '';
+        onConfirm('__PDF__');
+      });
+      document.getElementById('_etqBtnCancelarImpressora')?.addEventListener('click', () => {
+        el.innerHTML = ''; if (!container) el.style.color = '';
+      });
+      return;
+    }
+
+    // Impressoras físicas + opção PDF no topo
+    const opts = optPdf + lista.map(p => `<option value="${escapeHtml(p)}">${escapeHtml(p)}</option>`).join('');
+    if (!container) el.style.color = '';
+    el.innerHTML = `
+      ${msgErro ? `<span style="color:#f87171;font-size:.85rem;">${escapeHtml(msgErro)}</span>` : ''}
+      <div style="display:flex;align-items:center;gap:8px;margin-top:6px;flex-wrap:wrap;">
+        <label style="color:#94a3b8;font-size:.8rem;white-space:nowrap;">Escolher impressora:</label>
+        <select id="_etqSelectImpressora" style="background:#1e293b;color:#f1f5f9;border:1px solid #334155;border-radius:6px;padding:4px 8px;font-size:.85rem;flex:1;min-width:120px;">
+          ${opts}
+        </select>
+        <button id="_etqBtnTentarImpressora" style="background:#7c3aed;color:#fff;border:none;border-radius:6px;padding:5px 12px;font-size:.82rem;cursor:pointer;white-space:nowrap;">
+          <i class="fa-solid fa-print"></i> Imprimir
+        </button>
+        <button id="_etqBtnCancelarImpressora" style="background:#374151;color:#94a3b8;border:none;border-radius:6px;padding:5px 10px;font-size:.82rem;cursor:pointer;">
+          Cancelar
+        </button>
+      </div>`;
+
+    document.getElementById('_etqBtnTentarImpressora')?.addEventListener('click', () => {
+      const sel = document.getElementById('_etqSelectImpressora');
+      const printer = sel?.value || '';
+      el.innerHTML = ''; if (!container) el.style.color = '';
+      if (printer) onConfirm(printer);
+    });
+    document.getElementById('_etqBtnCancelarImpressora')?.addEventListener('click', () => {
+      el.innerHTML = ''; if (!container) el.style.color = '';
+    });
+  }
+
   function _etqRenderCards(etiquetas) {
     if (!etqGrid) return;
     if (!etiquetas || etiquetas.length === 0) {
@@ -23714,34 +23903,73 @@ window.openRegistros = async function() {
     }
   }
 
-  async function _etqImprimirIds(ids, btnRef) {
+  // ── Dispara impressão, com retry usando impressora alternativa ──────────
+  async function _etqImprimirIds(ids, btnRef, printer = null) {
     if (!ids || ids.length === 0) return;
+    // Opção PDF: baixa via fetch para saber quando concluiu e recarregar a lista
+    if (printer === '__PDF__') {
+      if (btnRef) { btnRef.disabled = true; btnRef.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>'; }
+      try {
+        const usuario = (document.getElementById('userNameDisplay')?.textContent || '').trim();
+        const resp = await fetch('/api/etiquetas/recebimento/pdf-download?ids=' + ids.join(',') + '&usuario=' + encodeURIComponent(usuario), { credentials: 'include' });
+        if (!resp.ok) throw new Error(`Erro ${resp.status}`);
+        const blob = await resp.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url; a.download = `etiquetas_${ids.join('-')}.pdf`;
+        document.body.appendChild(a); a.click();
+        setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 1000);
+        if (etqStatus) { etqStatus.textContent = 'PDF gerado com sucesso.'; etqStatus.style.color = '#4ade80'; setTimeout(() => { if (etqStatus) { etqStatus.textContent = ''; etqStatus.style.color = ''; } }, 4000); }
+        await _etqCarregar(etqBusca?.value || '');
+      } catch (err) {
+        if (etqStatus) { etqStatus.textContent = err.message; etqStatus.style.color = '#f87171'; setTimeout(() => { if (etqStatus) { etqStatus.textContent = ''; etqStatus.style.color = ''; } }, 6000); }
+      } finally {
+        if (btnRef) { btnRef.disabled = false; btnRef.innerHTML = '<i class="fa-solid fa-print"></i> Imprimir'; }
+      }
+      return;
+    }
     const orig = btnRef ? btnRef.innerHTML : '';
     if (btnRef) { btnRef.disabled = true; btnRef.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>'; }
     try {
+      const body = { ids };
+      if (printer) body.printer = printer;
+      body.usuario = (document.getElementById('userNameDisplay')?.textContent || '').trim();
       const resp = await fetch('/api/etiquetas/recebimento/imprimir-modal', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
-        body: JSON.stringify({ ids }),
+        body: JSON.stringify(body),
       });
       if (!resp.ok) {
         const err = await resp.json().catch(() => ({}));
         throw new Error(err.error || `Erro ${resp.status}`);
       }
       const data = await resp.json();
+      if (!data.ok) {
+        // Verifica se é erro de impressora não encontrada → oferece seletor
+        const isPrinterError = /não encontrada|does not exist|impressora/i.test(data.error || '');
+        if (isPrinterError) {
+          _etqMostrarSeletorImpressora(data.error, (p) => _etqImprimirIds(ids, null, p));
+        } else {
+          if (etqStatus) {
+            etqStatus.textContent = data.error || 'Falha ao imprimir.';
+            etqStatus.style.color = '#f87171';
+            setTimeout(() => { if (etqStatus) { etqStatus.textContent = ''; etqStatus.style.color = ''; } }, 6000);
+          }
+        }
+        return;
+      }
       if (etqStatus) {
         etqStatus.textContent = `${data.impressas || ids.length} etiqueta(s) enviada(s) para a impressora.`;
         etqStatus.style.color = '#4ade80';
         setTimeout(() => { if (etqStatus) { etqStatus.textContent = ''; etqStatus.style.color = ''; } }, 4000);
       }
-      // Recarrega a lista após imprimir
       await _etqCarregar(etqBusca?.value || '');
     } catch (err) {
       if (etqStatus) {
-        etqStatus.textContent = 'Erro: ' + err.message;
+        etqStatus.textContent = err.message;
         etqStatus.style.color = '#f87171';
-        setTimeout(() => { if (etqStatus) { etqStatus.textContent = ''; etqStatus.style.color = ''; } }, 4000);
+        setTimeout(() => { if (etqStatus) { etqStatus.textContent = ''; etqStatus.style.color = ''; } }, 6000);
       }
     } finally {
       if (btnRef) { btnRef.disabled = false; btnRef.innerHTML = orig; }
@@ -23756,6 +23984,7 @@ window.openRegistros = async function() {
     if (etqBusca) etqBusca.value = '';
     await _etqCarregar();
   });
+
 
   // Fechar
   etqFechar?.addEventListener('click', () => { if (etqModal) etqModal.style.display = 'none'; });
@@ -23881,21 +24110,71 @@ window.openRegistros = async function() {
   etqMplGerar?.addEventListener('click', async () => {
     const m = Number(etqMplInput?.value);
     if (!_etqMplIdAtual || !m || m <= 0) return;
+    // Abre seletor de impressora dentro do modal (passa etqMplPreview como container)
+    _etqMostrarSeletorImpressora(null, (p) => _etqMplImprimirComImpressora(_etqMplIdAtual, m, p), etqMplPreview);
+  });
+
+  // Dispara impressão múltiplo, com retry para impressora alternativa
+  async function _etqMplImprimirComImpressora(idEtq, multiplo, printer) {
+    if (!etqMplGerar) return;
+    // Opção PDF: baixa via fetch, passa multiplo para floor+remainder no backend
+    if (printer === '__PDF__') {
+      etqMplGerar.disabled = true;
+      etqMplGerar.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Gerando...';
+      try {
+        const usuario = (document.getElementById('userNameDisplay')?.textContent || '').trim();
+        const url = `/api/etiquetas/recebimento/pdf-download?ids=${idEtq}&multiplo=${multiplo}&usuario=${encodeURIComponent(usuario)}`;
+        const resp = await fetch(url, { credentials: 'include' });
+        if (!resp.ok) throw new Error(`Erro ${resp.status}`);
+        const blob = await resp.blob();
+        const urlObj = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = urlObj; a.download = `etiqueta_${idEtq}_multiplo${multiplo}.pdf`;
+        document.body.appendChild(a); a.click();
+        setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(urlObj); }, 1000);
+        _etqMplFecharFn();
+        await _etqCarregar(etqBusca?.value || '');
+      } catch (err) {
+        etqMplGerar.disabled = false;
+        etqMplGerar.innerHTML = '<i class="fa-solid fa-print"></i> Gerar etiquetas';
+        alert('Erro ao gerar PDF: ' + err.message);
+      }
+      return;
+    }
     const origHtml = etqMplGerar.innerHTML;
     etqMplGerar.disabled = true;
     etqMplGerar.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Gerando...';
     try {
+      const body = { id: idEtq, multiplo };
+      if (printer) body.printer = printer;
+      body.usuario = (document.getElementById('userNameDisplay')?.textContent || '').trim();
       const resp = await fetch('/api/etiquetas/recebimento/imprimir-multiplo', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
-        body: JSON.stringify({ id: _etqMplIdAtual, multiplo: m }),
+        body: JSON.stringify(body),
       });
       if (!resp.ok) {
         const err = await resp.json().catch(() => ({}));
         throw new Error(err.error || `Erro ${resp.status}`);
       }
       const data = await resp.json();
+      if (!data.ok) {
+        // Verifica se é erro de impressora não encontrada → oferece seletor
+        const isPrinterError = /não encontrada|does not exist|impressora/i.test(data.error || '');
+        if (isPrinterError) {
+          etqMplGerar.disabled = false;
+          etqMplGerar.innerHTML = origHtml;
+          _etqMostrarSeletorImpressora(data.error, (p) => _etqMplImprimirComImpressora(idEtq, multiplo, p), etqMplPreview);
+        } else {
+          if (etqMplPreview) {
+            etqMplPreview.innerHTML = `<span style="color:#f87171;">${escapeHtml(data.error || 'Falha ao imprimir.')}</span>`;
+          }
+          etqMplGerar.disabled = false;
+          etqMplGerar.innerHTML = origHtml;
+        }
+        return;
+      }
       _etqMplFecharFn();
       if (etqStatus) {
         etqStatus.textContent = `${data.impressas} etiqueta(s) enviada(s) para a impressora.`;
@@ -23905,10 +24184,303 @@ window.openRegistros = async function() {
       await _etqCarregar(etqBusca?.value || '');
     } catch (err) {
       if (etqMplPreview) {
-        etqMplPreview.innerHTML = `<span style="color:#f87171;">Erro: ${escapeHtml(err.message)}</span>`;
+        etqMplPreview.innerHTML = `<span style="color:#f87171;">${escapeHtml(err.message)}</span>`;
       }
       etqMplGerar.disabled = false;
       etqMplGerar.innerHTML = origHtml;
+    }
+  }
+
+  // ── Modal: Etiquetas impressas — Estoque (ETQ_rec_impresso) ───────────────
+  const etqImpressoModal    = document.getElementById('etqImpressoModal');
+  const etqImpressoGrid     = document.getElementById('etqImpressoModalGrid');
+  const etqImpressoStatus   = document.getElementById('etqImpressoModalStatus');
+  const etqImpressoBusca    = document.getElementById('etqImpressoBuscaInput');
+  const etqImpressoFechar   = document.getElementById('etqImpressoModalFechar');
+  const btnFloatingEstoque  = document.getElementById('btnFloatingEstoque');
+
+  let _etqImpressoDebounce = null;
+
+  function _etqImpressoRenderCards(etiquetas) {
+    if (!etqImpressoGrid) return;
+    if (!etiquetas || etiquetas.length === 0) {
+      etqImpressoGrid.innerHTML = '<div class="etiquetas-loading">Nenhuma etiqueta impressa encontrada.</div>';
+      if (etqImpressoStatus) etqImpressoStatus.textContent = '';
+      return;
+    }
+    if (etqImpressoStatus) etqImpressoStatus.textContent = `${etiquetas.length} etiqueta(s) impressa(s)`;
+
+    etqImpressoGrid.innerHTML = etiquetas.map(e => {
+      const cod      = escapeHtml(String(e.codigo_produto   || '—'));
+      const desc     = escapeHtml(String(e.descricao_produto || '—'));
+      const lote     = escapeHtml(String(e.lote             || '—'));
+      const qtd      = escapeHtml(String(e.qtd != null ? e.qtd : ''));
+      const unid     = escapeHtml(String(e.unidade          || ''));
+      const forn     = escapeHtml(String(e.fornecedor       || ''));
+      const nfe      = escapeHtml(String(e.numero_nfe       || ''));
+      const pedido   = escapeHtml(String(e.numero_pedido    || ''));
+      const dataEmis = escapeHtml(String(e.data_emissao     || ''));
+      const impresso = e.impresso_em
+        ? new Date(e.impresso_em).toLocaleString('pt-BR', { day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit' })
+        : '';
+      const usuario  = escapeHtml(String(e.usuario_criacao  || ''));
+
+      return `
+      <div class="etq-card" data-id="${e.id}" style="cursor:pointer;" title="Clique para armazenar">
+        <div class="etq-card-thumbnail">
+          <div class="etq-thumb-row">
+            <div class="etq-thumb-qr"><i class="fa-solid fa-qrcode" style="font-size:18px;color:#888;"></i></div>
+            <div class="etq-thumb-dados">
+              <div class="etq-thumb-line label">Cod. Produto:</div>
+              <div class="etq-thumb-line value">${cod}</div>
+              <div class="etq-thumb-line label">Descricao:</div>
+              <div class="etq-thumb-line value">${desc.length > 22 ? desc.slice(0,22)+'…' : desc}</div>
+              <div class="etq-thumb-line">Qtd: ${qtd} ${unid}</div>
+              <div class="etq-thumb-line">Lote: ${lote.length > 18 ? lote.slice(0,18)+'…' : lote}</div>
+              ${dataEmis ? `<div class="etq-thumb-line">Emissao: ${dataEmis}</div>` : ''}
+            </div>
+          </div>
+        </div>
+        <div class="etq-card-footer">
+          <div class="etq-card-cod">${cod}</div>
+          <div class="etq-card-desc" title="${desc}">${desc}</div>
+          <div class="etq-card-lote">Lote: ${lote}</div>
+          ${forn  ? `<div class="etq-card-lote" style="color:#94a3b8;">Forn.: ${forn}</div>` : ''}
+          ${nfe   ? `<div class="etq-card-lote" style="color:#94a3b8;">NF-e: ${nfe}${pedido ? ' | Ped.: '+pedido : ''}</div>` : ''}
+          ${impresso ? `<div class="etq-card-lote" style="color:#34d399;font-size:11px;">Impresso: ${impresso}${usuario ? ' por '+usuario : ''}</div>` : ''}
+          ${e.endereco ? `<div class="etq-card-lote" style="color:#a78bfa;font-weight:600;"><i class="fa-solid fa-location-dot" style="font-size:10px;"></i> ${escapeHtml(String(e.endereco))}</div>` : ''}
+        </div>
+      </div>`;
+    }).join('');
+  }
+
+  async function _etqImpressoCarregar(q = '') {
+    if (!etqImpressoGrid) return;
+    etqImpressoGrid.innerHTML = '<div class="etiquetas-loading"><i class="fa-solid fa-spinner fa-spin"></i> Carregando...</div>';
+    try {
+      const url = '/api/etiquetas/rec-impresso' + (q ? `?q=${encodeURIComponent(q)}` : '');
+      const resp = await fetch(url, { credentials: 'include' });
+      if (!resp.ok) throw new Error(`Erro ${resp.status}`);
+      const data = await resp.json();
+      _etqImpressoRenderCards(data.etiquetas || []);
+    } catch (err) {
+      if (etqImpressoGrid) etqImpressoGrid.innerHTML = `<div class="etiquetas-loading" style="color:#f87171;">Erro ao carregar: ${escapeHtml(err.message)}</div>`;
+    }
+  }
+
+  btnFloatingEstoque?.addEventListener('click', async () => {
+    if (!etqImpressoModal) return;
+    etqImpressoModal.style.display = 'flex';
+    if (etqImpressoBusca) etqImpressoBusca.value = '';
+    await _etqImpressoCarregar();
+  });
+
+  etqImpressoFechar?.addEventListener('click', () => { if (etqImpressoModal) etqImpressoModal.style.display = 'none'; });
+  etqImpressoModal?.addEventListener('click', e => { if (e.target === etqImpressoModal) etqImpressoModal.style.display = 'none'; });
+
+  etqImpressoBusca?.addEventListener('input', () => {
+    clearTimeout(_etqImpressoDebounce);
+    _etqImpressoDebounce = setTimeout(() => _etqImpressoCarregar(etqImpressoBusca.value.trim()), 350);
+  });
+
+  // ── Sub-modal câmera: Armazenar produto (QR → barcode) ───────────────────
+  const etqArmazenarModal  = document.getElementById('etqArmazenarModal');
+  const etqArmazenarVideo  = document.getElementById('etqArmazenarVideo');
+  const etqArmazenarTitle  = document.getElementById('etqArmazenarTitle');
+  const etqArmazenarIcone  = document.getElementById('etqArmazenarIcone');
+  const etqArmazenarStatus = document.getElementById('etqArmazenarStatus');
+  const etqArmazenarMira   = document.getElementById('etqArmazenarMira');
+  const etqArmazenarFechar = document.getElementById('etqArmazenarFechar');
+  const etqArmazenarInput       = document.getElementById('etqArmazenarInput');
+  const etqArmazenarComplemento = document.getElementById('etqArmazenarComplemento');
+  const etqArmazenarOk          = document.getElementById('etqArmazenarOk');
+  const btnArmazenarProduto     = document.getElementById('btnArmazenarProduto');
+
+  let _armStep = 1;          // 1 = ler QR do produto, 2 = ler barcode do local
+  let _armIdImpresso = null; // id de ETQ_rec_impresso
+  let _armStream = null;
+  let _armScanInterval = null;
+
+  async function _armPararCamera() {
+    clearInterval(_armScanInterval);
+    _armScanInterval = null;
+    if (_armStream) { _armStream.getTracks().forEach(t => t.stop()); _armStream = null; }
+    if (etqArmazenarVideo) etqArmazenarVideo.srcObject = null;
+  }
+
+  async function _armIniciarCamera() {
+    await _armPararCamera();
+    try {
+      _armStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+      if (etqArmazenarVideo) {
+        etqArmazenarVideo.srcObject = _armStream;
+        await etqArmazenarVideo.play().catch(() => {});
+      }
+      return true;
+    } catch (_) {
+      if (etqArmazenarStatus) {
+        etqArmazenarStatus.textContent = 'Câmera não disponível. Use o campo de texto abaixo.';
+        etqArmazenarStatus.style.color = '#f59e0b';
+      }
+      return false;
+    }
+  }
+
+  function _armIniciarScan(onDetect) {
+    clearInterval(_armScanInterval);
+    if (!('BarcodeDetector' in window)) {
+      if (etqArmazenarStatus) {
+        etqArmazenarStatus.textContent = 'Scanner automático não suportado neste navegador. Use o campo abaixo.';
+        etqArmazenarStatus.style.color = '#f59e0b';
+      }
+      return;
+    }
+    const detector = new BarcodeDetector({
+      formats: ['qr_code', 'code_128', 'code_39', 'ean_13', 'ean_8', 'upc_a', 'data_matrix']
+    });
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+    _armScanInterval = setInterval(async () => {
+      if (!etqArmazenarVideo || etqArmazenarVideo.readyState < 2) return;
+      canvas.width  = etqArmazenarVideo.videoWidth;
+      canvas.height = etqArmazenarVideo.videoHeight;
+      ctx.drawImage(etqArmazenarVideo, 0, 0);
+      try {
+        const barcodes = await detector.detect(canvas);
+        if (barcodes.length > 0) {
+          clearInterval(_armScanInterval);
+          _armScanInterval = null;
+          // Pisca mira em verde
+          if (etqArmazenarMira) {
+            etqArmazenarMira.style.borderColor = '#4ade80';
+            setTimeout(() => { if (etqArmazenarMira) etqArmazenarMira.style.borderColor = 'rgba(52,211,153,.85)'; }, 600);
+          }
+          onDetect(barcodes[0].rawValue);
+        }
+      } catch (_) {}
+    }, 250);
+  }
+
+  function _armProcessarCodigo(valor) {
+    if (_armStep === 1) {
+      // QR format: "COD|DESC|LOTE|ID<número>" — extrai o ID
+      const parts = String(valor).split('|');
+      const last  = parts[parts.length - 1]; // ex: "ID13"
+      const m     = last.match(/^ID(\d+)$/i);
+      const id    = m ? parseInt(m[1], 10) : parseInt(String(valor), 10);
+      if (!id || isNaN(id)) {
+        if (etqArmazenarStatus) {
+          etqArmazenarStatus.textContent = 'QR não reconhecido. Tente novamente.';
+          etqArmazenarStatus.style.color = '#f87171';
+        }
+        if (etqArmazenarInput) etqArmazenarInput.value = '';
+        _armIniciarScan(_armProcessarCodigo);
+        return;
+      }
+      _armIdImpresso = id;
+      _armStep = 2;
+      // Atualiza UI para passo 2
+      if (etqArmazenarTitle)  etqArmazenarTitle.textContent  = 'Leia o código do local';
+      if (etqArmazenarIcone)  { etqArmazenarIcone.className = 'fa-solid fa-barcode'; etqArmazenarIcone.style.color = '#a78bfa'; }
+      if (etqArmazenarStatus) { etqArmazenarStatus.textContent = `Produto ID ${id} lido. Aponte para o código de barras do local.`; etqArmazenarStatus.style.color = '#4ade80'; }
+      if (etqArmazenarInput)  { etqArmazenarInput.placeholder = 'Ou digite o local manualmente...'; etqArmazenarInput.value = ''; etqArmazenarInput.focus(); }
+      _armIniciarScan(_armProcessarCodigo);
+    } else {
+      // Passo 2: valor lido é o endereço
+      _armRegistrarEndereco(String(valor).trim());
+    }
+  }
+
+  async function _armRegistrarEndereco(endereco) {
+    await _armPararCamera();
+    const complemento = etqArmazenarComplemento?.value?.trim() || '';
+    if (etqArmazenarStatus) { etqArmazenarStatus.textContent = 'Registrando...'; etqArmazenarStatus.style.color = '#94a3b8'; }
+    try {
+      const body = { endereco };
+      if (complemento) body.complemento = complemento;
+      const resp = await fetch(`/api/etiquetas/rec-impresso/${_armIdImpresso}/endereco`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify(body),
+      });
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({}));
+        throw new Error(err.error || `Erro ${resp.status}`);
+      }
+      const msg = complemento
+        ? `✓ Armazenado em: ${escapeHtml(endereco)} · ${escapeHtml(complemento)}`
+        : `✓ Armazenado em: ${escapeHtml(endereco)}`;
+      if (etqArmazenarStatus) {
+        etqArmazenarStatus.textContent = msg;
+        etqArmazenarStatus.style.color = '#4ade80';
+      }
+      setTimeout(() => {
+        if (etqArmazenarModal) etqArmazenarModal.style.display = 'none';
+        _etqImpressoCarregar(etqImpressoBusca?.value || '');
+      }, 1800);
+    } catch (err) {
+      if (etqArmazenarStatus) {
+        etqArmazenarStatus.textContent = `Erro: ${escapeHtml(err.message)}`;
+        etqArmazenarStatus.style.color = '#f87171';
+      }
+    }
+  }
+
+  async function _armAbrir() {
+    _armStep = 1;
+    _armIdImpresso = null;
+    if (etqArmazenarTitle)  etqArmazenarTitle.textContent  = 'Leia o QR Code do produto';
+    if (etqArmazenarIcone)  { etqArmazenarIcone.className = 'fa-solid fa-qrcode'; etqArmazenarIcone.style.color = '#34d399'; }
+    if (etqArmazenarStatus) { etqArmazenarStatus.textContent = ''; etqArmazenarStatus.style.color = '#94a3b8'; }
+    if (etqArmazenarInput)       { etqArmazenarInput.placeholder = 'Ou digite o código manualmente...'; etqArmazenarInput.value = ''; }
+    if (etqArmazenarComplemento) etqArmazenarComplemento.value = '';
+    if (etqArmazenarMira)        etqArmazenarMira.style.borderColor = 'rgba(52,211,153,.85)';
+    if (etqArmazenarModal)       etqArmazenarModal.style.display = 'flex';
+    const ok = await _armIniciarCamera();
+    if (ok) _armIniciarScan(_armProcessarCodigo);
+  }
+
+  async function _armAbrirComId(id) {
+    _armStep = 2;
+    _armIdImpresso = id;
+    if (etqArmazenarTitle)  etqArmazenarTitle.textContent  = 'Leia o código do local';
+    if (etqArmazenarIcone)  { etqArmazenarIcone.className = 'fa-solid fa-barcode'; etqArmazenarIcone.style.color = '#a78bfa'; }
+    if (etqArmazenarStatus) { etqArmazenarStatus.textContent = `Produto ID ${id} selecionado. Aponte para o código de barras do local.`; etqArmazenarStatus.style.color = '#4ade80'; }
+    if (etqArmazenarInput)       { etqArmazenarInput.placeholder = 'Ou digite o local manualmente...'; etqArmazenarInput.value = ''; etqArmazenarInput.focus(); }
+    if (etqArmazenarComplemento) etqArmazenarComplemento.value = '';
+    if (etqArmazenarMira)        etqArmazenarMira.style.borderColor = 'rgba(52,211,153,.85)';
+    if (etqArmazenarModal)       etqArmazenarModal.style.display = 'flex';
+    const ok = await _armIniciarCamera();
+    if (ok) _armIniciarScan(_armProcessarCodigo);
+  }
+
+  function _armFechar() {
+    _armPararCamera();
+    if (etqArmazenarModal) etqArmazenarModal.style.display = 'none';
+  }
+
+  btnArmazenarProduto?.addEventListener('click', _armAbrir);
+  etqArmazenarFechar?.addEventListener('click', _armFechar);
+  etqArmazenarModal?.addEventListener('click', e => { if (e.target === etqArmazenarModal) _armFechar(); });
+
+  // Clique em card da lista → abre modal já no passo 2 (pula leitura de QR)
+  etqImpressoGrid?.addEventListener('click', e => {
+    const card = e.target.closest('.etq-card[data-id]');
+    if (card) {
+      const id = Number(card.dataset.id);
+      if (id) _armAbrirComId(id);
+    }
+  });
+
+  etqArmazenarOk?.addEventListener('click', () => {
+    const val = etqArmazenarInput?.value?.trim();
+    if (val) _armProcessarCodigo(val);
+  });
+  etqArmazenarInput?.addEventListener('keydown', e => {
+    if (e.key === 'Enter') {
+      const val = etqArmazenarInput?.value?.trim();
+      if (val) _armProcessarCodigo(val);
     }
   });
 
@@ -48395,7 +48967,7 @@ async function imprimirEtiquetaRecebimentoPreview() {
     return;
   }
 
-  const payload = { nfe, pedido, itens: itensParaImprimir };
+  const payload = { nfe, pedido, itens: itensParaImprimir, usuario: (document.getElementById('userNameDisplay')?.textContent || '').trim() };
 
   const btn = document.getElementById('modalAssociarPedidoBtnImprimir');
   const textoOriginal = btn ? btn.innerHTML : '';
@@ -48579,7 +49151,7 @@ async function confirmarAssociacaoPedidoNfeOmie() {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           credentials: 'include',
-          body: JSON.stringify({ nfe: numeroNfe, pedido: numeroPedido, itens: _itensParaEtq }),
+          body: JSON.stringify({ nfe: numeroNfe, pedido: numeroPedido, itens: _itensParaEtq, usuario: (document.getElementById('userNameDisplay')?.textContent || '').trim() }),
         }).then(async r => {
           if (r.ok) {
             const geradas = r.headers.get('X-Etiquetas-Geradas') || _itensParaEtq.length;
