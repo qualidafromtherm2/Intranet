@@ -48741,6 +48741,9 @@ function renderPreviewAssociacaoPedidoNfe(preview) {
   const itens = [...window.__associarNfePreviewEstadoItens].sort(
     (a, b) => Number(a?.n_sequencia || 0) - Number(b?.n_sequencia || 0)
   );
+  const itensInformativosPedido = Array.isArray(preview?.itens_pedido_informativos)
+    ? preview.itens_pedido_informativos
+    : [];
 
   if (!window.__associarNfeCamposEditados || typeof window.__associarNfeCamposEditados !== 'object') {
     window.__associarNfeCamposEditados = {};
@@ -48776,6 +48779,7 @@ function renderPreviewAssociacaoPedidoNfe(preview) {
     return compararQuantidadePreview(item) || compararUnidadePreview(item, unidadePedido);
   }).length;
   const gruposMesmoItem = itens.filter((item) => item?.criterio_match === 'agrupamento_mesmo_item_pedido').length;
+  const itensInformativosTotal = itensInformativosPedido.length;
 
   const totalValorNfPreview = itens.reduce((acc, item) => acc + (Number(item?.nf_valor_total || 0) || 0), 0);
   const totalValorPedidoPreview = itens.reduce((acc, item) => {
@@ -48810,6 +48814,10 @@ function renderPreviewAssociacaoPedidoNfe(preview) {
       <div style="background:${divergenciasQtdUnid > 0 ? '#fef2f2' : '#eff6ff'};border:1px solid ${divergenciasQtdUnid > 0 ? '#fecaca' : '#bfdbfe'};border-radius:10px;padding:10px;">
         <div style="font-size:11px;color:${divergenciasQtdUnid > 0 ? '#991b1b' : '#1d4ed8'};">Qtd/Unid. divergentes</div>
         <div style="font-size:13px;font-weight:700;color:${divergenciasQtdUnid > 0 ? '#991b1b' : '#1d4ed8'};">${divergenciasQtdUnid}</div>
+      </div>
+      <div style="background:${itensInformativosTotal > 0 ? '#fff7ed' : '#f8fafc'};border:1px solid ${itensInformativosTotal > 0 ? '#fed7aa' : '#e2e8f0'};border-radius:10px;padding:10px;">
+        <div style="font-size:11px;color:${itensInformativosTotal > 0 ? '#9a3412' : '#64748b'};">Itens informativos</div>
+        <div style="font-size:13px;font-weight:700;color:${itensInformativosTotal > 0 ? '#9a3412' : '#0f172a'};">${itensInformativosTotal}</div>
       </div>
     </div>
   `;
@@ -48900,8 +48908,31 @@ function renderPreviewAssociacaoPedidoNfe(preview) {
       }).join('')
     : '<tr><td colspan="12" style="padding:10px;font-size:11px;color:#64748b;text-align:center;">Sem itens para pré-visualização.</td></tr>';
 
+  const itensInformativosHtml = itensInformativosPedido.length
+    ? `
+      <div style="margin:0 0 10px;padding:10px 12px;border:1px solid #fed7aa;background:#fff7ed;color:#9a3412;border-radius:8px;font-size:12px;">
+        <div style="display:flex;align-items:center;gap:8px;font-weight:800;margin-bottom:8px;">
+          <i class="fa-solid fa-circle-info"></i>
+          <span>${itensInformativosPedido.length} item(ns) do pedido foram tratados como informativos</span>
+        </div>
+        <div style="font-size:11px;line-height:1.45;margin-bottom:8px;">Eles existem no pedido apenas como referencia interna e nao serao associados a NF-e. A associacao segue somente com os itens que vieram na nota.</div>
+        <div style="display:grid;gap:6px;">
+          ${itensInformativosPedido.map((itemInfo) => `
+            <div style="display:grid;grid-template-columns:minmax(90px,.7fr) minmax(220px,2fr) minmax(80px,.5fr) minmax(90px,.7fr);gap:8px;align-items:center;background:#ffffff;border:1px solid #fed7aa;border-radius:8px;padding:8px;">
+              <div style="font-weight:800;color:#7c2d12;font-size:11px;">${escapeHtml(String(itemInfo?.pedido_codigo_produto || '-'))}</div>
+              <div style="color:#431407;font-size:11px;line-height:1.35;">${escapeHtml(String(itemInfo?.pedido_descricao_produto || '-'))}</div>
+              <div style="text-align:right;color:#7c2d12;font-size:11px;">${escapeHtml(String(itemInfo?.pedido_qtde ?? '-'))} ${escapeHtml(String(itemInfo?.pedido_unidade || ''))}</div>
+              <div style="text-align:right;font-weight:800;color:#7c2d12;font-size:11px;">${escapeHtml(formatarValorRecebimento(itemInfo?.pedido_valor_total))}</div>
+            </div>
+          `).join('')}
+        </div>
+      </div>
+    `
+    : '';
+
   previewConteudo.innerHTML = `
     ${resumoHtml}
+    ${itensInformativosHtml}
     ${gruposMesmoItem > 0 ? `<div style="margin:0 0 10px;padding:10px 12px;border:1px solid #bbf7d0;background:#ecfdf5;color:#166534;border-radius:8px;font-size:12px;font-weight:700;"><i class="fa-solid fa-layer-group" style="margin-right:6px;"></i>${gruposMesmoItem} linha(s) da NF-e foram agrupadas no mesmo item do pedido. A conferência usa a soma das linhas, não cada linha isolada.</div>` : ''}
     <div style="margin:0 0 10px;padding:9px 12px;border:1px solid #bae6fd;background:#f0f9ff;color:#0c4a6e;border-radius:8px;font-size:12px;font-weight:700;">Arraste o bloco do item do Pedido (coluna azul com ícone <i class="fa-solid fa-grip-vertical"></i>) para outra linha da NF-e para trocar a associação.</div>
     ${(divergenciasValor > 0 || divergenciasQtdUnid > 0) ? `<div style="margin:0 0 10px;padding:10px 12px;border:1px solid #fecaca;background:#fff1f2;color:#b91c1c;border-radius:8px;font-size:12px;font-weight:700;">Existem divergências de valor, quantidade ou unidade entre a NF-e e o pedido.${divergenciasQtdUnid > 0 ? ' Edite os campos de Qtd/Unid. do Pedido (em vermelho) antes de associar.' : ' Os campos divergentes estão destacados em vermelho.'}</div>` : ''}
