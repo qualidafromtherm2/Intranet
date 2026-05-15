@@ -18049,6 +18049,24 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
   }
 
+  const transferImportarListaBtn = document.getElementById('transferImportarListaBtn');
+  if (transferImportarListaBtn && !transferImportarListaBtn.__transferBound) {
+    transferImportarListaBtn.__transferBound = true;
+    transferImportarListaBtn.addEventListener('click', (ev) => {
+      ev.preventDefault();
+      abrirModalImportacaoTransferencia();
+    });
+  }
+
+  const ajusteImportarListaBtn = document.getElementById('ajusteImportarListaBtn');
+  if (ajusteImportarListaBtn && !ajusteImportarListaBtn.__ajusteBound) {
+    ajusteImportarListaBtn.__ajusteBound = true;
+    ajusteImportarListaBtn.addEventListener('click', (ev) => {
+      ev.preventDefault();
+      abrirModalImportacaoAjuste();
+    });
+  }
+
   if (transferAcaoBtn && !transferAcaoBtn.__transferBound) {
     transferAcaoBtn.__transferBound = true;
     transferAcaoBtn.addEventListener('click', async () => {
@@ -20891,6 +20909,253 @@ async function openSolicitacoesAjuste(forceReload = false) {
 }
 
 window.openSolicitacoesAjuste = openSolicitacoesAjuste;
+
+// ─── AJUSTE — IMPORTAÇÃO EM MASSA ────────────────────────────────────────────
+
+function ensureAjusteImportModal() {
+  let modal = document.getElementById('ajusteImportModal');
+  if (modal) return modal;
+
+  modal = document.createElement('div');
+  modal.id = 'ajusteImportModal';
+  modal.style.cssText = 'position:fixed;inset:0;z-index:9999;display:none;align-items:center;justify-content:center;background:rgba(3,7,18,.72);backdrop-filter:blur(4px);';
+  modal.innerHTML = `
+    <div style="width:min(820px,calc(100vw - 28px));max-height:calc(100vh - 42px);overflow:auto;background:#121722;border:1px solid #2b3548;border-radius:18px;box-shadow:0 24px 70px rgba(0,0,0,.45);color:#e5e7eb;">
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:18px 22px;border-bottom:1px solid #253044;">
+        <div>
+          <div style="font-size:18px;font-weight:800;">Importar ajustes em massa</div>
+          <div style="font-size:12px;color:#93a4bd;margin-top:6px;line-height:1.55;">
+            Uma linha por item. Colunas separadas por <strong>TAB</strong> (Ctrl+C do Excel/Sheets):<br>
+            <code style="background:#0b1020;padding:2px 6px;border-radius:4px;font-size:11px;">CODIGO &lt;TAB&gt; ENT|SAI &lt;TAB&gt; QUANTIDADE</code>
+            &nbsp;— opcionais: <code style="background:#0b1020;padding:2px 6px;border-radius:4px;font-size:11px;">&lt;TAB&gt; COD_ARMAZEM &lt;TAB&gt; CMC</code>
+          </div>
+        </div>
+        <button id="ajusteImportClose" type="button" class="icon-btn" aria-label="Fechar"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+      <div style="padding:18px 22px;display:grid;gap:14px;">
+        <textarea id="ajusteImportTextarea" rows="14" spellcheck="false"
+          placeholder="05.MP.I.80044&#9;ENT&#9;100&#10;09.MC.N.10106&#9;SAI&#9;50&#10;03.MP.C.20012&#9;ENT&#9;200&#9;10717096386&#9;45.50"
+          style="width:100%;resize:vertical;min-height:220px;background:#0b1020;color:#e5e7eb;border:1px solid #334155;border-radius:12px;padding:12px;font-family:Consolas,monospace;font-size:13px;line-height:1.45;tab-size:20;"></textarea>
+        <div style="display:grid;grid-template-columns:1fr 1fr 160px 1fr;gap:12px;align-items:end;">
+          <label style="display:grid;gap:5px;font-size:12px;font-weight:700;color:#9ca3af;">
+            Tipo padrão <span style="font-weight:400;">(se col.2 omitida)</span>
+            <select id="ajusteImportTipo" class="transfer-select">
+              <option value="ENT">ENT — Entrada</option>
+              <option value="SAI">SAI — Saída</option>
+            </select>
+          </label>
+          <label style="display:grid;gap:5px;font-size:12px;font-weight:700;color:#9ca3af;">
+            Armazém padrão <span style="font-weight:400;">(se col.4 omitida)</span>
+            <select id="ajusteImportLocal" class="transfer-select">
+              <option value="">Selecione…</option>
+            </select>
+          </label>
+          <label style="display:grid;gap:5px;font-size:12px;font-weight:700;color:#9ca3af;">
+            Data mov.
+            <input id="ajusteImportDataMov" type="date" class="transfer-select">
+          </label>
+          <label style="display:grid;gap:5px;font-size:12px;font-weight:700;color:#9ca3af;">
+            Observação
+            <input id="ajusteImportObs" type="text" class="transfer-select" placeholder="Ajuste em massa…">
+          </label>
+        </div>
+        <div id="ajusteImportFeedback" style="display:none;font-size:12px;line-height:1.55;border-radius:10px;padding:10px 14px;white-space:pre-wrap;"></div>
+        <div style="display:flex;justify-content:flex-end;gap:10px;">
+          <button id="ajusteImportCancel" type="button" class="btn tiny">Cancelar</button>
+          <button id="ajusteImportApply" type="button" class="btn" style="min-width:160px;">Registrar ajustes</button>
+        </div>
+      </div>
+    </div>`;
+  document.body.appendChild(modal);
+
+  const fechar = () => { modal.style.display = 'none'; };
+  modal.querySelector('#ajusteImportClose')?.addEventListener('click', fechar);
+  modal.querySelector('#ajusteImportCancel')?.addEventListener('click', fechar);
+  modal.addEventListener('click', ev => { if (ev.target === modal) fechar(); });
+  modal.querySelector('#ajusteImportApply')?.addEventListener('click', importarAjusteEmMassa);
+  return modal;
+}
+
+async function abrirModalImportacaoAjuste() {
+  await carregarLocaisEstoque().catch(() => {});
+  const modal = ensureAjusteImportModal();
+
+  // Preenche o select de armazém com os locais disponíveis
+  const localAtual = String(document.getElementById('ajusteLocal')?.value || TRANSFER_DEFAULT_ORIGEM);
+  preencherSelectImportacaoTransferencia(modal.querySelector('#ajusteImportLocal'), localAtual);
+
+  // Data padrão = hoje
+  const dataInput = modal.querySelector('#ajusteImportDataMov');
+  if (dataInput && !dataInput.value) dataInput.value = new Date().toISOString().slice(0, 10);
+
+  const feedback = modal.querySelector('#ajusteImportFeedback');
+  if (feedback) { feedback.style.display = 'none'; feedback.textContent = ''; }
+
+  modal.style.display = 'flex';
+  setTimeout(() => modal.querySelector('#ajusteImportTextarea')?.focus(), 50);
+}
+
+function parseLinhasImportacaoAjuste(texto) {
+  const TIPOS = new Set(['ENT', 'SAI']);
+  return String(texto || '')
+    .split(/\r?\n/)
+    .map((linha, idx) => ({ linha: idx + 1, raw: linha.trim() }))
+    .filter(item => item.raw && !item.raw.startsWith('#'))
+    .map(item => {
+      const partes = item.raw.split('\t').map(s => s.trim());
+      const codigo = partes[0] || '';
+      const col1Up = String(partes[1] || '').toUpperCase();
+
+      // Formato completo: CODIGO TAB ENT|SAI TAB QTD [TAB ARMAZEM [TAB CMC]]
+      if (TIPOS.has(col1Up)) {
+        return {
+          linha: item.linha,
+          codigo,
+          tipo: col1Up,
+          qtd: sanitizeQtd(partes[2], null),
+          armazem: partes[3] ? String(partes[3]).trim() : null,
+          cmc: partes[4] ? normalizaNumeroParaApi(partes[4]) : null
+        };
+      }
+
+      // Formato legado 2-col: CODIGO TAB QTD (tipo e armazem do default)
+      return {
+        linha: item.linha,
+        codigo,
+        tipo: null,
+        qtd: sanitizeQtd(partes[1], null),
+        armazem: partes[2] ? String(partes[2]).trim() : null,
+        cmc: partes[3] ? normalizaNumeroParaApi(partes[3]) : null
+      };
+    });
+}
+
+async function importarAjusteEmMassa() {
+  const modal = document.getElementById('ajusteImportModal');
+  if (!modal) return;
+
+  const feedback = modal.querySelector('#ajusteImportFeedback');
+  const setFeedback = (msg, tipo = 'erro') => {
+    if (!feedback) return;
+    feedback.style.display = 'block';
+    feedback.style.background = tipo === 'ok' ? 'rgba(22,163,74,.14)' : tipo === 'aviso' ? 'rgba(234,179,8,.10)' : 'rgba(239,68,68,.13)';
+    feedback.style.border = tipo === 'ok' ? '1px solid rgba(34,197,94,.35)' : tipo === 'aviso' ? '1px solid rgba(234,179,8,.35)' : '1px solid rgba(248,113,113,.35)';
+    feedback.style.color = tipo === 'ok' ? '#86efac' : tipo === 'aviso' ? '#fde047' : '#fecaca';
+    feedback.textContent = msg;
+  };
+
+  const applyBtn = modal.querySelector('#ajusteImportApply');
+  const textarea    = modal.querySelector('#ajusteImportTextarea');
+  const tipoDefault = String(modal.querySelector('#ajusteImportTipo')?.value || 'ENT').toUpperCase();
+  const localDefault = String(modal.querySelector('#ajusteImportLocal')?.value || '').trim();
+  const dataMov     = String(modal.querySelector('#ajusteImportDataMov')?.value || '').trim()
+                      || new Date().toISOString().slice(0, 10);
+  const obs         = String(modal.querySelector('#ajusteImportObs')?.value || '').trim()
+                      || 'Ajuste em massa';
+  const solicitante = String(document.getElementById('userNameDisplay')?.textContent || '').trim() || null;
+
+  const linhasBrutas = parseLinhasImportacaoAjuste(textarea?.value || '');
+
+  if (!linhasBrutas.length) {
+    setFeedback('Cole pelo menos uma linha no formato CODIGO TAB ENT|SAI TAB QUANTIDADE.');
+    return;
+  }
+
+  // Aplica defaults
+  const linhas = linhasBrutas.map(item => ({
+    ...item,
+    tipo: item.tipo || tipoDefault,
+    armazem: item.armazem || localDefault
+  }));
+
+  // Validações básicas
+  const semCodigo = linhas.filter(i => !i.codigo);
+  if (semCodigo.length) {
+    setFeedback(`Linhas sem código: ${semCodigo.map(i => i.linha).join(', ')}.`);
+    return;
+  }
+  const semQtd = linhas.filter(i => i.qtd === null || i.qtd <= 0);
+  if (semQtd.length) {
+    setFeedback(`Linhas com quantidade inválida (linha ${semQtd.map(i => i.linha).join(', ')}): verifique se o valor usa ponto ou vírgula corretamente.`);
+    return;
+  }
+  const semArmazem = linhas.filter(i => !i.armazem);
+  if (semArmazem.length) {
+    setFeedback(`${semArmazem.length} linha(s) sem armazém e nenhum armazém padrão selecionado. Selecione o armazém padrão acima ou inclua-o na coluna 4 de cada linha.`);
+    return;
+  }
+
+  // Agrupa por (tipo, armazem) — cada grupo = 1 requisição POST
+  const grupos = new Map();
+  for (const item of linhas) {
+    const key = `${item.tipo}__${item.armazem}`;
+    if (!grupos.has(key)) grupos.set(key, { tipo: item.tipo, armazem: item.armazem, itens: [] });
+    grupos.get(key).itens.push({ codigo: item.codigo, qtd: item.qtd, cmc: item.cmc || null });
+  }
+
+  const totalItens = linhas.length;
+  const totalGrupos = grupos.size;
+
+  const originalHtml = applyBtn?.innerHTML;
+  if (applyBtn) {
+    applyBtn.disabled = true;
+    applyBtn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Registrando ${totalItens} item(ns)…`;
+  }
+
+  const sucessos = [];
+  const erros = [];
+
+  let grupoIdx = 0;
+  for (const [, grupo] of grupos) {
+    grupoIdx++;
+    if (applyBtn) applyBtn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Grupo ${grupoIdx}/${totalGrupos}…`;
+
+    const payload = {
+      tipo_operacao: grupo.tipo,
+      local_estoque: grupo.armazem,
+      data_movimentacao: dataMov,
+      obs,
+      solicitante,
+      itens: grupo.itens
+    };
+
+    try {
+      const resp = await fetch('/api/ajustes', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      const json = await resp.json().catch(() => ({}));
+      if (!resp.ok || !json?.ok) {
+        erros.push(`${grupo.tipo} / armazém ${grupo.armazem} (${grupo.itens.length} itens): ${json?.error || json?.detail || 'Erro desconhecido'}`);
+      } else {
+        sucessos.push({ tipo: grupo.tipo, armazem: grupo.armazem, count: grupo.itens.length });
+      }
+    } catch (err) {
+      erros.push(`${grupo.tipo} / armazém ${grupo.armazem}: ${err?.message || 'Erro de rede'}`);
+    }
+  }
+
+  if (applyBtn) { applyBtn.disabled = false; applyBtn.innerHTML = originalHtml || 'Registrar ajustes'; }
+
+  const totalOk = sucessos.reduce((a, s) => a + s.count, 0);
+
+  if (!sucessos.length) {
+    setFeedback(`Falha ao registrar:\n${erros.join('\n')}`);
+    return;
+  }
+
+  const resumo = sucessos.map(s => `  • ${s.tipo} — ${s.count} item(ns) [armazém ${s.armazem}]`).join('\n');
+  const erroStr = erros.length ? `\n\nFalhas parciais:\n${erros.join('\n')}` : '';
+  setFeedback(`✅ ${totalOk} item(ns) registrado(s) com sucesso em ${sucessos.length} grupo(s):\n${resumo}${erroStr}`, erros.length ? 'aviso' : 'ok');
+
+  solicitacoesAjustesLoaded = false;
+  carregarSolicitacoesAjustes(true).catch(() => {});
+
+  if (!erros.length) {
+    setTimeout(() => { modal.style.display = 'none'; }, 1800);
+  }
+}
 
 // ─── FIM AJUSTE ───────────────────────────────────────────────────────────────
 

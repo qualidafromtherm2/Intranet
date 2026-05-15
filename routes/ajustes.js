@@ -347,15 +347,10 @@ router.post('/', express.json(), async (req, res) => {
         return res.status(400).json({ error: `Quantidade inválida para o produto ${codigo}.` });
       }
 
+      // CMC é opcional no registro; será validado no momento da aprovação
       const cmc = (cmcInformado && cmcInformado > 0)
         ? cmcInformado
-        : await buscarCmcAtual({ codigo, local_estoque });
-
-      if (!cmc || cmc <= 0) {
-        return res.status(400).json({
-          error: `CMC ausente ou inválido para o produto ${codigo}. Informe o CMC para continuar.`
-        });
-      }
+        : await buscarCmcAtual({ codigo, local_estoque }) ?? null;
 
       // Resolve codigo_produto numérico
       const candidatos = [item.codigo_produto, item.codigoProduto, item.codOmie, item.codigo_omie];
