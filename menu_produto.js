@@ -18694,9 +18694,11 @@ document.addEventListener('DOMContentLoaded', async () => {
       if (!confirm(`Aprovar ${pendentes.length} ajuste(s) pendente(s)?`)) return;
       ajusteApproveAllBtn.disabled = true;
       const originalLabel = ajusteApproveAllBtn.textContent;
-      ajusteApproveAllBtn.textContent = 'Aprovando…';
       const erros = [];
+      let aprovados = 0;
       for (const a of pendentes) {
+        aprovados++;
+        ajusteApproveAllBtn.textContent = `Aprovando ${aprovados}/${pendentes.length}…`;
         try {
           const resp = await fetch(`/api/ajustes/${a.id}/aprovar`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ aprovadoPor: usuario }) });
           const json = await resp.json().catch(() => ({}));
@@ -20920,49 +20922,78 @@ function ensureAjusteImportModal() {
   modal.id = 'ajusteImportModal';
   modal.style.cssText = 'position:fixed;inset:0;z-index:9999;display:none;align-items:center;justify-content:center;background:rgba(3,7,18,.72);backdrop-filter:blur(4px);';
   modal.innerHTML = `
-    <div style="width:min(820px,calc(100vw - 28px));max-height:calc(100vh - 42px);overflow:auto;background:#121722;border:1px solid #2b3548;border-radius:18px;box-shadow:0 24px 70px rgba(0,0,0,.45);color:#e5e7eb;">
+    <div style="width:min(860px,calc(100vw - 28px));max-height:calc(100vh - 42px);overflow:auto;background:#121722;border:1px solid #2b3548;border-radius:18px;box-shadow:0 24px 70px rgba(0,0,0,.45);color:#e5e7eb;">
       <div style="display:flex;align-items:center;justify-content:space-between;padding:18px 22px;border-bottom:1px solid #253044;">
         <div>
-          <div style="font-size:18px;font-weight:800;">Importar ajustes em massa</div>
-          <div style="font-size:12px;color:#93a4bd;margin-top:6px;line-height:1.55;">
-            Uma linha por item. Colunas separadas por <strong>TAB</strong> (Ctrl+C do Excel/Sheets):<br>
-            <code style="background:#0b1020;padding:2px 6px;border-radius:4px;font-size:11px;">CODIGO &lt;TAB&gt; ENT|SAI &lt;TAB&gt; QUANTIDADE</code>
-            &nbsp;— opcionais: <code style="background:#0b1020;padding:2px 6px;border-radius:4px;font-size:11px;">&lt;TAB&gt; COD_ARMAZEM &lt;TAB&gt; CMC</code>
+          <div style="font-size:18px;font-weight:800;">Importar movimentações em massa</div>
+          <div style="font-size:12px;color:#93a4bd;margin-top:6px;line-height:1.7;">
+            <strong style="color:#e5e7eb;">ENT/SAI:</strong>
+            <code style="background:#0b1020;padding:2px 6px;border-radius:4px;">CODIGO &lt;TAB&gt; ENT|SAI &lt;TAB&gt; QTD</code>
+            &nbsp;+ opcionais: <code style="background:#0b1020;padding:2px 6px;border-radius:4px;">&lt;TAB&gt; ARMAZEM &lt;TAB&gt; CMC</code><br>
+            <strong style="color:#e5e7eb;">TRF:</strong>
+            <code style="background:#0b1020;padding:2px 6px;border-radius:4px;">CODIGO &lt;TAB&gt; TRF &lt;TAB&gt; QTD &lt;TAB&gt; ORIGEM &lt;TAB&gt; DESTINO</code>
+            <span style="color:#64748b;">(origem/destino opcionais, usa padrão abaixo)</span>
           </div>
         </div>
         <button id="ajusteImportClose" type="button" class="icon-btn" aria-label="Fechar"><i class="fa-solid fa-xmark"></i></button>
       </div>
       <div style="padding:18px 22px;display:grid;gap:14px;">
-        <textarea id="ajusteImportTextarea" rows="14" spellcheck="false"
-          placeholder="05.MP.I.80044&#9;ENT&#9;100&#10;09.MC.N.10106&#9;SAI&#9;50&#10;03.MP.C.20012&#9;ENT&#9;200&#9;10717096386&#9;45.50"
-          style="width:100%;resize:vertical;min-height:220px;background:#0b1020;color:#e5e7eb;border:1px solid #334155;border-radius:12px;padding:12px;font-family:Consolas,monospace;font-size:13px;line-height:1.45;tab-size:20;"></textarea>
-        <div style="display:grid;grid-template-columns:1fr 1fr 160px 1fr;gap:12px;align-items:end;">
-          <label style="display:grid;gap:5px;font-size:12px;font-weight:700;color:#9ca3af;">
-            Tipo padrão <span style="font-weight:400;">(se col.2 omitida)</span>
-            <select id="ajusteImportTipo" class="transfer-select">
-              <option value="ENT">ENT — Entrada</option>
-              <option value="SAI">SAI — Saída</option>
-            </select>
-          </label>
-          <label style="display:grid;gap:5px;font-size:12px;font-weight:700;color:#9ca3af;">
-            Armazém padrão <span style="font-weight:400;">(se col.4 omitida)</span>
-            <select id="ajusteImportLocal" class="transfer-select">
-              <option value="">Selecione…</option>
-            </select>
-          </label>
-          <label style="display:grid;gap:5px;font-size:12px;font-weight:700;color:#9ca3af;">
-            Data mov.
-            <input id="ajusteImportDataMov" type="date" class="transfer-select">
-          </label>
-          <label style="display:grid;gap:5px;font-size:12px;font-weight:700;color:#9ca3af;">
-            Observação
-            <input id="ajusteImportObs" type="text" class="transfer-select" placeholder="Ajuste em massa…">
-          </label>
+        <textarea id="ajusteImportTextarea" rows="12" spellcheck="false"
+          placeholder="05.MP.I.80044&#9;ENT&#9;100&#10;09.MC.N.10106&#9;SAI&#9;50&#10;03.MP.C.20012&#9;TRF&#9;200&#9;10717096386&#9;10717096400"
+          style="width:100%;resize:vertical;min-height:200px;background:#0b1020;color:#e5e7eb;border:1px solid #334155;border-radius:12px;padding:12px;font-family:Consolas,monospace;font-size:13px;line-height:1.45;tab-size:20;"></textarea>
+
+        <details id="ajusteImportDefaults" open>
+          <summary style="cursor:pointer;font-size:12px;font-weight:700;color:#9ca3af;padding:4px 0;user-select:none;">
+            ▸ Valores padrão (quando colunas forem omitidas)
+          </summary>
+          <div style="display:grid;grid-template-columns:1fr 1fr 160px 1fr;gap:12px;align-items:end;padding-top:10px;">
+            <label style="display:grid;gap:5px;font-size:12px;font-weight:700;color:#9ca3af;">
+              Tipo padrão <span style="font-weight:400;">(ENT/SAI — se col.2 omitida)</span>
+              <select id="ajusteImportTipo" class="transfer-select">
+                <option value="ENT">ENT — Entrada</option>
+                <option value="SAI">SAI — Saída</option>
+              </select>
+            </label>
+            <label style="display:grid;gap:5px;font-size:12px;font-weight:700;color:#9ca3af;">
+              Armazém padrão <span style="font-weight:400;">(ENT/SAI — col.4)</span>
+              <select id="ajusteImportLocal" class="transfer-select"><option value="">Selecione…</option></select>
+            </label>
+            <label style="display:grid;gap:5px;font-size:12px;font-weight:700;color:#9ca3af;">
+              Data mov.
+              <input id="ajusteImportDataMov" type="date" class="transfer-select">
+            </label>
+            <label style="display:grid;gap:5px;font-size:12px;font-weight:700;color:#9ca3af;">
+              Observação
+              <input id="ajusteImportObs" type="text" class="transfer-select" placeholder="Ajuste em massa…">
+            </label>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;align-items:end;padding-top:10px;">
+            <label style="display:grid;gap:5px;font-size:12px;font-weight:700;color:#9ca3af;">
+              Origem padrão TRF <span style="font-weight:400;">(col.4 para TRF)</span>
+              <select id="ajusteImportTrfOrigem" class="transfer-select"><option value="">Selecione…</option></select>
+            </label>
+            <label style="display:grid;gap:5px;font-size:12px;font-weight:700;color:#9ca3af;">
+              Destino padrão TRF <span style="font-weight:400;">(col.5 para TRF)</span>
+              <select id="ajusteImportTrfDestino" class="transfer-select"><option value="">Selecione…</option></select>
+            </label>
+          </div>
+        </details>
+
+        <div id="ajusteImportCmcPanel" style="display:none;border:1px solid #253044;border-radius:10px;overflow:hidden;">
+          <div style="padding:8px 14px;background:#0b1020;font-size:11px;font-weight:700;color:#64748b;letter-spacing:.06em;display:flex;align-items:center;justify-content:space-between;">
+            <span>VERIFICAÇÃO DE CMC</span>
+            <span id="ajusteImportCmcSummary"></span>
+          </div>
+          <div id="ajusteImportCmcRows" style="padding:6px 14px 10px;max-height:200px;overflow:auto;font-size:12px;font-family:Consolas,monospace;line-height:1.8;"></div>
         </div>
+
         <div id="ajusteImportFeedback" style="display:none;font-size:12px;line-height:1.55;border-radius:10px;padding:10px 14px;white-space:pre-wrap;"></div>
         <div style="display:flex;justify-content:flex-end;gap:10px;">
           <button id="ajusteImportCancel" type="button" class="btn tiny">Cancelar</button>
-          <button id="ajusteImportApply" type="button" class="btn" style="min-width:160px;">Registrar ajustes</button>
+          <button id="ajusteImportVerifyCmc" type="button" class="btn tiny" title="Consulta o banco para ver quais produtos têm CMC cadastrado">
+            <i class="fa-solid fa-magnifying-glass"></i> Verificar CMC
+          </button>
+          <button id="ajusteImportApply" type="button" class="btn" style="min-width:160px;">Registrar movimentações</button>
         </div>
       </div>
     </div>`;
@@ -20973,6 +21004,7 @@ function ensureAjusteImportModal() {
   modal.querySelector('#ajusteImportCancel')?.addEventListener('click', fechar);
   modal.addEventListener('click', ev => { if (ev.target === modal) fechar(); });
   modal.querySelector('#ajusteImportApply')?.addEventListener('click', importarAjusteEmMassa);
+  modal.querySelector('#ajusteImportVerifyCmc')?.addEventListener('click', verificarCmcAjusteImport);
   return modal;
 }
 
@@ -20980,23 +21012,25 @@ async function abrirModalImportacaoAjuste() {
   await carregarLocaisEstoque().catch(() => {});
   const modal = ensureAjusteImportModal();
 
-  // Preenche o select de armazém com os locais disponíveis
   const localAtual = String(document.getElementById('ajusteLocal')?.value || TRANSFER_DEFAULT_ORIGEM);
   preencherSelectImportacaoTransferencia(modal.querySelector('#ajusteImportLocal'), localAtual);
+  preencherSelectImportacaoTransferencia(modal.querySelector('#ajusteImportTrfOrigem'), TRANSFER_DEFAULT_ORIGEM);
+  preencherSelectImportacaoTransferencia(modal.querySelector('#ajusteImportTrfDestino'), TRANSFER_DEFAULT_DESTINO);
 
-  // Data padrão = hoje
   const dataInput = modal.querySelector('#ajusteImportDataMov');
   if (dataInput && !dataInput.value) dataInput.value = new Date().toISOString().slice(0, 10);
 
   const feedback = modal.querySelector('#ajusteImportFeedback');
   if (feedback) { feedback.style.display = 'none'; feedback.textContent = ''; }
+  const cmcPanel = modal.querySelector('#ajusteImportCmcPanel');
+  if (cmcPanel) cmcPanel.style.display = 'none';
 
   modal.style.display = 'flex';
   setTimeout(() => modal.querySelector('#ajusteImportTextarea')?.focus(), 50);
 }
 
 function parseLinhasImportacaoAjuste(texto) {
-  const TIPOS = new Set(['ENT', 'SAI']);
+  const TIPOS_AJUSTE = new Set(['ENT', 'SAI']);
   return String(texto || '')
     .split(/\r?\n/)
     .map((linha, idx) => ({ linha: idx + 1, raw: linha.trim() }))
@@ -21006,28 +21040,109 @@ function parseLinhasImportacaoAjuste(texto) {
       const codigo = partes[0] || '';
       const col1Up = String(partes[1] || '').toUpperCase();
 
-      // Formato completo: CODIGO TAB ENT|SAI TAB QTD [TAB ARMAZEM [TAB CMC]]
-      if (TIPOS.has(col1Up)) {
+      // TRF: CODIGO TAB TRF TAB QTD [TAB ORIGEM [TAB DESTINO]]
+      if (col1Up === 'TRF') {
         return {
-          linha: item.linha,
-          codigo,
-          tipo: col1Up,
+          linha: item.linha, codigo, tipo: 'TRF',
+          qtd: sanitizeQtd(partes[2], null),
+          origem: partes[3] ? String(partes[3]).trim() : null,
+          destino: partes[4] ? String(partes[4]).trim() : null,
+          cmc: partes[5] ? normalizaNumeroParaApi(partes[5]) : null
+        };
+      }
+
+      // ENT/SAI completo: CODIGO TAB ENT|SAI TAB QTD [TAB ARMAZEM [TAB CMC]]
+      if (TIPOS_AJUSTE.has(col1Up)) {
+        return {
+          linha: item.linha, codigo, tipo: col1Up,
           qtd: sanitizeQtd(partes[2], null),
           armazem: partes[3] ? String(partes[3]).trim() : null,
           cmc: partes[4] ? normalizaNumeroParaApi(partes[4]) : null
         };
       }
 
-      // Formato legado 2-col: CODIGO TAB QTD (tipo e armazem do default)
+      // Legado 2-col: CODIGO TAB QTD (tipo do default)
       return {
-        linha: item.linha,
-        codigo,
-        tipo: null,
+        linha: item.linha, codigo, tipo: null,
         qtd: sanitizeQtd(partes[1], null),
         armazem: partes[2] ? String(partes[2]).trim() : null,
         cmc: partes[3] ? normalizaNumeroParaApi(partes[3]) : null
       };
     });
+}
+
+async function verificarCmcAjusteImport() {
+  const modal = document.getElementById('ajusteImportModal');
+  if (!modal) return;
+
+  const verifyBtn = modal.querySelector('#ajusteImportVerifyCmc');
+  const panel = modal.querySelector('#ajusteImportCmcPanel');
+  const rowsEl = modal.querySelector('#ajusteImportCmcRows');
+  const summaryEl = modal.querySelector('#ajusteImportCmcSummary');
+
+  const localDefault = String(modal.querySelector('#ajusteImportLocal')?.value || '').trim();
+  const linhasBrutas = parseLinhasImportacaoAjuste(modal.querySelector('#ajusteImportTextarea')?.value || '');
+  const linhas = linhasBrutas.filter(i => i.codigo);
+
+  if (!linhas.length) {
+    if (panel) { panel.style.display = 'none'; }
+    return;
+  }
+
+  const originalHtml = verifyBtn?.innerHTML;
+  if (verifyBtn) { verifyBtn.disabled = true; verifyBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>'; }
+
+  try {
+    // Remove duplicatas
+    const uniqueItems = [...new Map(linhas.map(i => {
+      const armazem = i.armazem || localDefault || null;
+      return [`${i.codigo}__${armazem}`, { codigo: i.codigo, local_estoque: armazem }];
+    })).values()];
+
+    const resp = await fetch('/api/ajustes/check-produtos', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ itens: uniqueItems })
+    });
+    const json = await resp.json().catch(() => ({}));
+    const resultados = json?.resultados || [];
+
+    const mapaResultados = new Map(resultados.map(r => [`${r.codigo}__${r.local_estoque || localDefault || ''}`, r]));
+
+    let semCmc = 0, comCmc = 0;
+    const htmlRows = linhas.map(item => {
+      if (item.tipo === 'TRF') {
+        return `<div style="color:#64748b;">└ ${item.codigo} <span style="opacity:.6;">[TRF — CMC verificado na aprovação]</span></div>`;
+      }
+      const armazem = item.armazem || localDefault || '';
+      const res = mapaResultados.get(`${item.codigo}__${armazem}`);
+      const cmcInformado = item.cmc && item.cmc > 0;
+      if (cmcInformado) {
+        comCmc++;
+        return `<div style="color:#86efac;">✅ ${item.codigo} — CMC informado: ${item.cmc.toFixed(4)}</div>`;
+      }
+      if (res?.cmc) {
+        comCmc++;
+        return `<div style="color:#86efac;">✅ ${item.codigo} — CMC atual: ${Number(res.cmc).toFixed(4)}</div>`;
+      }
+      semCmc++;
+      return `<div style="color:#fca5a5;">⚠️ ${item.codigo} — sem CMC${item.tipo === 'ENT' ? ' (ajuste ENT pode prosseguir, CMC será necessário na aprovação)' : ''}</div>`;
+    }).join('');
+
+    if (rowsEl) rowsEl.innerHTML = htmlRows;
+    if (summaryEl) {
+      summaryEl.textContent = semCmc > 0
+        ? `${comCmc} com CMC · ${semCmc} sem CMC`
+        : `Todos os ${comCmc} produto(s) têm CMC ✅`;
+      summaryEl.style.color = semCmc > 0 ? '#fca5a5' : '#86efac';
+    }
+    if (panel) panel.style.display = 'block';
+  } catch (err) {
+    if (rowsEl) rowsEl.innerHTML = `<span style="color:#fca5a5;">Falha ao verificar: ${err?.message || err}</span>`;
+    if (panel) panel.style.display = 'block';
+  } finally {
+    if (verifyBtn) { verifyBtn.disabled = false; verifyBtn.innerHTML = originalHtml || 'Verificar CMC'; }
+  }
 }
 
 async function importarAjusteEmMassa() {
@@ -21045,27 +21160,30 @@ async function importarAjusteEmMassa() {
   };
 
   const applyBtn = modal.querySelector('#ajusteImportApply');
-  const textarea    = modal.querySelector('#ajusteImportTextarea');
-  const tipoDefault = String(modal.querySelector('#ajusteImportTipo')?.value || 'ENT').toUpperCase();
-  const localDefault = String(modal.querySelector('#ajusteImportLocal')?.value || '').trim();
-  const dataMov     = String(modal.querySelector('#ajusteImportDataMov')?.value || '').trim()
-                      || new Date().toISOString().slice(0, 10);
-  const obs         = String(modal.querySelector('#ajusteImportObs')?.value || '').trim()
-                      || 'Ajuste em massa';
-  const solicitante = String(document.getElementById('userNameDisplay')?.textContent || '').trim() || null;
+  const textarea      = modal.querySelector('#ajusteImportTextarea');
+  const tipoDefault   = String(modal.querySelector('#ajusteImportTipo')?.value || 'ENT').toUpperCase();
+  const localDefault  = String(modal.querySelector('#ajusteImportLocal')?.value || '').trim();
+  const trfOrigemDef  = String(modal.querySelector('#ajusteImportTrfOrigem')?.value || '').trim();
+  const trfDestinoDef = String(modal.querySelector('#ajusteImportTrfDestino')?.value || '').trim();
+  const dataMov       = String(modal.querySelector('#ajusteImportDataMov')?.value || '').trim()
+                        || new Date().toISOString().slice(0, 10);
+  const obs           = String(modal.querySelector('#ajusteImportObs')?.value || '').trim()
+                        || 'Importação em massa';
+  const solicitante   = String(document.getElementById('userNameDisplay')?.textContent || '').trim() || null;
 
   const linhasBrutas = parseLinhasImportacaoAjuste(textarea?.value || '');
-
   if (!linhasBrutas.length) {
     setFeedback('Cole pelo menos uma linha no formato CODIGO TAB ENT|SAI TAB QUANTIDADE.');
     return;
   }
 
-  // Aplica defaults
+  // Aplica defaults por tipo
   const linhas = linhasBrutas.map(item => ({
     ...item,
     tipo: item.tipo || tipoDefault,
-    armazem: item.armazem || localDefault
+    armazem: item.tipo === 'TRF' ? undefined : (item.armazem || localDefault),
+    origem: item.tipo === 'TRF' ? (item.origem || trfOrigemDef) : undefined,
+    destino: item.tipo === 'TRF' ? (item.destino || trfDestinoDef) : undefined
   }));
 
   // Validações básicas
@@ -21076,26 +21194,42 @@ async function importarAjusteEmMassa() {
   }
   const semQtd = linhas.filter(i => i.qtd === null || i.qtd <= 0);
   if (semQtd.length) {
-    setFeedback(`Linhas com quantidade inválida (linha ${semQtd.map(i => i.linha).join(', ')}): verifique se o valor usa ponto ou vírgula corretamente.`);
+    setFeedback(`Qtd inválida nas linhas: ${semQtd.map(i => i.linha).join(', ')}.`);
     return;
   }
-  const semArmazem = linhas.filter(i => !i.armazem);
-  if (semArmazem.length) {
-    setFeedback(`${semArmazem.length} linha(s) sem armazém e nenhum armazém padrão selecionado. Selecione o armazém padrão acima ou inclua-o na coluna 4 de cada linha.`);
+  const ajustesSemArmazem = linhas.filter(i => i.tipo !== 'TRF' && !i.armazem);
+  if (ajustesSemArmazem.length) {
+    setFeedback(`${ajustesSemArmazem.length} item(ns) ENT/SAI sem armazém. Selecione o armazém padrão ou inclua na coluna 4.`);
+    return;
+  }
+  const trfSemOrigem = linhas.filter(i => i.tipo === 'TRF' && !i.origem);
+  if (trfSemOrigem.length) {
+    setFeedback(`${trfSemOrigem.length} item(ns) TRF sem origem. Selecione a origem padrão TRF ou inclua na coluna 4.`);
+    return;
+  }
+  const trfSemDestino = linhas.filter(i => i.tipo === 'TRF' && !i.destino);
+  if (trfSemDestino.length) {
+    setFeedback(`${trfSemDestino.length} item(ns) TRF sem destino. Selecione o destino padrão TRF ou inclua na coluna 5.`);
     return;
   }
 
-  // Agrupa por (tipo, armazem) — cada grupo = 1 requisição POST
-  const grupos = new Map();
+  // ─ Agrupa ENT/SAI por (tipo, armazem), TRF por (origem, destino) ─
+  const gruposAjuste = new Map();
+  const gruposTrf = new Map();
   for (const item of linhas) {
-    const key = `${item.tipo}__${item.armazem}`;
-    if (!grupos.has(key)) grupos.set(key, { tipo: item.tipo, armazem: item.armazem, itens: [] });
-    grupos.get(key).itens.push({ codigo: item.codigo, qtd: item.qtd, cmc: item.cmc || null });
+    if (item.tipo === 'TRF') {
+      const key = `${item.origem}__${item.destino}`;
+      if (!gruposTrf.has(key)) gruposTrf.set(key, { origem: item.origem, destino: item.destino, itens: [] });
+      gruposTrf.get(key).itens.push({ codigo: item.codigo, qtd: item.qtd, cmc: item.cmc || null });
+    } else {
+      const key = `${item.tipo}__${item.armazem}`;
+      if (!gruposAjuste.has(key)) gruposAjuste.set(key, { tipo: item.tipo, armazem: item.armazem, itens: [] });
+      gruposAjuste.get(key).itens.push({ codigo: item.codigo, qtd: item.qtd, cmc: item.cmc || null });
+    }
   }
 
+  const totalGrupos = gruposAjuste.size + gruposTrf.size;
   const totalItens = linhas.length;
-  const totalGrupos = grupos.size;
-
   const originalHtml = applyBtn?.innerHTML;
   if (applyBtn) {
     applyBtn.disabled = true;
@@ -21104,53 +21238,60 @@ async function importarAjusteEmMassa() {
 
   const sucessos = [];
   const erros = [];
-
   let grupoIdx = 0;
-  for (const [, grupo] of grupos) {
+
+  // ─ Submete grupos ENT/SAI ─
+  for (const [, grupo] of gruposAjuste) {
     grupoIdx++;
-    if (applyBtn) applyBtn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Grupo ${grupoIdx}/${totalGrupos}…`;
-
-    const payload = {
-      tipo_operacao: grupo.tipo,
-      local_estoque: grupo.armazem,
-      data_movimentacao: dataMov,
-      obs,
-      solicitante,
-      itens: grupo.itens
-    };
-
+    if (applyBtn) applyBtn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> ${grupoIdx}/${totalGrupos} grupos…`;
     try {
       const resp = await fetch('/api/ajustes', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
+        body: JSON.stringify({ tipo_operacao: grupo.tipo, local_estoque: grupo.armazem, data_movimentacao: dataMov, obs, solicitante, itens: grupo.itens })
       });
       const json = await resp.json().catch(() => ({}));
-      if (!resp.ok || !json?.ok) {
-        erros.push(`${grupo.tipo} / armazém ${grupo.armazem} (${grupo.itens.length} itens): ${json?.error || json?.detail || 'Erro desconhecido'}`);
-      } else {
-        sucessos.push({ tipo: grupo.tipo, armazem: grupo.armazem, count: grupo.itens.length });
-      }
+      if (!resp.ok || !json?.ok) erros.push(`${grupo.tipo}/${grupo.armazem} (${grupo.itens.length} itens): ${json?.error || 'Erro'}`);
+      else sucessos.push({ label: `${grupo.tipo} — armazém ${grupo.armazem}`, count: grupo.itens.length });
     } catch (err) {
-      erros.push(`${grupo.tipo} / armazém ${grupo.armazem}: ${err?.message || 'Erro de rede'}`);
+      erros.push(`${grupo.tipo}/${grupo.armazem}: ${err?.message || 'Erro de rede'}`);
     }
   }
 
-  if (applyBtn) { applyBtn.disabled = false; applyBtn.innerHTML = originalHtml || 'Registrar ajustes'; }
+  // ─ Submete grupos TRF ─
+  for (const [, grupo] of gruposTrf) {
+    grupoIdx++;
+    if (applyBtn) applyBtn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> ${grupoIdx}/${totalGrupos} grupos…`;
+    try {
+      const resp = await fetch('/api/transferencias', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ origem: grupo.origem, destino: grupo.destino, data_movimentacao: dataMov, solicitante, itens: grupo.itens })
+      });
+      const json = await resp.json().catch(() => ({}));
+      if (!resp.ok || !json?.ok) erros.push(`TRF ${grupo.origem}→${grupo.destino} (${grupo.itens.length} itens): ${json?.error || 'Erro'}`);
+      else sucessos.push({ label: `TRF ${grupo.origem} → ${grupo.destino}`, count: grupo.itens.length });
+    } catch (err) {
+      erros.push(`TRF ${grupo.origem}→${grupo.destino}: ${err?.message || 'Erro de rede'}`);
+    }
+  }
+
+  if (applyBtn) { applyBtn.disabled = false; applyBtn.innerHTML = originalHtml || 'Registrar movimentações'; }
 
   const totalOk = sucessos.reduce((a, s) => a + s.count, 0);
-
   if (!sucessos.length) {
     setFeedback(`Falha ao registrar:\n${erros.join('\n')}`);
     return;
   }
 
-  const resumo = sucessos.map(s => `  • ${s.tipo} — ${s.count} item(ns) [armazém ${s.armazem}]`).join('\n');
+  const resumo = sucessos.map(s => `  • ${s.label}: ${s.count} item(ns)`).join('\n');
   const erroStr = erros.length ? `\n\nFalhas parciais:\n${erros.join('\n')}` : '';
-  setFeedback(`✅ ${totalOk} item(ns) registrado(s) com sucesso em ${sucessos.length} grupo(s):\n${resumo}${erroStr}`, erros.length ? 'aviso' : 'ok');
+  setFeedback(`✅ ${totalOk} item(ns) registrado(s) em ${sucessos.length} grupo(s):\n${resumo}${erroStr}`, erros.length ? 'aviso' : 'ok');
 
   solicitacoesAjustesLoaded = false;
   carregarSolicitacoesAjustes(true).catch(() => {});
+  solicitacoesTransferenciasLoaded = false;
+  carregarSolicitacoesTransferencias(true).catch(() => {});
 
   if (!erros.length) {
     setTimeout(() => { modal.style.display = 'none'; }, 1800);

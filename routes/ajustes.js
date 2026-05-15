@@ -283,6 +283,28 @@ async function incluirAjusteOmie(registro, aprovadoPor) {
 
 // ─── rotas ──────────────────────────────────────────────────────────────────
 
+// POST /api/ajustes/check-produtos — verifica CMC de uma lista de produtos
+// Body: { itens: [{ codigo, local_estoque? }] }
+router.post('/check-produtos', express.json(), async (req, res) => {
+  try {
+    const itens = Array.isArray(req.body?.itens) ? req.body.itens : [];
+    if (!itens.length) return res.json({ ok: true, resultados: [] });
+
+    const resultados = await Promise.all(itens.map(async item => {
+      const codigo = String(item.codigo || '').trim();
+      const local_estoque = String(item.local_estoque || '').trim() || null;
+      if (!codigo) return { codigo, cmc: null, semCmc: true };
+      const cmc = await buscarCmcAtual({ codigo, local_estoque });
+      return { codigo, cmc: cmc || null, semCmc: !cmc };
+    }));
+
+    res.json({ ok: true, resultados });
+  } catch (err) {
+    console.error('[ajustes] check-produtos', err);
+    res.status(500).json({ error: err.message || 'Falha ao verificar produtos.' });
+  }
+});
+
 // GET /api/ajustes — lista últimos 500 ajustes
 router.get('/', async (_req, res) => {
   try {
