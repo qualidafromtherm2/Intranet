@@ -18722,6 +18722,46 @@ document.addEventListener('DOMContentLoaded', async () => {
     ajusteRefreshBtn.addEventListener('click', () => carregarSolicitacoesAjustes(true));
   }
 
+  // Transfer approve-all button
+  const transferApproveAllBtn = document.getElementById('solicitacoesTransferApproveAll');
+  if (transferApproveAllBtn && !transferApproveAllBtn.__transferBound) {
+    transferApproveAllBtn.__transferBound = true;
+    transferApproveAllBtn.addEventListener('click', async () => {
+      const pendentes = solicitacoesTransferencias.filter(t => {
+        const s = String(t.status || '').toLowerCase();
+        return s !== 'transferido' && s !== 'reprovado';
+      });
+      if (!pendentes.length) return alert('Nenhuma solicitação pendente de transferência.');
+      const usuario = String(document.getElementById('userNameDisplay')?.textContent || '').trim();
+      if (!usuario || usuario === 'Usuário' || usuario === '—') return alert('Usuário não identificado.');
+      if (!confirm(`Aprovar ${pendentes.length} transferência(s) pendente(s)?`)) return;
+      transferApproveAllBtn.disabled = true;
+      const originalLabel = transferApproveAllBtn.textContent;
+      const erros = [];
+      let aprovados = 0;
+      for (const t of pendentes) {
+        aprovados++;
+        transferApproveAllBtn.textContent = `Aprovando ${aprovados}/${pendentes.length}…`;
+        try {
+          const resp = await fetch(`/api/transferencias/${t.id}/aprovar`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ aprovadoPor: usuario })
+          });
+          const json = await resp.json().catch(() => ({}));
+          if (!resp.ok || !json?.ok) erros.push(`ID ${t.id}: ${json?.error || 'Erro'}`);
+        } catch (err) {
+          erros.push(`ID ${t.id}: ${err?.message || 'Erro de rede'}`);
+        }
+      }
+      transferApproveAllBtn.textContent = originalLabel;
+      transferApproveAllBtn.disabled = false;
+      if (erros.length) alert(`Concluído com erros:\n${erros.join('\n')}`);
+      else alert('Todas as transferências pendentes foram executadas com sucesso!');
+      await carregarSolicitacoesTransferencias(true);
+    });
+  }
+
   // abre o painel Início como padrão
   showMainTab('paginaInicio');
 
