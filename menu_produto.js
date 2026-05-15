@@ -21449,16 +21449,25 @@ async function reconciliarContagemFisica() {
     const comDiff = resultados.filter(r => r.tipo !== null);
     const semDiff = resultados.filter(r => r.tipo === null);
     const naoProd = resultados.filter(r => r.semSistema);
-    const ents = comDiff.filter(r => r.tipo === 'ENT');
-    const sais = comDiff.filter(r => r.tipo === 'SAI');
+    const ents   = comDiff.filter(r => r.tipo === 'ENT');
+    const trfEnt = comDiff.filter(r => r.tipo === 'TRF' && r.origemTrfNome === 'Recebimento');
+    const trfSai = comDiff.filter(r => r.tipo === 'TRF' && r.destinoTrfNome === 'Produção');
 
     // Monta tabela
     tbody.innerHTML = resultados.map((r, idx) => {
       const diffColor = r.delta > 0 ? '#86efac' : r.delta < 0 ? '#fca5a5' : '#64748b';
       const sinal = r.delta > 0 ? '+' : '';
-      const tipoTag = r.tipo
-        ? `<span style="background:${r.tipo === 'ENT' ? 'rgba(34,197,94,.15)' : 'rgba(239,68,68,.15)'};color:${r.tipo === 'ENT' ? '#86efac' : '#fca5a5'};padding:1px 6px;border-radius:4px;font-weight:700;">${r.tipo} ${r.ajusteQty.toFixed(2)}</span>`
-        : `<span style="color:#374151;">—</span>`;
+      let tipoTag;
+      if (r.tipo === 'TRF' && r.origemTrfNome === 'Recebimento') {
+        tipoTag = `<span style="background:rgba(56,189,248,.12);color:#7dd3fc;padding:1px 6px;border-radius:4px;font-weight:700;" title="Transferir ${r.ajusteQty.toFixed(2)} do Recebimento para este armazém">TRF ${r.ajusteQty.toFixed(2)} ← Recebimento</span>`;
+      } else if (r.tipo === 'TRF' && r.destinoTrfNome === 'Produção') {
+        tipoTag = `<span style="background:rgba(251,146,60,.12);color:#fdba74;padding:1px 6px;border-radius:4px;font-weight:700;" title="Transferir ${r.ajusteQty.toFixed(2)} para Produção">TRF ${r.ajusteQty.toFixed(2)} → Produção</span>`;
+      } else if (r.tipo === 'ENT') {
+        const aviso = (r.saldoRecebimento > 0) ? ` <span title="Recebimento tem ${r.saldoRecebimento.toFixed(2)} (insuficiente)" style="font-size:10px;opacity:.7;">⚠️ receb. parcial</span>` : '';
+        tipoTag = `<span style="background:rgba(34,197,94,.15);color:#86efac;padding:1px 6px;border-radius:4px;font-weight:700;">ENT ${r.ajusteQty.toFixed(2)}</span>${aviso}`;
+      } else {
+        tipoTag = `<span style="color:#374151;">—</span>`;
+      }
       const alertSistema = r.semSistema ? ' ⚠️' : '';
       return `<tr style="border-top:1px solid #1e293b;" data-idx="${idx}">
         <td style="padding:4px 8px;"><input type="checkbox" class="recon-chk" data-idx="${idx}" ${r.tipo ? 'checked' : ''} ${!r.tipo ? 'disabled' : ''}></td>
@@ -21472,7 +21481,13 @@ async function reconciliarContagemFisica() {
     }).join('');
 
     // Resumo
-    resumoEl.innerHTML = `<span style="color:#86efac;">${ents.length} ENT</span> &nbsp; <span style="color:#fca5a5;">${sais.length} SAI</span> &nbsp; <span style="color:#64748b;">${semDiff.length} iguais</span>${naoProd.length ? ` &nbsp; <span style="color:#f59e0b;">⚠️ ${naoProd.length} sem dados no sistema</span>` : ''}`;
+    const partesResumo = [];
+    if (trfEnt.length) partesResumo.push(`<span style="color:#7dd3fc;">↙ ${trfEnt.length} TRF Recebimento→Almox</span>`);
+    if (trfSai.length) partesResumo.push(`<span style="color:#fdba74;">↗ ${trfSai.length} TRF Almox→Produção</span>`);
+    if (ents.length)   partesResumo.push(`<span style="color:#86efac;">${ents.length} ENT direto</span>`);
+    if (semDiff.length) partesResumo.push(`<span style="color:#64748b;">${semDiff.length} iguais</span>`);
+    if (naoProd.length) partesResumo.push(`<span style="color:#f59e0b;">⚠️ ${naoProd.length} sem dados</span>`);
+    resumoEl.innerHTML = partesResumo.join(' &nbsp; ');
 
     resultadoEl.style.display = 'block';
     if (usarBtn) usarBtn.style.display = comDiff.length ? 'inline-flex' : 'none';
@@ -21507,7 +21522,14 @@ function converterReconciliacaoParaImport() {
 
   const linhas = resultados
     .filter((_, idx) => selecionados.has(idx) && resultados[idx].tipo)
-    .map(r => [r.codigo, r.tipo, r.ajusteQty.toFixed(2), local].join('\t'));
+    .map(r => {
+      if (r.tipo === 'TRF') {
+        // Formato: CODIGO TAB TRF TAB QTD TAB ORIGEM TAB DESTINO
+        return [r.codigo, 'TRF', r.ajusteQty.toFixed(2), r.origemTrf || local, r.destinoTrf || local].join('\t');
+      }
+      // ENT direto: CODIGO TAB ENT TAB QTD TAB ARMAZEM
+      return [r.codigo, r.tipo, r.ajusteQty.toFixed(2), local].join('\t');
+    });
 
   if (!linhas.length) {
     const fb = modal.querySelector('#ajusteReconFeedback');
