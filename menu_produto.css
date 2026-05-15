@@ -276,7 +276,8 @@ img {
   transition: 0.5s;
 }
 
-.floating-quick-menu {
+/* ====== ZONA DE ATALHOS FLUTUANTE ====== */
+.floating-shortcut-zone {
   position: fixed;
   bottom: 50px;
   right: 84px;
@@ -284,9 +285,11 @@ img {
   display: flex;
   align-items: center;
   gap: 8px;
+  flex-direction: row-reverse;
 }
 
-.floating-quick-btn {
+/* Botão de atalho individual */
+.shortcut-btn {
   position: relative;
   width: 42px;
   height: 42px;
@@ -300,39 +303,167 @@ img {
   color: #dbeafe;
   box-shadow: -1px 3px 8px -1px rgba(0, 0, 0, 0.25);
   transition: transform .2s ease, box-shadow .2s ease;
+  outline: none;
 }
-
-.floating-quick-btn:hover {
+.shortcut-btn:hover {
   transform: scale(1.08);
   box-shadow: -1px 5px 12px -1px rgba(0, 0, 0, 0.35);
 }
+.shortcut-btn i { font-size: 16px; color: inherit; }
 
-.floating-quick-btn i {
-  font-size: 16px;
-  color: inherit;
+/* Tooltip customizado abaixo do ícone */
+.shortcut-btn-tooltip {
+  position: absolute;
+  bottom: calc(100% + 10px);
+  left: 50%;
+  transform: translateX(-50%) translateY(4px);
+  background: #1e293b;
+  color: #e2e8f0;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+  padding: 5px 9px;
+  border-radius: 7px;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity .18s ease, transform .18s ease;
+  z-index: 100;
+  box-shadow: 0 4px 12px rgba(0,0,0,.45);
+  max-width: 160px;
+  white-space: normal;
+  text-align: center;
+  line-height: 1.3;
+}
+/* Seta apontando para baixo */
+.shortcut-btn-tooltip::after {
+  content: '';
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  border: 5px solid transparent;
+  border-top-color: #1e293b;
+}
+.shortcut-btn:hover .shortcut-btn-tooltip {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
 }
 
-.floating-quick-badge {
+.light-mode .shortcut-btn-tooltip {
+  background: #1f2937;
+  color: #f9fafb;
+}
+.light-mode .shortcut-btn-tooltip::after {
+  border-top-color: #1f2937;
+}
+
+/* Botão ×  de remover atalho */
+.shortcut-btn-remove {
+  display: none;
   position: absolute;
-  top: -4px;
-  right: -4px;
-  min-width: 20px;
-  height: 20px;
-  padding: 0 5px;
-  border-radius: 10px;
+  top: -5px;
+  right: -5px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
   background: #dc2626;
   color: #fff;
-  font-size: 11px;
+  font-size: 9px;
   font-weight: 700;
-  line-height: 20px;
+  line-height: 16px;
+  text-align: center;
+  cursor: pointer;
+  z-index: 2;
+  border: none;
+  padding: 0;
+}
+.shortcut-btn:hover .shortcut-btn-remove { display: block; }
+
+/* Badge herdado do item de menu fonte */
+.shortcut-item-badge {
+  position: absolute;
+  top: -4px;
+  left: -4px;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 4px;
+  border-radius: 9px;
+  background: #dc2626;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 18px;
   text-align: center;
   box-shadow: 0 1px 3px rgba(0,0,0,.35);
   pointer-events: none;
+  z-index: 3;
 }
 
-.light-mode .floating-quick-btn {
+/* Container dos atalhos */
+.shortcut-items-container {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Alvo de drop — visível apenas enquanto arrasta */
+.shortcut-drop-target {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 4px;
+  width: 56px;
+  height: 56px;
+  border-radius: 12px;
+  border: 2px dashed #6366f1;
+  background: rgba(99,102,241,.08);
+  color: #6366f1;
+  font-size: 10px;
+  font-weight: 600;
+  cursor: default;
+  transition: background .2s, border-color .2s, transform .15s;
+  pointer-events: all;
+}
+.shortcut-drop-target i { font-size: 18px; }
+.shortcut-drop-target span { font-size: 9px; text-align: center; line-height: 1.2; }
+
+/* Mostrado durante drag */
+body.dragging-menu-item .shortcut-drop-target { display: flex; }
+
+/* Destaque ao arrastar por cima */
+.shortcut-drop-target.drag-over {
+  border-color: #a5b4fc;
+  background: rgba(99,102,241,.2);
+  transform: scale(1.06);
+}
+
+/* Badge no item de menu lateral — estoque mínimo */
+.side-minimo-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 4px;
+  border-radius: 9px;
+  background: #dc2626;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 18px;
+  margin-left: auto;
+  pointer-events: none;
+}
+
+.light-mode .shortcut-btn {
   background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
   color: #eff6ff;
+}
+.light-mode .shortcut-drop-target {
+  border-color: #818cf8;
+  background: rgba(99,102,241,.06);
+  color: #4f46e5;
 }
 
 .light-mode .dark-light {

@@ -17375,6 +17375,183 @@ app.post(
   app.use('/api/users', require('./routes/users'));
 
   // ——————————————————————————————
+  // 3.2.1) Atalhos rápidos do usuário (zona drag-and-drop)
+  // ——————————————————————————————
+  {
+    function requireSession(req, res, next) {
+      if (req.session && req.session.user && req.session.user.id) return next();
+      return res.status(401).json({ ok: false, error: 'Não autenticado' });
+    }
+
+    // GET /api/user/atalhos — lista atalhos do usuário logado
+    app.get('/api/user/atalhos', requireSession, async (req, res) => {
+      try {
+        const userId = req.session.user.id;
+        const { rows } = await pool.query(
+          `SELECT id, nav_key, nav_label, nav_selector, icon_class, sort_order
+           FROM "User".preferencia_atalho
+           WHERE user_id = $1
+           ORDER BY sort_order, created_at`,
+          [userId]
+        );
+        res.json({ ok: true, atalhos: rows });
+      } catch (e) {
+        console.error('[atalhos] GET erro:', e.message);
+        res.status(500).json({ ok: false, error: e.message });
+      }
+    });
+
+    // POST /api/user/atalhos — cria ou atualiza atalho
+    app.post('/api/user/atalhos', requireSession, async (req, res) => {
+      try {
+        const userId = req.session.user.id;
+        const { nav_key, nav_label, nav_selector, icon_class, sort_order } = req.body;
+        if (!nav_key || !nav_label) {
+          return res.status(400).json({ ok: false, error: 'nav_key e nav_label são obrigatórios' });
+        }
+        const { rows } = await pool.query(
+          `INSERT INTO "User".preferencia_atalho (user_id, nav_key, nav_label, nav_selector, icon_class, sort_order)
+           VALUES ($1, $2, $3, $4, $5, $6)
+           ON CONFLICT (user_id, nav_key) DO UPDATE SET
+             nav_label    = EXCLUDED.nav_label,
+             nav_selector = EXCLUDED.nav_selector,
+             icon_class   = EXCLUDED.icon_class,
+             sort_order   = EXCLUDED.sort_order
+           RETURNING id, nav_key, nav_label, nav_selector, icon_class, sort_order`,
+          [userId, nav_key, nav_label, nav_selector || null, icon_class || null, sort_order || 0]
+        );
+        res.json({ ok: true, atalho: rows[0] });
+      } catch (e) {
+        console.error('[atalhos] POST erro:', e.message);
+        res.status(500).json({ ok: false, error: e.message });
+      }
+    });
+
+    // DELETE /api/user/atalhos/:id — remove atalho
+    app.delete('/api/user/atalhos/:id', requireSession, async (req, res) => {
+      try {
+        const userId = req.session.user.id;
+        const id = parseInt(req.params.id, 10);
+        if (!id || isNaN(id)) return res.status(400).json({ ok: false, error: 'id inválido' });
+        const { rowCount } = await pool.query(
+          `DELETE FROM "User".preferencia_atalho WHERE id = $1 AND user_id = $2`,
+          [id, userId]
+        );
+        res.json({ ok: true, removed: rowCount > 0 });
+      } catch (e) {
+        console.error('[atalhos] DELETE erro:', e.message);
+        res.status(500).json({ ok: false, error: e.message });
+      }
+    });
+  }
+
+  // ——————————————————————————————
+  // 3.2.2) Atalhos de URL do usuário no painel SAC (sac.sac_atalhos)
+  // ——————————————————————————————
+  {
+    function requireSessionSacAtalhos(req, res, next) {
+      if (req.session && req.session.user && req.session.user.id) return next();
+      return res.status(401).json({ ok: false, error: 'Não autenticado' });
+    }
+
+    // GET /api/sac/atalhos — lista atalhos de URL do usuário logado
+    app.get('/api/sac/atalhos', requireSessionSacAtalhos, async (req, res) => {
+      try {
+        const userId = req.session.user.id;
+        const { rows } = await pool.query(
+          `SELECT id, label, url, icon_class, icon_color, sort_order
+           FROM sac.sac_atalhos
+           WHERE user_id = $1
+           ORDER BY sort_order, created_at`,
+          [userId]
+        );
+        res.json({ ok: true, atalhos: rows });
+      } catch (e) {
+        console.error('[sac/atalhos] GET erro:', e.message);
+        res.status(500).json({ ok: false, error: e.message });
+      }
+    });
+
+    // POST /api/sac/atalhos — cria atalho
+    app.post('/api/sac/atalhos', requireSessionSacAtalhos, async (req, res) => {
+      try {
+        const userId = req.session.user.id;
+        const { label, url, icon_class, icon_color } = req.body;
+        if (!label || !url) {
+          return res.status(400).json({ ok: false, error: 'label e url são obrigatórios' });
+        }
+        // Validação básica de URL
+        let parsedUrl;
+        try { parsedUrl = new URL(url); } catch (_) {
+          return res.status(400).json({ ok: false, error: 'URL inválida' });
+        }
+        if (!['http:', 'https:'].includes(parsedUrl.protocol)) {
+          return res.status(400).json({ ok: false, error: 'Apenas URLs http/https são permitidas' });
+        }
+        const { rows } = await pool.query(
+          `INSERT INTO sac.sac_atalhos (user_id, label, url, icon_class, icon_color)
+           VALUES ($1, $2, $3, $4, $5)
+           RETURNING id, label, url, icon_class, icon_color, sort_order`,
+          [userId, label.trim(), url.trim(), icon_class || 'fa-solid fa-link', icon_color || '#38bdf8']
+        );
+        res.json({ ok: true, atalho: rows[0] });
+      } catch (e) {
+        console.error('[sac/atalhos] POST erro:', e.message);
+        res.status(500).json({ ok: false, error: e.message });
+      }
+    });
+
+    // PUT /api/sac/atalhos/:id — atualiza atalho
+    app.put('/api/sac/atalhos/:id', requireSessionSacAtalhos, async (req, res) => {
+      try {
+        const userId = req.session.user.id;
+        const id = parseInt(req.params.id, 10);
+        if (!id || isNaN(id)) return res.status(400).json({ ok: false, error: 'id inválido' });
+        const { label, url, icon_class, icon_color } = req.body;
+        if (!label || !url) {
+          return res.status(400).json({ ok: false, error: 'label e url são obrigatórios' });
+        }
+        let parsedUrl;
+        try { parsedUrl = new URL(url); } catch (_) {
+          return res.status(400).json({ ok: false, error: 'URL inválida' });
+        }
+        if (!['http:', 'https:'].includes(parsedUrl.protocol)) {
+          return res.status(400).json({ ok: false, error: 'Apenas URLs http/https são permitidas' });
+        }
+        const { rows } = await pool.query(
+          `UPDATE sac.sac_atalhos
+           SET label = $1, url = $2, icon_class = $3, icon_color = $4
+           WHERE id = $5 AND user_id = $6
+           RETURNING id, label, url, icon_class, icon_color, sort_order`,
+          [label.trim(), url.trim(), icon_class || 'fa-solid fa-link', icon_color || '#38bdf8', id, userId]
+        );
+        if (!rows.length) return res.status(404).json({ ok: false, error: 'Atalho não encontrado' });
+        res.json({ ok: true, atalho: rows[0] });
+      } catch (e) {
+        console.error('[sac/atalhos] PUT erro:', e.message);
+        res.status(500).json({ ok: false, error: e.message });
+      }
+    });
+
+    // DELETE /api/sac/atalhos/:id — remove atalho
+    app.delete('/api/sac/atalhos/:id', requireSessionSacAtalhos, async (req, res) => {
+      try {
+        const userId = req.session.user.id;
+        const id = parseInt(req.params.id, 10);
+        if (!id || isNaN(id)) return res.status(400).json({ ok: false, error: 'id inválido' });
+        const { rowCount } = await pool.query(
+          `DELETE FROM sac.sac_atalhos WHERE id = $1 AND user_id = $2`,
+          [id, userId]
+        );
+        res.json({ ok: true, removed: rowCount > 0 });
+      } catch (e) {
+        console.error('[sac/atalhos] DELETE erro:', e.message);
+        res.status(500).json({ ok: false, error: e.message });
+      }
+    });
+  }
+
+  // ——————————————————————————————
   // 3.3) Chat simples (arquivo JSON)
   // ——————————————————————————————
   function loadChatMessages() {

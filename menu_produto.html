@@ -67,14 +67,13 @@
     </svg>
   </div>
 
-  <div id="floatingQuickMenu" class="floating-quick-menu">
-    <button id="btnFloatingMinimo" type="button" class="floating-quick-btn" title="Produtos no mínimo">
-      <i class="fa-solid fa-boxes-stacked"></i>
-      <span id="floatingMinimoBadge" class="floating-quick-badge" hidden>0</span>
-    </button>
-    <button id="btnFloatingEstoque" type="button" class="floating-quick-btn" title="Etiquetas impressas — Estoque" style="background:linear-gradient(135deg,#059669 0%,#047857 100%);">
-      <i class="fa-solid fa-warehouse"></i>
-    </button>
+  <!-- Zona de atalhos do usuário (drag-and-drop a partir do menu lateral) -->
+  <div id="floatingShortcutZone" class="floating-shortcut-zone">
+    <div id="shortcutItemsContainer" class="shortcut-items-container"></div>
+    <div id="shortcutDropTarget" class="shortcut-drop-target" title="Arraste um item do menu lateral aqui para criar um atalho">
+      <i class="fa-solid fa-thumbtack"></i>
+      <span>Solte aqui</span>
+    </div>
   </div>
 
   <div class="app">
@@ -381,7 +380,7 @@
        data-nav-pos="side"
        data-nav-label="Produtos recebidos"
        data-nav-selector="#menu-produto-recebido">
-      <i class="fa-solid fa-box-open" style="margin-right:8px;"></i>
+      <i class="fa-solid fa-pallet" style="margin-right:8px;"></i>
       Produtos recebidos
     </a>
 
@@ -395,6 +394,31 @@
        data-nav-selector="#menu-envio-mercadoria">
       <i class="fa-solid fa-truck-fast" style="margin-right:8px;"></i>
       Envio de mercadoria
+    </a>
+
+    <a href="#"
+       id="menu-estoque-minimo"
+       class="menu-link"
+       data-nav-key="side:log:estoque-minimo"
+       data-nav-parent="side:log"
+       data-nav-pos="side"
+       data-nav-label="Estoque mínimo"
+       data-nav-selector="#menu-estoque-minimo">
+      <i class="fa-solid fa-boxes-stacked" style="margin-right:8px;"></i>
+      Estoque mínimo
+      <span id="sideMinimoBadge" class="side-minimo-badge" hidden>0</span>
+    </a>
+
+    <a href="#"
+       id="menu-guardar-materiais"
+       class="menu-link"
+       data-nav-key="side:log:guardar-materiais"
+       data-nav-parent="side:log"
+       data-nav-pos="side"
+       data-nav-label="Guardar materiais"
+       data-nav-selector="#menu-guardar-materiais">
+      <i class="fa-solid fa-dolly" style="margin-right:8px;"></i>
+      Guardar materiais
     </a>
   </div>
 </div>
@@ -461,7 +485,7 @@
        data-nav-pos="side"
        data-nav-label="AT"
        data-nav-selector="#menu-sac-at">
-      <i class="fa-solid fa-screwdriver-wrench" style="margin-right:8px;"></i>
+      <i class="fa-solid fa-toolbox" style="margin-right:8px;"></i>
       AT
     </a>
 
@@ -507,7 +531,7 @@
        data-nav-pos="side"
        data-nav-label="Controle de Pedidos"
        data-nav-selector="#menu-vendas-controle">
-      <i class="fa-solid fa-list-check" style="margin-right:8px;"></i>
+      <i class="fa-solid fa-receipt" style="margin-right:8px;"></i>
       Controle de Pedidos
     </a>
 
@@ -2726,6 +2750,9 @@
                       <button id="atAtualizarTecBtn" type="button" style="width:100%;text-align:left;padding:10px 14px;background:transparent;border:none;color:#e5e7eb;font-size:13px;cursor:pointer;display:flex;align-items:center;gap:8px;" onmouseover="this.style.background='rgba(255,255,255,.07)'" onmouseout="this.style.background='transparent'">
                         <i class="fa-solid fa-user-gear" style="color:#38bdf8;"></i> Atualizar Técnico
                       </button>
+                      <button id="atSacAtalhosMenuBtn" type="button" style="width:100%;text-align:left;padding:10px 14px;background:transparent;border:none;color:#e5e7eb;font-size:13px;cursor:pointer;display:flex;align-items:center;gap:8px;" onmouseover="this.style.background='rgba(255,255,255,.07)'" onmouseout="this.style.background='transparent'">
+                        <i class="fa-solid fa-bookmark" style="color:#a78bfa;"></i> Meus Atalhos
+                      </button>
                     </div>
                   </div>
                   <button id="atNewOsBtn" type="button" class="content-button" title="Adicionar nova OS" style="display:inline-flex;align-items:center;justify-content:center;min-width:44px;padding:10px;background:linear-gradient(135deg,#0284c7 0%,#0369a1 100%);color:white;">
@@ -4457,6 +4484,49 @@
                     <tr><td colspan="7" style="text-align:center;padding:16px;color:var(--inactive-color);">Sem dados.</td></tr>
                   </tbody>
                 </table>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Modal Meus Atalhos (sac.sac_atalhos) -->
+        <div id="sacAtalhosModal" class="modal-overlay" style="display:none;z-index:10062;">
+          <div class="modal-container" style="max-width:560px;width:96%;max-height:88vh;display:flex;flex-direction:column;">
+            <div class="modal-header" style="display:flex;justify-content:space-between;align-items:center;padding:12px 16px;border-bottom:1px solid rgba(255,255,255,.1);flex-shrink:0;">
+              <h3 style="margin:0;font-size:15px;display:flex;align-items:center;gap:8px;">
+                <i class="fa-solid fa-bookmark" style="color:#a78bfa;"></i>
+                Meus Atalhos
+              </h3>
+              <button id="sacAtalhosModalClose" class="modal-close-btn" type="button"><i class="fas fa-times"></i></button>
+            </div>
+            <!-- Formulário adicionar -->
+            <div style="padding:14px 16px;border-bottom:1px solid rgba(255,255,255,.08);flex-shrink:0;">
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;">
+                <div>
+                  <label style="font-size:11px;color:var(--inactive-color);display:block;margin-bottom:3px;">NOME DO ATALHO</label>
+                  <input id="sacAtalhoLabel" class="input-padrao" type="text" placeholder="ex: Portal Fiscal" maxlength="80" style="width:100%;box-sizing:border-box;">
+                </div>
+                <div>
+                  <label style="font-size:11px;color:var(--inactive-color);display:block;margin-bottom:3px;">URL</label>
+                  <input id="sacAtalhoUrl" class="input-padrao" type="url" placeholder="https://..." style="width:100%;box-sizing:border-box;">
+                </div>
+              </div>
+              <!-- Seletor de ícone -->
+              <div style="margin-bottom:10px;">
+                <label style="font-size:11px;color:var(--inactive-color);display:block;margin-bottom:6px;">ÍCONE</label>
+                <div id="sacAtalhoIconGrid" style="display:flex;flex-wrap:wrap;gap:6px;">
+                </div>
+                <input type="hidden" id="sacAtalhoIconSel" value="fa-solid fa-link">
+              </div>
+              <button id="sacAtalhoAddBtn" type="button" style="display:inline-flex;align-items:center;gap:6px;padding:7px 18px;border-radius:8px;border:none;background:#7c3aed;color:#fff;font-size:13px;font-weight:600;cursor:pointer;">
+                <i class="fa-solid fa-plus"></i> Adicionar
+              </button>
+              <span id="sacAtalhoAddMsg" style="font-size:12px;margin-left:10px;color:#f87171;display:none;"></span>
+            </div>
+            <!-- Lista de atalhos salvos -->
+            <div id="sacAtalhosList" style="overflow-y:auto;flex:1;padding:10px 16px;">
+              <div id="sacAtalhosLoading" style="text-align:center;padding:24px;color:var(--inactive-color);font-size:13px;">
+                <i class="fas fa-circle-notch fa-spin"></i> Carregando...
               </div>
             </div>
           </div>

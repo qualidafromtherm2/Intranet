@@ -4450,9 +4450,9 @@ router.get('/solicitacoes', async (req, res) => {
     const conditions = [];
     const params = [];
 
-    // Filtro por status (oculta Enviado e Finalizado)
+    // Filtro por status (oculta Enviado, Finalizado e Excluído)
     if (hideDone) {
-      conditions.push("COALESCE(status, '') NOT IN ('Enviado', 'Finalizado')");
+      conditions.push("COALESCE(status, '') NOT IN ('Enviado', 'Finalizado', 'Excluído')");
     }
 
     // Filtro por usuário logado (apenas se filterByUser=true)

@@ -12606,12 +12606,13 @@ function _abrirAtOsModal(id, navRows) {
   }
 })();
 
-// ── Dropdown Configuração (Alimentação / Atualizar Técnico) ──────────────────
+// ── Dropdown Configuração (Alimentação / Atualizar Técnico / Meus Atalhos) ──────────────────
 (function() {
   const wrapBtn  = document.getElementById('atConfigAlimentacaoBtn');
   const dropMenu = document.getElementById('atConfigDropdownMenu');
   const alimBtn  = document.getElementById('atConfigAlimMenuBtn');
   const updTecBtn= document.getElementById('atAtualizarTecBtn');
+  const atalhosBtn = document.getElementById('atSacAtalhosMenuBtn');
   if (!wrapBtn || !dropMenu) return;
 
   let open = false;
@@ -12643,6 +12644,239 @@ function _abrirAtOsModal(id, navRows) {
       if (modal) { modal.style.display = 'flex'; }
       const loadEvent = new CustomEvent('atUpdTecOpen');
       document.dispatchEvent(loadEvent);
+    });
+  }
+
+  if (atalhosBtn) {
+    atalhosBtn.addEventListener('click', () => {
+      fecharDrop();
+      const loadEvent = new CustomEvent('sacAtalhosOpen');
+      document.dispatchEvent(loadEvent);
+    });
+  }
+})();
+
+// ── Modal Meus Atalhos (sac.sac_atalhos) ─────────────────────────────────────
+(function() {
+  const ICONS = [
+    { cls: 'fa-solid fa-link',           label: 'Link' },
+    { cls: 'fa-solid fa-globe',          label: 'Globe' },
+    { cls: 'fa-solid fa-bookmark',       label: 'Bookmark' },
+    { cls: 'fa-solid fa-star',           label: 'Star' },
+    { cls: 'fa-solid fa-heart',          label: 'Heart' },
+    { cls: 'fa-solid fa-house',          label: 'House' },
+    { cls: 'fa-solid fa-bolt',           label: 'Bolt' },
+    { cls: 'fa-solid fa-fire',           label: 'Fire' },
+    { cls: 'fa-solid fa-rocket',         label: 'Rocket' },
+    { cls: 'fa-solid fa-folder',         label: 'Folder' },
+    { cls: 'fa-solid fa-chart-line',     label: 'Gráfico' },
+    { cls: 'fa-solid fa-file-lines',     label: 'Arquivo' },
+    { cls: 'fa-solid fa-magnifying-glass', label: 'Busca' },
+    { cls: 'fa-solid fa-bell',           label: 'Sino' },
+    { cls: 'fa-solid fa-gear',           label: 'Engrenagem' },
+    { cls: 'fa-solid fa-wrench',         label: 'Ferramenta' },
+    { cls: 'fa-solid fa-truck',          label: 'Caminhão' },
+    { cls: 'fa-solid fa-clipboard',      label: 'Prancheta' },
+    { cls: 'fa-solid fa-calculator',     label: 'Calculadora' },
+    { cls: 'fa-brands fa-whatsapp',      label: 'WhatsApp' },
+  ];
+
+  const modal     = document.getElementById('sacAtalhosModal');
+  const closeBtn  = document.getElementById('sacAtalhosModalClose');
+  const labelInp  = document.getElementById('sacAtalhoLabel');
+  const urlInp    = document.getElementById('sacAtalhoUrl');
+  const iconGrid  = document.getElementById('sacAtalhoIconGrid');
+  const iconSel   = document.getElementById('sacAtalhoIconSel');
+  const addBtn    = document.getElementById('sacAtalhoAddBtn');
+  const addMsg    = document.getElementById('sacAtalhoAddMsg');
+  const list      = document.getElementById('sacAtalhosList');
+  const loading   = document.getElementById('sacAtalhosLoading');
+  if (!modal) return;
+
+  // Constrói a grade de ícones
+  function buildIconGrid(currentIcon) {
+    if (!iconGrid) return;
+    iconGrid.innerHTML = ICONS.map(ic => {
+      const sel = (ic.cls === currentIcon) ? 'background:#7c3aed;color:#fff;border-color:#7c3aed;' : 'background:rgba(255,255,255,.05);color:#9ca3af;border-color:rgba(255,255,255,.15);';
+      return `<button type="button" data-icon="${ic.cls}" title="${ic.label}"
+        style="width:34px;height:34px;border-radius:8px;border:1px solid;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;font-size:15px;transition:background .15s;${sel}">
+        <i class="${ic.cls}"></i></button>`;
+    }).join('');
+    iconGrid.querySelectorAll('button[data-icon]').forEach(b => {
+      b.addEventListener('click', () => {
+        iconSel.value = b.dataset.icon;
+        iconGrid.querySelectorAll('button[data-icon]').forEach(x => {
+          x.style.background = 'rgba(255,255,255,.05)';
+          x.style.color = '#9ca3af';
+          x.style.borderColor = 'rgba(255,255,255,.15)';
+        });
+        b.style.background = '#7c3aed';
+        b.style.color = '#fff';
+        b.style.borderColor = '#7c3aed';
+      });
+    });
+  }
+
+  function showMsg(txt, ok) {
+    if (!addMsg) return;
+    addMsg.textContent = txt;
+    addMsg.style.color = ok ? '#4ade80' : '#f87171';
+    addMsg.style.display = 'inline';
+    setTimeout(() => { addMsg.style.display = 'none'; }, 3000);
+  }
+
+  async function loadAtalhos() {
+    if (loading) loading.style.display = 'block';
+    list.querySelectorAll('.sac-atalho-item').forEach(el => el.remove());
+    try {
+      const r = await fetch('/api/sac/atalhos', { credentials: 'same-origin' });
+      const d = await r.json();
+      if (loading) loading.style.display = 'none';
+      if (!d.ok || !d.atalhos.length) {
+        list.innerHTML = '<div style="text-align:center;padding:24px;color:var(--inactive-color);font-size:13px;">Nenhum atalho salvo ainda.</div>';
+        return;
+      }
+      list.innerHTML = '';
+      d.atalhos.forEach(a => renderAtalhoItem(a));
+    } catch(e) {
+      if (loading) loading.style.display = 'none';
+      list.innerHTML = '<div style="color:#f87171;padding:12px;">Erro ao carregar.</div>';
+    }
+  }
+
+  function renderAtalhoItem(a) {
+    const div = document.createElement('div');
+    div.className = 'sac-atalho-item';
+    div.dataset.id = a.id;
+    div.style.cssText = 'display:flex;align-items:center;gap:10px;padding:9px 6px;border-bottom:1px solid rgba(255,255,255,.06);';
+    div.innerHTML = `
+      <span style="display:inline-flex;align-items:center;justify-content:center;width:34px;height:34px;border-radius:9px;background:rgba(124,58,237,.18);color:${escapeAtHtml(a.icon_color)};flex-shrink:0;">
+        <i class="${escapeAtHtml(a.icon_class)}" style="font-size:16px;"></i>
+      </span>
+      <div style="flex:1;min-width:0;">
+        <div style="font-size:13px;font-weight:600;color:#e5e7eb;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeAtHtml(a.label)}</div>
+        <div style="font-size:11px;color:var(--inactive-color);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeAtHtml(a.url)}</div>
+      </div>
+      <a href="${escapeAtHtml(a.url)}" target="_blank" rel="noopener noreferrer" title="Abrir link"
+         style="display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;border-radius:7px;background:rgba(14,165,233,.15);color:#38bdf8;flex-shrink:0;text-decoration:none;">
+        <i class="fa-solid fa-arrow-up-right-from-square" style="font-size:13px;"></i>
+      </a>
+      <button class="sac-atalho-edit-btn" title="Editar / trocar ícone"
+        style="display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;border-radius:7px;background:rgba(255,255,255,.05);color:#9ca3af;border:1px solid rgba(255,255,255,.1);cursor:pointer;flex-shrink:0;">
+        <i class="fa-solid fa-pen" style="font-size:12px;"></i>
+      </button>
+      <button class="sac-atalho-del-btn" title="Excluir"
+        style="display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;border-radius:7px;background:rgba(239,68,68,.1);color:#f87171;border:1px solid rgba(239,68,68,.2);cursor:pointer;flex-shrink:0;">
+        <i class="fa-solid fa-trash" style="font-size:12px;"></i>
+      </button>`;
+
+    div.querySelector('.sac-atalho-del-btn').addEventListener('click', async () => {
+      if (!confirm(`Excluir atalho "${a.label}"?`)) return;
+      await fetch(`/api/sac/atalhos/${a.id}`, { method: 'DELETE', credentials: 'same-origin' });
+      loadAtalhos();
+    });
+
+    div.querySelector('.sac-atalho-edit-btn').addEventListener('click', () => {
+      abrirEdicaoInline(div, a);
+    });
+
+    list.appendChild(div);
+  }
+
+  function abrirEdicaoInline(div, a) {
+    // Substitui o item por um mini-formulário inline de edição
+    div.innerHTML = `
+      <div style="flex:1;display:grid;grid-template-columns:1fr 1fr;gap:6px;align-items:start;">
+        <input class="input-padrao sac-edit-label" type="text" value="${escapeAtHtml(a.label)}" maxlength="80" style="font-size:12px;">
+        <input class="input-padrao sac-edit-url" type="url" value="${escapeAtHtml(a.url)}" style="font-size:12px;">
+        <div class="sac-edit-icon-grid" style="grid-column:1/-1;display:flex;flex-wrap:wrap;gap:4px;margin-top:4px;"></div>
+        <input type="hidden" class="sac-edit-icon-sel" value="${escapeAtHtml(a.icon_class)}">
+      </div>
+      <div style="display:flex;flex-direction:column;gap:4px;flex-shrink:0;">
+        <button class="sac-edit-save" style="padding:5px 12px;border-radius:7px;border:none;background:#7c3aed;color:#fff;font-size:12px;cursor:pointer;">Salvar</button>
+        <button class="sac-edit-cancel" style="padding:5px 12px;border-radius:7px;border:none;background:rgba(255,255,255,.08);color:#9ca3af;font-size:12px;cursor:pointer;">Cancelar</button>
+      </div>`;
+
+    const editIconGrid = div.querySelector('.sac-edit-icon-grid');
+    const editIconSel  = div.querySelector('.sac-edit-icon-sel');
+
+    editIconGrid.innerHTML = ICONS.map(ic => {
+      const sel = (ic.cls === a.icon_class) ? 'background:#7c3aed;color:#fff;border-color:#7c3aed;' : 'background:rgba(255,255,255,.05);color:#9ca3af;border-color:rgba(255,255,255,.15);';
+      return `<button type="button" data-icon="${ic.cls}" title="${ic.label}"
+        style="width:30px;height:30px;border-radius:7px;border:1px solid;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;font-size:13px;${sel}">
+        <i class="${ic.cls}"></i></button>`;
+    }).join('');
+    editIconGrid.querySelectorAll('button[data-icon]').forEach(b => {
+      b.addEventListener('click', () => {
+        editIconSel.value = b.dataset.icon;
+        editIconGrid.querySelectorAll('button[data-icon]').forEach(x => {
+          x.style.background = 'rgba(255,255,255,.05)';
+          x.style.color = '#9ca3af';
+          x.style.borderColor = 'rgba(255,255,255,.15)';
+        });
+        b.style.background = '#7c3aed';
+        b.style.color = '#fff';
+        b.style.borderColor = '#7c3aed';
+      });
+    });
+
+    div.querySelector('.sac-edit-save').addEventListener('click', async () => {
+      const newLabel = div.querySelector('.sac-edit-label').value.trim();
+      const newUrl   = div.querySelector('.sac-edit-url').value.trim();
+      const newIcon  = editIconSel.value;
+      if (!newLabel || !newUrl) return;
+      try {
+        const r = await fetch(`/api/sac/atalhos/${a.id}`, {
+          method: 'PUT',
+          credentials: 'same-origin',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ label: newLabel, url: newUrl, icon_class: newIcon, icon_color: a.icon_color })
+        });
+        const d = await r.json();
+        if (d.ok) loadAtalhos(); else alert(d.error || 'Erro ao salvar');
+      } catch(e) { alert('Erro de rede'); }
+    });
+
+    div.querySelector('.sac-edit-cancel').addEventListener('click', () => loadAtalhos());
+  }
+
+  // Abre modal
+  document.addEventListener('sacAtalhosOpen', () => {
+    modal.style.display = 'flex';
+    buildIconGrid('fa-solid fa-link');
+    if (iconSel) iconSel.value = 'fa-solid fa-link';
+    if (labelInp) labelInp.value = '';
+    if (urlInp) urlInp.value = '';
+    loadAtalhos();
+  });
+
+  if (closeBtn) closeBtn.addEventListener('click', () => { modal.style.display = 'none'; });
+  modal.addEventListener('click', e => { if (e.target === modal) modal.style.display = 'none'; });
+
+  if (addBtn) {
+    addBtn.addEventListener('click', async () => {
+      const label    = labelInp ? labelInp.value.trim() : '';
+      const url      = urlInp   ? urlInp.value.trim()   : '';
+      const iconClass= iconSel  ? iconSel.value          : 'fa-solid fa-link';
+      if (!label) { showMsg('Informe o nome do atalho.', false); return; }
+      if (!url)   { showMsg('Informe a URL.', false); return; }
+      addBtn.disabled = true;
+      try {
+        const r = await fetch('/api/sac/atalhos', {
+          method: 'POST',
+          credentials: 'same-origin',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ label, url, icon_class: iconClass, icon_color: '#38bdf8' })
+        });
+        const d = await r.json();
+        if (d.ok) {
+          labelInp.value = ''; urlInp.value = '';
+          buildIconGrid('fa-solid fa-link'); iconSel.value = 'fa-solid fa-link';
+          showMsg('Atalho salvo!', true);
+          loadAtalhos();
+        } else { showMsg(d.error || 'Erro ao salvar.', false); }
+      } catch(e) { showMsg('Erro de rede.', false); }
+      finally { addBtn.disabled = false; }
     });
   }
 })();
@@ -24197,7 +24431,8 @@ window.openRegistros = async function() {
   const etqImpressoStatus   = document.getElementById('etqImpressoModalStatus');
   const etqImpressoBusca    = document.getElementById('etqImpressoBuscaInput');
   const etqImpressoFechar   = document.getElementById('etqImpressoModalFechar');
-  const btnFloatingEstoque  = document.getElementById('btnFloatingEstoque');
+  // Botão movido para menu lateral — novo ID
+  const btnGuardarMateriais = document.getElementById('menu-guardar-materiais');
 
   let _etqImpressoDebounce = null;
 
@@ -24268,12 +24503,18 @@ window.openRegistros = async function() {
     }
   }
 
-  btnFloatingEstoque?.addEventListener('click', async () => {
+  function _abrirGuardarMateriais() {
     if (!etqImpressoModal) return;
     etqImpressoModal.style.display = 'flex';
     if (etqImpressoBusca) etqImpressoBusca.value = '';
-    await _etqImpressoCarregar();
-  });
+    _etqImpressoCarregar();
+  }
+
+  btnGuardarMateriais?.addEventListener('click', (e) => { e.preventDefault(); _abrirGuardarMateriais(); });
+
+  // Expor para atalhos flutuantes
+  window.__atalhoAction = window.__atalhoAction || {};
+  window.__atalhoAction['side:log:guardar-materiais'] = _abrirGuardarMateriais;
 
   etqImpressoFechar?.addEventListener('click', () => { if (etqImpressoModal) etqImpressoModal.style.display = 'none'; });
   etqImpressoModal?.addEventListener('click', e => { if (e.target === etqImpressoModal) etqImpressoModal.style.display = 'none'; });
@@ -54159,6 +54400,8 @@ async function ensureAuthVisibility(){
 
     if (st.loggedIn) {
       await applyCurrentUserPermissionsToUI();
+      // Notifica módulos que dependem do login (ex: atalhos flutuantes)
+      document.dispatchEvent(new CustomEvent('auth:loggedIn', { detail: window.__sessionUser }));
       
       // Se estava deslogado E agora está logado, inicia monitoramento
       if (!wasLoggedBefore && isLoggedNow && typeof startVersionCheckLoop === 'function') {
@@ -60872,20 +61115,23 @@ document.addEventListener('DOMContentLoaded', async () => {
 
 // Menu flutuante global: Produtos no mínimo (abre Lista de produtos filtrada)
 document.addEventListener('DOMContentLoaded', () => {
-  const btn = document.getElementById('btnFloatingMinimo');
+  // Botão no menu lateral substituiu o floating — busca pelo novo id
+  const btn = document.getElementById('menu-estoque-minimo');
   if (!btn) return;
 
-  const badge = document.getElementById('floatingMinimoBadge');
+  // Badge no item de menu lateral
+  const sideBadge = document.getElementById('sideMinimoBadge');
 
   // Cache do último resultado para reutilizar entre clique e badge
   let _ultimosCodigos = null;
   let _carregando = false;
 
   function atualizaBadge(qtd) {
-    if (!badge) return;
     const n = Number(qtd) || 0;
-    badge.textContent = n > 999 ? '999+' : String(n);
-    badge.hidden = n <= 0;
+    if (sideBadge) {
+      sideBadge.textContent = n > 999 ? '999+' : String(n);
+      sideBadge.hidden = n <= 0;
+    }
   }
 
   async function carregaMinimos({ silencioso = false } = {}) {
@@ -60916,8 +61162,8 @@ document.addEventListener('DOMContentLoaded', () => {
   // Atualiza badge a cada 5 minutos sem incomodar o usuário
   setInterval(() => carregaMinimos({ silencioso: true }), 5 * 60 * 1000);
 
-  btn.addEventListener('click', async () => {
-    btn.disabled = true;
+  async function _abrirEstoqueMinimo(btnEl) {
+    if (btnEl) btnEl.disabled = true;
     try {
       const codigosNoMinimo = await carregaMinimos();
       if (!codigosNoMinimo) return;
@@ -60941,9 +61187,15 @@ document.addEventListener('DOMContentLoaded', () => {
         );
       }
     } finally {
-      btn.disabled = false;
+      if (btnEl) btnEl.disabled = false;
     }
-  });
+  }
+
+  btn.addEventListener('click', (e) => { e.preventDefault(); _abrirEstoqueMinimo(btn); });
+
+  // Expor para que atalhos flutuantes gerados por drag-and-drop possam chamar a mesma ação
+  window.__atalhoAction = window.__atalhoAction || {};
+  window.__atalhoAction['side:log:estoque-minimo'] = () => _abrirEstoqueMinimo(null);
 });
 
 // ===================== MODAL MOVIMENTAÇÃO DE ESTOQUE =====================
@@ -64141,4 +64393,230 @@ window.initOscilacaoEstoque = (function () {
     atualizarToggleBtn();
     carregar();
   };
+})();
+
+// ========== SISTEMA DE ATALHOS FLUTUANTES (DRAG & DROP) ==========
+(function () {
+  'use strict';
+
+  const zone      = document.getElementById('floatingShortcutZone');
+  const container = document.getElementById('shortcutItemsContainer');
+  const dropTarget = document.getElementById('shortcutDropTarget');
+
+  if (!zone || !container || !dropTarget) return;
+
+  // ── Mapa de observers de badge: nav_key → MutationObserver ──
+  const _badgeObservers = new Map();
+
+  // Busca o elemento de badge dentro do item de menu fonte
+  function _sourceBadgeEl(navSelector) {
+    if (!navSelector) return null;
+    const menuEl = document.querySelector(navSelector);
+    if (!menuEl) return null;
+    // Procura qualquer span/element com classe *badge* dentro do item
+    return menuEl.querySelector('[class*="badge"]') || null;
+  }
+
+  // Sincroniza ou cria badge no botão de atalho a partir do source
+  function _sincBadge(btn, sourceBadge) {
+    let shortcutBadge = btn.querySelector('.shortcut-item-badge');
+
+    if (!sourceBadge) {
+      if (shortcutBadge) shortcutBadge.remove();
+      return;
+    }
+
+    const isHidden = sourceBadge.hidden || sourceBadge.style.display === 'none';
+    const texto = sourceBadge.textContent.trim();
+
+    if (!shortcutBadge) {
+      shortcutBadge = document.createElement('span');
+      shortcutBadge.className = 'shortcut-item-badge';
+      btn.appendChild(shortcutBadge);
+    }
+
+    shortcutBadge.textContent = texto;
+    shortcutBadge.hidden = isHidden || !texto || texto === '0';
+  }
+
+  // Inicia MutationObserver no badge fonte para sincronizar em tempo real
+  function _observarBadge(btn, navKey, navSelector) {
+    if (_badgeObservers.has(navKey)) {
+      _badgeObservers.get(navKey).disconnect();
+    }
+
+    const sourceBadge = _sourceBadgeEl(navSelector);
+    if (!sourceBadge) return;
+
+    // Sincroniza imediatamente
+    _sincBadge(btn, sourceBadge);
+
+    // Observa mudanças futuras no badge fonte (texto e atributo hidden)
+    const obs = new MutationObserver(() => _sincBadge(btn, sourceBadge));
+    obs.observe(sourceBadge, { childList: true, characterData: true, subtree: true, attributes: true, attributeFilter: ['hidden', 'style'] });
+    _badgeObservers.set(navKey, obs);
+  }
+
+  // ── Renderiza um botão de atalho ──
+  function criarBotaoAtalho(atalho) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'shortcut-btn';
+    btn.dataset.id = atalho.id;
+    btn.dataset.navKey = atalho.nav_key;
+
+    const iconClass = atalho.icon_class || 'fa-solid fa-star';
+    btn.innerHTML = `<i class="${iconClass}"></i><button class="shortcut-btn-remove" title="Remover atalho" aria-label="Remover atalho">×</button><span class="shortcut-btn-tooltip">${atalho.nav_label}</span>`;
+
+    // Clique → executa ação
+    btn.addEventListener('click', (e) => {
+      if (e.target.classList.contains('shortcut-btn-remove')) return;
+      const selector = atalho.nav_selector;
+      const action = window.__atalhoAction && window.__atalhoAction[atalho.nav_key];
+      if (action) {
+        action();
+      } else if (selector) {
+        const el = document.querySelector(selector);
+        if (el) el.click();
+      }
+    });
+
+    // Botão remover
+    btn.querySelector('.shortcut-btn-remove').addEventListener('click', async (e) => {
+      e.stopPropagation();
+      _badgeObservers.get(atalho.nav_key)?.disconnect();
+      _badgeObservers.delete(atalho.nav_key);
+      await removerAtalho(atalho.id, btn);
+    });
+
+    // Iniciar sincronização de badge (fonte pode não existir ainda → aguarda um frame)
+    setTimeout(() => _observarBadge(btn, atalho.nav_key, atalho.nav_selector), 0);
+
+    return btn;
+  }
+
+  // ── Carrega atalhos do servidor ──
+  async function carregarAtalhos() {
+    if (!window.__sessionUser?.id) return;
+    try {
+      const resp = await fetch('/api/user/atalhos', { credentials: 'include' });
+      if (!resp.ok) return;
+      const data = await resp.json();
+      container.innerHTML = '';
+      (data.atalhos || []).forEach(a => container.appendChild(criarBotaoAtalho(a)));
+    } catch (e) {
+      console.error('[atalhos] erro ao carregar:', e.message);
+    }
+  }
+
+  // ── Salva atalho no servidor ──
+  async function salvarAtalho(navKey, navLabel, navSelector, iconClass) {
+    try {
+      const resp = await fetch('/api/user/atalhos', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ nav_key: navKey, nav_label: navLabel, nav_selector: navSelector, icon_class: iconClass })
+      });
+      const data = await resp.json();
+      if (!data.ok) throw new Error(data.error || 'Erro ao salvar');
+      return data.atalho;
+    } catch (e) {
+      console.error('[atalhos] erro ao salvar:', e.message);
+      return null;
+    }
+  }
+
+  // ── Remove atalho do servidor ──
+  async function removerAtalho(id, btnEl) {
+    try {
+      const resp = await fetch(`/api/user/atalhos/${id}`, { method: 'DELETE', credentials: 'include' });
+      const data = await resp.json();
+      if (data.ok) btnEl.remove();
+    } catch (e) {
+      console.error('[atalhos] erro ao remover:', e.message);
+    }
+  }
+
+  // ── Drag & Drop nos itens do menu lateral ──
+  let _dragData = null;
+
+  function habilitarDragNoMenu() {
+    // Seletor correto: .sidebar-content é o container real do menu lateral
+    document.querySelectorAll('.sidebar-content .menu-link[data-nav-key]').forEach(link => {
+      if (link.getAttribute('draggable') === 'true') return; // evita duplicar listeners
+      link.setAttribute('draggable', 'true');
+
+      link.addEventListener('dragstart', (e) => {
+        const iconEl = link.querySelector('i');
+        const iconClass = iconEl ? iconEl.className : 'fa-solid fa-star';
+        _dragData = {
+          nav_key:      link.dataset.navKey,
+          nav_label:    link.dataset.navLabel || link.textContent.trim().replace(/\s+/g, ' '),
+          nav_selector: link.dataset.navSelector || ('#' + link.id),
+          icon_class:   iconClass
+        };
+        e.dataTransfer.effectAllowed = 'copy';
+        document.body.classList.add('dragging-menu-item');
+      });
+
+      link.addEventListener('dragend', () => {
+        document.body.classList.remove('dragging-menu-item');
+        dropTarget.classList.remove('drag-over');
+        _dragData = null;
+      });
+    });
+  }
+
+  // ── Eventos no drop target ──
+  dropTarget.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'copy';
+    dropTarget.classList.add('drag-over');
+  });
+
+  dropTarget.addEventListener('dragleave', () => {
+    dropTarget.classList.remove('drag-over');
+  });
+
+  dropTarget.addEventListener('drop', async (e) => {
+    e.preventDefault();
+    dropTarget.classList.remove('drag-over');
+    document.body.classList.remove('dragging-menu-item');
+    if (!_dragData) return;
+
+    // Verifica se atalho já existe
+    const jaExiste = container.querySelector(`[data-nav-key="${CSS.escape(_dragData.nav_key)}"]`);
+    if (jaExiste) {
+      jaExiste.animate([{ transform: 'scale(1.2)' }, { transform: 'scale(1)' }], { duration: 300 });
+      _dragData = null;
+      return;
+    }
+
+    const atalho = await salvarAtalho(_dragData.nav_key, _dragData.nav_label, _dragData.nav_selector, _dragData.icon_class);
+    if (atalho) container.appendChild(criarBotaoAtalho(atalho));
+    _dragData = null;
+  });
+
+  // ── Inicialização ──
+  // O script está no fim do arquivo, DOM já carregou — usa setTimeout curto como microtask fence
+  function init() {
+    carregarAtalhos();
+    habilitarDragNoMenu();
+  }
+
+  function tentarInit() {
+    if (window.__sessionUser?.id) {
+      init();
+    } else {
+      // Usuário ainda não logou: fica escutando o evento customizado que o sistema de auth dispara
+      document.addEventListener('auth:loggedIn', () => init(), { once: true });
+      // Fallback: verifica após 2 s caso o evento não seja disparado
+      setTimeout(() => { if (window.__sessionUser?.id && !zone.dataset.atalhoInited) init(); }, 2000);
+    }
+    zone.dataset.atalhoInited = '1';
+  }
+
+  // DOM já disponível no fim do arquivo
+  setTimeout(tentarInit, 0);
 })();
