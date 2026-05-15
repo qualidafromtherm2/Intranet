@@ -21568,11 +21568,13 @@ function converterReconciliacaoParaImport() {
     .filter((_, idx) => selecionados.has(idx) && resultados[idx].tipo)
     .map(r => {
       if (r.tipo === 'TRF') {
-        // Formato: CODIGO TAB TRF TAB QTD TAB ORIGEM TAB DESTINO
-        return [r.codigo, 'TRF', r.ajusteQty.toFixed(2), r.origemTrf || local, r.destinoTrf || local].join('\t');
+        // Formato: CODIGO TAB TRF TAB QTD TAB ORIGEM TAB DESTINO [TAB CMC]
+        const cmcStr = r.cmc > 0 ? String(r.cmc) : '';
+        return [r.codigo, 'TRF', r.ajusteQty.toFixed(2), r.origemTrf || local, r.destinoTrf || local, cmcStr].join('\t');
       }
-      // ENT direto: CODIGO TAB ENT TAB QTD TAB ARMAZEM
-      return [r.codigo, r.tipo, r.ajusteQty.toFixed(2), local].join('\t');
+      // ENT direto: CODIGO TAB ENT TAB QTD TAB ARMAZEM [TAB CMC]
+      const cmcStr = r.cmc > 0 ? String(r.cmc) : '';
+      return [r.codigo, r.tipo, r.ajusteQty.toFixed(2), local, cmcStr].join('\t');
     });
 
   if (!linhas.length) {

@@ -362,8 +362,9 @@ router.post('/reconciliar', express.json(), async (req, res) => {
     });
 
     // Saldo no Recebimento para produtos que precisam de ENT
+    // (apenas quando o armazém reconciliado NÃO é o próprio Recebimento)
     let mapaRecebimento = new Map();
-    if (codigosEnt.length) {
+    if (codigosEnt.length && local_estoque !== COD_RECEBIMENTO) {
       const { rows: drRows } = await dbQuery(
         `SELECT MAX(data_posicao) AS ultima_data
            FROM public.omie_estoque_posicao
