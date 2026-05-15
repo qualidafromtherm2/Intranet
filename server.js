@@ -10338,6 +10338,7 @@ app.get('/api/preparacao/debug/:op', async (req, res) => {
 const produtosFotosRouter = require('./routes/produtosFotos'); // <-- ADICIONE ESTA LINHA
 const produtosAnexosRouter = require('./routes/produtosAnexos');
 const transferenciasRouter = require('./routes/transferencias');
+const ajustesRouter = require('./routes/ajustes');
 
 //app.use(require('express').json({ limit: '5mb' }));
 
@@ -10347,6 +10348,7 @@ app.use('/api/produtos', produtosRouter);
 app.use('/api/produtos', produtosFotosRouter);
 app.use('/api/produtos', produtosAnexosRouter);
 app.use('/api/transferencias', transferenciasRouter);
+app.use('/api/ajustes', ajustesRouter);
 app.use('/api/primeira-pc-ok', require('./routes/primeiraPcOk'));
 app.use('/api/engenharia', engenhariaRouter);
 app.use('/api/compras', comprasRouter);
@@ -29048,6 +29050,7 @@ app.get('/api/compras/localizar-nfe-por-numero', async (req, res) => {
         LEFT JOIN omie.fornecedores f ON f.codigo_cliente_omie = p.n_cod_for
         WHERE COALESCE(p.inativo, false) = false
           AND p.d_inc_data >= DATE '2026-01-01'
+          AND COALESCE(p."Pedido recebido", false) = false
           AND COALESCE(BTRIM(p."Etapa_NF"), '') NOT IN ('60', '80')
           AND (
             ${exists_clause}
@@ -29103,6 +29106,7 @@ app.get('/api/compras/localizar-nfe-por-numero', async (req, res) => {
         JOIN compras.pedidos_omie_produtos pop ON pop.n_cod_ped = p.n_cod_ped
         WHERE COALESCE(p.inativo, false) = false
           AND p.d_inc_data >= DATE '2026-01-01'
+          AND COALESCE(p."Pedido recebido", false) = false
           AND COALESCE(BTRIM(p."Etapa_NF"), '') NOT IN ('60', '80')
         GROUP BY p.n_cod_ped, p.c_numero, f.nome_fantasia, f.razao_social, p.d_inc_data, p.c_obs
         HAVING SUM(COALESCE(pop.n_val_tot, 0)) BETWEEN $1 AND $2

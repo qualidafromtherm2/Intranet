@@ -3099,6 +3099,11 @@ let solicitacoesTransferencias = [];
 let solicitacoesTransferenciasLoaded = false;
 let solicitacoesTransferenciasCarregando = false;
 
+let ajusteLista = [];
+let solicitacoesAjustes = [];
+let solicitacoesAjustesLoaded = false;
+let solicitacoesAjustesCarregando = false;
+
 // === PATCH GLOBAL DO FETCH (garante cookie da sessão em TODAS as requests) ===
 (function hardenFetchCredentials(){
   const _fetch = window.fetch;
@@ -6215,6 +6220,10 @@ else if (nome === 'transferencia') {
   // Renderiza lista de itens selecionados
   window.renderTransferenciaLista?.();
 }
+else if (nome === 'ajuste-estoque') {
+  await carregarLocaisEstoque();
+  renderAjusteLista();
+}
 else if (nome === 'armazem3d') {
   initArmazem3D();
 }
@@ -6509,12 +6518,13 @@ function formatarLocalEstoqueLabel(locOuCodigo) {
 function preencherTransferLocais() {
   const selects = [
     document.getElementById('transferOrigem'),
-    document.getElementById('transferDestino')
+    document.getElementById('transferDestino'),
+    document.getElementById('ajusteLocal')
   ].filter(Boolean);
 
   selects.forEach(sel => {
     const current = sel.value;
-    const isOrigem = sel.id === 'transferOrigem';
+    const isOrigem = sel.id === 'transferOrigem' || sel.id === 'ajusteLocal';
     const preferido = isOrigem ? TRANSFER_DEFAULT_ORIGEM : TRANSFER_DEFAULT_DESTINO;
     sel.innerHTML = '<option value="">Selecione…</option>';
     transferLocais.forEach(loc => {
@@ -7045,6 +7055,11 @@ document.getElementById('menu-armazens').addEventListener('click', e => {
 document.getElementById('menu-solicitacao-transferencia')?.addEventListener('click', async e => {
   e.preventDefault();
   await window.openSolicitacoesTransferencia?.();
+});
+
+document.getElementById('menu-solicitacao-ajuste')?.addEventListener('click', async e => {
+  e.preventDefault();
+  await window.openSolicitacoesAjuste?.();
 });
 
 function abrirLocalizarNfePeloMenuRecebimento() {
@@ -18350,6 +18365,343 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
   }
   carregarLocaisEstoque();
+
+  // ─── AJUSTE DE ESTOQUE (ENT/SAI) ─────────────────────────────────────────
+
+  function updateAjusteControlsState() {
+    const btn = document.getElementById('ajusteBtn');
+    if (!btn) return;
+    const local = document.getElementById('ajusteLocal')?.value || '';
+    const temItens = ajusteLista.some(i => i.selecionado);
+    btn.disabled = !local || !temItens;
+  }
+
+  function renderAjusteLista() {
+    const tbody = document.getElementById('ajusteTbody');
+    if (!tbody) return;
+    tbody.innerHTML = '';
+
+    const semItens = !ajusteLista.length;
+    if (semItens) {
+      tbody.innerHTML = '<tr class="transferencia-placeholder"><td colspan="8">Nenhum item selecionado para ajuste.</td></tr>';
+      updateAjusteControlsState();
+      return;
+    }
+
+    ajusteLista.forEach((item, idx) => {
+      const tr = document.createElement('tr');
+      const quantidade = Number(normalizaNumeroParaApi(item.qtd));
+      const cmcVal = Number(normalizaNumeroParaApi(item.cmc));
+      tr.innerHTML = `
+        <td class="sel-col">
+          <input type="checkbox" class="ajuste-sel-check" data-idx="${idx}" ${item.selecionado ? 'checked' : ''} />
+        </td>
+        <td>${escapeHtml(item.codigo || '')}</td>
+        <td class="desc-cell" title="${escapeHtml(item.descricao || '')}">${escapeHtml(truncateText(item.descricao || '', 40))}</td>
+        <td>${escapeHtml(item.codOmie || '')}</td>
+        <td><input type="number" class="transfer-qtd-input ajuste-qtd-input" data-idx="${idx}" min="0.0001" step="0.01" value="${Number.isFinite(quantidade) ? quantidade : 1}" style="width:80px;" /></td>
+        <td><input type="number" class="transfer-qtd-input ajuste-cmc-input" data-idx="${idx}" min="0" step="0.0001" value="${Number.isFinite(cmcVal) ? cmcVal : ''}" placeholder="CMC" title="Custo médio — obrigatório" style="width:90px;" /></td>
+        <td class="num">${escapeHtml(item.fisico != null ? String(item.fisico) : '-')}</td>
+        <td class="num">${escapeHtml(item.saldo != null ? String(item.saldo) : '-')}</td>
+      `;
+      tbody.appendChild(tr);
+    });
+
+    // Bind checkbox
+    tbody.querySelectorAll('.ajuste-sel-check').forEach(chk => {
+      chk.addEventListener('change', () => {
+        const i = Number(chk.dataset.idx);
+        if (ajusteLista[i]) ajusteLista[i].selecionado = chk.checked;
+        updateAjusteControlsState();
+      });
+    });
+
+    // Bind qtd input
+    tbody.querySelectorAll('.ajuste-qtd-input').forEach(inp => {
+      inp.addEventListener('input', () => {
+        const i = Number(inp.dataset.idx);
+        const v = sanitizeQtd(inp.value);
+        if (ajusteLista[i]) ajusteLista[i].qtd = v ?? 1;
+      });
+    });
+
+    // Bind cmc input
+    tbody.querySelectorAll('.ajuste-cmc-input').forEach(inp => {
+      inp.addEventListener('input', () => {
+        const i = Number(inp.dataset.idx);
+        const v = normalizaNumeroParaApi(inp.value);
+        if (ajusteLista[i]) ajusteLista[i].cmc = v;
+      });
+    });
+
+    updateAjusteControlsState();
+  }
+
+  window.renderAjusteLista = renderAjusteLista;
+
+  function adicionarItemAjuste(item) {
+    if (!item) return;
+    const codigo = String(item.codigo || '').trim();
+    if (!codigo) return;
+    const normalizado = {
+      codigo,
+      descricao: String(item.descricao || '').trim(),
+      fisico: item.fisico ?? '-',
+      saldo: item.saldo ?? '-',
+      cmc: item.cmc ?? 0,
+      codOmie: String(item.codOmie || '').trim(),
+      selecionado: true,
+      qtd: sanitizeQtd(item.qtd ?? 1)
+    };
+    const idx = ajusteLista.findIndex(i => i.codigo === codigo);
+    if (idx >= 0) {
+      ajusteLista[idx] = { ...ajusteLista[idx], ...normalizado, qtd: sanitizeQtd(ajusteLista[idx].qtd ?? normalizado.qtd), selecionado: true };
+    } else {
+      ajusteLista.push(normalizado);
+    }
+    renderAjusteLista();
+  }
+
+  // Ajuste local select change
+  const ajusteLocalSel = document.getElementById('ajusteLocal');
+  if (ajusteLocalSel && !ajusteLocalSel.__ajusteBound) {
+    ajusteLocalSel.__ajusteBound = true;
+    ajusteLocalSel.addEventListener('change', updateAjusteControlsState);
+  }
+
+  // Ajuste search
+  const ajusteSearchInput   = document.getElementById('ajusteSearch');
+  const ajusteSearchDropdown = document.querySelector('#conteudo-ajuste-estoque .transfer-search-dropdown');
+  const ajusteSearchResults = document.getElementById('ajusteSearchResults');
+  if (ajusteSearchInput && ajusteSearchResults && !ajusteSearchInput.__ajusteBound) {
+    ajusteSearchInput.__ajusteBound = true;
+    let debounceId = null;
+
+    const hideAjusteResults = () => {
+      if (debounceId) { clearTimeout(debounceId); debounceId = null; }
+      if (ajusteSearchDropdown) ajusteSearchDropdown.style.display = 'none';
+      ajusteSearchResults.innerHTML = '';
+    };
+
+    ajusteSearchInput.addEventListener('input', () => {
+      const termo = ajusteSearchInput.value.trim();
+      if (debounceId) clearTimeout(debounceId);
+      if (termo.length < 2) { hideAjusteResults(); return; }
+
+      debounceId = setTimeout(async () => {
+        if (ajusteSearchDropdown) ajusteSearchDropdown.style.display = 'block';
+        ajusteSearchResults.innerHTML = '<li class="info">Buscando…</li>';
+        try {
+          const resp = await fetch(`/api/produtos/search?q=${encodeURIComponent(termo)}&limit=40`, { credentials: 'include' });
+          const json = await resp.json();
+          const itens = Array.isArray(json?.data) ? json.data : [];
+          if (!itens.length) { ajusteSearchResults.innerHTML = '<li class="no-results">Nenhum item encontrado</li>'; return; }
+          await ensureAlmoxDadosCarregados().catch(() => {});
+          ajusteSearchResults.innerHTML = '';
+          itens.forEach(prod => {
+            const li = document.createElement('li');
+            li.dataset.codigo = prod.codigo || '';
+            li.dataset.descricao = prod.descricao || '';
+            li.innerHTML = `<span class="codigo">${escapeHtml(prod.codigo || '')}</span><span class="descricao">${escapeHtml(prod.descricao || '')}</span>`;
+            ajusteSearchResults.appendChild(li);
+          });
+          const first = ajusteSearchResults.firstElementChild;
+          const itemH = first ? (first.getBoundingClientRect().height || 44) : 44;
+          const maxH = itemH * 5;
+          ajusteSearchResults.style.maxHeight = `${maxH}px`;
+          ajusteSearchResults.style.height = itens.length * itemH > maxH ? `${maxH}px` : 'auto';
+          ajusteSearchResults.style.overflowY = itens.length * itemH > maxH ? 'auto' : 'hidden';
+          if (ajusteSearchDropdown) ajusteSearchDropdown.style.display = 'block';
+        } catch (err) {
+          console.error('[ajuste] autocomplete', err);
+          ajusteSearchResults.innerHTML = '<li class="error">Erro ao buscar</li>';
+        }
+      }, 150);
+    });
+
+    ajusteSearchResults.addEventListener('click', async (ev) => {
+      const li = ev.target.closest('li[data-codigo]');
+      if (!li || li.classList.contains('info') || li.classList.contains('error') || li.classList.contains('no-results')) return;
+      const codigo = li.dataset.codigo || '';
+      const descricao = li.dataset.descricao || '';
+      await ensureAlmoxDadosCarregados().catch(() => {});
+      const extra = almoxAllDados.find(i => i.codigo === codigo) || {};
+      adicionarItemAjuste({ codigo, descricao, fisico: extra.fisico, saldo: extra.saldo, cmc: extra.cmc ?? 0, codOmie: extra.codOmie || '', qtd: 1 });
+      ajusteSearchInput.value = '';
+      hideAjusteResults();
+      showArmazemTab('ajuste-estoque');
+    });
+
+    ajusteSearchInput.addEventListener('keydown', (ev) => { if (ev.key === 'Escape') { ajusteSearchInput.value = ''; hideAjusteResults(); } });
+    ajusteSearchInput.addEventListener('blur', () => { setTimeout(() => { if (!document.activeElement?.closest('#ajusteSearchResults')) hideAjusteResults(); }, 150); });
+    document.addEventListener('click', (ev) => { if (ev.target !== ajusteSearchInput && !ajusteSearchDropdown?.contains(ev.target)) hideAjusteResults(); });
+  }
+
+  // Ajuste submit button
+  const ajusteBtn = document.getElementById('ajusteBtn');
+  if (ajusteBtn && !ajusteBtn.__ajusteBound) {
+    ajusteBtn.__ajusteBound = true;
+    ajusteBtn.addEventListener('click', async () => {
+      const tipoSel = document.getElementById('ajusteTipo');
+      const localSel = document.getElementById('ajusteLocal');
+      const dataMov  = document.getElementById('ajusteDataMov');
+      const obsTa    = document.getElementById('ajusteObs');
+      const usuario  = String(document.getElementById('userNameDisplay')?.textContent || '').trim();
+
+      const tipo_operacao = String(tipoSel?.value || '').trim();
+      const local_estoque = String(localSel?.value || '').trim();
+      const local_nome    = String(localSel?.selectedOptions?.[0]?.textContent || '').trim() || null;
+      const data_movimentacao = dataMov?.value || new Date().toISOString().slice(0, 10);
+      const obs = String(obsTa?.value || '').trim() || null;
+
+      if (!['ENT','SAI'].includes(tipo_operacao)) return alert('Selecione o tipo (ENT ou SAI).');
+      if (!local_estoque) return alert('Selecione o local de estoque.');
+
+      const itensSel = ajusteLista.filter(i => i.selecionado);
+      if (!itensSel.length) return alert('Nenhum item selecionado para o ajuste.');
+
+      const payload = {
+        tipo_operacao,
+        local_estoque,
+        local_nome,
+        data_movimentacao,
+        solicitante: usuario || null,
+        obs,
+        itens: itensSel.map(item => ({
+          codigo: item.codigo,
+          descricao: item.descricao || null,
+          qtd: normalizaNumeroParaApi(item.qtd),
+          cmc: normalizaNumeroParaApi(item.cmc),
+          codigo_produto: item.codOmie || item.codigo_produto || null,
+          codOmie: item.codOmie || null
+        }))
+      };
+
+      const originalHtml = ajusteBtn.innerHTML;
+      ajusteBtn.disabled = true;
+      ajusteBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
+
+      try {
+        const resp = await fetch('/api/ajustes', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+        let resposta;
+        try { resposta = await resp.json(); } catch { throw new Error('Resposta inválida do servidor.'); }
+        if (!resp.ok || !resposta?.ok) throw new Error(resposta?.error || resposta?.detail || `Falha ao registrar ajuste (HTTP ${resp.status}).`);
+        alert(`Ajuste ${tipo_operacao} registrado com sucesso!`);
+        ajusteLista = [];
+        renderAjusteLista();
+        updateAjusteControlsState();
+        solicitacoesAjustesLoaded = false;
+        carregarSolicitacoesAjustes(true).catch(() => {});
+      } catch (err) {
+        console.error('[ajuste] registrar', err);
+        alert(`Falha ao registrar ajuste: ${err?.message || err}`);
+      } finally {
+        ajusteBtn.innerHTML = originalHtml;
+        ajusteBtn.disabled = false;
+        updateAjusteControlsState();
+      }
+    });
+  }
+
+  // Ajuste approve/reject handlers
+  const solicitacoesAjusteTbody = document.getElementById('solicitacoesAjusteTbody');
+  if (solicitacoesAjusteTbody && !solicitacoesAjusteTbody.__approveBound) {
+    solicitacoesAjusteTbody.__approveBound = true;
+    solicitacoesAjusteTbody.addEventListener('click', async (ev) => {
+      const btn = ev.target.closest('.btn-approve-ajuste');
+      if (!btn) return;
+      const id = Number(btn.dataset.id);
+      if (!Number.isInteger(id)) return alert('ID inválido.');
+      const usuario = String(document.getElementById('userNameDisplay')?.textContent || '').trim();
+      if (!usuario || usuario === 'Usuário' || usuario === '—') return alert('Usuário não identificado. Faça login novamente.');
+      const originalLabel = btn.textContent;
+      btn.disabled = true;
+      btn.textContent = 'Executando…';
+      try {
+        const resp = await fetch(`/api/ajustes/${id}/aprovar`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ aprovadoPor: usuario }) });
+        const json = await resp.json().catch(() => ({}));
+        if (!resp.ok || !json?.ok) throw new Error(json?.error || `Falha ao aprovar (HTTP ${resp.status}).`);
+        const msg = json?.descricao_status || json?.mensagem || 'Ajuste executado com sucesso.';
+        alert(msg);
+        await carregarSolicitacoesAjustes(true);
+      } catch (err) {
+        console.error('[ajuste] aprovar', err);
+        alert(err?.message || 'Falha ao executar o ajuste.');
+        btn.disabled = false;
+        btn.textContent = originalLabel;
+      }
+    });
+  }
+  if (solicitacoesAjusteTbody && !solicitacoesAjusteTbody.__rejectBound) {
+    solicitacoesAjusteTbody.__rejectBound = true;
+    solicitacoesAjusteTbody.addEventListener('click', async (ev) => {
+      const btn = ev.target.closest('.btn-reject-ajuste');
+      if (!btn) return;
+      const id = Number(btn.dataset.id);
+      if (!Number.isInteger(id)) return alert('ID inválido.');
+      const usuario = String(document.getElementById('userNameDisplay')?.textContent || '').trim();
+      if (!usuario || usuario === 'Usuário' || usuario === '—') return alert('Usuário não identificado. Faça login novamente.');
+      const motivo = prompt('Informe o motivo para reprovar este ajuste:', '');
+      if (motivo === null) return;
+      const originalLabel = btn.textContent;
+      btn.disabled = true;
+      btn.textContent = 'Reprovando…';
+      try {
+        const resp = await fetch(`/api/ajustes/${id}/reprovar`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ reprovadoPor: usuario, motivo }) });
+        const json = await resp.json().catch(() => ({}));
+        if (!resp.ok || !json?.ok) throw new Error(json?.error || `Falha ao reprovar (HTTP ${resp.status}).`);
+        alert('Ajuste reprovado.');
+        await carregarSolicitacoesAjustes(true);
+      } catch (err) {
+        console.error('[ajuste] reprovar', err);
+        alert(err?.message || 'Falha ao reprovar o ajuste.');
+        btn.disabled = false;
+        btn.textContent = originalLabel;
+      }
+    });
+  }
+
+  // Ajuste approve-all button
+  const ajusteApproveAllBtn = document.getElementById('solicitacoesAjusteApproveAll');
+  if (ajusteApproveAllBtn && !ajusteApproveAllBtn.__ajusteBound) {
+    ajusteApproveAllBtn.__ajusteBound = true;
+    ajusteApproveAllBtn.addEventListener('click', async () => {
+      const pendentes = solicitacoesAjustes.filter(a => {
+        const s = String(a.status || '').toLowerCase();
+        return s !== 'executado' && s !== 'reprovado';
+      });
+      if (!pendentes.length) return alert('Nenhuma solicitação pendente de ajuste.');
+      const usuario = String(document.getElementById('userNameDisplay')?.textContent || '').trim();
+      if (!usuario || usuario === 'Usuário' || usuario === '—') return alert('Usuário não identificado.');
+      if (!confirm(`Aprovar ${pendentes.length} ajuste(s) pendente(s)?`)) return;
+      ajusteApproveAllBtn.disabled = true;
+      const originalLabel = ajusteApproveAllBtn.textContent;
+      ajusteApproveAllBtn.textContent = 'Aprovando…';
+      const erros = [];
+      for (const a of pendentes) {
+        try {
+          const resp = await fetch(`/api/ajustes/${a.id}/aprovar`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ aprovadoPor: usuario }) });
+          const json = await resp.json().catch(() => ({}));
+          if (!resp.ok || !json?.ok) erros.push(`ID ${a.id}: ${json?.error || 'Erro'}`);
+        } catch (err) {
+          erros.push(`ID ${a.id}: ${err?.message || 'Erro de rede'}`);
+        }
+      }
+      ajusteApproveAllBtn.textContent = originalLabel;
+      ajusteApproveAllBtn.disabled = false;
+      if (erros.length) alert(`Concluído com erros:\n${erros.join('\n')}`);
+      else alert('Todos os ajustes pendentes foram executados com sucesso!');
+      await carregarSolicitacoesAjustes(true);
+    });
+  }
+
+  // Ajuste refresh button
+  const ajusteRefreshBtn = document.getElementById('solicitacoesAjusteRefresh');
+  if (ajusteRefreshBtn && !ajusteRefreshBtn.__ajusteBound) {
+    ajusteRefreshBtn.__ajusteBound = true;
+    ajusteRefreshBtn.addEventListener('click', () => carregarSolicitacoesAjustes(true));
+  }
+
   // abre o painel Início como padrão
   showMainTab('paginaInicio');
 
@@ -20432,6 +20784,115 @@ async function openSolicitacoesTransferencia(forceReload = false) {
 }
 
 window.openSolicitacoesTransferencia = openSolicitacoesTransferencia;
+
+// ─── AJUSTE DE ESTOQUE — renderizar e carregar ───────────────────────────────
+
+function renderSolicitacoesAjustes() {
+  const tbody = document.getElementById('solicitacoesAjusteTbody');
+  if (!tbody) return;
+  tbody.innerHTML = '';
+
+  if (!solicitacoesAjustes.length) {
+    const tr = document.createElement('tr');
+    tr.innerHTML = '<td colspan="13">Nenhuma solicitação registrada.</td>';
+    tbody.appendChild(tr);
+    return;
+  }
+
+  solicitacoesAjustes.forEach(item => {
+    const quantidade = Number(item.qtd);
+    const cmc = Number(item.cmc);
+    const qtdFormatada = Number.isFinite(quantidade) ? fmtQtd.format(quantidade) : '-';
+    const cmcFormatado = Number.isFinite(cmc) ? `R$ ${fmtBR.format(cmc)}` : '-';
+    const dataMovimentacao = item.data_movimentacao
+      ? new Date(item.data_movimentacao).toLocaleDateString('pt-BR', { timeZone: 'UTC' })
+      : '-';
+    const descricaoCompleta = String(item.descricao || '');
+    const obsTexto = String(item.obs || '');
+    const statusAtual = String(item.status || '');
+    const localLabel = formatarLocalEstoqueLabel({ codigo_local_estoque: item.local_estoque, descricao: item.local_nome }) || item.local_estoque || '';
+    const podeAprovar = statusAtual.toLowerCase() !== 'executado' && statusAtual.toLowerCase() !== 'reprovado';
+    const idEsc = escapeHtml(String(item.id ?? ''));
+    const botaoHtml = podeAprovar
+      ? `<div style="display:flex;gap:6px;flex-wrap:wrap;">
+           <button type="button" class="btn tiny btn-approve-ajuste" data-id="${idEsc}">Executar</button>
+           <button type="button" class="btn tiny btn-reject-ajuste" data-id="${idEsc}" style="border-color:#ef4444;color:#fecaca;">Reprovar</button>
+         </div>`
+      : `<span>${escapeHtml(statusAtual)}</span>`;
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td>${idEsc}</td>
+      <td><strong>${escapeHtml(item.tipo_operacao || '')}</strong></td>
+      <td>${escapeHtml(item.codigo || '')}</td>
+      <td class="desc-cell" title="${escapeHtml(descricaoCompleta)}">${escapeHtml(truncateText(descricaoCompleta, 40))}</td>
+      <td class="num">${escapeHtml(qtdFormatada)}</td>
+      <td>${escapeHtml(dataMovimentacao)}</td>
+      <td class="num">${escapeHtml(cmcFormatado)}</td>
+      <td>${escapeHtml(localLabel)}</td>
+      <td class="desc-cell" title="${escapeHtml(obsTexto)}">${escapeHtml(truncateText(obsTexto, 30))}</td>
+      <td>${escapeHtml(item.solicitante || '')}</td>
+      <td>${escapeHtml(statusAtual)}</td>
+      <td>${escapeHtml(item.aprovado_por || '-')}</td>
+      <td>${botaoHtml}</td>`;
+    tbody.appendChild(tr);
+  });
+}
+
+async function carregarSolicitacoesAjustes(forceReload = false) {
+  if (solicitacoesAjustesCarregando) return;
+  if (solicitacoesAjustesLoaded && !forceReload) {
+    renderSolicitacoesAjustes();
+    return;
+  }
+
+  const spinner = document.getElementById('solicitacoesAjusteSpinner');
+  const tbody = document.getElementById('solicitacoesAjusteTbody');
+  if (!tbody) return;
+
+  solicitacoesAjustesCarregando = true;
+  if (spinner) spinner.style.display = 'block';
+  tbody.innerHTML = '<tr><td colspan="13">Carregando solicitações…</td></tr>';
+
+  try {
+    const resp = await fetch('/api/ajustes');
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    const json = await resp.json();
+    if (!json.ok) throw new Error(json.error || 'Falha ao carregar lista.');
+
+    const registros = Array.isArray(json.registros) ? json.registros : [];
+    solicitacoesAjustes = registros.filter(item => {
+      const status = String(item.status || '').toLowerCase();
+      return status !== 'executado' && status !== 'reprovado';
+    });
+    solicitacoesAjustesLoaded = true;
+    renderSolicitacoesAjustes();
+  } catch (err) {
+    console.error('[ajustes] falha ao carregar solicitações', err);
+    tbody.innerHTML = '<tr><td colspan="13">⚠️ Falha ao carregar solicitações de ajuste.</td></tr>';
+  } finally {
+    solicitacoesAjustesCarregando = false;
+    if (spinner) spinner.style.display = 'none';
+  }
+}
+
+async function openSolicitacoesAjuste(forceReload = false) {
+  if (typeof hideKanban === 'function') hideKanban();
+  if (typeof hideArmazem === 'function') hideArmazem();
+  window.clearMainContainer?.();
+  const prodTabs = document.getElementById('produtoTabs');
+  if (prodTabs) prodTabs.style.display = 'none';
+  const kanbanTabs = document.getElementById('kanbanTabs');
+  if (kanbanTabs) kanbanTabs.style.display = 'none';
+  const pane = document.getElementById('solicitacaoAjuste');
+  if (pane) window.showOnlyInMain?.(pane);
+  document.querySelectorAll('.left-side .side-menu a').forEach(a => a.classList.remove('is-active'));
+  document.getElementById('menu-solicitacao-ajuste')?.classList.add('is-active');
+  await carregarSolicitacoesAjustes(forceReload);
+}
+
+window.openSolicitacoesAjuste = openSolicitacoesAjuste;
+
+// ─── FIM AJUSTE ───────────────────────────────────────────────────────────────
 
 function adicionarItemTransferencia(item) {
   if (!item) return;
