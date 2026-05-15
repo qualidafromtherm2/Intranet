@@ -280,6 +280,13 @@ router.post('/locais', async (req, res) => {
 router.get('/lista', async (req, res) => {
   try {
     const q        = (req.query.q || '').trim() || null;
+    const rawSearchMode = String(req.query.searchMode || 'contains').trim();
+    const searchMode = ['tags', 'contains', 'starts'].includes(rawSearchMode) ? rawSearchMode : 'contains';
+    const qTokens = q ? q.split(/\s+/).map(t => t.trim()).filter(Boolean).slice(0, 12) : [];
+    const utilidadeRaw = req.query.utilidade;
+    const utilidadeList = (Array.isArray(utilidadeRaw) ? utilidadeRaw : String(utilidadeRaw || '').split(','))
+      .map(v => String(v || '').trim().toLowerCase())
+      .filter(v => ['obsoleto', 'engenharia', 'sem-minimo'].includes(v));
     const tipoitem = (req.query.tipoitem || '').trim() || null;
     const inativo  = (req.query.inativo  || '').trim() || null;
     const limit    = Math.min(parseInt(req.query.limit || '50', 10), 500);
@@ -288,16 +295,58 @@ router.get('/lista', async (req, res) => {
 
     const sql = `
       WITH base AS (
-        SELECT v.*, p.descricao_familia
+        SELECT
+          v.*,
+          p.descricao_familia,
+          ea.saldo_total,
+          ea.estoque_minimo
         FROM vw_lista_produtos v
         LEFT JOIN public.produtos_omie p ON p.codigo_produto = v.codigo_produto
+        LEFT JOIN LATERAL (
+          SELECT
+            SUM(saldo) AS saldo_total,
+            MAX(estoque_minimo) AS estoque_minimo
+          FROM logistica.estoque_atual
+          WHERE codigo = v.codigo
+        ) ea ON true
         WHERE
           ($1::text IS NULL
-            OR v.descricao ILIKE '%' || $1 || '%'
-            OR v.codigo    ILIKE '%' || $1 || '%'
-            OR v.codigo_produto_integracao ILIKE '%' || $1 || '%')
+            OR (
+              $6::text = 'contains'
+              AND (
+                v.descricao ILIKE '%' || $1 || '%'
+                OR v.codigo ILIKE '%' || $1 || '%'
+                OR v.codigo_produto_integracao ILIKE '%' || $1 || '%'
+              )
+            )
+            OR (
+              $6::text = 'starts'
+              AND (
+                v.descricao ILIKE $1 || '%'
+                OR v.codigo ILIKE $1 || '%'
+                OR v.codigo_produto_integracao ILIKE $1 || '%'
+              )
+            )
+            OR (
+              $6::text = 'tags'
+              AND NOT EXISTS (
+                SELECT 1
+                FROM unnest($7::text[]) AS token
+                WHERE NOT (
+                  unaccent(COALESCE(v.descricao, '')) ILIKE '%' || unaccent(token) || '%'
+                  OR COALESCE(v.codigo, '') ILIKE '%' || token || '%'
+                  OR COALESCE(v.codigo_produto_integracao, '') ILIKE '%' || token || '%'
+                )
+              )
+            ))
           AND ($2::text IS NULL OR v.tipoitem = $2)
           AND ($3::text IS NULL OR v.inativo  = $3)
+          AND (
+            cardinality($8::text[]) = 0
+            OR ('obsoleto' = ANY($8::text[]) AND v.descricao ILIKE 'OBSOLETO%')
+            OR ('engenharia' = ANY($8::text[]) AND v.descricao ILIKE 'ENGENHARIA%')
+            OR ('sem-minimo' = ANY($8::text[]) AND COALESCE(ea.estoque_minimo, 0) <= 0)
+          )
       )
       SELECT
         (SELECT COUNT(*) FROM base) AS total,
@@ -313,7 +362,8 @@ router.get('/lista', async (req, res) => {
           tipoitem,
           ncm,
           valor_unitario,
-          quantidade_estoque,
+          COALESCE(saldo_total, quantidade_estoque) AS quantidade_estoque,
+          estoque_minimo,
           inativo,
           bloqueado,
           marca,
@@ -326,7 +376,7 @@ router.get('/lista', async (req, res) => {
       ) AS t;
     `;
 
-    const { rows } = await dbQuery(sql, [q, tipoitem, inativo, limit, offset]);
+    const { rows } = await dbQuery(sql, [q, tipoitem, inativo, limit, offset, searchMode, qTokens, utilidadeList]);
     const total = Number(rows?.[0]?.total || 0);
     const itens = rows?.[0]?.itens || [];
 
