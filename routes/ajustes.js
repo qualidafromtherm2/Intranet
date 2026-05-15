@@ -310,9 +310,12 @@ router.post('/check-produtos', express.json(), async (req, res) => {
 // Lógica de sugestão:
 //   ENT (contado > sistema) → verifica saldo no Recebimento; se suficiente → TRF Recebimento→Almox
 //   SAI (contado < sistema) → TRF Almox→Produção (consumo não registrado)
+//   tipoitem 0/00 (revenda) ou 4/04 (PA) fora do #MAQ → pertenceMaq=true, sem ação
 router.post('/reconciliar', express.json(), async (req, res) => {
-  const COD_RECEBIMENTO = '10408201806'; // #D — 1. RECEBIMENTO DE PRODUTOS
-  const COD_PRODUCAO    = '10431538872'; // #PROD — 3. ESTOQUE PRODUÇÃO
+  const COD_RECEBIMENTO  = '10408201806'; // #D   — 1. RECEBIMENTO DE PRODUTOS
+  const COD_PRODUCAO     = '10431538872'; // #PROD — 3. ESTOQUE PRODUÇÃO
+  const COD_MAQ          = '10408747829'; // #MAQ  — 4. ESTOQUE MAQUINAS
+  const TIPOS_PA_REVENDA = new Set(['0', '00', '4', '04']); // Produto Acabado e Revenda
   try {
     const local_estoque = String(req.body?.local_estoque || '').trim();
     const itens = Array.isArray(req.body?.itens) ? req.body.itens : [];
@@ -381,6 +384,15 @@ router.post('/reconciliar', express.json(), async (req, res) => {
       }
     }
 
+    // tipoitem de cada produto (para regra PA/Revenda → #MAQ)
+    const { rows: tipoRows } = await dbQuery(
+      `SELECT codigo, COALESCE(tipoitem, '') AS tipoitem
+         FROM public.produtos_omie
+        WHERE codigo = ANY($1::text[])`,
+      [codigos]
+    );
+    const mapaTipoItem = new Map(tipoRows.map(r => [String(r.codigo), String(r.tipoitem || '')]));
+
     const resultados = itens
       .filter(item => String(item.codigo || '').trim())
       .map(item => {
@@ -392,6 +404,18 @@ router.post('/reconciliar', express.json(), async (req, res) => {
         const descricao = est?.descricao || '';
         const delta = qtyFisica - qtySistema;
         const ajusteQty = Math.abs(delta);
+
+        // Produtos PA/Revenda fora do #MAQ: normal ter saldo 0 no armazém contado
+        const tipoitem = mapaTipoItem.get(codigo) || '';
+        if (TIPOS_PA_REVENDA.has(tipoitem) && local_estoque !== COD_MAQ && delta > 0) {
+          return {
+            codigo, descricao, qtySistema, qtyFisica, delta, ajusteQty, cmc,
+            semSistema: !est,
+            tipo: null,
+            pertenceMaq: true,
+            tipoitem
+          };
+        }
 
         if (delta > 0) {
           // Contado > sistema → verifica cobertura no Recebimento

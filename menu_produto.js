@@ -21446,12 +21446,13 @@ async function reconciliarContagemFisica() {
     }
 
     const resultados = json.resultados || [];
-    const comDiff = resultados.filter(r => r.tipo !== null);
-    const semDiff = resultados.filter(r => r.tipo === null);
-    const naoProd = resultados.filter(r => r.semSistema);
-    const ents   = comDiff.filter(r => r.tipo === 'ENT');
-    const trfEnt = comDiff.filter(r => r.tipo === 'TRF' && r.origemTrfNome === 'Recebimento');
-    const trfSai = comDiff.filter(r => r.tipo === 'TRF' && r.destinoTrfNome === 'Produção');
+    const comDiff  = resultados.filter(r => r.tipo !== null);
+    const semDiff  = resultados.filter(r => r.tipo === null && !r.pertenceMaq);
+    const maqItems = resultados.filter(r => r.pertenceMaq);
+    const naoProd  = resultados.filter(r => r.semSistema && !r.pertenceMaq);
+    const ents     = comDiff.filter(r => r.tipo === 'ENT');
+    const trfEnt   = comDiff.filter(r => r.tipo === 'TRF' && r.origemTrfNome === 'Recebimento');
+    const trfSai   = comDiff.filter(r => r.tipo === 'TRF' && r.destinoTrfNome === 'Produção');
 
     // Monta tabela
     tbody.innerHTML = resultados.map((r, idx) => {
@@ -21465,6 +21466,8 @@ async function reconciliarContagemFisica() {
       } else if (r.tipo === 'ENT') {
         const aviso = (r.saldoRecebimento > 0) ? ` <span title="Recebimento tem ${r.saldoRecebimento.toFixed(2)} (insuficiente)" style="font-size:10px;opacity:.7;">⚠️ receb. parcial</span>` : '';
         tipoTag = `<span style="background:rgba(34,197,94,.15);color:#86efac;padding:1px 6px;border-radius:4px;font-weight:700;">ENT ${r.ajusteQty.toFixed(2)}</span>${aviso}`;
+      } else if (r.pertenceMaq) {
+        tipoTag = `<span style="background:rgba(148,163,184,.10);color:#94a3b8;padding:1px 6px;border-radius:4px;" title="PA/Revenda: estoque pertence ao armazém #MAQ">PA/Revenda → #MAQ</span>`;
       } else {
         tipoTag = `<span style="color:#374151;">—</span>`;
       }
@@ -21482,10 +21485,11 @@ async function reconciliarContagemFisica() {
 
     // Resumo
     const partesResumo = [];
-    if (trfEnt.length) partesResumo.push(`<span style="color:#7dd3fc;">↙ ${trfEnt.length} TRF Recebimento→Almox</span>`);
-    if (trfSai.length) partesResumo.push(`<span style="color:#fdba74;">↗ ${trfSai.length} TRF Almox→Produção</span>`);
-    if (ents.length)   partesResumo.push(`<span style="color:#86efac;">${ents.length} ENT direto</span>`);
+    if (trfEnt.length)  partesResumo.push(`<span style="color:#7dd3fc;">↙ ${trfEnt.length} TRF Recebimento→Almox</span>`);
+    if (trfSai.length)  partesResumo.push(`<span style="color:#fdba74;">↗ ${trfSai.length} TRF Almox→Produção</span>`);
+    if (ents.length)    partesResumo.push(`<span style="color:#86efac;">${ents.length} ENT direto</span>`);
     if (semDiff.length) partesResumo.push(`<span style="color:#64748b;">${semDiff.length} iguais</span>`);
+    if (maqItems.length) partesResumo.push(`<span style="color:#94a3b8;">${maqItems.length} PA/Revenda (#MAQ)</span>`);
     if (naoProd.length) partesResumo.push(`<span style="color:#f59e0b;">⚠️ ${naoProd.length} sem dados</span>`);
     resumoEl.innerHTML = partesResumo.join(' &nbsp; ');
 
