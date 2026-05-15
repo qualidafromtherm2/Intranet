@@ -20922,30 +20922,39 @@ function ensureAjusteImportModal() {
   modal.id = 'ajusteImportModal';
   modal.style.cssText = 'position:fixed;inset:0;z-index:9999;display:none;align-items:center;justify-content:center;background:rgba(3,7,18,.72);backdrop-filter:blur(4px);';
   modal.innerHTML = `
-    <div style="width:min(860px,calc(100vw - 28px));max-height:calc(100vh - 42px);overflow:auto;background:#121722;border:1px solid #2b3548;border-radius:18px;box-shadow:0 24px 70px rgba(0,0,0,.45);color:#e5e7eb;">
+    <div style="width:min(900px,calc(100vw - 28px));max-height:calc(100vh - 42px);overflow:auto;background:#121722;border:1px solid #2b3548;border-radius:18px;box-shadow:0 24px 70px rgba(0,0,0,.45);color:#e5e7eb;">
       <div style="display:flex;align-items:center;justify-content:space-between;padding:18px 22px;border-bottom:1px solid #253044;">
-        <div>
-          <div style="font-size:18px;font-weight:800;">Importar movimentações em massa</div>
-          <div style="font-size:12px;color:#93a4bd;margin-top:6px;line-height:1.7;">
-            <strong style="color:#e5e7eb;">ENT/SAI:</strong>
-            <code style="background:#0b1020;padding:2px 6px;border-radius:4px;">CODIGO &lt;TAB&gt; ENT|SAI &lt;TAB&gt; QTD</code>
-            &nbsp;+ opcionais: <code style="background:#0b1020;padding:2px 6px;border-radius:4px;">&lt;TAB&gt; ARMAZEM &lt;TAB&gt; CMC</code><br>
-            <strong style="color:#e5e7eb;">TRF:</strong>
-            <code style="background:#0b1020;padding:2px 6px;border-radius:4px;">CODIGO &lt;TAB&gt; TRF &lt;TAB&gt; QTD &lt;TAB&gt; ORIGEM &lt;TAB&gt; DESTINO</code>
-            <span style="color:#64748b;">(origem/destino opcionais, usa padrão abaixo)</span>
+        <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+          <div style="font-size:17px;font-weight:800;">Importar movimentações</div>
+          <div style="display:flex;gap:4px;background:#0b1020;border-radius:8px;padding:3px;">
+            <button id="ajusteImportTabImportar" type="button"
+              style="padding:4px 12px;border-radius:6px;font-size:12px;font-weight:700;border:none;cursor:pointer;background:#1e3a5f;color:#93c5fd;">
+              <i class="fa-solid fa-list"></i> Importar lista
+            </button>
+            <button id="ajusteImportTabReconciliar" type="button"
+              style="padding:4px 12px;border-radius:6px;font-size:12px;font-weight:700;border:none;cursor:pointer;background:transparent;color:#6b7280;">
+              <i class="fa-solid fa-scale-balanced"></i> Reconciliar contagem
+            </button>
           </div>
         </div>
         <button id="ajusteImportClose" type="button" class="icon-btn" aria-label="Fechar"><i class="fa-solid fa-xmark"></i></button>
       </div>
-      <div style="padding:18px 22px;display:grid;gap:14px;">
+
+      <!-- ── ABA: IMPORTAR LISTA ── -->
+      <div id="ajusteImportPanelImportar" style="padding:18px 22px;display:grid;gap:14px;">
+        <div style="font-size:11px;color:#64748b;line-height:1.7;">
+          <strong style="color:#cbd5e1;">ENT/SAI:</strong>
+          <code style="background:#0b1020;padding:1px 5px;border-radius:4px;">CODIGO &lt;TAB&gt; ENT|SAI &lt;TAB&gt; QTD</code>
+          + opcionais: <code style="background:#0b1020;padding:1px 5px;border-radius:4px;">&lt;TAB&gt; ARMAZEM &lt;TAB&gt; CMC</code>
+          &nbsp;|&nbsp;
+          <strong style="color:#cbd5e1;">TRF:</strong>
+          <code style="background:#0b1020;padding:1px 5px;border-radius:4px;">CODIGO &lt;TAB&gt; TRF &lt;TAB&gt; QTD &lt;TAB&gt; ORIGEM &lt;TAB&gt; DESTINO</code>
+        </div>
         <textarea id="ajusteImportTextarea" rows="12" spellcheck="false"
           placeholder="05.MP.I.80044&#9;ENT&#9;100&#10;09.MC.N.10106&#9;SAI&#9;50&#10;03.MP.C.20012&#9;TRF&#9;200&#9;10717096386&#9;10717096400"
-          style="width:100%;resize:vertical;min-height:200px;background:#0b1020;color:#e5e7eb;border:1px solid #334155;border-radius:12px;padding:12px;font-family:Consolas,monospace;font-size:13px;line-height:1.45;tab-size:20;"></textarea>
-
+          style="width:100%;resize:vertical;min-height:190px;background:#0b1020;color:#e5e7eb;border:1px solid #334155;border-radius:12px;padding:12px;font-family:Consolas,monospace;font-size:13px;line-height:1.45;tab-size:20;"></textarea>
         <details id="ajusteImportDefaults" open>
-          <summary style="cursor:pointer;font-size:12px;font-weight:700;color:#9ca3af;padding:4px 0;user-select:none;">
-            ▸ Valores padrão (quando colunas forem omitidas)
-          </summary>
+          <summary style="cursor:pointer;font-size:12px;font-weight:700;color:#9ca3af;padding:4px 0;user-select:none;">▸ Valores padrão (quando colunas forem omitidas)</summary>
           <div style="display:grid;grid-template-columns:1fr 1fr 160px 1fr;gap:12px;align-items:end;padding-top:10px;">
             <label style="display:grid;gap:5px;font-size:12px;font-weight:700;color:#9ca3af;">
               Tipo padrão <span style="font-weight:400;">(ENT/SAI — se col.2 omitida)</span>
@@ -20967,7 +20976,7 @@ function ensureAjusteImportModal() {
               <input id="ajusteImportObs" type="text" class="transfer-select" placeholder="Ajuste em massa…">
             </label>
           </div>
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;align-items:end;padding-top:10px;">
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;padding-top:10px;">
             <label style="display:grid;gap:5px;font-size:12px;font-weight:700;color:#9ca3af;">
               Origem padrão TRF <span style="font-weight:400;">(col.4 para TRF)</span>
               <select id="ajusteImportTrfOrigem" class="transfer-select"><option value="">Selecione…</option></select>
@@ -20978,15 +20987,13 @@ function ensureAjusteImportModal() {
             </label>
           </div>
         </details>
-
         <div id="ajusteImportCmcPanel" style="display:none;border:1px solid #253044;border-radius:10px;overflow:hidden;">
           <div style="padding:8px 14px;background:#0b1020;font-size:11px;font-weight:700;color:#64748b;letter-spacing:.06em;display:flex;align-items:center;justify-content:space-between;">
             <span>VERIFICAÇÃO DE CMC</span>
             <span id="ajusteImportCmcSummary"></span>
           </div>
-          <div id="ajusteImportCmcRows" style="padding:6px 14px 10px;max-height:200px;overflow:auto;font-size:12px;font-family:Consolas,monospace;line-height:1.8;"></div>
+          <div id="ajusteImportCmcRows" style="padding:6px 14px 10px;max-height:180px;overflow:auto;font-size:12px;font-family:Consolas,monospace;line-height:1.8;"></div>
         </div>
-
         <div id="ajusteImportFeedback" style="display:none;font-size:12px;line-height:1.55;border-radius:10px;padding:10px 14px;white-space:pre-wrap;"></div>
         <div style="display:flex;justify-content:flex-end;gap:10px;">
           <button id="ajusteImportCancel" type="button" class="btn tiny">Cancelar</button>
@@ -20996,15 +21003,99 @@ function ensureAjusteImportModal() {
           <button id="ajusteImportApply" type="button" class="btn" style="min-width:160px;">Registrar movimentações</button>
         </div>
       </div>
+
+      <!-- ── ABA: RECONCILIAR ── -->
+      <div id="ajusteImportPanelReconciliar" style="display:none;padding:18px 22px;display:none;flex-direction:column;gap:14px;">
+        <div style="font-size:11px;color:#64748b;line-height:1.7;">
+          Cole a sua contagem física. Formato:
+          <code style="background:#0b1020;padding:1px 5px;border-radius:4px;">CODIGO &lt;TAB&gt; QTD_CONTADA</code>
+          — o sistema buscará o estoque atual no banco e calculará ENT/SAI automaticamente.
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr 160px;gap:12px;align-items:end;">
+          <label style="display:grid;gap:5px;font-size:12px;font-weight:700;color:#9ca3af;">
+            Armazém da contagem
+            <select id="ajusteReconLocal" class="transfer-select"><option value="">Selecione…</option></select>
+          </label>
+          <label style="display:grid;gap:5px;font-size:12px;font-weight:700;color:#9ca3af;">
+            Observação para ajuste gerado
+            <input id="ajusteReconObs" type="text" class="transfer-select" placeholder="Inventário físico…">
+          </label>
+          <label style="display:grid;gap:5px;font-size:12px;font-weight:700;color:#9ca3af;">
+            Data mov.
+            <input id="ajusteReconDataMov" type="date" class="transfer-select">
+          </label>
+        </div>
+        <textarea id="ajusteReconTextarea" rows="10" spellcheck="false"
+          placeholder="05.MP.I.80044&#9;120&#10;09.MC.N.10106&#9;0&#10;03.MP.C.20012&#9;85"
+          style="width:100%;resize:vertical;min-height:170px;background:#0b1020;color:#e5e7eb;border:1px solid #334155;border-radius:12px;padding:12px;font-family:Consolas,monospace;font-size:13px;line-height:1.45;tab-size:20;"></textarea>
+        <div id="ajusteReconResultado" style="display:none;">
+          <div style="font-size:11px;font-weight:700;color:#64748b;letter-spacing:.06em;margin-bottom:6px;display:flex;align-items:center;justify-content:space-between;">
+            <span>RESULTADO DA RECONCILIAÇÃO</span>
+            <span id="ajusteReconResumo" style="font-size:11px;"></span>
+          </div>
+          <div style="max-height:280px;overflow:auto;border:1px solid #253044;border-radius:8px;">
+            <table style="width:100%;border-collapse:collapse;font-size:11px;font-family:Consolas,monospace;">
+              <thead>
+                <tr style="background:#0b1020;color:#64748b;text-align:left;">
+                  <th style="padding:6px 8px;font-weight:600;">SEL</th>
+                  <th style="padding:6px 8px;font-weight:600;">CÓDIGO</th>
+                  <th style="padding:6px 8px;font-weight:600;">DESCRIÇÃO</th>
+                  <th style="padding:6px 8px;font-weight:600;text-align:right;">SISTEMA</th>
+                  <th style="padding:6px 8px;font-weight:600;text-align:right;">CONTADO</th>
+                  <th style="padding:6px 8px;font-weight:600;text-align:right;">DIFF</th>
+                  <th style="padding:6px 8px;font-weight:600;">TIPO</th>
+                </tr>
+              </thead>
+              <tbody id="ajusteReconTbody"></tbody>
+            </table>
+          </div>
+        </div>
+        <div id="ajusteReconFeedback" style="display:none;font-size:12px;line-height:1.55;border-radius:10px;padding:10px 14px;white-space:pre-wrap;"></div>
+        <div style="display:flex;justify-content:flex-end;gap:10px;">
+          <button id="ajusteReconCancel" type="button" class="btn tiny">Cancelar</button>
+          <button id="ajusteReconCalcular" type="button" class="btn tiny">
+            <i class="fa-solid fa-calculator"></i> Calcular diferenças
+          </button>
+          <button id="ajusteReconUsarAjustes" type="button" class="btn" style="display:none;min-width:180px;">
+            <i class="fa-solid fa-arrow-right"></i> Usar estes ajustes
+          </button>
+        </div>
+      </div>
     </div>`;
   document.body.appendChild(modal);
 
+  // ─ Fechar ─
   const fechar = () => { modal.style.display = 'none'; };
   modal.querySelector('#ajusteImportClose')?.addEventListener('click', fechar);
   modal.querySelector('#ajusteImportCancel')?.addEventListener('click', fechar);
+  modal.querySelector('#ajusteReconCancel')?.addEventListener('click', fechar);
   modal.addEventListener('click', ev => { if (ev.target === modal) fechar(); });
+
+  // ─ Abas ─
+  const tabImportar = modal.querySelector('#ajusteImportTabImportar');
+  const tabRecon    = modal.querySelector('#ajusteImportTabReconciliar');
+  const panelImportar = modal.querySelector('#ajusteImportPanelImportar');
+  const panelRecon    = modal.querySelector('#ajusteImportPanelReconciliar');
+
+  function ativarAba(aba) {
+    const isImportar = aba === 'importar';
+    tabImportar.style.background = isImportar ? '#1e3a5f' : 'transparent';
+    tabImportar.style.color      = isImportar ? '#93c5fd' : '#6b7280';
+    tabRecon.style.background    = isImportar ? 'transparent' : '#1e3a5f';
+    tabRecon.style.color         = isImportar ? '#6b7280' : '#93c5fd';
+    panelImportar.style.display  = isImportar ? 'grid'  : 'none';
+    panelRecon.style.display     = isImportar ? 'none'  : 'flex';
+  }
+
+  tabImportar.addEventListener('click', () => ativarAba('importar'));
+  tabRecon.addEventListener('click',    () => ativarAba('reconciliar'));
+
+  // ─ Ações ─
   modal.querySelector('#ajusteImportApply')?.addEventListener('click', importarAjusteEmMassa);
   modal.querySelector('#ajusteImportVerifyCmc')?.addEventListener('click', verificarCmcAjusteImport);
+  modal.querySelector('#ajusteReconCalcular')?.addEventListener('click', reconciliarContagemFisica);
+  modal.querySelector('#ajusteReconUsarAjustes')?.addEventListener('click', converterReconciliacaoParaImport);
+
   return modal;
 }
 
@@ -21016,9 +21107,12 @@ async function abrirModalImportacaoAjuste() {
   preencherSelectImportacaoTransferencia(modal.querySelector('#ajusteImportLocal'), localAtual);
   preencherSelectImportacaoTransferencia(modal.querySelector('#ajusteImportTrfOrigem'), TRANSFER_DEFAULT_ORIGEM);
   preencherSelectImportacaoTransferencia(modal.querySelector('#ajusteImportTrfDestino'), TRANSFER_DEFAULT_DESTINO);
+  preencherSelectImportacaoTransferencia(modal.querySelector('#ajusteReconLocal'), localAtual);
 
   const dataInput = modal.querySelector('#ajusteImportDataMov');
   if (dataInput && !dataInput.value) dataInput.value = new Date().toISOString().slice(0, 10);
+  const dataRecon = modal.querySelector('#ajusteReconDataMov');
+  if (dataRecon && !dataRecon.value) dataRecon.value = new Date().toISOString().slice(0, 10);
 
   const feedback = modal.querySelector('#ajusteImportFeedback');
   if (feedback) { feedback.style.display = 'none'; feedback.textContent = ''; }
@@ -21296,6 +21390,157 @@ async function importarAjusteEmMassa() {
   if (!erros.length) {
     setTimeout(() => { modal.style.display = 'none'; }, 1800);
   }
+}
+
+async function reconciliarContagemFisica() {
+  const modal = document.getElementById('ajusteImportModal');
+  if (!modal) return;
+
+  const feedbackEl = modal.querySelector('#ajusteReconFeedback');
+  const setFb = (msg, tipo = 'erro') => {
+    if (!feedbackEl) return;
+    feedbackEl.style.display = 'block';
+    feedbackEl.style.background = tipo === 'ok' ? 'rgba(22,163,74,.14)' : tipo === 'aviso' ? 'rgba(234,179,8,.10)' : 'rgba(239,68,68,.13)';
+    feedbackEl.style.border = tipo === 'ok' ? '1px solid rgba(34,197,94,.35)' : tipo === 'aviso' ? '1px solid rgba(234,179,8,.35)' : '1px solid rgba(248,113,113,.35)';
+    feedbackEl.style.color = tipo === 'ok' ? '#86efac' : tipo === 'aviso' ? '#fde047' : '#fecaca';
+    feedbackEl.textContent = msg;
+  };
+
+  const local = String(modal.querySelector('#ajusteReconLocal')?.value || '').trim();
+  const textoRaw = String(modal.querySelector('#ajusteReconTextarea')?.value || '').trim();
+  const calcBtn = modal.querySelector('#ajusteReconCalcular');
+  const usarBtn = modal.querySelector('#ajusteReconUsarAjustes');
+  const resultadoEl = modal.querySelector('#ajusteReconResultado');
+  const tbody = modal.querySelector('#ajusteReconTbody');
+  const resumoEl = modal.querySelector('#ajusteReconResumo');
+
+  if (!local) { setFb('Selecione o armazém da contagem.'); return; }
+  if (!textoRaw) { setFb('Cole sua planilha de contagem.'); return; }
+
+  // Parse: CODIGO TAB QTD_FISICA
+  const linhas = textoRaw.split(/\r?\n/)
+    .map(l => l.trim()).filter(Boolean)
+    .map(l => {
+      const [cod, qtdStr] = l.split('\t').map(s => s.trim());
+      const qty_fisica = Number(String(qtdStr || '0').replace(',', '.'));
+      return { codigo: cod || '', qty_fisica: isNaN(qty_fisica) ? 0 : qty_fisica };
+    })
+    .filter(i => i.codigo);
+
+  if (!linhas.length) { setFb('Nenhuma linha válida encontrada. Formato: CODIGO TAB QUANTIDADE.'); return; }
+
+  const origHtml = calcBtn?.innerHTML;
+  if (calcBtn) { calcBtn.disabled = true; calcBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>'; }
+  if (feedbackEl) feedbackEl.style.display = 'none';
+
+  try {
+    const resp = await fetch('/api/ajustes/reconciliar', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ local_estoque: local, itens: linhas })
+    });
+    const json = await resp.json().catch(() => ({}));
+    if (!resp.ok || !json?.ok) {
+      setFb(json?.error || `Erro ${resp.status} ao consultar estoque.`);
+      return;
+    }
+
+    const resultados = json.resultados || [];
+    const comDiff = resultados.filter(r => r.tipo !== null);
+    const semDiff = resultados.filter(r => r.tipo === null);
+    const naoProd = resultados.filter(r => r.semSistema);
+    const ents = comDiff.filter(r => r.tipo === 'ENT');
+    const sais = comDiff.filter(r => r.tipo === 'SAI');
+
+    // Monta tabela
+    tbody.innerHTML = resultados.map((r, idx) => {
+      const diffColor = r.delta > 0 ? '#86efac' : r.delta < 0 ? '#fca5a5' : '#64748b';
+      const sinal = r.delta > 0 ? '+' : '';
+      const tipoTag = r.tipo
+        ? `<span style="background:${r.tipo === 'ENT' ? 'rgba(34,197,94,.15)' : 'rgba(239,68,68,.15)'};color:${r.tipo === 'ENT' ? '#86efac' : '#fca5a5'};padding:1px 6px;border-radius:4px;font-weight:700;">${r.tipo} ${r.ajusteQty.toFixed(2)}</span>`
+        : `<span style="color:#374151;">—</span>`;
+      const alertSistema = r.semSistema ? ' ⚠️' : '';
+      return `<tr style="border-top:1px solid #1e293b;" data-idx="${idx}">
+        <td style="padding:4px 8px;"><input type="checkbox" class="recon-chk" data-idx="${idx}" ${r.tipo ? 'checked' : ''} ${!r.tipo ? 'disabled' : ''}></td>
+        <td style="padding:4px 8px;color:#cbd5e1;">${r.codigo}${alertSistema}</td>
+        <td style="padding:4px 8px;color:#64748b;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${r.descricao}">${r.descricao || '—'}</td>
+        <td style="padding:4px 8px;text-align:right;color:#94a3b8;">${r.qtySistema.toFixed(2)}</td>
+        <td style="padding:4px 8px;text-align:right;color:#e2e8f0;">${r.qtyFisica.toFixed(2)}</td>
+        <td style="padding:4px 8px;text-align:right;color:${diffColor};font-weight:700;">${sinal}${r.delta.toFixed(2)}</td>
+        <td style="padding:4px 8px;">${tipoTag}</td>
+      </tr>`;
+    }).join('');
+
+    // Resumo
+    resumoEl.innerHTML = `<span style="color:#86efac;">${ents.length} ENT</span> &nbsp; <span style="color:#fca5a5;">${sais.length} SAI</span> &nbsp; <span style="color:#64748b;">${semDiff.length} iguais</span>${naoProd.length ? ` &nbsp; <span style="color:#f59e0b;">⚠️ ${naoProd.length} sem dados no sistema</span>` : ''}`;
+
+    resultadoEl.style.display = 'block';
+    if (usarBtn) usarBtn.style.display = comDiff.length ? 'inline-flex' : 'none';
+
+    // Armazena resultado para converter depois
+    modal._reconResultados = resultados;
+    modal._reconLocal = local;
+
+    if (!comDiff.length) {
+      setFb(`Estoque já está igual à contagem para todos os ${resultados.length} produto(s). Nenhum ajuste necessário!`, 'ok');
+    } else {
+      setFb(`Posição de: ${json.ultimaData}. ${comDiff.length} produto(s) com divergência — marque os que deseja ajustar.`, 'aviso');
+    }
+  } catch (err) {
+    setFb(`Erro ao reconciliar: ${err?.message || err}`);
+  } finally {
+    if (calcBtn) { calcBtn.disabled = false; calcBtn.innerHTML = origHtml || 'Calcular diferenças'; }
+  }
+}
+
+function converterReconciliacaoParaImport() {
+  const modal = document.getElementById('ajusteImportModal');
+  if (!modal) return;
+
+  const resultados = modal._reconResultados || [];
+  const local = modal._reconLocal || '';
+  const obs = String(modal.querySelector('#ajusteReconObs')?.value || '').trim() || 'Reconciliação inventário';
+  const dataMov = String(modal.querySelector('#ajusteReconDataMov')?.value || '').trim()
+                  || new Date().toISOString().slice(0, 10);
+  const checkboxes = modal.querySelectorAll('.recon-chk:checked');
+  const selecionados = new Set([...checkboxes].map(cb => Number(cb.dataset.idx)));
+
+  const linhas = resultados
+    .filter((_, idx) => selecionados.has(idx) && resultados[idx].tipo)
+    .map(r => [r.codigo, r.tipo, r.ajusteQty.toFixed(2), local].join('\t'));
+
+  if (!linhas.length) {
+    const fb = modal.querySelector('#ajusteReconFeedback');
+    if (fb) {
+      fb.style.display = 'block';
+      fb.style.background = 'rgba(239,68,68,.13)';
+      fb.style.border = '1px solid rgba(248,113,113,.35)';
+      fb.style.color = '#fecaca';
+      fb.textContent = 'Nenhum produto selecionado para ajuste.';
+    }
+    return;
+  }
+
+  // Muda para a aba de importação e preenche a textarea
+  const tabImportar = modal.querySelector('#ajusteImportTabImportar');
+  tabImportar?.click();
+
+  const textarea = modal.querySelector('#ajusteImportTextarea');
+  if (textarea) textarea.value = linhas.join('\n');
+
+  // Preenche campos padrão
+  const localSel = modal.querySelector('#ajusteImportLocal');
+  if (localSel) localSel.value = local;
+  const obsInput = modal.querySelector('#ajusteImportObs');
+  if (obsInput) obsInput.value = obs;
+  const dataInput = modal.querySelector('#ajusteImportDataMov');
+  if (dataInput) dataInput.value = dataMov;
+
+  // Limpa feedback anterior
+  const fb2 = modal.querySelector('#ajusteImportFeedback');
+  if (fb2) fb2.style.display = 'none';
+
+  setTimeout(() => textarea?.focus(), 50);
 }
 
 // ─── FIM AJUSTE ───────────────────────────────────────────────────────────────

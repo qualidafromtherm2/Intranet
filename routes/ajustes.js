@@ -305,6 +305,83 @@ router.post('/check-produtos', express.json(), async (req, res) => {
   }
 });
 
+// POST /api/ajustes/reconciliar — compara QTD_CONTADA com estoque atual no Omie
+// Body: { local_estoque: "cod", itens: [{codigo, qty_fisica}] }
+router.post('/reconciliar', express.json(), async (req, res) => {
+  try {
+    const local_estoque = String(req.body?.local_estoque || '').trim();
+    const itens = Array.isArray(req.body?.itens) ? req.body.itens : [];
+
+    if (!local_estoque) return res.status(400).json({ error: 'Informe o armazém.' });
+    if (!itens.length) return res.status(400).json({ error: 'Nenhum item informado.' });
+
+    const codigos = [...new Set(
+      itens.map(i => String(i.codigo || '').trim()).filter(Boolean)
+    )];
+    if (!codigos.length) return res.status(400).json({ error: 'Nenhum código válido.' });
+
+    // Data mais recente disponível para este armazém na tabela de posição
+    const { rows: dateRows } = await dbQuery(
+      `SELECT MAX(data_posicao) AS ultima_data
+         FROM public.omie_estoque_posicao
+        WHERE local_codigo = $1`,
+      [local_estoque]
+    );
+    const ultimaData = dateRows[0]?.ultima_data;
+    if (!ultimaData) {
+      return res.status(404).json({
+        error: `Sem dados de posição de estoque para o armazém "${local_estoque}". Sincronize o estoque primeiro.`
+      });
+    }
+
+    // Busca saldo e cmc de cada produto na posição mais recente
+    const { rows: estoqueRows } = await dbQuery(
+      `SELECT codigo, COALESCE(saldo, 0) AS saldo, COALESCE(cmc, 0) AS cmc, descricao
+         FROM public.omie_estoque_posicao
+        WHERE local_codigo = $1
+          AND data_posicao = $2
+          AND codigo = ANY($3::text[])`,
+      [local_estoque, ultimaData, codigos]
+    );
+    const mapaEstoque = new Map(estoqueRows.map(r => [String(r.codigo), r]));
+
+    const resultados = itens
+      .filter(item => String(item.codigo || '').trim())
+      .map(item => {
+        const codigo = String(item.codigo || '').trim();
+        const qtyFisica = normalizaNumero(item.qty_fisica) ?? 0;
+        const est = mapaEstoque.get(codigo);
+        const qtySistema = normalizaNumero(est?.saldo) ?? 0;
+        const cmc = normalizaNumero(est?.cmc) ?? 0;
+        const descricao = est?.descricao || '';
+        const delta = qtyFisica - qtySistema;
+        return {
+          codigo,
+          descricao,
+          qtySistema,
+          qtyFisica,
+          delta,
+          tipo: delta > 0 ? 'ENT' : delta < 0 ? 'SAI' : null,
+          ajusteQty: Math.abs(delta),
+          cmc,
+          semSistema: !est
+        };
+      });
+
+    res.json({
+      ok: true,
+      local_estoque,
+      ultimaData: ultimaData instanceof Date
+        ? ultimaData.toISOString().slice(0, 10)
+        : String(ultimaData).slice(0, 10),
+      resultados
+    });
+  } catch (err) {
+    console.error('[ajustes] reconciliar', err);
+    res.status(500).json({ error: err.message || 'Falha ao reconciliar estoque.' });
+  }
+});
+
 // GET /api/ajustes — lista últimos 500 ajustes
 router.get('/', async (_req, res) => {
   try {
