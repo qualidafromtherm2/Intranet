@@ -18352,12 +18352,11 @@ document.addEventListener('DOMContentLoaded', async () => {
         return;
       }
 
-      const motivo = prompt('Informe o motivo para reprovar/excluir esta solicitaÃ§Ã£o:', '');
-      if (motivo === null) return;
+      if (!confirm('Reprovar esta solicitação de transferência?')) return;
 
       const originalLabel = btn.textContent;
       btn.disabled = true;
-      btn.textContent = 'Reprovandoâ€¦';
+      btn.textContent = 'Reprovando...';
 
       try {
         const resp = await fetch(`/api/transferencias/${id}/reprovar`, {
