@@ -18362,7 +18362,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         const resp = await fetch(`/api/transferencias/${id}/reprovar`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ reprovadoPor: usuario, motivo })
+          body: JSON.stringify({ reprovadoPor: usuario, motivo: '' })
         });
 
         const json = await resp.json().catch(() => ({}));
