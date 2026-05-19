@@ -7632,4 +7632,55 @@ router.get('/whatsapp/messages', async (req, res) => {
   }
 });
 
+// GET /api/sac/cmc — retorna mapa {codigo_5chars: cmc} para todos os produtos com CMC cadastrado
+// Usa os últimos 5 caracteres do campo codigo (ex: "04.MP.N.61016" → "61016")
+router.get('/cmc', async (_req, res) => {
+  try {
+    const sql = `
+      SELECT
+        RIGHT(codigo, 5) AS codigo_5,
+        MAX(cmc) AS cmc
+      FROM logistica.estoque_atual
+      WHERE cmc IS NOT NULL AND cmc > 0
+        AND LENGTH(codigo) >= 5
+      GROUP BY RIGHT(codigo, 5)
+    `;
+    const { rows } = await pool.query(sql);
+    const mapa = {};
+    rows.forEach((r) => {
+      mapa[String(r.codigo_5)] = Number(r.cmc) || 0;
+    });
+    return res.json({ ok: true, cmc: mapa });
+  } catch (err) {
+    console.error('[SAC/CMC] erro ao buscar CMC:', err);
+    return res.status(500).json({ ok: false, error: 'Falha ao buscar CMC.' });
+  }
+});
+
+// GET /api/sac/at-info?ids=173,88,95 — retorna tag_problema + descreva_reclamacao do sac.at para os IDs informados
+router.get('/at-info', async (req, res) => {
+  try {
+    const ids = String(req.query?.ids || '')
+      .split(',')
+      .map((s) => parseInt(s.trim(), 10))
+      .filter((n) => !isNaN(n) && n > 0);
+    if (!ids.length) return res.json({ ok: true, data: {} });
+    const { rows } = await pool.query(
+      `SELECT id, tag_problema, descreva_reclamacao FROM sac."at" WHERE id = ANY($1::bigint[])`,
+      [ids]
+    );
+    const data = {};
+    rows.forEach((r) => {
+      data[String(r.id)] = {
+        tag_problema: r.tag_problema || null,
+        descreva_reclamacao: r.descreva_reclamacao || null
+      };
+    });
+    return res.json({ ok: true, data });
+  } catch (err) {
+    console.error('[SAC/AT-INFO] erro:', err);
+    return res.status(500).json({ ok: false, error: 'Falha ao buscar dados do AT.' });
+  }
+});
+
 module.exports = router;

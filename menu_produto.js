@@ -9732,7 +9732,26 @@ const sacEnvioStatus = document.getElementById('sacEnvioStatus');
 const sacObservacao = document.getElementById('sacObservacao');
 const sacNumeroSep = document.getElementById('sacNumeroSep');
 const sacRefreshBtn = document.getElementById('sacRefreshBtn');
+const sacRelatorioBtn = document.getElementById('sacRelatorioBtn');
 const sacTabelaBody = document.getElementById('sacTabelaBody');
+const sacRelatorioGraficoWrapper = document.getElementById('sacRelatorioGraficoWrapper');
+const sacRelatorioGraficoCanvas = document.getElementById('sacRelatorioGraficoCanvas');
+const sacRelatorioGraficoVazio = document.getElementById('sacRelatorioGraficoVazio');
+const sacRelatorioConteudoGraficoCanvas = document.getElementById('sacRelatorioConteudoGraficoCanvas');
+const sacRelatorioConteudoGraficoVazio = document.getElementById('sacRelatorioConteudoGraficoVazio');
+const sacRelatorioConteudoUsuarioSelect = document.getElementById('sacRelatorioConteudoUsuarioSelect');
+const sacRelatorioDrilldownWrapper = document.getElementById('sacRelatorioDrilldownWrapper');
+const sacRelatorioDrilldownTitulo = document.getElementById('sacRelatorioDrilldownTitulo');
+const sacRelatorioDrilldownBody = document.getElementById('sacRelatorioDrilldownBody');
+const sacRelatorioVoltarBtn = document.getElementById('sacRelatorioVoltarBtn');
+const sacRelatorioDownloadBtn = document.getElementById('sacRelatorioDownloadBtn');
+const sacPeriodo3mBtn = document.getElementById('sacPeriodo3mBtn');
+const sacPeriodo4mBtn = document.getElementById('sacPeriodo4mBtn');
+const sacPeriodo6mBtn = document.getElementById('sacPeriodo6mBtn');
+const sacPeriodo12mBtn = document.getElementById('sacPeriodo12mBtn');
+const sacPeriodoTudoBtn = document.getElementById('sacPeriodoTudoBtn');
+const sacRelatorioTipoGraficoBtn = document.getElementById('sacRelatorioTipoGraficoBtn');
+const sacRelatorioModoValorBtn = document.getElementById('sacRelatorioModoValorBtn');
 const atTipoAtendimentoInput = document.getElementById('atTipoAtendimento');
 const atNomeRevendaClienteInput = document.getElementById('atNomeRevendaCliente');
 const atTelefoneInput = document.getElementById('atTelefone');
@@ -9786,6 +9805,17 @@ let atWhatsappRealtimeBound = false;
 // Mapa de conversas com last_read_at do banco (sincronizado via API)
 const atWhatsappConversationState = new Map(); // { phone_digits -> { last_read_at, ... } }
 let atWhatsappConversationFilter = 'todos';
+
+let _sacRelatorioUsuariosChart = null;
+let _sacRelatorioConteudoChart = null;
+let _sacRelatorioRowsCache = [];
+let _sacRelatorioPeriodoMeses = 4;
+let _sacRelatorioConteudoUsuarioSelecionado = '';
+let _sacRelatorioConteudoTopItens = [];
+let _sacRelatorioDrilldownItensCache = [];
+let _sacRelatorioModoGrafico = 'bar';
+let _sacRelatorioModoValor = false;   // false = quantidade, true = valor (CMC × qtd)
+let _sacCmcCache = {};                // { "61016": 45.20, ... }
 
 // -------- Gestão de anexos pendentes (antes de salvar a OS) --------
 let _atAnexosPendentes = []; // Array de File objects
@@ -17274,6 +17304,618 @@ async function carregarSacSolicitacoes(targetBody, { hideDone = false, titleOnly
       ? '<div class="envio-empty-state" style="color:#f87171;">Erro ao carregar envios.</div>'
       : `<tr><td colspan="${numCols}" style="text-align:center;padding:16px;color:#f87171;">Erro ao carregar</td></tr>`;
   }
+}
+
+function _sacEscapeHtml(value) {
+  return String(value ?? '').replace(/[&<>"]/g, (ch) => ({
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;'
+  }[ch]));
+}
+
+function _sacCorPorIndice(i) {
+  const cores = ['#6366f1', '#10b981', '#f59e0b', '#ef4444', '#06b6d4', '#8b5cf6', '#14b8a6', '#f97316', '#22c55e', '#eab308'];
+  return cores[i % cores.length];
+}
+
+function _sacPeriodoMesAno(dateValue) {
+  const d = new Date(dateValue);
+  if (Number.isNaN(d.getTime())) return 'Sem data';
+  const mes = String(d.getMonth() + 1).padStart(2, '0');
+  return `${mes}/${d.getFullYear()}`;
+}
+
+function _sacRotuloCurto(nome, limite = 44) {
+  const texto = String(nome || '').trim().replace(/\s+/g, ' ');
+  if (texto.length <= limite) return texto;
+  return `${texto.slice(0, limite - 1)}...`;
+}
+
+function _sacPeriodoKey(dateValue) {
+  const d = new Date(dateValue);
+  if (Number.isNaN(d.getTime())) return null;
+  return (d.getFullYear() * 100) + (d.getMonth() + 1);
+}
+
+function _sacAplicarPeriodo(rows, meses) {
+  const lista = Array.isArray(rows) ? rows : [];
+  if (!meses || meses <= 0) return lista;
+  const chaves = lista.map((r) => _sacPeriodoKey(r?.created_at)).filter((v) => Number.isFinite(v));
+  if (!chaves.length) return lista;
+  const maxKey = Math.max(...chaves);
+  const maxAno = Math.floor(maxKey / 100);
+  const maxMes = maxKey % 100;
+  const maxData = new Date(maxAno, maxMes - 1, 1);
+  const minData = new Date(maxData.getFullYear(), maxData.getMonth() - (meses - 1), 1);
+  return lista.filter((r) => {
+    const d = new Date(r?.created_at);
+    if (Number.isNaN(d.getTime())) return false;
+    const dm = new Date(d.getFullYear(), d.getMonth(), 1);
+    return dm >= minData && dm <= maxData;
+  });
+}
+
+function _sacSetPeriodoBotaoAtivo() {
+  const mapa = [
+    [sacPeriodo3mBtn, 3], [sacPeriodo4mBtn, 4], [sacPeriodo6mBtn, 6],
+    [sacPeriodo12mBtn, 12], [sacPeriodoTudoBtn, 0]
+  ];
+  mapa.forEach(([btn, valor]) => {
+    if (!btn) return;
+    const ativo = valor === _sacRelatorioPeriodoMeses;
+    btn.style.background = ativo ? 'linear-gradient(135deg,#4f46e5 0%,#4338ca 100%)' : '#1f2937';
+    btn.style.color = ativo ? '#ffffff' : '#cbd5e1';
+  });
+}
+
+function _sacSetTipoGraficoBtn() {
+  if (!sacRelatorioTipoGraficoBtn) return;
+  const modoPizza = _sacRelatorioModoGrafico === 'pie';
+  sacRelatorioTipoGraficoBtn.innerHTML = modoPizza
+    ? '<i class="fa-solid fa-chart-column"></i><span>Modo barras</span>'
+    : '<i class="fa-solid fa-chart-pie"></i><span>Modo pizza</span>';
+  sacRelatorioTipoGraficoBtn.style.background = modoPizza
+    ? 'linear-gradient(135deg,#0ea5e9 0%,#0284c7 100%)'
+    : '#1f2937';
+  sacRelatorioTipoGraficoBtn.style.color = '#ffffff';
+}
+
+function _sacAtualizarSelectUsuario(rows) {
+  if (!sacRelatorioConteudoUsuarioSelect) return;
+  const usuarios = Array.from(new Set(
+    (Array.isArray(rows) ? rows : [])
+      .map((r) => String(r?.usuario || '').trim())
+      .filter(Boolean)))
+    .sort((a, b) => a.localeCompare(b, 'pt-BR'));
+  const valorAtual = _sacRelatorioConteudoUsuarioSelecionado;
+  const existeAtual = valorAtual && usuarios.includes(valorAtual);
+  if (valorAtual && !existeAtual) _sacRelatorioConteudoUsuarioSelecionado = '';
+  sacRelatorioConteudoUsuarioSelect.innerHTML = [
+    '<option value="">Todos</option>',
+    ...usuarios.map((u) => `<option value="${_sacEscapeHtml(u)}">${_sacEscapeHtml(u)}</option>`)
+  ].join('');
+  sacRelatorioConteudoUsuarioSelect.value = _sacRelatorioConteudoUsuarioSelecionado;
+}
+
+function _sacLimparDrilldown() {
+  if (!sacRelatorioDrilldownWrapper || !sacRelatorioDrilldownBody || !sacRelatorioDrilldownTitulo) return;
+  sacRelatorioDrilldownWrapper.style.display = 'none';
+  sacRelatorioDrilldownTitulo.textContent = 'Registros da barra selecionada';
+  sacRelatorioDrilldownBody.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:14px;color:var(--inactive-color);">Clique em uma barra para ver os conteúdos.</td></tr>';
+  _sacRelatorioDrilldownItensCache = [];
+}
+
+function _sacNormalizarNomeItem(nomeCompleto) {
+  const nome = String(nomeCompleto || '').trim();
+  if (!nome) return '';
+
+  // Pega a primeira palavra (antes do primeiro espaço) e usa os últimos 5 caracteres
+  // Ex: "107.MP.N.10873 TARUGO..." → primeiraPalavra="107.MP.N.10873" → "10873"
+  // Ex: "104MPI80203 VISOR..."    → primeiraPalavra="104MPI80203"    → "80203"
+  const primeiraPalavra = nome.split(' ')[0];
+  if (primeiraPalavra.length >= 5) {
+    return primeiraPalavra.slice(-5);
+  }
+
+  return primeiraPalavra || nome;
+}
+
+function _sacExtrairItensDoConteudo(conteudoRaw) {
+  const saida = [];
+  const conteudo = String(conteudoRaw || '').trim();
+  if (!conteudo) return saida;
+  try {
+    const parsed = JSON.parse(conteudo);
+    if (Array.isArray(parsed)) {
+      parsed.forEach((item) => {
+        const nome = String(item?.conteudo || item?.item || '').trim();
+        const quantidade = Number(item?.quantidade || 0) || 1;
+        if (nome) saida.push({ nome, quantidade });
+      });
+      if (saida.length) return saida;
+    }
+  } catch (_) {}
+  const reItens = /Item\s+\d+\s*:\s*([\s\S]*?)\s+Quantidade\s+(\d+)(?=\s*Item\s+\d+\s*:|$)/gi;
+  let m;
+  while ((m = reItens.exec(conteudo)) !== null) {
+    const nome = String(m[1] || '').trim().replace(/\s+/g, ' ');
+    const quantidade = Number(m[2] || 0) || 1;
+    if (nome) saida.push({ nome, quantidade });
+  }
+  if (saida.length) return saida;
+  const reQtdFinal = /^([\s\S]*?)\s*-\s*Quantidade\s*(\d+)$/i;
+  const matchFinal = conteudo.match(reQtdFinal);
+  if (matchFinal) {
+    const nome = String(matchFinal[1] || '').trim();
+    const quantidade = Number(matchFinal[2] || 0) || 1;
+    if (nome) return [{ nome, quantidade }];
+  }
+  return [{ nome: conteudo.replace(/\s+/g, ' ').trim(), quantidade: 1 }];
+}
+
+function _sacExpandirConteudoDosRegistros(rows, seletorItem) {
+  const lista = Array.isArray(rows) ? rows : [];
+  const itens = [];
+  lista.forEach((r) => {
+    const extraidos = _sacExtrairItensDoConteudo(r?.conteudo || '');
+    extraidos.forEach((it) => {
+      const nome = String(it?.nome || '').trim();
+      const quantidade = Number(it?.quantidade || 0) || 1;
+      if (!nome) return;
+      if (typeof seletorItem === 'function' && !seletorItem(nome, r)) return;
+      itens.push({ id: r?.id, created_at: r?.created_at, usuario: r?.usuario, observacao: r?.observacao, conteudo: nome, quantidade });
+    });
+  });
+  return itens;
+}
+
+// Extrai o ID do AT a partir do campo observacao no padrão "O.S 250178"
+// "25" = ano, "0178" = ID → 178. Suporta com ou sem espaço após "O.S".
+function _sacParsearOsAtId(observacao) {
+  const obs = String(observacao || '');
+  const match = obs.match(/O\.S\s*(\d+)/i);
+  if (!match) return null;
+  const num = match[1];
+  if (num.length >= 6) return parseInt(num.substring(2), 10);
+  return parseInt(num, 10) || null;
+}
+
+async function _sacRenderDrilldown(titulo, itensConteudo) {
+  if (!sacRelatorioDrilldownWrapper || !sacRelatorioDrilldownBody || !sacRelatorioDrilldownTitulo) return;
+  const lista = Array.isArray(itensConteudo) ? itensConteudo : [];
+  _sacRelatorioDrilldownItensCache = lista;
+  sacRelatorioDrilldownWrapper.style.display = '';
+  sacRelatorioDrilldownTitulo.textContent = titulo || 'Registros da barra selecionada';
+  if (!lista.length) {
+    sacRelatorioDrilldownBody.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:14px;color:var(--inactive-color);">Nenhum conteúdo encontrado para esta barra.</td></tr>';
+    return;
+  }
+
+  // Extrai IDs únicos de AT a partir do campo observacao
+  const atIdPorItem = lista.map((item) => _sacParsearOsAtId(item?.observacao));
+  const atIdsUnicos = [...new Set(atIdPorItem.filter((id) => id !== null && id > 0))];
+
+  // Busca dados do AT em batch
+  let atData = {};
+  if (atIdsUnicos.length) {
+    try {
+      const resp = await fetch(`/api/sac/at-info?ids=${atIdsUnicos.join(',')}`);
+      const json = await resp.json().catch(() => ({}));
+      if (json?.ok) atData = json.data || {};
+    } catch (_) {}
+  }
+
+  sacRelatorioDrilldownBody.innerHTML = lista.map((item, idx) => {
+    const criadoEm = item?.created_at ? new Date(item.created_at).toLocaleString('pt-BR') : '—';
+    const usuario = String(item?.usuario || 'Sem usuário');
+    const conteudo = String(item?.conteudo || '—');
+    const qtd = Number(item?.quantidade || 0);
+    const atId = atIdPorItem[idx];
+    const atInfo = atId ? (atData[String(atId)] || null) : null;
+    let osCell = '';
+    if (atInfo) {
+      const tag = atInfo.tag_problema ? `<span style="display:inline-block;background:#f59e0b20;color:#fbbf24;border:1px solid #f59e0b40;border-radius:4px;padding:1px 6px;font-size:10px;font-weight:700;margin-bottom:3px;">${_sacEscapeHtml(atInfo.tag_problema)}</span><br>` : '';
+      const desc = atInfo.descreva_reclamacao ? `<span title="${_sacEscapeHtml(atInfo.descreva_reclamacao)}" style="font-size:11px;color:#cbd5e1;">${_sacEscapeHtml(atInfo.descreva_reclamacao.substring(0, 60))}${atInfo.descreva_reclamacao.length > 60 ? '…' : ''}</span>` : '';
+      const osNum = atId ? `<span style="font-size:10px;color:#64748b;">AT#${atId}</span><br>` : '';
+      osCell = `${osNum}${tag}${desc}`;
+    } else {
+      const rawOs = String(item?.observacao || '—');
+      osCell = `<span title="${_sacEscapeHtml(rawOs)}" style="color:#64748b;font-size:11px;">${_sacEscapeHtml(rawOs.substring(0, 50))}${rawOs.length > 50 ? '…' : ''}</span>`;
+    }
+    return `<tr>
+      <td>${item?.id ?? '—'}</td>
+      <td>${criadoEm}</td>
+      <td>${_sacEscapeHtml(usuario)}</td>
+      <td title="${_sacEscapeHtml(conteudo)}" style="max-width:300px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${_sacEscapeHtml(conteudo)}</td>
+      <td>${qtd}</td>
+      <td style="max-width:360px;">${osCell}</td>
+    </tr>`;
+  }).join('');
+}
+
+function _sacMontarItensConteudoParaExportacao() {
+  const rows = _sacAplicarPeriodo(_sacRelatorioRowsCache, _sacRelatorioPeriodoMeses);
+  return _sacExpandirConteudoDosRegistros(rows);
+}
+
+function _sacBaixarRelatorioXls() {
+  const itens = _sacRelatorioDrilldownItensCache?.length
+    ? _sacRelatorioDrilldownItensCache
+    : _sacMontarItensConteudoParaExportacao();
+  if (!itens.length) { alert('Nenhum dado disponível para exportar.'); return; }
+  const titulo = _sacRelatorioDrilldownItensCache?.length
+    ? (sacRelatorioDrilldownTitulo?.textContent || 'Relatório SAC')
+    : 'Relatório SAC - Conteúdo';
+  const header = ['ID Registro', 'Criado em', 'Usuário', 'Conteúdo', 'Quantidade', 'Observação'];
+  const linhas = itens.map((item) => [
+    item?.id ?? '',
+    item?.created_at ? new Date(item.created_at).toLocaleString('pt-BR') : '',
+    String(item?.usuario || ''),
+    String(item?.conteudo || ''),
+    Number(item?.quantidade || 0),
+    String(item?.observacao || '')
+  ]);
+  const trHeader = `<tr>${header.map((h) => `<th style="background:#1f2937;color:#fff;font-weight:bold;">${h}</th>`).join('')}</tr>`;
+  const trRows = linhas.map((arr) => `<tr>${arr.map((v) => `<td>${_sacEscapeHtml(String(v))}</td>`).join('')}</tr>`).join('');
+  const html = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40"><head><meta charset="UTF-8"><title>${titulo}</title></head><body><table border="1"><thead>${trHeader}</thead><tbody>${trRows}</tbody></table></body></html>`;
+  const blob = new Blob(['\uFEFF' + html], { type: 'application/vnd.ms-excel;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `relatorio_sac_conteudo_${new Date().toISOString().slice(0,10)}.xls`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+function _renderizarRelatorioSacPorUsuario() {
+  if (!sacRelatorioGraficoCanvas || !sacRelatorioConteudoGraficoCanvas) return;
+  const modoPizza = _sacRelatorioModoGrafico === 'pie';
+  const rows = _sacAplicarPeriodo(_sacRelatorioRowsCache, _sacRelatorioPeriodoMeses);
+  _sacAtualizarSelectUsuario(rows);
+  _sacLimparDrilldown();
+
+  const agrupado = new Map();
+  const usuariosSet = new Set();
+  rows.forEach((r) => {
+    const periodo = _sacPeriodoMesAno(r?.created_at);
+    const usuario = String(r?.usuario || 'Sem usuário').trim() || 'Sem usuário';
+    const itens = _sacExtrairItensDoConteudo(r?.conteudo || '');
+    const totalItens = itens.reduce((sum, it) => {
+      const qtd = Number(it?.quantidade || 0) || 1;
+      const chave = _sacNormalizarNomeItem(String(it?.nome || '').trim()) || String(it?.nome || '').trim();
+      return sum + _sacValorItem(chave, qtd);
+    }, 0);
+    if (!agrupado.has(periodo)) agrupado.set(periodo, new Map());
+    agrupado.get(periodo).set(usuario, (agrupado.get(periodo).get(usuario) || 0) + totalItens);
+    usuariosSet.add(usuario);
+  });
+  const periodos = Array.from(agrupado.keys()).sort((a, b) => {
+    const [ma, ya] = a.split('/').map(Number); const [mb, yb] = b.split('/').map(Number);
+    return (ya - yb) || (ma - mb);
+  });
+  const usuarios = Array.from(usuariosSet)
+    .map((u) => ({ nome: u, total: periodos.reduce((sum, p) => sum + (agrupado.get(p)?.get(u) || 0), 0) }))
+    .sort((a, b) => b.total - a.total).slice(0, 2);
+  const usuariosPizza = Array.from(usuariosSet)
+    .map((u) => ({ nome: u, total: periodos.reduce((sum, p) => sum + (agrupado.get(p)?.get(u) || 0), 0) }))
+    .sort((a, b) => b.total - a.total).slice(0, 8);
+
+  const datasets = usuarios.map((user, idx) => ({
+    label: _sacRotuloCurto(user.nome, 26), _fullLabel: user.nome,
+    data: periodos.map((p) => agrupado.get(p)?.get(user.nome) || 0),
+    backgroundColor: idx === 0 ? '#22c55e' : '#38bdf8', borderRadius: 6, maxBarThickness: 42
+  }));
+
+  if (_sacRelatorioUsuariosChart) { _sacRelatorioUsuariosChart.destroy(); _sacRelatorioUsuariosChart = null; }
+  if (!periodos.length || (!usuarios.length && !usuariosPizza.length)) {
+    sacRelatorioGraficoCanvas.style.display = 'none';
+    if (sacRelatorioGraficoVazio) { sacRelatorioGraficoVazio.style.display = ''; sacRelatorioGraficoVazio.textContent = 'Nenhum dado encontrado para o período selecionado.'; }
+  } else {
+    sacRelatorioGraficoCanvas.style.display = '';
+    if (sacRelatorioGraficoVazio) sacRelatorioGraficoVazio.style.display = 'none';
+    if (modoPizza) {
+      const usuariosPizzaLabels = usuariosPizza.map((u) => _sacRotuloCurto(u.nome, 28));
+      _sacRelatorioUsuariosChart = new Chart(sacRelatorioGraficoCanvas.getContext('2d'), {
+        type: 'pie',
+        data: {
+          labels: usuariosPizzaLabels,
+          datasets: [{
+            _fullLabels: usuariosPizza.map((u) => u.nome),
+            data: usuariosPizza.map((u) => u.total),
+            backgroundColor: usuariosPizza.map((_, idx) => _sacCorPorIndice(idx))
+          }]
+        },
+        options: {
+          onClick: (_event, elements, chart) => {
+            if (!elements?.length) return;
+            const idx = elements[0].index;
+            const usuario = String(chart.data.datasets?.[0]?._fullLabels?.[idx] || chart.data.labels?.[idx] || '');
+            const rowsBarra = rows.filter((r) => String(r?.usuario || '').trim() === usuario);
+            const itensBarra = _sacExpandirConteudoDosRegistros(rowsBarra);
+            _sacRenderDrilldown(`Registros - Usuário: ${usuario} | Período: filtro atual`, itensBarra);
+          },
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: { position: 'right', labels: { color: '#cbd5e1', boxWidth: 14, boxHeight: 14 } },
+            tooltip: {
+              callbacks: {
+                label: (item) => {
+                  const ds = item.dataset || {};
+                  const nome = ds._fullLabels?.[item.dataIndex] || item.label || '';
+                  const v = _sacRelatorioModoValor
+                    ? `R$ ${Number(item.raw).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2})}`
+                    : `${item.raw} item(ns)`;
+                  return `${nome}: ${v}`;
+                }
+              }
+            }
+          }
+        }
+      });
+    } else {
+      _sacRelatorioUsuariosChart = new Chart(sacRelatorioGraficoCanvas.getContext('2d'), {
+        type: 'bar', data: { labels: periodos, datasets },
+        options: {
+          onClick: (_event, elements, chart) => {
+            if (!elements?.length) return;
+            const el = elements[0]; const periodo = chart.data.labels?.[el.index];
+            const ds = chart.data.datasets?.[el.datasetIndex];
+            const usuario = String(ds?._fullLabel || ds?.label || '');
+            const rowsBarra = rows.filter((r) => _sacPeriodoMesAno(r?.created_at) === periodo && String(r?.usuario || '').trim() === usuario);
+            const itensBarra = _sacExpandirConteudoDosRegistros(rowsBarra);
+            _sacRenderDrilldown(`Registros - Usuário: ${usuario} | Período: ${periodo}`, itensBarra);
+          },
+          responsive: true, maintainAspectRatio: false,
+          plugins: { legend: { position: 'top', labels: { color: '#cbd5e1', boxWidth: 14, boxHeight: 14 } }, tooltip: { callbacks: { title: (items) => `Período: ${items?.[0]?.label || ''}`, label: (item) => { const v = _sacRelatorioModoValor ? `R$ ${Number(item.raw).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2})}` : `${item.raw} item(ns)`; return `${item.dataset._fullLabel || item.dataset.label}: ${v}`; } } } },
+          scales: { x: { stacked: false, ticks: { color: '#94a3b8' }, grid: { color: 'rgba(148,163,184,0.15)' } }, y: { stacked: false, beginAtZero: true, ticks: { color: '#94a3b8', precision: 0 }, grid: { color: 'rgba(148,163,184,0.15)' } } }
+        }
+      });
+    }
+  }
+
+  const agrupadoConteudo = new Map(); const itensSet = new Set(); const itensMapaNomeParaCodigo = new Map();
+  const rowsConteudo = _sacRelatorioConteudoUsuarioSelecionado
+    ? rows.filter((r) => String(r?.usuario || '').trim() === _sacRelatorioConteudoUsuarioSelecionado) : rows;
+  rowsConteudo.forEach((r) => {
+    const periodo = _sacPeriodoMesAno(r?.created_at);
+    const itens = _sacExtrairItensDoConteudo(r?.conteudo || '');
+    if (!agrupadoConteudo.has(periodo)) agrupadoConteudo.set(periodo, new Map());
+    itens.forEach((it) => {
+      const nome = String(it?.nome || '').trim(); 
+      const qtd = Number(it?.quantidade || 0) || 1;
+      if (!nome) return;
+      const chaveAgrupamento = _sacNormalizarNomeItem(nome) || nome;
+      itensSet.add(chaveAgrupamento);
+      itensMapaNomeParaCodigo.set(chaveAgrupamento, nome);
+      agrupadoConteudo.get(periodo).set(chaveAgrupamento, (agrupadoConteudo.get(periodo).get(chaveAgrupamento) || 0) + _sacValorItem(chaveAgrupamento, qtd));
+    });
+  });
+  const periodosConteudo = Array.from(agrupadoConteudo.keys()).sort((a, b) => {
+    const [ma, ya] = a.split('/').map(Number); const [mb, yb] = b.split('/').map(Number);
+    return (ya - yb) || (ma - mb);
+  });
+  const itens = Array.from(itensSet);
+  if (_sacRelatorioConteudoChart) { _sacRelatorioConteudoChart.destroy(); _sacRelatorioConteudoChart = null; }
+  if (!periodosConteudo.length || !itens.length) {
+    sacRelatorioConteudoGraficoCanvas.style.display = 'none';
+    if (sacRelatorioConteudoGraficoVazio) { sacRelatorioConteudoGraficoVazio.style.display = ''; sacRelatorioConteudoGraficoVazio.textContent = _sacRelatorioConteudoUsuarioSelecionado ? `Nenhum dado de conteúdo para o usuário "${_sacRelatorioConteudoUsuarioSelecionado}" no período selecionado.` : 'Nenhum dado encontrado para o gráfico de conteúdo.'; }
+    return;
+  }
+  const topItens = itens.map((nome) => ({ nome, total: periodosConteudo.reduce((sum, p) => sum + (agrupadoConteudo.get(p)?.get(nome) || 0), 0) })).sort((a, b) => b.total - a.total).slice(0, 8);
+  _sacRelatorioConteudoTopItens = topItens.map((x) => x.nome);
+  const ocultarOutros = !!document.getElementById('sacConteudoOcultarOutros')?.checked;
+  const totalOutros = ocultarOutros ? 0 : itens.filter((nome) => !topItens.some((top) => top.nome === nome)).reduce((acc, nome) => acc + periodosConteudo.reduce((sum, p) => sum + (agrupadoConteudo.get(p)?.get(nome) || 0), 0), 0);
+  const datasetsConteudo = topItens.map((item, idx) => ({ label: _sacRotuloCurto(item.nome, 34), _fullLabel: item.nome, data: periodosConteudo.map((p) => agrupadoConteudo.get(p)?.get(item.nome) || 0), backgroundColor: _sacCorPorIndice(idx), borderRadius: 6, maxBarThickness: 36 }));
+  if (totalOutros > 0) { datasetsConteudo.push({ label: 'Outros itens', _fullLabel: 'Outros itens', data: periodosConteudo.map((p) => { const topSet = new Set(topItens.map((it) => it.nome)); return itens.filter((nome) => !topSet.has(nome)).reduce((sum, nome) => sum + (agrupadoConteudo.get(p)?.get(nome) || 0), 0); }), backgroundColor: '#64748b', borderRadius: 6, maxBarThickness: 36 }); }
+  sacRelatorioConteudoGraficoCanvas.style.display = '';
+  if (sacRelatorioConteudoGraficoVazio) sacRelatorioConteudoGraficoVazio.style.display = 'none';
+
+  if (modoPizza) {
+    const labelsPie = topItens.map((item) => _sacRotuloCurto(item.nome, 34));
+    const fullLabelsPie = topItens.map((item) => item.nome);
+    const dataPie = topItens.map((item) => item.total);
+    const coresPie = topItens.map((_, idx) => _sacCorPorIndice(idx));
+    if (totalOutros > 0) {
+      labelsPie.push('Outros itens');
+      fullLabelsPie.push('Outros itens');
+      dataPie.push(totalOutros);
+      coresPie.push('#64748b');
+    }
+    _sacRelatorioConteudoChart = new Chart(sacRelatorioConteudoGraficoCanvas.getContext('2d'), {
+      type: 'pie',
+      data: {
+        labels: labelsPie,
+        datasets: [{ _fullLabels: fullLabelsPie, data: dataPie, backgroundColor: coresPie }]
+      },
+      options: {
+        onClick: (_event, elements, chart) => {
+          if (!elements?.length) return;
+          const idx = elements[0].index;
+          const itemLabel = String(chart.data.datasets?.[0]?._fullLabels?.[idx] || chart.data.labels?.[idx] || '');
+          const topSet = new Set(_sacRelatorioConteudoTopItens || []);
+          const rowsBarra = rowsConteudo.filter((r) => {
+            const itensRow = _sacExtrairItensDoConteudo(r?.conteudo || '');
+            if (itemLabel === 'Outros itens') return itensRow.some((it) => !topSet.has(_sacNormalizarNomeItem(String(it?.nome || '').trim()) || String(it?.nome || '').trim()));
+            return itensRow.some((it) => {
+              const chaveNorm = _sacNormalizarNomeItem(String(it?.nome || '').trim()) || String(it?.nome || '').trim();
+              return chaveNorm === itemLabel;
+            });
+          });
+          const itensBarra = _sacExpandirConteudoDosRegistros(rowsBarra, (nome) => {
+            const chaveNorm = _sacNormalizarNomeItem(String(nome || '').trim()) || String(nome || '').trim();
+            if (itemLabel === 'Outros itens') return !topSet.has(chaveNorm);
+            return chaveNorm === itemLabel;
+          });
+          _sacRenderDrilldown(`Registros - Conteúdo: ${itemLabel} | Período: filtro atual`, itensBarra);
+        },
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { position: 'right', labels: { color: '#cbd5e1', boxWidth: 14, boxHeight: 14 } },
+          tooltip: {
+            callbacks: {
+              label: (item) => {
+                const ds = item.dataset || {};
+                const nome = ds._fullLabels?.[item.dataIndex] || item.label || '';
+                const val = _sacRelatorioModoValor
+                  ? `R$ ${Number(item.raw).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                  : `${item.raw} unidade(ns)`;
+                return `${nome}: ${val}`;
+              }
+            }
+          }
+        }
+      }
+    });
+  } else {
+    _sacRelatorioConteudoChart = new Chart(sacRelatorioConteudoGraficoCanvas.getContext('2d'), {
+      type: 'bar', data: { labels: periodosConteudo, datasets: datasetsConteudo },
+      options: {
+        onClick: (_event, elements, chart) => {
+          if (!elements?.length) return;
+          const el = elements[0]; const periodo = chart.data.labels?.[el.index];
+          const ds = chart.data.datasets?.[el.datasetIndex];
+          const itemLabel = String(ds?._fullLabel || ds?.label || '');
+          const topSet = new Set(_sacRelatorioConteudoTopItens || []);
+          const rowsBarra = rowsConteudo.filter((r) => { 
+            if (_sacPeriodoMesAno(r?.created_at) !== periodo) return false; 
+            const itensRow = _sacExtrairItensDoConteudo(r?.conteudo || ''); 
+            if (itemLabel === 'Outros itens') return itensRow.some((it) => !topSet.has(_sacNormalizarNomeItem(String(it?.nome || '').trim()) || String(it?.nome || '').trim())); 
+            return itensRow.some((it) => { 
+              const chaveNorm = _sacNormalizarNomeItem(String(it?.nome || '').trim()) || String(it?.nome || '').trim();
+              return chaveNorm === itemLabel;
+            }); 
+          });
+          const itensBarra = _sacExpandirConteudoDosRegistros(rowsBarra, (nome) => { if (itemLabel === 'Outros itens') return !topSet.has(String(nome || '').trim()); return String(nome || '').trim() === itemLabel; });
+          _sacRenderDrilldown(`Registros - Conteúdo: ${itemLabel} | Período: ${periodo}`, itensBarra);
+        },
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { position: 'top', labels: { color: '#cbd5e1', boxWidth: 14, boxHeight: 14 } }, tooltip: { callbacks: { title: (items) => `Período: ${items?.[0]?.label || ''}`, label: (item) => { const v = _sacRelatorioModoValor ? `R$ ${Number(item.raw).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2})}` : `${item.raw} unid.`; return `${item.dataset._fullLabel || item.dataset.label}: ${v}`; } } } },
+        scales: { x: { stacked: true, ticks: { color: '#94a3b8' }, grid: { color: 'rgba(148,163,184,0.15)' } }, y: { stacked: true, beginAtZero: true, ticks: { color: '#94a3b8', precision: 0, callback: (v) => _sacRelatorioModoValor ? `R$${Number(v).toLocaleString('pt-BR',{maximumFractionDigits:0})}` : v }, grid: { color: 'rgba(148,163,184,0.15)' } } }
+      }
+    });
+  }
+}
+
+async function _abrirRelatorioSac() {
+  if (!sacRelatorioGraficoWrapper || !sacRelatorioGraficoCanvas || !sacTabelaBody) return;
+  if (typeof Chart === 'undefined') { alert('Biblioteca de gráfico não disponível no momento.'); return; }
+  const tabelaWrapper = sacTabelaBody.closest('.tabela-wrapper');
+  sacRelatorioGraficoWrapper.style.display = '';
+  if (tabelaWrapper) tabelaWrapper.style.display = 'none';
+  if (sacRelatorioGraficoVazio) { sacRelatorioGraficoVazio.style.display = 'none'; sacRelatorioGraficoVazio.textContent = 'Carregando dados...'; }
+  try {
+    const [respSac, respCmc] = await Promise.all([
+      fetch('/api/sac/solicitacoes'),
+      fetch('/api/sac/cmc')
+    ]);
+    const data = await respSac.json().catch(() => ({}));
+    if (!respSac.ok || data?.ok === false) throw new Error(data?.error || 'Erro ao carregar dados do relatório.');
+    const dataCmc = await respCmc.json().catch(() => ({}));
+    _sacCmcCache = (dataCmc?.ok && dataCmc?.cmc) ? dataCmc.cmc : {};
+    _sacRelatorioRowsCache = Array.isArray(data?.rows) ? data.rows : [];
+    _sacSetPeriodoBotaoAtivo();
+    _sacSetTipoGraficoBtn();
+    _sacSetModoValorBtn();
+    _renderizarRelatorioSacPorUsuario();
+  } catch (err) {
+    if (_sacRelatorioUsuariosChart) { _sacRelatorioUsuariosChart.destroy(); _sacRelatorioUsuariosChart = null; }
+    if (_sacRelatorioConteudoChart) { _sacRelatorioConteudoChart.destroy(); _sacRelatorioConteudoChart = null; }
+    sacRelatorioGraficoCanvas.style.display = 'none';
+    if (sacRelatorioConteudoGraficoCanvas) sacRelatorioConteudoGraficoCanvas.style.display = 'none';
+    if (sacRelatorioGraficoVazio) { sacRelatorioGraficoVazio.style.display = ''; sacRelatorioGraficoVazio.textContent = err?.message || 'Erro ao gerar relatório.'; }
+    if (sacRelatorioConteudoGraficoVazio) { sacRelatorioConteudoGraficoVazio.style.display = ''; sacRelatorioConteudoGraficoVazio.textContent = err?.message || 'Erro ao gerar relatório de conteúdo.'; }
+  }
+}
+
+function _fecharRelatorioSac() {
+  const tabelaWrapper = sacTabelaBody?.closest('.tabela-wrapper');
+  if (sacRelatorioGraficoWrapper) sacRelatorioGraficoWrapper.style.display = 'none';
+  if (tabelaWrapper) tabelaWrapper.style.display = '';
+  _sacLimparDrilldown();
+}
+
+function _setRelatorioSacPeriodo(meses) {
+  _sacRelatorioPeriodoMeses = meses;
+  _sacSetPeriodoBotaoAtivo();
+  _renderizarRelatorioSacPorUsuario();
+}
+
+function _alternarRelatorioSacTipoGrafico() {
+  _sacRelatorioModoGrafico = _sacRelatorioModoGrafico === 'bar' ? 'pie' : 'bar';
+  _sacSetTipoGraficoBtn();
+  _renderizarRelatorioSacPorUsuario();
+}
+
+function _sacSetModoValorBtn() {
+  if (!sacRelatorioModoValorBtn) return;
+  const modoValor = _sacRelatorioModoValor;
+  sacRelatorioModoValorBtn.innerHTML = modoValor
+    ? '<i class="fa-solid fa-hashtag"></i><span>Modo qtd</span>'
+    : '<i class="fa-solid fa-dollar-sign"></i><span>Modo valor</span>';
+  sacRelatorioModoValorBtn.style.background = modoValor
+    ? 'linear-gradient(135deg,#f59e0b 0%,#d97706 100%)'
+    : '#1f2937';
+  sacRelatorioModoValorBtn.style.color = '#ffffff';
+  const titulo1 = document.getElementById('sacGrafico1Titulo');
+  const titulo2 = document.getElementById('sacGrafico2Titulo');
+  if (titulo1) titulo1.textContent = modoValor ? 'Gráfico 1 - Valor (R$) por Usuário' : 'Gráfico 1 - Quantidade por Usuário';
+  if (titulo2) titulo2.textContent = modoValor ? 'Gráfico 2 - Conteúdo (Itens x Valor R$)' : 'Gráfico 2 - Conteúdo (Itens x Quantidade)';
+}
+
+function _alternarRelatorioSacModoValor() {
+  _sacRelatorioModoValor = !_sacRelatorioModoValor;
+  _sacSetModoValorBtn();
+  _renderizarRelatorioSacPorUsuario();
+}
+
+// Retorna o valor de um item: se modo valor, multiplica qtd pelo CMC; senão retorna só a qtd
+function _sacValorItem(chaveNormalizada, qtd) {
+  if (!_sacRelatorioModoValor) return qtd;
+  const cmc = Number(_sacCmcCache[chaveNormalizada] || 0);
+  return cmc > 0 ? cmc * qtd : qtd; // fallback para qtd se CMC não encontrado
+}
+
+const sacConteudoFiltroBtn = document.getElementById('sacConteudoFiltroBtn');
+const sacConteudoFiltroDropdown = document.getElementById('sacConteudoFiltroDropdown');
+const sacConteudoOcultarOutros = document.getElementById('sacConteudoOcultarOutros');
+
+if (sacConteudoFiltroBtn && sacConteudoFiltroDropdown) {
+  sacConteudoFiltroBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    sacConteudoFiltroDropdown.style.display = sacConteudoFiltroDropdown.style.display === 'none' || !sacConteudoFiltroDropdown.style.display ? 'block' : 'none';
+  });
+  document.addEventListener('click', (e) => {
+    if (!sacConteudoFiltroDropdown.contains(e.target) && !sacConteudoFiltroBtn.contains(e.target)) {
+      sacConteudoFiltroDropdown.style.display = 'none';
+    }
+  });
+}
+if (sacConteudoOcultarOutros) {
+  sacConteudoOcultarOutros.addEventListener('change', () => _renderizarRelatorioSacPorUsuario());
+}
+
+// Painel SAC: filtra por usuário logado (filterByUser: true)
+sacRelatorioBtn?.addEventListener('click', _abrirRelatorioSac);
+sacRelatorioVoltarBtn?.addEventListener('click', _fecharRelatorioSac);
+sacRelatorioDownloadBtn?.addEventListener('click', _sacBaixarRelatorioXls);
+sacPeriodo3mBtn?.addEventListener('click', () => _setRelatorioSacPeriodo(3));
+sacPeriodo4mBtn?.addEventListener('click', () => _setRelatorioSacPeriodo(4));
+sacPeriodo6mBtn?.addEventListener('click', () => _setRelatorioSacPeriodo(6));
+sacPeriodo12mBtn?.addEventListener('click', () => _setRelatorioSacPeriodo(12));
+sacPeriodoTudoBtn?.addEventListener('click', () => _setRelatorioSacPeriodo(0));
+sacRelatorioTipoGraficoBtn?.addEventListener('click', _alternarRelatorioSacTipoGrafico);
+sacRelatorioModoValorBtn?.addEventListener('click', _alternarRelatorioSacModoValor);
+if (sacRelatorioConteudoUsuarioSelect) {
+  sacRelatorioConteudoUsuarioSelect.addEventListener('change', () => {
+    _sacRelatorioConteudoUsuarioSelecionado = String(sacRelatorioConteudoUsuarioSelect.value || '');
+    _renderizarRelatorioSacPorUsuario();
+  });
 }
 
 // Painel SAC: filtra por usuário logado (filterByUser: true)
@@ -59478,9 +60120,29 @@ function _agendaGerarPdfAta() {
 
   if (!agendaAtasCache.length) { alert('Nenhuma anotação registrada para gerar PDF.'); return; }
 
+  // Aplicar o mesmo filtro ativo na tela
+  const modoVisualizacao = agendaAtaVisualizacaoModo || 'tudo';
+  let atasParaPdf = [...agendaAtasCache];
+  let filtroDescricao = '';
+
+  if (modoVisualizacao === 'datas' && agendaAtaDataSelecionada) {
+    atasParaPdf = atasParaPdf.filter((a) => String(a.criado_em_fmt || '').trim() === agendaAtaDataSelecionada);
+    filtroDescricao = `Filtro: Data ${agendaAtaDataSelecionada}`;
+  } else if (modoVisualizacao === 'atividades') {
+    atasParaPdf = atasParaPdf
+      .filter((a) => {
+        const st = _agendaAtaStatusChecklist(a);
+        return agendaAtaAtividadesAba === 'executadas' ? st.executadas > 0 : st.pendentes > 0;
+      })
+      .map((a) => _agendaFiltrarConteudoAtaPorStatus(a, agendaAtaAtividadesAba));
+    filtroDescricao = `Filtro: Atividades ${agendaAtaAtividadesAba === 'executadas' ? 'executadas' : 'pendentes'}`;
+  }
+
+  if (!atasParaPdf.length) { alert('Nenhuma anotação encontrada para o filtro selecionado.'); return; }
+
   // Agrupa por tema na mesma ordem de exibição
   const porTema = {};
-  for (const a of agendaAtasCache) {
+  for (const a of atasParaPdf) {
     const t = String(a.tema || 'Geral').trim();
     if (!porTema[t]) porTema[t] = [];
     porTema[t].push(a);
@@ -59518,6 +60180,7 @@ function _agendaGerarPdfAta() {
   });
 
   const agora = new Date().toLocaleString('pt-BR');
+  const subtitCompleto = filtroDescricao ? `${subtit}${subtit ? ' &mdash; ' : ''}${e(filtroDescricao)}` : e(subtit);
   const html = `<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8">
 <title>${e(titulo)}</title><style>
 body{font-family:Arial,sans-serif;max-width:820px;margin:0 auto;padding:32px;color:#1e293b;font-size:13px;}
@@ -59532,7 +60195,7 @@ h3{font-size:14px;color:#1e3a5f;border-bottom:2px solid #93c5fd;padding-bottom:4
 @media print{body{padding:16px;}}
 </style></head><body>
 <h1>${e(titulo)}</h1>
-<p class="subtit">${e(subtit)}</p>
+<p class="subtit">${subtitCompleto}</p>
 ${corpo}
 <p class="footer">Gerado em ${agora}</p>
 <script>window.onload=()=>window.print();<\/script>

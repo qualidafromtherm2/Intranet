@@ -2656,6 +2656,14 @@
                         <button id="sacPeriodo12mBtn" class="content-button" type="button" style="padding:6px 10px;font-size:12px;background:#1f2937;color:#cbd5e1;">12 meses</button>
                         <button id="sacPeriodoTudoBtn" class="content-button" type="button" style="padding:6px 10px;font-size:12px;background:#1f2937;color:#cbd5e1;">Tudo</button>
                       </div>
+                      <button id="sacRelatorioTipoGraficoBtn" class="content-button" type="button" style="background:#1f2937;color:#cbd5e1;gap:6px;">
+                        <i class="fa-solid fa-chart-pie"></i>
+                        <span>Modo pizza</span>
+                      </button>
+                      <button id="sacRelatorioModoValorBtn" class="content-button" type="button" style="background:#1f2937;color:#cbd5e1;gap:6px;">
+                        <i class="fa-solid fa-dollar-sign"></i>
+                        <span>Modo valor</span>
+                      </button>
                       <button id="sacRelatorioVoltarBtn" class="content-button" type="button" style="background:#334155;color:#fff;gap:6px;">
                         <i class="fa-solid fa-arrow-left"></i>
                         <span>Voltar</span>
@@ -2665,14 +2673,14 @@
                         <span>Baixar relatório</span>
                       </button>
                     </div>
-                    <div style="margin-bottom:14px;color:#94a3b8;font-size:12px;font-weight:700;letter-spacing:.3px;">Gráfico 1 - Quantidade por Usuário</div>
+                    <div id="sacGrafico1Titulo" style="margin-bottom:14px;color:#94a3b8;font-size:12px;font-weight:700;letter-spacing:.3px;">Gráfico 1 - Quantidade por Usuário</div>
                     <div style="position:relative;height:320px;max-height:320px;min-height:320px;overflow:hidden;">
                       <canvas id="sacRelatorioGraficoCanvas" style="width:100%;height:100%;"></canvas>
                     </div>
                     <div id="sacRelatorioGraficoVazio" style="display:none;text-align:center;color:#94a3b8;font-size:15px;margin-top:12px;">Nenhum dado encontrado para o gráfico por usuário.</div>
 
                     <div style="margin-top:22px;margin-bottom:14px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
-                      <div style="color:#94a3b8;font-size:12px;font-weight:700;letter-spacing:.3px;">Gráfico 2 - Conteúdo (Itens x Quantidade)</div>
+                      <div id="sacGrafico2Titulo" style="color:#94a3b8;font-size:12px;font-weight:700;letter-spacing:.3px;">Gráfico 2 - Conteúdo (Itens x Quantidade)</div>
                       <div style="display:flex;align-items:center;gap:8px;margin-left:auto;">
                         <label for="sacRelatorioConteudoUsuarioSelect" style="color:#94a3b8;font-size:12px;font-weight:600;">Usuário:</label>
                         <select id="sacRelatorioConteudoUsuarioSelect" style="padding:6px 10px;border:1px solid rgba(148,163,184,0.35);border-radius:8px;background:#0f172a;color:#e2e8f0;font-size:12px;min-width:180px;">
@@ -2711,7 +2719,7 @@
                               <th>Usuário</th>
                               <th>Conteúdo</th>
                               <th>Quantidade</th>
-                              <th>Observação</th>
+                              <th>OS</th>
                             </tr>
                           </thead>
                           <tbody id="sacRelatorioDrilldownBody">

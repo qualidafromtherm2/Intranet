@@ -8,7 +8,6 @@ const OMIE_WEBHOOK_TOKEN = process.env.OMIE_WEBHOOK_TOKEN || null; // se NULL, n
 // local padrão para a UI (pode setar ALMOX_LOCAL_PADRAO no Render)
 const ALMOX_LOCAL_PADRAO     = process.env.ALMOX_LOCAL_PADRAO     || '10408201806';
 const PRODUCAO_LOCAL_PADRAO  = process.env.PRODUCAO_LOCAL_PADRAO  || '10564345392';
-const RECEBIMENTO_NFE_LOCAL_ESTOQUE_PADRAO = Number(process.env.RECEBIMENTO_NFE_LOCAL_ESTOQUE_PADRAO || ALMOX_LOCAL_PADRAO) || 10408201806;
 // outros requires de rotas...
 
 // no topo: já deve ter dotenv/express carregados
@@ -26,7 +25,6 @@ const { AsyncLocalStorage } = require('async_hooks');
 const fs  = require('fs');           // todas as funções sync
 const fsp = fs.promises;            // parte assíncrona (equivale a fs/promises)
 const path          = require('path');
-const { execFile }  = require('child_process');
 const multer        = require('multer');
 // logo após os outros requires:
 const archiver = require('archiver');
@@ -228,7 +226,6 @@ app.use('/api/qualidade', require('./routes/qualidadeFotos'));
 app.use('/api/registros', require('./routes/registros'));
 app.use('/api/sac', require('./routes/sacEnvios'));
 app.use('/api/ai', require('./routes/ai_assistant'));
-app.use('/api/producao', require('./routes/producao'));
 
 app.get('/api/produtos/stream', (req, res) => {
   const accept = String(req.headers?.accept || '');
@@ -10485,60 +10482,6 @@ const etiquetasRoot = path.join(__dirname, 'etiquetas');   // raiz única
 fs.mkdirSync(path.join(etiquetasRoot, 'Expedicao',  'Printed'), { recursive: true });
 fs.mkdirSync(path.join(etiquetasRoot, 'Recebimento', 'Printed'), { recursive: true });
 
-// Garante schema etiqueta e tabela ETQ_recebimento no Postgres
-(async () => {
-  try {
-    await pool.query(`CREATE SCHEMA IF NOT EXISTS etiqueta`);
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS etiqueta."ETQ_recebimento" (
-        id                SERIAL PRIMARY KEY,
-        numero_nfe        TEXT    NOT NULL,
-        numero_pedido     TEXT    NOT NULL,
-        lote              TEXT    NOT NULL,
-        codigo_produto    TEXT,
-        descricao_produto TEXT,
-        qtd               NUMERIC,
-        unidade           TEXT,
-        fornecedor        TEXT,
-        data_emissao      TEXT,
-        conteudo_zpl      TEXT    NOT NULL,
-        usuario_criacao   TEXT,
-        status            TEXT    NOT NULL DEFAULT 'pendente',
-        criado_em         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-        impressa          BOOLEAN NOT NULL DEFAULT FALSE
-      )
-    `);
-    // Migração: adiciona coluna impressa (booleano) se ainda não existir
-    await pool.query(`ALTER TABLE etiqueta."ETQ_recebimento" ADD COLUMN IF NOT EXISTS impressa BOOLEAN NOT NULL DEFAULT FALSE`);
-    // Migração: remove colunas antigas de timestamp de impressão
-    await pool.query(`ALTER TABLE etiqueta."ETQ_recebimento" DROP COLUMN IF EXISTS impresso_em`).catch(() => {});
-    await pool.query(`ALTER TABLE etiqueta."ETQ_recebimento" DROP COLUMN IF EXISTS impresso_modal_em`).catch(() => {});
-    // Tabela de registro de cada impressão realizada
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS etiqueta."ETQ_rec_impresso" (
-        id                SERIAL PRIMARY KEY,
-        origem_id         INT REFERENCES etiqueta."ETQ_recebimento"(id),
-        qtd               NUMERIC,
-        unidade           TEXT,
-        data_emissao      TEXT,
-        conteudo_zpl      TEXT,
-        usuario_criacao   TEXT,
-        impresso_em       TIMESTAMPTZ NOT NULL DEFAULT NOW()
-      )
-    `);
-    // Migração: remove colunas redundantes (dados já existem em ETQ_recebimento via origem_id)
-    for (const col of ['numero_nfe','numero_pedido','lote','codigo_produto','descricao_produto','fornecedor']) {
-      await pool.query(`ALTER TABLE etiqueta."ETQ_rec_impresso" DROP COLUMN IF EXISTS ${col}`).catch(() => {});
-    }
-    // Migração: colunas de armazenamento
-    await pool.query(`ALTER TABLE etiqueta."ETQ_rec_impresso" ADD COLUMN IF NOT EXISTS endereco TEXT`);
-    await pool.query(`ALTER TABLE etiqueta."ETQ_rec_impresso" ADD COLUMN IF NOT EXISTS complemento TEXT`);
-    console.log('[etiqueta] Schema e tabelas ETQ_recebimento / ETQ_rec_impresso garantidos');
-  } catch (err) {
-    console.error('[etiqueta] Falha ao garantir schema/tabela:', err?.message || err);
-  }
-})();
-
 function getDirs(tipo = 'Expedicao') {
   const dirTipo   = path.join(etiquetasRoot, tipo);                // p.ex. …/Expedicao
   const dirPrint  = path.join(dirTipo,    'Printed');              // …/Expedicao/Printed
@@ -10654,7 +10597,7 @@ app.post('/api/upload/supabase', upload.single('file'), async (req, res) => {
     const supabase = createClient(supabaseUrl, supabaseKey);
     
     // Permite especificar o bucket via body; padrão: 'compras-anexos'
-    const ALLOWED_BUCKETS = ['compras-anexos', 'Funcionarios', 'Engenharia'];
+    const ALLOWED_BUCKETS = ['compras-anexos', 'Funcionarios'];
     const requestedBucket = String(req.body.bucket || '').trim();
     const bucketName = ALLOWED_BUCKETS.includes(requestedBucket) ? requestedBucket : 'compras-anexos';
     const filePath = req.body.path || `uploads/${Date.now()}_${req.file.originalname}`;
@@ -11221,743 +11164,6 @@ app.get('/api/preparacao/eventos.csv', async (req, res) => {
   }
 });
 
-
-// ── Helper: gera um bloco ZPL para salvar no banco (ETQ_recebimento) ─────────
-function _gerarZplRecebimentoBloco({ codProd, descProd, loteTxt, dataExibir, idEtq }) {
-  const qrContent = `${codProd}|${descProd.slice(0, 40)}|${loteTxt}|ID${idEtq}`;
-  return [
-    '^XA',
-    '^CI28',
-    '^PW812',
-    '^LL165',
-    `^FO10,10^BQN,2,4^FDLA,${qrContent}^FS`,
-    '^FO170,10^A0N,20,20^FDCod. Produto:^FS',
-    `^FO360,10^A0N,20,20^FD${codProd}^FS`,
-    '^FO170,34^A0N,20,20^FDDescricao:^FS',
-    `^FO170,58^A0N,20,20^FD${descProd.slice(0, 30)}^FS`,
-    `^FO170,82^A0N,20,20^FDLote: ${loteTxt}^FS`,
-    `^FO170,106^A0N,20,20^FDEmissao: ${dataExibir}^FS`,
-    '^XZ',
-  ].join('\n');
-}
-
-// ── Helper: traduz erros técnicos do lpr para mensagens amigáveis ──────────
-function _friendlyLprError(msg) {
-  const s = String(msg || '');
-  if (/does not exist/i.test(s))       return `Impressora "${process.env.PRINTER || 'ZebraZD220'}" não encontrada. Verifique se ela está instalada no sistema.`;
-  if (/unable to connect/i.test(s))    return 'Não foi possível conectar à impressora. Verifique se ela está ligada e acessível na rede.';
-  if (/permission denied/i.test(s))    return 'Sem permissão para acessar a impressora. Verifique as permissões do usuário.';
-  if (/connection refused/i.test(s))   return 'Conexão com a impressora recusada. Verifique se o serviço de impressão está ativo.';
-  return 'Falha na comunicação com a impressora. Verifique se ela está ligada e configurada corretamente.';
-}
-
-// ── Helper: gera ZPL para IMPRESSÃO física (mostra ID da impressão, sem qtd) ──
-// QR code: cod|desc|lote|idImpresso  — sem quantidade
-// Linha no label: "ID: 123" em vez de "Qtd: X UN"
-function _gerarZplParaImpressao({ codProd, descProd, idImpresso, loteTxt, dataExibir }) {
-  const qr = `${codProd}|${descProd.slice(0, 40)}|${loteTxt}|ID${idImpresso}`;
-  return [
-    '^XA',
-    '^CI28',
-    '^PW812',
-    '^LL165',
-    `^FO10,10^BQN,2,4^FDLA,${qr}^FS`,
-    '^FO170,10^A0N,20,20^FDCod. Produto:^FS',
-    `^FO360,10^A0N,20,20^FD${codProd}^FS`,
-    '^FO170,34^A0N,20,20^FDDescricao:^FS',
-    `^FO170,58^A0N,20,20^FD${descProd.slice(0, 30)}^FS`,
-    `^FO170,82^A0N,20,20^FDID: ${idImpresso}^FS`,
-    `^FO170,106^A0N,20,20^FDLote: ${loteTxt}^FS`,
-    `^FO170,130^A0N,20,20^FDEmissao: ${dataExibir}^FS`,
-    '^XZ',
-  ].join('\n');
-}
-
-// ── Etiquetas de Recebimento: gera PDF + salva no banco (1 etiqueta por item) ─
-// POST /api/etiquetas/recebimento/preview
-// Body JSON: { nfe, pedido, itens: [{ codigo_produto, descricao_produto, qtd, unidade }] }
-// Retorna: application/pdf multi-página (um label por item)
-app.post('/api/etiquetas/recebimento/preview', express.json(), async (req, res) => {
-  try {
-    const {
-      nfe    = '',
-      pedido = '',
-      itens  = [],
-    } = req.body || {};
-
-    const usuario = req.body?.usuario || req.session?.usuario || req.session?.user?.login || null;
-
-    if (!nfe)    return res.status(400).json({ error: 'Informe o número da NF-e.' });
-    if (!pedido) return res.status(400).json({ error: 'Informe o número do pedido.' });
-    if (!Array.isArray(itens) || itens.length === 0) {
-      return res.status(400).json({ error: 'Nenhum item informado.' });
-    }
-
-    // Lote = Pedido + "-" + NF-e (igual para todos os itens)
-    const lote = `${String(pedido)}-${String(nfe)}`;
-
-    // Busca data de emissão da NF-e
-    let dataEmissao = '';
-    try {
-      const dbRes = await pool.query(
-        `SELECT c_dat_entrada FROM logistica.notas_entrada_omie WHERE TRIM(c_num_nfe)=TRIM($1) LIMIT 1`,
-        [String(nfe)]
-      );
-      if (!dbRes.rows.length) {
-        const dbRes2 = await pool.query(
-          `SELECT data_emissao FROM logistica.recebimentos_nfe_omie WHERE TRIM(numero_nfe)=TRIM($1) LIMIT 1`,
-          [String(nfe)]
-        );
-        dataEmissao = dbRes2.rows[0]?.data_emissao || '';
-      } else {
-        dataEmissao = dbRes.rows[0]?.c_dat_entrada || '';
-      }
-    } catch (_) { /* sem data */ }
-
-    const hoje = new Date();
-    const dataExibir = dataEmissao
-      ? String(dataEmissao).slice(0, 10).split('-').reverse().join('/')
-      : [String(hoje.getDate()).padStart(2,'0'), String(hoje.getMonth()+1).padStart(2,'0'), hoje.getFullYear()].join('/');
-
-    const sanitize = (v, max = 999) => String(v || '').slice(0, max).replace(/[\\^~]/g, ' ');
-    const loteTxt = sanitize(lote, 40);
-
-    const zplBlocks   = [];
-    const ignorados   = [];
-    const gerados     = [];
-
-    for (const item of itens) {
-      const codProdRaw = String(item?.codigo_produto  || '').trim();
-      const descProdRaw = String(item?.descricao_produto || '').trim();
-      const qtdRaw     = String(item?.qtd     || '');
-      const unidRaw    = String(item?.unidade || '').trim();
-
-      if (!codProdRaw) continue; // item sem código: ignora silenciosamente
-
-      // ── Deduplicação: mesmo nfe + pedido + codigo_produto ────────────────
-      const existe = await pool.query(
-        `SELECT 1 FROM etiqueta."ETQ_recebimento"
-          WHERE numero_nfe=$1 AND numero_pedido=$2 AND codigo_produto=$3
-          LIMIT 1`,
-        [String(nfe), String(pedido), codProdRaw]
-      );
-      if (existe.rows.length > 0) {
-        ignorados.push(codProdRaw);
-        continue;
-      }
-
-      const codProd  = sanitize(codProdRaw,  30);
-      const descProd = sanitize(descProdRaw, 70);
-      const qtdTxt   = sanitize(qtdRaw,  15);
-      const unidTxt  = sanitize(unidRaw, 10);
-
-      // ── Salva no banco primeiro para obter o ID ───────────────────────────
-      let idEtq = null;
-      try {
-        const ins = await pool.query(
-          `INSERT INTO etiqueta."ETQ_recebimento"
-             (numero_nfe, numero_pedido, lote, codigo_produto, descricao_produto,
-              qtd, unidade, data_emissao, conteudo_zpl, usuario_criacao)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
-           RETURNING id`,
-          [
-            String(nfe), String(pedido), lote,
-            codProdRaw, descProdRaw,
-            qtdRaw !== '' ? Number(String(qtdRaw).replace(',', '.')) || null : null,
-            unidRaw, dataExibir, '', usuario,
-          ]
-        );
-        idEtq = ins.rows[0]?.id;
-        gerados.push({ cod: codProdRaw, id: idEtq });
-      } catch (dbErr) {
-        console.error('[etiquetas/recebimento/preview] falha ao salvar item:', codProdRaw, dbErr?.message || dbErr);
-        continue;
-      }
-
-      // ── Gera ZPL com o ID já conhecido ────────────────────────────────────
-      const zpl = _gerarZplRecebimentoBloco({ codProd, descProd, loteTxt, dataExibir, idEtq });
-
-      // ── Atualiza conteudo_zpl com o ZPL final ─────────────────────────────
-      try {
-        await pool.query(
-          `UPDATE etiqueta."ETQ_recebimento" SET conteudo_zpl=$1 WHERE id=$2`,
-          [zpl, idEtq]
-        );
-      } catch (updErr) {
-        console.error('[etiquetas/recebimento/preview] falha ao atualizar zpl id:', idEtq, updErr?.message || updErr);
-      }
-
-      zplBlocks.push(zpl);
-    }
-
-    if (zplBlocks.length === 0) {
-      return res.status(409).json({
-        error: `Todas as etiquetas já foram geradas anteriormente para esta NF-e/Pedido.${ignorados.length ? ` (${ignorados.length} item(s) ignorado(s))` : ''}`
-      });
-    }
-
-    // ── Chama Labelary com todos os blocos ZPL concatenados → PDF multi-página
-    const zplCombinado = zplBlocks.join('\n');
-    const labelaryResp = await fetch(
-      'http://api.labelary.com/v1/printers/8dpmm/labels/4x6/',
-      {
-        method: 'POST',
-        headers: { 'Accept': 'application/pdf', 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: zplCombinado,
-      }
-    );
-
-    if (!labelaryResp.ok) {
-      const txt = await labelaryResp.text().catch(() => '');
-      throw new Error(`Labelary retornou ${labelaryResp.status}: ${txt.slice(0, 120)}`);
-    }
-
-    const pdfBuffer = Buffer.from(await labelaryResp.arrayBuffer());
-    res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `inline; filename="etiquetas_receb_nfe${String(nfe)}.pdf"`);
-    res.setHeader('Cache-Control', 'no-store');
-    res.setHeader('X-Etiquetas-Geradas',  String(gerados.length));
-    res.setHeader('X-Etiquetas-Ignoradas', String(ignorados.length));
-    res.send(pdfBuffer);
-  } catch (err) {
-    console.error('[etiquetas/recebimento/preview]', err);
-    res.status(500).json({ error: err?.message || 'Falha ao gerar etiquetas' });
-  }
-});
-
-// ── Etiquetas pendentes de impressão via modal ────────────────────────────────
-// GET /api/etiquetas/recebimento/pendentes?q=texto
-// Retorna registros onde impressa = false, filtrando por lote/codigo/descricao
-app.get('/api/etiquetas/recebimento/pendentes', async (req, res) => {
-  try {
-    const q = String(req.query.q || '').trim();
-    let rows;
-    if (q) {
-      const like = `%${q}%`;
-      const result = await pool.query(
-        `SELECT id, numero_nfe, numero_pedido, lote, codigo_produto,
-                descricao_produto, qtd, unidade, data_emissao, criado_em
-           FROM etiqueta."ETQ_recebimento"
-          WHERE impressa = false
-            AND (lote ILIKE $1 OR codigo_produto ILIKE $1 OR descricao_produto ILIKE $1)
-          ORDER BY criado_em DESC
-          LIMIT 200`,
-        [like]
-      );
-      rows = result.rows;
-    } else {
-      const result = await pool.query(
-        `SELECT id, numero_nfe, numero_pedido, lote, codigo_produto,
-                descricao_produto, qtd, unidade, data_emissao, criado_em
-           FROM etiqueta."ETQ_recebimento"
-          WHERE impressa = false
-          ORDER BY criado_em DESC
-          LIMIT 200`
-      );
-      rows = result.rows;
-    }
-    res.json({ etiquetas: rows });
-  } catch (err) {
-    console.error('[etiquetas/pendentes]', err);
-    res.status(500).json({ error: err?.message || 'Falha ao buscar etiquetas' });
-  }
-});
-
-// GET /api/etiquetas/impressoras
-// Lista impressoras disponíveis no sistema via lpstat
-app.get('/api/etiquetas/impressoras', async (req, res) => {
-  try {
-    const lista = await new Promise((resolve) => {
-      execFile('lpstat', ['-a'], (err, stdout) => {
-        if (err || !stdout) { resolve([]); return; }
-        // Cada linha: "NomeDaImpressora accepting requests since ..."
-        const nomes = stdout.split('\n')
-          .map(l => l.split(' ')[0].trim())
-          .filter(n => n.length > 0);
-        resolve(nomes);
-      });
-    });
-    res.json({ impressoras: lista, padrao: process.env.PRINTER || 'ZebraZD220' });
-  } catch (err) {
-    res.json({ impressoras: [], padrao: process.env.PRINTER || 'ZebraZD220' });
-  }
-});
-
-// GET /api/etiquetas/recebimento/pdf-download?ids=1,2,3[&multiplo=50][&usuario=xxx]
-// Gera PDF das etiquetas via Labelary, regenerando ZPL a partir dos campos do banco.
-// Quando `multiplo` é informado, aplica lógica floor+remainder igual ao imprimir-multiplo.
-app.get('/api/etiquetas/recebimento/pdf-download', async (req, res) => {
-  try {
-    const ids     = String(req.query.ids || '').split(',').map(Number).filter(n => n > 0);
-    const multiplo = Number(req.query.multiplo) || 0;
-    if (!ids.length) return res.status(400).json({ error: 'Informe os ids.' });
-
-    const result = await pool.query(
-      `SELECT id, codigo_produto, descricao_produto, lote, data_emissao, qtd, unidade
-         FROM etiqueta."ETQ_recebimento"
-        WHERE id = ANY($1::int[]) ORDER BY id`,
-      [ids]
-    );
-    if (!result.rows.length) return res.status(404).json({ error: 'Nenhuma etiqueta encontrada.' });
-
-    const sanitize = (v, max = 999) => String(v || '').slice(0, max).replace(/[\\^~]/g, ' ');
-    // Aceita usuario via query param (GET) ou sessão
-    const usuarioImpressao = String(req.query.usuario || req.session?.user?.login || req.session?.usuario || '').trim();
-    const zplBlocks = [];
-
-    for (const row of result.rows) {
-      const codProd    = sanitize(row.codigo_produto, 30);
-      const descProd   = sanitize(row.descricao_produto, 70);
-      const loteTxt    = sanitize(row.lote, 40);
-      const dataExibir = sanitize(row.data_emissao, 10);
-
-      // Se multiplo informado: floor+remainder igual ao imprimir-multiplo
-      let lotes;
-      if (multiplo > 0) {
-        const qtdTotal = Number(row.qtd) || 0;
-        const nCheias  = Math.floor(qtdTotal / multiplo);
-        const resto    = qtdTotal % multiplo;
-        lotes = [];
-        for (let i = 0; i < nCheias; i++) lotes.push(multiplo);
-        if (resto > 0) lotes.push(resto);
-        if (lotes.length === 0) lotes.push(qtdTotal || 1);
-      } else {
-        lotes = [Number(row.qtd) || 1];
-      }
-
-      for (const qtdEtq of lotes) {
-        const ins = await pool.query(
-          `INSERT INTO etiqueta."ETQ_rec_impresso"
-             (origem_id, qtd, unidade, data_emissao, conteudo_zpl, usuario_criacao)
-           VALUES ($1,$2,$3,$4,'',$5)
-           RETURNING id`,
-          [row.id, qtdEtq, row.unidade, row.data_emissao, usuarioImpressao]
-        );
-        const idImpresso = ins.rows[0].id;
-
-        const zpl = _gerarZplParaImpressao({ codProd, descProd, idImpresso, loteTxt, dataExibir });
-
-        await pool.query(
-          `UPDATE etiqueta."ETQ_rec_impresso" SET conteudo_zpl = $1 WHERE id = $2`,
-          [zpl, idImpresso]
-        );
-
-        zplBlocks.push(zpl);
-      }
-    }
-
-    // Marca todas as etiquetas como impressas
-    await pool.query(
-      `UPDATE etiqueta."ETQ_recebimento" SET qtd = 0, impressa = true WHERE id = ANY($1::int[])`,
-      [ids]
-    );
-
-    const zplCombinado = zplBlocks.join('\n');
-
-    const labelaryResp = await fetch(
-      'http://api.labelary.com/v1/printers/8dpmm/labels/4x6/',
-      {
-        method: 'POST',
-        headers: { 'Accept': 'application/pdf', 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: zplCombinado,
-      }
-    );
-
-    if (!labelaryResp.ok) {
-      const txt = await labelaryResp.text().catch(() => '');
-      throw new Error(`Labelary retornou ${labelaryResp.status}: ${txt.slice(0, 120)}`);
-    }
-
-    const pdfBuffer = Buffer.from(await labelaryResp.arrayBuffer());
-    res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `attachment; filename="etiquetas_${ids.join('-')}.pdf"`);
-    res.setHeader('Cache-Control', 'no-store');
-    res.send(pdfBuffer);
-  } catch (err) {
-    console.error('[etiquetas/recebimento/pdf-download]', err);
-    res.status(500).json({ error: err?.message || 'Falha ao gerar PDF' });
-  }
-});
-
-// GET /api/etiquetas/rec-impresso?q=texto
-// Retorna registros já impressos de ETQ_rec_impresso, com filtro opcional
-app.get('/api/etiquetas/rec-impresso', async (req, res) => {
-  try {
-    const q = String(req.query.q || '').trim();
-    let rows;
-    const baseSql = `
-      SELECT i.id, r.numero_nfe, r.numero_pedido, r.lote, r.codigo_produto,
-             r.descricao_produto, i.qtd, r.unidade, r.fornecedor, r.data_emissao,
-             i.impresso_em, i.usuario_criacao
-        FROM etiqueta."ETQ_rec_impresso" i
-        JOIN etiqueta."ETQ_recebimento"  r ON r.id = i.origem_id`;
-    if (q) {
-      const like = `%${q}%`;
-      const result = await pool.query(
-        `${baseSql}
-         WHERE (i.endereco IS NULL OR i.endereco = '')
-           AND (r.lote ILIKE $1 OR r.codigo_produto ILIKE $1 OR r.descricao_produto ILIKE $1)
-         ORDER BY i.impresso_em DESC
-         LIMIT 200`,
-        [like]
-      );
-      rows = result.rows;
-    } else {
-      const result = await pool.query(
-        `${baseSql}
-         WHERE (i.endereco IS NULL OR i.endereco = '')
-         ORDER BY i.impresso_em DESC
-         LIMIT 200`
-      );
-      rows = result.rows;
-    }
-    res.json({ etiquetas: rows });
-  } catch (err) {
-    console.error('[etiquetas/rec-impresso]', err);
-    res.status(500).json({ error: err?.message || 'Falha ao buscar etiquetas impressas' });
-  }
-});
-
-// PATCH /api/etiquetas/rec-impresso/:id/endereco
-// Body: { endereco: "A1-B2" } — registra o local de armazenamento e faz TRF Omie
-app.patch('/api/etiquetas/rec-impresso/:id/endereco', express.json(), async (req, res) => {
-  const _sep = '─'.repeat(60);
-  try {
-    const id = Number(req.params.id);
-    const endereco    = String(req.body?.endereco    || '').trim();
-    const complemento = String(req.body?.complemento || '').trim();
-    if (!id || !endereco) return res.status(400).json({ error: 'id e endereco são obrigatórios.' });
-
-    // 1. Salva endereço (e complemento opcional) e busca dados do produto
-    const result = await pool.query(
-      `UPDATE etiqueta."ETQ_rec_impresso" SET endereco = $1, complemento = $2 WHERE id = $3 RETURNING id, endereco, complemento, origem_id, qtd`,
-      [endereco, complemento || null, id]
-    );
-    if (!result.rows.length) return res.status(404).json({ error: 'Registro não encontrado.' });
-    const { origem_id, qtd } = result.rows[0];
-
-    // 2. Busca dados do produto no recebimento para o TRF Omie
-    const { rows: recRows } = await pool.query(
-      `SELECT codigo_produto, numero_nfe, lote FROM etiqueta."ETQ_recebimento" WHERE id = $1`,
-      [origem_id]
-    );
-
-    // 3. TRF Omie: RECEBIMENTO (10408201806) → PORTA PALLET ALMOXARIFADO (10717096386)
-    if (recRows.length) {
-      const { codigo_produto, numero_nfe, lote } = recRows[0];
-      const COD_ORIGEM  = '10408201806'; // Recebimento de Produtos
-      const COD_DESTINO = '10717096386'; // Porta Pallet (Almoxarifado)
-      try {
-        const { rows: prodRows } = await pool.query(
-          `SELECT p.codigo_produto AS id_prod,
-                  COALESCE(
-                    NULLIF(e.cmc, 0),
-                    NULLIF(e.preco_unitario, 0),
-                    NULLIF(p.valor_unitario, 0),
-                    0.01
-                  ) AS valor_unit
-           FROM public.produtos_omie p
-           LEFT JOIN logistica.estoque_atual e
-             ON e.codigo = p.codigo AND e.local_codigo = $2
-           WHERE p.codigo = $1
-           LIMIT 1`,
-          [codigo_produto, COD_ORIGEM]
-        );
-
-        if (prodRows.length) {
-          const idProd  = Number(prodRows[0].id_prod);
-          const valor   = parseFloat(prodRows[0].valor_unit) || 0.01;
-          const qtdNum  = parseFloat(qtd) || 1;
-          const hoje    = new Date();
-          const dataOmie = `${String(hoje.getDate()).padStart(2,'0')}/${String(hoje.getMonth()+1).padStart(2,'0')}/${hoje.getFullYear()}`;
-          const obs     = `Armazenar. NF: ${numero_nfe || '-'} | Lote: ${lote || '-'} | End: ${endereco}`;
-
-          const omiePayload = {
-            call: 'IncluirAjusteEstoque',
-            app_key: OMIE_APP_KEY,
-            app_secret: OMIE_APP_SECRET,
-            param: [{
-              codigo_local_estoque:          COD_ORIGEM,
-              id_prod:                       idProd,
-              data:                          dataOmie,
-              tipo:                          'TRF',
-              quan:                          qtdNum,
-              valor,
-              obs,
-              origem:                        'AJU',
-              motivo:                        'TRF',
-              codigo_local_estoque_destino:  COD_DESTINO
-            }]
-          };
-
-          console.log(`\n┌${_sep}\n│ [ARMAZENAR] Omie TRF ${codigo_produto}: ${COD_ORIGEM} → ${COD_DESTINO} (${qtdNum} un)\n│ NF: ${numero_nfe || '-'} | Lote: ${lote || '-'} | Endereço: ${endereco}\n└${_sep}`);
-          await omieCall('https://app.omie.com.br/api/v1/estoque/ajuste/', omiePayload);
-          console.log(`\n┌${_sep}\n│ [ARMAZENAR] ✓ TRF Omie concluída  id_rec=${id}  cod=${codigo_produto}  qtd=${qtdNum}\n└${_sep}`);
-        } else {
-          console.warn(`\n┌${_sep}\n│ [ARMAZENAR] ⚠ Produto ${codigo_produto} não encontrado em produtos_omie — TRF Omie ignorada\n└${_sep}`);
-        }
-      } catch (omieErr) {
-        console.warn(`\n┌${_sep}\n│ [ARMAZENAR] ⚠ Omie IncluirAjusteEstoque falhou: ${omieErr?.faultstring || omieErr?.message || omieErr}\n└${_sep}`);
-        // Não bloqueia o fluxo se a integração Omie falhar
-      }
-    }
-
-    res.json({ ok: true, id: result.rows[0].id, endereco: result.rows[0].endereco });
-  } catch (err) {
-    console.error('[etiquetas/rec-impresso/endereco]', err);
-    res.status(500).json({ error: err?.message || 'Falha ao registrar endereço' });
-  }
-});
-
-// ── Imprime etiqueta(s) pelo modal direto via ZPL → lpr ─────────────────────
-// POST /api/etiquetas/recebimento/imprimir-modal
-// Body: { ids: [1, 2, ...], printer?: string, usuario?: string }
-// Fluxo por etiqueta:
-//   1. Insere linha em ETQ_rec_impresso (ZPL placeholder) → obtém o id gerado
-//   2. Gera ZPL definitivo com esse id (sem qtd, QR com ID do impresso)
-//   3. Atualiza conteudo_zpl em ETQ_rec_impresso
-//   4. Envia ZPL para lpr
-//   5. Zera qtd em ETQ_recebimento e marca impresso_modal_em
-app.post('/api/etiquetas/recebimento/imprimir-modal', express.json(), async (req, res) => {
-  try {
-    const ids = Array.isArray(req.body?.ids) ? req.body.ids.map(Number).filter(n => n > 0) : [];
-    if (ids.length === 0) return res.status(400).json({ error: 'Nenhum id informado.' });
-
-    const result = await pool.query(
-      `SELECT id, lote, codigo_produto, descricao_produto,
-              qtd, unidade, data_emissao
-         FROM etiqueta."ETQ_recebimento"
-        WHERE id = ANY($1::int[])`,
-      [ids]
-    );
-    if (result.rows.length === 0) return res.status(404).json({ error: 'Nenhuma etiqueta encontrada.' });
-
-    const sanitize = (v, max = 999) => String(v || '').slice(0, max).replace(/[\\^~]/g, ' ');
-    const dirPrint = path.join(__dirname, 'etiquetas', 'Recebimento', 'Printed');
-    fs.mkdirSync(dirPrint, { recursive: true });
-    const printerName = String(req.body?.printer || process.env.PRINTER || 'ZebraZD220').trim();
-    const usuarioImpressao = String(req.body?.usuario || req.session?.user?.login || req.session?.usuario || '').trim();
-    const erros = [];
-
-    for (const row of result.rows) {
-      const codProd    = sanitize(row.codigo_produto, 30);
-      const descProd   = sanitize(row.descricao_produto, 70);
-      const loteTxt    = sanitize(row.lote, 40);
-      const dataExibir = sanitize(row.data_emissao, 10);
-
-      // 1. Insere placeholder para obter o id da impressão
-      const ins = await pool.query(
-        `INSERT INTO etiqueta."ETQ_rec_impresso"
-           (origem_id, qtd, unidade, data_emissao, conteudo_zpl, usuario_criacao)
-         VALUES ($1,$2,$3,$4,'',$5)
-         RETURNING id`,
-        [row.id, row.qtd, row.unidade, row.data_emissao, usuarioImpressao]
-      );
-      const idImpresso = ins.rows[0].id;
-
-      // 2. Gera ZPL definitivo com ID (sem qtd)
-      const zpl = _gerarZplParaImpressao({ codProd, descProd, idImpresso, loteTxt, dataExibir });
-
-      // 3. Atualiza ZPL no registro
-      await pool.query(
-        `UPDATE etiqueta."ETQ_rec_impresso" SET conteudo_zpl = $1 WHERE id = $2`,
-        [zpl, idImpresso]
-      );
-
-      // 4. Envia para a impressora
-      const fname = `receb_${row.id}_imp${idImpresso}_${Date.now()}.zpl`;
-      const fpath = path.join(dirPrint, fname);
-      fs.writeFileSync(fpath, zpl, 'utf8');
-      await new Promise((resolve) => {
-        const args = printerName ? ['-P', printerName, '-o', 'raw', fpath] : ['-o', 'raw', fpath];
-        execFile('lpr', args, (err) => {
-          if (err) {
-            erros.push(_friendlyLprError(err.message));
-            console.error(`[etiquetas/imprimir-modal] lpr falhou id=${row.id}:`, err.message);
-            // Remove o registro criado para que re-tentativa não gere duplicata
-            pool.query('DELETE FROM etiqueta."ETQ_rec_impresso" WHERE id = $1', [idImpresso]).catch(() => {});
-          } else {
-            console.log(`[etiquetas/imprimir-modal] impressão enviada id=${row.id} idImpresso=${idImpresso}`);
-          }
-          resolve();
-        });
-      });
-    }
-
-    // Se TODAS falharam, retorna erro amigável sem HTTP 500
-    if (erros.length === result.rows.length) {
-      return res.status(200).json({ ok: false, error: erros[0] });
-    }
-
-    // 5. Zera qtd e marca como impressa
-    await pool.query(
-      `UPDATE etiqueta."ETQ_recebimento"
-          SET qtd = 0, impressa = true
-        WHERE id = ANY($1::int[])`,
-      [ids]
-    );
-
-    res.json({
-      ok: true,
-      impressas: result.rows.length - erros.length,
-      erros: erros.length > 0 ? erros : undefined,
-    });
-  } catch (err) {
-    console.error('[etiquetas/imprimir-modal]', err);
-    res.status(500).json({ error: err?.message || 'Falha ao imprimir etiqueta' });
-  }
-});
-
-// ── Imprimir etiqueta com divisão em múltiplos ────────────────────────────────
-// POST /api/etiquetas/recebimento/imprimir-multiplo
-// Body: { id: number, multiplo: number }
-// Lógica: floor(qtd/multiplo) etiquetas completas + 1 etiqueta com o resto (se > 0)
-// Cada etiqueta recebe ID único de ETQ_rec_impresso; QR sem qtd.
-// Subtrai toda a quantidade de ETQ_recebimento (zera o saldo).
-app.post('/api/etiquetas/recebimento/imprimir-multiplo', express.json(), async (req, res) => {
-  try {
-    const id       = Number(req.body?.id)      || 0;
-    const multiplo = Number(req.body?.multiplo) || 0;
-
-    if (!id)      return res.status(400).json({ error: 'Informe o id da etiqueta.' });
-    if (!multiplo || multiplo <= 0) return res.status(400).json({ error: 'Informe um múltiplo válido (> 0).' });
-
-    const result = await pool.query(
-      `SELECT id, lote, codigo_produto, descricao_produto,
-              qtd, unidade, data_emissao
-         FROM etiqueta."ETQ_recebimento" WHERE id = $1`,
-      [id]
-    );
-    if (result.rows.length === 0) return res.status(404).json({ error: 'Etiqueta não encontrada.' });
-
-    const etq      = result.rows[0];
-    const qtdTotal = Number(etq.qtd) || 0;
-    const nCheias  = Math.floor(qtdTotal / multiplo);   // etiquetas completas
-    const resto    = qtdTotal % multiplo;               // sobra (< multiplo)
-
-    // Lista de quantidades: n etiquetas de `multiplo` + opcionalmente 1 de `resto`
-    const lotes = [];
-    for (let i = 0; i < nCheias; i++) lotes.push(multiplo);
-    if (resto > 0) lotes.push(resto);
-
-    if (lotes.length === 0) {
-      return res.status(400).json({ error: 'Quantidade insuficiente para gerar etiquetas.' });
-    }
-
-    const sanitize   = (v, max = 999) => String(v || '').slice(0, max).replace(/[\\^~]/g, ' ');
-    const codProd    = sanitize(etq.codigo_produto,  30);
-    const descProd   = sanitize(etq.descricao_produto, 70);
-    const loteTxt    = sanitize(etq.lote, 40);
-    const dataExibir = sanitize(etq.data_emissao, 10);
-
-    const dirPrint    = path.join(__dirname, 'etiquetas', 'Recebimento', 'Printed');
-    fs.mkdirSync(dirPrint, { recursive: true });
-    const printerName = String(req.body?.printer || process.env.PRINTER || 'ZebraZD220').trim();
-    const usuarioImpressao = String(req.body?.usuario || req.session?.user?.login || req.session?.usuario || '').trim();
-    const erros       = [];
-
-    for (let i = 0; i < lotes.length; i++) {
-      const qtdEtq = lotes[i];
-
-      // 1. Insere placeholder → obtém id da impressão
-      const ins = await pool.query(
-        `INSERT INTO etiqueta."ETQ_rec_impresso"
-           (origem_id, qtd, unidade, data_emissao, conteudo_zpl, usuario_criacao)
-         VALUES ($1,$2,$3,$4,'',$5)
-         RETURNING id`,
-        [etq.id, qtdEtq, etq.unidade, etq.data_emissao, usuarioImpressao]
-      );
-      const idImpresso = ins.rows[0].id;
-
-      // 2. Gera ZPL com ID (sem qtd)
-      const zpl = _gerarZplParaImpressao({ codProd, descProd, idImpresso, loteTxt, dataExibir });
-
-      // 3. Atualiza ZPL
-      await pool.query(
-        `UPDATE etiqueta."ETQ_rec_impresso" SET conteudo_zpl = $1 WHERE id = $2`,
-        [zpl, idImpresso]
-      );
-
-      // 4. Envia para a impressora
-      const fname = `receb_multiplo_${id}_imp${idImpresso}_${Date.now()}.zpl`;
-      const fpath = path.join(dirPrint, fname);
-      fs.writeFileSync(fpath, zpl, 'utf8');
-      await new Promise((resolve) => {
-        const args = printerName ? ['-P', printerName, '-o', 'raw', fpath] : ['-o', 'raw', fpath];
-        execFile('lpr', args, (err) => {
-          if (err) {
-            erros.push(_friendlyLprError(err.message));
-            console.error(`[etiquetas/imprimir-multiplo] lpr falhou etiqueta ${i + 1}:`, err.message);
-            // Remove o registro criado para que re-tentativa não gere duplicata
-            pool.query('DELETE FROM etiqueta."ETQ_rec_impresso" WHERE id = $1', [idImpresso]).catch(() => {});
-          } else {
-            console.log(`[etiquetas/imprimir-multiplo] impressão enviada idImpresso=${idImpresso} qtd=${qtdEtq}`);
-          }
-          resolve();
-        });
-      });
-    }
-
-    // Se TODAS falharam, retorna erro amigável sem HTTP 500
-    if (erros.length === lotes.length) {
-      return res.status(200).json({ ok: false, error: erros[0] });
-    }
-
-    // 5. Zera qtd e marca como impressa
-    await pool.query(
-      `UPDATE etiqueta."ETQ_recebimento"
-          SET qtd = 0, impressa = true
-        WHERE id = $1`,
-      [id]
-    );
-
-    res.json({
-      ok: true,
-      impressas: lotes.length - erros.length,
-      etiquetas_cheias: nCheias,
-      etiqueta_resto: resto > 0 ? 1 : 0,
-      multiplo,
-      erros: erros.length > 0 ? erros : undefined,
-    });
-  } catch (err) {
-    console.error('[etiquetas/imprimir-multiplo]', err);
-    res.status(500).json({ error: err?.message || 'Falha ao gerar etiquetas' });
-  }
-});
-
-// Ocupação do armazém 3D — retorna estoque por endereço para colorir o mapa
-app.get('/api/etiquetas/ocupacao', async (req, res) => {
-  try {
-    const { rows } = await pool.query(`
-      SELECT
-        i.endereco,
-        r.codigo_produto,
-        SUM(i.qtd)     AS qtd_total,
-        MAX(i.unidade) AS unidade
-      FROM etiqueta."ETQ_rec_impresso" i
-      JOIN etiqueta."ETQ_recebimento"  r ON r.id = i.origem_id
-      WHERE i.endereco IS NOT NULL AND i.endereco <> ''
-      GROUP BY i.endereco, r.codigo_produto
-      ORDER BY i.endereco, r.codigo_produto
-    `);
-
-    /* Agrupa por endereço: { "01-04-01-001": [{codigo_produto, qtd_total, unidade}, ...] } */
-    const mapa = {};
-    for (const row of rows) {
-      const key = row.endereco;
-      if (!mapa[key]) mapa[key] = [];
-      mapa[key].push({
-        codigo_produto: row.codigo_produto,
-        qtd:            Number(row.qtd_total),
-        unidade:        row.unidade || ''
-      });
-    }
-    res.json({ ok: true, ocupacao: mapa });
-  } catch (err) {
-    console.error('[etiquetas/ocupacao]', err);
-    res.status(500).json({ ok: false, error: err?.message || 'Falha ao buscar ocupação' });
-  }
-});
 
 // Grava um ZPL pronto vindo do front
 app.post('/api/etiquetas/gravar', express.json(), (req, res) => {
@@ -13610,34 +12816,32 @@ app.post('/api/omie/estoque/ajuste', express.json(), async (req, res) => {
 //------------------------------------------------------------------
 app.post('/api/armazem/almoxarifado', express.json(), async (req, res) => {
   try {
-    await ensureEstoqueAtualTable();
-
     const rawLocal = req.query.local ?? req.body?.local;
     const local = String(rawLocal ?? '').trim() || ALMOX_LOCAL_PADRAO;
 
-    // Usa a mesma fonte atualizada da Lista de produtos: posição consolidada por produto/local.
+    // Usa apenas a tabela principal de posições do Omie, filtrando pelo local informado.
     const { rows } = await pool.query(`
-      SELECT
-        e.codigo,
-        COALESCE(e.descricao, po.descricao) AS descricao,
-        e.estoque_minimo,
-        e.fisico,
-        e.reservado,
-        e.saldo,
-        e.cmc,
-        e.omie_prod_id,
-        e.cod_int,
-        e.updated_at AS data_posicao,
-        e.updated_at AS ingested_at,
+      SELECT DISTINCT ON (COALESCE(p.omie_prod_id::text, p.codigo))
+        p.codigo,
+        p.descricao,
+        p.estoque_minimo,
+        p.fisico,
+        p.reservado,
+        p.saldo,
+        p.cmc,
+        p.omie_prod_id,
+        p.cod_int,
+        p.data_posicao,
+        p.ingested_at,
         po.codigo_familia,
         po.descricao_familia,
         po.preco_definido
-      FROM logistica.estoque_atual e
+      FROM public.omie_estoque_posicao p
       LEFT JOIN public.produtos_omie po
-        ON po.codigo = e.codigo
-      WHERE e.local_codigo = $1
-        AND COALESCE(e.saldo, 0) != 0
-      ORDER BY e.codigo
+        ON po.codigo_produto = p.omie_prod_id
+      WHERE p.local_codigo = $1
+        AND COALESCE(p.saldo, 0) != 0
+      ORDER BY COALESCE(p.omie_prod_id::text, p.codigo), p.data_posicao DESC, p.ingested_at DESC, p.id DESC
     `, [local]);
 
     const dados = rows.map(r => ({
@@ -13661,111 +12865,6 @@ app.post('/api/armazem/almoxarifado', express.json(), async (req, res) => {
   } catch (err) {
     console.error('[almoxarifado SQL]', err);
     res.status(500).json({ ok:false, error:String(err.message || err) });
-  }
-});
-
-// ── GET /api/estoque/posicao-por-data ──────────────────────────────────────
-// Retorna posição de estoque para uma data específica
-// Query params: data (YYYY-MM-DD), pagina (opcional), limite (opcional)
-app.get('/api/estoque/posicao-por-data', async (req, res) => {
-  try {
-    const { data, pagina = 1, limite = 200 } = req.query;
-    if (!data || !/^\d{4}-\d{2}-\d{2}$/.test(data)) {
-      return res.status(400).json({ ok: false, error: 'Parâmetro data inválido (use YYYY-MM-DD).' });
-    }
-    const pg = Math.max(1, parseInt(pagina) || 1);
-    const lim = Math.min(500, Math.max(1, parseInt(limite) || 200));
-    const offset = (pg - 1) * lim;
-
-    const { rows: countRows } = await pool.query(`
-      SELECT COUNT(*) AS total
-      FROM public.omie_estoque_posicao
-      WHERE data_posicao = $1
-    `, [data]);
-    const total = parseInt(countRows[0].total) || 0;
-
-    const { rows } = await pool.query(`
-      SELECT
-        p.codigo,
-        p.descricao,
-        p.local_codigo,
-        p.fisico,
-        p.saldo,
-        p.cmc,
-        p.estoque_minimo
-      FROM public.omie_estoque_posicao p
-      WHERE p.data_posicao = $1
-      ORDER BY p.descricao NULLS LAST, p.codigo
-      LIMIT $2 OFFSET $3
-    `, [data, lim, offset]);
-
-    const dados = rows.map(r => ({
-      codigo       : r.codigo        || '',
-      descricao    : r.descricao     || '',
-      local_codigo : r.local_codigo  || '',
-      fisico       : Number(r.fisico)        || 0,
-      saldo        : Number(r.saldo)         || 0,
-      cmc          : Number(r.cmc)           || 0,
-      min          : Number(r.estoque_minimo) || 0,
-    }));
-
-    res.json({ ok: true, data, pagina: pg, totalRegistros: total, totalPaginas: Math.ceil(total / lim), dados });
-  } catch (err) {
-    console.error('[posicao-por-data SQL]', err);
-    res.status(500).json({ ok: false, error: String(err.message || err) });
-  }
-});
-
-// ── GET /api/estoque/datas-disponiveis ──────────────────────────────────────
-// Retorna datas distintas que existem na tabela omie_estoque_posicao
-app.get('/api/estoque/datas-disponiveis', async (req, res) => {
-  try {
-    const { rows } = await pool.query(`
-      SELECT DISTINCT data_posicao
-      FROM public.omie_estoque_posicao
-      ORDER BY data_posicao DESC
-      LIMIT 365
-    `);
-    const datas = rows.map(r => r.data_posicao instanceof Date
-      ? r.data_posicao.toISOString().slice(0, 10)
-      : String(r.data_posicao).slice(0, 10));
-    res.json({ ok: true, datas });
-  } catch (err) {
-    console.error('[datas-disponiveis SQL]', err);
-    res.status(500).json({ ok: false, error: String(err.message || err) });
-  }
-});
-
-
-// ── GET /api/estoque/oscilacao-diaria ──────────────────────────────────────
-app.get('/api/estoque/oscilacao-diaria', async (req, res) => {
-  try {
-    const { periodo } = req.query; // '30', '60', '90', 'tudo'
-    let whereData = '';
-    if (periodo && periodo !== 'tudo') {
-      const dias = parseInt(periodo, 10);
-      if (!isNaN(dias) && dias > 0) {
-        whereData = `AND p.data_posicao >= CURRENT_DATE - INTERVAL '${dias} days'`;
-      }
-    }
-    const { rows } = await pool.query(`
-      SELECT
-        p.data_posicao::text                        AS data,
-        l.nome                                      AS armazem,
-        SUM(p.fisico)::float                        AS total_fisico,
-        SUM(p.fisico * COALESCE(p.cmc, 0))::float  AS total_valor
-      FROM public.omie_estoque_posicao p
-      JOIN public.omie_locais_estoque l
-        ON l.local_codigo = p.local_codigo::text
-      WHERE l.ativo = TRUE
-        ${whereData}
-      GROUP BY p.data_posicao, l.nome
-      ORDER BY p.data_posicao, l.nome
-    `);
-    res.json({ ok: true, rows });
-  } catch (err) {
-    console.error('[oscilacao-diaria SQL]', err);
-    res.status(500).json({ ok: false, error: String(err.message || err) });
   }
 });
 
@@ -14398,126 +13497,6 @@ function inferNotaEntradaStatusFromTopic(topic = '') {
   return 'Desconhecida';
 }
 
-function normalizarTextoWebhookRecebimento(valor = '') {
-  return String(valor || '')
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .toLowerCase()
-    .trim();
-}
-
-function topicRecebimentoConcluido(topic = '') {
-  return normalizarTextoWebhookRecebimento(topic).includes('concluid');
-}
-
-function topicRecebimentoRevertido(topic = '') {
-  return normalizarTextoWebhookRecebimento(topic).includes('revertid');
-}
-
-function extrairNumeroPedidoCompraRecebimento(texto = '') {
-  const normalizado = String(texto || '').trim();
-  if (!normalizado) return null;
-
-  const padroes = [
-    /pedido\s*de\s*compra\s*(?:numero|n[uú]mero|n[ºo.]?)?\s*[-:#]?\s*(\d+)/i,
-    /pedido\s*(?:numero|n[uú]mero|n[ºo.]?)?\s*[-:#]?\s*(\d+)/i,
-    /\bpc\s*[-:#]?\s*(\d+)\b/i
-  ];
-
-  for (const padrao of padroes) {
-    const match = normalizado.match(padrao);
-    if (match?.[1]) return match[1].replace(/^0+/, '') || '0';
-  }
-
-  return null;
-}
-
-async function ensurePedidoRecebidoWebhookColumns(db = pool) {
-  await db.query(`
-    ALTER TABLE compras.pedidos_omie
-      ADD COLUMN IF NOT EXISTS "Pedido recebido" BOOLEAN DEFAULT FALSE,
-      ADD COLUMN IF NOT EXISTS "Pedido recebido em" TIMESTAMP NULL,
-      ADD COLUMN IF NOT EXISTS "Pedido recebido webhook" TEXT NULL
-  `);
-}
-
-async function atualizarPedidoRecebidoPorWebhookRecebimento(db, {
-  topic = '',
-  nIdReceb = null,
-  numeroPedido = null,
-  cDadosAdicionais = null,
-  messageId = null
-} = {}) {
-  const concluido = topicRecebimentoConcluido(topic);
-  const revertido = topicRecebimentoRevertido(topic);
-  if (!concluido && !revertido) return { ok: true, updated: 0, skipped: 'topic_sem_alteracao_pedido' };
-
-  await ensurePedidoRecebidoWebhookColumns(db);
-
-  const pedidos = new Set();
-  const numeroExtraido = numeroPedido || extrairNumeroPedidoCompraRecebimento(cDadosAdicionais);
-  if (numeroExtraido) pedidos.add(String(numeroExtraido));
-
-  if (nIdReceb) {
-    const { rows } = await db.query(`
-      SELECT DISTINCT n_id_pedido::text AS n_id_pedido
-        FROM logistica.recebimentos_nfe_itens
-       WHERE n_id_receb = $1
-         AND n_id_pedido IS NOT NULL
-    `, [nIdReceb]);
-    rows.forEach((row) => {
-      if (row.n_id_pedido) pedidos.add(String(row.n_id_pedido));
-    });
-  }
-
-  if (pedidos.size === 0) return { ok: true, updated: 0, skipped: 'pedido_nao_identificado' };
-
-  const valores = Array.from(pedidos);
-  const pedidosNormalizados = valores.map((valor) => String(valor).replace(/^0+/, '') || '0');
-  const { rowCount } = concluido
-    ? await db.query(`
-        UPDATE compras.pedidos_omie
-           SET "Pedido recebido" = TRUE,
-               "Pedido recebido em" = NOW(),
-               "Pedido recebido webhook" = $1,
-               updated_at = NOW()
-         WHERE n_cod_ped::text = ANY($2::text[])
-            OR regexp_replace(COALESCE(c_numero, ''), '^0+', '') = ANY($2::text[])
-      `, [messageId || topic || null, pedidosNormalizados])
-    : await db.query(`
-        WITH alvo AS (
-          SELECT n_cod_ped
-            FROM compras.pedidos_omie
-           WHERE n_cod_ped::text = ANY($2::text[])
-              OR regexp_replace(COALESCE(c_numero, ''), '^0+', '') = ANY($2::text[])
-        ),
-        status_recebido AS (
-          SELECT a.n_cod_ped,
-                 EXISTS (
-                   SELECT 1
-                     FROM logistica.recebimentos_nfe_itens i
-                     JOIN logistica.recebimentos_nfe_omie r ON r.n_id_receb = i.n_id_receb
-                    WHERE i.n_id_pedido = a.n_cod_ped
-                      AND COALESCE(r.c_cancelada, 'N') <> 'S'
-                      AND (
-                        COALESCE(r.c_recebido, 'N') = 'S'
-                        OR COALESCE(BTRIM(r.c_etapa), '') IN ('60', '80', '100')
-                      )
-                 ) AS ainda_recebido
-            FROM alvo a
-        )
-        UPDATE compras.pedidos_omie p
-           SET "Pedido recebido" = sr.ainda_recebido,
-               "Pedido recebido em" = CASE WHEN sr.ainda_recebido THEN COALESCE(p."Pedido recebido em", NOW()) ELSE NULL END,
-               "Pedido recebido webhook" = $1,
-               updated_at = NOW()
-          FROM status_recebido sr
-         WHERE p.n_cod_ped = sr.n_cod_ped
-      `, [messageId || topic || null, pedidosNormalizados]);
-
-  return { ok: true, updated: rowCount, recebido: concluido, revertido, pedidos: valores };
-}
-
 function inferNotaEntradaStatusFromSnapshot(cabec = {}, infoCadastro = {}) {
   const cancelada = String(
     infoCadastro.cCancelada
@@ -14910,7 +13889,6 @@ async function upsertRecebimentoFromWebhookPayload(rawBody = {}) {
     || cab.c_dados_adicionais
     || cab.cObsNFe
     || null;
-  const numeroPedidoWebhook = extrairNumeroPedidoCompraRecebimento(cDadosAdicionais);
 
   const fornecedorResolvido = await resolverFornecedorRecebimentoFallback({
     cChaveNfe,
@@ -15017,14 +13995,6 @@ async function upsertRecebimentoFromWebhookPayload(rawBody = {}) {
 
   const client = await pool.connect();
   try {
-    await atualizarPedidoRecebidoPorWebhookRecebimento(client, {
-      topic,
-      nIdReceb: nIdRecebValido ? nIdReceb : null,
-      numeroPedido: numeroPedidoWebhook,
-      cDadosAdicionais,
-      messageId
-    });
-
     await upsertNotaEntradaEstado(client, {
       nIdReceb: nIdRecebValido ? nIdReceb : null,
       cChaveNfe,
@@ -15639,7 +14609,7 @@ async function initSolicitacaoProdutoSchema() {
 
     }
 
-    await pool.query(`ALTER TABLE solicitacao_produto.itens_solicitados ADD COLUMN IF NOT EXISTS nome_local TEXT`);
+    await pool.query(`ALTER TABLE solicitacao_produto.itens_solicitados ADD COLUMN IF NOT EXISTS motivo TEXT`);
 
     await pool.query(`
       CREATE TABLE IF NOT EXISTS solicitacao_produto.movimentacoes_kanban_itens (
@@ -15967,16 +14937,6 @@ app.post('/api/logistica/itens_solicitados/separar-parcial', async (req, res) =>
 
     // Se não há restante, apenas marca tudo como Separado sem novo SEP
     if (qtyRemainder <= 0.0001) {
-      // Se veio embalagem fechada com quantidade maior que a solicitada,
-      // grava a quantidade real separada no carrinho para o Kanban refletir o total correto.
-      if (qtySep > qtyTotal + 0.0001) {
-        const extra = qtySep - qtyTotal;
-        const destino = carrs[carrs.length - 1];
-        await client.query(
-          `UPDATE logistica.carrinho SET quantidade = quantidade + $1 WHERE id = $2`,
-          [extra, destino.id]
-        );
-      }
       if (sIds.length > 0) {
         await client.query(
           `UPDATE solicitacao_produto.itens_solicitados SET status = 'Separado' WHERE id = ANY($1::bigint[])`, [sIds]
@@ -16150,19 +15110,13 @@ app.get('/api/logistica/kanban/itens', async (req, res) => {
     if (n_solic) {
       // Itens de uma SEP específica
       const { rows } = await pool.query(`
-        SELECT c.id AS carr_id, i.id AS solic_id, i.status, i.observacao, i.nome_local, i.cod_local,
+        SELECT c.id AS carr_id, i.id AS solic_id, i.status, i.observacao, i.motivo,
                c.codigo_produto, c.descricao, c.unidade,
                c.quantidade::numeric AS quantidade,
                c.data_prevista::text, c.horario, c.criado_em::text,
                c.cod_omie,
                COALESCE(c.retirada_por, c.nome_user) AS nome_user,
-               rt.codigo_produto_ant, rt.descricao_ant, rt.codigo_produto_novo, rt.descricao_novo,
-               (
-                 SELECT json_agg(json_build_object('rua', ep.rua, 'andar', ep.andar, 'edificio', ep.edificio, 'apartamento', ep.apartamento) ORDER BY ep.completo)
-                   FROM logistica."Endereço_pp" ep
-                  WHERE c.cod_omie IS NOT NULL
-                    AND ep.codigo_produto::text = c.cod_omie
-               ) AS enderecos_pp
+               rt.codigo_produto_ant, rt.descricao_ant, rt.codigo_produto_novo, rt.descricao_novo
           FROM solicitacao_produto.itens_solicitados i
           JOIN logistica.carrinho c ON c.id = i.id_carr
           LEFT JOIN solicitacao_produto.Registro_troca rt ON rt.id_item_original = i.id
@@ -16175,7 +15129,7 @@ app.get('/api/logistica/kanban/itens', async (req, res) => {
       if (includeDerivados === '1' || includeDerivados === 'true' || includeDerivados === 'yes') {
         const baseNSolic = String(n_solic).replace(/\.\d+$/, '');
         const { rows: derivRows } = await pool.query(`
-             SELECT c.id AS carr_id, i.id AS solic_id, i.n_solic, i.status, i.observacao, i.nome_local, i.cod_local,
+             SELECT c.id AS carr_id, i.id AS solic_id, i.n_solic, i.status, i.observacao, i.motivo,
                  c.codigo_produto, c.descricao, c.unidade,
                  c.quantidade::numeric AS quantidade,
                  c.data_prevista::text, c.horario, c.criado_em::text,
@@ -16333,108 +15287,14 @@ app.patch('/api/logistica/itens_solicitados/aguardando-retirada', async (req, re
     await ensureSchemaMigrated();
     const id_user = req.session?.user?.id;
     if (!id_user) return res.status(401).json({ ok: false, error: 'Não autenticado.' });
-    const { solic_ids, cod_local, nome_local, quantidade } = req.body;
+    const { solic_ids } = req.body;
     if (!Array.isArray(solic_ids) || !solic_ids.length)
       return res.status(400).json({ ok: false, error: 'solic_ids inválido.' });
     const ids = solic_ids.map(id => parseInt(id, 10)).filter(id => !isNaN(id));
-
-    // Log do evento "Conferido" no terminal
-    const _sep = '─'.repeat(60);
-    console.log(`\n┌${_sep}`);
-    console.log(`│ [CONFERIDO] Botão "Conferido" clicado`);
-    console.log(`│ usuário   : ${req.session?.user?.username || req.session?.user?.nome || id_user}`);
-    console.log(`│ solic_ids : ${JSON.stringify(ids)}`);
-    console.log(`│ cod_local (origem): ${cod_local || '—'}  nome_local: ${nome_local || '—'}`);
-    console.log(`│ quantidade: ${quantidade || '(não informada)'}`);
-    console.log(`└${_sep}`);
-
-    // Transferência Omie: origem = armazém selecionado no modal (cod_local do body),
-    // destino = cod_local atual no DB (definido na criação da SEP)
-    if (cod_local) {
-      try {
-        const { rows: itemRows } = await pool.query(
-          `SELECT i.id, i.n_solic, i.cod_local AS cod_destino,
-                  c.codigo_produto, c.nome_user, c.quantidade AS qtd_solic
-           FROM solicitacao_produto.itens_solicitados i
-           JOIN logistica.carrinho c ON c.id = i.id_carr
-           WHERE i.id = ANY($1::bigint[])`,
-          [ids]
-        );
-        const nomeLogado = req.session?.user?.nome || req.session?.user?.username || req.session?.user?.login || '';
-        const hoje = new Date();
-        const dataOmie = `${String(hoje.getDate()).padStart(2,'0')}/${String(hoje.getMonth()+1).padStart(2,'0')}/${hoje.getFullYear()}`;
-        for (const item of itemRows) {
-          const codDestino = item.cod_destino;
-          if (!codDestino || String(codDestino) === String(cod_local)) {
-            console.log(`\n┌${_sep}\n│ [CONFERIDO] Item ${item.n_solic} sem destino ou origem=destino, pulando TRF Omie\n└${_sep}`);
-            continue;
-          }
-          const { rows: prodRows } = await pool.query(
-            `SELECT p.codigo_produto,
-                    COALESCE(
-                      NULLIF(e.cmc, 0),
-                      NULLIF(e.preco_unitario, 0),
-                      NULLIF(p.valor_unitario, 0),
-                      0.01
-                    ) AS valor_unit
-             FROM public.produtos_omie p
-             LEFT JOIN logistica.estoque_atual e
-               ON e.codigo = p.codigo AND e.local_codigo = $2
-             WHERE p.codigo = $1
-             LIMIT 1`,
-            [item.codigo_produto, String(cod_local)]
-          );
-          if (!prodRows.length) {
-            console.warn(`[CONFERIDO] Produto ${item.codigo_produto} não encontrado em produtos_omie, pulando TRF`);
-            continue;
-          }
-          const idProd = Number(prodRows[0].codigo_produto);
-          const valor = parseFloat(prodRows[0].valor_unit) || 0.01;
-          const qtd = parseFloat(quantidade) || parseFloat(item.qtd_solic) || 1;
-          const obs = `Sep. ${item.n_solic} | Solic.: ${item.nome_user} | Conf.: ${nomeLogado}`;
-          const omiePayload = {
-            call: 'IncluirAjusteEstoque',
-            app_key: OMIE_APP_KEY,
-            app_secret: OMIE_APP_SECRET,
-            param: [{
-              codigo_local_estoque: String(cod_local),
-              id_prod: idProd,
-              data: dataOmie,
-              tipo: 'TRF',
-              quan: qtd,
-              valor,
-              obs,
-              origem: 'AJU',
-              motivo: 'TRF',
-              codigo_local_estoque_destino: String(codDestino)
-            }]
-          };
-          console.log(`\n┌${_sep}\n│ [CONFERIDO] Omie TRF ${item.codigo_produto}: ${cod_local} → ${codDestino} (${qtd} un)\n└${_sep}`);
-          await omieCall('https://app.omie.com.br/api/v1/estoque/ajuste/', omiePayload);
-        }
-      } catch (omieErr) {
-        console.warn(`\n┌${_sep}\n│ [CONFERIDO] ⚠ Omie IncluirAjusteEstoque falhou: ${omieErr?.faultstring || omieErr?.message || omieErr}\n└${_sep}`);
-        // Não bloqueia o fluxo se a integração Omie falhar
-      }
-    }
-
     await registrarMovimentacaoKanbanItens(pool, ids, 'Aguardando retirada', req);
-    if (cod_local || nome_local) {
-      await pool.query(
-        `UPDATE solicitacao_produto.itens_solicitados
-         SET status = 'Aguardando retirada',
-             cod_local  = COALESCE($2, cod_local),
-             nome_local = COALESCE($3, nome_local)
-         WHERE id = ANY($1::bigint[])`,
-        [ids, cod_local ? String(cod_local) : null, nome_local ? String(nome_local) : null]
-      );
-    } else {
-      await pool.query(
-        `UPDATE solicitacao_produto.itens_solicitados SET status = 'Aguardando retirada' WHERE id = ANY($1::bigint[])`, [ids]
-      );
-    }
-
-    console.log(`\n┌${_sep}\n│ [CONFERIDO] ✓ Status atualizado para "Aguardando retirada"  ids=${JSON.stringify(ids)}\n└${_sep}`);
+    await pool.query(
+      `UPDATE solicitacao_produto.itens_solicitados SET status = 'Aguardando retirada' WHERE id = ANY($1::bigint[])`, [ids]
+    );
     res.json({ ok: true });
   } catch (err) {
     console.error('[logistica/aguardando-retirada] erro:', err);
@@ -16737,11 +15597,11 @@ app.post('/api/logistica/separacao/enviar', express.json(), async (req, res) => 
     const id_user   = req.session?.user?.id;
     const nome_user = req.session?.user?.username || req.session?.user?.nome || 'desconhecido';
     if (!id_user) return res.status(401).json({ ok: false, error: 'Não autenticado.' });
-    const { solicitado_para, motivo, local_estoque, local_estoque_nome, data_prevista, horario, observacao } = req.body || {};
+    const { solicitado_para, motivo, data_prevista, horario, observacao } = req.body || {};
 
-    const motivoSolicitacao = String(motivo || '').trim() || null;
-    const localEstoqueVal   = String(local_estoque || '').trim() || null;
-    const nomeLocalVal      = String(local_estoque_nome || '').trim() || null;
+    const motivoRaw = String(motivo || '').trim();
+    const motivosPermitidos = new Set(['Produção', 'Engenharia', 'venda', 'Assistencia tecnica']);
+    const motivoSolicitacao = motivosPermitidos.has(motivoRaw) ? motivoRaw : 'Produção';
 
     await client.query('BEGIN');
 
@@ -16753,22 +15613,7 @@ app.post('/api/logistica/separacao/enviar', express.json(), async (req, res) => 
       `ALTER TABLE solicitacao_produto.itens_solicitados ADD COLUMN IF NOT EXISTS observacao TEXT`
     );
     await client.query(
-      `ALTER TABLE solicitacao_produto.itens_solicitados ADD COLUMN IF NOT EXISTS nome_local TEXT`
-    );
-    await client.query(`
-      DO $$ BEGIN
-        IF EXISTS (SELECT 1 FROM information_schema.columns
-                   WHERE table_schema='solicitacao_produto' AND table_name='itens_solicitados' AND column_name='motivo')
-        THEN ALTER TABLE solicitacao_produto.itens_solicitados RENAME COLUMN motivo TO nome_local;
-        END IF;
-        IF EXISTS (SELECT 1 FROM information_schema.columns
-                   WHERE table_schema='solicitacao_produto' AND table_name='itens_solicitados' AND column_name='local_estoque')
-        THEN ALTER TABLE solicitacao_produto.itens_solicitados RENAME COLUMN local_estoque TO cod_local;
-        END IF;
-      END $$
-    `);
-    await client.query(
-      `ALTER TABLE solicitacao_produto.itens_solicitados ADD COLUMN IF NOT EXISTS cod_local TEXT`
+      `ALTER TABLE solicitacao_produto.itens_solicitados ADD COLUMN IF NOT EXISTS motivo TEXT`
     );
     await client.query(
       `ALTER TABLE logistica.carrinho ADD COLUMN IF NOT EXISTS comentario TEXT`
@@ -16869,9 +15714,9 @@ app.post('/api/logistica/separacao/enviar', express.json(), async (req, res) => 
          data_prevista || null, horario || null, item.comentario || null]
       );
       await client.query(
-        `INSERT INTO solicitacao_produto.itens_solicitados (id_carr, n_solic, status, observacao, nome_local, cod_local)
-         VALUES ($1, $2, 'pendente', $3, $4, $5)`,
-        [item.id, nSolic, observacao || null, nomeLocalVal, localEstoqueVal]
+        `INSERT INTO solicitacao_produto.itens_solicitados (id_carr, n_solic, status, observacao, motivo)
+         VALUES ($1, $2, 'pendente', $3, $4)`,
+        [item.id, nSolic, observacao || null, motivoSolicitacao]
       );
     }
 
@@ -16911,7 +15756,7 @@ app.get('/api/logistica/estoque/batch', async (req, res) => {
     // Passo 1: coleta todos os dados
     for (const row of rows) {
       if (!dados[row.codigo]) dados[row.codigo] = [];
-      dados[row.codigo].push({ local_nome: row.local_nome || row.local_codigo, local_codigo: String(row.local_codigo || ''), saldo: row.saldo, unidade: row.unidade || '' });
+      dados[row.codigo].push({ local_nome: row.local_nome || row.local_codigo, saldo: row.saldo, unidade: row.unidade || '' });
 
       if (!minimos[row.codigo]) minimos[row.codigo] = { min: 0, saldoAlmox: null, abaixo: false };
       const min = parseFloat(row.estoque_minimo) || 0;
@@ -17373,183 +16218,6 @@ app.post(
   app.use('/api/auth',     authRouter);
   app.use('/api/etiquetas', etiquetasRouter);   // ⬅️  NOVO
   app.use('/api/users', require('./routes/users'));
-
-  // ——————————————————————————————
-  // 3.2.1) Atalhos rápidos do usuário (zona drag-and-drop)
-  // ——————————————————————————————
-  {
-    function requireSession(req, res, next) {
-      if (req.session && req.session.user && req.session.user.id) return next();
-      return res.status(401).json({ ok: false, error: 'Não autenticado' });
-    }
-
-    // GET /api/user/atalhos — lista atalhos do usuário logado
-    app.get('/api/user/atalhos', requireSession, async (req, res) => {
-      try {
-        const userId = req.session.user.id;
-        const { rows } = await pool.query(
-          `SELECT id, nav_key, nav_label, nav_selector, icon_class, sort_order
-           FROM "User".preferencia_atalho
-           WHERE user_id = $1
-           ORDER BY sort_order, created_at`,
-          [userId]
-        );
-        res.json({ ok: true, atalhos: rows });
-      } catch (e) {
-        console.error('[atalhos] GET erro:', e.message);
-        res.status(500).json({ ok: false, error: e.message });
-      }
-    });
-
-    // POST /api/user/atalhos — cria ou atualiza atalho
-    app.post('/api/user/atalhos', requireSession, async (req, res) => {
-      try {
-        const userId = req.session.user.id;
-        const { nav_key, nav_label, nav_selector, icon_class, sort_order } = req.body;
-        if (!nav_key || !nav_label) {
-          return res.status(400).json({ ok: false, error: 'nav_key e nav_label são obrigatórios' });
-        }
-        const { rows } = await pool.query(
-          `INSERT INTO "User".preferencia_atalho (user_id, nav_key, nav_label, nav_selector, icon_class, sort_order)
-           VALUES ($1, $2, $3, $4, $5, $6)
-           ON CONFLICT (user_id, nav_key) DO UPDATE SET
-             nav_label    = EXCLUDED.nav_label,
-             nav_selector = EXCLUDED.nav_selector,
-             icon_class   = EXCLUDED.icon_class,
-             sort_order   = EXCLUDED.sort_order
-           RETURNING id, nav_key, nav_label, nav_selector, icon_class, sort_order`,
-          [userId, nav_key, nav_label, nav_selector || null, icon_class || null, sort_order || 0]
-        );
-        res.json({ ok: true, atalho: rows[0] });
-      } catch (e) {
-        console.error('[atalhos] POST erro:', e.message);
-        res.status(500).json({ ok: false, error: e.message });
-      }
-    });
-
-    // DELETE /api/user/atalhos/:id — remove atalho
-    app.delete('/api/user/atalhos/:id', requireSession, async (req, res) => {
-      try {
-        const userId = req.session.user.id;
-        const id = parseInt(req.params.id, 10);
-        if (!id || isNaN(id)) return res.status(400).json({ ok: false, error: 'id inválido' });
-        const { rowCount } = await pool.query(
-          `DELETE FROM "User".preferencia_atalho WHERE id = $1 AND user_id = $2`,
-          [id, userId]
-        );
-        res.json({ ok: true, removed: rowCount > 0 });
-      } catch (e) {
-        console.error('[atalhos] DELETE erro:', e.message);
-        res.status(500).json({ ok: false, error: e.message });
-      }
-    });
-  }
-
-  // ——————————————————————————————
-  // 3.2.2) Atalhos de URL do usuário no painel SAC (sac.sac_atalhos)
-  // ——————————————————————————————
-  {
-    function requireSessionSacAtalhos(req, res, next) {
-      if (req.session && req.session.user && req.session.user.id) return next();
-      return res.status(401).json({ ok: false, error: 'Não autenticado' });
-    }
-
-    // GET /api/sac/atalhos — lista atalhos de URL do usuário logado
-    app.get('/api/sac/atalhos', requireSessionSacAtalhos, async (req, res) => {
-      try {
-        const userId = req.session.user.id;
-        const { rows } = await pool.query(
-          `SELECT id, label, url, icon_class, icon_color, sort_order
-           FROM sac.sac_atalhos
-           WHERE user_id = $1
-           ORDER BY sort_order, created_at`,
-          [userId]
-        );
-        res.json({ ok: true, atalhos: rows });
-      } catch (e) {
-        console.error('[sac/atalhos] GET erro:', e.message);
-        res.status(500).json({ ok: false, error: e.message });
-      }
-    });
-
-    // POST /api/sac/atalhos — cria atalho
-    app.post('/api/sac/atalhos', requireSessionSacAtalhos, async (req, res) => {
-      try {
-        const userId = req.session.user.id;
-        const { label, url, icon_class, icon_color } = req.body;
-        if (!label || !url) {
-          return res.status(400).json({ ok: false, error: 'label e url são obrigatórios' });
-        }
-        // Validação básica de URL
-        let parsedUrl;
-        try { parsedUrl = new URL(url); } catch (_) {
-          return res.status(400).json({ ok: false, error: 'URL inválida' });
-        }
-        if (!['http:', 'https:'].includes(parsedUrl.protocol)) {
-          return res.status(400).json({ ok: false, error: 'Apenas URLs http/https são permitidas' });
-        }
-        const { rows } = await pool.query(
-          `INSERT INTO sac.sac_atalhos (user_id, label, url, icon_class, icon_color)
-           VALUES ($1, $2, $3, $4, $5)
-           RETURNING id, label, url, icon_class, icon_color, sort_order`,
-          [userId, label.trim(), url.trim(), icon_class || 'fa-solid fa-link', icon_color || '#38bdf8']
-        );
-        res.json({ ok: true, atalho: rows[0] });
-      } catch (e) {
-        console.error('[sac/atalhos] POST erro:', e.message);
-        res.status(500).json({ ok: false, error: e.message });
-      }
-    });
-
-    // PUT /api/sac/atalhos/:id — atualiza atalho
-    app.put('/api/sac/atalhos/:id', requireSessionSacAtalhos, async (req, res) => {
-      try {
-        const userId = req.session.user.id;
-        const id = parseInt(req.params.id, 10);
-        if (!id || isNaN(id)) return res.status(400).json({ ok: false, error: 'id inválido' });
-        const { label, url, icon_class, icon_color } = req.body;
-        if (!label || !url) {
-          return res.status(400).json({ ok: false, error: 'label e url são obrigatórios' });
-        }
-        let parsedUrl;
-        try { parsedUrl = new URL(url); } catch (_) {
-          return res.status(400).json({ ok: false, error: 'URL inválida' });
-        }
-        if (!['http:', 'https:'].includes(parsedUrl.protocol)) {
-          return res.status(400).json({ ok: false, error: 'Apenas URLs http/https são permitidas' });
-        }
-        const { rows } = await pool.query(
-          `UPDATE sac.sac_atalhos
-           SET label = $1, url = $2, icon_class = $3, icon_color = $4
-           WHERE id = $5 AND user_id = $6
-           RETURNING id, label, url, icon_class, icon_color, sort_order`,
-          [label.trim(), url.trim(), icon_class || 'fa-solid fa-link', icon_color || '#38bdf8', id, userId]
-        );
-        if (!rows.length) return res.status(404).json({ ok: false, error: 'Atalho não encontrado' });
-        res.json({ ok: true, atalho: rows[0] });
-      } catch (e) {
-        console.error('[sac/atalhos] PUT erro:', e.message);
-        res.status(500).json({ ok: false, error: e.message });
-      }
-    });
-
-    // DELETE /api/sac/atalhos/:id — remove atalho
-    app.delete('/api/sac/atalhos/:id', requireSessionSacAtalhos, async (req, res) => {
-      try {
-        const userId = req.session.user.id;
-        const id = parseInt(req.params.id, 10);
-        if (!id || isNaN(id)) return res.status(400).json({ ok: false, error: 'id inválido' });
-        const { rowCount } = await pool.query(
-          `DELETE FROM sac.sac_atalhos WHERE id = $1 AND user_id = $2`,
-          [id, userId]
-        );
-        res.json({ ok: true, removed: rowCount > 0 });
-      } catch (e) {
-        console.error('[sac/atalhos] DELETE erro:', e.message);
-        res.status(500).json({ ok: false, error: e.message });
-      }
-    });
-  }
 
   // ——————————————————————————————
   // 3.3) Chat simples (arquivo JSON)
@@ -20809,25 +19477,6 @@ async function ensureComprasSchema() {
       )
     `);
 
-    // Garante a categoria operacional usada no fluxo curto de compras.
-    await pool.query(`
-      INSERT INTO configuracoes.categoria_compra (
-        codigo,
-        descricao,
-        conta_despesa,
-        conta_inativa,
-        categoria_superior,
-        updated_at
-      )
-      VALUES ('2.01.93', 'Embalagem Dos Produtos', 'S', 'N', '2.01', NOW())
-      ON CONFLICT (codigo) DO UPDATE SET
-        descricao = EXCLUDED.descricao,
-        conta_despesa = EXCLUDED.conta_despesa,
-        conta_inativa = EXCLUDED.conta_inativa,
-        categoria_superior = EXCLUDED.categoria_superior,
-        updated_at = NOW()
-    `);
-
     // Insere departamentos padrão se não existirem
     await pool.query(`
       INSERT INTO configuracoes.departamento (nome) 
@@ -20853,7 +19502,6 @@ async function ensureComprasSchema() {
       INSERT INTO configuracoes.centro_custo (nome)
       VALUES
         ('Materia prima'),
-        ('Embalagem dos produtos'),
         ('Investimento na produção'),
         ('Maquinas e equipamentos'),
         ('Manutenção'),
@@ -20863,54 +19511,6 @@ async function ensureComprasSchema() {
         ('Ferramentas'),
         ('Outros')
       ON CONFLICT (nome) DO NOTHING
-    `);
-
-    // Garante a categoria operacional no vínculo configurável de Produção usado pelo carrinho.
-    await pool.query(`
-      DO $$
-      DECLARE
-        v_departamento_id INTEGER;
-        v_ordem INTEGER;
-      BEGIN
-        IF EXISTS (
-          SELECT 1
-          FROM information_schema.tables
-          WHERE table_schema = 'configuracoes'
-            AND table_name = 'categoria_departamento'
-        ) THEN
-          SELECT id
-            INTO v_departamento_id
-            FROM configuracoes.departamento
-           WHERE nome = 'Produção'
-           LIMIT 1;
-
-          IF v_departamento_id IS NOT NULL
-             AND NOT EXISTS (
-               SELECT 1
-                 FROM configuracoes.categoria_departamento
-                WHERE departamento_id = v_departamento_id
-                  AND LOWER(TRIM(nome)) = LOWER('Embalagem dos produtos')
-             ) THEN
-            SELECT COALESCE(ordem, 0)
-              INTO v_ordem
-              FROM configuracoes.categoria_departamento
-             WHERE departamento_id = v_departamento_id
-               AND LOWER(TRIM(nome)) = LOWER('Materia prima')
-             ORDER BY ordem
-             LIMIT 1;
-
-            IF v_ordem IS NULL THEN
-              SELECT COALESCE(MAX(ordem), 0) + 1
-                INTO v_ordem
-                FROM configuracoes.categoria_departamento
-               WHERE departamento_id = v_departamento_id;
-            END IF;
-
-            INSERT INTO configuracoes.categoria_departamento (departamento_id, nome, ordem, ativo)
-            VALUES (v_departamento_id, 'Embalagem dos produtos', v_ordem, true);
-          END IF;
-        END IF;
-      END $$;
     `);
     
     // Cria tabela de status de compras
@@ -23101,7 +21701,6 @@ async function upsertRecebimentoNFe(recebimento, eventoWebhook = '', messageId =
     
     for (const item of itens) {
       const itemCabec = item.itensCabec || {};
-      const itemAjustes = item.itensAjustes || {};
       const itemInfoAdic = item.itensInfoAdic || {};
       
       await client.query(`
@@ -23139,7 +21738,7 @@ async function upsertRecebimentoNFe(recebimento, eventoWebhook = '', messageId =
         itemCabec.cNcm || null,
         itemCabec.nQtdeNFe || null,
         itemCabec.cUnidadeNFe || null,
-        itemCabec.nQtdeRecebida || itemAjustes.nQtdeRecebida || null,
+        itemCabec.nQtdeRecebida || null,
         itemCabec.nQtdeDivergente || null,
         itemCabec.nPrecoUnit || null,
         itemCabec.vTotalItem || null,
@@ -23155,12 +21754,12 @@ async function upsertRecebimentoNFe(recebimento, eventoWebhook = '', messageId =
         itemInfoAdic.nNumPedCompra || null,
         itemCabec.nIdPedido || null,
         itemCabec.nIdItPedido || null,
-        itemInfoAdic.cCfopEntrada || itemAjustes.cCFOPEntrada || null,
+        itemInfoAdic.cCfopEntrada || null,
         itemInfoAdic.cCategoriaItem || null,
-        itemInfoAdic.codigoLocalEstoque || itemAjustes.codigoLocalEstoque || itemAjustes.codigo_local_estoque || null,
-        itemInfoAdic.cLocalEstoque || itemAjustes.cLocalEstoque || null,
-        itemInfoAdic.cNaoGerarFinanceiro || itemAjustes.cNaoGerarFinanceiro || null,
-        itemInfoAdic.cNaoGerarMovEstoque || itemAjustes.cNaoGerarMovEstoque || null,
+        itemInfoAdic.codigoLocalEstoque || null,
+        itemInfoAdic.cLocalEstoque || null,
+        itemInfoAdic.cNaoGerarFinanceiro || null,
+        itemInfoAdic.cNaoGerarMovEstoque || null,
         itemInfoAdic.cObsItem || null
       ]);
     }
@@ -23225,13 +21824,6 @@ async function upsertRecebimentoNFe(recebimento, eventoWebhook = '', messageId =
         frete.cUfVeiculo || null
       ]);
     }
-
-    await atualizarPedidoRecebidoPorWebhookRecebimento(client, {
-      topic: eventoWebhook,
-      nIdReceb,
-      cDadosAdicionais: cDadosAdicionaisFinal,
-      messageId
-    });
 
     await upsertNotaEntradaEstado(client, {
       nIdReceb,
@@ -29246,9 +27838,8 @@ app.post('/api/compras/ranking-pedidos-nfe', async (req, res) => {
 REGRAS DE CLASSIFICAÇÃO (em ordem de importância):
 1. DESCRIÇÃO DO PRODUTO (peso 60%): Pedidos com descrição igual ou muito semelhante aos itens da NF-e devem ter score altíssimo. Correspondência parcial de palavras (ex: "BORBOLETA ZAMAC") ainda conta bastante.
 2. QUANTIDADE (peso 20%): Se a quantidade dos itens do pedido for igual ou muito próxima à da NF-e, aumente o score. Divergência grande reduz o score.
-3. UNIDADE DE MEDIDA (peso 15%): Considere equivalentes: UN/UND/UNID/UNIDADE/PC/PECA; PAR/PARES/PR; CX/CAIXA; PCT/PAC/PACOTE/EMB/EMBALAGEM; RL/ROLO; M/MT/MTS/METRO; CM/CENTIMETRO; MM/MILIMETRO; KG/KILO/QUILO; G/GR/GRAMA; TON/T/TONELADA; L/LT/LITRO; ML/MILILITRO; M2/M²/MT2/METRO QUADRADO; M3/M³/MT3/METRO CUBICO. Equivalência deve aumentar score; unidade incompatível deve reduzir score.
-4. VALOR UNITÁRIO (peso 10%): Se o valor unitário do item do pedido for próximo ao valor unitário da NF-e (vlr_item ÷ qtd), aumente o score.
-5. FORNECEDOR / DATA (peso 5%): Pedidos do mesmo fornecedor ou data próxima são leve tiebreaker.
+3. VALOR UNITÁRIO (peso 15%): Se o valor unitário do item do pedido for próximo ao valor unitário da NF-e (vlr_item ÷ qtd), aumente o score.
+4. FORNECEDOR / DATA (peso 5%): Pedidos do mesmo fornecedor ou data próxima são leve tiebreaker.
 IGNORE: categoria genérica, ordem de listagem, número do pedido.
 
 NF-e:
@@ -30784,71 +29375,6 @@ function tokenizarTextoAssociacaoNfePedido(valor) {
   )];
 }
 
-const DICIONARIO_EQUIVALENCIA_UNIDADE_MATCH = {
-  UN: ['UN', 'UND', 'UNID', 'UNIDADE', 'UNIDAD', 'UNIT', 'PC', 'PÇ', 'PECA', 'PEÇA', 'PCS', 'PÇS', 'PECAS', 'PEÇAS'],
-  PAR: ['PAR', 'PARES', 'PR'],
-  CX: ['CX', 'CAIXA', 'CXS', 'CAIXAS'],
-  PCT: ['PCT', 'PAC', 'PACOTE', 'PACOTES', 'EMB', 'EMBALAGEM', 'EMBALAGENS'],
-  RL: ['RL', 'RLO', 'ROLO', 'ROLOS'],
-  M: ['M', 'MT', 'MTS', 'METRO', 'METROS'],
-  CM: ['CM', 'CENTIMETRO', 'CENTÍMETRO', 'CENTIMETROS', 'CENTÍMETROS'],
-  MM: ['MM', 'MILIMETRO', 'MILÍMETRO', 'MILIMETROS', 'MILÍMETROS'],
-  KG: ['KG', 'KILO', 'QUILO', 'QUILOGRAMA', 'QUILOGRAMAS'],
-  G: ['G', 'GR', 'GRAMA', 'GRAMAS'],
-  TON: ['TON', 'T', 'TONELADA', 'TONELADAS'],
-  L: ['L', 'LT', 'LTS', 'LITRO', 'LITROS'],
-  ML: ['ML', 'MILILITRO', 'MILILITROS'],
-  M2: ['M2', 'M²', 'MT2', 'METRO2', 'METRO QUADRADO', 'METROS QUADRADOS'],
-  M3: ['M3', 'M³', 'MT3', 'METRO3', 'METRO CUBICO', 'METRO CÚBICO', 'METROS CUBICOS', 'METROS CÚBICOS']
-};
-
-function normalizarTokenUnidadeMatch(valor) {
-  return String(valor || '')
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .replace(/²/g, '2')
-    .replace(/³/g, '3')
-    .toUpperCase()
-    .replace(/[^A-Z0-9]+/g, '');
-}
-
-const MAPA_CANONICO_UNIDADE_MATCH = (() => {
-  const mapa = new Map();
-
-  Object.entries(DICIONARIO_EQUIVALENCIA_UNIDADE_MATCH).forEach(([canonico, alias]) => {
-    const chaveCanonica = normalizarTokenUnidadeMatch(canonico);
-    if (chaveCanonica) mapa.set(chaveCanonica, canonico);
-
-    alias.forEach((itemAlias) => {
-      const chaveAlias = normalizarTokenUnidadeMatch(itemAlias);
-      if (chaveAlias) mapa.set(chaveAlias, canonico);
-    });
-  });
-
-  return mapa;
-})();
-
-function unidadeCanonicaMatch(valor) {
-  const token = normalizarTokenUnidadeMatch(valor);
-  if (!token) return '';
-  return MAPA_CANONICO_UNIDADE_MATCH.get(token) || token;
-}
-
-function unidadesEquivalentesMatch(unidadeA, unidadeB) {
-  const canonicaA = unidadeCanonicaMatch(unidadeA);
-  const canonicaB = unidadeCanonicaMatch(unidadeB);
-
-  if (!canonicaA || !canonicaB) return false;
-  return canonicaA === canonicaB;
-}
-
-function normalizarCfopServicoRecebimento(valor) {
-  const cfop = String(valor || '').replace(/\D/g, '');
-  if (cfop === '5933') return { servico: true, cfopEntrada: '1.933' };
-  if (cfop === '6933') return { servico: true, cfopEntrada: '2.933' };
-  return { servico: false, cfopEntrada: null };
-}
-
 function calcularScoreAssociacaoNfePedido(itemReceb, itemPedido) {
   const itensCabec = itemReceb?.itensCabec || {};
   const codigoRecBruto = String(itensCabec?.cCodigoProduto || '').trim();
@@ -30902,77 +29428,7 @@ function calcularScoreAssociacaoNfePedido(itemReceb, itemPedido) {
     }
   }
 
-  const unidadeRec = String(itensCabec?.cUnidadeNFe || itensCabec?.cUnidadeNfe || '').trim();
-  const unidadePedido = String(itemPedido?.c_unidade || '').trim();
-  if (unidadeRec && unidadePedido) {
-    if (unidadesEquivalentesMatch(unidadeRec, unidadePedido)) {
-      score += 55;
-    } else {
-      score -= 20;
-    }
-  }
-
   return score;
-}
-
-function obterAssinaturaItemRecebimentoParaAgrupar(itemReceb) {
-  const cab = itemReceb?.itensCabec || {};
-  const codigo = normalizarTextoAssociacaoNfePedido(String(
-    cab.cCodigoProduto || cab.cCodProduto || ''
-  )).replace(/\s+/g, '');
-  const descricao = normalizarTextoAssociacaoNfePedido(String(
-    cab.cDescricaoProduto || cab.cDescricao || ''
-  ));
-  return `${codigo}|${descricao}`;
-}
-
-function valoresProximosAssociacao(valorA, valorB, tolerancia = 0.01) {
-  const a = Number(valorA);
-  const b = Number(valorB);
-  return Number.isFinite(a) && Number.isFinite(b) && Math.abs(a - b) <= tolerancia;
-}
-
-function montarMapaItensPedidoReutilizaveis(itensReceb = [], itensPedido = []) {
-  const grupos = new Map();
-  itensReceb.forEach((item) => {
-    const chave = obterAssinaturaItemRecebimentoParaAgrupar(item);
-    if (!chave || chave === '|') return;
-    if (!grupos.has(chave)) {
-      grupos.set(chave, { itens: [], qtdTotal: 0, valorTotal: 0 });
-    }
-    const grupo = grupos.get(chave);
-    const cab = item?.itensCabec || {};
-    grupo.itens.push(item);
-    grupo.qtdTotal += Number(cab.nQtdeNFe || 0) || 0;
-    grupo.valorTotal += Number(cab.vTotalItem || 0) || 0;
-  });
-
-  const reutilizaveis = new Map();
-  grupos.forEach((grupo, chave) => {
-    if (grupo.itens.length < 2) return;
-
-    let melhor = null;
-    let melhorScore = -Infinity;
-    itensPedido.forEach((itemPedido) => {
-      const score = grupo.itens.reduce(
-        (acc, itemReceb) => acc + calcularScoreAssociacaoNfePedido(itemReceb, itemPedido),
-        0
-      );
-      const qtdBate = valoresProximosAssociacao(grupo.qtdTotal, itemPedido?.n_qtde, 0.0001);
-      const valorBate = valoresProximosAssociacao(grupo.valorTotal, itemPedido?.n_val_tot, 0.05);
-      const scoreFinal = score + (qtdBate ? 500 : 0) + (valorBate ? 500 : 0);
-      if (scoreFinal > melhorScore) {
-        melhorScore = scoreFinal;
-        melhor = { itemPedido, qtdBate, valorBate };
-      }
-    });
-
-    if (melhor?.itemPedido && (melhor.qtdBate || melhor.valorBate)) {
-      reutilizaveis.set(chave, melhor.itemPedido);
-    }
-  });
-
-  return reutilizaveis;
 }
 
 async function montarPlanoAssociacaoNfePedido(numeroNfe, numeroPedido, chaveNfe = null, nCodPedInformado = null) {
@@ -31035,7 +29491,6 @@ async function montarPlanoAssociacaoNfePedido(numeroNfe, numeroPedido, chaveNfe 
   });
   const mapaPorCodigoProduto = new Map();
   const mapaPorIdProduto = new Map();
-  const mapaItensPedidoReutilizaveis = montarMapaItensPedidoReutilizaveis(itensReceb, itensPedido);
 
   for (const item of itensPedido) {
     const codigo = String(item?.c_produto || '').trim();
@@ -31100,30 +29555,12 @@ async function montarPlanoAssociacaoNfePedido(numeroNfe, numeroPedido, chaveNfe 
       || ''
     ).trim();
     const nIdProdutoRec = Number(itensCabec?.nIdProduto);
-    const cfopNf = String(
-      itensCabec?.cCFOP
-      || itensCabec?.cCfop
-      || itensInfoAdic?.cCFOP
-      || itensInfoAdic?.cCfop
-      || itensInfoAdic?.cCFOPEntrada
-      || itensInfoAdic?.cCfopEntrada
-      || ''
-    ).trim();
-    const servicoCfop = normalizarCfopServicoRecebimento(cfopNf);
 
     let itemPedidoVinculo = null;
     let criterioMatch = null;
     let scoreMatch = 0;
-    const assinaturaRecebimento = obterAssinaturaItemRecebimentoParaAgrupar(item);
-    const itemPedidoReutilizavel = mapaItensPedidoReutilizaveis.get(assinaturaRecebimento);
 
-    if (itemPedidoReutilizavel) {
-      itemPedidoVinculo = itemPedidoReutilizavel;
-      criterioMatch = 'agrupamento_mesmo_item_pedido';
-      scoreMatch = Math.max(calcularScoreAssociacaoNfePedido(item, itemPedidoReutilizavel), 1500);
-    }
-
-    if (!itemPedidoVinculo && Number.isFinite(nIdProdutoRec) && nIdProdutoRec > 0 && mapaPorIdProduto.has(nIdProdutoRec)) {
+    if (Number.isFinite(nIdProdutoRec) && nIdProdutoRec > 0 && mapaPorIdProduto.has(nIdProdutoRec)) {
       const candidatos = mapaPorIdProduto.get(nIdProdutoRec);
       const { item: melhorPorId, score } = escolherMelhorCandidatoPedido(item, candidatos);
       if (melhorPorId) {
@@ -31169,28 +29606,14 @@ async function montarPlanoAssociacaoNfePedido(numeroNfe, numeroPedido, chaveNfe 
 
     const itensIde = {
       nSequencia: Number.isFinite(nSequencia) && nSequencia > 0 ? nSequencia : (idx + 1),
-      cAcao: servicoCfop.servico ? 'ASSOCIAR-PRODUTO' : 'ASSOCIAR-PEDIDO'
+      cAcao: 'ASSOCIAR-PEDIDO',
+      nIdPedidoExistente: nCodPed
     };
-    if (!servicoCfop.servico) itensIde.nIdPedidoExistente = nCodPed;
-    if (servicoCfop.servico && Number.isFinite(nIdProdutoRec) && nIdProdutoRec > 0) {
-      itensIde.nIdProdutoExistente = nIdProdutoRec;
-    }
 
     const nCodItem = Number(itemPedidoVinculo?.n_cod_item);
     if (Number.isFinite(nCodItem) && nCodItem > 0) {
       itensIde.nIdItPedidoExistente = nCodItem;
     }
-
-    const matchAgrupadoMesmoItem = criterioMatch === 'agrupamento_mesmo_item_pedido';
-    const pedidoQtdePreview = matchAgrupadoMesmoItem
-      ? (itensCabec?.nQtdeNFe ?? null)
-      : (itemPedidoVinculo?.n_qtde ?? null);
-    const pedidoValorPreview = matchAgrupadoMesmoItem
-      ? (itensCabec?.vTotalItem ?? null)
-      : (itemPedidoVinculo?.n_val_tot ?? null);
-    const pedidoUnidadePreview = matchAgrupadoMesmoItem
-      ? (String(itensCabec?.cUnidadeNfe || itensCabec?.cUnidadeNFe || itemPedidoVinculo?.c_unidade || '').trim() || null)
-      : (String(itemPedidoVinculo?.c_unidade || '').trim() || null);
 
     previewItens.push({
       n_sequencia: itensIde.nSequencia,
@@ -31198,19 +29621,14 @@ async function montarPlanoAssociacaoNfePedido(numeroNfe, numeroPedido, chaveNfe 
       nf_descricao_produto: descricaoProdutoRec || null,
       nf_qtde: itensCabec?.nQtdeNFe ?? null,
       nf_unidade: String(itensCabec?.cUnidadeNfe || '').trim() || null,
-      nf_cfop: cfopNf || null,
-      item_servico: servicoCfop.servico,
-      servico_cfop_entrada: servicoCfop.cfopEntrada,
       nf_valor_total: itensCabec?.vTotalItem ?? null,
-      pedido_item_encontrado: !!itemPedidoVinculo || servicoCfop.servico,
+      pedido_item_encontrado: !!itemPedidoVinculo,
       pedido_n_cod_item: Number.isFinite(nCodItem) && nCodItem > 0 ? nCodItem : null,
       pedido_codigo_produto: String(itemPedidoVinculo?.c_produto || '').trim() || null,
       pedido_descricao_produto: String(itemPedidoVinculo?.c_descricao || '').trim() || null,
-      pedido_qtde: pedidoQtdePreview,
-      pedido_unidade: pedidoUnidadePreview,
-      pedido_valor_total: pedidoValorPreview,
-      pedido_qtde_original: itemPedidoVinculo?.n_qtde ?? null,
-      pedido_valor_total_original: itemPedidoVinculo?.n_val_tot ?? null,
+      pedido_qtde: itemPedidoVinculo?.n_qtde ?? null,
+      pedido_unidade: String(itemPedidoVinculo?.c_unidade || '').trim() || null,
+      pedido_valor_total: itemPedidoVinculo?.n_val_tot ?? null,
       criterio_match: criterioMatch,
       score_match: scoreMatch
     });
@@ -31398,7 +29816,9 @@ app.post('/api/compras/pedidos-omie/nfe-associar-pedido', express.json(), async 
     //   • nIdConta = nCodCC do pedido
     //   • cUnidade e nQtde do pedido (ou override do usuário) em cada item
     //   • dVencimento dinâmico conforme compras.contas_omie (tipo CR, melhor_data, fechamento_conta)
-    //   • codigo_local_estoque = #D Recebimento em todos os itens
+    //   • Se conta especial (GLP/Frigelar): codigo_local_estoque = ESTOQUE_LOCAL_ESPECIAL
+    const CONTAS_ESPECIAIS = [10507452702, 10440916421];
+    const ESTOQUE_LOCAL_ESPECIAL = 10408201806;
     let nCodCC = null;
 
     // Lê itens_override do frontend (Qtd/Unid editados pelo user na prévia)
@@ -31409,51 +29829,6 @@ app.post('/api/compras/pedidos-omie/nfe-associar-pedido', express.json(), async 
       if (seq > 0) overrideMap.set(seq, ov);
     }
 
-    const overridesValorPedido = [];
-    for (const itemPreview of (Array.isArray(plano?.itens_preview) ? plano.itens_preview : [])) {
-      const seq = Number(itemPreview?.n_sequencia || 0);
-      const override = overrideMap.get(seq);
-      const valorTotalNovo = parseValorDecimalNfe(override?.nValTot);
-      if (!seq || !Number.isFinite(valorTotalNovo) || valorTotalNovo < 0) continue;
-
-      const nCodItem = Number(override?.nIdItPedidoExistente || itemPreview?.pedido_n_cod_item || 0);
-      if (!Number.isFinite(nCodItem) || nCodItem <= 0) continue;
-
-      const qtdBase = parseValorDecimalNfe(override?.nQtde ?? itemPreview?.pedido_qtde);
-      const valorUnitNovo = Number.isFinite(qtdBase) && qtdBase > 0
-        ? Number((valorTotalNovo / qtdBase).toFixed(6))
-        : null;
-
-      overridesValorPedido.push({ nCodItem, valorTotalNovo, valorUnitNovo });
-      itemPreview.pedido_valor_total = valorTotalNovo;
-    }
-
-    if (overridesValorPedido.length > 0) {
-      for (const ovValor of overridesValorPedido) {
-        await pool.query(
-          `UPDATE compras.pedidos_omie_produtos
-              SET n_val_tot = $1,
-                  n_val_unit = COALESCE($2, n_val_unit),
-                  updated_at = NOW()
-            WHERE n_cod_ped = $3
-              AND n_cod_item = $4`,
-          [ovValor.valorTotalNovo, ovValor.valorUnitNovo, plano.n_cod_ped, ovValor.nCodItem]
-        );
-      }
-
-      await pool.query(
-        `UPDATE compras.pedidos_omie p
-            SET n_valor = COALESCE((
-                  SELECT SUM(COALESCE(pp.n_val_tot, 0))
-                    FROM compras.pedidos_omie_produtos pp
-                   WHERE pp.n_cod_ped = p.n_cod_ped
-                ), 0),
-                updated_at = NOW()
-          WHERE p.n_cod_ped = $1`,
-        [plano.n_cod_ped]
-      );
-    }
-
     // Valida que todos os itens da NF-e foram mapeados a um item do pedido Omie
     // (considerando possíveis ajustes manuais vindos do frontend)
     const itensSemMapeamento = Array.isArray(plano?.itens_preview)
@@ -31462,7 +29837,6 @@ app.post('/api/compras/pedidos-omie/nfe-associar-pedido', express.json(), async 
         const override = overrideMap.get(seq);
         const codItemOverride = Number(override?.nIdItPedidoExistente || 0);
         if (Number.isFinite(codItemOverride) && codItemOverride > 0) return false;
-        if (it?.item_servico) return false;
         return !Number.isFinite(Number(it?.pedido_n_cod_item || NaN));
       })
       : [];
@@ -31503,6 +29877,8 @@ app.post('/api/compras/pedidos-omie/nfe-associar-pedido', express.json(), async 
       console.warn('[Compras/NFeAssociarPedido] Falha ao buscar nCodCC do pedido:', errPed?.message);
     }
 
+    const aplicarEstoqueEspecial = nCodCC && CONTAS_ESPECIAIS.includes(nCodCC);
+
     // Itens conforme plano (ASSOCIAR-PEDIDO)
     const itensParaEnviar = Array.isArray(plano?.itensRecebimentoEditar)
       ? plano.itensRecebimentoEditar.map((itemEditar) => ({
@@ -31510,12 +29886,6 @@ app.post('/api/compras/pedidos-omie/nfe-associar-pedido', express.json(), async 
         itensIde: { ...(itemEditar?.itensIde || {}) }
       }))
       : [];
-    const seqsServicoAssociacao = new Set(
-      (plano?.itens_preview || [])
-        .filter((item) => item?.item_servico)
-        .map((item) => Number(item?.n_sequencia || 0))
-        .filter((seq) => Number.isFinite(seq) && seq > 0)
-    );
 
     // Aplica troca manual do item do pedido por sequência da NF-e
     itensParaEnviar.forEach((itemEditar) => {
@@ -31526,11 +29896,6 @@ app.post('/api/compras/pedidos-omie/nfe-associar-pedido', express.json(), async 
       const codItemOverride = Number(override?.nIdItPedidoExistente || 0);
       if (Number.isFinite(codItemOverride) && codItemOverride > 0) {
         itemEditar.itensIde.nIdItPedidoExistente = codItemOverride;
-      }
-      const idProdutoServico = Number(override?.nIdProdutoServico || 0);
-      if (Number.isFinite(idProdutoServico) && idProdutoServico > 0) {
-        itemEditar.itensIde.cAcao = 'ASSOCIAR-PRODUTO';
-        itemEditar.itensIde.nIdProdutoExistente = idProdutoServico;
       }
     });
 
@@ -31543,14 +29908,7 @@ app.post('/api/compras/pedidos-omie/nfe-associar-pedido', express.json(), async 
     let ufNfeRegraCfop = '';
     let cfopCalculado = null;
 
-    const dHoje = (() => {
-      const d = new Date();
-      const dd = String(d.getDate()).padStart(2, '0');
-      const mm = String(d.getMonth() + 1).padStart(2, '0');
-      return `${dd}/${mm}/${d.getFullYear()}`;
-    })();
-
-    if (nCodCC || RECEBIMENTO_NFE_LOCAL_ESTOQUE_PADRAO) {
+    if (nCodCC) {
       try {
         // Busca dados atuais do recebimento + unidades do pedido
         const [recebAtual, pedidoConsulta] = await Promise.all([
@@ -31624,33 +29982,11 @@ app.post('/api/compras/pedidos-omie/nfe-associar-pedido', express.json(), async 
           }
         }
 
-        // Mapa de unidade/quantidade por nCodItem do pedido
+        // Mapa de unidade por nCodItem do pedido
         const unidadePorCodItem = {};
-        const quantidadePorCodItem = {};
-        const quantidadeRecebidaPorSeq = {};
-        const unidadeRecebidaPorSeq = {};
         (pedidoConsulta?.produtos_consulta || []).forEach(p => {
           if (p.nCodItem) {
             unidadePorCodItem[String(p.nCodItem)] = p.cUnidade;
-            quantidadePorCodItem[String(p.nCodItem)] = Number(p.nQtde);
-          }
-        });
-        (plano?.itens_preview || []).forEach(itemPreview => {
-          const nCodItemPreview = Number(itemPreview?.pedido_n_cod_item || 0);
-          if (!Number.isFinite(nCodItemPreview) || nCodItemPreview <= 0) return;
-          const chaveItem = String(nCodItemPreview);
-          if (!unidadePorCodItem[chaveItem] && itemPreview?.pedido_unidade) {
-            unidadePorCodItem[chaveItem] = itemPreview.pedido_unidade;
-          }
-          if (!Number.isFinite(quantidadePorCodItem[chaveItem]) && Number.isFinite(Number(itemPreview?.pedido_qtde))) {
-            quantidadePorCodItem[chaveItem] = Number(itemPreview.pedido_qtde);
-          }
-          if (itemPreview?.criterio_match === 'agrupamento_mesmo_item_pedido') {
-            const seqPreview = Number(itemPreview?.n_sequencia || 0);
-            if (seqPreview) {
-              quantidadeRecebidaPorSeq[String(seqPreview)] = Number(itemPreview?.nf_qtde ?? itemPreview?.pedido_qtde);
-              unidadeRecebidaPorSeq[String(seqPreview)] = itemPreview?.nf_unidade || itemPreview?.pedido_unidade || unidadePorCodItem[chaveItem] || null;
-            }
           }
         });
 
@@ -31727,12 +30063,18 @@ app.post('/api/compras/pedidos-omie/nfe-associar-pedido', express.json(), async 
         }
 
         // --- infoAdicionais: dRegistro = hoje, nIdConta = nCodCC ---
+        const dHoje = (() => {
+          const d = new Date();
+          const dd = String(d.getDate()).padStart(2, '0');
+          const mm = String(d.getMonth() + 1).padStart(2, '0');
+          return `${dd}/${mm}/${d.getFullYear()}`;
+        })();
         // novaCategoriaCompra: substitui a categoria inativa se o usuário selecionou uma nova
         const categoriaParaInforAdic = novaCategoriaCompra || recebAtual?.infoAdicionais?.cCategCompra || undefined;
         infoAdicionaisParaEnviar = {
           cCategCompra: categoriaParaInforAdic,
           dRegistro: dHoje,
-          ...(nCodCC ? { nIdConta: nCodCC } : {})
+          nIdConta: nCodCC
         };
 
         // --- CFOP calculado por regra: UF da NF-e (extraída da chave) + cCategCompra ---
@@ -31752,10 +30094,9 @@ app.post('/api/compras/pedidos-omie/nfe-associar-pedido', express.json(), async 
           ufNfeRegraCfop = ufNfe;
           if (ufNfe && cCategCompraReceb) {
             const dentroEstado = ufNfe === 'SC';
-            const categoriasMateriaPrima = new Set(['2.01.03', '2.14.94', '2.01.93']);
             if (cCategCompraReceb === '2.01.04') {
-              cfopCalculado = '1.101';
-            } else if (categoriasMateriaPrima.has(cCategCompraReceb)) {
+              cfopCalculado = '1.102';
+            } else if (cCategCompraReceb === '2.01.03') {
               cfopCalculado = dentroEstado ? '1.101' : '2.101';
             } else {
               cfopCalculado = dentroEstado ? '1.556' : '2.556';
@@ -31766,34 +30107,21 @@ app.post('/api/compras/pedidos-omie/nfe-associar-pedido', express.json(), async 
           console.warn('[Compras/NFeAssociarPedido] Falha ao calcular CFOP:', errCfop?.message);
         }
 
-        // --- EDITAR cada item: local de estoque + cUnidade (do pedido ou override do user) ---
-        // Toda NF-e vinculada a pedido de compra deve entrar no local #D Recebimento.
+        // --- EDITAR cada item: cUnidade + nQtde (do pedido ou override do user) ---
+        // Se conta especial, também aplica codigo_local_estoque
         itensEditarEstoque = plano.itensRecebimentoEditar.map(itemEditar => {
           const nSeq = itemEditar.itensIde?.nSequencia;
           const nIdItPed = itemEditar.itensIde?.nIdItPedidoExistente;
-          const previewItem = (plano?.itens_preview || []).find(p => Number(p?.n_sequencia || 0) === Number(nSeq || 0));
-          const cfopServicoEntrada = previewItem?.item_servico ? previewItem?.servico_cfop_entrada : null;
           const cUnidadePedido = nIdItPed ? unidadePorCodItem[String(nIdItPed)] : null;
-          const nQtdePedido = nIdItPed ? quantidadePorCodItem[String(nIdItPed)] : null;
-          const nQtdeAgrupada = Number(quantidadeRecebidaPorSeq[String(nSeq)]);
-          const cUnidadeAgrupada = unidadeRecebidaPorSeq[String(nSeq)] || null;
 
           // Override do user tem prioridade sobre o valor do pedido
           const override = overrideMap.get(nSeq);
-          const cUnidadeFinal = override?.cUnidade || cUnidadeAgrupada || cUnidadePedido || null;
-          const nQtdeOverride = Number(override?.nQtde);
-          const nQtdeRecebidaFinal = Number.isFinite(nQtdeOverride) && nQtdeOverride > 0
-            ? nQtdeOverride
-            : (Number.isFinite(nQtdeAgrupada) && nQtdeAgrupada > 0
-              ? nQtdeAgrupada
-              : (Number.isFinite(nQtdePedido) && nQtdePedido > 0 ? nQtdePedido : null));
+          const cUnidadeFinal = override?.cUnidade || cUnidadePedido || null;
 
-          const ajustes = {
-            codigo_local_estoque: RECEBIMENTO_NFE_LOCAL_ESTOQUE_PADRAO
-          };
+          const ajustes = {};
+          if (aplicarEstoqueEspecial) ajustes.codigo_local_estoque = ESTOQUE_LOCAL_ESPECIAL;
           if (cUnidadeFinal) ajustes.cUnidade = cUnidadeFinal;
-          if (nQtdeRecebidaFinal) ajustes.nQtdeRecebida = nQtdeRecebidaFinal;
-          if (cfopServicoEntrada || cfopCalculado) ajustes.cCFOPEntrada = cfopServicoEntrada || cfopCalculado;
+          if (cfopCalculado) ajustes.cCFOPEntrada = cfopCalculado;
           // Nota: nQtde não é campo válido em itensAjustes da Omie
 
           // Só incluir o item se tiver ajustes
@@ -31806,35 +30134,16 @@ app.post('/api/compras/pedidos-omie/nfe-associar-pedido', express.json(), async 
         }).filter(Boolean);
 
         recebimentoCache = recebAtual;
-        console.log(`[Compras/NFeAssociarPedido] nIdConta=${nCodCC} localEstoqueRecebimento=${RECEBIMENTO_NFE_LOCAL_ESTOQUE_PADRAO} dVencimento=${dVencimento} parcelas=${parcelasLista.length} itensEditar=${itensEditarEstoque.length} overrides=${overrideMap.size}`);
+        console.log(`[Compras/NFeAssociarPedido] nIdConta=${nCodCC} estoqueEspecial=${aplicarEstoqueEspecial} dVencimento=${dVencimento} parcelas=${parcelasLista.length} itensEditar=${itensEditarEstoque.length} overrides=${overrideMap.size}`);
       } catch (errPrep) {
         console.warn('[Compras/NFeAssociarPedido] Falha ao preparar dados de associação:', errPrep?.message);
       }
     }
 
-    if (novaCategoriaCompra && !infoAdicionaisParaEnviar) {
-      infoAdicionaisParaEnviar = {
-        cCategCompra: novaCategoriaCompra,
-        dRegistro: dHoje,
-        ...(nCodCC ? { nIdConta: nCodCC } : {})
-      };
-      cCategCompraRegraCfop = novaCategoriaCompra;
-      console.log(`[Compras/NFeAssociarPedido] infoAdicionais fallback montado para categoria=${novaCategoriaCompra}`);
-    }
-
     // ─── Passo 1: associação do pedido (PRIMEIRO, pois pode resetar dados financeiros) ───
-    // Se houver troca de categoria, ela precisa ir junto com a associação.
-    // A Omie pode validar a categoria antiga já no vínculo do pedido antes do Passo 2.
     const payloadAlterar = {
       ide: { nIdReceb: Number(plano.n_id_receb) },
-      itensRecebimentoEditar: itensParaEnviar.filter((itemEditar) => {
-        const seq = Number(itemEditar?.itensIde?.nSequencia || 0);
-        const acao = String(itemEditar?.itensIde?.cAcao || '').toUpperCase();
-        const isServico = seqsServicoAssociacao.has(seq);
-        if (!isServico) return true;
-        return acao === 'ASSOCIAR-PRODUTO' && Number(itemEditar?.itensIde?.nIdProdutoExistente || 0) > 0;
-      }),
-      ...(novaCategoriaCompra && infoAdicionaisParaEnviar ? { infoAdicionais: infoAdicionaisParaEnviar } : {})
+      itensRecebimentoEditar: itensParaEnviar
     };
 
     console.log('[Compras/NFeAssociarPedido] ===== PASSO 1: ASSOCIAR-PEDIDO =====');
@@ -31872,56 +30181,12 @@ app.post('/api/compras/pedidos-omie/nfe-associar-pedido', express.json(), async 
           tentativasMaximas: 2
         });
         console.log('[Compras/NFeAssociarPedido] Parcelas/infoAdicionais atualizados com sucesso.');
-
-        if (novaCategoriaCompra) {
-          let categoriaConfirmada = '';
-          try {
-            const recebConf = await chamarApiRecebimentoNfeOmieComRetryRedundant('ConsultarRecebimento', {
-              nIdReceb: Number(plano.n_id_receb)
-            }, { tentativasMaximas: 2 });
-            categoriaConfirmada = String(
-              recebConf?.infoAdicionais?.cCategCompra
-              || recebConf?.cabec?.cCategCompra
-              || recebConf?.cabec?.c_categoria_compra
-              || ''
-            ).trim();
-          } catch (errConf) {
-            console.warn('[Compras/NFeAssociarPedido] Falha ao confirmar categoria após AlterarRecebimento:', errConf?.message);
-          }
-
-          if (categoriaConfirmada !== novaCategoriaCompra) {
-            console.warn(`[Compras/NFeAssociarPedido] Categoria ainda não confirmada (${categoriaConfirmada || 'vazia'}). Tentando AlterarRecebimentoConcluido.`);
-            await chamarApiRecebimentoNfeOmieComRetryRedundant('AlterarRecebimentoConcluido', {
-              ide: { nIdReceb: Number(plano.n_id_receb) },
-              infoAdicionais: infoAdicionaisParaEnviar
-            }, { tentativasMaximas: 2 });
-
-            const recebConfFinal = await chamarApiRecebimentoNfeOmieComRetryRedundant('ConsultarRecebimento', {
-              nIdReceb: Number(plano.n_id_receb)
-            }, { tentativasMaximas: 2 });
-            categoriaConfirmada = String(
-              recebConfFinal?.infoAdicionais?.cCategCompra
-              || recebConfFinal?.cabec?.cCategCompra
-              || recebConfFinal?.cabec?.c_categoria_compra
-              || ''
-            ).trim();
-          }
-
-          if (categoriaConfirmada !== novaCategoriaCompra) {
-            throw new Error(`Omie não confirmou a nova categoria antes da conclusão. Esperado=${novaCategoriaCompra}, atual=${categoriaConfirmada || 'N/A'}.`);
-          }
-
-          console.log(`[Compras/NFeAssociarPedido] Categoria confirmada na Omie: ${categoriaConfirmada}`);
-        }
       } catch (errParcelas) {
-        if (novaCategoriaCompra) {
-          throw errParcelas;
-        }
         console.warn('[Compras/NFeAssociarPedido] Falha ao atualizar parcelas/infoAdicionais:', errParcelas?.message);
       }
     }
 
-    // ─── Passo 3: EDITAR itens com cUnidade + CFOP + local #D Recebimento ───
+    // ─── Passo 3: EDITAR itens com cUnidade + nQtde (+ codigo_local_estoque se especial) ───
     if (itensEditarEstoque && itensEditarEstoque.length > 0) {
       try {
         const payloadEstoque = {
@@ -32111,7 +30376,6 @@ app.post('/api/compras/pedidos-omie/nfe-associar-pedido', express.json(), async 
         nfe_vinculada: numeroNfeVinculada || null,
         etapa_nf_omie: etapaFinalRecebimento || null,
         etapa_nf_pedido: etapaPedidoNf || null,
-        local_estoque_recebimento: RECEBIMENTO_NFE_LOCAL_ESTOQUE_PADRAO,
         valor_total_pedido: Number.isFinite(valorTotalPedido) ? valorTotalPedido : null,
         valor_recebido_pedido: Number.isFinite(valorRecebidoPedido) ? valorRecebidoPedido : null,
         retorno_etapa_omie: respostaEtapaFinal || null,
@@ -35099,9 +33363,6 @@ app.listen(PORT, HOST, () => {
   // Notificação diária WhatsApp (08:00)
   const { iniciarCronNotificacaoDiaria } = require('./cron/notificacao_diaria_whatsapp');
   iniciarCronNotificacaoDiaria();
-  // Snapshot diário de estoque (20:00 Brasília) — copia logistica.estoque_atual → omie_estoque_posicao
-  const { iniciarCronSnapshotEstoque } = require('./cron/snapshot_estoque_diario');
-  iniciarCronSnapshotEstoque();
 });
 
 // DEBUG: sanity check do webhook (GET simples)
@@ -36265,29 +34526,3 @@ app.get('/api/_where', (req, res) => {
   }
 });
 // ==========================================================================
-
-// ─── Global error handler ────────────────────────────────────────────────────
-// Captura erros lançados por middlewares (ex.: session store em recovery mode)
-// e retorna resposta amigável em vez da tela branca padrão do Express.
-// eslint-disable-next-line no-unused-vars
-app.use((err, req, res, next) => {
-  console.error('[global-error]', err?.message || err);
-  const isApi = req.path.startsWith('/api/');
-  if (isApi) {
-    return res.status(500).json({ ok: false, error: err?.message || 'Erro interno' });
-  }
-  res.status(503).send(`
-    <!DOCTYPE html>
-    <html lang="pt-BR">
-    <head><meta charset="UTF-8"><title>Serviço indisponível</title>
-    <style>body{font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;background:#f5f5f5}
-    .box{background:#fff;padding:2rem 3rem;border-radius:8px;box-shadow:0 2px 8px rgba(0,0,0,.15);text-align:center}
-    h2{color:#d32f2f}p{color:#555}</style>
-    </head>
-    <body><div class="box">
-      <h2>Serviço temporariamente indisponível</h2>
-      <p>O banco de dados está inicializando. Aguarde alguns segundos e <a href="javascript:location.reload()">recarregue a página</a>.</p>
-    </div></body>
-    </html>
-  `);
-});
