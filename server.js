@@ -11008,6 +11008,77 @@ app.get('/api/etiquetas/recebimento/zpl-download', async (req, res) => {
   }
 });
 
+// POST /api/etiquetas/recebimento/imprimir-local
+// Body: { ids: [1,2,...], multiplo?: number, usuario?: string }
+// Gera ZPL e retorna como JSON para que o cliente envie ao Zebra Browser Print.
+// Mesmo fluxo do imprimir-modal/pdf-download, mas não chama lpr — devolve o ZPL.
+app.post('/api/etiquetas/recebimento/imprimir-local', express.json(), async (req, res) => {
+  try {
+    const ids      = Array.isArray(req.body?.ids) ? req.body.ids.map(Number).filter(n => n > 0) : [];
+    const multiplo = Number(req.body?.multiplo) || 0;
+    if (!ids.length) return res.status(400).json({ error: 'Nenhum id informado.' });
+
+    const result = await pool.query(
+      `SELECT id, lote, codigo_produto, descricao_produto, qtd, unidade, data_emissao
+         FROM etiqueta."ETQ_recebimento"
+        WHERE id = ANY($1::int[]) ORDER BY id`,
+      [ids]
+    );
+    if (!result.rows.length) return res.status(404).json({ error: 'Nenhuma etiqueta encontrada.' });
+
+    const sanitize = (v, max = 999) => String(v || '').slice(0, max).replace(/[\\^~]/g, ' ');
+    const usuarioImpressao = String(req.body?.usuario || req.session?.user?.login || req.session?.usuario || '').trim();
+    const zplBlocks = [];
+
+    for (const row of result.rows) {
+      const codProd    = sanitize(row.codigo_produto, 30);
+      const descProd   = sanitize(row.descricao_produto, 70);
+      const loteTxt    = sanitize(row.lote, 40);
+      const dataExibir = sanitize(row.data_emissao, 10);
+
+      let lotes;
+      if (multiplo > 0) {
+        const qtdTotal = Number(row.qtd) || 0;
+        const nCheias  = Math.floor(qtdTotal / multiplo);
+        const resto    = qtdTotal % multiplo;
+        lotes = [];
+        for (let i = 0; i < nCheias; i++) lotes.push(multiplo);
+        if (resto > 0) lotes.push(resto);
+        if (lotes.length === 0) lotes.push(qtdTotal || 1);
+      } else {
+        lotes = [Number(row.qtd) || 1];
+      }
+
+      for (const qtdEtq of lotes) {
+        const ins = await pool.query(
+          `INSERT INTO etiqueta."ETQ_rec_impresso"
+             (origem_id, qtd, unidade, data_emissao, conteudo_zpl, usuario_criacao)
+           VALUES ($1,$2,$3,$4,'',$5)
+           RETURNING id`,
+          [row.id, qtdEtq, row.unidade, row.data_emissao, usuarioImpressao]
+        );
+        const idImpresso = ins.rows[0].id;
+        const zpl = _gerarZplParaImpressao({ codProd, descProd, idImpresso, loteTxt, dataExibir });
+        await pool.query(
+          `UPDATE etiqueta."ETQ_rec_impresso" SET conteudo_zpl = $1 WHERE id = $2`,
+          [zpl, idImpresso]
+        );
+        zplBlocks.push(zpl);
+      }
+    }
+
+    await pool.query(
+      `UPDATE etiqueta."ETQ_recebimento" SET qtd = 0, impressa = true WHERE id = ANY($1::int[])`,
+      [ids]
+    );
+
+    res.json({ ok: true, zpl: zplBlocks.join('\n'), quantidade: zplBlocks.length });
+  } catch (err) {
+    console.error('[etiquetas/imprimir-local]', err);
+    res.status(500).json({ error: err?.message || 'Falha ao gerar ZPL' });
+  }
+});
+
 // GET /api/etiquetas/rec-impresso?q=texto
 // Retorna registros já impressos de ETQ_rec_impresso, com filtro opcional
 app.get('/api/etiquetas/rec-impresso', async (req, res) => {

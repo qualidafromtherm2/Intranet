@@ -24580,7 +24580,7 @@ window.openRegistros = async function() {
     const btn = document.getElementById('etqBtnImpressora');
     if (!btn) return;
     if (_etqPrinterPref) {
-      const label = _etqPrinterPref === '__PDF__' ? 'PDF' : _etqPrinterPref === '__ZPL__' ? 'ZPL local' : _etqPrinterPref;
+      const label = _etqPrinterPref === '__PDF__' ? 'PDF' : _etqPrinterPref === '__BP__' ? 'Local (BP)' : _etqPrinterPref;
       btn.title = `Impressora: ${label} — clique para trocar`;
       btn.innerHTML = `<i class="fa-solid fa-print"></i><span class="etq-pref-label">${escapeHtml(label)}</span>`;
       btn.classList.add('etq-pref-set');
@@ -24662,7 +24662,7 @@ window.openRegistros = async function() {
 
     // Opções de saída: impressoras físicas do servidor + PDF + ZPL local
     const optPdf = '<option value="__PDF__">📄 PDF (baixar arquivo)</option>';
-    const optZpl = '<option value="__ZPL__">📦 ZPL local (Windows — baixar .zpl)</option>';
+    const optBp  = '<option value="__BP__">🖨️ Impressora local (Zebra Browser Print)</option>';
     const chkPadraoHtml = `<label style="display:flex;align-items:center;gap:4px;color:#94a3b8;font-size:.78rem;white-space:nowrap;cursor:pointer;"><input type="checkbox" id="_etqChkPadrao" style="accent-color:#7c3aed;"> Salvar como padrão</label>`;
     // Pré-selecionar a preferência atual, se houver
     const prefAtual = _etqPrinterPref || '';
@@ -24675,7 +24675,7 @@ window.openRegistros = async function() {
         <div style="display:flex;align-items:center;gap:8px;margin-top:6px;flex-wrap:wrap;">
           <label style="color:#94a3b8;font-size:.8rem;white-space:nowrap;">Sem impressoras físicas. Salvar como:</label>
           <select id="_etqSelectImpressora" style="background:#1e293b;color:#f1f5f9;border:1px solid #334155;border-radius:6px;padding:4px 8px;font-size:.85rem;flex:1;min-width:120px;">
-            ${optPdf}${optZpl}
+            ${optPdf}${optBp}
           </select>
           ${chkPadraoHtml}
           <button id="_etqBtnTentarImpressora" style="background:#7c3aed;color:#fff;border:none;border-radius:6px;padding:5px 12px;font-size:.82rem;cursor:pointer;white-space:nowrap;">
@@ -24704,7 +24704,7 @@ window.openRegistros = async function() {
     }
 
     // Impressoras físicas + opção PDF + opção ZPL no topo
-    const opts = optPdf + optZpl + lista.map(p => `<option value="${escapeHtml(p)}"${prefAtual === p ? ' selected' : ''}>${escapeHtml(p)}</option>`).join('');
+    const opts = optPdf + optBp + lista.map(p => `<option value="${escapeHtml(p)}"${prefAtual === p ? ' selected' : ''}>${escapeHtml(p)}</option>`).join('');
     if (!container) el.style.color = '';
     el.innerHTML = `
       ${msgErro ? `<span style="color:#f87171;font-size:.85rem;">${escapeHtml(msgErro)}</span>` : ''}
@@ -24724,7 +24724,7 @@ window.openRegistros = async function() {
     // Pré-selecionar preferência salva
     if (prefAtual) {
       const sel = document.getElementById('_etqSelectImpressora');
-      if (sel && prefAtual !== '__PDF__' && prefAtual !== '__ZPL__') sel.value = prefAtual;
+      if (sel && prefAtual !== '__PDF__' && prefAtual !== '__BP__') sel.value = prefAtual;
     }
     document.getElementById('_etqBtnTentarImpressora')?.addEventListener('click', () => {
       const sel = document.getElementById('_etqSelectImpressora');
@@ -24960,31 +24960,79 @@ window.openRegistros = async function() {
     }
   }
 
+  // ── Browser Print: envia ZPL direto à impressora local via Zebra Browser Print ──
+  async function _etqImprimirBrowserPrint(ids, btnRef, container) {
+    const statusEl = container || etqStatus;
+    const showSt = (msg, cor = '#94a3b8') => {
+      if (!statusEl) return;
+      if (statusEl.tagName === 'DIV' || statusEl.tagName === 'P') statusEl.innerHTML = escapeHtml(msg);
+      else statusEl.textContent = msg;
+      if (!container) statusEl.style.color = cor;
+    };
+    const clearSt = (delay = 0) => setTimeout(() => { if (statusEl) { statusEl.textContent = ''; if (!container) statusEl.style.color = ''; } }, delay);
+    const origBtn = btnRef ? btnRef.innerHTML : null;
+    if (btnRef) { btnRef.disabled = true; btnRef.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>'; }
+    try {
+      // 1. Verificar se Zebra Browser Print está rodando
+      showSt('Procurando impressora local...', '#facc15');
+      let bpPrinter = null;
+      try {
+        const r = await fetch('http://localhost:9100/default?type=printer', { signal: AbortSignal.timeout(3000) });
+        if (r.ok) bpPrinter = await r.json();
+      } catch { /* Browser Print não disponível */ }
+
+      if (!bpPrinter || !bpPrinter.uid) {
+        if (statusEl) {
+          statusEl.innerHTML = '<span style="color:#f87171;">Zebra Browser Print não encontrado neste PC.</span> ' +
+            '<a href="https://www.zebra.com/us/en/software/printer-software/browser-print.html" target="_blank" rel="noopener noreferrer" style="color:#a78bfa;font-size:.82rem;">'
+            + '<i class="fa-solid fa-arrow-up-right-from-square"></i> Baixar e instalar</a>';
+          if (!container) statusEl.style.color = '';
+          clearSt(10000);
+        }
+        return;
+      }
+
+      // 2. Obter ZPL do servidor (cria ETQ_rec_impresso, marca como impressa)
+      const usuario = (document.getElementById('userNameDisplay')?.textContent || '').trim();
+      showSt(`Enviando para ${bpPrinter.name || 'impressora'}...`, '#facc15');
+      const resp = await fetch('/api/etiquetas/recebimento/imprimir-local', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ ids, usuario }),
+      });
+      if (!resp.ok) { const e = await resp.json().catch(() => ({})); throw new Error(e.error || `Erro ${resp.status}`); }
+      const data = await resp.json();
+      if (!data.ok) throw new Error(data.error || 'Falha ao gerar ZPL');
+
+      // 3. Enviar ZPL ao Browser Print
+      const bpResp = await fetch('http://localhost:9100/write', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ device: bpPrinter, data: data.zpl }),
+        signal: AbortSignal.timeout(10000),
+      });
+      if (!bpResp.ok) throw new Error(`Browser Print: falha ao enviar (${bpResp.status})`);
+
+      showSt(`${data.quantidade} etiqueta(s) enviada(s) para ${bpPrinter.name}.`, '#4ade80');
+      clearSt(4000);
+      await _etqCarregar(etqBusca?.value || '');
+    } catch (err) {
+      showSt(err.message, '#f87171');
+      clearSt(7000);
+    } finally {
+      if (btnRef) { btnRef.disabled = false; btnRef.innerHTML = origBtn || '<i class="fa-solid fa-print"></i> Imprimir'; }
+    }
+  }
+
   // ── Dispara impressão, com retry usando impressora alternativa ──────────
   async function _etqImprimirIds(ids, btnRef, printer = null) {
     if (!ids || ids.length === 0) return;
     // Aplicar preferência salva se nenhuma impressora foi explicitamente passada
     if (printer === null || printer === undefined) printer = _etqPrinterPref || null;
-    // Opção ZPL local: baixar arquivo .zpl para impressão em Windows
-    if (printer === '__ZPL__') {
-      if (btnRef) { btnRef.disabled = true; btnRef.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>'; }
-      try {
-        const usuario = (document.getElementById('userNameDisplay')?.textContent || '').trim();
-        const resp = await fetch('/api/etiquetas/recebimento/zpl-download?ids=' + ids.join(',') + '&usuario=' + encodeURIComponent(usuario), { credentials: 'include' });
-        if (!resp.ok) throw new Error(`Erro ${resp.status}`);
-        const blob = await resp.blob();
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url; a.download = `etiquetas_${ids.join('-')}.zpl`;
-        document.body.appendChild(a); a.click();
-        setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 1000);
-        if (etqStatus) { etqStatus.textContent = 'Arquivo ZPL baixado. Abra-o na impressora Zebra local.'; etqStatus.style.color = '#4ade80'; setTimeout(() => { if (etqStatus) { etqStatus.textContent = ''; etqStatus.style.color = ''; } }, 5000); }
-        await _etqCarregar(etqBusca?.value || '');
-      } catch (err) {
-        if (etqStatus) { etqStatus.textContent = err.message; etqStatus.style.color = '#f87171'; setTimeout(() => { if (etqStatus) { etqStatus.textContent = ''; etqStatus.style.color = ''; } }, 6000); }
-      } finally {
-        if (btnRef) { btnRef.disabled = false; btnRef.innerHTML = '<i class="fa-solid fa-print"></i> Imprimir'; }
-      }
+    // Impressão local via Zebra Browser Print
+    if (printer === '__BP__') {
+      await _etqImprimirBrowserPrint(ids, btnRef);
       return;
     }
     // Opção PDF: baixa via fetch para saber quando concluiu e recarregar a lista
@@ -25072,7 +25120,7 @@ window.openRegistros = async function() {
     _etqMostrarSeletorImpressora(null, (p) => {
       _etqSalvarPref(p);
       if (etqStatus) {
-        const label = p === '__PDF__' ? 'PDF' : p === '__ZPL__' ? 'ZPL local' : p;
+        const label = p === '__PDF__' ? 'PDF' : p === '__BP__' ? 'Local (BP)' : p;
         etqStatus.textContent = `Impressora padrão salva: ${label}`;
         etqStatus.style.color = '#4ade80';
         setTimeout(() => { if (etqStatus) { etqStatus.textContent = ''; etqStatus.style.color = ''; } }, 3000);
@@ -25216,26 +25264,46 @@ window.openRegistros = async function() {
   // Dispara impressão múltiplo, com retry para impressora alternativa
   async function _etqMplImprimirComImpressora(idEtq, multiplo, printer) {
     if (!etqMplGerar) return;
-    // Opção ZPL local: baixar arquivo .zpl (sem suporte a múltiplo — usa lógica simples)
-    if (printer === '__ZPL__') {
+    // Impressão local via Zebra Browser Print (com multiplo)
+    if (printer === '__BP__') {
+      const origHtml = etqMplGerar.innerHTML;
       etqMplGerar.disabled = true;
-      etqMplGerar.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Gerando...';
+      etqMplGerar.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Enviando...';
       try {
+        const statusEl = etqMplPreview;
+        const showSt = (msg, cor = '#94a3b8') => { if (statusEl) statusEl.innerHTML = `<span style="color:${cor};">${escapeHtml(msg)}</span>`; };
+        // Verificar Browser Print
+        let bpPrinter = null;
+        try {
+          const r = await fetch('http://localhost:9100/default?type=printer', { signal: AbortSignal.timeout(3000) });
+          if (r.ok) bpPrinter = await r.json();
+        } catch { /* sem Browser Print */ }
+        if (!bpPrinter || !bpPrinter.uid) {
+          showSt('Zebra Browser Print não encontrado neste PC. Instale em zebra.com/browserprint', '#f87171');
+          etqMplGerar.disabled = false; etqMplGerar.innerHTML = origHtml; return;
+        }
         const usuario = (document.getElementById('userNameDisplay')?.textContent || '').trim();
-        const url = `/api/etiquetas/recebimento/zpl-download?ids=${idEtq}&usuario=${encodeURIComponent(usuario)}`;
-        const resp = await fetch(url, { credentials: 'include' });
-        if (!resp.ok) throw new Error(`Erro ${resp.status}`);
-        const blob = await resp.blob();
-        const urlObj = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = urlObj; a.download = `etiqueta_${idEtq}.zpl`;
-        document.body.appendChild(a); a.click();
-        setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(urlObj); }, 1000);
+        showSt(`Enviando para ${bpPrinter.name || 'impressora'}...`, '#facc15');
+        const resp = await fetch('/api/etiquetas/recebimento/imprimir-local', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ ids: [idEtq], multiplo, usuario }),
+        });
+        if (!resp.ok) { const e = await resp.json().catch(() => ({})); throw new Error(e.error || `Erro ${resp.status}`); }
+        const data = await resp.json();
+        if (!data.ok) throw new Error(data.error || 'Falha ao gerar ZPL');
+        const bpResp = await fetch('http://localhost:9100/write', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ device: bpPrinter, data: data.zpl }),
+          signal: AbortSignal.timeout(10000),
+        });
+        if (!bpResp.ok) throw new Error(`Browser Print: falha (${bpResp.status})`);
         _etqMplFecharFn();
         await _etqCarregar(etqBusca?.value || '');
       } catch (err) {
-        etqMplGerar.disabled = false;
-        etqMplGerar.innerHTML = '<i class="fa-solid fa-print"></i> Gerar etiquetas';
+        etqMplGerar.disabled = false; etqMplGerar.innerHTML = origHtml;
         if (etqMplPreview) etqMplPreview.innerHTML = `<span style="color:#f87171;">${escapeHtml(err.message)}</span>`;
       }
       return;
