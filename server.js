@@ -10570,7 +10570,7 @@ function _gerarZplRecebimentoBloco({ codProd, descProd, loteTxt, dataExibir, idE
 // ── Helper: traduz erros técnicos do lpr para mensagens amigáveis ──────────
 function _friendlyLprError(msg) {
   const s = String(msg || '');
-  if (/does not exist/i.test(s))       return `Impressora "${process.env.PRINTER || 'ZebraZD220'}" não encontrada. Verifique se ela está instalada no sistema.`;
+  if (/does not exist/i.test(s))       return `Impressora "${process.env.PRINTER || 'zebra'}" não encontrada. Verifique se ela está instalada no sistema.`;
   if (/unable to connect/i.test(s))    return 'Não foi possível conectar à impressora. Verifique se ela está ligada e acessível na rede.';
   if (/permission denied/i.test(s))    return 'Sem permissão para acessar a impressora. Verifique as permissões do usuário.';
   if (/connection refused/i.test(s))   return 'Conexão com a impressora recusada. Verifique se o serviço de impressão está ativo.';
@@ -10848,9 +10848,9 @@ app.get('/api/etiquetas/impressoras', async (req, res) => {
         resolve(nomes);
       });
     });
-    res.json({ impressoras: lista, padrao: process.env.PRINTER || 'ZebraZD220' });
+    res.json({ impressoras: lista, padrao: process.env.PRINTER || 'zebra' });
   } catch (err) {
-    res.json({ impressoras: [], padrao: process.env.PRINTER || 'ZebraZD220' });
+    res.json({ impressoras: [], padrao: process.env.PRINTER || 'zebra' });
   }
 });
 
@@ -10947,6 +10947,64 @@ app.get('/api/etiquetas/recebimento/pdf-download', async (req, res) => {
   } catch (err) {
     console.error('[etiquetas/recebimento/pdf-download]', err);
     res.status(500).json({ error: err?.message || 'Falha ao gerar PDF' });
+  }
+});
+
+// GET /api/etiquetas/recebimento/zpl-download?ids=1,2,3[&usuario=xxx]
+// Retorna arquivo ZPL bruto para impressão local (Windows com driver Zebra instalado).
+// Mesmo fluxo do pdf-download: cria ETQ_rec_impresso e marca ETQ_recebimento como impressa.
+app.get('/api/etiquetas/recebimento/zpl-download', async (req, res) => {
+  try {
+    const ids = String(req.query.ids || '').split(',').map(Number).filter(n => n > 0);
+    if (!ids.length) return res.status(400).json({ error: 'Informe os ids.' });
+
+    const result = await pool.query(
+      `SELECT id, codigo_produto, descricao_produto, lote, data_emissao, qtd, unidade
+         FROM etiqueta."ETQ_recebimento"
+        WHERE id = ANY($1::int[]) ORDER BY id`,
+      [ids]
+    );
+    if (!result.rows.length) return res.status(404).json({ error: 'Nenhuma etiqueta encontrada.' });
+
+    const sanitize = (v, max = 999) => String(v || '').slice(0, max).replace(/[\\^~]/g, ' ');
+    const usuarioImpressao = String(req.query.usuario || req.session?.user?.login || req.session?.usuario || '').trim();
+    const zplBlocks = [];
+
+    for (const row of result.rows) {
+      const codProd    = sanitize(row.codigo_produto, 30);
+      const descProd   = sanitize(row.descricao_produto, 70);
+      const loteTxt    = sanitize(row.lote, 40);
+      const dataExibir = sanitize(row.data_emissao, 10);
+
+      const ins = await pool.query(
+        `INSERT INTO etiqueta."ETQ_rec_impresso"
+           (origem_id, qtd, unidade, data_emissao, conteudo_zpl, usuario_criacao)
+         VALUES ($1,$2,$3,$4,'',$5)
+         RETURNING id`,
+        [row.id, row.qtd, row.unidade, row.data_emissao, usuarioImpressao]
+      );
+      const idImpresso = ins.rows[0].id;
+      const zpl = _gerarZplParaImpressao({ codProd, descProd, idImpresso, loteTxt, dataExibir });
+
+      await pool.query(
+        `UPDATE etiqueta."ETQ_rec_impresso" SET conteudo_zpl = $1 WHERE id = $2`,
+        [zpl, idImpresso]
+      );
+      zplBlocks.push(zpl);
+    }
+
+    await pool.query(
+      `UPDATE etiqueta."ETQ_recebimento" SET qtd = 0, impressa = true WHERE id = ANY($1::int[])`,
+      [ids]
+    );
+
+    res.setHeader('Content-Type', 'application/octet-stream');
+    res.setHeader('Content-Disposition', `attachment; filename="etiquetas_${ids.join('-')}.zpl"`);
+    res.setHeader('Cache-Control', 'no-store');
+    res.send(Buffer.from(zplBlocks.join('\n'), 'utf8'));
+  } catch (err) {
+    console.error('[etiquetas/recebimento/zpl-download]', err);
+    res.status(500).json({ error: err?.message || 'Falha ao gerar ZPL' });
   }
 });
 
@@ -11106,7 +11164,7 @@ app.post('/api/etiquetas/recebimento/imprimir-modal', express.json(), async (req
     const sanitize = (v, max = 999) => String(v || '').slice(0, max).replace(/[\\^~]/g, ' ');
     const dirPrint = path.join(__dirname, 'etiquetas', 'Recebimento', 'Printed');
     fs.mkdirSync(dirPrint, { recursive: true });
-    const printerName = String(req.body?.printer || process.env.PRINTER || 'ZebraZD220').trim();
+    const printerName = String(req.body?.printer || process.env.PRINTER || 'zebra').trim();
     const usuarioImpressao = String(req.body?.usuario || req.session?.user?.login || req.session?.usuario || '').trim();
     const erros = [];
 
@@ -11223,7 +11281,7 @@ app.post('/api/etiquetas/recebimento/imprimir-multiplo', express.json(), async (
 
     const dirPrint    = path.join(__dirname, 'etiquetas', 'Recebimento', 'Printed');
     fs.mkdirSync(dirPrint, { recursive: true });
-    const printerName = String(req.body?.printer || process.env.PRINTER || 'ZebraZD220').trim();
+    const printerName = String(req.body?.printer || process.env.PRINTER || 'zebra').trim();
     const usuarioImpressao = String(req.body?.usuario || req.session?.user?.login || req.session?.usuario || '').trim();
     const erros       = [];
 

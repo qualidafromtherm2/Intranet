@@ -9246,6 +9246,9 @@
         <button id="etqBtnVerOcultos" class="etq-view-btn" title="Exibir ocultos">
           <i class="fa-solid fa-eye-slash"></i>
         </button>
+        <button id="etqBtnImpressora" class="etq-view-btn" title="Impressora não definida — clique para configurar" style="gap:3px;">
+          <i class="fa-solid fa-print"></i><i class="fa-solid fa-question" style="font-size:.6rem;margin-left:1px;"></i>
+        </button>
       </div>
       <button id="etiquetasImprimirSelecionadas" class="etiquetas-btn-imprimir-sel" title="Imprimir etiquetas selecionadas" style="display:none;">
         <i class="fa-solid fa-print"></i>
@@ -9573,6 +9576,10 @@
   .etq-view-btn:hover { color: #a78bfa; }
   .etq-view-btn.active { background: #7c3aed; color: #fff; }
   #etqBtnVerOcultos.active { background: #b45309; color: #fef3c7; }
+  #etqBtnImpressora { width: auto; min-width: 32px; padding: 0 6px; gap: 3px; color: #f87171; }
+  #etqBtnImpressora.etq-pref-set { color: #a78bfa; }
+  #etqBtnImpressora:hover { color: #c4b5fd; }
+  .etq-pref-label { font-size: .65rem; max-width: 70px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
   /* ── Modo lista ───────────────────────────────────────────────────────── */
   .etiquetas-grid.view-list {

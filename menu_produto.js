@@ -24560,6 +24560,36 @@ window.openRegistros = async function() {
   let _etqDebounce = null;
   let _etqViewMode = 'list'; // 'list' | 'grid'
   let _etqMostrarOcultos = false; // quando true, mostra apenas itens ocultos
+  let _etqPrinterPref = null; // impressora preferida salva no localStorage por usuário
+
+  function _etqPrefKey() {
+    const u = (document.getElementById('userNameDisplay')?.textContent || 'user').trim().replace(/\s+/g, '_');
+    return `etq_printer_pref_${u}`;
+  }
+  function _etqCarregarPref() {
+    _etqPrinterPref = localStorage.getItem(_etqPrefKey()) || null;
+    _etqAtualizarBtnPref();
+  }
+  function _etqSalvarPref(printer) {
+    _etqPrinterPref = printer || null;
+    if (printer) localStorage.setItem(_etqPrefKey(), printer);
+    else localStorage.removeItem(_etqPrefKey());
+    _etqAtualizarBtnPref();
+  }
+  function _etqAtualizarBtnPref() {
+    const btn = document.getElementById('etqBtnImpressora');
+    if (!btn) return;
+    if (_etqPrinterPref) {
+      const label = _etqPrinterPref === '__PDF__' ? 'PDF' : _etqPrinterPref === '__ZPL__' ? 'ZPL local' : _etqPrinterPref;
+      btn.title = `Impressora: ${label} — clique para trocar`;
+      btn.innerHTML = `<i class="fa-solid fa-print"></i><span class="etq-pref-label">${escapeHtml(label)}</span>`;
+      btn.classList.add('etq-pref-set');
+    } else {
+      btn.title = 'Impressora não definida — clique para configurar';
+      btn.innerHTML = '<i class="fa-solid fa-print"></i><i class="fa-solid fa-question" style="font-size:.6rem;margin-left:1px;"></i>';
+      btn.classList.remove('etq-pref-set');
+    }
+  }
 
   const etqModal     = document.getElementById('etiquetasModal');
   const etqGrid      = document.getElementById('etiquetasModalGrid');
@@ -24630,29 +24660,42 @@ window.openRegistros = async function() {
       lista = d.impressoras || [];
     } catch (_) {}
 
-    // PDF está sempre disponível, independente de impressoras físicas
+    // Opções de saída: impressoras físicas do servidor + PDF + ZPL local
     const optPdf = '<option value="__PDF__">📄 PDF (baixar arquivo)</option>';
+    const optZpl = '<option value="__ZPL__">📦 ZPL local (Windows — baixar .zpl)</option>';
+    const chkPadraoHtml = `<label style="display:flex;align-items:center;gap:4px;color:#94a3b8;font-size:.78rem;white-space:nowrap;cursor:pointer;"><input type="checkbox" id="_etqChkPadrao" style="accent-color:#7c3aed;"> Salvar como padrão</label>`;
+    // Pré-selecionar a preferência atual, se houver
+    const prefAtual = _etqPrinterPref || '';
 
     if (lista.length === 0) {
-      // Sem impressoras físicas: oferece apenas PDF
+      // Sem impressoras físicas: oferece PDF e ZPL
       if (!container) el.style.color = '';
       el.innerHTML = `
         ${msgErro ? `<span style="color:#f87171;font-size:.85rem;">${escapeHtml(msgErro)}</span>` : ''}
         <div style="display:flex;align-items:center;gap:8px;margin-top:6px;flex-wrap:wrap;">
           <label style="color:#94a3b8;font-size:.8rem;white-space:nowrap;">Sem impressoras físicas. Salvar como:</label>
           <select id="_etqSelectImpressora" style="background:#1e293b;color:#f1f5f9;border:1px solid #334155;border-radius:6px;padding:4px 8px;font-size:.85rem;flex:1;min-width:120px;">
-            ${optPdf}
+            ${optPdf}${optZpl}
           </select>
+          ${chkPadraoHtml}
           <button id="_etqBtnTentarImpressora" style="background:#7c3aed;color:#fff;border:none;border-radius:6px;padding:5px 12px;font-size:.82rem;cursor:pointer;white-space:nowrap;">
-            <i class="fa-solid fa-file-pdf"></i> Baixar PDF
+            <i class="fa-solid fa-download"></i> Baixar
           </button>
           <button id="_etqBtnCancelarImpressora" style="background:#374151;color:#94a3b8;border:none;border-radius:6px;padding:5px 10px;font-size:.82rem;cursor:pointer;">
             Cancelar
           </button>
         </div>`;
+      if (prefAtual) {
+        const sel = document.getElementById('_etqSelectImpressora');
+        if (sel) sel.value = prefAtual;
+      }
       document.getElementById('_etqBtnTentarImpressora')?.addEventListener('click', () => {
+        const sel = document.getElementById('_etqSelectImpressora');
+        const printer = sel?.value || '__PDF__';
+        const salvar = document.getElementById('_etqChkPadrao')?.checked;
         el.innerHTML = ''; if (!container) el.style.color = '';
-        onConfirm('__PDF__');
+        if (salvar) _etqSalvarPref(printer);
+        onConfirm(printer);
       });
       document.getElementById('_etqBtnCancelarImpressora')?.addEventListener('click', () => {
         el.innerHTML = ''; if (!container) el.style.color = '';
@@ -24660,8 +24703,8 @@ window.openRegistros = async function() {
       return;
     }
 
-    // Impressoras físicas + opção PDF no topo
-    const opts = optPdf + lista.map(p => `<option value="${escapeHtml(p)}">${escapeHtml(p)}</option>`).join('');
+    // Impressoras físicas + opção PDF + opção ZPL no topo
+    const opts = optPdf + optZpl + lista.map(p => `<option value="${escapeHtml(p)}"${prefAtual === p ? ' selected' : ''}>${escapeHtml(p)}</option>`).join('');
     if (!container) el.style.color = '';
     el.innerHTML = `
       ${msgErro ? `<span style="color:#f87171;font-size:.85rem;">${escapeHtml(msgErro)}</span>` : ''}
@@ -24670,6 +24713,7 @@ window.openRegistros = async function() {
         <select id="_etqSelectImpressora" style="background:#1e293b;color:#f1f5f9;border:1px solid #334155;border-radius:6px;padding:4px 8px;font-size:.85rem;flex:1;min-width:120px;">
           ${opts}
         </select>
+        ${chkPadraoHtml}
         <button id="_etqBtnTentarImpressora" style="background:#7c3aed;color:#fff;border:none;border-radius:6px;padding:5px 12px;font-size:.82rem;cursor:pointer;white-space:nowrap;">
           <i class="fa-solid fa-print"></i> Imprimir
         </button>
@@ -24677,11 +24721,17 @@ window.openRegistros = async function() {
           Cancelar
         </button>
       </div>`;
-
+    // Pré-selecionar preferência salva
+    if (prefAtual) {
+      const sel = document.getElementById('_etqSelectImpressora');
+      if (sel && prefAtual !== '__PDF__' && prefAtual !== '__ZPL__') sel.value = prefAtual;
+    }
     document.getElementById('_etqBtnTentarImpressora')?.addEventListener('click', () => {
       const sel = document.getElementById('_etqSelectImpressora');
       const printer = sel?.value || '';
+      const salvar = document.getElementById('_etqChkPadrao')?.checked;
       el.innerHTML = ''; if (!container) el.style.color = '';
+      if (salvar && printer) _etqSalvarPref(printer);
       if (printer) onConfirm(printer);
     });
     document.getElementById('_etqBtnCancelarImpressora')?.addEventListener('click', () => {
@@ -24913,6 +24963,30 @@ window.openRegistros = async function() {
   // ── Dispara impressão, com retry usando impressora alternativa ──────────
   async function _etqImprimirIds(ids, btnRef, printer = null) {
     if (!ids || ids.length === 0) return;
+    // Aplicar preferência salva se nenhuma impressora foi explicitamente passada
+    if (printer === null || printer === undefined) printer = _etqPrinterPref || null;
+    // Opção ZPL local: baixar arquivo .zpl para impressão em Windows
+    if (printer === '__ZPL__') {
+      if (btnRef) { btnRef.disabled = true; btnRef.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>'; }
+      try {
+        const usuario = (document.getElementById('userNameDisplay')?.textContent || '').trim();
+        const resp = await fetch('/api/etiquetas/recebimento/zpl-download?ids=' + ids.join(',') + '&usuario=' + encodeURIComponent(usuario), { credentials: 'include' });
+        if (!resp.ok) throw new Error(`Erro ${resp.status}`);
+        const blob = await resp.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url; a.download = `etiquetas_${ids.join('-')}.zpl`;
+        document.body.appendChild(a); a.click();
+        setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 1000);
+        if (etqStatus) { etqStatus.textContent = 'Arquivo ZPL baixado. Abra-o na impressora Zebra local.'; etqStatus.style.color = '#4ade80'; setTimeout(() => { if (etqStatus) { etqStatus.textContent = ''; etqStatus.style.color = ''; } }, 5000); }
+        await _etqCarregar(etqBusca?.value || '');
+      } catch (err) {
+        if (etqStatus) { etqStatus.textContent = err.message; etqStatus.style.color = '#f87171'; setTimeout(() => { if (etqStatus) { etqStatus.textContent = ''; etqStatus.style.color = ''; } }, 6000); }
+      } finally {
+        if (btnRef) { btnRef.disabled = false; btnRef.innerHTML = '<i class="fa-solid fa-print"></i> Imprimir'; }
+      }
+      return;
+    }
     // Opção PDF: baixa via fetch para saber quando concluiu e recarregar a lista
     if (printer === '__PDF__') {
       if (btnRef) { btnRef.disabled = true; btnRef.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>'; }
@@ -24989,7 +25063,21 @@ window.openRegistros = async function() {
     if (!etqModal) return;
     etqModal.style.display = 'flex';
     if (etqBusca) etqBusca.value = '';
+    _etqCarregarPref(); // carrega preferência de impressora do usuário
     await _etqCarregar();
+  });
+
+  // Botão de configuração de impressora padrão
+  document.getElementById('etqBtnImpressora')?.addEventListener('click', () => {
+    _etqMostrarSeletorImpressora(null, (p) => {
+      _etqSalvarPref(p);
+      if (etqStatus) {
+        const label = p === '__PDF__' ? 'PDF' : p === '__ZPL__' ? 'ZPL local' : p;
+        etqStatus.textContent = `Impressora padrão salva: ${label}`;
+        etqStatus.style.color = '#4ade80';
+        setTimeout(() => { if (etqStatus) { etqStatus.textContent = ''; etqStatus.style.color = ''; } }, 3000);
+      }
+    });
   });
 
 
@@ -25117,13 +25205,41 @@ window.openRegistros = async function() {
   etqMplGerar?.addEventListener('click', async () => {
     const m = Number(etqMplInput?.value);
     if (!_etqMplIdAtual || !m || m <= 0) return;
-    // Abre seletor de impressora dentro do modal (passa etqMplPreview como container)
-    _etqMostrarSeletorImpressora(null, (p) => _etqMplImprimirComImpressora(_etqMplIdAtual, m, p), etqMplPreview);
+    // Usar preferência salva; se não houver, abrir seletor
+    if (_etqPrinterPref) {
+      await _etqMplImprimirComImpressora(_etqMplIdAtual, m, _etqPrinterPref);
+    } else {
+      _etqMostrarSeletorImpressora(null, (p) => _etqMplImprimirComImpressora(_etqMplIdAtual, m, p), etqMplPreview);
+    }
   });
 
   // Dispara impressão múltiplo, com retry para impressora alternativa
   async function _etqMplImprimirComImpressora(idEtq, multiplo, printer) {
     if (!etqMplGerar) return;
+    // Opção ZPL local: baixar arquivo .zpl (sem suporte a múltiplo — usa lógica simples)
+    if (printer === '__ZPL__') {
+      etqMplGerar.disabled = true;
+      etqMplGerar.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Gerando...';
+      try {
+        const usuario = (document.getElementById('userNameDisplay')?.textContent || '').trim();
+        const url = `/api/etiquetas/recebimento/zpl-download?ids=${idEtq}&usuario=${encodeURIComponent(usuario)}`;
+        const resp = await fetch(url, { credentials: 'include' });
+        if (!resp.ok) throw new Error(`Erro ${resp.status}`);
+        const blob = await resp.blob();
+        const urlObj = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = urlObj; a.download = `etiqueta_${idEtq}.zpl`;
+        document.body.appendChild(a); a.click();
+        setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(urlObj); }, 1000);
+        _etqMplFecharFn();
+        await _etqCarregar(etqBusca?.value || '');
+      } catch (err) {
+        etqMplGerar.disabled = false;
+        etqMplGerar.innerHTML = '<i class="fa-solid fa-print"></i> Gerar etiquetas';
+        if (etqMplPreview) etqMplPreview.innerHTML = `<span style="color:#f87171;">${escapeHtml(err.message)}</span>`;
+      }
+      return;
+    }
     // Opção PDF: baixa via fetch, passa multiplo para floor+remainder no backend
     if (printer === '__PDF__') {
       etqMplGerar.disabled = true;
