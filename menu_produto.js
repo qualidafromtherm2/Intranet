@@ -3174,20 +3174,17 @@ function renderAlmoxTable(arr) {
 function toggleHeaderIcons(isLoggedIn) {
   const bellWrapper = document.getElementById('notification-wrapper');
   const cartIcon = document.getElementById('cart-icon');
-  const printIcon = document.getElementById('print-icon');
   const configIcon = document.getElementById('config-icon');
 
   if (isLoggedIn) {
     // Mostra os ícones quando usuário está logado
     if (bellWrapper) bellWrapper.style.display = 'block';
     if (cartIcon) cartIcon.style.display = 'inline-block';
-    if (printIcon) printIcon.style.display = 'inline-block';
     if (configIcon) configIcon.style.display = 'inline-block';
   } else {
     // Oculta os ícones quando usuário não está logado
     if (bellWrapper) bellWrapper.style.display = 'none';
     if (cartIcon) cartIcon.style.display = 'none';
-    if (printIcon) printIcon.style.display = 'none';
     if (configIcon) configIcon.style.display = 'none';
   }
 }
@@ -24143,7 +24140,7 @@ if (document.readyState === 'loading') {
 /* dentro do MESMO callback que já existe */
 const bell       = document.getElementById('bell-icon');
 const homeBtn    = document.getElementById('home-icon');
-const printBtn   = document.getElementById('print-icon');
+const printBtn   = document.getElementById('menu-identificacao-produto');
 const cloudBtn   = document.getElementById('cloud-icon');
 const avatar     = document.getElementById('profile-icon');
 const etiquetasModal = document.getElementById('etiquetasModal');
@@ -24561,6 +24558,8 @@ window.openRegistros = async function() {
   // ── Estado do modal ────────────────────────────────────────────────────
   let _etqSelecionadas = new Set(); // ids selecionados
   let _etqDebounce = null;
+  let _etqViewMode = 'list'; // 'list' | 'grid'
+  let _etqMostrarOcultos = false; // quando true, mostra apenas itens ocultos
 
   const etqModal     = document.getElementById('etiquetasModal');
   const etqGrid      = document.getElementById('etiquetasModalGrid');
@@ -24569,6 +24568,42 @@ window.openRegistros = async function() {
   const etqBtnSel    = document.getElementById('etiquetasImprimirSelecionadas');
   const etqSelCount  = document.getElementById('etiquetasSelCount');
   const etqFechar    = document.getElementById('etiquetasModalFechar');
+  const etqBtnViewLista = document.getElementById('etqBtnViewLista');
+  const etqBtnViewGrade = document.getElementById('etqBtnViewGrade');
+  const etqBtnVerOcultos = document.getElementById('etqBtnVerOcultos');
+
+  function _etqAplicarViewMode() {
+    if (!etqGrid) return;
+    if (_etqViewMode === 'list') {
+      etqGrid.classList.add('view-list');
+      etqBtnViewLista?.classList.add('active');
+      etqBtnViewGrade?.classList.remove('active');
+    } else {
+      etqGrid.classList.remove('view-list');
+      etqBtnViewGrade?.classList.add('active');
+      etqBtnViewLista?.classList.remove('active');
+    }
+  }
+
+  etqBtnViewLista?.addEventListener('click', () => {
+    _etqViewMode = 'list';
+    _etqAplicarViewMode();
+  });
+  etqBtnViewGrade?.addEventListener('click', () => {
+    _etqViewMode = 'grid';
+    _etqAplicarViewMode();
+  });
+
+  // Aplicar modo padrão (lista) no carregamento
+  _etqAplicarViewMode();
+
+  // Botão exibir ocultos
+  etqBtnVerOcultos?.addEventListener('click', () => {
+    _etqMostrarOcultos = !_etqMostrarOcultos;
+    etqBtnVerOcultos.classList.toggle('active', _etqMostrarOcultos);
+    etqBtnVerOcultos.title = _etqMostrarOcultos ? 'Exibir todos (não ocultos)' : 'Exibir ocultos';
+    _etqCarregar(etqBusca?.value || '');
+  });
 
   function _etqAtualizarBotaoSel() {
     if (!etqBtnSel || !etqSelCount) return;
@@ -24662,19 +24697,52 @@ window.openRegistros = async function() {
       return;
     }
 
-    if (etqStatus) etqStatus.textContent = `${etiquetas.length} etiqueta(s) pendente(s)`;
+    const pendentes = etiquetas.filter(e => !e.impressa).length;
+    const impressas = etiquetas.filter(e => e.impressa).length;
+    if (etqStatus) {
+      let txt = `${etiquetas.length} etiqueta(s)`;
+      if (pendentes && impressas) txt += ` · ${pendentes} pendente(s), ${impressas} impressa(s)`;
+      else if (impressas) txt += ` impressa(s)`;
+      else txt += ` pendente(s)`;
+      etqStatus.textContent = txt;
+    }
 
     etqGrid.innerHTML = etiquetas.map(e => {
-      const cod   = escapeHtml(String(e.codigo_produto  || '—'));
-      const desc  = escapeHtml(String(e.descricao_produto || '—'));
-      const lote  = escapeHtml(String(e.lote || '—'));
-      const qtd   = escapeHtml(String(e.qtd  != null ? e.qtd : ''));
-      const unid  = escapeHtml(String(e.unidade || ''));
-      const data  = escapeHtml(String(e.data_emissao || ''));
-      const id    = Number(e.id);
-      const qtdRaw = e.qtd != null ? Number(e.qtd) || 0 : 0;
+      const cod     = escapeHtml(String(e.codigo_produto  || '—'));
+      const desc    = escapeHtml(String(e.descricao_produto || '—'));
+      const lote    = escapeHtml(String(e.lote || '—'));
+      const qtd     = escapeHtml(String(e.qtd  != null ? e.qtd : ''));
+      const unid    = escapeHtml(String(e.unidade || ''));
+      const data    = escapeHtml(String(e.data_emissao || ''));
+      const id      = Number(e.id);
+      const qtdRaw  = e.qtd != null ? Number(e.qtd) || 0 : 0;
+      const impressa    = !!e.impressa;
+      const idImpresso  = e.id_impresso ? Number(e.id_impresso) : 0;
+
+      const acoes = impressa
+        ? `<div class="etq-card-actions">
+            <button class="etq-btn-reimprimir" data-id="${id}" title="Marcar como não impresso e reabrir para impressão">
+              <i class="fa-solid fa-rotate-left"></i> Reimprimir
+            </button>
+            <button class="etq-btn-armazenar" data-id="${id}" data-id-impresso="${idImpresso}" title="Armazenar produto">
+              <i class="fa-solid fa-box-archive"></i> Armazenar
+            </button>
+          </div>`
+        : `<div class="etq-card-actions">
+            <input type="checkbox" class="etq-check-sel" data-id="${id}" title="Selecionar">
+            <button class="etq-btn-imprimir-unit" data-id="${id}" title="Imprimir esta etiqueta">
+              <i class="fa-solid fa-print"></i> Imprimir
+            </button>
+            <button class="etq-btn-multiplo" data-id="${id}" title="Dividir em múltiplas etiquetas">
+              <i class="fa-solid fa-layer-group"></i> Múltiplo
+            </button>
+            <button class="etq-btn-ocultar" data-id="${id}" title="${_etqMostrarOcultos ? 'Desocultar esta etiqueta' : 'Ocultar esta etiqueta'}">
+              <i class="fa-solid ${_etqMostrarOcultos ? 'fa-eye' : 'fa-eye-slash'}"></i>
+            </button>
+          </div>`;
+
       return `
-      <div class="etq-card" data-id="${id}" data-qtd="${qtdRaw}" data-cod="${cod}" data-desc="${desc}" data-lote="${lote}" data-unid="${unid}" data-data="${data}">
+      <div class="etq-card${impressa ? ' etq-card--impressa' : ''}" data-id="${id}" data-qtd="${qtdRaw}" data-cod="${cod}" data-desc="${desc}" data-lote="${lote}" data-unid="${unid}" data-data="${data}" data-impressa="${impressa}">
         <div class="etq-card-thumbnail">
           <div class="etq-thumb-row">
             <div class="etq-thumb-qr"><i class="fa-solid fa-qrcode" style="font-size:18px;color:#888;"></i></div>
@@ -24693,23 +24761,18 @@ window.openRegistros = async function() {
           <div class="etq-card-cod">${cod}</div>
           <div class="etq-card-desc" title="${desc}">${desc}</div>
           <div class="etq-card-lote">Lote: ${lote}</div>
+          <div class="etq-card-qty">${qtd}${unid ? ' '+unid : ''}${impressa ? ' <span class="etq-badge-impressa"><i class="fa-solid fa-check"></i> Impresso</span>' : ''}</div>
         </div>
-        <div class="etq-card-actions">
-          <input type="checkbox" class="etq-check-sel" data-id="${id}" title="Selecionar">
-          <button class="etq-btn-imprimir-unit" data-id="${id}" title="Imprimir esta etiqueta">
-            <i class="fa-solid fa-print"></i> Imprimir
-          </button>
-          <button class="etq-btn-multiplo" data-id="${id}" title="Dividir em múltiplas etiquetas">
-            <i class="fa-solid fa-layer-group"></i> Múltiplo
-          </button>
-        </div>
+        ${acoes}
       </div>`;
     }).join('');
 
     // Clique no card seleciona
     etqGrid.querySelectorAll('.etq-card').forEach(card => {
       card.addEventListener('click', e => {
-        if (e.target.matches('.etq-check-sel') || e.target.matches('.etq-btn-imprimir-unit') || e.target.closest('.etq-btn-imprimir-unit') || e.target.matches('.etq-btn-multiplo') || e.target.closest('.etq-btn-multiplo')) return;
+        if (e.target.matches('.etq-check-sel') || e.target.matches('.etq-btn-imprimir-unit') || e.target.closest('.etq-btn-imprimir-unit') || e.target.matches('.etq-btn-multiplo') || e.target.closest('.etq-btn-multiplo') || e.target.matches('.etq-btn-ocultar') || e.target.closest('.etq-btn-ocultar') || e.target.matches('.etq-btn-reimprimir') || e.target.closest('.etq-btn-reimprimir') || e.target.matches('.etq-btn-armazenar') || e.target.closest('.etq-btn-armazenar')) return;
+        // Não selecionar cards impressos (só têm reimprimir/armazenar)
+        if (card.dataset.impressa === 'true') return;
         const id = Number(card.dataset.id);
         const cb = card.querySelector('.etq-check-sel');
         if (_etqSelecionadas.has(id)) {
@@ -24761,6 +24824,71 @@ window.openRegistros = async function() {
         );
       });
     });
+
+    // Botão Ocultar / Desocultar
+    etqGrid.querySelectorAll('.etq-btn-ocultar').forEach(btn => {
+      btn.addEventListener('click', async e => {
+        e.stopPropagation();
+        const id = Number(btn.dataset.id);
+        const novoOculto = !_etqMostrarOcultos; // ocultar quando em modo normal; desocultar quando em modo ocultos
+        btn.disabled = true;
+        try {
+          const resp = await fetch(`/api/etiquetas/recebimento/${id}/oculto`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
+            body: JSON.stringify({ oculto: novoOculto }),
+          });
+          if (!resp.ok) throw new Error(`Erro ${resp.status}`);
+          // Remove o card da lista imediatamente
+          btn.closest('.etq-card')?.remove();
+          // Atualiza contagem no status
+          const restantes = etqGrid?.querySelectorAll('.etq-card').length || 0;
+          if (etqStatus) etqStatus.textContent = `${restantes} etiqueta(s) ${_etqMostrarOcultos ? 'oculta(s)' : 'pendente(s)'}${restantes === 0 ? '' : ''}`;
+          if (restantes === 0) {
+            etqGrid.innerHTML = `<div class="etiquetas-loading">${_etqMostrarOcultos ? 'Nenhuma etiqueta oculta.' : 'Nenhuma etiqueta pendente encontrada.'}</div>`;
+            if (etqStatus) etqStatus.textContent = '';
+          }
+        } catch (err) {
+          if (etqStatus) { etqStatus.textContent = err.message; etqStatus.style.color = '#f87171'; setTimeout(() => { if (etqStatus) { etqStatus.textContent = ''; etqStatus.style.color = ''; } }, 4000); }
+          btn.disabled = false;
+        }
+      });
+    });
+
+    // Botão Reimprimir (desmarca impressa, volta ao estado normal)
+    etqGrid.querySelectorAll('.etq-btn-reimprimir').forEach(btn => {
+      btn.addEventListener('click', async e => {
+        e.stopPropagation();
+        const id = Number(btn.dataset.id);
+        btn.disabled = true;
+        try {
+          const resp = await fetch(`/api/etiquetas/recebimento/${id}/reimprimir`, {
+            method: 'PATCH',
+            credentials: 'include',
+          });
+          if (!resp.ok) throw new Error(`Erro ${resp.status}`);
+          // Recarrega a lista para refletir o novo estado
+          await _etqCarregar(etqBusca?.value || '');
+        } catch (err) {
+          if (etqStatus) { etqStatus.textContent = err.message; etqStatus.style.color = '#f87171'; setTimeout(() => { if (etqStatus) { etqStatus.textContent = ''; etqStatus.style.color = ''; } }, 4000); }
+          btn.disabled = false;
+        }
+      });
+    });
+
+    // Botão Armazenar (abre modal de câmera/local direto no passo 2)
+    etqGrid.querySelectorAll('.etq-btn-armazenar').forEach(btn => {
+      btn.addEventListener('click', async e => {
+        e.stopPropagation();
+        const idImpresso = Number(btn.dataset.idImpresso);
+        if (!idImpresso) {
+          if (etqStatus) { etqStatus.textContent = 'Nenhum registro de impressão encontrado para este item.'; etqStatus.style.color = '#f87171'; setTimeout(() => { if (etqStatus) { etqStatus.textContent = ''; etqStatus.style.color = ''; } }, 4000); }
+          return;
+        }
+        _armAbrirComId(idImpresso);
+      });
+    });
   }
 
   async function _etqCarregar(q = '') {
@@ -24769,7 +24897,10 @@ window.openRegistros = async function() {
     _etqSelecionadas.clear();
     _etqAtualizarBotaoSel();
     try {
-      const url = '/api/etiquetas/recebimento/pendentes' + (q ? `?q=${encodeURIComponent(q)}` : '');
+      const params = new URLSearchParams();
+      if (q) params.set('q', q);
+      if (_etqMostrarOcultos) params.set('mostrar_ocultos', '1');
+      const url = '/api/etiquetas/recebimento/pendentes' + (params.toString() ? '?' + params.toString() : '');
       const resp = await fetch(url, { credentials: 'include' });
       if (!resp.ok) throw new Error(`Erro ${resp.status}`);
       const data = await resp.json();
@@ -25301,6 +25432,10 @@ window.openRegistros = async function() {
       setTimeout(() => {
         if (etqArmazenarModal) etqArmazenarModal.style.display = 'none';
         _etqImpressoCarregar(etqImpressoBusca?.value || '');
+        // Recarrega também o modal de pendentes se estiver aberto
+        if (etqModal && etqModal.style.display !== 'none') {
+          _etqCarregar(etqBusca?.value || '');
+        }
       }, 1800);
     } catch (err) {
       if (etqArmazenarStatus) {
@@ -65065,6 +65200,10 @@ window.initOscilacaoEstoque = (function () {
   const zone      = document.getElementById('floatingShortcutZone');
   const container = document.getElementById('shortcutItemsContainer');
   const dropTarget = document.getElementById('shortcutDropTarget');
+  const btnGerenciar = document.getElementById('btnGerenciarAtalhos');
+  const modal        = document.getElementById('modalGerenciarAtalhos');
+  const btnFecharModal = document.getElementById('btnFecharModalAtalhos');
+  const modalList    = document.getElementById('shortcutModalList');
 
   if (!zone || !container || !dropTarget) return;
 
@@ -65166,7 +65305,9 @@ window.initOscilacaoEstoque = (function () {
       if (!resp.ok) return;
       const data = await resp.json();
       container.innerHTML = '';
-      (data.atalhos || []).forEach(a => container.appendChild(criarBotaoAtalho(a)));
+      // API retorna array direto
+      const lista = Array.isArray(data) ? data : (data.atalhos || []);
+      lista.forEach(a => container.appendChild(criarBotaoAtalho(a)));
     } catch (e) {
       console.error('[atalhos] erro ao carregar:', e.message);
     }
@@ -65182,8 +65323,9 @@ window.initOscilacaoEstoque = (function () {
         body: JSON.stringify({ nav_key: navKey, nav_label: navLabel, nav_selector: navSelector, icon_class: iconClass })
       });
       const data = await resp.json();
-      if (!data.ok) throw new Error(data.error || 'Erro ao salvar');
-      return data.atalho;
+      if (!resp.ok) throw new Error(data.error || 'Erro ao salvar');
+      // API retorna o objeto do atalho diretamente (não { ok, atalho })
+      return data.id ? data : (data.atalho || null);
     } catch (e) {
       console.error('[atalhos] erro ao salvar:', e.message);
       return null;
@@ -65199,6 +65341,86 @@ window.initOscilacaoEstoque = (function () {
     } catch (e) {
       console.error('[atalhos] erro ao remover:', e.message);
     }
+  }
+
+  // ── Modal de gerenciamento ──
+  function _navKeyAtual() {
+    const set = new Set();
+    container.querySelectorAll('[data-nav-key]').forEach(b => set.add(b.dataset.navKey));
+    return set;
+  }
+
+  function abrirModalGerenciar() {
+    if (!modal) return;
+    modalList.innerHTML = '';
+
+    const pinados = _navKeyAtual();
+    let grupoAtual = '';
+
+    document.querySelectorAll('.sidebar-content .menu-link[data-nav-key]').forEach(link => {
+      const navKey   = link.dataset.navKey;
+      const navLabel = link.dataset.navLabel || link.textContent.trim().replace(/\s+/g, ' ').split(/\s+\d+$/)[0].trim();
+      const iconEl   = link.querySelector('i');
+      const iconClass = iconEl ? iconEl.className : 'fa-solid fa-star';
+      const navSelector = link.dataset.navSelector || ('#' + link.id);
+
+      // Título do grupo (parent)
+      const parentKey = link.dataset.navParent || '';
+      if (parentKey !== grupoAtual) {
+        grupoAtual = parentKey;
+        const groupEl = document.querySelector(`.side-title[data-nav-key="${parentKey}"]`);
+        const groupLabel = groupEl ? groupEl.textContent.trim() : parentKey;
+        if (groupLabel) {
+          const sep = document.createElement('div');
+          sep.className = 'shortcut-modal-group-title';
+          sep.textContent = groupLabel;
+          modalList.appendChild(sep);
+        }
+      }
+
+      const item = document.createElement('div');
+      item.className = 'shortcut-modal-item' + (pinados.has(navKey) ? ' is-pinned' : '');
+      item.innerHTML = `<i class="item-icon ${iconClass}"></i><span class="item-label">${navLabel}</span><span class="item-toggle">✓</span>`;
+
+      item.addEventListener('click', async () => {
+        const isPinado = item.classList.contains('is-pinned');
+        if (isPinado) {
+          // Remover: encontra o botão no container
+          const btnExistente = container.querySelector(`[data-nav-key="${CSS.escape(navKey)}"]`);
+          if (btnExistente) {
+            const id = parseInt(btnExistente.dataset.id, 10);
+            _badgeObservers.get(navKey)?.disconnect();
+            _badgeObservers.delete(navKey);
+            await removerAtalho(id, btnExistente);
+          }
+          item.classList.remove('is-pinned');
+        } else {
+          // Adicionar
+          const atalho = await salvarAtalho(navKey, navLabel, navSelector, iconClass);
+          if (atalho) {
+            container.appendChild(criarBotaoAtalho(atalho));
+            item.classList.add('is-pinned');
+          }
+        }
+      });
+
+      modalList.appendChild(item);
+    });
+
+    modal.hidden = false;
+  }
+
+  function fecharModalGerenciar() {
+    if (modal) modal.hidden = true;
+  }
+
+  if (btnGerenciar) btnGerenciar.addEventListener('click', abrirModalGerenciar);
+  if (btnFecharModal) btnFecharModal.addEventListener('click', fecharModalGerenciar);
+  // Fechar ao clicar no overlay (fora do card)
+  if (modal) {
+    modal.addEventListener('click', (e) => {
+      if (e.target === modal) fecharModalGerenciar();
+    });
   }
 
   // ── Drag & Drop nos itens do menu lateral ──
