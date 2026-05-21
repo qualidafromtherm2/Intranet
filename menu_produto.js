@@ -24580,7 +24580,7 @@ window.openRegistros = async function() {
     const btn = document.getElementById('etqBtnImpressora');
     if (!btn) return;
     if (_etqPrinterPref) {
-      const label = _etqPrinterPref === '__PDF__' ? 'PDF' : _etqPrinterPref === '__BP__' ? 'Local (BP)' : _etqPrinterPref;
+      const label = _etqPrinterPref === '__PDF__' ? 'PDF' : _etqPrinterPref === '__BP__' ? 'Local (agente)' : _etqPrinterPref;
       btn.title = `Impressora: ${label} — clique para trocar`;
       btn.innerHTML = `<i class="fa-solid fa-print"></i><span class="etq-pref-label">${escapeHtml(label)}</span>`;
       btn.classList.add('etq-pref-set');
@@ -25144,12 +25144,43 @@ window.openRegistros = async function() {
     _etqMostrarSeletorImpressora(null, (p) => {
       _etqSalvarPref(p);
       if (etqStatus) {
-        const label = p === '__PDF__' ? 'PDF' : p === '__BP__' ? 'Local (BP)' : p;
+        const label = p === '__PDF__' ? 'PDF' : p === '__BP__' ? 'Local (agente)' : p;
         etqStatus.textContent = `Impressora padrão salva: ${label}`;
         etqStatus.style.color = '#4ade80';
         setTimeout(() => { if (etqStatus) { etqStatus.textContent = ''; etqStatus.style.color = ''; } }, 3000);
       }
     });
+  });
+
+  // Botão: Baixar instalador do agente (.exe)
+  document.getElementById('etqBtnBaixarAgente')?.addEventListener('click', async () => {
+    const EXE_FALLBACK = 'https://pxhbginkisinegzupqcy.supabase.co/storage/v1/object/public/agente-impressao/agente-impressao-setup.exe';
+    let exeUrl = EXE_FALLBACK;
+    try {
+      const r = await fetch('/api/etiquetas/agente-url', { credentials: 'include' });
+      if (r.ok) { const j = await r.json(); if (j?.url) exeUrl = j.url; }
+    } catch {}
+    const a = document.createElement('a');
+    a.href = exeUrl;
+    a.download = 'agente-impressao-setup.exe';
+    a.rel = 'noopener';
+    document.body.appendChild(a); a.click();
+    setTimeout(() => a.remove(), 1500);
+    if (etqStatus) {
+      etqStatus.innerHTML = '<i class="fa-solid fa-download"></i> Baixando agente... Execute o arquivo no PC da impressora. Depois clique no botão <b>⚙️</b> para configurar.';
+      etqStatus.style.color = '#4ade80';
+      setTimeout(() => { if (etqStatus) { etqStatus.textContent = ''; etqStatus.style.color = ''; } }, 8000);
+    }
+  });
+
+  // Botão: Abrir UI de configuração do agente local (localhost:9200)
+  document.getElementById('etqBtnConfigAgente')?.addEventListener('click', () => {
+    const win = window.open('http://localhost:9200', '_blank', 'noopener');
+    if (!win && etqStatus) {
+      etqStatus.innerHTML = 'Permita pop-ups ou acesse manualmente <a href="http://localhost:9200" target="_blank" style="color:#60a5fa;">http://localhost:9200</a>';
+      etqStatus.style.color = '#facc15';
+      setTimeout(() => { if (etqStatus) { etqStatus.textContent = ''; etqStatus.style.color = ''; } }, 7000);
+    }
   });
 
 

@@ -311,6 +311,15 @@ function buildConfigHtml(cfg, printers, status) {
       </div>
     </div>
 
+    <div class="card" style="margin-bottom:16px">
+      <h2><i>📋</i> Fila de impressão pendente</h2>
+      <div id="queueBox" style="font-size:.85rem;color:var(--muted);min-height:60px;">Aguardando polling…</div>
+      <div style="margin-top:10px;display:flex;gap:8px;align-items:center">
+        <button class="btn btn-secondary" style="font-size:.78rem" onclick="reloadQueue()">🔄 Atualizar agora</button>
+        <span id="queueAt" style="font-size:.72rem;color:var(--muted);margin-left:auto"></span>
+      </div>
+    </div>
+
     <div class="card">
       <h2><i>📋</i> Log recente</h2>
       <div class="log-box" id="logBox">${status.recentLog || 'Nenhum log ainda.'}</div>
@@ -364,6 +373,29 @@ async function reloadLog() {
   document.getElementById('logBox').scrollTop = 999999;
 }
 
+async function reloadQueue() {
+  try {
+    const r = await fetch('/api/queue');
+    const j = await r.json();
+    const box = document.getElementById('queueBox');
+    const at  = document.getElementById('queueAt');
+    const q   = j.queue || [];
+    if (!q.length) {
+      box.innerHTML = '<div style="color:var(--green);padding:8px 0;"><b>✓ Fila vazia</b> — nenhuma etiqueta pendente.</div>';
+    } else {
+      box.innerHTML = '<div style="color:var(--yellow);margin-bottom:8px;"><b>' + q.length + ' job(s) aguardando impressão:</b></div>' +
+        '<div style="max-height:160px;overflow-y:auto;border:1px solid var(--border);border-radius:6px;">' +
+        q.map(function(j){
+          return '<div style="padding:6px 10px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;gap:10px;">' +
+            '<span>Job <b>#' + j.id + '</b></span>' +
+            '<span style="color:var(--muted)">' + (j.quantidade || 1) + ' etiqueta(s)</span>' +
+            '</div>';
+        }).join('') + '</div>';
+    }
+    if (j.lastQueueAt) at.textContent = 'Última consulta: ' + new Date(j.lastQueueAt).toLocaleTimeString('pt-BR');
+  } catch (e) { /* ignora */ }
+}
+
 // Auto-refresh status a cada 10s
 setInterval(async () => {
   try {
@@ -373,6 +405,10 @@ setInterval(async () => {
       '<b>Última impressão:</b> ' + j.lastPrint;
   } catch {}
 }, 10000);
+
+// Auto-refresh fila a cada 4s
+reloadQueue();
+setInterval(reloadQueue, 4000);
 </script>
 </body>
 </html>`;
@@ -402,6 +438,8 @@ function runService() {
     totalErrors: 0,
     recentLog: '',
     printers: [],
+    lastQueue: [],          // última fila vista no polling
+    lastQueueAt: null,      // timestamp da última consulta
   };
 
   // Carrega lista de impressoras na inicialização
@@ -435,6 +473,10 @@ function runService() {
           return resolve();
         }
         if (status === 401) { log('[poll] Token inválido!'); return resolve(); }
+        state.lastQueueAt = Date.now();
+        state.lastQueue = Array.isArray(body?.jobs) ? body.jobs.map(j => ({
+          id: j.id, quantidade: j.quantidade, criadaEm: j.criadaEm || j.criada_em || null,
+        })) : [];
         if (!body?.jobs?.length) return resolve();
 
         log(`[poll] ${body.jobs.length} job(s) na fila`);
@@ -505,6 +547,15 @@ function runService() {
         res.end(html);
       });
       return;
+    }
+
+    // GET /api/queue — fila pendente atual (último polling)
+    if (req.method === 'GET' && req.url === '/api/queue') {
+      return respJson(res, 200, {
+        ok: true,
+        queue: state.lastQueue || [],
+        lastQueueAt: state.lastQueueAt ? new Date(state.lastQueueAt).toISOString() : null,
+      });
     }
 
     // GET /api/status  (também responde em /status para compatibilidade com v1.0)
