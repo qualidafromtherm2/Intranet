@@ -24662,7 +24662,7 @@ window.openRegistros = async function() {
 
     // Opções de saída: impressoras físicas do servidor + PDF + ZPL local
     const optPdf = '<option value="__PDF__">📄 PDF (baixar arquivo)</option>';
-    const optBp  = '<option value="__BP__">🖨️ Impressora local (Zebra Browser Print)</option>';
+    const optBp  = '<option value="__BP__">🖨️ Impressora local (agente)</option>';
     const chkPadraoHtml = `<label style="display:flex;align-items:center;gap:4px;color:#94a3b8;font-size:.78rem;white-space:nowrap;cursor:pointer;"><input type="checkbox" id="_etqChkPadrao" style="accent-color:#7c3aed;"> Salvar como padrão</label>`;
     // Pré-selecionar a preferência atual, se houver
     const prefAtual = _etqPrinterPref || '';
@@ -24973,28 +24973,28 @@ window.openRegistros = async function() {
     const origBtn = btnRef ? btnRef.innerHTML : null;
     if (btnRef) { btnRef.disabled = true; btnRef.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>'; }
     try {
-      // 1. Verificar se Zebra Browser Print está rodando
-      showSt('Procurando impressora local...', '#facc15');
-      let bpPrinter = null;
+      // 1. Verificar se o agente local está rodando em localhost:9200
+      showSt('Procurando agente de impressão...', '#facc15');
+      let agentePrinter = null;
       try {
-        const r = await fetch('http://localhost:9100/default?type=printer', { signal: AbortSignal.timeout(3000) });
-        if (r.ok) bpPrinter = await r.json();
-      } catch { /* Browser Print não disponível */ }
+        const r = await fetch('http://localhost:9200/status', { signal: AbortSignal.timeout(3000) });
+        if (r.ok) { const d = await r.json(); if (d.printer) agentePrinter = d.printer; }
+      } catch { /* agente não disponível */ }
 
-      if (!bpPrinter || !bpPrinter.uid) {
+      if (!agentePrinter) {
         if (statusEl) {
-          statusEl.innerHTML = '<span style="color:#f87171;">Zebra Browser Print não encontrado neste PC.</span> ' +
-            '<a href="https://www.zebra.com/us/en/software/printer-software/browser-print.html" target="_blank" rel="noopener noreferrer" style="color:#a78bfa;font-size:.82rem;">'
+          statusEl.innerHTML = '<span style="color:#f87171;">Agente de impressão não encontrado neste PC.</span> ' +
+            '<a href="/agente-impressao/" target="_blank" rel="noopener noreferrer" style="color:#a78bfa;font-size:.82rem;">'
             + '<i class="fa-solid fa-arrow-up-right-from-square"></i> Baixar e instalar</a>';
           if (!container) statusEl.style.color = '';
-          clearSt(10000);
+          clearSt(12000);
         }
         return;
       }
 
       // 2. Obter ZPL do servidor (cria ETQ_rec_impresso, marca como impressa)
       const usuario = (document.getElementById('userNameDisplay')?.textContent || '').trim();
-      showSt(`Enviando para ${bpPrinter.name || 'impressora'}...`, '#facc15');
+      showSt(`Enviando para ${agentePrinter}...`, '#facc15');
       const resp = await fetch('/api/etiquetas/recebimento/imprimir-local', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -25005,16 +25005,17 @@ window.openRegistros = async function() {
       const data = await resp.json();
       if (!data.ok) throw new Error(data.error || 'Falha ao gerar ZPL');
 
-      // 3. Enviar ZPL ao Browser Print
-      const bpResp = await fetch('http://localhost:9100/write', {
+      // 3. Enviar ZPL ao agente local
+      const bpResp = await fetch('http://localhost:9200/print', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ device: bpPrinter, data: data.zpl }),
-        signal: AbortSignal.timeout(10000),
+        body: JSON.stringify({ zpl: data.zpl }),
+        signal: AbortSignal.timeout(20000),
       });
-      if (!bpResp.ok) throw new Error(`Browser Print: falha ao enviar (${bpResp.status})`);
+      const bpData = await bpResp.json().catch(() => ({}));
+      if (!bpResp.ok) throw new Error(bpData.error || `Agente: falha ao enviar (${bpResp.status})`);
 
-      showSt(`${data.quantidade} etiqueta(s) enviada(s) para ${bpPrinter.name}.`, '#4ade80');
+      showSt(`${data.quantidade} etiqueta(s) enviada(s) para ${agentePrinter}.`, '#4ade80');
       clearSt(4000);
       await _etqCarregar(etqBusca?.value || '');
     } catch (err) {
@@ -25272,18 +25273,18 @@ window.openRegistros = async function() {
       try {
         const statusEl = etqMplPreview;
         const showSt = (msg, cor = '#94a3b8') => { if (statusEl) statusEl.innerHTML = `<span style="color:${cor};">${escapeHtml(msg)}</span>`; };
-        // Verificar Browser Print
-        let bpPrinter = null;
+        // Verificar agente local em localhost:9200
+        let agentePrinter = null;
         try {
-          const r = await fetch('http://localhost:9100/default?type=printer', { signal: AbortSignal.timeout(3000) });
-          if (r.ok) bpPrinter = await r.json();
-        } catch { /* sem Browser Print */ }
-        if (!bpPrinter || !bpPrinter.uid) {
-          showSt('Zebra Browser Print não encontrado neste PC. Instale em zebra.com/browserprint', '#f87171');
+          const r = await fetch('http://localhost:9200/status', { signal: AbortSignal.timeout(3000) });
+          if (r.ok) { const d = await r.json(); if (d.printer) agentePrinter = d.printer; }
+        } catch { /* agente não disponível */ }
+        if (!agentePrinter) {
+          showSt('Agente de impressão não encontrado. Instale em: ' + location.origin + '/agente-impressao/', '#f87171');
           etqMplGerar.disabled = false; etqMplGerar.innerHTML = origHtml; return;
         }
         const usuario = (document.getElementById('userNameDisplay')?.textContent || '').trim();
-        showSt(`Enviando para ${bpPrinter.name || 'impressora'}...`, '#facc15');
+        showSt(`Enviando para ${agentePrinter}...`, '#facc15');
         const resp = await fetch('/api/etiquetas/recebimento/imprimir-local', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -25293,13 +25294,14 @@ window.openRegistros = async function() {
         if (!resp.ok) { const e = await resp.json().catch(() => ({})); throw new Error(e.error || `Erro ${resp.status}`); }
         const data = await resp.json();
         if (!data.ok) throw new Error(data.error || 'Falha ao gerar ZPL');
-        const bpResp = await fetch('http://localhost:9100/write', {
+        const bpResp = await fetch('http://localhost:9200/print', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ device: bpPrinter, data: data.zpl }),
-          signal: AbortSignal.timeout(10000),
+          body: JSON.stringify({ zpl: data.zpl }),
+          signal: AbortSignal.timeout(20000),
         });
-        if (!bpResp.ok) throw new Error(`Browser Print: falha (${bpResp.status})`);
+        const bpData = await bpResp.json().catch(() => ({}));
+        if (!bpResp.ok) throw new Error(bpData.error || `Agente: falha (${bpResp.status})`);
         _etqMplFecharFn();
         await _etqCarregar(etqBusca?.value || '');
       } catch (err) {

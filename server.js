@@ -11463,6 +11463,9 @@ app.get('/api/etiquetas/ocupacao', async (req, res) => {
 // Servir lib XLSX local (para importação de estrutura sem depender de CDN externo)
 app.use('/vendor/xlsx', express.static(path.join(__dirname, 'node_modules/xlsx/dist')));
 
+// Servir agente de impressão local (download para PCs Windows)
+app.use('/agente-impressao', express.static(path.join(__dirname, 'agente_impressao')));
+
 // Servir anexos de compras
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
