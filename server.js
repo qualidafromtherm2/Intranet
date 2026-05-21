@@ -30882,7 +30882,7 @@ async function montarPlanoAssociacaoNfePedido(numeroNfe, numeroPedido, chaveNfe 
     };
 
     const nCodItem = Number(itemPedidoVinculo?.n_cod_item);
-    if (Number.isFinite(nCodItem) && nCodItem > 0) {
+    if (!servicoCfop.servico && Number.isFinite(nCodItem) && nCodItem > 0) {
       itensIde.nIdItPedidoExistente = nCodItem;
     }
 
@@ -30907,6 +30907,19 @@ async function montarPlanoAssociacaoNfePedido(numeroNfe, numeroPedido, chaveNfe 
     return { itensIde };
   });
 
+  const itensPedidoInformativos = itensPedido
+    .filter(itemPedidoDisponivel)
+    .map((itemPedido) => ({
+      pedido_n_cod_item: Number(itemPedido?.n_cod_item || 0) || null,
+      pedido_codigo_produto: String(itemPedido?.c_produto || '').trim() || null,
+      pedido_descricao_produto: String(itemPedido?.c_descricao || '').trim() || null,
+      pedido_qtde: itemPedido?.n_qtde ?? null,
+      pedido_unidade: String(itemPedido?.c_unidade || '').trim() || null,
+      pedido_valor_total: itemPedido?.n_val_tot ?? null,
+      item_informativo_sugerido: true,
+      motivo: 'Item do pedido sem linha correspondente na NF-e'
+    }));
+
   return {
     numero_nfe: String(recebimento?.cabec?.cNumeroNFe || '').trim() || String(numeroNfe || '').trim(),
     n_id_receb: Number(recebimento?.cabec?.nIdReceb || 0) || null,
@@ -30918,6 +30931,7 @@ async function montarPlanoAssociacaoNfePedido(numeroNfe, numeroPedido, chaveNfe 
     itens_sem_match_total: previewItens.filter(item => !item.pedido_item_encontrado).length,
     recebimento_omie: recebimento,
     itens_preview: previewItens,
+    itens_pedido_informativos: itensPedidoInformativos,
     itensRecebimentoEditar
   };
 }
@@ -31167,6 +31181,15 @@ app.post('/api/compras/pedidos-omie/nfe-associar-pedido', express.json(), async 
       const codItemOverride = Number(override?.nIdItPedidoExistente || 0);
       if (Number.isFinite(codItemOverride) && codItemOverride > 0) {
         itemEditar.itensIde.nIdItPedidoExistente = codItemOverride;
+      }
+    });
+
+    itensParaEnviar.forEach((itemEditar) => {
+      const itensIde = itemEditar?.itensIde || {};
+      const acao = String(itensIde?.cAcao || '').trim().toUpperCase();
+      if (acao !== 'ASSOCIAR-PEDIDO') {
+        delete itensIde.nIdPedidoExistente;
+        delete itensIde.nIdItPedidoExistente;
       }
     });
 
