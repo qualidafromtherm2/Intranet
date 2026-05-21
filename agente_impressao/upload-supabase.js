@@ -1,5 +1,6 @@
 /**
- * Upload do agente-impressao-setup.exe para Supabase Storage
+ * Upload do agente de impressão para Supabase Storage
+ * Nome do arquivo inclui a versão: agente-impressao-vX.X.exe
  * Uso: node agente_impressao/upload-supabase.js
  */
 require('dotenv').config();
@@ -7,9 +8,14 @@ const { createClient } = require('@supabase/supabase-js');
 const fs   = require('fs');
 const path = require('path');
 
+// Lê a versão direto do index.js para nunca dessincronia
+const _indexSrc    = fs.readFileSync(path.join(__dirname, 'index.js'), 'utf8');
+const _verMatch    = _indexSrc.match(/const AGENT_VERSION\s*=\s*'([^']+)'/);
+const AGENT_VER    = _verMatch ? _verMatch[1] : 'X.X';
+
 const BUCKET   = 'agente-impressao';
-const FILE_KEY = 'agente-impressao-setup.exe';
-const EXE_PATH = path.join(__dirname, FILE_KEY);
+const FILE_KEY = `agente-impressao-v${AGENT_VER}.exe`;   // ex.: agente-impressao-v2.3.exe
+const EXE_PATH = path.join(__dirname, 'agente-impressao.exe'); // arquivo gerado pelo pkg
 
 async function main() {
   const supabase = createClient(
@@ -31,7 +37,7 @@ async function main() {
   // 2. Ler arquivo
   if (!fs.existsSync(EXE_PATH)) {
     console.error(`Arquivo não encontrado: ${EXE_PATH}`);
-    console.error('Execute: npx pkg agente_impressao/index.js --targets node18-win-x64 --output agente_impressao/agente-impressao-setup.exe --compress GZip');
+    console.error('Execute: npx pkg agente_impressao/index.js --targets node18-win-x64 --output agente_impressao/agente-impressao.exe');
     process.exit(1);
   }
 

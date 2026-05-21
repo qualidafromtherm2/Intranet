@@ -15,7 +15,7 @@ const fs     = require('fs');
 const os     = require('os');
 const path   = require('path');
 
-const AGENT_VERSION = '2.3';
+const AGENT_VERSION = '2.4';
 const PORT       = 9200;
 const TASK_NAME  = 'AgenteImpressaoSGF';
 const EXE_NAME   = 'agente-impressao.exe';
@@ -35,18 +35,35 @@ const DEFAULT_CONFIG = {
   printer:      '',
   pcName:       '',          // identificador deste PC na fila (deixe vazio para usar o hostname)
   pollInterval: 5000,
-  labelWidth:   100,
-  labelHeight:  150,
+  labelWidth:   110,
+  labelHeight:  70,
   darkness:     20,
   speed:        4,
   labelOffsetX: 0,
   labelOffsetY: 0,
+  printerConfigs: {},        // config por impressora: { "NomeImpressora": { labelWidth, labelHeight, ... } }
 };
+
+// Campos que pertencem à configuração de etiqueta (por impressora)
+const PRINTER_CFG_FIELDS = ['labelWidth','labelHeight','darkness','speed','labelOffsetX','labelOffsetY'];
+
+// Retorna a config de etiqueta para uma impressora específica,
+// fazendo fallback para os valores globais quando não há config salva pra ela.
+function getPrinterConfig(cfg, printerName) {
+  const name = printerName || cfg.printer || '';
+  const saved = (cfg.printerConfigs || {})[name];
+  const base  = { labelWidth: cfg.labelWidth, labelHeight: cfg.labelHeight,
+                  darkness: cfg.darkness, speed: cfg.speed,
+                  labelOffsetX: cfg.labelOffsetX, labelOffsetY: cfg.labelOffsetY };
+  return saved ? Object.assign({}, base, saved) : base;
+}
 
 function readConfig() {
   try {
     const raw = fs.readFileSync(CONFIG_PATH, 'utf8');
-    return Object.assign({}, DEFAULT_CONFIG, JSON.parse(raw));
+    const parsed = JSON.parse(raw);
+    return Object.assign({}, DEFAULT_CONFIG, parsed,
+      { printerConfigs: Object.assign({}, DEFAULT_CONFIG.printerConfigs, parsed.printerConfigs || {}) });
   } catch { return Object.assign({}, DEFAULT_CONFIG); }
 }
 
@@ -54,6 +71,17 @@ function saveConfig(data) {
   fs.mkdirSync(INSTALL_DIR, { recursive: true });
   const current = readConfig();
   const merged  = Object.assign({}, current, data);
+
+  // Se tem impressora e campos de etiqueta → salvar também por impressora
+  const printerName = data.printer || current.printer || '';
+  const hasPrinterFields = PRINTER_CFG_FIELDS.some(k => data[k] !== undefined);
+  if (printerName && hasPrinterFields) {
+    merged.printerConfigs = Object.assign({}, current.printerConfigs || {});
+    const prev = merged.printerConfigs[printerName] || {};
+    merged.printerConfigs[printerName] = Object.assign({}, prev,
+      Object.fromEntries(PRINTER_CFG_FIELDS.filter(k => data[k] !== undefined).map(k => [k, data[k]])));
+  }
+
   fs.writeFileSync(CONFIG_PATH, JSON.stringify(merged, null, 2), 'utf8');
   return merged;
 }
@@ -285,7 +313,7 @@ function buildConfigHtml(cfg, printers, status) {
 </style>
 </head>
 <body>
-<h1>🖨️ Agente de Impressão SGF <span class="badge">v2.0</span></h1>
+<h1>🖨️ Agente de Impressão SGF <span class="badge">v${AGENT_VERSION}</span></h1>
 <p class="subtitle">Configuração e monitoramento do agente — monitora a fila e imprime automaticamente.</p>
 
 <div class="grid">
@@ -293,6 +321,11 @@ function buildConfigHtml(cfg, printers, status) {
   <div>
     <div class="card">
       <h2>⚙️ Configuração de Impressão</h2>
+      <div id="printerCfgBanner" style="background:rgba(124,58,237,.15);border:1px solid var(--accent);border-radius:6px;padding:7px 12px;margin-bottom:12px;font-size:.8rem;display:${cfg.printer ? 'flex' : 'none'};align-items:center;gap:8px">
+        <span style="color:var(--accent)">&#128427;</span>
+        <span>Configurando: <b id="printerCfgLabel">${cfg.printer || ''}</b></span>
+        <span style="margin-left:auto;color:var(--muted);font-size:.73rem">Salvar aplica apenas a esta impressora</span>
+      </div>
       <form id="formConfig">
         <div class="field">
           <label>Impressora padrão</label>
@@ -476,8 +509,32 @@ document.getElementById('formConfig').addEventListener('submit', async e => {
   ['labelWidth','labelHeight','darkness','speed','pollInterval','labelOffsetX','labelOffsetY'].forEach(k => data[k] = Number(data[k]));
   const r = await fetch('/api/config', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(data) });
   const j = await r.json();
-  toast(j.ok ? 'Configuração salva!' : (j.error || 'Erro'), j.ok);
+  const printerName = data.printer || 'impressora';
+  toast(j.ok ? ('Configuração de "' + printerName + '" salva!') : (j.error || 'Erro'), j.ok);
   if (j.ok) { document.getElementById('oxInfo').textContent = data.labelOffsetX; document.getElementById('oyInfo').textContent = data.labelOffsetY; setTimeout(refreshPreview, 400); }
+});
+
+// ── Trocar impressora → carregar config específica dela ───────────────────────
+document.getElementById('selPrinter').addEventListener('change', async function () {
+  const name = this.value;
+  const banner = document.getElementById('printerCfgBanner');
+  const label  = document.getElementById('printerCfgLabel');
+  if (banner) { banner.style.display = name ? 'flex' : 'none'; }
+  if (label)  { label.textContent = name; }
+  if (!name) return;
+  const r = await fetch('/api/printer-config?name=' + encodeURIComponent(name)).catch(() => null);
+  if (!r || !r.ok) return;
+  const j = await r.json();
+  if (!j.ok) return;
+  const c = j.config;
+  document.querySelector('[name=labelWidth]').value  = c.labelWidth;
+  document.querySelector('[name=labelHeight]').value = c.labelHeight;
+  document.querySelector('[name=darkness]').value    = c.darkness;
+  document.querySelector('[name=speed]').value       = c.speed;
+  syncOffset('X', c.labelOffsetX || 0);
+  syncOffset('Y', c.labelOffsetY || 0);
+  clearTimeout(window._prevTimer);
+  window._prevTimer = setTimeout(refreshPreview, 700);
 });
 
 document.getElementById('formServer').addEventListener('submit', async e => {
@@ -697,14 +754,16 @@ setInterval(refreshHistory, 15000);
 
 // ─── MODO SERVIÇO ─────────────────────────────────────────────────────────────
 function runService() {
-  log('=== Agente SGF v2.0 iniciando (modo serviço) ===');
+  log(`=== Agente SGF v${AGENT_VERSION} iniciando (modo serviço) ===`);
   log(`INSTALL_DIR: ${INSTALL_DIR}`);
 
   // ─── Heartbeat ─────────────────────────────────────────────────────────────
   function sendHeartbeat() {
     const c = readConfig();
+    const pc = c.pcName || os.hostname();
     apiRequest('POST', '/api/etiquetas/agente/heartbeat',
-      { printer: c.printer || '', version: AGENT_VERSION, host: os.hostname() },
+      { printer: c.printer || '', version: AGENT_VERSION, host: os.hostname(),
+        pcName: pc, printers: state.printers || [] },
       c.agentToken, () => {});
   }
   sendHeartbeat();                          // imediato ao iniciar
@@ -775,7 +834,7 @@ function runService() {
         for (const job of body.jobs) {
           log(`[poll] Imprimindo job #${job.id} (${job.quantidade} etiqueta(s)) em "${job.impressora || cfg.printer}"`);
           const targetPrinter = job.impressora || cfg.printer;
-          const zplToUse = injectLH(job.zpl, cfg);
+          const zplToUse = injectLH(job.zpl, getPrinterConfig(cfg, targetPrinter));
           printZpl(zplToUse, targetPrinter, (err2) => {
             const ok = !err2;
             const erroMsg = err2?.message || null;
@@ -877,8 +936,15 @@ function runService() {
     }
 
     // GET /api/config
-    if (req.method === 'GET' && req.url === '/api/config') {
-      return respJson(res, 200, readConfig());
+    if (req.method === 'GET' && req.url === '/api/config') {      return respJson(res, 200, readConfig());
+    }
+
+    // GET /api/printer-config?name=NomeImpressora — retorna config de etiqueta por impressora
+    if (req.method === 'GET' && req.url.startsWith('/api/printer-config')) {
+      const urlObj = new URL('http://localhost' + req.url);
+      const name = urlObj.searchParams.get('name') || '';
+      const cfg  = readConfig();
+      return respJson(res, 200, { ok: true, config: getPrinterConfig(cfg, name) });
     }
 
     // POST /api/config
@@ -938,7 +1004,8 @@ function runService() {
       const cfg = readConfig();
       if (!cfg.printer) return respJson(res, 400, { error: 'Nenhuma impressora configurada' });
       if (!state.lastZpl) return respJson(res, 404, { error: 'Nenhuma etiqueta na memória para reimprimir' });
-      const zplToUse = injectLH(state.lastZpl, cfg);
+      const pcfgReprint = getPrinterConfig(cfg, cfg.printer);
+      const zplToUse = injectLH(state.lastZpl, pcfgReprint);
       printZpl(zplToUse, cfg.printer, (err2) => {
         if (err2) return respJson(res, 500, { error: err2.message });
         log(`[reprint] Última etiqueta (job #${state.lastJobId}) reimpressa em "${cfg.printer}"`);
@@ -966,9 +1033,10 @@ function runService() {
         res.writeHead(404, { 'Content-Type': 'text/plain' });
         return res.end('no-label');
       }
-      const wIn = (cfg.labelWidth  / 25.4).toFixed(2);
-      const hIn = (cfg.labelHeight / 25.4).toFixed(2);
-      const zplToPreview = injectLH(zpl, cfg);
+      const pcfgPrev = getPrinterConfig(cfg, cfg.printer);
+      const wIn = (pcfgPrev.labelWidth  / 25.4).toFixed(2);
+      const hIn = (pcfgPrev.labelHeight / 25.4).toFixed(2);
+      const zplToPreview = injectLH(zpl, pcfgPrev);
       const postReq = http.request({
         hostname: 'api.labelary.com',
         path: `/v1/printers/8dpmm/labels/${wIn}x${hIn}/0/`,
