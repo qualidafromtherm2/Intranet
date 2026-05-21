@@ -60,18 +60,40 @@
     <div class="boot-msg">Carregando…</div>
   </div>
 
-  <div class="dark-light">
-    <svg viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5" fill="none"
-         stroke-linecap="round" stroke-linejoin="round">
-      <path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z" />
-    </svg>
+
+
+  <!-- Zona de atalhos do usuário (drag-and-drop a partir do menu lateral) -->
+  <div id="floatingShortcutZone" class="floating-shortcut-zone">
+    <div id="shortcutItemsContainer" class="shortcut-items-container"></div>
+    <div id="shortcutDropTarget" class="shortcut-drop-target" title="Arraste um item do menu lateral aqui para criar um atalho">
+      <i class="fa-solid fa-thumbtack"></i>
+      <span>Solte aqui</span>
+    </div>
   </div>
 
-  <div id="floatingQuickMenu" class="floating-quick-menu">
-    <button id="btnFloatingMinimo" type="button" class="floating-quick-btn" title="Produtos no mínimo">
-      <i class="fa-solid fa-boxes-stacked"></i>
-      <span id="floatingMinimoBadge" class="floating-quick-badge" hidden>0</span>
-    </button>
+  <!-- Botão gerenciar atalhos (fixo, substitui posição do toggle de tema) -->
+  <button id="btnGerenciarAtalhos" type="button" class="shortcut-manage-btn shortcut-manage-btn--fixed" title="Gerenciar atalhos">
+    <i class="fa-solid fa-sliders"></i>
+  </button>
+
+  <!-- Modal de gerenciamento de atalhos -->
+  <div id="modalGerenciarAtalhos" class="shortcut-modal-overlay" hidden>
+    <div class="shortcut-modal">
+      <div class="shortcut-modal-header">
+        <span><i class="fa-solid fa-thumbtack" style="margin-right:8px;"></i>Gerenciar atalhos</span>
+        <button type="button" id="btnFecharModalAtalhos" class="shortcut-modal-close" aria-label="Fechar">×</button>
+      </div>
+      <p class="shortcut-modal-hint">Marque os itens que deseja fixar como atalho rápido.</p>
+      <div class="shortcut-modal-theme-row">
+        <div class="dark-light dark-light-inline" title="Alternar modo claro/escuro" role="button" tabindex="0">
+          <svg viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5" fill="none"
+               stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z" />
+          </svg>
+        </div>
+      </div>
+      <div id="shortcutModalList" class="shortcut-modal-list"></div>
+    </div>
   </div>
 
   <div class="app">
@@ -140,7 +162,6 @@
     </div>
     <i id="cart-icon" class="fa-solid fa-shopping-bag" title="Painel de compras" style="display:none;"></i>
     <i id="links-icon" class="fa-solid fa-link" title="Links rápidos"></i>
-    <i id="print-icon" class="fa-solid fa-print" title="Imprimir" style="display:none;"></i>
     <i id="config-icon" class="fa-solid fa-rotate-right" title="Atualização disponível - clique para limpar cache e atualizar" style="cursor:pointer;display:none;"></i>
     <img id="profile-icon" class="profile-img"
          src="https://pxhbginkisinegzupqcy.supabase.co/storage/v1/object/public/compras-anexos/profile-photos/Captura%20de%20tela%20de%202026-01-29%2015-12-33.png"
@@ -371,6 +392,18 @@
     </a>
 
     <a href="#"
+       id="menu-produto-recebido"
+       class="menu-link"
+       data-nav-key="side:log:produto-recebido"
+       data-nav-parent="side:log"
+       data-nav-pos="side"
+       data-nav-label="Produtos recebidos"
+       data-nav-selector="#menu-produto-recebido">
+      <i class="fa-solid fa-pallet" style="margin-right:8px;"></i>
+      Produtos recebidos
+    </a>
+
+    <a href="#"
        id="menu-envio-mercadoria"
        class="menu-link"
        data-nav-key="side:log:envio-mercadoria"
@@ -380,6 +413,43 @@
        data-nav-selector="#menu-envio-mercadoria">
       <i class="fa-solid fa-truck-fast" style="margin-right:8px;"></i>
       Envio de mercadoria
+    </a>
+
+    <a href="#"
+       id="menu-estoque-minimo"
+       class="menu-link"
+       data-nav-key="side:log:estoque-minimo"
+       data-nav-parent="side:log"
+       data-nav-pos="side"
+       data-nav-label="Estoque mínimo"
+       data-nav-selector="#menu-estoque-minimo">
+      <i class="fa-solid fa-boxes-stacked" style="margin-right:8px;"></i>
+      Estoque mínimo
+      <span id="sideMinimoBadge" class="side-minimo-badge" hidden>0</span>
+    </a>
+
+    <a href="#"
+       id="menu-guardar-materiais"
+       class="menu-link"
+       data-nav-key="side:log:guardar-materiais"
+       data-nav-parent="side:log"
+       data-nav-pos="side"
+       data-nav-label="Guardar materiais"
+       data-nav-selector="#menu-guardar-materiais">
+      <i class="fa-solid fa-dolly" style="margin-right:8px;"></i>
+      Guardar materiais
+    </a>
+
+    <a href="#"
+       id="menu-identificacao-produto"
+       class="menu-link"
+       data-nav-key="side:log:identificacao-produto"
+       data-nav-parent="side:log"
+       data-nav-pos="side"
+       data-nav-label="Identificação do produto"
+       data-nav-selector="#menu-identificacao-produto">
+      <i class="fa-solid fa-print" style="margin-right:8px;"></i>
+      Identificação do produto
     </a>
   </div>
 </div>
@@ -446,7 +516,7 @@
        data-nav-pos="side"
        data-nav-label="AT"
        data-nav-selector="#menu-sac-at">
-      <i class="fa-solid fa-screwdriver-wrench" style="margin-right:8px;"></i>
+      <i class="fa-solid fa-toolbox" style="margin-right:8px;"></i>
       AT
     </a>
 
@@ -492,7 +562,7 @@
        data-nav-pos="side"
        data-nav-label="Controle de Pedidos"
        data-nav-selector="#menu-vendas-controle">
-      <i class="fa-solid fa-list-check" style="margin-right:8px;"></i>
+      <i class="fa-solid fa-receipt" style="margin-right:8px;"></i>
       Controle de Pedidos
     </a>
 
@@ -518,18 +588,6 @@
        data-nav-label="Compras">Compras</div>
 
   <div class="side-menu">
-    <a href="#"
-       id="menu-produto-recebido"
-       class="menu-link"
-       data-nav-key="side:compras:produto-recebido"
-       data-nav-parent="side:compras"
-       data-nav-pos="side"
-       data-nav-label="Produtos recebidos"
-       data-nav-selector="#menu-produto-recebido">
-      <i class="fa-solid fa-box-open" style="margin-right:8px;"></i>
-      Produtos recebidos
-    </a>
-
     <a href="#"
        id="menu-compras-contas-utilizadas"
        class="menu-link"
@@ -2629,6 +2687,14 @@
                         <button id="sacPeriodo12mBtn" class="content-button" type="button" style="padding:6px 10px;font-size:12px;background:#1f2937;color:#cbd5e1;">12 meses</button>
                         <button id="sacPeriodoTudoBtn" class="content-button" type="button" style="padding:6px 10px;font-size:12px;background:#1f2937;color:#cbd5e1;">Tudo</button>
                       </div>
+                      <button id="sacRelatorioTipoGraficoBtn" class="content-button" type="button" style="background:#1f2937;color:#cbd5e1;gap:6px;">
+                        <i class="fa-solid fa-chart-pie"></i>
+                        <span>Modo pizza</span>
+                      </button>
+                      <button id="sacRelatorioModoValorBtn" class="content-button" type="button" style="background:#1f2937;color:#cbd5e1;gap:6px;">
+                        <i class="fa-solid fa-dollar-sign"></i>
+                        <span>Modo valor</span>
+                      </button>
                       <button id="sacRelatorioVoltarBtn" class="content-button" type="button" style="background:#334155;color:#fff;gap:6px;">
                         <i class="fa-solid fa-arrow-left"></i>
                         <span>Voltar</span>
@@ -2638,14 +2704,14 @@
                         <span>Baixar relatório</span>
                       </button>
                     </div>
-                    <div style="margin-bottom:14px;color:#94a3b8;font-size:12px;font-weight:700;letter-spacing:.3px;">Gráfico 1 - Quantidade por Usuário</div>
+                    <div id="sacGrafico1Titulo" style="margin-bottom:14px;color:#94a3b8;font-size:12px;font-weight:700;letter-spacing:.3px;">Gráfico 1 - Quantidade por Usuário</div>
                     <div style="position:relative;height:320px;max-height:320px;min-height:320px;overflow:hidden;">
                       <canvas id="sacRelatorioGraficoCanvas" style="width:100%;height:100%;"></canvas>
                     </div>
                     <div id="sacRelatorioGraficoVazio" style="display:none;text-align:center;color:#94a3b8;font-size:15px;margin-top:12px;">Nenhum dado encontrado para o gráfico por usuário.</div>
 
                     <div style="margin-top:22px;margin-bottom:14px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
-                      <div style="color:#94a3b8;font-size:12px;font-weight:700;letter-spacing:.3px;">Gráfico 2 - Conteúdo (Itens x Quantidade)</div>
+                      <div id="sacGrafico2Titulo" style="color:#94a3b8;font-size:12px;font-weight:700;letter-spacing:.3px;">Gráfico 2 - Conteúdo (Itens x Quantidade)</div>
                       <div style="display:flex;align-items:center;gap:8px;margin-left:auto;">
                         <label for="sacRelatorioConteudoUsuarioSelect" style="color:#94a3b8;font-size:12px;font-weight:600;">Usuário:</label>
                         <select id="sacRelatorioConteudoUsuarioSelect" style="padding:6px 10px;border:1px solid rgba(148,163,184,0.35);border-radius:8px;background:#0f172a;color:#e2e8f0;font-size:12px;min-width:180px;">
@@ -2684,7 +2750,7 @@
                               <th>Usuário</th>
                               <th>Conteúdo</th>
                               <th>Quantidade</th>
-                              <th>Observação</th>
+                              <th>OS</th>
                             </tr>
                           </thead>
                           <tbody id="sacRelatorioDrilldownBody">
@@ -2722,6 +2788,9 @@
                       </button>
                       <button id="atAtualizarTecBtn" type="button" style="width:100%;text-align:left;padding:10px 14px;background:transparent;border:none;color:#e5e7eb;font-size:13px;cursor:pointer;display:flex;align-items:center;gap:8px;" onmouseover="this.style.background='rgba(255,255,255,.07)'" onmouseout="this.style.background='transparent'">
                         <i class="fa-solid fa-user-gear" style="color:#38bdf8;"></i> Atualizar Técnico
+                      </button>
+                      <button id="atSacAtalhosMenuBtn" type="button" style="width:100%;text-align:left;padding:10px 14px;background:transparent;border:none;color:#e5e7eb;font-size:13px;cursor:pointer;display:flex;align-items:center;gap:8px;" onmouseover="this.style.background='rgba(255,255,255,.07)'" onmouseout="this.style.background='transparent'">
+                        <i class="fa-solid fa-bookmark" style="color:#a78bfa;"></i> Meus Atalhos
                       </button>
                     </div>
                   </div>
@@ -4459,6 +4528,49 @@
           </div>
         </div>
 
+        <!-- Modal Meus Atalhos (sac.sac_atalhos) -->
+        <div id="sacAtalhosModal" class="modal-overlay" style="display:none;z-index:10062;">
+          <div class="modal-container" style="max-width:560px;width:96%;max-height:88vh;display:flex;flex-direction:column;">
+            <div class="modal-header" style="display:flex;justify-content:space-between;align-items:center;padding:12px 16px;border-bottom:1px solid rgba(255,255,255,.1);flex-shrink:0;">
+              <h3 style="margin:0;font-size:15px;display:flex;align-items:center;gap:8px;">
+                <i class="fa-solid fa-bookmark" style="color:#a78bfa;"></i>
+                Meus Atalhos
+              </h3>
+              <button id="sacAtalhosModalClose" class="modal-close-btn" type="button"><i class="fas fa-times"></i></button>
+            </div>
+            <!-- Formulário adicionar -->
+            <div style="padding:14px 16px;border-bottom:1px solid rgba(255,255,255,.08);flex-shrink:0;">
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;">
+                <div>
+                  <label style="font-size:11px;color:var(--inactive-color);display:block;margin-bottom:3px;">NOME DO ATALHO</label>
+                  <input id="sacAtalhoLabel" class="input-padrao" type="text" placeholder="ex: Portal Fiscal" maxlength="80" style="width:100%;box-sizing:border-box;">
+                </div>
+                <div>
+                  <label style="font-size:11px;color:var(--inactive-color);display:block;margin-bottom:3px;">URL</label>
+                  <input id="sacAtalhoUrl" class="input-padrao" type="url" placeholder="https://..." style="width:100%;box-sizing:border-box;">
+                </div>
+              </div>
+              <!-- Seletor de ícone -->
+              <div style="margin-bottom:10px;">
+                <label style="font-size:11px;color:var(--inactive-color);display:block;margin-bottom:6px;">ÍCONE</label>
+                <div id="sacAtalhoIconGrid" style="display:flex;flex-wrap:wrap;gap:6px;">
+                </div>
+                <input type="hidden" id="sacAtalhoIconSel" value="fa-solid fa-link">
+              </div>
+              <button id="sacAtalhoAddBtn" type="button" style="display:inline-flex;align-items:center;gap:6px;padding:7px 18px;border-radius:8px;border:none;background:#7c3aed;color:#fff;font-size:13px;font-weight:600;cursor:pointer;">
+                <i class="fa-solid fa-plus"></i> Adicionar
+              </button>
+              <span id="sacAtalhoAddMsg" style="font-size:12px;margin-left:10px;color:#f87171;display:none;"></span>
+            </div>
+            <!-- Lista de atalhos salvos -->
+            <div id="sacAtalhosList" style="overflow-y:auto;flex:1;padding:10px 16px;">
+              <div id="sacAtalhosLoading" style="text-align:center;padding:24px;color:var(--inactive-color);font-size:13px;">
+                <i class="fas fa-circle-notch fa-spin"></i> Carregando...
+              </div>
+            </div>
+          </div>
+        </div>
+
         <!-- Modal de Edição de Envio (SAC) -->
         <div id="sacEditModal" class="modal-overlay" style="display:none;">
           <div class="modal-container" style="max-width:600px;width:90%;">
@@ -4998,6 +5110,104 @@
               <div id="envioMercadoriaCardsPane" class="envio-mercadoria-list">
                 <div class="envio-empty-state">Carregando envios...</div>
               </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Painel 1ª Peça OK -->
+        <div id="producaoPrimeiraPecaOkPane" class="tab-pane" style="display:none;">
+          <div class="content-wrapper">
+            <div class="content-section" style="margin-top:0;">
+              <div class="title-wrapper" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+                <div class="content-section-title" style="display:flex;align-items:center;gap:8px;">
+                  <i class="fa-solid fa-industry" style="color:#22c55e;"></i>
+                  Produção - 1° pç ok
+                </div>
+              </div>
+
+              <!-- Barra de busca -->
+              <div style="margin-top:12px;max-width:480px;">
+                <label for="producaoPrimeiraPecaOkPesquisa" style="display:block;margin-bottom:6px;color:var(--inactive-color);font-size:13px;">
+                  Pesquisar produto (código)
+                </label>
+                <div style="display:flex;gap:8px;">
+                  <input
+                    id="producaoPrimeiraPecaOkPesquisa"
+                    type="text"
+                    placeholder="Ex: 09.MC.N.10106"
+                    style="flex:1;padding:10px 12px;border-radius:10px;border:1px solid var(--border-color);background:var(--search-bg);color:var(--theme-color);"
+                  />
+                  <button id="producaoPrimeiraPecaOkBtnBuscar"
+                    style="padding:10px 16px;border-radius:10px;border:none;background:#22c55e;color:#fff;font-size:13px;font-weight:600;cursor:pointer;">
+                    <i class="fa-solid fa-magnifying-glass"></i> Buscar
+                  </button>
+                </div>
+                <div id="producaoPrimeiraPecaOkBuscaStatus" style="display:none;margin-top:8px;font-size:13px;"></div>
+              </div>
+
+              <!-- Área de resultados -->
+              <div id="producaoPrimeiraPecaOkResultados" style="display:none;margin-top:20px;">
+                <!-- Nome do produto -->
+                <div id="producaoPrimeiraPecaOkNomeProduto" style="font-size:14px;font-weight:600;color:var(--content-title-color);margin-bottom:12px;padding:10px 14px;background:var(--content-bg);border:1px solid var(--border-color);border-radius:10px;"></div>
+
+                <!-- Número da OP (obrigatório) -->
+                <div style="margin-bottom:12px;max-width:280px;">
+                  <label for="producaoPrimeiraPecaOkNumeroOp" style="display:block;margin-bottom:4px;color:var(--inactive-color);font-size:12px;">
+                    Número da OP <span style="color:#ef4444;">*</span>
+                  </label>
+                  <input
+                    id="producaoPrimeiraPecaOkNumeroOp"
+                    type="text"
+                    placeholder="Ex: OP-2026-001"
+                    required
+                    style="width:100%;padding:9px 10px;border-radius:8px;border:1px solid var(--border-color);background:var(--search-bg);color:var(--theme-color);font-size:13px;box-sizing:border-box;"
+                  />
+                </div>
+
+                <!-- Lista de itens a verificar -->
+                <div id="producaoPrimeiraPecaOkItens" style="display:flex;flex-direction:column;gap:10px;"></div>
+
+                <!-- Botão Registrar -->
+                <div style="margin-top:16px;">
+                  <button id="producaoPrimeiraPecaOkBtnRegistrar"
+                    style="padding:11px 20px;border-radius:10px;border:none;background:#22c55e;color:#fff;font-size:14px;font-weight:600;cursor:pointer;width:100%;">
+                    <i class="fa-solid fa-clipboard-check"></i> Registrar verificação
+                  </button>
+                </div>
+
+                <!-- Seção NOK (aparece só quando houver NOK) -->
+                <div id="producaoPrimeiraPecaOkNokSection" style="display:none;margin-top:16px;padding:14px;background:#2a0a0a;border:1px solid #ef4444;border-radius:10px;">
+                  <div style="color:#fca5a5;font-size:13px;font-weight:600;margin-bottom:12px;">
+                    <i class="fa-solid fa-triangle-exclamation"></i> Itens com NOK — informe o responsável pela liberação
+                  </div>
+                  <div style="margin-bottom:10px;">
+                    <label style="display:block;font-size:12px;color:var(--inactive-color);margin-bottom:4px;">Usuário liberador</label>
+                    <select id="producaoPrimeiraPecaOkUserLiberacao"
+                      style="width:100%;padding:9px 10px;border-radius:8px;border:1px solid var(--border-color);background:var(--search-bg);color:var(--theme-color);font-size:13px;">
+                      <option value="">Selecione o usuário…</option>
+                    </select>
+                  </div>
+                  <div style="margin-bottom:10px;">
+                    <label style="display:block;font-size:12px;color:var(--inactive-color);margin-bottom:4px;">Senha do usuário liberador</label>
+                    <input id="producaoPrimeiraPecaOkSenhaLib" type="password" autocomplete="off"
+                      placeholder="Senha"
+                      style="width:100%;padding:9px 10px;border-radius:8px;border:1px solid var(--border-color);background:var(--search-bg);color:var(--theme-color);font-size:13px;box-sizing:border-box;" />
+                  </div>
+                  <div style="margin-bottom:12px;">
+                    <label style="display:block;font-size:12px;color:var(--inactive-color);margin-bottom:4px;">Resolução / Justificativa <span style="color:#ef4444;">*</span></label>
+                    <textarea id="producaoPrimeiraPecaOkResolucao" rows="3" placeholder="Liberei devido:"
+                      style="width:100%;padding:9px 10px;border-radius:8px;border:1px solid var(--border-color);background:var(--search-bg);color:var(--theme-color);font-size:13px;resize:vertical;box-sizing:border-box;"></textarea>
+                  </div>
+                  <button id="producaoPrimeiraPecaOkBtnConfirmar"
+                    style="padding:10px 20px;border-radius:10px;border:none;background:#ef4444;color:#fff;font-size:13px;font-weight:600;cursor:pointer;width:100%;">
+                    <i class="fa-solid fa-lock-open"></i> Confirmar registro com NOK
+                  </button>
+                </div>
+
+                <!-- Status/feedback -->
+                <div id="producaoPrimeiraPecaOkRegistroStatus" style="display:none;margin-top:12px;padding:10px 14px;border-radius:8px;font-size:13px;"></div>
+              </div>
+
             </div>
           </div>
         </div>
@@ -8166,13 +8376,34 @@
       <img src="img/armazem3d_side.png" alt="Vista lateral do armazém"
            class="arm3d-side-img" id="arm3dSideImg">
       <div class="arm3d-ruas">
-        <button class="arm3d-rua-btn" data-rua="4" data-lado="D">R4D</button>
-        <button class="arm3d-rua-btn" data-rua="3" data-lado="E">R3E</button>
-        <button class="arm3d-rua-btn" data-rua="3" data-lado="D">R3D</button>
-        <button class="arm3d-rua-btn" data-rua="2" data-lado="E">R2E</button>
-        <button class="arm3d-rua-btn" data-rua="2" data-lado="D">R2D</button>
-        <button class="arm3d-rua-btn" data-rua="1" data-lado="E">R1E</button>
-        <button class="arm3d-rua-btn" data-rua="1" data-lado="D">R1D</button>
+        <div class="arm3d-rua-slot" data-rua="4" data-lado="D">
+          <div class="arm3d-rua-badge" id="arm3dBadge-4-D"></div>
+          <button class="arm3d-rua-btn" data-rua="4" data-lado="D">R4</button>
+        </div>
+        <div class="arm3d-rua-slot" data-rua="3" data-lado="E">
+          <div class="arm3d-rua-badge" id="arm3dBadge-3-E"></div>
+          <button class="arm3d-rua-btn" data-rua="3" data-lado="E">R3</button>
+        </div>
+        <div class="arm3d-rua-slot" data-rua="3" data-lado="D">
+          <div class="arm3d-rua-badge" id="arm3dBadge-3-D"></div>
+          <button class="arm3d-rua-btn" data-rua="3" data-lado="D">R3</button>
+        </div>
+        <div class="arm3d-rua-slot" data-rua="2" data-lado="E">
+          <div class="arm3d-rua-badge" id="arm3dBadge-2-E"></div>
+          <button class="arm3d-rua-btn" data-rua="2" data-lado="E">R2</button>
+        </div>
+        <div class="arm3d-rua-slot" data-rua="2" data-lado="D">
+          <div class="arm3d-rua-badge" id="arm3dBadge-2-D"></div>
+          <button class="arm3d-rua-btn" data-rua="2" data-lado="D">R2</button>
+        </div>
+        <div class="arm3d-rua-slot" data-rua="1" data-lado="E">
+          <div class="arm3d-rua-badge" id="arm3dBadge-1-E"></div>
+          <button class="arm3d-rua-btn" data-rua="1" data-lado="E">R1</button>
+        </div>
+        <div class="arm3d-rua-slot" data-rua="1" data-lado="D">
+          <div class="arm3d-rua-badge" id="arm3dBadge-1-D"></div>
+          <button class="arm3d-rua-btn" data-rua="1" data-lado="D">R1</button>
+        </div>
       </div>
     </div><!-- /arm3d-photo-wrap -->
 
@@ -8330,11 +8561,61 @@
 }
 
 /* =====================================================
+   SLOT — wrapper que empilha badge + botão verticalmente
+   ===================================================== */
+.arm3d-rua-slot {
+  position: absolute;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+/* Posições individuais dos slots (mesmo left dos antigos botões) */
+.arm3d-rua-slot[data-rua="4"][data-lado="D"] { left: 5.5%;  bottom: 8%; }
+.arm3d-rua-slot[data-rua="3"][data-lado="E"] { left: 13.5%; bottom: 8%; }
+.arm3d-rua-slot[data-rua="3"][data-lado="D"] { left: 34.5%; bottom: 8%; }
+.arm3d-rua-slot[data-rua="2"][data-lado="E"] { left: 43.2%; bottom: 8%; }
+.arm3d-rua-slot[data-rua="2"][data-lado="D"] { left: 63.3%; bottom: 8%; }
+.arm3d-rua-slot[data-rua="1"][data-lado="E"] { left: 71.5%; bottom: 8%; }
+.arm3d-rua-slot[data-rua="1"][data-lado="D"] { left: 93.2%; bottom: 8%; }
+
+/* Badge de lista acima do botão */
+.arm3d-rua-badge {
+  pointer-events: auto;
+  background: rgba(10, 20, 45, 0.90);
+  border: 1px solid rgba(56, 189, 248, 0.5);
+  border-radius: 6px;
+  padding: 4px 6px;
+  min-width: 70px;
+  max-width: 110px;
+  max-height: 90px;
+  overflow-y: auto;
+  font-size: 10px;
+  color: #cbd5e1;
+  line-height: 1.4;
+  backdrop-filter: blur(4px);
+  scrollbar-width: thin;
+  scrollbar-color: #334155 transparent;
+  display: none; /* oculto até ter dados */
+}
+.arm3d-rua-badge::-webkit-scrollbar { width: 3px; }
+.arm3d-rua-badge::-webkit-scrollbar-thumb { background: #334155; border-radius: 2px; }
+.arm3d-rua-badge-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 6px;
+  white-space: nowrap;
+}
+.arm3d-rua-badge-cod { color: #fde68a; font-weight: 600; overflow: hidden; text-overflow: ellipsis; max-width: 60px; }
+.arm3d-rua-badge-qtd { color: #86efac; font-variant-numeric: tabular-nums; flex-shrink: 0; }
+
+/* =====================================================
    POSIÇÃO INDIVIDUAL DE CADA BOTÃO — edite left e bottom
    ===================================================== */
 .arm3d-rua-btn {
-  position: absolute;
-  transform: translateX(-50%);
+  position: relative;
+  transform: none;
   pointer-events: auto;
   background: rgba(20, 40, 80, 0.85);
   color: #fff;
@@ -8350,19 +8631,19 @@
   white-space: nowrap;
 }
 /* --- Rua 4 --- */
-.arm3d-rua-btn[data-rua="4"][data-lado="D"] { left: 5.5%;  bottom: 8%; }
+.arm3d-rua-btn[data-rua="4"][data-lado="D"] { left: unset; bottom: unset; }
 /* --- Rua 3 --- */
-.arm3d-rua-btn[data-rua="3"][data-lado="E"] { left: 13.5%;  bottom: 8%; }
-.arm3d-rua-btn[data-rua="3"][data-lado="D"] { left: 34.5%;  bottom: 8%; }
+.arm3d-rua-btn[data-rua="3"][data-lado="E"] { left: unset; bottom: unset; }
+.arm3d-rua-btn[data-rua="3"][data-lado="D"] { left: unset; bottom: unset; }
 /* --- Rua 2 --- */
-.arm3d-rua-btn[data-rua="2"][data-lado="E"] { left: 43.2%;  bottom: 8%; }
-.arm3d-rua-btn[data-rua="2"][data-lado="D"] { left: 63.3%;  bottom: 8%; }
+.arm3d-rua-btn[data-rua="2"][data-lado="E"] { left: unset; bottom: unset; }
+.arm3d-rua-btn[data-rua="2"][data-lado="D"] { left: unset; bottom: unset; }
 /* --- Rua 1 --- */
-.arm3d-rua-btn[data-rua="1"][data-lado="E"] { left: 71.5%;  bottom: 8%; }
-.arm3d-rua-btn[data-rua="1"][data-lado="D"] { left: 93.2%;  bottom: 8%; }
+.arm3d-rua-btn[data-rua="1"][data-lado="E"] { left: unset; bottom: unset; }
+.arm3d-rua-btn[data-rua="1"][data-lado="D"] { left: unset; bottom: unset; }
 .arm3d-rua-btn:hover {
   background: rgba(40, 90, 180, 0.95);
-  transform: translateY(-2px) translateX(-50%);
+  transform: translateY(-2px);
 }
 .arm3d-rua-btn[data-lado="E"] { border-right-width: 1px; border-radius: 6px 3px 3px 6px; }
 .arm3d-rua-btn[data-lado="D"] { border-left-width: 1px;  border-radius: 3px 6px 6px 3px; }
@@ -8490,6 +8771,10 @@
   transform: translateX(-50%);
   white-space: nowrap;
   pointer-events: none;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  line-height: 1.2;
 }
 /* Cards lado a lado sem cantos internos arredondados */
 .arm3d-cell .arm3d-cell-card:first-child { border-radius: 4px 0 0 4px; border-right-width: 0; }
@@ -8501,6 +8786,45 @@
   z-index: 2;
   position: relative;
 }
+/* Card ocupado — metade inferior preenchida com verde */
+.arm3d-cell-card.arm3d-card-ocupado {
+  background: linear-gradient(to top, rgba(34,197,94,0.55) 50%, rgba(15,23,42,0.75) 50%);
+  border-color: rgba(34,197,94,0.7);
+}
+.arm3d-cell-card.arm3d-card-ocupado:hover {
+  background: linear-gradient(to top, rgba(34,197,94,0.80) 50%, rgba(40,90,200,0.70) 50%);
+  border-color: rgba(74,222,128,0.9);
+}
+/* Tooltip flutuante de ocupação */
+.arm3d-tooltip {
+  position: fixed;
+  z-index: 9999;
+  pointer-events: none;
+  background: #1e293b;
+  border: 1px solid #38bdf8;
+  border-radius: 8px;
+  padding: 8px 12px;
+  min-width: 180px;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.6);
+  font-size: 12px;
+  color: #e2e8f0;
+}
+.arm3d-tip-title {
+  font-weight: 700;
+  color: #38bdf8;
+  margin-bottom: 6px;
+  border-bottom: 1px solid #334155;
+  padding-bottom: 4px;
+  letter-spacing: 0.05em;
+}
+.arm3d-tip-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 2px 0;
+}
+.arm3d-tip-cod  { color: #fde68a; }
+.arm3d-tip-qtd  { color: #86efac; font-variant-numeric: tabular-nums; }
 
 .arm3d-empty-msg {
   font-size: 0.9rem;
@@ -8893,12 +9217,158 @@
     <div class="overlay-app" id="authOverlay"></div>
   </div> <!-- /.app -->
 
-<!-- Modal de etiquetas ----------------------------->
-<div id="etiquetasModal" class="modal">
-  <div class="modal-content">
-    <span class="close-modal">&times;</span>
-    <h3>Etiquetas disponíveis</h3>
-    <ul id="listaEtiquetas" class="etiquetas-list"></ul>
+<!-- Modal de etiquetas pendentes de impressão ------>
+<div id="etiquetasModal" class="modal etiquetas-modal-overlay" style="display:none;align-items:flex-start;justify-content:center;padding-top:40px;">
+  <div class="etiquetas-modal-box">
+    <!-- Cabeçalho -->
+    <div class="etiquetas-modal-header">
+      <div style="display:flex;align-items:center;gap:10px;">
+        <i class="fa-solid fa-print" style="font-size:1.2rem;color:#a78bfa;"></i>
+        <h3 style="margin:0;font-size:1.1rem;font-weight:700;color:#f1f5f9;">Etiquetas disponíveis</h3>
+      </div>
+      <button id="etiquetasModalFechar" class="etiquetas-modal-close" title="Fechar">&times;</button>
+    </div>
+
+    <!-- Barra de pesquisa -->
+    <div class="etiquetas-modal-search-row">
+      <div class="etiquetas-search-wrap">
+        <i class="fa-solid fa-magnifying-glass" style="color:#94a3b8;"></i>
+        <input id="etiquetasBuscaInput" type="text" placeholder="Pesquisar por lote, código ou descrição..." autocomplete="off" />
+      </div>
+      <!-- Toggle grade / lista -->
+      <div class="etq-view-toggle">
+        <button id="etqBtnViewLista" class="etq-view-btn active" title="Visualização em lista">
+          <i class="fa-solid fa-list"></i>
+        </button>
+        <button id="etqBtnViewGrade" class="etq-view-btn" title="Visualização em grade">
+          <i class="fa-solid fa-grip"></i>
+        </button>
+        <button id="etqBtnVerOcultos" class="etq-view-btn" title="Exibir ocultos">
+          <i class="fa-solid fa-eye-slash"></i>
+        </button>
+        <button id="etqBtnImpressora" class="etq-view-btn" title="Impressora não definida — clique para configurar" style="gap:3px;">
+          <i class="fa-solid fa-print"></i><i class="fa-solid fa-question" style="font-size:.6rem;margin-left:1px;"></i>
+        </button>
+        <button id="etqBtnBaixarAgente" class="etq-view-btn" title="Baixar instalador do agente de impressão (Windows)" style="color:#4ade80;">
+          <i class="fa-solid fa-download"></i>
+        </button>
+        <button id="etqBtnConfigAgente" class="etq-view-btn" title="Abrir configuração do agente local (http://localhost:9200)" style="color:#60a5fa;">
+          <i class="fa-solid fa-gear"></i>
+        </button>
+      </div>
+      <button id="etiquetasImprimirSelecionadas" class="etiquetas-btn-imprimir-sel" title="Imprimir etiquetas selecionadas" style="display:none;">
+        <i class="fa-solid fa-print"></i>
+        <span id="etiquetasSelCount">0</span> selecionada(s)
+      </button>
+    </div>
+
+    <!-- Status/contagem -->
+    <div id="etiquetasModalStatus" class="etiquetas-modal-status"></div>
+
+    <!-- Grid de cards -->
+    <div id="etiquetasModalGrid" class="etiquetas-grid">
+      <div class="etiquetas-loading"><i class="fa-solid fa-spinner fa-spin"></i> Carregando...</div>
+    </div>
+  </div>
+</div>
+
+<!-- Sub-modal: Definir Múltiplo ------------------------------------->
+<div id="etqMultiploModal" style="display:none;position:fixed;inset:0;z-index:2100;background:rgba(0,0,0,.78);backdrop-filter:blur(5px);align-items:center;justify-content:center;">
+  <div class="etq-multiplo-box">
+    <div class="etq-multiplo-header">
+      <div style="display:flex;align-items:center;gap:8px;">
+        <i class="fa-solid fa-layer-group" style="color:#a78bfa;"></i>
+        <span style="font-weight:700;color:#f1f5f9;font-size:1rem;">Definir Múltiplo</span>
+      </div>
+      <button id="etqMultiploFechar" class="etiquetas-modal-close">&times;</button>
+    </div>
+    <!-- Miniatura -->
+    <div id="etqMultiploMiniatura" class="etq-card-thumbnail" style="margin:14px 16px 6px;border-radius:8px;min-height:56px;"></div>
+    <!-- Sugestões -->
+    <div style="padding:6px 16px 10px;">
+      <div style="font-size:.76rem;color:#94a3b8;margin-bottom:8px;">Divisores de <strong id="etqMultiploQtdTotal" style="color:#e2e8f0;">?</strong> &mdash; cada divisor vira a <em>quantidade por etiqueta</em>:</div>
+      <div id="etqMultiploChips" class="etq-multiplo-chips"></div>
+    </div>
+    <!-- Input -->
+    <div style="padding:2px 16px 10px;display:flex;align-items:center;gap:10px;">
+      <label style="color:#94a3b8;font-size:.85rem;white-space:nowrap;">Múltiplo:</label>
+      <input id="etqMultiploInput" type="number" min="1" step="1" placeholder="Ex: 10"
+             style="flex:1;background:#1e293b;border:1px solid #334155;border-radius:8px;padding:8px 12px;color:#f1f5f9;font-size:.95rem;outline:none;" />
+    </div>
+    <!-- Prévia -->
+    <div id="etqMultiploPreview" class="etq-multiplo-preview">Selecione ou digite um múltiplo para ver a prévia.</div>
+    <!-- Botes -->
+    <div style="padding:12px 16px 16px;display:flex;justify-content:flex-end;gap:10px;">
+      <button id="etqMultiploCancelar" class="etq-multiplo-btn-cancel">Cancelar</button>
+      <button id="etqMultiploGerar" class="etq-multiplo-btn-gerar" disabled>
+        <i class="fa-solid fa-print"></i> Gerar etiquetas
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal de etiquetas impressas — Estoque (ETQ_rec_impresso) -->
+<div id="etqImpressoModal" class="modal etiquetas-modal-overlay" style="display:none;align-items:flex-start;justify-content:center;padding-top:40px;">
+  <div class="etiquetas-modal-box">
+    <div class="etiquetas-modal-header">
+      <div style="display:flex;align-items:center;gap:10px;">
+        <i class="fa-solid fa-warehouse" style="font-size:1.2rem;color:#34d399;"></i>
+        <h3 style="margin:0;font-size:1.1rem;font-weight:700;color:#f1f5f9;">Etiquetas impressas — Estoque</h3>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px;">
+        <button id="btnArmazenarProduto" type="button" style="display:flex;align-items:center;gap:6px;background:linear-gradient(135deg,#0891b2 0%,#0e7490 100%);color:#fff;border:none;border-radius:8px;padding:7px 14px;font-size:13px;font-weight:600;cursor:pointer;" title="Armazenar produto — ler QR e local">
+          <i class="fa-solid fa-boxes-packing"></i> Armazenar produto
+        </button>
+        <button id="etqImpressoModalFechar" class="etiquetas-modal-close" title="Fechar">&times;</button>
+      </div>
+    </div>
+    <div class="etiquetas-modal-search-row">
+      <div class="etiquetas-search-wrap">
+        <i class="fa-solid fa-magnifying-glass" style="color:#94a3b8;"></i>
+        <input id="etqImpressoBuscaInput" type="text" placeholder="Pesquisar por lote, código ou descrição..." autocomplete="off" />
+      </div>
+    </div>
+    <div id="etqImpressoModalStatus" class="etiquetas-modal-status"></div>
+    <div id="etqImpressoModalGrid" class="etiquetas-grid">
+      <div class="etiquetas-loading"><i class="fa-solid fa-spinner fa-spin"></i> Carregando...</div>
+    </div>
+  </div>
+</div>
+
+<!-- Sub-modal câmera: Armazenar produto (QR → barcode) -->
+<div id="etqArmazenarModal" style="display:none;position:fixed;inset:0;z-index:2200;background:rgba(0,0,0,.88);backdrop-filter:blur(6px);align-items:center;justify-content:center;">
+  <div style="background:#1e293b;border:1px solid #334155;border-radius:14px;width:92vw;max-width:460px;overflow:hidden;box-shadow:0 24px 64px rgba(0,0,0,.6);">
+    <!-- Cabeçalho -->
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 18px;background:#0f172a;border-bottom:1px solid #334155;">
+      <div style="display:flex;align-items:center;gap:8px;">
+        <i id="etqArmazenarIcone" class="fa-solid fa-qrcode" style="color:#34d399;font-size:1.1rem;"></i>
+        <span id="etqArmazenarTitle" style="font-weight:700;color:#f1f5f9;font-size:1rem;">Leia o QR Code do produto</span>
+      </div>
+      <button id="etqArmazenarFechar" class="etiquetas-modal-close" title="Fechar">&times;</button>
+    </div>
+    <!-- Viewport da câmera -->
+    <div style="position:relative;background:#000;width:100%;aspect-ratio:4/3;overflow:hidden;">
+      <video id="etqArmazenarVideo" autoplay playsinline muted style="width:100%;height:100%;object-fit:cover;display:block;"></video>
+      <!-- Mira de scan -->
+      <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none;">
+        <div id="etqArmazenarMira" style="width:200px;height:200px;border:3px solid rgba(52,211,153,.85);border-radius:12px;box-shadow:0 0 0 3000px rgba(0,0,0,.38);transition:border-color .3s;"></div>
+      </div>
+    </div>
+    <!-- Status do passo atual -->
+    <div id="etqArmazenarStatus" style="padding:12px 18px;font-size:.88rem;color:#94a3b8;min-height:44px;text-align:center;line-height:1.4;"></div>
+    <!-- Entrada manual (fallback) -->
+    <div style="padding:2px 18px 8px;display:flex;gap:8px;">
+      <input id="etqArmazenarInput" type="text" placeholder="Ou digite o código manualmente..."
+        style="flex:1;background:#0f172a;border:1px solid #334155;border-radius:8px;padding:9px 12px;color:#f1f5f9;font-size:.9rem;outline:none;box-sizing:border-box;" autocomplete="off" />
+      <button id="etqArmazenarOk" style="background:#059669;color:#fff;border:none;border-radius:8px;padding:9px 16px;font-weight:700;cursor:pointer;white-space:nowrap;">
+        <i class="fa-solid fa-check"></i>
+      </button>
+    </div>
+    <!-- Campo complemento opcional -->
+    <div style="padding:0 18px 16px;">
+      <input id="etqArmazenarComplemento" type="text" placeholder="Complemento (opcional)..."
+        style="width:100%;background:#0f172a;border:1px solid #1e3a5f;border-radius:8px;padding:8px 12px;color:#94a3b8;font-size:.82rem;outline:none;box-sizing:border-box;" autocomplete="off" />
+    </div>
   </div>
 </div>
 
@@ -8917,7 +9387,7 @@
   <!-- Interceptor de sessão: precisa carregar ANTES de qualquer módulo que faça fetch -->
   <script src="/public/js/sessao_resiliente.js?v=20260422a"></script>
   <script type="module" src="login/login.js"></script>
-  <script type="module" src="menu_produto.js?v=20260507a"></script>
+  <script type="module" src="menu_produto.js?v=20260513b"></script>
   
   <script type="module" src="./requisicoes_omie/filtro_produto.js"></script>
   <script type="module" src="./requisicoes_omie/ListarProdutos.js"></script>
@@ -8931,6 +9401,279 @@
   <script type="module" src="./kanban/kanban.js" defer></script>
 
 <style>
+  /* ── Modal Etiquetas Pendentes ──────────────────────────────────────────── */
+  .etiquetas-modal-overlay {
+    position: fixed; inset: 0; z-index: 2000;
+    background: rgba(0,0,0,.7); backdrop-filter: blur(4px);
+    display: flex; align-items: flex-start; justify-content: center;
+    padding-top: 40px; overflow-y: auto;
+  }
+  .etiquetas-modal-box {
+    background: #1e293b; border: 1px solid #334155;
+    border-radius: 14px; width: 92vw; max-width: 960px;
+    display: flex; flex-direction: column; gap: 0;
+    box-shadow: 0 20px 60px rgba(0,0,0,.5);
+    overflow: hidden; margin-bottom: 40px;
+  }
+  .etiquetas-modal-header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 16px 20px; border-bottom: 1px solid #334155;
+    background: #0f172a;
+  }
+  .etiquetas-modal-close {
+    background: none; border: none; color: #94a3b8; font-size: 1.5rem;
+    cursor: pointer; line-height: 1; padding: 0 4px;
+    transition: color .2s;
+  }
+  .etiquetas-modal-close:hover { color: #f1f5f9; }
+  .etiquetas-modal-search-row {
+    display: flex; align-items: center; gap: 10px;
+    padding: 14px 20px; border-bottom: 1px solid #1e293b;
+    background: #0f172a;
+  }
+  .etiquetas-search-wrap {
+    flex: 1; display: flex; align-items: center; gap: 8px;
+    background: #1e293b; border: 1px solid #334155; border-radius: 8px;
+    padding: 8px 12px;
+  }
+  .etiquetas-search-wrap input {
+    flex: 1; background: none; border: none; outline: none;
+    color: #f1f5f9; font-size: .93rem;
+  }
+  .etiquetas-search-wrap input::placeholder { color: #64748b; }
+  .etiquetas-btn-imprimir-sel {
+    display: flex; align-items: center; gap: 6px;
+    padding: 8px 14px; border: none; border-radius: 8px;
+    background: #7c3aed; color: #fff; font-weight: 700;
+    cursor: pointer; font-size: .9rem; white-space: nowrap;
+    transition: background .2s;
+  }
+  .etiquetas-btn-imprimir-sel:hover { background: #6d28d9; }
+  .etiquetas-modal-status {
+    padding: 6px 20px; font-size: .8rem; color: #94a3b8;
+    min-height: 26px;
+  }
+  /* Grid de cards */
+  .etiquetas-grid {
+    padding: 16px 20px 20px;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    gap: 12px;
+    max-height: 62vh; overflow-y: auto;
+  }
+  .etiquetas-loading {
+    grid-column: 1/-1; text-align: center;
+    color: #64748b; padding: 40px 0; font-size: .95rem;
+  }
+  .etq-card {
+    background: #0f172a; border: 1px solid #334155; border-radius: 10px;
+    overflow: hidden; cursor: pointer; transition: border-color .2s, box-shadow .2s;
+    display: flex; flex-direction: column;
+    user-select: none;
+  }
+  .etq-card:hover { border-color: #7c3aed; box-shadow: 0 0 0 2px rgba(124,58,237,.2); }
+  .etq-card.selecionado {
+    border-color: #7c3aed; box-shadow: 0 0 0 3px rgba(124,58,237,.35);
+    background: #1e1040;
+  }
+  /* Miniatura da etiqueta (proporção 4×2 simplificada) */
+  .etq-card-thumbnail {
+    background: #fff; color: #111; font-size: 7.5px; line-height: 1.3;
+    padding: 6px 8px; min-height: 70px;
+    display: flex; flex-direction: column; gap: 2px;
+    position: relative;
+  }
+  .etq-card-thumbnail .etq-thumb-row {
+    display: flex; gap: 4px; align-items: flex-start;
+  }
+  .etq-card-thumbnail .etq-thumb-qr {
+    width: 44px; height: 44px; background: #eee;
+    border: 1px solid #ccc; border-radius: 3px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 6px; color: #888; flex-shrink: 0;
+  }
+  .etq-card-thumbnail .etq-thumb-dados {
+    flex: 1; overflow: hidden;
+  }
+  .etq-card-thumbnail .etq-thumb-line {
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    max-width: 100%;
+  }
+  .etq-card-thumbnail .etq-thumb-line.label { color: #555; }
+  .etq-card-thumbnail .etq-thumb-line.value { font-weight: 600; }
+  /* Rodapé do card */
+  .etq-card-footer {
+    padding: 8px 10px; display: flex; flex-direction: column; gap: 3px;
+  }
+  .etq-card-cod { font-size: .78rem; font-weight: 700; color: #e2e8f0; }
+  .etq-card-desc { font-size: .72rem; color: #94a3b8;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .etq-card-lote { font-size: .68rem; color: #64748b; }
+  .etq-card-qty  { font-size: .68rem; color: #94a3b8; }
+  .etq-card-actions {
+    padding: 0 10px 10px; display: flex; gap: 6px;
+  }
+  .etq-btn-imprimir-unit {
+    flex: 1; padding: 5px; border: 1px solid #334155; border-radius: 6px;
+    background: #1e293b; color: #a78bfa; font-size: .75rem;
+    cursor: pointer; transition: background .2s, color .2s;
+    display: flex; align-items: center; justify-content: center; gap: 4px;
+  }
+  .etq-btn-imprimir-unit:hover { background: #7c3aed; color: #fff; border-color: #7c3aed; }
+  .etq-check-sel {
+    width: 18px; height: 18px; cursor: pointer; accent-color: #7c3aed; flex-shrink: 0;
+  }
+
+  .etq-btn-multiplo {
+    flex: 1; padding: 5px; border: 1px solid #334155; border-radius: 6px;
+    background: #1e293b; color: #60a5fa; font-size: .75rem;
+    cursor: pointer; transition: background .2s, color .2s;
+    display: flex; align-items: center; justify-content: center; gap: 4px;
+  }
+  .etq-btn-multiplo:hover { background: #2563eb; color: #fff; border-color: #2563eb; }
+
+  .etq-btn-ocultar {
+    flex: 0 0 auto; padding: 5px 7px; border: 1px solid #334155; border-radius: 6px;
+    background: #1e293b; color: #94a3b8; font-size: .75rem;
+    cursor: pointer; transition: background .2s, color .2s;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .etq-btn-ocultar:hover { background: #b45309; color: #fef3c7; border-color: #b45309; }
+
+  /* Cards impressos (impressa = true) */
+  .etq-card--impressa {
+    border: 1px solid #166534;
+    background: linear-gradient(135deg, #052e16 0%, #0f172a 100%);
+    opacity: .92;
+  }
+  .etq-badge-impressa {
+    display: inline-flex; align-items: center; gap: 3px;
+    background: #166534; color: #4ade80; font-size: .68rem;
+    font-weight: 700; border-radius: 4px; padding: 1px 5px; margin-left: 4px;
+  }
+  .etq-btn-reimprimir {
+    flex: 1; padding: 5px; border: 1px solid #1d4ed8; border-radius: 6px;
+    background: #1e3a5f; color: #93c5fd; font-size: .75rem;
+    cursor: pointer; transition: background .2s, color .2s;
+    display: flex; align-items: center; justify-content: center; gap: 4px;
+  }
+  .etq-btn-reimprimir:hover { background: #1d4ed8; color: #fff; border-color: #1d4ed8; }
+  .etq-btn-armazenar {
+    flex: 1; padding: 5px; border: 1px solid #166534; border-radius: 6px;
+    background: #14532d; color: #4ade80; font-size: .75rem;
+    cursor: pointer; transition: background .2s, color .2s;
+    display: flex; align-items: center; justify-content: center; gap: 4px;
+  }
+  .etq-btn-armazenar:hover { background: #166534; color: #fff; border-color: #166534; }
+
+  /* Botões de alternância grade/lista */
+  .etq-view-toggle {
+    display: flex; gap: 2px;
+    background: #0f172a; border: 1px solid #334155; border-radius: 8px;
+    padding: 2px;
+  }
+  .etq-view-btn {
+    background: none; border: none; color: #64748b;
+    width: 32px; height: 32px; border-radius: 6px;
+    cursor: pointer; font-size: .9rem;
+    display: flex; align-items: center; justify-content: center;
+    transition: background .15s, color .15s;
+  }
+  .etq-view-btn:hover { color: #a78bfa; }
+  .etq-view-btn.active { background: #7c3aed; color: #fff; }
+  #etqBtnVerOcultos.active { background: #b45309; color: #fef3c7; }
+  #etqBtnImpressora { width: auto; min-width: 32px; padding: 0 6px; gap: 3px; color: #f87171; }
+  #etqBtnImpressora.etq-pref-set { color: #a78bfa; }
+  #etqBtnImpressora:hover { color: #c4b5fd; }
+  .etq-pref-label { font-size: .65rem; max-width: 70px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  /* ── Modo lista ───────────────────────────────────────────────────────── */
+  .etiquetas-grid.view-list {
+    display: flex; flex-direction: column; gap: 6px;
+    padding: 12px 20px 16px;
+    grid-template-columns: unset;
+  }
+  .etiquetas-grid.view-list .etq-card {
+    flex-direction: row; align-items: center;
+    background: #0f172a; border-radius: 8px;
+    min-height: 48px; padding: 0;
+  }
+  .etiquetas-grid.view-list .etq-card-thumbnail { display: none; }
+  .etiquetas-grid.view-list .etq-card-footer {
+    flex: 1; flex-direction: row; align-items: center; gap: 10px;
+    padding: 8px 12px; flex-wrap: wrap; min-width: 0;
+  }
+  .etiquetas-grid.view-list .etq-card-cod {
+    font-size: .82rem; font-weight: 700; white-space: nowrap; flex-shrink: 0;
+  }
+  .etiquetas-grid.view-list .etq-card-desc {
+    flex: 1; min-width: 80px; font-size: .8rem; white-space: nowrap;
+    overflow: hidden; text-overflow: ellipsis;
+  }
+  .etiquetas-grid.view-list .etq-card-lote {
+    font-size: .75rem; white-space: nowrap; flex-shrink: 0;
+  }
+  .etiquetas-grid.view-list .etq-card-qty {
+    font-size: .75rem; color: #cbd5e1; white-space: nowrap; flex-shrink: 0;
+  }
+  .etiquetas-grid.view-list .etq-card-actions {
+    padding: 6px 8px 6px 0; gap: 4px; flex-shrink: 0;
+  }
+  .etiquetas-grid.view-list .etq-btn-imprimir-unit,
+  .etiquetas-grid.view-list .etq-btn-multiplo,
+  .etiquetas-grid.view-list .etq-btn-ocultar,
+  .etiquetas-grid.view-list .etq-btn-reimprimir,
+  .etiquetas-grid.view-list .etq-btn-armazenar {
+    padding: 4px 10px; font-size: .72rem;
+  }
+  .etiquetas-grid.view-list .etq-btn-ocultar {
+    padding: 4px 8px;
+  }
+  .etiquetas-grid.view-list .etq-check-sel {
+    margin-left: 10px; flex-shrink: 0;
+  }
+
+  /* Sub-modal Múltiplo */
+  .etq-multiplo-box {
+    background: #1e293b; border: 1px solid #334155; border-radius: 14px;
+    width: 90vw; max-width: 440px;
+    box-shadow: 0 20px 60px rgba(0,0,0,.6);
+    overflow: hidden;
+  }
+  .etq-multiplo-header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 14px 16px; border-bottom: 1px solid #334155; background: #0f172a;
+  }
+  .etq-multiplo-chips {
+    display: flex; flex-wrap: wrap; gap: 6px;
+  }
+  .etq-multiplo-chip {
+    padding: 4px 12px; background: #1e293b; border: 1px solid #334155;
+    border-radius: 20px; color: #a78bfa; font-size: .8rem; cursor: pointer;
+    transition: background .2s, border-color .2s;
+  }
+  .etq-multiplo-chip:hover, .etq-multiplo-chip.ativo {
+    background: #7c3aed; border-color: #7c3aed; color: #fff;
+  }
+  .etq-multiplo-preview {
+    margin: 4px 16px 8px; padding: 10px 14px;
+    background: #0f172a; border-radius: 8px; border: 1px solid #1e293b;
+    font-size: .85rem; color: #94a3b8; min-height: 42px;
+  }
+  .etq-multiplo-btn-cancel {
+    padding: 8px 16px; border: 1px solid #334155; border-radius: 8px;
+    background: none; color: #94a3b8; cursor: pointer; font-size: .9rem;
+  }
+  .etq-multiplo-btn-cancel:hover { color: #f1f5f9; border-color: #94a3b8; }
+  .etq-multiplo-btn-gerar {
+    padding: 8px 18px; border: none; border-radius: 8px;
+    background: #7c3aed; color: #fff; font-weight: 700; cursor: pointer;
+    font-size: .9rem; display: flex; align-items: center; gap: 6px;
+    transition: background .2s;
+  }
+  .etq-multiplo-btn-gerar:disabled { background: #4c1d95; opacity: .5; cursor: not-allowed; }
+  .etq-multiplo-btn-gerar:not(:disabled):hover { background: #6d28d9; }
+
   .mp-header{
     display:flex; align-items:center; justify-content:space-between;
     margin:12px 0 8px; padding:0 4px; color:#e5e7eb;
@@ -13012,9 +13755,11 @@ function attachDropZone(ul) {
   window.fecharModalLocalizarNfe = fecharModal;
 
   btnFechar && btnFechar.addEventListener('click', fecharModal);
-  modal.addEventListener('click', (e) => { if (e.target === modal) fecharModal(); });
-  document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && modal.style.display === 'block') fecharModal();
+  modal.addEventListener('click', (e) => {
+    if (e.target === modal) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
   });
 
   // ── Utilitários ──────────────────────────────────────────────
@@ -13204,6 +13949,25 @@ function attachDropZone(ul) {
     return '<span style="background:#fff7ed;color:#c2410c;border:1px solid #fed7aa;border-radius:6px;padding:2px 8px;font-size:11px;font-weight:700;">Faturada (etapa '+esc(c||'-')+')</span>';
   };
 
+  const nfeJaRecebidaOuConcluida = (nfe) => {
+    const etapa = String(nfe?.c_etapa || '').trim();
+    const recebido = String(nfe?.c_recebido || '').toUpperCase() === 'S';
+    const desc = String(nfe?.c_etapa_descricao || nfe?.etapa_descricao || nfe?.status || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+    return recebido || etapa === '60' || etapa === '80' || desc.includes('concluid') || desc.includes('recebid');
+  };
+
+  const renderAvisoNfeSomenteConsulta = (nfe) => {
+    const etapa = esc(nfe?.c_etapa || '-');
+    const label = String(nfe?.c_etapa || '').trim() === '80' ? 'NF-e concluida' : `NF-e recebida (etapa ${etapa})`;
+    return `<div style="margin:0 0 12px;padding:14px 16px;border:2px solid #86efac;background:#ecfdf5;color:#14532d;border-radius:10px;display:flex;align-items:flex-start;gap:12px;">
+      <i class="fa-solid fa-circle-check" style="font-size:22px;color:#16a34a;margin-top:1px;"></i>
+      <div>
+        <div style="font-size:16px;font-weight:800;line-height:1.2;">${label}</div>
+        <div style="font-size:12px;margin-top:4px;color:#166534;">Esta nota ja foi recebida/concluida. A tela fica somente para consulta; pedidos sugeridos e nova associacao ficam ocultos ate a NF-e voltar de etapa.</div>
+      </div>
+    </div>`;
+  };
+
   // ── Card de pedido reutilizável ───────────────────────────────
   const renderPedidoCard = (ped, chaveNfe, numeroNfe, badgeExtra, justEl) => {
     badgeExtra = badgeExtra || '';
@@ -13240,7 +14004,6 @@ function attachDropZone(ul) {
         const numeroNfe= card.dataset.numeroNfe|| '';
         let itensCard = [];
         try { itensCard = JSON.parse(card.dataset.itens || '[]'); } catch (_) {}
-        fecharModal();
         if (window.abrirModalAssociarPedidoNfeComContexto) {
           window.abrirModalAssociarPedidoNfeComContexto({
             numero_nfe: numeroNfe, numero_pedido: cnumero,
@@ -13278,6 +14041,7 @@ function attachDropZone(ul) {
       ultimaNfeCtx = { nfe, itens };
 
       const jaVinculado  = itens.some(i => i.n_id_pedido && Number(i.n_id_pedido) > 0);
+      const somenteConsulta = nfeJaRecebidaOuConcluida(nfe);
       const totalItens   = itens.reduce((acc, i) => acc + (Number(i.vlr_item) || 0), 0);
       const statusHtml   = renderEtapaBadge(nfe.c_etapa, nfe.c_recebido, nfe.c_cancelada);
 
@@ -13299,7 +14063,9 @@ function attachDropZone(ul) {
       </div>`;
 
       let pedidosHtml = '';
-      if (pedidos.length > 0) {
+      if (somenteConsulta) {
+        pedidosHtml = '';
+      } else if (pedidos.length > 0) {
         // Calcula score local e ordena antes de renderizar
         const pedidosComScore = pedidos.map(ped => ({
           ...ped,
@@ -13329,7 +14095,7 @@ function attachDropZone(ul) {
         pedidosHtml = '<div style="padding:10px;background:#f8fafc;border:1px solid #e2e8f0;color:#64748b;border-radius:8px;font-size:13px;"><i class="fa-solid fa-info-circle" style="margin-right:6px;"></i>Nenhum pedido de compra correspondente localizado.</div>';
       }
 
-      conteudo.innerHTML = cabecHtml + pedidosHtml;
+      conteudo.innerHTML = (somenteConsulta ? renderAvisoNfeSomenteConsulta(nfe) : '') + cabecHtml + pedidosHtml;
       attachCardListeners();
 
       const btnRanquear = document.getElementById('locNfeBtnRanquear');

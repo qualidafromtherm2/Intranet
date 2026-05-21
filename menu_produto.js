@@ -187,6 +187,11 @@ document.addEventListener('DOMContentLoaded', () => {
       window._loadKanbanSolicitacoesTab();
     });
   }
+
+  // Atualiza contadores das guias ao carregar a página
+  if (typeof window._updateTabCounters === 'function') {
+    window._updateTabCounters();
+  }
 });
 
 // Helpers compartilhados pela aba de solicitações
@@ -317,6 +322,52 @@ function _solRenderItemRow(item, mode) {
     </div>`;
 }
 
+// ============================================================================
+// FUNÇÕES DE ATUALIZAÇÃO DE CONTADORES DAS GUIAS
+// ============================================================================
+
+// Atualiza os contadores das guias "Tela de separação" e "Kanban solicitações"
+window._updateTabCounters = async function() {
+  try {
+    // Contador para "Tela de separação": Solicitado + Em Separação + Separado
+    const solicitacoesCountEl = document.getElementById('solicitacoesCount');
+    if (solicitacoesCountEl) {
+      try {
+        const respSol = await fetch('/api/logistica/solicitacoes-kanban', { credentials: 'include' });
+        if (respSol.ok) {
+          const dataSol = await respSol.json();
+          const colunas = dataSol.colunas || {};
+          const contSol = 
+            (colunas['Solicitado']?.length || 0) +
+            (colunas['Em Separação']?.length || 0) +
+            (colunas['Separado']?.length || 0);
+          solicitacoesCountEl.textContent = contSol;
+        }
+      } catch (err) {
+        console.warn('[UPDATE-COUNTERS] Erro ao atualizar contador solicitações:', err);
+      }
+    }
+
+    // Contador para "Kanban solicitações": apenas "Aguardando retirada"
+    const kanbanSolicitacoesCountEl = document.getElementById('kanbanSolicitacoesCount');
+    if (kanbanSolicitacoesCountEl) {
+      try {
+        const respKan = await fetch('/api/logistica/kanban', { credentials: 'include' });
+        if (respKan.ok) {
+          const dataKan = await respKan.json();
+          const colunas = dataKan.colunas || {};
+          const contKan = colunas['Aguardando retirada']?.length || 0;
+          kanbanSolicitacoesCountEl.textContent = contKan;
+        }
+      } catch (err) {
+        console.warn('[UPDATE-COUNTERS] Erro ao atualizar contador kanban:', err);
+      }
+    }
+  } catch (err) {
+    console.warn('[UPDATE-COUNTERS] Erro geral:', err);
+  }
+};
+
 // Carrega e renderiza a aba de solicitações como kanban do separador
 window._loadSolicitacoesTab = async function() {
   const board    = document.getElementById('solicitacoesKanbanBoard');
@@ -347,10 +398,16 @@ window._loadSolicitacoesTab = async function() {
 
     board.innerHTML = '';
     let totalCards = 0;
+    let contarSolicitacoes = 0;  // Contador específico: Solicitado + Em Separação + Separado
 
     COLS.forEach(col => {
       const cards = colunas[col.key] || [];
       totalCards += cards.length;
+      
+      // Conta apenas para as 3 colunas específicas
+      if (['Solicitado', 'Em Separação', 'Separado'].includes(col.key)) {
+        contarSolicitacoes += cards.length;
+      }
 
       const colEl = document.createElement('div');
       colEl.style.cssText = 'flex:0 0 200px;display:flex;flex-direction:column;';
@@ -412,7 +469,7 @@ window._loadSolicitacoesTab = async function() {
       board.appendChild(colEl);
     });
 
-    if (countEl) countEl.textContent = totalCards;
+    if (countEl) countEl.textContent = contarSolicitacoes;
     if (statusEl) {
       const agora = new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
       statusEl.textContent = `Atualizado às ${agora} · ${totalCards} SEP(s)`;
@@ -556,6 +613,45 @@ function _abrirModalSeparacao(grupoAtual, gruposConflito) {
     } else {
       enderecoHtml = `<div style="margin-top:2px;font-size:.65rem;color:#6b7280;font-style:italic;"><i class="fa-solid fa-location-dot" style="margin-right:3px;"></i>Não endereçado</div>`;
     }
+
+    // Seletor de armazém — só para itens já Separados
+    let armazemHtml = '';
+    if (isSep) {
+      const locais = (estoqueBatch[it.codigo_produto] || [])
+        .filter(l => Number(l.saldo) > 0)
+        .slice()
+        .sort((a, b) => String(a.local_codigo) === PRINC_ARMZ ? -1 : String(b.local_codigo) === PRINC_ARMZ ? 1 : 0);
+      if (locais.length) {
+        const btns = locais.map((l, idx) => {
+          const isDefault = String(l.local_codigo) === PRINC_ARMZ || (idx === 0);
+          const cod = String(l.local_codigo);
+          const nome = l.local_nome || cod;
+          const qty2 = Number(l.saldo).toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+          return `<button class="armazem-btn" data-cod="${cod}" data-nome="${nome.replace(/"/g,'&quot;')}" data-selected="${isDefault ? '1' : '0'}"
+            style="padding:3px 9px;border-radius:5px;font-size:.65rem;font-weight:700;cursor:pointer;white-space:nowrap;
+                   border:2px solid ${isDefault ? '#16a34a' : '#374151'};
+                   background:${isDefault ? '#14532d' : '#111827'};
+                   color:${isDefault ? '#86efac' : '#9ca3af'};">
+            ${nome} · ${qty2} ${l.unidade || 'UN'}
+          </button>`;
+        }).join('');
+        const destLabel = it.nome_local || it.cod_local || '';
+        armazemHtml = `<div class="armazem-sel-wrap" style="margin-top:6px;">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;flex-wrap:wrap;">
+            <span style="font-size:.60rem;color:#475569;font-weight:600;text-transform:uppercase;letter-spacing:.04em;">
+              <i class="fa-solid fa-warehouse" style="margin-right:4px;color:#3b82f6;"></i>Armazém de retirada
+            </span>
+            ${destLabel ? `<span style="font-size:.60rem;color:#6b7280;">→</span><span style="font-size:.60rem;font-weight:600;text-transform:uppercase;letter-spacing:.04em;padding:2px 6px;border-radius:4px;background:#1e1b4b;color:#a78bfa;border:1px solid #312e81;"><i class="fa-solid fa-location-arrow" style="margin-right:3px;color:#a78bfa;"></i>${destLabel}</span>` : ''}
+          </div>
+          <div style="display:flex;flex-wrap:wrap;gap:4px;">${btns}</div>
+        </div>`;
+      } else if (Object.keys(estoqueBatch).length > 0) {
+        armazemHtml = `<div style="margin-top:5px;font-size:.63rem;color:#fbbf24;font-style:italic;">
+          <i class="fa-solid fa-triangle-exclamation" style="margin-right:3px;"></i>Sem armazém com saldo positivo
+        </div>`;
+      }
+    }
+
     // Itens de sub-SEPs (já Separado) não têm input de quantidade editável
     const qtyHtml = isSep
       ? `<span style="font-size:.80rem;font-weight:700;color:#f0f0f0;">${_solFmtQty(qty)} ${it.unidade || 'UN'}</span>`
@@ -576,8 +672,8 @@ function _abrirModalSeparacao(grupoAtual, gruposConflito) {
            data-descricao="${encodeURIComponent(it.descricao || '')}"
            data-observacao="${encodeURIComponent(obsText)}"
            data-unidade="${String(it.unidade || 'UN').replace(/"/g, '&quot;')}"
-           style="display:flex;align-items:center;gap:12px;padding:10px 16px;border-top:1px solid #222;">
-        <div style="width:40px;height:40px;border-radius:8px;background:#0f0f0f;overflow:hidden;flex-shrink:0;">
+           style="display:flex;align-items:flex-start;gap:12px;padding:10px 16px;border-top:1px solid #222;">
+        <div style="width:40px;height:40px;border-radius:8px;background:#0f0f0f;overflow:hidden;flex-shrink:0;margin-top:2px;">
           <img src="/imagens_produtos/${it.codigo_produto}.jpg" style="width:100%;height:100%;object-fit:cover;" onerror="this.style.display='none'">
         </div>
         <div style="flex:1;min-width:0;">
@@ -590,10 +686,11 @@ function _abrirModalSeparacao(grupoAtual, gruposConflito) {
           </div>
           ${swapHistory}
           ${enderecoHtml}
+          ${armazemHtml}
         </div>
           ${qtyHtml}
           ${isSep
-            ? `<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;justify-content:flex-end;">
+            ? `<div style="display:flex;gap:6px;align-items:flex-start;flex-wrap:wrap;justify-content:flex-end;flex-shrink:0;">
                  <button class="btn-item-conferido" title="Enviar para Aguardando retirada"
                    style="padding:4px 9px;border:none;border-radius:6px;background:#16a34a;color:#dcfce7;font-weight:700;font-size:.70rem;cursor:pointer;white-space:nowrap;">
                    <i class="fa-solid fa-clipboard-check" style="margin-right:3px;"></i>Conferido
@@ -633,6 +730,24 @@ function _abrirModalSeparacao(grupoAtual, gruposConflito) {
   }
 
   let aggItens = _aggItens(grupoAtual.itens);
+  const PRINC_ARMZ = '10717096386';
+  let estoqueBatch = {};
+
+  function _renderLista() {
+    const lista = document.getElementById('modalSepItemsList');
+    if (lista) lista.innerHTML = aggItens.map(it => _renderAggItem(it, grupoAtual.n_solic)).join('');
+  }
+
+  async function _carregarEstoque() {
+    const codigos = [...new Set(aggItens.map(it => it.codigo_produto).filter(Boolean))];
+    if (!codigos.length) return;
+    try {
+      const re = await fetch('/api/logistica/estoque/batch?codigos=' + encodeURIComponent(codigos.join(',')), { credentials: 'include' });
+      const de = await re.json();
+      if (de.ok) estoqueBatch = de.dados || {};
+    } catch (_) {}
+    _renderLista();
+  }
 
   // Recarrega o SEP original do servidor e re-renderiza lista (sem sub-SEPs — .1 vai para fila pendente)
   let _reloadPending = false;
@@ -645,8 +760,7 @@ function _abrirModalSeparacao(grupoAtual, gruposConflito) {
       if (!d.ok) return;
       const mapped = (d.itens || []).map(it => ({ ...it, solic_ids: [it.solic_id], carr_ids: [it.carr_id] }));
       aggItens = _aggItens(mapped);
-      const lista = document.getElementById('modalSepItemsList');
-      if (lista) lista.innerHTML = aggItens.map(it => _renderAggItem(it, grupoAtual.n_solic)).join('');
+      await _carregarEstoque();
     } catch (_) {} finally { _reloadPending = false; }
   }
 
@@ -705,6 +819,9 @@ function _abrirModalSeparacao(grupoAtual, gruposConflito) {
     </div>`;
 
   document.body.appendChild(modal);
+
+  // Carrega estoque assim que modal abre
+  _carregarEstoque();
 
   document.getElementById('btnModalSepFechar')?.addEventListener('click', () => fecharModal());
   modal.addEventListener('click', e => { if (e.target === modal) fecharModal(); });
@@ -984,6 +1101,21 @@ function _abrirModalSeparacao(grupoAtual, gruposConflito) {
 
   // Delegação de clique — ações do item
   modalInner.addEventListener('click', async (e) => {
+    // Seleção de armazém inline
+    const btnArm = e.target.closest('.armazem-btn');
+    if (btnArm) {
+      const wrap = btnArm.closest('.armazem-sel-wrap');
+      if (!wrap) return;
+      wrap.querySelectorAll('.armazem-btn').forEach(b => {
+        const active = b === btnArm;
+        b.dataset.selected = active ? '1' : '0';
+        b.style.border = '2px solid ' + (active ? '#16a34a' : '#374151');
+        b.style.background = active ? '#14532d' : '#111827';
+        b.style.color = active ? '#86efac' : '#9ca3af';
+      });
+      return;
+    }
+
     const btnConferido = e.target.closest('.btn-item-conferido');
     if (btnConferido && !btnConferido.disabled) {
       const row = btnConferido.closest('[data-item-row]');
@@ -991,15 +1123,22 @@ function _abrirModalSeparacao(grupoAtual, gruposConflito) {
       const solicIds = JSON.parse(row.dataset.solicIds || '[]');
       if (!solicIds.length) return;
 
+      // Lê armazém selecionado no DOM (botão com data-selected="1")
+      const selBtn = row.querySelector('.armazem-btn[data-selected="1"]');
+      const cod_local  = selBtn ? selBtn.dataset.cod  : null;
+      const nome_local = selBtn ? selBtn.dataset.nome : null;
+      const quantidade = parseFloat(row.dataset.qtyTotal) || 1;
+
       btnConferido.disabled = true;
       const htmlOrig = btnConferido.innerHTML;
       btnConferido.innerHTML = '<i class="fa-solid fa-spinner fa-spin" style="margin-right:3px;"></i>...';
+
       try {
         const r = await fetch('/api/logistica/itens_solicitados/aguardando-retirada', {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
           credentials: 'include',
-          body: JSON.stringify({ solic_ids: solicIds })
+          body: JSON.stringify({ solic_ids: solicIds, cod_local, nome_local, quantidade })
         });
         const d = await r.json();
         if (!d.ok) throw new Error(d.error || 'Erro ao marcar como aguardando retirada.');
@@ -1389,6 +1528,7 @@ async function _abrirModalAguardandoRetiradaSep(nSolic, opts = {}) {
 
   let itens = [];
   let itensDerivados = [];
+  let estoqueBatch = {};
   try {
     const r = await fetch(`/api/logistica/kanban/itens?n_solic=${encodeURIComponent(nSolic)}&include_derivados=1`, { credentials: 'include' });
     const d = await r.json();
@@ -1398,6 +1538,16 @@ async function _abrirModalAguardandoRetiradaSep(nSolic, opts = {}) {
     }
     itens = Array.isArray(d.itens) ? d.itens : [];
     itensDerivados = Array.isArray(d.itens_derivados) ? d.itens_derivados : [];
+
+    // Carrega estoque por armazém para todos os produtos da solicitação
+    const codigos = [...new Set(itens.map(it => it.codigo_produto).filter(Boolean))];
+    if (codigos.length) {
+      try {
+        const re = await fetch('/api/logistica/estoque/batch?codigos=' + encodeURIComponent(codigos.join(',')), { credentials: 'include' });
+        const de = await re.json();
+        if (de.ok) estoqueBatch = de.dados || {};
+      } catch (_) { /* silencia */ }
+    }
   } catch (err) {
     alert('Erro de rede ao carregar a solicitação.');
     return;
@@ -1411,28 +1561,52 @@ async function _abrirModalAguardandoRetiradaSep(nSolic, opts = {}) {
   document.getElementById('modalAguardandoRetiradaSep')?.remove();
 
   const renderLinha = (it) => {
-    let endAddr;
+    // Card de endereço (localização física)
+    let endCard = '';
     const endList = it.enderecos_pp;
     if (endList && Array.isArray(endList) && endList.length > 0) {
-      const cards = endList.map(e => `
-        <div style="display:inline-flex;flex-direction:column;gap:1px;background:#1e293b;border:1px solid #334155;border-radius:4px;padding:3px 6px;font-size:.65rem;line-height:1.5;white-space:nowrap;">
+      endCard = endList.map(e => `
+        <div style="display:inline-flex;flex-direction:column;gap:1px;background:#1e293b;border:1px solid #334155;border-radius:4px;padding:3px 6px;font-size:.65rem;line-height:1.6;white-space:nowrap;">
           <span><span style="color:#6b7280;">rua:</span> <span style="color:#67e8f9;font-weight:700;">${e.rua || '—'}</span></span>
           <span><span style="color:#6b7280;">andar:</span> <span style="color:#67e8f9;font-weight:700;">${e.andar || '—'}</span></span>
           <span><span style="color:#6b7280;">edif.:</span> <span style="color:#67e8f9;font-weight:700;">${e.edificio || '—'}</span></span>
           <span><span style="color:#6b7280;">apto:</span> <span style="color:#67e8f9;font-weight:700;">${e.apartamento || '—'}</span></span>
         </div>`).join('');
-      endAddr = `<div style="display:flex;flex-wrap:wrap;gap:4px;margin-top:2px;">${cards}</div>`;
     } else {
-      endAddr = `<span style="color:#6b7280;font-style:italic;font-size:.68rem;">Não endereçado</span>`;
+      endCard = `<span style="color:#6b7280;font-style:italic;font-size:.68rem;">Não endereçado</span>`;
     }
+
+    // Armazéns — local_codigo 10717096386 sempre primeiro
+    const PRINCIPAL = '10717096386';
+    let locais = (estoqueBatch[it.codigo_produto] || []).slice();
+    locais.sort((a, b) => {
+      if (String(a.local_codigo) === PRINCIPAL) return -1;
+      if (String(b.local_codigo) === PRINCIPAL) return  1;
+      return 0;
+    });
+    let estoqueColuna = '';
+    if (locais.length) {
+      estoqueColuna = locais.map(l =>
+        `<div style="display:flex;flex-direction:column;line-height:1.3;padding:2px 0;">
+          <span style="font-size:.63rem;color:#86efac;">${l.local_nome || l.local_codigo}</span>
+          <span style="font-size:.68rem;color:#f0f0f0;font-weight:700;">${Number(l.saldo).toLocaleString('pt-BR',{minimumFractionDigits:0,maximumFractionDigits:2})} ${l.unidade||'UN'}</span>
+        </div>`
+      ).join('');
+    } else {
+      estoqueColuna = `<span style="font-size:.63rem;color:#6b7280;font-style:italic;">Sem estoque</span>`;
+    }
+
     return `
     <div style="display:flex;align-items:flex-start;gap:10px;padding:10px 12px;border-top:1px solid #222;">
       <div style="flex:1;min-width:0;">
         <div style="font-weight:700;font-size:.78rem;color:#f59e0b;">${it.codigo_produto || '—'}</div>
         <div style="font-size:.75rem;color:#d1d5db;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${it.descricao || '—'}</div>
-        <div style="margin-top:3px;display:flex;align-items:flex-start;gap:4px;">
-          <i class="fa-solid fa-location-dot" style="color:#6b7280;font-size:.68rem;margin-top:3px;"></i>
-          ${endAddr}
+        <div style="margin-top:4px;display:flex;align-items:flex-start;gap:8px;">
+          <i class="fa-solid fa-location-dot" style="color:#6b7280;font-size:.68rem;margin-top:3px;flex-shrink:0;"></i>
+          ${endCard}
+          <div style="display:flex;flex-direction:column;gap:3px;border-left:1px solid #374151;padding-left:8px;min-width:130px;">
+            ${estoqueColuna}
+          </div>
         </div>
       </div>
       <div style="font-size:.74rem;font-weight:700;color:#f0f0f0;white-space:nowrap;">${_solFmtQty(it.quantidade)} ${it.unidade || 'UN'}</div>
@@ -3000,20 +3174,17 @@ function renderAlmoxTable(arr) {
 function toggleHeaderIcons(isLoggedIn) {
   const bellWrapper = document.getElementById('notification-wrapper');
   const cartIcon = document.getElementById('cart-icon');
-  const printIcon = document.getElementById('print-icon');
   const configIcon = document.getElementById('config-icon');
 
   if (isLoggedIn) {
     // Mostra os ícones quando usuário está logado
     if (bellWrapper) bellWrapper.style.display = 'block';
     if (cartIcon) cartIcon.style.display = 'inline-block';
-    if (printIcon) printIcon.style.display = 'inline-block';
     if (configIcon) configIcon.style.display = 'inline-block';
   } else {
     // Oculta os ícones quando usuário não está logado
     if (bellWrapper) bellWrapper.style.display = 'none';
     if (cartIcon) cartIcon.style.display = 'none';
-    if (printIcon) printIcon.style.display = 'none';
     if (configIcon) configIcon.style.display = 'none';
   }
 }
@@ -6057,9 +6228,69 @@ else if (nome === 'oscilacao-estoque') {
 /*  Armazém — seleção de rua/lado (2D)                   */
 /* ====================================================== */
 let _arm3dInited = false;
+let _arm3dOcupacao = null; // cache { "01-04-01-001": [{codigo_produto, qtd, unidade}, ...] }
+
+async function _arm3dCarregarOcupacao() {
+  try {
+    const resp = await fetch('/api/etiquetas/ocupacao');
+    const json = await resp.json();
+    if (json.ok) _arm3dOcupacao = json.ocupacao;
+  } catch (e) {
+    console.warn('[arm3d] Não foi possível carregar ocupação:', e);
+    _arm3dOcupacao = {};
+  }
+  _arm3dPopularBadges();
+}
+
+/* Agrega itens de todos os endereços de uma rua+lado e popula o badge */
+function _arm3dPopularBadges() {
+  if (!_arm3dOcupacao) return;
+
+  document.querySelectorAll('.arm3d-rua-slot').forEach(slot => {
+    const rua  = slot.dataset.rua;
+    const lado = slot.dataset.lado; // "E" ou "D"
+    const badge = slot.querySelector('.arm3d-rua-badge');
+    if (!badge) return;
+
+    const ruaStr = String(rua).padStart(2, '0');
+    const prefix  = `${ruaStr}-`;
+
+    /* Soma por código de produto */
+    /* E → CC ímpar; D → CC par */
+    const totais = {};
+    for (const [end, itens] of Object.entries(_arm3dOcupacao)) {
+      if (!end.startsWith(prefix)) continue;
+      const partes = end.split('-');
+      if (partes.length !== 4) continue;
+      const ccNum = parseInt(partes[2], 10);
+      const isImpar = ccNum % 2 === 1;
+      if (lado === 'E' && !isImpar) continue;
+      if (lado === 'D' &&  isImpar) continue;
+      for (const item of itens) {
+        if (!totais[item.codigo_produto]) totais[item.codigo_produto] = { qtd: 0, unidade: item.unidade };
+        totais[item.codigo_produto].qtd += item.qtd;
+      }
+    }
+
+    const linhas = Object.entries(totais);
+    if (linhas.length === 0) { badge.style.display = 'none'; return; }
+
+    badge.innerHTML = linhas.map(([cod, v]) =>
+      `<div class="arm3d-rua-badge-row">
+         <span class="arm3d-rua-badge-cod" title="${cod}">${cod}</span>
+         <span class="arm3d-rua-badge-qtd">${v.qtd} ${v.unidade}</span>
+       </div>`
+    ).join('');
+    badge.style.display = 'block';
+  });
+}
+
 function initArmazem3D() {
   if (_arm3dInited) return;
   _arm3dInited = true;
+
+  /* Carrega ocupação imediatamente para popular as badges na vista inicial */
+  _arm3dCarregarOcupacao();
 
   const photoWrap = document.getElementById('arm3dPhotoWrap');
   const panel     = document.getElementById('arm3dRuaPanel');
@@ -6070,6 +6301,36 @@ function initArmazem3D() {
   const ROWS = 6;  // níveis (cima → baixo no DOM, nível 1 = baixo)
 
   const ladoNome = { E: 'Esquerda', D: 'Direita' };
+
+  /* ── Tooltip flutuante ── */
+  const tooltip = document.createElement('div');
+  tooltip.className = 'arm3d-tooltip';
+  tooltip.style.display = 'none';
+  document.body.appendChild(tooltip);
+
+  function mostrarTooltip(card, itens) {
+    const linhas = itens.map(i =>
+      `<div class="arm3d-tip-row"><span class="arm3d-tip-cod">${i.codigo_produto}</span><span class="arm3d-tip-qtd">${i.qtd} ${i.unidade}</span></div>`
+    ).join('');
+    tooltip.innerHTML = `<div class="arm3d-tip-title">${card.dataset.endereco}</div>${linhas}`;
+    tooltip.style.display = 'block';
+  }
+
+  function moverTooltip(e) {
+    const margin = 12;
+    let x = e.clientX + margin;
+    let y = e.clientY + margin;
+    const tw = tooltip.offsetWidth;
+    const th = tooltip.offsetHeight;
+    if (x + tw > window.innerWidth)  x = e.clientX - tw - margin;
+    if (y + th > window.innerHeight) y = e.clientY - th - margin;
+    tooltip.style.left = x + 'px';
+    tooltip.style.top  = y + 'px';
+  }
+
+  function esconderTooltip() {
+    tooltip.style.display = 'none';
+  }
 
   function gerarGridEstante(rua, lado) {
     const body = document.getElementById('arm3dRuaPanelBody');
@@ -6100,15 +6361,34 @@ function initArmazem3D() {
         cell.className = 'arm3d-cell';
 
         ['e', 'd'].forEach(sub => {
+          const ruaStr    = String(rua).padStart(2, '0');
+          const nivelStr  = String(rowNum).padStart(2, '0');
+          // Edifício: rack E → número ímpar (2*col-1), rack D → número par (2*col)
+          const edificioNum = lado === 'E' ? (2 * colNum - 1) : (2 * colNum);
+          const colunaStr   = String(edificioNum).padStart(2, '0');
+          const ladoStr     = sub === 'e' ? '001' : '002';
+          const endereco    = `${ruaStr}-${nivelStr}-${colunaStr}-${ladoStr}`;
+
           const card = document.createElement('button');
           card.className = 'arm3d-cell-card';
-          card.innerHTML = `<span class="arm3d-card-label">E${colNum}.${rowNum}${sub}</span>`;
-          card.title = `Rua ${rua} ${ladoNome[lado]} — Coluna ${colNum} Nível ${rowNum} ${sub === 'e' ? 'Esquerda' : 'Direita'}`;
+          card.innerHTML = `<span class="arm3d-card-label"><span>${ruaStr}-${nivelStr}</span><span>${colunaStr}-${ladoStr}</span></span>`;
+          card.title = `Endereço: ${endereco} | Rua ${rua} | Nível ${rowNum} | Edifício ${colunaStr} | ${sub === 'e' ? 'Esquerda' : 'Direita'}`;
           card.dataset.rua = rua;
           card.dataset.lado = lado;
           card.dataset.coluna = colNum;
           card.dataset.nivel = rowNum;
           card.dataset.sub = sub;
+          card.dataset.endereco = endereco;
+
+          /* ── Ocupação ── */
+          const itens = _arm3dOcupacao ? (_arm3dOcupacao[endereco] || null) : null;
+          if (itens && itens.length > 0) {
+            card.classList.add('arm3d-card-ocupado');
+            card.addEventListener('mouseenter', e => { mostrarTooltip(card, itens); moverTooltip(e); });
+            card.addEventListener('mousemove',  moverTooltip);
+            card.addEventListener('mouseleave', esconderTooltip);
+          }
+
           cell.appendChild(card);
         });
 
@@ -6120,14 +6400,17 @@ function initArmazem3D() {
     body.appendChild(wrap);
   }
 
-  function abrirPainel(rua, lado) {
+  async function abrirPainel(rua, lado) {
     if (photoWrap) photoWrap.classList.remove('a3-visible');
     if (panelTitle) panelTitle.textContent = `Rua ${rua} — ${ladoNome[lado] || lado}`;
+    /* Garante que ocupação está carregada (uma só vez) */
+    if (_arm3dOcupacao === null) await _arm3dCarregarOcupacao();
     gerarGridEstante(rua, lado);
     if (panel) panel.style.display = 'flex';
   }
 
   function fecharPainel() {
+    esconderTooltip();
     if (panel) panel.style.display = 'none';
     if (photoWrap) photoWrap.classList.add('a3-visible');
   }
@@ -6761,10 +7044,21 @@ document.getElementById('menu-solicitacao-transferencia')?.addEventListener('cli
   await window.openSolicitacoesTransferencia?.();
 });
 
+function abrirLocalizarNfePeloMenuRecebimento() {
+  const inputNfe = document.getElementById('modalLocalizarNfeInput');
+  const inputPedido = document.getElementById('modalLocalizarPedidoInput');
+  if (inputNfe) inputNfe.value = '';
+  if (inputPedido) inputPedido.value = '';
+  document.getElementById('locNfeTabNfe')?.click();
+  if (typeof window.abrirModalLocalizarNfe === 'function') {
+    window.abrirModalLocalizarNfe();
+  }
+}
+
 document.getElementById('menu-recebimento')?.addEventListener('click', async e => {
   e.preventDefault();
-  showMainTab('recebimentoPane');
-  // await loadComprasRecebimento(); // COMENTADO - usando nova implementação inline no HTML
+  e.stopImmediatePropagation();
+  abrirLocalizarNfePeloMenuRecebimento();
 });
 
 // QUALIDADE: abre painel de Qualidade Fábrica
@@ -9453,6 +9747,8 @@ const sacPeriodo4mBtn = document.getElementById('sacPeriodo4mBtn');
 const sacPeriodo6mBtn = document.getElementById('sacPeriodo6mBtn');
 const sacPeriodo12mBtn = document.getElementById('sacPeriodo12mBtn');
 const sacPeriodoTudoBtn = document.getElementById('sacPeriodoTudoBtn');
+const sacRelatorioTipoGraficoBtn = document.getElementById('sacRelatorioTipoGraficoBtn');
+const sacRelatorioModoValorBtn = document.getElementById('sacRelatorioModoValorBtn');
 const atTipoAtendimentoInput = document.getElementById('atTipoAtendimento');
 const atNomeRevendaClienteInput = document.getElementById('atNomeRevendaCliente');
 const atTelefoneInput = document.getElementById('atTelefone');
@@ -9506,6 +9802,17 @@ let atWhatsappRealtimeBound = false;
 // Mapa de conversas com last_read_at do banco (sincronizado via API)
 const atWhatsappConversationState = new Map(); // { phone_digits -> { last_read_at, ... } }
 let atWhatsappConversationFilter = 'todos';
+
+let _sacRelatorioUsuariosChart = null;
+let _sacRelatorioConteudoChart = null;
+let _sacRelatorioRowsCache = [];
+let _sacRelatorioPeriodoMeses = 4;
+let _sacRelatorioConteudoUsuarioSelecionado = '';
+let _sacRelatorioConteudoTopItens = [];
+let _sacRelatorioDrilldownItensCache = [];
+let _sacRelatorioModoGrafico = 'bar';
+let _sacRelatorioModoValor = false;   // false = quantidade, true = valor (CMC × qtd)
+let _sacCmcCache = {};                // { "61016": 45.20, ... }
 
 // -------- Gestão de anexos pendentes (antes de salvar a OS) --------
 let _atAnexosPendentes = []; // Array de File objects
@@ -12326,12 +12633,13 @@ function _abrirAtOsModal(id, navRows) {
   }
 })();
 
-// ── Dropdown Configuração (Alimentação / Atualizar Técnico) ──────────────────
+// ── Dropdown Configuração (Alimentação / Atualizar Técnico / Meus Atalhos) ──────────────────
 (function() {
   const wrapBtn  = document.getElementById('atConfigAlimentacaoBtn');
   const dropMenu = document.getElementById('atConfigDropdownMenu');
   const alimBtn  = document.getElementById('atConfigAlimMenuBtn');
   const updTecBtn= document.getElementById('atAtualizarTecBtn');
+  const atalhosBtn = document.getElementById('atSacAtalhosMenuBtn');
   if (!wrapBtn || !dropMenu) return;
 
   let open = false;
@@ -12363,6 +12671,239 @@ function _abrirAtOsModal(id, navRows) {
       if (modal) { modal.style.display = 'flex'; }
       const loadEvent = new CustomEvent('atUpdTecOpen');
       document.dispatchEvent(loadEvent);
+    });
+  }
+
+  if (atalhosBtn) {
+    atalhosBtn.addEventListener('click', () => {
+      fecharDrop();
+      const loadEvent = new CustomEvent('sacAtalhosOpen');
+      document.dispatchEvent(loadEvent);
+    });
+  }
+})();
+
+// ── Modal Meus Atalhos (sac.sac_atalhos) ─────────────────────────────────────
+(function() {
+  const ICONS = [
+    { cls: 'fa-solid fa-link',           label: 'Link' },
+    { cls: 'fa-solid fa-globe',          label: 'Globe' },
+    { cls: 'fa-solid fa-bookmark',       label: 'Bookmark' },
+    { cls: 'fa-solid fa-star',           label: 'Star' },
+    { cls: 'fa-solid fa-heart',          label: 'Heart' },
+    { cls: 'fa-solid fa-house',          label: 'House' },
+    { cls: 'fa-solid fa-bolt',           label: 'Bolt' },
+    { cls: 'fa-solid fa-fire',           label: 'Fire' },
+    { cls: 'fa-solid fa-rocket',         label: 'Rocket' },
+    { cls: 'fa-solid fa-folder',         label: 'Folder' },
+    { cls: 'fa-solid fa-chart-line',     label: 'Gráfico' },
+    { cls: 'fa-solid fa-file-lines',     label: 'Arquivo' },
+    { cls: 'fa-solid fa-magnifying-glass', label: 'Busca' },
+    { cls: 'fa-solid fa-bell',           label: 'Sino' },
+    { cls: 'fa-solid fa-gear',           label: 'Engrenagem' },
+    { cls: 'fa-solid fa-wrench',         label: 'Ferramenta' },
+    { cls: 'fa-solid fa-truck',          label: 'Caminhão' },
+    { cls: 'fa-solid fa-clipboard',      label: 'Prancheta' },
+    { cls: 'fa-solid fa-calculator',     label: 'Calculadora' },
+    { cls: 'fa-brands fa-whatsapp',      label: 'WhatsApp' },
+  ];
+
+  const modal     = document.getElementById('sacAtalhosModal');
+  const closeBtn  = document.getElementById('sacAtalhosModalClose');
+  const labelInp  = document.getElementById('sacAtalhoLabel');
+  const urlInp    = document.getElementById('sacAtalhoUrl');
+  const iconGrid  = document.getElementById('sacAtalhoIconGrid');
+  const iconSel   = document.getElementById('sacAtalhoIconSel');
+  const addBtn    = document.getElementById('sacAtalhoAddBtn');
+  const addMsg    = document.getElementById('sacAtalhoAddMsg');
+  const list      = document.getElementById('sacAtalhosList');
+  const loading   = document.getElementById('sacAtalhosLoading');
+  if (!modal) return;
+
+  // Constrói a grade de ícones
+  function buildIconGrid(currentIcon) {
+    if (!iconGrid) return;
+    iconGrid.innerHTML = ICONS.map(ic => {
+      const sel = (ic.cls === currentIcon) ? 'background:#7c3aed;color:#fff;border-color:#7c3aed;' : 'background:rgba(255,255,255,.05);color:#9ca3af;border-color:rgba(255,255,255,.15);';
+      return `<button type="button" data-icon="${ic.cls}" title="${ic.label}"
+        style="width:34px;height:34px;border-radius:8px;border:1px solid;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;font-size:15px;transition:background .15s;${sel}">
+        <i class="${ic.cls}"></i></button>`;
+    }).join('');
+    iconGrid.querySelectorAll('button[data-icon]').forEach(b => {
+      b.addEventListener('click', () => {
+        iconSel.value = b.dataset.icon;
+        iconGrid.querySelectorAll('button[data-icon]').forEach(x => {
+          x.style.background = 'rgba(255,255,255,.05)';
+          x.style.color = '#9ca3af';
+          x.style.borderColor = 'rgba(255,255,255,.15)';
+        });
+        b.style.background = '#7c3aed';
+        b.style.color = '#fff';
+        b.style.borderColor = '#7c3aed';
+      });
+    });
+  }
+
+  function showMsg(txt, ok) {
+    if (!addMsg) return;
+    addMsg.textContent = txt;
+    addMsg.style.color = ok ? '#4ade80' : '#f87171';
+    addMsg.style.display = 'inline';
+    setTimeout(() => { addMsg.style.display = 'none'; }, 3000);
+  }
+
+  async function loadAtalhos() {
+    if (loading) loading.style.display = 'block';
+    list.querySelectorAll('.sac-atalho-item').forEach(el => el.remove());
+    try {
+      const r = await fetch('/api/sac/atalhos', { credentials: 'same-origin' });
+      const d = await r.json();
+      if (loading) loading.style.display = 'none';
+      if (!d.ok || !d.atalhos.length) {
+        list.innerHTML = '<div style="text-align:center;padding:24px;color:var(--inactive-color);font-size:13px;">Nenhum atalho salvo ainda.</div>';
+        return;
+      }
+      list.innerHTML = '';
+      d.atalhos.forEach(a => renderAtalhoItem(a));
+    } catch(e) {
+      if (loading) loading.style.display = 'none';
+      list.innerHTML = '<div style="color:#f87171;padding:12px;">Erro ao carregar.</div>';
+    }
+  }
+
+  function renderAtalhoItem(a) {
+    const div = document.createElement('div');
+    div.className = 'sac-atalho-item';
+    div.dataset.id = a.id;
+    div.style.cssText = 'display:flex;align-items:center;gap:10px;padding:9px 6px;border-bottom:1px solid rgba(255,255,255,.06);';
+    div.innerHTML = `
+      <span style="display:inline-flex;align-items:center;justify-content:center;width:34px;height:34px;border-radius:9px;background:rgba(124,58,237,.18);color:${escapeAtHtml(a.icon_color)};flex-shrink:0;">
+        <i class="${escapeAtHtml(a.icon_class)}" style="font-size:16px;"></i>
+      </span>
+      <div style="flex:1;min-width:0;">
+        <div style="font-size:13px;font-weight:600;color:#e5e7eb;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeAtHtml(a.label)}</div>
+        <div style="font-size:11px;color:var(--inactive-color);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeAtHtml(a.url)}</div>
+      </div>
+      <a href="${escapeAtHtml(a.url)}" target="_blank" rel="noopener noreferrer" title="Abrir link"
+         style="display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;border-radius:7px;background:rgba(14,165,233,.15);color:#38bdf8;flex-shrink:0;text-decoration:none;">
+        <i class="fa-solid fa-arrow-up-right-from-square" style="font-size:13px;"></i>
+      </a>
+      <button class="sac-atalho-edit-btn" title="Editar / trocar ícone"
+        style="display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;border-radius:7px;background:rgba(255,255,255,.05);color:#9ca3af;border:1px solid rgba(255,255,255,.1);cursor:pointer;flex-shrink:0;">
+        <i class="fa-solid fa-pen" style="font-size:12px;"></i>
+      </button>
+      <button class="sac-atalho-del-btn" title="Excluir"
+        style="display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;border-radius:7px;background:rgba(239,68,68,.1);color:#f87171;border:1px solid rgba(239,68,68,.2);cursor:pointer;flex-shrink:0;">
+        <i class="fa-solid fa-trash" style="font-size:12px;"></i>
+      </button>`;
+
+    div.querySelector('.sac-atalho-del-btn').addEventListener('click', async () => {
+      if (!confirm(`Excluir atalho "${a.label}"?`)) return;
+      await fetch(`/api/sac/atalhos/${a.id}`, { method: 'DELETE', credentials: 'same-origin' });
+      loadAtalhos();
+    });
+
+    div.querySelector('.sac-atalho-edit-btn').addEventListener('click', () => {
+      abrirEdicaoInline(div, a);
+    });
+
+    list.appendChild(div);
+  }
+
+  function abrirEdicaoInline(div, a) {
+    // Substitui o item por um mini-formulário inline de edição
+    div.innerHTML = `
+      <div style="flex:1;display:grid;grid-template-columns:1fr 1fr;gap:6px;align-items:start;">
+        <input class="input-padrao sac-edit-label" type="text" value="${escapeAtHtml(a.label)}" maxlength="80" style="font-size:12px;">
+        <input class="input-padrao sac-edit-url" type="url" value="${escapeAtHtml(a.url)}" style="font-size:12px;">
+        <div class="sac-edit-icon-grid" style="grid-column:1/-1;display:flex;flex-wrap:wrap;gap:4px;margin-top:4px;"></div>
+        <input type="hidden" class="sac-edit-icon-sel" value="${escapeAtHtml(a.icon_class)}">
+      </div>
+      <div style="display:flex;flex-direction:column;gap:4px;flex-shrink:0;">
+        <button class="sac-edit-save" style="padding:5px 12px;border-radius:7px;border:none;background:#7c3aed;color:#fff;font-size:12px;cursor:pointer;">Salvar</button>
+        <button class="sac-edit-cancel" style="padding:5px 12px;border-radius:7px;border:none;background:rgba(255,255,255,.08);color:#9ca3af;font-size:12px;cursor:pointer;">Cancelar</button>
+      </div>`;
+
+    const editIconGrid = div.querySelector('.sac-edit-icon-grid');
+    const editIconSel  = div.querySelector('.sac-edit-icon-sel');
+
+    editIconGrid.innerHTML = ICONS.map(ic => {
+      const sel = (ic.cls === a.icon_class) ? 'background:#7c3aed;color:#fff;border-color:#7c3aed;' : 'background:rgba(255,255,255,.05);color:#9ca3af;border-color:rgba(255,255,255,.15);';
+      return `<button type="button" data-icon="${ic.cls}" title="${ic.label}"
+        style="width:30px;height:30px;border-radius:7px;border:1px solid;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;font-size:13px;${sel}">
+        <i class="${ic.cls}"></i></button>`;
+    }).join('');
+    editIconGrid.querySelectorAll('button[data-icon]').forEach(b => {
+      b.addEventListener('click', () => {
+        editIconSel.value = b.dataset.icon;
+        editIconGrid.querySelectorAll('button[data-icon]').forEach(x => {
+          x.style.background = 'rgba(255,255,255,.05)';
+          x.style.color = '#9ca3af';
+          x.style.borderColor = 'rgba(255,255,255,.15)';
+        });
+        b.style.background = '#7c3aed';
+        b.style.color = '#fff';
+        b.style.borderColor = '#7c3aed';
+      });
+    });
+
+    div.querySelector('.sac-edit-save').addEventListener('click', async () => {
+      const newLabel = div.querySelector('.sac-edit-label').value.trim();
+      const newUrl   = div.querySelector('.sac-edit-url').value.trim();
+      const newIcon  = editIconSel.value;
+      if (!newLabel || !newUrl) return;
+      try {
+        const r = await fetch(`/api/sac/atalhos/${a.id}`, {
+          method: 'PUT',
+          credentials: 'same-origin',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ label: newLabel, url: newUrl, icon_class: newIcon, icon_color: a.icon_color })
+        });
+        const d = await r.json();
+        if (d.ok) loadAtalhos(); else alert(d.error || 'Erro ao salvar');
+      } catch(e) { alert('Erro de rede'); }
+    });
+
+    div.querySelector('.sac-edit-cancel').addEventListener('click', () => loadAtalhos());
+  }
+
+  // Abre modal
+  document.addEventListener('sacAtalhosOpen', () => {
+    modal.style.display = 'flex';
+    buildIconGrid('fa-solid fa-link');
+    if (iconSel) iconSel.value = 'fa-solid fa-link';
+    if (labelInp) labelInp.value = '';
+    if (urlInp) urlInp.value = '';
+    loadAtalhos();
+  });
+
+  if (closeBtn) closeBtn.addEventListener('click', () => { modal.style.display = 'none'; });
+  modal.addEventListener('click', e => { if (e.target === modal) modal.style.display = 'none'; });
+
+  if (addBtn) {
+    addBtn.addEventListener('click', async () => {
+      const label    = labelInp ? labelInp.value.trim() : '';
+      const url      = urlInp   ? urlInp.value.trim()   : '';
+      const iconClass= iconSel  ? iconSel.value          : 'fa-solid fa-link';
+      if (!label) { showMsg('Informe o nome do atalho.', false); return; }
+      if (!url)   { showMsg('Informe a URL.', false); return; }
+      addBtn.disabled = true;
+      try {
+        const r = await fetch('/api/sac/atalhos', {
+          method: 'POST',
+          credentials: 'same-origin',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ label, url, icon_class: iconClass, icon_color: '#38bdf8' })
+        });
+        const d = await r.json();
+        if (d.ok) {
+          labelInp.value = ''; urlInp.value = '';
+          buildIconGrid('fa-solid fa-link'); iconSel.value = 'fa-solid fa-link';
+          showMsg('Atalho salvo!', true);
+          loadAtalhos();
+        } else { showMsg(d.error || 'Erro ao salvar.', false); }
+      } catch(e) { showMsg('Erro de rede.', false); }
+      finally { addBtn.disabled = false; }
     });
   }
 })();
@@ -14535,7 +15076,7 @@ document.querySelectorAll('#atTabelaWrapper thead th[data-col]').forEach(th => {
     if (status) { status.style.display = 'block'; status.textContent = 'Carregando...'; status.style.color = ''; }
 
     try {
-      const resp = await fetch(`/api/sac/at/graficos/por-modelo-mes?tipo=${encodeURIComponent(_pgTipo)}`, { credentials: 'include' });
+      const resp = await fetch('/api/sac/at/graficos/por-modelo-mes?tipo=' + encodeURIComponent(_pgTipo), { credentials: 'include' });
       const data = await resp.json().catch(() => ({}));
       if (!resp.ok || data.ok === false) throw new Error(data.error || 'Erro ao carregar.');
 
@@ -14613,7 +15154,7 @@ document.querySelectorAll('#atTabelaWrapper thead th[data-col]').forEach(th => {
     if (status) { status.style.display = 'block'; status.textContent = 'Carregando...'; status.style.color = ''; }
 
     try {
-      const resp = await fetch(`/api/sac/at/graficos/por-tag-problema-mes?tipo=${encodeURIComponent(_pgTipo)}`, { credentials: 'include' });
+      const resp = await fetch('/api/sac/at/graficos/por-tag-problema-mes?tipo=' + encodeURIComponent(_pgTipo), { credentials: 'include' });
       const data = await resp.json().catch(() => ({}));
       if (!resp.ok || data.ok === false) throw new Error(data.error || 'Erro ao carregar.');
 
@@ -14691,7 +15232,7 @@ document.querySelectorAll('#atTabelaWrapper thead th[data-col]').forEach(th => {
     if (status) { status.style.display = 'block'; status.textContent = 'Carregando...'; status.style.color = ''; }
 
     try {
-      const resp = await fetch(`/api/sac/at/graficos/por-estado-mes?tipo=${encodeURIComponent(_pgTipo)}`, { credentials: 'include' });
+      const resp = await fetch('/api/sac/at/graficos/por-estado-mes?tipo=' + encodeURIComponent(_pgTipo), { credentials: 'include' });
       const data = await resp.json().catch(() => ({}));
       if (!resp.ok || data.ok === false) throw new Error(data.error || 'Erro ao carregar.');
 
@@ -14728,34 +15269,11 @@ document.querySelectorAll('#atTabelaWrapper thead th[data-col]').forEach(th => {
         borderRadius: 4,
       }));
 
-      const _dataLabelsGraf1 = {
-        id: 'dataLabelsGraf1',
-        afterDatasetsDraw(chart) {
-          const ctx2 = chart.ctx;
-          chart.data.datasets.forEach((_ds, di) => {
-            const meta = chart.getDatasetMeta(di);
-            if (meta.hidden) return;
-            meta.data.forEach((bar, idx) => {
-              const val = chart.data.datasets[di].data[idx];
-              if (!val) return;
-              ctx2.save();
-              ctx2.font = 'bold 11px Segoe UI,Arial,sans-serif';
-              ctx2.fillStyle = '#e2e8f0';
-              ctx2.textAlign = 'center';
-              ctx2.textBaseline = 'bottom';
-              ctx2.fillText(val, bar.x, bar.y - 2);
-              ctx2.restore();
-            });
-          });
-        },
-      };
-
       if (_pg1Instance) { _pg1Instance.destroy(); _pg1Instance = null; }
       const ctx = canvas.getContext('2d');
       _pg1Instance = new Chart(ctx, {
         type: 'bar',
         data: { labels, datasets },
-        plugins: [_dataLabelsGraf1],
         options: {
           responsive: true,
           maintainAspectRatio: false,
@@ -14775,7 +15293,7 @@ document.querySelectorAll('#atTabelaWrapper thead th[data-col]').forEach(th => {
     }
   }
 
-  // ── Gráfico 2 — linhas (3 séries com filtro de tipo) ───────────────────
+  // ── Gráfico 2 — linhas (3 séries) ──────────────────────────────────────
   async function _carregarPg2() {
     const status = document.getElementById('atGrafPg2Status');
     const canvas = document.getElementById('atGrafPg2Canvas');
@@ -14817,14 +15335,16 @@ document.querySelectorAll('#atTabelaWrapper thead th[data-col]').forEach(th => {
       if (_pg2Instance) { _pg2Instance.destroy(); _pg2Instance = null; }
       const ctx = canvas.getContext('2d');
 
-      // Gráfico 2 sempre exibe as 3 séries independente do filtro de tipo
-      const dsQ = { label: 'Qualidade',              data: valQ, borderColor: '#34d399', backgroundColor: 'rgba(52,211,153,.10)', borderWidth: 2, pointRadius: 4, pointHoverRadius: 6, tension: 0.3, fill: true };
-      const dsR = { label: 'Atend. Rápido',          data: valR, borderColor: '#fb923c', backgroundColor: 'rgba(251,146,60,.10)',  borderWidth: 2, pointRadius: 4, pointHoverRadius: 6, tension: 0.3, fill: false };
-      const dsM = { label: 'Menções (OS não-rápido)', data: valM, borderColor: '#a855f7', backgroundColor: 'rgba(168,85,247,.10)',  borderWidth: 2, pointRadius: 4, pointHoverRadius: 6, tension: 0.3, fill: false, borderDash: [5,4] };
-
       _pg2Instance = new Chart(ctx, {
         type: 'line',
-        data: { labels, datasets: [dsQ, dsR, dsM] },
+        data: {
+          labels,
+          datasets: [
+            { label: 'Qualidade',              data: valQ, borderColor: '#34d399', backgroundColor: 'rgba(52,211,153,.10)', borderWidth: 2, pointRadius: 4, pointHoverRadius: 6, tension: 0.3, fill: true },
+            { label: 'Atend. Rápido',          data: valR, borderColor: '#fb923c', backgroundColor: 'rgba(251,146,60,.10)',  borderWidth: 2, pointRadius: 4, pointHoverRadius: 6, tension: 0.3, fill: false },
+            { label: 'Menções (OS não-rápido)', data: valM, borderColor: '#a855f7', backgroundColor: 'rgba(168,85,247,.10)',  borderWidth: 2, pointRadius: 4, pointHoverRadius: 6, tension: 0.3, fill: false, borderDash: [5,4] },
+          ],
+        },
         options: {
           responsive: true,
           maintainAspectRatio: false,
@@ -14999,26 +15519,21 @@ document.querySelectorAll('#atTabelaWrapper thead th[data-col]').forEach(th => {
         return tmp.toDataURL('image/png');
       }
 
-      const saved1  = _salvarOpcoes(_pg1Instance);
-      const saved2  = _salvarOpcoes(_pg2Instance);
-      const saved0  = _salvarOpcoes(_pg0Instance);
+      const saved1 = _salvarOpcoes(_pg1Instance);
+      const saved2 = _salvarOpcoes(_pg2Instance);
       _aplicarOpcoesPrint(_pg1Instance);
       _aplicarOpcoesPrint(_pg2Instance);
-      _aplicarOpcoesPrint(_pg0Instance);
 
       const c1 = document.getElementById('atGrafPg1Canvas');
       const c2 = document.getElementById('atGrafPg2Canvas');
-      const c0 = document.getElementById('atGrafPg0Canvas');
-      const img1  = _canvasParaImg(c1);
-      const img2  = _canvasParaImg(c2);
-      const img0  = _canvasParaImg(c0);
+      const img1 = _canvasParaImg(c1);
+      const img2 = _canvasParaImg(c2);
 
       _restaurarOpcoes(_pg1Instance, saved1);
       _restaurarOpcoes(_pg2Instance, saved2);
-      _restaurarOpcoes(_pg0Instance, saved0);
 
       // ── 2) Busca dados com breakdown por mês ──
-      const resp = await fetch(`/api/sac/at/graficos/relatorio?meses=${_pgPeriodo}`, { credentials: 'include' });
+      const resp = await fetch('/api/sac/at/graficos/relatorio', { credentials: 'include' });
       const data = await resp.json().catch(() => ({}));
       if (!resp.ok || data.ok === false) throw new Error(data.error || 'Erro ao carregar dados.');
 
@@ -15035,7 +15550,7 @@ document.querySelectorAll('#atTabelaWrapper thead th[data-col]').forEach(th => {
         }
         const totaisPorTag = {};
         rows.forEach(r => { totaisPorTag[r.tag] = (totaisPorTag[r.tag] || 0) + r.total; });
-        const tags = Object.keys(totaisPorTag).sort((a, b) => totaisPorTag[b] - totaisPorTag[a]).slice(0, 10);
+        const tags = Object.keys(totaisPorTag).sort((a, b) => totaisPorTag[b] - totaisPorTag[a]);
 
         const thMeses = meses.map(m =>
           `<th class="th-mes" style="background:${cor};">${m.label}</th>`
@@ -15238,13 +15753,7 @@ document.querySelectorAll('#atTabelaWrapper thead th[data-col]').forEach(th => {
     <h1>Relatório — Gráfico AT</h1>
     <div class="sub">Gerado em ${new Date().toLocaleString('pt-BR')}</div>
   </div>
-  <div style="display:flex;align-items:center;gap:12px;">
-    <button onclick="window.print()" class="no-print"
-      style="padding:9px 22px;background:#1e3a5f;color:#fff;border:none;border-radius:7px;cursor:pointer;font-size:13px;font-weight:600;">
-      &#128438; Imprimir / Salvar PDF
-    </button>
-    <div class="badge">Período: ${periodo}</div>
-  </div>
+  <div class="badge">Período: ${periodo}</div>
 </div>
 
 <div class="graficos-row">
@@ -15258,17 +15767,16 @@ document.querySelectorAll('#atTabelaWrapper thead th[data-col]').forEach(th => {
   </div>
 </div>
 
-<div class="graficos-row" style="margin-top:18px;">
-  <div class="grafico-card" style="flex:1;">
-    <div class="gc-title">Gráfico 3 — Top Modelos por Mês (Qualidade)</div>
-    ${img0 ? `<img src="${img0}" alt="Gráfico 3">` : '<p style="color:#aaa;font-size:11px;">Gráfico não disponível.</p>'}
-  </div>
-</div>
-
 ${pivotHtml('OS aberta', '#1d6a2f', data.qualidade)}
 ${pivotHtml('Atendimento Rápido', '#7c2d12', data.rapido)}
 ${pivotHtml('Menções (Pós abertura de OS)', '#4c1d95', data.mencoes)}
-${pivotHtml('Top 10 Modelos', '#0c4a6e', data.modelos)}
+
+<div class="no-print" style="margin-top:24px;padding-top:16px;border-top:1px solid #e5e7eb;">
+  <button onclick="window.print()"
+    style="padding:9px 22px;background:#1e3a5f;color:#fff;border:none;border-radius:7px;cursor:pointer;font-size:13px;font-weight:600;">
+    &#128438; Imprimir / Salvar PDF
+  </button>
+</div>
 
 </body>
 </html>`;
@@ -15315,7 +15823,7 @@ ${pivotHtml('Top 10 Modelos', '#0c4a6e', data.modelos)}
       // Botões de tipo
       document.querySelectorAll('.at-graf-tipo-btn-pg').forEach(btn => {
         btn.addEventListener('click', () => {
-          _pgTipo = btn.dataset.tipo || '';
+          _pgTipo = btn.dataset.tipo;
           document.querySelectorAll('.at-graf-tipo-btn-pg').forEach(b => {
             const ativo = b === btn;
             b.style.borderColor = ativo ? '#10b981' : '#374151';
@@ -16795,15 +17303,14 @@ async function carregarSacSolicitacoes(targetBody, { hideDone = false, titleOnly
   }
 }
 
-let _sacRelatorioUsuariosChart = null;
-let _sacRelatorioConteudoChart = null;
-let _sacRelatorioOcultarOutros = false;
-let _sacRelatorioRowsCache = [];
-let _sacRelatorioPeriodoMeses = 4;
-let _sacRelatorioConteudoUsuarioSelecionado = '';
-let _sacRelatorioConteudoTopItens = [];
-let _sacRelatorioDrilldownItensCache = [];
-let _sacRelatorioDrilldownTituloCache = 'Registros da barra selecionada';
+function _sacEscapeHtml(value) {
+  return String(value ?? '').replace(/[&<>"]/g, (ch) => ({
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;'
+  }[ch]));
+}
 
 function _sacCorPorIndice(i) {
   const cores = ['#6366f1', '#10b981', '#f59e0b', '#ef4444', '#06b6d4', '#8b5cf6', '#14b8a6', '#f97316', '#22c55e', '#eab308'];
@@ -16832,9 +17339,7 @@ function _sacPeriodoKey(dateValue) {
 function _sacAplicarPeriodo(rows, meses) {
   const lista = Array.isArray(rows) ? rows : [];
   if (!meses || meses <= 0) return lista;
-  const chaves = lista
-    .map((r) => _sacPeriodoKey(r?.created_at))
-    .filter((v) => Number.isFinite(v));
+  const chaves = lista.map((r) => _sacPeriodoKey(r?.created_at)).filter((v) => Number.isFinite(v));
   if (!chaves.length) return lista;
   const maxKey = Math.max(...chaves);
   const maxAno = Math.floor(maxKey / 100);
@@ -16851,39 +17356,43 @@ function _sacAplicarPeriodo(rows, meses) {
 
 function _sacSetPeriodoBotaoAtivo() {
   const mapa = [
-    [sacPeriodo3mBtn, 3],
-    [sacPeriodo4mBtn, 4],
-    [sacPeriodo6mBtn, 6],
-    [sacPeriodo12mBtn, 12],
-    [sacPeriodoTudoBtn, 0]
+    [sacPeriodo3mBtn, 3], [sacPeriodo4mBtn, 4], [sacPeriodo6mBtn, 6],
+    [sacPeriodo12mBtn, 12], [sacPeriodoTudoBtn, 0]
   ];
   mapa.forEach(([btn, valor]) => {
     if (!btn) return;
     const ativo = valor === _sacRelatorioPeriodoMeses;
-    btn.style.background = ativo
-      ? 'linear-gradient(135deg,#4f46e5 0%,#4338ca 100%)'
-      : '#1f2937';
+    btn.style.background = ativo ? 'linear-gradient(135deg,#4f46e5 0%,#4338ca 100%)' : '#1f2937';
     btn.style.color = ativo ? '#ffffff' : '#cbd5e1';
   });
 }
 
-function _sacAtualizarSelectUsuario(rowsPeriodo) {
-  if (!sacRelatorioConteudoUsuarioSelect) return;
-  const rows = Array.isArray(rowsPeriodo) ? rowsPeriodo : [];
-  const usuarios = Array.from(new Set(rows
-    .map((r) => String(r?.usuario || '').trim())
-    .filter(Boolean)))
-    .sort((a, b) => a.localeCompare(b, 'pt-BR'));
+function _sacSetTipoGraficoBtn() {
+  if (!sacRelatorioTipoGraficoBtn) return;
+  const modoPizza = _sacRelatorioModoGrafico === 'pie';
+  sacRelatorioTipoGraficoBtn.innerHTML = modoPizza
+    ? '<i class="fa-solid fa-chart-column"></i><span>Modo barras</span>'
+    : '<i class="fa-solid fa-chart-pie"></i><span>Modo pizza</span>';
+  sacRelatorioTipoGraficoBtn.style.background = modoPizza
+    ? 'linear-gradient(135deg,#0ea5e9 0%,#0284c7 100%)'
+    : '#1f2937';
+  sacRelatorioTipoGraficoBtn.style.color = '#ffffff';
+}
 
+function _sacAtualizarSelectUsuario(rows) {
+  if (!sacRelatorioConteudoUsuarioSelect) return;
+  const usuarios = Array.from(new Set(
+    (Array.isArray(rows) ? rows : [])
+      .map((r) => String(r?.usuario || '').trim())
+      .filter(Boolean)))
+    .sort((a, b) => a.localeCompare(b, 'pt-BR'));
   const valorAtual = _sacRelatorioConteudoUsuarioSelecionado;
   const existeAtual = valorAtual && usuarios.includes(valorAtual);
   if (valorAtual && !existeAtual) _sacRelatorioConteudoUsuarioSelecionado = '';
-
   sacRelatorioConteudoUsuarioSelect.innerHTML = [
     '<option value="">Todos</option>',
-    ...usuarios.map((u) => `<option value="${String(u).replace(/"/g, '&quot;')}">${u}</option>`)
+    ...usuarios.map((u) => `<option value="${_sacEscapeHtml(u)}">${_sacEscapeHtml(u)}</option>`)
   ].join('');
-
   sacRelatorioConteudoUsuarioSelect.value = _sacRelatorioConteudoUsuarioSelecionado;
 }
 
@@ -16893,7 +17402,54 @@ function _sacLimparDrilldown() {
   sacRelatorioDrilldownTitulo.textContent = 'Registros da barra selecionada';
   sacRelatorioDrilldownBody.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:14px;color:var(--inactive-color);">Clique em uma barra para ver os conteúdos.</td></tr>';
   _sacRelatorioDrilldownItensCache = [];
-  _sacRelatorioDrilldownTituloCache = 'Registros da barra selecionada';
+}
+
+function _sacNormalizarNomeItem(nomeCompleto) {
+  const nome = String(nomeCompleto || '').trim();
+  if (!nome) return '';
+
+  // Pega a primeira palavra (antes do primeiro espaço) e usa os últimos 5 caracteres
+  // Ex: "107.MP.N.10873 TARUGO..." → primeiraPalavra="107.MP.N.10873" → "10873"
+  // Ex: "104MPI80203 VISOR..."    → primeiraPalavra="104MPI80203"    → "80203"
+  const primeiraPalavra = nome.split(' ')[0];
+  if (primeiraPalavra.length >= 5) {
+    return primeiraPalavra.slice(-5);
+  }
+
+  return primeiraPalavra || nome;
+}
+
+function _sacExtrairItensDoConteudo(conteudoRaw) {
+  const saida = [];
+  const conteudo = String(conteudoRaw || '').trim();
+  if (!conteudo) return saida;
+  try {
+    const parsed = JSON.parse(conteudo);
+    if (Array.isArray(parsed)) {
+      parsed.forEach((item) => {
+        const nome = String(item?.conteudo || item?.item || '').trim();
+        const quantidade = Number(item?.quantidade || 0) || 1;
+        if (nome) saida.push({ nome, quantidade });
+      });
+      if (saida.length) return saida;
+    }
+  } catch (_) {}
+  const reItens = /Item\s+\d+\s*:\s*([\s\S]*?)\s+Quantidade\s+(\d+)(?=\s*Item\s+\d+\s*:|$)/gi;
+  let m;
+  while ((m = reItens.exec(conteudo)) !== null) {
+    const nome = String(m[1] || '').trim().replace(/\s+/g, ' ');
+    const quantidade = Number(m[2] || 0) || 1;
+    if (nome) saida.push({ nome, quantidade });
+  }
+  if (saida.length) return saida;
+  const reQtdFinal = /^([\s\S]*?)\s*-\s*Quantidade\s*(\d+)$/i;
+  const matchFinal = conteudo.match(reQtdFinal);
+  if (matchFinal) {
+    const nome = String(matchFinal[1] || '').trim();
+    const quantidade = Number(matchFinal[2] || 0) || 1;
+    if (nome) return [{ nome, quantidade }];
+  }
+  return [{ nome: conteudo.replace(/\s+/g, ' ').trim(), quantidade: 1 }];
 }
 
 function _sacExpandirConteudoDosRegistros(rows, seletorItem) {
@@ -16906,125 +17462,106 @@ function _sacExpandirConteudoDosRegistros(rows, seletorItem) {
       const quantidade = Number(it?.quantidade || 0) || 1;
       if (!nome) return;
       if (typeof seletorItem === 'function' && !seletorItem(nome, r)) return;
-      itens.push({
-        id: r?.id,
-        created_at: r?.created_at,
-        usuario: r?.usuario,
-        observacao: r?.observacao,
-        conteudo: nome,
-        quantidade
-      });
+      itens.push({ id: r?.id, created_at: r?.created_at, usuario: r?.usuario, observacao: r?.observacao, conteudo: nome, quantidade });
     });
   });
   return itens;
 }
 
-function _sacRenderDrilldown(titulo, itensConteudo) {
+// Extrai o ID do AT a partir do campo observacao no padrão "O.S 250178"
+// "25" = ano, "0178" = ID → 178. Suporta com ou sem espaço após "O.S".
+function _sacParsearOsAtId(observacao) {
+  const obs = String(observacao || '');
+  const match = obs.match(/O\.S\s*(\d+)/i);
+  if (!match) return null;
+  const num = match[1];
+  if (num.length >= 6) return parseInt(num.substring(2), 10);
+  return parseInt(num, 10) || null;
+}
+
+async function _sacRenderDrilldown(titulo, itensConteudo) {
   if (!sacRelatorioDrilldownWrapper || !sacRelatorioDrilldownBody || !sacRelatorioDrilldownTitulo) return;
   const lista = Array.isArray(itensConteudo) ? itensConteudo : [];
+  _sacRelatorioDrilldownItensCache = lista;
   sacRelatorioDrilldownWrapper.style.display = '';
   sacRelatorioDrilldownTitulo.textContent = titulo || 'Registros da barra selecionada';
-  _sacRelatorioDrilldownItensCache = lista;
-  _sacRelatorioDrilldownTituloCache = titulo || 'Registros da barra selecionada';
-
   if (!lista.length) {
     sacRelatorioDrilldownBody.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:14px;color:var(--inactive-color);">Nenhum conteúdo encontrado para esta barra.</td></tr>';
     return;
   }
 
-  sacRelatorioDrilldownBody.innerHTML = lista.map((item) => {
+  // Extrai IDs únicos de AT a partir do campo observacao
+  const atIdPorItem = lista.map((item) => _sacParsearOsAtId(item?.observacao));
+  const atIdsUnicos = [...new Set(atIdPorItem.filter((id) => id !== null && id > 0))];
+
+  // Busca dados do AT em batch
+  let atData = {};
+  if (atIdsUnicos.length) {
+    try {
+      const resp = await fetch(`/api/sac/at-info?ids=${atIdsUnicos.join(',')}`);
+      const json = await resp.json().catch(() => ({}));
+      if (json?.ok) atData = json.data || {};
+    } catch (_) {}
+  }
+
+  sacRelatorioDrilldownBody.innerHTML = lista.map((item, idx) => {
     const criadoEm = item?.created_at ? new Date(item.created_at).toLocaleString('pt-BR') : '—';
     const usuario = String(item?.usuario || 'Sem usuário');
-    const observacao = String(item?.observacao || '—');
     const conteudo = String(item?.conteudo || '—');
     const qtd = Number(item?.quantidade || 0);
-    return `
-      <tr>
-        <td>${item?.id ?? '—'}</td>
-        <td>${criadoEm}</td>
-        <td>${escapeHtml(usuario)}</td>
-        <td title="${escapeHtml(conteudo)}" style="max-width:340px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(conteudo)}</td>
-        <td>${qtd}</td>
-        <td title="${escapeHtml(observacao)}" style="max-width:360px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(observacao)}</td>
-      </tr>`;
+    const atId = atIdPorItem[idx];
+    const atInfo = atId ? (atData[String(atId)] || null) : null;
+    let osCell = '';
+    if (atInfo) {
+      const tag = atInfo.tag_problema ? `<span style="display:inline-block;background:#f59e0b20;color:#fbbf24;border:1px solid #f59e0b40;border-radius:4px;padding:1px 6px;font-size:10px;font-weight:700;margin-bottom:3px;">${_sacEscapeHtml(atInfo.tag_problema)}</span><br>` : '';
+      const desc = atInfo.descreva_reclamacao ? `<span title="${_sacEscapeHtml(atInfo.descreva_reclamacao)}" style="font-size:11px;color:#cbd5e1;">${_sacEscapeHtml(atInfo.descreva_reclamacao.substring(0, 60))}${atInfo.descreva_reclamacao.length > 60 ? '…' : ''}</span>` : '';
+      const osNum = atId ? `<span style="font-size:10px;color:#64748b;">AT#${atId}</span><br>` : '';
+      osCell = `${osNum}${tag}${desc}`;
+    } else {
+      const rawOs = String(item?.observacao || '—');
+      osCell = `<span title="${_sacEscapeHtml(rawOs)}" style="color:#64748b;font-size:11px;">${_sacEscapeHtml(rawOs.substring(0, 50))}${rawOs.length > 50 ? '…' : ''}</span>`;
+    }
+    return `<tr>
+      <td>${item?.id ?? '—'}</td>
+      <td>${criadoEm}</td>
+      <td>${_sacEscapeHtml(usuario)}</td>
+      <td title="${_sacEscapeHtml(conteudo)}" style="max-width:300px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${_sacEscapeHtml(conteudo)}</td>
+      <td>${qtd}</td>
+      <td style="max-width:360px;">${osCell}</td>
+    </tr>`;
   }).join('');
-}
-
-function _sacEscaparExcelHtml(v) {
-  return String(v ?? '')
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
 }
 
 function _sacMontarItensConteudoParaExportacao() {
-  const rowsPeriodo = _sacAplicarPeriodo(_sacRelatorioRowsCache, _sacRelatorioPeriodoMeses);
-  const rowsConteudo = _sacRelatorioConteudoUsuarioSelecionado
-    ? rowsPeriodo.filter((r) => String(r?.usuario || '').trim() === _sacRelatorioConteudoUsuarioSelecionado)
-    : rowsPeriodo;
-  return _sacExpandirConteudoDosRegistros(rowsConteudo);
+  const rows = _sacAplicarPeriodo(_sacRelatorioRowsCache, _sacRelatorioPeriodoMeses);
+  return _sacExpandirConteudoDosRegistros(rows);
 }
 
-function _sacBaixarRelatorioExcel() {
+function _sacBaixarRelatorioXls() {
   const itens = _sacRelatorioDrilldownItensCache?.length
     ? _sacRelatorioDrilldownItensCache
     : _sacMontarItensConteudoParaExportacao();
-
-  if (!itens.length) {
-    alert('Não há dados para exportar no relatório.');
-    return;
-  }
-
+  if (!itens.length) { alert('Nenhum dado disponível para exportar.'); return; }
   const titulo = _sacRelatorioDrilldownItensCache?.length
-    ? _sacRelatorioDrilldownTituloCache
-    : 'Registros - Conteúdo: Todos os itens';
-
-  const linhasHtml = itens.map((item) => {
-    const criadoEm = item?.created_at ? new Date(item.created_at).toLocaleString('pt-BR') : '';
-    return `
-      <tr>
-        <td>${_sacEscaparExcelHtml(item?.id ?? '')}</td>
-        <td>${_sacEscaparExcelHtml(criadoEm)}</td>
-        <td>${_sacEscaparExcelHtml(item?.usuario || '')}</td>
-        <td>${_sacEscaparExcelHtml(item?.conteudo || '')}</td>
-        <td>${_sacEscaparExcelHtml(Number(item?.quantidade || 0))}</td>
-        <td>${_sacEscaparExcelHtml(item?.observacao || '')}</td>
-      </tr>`;
-  }).join('');
-
-  const planilhaHtml = `
-<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">
-  <head>
-    <meta charset="UTF-8" />
-    <meta http-equiv="Content-Type" content="application/vnd.ms-excel; charset=UTF-8" />
-    <title>${_sacEscaparExcelHtml(titulo)}</title>
-  </head>
-  <body>
-    <table border="1">
-      <tr>
-        <th colspan="6" style="font-size:16px;">${_sacEscaparExcelHtml(titulo)}</th>
-      </tr>
-      <tr>
-        <th>ID Registro</th>
-        <th>Criado em</th>
-        <th>Usuário</th>
-        <th>Conteúdo</th>
-        <th>Quantidade</th>
-        <th>Observação</th>
-      </tr>
-      ${linhasHtml}
-    </table>
-  </body>
-</html>`;
-
-  const blob = new Blob([`\uFEFF${planilhaHtml}`], { type: 'application/vnd.ms-excel;charset=utf-8;' });
+    ? (sacRelatorioDrilldownTitulo?.textContent || 'Relatório SAC')
+    : 'Relatório SAC - Conteúdo';
+  const header = ['ID Registro', 'Criado em', 'Usuário', 'Conteúdo', 'Quantidade', 'Observação'];
+  const linhas = itens.map((item) => [
+    item?.id ?? '',
+    item?.created_at ? new Date(item.created_at).toLocaleString('pt-BR') : '',
+    String(item?.usuario || ''),
+    String(item?.conteudo || ''),
+    Number(item?.quantidade || 0),
+    String(item?.observacao || '')
+  ]);
+  const trHeader = `<tr>${header.map((h) => `<th style="background:#1f2937;color:#fff;font-weight:bold;">${h}</th>`).join('')}</tr>`;
+  const trRows = linhas.map((arr) => `<tr>${arr.map((v) => `<td>${_sacEscapeHtml(String(v))}</td>`).join('')}</tr>`).join('');
+  const html = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40"><head><meta charset="UTF-8"><title>${titulo}</title></head><body><table border="1"><thead>${trHeader}</thead><tbody>${trRows}</tbody></table></body></html>`;
+  const blob = new Blob(['\uFEFF' + html], { type: 'application/vnd.ms-excel;charset=utf-8' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
-  const data = new Date().toISOString().slice(0, 10);
   a.href = url;
-  a.download = `relatorio_sac_conteudo_${data}.xls`;
+  a.download = `relatorio_sac_conteudo_${new Date().toISOString().slice(0,10)}.xls`;
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
@@ -17033,352 +17570,263 @@ function _sacBaixarRelatorioExcel() {
 
 function _renderizarRelatorioSacPorUsuario() {
   if (!sacRelatorioGraficoCanvas || !sacRelatorioConteudoGraficoCanvas) return;
-
+  const modoPizza = _sacRelatorioModoGrafico === 'pie';
   const rows = _sacAplicarPeriodo(_sacRelatorioRowsCache, _sacRelatorioPeriodoMeses);
   _sacAtualizarSelectUsuario(rows);
   _sacLimparDrilldown();
 
-  // -------------------- GRÁFICO 1: POR USUÁRIO --------------------
-  const agrupado = new Map(); // periodo -> usuario -> total
+  const agrupado = new Map();
   const usuariosSet = new Set();
-
   rows.forEach((r) => {
     const periodo = _sacPeriodoMesAno(r?.created_at);
     const usuario = String(r?.usuario || 'Sem usuário').trim() || 'Sem usuário';
     const itens = _sacExtrairItensDoConteudo(r?.conteudo || '');
-    const totalItens = itens.reduce((sum, it) => sum + (Number(it?.quantidade || 0) || 1), 0);
+    const totalItens = itens.reduce((sum, it) => {
+      const qtd = Number(it?.quantidade || 0) || 1;
+      const chave = _sacNormalizarNomeItem(String(it?.nome || '').trim()) || String(it?.nome || '').trim();
+      return sum + _sacValorItem(chave, qtd);
+    }, 0);
     if (!agrupado.has(periodo)) agrupado.set(periodo, new Map());
-    const mapaUser = agrupado.get(periodo);
-    mapaUser.set(usuario, (mapaUser.get(usuario) || 0) + totalItens);
+    agrupado.get(periodo).set(usuario, (agrupado.get(periodo).get(usuario) || 0) + totalItens);
     usuariosSet.add(usuario);
   });
-
   const periodos = Array.from(agrupado.keys()).sort((a, b) => {
-    const [ma, ya] = a.split('/').map(Number);
-    const [mb, yb] = b.split('/').map(Number);
+    const [ma, ya] = a.split('/').map(Number); const [mb, yb] = b.split('/').map(Number);
     return (ya - yb) || (ma - mb);
   });
-
   const usuarios = Array.from(usuariosSet)
-    .map((u) => ({
-      nome: u,
-      total: periodos.reduce((sum, p) => sum + (agrupado.get(p)?.get(u) || 0), 0)
-    }))
-    .sort((a, b) => b.total - a.total)
-    .slice(0, 2);
+    .map((u) => ({ nome: u, total: periodos.reduce((sum, p) => sum + (agrupado.get(p)?.get(u) || 0), 0) }))
+    .sort((a, b) => b.total - a.total).slice(0, 2);
+  const usuariosPizza = Array.from(usuariosSet)
+    .map((u) => ({ nome: u, total: periodos.reduce((sum, p) => sum + (agrupado.get(p)?.get(u) || 0), 0) }))
+    .sort((a, b) => b.total - a.total).slice(0, 8);
 
   const datasets = usuarios.map((user, idx) => ({
-    label: _sacRotuloCurto(user.nome, 26),
-    _fullLabel: user.nome,
+    label: _sacRotuloCurto(user.nome, 26), _fullLabel: user.nome,
     data: periodos.map((p) => agrupado.get(p)?.get(user.nome) || 0),
-    backgroundColor: idx === 0 ? '#22c55e' : '#38bdf8',
-    borderRadius: 6,
-    maxBarThickness: 42
+    backgroundColor: idx === 0 ? '#22c55e' : '#38bdf8', borderRadius: 6, maxBarThickness: 42
   }));
 
-  if (!periodos.length || !usuarios.length) {
-    if (_sacRelatorioUsuariosChart) {
-      _sacRelatorioUsuariosChart.destroy();
-      _sacRelatorioUsuariosChart = null;
-    }
+  if (_sacRelatorioUsuariosChart) { _sacRelatorioUsuariosChart.destroy(); _sacRelatorioUsuariosChart = null; }
+  if (!periodos.length || (!usuarios.length && !usuariosPizza.length)) {
     sacRelatorioGraficoCanvas.style.display = 'none';
-    if (sacRelatorioGraficoVazio) {
-      sacRelatorioGraficoVazio.style.display = '';
-      sacRelatorioGraficoVazio.textContent = 'Nenhum dado encontrado para o período selecionado.';
-    }
+    if (sacRelatorioGraficoVazio) { sacRelatorioGraficoVazio.style.display = ''; sacRelatorioGraficoVazio.textContent = 'Nenhum dado encontrado para o período selecionado.'; }
   } else {
-    if (_sacRelatorioUsuariosChart) {
-      _sacRelatorioUsuariosChart.destroy();
-      _sacRelatorioUsuariosChart = null;
-    }
-
     sacRelatorioGraficoCanvas.style.display = '';
     if (sacRelatorioGraficoVazio) sacRelatorioGraficoVazio.style.display = 'none';
-
-    _sacRelatorioUsuariosChart = new Chart(sacRelatorioGraficoCanvas.getContext('2d'), {
-      type: 'bar',
-      data: { labels: periodos, datasets },
-      options: {
-        onClick: (_event, elements, chart) => {
-          if (!elements?.length) return;
-          const el = elements[0];
-          const periodo = chart.data.labels?.[el.index];
-          const ds = chart.data.datasets?.[el.datasetIndex];
-          const usuario = String(ds?._fullLabel || ds?.label || '');
-          const rowsBarra = rows.filter((r) => _sacPeriodoMesAno(r?.created_at) === periodo && String(r?.usuario || '').trim() === usuario);
-          const itensBarra = _sacExpandirConteudoDosRegistros(rowsBarra);
-          _sacRenderDrilldown(
-            `Registros - Usuário: ${usuario} | Período: ${periodo}`,
-            itensBarra
-          );
+    if (modoPizza) {
+      const usuariosPizzaLabels = usuariosPizza.map((u) => _sacRotuloCurto(u.nome, 28));
+      _sacRelatorioUsuariosChart = new Chart(sacRelatorioGraficoCanvas.getContext('2d'), {
+        type: 'pie',
+        data: {
+          labels: usuariosPizzaLabels,
+          datasets: [{
+            _fullLabels: usuariosPizza.map((u) => u.nome),
+            data: usuariosPizza.map((u) => u.total),
+            backgroundColor: usuariosPizza.map((_, idx) => _sacCorPorIndice(idx))
+          }]
         },
-        responsive: true,
-        maintainAspectRatio: false,
-        plugins: {
-          legend: {
-            position: 'top',
-            labels: { color: '#cbd5e1', boxWidth: 14, boxHeight: 14 }
+        options: {
+          onClick: (_event, elements, chart) => {
+            if (!elements?.length) return;
+            const idx = elements[0].index;
+            const usuario = String(chart.data.datasets?.[0]?._fullLabels?.[idx] || chart.data.labels?.[idx] || '');
+            const rowsBarra = rows.filter((r) => String(r?.usuario || '').trim() === usuario);
+            const itensBarra = _sacExpandirConteudoDosRegistros(rowsBarra);
+            _sacRenderDrilldown(`Registros - Usuário: ${usuario} | Período: filtro atual`, itensBarra);
           },
-          tooltip: {
-            callbacks: {
-              title: (items) => `Período: ${items?.[0]?.label || ''}`,
-              label: (item) => `${item.dataset._fullLabel || item.dataset.label}: ${item.raw} item(ns)`
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: { position: 'right', labels: { color: '#cbd5e1', boxWidth: 14, boxHeight: 14 } },
+            tooltip: {
+              callbacks: {
+                label: (item) => {
+                  const ds = item.dataset || {};
+                  const nome = ds._fullLabels?.[item.dataIndex] || item.label || '';
+                  const v = _sacRelatorioModoValor
+                    ? `R$ ${Number(item.raw).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2})}`
+                    : `${item.raw} item(ns)`;
+                  return `${nome}: ${v}`;
+                }
+              }
             }
           }
-        },
-        scales: {
-          x: {
-            stacked: false,
-            ticks: { color: '#94a3b8' },
-            grid: { color: 'rgba(148,163,184,0.15)' }
-          },
-          y: {
-            stacked: false,
-            beginAtZero: true,
-            ticks: { color: '#94a3b8', precision: 0 },
-            grid: { color: 'rgba(148,163,184,0.15)' }
-          }
         }
-      }
-    });
+      });
+    } else {
+      _sacRelatorioUsuariosChart = new Chart(sacRelatorioGraficoCanvas.getContext('2d'), {
+        type: 'bar', data: { labels: periodos, datasets },
+        options: {
+          onClick: (_event, elements, chart) => {
+            if (!elements?.length) return;
+            const el = elements[0]; const periodo = chart.data.labels?.[el.index];
+            const ds = chart.data.datasets?.[el.datasetIndex];
+            const usuario = String(ds?._fullLabel || ds?.label || '');
+            const rowsBarra = rows.filter((r) => _sacPeriodoMesAno(r?.created_at) === periodo && String(r?.usuario || '').trim() === usuario);
+            const itensBarra = _sacExpandirConteudoDosRegistros(rowsBarra);
+            _sacRenderDrilldown(`Registros - Usuário: ${usuario} | Período: ${periodo}`, itensBarra);
+          },
+          responsive: true, maintainAspectRatio: false,
+          plugins: { legend: { position: 'top', labels: { color: '#cbd5e1', boxWidth: 14, boxHeight: 14 } }, tooltip: { callbacks: { title: (items) => `Período: ${items?.[0]?.label || ''}`, label: (item) => { const v = _sacRelatorioModoValor ? `R$ ${Number(item.raw).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2})}` : `${item.raw} item(ns)`; return `${item.dataset._fullLabel || item.dataset.label}: ${v}`; } } } },
+          scales: { x: { stacked: false, ticks: { color: '#94a3b8' }, grid: { color: 'rgba(148,163,184,0.15)' } }, y: { stacked: false, beginAtZero: true, ticks: { color: '#94a3b8', precision: 0 }, grid: { color: 'rgba(148,163,184,0.15)' } } }
+        }
+      });
+    }
   }
 
-  // -------------------- GRÁFICO 2: CONTEÚDO (ITEM X QUANTIDADE) --------------------
-  const agrupadoConteudo = new Map(); // periodo -> item -> quantidade
-  const itensSet = new Set();
-
+  const agrupadoConteudo = new Map(); const itensSet = new Set(); const itensMapaNomeParaCodigo = new Map();
   const rowsConteudo = _sacRelatorioConteudoUsuarioSelecionado
-    ? rows.filter((r) => String(r?.usuario || '').trim() === _sacRelatorioConteudoUsuarioSelecionado)
-    : rows;
-
+    ? rows.filter((r) => String(r?.usuario || '').trim() === _sacRelatorioConteudoUsuarioSelecionado) : rows;
   rowsConteudo.forEach((r) => {
     const periodo = _sacPeriodoMesAno(r?.created_at);
     const itens = _sacExtrairItensDoConteudo(r?.conteudo || '');
     if (!agrupadoConteudo.has(periodo)) agrupadoConteudo.set(periodo, new Map());
-    const mapaItens = agrupadoConteudo.get(periodo);
-
     itens.forEach((it) => {
-      const nome = String(it?.nome || '').trim();
+      const nome = String(it?.nome || '').trim(); 
       const qtd = Number(it?.quantidade || 0) || 1;
       if (!nome) return;
-      itensSet.add(nome);
-      mapaItens.set(nome, (mapaItens.get(nome) || 0) + qtd);
+      const chaveAgrupamento = _sacNormalizarNomeItem(nome) || nome;
+      itensSet.add(chaveAgrupamento);
+      itensMapaNomeParaCodigo.set(chaveAgrupamento, nome);
+      agrupadoConteudo.get(periodo).set(chaveAgrupamento, (agrupadoConteudo.get(periodo).get(chaveAgrupamento) || 0) + _sacValorItem(chaveAgrupamento, qtd));
     });
   });
-
   const periodosConteudo = Array.from(agrupadoConteudo.keys()).sort((a, b) => {
-    const [ma, ya] = a.split('/').map(Number);
-    const [mb, yb] = b.split('/').map(Number);
+    const [ma, ya] = a.split('/').map(Number); const [mb, yb] = b.split('/').map(Number);
     return (ya - yb) || (ma - mb);
   });
   const itens = Array.from(itensSet);
-
+  if (_sacRelatorioConteudoChart) { _sacRelatorioConteudoChart.destroy(); _sacRelatorioConteudoChart = null; }
   if (!periodosConteudo.length || !itens.length) {
-    if (_sacRelatorioConteudoChart) {
-      _sacRelatorioConteudoChart.destroy();
-      _sacRelatorioConteudoChart = null;
-    }
     sacRelatorioConteudoGraficoCanvas.style.display = 'none';
-    if (sacRelatorioConteudoGraficoVazio) {
-      sacRelatorioConteudoGraficoVazio.style.display = '';
-      sacRelatorioConteudoGraficoVazio.textContent = _sacRelatorioConteudoUsuarioSelecionado
-        ? `Nenhum dado de conteúdo para o usuário "${_sacRelatorioConteudoUsuarioSelecionado}" no período selecionado.`
-        : 'Nenhum dado encontrado para o gráfico de conteúdo.';
-    }
+    if (sacRelatorioConteudoGraficoVazio) { sacRelatorioConteudoGraficoVazio.style.display = ''; sacRelatorioConteudoGraficoVazio.textContent = _sacRelatorioConteudoUsuarioSelecionado ? `Nenhum dado de conteúdo para o usuário "${_sacRelatorioConteudoUsuarioSelecionado}" no período selecionado.` : 'Nenhum dado encontrado para o gráfico de conteúdo.'; }
     return;
   }
-
-  const topItens = itens
-    .map((nome) => ({
-      nome,
-      total: periodosConteudo.reduce((sum, p) => sum + (agrupadoConteudo.get(p)?.get(nome) || 0), 0)
-    }))
-    .sort((a, b) => b.total - a.total)
-    .slice(0, 8);
+  const topItens = itens.map((nome) => ({ nome, total: periodosConteudo.reduce((sum, p) => sum + (agrupadoConteudo.get(p)?.get(nome) || 0), 0) })).sort((a, b) => b.total - a.total).slice(0, 8);
   _sacRelatorioConteudoTopItens = topItens.map((x) => x.nome);
-
-  const totalOutros = itens
-    .filter((nome) => !topItens.some((top) => top.nome === nome))
-    .reduce((acc, nome) => acc + periodosConteudo.reduce((sum, p) => sum + (agrupadoConteudo.get(p)?.get(nome) || 0), 0), 0);
-
-  const datasetsConteudo = topItens.map((item, idx) => ({
-    label: _sacRotuloCurto(item.nome, 34),
-    _fullLabel: item.nome,
-    data: periodosConteudo.map((p) => agrupadoConteudo.get(p)?.get(item.nome) || 0),
-    backgroundColor: _sacCorPorIndice(idx),
-    borderRadius: 6,
-    maxBarThickness: 36
-  }));
-
-  if (totalOutros > 0 && !_sacRelatorioOcultarOutros) {
-    datasetsConteudo.push({
-      label: 'Outros itens',
-      _fullLabel: 'Outros itens',
-      data: periodosConteudo.map((p) => {
-        const topSet = new Set(topItens.map((it) => it.nome));
-        return itens
-          .filter((nome) => !topSet.has(nome))
-          .reduce((sum, nome) => sum + (agrupadoConteudo.get(p)?.get(nome) || 0), 0);
-      }),
-      backgroundColor: '#64748b',
-      borderRadius: 6,
-      maxBarThickness: 36
-    });
-  }
-
-  if (_sacRelatorioConteudoChart) {
-    _sacRelatorioConteudoChart.destroy();
-    _sacRelatorioConteudoChart = null;
-  }
-
+  const ocultarOutros = !!document.getElementById('sacConteudoOcultarOutros')?.checked;
+  const totalOutros = ocultarOutros ? 0 : itens.filter((nome) => !topItens.some((top) => top.nome === nome)).reduce((acc, nome) => acc + periodosConteudo.reduce((sum, p) => sum + (agrupadoConteudo.get(p)?.get(nome) || 0), 0), 0);
+  const datasetsConteudo = topItens.map((item, idx) => ({ label: _sacRotuloCurto(item.nome, 34), _fullLabel: item.nome, data: periodosConteudo.map((p) => agrupadoConteudo.get(p)?.get(item.nome) || 0), backgroundColor: _sacCorPorIndice(idx), borderRadius: 6, maxBarThickness: 36 }));
+  if (totalOutros > 0) { datasetsConteudo.push({ label: 'Outros itens', _fullLabel: 'Outros itens', data: periodosConteudo.map((p) => { const topSet = new Set(topItens.map((it) => it.nome)); return itens.filter((nome) => !topSet.has(nome)).reduce((sum, nome) => sum + (agrupadoConteudo.get(p)?.get(nome) || 0), 0); }), backgroundColor: '#64748b', borderRadius: 6, maxBarThickness: 36 }); }
   sacRelatorioConteudoGraficoCanvas.style.display = '';
   if (sacRelatorioConteudoGraficoVazio) sacRelatorioConteudoGraficoVazio.style.display = 'none';
 
-  _sacRelatorioConteudoChart = new Chart(sacRelatorioConteudoGraficoCanvas.getContext('2d'), {
-    type: 'bar',
-    data: { labels: periodosConteudo, datasets: datasetsConteudo },
-    options: {
-      onClick: (_event, elements, chart) => {
-        if (!elements?.length) return;
-        const el = elements[0];
-        const periodo = chart.data.labels?.[el.index];
-        const ds = chart.data.datasets?.[el.datasetIndex];
-        const itemLabel = String(ds?._fullLabel || ds?.label || '');
-        const topSet = new Set(_sacRelatorioConteudoTopItens || []);
-
-        const rowsBarra = rowsConteudo.filter((r) => {
-          if (_sacPeriodoMesAno(r?.created_at) !== periodo) return false;
-          const itensRow = _sacExtrairItensDoConteudo(r?.conteudo || '');
-          if (itemLabel === 'Outros itens') {
-            return itensRow.some((it) => !topSet.has(String(it?.nome || '').trim()));
-          }
-          return itensRow.some((it) => String(it?.nome || '').trim() === itemLabel);
-        });
-
-        const itensBarra = _sacExpandirConteudoDosRegistros(rowsBarra, (nome) => {
-          if (itemLabel === 'Outros itens') return !topSet.has(String(nome || '').trim());
-          return String(nome || '').trim() === itemLabel;
-        });
-
-        _sacRenderDrilldown(
-          `Registros - Conteúdo: ${itemLabel} | Período: ${periodo}`,
-          itensBarra
-        );
+  if (modoPizza) {
+    const labelsPie = topItens.map((item) => _sacRotuloCurto(item.nome, 34));
+    const fullLabelsPie = topItens.map((item) => item.nome);
+    const dataPie = topItens.map((item) => item.total);
+    const coresPie = topItens.map((_, idx) => _sacCorPorIndice(idx));
+    if (totalOutros > 0) {
+      labelsPie.push('Outros itens');
+      fullLabelsPie.push('Outros itens');
+      dataPie.push(totalOutros);
+      coresPie.push('#64748b');
+    }
+    _sacRelatorioConteudoChart = new Chart(sacRelatorioConteudoGraficoCanvas.getContext('2d'), {
+      type: 'pie',
+      data: {
+        labels: labelsPie,
+        datasets: [{ _fullLabels: fullLabelsPie, data: dataPie, backgroundColor: coresPie }]
       },
-      responsive: true,
-      maintainAspectRatio: false,
-      plugins: {
-        legend: {
-          position: 'top',
-          labels: { color: '#cbd5e1', boxWidth: 14, boxHeight: 14 }
+      options: {
+        onClick: (_event, elements, chart) => {
+          if (!elements?.length) return;
+          const idx = elements[0].index;
+          const itemLabel = String(chart.data.datasets?.[0]?._fullLabels?.[idx] || chart.data.labels?.[idx] || '');
+          const topSet = new Set(_sacRelatorioConteudoTopItens || []);
+          const rowsBarra = rowsConteudo.filter((r) => {
+            const itensRow = _sacExtrairItensDoConteudo(r?.conteudo || '');
+            if (itemLabel === 'Outros itens') return itensRow.some((it) => !topSet.has(_sacNormalizarNomeItem(String(it?.nome || '').trim()) || String(it?.nome || '').trim()));
+            return itensRow.some((it) => {
+              const chaveNorm = _sacNormalizarNomeItem(String(it?.nome || '').trim()) || String(it?.nome || '').trim();
+              return chaveNorm === itemLabel;
+            });
+          });
+          const itensBarra = _sacExpandirConteudoDosRegistros(rowsBarra, (nome) => {
+            const chaveNorm = _sacNormalizarNomeItem(String(nome || '').trim()) || String(nome || '').trim();
+            if (itemLabel === 'Outros itens') return !topSet.has(chaveNorm);
+            return chaveNorm === itemLabel;
+          });
+          _sacRenderDrilldown(`Registros - Conteúdo: ${itemLabel} | Período: filtro atual`, itensBarra);
         },
-        tooltip: {
-          callbacks: {
-            title: (items) => `Período: ${items?.[0]?.label || ''}`,
-            label: (item) => `${item.dataset._fullLabel || item.dataset.label}: ${item.raw} unidade(s)`
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { position: 'right', labels: { color: '#cbd5e1', boxWidth: 14, boxHeight: 14 } },
+          tooltip: {
+            callbacks: {
+              label: (item) => {
+                const ds = item.dataset || {};
+                const nome = ds._fullLabels?.[item.dataIndex] || item.label || '';
+                const val = _sacRelatorioModoValor
+                  ? `R$ ${Number(item.raw).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                  : `${item.raw} unidade(ns)`;
+                return `${nome}: ${val}`;
+              }
+            }
           }
-        }
-      },
-      scales: {
-        x: {
-          stacked: false,
-          ticks: { color: '#94a3b8' },
-          grid: { color: 'rgba(148,163,184,0.15)' }
-        },
-        y: {
-          stacked: false,
-          beginAtZero: true,
-          ticks: { color: '#94a3b8', precision: 0 },
-          grid: { color: 'rgba(148,163,184,0.15)' }
         }
       }
-    }
-  });
-}
-
-function _sacExtrairItensDoConteudo(conteudoRaw) {
-  const saida = [];
-  const conteudo = String(conteudoRaw || '').trim();
-  if (!conteudo) return saida;
-
-  try {
-    const parsed = JSON.parse(conteudo);
-    if (Array.isArray(parsed)) {
-      parsed.forEach((item) => {
-        const nome = String(item?.conteudo || item?.item || '').trim();
-        const quantidade = Number(item?.quantidade || 0) || 1;
-        if (nome) saida.push({ nome, quantidade });
-      });
-      if (saida.length) return saida;
-    }
-  } catch (_) {
-    // segue para parse em texto livre
+    });
+  } else {
+    _sacRelatorioConteudoChart = new Chart(sacRelatorioConteudoGraficoCanvas.getContext('2d'), {
+      type: 'bar', data: { labels: periodosConteudo, datasets: datasetsConteudo },
+      options: {
+        onClick: (_event, elements, chart) => {
+          if (!elements?.length) return;
+          const el = elements[0]; const periodo = chart.data.labels?.[el.index];
+          const ds = chart.data.datasets?.[el.datasetIndex];
+          const itemLabel = String(ds?._fullLabel || ds?.label || '');
+          const topSet = new Set(_sacRelatorioConteudoTopItens || []);
+          const rowsBarra = rowsConteudo.filter((r) => { 
+            if (_sacPeriodoMesAno(r?.created_at) !== periodo) return false; 
+            const itensRow = _sacExtrairItensDoConteudo(r?.conteudo || ''); 
+            if (itemLabel === 'Outros itens') return itensRow.some((it) => !topSet.has(_sacNormalizarNomeItem(String(it?.nome || '').trim()) || String(it?.nome || '').trim())); 
+            return itensRow.some((it) => { 
+              const chaveNorm = _sacNormalizarNomeItem(String(it?.nome || '').trim()) || String(it?.nome || '').trim();
+              return chaveNorm === itemLabel;
+            }); 
+          });
+          const itensBarra = _sacExpandirConteudoDosRegistros(rowsBarra, (nome) => { if (itemLabel === 'Outros itens') return !topSet.has(String(nome || '').trim()); return String(nome || '').trim() === itemLabel; });
+          _sacRenderDrilldown(`Registros - Conteúdo: ${itemLabel} | Período: ${periodo}`, itensBarra);
+        },
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { position: 'top', labels: { color: '#cbd5e1', boxWidth: 14, boxHeight: 14 } }, tooltip: { callbacks: { title: (items) => `Período: ${items?.[0]?.label || ''}`, label: (item) => { const v = _sacRelatorioModoValor ? `R$ ${Number(item.raw).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2})}` : `${item.raw} unid.`; return `${item.dataset._fullLabel || item.dataset.label}: ${v}`; } } } },
+        scales: { x: { stacked: true, ticks: { color: '#94a3b8' }, grid: { color: 'rgba(148,163,184,0.15)' } }, y: { stacked: true, beginAtZero: true, ticks: { color: '#94a3b8', precision: 0, callback: (v) => _sacRelatorioModoValor ? `R$${Number(v).toLocaleString('pt-BR',{maximumFractionDigits:0})}` : v }, grid: { color: 'rgba(148,163,184,0.15)' } } }
+      }
+    });
   }
-
-  const reItens = /Item\s+\d+\s*:\s*([\s\S]*?)\s+Quantidade\s+(\d+)(?=\s*Item\s+\d+\s*:|$)/gi;
-  let m;
-  while ((m = reItens.exec(conteudo)) !== null) {
-    const nome = String(m[1] || '').trim().replace(/\s+/g, ' ');
-    const quantidade = Number(m[2] || 0) || 1;
-    if (nome) saida.push({ nome, quantidade });
-  }
-  if (saida.length) return saida;
-
-  const reQtdFinal = /^([\s\S]*?)\s*-\s*Quantidade\s*(\d+)$/i;
-  const matchFinal = conteudo.match(reQtdFinal);
-  if (matchFinal) {
-    const nome = String(matchFinal[1] || '').trim();
-    const quantidade = Number(matchFinal[2] || 0) || 1;
-    if (nome) return [{ nome, quantidade }];
-  }
-
-  return [{ nome: conteudo.replace(/\s+/g, ' ').trim(), quantidade: 1 }];
 }
 
 async function _abrirRelatorioSac() {
   if (!sacRelatorioGraficoWrapper || !sacRelatorioGraficoCanvas || !sacTabelaBody) return;
-  if (typeof Chart === 'undefined') {
-    alert('Biblioteca de gráfico não disponível no momento.');
-    return;
-  }
-
+  if (typeof Chart === 'undefined') { alert('Biblioteca de gráfico não disponível no momento.'); return; }
   const tabelaWrapper = sacTabelaBody.closest('.tabela-wrapper');
   sacRelatorioGraficoWrapper.style.display = '';
   if (tabelaWrapper) tabelaWrapper.style.display = 'none';
-
-  if (sacRelatorioGraficoVazio) {
-    sacRelatorioGraficoVazio.style.display = 'none';
-    sacRelatorioGraficoVazio.textContent = 'Carregando dados...';
-  }
-
+  if (sacRelatorioGraficoVazio) { sacRelatorioGraficoVazio.style.display = 'none'; sacRelatorioGraficoVazio.textContent = 'Carregando dados...'; }
   try {
-    const resp = await fetch('/api/sac/solicitacoes');
-    const data = await resp.json().catch(() => ({}));
-    if (!resp.ok || data?.ok === false) {
-      throw new Error(data?.error || 'Erro ao carregar dados do relatório.');
-    }
+    const [respSac, respCmc] = await Promise.all([
+      fetch('/api/sac/solicitacoes'),
+      fetch('/api/sac/cmc')
+    ]);
+    const data = await respSac.json().catch(() => ({}));
+    if (!respSac.ok || data?.ok === false) throw new Error(data?.error || 'Erro ao carregar dados do relatório.');
+    const dataCmc = await respCmc.json().catch(() => ({}));
+    _sacCmcCache = (dataCmc?.ok && dataCmc?.cmc) ? dataCmc.cmc : {};
     _sacRelatorioRowsCache = Array.isArray(data?.rows) ? data.rows : [];
     _sacSetPeriodoBotaoAtivo();
+    _sacSetTipoGraficoBtn();
+    _sacSetModoValorBtn();
     _renderizarRelatorioSacPorUsuario();
   } catch (err) {
-    if (_sacRelatorioUsuariosChart) {
-      _sacRelatorioUsuariosChart.destroy();
-      _sacRelatorioUsuariosChart = null;
-    }
-    if (_sacRelatorioConteudoChart) {
-      _sacRelatorioConteudoChart.destroy();
-      _sacRelatorioConteudoChart = null;
-    }
+    if (_sacRelatorioUsuariosChart) { _sacRelatorioUsuariosChart.destroy(); _sacRelatorioUsuariosChart = null; }
+    if (_sacRelatorioConteudoChart) { _sacRelatorioConteudoChart.destroy(); _sacRelatorioConteudoChart = null; }
     sacRelatorioGraficoCanvas.style.display = 'none';
     if (sacRelatorioConteudoGraficoCanvas) sacRelatorioConteudoGraficoCanvas.style.display = 'none';
-    if (sacRelatorioGraficoVazio) {
-      sacRelatorioGraficoVazio.style.display = '';
-      sacRelatorioGraficoVazio.textContent = err?.message || 'Erro ao gerar relatório.';
-    }
-    if (sacRelatorioConteudoGraficoVazio) {
-      sacRelatorioConteudoGraficoVazio.style.display = '';
-      sacRelatorioConteudoGraficoVazio.textContent = err?.message || 'Erro ao gerar relatório de conteúdo.';
-    }
+    if (sacRelatorioGraficoVazio) { sacRelatorioGraficoVazio.style.display = ''; sacRelatorioGraficoVazio.textContent = err?.message || 'Erro ao gerar relatório.'; }
+    if (sacRelatorioConteudoGraficoVazio) { sacRelatorioConteudoGraficoVazio.style.display = ''; sacRelatorioConteudoGraficoVazio.textContent = err?.message || 'Erro ao gerar relatório de conteúdo.'; }
   }
 }
 
@@ -17395,6 +17843,71 @@ function _setRelatorioSacPeriodo(meses) {
   _renderizarRelatorioSacPorUsuario();
 }
 
+function _alternarRelatorioSacTipoGrafico() {
+  _sacRelatorioModoGrafico = _sacRelatorioModoGrafico === 'bar' ? 'pie' : 'bar';
+  _sacSetTipoGraficoBtn();
+  _renderizarRelatorioSacPorUsuario();
+}
+
+function _sacSetModoValorBtn() {
+  if (!sacRelatorioModoValorBtn) return;
+  const modoValor = _sacRelatorioModoValor;
+  sacRelatorioModoValorBtn.innerHTML = modoValor
+    ? '<i class="fa-solid fa-hashtag"></i><span>Modo qtd</span>'
+    : '<i class="fa-solid fa-dollar-sign"></i><span>Modo valor</span>';
+  sacRelatorioModoValorBtn.style.background = modoValor
+    ? 'linear-gradient(135deg,#f59e0b 0%,#d97706 100%)'
+    : '#1f2937';
+  sacRelatorioModoValorBtn.style.color = '#ffffff';
+  const titulo1 = document.getElementById('sacGrafico1Titulo');
+  const titulo2 = document.getElementById('sacGrafico2Titulo');
+  if (titulo1) titulo1.textContent = modoValor ? 'Gráfico 1 - Valor (R$) por Usuário' : 'Gráfico 1 - Quantidade por Usuário';
+  if (titulo2) titulo2.textContent = modoValor ? 'Gráfico 2 - Conteúdo (Itens x Valor R$)' : 'Gráfico 2 - Conteúdo (Itens x Quantidade)';
+}
+
+function _alternarRelatorioSacModoValor() {
+  _sacRelatorioModoValor = !_sacRelatorioModoValor;
+  _sacSetModoValorBtn();
+  _renderizarRelatorioSacPorUsuario();
+}
+
+// Retorna o valor de um item: se modo valor, multiplica qtd pelo CMC; senão retorna só a qtd
+function _sacValorItem(chaveNormalizada, qtd) {
+  if (!_sacRelatorioModoValor) return qtd;
+  const cmc = Number(_sacCmcCache[chaveNormalizada] || 0);
+  return cmc > 0 ? cmc * qtd : qtd; // fallback para qtd se CMC não encontrado
+}
+
+const sacConteudoFiltroBtn = document.getElementById('sacConteudoFiltroBtn');
+const sacConteudoFiltroDropdown = document.getElementById('sacConteudoFiltroDropdown');
+const sacConteudoOcultarOutros = document.getElementById('sacConteudoOcultarOutros');
+
+if (sacConteudoFiltroBtn && sacConteudoFiltroDropdown) {
+  sacConteudoFiltroBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    sacConteudoFiltroDropdown.style.display = sacConteudoFiltroDropdown.style.display === 'none' || !sacConteudoFiltroDropdown.style.display ? 'block' : 'none';
+  });
+  document.addEventListener('click', (e) => {
+    if (!sacConteudoFiltroDropdown.contains(e.target) && !sacConteudoFiltroBtn.contains(e.target)) {
+      sacConteudoFiltroDropdown.style.display = 'none';
+    }
+  });
+}
+if (sacConteudoOcultarOutros) {
+  sacConteudoOcultarOutros.addEventListener('change', () => _renderizarRelatorioSacPorUsuario());
+}
+
+// Painel SAC: filtra por usuário logado (filterByUser: true)
+sacRelatorioBtn?.addEventListener('click', _abrirRelatorioSac);
+sacRelatorioVoltarBtn?.addEventListener('click', _fecharRelatorioSac);
+sacRelatorioDownloadBtn?.addEventListener('click', _sacBaixarRelatorioXls);
+sacPeriodo3mBtn?.addEventListener('click', () => _setRelatorioSacPeriodo(3));
+sacPeriodo4mBtn?.addEventListener('click', () => _setRelatorioSacPeriodo(4));
+sacPeriodo6mBtn?.addEventListener('click', () => _setRelatorioSacPeriodo(6));
+sacPeriodo12mBtn?.addEventListener('click', () => _setRelatorioSacPeriodo(12));
+sacPeriodoTudoBtn?.addEventListener('click', () => _setRelatorioSacPeriodo(0));
+sacRelatorioTipoGraficoBtn?.addEventListener('click', _alternarRelatorioSacTipoGrafico);
+sacRelatorioModoValorBtn?.addEventListener('click', _alternarRelatorioSacModoValor);
 if (sacRelatorioConteudoUsuarioSelect) {
   sacRelatorioConteudoUsuarioSelect.addEventListener('change', () => {
     _sacRelatorioConteudoUsuarioSelecionado = String(sacRelatorioConteudoUsuarioSelect.value || '');
@@ -17402,51 +17915,8 @@ if (sacRelatorioConteudoUsuarioSelect) {
   });
 }
 
-// Filtro "Outros itens" do Gráfico 2
-(function () {
-  const btn      = document.getElementById('sacConteudoFiltroBtn');
-  const dropdown = document.getElementById('sacConteudoFiltroDropdown');
-  const checkbox = document.getElementById('sacConteudoOcultarOutros');
-  if (!btn || !dropdown || !checkbox) return;
-
-  // Abre/fecha dropdown ao clicar no botão filtro
-  btn.addEventListener('click', (e) => {
-    e.stopPropagation();
-    const aberto = dropdown.style.display !== 'none';
-    dropdown.style.display = aberto ? 'none' : 'block';
-  });
-
-  // Fecha ao clicar fora
-  document.addEventListener('click', (e) => {
-    if (!dropdown.contains(e.target) && e.target !== btn) {
-      dropdown.style.display = 'none';
-    }
-  });
-
-  // Sincroniza estado inicial
-  checkbox.checked = _sacRelatorioOcultarOutros;
-
-  // Aplica filtro e redesenha ao mudar
-  checkbox.addEventListener('change', () => {
-    _sacRelatorioOcultarOutros = checkbox.checked;
-    // Atualiza visual do botão quando filtro está ativo
-    btn.style.borderColor     = _sacRelatorioOcultarOutros ? '#6366f1' : 'rgba(148,163,184,0.3)';
-    btn.style.color           = _sacRelatorioOcultarOutros ? '#a5b4fc' : '#94a3b8';
-    btn.style.background      = _sacRelatorioOcultarOutros ? 'rgba(99,102,241,.18)' : 'rgba(255,255,255,.06)';
-    _renderizarRelatorioSacPorUsuario();
-  });
-})();
-
 // Painel SAC: filtra por usuário logado (filterByUser: true)
 sacRefreshBtn?.addEventListener('click', () => carregarSacSolicitacoes(sacTabelaBody, { hideDone: false, filterByUser: true }));
-sacRelatorioBtn?.addEventListener('click', _abrirRelatorioSac);
-sacRelatorioVoltarBtn?.addEventListener('click', _fecharRelatorioSac);
-sacRelatorioDownloadBtn?.addEventListener('click', _sacBaixarRelatorioExcel);
-sacPeriodo3mBtn?.addEventListener('click', () => _setRelatorioSacPeriodo(3));
-sacPeriodo4mBtn?.addEventListener('click', () => _setRelatorioSacPeriodo(4));
-sacPeriodo6mBtn?.addEventListener('click', () => _setRelatorioSacPeriodo(6));
-sacPeriodo12mBtn?.addEventListener('click', () => _setRelatorioSacPeriodo(12));
-sacPeriodoTudoBtn?.addEventListener('click', () => _setRelatorioSacPeriodo(0));
 // Painel Envio de Mercadoria: mostra todos os registros (filterByUser: false)
 envioMercadoriaRefreshBtnTop?.addEventListener('click', () => carregarSacSolicitacoes(envioMercadoriaTabelaBodyPane, { hideDone: true, filterByUser: false }));
 
@@ -17880,17 +18350,7 @@ document.addEventListener('click', async (e) => {
 });
 
 document.getElementById('solicitacoesTransferRefresh')?.addEventListener('click', () => {
-  if (typeof window.carregarSolicitacoesTransferencias === 'function') {
-    window.carregarSolicitacoesTransferencias(true);
-  }
-});
-
-document.getElementById('solicitacoesTransferApproveAll')?.addEventListener('click', async () => {
-  if (typeof window.aprovarSolicitacoesTransferenciaEmSequencia === 'function') {
-    await window.aprovarSolicitacoesTransferenciaEmSequencia();
-  } else {
-    alert('A tela de transferencias ainda esta carregando. Tente novamente em alguns segundos.');
-  }
+  carregarSolicitacoesTransferencias(true);
 });
 
 document.getElementById('recebimentoRefreshBtn')?.addEventListener('click', async () => {
@@ -18156,27 +18616,10 @@ document.addEventListener('DOMContentLoaded', async () => {
   const transferQtdBulk = document.getElementById('transferQtdBulk');
   const transferAcaoBtn = document.getElementById('transferenciaBtn');
   const transferImportarBtn = document.getElementById('transferImportarBtn');
-  const transferImportarListaBtn = document.getElementById('transferImportarListaBtn');
   const transferDataMov = document.getElementById('transferDataMov');
-  const transferDataMovLabel = document.querySelector('label[for="transferDataMov"]');
 
   if (transferDataMov && !transferDataMov.value) {
     transferDataMov.value = new Date().toISOString().slice(0, 10);
-  }
-  if (transferDataMovLabel) {
-    transferDataMovLabel.textContent = 'Data movimentacao';
-  }
-  if (transferImportarBtn) {
-    transferImportarBtn.style.display = 'none';
-  }
-  if (transferAcaoBtn && !transferAcaoBtn.__labelFixed) {
-    transferAcaoBtn.__labelFixed = true;
-    transferAcaoBtn.classList.remove('icon-btn');
-    transferAcaoBtn.classList.add('btn');
-    transferAcaoBtn.title = 'Enviar solicitacao de transferencia dos itens selecionados';
-    transferAcaoBtn.setAttribute('aria-label', 'Enviar solicitacao de transferencia');
-    transferAcaoBtn.style.cssText = 'display:inline-flex;align-items:center;gap:8px;min-width:230px;justify-content:center;background:#22c55e;color:#06120a;font-weight:800;border-color:#86efac;';
-    transferAcaoBtn.innerHTML = '<i class="fa-solid fa-right-left"></i><span>Enviar solicitacao</span>';
   }
 
   if (transferQtdBulk && !transferQtdBulk.__transferBound) {
@@ -18225,13 +18668,6 @@ document.addEventListener('DOMContentLoaded', async () => {
   if (transferImportarBtn && !transferImportarBtn.__transferBound) {
     transferImportarBtn.__transferBound = true;
     transferImportarBtn.addEventListener('click', (ev) => {
-      ev.preventDefault();
-      abrirModalImportacaoTransferencia();
-    });
-  }
-  if (transferImportarListaBtn && !transferImportarListaBtn.__transferBound) {
-    transferImportarListaBtn.__transferBound = true;
-    transferImportarListaBtn.addEventListener('click', (ev) => {
       ev.preventDefault();
       abrirModalImportacaoTransferencia();
     });
@@ -18296,7 +18732,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
 
         if (!resp.ok || !resposta?.ok) {
-          const msg = resposta?.detail || resposta?.error || `Falha ao registrar transferência (HTTP ${resp.status}).`;
+          const msg = resposta?.error || resposta?.detail || `Falha ao registrar transferência (HTTP ${resp.status}).`;
           throw new Error(msg);
         }
 
@@ -18452,55 +18888,6 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   const solicitacoesTbody = document.getElementById('solicitacoesTransferTbody');
-  if (solicitacoesTbody && !solicitacoesTbody.__rejectCleanBound) {
-    solicitacoesTbody.__rejectCleanBound = true;
-    solicitacoesTbody.addEventListener('click', async (ev) => {
-      const btn = ev.target.closest('.btn-reject-transfer');
-      if (!btn) return;
-      ev.preventDefault();
-      ev.stopImmediatePropagation();
-
-      const id = Number(btn.dataset.id);
-      if (!Number.isInteger(id)) {
-        alert('Nao foi possivel identificar a solicitacao selecionada.');
-        return;
-      }
-
-      const usuario = String(document.getElementById('userNameDisplay')?.textContent || '').trim();
-      if (!usuario || usuario === 'Usuario' || usuario === 'UsuÃ¡rio' || usuario === '—' || usuario === 'â€”') {
-        alert('Nao foi possivel identificar o usuario atual. Faca login novamente.');
-        return;
-      }
-
-      const motivo = prompt('Informe o motivo para reprovar/excluir esta solicitacao:', '');
-      if (motivo === null) return;
-
-      const originalLabel = btn.textContent;
-      btn.disabled = true;
-      btn.textContent = 'Reprovando...';
-
-      try {
-        const resp = await fetch(`/api/transferencias/${id}/reprovar`, {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ reprovadoPor: usuario, motivo })
-        });
-
-        const json = await resp.json().catch(() => ({}));
-        if (!resp.ok || !json?.ok) {
-          throw new Error(json?.error || `Falha ao reprovar (HTTP ${resp.status}).`);
-        }
-
-        alert('Solicitacao reprovada.');
-        await carregarSolicitacoesTransferencias(true);
-      } catch (err) {
-        console.error('[transferencias] reprovar', err);
-        alert(err?.message || 'Falha ao reprovar a solicitacao.');
-        btn.disabled = false;
-        btn.textContent = originalLabel;
-      }
-    }, true);
-  }
   if (solicitacoesTbody && !solicitacoesTbody.__approveBound) {
     solicitacoesTbody.__approveBound = true;
     solicitacoesTbody.addEventListener('click', async (ev) => {
@@ -20367,30 +20754,18 @@ function ensureTransferImportModal() {
 
   modal = document.createElement('div');
   modal.id = 'transferImportModal';
-  modal.style.cssText = 'position:fixed;inset:0;z-index:9999;display:none;align-items:center;justify-content:center;background:rgba(3,7,18,.72);backdrop-filter:blur(4px);padding:18px;';
+  modal.style.cssText = 'position:fixed;inset:0;z-index:9999;display:none;align-items:center;justify-content:center;background:rgba(3,7,18,.72);backdrop-filter:blur(4px);';
   modal.innerHTML = `
-    <div style="width:min(980px, calc(100vw - 28px));max-height:calc(100vh - 42px);overflow:auto;background:#121722;border:1px solid #2b3548;border-radius:18px;box-shadow:0 24px 70px rgba(0,0,0,.45);color:#e5e7eb;">
+    <div style="width:min(720px, calc(100vw - 28px));max-height:calc(100vh - 42px);overflow:auto;background:#121722;border:1px solid #2b3548;border-radius:18px;box-shadow:0 24px 70px rgba(0,0,0,.45);color:#e5e7eb;">
       <div style="display:flex;align-items:center;justify-content:space-between;padding:18px 22px;border-bottom:1px solid #253044;">
         <div>
-          <div style="font-size:20px;font-weight:800;">Importar lista da planilha</div>
-          <div style="font-size:13px;color:#93a4bd;margin-top:4px;">Copie varias linhas do Excel/Sheets e cole aqui. Formato: codigo, TAB, quantidade.</div>
+          <div style="font-size:18px;font-weight:800;">Importar transferencia em massa</div>
+          <div style="font-size:12px;color:#93a4bd;margin-top:4px;">Cole uma linha por item: codigo + TAB + quantidade.</div>
         </div>
         <button id="transferImportClose" type="button" class="icon-btn" aria-label="Fechar"><i class="fa-solid fa-xmark"></i></button>
       </div>
       <div style="padding:18px 22px;display:grid;gap:14px;">
-        <div style="display:grid;grid-template-columns:1fr auto;gap:14px;align-items:start;">
-          <label style="display:grid;gap:8px;font-size:12px;font-weight:800;color:#9ca3af;letter-spacing:.03em;text-transform:uppercase;">
-            Lista para importar
-            <textarea id="transferImportTextarea" rows="16" spellcheck="false" placeholder="05.MP.I.80044	300&#10;09.MC.N.10106	24&#10;01.MP.N.51001	12" style="width:100%;resize:vertical;min-height:340px;background:#0b1020;color:#e5e7eb;border:1px solid #334155;border-radius:12px;padding:14px;font-family:Consolas, monospace;font-size:14px;line-height:1.55;"></textarea>
-          </label>
-          <div style="min-width:230px;background:#0b1020;border:1px solid #263349;border-radius:12px;padding:14px;color:#cbd5e1;font-size:12px;line-height:1.55;">
-            <div style="font-weight:800;color:#e5e7eb;margin-bottom:8px;">Como colar</div>
-            <div>1. Na planilha, selecione duas colunas: codigo e quantidade.</div>
-            <div>2. Copie com CTRL+C.</div>
-            <div>3. Cole nesta caixa. Cada linha vira um item.</div>
-            <div style="margin-top:10px;color:#93c5fd;">Exemplo:<br><code>05.MP.I.80044&nbsp;&nbsp;300</code><br><code>09.MC.N.10106&nbsp;&nbsp;24</code></div>
-          </div>
-        </div>
+        <textarea id="transferImportTextarea" rows="10" spellcheck="false" placeholder="05.MP.I.80044\t300&#10;09.MC.N.10106\t24" style="width:100%;resize:vertical;min-height:180px;background:#0b1020;color:#e5e7eb;border:1px solid #334155;border-radius:12px;padding:12px;font-family:Consolas, monospace;font-size:13px;line-height:1.45;"></textarea>
         <div style="display:grid;grid-template-columns:1fr 1fr 180px;gap:12px;">
           <label style="display:grid;gap:6px;font-size:12px;font-weight:700;color:#9ca3af;">Origem
             <select id="transferImportOrigem" class="transfer-select"></select>
@@ -20580,93 +20955,6 @@ function renderTransferenciaLista() {
 
 window.renderTransferenciaLista = renderTransferenciaLista;
 
-function delayTransferencia(ms) {
-  return new Promise(resolve => setTimeout(resolve, ms));
-}
-
-function obterUsuarioAtualTransferencia() {
-  const usuario = String(document.getElementById('userNameDisplay')?.textContent || '').trim();
-  if (!usuario || usuario === 'Usuario' || usuario === 'UsuÃ¡rio' || usuario === '—' || usuario === 'â€”') {
-    return '';
-  }
-  return usuario;
-}
-
-async function aprovarTransferenciaPorId(id, usuario) {
-  const resp = await fetch(`/api/transferencias/${id}/aprovar`, {
-    method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ aprovadoPor: usuario })
-  });
-  const json = await resp.json().catch(() => ({}));
-  if (!resp.ok || !json?.ok) {
-    throw new Error(json?.error || json?.detail || `Falha ao aprovar transferencia #${id} (HTTP ${resp.status}).`);
-  }
-  return json;
-}
-
-async function aprovarSolicitacoesTransferenciaEmSequencia() {
-  const usuario = obterUsuarioAtualTransferencia();
-  if (!usuario) {
-    alert('Nao foi possivel identificar o usuario atual. Faca login novamente.');
-    return;
-  }
-
-  await carregarSolicitacoesTransferencias(true);
-  const pendentes = solicitacoesTransferencias
-    .filter(item => String(item.status || '').toLowerCase() !== 'transferido')
-    .filter(item => String(item.status || '').toLowerCase() !== 'reprovado')
-    .filter(item => Number.isInteger(Number(item.id)));
-
-  if (!pendentes.length) {
-    alert('Nao ha solicitacoes pendentes para aprovar.');
-    return;
-  }
-
-  if (!confirm(`Aprovar ${pendentes.length} solicitacao(oes) uma por uma? O sistema vai enviar para a Omie em sequencia, sem chamadas paralelas.`)) {
-    return;
-  }
-
-  const btn = document.getElementById('solicitacoesTransferApproveAll');
-  const originalLabel = btn?.textContent || '';
-  if (btn) {
-    btn.disabled = true;
-    btn.textContent = `Aprovando 0/${pendentes.length}`;
-  }
-
-  const erros = [];
-  let aprovadas = 0;
-  try {
-    for (const item of pendentes) {
-      const id = Number(item.id);
-      if (btn) btn.textContent = `Aprovando ${aprovadas + 1}/${pendentes.length}`;
-      try {
-        await aprovarTransferenciaPorId(id, usuario);
-        aprovadas++;
-      } catch (err) {
-        erros.push(`#${id} ${item.codigo || ''}: ${err?.message || err}`);
-      }
-      if (aprovadas + erros.length < pendentes.length) {
-        await delayTransferencia(1500);
-      }
-    }
-  } finally {
-    if (btn) {
-      btn.disabled = false;
-      btn.textContent = originalLabel || 'Aprovar pendentes';
-    }
-    await carregarSolicitacoesTransferencias(true);
-  }
-
-  if (erros.length) {
-    alert(`Aprovadas: ${aprovadas}. Falharam: ${erros.length}.\n${erros.slice(0, 5).join('\n')}${erros.length > 5 ? '\n...' : ''}`);
-    return;
-  }
-  alert(`Todas as ${aprovadas} solicitacoes foram aprovadas.`);
-}
-
-window.aprovarSolicitacoesTransferenciaEmSequencia = aprovarSolicitacoesTransferenciaEmSequencia;
-
 function renderSolicitacoesTransferencias() {
   const tbody = document.getElementById('solicitacoesTransferTbody');
   if (!tbody) return;
@@ -20696,7 +20984,7 @@ function renderSolicitacoesTransferencias() {
     const botaoHtml = podeAprovar
       ? `<div style="display:flex;gap:6px;flex-wrap:wrap;">
            <button type="button" class="btn tiny btn-approve-transfer" data-id="${escapeHtml(String(item.id ?? ''))}">Aprovar</button>
-           <button type="button" class="btn tiny btn-reject-transfer" data-id="${escapeHtml(String(item.id ?? ''))}" style="background:#dc2626;border-color:#f87171;color:#ffffff;font-weight:800;">Reprovar</button>
+           <button type="button" class="btn tiny btn-reject-transfer" data-id="${escapeHtml(String(item.id ?? ''))}" style="border-color:#ef4444;color:#fecaca;">Reprovar</button>
          </div>`
       : '<span>Transferido</span>';
     const tr = document.createElement('tr');
@@ -20753,8 +21041,6 @@ async function carregarSolicitacoesTransferencias(forceReload = false) {
     if (spinner) spinner.style.display = 'none';
   }
 }
-
-window.carregarSolicitacoesTransferencias = carregarSolicitacoesTransferencias;
 
 async function openSolicitacoesTransferencia(forceReload = false) {
   if (typeof hideKanban === 'function') hideKanban();
@@ -23854,7 +24140,7 @@ if (document.readyState === 'loading') {
 /* dentro do MESMO callback que já existe */
 const bell       = document.getElementById('bell-icon');
 const homeBtn    = document.getElementById('home-icon');
-const printBtn   = document.getElementById('print-icon');
+const printBtn   = document.getElementById('menu-identificacao-produto');
 const cloudBtn   = document.getElementById('cloud-icon');
 const avatar     = document.getElementById('profile-icon');
 const etiquetasModal = document.getElementById('etiquetasModal');
@@ -24267,45 +24553,1235 @@ window.openRegistros = async function() {
   }
 };
 
-  /* –– IMPRESSORA –– */
-printBtn?.addEventListener('click', async e => {
-  e.preventDefault(); e.stopPropagation();
+  /* –– IMPRESSORA: modal de etiquetas pendentes –– */
 
-  listaEtiq.innerHTML = '<li>carregando…</li>';
-  try {
-    const resp = await fetch('/api/etiquetas');
-    if (!resp.ok) throw new Error('HTTP ' + resp.status);
-    const files = await resp.json();  // ex.: ["etiqueta_F06250019.zpl"]
+  // ── Estado do modal ────────────────────────────────────────────────────
+  let _etqSelecionadas = new Set(); // ids selecionados
+  let _etqDebounce = null;
+  let _etqViewMode = 'list'; // 'list' | 'grid'
+  let _etqMostrarOcultos = false; // quando true, mostra apenas itens ocultos
+  let _etqPrinterPref = null; // impressora preferida salva no localStorage por usuário
 
-    if (files.length === 0) {
-      listaEtiq.innerHTML = '<li>Nenhuma etiqueta encontrada</li>';
+  function _etqPrefKey() {
+    const u = (document.getElementById('userNameDisplay')?.textContent || 'user').trim().replace(/\s+/g, '_');
+    return `etq_printer_pref_${u}`;
+  }
+  function _etqCarregarPref() {
+    _etqPrinterPref = localStorage.getItem(_etqPrefKey()) || null;
+    _etqAtualizarBtnPref();
+  }
+  function _etqSalvarPref(printer) {
+    _etqPrinterPref = printer || null;
+    if (printer) localStorage.setItem(_etqPrefKey(), printer);
+    else localStorage.removeItem(_etqPrefKey());
+    _etqAtualizarBtnPref();
+  }
+  function _etqAtualizarBtnPref() {
+    const btn = document.getElementById('etqBtnImpressora');
+    if (!btn) return;
+    if (_etqPrinterPref) {
+      const label = _etqPrinterPref === '__PDF__' ? 'PDF' : _etqPrinterPref === '__BP__' ? 'Local (agente)' : _etqPrinterPref;
+      btn.title = `Impressora: ${label} — clique para trocar`;
+      btn.innerHTML = `<i class="fa-solid fa-print"></i><span class="etq-pref-label">${escapeHtml(label)}</span>`;
+      btn.classList.add('etq-pref-set');
     } else {
-      listaEtiq.innerHTML = files.map(f => `
-        <li>
-          <span>${f}</span>
-          <button class="btn-print" data-file="${f}">Imprimir</button>
-        </li>`).join('');
+      btn.title = 'Impressora não definida — clique para configurar';
+      btn.innerHTML = '<i class="fa-solid fa-print"></i><i class="fa-solid fa-question" style="font-size:.6rem;margin-left:1px;"></i>';
+      btn.classList.remove('etq-pref-set');
     }
-  } catch (err) {
-    console.error(err);
-    listaEtiq.innerHTML = '<li>Falha ao buscar etiquetas</li>';
   }
 
-  etiquetasModal.classList.add('is-active');
-});
+  const etqModal     = document.getElementById('etiquetasModal');
+  const etqGrid      = document.getElementById('etiquetasModalGrid');
+  const etqStatus    = document.getElementById('etiquetasModalStatus');
+  const etqBusca     = document.getElementById('etiquetasBuscaInput');
+  const etqBtnSel    = document.getElementById('etiquetasImprimirSelecionadas');
+  const etqSelCount  = document.getElementById('etiquetasSelCount');
+  const etqFechar    = document.getElementById('etiquetasModalFechar');
+  const etqBtnViewLista = document.getElementById('etqBtnViewLista');
+  const etqBtnViewGrade = document.getElementById('etqBtnViewGrade');
+  const etqBtnVerOcultos = document.getElementById('etqBtnVerOcultos');
 
-document
-  .querySelector('#etiquetasModal .close-modal')
-  .addEventListener('click', () =>
-    etiquetasModal.classList.remove('is-active')
-  );
-
-listaEtiq.addEventListener('click', e => {
-  if (e.target.matches('.btn-print')) {
-    const file = e.target.dataset.file;
-    window.open(`/etiquetas/printed/${encodeURIComponent(file)}`, '_blank');
+  function _etqAplicarViewMode() {
+    if (!etqGrid) return;
+    if (_etqViewMode === 'list') {
+      etqGrid.classList.add('view-list');
+      etqBtnViewLista?.classList.add('active');
+      etqBtnViewGrade?.classList.remove('active');
+    } else {
+      etqGrid.classList.remove('view-list');
+      etqBtnViewGrade?.classList.add('active');
+      etqBtnViewLista?.classList.remove('active');
+    }
   }
-});
+
+  etqBtnViewLista?.addEventListener('click', () => {
+    _etqViewMode = 'list';
+    _etqAplicarViewMode();
+  });
+  etqBtnViewGrade?.addEventListener('click', () => {
+    _etqViewMode = 'grid';
+    _etqAplicarViewMode();
+  });
+
+  // Aplicar modo padrão (lista) no carregamento
+  _etqAplicarViewMode();
+
+  // Botão exibir ocultos
+  etqBtnVerOcultos?.addEventListener('click', () => {
+    _etqMostrarOcultos = !_etqMostrarOcultos;
+    etqBtnVerOcultos.classList.toggle('active', _etqMostrarOcultos);
+    etqBtnVerOcultos.title = _etqMostrarOcultos ? 'Exibir todos (não ocultos)' : 'Exibir ocultos';
+    _etqCarregar(etqBusca?.value || '');
+  });
+
+  function _etqAtualizarBotaoSel() {
+    if (!etqBtnSel || !etqSelCount) return;
+    const n = _etqSelecionadas.size;
+    etqSelCount.textContent = String(n);
+    etqBtnSel.style.display = n > 0 ? 'flex' : 'none';
+  }
+
+  // ── Seletor de impressora alternativa ──────────────────────────────────
+  // Mostra no etqStatus um select com impressoras disponíveis + botão Tentar.
+  // Chama onConfirm(printerName) quando o usuário confirma.
+  async function _etqMostrarSeletorImpressora(msgErro, onConfirm, container) {
+    // container opcional: quando chamado de dentro de um modal, passar o elemento interno
+    // para que o seletor apareça dentro do modal e não atrás do overlay.
+    const el = container || etqStatus;
+    if (!el) return;
+    el.innerHTML = '<i class="fa-solid fa-spinner fa-spin" style="color:#facc15;"></i> Buscando impressoras...';
+    if (!container) el.style.color = '#facc15';
+
+    let lista = [];
+    try {
+      const r = await fetch('/api/etiquetas/impressoras', { credentials: 'include' });
+      const d = await r.json();
+      lista = d.impressoras || [];
+    } catch (_) {}
+
+    // Opções de saída: impressoras físicas do servidor + PDF + ZPL local
+    const optPdf = '<option value="__PDF__">📄 PDF (baixar arquivo)</option>';
+    const optBp  = '<option value="__BP__">🖨️ Impressora local (agente)</option>';
+    const chkPadraoHtml = `<label style="display:flex;align-items:center;gap:4px;color:#94a3b8;font-size:.78rem;white-space:nowrap;cursor:pointer;"><input type="checkbox" id="_etqChkPadrao" style="accent-color:#7c3aed;"> Salvar como padrão</label>`;
+    // Pré-selecionar a preferência atual, se houver
+    const prefAtual = _etqPrinterPref || '';
+
+    if (lista.length === 0) {
+      // Sem CUPS no servidor → redirecionar automaticamente para o agente local
+      _etqSalvarPref('__BP__');
+      if (!container) el.style.color = '';
+      el.innerHTML = '<span style="color:#facc15;font-size:.83rem;"><i class="fa-solid fa-spinner fa-spin"></i> Nenhuma impressora CUPS no servidor — usando agente local...</span>';
+      setTimeout(() => { if (el) el.innerHTML = ''; }, 4000);
+      onConfirm('__BP__');
+      return;
+    }
+
+    // Impressoras físicas + opção PDF + opção ZPL no topo
+    const opts = optPdf + optBp + lista.map(p => `<option value="${escapeHtml(p)}"${prefAtual === p ? ' selected' : ''}>${escapeHtml(p)}</option>`).join('');
+    if (!container) el.style.color = '';
+    el.innerHTML = `
+      ${msgErro ? `<span style="color:#f87171;font-size:.85rem;">${escapeHtml(msgErro)}</span>` : ''}
+      <div style="display:flex;align-items:center;gap:8px;margin-top:6px;flex-wrap:wrap;">
+        <label style="color:#94a3b8;font-size:.8rem;white-space:nowrap;">Escolher impressora:</label>
+        <select id="_etqSelectImpressora" style="background:#1e293b;color:#f1f5f9;border:1px solid #334155;border-radius:6px;padding:4px 8px;font-size:.85rem;flex:1;min-width:120px;">
+          ${opts}
+        </select>
+        ${chkPadraoHtml}
+        <button id="_etqBtnTentarImpressora" style="background:#7c3aed;color:#fff;border:none;border-radius:6px;padding:5px 12px;font-size:.82rem;cursor:pointer;white-space:nowrap;">
+          <i class="fa-solid fa-print"></i> Imprimir
+        </button>
+        <button id="_etqBtnCancelarImpressora" style="background:#374151;color:#94a3b8;border:none;border-radius:6px;padding:5px 10px;font-size:.82rem;cursor:pointer;">
+          Cancelar
+        </button>
+      </div>`;
+    // Pré-selecionar preferência salva
+    if (prefAtual) {
+      const sel = document.getElementById('_etqSelectImpressora');
+      if (sel && prefAtual !== '__PDF__' && prefAtual !== '__BP__') sel.value = prefAtual;
+    }
+    document.getElementById('_etqBtnTentarImpressora')?.addEventListener('click', () => {
+      const sel = document.getElementById('_etqSelectImpressora');
+      const printer = sel?.value || '';
+      const salvar = document.getElementById('_etqChkPadrao')?.checked;
+      el.innerHTML = ''; if (!container) el.style.color = '';
+      if (salvar && printer) _etqSalvarPref(printer);
+      if (printer) onConfirm(printer);
+    });
+    document.getElementById('_etqBtnCancelarImpressora')?.addEventListener('click', () => {
+      el.innerHTML = ''; if (!container) el.style.color = '';
+    });
+  }
+
+  function _etqRenderCards(etiquetas) {
+    if (!etqGrid) return;
+    if (!etiquetas || etiquetas.length === 0) {
+      etqGrid.innerHTML = '<div class="etiquetas-loading">Nenhuma etiqueta pendente encontrada.</div>';
+      if (etqStatus) etqStatus.textContent = '';
+      return;
+    }
+
+    const pendentes = etiquetas.filter(e => !e.impressa).length;
+    const impressas = etiquetas.filter(e => e.impressa).length;
+    if (etqStatus) {
+      let txt = `${etiquetas.length} etiqueta(s)`;
+      if (pendentes && impressas) txt += ` · ${pendentes} pendente(s), ${impressas} impressa(s)`;
+      else if (impressas) txt += ` impressa(s)`;
+      else txt += ` pendente(s)`;
+      etqStatus.textContent = txt;
+    }
+
+    etqGrid.innerHTML = etiquetas.map(e => {
+      const cod     = escapeHtml(String(e.codigo_produto  || '—'));
+      const desc    = escapeHtml(String(e.descricao_produto || '—'));
+      const lote    = escapeHtml(String(e.lote || '—'));
+      const qtd     = escapeHtml(String(e.qtd  != null ? e.qtd : ''));
+      const unid    = escapeHtml(String(e.unidade || ''));
+      const data    = escapeHtml(String(e.data_emissao || ''));
+      const id      = Number(e.id);
+      const qtdRaw  = e.qtd != null ? Number(e.qtd) || 0 : 0;
+      const impressa    = !!e.impressa;
+      const idImpresso  = e.id_impresso ? Number(e.id_impresso) : 0;
+
+      const acoes = impressa
+        ? `<div class="etq-card-actions">
+            <button class="etq-btn-reimprimir" data-id="${id}" title="Marcar como não impresso e reabrir para impressão">
+              <i class="fa-solid fa-rotate-left"></i> Reimprimir
+            </button>
+            <button class="etq-btn-armazenar" data-id="${id}" data-id-impresso="${idImpresso}" title="Armazenar produto">
+              <i class="fa-solid fa-box-archive"></i> Armazenar
+            </button>
+          </div>`
+        : `<div class="etq-card-actions">
+            <input type="checkbox" class="etq-check-sel" data-id="${id}" title="Selecionar">
+            <button class="etq-btn-imprimir-unit" data-id="${id}" title="Imprimir esta etiqueta">
+              <i class="fa-solid fa-print"></i> Imprimir
+            </button>
+            <button class="etq-btn-multiplo" data-id="${id}" title="Dividir em múltiplas etiquetas">
+              <i class="fa-solid fa-layer-group"></i> Múltiplo
+            </button>
+            <button class="etq-btn-ocultar" data-id="${id}" title="${_etqMostrarOcultos ? 'Desocultar esta etiqueta' : 'Ocultar esta etiqueta'}">
+              <i class="fa-solid ${_etqMostrarOcultos ? 'fa-eye' : 'fa-eye-slash'}"></i>
+            </button>
+          </div>`;
+
+      return `
+      <div class="etq-card${impressa ? ' etq-card--impressa' : ''}" data-id="${id}" data-qtd="${qtdRaw}" data-cod="${cod}" data-desc="${desc}" data-lote="${lote}" data-unid="${unid}" data-data="${data}" data-impressa="${impressa}">
+        <div class="etq-card-thumbnail">
+          <div class="etq-thumb-row">
+            <div class="etq-thumb-qr"><i class="fa-solid fa-qrcode" style="font-size:18px;color:#888;"></i></div>
+            <div class="etq-thumb-dados">
+              <div class="etq-thumb-line label">Cod. Produto:</div>
+              <div class="etq-thumb-line value">${cod}</div>
+              <div class="etq-thumb-line label">Descricao:</div>
+              <div class="etq-thumb-line value">${desc.length > 22 ? desc.slice(0,22)+'…' : desc}</div>
+              <div class="etq-thumb-line">Qtd: ${qtd} ${unid}</div>
+              <div class="etq-thumb-line">Lote: ${lote.length > 18 ? lote.slice(0,18)+'…' : lote}</div>
+              ${data ? `<div class="etq-thumb-line">Emissao: ${data}</div>` : ''}
+            </div>
+          </div>
+        </div>
+        <div class="etq-card-footer">
+          <div class="etq-card-cod">${cod}</div>
+          <div class="etq-card-desc" title="${desc}">${desc}</div>
+          <div class="etq-card-lote">Lote: ${lote}</div>
+          <div class="etq-card-qty">${qtd}${unid ? ' '+unid : ''}${impressa ? ' <span class="etq-badge-impressa"><i class="fa-solid fa-check"></i> Impresso</span>' : ''}</div>
+        </div>
+        ${acoes}
+      </div>`;
+    }).join('');
+
+    // Clique no card seleciona
+    etqGrid.querySelectorAll('.etq-card').forEach(card => {
+      card.addEventListener('click', e => {
+        if (e.target.matches('.etq-check-sel') || e.target.matches('.etq-btn-imprimir-unit') || e.target.closest('.etq-btn-imprimir-unit') || e.target.matches('.etq-btn-multiplo') || e.target.closest('.etq-btn-multiplo') || e.target.matches('.etq-btn-ocultar') || e.target.closest('.etq-btn-ocultar') || e.target.matches('.etq-btn-reimprimir') || e.target.closest('.etq-btn-reimprimir') || e.target.matches('.etq-btn-armazenar') || e.target.closest('.etq-btn-armazenar')) return;
+        // Não selecionar cards impressos (só têm reimprimir/armazenar)
+        if (card.dataset.impressa === 'true') return;
+        const id = Number(card.dataset.id);
+        const cb = card.querySelector('.etq-check-sel');
+        if (_etqSelecionadas.has(id)) {
+          _etqSelecionadas.delete(id);
+          card.classList.remove('selecionado');
+          if (cb) cb.checked = false;
+        } else {
+          _etqSelecionadas.add(id);
+          card.classList.add('selecionado');
+          if (cb) cb.checked = true;
+        }
+        _etqAtualizarBotaoSel();
+      });
+    });
+
+    // Checkbox individual
+    etqGrid.querySelectorAll('.etq-check-sel').forEach(cb => {
+      cb.addEventListener('change', () => {
+        const id = Number(cb.dataset.id);
+        const card = cb.closest('.etq-card');
+        if (cb.checked) { _etqSelecionadas.add(id); card?.classList.add('selecionado'); }
+        else            { _etqSelecionadas.delete(id); card?.classList.remove('selecionado'); }
+        _etqAtualizarBotaoSel();
+      });
+    });
+
+    // Botão imprimir unitário
+    etqGrid.querySelectorAll('.etq-btn-imprimir-unit').forEach(btn => {
+      btn.addEventListener('click', async e => {
+        e.stopPropagation();
+        const id = Number(btn.dataset.id);
+        await _etqImprimirIds([id], btn);
+      });
+    });
+
+    // Botão Múltiplo
+    etqGrid.querySelectorAll('.etq-btn-multiplo').forEach(btn => {
+      btn.addEventListener('click', e => {
+        e.stopPropagation();
+        const card = btn.closest('.etq-card');
+        _etqMplAbrir(
+          Number(btn.dataset.id),
+          Number(card?.dataset.qtd) || 0,
+          card?.dataset.cod || '',
+          card?.dataset.desc || '',
+          card?.dataset.lote || '',
+          card?.dataset.unid || '',
+          card?.dataset.data || '',
+        );
+      });
+    });
+
+    // Botão Ocultar / Desocultar
+    etqGrid.querySelectorAll('.etq-btn-ocultar').forEach(btn => {
+      btn.addEventListener('click', async e => {
+        e.stopPropagation();
+        const id = Number(btn.dataset.id);
+        const novoOculto = !_etqMostrarOcultos; // ocultar quando em modo normal; desocultar quando em modo ocultos
+        btn.disabled = true;
+        try {
+          const resp = await fetch(`/api/etiquetas/recebimento/${id}/oculto`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
+            body: JSON.stringify({ oculto: novoOculto }),
+          });
+          if (!resp.ok) throw new Error(`Erro ${resp.status}`);
+          // Remove o card da lista imediatamente
+          btn.closest('.etq-card')?.remove();
+          // Atualiza contagem no status
+          const restantes = etqGrid?.querySelectorAll('.etq-card').length || 0;
+          if (etqStatus) etqStatus.textContent = `${restantes} etiqueta(s) ${_etqMostrarOcultos ? 'oculta(s)' : 'pendente(s)'}${restantes === 0 ? '' : ''}`;
+          if (restantes === 0) {
+            etqGrid.innerHTML = `<div class="etiquetas-loading">${_etqMostrarOcultos ? 'Nenhuma etiqueta oculta.' : 'Nenhuma etiqueta pendente encontrada.'}</div>`;
+            if (etqStatus) etqStatus.textContent = '';
+          }
+        } catch (err) {
+          if (etqStatus) { etqStatus.textContent = err.message; etqStatus.style.color = '#f87171'; setTimeout(() => { if (etqStatus) { etqStatus.textContent = ''; etqStatus.style.color = ''; } }, 4000); }
+          btn.disabled = false;
+        }
+      });
+    });
+
+    // Botão Reimprimir (desmarca impressa, volta ao estado normal)
+    etqGrid.querySelectorAll('.etq-btn-reimprimir').forEach(btn => {
+      btn.addEventListener('click', async e => {
+        e.stopPropagation();
+        const id = Number(btn.dataset.id);
+        btn.disabled = true;
+        try {
+          const resp = await fetch(`/api/etiquetas/recebimento/${id}/reimprimir`, {
+            method: 'PATCH',
+            credentials: 'include',
+          });
+          if (!resp.ok) throw new Error(`Erro ${resp.status}`);
+          // Recarrega a lista para refletir o novo estado
+          await _etqCarregar(etqBusca?.value || '');
+        } catch (err) {
+          if (etqStatus) { etqStatus.textContent = err.message; etqStatus.style.color = '#f87171'; setTimeout(() => { if (etqStatus) { etqStatus.textContent = ''; etqStatus.style.color = ''; } }, 4000); }
+          btn.disabled = false;
+        }
+      });
+    });
+
+    // Botão Armazenar (abre modal de câmera/local direto no passo 2)
+    etqGrid.querySelectorAll('.etq-btn-armazenar').forEach(btn => {
+      btn.addEventListener('click', async e => {
+        e.stopPropagation();
+        const idImpresso = Number(btn.dataset.idImpresso);
+        if (!idImpresso) {
+          if (etqStatus) { etqStatus.textContent = 'Nenhum registro de impressão encontrado para este item.'; etqStatus.style.color = '#f87171'; setTimeout(() => { if (etqStatus) { etqStatus.textContent = ''; etqStatus.style.color = ''; } }, 4000); }
+          return;
+        }
+        _armAbrirComId(idImpresso);
+      });
+    });
+  }
+
+  async function _etqCarregar(q = '') {
+    if (!etqGrid) return;
+    etqGrid.innerHTML = '<div class="etiquetas-loading"><i class="fa-solid fa-spinner fa-spin"></i> Carregando...</div>';
+    _etqSelecionadas.clear();
+    _etqAtualizarBotaoSel();
+    try {
+      const params = new URLSearchParams();
+      if (q) params.set('q', q);
+      if (_etqMostrarOcultos) params.set('mostrar_ocultos', '1');
+      const url = '/api/etiquetas/recebimento/pendentes' + (params.toString() ? '?' + params.toString() : '');
+      const resp = await fetch(url, { credentials: 'include' });
+      if (!resp.ok) throw new Error(`Erro ${resp.status}`);
+      const data = await resp.json();
+      _etqRenderCards(data.etiquetas || []);
+    } catch (err) {
+      if (etqGrid) etqGrid.innerHTML = `<div class="etiquetas-loading" style="color:#f87171;">Erro ao carregar: ${escapeHtml(err.message)}</div>`;
+    }
+  }
+
+  // ── Browser Print: envia ZPL direto à impressora local via Zebra Browser Print ──
+  async function _etqImprimirBrowserPrint(ids, btnRef, container) {
+    const statusEl = container || etqStatus;
+    const showSt = (msg, cor = '#94a3b8') => {
+      if (!statusEl) return;
+      if (statusEl.tagName === 'DIV' || statusEl.tagName === 'P') statusEl.innerHTML = escapeHtml(msg);
+      else statusEl.textContent = msg;
+      if (!container) statusEl.style.color = cor;
+    };
+    const clearSt = (delay = 0) => setTimeout(() => { if (statusEl) { statusEl.textContent = ''; if (!container) statusEl.style.color = ''; } }, delay);
+    const origBtn = btnRef ? btnRef.innerHTML : null;
+    if (btnRef) { btnRef.disabled = true; btnRef.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>'; }
+    try {
+      // 1. Verificar agente — primeiro via backend (funciona em HTTPS), depois localhost (fallback)
+      showSt('Verificando agente de impressão...', '#facc15');
+      let agenteOk = false;
+      let agenteVersion = null;
+      let agentePrinter = null;
+
+      // Verificação primária: backend informa se agente fez heartbeat recente
+      try {
+        const ag = await fetch('/api/etiquetas/agente/online', { credentials: 'include', signal: AbortSignal.timeout(5000) });
+        if (ag.ok) {
+          const agd = await ag.json();
+          if (agd.online) { agenteOk = true; agenteVersion = agd.version || '2.0'; agentePrinter = agd.printer || null; }
+        }
+      } catch { /* backend indisponível, tenta localhost */ }
+
+      // Fallback: tenta localhost diretamente (v2.0 /api/status, v1.0 /status)
+      if (!agenteOk) {
+        for (const host of ['localhost', '127.0.0.1']) {
+          try {
+            const r = await fetch(`http://${host}:9200/api/status`, { signal: AbortSignal.timeout(3000) });
+            if (r.ok) { const d = await r.json(); agenteOk = true; agenteVersion = d.version || '2.0'; agentePrinter = d.printer || null; break; }
+          } catch { /* tenta próximo */ }
+        }
+      }
+      if (!agenteOk) {
+        for (const host of ['localhost', '127.0.0.1']) {
+          try {
+            const r = await fetch(`http://${host}:9200/status`, { signal: AbortSignal.timeout(2000) });
+            if (r.ok) { agenteOk = true; agenteVersion = '1.0'; agentePrinter = null; break; }
+          } catch { /* não disponível */ }
+        }
+      }
+
+      if (!agenteOk) {
+        if (statusEl) {
+          const _EXE_URL_FB = 'https://pxhbginkisinegzupqcy.supabase.co/storage/v1/object/public/agente-impressao/agente-impressao-setup.exe';
+          let exeUrl = _EXE_URL_FB;
+          try { const u = await fetch('/api/etiquetas/agente-url'); const uj = await u.json(); if (uj.url) exeUrl = uj.url; } catch {}
+          statusEl.innerHTML =
+            '<div style="background:#1e1b2e;border:1px solid #7c3aed;border-radius:8px;padding:10px 14px;margin-top:6px;">' +
+            '<div style="color:#f87171;font-weight:600;margin-bottom:6px;"><i class="fa-solid fa-triangle-exclamation"></i> Agente de impressão não encontrado neste PC</div>' +
+            '<div style="color:#94a3b8;font-size:.83rem;margin-bottom:8px;">Instale o agente no PC conectado à impressora Zebra. Após instalar, tente novamente.</div>' +
+            '<a href="' + exeUrl + '" download="agente-impressao-setup.exe" style="display:inline-flex;align-items:center;gap:6px;background:#7c3aed;color:#fff;padding:7px 14px;border-radius:6px;text-decoration:none;font-size:.85rem;font-weight:600;">' +
+            '<i class="fa-solid fa-download"></i> Baixar instalador (.exe)</a>' +
+            '<span style="color:#64748b;font-size:.76rem;margin-left:10px;">Clique 2× para instalar · depois tente imprimir novamente</span>' +
+            '</div>';
+          if (!container) statusEl.style.color = '';
+          clearSt(20000);
+        }
+        return;
+      }
+
+      // Agente v1.0 detectado — precisa atualizar
+      if (agenteVersion === '1.0') {
+        if (statusEl) {
+          const _EXE_URL_FB = 'https://pxhbginkisinegzupqcy.supabase.co/storage/v1/object/public/agente-impressao/agente-impressao-setup.exe';
+          let exeUrl = _EXE_URL_FB;
+          try { const u = await fetch('/api/etiquetas/agente-url'); const uj = await u.json(); if (uj.url) exeUrl = uj.url; } catch {}
+          statusEl.innerHTML =
+            '<div style="background:#1e1b2e;border:1px solid #f59e0b;border-radius:8px;padding:10px 14px;margin-top:6px;">' +
+            '<div style="color:#fbbf24;font-weight:600;margin-bottom:6px;"><i class="fa-solid fa-arrow-up-from-bracket"></i> Agente v1.0 encontrado — atualização necessária</div>' +
+            '<div style="color:#94a3b8;font-size:.83rem;margin-bottom:8px;">A versão instalada é antiga. Baixe e execute o instalador novamente para atualizar.</div>' +
+            '<a href="' + exeUrl + '" download="agente-impressao-setup.exe" style="display:inline-flex;align-items:center;gap:6px;background:#f59e0b;color:#000;padding:7px 14px;border-radius:6px;text-decoration:none;font-size:.85rem;font-weight:600;">' +
+            '<i class="fa-solid fa-download"></i> Baixar v2.0 e atualizar</a>' +
+            '<span style="color:#64748b;font-size:.76rem;margin-left:10px;">Clique 2× no instalador · ele encerra o antigo automaticamente</span>' +
+            '</div>';
+          if (!container) statusEl.style.color = '';
+          clearSt(30000);
+        }
+        return;
+      }
+
+      if (!agentePrinter) {
+        showSt('Agente instalado mas sem impressora configurada. <a href="http://localhost:9200" target="_blank" style="color:#7c3aed">Configurar agora</a>', '#facc15');
+        clearSt(15000);
+        return;
+      }
+
+      // 2. Enfileirar impressão no servidor (agente faz polling e imprime automaticamente)
+      const usuario = (document.getElementById('userNameDisplay')?.textContent || '').trim();
+      showSt(`Enviando para fila de impressão (${agentePrinter})...`, '#facc15');
+      const resp = await fetch('/api/etiquetas/fila', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ ids, usuario }),
+      });
+      if (!resp.ok) { const e = await resp.json().catch(() => ({})); throw new Error(e.error || `Erro ${resp.status}`); }
+      const data = await resp.json();
+      if (!data.ok) throw new Error(data.error || 'Falha ao enfileirar');
+
+      showSt(`✅ ${data.quantidade} etiqueta(s) na fila para ${agentePrinter}. Imprimindo...`, '#4ade80');
+      clearSt(5000);
+      await _etqCarregar(etqBusca?.value || '');
+    } catch (err) {
+      showSt(err.message, '#f87171');
+      clearSt(7000);
+    } finally {
+      if (btnRef) { btnRef.disabled = false; btnRef.innerHTML = origBtn || '<i class="fa-solid fa-print"></i> Imprimir'; }
+    }
+  }
+
+  // ── Dispara impressão, com retry usando impressora alternativa ──────────
+  async function _etqImprimirIds(ids, btnRef, printer = null) {
+    if (!ids || ids.length === 0) return;
+    // Aplicar preferência salva se nenhuma impressora foi explicitamente passada
+    if (printer === null || printer === undefined) printer = _etqPrinterPref || null;
+    // Impressão local via Zebra Browser Print
+    if (printer === '__BP__') {
+      await _etqImprimirBrowserPrint(ids, btnRef);
+      return;
+    }
+    // Opção PDF: baixa via fetch para saber quando concluiu e recarregar a lista
+    if (printer === '__PDF__') {
+      if (btnRef) { btnRef.disabled = true; btnRef.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>'; }
+      try {
+        const usuario = (document.getElementById('userNameDisplay')?.textContent || '').trim();
+        const resp = await fetch('/api/etiquetas/recebimento/pdf-download?ids=' + ids.join(',') + '&usuario=' + encodeURIComponent(usuario), { credentials: 'include' });
+        if (!resp.ok) throw new Error(`Erro ${resp.status}`);
+        const blob = await resp.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url; a.download = `etiquetas_${ids.join('-')}.pdf`;
+        document.body.appendChild(a); a.click();
+        setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 1000);
+        if (etqStatus) { etqStatus.textContent = 'PDF gerado com sucesso.'; etqStatus.style.color = '#4ade80'; setTimeout(() => { if (etqStatus) { etqStatus.textContent = ''; etqStatus.style.color = ''; } }, 4000); }
+        await _etqCarregar(etqBusca?.value || '');
+      } catch (err) {
+        if (etqStatus) { etqStatus.textContent = err.message; etqStatus.style.color = '#f87171'; setTimeout(() => { if (etqStatus) { etqStatus.textContent = ''; etqStatus.style.color = ''; } }, 6000); }
+      } finally {
+        if (btnRef) { btnRef.disabled = false; btnRef.innerHTML = '<i class="fa-solid fa-print"></i> Imprimir'; }
+      }
+      return;
+    }
+    const orig = btnRef ? btnRef.innerHTML : '';
+    if (btnRef) { btnRef.disabled = true; btnRef.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>'; }
+    try {
+      const body = { ids };
+      if (printer) body.printer = printer;
+      body.usuario = (document.getElementById('userNameDisplay')?.textContent || '').trim();
+      const resp = await fetch('/api/etiquetas/recebimento/imprimir-modal', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify(body),
+      });
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({}));
+        throw new Error(err.error || `Erro ${resp.status}`);
+      }
+      const data = await resp.json();
+      if (!data.ok) {
+        // Verifica se é erro de impressora não encontrada → oferece seletor
+        const isPrinterError = /não encontrada|does not exist|impressora/i.test(data.error || '');
+        if (isPrinterError) {
+          _etqMostrarSeletorImpressora(data.error, (p) => _etqImprimirIds(ids, null, p));
+        } else {
+          if (etqStatus) {
+            etqStatus.textContent = data.error || 'Falha ao imprimir.';
+            etqStatus.style.color = '#f87171';
+            setTimeout(() => { if (etqStatus) { etqStatus.textContent = ''; etqStatus.style.color = ''; } }, 6000);
+          }
+        }
+        return;
+      }
+      if (etqStatus) {
+        etqStatus.textContent = `${data.impressas || ids.length} etiqueta(s) enviada(s) para a impressora.`;
+        etqStatus.style.color = '#4ade80';
+        setTimeout(() => { if (etqStatus) { etqStatus.textContent = ''; etqStatus.style.color = ''; } }, 4000);
+      }
+      await _etqCarregar(etqBusca?.value || '');
+    } catch (err) {
+      if (etqStatus) {
+        etqStatus.textContent = err.message;
+        etqStatus.style.color = '#f87171';
+        setTimeout(() => { if (etqStatus) { etqStatus.textContent = ''; etqStatus.style.color = ''; } }, 6000);
+      }
+    } finally {
+      if (btnRef) { btnRef.disabled = false; btnRef.innerHTML = orig; }
+    }
+  }
+
+  // Abre o modal
+  printBtn?.addEventListener('click', async e => {
+    e.preventDefault(); e.stopPropagation();
+    if (!etqModal) return;
+    etqModal.style.display = 'flex';
+    if (etqBusca) etqBusca.value = '';
+    _etqCarregarPref(); // carrega preferência de impressora do usuário
+    await _etqCarregar();
+  });
+
+  // Botão de configuração de impressora padrão
+  document.getElementById('etqBtnImpressora')?.addEventListener('click', () => {
+    _etqMostrarSeletorImpressora(null, (p) => {
+      _etqSalvarPref(p);
+      if (etqStatus) {
+        const label = p === '__PDF__' ? 'PDF' : p === '__BP__' ? 'Local (agente)' : p;
+        etqStatus.textContent = `Impressora padrão salva: ${label}`;
+        etqStatus.style.color = '#4ade80';
+        setTimeout(() => { if (etqStatus) { etqStatus.textContent = ''; etqStatus.style.color = ''; } }, 3000);
+      }
+    });
+  });
+
+  // Botão: Baixar instalador do agente (.exe)
+  document.getElementById('etqBtnBaixarAgente')?.addEventListener('click', async () => {
+    const EXE_FALLBACK = 'https://pxhbginkisinegzupqcy.supabase.co/storage/v1/object/public/agente-impressao/agente-impressao-setup.exe';
+    let exeUrl = EXE_FALLBACK;
+    try {
+      const r = await fetch('/api/etiquetas/agente-url', { credentials: 'include' });
+      if (r.ok) { const j = await r.json(); if (j?.url) exeUrl = j.url; }
+    } catch {}
+    const a = document.createElement('a');
+    a.href = exeUrl;
+    a.download = 'agente-impressao-setup.exe';
+    a.rel = 'noopener';
+    document.body.appendChild(a); a.click();
+    setTimeout(() => a.remove(), 1500);
+    if (etqStatus) {
+      etqStatus.innerHTML = '<i class="fa-solid fa-download"></i> Baixando agente... Execute o arquivo no PC da impressora. Depois clique no botão <b>⚙️</b> para configurar.';
+      etqStatus.style.color = '#4ade80';
+      setTimeout(() => { if (etqStatus) { etqStatus.textContent = ''; etqStatus.style.color = ''; } }, 8000);
+    }
+  });
+
+  // Botão: Abrir UI de configuração do agente local (localhost:9200)
+  document.getElementById('etqBtnConfigAgente')?.addEventListener('click', () => {
+    const win = window.open('http://localhost:9200', '_blank', 'noopener');
+    if (!win && etqStatus) {
+      etqStatus.innerHTML = 'Permita pop-ups ou acesse manualmente <a href="http://localhost:9200" target="_blank" style="color:#60a5fa;">http://localhost:9200</a>';
+      etqStatus.style.color = '#facc15';
+      setTimeout(() => { if (etqStatus) { etqStatus.textContent = ''; etqStatus.style.color = ''; } }, 7000);
+    }
+  });
+
+
+  // Fechar
+  etqFechar?.addEventListener('click', () => { if (etqModal) etqModal.style.display = 'none'; });
+  etqModal?.addEventListener('click', e => { if (e.target === etqModal) etqModal.style.display = 'none'; });
+
+  // Busca com debounce
+  etqBusca?.addEventListener('input', () => {
+    clearTimeout(_etqDebounce);
+    _etqDebounce = setTimeout(() => _etqCarregar(etqBusca.value.trim()), 350);
+  });
+
+  // Imprimir selecionadas
+  etqBtnSel?.addEventListener('click', async () => {
+    const ids = [..._etqSelecionadas];
+    if (ids.length === 0) return;
+    await _etqImprimirIds(ids, etqBtnSel);
+  });
+
+  // ── Sub-modal: Definir Múltiplo ────────────────────────────────────────────
+  const etqMplModal    = document.getElementById('etqMultiploModal');
+  const etqMplFechar   = document.getElementById('etqMultiploFechar');
+  const etqMplCancel   = document.getElementById('etqMultiploCancelar');
+  const etqMplInput    = document.getElementById('etqMultiploInput');
+  const etqMplChips    = document.getElementById('etqMultiploChips');
+  const etqMplPreview  = document.getElementById('etqMultiploPreview');
+  const etqMplGerar    = document.getElementById('etqMultiploGerar');
+  const etqMplQtdTotal = document.getElementById('etqMultiploQtdTotal');
+  const etqMplMiniatura= document.getElementById('etqMultiploMiniatura');
+
+  let _etqMplIdAtual  = null;
+  let _etqMplQtdAtual = 0;
+
+  function calcularDivisores(qtd) {
+    const n = Math.floor(Math.abs(qtd));
+    if (!n || n <= 0) return [1];
+    const set = new Set();
+    for (let i = 1; i <= Math.ceil(Math.sqrt(n)); i++) {
+      if (n % i === 0) { set.add(i); set.add(n / i); }
+    }
+    const arr = [...set].sort((a, b) => a - b);
+    if (arr.length > 16) {
+      const step = Math.ceil(arr.length / 16);
+      const filtered = arr.filter((_, i) => i % step === 0);
+      if (!filtered.includes(arr[arr.length - 1])) filtered.push(arr[arr.length - 1]);
+      return filtered;
+    }
+    return arr;
+  }
+
+  function _etqMplAtualizarPreview() {
+    const m = Number(etqMplInput?.value);
+    if (!m || m <= 0 || !_etqMplQtdAtual) {
+      if (etqMplPreview) etqMplPreview.textContent = 'Informe um múltiplo válido.';
+      if (etqMplGerar) etqMplGerar.disabled = true;
+      return;
+    }
+    const n = Math.max(1, Math.round(_etqMplQtdAtual / m));
+    if (etqMplPreview) {
+      etqMplPreview.innerHTML =
+        `Serão geradas <strong style="color:#a78bfa">${n}</strong> etiqueta(s),
+         cada uma com quantidade <strong style="color:#a78bfa">${m}</strong> ${escapeHtml(_etqMplUnidAtual || '')}.`;
+    }
+    if (etqMplGerar) etqMplGerar.disabled = false;
+    etqMplChips?.querySelectorAll('.etq-multiplo-chip').forEach(c => {
+      c.classList.toggle('ativo', Number(c.dataset.val) === m);
+    });
+  }
+
+  let _etqMplUnidAtual = '';
+
+  function _etqMplAbrir(id, qtd, cod, desc, lote, unid, data) {
+    _etqMplIdAtual   = id;
+    _etqMplQtdAtual  = qtd;
+    _etqMplUnidAtual = unid;
+
+    if (etqMplMiniatura) {
+      etqMplMiniatura.innerHTML = `
+        <div class="etq-thumb-row">
+          <div class="etq-thumb-qr"><i class="fa-solid fa-qrcode" style="font-size:18px;color:#888;"></i></div>
+          <div class="etq-thumb-dados">
+            <div class="etq-thumb-line label">Cod. Produto:</div>
+            <div class="etq-thumb-line value">${escapeHtml(String(cod||''))}</div>
+            <div class="etq-thumb-line label">Descricao:</div>
+            <div class="etq-thumb-line value">${escapeHtml(String(desc||'').slice(0,32))}</div>
+            <div class="etq-thumb-line">Qtd Total: <strong>${escapeHtml(String(qtd||''))} ${escapeHtml(String(unid||''))}</strong></div>
+            <div class="etq-thumb-line">Lote: ${escapeHtml(String(lote||'').slice(0,22))}</div>
+            ${data ? `<div class="etq-thumb-line">Emissao: ${escapeHtml(String(data||''))}</div>` : ''}
+          </div>
+        </div>`;
+    }
+
+    if (etqMplQtdTotal) etqMplQtdTotal.textContent = String(qtd || '?');
+
+    if (etqMplChips) {
+      const divisores = qtd > 0 ? calcularDivisores(qtd) : [1];
+      etqMplChips.innerHTML = divisores.map(d =>
+        `<button class="etq-multiplo-chip" data-val="${d}">${d}</button>`
+      ).join('');
+      etqMplChips.querySelectorAll('.etq-multiplo-chip').forEach(c => {
+        c.addEventListener('click', () => {
+          if (etqMplInput) etqMplInput.value = c.dataset.val;
+          _etqMplAtualizarPreview();
+        });
+      });
+    }
+
+    if (etqMplInput)   etqMplInput.value = '';
+    if (etqMplPreview) etqMplPreview.textContent = 'Selecione ou digite um múltiplo para ver a prévia.';
+    if (etqMplGerar)   etqMplGerar.disabled = true;
+    if (etqMplModal)   etqMplModal.style.display = 'flex';
+  }
+
+  function _etqMplFecharFn() {
+    if (etqMplModal) etqMplModal.style.display = 'none';
+    _etqMplIdAtual = null;
+  }
+
+  etqMplFechar?.addEventListener('click', _etqMplFecharFn);
+  etqMplCancel?.addEventListener('click', _etqMplFecharFn);
+  etqMplModal?.addEventListener('click', e => { if (e.target === etqMplModal) _etqMplFecharFn(); });
+  etqMplInput?.addEventListener('input', _etqMplAtualizarPreview);
+
+  etqMplGerar?.addEventListener('click', async () => {
+    const m = Number(etqMplInput?.value);
+    if (!_etqMplIdAtual || !m || m <= 0) return;
+    // Usar preferência salva; se não houver, abrir seletor
+    if (_etqPrinterPref) {
+      await _etqMplImprimirComImpressora(_etqMplIdAtual, m, _etqPrinterPref);
+    } else {
+      _etqMostrarSeletorImpressora(null, (p) => _etqMplImprimirComImpressora(_etqMplIdAtual, m, p), etqMplPreview);
+    }
+  });
+
+  // Dispara impressão múltiplo, com retry para impressora alternativa
+  async function _etqMplImprimirComImpressora(idEtq, multiplo, printer) {
+    if (!etqMplGerar) return;
+    // Impressão local via Zebra Browser Print (com multiplo)
+    if (printer === '__BP__') {
+      const origHtml = etqMplGerar.innerHTML;
+      etqMplGerar.disabled = true;
+      etqMplGerar.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Enviando...';
+      try {
+        const statusEl = etqMplPreview;
+        const showSt = (msg, cor = '#94a3b8') => { if (statusEl) statusEl.innerHTML = `<span style="color:${cor};">${escapeHtml(msg)}</span>`; };
+        // Verificar agente — backend primeiro (funciona em HTTPS), depois localhost
+        let agenteOk = false;
+        let agenteVersion = null;
+        let agentePrinter = null;
+        try {
+          const ag2 = await fetch('/api/etiquetas/agente/online', { credentials: 'include', signal: AbortSignal.timeout(5000) });
+          if (ag2.ok) { const agd2 = await ag2.json(); if (agd2.online) { agenteOk = true; agenteVersion = agd2.version || '2.0'; agentePrinter = agd2.printer || null; } }
+        } catch { /* fallback localhost */ }
+        if (!agenteOk) {
+          for (const host of ['localhost', '127.0.0.1']) {
+            try {
+              const r = await fetch(`http://${host}:9200/api/status`, { signal: AbortSignal.timeout(3000) });
+              if (r.ok) { const d = await r.json(); agenteOk = true; agenteVersion = d.version || '2.0'; agentePrinter = d.printer || null; break; }
+            } catch { /* tenta próximo */ }
+          }
+        }
+        if (!agenteOk) {
+          for (const host of ['localhost', '127.0.0.1']) {
+            try {
+              const r = await fetch(`http://${host}:9200/status`, { signal: AbortSignal.timeout(2000) });
+              if (r.ok) { agenteOk = true; agenteVersion = '1.0'; agentePrinter = null; break; }
+            } catch { /* não disponível */ }
+          }
+        }
+        if (!agenteOk) {
+          const _EXE_URL_FB2 = 'https://pxhbginkisinegzupqcy.supabase.co/storage/v1/object/public/agente-impressao/agente-impressao-setup.exe';
+          let exeUrl2 = _EXE_URL_FB2;
+          try { const u2 = await fetch('/api/etiquetas/agente-url'); const uj2 = await u2.json(); if (uj2.url) exeUrl2 = uj2.url; } catch {}
+          showSt(
+            '<div style="background:#1e1b2e;border:1px solid #7c3aed;border-radius:8px;padding:10px 14px;">' +
+            '<div style="color:#f87171;font-weight:600;margin-bottom:4px;"><i class="fa-solid fa-triangle-exclamation"></i> Agente não encontrado neste PC</div>' +
+            '<div style="color:#94a3b8;font-size:.82rem;margin-bottom:6px;">Instale o agente no PC da impressora Zebra.</div>' +
+            '<a href="' + exeUrl2 + '" download="agente-impressao-setup.exe" style="display:inline-flex;align-items:center;gap:6px;background:#7c3aed;color:#fff;padding:6px 12px;border-radius:6px;text-decoration:none;font-size:.83rem;font-weight:600;">' +
+            '<i class="fa-solid fa-download"></i> Baixar instalador (.exe)</a>' +
+            '</div>',
+            '#f87171'
+          );
+          etqMplGerar.disabled = false; etqMplGerar.innerHTML = origHtml; return;
+        }
+        if (agenteVersion === '1.0') {
+          const _EXE_URL_FB2 = 'https://pxhbginkisinegzupqcy.supabase.co/storage/v1/object/public/agente-impressao/agente-impressao-setup.exe';
+          let exeUrl2 = _EXE_URL_FB2;
+          try { const u2 = await fetch('/api/etiquetas/agente-url'); const uj2 = await u2.json(); if (uj2.url) exeUrl2 = uj2.url; } catch {}
+          showSt(
+            '<div style="background:#1e1b2e;border:1px solid #f59e0b;border-radius:8px;padding:10px 14px;">' +
+            '<div style="color:#fbbf24;font-weight:600;margin-bottom:4px;"><i class="fa-solid fa-arrow-up-from-bracket"></i> Agente v1.0 — atualização necessária</div>' +
+            '<a href="' + exeUrl2 + '" download="agente-impressao-setup.exe" style="display:inline-flex;align-items:center;gap:6px;background:#f59e0b;color:#000;padding:6px 12px;border-radius:6px;text-decoration:none;font-size:.83rem;font-weight:600;margin-top:4px;">' +
+            '<i class="fa-solid fa-download"></i> Baixar v2.0 e atualizar</a>' +
+            '</div>',
+            '#fbbf24'
+          );
+          etqMplGerar.disabled = false; etqMplGerar.innerHTML = origHtml; return;
+        }
+        if (!agentePrinter) {
+          showSt('Agente instalado mas sem impressora configurada. <a href="http://localhost:9200" target="_blank" style="color:#7c3aed">Configurar</a>', '#facc15');
+          etqMplGerar.disabled = false; etqMplGerar.innerHTML = origHtml; return;
+        }
+        const usuario = (document.getElementById('userNameDisplay')?.textContent || '').trim();
+        showSt(`Enviando para fila (${agentePrinter})...`, '#facc15');
+        const resp = await fetch('/api/etiquetas/fila', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ ids: [idEtq], multiplo, usuario }),
+        });
+        if (!resp.ok) { const e = await resp.json().catch(() => ({})); throw new Error(e.error || `Erro ${resp.status}`); }
+        const data = await resp.json();
+        if (!data.ok) throw new Error(data.error || 'Falha ao enfileirar');
+        showSt(`✅ ${data.quantidade} etiqueta(s) na fila. Imprimindo...`, '#4ade80');
+        setTimeout(() => { if (etqMplPreview) etqMplPreview.innerHTML = ''; }, 5000);
+        _etqMplFecharFn();
+        await _etqCarregar(etqBusca?.value || '');
+      } catch (err) {
+        etqMplGerar.disabled = false; etqMplGerar.innerHTML = origHtml;
+        if (etqMplPreview) etqMplPreview.innerHTML = `<span style="color:#f87171;">${escapeHtml(err.message)}</span>`;
+      }
+      return;
+    }
+    // Opção PDF: baixa via fetch, passa multiplo para floor+remainder no backend
+    if (printer === '__PDF__') {
+      etqMplGerar.disabled = true;
+      etqMplGerar.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Gerando...';
+      try {
+        const usuario = (document.getElementById('userNameDisplay')?.textContent || '').trim();
+        const url = `/api/etiquetas/recebimento/pdf-download?ids=${idEtq}&multiplo=${multiplo}&usuario=${encodeURIComponent(usuario)}`;
+        const resp = await fetch(url, { credentials: 'include' });
+        if (!resp.ok) throw new Error(`Erro ${resp.status}`);
+        const blob = await resp.blob();
+        const urlObj = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = urlObj; a.download = `etiqueta_${idEtq}_multiplo${multiplo}.pdf`;
+        document.body.appendChild(a); a.click();
+        setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(urlObj); }, 1000);
+        _etqMplFecharFn();
+        await _etqCarregar(etqBusca?.value || '');
+      } catch (err) {
+        etqMplGerar.disabled = false;
+        etqMplGerar.innerHTML = '<i class="fa-solid fa-print"></i> Gerar etiquetas';
+        alert('Erro ao gerar PDF: ' + err.message);
+      }
+      return;
+    }
+    const origHtml = etqMplGerar.innerHTML;
+    etqMplGerar.disabled = true;
+    etqMplGerar.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Gerando...';
+    try {
+      const body = { id: idEtq, multiplo };
+      if (printer) body.printer = printer;
+      body.usuario = (document.getElementById('userNameDisplay')?.textContent || '').trim();
+      const resp = await fetch('/api/etiquetas/recebimento/imprimir-multiplo', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify(body),
+      });
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({}));
+        throw new Error(err.error || `Erro ${resp.status}`);
+      }
+      const data = await resp.json();
+      if (!data.ok) {
+        // Verifica se é erro de impressora não encontrada → oferece seletor
+        const isPrinterError = /não encontrada|does not exist|impressora/i.test(data.error || '');
+        if (isPrinterError) {
+          etqMplGerar.disabled = false;
+          etqMplGerar.innerHTML = origHtml;
+          _etqMostrarSeletorImpressora(data.error, (p) => _etqMplImprimirComImpressora(idEtq, multiplo, p), etqMplPreview);
+        } else {
+          if (etqMplPreview) {
+            etqMplPreview.innerHTML = `<span style="color:#f87171;">${escapeHtml(data.error || 'Falha ao imprimir.')}</span>`;
+          }
+          etqMplGerar.disabled = false;
+          etqMplGerar.innerHTML = origHtml;
+        }
+        return;
+      }
+      _etqMplFecharFn();
+      if (etqStatus) {
+        etqStatus.textContent = `${data.impressas} etiqueta(s) enviada(s) para a impressora.`;
+        etqStatus.style.color = '#4ade80';
+        setTimeout(() => { if (etqStatus) { etqStatus.textContent = ''; etqStatus.style.color = ''; } }, 4000);
+      }
+      await _etqCarregar(etqBusca?.value || '');
+    } catch (err) {
+      if (etqMplPreview) {
+        etqMplPreview.innerHTML = `<span style="color:#f87171;">${escapeHtml(err.message)}</span>`;
+      }
+      etqMplGerar.disabled = false;
+      etqMplGerar.innerHTML = origHtml;
+    }
+  }
+
+  // ── Modal: Etiquetas impressas — Estoque (ETQ_rec_impresso) ───────────────
+  const etqImpressoModal    = document.getElementById('etqImpressoModal');
+  const etqImpressoGrid     = document.getElementById('etqImpressoModalGrid');
+  const etqImpressoStatus   = document.getElementById('etqImpressoModalStatus');
+  const etqImpressoBusca    = document.getElementById('etqImpressoBuscaInput');
+  const etqImpressoFechar   = document.getElementById('etqImpressoModalFechar');
+  // Botão movido para menu lateral — novo ID
+  const btnGuardarMateriais = document.getElementById('menu-guardar-materiais');
+
+  let _etqImpressoDebounce = null;
+
+  function _etqImpressoRenderCards(etiquetas) {
+    if (!etqImpressoGrid) return;
+    if (!etiquetas || etiquetas.length === 0) {
+      etqImpressoGrid.innerHTML = '<div class="etiquetas-loading">Nenhuma etiqueta impressa encontrada.</div>';
+      if (etqImpressoStatus) etqImpressoStatus.textContent = '';
+      return;
+    }
+    if (etqImpressoStatus) etqImpressoStatus.textContent = `${etiquetas.length} etiqueta(s) impressa(s)`;
+
+    etqImpressoGrid.innerHTML = etiquetas.map(e => {
+      const cod      = escapeHtml(String(e.codigo_produto   || '—'));
+      const desc     = escapeHtml(String(e.descricao_produto || '—'));
+      const lote     = escapeHtml(String(e.lote             || '—'));
+      const qtd      = escapeHtml(String(e.qtd != null ? e.qtd : ''));
+      const unid     = escapeHtml(String(e.unidade          || ''));
+      const forn     = escapeHtml(String(e.fornecedor       || ''));
+      const nfe      = escapeHtml(String(e.numero_nfe       || ''));
+      const pedido   = escapeHtml(String(e.numero_pedido    || ''));
+      const dataEmis = escapeHtml(String(e.data_emissao     || ''));
+      const impresso = e.impresso_em
+        ? new Date(e.impresso_em).toLocaleString('pt-BR', { day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit' })
+        : '';
+      const usuario  = escapeHtml(String(e.usuario_criacao  || ''));
+
+      return `
+      <div class="etq-card" data-id="${e.id}" style="cursor:pointer;" title="Clique para armazenar">
+        <div class="etq-card-thumbnail">
+          <div class="etq-thumb-row">
+            <div class="etq-thumb-qr"><i class="fa-solid fa-qrcode" style="font-size:18px;color:#888;"></i></div>
+            <div class="etq-thumb-dados">
+              <div class="etq-thumb-line label">Cod. Produto:</div>
+              <div class="etq-thumb-line value">${cod}</div>
+              <div class="etq-thumb-line label">Descricao:</div>
+              <div class="etq-thumb-line value">${desc.length > 22 ? desc.slice(0,22)+'…' : desc}</div>
+              <div class="etq-thumb-line">Qtd: ${qtd} ${unid}</div>
+              <div class="etq-thumb-line">Lote: ${lote.length > 18 ? lote.slice(0,18)+'…' : lote}</div>
+              ${dataEmis ? `<div class="etq-thumb-line">Emissao: ${dataEmis}</div>` : ''}
+            </div>
+          </div>
+        </div>
+        <div class="etq-card-footer">
+          <div class="etq-card-cod">${cod}</div>
+          <div class="etq-card-desc" title="${desc}">${desc}</div>
+          <div class="etq-card-lote">Lote: ${lote}</div>
+          ${forn  ? `<div class="etq-card-lote" style="color:#94a3b8;">Forn.: ${forn}</div>` : ''}
+          ${nfe   ? `<div class="etq-card-lote" style="color:#94a3b8;">NF-e: ${nfe}${pedido ? ' | Ped.: '+pedido : ''}</div>` : ''}
+          ${impresso ? `<div class="etq-card-lote" style="color:#34d399;font-size:11px;">Impresso: ${impresso}${usuario ? ' por '+usuario : ''}</div>` : ''}
+          ${e.endereco ? `<div class="etq-card-lote" style="color:#a78bfa;font-weight:600;"><i class="fa-solid fa-location-dot" style="font-size:10px;"></i> ${escapeHtml(String(e.endereco))}</div>` : ''}
+        </div>
+      </div>`;
+    }).join('');
+  }
+
+  async function _etqImpressoCarregar(q = '') {
+    if (!etqImpressoGrid) return;
+    etqImpressoGrid.innerHTML = '<div class="etiquetas-loading"><i class="fa-solid fa-spinner fa-spin"></i> Carregando...</div>';
+    try {
+      const url = '/api/etiquetas/rec-impresso' + (q ? `?q=${encodeURIComponent(q)}` : '');
+      const resp = await fetch(url, { credentials: 'include' });
+      if (!resp.ok) throw new Error(`Erro ${resp.status}`);
+      const data = await resp.json();
+      _etqImpressoRenderCards(data.etiquetas || []);
+    } catch (err) {
+      if (etqImpressoGrid) etqImpressoGrid.innerHTML = `<div class="etiquetas-loading" style="color:#f87171;">Erro ao carregar: ${escapeHtml(err.message)}</div>`;
+    }
+  }
+
+  function _abrirGuardarMateriais() {
+    if (!etqImpressoModal) return;
+    etqImpressoModal.style.display = 'flex';
+    if (etqImpressoBusca) etqImpressoBusca.value = '';
+    _etqImpressoCarregar();
+  }
+
+  btnGuardarMateriais?.addEventListener('click', (e) => { e.preventDefault(); _abrirGuardarMateriais(); });
+
+  // Expor para atalhos flutuantes
+  window.__atalhoAction = window.__atalhoAction || {};
+  window.__atalhoAction['side:log:guardar-materiais'] = _abrirGuardarMateriais;
+
+  etqImpressoFechar?.addEventListener('click', () => { if (etqImpressoModal) etqImpressoModal.style.display = 'none'; });
+  etqImpressoModal?.addEventListener('click', e => { if (e.target === etqImpressoModal) etqImpressoModal.style.display = 'none'; });
+
+  etqImpressoBusca?.addEventListener('input', () => {
+    clearTimeout(_etqImpressoDebounce);
+    _etqImpressoDebounce = setTimeout(() => _etqImpressoCarregar(etqImpressoBusca.value.trim()), 350);
+  });
+
+  // ── Sub-modal câmera: Armazenar produto (QR → barcode) ───────────────────
+  const etqArmazenarModal  = document.getElementById('etqArmazenarModal');
+  const etqArmazenarVideo  = document.getElementById('etqArmazenarVideo');
+  const etqArmazenarTitle  = document.getElementById('etqArmazenarTitle');
+  const etqArmazenarIcone  = document.getElementById('etqArmazenarIcone');
+  const etqArmazenarStatus = document.getElementById('etqArmazenarStatus');
+  const etqArmazenarMira   = document.getElementById('etqArmazenarMira');
+  const etqArmazenarFechar = document.getElementById('etqArmazenarFechar');
+  const etqArmazenarInput       = document.getElementById('etqArmazenarInput');
+  const etqArmazenarComplemento = document.getElementById('etqArmazenarComplemento');
+  const etqArmazenarOk          = document.getElementById('etqArmazenarOk');
+  const btnArmazenarProduto     = document.getElementById('btnArmazenarProduto');
+
+  let _armStep = 1;          // 1 = ler QR do produto, 2 = ler barcode do local
+  let _armIdImpresso = null; // id de ETQ_rec_impresso
+  let _armStream = null;
+  let _armScanInterval = null;
+
+  async function _armPararCamera() {
+    clearInterval(_armScanInterval);
+    _armScanInterval = null;
+    if (_armStream) { _armStream.getTracks().forEach(t => t.stop()); _armStream = null; }
+    if (etqArmazenarVideo) etqArmazenarVideo.srcObject = null;
+  }
+
+  async function _armIniciarCamera() {
+    await _armPararCamera();
+    try {
+      _armStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+      if (etqArmazenarVideo) {
+        etqArmazenarVideo.srcObject = _armStream;
+        await etqArmazenarVideo.play().catch(() => {});
+      }
+      return true;
+    } catch (_) {
+      if (etqArmazenarStatus) {
+        etqArmazenarStatus.textContent = 'Câmera não disponível. Use o campo de texto abaixo.';
+        etqArmazenarStatus.style.color = '#f59e0b';
+      }
+      return false;
+    }
+  }
+
+  function _armIniciarScan(onDetect) {
+    clearInterval(_armScanInterval);
+    if (!('BarcodeDetector' in window)) {
+      if (etqArmazenarStatus) {
+        etqArmazenarStatus.textContent = 'Scanner automático não suportado neste navegador. Use o campo abaixo.';
+        etqArmazenarStatus.style.color = '#f59e0b';
+      }
+      return;
+    }
+    const detector = new BarcodeDetector({
+      formats: ['qr_code', 'code_128', 'code_39', 'ean_13', 'ean_8', 'upc_a', 'data_matrix']
+    });
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+    _armScanInterval = setInterval(async () => {
+      if (!etqArmazenarVideo || etqArmazenarVideo.readyState < 2) return;
+      canvas.width  = etqArmazenarVideo.videoWidth;
+      canvas.height = etqArmazenarVideo.videoHeight;
+      ctx.drawImage(etqArmazenarVideo, 0, 0);
+      try {
+        const barcodes = await detector.detect(canvas);
+        if (barcodes.length > 0) {
+          clearInterval(_armScanInterval);
+          _armScanInterval = null;
+          // Pisca mira em verde
+          if (etqArmazenarMira) {
+            etqArmazenarMira.style.borderColor = '#4ade80';
+            setTimeout(() => { if (etqArmazenarMira) etqArmazenarMira.style.borderColor = 'rgba(52,211,153,.85)'; }, 600);
+          }
+          onDetect(barcodes[0].rawValue);
+        }
+      } catch (_) {}
+    }, 250);
+  }
+
+  function _armProcessarCodigo(valor) {
+    if (_armStep === 1) {
+      // QR format: "COD|DESC|LOTE|ID<número>" — extrai o ID
+      const parts = String(valor).split('|');
+      const last  = parts[parts.length - 1]; // ex: "ID13"
+      const m     = last.match(/^ID(\d+)$/i);
+      const id    = m ? parseInt(m[1], 10) : parseInt(String(valor), 10);
+      if (!id || isNaN(id)) {
+        if (etqArmazenarStatus) {
+          etqArmazenarStatus.textContent = 'QR não reconhecido. Tente novamente.';
+          etqArmazenarStatus.style.color = '#f87171';
+        }
+        if (etqArmazenarInput) etqArmazenarInput.value = '';
+        _armIniciarScan(_armProcessarCodigo);
+        return;
+      }
+      _armIdImpresso = id;
+      _armStep = 2;
+      // Atualiza UI para passo 2
+      if (etqArmazenarTitle)  etqArmazenarTitle.textContent  = 'Leia o código do local';
+      if (etqArmazenarIcone)  { etqArmazenarIcone.className = 'fa-solid fa-barcode'; etqArmazenarIcone.style.color = '#a78bfa'; }
+      if (etqArmazenarStatus) { etqArmazenarStatus.textContent = `Produto ID ${id} lido. Aponte para o código de barras do local.`; etqArmazenarStatus.style.color = '#4ade80'; }
+      if (etqArmazenarInput)  { etqArmazenarInput.placeholder = 'Ou digite o local manualmente...'; etqArmazenarInput.value = ''; etqArmazenarInput.focus(); }
+      _armIniciarScan(_armProcessarCodigo);
+    } else {
+      // Passo 2: valor lido é o endereço
+      _armRegistrarEndereco(String(valor).trim());
+    }
+  }
+
+  async function _armRegistrarEndereco(endereco) {
+    await _armPararCamera();
+    const complemento = etqArmazenarComplemento?.value?.trim() || '';
+    if (etqArmazenarStatus) { etqArmazenarStatus.textContent = 'Registrando...'; etqArmazenarStatus.style.color = '#94a3b8'; }
+    try {
+      const body = { endereco };
+      if (complemento) body.complemento = complemento;
+      const resp = await fetch(`/api/etiquetas/rec-impresso/${_armIdImpresso}/endereco`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify(body),
+      });
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({}));
+        throw new Error(err.error || `Erro ${resp.status}`);
+      }
+      const msg = complemento
+        ? `✓ Armazenado em: ${escapeHtml(endereco)} · ${escapeHtml(complemento)}`
+        : `✓ Armazenado em: ${escapeHtml(endereco)}`;
+      if (etqArmazenarStatus) {
+        etqArmazenarStatus.textContent = msg;
+        etqArmazenarStatus.style.color = '#4ade80';
+      }
+      setTimeout(() => {
+        if (etqArmazenarModal) etqArmazenarModal.style.display = 'none';
+        _etqImpressoCarregar(etqImpressoBusca?.value || '');
+        // Recarrega também o modal de pendentes se estiver aberto
+        if (etqModal && etqModal.style.display !== 'none') {
+          _etqCarregar(etqBusca?.value || '');
+        }
+      }, 1800);
+    } catch (err) {
+      if (etqArmazenarStatus) {
+        etqArmazenarStatus.textContent = `Erro: ${escapeHtml(err.message)}`;
+        etqArmazenarStatus.style.color = '#f87171';
+      }
+    }
+  }
+
+  async function _armAbrir() {
+    _armStep = 1;
+    _armIdImpresso = null;
+    if (etqArmazenarTitle)  etqArmazenarTitle.textContent  = 'Leia o QR Code do produto';
+    if (etqArmazenarIcone)  { etqArmazenarIcone.className = 'fa-solid fa-qrcode'; etqArmazenarIcone.style.color = '#34d399'; }
+    if (etqArmazenarStatus) { etqArmazenarStatus.textContent = ''; etqArmazenarStatus.style.color = '#94a3b8'; }
+    if (etqArmazenarInput)       { etqArmazenarInput.placeholder = 'Ou digite o código manualmente...'; etqArmazenarInput.value = ''; }
+    if (etqArmazenarComplemento) etqArmazenarComplemento.value = '';
+    if (etqArmazenarMira)        etqArmazenarMira.style.borderColor = 'rgba(52,211,153,.85)';
+    if (etqArmazenarModal)       etqArmazenarModal.style.display = 'flex';
+    const ok = await _armIniciarCamera();
+    if (ok) _armIniciarScan(_armProcessarCodigo);
+  }
+
+  async function _armAbrirComId(id) {
+    _armStep = 2;
+    _armIdImpresso = id;
+    if (etqArmazenarTitle)  etqArmazenarTitle.textContent  = 'Leia o código do local';
+    if (etqArmazenarIcone)  { etqArmazenarIcone.className = 'fa-solid fa-barcode'; etqArmazenarIcone.style.color = '#a78bfa'; }
+    if (etqArmazenarStatus) { etqArmazenarStatus.textContent = `Produto ID ${id} selecionado. Aponte para o código de barras do local.`; etqArmazenarStatus.style.color = '#4ade80'; }
+    if (etqArmazenarInput)       { etqArmazenarInput.placeholder = 'Ou digite o local manualmente...'; etqArmazenarInput.value = ''; etqArmazenarInput.focus(); }
+    if (etqArmazenarComplemento) etqArmazenarComplemento.value = '';
+    if (etqArmazenarMira)        etqArmazenarMira.style.borderColor = 'rgba(52,211,153,.85)';
+    if (etqArmazenarModal)       etqArmazenarModal.style.display = 'flex';
+    const ok = await _armIniciarCamera();
+    if (ok) _armIniciarScan(_armProcessarCodigo);
+  }
+
+  function _armFechar() {
+    _armPararCamera();
+    if (etqArmazenarModal) etqArmazenarModal.style.display = 'none';
+  }
+
+  btnArmazenarProduto?.addEventListener('click', _armAbrir);
+  etqArmazenarFechar?.addEventListener('click', _armFechar);
+  etqArmazenarModal?.addEventListener('click', e => { if (e.target === etqArmazenarModal) _armFechar(); });
+
+  // Clique em card da lista → abre modal já no passo 2 (pula leitura de QR)
+  etqImpressoGrid?.addEventListener('click', e => {
+    const card = e.target.closest('.etq-card[data-id]');
+    if (card) {
+      const id = Number(card.dataset.id);
+      if (id) _armAbrirComId(id);
+    }
+  });
+
+  etqArmazenarOk?.addEventListener('click', () => {
+    const val = etqArmazenarInput?.value?.trim();
+    if (val) _armProcessarCodigo(val);
+  });
+  etqArmazenarInput?.addEventListener('keydown', e => {
+    if (e.key === 'Enter') {
+      const val = etqArmazenarInput?.value?.trim();
+      if (val) _armProcessarCodigo(val);
+    }
+  });
 
   /* –– NUVEM –– */
   cloudBtn?.addEventListener('click', e => {
@@ -40382,10 +41858,7 @@ window.renderizarCatalogoOmie = renderizarCatalogoOmie;
             <i class="fa-solid fa-clipboard-list"></i> Adicionar separação
           </button>
         </div>
-        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;">
-          <button id="modalAcoesBtnEditar" style="background:#fef3c7;color:#d97706;border:1px solid #fbbf24;padding:10px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600;display:flex;align-items:center;justify-content:center;gap:6px;">
-            <i class="fa-solid fa-pencil"></i> Editar
-          </button>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
           <button id="modalAcoesBtnCompras" style="background:#ede9fe;color:#7c3aed;border:1px solid #c4b5fd;padding:10px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600;display:flex;align-items:center;justify-content:center;gap:6px;">
             <i class="fa-solid fa-receipt"></i> Últimas Compras
           </button>
@@ -40537,7 +42010,6 @@ window.renderizarCatalogoOmie = renderizarCatalogoOmie;
   document.getElementById('modalManuaisVoltar').addEventListener('click', mostrarBotoes);
   document.getElementById('modalManualBtnEnviar').addEventListener('click', enviarManual);
 
-  document.getElementById('modalAcoesBtnEditar').addEventListener('click', () => { const c = _ctx.codigo; fechar(); abrirModalEditarProduto(c); });
   document.getElementById('modalAcoesBtnCompras').addEventListener('click', () => { const {codigo_produto, codigo, descricao} = _ctx; fechar(); abrirModalUltimasCompras(codigo_produto, codigo, descricao); });
   document.getElementById('modalAcoesBtnSeparacao').addEventListener('click', () => {
     const qtdInput = document.getElementById('modalAcoesQtd');
@@ -42052,8 +43524,6 @@ function abrirModalEditarProduto(codigoProduto) {
 }
 
 // ===== CONFIGURAÇÃO DE CATEGORIAS E DEPARTAMENTOS =====
-
-// Abre painel de configuração (não é mais modal)
 function abrirPainelConfiguracaoCateg() {
   try {
     // Limpa tudo
@@ -43655,7 +45125,8 @@ function vincularFiltrosRecebimento() {
 
   document.getElementById('menu-recebimento')?.addEventListener('click', async (event) => {
     event.preventDefault();
-    await loadComprasRecebimento();
+    event.stopImmediatePropagation();
+    abrirLocalizarNfePeloMenuRecebimento();
   });
 
   document.getElementById('recebimentoRefreshBtn')?.addEventListener('click', async () => {
@@ -47967,7 +49438,18 @@ function setStatusModalAssociarPedidoNfe(mensagem, tipo = 'info') {
   statusEl.style.background = tema.bg;
   statusEl.style.border = `1px solid ${tema.border}`;
   statusEl.style.color = tema.color;
-  statusEl.textContent = mensagem || '';
+  if (mensagem && /^<div\s/i.test(String(mensagem).trim())) {
+    statusEl.innerHTML = mensagem;
+  } else {
+    statusEl.textContent = mensagem || '';
+  }
+}
+
+function resetBotaoAssociarPedidoNfe(disabled = true) {
+  const btnAssociar = document.getElementById('modalAssociarPedidoBtnConfirmar');
+  if (!btnAssociar) return;
+  btnAssociar.disabled = disabled;
+  btnAssociar.innerHTML = '<i class="fa-solid fa-check"></i> Associar';
 }
 
 async function carregarSeletorCategoriasAssociarNfe(categoriaAtualCodigo, categoriaAtualDescricao) {
@@ -48175,7 +49657,7 @@ function snapshotEdicoesQtdUnidAssociacaoNfe() {
     window.__associarNfeCamposEditados = {};
   }
 
-  previewConteudo.querySelectorAll('.assoc-override-qtd, .assoc-override-unid').forEach((input) => {
+  previewConteudo.querySelectorAll('.assoc-override-qtd, .assoc-override-unid, .assoc-override-valor').forEach((input) => {
     const seq = Number(input.dataset.seq || 0);
     if (!seq) return;
 
@@ -48190,6 +49672,11 @@ function snapshotEdicoesQtdUnidAssociacaoNfe() {
 
     if (input.classList.contains('assoc-override-unid')) {
       window.__associarNfeCamposEditados[seq].cUnidade = String(input.value || '').trim().toUpperCase() || null;
+    }
+
+    if (input.classList.contains('assoc-override-valor')) {
+      const valor = parseFloat(String(input.value || '').replace(/\./g, '').replace(',', '.'));
+      window.__associarNfeCamposEditados[seq].nValTot = Number.isFinite(valor) ? valor : null;
     }
   });
 }
@@ -48336,17 +49823,25 @@ function renderPreviewAssociacaoPedidoNfe(preview) {
   const itensSemMatch = itens.length - itensComMatch;
 
   const divergenciasValor = itens.filter((item) => {
+    if (item?.criterio_match === 'agrupamento_mesmo_item_pedido') return false;
     const nfValor = Number(item?.nf_valor_total || 0);
     const pedidoValor = Number(item?.pedido_valor_total || 0);
     return Number.isFinite(nfValor) && Number.isFinite(pedidoValor) && Math.abs(nfValor - pedidoValor) > 0.01;
   }).length;
   const divergenciasQtdUnid = itens.filter((item) => {
+    if (item?.criterio_match === 'agrupamento_mesmo_item_pedido') return false;
     const unidadePedido = obterUnidadePedidoPreviewAssociacao(item);
     return compararQuantidadePreview(item) || compararUnidadePreview(item, unidadePedido);
   }).length;
+  const gruposMesmoItem = itens.filter((item) => item?.criterio_match === 'agrupamento_mesmo_item_pedido').length;
 
   const totalValorNfPreview = itens.reduce((acc, item) => acc + (Number(item?.nf_valor_total || 0) || 0), 0);
-  const totalValorPedidoPreview = itens.reduce((acc, item) => acc + (Number(item?.pedido_valor_total || 0) || 0), 0);
+  const totalValorPedidoPreview = itens.reduce((acc, item) => {
+    const seq = Number(item?.n_sequencia || 0);
+    const overrideCampos = window.__associarNfeCamposEditados?.[seq] || {};
+    const valorOverride = Number(overrideCampos?.nValTot);
+    return acc + (Number.isFinite(valorOverride) ? valorOverride : (Number(item?.pedido_valor_total || 0) || 0));
+  }, 0);
 
   const resumoHtml = `
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;margin-bottom:10px;">
@@ -48391,19 +49886,25 @@ function renderPreviewAssociacaoPedidoNfe(preview) {
               ? 'Ajuste manual'
             : item?.criterio_match === 'fallback_item_unico_pedido'
               ? 'Item único do pedido'
+            : item?.criterio_match === 'agrupamento_mesmo_item_pedido'
+              ? 'Item agrupado'
               : (encontrou ? 'Match identificado' : 'Sem match');
         const nfValor = Number(item?.nf_valor_total || 0);
         const pedidoValor = Number((isServico ? item?.nf_valor_total : item?.pedido_valor_total) || 0);
+        const agrupadoMesmoItem = item?.criterio_match === 'agrupamento_mesmo_item_pedido';
         const divergiuValor = Number.isFinite(nfValor) && Number.isFinite(pedidoValor) && Math.abs(nfValor - pedidoValor) > 0.01;
         const seq = Number(item?.n_sequencia || 0);
         const overrideCampos = window.__associarNfeCamposEditados?.[seq] || {};
         const qtdPedidoBase = item?.pedido_qtde ?? '-';
         const qtdPedido = isServico ? (item?.nf_qtde ?? '-') : (overrideCampos?.nQtde ?? qtdPedidoBase);
+        const valorPedidoEditado = isServico ? item?.nf_valor_total : (overrideCampos?.nValTot ?? item?.pedido_valor_total);
         const unidadePedidoBase = obterUnidadePedidoPreviewAssociacao(item);
         const unidadePedido = isServico ? (item?.nf_unidade || '-') : (overrideCampos?.cUnidade || unidadePedidoBase);
-        const divergiuQtd = compararQuantidadePreview({ ...item, pedido_qtde: qtdPedido });
-        const divergiuUnidade = compararUnidadePreview(item, unidadePedido);
-        const temDivergencia = divergiuValor || divergiuQtd || divergiuUnidade;
+        const divergiuQtd = !isServico && !agrupadoMesmoItem && compararQuantidadePreview({ ...item, pedido_qtde: qtdPedido });
+        const divergiuUnidade = !isServico && !agrupadoMesmoItem && compararUnidadePreview(item, unidadePedido);
+        const pedidoValorComparacao = Number(valorPedidoEditado || 0);
+        const divergiuValorEditado = !isServico && !agrupadoMesmoItem && Number.isFinite(nfValor) && Number.isFinite(pedidoValorComparacao) && Math.abs(nfValor - pedidoValorComparacao) > 0.01;
+        const temDivergencia = divergiuValorEditado || divergiuQtd || divergiuUnidade;
         const qtdNf = item?.nf_qtde ?? '-';
         const corQtd = divergiuQtd ? '#b91c1c' : '#0f172a';
         const bgQtd = divergiuQtd ? '#fee2e2' : 'transparent';
@@ -48446,7 +49947,11 @@ function renderPreviewAssociacaoPedidoNfe(preview) {
                 ? `<input type="text" class="assoc-override-unid" data-seq="${seq}" value="${escapeHtml(String(unidadePedido || ''))}" style="width:50px;padding:2px 4px;font-size:11px;font-weight:700;color:#b91c1c;border:1px solid #fca5a5;border-radius:4px;text-align:center;background:#fff5f5;text-transform:uppercase;" title="Edite a unidade para associação">`
                 : escapeHtml(String(unidadePedido || '-'))
             }</td>
-            <td style="padding:7px 8px;font-size:11px;text-align:right;font-weight:700;color:${divergiuValor ? '#b91c1c' : '#0f172a'};background:${divergiuValor ? '#fee2e2' : 'transparent'};">${escapeHtml(formatarValorRecebimento(isServico ? item?.nf_valor_total : item?.pedido_valor_total))}</td>
+            <td style="padding:7px 8px;font-size:11px;text-align:right;font-weight:700;color:${divergiuValorEditado ? '#b91c1c' : '#0f172a'};background:${divergiuValorEditado ? '#fee2e2' : 'transparent'};">${
+              divergiuValorEditado
+                ? `<input type="text" class="assoc-override-valor" data-seq="${seq}" value="${escapeHtml(Number(valorPedidoEditado || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }))}" style="width:82px;padding:2px 4px;font-size:11px;font-weight:700;color:#b91c1c;border:1px solid #fca5a5;border-radius:4px;text-align:right;background:#fff5f5;" title="Edite o valor total do item do pedido">`
+                : escapeHtml(formatarValorRecebimento(valorPedidoEditado))
+            }</td>
             <td style="padding:7px 8px;font-size:11px;text-align:center;color:${temDivergencia ? '#b91c1c' : (encontrou ? '#166534' : '#9a3412')};font-weight:700;">${escapeHtml(criterio)}</td>
           </tr>
         `;
@@ -48455,6 +49960,7 @@ function renderPreviewAssociacaoPedidoNfe(preview) {
 
   previewConteudo.innerHTML = `
     ${resumoHtml}
+    ${gruposMesmoItem > 0 ? `<div style="margin:0 0 10px;padding:10px 12px;border:1px solid #bbf7d0;background:#ecfdf5;color:#166534;border-radius:8px;font-size:12px;font-weight:700;"><i class="fa-solid fa-layer-group" style="margin-right:6px;"></i>${gruposMesmoItem} linha(s) da NF-e foram agrupadas no mesmo item do pedido. A conferência usa a soma das linhas, não cada linha isolada.</div>` : ''}
     <div style="margin:0 0 10px;padding:9px 12px;border:1px solid #bae6fd;background:#f0f9ff;color:#0c4a6e;border-radius:8px;font-size:12px;font-weight:700;">Arraste o bloco do item do Pedido (coluna azul com ícone <i class="fa-solid fa-grip-vertical"></i>) para outra linha da NF-e para trocar a associação.</div>
     ${(divergenciasValor > 0 || divergenciasQtdUnid > 0) ? `<div style="margin:0 0 10px;padding:10px 12px;border:1px solid #fecaca;background:#fff1f2;color:#b91c1c;border-radius:8px;font-size:12px;font-weight:700;">Existem divergências de valor, quantidade ou unidade entre a NF-e e o pedido.${divergenciasQtdUnid > 0 ? ' Edite os campos de Qtd/Unid. do Pedido (em vermelho) antes de associar.' : ' Os campos divergentes estão destacados em vermelho.'}</div>` : ''}
     <div style="max-height:340px;overflow:auto;border:1px solid #e2e8f0;border-radius:10px;">
@@ -48490,7 +49996,7 @@ function renderPreviewAssociacaoPedidoNfe(preview) {
 
   previewWrap.style.display = 'block';
   habilitarDragDropAssociacaoPedidoNfe(preview);
-  previewConteudo.querySelectorAll('.assoc-override-qtd, .assoc-override-unid').forEach((input) => {
+  previewConteudo.querySelectorAll('.assoc-override-qtd, .assoc-override-unid, .assoc-override-valor').forEach((input) => {
     input.addEventListener('input', snapshotEdicoesQtdUnidAssociacaoNfe);
     input.addEventListener('change', snapshotEdicoesQtdUnidAssociacaoNfe);
   });
@@ -48644,10 +50150,10 @@ async function previsualizarAssociacaoPedidoNfeOmie() {
         `Prévia gerada. ${qtdSemMatch} item(ns) da NF-e não foram mapeados ao pedido — revise antes de confirmar.`,
         'erro'
       );
-      btnAssociar.disabled = true;
+      resetBotaoAssociarPedidoNfe(true);
     } else {
       setStatusModalAssociarPedidoNfe('Prévia gerada. Itens prontos para associação.', 'sucesso');
-      btnAssociar.disabled = false;
+      resetBotaoAssociarPedidoNfe(false);
     }
   } catch (err) {
     setStatusModalAssociarPedidoNfe(err?.message || 'Erro ao gerar prévia de associação.', 'erro');
@@ -48728,6 +50234,83 @@ async function localizarNfeParaAssociacaoOmie() {
   }
 }
 
+// ── Pré-visualização de etiqueta de recebimento (ZPL → PDF via backend) ──
+async function imprimirEtiquetaRecebimentoPreview() {
+  const nfe    = String(document.getElementById('modalAssociarNfeNumeroInput')?.value || '').trim();
+  const pedido = String(document.getElementById('modalAssociarPedidoNumeroInput')?.value || '').trim();
+
+  if (!nfe) {
+    setStatusModalAssociarPedidoNfe('Informe o número da NF-e antes de imprimir.', 'erro');
+    return;
+  }
+  if (!pedido) {
+    setStatusModalAssociarPedidoNfe('Informe o número do pedido antes de imprimir.', 'erro');
+    return;
+  }
+
+  const preview = window.__associarNfePreviewAtual?.preview || {};
+  const itensPreview = Array.isArray(preview.itens) ? preview.itens : [];
+
+  // Coleta todos os itens do pedido que possuem código de produto identificado
+  const itensParaImprimir = itensPreview
+    .filter(it => it?.pedido_codigo_produto)
+    .map(it => ({
+      codigo_produto:    String(it.pedido_codigo_produto  || '').trim(),
+      descricao_produto: String(it.pedido_descricao_produto || '').trim(),
+      qtd:     String(it.pedido_qtde  ?? it.nf_qtde  ?? ''),
+      unidade: String(it.pedido_unidade ?? it.nf_unidade ?? '').trim(),
+    }));
+
+  if (itensParaImprimir.length === 0) {
+    setStatusModalAssociarPedidoNfe('Nenhum item com código de produto identificado. Gere a prévia antes de imprimir.', 'erro');
+    return;
+  }
+
+  const payload = { nfe, pedido, itens: itensParaImprimir, usuario: (document.getElementById('userNameDisplay')?.textContent || '').trim() };
+
+  const btn = document.getElementById('modalAssociarPedidoBtnImprimir');
+  const textoOriginal = btn ? btn.innerHTML : '';
+  if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>'; }
+
+  try {
+    const resp = await fetch('/api/etiquetas/recebimento/preview', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify(payload),
+    });
+
+    // 409 = todas as etiquetas já existem no banco
+    if (resp.status === 409) {
+      const err = await resp.json().catch(() => ({}));
+      setStatusModalAssociarPedidoNfe(err?.error || 'Etiquetas já geradas anteriormente para esta NF-e/Pedido.', 'info');
+      return;
+    }
+
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      throw new Error(err?.error || `Erro ${resp.status}`);
+    }
+
+    const geradas  = resp.headers.get('X-Etiquetas-Geradas')  || itensParaImprimir.length;
+    const ignoradas = resp.headers.get('X-Etiquetas-Ignoradas') || '0';
+
+    const blob = await resp.blob();
+    const url  = URL.createObjectURL(blob);
+    window.open(url, '_blank');
+    setTimeout(() => URL.revokeObjectURL(url), 5 * 60 * 1000);
+
+    const msg = Number(ignoradas) > 0
+      ? `${geradas} etiqueta(s) gerada(s). ${ignoradas} já existia(m) e foram ignoradas.`
+      : `${geradas} etiqueta(s) gerada(s) com sucesso.`;
+    setStatusModalAssociarPedidoNfe(msg, 'sucesso');
+  } catch (err) {
+    setStatusModalAssociarPedidoNfe('Erro ao gerar etiquetas: ' + (err?.message || err), 'erro');
+  } finally {
+    if (btn) { btn.disabled = false; btn.innerHTML = textoOriginal || '<i class="fa-solid fa-print"></i> Imprimir'; }
+  }
+}
+
 async function confirmarAssociacaoPedidoNfeOmie() {
   const nfeInput = document.getElementById('modalAssociarNfeNumeroInput');
   const pedidoInput = document.getElementById('modalAssociarPedidoNumeroInput');
@@ -48769,7 +50352,7 @@ async function confirmarAssociacaoPedidoNfeOmie() {
     return;
   }
 
-  const textoOriginal = btnAssociar.innerHTML;
+  let associacaoConcluida = false;
   btnAssociar.disabled = true;
   btnAssociar.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
   setStatusModalAssociarPedidoNfe('Associando NF-e ao pedido na Omie...', 'info');
@@ -48804,7 +50387,7 @@ async function confirmarAssociacaoPedidoNfeOmie() {
 
     const previewConteudo = document.getElementById('modalAssociarPedidoNfePreviewConteudo');
     if (previewConteudo) {
-      previewConteudo.querySelectorAll('.assoc-override-qtd, .assoc-override-unid').forEach(input => {
+      previewConteudo.querySelectorAll('.assoc-override-qtd, .assoc-override-unid, .assoc-override-valor').forEach(input => {
         const seq = Number(input.dataset.seq || 0);
         if (!seq) return;
         let entry = itensOverrideMap.get(seq);
@@ -48817,6 +50400,10 @@ async function confirmarAssociacaoPedidoNfeOmie() {
         }
         if (input.classList.contains('assoc-override-unid')) {
           entry.cUnidade = String(input.value || '').trim().toUpperCase() || null;
+        }
+        if (input.classList.contains('assoc-override-valor')) {
+          const valor = parseFloat(String(input.value || '').replace(/\./g, '').replace(',', '.'));
+          entry.nValTot = Number.isFinite(valor) ? valor : null;
         }
       });
     }
@@ -48844,11 +50431,74 @@ async function confirmarAssociacaoPedidoNfeOmie() {
     if (!resp.ok || !data?.ok) {
       throw new Error(data?.error || `Falha ao associar NF-e (HTTP ${resp.status})`);
     }
+    associacaoConcluida = true;
+
+    // ── Registra etiquetas automaticamente após associar ─────────────────
+    try {
+      const _previewEtq = window.__associarNfePreviewAtual?.preview || {};
+      const _itensEtq   = Array.isArray(_previewEtq.itens) ? _previewEtq.itens : [];
+      const _itensParaEtq = _itensEtq
+        .filter(it => it?.pedido_codigo_produto)
+        .map(it => ({
+          codigo_produto:    String(it.pedido_codigo_produto  || '').trim(),
+          descricao_produto: String(it.pedido_descricao_produto || '').trim(),
+          qtd:     String(it.pedido_qtde  ?? it.nf_qtde  ?? ''),
+          unidade: String(it.pedido_unidade ?? it.nf_unidade ?? '').trim(),
+        }));
+      if (_itensParaEtq.length > 0) {
+        fetch('/api/etiquetas/recebimento/preview', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ nfe: numeroNfe, pedido: numeroPedido, itens: _itensParaEtq, usuario: (document.getElementById('userNameDisplay')?.textContent || '').trim() }),
+        }).then(async r => {
+          if (r.ok) {
+            const geradas = r.headers.get('X-Etiquetas-Geradas') || _itensParaEtq.length;
+            console.log(`[etiquetas] ${geradas} etiqueta(s) registrada(s) para NF-e ${numeroNfe} / pedido ${numeroPedido}`);
+          }
+          // descarta o PDF — apenas registra no banco
+        }).catch(e => console.warn('[etiquetas] falha ao registrar etiquetas:', e?.message));
+      }
+    } catch (_etqErr) {
+      console.warn('[etiquetas] falha ao preparar etiquetas:', _etqErr?.message);
+    }
+    // ─────────────────────────────────────────────────────────────────────
 
     setStatusModalAssociarPedidoNfe(
-      data?.message || `NF-e ${numeroNfe} associada com sucesso ao pedido ${numeroPedido}.`,
+      `<div style="display:flex;align-items:flex-start;gap:12px;">
+        <i class="fa-solid fa-circle-check" style="font-size:26px;color:#16a34a;margin-top:2px;"></i>
+        <div style="flex:1;">
+          <div style="font-size:17px;font-weight:800;line-height:1.2;">NF-e associada com sucesso</div>
+          <div style="font-size:13px;margin-top:5px;">${escapeHtml(data?.message || `NF-e ${numeroNfe} associada ao pedido ${numeroPedido}.`)}</div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;">
+            <button type="button" id="modalAssociarNovaBuscaBtn" style="border:none;border-radius:8px;background:#7c3aed;color:#fff;font-weight:700;padding:9px 13px;cursor:pointer;display:inline-flex;align-items:center;gap:6px;">
+              <i class="fa-solid fa-magnifying-glass"></i> Buscar outra NF-e
+            </button>
+            <button type="button" id="modalAssociarFecharSucessoBtn" style="border:1px solid #86efac;border-radius:8px;background:#ffffff;color:#166534;font-weight:700;padding:9px 13px;cursor:pointer;">
+              Fechar
+            </button>
+          </div>
+        </div>
+      </div>`,
       'sucesso'
     );
+
+    document.getElementById('modalAssociarNovaBuscaBtn')?.addEventListener('click', () => {
+      fecharModalAssociarPedidoNfe();
+      if (typeof window.abrirModalLocalizarNfe === 'function') {
+        window.abrirModalLocalizarNfe();
+      }
+      const inputLocalizar = document.getElementById('modalLocalizarNfeInput');
+      if (inputLocalizar) {
+        inputLocalizar.value = '';
+        inputLocalizar.focus();
+      }
+      const conteudoLocalizar = document.getElementById('modalLocalizarNfeConteudo');
+      if (conteudoLocalizar) {
+        conteudoLocalizar.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;color:#94a3b8;font-size:13px;padding:24px 0;gap:8px;"><i class="fa-solid fa-file-invoice"></i><span>Digite o numero da NF-e e clique em Buscar.</span></div>';
+      }
+    });
+    document.getElementById('modalAssociarFecharSucessoBtn')?.addEventListener('click', fecharModalAssociarPedidoNfe);
 
     if (typeof loadComprasRecebimento === 'function') {
       loadComprasRecebimento(true).catch(() => {});
@@ -48859,8 +50509,12 @@ async function confirmarAssociacaoPedidoNfeOmie() {
   } catch (err) {
     setStatusModalAssociarPedidoNfe(err?.message || 'Erro ao associar NF-e ao pedido.', 'erro');
   } finally {
-    btnAssociar.disabled = false;
-    btnAssociar.innerHTML = textoOriginal;
+    if (associacaoConcluida) {
+      btnAssociar.disabled = true;
+      btnAssociar.innerHTML = '<i class="fa-solid fa-circle-check"></i> Associado';
+    } else {
+      resetBotaoAssociarPedidoNfe(false);
+    }
   }
 }
 
@@ -48950,7 +50604,7 @@ function criarModalAssociarPedidoNfeSeNecessario() {
   document.getElementById('modalAssociarPedidoBtnConfirmar')?.addEventListener('click', confirmarAssociacaoPedidoNfeOmie);
 
   const btnAssociar = document.getElementById('modalAssociarPedidoBtnConfirmar');
-  if (btnAssociar) btnAssociar.disabled = true;
+  resetBotaoAssociarPedidoNfe(true);
 
   const inputNfe = document.getElementById('modalAssociarNfeNumeroInput');
   inputNfe?.addEventListener('keydown', (ev) => {
@@ -48962,8 +50616,7 @@ function criarModalAssociarPedidoNfeSeNecessario() {
 
   const inputPedido = document.getElementById('modalAssociarPedidoNumeroInput');
   inputPedido?.addEventListener('input', () => {
-    const btnAssociar = document.getElementById('modalAssociarPedidoBtnConfirmar');
-    if (btnAssociar) btnAssociar.disabled = true;
+    resetBotaoAssociarPedidoNfe(true);
     if (window.__associarNfePreviewAtual) window.__associarNfePreviewAtual = null;
   });
   inputPedido?.addEventListener('keydown', (ev) => {
@@ -49007,6 +50660,7 @@ async function abrirModalAssociarPedidoNfeComContexto(contexto = {}) {
   if (pedidoInput) pedidoInput.value = String(contexto?.numero_pedido || '').trim();
   if (blocoPedido) blocoPedido.style.display = 'block';
   if (btnAssociar) btnAssociar.disabled = true;
+  resetBotaoAssociarPedidoNfe(true);
 
   setStatusModalAssociarPedidoNfe('Prévia profissional carregando para revisão da vinculação...', 'info');
 
@@ -53804,6 +55458,8 @@ async function ensureAuthVisibility(){
 
     if (st.loggedIn) {
       await applyCurrentUserPermissionsToUI();
+      // Notifica módulos que dependem do login (ex: atalhos flutuantes)
+      document.dispatchEvent(new CustomEvent('auth:loggedIn', { detail: window.__sessionUser }));
       
       // Se estava deslogado E agora está logado, inicia monitoramento
       if (!wasLoggedBefore && isLoggedNow && typeof startVersionCheckLoop === 'function') {
@@ -58880,9 +60536,29 @@ function _agendaGerarPdfAta() {
 
   if (!agendaAtasCache.length) { alert('Nenhuma anotação registrada para gerar PDF.'); return; }
 
+  // Aplicar o mesmo filtro ativo na tela
+  const modoVisualizacao = agendaAtaVisualizacaoModo || 'tudo';
+  let atasParaPdf = [...agendaAtasCache];
+  let filtroDescricao = '';
+
+  if (modoVisualizacao === 'datas' && agendaAtaDataSelecionada) {
+    atasParaPdf = atasParaPdf.filter((a) => String(a.criado_em_fmt || '').trim() === agendaAtaDataSelecionada);
+    filtroDescricao = `Filtro: Data ${agendaAtaDataSelecionada}`;
+  } else if (modoVisualizacao === 'atividades') {
+    atasParaPdf = atasParaPdf
+      .filter((a) => {
+        const st = _agendaAtaStatusChecklist(a);
+        return agendaAtaAtividadesAba === 'executadas' ? st.executadas > 0 : st.pendentes > 0;
+      })
+      .map((a) => _agendaFiltrarConteudoAtaPorStatus(a, agendaAtaAtividadesAba));
+    filtroDescricao = `Filtro: Atividades ${agendaAtaAtividadesAba === 'executadas' ? 'executadas' : 'pendentes'}`;
+  }
+
+  if (!atasParaPdf.length) { alert('Nenhuma anotação encontrada para o filtro selecionado.'); return; }
+
   // Agrupa por tema na mesma ordem de exibição
   const porTema = {};
-  for (const a of agendaAtasCache) {
+  for (const a of atasParaPdf) {
     const t = String(a.tema || 'Geral').trim();
     if (!porTema[t]) porTema[t] = [];
     porTema[t].push(a);
@@ -58920,6 +60596,7 @@ function _agendaGerarPdfAta() {
   });
 
   const agora = new Date().toLocaleString('pt-BR');
+  const subtitCompleto = filtroDescricao ? `${subtit}${subtit ? ' &mdash; ' : ''}${e(filtroDescricao)}` : e(subtit);
   const html = `<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8">
 <title>${e(titulo)}</title><style>
 body{font-family:Arial,sans-serif;max-width:820px;margin:0 auto;padding:32px;color:#1e293b;font-size:13px;}
@@ -58934,7 +60611,7 @@ h3{font-size:14px;color:#1e3a5f;border-bottom:2px solid #93c5fd;padding-bottom:4
 @media print{body{padding:16px;}}
 </style></head><body>
 <h1>${e(titulo)}</h1>
-<p class="subtit">${e(subtit)}</p>
+<p class="subtit">${subtitCompleto}</p>
 ${corpo}
 <p class="footer">Gerado em ${agora}</p>
 <script>window.onload=()=>window.print();<\/script>
@@ -60517,20 +62194,23 @@ document.addEventListener('DOMContentLoaded', async () => {
 
 // Menu flutuante global: Produtos no mínimo (abre Lista de produtos filtrada)
 document.addEventListener('DOMContentLoaded', () => {
-  const btn = document.getElementById('btnFloatingMinimo');
+  // Botão no menu lateral substituiu o floating — busca pelo novo id
+  const btn = document.getElementById('menu-estoque-minimo');
   if (!btn) return;
 
-  const badge = document.getElementById('floatingMinimoBadge');
+  // Badge no item de menu lateral
+  const sideBadge = document.getElementById('sideMinimoBadge');
 
   // Cache do último resultado para reutilizar entre clique e badge
   let _ultimosCodigos = null;
   let _carregando = false;
 
   function atualizaBadge(qtd) {
-    if (!badge) return;
     const n = Number(qtd) || 0;
-    badge.textContent = n > 999 ? '999+' : String(n);
-    badge.hidden = n <= 0;
+    if (sideBadge) {
+      sideBadge.textContent = n > 999 ? '999+' : String(n);
+      sideBadge.hidden = n <= 0;
+    }
   }
 
   async function carregaMinimos({ silencioso = false } = {}) {
@@ -60561,8 +62241,8 @@ document.addEventListener('DOMContentLoaded', () => {
   // Atualiza badge a cada 5 minutos sem incomodar o usuário
   setInterval(() => carregaMinimos({ silencioso: true }), 5 * 60 * 1000);
 
-  btn.addEventListener('click', async () => {
-    btn.disabled = true;
+  async function _abrirEstoqueMinimo(btnEl) {
+    if (btnEl) btnEl.disabled = true;
     try {
       const codigosNoMinimo = await carregaMinimos();
       if (!codigosNoMinimo) return;
@@ -60586,9 +62266,15 @@ document.addEventListener('DOMContentLoaded', () => {
         );
       }
     } finally {
-      btn.disabled = false;
+      if (btnEl) btnEl.disabled = false;
     }
-  });
+  }
+
+  btn.addEventListener('click', (e) => { e.preventDefault(); _abrirEstoqueMinimo(btn); });
+
+  // Expor para que atalhos flutuantes gerados por drag-and-drop possam chamar a mesma ação
+  window.__atalhoAction = window.__atalhoAction || {};
+  window.__atalhoAction['side:log:estoque-minimo'] = () => _abrirEstoqueMinimo(null);
 });
 
 // ===================== MODAL MOVIMENTAÇÃO DE ESTOQUE =====================
@@ -60898,12 +62584,9 @@ document.addEventListener('DOMContentLoaded', () => {
           <select id="modalCarrinhoSepRequester" style="background:#2a2a2a;color:#f0f0f0;border:1px solid #3a3a3a;border-radius:10px;padding:8px 12px;font-size:.9rem;width:100%;"></select>
         </div>
         <div style="display:flex;flex-direction:column;gap:5px;min-width:0;">
-          <label style="color:#d1d5db;font-size:.85rem;font-weight:600;">Motivo da solicitação</label>
+          <label style="color:#d1d5db;font-size:.85rem;font-weight:600;">Local de estoque</label>
           <select id="modalCarrinhoSepMotivo" style="background:#2a2a2a;color:#f0f0f0;border:1px solid #3a3a3a;border-radius:10px;padding:8px 12px;font-size:.9rem;width:100%;">
-            <option value="Produção" selected>Produção</option>
-            <option value="Engenharia">Engenharia</option>
-            <option value="venda">venda</option>
-            <option value="Assistencia tecnica">Assistencia tecnica</option>
+            <option value="">— carregando... —</option>
           </select>
         </div>
         <div style="display:flex;flex-direction:column;gap:6px;">
@@ -61143,6 +62826,30 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
+  async function _carregarLocaisEstoqueSep() {
+    const sel = document.getElementById('modalCarrinhoSepMotivo');
+    if (!sel) return;
+    sel.innerHTML = '<option value="">— carregando... —</option>';
+    try {
+      let locais = window.__locaisEstoqueCache;
+      if (!locais) {
+        const resp = await fetch('/api/armazem/locais?fonte=omie', { credentials: 'include' });
+        const data = await resp.json();
+        locais = (data.locais || []).filter(l => l.inativo !== 'S');
+        window.__locaisEstoqueCache = locais;
+      }
+      if (!locais.length) {
+        sel.innerHTML = '<option value="">— nenhum local encontrado —</option>';
+        return;
+      }
+      sel.innerHTML = '<option value="">\u2014 Selecione o local \u2014</option>' + locais
+        .map(l => `<option value="${l.codigo_local_estoque}" data-descricao="${l.descricao}">${l.nIdent ? l.nIdent + '. ' : ''}${l.descricao}</option>`)
+        .join('');
+    } catch {
+      sel.innerHTML = '<option value="">— erro ao carregar —</option>';
+    }
+  }
+
   async function _carregarUsuarios() {
     const sel = document.getElementById('modalCarrinhoSepRequester');
     const sendBtn = document.getElementById('modalCarrinhoSepSend');
@@ -61206,7 +62913,8 @@ document.addEventListener('DOMContentLoaded', () => {
           }
         } catch { _renderItens([]); }
       })(),
-      _carregarUsuarios()
+      _carregarUsuarios(),
+      _carregarLocaisEstoqueSep()
     ]);
   }
 
@@ -61219,6 +62927,14 @@ document.addEventListener('DOMContentLoaded', () => {
       return;
     }
 
+    const selLocal = document.getElementById('modalCarrinhoSepMotivo');
+    const localEstoque = selLocal?.value || '';
+    const localEstoqueNome = selLocal?.options[selLocal.selectedIndex]?.text || '';
+    if (!localEstoque) {
+      alert('Selecione o local de estoque.');
+      return;
+    }
+
     const btn = document.getElementById('modalCarrinhoSepSend');
     btn.disabled = true;
     btn.textContent = 'Enviando...';
@@ -61228,8 +62944,9 @@ document.addEventListener('DOMContentLoaded', () => {
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
         body: JSON.stringify({
-          solicitado_para: solicitadoPara,
-          motivo:         document.getElementById('modalCarrinhoSepMotivo')?.value || 'Produção',
+          solicitado_para:    solicitadoPara,
+          local_estoque:      localEstoque,
+          local_estoque_nome: localEstoqueNome,
           data_prevista:   document.getElementById('modalCarrinhoSepDate').value || null,
           horario:         document.getElementById('modalCarrinhoSepHorario').value,
           observacao:      document.getElementById('modalCarrinhoSepObs').value.trim() || null
@@ -63755,4 +65472,317 @@ window.initOscilacaoEstoque = (function () {
     atualizarToggleBtn();
     carregar();
   };
+})();
+
+// ========== SISTEMA DE ATALHOS FLUTUANTES (DRAG & DROP) ==========
+(function () {
+  'use strict';
+
+  const zone      = document.getElementById('floatingShortcutZone');
+  const container = document.getElementById('shortcutItemsContainer');
+  const dropTarget = document.getElementById('shortcutDropTarget');
+  const btnGerenciar = document.getElementById('btnGerenciarAtalhos');
+  const modal        = document.getElementById('modalGerenciarAtalhos');
+  const btnFecharModal = document.getElementById('btnFecharModalAtalhos');
+  const modalList    = document.getElementById('shortcutModalList');
+
+  if (!zone || !container || !dropTarget) return;
+
+  // ── Mapa de observers de badge: nav_key → MutationObserver ──
+  const _badgeObservers = new Map();
+
+  // Busca o elemento de badge dentro do item de menu fonte
+  function _sourceBadgeEl(navSelector) {
+    if (!navSelector) return null;
+    const menuEl = document.querySelector(navSelector);
+    if (!menuEl) return null;
+    // Procura qualquer span/element com classe *badge* dentro do item
+    return menuEl.querySelector('[class*="badge"]') || null;
+  }
+
+  // Sincroniza ou cria badge no botão de atalho a partir do source
+  function _sincBadge(btn, sourceBadge) {
+    let shortcutBadge = btn.querySelector('.shortcut-item-badge');
+
+    if (!sourceBadge) {
+      if (shortcutBadge) shortcutBadge.remove();
+      return;
+    }
+
+    const isHidden = sourceBadge.hidden || sourceBadge.style.display === 'none';
+    const texto = sourceBadge.textContent.trim();
+
+    if (!shortcutBadge) {
+      shortcutBadge = document.createElement('span');
+      shortcutBadge.className = 'shortcut-item-badge';
+      btn.appendChild(shortcutBadge);
+    }
+
+    shortcutBadge.textContent = texto;
+    shortcutBadge.hidden = isHidden || !texto || texto === '0';
+  }
+
+  // Inicia MutationObserver no badge fonte para sincronizar em tempo real
+  function _observarBadge(btn, navKey, navSelector) {
+    if (_badgeObservers.has(navKey)) {
+      _badgeObservers.get(navKey).disconnect();
+    }
+
+    const sourceBadge = _sourceBadgeEl(navSelector);
+    if (!sourceBadge) return;
+
+    // Sincroniza imediatamente
+    _sincBadge(btn, sourceBadge);
+
+    // Observa mudanças futuras no badge fonte (texto e atributo hidden)
+    const obs = new MutationObserver(() => _sincBadge(btn, sourceBadge));
+    obs.observe(sourceBadge, { childList: true, characterData: true, subtree: true, attributes: true, attributeFilter: ['hidden', 'style'] });
+    _badgeObservers.set(navKey, obs);
+  }
+
+  // ── Renderiza um botão de atalho ──
+  function criarBotaoAtalho(atalho) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'shortcut-btn';
+    btn.dataset.id = atalho.id;
+    btn.dataset.navKey = atalho.nav_key;
+
+    const iconClass = atalho.icon_class || 'fa-solid fa-star';
+    btn.innerHTML = `<i class="${iconClass}"></i><button class="shortcut-btn-remove" title="Remover atalho" aria-label="Remover atalho">×</button><span class="shortcut-btn-tooltip">${atalho.nav_label}</span>`;
+
+    // Clique → executa ação
+    btn.addEventListener('click', (e) => {
+      if (e.target.classList.contains('shortcut-btn-remove')) return;
+      const selector = atalho.nav_selector;
+      const action = window.__atalhoAction && window.__atalhoAction[atalho.nav_key];
+      if (action) {
+        action();
+      } else if (selector) {
+        const el = document.querySelector(selector);
+        if (el) el.click();
+      }
+    });
+
+    // Botão remover
+    btn.querySelector('.shortcut-btn-remove').addEventListener('click', async (e) => {
+      e.stopPropagation();
+      _badgeObservers.get(atalho.nav_key)?.disconnect();
+      _badgeObservers.delete(atalho.nav_key);
+      await removerAtalho(atalho.id, btn);
+    });
+
+    // Iniciar sincronização de badge (fonte pode não existir ainda → aguarda um frame)
+    setTimeout(() => _observarBadge(btn, atalho.nav_key, atalho.nav_selector), 0);
+
+    return btn;
+  }
+
+  // ── Carrega atalhos do servidor ──
+  async function carregarAtalhos() {
+    if (!window.__sessionUser?.id) return;
+    try {
+      const resp = await fetch('/api/user/atalhos', { credentials: 'include' });
+      if (!resp.ok) return;
+      const data = await resp.json();
+      container.innerHTML = '';
+      // API retorna array direto
+      const lista = Array.isArray(data) ? data : (data.atalhos || []);
+      lista.forEach(a => container.appendChild(criarBotaoAtalho(a)));
+    } catch (e) {
+      console.error('[atalhos] erro ao carregar:', e.message);
+    }
+  }
+
+  // ── Salva atalho no servidor ──
+  async function salvarAtalho(navKey, navLabel, navSelector, iconClass) {
+    try {
+      const resp = await fetch('/api/user/atalhos', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ nav_key: navKey, nav_label: navLabel, nav_selector: navSelector, icon_class: iconClass })
+      });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data.error || 'Erro ao salvar');
+      // API retorna o objeto do atalho diretamente (não { ok, atalho })
+      return data.id ? data : (data.atalho || null);
+    } catch (e) {
+      console.error('[atalhos] erro ao salvar:', e.message);
+      return null;
+    }
+  }
+
+  // ── Remove atalho do servidor ──
+  async function removerAtalho(id, btnEl) {
+    try {
+      const resp = await fetch(`/api/user/atalhos/${id}`, { method: 'DELETE', credentials: 'include' });
+      const data = await resp.json();
+      if (data.ok) btnEl.remove();
+    } catch (e) {
+      console.error('[atalhos] erro ao remover:', e.message);
+    }
+  }
+
+  // ── Modal de gerenciamento ──
+  function _navKeyAtual() {
+    const set = new Set();
+    container.querySelectorAll('[data-nav-key]').forEach(b => set.add(b.dataset.navKey));
+    return set;
+  }
+
+  function abrirModalGerenciar() {
+    if (!modal) return;
+    modalList.innerHTML = '';
+
+    const pinados = _navKeyAtual();
+    let grupoAtual = '';
+
+    document.querySelectorAll('.sidebar-content .menu-link[data-nav-key]').forEach(link => {
+      const navKey   = link.dataset.navKey;
+      const navLabel = link.dataset.navLabel || link.textContent.trim().replace(/\s+/g, ' ').split(/\s+\d+$/)[0].trim();
+      const iconEl   = link.querySelector('i');
+      const iconClass = iconEl ? iconEl.className : 'fa-solid fa-star';
+      const navSelector = link.dataset.navSelector || ('#' + link.id);
+
+      // Título do grupo (parent)
+      const parentKey = link.dataset.navParent || '';
+      if (parentKey !== grupoAtual) {
+        grupoAtual = parentKey;
+        const groupEl = document.querySelector(`.side-title[data-nav-key="${parentKey}"]`);
+        const groupLabel = groupEl ? groupEl.textContent.trim() : parentKey;
+        if (groupLabel) {
+          const sep = document.createElement('div');
+          sep.className = 'shortcut-modal-group-title';
+          sep.textContent = groupLabel;
+          modalList.appendChild(sep);
+        }
+      }
+
+      const item = document.createElement('div');
+      item.className = 'shortcut-modal-item' + (pinados.has(navKey) ? ' is-pinned' : '');
+      item.innerHTML = `<i class="item-icon ${iconClass}"></i><span class="item-label">${navLabel}</span><span class="item-toggle">✓</span>`;
+
+      item.addEventListener('click', async () => {
+        const isPinado = item.classList.contains('is-pinned');
+        if (isPinado) {
+          // Remover: encontra o botão no container
+          const btnExistente = container.querySelector(`[data-nav-key="${CSS.escape(navKey)}"]`);
+          if (btnExistente) {
+            const id = parseInt(btnExistente.dataset.id, 10);
+            _badgeObservers.get(navKey)?.disconnect();
+            _badgeObservers.delete(navKey);
+            await removerAtalho(id, btnExistente);
+          }
+          item.classList.remove('is-pinned');
+        } else {
+          // Adicionar
+          const atalho = await salvarAtalho(navKey, navLabel, navSelector, iconClass);
+          if (atalho) {
+            container.appendChild(criarBotaoAtalho(atalho));
+            item.classList.add('is-pinned');
+          }
+        }
+      });
+
+      modalList.appendChild(item);
+    });
+
+    modal.hidden = false;
+  }
+
+  function fecharModalGerenciar() {
+    if (modal) modal.hidden = true;
+  }
+
+  if (btnGerenciar) btnGerenciar.addEventListener('click', abrirModalGerenciar);
+  if (btnFecharModal) btnFecharModal.addEventListener('click', fecharModalGerenciar);
+  // Fechar ao clicar no overlay (fora do card)
+  if (modal) {
+    modal.addEventListener('click', (e) => {
+      if (e.target === modal) fecharModalGerenciar();
+    });
+  }
+
+  // ── Drag & Drop nos itens do menu lateral ──
+  let _dragData = null;
+
+  function habilitarDragNoMenu() {
+    // Seletor correto: .sidebar-content é o container real do menu lateral
+    document.querySelectorAll('.sidebar-content .menu-link[data-nav-key]').forEach(link => {
+      if (link.getAttribute('draggable') === 'true') return; // evita duplicar listeners
+      link.setAttribute('draggable', 'true');
+
+      link.addEventListener('dragstart', (e) => {
+        const iconEl = link.querySelector('i');
+        const iconClass = iconEl ? iconEl.className : 'fa-solid fa-star';
+        _dragData = {
+          nav_key:      link.dataset.navKey,
+          nav_label:    link.dataset.navLabel || link.textContent.trim().replace(/\s+/g, ' '),
+          nav_selector: link.dataset.navSelector || ('#' + link.id),
+          icon_class:   iconClass
+        };
+        e.dataTransfer.effectAllowed = 'copy';
+        document.body.classList.add('dragging-menu-item');
+      });
+
+      link.addEventListener('dragend', () => {
+        document.body.classList.remove('dragging-menu-item');
+        dropTarget.classList.remove('drag-over');
+        _dragData = null;
+      });
+    });
+  }
+
+  // ── Eventos no drop target ──
+  dropTarget.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'copy';
+    dropTarget.classList.add('drag-over');
+  });
+
+  dropTarget.addEventListener('dragleave', () => {
+    dropTarget.classList.remove('drag-over');
+  });
+
+  dropTarget.addEventListener('drop', async (e) => {
+    e.preventDefault();
+    dropTarget.classList.remove('drag-over');
+    document.body.classList.remove('dragging-menu-item');
+    if (!_dragData) return;
+
+    // Verifica se atalho já existe
+    const jaExiste = container.querySelector(`[data-nav-key="${CSS.escape(_dragData.nav_key)}"]`);
+    if (jaExiste) {
+      jaExiste.animate([{ transform: 'scale(1.2)' }, { transform: 'scale(1)' }], { duration: 300 });
+      _dragData = null;
+      return;
+    }
+
+    const atalho = await salvarAtalho(_dragData.nav_key, _dragData.nav_label, _dragData.nav_selector, _dragData.icon_class);
+    if (atalho) container.appendChild(criarBotaoAtalho(atalho));
+    _dragData = null;
+  });
+
+  // ── Inicialização ──
+  // O script está no fim do arquivo, DOM já carregou — usa setTimeout curto como microtask fence
+  function init() {
+    carregarAtalhos();
+    habilitarDragNoMenu();
+  }
+
+  function tentarInit() {
+    if (window.__sessionUser?.id) {
+      init();
+    } else {
+      // Usuário ainda não logou: fica escutando o evento customizado que o sistema de auth dispara
+      document.addEventListener('auth:loggedIn', () => init(), { once: true });
+      // Fallback: verifica após 2 s caso o evento não seja disparado
+      setTimeout(() => { if (window.__sessionUser?.id && !zone.dataset.atalhoInited) init(); }, 2000);
+    }
+    zone.dataset.atalhoInited = '1';
+  }
+
+  // DOM já disponível no fim do arquivo
+  setTimeout(tentarInit, 0);
 })();

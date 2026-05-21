@@ -11,10 +11,12 @@ async function omieCall(url, body, options = {}) {
     return p;
   })();
 
-  console.groupCollapsed('[omieCall] →', url);
-  console.log('headers:', { 'Content-Type': 'application/json' });
-  console.log('body (mask):', bodyMasked);
-  console.groupEnd();
+  const sep = '─'.repeat(60);
+  console.log(`\n┌${sep}`);
+  console.log(`│ [omieCall] REQUEST  →  ${url}`);
+  console.log(`│ call: ${body?.call || '(sem call)'}`);
+  console.log(`│ payload:\n${JSON.stringify(bodyMasked, null, 2).split('\n').map(l => '│   ' + l).join('\n')}`);
+  console.log(`└${sep}`);
 
   const aguardar = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   const retryRedundant = options?.retryRedundant !== false;
@@ -41,18 +43,21 @@ async function omieCall(url, body, options = {}) {
         const match = String(faultString || text || '').match(/Aguarde\s+(\d+)\s+segundos?/i);
         const segundos = match ? Number(match[1]) : 5;
         const esperaMs = Math.max(1000, Math.min((Number.isFinite(segundos) ? segundos : 5) * 1000, 60000));
-        console.warn('[omieCall] REDUNDANT detectado, aguardando retry...', { url, tentativa, esperaMs });
+        console.warn(`\n┌${sep}\n│ [omieCall] ⚠ REDUNDANT — retry em ${esperaMs}ms  (tentativa ${tentativa})\n│ url: ${url}\n└${sep}`);
         await aguardar(esperaMs);
         continue;
       }
 
-      console.error('[omieCall] ←', url, { status: res.status, ms, body: json || text });
+      console.error(`\n┌${sep}\n│ [omieCall] ERRO ✗  ${url}  status=${res.status}  ${ms}ms\n│ resposta:\n${JSON.stringify(json || text, null, 2).split('\n').map(l => '│   ' + l).join('\n')}\n└${sep}`);
       const err = new Error(json ? JSON.stringify(json) : text);
       err.status = res.status;
       throw err;
     }
 
-    console.log('[omieCall] ←', url, { status: res.status, ms, body: json });
+    console.log(`\n┌${sep}`);
+    console.log(`│ [omieCall] RESPOSTA ✓  ${url}  status=${res.status}  ${ms}ms`);
+    console.log(`│ body:\n${JSON.stringify(json, null, 2).split('\n').map(l => '│   ' + l).join('\n')}`);
+    console.log(`└${sep}`);
     return json || {};
   }
 

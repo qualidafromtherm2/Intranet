@@ -28,10 +28,9 @@ Thumbs.db
 .env.development.local
 .env.test.local
 .env.production.local
-etiquetas/*.zpl
-etiquetas/*.zpl
-etiquetas/*.zpl
-etiquetas/*.zpl
+etiquetas/**/*.zpl
+server.js.backup_*
+*.py
 
 # nunca versionar o antigo cache
 data/kanban_preparacao.json
@@ -64,3 +63,6 @@ cookies.txt
 *.p12
 intranet_db_*.sql
 data/users.json
+
+# Agente de Impressão — binário compilado (hospedado no Supabase)
+agente_impressao/*.exe
