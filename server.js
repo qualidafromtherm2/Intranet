@@ -10542,11 +10542,157 @@ app.use('/etiquetas', express.static(etiquetasRoot));
     // Migração: colunas de armazenamento
     await pool.query(`ALTER TABLE etiqueta."ETQ_rec_impresso" ADD COLUMN IF NOT EXISTS endereco TEXT`);
     await pool.query(`ALTER TABLE etiqueta."ETQ_rec_impresso" ADD COLUMN IF NOT EXISTS complemento TEXT`);
-    console.log('[etiqueta] Schema e tabelas ETQ_recebimento / ETQ_rec_impresso garantidos');
+    // Tabela de fila de impressão (para agente polling)
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS etiqueta."ETQ_fila_impressao" (
+        id          SERIAL PRIMARY KEY,
+        etq_ids     INT[]   NOT NULL,
+        multiplo    NUMERIC DEFAULT 0,
+        usuario     TEXT,
+        zpl         TEXT    NOT NULL,
+        quantidade  INT     NOT NULL DEFAULT 1,
+        status      TEXT    NOT NULL DEFAULT 'pendente',
+        criado_em   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        impresso_em TIMESTAMPTZ,
+        agent_host  TEXT,
+        erro_msg    TEXT
+      )
+    `);
+    console.log('[etiqueta] Schema e tabelas ETQ_recebimento / ETQ_rec_impresso / ETQ_fila_impressao garantidos');
   } catch (err) {
     console.error('[etiqueta] Falha ao garantir schema/tabela:', err?.message || err);
   }
 })();
+
+// ── Token simples de autenticação para o agente de impressão ─────────────────
+const AGENTE_TOKEN = process.env.AGENTE_TOKEN || 'sgf-agente-2024';
+
+// POST /api/etiquetas/fila — enfileira impressão (chamado pelo frontend)
+app.post('/api/etiquetas/fila', express.json(), async (req, res) => {
+  try {
+    const ids      = Array.isArray(req.body?.ids) ? req.body.ids.map(Number).filter(n => n > 0) : [];
+    const multiplo = Number(req.body?.multiplo) || 0;
+    const usuario  = String(req.body?.usuario || req.session?.user?.login || req.session?.usuario || '').trim();
+    if (!ids.length) return res.status(400).json({ error: 'Nenhum id informado.' });
+
+    const result = await pool.query(
+      `SELECT id, lote, codigo_produto, descricao_produto, qtd, unidade, data_emissao
+         FROM etiqueta."ETQ_recebimento"
+        WHERE id = ANY($1::int[]) ORDER BY id`,
+      [ids]
+    );
+    if (!result.rows.length) return res.status(404).json({ error: 'Nenhuma etiqueta encontrada.' });
+
+    const sanitize = (v, max = 999) => String(v || '').slice(0, max).replace(/[\\^~]/g, ' ');
+    const zplBlocks = [];
+
+    for (const row of result.rows) {
+      const codProd    = sanitize(row.codigo_produto, 30);
+      const descProd   = sanitize(row.descricao_produto, 70);
+      const loteTxt    = sanitize(row.lote, 40);
+      const dataExibir = sanitize(row.data_emissao, 10);
+
+      let lotes;
+      if (multiplo > 0) {
+        const qtdTotal = Number(row.qtd) || 0;
+        const nCheias  = Math.floor(qtdTotal / multiplo);
+        const resto    = qtdTotal % multiplo;
+        lotes = [];
+        for (let i = 0; i < nCheias; i++) lotes.push(multiplo);
+        if (resto > 0) lotes.push(resto);
+        if (lotes.length === 0) lotes.push(qtdTotal || 1);
+      } else {
+        lotes = [Number(row.qtd) || 1];
+      }
+
+      for (const qtdEtq of lotes) {
+        const ins = await pool.query(
+          `INSERT INTO etiqueta."ETQ_rec_impresso"
+             (origem_id, qtd, unidade, data_emissao, conteudo_zpl, usuario_criacao)
+           VALUES ($1,$2,$3,$4,'',$5)
+           RETURNING id`,
+          [row.id, qtdEtq, row.unidade, row.data_emissao, usuario]
+        );
+        const idImpresso = ins.rows[0].id;
+        const zpl = _gerarZplParaImpressao({ codProd, descProd, idImpresso, loteTxt, dataExibir });
+        await pool.query(
+          `UPDATE etiqueta."ETQ_rec_impresso" SET conteudo_zpl = $1 WHERE id = $2`,
+          [zpl, idImpresso]
+        );
+        zplBlocks.push(zpl);
+      }
+    }
+
+    await pool.query(
+      `UPDATE etiqueta."ETQ_recebimento" SET qtd = 0, impressa = true WHERE id = ANY($1::int[])`,
+      [ids]
+    );
+
+    const filaIns = await pool.query(
+      `INSERT INTO etiqueta."ETQ_fila_impressao" (etq_ids, multiplo, usuario, zpl, quantidade)
+       VALUES ($1, $2, $3, $4, $5) RETURNING id`,
+      [ids, multiplo, usuario, zplBlocks.join('\n'), zplBlocks.length]
+    );
+
+    res.json({ ok: true, fila_id: filaIns.rows[0].id, quantidade: zplBlocks.length });
+  } catch (err) {
+    console.error('[etiquetas/fila POST]', err);
+    res.status(500).json({ error: err?.message || 'Falha ao enfileirar impressão' });
+  }
+});
+
+// GET /api/etiquetas/fila/pendentes — agente busca trabalhos pendentes
+app.get('/api/etiquetas/fila/pendentes', async (req, res) => {
+  const token = req.headers['x-agent-token'] || req.query.token;
+  if (token !== AGENTE_TOKEN) return res.status(401).json({ error: 'Token inválido' });
+  try {
+    const r = await pool.query(
+      `SELECT id, zpl, quantidade FROM etiqueta."ETQ_fila_impressao"
+        WHERE status = 'pendente' ORDER BY criado_em ASC LIMIT 10`
+    );
+    // Marca como 'imprimindo' para evitar dupla entrega
+    if (r.rows.length) {
+      const ids = r.rows.map(row => row.id);
+      await pool.query(
+        `UPDATE etiqueta."ETQ_fila_impressao" SET status = 'imprimindo' WHERE id = ANY($1::int[])`,
+        [ids]
+      );
+    }
+    res.json({ ok: true, jobs: r.rows });
+  } catch (err) {
+    console.error('[etiquetas/fila/pendentes]', err);
+    res.status(500).json({ error: err?.message });
+  }
+});
+
+// POST /api/etiquetas/fila/confirmar — agente confirma impressão ou erro
+app.post('/api/etiquetas/fila/confirmar', express.json(), async (req, res) => {
+  const token = req.headers['x-agent-token'] || req.query.token;
+  if (token !== AGENTE_TOKEN) return res.status(401).json({ error: 'Token inválido' });
+  try {
+    const { id, success, error: erroMsg, agent_host } = req.body || {};
+    if (!id) return res.status(400).json({ error: 'id obrigatório' });
+    if (success) {
+      await pool.query(
+        `UPDATE etiqueta."ETQ_fila_impressao"
+           SET status = 'impresso', impresso_em = NOW(), agent_host = $2
+         WHERE id = $1`,
+        [id, agent_host || null]
+      );
+    } else {
+      await pool.query(
+        `UPDATE etiqueta."ETQ_fila_impressao"
+           SET status = 'erro', erro_msg = $2, agent_host = $3
+         WHERE id = $1`,
+        [id, erroMsg || 'Erro desconhecido', agent_host || null]
+      );
+    }
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[etiquetas/fila/confirmar]', err);
+    res.status(500).json({ error: err?.message });
+  }
+});
 
 // ── Helper: gera um bloco ZPL para salvar no banco (ETQ_recebimento) ─────────
 function _gerarZplRecebimentoBloco({ codProd, descProd, loteTxt, dataExibir, idEtq }) {

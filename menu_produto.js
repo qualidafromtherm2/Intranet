@@ -24947,24 +24947,26 @@ window.openRegistros = async function() {
     const origBtn = btnRef ? btnRef.innerHTML : null;
     if (btnRef) { btnRef.disabled = true; btnRef.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>'; }
     try {
-      // 1. Verificar se o agente local está rodando em localhost:9200
-      showSt('Procurando agente de impressão...', '#facc15');
+      // 1. Verificar se o agente está instalado neste PC
+      showSt('Verificando agente de impressão...', '#facc15');
+      let agenteOk = false;
       let agentePrinter = null;
-      try {
-        const r = await fetch('http://localhost:9200/status', { signal: AbortSignal.timeout(3000) });
-        if (r.ok) { const d = await r.json(); if (d.printer) agentePrinter = d.printer; }
-      } catch { /* agente não disponível */ }
+      for (const host of ['localhost', '127.0.0.1']) {
+        try {
+          const r = await fetch(`http://${host}:9200/api/status`, { signal: AbortSignal.timeout(3000) });
+          if (r.ok) { const d = await r.json(); agenteOk = true; agentePrinter = d.printer || null; break; }
+        } catch { /* tenta próximo */ }
+      }
 
-      if (!agentePrinter) {
+      if (!agenteOk) {
         if (statusEl) {
-          // Busca URL do instalador no servidor (configurada via AGENTE_EXE_URL no .env)
           const _EXE_URL_FB = 'https://pxhbginkisinegzupqcy.supabase.co/storage/v1/object/public/agente-impressao/agente-impressao-setup.exe';
           let exeUrl = _EXE_URL_FB;
-          try { const u = await fetch('/api/etiquetas/agente-url'); const uj = await u.json(); if (uj.url) exeUrl = uj.url; } catch { /* usa fallback Supabase */ }
+          try { const u = await fetch('/api/etiquetas/agente-url'); const uj = await u.json(); if (uj.url) exeUrl = uj.url; } catch {}
           statusEl.innerHTML =
             '<div style="background:#1e1b2e;border:1px solid #7c3aed;border-radius:8px;padding:10px 14px;margin-top:6px;">' +
             '<div style="color:#f87171;font-weight:600;margin-bottom:6px;"><i class="fa-solid fa-triangle-exclamation"></i> Agente de impressão não encontrado neste PC</div>' +
-            '<div style="color:#94a3b8;font-size:.83rem;margin-bottom:8px;">O agente precisa estar rodando no computador onde está a impressora Zebra.</div>' +
+            '<div style="color:#94a3b8;font-size:.83rem;margin-bottom:8px;">Instale o agente no PC conectado à impressora Zebra. Após instalar, tente novamente.</div>' +
             '<a href="' + exeUrl + '" download="agente-impressao-setup.exe" style="display:inline-flex;align-items:center;gap:6px;background:#7c3aed;color:#fff;padding:7px 14px;border-radius:6px;text-decoration:none;font-size:.85rem;font-weight:600;">' +
             '<i class="fa-solid fa-download"></i> Baixar instalador (.exe)</a>' +
             '<span style="color:#64748b;font-size:.76rem;margin-left:10px;">Clique 2× para instalar · depois tente imprimir novamente</span>' +
@@ -24975,10 +24977,16 @@ window.openRegistros = async function() {
         return;
       }
 
-      // 2. Obter ZPL do servidor (cria ETQ_rec_impresso, marca como impressa)
+      if (!agentePrinter) {
+        showSt('Agente instalado mas sem impressora configurada. <a href="http://localhost:9200" target="_blank" style="color:#7c3aed">Configurar agora</a>', '#facc15');
+        clearSt(15000);
+        return;
+      }
+
+      // 2. Enfileirar impressão no servidor (agente faz polling e imprime automaticamente)
       const usuario = (document.getElementById('userNameDisplay')?.textContent || '').trim();
-      showSt(`Enviando para ${agentePrinter}...`, '#facc15');
-      const resp = await fetch('/api/etiquetas/recebimento/imprimir-local', {
+      showSt(`Enviando para fila de impressão (${agentePrinter})...`, '#facc15');
+      const resp = await fetch('/api/etiquetas/fila', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
@@ -24986,20 +24994,10 @@ window.openRegistros = async function() {
       });
       if (!resp.ok) { const e = await resp.json().catch(() => ({})); throw new Error(e.error || `Erro ${resp.status}`); }
       const data = await resp.json();
-      if (!data.ok) throw new Error(data.error || 'Falha ao gerar ZPL');
+      if (!data.ok) throw new Error(data.error || 'Falha ao enfileirar');
 
-      // 3. Enviar ZPL ao agente local
-      const bpResp = await fetch('http://localhost:9200/print', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ zpl: data.zpl }),
-        signal: AbortSignal.timeout(20000),
-      });
-      const bpData = await bpResp.json().catch(() => ({}));
-      if (!bpResp.ok) throw new Error(bpData.error || `Agente: falha ao enviar (${bpResp.status})`);
-
-      showSt(`${data.quantidade} etiqueta(s) enviada(s) para ${agentePrinter}.`, '#4ade80');
-      clearSt(4000);
+      showSt(`✅ ${data.quantidade} etiqueta(s) na fila para ${agentePrinter}. Imprimindo...`, '#4ade80');
+      clearSt(5000);
       await _etqCarregar(etqBusca?.value || '');
     } catch (err) {
       showSt(err.message, '#f87171');
@@ -25256,30 +25254,38 @@ window.openRegistros = async function() {
       try {
         const statusEl = etqMplPreview;
         const showSt = (msg, cor = '#94a3b8') => { if (statusEl) statusEl.innerHTML = `<span style="color:${cor};">${escapeHtml(msg)}</span>`; };
-        // Verificar agente local em localhost:9200
+        // Verificar agente local em localhost:9200 (com fallback para 127.0.0.1)
+        // Verificar agente (polling-based)
+        let agenteOk = false;
         let agentePrinter = null;
-        try {
-          const r = await fetch('http://localhost:9200/status', { signal: AbortSignal.timeout(3000) });
-          if (r.ok) { const d = await r.json(); if (d.printer) agentePrinter = d.printer; }
-        } catch { /* agente não disponível */ }
-        if (!agentePrinter) {
+        for (const host of ['localhost', '127.0.0.1']) {
+          try {
+            const r = await fetch(`http://${host}:9200/api/status`, { signal: AbortSignal.timeout(3000) });
+            if (r.ok) { const d = await r.json(); agenteOk = true; agentePrinter = d.printer || null; break; }
+          } catch { /* tenta próximo */ }
+        }
+        if (!agenteOk) {
           const _EXE_URL_FB2 = 'https://pxhbginkisinegzupqcy.supabase.co/storage/v1/object/public/agente-impressao/agente-impressao-setup.exe';
           let exeUrl2 = _EXE_URL_FB2;
-          try { const u2 = await fetch('/api/etiquetas/agente-url'); const uj2 = await u2.json(); if (uj2.url) exeUrl2 = uj2.url; } catch { /* fallback Supabase */ }
+          try { const u2 = await fetch('/api/etiquetas/agente-url'); const uj2 = await u2.json(); if (uj2.url) exeUrl2 = uj2.url; } catch {}
           showSt(
             '<div style="background:#1e1b2e;border:1px solid #7c3aed;border-radius:8px;padding:10px 14px;">' +
             '<div style="color:#f87171;font-weight:600;margin-bottom:4px;"><i class="fa-solid fa-triangle-exclamation"></i> Agente não encontrado neste PC</div>' +
-            '<a href="' + exeUrl2 + '" download="agente-impressao-setup.exe" style="display:inline-flex;align-items:center;gap:6px;background:#7c3aed;color:#fff;padding:6px 12px;border-radius:6px;text-decoration:none;font-size:.83rem;font-weight:600;margin-top:4px;">' +
+            '<div style="color:#94a3b8;font-size:.82rem;margin-bottom:6px;">Instale o agente no PC da impressora Zebra.</div>' +
+            '<a href="' + exeUrl2 + '" download="agente-impressao-setup.exe" style="display:inline-flex;align-items:center;gap:6px;background:#7c3aed;color:#fff;padding:6px 12px;border-radius:6px;text-decoration:none;font-size:.83rem;font-weight:600;">' +
             '<i class="fa-solid fa-download"></i> Baixar instalador (.exe)</a>' +
-            '<span style="color:#64748b;font-size:.75rem;display:block;margin-top:4px;">Clique 2× para instalar · depois tente imprimir novamente</span>' +
             '</div>',
             '#f87171'
           );
           etqMplGerar.disabled = false; etqMplGerar.innerHTML = origHtml; return;
         }
+        if (!agentePrinter) {
+          showSt('Agente instalado mas sem impressora configurada. <a href="http://localhost:9200" target="_blank" style="color:#7c3aed">Configurar</a>', '#facc15');
+          etqMplGerar.disabled = false; etqMplGerar.innerHTML = origHtml; return;
+        }
         const usuario = (document.getElementById('userNameDisplay')?.textContent || '').trim();
-        showSt(`Enviando para ${agentePrinter}...`, '#facc15');
-        const resp = await fetch('/api/etiquetas/recebimento/imprimir-local', {
+        showSt(`Enviando para fila (${agentePrinter})...`, '#facc15');
+        const resp = await fetch('/api/etiquetas/fila', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           credentials: 'include',
@@ -25287,15 +25293,9 @@ window.openRegistros = async function() {
         });
         if (!resp.ok) { const e = await resp.json().catch(() => ({})); throw new Error(e.error || `Erro ${resp.status}`); }
         const data = await resp.json();
-        if (!data.ok) throw new Error(data.error || 'Falha ao gerar ZPL');
-        const bpResp = await fetch('http://localhost:9200/print', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ zpl: data.zpl }),
-          signal: AbortSignal.timeout(20000),
-        });
-        const bpData = await bpResp.json().catch(() => ({}));
-        if (!bpResp.ok) throw new Error(bpData.error || `Agente: falha (${bpResp.status})`);
+        if (!data.ok) throw new Error(data.error || 'Falha ao enfileirar');
+        showSt(`✅ ${data.quantidade} etiqueta(s) na fila. Imprimindo...`, '#4ade80');
+        setTimeout(() => { if (etqMplPreview) etqMplPreview.innerHTML = ''; }, 5000);
         _etqMplFecharFn();
         await _etqCarregar(etqBusca?.value || '');
       } catch (err) {
