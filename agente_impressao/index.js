@@ -15,6 +15,7 @@ const fs     = require('fs');
 const os     = require('os');
 const path   = require('path');
 
+const AGENT_VERSION = '2.1';
 const PORT       = 9200;
 const TASK_NAME  = 'AgenteImpressaoSGF';
 const EXE_NAME   = 'agente-impressao.exe';
@@ -669,7 +670,7 @@ function runService() {
   function sendHeartbeat() {
     const c = readConfig();
     apiRequest('POST', '/api/etiquetas/agente/heartbeat',
-      { printer: c.printer || '', version: '2.0', host: os.hostname() },
+      { printer: c.printer || '', version: AGENT_VERSION, host: os.hostname() },
       c.agentToken, () => {});
   }
   sendHeartbeat();                          // imediato ao iniciar
@@ -826,8 +827,13 @@ function runService() {
         lastPrintOk: state.lastPrintOk,
         totalPrinted: state.totalPrinted,
         totalErrors: state.totalErrors,
-        version: '2.0',
+        version: AGENT_VERSION,
       });
+    }
+
+    // GET /api/version
+    if (req.method === 'GET' && req.url === '/api/version') {
+      return respJson(res, 200, { ok: true, version: AGENT_VERSION });
     }
 
     // GET /api/config

@@ -25128,6 +25128,78 @@ window.openRegistros = async function() {
   const etqMplModal    = document.getElementById('etqMultiploModal');
   const etqMplFechar   = document.getElementById('etqMultiploFechar');
   const etqMplCancel   = document.getElementById('etqMultiploCancelar');
+
+  // ── Verificação de versão do agente ────────────────────────────────────────
+  let _etqUpdateDismissedVersion = null;
+
+  async function _etqVerificarVersaoAgente() {
+    try {
+      // 1) Versão "latest" vinda do servidor
+      const infoResp = await Promise.race([
+        fetch('/api/etiquetas/agente-url'),
+        new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 3000)),
+      ]);
+      const info = await infoResp.json();
+      const versaoAtual = info.versao || '0';
+      const downloadUrl = info.url || '';
+
+      // Usuário já dispensou esse release nesta sessão
+      if (_etqUpdateDismissedVersion === versaoAtual) return;
+
+      // 2) Versão do agente local (pode não estar rodando)
+      let versaoAgente = null;
+      try {
+        const agResp = await Promise.race([
+          fetch('http://localhost:9200/api/version'),
+          new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 2000)),
+        ]);
+        const ag = await agResp.json();
+        versaoAgente = ag.version || '0';
+      } catch {
+        return; // agente não está rodando — sem banner
+      }
+
+      // 3) Comparação semver simples (ex: 2.1 > 2.0)
+      function parseVer(v) { return (v || '0').split('.').map(Number); }
+      const [ma, mi] = parseVer(versaoAtual);
+      const [ca, ci] = parseVer(versaoAgente);
+      if (ca > ma || (ca === ma && ci >= mi)) return; // já atualizado
+
+      // 4) Montar / atualizar banner dentro do modal
+      let banner = document.getElementById('etqUpdateBanner');
+      if (!banner) {
+        banner = document.createElement('div');
+        banner.id = 'etqUpdateBanner';
+        banner.style.cssText = [
+          'margin:10px 16px 0',
+          'padding:10px 14px',
+          'background:#1c1917',
+          'border:1px solid #f59e0b',
+          'border-radius:8px',
+          'display:flex',
+          'align-items:center',
+          'gap:10px',
+          'font-size:.84rem',
+        ].join(';');
+        const header = document.querySelector('#etqMultiploModal .etq-multiplo-header');
+        if (header) header.insertAdjacentElement('afterend', banner);
+      }
+      banner.innerHTML =
+        `<i class="fa-solid fa-triangle-exclamation" style="color:#f59e0b;flex-shrink:0;"></i>` +
+        `<span style="flex:1;color:#fde68a;">Agente v${escapeHtml(versaoAgente)} desatualizado — versão v${escapeHtml(versaoAtual)} disponível.</span>` +
+        `<a href="${escapeHtml(downloadUrl)}" target="_blank" rel="noopener noreferrer"` +
+        ` style="background:#f59e0b;color:#1e293b;border-radius:6px;padding:5px 12px;font-weight:700;` +
+        `text-decoration:none;font-size:.82rem;white-space:nowrap;">⬇ Atualizar</a>` +
+        `<button id="etqUpdateBannerDismiss" title="Lembrar depois"` +
+        ` style="background:transparent;border:none;color:#94a3b8;cursor:pointer;padding:4px 6px;font-size:1.1rem;line-height:1;">✕</button>`;
+      banner.style.display = 'flex';
+
+      document.getElementById('etqUpdateBannerDismiss')?.addEventListener('click', () => {
+        _etqUpdateDismissedVersion = versaoAtual;
+        banner.style.display = 'none';
+      });
+    } catch { /* silencioso — nunca bloqueia o usuário */ }
+  }
   const etqMplInput    = document.getElementById('etqMultiploInput');
   const etqMplChips    = document.getElementById('etqMultiploChips');
   const etqMplPreview  = document.getElementById('etqMultiploPreview');
@@ -25216,6 +25288,8 @@ window.openRegistros = async function() {
     if (etqMplPreview) etqMplPreview.textContent = 'Selecione ou digite um múltiplo para ver a prévia.';
     if (etqMplGerar)   etqMplGerar.disabled = true;
     if (etqMplModal)   etqMplModal.style.display = 'flex';
+    // Verificar versão do agente de forma não-blocante
+    _etqVerificarVersaoAgente();
   }
 
   function _etqMplFecharFn() {
