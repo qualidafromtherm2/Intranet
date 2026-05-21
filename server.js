@@ -10731,20 +10731,24 @@ app.post('/api/etiquetas/fila/confirmar', express.json(), async (req, res) => {
 });
 
 // ── Helper: gera um bloco ZPL para salvar no banco (ETQ_recebimento) ─────────
+// Layout p/ etiqueta 5×3 cm (50×30 mm, 203 dpi → 399×240 dots)
+// O agente sobrescreve ^PW/^LL conforme as dimensões configuradas na UI dele.
 function _gerarZplRecebimentoBloco({ codProd, descProd, loteTxt, dataExibir, idEtq }) {
   const qrContent = `${codProd}|${descProd.slice(0, 40)}|${loteTxt}|ID${idEtq}`;
   return [
     '^XA',
     '^CI28',
-    '^PW812',
-    '^LL165',
-    `^FO10,10^BQN,2,4^FDLA,${qrContent}^FS`,
-    '^FO170,10^A0N,20,20^FDCod. Produto:^FS',
-    `^FO360,10^A0N,20,20^FD${codProd}^FS`,
-    '^FO170,34^A0N,20,20^FDDescricao:^FS',
-    `^FO170,58^A0N,20,20^FD${descProd.slice(0, 30)}^FS`,
-    `^FO170,82^A0N,20,20^FDLote: ${loteTxt}^FS`,
-    `^FO170,106^A0N,20,20^FDEmissao: ${dataExibir}^FS`,
+    '^PW399',          // 50 mm @ 203 dpi — sobrescrito pelo agente
+    '^LL240',          // 30 mm @ 203 dpi — sobrescrito pelo agente
+    // QR code — canto superior esquerdo, escala 3 (~111×111 dots)
+    `^FO5,5^BQN,2,3^FDLA,${qrContent}^FS`,
+    // Código do produto — só o valor, fonte grande, sem rótulo
+    `^FO118,8^A0N,26,22^FD${codProd}^FS`,
+    // Lote e data na coluna direita
+    `^FO118,38^A0N,18,15^FDLote: ${loteTxt}^FS`,
+    `^FO118,60^A0N,18,15^FDEmissao: ${dataExibir}^FS`,
+    // Descrição abaixo do QR — até 3 linhas, sem rótulo
+    `^FO5,120^A0N,18,15^FB385,3,0,L,0^FD${descProd.slice(0, 90)}^FS`,
     '^XZ',
   ].join('\n');
 }
@@ -10760,23 +10764,24 @@ function _friendlyLprError(msg) {
 }
 
 // ── Helper: gera ZPL para IMPRESSÃO física (mostra ID da impressão, sem qtd) ──
-// QR code: cod|desc|lote|idImpresso  — sem quantidade
-// Linha no label: "ID: 123" em vez de "Qtd: X UN"
+// Layout p/ etiqueta 5×3 cm (50×30 mm, 203 dpi → 399×240 dots)
 function _gerarZplParaImpressao({ codProd, descProd, idImpresso, loteTxt, dataExibir }) {
   const qr = `${codProd}|${descProd.slice(0, 40)}|${loteTxt}|ID${idImpresso}`;
   return [
     '^XA',
     '^CI28',
-    '^PW812',
-    '^LL165',
-    `^FO10,10^BQN,2,4^FDLA,${qr}^FS`,
-    '^FO170,10^A0N,20,20^FDCod. Produto:^FS',
-    `^FO360,10^A0N,20,20^FD${codProd}^FS`,
-    '^FO170,34^A0N,20,20^FDDescricao:^FS',
-    `^FO170,58^A0N,20,20^FD${descProd.slice(0, 30)}^FS`,
-    `^FO170,82^A0N,20,20^FDID: ${idImpresso}^FS`,
-    `^FO170,106^A0N,20,20^FDLote: ${loteTxt}^FS`,
-    `^FO170,130^A0N,20,20^FDEmissao: ${dataExibir}^FS`,
+    '^PW399',          // 50 mm @ 203 dpi — sobrescrito pelo agente
+    '^LL240',          // 30 mm @ 203 dpi — sobrescrito pelo agente
+    // QR code — canto superior esquerdo, escala 3 (~111×111 dots)
+    `^FO5,5^BQN,2,3^FDLA,${qr}^FS`,
+    // Código do produto — só o valor, fonte grande, sem rótulo
+    `^FO118,8^A0N,26,22^FD${codProd}^FS`,
+    // ID, Lote e data na coluna direita
+    `^FO118,38^A0N,18,15^FDID: ${idImpresso}^FS`,
+    `^FO118,60^A0N,18,15^FDLote: ${loteTxt}^FS`,
+    `^FO118,82^A0N,18,15^FDEmissao: ${dataExibir}^FS`,
+    // Descrição abaixo do QR — até 3 linhas, sem rótulo
+    `^FO5,120^A0N,18,15^FB385,3,0,L,0^FD${descProd.slice(0, 90)}^FS`,
     '^XZ',
   ].join('\n');
 }
