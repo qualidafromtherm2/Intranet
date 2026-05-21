@@ -495,8 +495,8 @@ function runService() {
       return;
     }
 
-    // GET /api/status
-    if (req.method === 'GET' && req.url === '/api/status') {
+    // GET /api/status  (também responde em /status para compatibilidade com v1.0)
+    if (req.method === 'GET' && (req.url === '/api/status' || req.url === '/status')) {
       const cfg = readConfig();
       return respJson(res, 200, {
         ok: true,
@@ -592,11 +592,16 @@ async function install() {
     fs.mkdirSync(INSTALL_DIR, { recursive: true });
     ok();
 
-    // 2. Copiar executável
+    // 2. Encerrar versão anterior (se estiver rodando) e copiar executável
+    step('Encerrando versão anterior (se houver)');
+    spawnSync('taskkill', ['/IM', EXE_NAME, '/F'], { encoding: 'utf8', windowsHide: true });
+    await new Promise(r => setTimeout(r, 1500));
+    ok();
+
     const exeDest = path.join(INSTALL_DIR, EXE_NAME);
     step('Copiando executável');
     try { fs.copyFileSync(process.execPath, exeDest); ok(); }
-    catch { console.log('(já em uso, pulando cópia)'); }
+    catch (e) { console.log(`(aviso: ${e.message})`); }
 
     // 3. Gravar config padrão se não existir
     if (!fs.existsSync(CONFIG_PATH)) {

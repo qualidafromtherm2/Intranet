@@ -24947,15 +24947,25 @@ window.openRegistros = async function() {
     const origBtn = btnRef ? btnRef.innerHTML : null;
     if (btnRef) { btnRef.disabled = true; btnRef.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>'; }
     try {
-      // 1. Verificar se o agente está instalado neste PC
+      // 1. Verificar se o agente está instalado neste PC (v2.0 em /api/status, v1.0 em /status)
       showSt('Verificando agente de impressão...', '#facc15');
       let agenteOk = false;
+      let agenteVersion = null;
       let agentePrinter = null;
       for (const host of ['localhost', '127.0.0.1']) {
         try {
           const r = await fetch(`http://${host}:9200/api/status`, { signal: AbortSignal.timeout(3000) });
-          if (r.ok) { const d = await r.json(); agenteOk = true; agentePrinter = d.printer || null; break; }
+          if (r.ok) { const d = await r.json(); agenteOk = true; agenteVersion = d.version || '2.0'; agentePrinter = d.printer || null; break; }
         } catch { /* tenta próximo */ }
+      }
+      // Fallback: detecta agente v1.0 (só responde em /status)
+      if (!agenteOk) {
+        for (const host of ['localhost', '127.0.0.1']) {
+          try {
+            const r = await fetch(`http://${host}:9200/status`, { signal: AbortSignal.timeout(2000) });
+            if (r.ok) { agenteOk = true; agenteVersion = '1.0'; agentePrinter = null; break; }
+          } catch { /* não disponível */ }
+        }
       }
 
       if (!agenteOk) {
@@ -24973,6 +24983,26 @@ window.openRegistros = async function() {
             '</div>';
           if (!container) statusEl.style.color = '';
           clearSt(20000);
+        }
+        return;
+      }
+
+      // Agente v1.0 detectado — precisa atualizar
+      if (agenteVersion === '1.0') {
+        if (statusEl) {
+          const _EXE_URL_FB = 'https://pxhbginkisinegzupqcy.supabase.co/storage/v1/object/public/agente-impressao/agente-impressao-setup.exe';
+          let exeUrl = _EXE_URL_FB;
+          try { const u = await fetch('/api/etiquetas/agente-url'); const uj = await u.json(); if (uj.url) exeUrl = uj.url; } catch {}
+          statusEl.innerHTML =
+            '<div style="background:#1e1b2e;border:1px solid #f59e0b;border-radius:8px;padding:10px 14px;margin-top:6px;">' +
+            '<div style="color:#fbbf24;font-weight:600;margin-bottom:6px;"><i class="fa-solid fa-arrow-up-from-bracket"></i> Agente v1.0 encontrado — atualização necessária</div>' +
+            '<div style="color:#94a3b8;font-size:.83rem;margin-bottom:8px;">A versão instalada é antiga. Baixe e execute o instalador novamente para atualizar.</div>' +
+            '<a href="' + exeUrl + '" download="agente-impressao-setup.exe" style="display:inline-flex;align-items:center;gap:6px;background:#f59e0b;color:#000;padding:7px 14px;border-radius:6px;text-decoration:none;font-size:.85rem;font-weight:600;">' +
+            '<i class="fa-solid fa-download"></i> Baixar v2.0 e atualizar</a>' +
+            '<span style="color:#64748b;font-size:.76rem;margin-left:10px;">Clique 2× no instalador · ele encerra o antigo automaticamente</span>' +
+            '</div>';
+          if (!container) statusEl.style.color = '';
+          clearSt(30000);
         }
         return;
       }
@@ -25254,15 +25284,23 @@ window.openRegistros = async function() {
       try {
         const statusEl = etqMplPreview;
         const showSt = (msg, cor = '#94a3b8') => { if (statusEl) statusEl.innerHTML = `<span style="color:${cor};">${escapeHtml(msg)}</span>`; };
-        // Verificar agente local em localhost:9200 (com fallback para 127.0.0.1)
-        // Verificar agente (polling-based)
+        // Verificar agente v2.0 (/api/status) e v1.0 (/status) para retrocompat
         let agenteOk = false;
+        let agenteVersion = null;
         let agentePrinter = null;
         for (const host of ['localhost', '127.0.0.1']) {
           try {
             const r = await fetch(`http://${host}:9200/api/status`, { signal: AbortSignal.timeout(3000) });
-            if (r.ok) { const d = await r.json(); agenteOk = true; agentePrinter = d.printer || null; break; }
+            if (r.ok) { const d = await r.json(); agenteOk = true; agenteVersion = d.version || '2.0'; agentePrinter = d.printer || null; break; }
           } catch { /* tenta próximo */ }
+        }
+        if (!agenteOk) {
+          for (const host of ['localhost', '127.0.0.1']) {
+            try {
+              const r = await fetch(`http://${host}:9200/status`, { signal: AbortSignal.timeout(2000) });
+              if (r.ok) { agenteOk = true; agenteVersion = '1.0'; agentePrinter = null; break; }
+            } catch { /* não disponível */ }
+          }
         }
         if (!agenteOk) {
           const _EXE_URL_FB2 = 'https://pxhbginkisinegzupqcy.supabase.co/storage/v1/object/public/agente-impressao/agente-impressao-setup.exe';
@@ -25276,6 +25314,20 @@ window.openRegistros = async function() {
             '<i class="fa-solid fa-download"></i> Baixar instalador (.exe)</a>' +
             '</div>',
             '#f87171'
+          );
+          etqMplGerar.disabled = false; etqMplGerar.innerHTML = origHtml; return;
+        }
+        if (agenteVersion === '1.0') {
+          const _EXE_URL_FB2 = 'https://pxhbginkisinegzupqcy.supabase.co/storage/v1/object/public/agente-impressao/agente-impressao-setup.exe';
+          let exeUrl2 = _EXE_URL_FB2;
+          try { const u2 = await fetch('/api/etiquetas/agente-url'); const uj2 = await u2.json(); if (uj2.url) exeUrl2 = uj2.url; } catch {}
+          showSt(
+            '<div style="background:#1e1b2e;border:1px solid #f59e0b;border-radius:8px;padding:10px 14px;">' +
+            '<div style="color:#fbbf24;font-weight:600;margin-bottom:4px;"><i class="fa-solid fa-arrow-up-from-bracket"></i> Agente v1.0 — atualização necessária</div>' +
+            '<a href="' + exeUrl2 + '" download="agente-impressao-setup.exe" style="display:inline-flex;align-items:center;gap:6px;background:#f59e0b;color:#000;padding:6px 12px;border-radius:6px;text-decoration:none;font-size:.83rem;font-weight:600;margin-top:4px;">' +
+            '<i class="fa-solid fa-download"></i> Baixar v2.0 e atualizar</a>' +
+            '</div>',
+            '#fbbf24'
           );
           etqMplGerar.disabled = false; etqMplGerar.innerHTML = origHtml; return;
         }
