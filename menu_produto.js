@@ -24668,38 +24668,12 @@ window.openRegistros = async function() {
     const prefAtual = _etqPrinterPref || '';
 
     if (lista.length === 0) {
-      // Sem impressoras físicas: oferece PDF e ZPL
+      // Sem CUPS no servidor → redirecionar automaticamente para o agente local
+      _etqSalvarPref('__BP__');
       if (!container) el.style.color = '';
-      el.innerHTML = `
-        ${msgErro ? `<span style="color:#f87171;font-size:.85rem;">${escapeHtml(msgErro)}</span>` : ''}
-        <div style="display:flex;align-items:center;gap:8px;margin-top:6px;flex-wrap:wrap;">
-          <label style="color:#94a3b8;font-size:.8rem;white-space:nowrap;">Sem impressoras físicas. Salvar como:</label>
-          <select id="_etqSelectImpressora" style="background:#1e293b;color:#f1f5f9;border:1px solid #334155;border-radius:6px;padding:4px 8px;font-size:.85rem;flex:1;min-width:120px;">
-            ${optPdf}${optBp}
-          </select>
-          ${chkPadraoHtml}
-          <button id="_etqBtnTentarImpressora" style="background:#7c3aed;color:#fff;border:none;border-radius:6px;padding:5px 12px;font-size:.82rem;cursor:pointer;white-space:nowrap;">
-            <i class="fa-solid fa-download"></i> Baixar
-          </button>
-          <button id="_etqBtnCancelarImpressora" style="background:#374151;color:#94a3b8;border:none;border-radius:6px;padding:5px 10px;font-size:.82rem;cursor:pointer;">
-            Cancelar
-          </button>
-        </div>`;
-      if (prefAtual) {
-        const sel = document.getElementById('_etqSelectImpressora');
-        if (sel) sel.value = prefAtual;
-      }
-      document.getElementById('_etqBtnTentarImpressora')?.addEventListener('click', () => {
-        const sel = document.getElementById('_etqSelectImpressora');
-        const printer = sel?.value || '__PDF__';
-        const salvar = document.getElementById('_etqChkPadrao')?.checked;
-        el.innerHTML = ''; if (!container) el.style.color = '';
-        if (salvar) _etqSalvarPref(printer);
-        onConfirm(printer);
-      });
-      document.getElementById('_etqBtnCancelarImpressora')?.addEventListener('click', () => {
-        el.innerHTML = ''; if (!container) el.style.color = '';
-      });
+      el.innerHTML = '<span style="color:#facc15;font-size:.83rem;"><i class="fa-solid fa-spinner fa-spin"></i> Nenhuma impressora CUPS no servidor — usando agente local...</span>';
+      setTimeout(() => { if (el) el.innerHTML = ''; }, 4000);
+      onConfirm('__BP__');
       return;
     }
 
