@@ -24984,8 +24984,9 @@ window.openRegistros = async function() {
       if (!agentePrinter) {
         if (statusEl) {
           // Busca URL do instalador no servidor (configurada via AGENTE_EXE_URL no .env)
-          let exeUrl = '/agente-impressao/agente-impressao-setup.exe';
-          try { const u = await fetch('/api/etiquetas/agente-url'); const uj = await u.json(); if (uj.url) exeUrl = uj.url; } catch { /* usa fallback */ }
+          const _EXE_URL_FB = 'https://pxhbginkisinegzupqcy.supabase.co/storage/v1/object/public/agente-impressao/agente-impressao-setup.exe';
+          let exeUrl = _EXE_URL_FB;
+          try { const u = await fetch('/api/etiquetas/agente-url'); const uj = await u.json(); if (uj.url) exeUrl = uj.url; } catch { /* usa fallback Supabase */ }
           statusEl.innerHTML =
             '<div style="background:#1e1b2e;border:1px solid #7c3aed;border-radius:8px;padding:10px 14px;margin-top:6px;">' +
             '<div style="color:#f87171;font-weight:600;margin-bottom:6px;"><i class="fa-solid fa-triangle-exclamation"></i> Agente de impressão não encontrado neste PC</div>' +
@@ -25288,8 +25289,9 @@ window.openRegistros = async function() {
           if (r.ok) { const d = await r.json(); if (d.printer) agentePrinter = d.printer; }
         } catch { /* agente não disponível */ }
         if (!agentePrinter) {
-          let exeUrl2 = '/agente-impressao/agente-impressao-setup.exe';
-          try { const u2 = await fetch('/api/etiquetas/agente-url'); const uj2 = await u2.json(); if (uj2.url) exeUrl2 = uj2.url; } catch { /* fallback */ }
+          const _EXE_URL_FB2 = 'https://pxhbginkisinegzupqcy.supabase.co/storage/v1/object/public/agente-impressao/agente-impressao-setup.exe';
+          let exeUrl2 = _EXE_URL_FB2;
+          try { const u2 = await fetch('/api/etiquetas/agente-url'); const uj2 = await u2.json(); if (uj2.url) exeUrl2 = uj2.url; } catch { /* fallback Supabase */ }
           showSt(
             '<div style="background:#1e1b2e;border:1px solid #7c3aed;border-radius:8px;padding:10px 14px;">' +
             '<div style="color:#f87171;font-weight:600;margin-bottom:4px;"><i class="fa-solid fa-triangle-exclamation"></i> Agente não encontrado neste PC</div>' +
