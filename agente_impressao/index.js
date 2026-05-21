@@ -1,88 +1,105 @@
 'use strict';
 /**
- * Agente de Impressão Local — Intranet SGF
+ * Agente de Impressão SGF — Instalador + Serviço
  *
- * Instale Node.js (nodejs.org) e execute: node index.js
+ * Quando executado pelo usuário (duplo-clique / primeira vez):
+ *   → Instala em %APPDATA%\AgenteImpressaoSGF\
+ *   → Configura inicialização automática com o Windows
+ *   → Inicia o serviço imediatamente
  *
- * Rotas disponíveis em http://localhost:9200:
- *   GET  /status  → { ok: true, printer: "nome da impressora" }
- *   POST /print   → body: { zpl: "^XA..." [, printer: "nome"] }
- *                → { ok: true } | { error: "mensagem" }
+ * Quando iniciado automaticamente pelo Windows (--service):
+ *   → Roda HTTP server em localhost:9200
  */
+const http        = require('http');
+const { exec, execFile } = require('child_process');
+const { spawn }   = require('child_process');
+const fs          = require('fs');
+const os          = require('os');
+const path        = require('path');
 
-const http = require('http');
-const { exec } = require('child_process');
-const fs   = require('fs');
-const os   = require('os');
-const path = require('path');
+const PORT        = 9200;
+const TASK_NAME   = 'AgenteImpressaoSGF';
+const EXE_NAME    = 'agente-impressao.exe';
+const SERVICE_ARG = '--service';
 
-const PORT     = 9200;
-const PS1_FILE = path.join(__dirname, 'imprimir.ps1');
+const INSTALL_DIR = path.join(
+  process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'),
+  'AgenteImpressaoSGF'
+);
 
-let printerName = '';
+// ─── PS1 embutido (winspool.Drv raw ZPL print) ───────────────────────────────
+const PS1_CONTENT = [
+  'param([Parameter(Mandatory)][string]$ZplFile,[Parameter(Mandatory)][string]$PrinterName)',
+  '$ErrorActionPreference = \'Stop\'',
+  '$bytes = [IO.File]::ReadAllBytes($ZplFile)',
+  'Add-Type -TypeDefinition @\'',
+  'using System; using System.Runtime.InteropServices;',
+  'public class ZebraRaw {',
+  '  [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Ansi)]',
+  '  public class DocInfo { public int cbSize = 16; public string pDocName; public string pOutputFile; public string pDataType; }',
+  '  [DllImport("winspool.Drv", EntryPoint = "OpenPrinterA", CharSet = CharSet.Ansi, SetLastError = true)]',
+  '  public static extern bool OpenPrinter(string name, out IntPtr handle, IntPtr defaults);',
+  '  [DllImport("winspool.Drv", EntryPoint = "ClosePrinter", SetLastError = true)]',
+  '  public static extern bool ClosePrinter(IntPtr handle);',
+  '  [DllImport("winspool.Drv", EntryPoint = "StartDocPrinterA", CharSet = CharSet.Ansi, SetLastError = true)]',
+  '  public static extern int StartDocPrinter(IntPtr handle, int level, DocInfo docInfo);',
+  '  [DllImport("winspool.Drv", EntryPoint = "EndDocPrinter", SetLastError = true)]',
+  '  public static extern bool EndDocPrinter(IntPtr handle);',
+  '  [DllImport("winspool.Drv", EntryPoint = "StartPagePrinter", SetLastError = true)]',
+  '  public static extern bool StartPagePrinter(IntPtr handle);',
+  '  [DllImport("winspool.Drv", EntryPoint = "EndPagePrinter", SetLastError = true)]',
+  '  public static extern bool EndPagePrinter(IntPtr handle);',
+  '  [DllImport("winspool.Drv", EntryPoint = "WritePrinter", SetLastError = true)]',
+  '  public static extern bool WritePrinter(IntPtr handle, byte[] data, int count, out int written);',
+  '}',
+  '\'@',
+  '$h = [IntPtr]::Zero',
+  'if (-not [ZebraRaw]::OpenPrinter($PrinterName, [ref]$h, [IntPtr]::Zero)) {',
+  '  $code = [Runtime.InteropServices.Marshal]::GetLastWin32Error()',
+  '  throw "Impressora nao encontrada: \'$PrinterName\' (codigo $code)"',
+  '}',
+  'try {',
+  '  $d = New-Object ZebraRaw+DocInfo; $d.pDocName = "ZPL"; $d.pDataType = "RAW"',
+  '  if ([ZebraRaw]::StartDocPrinter($h, 1, $d) -le 0) { throw "Falha StartDocPrinter" }',
+  '  [ZebraRaw]::StartPagePrinter($h) | Out-Null',
+  '  $w = 0; $ok = [ZebraRaw]::WritePrinter($h, $bytes, $bytes.Length, [ref]$w)',
+  '  [ZebraRaw]::EndPagePrinter($h) | Out-Null',
+  '  [ZebraRaw]::EndDocPrinter($h) | Out-Null',
+  '  if (-not $ok) { throw "WritePrinter retornou falso" }',
+  '  Write-Output "ENVIADO: $w bytes"',
+  '} finally { [ZebraRaw]::ClosePrinter($h) | Out-Null }',
+].join('\n');
 
-// ─── Detecta primeira impressora Zebra instalada ─────────────────────────────
+// ─── Detecta impressora Zebra ─────────────────────────────────────────────────
 function detectarImpressora(cb) {
-  if (os.platform() !== 'win32') {
-    exec("lpstat -p 2>/dev/null | grep -iE 'zebra|zd[0-9]|ztc|zm[0-9]' | head -1 | awk '{print $2}'",
-      (err, out) => cb(out.trim() || ''));
-    return;
-  }
   exec(
     'powershell -NoProfile -Command "Get-Printer | Where-Object { $_.Name -match \'Zebra|ZD|ZTC|ZM\' } | Select-Object -First 1 -ExpandProperty Name"',
     (err, stdout) => cb((stdout || '').trim() || '')
   );
 }
 
-// ─── Lista todas as impressoras (Windows) ─────────────────────────────────────
 function listarImpressoras(cb) {
-  if (os.platform() !== 'win32') {
-    exec("lpstat -p 2>/dev/null | awk '{print $2}'", (err, out) => {
-      cb(out.trim().split('\n').filter(Boolean));
-    });
-    return;
-  }
   exec(
     'powershell -NoProfile -Command "Get-Printer | Select-Object -ExpandProperty Name"',
     (err, stdout) => cb((stdout || '').trim().split('\n').map(s => s.trim()).filter(Boolean))
   );
 }
 
-// ─── Envia ZPL raw via script PS1 ────────────────────────────────────────────
+// ─── Envia ZPL via PS1 ────────────────────────────────────────────────────────
 function imprimirZpl(zpl, printer, cb) {
-  if (os.platform() !== 'win32') {
-    // Linux/Mac: usa lp com modo raw
-    const tmpFile = path.join(os.tmpdir(), `etq_${Date.now()}.zpl`);
-    try { fs.writeFileSync(tmpFile, zpl, 'binary'); } catch (e) { return cb(e); }
-    exec(`lp -d "${printer.replace(/"/g, '')}" -o raw "${tmpFile}"`, { timeout: 15000 }, (err, stdout, stderr) => {
-      fs.unlink(tmpFile, () => {});
-      if (err) return cb(new Error((stderr || err.message).trim()));
-      cb(null, stdout.trim());
-    });
-    return;
+  const ps1File = path.join(INSTALL_DIR, 'imprimir.ps1');
+  if (!fs.existsSync(ps1File)) {
+    try { fs.mkdirSync(INSTALL_DIR, { recursive: true }); fs.writeFileSync(ps1File, PS1_CONTENT, 'utf8'); } catch (e) { return cb(e); }
   }
-
-  if (!fs.existsSync(PS1_FILE)) {
-    return cb(new Error('Arquivo imprimir.ps1 não encontrado. Reinstale o agente.'));
-  }
-
   const id      = `${Date.now()}_${Math.random().toString(36).slice(2)}`;
   const zplFile = path.join(os.tmpdir(), `etq_${id}.zpl`);
   try { fs.writeFileSync(zplFile, zpl, 'binary'); } catch (e) { return cb(e); }
 
-  const cmd = [
-    'powershell',
-    '-NoProfile',
-    '-ExecutionPolicy', 'Bypass',
-    '-File', `"${PS1_FILE}"`,
-    '-ZplFile', `"${zplFile}"`,
-    '-PrinterName', `"${printer.replace(/"/g, '')}"`,
-  ].join(' ');
-
+  const cmd = `powershell -NoProfile -ExecutionPolicy Bypass -File "${ps1File}" -ZplFile "${zplFile}" -PrinterName "${printer.replace(/"/g, '')}"`;
   exec(cmd, { timeout: 20000 }, (err, stdout, stderr) => {
     fs.unlink(zplFile, () => {});
-    const errMsg = (stderr || '').trim();
-    if (err || errMsg) return cb(new Error(errMsg || err?.message || 'Erro desconhecido'));
+    const msg = ((stderr || '').trim() || err?.message || '');
+    if (err || msg) return cb(new Error(msg.slice(0, 300)));
     cb(null, stdout.trim());
   });
 }
@@ -100,68 +117,123 @@ function respJson(res, status, obj) {
   res.end(body);
 }
 
-// ─── Inicia ───────────────────────────────────────────────────────────────────
-detectarImpressora(nome => {
-  printerName = nome;
+// ═══════════════════════════════════════════════════════════════════════════════
+// MODO SERVIÇO — roda HTTP server em localhost:9200
+// ═══════════════════════════════════════════════════════════════════════════════
+function startService() {
+  detectarImpressora(printerName => {
+    console.log(`[SGF-Agente] Iniciando servico na porta ${PORT}`);
+    console.log(`[SGF-Agente] Impressora: ${printerName || '(nenhuma detectada)'}`);
 
-  console.log('\n╔══════════════════════════════════════════════╗');
-  console.log('║   Agente de Impressão — Intranet SGF         ║');
-  console.log('╚══════════════════════════════════════════════╝');
-  console.log(`  Impressora : ${printerName || '(nenhuma detectada — use o parâmetro "printer")'}`);
-  console.log(`  API        : http://localhost:${PORT}`);
-  console.log(`  Teste      : http://localhost:${PORT}/status`);
-  console.log('  Mantenha esta janela aberta para imprimir.\n');
+    const server = http.createServer((req, res) => {
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+      res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+      if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
 
-  const server = http.createServer((req, res) => {
-    // CORS preflight
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-    if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
-
-    // GET /status
-    if (req.method === 'GET' && req.url === '/status') {
-      return respJson(res, 200, { ok: true, printer: printerName || null });
-    }
-
-    // GET /impressoras — lista todas as impressoras
-    if (req.method === 'GET' && req.url === '/impressoras') {
-      return listarImpressoras(lista => respJson(res, 200, { ok: true, printers: lista }));
-    }
-
-    // POST /print
-    if (req.method === 'POST' && req.url === '/print') {
-      let body = '';
-      req.on('data', c => (body += c));
-      req.on('end', () => {
-        let data;
-        try { data = JSON.parse(body); } catch { return respJson(res, 400, { error: 'JSON inválido' }); }
-
-        const { zpl, printer } = data;
-        if (!zpl) return respJson(res, 400, { error: 'Campo "zpl" obrigatório' });
-
-        const p = printer || printerName;
-        if (!p) return respJson(res, 500, {
-          error: 'Nenhuma impressora Zebra detectada automaticamente. ' +
-                 'Informe o nome no campo "printer" ou verifique a instalação da impressora.'
+      if (req.method === 'GET' && req.url === '/status') {
+        return respJson(res, 200, { ok: true, printer: printerName || null });
+      }
+      if (req.method === 'GET' && req.url === '/impressoras') {
+        return listarImpressoras(lista => respJson(res, 200, { ok: true, printers: lista }));
+      }
+      if (req.method === 'POST' && req.url === '/print') {
+        let body = '';
+        req.on('data', c => (body += c));
+        req.on('end', () => {
+          let data;
+          try { data = JSON.parse(body); } catch { return respJson(res, 400, { error: 'JSON inválido' }); }
+          const { zpl, printer } = data;
+          if (!zpl) return respJson(res, 400, { error: 'Campo "zpl" obrigatório' });
+          const p = printer || printerName;
+          if (!p) return respJson(res, 500, { error: 'Nenhuma impressora Zebra detectada. Informe o nome no campo "printer".' });
+          imprimirZpl(zpl, p, (err) => {
+            if (err) { console.error('[print] ERRO:', err.message); return respJson(res, 500, { error: err.message }); }
+            console.log(`[print] OK → "${p}"`);
+            respJson(res, 200, { ok: true });
+          });
         });
+        return;
+      }
+      respJson(res, 404, { error: 'Rota não encontrada' });
+    });
 
-        imprimirZpl(zpl, p, (err, msg) => {
-          if (err) {
-            console.error('[print] ERRO:', err.message);
-            return respJson(res, 500, { error: err.message });
-          }
-          console.log(`[print] OK → "${p}"${msg ? `  (${msg})` : ''}`);
-          respJson(res, 200, { ok: true });
-        });
-      });
-      return;
-    }
-
-    respJson(res, 404, { error: 'Rota não encontrada' });
+    server.listen(PORT, '127.0.0.1', () => {
+      console.log(`[SGF-Agente] Pronto em http://localhost:${PORT}`);
+    });
   });
+}
 
-  server.listen(PORT, '127.0.0.1', () => {
-    console.log('✅ Pronto.\n');
-  });
-});
+// ═══════════════════════════════════════════════════════════════════════════════
+// MODO INSTALADOR — configura o PC e inicia o serviço
+// ═══════════════════════════════════════════════════════════════════════════════
+function install() {
+  const LINE = '═'.repeat(50);
+  console.log(`\n╔${LINE}╗`);
+  console.log('║  Agente de Impressão — Intranet SGF               ║');
+  console.log('║  Instalador v1.0                                  ║');
+  console.log(`╚${LINE}╝\n`);
+
+  const step = msg => process.stdout.write(`  ► ${msg}... `);
+  const ok   = ()  => console.log('OK ✓');
+  const warn = msg => console.log(`AVISO: ${msg}`);
+
+  try {
+    // 1. Criar diretório
+    step('Criando pasta de instalação');
+    fs.mkdirSync(INSTALL_DIR, { recursive: true });
+    ok();
+
+    // 2. Copiar executável para install dir
+    const exeDest = path.join(INSTALL_DIR, EXE_NAME);
+    step('Copiando executável');
+    try { fs.copyFileSync(process.execPath, exeDest); ok(); }
+    catch (e) { console.log('(já em uso, ignorado)'); }
+
+    // 3. Gravar PS1
+    step('Criando script de impressão');
+    fs.writeFileSync(path.join(INSTALL_DIR, 'imprimir.ps1'), PS1_CONTENT, 'utf8');
+    ok();
+
+    // 4. Tarefa de inicialização automática
+    step('Configurando início automático com o Windows');
+    const exeRun = path.join(INSTALL_DIR, EXE_NAME);
+    const cmd = `schtasks /create /tn "${TASK_NAME}" /tr "\\"${exeRun}\\" ${SERVICE_ARG}" /sc ONLOGON /rl HIGHEST /f`;
+    const r = require('child_process').spawnSync('cmd', ['/c', cmd], { encoding: 'utf8' });
+    if (r.status === 0) { ok(); } else { warn('execute como Administrador para início automático'); }
+
+    // 5. Inicia o serviço agora
+    step('Iniciando agente');
+    spawn(exeRun, [SERVICE_ARG], { detached: true, stdio: 'ignore', windowsHide: true }).unref();
+    ok();
+
+    console.log(`\n╔${LINE}╗`);
+    console.log('║  ✅  Instalação concluída com sucesso!             ║');
+    console.log(`╠${LINE}╣`);
+    console.log('║  Agente rodando em: http://localhost:9200         ║');
+    console.log('║  Será iniciado automaticamente no próximo login.  ║');
+    console.log(`╚${LINE}╝\n`);
+
+  } catch (e) {
+    console.error('\n  Erro:', e.message || e);
+    console.log('\n❌ Instalação falhou. Tente executar como Administrador.\n');
+  }
+
+  console.log('Pressione ENTER para fechar...');
+  process.stdin.setEncoding('utf8');
+  process.stdin.once('data', () => process.exit(0));
+  process.stdin.resume();
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// MAIN
+// ═══════════════════════════════════════════════════════════════════════════════
+const runningFromInstallDir =
+  process.execPath &&
+  path.dirname(process.execPath).toLowerCase() === INSTALL_DIR.toLowerCase();
+
+if (process.argv.includes(SERVICE_ARG) || runningFromInstallDir) {
+  startService();
+} else {
+  install();
+}

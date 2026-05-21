@@ -63,3 +63,6 @@ cookies.txt
 *.p12
 intranet_db_*.sql
 data/users.json
+
+# Agente de Impressão — binário compilado (hospedado no Supabase)
+agente_impressao/*.exe

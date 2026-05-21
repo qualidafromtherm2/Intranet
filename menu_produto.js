@@ -24983,11 +24983,19 @@ window.openRegistros = async function() {
 
       if (!agentePrinter) {
         if (statusEl) {
-          statusEl.innerHTML = '<span style="color:#f87171;">Agente de impressão não encontrado neste PC.</span> ' +
-            '<a href="/agente-impressao/" target="_blank" rel="noopener noreferrer" style="color:#a78bfa;font-size:.82rem;">'
-            + '<i class="fa-solid fa-arrow-up-right-from-square"></i> Baixar e instalar</a>';
+          // Busca URL do instalador no servidor (configurada via AGENTE_EXE_URL no .env)
+          let exeUrl = '/agente-impressao/agente-impressao-setup.exe';
+          try { const u = await fetch('/api/etiquetas/agente-url'); const uj = await u.json(); if (uj.url) exeUrl = uj.url; } catch { /* usa fallback */ }
+          statusEl.innerHTML =
+            '<div style="background:#1e1b2e;border:1px solid #7c3aed;border-radius:8px;padding:10px 14px;margin-top:6px;">' +
+            '<div style="color:#f87171;font-weight:600;margin-bottom:6px;"><i class="fa-solid fa-triangle-exclamation"></i> Agente de impressão não encontrado neste PC</div>' +
+            '<div style="color:#94a3b8;font-size:.83rem;margin-bottom:8px;">O agente precisa estar rodando no computador onde está a impressora Zebra.</div>' +
+            '<a href="' + exeUrl + '" download="agente-impressao-setup.exe" style="display:inline-flex;align-items:center;gap:6px;background:#7c3aed;color:#fff;padding:7px 14px;border-radius:6px;text-decoration:none;font-size:.85rem;font-weight:600;">' +
+            '<i class="fa-solid fa-download"></i> Baixar instalador (.exe)</a>' +
+            '<span style="color:#64748b;font-size:.76rem;margin-left:10px;">Clique 2× para instalar · depois tente imprimir novamente</span>' +
+            '</div>';
           if (!container) statusEl.style.color = '';
-          clearSt(12000);
+          clearSt(20000);
         }
         return;
       }
@@ -25280,7 +25288,17 @@ window.openRegistros = async function() {
           if (r.ok) { const d = await r.json(); if (d.printer) agentePrinter = d.printer; }
         } catch { /* agente não disponível */ }
         if (!agentePrinter) {
-          showSt('Agente de impressão não encontrado. Instale em: ' + location.origin + '/agente-impressao/', '#f87171');
+          let exeUrl2 = '/agente-impressao/agente-impressao-setup.exe';
+          try { const u2 = await fetch('/api/etiquetas/agente-url'); const uj2 = await u2.json(); if (uj2.url) exeUrl2 = uj2.url; } catch { /* fallback */ }
+          showSt(
+            '<div style="background:#1e1b2e;border:1px solid #7c3aed;border-radius:8px;padding:10px 14px;">' +
+            '<div style="color:#f87171;font-weight:600;margin-bottom:4px;"><i class="fa-solid fa-triangle-exclamation"></i> Agente não encontrado neste PC</div>' +
+            '<a href="' + exeUrl2 + '" download="agente-impressao-setup.exe" style="display:inline-flex;align-items:center;gap:6px;background:#7c3aed;color:#fff;padding:6px 12px;border-radius:6px;text-decoration:none;font-size:.83rem;font-weight:600;margin-top:4px;">' +
+            '<i class="fa-solid fa-download"></i> Baixar instalador (.exe)</a>' +
+            '<span style="color:#64748b;font-size:.75rem;display:block;margin-top:4px;">Clique 2× para instalar · depois tente imprimir novamente</span>' +
+            '</div>',
+            '#f87171'
+          );
           etqMplGerar.disabled = false; etqMplGerar.innerHTML = origHtml; return;
         }
         const usuario = (document.getElementById('userNameDisplay')?.textContent || '').trim();

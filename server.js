@@ -11466,6 +11466,12 @@ app.use('/vendor/xlsx', express.static(path.join(__dirname, 'node_modules/xlsx/d
 // Servir agente de impressão local (download para PCs Windows)
 app.use('/agente-impressao', express.static(path.join(__dirname, 'agente_impressao')));
 
+// Retorna URL pública do instalador Windows do agente de impressão
+app.get('/api/etiquetas/agente-url', (req, res) => {
+  const url = process.env.AGENTE_EXE_URL || null;
+  res.json({ ok: true, url });
+});
+
 // Servir anexos de compras
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
