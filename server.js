@@ -200,6 +200,10 @@ const API_PUBLIC_PREFIXES = [
   '/api/sac/at/tecnico/fechamento/',  // fechamento + evidências + NFe
   '/api/ai/manual-chat',              // chatbot do portal AT
   '/api/sac/whatsapp/webhook',        // webhook Meta WhatsApp Cloud (verificação GET + POST de mensagens)
+  // ── Agente de impressão (auth própria via x-agent-token) ──
+  '/api/etiquetas/agente/heartbeat',  // agente anuncia presença
+  '/api/etiquetas/fila/pendentes',    // agente busca fila para imprimir
+  '/api/etiquetas/fila/confirmar',    // agente confirma impressão
 ];
 function isApiPublic(pathname) {
   if (!pathname.startsWith('/api/')) return true;
