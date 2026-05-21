@@ -15,7 +15,7 @@ const fs     = require('fs');
 const os     = require('os');
 const path   = require('path');
 
-const AGENT_VERSION = '2.1';
+const AGENT_VERSION = '2.3';
 const PORT       = 9200;
 const TASK_NAME  = 'AgenteImpressaoSGF';
 const EXE_NAME   = 'agente-impressao.exe';
@@ -33,6 +33,7 @@ const DEFAULT_CONFIG = {
   serverUrl:    'https://intranet-30av.onrender.com',
   agentToken:   'sgf-agente-2024',
   printer:      '',
+  pcName:       '',          // identificador deste PC na fila (deixe vazio para usar o hostname)
   pollInterval: 5000,
   labelWidth:   100,
   labelHeight:  150,
@@ -353,6 +354,10 @@ function buildConfigHtml(cfg, printers, status) {
         <div class="field">
           <label>URL do servidor</label>
           <input type="url" name="serverUrl" value="${cfg.serverUrl}">
+        </div>
+        <div class="field">
+          <label>Nome deste PC <span style="color:var(--muted);font-size:.78em">(identifica este agente na fila — deve ser único por máquina)</span></label>
+          <input type="text" name="pcName" value="${cfg.pcName || os.hostname()}" placeholder="${os.hostname()}">
         </div>
         <div class="field">
           <label>Token do agente</label>
@@ -746,7 +751,12 @@ function runService() {
     }
 
     return new Promise(resolve => {
-      const extraHdr = { 'x-agent-printer': cfg.printer || '', 'x-agent-version': '2.0', 'x-agent-host': os.hostname() };
+      const extraHdr = {
+        'x-agent-printer':  cfg.printer || '',
+        'x-agent-version':  AGENT_VERSION,
+        'x-agent-host':     os.hostname(),
+        'x-agent-pcname':   cfg.pcName || os.hostname(),  // filtra jobs destinados a este PC
+      };
       apiRequest('GET', '/api/etiquetas/fila/pendentes', null, cfg.agentToken, (err, status, body) => {
         if (err) {
           log(`[poll] Erro de conexão: ${err.message}`);
@@ -763,9 +773,10 @@ function runService() {
         let pending = body.jobs.length;
 
         for (const job of body.jobs) {
-          log(`[poll] Imprimindo job #${job.id} (${job.quantidade} etiqueta(s)) em "${cfg.printer}"`);
+          log(`[poll] Imprimindo job #${job.id} (${job.quantidade} etiqueta(s)) em "${job.impressora || cfg.printer}"`);
+          const targetPrinter = job.impressora || cfg.printer;
           const zplToUse = injectLH(job.zpl, cfg);
-          printZpl(zplToUse, cfg.printer, (err2) => {
+          printZpl(zplToUse, targetPrinter, (err2) => {
             const ok = !err2;
             const erroMsg = err2?.message || null;
             // Atualiza histórico do dia

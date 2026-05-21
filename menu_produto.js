@@ -24562,6 +24562,15 @@ window.openRegistros = async function() {
   let _etqMostrarOcultos = false; // quando true, mostra apenas itens ocultos
   let _etqPrinterPref = null; // impressora preferida salva no localStorage por usuário
 
+  // Analisa preferência do tipo "__AGENT__:pcName:impressora"
+  function _etqParseAgentPref(pref) {
+    if (!pref || !pref.startsWith('__AGENT__:')) return null;
+    const s    = pref.slice('__AGENT__:'.length);
+    const idx  = s.indexOf(':');
+    if (idx === -1) return null;
+    return { pcName: s.slice(0, idx), impressora: s.slice(idx + 1) };
+  }
+
   function _etqPrefKey() {
     const u = (document.getElementById('userNameDisplay')?.textContent || 'user').trim().replace(/\s+/g, '_');
     return `etq_printer_pref_${u}`;
@@ -24580,7 +24589,12 @@ window.openRegistros = async function() {
     const btn = document.getElementById('etqBtnImpressora');
     if (!btn) return;
     if (_etqPrinterPref) {
-      const label = _etqPrinterPref === '__PDF__' ? 'PDF' : _etqPrinterPref === '__BP__' ? 'Local (agente)' : _etqPrinterPref;
+      const agentDest = _etqParseAgentPref(_etqPrinterPref);
+      let label;
+      if (agentDest)                          label = `${agentDest.impressora} (${agentDest.pcName})`;
+      else if (_etqPrinterPref === '__PDF__') label = 'PDF';
+      else if (_etqPrinterPref === '__BP__')  label = 'Local (agente)';
+      else                                    label = _etqPrinterPref;
       btn.title = `Impressora: ${label} — clique para trocar`;
       btn.innerHTML = `<i class="fa-solid fa-print"></i><span class="etq-pref-label">${escapeHtml(label)}</span>`;
       btn.classList.add('etq-pref-set');
@@ -24646,29 +24660,46 @@ window.openRegistros = async function() {
   // Mostra no etqStatus um select com impressoras disponíveis + botão Tentar.
   // Chama onConfirm(printerName) quando o usuário confirma.
   async function _etqMostrarSeletorImpressora(msgErro, onConfirm, container) {
-    // container opcional: quando chamado de dentro de um modal, passar o elemento interno
-    // para que o seletor apareça dentro do modal e não atrás do overlay.
     const el = container || etqStatus;
     if (!el) return;
     el.innerHTML = '<i class="fa-solid fa-spinner fa-spin" style="color:#facc15;"></i> Buscando impressoras...';
     if (!container) el.style.color = '#facc15';
 
     let lista = [];
+    let agentOpts = '';
+    try {
+      // Busca agentes online com suas impressoras
+      const ar = await fetch('/api/etiquetas/agentes-disponiveis', { credentials: 'include' });
+      const ad = await ar.json();
+      const agentes = ad.agentes || [];
+      if (agentes.length > 0) {
+        agentOpts += '<optgroup label="🖨️ Agentes online">';
+        for (const ag of agentes) {
+          for (const imp of (ag.printers || [])) {
+            const val = `__AGENT__:${ag.pcName}:${imp}`;
+            agentOpts += `<option value="${escapeHtml(val)}">${escapeHtml(ag.pcName)} → ${escapeHtml(imp)}</option>`;
+          }
+        }
+        agentOpts += '</optgroup>';
+      } else {
+        // Nenhum agente com nome registrado — usa opção genérica
+        agentOpts = '<option value="__BP__">🖨️ Agente local (qualquer)</option>';
+      }
+    } catch (_) {
+      agentOpts = '<option value="__BP__">🖨️ Agente local (qualquer)</option>';
+    }
+
     try {
       const r = await fetch('/api/etiquetas/impressoras', { credentials: 'include' });
       const d = await r.json();
       lista = d.impressoras || [];
     } catch (_) {}
 
-    // Opções de saída: impressoras físicas do servidor + PDF + ZPL local
     const optPdf = '<option value="__PDF__">📄 PDF (baixar arquivo)</option>';
-    const optBp  = '<option value="__BP__">🖨️ Impressora local (agente)</option>';
     const chkPadraoHtml = `<label style="display:flex;align-items:center;gap:4px;color:#94a3b8;font-size:.78rem;white-space:nowrap;cursor:pointer;"><input type="checkbox" id="_etqChkPadrao" style="accent-color:#7c3aed;"> Salvar como padrão</label>`;
-    // Pré-selecionar a preferência atual, se houver
     const prefAtual = _etqPrinterPref || '';
 
-    if (lista.length === 0) {
-      // Sem CUPS no servidor → redirecionar automaticamente para o agente local
+    if (lista.length === 0 && !agentOpts.includes('<option')) {
       _etqSalvarPref('__BP__');
       if (!container) el.style.color = '';
       el.innerHTML = '<span style="color:#facc15;font-size:.83rem;"><i class="fa-solid fa-spinner fa-spin"></i> Nenhuma impressora CUPS no servidor — usando agente local...</span>';
@@ -24677,15 +24708,14 @@ window.openRegistros = async function() {
       return;
     }
 
-    // Impressoras físicas + opção PDF + opção ZPL no topo
-    const opts = optPdf + optBp + lista.map(p => `<option value="${escapeHtml(p)}"${prefAtual === p ? ' selected' : ''}>${escapeHtml(p)}</option>`).join('');
+    const cupOpts = lista.length ? '<optgroup label="Impressoras servidor">' + lista.map(p => `<option value="${escapeHtml(p)}"${prefAtual === p ? ' selected' : ''}>${escapeHtml(p)}</option>`).join('') + '</optgroup>' : '';
     if (!container) el.style.color = '';
     el.innerHTML = `
       ${msgErro ? `<span style="color:#f87171;font-size:.85rem;">${escapeHtml(msgErro)}</span>` : ''}
       <div style="display:flex;align-items:center;gap:8px;margin-top:6px;flex-wrap:wrap;">
         <label style="color:#94a3b8;font-size:.8rem;white-space:nowrap;">Escolher impressora:</label>
         <select id="_etqSelectImpressora" style="background:#1e293b;color:#f1f5f9;border:1px solid #334155;border-radius:6px;padding:4px 8px;font-size:.85rem;flex:1;min-width:120px;">
-          ${opts}
+          ${optPdf}${agentOpts}${cupOpts}
         </select>
         ${chkPadraoHtml}
         <button id="_etqBtnTentarImpressora" style="background:#7c3aed;color:#fff;border:none;border-radius:6px;padding:5px 12px;font-size:.82rem;cursor:pointer;white-space:nowrap;">
@@ -24698,12 +24728,12 @@ window.openRegistros = async function() {
     // Pré-selecionar preferência salva
     if (prefAtual) {
       const sel = document.getElementById('_etqSelectImpressora');
-      if (sel && prefAtual !== '__PDF__' && prefAtual !== '__BP__') sel.value = prefAtual;
+      if (sel) sel.value = prefAtual;
     }
     document.getElementById('_etqBtnTentarImpressora')?.addEventListener('click', () => {
-      const sel = document.getElementById('_etqSelectImpressora');
+      const sel     = document.getElementById('_etqSelectImpressora');
       const printer = sel?.value || '';
-      const salvar = document.getElementById('_etqChkPadrao')?.checked;
+      const salvar  = document.getElementById('_etqChkPadrao')?.checked;
       el.innerHTML = ''; if (!container) el.style.color = '';
       if (salvar && printer) _etqSalvarPref(printer);
       if (printer) onConfirm(printer);
@@ -24712,6 +24742,7 @@ window.openRegistros = async function() {
       el.innerHTML = ''; if (!container) el.style.color = '';
     });
   }
+
 
   function _etqRenderCards(etiquetas) {
     if (!etqGrid) return;
@@ -24935,7 +24966,7 @@ window.openRegistros = async function() {
   }
 
   // ── Browser Print: envia ZPL direto à impressora local via Zebra Browser Print ──
-  async function _etqImprimirBrowserPrint(ids, btnRef, container) {
+  async function _etqImprimirBrowserPrint(ids, btnRef, container, agentDest = null) {
     const statusEl = container || etqStatus;
     const showSt = (msg, cor = '#94a3b8') => {
       if (!statusEl) return;
@@ -24947,21 +24978,22 @@ window.openRegistros = async function() {
     const origBtn = btnRef ? btnRef.innerHTML : null;
     if (btnRef) { btnRef.disabled = true; btnRef.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>'; }
     try {
-      // Apenas enfileira — o agente faz polling e imprime sozinho.
-      // Se o agente não estiver rodando, a etiqueta fica na fila e será impressa quando o agente subir.
       const usuario = (document.getElementById('userNameDisplay')?.textContent || '').trim();
       showSt('Enviando para fila de impressão...', '#facc15');
+      const body = { ids, usuario };
+      if (agentDest) { body.destino_agente = agentDest.pcName; body.impressora = agentDest.impressora; }
       const resp = await fetch('/api/etiquetas/fila', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
-        body: JSON.stringify({ ids, usuario }),
+        body: JSON.stringify(body),
       });
       if (!resp.ok) { const e = await resp.json().catch(() => ({})); throw new Error(e.error || `Erro ${resp.status}`); }
       const data = await resp.json();
       if (!data.ok) throw new Error(data.error || 'Falha ao enfileirar');
 
-      showSt(`✅ ${data.quantidade} etiqueta(s) enfileirada(s). O agente está imprimindo...`, '#4ade80');
+      const destLabel = agentDest ? ` → ${agentDest.impressora} (${agentDest.pcName})` : '';
+      showSt(`✅ ${data.quantidade} etiqueta(s) enfileirada(s)${destLabel}. O agente está imprimindo...`, '#4ade80');
       clearSt(5000);
       await _etqCarregar(etqBusca?.value || '');
     } catch (err) {
@@ -24977,9 +25009,10 @@ window.openRegistros = async function() {
     if (!ids || ids.length === 0) return;
     // Aplicar preferência salva se nenhuma impressora foi explicitamente passada
     if (printer === null || printer === undefined) printer = _etqPrinterPref || null;
-    // Impressão local via Zebra Browser Print
-    if (printer === '__BP__') {
-      await _etqImprimirBrowserPrint(ids, btnRef);
+    // Impressão via agente: __BP__ genérico ou __AGENT__:pcName:impressora
+    const agentDest = _etqParseAgentPref(printer);
+    if (printer === '__BP__' || agentDest) {
+      await _etqImprimirBrowserPrint(ids, btnRef, null, agentDest);
       return;
     }
     // Opção PDF: baixa via fetch para saber quando concluiu e recarregar a lista
@@ -25067,7 +25100,9 @@ window.openRegistros = async function() {
     _etqMostrarSeletorImpressora(null, (p) => {
       _etqSalvarPref(p);
       if (etqStatus) {
-        const label = p === '__PDF__' ? 'PDF' : p === '__BP__' ? 'Local (agente)' : p;
+        const agentDest = _etqParseAgentPref(p);
+        const label = agentDest ? `${agentDest.impressora} (${agentDest.pcName})` :
+                      p === '__PDF__' ? 'PDF' : p === '__BP__' ? 'Local (agente)' : p;
         etqStatus.textContent = `Impressora padrão salva: ${label}`;
         etqStatus.style.color = '#4ade80';
         setTimeout(() => { if (etqStatus) { etqStatus.textContent = ''; etqStatus.style.color = ''; } }, 3000);
@@ -25309,34 +25344,40 @@ window.openRegistros = async function() {
     if (_etqPrinterPref) {
       await _etqMplImprimirComImpressora(_etqMplIdAtual, m, _etqPrinterPref);
     } else {
-      _etqMostrarSeletorImpressora(null, (p) => _etqMplImprimirComImpressora(_etqMplIdAtual, m, p), etqMplPreview);
+      _etqMostrarSeletorImpressora(null, (p) => {
+        _etqSalvarPref(p);
+        _etqMplImprimirComImpressora(_etqMplIdAtual, m, p);
+      }, etqMplPreview);
     }
   });
 
   // Dispara impressão múltiplo, com retry para impressora alternativa
   async function _etqMplImprimirComImpressora(idEtq, multiplo, printer) {
     if (!etqMplGerar) return;
-    // Impressão local via Zebra Browser Print (com multiplo)
-    if (printer === '__BP__') {
+    // Apenas enfileira — o agente faz polling e imprime sozinho
+    if (printer === '__BP__' || _etqParseAgentPref(printer)) {
       const origHtml = etqMplGerar.innerHTML;
       etqMplGerar.disabled = true;
       etqMplGerar.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Enviando...';
       try {
         const statusEl = etqMplPreview;
         const showSt = (msg, cor = '#94a3b8') => { if (statusEl) statusEl.innerHTML = `<span style="color:${cor};">${escapeHtml(msg)}</span>`; };
-        // Apenas enfileira — o agente faz polling e imprime sozinho
         const usuario = (document.getElementById('userNameDisplay')?.textContent || '').trim();
         showSt('Enviando para fila...', '#facc15');
+        const agentDest = _etqParseAgentPref(printer);
+        const filaBody = { ids: [idEtq], multiplo, usuario };
+        if (agentDest) { filaBody.destino_agente = agentDest.pcName; filaBody.impressora = agentDest.impressora; }
         const resp = await fetch('/api/etiquetas/fila', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           credentials: 'include',
-          body: JSON.stringify({ ids: [idEtq], multiplo, usuario }),
+          body: JSON.stringify(filaBody),
         });
         if (!resp.ok) { const e = await resp.json().catch(() => ({})); throw new Error(e.error || `Erro ${resp.status}`); }
         const data = await resp.json();
         if (!data.ok) throw new Error(data.error || 'Falha ao enfileirar');
-        showSt(`✅ ${data.quantidade} etiqueta(s) na fila. Imprimindo...`, '#4ade80');
+        const destLabel = agentDest ? ` → ${agentDest.impressora} (${agentDest.pcName})` : '';
+        showSt(`✅ ${data.quantidade} etiqueta(s) na fila${destLabel}. Imprimindo...`, '#4ade80');
         setTimeout(() => { if (etqMplPreview) etqMplPreview.innerHTML = ''; }, 5000);
         _etqMplFecharFn();
         await _etqCarregar(etqBusca?.value || '');

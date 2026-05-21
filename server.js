@@ -201,9 +201,10 @@ const API_PUBLIC_PREFIXES = [
   '/api/ai/manual-chat',              // chatbot do portal AT
   '/api/sac/whatsapp/webhook',        // webhook Meta WhatsApp Cloud (verificação GET + POST de mensagens)
   // ── Agente de impressão (auth própria via x-agent-token) ──
-  '/api/etiquetas/agente/heartbeat',  // agente anuncia presença
-  '/api/etiquetas/fila/pendentes',    // agente busca fila para imprimir
-  '/api/etiquetas/fila/confirmar',    // agente confirma impressão
+  '/api/etiquetas/agente/heartbeat',      // agente anuncia presença
+  '/api/etiquetas/agentes-disponiveis',   // frontend busca agentes online
+  '/api/etiquetas/fila/pendentes',        // agente busca fila para imprimir
+  '/api/etiquetas/fila/confirmar',        // agente confirma impressão
 ];
 function isApiPublic(pathname) {
   if (!pathname.startsWith('/api/')) return true;
@@ -10572,18 +10573,42 @@ app.use('/etiquetas', express.static(etiquetasRoot));
 const AGENTE_TOKEN = process.env.AGENTE_TOKEN || 'sgf-agente-2024';
 
 // Estado em memória do agente ativo (sem DB — reseta com restart do servidor)
-const _agenteAtivo = { ts: 0, printer: '', host: '', version: '' };
+const _agenteAtivo  = { ts: 0, printer: '', host: '', version: '' };
+// Map de agentes por pcName — multi-PC support
+const _agentesOnline = new Map(); // key: pcName → { pcName, printers, lastSeen, host, version }
 
 // POST /api/etiquetas/agente/heartbeat — agente anuncia que está online
 app.post('/api/etiquetas/agente/heartbeat', express.json(), (req, res) => {
   const token = req.headers['x-agent-token'];
   if (token !== AGENTE_TOKEN) return res.status(401).json({ error: 'Token inválido' });
-  const { printer = '', version = '?', host = '' } = req.body || {};
+  const { printer = '', version = '?', host = '', pcName = '', printers = [] } = req.body || {};
+  // Compatibilidade retroativa — agente único
   _agenteAtivo.ts      = Date.now();
   _agenteAtivo.printer = printer || _agenteAtivo.printer;
   _agenteAtivo.host    = host || req.ip;
   _agenteAtivo.version = version;
+  // Registro multi-agente
+  const nome = pcName || host || req.ip;
+  _agentesOnline.set(nome, {
+    pcName:    nome,
+    printers:  Array.isArray(printers) && printers.length ? printers : (printer ? [printer] : []),
+    lastSeen:  Date.now(),
+    host:      host || req.ip,
+    version,
+  });
   res.json({ ok: true });
+});
+
+// GET /api/etiquetas/agentes-disponiveis — lista agentes online com suas impressoras
+app.get('/api/etiquetas/agentes-disponiveis', (req, res) => {
+  const agora      = Date.now();
+  const disponiveis = [];
+  for (const ag of _agentesOnline.values()) {
+    if (agora - ag.lastSeen < 120000) {   // online = visto nos últimos 2 min
+      disponiveis.push({ pcName: ag.pcName, printers: ag.printers, version: ag.version, online: true });
+    }
+  }
+  res.json({ ok: true, agentes: disponiveis });
 });
 
 // GET /api/etiquetas/agente/online — frontend verifica se há agente ativo
@@ -10659,10 +10684,12 @@ app.post('/api/etiquetas/fila', express.json(), async (req, res) => {
       [ids]
     );
 
+    const destiAg = String(req.body?.destino_agente || '').trim() || null;
+    const impres   = String(req.body?.impressora      || '').trim() || null;
     const filaIns = await pool.query(
-      `INSERT INTO etiqueta."ETQ_fila_impressao" (etq_ids, multiplo, usuario, zpl, quantidade)
-       VALUES ($1, $2, $3, $4, $5) RETURNING id`,
-      [ids, multiplo, usuario, zplBlocks.join('\n'), zplBlocks.length]
+      `INSERT INTO etiqueta."ETQ_fila_impressao" (etq_ids, multiplo, usuario, zpl, quantidade, destino_agente, impressora)
+       VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
+      [ids, multiplo, usuario, zplBlocks.join('\n'), zplBlocks.length, destiAg, impres]
     );
 
     res.json({ ok: true, fila_id: filaIns.rows[0].id, quantidade: zplBlocks.length });
@@ -10676,15 +10703,19 @@ app.post('/api/etiquetas/fila', express.json(), async (req, res) => {
 app.get('/api/etiquetas/fila/pendentes', async (req, res) => {
   const token = req.headers['x-agent-token'] || req.query.token;
   if (token !== AGENTE_TOKEN) return res.status(401).json({ error: 'Token inválido' });
-  // Atualiza heartbeat do agente a cada poll
+  // Atualiza heartbeat retrocompat
   _agenteAtivo.ts      = Date.now();
   _agenteAtivo.printer = req.headers['x-agent-printer'] || _agenteAtivo.printer;
   _agenteAtivo.host    = req.headers['x-agent-host']    || req.ip;
   _agenteAtivo.version = req.headers['x-agent-version'] || _agenteAtivo.version;
+  const pcName = (req.headers['x-agent-pcname'] || '').trim();
   try {
     const r = await pool.query(
-      `SELECT id, zpl, quantidade FROM etiqueta."ETQ_fila_impressao"
-        WHERE status = 'pendente' ORDER BY criado_em ASC LIMIT 10`
+      `SELECT id, zpl, quantidade, impressora FROM etiqueta."ETQ_fila_impressao"
+        WHERE status = 'pendente'
+          AND ($1 = '' OR destino_agente IS NULL OR destino_agente = $1)
+        ORDER BY criado_em ASC LIMIT 10`,
+      [pcName]
     );
     // Marca como 'imprimindo' para evitar dupla entrega
     if (r.rows.length) {
