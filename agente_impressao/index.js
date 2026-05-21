@@ -131,7 +131,7 @@ function listarImpressoras(cb) {
 }
 
 // ─── Requisição HTTPS para o servidor ────────────────────────────────────────
-function apiRequest(method, urlPath, body, token, cb) {
+function apiRequest(method, urlPath, body, token, cb, extraHeaders = {}) {
   const cfg = readConfig();
   const serverUrl = cfg.serverUrl.replace(/\/$/, '');
   const fullUrl = `${serverUrl}${urlPath}`;
@@ -148,6 +148,7 @@ function apiRequest(method, urlPath, body, token, cb) {
     headers: {
       'Content-Type': 'application/json',
       'x-agent-token': token || cfg.agentToken,
+      ...extraHeaders,
       ...(bodyStr ? { 'Content-Length': Buffer.byteLength(bodyStr) } : {}),
     },
     timeout: 15000,
@@ -382,6 +383,16 @@ function runService() {
   log('=== Agente SGF v2.0 iniciando (modo serviço) ===');
   log(`INSTALL_DIR: ${INSTALL_DIR}`);
 
+  // ─── Heartbeat ─────────────────────────────────────────────────────────────
+  function sendHeartbeat() {
+    const c = readConfig();
+    apiRequest('POST', '/api/etiquetas/agente/heartbeat',
+      { printer: c.printer || '', version: '2.0', host: os.hostname() },
+      c.agentToken, () => {});
+  }
+  sendHeartbeat();                          // imediato ao iniciar
+  setInterval(sendHeartbeat, 30000);        // a cada 30s
+
   // Estado em memória
   const state = {
     polling: false,
@@ -417,6 +428,7 @@ function runService() {
     }
 
     return new Promise(resolve => {
+      const extraHdr = { 'x-agent-printer': cfg.printer || '', 'x-agent-version': '2.0', 'x-agent-host': os.hostname() };
       apiRequest('GET', '/api/etiquetas/fila/pendentes', null, cfg.agentToken, (err, status, body) => {
         if (err) {
           log(`[poll] Erro de conexão: ${err.message}`);
@@ -454,7 +466,7 @@ function runService() {
             if (pending === 0) resolve();
           });
         }
-      });
+      }, extraHdr);
     });
   }
 
@@ -610,11 +622,19 @@ async function install() {
       ok();
     }
 
-    // 4. Tarefa de inicialização automática
+    // 4. Criar script PS1 launcher (inicia serviço sem janela de console)
+    step('Criando launcher sem janela');
+    const exeRun     = path.join(INSTALL_DIR, EXE_NAME);
+    const ps1Path    = path.join(INSTALL_DIR, 'start-service.ps1');
+    const ps1Content = `Start-Process -FilePath "${exeRun.replace(/\\/g, '\\\\')}" -ArgumentList "--service" -WindowStyle Hidden\r\n`;
+    fs.writeFileSync(ps1Path, ps1Content, 'utf8');
+    ok();
+
+    // 5. Tarefa de inicialização automática (usa PS1 para iniciar sem janela)
     step('Configurando início automático com o Windows');
-    const exeRun = path.join(INSTALL_DIR, EXE_NAME);
-    const cmd = `schtasks /create /tn "${TASK_NAME}" /tr "\\"${exeRun}\\" --service" /sc ONLOGON /rl HIGHEST /f`;
-    const r = spawnSync('cmd', ['/c', cmd], { encoding: 'utf8' });
+    const taskTr = `powershell.exe -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "${ps1Path}"`;
+    const schtaskCmd = `schtasks /create /tn "${TASK_NAME}" /tr "${taskTr}" /sc ONLOGON /rl HIGHEST /f`;
+    const r = spawnSync('cmd', ['/c', schtaskCmd], { encoding: 'utf8' });
     if (r.status === 0) { ok(); } else { warn('execute como Administrador para início automático'); }
 
     // 5. Criar atalho na área de trabalho (abre o browser na UI)
@@ -637,14 +657,13 @@ $Shortcut.Save()
     try { fs.unlinkSync(tmpPs); } catch {}
     if (rsShortcut.status === 0) { ok(); } else { warn('não foi possível criar atalho automático'); }
 
-    // 6. Inicia o serviço agora
+    // 7. Inicia o serviço agora via PowerShell (sem janela de console)
     step('Iniciando agente em background');
     try {
-      const child = spawn(exeRun, ['--service'], { detached: true, stdio: 'ignore', windowsHide: true });
-      child.on('error', e => {
-        try { fs.appendFileSync(path.join(INSTALL_DIR, 'install.log'), `[${new Date().toISOString()}] Spawn error: ${e.message}\n`); } catch {}
-      });
-      child.unref();
+      // PowerShell Start-Process com -WindowStyle Hidden é mais confiável que spawn
+      spawnSync('powershell.exe',
+        ['-NonInteractive', '-WindowStyle', 'Hidden', '-ExecutionPolicy', 'Bypass', '-File', ps1Path],
+        { encoding: 'utf8', windowsHide: true });
       ok();
     } catch (spawnErr) {
       console.log(`AVISO: ${spawnErr.message}`);

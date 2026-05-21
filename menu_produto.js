@@ -24947,18 +24947,30 @@ window.openRegistros = async function() {
     const origBtn = btnRef ? btnRef.innerHTML : null;
     if (btnRef) { btnRef.disabled = true; btnRef.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>'; }
     try {
-      // 1. Verificar se o agente está instalado neste PC (v2.0 em /api/status, v1.0 em /status)
+      // 1. Verificar agente — primeiro via backend (funciona em HTTPS), depois localhost (fallback)
       showSt('Verificando agente de impressão...', '#facc15');
       let agenteOk = false;
       let agenteVersion = null;
       let agentePrinter = null;
-      for (const host of ['localhost', '127.0.0.1']) {
-        try {
-          const r = await fetch(`http://${host}:9200/api/status`, { signal: AbortSignal.timeout(3000) });
-          if (r.ok) { const d = await r.json(); agenteOk = true; agenteVersion = d.version || '2.0'; agentePrinter = d.printer || null; break; }
-        } catch { /* tenta próximo */ }
+
+      // Verificação primária: backend informa se agente fez heartbeat recente
+      try {
+        const ag = await fetch('/api/etiquetas/agente/online', { credentials: 'include', signal: AbortSignal.timeout(5000) });
+        if (ag.ok) {
+          const agd = await ag.json();
+          if (agd.online) { agenteOk = true; agenteVersion = agd.version || '2.0'; agentePrinter = agd.printer || null; }
+        }
+      } catch { /* backend indisponível, tenta localhost */ }
+
+      // Fallback: tenta localhost diretamente (v2.0 /api/status, v1.0 /status)
+      if (!agenteOk) {
+        for (const host of ['localhost', '127.0.0.1']) {
+          try {
+            const r = await fetch(`http://${host}:9200/api/status`, { signal: AbortSignal.timeout(3000) });
+            if (r.ok) { const d = await r.json(); agenteOk = true; agenteVersion = d.version || '2.0'; agentePrinter = d.printer || null; break; }
+          } catch { /* tenta próximo */ }
+        }
       }
-      // Fallback: detecta agente v1.0 (só responde em /status)
       if (!agenteOk) {
         for (const host of ['localhost', '127.0.0.1']) {
           try {
@@ -25284,15 +25296,21 @@ window.openRegistros = async function() {
       try {
         const statusEl = etqMplPreview;
         const showSt = (msg, cor = '#94a3b8') => { if (statusEl) statusEl.innerHTML = `<span style="color:${cor};">${escapeHtml(msg)}</span>`; };
-        // Verificar agente v2.0 (/api/status) e v1.0 (/status) para retrocompat
+        // Verificar agente — backend primeiro (funciona em HTTPS), depois localhost
         let agenteOk = false;
         let agenteVersion = null;
         let agentePrinter = null;
-        for (const host of ['localhost', '127.0.0.1']) {
-          try {
-            const r = await fetch(`http://${host}:9200/api/status`, { signal: AbortSignal.timeout(3000) });
-            if (r.ok) { const d = await r.json(); agenteOk = true; agenteVersion = d.version || '2.0'; agentePrinter = d.printer || null; break; }
-          } catch { /* tenta próximo */ }
+        try {
+          const ag2 = await fetch('/api/etiquetas/agente/online', { credentials: 'include', signal: AbortSignal.timeout(5000) });
+          if (ag2.ok) { const agd2 = await ag2.json(); if (agd2.online) { agenteOk = true; agenteVersion = agd2.version || '2.0'; agentePrinter = agd2.printer || null; } }
+        } catch { /* fallback localhost */ }
+        if (!agenteOk) {
+          for (const host of ['localhost', '127.0.0.1']) {
+            try {
+              const r = await fetch(`http://${host}:9200/api/status`, { signal: AbortSignal.timeout(3000) });
+              if (r.ok) { const d = await r.json(); agenteOk = true; agenteVersion = d.version || '2.0'; agentePrinter = d.printer || null; break; }
+            } catch { /* tenta próximo */ }
+          }
         }
         if (!agenteOk) {
           for (const host of ['localhost', '127.0.0.1']) {

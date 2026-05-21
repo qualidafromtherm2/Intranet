@@ -10567,6 +10567,33 @@ app.use('/etiquetas', express.static(etiquetasRoot));
 // ── Token simples de autenticação para o agente de impressão ─────────────────
 const AGENTE_TOKEN = process.env.AGENTE_TOKEN || 'sgf-agente-2024';
 
+// Estado em memória do agente ativo (sem DB — reseta com restart do servidor)
+const _agenteAtivo = { ts: 0, printer: '', host: '', version: '' };
+
+// POST /api/etiquetas/agente/heartbeat — agente anuncia que está online
+app.post('/api/etiquetas/agente/heartbeat', express.json(), (req, res) => {
+  const token = req.headers['x-agent-token'];
+  if (token !== AGENTE_TOKEN) return res.status(401).json({ error: 'Token inválido' });
+  const { printer = '', version = '?', host = '' } = req.body || {};
+  _agenteAtivo.ts      = Date.now();
+  _agenteAtivo.printer = printer || _agenteAtivo.printer;
+  _agenteAtivo.host    = host || req.ip;
+  _agenteAtivo.version = version;
+  res.json({ ok: true });
+});
+
+// GET /api/etiquetas/agente/online — frontend verifica se há agente ativo
+app.get('/api/etiquetas/agente/online', (req, res) => {
+  const online = _agenteAtivo.ts > 0 && (Date.now() - _agenteAtivo.ts) < 90000;
+  res.json({
+    online,
+    printer:  _agenteAtivo.printer  || null,
+    host:     _agenteAtivo.host     || null,
+    version:  _agenteAtivo.version  || null,
+    lastSeen: _agenteAtivo.ts ? new Date(_agenteAtivo.ts).toISOString() : null,
+  });
+});
+
 // POST /api/etiquetas/fila — enfileira impressão (chamado pelo frontend)
 app.post('/api/etiquetas/fila', express.json(), async (req, res) => {
   try {
@@ -10645,6 +10672,11 @@ app.post('/api/etiquetas/fila', express.json(), async (req, res) => {
 app.get('/api/etiquetas/fila/pendentes', async (req, res) => {
   const token = req.headers['x-agent-token'] || req.query.token;
   if (token !== AGENTE_TOKEN) return res.status(401).json({ error: 'Token inválido' });
+  // Atualiza heartbeat do agente a cada poll
+  _agenteAtivo.ts      = Date.now();
+  _agenteAtivo.printer = req.headers['x-agent-printer'] || _agenteAtivo.printer;
+  _agenteAtivo.host    = req.headers['x-agent-host']    || req.ip;
+  _agenteAtivo.version = req.headers['x-agent-version'] || _agenteAtivo.version;
   try {
     const r = await pool.query(
       `SELECT id, zpl, quantidade FROM etiqueta."ETQ_fila_impressao"
