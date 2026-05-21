@@ -650,16 +650,19 @@ $Shortcut.Save()
       console.log(`AVISO: ${spawnErr.message}`);
     }
 
-    // 7. Aguarda 3s e verifica se o serviço subiu
+    // 7. Aguarda serviço iniciar — tenta por até 10s (poll a cada 1s)
     step('Verificando serviço em localhost:' + PORT);
-    await new Promise(res => setTimeout(res, 3000));
-    const serviceOk = await new Promise(resolve => {
-      const req = http.get({ hostname: '127.0.0.1', port: PORT, path: '/api/status', timeout: 3000 }, r => {
-        resolve(r.statusCode === 200); r.resume();
+    let serviceOk = false;
+    for (let _i = 0; _i < 10 && !serviceOk; _i++) {
+      await new Promise(res => setTimeout(res, 1000));
+      serviceOk = await new Promise(resolve => {
+        const req = http.get({ hostname: '127.0.0.1', port: PORT, path: '/api/status', timeout: 2000 }, r => {
+          resolve(r.statusCode === 200); r.resume();
+        });
+        req.on('error', () => resolve(false));
+        req.on('timeout', () => { req.destroy(); resolve(false); });
       });
-      req.on('error', () => resolve(false));
-      req.on('timeout', () => { req.destroy(); resolve(false); });
-    });
+    }
 
     if (serviceOk) {
       ok();
@@ -668,9 +671,28 @@ $Shortcut.Save()
       spawnSync('cmd', ['/c', 'start', '', `http://localhost:${PORT}`], { windowsHide: true });
       ok();
     } else {
-      console.log('NÃO DETECTADO');
-      console.log(`  ⚠️  O agente não respondeu em localhost:${PORT}.`);
-      console.log(`  → Tente abrir manualmente: http://localhost:${PORT}`);
+      // Serviço não subiu em background (provavelmente bloqueado pelo antivírus)
+      // → inicia o serviço NESTA janela como fallback automático
+      const SEP = '═'.repeat(62);
+      console.log('BLOQUEADO\n');
+      console.log(`╔${SEP}╗`);
+      console.log('║  ⚠️  Windows bloqueou o início automático do agente            ║');
+      console.log(`╠${SEP}╣`);
+      console.log('║  O agente está iniciando NESTA JANELA como alternativa.       ║');
+      console.log('║  ⚠️  MANTENHA ESTA JANELA ABERTA enquanto usar etiquetas.      ║');
+      console.log(`╠${SEP}╣`);
+      console.log('║  Para que funcione em background no próximo login:            ║');
+      console.log('║  1. Pressione  Win + S  e abra  "Segurança do Windows"        ║');
+      console.log('║  2. Proteção contra vírus → Gerenciar configurações           ║');
+      console.log('║  3. Exclusões → Adicionar exclusão → Pasta → selecione:       ║');
+      console.log(`║     ${INSTALL_DIR.padEnd(58)}║`);
+      console.log('║  4. Execute o instalador novamente após adicionar a exclusão. ║');
+      console.log(`╚${SEP}╝\n`);
+      // Abre browser na UI de config
+      spawnSync('cmd', ['/c', 'start', '', `http://localhost:${PORT}`], { windowsHide: true });
+      // Inicia serviço nesta janela (process fica vivo pelo server.listen)
+      runService();
+      return;
     }
 
     console.log(`\n╔${LINE}╗`);
