@@ -535,8 +535,8 @@ function runService() {
       return res.end();
     }
 
-    // GET / — Config UI
-    if (req.method === 'GET' && req.url === '/') {
+    // GET / — Config UI (aceita querystring e hash)
+    if (req.method === 'GET' && (req.url === '/' || req.url.startsWith('/?') || req.url.startsWith('/#'))) {
       listarImpressoras(list => {
         state.printers = list;
         const cfg = readConfig();
@@ -630,6 +630,12 @@ function runService() {
       return;
     }
 
+    // Catch-all: GET desconhecido → redireciona para a UI
+    if (req.method === 'GET') {
+      res.writeHead(302, { Location: '/' });
+      return res.end();
+    }
+
     respJson(res, 404, { error: 'Rota não encontrada' });
   });
 
@@ -657,8 +663,16 @@ async function install() {
 
     // 2. Encerrar versão anterior (se estiver rodando) e copiar executável
     step('Encerrando versão anterior (se houver)');
-    spawnSync('taskkill', ['/IM', EXE_NAME, '/F'], { encoding: 'utf8', windowsHide: true });
-    await new Promise(r => setTimeout(r, 1500));
+    // Mata por nome (todas as variações comuns)
+    for (const name of ['agente-impressao.exe', 'agente-impressao-setup.exe', 'agente-impressao-setup (1).exe', 'agente-impressao-setup (2).exe', 'agente-impressao-setup (3).exe', 'agente-impressao-setup (4).exe']) {
+      spawnSync('taskkill', ['/IM', name, '/F', '/T'], { encoding: 'utf8', windowsHide: true });
+    }
+    // Mata quem estiver escutando na porta 9200 (qualquer processo)
+    try {
+      const ps = `$ErrorActionPreference='SilentlyContinue'; (Get-NetTCPConnection -LocalPort 9200 -State Listen).OwningProcess | Sort-Object -Unique | ForEach-Object { Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue }`;
+      spawnSync('powershell.exe', ['-NonInteractive', '-WindowStyle', 'Hidden', '-ExecutionPolicy', 'Bypass', '-Command', ps], { encoding: 'utf8', windowsHide: true, timeout: 8000 });
+    } catch {}
+    await new Promise(r => setTimeout(r, 1800));
     ok();
 
     const exeDest = path.join(INSTALL_DIR, EXE_NAME);
