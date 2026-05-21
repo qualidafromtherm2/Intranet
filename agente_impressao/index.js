@@ -63,12 +63,41 @@ function log(msg) {
   console.log(msg);
 }
 
-// Injeta ^LH (Label Home offset) no início do ZPL para ajuste de margens
+// Injeta configurações do agente no ZPL:
+//   ^LH  — Label Home offset (ajuste de margens)
+//   ^PW  — Print Width (largura real da etiqueta em dots, sobrescreve valor do servidor)
+//   ^LL  — Label Length (altura real da etiqueta em dots, sobrescreve valor do servidor)
 function injectLH(zpl, cfg) {
+  const DPI = 203;
+  const dpm = DPI / 25.4; // ~7.99 dots/mm
+  let result = zpl;
+
+  // ── Substituir ^PW e ^LL pelos valores configurados ─────────────────────
+  if (cfg.labelWidth && Number(cfg.labelWidth) > 0) {
+    const pw = Math.round(Number(cfg.labelWidth) * dpm);
+    if (/\^PW\d+/i.test(result)) {
+      result = result.replace(/\^PW\d+/gi, `^PW${pw}`);
+    } else {
+      result = result.replace(/(\^XA)/i, `$1\n^PW${pw}`);
+    }
+  }
+  if (cfg.labelHeight && Number(cfg.labelHeight) > 0) {
+    const ll = Math.round(Number(cfg.labelHeight) * dpm);
+    if (/\^LL\d+/i.test(result)) {
+      result = result.replace(/\^LL\d+/gi, `^LL${ll}`);
+    } else {
+      result = result.replace(/(\^XA)/i, `$1\n^LL${ll}`);
+    }
+  }
+
+  // ── Injetar ^LH (offset de origem) ──────────────────────────────────────
   const x = Number(cfg.labelOffsetX) || 0;
   const y = Number(cfg.labelOffsetY) || 0;
-  if (x === 0 && y === 0) return zpl;
-  return zpl.replace(/\^XA/i, `^XA\n^LH${x},${y}`);
+  if (x !== 0 || y !== 0) {
+    result = result.replace(/(\^XA)/i, `$1\n^LH${x},${y}`);
+  }
+
+  return result;
 }
 
 // ─── ZPL via PowerShell (winspool.Drv) ───────────────────────────────────────
@@ -273,11 +302,11 @@ function buildConfigHtml(cfg, printers, status) {
         </div>
         <div class="row2">
           <div class="field">
-            <label>Largura da etiqueta (mm)</label>
+            <label>Largura da etiqueta (mm) <span style="color:var(--muted);font-size:.78em">(define ^PW na impressão)</span></label>
             <input type="number" name="labelWidth" value="${cfg.labelWidth}" min="20" max="300">
           </div>
           <div class="field">
-            <label>Altura da etiqueta (mm)</label>
+            <label>Altura da etiqueta (mm) <span style="color:var(--muted);font-size:.78em">(define ^LL na impressão)</span></label>
             <input type="number" name="labelHeight" value="${cfg.labelHeight}" min="10" max="500">
           </div>
         </div>
@@ -298,7 +327,7 @@ function buildConfigHtml(cfg, printers, status) {
 
         <!-- Offset de margem -->
         <div style="border-top:1px solid var(--border);margin:14px 0 10px;padding-top:12px">
-          <label style="font-weight:600;color:var(--text);margin-bottom:10px;display:block">📐 Ajuste de margem (^LH)</label>
+          <label style="font-weight:600;color:var(--text);margin-bottom:10px;display:block">📐 Ajuste de margem ^LH <span style="color:var(--muted);font-size:.78em">(offset de origem, em dots)</span></label>
           <div class="field">
             <label>Offset horizontal — <b id="offsetXDisplay">${ox}</b> dots</label>
             <input type="range" id="sliderOffsetX" name="labelOffsetX" value="${ox}" min="-200" max="200" step="1" oninput="syncOffset('X',this.value)">
