@@ -37,6 +37,8 @@ const DEFAULT_CONFIG = {
   labelHeight:  150,
   darkness:     20,
   speed:        4,
+  labelOffsetX: 0,
+  labelOffsetY: 0,
 };
 
 function readConfig() {
@@ -58,6 +60,14 @@ function log(msg) {
   const line = `[${new Date().toISOString()}] ${msg}\n`;
   try { fs.appendFileSync(LOG_PATH, line); } catch {}
   console.log(msg);
+}
+
+// Injeta ^LH (Label Home offset) no início do ZPL para ajuste de margens
+function injectLH(zpl, cfg) {
+  const x = Number(cfg.labelOffsetX) || 0;
+  const y = Number(cfg.labelOffsetY) || 0;
+  if (x === 0 && y === 0) return zpl;
+  return zpl.replace(/\^XA/i, `^XA\n^LH${x},${y}`);
 }
 
 // ─── ZPL via PowerShell (winspool.Drv) ───────────────────────────────────────
@@ -174,6 +184,9 @@ function buildConfigHtml(cfg, printers, status) {
     `<option value="${p.replace(/"/g, '&quot;')}"${p === cfg.printer ? ' selected' : ''}>${p}</option>`
   ).join('');
 
+  const ox = Number(cfg.labelOffsetX) || 0;
+  const oy = Number(cfg.labelOffsetY) || 0;
+
   return `<!DOCTYPE html>
 <html lang="pt-br">
 <head>
@@ -188,16 +201,16 @@ function buildConfigHtml(cfg, printers, status) {
   h1{font-size:1.4rem;font-weight:700;display:flex;align-items:center;gap:10px;margin-bottom:4px}
   h1 span.badge{font-size:.7rem;background:var(--accent);color:#fff;padding:3px 8px;border-radius:20px;font-weight:600}
   .subtitle{color:var(--muted);font-size:.85rem;margin-bottom:24px}
-  .grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;max-width:900px}
-  @media(max-width:640px){.grid{grid-template-columns:1fr}}
-  .card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:20px}
-  .card h2{font-size:.95rem;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:14px;display:flex;align-items:center;gap:8px}
-  .card h2 i{color:var(--accent);width:16px;text-align:center}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;max-width:1100px}
+  @media(max-width:700px){.grid{grid-template-columns:1fr}}
+  .card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:20px;margin-bottom:16px}
+  .card h2{font-size:.9rem;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:14px;display:flex;align-items:center;gap:8px}
   .field{margin-bottom:14px}
   label{display:block;font-size:.8rem;color:var(--muted);margin-bottom:5px;font-weight:500}
   input,select{width:100%;background:#0f0e17;border:1px solid var(--border);border-radius:7px;padding:8px 12px;
     color:var(--text);font-size:.9rem;outline:none;transition:border .2s}
   input:focus,select:focus{border-color:var(--accent)}
+  input[type=range]{padding:4px 0;cursor:pointer;accent-color:var(--accent)}
   select option{background:#1a1929}
   .row2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
   .btn{display:inline-flex;align-items:center;gap:6px;padding:9px 18px;border-radius:8px;border:none;
@@ -206,6 +219,9 @@ function buildConfigHtml(cfg, printers, status) {
   .btn-primary:hover{background:var(--accent2)}
   .btn-secondary{background:transparent;color:var(--muted);border:1px solid var(--border)}
   .btn-secondary:hover{border-color:var(--accent);color:var(--text)}
+  .btn-green{background:transparent;color:var(--green);border:1px solid #166534}
+  .btn-green:hover{background:#166534;color:#fff}
+  .btn-row{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}
   .status-row{display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--border);font-size:.88rem}
   .status-row:last-child{border:none}
   .dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
@@ -215,21 +231,37 @@ function buildConfigHtml(cfg, printers, status) {
   @keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
   .toast{position:fixed;bottom:24px;right:24px;background:#1e1b2e;border:1px solid var(--accent);
     border-radius:10px;padding:12px 20px;color:var(--text);font-size:.88rem;font-weight:500;
-    opacity:0;transform:translateY(10px);transition:all .3s;pointer-events:none}
+    opacity:0;transform:translateY(10px);transition:all .3s;pointer-events:none;z-index:999}
   .toast.show{opacity:1;transform:translateY(0)}
   .log-box{background:#0a0a12;border:1px solid var(--border);border-radius:8px;padding:10px 12px;
     font-family:monospace;font-size:.77rem;color:var(--muted);height:120px;overflow-y:auto;white-space:pre-wrap}
+
+  /* Preview de etiqueta */
+  .preview-wrap{position:relative;background:#111;border:1px solid var(--border);border-radius:8px;
+    overflow:hidden;display:flex;align-items:center;justify-content:center;min-height:140px;cursor:move;}
+  .preview-wrap img{display:block;max-width:100%;height:auto;transition:opacity .3s}
+  .preview-placeholder{color:var(--muted);font-size:.82rem;text-align:center;padding:20px}
+  .drag-handle{position:absolute;width:18px;height:18px;border-radius:50%;background:var(--accent);
+    border:2px solid #fff;cursor:grab;top:50%;left:50%;transform:translate(-50%,-50%);z-index:10;
+    box-shadow:0 0 0 3px rgba(124,58,237,.35)}
+  .drag-handle:active{cursor:grabbing}
+  .drag-handle:hover{background:var(--accent2)}
+  .offset-display{font-size:.78rem;color:var(--muted);text-align:center;margin-top:6px}
+
+  /* Histórico */
+  .hist-row{padding:5px 8px;border-bottom:1px solid var(--border);display:flex;gap:8px;align-items:center;font-size:.82rem}
+  .hist-row:last-child{border:none}
 </style>
 </head>
 <body>
 <h1>🖨️ Agente de Impressão SGF <span class="badge">v2.0</span></h1>
-<p class="subtitle">Configuração do agente de impressão — monitora a fila e imprime automaticamente.</p>
+<p class="subtitle">Configuração e monitoramento do agente — monitora a fila e imprime automaticamente.</p>
 
 <div class="grid">
-  <!-- Coluna 1: Config -->
+  <!-- ══ COLUNA 1: Configuração ═══════════════════════════════════════════ -->
   <div>
-    <div class="card" style="margin-bottom:16px">
-      <h2><i>⚙️</i> Configuração de Impressão</h2>
+    <div class="card">
+      <h2>⚙️ Configuração de Impressão</h2>
       <form id="formConfig">
         <div class="field">
           <label>Impressora padrão</label>
@@ -262,12 +294,31 @@ function buildConfigHtml(cfg, printers, status) {
           <label>Intervalo de polling (ms)</label>
           <input type="number" name="pollInterval" value="${cfg.pollInterval}" min="1000" max="60000" step="500">
         </div>
-        <button type="submit" class="btn btn-primary">💾 Salvar configuração</button>
+
+        <!-- Offset de margem -->
+        <div style="border-top:1px solid var(--border);margin:14px 0 10px;padding-top:12px">
+          <label style="font-weight:600;color:var(--text);margin-bottom:10px;display:block">📐 Ajuste de margem (^LH)</label>
+          <div class="field">
+            <label>Offset horizontal — <b id="offsetXDisplay">${ox}</b> dots</label>
+            <input type="range" id="sliderOffsetX" name="labelOffsetX" value="${ox}" min="-200" max="200" step="1" oninput="syncOffset('X',this.value)">
+            <input type="number" id="inputOffsetX" value="${ox}" min="-200" max="200" style="margin-top:5px" oninput="syncOffset('X',this.value)">
+          </div>
+          <div class="field">
+            <label>Offset vertical — <b id="offsetYDisplay">${oy}</b> dots</label>
+            <input type="range" id="sliderOffsetY" name="labelOffsetY" value="${oy}" min="-200" max="200" step="1" oninput="syncOffset('Y',this.value)">
+            <input type="number" id="inputOffsetY" value="${oy}" min="-200" max="200" style="margin-top:5px" oninput="syncOffset('Y',this.value)">
+          </div>
+        </div>
+
+        <div class="btn-row">
+          <button type="submit" class="btn btn-primary">💾 Salvar configuração</button>
+          <button type="button" class="btn btn-secondary" onclick="refreshPreview()">👁 Preview</button>
+        </div>
       </form>
     </div>
 
     <div class="card">
-      <h2><i>🔗</i> Conexão com Servidor</h2>
+      <h2>🔗 Conexão com Servidor</h2>
       <form id="formServer">
         <div class="field">
           <label>URL do servidor</label>
@@ -277,15 +328,18 @@ function buildConfigHtml(cfg, printers, status) {
           <label>Token do agente</label>
           <input type="text" name="agentToken" value="${cfg.agentToken}">
         </div>
-        <button type="submit" class="btn btn-secondary">Salvar conexão</button>
+        <div class="btn-row">
+          <button type="submit" class="btn btn-secondary">Salvar conexão</button>
+        </div>
       </form>
     </div>
   </div>
 
-  <!-- Coluna 2: Status -->
+  <!-- ══ COLUNA 2: Status / Preview / Histórico / Fila / Log ═══════════ -->
   <div>
-    <div class="card" style="margin-bottom:16px">
-      <h2><i>📊</i> Status do Agente</h2>
+    <!-- Status -->
+    <div class="card">
+      <h2>📊 Status do Agente</h2>
       <div class="status-row">
         <div class="dot dot-green"></div>
         <span><b>Serviço:</b> Rodando em localhost:${PORT}</span>
@@ -294,7 +348,7 @@ function buildConfigHtml(cfg, printers, status) {
         <div class="dot ${status.polling ? 'dot-green' : 'dot-red'}"></div>
         <span><b>Polling:</b> ${status.polling ? 'Ativo' : 'Pausado'}</span>
       </div>
-      <div class="status-row">
+      <div class="status-row" id="rowLastPrint">
         <div class="dot dot-${status.lastPrintOk === null ? 'yellow' : status.lastPrintOk ? 'green' : 'red'}"></div>
         <span><b>Última impressão:</b> ${status.lastPrint || 'Nenhuma ainda'}</span>
       </div>
@@ -302,28 +356,65 @@ function buildConfigHtml(cfg, printers, status) {
         <span><b>Impressora ativa:</b> ${cfg.printer || '<span style="color:var(--yellow)">Não configurada</span>'}</span>
       </div>
       <div class="status-row">
-        <span><b>Jobs impressos:</b> ${status.totalPrinted}</span>
-        <span style="margin-left:auto;color:var(--red)"><b>Erros:</b> ${status.totalErrors}</span>
+        <span><b>Jobs impressos:</b> <span id="cntPrinted">${status.totalPrinted}</span></span>
+        <span style="margin-left:auto;color:var(--red)"><b>Erros:</b> <span id="cntErrors">${status.totalErrors}</span></span>
       </div>
-      <div style="margin-top:14px;display:flex;gap:8px">
+      <div class="btn-row">
         <button class="btn btn-secondary" onclick="location.reload()">🔄 Atualizar</button>
-        <button class="btn btn-secondary" onclick="testPrint()">🧪 Teste de impressão</button>
+        <button class="btn btn-secondary" onclick="testPrint()">🧪 Teste</button>
+        <button class="btn btn-green" id="btnReprint" onclick="reprintLast()">🔁 Reimprimir última</button>
       </div>
     </div>
 
-    <div class="card" style="margin-bottom:16px">
-      <h2><i>📋</i> Fila de impressão pendente</h2>
-      <div id="queueBox" style="font-size:.85rem;color:var(--muted);min-height:60px;">Aguardando polling…</div>
-      <div style="margin-top:10px;display:flex;gap:8px;align-items:center">
+    <!-- Preview da última etiqueta -->
+    <div class="card">
+      <h2>🏷️ Preview da última etiqueta</h2>
+      <div class="preview-wrap" id="previewContainer">
+        <img id="labelPreviewImg" src="" alt="" style="display:none;max-width:100%;height:auto">
+        <div class="preview-placeholder" id="previewPlaceholder">
+          Nenhuma etiqueta impressa ainda.<br>
+          <span style="font-size:.75rem">Após imprimir, o preview aparece aqui.</span>
+        </div>
+        <div class="drag-handle" id="dragHandle" title="Arraste para ajustar o offset"></div>
+      </div>
+      <div class="offset-display" id="offsetDisplay">
+        Offset: X=<span id="oxInfo">${ox}</span> Y=<span id="oyInfo">${oy}</span> dots
+        &nbsp;·&nbsp;
+        <span style="font-size:.72rem;color:#555">Arraste o ponto roxo para ajustar</span>
+      </div>
+      <div class="btn-row" style="margin-top:10px">
+        <button class="btn btn-secondary" style="font-size:.8rem" onclick="refreshPreview()">🔄 Atualizar preview</button>
+        <span id="previewStatus" style="font-size:.75rem;color:var(--muted);align-self:center"></span>
+      </div>
+    </div>
+
+    <!-- Histórico de hoje -->
+    <div class="card">
+      <h2>📅 Impressões de hoje</h2>
+      <div id="historyBox" style="max-height:200px;overflow-y:auto">
+        <div style="color:var(--muted);font-size:.82rem;padding:6px 0">Carregando...</div>
+      </div>
+      <div class="btn-row" style="margin-top:10px">
+        <button class="btn btn-secondary" style="font-size:.78rem" onclick="refreshHistory()">🔄 Atualizar</button>
+        <span id="histCount" style="font-size:.75rem;color:var(--muted);align-self:center"></span>
+      </div>
+    </div>
+
+    <!-- Fila pendente -->
+    <div class="card">
+      <h2>📋 Fila de impressão pendente</h2>
+      <div id="queueBox" style="font-size:.85rem;color:var(--muted);min-height:60px">Aguardando polling…</div>
+      <div class="btn-row" style="margin-top:10px">
         <button class="btn btn-secondary" style="font-size:.78rem" onclick="reloadQueue()">🔄 Atualizar agora</button>
         <span id="queueAt" style="font-size:.72rem;color:var(--muted);margin-left:auto"></span>
       </div>
     </div>
 
+    <!-- Log -->
     <div class="card">
-      <h2><i>📋</i> Log recente</h2>
+      <h2>📋 Log recente</h2>
       <div class="log-box" id="logBox">${status.recentLog || 'Nenhum log ainda.'}</div>
-      <div style="margin-top:10px;display:flex;gap:8px">
+      <div class="btn-row" style="margin-top:10px">
         <button class="btn btn-secondary" style="font-size:.78rem" onclick="reloadLog()">🔄 Recarregar log</button>
       </div>
     </div>
@@ -333,22 +424,25 @@ function buildConfigHtml(cfg, printers, status) {
 <div class="toast" id="toast"></div>
 
 <script>
+// ── Utilitários ───────────────────────────────────────────────────────────────
 function toast(msg, ok=true) {
   const t = document.getElementById('toast');
   t.textContent = (ok ? '✅ ' : '❌ ') + msg;
   t.style.borderColor = ok ? 'var(--green)' : 'var(--red)';
   t.classList.add('show');
-  setTimeout(() => t.classList.remove('show'), 3000);
+  setTimeout(() => t.classList.remove('show'), 3500);
 }
 
+// ── Salvar Config ─────────────────────────────────────────────────────────────
 document.getElementById('formConfig').addEventListener('submit', async e => {
   e.preventDefault();
   const fd = new FormData(e.target);
   const data = Object.fromEntries(fd.entries());
-  ['labelWidth','labelHeight','darkness','speed','pollInterval'].forEach(k => data[k] = Number(data[k]));
+  ['labelWidth','labelHeight','darkness','speed','pollInterval','labelOffsetX','labelOffsetY'].forEach(k => data[k] = Number(data[k]));
   const r = await fetch('/api/config', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(data) });
   const j = await r.json();
   toast(j.ok ? 'Configuração salva!' : (j.error || 'Erro'), j.ok);
+  if (j.ok) { document.getElementById('oxInfo').textContent = data.labelOffsetX; document.getElementById('oyInfo').textContent = data.labelOffsetY; setTimeout(refreshPreview, 400); }
 });
 
 document.getElementById('formServer').addEventListener('submit', async e => {
@@ -357,22 +451,142 @@ document.getElementById('formServer').addEventListener('submit', async e => {
   const data = Object.fromEntries(fd.entries());
   const r = await fetch('/api/config', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(data) });
   const j = await r.json();
-  toast(j.ok ? 'Conexão salva! Agente reiniciará o polling.' : (j.error || 'Erro'), j.ok);
+  toast(j.ok ? 'Conexão salva!' : (j.error || 'Erro'), j.ok);
 });
 
+// ── Offset sliders + inputs sincronizados ─────────────────────────────────────
+function syncOffset(axis, val) {
+  val = parseInt(val) || 0;
+  document.getElementById('slider' + 'Offset' + axis).value = val;
+  document.getElementById('input'  + 'Offset' + axis).value = val;
+  document.getElementById('offset' + axis + 'Display').textContent = val;
+  document.getElementById(axis === 'X' ? 'oxInfo' : 'oyInfo').textContent = val;
+  updateHandlePosition();
+  clearTimeout(window._prevTimer);
+  window._prevTimer = setTimeout(refreshPreview, 700);
+}
+
+// ── Preview da etiqueta ───────────────────────────────────────────────────────
+async function refreshPreview() {
+  const img = document.getElementById('labelPreviewImg');
+  const ph  = document.getElementById('previewPlaceholder');
+  const st  = document.getElementById('previewStatus');
+  if (!img) return;
+  if (st) st.textContent = 'Carregando preview...';
+  const src = '/api/label-preview?t=' + Date.now();
+  // Verifica se tem etiqueta
+  const probe = await fetch(src).catch(() => null);
+  if (!probe || !probe.ok || probe.status === 404) {
+    img.style.display = 'none';
+    if (ph) ph.style.display = '';
+    if (st) st.textContent = 'Nenhuma etiqueta disponível ainda.';
+    return;
+  }
+  img.src = src;
+  img.style.display = 'block';
+  if (ph) ph.style.display = 'none';
+  img.onload = () => { img.style.opacity = '1'; if (st) st.textContent = ''; };
+  img.onerror = () => { img.style.opacity = '.3'; if (st) st.textContent = 'Erro ao gerar preview (sem internet?).'; };
+}
+
+// ── Posicionamento do drag-handle ─────────────────────────────────────────────
+function updateHandlePosition() {
+  const handle = document.getElementById('dragHandle');
+  const container = document.getElementById('previewContainer');
+  if (!handle || !container) return;
+  const ox = parseInt(document.getElementById('inputOffsetX').value) || 0;
+  const oy = parseInt(document.getElementById('inputOffsetY').value) || 0;
+  const labelWidthMm = parseFloat(document.querySelector('[name=labelWidth]').value) || 100;
+  const dotsPerPx = (labelWidthMm * 8) / (container.offsetWidth || 280);
+  const pxX = Math.round(ox / (dotsPerPx || 1));
+  const pxY = Math.round(oy / (dotsPerPx || 1));
+  // Centralizar handle + deslocar pelo offset
+  const cx = container.offsetWidth  / 2;
+  const cy = container.offsetHeight / 2;
+  handle.style.left = Math.max(6, Math.min(container.offsetWidth  - 6, cx + pxX)) + 'px';
+  handle.style.top  = Math.max(6, Math.min(container.offsetHeight - 6, cy + pxY)) + 'px';
+  handle.style.transform = 'translate(-50%,-50%)';
+}
+
+// ── Drag do handle ────────────────────────────────────────────────────────────
+(function() {
+  let active = false, sx, sy, sox, soy;
+  const h = document.getElementById('dragHandle');
+  const c = document.getElementById('previewContainer');
+  if (!h || !c) return;
+
+  h.addEventListener('mousedown', e => {
+    active = true;
+    sx = e.clientX; sy = e.clientY;
+    sox = parseInt(document.getElementById('inputOffsetX').value) || 0;
+    soy = parseInt(document.getElementById('inputOffsetY').value) || 0;
+    e.preventDefault();
+  });
+  document.addEventListener('mousemove', e => {
+    if (!active) return;
+    const labelW = parseFloat(document.querySelector('[name=labelWidth]').value) || 100;
+    const dpp = (labelW * 8) / (c.offsetWidth || 280);
+    const dx = Math.round((e.clientX - sx) * dpp);
+    const dy = Math.round((e.clientY - sy) * dpp);
+    const nx = Math.max(-200, Math.min(200, sox + dx));
+    const ny = Math.max(-200, Math.min(200, soy + dy));
+    syncOffset('X', nx);
+    syncOffset('Y', ny);
+  });
+  document.addEventListener('mouseup', () => {
+    if (active) { active = false; }
+  });
+  // Touch support
+  h.addEventListener('touchstart', e => {
+    active = true;
+    sx = e.touches[0].clientX; sy = e.touches[0].clientY;
+    sox = parseInt(document.getElementById('inputOffsetX').value) || 0;
+    soy = parseInt(document.getElementById('inputOffsetY').value) || 0;
+    e.preventDefault();
+  }, { passive: false });
+  document.addEventListener('touchmove', e => {
+    if (!active) return;
+    const labelW = parseFloat(document.querySelector('[name=labelWidth]').value) || 100;
+    const dpp = (labelW * 8) / (c.offsetWidth || 280);
+    const dx = Math.round((e.touches[0].clientX - sx) * dpp);
+    const dy = Math.round((e.touches[0].clientY - sy) * dpp);
+    syncOffset('X', Math.max(-200, Math.min(200, sox + dx)));
+    syncOffset('Y', Math.max(-200, Math.min(200, soy + dy)));
+    e.preventDefault();
+  }, { passive: false });
+  document.addEventListener('touchend', () => { active = false; });
+})();
+
+// ── Reimprimir última ─────────────────────────────────────────────────────────
+async function reprintLast() {
+  const btn = document.getElementById('btnReprint');
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Reimprimindo...'; }
+  try {
+    const r = await fetch('/api/reprint-last', { method: 'POST' });
+    const j = await r.json();
+    toast(j.ok ? 'Última etiqueta reimpressa com sucesso!' : (j.error || 'Erro'), j.ok);
+    if (j.ok) { setTimeout(refreshHistory, 500); }
+  } catch { toast('Erro ao reimprimir', false); }
+  finally { if (btn) { btn.disabled = false; btn.textContent = '🔁 Reimprimir última'; } }
+}
+
+// ── Teste de impressão ────────────────────────────────────────────────────────
 async function testPrint() {
   const r = await fetch('/api/test-print', { method:'POST' });
   const j = await r.json();
   toast(j.ok ? 'Etiqueta de teste enviada!' : (j.error || 'Erro ao testar'), j.ok);
 }
 
+// ── Log ───────────────────────────────────────────────────────────────────────
 async function reloadLog() {
   const r = await fetch('/api/log');
   const j = await r.json();
-  document.getElementById('logBox').textContent = j.log || '';
-  document.getElementById('logBox').scrollTop = 999999;
+  const box = document.getElementById('logBox');
+  box.textContent = j.log || '';
+  box.scrollTop = 999999;
 }
 
+// ── Fila pendente ─────────────────────────────────────────────────────────────
 async function reloadQueue() {
   try {
     const r = await fetch('/api/queue');
@@ -381,38 +595,70 @@ async function reloadQueue() {
     const at  = document.getElementById('queueAt');
     const q   = j.queue || [];
     if (!q.length) {
-      box.innerHTML = '<div style="color:var(--green);padding:8px 0;"><b>✓ Fila vazia</b> — nenhuma etiqueta pendente.</div>';
+      box.innerHTML = '<div style="color:var(--green);padding:8px 0"><b>✓ Fila vazia</b> — nenhuma etiqueta pendente.</div>';
     } else {
-      box.innerHTML = '<div style="color:var(--yellow);margin-bottom:8px;"><b>' + q.length + ' job(s) aguardando impressão:</b></div>' +
-        '<div style="max-height:160px;overflow-y:auto;border:1px solid var(--border);border-radius:6px;">' +
-        q.map(function(j){
-          return '<div style="padding:6px 10px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;gap:10px;">' +
-            '<span>Job <b>#' + j.id + '</b></span>' +
-            '<span style="color:var(--muted)">' + (j.quantidade || 1) + ' etiqueta(s)</span>' +
-            '</div>';
+      box.innerHTML = '<div style="color:var(--yellow);margin-bottom:8px"><b>' + q.length + ' job(s) aguardando:</b></div>' +
+        '<div style="max-height:160px;overflow-y:auto;border:1px solid var(--border);border-radius:6px">' +
+        q.map(function(jj){
+          return '<div style="padding:6px 10px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between">' +
+            '<span>Job <b>#' + jj.id + '</b></span>' +
+            '<span style="color:var(--muted)">' + (jj.quantidade || 1) + ' etiqueta(s)</span></div>';
         }).join('') + '</div>';
     }
     if (j.lastQueueAt) at.textContent = 'Última consulta: ' + new Date(j.lastQueueAt).toLocaleTimeString('pt-BR');
-  } catch (e) { /* ignora */ }
+  } catch {}
 }
 
-// Auto-refresh status a cada 10s
+// ── Histórico do dia ──────────────────────────────────────────────────────────
+async function refreshHistory() {
+  try {
+    const r = await fetch('/api/history');
+    const j = await r.json();
+    const box   = document.getElementById('historyBox');
+    const count = document.getElementById('histCount');
+    const prints = j.prints || [];
+    if (count) count.textContent = prints.length + ' impressão(ões) hoje';
+    if (!prints.length) {
+      box.innerHTML = '<div style="color:var(--muted);font-size:.82rem;padding:6px 0">Nenhuma etiqueta impressa hoje.</div>';
+      return;
+    }
+    box.innerHTML = prints.slice().reverse().slice(0, 30).map(p =>
+      '<div class="hist-row">' +
+        '<span style="color:' + (p.ok ? 'var(--green)' : 'var(--red)') + ';font-size:.9rem">' + (p.ok ? '✓' : '✗') + '</span>' +
+        '<span style="color:var(--muted)">' + p.time + '</span>' +
+        '<span>Job <b>#' + p.jobId + '</b></span>' +
+        '<span style="margin-left:auto;color:var(--muted)">' + p.quantidade + ' etq.</span>' +
+      '</div>'
+    ).join('');
+  } catch {}
+}
+
+// ── Auto-refresh ──────────────────────────────────────────────────────────────
 setInterval(async () => {
   try {
     const r = await fetch('/api/status');
     const j = await r.json();
-    if (j.lastPrint) document.querySelector('.status-row:nth-child(3) span').innerHTML =
-      '<b>Última impressão:</b> ' + j.lastPrint;
+    if (j.lastPrint) {
+      const row = document.getElementById('rowLastPrint');
+      if (row) row.querySelector('span').innerHTML = '<b>Última impressão:</b> ' + j.lastPrint;
+    }
+    const cp = document.getElementById('cntPrinted'); if (cp) cp.textContent = j.totalPrinted;
+    const ce = document.getElementById('cntErrors');  if (ce) ce.textContent = j.totalErrors;
   } catch {}
-}, 10000);
+}, 8000);
 
-// Auto-refresh fila a cada 4s
+// Init
 reloadQueue();
-setInterval(reloadQueue, 4000);
+refreshHistory();
+refreshPreview();
+updateHandlePosition();
+setInterval(reloadQueue, 5000);
+setInterval(refreshHistory, 15000);
 </script>
 </body>
 </html>`;
 }
+
 
 // ─── MODO SERVIÇO ─────────────────────────────────────────────────────────────
 function runService() {
@@ -440,6 +686,10 @@ function runService() {
     printers: [],
     lastQueue: [],          // última fila vista no polling
     lastQueueAt: null,      // timestamp da última consulta
+    lastZpl: null,          // ZPL do último job impresso
+    lastJobId: null,        // id do último job impresso
+    todayPrints: [],        // histórico do dia
+    todayDate: new Date().toDateString(),
   };
 
   // Carrega lista de impressoras na inicialização
@@ -484,13 +734,20 @@ function runService() {
 
         for (const job of body.jobs) {
           log(`[poll] Imprimindo job #${job.id} (${job.quantidade} etiqueta(s)) em "${cfg.printer}"`);
-          printZpl(job.zpl, cfg.printer, (err2) => {
+          const zplToUse = injectLH(job.zpl, cfg);
+          printZpl(zplToUse, cfg.printer, (err2) => {
             const ok = !err2;
             const erroMsg = err2?.message || null;
+            // Atualiza histórico do dia
+            const today = new Date().toDateString();
+            if (state.todayDate !== today) { state.todayPrints = []; state.todayDate = today; }
+            state.todayPrints.push({ time: new Date().toLocaleTimeString('pt-BR'), jobId: job.id, quantidade: job.quantidade, ok });
             if (ok) {
               state.totalPrinted++;
               state.lastPrint = new Date().toLocaleString('pt-BR');
               state.lastPrintOk = true;
+              state.lastZpl = job.zpl;   // guarda ZPL original (sem LH) para reprint
+              state.lastJobId = job.id;
               log(`[poll] Job #${job.id} → OK`);
             } else {
               state.totalErrors++;
@@ -627,6 +884,64 @@ function runService() {
         log(`[test] Etiqueta de teste impressa em "${cfg.printer}"`);
         respJson(res, 200, { ok: true });
       });
+      return;
+    }
+
+    // POST /api/reprint-last — reimprime o último ZPL na impressora configurada
+    if (req.method === 'POST' && req.url === '/api/reprint-last') {
+      const cfg = readConfig();
+      if (!cfg.printer) return respJson(res, 400, { error: 'Nenhuma impressora configurada' });
+      if (!state.lastZpl) return respJson(res, 404, { error: 'Nenhuma etiqueta na memória para reimprimir' });
+      const zplToUse = injectLH(state.lastZpl, cfg);
+      printZpl(zplToUse, cfg.printer, (err2) => {
+        if (err2) return respJson(res, 500, { error: err2.message });
+        log(`[reprint] Última etiqueta (job #${state.lastJobId}) reimpressa em "${cfg.printer}"`);
+        const today = new Date().toDateString();
+        if (state.todayDate !== today) { state.todayPrints = []; state.todayDate = today; }
+        state.todayPrints.push({ time: new Date().toLocaleTimeString('pt-BR'), jobId: state.lastJobId, quantidade: '(reimpressão)', ok: true });
+        respJson(res, 200, { ok: true });
+      });
+      return;
+    }
+
+    // GET /api/history — histórico de impressões do dia
+    if (req.method === 'GET' && req.url === '/api/history') {
+      const today = new Date().toDateString();
+      if (state.todayDate !== today) { state.todayPrints = []; state.todayDate = today; }
+      return respJson(res, 200, { ok: true, prints: state.todayPrints, date: state.todayDate });
+    }
+
+    // GET /api/label-preview — proxy para Labelary (ZPL → PNG da última etiqueta)
+    if (req.method === 'GET' && req.url.startsWith('/api/label-preview')) {
+      const cfg = readConfig();
+      const zpl = state.lastZpl;
+      if (!zpl) {
+        // Retorna placeholder 1x1 transparente
+        res.writeHead(404, { 'Content-Type': 'text/plain' });
+        return res.end('no-label');
+      }
+      const wIn = (cfg.labelWidth  / 25.4).toFixed(2);
+      const hIn = (cfg.labelHeight / 25.4).toFixed(2);
+      const zplToPreview = injectLH(zpl, cfg);
+      const postReq = http.request({
+        hostname: 'api.labelary.com',
+        path: `/v1/printers/8dpmm/labels/${wIn}x${hIn}/0/`,
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+          'Accept': 'image/png',
+          'Content-Length': Buffer.byteLength(zplToPreview),
+        },
+        timeout: 12000,
+      }, (lr) => {
+        res.writeHead(lr.statusCode || 200, { 'Content-Type': 'image/png', 'Cache-Control': 'no-cache' });
+        lr.pipe(res);
+      });
+      postReq.on('error', (e) => {
+        if (!res.headersSent) { res.writeHead(502); res.end('Labelary error: ' + e.message); }
+      });
+      postReq.write(zplToPreview);
+      postReq.end();
       return;
     }
 
