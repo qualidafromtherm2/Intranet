@@ -27984,6 +27984,7 @@ function configurarCompraRealizadaGlobalCarrinho() {
       inputNfe.value = '';
 
       if (wrapperCompraAutorizada) wrapperCompraAutorizada.style.display = 'flex';
+      if (checkboxCompraAutorizada) checkboxCompraAutorizada.checked = true;
       if (wrapperRetornoCotacao) wrapperRetornoCotacao.style.display = 'flex';
       if (wrapperPrazoSolicitado) wrapperPrazoSolicitado.style.display = 'flex';
     }
@@ -27997,8 +27998,16 @@ function configurarCompraRealizadaGlobalCarrinho() {
   atualizarVisibilidadeNfe();
 }
 
+function prepararPadroesAberturaCarrinhoCompras() {
+  const compraRealizada = document.getElementById('carrinhoCompraRealizada');
+  const compraAutorizada = document.getElementById('carrinhoCompraAutorizada');
+
+  if (compraRealizada) compraRealizada.checked = false;
+  if (compraAutorizada) compraAutorizada.checked = true;
+}
+
 // Abre o modal do carrinho e sincroniza com os dados atuais
-function atualizarBlocoCompraOmieModal(numeros = []) {
+function atualizarBlocoCompraOmieModalLegado(numeros = []) {
   const blocoInfo = document.getElementById('modalComprasOmieInfo');
   if (!blocoInfo) return;
 
@@ -28039,7 +28048,49 @@ function atualizarBlocoCompraOmieModal(numeros = []) {
   `;
 }
 
-window.abrirModalCarrinhoCompras = async function() {
+function atualizarBlocoCompraOmieModal(numeros = []) {
+  const blocoInfo = document.getElementById('modalComprasOmieInfo');
+  if (!blocoInfo) return;
+
+  const numerosUnicos = Array.from(new Set(
+    (Array.isArray(numeros) ? numeros : [])
+      .map(n => String(n || '').trim())
+      .filter(Boolean)
+  ));
+
+  if (numerosUnicos.length === 0) {
+    blocoInfo.style.display = 'none';
+    blocoInfo.innerHTML = '';
+    return;
+  }
+
+  const escape = (valor) => {
+    const texto = String(valor || '');
+    if (typeof window.escapeHtml === 'function') return window.escapeHtml(texto);
+    return texto
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  };
+
+  const numerosHtml = numerosUnicos.map((numeroPedidoOmie) => (
+    `<span style="display:inline-flex;align-items:center;justify-content:center;padding:8px 14px;border-radius:10px;background:#1d4ed8;color:white;font-size:18px;font-weight:900;letter-spacing:.02em;">${escape(numeroPedidoOmie)}</span>`
+  )).join('');
+
+  blocoInfo.style.display = 'block';
+  blocoInfo.innerHTML = `
+    <div style="display:flex;align-items:center;gap:8px;font-weight:800;font-size:14px;margin-bottom:8px;">
+      <i class="fa-solid fa-circle-check" style="color:#16a34a;"></i>
+      <span>Pedido(s) de compra gerado(s)</span>
+    </div>
+    <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px;">${numerosHtml}</div>
+    <div style="font-size:12px;color:#1e40af;">Informe esse cNumero na NFe e encaminhe ao setor de Compras para identificacao e vinculo do pedido.</div>
+  `;
+}
+
+async function abrirModalCarrinhoComprasLegado() {
   const modal = document.getElementById('modalCarrinhoCompras');
   if (!modal) return;
   
@@ -28067,6 +28118,52 @@ window.abrirModalCarrinhoCompras = async function() {
   // Exibe o modal
   modal.style.display = 'flex';
   setTimeout(() => modal.classList.add('active'), 10);
+}
+
+window.abrirModalCarrinhoCompras = async function() {
+  const modal = document.getElementById('modalCarrinhoCompras');
+  if (!modal) return;
+
+  prepararPadroesAberturaCarrinhoCompras();
+  configurarPrazoSolicitadoGlobal();
+  configurarObjetivoCompraGlobalCarrinho();
+  configurarAnexoUrlGlobalCarrinho();
+  configurarAnexoArquivoGlobalCarrinho();
+  configurarRetornoCotacaoGlobalCarrinho();
+  configurarCompraRealizadaGlobalCarrinho();
+  atualizarBlocoCompraOmieModal();
+
+  modal.style.display = 'flex';
+  setTimeout(() => modal.classList.add('active'), 10);
+
+  renderCarrinhoCompras();
+  renderModalCarrinhoCompras();
+  renderModalCarrinhoLista();
+
+  const cargas = [
+    window.usuariosAtivos.length === 0 ? carregarUsuariosAtivos() : Promise.resolve(),
+    carregarCarrinhoComprasDoBanco(),
+    (async () => {
+      await carregarCategoriasPorDepartamento();
+      await carregarDepartamentosCarrinho();
+      configurarCategoriaGlobalCarrinho();
+      await carregarCategoriaCompraDropdown();
+    })(),
+    carregarGruposRequisicaoDisponiveis()
+  ];
+
+  const resultados = await Promise.allSettled(cargas);
+  resultados.forEach((resultado, idx) => {
+    if (resultado.status === 'rejected') {
+      console.warn(`[CARRINHO] Falha ao carregar recurso do modal (${idx}):`, resultado.reason);
+    }
+  });
+
+  prepararPadroesAberturaCarrinhoCompras();
+  configurarCompraRealizadaGlobalCarrinho();
+  renderCarrinhoCompras();
+  renderModalCarrinhoCompras();
+  renderModalCarrinhoLista();
 }
 
 // Fecha o modal do carrinho
@@ -29241,9 +29338,13 @@ async function enviarPedidoModal() {
         statusEl.style.background = '#d1fae5';
         statusEl.style.color = '#065f46';
         statusEl.innerHTML = `<i class="fa-solid fa-check-circle"></i> ${respostasOk} solicitação(ões) enviada(s) com sucesso!`;
-        if (compraRealizada && numerosUnicos.length > 0) {
+        if (numerosUnicos.length > 0) {
           statusEl.innerHTML += `<br><small>Compra(s) gerada(s) na Omie: <strong>${numerosUnicos.join(', ')}</strong></small>`;
           atualizarBlocoCompraOmieModal(numerosUnicos);
+          const numerosHtml = numerosUnicos
+            .map(numero => `<span style="display:inline-flex;align-items:center;justify-content:center;margin:6px 6px 0 0;padding:7px 12px;border-radius:9px;background:#047857;color:white;font-size:17px;font-weight:900;">${window.escapeHtml ? window.escapeHtml(numero) : numero}</span>`)
+            .join('');
+          statusEl.innerHTML = `<div style="font-weight:800;font-size:14px;margin-bottom:4px;"><i class="fa-solid fa-check-circle"></i> Pedido de compra enviado com sucesso</div><div style="font-size:12px;">Numero do pedido:</div><div>${numerosHtml}</div>`;
         }
       } else {
         statusEl.style.background = '#fee2e2';
@@ -29266,7 +29367,7 @@ async function enviarPedidoModal() {
       window.carrinhoCompras = [];
 
       const numerosUnicos = Array.from(new Set(numerosCompraOmieGerados));
-      if (compraRealizada && numerosUnicos.length > 0) {
+      if (numerosUnicos.length > 0) {
         const orientacoesAlerta = numerosUnicos
           .map((numeroPedidoOmie) => `Registro realizado com sucesso. Informe o cNumero "${numeroPedidoOmie}" na NFe e encaminhe ao setor de Compras para identificação e vínculo do pedido.`)
           .join('\n');
@@ -29275,7 +29376,7 @@ async function enviarPedidoModal() {
         alert('Solicitação(ões) enviada(s) com sucesso.');
       }
 
-      if (compraRealizada && numerosUnicos.length > 0) {
+      if (numerosUnicos.length > 0) {
         renderModalCarrinhoCompras();
         renderCarrinhoCompras();
         if (typeof recarregarKanbanMinhasCompras === 'function') {
