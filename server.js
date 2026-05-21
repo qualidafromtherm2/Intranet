@@ -10745,10 +10745,11 @@ function _gerarZplRecebimentoBloco({ codProd, descProd, loteTxt, dataExibir, idE
     // Código do produto — só o valor, sem rótulo
     `^FO178,8^A0N,20,20^FD${codProd}^FS`,
     // Lote e data na coluna direita
-    `^FO178,32^A0N,20,20^FDLote: ${loteTxt}^FS`,
-    `^FO178,56^A0N,20,20^FDEmissao: ${dataExibir}^FS`,
+    `^FO178,32^A0N,20,20^FDLote:^FS`,
+    `^FO178,56^A0N,20,20^FD${loteTxt}^FS`,
+    `^FO178,80^A0N,20,20^FDEmissao: ${dataExibir}^FS`,
     // Descrição abaixo do QR — até 2 linhas, sem rótulo
-    `^FO5,172^A0N,20,20^FB385,2,0,L,0^FD${descProd.slice(0, 60)}^FS`,
+    `^FO5,190^A0N,20,20^FB385,2,0,L,0^FD${descProd.slice(0, 60)}^FS`,
     '^XZ',
   ].join('\n');
 }
@@ -10778,10 +10779,11 @@ function _gerarZplParaImpressao({ codProd, descProd, idImpresso, loteTxt, dataEx
     `^FO178,8^A0N,20,20^FD${codProd}^FS`,
     // ID, Lote e data na coluna direita
     `^FO178,32^A0N,20,20^FDID: ${idImpresso}^FS`,
-    `^FO178,56^A0N,20,20^FDLote: ${loteTxt}^FS`,
-    `^FO178,80^A0N,20,20^FDEmissao: ${dataExibir}^FS`,
+    `^FO178,56^A0N,20,20^FDLote:^FS`,
+    `^FO178,80^A0N,20,20^FD${loteTxt}^FS`,
+    `^FO178,104^A0N,20,20^FDEmissao: ${dataExibir}^FS`,
     // Descrição abaixo do QR — até 2 linhas, sem rótulo
-    `^FO5,172^A0N,20,20^FB385,2,0,L,0^FD${descProd.slice(0, 60)}^FS`,
+    `^FO5,190^A0N,20,20^FB385,2,0,L,0^FD${descProd.slice(0, 60)}^FS`,
     '^XZ',
   ].join('\n');
 }
