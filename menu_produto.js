@@ -25141,6 +25141,220 @@ window.openRegistros = async function() {
     }
   });
 
+  // ── Configuração de impressoras por usuário ─────────────────────────────────
+  function _etqCfgImprKey() {
+    const u = (document.getElementById('userNameDisplay')?.textContent || 'user').trim().replace(/\s+/g, '_');
+    return `etq_impr_cfg_${u}`;
+  }
+  function _etqCarregarCfgImpr() {
+    try { return JSON.parse(localStorage.getItem(_etqCfgImprKey()) || '{}'); }
+    catch (_) { return {}; }
+  }
+  function _etqSalvarCfgImpr(cfg) {
+    localStorage.setItem(_etqCfgImprKey(), JSON.stringify(cfg));
+  }
+
+  // Monta o valor de impressora no formato usado por _etqSalvarPref
+  function _etqImpressoraParaVal(ag, imp) {
+    if (!ag) return imp; // CUPS local ou PDF
+    return `__AGENT__:${ag}:${imp}`;
+  }
+  function _etqValParaLabel(val) {
+    if (!val) return '';
+    if (val === '__PDF__') return '📄 PDF';
+    if (val === '__BP__')  return '🖨️ Agente local';
+    if (val.startsWith('__AGENT__:')) {
+      const s = val.slice('__AGENT__:'.length);
+      const i = s.indexOf(':');
+      if (i === -1) return s;
+      return `🖨️ ${s.slice(i + 1)} (${s.slice(0, i)})`;
+    }
+    return val;
+  }
+
+  // Atualiza o listbox com as impressoras ativas da config do usuário
+  async function _etqAtualizarListbox() {
+    const sel = document.getElementById('etqListboxImpressora');
+    if (!sel) return;
+    const cfg = _etqCarregarCfgImpr();
+    const padrao  = cfg.padrao  || null;
+    const enabled = Array.isArray(cfg.enabled) ? cfg.enabled : [];
+
+    sel.innerHTML = '<option value="">— nenhuma selecionada —</option>';
+
+    // Monta lista: padrão no topo, depois os demais ativos
+    const todos = padrao ? [padrao, ...enabled.filter(v => v !== padrao)] : enabled;
+    if (todos.length === 0) {
+      // Sem config salva: busca agentes e mostra todos
+      try {
+        const r = await fetch('/api/etiquetas/agentes-disponiveis', { credentials: 'include' });
+        const d = await r.json();
+        const agentes = d.agentes || [];
+        sel.innerHTML = '<option value="">— nenhuma selecionada —</option>';
+        for (const ag of agentes) {
+          for (const imp of (ag.printers || [])) {
+            const val = _etqImpressoraParaVal(ag.pcName, imp);
+            const opt = document.createElement('option');
+            opt.value = val;
+            opt.textContent = _etqValParaLabel(val);
+            sel.appendChild(opt);
+          }
+        }
+        sel.insertAdjacentHTML('beforeend', '<option value="__PDF__">📄 PDF (baixar arquivo)</option>');
+      } catch (_) {}
+    } else {
+      for (const val of todos) {
+        const opt = document.createElement('option');
+        opt.value = val;
+        opt.textContent = (val === padrao ? '★ ' : '') + _etqValParaLabel(val);
+        if (val === padrao) opt.style.color = '#fbbf24';
+        sel.appendChild(opt);
+      }
+    }
+
+    // Pré-seleciona a preferência atual
+    const pref = _etqPrinterPref || padrao || '';
+    if (pref) sel.value = pref;
+  }
+
+  // Evento: mudar impressora pelo listbox
+  document.getElementById('etqListboxImpressora')?.addEventListener('change', function () {
+    const val = this.value;
+    _etqSalvarPref(val || null);
+  });
+
+  // Botão refresh do listbox
+  document.getElementById('etqBtnRefreshImpressoras')?.addEventListener('click', () => {
+    _etqAtualizarListbox();
+  });
+
+  // ── Modal de configuração de impressoras ────────────────────────────────────
+  let _etqCfgImprPadraoTemp = null; // padrão escolhido no modal antes de salvar
+
+  async function _etqAbrirConfigImpressoras() {
+    const modal = document.getElementById('etqConfigImpressorasModal');
+    const lista = document.getElementById('etqCfgImprLista');
+    if (!modal || !lista) return;
+
+    _etqCfgImprPadraoTemp = null;
+    modal.style.display = 'flex';
+    lista.innerHTML = '<div style="color:#64748b;text-align:center;padding:24px;"><i class="fa-solid fa-spinner fa-spin"></i> Buscando impressoras online...</div>';
+
+    const cfg = _etqCarregarCfgImpr();
+    const padrao  = cfg.padrao  || null;
+    const enabled = Array.isArray(cfg.enabled) ? new Set(cfg.enabled) : new Set();
+    _etqCfgImprPadraoTemp = padrao;
+
+    let impressoras = []; // { val, label, pcName }
+    try {
+      const r = await fetch('/api/etiquetas/agentes-disponiveis', { credentials: 'include' });
+      const d = await r.json();
+      for (const ag of (d.agentes || [])) {
+        for (const imp of (ag.printers || [])) {
+          const val = _etqImpressoraParaVal(ag.pcName, imp);
+          impressoras.push({ val, label: imp, pcName: ag.pcName });
+        }
+      }
+    } catch (_) {}
+    // Sempre inclui PDF
+    impressoras.push({ val: '__PDF__', label: 'PDF (baixar arquivo)', pcName: '' });
+
+    // Adiciona impressoras já salvas que podem não estar online agora
+    for (const v of enabled) {
+      if (!impressoras.find(x => x.val === v)) {
+        impressoras.push({ val: v, label: _etqValParaLabel(v), pcName: '(offline)', offline: true });
+      }
+    }
+    if (padrao && !impressoras.find(x => x.val === padrao)) {
+      impressoras.unshift({ val: padrao, label: _etqValParaLabel(padrao), pcName: '(offline)', offline: true });
+    }
+
+    if (impressoras.length === 0) {
+      lista.innerHTML = '<div style="color:#f87171;text-align:center;padding:20px;">Nenhum agente online encontrado.<br><small style="color:#64748b;">Verifique se o agente está rodando no PC da impressora.</small></div>';
+      return;
+    }
+
+    lista.innerHTML = '';
+    for (const { val, label, pcName, offline } of impressoras) {
+      const isEnabled = enabled.has(val) || val === padrao;
+      const isPadrao  = val === padrao;
+      const item = document.createElement('div');
+      item.className = 'etq-cfg-impr-item';
+      item.dataset.val = val;
+      item.innerHTML = `
+        <input type="checkbox" class="etqCfgImprChk" data-val="${escapeHtml(val)}" ${isEnabled ? 'checked' : ''}>
+        <div class="etq-cfg-impr-item-info">
+          <div class="etq-cfg-impr-item-nome">${escapeHtml(label)}${offline ? ' <span style="color:#f87171;font-size:.7rem;">(offline)</span>' : ''}</div>
+          ${pcName ? `<div class="etq-cfg-impr-item-pc">${escapeHtml(pcName)}</div>` : ''}
+        </div>
+        <button class="etq-cfg-impr-btn-padrao${isPadrao ? ' padrao-ativo' : ''}" data-val="${escapeHtml(val)}" title="Definir como impressora padrão">
+          ${isPadrao ? '★ Padrão' : '☆ Padrão'}
+        </button>`;
+      lista.appendChild(item);
+    }
+
+    // Botões "Definir como padrão"
+    lista.querySelectorAll('.etq-cfg-impr-btn-padrao').forEach(btn => {
+      btn.addEventListener('click', () => {
+        _etqCfgImprPadraoTemp = btn.dataset.val;
+        // Atualiza visual
+        lista.querySelectorAll('.etq-cfg-impr-btn-padrao').forEach(b => {
+          const isThis = b.dataset.val === _etqCfgImprPadraoTemp;
+          b.classList.toggle('padrao-ativo', isThis);
+          b.textContent = isThis ? '★ Padrão' : '☆ Padrão';
+        });
+        // Marca o checkbox automaticamente ao definir como padrão
+        const chk = lista.querySelector(`.etqCfgImprChk[data-val="${CSS.escape(btn.dataset.val)}"]`);
+        if (chk) chk.checked = true;
+      });
+    });
+  }
+
+  document.getElementById('etqBtnConfigImpressoras')?.addEventListener('click', () => {
+    _etqAbrirConfigImpressoras();
+  });
+
+  document.getElementById('etqCfgImprSalvar')?.addEventListener('click', () => {
+    const lista = document.getElementById('etqCfgImprLista');
+    if (!lista) return;
+    const enabled = [];
+    lista.querySelectorAll('.etqCfgImprChk:checked').forEach(chk => {
+      enabled.push(chk.dataset.val);
+    });
+    const cfg = { padrao: _etqCfgImprPadraoTemp || (enabled[0] || null), enabled };
+    _etqSalvarCfgImpr(cfg);
+    // Atualiza a preferência ativa se não tiver nenhuma
+    if (!_etqPrinterPref && cfg.padrao) _etqSalvarPref(cfg.padrao);
+    document.getElementById('etqConfigImpressorasModal').style.display = 'none';
+    _etqAtualizarListbox();
+  });
+
+  document.getElementById('etqCfgImprCancelar')?.addEventListener('click', () => {
+    document.getElementById('etqConfigImpressorasModal').style.display = 'none';
+  });
+  document.getElementById('etqCfgImprFechar')?.addEventListener('click', () => {
+    document.getElementById('etqConfigImpressorasModal').style.display = 'none';
+  });
+  document.getElementById('etqConfigImpressorasModal')?.addEventListener('click', e => {
+    if (e.target === document.getElementById('etqConfigImpressorasModal'))
+      document.getElementById('etqConfigImpressorasModal').style.display = 'none';
+  });
+
+  // Inicializa o listbox ao abrir o modal
+  const _etqObserver = new MutationObserver(mutations => {
+    for (const m of mutations) {
+      if (m.type === 'attributes' && m.attributeName === 'style') {
+        const el = m.target;
+        if (el.id === 'etiquetasModal' && el.style.display !== 'none') {
+          _etqCarregarPref();
+          _etqAtualizarListbox();
+        }
+      }
+    }
+  });
+  const _etqModalEl = document.getElementById('etiquetasModal');
+  if (_etqModalEl) _etqObserver.observe(_etqModalEl, { attributes: true });
+
 
   // Fechar
   etqFechar?.addEventListener('click', () => { if (etqModal) etqModal.style.display = 'none'; });

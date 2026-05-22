@@ -232,6 +232,7 @@ app.use('/api/qualidade', require('./routes/qualidadeFotos'));
 app.use('/api/registros', require('./routes/registros'));
 app.use('/api/sac', require('./routes/sacEnvios'));
 app.use('/api/ai', require('./routes/ai_assistant'));
+app.use('/api/producao', require('./routes/producao'));
 
 app.get('/api/produtos/stream', (req, res) => {
   const accept = String(req.headers?.accept || '');
