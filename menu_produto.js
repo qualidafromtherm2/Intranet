@@ -24650,6 +24650,35 @@ window.openRegistros = async function() {
     _etqCarregar(etqBusca?.value || '');
   });
 
+  // ── Dropdown de configurações da toolbar ─────────────────────────────────
+  const _etqDropdownBtn  = document.getElementById('etqBtnConfig');
+  const _etqDropdownMenu = document.getElementById('etqConfigDropdown');
+
+  function _etqFecharDropdown() {
+    if (!_etqDropdownMenu) return;
+    _etqDropdownMenu.style.display = 'none';
+    _etqDropdownBtn?.classList.remove('open');
+  }
+
+  _etqDropdownBtn?.addEventListener('click', e => {
+    e.stopPropagation();
+    const aberto = _etqDropdownMenu.style.display !== 'none';
+    if (aberto) { _etqFecharDropdown(); }
+    else { _etqDropdownMenu.style.display = 'flex'; _etqDropdownBtn.classList.add('open'); }
+  });
+
+  // Fechar ao clicar fora
+  document.addEventListener('click', e => {
+    if (_etqDropdownMenu && _etqDropdownMenu.style.display !== 'none') {
+      if (!document.getElementById('etqConfigMenuWrap')?.contains(e.target)) _etqFecharDropdown();
+    }
+  });
+
+  // Fechar dropdown após ações (não após os toggles lista/grade/ocultos)
+  ['etqBtnBaixarAgente', 'etqBtnConfigAgente', 'etqBtnConfigImpressoras'].forEach(id => {
+    document.getElementById(id)?.addEventListener('click', () => setTimeout(_etqFecharDropdown, 80), true);
+  });
+
   function _etqAtualizarBotaoSel() {
     if (!etqBtnSel || !etqSelCount) return;
     const n = _etqSelecionadas.size;
