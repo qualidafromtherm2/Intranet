@@ -24996,6 +24996,7 @@ window.openRegistros = async function() {
       showSt(`✅ ${data.quantidade} etiqueta(s) enfileirada(s)${destLabel}. O agente está imprimindo...`, '#4ade80');
       clearSt(5000);
       await _etqCarregar(etqBusca?.value || '');
+      _etqRevertarParaPadrao();
     } catch (err) {
       showSt(err.message, '#f87171');
       clearSt(7000);
@@ -25030,6 +25031,7 @@ window.openRegistros = async function() {
         setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 1000);
         if (etqStatus) { etqStatus.textContent = 'PDF gerado com sucesso.'; etqStatus.style.color = '#4ade80'; setTimeout(() => { if (etqStatus) { etqStatus.textContent = ''; etqStatus.style.color = ''; } }, 4000); }
         await _etqCarregar(etqBusca?.value || '');
+        _etqRevertarParaPadrao();
       } catch (err) {
         if (etqStatus) { etqStatus.textContent = err.message; etqStatus.style.color = '#f87171'; setTimeout(() => { if (etqStatus) { etqStatus.textContent = ''; etqStatus.style.color = ''; } }, 6000); }
       } finally {
@@ -25074,6 +25076,7 @@ window.openRegistros = async function() {
         setTimeout(() => { if (etqStatus) { etqStatus.textContent = ''; etqStatus.style.color = ''; } }, 4000);
       }
       await _etqCarregar(etqBusca?.value || '');
+      _etqRevertarParaPadrao();
     } catch (err) {
       if (etqStatus) {
         etqStatus.textContent = err.message;
@@ -25171,6 +25174,12 @@ window.openRegistros = async function() {
     }
     return val;
   }
+  // Retorna o apelido amigável se definido, senso retorna o label padrão
+  function _etqGetDisplayName(val) {
+    const cfg = _etqCarregarCfgImpr();
+    const alias = (cfg.aliases || {})[val];
+    return alias && alias.trim() ? alias.trim() : _etqValParaLabel(val);
+  }
 
   // Atualiza o listbox com as impressoras ativas da config do usuário
   async function _etqAtualizarListbox() {
@@ -25196,7 +25205,7 @@ window.openRegistros = async function() {
             const val = _etqImpressoraParaVal(ag.pcName, imp);
             const opt = document.createElement('option');
             opt.value = val;
-            opt.textContent = _etqValParaLabel(val);
+            opt.textContent = _etqGetDisplayName(val);
             sel.appendChild(opt);
           }
         }
@@ -25206,7 +25215,7 @@ window.openRegistros = async function() {
       for (const val of todos) {
         const opt = document.createElement('option');
         opt.value = val;
-        opt.textContent = (val === padrao ? '★ ' : '') + _etqValParaLabel(val);
+        opt.textContent = (val === padrao ? '★ ' : '') + _etqGetDisplayName(val);
         if (val === padrao) opt.style.color = '#fbbf24';
         sel.appendChild(opt);
       }
@@ -25217,10 +25226,18 @@ window.openRegistros = async function() {
     if (pref) sel.value = pref;
   }
 
-  // Evento: mudar impressora pelo listbox
+  // Reverteu para a impressora padrão da config após cada impressão
+  function _etqRevertarParaPadrao() {
+    const cfg = _etqCarregarCfgImpr();
+    const padrao = cfg.padrao || null;
+    _etqPrinterPref = padrao;
+    const sel = document.getElementById('etqListboxImpressora');
+    if (sel) sel.value = padrao || '';
+  }
+
+  // Evento: mudar impressora pelo listbox — sobrescrita TEMPORÁRIA (não salva no localStorage)
   document.getElementById('etqListboxImpressora')?.addEventListener('change', function () {
-    const val = this.value;
-    _etqSalvarPref(val || null);
+    _etqPrinterPref = this.value || null;  // temp: volta para padrão após impressão
   });
 
   // Botão refresh do listbox
@@ -25274,10 +25291,12 @@ window.openRegistros = async function() {
       return;
     }
 
+    const savedAliases = cfg.aliases || {};
     lista.innerHTML = '';
     for (const { val, label, pcName, offline } of impressoras) {
       const isEnabled = enabled.has(val) || val === padrao;
       const isPadrao  = val === padrao;
+      const savedAlias = savedAliases[val] || '';
       const item = document.createElement('div');
       item.className = 'etq-cfg-impr-item';
       item.dataset.val = val;
@@ -25286,6 +25305,9 @@ window.openRegistros = async function() {
         <div class="etq-cfg-impr-item-info">
           <div class="etq-cfg-impr-item-nome">${escapeHtml(label)}${offline ? ' <span style="color:#f87171;font-size:.7rem;">(offline)</span>' : ''}</div>
           ${pcName ? `<div class="etq-cfg-impr-item-pc">${escapeHtml(pcName)}</div>` : ''}
+          <input type="text" class="etq-cfg-impr-alias-input etqCfgImprAlias" data-val="${escapeHtml(val)}"
+            placeholder="Apelido amigável (ex: Zebra Expedição)"
+            value="${escapeHtml(savedAlias)}" maxlength="50">
         </div>
         <button class="etq-cfg-impr-btn-padrao${isPadrao ? ' padrao-ativo' : ''}" data-val="${escapeHtml(val)}" title="Definir como impressora padrão">
           ${isPadrao ? '★ Padrão' : '☆ Padrão'}
@@ -25318,12 +25340,17 @@ window.openRegistros = async function() {
     const lista = document.getElementById('etqCfgImprLista');
     if (!lista) return;
     const enabled = [];
+    const aliases = {};
     lista.querySelectorAll('.etqCfgImprChk:checked').forEach(chk => {
       enabled.push(chk.dataset.val);
     });
-    const cfg = { padrao: _etqCfgImprPadraoTemp || (enabled[0] || null), enabled };
+    lista.querySelectorAll('.etqCfgImprAlias').forEach(inp => {
+      const v = inp.dataset.val;
+      const a = inp.value.trim();
+      if (v && a) aliases[v] = a;
+    });
+    const cfg = { padrao: _etqCfgImprPadraoTemp || (enabled[0] || null), enabled, aliases };
     _etqSalvarCfgImpr(cfg);
-    // Atualiza a preferência ativa se não tiver nenhuma
     if (!_etqPrinterPref && cfg.padrao) _etqSalvarPref(cfg.padrao);
     document.getElementById('etqConfigImpressorasModal').style.display = 'none';
     _etqAtualizarListbox();
