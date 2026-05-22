@@ -46744,8 +46744,8 @@ let kanbansVisiveis = [];
 let estadoInicialFiltroKanbans = null;
 const DATA_LIMITE_PADRAO = '2026-02-01';
 
-// Variável global para controlar filtro por solicitante (padrão: apenas minhas solicitações)
-window.kanbanFiltroSolicitante = 'minhas';
+// Variável global para controlar filtro por solicitante (padrão: todas as solicitações)
+window.kanbanFiltroSolicitante = 'todas';
 
 function formatarDataLimite(valor) {
   if (!valor) return '';
@@ -52053,11 +52053,27 @@ async function confirmarAssociacaoPedidoNfeOmie() {
             <button type="button" id="modalAssociarFecharSucessoBtn" style="border:1px solid #86efac;border-radius:8px;background:#ffffff;color:#166534;font-weight:700;padding:9px 13px;cursor:pointer;">
               Fechar
             </button>
+            <button type="button" id="modalAssociarTransformacaoMpBtn" style="border:none;border-radius:8px;background:linear-gradient(135deg,#ea580c 0%,#c2410c 100%);color:#fff;font-weight:700;padding:9px 13px;cursor:pointer;display:inline-flex;align-items:center;gap:6px;">
+              <i class="fa-solid fa-arrows-rotate"></i> Transformação de MP
+            </button>
           </div>
         </div>
       </div>`,
       'sucesso'
     );
+
+    // Guarda dados da associação para o modal de transformação
+    window.__transformacaoMpDados = {
+      n_id_receb: data?.dados?.n_id_receb || null,
+      numero_nfe: data?.dados?.c_numero_nfe || null,
+      fornecedor_nome: data?.dados?.fornecedor_nome || window.__associarNfePreviewAtual?.preview?.fornecedor_nome || null,
+      valor_total: data?.dados?.valor_total_nfe || window.__associarNfePreviewAtual?.preview?.valor_total_nfe || null,
+      solicitante: (document.getElementById('userNameDisplay')?.textContent || '').trim() || null,
+    };
+
+    document.getElementById('modalAssociarTransformacaoMpBtn')?.addEventListener('click', () => {
+      abrirModalTransformacaoMp(window.__transformacaoMpDados);
+    });
 
     document.getElementById('modalAssociarNovaBuscaBtn')?.addEventListener('click', () => {
       fecharModalAssociarPedidoNfe();
@@ -52093,6 +52109,338 @@ async function confirmarAssociacaoPedidoNfeOmie() {
     }
   }
 }
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// TRANSFORMAÇÃO DE MATÉRIA-PRIMA
+// Modal para registrar SAI + ENT de peças após processamento externo (ex: zincagem)
+// Custo é rateado proporcionalmente à área (largura × altura) de cada peça
+// ═══════════════════════════════════════════════════════════════════════════════
+
+function criarModalTransformacaoMpSeNecessario() {
+  if (document.getElementById('modalTransformacaoMp')) return;
+  const el = document.createElement('div');
+  el.id = 'modalTransformacaoMp';
+  el.style.cssText = 'display:none;position:fixed;inset:0;background:rgba(15,23,42,.72);z-index:100200;align-items:center;justify-content:center;padding:18px;';
+  el.innerHTML = `
+    <div style="width:min(980px,100%);max-height:92vh;background:#fff;border-radius:14px;box-shadow:0 24px 60px rgba(2,6,23,.38);border:1px solid #d1d5db;overflow:hidden;display:flex;flex-direction:column;">
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 18px;border-bottom:1px solid #e5e7eb;background:linear-gradient(135deg,#fff7ed 0%,#ffedd5 100%);">
+        <strong style="font-size:15px;color:#0f172a;display:flex;align-items:center;gap:8px;">
+          <i class="fa-solid fa-arrows-rotate" style="color:#ea580c;"></i>
+          Transformação de Matéria-Prima
+        </strong>
+        <button type="button" id="modalTransformacaoMpFechar" style="border:none;background:transparent;color:#475569;font-size:18px;cursor:pointer;padding:4px 8px;"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+      <div id="modalTransformacaoMpConteudo" style="padding:18px;overflow:auto;flex:1;display:flex;flex-direction:column;gap:14px;"></div>
+      <div style="padding:14px 18px;border-top:1px solid #e5e7eb;background:#f8fafc;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;">
+        <label style="display:flex;align-items:center;gap:7px;font-size:13px;color:#475569;cursor:pointer;">
+          <input type="checkbox" id="modalTransformacaoMpSalvarTemplate" style="width:15px;height:15px;">
+          Salvar como template para este fornecedor
+        </label>
+        <div style="display:flex;gap:8px;">
+          <button type="button" id="modalTransformacaoMpCancelar" style="padding:10px 16px;border:1px solid #d1d5db;border-radius:8px;background:#fff;color:#475569;font-weight:700;cursor:pointer;font-size:14px;">Cancelar</button>
+          <button type="button" id="modalTransformacaoMpExecutar" style="padding:10px 20px;border:none;border-radius:8px;background:linear-gradient(135deg,#ea580c 0%,#c2410c 100%);color:#fff;font-weight:700;cursor:pointer;font-size:14px;display:inline-flex;align-items:center;gap:7px;">
+            <i class="fa-solid fa-check"></i> Executar Transformação
+          </button>
+        </div>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(el);
+}
+
+function fecharModalTransformacaoMp() {
+  const modal = document.getElementById('modalTransformacaoMp');
+  if (modal) modal.style.display = 'none';
+}
+
+function calcularRateioAreaFrontend(itens, valorTotal) {
+  const parsed = itens.map(it => ({
+    ...it,
+    _qtde: Number(it.qtde) || 0,
+    _l: Number(it.largura_cm) || 0,
+    _a: Number(it.altura_cm) || 0,
+  }));
+  const totalArea = parsed.reduce((acc, it) => acc + it._qtde * (it._l / 100) * (it._a / 100), 0);
+  if (totalArea <= 0) return parsed.map(it => ({ ...it, area_unit_m2: 0, custo_unit: 0 }));
+  const custoPorM2 = valorTotal / totalArea;
+  return parsed.map(it => {
+    const areaUnit = (it._l / 100) * (it._a / 100);
+    return { ...it, area_unit_m2: +areaUnit.toFixed(6), custo_unit: +(areaUnit * custoPorM2).toFixed(4) };
+  });
+}
+
+function formatarMoeda(v) {
+  if (!Number.isFinite(Number(v))) return '—';
+  return Number(v).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+}
+
+function renderizarTabelaTransformacaoMp(itens, valorTotal) {
+  const comCusto = calcularRateioAreaFrontend(itens, Number(valorTotal) || 0);
+  const totalGeral = comCusto.reduce((acc, it) => acc + it.custo_unit * it._qtde, 0);
+  return `
+    <table style="width:100%;border-collapse:collapse;font-size:13px;">
+      <thead>
+        <tr style="background:#fef3c7;color:#92400e;font-weight:700;">
+          <th style="padding:8px 10px;text-align:left;border:1px solid #fde68a;">SKU</th>
+          <th style="padding:8px 10px;text-align:left;border:1px solid #fde68a;">Descrição</th>
+          <th style="padding:8px 6px;text-align:center;border:1px solid #fde68a;white-space:nowrap;">Larg.(cm)</th>
+          <th style="padding:8px 6px;text-align:center;border:1px solid #fde68a;white-space:nowrap;">Alt.(cm)</th>
+          <th style="padding:8px 6px;text-align:center;border:1px solid #fde68a;">Qtde</th>
+          <th style="padding:8px 6px;text-align:center;border:1px solid #fde68a;white-space:nowrap;">Área (m²)</th>
+          <th style="padding:8px 6px;text-align:right;border:1px solid #fde68a;white-space:nowrap;">Custo/un</th>
+          <th style="padding:8px 6px;text-align:right;border:1px solid #fde68a;">Subtotal</th>
+          <th style="padding:8px 6px;text-align:center;border:1px solid #fde68a;"></th>
+        </tr>
+      </thead>
+      <tbody id="transformacaoMpTbody">
+        ${comCusto.map((it, i) => `
+          <tr data-idx="${i}" style="background:${i % 2 === 0 ? '#fff' : '#fafafa'};">
+            <td style="padding:6px 10px;border:1px solid #e5e7eb;"><input class="trmp-sku" data-idx="${i}" value="${escapeHtml(it.sku)}" style="width:130px;padding:4px 6px;border:1px solid #cbd5e1;border-radius:5px;font-size:12px;" /></td>
+            <td style="padding:6px 10px;border:1px solid #e5e7eb;"><input class="trmp-desc" data-idx="${i}" value="${escapeHtml(it.descricao || '')}" style="width:180px;padding:4px 6px;border:1px solid #cbd5e1;border-radius:5px;font-size:12px;" /></td>
+            <td style="padding:6px 6px;border:1px solid #e5e7eb;text-align:center;"><input class="trmp-larg" data-idx="${i}" value="${it.largura_cm}" type="number" min="0.01" step="0.01" style="width:65px;padding:4px 5px;border:1px solid #cbd5e1;border-radius:5px;font-size:12px;text-align:center;" /></td>
+            <td style="padding:6px 6px;border:1px solid #e5e7eb;text-align:center;"><input class="trmp-alt" data-idx="${i}" value="${it.altura_cm}" type="number" min="0.01" step="0.01" style="width:65px;padding:4px 5px;border:1px solid #cbd5e1;border-radius:5px;font-size:12px;text-align:center;" /></td>
+            <td style="padding:6px 6px;border:1px solid #e5e7eb;text-align:center;"><input class="trmp-qtde" data-idx="${i}" value="${it._qtde || 1}" type="number" min="0.0001" step="1" style="width:65px;padding:4px 5px;border:1px solid #cbd5e1;border-radius:5px;font-size:12px;text-align:center;" /></td>
+            <td style="padding:6px 6px;border:1px solid #e5e7eb;text-align:center;color:#6b7280;" class="trmp-area-${i}">${it.area_unit_m2}</td>
+            <td style="padding:6px 6px;border:1px solid #e5e7eb;text-align:right;font-weight:700;color:#b45309;" class="trmp-custo-${i}">${formatarMoeda(it.custo_unit)}</td>
+            <td style="padding:6px 6px;border:1px solid #e5e7eb;text-align:right;" class="trmp-sub-${i}">${formatarMoeda(it.custo_unit * it._qtde)}</td>
+            <td style="padding:6px 6px;border:1px solid #e5e7eb;text-align:center;">
+              <button type="button" class="trmp-remover" data-idx="${i}" style="border:none;background:transparent;color:#ef4444;cursor:pointer;font-size:14px;" title="Remover linha"><i class="fa-solid fa-trash-can"></i></button>
+            </td>
+          </tr>
+        `).join('')}
+      </tbody>
+      <tfoot>
+        <tr style="background:#fff7ed;font-weight:700;color:#92400e;">
+          <td colspan="7" style="padding:8px 10px;border:1px solid #fde68a;text-align:right;">Total rateado:</td>
+          <td style="padding:8px 10px;border:1px solid #fde68a;text-align:right;" id="trmpTotalRateado">${formatarMoeda(totalGeral)}</td>
+          <td style="border:1px solid #fde68a;"></td>
+        </tr>
+      </tfoot>
+    </table>
+  `;
+}
+
+function lerItensTransformacaoMp() {
+  const tbody = document.getElementById('transformacaoMpTbody');
+  if (!tbody) return [];
+  return Array.from(tbody.querySelectorAll('tr[data-idx]')).map(tr => {
+    const idx = tr.dataset.idx;
+    return {
+      sku:        (tr.querySelector(`.trmp-sku[data-idx="${idx}"]`)?.value || '').trim(),
+      descricao:  (tr.querySelector(`.trmp-desc[data-idx="${idx}"]`)?.value || '').trim(),
+      largura_cm: parseFloat(tr.querySelector(`.trmp-larg[data-idx="${idx}"]`)?.value || '0') || 0,
+      altura_cm:  parseFloat(tr.querySelector(`.trmp-alt[data-idx="${idx}"]`)?.value || '0') || 0,
+      qtde:       parseFloat(tr.querySelector(`.trmp-qtde[data-idx="${idx}"]`)?.value || '0') || 0,
+    };
+  }).filter(it => it.sku);
+}
+
+function atualizarCalculosTransformacaoMp() {
+  const valorInput = document.getElementById('trmpValorTotal');
+  const valorTotal = parseFloat(String(valorInput?.value || '0').replace(/\./g, '').replace(',', '.')) || 0;
+  const itens = lerItensTransformacaoMp();
+  const comCusto = calcularRateioAreaFrontend(itens, valorTotal);
+  comCusto.forEach((it, i) => {
+    const areaEl = document.querySelector(`.trmp-area-${i}`);
+    const custoEl = document.querySelector(`.trmp-custo-${i}`);
+    const subEl = document.querySelector(`.trmp-sub-${i}`);
+    if (areaEl) areaEl.textContent = it.area_unit_m2;
+    if (custoEl) custoEl.textContent = formatarMoeda(it.custo_unit);
+    if (subEl) subEl.textContent = formatarMoeda(it.custo_unit * it._qtde);
+  });
+  const totalGeral = comCusto.reduce((acc, it) => acc + it.custo_unit * it._qtde, 0);
+  const totalEl = document.getElementById('trmpTotalRateado');
+  if (totalEl) totalEl.textContent = formatarMoeda(totalGeral);
+}
+
+function adicionarLinhaTransformacaoMp() {
+  const itens = lerItensTransformacaoMp();
+  itens.push({ sku: '', descricao: '', largura_cm: 0, altura_cm: 0, qtde: 1 });
+  const valorInput = document.getElementById('trmpValorTotal');
+  const valorTotal = parseFloat(String(valorInput?.value || '0').replace(/\./g, '').replace(',', '.')) || 0;
+  const tbody = document.getElementById('transformacaoMpTbody');
+  const tabelaWrap = tbody?.closest('div, table')?.parentElement;
+  if (tabelaWrap) {
+    tabelaWrap.innerHTML = renderizarTabelaTransformacaoMp(itens, valorTotal);
+    ligarEventosTabelaTransformacaoMp(tabelaWrap, valorTotal);
+  }
+}
+
+function ligarEventosTabelaTransformacaoMp(container, valorTotal) {
+  container.querySelectorAll('.trmp-sku,.trmp-desc,.trmp-larg,.trmp-alt,.trmp-qtde').forEach(inp => {
+    inp.addEventListener('input', atualizarCalculosTransformacaoMp);
+  });
+  container.querySelectorAll('.trmp-remover').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const idx = Number(btn.dataset.idx);
+      const itens = lerItensTransformacaoMp().filter((_, i) => i !== idx);
+      const valorInput = document.getElementById('trmpValorTotal');
+      const vt = parseFloat(String(valorInput?.value || '0').replace(/\./g, '').replace(',', '.')) || 0;
+      container.innerHTML = renderizarTabelaTransformacaoMp(itens, vt);
+      ligarEventosTabelaTransformacaoMp(container, vt);
+    });
+  });
+}
+
+async function abrirModalTransformacaoMp(dados) {
+  criarModalTransformacaoMpSeNecessario();
+  const modal = document.getElementById('modalTransformacaoMp');
+  const conteudo = document.getElementById('modalTransformacaoMpConteudo');
+  if (!modal || !conteudo) return;
+
+  modal.style.display = 'flex';
+  conteudo.innerHTML = '<div style="text-align:center;padding:32px;color:#94a3b8;"><i class="fa-solid fa-spinner fa-spin fa-2x"></i><div style="margin-top:10px;font-size:13px;">Carregando template...</div></div>';
+
+  document.getElementById('modalTransformacaoMpFechar')?.addEventListener('click', fecharModalTransformacaoMp);
+  document.getElementById('modalTransformacaoMpCancelar')?.addEventListener('click', fecharModalTransformacaoMp);
+
+  const fornecedor = dados?.fornecedor_nome || '';
+  const valorTotal = Number(dados?.valor_total) || 0;
+
+  // Carrega template salvo
+  let templateItens = [];
+  try {
+    const resp = await fetch(`/api/transformacao-mp/template?fornecedor=${encodeURIComponent(fornecedor)}`, { credentials: 'include' });
+    const json = await resp.json().catch(() => ({}));
+    if (json?.template?.itens && Array.isArray(json.template.itens)) {
+      templateItens = json.template.itens;
+    }
+  } catch (_) {}
+
+  // Se não tem template, pré-preenche com os SKUs padrão da ZINCA RAPIDO
+  if (!templateItens.length && /ZINCA\s*RAPIDO/i.test(fornecedor)) {
+    templateItens = [
+      { sku: '03.MP.N.60409', descricao: 'Chapa Zincada 24,5×15,5cm', largura_cm: 24.5, altura_cm: 15.5, qtde: 1 },
+      { sku: '03.MP.N.60410', descricao: 'Chapa Zincada 38×18cm',     largura_cm: 38,   altura_cm: 18,   qtde: 1 },
+      { sku: '03.MP.N.60411', descricao: 'Chapa Zincada 40×33cm',     largura_cm: 40,   altura_cm: 33,   qtde: 1 },
+      { sku: '03.MP.N.60412', descricao: 'Chapa Zincada 41×21cm',     largura_cm: 41,   altura_cm: 21,   qtde: 1 },
+    ];
+  }
+
+  const valorFormatado = valorTotal > 0
+    ? valorTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+    : '';
+
+  conteudo.innerHTML = `
+    <div style="display:flex;align-items:center;flex-wrap:wrap;gap:14px;padding:12px 14px;background:#fff7ed;border-radius:8px;border:1px solid #fed7aa;">
+      <div style="flex:1;min-width:200px;">
+        <div style="font-size:12px;color:#92400e;font-weight:700;margin-bottom:2px;">Fornecedor</div>
+        <div style="font-size:15px;color:#0f172a;font-weight:800;">${escapeHtml(fornecedor || '—')}</div>
+      </div>
+      <div>
+        <div style="font-size:12px;color:#92400e;font-weight:700;margin-bottom:2px;">Valor Total NF-e</div>
+        <input id="trmpValorTotal" type="text" value="${escapeHtml(valorFormatado)}" placeholder="0,00" inputmode="decimal"
+          style="font-size:16px;font-weight:800;color:#b45309;padding:6px 10px;border:1.5px solid #fb923c;border-radius:7px;width:150px;text-align:right;" />
+      </div>
+      <div>
+        <div style="font-size:12px;color:#92400e;font-weight:700;margin-bottom:2px;">NF-e</div>
+        <div style="font-size:14px;color:#0f172a;">${escapeHtml(dados?.numero_nfe || '—')}</div>
+      </div>
+    </div>
+
+    <div>
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+        <span style="font-size:13px;font-weight:700;color:#334155;">Itens para Transformação</span>
+        <button type="button" id="trmpAdicionarLinha" style="border:none;background:#0f766e;color:#fff;border-radius:6px;padding:5px 12px;font-size:12px;font-weight:700;cursor:pointer;display:inline-flex;align-items:center;gap:5px;">
+          <i class="fa-solid fa-plus"></i> Adicionar linha
+        </button>
+      </div>
+      <div id="trmpTabelaWrap" style="overflow-x:auto;">
+        ${renderizarTabelaTransformacaoMp(templateItens, valorTotal)}
+      </div>
+    </div>
+
+    <div style="font-size:12px;color:#6b7280;padding:6px 10px;background:#f8fafc;border-radius:6px;border:1px solid #e2e8f0;line-height:1.7;">
+      <strong>Lógica de rateio:</strong>
+      Custo/un = (largura × altura) ÷ 10.000 × (Valor Total ÷ Área Total)<br>
+      Área total = Σ (qtde × largura × altura) ÷ 10.000 de todos os itens
+    </div>
+
+    <div id="trmpMensagem" style="display:none;"></div>
+  `;
+
+  const tabelaWrap = document.getElementById('trmpTabelaWrap');
+  ligarEventosTabelaTransformacaoMp(tabelaWrap, valorTotal);
+
+  document.getElementById('trmpValorTotal')?.addEventListener('input', atualizarCalculosTransformacaoMp);
+
+  document.getElementById('trmpAdicionarLinha')?.addEventListener('click', adicionarLinhaTransformacaoMp);
+
+  document.getElementById('modalTransformacaoMpExecutar')?.addEventListener('click', () =>
+    executarTransformacaoMp(dados)
+  );
+}
+
+async function executarTransformacaoMp(dadosBase) {
+  const btnExecutar = document.getElementById('modalTransformacaoMpExecutar');
+  const msgEl = document.getElementById('trmpMensagem');
+  if (!btnExecutar) return;
+
+  const itens = lerItensTransformacaoMp();
+  if (!itens.length) {
+    if (msgEl) { msgEl.style.display = ''; msgEl.innerHTML = '<div style="background:#fef2f2;border:1px solid #fca5a5;color:#b91c1c;padding:10px 14px;border-radius:7px;font-size:13px;"><i class="fa-solid fa-triangle-exclamation"></i> Adicione ao menos um item.</div>'; }
+    return;
+  }
+
+  const valorInput = document.getElementById('trmpValorTotal');
+  const valorTotal = parseFloat(String(valorInput?.value || '0').replace(/\./g, '').replace(',', '.')) || 0;
+  if (valorTotal <= 0) {
+    if (msgEl) { msgEl.style.display = ''; msgEl.innerHTML = '<div style="background:#fef2f2;border:1px solid #fca5a5;color:#b91c1c;padding:10px 14px;border-radius:7px;font-size:13px;"><i class="fa-solid fa-triangle-exclamation"></i> Informe o valor total da NF-e.</div>'; }
+    return;
+  }
+
+  const salvarTemplate = document.getElementById('modalTransformacaoMpSalvarTemplate')?.checked || false;
+  btnExecutar.disabled = true;
+  btnExecutar.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Executando...';
+  if (msgEl) msgEl.style.display = 'none';
+
+  try {
+    const resp = await fetch('/api/transformacao-mp/executar', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({
+        n_id_receb: dadosBase?.n_id_receb || null,
+        numero_nfe: dadosBase?.numero_nfe || null,
+        fornecedor_nome: dadosBase?.fornecedor_nome || null,
+        valor_total: valorTotal,
+        itens,
+        solicitante: dadosBase?.solicitante || (document.getElementById('userNameDisplay')?.textContent || '').trim() || null,
+        salvar_template: salvarTemplate,
+      }),
+    });
+
+    const json = await resp.json().catch(() => ({}));
+    if (!resp.ok || !json?.ok) {
+      throw new Error(json?.error || `Erro HTTP ${resp.status}`);
+    }
+
+    if (msgEl) {
+      msgEl.style.display = '';
+      msgEl.innerHTML = `
+        <div style="background:#f0fdf4;border:1px solid #86efac;color:#166534;padding:12px 16px;border-radius:8px;font-size:13px;">
+          <div style="font-weight:800;font-size:15px;margin-bottom:4px;"><i class="fa-solid fa-circle-check"></i> Transformação executada!</div>
+          <div>${escapeHtml(json.message || '')}</div>
+          <div style="margin-top:8px;font-size:12px;color:#4ade80;">
+            ${(json.itens || []).map(it => `${escapeHtml(it.sku)}: SAI #${it.id_sai} + ENT #${it.id_ent}`).join('<br>')}
+          </div>
+          <div style="margin-top:8px;font-size:12px;color:#166534;">Aguardando aprovação no módulo de Ajustes de Estoque.</div>
+        </div>
+      `;
+    }
+    btnExecutar.innerHTML = '<i class="fa-solid fa-circle-check"></i> Concluído';
+    btnExecutar.style.background = 'linear-gradient(135deg,#16a34a 0%,#15803d 100%)';
+  } catch (err) {
+    if (msgEl) {
+      msgEl.style.display = '';
+      msgEl.innerHTML = `<div style="background:#fef2f2;border:1px solid #fca5a5;color:#b91c1c;padding:10px 14px;border-radius:7px;font-size:13px;"><i class="fa-solid fa-triangle-exclamation"></i> ${escapeHtml(err?.message || 'Erro ao executar transformação.')}</div>`;
+    }
+    btnExecutar.disabled = false;
+    btnExecutar.innerHTML = '<i class="fa-solid fa-check"></i> Executar Transformação';
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
 
 function criarModalAssociarPedidoNfeSeNecessario() {
   if (obterModalAssociarPedidoNfeEl()) return;

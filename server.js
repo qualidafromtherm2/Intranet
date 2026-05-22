@@ -244,6 +244,7 @@ app.use('/api/registros', require('./routes/registros'));
 app.use('/api/sac', require('./routes/sacEnvios'));
 app.use('/api/ai', require('./routes/ai_assistant'));
 app.use('/api/producao', require('./routes/producao'));
+app.use('/api/transformacao-mp', require('./routes/transformacaoMp'));
 
 app.get('/api/produtos/stream', (req, res) => {
   const accept = String(req.headers?.accept || '');
@@ -346,6 +347,9 @@ const { Pool } = require('pg');
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL || process.env.POSTGRES_URL,
   ssl: { rejectUnauthorized: false },
+});
+pool.on('error', (err) => {
+  console.error('[pg] erro em cliente ocioso — ignorado para evitar crash:', err.message);
 });
 const comprasAuditContext = new AsyncLocalStorage();
 const originalPoolQuery = pool.query.bind(pool);
@@ -30719,6 +30723,13 @@ function calcularScoreAssociacaoNfePedido(itemReceb, itemPedido) {
   return score;
 }
 
+function normalizarCfopServicoRecebimento(valor) {
+  const cfop = String(valor || '').replace(/\D/g, '');
+  if (cfop === '5933') return { servico: true, cfopEntrada: '1.933' };
+  if (cfop === '6933') return { servico: true, cfopEntrada: '2.933' };
+  return { servico: false, cfopEntrada: null };
+}
+
 async function montarPlanoAssociacaoNfePedido(numeroNfe, numeroPedido, chaveNfe = null, nCodPedInformado = null) {
   const nCodPedNumerico = Number(nCodPedInformado);
   const usarIdDireto = Number.isFinite(nCodPedNumerico) && nCodPedNumerico > 0;
@@ -30892,6 +30903,16 @@ async function montarPlanoAssociacaoNfePedido(numeroNfe, numeroPedido, chaveNfe 
       }
     }
 
+    const cfopNf = String(
+      itensCabec?.cCFOP
+      || itensCabec?.cCfop
+      || itensInfoAdic?.cCFOP
+      || itensInfoAdic?.cCfop
+      || itensInfoAdic?.cCFOPEntrada
+      || itensInfoAdic?.cCfopEntrada
+    ).trim();
+    const servicoCfop = normalizarCfopServicoRecebimento(cfopNf);
+
     const itensIde = {
       nSequencia: Number.isFinite(nSequencia) && nSequencia > 0 ? nSequencia : (idx + 1),
       cAcao: servicoCfop.servico ? 'ASSOCIAR-PRODUTO' : 'ASSOCIAR-PEDIDO'
@@ -30913,7 +30934,10 @@ async function montarPlanoAssociacaoNfePedido(numeroNfe, numeroPedido, chaveNfe 
       nf_qtde: itensCabec?.nQtdeNFe ?? null,
       nf_unidade: String(itensCabec?.cUnidadeNfe || '').trim() || null,
       nf_valor_total: itensCabec?.vTotalItem ?? null,
-      pedido_item_encontrado: !!itemPedidoVinculo,
+      nf_cfop: cfopNf || null,
+      item_servico: servicoCfop.servico,
+      servico_cfop_entrada: servicoCfop.cfopEntrada,
+      pedido_item_encontrado: !!itemPedidoVinculo || servicoCfop.servico,
       pedido_n_cod_item: Number.isFinite(nCodItem) && nCodItem > 0 ? nCodItem : null,
       pedido_codigo_produto: String(itemPedidoVinculo?.c_produto || '').trim() || null,
       pedido_descricao_produto: String(itemPedidoVinculo?.c_descricao || '').trim() || null,
@@ -31063,6 +31087,13 @@ app.post('/api/compras/pedidos-omie/nfe-associar-pedido/preview', express.json()
 
     const categoriaInfo = await obterInfoCategoriaRecebimentoOmie(plano?.recebimento_omie);
 
+    const _cab = plano?.recebimento_omie?.cabec || {};
+    const _fornecedorNome = String(_cab.cNome || _cab.cRazaoSocial || '').trim() || null;
+    const _itensReceb = Array.isArray(plano?.recebimento_omie?.itensRecebimento)
+      ? plano.recebimento_omie.itensRecebimento
+      : [];
+    const _valorTotalNfe = _itensReceb.reduce((acc, it) => acc + Number(it?.nValTot || it?.det?.prod?.vProd || 0), 0);
+
     return res.json({
       ok: true,
       preview: {
@@ -31075,6 +31106,8 @@ app.post('/api/compras/pedidos-omie/nfe-associar-pedido/preview', express.json()
         itens_match_total: plano.itens_match_total,
         itens_sem_match_total: plano.itens_sem_match_total,
         categoria: categoriaInfo,
+        fornecedor_nome: _fornecedorNome,
+        valor_total_nfe: Number.isFinite(_valorTotalNfe) && _valorTotalNfe > 0 ? +_valorTotalNfe.toFixed(2) : null,
         itens: plano.itens_preview
       }
     });
@@ -31446,7 +31479,9 @@ app.post('/api/compras/pedidos-omie/nfe-associar-pedido', express.json(), async 
           const ajustes = {};
           if (aplicarEstoqueEspecial) ajustes.codigo_local_estoque = ESTOQUE_LOCAL_ESPECIAL;
           if (cUnidadeFinal) ajustes.cUnidade = cUnidadeFinal;
-          if (cfopCalculado) ajustes.cCFOPEntrada = cfopCalculado;
+          const previewItem = (plano?.itens_preview || []).find(p => p.n_sequencia === nSeq);
+          const cfopServicoEntrada = previewItem?.item_servico ? previewItem?.servico_cfop_entrada : null;
+          if (cfopServicoEntrada || cfopCalculado) ajustes.cCFOPEntrada = cfopServicoEntrada || cfopCalculado;
           // Nota: nQtde não é campo válido em itensAjustes da Omie
 
           // Só incluir o item se tiver ajustes
@@ -31712,7 +31747,17 @@ app.post('/api/compras/pedidos-omie/nfe-associar-pedido', express.json(), async 
         valor_recebido_pedido: Number.isFinite(valorRecebidoPedido) ? valorRecebidoPedido : null,
         retorno_etapa_omie: respostaEtapaFinal || null,
         pedidos_vinculados: pedidosVinculados,
-        alerta_item: alertaItemAssociacao || null
+        alerta_item: alertaItemAssociacao || null,
+        fornecedor_nome: (() => {
+          const c = plano?.recebimento_omie?.cabec || {};
+          return String(c.cNome || c.cRazaoSocial || '').trim() || null;
+        })(),
+        valor_total_nfe: (() => {
+          const its = Array.isArray(plano?.recebimento_omie?.itensRecebimento)
+            ? plano.recebimento_omie.itensRecebimento : [];
+          const total = its.reduce((a, it) => a + Number(it?.nValTot || 0), 0);
+          return Number.isFinite(total) && total > 0 ? +total.toFixed(2) : null;
+        })()
       }
     });
   } catch (err) {
