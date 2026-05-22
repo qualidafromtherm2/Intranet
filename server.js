@@ -29084,7 +29084,7 @@ app.get('/api/compras/buscar-pedido-compra', async (req, res) => {
     const pedido = rows[0];
     const { rows: prodRows } = await pool.query(`
       SELECT c_produto AS produto_codigo, c_descricao AS produto_descricao,
-             n_qtde AS quantidade, c_unidade AS unidade,
+             n_cod_item, n_qtde AS quantidade, c_unidade AS unidade,
              COALESCE(n_val_tot, 0) AS valor_item
       FROM compras.pedidos_omie_produtos
       WHERE n_cod_ped = $1

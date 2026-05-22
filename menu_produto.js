@@ -51498,6 +51498,7 @@ function renderPreviewAssociacaoPedidoNfe(preview) {
                 <i class="fa-solid fa-triangle-exclamation" style="color:#ea580c;font-size:12px;flex-shrink:0;"></i>
                 <span style="font-size:11px;color:#9a3412;flex:1;">Sem match — selecione o produto</span>`}
                 <button type="button" class="assoc-produto-override-btn" data-seq="${seq}" style="border:1px solid #fb923c;background:#ea580c;color:#fff;border-radius:7px;padding:5px 8px;font-size:11px;font-weight:700;cursor:pointer;white-space:nowrap;flex-shrink:0;">${item?.produto_override && Number(item?.servico_produto_codigo_produto || 0) > 0 ? 'Alterar' : 'Selecionar produto'}</button>
+                <button type="button" class="assoc-item-pedido-btn" data-seq="${seq}" title="Vincular a um item já presente no pedido" style="border:1px solid #16a34a;background:#15803d;color:#fff;border-radius:7px;padding:5px 8px;font-size:11px;font-weight:700;cursor:pointer;white-space:nowrap;flex-shrink:0;">Item do pedido</button>
               </div>`}
             </td>
             <td style="padding:7px 8px;font-size:11px;color:${corQtd};background:${bgQtd};text-align:right;white-space:nowrap;">${
@@ -51592,6 +51593,129 @@ function renderPreviewAssociacaoPedidoNfe(preview) {
   previewConteudo.querySelectorAll('.assoc-produto-override-btn').forEach((btn) => {
     btn.addEventListener('click', () => abrirModalProdutoServicoAssociacaoNfe(Number(btn.dataset.seq || 0)));
   });
+  previewConteudo.querySelectorAll('.assoc-item-pedido-btn').forEach((btn) => {
+    btn.addEventListener('click', () => abrirPickerItemPedidoAssociacao(Number(btn.dataset.seq || 0)));
+  });
+}
+
+function abrirPickerItemPedidoAssociacao(seq) {
+  if (!seq) return;
+  const preview = window.__associarNfePreviewAtual?.preview || {};
+  const numeroPedido = String(preview?.c_numero_pedido || '').trim();
+
+  // Coleta todos os itens do pedido: informativos + matched
+  let itensPedido = [
+    ...(preview.itens_pedido_informativos || []),
+    ...(preview.itens_preview || [])
+      .filter(i => i.pedido_item_encontrado && Number(i.pedido_n_cod_item || 0) > 0)
+      .map(i => ({
+        pedido_n_cod_item: i.pedido_n_cod_item,
+        pedido_codigo_produto: i.pedido_codigo_produto,
+        pedido_descricao_produto: i.pedido_descricao_produto,
+        pedido_qtde: i.pedido_qtde,
+        pedido_unidade: i.pedido_unidade,
+        pedido_valor_total: i.pedido_valor_total,
+      }))
+  ];
+  // Remove duplicatas por n_cod_item
+  const seen = new Set();
+  itensPedido = itensPedido.filter(i => {
+    const k = Number(i.pedido_n_cod_item || 0);
+    if (!k || seen.has(k)) return false;
+    seen.add(k); return true;
+  });
+
+  let modal = document.getElementById('modalItemPedidoAssociacao');
+  if (modal) modal.remove();
+  modal = document.createElement('div');
+  modal.id = 'modalItemPedidoAssociacao';
+  modal.style.cssText = 'position:fixed;inset:0;z-index:2147483647;background:rgba(15,23,42,.70);display:flex;align-items:center;justify-content:center;padding:20px;';
+
+  const renderItensHtml = (items) => {
+    if (!items.length) return '<div style="font-size:12px;color:#64748b;padding:12px;">Nenhum item encontrado para o pedido.</div>';
+    return items.map(it => `
+      <button type="button"
+        data-n-cod-item="${Number(it.pedido_n_cod_item || 0)}"
+        data-codigo="${escapeHtml(String(it.pedido_codigo_produto || ''))}"
+        data-descricao="${escapeHtml(String(it.pedido_descricao_produto || ''))}"
+        data-qtde="${escapeHtml(String(it.pedido_qtde ?? ''))}"
+        data-unidade="${escapeHtml(String(it.pedido_unidade || ''))}"
+        data-valor="${escapeHtml(String(it.pedido_valor_total ?? ''))}"
+        style="display:flex;align-items:center;justify-content:space-between;gap:14px;text-align:left;border:1px solid #bbf7d0;background:#f0fdf4;border-radius:10px;padding:10px;cursor:pointer;width:100%;">
+        <span style="min-width:0;">
+          <div style="font-weight:800;color:#0f172a;">${escapeHtml(String(it.pedido_codigo_produto || '-'))}</div>
+          <div style="font-size:12px;color:#475569;">${escapeHtml(String(it.pedido_descricao_produto || '-'))}</div>
+          <div style="font-size:11px;color:#64748b;margin-top:2px;">Qtd: ${escapeHtml(String(it.pedido_qtde ?? '-'))} ${escapeHtml(String(it.pedido_unidade || ''))} · R$ ${escapeHtml(Number(it.pedido_valor_total || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 }))}</div>
+        </span>
+        <span style="white-space:nowrap;background:#15803d;color:white;border-radius:8px;padding:7px 10px;font-size:12px;font-weight:800;">Usar este item</span>
+      </button>`).join('');
+  };
+
+  modal.innerHTML = `
+    <div style="width:min(820px,95vw);max-height:85vh;overflow:auto;background:#fff;border:2px solid #16a34a;border-radius:16px;box-shadow:0 24px 80px rgba(0,0,0,.35);padding:18px;">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+        <strong style="font-size:18px;color:#0f172a;">Itens do Pedido ${escapeHtml(String(numeroPedido || ''))}</strong>
+        <button type="button" id="modalItemPedidoFechar" style="border:0;background:transparent;font-size:26px;cursor:pointer;color:#334155;">&times;</button>
+      </div>
+      <div style="font-size:12px;color:#475569;margin-bottom:12px;">Clique em <strong>Usar este item</strong> para vincular o item do pedido à linha da NF-e não mapeada.</div>
+      <div id="modalItemPedidoLista" style="display:flex;flex-direction:column;gap:8px;">
+        ${itensPedido.length ? renderItensHtml(itensPedido) : '<div style="font-size:12px;color:#64748b;">Carregando itens...</div>'}
+      </div>
+    </div>`;
+
+  document.body.appendChild(modal);
+  modal.querySelector('#modalItemPedidoFechar').onclick = () => modal.remove();
+
+  function attachSelectHandlers() {
+    modal.querySelectorAll('button[data-n-cod-item]').forEach(btn => {
+      btn.onclick = () => {
+        const nCodItem = Number(btn.dataset.nCodItem || 0);
+        if (!nCodItem) return;
+        const item = (window.__associarNfePreviewEstadoItens || []).find(i => Number(i?.n_sequencia || 0) === seq);
+        if (item) {
+          item.pedido_item_encontrado = true;
+          item.pedido_item_override = true;
+          item.pedido_n_cod_item = nCodItem;
+          item.pedido_codigo_produto = btn.dataset.codigo || '';
+          item.pedido_descricao_produto = btn.dataset.descricao || '';
+          item.pedido_qtde = btn.dataset.qtde !== '' ? Number(btn.dataset.qtde) : null;
+          item.pedido_unidade = btn.dataset.unidade || '';
+          item.pedido_valor_total = btn.dataset.valor !== '' ? Number(btn.dataset.valor) : null;
+          item.criterio_match = 'ajuste_manual_item_pedido';
+          item.score_match = 9999;
+          delete item.produto_override;
+        }
+        modal.remove();
+        renderPreviewAssociacaoPedidoNfe(window.__associarNfePreviewAtual?.preview || {});
+      };
+    });
+  }
+
+  // Se sem itens no preview, busca via API
+  if (!itensPedido.length && numeroPedido) {
+    const lista = modal.querySelector('#modalItemPedidoLista');
+    fetch(`/api/compras/buscar-pedido-compra?numero=${encodeURIComponent(numeroPedido)}`, { credentials: 'include' })
+      .then(r => r.json())
+      .then(data => {
+        const itensApi = (data?.pedido?.itens || []).filter(i => Number(i.n_cod_item || 0) > 0);
+        lista.innerHTML = itensApi.length
+          ? renderItensHtml(itensApi.map(i => ({
+              pedido_n_cod_item: i.n_cod_item,
+              pedido_codigo_produto: i.c_produto || i.produto_codigo,
+              pedido_descricao_produto: i.c_descricao || i.produto_descricao,
+              pedido_qtde: i.n_qtde !== undefined ? i.n_qtde : i.quantidade,
+              pedido_unidade: i.c_unidade || i.unidade,
+              pedido_valor_total: i.n_val_tot !== undefined ? i.n_val_tot : i.valor_item,
+            })))
+          : '<div style="font-size:12px;color:#64748b;">Nenhum item encontrado.</div>';
+        attachSelectHandlers();
+      })
+      .catch(() => {
+        lista.innerHTML = '<div style="font-size:12px;color:#b91c1c;">Erro ao carregar itens do pedido.</div>';
+      });
+  } else {
+    attachSelectHandlers();
+  }
 }
 
 function abrirModalProdutoServicoAssociacaoNfe(seq) {
