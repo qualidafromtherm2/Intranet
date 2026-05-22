@@ -24561,6 +24561,7 @@ window.openRegistros = async function() {
   let _etqViewMode = 'list'; // 'list' | 'grid'
   let _etqMostrarOcultos = false; // quando true, mostra apenas itens ocultos
   let _etqPrinterPref = null; // impressora preferida salva no localStorage por usuário
+  let _etqAgentAliasCache = {}; // cache de apelidos vindos dos agentes via heartbeat
 
   // Analisa preferência do tipo "__AGENT__:pcName:impressora"
   function _etqParseAgentPref(pref) {
@@ -25174,11 +25175,21 @@ window.openRegistros = async function() {
     }
     return val;
   }
-  // Retorna o apelido amigável se definido, senso retorna o label padrão
+  // Retorna o apelido amigável do agente (via heartbeat/cache) ou label técnico
   function _etqGetDisplayName(val) {
-    const cfg = _etqCarregarCfgImpr();
-    const alias = (cfg.aliases || {})[val];
+    const alias = _etqAgentAliasCache[val];
     return alias && alias.trim() ? alias.trim() : _etqValParaLabel(val);
+  }
+
+  // Popula _etqAgentAliasCache a partir da resposta de agentes-disponiveis
+  function _etqPopularAliasCache(agentes) {
+    for (const ag of agentes) {
+      for (const [imp, alias] of Object.entries(ag.printerAliases || {})) {
+        const val = _etqImpressoraParaVal(ag.pcName, imp);
+        if (alias && alias.trim()) _etqAgentAliasCache[val] = alias.trim();
+        else delete _etqAgentAliasCache[val]; // limpa apelido removido
+      }
+    }
   }
 
   // Atualiza o listbox com as impressoras ativas da config do usuário
@@ -25191,34 +25202,42 @@ window.openRegistros = async function() {
 
     sel.innerHTML = '<option value="">— nenhuma selecionada —</option>';
 
-    // Monta lista: padrão no topo, depois os demais ativos
+    // Sempre busca agentes para atualizar o cache de apelidos
+    let agentData = [];
+    try {
+      const r = await fetch('/api/etiquetas/agentes-disponiveis', { credentials: 'include' });
+      const d = await r.json();
+      agentData = d.agentes || [];
+      _etqPopularAliasCache(agentData);
+    } catch (_) {}
+
+    // Helper: adiciona option deduplicando por nome de exibição
+    // Impressoras com mesmo apelido = mesma impressora lógica → mostra só uma vez
+    function addOpt(val, isPadrao, seenNames) {
+      const name = _etqGetDisplayName(val);
+      const key  = name.toLowerCase().trim();
+      if (seenNames.has(key)) return;
+      seenNames.add(key);
+      const opt = document.createElement('option');
+      opt.value = val;
+      opt.textContent = (isPadrao ? '\u2605 ' : '') + name;
+      if (isPadrao) opt.style.color = '#fbbf24';
+      sel.appendChild(opt);
+    }
+
     const todos = padrao ? [padrao, ...enabled.filter(v => v !== padrao)] : enabled;
+    const seen = new Set();
     if (todos.length === 0) {
-      // Sem config salva: busca agentes e mostra todos
-      try {
-        const r = await fetch('/api/etiquetas/agentes-disponiveis', { credentials: 'include' });
-        const d = await r.json();
-        const agentes = d.agentes || [];
-        sel.innerHTML = '<option value="">— nenhuma selecionada —</option>';
-        for (const ag of agentes) {
-          for (const imp of (ag.printers || [])) {
-            const val = _etqImpressoraParaVal(ag.pcName, imp);
-            const opt = document.createElement('option');
-            opt.value = val;
-            opt.textContent = _etqGetDisplayName(val);
-            sel.appendChild(opt);
-          }
+      // Sem config: exibe todos os agentes online
+      sel.innerHTML = '<option value="">— nenhuma selecionada —</option>';
+      for (const ag of agentData) {
+        for (const imp of (ag.printers || [])) {
+          addOpt(_etqImpressoraParaVal(ag.pcName, imp), false, seen);
         }
-        sel.insertAdjacentHTML('beforeend', '<option value="__PDF__">📄 PDF (baixar arquivo)</option>');
-      } catch (_) {}
-    } else {
-      for (const val of todos) {
-        const opt = document.createElement('option');
-        opt.value = val;
-        opt.textContent = (val === padrao ? '★ ' : '') + _etqGetDisplayName(val);
-        if (val === padrao) opt.style.color = '#fbbf24';
-        sel.appendChild(opt);
       }
+      sel.insertAdjacentHTML('beforeend', '<option value="__PDF__">📄 PDF (baixar arquivo)</option>');
+    } else {
+      for (const val of todos) addOpt(val, val === padrao, seen);
     }
 
     // Pré-seleciona a preferência atual
@@ -25266,7 +25285,9 @@ window.openRegistros = async function() {
     try {
       const r = await fetch('/api/etiquetas/agentes-disponiveis', { credentials: 'include' });
       const d = await r.json();
-      for (const ag of (d.agentes || [])) {
+      const agentes = d.agentes || [];
+      _etqPopularAliasCache(agentes); // atualiza apelidos antes de renderizar
+      for (const ag of agentes) {
         for (const imp of (ag.printers || [])) {
           const val = _etqImpressoraParaVal(ag.pcName, imp);
           impressoras.push({ val, label: imp, pcName: ag.pcName });
@@ -25296,7 +25317,7 @@ window.openRegistros = async function() {
     for (const { val, label, pcName, offline } of impressoras) {
       const isEnabled = enabled.has(val) || val === padrao;
       const isPadrao  = val === padrao;
-      const savedAlias = savedAliases[val] || '';
+      const agentAlias = _etqAgentAliasCache[val] || '';
       const item = document.createElement('div');
       item.className = 'etq-cfg-impr-item';
       item.dataset.val = val;
@@ -25304,10 +25325,8 @@ window.openRegistros = async function() {
         <input type="checkbox" class="etqCfgImprChk" data-val="${escapeHtml(val)}" ${isEnabled ? 'checked' : ''}>
         <div class="etq-cfg-impr-item-info">
           <div class="etq-cfg-impr-item-nome">${escapeHtml(label)}${offline ? ' <span style="color:#f87171;font-size:.7rem;">(offline)</span>' : ''}</div>
+          ${agentAlias ? `<div style="font-size:.75rem;color:#7c3aed;margin-top:2px">🏷️ ${escapeHtml(agentAlias)}</div>` : ''}
           ${pcName ? `<div class="etq-cfg-impr-item-pc">${escapeHtml(pcName)}</div>` : ''}
-          <input type="text" class="etq-cfg-impr-alias-input etqCfgImprAlias" data-val="${escapeHtml(val)}"
-            placeholder="Apelido amigável (ex: Zebra Expedição)"
-            value="${escapeHtml(savedAlias)}" maxlength="50">
         </div>
         <button class="etq-cfg-impr-btn-padrao${isPadrao ? ' padrao-ativo' : ''}" data-val="${escapeHtml(val)}" title="Definir como impressora padrão">
           ${isPadrao ? '★ Padrão' : '☆ Padrão'}
@@ -25340,16 +25359,10 @@ window.openRegistros = async function() {
     const lista = document.getElementById('etqCfgImprLista');
     if (!lista) return;
     const enabled = [];
-    const aliases = {};
     lista.querySelectorAll('.etqCfgImprChk:checked').forEach(chk => {
       enabled.push(chk.dataset.val);
     });
-    lista.querySelectorAll('.etqCfgImprAlias').forEach(inp => {
-      const v = inp.dataset.val;
-      const a = inp.value.trim();
-      if (v && a) aliases[v] = a;
-    });
-    const cfg = { padrao: _etqCfgImprPadraoTemp || (enabled[0] || null), enabled, aliases };
+    const cfg = { padrao: _etqCfgImprPadraoTemp || (enabled[0] || null), enabled };
     _etqSalvarCfgImpr(cfg);
     if (!_etqPrinterPref && cfg.padrao) _etqSalvarPref(cfg.padrao);
     document.getElementById('etqConfigImpressorasModal').style.display = 'none';

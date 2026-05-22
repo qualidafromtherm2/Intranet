@@ -10582,7 +10582,7 @@ const _agentesOnline = new Map(); // key: pcName → { pcName, printers, lastSee
 app.post('/api/etiquetas/agente/heartbeat', express.json(), (req, res) => {
   const token = req.headers['x-agent-token'];
   if (token !== AGENTE_TOKEN) return res.status(401).json({ error: 'Token inválido' });
-  const { printer = '', version = '?', host = '', pcName = '', printers = [] } = req.body || {};
+  const { printer = '', version = '?', host = '', pcName = '', printers = [], printerAliases = {} } = req.body || {};
   // Compatibilidade retroativa — agente único
   _agenteAtivo.ts      = Date.now();
   _agenteAtivo.printer = printer || _agenteAtivo.printer;
@@ -10591,10 +10591,11 @@ app.post('/api/etiquetas/agente/heartbeat', express.json(), (req, res) => {
   // Registro multi-agente
   const nome = pcName || host || req.ip;
   _agentesOnline.set(nome, {
-    pcName:    nome,
-    printers:  Array.isArray(printers) && printers.length ? printers : (printer ? [printer] : []),
-    lastSeen:  Date.now(),
-    host:      host || req.ip,
+    pcName:         nome,
+    printers:       Array.isArray(printers) && printers.length ? printers : (printer ? [printer] : []),
+    printerAliases: typeof printerAliases === 'object' && printerAliases !== null ? printerAliases : {},
+    lastSeen:       Date.now(),
+    host:           host || req.ip,
     version,
   });
   res.json({ ok: true });
@@ -10606,7 +10607,7 @@ app.get('/api/etiquetas/agentes-disponiveis', (req, res) => {
   const disponiveis = [];
   for (const ag of _agentesOnline.values()) {
     if (agora - ag.lastSeen < 120000) {   // online = visto nos últimos 2 min
-      disponiveis.push({ pcName: ag.pcName, printers: ag.printers, version: ag.version, online: true });
+      disponiveis.push({ pcName: ag.pcName, printers: ag.printers, printerAliases: ag.printerAliases || {}, version: ag.version, online: true });
     }
   }
   res.json({ ok: true, agentes: disponiveis });

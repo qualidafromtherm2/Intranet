@@ -42,6 +42,7 @@ const DEFAULT_CONFIG = {
   labelOffsetX: 0,
   labelOffsetY: 0,
   printerConfigs: {},        // config por impressora: { "NomeImpressora": { labelWidth, labelHeight, ... } }
+  printerAliases:  {},        // apelidos amigáveis: { "NomeImpressora": "Zebra Expedição" }
 };
 
 // Campos que pertencem à configuração de etiqueta (por impressora)
@@ -63,7 +64,8 @@ function readConfig() {
     const raw = fs.readFileSync(CONFIG_PATH, 'utf8');
     const parsed = JSON.parse(raw);
     return Object.assign({}, DEFAULT_CONFIG, parsed,
-      { printerConfigs: Object.assign({}, DEFAULT_CONFIG.printerConfigs, parsed.printerConfigs || {}) });
+      { printerConfigs: Object.assign({}, DEFAULT_CONFIG.printerConfigs, parsed.printerConfigs || {}),
+        printerAliases: Object.assign({}, DEFAULT_CONFIG.printerAliases, parsed.printerAliases || {}) });
   } catch { return Object.assign({}, DEFAULT_CONFIG); }
 }
 
@@ -401,6 +403,27 @@ function buildConfigHtml(cfg, printers, status) {
         </div>
       </form>
     </div>
+
+    <div class="card">
+      <h2>🏷️ Apelidos das Impressoras</h2>
+      <p style="color:var(--muted);font-size:.82rem;margin-bottom:14px">Defina nomes amigáveis para cada impressora. O apelido aparece no intranet para todos os usuários.</p>
+      ${printers.length === 0
+        ? '<p style="color:var(--muted);font-size:.82rem">Nenhuma impressora detectada. Atualize a página após inicializar o serviço.</p>'
+        : `<div id="aliasesList">
+          ${printers.map(p => {
+            const alias = (cfg.printerAliases || {})[p] || '';
+            return `<div class="field" style="margin-bottom:10px">
+              <label style="font-size:.8rem;color:var(--muted)">${p.replace(/</g,'&lt;').replace(/>/g,'&gt;')}</label>
+              <input type="text" class="alias-input" data-printer="${p.replace(/"/g,'&quot;')}"
+                placeholder="Apelido amigável (ex: Zebra Expedição)"
+                value="${alias.replace(/"/g,'&quot;')}" maxlength="50"
+                style="width:100%;padding:7px 10px;background:#1a1929;color:var(--text);border:1px solid var(--border);border-radius:6px;font-size:.85rem;outline:none">
+            </div>`;
+          }).join('')}
+        </div>
+        <div class="btn-row"><button class="btn btn-secondary" onclick="saveAliases()">💾 Salvar apelidos</button></div>`
+      }
+    </div>
   </div>
 
   <!-- ══ COLUNA 2: Status / Preview / Histórico / Fila / Log ═══════════ -->
@@ -545,6 +568,18 @@ document.getElementById('formServer').addEventListener('submit', async e => {
   const j = await r.json();
   toast(j.ok ? 'Conexão salva!' : (j.error || 'Erro'), j.ok);
 });
+
+// ── Salvar apelidos das impressoras ───────────────────────────────────────────
+async function saveAliases() {
+  const aliases = {};
+  document.querySelectorAll('.alias-input').forEach(inp => {
+    const p = inp.dataset.printer;
+    if (p !== undefined) aliases[p] = inp.value.trim();
+  });
+  const r = await fetch('/api/config', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ printerAliases: aliases }) });
+  const j = await r.json();
+  toast(j.ok ? 'Apelidos salvos! O intranet vai exibi-los no próximo heartbeat.' : (j.error || 'Erro'), j.ok);
+}
 
 // ── Offset sliders + inputs sincronizados ─────────────────────────────────────
 function syncOffset(axis, val) {
@@ -780,7 +815,8 @@ function runService() {
     const pc = c.pcName || os.hostname();
     apiRequest('POST', '/api/etiquetas/agente/heartbeat',
       { printer: c.printer || '', version: AGENT_VERSION, host: os.hostname(),
-        pcName: pc, printers: state.printers || [] },
+        pcName: pc, printers: state.printers || [],
+        printerAliases: c.printerAliases || {} },
       c.agentToken, () => {});
   }
   sendHeartbeat();                          // imediato ao iniciar
