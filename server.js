@@ -116,7 +116,18 @@ const sessionStore = new PgSession({
 });
 
 sessionStore.on('error', (err) => {
-  console.error('[session-store] erro no Postgres session store:', err?.message || err);
+  // Throttle: evita inundação de logs quando o Postgres está em recovery mode (manutenção/failover)
+  const msg = err?.message || String(err);
+  const now = Date.now();
+  if (!sessionStore._lastErrLog || now - sessionStore._lastErrLog > 30000) {
+    const sup = sessionStore._suppressedErrs || 0;
+    const prefix = sup > 0 ? ` (+${sup} suprimidos nos últimos 30s)` : '';
+    console.error(`[session-store] erro no Postgres session store${prefix}:`, msg);
+    sessionStore._lastErrLog    = now;
+    sessionStore._suppressedErrs = 0;
+  } else {
+    sessionStore._suppressedErrs = (sessionStore._suppressedErrs || 0) + 1;
+  }
 });
 
 // 🔐 SESSION_SECRET é obrigatório. Em produção, falhar fechado.
