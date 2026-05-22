@@ -10575,7 +10575,14 @@ app.use('/etiquetas', express.static(etiquetasRoot));
         erro_msg    TEXT
       )
     `);
-    console.log('[etiqueta] Schema e tabelas ETQ_recebimento / ETQ_rec_impresso / ETQ_fila_impressao garantidos');
+    // Tabela de regras de auto-ocultamento por codigo_produto
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS etiqueta."ETQ_auto_oculto" (
+        codigo_produto TEXT PRIMARY KEY,
+        criado_em      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
+    console.log('[etiqueta] Schema e tabelas ETQ_recebimento / ETQ_rec_impresso / ETQ_fila_impressao / ETQ_auto_oculto garantidos');
   } catch (err) {
     console.error('[etiqueta] Falha ao garantir schema/tabela:', err?.message || err);
   }
@@ -10993,7 +11000,13 @@ app.get('/api/etiquetas/recebimento/pendentes', async (req, res) => {
   try {
     const q = String(req.query.q || '').trim();
     const mostrarOcultos = req.query.mostrar_ocultos === '1';
-    const ocultoCond = mostrarOcultos ? 'AND oculto = true' : 'AND (oculto = false OR oculto IS NULL)';
+    // ETQ_auto_oculto: regra de auto-ocultamento por codigo_produto.
+    // Normal: exclui ocultos explícitos E itens cujo codigo_produto tem regra ativa.
+    // Ocultos: inclui ocultos explícitos E itens cobertos pela regra (novos ainda não marcados).
+    const _aoSub = `SELECT codigo_produto FROM etiqueta."ETQ_auto_oculto"`;
+    const ocultoCond = mostrarOcultos
+      ? `(er.oculto = true OR (er.codigo_produto IS NOT NULL AND er.codigo_produto IN (${_aoSub})))`
+      : `(er.oculto = false OR er.oculto IS NULL) AND (er.codigo_produto IS NULL OR er.codigo_produto NOT IN (${_aoSub}))`;
     const idImpressoSub = `(SELECT id FROM etiqueta."ETQ_rec_impresso" ri WHERE ri.origem_id = er.id ORDER BY ri.id DESC LIMIT 1) AS id_impresso`;
     let rows;
     if (q) {
@@ -11003,7 +11016,7 @@ app.get('/api/etiquetas/recebimento/pendentes', async (req, res) => {
                 er.descricao_produto, er.qtd, er.unidade, er.data_emissao, er.criado_em, er.oculto, er.impressa,
                 ${idImpressoSub}
            FROM etiqueta."ETQ_recebimento" er
-          WHERE ${ocultoCond.replace(/^AND /, '')}
+          WHERE ${ocultoCond}
             AND (er.lote ILIKE $1 OR er.codigo_produto ILIKE $1 OR er.descricao_produto ILIKE $1)
           ORDER BY er.impressa DESC, er.criado_em DESC
           LIMIT 200`,
@@ -11016,7 +11029,7 @@ app.get('/api/etiquetas/recebimento/pendentes', async (req, res) => {
                 er.descricao_produto, er.qtd, er.unidade, er.data_emissao, er.criado_em, er.oculto, er.impressa,
                 ${idImpressoSub}
            FROM etiqueta."ETQ_recebimento" er
-          WHERE ${ocultoCond.replace(/^AND /, '')}
+          WHERE ${ocultoCond}
           ORDER BY er.impressa DESC, er.criado_em DESC
           LIMIT 200`
       );
@@ -11048,19 +11061,56 @@ app.patch('/api/etiquetas/recebimento/:id/reimprimir', async (req, res) => {
 });
 
 // PATCH /api/etiquetas/recebimento/:id/oculto
-// Alterna o campo oculto de um registro
+// Ocultar: marca este registro + todos com mesmo codigo_produto + cria regra em ETQ_auto_oculto.
+// Desocultar: desmarca apenas este registro + remove a regra (novos ficam visíveis; já ocultos permanecem).
 app.patch('/api/etiquetas/recebimento/:id/oculto', async (req, res) => {
   try {
     const id = Number(req.params.id);
     if (!id) return res.status(400).json({ error: 'ID inválido.' });
     const { oculto } = req.body;
     if (typeof oculto !== 'boolean') return res.status(400).json({ error: 'Campo oculto deve ser boolean.' });
-    const result = await pool.query(
-      `UPDATE etiqueta."ETQ_recebimento" SET oculto = $1 WHERE id = $2 RETURNING id, oculto`,
-      [oculto, id]
+    // Busca codigo_produto do registro
+    const rec = await pool.query(
+      `SELECT codigo_produto FROM etiqueta."ETQ_recebimento" WHERE id = $1`,
+      [id]
     );
-    if (result.rowCount === 0) return res.status(404).json({ error: 'Registro não encontrado.' });
-    res.json({ ok: true, id, oculto: result.rows[0].oculto });
+    if (rec.rowCount === 0) return res.status(404).json({ error: 'Registro não encontrado.' });
+    const codigoProduto = rec.rows[0].codigo_produto;
+
+    if (oculto) {
+      // Oculta TODOS os registros com o mesmo codigo_produto de uma vez
+      if (codigoProduto) {
+        await pool.query(
+          `UPDATE etiqueta."ETQ_recebimento" SET oculto = true WHERE codigo_produto = $1`,
+          [codigoProduto]
+        );
+        // Registra regra de auto-ocultamento para futuros itens
+        await pool.query(
+          `INSERT INTO etiqueta."ETQ_auto_oculto" (codigo_produto) VALUES ($1) ON CONFLICT DO NOTHING`,
+          [codigoProduto]
+        );
+      } else {
+        // Sem codigo_produto: oculta apenas este
+        await pool.query(
+          `UPDATE etiqueta."ETQ_recebimento" SET oculto = true WHERE id = $1`,
+          [id]
+        );
+      }
+    } else {
+      // Desoculta apenas este registro (os demais já ocultos permanecem)
+      await pool.query(
+        `UPDATE etiqueta."ETQ_recebimento" SET oculto = false WHERE id = $1`,
+        [id]
+      );
+      // Remove regra de auto-ocultamento — novos itens do mesmo código ficarão visíveis
+      if (codigoProduto) {
+        await pool.query(
+          `DELETE FROM etiqueta."ETQ_auto_oculto" WHERE codigo_produto = $1`,
+          [codigoProduto]
+        );
+      }
+    }
+    res.json({ ok: true, id, oculto, codigo_produto: codigoProduto });
   } catch (err) {
     console.error('[etiquetas/oculto]', err);
     res.status(500).json({ error: err?.message || 'Falha ao atualizar.' });
