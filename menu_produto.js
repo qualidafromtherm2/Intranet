@@ -3179,20 +3179,17 @@ function renderAlmoxTable(arr) {
 function toggleHeaderIcons(isLoggedIn) {
   const bellWrapper = document.getElementById('notification-wrapper');
   const cartIcon = document.getElementById('cart-icon');
-  const printIcon = document.getElementById('print-icon');
   const configIcon = document.getElementById('config-icon');
 
   if (isLoggedIn) {
     // Mostra os ícones quando usuário está logado
     if (bellWrapper) bellWrapper.style.display = 'block';
     if (cartIcon) cartIcon.style.display = 'inline-block';
-    if (printIcon) printIcon.style.display = 'inline-block';
     if (configIcon) configIcon.style.display = 'inline-block';
   } else {
     // Oculta os ícones quando usuário não está logado
     if (bellWrapper) bellWrapper.style.display = 'none';
     if (cartIcon) cartIcon.style.display = 'none';
-    if (printIcon) printIcon.style.display = 'none';
     if (configIcon) configIcon.style.display = 'none';
   }
 }
@@ -9747,7 +9744,26 @@ const sacEnvioStatus = document.getElementById('sacEnvioStatus');
 const sacObservacao = document.getElementById('sacObservacao');
 const sacNumeroSep = document.getElementById('sacNumeroSep');
 const sacRefreshBtn = document.getElementById('sacRefreshBtn');
+const sacRelatorioBtn = document.getElementById('sacRelatorioBtn');
 const sacTabelaBody = document.getElementById('sacTabelaBody');
+const sacRelatorioGraficoWrapper = document.getElementById('sacRelatorioGraficoWrapper');
+const sacRelatorioGraficoCanvas = document.getElementById('sacRelatorioGraficoCanvas');
+const sacRelatorioGraficoVazio = document.getElementById('sacRelatorioGraficoVazio');
+const sacRelatorioConteudoGraficoCanvas = document.getElementById('sacRelatorioConteudoGraficoCanvas');
+const sacRelatorioConteudoGraficoVazio = document.getElementById('sacRelatorioConteudoGraficoVazio');
+const sacRelatorioConteudoUsuarioSelect = document.getElementById('sacRelatorioConteudoUsuarioSelect');
+const sacRelatorioDrilldownWrapper = document.getElementById('sacRelatorioDrilldownWrapper');
+const sacRelatorioDrilldownTitulo = document.getElementById('sacRelatorioDrilldownTitulo');
+const sacRelatorioDrilldownBody = document.getElementById('sacRelatorioDrilldownBody');
+const sacRelatorioVoltarBtn = document.getElementById('sacRelatorioVoltarBtn');
+const sacRelatorioDownloadBtn = document.getElementById('sacRelatorioDownloadBtn');
+const sacPeriodo3mBtn = document.getElementById('sacPeriodo3mBtn');
+const sacPeriodo4mBtn = document.getElementById('sacPeriodo4mBtn');
+const sacPeriodo6mBtn = document.getElementById('sacPeriodo6mBtn');
+const sacPeriodo12mBtn = document.getElementById('sacPeriodo12mBtn');
+const sacPeriodoTudoBtn = document.getElementById('sacPeriodoTudoBtn');
+const sacRelatorioTipoGraficoBtn = document.getElementById('sacRelatorioTipoGraficoBtn');
+const sacRelatorioModoValorBtn = document.getElementById('sacRelatorioModoValorBtn');
 const atTipoAtendimentoInput = document.getElementById('atTipoAtendimento');
 const atNomeRevendaClienteInput = document.getElementById('atNomeRevendaCliente');
 const atTelefoneInput = document.getElementById('atTelefone');
@@ -9801,6 +9817,17 @@ let atWhatsappRealtimeBound = false;
 // Mapa de conversas com last_read_at do banco (sincronizado via API)
 const atWhatsappConversationState = new Map(); // { phone_digits -> { last_read_at, ... } }
 let atWhatsappConversationFilter = 'todos';
+
+let _sacRelatorioUsuariosChart = null;
+let _sacRelatorioConteudoChart = null;
+let _sacRelatorioRowsCache = [];
+let _sacRelatorioPeriodoMeses = 4;
+let _sacRelatorioConteudoUsuarioSelecionado = '';
+let _sacRelatorioConteudoTopItens = [];
+let _sacRelatorioDrilldownItensCache = [];
+let _sacRelatorioModoGrafico = 'bar';
+let _sacRelatorioModoValor = false;   // false = quantidade, true = valor (CMC × qtd)
+let _sacCmcCache = {};                // { "61016": 45.20, ... }
 
 // -------- Gestão de anexos pendentes (antes de salvar a OS) --------
 let _atAnexosPendentes = []; // Array de File objects
@@ -17291,6 +17318,618 @@ async function carregarSacSolicitacoes(targetBody, { hideDone = false, titleOnly
   }
 }
 
+function _sacEscapeHtml(value) {
+  return String(value ?? '').replace(/[&<>"]/g, (ch) => ({
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;'
+  }[ch]));
+}
+
+function _sacCorPorIndice(i) {
+  const cores = ['#6366f1', '#10b981', '#f59e0b', '#ef4444', '#06b6d4', '#8b5cf6', '#14b8a6', '#f97316', '#22c55e', '#eab308'];
+  return cores[i % cores.length];
+}
+
+function _sacPeriodoMesAno(dateValue) {
+  const d = new Date(dateValue);
+  if (Number.isNaN(d.getTime())) return 'Sem data';
+  const mes = String(d.getMonth() + 1).padStart(2, '0');
+  return `${mes}/${d.getFullYear()}`;
+}
+
+function _sacRotuloCurto(nome, limite = 44) {
+  const texto = String(nome || '').trim().replace(/\s+/g, ' ');
+  if (texto.length <= limite) return texto;
+  return `${texto.slice(0, limite - 1)}...`;
+}
+
+function _sacPeriodoKey(dateValue) {
+  const d = new Date(dateValue);
+  if (Number.isNaN(d.getTime())) return null;
+  return (d.getFullYear() * 100) + (d.getMonth() + 1);
+}
+
+function _sacAplicarPeriodo(rows, meses) {
+  const lista = Array.isArray(rows) ? rows : [];
+  if (!meses || meses <= 0) return lista;
+  const chaves = lista.map((r) => _sacPeriodoKey(r?.created_at)).filter((v) => Number.isFinite(v));
+  if (!chaves.length) return lista;
+  const maxKey = Math.max(...chaves);
+  const maxAno = Math.floor(maxKey / 100);
+  const maxMes = maxKey % 100;
+  const maxData = new Date(maxAno, maxMes - 1, 1);
+  const minData = new Date(maxData.getFullYear(), maxData.getMonth() - (meses - 1), 1);
+  return lista.filter((r) => {
+    const d = new Date(r?.created_at);
+    if (Number.isNaN(d.getTime())) return false;
+    const dm = new Date(d.getFullYear(), d.getMonth(), 1);
+    return dm >= minData && dm <= maxData;
+  });
+}
+
+function _sacSetPeriodoBotaoAtivo() {
+  const mapa = [
+    [sacPeriodo3mBtn, 3], [sacPeriodo4mBtn, 4], [sacPeriodo6mBtn, 6],
+    [sacPeriodo12mBtn, 12], [sacPeriodoTudoBtn, 0]
+  ];
+  mapa.forEach(([btn, valor]) => {
+    if (!btn) return;
+    const ativo = valor === _sacRelatorioPeriodoMeses;
+    btn.style.background = ativo ? 'linear-gradient(135deg,#4f46e5 0%,#4338ca 100%)' : '#1f2937';
+    btn.style.color = ativo ? '#ffffff' : '#cbd5e1';
+  });
+}
+
+function _sacSetTipoGraficoBtn() {
+  if (!sacRelatorioTipoGraficoBtn) return;
+  const modoPizza = _sacRelatorioModoGrafico === 'pie';
+  sacRelatorioTipoGraficoBtn.innerHTML = modoPizza
+    ? '<i class="fa-solid fa-chart-column"></i><span>Modo barras</span>'
+    : '<i class="fa-solid fa-chart-pie"></i><span>Modo pizza</span>';
+  sacRelatorioTipoGraficoBtn.style.background = modoPizza
+    ? 'linear-gradient(135deg,#0ea5e9 0%,#0284c7 100%)'
+    : '#1f2937';
+  sacRelatorioTipoGraficoBtn.style.color = '#ffffff';
+}
+
+function _sacAtualizarSelectUsuario(rows) {
+  if (!sacRelatorioConteudoUsuarioSelect) return;
+  const usuarios = Array.from(new Set(
+    (Array.isArray(rows) ? rows : [])
+      .map((r) => String(r?.usuario || '').trim())
+      .filter(Boolean)))
+    .sort((a, b) => a.localeCompare(b, 'pt-BR'));
+  const valorAtual = _sacRelatorioConteudoUsuarioSelecionado;
+  const existeAtual = valorAtual && usuarios.includes(valorAtual);
+  if (valorAtual && !existeAtual) _sacRelatorioConteudoUsuarioSelecionado = '';
+  sacRelatorioConteudoUsuarioSelect.innerHTML = [
+    '<option value="">Todos</option>',
+    ...usuarios.map((u) => `<option value="${_sacEscapeHtml(u)}">${_sacEscapeHtml(u)}</option>`)
+  ].join('');
+  sacRelatorioConteudoUsuarioSelect.value = _sacRelatorioConteudoUsuarioSelecionado;
+}
+
+function _sacLimparDrilldown() {
+  if (!sacRelatorioDrilldownWrapper || !sacRelatorioDrilldownBody || !sacRelatorioDrilldownTitulo) return;
+  sacRelatorioDrilldownWrapper.style.display = 'none';
+  sacRelatorioDrilldownTitulo.textContent = 'Registros da barra selecionada';
+  sacRelatorioDrilldownBody.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:14px;color:var(--inactive-color);">Clique em uma barra para ver os conteúdos.</td></tr>';
+  _sacRelatorioDrilldownItensCache = [];
+}
+
+function _sacNormalizarNomeItem(nomeCompleto) {
+  const nome = String(nomeCompleto || '').trim();
+  if (!nome) return '';
+
+  // Pega a primeira palavra (antes do primeiro espaço) e usa os últimos 5 caracteres
+  // Ex: "107.MP.N.10873 TARUGO..." → primeiraPalavra="107.MP.N.10873" → "10873"
+  // Ex: "104MPI80203 VISOR..."    → primeiraPalavra="104MPI80203"    → "80203"
+  const primeiraPalavra = nome.split(' ')[0];
+  if (primeiraPalavra.length >= 5) {
+    return primeiraPalavra.slice(-5);
+  }
+
+  return primeiraPalavra || nome;
+}
+
+function _sacExtrairItensDoConteudo(conteudoRaw) {
+  const saida = [];
+  const conteudo = String(conteudoRaw || '').trim();
+  if (!conteudo) return saida;
+  try {
+    const parsed = JSON.parse(conteudo);
+    if (Array.isArray(parsed)) {
+      parsed.forEach((item) => {
+        const nome = String(item?.conteudo || item?.item || '').trim();
+        const quantidade = Number(item?.quantidade || 0) || 1;
+        if (nome) saida.push({ nome, quantidade });
+      });
+      if (saida.length) return saida;
+    }
+  } catch (_) {}
+  const reItens = /Item\s+\d+\s*:\s*([\s\S]*?)\s+Quantidade\s+(\d+)(?=\s*Item\s+\d+\s*:|$)/gi;
+  let m;
+  while ((m = reItens.exec(conteudo)) !== null) {
+    const nome = String(m[1] || '').trim().replace(/\s+/g, ' ');
+    const quantidade = Number(m[2] || 0) || 1;
+    if (nome) saida.push({ nome, quantidade });
+  }
+  if (saida.length) return saida;
+  const reQtdFinal = /^([\s\S]*?)\s*-\s*Quantidade\s*(\d+)$/i;
+  const matchFinal = conteudo.match(reQtdFinal);
+  if (matchFinal) {
+    const nome = String(matchFinal[1] || '').trim();
+    const quantidade = Number(matchFinal[2] || 0) || 1;
+    if (nome) return [{ nome, quantidade }];
+  }
+  return [{ nome: conteudo.replace(/\s+/g, ' ').trim(), quantidade: 1 }];
+}
+
+function _sacExpandirConteudoDosRegistros(rows, seletorItem) {
+  const lista = Array.isArray(rows) ? rows : [];
+  const itens = [];
+  lista.forEach((r) => {
+    const extraidos = _sacExtrairItensDoConteudo(r?.conteudo || '');
+    extraidos.forEach((it) => {
+      const nome = String(it?.nome || '').trim();
+      const quantidade = Number(it?.quantidade || 0) || 1;
+      if (!nome) return;
+      if (typeof seletorItem === 'function' && !seletorItem(nome, r)) return;
+      itens.push({ id: r?.id, created_at: r?.created_at, usuario: r?.usuario, observacao: r?.observacao, conteudo: nome, quantidade });
+    });
+  });
+  return itens;
+}
+
+// Extrai o ID do AT a partir do campo observacao no padrão "O.S 250178"
+// "25" = ano, "0178" = ID → 178. Suporta com ou sem espaço após "O.S".
+function _sacParsearOsAtId(observacao) {
+  const obs = String(observacao || '');
+  const match = obs.match(/O\.S\s*(\d+)/i);
+  if (!match) return null;
+  const num = match[1];
+  if (num.length >= 6) return parseInt(num.substring(2), 10);
+  return parseInt(num, 10) || null;
+}
+
+async function _sacRenderDrilldown(titulo, itensConteudo) {
+  if (!sacRelatorioDrilldownWrapper || !sacRelatorioDrilldownBody || !sacRelatorioDrilldownTitulo) return;
+  const lista = Array.isArray(itensConteudo) ? itensConteudo : [];
+  _sacRelatorioDrilldownItensCache = lista;
+  sacRelatorioDrilldownWrapper.style.display = '';
+  sacRelatorioDrilldownTitulo.textContent = titulo || 'Registros da barra selecionada';
+  if (!lista.length) {
+    sacRelatorioDrilldownBody.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:14px;color:var(--inactive-color);">Nenhum conteúdo encontrado para esta barra.</td></tr>';
+    return;
+  }
+
+  // Extrai IDs únicos de AT a partir do campo observacao
+  const atIdPorItem = lista.map((item) => _sacParsearOsAtId(item?.observacao));
+  const atIdsUnicos = [...new Set(atIdPorItem.filter((id) => id !== null && id > 0))];
+
+  // Busca dados do AT em batch
+  let atData = {};
+  if (atIdsUnicos.length) {
+    try {
+      const resp = await fetch(`/api/sac/at-info?ids=${atIdsUnicos.join(',')}`);
+      const json = await resp.json().catch(() => ({}));
+      if (json?.ok) atData = json.data || {};
+    } catch (_) {}
+  }
+
+  sacRelatorioDrilldownBody.innerHTML = lista.map((item, idx) => {
+    const criadoEm = item?.created_at ? new Date(item.created_at).toLocaleString('pt-BR') : '—';
+    const usuario = String(item?.usuario || 'Sem usuário');
+    const conteudo = String(item?.conteudo || '—');
+    const qtd = Number(item?.quantidade || 0);
+    const atId = atIdPorItem[idx];
+    const atInfo = atId ? (atData[String(atId)] || null) : null;
+    let osCell = '';
+    if (atInfo) {
+      const tag = atInfo.tag_problema ? `<span style="display:inline-block;background:#f59e0b20;color:#fbbf24;border:1px solid #f59e0b40;border-radius:4px;padding:1px 6px;font-size:10px;font-weight:700;margin-bottom:3px;">${_sacEscapeHtml(atInfo.tag_problema)}</span><br>` : '';
+      const desc = atInfo.descreva_reclamacao ? `<span title="${_sacEscapeHtml(atInfo.descreva_reclamacao)}" style="font-size:11px;color:#cbd5e1;">${_sacEscapeHtml(atInfo.descreva_reclamacao.substring(0, 60))}${atInfo.descreva_reclamacao.length > 60 ? '…' : ''}</span>` : '';
+      const osNum = atId ? `<span style="font-size:10px;color:#64748b;">AT#${atId}</span><br>` : '';
+      osCell = `${osNum}${tag}${desc}`;
+    } else {
+      const rawOs = String(item?.observacao || '—');
+      osCell = `<span title="${_sacEscapeHtml(rawOs)}" style="color:#64748b;font-size:11px;">${_sacEscapeHtml(rawOs.substring(0, 50))}${rawOs.length > 50 ? '…' : ''}</span>`;
+    }
+    return `<tr>
+      <td>${item?.id ?? '—'}</td>
+      <td>${criadoEm}</td>
+      <td>${_sacEscapeHtml(usuario)}</td>
+      <td title="${_sacEscapeHtml(conteudo)}" style="max-width:300px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${_sacEscapeHtml(conteudo)}</td>
+      <td>${qtd}</td>
+      <td style="max-width:360px;">${osCell}</td>
+    </tr>`;
+  }).join('');
+}
+
+function _sacMontarItensConteudoParaExportacao() {
+  const rows = _sacAplicarPeriodo(_sacRelatorioRowsCache, _sacRelatorioPeriodoMeses);
+  return _sacExpandirConteudoDosRegistros(rows);
+}
+
+function _sacBaixarRelatorioXls() {
+  const itens = _sacRelatorioDrilldownItensCache?.length
+    ? _sacRelatorioDrilldownItensCache
+    : _sacMontarItensConteudoParaExportacao();
+  if (!itens.length) { alert('Nenhum dado disponível para exportar.'); return; }
+  const titulo = _sacRelatorioDrilldownItensCache?.length
+    ? (sacRelatorioDrilldownTitulo?.textContent || 'Relatório SAC')
+    : 'Relatório SAC - Conteúdo';
+  const header = ['ID Registro', 'Criado em', 'Usuário', 'Conteúdo', 'Quantidade', 'Observação'];
+  const linhas = itens.map((item) => [
+    item?.id ?? '',
+    item?.created_at ? new Date(item.created_at).toLocaleString('pt-BR') : '',
+    String(item?.usuario || ''),
+    String(item?.conteudo || ''),
+    Number(item?.quantidade || 0),
+    String(item?.observacao || '')
+  ]);
+  const trHeader = `<tr>${header.map((h) => `<th style="background:#1f2937;color:#fff;font-weight:bold;">${h}</th>`).join('')}</tr>`;
+  const trRows = linhas.map((arr) => `<tr>${arr.map((v) => `<td>${_sacEscapeHtml(String(v))}</td>`).join('')}</tr>`).join('');
+  const html = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40"><head><meta charset="UTF-8"><title>${titulo}</title></head><body><table border="1"><thead>${trHeader}</thead><tbody>${trRows}</tbody></table></body></html>`;
+  const blob = new Blob(['\uFEFF' + html], { type: 'application/vnd.ms-excel;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `relatorio_sac_conteudo_${new Date().toISOString().slice(0,10)}.xls`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+function _renderizarRelatorioSacPorUsuario() {
+  if (!sacRelatorioGraficoCanvas || !sacRelatorioConteudoGraficoCanvas) return;
+  const modoPizza = _sacRelatorioModoGrafico === 'pie';
+  const rows = _sacAplicarPeriodo(_sacRelatorioRowsCache, _sacRelatorioPeriodoMeses);
+  _sacAtualizarSelectUsuario(rows);
+  _sacLimparDrilldown();
+
+  const agrupado = new Map();
+  const usuariosSet = new Set();
+  rows.forEach((r) => {
+    const periodo = _sacPeriodoMesAno(r?.created_at);
+    const usuario = String(r?.usuario || 'Sem usuário').trim() || 'Sem usuário';
+    const itens = _sacExtrairItensDoConteudo(r?.conteudo || '');
+    const totalItens = itens.reduce((sum, it) => {
+      const qtd = Number(it?.quantidade || 0) || 1;
+      const chave = _sacNormalizarNomeItem(String(it?.nome || '').trim()) || String(it?.nome || '').trim();
+      return sum + _sacValorItem(chave, qtd);
+    }, 0);
+    if (!agrupado.has(periodo)) agrupado.set(periodo, new Map());
+    agrupado.get(periodo).set(usuario, (agrupado.get(periodo).get(usuario) || 0) + totalItens);
+    usuariosSet.add(usuario);
+  });
+  const periodos = Array.from(agrupado.keys()).sort((a, b) => {
+    const [ma, ya] = a.split('/').map(Number); const [mb, yb] = b.split('/').map(Number);
+    return (ya - yb) || (ma - mb);
+  });
+  const usuarios = Array.from(usuariosSet)
+    .map((u) => ({ nome: u, total: periodos.reduce((sum, p) => sum + (agrupado.get(p)?.get(u) || 0), 0) }))
+    .sort((a, b) => b.total - a.total).slice(0, 2);
+  const usuariosPizza = Array.from(usuariosSet)
+    .map((u) => ({ nome: u, total: periodos.reduce((sum, p) => sum + (agrupado.get(p)?.get(u) || 0), 0) }))
+    .sort((a, b) => b.total - a.total).slice(0, 8);
+
+  const datasets = usuarios.map((user, idx) => ({
+    label: _sacRotuloCurto(user.nome, 26), _fullLabel: user.nome,
+    data: periodos.map((p) => agrupado.get(p)?.get(user.nome) || 0),
+    backgroundColor: idx === 0 ? '#22c55e' : '#38bdf8', borderRadius: 6, maxBarThickness: 42
+  }));
+
+  if (_sacRelatorioUsuariosChart) { _sacRelatorioUsuariosChart.destroy(); _sacRelatorioUsuariosChart = null; }
+  if (!periodos.length || (!usuarios.length && !usuariosPizza.length)) {
+    sacRelatorioGraficoCanvas.style.display = 'none';
+    if (sacRelatorioGraficoVazio) { sacRelatorioGraficoVazio.style.display = ''; sacRelatorioGraficoVazio.textContent = 'Nenhum dado encontrado para o período selecionado.'; }
+  } else {
+    sacRelatorioGraficoCanvas.style.display = '';
+    if (sacRelatorioGraficoVazio) sacRelatorioGraficoVazio.style.display = 'none';
+    if (modoPizza) {
+      const usuariosPizzaLabels = usuariosPizza.map((u) => _sacRotuloCurto(u.nome, 28));
+      _sacRelatorioUsuariosChart = new Chart(sacRelatorioGraficoCanvas.getContext('2d'), {
+        type: 'pie',
+        data: {
+          labels: usuariosPizzaLabels,
+          datasets: [{
+            _fullLabels: usuariosPizza.map((u) => u.nome),
+            data: usuariosPizza.map((u) => u.total),
+            backgroundColor: usuariosPizza.map((_, idx) => _sacCorPorIndice(idx))
+          }]
+        },
+        options: {
+          onClick: (_event, elements, chart) => {
+            if (!elements?.length) return;
+            const idx = elements[0].index;
+            const usuario = String(chart.data.datasets?.[0]?._fullLabels?.[idx] || chart.data.labels?.[idx] || '');
+            const rowsBarra = rows.filter((r) => String(r?.usuario || '').trim() === usuario);
+            const itensBarra = _sacExpandirConteudoDosRegistros(rowsBarra);
+            _sacRenderDrilldown(`Registros - Usuário: ${usuario} | Período: filtro atual`, itensBarra);
+          },
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: { position: 'right', labels: { color: '#cbd5e1', boxWidth: 14, boxHeight: 14 } },
+            tooltip: {
+              callbacks: {
+                label: (item) => {
+                  const ds = item.dataset || {};
+                  const nome = ds._fullLabels?.[item.dataIndex] || item.label || '';
+                  const v = _sacRelatorioModoValor
+                    ? `R$ ${Number(item.raw).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2})}`
+                    : `${item.raw} item(ns)`;
+                  return `${nome}: ${v}`;
+                }
+              }
+            }
+          }
+        }
+      });
+    } else {
+      _sacRelatorioUsuariosChart = new Chart(sacRelatorioGraficoCanvas.getContext('2d'), {
+        type: 'bar', data: { labels: periodos, datasets },
+        options: {
+          onClick: (_event, elements, chart) => {
+            if (!elements?.length) return;
+            const el = elements[0]; const periodo = chart.data.labels?.[el.index];
+            const ds = chart.data.datasets?.[el.datasetIndex];
+            const usuario = String(ds?._fullLabel || ds?.label || '');
+            const rowsBarra = rows.filter((r) => _sacPeriodoMesAno(r?.created_at) === periodo && String(r?.usuario || '').trim() === usuario);
+            const itensBarra = _sacExpandirConteudoDosRegistros(rowsBarra);
+            _sacRenderDrilldown(`Registros - Usuário: ${usuario} | Período: ${periodo}`, itensBarra);
+          },
+          responsive: true, maintainAspectRatio: false,
+          plugins: { legend: { position: 'top', labels: { color: '#cbd5e1', boxWidth: 14, boxHeight: 14 } }, tooltip: { callbacks: { title: (items) => `Período: ${items?.[0]?.label || ''}`, label: (item) => { const v = _sacRelatorioModoValor ? `R$ ${Number(item.raw).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2})}` : `${item.raw} item(ns)`; return `${item.dataset._fullLabel || item.dataset.label}: ${v}`; } } } },
+          scales: { x: { stacked: false, ticks: { color: '#94a3b8' }, grid: { color: 'rgba(148,163,184,0.15)' } }, y: { stacked: false, beginAtZero: true, ticks: { color: '#94a3b8', precision: 0 }, grid: { color: 'rgba(148,163,184,0.15)' } } }
+        }
+      });
+    }
+  }
+
+  const agrupadoConteudo = new Map(); const itensSet = new Set(); const itensMapaNomeParaCodigo = new Map();
+  const rowsConteudo = _sacRelatorioConteudoUsuarioSelecionado
+    ? rows.filter((r) => String(r?.usuario || '').trim() === _sacRelatorioConteudoUsuarioSelecionado) : rows;
+  rowsConteudo.forEach((r) => {
+    const periodo = _sacPeriodoMesAno(r?.created_at);
+    const itens = _sacExtrairItensDoConteudo(r?.conteudo || '');
+    if (!agrupadoConteudo.has(periodo)) agrupadoConteudo.set(periodo, new Map());
+    itens.forEach((it) => {
+      const nome = String(it?.nome || '').trim(); 
+      const qtd = Number(it?.quantidade || 0) || 1;
+      if (!nome) return;
+      const chaveAgrupamento = _sacNormalizarNomeItem(nome) || nome;
+      itensSet.add(chaveAgrupamento);
+      itensMapaNomeParaCodigo.set(chaveAgrupamento, nome);
+      agrupadoConteudo.get(periodo).set(chaveAgrupamento, (agrupadoConteudo.get(periodo).get(chaveAgrupamento) || 0) + _sacValorItem(chaveAgrupamento, qtd));
+    });
+  });
+  const periodosConteudo = Array.from(agrupadoConteudo.keys()).sort((a, b) => {
+    const [ma, ya] = a.split('/').map(Number); const [mb, yb] = b.split('/').map(Number);
+    return (ya - yb) || (ma - mb);
+  });
+  const itens = Array.from(itensSet);
+  if (_sacRelatorioConteudoChart) { _sacRelatorioConteudoChart.destroy(); _sacRelatorioConteudoChart = null; }
+  if (!periodosConteudo.length || !itens.length) {
+    sacRelatorioConteudoGraficoCanvas.style.display = 'none';
+    if (sacRelatorioConteudoGraficoVazio) { sacRelatorioConteudoGraficoVazio.style.display = ''; sacRelatorioConteudoGraficoVazio.textContent = _sacRelatorioConteudoUsuarioSelecionado ? `Nenhum dado de conteúdo para o usuário "${_sacRelatorioConteudoUsuarioSelecionado}" no período selecionado.` : 'Nenhum dado encontrado para o gráfico de conteúdo.'; }
+    return;
+  }
+  const topItens = itens.map((nome) => ({ nome, total: periodosConteudo.reduce((sum, p) => sum + (agrupadoConteudo.get(p)?.get(nome) || 0), 0) })).sort((a, b) => b.total - a.total).slice(0, 8);
+  _sacRelatorioConteudoTopItens = topItens.map((x) => x.nome);
+  const ocultarOutros = !!document.getElementById('sacConteudoOcultarOutros')?.checked;
+  const totalOutros = ocultarOutros ? 0 : itens.filter((nome) => !topItens.some((top) => top.nome === nome)).reduce((acc, nome) => acc + periodosConteudo.reduce((sum, p) => sum + (agrupadoConteudo.get(p)?.get(nome) || 0), 0), 0);
+  const datasetsConteudo = topItens.map((item, idx) => ({ label: _sacRotuloCurto(item.nome, 34), _fullLabel: item.nome, data: periodosConteudo.map((p) => agrupadoConteudo.get(p)?.get(item.nome) || 0), backgroundColor: _sacCorPorIndice(idx), borderRadius: 6, maxBarThickness: 36 }));
+  if (totalOutros > 0) { datasetsConteudo.push({ label: 'Outros itens', _fullLabel: 'Outros itens', data: periodosConteudo.map((p) => { const topSet = new Set(topItens.map((it) => it.nome)); return itens.filter((nome) => !topSet.has(nome)).reduce((sum, nome) => sum + (agrupadoConteudo.get(p)?.get(nome) || 0), 0); }), backgroundColor: '#64748b', borderRadius: 6, maxBarThickness: 36 }); }
+  sacRelatorioConteudoGraficoCanvas.style.display = '';
+  if (sacRelatorioConteudoGraficoVazio) sacRelatorioConteudoGraficoVazio.style.display = 'none';
+
+  if (modoPizza) {
+    const labelsPie = topItens.map((item) => _sacRotuloCurto(item.nome, 34));
+    const fullLabelsPie = topItens.map((item) => item.nome);
+    const dataPie = topItens.map((item) => item.total);
+    const coresPie = topItens.map((_, idx) => _sacCorPorIndice(idx));
+    if (totalOutros > 0) {
+      labelsPie.push('Outros itens');
+      fullLabelsPie.push('Outros itens');
+      dataPie.push(totalOutros);
+      coresPie.push('#64748b');
+    }
+    _sacRelatorioConteudoChart = new Chart(sacRelatorioConteudoGraficoCanvas.getContext('2d'), {
+      type: 'pie',
+      data: {
+        labels: labelsPie,
+        datasets: [{ _fullLabels: fullLabelsPie, data: dataPie, backgroundColor: coresPie }]
+      },
+      options: {
+        onClick: (_event, elements, chart) => {
+          if (!elements?.length) return;
+          const idx = elements[0].index;
+          const itemLabel = String(chart.data.datasets?.[0]?._fullLabels?.[idx] || chart.data.labels?.[idx] || '');
+          const topSet = new Set(_sacRelatorioConteudoTopItens || []);
+          const rowsBarra = rowsConteudo.filter((r) => {
+            const itensRow = _sacExtrairItensDoConteudo(r?.conteudo || '');
+            if (itemLabel === 'Outros itens') return itensRow.some((it) => !topSet.has(_sacNormalizarNomeItem(String(it?.nome || '').trim()) || String(it?.nome || '').trim()));
+            return itensRow.some((it) => {
+              const chaveNorm = _sacNormalizarNomeItem(String(it?.nome || '').trim()) || String(it?.nome || '').trim();
+              return chaveNorm === itemLabel;
+            });
+          });
+          const itensBarra = _sacExpandirConteudoDosRegistros(rowsBarra, (nome) => {
+            const chaveNorm = _sacNormalizarNomeItem(String(nome || '').trim()) || String(nome || '').trim();
+            if (itemLabel === 'Outros itens') return !topSet.has(chaveNorm);
+            return chaveNorm === itemLabel;
+          });
+          _sacRenderDrilldown(`Registros - Conteúdo: ${itemLabel} | Período: filtro atual`, itensBarra);
+        },
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { position: 'right', labels: { color: '#cbd5e1', boxWidth: 14, boxHeight: 14 } },
+          tooltip: {
+            callbacks: {
+              label: (item) => {
+                const ds = item.dataset || {};
+                const nome = ds._fullLabels?.[item.dataIndex] || item.label || '';
+                const val = _sacRelatorioModoValor
+                  ? `R$ ${Number(item.raw).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                  : `${item.raw} unidade(ns)`;
+                return `${nome}: ${val}`;
+              }
+            }
+          }
+        }
+      }
+    });
+  } else {
+    _sacRelatorioConteudoChart = new Chart(sacRelatorioConteudoGraficoCanvas.getContext('2d'), {
+      type: 'bar', data: { labels: periodosConteudo, datasets: datasetsConteudo },
+      options: {
+        onClick: (_event, elements, chart) => {
+          if (!elements?.length) return;
+          const el = elements[0]; const periodo = chart.data.labels?.[el.index];
+          const ds = chart.data.datasets?.[el.datasetIndex];
+          const itemLabel = String(ds?._fullLabel || ds?.label || '');
+          const topSet = new Set(_sacRelatorioConteudoTopItens || []);
+          const rowsBarra = rowsConteudo.filter((r) => { 
+            if (_sacPeriodoMesAno(r?.created_at) !== periodo) return false; 
+            const itensRow = _sacExtrairItensDoConteudo(r?.conteudo || ''); 
+            if (itemLabel === 'Outros itens') return itensRow.some((it) => !topSet.has(_sacNormalizarNomeItem(String(it?.nome || '').trim()) || String(it?.nome || '').trim())); 
+            return itensRow.some((it) => { 
+              const chaveNorm = _sacNormalizarNomeItem(String(it?.nome || '').trim()) || String(it?.nome || '').trim();
+              return chaveNorm === itemLabel;
+            }); 
+          });
+          const itensBarra = _sacExpandirConteudoDosRegistros(rowsBarra, (nome) => { if (itemLabel === 'Outros itens') return !topSet.has(String(nome || '').trim()); return String(nome || '').trim() === itemLabel; });
+          _sacRenderDrilldown(`Registros - Conteúdo: ${itemLabel} | Período: ${periodo}`, itensBarra);
+        },
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { position: 'top', labels: { color: '#cbd5e1', boxWidth: 14, boxHeight: 14 } }, tooltip: { callbacks: { title: (items) => `Período: ${items?.[0]?.label || ''}`, label: (item) => { const v = _sacRelatorioModoValor ? `R$ ${Number(item.raw).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2})}` : `${item.raw} unid.`; return `${item.dataset._fullLabel || item.dataset.label}: ${v}`; } } } },
+        scales: { x: { stacked: true, ticks: { color: '#94a3b8' }, grid: { color: 'rgba(148,163,184,0.15)' } }, y: { stacked: true, beginAtZero: true, ticks: { color: '#94a3b8', precision: 0, callback: (v) => _sacRelatorioModoValor ? `R$${Number(v).toLocaleString('pt-BR',{maximumFractionDigits:0})}` : v }, grid: { color: 'rgba(148,163,184,0.15)' } } }
+      }
+    });
+  }
+}
+
+async function _abrirRelatorioSac() {
+  if (!sacRelatorioGraficoWrapper || !sacRelatorioGraficoCanvas || !sacTabelaBody) return;
+  if (typeof Chart === 'undefined') { alert('Biblioteca de gráfico não disponível no momento.'); return; }
+  const tabelaWrapper = sacTabelaBody.closest('.tabela-wrapper');
+  sacRelatorioGraficoWrapper.style.display = '';
+  if (tabelaWrapper) tabelaWrapper.style.display = 'none';
+  if (sacRelatorioGraficoVazio) { sacRelatorioGraficoVazio.style.display = 'none'; sacRelatorioGraficoVazio.textContent = 'Carregando dados...'; }
+  try {
+    const [respSac, respCmc] = await Promise.all([
+      fetch('/api/sac/solicitacoes'),
+      fetch('/api/sac/cmc')
+    ]);
+    const data = await respSac.json().catch(() => ({}));
+    if (!respSac.ok || data?.ok === false) throw new Error(data?.error || 'Erro ao carregar dados do relatório.');
+    const dataCmc = await respCmc.json().catch(() => ({}));
+    _sacCmcCache = (dataCmc?.ok && dataCmc?.cmc) ? dataCmc.cmc : {};
+    _sacRelatorioRowsCache = Array.isArray(data?.rows) ? data.rows : [];
+    _sacSetPeriodoBotaoAtivo();
+    _sacSetTipoGraficoBtn();
+    _sacSetModoValorBtn();
+    _renderizarRelatorioSacPorUsuario();
+  } catch (err) {
+    if (_sacRelatorioUsuariosChart) { _sacRelatorioUsuariosChart.destroy(); _sacRelatorioUsuariosChart = null; }
+    if (_sacRelatorioConteudoChart) { _sacRelatorioConteudoChart.destroy(); _sacRelatorioConteudoChart = null; }
+    sacRelatorioGraficoCanvas.style.display = 'none';
+    if (sacRelatorioConteudoGraficoCanvas) sacRelatorioConteudoGraficoCanvas.style.display = 'none';
+    if (sacRelatorioGraficoVazio) { sacRelatorioGraficoVazio.style.display = ''; sacRelatorioGraficoVazio.textContent = err?.message || 'Erro ao gerar relatório.'; }
+    if (sacRelatorioConteudoGraficoVazio) { sacRelatorioConteudoGraficoVazio.style.display = ''; sacRelatorioConteudoGraficoVazio.textContent = err?.message || 'Erro ao gerar relatório de conteúdo.'; }
+  }
+}
+
+function _fecharRelatorioSac() {
+  const tabelaWrapper = sacTabelaBody?.closest('.tabela-wrapper');
+  if (sacRelatorioGraficoWrapper) sacRelatorioGraficoWrapper.style.display = 'none';
+  if (tabelaWrapper) tabelaWrapper.style.display = '';
+  _sacLimparDrilldown();
+}
+
+function _setRelatorioSacPeriodo(meses) {
+  _sacRelatorioPeriodoMeses = meses;
+  _sacSetPeriodoBotaoAtivo();
+  _renderizarRelatorioSacPorUsuario();
+}
+
+function _alternarRelatorioSacTipoGrafico() {
+  _sacRelatorioModoGrafico = _sacRelatorioModoGrafico === 'bar' ? 'pie' : 'bar';
+  _sacSetTipoGraficoBtn();
+  _renderizarRelatorioSacPorUsuario();
+}
+
+function _sacSetModoValorBtn() {
+  if (!sacRelatorioModoValorBtn) return;
+  const modoValor = _sacRelatorioModoValor;
+  sacRelatorioModoValorBtn.innerHTML = modoValor
+    ? '<i class="fa-solid fa-hashtag"></i><span>Modo qtd</span>'
+    : '<i class="fa-solid fa-dollar-sign"></i><span>Modo valor</span>';
+  sacRelatorioModoValorBtn.style.background = modoValor
+    ? 'linear-gradient(135deg,#f59e0b 0%,#d97706 100%)'
+    : '#1f2937';
+  sacRelatorioModoValorBtn.style.color = '#ffffff';
+  const titulo1 = document.getElementById('sacGrafico1Titulo');
+  const titulo2 = document.getElementById('sacGrafico2Titulo');
+  if (titulo1) titulo1.textContent = modoValor ? 'Gráfico 1 - Valor (R$) por Usuário' : 'Gráfico 1 - Quantidade por Usuário';
+  if (titulo2) titulo2.textContent = modoValor ? 'Gráfico 2 - Conteúdo (Itens x Valor R$)' : 'Gráfico 2 - Conteúdo (Itens x Quantidade)';
+}
+
+function _alternarRelatorioSacModoValor() {
+  _sacRelatorioModoValor = !_sacRelatorioModoValor;
+  _sacSetModoValorBtn();
+  _renderizarRelatorioSacPorUsuario();
+}
+
+// Retorna o valor de um item: se modo valor, multiplica qtd pelo CMC; senão retorna só a qtd
+function _sacValorItem(chaveNormalizada, qtd) {
+  if (!_sacRelatorioModoValor) return qtd;
+  const cmc = Number(_sacCmcCache[chaveNormalizada] || 0);
+  return cmc > 0 ? cmc * qtd : qtd; // fallback para qtd se CMC não encontrado
+}
+
+const sacConteudoFiltroBtn = document.getElementById('sacConteudoFiltroBtn');
+const sacConteudoFiltroDropdown = document.getElementById('sacConteudoFiltroDropdown');
+const sacConteudoOcultarOutros = document.getElementById('sacConteudoOcultarOutros');
+
+if (sacConteudoFiltroBtn && sacConteudoFiltroDropdown) {
+  sacConteudoFiltroBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    sacConteudoFiltroDropdown.style.display = sacConteudoFiltroDropdown.style.display === 'none' || !sacConteudoFiltroDropdown.style.display ? 'block' : 'none';
+  });
+  document.addEventListener('click', (e) => {
+    if (!sacConteudoFiltroDropdown.contains(e.target) && !sacConteudoFiltroBtn.contains(e.target)) {
+      sacConteudoFiltroDropdown.style.display = 'none';
+    }
+  });
+}
+if (sacConteudoOcultarOutros) {
+  sacConteudoOcultarOutros.addEventListener('change', () => _renderizarRelatorioSacPorUsuario());
+}
+
+// Painel SAC: filtra por usuário logado (filterByUser: true)
+sacRelatorioBtn?.addEventListener('click', _abrirRelatorioSac);
+sacRelatorioVoltarBtn?.addEventListener('click', _fecharRelatorioSac);
+sacRelatorioDownloadBtn?.addEventListener('click', _sacBaixarRelatorioXls);
+sacPeriodo3mBtn?.addEventListener('click', () => _setRelatorioSacPeriodo(3));
+sacPeriodo4mBtn?.addEventListener('click', () => _setRelatorioSacPeriodo(4));
+sacPeriodo6mBtn?.addEventListener('click', () => _setRelatorioSacPeriodo(6));
+sacPeriodo12mBtn?.addEventListener('click', () => _setRelatorioSacPeriodo(12));
+sacPeriodoTudoBtn?.addEventListener('click', () => _setRelatorioSacPeriodo(0));
+sacRelatorioTipoGraficoBtn?.addEventListener('click', _alternarRelatorioSacTipoGrafico);
+sacRelatorioModoValorBtn?.addEventListener('click', _alternarRelatorioSacModoValor);
+if (sacRelatorioConteudoUsuarioSelect) {
+  sacRelatorioConteudoUsuarioSelect.addEventListener('change', () => {
+    _sacRelatorioConteudoUsuarioSelecionado = String(sacRelatorioConteudoUsuarioSelect.value || '');
+    _renderizarRelatorioSacPorUsuario();
+  });
+}
+
 // Painel SAC: filtra por usuário logado (filterByUser: true)
 sacRefreshBtn?.addEventListener('click', () => carregarSacSolicitacoes(sacTabelaBody, { hideDone: false, filterByUser: true }));
 // Painel Envio de Mercadoria: mostra todos os registros (filterByUser: false)
@@ -24680,7 +25319,7 @@ if (document.readyState === 'loading') {
 /* dentro do MESMO callback que já existe */
 const bell       = document.getElementById('bell-icon');
 const homeBtn    = document.getElementById('home-icon');
-const printBtn   = document.getElementById('print-icon');
+const printBtn   = document.getElementById('menu-identificacao-produto');
 const cloudBtn   = document.getElementById('cloud-icon');
 const avatar     = document.getElementById('profile-icon');
 const etiquetasModal = document.getElementById('etiquetasModal');
@@ -25098,6 +25737,53 @@ window.openRegistros = async function() {
   // ── Estado do modal ────────────────────────────────────────────────────
   let _etqSelecionadas = new Set(); // ids selecionados
   let _etqDebounce = null;
+  let _etqViewMode = 'list'; // 'list' | 'grid'
+  let _etqMostrarOcultos = false; // quando true, mostra apenas itens ocultos
+  let _etqPrinterPref = null; // impressora preferida salva no localStorage por usuário
+  let _etqAgentAliasCache = {}; // cache de apelidos vindos dos agentes via heartbeat
+
+  // Analisa preferência do tipo "__AGENT__:pcName:impressora"
+  function _etqParseAgentPref(pref) {
+    if (!pref || !pref.startsWith('__AGENT__:')) return null;
+    const s    = pref.slice('__AGENT__:'.length);
+    const idx  = s.indexOf(':');
+    if (idx === -1) return null;
+    return { pcName: s.slice(0, idx), impressora: s.slice(idx + 1) };
+  }
+
+  function _etqPrefKey() {
+    const u = (document.getElementById('userNameDisplay')?.textContent || 'user').trim().replace(/\s+/g, '_');
+    return `etq_printer_pref_${u}`;
+  }
+  function _etqCarregarPref() {
+    _etqPrinterPref = localStorage.getItem(_etqPrefKey()) || null;
+    _etqAtualizarBtnPref();
+  }
+  function _etqSalvarPref(printer) {
+    _etqPrinterPref = printer || null;
+    if (printer) localStorage.setItem(_etqPrefKey(), printer);
+    else localStorage.removeItem(_etqPrefKey());
+    _etqAtualizarBtnPref();
+  }
+  function _etqAtualizarBtnPref() {
+    const btn = document.getElementById('etqBtnImpressora');
+    if (!btn) return;
+    if (_etqPrinterPref) {
+      const agentDest = _etqParseAgentPref(_etqPrinterPref);
+      let label;
+      if (agentDest)                          label = `${agentDest.impressora} (${agentDest.pcName})`;
+      else if (_etqPrinterPref === '__PDF__') label = 'PDF';
+      else if (_etqPrinterPref === '__BP__')  label = 'Local (agente)';
+      else                                    label = _etqPrinterPref;
+      btn.title = `Impressora: ${label} — clique para trocar`;
+      btn.innerHTML = `<i class="fa-solid fa-print"></i><span class="etq-pref-label">${escapeHtml(label)}</span>`;
+      btn.classList.add('etq-pref-set');
+    } else {
+      btn.title = 'Impressora não definida — clique para configurar';
+      btn.innerHTML = '<i class="fa-solid fa-print"></i><i class="fa-solid fa-question" style="font-size:.6rem;margin-left:1px;"></i>';
+      btn.classList.remove('etq-pref-set');
+    }
+  }
 
   const etqModal     = document.getElementById('etiquetasModal');
   const etqGrid      = document.getElementById('etiquetasModalGrid');
@@ -25106,6 +25792,71 @@ window.openRegistros = async function() {
   const etqBtnSel    = document.getElementById('etiquetasImprimirSelecionadas');
   const etqSelCount  = document.getElementById('etiquetasSelCount');
   const etqFechar    = document.getElementById('etiquetasModalFechar');
+  const etqBtnViewLista = document.getElementById('etqBtnViewLista');
+  const etqBtnViewGrade = document.getElementById('etqBtnViewGrade');
+  const etqBtnVerOcultos = document.getElementById('etqBtnVerOcultos');
+
+  function _etqAplicarViewMode() {
+    if (!etqGrid) return;
+    if (_etqViewMode === 'list') {
+      etqGrid.classList.add('view-list');
+      etqBtnViewLista?.classList.add('active');
+      etqBtnViewGrade?.classList.remove('active');
+    } else {
+      etqGrid.classList.remove('view-list');
+      etqBtnViewGrade?.classList.add('active');
+      etqBtnViewLista?.classList.remove('active');
+    }
+  }
+
+  etqBtnViewLista?.addEventListener('click', () => {
+    _etqViewMode = 'list';
+    _etqAplicarViewMode();
+  });
+  etqBtnViewGrade?.addEventListener('click', () => {
+    _etqViewMode = 'grid';
+    _etqAplicarViewMode();
+  });
+
+  // Aplicar modo padrão (lista) no carregamento
+  _etqAplicarViewMode();
+
+  // Botão exibir ocultos
+  etqBtnVerOcultos?.addEventListener('click', () => {
+    _etqMostrarOcultos = !_etqMostrarOcultos;
+    etqBtnVerOcultos.classList.toggle('active', _etqMostrarOcultos);
+    etqBtnVerOcultos.title = _etqMostrarOcultos ? 'Exibir todos (não ocultos)' : 'Exibir ocultos';
+    _etqCarregar(etqBusca?.value || '');
+  });
+
+  // ── Dropdown de configurações da toolbar ─────────────────────────────────
+  const _etqDropdownBtn  = document.getElementById('etqBtnConfig');
+  const _etqDropdownMenu = document.getElementById('etqConfigDropdown');
+
+  function _etqFecharDropdown() {
+    if (!_etqDropdownMenu) return;
+    _etqDropdownMenu.style.display = 'none';
+    _etqDropdownBtn?.classList.remove('open');
+  }
+
+  _etqDropdownBtn?.addEventListener('click', e => {
+    e.stopPropagation();
+    const aberto = _etqDropdownMenu.style.display !== 'none';
+    if (aberto) { _etqFecharDropdown(); }
+    else { _etqDropdownMenu.style.display = 'flex'; _etqDropdownBtn.classList.add('open'); }
+  });
+
+  // Fechar ao clicar fora
+  document.addEventListener('click', e => {
+    if (_etqDropdownMenu && _etqDropdownMenu.style.display !== 'none') {
+      if (!document.getElementById('etqConfigMenuWrap')?.contains(e.target)) _etqFecharDropdown();
+    }
+  });
+
+  // Fechar dropdown após ações (não após os toggles lista/grade/ocultos)
+  ['etqBtnBaixarAgente', 'etqBtnConfigAgente', 'etqBtnConfigImpressoras'].forEach(id => {
+    document.getElementById(id)?.addEventListener('click', () => setTimeout(_etqFecharDropdown, 80), true);
+  });
 
   function _etqAtualizarBotaoSel() {
     if (!etqBtnSel || !etqSelCount) return;
@@ -25118,60 +25869,64 @@ window.openRegistros = async function() {
   // Mostra no etqStatus um select com impressoras disponíveis + botão Tentar.
   // Chama onConfirm(printerName) quando o usuário confirma.
   async function _etqMostrarSeletorImpressora(msgErro, onConfirm, container) {
-    // container opcional: quando chamado de dentro de um modal, passar o elemento interno
-    // para que o seletor apareça dentro do modal e não atrás do overlay.
     const el = container || etqStatus;
     if (!el) return;
     el.innerHTML = '<i class="fa-solid fa-spinner fa-spin" style="color:#facc15;"></i> Buscando impressoras...';
     if (!container) el.style.color = '#facc15';
 
     let lista = [];
+    let agentOpts = '';
+    try {
+      // Busca agentes online com suas impressoras
+      const ar = await fetch('/api/etiquetas/agentes-disponiveis', { credentials: 'include' });
+      const ad = await ar.json();
+      const agentes = ad.agentes || [];
+      if (agentes.length > 0) {
+        agentOpts += '<optgroup label="🖨️ Agentes online">';
+        for (const ag of agentes) {
+          for (const imp of (ag.printers || [])) {
+            const val = `__AGENT__:${ag.pcName}:${imp}`;
+            agentOpts += `<option value="${escapeHtml(val)}">${escapeHtml(ag.pcName)} → ${escapeHtml(imp)}</option>`;
+          }
+        }
+        agentOpts += '</optgroup>';
+      } else {
+        // Nenhum agente com nome registrado — usa opção genérica
+        agentOpts = '<option value="__BP__">🖨️ Agente local (qualquer)</option>';
+      }
+    } catch (_) {
+      agentOpts = '<option value="__BP__">🖨️ Agente local (qualquer)</option>';
+    }
+
     try {
       const r = await fetch('/api/etiquetas/impressoras', { credentials: 'include' });
       const d = await r.json();
       lista = d.impressoras || [];
     } catch (_) {}
 
-    // PDF está sempre disponível, independente de impressoras físicas
     const optPdf = '<option value="__PDF__">📄 PDF (baixar arquivo)</option>';
+    const chkPadraoHtml = `<label style="display:flex;align-items:center;gap:4px;color:#94a3b8;font-size:.78rem;white-space:nowrap;cursor:pointer;"><input type="checkbox" id="_etqChkPadrao" style="accent-color:#7c3aed;"> Salvar como padrão</label>`;
+    const prefAtual = _etqPrinterPref || '';
 
-    if (lista.length === 0) {
-      // Sem impressoras físicas: oferece apenas PDF
+    if (lista.length === 0 && !agentOpts.includes('<option')) {
+      _etqSalvarPref('__BP__');
       if (!container) el.style.color = '';
-      el.innerHTML = `
-        ${msgErro ? `<span style="color:#f87171;font-size:.85rem;">${escapeHtml(msgErro)}</span>` : ''}
-        <div style="display:flex;align-items:center;gap:8px;margin-top:6px;flex-wrap:wrap;">
-          <label style="color:#94a3b8;font-size:.8rem;white-space:nowrap;">Sem impressoras físicas. Salvar como:</label>
-          <select id="_etqSelectImpressora" style="background:#1e293b;color:#f1f5f9;border:1px solid #334155;border-radius:6px;padding:4px 8px;font-size:.85rem;flex:1;min-width:120px;">
-            ${optPdf}
-          </select>
-          <button id="_etqBtnTentarImpressora" style="background:#7c3aed;color:#fff;border:none;border-radius:6px;padding:5px 12px;font-size:.82rem;cursor:pointer;white-space:nowrap;">
-            <i class="fa-solid fa-file-pdf"></i> Baixar PDF
-          </button>
-          <button id="_etqBtnCancelarImpressora" style="background:#374151;color:#94a3b8;border:none;border-radius:6px;padding:5px 10px;font-size:.82rem;cursor:pointer;">
-            Cancelar
-          </button>
-        </div>`;
-      document.getElementById('_etqBtnTentarImpressora')?.addEventListener('click', () => {
-        el.innerHTML = ''; if (!container) el.style.color = '';
-        onConfirm('__PDF__');
-      });
-      document.getElementById('_etqBtnCancelarImpressora')?.addEventListener('click', () => {
-        el.innerHTML = ''; if (!container) el.style.color = '';
-      });
+      el.innerHTML = '<span style="color:#facc15;font-size:.83rem;"><i class="fa-solid fa-spinner fa-spin"></i> Nenhuma impressora CUPS no servidor — usando agente local...</span>';
+      setTimeout(() => { if (el) el.innerHTML = ''; }, 4000);
+      onConfirm('__BP__');
       return;
     }
 
-    // Impressoras físicas + opção PDF no topo
-    const opts = optPdf + lista.map(p => `<option value="${escapeHtml(p)}">${escapeHtml(p)}</option>`).join('');
+    const cupOpts = lista.length ? '<optgroup label="Impressoras servidor">' + lista.map(p => `<option value="${escapeHtml(p)}"${prefAtual === p ? ' selected' : ''}>${escapeHtml(p)}</option>`).join('') + '</optgroup>' : '';
     if (!container) el.style.color = '';
     el.innerHTML = `
       ${msgErro ? `<span style="color:#f87171;font-size:.85rem;">${escapeHtml(msgErro)}</span>` : ''}
       <div style="display:flex;align-items:center;gap:8px;margin-top:6px;flex-wrap:wrap;">
         <label style="color:#94a3b8;font-size:.8rem;white-space:nowrap;">Escolher impressora:</label>
         <select id="_etqSelectImpressora" style="background:#1e293b;color:#f1f5f9;border:1px solid #334155;border-radius:6px;padding:4px 8px;font-size:.85rem;flex:1;min-width:120px;">
-          ${opts}
+          ${optPdf}${agentOpts}${cupOpts}
         </select>
+        ${chkPadraoHtml}
         <button id="_etqBtnTentarImpressora" style="background:#7c3aed;color:#fff;border:none;border-radius:6px;padding:5px 12px;font-size:.82rem;cursor:pointer;white-space:nowrap;">
           <i class="fa-solid fa-print"></i> Imprimir
         </button>
@@ -25179,17 +25934,24 @@ window.openRegistros = async function() {
           Cancelar
         </button>
       </div>`;
-
-    document.getElementById('_etqBtnTentarImpressora')?.addEventListener('click', () => {
+    // Pré-selecionar preferência salva
+    if (prefAtual) {
       const sel = document.getElementById('_etqSelectImpressora');
+      if (sel) sel.value = prefAtual;
+    }
+    document.getElementById('_etqBtnTentarImpressora')?.addEventListener('click', () => {
+      const sel     = document.getElementById('_etqSelectImpressora');
       const printer = sel?.value || '';
+      const salvar  = document.getElementById('_etqChkPadrao')?.checked;
       el.innerHTML = ''; if (!container) el.style.color = '';
+      if (salvar && printer) _etqSalvarPref(printer);
       if (printer) onConfirm(printer);
     });
     document.getElementById('_etqBtnCancelarImpressora')?.addEventListener('click', () => {
       el.innerHTML = ''; if (!container) el.style.color = '';
     });
   }
+
 
   function _etqRenderCards(etiquetas) {
     if (!etqGrid) return;
@@ -25199,19 +25961,52 @@ window.openRegistros = async function() {
       return;
     }
 
-    if (etqStatus) etqStatus.textContent = `${etiquetas.length} etiqueta(s) pendente(s)`;
+    const pendentes = etiquetas.filter(e => !e.impressa).length;
+    const impressas = etiquetas.filter(e => e.impressa).length;
+    if (etqStatus) {
+      let txt = `${etiquetas.length} etiqueta(s)`;
+      if (pendentes && impressas) txt += ` · ${pendentes} pendente(s), ${impressas} impressa(s)`;
+      else if (impressas) txt += ` impressa(s)`;
+      else txt += ` pendente(s)`;
+      etqStatus.textContent = txt;
+    }
 
     etqGrid.innerHTML = etiquetas.map(e => {
-      const cod   = escapeHtml(String(e.codigo_produto  || '—'));
-      const desc  = escapeHtml(String(e.descricao_produto || '—'));
-      const lote  = escapeHtml(String(e.lote || '—'));
-      const qtd   = escapeHtml(String(e.qtd  != null ? e.qtd : ''));
-      const unid  = escapeHtml(String(e.unidade || ''));
-      const data  = escapeHtml(String(e.data_emissao || ''));
-      const id    = Number(e.id);
-      const qtdRaw = e.qtd != null ? Number(e.qtd) || 0 : 0;
+      const cod     = escapeHtml(String(e.codigo_produto  || '—'));
+      const desc    = escapeHtml(String(e.descricao_produto || '—'));
+      const lote    = escapeHtml(String(e.lote || '—'));
+      const qtd     = escapeHtml(String(e.qtd  != null ? e.qtd : ''));
+      const unid    = escapeHtml(String(e.unidade || ''));
+      const data    = escapeHtml(String(e.data_emissao || ''));
+      const id      = Number(e.id);
+      const qtdRaw  = e.qtd != null ? Number(e.qtd) || 0 : 0;
+      const impressa    = !!e.impressa;
+      const idImpresso  = e.id_impresso ? Number(e.id_impresso) : 0;
+
+      const acoes = impressa
+        ? `<div class="etq-card-actions">
+            <button class="etq-btn-reimprimir" data-id="${id}" title="Marcar como não impresso e reabrir para impressão">
+              <i class="fa-solid fa-rotate-left"></i> Reimprimir
+            </button>
+            <button class="etq-btn-armazenar" data-id="${id}" data-id-impresso="${idImpresso}" title="Armazenar produto">
+              <i class="fa-solid fa-box-archive"></i> Armazenar
+            </button>
+          </div>`
+        : `<div class="etq-card-actions">
+            <input type="checkbox" class="etq-check-sel" data-id="${id}" title="Selecionar">
+            <button class="etq-btn-imprimir-unit" data-id="${id}" title="Imprimir esta etiqueta">
+              <i class="fa-solid fa-print"></i> Imprimir
+            </button>
+            <button class="etq-btn-multiplo" data-id="${id}" title="Dividir em múltiplas etiquetas">
+              <i class="fa-solid fa-layer-group"></i> Múltiplo
+            </button>
+            <button class="etq-btn-ocultar" data-id="${id}" title="${_etqMostrarOcultos ? 'Desocultar esta etiqueta' : 'Ocultar esta etiqueta'}">
+              <i class="fa-solid ${_etqMostrarOcultos ? 'fa-eye' : 'fa-eye-slash'}"></i>
+            </button>
+          </div>`;
+
       return `
-      <div class="etq-card" data-id="${id}" data-qtd="${qtdRaw}" data-cod="${cod}" data-desc="${desc}" data-lote="${lote}" data-unid="${unid}" data-data="${data}">
+      <div class="etq-card${impressa ? ' etq-card--impressa' : ''}" data-id="${id}" data-qtd="${qtdRaw}" data-cod="${cod}" data-desc="${desc}" data-lote="${lote}" data-unid="${unid}" data-data="${data}" data-impressa="${impressa}">
         <div class="etq-card-thumbnail">
           <div class="etq-thumb-row">
             <div class="etq-thumb-qr"><i class="fa-solid fa-qrcode" style="font-size:18px;color:#888;"></i></div>
@@ -25230,23 +26025,18 @@ window.openRegistros = async function() {
           <div class="etq-card-cod">${cod}</div>
           <div class="etq-card-desc" title="${desc}">${desc}</div>
           <div class="etq-card-lote">Lote: ${lote}</div>
+          <div class="etq-card-qty">${qtd}${unid ? ' '+unid : ''}${impressa ? ' <span class="etq-badge-impressa"><i class="fa-solid fa-check"></i> Impresso</span>' : ''}</div>
         </div>
-        <div class="etq-card-actions">
-          <input type="checkbox" class="etq-check-sel" data-id="${id}" title="Selecionar">
-          <button class="etq-btn-imprimir-unit" data-id="${id}" title="Imprimir esta etiqueta">
-            <i class="fa-solid fa-print"></i> Imprimir
-          </button>
-          <button class="etq-btn-multiplo" data-id="${id}" title="Dividir em múltiplas etiquetas">
-            <i class="fa-solid fa-layer-group"></i> Múltiplo
-          </button>
-        </div>
+        ${acoes}
       </div>`;
     }).join('');
 
     // Clique no card seleciona
     etqGrid.querySelectorAll('.etq-card').forEach(card => {
       card.addEventListener('click', e => {
-        if (e.target.matches('.etq-check-sel') || e.target.matches('.etq-btn-imprimir-unit') || e.target.closest('.etq-btn-imprimir-unit') || e.target.matches('.etq-btn-multiplo') || e.target.closest('.etq-btn-multiplo')) return;
+        if (e.target.matches('.etq-check-sel') || e.target.matches('.etq-btn-imprimir-unit') || e.target.closest('.etq-btn-imprimir-unit') || e.target.matches('.etq-btn-multiplo') || e.target.closest('.etq-btn-multiplo') || e.target.matches('.etq-btn-ocultar') || e.target.closest('.etq-btn-ocultar') || e.target.matches('.etq-btn-reimprimir') || e.target.closest('.etq-btn-reimprimir') || e.target.matches('.etq-btn-armazenar') || e.target.closest('.etq-btn-armazenar')) return;
+        // Não selecionar cards impressos (só têm reimprimir/armazenar)
+        if (card.dataset.impressa === 'true') return;
         const id = Number(card.dataset.id);
         const cb = card.querySelector('.etq-check-sel');
         if (_etqSelecionadas.has(id)) {
@@ -25298,6 +26088,71 @@ window.openRegistros = async function() {
         );
       });
     });
+
+    // Botão Ocultar / Desocultar
+    etqGrid.querySelectorAll('.etq-btn-ocultar').forEach(btn => {
+      btn.addEventListener('click', async e => {
+        e.stopPropagation();
+        const id = Number(btn.dataset.id);
+        const novoOculto = !_etqMostrarOcultos; // ocultar quando em modo normal; desocultar quando em modo ocultos
+        btn.disabled = true;
+        try {
+          const resp = await fetch(`/api/etiquetas/recebimento/${id}/oculto`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
+            body: JSON.stringify({ oculto: novoOculto }),
+          });
+          if (!resp.ok) throw new Error(`Erro ${resp.status}`);
+          // Remove o card da lista imediatamente
+          btn.closest('.etq-card')?.remove();
+          // Atualiza contagem no status
+          const restantes = etqGrid?.querySelectorAll('.etq-card').length || 0;
+          if (etqStatus) etqStatus.textContent = `${restantes} etiqueta(s) ${_etqMostrarOcultos ? 'oculta(s)' : 'pendente(s)'}${restantes === 0 ? '' : ''}`;
+          if (restantes === 0) {
+            etqGrid.innerHTML = `<div class="etiquetas-loading">${_etqMostrarOcultos ? 'Nenhuma etiqueta oculta.' : 'Nenhuma etiqueta pendente encontrada.'}</div>`;
+            if (etqStatus) etqStatus.textContent = '';
+          }
+        } catch (err) {
+          if (etqStatus) { etqStatus.textContent = err.message; etqStatus.style.color = '#f87171'; setTimeout(() => { if (etqStatus) { etqStatus.textContent = ''; etqStatus.style.color = ''; } }, 4000); }
+          btn.disabled = false;
+        }
+      });
+    });
+
+    // Botão Reimprimir (desmarca impressa, volta ao estado normal)
+    etqGrid.querySelectorAll('.etq-btn-reimprimir').forEach(btn => {
+      btn.addEventListener('click', async e => {
+        e.stopPropagation();
+        const id = Number(btn.dataset.id);
+        btn.disabled = true;
+        try {
+          const resp = await fetch(`/api/etiquetas/recebimento/${id}/reimprimir`, {
+            method: 'PATCH',
+            credentials: 'include',
+          });
+          if (!resp.ok) throw new Error(`Erro ${resp.status}`);
+          // Recarrega a lista para refletir o novo estado
+          await _etqCarregar(etqBusca?.value || '');
+        } catch (err) {
+          if (etqStatus) { etqStatus.textContent = err.message; etqStatus.style.color = '#f87171'; setTimeout(() => { if (etqStatus) { etqStatus.textContent = ''; etqStatus.style.color = ''; } }, 4000); }
+          btn.disabled = false;
+        }
+      });
+    });
+
+    // Botão Armazenar (abre modal de câmera/local direto no passo 2)
+    etqGrid.querySelectorAll('.etq-btn-armazenar').forEach(btn => {
+      btn.addEventListener('click', async e => {
+        e.stopPropagation();
+        const idImpresso = Number(btn.dataset.idImpresso);
+        if (!idImpresso) {
+          if (etqStatus) { etqStatus.textContent = 'Nenhum registro de impressão encontrado para este item.'; etqStatus.style.color = '#f87171'; setTimeout(() => { if (etqStatus) { etqStatus.textContent = ''; etqStatus.style.color = ''; } }, 4000); }
+          return;
+        }
+        _armAbrirComId(idImpresso);
+      });
+    });
   }
 
   async function _etqCarregar(q = '') {
@@ -25306,7 +26161,10 @@ window.openRegistros = async function() {
     _etqSelecionadas.clear();
     _etqAtualizarBotaoSel();
     try {
-      const url = '/api/etiquetas/recebimento/pendentes' + (q ? `?q=${encodeURIComponent(q)}` : '');
+      const params = new URLSearchParams();
+      if (q) params.set('q', q);
+      if (_etqMostrarOcultos) params.set('mostrar_ocultos', '1');
+      const url = '/api/etiquetas/recebimento/pendentes' + (params.toString() ? '?' + params.toString() : '');
       const resp = await fetch(url, { credentials: 'include' });
       if (!resp.ok) throw new Error(`Erro ${resp.status}`);
       const data = await resp.json();
@@ -25316,9 +26174,57 @@ window.openRegistros = async function() {
     }
   }
 
+  // ── Browser Print: envia ZPL direto à impressora local via Zebra Browser Print ──
+  async function _etqImprimirBrowserPrint(ids, btnRef, container, agentDest = null) {
+    const statusEl = container || etqStatus;
+    const showSt = (msg, cor = '#94a3b8') => {
+      if (!statusEl) return;
+      if (statusEl.tagName === 'DIV' || statusEl.tagName === 'P') statusEl.innerHTML = escapeHtml(msg);
+      else statusEl.textContent = msg;
+      if (!container) statusEl.style.color = cor;
+    };
+    const clearSt = (delay = 0) => setTimeout(() => { if (statusEl) { statusEl.textContent = ''; if (!container) statusEl.style.color = ''; } }, delay);
+    const origBtn = btnRef ? btnRef.innerHTML : null;
+    if (btnRef) { btnRef.disabled = true; btnRef.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>'; }
+    try {
+      const usuario = (document.getElementById('userNameDisplay')?.textContent || '').trim();
+      showSt('Enviando para fila de impressão...', '#facc15');
+      const body = { ids, usuario };
+      if (agentDest) { body.destino_agente = agentDest.pcName; body.impressora = agentDest.impressora; }
+      const resp = await fetch('/api/etiquetas/fila', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify(body),
+      });
+      if (!resp.ok) { const e = await resp.json().catch(() => ({})); throw new Error(e.error || `Erro ${resp.status}`); }
+      const data = await resp.json();
+      if (!data.ok) throw new Error(data.error || 'Falha ao enfileirar');
+
+      const destLabel = agentDest ? ` → ${agentDest.impressora} (${agentDest.pcName})` : '';
+      showSt(`✅ ${data.quantidade} etiqueta(s) enfileirada(s)${destLabel}. O agente está imprimindo...`, '#4ade80');
+      clearSt(5000);
+      await _etqCarregar(etqBusca?.value || '');
+      _etqRevertarParaPadrao();
+    } catch (err) {
+      showSt(err.message, '#f87171');
+      clearSt(7000);
+    } finally {
+      if (btnRef) { btnRef.disabled = false; btnRef.innerHTML = origBtn || '<i class="fa-solid fa-print"></i> Imprimir'; }
+    }
+  }
+
   // ── Dispara impressão, com retry usando impressora alternativa ──────────
   async function _etqImprimirIds(ids, btnRef, printer = null) {
     if (!ids || ids.length === 0) return;
+    // Aplicar preferência salva se nenhuma impressora foi explicitamente passada
+    if (printer === null || printer === undefined) printer = _etqPrinterPref || null;
+    // Impressão via agente: __BP__ genérico ou __AGENT__:pcName:impressora
+    const agentDest = _etqParseAgentPref(printer);
+    if (printer === '__BP__' || agentDest) {
+      await _etqImprimirBrowserPrint(ids, btnRef, null, agentDest);
+      return;
+    }
     // Opção PDF: baixa via fetch para saber quando concluiu e recarregar a lista
     if (printer === '__PDF__') {
       if (btnRef) { btnRef.disabled = true; btnRef.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>'; }
@@ -25334,6 +26240,7 @@ window.openRegistros = async function() {
         setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 1000);
         if (etqStatus) { etqStatus.textContent = 'PDF gerado com sucesso.'; etqStatus.style.color = '#4ade80'; setTimeout(() => { if (etqStatus) { etqStatus.textContent = ''; etqStatus.style.color = ''; } }, 4000); }
         await _etqCarregar(etqBusca?.value || '');
+        _etqRevertarParaPadrao();
       } catch (err) {
         if (etqStatus) { etqStatus.textContent = err.message; etqStatus.style.color = '#f87171'; setTimeout(() => { if (etqStatus) { etqStatus.textContent = ''; etqStatus.style.color = ''; } }, 6000); }
       } finally {
@@ -25378,6 +26285,7 @@ window.openRegistros = async function() {
         setTimeout(() => { if (etqStatus) { etqStatus.textContent = ''; etqStatus.style.color = ''; } }, 4000);
       }
       await _etqCarregar(etqBusca?.value || '');
+      _etqRevertarParaPadrao();
     } catch (err) {
       if (etqStatus) {
         etqStatus.textContent = err.message;
@@ -25395,8 +26303,305 @@ window.openRegistros = async function() {
     if (!etqModal) return;
     etqModal.style.display = 'flex';
     if (etqBusca) etqBusca.value = '';
+    _etqCarregarPref(); // carrega preferência de impressora do usuário
     await _etqCarregar();
   });
+
+  // Botão de configuração de impressora padrão
+  document.getElementById('etqBtnImpressora')?.addEventListener('click', () => {
+    _etqMostrarSeletorImpressora(null, (p) => {
+      _etqSalvarPref(p);
+      if (etqStatus) {
+        const agentDest = _etqParseAgentPref(p);
+        const label = agentDest ? `${agentDest.impressora} (${agentDest.pcName})` :
+                      p === '__PDF__' ? 'PDF' : p === '__BP__' ? 'Local (agente)' : p;
+        etqStatus.textContent = `Impressora padrão salva: ${label}`;
+        etqStatus.style.color = '#4ade80';
+        setTimeout(() => { if (etqStatus) { etqStatus.textContent = ''; etqStatus.style.color = ''; } }, 3000);
+      }
+    });
+  });
+
+  // Botão: Baixar instalador do agente (.exe)
+  document.getElementById('etqBtnBaixarAgente')?.addEventListener('click', async () => {
+    const EXE_FALLBACK = 'https://pxhbginkisinegzupqcy.supabase.co/storage/v1/object/public/agente-impressao/agente-impressao-setup.exe';
+    let exeUrl = EXE_FALLBACK;
+    try {
+      const r = await fetch('/api/etiquetas/agente-url', { credentials: 'include' });
+      if (r.ok) { const j = await r.json(); if (j?.url) exeUrl = j.url; }
+    } catch {}
+    const a = document.createElement('a');
+    a.href = exeUrl;
+    a.download = 'agente-impressao-setup.exe';
+    a.rel = 'noopener';
+    document.body.appendChild(a); a.click();
+    setTimeout(() => a.remove(), 1500);
+    if (etqStatus) {
+      etqStatus.innerHTML = '<i class="fa-solid fa-download"></i> Baixando agente... Execute o arquivo no PC da impressora. Depois clique no botão <b>⚙️</b> para configurar.';
+      etqStatus.style.color = '#4ade80';
+      setTimeout(() => { if (etqStatus) { etqStatus.textContent = ''; etqStatus.style.color = ''; } }, 8000);
+    }
+  });
+
+  // Botão: Abrir UI de configuração do agente local (localhost:9200)
+  document.getElementById('etqBtnConfigAgente')?.addEventListener('click', () => {
+    const win = window.open('http://localhost:9200', '_blank', 'noopener');
+    if (!win && etqStatus) {
+      etqStatus.innerHTML = 'Permita pop-ups ou acesse manualmente <a href="http://localhost:9200" target="_blank" style="color:#60a5fa;">http://localhost:9200</a>';
+      etqStatus.style.color = '#facc15';
+      setTimeout(() => { if (etqStatus) { etqStatus.textContent = ''; etqStatus.style.color = ''; } }, 7000);
+    }
+  });
+
+  // ── Configuração de impressoras por usuário ─────────────────────────────────
+  function _etqCfgImprKey() {
+    const u = (document.getElementById('userNameDisplay')?.textContent || 'user').trim().replace(/\s+/g, '_');
+    return `etq_impr_cfg_${u}`;
+  }
+  function _etqCarregarCfgImpr() {
+    try { return JSON.parse(localStorage.getItem(_etqCfgImprKey()) || '{}'); }
+    catch (_) { return {}; }
+  }
+  function _etqSalvarCfgImpr(cfg) {
+    localStorage.setItem(_etqCfgImprKey(), JSON.stringify(cfg));
+  }
+
+  // Monta o valor de impressora no formato usado por _etqSalvarPref
+  function _etqImpressoraParaVal(ag, imp) {
+    if (!ag) return imp; // CUPS local ou PDF
+    return `__AGENT__:${ag}:${imp}`;
+  }
+  function _etqValParaLabel(val) {
+    if (!val) return '';
+    if (val === '__PDF__') return '📄 PDF';
+    if (val === '__BP__')  return '🖨️ Agente local';
+    if (val.startsWith('__AGENT__:')) {
+      const s = val.slice('__AGENT__:'.length);
+      const i = s.indexOf(':');
+      if (i === -1) return s;
+      return `🖨️ ${s.slice(i + 1)} (${s.slice(0, i)})`;
+    }
+    return val;
+  }
+  // Retorna o apelido amigável do agente (via heartbeat/cache) ou label técnico
+  function _etqGetDisplayName(val) {
+    const alias = _etqAgentAliasCache[val];
+    return alias && alias.trim() ? alias.trim() : _etqValParaLabel(val);
+  }
+
+  // Popula _etqAgentAliasCache a partir da resposta de agentes-disponiveis
+  function _etqPopularAliasCache(agentes) {
+    for (const ag of agentes) {
+      for (const [imp, alias] of Object.entries(ag.printerAliases || {})) {
+        const val = _etqImpressoraParaVal(ag.pcName, imp);
+        if (alias && alias.trim()) _etqAgentAliasCache[val] = alias.trim();
+        else delete _etqAgentAliasCache[val]; // limpa apelido removido
+      }
+    }
+  }
+
+  // Atualiza o listbox com as impressoras ativas da config do usuário
+  async function _etqAtualizarListbox() {
+    const sel = document.getElementById('etqListboxImpressora');
+    if (!sel) return;
+    const cfg = _etqCarregarCfgImpr();
+    const padrao  = cfg.padrao  || null;
+    const enabled = Array.isArray(cfg.enabled) ? cfg.enabled : [];
+
+    sel.innerHTML = '<option value="">— nenhuma selecionada —</option>';
+
+    // Sempre busca agentes para atualizar o cache de apelidos
+    let agentData = [];
+    try {
+      const r = await fetch('/api/etiquetas/agentes-disponiveis', { credentials: 'include' });
+      const d = await r.json();
+      agentData = d.agentes || [];
+      _etqPopularAliasCache(agentData);
+    } catch (_) {}
+
+    // Helper: adiciona option deduplicando por nome de exibição
+    // Impressoras com mesmo apelido = mesma impressora lógica → mostra só uma vez
+    function addOpt(val, isPadrao, seenNames) {
+      const name = _etqGetDisplayName(val);
+      const key  = name.toLowerCase().trim();
+      if (seenNames.has(key)) return;
+      seenNames.add(key);
+      const opt = document.createElement('option');
+      opt.value = val;
+      opt.textContent = (isPadrao ? '\u2605 ' : '') + name;
+      if (isPadrao) opt.style.color = '#fbbf24';
+      sel.appendChild(opt);
+    }
+
+    const todos = padrao ? [padrao, ...enabled.filter(v => v !== padrao)] : enabled;
+    const seen = new Set();
+    if (todos.length === 0) {
+      // Sem config: exibe todos os agentes online
+      sel.innerHTML = '<option value="">— nenhuma selecionada —</option>';
+      for (const ag of agentData) {
+        for (const imp of (ag.printers || [])) {
+          addOpt(_etqImpressoraParaVal(ag.pcName, imp), false, seen);
+        }
+      }
+      sel.insertAdjacentHTML('beforeend', '<option value="__PDF__">📄 PDF (baixar arquivo)</option>');
+    } else {
+      for (const val of todos) addOpt(val, val === padrao, seen);
+    }
+
+    // Pré-seleciona a preferência atual
+    const pref = _etqPrinterPref || padrao || '';
+    if (pref) sel.value = pref;
+  }
+
+  // Reverteu para a impressora padrão da config após cada impressão
+  function _etqRevertarParaPadrao() {
+    const cfg = _etqCarregarCfgImpr();
+    const padrao = cfg.padrao || null;
+    _etqPrinterPref = padrao;
+    const sel = document.getElementById('etqListboxImpressora');
+    if (sel) sel.value = padrao || '';
+  }
+
+  // Evento: mudar impressora pelo listbox — sobrescrita TEMPORÁRIA (não salva no localStorage)
+  document.getElementById('etqListboxImpressora')?.addEventListener('change', function () {
+    _etqPrinterPref = this.value || null;  // temp: volta para padrão após impressão
+  });
+
+  // Botão refresh do listbox
+  document.getElementById('etqBtnRefreshImpressoras')?.addEventListener('click', () => {
+    _etqAtualizarListbox();
+  });
+
+  // ── Modal de configuração de impressoras ────────────────────────────────────
+  let _etqCfgImprPadraoTemp = null; // padrão escolhido no modal antes de salvar
+
+  async function _etqAbrirConfigImpressoras() {
+    const modal = document.getElementById('etqConfigImpressorasModal');
+    const lista = document.getElementById('etqCfgImprLista');
+    if (!modal || !lista) return;
+
+    _etqCfgImprPadraoTemp = null;
+    modal.style.display = 'flex';
+    lista.innerHTML = '<div style="color:#64748b;text-align:center;padding:24px;"><i class="fa-solid fa-spinner fa-spin"></i> Buscando impressoras online...</div>';
+
+    const cfg = _etqCarregarCfgImpr();
+    const padrao  = cfg.padrao  || null;
+    const enabled = Array.isArray(cfg.enabled) ? new Set(cfg.enabled) : new Set();
+    _etqCfgImprPadraoTemp = padrao;
+
+    let impressoras = []; // { val, label, pcName }
+    try {
+      const r = await fetch('/api/etiquetas/agentes-disponiveis', { credentials: 'include' });
+      const d = await r.json();
+      const agentes = d.agentes || [];
+      _etqPopularAliasCache(agentes); // atualiza apelidos antes de renderizar
+      for (const ag of agentes) {
+        for (const imp of (ag.printers || [])) {
+          const val = _etqImpressoraParaVal(ag.pcName, imp);
+          impressoras.push({ val, label: imp, pcName: ag.pcName });
+        }
+      }
+    } catch (_) {}
+    // Sempre inclui PDF
+    impressoras.push({ val: '__PDF__', label: 'PDF (baixar arquivo)', pcName: '' });
+
+    // Adiciona impressoras já salvas que podem não estar online agora
+    for (const v of enabled) {
+      if (!impressoras.find(x => x.val === v)) {
+        impressoras.push({ val: v, label: _etqValParaLabel(v), pcName: '(offline)', offline: true });
+      }
+    }
+    if (padrao && !impressoras.find(x => x.val === padrao)) {
+      impressoras.unshift({ val: padrao, label: _etqValParaLabel(padrao), pcName: '(offline)', offline: true });
+    }
+
+    if (impressoras.length === 0) {
+      lista.innerHTML = '<div style="color:#f87171;text-align:center;padding:20px;">Nenhum agente online encontrado.<br><small style="color:#64748b;">Verifique se o agente está rodando no PC da impressora.</small></div>';
+      return;
+    }
+
+    const savedAliases = cfg.aliases || {};
+    lista.innerHTML = '';
+    for (const { val, label, pcName, offline } of impressoras) {
+      const isEnabled = enabled.has(val) || val === padrao;
+      const isPadrao  = val === padrao;
+      const agentAlias = _etqAgentAliasCache[val] || '';
+      const item = document.createElement('div');
+      item.className = 'etq-cfg-impr-item';
+      item.dataset.val = val;
+      item.innerHTML = `
+        <input type="checkbox" class="etqCfgImprChk" data-val="${escapeHtml(val)}" ${isEnabled ? 'checked' : ''}>
+        <div class="etq-cfg-impr-item-info">
+          <div class="etq-cfg-impr-item-nome">${escapeHtml(label)}${offline ? ' <span style="color:#f87171;font-size:.7rem;">(offline)</span>' : ''}</div>
+          ${agentAlias ? `<div style="font-size:.75rem;color:#7c3aed;margin-top:2px">🏷️ ${escapeHtml(agentAlias)}</div>` : ''}
+          ${pcName ? `<div class="etq-cfg-impr-item-pc">${escapeHtml(pcName)}</div>` : ''}
+        </div>
+        <button class="etq-cfg-impr-btn-padrao${isPadrao ? ' padrao-ativo' : ''}" data-val="${escapeHtml(val)}" title="Definir como impressora padrão">
+          ${isPadrao ? '★ Padrão' : '☆ Padrão'}
+        </button>`;
+      lista.appendChild(item);
+    }
+
+    // Botões "Definir como padrão"
+    lista.querySelectorAll('.etq-cfg-impr-btn-padrao').forEach(btn => {
+      btn.addEventListener('click', () => {
+        _etqCfgImprPadraoTemp = btn.dataset.val;
+        // Atualiza visual
+        lista.querySelectorAll('.etq-cfg-impr-btn-padrao').forEach(b => {
+          const isThis = b.dataset.val === _etqCfgImprPadraoTemp;
+          b.classList.toggle('padrao-ativo', isThis);
+          b.textContent = isThis ? '★ Padrão' : '☆ Padrão';
+        });
+        // Marca o checkbox automaticamente ao definir como padrão
+        const chk = lista.querySelector(`.etqCfgImprChk[data-val="${CSS.escape(btn.dataset.val)}"]`);
+        if (chk) chk.checked = true;
+      });
+    });
+  }
+
+  document.getElementById('etqBtnConfigImpressoras')?.addEventListener('click', () => {
+    _etqAbrirConfigImpressoras();
+  });
+
+  document.getElementById('etqCfgImprSalvar')?.addEventListener('click', () => {
+    const lista = document.getElementById('etqCfgImprLista');
+    if (!lista) return;
+    const enabled = [];
+    lista.querySelectorAll('.etqCfgImprChk:checked').forEach(chk => {
+      enabled.push(chk.dataset.val);
+    });
+    const cfg = { padrao: _etqCfgImprPadraoTemp || (enabled[0] || null), enabled };
+    _etqSalvarCfgImpr(cfg);
+    if (!_etqPrinterPref && cfg.padrao) _etqSalvarPref(cfg.padrao);
+    document.getElementById('etqConfigImpressorasModal').style.display = 'none';
+    _etqAtualizarListbox();
+  });
+
+  document.getElementById('etqCfgImprCancelar')?.addEventListener('click', () => {
+    document.getElementById('etqConfigImpressorasModal').style.display = 'none';
+  });
+  document.getElementById('etqCfgImprFechar')?.addEventListener('click', () => {
+    document.getElementById('etqConfigImpressorasModal').style.display = 'none';
+  });
+  document.getElementById('etqConfigImpressorasModal')?.addEventListener('click', e => {
+    if (e.target === document.getElementById('etqConfigImpressorasModal'))
+      document.getElementById('etqConfigImpressorasModal').style.display = 'none';
+  });
+
+  // Inicializa o listbox ao abrir o modal
+  const _etqObserver = new MutationObserver(mutations => {
+    for (const m of mutations) {
+      if (m.type === 'attributes' && m.attributeName === 'style') {
+        const el = m.target;
+        if (el.id === 'etiquetasModal' && el.style.display !== 'none') {
+          _etqCarregarPref();
+          _etqAtualizarListbox();
+        }
+      }
+    }
+  });
+  const _etqModalEl = document.getElementById('etiquetasModal');
+  if (_etqModalEl) _etqObserver.observe(_etqModalEl, { attributes: true });
 
 
   // Fechar
@@ -25420,6 +26625,78 @@ window.openRegistros = async function() {
   const etqMplModal    = document.getElementById('etqMultiploModal');
   const etqMplFechar   = document.getElementById('etqMultiploFechar');
   const etqMplCancel   = document.getElementById('etqMultiploCancelar');
+
+  // ── Verificação de versão do agente ────────────────────────────────────────
+  let _etqUpdateDismissedVersion = null;
+
+  async function _etqVerificarVersaoAgente() {
+    try {
+      // 1) Versão "latest" vinda do servidor
+      const infoResp = await Promise.race([
+        fetch('/api/etiquetas/agente-url'),
+        new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 3000)),
+      ]);
+      const info = await infoResp.json();
+      const versaoAtual = info.versao || '0';
+      const downloadUrl = info.url || '';
+
+      // Usuário já dispensou esse release nesta sessão
+      if (_etqUpdateDismissedVersion === versaoAtual) return;
+
+      // 2) Versão do agente local (pode não estar rodando)
+      let versaoAgente = null;
+      try {
+        const agResp = await Promise.race([
+          fetch('http://localhost:9200/api/version'),
+          new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 2000)),
+        ]);
+        const ag = await agResp.json();
+        versaoAgente = ag.version || '0';
+      } catch {
+        return; // agente não está rodando — sem banner
+      }
+
+      // 3) Comparação semver simples (ex: 2.1 > 2.0)
+      function parseVer(v) { return (v || '0').split('.').map(Number); }
+      const [ma, mi] = parseVer(versaoAtual);
+      const [ca, ci] = parseVer(versaoAgente);
+      if (ca > ma || (ca === ma && ci >= mi)) return; // já atualizado
+
+      // 4) Montar / atualizar banner dentro do modal
+      let banner = document.getElementById('etqUpdateBanner');
+      if (!banner) {
+        banner = document.createElement('div');
+        banner.id = 'etqUpdateBanner';
+        banner.style.cssText = [
+          'margin:10px 16px 0',
+          'padding:10px 14px',
+          'background:#1c1917',
+          'border:1px solid #f59e0b',
+          'border-radius:8px',
+          'display:flex',
+          'align-items:center',
+          'gap:10px',
+          'font-size:.84rem',
+        ].join(';');
+        const header = document.querySelector('#etqMultiploModal .etq-multiplo-header');
+        if (header) header.insertAdjacentElement('afterend', banner);
+      }
+      banner.innerHTML =
+        `<i class="fa-solid fa-triangle-exclamation" style="color:#f59e0b;flex-shrink:0;"></i>` +
+        `<span style="flex:1;color:#fde68a;">Agente v${escapeHtml(versaoAgente)} desatualizado — versão v${escapeHtml(versaoAtual)} disponível.</span>` +
+        `<a href="${escapeHtml(downloadUrl)}" target="_blank" rel="noopener noreferrer"` +
+        ` style="background:#f59e0b;color:#1e293b;border-radius:6px;padding:5px 12px;font-weight:700;` +
+        `text-decoration:none;font-size:.82rem;white-space:nowrap;">⬇ Atualizar</a>` +
+        `<button id="etqUpdateBannerDismiss" title="Lembrar depois"` +
+        ` style="background:transparent;border:none;color:#94a3b8;cursor:pointer;padding:4px 6px;font-size:1.1rem;line-height:1;">✕</button>`;
+      banner.style.display = 'flex';
+
+      document.getElementById('etqUpdateBannerDismiss')?.addEventListener('click', () => {
+        _etqUpdateDismissedVersion = versaoAtual;
+        banner.style.display = 'none';
+      });
+    } catch { /* silencioso — nunca bloqueia o usuário */ }
+  }
   const etqMplInput    = document.getElementById('etqMultiploInput');
   const etqMplChips    = document.getElementById('etqMultiploChips');
   const etqMplPreview  = document.getElementById('etqMultiploPreview');
@@ -25508,6 +26785,8 @@ window.openRegistros = async function() {
     if (etqMplPreview) etqMplPreview.textContent = 'Selecione ou digite um múltiplo para ver a prévia.';
     if (etqMplGerar)   etqMplGerar.disabled = true;
     if (etqMplModal)   etqMplModal.style.display = 'flex';
+    // Verificar versão do agente de forma não-blocante
+    _etqVerificarVersaoAgente();
   }
 
   function _etqMplFecharFn() {
@@ -25523,13 +26802,53 @@ window.openRegistros = async function() {
   etqMplGerar?.addEventListener('click', async () => {
     const m = Number(etqMplInput?.value);
     if (!_etqMplIdAtual || !m || m <= 0) return;
-    // Abre seletor de impressora dentro do modal (passa etqMplPreview como container)
-    _etqMostrarSeletorImpressora(null, (p) => _etqMplImprimirComImpressora(_etqMplIdAtual, m, p), etqMplPreview);
+    // Usar preferência salva; se não houver, abrir seletor
+    if (_etqPrinterPref) {
+      await _etqMplImprimirComImpressora(_etqMplIdAtual, m, _etqPrinterPref);
+    } else {
+      _etqMostrarSeletorImpressora(null, (p) => {
+        _etqSalvarPref(p);
+        _etqMplImprimirComImpressora(_etqMplIdAtual, m, p);
+      }, etqMplPreview);
+    }
   });
 
   // Dispara impressão múltiplo, com retry para impressora alternativa
   async function _etqMplImprimirComImpressora(idEtq, multiplo, printer) {
     if (!etqMplGerar) return;
+    // Apenas enfileira — o agente faz polling e imprime sozinho
+    if (printer === '__BP__' || _etqParseAgentPref(printer)) {
+      const origHtml = etqMplGerar.innerHTML;
+      etqMplGerar.disabled = true;
+      etqMplGerar.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Enviando...';
+      try {
+        const statusEl = etqMplPreview;
+        const showSt = (msg, cor = '#94a3b8') => { if (statusEl) statusEl.innerHTML = `<span style="color:${cor};">${escapeHtml(msg)}</span>`; };
+        const usuario = (document.getElementById('userNameDisplay')?.textContent || '').trim();
+        showSt('Enviando para fila...', '#facc15');
+        const agentDest = _etqParseAgentPref(printer);
+        const filaBody = { ids: [idEtq], multiplo, usuario };
+        if (agentDest) { filaBody.destino_agente = agentDest.pcName; filaBody.impressora = agentDest.impressora; }
+        const resp = await fetch('/api/etiquetas/fila', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify(filaBody),
+        });
+        if (!resp.ok) { const e = await resp.json().catch(() => ({})); throw new Error(e.error || `Erro ${resp.status}`); }
+        const data = await resp.json();
+        if (!data.ok) throw new Error(data.error || 'Falha ao enfileirar');
+        const destLabel = agentDest ? ` → ${agentDest.impressora} (${agentDest.pcName})` : '';
+        showSt(`✅ ${data.quantidade} etiqueta(s) na fila${destLabel}. Imprimindo...`, '#4ade80');
+        setTimeout(() => { if (etqMplPreview) etqMplPreview.innerHTML = ''; }, 5000);
+        _etqMplFecharFn();
+        await _etqCarregar(etqBusca?.value || '');
+      } catch (err) {
+        etqMplGerar.disabled = false; etqMplGerar.innerHTML = origHtml;
+        if (etqMplPreview) etqMplPreview.innerHTML = `<span style="color:#f87171;">${escapeHtml(err.message)}</span>`;
+      }
+      return;
+    }
     // Opção PDF: baixa via fetch, passa multiplo para floor+remainder no backend
     if (printer === '__PDF__') {
       etqMplGerar.disabled = true;
@@ -25838,6 +27157,10 @@ window.openRegistros = async function() {
       setTimeout(() => {
         if (etqArmazenarModal) etqArmazenarModal.style.display = 'none';
         _etqImpressoCarregar(etqImpressoBusca?.value || '');
+        // Recarrega também o modal de pendentes se estiver aberto
+        if (etqModal && etqModal.style.display !== 'none') {
+          _etqCarregar(etqBusca?.value || '');
+        }
       }, 1800);
     } catch (err) {
       if (etqArmazenarStatus) {
@@ -28123,6 +29446,7 @@ function configurarCompraRealizadaGlobalCarrinho() {
       inputNfe.value = '';
 
       if (wrapperCompraAutorizada) wrapperCompraAutorizada.style.display = 'flex';
+      if (checkboxCompraAutorizada) checkboxCompraAutorizada.checked = true;
       if (wrapperRetornoCotacao) wrapperRetornoCotacao.style.display = 'flex';
       if (wrapperPrazoSolicitado) wrapperPrazoSolicitado.style.display = 'flex';
     }
@@ -28136,8 +29460,16 @@ function configurarCompraRealizadaGlobalCarrinho() {
   atualizarVisibilidadeNfe();
 }
 
+function prepararPadroesAberturaCarrinhoCompras() {
+  const compraRealizada = document.getElementById('carrinhoCompraRealizada');
+  const compraAutorizada = document.getElementById('carrinhoCompraAutorizada');
+
+  if (compraRealizada) compraRealizada.checked = false;
+  if (compraAutorizada) compraAutorizada.checked = true;
+}
+
 // Abre o modal do carrinho e sincroniza com os dados atuais
-function atualizarBlocoCompraOmieModal(numeros = []) {
+function atualizarBlocoCompraOmieModalLegado(numeros = []) {
   const blocoInfo = document.getElementById('modalComprasOmieInfo');
   if (!blocoInfo) return;
 
@@ -28178,7 +29510,49 @@ function atualizarBlocoCompraOmieModal(numeros = []) {
   `;
 }
 
-window.abrirModalCarrinhoCompras = async function() {
+function atualizarBlocoCompraOmieModal(numeros = []) {
+  const blocoInfo = document.getElementById('modalComprasOmieInfo');
+  if (!blocoInfo) return;
+
+  const numerosUnicos = Array.from(new Set(
+    (Array.isArray(numeros) ? numeros : [])
+      .map(n => String(n || '').trim())
+      .filter(Boolean)
+  ));
+
+  if (numerosUnicos.length === 0) {
+    blocoInfo.style.display = 'none';
+    blocoInfo.innerHTML = '';
+    return;
+  }
+
+  const escape = (valor) => {
+    const texto = String(valor || '');
+    if (typeof window.escapeHtml === 'function') return window.escapeHtml(texto);
+    return texto
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  };
+
+  const numerosHtml = numerosUnicos.map((numeroPedidoOmie) => (
+    `<span style="display:inline-flex;align-items:center;justify-content:center;padding:8px 14px;border-radius:10px;background:#1d4ed8;color:white;font-size:18px;font-weight:900;letter-spacing:.02em;">${escape(numeroPedidoOmie)}</span>`
+  )).join('');
+
+  blocoInfo.style.display = 'block';
+  blocoInfo.innerHTML = `
+    <div style="display:flex;align-items:center;gap:8px;font-weight:800;font-size:14px;margin-bottom:8px;">
+      <i class="fa-solid fa-circle-check" style="color:#16a34a;"></i>
+      <span>Pedido(s) de compra gerado(s)</span>
+    </div>
+    <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px;">${numerosHtml}</div>
+    <div style="font-size:12px;color:#1e40af;">Informe esse cNumero na NFe e encaminhe ao setor de Compras para identificacao e vinculo do pedido.</div>
+  `;
+}
+
+async function abrirModalCarrinhoComprasLegado() {
   const modal = document.getElementById('modalCarrinhoCompras');
   if (!modal) return;
   
@@ -28206,6 +29580,52 @@ window.abrirModalCarrinhoCompras = async function() {
   // Exibe o modal
   modal.style.display = 'flex';
   setTimeout(() => modal.classList.add('active'), 10);
+}
+
+window.abrirModalCarrinhoCompras = async function() {
+  const modal = document.getElementById('modalCarrinhoCompras');
+  if (!modal) return;
+
+  prepararPadroesAberturaCarrinhoCompras();
+  configurarPrazoSolicitadoGlobal();
+  configurarObjetivoCompraGlobalCarrinho();
+  configurarAnexoUrlGlobalCarrinho();
+  configurarAnexoArquivoGlobalCarrinho();
+  configurarRetornoCotacaoGlobalCarrinho();
+  configurarCompraRealizadaGlobalCarrinho();
+  atualizarBlocoCompraOmieModal();
+
+  modal.style.display = 'flex';
+  setTimeout(() => modal.classList.add('active'), 10);
+
+  renderCarrinhoCompras();
+  renderModalCarrinhoCompras();
+  renderModalCarrinhoLista();
+
+  const cargas = [
+    window.usuariosAtivos.length === 0 ? carregarUsuariosAtivos() : Promise.resolve(),
+    carregarCarrinhoComprasDoBanco(),
+    (async () => {
+      await carregarCategoriasPorDepartamento();
+      await carregarDepartamentosCarrinho();
+      configurarCategoriaGlobalCarrinho();
+      await carregarCategoriaCompraDropdown();
+    })(),
+    carregarGruposRequisicaoDisponiveis()
+  ];
+
+  const resultados = await Promise.allSettled(cargas);
+  resultados.forEach((resultado, idx) => {
+    if (resultado.status === 'rejected') {
+      console.warn(`[CARRINHO] Falha ao carregar recurso do modal (${idx}):`, resultado.reason);
+    }
+  });
+
+  prepararPadroesAberturaCarrinhoCompras();
+  configurarCompraRealizadaGlobalCarrinho();
+  renderCarrinhoCompras();
+  renderModalCarrinhoCompras();
+  renderModalCarrinhoLista();
 }
 
 // Fecha o modal do carrinho
@@ -29380,9 +30800,13 @@ async function enviarPedidoModal() {
         statusEl.style.background = '#d1fae5';
         statusEl.style.color = '#065f46';
         statusEl.innerHTML = `<i class="fa-solid fa-check-circle"></i> ${respostasOk} solicitação(ões) enviada(s) com sucesso!`;
-        if (compraRealizada && numerosUnicos.length > 0) {
+        if (numerosUnicos.length > 0) {
           statusEl.innerHTML += `<br><small>Compra(s) gerada(s) na Omie: <strong>${numerosUnicos.join(', ')}</strong></small>`;
           atualizarBlocoCompraOmieModal(numerosUnicos);
+          const numerosHtml = numerosUnicos
+            .map(numero => `<span style="display:inline-flex;align-items:center;justify-content:center;margin:6px 6px 0 0;padding:7px 12px;border-radius:9px;background:#047857;color:white;font-size:17px;font-weight:900;">${window.escapeHtml ? window.escapeHtml(numero) : numero}</span>`)
+            .join('');
+          statusEl.innerHTML = `<div style="font-weight:800;font-size:14px;margin-bottom:4px;"><i class="fa-solid fa-check-circle"></i> Pedido de compra enviado com sucesso</div><div style="font-size:12px;">Numero do pedido:</div><div>${numerosHtml}</div>`;
         }
       } else {
         statusEl.style.background = '#fee2e2';
@@ -29405,7 +30829,7 @@ async function enviarPedidoModal() {
       window.carrinhoCompras = [];
 
       const numerosUnicos = Array.from(new Set(numerosCompraOmieGerados));
-      if (compraRealizada && numerosUnicos.length > 0) {
+      if (numerosUnicos.length > 0) {
         const orientacoesAlerta = numerosUnicos
           .map((numeroPedidoOmie) => `Registro realizado com sucesso. Informe o cNumero "${numeroPedidoOmie}" na NFe e encaminhe ao setor de Compras para identificação e vínculo do pedido.`)
           .join('\n');
@@ -29414,7 +30838,7 @@ async function enviarPedidoModal() {
         alert('Solicitação(ões) enviada(s) com sucesso.');
       }
 
-      if (compraRealizada && numerosUnicos.length > 0) {
+      if (numerosUnicos.length > 0) {
         renderModalCarrinhoCompras();
         renderCarrinhoCompras();
         if (typeof recarregarKanbanMinhasCompras === 'function') {
@@ -49920,6 +51344,9 @@ function renderPreviewAssociacaoPedidoNfe(preview) {
   const itens = [...window.__associarNfePreviewEstadoItens].sort(
     (a, b) => Number(a?.n_sequencia || 0) - Number(b?.n_sequencia || 0)
   );
+  const itensInformativosPedido = Array.isArray(preview?.itens_pedido_informativos)
+    ? preview.itens_pedido_informativos
+    : [];
 
   if (!window.__associarNfeCamposEditados || typeof window.__associarNfeCamposEditados !== 'object') {
     window.__associarNfeCamposEditados = {};
@@ -49955,6 +51382,7 @@ function renderPreviewAssociacaoPedidoNfe(preview) {
     return compararQuantidadePreview(item) || compararUnidadePreview(item, unidadePedido);
   }).length;
   const gruposMesmoItem = itens.filter((item) => item?.criterio_match === 'agrupamento_mesmo_item_pedido').length;
+  const itensInformativosTotal = itensInformativosPedido.length;
 
   const totalValorNfPreview = itens.reduce((acc, item) => acc + (Number(item?.nf_valor_total || 0) || 0), 0);
   const totalValorPedidoPreview = itens.reduce((acc, item) => {
@@ -49989,6 +51417,10 @@ function renderPreviewAssociacaoPedidoNfe(preview) {
       <div style="background:${divergenciasQtdUnid > 0 ? '#fef2f2' : '#eff6ff'};border:1px solid ${divergenciasQtdUnid > 0 ? '#fecaca' : '#bfdbfe'};border-radius:10px;padding:10px;">
         <div style="font-size:11px;color:${divergenciasQtdUnid > 0 ? '#991b1b' : '#1d4ed8'};">Qtd/Unid. divergentes</div>
         <div style="font-size:13px;font-weight:700;color:${divergenciasQtdUnid > 0 ? '#991b1b' : '#1d4ed8'};">${divergenciasQtdUnid}</div>
+      </div>
+      <div style="background:${itensInformativosTotal > 0 ? '#fff7ed' : '#f8fafc'};border:1px solid ${itensInformativosTotal > 0 ? '#fed7aa' : '#e2e8f0'};border-radius:10px;padding:10px;">
+        <div style="font-size:11px;color:${itensInformativosTotal > 0 ? '#9a3412' : '#64748b'};">Itens informativos</div>
+        <div style="font-size:13px;font-weight:700;color:${itensInformativosTotal > 0 ? '#9a3412' : '#0f172a'};">${itensInformativosTotal}</div>
       </div>
     </div>
   `;
@@ -50079,8 +51511,31 @@ function renderPreviewAssociacaoPedidoNfe(preview) {
       }).join('')
     : '<tr><td colspan="12" style="padding:10px;font-size:11px;color:#64748b;text-align:center;">Sem itens para pré-visualização.</td></tr>';
 
+  const itensInformativosHtml = itensInformativosPedido.length
+    ? `
+      <div style="margin:0 0 10px;padding:10px 12px;border:1px solid #fed7aa;background:#fff7ed;color:#9a3412;border-radius:8px;font-size:12px;">
+        <div style="display:flex;align-items:center;gap:8px;font-weight:800;margin-bottom:8px;">
+          <i class="fa-solid fa-circle-info"></i>
+          <span>${itensInformativosPedido.length} item(ns) do pedido foram tratados como informativos</span>
+        </div>
+        <div style="font-size:11px;line-height:1.45;margin-bottom:8px;">Eles existem no pedido apenas como referencia interna e nao serao associados a NF-e. A associacao segue somente com os itens que vieram na nota.</div>
+        <div style="display:grid;gap:6px;">
+          ${itensInformativosPedido.map((itemInfo) => `
+            <div style="display:grid;grid-template-columns:minmax(90px,.7fr) minmax(220px,2fr) minmax(80px,.5fr) minmax(90px,.7fr);gap:8px;align-items:center;background:#ffffff;border:1px solid #fed7aa;border-radius:8px;padding:8px;">
+              <div style="font-weight:800;color:#7c2d12;font-size:11px;">${escapeHtml(String(itemInfo?.pedido_codigo_produto || '-'))}</div>
+              <div style="color:#431407;font-size:11px;line-height:1.35;">${escapeHtml(String(itemInfo?.pedido_descricao_produto || '-'))}</div>
+              <div style="text-align:right;color:#7c2d12;font-size:11px;">${escapeHtml(String(itemInfo?.pedido_qtde ?? '-'))} ${escapeHtml(String(itemInfo?.pedido_unidade || ''))}</div>
+              <div style="text-align:right;font-weight:800;color:#7c2d12;font-size:11px;">${escapeHtml(formatarValorRecebimento(itemInfo?.pedido_valor_total))}</div>
+            </div>
+          `).join('')}
+        </div>
+      </div>
+    `
+    : '';
+
   previewConteudo.innerHTML = `
     ${resumoHtml}
+    ${itensInformativosHtml}
     ${gruposMesmoItem > 0 ? `<div style="margin:0 0 10px;padding:10px 12px;border:1px solid #bbf7d0;background:#ecfdf5;color:#166534;border-radius:8px;font-size:12px;font-weight:700;"><i class="fa-solid fa-layer-group" style="margin-right:6px;"></i>${gruposMesmoItem} linha(s) da NF-e foram agrupadas no mesmo item do pedido. A conferência usa a soma das linhas, não cada linha isolada.</div>` : ''}
     <div style="margin:0 0 10px;padding:9px 12px;border:1px solid #bae6fd;background:#f0f9ff;color:#0c4a6e;border-radius:8px;font-size:12px;font-weight:700;">Arraste o bloco do item do Pedido (coluna azul com ícone <i class="fa-solid fa-grip-vertical"></i>) para outra linha da NF-e para trocar a associação.</div>
     ${(divergenciasValor > 0 || divergenciasQtdUnid > 0) ? `<div style="margin:0 0 10px;padding:10px 12px;border:1px solid #fecaca;background:#fff1f2;color:#b91c1c;border-radius:8px;font-size:12px;font-weight:700;">Existem divergências de valor, quantidade ou unidade entre a NF-e e o pedido.${divergenciasQtdUnid > 0 ? ' Edite os campos de Qtd/Unid. do Pedido (em vermelho) antes de associar.' : ' Os campos divergentes estão destacados em vermelho.'}</div>` : ''}
@@ -60657,9 +62112,29 @@ function _agendaGerarPdfAta() {
 
   if (!agendaAtasCache.length) { alert('Nenhuma anotação registrada para gerar PDF.'); return; }
 
+  // Aplicar o mesmo filtro ativo na tela
+  const modoVisualizacao = agendaAtaVisualizacaoModo || 'tudo';
+  let atasParaPdf = [...agendaAtasCache];
+  let filtroDescricao = '';
+
+  if (modoVisualizacao === 'datas' && agendaAtaDataSelecionada) {
+    atasParaPdf = atasParaPdf.filter((a) => String(a.criado_em_fmt || '').trim() === agendaAtaDataSelecionada);
+    filtroDescricao = `Filtro: Data ${agendaAtaDataSelecionada}`;
+  } else if (modoVisualizacao === 'atividades') {
+    atasParaPdf = atasParaPdf
+      .filter((a) => {
+        const st = _agendaAtaStatusChecklist(a);
+        return agendaAtaAtividadesAba === 'executadas' ? st.executadas > 0 : st.pendentes > 0;
+      })
+      .map((a) => _agendaFiltrarConteudoAtaPorStatus(a, agendaAtaAtividadesAba));
+    filtroDescricao = `Filtro: Atividades ${agendaAtaAtividadesAba === 'executadas' ? 'executadas' : 'pendentes'}`;
+  }
+
+  if (!atasParaPdf.length) { alert('Nenhuma anotação encontrada para o filtro selecionado.'); return; }
+
   // Agrupa por tema na mesma ordem de exibição
   const porTema = {};
-  for (const a of agendaAtasCache) {
+  for (const a of atasParaPdf) {
     const t = String(a.tema || 'Geral').trim();
     if (!porTema[t]) porTema[t] = [];
     porTema[t].push(a);
@@ -60697,6 +62172,7 @@ function _agendaGerarPdfAta() {
   });
 
   const agora = new Date().toLocaleString('pt-BR');
+  const subtitCompleto = filtroDescricao ? `${subtit}${subtit ? ' &mdash; ' : ''}${e(filtroDescricao)}` : e(subtit);
   const html = `<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8">
 <title>${e(titulo)}</title><style>
 body{font-family:Arial,sans-serif;max-width:820px;margin:0 auto;padding:32px;color:#1e293b;font-size:13px;}
@@ -60711,7 +62187,7 @@ h3{font-size:14px;color:#1e3a5f;border-bottom:2px solid #93c5fd;padding-bottom:4
 @media print{body{padding:16px;}}
 </style></head><body>
 <h1>${e(titulo)}</h1>
-<p class="subtit">${e(subtit)}</p>
+<p class="subtit">${subtitCompleto}</p>
 ${corpo}
 <p class="footer">Gerado em ${agora}</p>
 <script>window.onload=()=>window.print();<\/script>
@@ -65581,6 +67057,10 @@ window.initOscilacaoEstoque = (function () {
   const zone      = document.getElementById('floatingShortcutZone');
   const container = document.getElementById('shortcutItemsContainer');
   const dropTarget = document.getElementById('shortcutDropTarget');
+  const btnGerenciar = document.getElementById('btnGerenciarAtalhos');
+  const modal        = document.getElementById('modalGerenciarAtalhos');
+  const btnFecharModal = document.getElementById('btnFecharModalAtalhos');
+  const modalList    = document.getElementById('shortcutModalList');
 
   if (!zone || !container || !dropTarget) return;
 
@@ -65682,7 +67162,9 @@ window.initOscilacaoEstoque = (function () {
       if (!resp.ok) return;
       const data = await resp.json();
       container.innerHTML = '';
-      (data.atalhos || []).forEach(a => container.appendChild(criarBotaoAtalho(a)));
+      // API retorna array direto
+      const lista = Array.isArray(data) ? data : (data.atalhos || []);
+      lista.forEach(a => container.appendChild(criarBotaoAtalho(a)));
     } catch (e) {
       console.error('[atalhos] erro ao carregar:', e.message);
     }
@@ -65698,8 +67180,9 @@ window.initOscilacaoEstoque = (function () {
         body: JSON.stringify({ nav_key: navKey, nav_label: navLabel, nav_selector: navSelector, icon_class: iconClass })
       });
       const data = await resp.json();
-      if (!data.ok) throw new Error(data.error || 'Erro ao salvar');
-      return data.atalho;
+      if (!resp.ok) throw new Error(data.error || 'Erro ao salvar');
+      // API retorna o objeto do atalho diretamente (não { ok, atalho })
+      return data.id ? data : (data.atalho || null);
     } catch (e) {
       console.error('[atalhos] erro ao salvar:', e.message);
       return null;
@@ -65715,6 +67198,86 @@ window.initOscilacaoEstoque = (function () {
     } catch (e) {
       console.error('[atalhos] erro ao remover:', e.message);
     }
+  }
+
+  // ── Modal de gerenciamento ──
+  function _navKeyAtual() {
+    const set = new Set();
+    container.querySelectorAll('[data-nav-key]').forEach(b => set.add(b.dataset.navKey));
+    return set;
+  }
+
+  function abrirModalGerenciar() {
+    if (!modal) return;
+    modalList.innerHTML = '';
+
+    const pinados = _navKeyAtual();
+    let grupoAtual = '';
+
+    document.querySelectorAll('.sidebar-content .menu-link[data-nav-key]').forEach(link => {
+      const navKey   = link.dataset.navKey;
+      const navLabel = link.dataset.navLabel || link.textContent.trim().replace(/\s+/g, ' ').split(/\s+\d+$/)[0].trim();
+      const iconEl   = link.querySelector('i');
+      const iconClass = iconEl ? iconEl.className : 'fa-solid fa-star';
+      const navSelector = link.dataset.navSelector || ('#' + link.id);
+
+      // Título do grupo (parent)
+      const parentKey = link.dataset.navParent || '';
+      if (parentKey !== grupoAtual) {
+        grupoAtual = parentKey;
+        const groupEl = document.querySelector(`.side-title[data-nav-key="${parentKey}"]`);
+        const groupLabel = groupEl ? groupEl.textContent.trim() : parentKey;
+        if (groupLabel) {
+          const sep = document.createElement('div');
+          sep.className = 'shortcut-modal-group-title';
+          sep.textContent = groupLabel;
+          modalList.appendChild(sep);
+        }
+      }
+
+      const item = document.createElement('div');
+      item.className = 'shortcut-modal-item' + (pinados.has(navKey) ? ' is-pinned' : '');
+      item.innerHTML = `<i class="item-icon ${iconClass}"></i><span class="item-label">${navLabel}</span><span class="item-toggle">✓</span>`;
+
+      item.addEventListener('click', async () => {
+        const isPinado = item.classList.contains('is-pinned');
+        if (isPinado) {
+          // Remover: encontra o botão no container
+          const btnExistente = container.querySelector(`[data-nav-key="${CSS.escape(navKey)}"]`);
+          if (btnExistente) {
+            const id = parseInt(btnExistente.dataset.id, 10);
+            _badgeObservers.get(navKey)?.disconnect();
+            _badgeObservers.delete(navKey);
+            await removerAtalho(id, btnExistente);
+          }
+          item.classList.remove('is-pinned');
+        } else {
+          // Adicionar
+          const atalho = await salvarAtalho(navKey, navLabel, navSelector, iconClass);
+          if (atalho) {
+            container.appendChild(criarBotaoAtalho(atalho));
+            item.classList.add('is-pinned');
+          }
+        }
+      });
+
+      modalList.appendChild(item);
+    });
+
+    modal.hidden = false;
+  }
+
+  function fecharModalGerenciar() {
+    if (modal) modal.hidden = true;
+  }
+
+  if (btnGerenciar) btnGerenciar.addEventListener('click', abrirModalGerenciar);
+  if (btnFecharModal) btnFecharModal.addEventListener('click', fecharModalGerenciar);
+  // Fechar ao clicar no overlay (fora do card)
+  if (modal) {
+    modal.addEventListener('click', (e) => {
+      if (e.target === modal) fecharModalGerenciar();
+    });
   }
 
   // ── Drag & Drop nos itens do menu lateral ──

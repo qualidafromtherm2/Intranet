@@ -1,7 +1,56 @@
 // routes/engenharia.js
 const express = require('express');
+const https   = require('https');
 const router = express.Router();
 const { createClient } = require('@supabase/supabase-js');
+
+const IAPP_BASE = 'https://api.iniciativaaplicativos.com.br/api';
+
+/**
+ * Faz uma requisição GET à API IAPP.
+ * @param {string} path  ex: '/engenharia/fichas/lista'
+ * @param {object} params  query string params (filtros, ordenação, etc.)
+ */
+function iappGet(path, params = {}) {
+  return new Promise((resolve, reject) => {
+    const token  = process.env.IAPP_TOKEN;
+    const secret = process.env.IAPP_SECRET;
+    if (!token || !secret) {
+      return reject(new Error('IAPP_TOKEN e IAPP_SECRET não configurados no .env'));
+    }
+    const qs = new URLSearchParams(params).toString();
+    const url = new URL(`${IAPP_BASE}${path}${qs ? '?' + qs : ''}`);
+    const options = {
+      hostname: url.hostname,
+      path: url.pathname + url.search,
+      method: 'GET',
+      headers: {
+        'token': token,
+        'secret': secret,
+        'Content-Type': 'application/json'
+      }
+    };
+    const req = https.request(options, (resp) => {
+      let body = '';
+      resp.on('data', chunk => { body += chunk; });
+      resp.on('end', () => {
+        try {
+          const json = JSON.parse(body);
+          if (resp.statusCode >= 400) {
+            const err = new Error(json.message || `HTTP ${resp.statusCode}`);
+            err.status = resp.statusCode;
+            return reject(err);
+          }
+          resolve(json);
+        } catch (e) {
+          reject(new Error(`Resposta inválida da API IAPP: ${body.slice(0, 200)}`));
+        }
+      });
+    });
+    req.on('error', reject);
+    req.end();
+  });
+}
 
 function getSupabase() {
   return createClient(
@@ -241,6 +290,185 @@ module.exports = (pool) => {
       res.json({ ok: true, registros: Array.from(codesMap.values()) });
     } catch (e) {
       console.error('[GET /api/engenharia/codigos-erro] erro:', e);
+      res.status(500).json({ error: e.message || String(e) });
+    } finally {
+      client.release();
+    }
+  });
+
+  // GET /api/engenharia/codigos-erro/exportar-xls — exporta tabela completa em XLS
+  router.get('/codigos-erro/exportar-xls', async (req, res) => {
+    const client = await pool.connect();
+    try {
+      const result = await client.query(
+        `SELECT
+           ce.codigo,
+           ca.analise,
+           cs.solucao_problema AS solucao,
+           ce.criado_por
+         FROM engenharia.codigos_erro ce
+         LEFT JOIN engenharia.codigo_analise ca ON ca.codigo_erro_id = ce.id
+         LEFT JOIN engenharia.codigo_solucao cs ON cs.codigo_analise_id = ca.id
+         ORDER BY ce.codigo ASC, ca.id ASC, cs.id ASC`
+      );
+
+      const XLSX = require('xlsx');
+      const rows = result.rows.map(r => ({
+        'Código':   r.codigo       || '',
+        'Análise':  r.analise      || '',
+        'Solução':  r.solucao      || '',
+        'Criado por': r.criado_por || ''
+      }));
+
+      const wb = XLSX.utils.book_new();
+      const ws = XLSX.utils.json_to_sheet(rows);
+      XLSX.utils.book_append_sheet(wb, ws, 'Codigos de Erro');
+
+      const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+      res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+      res.setHeader('Content-Disposition', 'attachment; filename="codigos_erro.xlsx"');
+      res.send(buf);
+    } catch (e) {
+      console.error('[GET /api/engenharia/codigos-erro/exportar-xls] erro:', e);
+      res.status(500).json({ error: e.message || String(e) });
+    } finally {
+      client.release();
+    }
+  });
+
+  // POST /api/engenharia/codigos-erro/:codigoErroId/reordenar-analises
+  // Body: { ordemIds: [id1, id2, ...] }  — IDs das análises RAIZ na nova ordem
+  router.post('/codigos-erro/:codigoErroId/reordenar-analises', async (req, res) => {
+    const codigoErroId = parseInt(req.params.codigoErroId);
+    const { ordemIds } = req.body;
+    if (!Array.isArray(ordemIds) || !ordemIds.length) {
+      return res.status(400).json({ error: 'ordemIds é obrigatório.' });
+    }
+    const client = await pool.connect();
+    try {
+      // Carrega todas as análises do código para ter os textos atuais
+      const { rows: todas } = await client.query(
+        'SELECT id, analise FROM engenharia.codigo_analise WHERE codigo_erro_id = $1',
+        [codigoErroId]
+      );
+      const textoMap = new Map(todas.map(a => [a.id, a.analise]));
+
+      // Mapeia: número raiz antigo → número raiz novo
+      const numMap = new Map();
+      for (let i = 0; i < ordemIds.length; i++) {
+        const rootId = parseInt(ordemIds[i]);
+        const texto = textoMap.get(rootId);
+        if (!texto) continue;
+        const m = String(texto).match(/^(\d+)/);
+        if (!m) continue;
+        numMap.set(m[1], String(i + 1));
+      }
+
+      // Pré-computa novos textos (substitui apenas o primeiro número do prefixo)
+      const updates = [];
+      for (const [id, texto] of textoMap) {
+        const m = String(texto).match(/^(\d+)/);
+        if (!m) continue;
+        const mainNum = m[1];
+        const newMainNum = numMap.get(mainNum);
+        if (!newMainNum || newMainNum === mainNum) continue;
+        const newTexto = texto.replace(/^\d+/, newMainNum);
+        updates.push({ id, newTexto });
+      }
+
+      if (updates.length) {
+        await client.query('BEGIN');
+        for (const { id, newTexto } of updates) {
+          await client.query(
+            'UPDATE engenharia.codigo_analise SET analise = $1 WHERE id = $2',
+            [newTexto, id]
+          );
+        }
+        await client.query('COMMIT');
+      }
+
+      res.json({ ok: true });
+    } catch (e) {
+      await client.query('ROLLBACK').catch(() => {});
+      console.error('[POST /api/engenharia/codigos-erro/reordenar-analises] erro:', e);
+      res.status(500).json({ error: e.message || String(e) });
+    } finally {
+      client.release();
+    }
+  });
+
+  // POST /api/engenharia/codigos-erro/:codigoErroId/reordenar-subanalises
+  // Body: { rootAnaliseId: number, ordemIds: [id1, id2, ...] }
+  // Renumera sub-itens (ex: 5.1, 5.2) conforme nova ordem
+  router.post('/codigos-erro/:codigoErroId/reordenar-subanalises', async (req, res) => {
+    const codigoErroId = parseInt(req.params.codigoErroId);
+    const { rootAnaliseId, ordemIds } = req.body;
+    if (!rootAnaliseId || !Array.isArray(ordemIds) || !ordemIds.length) {
+      return res.status(400).json({ error: 'rootAnaliseId e ordemIds são obrigatórios.' });
+    }
+    const client = await pool.connect();
+    try {
+      // Busca o texto da análise raiz para extrair o prefixo numérico (ex: "5")
+      const { rows: [root] } = await client.query(
+        'SELECT analise FROM engenharia.codigo_analise WHERE id = $1',
+        [rootAnaliseId]
+      );
+      if (!root) return res.status(404).json({ error: 'Análise raiz não encontrada.' });
+      const rootPrefMatch = String(root.analise).match(/^(\d+)/);
+      if (!rootPrefMatch) return res.status(400).json({ error: 'Análise raiz não tem prefixo numérico.' });
+      const rootNum = rootPrefMatch[1]; // ex: "5"
+
+      // Carrega todas as análises filhas (diretas e indiretas) do código para ter textos
+      const { rows: todas } = await client.query(
+        'SELECT id, analise FROM engenharia.codigo_analise WHERE codigo_erro_id = $1',
+        [codigoErroId]
+      );
+      const textoMap = new Map(todas.map(a => [a.id, a.analise]));
+
+      // Monta mapa: sub-número antigo → novo (ex: "5.2" → "5.1")
+      const numMap = new Map();
+      for (let i = 0; i < ordemIds.length; i++) {
+        const subId = parseInt(ordemIds[i]);
+        const texto = textoMap.get(subId);
+        if (!texto) continue;
+        const m = String(texto).match(/^(\d+\.\d+)/);
+        if (!m) continue;
+        numMap.set(m[1], `${rootNum}.${i + 1}`);
+      }
+
+      // Atualiza todas as análises afetadas (filhas diretas e seus sub-filhos)
+      const updates = [];
+      for (const [id, texto] of textoMap) {
+        // prefixo do item começa com rootNum. seguido de dígito
+        const m = String(texto).match(/^(\d+\.\d+)/);
+        if (!m) continue;
+        const subPref = m[1];
+        const parentSubPref = subPref; // pode ser "5.2" ou parte de "5.2.1"
+        // encontra o sub-número de nível 2 deste item (ex: "5.2" em "5.2.1 texto")
+        const nivel2Match = String(texto).match(/^(\d+\.\d+)/);
+        if (!nivel2Match) continue;
+        const nivel2Old = nivel2Match[1];
+        const nivel2New = numMap.get(nivel2Old);
+        if (!nivel2New) continue;
+        const newTexto = texto.replace(nivel2Old, nivel2New);
+        if (newTexto !== texto) updates.push({ id, newTexto });
+      }
+
+      if (updates.length) {
+        await client.query('BEGIN');
+        for (const { id, newTexto } of updates) {
+          await client.query(
+            'UPDATE engenharia.codigo_analise SET analise = $1 WHERE id = $2',
+            [newTexto, id]
+          );
+        }
+        await client.query('COMMIT');
+      }
+
+      res.json({ ok: true });
+    } catch (e) {
+      await client.query('ROLLBACK').catch(() => {});
+      console.error('[POST /api/engenharia/codigos-erro/reordenar-subanalises] erro:', e);
       res.status(500).json({ error: e.message || String(e) });
     } finally {
       client.release();
@@ -622,6 +850,35 @@ module.exports = (pool) => {
     } catch (e) {
       console.error('[DELETE /entidade-arquivo]', e);
       res.status(500).json({ error: e.message });
+    }
+  });
+
+  // ─────────────────────────────────────────────────────────
+  // GET /api/engenharia/fichas/lista — proxy para API iApp
+  // Query aceita: identificacao, descricao, status, modelo,
+  //               page, limit, order, direction
+  // ─────────────────────────────────────────────────────────
+  router.get('/fichas/lista', async (req, res) => {
+    try {
+      const params = {};
+      const allowed = [
+        'identificacao', 'descricao', 'identificacao_produto', 'status',
+        'modelo', 'etapa', 'page', 'limit', 'order', 'direction'
+      ];
+      for (const k of allowed) {
+        if (req.query[k] !== undefined && req.query[k] !== '') {
+          params[k] = req.query[k];
+        }
+      }
+      const data = await iappGet('/engenharia/fichas/lista', params);
+      console.log('[GET /api/engenharia/fichas/lista] chaves do retorno iApp:', Object.keys(data), '| qtd response:', Array.isArray(data.response) ? data.response.length : 'N/A');
+      if (data.success === false) {
+        return res.status(400).json({ error: data.message || data.code || 'Erro iApp', iappCode: data.code });
+      }
+      res.json(data);
+    } catch (e) {
+      console.error('[GET /api/engenharia/fichas/lista] erro:', e.message);
+      res.status(e.status || 500).json({ error: e.message });
     }
   });
 

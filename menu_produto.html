@@ -60,12 +60,7 @@
     <div class="boot-msg">Carregando…</div>
   </div>
 
-  <div class="dark-light">
-    <svg viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5" fill="none"
-         stroke-linecap="round" stroke-linejoin="round">
-      <path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z" />
-    </svg>
-  </div>
+
 
   <!-- Zona de atalhos do usuário (drag-and-drop a partir do menu lateral) -->
   <div id="floatingShortcutZone" class="floating-shortcut-zone">
@@ -73,6 +68,31 @@
     <div id="shortcutDropTarget" class="shortcut-drop-target" title="Arraste um item do menu lateral aqui para criar um atalho">
       <i class="fa-solid fa-thumbtack"></i>
       <span>Solte aqui</span>
+    </div>
+  </div>
+
+  <!-- Botão gerenciar atalhos (fixo, substitui posição do toggle de tema) -->
+  <button id="btnGerenciarAtalhos" type="button" class="shortcut-manage-btn shortcut-manage-btn--fixed" title="Gerenciar atalhos">
+    <i class="fa-solid fa-sliders"></i>
+  </button>
+
+  <!-- Modal de gerenciamento de atalhos -->
+  <div id="modalGerenciarAtalhos" class="shortcut-modal-overlay" hidden>
+    <div class="shortcut-modal">
+      <div class="shortcut-modal-header">
+        <span><i class="fa-solid fa-thumbtack" style="margin-right:8px;"></i>Gerenciar atalhos</span>
+        <button type="button" id="btnFecharModalAtalhos" class="shortcut-modal-close" aria-label="Fechar">×</button>
+      </div>
+      <p class="shortcut-modal-hint">Marque os itens que deseja fixar como atalho rápido.</p>
+      <div class="shortcut-modal-theme-row">
+        <div class="dark-light dark-light-inline" title="Alternar modo claro/escuro" role="button" tabindex="0">
+          <svg viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5" fill="none"
+               stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z" />
+          </svg>
+        </div>
+      </div>
+      <div id="shortcutModalList" class="shortcut-modal-list"></div>
     </div>
   </div>
 
@@ -142,7 +162,6 @@
     </div>
     <i id="cart-icon" class="fa-solid fa-shopping-bag" title="Painel de compras" style="display:none;"></i>
     <i id="links-icon" class="fa-solid fa-link" title="Links rápidos"></i>
-    <i id="print-icon" class="fa-solid fa-print" title="Imprimir" style="display:none;"></i>
     <i id="config-icon" class="fa-solid fa-rotate-right" title="Atualização disponível - clique para limpar cache e atualizar" style="cursor:pointer;display:none;"></i>
     <img id="profile-icon" class="profile-img"
          src="https://pxhbginkisinegzupqcy.supabase.co/storage/v1/object/public/compras-anexos/profile-photos/Captura%20de%20tela%20de%202026-01-29%2015-12-33.png"
@@ -431,6 +450,18 @@
        data-nav-selector="#menu-guardar-materiais">
       <i class="fa-solid fa-dolly" style="margin-right:8px;"></i>
       Guardar materiais
+    </a>
+
+    <a href="#"
+       id="menu-identificacao-produto"
+       class="menu-link"
+       data-nav-key="side:log:identificacao-produto"
+       data-nav-parent="side:log"
+       data-nav-pos="side"
+       data-nav-label="Identificação do produto"
+       data-nav-selector="#menu-identificacao-produto">
+      <i class="fa-solid fa-print" style="margin-right:8px;"></i>
+      Identificação do produto
     </a>
   </div>
 </div>
@@ -1324,7 +1355,7 @@
 
                 <div style="background:transparent;border:none;border-radius:0;padding:0;display:flex;flex-direction:column;gap:10px;">
                   <label id="carrinhoCompraAutorizadaWrapper" style="display:flex;align-items:center;gap:8px;cursor:pointer;padding:10px;background:#0f172a;border:1px solid #334155;border-radius:6px;">
-                    <input type="checkbox" id="carrinhoCompraAutorizada" style="width:18px;height:18px;cursor:pointer;">
+                    <input type="checkbox" id="carrinhoCompraAutorizada" checked style="width:18px;height:18px;cursor:pointer;">
                     <span style="font-weight:700;color:#e5e7eb;font-size:12px;">Compra já autorizada</span>
                   </label>
 
@@ -2668,6 +2699,14 @@
                         <button id="sacPeriodo12mBtn" class="content-button" type="button" style="padding:6px 10px;font-size:12px;background:#1f2937;color:#cbd5e1;">12 meses</button>
                         <button id="sacPeriodoTudoBtn" class="content-button" type="button" style="padding:6px 10px;font-size:12px;background:#1f2937;color:#cbd5e1;">Tudo</button>
                       </div>
+                      <button id="sacRelatorioTipoGraficoBtn" class="content-button" type="button" style="background:#1f2937;color:#cbd5e1;gap:6px;">
+                        <i class="fa-solid fa-chart-pie"></i>
+                        <span>Modo pizza</span>
+                      </button>
+                      <button id="sacRelatorioModoValorBtn" class="content-button" type="button" style="background:#1f2937;color:#cbd5e1;gap:6px;">
+                        <i class="fa-solid fa-dollar-sign"></i>
+                        <span>Modo valor</span>
+                      </button>
                       <button id="sacRelatorioVoltarBtn" class="content-button" type="button" style="background:#334155;color:#fff;gap:6px;">
                         <i class="fa-solid fa-arrow-left"></i>
                         <span>Voltar</span>
@@ -2677,14 +2716,14 @@
                         <span>Baixar relatório</span>
                       </button>
                     </div>
-                    <div style="margin-bottom:14px;color:#94a3b8;font-size:12px;font-weight:700;letter-spacing:.3px;">Gráfico 1 - Quantidade por Usuário</div>
+                    <div id="sacGrafico1Titulo" style="margin-bottom:14px;color:#94a3b8;font-size:12px;font-weight:700;letter-spacing:.3px;">Gráfico 1 - Quantidade por Usuário</div>
                     <div style="position:relative;height:320px;max-height:320px;min-height:320px;overflow:hidden;">
                       <canvas id="sacRelatorioGraficoCanvas" style="width:100%;height:100%;"></canvas>
                     </div>
                     <div id="sacRelatorioGraficoVazio" style="display:none;text-align:center;color:#94a3b8;font-size:15px;margin-top:12px;">Nenhum dado encontrado para o gráfico por usuário.</div>
 
                     <div style="margin-top:22px;margin-bottom:14px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
-                      <div style="color:#94a3b8;font-size:12px;font-weight:700;letter-spacing:.3px;">Gráfico 2 - Conteúdo (Itens x Quantidade)</div>
+                      <div id="sacGrafico2Titulo" style="color:#94a3b8;font-size:12px;font-weight:700;letter-spacing:.3px;">Gráfico 2 - Conteúdo (Itens x Quantidade)</div>
                       <div style="display:flex;align-items:center;gap:8px;margin-left:auto;">
                         <label for="sacRelatorioConteudoUsuarioSelect" style="color:#94a3b8;font-size:12px;font-weight:600;">Usuário:</label>
                         <select id="sacRelatorioConteudoUsuarioSelect" style="padding:6px 10px;border:1px solid rgba(148,163,184,0.35);border-radius:8px;background:#0f172a;color:#e2e8f0;font-size:12px;min-width:180px;">
@@ -2723,7 +2762,7 @@
                               <th>Usuário</th>
                               <th>Conteúdo</th>
                               <th>Quantidade</th>
-                              <th>Observação</th>
+                              <th>OS</th>
                             </tr>
                           </thead>
                           <tbody id="sacRelatorioDrilldownBody">
@@ -9343,9 +9382,59 @@
         <i class="fa-solid fa-magnifying-glass" style="color:#94a3b8;"></i>
         <input id="etiquetasBuscaInput" type="text" placeholder="Pesquisar por lote, código ou descrição..." autocomplete="off" />
       </div>
+      <!-- Toggle grade / lista -->
+      <div class="etq-view-toggle">
+      <!-- Botão único de configurações + dropdown -->
+      <div class="etq-config-menu-wrap" id="etqConfigMenuWrap">
+        <button id="etqBtnConfig" class="etq-view-btn" title="Configurações">
+          <i class="fa-solid fa-sliders"></i>
+        </button>
+        <div id="etqConfigDropdown" class="etq-config-dropdown" style="display:none">
+          <div class="etq-cfg-section-label">Visualização</div>
+          <div class="etq-cfg-view-row">
+            <button id="etqBtnViewLista" class="etq-cfg-view-btn active" title="Visualização em lista">
+              <i class="fa-solid fa-list"></i> Lista
+            </button>
+            <button id="etqBtnViewGrade" class="etq-cfg-view-btn" title="Visualização em grade">
+              <i class="fa-solid fa-grip"></i> Grade
+            </button>
+          </div>
+          <button id="etqBtnVerOcultos" class="etq-cfg-item">
+            <i class="fa-solid fa-eye-slash"></i>
+            <span>Exibir itens ocultos</span>
+          </button>
+          <div class="etq-cfg-divider"></div>
+          <div class="etq-cfg-section-label">Agente de Impressão</div>
+          <button id="etqBtnBaixarAgente" class="etq-cfg-item" style="color:#4ade80">
+            <i class="fa-solid fa-download"></i>
+            <span>Baixar instalador (Windows)</span>
+          </button>
+          <button id="etqBtnConfigAgente" class="etq-cfg-item" style="color:#60a5fa">
+            <i class="fa-solid fa-display"></i>
+            <span>Abrir configuração do agente</span>
+          </button>
+          <button id="etqBtnConfigImpressoras" class="etq-cfg-item" style="color:#f59e0b">
+            <i class="fa-solid fa-print"></i>
+            <span>Configurar impressoras</span>
+          </button>
+        </div>
+      </div>
+      </div>
       <button id="etiquetasImprimirSelecionadas" class="etiquetas-btn-imprimir-sel" title="Imprimir etiquetas selecionadas" style="display:none;">
         <i class="fa-solid fa-print"></i>
         <span id="etiquetasSelCount">0</span> selecionada(s)
+      </button>
+    </div>
+
+    <!-- Linha do listbox de impressora -->
+    <div class="etq-impressora-row" id="etqImpressoraRow">
+      <i class="fa-solid fa-print" style="color:#a78bfa;font-size:.85rem;flex-shrink:0;"></i>
+      <label for="etqListboxImpressora" style="color:#94a3b8;font-size:.8rem;white-space:nowrap;flex-shrink:0;">Impressora ativa:</label>
+      <select id="etqListboxImpressora" class="etq-listbox-impressora">
+        <option value="">— nenhuma selecionada —</option>
+      </select>
+      <button id="etqBtnRefreshImpressoras" class="etq-view-btn" title="Atualizar impressoras online" style="flex-shrink:0;">
+        <i class="fa-solid fa-rotate"></i>
       </button>
     </div>
 
@@ -9355,6 +9444,29 @@
     <!-- Grid de cards -->
     <div id="etiquetasModalGrid" class="etiquetas-grid">
       <div class="etiquetas-loading"><i class="fa-solid fa-spinner fa-spin"></i> Carregando...</div>
+    </div>
+  </div>
+</div>
+
+<!-- Modal de configuração de impressoras (por usuário) -->
+<div id="etqConfigImpressorasModal" style="display:none;position:fixed;inset:0;z-index:2200;background:rgba(0,0,0,.75);backdrop-filter:blur(5px);align-items:center;justify-content:center;">
+  <div class="etq-cfg-impr-box">
+    <div class="etq-cfg-impr-header">
+      <div style="display:flex;align-items:center;gap:10px;">
+        <i class="fa-solid fa-sliders" style="color:#f59e0b;font-size:1.1rem;"></i>
+        <h3 style="margin:0;font-size:1rem;font-weight:700;color:#f1f5f9;">Configurar impressoras</h3>
+      </div>
+      <button id="etqCfgImprFechar" class="etiquetas-modal-close" title="Fechar">&times;</button>
+    </div>
+    <div class="etq-cfg-impr-desc">
+      Marque as impressoras que devem aparecer no listbox. A impressora <strong>padrão</strong> aparece sempre no topo.
+    </div>
+    <div id="etqCfgImprLista" class="etq-cfg-impr-lista">
+      <div style="color:#64748b;text-align:center;padding:24px;"><i class="fa-solid fa-spinner fa-spin"></i> Buscando impressoras online...</div>
+    </div>
+    <div class="etq-cfg-impr-footer">
+      <button id="etqCfgImprSalvar" class="etq-cfg-impr-btn-salvar"><i class="fa-solid fa-floppy-disk"></i> Salvar</button>
+      <button id="etqCfgImprCancelar" class="etq-cfg-impr-btn-cancelar">Cancelar</button>
     </div>
   </div>
 </div>
@@ -9474,7 +9586,7 @@
   <!-- Interceptor de sessão: precisa carregar ANTES de qualquer módulo que faça fetch -->
   <script src="/public/js/sessao_resiliente.js?v=20260422a"></script>
   <script type="module" src="login/login.js"></script>
-  <script type="module" src="menu_produto.js?v=20260513b"></script>
+  <script type="module" src="menu_produto.js?v=20260515a"></script>
   
   <script type="module" src="./requisicoes_omie/filtro_produto.js"></script>
   <script type="module" src="./requisicoes_omie/ListarProdutos.js"></script>
@@ -9596,6 +9708,7 @@
   .etq-card-desc { font-size: .72rem; color: #94a3b8;
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .etq-card-lote { font-size: .68rem; color: #64748b; }
+  .etq-card-qty  { font-size: .68rem; color: #94a3b8; }
   .etq-card-actions {
     padding: 0 10px 10px; display: flex; gap: 6px;
   }
@@ -9617,6 +9730,225 @@
     display: flex; align-items: center; justify-content: center; gap: 4px;
   }
   .etq-btn-multiplo:hover { background: #2563eb; color: #fff; border-color: #2563eb; }
+
+  .etq-btn-ocultar {
+    flex: 0 0 auto; padding: 5px 7px; border: 1px solid #334155; border-radius: 6px;
+    background: #1e293b; color: #94a3b8; font-size: .75rem;
+    cursor: pointer; transition: background .2s, color .2s;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .etq-btn-ocultar:hover { background: #b45309; color: #fef3c7; border-color: #b45309; }
+
+  /* Cards impressos (impressa = true) */
+  .etq-card--impressa {
+    border: 1px solid #166534;
+    background: linear-gradient(135deg, #052e16 0%, #0f172a 100%);
+    opacity: .92;
+  }
+  .etq-badge-impressa {
+    display: inline-flex; align-items: center; gap: 3px;
+    background: #166534; color: #4ade80; font-size: .68rem;
+    font-weight: 700; border-radius: 4px; padding: 1px 5px; margin-left: 4px;
+  }
+  .etq-btn-reimprimir {
+    flex: 1; padding: 5px; border: 1px solid #1d4ed8; border-radius: 6px;
+    background: #1e3a5f; color: #93c5fd; font-size: .75rem;
+    cursor: pointer; transition: background .2s, color .2s;
+    display: flex; align-items: center; justify-content: center; gap: 4px;
+  }
+  .etq-btn-reimprimir:hover { background: #1d4ed8; color: #fff; border-color: #1d4ed8; }
+  .etq-btn-armazenar {
+    flex: 1; padding: 5px; border: 1px solid #166534; border-radius: 6px;
+    background: #14532d; color: #4ade80; font-size: .75rem;
+    cursor: pointer; transition: background .2s, color .2s;
+    display: flex; align-items: center; justify-content: center; gap: 4px;
+  }
+  .etq-btn-armazenar:hover { background: #166534; color: #fff; border-color: #166534; }
+
+  /* Botões de alternância grade/lista */
+  .etq-view-toggle {
+    display: flex; gap: 2px;
+    background: #0f172a; border: 1px solid #334155; border-radius: 8px;
+    padding: 2px;
+  }
+  .etq-view-btn {
+    background: none; border: none; color: #64748b;
+    width: 32px; height: 32px; border-radius: 6px;
+    cursor: pointer; font-size: .9rem;
+    display: flex; align-items: center; justify-content: center;
+    transition: background .15s, color .15s;
+  }
+  .etq-view-btn:hover { color: #a78bfa; }
+  .etq-view-btn.active { background: #7c3aed; color: #fff; }
+  #etqBtnVerOcultos.active { background: #b45309; color: #fef3c7; }
+
+  /* ── Dropdown de configurações da toolbar ───────────────────────────── */
+  .etq-config-menu-wrap { position: relative; }
+  #etqBtnConfig { color: #a78bfa; }
+  #etqBtnConfig.open { background: #7c3aed; color: #fff; }
+  .etq-config-dropdown {
+    position: absolute; right: 0; top: calc(100% + 8px); z-index: 9999;
+    background: #1e293b; border: 1px solid #334155; border-radius: 10px;
+    padding: 10px 8px; min-width: 220px;
+    box-shadow: 0 8px 32px rgba(0,0,0,.45);
+    display: flex; flex-direction: column; gap: 2px;
+  }
+  .etq-cfg-section-label {
+    font-size: .68rem; color: #64748b; text-transform: uppercase;
+    letter-spacing: .07em; padding: 4px 8px 2px;
+  }
+  .etq-cfg-divider { border-top: 1px solid #334155; margin: 6px 0; }
+  .etq-cfg-view-row { display: flex; gap: 4px; padding: 2px 8px 6px; }
+  .etq-cfg-view-btn {
+    flex: 1; display: flex; align-items: center; justify-content: center; gap: 5px;
+    background: #0f172a; border: 1px solid #334155; border-radius: 6px;
+    color: #94a3b8; font-size: .8rem; padding: 6px 4px; cursor: pointer;
+    transition: background .15s, color .15s, border-color .15s;
+  }
+  .etq-cfg-view-btn:hover { background: #334155; color: #e2e8f0; }
+  .etq-cfg-view-btn.active { background: #7c3aed; border-color: #7c3aed; color: #fff; }
+  .etq-cfg-item {
+    display: flex; align-items: center; gap: 10px;
+    background: none; border: none; border-radius: 7px;
+    color: #cbd5e1; font-size: .83rem; padding: 8px 10px;
+    cursor: pointer; width: 100%; text-align: left;
+    transition: background .15s, color .15s;
+  }
+  .etq-cfg-item:hover { background: #334155; color: #f1f5f9; }
+  .etq-cfg-item i { width: 16px; text-align: center; flex-shrink: 0; }
+  .etq-cfg-item.active { color: #fef3c7; background: rgba(180,83,9,.25); }
+  #etqBtnImpressora { width: auto; min-width: 32px; padding: 0 6px; gap: 3px; color: #f87171; }
+  #etqBtnImpressora.etq-pref-set { color: #a78bfa; }
+  #etqBtnImpressora:hover { color: #c4b5fd; }
+  .etq-pref-label { font-size: .65rem; max-width: 70px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  /* ── Linha do listbox de impressora ─────────────────────────────────── */
+  .etq-impressora-row {
+    display: flex; align-items: center; gap: 8px;
+    padding: 8px 20px; border-bottom: 1px solid #1e293b;
+    background: #0f172a;
+  }
+  .etq-listbox-impressora {
+    flex: 1; background: #1e293b; color: #f1f5f9;
+    border: 1px solid #334155; border-radius: 7px;
+    padding: 5px 10px; font-size: .85rem; outline: none;
+    cursor: pointer; transition: border-color .2s;
+  }
+  .etq-listbox-impressora:focus { border-color: #7c3aed; }
+  .etq-listbox-impressora option { background: #1e293b; }
+
+  /* ── Modal de configuração de impressoras ────────────────────────────── */
+  .etq-cfg-impr-box {
+    background: #1e293b; border: 1px solid #334155; border-radius: 12px;
+    width: 90vw; max-width: 480px; display: flex; flex-direction: column;
+    box-shadow: 0 20px 60px rgba(0,0,0,.6); overflow: hidden;
+  }
+  .etq-cfg-impr-header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 14px 18px; border-bottom: 1px solid #334155; background: #0f172a;
+  }
+  .etq-cfg-impr-desc {
+    padding: 10px 18px; font-size: .8rem; color: #94a3b8;
+    border-bottom: 1px solid #1e293b;
+  }
+  .etq-cfg-impr-desc strong { color: #fbbf24; }
+  .etq-cfg-impr-lista {
+    max-height: 50vh; overflow-y: auto; padding: 10px 18px;
+    display: flex; flex-direction: column; gap: 6px;
+  }
+  .etq-cfg-impr-item {
+    display: flex; align-items: center; gap: 10px;
+    padding: 9px 12px; border-radius: 8px;
+    border: 1px solid #334155; background: #0f172a;
+    transition: border-color .2s;
+  }
+  .etq-cfg-impr-item:hover { border-color: #475569; }
+  .etq-cfg-impr-item input[type="checkbox"] {
+    width: 16px; height: 16px; accent-color: #7c3aed; cursor: pointer; flex-shrink: 0;
+  }
+  .etq-cfg-impr-item-info { flex: 1; min-width: 0; }
+  .etq-cfg-impr-item-nome {
+    font-size: .88rem; color: #f1f5f9; white-space: nowrap;
+    overflow: hidden; text-overflow: ellipsis;
+  }
+  .etq-cfg-impr-item-pc { font-size: .72rem; color: #64748b; }
+  .etq-cfg-impr-btn-padrao {
+    background: none; border: 1px solid #334155; border-radius: 6px;
+    color: #64748b; font-size: .75rem; padding: 3px 8px; cursor: pointer;
+    white-space: nowrap; transition: all .15s; flex-shrink: 0;
+  }
+  .etq-cfg-impr-btn-padrao:hover { border-color: #fbbf24; color: #fbbf24; }
+  .etq-cfg-impr-btn-padrao.padrao-ativo {
+    background: #78350f; border-color: #fbbf24; color: #fbbf24; font-weight: 600;
+  }
+  .etq-cfg-impr-footer {
+    display: flex; gap: 8px; justify-content: flex-end;
+    padding: 12px 18px; border-top: 1px solid #334155; background: #0f172a;
+  }
+  .etq-cfg-impr-btn-salvar {
+    background: #7c3aed; color: #fff; border: none; border-radius: 7px;
+    padding: 7px 16px; font-size: .88rem; font-weight: 600; cursor: pointer;
+    transition: background .2s;
+  }
+  .etq-cfg-impr-btn-salvar:hover { background: #6d28d9; }
+  .etq-cfg-impr-btn-cancelar {
+    background: #374151; color: #94a3b8; border: none; border-radius: 7px;
+    padding: 7px 14px; font-size: .88rem; cursor: pointer; transition: background .2s;
+  }
+  .etq-cfg-impr-btn-cancelar:hover { background: #4b5563; }
+  .etq-cfg-impr-alias-input {
+    width: 100%; margin-top: 4px; background: #1e293b; color: #f1f5f9;
+    border: 1px solid #334155; border-radius: 5px; padding: 4px 8px;
+    font-size: .78rem; outline: none; transition: border-color .2s;
+  }
+  .etq-cfg-impr-alias-input:focus { border-color: #7c3aed; }
+  .etq-cfg-impr-alias-input::placeholder { color: #475569; font-style: italic; }
+
+  /* ── Modo lista ───────────────────────────────────────────────────────── */
+  .etiquetas-grid.view-list {
+    display: flex; flex-direction: column; gap: 6px;
+    padding: 12px 20px 16px;
+    grid-template-columns: unset;
+  }
+  .etiquetas-grid.view-list .etq-card {
+    flex-direction: row; align-items: center;
+    background: #0f172a; border-radius: 8px;
+    min-height: 48px; padding: 0;
+  }
+  .etiquetas-grid.view-list .etq-card-thumbnail { display: none; }
+  .etiquetas-grid.view-list .etq-card-footer {
+    flex: 1; flex-direction: row; align-items: center; gap: 10px;
+    padding: 8px 12px; flex-wrap: wrap; min-width: 0;
+  }
+  .etiquetas-grid.view-list .etq-card-cod {
+    font-size: .82rem; font-weight: 700; white-space: nowrap; flex-shrink: 0;
+  }
+  .etiquetas-grid.view-list .etq-card-desc {
+    flex: 1; min-width: 80px; font-size: .8rem; white-space: nowrap;
+    overflow: hidden; text-overflow: ellipsis;
+  }
+  .etiquetas-grid.view-list .etq-card-lote {
+    font-size: .75rem; white-space: nowrap; flex-shrink: 0;
+  }
+  .etiquetas-grid.view-list .etq-card-qty {
+    font-size: .75rem; color: #cbd5e1; white-space: nowrap; flex-shrink: 0;
+  }
+  .etiquetas-grid.view-list .etq-card-actions {
+    padding: 6px 8px 6px 0; gap: 4px; flex-shrink: 0;
+  }
+  .etiquetas-grid.view-list .etq-btn-imprimir-unit,
+  .etiquetas-grid.view-list .etq-btn-multiplo,
+  .etiquetas-grid.view-list .etq-btn-ocultar,
+  .etiquetas-grid.view-list .etq-btn-reimprimir,
+  .etiquetas-grid.view-list .etq-btn-armazenar {
+    padding: 4px 10px; font-size: .72rem;
+  }
+  .etiquetas-grid.view-list .etq-btn-ocultar {
+    padding: 4px 8px;
+  }
+  .etiquetas-grid.view-list .etq-check-sel {
+    margin-left: 10px; flex-shrink: 0;
+  }
 
   /* Sub-modal Múltiplo */
   .etq-multiplo-box {
