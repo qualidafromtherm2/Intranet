@@ -15,7 +15,7 @@ const fs     = require('fs');
 const os     = require('os');
 const path   = require('path');
 
-const AGENT_VERSION = '2.4';
+const AGENT_VERSION = '2.5';
 const PORT       = 9200;
 const TASK_NAME  = 'AgenteImpressaoSGF';
 const EXE_NAME   = 'agente-impressao.exe';
@@ -757,19 +757,7 @@ function runService() {
   log(`=== Agente SGF v${AGENT_VERSION} iniciando (modo serviço) ===`);
   log(`INSTALL_DIR: ${INSTALL_DIR}`);
 
-  // ─── Heartbeat ─────────────────────────────────────────────────────────────
-  function sendHeartbeat() {
-    const c = readConfig();
-    const pc = c.pcName || os.hostname();
-    apiRequest('POST', '/api/etiquetas/agente/heartbeat',
-      { printer: c.printer || '', version: AGENT_VERSION, host: os.hostname(),
-        pcName: pc, printers: state.printers || [] },
-      c.agentToken, () => {});
-  }
-  sendHeartbeat();                          // imediato ao iniciar
-  setInterval(sendHeartbeat, 30000);        // a cada 30s
-
-  // Estado em memória
+  // Estado em memória (declarado antes do heartbeat para evitar TDZ)
   const state = {
     polling: false,
     lastPrint: null,
@@ -785,6 +773,18 @@ function runService() {
     todayPrints: [],        // histórico do dia
     todayDate: new Date().toDateString(),
   };
+
+  // ─── Heartbeat ─────────────────────────────────────────────────────────────
+  function sendHeartbeat() {
+    const c = readConfig();
+    const pc = c.pcName || os.hostname();
+    apiRequest('POST', '/api/etiquetas/agente/heartbeat',
+      { printer: c.printer || '', version: AGENT_VERSION, host: os.hostname(),
+        pcName: pc, printers: state.printers || [] },
+      c.agentToken, () => {});
+  }
+  sendHeartbeat();                          // imediato ao iniciar
+  setInterval(sendHeartbeat, 30000);        // a cada 30s
 
   // Carrega lista de impressoras na inicialização
   listarImpressoras(list => {
