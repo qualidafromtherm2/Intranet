@@ -51481,13 +51481,23 @@ function renderPreviewAssociacaoPedidoNfe(preview) {
                   <div style="font-size:11px;color:#334155;line-height:1.35;">${escapeHtml(String(item?.servico_produto_descricao || item?.nf_descricao_produto || ''))}</div>
                 </div>
                 <button type="button" class="assoc-servico-produto-btn" data-seq="${seq}" style="border:1px solid #38bdf8;background:#0284c7;color:#fff;border-radius:7px;padding:5px 8px;font-size:11px;font-weight:700;cursor:pointer;">Selecionar</button>
-              </div>` : `
+              </div>` : encontrou ? `
               <div class="assoc-pedido-draggable" data-seq="${seq}" draggable="true" style="display:flex;align-items:flex-start;gap:8px;padding:6px 8px;border:1px dashed #cbd5e1;border-radius:8px;background:#ffffff;cursor:grab;">
                 <i class="fa-solid fa-grip-vertical" style="margin-top:1px;color:#64748b;"></i>
                 <div style="display:flex;flex-direction:column;gap:2px;min-width:0;">
                   <div style="font-size:11px;font-weight:700;color:#0f172a;">${escapeHtml(String(item?.pedido_codigo_produto || '-'))}</div>
                   <div style="font-size:11px;color:#334155;line-height:1.35;max-width:320px;" title="${escapeHtml(String(item?.pedido_descricao_produto || '-'))}">${escapeHtml(String(item?.pedido_descricao_produto || '-'))}</div>
                 </div>
+              </div>` : `
+              <div style="display:flex;align-items:center;gap:8px;padding:6px 8px;border:1px dashed #fed7aa;border-radius:8px;background:#fff7ed;">
+                ${item?.produto_override && Number(item?.servico_produto_codigo_produto || 0) > 0 ? `
+                <div style="min-width:0;flex:1;">
+                  <div style="font-size:11px;font-weight:800;color:#9a3412;">${escapeHtml(String(item?.servico_produto_codigo || '-'))}</div>
+                  <div style="font-size:11px;color:#7c2d12;line-height:1.35;max-width:240px;" title="${escapeHtml(String(item?.servico_produto_descricao || ''))}">${escapeHtml(String(item?.servico_produto_descricao || ''))}</div>
+                </div>` : `
+                <i class="fa-solid fa-triangle-exclamation" style="color:#ea580c;font-size:12px;flex-shrink:0;"></i>
+                <span style="font-size:11px;color:#9a3412;flex:1;">Sem match — selecione o produto</span>`}
+                <button type="button" class="assoc-produto-override-btn" data-seq="${seq}" style="border:1px solid #fb923c;background:#ea580c;color:#fff;border-radius:7px;padding:5px 8px;font-size:11px;font-weight:700;cursor:pointer;white-space:nowrap;flex-shrink:0;">${item?.produto_override && Number(item?.servico_produto_codigo_produto || 0) > 0 ? 'Alterar' : 'Selecionar produto'}</button>
               </div>`}
             </td>
             <td style="padding:7px 8px;font-size:11px;color:${corQtd};background:${bgQtd};text-align:right;white-space:nowrap;">${
@@ -51579,6 +51589,9 @@ function renderPreviewAssociacaoPedidoNfe(preview) {
   previewConteudo.querySelectorAll('.assoc-servico-produto-btn').forEach((btn) => {
     btn.addEventListener('click', () => abrirModalProdutoServicoAssociacaoNfe(Number(btn.dataset.seq || 0)));
   });
+  previewConteudo.querySelectorAll('.assoc-produto-override-btn').forEach((btn) => {
+    btn.addEventListener('click', () => abrirModalProdutoServicoAssociacaoNfe(Number(btn.dataset.seq || 0)));
+  });
 }
 
 function abrirModalProdutoServicoAssociacaoNfe(seq) {
@@ -51630,6 +51643,7 @@ function abrirModalProdutoServicoAssociacaoNfe(seq) {
             item.servico_produto_codigo_produto = Number(btn.dataset.cp || 0) || null;
             item.servico_produto_codigo = btn.dataset.codigo || '';
             item.servico_produto_descricao = btn.dataset.desc || '';
+            if (!item.item_servico) item.produto_override = true;
           }
           modal.remove();
           renderPreviewAssociacaoPedidoNfe(window.__associarNfePreviewAtual?.preview || {});
@@ -51951,6 +51965,17 @@ async function confirmarAssociacaoPedidoNfeOmie() {
           nIdProdutoServico: Number(item?.servico_produto_codigo_produto || 0) || null,
           codigoProdutoServico: String(item?.servico_produto_codigo || item?.nf_codigo_produto || '').trim(),
           descricaoProdutoServico: String(item?.servico_produto_descricao || item?.nf_descricao_produto || '').trim(),
+          nQtde: Number(item?.nf_qtde || 0) || null,
+          cUnidade: String(item?.nf_unidade || '').trim().toUpperCase() || null
+        });
+        return;
+      }
+      if (item?.produto_override && Number(item?.servico_produto_codigo_produto || 0) > 0) {
+        itensOverrideMap.set(seq, {
+          n_sequencia: seq,
+          nIdProdutoServico: Number(item?.servico_produto_codigo_produto || 0) || null,
+          codigoProdutoServico: String(item?.servico_produto_codigo || '').trim(),
+          descricaoProdutoServico: String(item?.servico_produto_descricao || '').trim(),
           nQtde: Number(item?.nf_qtde || 0) || null,
           cUnidade: String(item?.nf_unidade || '').trim().toUpperCase() || null
         });

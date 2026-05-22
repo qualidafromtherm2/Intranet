@@ -31175,6 +31175,8 @@ app.post('/api/compras/pedidos-omie/nfe-associar-pedido', express.json(), async 
         const override = overrideMap.get(seq);
         const codItemOverride = Number(override?.nIdItPedidoExistente || 0);
         if (Number.isFinite(codItemOverride) && codItemOverride > 0) return false;
+        const idProdutoOverride = Number(override?.nIdProdutoServico || 0);
+        if (Number.isFinite(idProdutoOverride) && idProdutoOverride > 0) return false;
         return !Number.isFinite(Number(it?.pedido_n_cod_item || NaN));
       })
       : [];
