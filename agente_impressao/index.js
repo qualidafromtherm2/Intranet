@@ -1,6 +1,6 @@
 'use strict';
 /**
- * Agente de Impressão SGF v2.0
+ * Agente de Impressão SGF v2.6
  *
  * MODOS:
  *   (sem args)   → Instalador: copia para AppData, agenda tarefa, cria atalho, inicia serviço
@@ -15,7 +15,7 @@ const fs     = require('fs');
 const os     = require('os');
 const path   = require('path');
 
-const AGENT_VERSION = '2.5';
+const AGENT_VERSION = '2.6';
 const PORT       = 9200;
 const TASK_NAME  = 'AgenteImpressaoSGF';
 const EXE_NAME   = 'agente-impressao.exe';
@@ -1113,7 +1113,7 @@ function runService() {
 async function install() {
   const LINE = '═'.repeat(52);
   console.log(`\n╔${LINE}╗`);
-  console.log('║  Agente de Impressão SGF v2.0 — Instalador          ║');
+  console.log('║  Agente de Impressão SGF v2.6 — Instalador          ║');
   console.log(`╚${LINE}╝\n`);
 
   const step = msg => process.stdout.write(`  ► ${msg}... `);

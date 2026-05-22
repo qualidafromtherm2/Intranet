@@ -11689,7 +11689,7 @@ app.use('/vendor/xlsx', express.static(path.join(__dirname, 'node_modules/xlsx/d
 app.use('/agente-impressao', express.static(path.join(__dirname, 'agente_impressao')));
 
 // Retorna URL pública do instalador Windows + versão atual do agente
-const _AGENTE_VERSAO_ATUAL    = process.env.AGENTE_VERSAO || '2.5';
+const _AGENTE_VERSAO_ATUAL    = process.env.AGENTE_VERSAO || '2.6';
 const _AGENTE_EXE_URL_DEFAULT = process.env.AGENTE_EXE_URL
   || `https://pxhbginkisinegzupqcy.supabase.co/storage/v1/object/public/agente-impressao/agente-impressao-v${_AGENTE_VERSAO_ATUAL}.exe`;
 app.get('/api/etiquetas/agente-url', (req, res) => {
