@@ -31227,6 +31227,8 @@ app.post('/api/compras/pedidos-omie/nfe-associar-pedido', express.json(), async 
         if (Number.isFinite(codItemOverride) && codItemOverride > 0) return false;
         const idProdutoOverride = Number(override?.nIdProdutoServico || 0);
         if (Number.isFinite(idProdutoOverride) && idProdutoOverride > 0) return false;
+        // Itens de serviço (CFOP 5933/6933) usam ASSOCIAR-PRODUTO, não nIdItPedidoExistente
+        if (it?.item_servico) return false;
         return !Number.isFinite(Number(it?.pedido_n_cod_item || NaN));
       })
       : [];
