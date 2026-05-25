@@ -51687,6 +51687,8 @@ function abrirPickerItemPedidoAssociacao(seq) {
         }
         modal.remove();
         renderPreviewAssociacaoPedidoNfe(window.__associarNfePreviewAtual?.preview || {});
+        const btnAssociarMain = document.getElementById('modalAssociarPedidoBtnConfirmar');
+        if (btnAssociarMain) btnAssociarMain.disabled = false;
       };
     });
   }
