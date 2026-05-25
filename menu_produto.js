@@ -51694,7 +51694,7 @@ function abrirPickerItemPedidoAssociacao(seq) {
   // Se sem itens no preview, busca via API
   if (!itensPedido.length && numeroPedido) {
     const lista = modal.querySelector('#modalItemPedidoLista');
-    fetch(`/api/compras/buscar-pedido-compra?numero=${encodeURIComponent(numeroPedido)}`, { credentials: 'include' })
+    fetch(`/api/compras/buscar-pedido-compra?numero=${encodeURIComponent(numeroPedido)}`, { credentials: 'include', cache: 'no-store' })
       .then(r => r.json())
       .then(data => {
         const itensApi = (data?.pedido?.itens || []).filter(i => Number(i.n_cod_item || 0) > 0);
