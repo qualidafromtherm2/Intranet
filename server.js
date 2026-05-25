@@ -28931,7 +28931,7 @@ app.get('/api/compras/localizar-nfe-por-numero', async (req, res) => {
         WHERE COALESCE(p.inativo, false) = false
           AND p.d_inc_data >= DATE '2026-01-01'
           AND COALESCE(p."Pedido recebido", false) = false
-          AND COALESCE(BTRIM(p."Etapa_NF"), '') NOT IN ('60', '80')
+          AND COALESCE(BTRIM(p."Etapa_NF"), '') NOT IN ('40', '50', '60', '80')
           AND (
             ${exists_clause}
             OR (
@@ -28987,7 +28987,7 @@ app.get('/api/compras/localizar-nfe-por-numero', async (req, res) => {
         WHERE COALESCE(p.inativo, false) = false
           AND p.d_inc_data >= DATE '2026-01-01'
           AND COALESCE(p."Pedido recebido", false) = false
-          AND COALESCE(BTRIM(p."Etapa_NF"), '') NOT IN ('60', '80')
+          AND COALESCE(BTRIM(p."Etapa_NF"), '') NOT IN ('40', '50', '60', '80')
         GROUP BY p.n_cod_ped, p.c_numero, f.nome_fantasia, f.razao_social, p.d_inc_data, p.c_obs
         HAVING SUM(COALESCE(pop.n_val_tot, 0)) BETWEEN $1 AND $2
         ORDER BY ABS(SUM(COALESCE(pop.n_val_tot, 0)) - $3) ASC
