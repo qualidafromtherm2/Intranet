@@ -26502,6 +26502,14 @@ window.openRegistros = async function() {
         }
       }
     } catch (_) {}
+    // Deduplicar por nome de exibição: mesmo apelido (ou mesmo nome sem apelido) = uma única entrada
+    const _cfgSeenKeys = new Set();
+    impressoras = impressoras.filter(({ val }) => {
+      const key = _etqGetDisplayName(val).toLowerCase().trim();
+      if (_cfgSeenKeys.has(key)) return false;
+      _cfgSeenKeys.add(key);
+      return true;
+    });
     // Sempre inclui PDF
     impressoras.push({ val: '__PDF__', label: 'PDF (baixar arquivo)', pcName: '' });
 
@@ -27204,6 +27212,7 @@ window.openRegistros = async function() {
   }
 
   btnArmazenarProduto?.addEventListener('click', _armAbrir);
+  document.getElementById('etqBtnArmazenarToolbar')?.addEventListener('click', _armAbrir);
   etqArmazenarFechar?.addEventListener('click', _armFechar);
   etqArmazenarModal?.addEventListener('click', e => { if (e.target === etqArmazenarModal) _armFechar(); });
 
