@@ -8,11 +8,12 @@
  * Endpoints:
  *   GET  /api/transformacao-mp/template?fornecedor=...   — busca template salvo
  *   POST /api/transformacao-mp/template                  — cria/atualiza template
- *   POST /api/transformacao-mp/executar                  — cria ajustes SAI + ENT
+ *   POST /api/transformacao-mp/executar                  — cria ajustes SAI + ENT e executa na Omie
  */
 const express = require('express');
 const router = express.Router();
 const { dbQuery } = require('../src/db');
+const { OMIE_APP_KEY, OMIE_APP_SECRET } = require('../config.server');
 
 // ─── Schema setup ─────────────────────────────────────────────────────────────
 
@@ -34,6 +35,111 @@ async function ensureSchema() {
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
+
+function formatarDataBR(data = new Date()) {
+  const d = data instanceof Date ? data : new Date(data);
+  const dia = String(d.getDate()).padStart(2, '0');
+  const mes = String(d.getMonth() + 1).padStart(2, '0');
+  return `${dia}/${mes}/${d.getFullYear()}`;
+}
+
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function isErroOmieRetryable({ httpStatus, texto }) {
+  const body = String(texto || '');
+  return httpStatus === 425
+    || httpStatus === 429
+    || httpStatus >= 500
+    || /too many|rate limit|consumo redundante|requisi/i.test(body);
+}
+
+async function buscarCmcAtual(codigo, local_estoque) {
+  if (!codigo || !local_estoque) return null;
+  const { rows } = await dbQuery(
+    `SELECT cmc FROM logistica.estoque_atual WHERE codigo = $1 AND local_codigo = $2 LIMIT 1`,
+    [String(codigo).trim(), String(local_estoque).trim()]
+  );
+  const cmc = Number(rows?.[0]?.cmc);
+  return cmc > 0 ? cmc : null;
+}
+
+/**
+ * Chama IncluirAjusteEstoque na Omie.
+ * Para SAI: usa CMC atual do estoque; se não encontrar, usa 0.01.
+ * Para ENT: usa o cmc_informado (custo calculado pelo rateio).
+ */
+async function incluirAjusteOmie({ id, tipo_operacao, codigo_produto, codigo, qtd, local_estoque, cmc: cmc_informado, obs }) {
+  if (!OMIE_APP_KEY || !OMIE_APP_SECRET) {
+    throw Object.assign(new Error('Credenciais da Omie ausentes.'), { status: 500 });
+  }
+
+  const tipoOmie = String(tipo_operacao).toUpperCase();
+  const motivoOmie = tipoOmie === 'SAI' ? 'INV' : 'OPE';
+
+  let valorCmc = Number(cmc_informado);
+  if (!valorCmc || valorCmc <= 0) {
+    valorCmc = await buscarCmcAtual(codigo, local_estoque);
+  }
+  if (!valorCmc || valorCmc <= 0) {
+    console.warn(`[TransformacaoMP] CMC não encontrado para ${codigo} (${tipoOmie}), usando 0.01`);
+    valorCmc = 0.01;
+  }
+
+  const payload = {
+    call: 'IncluirAjusteEstoque',
+    app_key: OMIE_APP_KEY,
+    app_secret: OMIE_APP_SECRET,
+    param: [{
+      codigo_local_estoque: String(local_estoque),
+      id_prod: Number(codigo_produto),
+      data: formatarDataBR(new Date()),
+      quan: String(Number(qtd)),
+      obs: String(obs || `Transf.MP ${tipoOmie} #${id}`).slice(0, 200),
+      origem: 'AJU',
+      tipo: tipoOmie,
+      motivo: motivoOmie,
+      valor: valorCmc,
+    }],
+  };
+
+  const delays = [3000, 6000, 12000];
+  let ultimoErro = null;
+
+  for (let tentativa = 0; tentativa <= delays.length; tentativa++) {
+    let resp, texto = '';
+    try {
+      resp = await fetch('https://app.omie.com.br/api/v1/estoque/ajuste/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      texto = await resp.text();
+    } catch (fetchErr) {
+      ultimoErro = fetchErr;
+      if (tentativa < delays.length) { await sleep(delays[tentativa]); continue; }
+      throw Object.assign(new Error(`Falha ao comunicar com a Omie: ${fetchErr.message}`), { status: 502 });
+    }
+
+    let json;
+    try { json = texto ? JSON.parse(texto) : {}; }
+    catch { json = {}; }
+
+    if (resp.ok && String(json?.codigo_status || '') === '0') return json;
+
+    const retryable = isErroOmieRetryable({ httpStatus: resp.status, texto: texto || json?.descricao_status });
+    if (retryable && tentativa < delays.length) {
+      await sleep(delays[tentativa]);
+      continue;
+    }
+
+    const msg = json?.descricao_status || json?.faultstring || `Falha na Omie (HTTP ${resp.status}).`;
+    throw Object.assign(new Error(msg), { status: resp.status >= 400 ? resp.status : 502 });
+  }
+
+  throw Object.assign(new Error(`Omie não confirmou o ajuste após várias tentativas. ${ultimoErro?.message || ''}`.trim()), { status: 429 });
+}
 
 function calcularRateioArea(itens, valorTotal) {
   // area_unit_m2 = (largura_cm / 100) × (altura_cm / 100)
@@ -141,8 +247,7 @@ router.post('/template', express.json(), async (req, res) => {
 });
 
 // ─── POST /api/transformacao-mp/executar ──────────────────────────────────────
-// Cria registros de ajuste (SAI + ENT) na tabela mensagens.ajustes_estoque.
-// Eles seguem o fluxo normal de aprovação: "Aguardando aprovação" → "Executado".
+// Cria registros de ajuste (SAI + ENT) e executa imediatamente na Omie.
 
 router.post('/executar', express.json(), async (req, res) => {
   try {
@@ -213,7 +318,7 @@ router.post('/executar', express.json(), async (req, res) => {
     const inseridos = [];
 
     for (const it of itensComCusto) {
-      // SAI — saída do raw material (peça sem processamento)
+      // SAI — saída do material (remove estoque ao custo atual)
       const { rows: saiRows } = await dbQuery(
         `INSERT INTO mensagens.ajustes_estoque
            (tipo_operacao, codigo_produto, codigo, descricao, qtd,
@@ -223,19 +328,14 @@ router.post('/executar', express.json(), async (req, res) => {
                  'Aguardando aprovação', NOW())
          RETURNING id`,
         [
-          it.codigo_produto,
-          it.sku,
-          it.descricao,
-          it.qtde,
-          LOCAL_ESTOQUE,
-          LOCAL_NOME,
-          dataHoje,
+          it.codigo_produto, it.sku, it.descricao, it.qtde,
+          LOCAL_ESTOQUE, LOCAL_NOME, dataHoje,
           `[Transf.MP SAI] ${obsBase}`.slice(0, 500),
           solicitante || null,
         ]
       );
 
-      // ENT — entrada do material processado com custo rateado
+      // ENT — entrada com custo rateado pela área
       const { rows: entRows } = await dbQuery(
         `INSERT INTO mensagens.ajustes_estoque
            (tipo_operacao, codigo_produto, codigo, descricao, qtd,
@@ -245,28 +345,54 @@ router.post('/executar', express.json(), async (req, res) => {
                  'Aguardando aprovação', NOW())
          RETURNING id`,
         [
-          it.codigo_produto,
-          it.sku,
-          it.descricao,
-          it.qtde,
-          LOCAL_ESTOQUE,
-          LOCAL_NOME,
-          dataHoje,
-          it.custo_unit,
+          it.codigo_produto, it.sku, it.descricao, it.qtde,
+          LOCAL_ESTOQUE, LOCAL_NOME, dataHoje, it.custo_unit,
           `[Transf.MP ENT] ${obsBase} | CustoUnit: R$${it.custo_unit} | Área: ${it.area_unit_m2}m²`.slice(0, 500),
           solicitante || null,
         ]
       );
 
-      inseridos.push({
-        sku: it.sku,
-        descricao: it.descricao,
-        qtde: it.qtde,
-        area_unit_m2: it.area_unit_m2,
-        custo_unit: it.custo_unit,
-        id_sai: saiRows[0]?.id,
-        id_ent: entRows[0]?.id,
-      });
+      const idSai = saiRows[0]?.id;
+      const idEnt = entRows[0]?.id;
+
+      // Executa na Omie imediatamente
+      try {
+        await incluirAjusteOmie({
+          id: idSai, tipo_operacao: 'SAI', codigo_produto: it.codigo_produto,
+          codigo: it.sku, qtd: it.qtde, local_estoque: LOCAL_ESTOQUE,
+          cmc: null,
+          obs: `[Transf.MP SAI] ${obsBase}`.slice(0, 200),
+        });
+        await dbQuery(
+          `UPDATE mensagens.ajustes_estoque SET status='Executado', aprovado_por=$2, aprovado_em=NOW() WHERE id=$1`,
+          [idSai, solicitante || 'Sistema']
+        );
+
+        await incluirAjusteOmie({
+          id: idEnt, tipo_operacao: 'ENT', codigo_produto: it.codigo_produto,
+          codigo: it.sku, qtd: it.qtde, local_estoque: LOCAL_ESTOQUE,
+          cmc: it.custo_unit,
+          obs: `[Transf.MP ENT] ${obsBase}`.slice(0, 200),
+        });
+        await dbQuery(
+          `UPDATE mensagens.ajustes_estoque SET status='Executado', aprovado_por=$2, aprovado_em=NOW() WHERE id=$1`,
+          [idEnt, solicitante || 'Sistema']
+        );
+
+        inseridos.push({
+          sku: it.sku, descricao: it.descricao, qtde: it.qtde,
+          area_unit_m2: it.area_unit_m2, custo_unit: it.custo_unit,
+          id_sai: idSai, id_ent: idEnt, executado: true,
+        });
+      } catch (omieErr) {
+        console.error(`[TransformacaoMP] Erro ao executar ajuste ${it.sku}:`, omieErr?.message);
+        inseridos.push({
+          sku: it.sku, descricao: it.descricao, qtde: it.qtde,
+          area_unit_m2: it.area_unit_m2, custo_unit: it.custo_unit,
+          id_sai: idSai, id_ent: idEnt, executado: false,
+          erro: omieErr?.message,
+        });
+      }
     }
 
     // Salva/atualiza template se solicitado
@@ -287,9 +413,14 @@ router.post('/executar', express.json(), async (req, res) => {
       }
     }
 
+    const totalExecutados = inseridos.filter(i => i.executado).length;
+    const totalErros = inseridos.filter(i => !i.executado).length;
+
     return res.json({
-      ok: true,
-      message: `${inseridos.length} tipo(s) de peça processado(s). ${inseridos.length * 2} ajuste(s) criados aguardando aprovação.`,
+      ok: totalErros === 0,
+      message: totalErros === 0
+        ? `${inseridos.length} tipo(s) de peça transformado(s) com sucesso.`
+        : `${totalExecutados} executado(s), ${totalErros} com erro. Verifique os detalhes.`,
       itens: inseridos,
     });
   } catch (err) {

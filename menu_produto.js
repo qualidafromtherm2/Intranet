@@ -52218,7 +52218,12 @@ async function confirmarAssociacaoPedidoNfeOmie() {
       n_id_receb: data?.dados?.n_id_receb || null,
       numero_nfe: data?.dados?.c_numero_nfe || null,
       fornecedor_nome: data?.dados?.fornecedor_nome || window.__associarNfePreviewAtual?.preview?.fornecedor_nome || null,
-      valor_total: data?.dados?.valor_total_nfe || window.__associarNfePreviewAtual?.preview?.valor_total_nfe || null,
+      valor_total: data?.dados?.valor_total_nfe
+        || window.__associarNfePreviewAtual?.preview?.valor_total_nfe
+        || (Array.isArray(window.__associarNfePreviewEstadoItens)
+            ? +(window.__associarNfePreviewEstadoItens.reduce((a, it) => a + (Number(it.nf_valor_total) || 0), 0)).toFixed(2) || null
+            : null)
+        || null,
       solicitante: (document.getElementById('userNameDisplay')?.textContent || '').trim() || null,
     };
 
@@ -52575,12 +52580,14 @@ async function executarTransformacaoMp(dadosBase) {
           <div style="margin-top:8px;font-size:12px;color:#4ade80;">
             ${(json.itens || []).map(it => `${escapeHtml(it.sku)}: SAI #${it.id_sai} + ENT #${it.id_ent}`).join('<br>')}
           </div>
-          <div style="margin-top:8px;font-size:12px;color:#166534;">Aguardando aprovação no módulo de Ajustes de Estoque.</div>
+          <div style="margin-top:8px;font-size:12px;color:#166534;">Ajustes executados diretamente no estoque Omie.</div>
         </div>
       `;
     }
     btnExecutar.innerHTML = '<i class="fa-solid fa-circle-check"></i> Concluído';
     btnExecutar.style.background = 'linear-gradient(135deg,#16a34a 0%,#15803d 100%)';
+    btnExecutar.disabled = false;
+    btnExecutar.onclick = fecharModalTransformacaoMp;
   } catch (err) {
     if (msgEl) {
       msgEl.style.display = '';
