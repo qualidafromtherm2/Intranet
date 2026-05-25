@@ -30938,6 +30938,13 @@ async function montarPlanoAssociacaoNfePedido(numeroNfe, numeroPedido, chaveNfe 
       }
     }
 
+    const cfopNf = String(
+      itensCabec?.cCFOP || itensCabec?.cCfop
+      || itensInfoAdic?.cCFOP || itensInfoAdic?.cCfop
+      || itensInfoAdic?.cCFOPEntrada || itensInfoAdic?.cCfopEntrada
+    ).trim();
+    const servicoCfop = normalizarCfopServicoRecebimento(cfopNf);
+
     const itensIde = {
       nSequencia: Number.isFinite(nSequencia) && nSequencia > 0 ? nSequencia : (idx + 1),
       cAcao: servicoCfop.servico ? 'ASSOCIAR-PRODUTO' : 'ASSOCIAR-PEDIDO'
