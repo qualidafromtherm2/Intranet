@@ -380,6 +380,18 @@
     </a>
 
     <a href="#"
+       id="menu-solicitacao-ajuste"
+       class="menu-link"
+       data-nav-key="side:log:solicitacao-ajuste"
+       data-nav-parent="side:log"
+       data-nav-pos="side"
+       data-nav-label="Solicitação de ajuste"
+       data-nav-selector="#menu-solicitacao-ajuste">
+      <i class="fa-solid fa-pen-to-square" style="margin-right:8px;"></i>
+      Solicitação de ajuste
+    </a>
+
+    <a href="#"
        id="menu-recebimento"
        class="menu-link"
        data-nav-key="side:log:recebimento"
@@ -826,9 +838,9 @@
                   <button id="comprasGraficoBtn" class="content-button" type="button" onclick="toggleGraficoHistorico()" style="background:linear-gradient(135deg,#0ea5e9 0%,#0284c7 100%);color:white;display:flex;align-items:center;justify-content:center;width:44px;height:44px;padding:0;border-radius:50%;" title="Gráfico de Compras">
                     <i class="fa-solid fa-chart-line" style="font-size:20px;"></i>
                   </button>
-                  <button id="comprasToggleSolicitanteBtn" class="content-button" type="button" style="background:linear-gradient(135deg,#8b5cf6 0%,#7c3aed 100%);color:white;display:flex;align-items:center;justify-content:center;gap:6px;padding:0 16px;height:44px;border-radius:22px;font-weight:600;font-size:13px;" title="Alternar entre minhas solicitações e todas as solicitações">
-                    <i class="fa-solid fa-user" style="font-size:16px;"></i>
-                    <span id="comprasToggleSolicitanteText">Minhas</span>
+                  <button id="comprasToggleSolicitanteBtn" class="content-button" type="button" style="background:linear-gradient(135deg,#3b82f6 0%,#2563eb 100%);color:white;display:flex;align-items:center;justify-content:center;gap:6px;padding:0 16px;height:44px;border-radius:22px;font-weight:600;font-size:13px;" title="Alternar entre minhas solicitações e todas as solicitações">
+                    <i class="fa-solid fa-users" style="font-size:16px;"></i>
+                    <span id="comprasToggleSolicitanteText">Todas</span>
                   </button>
                   <button id="comprasAcoesHamburgerBtn" class="content-button" type="button" style="background:linear-gradient(135deg,#0f172a 0%,#1f2937 100%);color:white;display:flex;align-items:center;justify-content:center;width:44px;height:44px;padding:0;border-radius:50%;" title="Mais ações">
                     <i class="fa-solid fa-bars" style="font-size:20px;"></i>
@@ -7357,6 +7369,49 @@
         </div>
       </div>
 
+      <div id="solicitacaoAjuste" class="tab-pane" style="display:none;">
+              <div class="content-wrapper">
+                <div class="content-section">
+                  <div class="title-wrapper">
+                    <div class="content-section-title">Solicitações de ajuste de estoque</div>
+                    <div class="actions" style="display:flex; gap:8px; align-items:center;">
+                      <button id="solicitacoesAjusteApproveAll" class="btn tiny" type="button" style="background:#22c55e;color:#06120a;border-color:#86efac;font-weight:800;">Aprovar pendentes</button>
+                      <button id="solicitacoesAjusteRefresh" class="btn tiny" type="button">Atualizar</button>
+                    </div>
+                  </div>
+                  <div id="solicitacoesAjusteSpinner" class="loading-indicator" style="display:none; margin-bottom:12px;">
+                    Carregando solicitações…
+                  </div>
+                  <div class="solicitacao-transfer-table-wrapper">
+                    <table class="tabela padrao solicitacao-transfer-table">
+                      <thead>
+                        <tr>
+                          <th>ID</th>
+                          <th>Tipo</th>
+                          <th>Código</th>
+                          <th class="desc-col">Descrição</th>
+                          <th>Qtd</th>
+                          <th>Data mov.</th>
+                          <th>CMC</th>
+                          <th>Local</th>
+                          <th>Obs</th>
+                          <th>Solicitante</th>
+                          <th>Status</th>
+                          <th>Aprovado</th>
+                          <th>Ações</th>
+                        </tr>
+                      </thead>
+                      <tbody id="solicitacoesAjusteTbody">
+                        <tr>
+                          <td colspan="13">Nenhuma solicitação carregada ainda.</td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+            </div>
+
       <div id="solicitacaoTransferencia" class="tab-pane" style="display:none;">
               <div class="content-wrapper">
                 <div class="content-section">
@@ -8172,6 +8227,7 @@
   <div class="header-menu">
     <a href="#" data-arm-tab="estoque" class="main-header-link is-active">Estoque</a>
     <a href="#" data-arm-tab="transferencia" class="main-header-link">Transferência</a>
+    <a href="#" data-arm-tab="ajuste-estoque" class="main-header-link">Ajuste</a>
     <a href="#" data-arm-tab="armazem3d" class="main-header-link">
       <i class="fa-solid fa-warehouse" style="margin-right:5px;"></i>Armazém 3D
     </a>
@@ -8366,6 +8422,97 @@
       </div>
     </div>
   </div>
+
+<!-- ===================== PAINEL AJUSTE ESTOQUE ===================== -->
+<div id="conteudo-ajuste-estoque" class="armazem-page" style="display:none;">
+  <div class="content-wrapper">
+    <div class="content-section">
+      <div class="title-wrapper">
+        <div class="content-section-title">Ajuste de Estoque (ENT / SAI)</div>
+      </div>
+      <div class="transferencia-locais">
+        <div class="origem-group">
+          <label for="ajusteTipo">Tipo</label>
+          <select id="ajusteTipo" class="transfer-select">
+            <option value="ENT">ENT — Entrada</option>
+            <option value="SAI">SAI — Saída</option>
+          </select>
+        </div>
+        <div class="origem-group">
+          <label for="ajusteLocal">Local de estoque</label>
+          <select id="ajusteLocal" class="transfer-select">
+            <option value="">Selecione…</option>
+          </select>
+        </div>
+        <div class="destino-group">
+          <label for="ajusteDataMov">Data movimentação</label>
+          <input id="ajusteDataMov" type="date" class="transfer-select" title="Data enviada no ajuste de estoque da Omie" />
+        </div>
+        <div class="transferencia-actions">
+          <label>&nbsp;</label>
+          <div class="destino-inline">
+            <button id="ajusteBtn"
+                    type="button"
+                    class="icon-btn"
+                    title="Solicitar ajuste dos itens selecionados"
+                    aria-label="Solicitar ajuste"
+                    disabled>
+              <i class="fa-solid fa-pen-to-square"></i>
+            </button>
+          </div>
+        </div>
+      </div>
+      <div style="margin-top:10px; display:flex; gap:12px; align-items:center; flex-wrap:wrap;">
+        <div style="display:flex; flex-direction:column; gap:4px; flex:1; min-width:220px; max-width:380px;">
+          <label for="ajusteObs" style="font-size:12px; font-weight:600;">Observação / Motivo</label>
+          <textarea id="ajusteObs" rows="2"
+            placeholder="Descreva o motivo do ajuste (opcional)…"
+            style="resize:vertical; padding:6px 10px; border:1px solid #334155; border-radius:6px; background:var(--input-bg,#1e293b); color:inherit; font-size:13px;"></textarea>
+        </div>
+      </div>
+      <div class="transferencia-controls" style="margin-top:10px;">
+        <button id="ajusteImportarListaBtn"
+                type="button"
+                class="btn"
+                title="Cole uma lista: Código + TAB + ENT|SAI + TAB + Qtd (+ TAB + Armazém + TAB + CMC opcionais)"
+                aria-label="Importar ajustes em massa"
+                style="display:inline-flex;align-items:center;gap:8px;white-space:nowrap;">
+          <i class="fa-solid fa-table-list"></i>
+          Importar lista da planilha
+        </button>
+        <div class="transferencia-search">
+          <input id="ajusteSearch" type="text"
+                 placeholder="Adicionar item por código ou descrição…"
+                 class="search-box" autocomplete="off" />
+          <div class="transfer-search-dropdown">
+            <ul id="ajusteSearchResults" class="transfer-search-results"></ul>
+          </div>
+        </div>
+      </div>
+      <div class="transferencia-wrapper" style="max-height:calc(100vh - 380px);overflow:auto;border:1px solid #334155;border-radius:10px;margin-top:8px;">
+        <table class="tabela padrao transferencia-table">
+          <thead>
+            <tr>
+              <th class="sel-col"></th>
+              <th>Código</th>
+              <th class="desc-col">Descrição</th>
+              <th>Cod Omie</th>
+              <th>Qtd</th>
+              <th title="Custo médio — obrigatório para executar o ajuste">CMC</th>
+              <th>Físico</th>
+              <th>Saldo</th>
+            </tr>
+          </thead>
+          <tbody id="ajusteTbody">
+            <tr class="transferencia-placeholder">
+              <td colspan="8">Nenhum item selecionado para ajuste.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
 
 <!-- ===================== PAINEL ARMAZÉM ===================== -->
 <div id="conteudo-armazem3d" class="armazem-page" style="display:none;">
@@ -9443,7 +9590,7 @@
   <!-- Interceptor de sessão: precisa carregar ANTES de qualquer módulo que faça fetch -->
   <script src="/public/js/sessao_resiliente.js?v=20260422a"></script>
   <script type="module" src="login/login.js"></script>
-  <script type="module" src="menu_produto.js?v=20260515a"></script>
+  <script type="module" src="menu_produto.js?v=20260526a"></script>
   
   <script type="module" src="./requisicoes_omie/filtro_produto.js"></script>
   <script type="module" src="./requisicoes_omie/ListarProdutos.js"></script>

@@ -244,6 +244,7 @@ app.use('/api/registros', require('./routes/registros'));
 app.use('/api/sac', require('./routes/sacEnvios'));
 app.use('/api/ai', require('./routes/ai_assistant'));
 app.use('/api/producao', require('./routes/producao'));
+app.use('/api/transformacao-mp', require('./routes/transformacaoMp'));
 
 app.get('/api/produtos/stream', (req, res) => {
   const accept = String(req.headers?.accept || '');
@@ -346,6 +347,9 @@ const { Pool } = require('pg');
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL || process.env.POSTGRES_URL,
   ssl: { rejectUnauthorized: false },
+});
+pool.on('error', (err) => {
+  console.error('[pg] erro em cliente ocioso — ignorado para evitar crash:', err.message);
 });
 const comprasAuditContext = new AsyncLocalStorage();
 const originalPoolQuery = pool.query.bind(pool);
@@ -10353,6 +10357,7 @@ app.get('/api/preparacao/debug/:op', async (req, res) => {
 const produtosFotosRouter = require('./routes/produtosFotos'); // <-- ADICIONE ESTA LINHA
 const produtosAnexosRouter = require('./routes/produtosAnexos');
 const transferenciasRouter = require('./routes/transferencias');
+const ajustesRouter = require('./routes/ajustes');
 
 //app.use(require('express').json({ limit: '5mb' }));
 
@@ -10362,6 +10367,7 @@ app.use('/api/produtos', produtosRouter);
 app.use('/api/produtos', produtosFotosRouter);
 app.use('/api/produtos', produtosAnexosRouter);
 app.use('/api/transferencias', transferenciasRouter);
+app.use('/api/ajustes', ajustesRouter);
 app.use('/api/primeira-pc-ok', require('./routes/primeiraPcOk'));
 app.use('/api/engenharia', engenhariaRouter);
 app.use('/api/compras', comprasRouter);
@@ -28974,7 +28980,8 @@ app.get('/api/compras/localizar-nfe-por-numero', async (req, res) => {
         LEFT JOIN omie.fornecedores f ON f.codigo_cliente_omie = p.n_cod_for
         WHERE COALESCE(p.inativo, false) = false
           AND p.d_inc_data >= DATE '2026-01-01'
-          AND COALESCE(BTRIM(p."Etapa_NF"), '') NOT IN ('60', '80')
+          AND COALESCE(p."Pedido recebido", false) = false
+          AND COALESCE(BTRIM(p."Etapa_NF"), '') NOT IN ('40', '50', '60', '80')
           AND (
             ${exists_clause}
             OR (
@@ -29029,7 +29036,8 @@ app.get('/api/compras/localizar-nfe-por-numero', async (req, res) => {
         JOIN compras.pedidos_omie_produtos pop ON pop.n_cod_ped = p.n_cod_ped
         WHERE COALESCE(p.inativo, false) = false
           AND p.d_inc_data >= DATE '2026-01-01'
-          AND COALESCE(BTRIM(p."Etapa_NF"), '') NOT IN ('60', '80')
+          AND COALESCE(p."Pedido recebido", false) = false
+          AND COALESCE(BTRIM(p."Etapa_NF"), '') NOT IN ('40', '50', '60', '80')
         GROUP BY p.n_cod_ped, p.c_numero, f.nome_fantasia, f.razao_social, p.d_inc_data, p.c_obs
         HAVING SUM(COALESCE(pop.n_val_tot, 0)) BETWEEN $1 AND $2
         ORDER BY ABS(SUM(COALESCE(pop.n_val_tot, 0)) - $3) ASC
@@ -29126,7 +29134,7 @@ app.get('/api/compras/buscar-pedido-compra', async (req, res) => {
     const pedido = rows[0];
     const { rows: prodRows } = await pool.query(`
       SELECT c_produto AS produto_codigo, c_descricao AS produto_descricao,
-             n_qtde AS quantidade, c_unidade AS unidade,
+             n_cod_item, n_qtde AS quantidade, c_unidade AS unidade,
              COALESCE(n_val_tot, 0) AS valor_item
       FROM compras.pedidos_omie_produtos
       WHERE n_cod_ped = $1
@@ -30765,6 +30773,13 @@ function calcularScoreAssociacaoNfePedido(itemReceb, itemPedido) {
   return score;
 }
 
+function normalizarCfopServicoRecebimento(valor) {
+  const cfop = String(valor || '').replace(/\D/g, '');
+  if (cfop === '5933') return { servico: true, cfopEntrada: '1.933' };
+  if (cfop === '6933') return { servico: true, cfopEntrada: '2.933' };
+  return { servico: false, cfopEntrada: null };
+}
+
 async function montarPlanoAssociacaoNfePedido(numeroNfe, numeroPedido, chaveNfe = null, nCodPedInformado = null) {
   const nCodPedNumerico = Number(nCodPedInformado);
   const usarIdDireto = Number.isFinite(nCodPedNumerico) && nCodPedNumerico > 0;
@@ -30939,9 +30954,12 @@ async function montarPlanoAssociacaoNfePedido(numeroNfe, numeroPedido, chaveNfe 
     }
 
     const cfopNf = String(
-      itensCabec?.cCFOP || itensCabec?.cCfop
-      || itensInfoAdic?.cCFOP || itensInfoAdic?.cCfop
-      || itensInfoAdic?.cCFOPEntrada || itensInfoAdic?.cCfopEntrada
+      itensCabec?.cCFOP
+      || itensCabec?.cCfop
+      || itensInfoAdic?.cCFOP
+      || itensInfoAdic?.cCfop
+      || itensInfoAdic?.cCFOPEntrada
+      || itensInfoAdic?.cCfopEntrada
     ).trim();
     const servicoCfop = normalizarCfopServicoRecebimento(cfopNf);
 
@@ -30966,7 +30984,10 @@ async function montarPlanoAssociacaoNfePedido(numeroNfe, numeroPedido, chaveNfe 
       nf_qtde: itensCabec?.nQtdeNFe ?? null,
       nf_unidade: String(itensCabec?.cUnidadeNfe || '').trim() || null,
       nf_valor_total: itensCabec?.vTotalItem ?? null,
-      pedido_item_encontrado: !!itemPedidoVinculo,
+      nf_cfop: cfopNf || null,
+      item_servico: servicoCfop.servico,
+      servico_cfop_entrada: servicoCfop.cfopEntrada,
+      pedido_item_encontrado: !!itemPedidoVinculo || servicoCfop.servico,
       pedido_n_cod_item: Number.isFinite(nCodItem) && nCodItem > 0 ? nCodItem : null,
       pedido_codigo_produto: String(itemPedidoVinculo?.c_produto || '').trim() || null,
       pedido_descricao_produto: String(itemPedidoVinculo?.c_descricao || '').trim() || null,
@@ -31116,6 +31137,13 @@ app.post('/api/compras/pedidos-omie/nfe-associar-pedido/preview', express.json()
 
     const categoriaInfo = await obterInfoCategoriaRecebimentoOmie(plano?.recebimento_omie);
 
+    const _cab = plano?.recebimento_omie?.cabec || {};
+    const _fornecedorNome = String(_cab.cNome || _cab.cRazaoSocial || '').trim() || null;
+    const _itensReceb = Array.isArray(plano?.recebimento_omie?.itensRecebimento)
+      ? plano.recebimento_omie.itensRecebimento
+      : [];
+    const _valorTotalNfe = _itensReceb.reduce((acc, it) => acc + Number(it?.nValTot || it?.det?.prod?.vProd || 0), 0);
+
     return res.json({
       ok: true,
       preview: {
@@ -31128,6 +31156,8 @@ app.post('/api/compras/pedidos-omie/nfe-associar-pedido/preview', express.json()
         itens_match_total: plano.itens_match_total,
         itens_sem_match_total: plano.itens_sem_match_total,
         categoria: categoriaInfo,
+        fornecedor_nome: _fornecedorNome,
+        valor_total_nfe: Number.isFinite(_valorTotalNfe) && _valorTotalNfe > 0 ? +_valorTotalNfe.toFixed(2) : null,
         itens: plano.itens_preview
       }
     });
@@ -31195,6 +31225,10 @@ app.post('/api/compras/pedidos-omie/nfe-associar-pedido', express.json(), async 
         const override = overrideMap.get(seq);
         const codItemOverride = Number(override?.nIdItPedidoExistente || 0);
         if (Number.isFinite(codItemOverride) && codItemOverride > 0) return false;
+        const idProdutoOverride = Number(override?.nIdProdutoServico || 0);
+        if (Number.isFinite(idProdutoOverride) && idProdutoOverride > 0) return false;
+        // Itens de serviço (CFOP 5933/6933) usam ASSOCIAR-PRODUTO, não nIdItPedidoExistente
+        if (it?.item_servico) return false;
         return !Number.isFinite(Number(it?.pedido_n_cod_item || NaN));
       })
       : [];
@@ -31499,7 +31533,9 @@ app.post('/api/compras/pedidos-omie/nfe-associar-pedido', express.json(), async 
           const ajustes = {};
           if (aplicarEstoqueEspecial) ajustes.codigo_local_estoque = ESTOQUE_LOCAL_ESPECIAL;
           if (cUnidadeFinal) ajustes.cUnidade = cUnidadeFinal;
-          if (cfopCalculado) ajustes.cCFOPEntrada = cfopCalculado;
+          const previewItem = (plano?.itens_preview || []).find(p => p.n_sequencia === nSeq);
+          const cfopServicoEntrada = previewItem?.item_servico ? previewItem?.servico_cfop_entrada : null;
+          if (cfopServicoEntrada || cfopCalculado) ajustes.cCFOPEntrada = cfopServicoEntrada || cfopCalculado;
           // Nota: nQtde não é campo válido em itensAjustes da Omie
 
           // Só incluir o item se tiver ajustes
@@ -31765,7 +31801,17 @@ app.post('/api/compras/pedidos-omie/nfe-associar-pedido', express.json(), async 
         valor_recebido_pedido: Number.isFinite(valorRecebidoPedido) ? valorRecebidoPedido : null,
         retorno_etapa_omie: respostaEtapaFinal || null,
         pedidos_vinculados: pedidosVinculados,
-        alerta_item: alertaItemAssociacao || null
+        alerta_item: alertaItemAssociacao || null,
+        fornecedor_nome: (() => {
+          const c = plano?.recebimento_omie?.cabec || {};
+          return String(c.cNome || c.cRazaoSocial || '').trim() || null;
+        })(),
+        valor_total_nfe: (() => {
+          const its = Array.isArray(plano?.recebimento_omie?.itensRecebimento)
+            ? plano.recebimento_omie.itensRecebimento : [];
+          const total = its.reduce((a, it) => a + Number(it?.nValTot || 0), 0);
+          return Number.isFinite(total) && total > 0 ? +total.toFixed(2) : null;
+        })()
       }
     });
   } catch (err) {
