@@ -11119,6 +11119,7 @@ function renderEnvioMercadoriaCard(r) {
   const status = normalizeSacStatus(statusRaw);
   const etiqueta = r.etiqueta_url || r.etiqueta || '';
   const declaracao = r.declaracao_url || r.declaracao || '';
+  const declaracaoHref = declaracao || (r.id_vipp ? '/api/vipp/declaracao?id=' + r.id : '');
   const temIdentificacao = r.identificacao && String(r.identificacao).trim().length > 0;
   const identRaw = r.identificacao ? String(r.identificacao).trim() : '-';
   const identClean = identRaw.replace(/\s+/g, '').toUpperCase();
@@ -11133,7 +11134,7 @@ function renderEnvioMercadoriaCard(r) {
   const rastText = [rastStatusDisplay, rastQuandoDisplay].filter(Boolean).join(' | ');
   const buttons = [
     (etiqueta || temIdentificacao) ? `<button class="content-button btn-envio-etiqueta" data-envio-id="${escapeAtHtml(String(r.id))}" data-identificacao="${escapeAtHtml(identRaw)}" style="padding:8px 10px;font-size:12px;display:inline-flex;align-items:center;gap:6px;"><i class="fa-solid fa-print"></i><span>Etiqueta</span></button>` : '',
-    declaracao ? `<button class="content-button btn-envio-declaracao" data-envio-id="${escapeAtHtml(String(r.id))}" data-print-url="${escapeAtHtml(declaracao)}" style="padding:8px 10px;font-size:12px;display:inline-flex;align-items:center;gap:6px;"><i class="fa-solid fa-file-pdf"></i><span>Declaração</span></button>` : ''
+    declaracaoHref ? `<button class="content-button btn-envio-declaracao" data-envio-id="${escapeAtHtml(String(r.id))}" data-print-url="${escapeAtHtml(declaracaoHref)}" style="padding:8px 10px;font-size:12px;display:inline-flex;align-items:center;gap:6px;"><i class="fa-solid fa-file-pdf"></i><span>Declaração</span></button>` : ''
   ].filter(Boolean).join('');
 
   const statusToken = getStatusTokenEnvioMercadoria(statusRaw);
@@ -11167,7 +11168,7 @@ function renderEnvioMercadoriaCard(r) {
         <div>
           <div class="envio-card-label">Rastreio</div>
           <div class="envio-card-text" style="font-weight:800;color:#f8fafc;">${escapeAtHtml(identRaw)}</div>
-          <small class="rast-status" data-rastreio="${escapeAtHtml(dataRastreio)}" style="display:block;margin-top:5px;color:#94a3b8;line-height:1.35;">${escapeAtHtml(rastText || (isRastreio ? 'Consultando rastreio...' : 'Sem rastreio válido'))}</small>
+          <small class="rast-status" data-rastreio="${escapeAtHtml(dataRastreio)}" data-id-vipp="${escapeAtHtml(r.id_vipp || '')}" style="display:block;margin-top:5px;color:#94a3b8;line-height:1.35;">${escapeAtHtml(rastText || (isRastreio ? 'Consultando rastreio...' : 'Sem rastreio válido'))}</small>
         </div>
         <span class="envio-status-pill ${statusPillClasse}"><i class="fa-solid fa-circle"></i>${escapeAtHtml(status)}</span>
         ${statusSelect}
@@ -17364,6 +17365,7 @@ async function carregarSacSolicitacoes(targetBody, { hideDone = false, titleOnly
       }
       bodyEl.innerHTML = rowsVisiveis.map(renderEnvioMercadoriaCard).join('');
       preencherStatusRastreio(bodyEl);
+      preencherStatusVipp(bodyEl);
       return;
     }
     
