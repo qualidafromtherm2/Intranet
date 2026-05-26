@@ -18409,14 +18409,15 @@ async function _envioImprimirEtiqueta(envioId, identificacao, btnRef) {
   if (btnRef) btnRef.disabled = true;
   try {
     const pref = _envioImprPref || '__PDF__';
-    // Modo PDF: abre etiqueta no navegador
-    if (pref === '__PDF__') {
-      const ecLimpo = String(identificacao || '').trim().replace(/\s+/g, '');
+    const ecLimpo = String(identificacao || '').trim().replace(/\s+/g, '');
+    // VIPP retorna ZVP/XML (não ZPL), agente de impressão não consegue processar.
+    // Se tem código ECT, sempre abre o PDF no navegador para impressão manual.
+    if (pref === '__PDF__' || ecLimpo) {
       if (!ecLimpo) throw new Error('Código ECT não disponível para este envio');
       window.open(`/api/vipp/etiqueta?id=${encodeURIComponent(ecLimpo)}&saida=1`, '_blank');
       return;
     }
-    // Modo agente/impressora: enfileira via backend
+    // Modo agente/impressora sem ECT (etiqueta interna): enfileira via backend
     const agentDest = _etqParseAgentPref(pref);
     const body = { envio_id: envioId };
     if (agentDest) { body.destino_agente = agentDest.pcName; body.impressora = agentDest.impressora; }
