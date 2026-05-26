@@ -2601,7 +2601,7 @@
                   <i class="fa-solid fa-paper-plane" style="color:#22c55e;"></i>
                   Solicitação de envio (SAC)
                 </div>
-                <div style="color:var(--inactive-color);font-size:13px;">Anexe os arquivos manualmente ou clique em <strong style="color:#e5e7eb;">VIPP</strong> para criar a postagem e gerar a etiqueta automaticamente.</div>
+                <div style="color:var(--inactive-color);font-size:13px;">Clique em <strong style="color:#e5e7eb;">VIPP</strong> para criar a postagem e gerar a etiqueta automaticamente.</div>
                 <div style="margin-left:auto;display:flex;align-items:center;gap:8px;">
                   <button id="sacVippBtn" type="button" class="content-button" title="Criar postagem VIPP — gera etiqueta e declaração"
                     style="display:inline-flex;align-items:center;gap:8px;background:linear-gradient(135deg,#111827 0%,#1f2937 100%);color:white;border:1px solid #374151;">
@@ -2609,45 +2609,6 @@
                     <span>Criar Postagem VIPP</span>
                   </button>
                 </div>
-              </div>
-
-              <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:8px;">
-                <div style="display:flex;flex-direction:column;gap:6px;">
-                  <label style="font-size:13px;color:var(--inactive-color);">Escolha Etiqueta</label>
-                  <button id="sacAttachEtiquetaBtn" class="content-button" type="button" style="display:flex;align-items:center;gap:8px;background:linear-gradient(135deg,#22c55e 0%,#16a34a 100%);color:white;">
-                    <i class="fa-solid fa-file-lines"></i>
-                    <span>Anexar Etiqueta</span>
-                  </button>
-                  <div id="sacFileInfoEtiqueta" style="color:var(--inactive-color);font-size:12px;">Nenhum arquivo.</div>
-                  <input id="sacFileInputEtiqueta" type="file" style="display:none;" />
-                </div>
-                <div style="display:flex;flex-direction:column;gap:6px;">
-                  <label style="font-size:13px;color:var(--inactive-color);">Escolha Declaração de conteúdo</label>
-                  <button id="sacAttachDeclaracaoBtn" class="content-button" type="button" style="display:flex;align-items:center;gap:8px;background:linear-gradient(135deg,#a855f7 0%,#7c3aed 100%);color:white;">
-                    <i class="fa-solid fa-file-signature"></i>
-                    <span>Anexar Declaração</span>
-                  </button>
-                  <div id="sacFileInfoDeclaracao" style="color:var(--inactive-color);font-size:12px;">Nenhum arquivo.</div>
-                  <input id="sacFileInputDeclaracao" type="file" style="display:none;" />
-                </div>
-              </div>
-
-              <div class="form-field" style="margin-top:14px;">
-                <label for="sacObservacao">Observação</label>
-                <textarea id="sacObservacao" rows="3" placeholder="Descreva detalhes do envio" style="width:100%;"></textarea>
-              </div>
-
-              <div class="form-field" style="margin-top:14px;max-width:320px;">
-                <label for="sacNumeroSep">Número da SEP</label>
-                <input id="sacNumeroSep" type="text" placeholder="Ex: SEP 12345" style="width:100%;">
-              </div>
-
-              <div style="display:flex;align-items:center;gap:10px;justify-content:flex-end;margin-top:12px;flex-wrap:wrap;">
-                <div id="sacEnvioStatus" style="display:none;font-size:13px;color:var(--inactive-color);"></div>
-                <button id="sacSendBtn" class="content-button" type="button" style="display:flex;align-items:center;gap:8px;background:linear-gradient(135deg,#0ea5e9 0%,#0284c7 100%);color:white;">
-                  <i class="fa-solid fa-paper-plane"></i>
-                  <span>Enviar</span>
-                </button>
               </div>
 
               <div class="content-section" style="margin-top:18px;padding:0;">
