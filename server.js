@@ -30826,6 +30826,16 @@ function calcularScoreAssociacaoNfePedido(itemReceb, itemPedido) {
     }
   }
 
+  // Valor total: reforça match quando valores são iguais/próximos; penaliza divergência >30%
+  const valorRec = Number(itensCabec?.vTotalItem ?? null);
+  const valorPedido = Number(itemPedido?.n_val_tot ?? null);
+  if (Number.isFinite(valorRec) && Number.isFinite(valorPedido) && valorRec > 0 && valorPedido > 0) {
+    const diffPct = Math.abs(valorRec - valorPedido) / Math.max(valorRec, valorPedido);
+    if (diffPct < 0.001) score += 80;
+    else if (diffPct < 0.05) score += 40;
+    else if (diffPct > 0.30) score -= 40;
+  }
+
   return score;
 }
 
@@ -30942,7 +30952,25 @@ async function montarPlanoAssociacaoNfePedido(numeroNfe, numeroPedido, chaveNfe 
 
   const previewItens = [];
 
-  const itensRecebimentoEditar = itensReceb.map((item, idx) => {
+  // Sorted-greedy: pré-calcula o melhor score possível de cada item da NF e processa
+  // em ordem de confiança decrescente, evitando que itens com match fraco "roubem"
+  // itens do pedido de itens com match forte que aparecem depois na sequência da NF.
+  const melhoresScoresPossiveis = itensReceb.map((item) => {
+    let melhor = 0;
+    for (const pedItem of itensPedido) {
+      const s = calcularScoreAssociacaoNfePedido(item, pedItem);
+      if (s > melhor) melhor = s;
+    }
+    return melhor;
+  });
+  const ordemProcessamento = itensReceb
+    .map((_, idx) => idx)
+    .sort((a, b) => melhoresScoresPossiveis[b] - melhoresScoresPossiveis[a]);
+
+  const resultadosPorIdx = new Array(itensReceb.length);
+
+  for (const idx of ordemProcessamento) {
+    const item = itensReceb[idx];
     const itensCabec = item?.itensCabec || {};
     const itensInfoAdic = item?.itensInfoAdic || {};
     const nSequencia = Number(itensCabec?.nSequencia || idx + 1);
@@ -31033,29 +31061,34 @@ async function montarPlanoAssociacaoNfePedido(numeroNfe, numeroPedido, chaveNfe 
       itensIde.nIdItPedidoExistente = nCodItem;
     }
 
-    previewItens.push({
-      n_sequencia: itensIde.nSequencia,
-      nf_codigo_produto: codigoProdutoRec || null,
-      nf_descricao_produto: descricaoProdutoRec || null,
-      nf_qtde: itensCabec?.nQtdeNFe ?? null,
-      nf_unidade: String(itensCabec?.cUnidadeNfe || '').trim() || null,
-      nf_valor_total: itensCabec?.vTotalItem ?? null,
-      nf_cfop: cfopNf || null,
-      item_servico: servicoCfop.servico,
-      servico_cfop_entrada: servicoCfop.cfopEntrada,
-      pedido_item_encontrado: !!itemPedidoVinculo || servicoCfop.servico,
-      pedido_n_cod_item: Number.isFinite(nCodItem) && nCodItem > 0 ? nCodItem : null,
-      pedido_codigo_produto: String(itemPedidoVinculo?.c_produto || '').trim() || null,
-      pedido_descricao_produto: String(itemPedidoVinculo?.c_descricao || '').trim() || null,
-      pedido_qtde: itemPedidoVinculo?.n_qtde ?? null,
-      pedido_unidade: String(itemPedidoVinculo?.c_unidade || '').trim() || null,
-      pedido_valor_total: itemPedidoVinculo?.n_val_tot ?? null,
-      criterio_match: criterioMatch,
-      score_match: scoreMatch
-    });
+    resultadosPorIdx[idx] = {
+      itensIde,
+      previewItem: {
+        n_sequencia: itensIde.nSequencia,
+        nf_codigo_produto: codigoProdutoRec || null,
+        nf_descricao_produto: descricaoProdutoRec || null,
+        nf_qtde: itensCabec?.nQtdeNFe ?? null,
+        nf_unidade: String(itensCabec?.cUnidadeNfe || '').trim() || null,
+        nf_valor_total: itensCabec?.vTotalItem ?? null,
+        nf_cfop: cfopNf || null,
+        item_servico: servicoCfop.servico,
+        servico_cfop_entrada: servicoCfop.cfopEntrada,
+        pedido_item_encontrado: !!itemPedidoVinculo || servicoCfop.servico,
+        pedido_n_cod_item: Number.isFinite(nCodItem) && nCodItem > 0 ? nCodItem : null,
+        pedido_codigo_produto: String(itemPedidoVinculo?.c_produto || '').trim() || null,
+        pedido_descricao_produto: String(itemPedidoVinculo?.c_descricao || '').trim() || null,
+        pedido_qtde: itemPedidoVinculo?.n_qtde ?? null,
+        pedido_unidade: String(itemPedidoVinculo?.c_unidade || '').trim() || null,
+        pedido_valor_total: itemPedidoVinculo?.n_val_tot ?? null,
+        criterio_match: criterioMatch,
+        score_match: scoreMatch
+      }
+    };
+  }
 
-    return { itensIde };
-  });
+  // Reconstrói arrays na ordem original da NF-e
+  const itensRecebimentoEditar = resultadosPorIdx.map((r) => ({ itensIde: r.itensIde }));
+  for (const r of resultadosPorIdx) previewItens.push(r.previewItem);
 
   const itensPedidoInformativos = itensPedido
     .filter(itemPedidoDisponivel)
