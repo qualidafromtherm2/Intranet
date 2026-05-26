@@ -31609,7 +31609,7 @@ app.post('/api/compras/pedidos-omie/nfe-associar-pedido', express.json(), async 
         }
 
         // --- EDITAR cada item: cUnidade + nQtde (do pedido ou override do user) ---
-        // Se conta especial, também aplica codigo_local_estoque
+        // Sempre aplica codigo_local_estoque = ALMOX_LOCAL_PADRAO para itens físicos (não-serviço)
         itensEditarEstoque = plano.itensRecebimentoEditar.map(itemEditar => {
           const nSeq = itemEditar.itensIde?.nSequencia;
           const nIdItPed = itemEditar.itensIde?.nIdItPedidoExistente;
@@ -31619,11 +31619,13 @@ app.post('/api/compras/pedidos-omie/nfe-associar-pedido', express.json(), async 
           const override = overrideMap.get(nSeq);
           const cUnidadeFinal = override?.cUnidade || cUnidadePedido || null;
 
-          const ajustes = {};
-          if (aplicarEstoqueEspecial) ajustes.codigo_local_estoque = ESTOQUE_LOCAL_ESPECIAL;
-          if (cUnidadeFinal) ajustes.cUnidade = cUnidadeFinal;
           const previewItem = (plano?.itens_preview || []).find(p => p.n_sequencia === nSeq);
-          const cfopServicoEntrada = previewItem?.item_servico ? previewItem?.servico_cfop_entrada : null;
+          const isServico = !!(previewItem?.item_servico);
+          const cfopServicoEntrada = isServico ? previewItem?.servico_cfop_entrada : null;
+
+          const ajustes = {};
+          if (!isServico) ajustes.codigo_local_estoque = Number(ALMOX_LOCAL_PADRAO);
+          if (cUnidadeFinal) ajustes.cUnidade = cUnidadeFinal;
           if (cfopServicoEntrada || cfopCalculado) ajustes.cCFOPEntrada = cfopServicoEntrada || cfopCalculado;
           // Nota: nQtde não é campo válido em itensAjustes da Omie
 
