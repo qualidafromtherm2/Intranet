@@ -3099,6 +3099,11 @@ let solicitacoesTransferencias = [];
 let solicitacoesTransferenciasLoaded = false;
 let solicitacoesTransferenciasCarregando = false;
 
+let ajusteLista = [];
+let solicitacoesAjustes = [];
+let solicitacoesAjustesLoaded = false;
+let solicitacoesAjustesCarregando = false;
+
 // === PATCH GLOBAL DO FETCH (garante cookie da sessão em TODAS as requests) ===
 (function hardenFetchCredentials(){
   const _fetch = window.fetch;
@@ -6212,6 +6217,10 @@ else if (nome === 'transferencia') {
   // Renderiza lista de itens selecionados
   window.renderTransferenciaLista?.();
 }
+else if (nome === 'ajuste-estoque') {
+  await carregarLocaisEstoque();
+  renderAjusteLista();
+}
 else if (nome === 'armazem3d') {
   initArmazem3D();
 }
@@ -6506,12 +6515,13 @@ function formatarLocalEstoqueLabel(locOuCodigo) {
 function preencherTransferLocais() {
   const selects = [
     document.getElementById('transferOrigem'),
-    document.getElementById('transferDestino')
+    document.getElementById('transferDestino'),
+    document.getElementById('ajusteLocal')
   ].filter(Boolean);
 
   selects.forEach(sel => {
     const current = sel.value;
-    const isOrigem = sel.id === 'transferOrigem';
+    const isOrigem = sel.id === 'transferOrigem' || sel.id === 'ajusteLocal';
     const preferido = isOrigem ? TRANSFER_DEFAULT_ORIGEM : TRANSFER_DEFAULT_DESTINO;
     sel.innerHTML = '<option value="">Selecione…</option>';
     transferLocais.forEach(loc => {
@@ -7042,6 +7052,11 @@ document.getElementById('menu-armazens').addEventListener('click', e => {
 document.getElementById('menu-solicitacao-transferencia')?.addEventListener('click', async e => {
   e.preventDefault();
   await window.openSolicitacoesTransferencia?.();
+});
+
+document.getElementById('menu-solicitacao-ajuste')?.addEventListener('click', async e => {
+  e.preventDefault();
+  await window.openSolicitacoesAjuste?.();
 });
 
 function abrirLocalizarNfePeloMenuRecebimento() {
@@ -18673,6 +18688,24 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
   }
 
+  const transferImportarListaBtn = document.getElementById('transferImportarListaBtn');
+  if (transferImportarListaBtn && !transferImportarListaBtn.__transferBound) {
+    transferImportarListaBtn.__transferBound = true;
+    transferImportarListaBtn.addEventListener('click', (ev) => {
+      ev.preventDefault();
+      abrirModalImportacaoTransferencia();
+    });
+  }
+
+  const ajusteImportarListaBtn = document.getElementById('ajusteImportarListaBtn');
+  if (ajusteImportarListaBtn && !ajusteImportarListaBtn.__ajusteBound) {
+    ajusteImportarListaBtn.__ajusteBound = true;
+    ajusteImportarListaBtn.addEventListener('click', (ev) => {
+      ev.preventDefault();
+      abrirModalImportacaoAjuste();
+    });
+  }
+
   if (transferAcaoBtn && !transferAcaoBtn.__transferBound) {
     transferAcaoBtn.__transferBound = true;
     transferAcaoBtn.addEventListener('click', async () => {
@@ -18958,18 +18991,17 @@ document.addEventListener('DOMContentLoaded', async () => {
         return;
       }
 
-      const motivo = prompt('Informe o motivo para reprovar/excluir esta solicitaÃ§Ã£o:', '');
-      if (motivo === null) return;
+      if (!confirm('Reprovar esta solicitação de transferência?')) return;
 
       const originalLabel = btn.textContent;
       btn.disabled = true;
-      btn.textContent = 'Reprovandoâ€¦';
+      btn.textContent = 'Reprovando...';
 
       try {
         const resp = await fetch(`/api/transferencias/${id}/reprovar`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ reprovadoPor: usuario, motivo })
+          body: JSON.stringify({ reprovadoPor: usuario, motivo: '' })
         });
 
         const json = await resp.json().catch(() => ({}));
@@ -18989,6 +19021,385 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
   }
   carregarLocaisEstoque();
+
+  // ─── AJUSTE DE ESTOQUE (ENT/SAI) ─────────────────────────────────────────
+
+  function updateAjusteControlsState() {
+    const btn = document.getElementById('ajusteBtn');
+    if (!btn) return;
+    const local = document.getElementById('ajusteLocal')?.value || '';
+    const temItens = ajusteLista.some(i => i.selecionado);
+    btn.disabled = !local || !temItens;
+  }
+
+  function renderAjusteLista() {
+    const tbody = document.getElementById('ajusteTbody');
+    if (!tbody) return;
+    tbody.innerHTML = '';
+
+    const semItens = !ajusteLista.length;
+    if (semItens) {
+      tbody.innerHTML = '<tr class="transferencia-placeholder"><td colspan="8">Nenhum item selecionado para ajuste.</td></tr>';
+      updateAjusteControlsState();
+      return;
+    }
+
+    ajusteLista.forEach((item, idx) => {
+      const tr = document.createElement('tr');
+      const quantidade = Number(normalizaNumeroParaApi(item.qtd));
+      const cmcVal = Number(normalizaNumeroParaApi(item.cmc));
+      tr.innerHTML = `
+        <td class="sel-col">
+          <input type="checkbox" class="ajuste-sel-check" data-idx="${idx}" ${item.selecionado ? 'checked' : ''} />
+        </td>
+        <td>${escapeHtml(item.codigo || '')}</td>
+        <td class="desc-cell" title="${escapeHtml(item.descricao || '')}">${escapeHtml(truncateText(item.descricao || '', 40))}</td>
+        <td>${escapeHtml(item.codOmie || '')}</td>
+        <td><input type="number" class="transfer-qtd-input ajuste-qtd-input" data-idx="${idx}" min="0.0001" step="0.01" value="${Number.isFinite(quantidade) ? quantidade : 1}" style="width:80px;" /></td>
+        <td><input type="number" class="transfer-qtd-input ajuste-cmc-input" data-idx="${idx}" min="0" step="0.0001" value="${Number.isFinite(cmcVal) ? cmcVal : ''}" placeholder="CMC" title="Custo médio — obrigatório" style="width:90px;" /></td>
+        <td class="num">${escapeHtml(item.fisico != null ? String(item.fisico) : '-')}</td>
+        <td class="num">${escapeHtml(item.saldo != null ? String(item.saldo) : '-')}</td>
+      `;
+      tbody.appendChild(tr);
+    });
+
+    // Bind checkbox
+    tbody.querySelectorAll('.ajuste-sel-check').forEach(chk => {
+      chk.addEventListener('change', () => {
+        const i = Number(chk.dataset.idx);
+        if (ajusteLista[i]) ajusteLista[i].selecionado = chk.checked;
+        updateAjusteControlsState();
+      });
+    });
+
+    // Bind qtd input
+    tbody.querySelectorAll('.ajuste-qtd-input').forEach(inp => {
+      inp.addEventListener('input', () => {
+        const i = Number(inp.dataset.idx);
+        const v = sanitizeQtd(inp.value);
+        if (ajusteLista[i]) ajusteLista[i].qtd = v ?? 1;
+      });
+    });
+
+    // Bind cmc input
+    tbody.querySelectorAll('.ajuste-cmc-input').forEach(inp => {
+      inp.addEventListener('input', () => {
+        const i = Number(inp.dataset.idx);
+        const v = normalizaNumeroParaApi(inp.value);
+        if (ajusteLista[i]) ajusteLista[i].cmc = v;
+      });
+    });
+
+    updateAjusteControlsState();
+  }
+
+  window.renderAjusteLista = renderAjusteLista;
+
+  function adicionarItemAjuste(item) {
+    if (!item) return;
+    const codigo = String(item.codigo || '').trim();
+    if (!codigo) return;
+    const normalizado = {
+      codigo,
+      descricao: String(item.descricao || '').trim(),
+      fisico: item.fisico ?? '-',
+      saldo: item.saldo ?? '-',
+      cmc: item.cmc ?? 0,
+      codOmie: String(item.codOmie || '').trim(),
+      selecionado: true,
+      qtd: sanitizeQtd(item.qtd ?? 1)
+    };
+    const idx = ajusteLista.findIndex(i => i.codigo === codigo);
+    if (idx >= 0) {
+      ajusteLista[idx] = { ...ajusteLista[idx], ...normalizado, qtd: sanitizeQtd(ajusteLista[idx].qtd ?? normalizado.qtd), selecionado: true };
+    } else {
+      ajusteLista.push(normalizado);
+    }
+    renderAjusteLista();
+  }
+
+  // Ajuste local select change
+  const ajusteLocalSel = document.getElementById('ajusteLocal');
+  if (ajusteLocalSel && !ajusteLocalSel.__ajusteBound) {
+    ajusteLocalSel.__ajusteBound = true;
+    ajusteLocalSel.addEventListener('change', updateAjusteControlsState);
+  }
+
+  // Ajuste search
+  const ajusteSearchInput   = document.getElementById('ajusteSearch');
+  const ajusteSearchDropdown = document.querySelector('#conteudo-ajuste-estoque .transfer-search-dropdown');
+  const ajusteSearchResults = document.getElementById('ajusteSearchResults');
+  if (ajusteSearchInput && ajusteSearchResults && !ajusteSearchInput.__ajusteBound) {
+    ajusteSearchInput.__ajusteBound = true;
+    let debounceId = null;
+
+    const hideAjusteResults = () => {
+      if (debounceId) { clearTimeout(debounceId); debounceId = null; }
+      if (ajusteSearchDropdown) ajusteSearchDropdown.style.display = 'none';
+      ajusteSearchResults.innerHTML = '';
+    };
+
+    ajusteSearchInput.addEventListener('input', () => {
+      const termo = ajusteSearchInput.value.trim();
+      if (debounceId) clearTimeout(debounceId);
+      if (termo.length < 2) { hideAjusteResults(); return; }
+
+      debounceId = setTimeout(async () => {
+        if (ajusteSearchDropdown) ajusteSearchDropdown.style.display = 'block';
+        ajusteSearchResults.innerHTML = '<li class="info">Buscando…</li>';
+        try {
+          const resp = await fetch(`/api/produtos/search?q=${encodeURIComponent(termo)}&limit=40`, { credentials: 'include' });
+          const json = await resp.json();
+          const itens = Array.isArray(json?.data) ? json.data : [];
+          if (!itens.length) { ajusteSearchResults.innerHTML = '<li class="no-results">Nenhum item encontrado</li>'; return; }
+          await ensureAlmoxDadosCarregados().catch(() => {});
+          ajusteSearchResults.innerHTML = '';
+          itens.forEach(prod => {
+            const li = document.createElement('li');
+            li.dataset.codigo = prod.codigo || '';
+            li.dataset.descricao = prod.descricao || '';
+            li.innerHTML = `<span class="codigo">${escapeHtml(prod.codigo || '')}</span><span class="descricao">${escapeHtml(prod.descricao || '')}</span>`;
+            ajusteSearchResults.appendChild(li);
+          });
+          const first = ajusteSearchResults.firstElementChild;
+          const itemH = first ? (first.getBoundingClientRect().height || 44) : 44;
+          const maxH = itemH * 5;
+          ajusteSearchResults.style.maxHeight = `${maxH}px`;
+          ajusteSearchResults.style.height = itens.length * itemH > maxH ? `${maxH}px` : 'auto';
+          ajusteSearchResults.style.overflowY = itens.length * itemH > maxH ? 'auto' : 'hidden';
+          if (ajusteSearchDropdown) ajusteSearchDropdown.style.display = 'block';
+        } catch (err) {
+          console.error('[ajuste] autocomplete', err);
+          ajusteSearchResults.innerHTML = '<li class="error">Erro ao buscar</li>';
+        }
+      }, 150);
+    });
+
+    ajusteSearchResults.addEventListener('click', async (ev) => {
+      const li = ev.target.closest('li[data-codigo]');
+      if (!li || li.classList.contains('info') || li.classList.contains('error') || li.classList.contains('no-results')) return;
+      const codigo = li.dataset.codigo || '';
+      const descricao = li.dataset.descricao || '';
+      await ensureAlmoxDadosCarregados().catch(() => {});
+      const extra = almoxAllDados.find(i => i.codigo === codigo) || {};
+      adicionarItemAjuste({ codigo, descricao, fisico: extra.fisico, saldo: extra.saldo, cmc: extra.cmc ?? 0, codOmie: extra.codOmie || '', qtd: 1 });
+      ajusteSearchInput.value = '';
+      hideAjusteResults();
+      showArmazemTab('ajuste-estoque');
+    });
+
+    ajusteSearchInput.addEventListener('keydown', (ev) => { if (ev.key === 'Escape') { ajusteSearchInput.value = ''; hideAjusteResults(); } });
+    ajusteSearchInput.addEventListener('blur', () => { setTimeout(() => { if (!document.activeElement?.closest('#ajusteSearchResults')) hideAjusteResults(); }, 150); });
+    document.addEventListener('click', (ev) => { if (ev.target !== ajusteSearchInput && !ajusteSearchDropdown?.contains(ev.target)) hideAjusteResults(); });
+  }
+
+  // Ajuste submit button
+  const ajusteBtn = document.getElementById('ajusteBtn');
+  if (ajusteBtn && !ajusteBtn.__ajusteBound) {
+    ajusteBtn.__ajusteBound = true;
+    ajusteBtn.addEventListener('click', async () => {
+      const tipoSel = document.getElementById('ajusteTipo');
+      const localSel = document.getElementById('ajusteLocal');
+      const dataMov  = document.getElementById('ajusteDataMov');
+      const obsTa    = document.getElementById('ajusteObs');
+      const usuario  = String(document.getElementById('userNameDisplay')?.textContent || '').trim();
+
+      const tipo_operacao = String(tipoSel?.value || '').trim();
+      const local_estoque = String(localSel?.value || '').trim();
+      const local_nome    = String(localSel?.selectedOptions?.[0]?.textContent || '').trim() || null;
+      const data_movimentacao = dataMov?.value || new Date().toISOString().slice(0, 10);
+      const obs = String(obsTa?.value || '').trim() || null;
+
+      if (!['ENT','SAI'].includes(tipo_operacao)) return alert('Selecione o tipo (ENT ou SAI).');
+      if (!local_estoque) return alert('Selecione o local de estoque.');
+
+      const itensSel = ajusteLista.filter(i => i.selecionado);
+      if (!itensSel.length) return alert('Nenhum item selecionado para o ajuste.');
+
+      const payload = {
+        tipo_operacao,
+        local_estoque,
+        local_nome,
+        data_movimentacao,
+        solicitante: usuario || null,
+        obs,
+        itens: itensSel.map(item => ({
+          codigo: item.codigo,
+          descricao: item.descricao || null,
+          qtd: normalizaNumeroParaApi(item.qtd),
+          cmc: normalizaNumeroParaApi(item.cmc),
+          codigo_produto: item.codOmie || item.codigo_produto || null,
+          codOmie: item.codOmie || null
+        }))
+      };
+
+      const originalHtml = ajusteBtn.innerHTML;
+      ajusteBtn.disabled = true;
+      ajusteBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
+
+      try {
+        const resp = await fetch('/api/ajustes', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+        let resposta;
+        try { resposta = await resp.json(); } catch { throw new Error('Resposta inválida do servidor.'); }
+        if (!resp.ok || !resposta?.ok) throw new Error(resposta?.error || resposta?.detail || `Falha ao registrar ajuste (HTTP ${resp.status}).`);
+        alert(`Ajuste ${tipo_operacao} registrado com sucesso!`);
+        ajusteLista = [];
+        renderAjusteLista();
+        updateAjusteControlsState();
+        solicitacoesAjustesLoaded = false;
+        carregarSolicitacoesAjustes(true).catch(() => {});
+      } catch (err) {
+        console.error('[ajuste] registrar', err);
+        alert(`Falha ao registrar ajuste: ${err?.message || err}`);
+      } finally {
+        ajusteBtn.innerHTML = originalHtml;
+        ajusteBtn.disabled = false;
+        updateAjusteControlsState();
+      }
+    });
+  }
+
+  // Ajuste approve/reject handlers
+  const solicitacoesAjusteTbody = document.getElementById('solicitacoesAjusteTbody');
+  if (solicitacoesAjusteTbody && !solicitacoesAjusteTbody.__approveBound) {
+    solicitacoesAjusteTbody.__approveBound = true;
+    solicitacoesAjusteTbody.addEventListener('click', async (ev) => {
+      const btn = ev.target.closest('.btn-approve-ajuste');
+      if (!btn) return;
+      const id = Number(btn.dataset.id);
+      if (!Number.isInteger(id)) return alert('ID inválido.');
+      const usuario = String(document.getElementById('userNameDisplay')?.textContent || '').trim();
+      if (!usuario || usuario === 'Usuário' || usuario === '—') return alert('Usuário não identificado. Faça login novamente.');
+      const originalLabel = btn.textContent;
+      btn.disabled = true;
+      btn.textContent = 'Executando…';
+      try {
+        const resp = await fetch(`/api/ajustes/${id}/aprovar`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ aprovadoPor: usuario }) });
+        const json = await resp.json().catch(() => ({}));
+        if (!resp.ok || !json?.ok) throw new Error(json?.error || `Falha ao aprovar (HTTP ${resp.status}).`);
+        const msg = json?.descricao_status || json?.mensagem || 'Ajuste executado com sucesso.';
+        alert(msg);
+        await carregarSolicitacoesAjustes(true);
+      } catch (err) {
+        console.error('[ajuste] aprovar', err);
+        alert(err?.message || 'Falha ao executar o ajuste.');
+        btn.disabled = false;
+        btn.textContent = originalLabel;
+      }
+    });
+  }
+  if (solicitacoesAjusteTbody && !solicitacoesAjusteTbody.__rejectBound) {
+    solicitacoesAjusteTbody.__rejectBound = true;
+    solicitacoesAjusteTbody.addEventListener('click', async (ev) => {
+      const btn = ev.target.closest('.btn-reject-ajuste');
+      if (!btn) return;
+      const id = Number(btn.dataset.id);
+      if (!Number.isInteger(id)) return alert('ID inválido.');
+      const usuario = String(document.getElementById('userNameDisplay')?.textContent || '').trim();
+      if (!usuario || usuario === 'Usuário' || usuario === '—') return alert('Usuário não identificado. Faça login novamente.');
+      const motivo = prompt('Informe o motivo para reprovar este ajuste:', '');
+      if (motivo === null) return;
+      const originalLabel = btn.textContent;
+      btn.disabled = true;
+      btn.textContent = 'Reprovando…';
+      try {
+        const resp = await fetch(`/api/ajustes/${id}/reprovar`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ reprovadoPor: usuario, motivo }) });
+        const json = await resp.json().catch(() => ({}));
+        if (!resp.ok || !json?.ok) throw new Error(json?.error || `Falha ao reprovar (HTTP ${resp.status}).`);
+        alert('Ajuste reprovado.');
+        await carregarSolicitacoesAjustes(true);
+      } catch (err) {
+        console.error('[ajuste] reprovar', err);
+        alert(err?.message || 'Falha ao reprovar o ajuste.');
+        btn.disabled = false;
+        btn.textContent = originalLabel;
+      }
+    });
+  }
+
+  // Ajuste approve-all button
+  const ajusteApproveAllBtn = document.getElementById('solicitacoesAjusteApproveAll');
+  if (ajusteApproveAllBtn && !ajusteApproveAllBtn.__ajusteBound) {
+    ajusteApproveAllBtn.__ajusteBound = true;
+    ajusteApproveAllBtn.addEventListener('click', async () => {
+      const pendentes = solicitacoesAjustes.filter(a => {
+        const s = String(a.status || '').toLowerCase();
+        return s !== 'executado' && s !== 'reprovado';
+      });
+      if (!pendentes.length) return alert('Nenhuma solicitação pendente de ajuste.');
+      const usuario = String(document.getElementById('userNameDisplay')?.textContent || '').trim();
+      if (!usuario || usuario === 'Usuário' || usuario === '—') return alert('Usuário não identificado.');
+      if (!confirm(`Aprovar ${pendentes.length} ajuste(s) pendente(s)?`)) return;
+      ajusteApproveAllBtn.disabled = true;
+      const originalLabel = ajusteApproveAllBtn.textContent;
+      const erros = [];
+      let aprovados = 0;
+      for (const a of pendentes) {
+        aprovados++;
+        ajusteApproveAllBtn.textContent = `Aprovando ${aprovados}/${pendentes.length}…`;
+        try {
+          const resp = await fetch(`/api/ajustes/${a.id}/aprovar`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ aprovadoPor: usuario }) });
+          const json = await resp.json().catch(() => ({}));
+          if (!resp.ok || !json?.ok) erros.push(`ID ${a.id}: ${json?.error || 'Erro'}`);
+        } catch (err) {
+          erros.push(`ID ${a.id}: ${err?.message || 'Erro de rede'}`);
+        }
+      }
+      ajusteApproveAllBtn.textContent = originalLabel;
+      ajusteApproveAllBtn.disabled = false;
+      if (erros.length) alert(`Concluído com erros:\n${erros.join('\n')}`);
+      else alert('Todos os ajustes pendentes foram executados com sucesso!');
+      await carregarSolicitacoesAjustes(true);
+    });
+  }
+
+  // Ajuste refresh button
+  const ajusteRefreshBtn = document.getElementById('solicitacoesAjusteRefresh');
+  if (ajusteRefreshBtn && !ajusteRefreshBtn.__ajusteBound) {
+    ajusteRefreshBtn.__ajusteBound = true;
+    ajusteRefreshBtn.addEventListener('click', () => carregarSolicitacoesAjustes(true));
+  }
+
+  // Transfer approve-all button
+  const transferApproveAllBtn = document.getElementById('solicitacoesTransferApproveAll');
+  if (transferApproveAllBtn && !transferApproveAllBtn.__transferBound) {
+    transferApproveAllBtn.__transferBound = true;
+    transferApproveAllBtn.addEventListener('click', async () => {
+      const pendentes = solicitacoesTransferencias.filter(t => {
+        const s = String(t.status || '').toLowerCase();
+        return s !== 'transferido' && s !== 'reprovado';
+      });
+      if (!pendentes.length) return alert('Nenhuma solicitação pendente de transferência.');
+      const usuario = String(document.getElementById('userNameDisplay')?.textContent || '').trim();
+      if (!usuario || usuario === 'Usuário' || usuario === '—') return alert('Usuário não identificado.');
+      if (!confirm(`Aprovar ${pendentes.length} transferência(s) pendente(s)?`)) return;
+      transferApproveAllBtn.disabled = true;
+      const originalLabel = transferApproveAllBtn.textContent;
+      const erros = [];
+      let aprovados = 0;
+      for (const t of pendentes) {
+        aprovados++;
+        transferApproveAllBtn.textContent = `Aprovando ${aprovados}/${pendentes.length}…`;
+        try {
+          const resp = await fetch(`/api/transferencias/${t.id}/aprovar`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ aprovadoPor: usuario })
+          });
+          const json = await resp.json().catch(() => ({}));
+          if (!resp.ok || !json?.ok) erros.push(`ID ${t.id}: ${json?.error || 'Erro'}`);
+        } catch (err) {
+          erros.push(`ID ${t.id}: ${err?.message || 'Erro de rede'}`);
+        }
+      }
+      transferApproveAllBtn.textContent = originalLabel;
+      transferApproveAllBtn.disabled = false;
+      if (erros.length) alert(`Concluído com erros:\n${erros.join('\n')}`);
+      else alert('Todas as transferências pendentes foram executadas com sucesso!');
+      await carregarSolicitacoesTransferencias(true);
+    });
+  }
+
   // abre o painel Início como padrão
   showMainTab('paginaInicio');
 
@@ -21071,6 +21482,774 @@ async function openSolicitacoesTransferencia(forceReload = false) {
 }
 
 window.openSolicitacoesTransferencia = openSolicitacoesTransferencia;
+
+// ─── AJUSTE DE ESTOQUE — renderizar e carregar ───────────────────────────────
+
+function renderSolicitacoesAjustes() {
+  const tbody = document.getElementById('solicitacoesAjusteTbody');
+  if (!tbody) return;
+  tbody.innerHTML = '';
+
+  if (!solicitacoesAjustes.length) {
+    const tr = document.createElement('tr');
+    tr.innerHTML = '<td colspan="13">Nenhuma solicitação registrada.</td>';
+    tbody.appendChild(tr);
+    return;
+  }
+
+  solicitacoesAjustes.forEach(item => {
+    const quantidade = Number(item.qtd);
+    const cmc = Number(item.cmc);
+    const qtdFormatada = Number.isFinite(quantidade) ? fmtQtd.format(quantidade) : '-';
+    const cmcFormatado = Number.isFinite(cmc) ? `R$ ${fmtBR.format(cmc)}` : '-';
+    const dataMovimentacao = item.data_movimentacao
+      ? new Date(item.data_movimentacao).toLocaleDateString('pt-BR', { timeZone: 'UTC' })
+      : '-';
+    const descricaoCompleta = String(item.descricao || '');
+    const obsTexto = String(item.obs || '');
+    const statusAtual = String(item.status || '');
+    const localLabel = formatarLocalEstoqueLabel({ codigo_local_estoque: item.local_estoque, descricao: item.local_nome }) || item.local_estoque || '';
+    const podeAprovar = statusAtual.toLowerCase() !== 'executado' && statusAtual.toLowerCase() !== 'reprovado';
+    const idEsc = escapeHtml(String(item.id ?? ''));
+    const botaoHtml = podeAprovar
+      ? `<div style="display:flex;gap:6px;flex-wrap:wrap;">
+           <button type="button" class="btn tiny btn-approve-ajuste" data-id="${idEsc}">Executar</button>
+           <button type="button" class="btn tiny btn-reject-ajuste" data-id="${idEsc}" style="border-color:#ef4444;color:#fecaca;">Reprovar</button>
+         </div>`
+      : `<span>${escapeHtml(statusAtual)}</span>`;
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td>${idEsc}</td>
+      <td><strong>${escapeHtml(item.tipo_operacao || '')}</strong></td>
+      <td>${escapeHtml(item.codigo || '')}</td>
+      <td class="desc-cell" title="${escapeHtml(descricaoCompleta)}">${escapeHtml(truncateText(descricaoCompleta, 40))}</td>
+      <td class="num">${escapeHtml(qtdFormatada)}</td>
+      <td>${escapeHtml(dataMovimentacao)}</td>
+      <td class="num">${escapeHtml(cmcFormatado)}</td>
+      <td>${escapeHtml(localLabel)}</td>
+      <td class="desc-cell" title="${escapeHtml(obsTexto)}">${escapeHtml(truncateText(obsTexto, 30))}</td>
+      <td>${escapeHtml(item.solicitante || '')}</td>
+      <td>${escapeHtml(statusAtual)}</td>
+      <td>${escapeHtml(item.aprovado_por || '-')}</td>
+      <td>${botaoHtml}</td>`;
+    tbody.appendChild(tr);
+  });
+}
+
+async function carregarSolicitacoesAjustes(forceReload = false) {
+  if (solicitacoesAjustesCarregando) return;
+  if (solicitacoesAjustesLoaded && !forceReload) {
+    renderSolicitacoesAjustes();
+    return;
+  }
+
+  const spinner = document.getElementById('solicitacoesAjusteSpinner');
+  const tbody = document.getElementById('solicitacoesAjusteTbody');
+  if (!tbody) return;
+
+  solicitacoesAjustesCarregando = true;
+  if (spinner) spinner.style.display = 'block';
+  tbody.innerHTML = '<tr><td colspan="13">Carregando solicitações…</td></tr>';
+
+  try {
+    const resp = await fetch('/api/ajustes');
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    const json = await resp.json();
+    if (!json.ok) throw new Error(json.error || 'Falha ao carregar lista.');
+
+    const registros = Array.isArray(json.registros) ? json.registros : [];
+    solicitacoesAjustes = registros.filter(item => {
+      const status = String(item.status || '').toLowerCase();
+      return status !== 'executado' && status !== 'reprovado';
+    });
+    solicitacoesAjustesLoaded = true;
+    renderSolicitacoesAjustes();
+  } catch (err) {
+    console.error('[ajustes] falha ao carregar solicitações', err);
+    tbody.innerHTML = '<tr><td colspan="13">⚠️ Falha ao carregar solicitações de ajuste.</td></tr>';
+  } finally {
+    solicitacoesAjustesCarregando = false;
+    if (spinner) spinner.style.display = 'none';
+  }
+}
+
+async function openSolicitacoesAjuste(forceReload = false) {
+  if (typeof hideKanban === 'function') hideKanban();
+  if (typeof hideArmazem === 'function') hideArmazem();
+  window.clearMainContainer?.();
+  const prodTabs = document.getElementById('produtoTabs');
+  if (prodTabs) prodTabs.style.display = 'none';
+  const kanbanTabs = document.getElementById('kanbanTabs');
+  if (kanbanTabs) kanbanTabs.style.display = 'none';
+  const pane = document.getElementById('solicitacaoAjuste');
+  if (pane) window.showOnlyInMain?.(pane);
+  document.querySelectorAll('.left-side .side-menu a').forEach(a => a.classList.remove('is-active'));
+  document.getElementById('menu-solicitacao-ajuste')?.classList.add('is-active');
+  await carregarSolicitacoesAjustes(forceReload);
+}
+
+window.openSolicitacoesAjuste = openSolicitacoesAjuste;
+
+// ─── AJUSTE — IMPORTAÇÃO EM MASSA ────────────────────────────────────────────
+
+function ensureAjusteImportModal() {
+  let modal = document.getElementById('ajusteImportModal');
+  if (modal) return modal;
+
+  modal = document.createElement('div');
+  modal.id = 'ajusteImportModal';
+  modal.style.cssText = 'position:fixed;inset:0;z-index:9999;display:none;align-items:center;justify-content:center;background:rgba(3,7,18,.72);backdrop-filter:blur(4px);';
+  modal.innerHTML = `
+    <div style="width:min(900px,calc(100vw - 28px));max-height:calc(100vh - 42px);overflow:auto;background:#121722;border:1px solid #2b3548;border-radius:18px;box-shadow:0 24px 70px rgba(0,0,0,.45);color:#e5e7eb;">
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:18px 22px;border-bottom:1px solid #253044;">
+        <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+          <div style="font-size:17px;font-weight:800;">Importar movimentações</div>
+          <div style="display:flex;gap:4px;background:#0b1020;border-radius:8px;padding:3px;">
+            <button id="ajusteImportTabImportar" type="button"
+              style="padding:4px 12px;border-radius:6px;font-size:12px;font-weight:700;border:none;cursor:pointer;background:#1e3a5f;color:#93c5fd;">
+              <i class="fa-solid fa-list"></i> Importar lista
+            </button>
+            <button id="ajusteImportTabReconciliar" type="button"
+              style="padding:4px 12px;border-radius:6px;font-size:12px;font-weight:700;border:none;cursor:pointer;background:transparent;color:#6b7280;">
+              <i class="fa-solid fa-scale-balanced"></i> Reconciliar contagem
+            </button>
+          </div>
+        </div>
+        <button id="ajusteImportClose" type="button" class="icon-btn" aria-label="Fechar"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+
+      <!-- ── ABA: IMPORTAR LISTA ── -->
+      <div id="ajusteImportPanelImportar" style="padding:18px 22px;display:grid;gap:14px;">
+        <div style="font-size:11px;color:#64748b;line-height:1.7;">
+          <strong style="color:#cbd5e1;">ENT/SAI:</strong>
+          <code style="background:#0b1020;padding:1px 5px;border-radius:4px;">CODIGO &lt;TAB&gt; ENT|SAI &lt;TAB&gt; QTD</code>
+          + opcionais: <code style="background:#0b1020;padding:1px 5px;border-radius:4px;">&lt;TAB&gt; ARMAZEM &lt;TAB&gt; CMC</code>
+          &nbsp;|&nbsp;
+          <strong style="color:#cbd5e1;">TRF:</strong>
+          <code style="background:#0b1020;padding:1px 5px;border-radius:4px;">CODIGO &lt;TAB&gt; TRF &lt;TAB&gt; QTD &lt;TAB&gt; ORIGEM &lt;TAB&gt; DESTINO</code>
+        </div>
+        <textarea id="ajusteImportTextarea" rows="12" spellcheck="false"
+          placeholder="05.MP.I.80044&#9;ENT&#9;100&#10;09.MC.N.10106&#9;SAI&#9;50&#10;03.MP.C.20012&#9;TRF&#9;200&#9;10717096386&#9;10717096400"
+          style="width:100%;resize:vertical;min-height:190px;background:#0b1020;color:#e5e7eb;border:1px solid #334155;border-radius:12px;padding:12px;font-family:Consolas,monospace;font-size:13px;line-height:1.45;tab-size:20;"></textarea>
+        <details id="ajusteImportDefaults" open>
+          <summary style="cursor:pointer;font-size:12px;font-weight:700;color:#9ca3af;padding:4px 0;user-select:none;">▸ Valores padrão (quando colunas forem omitidas)</summary>
+          <div style="display:grid;grid-template-columns:1fr 1fr 160px 1fr;gap:12px;align-items:end;padding-top:10px;">
+            <label style="display:grid;gap:5px;font-size:12px;font-weight:700;color:#9ca3af;">
+              Tipo padrão <span style="font-weight:400;">(ENT/SAI — se col.2 omitida)</span>
+              <select id="ajusteImportTipo" class="transfer-select">
+                <option value="ENT">ENT — Entrada</option>
+                <option value="SAI">SAI — Saída</option>
+              </select>
+            </label>
+            <label style="display:grid;gap:5px;font-size:12px;font-weight:700;color:#9ca3af;">
+              Armazém padrão <span style="font-weight:400;">(ENT/SAI — col.4)</span>
+              <select id="ajusteImportLocal" class="transfer-select"><option value="">Selecione…</option></select>
+            </label>
+            <label style="display:grid;gap:5px;font-size:12px;font-weight:700;color:#9ca3af;">
+              Data mov.
+              <input id="ajusteImportDataMov" type="date" class="transfer-select">
+            </label>
+            <label style="display:grid;gap:5px;font-size:12px;font-weight:700;color:#9ca3af;">
+              Observação
+              <input id="ajusteImportObs" type="text" class="transfer-select" placeholder="Ajuste em massa…">
+            </label>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;padding-top:10px;">
+            <label style="display:grid;gap:5px;font-size:12px;font-weight:700;color:#9ca3af;">
+              Origem padrão TRF <span style="font-weight:400;">(col.4 para TRF)</span>
+              <select id="ajusteImportTrfOrigem" class="transfer-select"><option value="">Selecione…</option></select>
+            </label>
+            <label style="display:grid;gap:5px;font-size:12px;font-weight:700;color:#9ca3af;">
+              Destino padrão TRF <span style="font-weight:400;">(col.5 para TRF)</span>
+              <select id="ajusteImportTrfDestino" class="transfer-select"><option value="">Selecione…</option></select>
+            </label>
+          </div>
+        </details>
+        <div id="ajusteImportCmcPanel" style="display:none;border:1px solid #253044;border-radius:10px;overflow:hidden;">
+          <div style="padding:8px 14px;background:#0b1020;font-size:11px;font-weight:700;color:#64748b;letter-spacing:.06em;display:flex;align-items:center;justify-content:space-between;">
+            <span>VERIFICAÇÃO DE CMC</span>
+            <span id="ajusteImportCmcSummary"></span>
+          </div>
+          <div id="ajusteImportCmcRows" style="padding:6px 14px 10px;max-height:180px;overflow:auto;font-size:12px;font-family:Consolas,monospace;line-height:1.8;"></div>
+        </div>
+        <div id="ajusteImportFeedback" style="display:none;font-size:12px;line-height:1.55;border-radius:10px;padding:10px 14px;white-space:pre-wrap;"></div>
+        <div style="display:flex;justify-content:flex-end;gap:10px;">
+          <button id="ajusteImportCancel" type="button" class="btn tiny">Cancelar</button>
+          <button id="ajusteImportVerifyCmc" type="button" class="btn tiny" title="Consulta o banco para ver quais produtos têm CMC cadastrado">
+            <i class="fa-solid fa-magnifying-glass"></i> Verificar CMC
+          </button>
+          <button id="ajusteImportApply" type="button" class="btn" style="min-width:160px;">Registrar movimentações</button>
+        </div>
+      </div>
+
+      <!-- ── ABA: RECONCILIAR ── -->
+      <div id="ajusteImportPanelReconciliar" style="display:none;padding:18px 22px;display:none;flex-direction:column;gap:14px;">
+        <div style="font-size:11px;color:#64748b;line-height:1.7;">
+          Cole a sua contagem física. Formato:
+          <code style="background:#0b1020;padding:1px 5px;border-radius:4px;">CODIGO &lt;TAB&gt; QTD_CONTADA</code>
+          — o sistema buscará o estoque atual no banco e calculará ENT/SAI automaticamente.
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr 160px;gap:12px;align-items:end;">
+          <label style="display:grid;gap:5px;font-size:12px;font-weight:700;color:#9ca3af;">
+            Armazém da contagem
+            <select id="ajusteReconLocal" class="transfer-select"><option value="">Selecione…</option></select>
+          </label>
+          <label style="display:grid;gap:5px;font-size:12px;font-weight:700;color:#9ca3af;">
+            Observação para ajuste gerado
+            <input id="ajusteReconObs" type="text" class="transfer-select" placeholder="Inventário físico…">
+          </label>
+          <label style="display:grid;gap:5px;font-size:12px;font-weight:700;color:#9ca3af;">
+            Data mov.
+            <input id="ajusteReconDataMov" type="date" class="transfer-select">
+          </label>
+        </div>
+        <textarea id="ajusteReconTextarea" rows="10" spellcheck="false"
+          placeholder="05.MP.I.80044&#9;120&#10;09.MC.N.10106&#9;0&#10;03.MP.C.20012&#9;85"
+          style="width:100%;resize:vertical;min-height:170px;background:#0b1020;color:#e5e7eb;border:1px solid #334155;border-radius:12px;padding:12px;font-family:Consolas,monospace;font-size:13px;line-height:1.45;tab-size:20;"></textarea>
+        <div id="ajusteReconResultado" style="display:none;">
+          <div style="font-size:11px;font-weight:700;color:#64748b;letter-spacing:.06em;margin-bottom:6px;display:flex;align-items:center;justify-content:space-between;">
+            <span>RESULTADO DA RECONCILIAÇÃO</span>
+            <span id="ajusteReconResumo" style="font-size:11px;"></span>
+          </div>
+          <div style="max-height:280px;overflow:auto;border:1px solid #253044;border-radius:8px;">
+            <table style="width:100%;border-collapse:collapse;font-size:11px;font-family:Consolas,monospace;">
+              <thead>
+                <tr style="background:#0b1020;color:#64748b;text-align:left;">
+                  <th style="padding:6px 8px;font-weight:600;">SEL</th>
+                  <th style="padding:6px 8px;font-weight:600;">CÓDIGO</th>
+                  <th style="padding:6px 8px;font-weight:600;">DESCRIÇÃO</th>
+                  <th style="padding:6px 8px;font-weight:600;text-align:right;">SISTEMA</th>
+                  <th style="padding:6px 8px;font-weight:600;text-align:right;">CONTADO</th>
+                  <th style="padding:6px 8px;font-weight:600;text-align:right;">DIFF</th>
+                  <th style="padding:6px 8px;font-weight:600;">TIPO</th>
+                </tr>
+              </thead>
+              <tbody id="ajusteReconTbody"></tbody>
+            </table>
+          </div>
+        </div>
+        <div id="ajusteReconFeedback" style="display:none;font-size:12px;line-height:1.55;border-radius:10px;padding:10px 14px;white-space:pre-wrap;"></div>
+        <div style="display:flex;justify-content:flex-end;gap:10px;">
+          <button id="ajusteReconCancel" type="button" class="btn tiny">Cancelar</button>
+          <button id="ajusteReconCalcular" type="button" class="btn tiny">
+            <i class="fa-solid fa-calculator"></i> Calcular diferenças
+          </button>
+          <button id="ajusteReconUsarAjustes" type="button" class="btn" style="display:none;min-width:180px;">
+            <i class="fa-solid fa-arrow-right"></i> Usar estes ajustes
+          </button>
+        </div>
+      </div>
+    </div>`;
+  document.body.appendChild(modal);
+
+  // ─ Fechar ─
+  const fechar = () => { modal.style.display = 'none'; };
+  modal.querySelector('#ajusteImportClose')?.addEventListener('click', fechar);
+  modal.querySelector('#ajusteImportCancel')?.addEventListener('click', fechar);
+  modal.querySelector('#ajusteReconCancel')?.addEventListener('click', fechar);
+  modal.addEventListener('click', ev => { if (ev.target === modal) fechar(); });
+
+  // ─ Abas ─
+  const tabImportar = modal.querySelector('#ajusteImportTabImportar');
+  const tabRecon    = modal.querySelector('#ajusteImportTabReconciliar');
+  const panelImportar = modal.querySelector('#ajusteImportPanelImportar');
+  const panelRecon    = modal.querySelector('#ajusteImportPanelReconciliar');
+
+  function ativarAba(aba) {
+    const isImportar = aba === 'importar';
+    tabImportar.style.background = isImportar ? '#1e3a5f' : 'transparent';
+    tabImportar.style.color      = isImportar ? '#93c5fd' : '#6b7280';
+    tabRecon.style.background    = isImportar ? 'transparent' : '#1e3a5f';
+    tabRecon.style.color         = isImportar ? '#6b7280' : '#93c5fd';
+    panelImportar.style.display  = isImportar ? 'grid'  : 'none';
+    panelRecon.style.display     = isImportar ? 'none'  : 'flex';
+  }
+
+  tabImportar.addEventListener('click', () => ativarAba('importar'));
+  tabRecon.addEventListener('click',    () => ativarAba('reconciliar'));
+
+  // ─ Ações ─
+  modal.querySelector('#ajusteImportApply')?.addEventListener('click', importarAjusteEmMassa);
+  modal.querySelector('#ajusteImportVerifyCmc')?.addEventListener('click', verificarCmcAjusteImport);
+  modal.querySelector('#ajusteReconCalcular')?.addEventListener('click', reconciliarContagemFisica);
+  modal.querySelector('#ajusteReconUsarAjustes')?.addEventListener('click', converterReconciliacaoParaImport);
+
+  return modal;
+}
+
+async function abrirModalImportacaoAjuste() {
+  await carregarLocaisEstoque().catch(() => {});
+  const modal = ensureAjusteImportModal();
+
+  const localAtual = String(document.getElementById('ajusteLocal')?.value || TRANSFER_DEFAULT_ORIGEM);
+  preencherSelectImportacaoTransferencia(modal.querySelector('#ajusteImportLocal'), localAtual);
+  preencherSelectImportacaoTransferencia(modal.querySelector('#ajusteImportTrfOrigem'), TRANSFER_DEFAULT_ORIGEM);
+  preencherSelectImportacaoTransferencia(modal.querySelector('#ajusteImportTrfDestino'), TRANSFER_DEFAULT_DESTINO);
+  preencherSelectImportacaoTransferencia(modal.querySelector('#ajusteReconLocal'), localAtual);
+
+  const dataInput = modal.querySelector('#ajusteImportDataMov');
+  if (dataInput && !dataInput.value) dataInput.value = new Date().toISOString().slice(0, 10);
+  const dataRecon = modal.querySelector('#ajusteReconDataMov');
+  if (dataRecon && !dataRecon.value) dataRecon.value = new Date().toISOString().slice(0, 10);
+
+  const feedback = modal.querySelector('#ajusteImportFeedback');
+  if (feedback) { feedback.style.display = 'none'; feedback.textContent = ''; }
+  const cmcPanel = modal.querySelector('#ajusteImportCmcPanel');
+  if (cmcPanel) cmcPanel.style.display = 'none';
+
+  modal.style.display = 'flex';
+  setTimeout(() => modal.querySelector('#ajusteImportTextarea')?.focus(), 50);
+}
+
+function parseLinhasImportacaoAjuste(texto) {
+  const TIPOS_AJUSTE = new Set(['ENT', 'SAI']);
+  return String(texto || '')
+    .split(/\r?\n/)
+    .map((linha, idx) => ({ linha: idx + 1, raw: linha.trim() }))
+    .filter(item => item.raw && !item.raw.startsWith('#'))
+    .map(item => {
+      const partes = item.raw.split('\t').map(s => s.trim());
+      const codigo = partes[0] || '';
+      const col1Up = String(partes[1] || '').toUpperCase();
+
+      // TRF: CODIGO TAB TRF TAB QTD [TAB ORIGEM [TAB DESTINO]]
+      if (col1Up === 'TRF') {
+        return {
+          linha: item.linha, codigo, tipo: 'TRF',
+          qtd: sanitizeQtd(partes[2], null),
+          origem: partes[3] ? String(partes[3]).trim() : null,
+          destino: partes[4] ? String(partes[4]).trim() : null,
+          cmc: partes[5] ? normalizaNumeroParaApi(partes[5]) : null
+        };
+      }
+
+      // ENT/SAI completo: CODIGO TAB ENT|SAI TAB QTD [TAB ARMAZEM [TAB CMC]]
+      if (TIPOS_AJUSTE.has(col1Up)) {
+        return {
+          linha: item.linha, codigo, tipo: col1Up,
+          qtd: sanitizeQtd(partes[2], null),
+          armazem: partes[3] ? String(partes[3]).trim() : null,
+          cmc: partes[4] ? normalizaNumeroParaApi(partes[4]) : null
+        };
+      }
+
+      // Legado 2-col: CODIGO TAB QTD (tipo do default)
+      return {
+        linha: item.linha, codigo, tipo: null,
+        qtd: sanitizeQtd(partes[1], null),
+        armazem: partes[2] ? String(partes[2]).trim() : null,
+        cmc: partes[3] ? normalizaNumeroParaApi(partes[3]) : null
+      };
+    });
+}
+
+async function verificarCmcAjusteImport() {
+  const modal = document.getElementById('ajusteImportModal');
+  if (!modal) return;
+
+  const verifyBtn = modal.querySelector('#ajusteImportVerifyCmc');
+  const panel = modal.querySelector('#ajusteImportCmcPanel');
+  const rowsEl = modal.querySelector('#ajusteImportCmcRows');
+  const summaryEl = modal.querySelector('#ajusteImportCmcSummary');
+
+  const localDefault = String(modal.querySelector('#ajusteImportLocal')?.value || '').trim();
+  const linhasBrutas = parseLinhasImportacaoAjuste(modal.querySelector('#ajusteImportTextarea')?.value || '');
+  const linhas = linhasBrutas.filter(i => i.codigo);
+
+  if (!linhas.length) {
+    if (panel) { panel.style.display = 'none'; }
+    return;
+  }
+
+  const originalHtml = verifyBtn?.innerHTML;
+  if (verifyBtn) { verifyBtn.disabled = true; verifyBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>'; }
+
+  try {
+    // Remove duplicatas
+    const uniqueItems = [...new Map(linhas.map(i => {
+      const armazem = i.armazem || localDefault || null;
+      return [`${i.codigo}__${armazem}`, { codigo: i.codigo, local_estoque: armazem }];
+    })).values()];
+
+    const resp = await fetch('/api/ajustes/check-produtos', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ itens: uniqueItems })
+    });
+    const json = await resp.json().catch(() => ({}));
+    const resultados = json?.resultados || [];
+
+    const mapaResultados = new Map(resultados.map(r => [`${r.codigo}__${r.local_estoque || localDefault || ''}`, r]));
+
+    let semCmc = 0, comCmc = 0;
+    const htmlRows = linhas.map(item => {
+      if (item.tipo === 'TRF') {
+        return `<div style="color:#64748b;">└ ${item.codigo} <span style="opacity:.6;">[TRF — CMC verificado na aprovação]</span></div>`;
+      }
+      const armazem = item.armazem || localDefault || '';
+      const res = mapaResultados.get(`${item.codigo}__${armazem}`);
+      const cmcInformado = item.cmc && item.cmc > 0;
+      if (cmcInformado) {
+        comCmc++;
+        return `<div style="color:#86efac;">✅ ${item.codigo} — CMC informado: ${item.cmc.toFixed(4)}</div>`;
+      }
+      if (res?.cmc) {
+        comCmc++;
+        return `<div style="color:#86efac;">✅ ${item.codigo} — CMC atual: ${Number(res.cmc).toFixed(4)}</div>`;
+      }
+      semCmc++;
+      return `<div style="color:#fca5a5;">⚠️ ${item.codigo} — sem CMC${item.tipo === 'ENT' ? ' (ajuste ENT pode prosseguir, CMC será necessário na aprovação)' : ''}</div>`;
+    }).join('');
+
+    if (rowsEl) rowsEl.innerHTML = htmlRows;
+    if (summaryEl) {
+      summaryEl.textContent = semCmc > 0
+        ? `${comCmc} com CMC · ${semCmc} sem CMC`
+        : `Todos os ${comCmc} produto(s) têm CMC ✅`;
+      summaryEl.style.color = semCmc > 0 ? '#fca5a5' : '#86efac';
+    }
+    if (panel) panel.style.display = 'block';
+  } catch (err) {
+    if (rowsEl) rowsEl.innerHTML = `<span style="color:#fca5a5;">Falha ao verificar: ${err?.message || err}</span>`;
+    if (panel) panel.style.display = 'block';
+  } finally {
+    if (verifyBtn) { verifyBtn.disabled = false; verifyBtn.innerHTML = originalHtml || 'Verificar CMC'; }
+  }
+}
+
+async function importarAjusteEmMassa() {
+  const modal = document.getElementById('ajusteImportModal');
+  if (!modal) return;
+
+  const feedback = modal.querySelector('#ajusteImportFeedback');
+  const setFeedback = (msg, tipo = 'erro') => {
+    if (!feedback) return;
+    feedback.style.display = 'block';
+    feedback.style.background = tipo === 'ok' ? 'rgba(22,163,74,.14)' : tipo === 'aviso' ? 'rgba(234,179,8,.10)' : 'rgba(239,68,68,.13)';
+    feedback.style.border = tipo === 'ok' ? '1px solid rgba(34,197,94,.35)' : tipo === 'aviso' ? '1px solid rgba(234,179,8,.35)' : '1px solid rgba(248,113,113,.35)';
+    feedback.style.color = tipo === 'ok' ? '#86efac' : tipo === 'aviso' ? '#fde047' : '#fecaca';
+    feedback.textContent = msg;
+  };
+
+  const applyBtn = modal.querySelector('#ajusteImportApply');
+  const textarea      = modal.querySelector('#ajusteImportTextarea');
+  const tipoDefault   = String(modal.querySelector('#ajusteImportTipo')?.value || 'ENT').toUpperCase();
+  const localDefault  = String(modal.querySelector('#ajusteImportLocal')?.value || '').trim();
+  const trfOrigemDef  = String(modal.querySelector('#ajusteImportTrfOrigem')?.value || '').trim();
+  const trfDestinoDef = String(modal.querySelector('#ajusteImportTrfDestino')?.value || '').trim();
+  const dataMov       = String(modal.querySelector('#ajusteImportDataMov')?.value || '').trim()
+                        || new Date().toISOString().slice(0, 10);
+  const obs           = String(modal.querySelector('#ajusteImportObs')?.value || '').trim()
+                        || 'Importação em massa';
+  const solicitante   = String(document.getElementById('userNameDisplay')?.textContent || '').trim() || null;
+
+  const linhasBrutas = parseLinhasImportacaoAjuste(textarea?.value || '');
+  if (!linhasBrutas.length) {
+    setFeedback('Cole pelo menos uma linha no formato CODIGO TAB ENT|SAI TAB QUANTIDADE.');
+    return;
+  }
+
+  // Aplica defaults por tipo
+  const linhas = linhasBrutas.map(item => ({
+    ...item,
+    tipo: item.tipo || tipoDefault,
+    armazem: item.tipo === 'TRF' ? undefined : (item.armazem || localDefault),
+    origem: item.tipo === 'TRF' ? (item.origem || trfOrigemDef) : undefined,
+    destino: item.tipo === 'TRF' ? (item.destino || trfDestinoDef) : undefined
+  }));
+
+  // Validações básicas
+  const semCodigo = linhas.filter(i => !i.codigo);
+  if (semCodigo.length) {
+    setFeedback(`Linhas sem código: ${semCodigo.map(i => i.linha).join(', ')}.`);
+    return;
+  }
+  const semQtd = linhas.filter(i => i.qtd === null || i.qtd <= 0);
+  if (semQtd.length) {
+    setFeedback(`Qtd inválida nas linhas: ${semQtd.map(i => i.linha).join(', ')}.`);
+    return;
+  }
+  const ajustesSemArmazem = linhas.filter(i => i.tipo !== 'TRF' && !i.armazem);
+  if (ajustesSemArmazem.length) {
+    setFeedback(`${ajustesSemArmazem.length} item(ns) ENT/SAI sem armazém. Selecione o armazém padrão ou inclua na coluna 4.`);
+    return;
+  }
+  const trfSemOrigem = linhas.filter(i => i.tipo === 'TRF' && !i.origem);
+  if (trfSemOrigem.length) {
+    setFeedback(`${trfSemOrigem.length} item(ns) TRF sem origem. Selecione a origem padrão TRF ou inclua na coluna 4.`);
+    return;
+  }
+  const trfSemDestino = linhas.filter(i => i.tipo === 'TRF' && !i.destino);
+  if (trfSemDestino.length) {
+    setFeedback(`${trfSemDestino.length} item(ns) TRF sem destino. Selecione o destino padrão TRF ou inclua na coluna 5.`);
+    return;
+  }
+
+  // ─ Agrupa ENT/SAI por (tipo, armazem), TRF por (origem, destino) ─
+  const gruposAjuste = new Map();
+  const gruposTrf = new Map();
+  for (const item of linhas) {
+    if (item.tipo === 'TRF') {
+      const key = `${item.origem}__${item.destino}`;
+      if (!gruposTrf.has(key)) gruposTrf.set(key, { origem: item.origem, destino: item.destino, itens: [] });
+      gruposTrf.get(key).itens.push({ codigo: item.codigo, qtd: item.qtd, cmc: item.cmc || null });
+    } else {
+      const key = `${item.tipo}__${item.armazem}`;
+      if (!gruposAjuste.has(key)) gruposAjuste.set(key, { tipo: item.tipo, armazem: item.armazem, itens: [] });
+      gruposAjuste.get(key).itens.push({ codigo: item.codigo, qtd: item.qtd, cmc: item.cmc || null });
+    }
+  }
+
+  const totalGrupos = gruposAjuste.size + gruposTrf.size;
+  const totalItens = linhas.length;
+  const originalHtml = applyBtn?.innerHTML;
+  if (applyBtn) {
+    applyBtn.disabled = true;
+    applyBtn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Registrando ${totalItens} item(ns)…`;
+  }
+
+  const sucessos = [];
+  const erros = [];
+  let grupoIdx = 0;
+
+  // ─ Submete grupos ENT/SAI ─
+  for (const [, grupo] of gruposAjuste) {
+    grupoIdx++;
+    if (applyBtn) applyBtn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> ${grupoIdx}/${totalGrupos} grupos…`;
+    try {
+      const resp = await fetch('/api/ajustes', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tipo_operacao: grupo.tipo, local_estoque: grupo.armazem, data_movimentacao: dataMov, obs, solicitante, itens: grupo.itens })
+      });
+      const json = await resp.json().catch(() => ({}));
+      if (!resp.ok || !json?.ok) erros.push(`${grupo.tipo}/${grupo.armazem} (${grupo.itens.length} itens): ${json?.error || 'Erro'}`);
+      else sucessos.push({ label: `${grupo.tipo} — armazém ${grupo.armazem}`, count: grupo.itens.length });
+    } catch (err) {
+      erros.push(`${grupo.tipo}/${grupo.armazem}: ${err?.message || 'Erro de rede'}`);
+    }
+  }
+
+  // ─ Submete grupos TRF ─
+  for (const [, grupo] of gruposTrf) {
+    grupoIdx++;
+    if (applyBtn) applyBtn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> ${grupoIdx}/${totalGrupos} grupos…`;
+    try {
+      const resp = await fetch('/api/transferencias', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ origem: grupo.origem, destino: grupo.destino, data_movimentacao: dataMov, solicitante, itens: grupo.itens })
+      });
+      const json = await resp.json().catch(() => ({}));
+      if (!resp.ok || !json?.ok) erros.push(`TRF ${grupo.origem}→${grupo.destino} (${grupo.itens.length} itens): ${json?.error || 'Erro'}`);
+      else sucessos.push({ label: `TRF ${grupo.origem} → ${grupo.destino}`, count: grupo.itens.length });
+    } catch (err) {
+      erros.push(`TRF ${grupo.origem}→${grupo.destino}: ${err?.message || 'Erro de rede'}`);
+    }
+  }
+
+  if (applyBtn) { applyBtn.disabled = false; applyBtn.innerHTML = originalHtml || 'Registrar movimentações'; }
+
+  const totalOk = sucessos.reduce((a, s) => a + s.count, 0);
+  if (!sucessos.length) {
+    setFeedback(`Falha ao registrar:\n${erros.join('\n')}`);
+    return;
+  }
+
+  const resumo = sucessos.map(s => `  • ${s.label}: ${s.count} item(ns)`).join('\n');
+  const erroStr = erros.length ? `\n\nFalhas parciais:\n${erros.join('\n')}` : '';
+  setFeedback(`✅ ${totalOk} item(ns) registrado(s) em ${sucessos.length} grupo(s):\n${resumo}${erroStr}`, erros.length ? 'aviso' : 'ok');
+
+  solicitacoesAjustesLoaded = false;
+  carregarSolicitacoesAjustes(true).catch(() => {});
+  solicitacoesTransferenciasLoaded = false;
+  carregarSolicitacoesTransferencias(true).catch(() => {});
+
+  if (!erros.length) {
+    setTimeout(() => { modal.style.display = 'none'; }, 1800);
+  }
+}
+
+async function reconciliarContagemFisica() {
+  const modal = document.getElementById('ajusteImportModal');
+  if (!modal) return;
+
+  const feedbackEl = modal.querySelector('#ajusteReconFeedback');
+  const setFb = (msg, tipo = 'erro') => {
+    if (!feedbackEl) return;
+    feedbackEl.style.display = 'block';
+    feedbackEl.style.background = tipo === 'ok' ? 'rgba(22,163,74,.14)' : tipo === 'aviso' ? 'rgba(234,179,8,.10)' : 'rgba(239,68,68,.13)';
+    feedbackEl.style.border = tipo === 'ok' ? '1px solid rgba(34,197,94,.35)' : tipo === 'aviso' ? '1px solid rgba(234,179,8,.35)' : '1px solid rgba(248,113,113,.35)';
+    feedbackEl.style.color = tipo === 'ok' ? '#86efac' : tipo === 'aviso' ? '#fde047' : '#fecaca';
+    feedbackEl.textContent = msg;
+  };
+
+  const local = String(modal.querySelector('#ajusteReconLocal')?.value || '').trim();
+  const textoRaw = String(modal.querySelector('#ajusteReconTextarea')?.value || '').trim();
+  const calcBtn = modal.querySelector('#ajusteReconCalcular');
+  const usarBtn = modal.querySelector('#ajusteReconUsarAjustes');
+  const resultadoEl = modal.querySelector('#ajusteReconResultado');
+  const tbody = modal.querySelector('#ajusteReconTbody');
+  const resumoEl = modal.querySelector('#ajusteReconResumo');
+
+  if (!local) { setFb('Selecione o armazém da contagem.'); return; }
+  if (!textoRaw) { setFb('Cole sua planilha de contagem.'); return; }
+
+  // Parse: CODIGO TAB QTD_FISICA
+  const linhas = textoRaw.split(/\r?\n/)
+    .map(l => l.trim()).filter(Boolean)
+    .map(l => {
+      const [cod, qtdStr] = l.split('\t').map(s => s.trim());
+      const qty_fisica = Number(String(qtdStr || '0').replace(',', '.'));
+      return { codigo: cod || '', qty_fisica: isNaN(qty_fisica) ? 0 : qty_fisica };
+    })
+    .filter(i => i.codigo);
+
+  if (!linhas.length) { setFb('Nenhuma linha válida encontrada. Formato: CODIGO TAB QUANTIDADE.'); return; }
+
+  const origHtml = calcBtn?.innerHTML;
+  if (calcBtn) { calcBtn.disabled = true; calcBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>'; }
+  if (feedbackEl) feedbackEl.style.display = 'none';
+
+  try {
+    const resp = await fetch('/api/ajustes/reconciliar', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ local_estoque: local, itens: linhas })
+    });
+    const json = await resp.json().catch(() => ({}));
+    if (!resp.ok || !json?.ok) {
+      setFb(json?.error || `Erro ${resp.status} ao consultar estoque.`);
+      return;
+    }
+
+    const resultados = json.resultados || [];
+    const comDiff  = resultados.filter(r => r.tipo !== null);
+    const semDiff  = resultados.filter(r => r.tipo === null && !r.pertenceMaq);
+    const maqItems = resultados.filter(r => r.pertenceMaq);
+    const naoProd  = resultados.filter(r => r.semSistema && !r.pertenceMaq);
+    const ents     = comDiff.filter(r => r.tipo === 'ENT');
+    const trfEnt   = comDiff.filter(r => r.tipo === 'TRF' && r.origemTrfNome === 'Recebimento');
+    const trfSai   = comDiff.filter(r => r.tipo === 'TRF' && r.destinoTrfNome === 'Produção');
+
+    // Monta tabela
+    tbody.innerHTML = resultados.map((r, idx) => {
+      const diffColor = r.delta > 0 ? '#86efac' : r.delta < 0 ? '#fca5a5' : '#64748b';
+      const sinal = r.delta > 0 ? '+' : '';
+      let tipoTag;
+      if (r.tipo === 'TRF' && r.origemTrfNome === 'Recebimento') {
+        tipoTag = `<span style="background:rgba(56,189,248,.12);color:#7dd3fc;padding:1px 6px;border-radius:4px;font-weight:700;" title="Transferir ${r.ajusteQty.toFixed(2)} do Recebimento para este armazém">TRF ${r.ajusteQty.toFixed(2)} ← Recebimento</span>`;
+      } else if (r.tipo === 'TRF' && r.destinoTrfNome === 'Produção') {
+        tipoTag = `<span style="background:rgba(251,146,60,.12);color:#fdba74;padding:1px 6px;border-radius:4px;font-weight:700;" title="Transferir ${r.ajusteQty.toFixed(2)} para Produção">TRF ${r.ajusteQty.toFixed(2)} → Produção</span>`;
+      } else if (r.tipo === 'ENT') {
+        const aviso = (r.saldoRecebimento > 0) ? ` <span title="Recebimento tem ${r.saldoRecebimento.toFixed(2)} (insuficiente)" style="font-size:10px;opacity:.7;">⚠️ receb. parcial</span>` : '';
+        tipoTag = `<span style="background:rgba(34,197,94,.15);color:#86efac;padding:1px 6px;border-radius:4px;font-weight:700;">ENT ${r.ajusteQty.toFixed(2)}</span>${aviso}`;
+      } else if (r.pertenceMaq) {
+        tipoTag = `<span style="background:rgba(148,163,184,.10);color:#94a3b8;padding:1px 6px;border-radius:4px;" title="PA/Revenda: estoque pertence ao armazém #MAQ">PA/Revenda → #MAQ</span>`;
+      } else {
+        tipoTag = `<span style="color:#374151;">—</span>`;
+      }
+      const alertSistema = r.semSistema ? ' ⚠️' : '';
+      return `<tr style="border-top:1px solid #1e293b;" data-idx="${idx}">
+        <td style="padding:4px 8px;"><input type="checkbox" class="recon-chk" data-idx="${idx}" ${r.tipo ? 'checked' : ''} ${!r.tipo ? 'disabled' : ''}></td>
+        <td style="padding:4px 8px;color:#cbd5e1;">${r.codigo}${alertSistema}</td>
+        <td style="padding:4px 8px;color:#64748b;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${r.descricao}">${r.descricao || '—'}</td>
+        <td style="padding:4px 8px;text-align:right;color:#94a3b8;">${r.qtySistema.toFixed(2)}</td>
+        <td style="padding:4px 8px;text-align:right;color:#e2e8f0;">${r.qtyFisica.toFixed(2)}</td>
+        <td style="padding:4px 8px;text-align:right;color:${diffColor};font-weight:700;">${sinal}${r.delta.toFixed(2)}</td>
+        <td style="padding:4px 8px;">${tipoTag}</td>
+      </tr>`;
+    }).join('');
+
+    // Resumo
+    const partesResumo = [];
+    if (trfEnt.length)  partesResumo.push(`<span style="color:#7dd3fc;">↙ ${trfEnt.length} TRF Recebimento→Almox</span>`);
+    if (trfSai.length)  partesResumo.push(`<span style="color:#fdba74;">↗ ${trfSai.length} TRF Almox→Produção</span>`);
+    if (ents.length)    partesResumo.push(`<span style="color:#86efac;">${ents.length} ENT direto</span>`);
+    if (semDiff.length) partesResumo.push(`<span style="color:#64748b;">${semDiff.length} iguais</span>`);
+    if (maqItems.length) partesResumo.push(`<span style="color:#94a3b8;">${maqItems.length} PA/Revenda (#MAQ)</span>`);
+    if (naoProd.length) partesResumo.push(`<span style="color:#f59e0b;">⚠️ ${naoProd.length} sem dados</span>`);
+    resumoEl.innerHTML = partesResumo.join(' &nbsp; ');
+
+    resultadoEl.style.display = 'block';
+    if (usarBtn) usarBtn.style.display = comDiff.length ? 'inline-flex' : 'none';
+
+    // Armazena resultado para converter depois
+    modal._reconResultados = resultados;
+    modal._reconLocal = local;
+
+    if (!comDiff.length) {
+      setFb(`Estoque já está igual à contagem para todos os ${resultados.length} produto(s). Nenhum ajuste necessário!`, 'ok');
+    } else {
+      setFb(`Posição de: ${json.ultimaData}. ${comDiff.length} produto(s) com divergência — marque os que deseja ajustar.`, 'aviso');
+    }
+  } catch (err) {
+    setFb(`Erro ao reconciliar: ${err?.message || err}`);
+  } finally {
+    if (calcBtn) { calcBtn.disabled = false; calcBtn.innerHTML = origHtml || 'Calcular diferenças'; }
+  }
+}
+
+function converterReconciliacaoParaImport() {
+  const modal = document.getElementById('ajusteImportModal');
+  if (!modal) return;
+
+  const resultados = modal._reconResultados || [];
+  const local = modal._reconLocal || '';
+  const obs = String(modal.querySelector('#ajusteReconObs')?.value || '').trim() || 'Reconciliação inventário';
+  const dataMov = String(modal.querySelector('#ajusteReconDataMov')?.value || '').trim()
+                  || new Date().toISOString().slice(0, 10);
+  const checkboxes = modal.querySelectorAll('.recon-chk:checked');
+  const selecionados = new Set([...checkboxes].map(cb => Number(cb.dataset.idx)));
+
+  const linhas = resultados
+    .filter((_, idx) => selecionados.has(idx) && resultados[idx].tipo)
+    .map(r => {
+      if (r.tipo === 'TRF') {
+        // Formato: CODIGO TAB TRF TAB QTD TAB ORIGEM TAB DESTINO [TAB CMC]
+        const cmcStr = r.cmc > 0 ? String(r.cmc) : '';
+        return [r.codigo, 'TRF', r.ajusteQty.toFixed(2), r.origemTrf || local, r.destinoTrf || local, cmcStr].join('\t');
+      }
+      // ENT direto: CODIGO TAB ENT TAB QTD TAB ARMAZEM [TAB CMC]
+      const cmcStr = r.cmc > 0 ? String(r.cmc) : '';
+      return [r.codigo, r.tipo, r.ajusteQty.toFixed(2), local, cmcStr].join('\t');
+    });
+
+  if (!linhas.length) {
+    const fb = modal.querySelector('#ajusteReconFeedback');
+    if (fb) {
+      fb.style.display = 'block';
+      fb.style.background = 'rgba(239,68,68,.13)';
+      fb.style.border = '1px solid rgba(248,113,113,.35)';
+      fb.style.color = '#fecaca';
+      fb.textContent = 'Nenhum produto selecionado para ajuste.';
+    }
+    return;
+  }
+
+  // Muda para a aba de importação e preenche a textarea
+  const tabImportar = modal.querySelector('#ajusteImportTabImportar');
+  tabImportar?.click();
+
+  const textarea = modal.querySelector('#ajusteImportTextarea');
+  if (textarea) textarea.value = linhas.join('\n');
+
+  // Preenche campos padrão
+  const localSel = modal.querySelector('#ajusteImportLocal');
+  if (localSel) localSel.value = local;
+  const obsInput = modal.querySelector('#ajusteImportObs');
+  if (obsInput) obsInput.value = obs;
+  const dataInput = modal.querySelector('#ajusteImportDataMov');
+  if (dataInput) dataInput.value = dataMov;
+
+  // Limpa feedback anterior
+  const fb2 = modal.querySelector('#ajusteImportFeedback');
+  if (fb2) fb2.style.display = 'none';
+
+  setTimeout(() => textarea?.focus(), 50);
+}
+
+// ─── FIM AJUSTE ───────────────────────────────────────────────────────────────
 
 function adicionarItemTransferencia(item) {
   if (!item) return;
@@ -45574,8 +46753,8 @@ let kanbansVisiveis = [];
 let estadoInicialFiltroKanbans = null;
 const DATA_LIMITE_PADRAO = '2026-02-01';
 
-// Variável global para controlar filtro por solicitante (padrão: apenas minhas solicitações)
-window.kanbanFiltroSolicitante = 'minhas';
+// Variável global para controlar filtro por solicitante (padrão: todas as solicitações)
+window.kanbanFiltroSolicitante = 'todas';
 
 function formatarDataLimite(valor) {
   if (!valor) return '';
@@ -50311,13 +51490,24 @@ function renderPreviewAssociacaoPedidoNfe(preview) {
                   <div style="font-size:11px;color:#334155;line-height:1.35;">${escapeHtml(String(item?.servico_produto_descricao || item?.nf_descricao_produto || ''))}</div>
                 </div>
                 <button type="button" class="assoc-servico-produto-btn" data-seq="${seq}" style="border:1px solid #38bdf8;background:#0284c7;color:#fff;border-radius:7px;padding:5px 8px;font-size:11px;font-weight:700;cursor:pointer;">Selecionar</button>
-              </div>` : `
+              </div>` : encontrou ? `
               <div class="assoc-pedido-draggable" data-seq="${seq}" draggable="true" style="display:flex;align-items:flex-start;gap:8px;padding:6px 8px;border:1px dashed #cbd5e1;border-radius:8px;background:#ffffff;cursor:grab;">
                 <i class="fa-solid fa-grip-vertical" style="margin-top:1px;color:#64748b;"></i>
                 <div style="display:flex;flex-direction:column;gap:2px;min-width:0;">
                   <div style="font-size:11px;font-weight:700;color:#0f172a;">${escapeHtml(String(item?.pedido_codigo_produto || '-'))}</div>
                   <div style="font-size:11px;color:#334155;line-height:1.35;max-width:320px;" title="${escapeHtml(String(item?.pedido_descricao_produto || '-'))}">${escapeHtml(String(item?.pedido_descricao_produto || '-'))}</div>
                 </div>
+              </div>` : `
+              <div style="display:flex;align-items:center;gap:8px;padding:6px 8px;border:1px dashed #fed7aa;border-radius:8px;background:#fff7ed;">
+                ${item?.produto_override && Number(item?.servico_produto_codigo_produto || 0) > 0 ? `
+                <div style="min-width:0;flex:1;">
+                  <div style="font-size:11px;font-weight:800;color:#9a3412;">${escapeHtml(String(item?.servico_produto_codigo || '-'))}</div>
+                  <div style="font-size:11px;color:#7c2d12;line-height:1.35;max-width:240px;" title="${escapeHtml(String(item?.servico_produto_descricao || ''))}">${escapeHtml(String(item?.servico_produto_descricao || ''))}</div>
+                </div>` : `
+                <i class="fa-solid fa-triangle-exclamation" style="color:#ea580c;font-size:12px;flex-shrink:0;"></i>
+                <span style="font-size:11px;color:#9a3412;flex:1;">Sem match — selecione o produto</span>`}
+                <button type="button" class="assoc-produto-override-btn" data-seq="${seq}" style="border:1px solid #fb923c;background:#ea580c;color:#fff;border-radius:7px;padding:5px 8px;font-size:11px;font-weight:700;cursor:pointer;white-space:nowrap;flex-shrink:0;">${item?.produto_override && Number(item?.servico_produto_codigo_produto || 0) > 0 ? 'Alterar' : 'Selecionar produto'}</button>
+                <button type="button" class="assoc-item-pedido-btn" data-seq="${seq}" title="Vincular a um item já presente no pedido" style="border:1px solid #16a34a;background:#15803d;color:#fff;border-radius:7px;padding:5px 8px;font-size:11px;font-weight:700;cursor:pointer;white-space:nowrap;flex-shrink:0;">Item do pedido</button>
               </div>`}
             </td>
             <td style="padding:7px 8px;font-size:11px;color:${corQtd};background:${bgQtd};text-align:right;white-space:nowrap;">${
@@ -50409,6 +51599,134 @@ function renderPreviewAssociacaoPedidoNfe(preview) {
   previewConteudo.querySelectorAll('.assoc-servico-produto-btn').forEach((btn) => {
     btn.addEventListener('click', () => abrirModalProdutoServicoAssociacaoNfe(Number(btn.dataset.seq || 0)));
   });
+  previewConteudo.querySelectorAll('.assoc-produto-override-btn').forEach((btn) => {
+    btn.addEventListener('click', () => abrirModalProdutoServicoAssociacaoNfe(Number(btn.dataset.seq || 0)));
+  });
+  previewConteudo.querySelectorAll('.assoc-item-pedido-btn').forEach((btn) => {
+    btn.addEventListener('click', () => abrirPickerItemPedidoAssociacao(Number(btn.dataset.seq || 0)));
+  });
+}
+
+function abrirPickerItemPedidoAssociacao(seq) {
+  if (!seq) return;
+  const preview = window.__associarNfePreviewAtual?.preview || {};
+  const numeroPedido = String(preview?.c_numero_pedido || '').trim();
+
+  // Coleta todos os itens do pedido: informativos + matched
+  let itensPedido = [
+    ...(preview.itens_pedido_informativos || []),
+    ...(preview.itens_preview || [])
+      .filter(i => i.pedido_item_encontrado && Number(i.pedido_n_cod_item || 0) > 0)
+      .map(i => ({
+        pedido_n_cod_item: i.pedido_n_cod_item,
+        pedido_codigo_produto: i.pedido_codigo_produto,
+        pedido_descricao_produto: i.pedido_descricao_produto,
+        pedido_qtde: i.pedido_qtde,
+        pedido_unidade: i.pedido_unidade,
+        pedido_valor_total: i.pedido_valor_total,
+      }))
+  ];
+  // Remove duplicatas por n_cod_item
+  const seen = new Set();
+  itensPedido = itensPedido.filter(i => {
+    const k = Number(i.pedido_n_cod_item || 0);
+    if (!k || seen.has(k)) return false;
+    seen.add(k); return true;
+  });
+
+  let modal = document.getElementById('modalItemPedidoAssociacao');
+  if (modal) modal.remove();
+  modal = document.createElement('div');
+  modal.id = 'modalItemPedidoAssociacao';
+  modal.style.cssText = 'position:fixed;inset:0;z-index:2147483647;background:rgba(15,23,42,.70);display:flex;align-items:center;justify-content:center;padding:20px;';
+
+  const renderItensHtml = (items) => {
+    if (!items.length) return '<div style="font-size:12px;color:#64748b;padding:12px;">Nenhum item encontrado para o pedido.</div>';
+    return items.map(it => `
+      <button type="button"
+        data-n-cod-item="${Number(it.pedido_n_cod_item || 0)}"
+        data-codigo="${escapeHtml(String(it.pedido_codigo_produto || ''))}"
+        data-descricao="${escapeHtml(String(it.pedido_descricao_produto || ''))}"
+        data-qtde="${escapeHtml(String(it.pedido_qtde ?? ''))}"
+        data-unidade="${escapeHtml(String(it.pedido_unidade || ''))}"
+        data-valor="${escapeHtml(String(it.pedido_valor_total ?? ''))}"
+        style="display:flex;align-items:center;justify-content:space-between;gap:14px;text-align:left;border:1px solid #bbf7d0;background:#f0fdf4;border-radius:10px;padding:10px;cursor:pointer;width:100%;">
+        <span style="min-width:0;">
+          <div style="font-weight:800;color:#0f172a;">${escapeHtml(String(it.pedido_codigo_produto || '-'))}</div>
+          <div style="font-size:12px;color:#475569;">${escapeHtml(String(it.pedido_descricao_produto || '-'))}</div>
+          <div style="font-size:11px;color:#64748b;margin-top:2px;">Qtd: ${escapeHtml(String(it.pedido_qtde ?? '-'))} ${escapeHtml(String(it.pedido_unidade || ''))} · R$ ${escapeHtml(Number(it.pedido_valor_total || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 }))}</div>
+        </span>
+        <span style="white-space:nowrap;background:#15803d;color:white;border-radius:8px;padding:7px 10px;font-size:12px;font-weight:800;">Usar este item</span>
+      </button>`).join('');
+  };
+
+  modal.innerHTML = `
+    <div style="width:min(820px,95vw);max-height:85vh;overflow:auto;background:#fff;border:2px solid #16a34a;border-radius:16px;box-shadow:0 24px 80px rgba(0,0,0,.35);padding:18px;">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+        <strong style="font-size:18px;color:#0f172a;">Itens do Pedido ${escapeHtml(String(numeroPedido || ''))}</strong>
+        <button type="button" id="modalItemPedidoFechar" style="border:0;background:transparent;font-size:26px;cursor:pointer;color:#334155;">&times;</button>
+      </div>
+      <div style="font-size:12px;color:#475569;margin-bottom:12px;">Clique em <strong>Usar este item</strong> para vincular o item do pedido à linha da NF-e não mapeada.</div>
+      <div id="modalItemPedidoLista" style="display:flex;flex-direction:column;gap:8px;">
+        ${itensPedido.length ? renderItensHtml(itensPedido) : '<div style="font-size:12px;color:#64748b;">Carregando itens...</div>'}
+      </div>
+    </div>`;
+
+  document.body.appendChild(modal);
+  modal.querySelector('#modalItemPedidoFechar').onclick = () => modal.remove();
+
+  function attachSelectHandlers() {
+    modal.querySelectorAll('button[data-n-cod-item]').forEach(btn => {
+      btn.onclick = () => {
+        const nCodItem = Number(btn.dataset.nCodItem || 0);
+        if (!nCodItem) return;
+        const item = (window.__associarNfePreviewEstadoItens || []).find(i => Number(i?.n_sequencia || 0) === seq);
+        if (item) {
+          item.pedido_item_encontrado = true;
+          item.pedido_item_override = true;
+          item.pedido_n_cod_item = nCodItem;
+          item.pedido_codigo_produto = btn.dataset.codigo || '';
+          item.pedido_descricao_produto = btn.dataset.descricao || '';
+          item.pedido_qtde = btn.dataset.qtde !== '' ? Number(btn.dataset.qtde) : null;
+          item.pedido_unidade = btn.dataset.unidade || '';
+          item.pedido_valor_total = btn.dataset.valor !== '' ? Number(btn.dataset.valor) : null;
+          item.criterio_match = 'ajuste_manual_item_pedido';
+          item.score_match = 9999;
+          delete item.produto_override;
+        }
+        modal.remove();
+        renderPreviewAssociacaoPedidoNfe(window.__associarNfePreviewAtual?.preview || {});
+        const btnAssociarMain = document.getElementById('modalAssociarPedidoBtnConfirmar');
+        if (btnAssociarMain) btnAssociarMain.disabled = false;
+      };
+    });
+  }
+
+  // Se sem itens no preview, busca via API
+  if (!itensPedido.length && numeroPedido) {
+    const lista = modal.querySelector('#modalItemPedidoLista');
+    fetch(`/api/compras/buscar-pedido-compra?numero=${encodeURIComponent(numeroPedido)}`, { credentials: 'include', cache: 'no-store' })
+      .then(r => r.json())
+      .then(data => {
+        const itensApi = (data?.pedido?.itens || []).filter(i => Number(i.n_cod_item || 0) > 0);
+        lista.innerHTML = itensApi.length
+          ? renderItensHtml(itensApi.map(i => ({
+              pedido_n_cod_item: i.n_cod_item,
+              pedido_codigo_produto: i.c_produto || i.produto_codigo,
+              pedido_descricao_produto: i.c_descricao || i.produto_descricao,
+              pedido_qtde: i.n_qtde !== undefined ? i.n_qtde : i.quantidade,
+              pedido_unidade: i.c_unidade || i.unidade,
+              pedido_valor_total: i.n_val_tot !== undefined ? i.n_val_tot : i.valor_item,
+            })))
+          : '<div style="font-size:12px;color:#64748b;">Nenhum item encontrado.</div>';
+        attachSelectHandlers();
+      })
+      .catch(() => {
+        lista.innerHTML = '<div style="font-size:12px;color:#b91c1c;">Erro ao carregar itens do pedido.</div>';
+      });
+  } else {
+    attachSelectHandlers();
+  }
 }
 
 function abrirModalProdutoServicoAssociacaoNfe(seq) {
@@ -50460,6 +51778,7 @@ function abrirModalProdutoServicoAssociacaoNfe(seq) {
             item.servico_produto_codigo_produto = Number(btn.dataset.cp || 0) || null;
             item.servico_produto_codigo = btn.dataset.codigo || '';
             item.servico_produto_descricao = btn.dataset.desc || '';
+            if (!item.item_servico) item.produto_override = true;
           }
           modal.remove();
           renderPreviewAssociacaoPedidoNfe(window.__associarNfePreviewAtual?.preview || {});
@@ -50786,6 +52105,17 @@ async function confirmarAssociacaoPedidoNfeOmie() {
         });
         return;
       }
+      if (item?.produto_override && Number(item?.servico_produto_codigo_produto || 0) > 0) {
+        itensOverrideMap.set(seq, {
+          n_sequencia: seq,
+          nIdProdutoServico: Number(item?.servico_produto_codigo_produto || 0) || null,
+          codigoProdutoServico: String(item?.servico_produto_codigo || '').trim(),
+          descricaoProdutoServico: String(item?.servico_produto_descricao || '').trim(),
+          nQtde: Number(item?.nf_qtde || 0) || null,
+          cUnidade: String(item?.nf_unidade || '').trim().toUpperCase() || null
+        });
+        return;
+      }
       const nIdItPedidoExistente = Number(item?.pedido_n_cod_item || 0);
       if (!seq || !Number.isFinite(nIdItPedidoExistente) || nIdItPedidoExistente <= 0) return;
       itensOverrideMap.set(seq, { n_sequencia: seq, nIdItPedidoExistente });
@@ -50883,11 +52213,32 @@ async function confirmarAssociacaoPedidoNfeOmie() {
             <button type="button" id="modalAssociarFecharSucessoBtn" style="border:1px solid #86efac;border-radius:8px;background:#ffffff;color:#166534;font-weight:700;padding:9px 13px;cursor:pointer;">
               Fechar
             </button>
+            <button type="button" id="modalAssociarTransformacaoMpBtn" style="border:none;border-radius:8px;background:linear-gradient(135deg,#ea580c 0%,#c2410c 100%);color:#fff;font-weight:700;padding:9px 13px;cursor:pointer;display:inline-flex;align-items:center;gap:6px;">
+              <i class="fa-solid fa-arrows-rotate"></i> Transformação de MP
+            </button>
           </div>
         </div>
       </div>`,
       'sucesso'
     );
+
+    // Guarda dados da associação para o modal de transformação
+    window.__transformacaoMpDados = {
+      n_id_receb: data?.dados?.n_id_receb || null,
+      numero_nfe: data?.dados?.c_numero_nfe || null,
+      fornecedor_nome: data?.dados?.fornecedor_nome || window.__associarNfePreviewAtual?.preview?.fornecedor_nome || null,
+      valor_total: data?.dados?.valor_total_nfe
+        || window.__associarNfePreviewAtual?.preview?.valor_total_nfe
+        || (Array.isArray(window.__associarNfePreviewEstadoItens)
+            ? +(window.__associarNfePreviewEstadoItens.reduce((a, it) => a + (Number(it.nf_valor_total) || 0), 0)).toFixed(2) || null
+            : null)
+        || null,
+      solicitante: (document.getElementById('userNameDisplay')?.textContent || '').trim() || null,
+    };
+
+    document.getElementById('modalAssociarTransformacaoMpBtn')?.addEventListener('click', () => {
+      abrirModalTransformacaoMp(window.__transformacaoMpDados);
+    });
 
     document.getElementById('modalAssociarNovaBuscaBtn')?.addEventListener('click', () => {
       fecharModalAssociarPedidoNfe();
@@ -50923,6 +52274,340 @@ async function confirmarAssociacaoPedidoNfeOmie() {
     }
   }
 }
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// TRANSFORMAÇÃO DE MATÉRIA-PRIMA
+// Modal para registrar SAI + ENT de peças após processamento externo (ex: zincagem)
+// Custo é rateado proporcionalmente à área (largura × altura) de cada peça
+// ═══════════════════════════════════════════════════════════════════════════════
+
+function criarModalTransformacaoMpSeNecessario() {
+  if (document.getElementById('modalTransformacaoMp')) return;
+  const el = document.createElement('div');
+  el.id = 'modalTransformacaoMp';
+  el.style.cssText = 'display:none;position:fixed;inset:0;background:rgba(15,23,42,.72);z-index:100200;align-items:center;justify-content:center;padding:18px;';
+  el.innerHTML = `
+    <div style="width:min(980px,100%);max-height:92vh;background:#fff;border-radius:14px;box-shadow:0 24px 60px rgba(2,6,23,.38);border:1px solid #d1d5db;overflow:hidden;display:flex;flex-direction:column;">
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 18px;border-bottom:1px solid #e5e7eb;background:linear-gradient(135deg,#fff7ed 0%,#ffedd5 100%);">
+        <strong style="font-size:15px;color:#0f172a;display:flex;align-items:center;gap:8px;">
+          <i class="fa-solid fa-arrows-rotate" style="color:#ea580c;"></i>
+          Transformação de Matéria-Prima
+        </strong>
+        <button type="button" id="modalTransformacaoMpFechar" style="border:none;background:transparent;color:#475569;font-size:18px;cursor:pointer;padding:4px 8px;"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+      <div id="modalTransformacaoMpConteudo" style="padding:18px;overflow:auto;flex:1;display:flex;flex-direction:column;gap:14px;"></div>
+      <div style="padding:14px 18px;border-top:1px solid #e5e7eb;background:#f8fafc;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;">
+        <label style="display:flex;align-items:center;gap:7px;font-size:13px;color:#475569;cursor:pointer;">
+          <input type="checkbox" id="modalTransformacaoMpSalvarTemplate" style="width:15px;height:15px;">
+          Salvar como template para este fornecedor
+        </label>
+        <div style="display:flex;gap:8px;">
+          <button type="button" id="modalTransformacaoMpCancelar" style="padding:10px 16px;border:1px solid #d1d5db;border-radius:8px;background:#fff;color:#475569;font-weight:700;cursor:pointer;font-size:14px;">Cancelar</button>
+          <button type="button" id="modalTransformacaoMpExecutar" style="padding:10px 20px;border:none;border-radius:8px;background:linear-gradient(135deg,#ea580c 0%,#c2410c 100%);color:#fff;font-weight:700;cursor:pointer;font-size:14px;display:inline-flex;align-items:center;gap:7px;">
+            <i class="fa-solid fa-check"></i> Executar Transformação
+          </button>
+        </div>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(el);
+}
+
+function fecharModalTransformacaoMp() {
+  const modal = document.getElementById('modalTransformacaoMp');
+  if (modal) modal.style.display = 'none';
+}
+
+function calcularRateioAreaFrontend(itens, valorTotal) {
+  const parsed = itens.map(it => ({
+    ...it,
+    _qtde: Number(it.qtde) || 0,
+    _l: Number(it.largura_cm) || 0,
+    _a: Number(it.altura_cm) || 0,
+  }));
+  const totalArea = parsed.reduce((acc, it) => acc + it._qtde * (it._l / 100) * (it._a / 100), 0);
+  if (totalArea <= 0) return parsed.map(it => ({ ...it, area_unit_m2: 0, custo_unit: 0 }));
+  const custoPorM2 = valorTotal / totalArea;
+  return parsed.map(it => {
+    const areaUnit = (it._l / 100) * (it._a / 100);
+    return { ...it, area_unit_m2: +areaUnit.toFixed(6), custo_unit: +(areaUnit * custoPorM2).toFixed(4) };
+  });
+}
+
+function formatarMoeda(v) {
+  if (!Number.isFinite(Number(v))) return '—';
+  return Number(v).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+}
+
+function renderizarTabelaTransformacaoMp(itens, valorTotal) {
+  const comCusto = calcularRateioAreaFrontend(itens, Number(valorTotal) || 0);
+  const totalGeral = comCusto.reduce((acc, it) => acc + it.custo_unit * it._qtde, 0);
+  return `
+    <table style="width:100%;border-collapse:collapse;font-size:13px;">
+      <thead>
+        <tr style="background:#fef3c7;color:#92400e;font-weight:700;">
+          <th style="padding:8px 10px;text-align:left;border:1px solid #fde68a;">SKU</th>
+          <th style="padding:8px 10px;text-align:left;border:1px solid #fde68a;">Descrição</th>
+          <th style="padding:8px 6px;text-align:center;border:1px solid #fde68a;white-space:nowrap;">Larg.(cm)</th>
+          <th style="padding:8px 6px;text-align:center;border:1px solid #fde68a;white-space:nowrap;">Alt.(cm)</th>
+          <th style="padding:8px 6px;text-align:center;border:1px solid #fde68a;">Qtde</th>
+          <th style="padding:8px 6px;text-align:center;border:1px solid #fde68a;white-space:nowrap;">Área (m²)</th>
+          <th style="padding:8px 6px;text-align:right;border:1px solid #fde68a;white-space:nowrap;">Custo/un</th>
+          <th style="padding:8px 6px;text-align:right;border:1px solid #fde68a;">Subtotal</th>
+          <th style="padding:8px 6px;text-align:center;border:1px solid #fde68a;"></th>
+        </tr>
+      </thead>
+      <tbody id="transformacaoMpTbody">
+        ${comCusto.map((it, i) => `
+          <tr data-idx="${i}" style="background:${i % 2 === 0 ? '#fff' : '#fafafa'};">
+            <td style="padding:6px 10px;border:1px solid #e5e7eb;"><input class="trmp-sku" data-idx="${i}" value="${escapeHtml(it.sku)}" style="width:130px;padding:4px 6px;border:1px solid #cbd5e1;border-radius:5px;font-size:12px;" /></td>
+            <td style="padding:6px 10px;border:1px solid #e5e7eb;"><input class="trmp-desc" data-idx="${i}" value="${escapeHtml(it.descricao || '')}" style="width:180px;padding:4px 6px;border:1px solid #cbd5e1;border-radius:5px;font-size:12px;" /></td>
+            <td style="padding:6px 6px;border:1px solid #e5e7eb;text-align:center;"><input class="trmp-larg" data-idx="${i}" value="${it.largura_cm}" type="number" min="0.01" step="0.01" style="width:65px;padding:4px 5px;border:1px solid #cbd5e1;border-radius:5px;font-size:12px;text-align:center;" /></td>
+            <td style="padding:6px 6px;border:1px solid #e5e7eb;text-align:center;"><input class="trmp-alt" data-idx="${i}" value="${it.altura_cm}" type="number" min="0.01" step="0.01" style="width:65px;padding:4px 5px;border:1px solid #cbd5e1;border-radius:5px;font-size:12px;text-align:center;" /></td>
+            <td style="padding:6px 6px;border:1px solid #e5e7eb;text-align:center;"><input class="trmp-qtde" data-idx="${i}" value="${it._qtde || 1}" type="number" min="0.0001" step="1" style="width:65px;padding:4px 5px;border:1px solid #cbd5e1;border-radius:5px;font-size:12px;text-align:center;" /></td>
+            <td style="padding:6px 6px;border:1px solid #e5e7eb;text-align:center;color:#6b7280;" class="trmp-area-${i}">${it.area_unit_m2}</td>
+            <td style="padding:6px 6px;border:1px solid #e5e7eb;text-align:right;font-weight:700;color:#b45309;" class="trmp-custo-${i}">${formatarMoeda(it.custo_unit)}</td>
+            <td style="padding:6px 6px;border:1px solid #e5e7eb;text-align:right;" class="trmp-sub-${i}">${formatarMoeda(it.custo_unit * it._qtde)}</td>
+            <td style="padding:6px 6px;border:1px solid #e5e7eb;text-align:center;">
+              <button type="button" class="trmp-remover" data-idx="${i}" style="border:none;background:transparent;color:#ef4444;cursor:pointer;font-size:14px;" title="Remover linha"><i class="fa-solid fa-trash-can"></i></button>
+            </td>
+          </tr>
+        `).join('')}
+      </tbody>
+      <tfoot>
+        <tr style="background:#fff7ed;font-weight:700;color:#92400e;">
+          <td colspan="7" style="padding:8px 10px;border:1px solid #fde68a;text-align:right;">Total rateado:</td>
+          <td style="padding:8px 10px;border:1px solid #fde68a;text-align:right;" id="trmpTotalRateado">${formatarMoeda(totalGeral)}</td>
+          <td style="border:1px solid #fde68a;"></td>
+        </tr>
+      </tfoot>
+    </table>
+  `;
+}
+
+function lerItensTransformacaoMp() {
+  const tbody = document.getElementById('transformacaoMpTbody');
+  if (!tbody) return [];
+  return Array.from(tbody.querySelectorAll('tr[data-idx]')).map(tr => {
+    const idx = tr.dataset.idx;
+    return {
+      sku:        (tr.querySelector(`.trmp-sku[data-idx="${idx}"]`)?.value || '').trim(),
+      descricao:  (tr.querySelector(`.trmp-desc[data-idx="${idx}"]`)?.value || '').trim(),
+      largura_cm: parseFloat(tr.querySelector(`.trmp-larg[data-idx="${idx}"]`)?.value || '0') || 0,
+      altura_cm:  parseFloat(tr.querySelector(`.trmp-alt[data-idx="${idx}"]`)?.value || '0') || 0,
+      qtde:       parseFloat(tr.querySelector(`.trmp-qtde[data-idx="${idx}"]`)?.value || '0') || 0,
+    };
+  }).filter(it => it.sku);
+}
+
+function atualizarCalculosTransformacaoMp() {
+  const valorInput = document.getElementById('trmpValorTotal');
+  const valorTotal = parseFloat(String(valorInput?.value || '0').replace(/\./g, '').replace(',', '.')) || 0;
+  const itens = lerItensTransformacaoMp();
+  const comCusto = calcularRateioAreaFrontend(itens, valorTotal);
+  comCusto.forEach((it, i) => {
+    const areaEl = document.querySelector(`.trmp-area-${i}`);
+    const custoEl = document.querySelector(`.trmp-custo-${i}`);
+    const subEl = document.querySelector(`.trmp-sub-${i}`);
+    if (areaEl) areaEl.textContent = it.area_unit_m2;
+    if (custoEl) custoEl.textContent = formatarMoeda(it.custo_unit);
+    if (subEl) subEl.textContent = formatarMoeda(it.custo_unit * it._qtde);
+  });
+  const totalGeral = comCusto.reduce((acc, it) => acc + it.custo_unit * it._qtde, 0);
+  const totalEl = document.getElementById('trmpTotalRateado');
+  if (totalEl) totalEl.textContent = formatarMoeda(totalGeral);
+}
+
+function adicionarLinhaTransformacaoMp() {
+  const itens = lerItensTransformacaoMp();
+  itens.push({ sku: '', descricao: '', largura_cm: 0, altura_cm: 0, qtde: 1 });
+  const valorInput = document.getElementById('trmpValorTotal');
+  const valorTotal = parseFloat(String(valorInput?.value || '0').replace(/\./g, '').replace(',', '.')) || 0;
+  const tbody = document.getElementById('transformacaoMpTbody');
+  const tabelaWrap = tbody?.closest('div, table')?.parentElement;
+  if (tabelaWrap) {
+    tabelaWrap.innerHTML = renderizarTabelaTransformacaoMp(itens, valorTotal);
+    ligarEventosTabelaTransformacaoMp(tabelaWrap, valorTotal);
+  }
+}
+
+function ligarEventosTabelaTransformacaoMp(container, valorTotal) {
+  container.querySelectorAll('.trmp-sku,.trmp-desc,.trmp-larg,.trmp-alt,.trmp-qtde').forEach(inp => {
+    inp.addEventListener('input', atualizarCalculosTransformacaoMp);
+  });
+  container.querySelectorAll('.trmp-remover').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const idx = Number(btn.dataset.idx);
+      const itens = lerItensTransformacaoMp().filter((_, i) => i !== idx);
+      const valorInput = document.getElementById('trmpValorTotal');
+      const vt = parseFloat(String(valorInput?.value || '0').replace(/\./g, '').replace(',', '.')) || 0;
+      container.innerHTML = renderizarTabelaTransformacaoMp(itens, vt);
+      ligarEventosTabelaTransformacaoMp(container, vt);
+    });
+  });
+}
+
+async function abrirModalTransformacaoMp(dados) {
+  criarModalTransformacaoMpSeNecessario();
+  const modal = document.getElementById('modalTransformacaoMp');
+  const conteudo = document.getElementById('modalTransformacaoMpConteudo');
+  if (!modal || !conteudo) return;
+
+  modal.style.display = 'flex';
+  conteudo.innerHTML = '<div style="text-align:center;padding:32px;color:#94a3b8;"><i class="fa-solid fa-spinner fa-spin fa-2x"></i><div style="margin-top:10px;font-size:13px;">Carregando template...</div></div>';
+
+  document.getElementById('modalTransformacaoMpFechar')?.addEventListener('click', fecharModalTransformacaoMp);
+  document.getElementById('modalTransformacaoMpCancelar')?.addEventListener('click', fecharModalTransformacaoMp);
+
+  const fornecedor = dados?.fornecedor_nome || '';
+  const valorTotal = Number(dados?.valor_total) || 0;
+
+  // Carrega template salvo
+  let templateItens = [];
+  try {
+    const resp = await fetch(`/api/transformacao-mp/template?fornecedor=${encodeURIComponent(fornecedor)}`, { credentials: 'include' });
+    const json = await resp.json().catch(() => ({}));
+    if (json?.template?.itens && Array.isArray(json.template.itens)) {
+      templateItens = json.template.itens;
+    }
+  } catch (_) {}
+
+  // Se não tem template, pré-preenche com os SKUs padrão da ZINCA RAPIDO
+  if (!templateItens.length && /ZINCA\s*RAPIDO/i.test(fornecedor)) {
+    templateItens = [
+      { sku: '03.MP.N.60409', descricao: 'Chapa Zincada 24,5×15,5cm', largura_cm: 24.5, altura_cm: 15.5, qtde: 1 },
+      { sku: '03.MP.N.60410', descricao: 'Chapa Zincada 38×18cm',     largura_cm: 38,   altura_cm: 18,   qtde: 1 },
+      { sku: '03.MP.N.60411', descricao: 'Chapa Zincada 40×33cm',     largura_cm: 40,   altura_cm: 33,   qtde: 1 },
+      { sku: '03.MP.N.60412', descricao: 'Chapa Zincada 41×21cm',     largura_cm: 41,   altura_cm: 21,   qtde: 1 },
+    ];
+  }
+
+  const valorFormatado = valorTotal > 0
+    ? valorTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+    : '';
+
+  conteudo.innerHTML = `
+    <div style="display:flex;align-items:center;flex-wrap:wrap;gap:14px;padding:12px 14px;background:#fff7ed;border-radius:8px;border:1px solid #fed7aa;">
+      <div style="flex:1;min-width:200px;">
+        <div style="font-size:12px;color:#92400e;font-weight:700;margin-bottom:2px;">Fornecedor</div>
+        <div style="font-size:15px;color:#0f172a;font-weight:800;">${escapeHtml(fornecedor || '—')}</div>
+      </div>
+      <div>
+        <div style="font-size:12px;color:#92400e;font-weight:700;margin-bottom:2px;">Valor Total NF-e</div>
+        <input id="trmpValorTotal" type="text" value="${escapeHtml(valorFormatado)}" placeholder="0,00" inputmode="decimal"
+          style="font-size:16px;font-weight:800;color:#b45309;padding:6px 10px;border:1.5px solid #fb923c;border-radius:7px;width:150px;text-align:right;" />
+      </div>
+      <div>
+        <div style="font-size:12px;color:#92400e;font-weight:700;margin-bottom:2px;">NF-e</div>
+        <div style="font-size:14px;color:#0f172a;">${escapeHtml(dados?.numero_nfe || '—')}</div>
+      </div>
+    </div>
+
+    <div>
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+        <span style="font-size:13px;font-weight:700;color:#334155;">Itens para Transformação</span>
+        <button type="button" id="trmpAdicionarLinha" style="border:none;background:#0f766e;color:#fff;border-radius:6px;padding:5px 12px;font-size:12px;font-weight:700;cursor:pointer;display:inline-flex;align-items:center;gap:5px;">
+          <i class="fa-solid fa-plus"></i> Adicionar linha
+        </button>
+      </div>
+      <div id="trmpTabelaWrap" style="overflow-x:auto;">
+        ${renderizarTabelaTransformacaoMp(templateItens, valorTotal)}
+      </div>
+    </div>
+
+    <div style="font-size:12px;color:#6b7280;padding:6px 10px;background:#f8fafc;border-radius:6px;border:1px solid #e2e8f0;line-height:1.7;">
+      <strong>Lógica de rateio:</strong>
+      Custo/un = (largura × altura) ÷ 10.000 × (Valor Total ÷ Área Total)<br>
+      Área total = Σ (qtde × largura × altura) ÷ 10.000 de todos os itens
+    </div>
+
+    <div id="trmpMensagem" style="display:none;"></div>
+  `;
+
+  const tabelaWrap = document.getElementById('trmpTabelaWrap');
+  ligarEventosTabelaTransformacaoMp(tabelaWrap, valorTotal);
+
+  document.getElementById('trmpValorTotal')?.addEventListener('input', atualizarCalculosTransformacaoMp);
+
+  document.getElementById('trmpAdicionarLinha')?.addEventListener('click', adicionarLinhaTransformacaoMp);
+
+  document.getElementById('modalTransformacaoMpExecutar')?.addEventListener('click', () =>
+    executarTransformacaoMp(dados)
+  );
+}
+
+async function executarTransformacaoMp(dadosBase) {
+  const btnExecutar = document.getElementById('modalTransformacaoMpExecutar');
+  const msgEl = document.getElementById('trmpMensagem');
+  if (!btnExecutar) return;
+
+  const itens = lerItensTransformacaoMp();
+  if (!itens.length) {
+    if (msgEl) { msgEl.style.display = ''; msgEl.innerHTML = '<div style="background:#fef2f2;border:1px solid #fca5a5;color:#b91c1c;padding:10px 14px;border-radius:7px;font-size:13px;"><i class="fa-solid fa-triangle-exclamation"></i> Adicione ao menos um item.</div>'; }
+    return;
+  }
+
+  const valorInput = document.getElementById('trmpValorTotal');
+  const valorTotal = parseFloat(String(valorInput?.value || '0').replace(/\./g, '').replace(',', '.')) || 0;
+  if (valorTotal <= 0) {
+    if (msgEl) { msgEl.style.display = ''; msgEl.innerHTML = '<div style="background:#fef2f2;border:1px solid #fca5a5;color:#b91c1c;padding:10px 14px;border-radius:7px;font-size:13px;"><i class="fa-solid fa-triangle-exclamation"></i> Informe o valor total da NF-e.</div>'; }
+    return;
+  }
+
+  const salvarTemplate = document.getElementById('modalTransformacaoMpSalvarTemplate')?.checked || false;
+  btnExecutar.disabled = true;
+  btnExecutar.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Executando...';
+  if (msgEl) msgEl.style.display = 'none';
+
+  try {
+    const resp = await fetch('/api/transformacao-mp/executar', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({
+        n_id_receb: dadosBase?.n_id_receb || null,
+        numero_nfe: dadosBase?.numero_nfe || null,
+        fornecedor_nome: dadosBase?.fornecedor_nome || null,
+        valor_total: valorTotal,
+        itens,
+        solicitante: dadosBase?.solicitante || (document.getElementById('userNameDisplay')?.textContent || '').trim() || null,
+        salvar_template: salvarTemplate,
+      }),
+    });
+
+    const json = await resp.json().catch(() => ({}));
+    if (!resp.ok || !json?.ok) {
+      throw new Error(json?.error || `Erro HTTP ${resp.status}`);
+    }
+
+    if (msgEl) {
+      msgEl.style.display = '';
+      msgEl.innerHTML = `
+        <div style="background:#f0fdf4;border:1px solid #86efac;color:#166534;padding:12px 16px;border-radius:8px;font-size:13px;">
+          <div style="font-weight:800;font-size:15px;margin-bottom:4px;"><i class="fa-solid fa-circle-check"></i> Transformação executada!</div>
+          <div>${escapeHtml(json.message || '')}</div>
+          <div style="margin-top:8px;font-size:12px;color:#4ade80;">
+            ${(json.itens || []).map(it => `${escapeHtml(it.sku)}: SAI #${it.id_sai} + ENT #${it.id_ent}`).join('<br>')}
+          </div>
+          <div style="margin-top:8px;font-size:12px;color:#166534;">Ajustes executados diretamente no estoque Omie.</div>
+        </div>
+      `;
+    }
+    btnExecutar.innerHTML = '<i class="fa-solid fa-circle-check"></i> Concluído';
+    btnExecutar.style.background = 'linear-gradient(135deg,#16a34a 0%,#15803d 100%)';
+    btnExecutar.disabled = false;
+    btnExecutar.onclick = fecharModalTransformacaoMp;
+  } catch (err) {
+    if (msgEl) {
+      msgEl.style.display = '';
+      msgEl.innerHTML = `<div style="background:#fef2f2;border:1px solid #fca5a5;color:#b91c1c;padding:10px 14px;border-radius:7px;font-size:13px;"><i class="fa-solid fa-triangle-exclamation"></i> ${escapeHtml(err?.message || 'Erro ao executar transformação.')}</div>`;
+    }
+    btnExecutar.disabled = false;
+    btnExecutar.innerHTML = '<i class="fa-solid fa-check"></i> Executar Transformação';
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
 
 function criarModalAssociarPedidoNfeSeNecessario() {
   if (obterModalAssociarPedidoNfeEl()) return;
