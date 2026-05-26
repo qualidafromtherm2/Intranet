@@ -31717,6 +31717,41 @@ app.post('/api/compras/pedidos-omie/nfe-associar-pedido', express.json(), async 
       }
     }
 
+    // ─── Passo 3b: nQtde override (quando usuário informou qty diferente da conversão Omie) ───
+    // Omie calcula qty convertida via fator interno do produto (ex: KG→MTS). Se o usuário
+    // forneceu uma medição física diferente (campo assoc-override-qtd na prévia), tentamos
+    // sobrescrever com EDITAR separado. Executa depois do Passo 3 para não arriscar o armazém/unidade.
+    const itensEditarQtde = (plano?.itensRecebimentoEditar || []).map(itemEditar => {
+      const nSeq = itemEditar.itensIde?.nSequencia;
+      const override = overrideMap.get(nSeq);
+      const nQtdeOverride = Number(override?.nQtde || 0);
+      if (!Number.isFinite(nQtdeOverride) || nQtdeOverride <= 0) return null;
+      const previewItem = (plano?.itens_preview || []).find(p => p.n_sequencia === nSeq);
+      if (!!(previewItem?.item_servico)) return null;
+      return {
+        itensIde: { nSequencia: nSeq, cAcao: 'EDITAR' },
+        itensAjustes: { nQtde: nQtdeOverride }
+      };
+    }).filter(Boolean);
+
+    if (itensEditarQtde.length > 0) {
+      try {
+        const payloadQtde = {
+          ide: { nIdReceb: Number(plano.n_id_receb) },
+          itensRecebimentoEditar: itensEditarQtde
+        };
+        console.log('[Compras/NFeAssociarPedido] ===== PASSO 3b: nQtde override =====');
+        console.log(JSON.stringify(payloadQtde, null, 2));
+        console.log('[Compras/NFeAssociarPedido] ===================================');
+        await chamarApiRecebimentoNfeOmieComRetryRedundant('AlterarRecebimento', payloadQtde, {
+          tentativasMaximas: 1
+        });
+        console.log('[Compras/NFeAssociarPedido] nQtde override aplicado com sucesso.');
+      } catch (errQtde) {
+        console.warn('[Compras/NFeAssociarPedido] nQtde override ignorado (Omie pode não suportar o campo):', errQtde?.message);
+      }
+    }
+
     // ─── Passo 4: Concluir recebimento (etapa 60) ───
     // ConcluirRecebimento é mais confiável que AlterarEtapaRecebimento
     // (AlterarEtapaRecebimento pode retornar "OK" sem efetivamente mudar a etapa)
