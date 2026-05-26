@@ -11676,8 +11676,10 @@ function _renderAtCards(rows) {
 
     const hasAnexos = group.rows.some(r => Number(r.qtd_anexos) > 0);
     const hasPecas  = group.rows.some(r => r.has_pecas_enviadas);
+    const enviosStatusCard = group.rows.find(r => r.envios_status)?.envios_status || '';
     const pecasBtnCard = hasPecas
-      ? `<span title="Peças enviadas para esta OS" style="color:#a78bfa;font-size:13px;padding:2px 4px;flex-shrink:0;">
+      ? `<span title="Peças enviadas para esta OS" style="display:inline-flex;align-items:center;gap:4px;color:#a78bfa;font-size:13px;padding:2px 4px;flex-shrink:0;">
+           ${enviosStatusCard ? `<span style="font-size:10px;font-weight:600;background:rgba(167,139,250,.15);border:1px solid rgba(167,139,250,.35);border-radius:10px;padding:1px 6px;color:#a78bfa;">${escapeAtHtml(enviosStatusCard)}</span>` : ''}
            <i class="fa-solid fa-box"></i>
          </span>`
       : '';
@@ -17444,10 +17446,6 @@ async function carregarSacSolicitacoes(targetBody, { hideDone = false, titleOnly
         // Tabela "Registro de envios" (painel SAC) - SEM coluna Requisitante
         // Botões de Ação (Editar e Excluir)
         const acoesButtons = `
-          <button class="content-button btn-sac-editar" data-id="${r.id}" data-obs="${(obs || '').replace(/"/g, '&quot;')}" data-status="${statusRaw}" data-conteudo="${(r.conteudo || '').replace(/"/g, '&quot;')}" style="padding:4px 8px;font-size:12px;display:inline-flex;align-items:center;gap:6px;background:linear-gradient(135deg,#0ea5e9 0%,#0284c7 100%);color:white;">
-            <i class="fa-solid fa-pen-to-square"></i>
-            <span>Editar</span>
-          </button>
           <button class="content-button btn-sac-excluir" data-id="${r.id}" style="padding:4px 8px;font-size:12px;display:inline-flex;align-items:center;gap:6px;background:linear-gradient(135deg,#ef4444 0%,#dc2626 100%);color:white;">
             <i class="fa-solid fa-trash"></i>
             <span>Excluir</span>
@@ -18279,6 +18277,16 @@ function setupPrintButtons(container) {
 
 setupPrintButtons(sacTabelaBody);
 
+// ── Helper compartilhado: parse de preferência de agente "__AGENT__:pc:imp" ──
+// Definido no escopo global para ser acessível pelas funções de envio e pelo modal de etiquetas
+function _etqParseAgentPref(pref) {
+  if (!pref || !pref.startsWith('__AGENT__:')) return null;
+  const s   = pref.slice('__AGENT__:'.length);
+  const idx = s.indexOf(':');
+  if (idx === -1) return null;
+  return { pcName: s.slice(0, idx), impressora: s.slice(idx + 1) };
+}
+
 // ── Envio de Mercadoria: impressora configurável (separada da etiquetas de ID) ──
 let _envioImprPref = null;
 
@@ -18522,149 +18530,10 @@ document.addEventListener('change', async (ev) => {
   }
 });
 
-// ========== MODAL DE EDIÇÃO DE ENVIO SAC ==========
-const sacEditModal = document.getElementById('sacEditModal');
-const sacEditModalClose = document.getElementById('sacEditModalClose');
-const sacEditCancelBtn = document.getElementById('sacEditCancelBtn');
-const sacEditSaveBtn = document.getElementById('sacEditSaveBtn');
-const sacEditId = document.getElementById('sacEditId');
-const sacEditObservacao = document.getElementById('sacEditObservacao');
-const sacEditStatus = document.getElementById('sacEditStatus');
-const sacEditConteudoOriginal = document.getElementById('sacEditConteudoOriginal');
-const sacEditQuantidadeContainer = document.getElementById('sacEditQuantidadeContainer');
-
-// Função para abrir o modal de edição
-function abrirModalEdicaoSAC(id, observacao, status, conteudoRaw) {
-  sacEditId.value = id;
-  sacEditObservacao.value = observacao === '—' ? '' : observacao;
-  sacEditStatus.value = status;
-  sacEditConteudoOriginal.value = conteudoRaw;
-  
-  // Parse do conteúdo JSON para criar os campos de quantidade
-  sacEditQuantidadeContainer.innerHTML = '';
-  
-  if (conteudoRaw && conteudoRaw !== '—') {
-    try {
-      const items = JSON.parse(conteudoRaw);
-      if (Array.isArray(items) && items.length > 0) {
-        items.forEach((item, idx) => {
-          const div = document.createElement('div');
-          div.style.cssText = 'display:flex;align-items:center;gap:8px;padding:6px;border:1px solid var(--border-color);border-radius:8px;background:var(--content-bg);';
-          div.innerHTML = `
-            <label style="flex:1;font-size:13px;color:var(--inactive-color);">${item.conteudo}</label>
-            <input type="number" min="1" class="sac-qtd-input" data-idx="${idx}" value="${item.quantidade}" style="width:80px;padding:6px;border:1px solid var(--border-color);border-radius:6px;background:var(--content-bg);color:var(--content-title-color);text-align:center;" />
-          `;
-          sacEditQuantidadeContainer.appendChild(div);
-        });
-      }
-    } catch (err) {
-      console.warn('[SAC] Erro ao parsear conteúdo:', err);
-      sacEditQuantidadeContainer.innerHTML = '<div style="color:var(--inactive-color);font-size:13px;">Formato de conteúdo inválido para edição.</div>';
-    }
-  } else {
-    sacEditQuantidadeContainer.innerHTML = '<div style="color:var(--inactive-color);font-size:13px;">Nenhum item disponível.</div>';
-  }
-  
-  sacEditModal.style.display = 'flex';
-}
-
-// Função para fechar o modal de edição
-function fecharModalEdicaoSAC() {
-  sacEditModal.style.display = 'none';
-}
-
-// Event listeners para fechar o modal
-sacEditModalClose?.addEventListener('click', fecharModalEdicaoSAC);
-sacEditCancelBtn?.addEventListener('click', fecharModalEdicaoSAC);
-sacEditModal?.addEventListener('click', (e) => {
-  if (e.target === sacEditModal) fecharModalEdicaoSAC();
-});
-
-// Event listener para salvar as edições
-sacEditSaveBtn?.addEventListener('click', async () => {
-  const id = sacEditId.value;
-  if (!id) return;
-  
-  const novaObservacao = sacEditObservacao.value.trim();
-  const novoStatus = sacEditStatus.value.trim();
-  const conteudoOriginalStr = sacEditConteudoOriginal.value;
-  
-  // Coleta as novas quantidades
-  const qtdInputs = document.querySelectorAll('.sac-qtd-input');
-  let novoConteudo = null;
-  
-  if (conteudoOriginalStr && conteudoOriginalStr !== '—') {
-    try {
-      const items = JSON.parse(conteudoOriginalStr);
-      if (Array.isArray(items)) {
-        qtdInputs.forEach(input => {
-          const idx = parseInt(input.dataset.idx);
-          const novaQtd = input.value.trim();
-          if (items[idx]) {
-            items[idx].quantidade = novaQtd;
-          }
-        });
-        novoConteudo = JSON.stringify(items);
-      }
-    } catch (err) {
-      console.warn('[SAC] Erro ao processar conteúdo:', err);
-    }
-  }
-  
-  sacEditSaveBtn.disabled = true;
-  
-  try {
-    // 1. Atualizar observação
-    const respObs = await fetch(`/api/sac/solicitacoes/${id}/observacao`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ observacao: novaObservacao })
-    });
-    if (!respObs.ok) throw new Error('Erro ao atualizar observação');
-    
-    // 2. Atualizar status livre
-    const respStatus = await fetch(`/api/sac/solicitacoes/${id}/status-livre`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ status: novoStatus })
-    });
-    if (!respStatus.ok) throw new Error('Erro ao atualizar status');
-    
-    // 3. Atualizar quantidade (se houver conteúdo)
-    if (novoConteudo) {
-      const respQtd = await fetch(`/api/sac/solicitacoes/${id}/quantidade`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ conteudo: novoConteudo })
-      });
-      if (!respQtd.ok) throw new Error('Erro ao atualizar quantidade');
-    }
-    
-    alert('Registro atualizado com sucesso!');
-    fecharModalEdicaoSAC();
-    
-    // Recarrega a tabela
-    carregarSacSolicitacoes(sacTabelaBody, { hideDone: false, filterByUser: true });
-  } catch (err) {
-    console.error('[SAC] Erro ao salvar edição:', err);
-    alert('Não foi possível salvar as alterações. ' + (err?.message || ''));
-  } finally {
-    sacEditSaveBtn.disabled = false;
-  }
-});
-
-// Event listener para os botões "Editar"
-document.addEventListener('click', (e) => {
-  const btnEditar = e.target.closest('.btn-sac-editar');
-  if (btnEditar) {
-    e.preventDefault();
-    const id = btnEditar.dataset.id;
-    const obs = btnEditar.dataset.obs.replace(/&quot;/g, '"');
-    const status = btnEditar.dataset.status;
-    const conteudo = btnEditar.dataset.conteudo.replace(/&quot;/g, '"');
-    abrirModalEdicaoSAC(id, obs, status, conteudo);
-  }
-});
+// ========== MODAL DE EDIÇÃO DE ENVIO SAC — REMOVIDO ==========
+// (substituído pelo fluxo VIPP direto)
+function abrirModalEdicaoSAC() { /* removido */ }
+function fecharModalEdicaoSAC() { /* removido */ }
 
 // Event listener para os botões "Excluir"
 document.addEventListener('click', async (e) => {
@@ -68233,6 +68102,8 @@ window.initOscilacaoEstoque = (function () {
   const declTotalValor = document.getElementById('vippDeclTotalValor');
 
   if (!modal) return;
+  // Move modal para body, escapando display:none do sacAtPane
+  document.body.appendChild(modal);
 
   // ── Declaração de Conteúdo — helpers ─────────────────────────────────────
   function sanitizarDesc(str) {
@@ -68695,7 +68566,10 @@ window.initOscilacaoEstoque = (function () {
           item_ids:        _adicionados,
           forcar_novo_sep: true,
           os_num:          osNum   || null,
-          id_vipp:         idVipp  || null
+          id_vipp:         idVipp  || null,
+          conteudo:        itensDecl.length ? JSON.stringify(itensDecl.map(function(it) {
+                             return { conteudo: it.descricao || '', quantidade: parseInt(it.quantidade, 10) || 1 };
+                           })) : null
         })
       });
       var _envData = await _envResp.json();

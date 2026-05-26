@@ -4174,13 +4174,26 @@ router.get('/at/atendimentos', async (_req, res) => {
          LEFT JOIN anexos_cnt              anx ON anx.id_at = a.id
          ORDER BY a.id DESC, f.id DESC`
       ),
-      // 2) Busca observacoes das solicitações (poucas linhas) em paralelo
-      pool.query(`SELECT observacao FROM envios.solicitacoes WHERE observacao IS NOT NULL`)
+      // 2) Busca observacoes + status das solicitações em paralelo
+      pool.query(`SELECT observacao, status FROM envios.solicitacoes WHERE observacao IS NOT NULL ORDER BY id DESC`)
     ]);
 
     const tQuery = Date.now() - t0;
 
-    // 3) Computa has_pecas_enviadas em JS (~7ms em vez de ~38s no SQL)
+    // 3a) Mapa atId → status via padrão OS{id} (match direto com id do AT)
+    const atStatusMap = new Map(); // atId (number) → status mais recente
+    for (const row of solResult.rows) {
+      if (!row.observacao) continue;
+      const mId = row.observacao.match(/^OS\s*(\d+)/i);
+      if (mId) {
+        const atId = parseInt(mId[1], 10);
+        if (!atStatusMap.has(atId)) { // ORDER BY id DESC → first = mais recente
+          atStatusMap.set(atId, row.status);
+        }
+      }
+    }
+
+    // 3b) Computa has_pecas_enviadas em JS (~7ms em vez de ~38s no SQL)
     const osPattern = /O\.S\s+(\S+)/gi;
     const osTokens = new Set();
     for (const row of solResult.rows) {
@@ -4199,7 +4212,10 @@ router.get('/at/atendimentos', async (_req, res) => {
     for (const at of rows) {
       const yr = at.data ? new Date(at.data).getFullYear().toString().slice(-2) : '';
       const chaves = [at.atendimento_inicial, yr ? yr + at.id : ''].filter(Boolean);
-      at.has_pecas_enviadas = chaves.some(ch => osTokens.has(ch.replace(/-/g, '')));
+      const hasByChave = chaves.some(ch => osTokens.has(ch.replace(/-/g, '')));
+      const statusDireto = atStatusMap.get(at.id) || null;
+      at.has_pecas_enviadas = hasByChave || !!statusDireto;
+      at.envios_status = statusDireto;
     }
 
     console.log(`[SAC/AT] /at/atendimentos ${rows.length} rows em ${Date.now() - t0}ms (query: ${tQuery}ms)`);
