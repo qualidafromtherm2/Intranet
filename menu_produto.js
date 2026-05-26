@@ -10977,6 +10977,33 @@ async function preencherStatusRastreio(container) {
   });
 }
 
+// Consulta status VIPP para envios com id_vipp (substitui "ok" por status real)
+async function preencherStatusVipp(container) {
+  if (!container) return;
+  const spans = container.querySelectorAll('[data-id-vipp]');
+  spans.forEach(async (el) => {
+    const idVipp = (el.getAttribute('data-id-vipp') || '').trim();
+    if (!idVipp) return;
+    el.textContent = 'Consultando VIPP...';
+    try {
+      const resp = await fetch('/api/vipp/status?id=' + encodeURIComponent(idVipp), { credentials: 'same-origin' });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok || data.ok === false) {
+        el.textContent = data.error || 'Erro VIPP';
+        return;
+      }
+      const partes = [];
+      if (data.statusVipp && data.statusVipp !== 'Desconhecido') partes.push(data.statusVipp);
+      if (data.statusSolicitacao) partes.push(data.statusSolicitacao);
+      if (data.etiquetaPostagem) partes.push('ECT: ' + data.etiquetaPostagem);
+      el.textContent = partes.length ? partes.join(' | ') : 'Aguardando VIPP';
+    } catch (err) {
+      console.error('[VIPP] erro status', err);
+      el.textContent = 'Erro ao consultar VIPP';
+    }
+  });
+}
+
 
 const normalizeSacStatus = (val) => {
   const status = String(val || '').trim();
@@ -17349,6 +17376,7 @@ async function carregarSacSolicitacoes(targetBody, { hideDone = false, titleOnly
       const numeroSep = r.numero_sep || '-';
       const etiqueta = r.etiqueta_url || r.etiqueta || '';
       const declaracao = r.declaracao_url || r.declaracao || '';
+      const declaracaoHref = declaracao || (r.id_vipp ? '/api/vipp/declaracao?id=' + r.id : '');
       const identRaw = r.identificacao ? String(r.identificacao).trim() : '—';
       const identClean = identRaw.replace(/\s+/g, '').toUpperCase();
       const isRastreio = /^[A-Z]{2}\d{9}[A-Z]{2}$/.test(identClean);
@@ -17404,12 +17432,12 @@ async function carregarSacSolicitacoes(targetBody, { hideDone = false, titleOnly
       const temIdentRaw = r.identificacao && String(r.identificacao).trim().length > 0;
       const buttonsEnvio = [
         (etiqueta || temIdentRaw) ? `<button class="content-button btn-envio-etiqueta" data-envio-id="${r.id}" data-identificacao="${(r.identificacao || '').trim()}" style="padding:4px 8px;font-size:12px;display:inline-flex;align-items:center;gap:6px;"><i class="fa-solid fa-print"></i><span>Etiqueta</span></button>` : '',
-        declaracao ? `<button class="content-button btn-envio-declaracao" data-envio-id="${r.id}" data-print-url="${declaracao}" style="padding:4px 8px;font-size:12px;display:inline-flex;align-items:center;gap:6px;"><i class="fa-solid fa-file-pdf"></i><span>Declaração</span></button>` : ''
+        declaracaoHref ? `<button class="content-button btn-envio-declaracao" data-envio-id="${r.id}" data-print-url="${declaracaoHref}" style="padding:4px 8px;font-size:12px;display:inline-flex;align-items:center;gap:6px;"><i class="fa-solid fa-file-pdf"></i><span>Declaração</span></button>` : ''
       ].filter(Boolean).join(' ');
       // Botões painel SAC: usam classe btn-print-* + data-print-url (abre PDF no navegador)
       const buttonsSac = [
         etiqueta ? `<button class="content-button btn-print-etiqueta" data-print-url="${etiqueta}" style="padding:4px 8px;font-size:12px;display:inline-flex;align-items:center;gap:6px;"><i class="fa-solid fa-print"></i><span>Etiqueta</span></button>` : '',
-        declaracao ? `<button class="content-button btn-print-declaracao" data-print-url="${declaracao}" style="padding:4px 8px;font-size:12px;display:inline-flex;align-items:center;gap:6px;"><i class="fa-solid fa-print"></i><span>Declaração</span></button>` : ''
+        declaracaoHref ? `<button class="content-button btn-print-declaracao" data-print-url="${declaracaoHref}" style="padding:4px 8px;font-size:12px;display:inline-flex;align-items:center;gap:6px;"><i class="fa-solid fa-print"></i><span>Declaração</span></button>` : ''
       ].filter(Boolean).join(' ');
       
       // Select de status para Tabela "Envios registrados" (COM status real do banco)
@@ -17436,7 +17464,7 @@ async function carregarSacSolicitacoes(targetBody, { hideDone = false, titleOnly
             <td>${dataFmt}</td>
             <td>${usuario}</td>
             <td style="max-width:280px;">${obs}</td>
-            <td>${identRaw}<br><small class="rast-status" data-rastreio="${dataRastreio}" style="color:var(--inactive-color);">${rastText}</small></td>
+            <td>${identRaw}<br><small class="rast-status" data-rastreio="${dataRastreio}" data-id-vipp="${r.id_vipp || ''}" data-envio-id="${r.id}" style="color:var(--inactive-color);">${rastText}</small></td>
             <td>${numeroSep}</td>
             <td style="max-width:400px;white-space:pre-wrap;line-height:1.8;padding:12px 8px;vertical-align:top;">${conteudo}</td>
             <td>${statusSelectEnvioMercadoria}</td>
@@ -17457,7 +17485,7 @@ async function carregarSacSolicitacoes(targetBody, { hideDone = false, titleOnly
             <td>${r.id}</td>
             <td>${dataFmt}</td>
             <td style="max-width:280px;">${obs}</td>
-            <td>${identRaw}<br><small class="rast-status" data-rastreio="${dataRastreio}" style="color:var(--inactive-color);">${rastText}</small></td>
+            <td>${identRaw}<br><small class="rast-status" data-rastreio="${dataRastreio}" data-id-vipp="${r.id_vipp || ''}" data-envio-id="${r.id}" style="color:var(--inactive-color);">${rastText}</small></td>
             <td>${numeroSep}</td>
             <td style="max-width:400px;white-space:pre-wrap;line-height:1.8;padding:12px 8px;vertical-align:top;">${conteudo}</td>
             <td>${statusSelectSac}</td>
@@ -17467,6 +17495,7 @@ async function carregarSacSolicitacoes(targetBody, { hideDone = false, titleOnly
       }
     }).join('');
     preencherStatusRastreio(bodyEl);
+    preencherStatusVipp(bodyEl);
   } catch (err) {
     console.error('[SAC] erro ao carregar tabela', err);
     const numCols = bodyEl === envioMercadoriaTabelaBodyPane ? 8 : 9;
