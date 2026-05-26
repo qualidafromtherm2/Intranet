@@ -339,7 +339,7 @@ router.post('/postar', async (req, res) => {
 //   id — IdConhecimento numérico
 //
 router.get('/status', async (req, res) => {
-  const { id } = req.query;
+  const { id, envio_id } = req.query;
   if (!id) return res.status(400).json({ ok: false, error: 'Parâmetro id obrigatório' });
 
   const soapXml = `<?xml version="1.0" encoding="utf-8"?>
@@ -377,6 +377,29 @@ router.get('/status', async (req, res) => {
 
     if (extrairTag(raw, 'Message') && !etiquetaPostagem) {
       return res.json({ ok: false, error: extrairTag(raw, 'Message') });
+    }
+
+    // Persiste status no banco quando envio_id fornecido
+    // 'Invalida' = postagem não liberada no VIPP ainda (não é status real)
+    const STATUS_VIPP_INVALIDOS = ['Desconhecido', 'Invalida'];
+    if (envio_id) {
+      const statusParaSalvar = (nomeStatusEvento && !STATUS_VIPP_INVALIDOS.includes(nomeStatusEvento))
+        ? nomeStatusEvento
+        : (statusSolicitacao && !STATUS_VIPP_INVALIDOS.includes(statusSolicitacao) ? statusSolicitacao : null);
+      if (statusParaSalvar) {
+        try {
+          await dbQuery(
+            `UPDATE envios.solicitacoes
+                SET rastreio_status = $1,
+                    rastreio_quando = NOW(),
+                    identificacao   = COALESCE(NULLIF(identificacao, ''), $2)
+              WHERE id = $3`,
+            [statusParaSalvar, etiquetaPostagem || null, Number(envio_id)]
+          );
+        } catch (e) {
+          console.warn('[VIPP] falha ao persistir status:', e.message);
+        }
+      }
     }
 
     return res.json({
@@ -589,6 +612,15 @@ router.post('/imprimir-envio', async (req, res) => {
        VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
       [[], 0, usuario, zpl, 1, destino_agente || null, impressora || null]
     );
+    // 4. Persiste o ZPL em etiqueta_url (apenas quando vazio) para reimpressão futura
+    try {
+      await dbQuery(
+        `UPDATE envios.solicitacoes SET etiqueta_url = $1 WHERE id = $2 AND (etiqueta_url IS NULL OR etiqueta_url = '')`,
+        [zpl, Number(envio_id)]
+      );
+    } catch (e) {
+      console.warn('[VIPP] imprimir-envio: falha ao salvar ZPL em etiqueta_url:', e.message);
+    }
     console.log(`[VIPP] imprimir-envio: envio_id=${envio_id} identificacao=${identificacao} fila_id=${filaIns.rows[0].id}`);
     return res.json({ ok: true, fila_id: filaIns.rows[0].id });
 
@@ -945,6 +977,15 @@ router.post('/imprimir-declaracao', async (req, res) => {
        VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
       [[], 0, usuario, zpl, 1, destino_agente || null, impressora || null]
     );
+    // 6. Persiste ZPL em declaracao_url (apenas quando vazio) para reimpressão futura
+    try {
+      await dbQuery(
+        `UPDATE envios.solicitacoes SET declaracao_url = $1 WHERE id = $2 AND (declaracao_url IS NULL OR declaracao_url = '')`,
+        [zpl, Number(envio_id)]
+      );
+    } catch (e) {
+      console.warn('[VIPP] imprimir-declaracao: falha ao salvar ZPL em declaracao_url:', e.message);
+    }
     console.log(`[VIPP] imprimir-declaracao: envio_id=${envio_id} ect=${ectCode} fila_id=${filaIns.rows[0].id}`);
     return res.json({ ok: true, fila_id: filaIns.rows[0].id });
 

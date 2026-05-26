@@ -9761,16 +9761,6 @@ if (chatbotMonitorExplorerSection) {
 
 renderChatbotMonitorExplorer();
 
-const sacAttachEtiquetaBtn = document.getElementById('sacAttachEtiquetaBtn');
-const sacAttachDeclaracaoBtn = document.getElementById('sacAttachDeclaracaoBtn');
-const sacFileInputEtiqueta = document.getElementById('sacFileInputEtiqueta');
-const sacFileInputDeclaracao = document.getElementById('sacFileInputDeclaracao');
-const sacFileInfoEtiqueta = document.getElementById('sacFileInfoEtiqueta');
-const sacFileInfoDeclaracao = document.getElementById('sacFileInfoDeclaracao');
-const sacSendBtn = document.getElementById('sacSendBtn');
-const sacEnvioStatus = document.getElementById('sacEnvioStatus');
-const sacObservacao = document.getElementById('sacObservacao');
-const sacNumeroSep = document.getElementById('sacNumeroSep');
 const sacRefreshBtn = document.getElementById('sacRefreshBtn');
 const sacRelatorioBtn = document.getElementById('sacRelatorioBtn');
 const sacTabelaBody = document.getElementById('sacTabelaBody');
@@ -10984,16 +10974,48 @@ async function preencherStatusVipp(container) {
   spans.forEach(async (el) => {
     const idVipp = (el.getAttribute('data-id-vipp') || '').trim();
     if (!idVipp) return;
+    const envioId = (el.getAttribute('data-envio-id') || '').trim();
+    const identificacaoAttr = (el.getAttribute('data-identificacao') || '').replace(/\s+/g, '').toUpperCase();
     el.textContent = 'Consultando VIPP...';
     try {
-      const resp = await fetch('/api/vipp/status?id=' + encodeURIComponent(idVipp), { credentials: 'same-origin' });
+      const url = '/api/vipp/status?id=' + encodeURIComponent(idVipp) + (envioId ? '&envio_id=' + encodeURIComponent(envioId) : '');
+      const resp = await fetch(url, { credentials: 'same-origin' });
       const data = await resp.json().catch(() => ({}));
       if (!resp.ok || data.ok === false) {
         el.textContent = data.error || 'Erro VIPP';
         return;
       }
+      const statusVipp = data.statusVipp || '';
+      const isStatusInutil = !statusVipp || statusVipp === 'Desconhecido' || statusVipp === 'Invalida';
+      // ECT code: prefer what VIPP returned, fallback to card attribute
+      const ectCode = data.etiquetaPostagem ||
+        (/^[A-Z]{2}\d{9}[A-Z]{2}$/.test(identificacaoAttr) ? identificacaoAttr : '');
+
+      // Quando VIPP não tem status útil e temos código ECT, tenta Correios
+      if (isStatusInutil && ectCode) {
+        el.textContent = 'Consultando Correios...';
+        try {
+          const rCorr = await fetch('/api/sac/rastreio/' + encodeURIComponent(ectCode), { credentials: 'same-origin' });
+          const dCorr = await rCorr.json().catch(() => ({}));
+          const STATUS_INVALIDOS_CORREIOS = ['Invalida', 'Desconhecido', 'ok'];
+          if (rCorr.ok && dCorr.ok !== false && dCorr.status && !STATUS_INVALIDOS_CORREIOS.includes(dCorr.status)) {
+            const partes = [];
+            if (dCorr.status) partes.push(dCorr.status);
+            if (dCorr.detalhe) partes.push(dCorr.detalhe);
+            const local = [dCorr.local, dCorr.cidade, dCorr.uf].filter(Boolean).join(' - ');
+            if (local) partes.push(local);
+            if (dCorr.quando) partes.push(new Date(dCorr.quando).toLocaleString('pt-BR'));
+            el.textContent = partes.join(' | ') || 'Aguardando movimentação nos Correios';
+            return;
+          }
+        } catch (_) {}
+        // Fallback: postagem criada no VIPP mas ainda sem movimentação nos Correios
+        el.textContent = 'Aguardando movimentação';
+        return;
+      }
+
       const partes = [];
-      if (data.statusVipp && data.statusVipp !== 'Desconhecido') partes.push(data.statusVipp);
+      if (statusVipp && !isStatusInutil) partes.push(statusVipp);
       if (data.statusSolicitacao) partes.push(data.statusSolicitacao);
       if (data.etiquetaPostagem) partes.push('ECT: ' + data.etiquetaPostagem);
       el.textContent = partes.length ? partes.join(' | ') : 'Aguardando VIPP';
@@ -11126,11 +11148,15 @@ function renderEnvioMercadoriaCard(r) {
   const isRastreio = isCodigoRastreioEnvioMercadoria(identClean);
   const isFinalizado = status.toLowerCase() === 'finalizado';
   const rastStatus = r.rastreio_status ? String(r.rastreio_status).trim() : '';
+  // Filtra valores inválidos legados (ex.: "ok", "Invalida" do VIPP salvo por versão anterior)
+  const STATUS_INVALIDOS = ['ok', 'Invalida', 'Desconhecido'];
+  const rastStatusClean = (rastStatus && !STATUS_INVALIDOS.includes(rastStatus)) ? rastStatus : '';
   const rastQuando = r.rastreio_quando ? new Date(r.rastreio_quando).toLocaleString('pt-BR') : '';
   const finalizadoEm = r.finalizado_em ? new Date(r.finalizado_em).toLocaleString('pt-BR') : '';
-  const rastStatusDisplay = isFinalizado ? (rastStatus || 'Objeto entregue ao destinatário') : rastStatus;
+  const rastStatusDisplay = isFinalizado ? (rastStatusClean || 'Objeto entregue ao destinatário') : rastStatusClean;
   const rastQuandoDisplay = isFinalizado ? (finalizadoEm || rastQuando) : rastQuando;
-  const dataRastreio = (!rastStatusDisplay && isRastreio && !isFinalizado) ? identClean : '';
+  // Correios tracking só quando não há id_vipp (VIPP é a fonte de verdade nesse caso)
+  const dataRastreio = (!r.id_vipp && !rastStatusDisplay && isRastreio && !isFinalizado) ? identClean : '';
   const rastText = [rastStatusDisplay, rastQuandoDisplay].filter(Boolean).join(' | ');
   const buttons = [
     (etiqueta || temIdentificacao) ? `<button class="content-button btn-envio-etiqueta" data-envio-id="${escapeAtHtml(String(r.id))}" data-identificacao="${escapeAtHtml(identRaw)}" style="padding:8px 10px;font-size:12px;display:inline-flex;align-items:center;gap:6px;"><i class="fa-solid fa-print"></i><span>Etiqueta</span></button>` : '',
@@ -11140,12 +11166,6 @@ function renderEnvioMercadoriaCard(r) {
   const statusToken = getStatusTokenEnvioMercadoria(statusRaw);
   const statusClasse = `envio-card-status-${statusToken}`;
   const statusPillClasse = `envio-status-${statusToken}`;
-
-  const statusSelect = `
-    <select class="sac-status-select envio-status-select ${statusClasse}" data-id="${r.id}">
-      ${sacStatusOptions.map(opt => `<option value="${opt}" ${opt === statusRaw ? 'selected' : ''}>${opt}</option>`).join('')}
-      ${!sacStatusOptions.includes(statusRaw) ? `<option value="${escapeAtHtml(statusRaw)}" selected>${escapeAtHtml(statusRaw)}</option>` : ''}
-    </select>`;
 
   return `
     <article class="envio-card ${statusClasse}">
@@ -11168,10 +11188,9 @@ function renderEnvioMercadoriaCard(r) {
         <div>
           <div class="envio-card-label">Rastreio</div>
           <div class="envio-card-text" style="font-weight:800;color:#f8fafc;">${escapeAtHtml(identRaw)}</div>
-          <small class="rast-status" data-rastreio="${escapeAtHtml(dataRastreio)}" data-id-vipp="${escapeAtHtml(r.id_vipp || '')}" style="display:block;margin-top:5px;color:#94a3b8;line-height:1.35;">${escapeAtHtml(rastText || (isRastreio ? 'Consultando rastreio...' : 'Sem rastreio válido'))}</small>
+          <small class="rast-status" data-rastreio="${escapeAtHtml(dataRastreio)}" data-id-vipp="${escapeAtHtml(r.id_vipp || '')}" data-envio-id="${escapeAtHtml(String(r.id))}" data-identificacao="${escapeAtHtml(identClean)}" style="display:block;margin-top:5px;color:#94a3b8;line-height:1.35;">${escapeAtHtml(r.id_vipp && !isFinalizado ? 'Consultando VIPP...' : (rastText || (isRastreio ? 'Consultando rastreio...' : 'Sem rastreio válido')))}</small></small>
         </div>
         <span class="envio-status-pill ${statusPillClasse}"><i class="fa-solid fa-circle"></i>${escapeAtHtml(status)}</span>
-        ${statusSelect}
       </div>
       <div class="envio-card-actions">
         <div class="envio-card-label">Ações</div>
@@ -14187,103 +14206,6 @@ async function preencherEnderecoPorCepAt() {
     console.error('[SAC/AT] erro ao consultar CEP', err);
     setAtEnvioStatus('Erro ao consultar CEP. Tente novamente.', true);
   }
-}
-
-const formatFile = (f) => `${f.name} (${Math.round(f.size / 1024)} KB)`;
-
-if (sacAttachEtiquetaBtn && sacFileInputEtiqueta) {
-  sacAttachEtiquetaBtn.addEventListener('click', () => {
-    sacFileInputEtiqueta.value = '';
-    sacFileInputEtiqueta.click();
-  });
-  sacFileInputEtiqueta.addEventListener('change', () => {
-    const f = sacFileInputEtiqueta.files?.[0];
-    if (f) {
-      const name = f.name.toLowerCase();
-      if (!name.includes('etiqueta')) {
-        alert('Selecione o arquivo de ETIQUETA (nome deve conter "etiqueta").');
-        sacFileInputEtiqueta.value = '';
-        sacFileInfoEtiqueta.textContent = 'Nenhum arquivo.';
-        return;
-      }
-    }
-    sacFileInfoEtiqueta.textContent = f ? formatFile(f) : 'Nenhum arquivo.';
-  });
-}
-
-if (sacAttachDeclaracaoBtn && sacFileInputDeclaracao) {
-  sacAttachDeclaracaoBtn.addEventListener('click', () => {
-    sacFileInputDeclaracao.value = '';
-    sacFileInputDeclaracao.click();
-  });
-  sacFileInputDeclaracao.addEventListener('change', () => {
-    const f = sacFileInputDeclaracao.files?.[0];
-    sacFileInfoDeclaracao.textContent = f ? formatFile(f) : 'Nenhum arquivo.';
-  });
-}
-
-if (sacSendBtn) {
-  sacSendBtn.addEventListener('click', async () => {
-    const userName = document.getElementById('userNameDisplay')?.textContent?.trim() || '';
-    const observacao = sacObservacao?.value?.trim() || '';
-    const numeroSep = sacNumeroSep?.value?.trim() || '';
-    const etiqueta = sacFileInputEtiqueta?.files?.[0] || null;
-    const declaracao = sacFileInputDeclaracao?.files?.[0] || null;
-
-    const setStatus = (text, isError = false) => {
-      if (!sacEnvioStatus) return;
-      sacEnvioStatus.style.display = text ? 'inline' : 'none';
-      sacEnvioStatus.style.color = isError ? '#f87171' : 'var(--inactive-color)';
-      sacEnvioStatus.textContent = text || '';
-    };
-
-    if (!userName) {
-      alert('Usuário não identificado. Faça login novamente.');
-      return;
-    }
-
-    if (!etiqueta || !declaracao) {
-      alert('Selecione exatamente 2 arquivos: Etiqueta e Declaração de conteúdo.');
-      return;
-    }
-
-    sacSendBtn.disabled = true;
-    setStatus('Enviando...', false);
-
-    try {
-      const formData = new FormData();
-      formData.append('usuario', userName);
-      formData.append('observacao', observacao);
-      formData.append('numero_sep', numeroSep);
-      formData.append('anexos', etiqueta);
-      formData.append('anexos', declaracao);
-
-      const resp = await fetch('/api/sac/solicitacoes', {
-        method: 'POST',
-        body: formData
-      });
-
-      const data = await resp.json().catch(() => ({}));
-      const ok = resp.ok && data.ok !== false;
-      if (ok) {
-        setStatus('Solicitação registrada.', false);
-        if (sacFileInputEtiqueta) sacFileInputEtiqueta.value = '';
-        if (sacFileInputDeclaracao) sacFileInputDeclaracao.value = '';
-        if (sacFileInfoEtiqueta) sacFileInfoEtiqueta.textContent = 'Nenhum arquivo.';
-        if (sacFileInfoDeclaracao) sacFileInfoDeclaracao.textContent = 'Nenhum arquivo.';
-        sacObservacao.value = '';
-        if (sacNumeroSep) sacNumeroSep.value = '';
-        try { await carregarSacSolicitacoes(sacTabelaBody, { hideDone: false, filterByUser: true }); } catch {}
-      } else {
-        setStatus(data.error || 'Falha ao registrar.', true);
-      }
-    } catch (err) {
-      console.error('[SAC] erro ao registrar envio', err);
-      setStatus(err?.message || 'Erro ao registrar.', true);
-    } finally {
-      sacSendBtn.disabled = false;
-    }
-  });
 }
 
 // ── Modal: Envio de Peça (OS) ──────────────────────────────────────────────
@@ -17442,12 +17364,6 @@ async function carregarSacSolicitacoes(targetBody, { hideDone = false, titleOnly
         declaracaoHref ? `<button class="content-button btn-print-declaracao" data-print-url="${declaracaoHref}" style="padding:4px 8px;font-size:12px;display:inline-flex;align-items:center;gap:6px;"><i class="fa-solid fa-print"></i><span>Declaração</span></button>` : ''
       ].filter(Boolean).join(' ');
       
-      // Select de status para Tabela "Envios registrados" (COM status real do banco)
-      const statusSelectEnvioMercadoria = `
-        <select class="sac-status-select" data-id="${r.id}" style="padding:6px 8px;border:1px solid var(--border-color);border-radius:8px;background:var(--content-bg);color:var(--content-title-color);">
-          ${sacStatusOptions.map(opt => `<option value="${opt}" ${opt === statusRaw ? 'selected' : ''}>${opt}</option>`).join('')}
-          ${!sacStatusOptions.includes(statusRaw) ? `<option value="${statusRaw}" selected>${statusRaw}</option>` : ''}
-        </select>`;
       
       // Select de status para Tabela "Registro de envios" (SAC) (COM status real do banco)
       const statusSelectSac = `
@@ -17469,7 +17385,7 @@ async function carregarSacSolicitacoes(targetBody, { hideDone = false, titleOnly
             <td>${identRaw}<br><small class="rast-status" data-rastreio="${dataRastreio}" data-id-vipp="${r.id_vipp || ''}" data-envio-id="${r.id}" style="color:var(--inactive-color);">${rastText}</small></td>
             <td>${numeroSep}</td>
             <td style="max-width:400px;white-space:pre-wrap;line-height:1.8;padding:12px 8px;vertical-align:top;">${conteudo}</td>
-            <td>${statusSelectEnvioMercadoria}</td>
+            <td>${escapeAtHtml(normalizeSacStatus(statusRaw))}</td>
             <td>${buttonsEnvio || '—'}</td>
           </tr>`;
       } else {
@@ -18410,14 +18326,14 @@ async function _envioImprimirEtiqueta(envioId, identificacao, btnRef) {
   try {
     const pref = _envioImprPref || '__PDF__';
     const ecLimpo = String(identificacao || '').trim().replace(/\s+/g, '');
-    // VIPP retorna ZVP/XML (não ZPL), agente de impressão não consegue processar.
-    // Se tem código ECT, sempre abre o PDF no navegador para impressão manual.
-    if (pref === '__PDF__' || ecLimpo) {
+    // PDF: abre direto no navegador. Caso contrário, enfileira ZPL via backend
+    // (independente de ter código ECT — backend resolve via envio_id).
+    if (pref === '__PDF__') {
       if (!ecLimpo) throw new Error('Código ECT não disponível para este envio');
       window.open(`/api/vipp/etiqueta?id=${encodeURIComponent(ecLimpo)}&saida=1`, '_blank');
       return;
     }
-    // Modo agente/impressora sem ECT (etiqueta interna): enfileira via backend
+    // Modo agente/impressora: enfileira ZPL via backend (POST /api/vipp/imprimir-envio)
     const agentDest = _etqParseAgentPref(pref);
     const body = { envio_id: envioId };
     if (agentDest) { body.destino_agente = agentDest.pcName; body.impressora = agentDest.impressora; }
@@ -18468,12 +18384,41 @@ function setupEnvioPrintButtons(container) {
     if (btnDec) {
       ev.preventDefault();
       const url = btnDec.getAttribute('data-print-url');
-      if (!url) return;
-      // Declaração: sempre abre PDF no navegador
+      const envioId = btnDec.getAttribute('data-envio-id')
+        || (url && url.match(/[?&]id=(\d+)/) || [])[1] || '';
+      const pref = _envioImprPref || '__PDF__';
+      // PDF: abre URL no navegador. Caso contrário, enfileira ZPL via backend.
+      if (pref === '__PDF__') {
+        if (!url) return;
+        try {
+          const w = window.open(url, '_blank');
+          if (w) setTimeout(() => { try { w.focus(); } catch {} }, 300);
+        } catch (err) { console.error('[Envio] erro ao abrir declaração', err); }
+        return;
+      }
+      if (!envioId) { alert('Envio sem id — não foi possível imprimir declaração'); return; }
+      btnDec.disabled = true;
       try {
-        const w = window.open(url, '_blank');
-        if (w) setTimeout(() => { try { w.focus(); } catch {} }, 300);
-      } catch (err) { console.error('[Envio] erro ao abrir declaração', err); }
+        const agentDest = _etqParseAgentPref(pref);
+        const body = { envio_id: Number(envioId) };
+        if (agentDest) { body.destino_agente = agentDest.pcName; body.impressora = agentDest.impressora; }
+        else if (pref !== '__BP__') { body.impressora = pref; }
+        const resp = await fetch('/api/vipp/imprimir-declaracao', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify(body),
+        });
+        const data = await resp.json();
+        if (!data.ok) throw new Error(data.error || 'Falha ao enfileirar declaração');
+        const orig = btnDec.innerHTML;
+        btnDec.innerHTML = '<i class="fa-solid fa-check" style="color:#4ade80;"></i> Enviado!';
+        setTimeout(() => { btnDec.innerHTML = orig; }, 3000);
+      } catch (err) {
+        alert('Erro ao imprimir declaração: ' + err.message);
+      } finally {
+        btnDec.disabled = false;
+      }
     }
   });
 }
