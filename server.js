@@ -31623,11 +31623,15 @@ app.post('/api/compras/pedidos-omie/nfe-associar-pedido', express.json(), async 
           const isServico = !!(previewItem?.item_servico);
           const cfopServicoEntrada = isServico ? previewItem?.servico_cfop_entrada : null;
 
+          const nQtdeOverride = Number(override?.nQtde || 0);
+
           const ajustes = {};
           if (!isServico) ajustes.codigo_local_estoque = Number(ALMOX_LOCAL_PADRAO);
           if (cUnidadeFinal) ajustes.cUnidade = cUnidadeFinal;
           if (cfopServicoEntrada || cfopCalculado) ajustes.cCFOPEntrada = cfopServicoEntrada || cfopCalculado;
-          // Nota: nQtde não é campo válido em itensAjustes da Omie
+          // nQtde: inclui o valor digitado pelo user (medição física pode diferir da conversão Omie).
+          // Se a Omie rejeitar o campo, o Passo 3 faz retry sem ele (ver abaixo).
+          if (!isServico && Number.isFinite(nQtdeOverride) && nQtdeOverride > 0) ajustes.nQtde = nQtdeOverride;
 
           // Só incluir o item se tiver ajustes
           if (Object.keys(ajustes).length === 0) return null;
@@ -31698,57 +31702,43 @@ app.post('/api/compras/pedidos-omie/nfe-associar-pedido', express.json(), async 
       }
     }
 
-    // ─── Passo 3: EDITAR itens com cUnidade + nQtde (+ codigo_local_estoque se especial) ───
+    // ─── Passo 3: EDITAR itens com codigo_local_estoque + cUnidade + nQtde (se override) ───
+    // nQtde é enviado junto para evitar que um EDITAR separado sem os outros campos reverta
+    // o armazém/unidade. Se a Omie rejeitar o payload com nQtde, faz retry sem ele.
     if (itensEditarEstoque && itensEditarEstoque.length > 0) {
+      const hasQtdeOverride = itensEditarEstoque.some(it => it.itensAjustes?.nQtde != null);
       try {
         const payloadEstoque = {
           ide: { nIdReceb: Number(plano.n_id_receb) },
           itensRecebimentoEditar: itensEditarEstoque
         };
-        console.log('[Compras/NFeAssociarPedido] ===== PASSO 3: estoque =====');
+        console.log('[Compras/NFeAssociarPedido] ===== PASSO 3: estoque' + (hasQtdeOverride ? ' + nQtde' : '') + ' =====');
         console.log(JSON.stringify(payloadEstoque, null, 2));
         console.log('[Compras/NFeAssociarPedido] ===================================');
         await chamarApiRecebimentoNfeOmieComRetryRedundant('AlterarRecebimento', payloadEstoque, {
           tentativasMaximas: 2
         });
-        console.log('[Compras/NFeAssociarPedido] Local estoque/unidade atualizados com sucesso.');
+        console.log('[Compras/NFeAssociarPedido] Local estoque/unidade' + (hasQtdeOverride ? '/nQtde' : '') + ' atualizados com sucesso.');
       } catch (errEstoque) {
-        console.warn('[Compras/NFeAssociarPedido] Falha ao atualizar local estoque:', errEstoque?.message);
-      }
-    }
-
-    // ─── Passo 3b: nQtde override (quando usuário informou qty diferente da conversão Omie) ───
-    // Omie calcula qty convertida via fator interno do produto (ex: KG→MTS). Se o usuário
-    // forneceu uma medição física diferente (campo assoc-override-qtd na prévia), tentamos
-    // sobrescrever com EDITAR separado. Executa depois do Passo 3 para não arriscar o armazém/unidade.
-    const itensEditarQtde = (plano?.itensRecebimentoEditar || []).map(itemEditar => {
-      const nSeq = itemEditar.itensIde?.nSequencia;
-      const override = overrideMap.get(nSeq);
-      const nQtdeOverride = Number(override?.nQtde || 0);
-      if (!Number.isFinite(nQtdeOverride) || nQtdeOverride <= 0) return null;
-      const previewItem = (plano?.itens_preview || []).find(p => p.n_sequencia === nSeq);
-      if (!!(previewItem?.item_servico)) return null;
-      return {
-        itensIde: { nSequencia: nSeq, cAcao: 'EDITAR' },
-        itensAjustes: { nQtde: nQtdeOverride }
-      };
-    }).filter(Boolean);
-
-    if (itensEditarQtde.length > 0) {
-      try {
-        const payloadQtde = {
-          ide: { nIdReceb: Number(plano.n_id_receb) },
-          itensRecebimentoEditar: itensEditarQtde
-        };
-        console.log('[Compras/NFeAssociarPedido] ===== PASSO 3b: nQtde override =====');
-        console.log(JSON.stringify(payloadQtde, null, 2));
-        console.log('[Compras/NFeAssociarPedido] ===================================');
-        await chamarApiRecebimentoNfeOmieComRetryRedundant('AlterarRecebimento', payloadQtde, {
-          tentativasMaximas: 1
-        });
-        console.log('[Compras/NFeAssociarPedido] nQtde override aplicado com sucesso.');
-      } catch (errQtde) {
-        console.warn('[Compras/NFeAssociarPedido] nQtde override ignorado (Omie pode não suportar o campo):', errQtde?.message);
+        if (hasQtdeOverride) {
+          // Retry sem nQtde: garante que armazém e unidade sejam aplicados mesmo se Omie rejeitar nQtde
+          console.warn('[Compras/NFeAssociarPedido] Passo 3 com nQtde falhou, retrying sem nQtde:', errEstoque?.message);
+          const itensSemQtde = itensEditarEstoque.map(it => ({
+            ...it,
+            itensAjustes: Object.fromEntries(Object.entries(it.itensAjustes).filter(([k]) => k !== 'nQtde'))
+          }));
+          try {
+            await chamarApiRecebimentoNfeOmieComRetryRedundant('AlterarRecebimento', {
+              ide: { nIdReceb: Number(plano.n_id_receb) },
+              itensRecebimentoEditar: itensSemQtde
+            }, { tentativasMaximas: 2 });
+            console.log('[Compras/NFeAssociarPedido] Passo 3 (sem nQtde) aplicado com sucesso.');
+          } catch (errFallback) {
+            console.warn('[Compras/NFeAssociarPedido] Falha ao atualizar local estoque:', errFallback?.message);
+          }
+        } else {
+          console.warn('[Compras/NFeAssociarPedido] Falha ao atualizar local estoque:', errEstoque?.message);
+        }
       }
     }
 
