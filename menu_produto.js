@@ -68137,6 +68137,9 @@ window.initOscilacaoEstoque = (function () {
   // Move modal para body, escapando display:none do sacAtPane
   document.body.appendChild(modal);
 
+  // Flag: indica se o modal foi aberto pelo botão do painel SAC (e não pelo AT)
+  var _vippContextoSac = false;
+
   // ── Declaração de Conteúdo — helpers ─────────────────────────────────────
   function sanitizarDesc(str) {
     return str
@@ -68344,7 +68347,30 @@ window.initOscilacaoEstoque = (function () {
     statusEl.textContent   = text;
   }
 
-  if (openBtn)   openBtn.addEventListener('click', openModal);
+  if (openBtn)   openBtn.addEventListener('click', function () {
+    _vippContextoSac = false;
+    if (fillFromOsBtn) fillFromOsBtn.style.display = '';
+    openModal();
+  });
+
+  // sacVippBtn — abre o mesmo modal VIPP a partir do painel SAC
+  var sacVippBtn = document.getElementById('sacVippBtn');
+  if (sacVippBtn) sacVippBtn.addEventListener('click', function () {
+    _vippContextoSac = true;
+    if (fillFromOsBtn) fillFromOsBtn.style.display = 'none';
+    prePopular();
+    // Pré-preenche Observação com número da OS/AT se disponível
+    var _tit = (document.getElementById('atEditModalTitle') ? document.getElementById('atEditModalTitle').textContent : '').trim();
+    var _osN = _tit.replace(/[^0-9]/g, '');
+    var _obsEl = document.getElementById('vippObservacao');
+    if (_obsEl) {
+      _obsEl.value = _osN ? 'OS' + _osN : '';
+    }
+    modal.style.display = 'flex';
+    document.body.style.overflow = 'hidden';
+    setStatus('');
+  });
+
   if (closeBtn)  closeBtn.addEventListener('click', closeModal);
   if (cancelBtn) cancelBtn.addEventListener('click', closeModal);
   modal.addEventListener('click', function (e) { if (e.target === modal) closeModal(); });
@@ -68518,6 +68544,10 @@ window.initOscilacaoEstoque = (function () {
             if (itensDecl.length > 0) {
               criarSolicitacaoSeparacaoVipp(itensDecl, osNum, g('vippObservacao'), data.idConhecimento || null);
             }
+            // Se aberto pelo painel SAC, cria entrada em envios.solicitacoes automaticamente
+            if (_vippContextoSac) {
+              criarEntradaSacVipp(itensDecl, osNum, data.idConhecimento || null);
+            }
             enviarBtn.disabled = true;
             enviarBtn.innerHTML =
               '<i class="fa-solid fa-circle-check" style="color:#34d399;"></i>' +
@@ -68620,6 +68650,58 @@ window.initOscilacaoEstoque = (function () {
       }
     } catch (_e3) {
       console.error('[VIPP→Sep] Erro ao enviar separação:', _e3);
+    }
+  }
+
+  // ── Cria entrada em envios.solicitacoes após VIPP bem-sucedido (contexto SAC) ──
+  async function criarEntradaSacVipp(itensDecl, osNum, idVipp) {
+    var nomeUser = '';
+    try {
+      var _meResp = await fetch('/api/auth/status', { credentials: 'include' });
+      var _me = await _meResp.json();
+      nomeUser = (_me && _me.user && (_me.user.username || _me.user.nome)) || '';
+    } catch (_e) { /* ignora */ }
+
+    // Converte itens para formato [{ conteudo, quantidade }] (mesmo do PDF)
+    var conteudoItems = itensDecl.map(function (it) {
+      return { conteudo: it.descricao || '', quantidade: String(parseInt(it.quantidade, 10) || 1) };
+    });
+    var conteudoJson = conteudoItems.length ? JSON.stringify(conteudoItems) : null;
+    var observacao = osNum ? 'OS' + osNum : '';
+
+    try {
+      var _resp = await fetch('/api/sac/solicitacoes/vipp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          usuario:    nomeUser,
+          observacao: observacao,
+          id_vipp:    idVipp || null,
+          conteudo:   conteudoJson
+        })
+      });
+      var _d = await _resp.json();
+      if (_d.ok) {
+        // Atualiza a tabela SAC no painel
+        try {
+          var _sacBody = document.getElementById('sacTabelaBody');
+          if (_sacBody && typeof carregarSacSolicitacoes === 'function') {
+            await carregarSacSolicitacoes(_sacBody, { hideDone: false, filterByUser: true });
+          }
+        } catch (_e2) { /* ignora */ }
+        // Mostra nota no modal
+        var _sEl = document.getElementById('vippModalStatus');
+        if (_sEl) {
+          var _note = document.createElement('div');
+          _note.style.cssText = 'margin-top:8px;padding:6px 10px;background:rgba(14,165,233,.10);border:1px solid #0ea5e966;border-radius:6px;font-size:12px;color:#7dd3fc;';
+          _note.innerHTML = '<i class="fa-solid fa-paper-plane" style="margin-right:5px;"></i>' +
+            'Registro de envio SAC criado automaticamente (ID ' + _d.id + ').';
+          _sEl.appendChild(_note);
+        }
+      }
+    } catch (_e3) {
+      console.error('[VIPP→SAC] Erro ao criar entrada SAC:', _e3);
     }
   }
 })();

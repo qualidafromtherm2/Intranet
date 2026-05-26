@@ -4399,6 +4399,33 @@ router.patch('/at/fechamento/:id_at', async (req, res) => {
   }
 });
 
+// POST /solicitacoes/vipp — cria entrada de envio SAC a partir de postagem VIPP (sem upload de arquivo)
+router.post('/solicitacoes/vipp', async (req, res) => {
+  const usuario   = String(req.body?.usuario   || '').trim();
+  const observacao = String(req.body?.observacao || '').trim();
+  const idVipp    = String(req.body?.id_vipp    || '').trim() || null;
+  const conteudo  = req.body?.conteudo || null; // JSON string de itens [{ conteudo, quantidade }]
+  const numeroSep = String(req.body?.numero_sep || '').trim() || null;
+
+  if (!usuario) return res.status(400).json({ ok: false, error: 'Usuário é obrigatório.' });
+  if (!idVipp && !observacao) return res.status(400).json({ ok: false, error: 'id_vipp ou observação obrigatório.' });
+
+  try {
+    const result = await pool.query(
+      `INSERT INTO envios.solicitacoes
+         (usuario, observacao, numero_sep, status, anexos, conferido, id_vipp, conteudo)
+       VALUES ($1, $2, $3, 'Pendente', '{}', false, $4, $5)
+       RETURNING id, created_at, status, id_vipp, conteudo, observacao`,
+      [usuario, observacao || null, numeroSep, idVipp, conteudo ? String(conteudo) : null]
+    );
+    const row = result.rows[0];
+    return res.json({ ok: true, id: row.id, created_at: row.created_at, status: row.status, id_vipp: row.id_vipp });
+  } catch (err) {
+    console.error('[SAC] erro ao criar entrada via VIPP:', err);
+    return res.status(500).json({ ok: false, error: 'Erro ao registrar solicitação VIPP.' });
+  }
+});
+
 router.post('/solicitacoes', upload.array('anexos', 2), async (req, res) => {
   const usuario = String(req.body?.usuario || '').trim();
   const observacao = String(req.body?.observacao || '').trim();
