@@ -10604,7 +10604,7 @@ const _agenteAtivo  = { ts: 0, printer: '', host: '', version: '' };
 const _agentesOnline = new Map(); // key: pcName → { pcName, printers, lastSeen, host, version }
 
 // POST /api/etiquetas/agente/heartbeat — agente anuncia que está online
-app.post('/api/etiquetas/agente/heartbeat', express.json(), (req, res) => {
+app.post('/api/etiquetas/agente/heartbeat', express.json(), async (req, res) => {
   const token = req.headers['x-agent-token'];
   if (token !== AGENTE_TOKEN) return res.status(401).json({ error: 'Token inválido' });
   const { printer = '', version = '?', host = '', pcName = '', printers = [], printerAliases = {} } = req.body || {};
@@ -10613,26 +10613,69 @@ app.post('/api/etiquetas/agente/heartbeat', express.json(), (req, res) => {
   _agenteAtivo.printer = printer || _agenteAtivo.printer;
   _agenteAtivo.host    = host || req.ip;
   _agenteAtivo.version = version;
-  // Registro multi-agente
+  // Registro multi-agente (in-memory)
   const nome = pcName || host || req.ip;
+  const listaPrinters = Array.isArray(printers) && printers.length ? printers : (printer ? [printer] : []);
+  const aliasesObj    = typeof printerAliases === 'object' && printerAliases !== null ? printerAliases : {};
   _agentesOnline.set(nome, {
     pcName:         nome,
-    printers:       Array.isArray(printers) && printers.length ? printers : (printer ? [printer] : []),
-    printerAliases: typeof printerAliases === 'object' && printerAliases !== null ? printerAliases : {},
+    printers:       listaPrinters,
+    printerAliases: aliasesObj,
     lastSeen:       Date.now(),
     host:           host || req.ip,
     version,
   });
+  // Persiste no banco para que instâncias locais também enxerguem os agentes
+  try {
+    await pool.query(
+      `INSERT INTO etiqueta."ETQ_agentes" (pc_name, printers, printer_aliases, version, host, last_seen)
+       VALUES ($1, $2, $3, $4, $5, now())
+       ON CONFLICT (pc_name) DO UPDATE SET
+         printers        = EXCLUDED.printers,
+         printer_aliases = EXCLUDED.printer_aliases,
+         version         = EXCLUDED.version,
+         host            = EXCLUDED.host,
+         last_seen       = now()`,
+      [nome, JSON.stringify(listaPrinters), JSON.stringify(aliasesObj), version, host || req.ip]
+    );
+  } catch (e) {
+    console.warn('[heartbeat] falha ao persistir agente no banco:', e.message);
+  }
   res.json({ ok: true });
 });
 
 // GET /api/etiquetas/agentes-disponiveis — lista agentes online com suas impressoras
-app.get('/api/etiquetas/agentes-disponiveis', (req, res) => {
-  const agora      = Date.now();
+// Quando o Map local está vazio (instância local/dev), lê do banco compartilhado.
+app.get('/api/etiquetas/agentes-disponiveis', async (req, res) => {
+  const agora       = Date.now();
   const disponiveis = [];
+  // 1. Lê in-memory (produção, onde o heartbeat chegou nesta instância)
   for (const ag of _agentesOnline.values()) {
     if (agora - ag.lastSeen < 120000) {   // online = visto nos últimos 2 min
       disponiveis.push({ pcName: ag.pcName, printers: ag.printers, printerAliases: ag.printerAliases || {}, version: ag.version, online: true });
+    }
+  }
+  // 2. Se nenhum agente no Map (instância local/dev), consulta o banco
+  if (!disponiveis.length) {
+    try {
+      const { rows } = await pool.query(
+        `SELECT pc_name, printers, printer_aliases, version, host, last_seen
+           FROM etiqueta."ETQ_agentes"
+          WHERE last_seen > now() - INTERVAL '3 minutes'
+          ORDER BY last_seen DESC`
+      );
+      for (const row of rows) {
+        disponiveis.push({
+          pcName:         row.pc_name,
+          printers:       Array.isArray(row.printers) ? row.printers : [],
+          printerAliases: row.printer_aliases || {},
+          version:        row.version,
+          online:         true,
+          fromDb:         true,  // sinaliza origem (útil para debug)
+        });
+      }
+    } catch (e) {
+      console.warn('[agentes-disponiveis] falha ao ler banco:', e.message);
     }
   }
   res.json({ ok: true, agentes: disponiveis });
