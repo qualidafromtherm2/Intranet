@@ -3392,6 +3392,14 @@
                   <input id="atAgendarCom" type="text" placeholder="Nome do responsável" style="width:100%;" />
                 </div>
 
+                <div class="form-field at-campo-fullonly">
+                  <button id="atEnviarPecaBtn" type="button" class="content-button"
+                    style="display:flex;align-items:center;gap:8px;background:linear-gradient(135deg,#f59e0b 0%,#d97706 100%);color:white;width:100%;justify-content:center;">
+                    <i class="fa-solid fa-box-open"></i>
+                    <span>Enviar Peça</span>
+                  </button>
+                </div>
+
                 <!-- Campos exclusivos do Atendimento rápido -->
                 <div class="form-field at-campo-rapidoonly" style="display:none;">
                   <label for="atModelo">Modelo</label>
@@ -3694,7 +3702,423 @@
         </div>
 
         <!-- Modal WhatsApp -->
-        <div id="atWhatsappModal" role="dialog" aria-modal="true" aria-labelledby="atWhatsappModalTitle">
+        <!-- Modal: Envio de Peça (OS) -->
+        <div id="osEnviarPecaModal" class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="osEnviarPecaModalTitle"
+          style="position:fixed;inset:0;z-index:9999;display:none;align-items:center;justify-content:center;background:rgba(2,6,23,.72);backdrop-filter:blur(3px);">
+          <div id="osEnviarPecaModalCard"
+            style="width:min(520px,calc(100vw - 26px));border-radius:16px;border:1px solid #2c425c;background:linear-gradient(180deg,rgba(15,23,42,.98) 0%,rgba(17,24,39,.96) 100%);box-shadow:0 24px 48px rgba(0,0,0,.38);display:flex;flex-direction:column;overflow:hidden;">
+            <!-- Cabeçalho -->
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px 16px;border-bottom:1px solid rgba(255,255,255,.08);">
+              <div style="display:flex;align-items:center;gap:9px;">
+                <i class="fa-solid fa-box-open" style="font-size:18px;color:#f59e0b;"></i>
+                <strong id="osEnviarPecaModalTitle" style="font-size:15px;color:#e5e7eb;">Envio de Peça</strong>
+              </div>
+              <button id="osEnviarPecaModalClose" type="button"
+                style="display:inline-flex;align-items:center;justify-content:center;width:34px;height:34px;border-radius:10px;border:1px solid #374151;background:rgba(255,255,255,.04);color:var(--content-title-color);cursor:pointer;">
+                <i class="fa-solid fa-xmark"></i>
+              </button>
+            </div>
+            <!-- Corpo -->
+            <div style="padding:18px 16px 20px;display:flex;flex-direction:column;gap:14px;">
+              <div style="color:var(--inactive-color);font-size:13px;">Obrigatório anexar 2 arquivos: Etiqueta e Declaração de conteúdo.</div>
+              <!-- Botões de anexo -->
+              <div style="display:flex;align-items:flex-start;gap:14px;flex-wrap:wrap;">
+                <div style="display:flex;flex-direction:column;gap:6px;">
+                  <label style="font-size:13px;color:var(--inactive-color);">Escolha Etiqueta</label>
+                  <button id="osAttachEtiquetaBtn" type="button" class="content-button"
+                    style="display:flex;align-items:center;gap:8px;background:linear-gradient(135deg,#22c55e 0%,#16a34a 100%);color:white;">
+                    <i class="fa-solid fa-file-lines"></i>
+                    <span>Anexar Etiqueta</span>
+                  </button>
+                  <div id="osFileInfoEtiqueta" style="color:var(--inactive-color);font-size:12px;">Nenhum arquivo.</div>
+                  <input id="osFileInputEtiqueta" type="file" style="display:none;" />
+                </div>
+                <div style="display:flex;flex-direction:column;gap:6px;">
+                  <label style="font-size:13px;color:var(--inactive-color);">Escolha Declaração de conteúdo</label>
+                  <button id="osAttachDeclaracaoBtn" type="button" class="content-button"
+                    style="display:flex;align-items:center;gap:8px;background:linear-gradient(135deg,#a855f7 0%,#7c3aed 100%);color:white;">
+                    <i class="fa-solid fa-file-signature"></i>
+                    <span>Anexar Declaração</span>
+                  </button>
+                  <div id="osFileInfoDeclaracao" style="color:var(--inactive-color);font-size:12px;">Nenhum arquivo.</div>
+                  <input id="osFileInputDeclaracao" type="file" style="display:none;" />
+                </div>
+              </div>
+              <!-- Observação -->
+              <div class="form-field" style="margin:0;">
+                <label for="osObservacao">Observação</label>
+                <textarea id="osObservacao" rows="3" placeholder="Descreva detalhes do envio" style="width:100%;"></textarea>
+              </div>
+              <!-- Número da SEP -->
+              <div class="form-field" style="margin:0;max-width:280px;">
+                <label for="osNumeroSep">Número da SEP</label>
+                <input id="osNumeroSep" type="text" placeholder="Ex: SEP 12345" style="width:100%;" />
+              </div>
+              <!-- Ações -->
+              <div style="display:flex;align-items:center;gap:10px;justify-content:flex-end;flex-wrap:wrap;">
+                <div id="osEnvioStatus" style="display:none;font-size:13px;color:var(--inactive-color);"></div>
+                <button id="osSendBtn" type="button" class="content-button"
+                  style="display:flex;align-items:center;gap:8px;background:linear-gradient(135deg,#0ea5e9 0%,#0284c7 100%);color:white;">
+                  <i class="fa-solid fa-paper-plane"></i>
+                  <span>Enviar</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ── Modal VIPP — Criar Postagem ──────────────────────────────────────── -->
+        <div id="osVippModal" class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="osVippModalTitle"
+          style="position:fixed;inset:0;z-index:10055;display:none;align-items:center;justify-content:center;background:rgba(2,6,23,.78);backdrop-filter:blur(4px);">
+          <div id="osVippModalCard"
+            style="width:min(680px,calc(100vw - 26px));max-height:90vh;border-radius:16px;border:1px solid #2c425c;background:linear-gradient(180deg,rgba(15,23,42,.99) 0%,rgba(17,24,39,.97) 100%);box-shadow:0 24px 56px rgba(0,0,0,.48);display:flex;flex-direction:column;overflow:hidden;">
+            <!-- Cabeçalho -->
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:14px 18px;border-bottom:1px solid rgba(255,255,255,.08);flex-shrink:0;">
+              <div style="display:flex;align-items:center;gap:10px;">
+                <img src="https://vipp.visualset.com.br/vipp/img/logo-visualset5.png" alt="VIPP" style="width:26px;height:26px;object-fit:contain;">
+                <strong id="osVippModalTitle" style="font-size:15px;color:#e5e7eb;">VIPP — Criar Postagem</strong>
+                <span style="font-size:11px;color:#94a3b8;background:rgba(148,163,184,.1);border:1px solid rgba(148,163,184,.2);padding:2px 8px;border-radius:999px;">Correios</span>
+              </div>
+              <button id="osVippModalClose" type="button"
+                style="display:inline-flex;align-items:center;justify-content:center;width:34px;height:34px;border-radius:10px;border:1px solid #374151;background:rgba(255,255,255,.04);color:#e5e7eb;cursor:pointer;">
+                <i class="fa-solid fa-xmark"></i>
+              </button>
+            </div>
+            <!-- Corpo rolável -->
+            <div style="overflow-y:auto;padding:18px 18px 4px;display:flex;flex-direction:column;gap:18px;">
+
+              <!-- Seção: Destinatário -->
+              <div>
+                <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;">
+                  <i class="fa-solid fa-user" style="font-size:13px;color:#7dd3fc;"></i>
+                  <span style="font-size:13px;font-weight:700;color:#7dd3fc;letter-spacing:.04em;text-transform:uppercase;">Destinatário</span>
+                  <button id="vippPreencherDaOsBtn" type="button" title="Preencher com dados da OS em edição"
+                    style="display:inline-flex;align-items:center;gap:5px;padding:3px 10px;border-radius:6px;border:1px solid rgba(125,211,252,.3);background:rgba(56,189,248,.08);color:#7dd3fc;font-size:11px;cursor:pointer;margin-left:4px;">
+                    <i class="fa-solid fa-file-import"></i>
+                    <span>Preencher da OS</span>
+                  </button>
+                </div>
+                <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px;">
+                  <div class="form-field" style="margin:0;grid-column:1/-1;">
+                    <label for="vippNome">Nome *</label>
+                    <input id="vippNome" type="text" placeholder="Nome completo do destinatário" style="width:100%;" />
+                  </div>
+                  <div class="form-field" style="margin:0;">
+                    <label for="vippCnpjCpf">CPF / CNPJ</label>
+                    <input id="vippCnpjCpf" type="text" placeholder="Somente números" style="width:100%;" />
+                  </div>
+                  <div class="form-field" style="margin:0;">
+                    <label for="vippTelefone">Telefone / Celular</label>
+                    <input id="vippTelefone" type="text" placeholder="(00) 00000-0000" style="width:100%;" />
+                  </div>
+                  <div class="form-field" style="margin:0;">
+                    <label for="vippEmail">E-mail</label>
+                    <input id="vippEmail" type="email" placeholder="email@exemplo.com" style="width:100%;" />
+                  </div>
+                  <div class="form-field" style="margin:0;">
+                    <label for="vippCep">CEP *</label>
+                    <input id="vippCep" type="text" placeholder="00000-000" style="width:100%;" />
+                  </div>
+                  <div class="form-field" style="margin:0;grid-column:span 2;">
+                    <label for="vippEndereco">Endereço (Rua) *</label>
+                    <input id="vippEndereco" type="text" placeholder="Nome da rua" style="width:100%;" />
+                  </div>
+                  <div class="form-field" style="margin:0;">
+                    <label for="vippNumero">Número *</label>
+                    <input id="vippNumero" type="text" placeholder="Ex: 123 ou S/N" style="width:100%;" />
+                  </div>
+                  <div class="form-field" style="margin:0;">
+                    <label for="vippComplemento">Complemento</label>
+                    <input id="vippComplemento" type="text" placeholder="Apto, Bloco, etc." style="width:100%;" />
+                  </div>
+                  <div class="form-field" style="margin:0;">
+                    <label for="vippBairro">Bairro</label>
+                    <input id="vippBairro" type="text" placeholder="Bairro" style="width:100%;" />
+                  </div>
+                  <div class="form-field" style="margin:0;">
+                    <label for="vippCidade">Cidade *</label>
+                    <input id="vippCidade" type="text" placeholder="Cidade" style="width:100%;" />
+                  </div>
+                  <div class="form-field" style="margin:0;">
+                    <label for="vippUF">Estado *</label>
+                    <input id="vippUF" type="text" placeholder="UF" maxlength="2" style="width:100%;text-transform:uppercase;" />
+                  </div>
+                </div>
+              </div>
+
+              <!-- Seção: Serviço -->
+              <div>
+                <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;">
+                  <i class="fa-solid fa-truck-fast" style="font-size:13px;color:#a78bfa;"></i>
+                  <span style="font-size:13px;font-weight:700;color:#a78bfa;letter-spacing:.04em;text-transform:uppercase;">Serviço de Envio</span>
+                </div>
+                <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px;">
+                  <div class="form-field" style="margin:0;">
+                    <label for="vippServico">Tipo de serviço (ECT)</label>
+                    <select id="vippServico" style="width:100%;">
+                      <option value="04669">PAC (04669)</option>
+                      <option value="04162" selected>SEDEX (04162)</option>
+                      <option value="04227">SEDEX 12 (04227)</option>
+                      <option value="04804">SEDEX 10 (04804)</option>
+                      <option value="04782">SEDEX Hoje (04782)</option>
+                    </select>
+                  </div>
+                  <div class="form-field" style="margin:0;">
+                    <label for="vippAdicionais">Aos Cuidados</label>
+                    <input id="vippAdicionais" type="text" placeholder="Ex: Dep. Técnico / A/C João" style="width:100%;" />
+                  </div>
+                </div>
+              </div>
+
+              <!-- Seção: Volume -->
+              <div>
+                <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;">
+                  <i class="fa-solid fa-box" style="font-size:13px;color:#34d399;"></i>
+                  <span style="font-size:13px;font-weight:700;color:#34d399;letter-spacing:.04em;text-transform:uppercase;">Volume / Embalagem</span>
+                </div>
+                <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;">
+                  <div class="form-field" style="margin:0;">
+                    <label for="vippPeso">Peso (gramas)</label>
+                    <input id="vippPeso" type="number" min="1" placeholder="Ex: 5000" value="300" style="width:100%;" />
+                  </div>
+                  <div class="form-field" style="margin:0;">
+                    <label for="vippAltura">Altura (cm)</label>
+                    <input id="vippAltura" type="number" min="1" placeholder="Ex: 20" value="7" style="width:100%;" />
+                  </div>
+                  <div class="form-field" style="margin:0;">
+                    <label for="vippLargura">Largura (cm)</label>
+                    <input id="vippLargura" type="number" min="1" placeholder="Ex: 30" value="22" style="width:100%;" />
+                  </div>
+                  <div class="form-field" style="margin:0;">
+                    <label for="vippComprimento">Comprimento (cm)</label>
+                    <input id="vippComprimento" type="number" min="1" placeholder="Ex: 40" value="15" style="width:100%;" />
+                  </div>
+                </div>
+              </div>
+
+              <!-- Seção: Declaração de Conteúdo (inline) -->
+              <div>
+                <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
+                  <i class="fa-solid fa-file-lines" style="font-size:13px;color:#38bdf8;"></i>
+                  <span style="font-size:13px;font-weight:700;color:#38bdf8;letter-spacing:.04em;text-transform:uppercase;">Declaração de Conteúdo</span>
+                </div>
+                <!-- Alerta Correios -->
+                <div style="margin-bottom:10px;padding:8px 10px;border-radius:6px;background:rgba(14,165,233,.1);border:1px solid rgba(14,165,233,.25);display:flex;gap:7px;font-size:12px;color:#7dd3fc;">
+                  <i class="fa-solid fa-circle-info" style="margin-top:2px;flex-shrink:0;"></i>
+                  <span><strong>Atenção:</strong> Sem acentos ou caracteres especiais na descrição — máx. <strong>60 caracteres</strong>.</span>
+                </div>
+                <!-- Documentos remetente / destinatário -->
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px;">
+                  <div class="form-field" style="margin:0;">
+                    <label for="vippDeclDocRemetente">Doc. Remetente (CNPJ/CPF)</label>
+                    <input id="vippDeclDocRemetente" type="text" placeholder="CNPJ/CPF do remetente" style="width:100%;" />
+                  </div>
+                  <div class="form-field" style="margin:0;">
+                    <label for="vippDeclDocDestinatario">Doc. Destinatário (CNPJ/CPF)</label>
+                    <input id="vippDeclDocDestinatario" type="text" placeholder="CNPJ/CPF do destinatário" style="width:100%;" />
+                  </div>
+                </div>
+                <!-- Busca de produto -->
+                <div style="position:relative;margin-bottom:10px;">
+                  <input id="vippDeclBusca" type="text" autocomplete="off"
+                    placeholder="Pesquisar produto por código ou descrição para adicionar à declaração..."
+                    style="width:100%;padding-left:34px;" />
+                  <i class="fa-solid fa-magnifying-glass" style="position:absolute;left:11px;top:50%;transform:translateY(-50%);color:#6b7280;font-size:13px;pointer-events:none;"></i>
+                  <div id="vippDeclBuscaResultados"
+                    style="display:none;position:absolute;top:calc(100% + 4px);left:0;right:0;z-index:200;
+                           max-height:220px;overflow-y:auto;
+                           background:#1e2a36;border:1px solid #3b5068;border-radius:8px;
+                           box-shadow:0 8px 24px rgba(0,0,0,.5);">
+                  </div>
+                </div>
+                <!-- Tabela de itens -->
+                <table style="width:100%;border-collapse:collapse;border:1px solid #3b5068;font-size:13px;margin-bottom:6px;">
+                  <thead>
+                    <tr style="background:rgba(255,255,255,.05);">
+                      <th style="padding:7px 10px;text-align:left;border:1px solid #3b5068;color:#94a3b8;font-weight:600;">Descricao</th>
+                      <th style="padding:7px 10px;text-align:center;border:1px solid #3b5068;color:#94a3b8;font-weight:600;width:100px;">Qtd</th>
+                      <th style="padding:7px 10px;text-align:center;border:1px solid #3b5068;color:#94a3b8;font-weight:600;width:115px;">Valor (R$)</th>
+                      <th style="border:1px solid #3b5068;width:34px;"></th>
+                    </tr>
+                  </thead>
+                  <tbody id="vippDeclItens"></tbody>
+                  <tfoot>
+                    <tr style="background:rgba(255,255,255,.04);">
+                      <td style="border:1px solid #3b5068;padding:6px 10px;text-align:right;color:#94a3b8;font-weight:600;">Totais:</td>
+                      <td id="vippDeclTotalQtd" style="border:1px solid #3b5068;padding:6px 10px;text-align:center;color:#e5e7eb;font-weight:700;">0</td>
+                      <td id="vippDeclTotalValor" style="border:1px solid #3b5068;padding:6px 10px;text-align:center;color:#e5e7eb;font-weight:700;">0,00</td>
+                      <td style="border:1px solid #3b5068;"></td>
+                    </tr>
+                    <tr style="background:rgba(255,255,255,.04);">
+                      <td style="border:1px solid #3b5068;padding:6px 10px;text-align:right;color:#94a3b8;font-weight:600;">Peso Total:</td>
+                      <td colspan="3" style="border:1px solid #3b5068;padding:4px 8px;">
+                        <input id="vippDeclPesoTotal" type="text" placeholder="Ex: 300g" value="300"
+                          style="width:100%;background:transparent;border:none;color:#e5e7eb;font-size:13px;outline:none;" />
+                      </td>
+                    </tr>
+                  </tfoot>
+                </table>
+                <!-- Botão adicionar linha manual -->
+                <button id="vippDeclAddItem" type="button"
+                  style="display:inline-flex;align-items:center;gap:7px;padding:6px 14px;border-radius:6px;border:1px dashed #3b5068;background:transparent;color:#7dd3fc;font-size:12px;cursor:pointer;">
+                  <i class="fa-solid fa-plus"></i>
+                  <span>Adicionar linha manualmente</span>
+                </button>
+              </div>
+
+              <!-- Seção: Nota Fiscal -->
+              <div>
+                <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;">
+                  <i class="fa-solid fa-file-invoice" style="font-size:13px;color:#fbbf24;"></i>
+                  <span style="font-size:13px;font-weight:700;color:#fbbf24;letter-spacing:.04em;text-transform:uppercase;">Nota Fiscal <span style="font-weight:400;color:#6b7280;">(opcional)</span></span>
+                </div>
+                <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;">
+                  <div class="form-field" style="margin:0;">
+                    <label for="vippNrNF">Número da NF</label>
+                    <input id="vippNrNF" type="text" placeholder="Ex: 1234567" style="width:100%;" />
+                  </div>
+                  <div class="form-field" style="margin:0;">
+                    <label for="vippSerieNF">Série</label>
+                    <input id="vippSerieNF" type="text" placeholder="Ex: 1" style="width:100%;" />
+                  </div>
+                  <div class="form-field" style="margin:0;">
+                    <label for="vippDtNF">Data da NF</label>
+                    <input id="vippDtNF" type="date" style="width:100%;" />
+                  </div>
+                  <div class="form-field" style="margin:0;">
+                    <label for="vippVlrNF">Valor total (R$)</label>
+                    <input id="vippVlrNF" type="text" placeholder="Ex: 1200,00" style="width:100%;" />
+                  </div>
+                </div>
+              </div>
+
+              <!-- Observação -->
+              <div class="form-field" style="margin:0 0 4px;">
+                <label for="vippObservacao">Observação visual <span style="font-weight:400;color:#6b7280;">(impressa na etiqueta — opcional)</span></label>
+                <textarea id="vippObservacao" rows="2" placeholder="Informações extras que serão impressas na etiqueta" style="width:100%;"></textarea>
+              </div>
+
+            </div>
+            <!-- Rodapé -->
+            <div style="flex-shrink:0;display:flex;align-items:center;justify-content:space-between;gap:10px;padding:14px 18px;border-top:1px solid rgba(255,255,255,.08);flex-wrap:wrap;">
+              <div id="vippModalStatus" style="display:none;font-size:13px;color:var(--inactive-color);flex:1;"></div>
+              <div style="display:flex;gap:10px;margin-left:auto;">
+                <button id="vippModalCancelarBtn" type="button" class="content-button"
+                  style="display:flex;align-items:center;gap:8px;background:rgba(255,255,255,.06);color:#9ca3af;border:1px solid #374151;">
+                  <i class="fa-solid fa-xmark"></i>
+                  <span>Cancelar</span>
+                </button>
+                <button id="vippModalEnviarBtn" type="button" class="content-button"
+                  style="display:flex;align-items:center;gap:8px;background:linear-gradient(135deg,#111827 0%,#1f2937 100%);color:white;border:1px solid #4b5563;">
+                  <img src="https://vipp.visualset.com.br/vipp/img/logo-visualset5.png" alt="" style="width:16px;height:16px;object-fit:contain;">
+                  <span>Criar Postagem VIPP</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+        <!-- ── /Modal VIPP ──────────────────────────────────────────────────────── -->
+
+        <!-- ── Sub-modal: Declaração de Conteúdo removido — agora inline ── -->
+        <div id="vippDeclModal" class="modal-overlay" style="display:none !important;"
+          style="position:fixed;inset:0;z-index:10100;display:none;align-items:center;justify-content:center;background:rgba(2,6,23,.82);backdrop-filter:blur(4px);">
+          <div style="width:min(780px,calc(100vw - 20px));max-height:92vh;border-radius:10px;border:1px solid #3b5068;background:#1e2a36;box-shadow:0 24px 60px rgba(0,0,0,.55);display:flex;flex-direction:column;overflow:hidden;font-family:inherit;">
+            <!-- Cabeçalho estilo VIPP -->
+            <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 16px;background:#2c3e50;border-bottom:1px solid #3b5068;">
+              <div style="display:flex;align-items:center;gap:9px;">
+                <i class="fa-solid fa-file-lines" style="color:#7dd3fc;font-size:16px;"></i>
+                <strong style="color:#e5e7eb;font-size:14px;">Formulário Declaração de Conteúdo</strong>
+              </div>
+              <button id="vippDeclFecharBtnTop" type="button"
+                style="display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;border-radius:6px;border:1px solid #4b6278;background:rgba(255,255,255,.06);color:#e5e7eb;cursor:pointer;font-size:15px;">
+                ×
+              </button>
+            </div>
+            <!-- Alerta Correios -->
+            <div style="margin:12px 14px 0;padding:9px 12px;border-radius:6px;background:rgba(14,165,233,.12);border:1px solid rgba(14,165,233,.3);display:flex;gap:8px;align-items:flex-start;font-size:12px;color:#7dd3fc;">
+              <i class="fa-solid fa-circle-info" style="margin-top:2px;flex-shrink:0;"></i>
+              <span><strong>Atenção:</strong> Por imposição dos Correios, não serão aceitos caracteres especiais ou acentuação no campo Descrição, e no máximo <strong>60 caracteres</strong>.</span>
+            </div>
+            <!-- Corpo -->
+            <div style="overflow-y:auto;flex:1;padding:12px 14px;">
+              <!-- Documentos -->
+              <table style="width:100%;border-collapse:collapse;border:1px solid #3b5068;margin-bottom:10px;font-size:13px;">
+                <thead>
+                  <tr style="background:rgba(255,255,255,.05);">
+                    <th style="padding:8px 10px;text-align:center;border:1px solid #3b5068;color:#94a3b8;font-weight:600;">Documento Remetente :</th>
+                    <th style="padding:8px 10px;text-align:center;border:1px solid #3b5068;color:#94a3b8;font-weight:600;">Documento Destinatário:</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td style="border:1px solid #3b5068;padding:4px 8px;">
+                      <input id="vippDeclDocRemetente" type="text" placeholder="CNPJ/CPF do remetente"
+                        style="width:100%;background:transparent;border:none;color:#e5e7eb;font-size:13px;outline:none;text-align:center;" />
+                    </td>
+                    <td style="border:1px solid #3b5068;padding:4px 8px;">
+                      <input id="vippDeclDocDestinatario" type="text" placeholder="CNPJ/CPF do destinatário"
+                        style="width:100%;background:transparent;border:none;color:#e5e7eb;font-size:13px;outline:none;text-align:center;" />
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+              <!-- Tabela de itens -->
+              <table style="width:100%;border-collapse:collapse;border:1px solid #3b5068;font-size:13px;">
+                <thead>
+                  <tr style="background:rgba(255,255,255,.05);">
+                    <th style="padding:8px 10px;text-align:left;border:1px solid #3b5068;color:#94a3b8;font-weight:600;">Descricao</th>
+                    <th style="padding:8px 10px;text-align:center;border:1px solid #3b5068;color:#94a3b8;font-weight:600;width:110px;">Quantidade</th>
+                    <th style="padding:8px 10px;text-align:center;border:1px solid #3b5068;color:#94a3b8;font-weight:600;width:120px;">Valor (R$)</th>
+                    <th style="border:1px solid #3b5068;width:34px;"></th>
+                  </tr>
+                </thead>
+                <tbody id="vippDeclItens"></tbody>
+                <!-- Linha Totais -->
+                <tfoot>
+                  <tr style="background:rgba(255,255,255,.04);">
+                    <td style="border:1px solid #3b5068;padding:7px 10px;text-align:right;color:#94a3b8;font-weight:600;">Totais:</td>
+                    <td id="vippDeclTotalQtd" style="border:1px solid #3b5068;padding:7px 10px;text-align:center;color:#e5e7eb;font-weight:700;">0</td>
+                    <td id="vippDeclTotalValor" style="border:1px solid #3b5068;padding:7px 10px;text-align:center;color:#e5e7eb;font-weight:700;">0,00</td>
+                    <td style="border:1px solid #3b5068;"></td>
+                  </tr>
+                  <tr style="background:rgba(255,255,255,.04);">
+                    <td style="border:1px solid #3b5068;padding:7px 10px;text-align:right;color:#94a3b8;font-weight:600;">Peso Total:</td>
+                    <td colspan="3" style="border:1px solid #3b5068;padding:4px 8px;">
+                      <input id="vippDeclPesoTotal" type="text" placeholder="Ex: 5000g"
+                        style="width:100%;background:transparent;border:none;color:#e5e7eb;font-size:13px;outline:none;" />
+                    </td>
+                  </tr>
+                </tfoot>
+              </table>
+              <!-- Botão adicionar item -->
+              <button id="vippDeclAddItem" type="button"
+                style="margin-top:10px;display:inline-flex;align-items:center;gap:7px;padding:6px 14px;border-radius:6px;border:1px dashed #3b5068;background:transparent;color:#7dd3fc;font-size:12px;cursor:pointer;">
+                <i class="fa-solid fa-plus"></i>
+                <span>Adicionar linha</span>
+              </button>
+            </div>
+            <!-- Rodapé botões estilo VIPP -->
+            <div style="flex-shrink:0;display:flex;align-items:center;justify-content:space-between;padding:10px 14px;border-top:1px solid #3b5068;background:#222f3a;gap:8px;">
+              <div style="display:flex;gap:8px;">
+                <button id="vippDeclSalvarBtn" type="button"
+                  style="display:inline-flex;align-items:center;gap:7px;padding:7px 18px;border-radius:6px;border:none;background:#1d6fa4;color:white;font-size:13px;cursor:pointer;">
+                  <i class="fa-solid fa-floppy-disk"></i> Salvar
+                </button>
+                <button id="vippDeclLimparBtn" type="button"
+                  style="display:inline-flex;align-items:center;gap:7px;padding:7px 18px;border-radius:6px;border:1px solid #4b6278;background:rgba(255,255,255,.06);color:#94a3b8;font-size:13px;cursor:pointer;">
+                  <i class="fa-solid fa-rotate"></i> Limpar
+                </button>
+              </div>
+              <button id="vippDeclFecharBtn" type="button"
+                style="display:inline-flex;align-items:center;gap:7px;padding:7px 18px;border-radius:6px;border:none;background:#c0392b;color:white;font-size:13px;cursor:pointer;">
+                <i class="fa-solid fa-xmark"></i> Fechar
+              </button>
+            </div>
+          </div>
+        </div>
+        <!-- ── /Sub-modal Declaração de Conteúdo ──────────────────────────────── -->
+
+                <div id="atWhatsappModal" role="dialog" aria-modal="true" aria-labelledby="atWhatsappModalTitle">
           <div id="atWhatsappModalCard">
             <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px 14px;border-bottom:1px solid rgba(255,255,255,.08);">
               <div style="display:flex;align-items:center;gap:9px;min-width:0;">
@@ -3756,6 +4180,12 @@
                 <span id="atEditModalTitle">Editar Atendimento</span>
               </h3>
               <div style="display:flex;align-items:center;gap:6px;">
+                <!-- Botão VIPP -->
+                <button id="atVippBtn" type="button" title="Enviar peça via Correios (VIPP)"
+                  style="background:linear-gradient(135deg,#111827 0%,#1f2937 100%);border:1px solid #374151;color:white;border-radius:8px;padding:5px 10px;cursor:pointer;font-size:13px;display:flex;align-items:center;gap:5px;transition:background .2s;">
+                  <img src="https://vipp.visualset.com.br/vipp/img/logo-visualset5.png" alt="VIPP" style="width:14px;height:14px;object-fit:contain;">
+                  <span style="font-size:11px;font-weight:600;">Correios</span>
+                </button>
                 <!-- Botão Status OS -->
                 <div style="position:relative;">
                   <button id="atStatusOsBtn" type="button" title="Alterar status da OS"
@@ -5010,7 +5440,7 @@
             .envio-mercadoria-title i{display:inline-flex;align-items:center;justify-content:center;width:38px;height:38px;border-radius:10px;background:rgba(14,165,233,.12);color:#38bdf8;font-size:18px;}
             .envio-mercadoria-title h2{margin:0;color:#f8fafc;font-size:20px;line-height:1.2;letter-spacing:0;}
             .envio-mercadoria-title p{margin:4px 0 0;color:#94a3b8;font-size:13px;line-height:1.45;}
-            .envio-mercadoria-actions{display:flex;gap:10px;align-items:center;flex-wrap:wrap;justify-content:flex-end;}
+            .envio-mercadoria-actions{display:flex;gap:10px;align-items:center;flex-wrap:wrap;justify-content:flex-end;position:relative;}
             .envio-mercadoria-metrics{display:grid;grid-template-columns:repeat(4,minmax(140px,1fr));gap:10px;}
             .envio-metric{border:1px solid rgba(148,163,184,.18);border-radius:8px;background:rgba(15,23,42,.62);padding:10px 14px;min-height:72px;}
             .envio-metric span{display:block;color:#94a3b8;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;}
@@ -5068,10 +5498,15 @@
                     <i class="fa-solid fa-arrow-up-right-from-square"></i>
                     <span>VIPP</span>
                   </a>
+                  <button id="envioImprGearBtn" class="content-button" type="button" title="Configurar impressora de envios" style="display:flex;align-items:center;gap:6px;position:relative;">
+                    <i class="fa-solid fa-gear"></i>
+                    <span>Impressora</span>
+                  </button>
                   <button id="envioMercadoriaRefreshBtnTop" class="content-button" type="button" style="display:flex;align-items:center;gap:6px;">
                     <i class="fa-solid fa-rotate"></i>
                     <span>Recarregar</span>
                   </button>
+                  <div id="envioImprGearDropdown" style="display:none;position:absolute;z-index:200;right:0;top:calc(100% + 4px);min-width:340px;background:#1e293b;border:1px solid #334155;border-radius:10px;box-shadow:0 8px 32px rgba(0,0,0,.45);padding:4px 0;"></div>
                 </div>
               </div>
 

@@ -519,12 +519,25 @@ window._loadSolicitacoesTab = async function() {
         btn.disabled = true;
         btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin" style="margin-right:3px;"></i>Iniciando...';
         try {
+          // ── Dispara GerarPPN VIPP em background (sem bloquear) ───────────
+          fetch(`/api/vipp/sep-check?n_solic=${encodeURIComponent(nSolic)}`, { credentials: 'include' })
+            .then(r => r.json()).catch(() => ({ idVipp: null }))
+            .then(vc => {
+              if (!vc?.idVipp) return;
+              return fetch('/api/vipp/gerar-etiqueta', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                credentials: 'include',
+                body: JSON.stringify({ idConhecimento: vc.idVipp, n_solic: nSolic })
+              });
+            })
+            .catch(e => console.warn('[VIPP] background gerar-etiqueta:', e));
+
+          // ── Busca solic_ids e inicia separação normalmente ───────────────
           const ri = await fetch(`/api/logistica/kanban/itens?n_solic=${encodeURIComponent(nSolic)}`, { credentials: 'include' });
           const di = await ri.json();
           if (!di.ok) throw new Error(di.error || 'Erro ao buscar itens da SEP.');
-          const solicIds = (di.itens || [])
-            .map(it => parseInt(it.solic_id, 10))
-            .filter(id => !Number.isNaN(id));
+          const solicIds = (di.itens || []).map(it => parseInt(it.solic_id, 10)).filter(id => !Number.isNaN(id));
           if (!solicIds.length) throw new Error('Nenhum item pendente encontrado para iniciar separação.');
 
           const r = await fetch('/api/logistica/itens_solicitados/separacao', {
@@ -1679,6 +1692,21 @@ async function _abrirModalAguardandoRetiradaSep(nSolic, opts = {}) {
     btn.disabled = true;
     btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin" style="margin-right:4px;"></i>Iniciando...';
     try {
+      // ── Dispara GerarPPN VIPP em background (sem bloquear o usuário) ──────
+      fetch(`/api/vipp/sep-check?n_solic=${encodeURIComponent(nSolic)}`, { credentials: 'include' })
+        .then(r => r.json()).catch(() => ({ idVipp: null }))
+        .then(vc => {
+          if (!vc?.idVipp) return;
+          return fetch('/api/vipp/gerar-etiqueta', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
+            body: JSON.stringify({ idConhecimento: vc.idVipp, n_solic: nSolic })
+          });
+        })
+        .catch(e => console.warn('[VIPP] background gerar-etiqueta:', e));
+
+      // ── Avança itens para "Em Separação" ──────────────────────────────────
       const r = await fetch('/api/logistica/itens_solicitados/separacao', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
@@ -11064,6 +11092,7 @@ function renderEnvioMercadoriaCard(r) {
   const status = normalizeSacStatus(statusRaw);
   const etiqueta = r.etiqueta_url || r.etiqueta || '';
   const declaracao = r.declaracao_url || r.declaracao || '';
+  const temIdentificacao = r.identificacao && String(r.identificacao).trim().length > 0;
   const identRaw = r.identificacao ? String(r.identificacao).trim() : '-';
   const identClean = identRaw.replace(/\s+/g, '').toUpperCase();
   const isRastreio = isCodigoRastreioEnvioMercadoria(identClean);
@@ -11076,8 +11105,8 @@ function renderEnvioMercadoriaCard(r) {
   const dataRastreio = (!rastStatusDisplay && isRastreio && !isFinalizado) ? identClean : '';
   const rastText = [rastStatusDisplay, rastQuandoDisplay].filter(Boolean).join(' | ');
   const buttons = [
-    etiqueta ? `<button class="content-button btn-print-etiqueta" data-print-url="${escapeAtHtml(etiqueta)}" style="padding:8px 10px;font-size:12px;display:inline-flex;align-items:center;gap:6px;"><i class="fa-solid fa-print"></i><span>Etiqueta</span></button>` : '',
-    declaracao ? `<button class="content-button btn-print-declaracao" data-print-url="${escapeAtHtml(declaracao)}" style="padding:8px 10px;font-size:12px;display:inline-flex;align-items:center;gap:6px;"><i class="fa-solid fa-print"></i><span>Declaração</span></button>` : ''
+    (etiqueta || temIdentificacao) ? `<button class="content-button btn-envio-etiqueta" data-envio-id="${escapeAtHtml(String(r.id))}" data-identificacao="${escapeAtHtml(identRaw)}" style="padding:8px 10px;font-size:12px;display:inline-flex;align-items:center;gap:6px;"><i class="fa-solid fa-print"></i><span>Etiqueta</span></button>` : '',
+    declaracao ? `<button class="content-button btn-envio-declaracao" data-envio-id="${escapeAtHtml(String(r.id))}" data-print-url="${escapeAtHtml(declaracao)}" style="padding:8px 10px;font-size:12px;display:inline-flex;align-items:center;gap:6px;"><i class="fa-solid fa-file-pdf"></i><span>Declaração</span></button>` : ''
   ].filter(Boolean).join('');
 
   const statusToken = getStatusTokenEnvioMercadoria(statusRaw);
@@ -14227,6 +14256,130 @@ if (sacSendBtn) {
   });
 }
 
+// ── Modal: Envio de Peça (OS) ──────────────────────────────────────────────
+(function () {
+  const modal       = document.getElementById('osEnviarPecaModal');
+  const closeBtn    = document.getElementById('osEnviarPecaModalClose');
+  const openBtn     = document.getElementById('atEnviarPecaBtn');
+
+  const attachEtBtn = document.getElementById('osAttachEtiquetaBtn');
+  const attachDcBtn = document.getElementById('osAttachDeclaracaoBtn');
+  const inputEt     = document.getElementById('osFileInputEtiqueta');
+  const inputDc     = document.getElementById('osFileInputDeclaracao');
+  const infoEt      = document.getElementById('osFileInfoEtiqueta');
+  const infoDc      = document.getElementById('osFileInfoDeclaracao');
+  const obsEl       = document.getElementById('osObservacao');
+  const sepEl       = document.getElementById('osNumeroSep');
+  const statusEl    = document.getElementById('osEnvioStatus');
+  const sendBtn     = document.getElementById('osSendBtn');
+
+  if (!modal) return;
+
+  function openModal() {
+    modal.style.display = 'flex';
+    document.body.style.overflow = 'hidden';
+  }
+
+  function closeModal() {
+    modal.style.display = 'none';
+    document.body.style.overflow = '';
+  }
+
+  if (openBtn)  openBtn.addEventListener('click', openModal);
+  if (closeBtn) closeBtn.addEventListener('click', closeModal);
+  modal.addEventListener('click', (e) => { if (e.target === modal) closeModal(); });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && modal.style.display === 'flex') closeModal(); });
+
+  function formatFile(f) {
+    if (!f) return 'Nenhum arquivo.';
+    const kb = (f.size / 1024).toFixed(1);
+    return f.name + ' (' + kb + ' KB)';
+  }
+
+  if (attachEtBtn && inputEt) {
+    attachEtBtn.addEventListener('click', () => { inputEt.value = ''; inputEt.click(); });
+    inputEt.addEventListener('change', () => {
+      const f = inputEt.files?.[0];
+      if (f) {
+        const name = f.name.toLowerCase();
+        if (!name.includes('etiqueta')) {
+          alert('Selecione o arquivo de ETIQUETA (nome deve conter "etiqueta").');
+          inputEt.value = '';
+          infoEt.textContent = 'Nenhum arquivo.';
+          return;
+        }
+      }
+      infoEt.textContent = f ? formatFile(f) : 'Nenhum arquivo.';
+    });
+  }
+
+  if (attachDcBtn && inputDc) {
+    attachDcBtn.addEventListener('click', () => { inputDc.value = ''; inputDc.click(); });
+    inputDc.addEventListener('change', () => {
+      const f = inputDc.files?.[0];
+      infoDc.textContent = f ? formatFile(f) : 'Nenhum arquivo.';
+    });
+  }
+
+  function setStatus(text, isError = false) {
+    if (!statusEl) return;
+    statusEl.style.display = text ? 'inline' : 'none';
+    statusEl.style.color = isError ? '#f87171' : 'var(--inactive-color)';
+    statusEl.textContent = text || '';
+  }
+
+  if (sendBtn) {
+    sendBtn.addEventListener('click', async () => {
+      const userName = document.getElementById('userNameDisplay')?.textContent?.trim() || '';
+      const observacao = obsEl?.value?.trim() || '';
+      const numeroSep  = sepEl?.value?.trim() || '';
+      const etiqueta   = inputEt?.files?.[0] || null;
+      const declaracao = inputDc?.files?.[0] || null;
+
+      if (!userName) { alert('Usuário não identificado. Faça login novamente.'); return; }
+      if (!etiqueta || !declaracao) {
+        alert('Selecione exatamente 2 arquivos: Etiqueta e Declaração de conteúdo.');
+        return;
+      }
+
+      sendBtn.disabled = true;
+      setStatus('Enviando...', false);
+
+      try {
+        const formData = new FormData();
+        formData.append('usuario', userName);
+        formData.append('observacao', observacao);
+        formData.append('numero_sep', numeroSep);
+        formData.append('anexos', etiqueta);
+        formData.append('anexos', declaracao);
+
+        const resp = await fetch('/api/sac/solicitacoes', { method: 'POST', body: formData });
+        const data = await resp.json().catch(() => ({}));
+        const ok   = resp.ok && data.ok !== false;
+
+        if (ok) {
+          setStatus('Solicitação registrada com sucesso!', false);
+          if (inputEt) inputEt.value = '';
+          if (inputDc) inputDc.value = '';
+          if (infoEt)  infoEt.textContent  = 'Nenhum arquivo.';
+          if (infoDc)  infoDc.textContent  = 'Nenhum arquivo.';
+          if (obsEl)   obsEl.value  = '';
+          if (sepEl)   sepEl.value  = '';
+          setTimeout(closeModal, 1800);
+        } else {
+          setStatus(data.error || 'Falha ao registrar.', true);
+        }
+      } catch (err) {
+        console.error('[OS-EnviarPeca] erro ao registrar envio', err);
+        setStatus(err?.message || 'Erro ao registrar.', true);
+      } finally {
+        sendBtn.disabled = false;
+      }
+    });
+  }
+})();
+// ── Fim Modal: Envio de Peça (OS) ───────────────────────────────────────────
+
 if (atEnviarBtn) {
   atEnviarBtn.addEventListener('click', async () => {
     // Tipo de atendimento é obrigatório
@@ -17245,7 +17398,14 @@ async function carregarSacSolicitacoes(targetBody, { hideDone = false, titleOnly
       }
       
       const rastText = [rastStatusDisplay, rastQuandoDisplay].filter(Boolean).join(' | ');
-      const buttons = [
+      // Botões envio mercadoria: usam classe btn-envio-* + data-envio-id (agente de impressão)
+      const temIdentRaw = r.identificacao && String(r.identificacao).trim().length > 0;
+      const buttonsEnvio = [
+        (etiqueta || temIdentRaw) ? `<button class="content-button btn-envio-etiqueta" data-envio-id="${r.id}" data-identificacao="${(r.identificacao || '').trim()}" style="padding:4px 8px;font-size:12px;display:inline-flex;align-items:center;gap:6px;"><i class="fa-solid fa-print"></i><span>Etiqueta</span></button>` : '',
+        declaracao ? `<button class="content-button btn-envio-declaracao" data-envio-id="${r.id}" data-print-url="${declaracao}" style="padding:4px 8px;font-size:12px;display:inline-flex;align-items:center;gap:6px;"><i class="fa-solid fa-file-pdf"></i><span>Declaração</span></button>` : ''
+      ].filter(Boolean).join(' ');
+      // Botões painel SAC: usam classe btn-print-* + data-print-url (abre PDF no navegador)
+      const buttonsSac = [
         etiqueta ? `<button class="content-button btn-print-etiqueta" data-print-url="${etiqueta}" style="padding:4px 8px;font-size:12px;display:inline-flex;align-items:center;gap:6px;"><i class="fa-solid fa-print"></i><span>Etiqueta</span></button>` : '',
         declaracao ? `<button class="content-button btn-print-declaracao" data-print-url="${declaracao}" style="padding:4px 8px;font-size:12px;display:inline-flex;align-items:center;gap:6px;"><i class="fa-solid fa-print"></i><span>Declaração</span></button>` : ''
       ].filter(Boolean).join(' ');
@@ -17278,7 +17438,7 @@ async function carregarSacSolicitacoes(targetBody, { hideDone = false, titleOnly
             <td>${numeroSep}</td>
             <td style="max-width:400px;white-space:pre-wrap;line-height:1.8;padding:12px 8px;vertical-align:top;">${conteudo}</td>
             <td>${statusSelectEnvioMercadoria}</td>
-            <td>${buttons || '—'}</td>
+            <td>${buttonsEnvio || '—'}</td>
           </tr>`;
       } else {
         // Tabela "Registro de envios" (painel SAC) - SEM coluna Requisitante
@@ -17303,7 +17463,7 @@ async function carregarSacSolicitacoes(targetBody, { hideDone = false, titleOnly
             <td>${numeroSep}</td>
             <td style="max-width:400px;white-space:pre-wrap;line-height:1.8;padding:12px 8px;vertical-align:top;">${conteudo}</td>
             <td>${statusSelectSac}</td>
-            <td>${buttons || '—'}</td>
+            <td>${buttonsSac || '—'}</td>
             <td style="white-space:nowrap;">${acoesButtons}</td>
           </tr>`;
       }
@@ -18118,7 +18278,186 @@ function setupPrintButtons(container) {
 }
 
 setupPrintButtons(sacTabelaBody);
-setupPrintButtons(envioMercadoriaTabelaBodyPane);
+
+// ── Envio de Mercadoria: impressora configurável (separada da etiquetas de ID) ──
+let _envioImprPref = null;
+
+function _envioImprPrefKey() {
+  const u = (document.getElementById('userNameDisplay')?.textContent || 'user').trim().replace(/\s+/g, '_');
+  return `envio_printer_pref_${u}`;
+}
+function _envioCarregarPref() {
+  _envioImprPref = localStorage.getItem(_envioImprPrefKey()) || null;
+  _envioAtualizarGearBtn();
+}
+function _envioSalvarPref(p) {
+  _envioImprPref = p || null;
+  if (p) localStorage.setItem(_envioImprPrefKey(), p);
+  else localStorage.removeItem(_envioImprPrefKey());
+  _envioAtualizarGearBtn();
+}
+function _envioAtualizarGearBtn() {
+  const btn = document.getElementById('envioImprGearBtn');
+  if (!btn) return;
+  if (_envioImprPref) {
+    const ag = _etqParseAgentPref(_envioImprPref);
+    const label = ag ? `${ag.impressora}` : (_envioImprPref === '__PDF__' ? 'PDF' : _envioImprPref === '__BP__' ? 'Agente' : _envioImprPref);
+    btn.title = `Impressora envios: ${label} — clique para trocar`;
+    btn.classList.add('etq-pref-set');
+  } else {
+    btn.title = 'Impressora envios não definida — clique para configurar';
+    btn.classList.remove('etq-pref-set');
+  }
+}
+
+async function _envioMostrarSeletor(container) {
+  if (!container) return;
+  container.style.display = 'block';
+  container.innerHTML = '<div style="padding:12px 14px;color:#facc15;font-size:.85rem;"><i class="fa-solid fa-spinner fa-spin"></i> Buscando impressoras...</div>';
+  let agentOpts = '';
+  let cupOpts = '';
+  try {
+    const ar = await fetch('/api/etiquetas/agentes-disponiveis', { credentials: 'include' });
+    const ad = await ar.json();
+    const agentes = ad.agentes || [];
+    if (agentes.length > 0) {
+      agentOpts += '<optgroup label="🖨️ Agentes online">';
+      for (const ag of agentes) {
+        for (const imp of (ag.printers || [])) {
+          const val = `__AGENT__:${ag.pcName}:${imp}`;
+          agentOpts += `<option value="${escapeHtml(val)}">${escapeHtml(ag.pcName)} → ${escapeHtml(imp)}</option>`;
+        }
+      }
+      agentOpts += '</optgroup>';
+    } else {
+      agentOpts = '<option value="__BP__">🖨️ Agente local (qualquer)</option>';
+    }
+  } catch (_) { agentOpts = '<option value="__BP__">🖨️ Agente local (qualquer)</option>'; }
+  try {
+    const r = await fetch('/api/etiquetas/impressoras', { credentials: 'include' });
+    const d = await r.json();
+    if (d.impressoras?.length) {
+      cupOpts = '<optgroup label="Impressoras servidor">' + d.impressoras.map(p => `<option value="${escapeHtml(p)}">${escapeHtml(p)}</option>`).join('') + '</optgroup>';
+    }
+  } catch (_) {}
+  const prefAtual = _envioImprPref || '';
+  container.innerHTML = `
+    <div style="padding:12px 14px;">
+      <div style="color:#f1f5f9;font-size:.85rem;font-weight:600;margin-bottom:8px;"><i class="fa-solid fa-print" style="color:#7c3aed;margin-right:6px;"></i>Impressora de envios</div>
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+        <select id="_envioSelImp" style="background:#0f172a;color:#f1f5f9;border:1px solid #334155;border-radius:6px;padding:5px 8px;font-size:.85rem;flex:1;min-width:140px;">
+          <option value="__PDF__">📄 PDF (abrir no navegador)</option>
+          ${agentOpts}${cupOpts}
+        </select>
+        <button id="_envioBtnSalv" style="background:#7c3aed;color:#fff;border:none;border-radius:6px;padding:5px 12px;font-size:.82rem;cursor:pointer;white-space:nowrap;">
+          <i class="fa-solid fa-floppy-disk"></i> Salvar
+        </button>
+        <button id="_envioBtnCanc" style="background:#374151;color:#94a3b8;border:none;border-radius:6px;padding:5px 10px;font-size:.82rem;cursor:pointer;">Cancelar</button>
+      </div>
+    </div>`;
+  if (prefAtual) { const sel = document.getElementById('_envioSelImp'); if (sel) sel.value = prefAtual; }
+  document.getElementById('_envioBtnSalv')?.addEventListener('click', () => {
+    const printer = document.getElementById('_envioSelImp')?.value || '';
+    container.style.display = 'none'; container.innerHTML = '';
+    if (printer) _envioSalvarPref(printer);
+  });
+  document.getElementById('_envioBtnCanc')?.addEventListener('click', () => {
+    container.style.display = 'none'; container.innerHTML = '';
+  });
+}
+
+async function _envioImprimirEtiqueta(envioId, identificacao, btnRef) {
+  if (btnRef) btnRef.disabled = true;
+  try {
+    const pref = _envioImprPref || '__PDF__';
+    // Modo PDF: abre etiqueta no navegador
+    if (pref === '__PDF__') {
+      const ecLimpo = String(identificacao || '').trim().replace(/\s+/g, '');
+      if (!ecLimpo) throw new Error('Código ECT não disponível para este envio');
+      window.open(`/api/vipp/etiqueta?id=${encodeURIComponent(ecLimpo)}&saida=1`, '_blank');
+      return;
+    }
+    // Modo agente/impressora: enfileira via backend
+    const agentDest = _etqParseAgentPref(pref);
+    const body = { envio_id: envioId };
+    if (agentDest) { body.destino_agente = agentDest.pcName; body.impressora = agentDest.impressora; }
+    else if (pref !== '__BP__') { body.impressora = pref; }
+    const resp = await fetch('/api/vipp/imprimir-envio', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify(body),
+    });
+    const data = await resp.json();
+    if (!data.ok) throw new Error(data.error || 'Falha ao enfileirar impressão');
+    if (btnRef) {
+      const orig = btnRef.innerHTML;
+      btnRef.innerHTML = '<i class="fa-solid fa-check" style="color:#4ade80;"></i> Enviado!';
+      setTimeout(() => { btnRef.innerHTML = orig; }, 3000);
+    }
+  } catch (err) {
+    alert('Erro ao imprimir etiqueta de envio: ' + err.message);
+  } finally {
+    if (btnRef) btnRef.disabled = false;
+  }
+}
+
+function setupEnvioPrintButtons(container) {
+  if (!container) return;
+  _envioCarregarPref();
+  container.addEventListener('click', async (ev) => {
+    const btnEtq = ev.target.closest('.btn-envio-etiqueta');
+    if (btnEtq) {
+      ev.preventDefault();
+      const envioId = btnEtq.getAttribute('data-envio-id');
+      const identificacao = btnEtq.getAttribute('data-identificacao') || '';
+      if (!envioId) return;
+      // Se não tem impressora configurada, abre seletor antes de imprimir
+      if (!_envioImprPref) {
+        const drop = document.getElementById('envioImprGearDropdown');
+        if (drop) {
+          await _envioMostrarSeletor(drop);
+          // Aguarda o usuário salvar (poll simples)
+          return;
+        }
+      }
+      await _envioImprimirEtiqueta(envioId, identificacao, btnEtq);
+      return;
+    }
+    const btnDec = ev.target.closest('.btn-envio-declaracao');
+    if (btnDec) {
+      ev.preventDefault();
+      const url = btnDec.getAttribute('data-print-url');
+      if (!url) return;
+      // Declaração: sempre abre PDF no navegador
+      try {
+        const w = window.open(url, '_blank');
+        if (w) setTimeout(() => { try { w.focus(); } catch {} }, 300);
+      } catch (err) { console.error('[Envio] erro ao abrir declaração', err); }
+    }
+  });
+}
+
+setupEnvioPrintButtons(envioMercadoriaTabelaBodyPane);
+
+// Gear button: abre/fecha o dropdown de configuração de impressora
+document.getElementById('envioImprGearBtn')?.addEventListener('click', async (ev) => {
+  ev.stopPropagation();
+  const drop = document.getElementById('envioImprGearDropdown');
+  if (!drop) return;
+  if (drop.style.display !== 'none' && drop.innerHTML) {
+    drop.style.display = 'none'; drop.innerHTML = '';
+    return;
+  }
+  await _envioMostrarSeletor(drop);
+});
+// Fechar dropdown ao clicar fora
+document.addEventListener('click', (ev) => {
+  const drop = document.getElementById('envioImprGearDropdown');
+  if (drop && drop.style.display !== 'none' && !drop.contains(ev.target) && ev.target.id !== 'envioImprGearBtn') {
+    drop.style.display = 'none'; drop.innerHTML = '';
+  }
+});
 
 // Persistência de status diretamente pela tabela
 document.addEventListener('focusin', (ev) => {
@@ -67877,3 +68216,653 @@ window.initOscilacaoEstoque = (function () {
   // DOM já disponível no fim do arquivo
   setTimeout(tentarInit, 0);
 })();
+
+// ── Modal VIPP — Criar Postagem ───────────────────────────────────────────────
+(function () {
+  const modal      = document.getElementById('osVippModal');
+  const closeBtn   = document.getElementById('osVippModalClose');
+  const cancelBtn  = document.getElementById('vippModalCancelarBtn');
+  const openBtn    = document.getElementById('atVippBtn');
+  const enviarBtn  = document.getElementById('vippModalEnviarBtn');
+  const statusEl   = document.getElementById('vippModalStatus');
+
+  // Declaração de Conteúdo — inline (sub-modal removido)
+  const declAddBtn     = document.getElementById('vippDeclAddItem');
+  const declItens      = document.getElementById('vippDeclItens');
+  const declTotalQtd   = document.getElementById('vippDeclTotalQtd');
+  const declTotalValor = document.getElementById('vippDeclTotalValor');
+
+  if (!modal) return;
+
+  // ── Declaração de Conteúdo — helpers ─────────────────────────────────────
+  function sanitizarDesc(str) {
+    return str
+      .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^a-zA-Z0-9 .,:;/\-_()]/g, '')
+      .substring(0, 60);
+  }
+
+  function parseBR(str) {
+    if (!str) return 0;
+    return parseFloat(str.replace(/\./g, '').replace(',', '.')) || 0;
+  }
+
+  function formatBR(n) {
+    return n.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  }
+
+  function atualizarTotais() {
+    if (!declItens) return;
+    let totalQtd = 0, totalVal = 0;
+    declItens.querySelectorAll('tr').forEach((tr) => {
+      const qtd = parseInt(tr.querySelector('[data-decl="qtd"]')?.value || '0', 10) || 0;
+      const val = parseBR(tr.querySelector('[data-decl="valor"]')?.value || '0');
+      totalQtd += qtd;
+      totalVal += qtd * val;
+    });
+    if (declTotalQtd)   declTotalQtd.textContent   = totalQtd;
+    if (declTotalValor) declTotalValor.textContent = formatBR(totalVal);
+  }
+
+  function criarLinhaDecl(desc, qtd, valor) {
+    const tr = document.createElement('tr');
+    const inputStyle = 'width:100%;background:#2d3e50;border:none;color:#e5e7eb;font-size:13px;outline:none;padding:5px 7px;';
+    tr.innerHTML =
+      '<td style="border:1px solid #3b5068;padding:2px 4px;">' +
+        '<input type="text" maxlength="60" value="' + (desc || '') + '" placeholder="Descricao (sem acentos, max 60)"' +
+        ' data-decl="desc" style="' + inputStyle + 'border-radius:4px;" />' +
+      '</td>' +
+      '<td style="border:1px solid #3b5068;padding:2px 4px;text-align:center;">' +
+        '<input type="number" min="1" value="' + (qtd || '1') + '"' +
+        ' data-decl="qtd" style="' + inputStyle + 'text-align:center;border-radius:4px;width:80px;" />' +
+      '</td>' +
+      '<td style="border:1px solid #3b5068;padding:2px 4px;text-align:center;">' +
+        '<input type="text" placeholder="0,00" value="' + (valor || '0') + '"' +
+        ' data-decl="valor" style="' + inputStyle + 'text-align:center;border-radius:4px;width:100px;" />' +
+      '</td>' +
+      '<td style="border:1px solid #3b5068;padding:2px;text-align:center;">' +
+        '<button type="button" title="Remover" data-decl="remover"' +
+        ' style="width:28px;height:28px;background:transparent;border:none;color:#f87171;cursor:pointer;font-size:14px;border-radius:4px;">' +
+        '<i class="fa-solid fa-trash-can"></i>' +
+        '</button>' +
+      '</td>';
+
+    const descInput = tr.querySelector('[data-decl="desc"]');
+    descInput.addEventListener('blur', function () {
+      descInput.value = sanitizarDesc(descInput.value);
+    });
+    descInput.addEventListener('input', function () {
+      descInput.style.borderColor = descInput.value.length > 58 ? '#f59e0b' : '';
+    });
+    tr.querySelector('[data-decl="qtd"]').addEventListener('input', atualizarTotais);
+    tr.querySelector('[data-decl="valor"]').addEventListener('input', atualizarTotais);
+    tr.querySelector('[data-decl="remover"]').addEventListener('click', function () {
+      tr.remove();
+      atualizarTotais();
+      atualizarBotaoAdicionar();
+    });
+    return tr;
+  }
+
+  function atualizarBotaoAdicionar() {
+    if (!declItens || !declAddBtn) return;
+    var total = declItens.querySelectorAll('tr').length;
+    declAddBtn.disabled = total >= 25;
+    declAddBtn.style.opacity = total >= 25 ? '0.4' : '1';
+  }
+
+  function adicionarLinhaDecl(desc, qtd, valor) {
+    if (!declItens) return;
+    if (declItens.querySelectorAll('tr').length >= 25) return;
+    declItens.appendChild(criarLinhaDecl(desc, qtd, valor));
+    atualizarTotais();
+    atualizarBotaoAdicionar();
+  }
+
+  function limparDecl() {
+    if (declItens) declItens.innerHTML = '';
+    atualizarTotais();
+    atualizarBotaoAdicionar();
+  }
+
+  // ── Sub-modal removido — declaração agora é inline ───────────────────────
+
+  if (declAddBtn)    declAddBtn.addEventListener('click', function () { adicionarLinhaDecl(); });
+
+  // ── Busca de produto para Declaração de Conteúdo ─────────────────────────
+  var declBuscaInput = document.getElementById('vippDeclBusca');
+  var declBuscaResultados = document.getElementById('vippDeclBuscaResultados');
+  var declBuscaTimer = null;
+
+  function buscarProdutoDecl(q) {
+    if (!declBuscaResultados) return;
+    if (q.length < 2) { declBuscaResultados.style.display = 'none'; return; }
+    fetch('/api/produtos/busca', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ q: q }),
+      credentials: 'same-origin'
+    })
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        var itens = data.itens || [];
+        if (!itens.length) { declBuscaResultados.style.display = 'none'; return; }
+        declBuscaResultados.innerHTML = itens.slice(0, 50).map(function (item) {
+          var codigoEsc = (item.codigo || '').replace(/"/g, '&quot;');
+          var descEsc   = (item.descricao || '').replace(/"/g, '&quot;');
+          return '<div class="vipp-busca-item" data-codigo="' + codigoEsc + '" data-desc="' + descEsc + '"' +
+            ' style="padding:8px 12px;cursor:pointer;border-bottom:1px solid #2d3e50;font-size:12px;color:#e5e7eb;">' +
+            '<span style="color:#7dd3fc;font-size:11px;">' + (item.codigo || '') + '</span>' +
+            ' <span style="color:#9ca3af;">—</span> ' +
+            '<span>' + (item.descricao || '') + '</span>' +
+            '</div>';
+        }).join('');
+        declBuscaResultados.style.display = 'block';
+        declBuscaResultados.querySelectorAll('.vipp-busca-item').forEach(function (el) {
+          el.addEventListener('mouseenter', function () { el.style.background = 'rgba(56,189,248,.12)'; });
+          el.addEventListener('mouseleave', function () { el.style.background = ''; });
+          el.addEventListener('click', function () {
+            var rawDesc = (el.dataset.codigo ? el.dataset.codigo + ' - ' : '') + (el.dataset.desc || '');
+            adicionarLinhaDecl(sanitizarDesc(rawDesc), 1, '0');
+            if (declBuscaInput) declBuscaInput.value = '';
+            declBuscaResultados.style.display = 'none';
+          });
+        });
+      })
+      .catch(function () {});
+  }
+
+  if (declBuscaInput) {
+    declBuscaInput.addEventListener('input', function () {
+      clearTimeout(declBuscaTimer);
+      declBuscaTimer = setTimeout(function () { buscarProdutoDecl(declBuscaInput.value.trim()); }, 300);
+    });
+    declBuscaInput.addEventListener('blur', function () {
+      setTimeout(function () { if (declBuscaResultados) declBuscaResultados.style.display = 'none'; }, 200);
+    });
+  }
+
+  // ── Pré-popula campos da OS ───────────────────────────────────────────────
+  // Preenche apenas a data ao abrir (sem auto-preencher dados da OS)
+  function prePopular() {
+    document.getElementById('vippDtNF').value = new Date().toISOString().split('T')[0];
+  }
+
+  // Transfere dados da OS (edição) para o formulário VIPP — chamado pelo botão "Preencher da OS"
+  function prePopularFromOS() {
+    var g = function (id) { return (document.getElementById(id) ? document.getElementById(id).value : '').trim(); };
+
+    document.getElementById('vippNome').value        = g('atEmNome')     || g('atNomeRevendaCliente');
+    document.getElementById('vippCnpjCpf').value     = g('atEmCpf')      || g('atCpfCnpj');
+    document.getElementById('vippTelefone').value    = g('atEmTelefone') || g('atTelefone');
+    document.getElementById('vippCep').value         = g('atCep');
+    document.getElementById('vippEndereco').value    = g('atRua');
+    document.getElementById('vippNumero').value      = g('atNumero');
+    document.getElementById('vippBairro').value      = g('atBairro');
+    document.getElementById('vippCidade').value      = g('atEmCidade')   || g('atCidade');
+    document.getElementById('vippUF').value          = (g('atEmEstado')  || g('atEstado')).toUpperCase();
+
+    // Nº NF não é auto-preenchido — usuário preenche manualmente se necessário
+
+    // Preenche doc do destinatário na Declaração de Conteúdo
+    var docDestEl = document.getElementById('vippDeclDocDestinatario');
+    if (docDestEl) {
+      docDestEl.value = (document.getElementById('vippCnpjCpf') ? document.getElementById('vippCnpjCpf').value : '').replace(/\D/g, '');
+    }
+  }
+
+  var fillFromOsBtn = document.getElementById('vippPreencherDaOsBtn');
+  if (fillFromOsBtn) fillFromOsBtn.addEventListener('click', prePopularFromOS);
+
+  function openModal() {
+    prePopular();
+    // Define texto padrão da Observação visual: "OS{numero}" (+ Aos Cuidados, se preenchido)
+    var _tit = (document.getElementById('atEditModalTitle') ? document.getElementById('atEditModalTitle').textContent : '').trim();
+    var _osN = _tit.replace(/[^0-9]/g, '');
+    var _obsEl = document.getElementById('vippObservacao');
+    if (_obsEl && _osN) {
+      var _aosCuid = (document.getElementById('vippAdicionais') ? document.getElementById('vippAdicionais').value : '').trim();
+      _obsEl.value = 'OS' + _osN + (_aosCuid ? ' - ' + _aosCuid : '');
+    }
+    modal.style.display = 'flex';
+    document.body.style.overflow = 'hidden';
+    setStatus('');
+  }
+
+  function closeModal() {
+    modal.style.display = 'none';
+    document.body.style.overflow = '';
+  }
+
+  function setStatus(text, isError) {
+    if (!statusEl) return;
+    statusEl.style.display = text ? 'block' : 'none';
+    statusEl.style.color   = isError ? '#f87171' : 'var(--inactive-color)';
+    statusEl.textContent   = text;
+  }
+
+  if (openBtn)   openBtn.addEventListener('click', openModal);
+  if (closeBtn)  closeBtn.addEventListener('click', closeModal);
+  if (cancelBtn) cancelBtn.addEventListener('click', closeModal);
+  modal.addEventListener('click', function (e) { if (e.target === modal) closeModal(); });
+
+  // ── Auto-fill de endereço pelo CEP ───────────────────────────────────────
+  var vippCepInput = document.getElementById('vippCep');
+  var vippCepTimer = null;
+  function buscarCepVipp(cep) {
+    var clean = cep.replace(/\D/g, '');
+    if (clean.length !== 8) return;
+    fetch('/api/sac/at/cep/' + clean, { credentials: 'same-origin' })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (d) {
+        if (!d) return;
+        var end = document.getElementById('vippEndereco');
+        var bairro = document.getElementById('vippBairro');
+        var cidade = document.getElementById('vippCidade');
+        var uf = document.getElementById('vippUF');
+        if (end && d.rua && !end.value)      end.value    = d.rua;
+        if (bairro && d.bairro && !bairro.value) bairro.value = d.bairro;
+        if (cidade && d.municipio)           cidade.value = d.municipio;
+        if (uf && d.uf)                      uf.value     = d.uf.toUpperCase();
+        // Foca no número após preencher
+        var numEl = document.getElementById('vippNumero');
+        if (numEl && !numEl.value) numEl.focus();
+      })
+      .catch(function () {});
+  }
+  if (vippCepInput) {
+    vippCepInput.addEventListener('input', function () {
+      clearTimeout(vippCepTimer);
+      var clean = vippCepInput.value.replace(/\D/g, '');
+      if (clean.length === 8) vippCepTimer = setTimeout(function () { buscarCepVipp(clean); }, 500);
+    });
+    vippCepInput.addEventListener('blur', function () {
+      buscarCepVipp(vippCepInput.value);
+    });
+  }
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape') {
+      if (modal.style.display === 'flex') closeModal();
+    }
+  });
+
+  // ── Botão Criar Postagem — valida e monta payload ────────────────────────
+  if (enviarBtn) {
+    enviarBtn.addEventListener('click', function () {
+      var g = function (id) { return (document.getElementById(id) ? document.getElementById(id).value : '').trim(); };
+      var osNum = (document.getElementById('atEditModalTitle') ? document.getElementById('atEditModalTitle').textContent : '').trim().replace(/[^0-9]/g, '');
+
+      var nome     = g('vippNome');
+      var endereco = g('vippEndereco');
+      var numero   = g('vippNumero');
+      var cidade   = g('vippCidade');
+      var uf       = g('vippUF');
+      var cep      = g('vippCep').replace(/\D/g, '');
+
+      var erros = [];
+      if (!nome)            erros.push('Nome do destinatario');
+      if (!endereco)        erros.push('Endereco');
+      if (!numero)          erros.push('Numero');
+      if (!cidade)          erros.push('Cidade');
+      if (!uf)              erros.push('Estado (UF)');
+      if (cep.length !== 8) erros.push('CEP (8 digitos)');
+
+      var itensDecl = [];
+      if (declItens) {
+        declItens.querySelectorAll('tr').forEach(function (tr) {
+          var desc  = (tr.querySelector('[data-decl="desc"]')  ? tr.querySelector('[data-decl="desc"]').value  : '').trim();
+          var qtd   = (tr.querySelector('[data-decl="qtd"]')   ? tr.querySelector('[data-decl="qtd"]').value   : '').trim();
+          var valor = (tr.querySelector('[data-decl="valor"]') ? tr.querySelector('[data-decl="valor"]').value : '').trim();
+          if (desc) itensDecl.push({ descricao: sanitizarDesc(desc), quantidade: qtd, valor: valor });
+        });
+      }
+
+      if (erros.length) {
+        setStatus('Campos obrigatorios faltando: ' + erros.join(', ') + '.', true);
+        return;
+      }
+
+      var payload = {
+        destinatario: {
+          nome: nome,
+          cnpjCpf:     g('vippCnpjCpf').replace(/\D/g, ''),
+          telefone:    g('vippTelefone').replace(/\D/g, ''),
+          email:       g('vippEmail'),
+          cep: cep, endereco: endereco, numero: numero,
+          complemento: g('vippComplemento'),
+          bairro:      g('vippBairro'),
+          cidade: cidade,
+          uf:          uf.toUpperCase(),
+        },
+        servico:    g('vippServico'),
+        adicionais: g('vippAdicionais'),
+        volume: {
+          peso:        g('vippPeso'),
+          altura:      g('vippAltura'),
+          largura:     g('vippLargura'),
+          comprimento: g('vippComprimento'),
+          conteudo:    '',
+        },
+        notaFiscal: {
+          numero:  g('vippNrNF'),
+          serie:   g('vippSerieNF'),
+          data:    g('vippDtNF'),
+          valor:   g('vippVlrNF'),
+        },
+        declaracaoConteudo: itensDecl.length ? {
+          docRemetente:    (document.getElementById('vippDeclDocRemetente')    ? document.getElementById('vippDeclDocRemetente').value    : '').replace(/\D/g, ''),
+          docDestinatario: (document.getElementById('vippDeclDocDestinatario') ? document.getElementById('vippDeclDocDestinatario').value : '').replace(/\D/g, ''),
+          pesoTotal:       g('vippDeclPesoTotal'),
+          itens:           itensDecl,
+        } : null,
+        observacao: g('vippObservacao'),
+      };
+
+      // ── Chama backend /api/vipp/postar ──────────────────────────────────
+      setStatus('Enviando para VIPP...', false);
+      enviarBtn.disabled = true;
+      enviarBtn.style.opacity = '0.6';
+
+      fetch('/api/vipp/postar', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      })
+        .then(function (r) { return r.json(); })
+        .then(function (data) {
+          if (data.ok) {
+            setStatus('', false);
+            // Exibe painel de sucesso no rodapé
+            var statusEl2 = document.getElementById('vippModalStatus');
+            if (statusEl2) {
+              statusEl2.style.display = 'block';
+              if (data.etiqueta) {
+                // Retornou código de rastreio Correios
+                statusEl2.innerHTML =
+                  '<i class="fa-solid fa-circle-check" style="color:#34d399;margin-right:6px;"></i>' +
+                  '<strong style="color:#34d399;">Postagem criada com sucesso!</strong>' +
+                  ' &nbsp; Código de rastreio: ' +
+                  '<strong style="color:#7dd3fc;font-size:14px;letter-spacing:.08em;">' + data.etiqueta + '</strong>' +
+                  '<a href="https://www.correios.com.br/rastreamento?objetoDigitado=' + encodeURIComponent(data.etiqueta) + '"' +
+                  '   target="_blank" rel="noopener noreferrer"' +
+                  '   style="margin-left:10px;font-size:12px;color:#38bdf8;text-decoration:underline;">' +
+                  '<i class="fa-solid fa-arrow-up-right-from-square"></i> Rastrear nos Correios</a>';
+              } else {
+                // Postagem registrada no VIPP — sem ECT ainda (aguardando PLP)
+                var idConhec = data.idConhecimento || '';
+                statusEl2.innerHTML =
+                  '<i class="fa-solid fa-circle-check" style="color:#34d399;margin-right:6px;"></i>' +
+                  '<strong style="color:#34d399;">Postagem registrada no VIPP!</strong>' +
+                  (idConhec ? ' &nbsp; ID&nbsp;VIPP: <strong style="color:#7dd3fc;">' + idConhec + '</strong>' : '') +
+                  '<div id="vippPainelStatusMsg" style="margin-top:6px;padding:6px 10px;background:rgba(34,197,94,.08);border:1px solid #22c55e44;border-radius:6px;font-size:12px;color:#86efac;">' +
+                  '<i class="fa-solid fa-circle-check" style="margin-right:5px;"></i>' +
+                  'Separação de estoque solicitada. O número SEP será exibido abaixo.' +
+                  '</div>' +
+                  '<div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap;">' +
+                  '<button id="vippBtnVerificar" onclick="window._vippVerificarEtiqueta(\'' + idConhec + '\')"' +
+                  '  style="padding:6px 14px;background:#d97706;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:12px;">' +
+                  '<i class="fa-solid fa-rotate" style="margin-right:5px;"></i>Verificar Etiqueta</button>' +
+                  '<button id="vippBtnEtiquetaZebra" onclick="window._vippAbrirEtiqueta(\'' + idConhec + '\',\'0\')"' +
+                  '  style="padding:6px 14px;background:#374151;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:12px;">' +
+                  '<i class="fa-solid fa-print" style="margin-right:5px;"></i>ZPL / Zebra</button>' +
+                  '<a href="https://vipp.visualset.com.br/vipp/entradadados/FrmCheckList.php" target="_blank" rel="noopener noreferrer"' +
+                  '   style="padding:6px 14px;background:#0f172a;color:#38bdf8;border:1px solid #38bdf8;border-radius:6px;font-size:12px;text-decoration:none;">' +
+                  '<i class="fa-solid fa-arrow-up-right-from-square" style="margin-right:5px;"></i>Ver no VIPP</a>' +
+                  '</div>';
+              }
+            }
+            // Cria Sol. de Separação automaticamente com itens da Declaração de Conteúdo
+            if (itensDecl.length > 0) {
+              criarSolicitacaoSeparacaoVipp(itensDecl, osNum, g('vippObservacao'), data.idConhecimento || null);
+            }
+            enviarBtn.disabled = true;
+            enviarBtn.innerHTML =
+              '<i class="fa-solid fa-circle-check" style="color:#34d399;"></i>' +
+              '<span style="color:#34d399;">Postagem criada</span>';
+          } else {
+            var msgs = data.erros && data.erros.length
+              ? data.erros.join(' | ')
+              : (data.error || 'Erro desconhecido na criação da postagem.');
+            setStatus('Erro VIPP: ' + msgs, true);
+            enviarBtn.disabled = false;
+            enviarBtn.style.opacity = '1';
+          }
+        })
+        .catch(function (err) {
+          setStatus('Erro de comunicação: ' + err.message, true);
+          enviarBtn.disabled = false;
+          enviarBtn.style.opacity = '1';
+        });
+    });
+  }
+
+  // ── Cria Sol. de Separação automaticamente após VIPP bem-sucedido ───────────
+  async function criarSolicitacaoSeparacaoVipp(itensDecl, osNum, observacao, idVipp) {
+    if (!itensDecl || !itensDecl.length) return;
+    var comentario = osNum ? ('OS' + osNum) : '';
+    // Usuário logado
+    var nomeUser = '';
+    try {
+      var _meResp = await fetch('/api/auth/status', { credentials: 'include' });
+      var _me = await _meResp.json();
+      nomeUser = (_me && _me.user && (_me.user.username || _me.user.nome)) || '';
+    } catch (_e) { /* ignora */ }
+    // Adiciona cada item ao carrinho de separação
+    var _adicionados = []; // IDs dos itens adicionados (para enviar só estes, não o carrinho inteiro)
+    for (var _i = 0; _i < itensDecl.length; _i++) {
+      var _item = itensDecl[_i];
+      var _desc = _item.descricao || '';
+      var _qtd  = parseInt(_item.quantidade, 10) || 1;
+      // Extrai codigo do formato "CODIGO - DESCRICAO" (padrão da busca de produtos)
+      var _dash = _desc.indexOf(' - ');
+      if (_dash < 0) continue;
+      var _cod  = _desc.substring(0, _dash).trim();
+      var _nomeProd = _desc.substring(_dash + 3).trim();
+      if (!_cod) continue;
+      try {
+        var _resp = await fetch('/api/logistica/separacao', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ codigo: _cod, descricao: _nomeProd, quantidade: _qtd, unidade: 'UN' })
+        });
+        var _d = await _resp.json();
+        if (_d.ok && _d.id) {
+          _adicionados.push(_d.id);
+          if (comentario) {
+            await fetch('/api/logistica/carrinho/' + _d.id + '/comentario', {
+              method: 'PATCH',
+              headers: { 'Content-Type': 'application/json' },
+              credentials: 'include',
+              body: JSON.stringify({ comentario: comentario })
+            });
+          }
+        }
+      } catch (_e2) {
+        console.error('[VIPP→Sep] Erro ao adicionar item:', _e2);
+      }
+    }
+    // Envia a separação (somente os itens adicionados pela OS, não o carrinho inteiro)
+    try {
+      var _envResp = await fetch('/api/logistica/separacao/enviar', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          solicitado_para: nomeUser,
+          data_prevista:   new Date().toISOString().slice(0, 10),
+          observacao:      observacao || null,
+          item_ids:        _adicionados,
+          forcar_novo_sep: true,
+          os_num:          osNum   || null,
+          id_vipp:         idVipp  || null
+        })
+      });
+      var _envData = await _envResp.json();
+      if (_envData.ok) {
+        var _badge = document.getElementById('listaSeparacaoCount');
+        if (_badge) { _badge.textContent = '0'; _badge.style.display = 'none'; }
+        var _sEl = document.getElementById('vippModalStatus');
+        if (_sEl) {
+          var _note = document.createElement('div');
+          _note.style.cssText = 'margin-top:8px;padding:6px 10px;background:rgba(34,197,94,.12);border:1px solid #22c55e66;border-radius:6px;font-size:12px;color:#86efac;';
+          _note.innerHTML = '<i class="fa-solid fa-boxes-stacked" style="margin-right:5px;"></i>' +
+            'Separação <strong>' + (_envData.n_solic || '') + '</strong> criada automaticamente com ' +
+            _envData.total + ' ' + (_envData.total === 1 ? 'item' : 'itens') + '.';
+          _sEl.appendChild(_note);
+        }
+      }
+    } catch (_e3) {
+      console.error('[VIPP→Sep] Erro ao enviar separação:', _e3);
+    }
+  }
+})();
+
+// ── VIPP — verificar se etiqueta foi gerada (polling manual) ─────────────────
+window._vippVerificarEtiqueta = function (idConhecimento) {
+  var btnVerif = document.getElementById('vippBtnVerificar');
+  var msgEl    = document.getElementById('vippPainelStatusMsg');
+  if (btnVerif) { btnVerif.disabled = true; btnVerif.style.opacity = '0.6'; btnVerif.innerHTML = '<i class="fa-solid fa-spinner fa-spin" style="margin-right:5px;"></i>Verificando...'; }
+
+  fetch('/api/vipp/status?id=' + encodeURIComponent(idConhecimento), { credentials: 'same-origin' })
+    .then(function (r) { return r.json(); })
+    .then(function (d) {
+      if (d.temEtiqueta && d.etiquetaPostagem) {
+        // ECT atribuída! Atualiza painel
+        if (msgEl) {
+          msgEl.style.background = 'rgba(52,211,153,.12)';
+          msgEl.style.borderColor = '#34d39966';
+          msgEl.style.color = '#34d399';
+          msgEl.innerHTML = '<i class="fa-solid fa-circle-check" style="margin-right:5px;"></i>' +
+            'Etiqueta pronta! Código de rastreio: <strong style="color:#7dd3fc;letter-spacing:.06em;">' +
+            d.etiquetaPostagem + '</strong>' +
+            ' <a href="https://www.correios.com.br/rastreamento?objetoDigitado=' + encodeURIComponent(d.etiquetaPostagem) + '"' +
+            '    target="_blank" rel="noopener noreferrer" style="font-size:11px;color:#38bdf8;text-decoration:underline;margin-left:6px;">' +
+            '<i class="fa-solid fa-arrow-up-right-from-square"></i> Rastrear</a>';
+        }
+        if (btnVerif) btnVerif.style.display = 'none';
+      } else {
+        // Ainda sem ECT — tenta gerar automaticamente
+        if (msgEl) {
+          msgEl.innerHTML = '<i class="fa-solid fa-spinner fa-spin" style="margin-right:5px;"></i>' +
+            'Sem etiqueta no VIPP — gerando código dos Correios automaticamente...';
+        }
+        if (btnVerif) { btnVerif.disabled = true; btnVerif.style.opacity = '0.6'; }
+        window._vippGerarEtiquetaAuto(idConhecimento);
+      }
+    })
+    .catch(function (e) {
+      if (msgEl) msgEl.innerHTML = '<i class="fa-solid fa-triangle-exclamation" style="margin-right:5px;"></i>Erro ao verificar status: ' + e.message;
+      if (btnVerif) { btnVerif.disabled = false; btnVerif.style.opacity = '1'; btnVerif.innerHTML = '<i class="fa-solid fa-rotate" style="margin-right:5px;"></i>Verificar Etiqueta'; }
+    });
+};
+
+// ── VIPP — gerar etiqueta automaticamente (aloca ECT + retorna PDF) ─────────
+window._vippGerarEtiquetaAuto = function (idConhecimento) {
+  var btnPdf  = document.getElementById('vippBtnEtiquetaPdf');
+  var btnVerif = document.getElementById('vippBtnVerificar');
+  var msgEl   = document.getElementById('vippPainelStatusMsg');
+  if (btnPdf)  { btnPdf.disabled = true;  btnPdf.style.opacity = '0.6';  btnPdf.innerHTML  = '<i class="fa-solid fa-spinner fa-spin" style="margin-right:5px;"></i>Gerando...'; }
+  if (btnVerif) { btnVerif.disabled = true; btnVerif.style.opacity = '0.6'; }
+  if (msgEl)   { msgEl.innerHTML = '<i class="fa-solid fa-spinner fa-spin" style="margin-right:5px;"></i>Solicitando código dos Correios... aguarde.'; }
+
+  fetch('/api/vipp/gerar-etiqueta', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'same-origin',
+    body: JSON.stringify({ idConhecimento: idConhecimento }),
+  })
+    .then(function (r) {
+      var etq = r.headers.get('X-ECT-Code') || '';
+      if (r.ok && r.headers.get('Content-Type') && r.headers.get('Content-Type').includes('pdf')) {
+        return r.blob().then(function (blob) {
+          var url = URL.createObjectURL(blob);
+          window.open(url, '_blank');
+          if (msgEl) {
+            msgEl.style.background = 'rgba(52,211,153,.12)';
+            msgEl.style.borderColor = '#34d39966';
+            msgEl.style.color = '#34d399';
+            msgEl.innerHTML = '<i class="fa-solid fa-circle-check" style="margin-right:5px;"></i>' +
+              'Etiqueta gerada com sucesso!' +
+              (etq ? ' &nbsp; Código dos Correios: <strong style="color:#7dd3fc;letter-spacing:.06em;">' + etq + '</strong>' +
+                ' <a href="https://www.correios.com.br/rastreamento?objetoDigitado=' + encodeURIComponent(etq) + '"' +
+                '    target="_blank" rel="noopener noreferrer" style="font-size:11px;color:#38bdf8;text-decoration:underline;margin-left:6px;">' +
+                '<i class="fa-solid fa-arrow-up-right-from-square"></i> Rastrear</a>' : '');
+          }
+          if (btnPdf) {
+            btnPdf.disabled = false; btnPdf.style.opacity = '1';
+            btnPdf.innerHTML = '<i class="fa-solid fa-file-pdf" style="margin-right:5px;"></i>Abrir PDF';
+            btnPdf.onclick = function () { window.open(url, '_blank'); };
+          }
+          if (btnVerif) { btnVerif.disabled = false; btnVerif.style.opacity = '1'; btnVerif.innerHTML = '<i class="fa-solid fa-rotate" style="margin-right:5px;"></i>Verificar Etiqueta'; }
+        });
+      }
+      return r.json().then(function (d) { throw new Error(d.error || 'Erro ao gerar etiqueta'); });
+    })
+    .catch(function (e) {
+      if (msgEl) {
+        msgEl.style.background = 'rgba(239,68,68,.12)';
+        msgEl.style.borderColor = '#ef444466';
+        msgEl.style.color = '#ef4444';
+        msgEl.innerHTML = '<i class="fa-solid fa-triangle-exclamation" style="margin-right:5px;"></i>Erro ao gerar etiqueta: ' + e.message;
+      }
+      if (btnPdf)  { btnPdf.disabled = false;  btnPdf.style.opacity = '1';  btnPdf.innerHTML = '<i class="fa-solid fa-file-pdf" style="margin-right:5px;"></i>Gerar Etiqueta PDF'; }
+      if (btnVerif) { btnVerif.disabled = false; btnVerif.style.opacity = '1'; btnVerif.innerHTML = '<i class="fa-solid fa-rotate" style="margin-right:5px;"></i>Verificar Etiqueta'; }
+    });
+};
+
+// ── VIPP — abrir etiqueta postal (PDF ou ZPL/ZVP) ────────────────────────────
+window._vippAbrirEtiqueta = function (idConhecimento, saida) {
+  saida = saida || '1';
+  var btnId = saida === '0' ? 'vippBtnEtiquetaZebra' : 'vippBtnEtiquetaPdf';
+  var btn   = document.getElementById(btnId);
+  if (btn) { btn.disabled = true; btn.style.opacity = '0.6'; }
+
+  fetch('/api/vipp/etiqueta?id=' + encodeURIComponent(idConhecimento) + '&saida=' + saida, {
+    credentials: 'same-origin',
+  })
+    .then(function (r) {
+      var ct = r.headers.get('Content-Type') || '';
+      if (ct.includes('application/pdf') || ct.includes('application/octet-stream')) {
+        return r.blob().then(function (blob) {
+          var url = URL.createObjectURL(blob);
+          if (saida === '0') {
+            // ZPL/ZVP: baixa com nome e extensão corretos
+            var a = document.createElement('a');
+            a.href = url;
+            a.download = 'etiqueta-' + idConhecimento + '.zpl';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+          } else {
+            // PDF: abre em nova aba
+            window.open(url, '_blank');
+          }
+          setTimeout(function () { URL.revokeObjectURL(url); }, 90000);
+        });
+      }
+      return r.json().then(function (d) {
+        if (d.aguardandoPLP) {
+          // Consulta o status atual para dar mensagem precisa
+          return fetch('/api/vipp/status?id=' + encodeURIComponent(idConhecimento), { credentials: 'same-origin' })
+            .then(function (r2) { return r2.json(); })
+            .then(function (s) {
+              var statusInfo = s.statusVipp ? ('\nStatus VIPP: ' + s.statusVipp) : '';
+              alert('⏳ Etiqueta ainda não disponível.' + statusInfo +
+                '\n\nAcesse o VIPP Check List, selecione a postagem e clique em "Etiquetas Pré-postagem" para gerar a PLP.\nDepois use o botão "Verificar Etiqueta" neste painel.');
+            })
+            .catch(function () {
+              alert('⏳ Etiqueta ainda não disponível.\n\nAcesse o VIPP Check List e gere a PLP para esta postagem.\nDepois use o botão "Verificar Etiqueta" neste painel.');
+            });
+        } else {
+          alert('Etiqueta não disponível: ' + (d.error || 'Tente novamente em instantes.'));
+        }
+      });
+    })
+    .catch(function (e) {
+      alert('Erro ao buscar etiqueta: ' + e.message);
+    })
+    .finally(function () {
+      if (btn) { btn.disabled = false; btn.style.opacity = '1'; }
+    });
+};

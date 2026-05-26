@@ -13,7 +13,7 @@ const supabase = require('../utils/supabase');
 
 const router = express.Router();
 
-const STATUS_LIST = ['Pendente', 'Em separação', 'Aguardando correios', 'Enviado', 'Finalizado'];
+const STATUS_LIST = ['Pendente', 'Em separação', 'Aguardando identificação', 'Aguardando correios', 'Enviado', 'Finalizado'];
 
 const TRACK_USER = process.env.TRACK_USER || 'guest';
 const TRACK_TOKEN = process.env.TRACK_TOKEN || 'guest';
@@ -176,7 +176,9 @@ async function fetchLegacySerieRows() {
 }
 
 async function fetchPedidosSerieRows() {
-  const csvUrl = `https://docs.google.com/spreadsheets/d/${PEDIDOS_SERIE_SHEET_ID}/gviz/tq?tqx=out:csv&gid=${encodeURIComponent(PEDIDOS_SERIE_GID)}`;
+  // Usar /export?format=csv em vez de gviz/tq para ignorar filtros ativos na planilha
+  // (gviz/tq respeita filtros do Sheets e omite linhas ocultas no CSV exportado)
+  const csvUrl = `https://docs.google.com/spreadsheets/d/${PEDIDOS_SERIE_SHEET_ID}/export?format=csv&gid=${encodeURIComponent(PEDIDOS_SERIE_GID)}`;
   const resp = await fetchWithTimeout(csvUrl, { headers: { Accept: 'text/csv' } }, 30000);
   if (!resp.ok) {
     throw new Error(`Falha ao consultar planilha PEDIDOS (${resp.status})`);
@@ -192,7 +194,8 @@ async function fetchPedidosSerieRows() {
 }
 
 async function fetchTesteGasRows() {
-  const csvUrl = `https://docs.google.com/spreadsheets/d/${TESTE_GAS_SHEET_ID}/gviz/tq?tqx=out:csv&gid=${encodeURIComponent(TESTE_GAS_SHEET_GID)}`;
+  // /export?format=csv ignora filtros ativos no Google Sheets
+  const csvUrl = `https://docs.google.com/spreadsheets/d/${TESTE_GAS_SHEET_ID}/export?format=csv&gid=${encodeURIComponent(TESTE_GAS_SHEET_GID)}`;
   const resp = await fetchWithTimeout(csvUrl, { headers: { Accept: 'text/csv' } }, 30000);
   if (!resp.ok) {
     throw new Error(`Falha ao consultar planilha TESTE/GAS (${resp.status})`);
@@ -3675,6 +3678,9 @@ async function ensureSchema() {
       ADD COLUMN IF NOT EXISTS rastreio_quando TIMESTAMPTZ;
 
     ALTER TABLE envios.solicitacoes
+      ADD COLUMN IF NOT EXISTS id_vipp TEXT;
+
+    ALTER TABLE envios.solicitacoes
       ADD COLUMN IF NOT EXISTS finalizado_em TIMESTAMPTZ;
 
     ALTER TABLE envios.solicitacoes
@@ -3837,12 +3843,62 @@ async function ensureSchema() {
 
     CREATE INDEX IF NOT EXISTS whatsapp_read_status_phone_idx
       ON sac.whatsapp_conversation_read_status(from_phone_digits);
+
+    -- Cache local das planilhas de série/pedidos (AT)
+    -- Alimentado via POST /api/sac/at/sync-cache; busca ignora filtros ativos no Sheets
+    CREATE TABLE IF NOT EXISTS sac.at_serie_cache (
+      id             BIGSERIAL PRIMARY KEY,
+      fonte          TEXT NOT NULL,
+      pedido         TEXT,
+      ordem_producao TEXT,
+      modelo         TEXT,
+      cliente        TEXT,
+      data_venda     TEXT,
+      nota_fiscal    TEXT,
+      chave_nfe      TEXT,
+      data_entrega   TEXT,
+      teste_tipo_gas TEXT,
+      chave_dedup    TEXT NOT NULL,
+      synced_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+
+    CREATE UNIQUE INDEX IF NOT EXISTS at_serie_cache_dedup_idx
+      ON sac.at_serie_cache (chave_dedup);
+    CREATE INDEX IF NOT EXISTS at_serie_cache_pedido_idx
+      ON sac.at_serie_cache (pedido);
+    CREATE INDEX IF NOT EXISTS at_serie_cache_op_idx
+      ON sac.at_serie_cache (ordem_producao);
   `);
 }
 
 ensureSchema().catch(err => {
   console.error('[SAC] falha ao garantir schema/tabela envios:', err);
 });
+
+// ── Sync automático do cache de série ────────────────────────────────────────
+// Executa ao iniciar o servidor e depois a cada 2 horas automaticamente.
+// Também é disparado em background quando uma busca não encontra resultado no cache.
+let _atSyncEmAndamento = false;
+
+async function _autoSyncAtSerieCache(motivo) {
+  if (_atSyncEmAndamento) return; // não inicia dois syncs ao mesmo tempo
+  _atSyncEmAndamento = true;
+  try {
+    const t0 = Date.now();
+    const resultado = await syncAtSerieCacheFromSheets();
+    console.log(`[SAC/AT] sync cache (${motivo || 'auto'}): +${resultado.inserted} novos | total ${resultado.total_cache} | ${Date.now() - t0}ms`);
+  } catch (err) {
+    console.error('[SAC/AT] erro no sync do cache de série:', err.message);
+  } finally {
+    _atSyncEmAndamento = false;
+  }
+}
+// Aguarda 30s após o boot para não concorrer com outras inicializações
+setTimeout(() => {
+  _autoSyncAtSerieCache('boot');
+  setInterval(() => _autoSyncAtSerieCache('agendado'), 2 * 60 * 60 * 1000); // a cada 2 horas
+}, 30 * 1000);
+// ─────────────────────────────────────────────────────────────────────────────
 
 router.post('/at', async (req, res) => {
   const body = req.body || {};
@@ -4865,6 +4921,121 @@ router.delete('/solicitacoes/:id', async (req, res) => {
   }
 });
 
+// ── Cache SQL: sync das planilhas de série para sac.at_serie_cache ────────────
+// Estratégia: INSERT ... ON CONFLICT DO NOTHING → só insere registros novos.
+// Rodar manualmente via POST /api/sac/at/sync-cache sempre que a planilha
+// receber novos pedidos (ou agendar via cron).
+async function syncAtSerieCacheFromSheets() {
+  const registros = [];
+  const erros = [];
+
+  // ── Helper: extrai campos comuns de um rowObj (objeto com headers como chaves)
+  const extrairComHeaders = (rowObj, fonte) => {
+    const pedido          = getValueByHeaderMatch(rowObj, k => k.includes('PEDIDO'));
+    const ordemProducao   = getValueByHeaderMatch(rowObj, k => k.includes('ORDEM') && k.includes('PRODUCAO'));
+    const modelo          = getValueByHeaderMatch(rowObj, k => k.includes('MODELO'));
+    const cliente         = getValueByHeaderMatch(rowObj, k => k.includes('CLIENTE') || k.includes('REVENDA'));
+    const dataVenda       = getValueByHeaderMatch(rowObj, k => k.includes('DATA') && k.includes('VENDA'));
+    const notaFiscal      = getValueByHeaderMatch(rowObj, k => k.includes('NOTA') && k.includes('FISCAL'));
+    const chaveNfe        = getValueByHeaderMatch(rowObj, k => k.includes('CHAVE') && k.includes('NFE'));
+    const dataEntrega     = getValueByHeaderMatch(rowObj, k => k.includes('DATA') && k.includes('ENTREGA'));
+    const testeTipoGas    = getValueByHeaderMatch(rowObj, k => k.includes('TESTE') && k.includes('TIPO') && k.includes('GAS'))
+                         || getValueByHeaderMatch(rowObj, k => k.includes('1REF') && k.includes('FLUIDO'));
+    const pNorm  = normalizeText(pedido);
+    const opNorm = normalizeText(ordemProducao);
+    if (!pNorm && !opNorm) return null;
+    return {
+      fonte, pedido, ordem_producao: ordemProducao, modelo, cliente,
+      data_venda: dataVenda, nota_fiscal: notaFiscal, chave_nfe: chaveNfe,
+      data_entrega: dataEntrega, teste_tipo_gas: testeTipoGas,
+      chave_dedup: `${pNorm}|${opNorm}|${fonte}`,
+    };
+  };
+
+  // ── Fonte 1 & 2: PRODUÇÃO 1 e 2 (pub URL — sheets sem ID direto)
+  for (const sheetName of AT_SERIE_SHEETS) {
+    try {
+      const rows = await fetchAtSerieSheetRows(sheetName);
+      for (const r of rows) {
+        const reg = extrairComHeaders(r, sheetName);
+        if (reg) registros.push(reg);
+      }
+    } catch (e) {
+      erros.push(`${sheetName}: ${e.message}`);
+    }
+  }
+
+  // ── Fonte 3: PEDIDOS (já usa /export — ignora filtros)
+  try {
+    const rows = await fetchPedidosSerieRows();
+    for (const r of rows) {
+      const reg = extrairComHeaders(r, 'PEDIDOS');
+      if (reg) registros.push(reg);
+    }
+  } catch (e) { erros.push(`PEDIDOS: ${e.message}`); }
+
+  // ── Fonte 4: TESTE/GAS (já usa /export)
+  try {
+    const rows = await fetchTesteGasRows();
+    for (const r of rows) {
+      const reg = extrairComHeaders(r, 'TESTE_GAS');
+      if (reg) registros.push(reg);
+    }
+  } catch (e) { erros.push(`TESTE_GAS: ${e.message}`); }
+
+  if (!registros.length) {
+    return { inserted: 0, skipped: 0, total_cache: 0, erros };
+  }
+
+  // ── INSERT em lotes de 500, ignorando conflito (chave_dedup única)
+  const BATCH = 500;
+  let inserted = 0;
+  const client = await pool.connect();
+  try {
+    for (let i = 0; i < registros.length; i += BATCH) {
+      const lote = registros.slice(i, i + BATCH);
+      const values = [];
+      const params = [];
+      lote.forEach((r, idx) => {
+        const b = idx * 11;
+        values.push(`($${b+1},$${b+2},$${b+3},$${b+4},$${b+5},$${b+6},$${b+7},$${b+8},$${b+9},$${b+10},$${b+11})`);
+        params.push(
+          r.fonte, r.pedido || null, r.ordem_producao || null, r.modelo || null,
+          r.cliente || null, r.data_venda || null, r.nota_fiscal || null,
+          r.chave_nfe || null, r.data_entrega || null, r.teste_tipo_gas || null,
+          r.chave_dedup
+        );
+      });
+      const sql = `
+        INSERT INTO sac.at_serie_cache
+          (fonte, pedido, ordem_producao, modelo, cliente, data_venda,
+           nota_fiscal, chave_nfe, data_entrega, teste_tipo_gas, chave_dedup)
+        VALUES ${values.join(',')}
+        ON CONFLICT (chave_dedup) DO NOTHING`;
+      const res = await client.query(sql, params);
+      inserted += res.rowCount || 0;
+    }
+  } finally {
+    client.release();
+  }
+
+  const skipped = registros.length - inserted;
+  const { rows: [{ total_cache }] } = await pool.query('SELECT COUNT(*) AS total_cache FROM sac.at_serie_cache');
+  return { inserted, skipped, total_fontes: registros.length, total_cache: Number(total_cache), erros };
+}
+
+router.post('/at/sync-cache', async (req, res) => {
+  try {
+    const t0 = Date.now();
+    const resultado = await syncAtSerieCacheFromSheets();
+    return res.json({ ok: true, ...resultado, duration_ms: Date.now() - t0 });
+  } catch (err) {
+    console.error('[SAC/AT] erro ao sincronizar cache de série:', err);
+    return res.status(500).json({ ok: false, error: err.message });
+  }
+});
+// ── Fim: sync cache ───────────────────────────────────────────────────────────
+
 router.get('/at/busca-serie', async (req, res) => {
   const termo = String(req.query?.termo || '').trim();
   if (termo.length < 2) {
@@ -4875,6 +5046,84 @@ router.get('/at/busca-serie', async (req, res) => {
   const maxResultados = 10;
 
   try {
+    // ── Tenta busca no cache SQL primeiro (mais rápido e não afetado por filtros do Sheets)
+    try {
+      const { rows: [{ cnt }] } = await pool.query('SELECT COUNT(*) AS cnt FROM sac.at_serie_cache');
+      if (Number(cnt) > 0) {
+        const { rows: cacheRows } = await pool.query(`
+          SELECT fonte, pedido, ordem_producao, modelo, cliente,
+                 data_venda, nota_fiscal, chave_nfe, data_entrega, teste_tipo_gas
+          FROM   sac.at_serie_cache
+          WHERE  UPPER(TRIM(COALESCE(pedido, '')))          LIKE $1
+              OR UPPER(TRIM(COALESCE(ordem_producao, '')))  LIKE $1
+          ORDER BY
+            CASE WHEN UPPER(TRIM(COALESCE(ordem_producao, ''))) LIKE $1 THEN 0 ELSE 1 END
+          LIMIT $2
+        `, [termoNorm + '%', maxResultados]);
+
+        if (cacheRows.length > 0) {
+          const resultados = cacheRows.map(r => ({            descricao: (r.ordem_producao || r.pedido || '').toUpperCase(),
+            numero_serie: r.pedido,
+            op: r.ordem_producao,
+            modelo: r.modelo,
+            revenda: r.cliente,
+            data_venda: r.data_venda,
+            cliente: r.cliente,
+            nota_fiscal: r.nota_fiscal,
+            chave_nfe: r.chave_nfe,
+            data_entrega: r.data_entrega,
+            teste_tipo_gas: r.teste_tipo_gas,
+            pedido: r.pedido,
+            ordem_producao: r.ordem_producao,
+            fonte_cache: r.fonte,
+          }));
+
+          // Enriquece com flag ja_existe (mesmo código do bloco original)
+          try {
+            const pairs = resultados.filter(r => r.ordem_producao || r.modelo);
+            if (pairs.length > 0) {
+              const conditions = pairs.map((_, i) => `(s.ordem_producao = $${i*2+1} AND s.modelo = $${i*2+2})`).join(' OR ');
+              const params = pairs.flatMap(p => [String(p.ordem_producao||'').trim()||null, String(p.modelo||'').trim()||null]);
+              const dbResult = await pool.query(
+                `SELECT DISTINCT ON (s.ordem_producao, s.modelo)
+                   s.ordem_producao, s.modelo, s.id_at,
+                   a.tipo, a.nome_revenda_cliente, a.numero_telefone, a.cpf_cnpj,
+                   a.cep, a.bairro, a.cidade, a.estado, a.numero, a.rua,
+                   a.agendar_atendimento_com, a.modelo AS at_modelo,
+                   a.tag_problema, a.plataforma_atendimento
+                 FROM sac.at_busca_selecionada s
+                 JOIN sac.at a ON a.id = s.id_at
+                 WHERE ${conditions}
+                 ORDER BY s.ordem_producao, s.modelo, s.id_at DESC`,
+                params
+              );
+              const existMap = new Map();
+              for (const row of dbResult.rows) {
+                existMap.set(`${row.ordem_producao||''}|${row.modelo||''}`, { id_at: row.id_at, at_data: row });
+              }
+              for (const r of resultados) {
+                const key = `${r.ordem_producao||''}|${r.modelo||''}`;
+                if (existMap.has(key)) { r.ja_existe = true; r.id_at = existMap.get(key).id_at; r.at_data = existMap.get(key).at_data; }
+                else { r.ja_existe = false; }
+              }
+            }
+          } catch (_) { /* enriquecimento opcional */ }
+
+          return res.json({ ok: true, rows: resultados, source: 'cache' });
+        }
+
+        // Cache existe mas não encontrou o termo → sincroniza em background
+        // para que a próxima busca já encontre no SQL
+        if (!_atSyncEmAndamento) {
+          console.log(`[SAC/AT] busca "${termoNorm}" não encontrada no cache — sync disparado em background`);
+          _autoSyncAtSerieCache('busca-miss');
+        }
+      }
+    } catch (cacheErr) {
+      console.warn('[SAC/AT] cache SQL indisponível, usando planilhas:', cacheErr?.message);
+    }
+    // ── Fim busca SQL — continua com lógica original (planilhas) como fallback ──
+
     const resultados = [];
     const seen = new Set();
     const fontesComTimeout = [];

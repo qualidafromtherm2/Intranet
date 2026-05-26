@@ -245,6 +245,7 @@ app.use('/api/sac', require('./routes/sacEnvios'));
 app.use('/api/ai', require('./routes/ai_assistant'));
 app.use('/api/producao', require('./routes/producao'));
 app.use('/api/transformacao-mp', require('./routes/transformacaoMp'));
+app.use('/api/vipp',    require('./routes/vipp'));
 
 app.get('/api/produtos/stream', (req, res) => {
   const accept = String(req.headers?.accept || '');
@@ -16562,6 +16563,25 @@ app.patch('/api/logistica/itens_solicitados/aguardando-retirada', async (req, re
     await pool.query(
       `UPDATE solicitacao_produto.itens_solicitados SET status = 'Aguardando retirada' WHERE id = ANY($1::bigint[])`, [ids]
     );
+
+    // Se a SEP tem origem VIPP, atualiza status em envios.solicitacoes
+    try {
+      const { rows: sepRows } = await pool.query(
+        `SELECT DISTINCT n_solic FROM solicitacao_produto.itens_solicitados WHERE id = ANY($1::bigint[]) AND n_solic IS NOT NULL`,
+        [ids]
+      );
+      for (const { n_solic } of sepRows) {
+        await pool.query(
+          `UPDATE envios.solicitacoes
+              SET status = 'Aguardando identificação'
+            WHERE numero_sep = $1 AND id_vipp IS NOT NULL`,
+          [n_solic]
+        );
+      }
+    } catch (e) {
+      console.warn('[aguardando-retirada] Falha ao atualizar envios.solicitacoes:', e.message);
+    }
+
     res.json({ ok: true });
   } catch (err) {
     console.error('[logistica/aguardando-retirada] erro:', err);
@@ -16864,7 +16884,11 @@ app.post('/api/logistica/separacao/enviar', express.json(), async (req, res) => 
     const id_user   = req.session?.user?.id;
     const nome_user = req.session?.user?.username || req.session?.user?.nome || 'desconhecido';
     if (!id_user) return res.status(401).json({ ok: false, error: 'Não autenticado.' });
-    const { solicitado_para, motivo, data_prevista, horario, observacao } = req.body || {};
+    const { solicitado_para, motivo, data_prevista, horario, observacao, item_ids, forcar_novo_sep, os_num, id_vipp } = req.body || {};
+    // Quando item_ids for fornecido (ex: VIPP), processa apenas esses itens do carrinho
+    const filtroIds = Array.isArray(item_ids) && item_ids.length > 0
+      ? item_ids.map(id => parseInt(id, 10)).filter(id => !isNaN(id))
+      : null;
 
     const motivoRaw = String(motivo || '').trim();
     const motivosPermitidos = new Set(['Produção', 'Engenharia', 'venda', 'Assistencia tecnica']);
@@ -16911,20 +16935,36 @@ app.post('/api/logistica/separacao/enviar', express.json(), async (req, res) => 
     );
 
     // Grava data_prevista, horario e retirada_por nos itens do carrinho antes de processar
-    await client.query(
-      `UPDATE logistica.carrinho SET data_prevista = $1, horario = $2, retirada_por = $3
-        WHERE id_user = $4
-          AND NOT EXISTS (SELECT 1 FROM solicitacao_produto.itens_solicitados i WHERE i.id_carr = logistica.carrinho.id)`,
-      [data_prevista || null, horario || null, solicitado_para || nome_user, id_user]
-    );
+    if (filtroIds) {
+      await client.query(
+        `UPDATE logistica.carrinho SET data_prevista = $1, horario = $2, retirada_por = $3
+          WHERE id_user = $4
+            AND id = ANY($5::bigint[])
+            AND NOT EXISTS (SELECT 1 FROM solicitacao_produto.itens_solicitados i WHERE i.id_carr = logistica.carrinho.id)`,
+        [data_prevista || null, horario || null, solicitado_para || nome_user, id_user, filtroIds]
+      );
+    } else {
+      await client.query(
+        `UPDATE logistica.carrinho SET data_prevista = $1, horario = $2, retirada_por = $3
+          WHERE id_user = $4
+            AND NOT EXISTS (SELECT 1 FROM solicitacao_produto.itens_solicitados i WHERE i.id_carr = logistica.carrinho.id)`,
+        [data_prevista || null, horario || null, solicitado_para || nome_user, id_user]
+      );
+    }
 
     // Busca itens do carrinho do usuário
     const { rows: itens } = await client.query(
-      `SELECT id, codigo_produto, descricao, unidade, quantidade, comentario FROM logistica.carrinho
-       WHERE id_user = $1
-         AND NOT EXISTS (SELECT 1 FROM solicitacao_produto.itens_solicitados i WHERE i.id_carr = logistica.carrinho.id)
-       ORDER BY criado_em ASC`,
-      [id_user]
+      filtroIds
+        ? `SELECT id, codigo_produto, descricao, unidade, quantidade, comentario FROM logistica.carrinho
+           WHERE id_user = $1
+             AND id = ANY($2::bigint[])
+             AND NOT EXISTS (SELECT 1 FROM solicitacao_produto.itens_solicitados i WHERE i.id_carr = logistica.carrinho.id)
+           ORDER BY criado_em ASC`
+        : `SELECT id, codigo_produto, descricao, unidade, quantidade, comentario FROM logistica.carrinho
+           WHERE id_user = $1
+             AND NOT EXISTS (SELECT 1 FROM solicitacao_produto.itens_solicitados i WHERE i.id_carr = logistica.carrinho.id)
+           ORDER BY criado_em ASC`,
+      filtroIds ? [id_user, filtroIds] : [id_user]
     );
     if (!itens.length) {
       await client.query('ROLLBACK');
@@ -16941,8 +16981,8 @@ app.post('/api/logistica/separacao/enviar', express.json(), async (req, res) => 
 
     let nSolic = null;
 
-    if (brtHour < 14) {
-      // Antes das 14h: reutiliza n_solic do mesmo usuário criado hoje antes das 14h
+    if (!forcar_novo_sep && brtHour < 14) {
+      // Antes das 14h: reutiliza n_solic do mesmo usuário criado hoje antes das 14h (não aplicável a SEPs VIPP)
       const { rows: existing } = await client.query(`
         SELECT DISTINCT i.n_solic
           FROM solicitacao_produto.itens_solicitados i
@@ -16989,6 +17029,22 @@ app.post('/api/logistica/separacao/enviar', express.json(), async (req, res) => 
 
     await client.query('COMMIT');
     console.log(`[Separação] Pedido ${nSolic} enviado por ${nome_user} (${itens.length} itens)`);
+
+    // Se veio do VIPP, registra em envios.solicitacoes com id_vipp e número SEP
+    if (id_vipp) {
+      try {
+        await pool.query(`ALTER TABLE envios.solicitacoes ADD COLUMN IF NOT EXISTS id_vipp TEXT`);
+        await pool.query(
+          `INSERT INTO envios.solicitacoes (usuario, observacao, status, numero_sep, id_vipp, anexos, conferido)
+           VALUES ($1, $2, NULL, $3, $4, '{}', false)`,
+          [nome_user, os_num || null, nSolic, String(id_vipp)]
+        );
+        console.log(`[Separação/VIPP] Registro em envios.solicitacoes: SEP=${nSolic} VIPP=${id_vipp}`);
+      } catch (e) {
+        console.warn('[Separação/VIPP] Falha ao registrar em envios.solicitacoes:', e.message);
+      }
+    }
+
     res.json({ ok: true, total: itens.length, n_solic: nSolic });
   } catch (err) {
     try { await client.query('ROLLBACK'); } catch (_) {}
