@@ -31412,8 +31412,9 @@ app.post('/api/compras/pedidos-omie/nfe-associar-pedido', express.json(), async 
     if (nCodCC) {
       try {
         // Busca dados atuais do recebimento + unidades do pedido
+        // Usa ComRetryRedundant para tolerar erros REDUNDANT da Omie (chamadas anteriores na mesma sessão)
         const [recebAtual, pedidoConsulta] = await Promise.all([
-          chamarApiRecebimentoNfeOmie('ConsultarRecebimento', { nIdReceb: Number(plano.n_id_receb) }),
+          chamarApiRecebimentoNfeOmieComRetryRedundant('ConsultarRecebimento', { nIdReceb: Number(plano.n_id_receb) }, { tentativasMaximas: 3, margemSegundos: 8 }),
           fetch('https://app.omie.com.br/api/v1/produtos/pedidocompra/', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -31629,17 +31630,19 @@ app.post('/api/compras/pedidos-omie/nfe-associar-pedido', express.json(), async 
           if (!isServico) ajustes.codigo_local_estoque = Number(ALMOX_LOCAL_PADRAO);
           if (cUnidadeFinal) ajustes.cUnidade = cUnidadeFinal;
           if (cfopServicoEntrada || cfopCalculado) ajustes.cCFOPEntrada = cfopServicoEntrada || cfopCalculado;
-          // nQtde: inclui o valor digitado pelo user (medição física pode diferir da conversão Omie).
-          // Se a Omie rejeitar o campo, o Passo 3 faz retry sem ele (ver abaixo).
-          if (!isServico && Number.isFinite(nQtdeOverride) && nQtdeOverride > 0) ajustes.nQtde = nQtdeOverride;
 
           // Só incluir o item se tiver ajustes
           if (Object.keys(ajustes).length === 0) return null;
 
-          return {
+          // nQtde fica na raiz do item (não em itensAjustes — Omie rejeita lá)
+          const itemAEditar = {
             itensIde: { nSequencia: nSeq, cAcao: 'EDITAR' },
             itensAjustes: ajustes
           };
+          if (!isServico && Number.isFinite(nQtdeOverride) && nQtdeOverride > 0) {
+            itemAEditar.nQtde = nQtdeOverride;
+          }
+          return itemAEditar;
         }).filter(Boolean);
 
         recebimentoCache = recebAtual;
@@ -31723,10 +31726,10 @@ app.post('/api/compras/pedidos-omie/nfe-associar-pedido', express.json(), async 
         if (hasQtdeOverride) {
           // Retry sem nQtde: garante que armazém e unidade sejam aplicados mesmo se Omie rejeitar nQtde
           console.warn('[Compras/NFeAssociarPedido] Passo 3 com nQtde falhou, retrying sem nQtde:', errEstoque?.message);
-          const itensSemQtde = itensEditarEstoque.map(it => ({
-            ...it,
-            itensAjustes: Object.fromEntries(Object.entries(it.itensAjustes).filter(([k]) => k !== 'nQtde'))
-          }));
+          const itensSemQtde = itensEditarEstoque.map(it => {
+            const { nQtde: _qtde, ...semQtde } = it;
+            return semQtde;
+          });
           try {
             await chamarApiRecebimentoNfeOmieComRetryRedundant('AlterarRecebimento', {
               ide: { nIdReceb: Number(plano.n_id_receb) },
