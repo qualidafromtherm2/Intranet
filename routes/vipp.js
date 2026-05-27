@@ -1272,31 +1272,30 @@ function _gerarZplDeclaracao({ remetente, remDoc, remEndereco, destinatario, des
     '^XA',
     '^CI28',
     '^PW799',
-    '^LH0,0',
+    '^LH5,8',
     `^LL${LL}`,
 
     // ── Cabeçalho principal (left: DACE info mesclado; right: código de barras) ──
-    `^FO0,${Y0}^GB799,${FULL_H},2^FS`,
-    `^FO185,${Y0}^GB2,${FULL_H},2^FS`,
-    `^FO5,13^A0N,18,17^FDDACE - DECLARACAO AUXILIAR^FS`,
-    `^FO5,35^A0N,16,15^FDDE CONTEUDO ELETRONICA^FS`,
-    `^FO2,60^A0N,18,17^FB181,1,,C^FDN\xB0: ${nfeNumFmt}\\&^FS`,
-    `^FO2,92^A0N,18,17^FB181,1,,C^FDS\xC9RIE: ${nfeSerieFmt}\\&^FS`,
-    `^FO187,10^BY2,3,95^BCN,95,N,N^FD${chave}^FS`,
+    `^FO0,${Y0}^GB789,${FULL_H},2^FS`,
+    `^FO193,${Y0}^GB2,${FULL_H},2^FS`,
+    `^FO0,38^A0N,16,9^FB193,1,,C^FDDACE  -  DECLARACAO AUXILIAR\\&^FS`,
+    `^FO0,57^A0N,14,8^FB193,1,,C^FDDE  CONTEUDO  ELETRONICA\\&^FS`,
+    `^FO2,100^A0N,18,17^FB191,1,,C^FDN\xB0: ${nfeNumFmt}\\&^FS`,
+    `^FO2,128^A0N,18,17^FB191,1,,C^FDS\xC9RIE: ${nfeSerieFmt}\\&^FS`,
+    `^FO204,10^BY2,3,60^BCN,60,N,N^FD${chave}^FS`,
 
-    // ── Dígitos da chave (largura total) ──
-    `^FO0,${Y_DIGITS}^GB799,22,2^FS`,
-    `^FO190,${Y_DIGITS + 3}^A0N,13,11^FB604,1,,C^FD${z(chaveFormatted, 60)}\\&^FS`,
+    // ── Dígitos da chave ──
+    `^FO198,${Y_DIGITS}^A0N,13,11^FB588,1,,C^FD${z(chaveFormatted, 60)}\\&^FS`,
 
     // ── Data emissão / Modalidade ──
-    `^FO0,${Y_DATA}^GB799,${DATA_H},2^FS`,
-    `^FO430,${Y_DATA}^GB2,${DATA_H},2^FS`,
-    `^FO190,${Y_DATA + 4}^A0N,12,10^FB235,2,,^FDData emiss\xE3o: ${z(dataFmt, 40)}^FS`,
-    `^FO435,${Y_DATA + 4}^A0N,12,10^FB354,2,,^FDModalidade de Transporte: 0 - TRANSPORTE PELOS CORREIOS\\&^FS`,
+    `^FO193,${Y_DATA}^GB596,2,2^FS`,
+    `^FO423,${Y_DATA}^GB2,32,2^FS`,
+    `^FO198,${Y_DATA + 4}^A0N,12,10^FB222,2,,^FDData emiss\xE3o: ${z(dataFmt, 40)}^FS`,
+    `^FO428,${Y_DATA + 4}^A0N,12,10^FB357,2,,^FDModalidade de Transporte: 0 - TRANSPORTE PELOS CORREIOS\\&^FS`,
 
     // ── Protocolo ──
-    `^FO0,${Y_PROT}^GB799,22,2^FS`,
-    `^FO190,${Y_PROT + 4}^A0N,11,9^FB604,1,,^FDProtocolo de autoriza\xE7\xE3o: ${z(protocoloFmt, 70)}^FS`,
+    `^FO193,${Y_PROT}^GB596,2,2^FS`,
+    `^FO198,${Y_PROT + 4}^A0N,11,9^FB587,1,,^FDProtocolo de autoriza\xE7\xE3o: ${z(protocoloFmt, 70)}^FS`,
 
     // ── Remetente ──
     `^FO0,${Y_REM_HEAD}^GB799,22,22^FS`,
