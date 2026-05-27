@@ -17084,7 +17084,7 @@ app.post('/api/logistica/separacao/enviar', express.json(), async (req, res) => 
         await pool.query(`ALTER TABLE envios.solicitacoes ADD COLUMN IF NOT EXISTS id_vipp TEXT`);
         await pool.query(
           `INSERT INTO envios.solicitacoes (usuario, observacao, status, numero_sep, id_vipp, anexos, conferido, conteudo)
-           VALUES ($1, $2, NULL, $3, $4, '{}', false, $5)`,
+           VALUES ($1, $2, 'Pendente', $3, $4, '{}', false, $5)`,
           [nome_user, os_num || null, nSolic, String(id_vipp), conteudo || null]
         );
         console.log(`[Separação/VIPP] Registro em envios.solicitacoes: SEP=${nSolic} VIPP=${id_vipp}`);

@@ -5081,6 +5081,69 @@ ul#comprasList li ,
   font-size: 14px;
 }
 
+/* Formularios SAC/AT */
+:root:not(.light-mode) #atWhatsappWorkspace input:not([type="checkbox"]):not([type="radio"]):not([type="file"]),
+:root:not(.light-mode) #atWhatsappWorkspace select,
+:root:not(.light-mode) #atWhatsappWorkspace textarea,
+:root:not(.light-mode) #atEditModal input:not([type="checkbox"]):not([type="radio"]):not([type="file"]),
+:root:not(.light-mode) #atEditModal select,
+:root:not(.light-mode) #atEditModal textarea {
+  background: #1e293b;
+  color: #e5e7eb;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  -webkit-text-fill-color: #e5e7eb;
+}
+
+:root:not(.light-mode) #atWhatsappWorkspace input::placeholder,
+:root:not(.light-mode) #atWhatsappWorkspace textarea::placeholder,
+:root:not(.light-mode) #atEditModal input::placeholder,
+:root:not(.light-mode) #atEditModal textarea::placeholder {
+  color: #94a3b8;
+  -webkit-text-fill-color: #94a3b8;
+}
+
+:root:not(.light-mode) #atWhatsappWorkspace input:focus,
+:root:not(.light-mode) #atWhatsappWorkspace select:focus,
+:root:not(.light-mode) #atWhatsappWorkspace textarea:focus,
+:root:not(.light-mode) #atEditModal input:focus,
+:root:not(.light-mode) #atEditModal select:focus,
+:root:not(.light-mode) #atEditModal textarea:focus {
+  border-color: #38bdf8;
+  box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.14);
+}
+
+:root:not(.light-mode) #atWhatsappWorkspace label,
+:root:not(.light-mode) #atEditModal label,
+:root:not(.light-mode) #atEditModal .at-em-lbl {
+  color: #cbd5e1;
+}
+
+:root:not(.light-mode) #atWhatsappWorkspace select option,
+:root:not(.light-mode) #atEditModal select option {
+  background: #1e293b;
+  color: #e5e7eb;
+}
+
+.light-mode #atWhatsappWorkspace input:not([type="checkbox"]):not([type="radio"]):not([type="file"]),
+.light-mode #atWhatsappWorkspace select,
+.light-mode #atWhatsappWorkspace textarea,
+.light-mode #atEditModal input:not([type="checkbox"]):not([type="radio"]):not([type="file"]),
+.light-mode #atEditModal select,
+.light-mode #atEditModal textarea {
+  background: #ffffff;
+  color: #1f2937;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+}
+
+.light-mode #atWhatsappWorkspace input::placeholder,
+.light-mode #atWhatsappWorkspace textarea::placeholder,
+.light-mode #atEditModal input::placeholder,
+.light-mode #atEditModal textarea::placeholder {
+  color: #9ca3af;
+}
+
 .modal-close-btn {
   background: transparent;
   border: none;

@@ -68228,14 +68228,20 @@ window.initOscilacaoEstoque = (function () {
         }).join('');
         declBuscaResultados.style.display = 'block';
         declBuscaResultados.querySelectorAll('.vipp-busca-item').forEach(function (el) {
-          el.addEventListener('mouseenter', function () { el.style.background = 'rgba(56,189,248,.12)'; });
-          el.addEventListener('mouseleave', function () { el.style.background = ''; });
-          el.addEventListener('click', function () {
+          function selecionarProdutoDecl(e) {
+            if (e) {
+              e.preventDefault();
+              e.stopPropagation();
+            }
             var rawDesc = (el.dataset.codigo ? el.dataset.codigo + ' - ' : '') + (el.dataset.desc || '');
             adicionarLinhaDecl(sanitizarDesc(rawDesc), 1, '0');
             if (declBuscaInput) declBuscaInput.value = '';
             declBuscaResultados.style.display = 'none';
-          });
+          }
+          el.addEventListener('mouseenter', function () { el.style.background = 'rgba(56,189,248,.12)'; });
+          el.addEventListener('mouseleave', function () { el.style.background = ''; });
+          el.addEventListener('mousedown', selecionarProdutoDecl);
+          el.addEventListener('click', selecionarProdutoDecl);
         });
       })
       .catch(function () {});
@@ -68284,6 +68290,15 @@ window.initOscilacaoEstoque = (function () {
   if (fillFromOsBtn) fillFromOsBtn.addEventListener('click', prePopularFromOS);
 
   function openModal() {
+    if (enviarBtn) {
+      enviarBtn.disabled = false;
+      enviarBtn.style.opacity = '1';
+      enviarBtn.innerHTML = '<i class="fa-solid fa-paper-plane"></i><span>Criar Postagem</span>';
+    }
+    if (statusEl) {
+      statusEl.innerHTML = '';
+      statusEl.style.display = 'none';
+    }
     prePopular();
     // Define texto padrão da Observação visual: "OS{numero}" (+ Aos Cuidados, se preenchido)
     var _tit = (document.getElementById('atEditModalTitle') ? document.getElementById('atEditModalTitle').textContent : '').trim();
@@ -68647,6 +68662,9 @@ window.initOscilacaoEstoque = (function () {
         })
       });
       var _d = await _resp.json();
+      if (!_resp.ok || !_d.ok) {
+        throw new Error(_d.error || ('HTTP ' + _resp.status));
+      }
       if (_d.ok) {
         // Atualiza a tabela SAC no painel
         try {
@@ -68667,6 +68685,14 @@ window.initOscilacaoEstoque = (function () {
       }
     } catch (_e3) {
       console.error('[VIPP→SAC] Erro ao criar entrada SAC:', _e3);
+      var _sElErr = document.getElementById('vippModalStatus');
+      if (_sElErr) {
+        var _noteErr = document.createElement('div');
+        _noteErr.style.cssText = 'margin-top:8px;padding:6px 10px;background:rgba(239,68,68,.10);border:1px solid #ef444466;border-radius:6px;font-size:12px;color:#fca5a5;';
+        _noteErr.innerHTML = '<i class="fa-solid fa-triangle-exclamation" style="margin-right:5px;"></i>' +
+          'Postagem VIPP criada, mas falhou ao registrar em Envios: ' + (_e3.message || 'erro desconhecido') + '.';
+        _sElErr.appendChild(_noteErr);
+      }
     }
   }
 })();
