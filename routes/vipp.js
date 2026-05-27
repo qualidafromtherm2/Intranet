@@ -681,86 +681,43 @@ router.get('/declaracao', async (req, res) => {
     const envio = rows[0];
 
     // 1. Se já tem declaração salva como URL (PDF/Supabase) → redireciona
-    // Obs: se declaracao_url contém ZPL (^XA), não é URL — ignora e regenera HTML
     if (envio.declaracao_url && envio.declaracao_url.trimStart().startsWith('http')) {
       return res.redirect(302, envio.declaracao_url);
     }
 
-    // 2. Busca ZVP no VIPP para extrair dados de declaração
-    const ect    = (envio.identificacao || '').trim().replace(/\s+/g, '');
-    const idVipp = (envio.id_vipp || '').trim();
+    const ect = (envio.identificacao || '').trim().replace(/\s+/g, '');
 
-    if (!ect && !idVipp) {
-      // Sem dados VIPP — tenta gerar declaração básica do conteudo salvo
+    // 2. Sem código ECT → fallback básico do conteudo salvo
+    if (!ect) {
       if (!envio.conteudo) {
         return res.status(404).send('<p>Declaração não disponível para este envio.</p>');
       }
-      // Gera HTML simples a partir do campo conteudo
       let itens = [];
       try { itens = JSON.parse(envio.conteudo); } catch { itens = []; }
       return res.send(_gerarHtmlDeclaracao({
         remetente: 'FROM THERM SISTEMAS TERMICOS LTDA ME',
         destinatario: envio.observacao || '',
-        ect: ect || '',
+        ect: '',
         itens,
       }));
     }
 
-    // Busca ZVP para extrair dados
-    const filtro = /^[A-Z]{2}\d{9}BR$/i.test(ect) ? '1' : (idVipp ? '4' : '1');
-    const lista  = filtro === '4' ? idVipp : ect;
-    const params = new URLSearchParams({ Usr: VIPP_USUARIO, Pwd: VIPP_TOKEN, Filtro: filtro, Ordem: '1', Saida: '0', Lista: lista });
+    // 3. Busca dados via GetSituacaoPostagem
+    const dados = await _buscarSituacaoPostagem(ect);
 
-    let zvpXml = '';
-    try {
-      const resp = await axios.get(`${VIPP_IMPRESSAO}?${params}`, { responseType: 'arraybuffer', timeout: 30000, validateStatus: s => s === 200 });
-      zvpXml = Buffer.from(resp.data).toString('latin1');
-    } catch (e) {
-      console.warn('[VIPP] declaracao: falha ao buscar ZVP:', e.message);
-    }
-
-    // Parseia campos do ZVP (extrai primeiro RECORD)
-    const getField = (xml, tag) => {
-      const m = xml.match(new RegExp(`<${tag}>(?:<!\\[CDATA\\[)?([\\s\\S]*?)(?:\\]\\]>)?</${tag}>`, 'i'));
-      return m ? m[1].trim() : '';
-    };
-
-    const remetente    = getField(zvpXml, 'rem_nom') || 'FROM THERM SISTEMAS TERMICOS LTDA ME';
-    const remRazao     = getField(zvpXml, 'nomechancela') || remetente;
-    const remEndereco  = [getField(zvpXml, 'rem_log'), getField(zvpXml, 'rem_nro'), getField(zvpXml, 'rem_cpl'), getField(zvpXml, 'rem_brr'), getField(zvpXml, 'rem_cid') + '/' + getField(zvpXml, 'rem_uf'), getField(zvpXml, 'rem_cep')].filter(Boolean).join(', ');
-    const remDoc       = getField(zvpXml, 'rem_doc') || '';
-    const destinatario = getField(zvpXml, 'des_nom') || (envio.observacao || '');
-    const desEndereco  = [getField(zvpXml, 'des_log'), getField(zvpXml, 'des_nro'), getField(zvpXml, 'des_cpl'), getField(zvpXml, 'des_brr'), getField(zvpXml, 'des_cid') + '/' + getField(zvpXml, 'des_uf'), getField(zvpXml, 'des_cep')].filter(Boolean).join(', ');
-    const desDoc       = getField(zvpXml, 'des_doc') || '';
-    const ectCode      = getField(zvpXml, 'ect_reg') || ect;
-    const chaveNfe     = getField(zvpXml, 'vol_obs2') || '';
-    const nfeNum       = getField(zvpXml, 'not_num')  || '';
-    const nfeSerie     = getField(zvpXml, 'not_ser')  || '';
-
-    // Parseia itens de conteúdo do ZVP (disc_conteudo_N: quantidade|descricao|valor|peso)
-    const itens = [];
-    if (zvpXml) {
-      const reItens = /<disc_conteudo_\d+>(?:<!\[CDATA\[)?([^<\]]+)(?:\]\]>)?<\/disc_conteudo_\d+>/gi;
-      let m;
-      while ((m = reItens.exec(zvpXml)) !== null) {
-        const parts = m[1].split('|');
-        if (parts.length >= 2) {
-          itens.push({
-            conteudo:       parts[1] ? parts[1].trim() : '',
-            quantidade:     parts[0] ? parts[0].trim() : '1',
-            valor_unitario: parts[2] ? parts[2].trim() : '0,00',
-            valor_total:    '',
-          });
-        }
-      }
-    }
-
-    // Fallback: itens do campo conteudo salvo no banco
-    if (!itens.length && envio.conteudo) {
-      try { const parsed = JSON.parse(envio.conteudo); itens.push(...parsed); } catch {}
-    }
-
-    return res.send(_gerarHtmlDeclaracao({ remetente: remRazao || remetente, remEndereco, remDoc, destinatario, desEndereco, desDoc, ect: ectCode, chaveNfe, nfeNum, nfeSerie, itens }));
+    return res.send(_gerarHtmlDeclaracao({
+      remetente:   dados.remetente,
+      remEndereco: dados.remEndereco,
+      remDoc:      dados.remDoc,
+      destinatario: dados.destinatario,
+      desEndereco: dados.desEndereco,
+      desDoc:      dados.desDoc,
+      ect:         dados.ect,
+      chaveNfe:    dados.chaveNfe,
+      nfeNum:      dados.nfeNum,
+      nfeSerie:    dados.nfeSerie,
+      itens:       dados.itens,
+    }));
 
   } catch (err) {
     console.error('[VIPP] declaracao erro:', err.message);
@@ -911,8 +868,99 @@ ${chaveFormatada ? `<div class="chave-bar">Chave NF-e: ${chaveFormatada}</div>` 
 </html>`;
 }
 
+// ── Helper: busca dados completos via GetSituacaoPostagem ─────────────────────
+// Retorna objeto pronto para _gerarZplDeclaracao.
+async function _buscarSituacaoPostagem(etiqueta) {
+  const resp = await axios({
+    method: 'get',
+    url: 'http://vpsrv.visualset.com.br/api/v1/conhecimento/GetSituacaoPostagem',
+    params: {
+      usuario: VIPP_USUARIO,
+      senha:   VIPP_TOKEN,
+      StDadosCompletos: 1,
+      BuscarPor: 'EtiquetaPostagem',
+    },
+    data: [etiqueta],
+    headers: { 'Content-Type': 'application/json' },
+    timeout: 15000,
+  });
+  const lista = resp.data && resp.data.SituacaoPostagem;
+  if (!lista || !lista.length) throw new Error('GetSituacaoPostagem: resposta vazia para ' + etiqueta);
+  const s    = lista[0];
+  const post = s.PostagensRastreio || {};
+
+  // Itens de conteúdo (DescricaoConteudo é JSON string)
+  let itens = [];
+  if (post.DescricaoConteudo) {
+    try {
+      const dc = JSON.parse(post.DescricaoConteudo);
+      itens = (dc.Conteudos || []).map(c => ({
+        conteudo:       c.ObjDsc  || '',
+        quantidade:     c.ObjQtd  || '1',
+        valor_unitario: c.ObjVlr  ? Number(c.ObjVlr).toFixed(2).replace('.', ',') : '0,00',
+      }));
+    } catch {}
+  }
+  // Fallback: campo Conteudo (string descritiva)
+  if (!itens.length && post.Conteudo) {
+    itens = [{ conteudo: post.Conteudo, quantidade: '1', valor_unitario: '0,00' }];
+  }
+
+  // Chave NF-e (ObservacaoDois, 44 dígitos)
+  const chaveNfe = String(s.ObservacaoDois || post.ObservacaoDois || '').replace(/\D/g, '').substring(0, 44);
+  const nfeNum   = chaveNfe.length === 44 ? String(parseInt(chaveNfe.substring(25, 34), 10)) : '';
+  const nfeSerie = chaveNfe.length === 44 ? chaveNfe.substring(22, 25) : '';
+
+  // Formata CNPJ (14 dígitos → XX.XXX.XXX/XXXX-XX)
+  const fmtCnpj = n => {
+    const d = String(n || '').replace(/\D/g, '').padStart(14, '0');
+    return d.replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$/, '$1.$2.$3/$4-$5');
+  };
+
+  const remEndereco = [
+    post.EnderecoRemetente,
+    post.NumeroRemetente,
+    post.BairroRemetente,
+    post.CidadeRemetente && post.UfRemetente ? `${post.CidadeRemetente}/${post.UfRemetente}` : null,
+    post.CepRemetente ? `CEP ${post.CepRemetente}` : null,
+  ].filter(Boolean).join(' - ');
+
+  const desEndereco = [
+    post.EnderecoDestinatario,
+    post.NumeroDestinatario,
+    post.BairroDestinatario,
+    post.CidadeDestinatario && post.UfDestinatario ? `${post.CidadeDestinatario}/${post.UfDestinatario}` : null,
+    post.CEPDestinatario ? `CEP ${post.CEPDestinatario}` : null,
+  ].filter(Boolean).join(' - ');
+
+  const dataEmissao = (() => {
+    if (!s.DataDeEntradaNoVipp) return undefined;
+    const d = new Date(s.DataDeEntradaNoVipp);
+    return isNaN(d.getTime()) ? undefined
+      : d.toLocaleDateString('pt-BR') + ' ' + d.toLocaleTimeString('pt-BR');
+  })();
+
+  return {
+    remetente:   post.NomeRemetente   || post.NomeFantasiaRemetente || 'FROM THERM SISTEMAS TERMICOS LTDA ME',
+    remDoc:      fmtCnpj(post.CNPJRemetente),
+    remEndereco,
+    destinatario: post.NomeDestinatario || '',
+    desDoc:      post.AosCuidados || '',
+    desEndereco,
+    ect:         post.Etiqueta || s.Etiqueta || etiqueta,
+    chaveNfe,
+    itens,
+    nfeNum,
+    nfeSerie,
+    cnpjTransp:  fmtCnpj(post.CNPJPostadora),
+    nomeTransp:  post.NomeFantasiaPostadora || post.NomePostadora || 'EMPRESA BRASILEIRA DE CORREIOS E TELEGRAFOS',
+    dataEmissao,
+    protocolo:   '',
+  };
+}
+
 // ── POST /api/vipp/imprimir-declaracao ───────────────────────────────────────
-// Busca dados da declaração via ZVP VIPP, gera ZPL e enfileira no agente.
+// Busca dados da declaração via GetSituacaoPostagem, gera ZPL e enfileira no agente.
 //
 // Body JSON: { envio_id, destino_agente?, impressora? }
 //
@@ -922,7 +970,7 @@ router.post('/imprimir-declaracao', async (req, res) => {
   if (!envio_id) return res.status(400).json({ ok: false, error: 'envio_id obrigatório' });
 
   try {
-    // 1. Busca dados do envio (inclui declaracao_url para cache)
+    // 1. Busca dados do envio
     const { rows } = await dbQuery(
       `SELECT id, identificacao, id_vipp, conteudo, observacao, declaracao_url
          FROM envios.solicitacoes WHERE id = $1 LIMIT 1`,
@@ -931,7 +979,7 @@ router.post('/imprimir-declaracao', async (req, res) => {
     if (!rows.length) return res.status(404).json({ ok: false, error: 'Envio não encontrado' });
     const envio = rows[0];
 
-    // 1b. Se já há ZPL em cache, enfileira direto sem re-chamar VIPP
+    // 1b. Se já há ZPL em cache, enfileira direto
     if (envio.declaracao_url && envio.declaracao_url.trimStart().startsWith('^XA')) {
       const filaIns = await dbQuery(
         `INSERT INTO etiqueta."ETQ_fila_impressao" (etq_ids, multiplo, usuario, zpl, quantidade, destino_agente, impressora)
@@ -942,78 +990,24 @@ router.post('/imprimir-declaracao', async (req, res) => {
       return res.json({ ok: true, fila_id: filaIns.rows[0].id, fromCache: true });
     }
 
-    const ect    = (envio.identificacao || '').trim().replace(/\s+/g, '');
-    const idVipp = (envio.id_vipp || '').toString().trim();
-
-    if (!ect && !idVipp) {
-      return res.status(400).json({ ok: false, error: 'Envio sem código ECT ou ID VIPP — declaração não disponível' });
+    const ect = (envio.identificacao || '').trim().replace(/\s+/g, '');
+    if (!ect) {
+      return res.status(400).json({ ok: false, error: 'Envio sem código ECT — declaração não disponível' });
     }
 
-    // 2. Busca ZVP no VIPP (mesmos parâmetros que GET /declaracao)
-    const filtro = /^[A-Z]{2}\d{9}BR$/i.test(ect) ? '1' : (idVipp ? '4' : '1');
-    const lista  = filtro === '4' ? idVipp : ect;
-    const params = new URLSearchParams({
-      Usr: VIPP_USUARIO, Pwd: VIPP_TOKEN,
-      Filtro: filtro, Ordem: '1', Saida: '0', Lista: lista,
-    });
-    const vippResp = await axios.get(`${VIPP_IMPRESSAO}?${params}`, {
-      responseType: 'arraybuffer', timeout: 30000, validateStatus: s => s === 200,
-    });
-    const zvpXml = Buffer.from(vippResp.data).toString('latin1');
-    if (!zvpXml.trim()) {
-      return res.status(502).json({ ok: false, error: 'VIPP retornou ZVP vazio para este envio' });
-    }
+    // 2. Busca dados completos via GetSituacaoPostagem
+    const dados = await _buscarSituacaoPostagem(ect);
 
-    // 3. Parseia campos do ZVP
-    const getField = (tag) => {
-      const m = zvpXml.match(new RegExp(`<${tag}>(?:<!\\[CDATA\\[)?([\\s\\S]*?)(?:\\]\\]>)?</${tag}>`, 'i'));
-      return m ? m[1].trim() : '';
-    };
+    // 3. Gera ZPL
+    const zpl = _gerarZplDeclaracao(dados);
 
-    const remetente   = getField('nomechancela') || getField('rem_nom') || 'FROM THERM';
-    const remEndereco = [
-      getField('rem_log'), getField('rem_nro'), getField('rem_brr'),
-      getField('rem_cid') + '/' + getField('rem_uf'), 'CEP ' + getField('rem_cep'),
-    ].filter(Boolean).join(' - ');
-    const remDoc       = getField('rem_doc') || '';
-    const destinatario = getField('des_nom') || (envio.observacao || '');
-    const desEndereco  = [
-      getField('des_log'), getField('des_nro'), getField('des_brr'),
-      getField('des_cid') + '/' + getField('des_uf'), 'CEP ' + getField('des_cep'),
-    ].filter(Boolean).join(' - ');
-    const desDoc  = getField('des_doc') || '';
-    const ectCode = getField('ect_reg') || ect;
-    const chaveNfe = getField('vol_obs2') || '';
-
-    // Parseia itens de conteúdo (disc_conteudo_N: quantidade|descricao|valor|peso)
-    const itens = [];
-    const reItens = /<disc_conteudo_\d+>(?:<!\[CDATA\[)?([^<\]]+)(?:\]\]>)?<\/disc_conteudo_\d+>/gi;
-    let mItem;
-    while ((mItem = reItens.exec(zvpXml)) !== null) {
-      const parts = mItem[1].split('|');
-      if (parts.length >= 2) {
-        itens.push({
-          conteudo:       (parts[1] || '').trim(),
-          quantidade:     (parts[0] || '1').trim(),
-          valor_unitario: (parts[2] || '0,01').trim(),
-        });
-      }
-    }
-
-    // 4. Gera ZPL da declaração
-    const nfeNum  = getField('not_num') || '';
-    const nfeSerie = getField('not_ser') || '';
-    const protocolo = getField('protocolo_aut') || getField('prot_aut') || '';
-    const dataEmissao = (() => { const d = new Date(); return d.toLocaleDateString('pt-BR') + ' ' + d.toLocaleTimeString('pt-BR'); })();
-    const zpl = _gerarZplDeclaracao({ remetente, remDoc, remEndereco, destinatario, desDoc, desEndereco, ect: ectCode, chaveNfe, itens, nfeNum, nfeSerie, protocolo, dataEmissao });
-
-    // 5. Enfileira no agente de impressão
+    // 4. Enfileira no agente de impressão
     const filaIns = await dbQuery(
       `INSERT INTO etiqueta."ETQ_fila_impressao" (etq_ids, multiplo, usuario, zpl, quantidade, destino_agente, impressora)
        VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
       [[], 0, usuario, zpl, 1, destino_agente || null, impressora || null]
     );
-    // 6. Persiste ZPL em declaracao_url (apenas quando vazio) para reimpressão futura
+    // 5. Persiste ZPL em declaracao_url para reimpressão futura
     try {
       await dbQuery(
         `UPDATE envios.solicitacoes SET declaracao_url = $1 WHERE id = $2 AND (declaracao_url IS NULL OR declaracao_url = '')`,
@@ -1022,14 +1016,12 @@ router.post('/imprimir-declaracao', async (req, res) => {
     } catch (e) {
       console.warn('[VIPP] imprimir-declaracao: falha ao salvar ZPL em declaracao_url:', e.message);
     }
-    console.log(`[VIPP] imprimir-declaracao: envio_id=${envio_id} ect=${ectCode} fila_id=${filaIns.rows[0].id}`);
+    console.log(`[VIPP] imprimir-declaracao: envio_id=${envio_id} ect=${ect} fila_id=${filaIns.rows[0].id}`);
     return res.json({ ok: true, fila_id: filaIns.rows[0].id });
 
   } catch (err) {
-    const status = err.response?.status;
-    if (status === 215) return res.status(502).json({ ok: false, error: 'Declaração não encontrada no VIPP' });
     console.error('[VIPP] imprimir-declaracao erro:', err.message);
-    return res.status(502).json({ ok: false, error: err.message || 'Falha ao comunicar com VIPP' });
+    return res.status(502).json({ ok: false, error: err.message || 'Falha ao buscar dados da postagem' });
   }
 });
 
@@ -1208,7 +1200,7 @@ async function _gerarZplEtiquetaEnvio(zvpXml) {
 }
 
 // Gera ZPL da Declaração de Conteúdo para impressora térmica (100x150mm, 203dpi)
-function _gerarZplDeclaracao({ remetente, remDoc, remEndereco, destinatario, desDoc, desEndereco, ect, chaveNfe, itens, nfeNum, nfeSerie, protocolo, dataEmissao }) {
+function _gerarZplDeclaracao({ remetente, remDoc, remEndereco, destinatario, desDoc, desEndereco, ect, chaveNfe, itens, nfeNum, nfeSerie, protocolo, dataEmissao, cnpjTransp, nomeTransp }) {
   // Sanitiza texto para ZPL: remove ^ ~ que são chars de controle ZPL
   const z = (s, max = 80) => String(s || '').replace(/[\^~]/g, '-').replace(/\|/g, ' ').substring(0, max);
 
@@ -1257,8 +1249,8 @@ function _gerarZplDeclaracao({ remetente, remDoc, remEndereco, destinatario, des
   const Y_DES_R2    = Y_DES_R1 + 28;           // 319
   const Y_TRA_HEAD  = Y_DES_R2 + 28;           // 347
   const Y_TRA_R1    = Y_TRA_HEAD + 22;         // 369
-  const Y_BENS_HEAD = Y_TRA_R1 + 28;           // 397
-  const Y_BENS_TH   = Y_BENS_HEAD + 22;        // 419
+  const Y_BENS_HEAD = Y_TRA_R1 + 36;           // 405
+  const Y_BENS_TH   = Y_BENS_HEAD + 22 + 8;    // +8px gap visual entre caixa 1 e caixa 2 (alinha com ZPL modelo)
   const Y_ITEMS     = Y_BENS_TH + 22;          // 441
   const Y_TOTAL     = Y_ITEMS + nItens * 34;   // 475 para 1 item
   const Y_DADOS     = Y_TOTAL + 22;
@@ -1297,42 +1289,47 @@ function _gerarZplDeclaracao({ remetente, remDoc, remEndereco, destinatario, des
     `^FO193,${Y_PROT}^GB596,2,2^FS`,
     `^FO198,${Y_PROT + 4}^A0N,11,9^FB587,1,,^FDProtocolo de autoriza\xE7\xE3o: ${z(protocoloFmt, 70)}^FS`,
 
-    // ── Remetente ──
-    `^FO0,${Y_REM_HEAD}^GB799,22,22^FS`,
-    `^FO5,${Y_REM_HEAD + 4}^A0N,16,14^FR^FB789,1,,C^FDIDENTIFICACAO DO REMETENTE (USUARIO EMITENTE)\\&^FS`,
-    `^FO0,${Y_REM_R1}^GB799,28,2^FS`,
+    // ── CAIXA 1: Identificação ─────────────────────────────────────────────
+    // Caixa externa única; divisores internos 1px evitam bordas duplas/grossas
+    `^FO0,${Y_REM_HEAD}^GB789,${Y_BENS_HEAD + 22 - Y_REM_HEAD},2^FS`,
+    // Divisores horizontais internos (1px, recuados 2px das laterais)
+    `^FO2,${Y_REM_R1}^GB785,1,1^FS`,
+    `^FO2,${Y_REM_R2}^GB785,1,1^FS`,
+    `^FO2,${Y_DES_HEAD}^GB785,1,1^FS`,
+    `^FO2,${Y_DES_R1}^GB785,1,1^FS`,
+    `^FO2,${Y_DES_R2}^GB785,1,1^FS`,
+    `^FO2,${Y_TRA_HEAD}^GB785,1,1^FS`,
+    `^FO2,${Y_TRA_R1}^GB785,1,1^FS`,
+    `^FO2,${Y_BENS_HEAD}^GB785,1,1^FS`,
+    // Divisores verticais de coluna nas linhas de dados (x=230)
     `^FO230,${Y_REM_R1}^GB2,28,2^FS`,
+    `^FO230,${Y_REM_R2}^GB2,28,2^FS`,
+    `^FO230,${Y_DES_R1}^GB2,28,2^FS`,
+    `^FO230,${Y_DES_R2}^GB2,28,2^FS`,
+    `^FO230,${Y_TRA_R1}^GB2,36,2^FS`,
+    // ── Remetente
+    `^FO5,${Y_REM_HEAD + 4}^A0N,16,14^FB789,1,,C^FDIDENTIFICACAO DO REMETENTE (USUARIO EMITENTE)\\&^FS`,
     `^FO5,${Y_REM_R1 + 4}^A0N,13,12^FD${z('CNPJ: ' + (remDoc || 'NAO INFORMADO'), 35)}^FS`,
     `^FO235,${Y_REM_R1 + 4}^A0N,13,12^FD${z('NOME: ' + remetente, 55)}^FS`,
-    `^FO0,${Y_REM_R2}^GB799,28,2^FS`,
-    `^FO230,${Y_REM_R2}^GB2,28,2^FS`,
     `^FO5,${Y_REM_R2 + 4}^A0N,13,12^FD${z('CIDADE-UF: ' + (remAddr.cidadeUf || 'NAO INFORMADO'), 35)}^FS`,
-    `^FO235,${Y_REM_R2 + 4}^A0N,13,12^FD${z('ENDERECO: ' + (remAddr.endereco || remEndereco || '-'), 55)}^FS`,
-
-    // ── Destinatário ──
-    `^FO0,${Y_DES_HEAD}^GB799,22,22^FS`,
-    `^FO5,${Y_DES_HEAD + 4}^A0N,16,14^FR^FB789,1,,C^FDIDENTIFICACAO DO DESTINATARIO\\&^FS`,
-    `^FO0,${Y_DES_R1}^GB799,28,2^FS`,
-    `^FO230,${Y_DES_R1}^GB2,28,2^FS`,
+    `^FO235,${Y_REM_R2 + 4}^A0N,13,12^FD${z('ENDERE\xC7O: ' + (remAddr.endereco || remEndereco || '-'), 55)}^FS`,
+    // ── Destinatário
+    `^FO5,${Y_DES_HEAD + 4}^A0N,16,14^FB789,1,,C^FDIDENTIFICACAO DO DESTINATARIO\\&^FS`,
     `^FO5,${Y_DES_R1 + 4}^A0N,13,12^FD${z('IDOUTROS: ' + (desDoc || 'NAOINFORMADO'), 35)}^FS`,
     `^FO235,${Y_DES_R1 + 4}^A0N,13,12^FD${z('NOME: ' + destinatario, 55)}^FS`,
-    `^FO0,${Y_DES_R2}^GB799,28,2^FS`,
-    `^FO230,${Y_DES_R2}^GB2,28,2^FS`,
     `^FO5,${Y_DES_R2 + 4}^A0N,13,12^FD${z('CIDADE-UF: ' + (desAddr.cidadeUf || 'NAO INFORMADO'), 35)}^FS`,
-    `^FO235,${Y_DES_R2 + 4}^A0N,13,12^FD${z('ENDERECO: ' + (desAddr.endereco || desEndereco || '-'), 55)}^FS`,
+    `^FO235,${Y_DES_R2 + 4}^A0N,13,12^FD${z('ENDERE\xC7O: ' + (desAddr.endereco || desEndereco || '-'), 55)}^FS`,
+    // ── Transportadora (ECT)
+    `^FO5,${Y_TRA_HEAD + 4}^A0N,16,14^FB789,1,,C^FDTRANSPORTADORA\\&^FS`,
+    `^FO5,${Y_TRA_R1 + 3}^A0N,10,8^FB225,2,,^FDCNPJ FISCO/ MARKET/ TRANSP:\\&${z(cnpjTransp || '34.028.316/0001-03', 30)}^FS`,
+    `^FO235,${Y_TRA_R1 + 3}^A0N,10,8^FB554,2,,^FDNOME FISCO/ MARKETPLACE/ TRANSPORTADORA: ${z(nomeTransp || 'EMPRESA BRASILEIRA DE CORREIOS E TELEGRAFOS', 55)}^FS`,
+    // ── Bens (cabeçalho)
+    `^FO5,${Y_BENS_HEAD + 4}^A0N,16,14^FB789,1,,C^FDIDENTIFICACAO DOS BENS OU MERCADORIAS\\&^FS`,
 
-    // ── Transportadora (ECT) ──
-    `^FO0,${Y_TRA_HEAD}^GB799,22,22^FS`,
-    `^FO5,${Y_TRA_HEAD + 4}^A0N,16,14^FR^FB789,1,,C^FDTRANSPORTADORA\\&^FS`,
-    `^FO0,${Y_TRA_R1}^GB799,28,2^FS`,
-    `^FO230,${Y_TRA_R1}^GB2,28,2^FS`,
-    `^FO5,${Y_TRA_R1 + 4}^A0N,13,12^FDCNPJ: 34028316000103^FS`,
-    `^FO235,${Y_TRA_R1 + 4}^A0N,13,12^FDNOME: EMP. BRAS. DE CORREIOS E TELEGRAFOS^FS`,
-
-    // ── Bens / Mercadorias ──
-    `^FO0,${Y_BENS_HEAD}^GB799,22,22^FS`,
-    `^FO5,${Y_BENS_HEAD + 4}^A0N,16,14^FR^FB789,1,,C^FDIDENTIFICACAO DOS BENS OU MERCADORIAS\\&^FS`,
-    `^FO0,${Y_BENS_TH}^GB799,22,2^FS`,
+    // ── CAIXA 2: Itens + Dados Adicionais ────────────────────────────────────
+    // Outer box (Y_BENS_TH inclui +4px de separação visual da caixa 1)
+    `^FO0,${Y_BENS_TH}^GB789,${Y_QR_C + QR_H - Y_BENS_TH},2^FS`,
+    // Divisores verticais no cabeçalho da tabela de itens
     `^FO55,${Y_BENS_TH}^GB2,22,2^FS`,
     `^FO665,${Y_BENS_TH}^GB2,22,2^FS`,
     `^FO730,${Y_BENS_TH}^GB2,22,2^FS`,
@@ -1340,12 +1337,14 @@ function _gerarZplDeclaracao({ remetente, remDoc, remEndereco, destinatario, des
     `^FO60,${Y_BENS_TH + 4}^A0N,14,13^FDDESCRICAO^FS`,
     `^FO670,${Y_BENS_TH + 4}^A0N,14,13^FDQTDE^FS`,
     `^FO735,${Y_BENS_TH + 4}^A0N,14,13^FDVALOR^FS`,
+    // Divisor após cabeçalho da tabela
+    `^FO2,${Y_ITEMS}^GB785,1,1^FS`,
 
     // Linhas de itens
     ...itensFmt.flatMap((it, i) => {
       const yI = Y_ITEMS + i * 34;
       return [
-        `^FO0,${yI}^GB799,34,2^FS`,
+        ...(i > 0 ? [`^FO2,${yI}^GB785,1,1^FS`] : []),
         `^FO55,${yI}^GB2,34,2^FS`,
         `^FO665,${yI}^GB2,34,2^FS`,
         `^FO730,${yI}^GB2,34,2^FS`,
@@ -1358,32 +1357,36 @@ function _gerarZplDeclaracao({ remetente, remDoc, remEndereco, destinatario, des
 
     // Linha vazia se sem itens
     ...(itensFmt.length === 0 ? [
-      `^FO0,${Y_ITEMS}^GB799,34,2^FS`,
       `^FO55,${Y_ITEMS}^GB2,34,2^FS`,
       `^FO665,${Y_ITEMS}^GB2,34,2^FS`,
       `^FO730,${Y_ITEMS}^GB2,34,2^FS`,
     ] : []),
 
-    // ── Valor total ──
-    `^FO0,${Y_TOTAL}^GB799,22,2^FS`,
+    // Divisor / VALOR TOTAL
+    `^FO2,${Y_TOTAL}^GB785,1,1^FS`,
     `^FO5,${Y_TOTAL + 3}^A0N,14,13^FB789,1,,C^FDVALOR TOTAL R$ ${z(itensFmt.map(it => it.valor_unitario || '0,01').join(' + ') || '0,00', 50)}\\&^FS`,
 
-    // ── Dados adicionais ──
-    `^FO0,${Y_DADOS}^GB799,22,22^FS`,
-    `^FO5,${Y_DADOS + 4}^A0N,16,14^FR^FB789,1,,C^FDDADOS ADICIONAIS\\&^FS`,
-    `^FO0,${Y_INF}^GB799,26,2^FS`,
+    // Divisor / DADOS ADICIONAIS
+    `^FO2,${Y_DADOS}^GB785,1,1^FS`,
+    `^FO5,${Y_DADOS + 4}^A0N,16,14^FB789,1,,C^FDDADOS ADICIONAIS\\&^FS`,
+
+    // Divisor / INF COMPLEMENTARES
+    `^FO2,${Y_INF}^GB785,1,1^FS`,
     `^FO185,${Y_INF}^GB2,26,2^FS`,
     `^FO5,${Y_INF + 6}^A0N,13,12^FDINF. COMPLEMENTARES:^FS`,
     `^FO190,${Y_INF + 6}^A0N,13,12^FDINFORMACOES ADICIONAIS DO FISCO^FS`,
 
-    // ── QR Code + Observações ──
-    `^FO0,${Y_QR_H}^GB799,22,2^FS`,
+
+    // Divisor / QR-CODE header
+    `^FO2,${Y_QR_H}^GB785,1,1^FS`,
     `^FO210,${Y_QR_H}^GB2,22,2^FS`,
     `^FO5,${Y_QR_H + 4}^A0N,16,14^FB205,1,,C^FDQR-CODE\\&^FS`,
     `^FO215,${Y_QR_H + 4}^A0N,16,14^FB580,1,,C^FDOBSERVACOES\\&^FS`,
-    `^FO0,${Y_QR_C}^GB799,${QR_H},2^FS`,
+
+    // Divisor / QR-CODE content
+    `^FO2,${Y_QR_C}^GB785,1,1^FS`,
     `^FO210,${Y_QR_C}^GB2,${QR_H},2^FS`,
-    `^FO14,${Y_QR_C + 5}^BQN,2,2^FDQA,${sefazUrl}^FS`,
+    `^FO40,${Y_QR_C - 66}^BQN,3,3^FDQA,https://www.fazenda.pr.gov.br/dce/qrcode?chDCe=${chave}&tpAmb=1^FS`,
     `^FO215,${Y_QR_C + 5}^A0N,13,12^FB576,8,,^FDE contribuinte de ICMS qualquer pessoa fisica ou juridica que realize com habitualidade ou em volume que caracterize intuito comercial operacoes de circulacao de mercadoria ou prestacoes de servicos de transporte interestadual e intermunicipal de comunicacao.\\&^FS`,
 
     '^XZ',

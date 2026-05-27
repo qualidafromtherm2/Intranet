@@ -11158,10 +11158,9 @@ function renderEnvioMercadoriaCard(r) {
   // Correios tracking só quando não há id_vipp (VIPP é a fonte de verdade nesse caso)
   const dataRastreio = (!r.id_vipp && !rastStatusDisplay && isRastreio && !isFinalizado) ? identClean : '';
   const rastText = [rastStatusDisplay, rastQuandoDisplay].filter(Boolean).join(' | ');
-  const buttons = [
-    (etiqueta || temIdentificacao) ? `<button class="content-button btn-envio-etiqueta" data-envio-id="${escapeAtHtml(String(r.id))}" data-identificacao="${escapeAtHtml(identRaw)}" style="padding:8px 10px;font-size:12px;display:inline-flex;align-items:center;gap:6px;"><i class="fa-solid fa-print"></i><span>Etiqueta</span></button>` : '',
-    declaracaoHref ? `<button class="content-button btn-envio-declaracao" data-envio-id="${escapeAtHtml(String(r.id))}" data-print-url="${escapeAtHtml(declaracaoHref)}" style="padding:8px 10px;font-size:12px;display:inline-flex;align-items:center;gap:6px;"><i class="fa-solid fa-file-pdf"></i><span>Declaração</span></button>` : ''
-  ].filter(Boolean).join('');
+  const buttons = (etiqueta || temIdentificacao)
+    ? `<button class="content-button btn-envio-imprimir" data-envio-id="${escapeAtHtml(String(r.id))}" data-identificacao="${escapeAtHtml(identRaw)}" style="padding:8px 10px;font-size:12px;display:inline-flex;align-items:center;gap:6px;"><i class="fa-solid fa-print"></i><span>Imprimir</span></button>`
+    : '';
 
   const statusToken = getStatusTokenEnvioMercadoria(statusRaw);
   const statusClasse = `envio-card-status-${statusToken}`;
@@ -18380,63 +18379,46 @@ function setupEnvioPrintButtons(container) {
   if (!container) return;
   _envioCarregarPref();
   container.addEventListener('click', async (ev) => {
-    const btnEtq = ev.target.closest('.btn-envio-etiqueta');
-    if (btnEtq) {
-      ev.preventDefault();
-      const envioId = btnEtq.getAttribute('data-envio-id');
-      const identificacao = btnEtq.getAttribute('data-identificacao') || '';
-      if (!envioId) return;
-      // Se não tem impressora configurada, abre seletor antes de imprimir
-      if (!_envioImprPref) {
-        const drop = document.getElementById('envioImprGearDropdown');
-        if (drop) {
-          await _envioMostrarSeletor(drop);
-          // Aguarda o usuário salvar (poll simples)
-          return;
-        }
-      }
-      await _envioImprimirEtiqueta(envioId, identificacao, btnEtq);
-      return;
+    const btn = ev.target.closest('.btn-envio-imprimir');
+    if (!btn) return;
+    ev.preventDefault();
+    const envioId = btn.getAttribute('data-envio-id');
+    const identificacao = btn.getAttribute('data-identificacao') || '';
+    if (!envioId) return;
+    // Se não tem impressora configurada, abre seletor antes de imprimir
+    if (!_envioImprPref) {
+      const drop = document.getElementById('envioImprGearDropdown');
+      if (drop) { await _envioMostrarSeletor(drop); return; }
     }
-    const btnDec = ev.target.closest('.btn-envio-declaracao');
-    if (btnDec) {
-      ev.preventDefault();
-      const url = btnDec.getAttribute('data-print-url');
-      const envioId = btnDec.getAttribute('data-envio-id')
-        || (url && url.match(/[?&]id=(\d+)/) || [])[1] || '';
-      const pref = _envioImprPref || '__PDF__';
-      // PDF: abre URL no navegador. Caso contrário, enfileira ZPL via backend.
+    const pref = _envioImprPref || '__PDF__';
+    btn.disabled = true;
+    const origHtml = btn.innerHTML;
+    btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i><span>Imprimindo...</span>';
+    try {
       if (pref === '__PDF__') {
-        if (!url) return;
-        try {
-          const w = window.open(url, '_blank');
-          if (w) setTimeout(() => { try { w.focus(); } catch {} }, 300);
-        } catch (err) { console.error('[Envio] erro ao abrir declaração', err); }
-        return;
-      }
-      if (!envioId) { alert('Envio sem id — não foi possível imprimir declaração'); return; }
-      btnDec.disabled = true;
-      try {
+        // PDF: abre etiqueta + declaração HTML em abas separadas
+        const ecLimpo = String(identificacao).trim().replace(/\s+/g, '');
+        if (ecLimpo) window.open(`/api/vipp/etiqueta?id=${encodeURIComponent(ecLimpo)}&saida=1`, '_blank');
+        window.open(`/api/vipp/declaracao?id=${encodeURIComponent(envioId)}`, '_blank');
+      } else {
+        // Agente/impressora: enfileira etiqueta e declaração em paralelo
         const agentDest = _etqParseAgentPref(pref);
-        const body = { envio_id: Number(envioId) };
-        if (agentDest) { body.destino_agente = agentDest.pcName; body.impressora = agentDest.impressora; }
-        else if (pref !== '__BP__') { body.impressora = pref; }
-        const resp = await fetch('/api/vipp/imprimir-declaracao', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          credentials: 'include',
-          body: JSON.stringify(body),
-        });
-        const data = await resp.json();
-        if (!data.ok) throw new Error(data.error || 'Falha ao enfileirar declaração');
-        const orig = btnDec.innerHTML;
-        btnDec.innerHTML = '<i class="fa-solid fa-check" style="color:#4ade80;"></i> Enviado!';
-        setTimeout(() => { btnDec.innerHTML = orig; }, 3000);
-      } catch (err) {
-        alert('Erro ao imprimir declaração: ' + err.message);
-      } finally {
-        btnDec.disabled = false;
+        const base = { envio_id: Number(envioId) };
+        if (agentDest) { base.destino_agente = agentDest.pcName; base.impressora = agentDest.impressora; }
+        else if (pref !== '__BP__') { base.impressora = pref; }
+        const [rEtq, rDec] = await Promise.all([
+          fetch('/api/vipp/imprimir-envio', { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include', body: JSON.stringify(base) }).then(r => r.json()),
+          fetch('/api/vipp/imprimir-declaracao', { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include', body: JSON.stringify(base) }).then(r => r.json()),
+        ]);
+        const erros = [!rEtq.ok && ('Etiqueta: ' + (rEtq.error || 'Erro')), !rDec.ok && ('Declaração: ' + (rDec.error || 'Erro'))].filter(Boolean);
+        if (erros.length) throw new Error(erros.join(' | '));
       }
+      btn.innerHTML = '<i class="fa-solid fa-check" style="color:#4ade80;"></i><span>Enviado!</span>';
+      setTimeout(() => { btn.innerHTML = origHtml; btn.disabled = false; }, 3000);
+    } catch (err) {
+      alert('Erro ao imprimir: ' + err.message);
+      btn.innerHTML = origHtml;
+      btn.disabled = false;
     }
   });
 }
@@ -68329,7 +68311,9 @@ window.initOscilacaoEstoque = (function () {
   }
 
   if (openBtn)   openBtn.addEventListener('click', function () {
-    _vippContextoSac = false;
+    // atVippBtn é o botão de caminhão dentro do "Editar OS" (painel SAC/AT),
+    // então também é contexto SAC — precisa registrar em envios.solicitacoes.
+    _vippContextoSac = true;
     if (fillFromOsBtn) fillFromOsBtn.style.display = '';
     openModal();
   });
