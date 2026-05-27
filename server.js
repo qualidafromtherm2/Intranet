@@ -31709,7 +31709,7 @@ app.post('/api/compras/pedidos-omie/nfe-associar-pedido', express.json(), async 
     // nQtde é enviado junto para evitar que um EDITAR separado sem os outros campos reverta
     // o armazém/unidade. Se a Omie rejeitar o payload com nQtde, faz retry sem ele.
     if (itensEditarEstoque && itensEditarEstoque.length > 0) {
-      const hasQtdeOverride = itensEditarEstoque.some(it => it.itensAjustes?.nQtde != null);
+      const hasQtdeOverride = itensEditarEstoque.some(it => it.nQtde != null);
       try {
         const payloadEstoque = {
           ide: { nIdReceb: Number(plano.n_id_receb) },
