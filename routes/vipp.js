@@ -1001,7 +1001,11 @@ router.post('/imprimir-declaracao', async (req, res) => {
     }
 
     // 4. Gera ZPL da declaração
-    const zpl = _gerarZplDeclaracao({ remetente, remEndereco, destinatario, desEndereco, ect: ectCode, chaveNfe, itens });
+    const nfeNum  = getField('not_num') || '';
+    const nfeSerie = getField('not_ser') || '';
+    const protocolo = getField('protocolo_aut') || getField('prot_aut') || '';
+    const dataEmissao = (() => { const d = new Date(); return d.toLocaleDateString('pt-BR') + ' ' + d.toLocaleTimeString('pt-BR'); })();
+    const zpl = _gerarZplDeclaracao({ remetente, remDoc, remEndereco, destinatario, desDoc, desEndereco, ect: ectCode, chaveNfe, itens, nfeNum, nfeSerie, protocolo, dataEmissao });
 
     // 5. Enfileira no agente de impressão
     const filaIns = await dbQuery(
@@ -1204,79 +1208,187 @@ async function _gerarZplEtiquetaEnvio(zvpXml) {
 }
 
 // Gera ZPL da Declaração de Conteúdo para impressora térmica (100x150mm, 203dpi)
-function _gerarZplDeclaracao({ remetente, remEndereco, destinatario, desEndereco, ect, chaveNfe, itens }) {
+function _gerarZplDeclaracao({ remetente, remDoc, remEndereco, destinatario, desDoc, desEndereco, ect, chaveNfe, itens, nfeNum, nfeSerie, protocolo, dataEmissao }) {
   // Sanitiza texto para ZPL: remove ^ ~ que são chars de controle ZPL
-  const z = (s, max = 60) => String(s || '').replace(/[\^~]/g, '-').replace(/\|/g, ' ').substring(0, max);
+  const z = (s, max = 80) => String(s || '').replace(/[\^~]/g, '-').replace(/\|/g, ' ').substring(0, max);
 
-  const LM = 20;   // margem esquerda em pontos
-  const IW = 772;  // largura interna (812 - 2×20)
-  const cmds = [];
-  let y = 20;
+  // Chave NF-e (44 dígitos) — usa zeros se inválida
+  const chave = chaveNfe && /^\d{44}$/.test(chaveNfe) ? chaveNfe : '0'.repeat(44);
+  const chaveFormatted = chave.match(/.{1,4}/g).join(' ');
 
-  const addText = (str, h, x = LM) => {
-    if (!str) return;
-    cmds.push(`^FO${x},${y}^A0N,${h},${h}^FD${z(str)}^FS`);
-    y += h + 8;
+  const nfeNumFmt  = nfeNum  ? String(nfeNum).padStart(9, '0')  : '---';
+  const nfeSerieFmt = nfeSerie ? String(nfeSerie).padStart(3, '0') : '---';
+
+  const dataFmt     = dataEmissao || (() => { const d = new Date(); return d.toLocaleDateString('pt-BR') + ' ' + d.toLocaleTimeString('pt-BR'); })();
+  const protocoloFmt = protocolo ? `${z(protocolo, 20)} - ${dataFmt}` : dataFmt;
+
+  const sefazUrl = `https://www.nfe.fazenda.gov.br/portal/consultaRecaptcha.aspx?tipoConsulta=completa&chave=${chave}`;
+
+  // Divide endereço composto ("RUA X - N - BAIRRO - CIDADE/UF - CEP XXXXX") em cidade e logradouro
+  const splitAddr = (addr) => {
+    const parts = (addr || '').split(' - ');
+    if (parts.length >= 4) {
+      const cepIdx = parts.findIndex(p => /^CEP/i.test(p));
+      const cityIdx = cepIdx > 0 ? cepIdx - 1 : parts.length - 2;
+      return { cidadeUf: parts[cityIdx] || '', endereco: parts.slice(0, cityIdx).join(' - ') };
+    }
+    return { cidadeUf: '', endereco: addr };
   };
 
-  const addSep = () => {
-    cmds.push(`^FO${LM},${y}^GB${IW},2,2^FS`);
-    y += 12;
-  };
+  const remAddr = splitAddr(remEndereco);
+  const desAddr = splitAddr(desEndereco);
 
-  // Título
-  addText('*** DECLARACAO DE CONTEUDO ***', 26);
-  addSep();
+  const itensFmt   = (itens || []).slice(0, 5);
+  const nItens     = Math.max(itensFmt.length, 1);
 
-  // Remetente
-  addText('REMETENTE:', 22);
-  addText(remetente, 20, LM + 10);
-  if (remEndereco) addText(remEndereco, 16, LM + 10);
-  y += 4;
-  addSep();
+  // ── Y positions ──────────────────────────────────────────────────────────
+  const Y0 = 5;
+  const HEADER_H    = 118;
+  const Y_DIGITS    = Y0 + HEADER_H;           // 123
+  const Y_DATA      = Y_DIGITS + 22;           // 145
+  const Y_PROT      = Y_DATA + 24;             // 169
+  const Y_REM_HEAD  = Y_PROT + 22;             // 191
+  const Y_REM_R1    = Y_REM_HEAD + 22;         // 213
+  const Y_REM_R2    = Y_REM_R1 + 28;           // 241
+  const Y_DES_HEAD  = Y_REM_R2 + 28;           // 269
+  const Y_DES_R1    = Y_DES_HEAD + 22;         // 291
+  const Y_DES_R2    = Y_DES_R1 + 28;           // 319
+  const Y_TRA_HEAD  = Y_DES_R2 + 28;           // 347
+  const Y_TRA_R1    = Y_TRA_HEAD + 22;         // 369
+  const Y_BENS_HEAD = Y_TRA_R1 + 28;           // 397
+  const Y_BENS_TH   = Y_BENS_HEAD + 22;        // 419
+  const Y_ITEMS     = Y_BENS_TH + 22;          // 441
+  const Y_TOTAL     = Y_ITEMS + nItens * 34;   // 475 para 1 item
+  const Y_DADOS     = Y_TOTAL + 22;
+  const Y_INF       = Y_DADOS + 22;
+  const Y_QR_H      = Y_INF + 26;
+  const Y_QR_C      = Y_QR_H + 22;
+  const QR_H        = 163;
+  const LL          = Y_QR_C + QR_H + 4;
 
-  // Destinatário
-  addText('DESTINATARIO:', 22);
-  addText(destinatario, 20, LM + 10);
-  if (desEndereco) addText(desEndereco, 16, LM + 10);
-  y += 4;
-  addSep();
+  const lines = [
+    '^XA',
+    '^CI13',
+    '^PW799',
+    '^LH0,0',
+    `^LL${LL}`,
 
-  // Código ECT
-  if (ect) {
-    addText('OBJETO POSTAL: ' + ect, 20);
-    y += 4;
-    addSep();
-  }
+    // ── Cabeçalho principal (left: DACE info mesclado; right: código de barras) ──
+    `^FO0,${Y0}^GB799,${HEADER_H},2^FS`,
+    `^FO185,${Y0}^GB2,${HEADER_H},2^FS`,
+    `^FO5,13^A0N,18,17^FD${z('DACE - DECLARACAO AUXILIAR', 35)}^FS`,
+    `^FO5,35^A0N,16,15^FD${z('DE CONTEUDO ELETRONICA', 30)}^FS`,
+    `^FO2,65^A0N,18,17^FB181,1,,C^FDN: ${nfeNumFmt}\\&^FS`,
+    `^FO2,97^A0N,18,17^FB181,1,,C^FDSERIE: ${nfeSerieFmt}\\&^FS`,
+    `^FO190,43^BY2,3,42^BCN,42,N,N^FD${chave}^FS`,
 
-  // Itens de conteúdo
-  addText('CONTEUDO:', 22);
-  (itens || []).forEach((it, i) => {
-    const desc = (it.conteudo || '').substring(0, 45);
-    const qty  = it.quantidade || '1';
-    const val  = it.valor_unitario || '0,01';
-    addText(`${i + 1}. ${desc}`, 18);
-    addText(`Qtd: ${qty}  Valor: R$ ${val}`, 16, LM + 20);
-  });
-  y += 10;
-  addSep();
+    // ── Dígitos da chave (largura total) ──
+    `^FO0,${Y_DIGITS}^GB799,22,2^FS`,
+    `^FO5,${Y_DIGITS + 3}^A0N,14,13^FB789,1,,C^FD${z(chaveFormatted, 60)}\\&^FS`,
 
-  // QR code com a chave NF-e (se disponível) — URL completa para consulta SEFAZ
-  if (chaveNfe && /^\d{44}$/.test(chaveNfe)) {
-    const qrY = y;
-    const sefazUrl = `https://www.nfe.fazenda.gov.br/portal/consultaRecaptcha.aspx?tipoConsulta=completa&chave=${chaveNfe}`;
-    cmds.push(`^FO${LM},${qrY}^A0N,16,16^FDCHAVE NF-e:^FS`);
-    cmds.push(`^FO${LM},${qrY + 22}^A0N,14,14^FD${z(chaveNfe, 44)}^FS`);
-    // QR code: magnif=3 → ~171×171 dots (21mm) — cabe em 812 dots (X=633)
-    // ^FDQA,{url} = error level Q, auto encoding, dados = URL SEFAZ
-    cmds.push(`^FO${812 - 175},${qrY}^BQN,2,3^FDQA,${sefazUrl}^FS`);
-    y = qrY + 180;
-    y += 8;
-  }
+    // ── Data emissão / Modalidade ──
+    `^FO0,${Y_DATA}^GB799,24,2^FS`,
+    `^FO400,${Y_DATA}^GB2,24,2^FS`,
+    `^FO5,${Y_DATA + 4}^A0N,13,12^FDData emissao: ${z(dataFmt, 40)}^FS`,
+    `^FO405,${Y_DATA + 4}^A0N,13,12^FDModalidade: 0 - PELOS CORREIOS^FS`,
 
-  y += 10; // padding inferior
+    // ── Protocolo ──
+    `^FO0,${Y_PROT}^GB799,22,2^FS`,
+    `^FO5,${Y_PROT + 4}^A0N,13,12^FDProtocolo de autorizacao: ${z(protocoloFmt, 70)}^FS`,
 
-  return `^XA\n^CI13\n^PW812\n^LH0,0\n^LL${y}\n${cmds.join('\n')}\n^XZ`;
+    // ── Remetente ──
+    `^FO0,${Y_REM_HEAD}^GB799,22,22^FS`,
+    `^FO5,${Y_REM_HEAD + 4}^A0N,16,14^FR^FB789,1,,C^FDIDENTIFICACAO DO REMETENTE (USUARIO EMITENTE)\\&^FS`,
+    `^FO0,${Y_REM_R1}^GB799,28,2^FS`,
+    `^FO230,${Y_REM_R1}^GB2,28,2^FS`,
+    `^FO5,${Y_REM_R1 + 4}^A0N,13,12^FD${z('CNPJ: ' + (remDoc || 'NAO INFORMADO'), 35)}^FS`,
+    `^FO235,${Y_REM_R1 + 4}^A0N,13,12^FD${z('NOME: ' + remetente, 55)}^FS`,
+    `^FO0,${Y_REM_R2}^GB799,28,2^FS`,
+    `^FO230,${Y_REM_R2}^GB2,28,2^FS`,
+    `^FO5,${Y_REM_R2 + 4}^A0N,13,12^FD${z('CIDADE-UF: ' + (remAddr.cidadeUf || 'NAO INFORMADO'), 35)}^FS`,
+    `^FO235,${Y_REM_R2 + 4}^A0N,13,12^FD${z('ENDERECO: ' + (remAddr.endereco || remEndereco || '-'), 55)}^FS`,
+
+    // ── Destinatário ──
+    `^FO0,${Y_DES_HEAD}^GB799,22,22^FS`,
+    `^FO5,${Y_DES_HEAD + 4}^A0N,16,14^FR^FB789,1,,C^FDIDENTIFICACAO DO DESTINATARIO\\&^FS`,
+    `^FO0,${Y_DES_R1}^GB799,28,2^FS`,
+    `^FO230,${Y_DES_R1}^GB2,28,2^FS`,
+    `^FO5,${Y_DES_R1 + 4}^A0N,13,12^FD${z('IDOUTROS: ' + (desDoc || 'NAOINFORMADO'), 35)}^FS`,
+    `^FO235,${Y_DES_R1 + 4}^A0N,13,12^FD${z('NOME: ' + destinatario, 55)}^FS`,
+    `^FO0,${Y_DES_R2}^GB799,28,2^FS`,
+    `^FO230,${Y_DES_R2}^GB2,28,2^FS`,
+    `^FO5,${Y_DES_R2 + 4}^A0N,13,12^FD${z('CIDADE-UF: ' + (desAddr.cidadeUf || 'NAO INFORMADO'), 35)}^FS`,
+    `^FO235,${Y_DES_R2 + 4}^A0N,13,12^FD${z('ENDERECO: ' + (desAddr.endereco || desEndereco || '-'), 55)}^FS`,
+
+    // ── Transportadora (ECT) ──
+    `^FO0,${Y_TRA_HEAD}^GB799,22,22^FS`,
+    `^FO5,${Y_TRA_HEAD + 4}^A0N,16,14^FR^FB789,1,,C^FDTRANSPORTADORA\\&^FS`,
+    `^FO0,${Y_TRA_R1}^GB799,28,2^FS`,
+    `^FO230,${Y_TRA_R1}^GB2,28,2^FS`,
+    `^FO5,${Y_TRA_R1 + 4}^A0N,13,12^FDCNPJ: 34028316000103^FS`,
+    `^FO235,${Y_TRA_R1 + 4}^A0N,13,12^FDNOME: EMP. BRAS. DE CORREIOS E TELEGRAFOS^FS`,
+
+    // ── Bens / Mercadorias ──
+    `^FO0,${Y_BENS_HEAD}^GB799,22,22^FS`,
+    `^FO5,${Y_BENS_HEAD + 4}^A0N,16,14^FR^FB789,1,,C^FDIDENTIFICACAO DOS BENS OU MERCADORIAS\\&^FS`,
+    `^FO0,${Y_BENS_TH}^GB799,22,2^FS`,
+    `^FO55,${Y_BENS_TH}^GB2,22,2^FS`,
+    `^FO665,${Y_BENS_TH}^GB2,22,2^FS`,
+    `^FO730,${Y_BENS_TH}^GB2,22,2^FS`,
+    `^FO5,${Y_BENS_TH + 4}^A0N,14,13^FDITEM^FS`,
+    `^FO60,${Y_BENS_TH + 4}^A0N,14,13^FDDESCRICAO^FS`,
+    `^FO670,${Y_BENS_TH + 4}^A0N,14,13^FDQTDE^FS`,
+    `^FO735,${Y_BENS_TH + 4}^A0N,14,13^FDVALOR^FS`,
+
+    // Linhas de itens
+    ...itensFmt.flatMap((it, i) => {
+      const yI = Y_ITEMS + i * 34;
+      return [
+        `^FO0,${yI}^GB799,34,2^FS`,
+        `^FO55,${yI}^GB2,34,2^FS`,
+        `^FO665,${yI}^GB2,34,2^FS`,
+        `^FO730,${yI}^GB2,34,2^FS`,
+        `^FO5,${yI + 9}^A0N,16,14^FB50,1,,C^FD${i + 1}\\&^FS`,
+        `^FO60,${yI + 5}^A0N,13,12^FB605,2,,^FD${z(it.conteudo || '', 55)}\\&^FS`,
+        `^FO670,${yI + 9}^A0N,16,14^FB60,1,,C^FD${z(String(it.quantidade || '1'), 5)}\\&^FS`,
+        `^FO735,${yI + 7}^A0N,13,12^FD${z(String(it.valor_unitario || '0,01'), 10)}^FS`,
+      ];
+    }),
+
+    // Linha vazia se sem itens
+    ...(itensFmt.length === 0 ? [
+      `^FO0,${Y_ITEMS}^GB799,34,2^FS`,
+      `^FO55,${Y_ITEMS}^GB2,34,2^FS`,
+      `^FO665,${Y_ITEMS}^GB2,34,2^FS`,
+      `^FO730,${Y_ITEMS}^GB2,34,2^FS`,
+    ] : []),
+
+    // ── Valor total ──
+    `^FO0,${Y_TOTAL}^GB799,22,2^FS`,
+    `^FO5,${Y_TOTAL + 3}^A0N,14,13^FB789,1,,C^FDVALOR TOTAL R$ ${z(itensFmt.map(it => it.valor_unitario || '0,01').join(' + ') || '0,00', 50)}\\&^FS`,
+
+    // ── Dados adicionais ──
+    `^FO0,${Y_DADOS}^GB799,22,22^FS`,
+    `^FO5,${Y_DADOS + 4}^A0N,16,14^FR^FB789,1,,C^FDDADOS ADICIONAIS\\&^FS`,
+    `^FO0,${Y_INF}^GB799,26,2^FS`,
+    `^FO185,${Y_INF}^GB2,26,2^FS`,
+    `^FO5,${Y_INF + 6}^A0N,13,12^FDINF. COMPLEMENTARES:^FS`,
+    `^FO190,${Y_INF + 6}^A0N,13,12^FDINFORMACOES ADICIONAIS DO FISCO^FS`,
+
+    // ── QR Code + Observações ──
+    `^FO0,${Y_QR_H}^GB799,22,2^FS`,
+    `^FO210,${Y_QR_H}^GB2,22,2^FS`,
+    `^FO5,${Y_QR_H + 4}^A0N,16,14^FB205,1,,C^FDQR-CODE\\&^FS`,
+    `^FO215,${Y_QR_H + 4}^A0N,16,14^FB580,1,,C^FDOBSERVACOES\\&^FS`,
+    `^FO0,${Y_QR_C}^GB799,${QR_H},2^FS`,
+    `^FO210,${Y_QR_C}^GB2,${QR_H},2^FS`,
+    `^FO14,${Y_QR_C + 5}^BQN,2,2^FDQA,${sefazUrl}^FS`,
+    `^FO215,${Y_QR_C + 5}^A0N,13,12^FB576,8,,^FDE contribuinte de ICMS qualquer pessoa fisica ou juridica que realize com habitualidade ou em volume que caracterize intuito comercial operacoes de circulacao de mercadoria ou prestacoes de servicos de transporte interestadual e intermunicipal de comunicacao.\\&^FS`,
+
+    '^XZ',
+  ];
+
+  return lines.join('\n');
 }
 
 // ── GET /api/vipp/sep-check ───────────────────────────────────────────────────

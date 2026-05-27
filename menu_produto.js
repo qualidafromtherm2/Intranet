@@ -9761,16 +9761,6 @@ if (chatbotMonitorExplorerSection) {
 
 renderChatbotMonitorExplorer();
 
-const sacAttachEtiquetaBtn = document.getElementById('sacAttachEtiquetaBtn');
-const sacAttachDeclaracaoBtn = document.getElementById('sacAttachDeclaracaoBtn');
-const sacFileInputEtiqueta = document.getElementById('sacFileInputEtiqueta');
-const sacFileInputDeclaracao = document.getElementById('sacFileInputDeclaracao');
-const sacFileInfoEtiqueta = document.getElementById('sacFileInfoEtiqueta');
-const sacFileInfoDeclaracao = document.getElementById('sacFileInfoDeclaracao');
-const sacSendBtn = document.getElementById('sacSendBtn');
-const sacEnvioStatus = document.getElementById('sacEnvioStatus');
-const sacObservacao = document.getElementById('sacObservacao');
-const sacNumeroSep = document.getElementById('sacNumeroSep');
 const sacRefreshBtn = document.getElementById('sacRefreshBtn');
 const sacRelatorioBtn = document.getElementById('sacRelatorioBtn');
 const sacTabelaBody = document.getElementById('sacTabelaBody');
@@ -10977,6 +10967,65 @@ async function preencherStatusRastreio(container) {
   });
 }
 
+// Consulta status VIPP para envios com id_vipp (substitui "ok" por status real)
+async function preencherStatusVipp(container) {
+  if (!container) return;
+  const spans = container.querySelectorAll('[data-id-vipp]');
+  spans.forEach(async (el) => {
+    const idVipp = (el.getAttribute('data-id-vipp') || '').trim();
+    if (!idVipp) return;
+    const envioId = (el.getAttribute('data-envio-id') || '').trim();
+    const identificacaoAttr = (el.getAttribute('data-identificacao') || '').replace(/\s+/g, '').toUpperCase();
+    el.textContent = 'Consultando VIPP...';
+    try {
+      const url = '/api/vipp/status?id=' + encodeURIComponent(idVipp) + (envioId ? '&envio_id=' + encodeURIComponent(envioId) : '');
+      const resp = await fetch(url, { credentials: 'same-origin' });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok || data.ok === false) {
+        el.textContent = data.error || 'Erro VIPP';
+        return;
+      }
+      const statusVipp = data.statusVipp || '';
+      const isStatusInutil = !statusVipp || statusVipp === 'Desconhecido' || statusVipp === 'Invalida';
+      // ECT code: prefer what VIPP returned, fallback to card attribute
+      const ectCode = data.etiquetaPostagem ||
+        (/^[A-Z]{2}\d{9}[A-Z]{2}$/.test(identificacaoAttr) ? identificacaoAttr : '');
+
+      // Quando VIPP não tem status útil e temos código ECT, tenta Correios
+      if (isStatusInutil && ectCode) {
+        el.textContent = 'Consultando Correios...';
+        try {
+          const rCorr = await fetch('/api/sac/rastreio/' + encodeURIComponent(ectCode), { credentials: 'same-origin' });
+          const dCorr = await rCorr.json().catch(() => ({}));
+          const STATUS_INVALIDOS_CORREIOS = ['Invalida', 'Desconhecido', 'ok'];
+          if (rCorr.ok && dCorr.ok !== false && dCorr.status && !STATUS_INVALIDOS_CORREIOS.includes(dCorr.status)) {
+            const partes = [];
+            if (dCorr.status) partes.push(dCorr.status);
+            if (dCorr.detalhe) partes.push(dCorr.detalhe);
+            const local = [dCorr.local, dCorr.cidade, dCorr.uf].filter(Boolean).join(' - ');
+            if (local) partes.push(local);
+            if (dCorr.quando) partes.push(new Date(dCorr.quando).toLocaleString('pt-BR'));
+            el.textContent = partes.join(' | ') || 'Aguardando movimentação nos Correios';
+            return;
+          }
+        } catch (_) {}
+        // Fallback: postagem criada no VIPP mas ainda sem movimentação nos Correios
+        el.textContent = 'Aguardando movimentação';
+        return;
+      }
+
+      const partes = [];
+      if (statusVipp && !isStatusInutil) partes.push(statusVipp);
+      if (data.statusSolicitacao) partes.push(data.statusSolicitacao);
+      if (data.etiquetaPostagem) partes.push('ECT: ' + data.etiquetaPostagem);
+      el.textContent = partes.length ? partes.join(' | ') : 'Aguardando VIPP';
+    } catch (err) {
+      console.error('[VIPP] erro status', err);
+      el.textContent = 'Erro ao consultar VIPP';
+    }
+  });
+}
+
 
 const normalizeSacStatus = (val) => {
   const status = String(val || '').trim();
@@ -11092,32 +11141,31 @@ function renderEnvioMercadoriaCard(r) {
   const status = normalizeSacStatus(statusRaw);
   const etiqueta = r.etiqueta_url || r.etiqueta || '';
   const declaracao = r.declaracao_url || r.declaracao || '';
+  const declaracaoHref = declaracao || (r.id_vipp ? '/api/vipp/declaracao?id=' + r.id : '');
   const temIdentificacao = r.identificacao && String(r.identificacao).trim().length > 0;
   const identRaw = r.identificacao ? String(r.identificacao).trim() : '-';
   const identClean = identRaw.replace(/\s+/g, '').toUpperCase();
   const isRastreio = isCodigoRastreioEnvioMercadoria(identClean);
   const isFinalizado = status.toLowerCase() === 'finalizado';
   const rastStatus = r.rastreio_status ? String(r.rastreio_status).trim() : '';
+  // Filtra valores inválidos legados (ex.: "ok", "Invalida" do VIPP salvo por versão anterior)
+  const STATUS_INVALIDOS = ['ok', 'Invalida', 'Desconhecido'];
+  const rastStatusClean = (rastStatus && !STATUS_INVALIDOS.includes(rastStatus)) ? rastStatus : '';
   const rastQuando = r.rastreio_quando ? new Date(r.rastreio_quando).toLocaleString('pt-BR') : '';
   const finalizadoEm = r.finalizado_em ? new Date(r.finalizado_em).toLocaleString('pt-BR') : '';
-  const rastStatusDisplay = isFinalizado ? (rastStatus || 'Objeto entregue ao destinatário') : rastStatus;
+  const rastStatusDisplay = isFinalizado ? (rastStatusClean || 'Objeto entregue ao destinatário') : rastStatusClean;
   const rastQuandoDisplay = isFinalizado ? (finalizadoEm || rastQuando) : rastQuando;
-  const dataRastreio = (!rastStatusDisplay && isRastreio && !isFinalizado) ? identClean : '';
+  // Correios tracking só quando não há id_vipp (VIPP é a fonte de verdade nesse caso)
+  const dataRastreio = (!r.id_vipp && !rastStatusDisplay && isRastreio && !isFinalizado) ? identClean : '';
   const rastText = [rastStatusDisplay, rastQuandoDisplay].filter(Boolean).join(' | ');
   const buttons = [
     (etiqueta || temIdentificacao) ? `<button class="content-button btn-envio-etiqueta" data-envio-id="${escapeAtHtml(String(r.id))}" data-identificacao="${escapeAtHtml(identRaw)}" style="padding:8px 10px;font-size:12px;display:inline-flex;align-items:center;gap:6px;"><i class="fa-solid fa-print"></i><span>Etiqueta</span></button>` : '',
-    declaracao ? `<button class="content-button btn-envio-declaracao" data-envio-id="${escapeAtHtml(String(r.id))}" data-print-url="${escapeAtHtml(declaracao)}" style="padding:8px 10px;font-size:12px;display:inline-flex;align-items:center;gap:6px;"><i class="fa-solid fa-file-pdf"></i><span>Declaração</span></button>` : ''
+    declaracaoHref ? `<button class="content-button btn-envio-declaracao" data-envio-id="${escapeAtHtml(String(r.id))}" data-print-url="${escapeAtHtml(declaracaoHref)}" style="padding:8px 10px;font-size:12px;display:inline-flex;align-items:center;gap:6px;"><i class="fa-solid fa-file-pdf"></i><span>Declaração</span></button>` : ''
   ].filter(Boolean).join('');
 
   const statusToken = getStatusTokenEnvioMercadoria(statusRaw);
   const statusClasse = `envio-card-status-${statusToken}`;
   const statusPillClasse = `envio-status-${statusToken}`;
-
-  const statusSelect = `
-    <select class="sac-status-select envio-status-select ${statusClasse}" data-id="${r.id}">
-      ${sacStatusOptions.map(opt => `<option value="${opt}" ${opt === statusRaw ? 'selected' : ''}>${opt}</option>`).join('')}
-      ${!sacStatusOptions.includes(statusRaw) ? `<option value="${escapeAtHtml(statusRaw)}" selected>${escapeAtHtml(statusRaw)}</option>` : ''}
-    </select>`;
 
   return `
     <article class="envio-card ${statusClasse}">
@@ -11140,10 +11188,9 @@ function renderEnvioMercadoriaCard(r) {
         <div>
           <div class="envio-card-label">Rastreio</div>
           <div class="envio-card-text" style="font-weight:800;color:#f8fafc;">${escapeAtHtml(identRaw)}</div>
-          <small class="rast-status" data-rastreio="${escapeAtHtml(dataRastreio)}" style="display:block;margin-top:5px;color:#94a3b8;line-height:1.35;">${escapeAtHtml(rastText || (isRastreio ? 'Consultando rastreio...' : 'Sem rastreio válido'))}</small>
+          <small class="rast-status" data-rastreio="${escapeAtHtml(dataRastreio)}" data-id-vipp="${escapeAtHtml(r.id_vipp || '')}" data-envio-id="${escapeAtHtml(String(r.id))}" data-identificacao="${escapeAtHtml(identClean)}" style="display:block;margin-top:5px;color:#94a3b8;line-height:1.35;">${escapeAtHtml(r.id_vipp && !isFinalizado ? 'Consultando VIPP...' : (rastText || (isRastreio ? 'Consultando rastreio...' : 'Sem rastreio válido')))}</small></small>
         </div>
         <span class="envio-status-pill ${statusPillClasse}"><i class="fa-solid fa-circle"></i>${escapeAtHtml(status)}</span>
-        ${statusSelect}
       </div>
       <div class="envio-card-actions">
         <div class="envio-card-label">Ações</div>
@@ -11676,8 +11723,10 @@ function _renderAtCards(rows) {
 
     const hasAnexos = group.rows.some(r => Number(r.qtd_anexos) > 0);
     const hasPecas  = group.rows.some(r => r.has_pecas_enviadas);
+    const enviosStatusCard = group.rows.find(r => r.envios_status)?.envios_status || '';
     const pecasBtnCard = hasPecas
-      ? `<span title="Peças enviadas para esta OS" style="color:#a78bfa;font-size:13px;padding:2px 4px;flex-shrink:0;">
+      ? `<span title="Peças enviadas para esta OS" style="display:inline-flex;align-items:center;gap:4px;color:#a78bfa;font-size:13px;padding:2px 4px;flex-shrink:0;">
+           ${enviosStatusCard ? `<span style="font-size:10px;font-weight:600;background:rgba(167,139,250,.15);border:1px solid rgba(167,139,250,.35);border-radius:10px;padding:1px 6px;color:#a78bfa;">${escapeAtHtml(enviosStatusCard)}</span>` : ''}
            <i class="fa-solid fa-box"></i>
          </span>`
       : '';
@@ -14157,103 +14206,6 @@ async function preencherEnderecoPorCepAt() {
     console.error('[SAC/AT] erro ao consultar CEP', err);
     setAtEnvioStatus('Erro ao consultar CEP. Tente novamente.', true);
   }
-}
-
-const formatFile = (f) => `${f.name} (${Math.round(f.size / 1024)} KB)`;
-
-if (sacAttachEtiquetaBtn && sacFileInputEtiqueta) {
-  sacAttachEtiquetaBtn.addEventListener('click', () => {
-    sacFileInputEtiqueta.value = '';
-    sacFileInputEtiqueta.click();
-  });
-  sacFileInputEtiqueta.addEventListener('change', () => {
-    const f = sacFileInputEtiqueta.files?.[0];
-    if (f) {
-      const name = f.name.toLowerCase();
-      if (!name.includes('etiqueta')) {
-        alert('Selecione o arquivo de ETIQUETA (nome deve conter "etiqueta").');
-        sacFileInputEtiqueta.value = '';
-        sacFileInfoEtiqueta.textContent = 'Nenhum arquivo.';
-        return;
-      }
-    }
-    sacFileInfoEtiqueta.textContent = f ? formatFile(f) : 'Nenhum arquivo.';
-  });
-}
-
-if (sacAttachDeclaracaoBtn && sacFileInputDeclaracao) {
-  sacAttachDeclaracaoBtn.addEventListener('click', () => {
-    sacFileInputDeclaracao.value = '';
-    sacFileInputDeclaracao.click();
-  });
-  sacFileInputDeclaracao.addEventListener('change', () => {
-    const f = sacFileInputDeclaracao.files?.[0];
-    sacFileInfoDeclaracao.textContent = f ? formatFile(f) : 'Nenhum arquivo.';
-  });
-}
-
-if (sacSendBtn) {
-  sacSendBtn.addEventListener('click', async () => {
-    const userName = document.getElementById('userNameDisplay')?.textContent?.trim() || '';
-    const observacao = sacObservacao?.value?.trim() || '';
-    const numeroSep = sacNumeroSep?.value?.trim() || '';
-    const etiqueta = sacFileInputEtiqueta?.files?.[0] || null;
-    const declaracao = sacFileInputDeclaracao?.files?.[0] || null;
-
-    const setStatus = (text, isError = false) => {
-      if (!sacEnvioStatus) return;
-      sacEnvioStatus.style.display = text ? 'inline' : 'none';
-      sacEnvioStatus.style.color = isError ? '#f87171' : 'var(--inactive-color)';
-      sacEnvioStatus.textContent = text || '';
-    };
-
-    if (!userName) {
-      alert('Usuário não identificado. Faça login novamente.');
-      return;
-    }
-
-    if (!etiqueta || !declaracao) {
-      alert('Selecione exatamente 2 arquivos: Etiqueta e Declaração de conteúdo.');
-      return;
-    }
-
-    sacSendBtn.disabled = true;
-    setStatus('Enviando...', false);
-
-    try {
-      const formData = new FormData();
-      formData.append('usuario', userName);
-      formData.append('observacao', observacao);
-      formData.append('numero_sep', numeroSep);
-      formData.append('anexos', etiqueta);
-      formData.append('anexos', declaracao);
-
-      const resp = await fetch('/api/sac/solicitacoes', {
-        method: 'POST',
-        body: formData
-      });
-
-      const data = await resp.json().catch(() => ({}));
-      const ok = resp.ok && data.ok !== false;
-      if (ok) {
-        setStatus('Solicitação registrada.', false);
-        if (sacFileInputEtiqueta) sacFileInputEtiqueta.value = '';
-        if (sacFileInputDeclaracao) sacFileInputDeclaracao.value = '';
-        if (sacFileInfoEtiqueta) sacFileInfoEtiqueta.textContent = 'Nenhum arquivo.';
-        if (sacFileInfoDeclaracao) sacFileInfoDeclaracao.textContent = 'Nenhum arquivo.';
-        sacObservacao.value = '';
-        if (sacNumeroSep) sacNumeroSep.value = '';
-        try { await carregarSacSolicitacoes(sacTabelaBody, { hideDone: false, filterByUser: true }); } catch {}
-      } else {
-        setStatus(data.error || 'Falha ao registrar.', true);
-      }
-    } catch (err) {
-      console.error('[SAC] erro ao registrar envio', err);
-      setStatus(err?.message || 'Erro ao registrar.', true);
-    } finally {
-      sacSendBtn.disabled = false;
-    }
-  });
 }
 
 // ── Modal: Envio de Peça (OS) ──────────────────────────────────────────────
@@ -17335,6 +17287,7 @@ async function carregarSacSolicitacoes(targetBody, { hideDone = false, titleOnly
       }
       bodyEl.innerHTML = rowsVisiveis.map(renderEnvioMercadoriaCard).join('');
       preencherStatusRastreio(bodyEl);
+      preencherStatusVipp(bodyEl);
       return;
     }
     
@@ -17347,6 +17300,7 @@ async function carregarSacSolicitacoes(targetBody, { hideDone = false, titleOnly
       const numeroSep = r.numero_sep || '-';
       const etiqueta = r.etiqueta_url || r.etiqueta || '';
       const declaracao = r.declaracao_url || r.declaracao || '';
+      const declaracaoHref = declaracao || (r.id_vipp ? '/api/vipp/declaracao?id=' + r.id : '');
       const identRaw = r.identificacao ? String(r.identificacao).trim() : '—';
       const identClean = identRaw.replace(/\s+/g, '').toUpperCase();
       const isRastreio = /^[A-Z]{2}\d{9}[A-Z]{2}$/.test(identClean);
@@ -17402,20 +17356,14 @@ async function carregarSacSolicitacoes(targetBody, { hideDone = false, titleOnly
       const temIdentRaw = r.identificacao && String(r.identificacao).trim().length > 0;
       const buttonsEnvio = [
         (etiqueta || temIdentRaw) ? `<button class="content-button btn-envio-etiqueta" data-envio-id="${r.id}" data-identificacao="${(r.identificacao || '').trim()}" style="padding:4px 8px;font-size:12px;display:inline-flex;align-items:center;gap:6px;"><i class="fa-solid fa-print"></i><span>Etiqueta</span></button>` : '',
-        declaracao ? `<button class="content-button btn-envio-declaracao" data-envio-id="${r.id}" data-print-url="${declaracao}" style="padding:4px 8px;font-size:12px;display:inline-flex;align-items:center;gap:6px;"><i class="fa-solid fa-file-pdf"></i><span>Declaração</span></button>` : ''
+        declaracaoHref ? `<button class="content-button btn-envio-declaracao" data-envio-id="${r.id}" data-print-url="${declaracaoHref}" style="padding:4px 8px;font-size:12px;display:inline-flex;align-items:center;gap:6px;"><i class="fa-solid fa-file-pdf"></i><span>Declaração</span></button>` : ''
       ].filter(Boolean).join(' ');
       // Botões painel SAC: usam classe btn-print-* + data-print-url (abre PDF no navegador)
       const buttonsSac = [
         etiqueta ? `<button class="content-button btn-print-etiqueta" data-print-url="${etiqueta}" style="padding:4px 8px;font-size:12px;display:inline-flex;align-items:center;gap:6px;"><i class="fa-solid fa-print"></i><span>Etiqueta</span></button>` : '',
-        declaracao ? `<button class="content-button btn-print-declaracao" data-print-url="${declaracao}" style="padding:4px 8px;font-size:12px;display:inline-flex;align-items:center;gap:6px;"><i class="fa-solid fa-print"></i><span>Declaração</span></button>` : ''
+        declaracaoHref ? `<button class="content-button btn-print-declaracao" data-print-url="${declaracaoHref}" style="padding:4px 8px;font-size:12px;display:inline-flex;align-items:center;gap:6px;"><i class="fa-solid fa-print"></i><span>Declaração</span></button>` : ''
       ].filter(Boolean).join(' ');
       
-      // Select de status para Tabela "Envios registrados" (COM status real do banco)
-      const statusSelectEnvioMercadoria = `
-        <select class="sac-status-select" data-id="${r.id}" style="padding:6px 8px;border:1px solid var(--border-color);border-radius:8px;background:var(--content-bg);color:var(--content-title-color);">
-          ${sacStatusOptions.map(opt => `<option value="${opt}" ${opt === statusRaw ? 'selected' : ''}>${opt}</option>`).join('')}
-          ${!sacStatusOptions.includes(statusRaw) ? `<option value="${statusRaw}" selected>${statusRaw}</option>` : ''}
-        </select>`;
       
       // Select de status para Tabela "Registro de envios" (SAC) (COM status real do banco)
       const statusSelectSac = `
@@ -17434,20 +17382,16 @@ async function carregarSacSolicitacoes(targetBody, { hideDone = false, titleOnly
             <td>${dataFmt}</td>
             <td>${usuario}</td>
             <td style="max-width:280px;">${obs}</td>
-            <td>${identRaw}<br><small class="rast-status" data-rastreio="${dataRastreio}" style="color:var(--inactive-color);">${rastText}</small></td>
+            <td>${identRaw}<br><small class="rast-status" data-rastreio="${dataRastreio}" data-id-vipp="${r.id_vipp || ''}" data-envio-id="${r.id}" style="color:var(--inactive-color);">${rastText}</small></td>
             <td>${numeroSep}</td>
             <td style="max-width:400px;white-space:pre-wrap;line-height:1.8;padding:12px 8px;vertical-align:top;">${conteudo}</td>
-            <td>${statusSelectEnvioMercadoria}</td>
+            <td>${escapeAtHtml(normalizeSacStatus(statusRaw))}</td>
             <td>${buttonsEnvio || '—'}</td>
           </tr>`;
       } else {
         // Tabela "Registro de envios" (painel SAC) - SEM coluna Requisitante
         // Botões de Ação (Editar e Excluir)
         const acoesButtons = `
-          <button class="content-button btn-sac-editar" data-id="${r.id}" data-obs="${(obs || '').replace(/"/g, '&quot;')}" data-status="${statusRaw}" data-conteudo="${(r.conteudo || '').replace(/"/g, '&quot;')}" style="padding:4px 8px;font-size:12px;display:inline-flex;align-items:center;gap:6px;background:linear-gradient(135deg,#0ea5e9 0%,#0284c7 100%);color:white;">
-            <i class="fa-solid fa-pen-to-square"></i>
-            <span>Editar</span>
-          </button>
           <button class="content-button btn-sac-excluir" data-id="${r.id}" style="padding:4px 8px;font-size:12px;display:inline-flex;align-items:center;gap:6px;background:linear-gradient(135deg,#ef4444 0%,#dc2626 100%);color:white;">
             <i class="fa-solid fa-trash"></i>
             <span>Excluir</span>
@@ -17459,7 +17403,7 @@ async function carregarSacSolicitacoes(targetBody, { hideDone = false, titleOnly
             <td>${r.id}</td>
             <td>${dataFmt}</td>
             <td style="max-width:280px;">${obs}</td>
-            <td>${identRaw}<br><small class="rast-status" data-rastreio="${dataRastreio}" style="color:var(--inactive-color);">${rastText}</small></td>
+            <td>${identRaw}<br><small class="rast-status" data-rastreio="${dataRastreio}" data-id-vipp="${r.id_vipp || ''}" data-envio-id="${r.id}" style="color:var(--inactive-color);">${rastText}</small></td>
             <td>${numeroSep}</td>
             <td style="max-width:400px;white-space:pre-wrap;line-height:1.8;padding:12px 8px;vertical-align:top;">${conteudo}</td>
             <td>${statusSelectSac}</td>
@@ -17469,6 +17413,7 @@ async function carregarSacSolicitacoes(targetBody, { hideDone = false, titleOnly
       }
     }).join('');
     preencherStatusRastreio(bodyEl);
+    preencherStatusVipp(bodyEl);
   } catch (err) {
     console.error('[SAC] erro ao carregar tabela', err);
     const numCols = bodyEl === envioMercadoriaTabelaBodyPane ? 8 : 9;
@@ -18279,6 +18224,16 @@ function setupPrintButtons(container) {
 
 setupPrintButtons(sacTabelaBody);
 
+// ── Helper compartilhado: parse de preferência de agente "__AGENT__:pc:imp" ──
+// Definido no escopo global para ser acessível pelas funções de envio e pelo modal de etiquetas
+function _etqParseAgentPref(pref) {
+  if (!pref || !pref.startsWith('__AGENT__:')) return null;
+  const s   = pref.slice('__AGENT__:'.length);
+  const idx = s.indexOf(':');
+  if (idx === -1) return null;
+  return { pcName: s.slice(0, idx), impressora: s.slice(idx + 1) };
+}
+
 // ── Envio de Mercadoria: impressora configurável (separada da etiquetas de ID) ──
 let _envioImprPref = null;
 
@@ -18287,14 +18242,32 @@ function _envioImprPrefKey() {
   return `envio_printer_pref_${u}`;
 }
 function _envioCarregarPref() {
+  // Carrega localStorage imediatamente (UX responsivo)
   _envioImprPref = localStorage.getItem(_envioImprPrefKey()) || null;
   _envioAtualizarGearBtn();
+  // Sincroniza com banco em background
+  fetch('/api/usuario/preferencias/impressora_envio')
+    .then(r => r.ok ? r.json() : null)
+    .then(d => {
+      if (d && d.valor) {
+        _envioImprPref = d.valor;
+        localStorage.setItem(_envioImprPrefKey(), d.valor);
+        _envioAtualizarGearBtn();
+      }
+    })
+    .catch(() => {});
 }
 function _envioSalvarPref(p) {
   _envioImprPref = p || null;
   if (p) localStorage.setItem(_envioImprPrefKey(), p);
   else localStorage.removeItem(_envioImprPrefKey());
   _envioAtualizarGearBtn();
+  // Persiste no banco
+  fetch('/api/usuario/preferencias', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ chave: 'impressora_envio', valor: p || null })
+  }).catch(() => {});
 }
 function _envioAtualizarGearBtn() {
   const btn = document.getElementById('envioImprGearBtn');
@@ -18370,14 +18343,15 @@ async function _envioImprimirEtiqueta(envioId, identificacao, btnRef) {
   if (btnRef) btnRef.disabled = true;
   try {
     const pref = _envioImprPref || '__PDF__';
-    // Modo PDF: abre etiqueta no navegador
+    const ecLimpo = String(identificacao || '').trim().replace(/\s+/g, '');
+    // PDF: abre direto no navegador. Caso contrário, enfileira ZPL via backend
+    // (independente de ter código ECT — backend resolve via envio_id).
     if (pref === '__PDF__') {
-      const ecLimpo = String(identificacao || '').trim().replace(/\s+/g, '');
       if (!ecLimpo) throw new Error('Código ECT não disponível para este envio');
       window.open(`/api/vipp/etiqueta?id=${encodeURIComponent(ecLimpo)}&saida=1`, '_blank');
       return;
     }
-    // Modo agente/impressora: enfileira via backend
+    // Modo agente/impressora: enfileira ZPL via backend (POST /api/vipp/imprimir-envio)
     const agentDest = _etqParseAgentPref(pref);
     const body = { envio_id: envioId };
     if (agentDest) { body.destino_agente = agentDest.pcName; body.impressora = agentDest.impressora; }
@@ -18428,12 +18402,41 @@ function setupEnvioPrintButtons(container) {
     if (btnDec) {
       ev.preventDefault();
       const url = btnDec.getAttribute('data-print-url');
-      if (!url) return;
-      // Declaração: sempre abre PDF no navegador
+      const envioId = btnDec.getAttribute('data-envio-id')
+        || (url && url.match(/[?&]id=(\d+)/) || [])[1] || '';
+      const pref = _envioImprPref || '__PDF__';
+      // PDF: abre URL no navegador. Caso contrário, enfileira ZPL via backend.
+      if (pref === '__PDF__') {
+        if (!url) return;
+        try {
+          const w = window.open(url, '_blank');
+          if (w) setTimeout(() => { try { w.focus(); } catch {} }, 300);
+        } catch (err) { console.error('[Envio] erro ao abrir declaração', err); }
+        return;
+      }
+      if (!envioId) { alert('Envio sem id — não foi possível imprimir declaração'); return; }
+      btnDec.disabled = true;
       try {
-        const w = window.open(url, '_blank');
-        if (w) setTimeout(() => { try { w.focus(); } catch {} }, 300);
-      } catch (err) { console.error('[Envio] erro ao abrir declaração', err); }
+        const agentDest = _etqParseAgentPref(pref);
+        const body = { envio_id: Number(envioId) };
+        if (agentDest) { body.destino_agente = agentDest.pcName; body.impressora = agentDest.impressora; }
+        else if (pref !== '__BP__') { body.impressora = pref; }
+        const resp = await fetch('/api/vipp/imprimir-declaracao', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify(body),
+        });
+        const data = await resp.json();
+        if (!data.ok) throw new Error(data.error || 'Falha ao enfileirar declaração');
+        const orig = btnDec.innerHTML;
+        btnDec.innerHTML = '<i class="fa-solid fa-check" style="color:#4ade80;"></i> Enviado!';
+        setTimeout(() => { btnDec.innerHTML = orig; }, 3000);
+      } catch (err) {
+        alert('Erro ao imprimir declaração: ' + err.message);
+      } finally {
+        btnDec.disabled = false;
+      }
     }
   });
 }
@@ -18522,149 +18525,10 @@ document.addEventListener('change', async (ev) => {
   }
 });
 
-// ========== MODAL DE EDIÇÃO DE ENVIO SAC ==========
-const sacEditModal = document.getElementById('sacEditModal');
-const sacEditModalClose = document.getElementById('sacEditModalClose');
-const sacEditCancelBtn = document.getElementById('sacEditCancelBtn');
-const sacEditSaveBtn = document.getElementById('sacEditSaveBtn');
-const sacEditId = document.getElementById('sacEditId');
-const sacEditObservacao = document.getElementById('sacEditObservacao');
-const sacEditStatus = document.getElementById('sacEditStatus');
-const sacEditConteudoOriginal = document.getElementById('sacEditConteudoOriginal');
-const sacEditQuantidadeContainer = document.getElementById('sacEditQuantidadeContainer');
-
-// Função para abrir o modal de edição
-function abrirModalEdicaoSAC(id, observacao, status, conteudoRaw) {
-  sacEditId.value = id;
-  sacEditObservacao.value = observacao === '—' ? '' : observacao;
-  sacEditStatus.value = status;
-  sacEditConteudoOriginal.value = conteudoRaw;
-  
-  // Parse do conteúdo JSON para criar os campos de quantidade
-  sacEditQuantidadeContainer.innerHTML = '';
-  
-  if (conteudoRaw && conteudoRaw !== '—') {
-    try {
-      const items = JSON.parse(conteudoRaw);
-      if (Array.isArray(items) && items.length > 0) {
-        items.forEach((item, idx) => {
-          const div = document.createElement('div');
-          div.style.cssText = 'display:flex;align-items:center;gap:8px;padding:6px;border:1px solid var(--border-color);border-radius:8px;background:var(--content-bg);';
-          div.innerHTML = `
-            <label style="flex:1;font-size:13px;color:var(--inactive-color);">${item.conteudo}</label>
-            <input type="number" min="1" class="sac-qtd-input" data-idx="${idx}" value="${item.quantidade}" style="width:80px;padding:6px;border:1px solid var(--border-color);border-radius:6px;background:var(--content-bg);color:var(--content-title-color);text-align:center;" />
-          `;
-          sacEditQuantidadeContainer.appendChild(div);
-        });
-      }
-    } catch (err) {
-      console.warn('[SAC] Erro ao parsear conteúdo:', err);
-      sacEditQuantidadeContainer.innerHTML = '<div style="color:var(--inactive-color);font-size:13px;">Formato de conteúdo inválido para edição.</div>';
-    }
-  } else {
-    sacEditQuantidadeContainer.innerHTML = '<div style="color:var(--inactive-color);font-size:13px;">Nenhum item disponível.</div>';
-  }
-  
-  sacEditModal.style.display = 'flex';
-}
-
-// Função para fechar o modal de edição
-function fecharModalEdicaoSAC() {
-  sacEditModal.style.display = 'none';
-}
-
-// Event listeners para fechar o modal
-sacEditModalClose?.addEventListener('click', fecharModalEdicaoSAC);
-sacEditCancelBtn?.addEventListener('click', fecharModalEdicaoSAC);
-sacEditModal?.addEventListener('click', (e) => {
-  if (e.target === sacEditModal) fecharModalEdicaoSAC();
-});
-
-// Event listener para salvar as edições
-sacEditSaveBtn?.addEventListener('click', async () => {
-  const id = sacEditId.value;
-  if (!id) return;
-  
-  const novaObservacao = sacEditObservacao.value.trim();
-  const novoStatus = sacEditStatus.value.trim();
-  const conteudoOriginalStr = sacEditConteudoOriginal.value;
-  
-  // Coleta as novas quantidades
-  const qtdInputs = document.querySelectorAll('.sac-qtd-input');
-  let novoConteudo = null;
-  
-  if (conteudoOriginalStr && conteudoOriginalStr !== '—') {
-    try {
-      const items = JSON.parse(conteudoOriginalStr);
-      if (Array.isArray(items)) {
-        qtdInputs.forEach(input => {
-          const idx = parseInt(input.dataset.idx);
-          const novaQtd = input.value.trim();
-          if (items[idx]) {
-            items[idx].quantidade = novaQtd;
-          }
-        });
-        novoConteudo = JSON.stringify(items);
-      }
-    } catch (err) {
-      console.warn('[SAC] Erro ao processar conteúdo:', err);
-    }
-  }
-  
-  sacEditSaveBtn.disabled = true;
-  
-  try {
-    // 1. Atualizar observação
-    const respObs = await fetch(`/api/sac/solicitacoes/${id}/observacao`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ observacao: novaObservacao })
-    });
-    if (!respObs.ok) throw new Error('Erro ao atualizar observação');
-    
-    // 2. Atualizar status livre
-    const respStatus = await fetch(`/api/sac/solicitacoes/${id}/status-livre`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ status: novoStatus })
-    });
-    if (!respStatus.ok) throw new Error('Erro ao atualizar status');
-    
-    // 3. Atualizar quantidade (se houver conteúdo)
-    if (novoConteudo) {
-      const respQtd = await fetch(`/api/sac/solicitacoes/${id}/quantidade`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ conteudo: novoConteudo })
-      });
-      if (!respQtd.ok) throw new Error('Erro ao atualizar quantidade');
-    }
-    
-    alert('Registro atualizado com sucesso!');
-    fecharModalEdicaoSAC();
-    
-    // Recarrega a tabela
-    carregarSacSolicitacoes(sacTabelaBody, { hideDone: false, filterByUser: true });
-  } catch (err) {
-    console.error('[SAC] Erro ao salvar edição:', err);
-    alert('Não foi possível salvar as alterações. ' + (err?.message || ''));
-  } finally {
-    sacEditSaveBtn.disabled = false;
-  }
-});
-
-// Event listener para os botões "Editar"
-document.addEventListener('click', (e) => {
-  const btnEditar = e.target.closest('.btn-sac-editar');
-  if (btnEditar) {
-    e.preventDefault();
-    const id = btnEditar.dataset.id;
-    const obs = btnEditar.dataset.obs.replace(/&quot;/g, '"');
-    const status = btnEditar.dataset.status;
-    const conteudo = btnEditar.dataset.conteudo.replace(/&quot;/g, '"');
-    abrirModalEdicaoSAC(id, obs, status, conteudo);
-  }
-});
+// ========== MODAL DE EDIÇÃO DE ENVIO SAC — REMOVIDO ==========
+// (substituído pelo fluxo VIPP direto)
+function abrirModalEdicaoSAC() { /* removido */ }
+function fecharModalEdicaoSAC() { /* removido */ }
 
 // Event listener para os botões "Excluir"
 document.addEventListener('click', async (e) => {
@@ -26095,14 +25959,32 @@ window.openRegistros = async function() {
     return `etq_printer_pref_${u}`;
   }
   function _etqCarregarPref() {
+    // Carrega localStorage imediatamente (UX responsivo)
     _etqPrinterPref = localStorage.getItem(_etqPrefKey()) || null;
     _etqAtualizarBtnPref();
+    // Sincroniza com banco em background
+    fetch('/api/usuario/preferencias/impressora_etiquetas')
+      .then(r => r.ok ? r.json() : null)
+      .then(d => {
+        if (d && d.valor) {
+          _etqPrinterPref = d.valor;
+          localStorage.setItem(_etqPrefKey(), d.valor);
+          _etqAtualizarBtnPref();
+        }
+      })
+      .catch(() => {});
   }
   function _etqSalvarPref(printer) {
     _etqPrinterPref = printer || null;
     if (printer) localStorage.setItem(_etqPrefKey(), printer);
     else localStorage.removeItem(_etqPrefKey());
     _etqAtualizarBtnPref();
+    // Persiste no banco
+    fetch('/api/usuario/preferencias', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ chave: 'impressora_etiquetas', valor: printer || null })
+    }).catch(() => {});
   }
   function _etqAtualizarBtnPref() {
     const btn = document.getElementById('etqBtnImpressora');
@@ -68233,6 +68115,11 @@ window.initOscilacaoEstoque = (function () {
   const declTotalValor = document.getElementById('vippDeclTotalValor');
 
   if (!modal) return;
+  // Move modal para body, escapando display:none do sacAtPane
+  document.body.appendChild(modal);
+
+  // Flag: indica se o modal foi aberto pelo botão do painel SAC (e não pelo AT)
+  var _vippContextoSac = false;
 
   // ── Declaração de Conteúdo — helpers ─────────────────────────────────────
   function sanitizarDesc(str) {
@@ -68441,7 +68328,30 @@ window.initOscilacaoEstoque = (function () {
     statusEl.textContent   = text;
   }
 
-  if (openBtn)   openBtn.addEventListener('click', openModal);
+  if (openBtn)   openBtn.addEventListener('click', function () {
+    _vippContextoSac = false;
+    if (fillFromOsBtn) fillFromOsBtn.style.display = '';
+    openModal();
+  });
+
+  // sacVippBtn — abre o mesmo modal VIPP a partir do painel SAC
+  var sacVippBtn = document.getElementById('sacVippBtn');
+  if (sacVippBtn) sacVippBtn.addEventListener('click', function () {
+    _vippContextoSac = true;
+    if (fillFromOsBtn) fillFromOsBtn.style.display = 'none';
+    prePopular();
+    // Pré-preenche Observação com número da OS/AT se disponível
+    var _tit = (document.getElementById('atEditModalTitle') ? document.getElementById('atEditModalTitle').textContent : '').trim();
+    var _osN = _tit.replace(/[^0-9]/g, '');
+    var _obsEl = document.getElementById('vippObservacao');
+    if (_obsEl) {
+      _obsEl.value = _osN ? 'OS' + _osN : '';
+    }
+    modal.style.display = 'flex';
+    document.body.style.overflow = 'hidden';
+    setStatus('');
+  });
+
   if (closeBtn)  closeBtn.addEventListener('click', closeModal);
   if (cancelBtn) cancelBtn.addEventListener('click', closeModal);
   modal.addEventListener('click', function (e) { if (e.target === modal) closeModal(); });
@@ -68615,6 +68525,10 @@ window.initOscilacaoEstoque = (function () {
             if (itensDecl.length > 0) {
               criarSolicitacaoSeparacaoVipp(itensDecl, osNum, g('vippObservacao'), data.idConhecimento || null);
             }
+            // Se aberto pelo painel SAC, cria entrada em envios.solicitacoes automaticamente
+            if (_vippContextoSac) {
+              criarEntradaSacVipp(itensDecl, osNum, data.idConhecimento || null);
+            }
             enviarBtn.disabled = true;
             enviarBtn.innerHTML =
               '<i class="fa-solid fa-circle-check" style="color:#34d399;"></i>' +
@@ -68695,7 +68609,10 @@ window.initOscilacaoEstoque = (function () {
           item_ids:        _adicionados,
           forcar_novo_sep: true,
           os_num:          osNum   || null,
-          id_vipp:         idVipp  || null
+          id_vipp:         idVipp  || null,
+          conteudo:        itensDecl.length ? JSON.stringify(itensDecl.map(function(it) {
+                             return { conteudo: it.descricao || '', quantidade: parseInt(it.quantidade, 10) || 1 };
+                           })) : null
         })
       });
       var _envData = await _envResp.json();
@@ -68714,6 +68631,58 @@ window.initOscilacaoEstoque = (function () {
       }
     } catch (_e3) {
       console.error('[VIPP→Sep] Erro ao enviar separação:', _e3);
+    }
+  }
+
+  // ── Cria entrada em envios.solicitacoes após VIPP bem-sucedido (contexto SAC) ──
+  async function criarEntradaSacVipp(itensDecl, osNum, idVipp) {
+    var nomeUser = '';
+    try {
+      var _meResp = await fetch('/api/auth/status', { credentials: 'include' });
+      var _me = await _meResp.json();
+      nomeUser = (_me && _me.user && (_me.user.username || _me.user.nome)) || '';
+    } catch (_e) { /* ignora */ }
+
+    // Converte itens para formato [{ conteudo, quantidade }] (mesmo do PDF)
+    var conteudoItems = itensDecl.map(function (it) {
+      return { conteudo: it.descricao || '', quantidade: String(parseInt(it.quantidade, 10) || 1) };
+    });
+    var conteudoJson = conteudoItems.length ? JSON.stringify(conteudoItems) : null;
+    var observacao = osNum ? 'OS' + osNum : '';
+
+    try {
+      var _resp = await fetch('/api/sac/solicitacoes/vipp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          usuario:    nomeUser,
+          observacao: observacao,
+          id_vipp:    idVipp || null,
+          conteudo:   conteudoJson
+        })
+      });
+      var _d = await _resp.json();
+      if (_d.ok) {
+        // Atualiza a tabela SAC no painel
+        try {
+          var _sacBody = document.getElementById('sacTabelaBody');
+          if (_sacBody && typeof carregarSacSolicitacoes === 'function') {
+            await carregarSacSolicitacoes(_sacBody, { hideDone: false, filterByUser: true });
+          }
+        } catch (_e2) { /* ignora */ }
+        // Mostra nota no modal
+        var _sEl = document.getElementById('vippModalStatus');
+        if (_sEl) {
+          var _note = document.createElement('div');
+          _note.style.cssText = 'margin-top:8px;padding:6px 10px;background:rgba(14,165,233,.10);border:1px solid #0ea5e966;border-radius:6px;font-size:12px;color:#7dd3fc;';
+          _note.innerHTML = '<i class="fa-solid fa-paper-plane" style="margin-right:5px;"></i>' +
+            'Registro de envio SAC criado automaticamente (ID ' + _d.id + ').';
+          _sEl.appendChild(_note);
+        }
+      }
+    } catch (_e3) {
+      console.error('[VIPP→SAC] Erro ao criar entrada SAC:', _e3);
     }
   }
 })();
