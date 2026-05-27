@@ -1,9 +1,0 @@
- cnumero | id | produto_codigo  |                        produto_descricao                        | quantidade | solicitante | previsao_chegada 
----------+----+-----------------+-----------------------------------------------------------------+------------+-------------+------------------
- 2243    | 48 | CODPROV - 00002 | teste de codigo gerado na omie                                  |          1 | leandro9808 | 
- 2241    | 47 | CODPROV - 00001 | teste de codigo                                                 |          1 | leandro9808 | 
- 2238    | 45 | 01.MP.N.30000   | ADESIVO 220V INDICACAO VOLTAGEM                                 |          1 | leandro9808 | 
- 2238    | 46 | 01.MP.N.30001   | ADESIVO 380V INDICACAO VOLTAGEM                                 |          1 | leandro9808 | 
- 2237    | 40 | 09.MC.N.10106   | 2.0022.01.1 - CAIXA ORGANIZADORA COM TAMPA 61 LTS - 1035 BRANCO |          1 | leandro9808 | 
-(5 linhas)
-

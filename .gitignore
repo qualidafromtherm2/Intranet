@@ -69,3 +69,16 @@ agente_impressao/*.exe
 
 # Arquivos pessoais do projeto — não versionar
 csv/1 - Instruções dev.csv
+
+# lixo operacional / capturas acidentais
+menu_produto.js.backup_errors
+t-temp.txt
+tart intranet_api
+tica.recebimentos_nfe_omie
+uario TEXT
+uario, NEW.produto_descricao, NEW.status, NEW.departamento
+uario, OLD.produto_descricao, OLD.status, OLD.departamento
+intranet_backup_20251118_102011_completude_campos_obrigatorios_familia.tar.gz
+OrdemProducaoJsonClient (5).js
+ProdutosEstruturaJsonClient (5).js
+API Omie/ProdutosEstruturaJsonClient (5).js
