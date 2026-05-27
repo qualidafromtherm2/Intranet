@@ -1248,7 +1248,8 @@ function _gerarZplDeclaracao({ remetente, remDoc, remEndereco, destinatario, des
   const Y_DATA      = Y_DIGITS + 22;           // 145
   const DATA_H      = 32;                      // linha data/modalidade mais alta (2 linhas no campo direito)
   const Y_PROT      = Y_DATA + DATA_H;         // 177
-  const Y_REM_HEAD  = Y_PROT + 22;             // 191
+  const FULL_H      = Y_PROT + 22 - Y0;         // 194 — altura total do bloco cabeçalho (outer box + divisor)
+  const Y_REM_HEAD  = Y_PROT + 22;             // 199
   const Y_REM_R1    = Y_REM_HEAD + 22;         // 213
   const Y_REM_R2    = Y_REM_R1 + 28;           // 241
   const Y_DES_HEAD  = Y_REM_R2 + 28;           // 269
@@ -1275,8 +1276,8 @@ function _gerarZplDeclaracao({ remetente, remDoc, remEndereco, destinatario, des
     `^LL${LL}`,
 
     // ── Cabeçalho principal (left: DACE info mesclado; right: código de barras) ──
-    `^FO0,${Y0}^GB799,${HEADER_H},2^FS`,
-    `^FO185,${Y0}^GB2,${HEADER_H},2^FS`,
+    `^FO0,${Y0}^GB799,${FULL_H},2^FS`,
+    `^FO185,${Y0}^GB2,${FULL_H},2^FS`,
     `^FO5,13^A0N,18,17^FDDACE - DECLARACAO AUXILIAR^FS`,
     `^FO5,35^A0N,16,15^FDDE CONTEUDO ELETRONICA^FS`,
     `^FO2,60^A0N,18,17^FB181,1,,C^FDN\xB0: ${nfeNumFmt}\\&^FS`,
@@ -1285,17 +1286,17 @@ function _gerarZplDeclaracao({ remetente, remDoc, remEndereco, destinatario, des
 
     // ── Dígitos da chave (largura total) ──
     `^FO0,${Y_DIGITS}^GB799,22,2^FS`,
-    `^FO5,${Y_DIGITS + 3}^A0N,14,13^FB789,1,,C^FD${z(chaveFormatted, 60)}\\&^FS`,
+    `^FO190,${Y_DIGITS + 3}^A0N,13,11^FB604,1,,C^FD${z(chaveFormatted, 60)}\\&^FS`,
 
     // ── Data emissão / Modalidade ──
     `^FO0,${Y_DATA}^GB799,${DATA_H},2^FS`,
-    `^FO360,${Y_DATA}^GB2,${DATA_H},2^FS`,
-    `^FO5,${Y_DATA + 9}^A0N,13,12^FDData emiss\xE3o: ${z(dataFmt, 40)}^FS`,
-    `^FO365,${Y_DATA + 3}^A0N,12,10^FB429,2,,^FDModalidade de Transporte: 0 - TRANSPORTE PELOS CORREIOS\\&^FS`,
+    `^FO430,${Y_DATA}^GB2,${DATA_H},2^FS`,
+    `^FO190,${Y_DATA + 4}^A0N,12,10^FB235,2,,^FDData emiss\xE3o: ${z(dataFmt, 40)}^FS`,
+    `^FO435,${Y_DATA + 4}^A0N,12,10^FB354,2,,^FDModalidade de Transporte: 0 - TRANSPORTE PELOS CORREIOS\\&^FS`,
 
     // ── Protocolo ──
     `^FO0,${Y_PROT}^GB799,22,2^FS`,
-    `^FO5,${Y_PROT + 4}^A0N,13,12^FDProtocolo de autoriza\xE7\xE3o: ${z(protocoloFmt, 70)}^FS`,
+    `^FO190,${Y_PROT + 4}^A0N,11,9^FB604,1,,^FDProtocolo de autoriza\xE7\xE3o: ${z(protocoloFmt, 70)}^FS`,
 
     // ── Remetente ──
     `^FO0,${Y_REM_HEAD}^GB799,22,22^FS`,
