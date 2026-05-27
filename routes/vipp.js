@@ -4,6 +4,7 @@
 const express = require('express');
 const axios   = require('axios');
 const { dbQuery } = require('../src/db');
+const Jimp        = require('jimp');
 
 const router = express.Router();
 
@@ -14,6 +15,12 @@ const VIPP_ID_PERFIL = process.env.VIPP_ID_PERFIL || '9363';
 const VIPP_ENDPOINT  = 'http://vpsrv.visualset.com.br/PostagemVipp.asmx';
 const VIPP_IMPRESSAO = 'https://vipp.visualset.com.br/vipp/remoto/ImpressaoRemota.php';
 const VIPP_WEB_URL   = 'https://vipp.visualset.com.br';
+
+// URLs dos logos para etiqueta ZPL (carregados e cacheados na primeira impressão)
+const LOGO_EMPRESA_URL  = 'https://pxhbginkisinegzupqcy.supabase.co/storage/v1/object/public/compras-anexos/favicons/logo_guia_20260323.png';
+const LOGO_EXPRESSA_URL = 'https://pxhbginkisinegzupqcy.supabase.co/storage/v1/object/public/compras-anexos/favicons/expressa_logo.png';
+const LOGO_CORREIOS_URL = 'https://pxhbginkisinegzupqcy.supabase.co/storage/v1/object/public/compras-anexos/favicons/Logo_Correios.png';
+const _gfCache = new Map();
 
 // ── Sessão web VIPP (PHP session para GerarPPN) ───────────────────────────────
 let _vippWebSession = { cookie: null, expiresAt: 0 };
@@ -577,33 +584,55 @@ router.post('/imprimir-envio', async (req, res) => {
     );
     if (!rows.length) return res.status(404).json({ ok: false, error: 'Envio não encontrado' });
 
-    // Se o registro já tem etiqueta_url, o frontend deveria abrir o PDF diretamente
-    if (rows[0].etiqueta_url) {
-      return res.status(400).json({ ok: false, error: 'Este envio já possui etiqueta PDF salva. Abra o link diretamente.', etiqueta_url: rows[0].etiqueta_url });
-    }
+    // 2. Obtém ZPL — usa cache se disponível, senão busca no VIPP e converte
+    let zpl = null;
+    const cachedUrl = rows[0].etiqueta_url || '';
 
-    const identificacao = (rows[0].identificacao || '').trim().replace(/\s+/g, '');
-    if (!identificacao) {
-      return res.status(400).json({ ok: false, error: 'Código de identificação (ECT) ainda não disponível para este envio' });
-    }
-
-    // 2. Busca ZVP (ZPL) no VIPP — Filtro=1 (Registro ECT), Saida=0 (ZVP)
-    const params = new URLSearchParams({
-      Usr:    VIPP_USUARIO,
-      Pwd:    VIPP_TOKEN,
-      Filtro: '1',
-      Ordem:  '1',
-      Saida:  '0',
-      Lista:  identificacao,
-    });
-    const vippResp = await axios.get(`${VIPP_IMPRESSAO}?${params}`, {
-      responseType: 'arraybuffer',
-      timeout: 30000,
-      validateStatus: s => s === 200,
-    });
-    const zpl = Buffer.from(vippResp.data).toString('latin1');
-    if (!zpl.trim()) {
-      return res.status(502).json({ ok: false, error: 'VIPP retornou ZPL vazio' });
+    if (cachedUrl.trimStart().startsWith('^XA')) {
+      // Cache já é ZPL válido — usa diretamente (reimpressão sem chamar VIPP)
+      zpl = cachedUrl;
+    } else if (cachedUrl.trimStart().startsWith('<?xml') || cachedUrl.trimStart().startsWith('<RECORDS')) {
+      // Cache é ZVP XML — converte para ZPL (sem chamar VIPP)
+      zpl = await _gerarZplEtiquetaEnvio(cachedUrl);
+      // Upgrade: substitui ZVP por ZPL no cache para reprints futuros
+      dbQuery(
+        `UPDATE envios.solicitacoes SET etiqueta_url = $1 WHERE id = $2`,
+        [zpl, Number(envio_id)]
+      ).catch(e => console.warn('[VIPP] falha ao atualizar ZPL em etiqueta_url:', e.message));
+    } else {
+      // Sem cache — busca no VIPP
+      const identificacao = (rows[0].identificacao || '').trim().replace(/\s+/g, '');
+      if (!identificacao) {
+        return res.status(400).json({ ok: false, error: 'Código de identificação (ECT) ainda não disponível para este envio' });
+      }
+      const params = new URLSearchParams({
+        Usr:    VIPP_USUARIO,
+        Pwd:    VIPP_TOKEN,
+        Filtro: '1',
+        Ordem:  '1',
+        Saida:  '0',
+        Lista:  identificacao,
+      });
+      const vippResp = await axios.get(`${VIPP_IMPRESSAO}?${params}`, {
+        responseType: 'arraybuffer',
+        timeout: 30000,
+        validateStatus: s => s === 200,
+      });
+      const zvpXml = Buffer.from(vippResp.data).toString('latin1');
+      if (!zvpXml.trim()) {
+        return res.status(502).json({ ok: false, error: 'VIPP retornou ZVP vazio' });
+      }
+      // Converte ZVP XML → ZPL para enviar ao agente Zebra
+      zpl = await _gerarZplEtiquetaEnvio(zvpXml);
+      // Persiste ZPL em etiqueta_url (cache para reimpressões futuras)
+      try {
+        await dbQuery(
+          `UPDATE envios.solicitacoes SET etiqueta_url = $1 WHERE id = $2 AND (etiqueta_url IS NULL OR etiqueta_url = '')`,
+          [zpl, Number(envio_id)]
+        );
+      } catch (e) {
+        console.warn('[VIPP] imprimir-envio: falha ao salvar ZPL em etiqueta_url:', e.message);
+      }
     }
 
     // 3. Enfileira no agente de impressão
@@ -612,16 +641,7 @@ router.post('/imprimir-envio', async (req, res) => {
        VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
       [[], 0, usuario, zpl, 1, destino_agente || null, impressora || null]
     );
-    // 4. Persiste o ZPL em etiqueta_url (apenas quando vazio) para reimpressão futura
-    try {
-      await dbQuery(
-        `UPDATE envios.solicitacoes SET etiqueta_url = $1 WHERE id = $2 AND (etiqueta_url IS NULL OR etiqueta_url = '')`,
-        [zpl, Number(envio_id)]
-      );
-    } catch (e) {
-      console.warn('[VIPP] imprimir-envio: falha ao salvar ZPL em etiqueta_url:', e.message);
-    }
-    console.log(`[VIPP] imprimir-envio: envio_id=${envio_id} identificacao=${identificacao} fila_id=${filaIns.rows[0].id}`);
+    console.log(`[VIPP] imprimir-envio: envio_id=${envio_id} fila_id=${filaIns.rows[0].id} fromCache=${!!cachedUrl}`);
     return res.json({ ok: true, fila_id: filaIns.rows[0].id });
 
   } catch (err) {
@@ -660,8 +680,9 @@ router.get('/declaracao', async (req, res) => {
     if (!rows.length) return res.status(404).json({ ok: false, error: 'Envio não encontrado' });
     const envio = rows[0];
 
-    // 1. Se já tem declaração salva em Supabase → redireciona
-    if (envio.declaracao_url) {
+    // 1. Se já tem declaração salva como URL (PDF/Supabase) → redireciona
+    // Obs: se declaracao_url contém ZPL (^XA), não é URL — ignora e regenera HTML
+    if (envio.declaracao_url && envio.declaracao_url.trimStart().startsWith('http')) {
       return res.redirect(302, envio.declaracao_url);
     }
 
@@ -901,14 +922,25 @@ router.post('/imprimir-declaracao', async (req, res) => {
   if (!envio_id) return res.status(400).json({ ok: false, error: 'envio_id obrigatório' });
 
   try {
-    // 1. Busca dados do envio
+    // 1. Busca dados do envio (inclui declaracao_url para cache)
     const { rows } = await dbQuery(
-      `SELECT id, identificacao, id_vipp, conteudo, observacao
+      `SELECT id, identificacao, id_vipp, conteudo, observacao, declaracao_url
          FROM envios.solicitacoes WHERE id = $1 LIMIT 1`,
       [Number(envio_id)]
     );
     if (!rows.length) return res.status(404).json({ ok: false, error: 'Envio não encontrado' });
     const envio = rows[0];
+
+    // 1b. Se já há ZPL em cache, enfileira direto sem re-chamar VIPP
+    if (envio.declaracao_url && envio.declaracao_url.trimStart().startsWith('^XA')) {
+      const filaIns = await dbQuery(
+        `INSERT INTO etiqueta."ETQ_fila_impressao" (etq_ids, multiplo, usuario, zpl, quantidade, destino_agente, impressora)
+         VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
+        [[], 0, usuario, envio.declaracao_url, 1, destino_agente || null, impressora || null]
+      );
+      console.log(`[VIPP] imprimir-declaracao (cache): envio_id=${envio_id} fila_id=${filaIns.rows[0].id}`);
+      return res.json({ ok: true, fila_id: filaIns.rows[0].id, fromCache: true });
+    }
 
     const ect    = (envio.identificacao || '').trim().replace(/\s+/g, '');
     const idVipp = (envio.id_vipp || '').toString().trim();
@@ -997,6 +1029,180 @@ router.post('/imprimir-declaracao', async (req, res) => {
   }
 });
 
+// Converte imagem PNG de URL para comando ^GF (ZPL). Cache por URL+dimensões.
+async function _imgToGf(url, targetW, targetH) {
+  const key = `${url}:${targetW}x${targetH}`;
+  if (_gfCache.has(key)) return _gfCache.get(key);
+  try {
+    const img = await Jimp.read(url);
+    img.contain(targetW, targetH, Jimp.HORIZONTAL_ALIGN_CENTER | Jimp.VERTICAL_ALIGN_MIDDLE, 0xFFFFFFFF);
+    img.grayscale();
+    const w   = img.getWidth();
+    const h   = img.getHeight();
+    const bpr = Math.ceil(w / 8);
+    let hex = '';
+    for (let row = 0; row < h; row++) {
+      for (let bx = 0; bx < bpr; bx++) {
+        let byte = 0;
+        for (let bit = 0; bit < 8; bit++) {
+          const px = bx * 8 + bit;
+          if (px < w) {
+            const { r, a } = Jimp.intToRGBA(img.getPixelColor(px, row));
+            if (a > 32 && r < 128) byte |= (0x80 >> bit);
+          }
+        }
+        hex += byte.toString(16).padStart(2, '0').toUpperCase();
+      }
+    }
+    const cmd = `^GFA,${bpr * h},${bpr * h},${bpr},${hex}`;
+    _gfCache.set(key, cmd);
+    return cmd;
+  } catch (e) {
+    console.warn('[VIPP] _imgToGf falha:', url, e.message);
+    return null;
+  }
+}
+
+// Gera ZPL da Etiqueta de Envio — layout fiel ao modelo Correios (VIPP PDF)
+// Label: 100×150mm (^PW812 × ^LL1218) a 203 DPI
+async function _gerarZplEtiquetaEnvio(zvpXml) {
+  const get = (tag) => {
+    const m = zvpXml.match(new RegExp(`<${tag}>(?:<!\\[CDATA\\[)?([\\s\\S]*?)(?:\\]\\]>)?</${tag}>`, 'i'));
+    return m ? m[1].trim() : '';
+  };
+  const safe = (s, n) => String(s || '').replace(/[\^~\\]/g, '').replace(/\r?\n/g, ' ').slice(0, n);
+  const fmtCep = (c) => {
+    const d = (c || '').replace(/\D/g, '');
+    return d.length === 8 ? `${d.slice(0, 5)}-${d.slice(5)}` : (c || '');
+  };
+  // Formata código ECT com espaços: "AD468913789BR" → "AD 468 913 789 BR"
+  const fmtEct = (s) => {
+    const c = String(s || '').replace(/\s/g, '');
+    return /^[A-Z]{2}\d{9}[A-Z]{2}$/i.test(c)
+      ? `${c.slice(0,2)} ${c.slice(2,5)} ${c.slice(5,8)} ${c.slice(8,11)} ${c.slice(11,13)}`
+      : c;
+  };
+  const SRV_NOME = { '3220':'EXPRESSA', '03220':'EXPRESSA', '40010':'SEDEX', '04510':'PAC', '04669':'PAC' };
+
+  const ectRegRaw  = safe(get('ect_reg'), 20).replace(/\s/g, '');
+  const ectReg     = fmtEct(ectRegRaw);
+  const ectSrvCode = safe(get('ect_srv') || get('ect_tip') || '', 10);
+  const contrato   = safe(get('ctt_nro') || get('ctt_ctr'), 20);
+  const volume     = safe(get('vol_pos') || get('vol_nro') || '1', 5);
+  const totalVol   = safe(get('vol_qtd') || get('vol_total') || '1', 5);
+  const desNom     = safe(get('des_nom'), 28);
+  const desAcd     = safe(get('des_acd'), 30);
+  const desLog     = safe(get('des_log'), 28);
+  const desNro     = safe(get('des_nro'), 6);
+  const desBrr     = safe(get('des_brr'), 22);
+  const desCid     = safe(get('des_cid'), 20);
+  const desUf      = safe(get('des_uf'), 2);
+  const desCep     = fmtCep(get('des_cep'));
+  const desCepD    = (get('des_cep') || '').replace(/\D/g, '');
+  const remNom     = safe(get('rem_nom'), 32);
+  const remLog     = safe(get('rem_log'), 28);
+  const remNro     = safe(get('rem_nro'), 6);
+  const remBrr     = safe(get('rem_brr'), 20);
+  const remCid     = safe(get('rem_cid'), 20);
+  const remUf      = safe(get('rem_uf'), 2);
+  const remCep     = fmtCep(get('rem_cep'));
+
+  const [gfEmpresa, gfExpressa, gfCorreios] = await Promise.all([
+    _imgToGf(LOGO_EMPRESA_URL,  160, 160),
+    _imgToGf(LOGO_EXPRESSA_URL, 210, 128),
+    _imgToGf(LOGO_CORREIOS_URL, 120,  44),
+  ]);
+
+  const desCepRaw  = (get('des_cep') || '').replace(/\D/g, '').padStart(8, '0').slice(0, 8);
+  const remCepRaw  = (get('rem_cep') || '').replace(/\D/g, '').padStart(8, '0').slice(0, 8);
+  const pesoStr    = String(parseInt(get('vol_pes') || '0') || 0).padStart(5, '0').slice(0, 5);
+  const cttNroPad  = String(get('ctt_nro') || '').replace(/\D/g, '').padStart(10, '0').slice(0, 10);
+  const admPad     = String(get('ctt_adm') || '').replace(/\D/g, '').padStart(8, '0').slice(0, 8);
+  const srvPad     = String(ectSrvCode).replace(/\D/g, '').padStart(4, '0').slice(0, 4);
+  const carPad     = String(get('ctt_car') || '').replace(/\D/g, '').padStart(8, '0').slice(0, 8);
+  const qrData = `${desCepRaw}00000${remCepRaw}00000${ectRegRaw}${pesoStr}${cttNroPad}${admPad}${srvPad}${carPad}-00.000000-00.000000|`;
+
+  // Pré-cálculo da altura do box DESTINATÁRIO (^GB desenhado antes do conteúdo)
+  // Y_BOX = separador (476) + 12px de margem = 488
+  const Y_BOX = 488;
+  let y_calc = Y_BOX + 52 + 6;
+  y_calc += 34;                  // nome (24pt)
+  if (desAcd) y_calc += 30;     // acompanhante (24pt)
+  y_calc += 30;                  // logradouro (24pt)
+  if (desBrr) y_calc += 28;     // bairro (24pt)
+  y_calc += 40;                  // CEP + cidade (28pt)
+  if (desCepD.length === 8) y_calc += 80; // barcode CEP
+  y_calc += 8;                   // padding inferior
+  const boxH = y_calc - Y_BOX;
+
+  const L = [];
+  L.push(
+    '^XA',
+    '^CI13',
+    '^PW799',
+    '^LH8,8',
+    '^LL1218',
+    // ══ HEADER ══
+    // Logo empresa (canto superior esquerdo, 160×160)
+    ...(gfEmpresa ? [`^FO10,5${gfEmpresa}`] : []),
+    // QR code centralizado no rótulo (X=357, mag=3)
+    `^FO357,5^BQN,2,3^FDQA,${qrData}^FS`,
+    // Contrato abaixo do QR — Y=142
+    ...(contrato ? [`^FO0,142^A0N,18,18^FB784,1,,C^FDContrato: ${contrato}^FS`] : []),
+    // Logo EXPRESSA (canto superior direito, 210×128)
+    ...(gfExpressa ? [`^FO574,5${gfExpressa}`] : []),
+    // Volume centralizado abaixo do logo EXPRESSA
+    `^FO574,143^A0N,18,18^FB210,1,,C^FDVolume: ${volume}/${totalVol}^FS`,
+    // Separador header
+    '^FO0,173^GB784,3,3^FS',
+    // ══ CÓDIGO ECT CENTRALIZADO ══
+    `^FO0,182^A0N,36,36^FB784,1,,C^FD${ectReg}^FS`,
+    // ══ CÓDIGO DE BARRAS CODE-128 (quase full-width, BY4=alta densidade, altura 130px) ══
+    `^FO36,224^BY4,3,130^BCN,130,N,N^FD${ectRegRaw}^FS`,
+    // Separador
+    '^FO0,394^GB784,3,3^FS',
+    // ══ LINHAS DE RECEBEDOR / ASSINATURA ══
+    '^FO14,402^A0N,22,22^FDRecebedor:^FS',
+    '^FO132,423^GB652,2,2^FS',
+    '^FO14,436^A0N,22,22^FDAssinatura:^FS',
+    '^FO140,457^GB288,2,2^FS',
+    '^FO450,436^A0N,22,22^FDDocumento:^FS',
+    '^FO556,457^GB228,2,2^FS',
+    // Separador antes do bloco DESTINATÁRIO
+    '^FO0,476^GB784,3,3^FS',
+    // ══ BOX EXTERNO ao redor do bloco DESTINATÁRIO (borda 4 dots) ══
+    `^FO0,${Y_BOX}^GB784,${boxH},4^FS`,
+    // ══ FAIXA PRETA apenas onde está o texto DESTINATARIO ══
+    `^FO0,${Y_BOX}^GB230,52,52^FS`,
+    `^FO14,${Y_BOX+12}^A0N,28,28^FR^FDDESTINATARIO^FS`,
+    // Logo CORREIOS: canto direito da banda DESTINATÁRIO (8px dentro da borda interna)
+    ...(gfCorreios
+      ? [`^FO652,${Y_BOX+4}${gfCorreios}`]
+      : [`^FO652,${Y_BOX+15}^A0N,20,20^FDCorreios^FS`]
+    ),
+  );
+
+  // ══ DADOS DO DESTINATÁRIO — todos em 24pt (tamanho uniforme) ══
+  let y = Y_BOX + 52 + 6;
+  L.push(`^FO14,${y}^A0N,24,24^FD${desNom}^FS`); y += 34;
+  if (desAcd) { L.push(`^FO14,${y}^A0N,24,24^FD${desAcd}^FS`); y += 30; }
+  L.push(`^FO14,${y}^A0N,24,24^FD${desLog}, ${desNro}^FS`); y += 30;
+  if (desBrr) { L.push(`^FO14,${y}^A0N,24,24^FD${desBrr}^FS`); y += 28; }
+  L.push(`^FO14,${y}^A0N,28,28^FD${desCep}  ${desCid}/${desUf}^FS`); y += 40;
+  if (desCepD.length === 8) {
+    L.push(`^FO14,${y}^BY2,3,70^BCN,70,N,N^FD${desCepD}^FS`); y += 80;
+  }
+
+  // ══ REMETENTE — texto solto abaixo do box, SEM bordas ══
+  y = Y_BOX + boxH + 10;
+  L.push(`^FO14,${y}^A0N,22,22^FDRemetente: ${remNom}^FS`); y += 30;
+  L.push(`^FO14,${y}^A0N,20,20^FD${remLog} ${remNro} ${remBrr}^FS`); y += 26;
+  L.push(`^FO14,${y}^A0N,20,20^FD${remCep}  ${remCid}/${remUf}^FS`);
+
+  L.push('^XZ');
+  return L.join('\n');
+}
+
 // Gera ZPL da Declaração de Conteúdo para impressora térmica (100x150mm, 203dpi)
 function _gerarZplDeclaracao({ remetente, remEndereco, destinatario, desEndereco, ect, chaveNfe, itens }) {
   // Sanitiza texto para ZPL: remove ^ ~ que são chars de controle ZPL
@@ -1055,14 +1261,16 @@ function _gerarZplDeclaracao({ remetente, remEndereco, destinatario, desEndereco
   y += 10;
   addSep();
 
-  // QR code com a chave NF-e (se disponível) — ocupa 120x120 dots à direita
+  // QR code com a chave NF-e (se disponível) — URL completa para consulta SEFAZ
   if (chaveNfe && /^\d{44}$/.test(chaveNfe)) {
     const qrY = y;
+    const sefazUrl = `https://www.nfe.fazenda.gov.br/portal/consultaRecaptcha.aspx?tipoConsulta=completa&chave=${chaveNfe}`;
     cmds.push(`^FO${LM},${qrY}^A0N,16,16^FDCHAVE NF-e:^FS`);
-    cmds.push(`^FO${LM},${qrY + 22}^A0N,14,14^FD${z(chaveNfe.substring(0, 44), 44)}^FS`);
-    // QR code posicionado à direita
-    cmds.push(`^FO${812 - 140},${qrY}^BQN,2,4^FDMM,A${chaveNfe}^FS`);
-    y = qrY + 140;
+    cmds.push(`^FO${LM},${qrY + 22}^A0N,14,14^FD${z(chaveNfe, 44)}^FS`);
+    // QR code: magnif=3 → ~171×171 dots (21mm) — cabe em 812 dots (X=633)
+    // ^FDQA,{url} = error level Q, auto encoding, dados = URL SEFAZ
+    cmds.push(`^FO${812 - 175},${qrY}^BQN,2,3^FDQA,${sefazUrl}^FS`);
+    y = qrY + 180;
     y += 8;
   }
 
