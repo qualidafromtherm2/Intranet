@@ -6425,11 +6425,13 @@ app.post(['/webhooks/omie/pedidos-compra', '/api/webhooks/omie/pedidos-compra'],
 
             if (!response.ok) {
               const errorText = await response.text();
-              const ehConsumoRedundante = /Consumo redundante|Client-8/i.test(errorText || '');
+              const ehConsumoRedundante = /Consumo redundante|Client-[68]/i.test(errorText || '');
               console.error(`[webhooks/omie/pedidos-compra] Erro na API Omie: ${response.status} - ${errorText}`);
 
               if (ehConsumoRedundante && tentativa < maxTentativas) {
-                const esperaMs = tentativa * 3000;
+                const matchSegundos = errorText.match(/Aguarde (\d+) segundos/i);
+                const esperaMs = matchSegundos ? (parseInt(matchSegundos[1], 10) * 1000 + 1000) : (tentativa * 3000);
+                console.log(`[webhooks/omie/pedidos-compra] Aguardando ${esperaMs/1000}s para tentar novamente...`);
                 await new Promise(resolve => setTimeout(resolve, esperaMs));
                 continue;
               }
@@ -6441,11 +6443,13 @@ app.post(['/webhooks/omie/pedidos-compra', '/api/webhooks/omie/pedidos-compra'],
             const faultcode = String(pedidoApi?.faultcode || '').trim();
 
             if (faultstring) {
-              const ehConsumoRedundante = /Consumo redundante|Client-8/i.test(`${faultstring} ${faultcode}`);
+              const ehConsumoRedundante = /Consumo redundante|Client-[68]/i.test(`${faultstring} ${faultcode}`);
               console.error(`[webhooks/omie/pedidos-compra] Falha ConsultarPedCompra: ${faultstring}${faultcode ? ` (${faultcode})` : ''}`);
 
               if (ehConsumoRedundante && tentativa < maxTentativas) {
-                const esperaMs = tentativa * 3000;
+                const matchSegundos = faultstring.match(/Aguarde (\d+) segundos/i);
+                const esperaMs = matchSegundos ? (parseInt(matchSegundos[1], 10) * 1000 + 1000) : (tentativa * 3000);
+                console.log(`[webhooks/omie/pedidos-compra] Aguardando ${esperaMs/1000}s para tentar novamente...`);
                 await new Promise(resolve => setTimeout(resolve, esperaMs));
                 continue;
               }
