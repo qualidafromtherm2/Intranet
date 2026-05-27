@@ -31624,8 +31624,6 @@ app.post('/api/compras/pedidos-omie/nfe-associar-pedido', express.json(), async 
           const isServico = !!(previewItem?.item_servico);
           const cfopServicoEntrada = isServico ? previewItem?.servico_cfop_entrada : null;
 
-          const nQtdeOverride = Number(override?.nQtde || 0);
-
           const ajustes = {};
           if (!isServico) ajustes.codigo_local_estoque = Number(ALMOX_LOCAL_PADRAO);
           if (cUnidadeFinal) ajustes.cUnidade = cUnidadeFinal;
@@ -31634,15 +31632,10 @@ app.post('/api/compras/pedidos-omie/nfe-associar-pedido', express.json(), async 
           // Só incluir o item se tiver ajustes
           if (Object.keys(ajustes).length === 0) return null;
 
-          // nQtde fica na raiz do item (não em itensAjustes — Omie rejeita lá)
-          const itemAEditar = {
+          return {
             itensIde: { nSequencia: nSeq, cAcao: 'EDITAR' },
             itensAjustes: ajustes
           };
-          if (!isServico && Number.isFinite(nQtdeOverride) && nQtdeOverride > 0) {
-            itemAEditar.nQtde = nQtdeOverride;
-          }
-          return itemAEditar;
         }).filter(Boolean);
 
         recebimentoCache = recebAtual;
@@ -31705,43 +31698,24 @@ app.post('/api/compras/pedidos-omie/nfe-associar-pedido', express.json(), async 
       }
     }
 
-    // ─── Passo 3: EDITAR itens com codigo_local_estoque + cUnidade + nQtde (se override) ───
-    // nQtde é enviado junto para evitar que um EDITAR separado sem os outros campos reverta
-    // o armazém/unidade. Se a Omie rejeitar o payload com nQtde, faz retry sem ele.
+    // ─── Passo 3: EDITAR itens com codigo_local_estoque + cUnidade + cCFOPEntrada ───
+    // Define armazém (Recebimento) e unidade conforme o pedido.
+    // A Omie não suporta alterar nQtde via AlterarRecebimento — a qtd é calculada pela Omie.
     if (itensEditarEstoque && itensEditarEstoque.length > 0) {
-      const hasQtdeOverride = itensEditarEstoque.some(it => it.nQtde != null);
       try {
         const payloadEstoque = {
           ide: { nIdReceb: Number(plano.n_id_receb) },
           itensRecebimentoEditar: itensEditarEstoque
         };
-        console.log('[Compras/NFeAssociarPedido] ===== PASSO 3: estoque' + (hasQtdeOverride ? ' + nQtde' : '') + ' =====');
+        console.log('[Compras/NFeAssociarPedido] ===== PASSO 3: estoque + unidade =====');
         console.log(JSON.stringify(payloadEstoque, null, 2));
         console.log('[Compras/NFeAssociarPedido] ===================================');
         await chamarApiRecebimentoNfeOmieComRetryRedundant('AlterarRecebimento', payloadEstoque, {
           tentativasMaximas: 2
         });
-        console.log('[Compras/NFeAssociarPedido] Local estoque/unidade' + (hasQtdeOverride ? '/nQtde' : '') + ' atualizados com sucesso.');
+        console.log('[Compras/NFeAssociarPedido] Local estoque/unidade atualizados com sucesso.');
       } catch (errEstoque) {
-        if (hasQtdeOverride) {
-          // Retry sem nQtde: garante que armazém e unidade sejam aplicados mesmo se Omie rejeitar nQtde
-          console.warn('[Compras/NFeAssociarPedido] Passo 3 com nQtde falhou, retrying sem nQtde:', errEstoque?.message);
-          const itensSemQtde = itensEditarEstoque.map(it => {
-            const { nQtde: _qtde, ...semQtde } = it;
-            return semQtde;
-          });
-          try {
-            await chamarApiRecebimentoNfeOmieComRetryRedundant('AlterarRecebimento', {
-              ide: { nIdReceb: Number(plano.n_id_receb) },
-              itensRecebimentoEditar: itensSemQtde
-            }, { tentativasMaximas: 2 });
-            console.log('[Compras/NFeAssociarPedido] Passo 3 (sem nQtde) aplicado com sucesso.');
-          } catch (errFallback) {
-            console.warn('[Compras/NFeAssociarPedido] Falha ao atualizar local estoque:', errFallback?.message);
-          }
-        } else {
-          console.warn('[Compras/NFeAssociarPedido] Falha ao atualizar local estoque:', errEstoque?.message);
-        }
+        console.warn('[Compras/NFeAssociarPedido] Falha ao atualizar local estoque:', errEstoque?.message);
       }
     }
 
