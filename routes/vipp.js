@@ -1216,7 +1216,7 @@ function _gerarZplDeclaracao({ remetente, remDoc, remEndereco, destinatario, des
   const chave = chaveNfe && /^\d{44}$/.test(chaveNfe) ? chaveNfe : '0'.repeat(44);
   const chaveFormatted = chave.match(/.{1,4}/g).join(' ');
 
-  const nfeNumFmt  = nfeNum  ? String(nfeNum).padStart(9, '0')  : '---';
+  const nfeNumFmt  = nfeNum  ? String(nfeNum)  : '---';
   const nfeSerieFmt = nfeSerie ? String(nfeSerie).padStart(3, '0') : '---';
 
   const dataFmt     = dataEmissao || (() => { const d = new Date(); return d.toLocaleDateString('pt-BR') + ' ' + d.toLocaleTimeString('pt-BR'); })();
@@ -1246,7 +1246,8 @@ function _gerarZplDeclaracao({ remetente, remDoc, remEndereco, destinatario, des
   const HEADER_H    = 118;
   const Y_DIGITS    = Y0 + HEADER_H;           // 123
   const Y_DATA      = Y_DIGITS + 22;           // 145
-  const Y_PROT      = Y_DATA + 24;             // 169
+  const DATA_H      = 32;                      // linha data/modalidade mais alta (2 linhas no campo direito)
+  const Y_PROT      = Y_DATA + DATA_H;         // 177
   const Y_REM_HEAD  = Y_PROT + 22;             // 191
   const Y_REM_R1    = Y_REM_HEAD + 22;         // 213
   const Y_REM_R2    = Y_REM_R1 + 28;           // 241
@@ -1268,7 +1269,7 @@ function _gerarZplDeclaracao({ remetente, remDoc, remEndereco, destinatario, des
 
   const lines = [
     '^XA',
-    '^CI13',
+    '^CI28',
     '^PW799',
     '^LH0,0',
     `^LL${LL}`,
@@ -1276,25 +1277,25 @@ function _gerarZplDeclaracao({ remetente, remDoc, remEndereco, destinatario, des
     // ── Cabeçalho principal (left: DACE info mesclado; right: código de barras) ──
     `^FO0,${Y0}^GB799,${HEADER_H},2^FS`,
     `^FO185,${Y0}^GB2,${HEADER_H},2^FS`,
-    `^FO5,13^A0N,18,17^FD${z('DACE - DECLARACAO AUXILIAR', 35)}^FS`,
-    `^FO5,35^A0N,16,15^FD${z('DE CONTEUDO ELETRONICA', 30)}^FS`,
-    `^FO2,65^A0N,18,17^FB181,1,,C^FDN: ${nfeNumFmt}\\&^FS`,
-    `^FO2,97^A0N,18,17^FB181,1,,C^FDSERIE: ${nfeSerieFmt}\\&^FS`,
-    `^FO190,43^BY2,3,42^BCN,42,N,N^FD${chave}^FS`,
+    `^FO5,13^A0N,18,17^FDDACE - DECLARACAO AUXILIAR^FS`,
+    `^FO5,35^A0N,16,15^FDDE CONTEUDO ELETRONICA^FS`,
+    `^FO2,60^A0N,18,17^FB181,1,,C^FDN\xB0: ${nfeNumFmt}\\&^FS`,
+    `^FO2,92^A0N,18,17^FB181,1,,C^FDS\xC9RIE: ${nfeSerieFmt}\\&^FS`,
+    `^FO187,10^BY2,3,95^BCN,95,N,N^FD${chave}^FS`,
 
     // ── Dígitos da chave (largura total) ──
     `^FO0,${Y_DIGITS}^GB799,22,2^FS`,
     `^FO5,${Y_DIGITS + 3}^A0N,14,13^FB789,1,,C^FD${z(chaveFormatted, 60)}\\&^FS`,
 
     // ── Data emissão / Modalidade ──
-    `^FO0,${Y_DATA}^GB799,24,2^FS`,
-    `^FO400,${Y_DATA}^GB2,24,2^FS`,
-    `^FO5,${Y_DATA + 4}^A0N,13,12^FDData emissao: ${z(dataFmt, 40)}^FS`,
-    `^FO405,${Y_DATA + 4}^A0N,13,12^FDModalidade: 0 - PELOS CORREIOS^FS`,
+    `^FO0,${Y_DATA}^GB799,${DATA_H},2^FS`,
+    `^FO360,${Y_DATA}^GB2,${DATA_H},2^FS`,
+    `^FO5,${Y_DATA + 9}^A0N,13,12^FDData emiss\xE3o: ${z(dataFmt, 40)}^FS`,
+    `^FO365,${Y_DATA + 3}^A0N,12,10^FB429,2,,^FDModalidade de Transporte: 0 - TRANSPORTE PELOS CORREIOS\\&^FS`,
 
     // ── Protocolo ──
     `^FO0,${Y_PROT}^GB799,22,2^FS`,
-    `^FO5,${Y_PROT + 4}^A0N,13,12^FDProtocolo de autorizacao: ${z(protocoloFmt, 70)}^FS`,
+    `^FO5,${Y_PROT + 4}^A0N,13,12^FDProtocolo de autoriza\xE7\xE3o: ${z(protocoloFmt, 70)}^FS`,
 
     // ── Remetente ──
     `^FO0,${Y_REM_HEAD}^GB799,22,22^FS`,
