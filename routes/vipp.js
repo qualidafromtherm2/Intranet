@@ -1282,7 +1282,7 @@ function _gerarZplDeclaracao({ remetente, remDoc, remEndereco, destinatario, des
     `^FO0,57^A0N,14,8^FB193,1,,C^FDDE  CONTEUDO  ELETRONICA\\&^FS`,
     `^FO2,100^A0N,18,17^FB191,1,,C^FDN\xB0: ${nfeNumFmt}\\&^FS`,
     `^FO2,128^A0N,18,17^FB191,1,,C^FDS\xC9RIE: ${nfeSerieFmt}\\&^FS`,
-    `^FO204,10^BY2,3,60^BCN,60,N,N^FD${chave}^FS`,
+    `^FO343,20^BY1,3,80^BCN,80,N,N^FD${chave}^FS`,
 
     // ── Dígitos da chave ──
     `^FO198,${Y_DIGITS}^A0N,13,11^FB588,1,,C^FD${z(chaveFormatted, 60)}\\&^FS`,
