@@ -59,17 +59,6 @@ function getPrinterConfig(cfg, printerName) {
   return saved ? Object.assign({}, base, saved) : base;
 }
 
-// Verifica se o serviço está rodando em localhost:PORT
-function pingService() {
-  return new Promise(resolve => {
-    const req = http.get({ hostname: '127.0.0.1', port: PORT, path: '/api/status', timeout: 2000 }, r => {
-      resolve(r.statusCode === 200); r.resume();
-    });
-    req.on('error', () => resolve(false));
-    req.on('timeout', () => { req.destroy(); resolve(false); });
-  });
-}
-
 function readConfig() {
   try {
     const raw = fs.readFileSync(CONFIG_PATH, 'utf8');
@@ -1198,27 +1187,30 @@ $Shortcut.Save()
     try { fs.unlinkSync(tmpPs); } catch {}
     if (rsShortcut.status === 0) { ok(); } else { warn('não foi possível criar atalho automático'); }
 
-    // 7. Inicia o serviço agora — tenta via schtasks /run (mais confiável, usa a tarefa já registrada)
+    // 7. Inicia o serviço agora via PowerShell (sem janela de console)
     step('Iniciando agente em background');
     try {
-      const runTask = spawnSync('schtasks', ['/run', '/tn', TASK_NAME], { encoding: 'utf8', windowsHide: true });
-      if (runTask.status !== 0) {
-        // Fallback: PowerShell Start-Process (caso schtasks falhe)
-        spawnSync('powershell.exe',
-          ['-NonInteractive', '-WindowStyle', 'Hidden', '-ExecutionPolicy', 'Bypass', '-File', ps1Path],
-          { encoding: 'utf8', windowsHide: true });
-      }
+      // PowerShell Start-Process com -WindowStyle Hidden é mais confiável que spawn
+      spawnSync('powershell.exe',
+        ['-NonInteractive', '-WindowStyle', 'Hidden', '-ExecutionPolicy', 'Bypass', '-File', ps1Path],
+        { encoding: 'utf8', windowsHide: true });
       ok();
     } catch (spawnErr) {
       console.log(`AVISO: ${spawnErr.message}`);
     }
 
-    // Aguarda serviço iniciar — tenta por até 15s (poll a cada 1s)
+    // 7. Aguarda serviço iniciar — tenta por até 10s (poll a cada 1s)
     step('Verificando serviço em localhost:' + PORT);
     let serviceOk = false;
-    for (let _i = 0; _i < 15 && !serviceOk; _i++) {
+    for (let _i = 0; _i < 10 && !serviceOk; _i++) {
       await new Promise(res => setTimeout(res, 1000));
-      serviceOk = await pingService();
+      serviceOk = await new Promise(resolve => {
+        const req = http.get({ hostname: '127.0.0.1', port: PORT, path: '/api/status', timeout: 2000 }, r => {
+          resolve(r.statusCode === 200); r.resume();
+        });
+        req.on('error', () => resolve(false));
+        req.on('timeout', () => { req.destroy(); resolve(false); });
+      });
     }
 
     if (serviceOk) {
@@ -1270,54 +1262,25 @@ $Shortcut.Save()
 }
 
 // ─── MODO ABRIR CONFIG ────────────────────────────────────────────────────────
-async function openConfig() {
+function openConfig() {
   // Verifica se o serviço já está rodando
-  let serviceOk = await pingService();
-
-  if (!serviceOk) {
-    // Tenta disparar via tarefa agendada (método mais confiável)
-    spawnSync('schtasks', ['/run', '/tn', TASK_NAME], { encoding: 'utf8', windowsHide: true });
-
-    // Fallback: spawn direto com --service
+  const req = http.get({ hostname: '127.0.0.1', port: PORT, path: '/api/status', timeout: 2000 }, r => {
+    r.resume();
+    // Serviço rodando — abre browser
+    spawnSync('cmd', ['/c', 'start', '', `http://localhost:${PORT}`], { windowsHide: true });
+    process.exit(0);
+  });
+  req.on('error', () => {
+    // Serviço não está rodando — inicia primeiro, depois abre
     const exeRun = path.join(INSTALL_DIR, EXE_NAME);
-    if (fs.existsSync(exeRun)) {
-      const child = spawn(exeRun, ['--service'], { detached: true, stdio: 'ignore', windowsHide: true });
-      child.unref();
-    }
-
-    // Aguarda serviço iniciar (até 15s, poll a cada 1s)
-    for (let i = 0; i < 15 && !serviceOk; i++) {
-      await new Promise(r => setTimeout(r, 1000));
-      serviceOk = await pingService();
-    }
-
-    if (!serviceOk) {
-      // Serviço não subiu — abre janela de prompt orientando o usuário
-      const SEP = '═'.repeat(62);
-      console.log(`\n╔${SEP}╗`);
-      console.log('║  ⚠️  Agente não está respondendo em localhost:' + PORT + '           ║');
-      console.log(`╠${SEP}╣`);
-      console.log('║  Possíveis causas:                                            ║');
-      console.log('║  1. Windows Defender bloqueou o início automático             ║');
-      console.log('║  2. A tarefa agendada não foi criada (execute o              ║');
-      console.log('║     instalador como Administrador)                            ║');
-      console.log(`╠${SEP}╣`);
-      console.log('║  Solução rápida:                                              ║');
-      console.log('║  1. Abra o Agendador de Tarefas (taskschd.msc)               ║');
-      console.log(`║  2. Localize "${TASK_NAME.padEnd(47)}║`);
-      console.log('║  3. Clique com botão direito → Executar                       ║');
-      console.log('║  4. Em seguida clique novamente no atalho                     ║');
-      console.log(`╚${SEP}╝\n`);
-      console.log('Pressione ENTER para fechar...');
-      process.stdin.setEncoding('utf8');
-      process.stdin.once('data', () => process.exit(1));
-      process.stdin.resume();
-      return;
-    }
-  }
-
-  spawnSync('cmd', ['/c', 'start', '', `http://localhost:${PORT}`], { windowsHide: true });
-  process.exit(0);
+    const child = spawn(exeRun, ['--service'], { detached: true, stdio: 'ignore', windowsHide: true });
+    child.unref();
+    setTimeout(() => {
+      spawnSync('cmd', ['/c', 'start', '', `http://localhost:${PORT}`], { windowsHide: true });
+      process.exit(0);
+    }, 2000);
+  });
+  req.on('timeout', () => { req.destroy(); });
 }
 
 // ─── ENTRYPOINT ──────────────────────────────────────────────────────────────
@@ -1325,7 +1288,7 @@ const args = process.argv.slice(2);
 if (args.includes('--service')) {
   runService();
 } else if (args.includes('--config')) {
-  openConfig().catch(e => { console.error(e); process.exit(1); });
+  openConfig();
 } else {
   install();
 }
