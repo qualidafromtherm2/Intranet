@@ -1,13 +1,8 @@
 // kanban_base.js
-import config from '../config.client.js';
-const { OMIE_APP_KEY, OMIE_APP_SECRET } = config;
-
 const getKanbanEndpoint = destino =>
   destino === 'preparacao' ? '/api/preparacao/listar' : '/api/kanban';
 
 // Define a URL-base das chamadas à API: usa window.location.origin
-const ZPL_TOKEN = 'fr0mTh3rm2025';          // ←  o MESMO valor que está no Render
- // Mantenha o token original
  const isLocal = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
  // Em local, imprime na própria máquina; em prod, aponta para o Windows da logística
  const PRINTER_URL = isLocal
@@ -104,9 +99,6 @@ export async function incluirOP_omie(item, diasPrazo = 1) {
 
   const payloadOP = {
     call: 'IncluirOrdemProducao',
-    // pode mandar a chave aqui ou deixar o servidor injetar via env
-    app_key: OMIE_APP_KEY,
-    app_secret: OMIE_APP_SECRET,
     param: [{
       identificacao: {
         cCodIntOP: String(Date.now()),
@@ -196,7 +188,7 @@ export async function gerarTicket () {
 
    // 1) Gera o .zpl na pasta determinada acima
    await fetch(
-     `/api/etiquetas?token=${encodeURIComponent(ZPL_TOKEN)}`,
+     '/api/etiquetas',
      { method: 'POST', headers, body: payload }
    );
 

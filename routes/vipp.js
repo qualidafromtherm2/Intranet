@@ -10,7 +10,7 @@ const router = express.Router();
 
 // ── Credenciais (variáveis de ambiente; padrão = homologação VisualSet) ───────
 const VIPP_USUARIO   = process.env.VIPP_USUARIO   || 'onbiws';
-const VIPP_TOKEN     = process.env.VIPP_TOKEN     || '112233';
+const VIPP_TOKEN     = String(process.env.VIPP_TOKEN || '').trim();
 const VIPP_ID_PERFIL = process.env.VIPP_ID_PERFIL || '9363';
 const VIPP_ENDPOINT  = 'http://vpsrv.visualset.com.br/PostagemVipp.asmx';
 const VIPP_IMPRESSAO = 'https://vipp.visualset.com.br/vipp/remoto/ImpressaoRemota.php';

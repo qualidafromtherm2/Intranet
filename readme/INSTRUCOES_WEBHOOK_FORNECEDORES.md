@@ -47,7 +47,7 @@ Você verá mensagens como:
 Seu webhook já está configurado e rodando em:
 
 ```
-https://intranet-30av.onrender.com/webhooks/omie/clientes?token=11e503358e3ae0bee91053faa1323629
+https://intranet-30av.onrender.com/webhooks/omie/clientes?token=<OMIE_WEBHOOK_TOKEN>
 ```
 
 ### Passo a Passo na Interface da Omie
@@ -65,7 +65,7 @@ Preencha os campos conforme abaixo:
 | **Nome** | `Webhook Fornecedores Intranet` |
 | **Evento/Tópico** | `Clientes/Fornecedores` |
 | **Operações** | ✅ Todas marcadas:<br>• ClienteFornecedor.Incluido<br>• ClienteFornecedor.Alterado<br>• ClienteFornecedor.Excluido |
-| **URL** | `https://intranet-30av.onrender.com/webhooks/omie/clientes?token=11e503358e3ae0bee91053faa1323629` |
+| **URL** | `https://intranet-30av.onrender.com/webhooks/omie/clientes?token=<OMIE_WEBHOOK_TOKEN>` |
 | **Método HTTP** | `POST` |
 | **Content-Type** | `application/json` |
 | **Status** | `Ativo` ✅ |
@@ -110,7 +110,7 @@ Após salvar, clique em **"Testar Webhook"** na interface da Omie.
 Se quiser testar o webhook sem usar a Omie:
 
 ```bash
-curl -X POST "https://intranet-30av.onrender.com/webhooks/omie/clientes?token=11e503358e3ae0bee91053faa1323629" \
+curl -X POST "https://intranet-30av.onrender.com/webhooks/omie/clientes?token=<OMIE_WEBHOOK_TOKEN>" \
   -H "Content-Type: application/json" \
   -d '{
     "topic": "ClienteFornecedor.Alterado",
@@ -295,12 +295,12 @@ curl -X POST http://localhost:5001/api/fornecedores/sync
 
 **Verificar:** O token na URL deve ser exatamente:
 ```
-11e503358e3ae0bee91053faa1323629
+<OMIE_WEBHOOK_TOKEN>
 ```
 
 **URL completa:**
 ```
-https://intranet-30av.onrender.com/webhooks/omie/clientes?token=11e503358e3ae0bee91053faa1323629
+https://intranet-30av.onrender.com/webhooks/omie/clientes?token=<OMIE_WEBHOOK_TOKEN>
 ```
 
 ---
@@ -364,7 +364,7 @@ pm2 logs intranet_api | grep Fornecedores
 
 ### URL DO WEBHOOK PARA CONFIGURAR NA OMIE:
 ```
-https://intranet-30av.onrender.com/webhooks/omie/clientes?token=11e503358e3ae0bee91053faa1323629
+https://intranet-30av.onrender.com/webhooks/omie/clientes?token=<OMIE_WEBHOOK_TOKEN>
 ```
 
 ### EVENTOS A MARCAR:

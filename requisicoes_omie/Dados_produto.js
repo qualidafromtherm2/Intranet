@@ -1,5 +1,4 @@
 // requisicoes_omie/Dados_produto.js
-import config from '../config.client.js';
 import { renderListaPecas } from '../produtos/lista_Pecas.js';
 import {
   setCurrentCodigo,
@@ -17,9 +16,6 @@ const API_BASE =
   (location.hostname === 'localhost' || location.hostname === '127.0.0.1')
     ? 'http://localhost:5001'
     : window.location.origin;         // produção (Render)
-
-    
-const { OMIE_APP_KEY, OMIE_APP_SECRET } = config;
 
 // --- Controle de permissões de produto ---
 let userPermissoes = [];
@@ -341,8 +337,6 @@ try {
       headers: { 'Content-Type':'application/json' },
       body: JSON.stringify({
         call:       'ObterEstoqueProduto',
-        app_key:    OMIE_APP_KEY,
-        app_secret: OMIE_APP_SECRET,
         param:      [{ cCodigo: codigo, dDia }]
       })
     });
@@ -847,9 +841,7 @@ if (!window.__allCaracteristicas) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       call:       'ListarCaracteristicas',
-      param:      [{ nPagina:1, nRegPorPagina:50 }],
-      app_key:    OMIE_APP_KEY,
-      app_secret: OMIE_APP_SECRET
+      param:      [{ nPagina:1, nRegPorPagina:50 }]
     })
   });
   const jsonCarat = await respCarat.json();
@@ -1015,9 +1007,7 @@ if (!caracUl._caracListenerAttached) {
         // ─── 1ª requisição: cria a característica ────────────────────────
         const payload1 = {
           call:       'IncluirCaracteristica',
-          param:      [{ cCodIntCaract: valorNome, cNomeCaract: valorNome }],
-          app_key:    OMIE_APP_KEY,
-          app_secret: OMIE_APP_SECRET
+          param:      [{ cCodIntCaract: valorNome, cNomeCaract: valorNome }]
         };
         console.log('▶️ IncluirCaracteristica →', payload1);
         let json1;
@@ -1063,9 +1053,7 @@ if (!caracUl._caracListenerAttached) {
                  cExibirItemNF:     cExibirNF,
                  cExibirItemPedido: cExibirPedido,
                  cExibirOrdemProd:  cExibirOrdem
-               }],
-               app_key:    OMIE_APP_KEY,
-               app_secret: OMIE_APP_SECRET
+               }]
              };
              console.log('▶️ IncluirCaractProduto →', payload2);
              try {
@@ -1265,9 +1253,7 @@ if (!caracUl._deleteListenerAttached) {
         headers: { 'Content-Type':'application/json' },
         body: JSON.stringify({
           call:  'ExcluirCaractProduto',
-          param: [{ nCodProd, nCodCaract }],
-          app_key: OMIE_APP_KEY,
-          app_secret: OMIE_APP_SECRET
+          param: [{ nCodProd, nCodCaract }]
         })
       });
       const json = await resp.json();
@@ -1470,9 +1456,7 @@ ulMalha.addEventListener('click', async ev => {
           percPerdaProdMalha: +submenu.querySelector('[data-key="percPerdaProdMalha"]').value,
           obsProdMalha      :  submenu.querySelector('[data-key="obsProdMalha"]').value
         }]
-      }],
-      app_key   : OMIE_APP_KEY,
-      app_secret: OMIE_APP_SECRET
+      }]
     };
   
     btn.disabled  = true;

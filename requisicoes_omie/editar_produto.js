@@ -1,7 +1,4 @@
 // requisicoes_omie/editar_produto.js
-import config from '../config.client.js';
-const { OMIE_APP_KEY, OMIE_APP_SECRET } = config;
-
 const API_BASE =
   (location.hostname === 'localhost' || location.hostname === '127.0.0.1')
     ? 'http://localhost:5001'
@@ -210,8 +207,6 @@ await fetch(`${API_BASE}/api/omie/estoque/ajuste/`, {
   headers: { 'Content-Type': 'application/json' },
   body: JSON.stringify({
     call:      'AlterarEstoqueMinimo',
-    app_key:   OMIE_APP_KEY,
-    app_secret: OMIE_APP_SECRET,
     param: [{
       cod_int:  currentCodigo,
       quan_min: novoValor

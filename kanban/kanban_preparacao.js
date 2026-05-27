@@ -1,8 +1,6 @@
 // kanban/kanban_preparacao.js
-import config from '../config.client.js';
 import { enableDragAndDrop } from './kanban_base.js';
 
-const { OMIE_APP_KEY, OMIE_APP_SECRET } = config;
 const API_BASE = window.location.origin;
 
 /* ===========================================================
@@ -93,9 +91,7 @@ class CacheManager {
           apenas_importado_api: 'N',
           filtrar_apenas_omiepdv: 'N',
           filtrar_apenas_tipo: '03'
-        }],
-        app_key: OMIE_APP_KEY,
-        app_secret: OMIE_APP_SECRET
+        }]
       };
 
       // Descobrir total de registros

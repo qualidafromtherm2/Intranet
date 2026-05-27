@@ -1,9 +1,6 @@
 // kanban_detalhes.js  – responsável por abrir a aba Detalhes
 // Sempre consulta a OMIE e mostra TODOS os itens do pedido.
 
-import config from '../config.client.js';
-const { OMIE_APP_KEY, OMIE_APP_SECRET } = config;
-
 const API_BASE =
   (location.hostname === 'localhost' || location.hostname === '127.0.0.1')
     ? 'http://localhost:5001'
@@ -48,8 +45,6 @@ export function initKanbanDetalhes(itemsKanban) {
       /* consulta OMIE */
       const payload = {
         call: 'ConsultarPedido',
-        app_key: OMIE_APP_KEY,
-        app_secret: OMIE_APP_SECRET,
         param: [{ numero_pedido: numeroPedido }],
         source: 'kanban/kanban_detalhes.js:dblclick-detalhes'
       };

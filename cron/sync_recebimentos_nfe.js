@@ -18,10 +18,14 @@
 const { Pool } = require('pg');
 
 // ─── Credenciais ──────────────────────────────────────────────────────────────
-const DATABASE_URL  = process.env.DATABASE_URL  || 'postgresql://intranet_db_yd0w_user:amLpOKjWzzDRhwcR1NF0eolJzzfCY0ho@dpg-d2d4b0a4d50c7385vm50-a.oregon-postgres.render.com:5432/intranet_db_yd0w?sslmode=require';
-const OMIE_APP_KEY  = process.env.OMIE_APP_KEY  || '4244634488206';
-const OMIE_APP_SECRET = process.env.OMIE_APP_SECRET || '10d9dde2e4e3bac7e62a2cc01bfba01e';
+const DATABASE_URL  = process.env.DATABASE_URL || '';
+const OMIE_APP_KEY  = process.env.OMIE_APP_KEY || '';
+const OMIE_APP_SECRET = process.env.OMIE_APP_SECRET || '';
 const OMIE_URL      = 'https://app.omie.com.br/api/v1/produtos/recebimentonfe/';
+
+if (!DATABASE_URL || !OMIE_APP_KEY || !OMIE_APP_SECRET) {
+  throw new Error('Defina DATABASE_URL, OMIE_APP_KEY e OMIE_APP_SECRET antes de executar cron/sync_recebimentos_nfe.js');
+}
 
 // Delay entre chamadas Omie para não ultrapassar o limite (~400ms ≈ 2,5 req/s)
 const DELAY_MS = 400;

@@ -72,7 +72,7 @@ pm2 logs intranet_api --lines 30
 ### Problema: Webhook não está sendo chamado
 **Solução:**
 1. Verificar configuração na Omie:
-   - URL: `https://intranet-30av.onrender.com/api/produtos/webhook?token=11e503358e3ae0bee91053faa1323629`
+   - URL: `https://intranet-30av.onrender.com/api/produtos/webhook?token=<OMIE_WEBHOOK_TOKEN>`
    - Método: POST
    - Eventos: Produto.Incluido, Produto.Alterado, Produto.Excluido
 2. Testar URL manualmente: `bash scripts/test_webhook_produtos.sh`
@@ -81,7 +81,7 @@ pm2 logs intranet_api --lines 30
 **Solução:**
 ```bash
 echo $OMIE_WEBHOOK_TOKEN
-# Deve retornar: 11e503358e3ae0bee91053faa1323629
+# Deve retornar: <OMIE_WEBHOOK_TOKEN>
 ```
 Se não retornar nada, adicione no `.env` ou nas variáveis do PM2.
 

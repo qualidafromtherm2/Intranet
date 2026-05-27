@@ -9,7 +9,7 @@ const OMIE_APP_KEY       = process.env.OMIE_APP_KEY || '';
 const OMIE_APP_SECRET    = process.env.OMIE_APP_SECRET || '';
 const OMIE_PROD_URL      = 'https://app.omie.com.br/api/v1/geral/produtos/';
 // Ctrl+F: require('express')  (cole logo abaixo dos requires)
-const INTERNAL_TOKEN = process.env.INTERNAL_TOKEN || 'changeme';
+const INTERNAL_TOKEN = String(process.env.INTERNAL_TOKEN || '').trim();
 const INTERNAL_BASE = `http://localhost:${process.env.PORT || 5001}`;
 
 // Utilzinho pra ocultar chaves em logs
@@ -409,6 +409,10 @@ async function processWebhookInBackground(app, body, messageId) {
   // dispara re-sync da ESTRUTURA (fire-and-forget)
   async function fireAndForgetResyncById(idProduto) {
     if (!idProduto) return;
+    if (!INTERNAL_TOKEN) {
+      console.warn('[webhook/produtos] INTERNAL_TOKEN ausente; re-sync interno não será disparado.');
+      return;
+    }
     const url = `${INTERNAL_BASE}/internal/pcp/estrutura/resync?token=${encodeURIComponent(INTERNAL_TOKEN)}`;
     const body = JSON.stringify({ id_produto: Number(idProduto) });
     try {

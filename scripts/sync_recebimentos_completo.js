@@ -7,9 +7,6 @@
  * Ou:  node scripts/sync_recebimentos_completo.js
  */
 
-const OMIE_APP_KEY = process.env.OMIE_APP_KEY || '4244634488206';
-const OMIE_APP_SECRET = process.env.OMIE_APP_SECRET || '10d9dde2e4e3bac7e62a2cc01bfba01e';
-
 async function syncRecebimentos() {
   console.log('\n╔════════════════════════════════════════════════════════════════╗');
   console.log('║  🔄 Sincronizando Recebimentos de NF-e da Omie              ║');

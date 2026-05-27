@@ -1,6 +1,4 @@
 // login/login.js
-import config from '../config.client.js';
-
 // opção A (recomendada): sempre a mesma origem
 const API_BASE = '';
 

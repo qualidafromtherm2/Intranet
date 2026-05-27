@@ -68,10 +68,6 @@ app.set('trust proxy', 1); // necessário no Render (proxy) para cookie Secure f
 app.use(express.json({ limit: '5mb' })); // precisa vir ANTES de app.use('/api/auth', ...)
 
 // server.js (antes das rotas HTML)
-app.use('/pst_prep_eletrica',
-  express.static(path.join(__dirname, 'pst_prep_eletrica'), { etag:false, maxAge:'1h' })
-);
-
 // === DEBUG BOOT / VIDA ======================================================
 app.get('/__ping', (req, res) => {
   res.type('text/plain').send(`[OK] ${new Date().toISOString()}`);
@@ -1424,14 +1420,16 @@ registro = omie.ConsultarEstrutura({
 
 // --- endpoint interno para re-sincronizar a estrutura de um produto ---
 // proteção simples com token opcional
-const INTERNAL_TOKEN = process.env.INTERNAL_TOKEN || null;
+const INTERNAL_TOKEN = String(process.env.INTERNAL_TOKEN || '').trim();
 
 app.post('/internal/pcp/estrutura/resync', express.json(), async (req, res) => {
   try {
-    if (INTERNAL_TOKEN) {
-      const tok = req.get('X-Internal-Token') || req.query.token || '';
-      if (tok !== INTERNAL_TOKEN) return res.status(401).json({ ok:false, error:'unauthorized' });
+    if (!INTERNAL_TOKEN) {
+      console.error('[internal/pcp/estrutura/resync] INTERNAL_TOKEN ausente. Recusando requisição.');
+      return res.status(503).json({ ok:false, error:'INTERNAL_TOKEN não configurado' });
     }
+    const tok = req.get('X-Internal-Token') || req.query.token || '';
+    if (tok !== INTERNAL_TOKEN) return res.status(401).json({ ok:false, error:'unauthorized' });
     const { cod_produto = null, id_produto = null, int_produto = null } = req.body || {};
     await resyncEstruturaDeProduto({ cod_produto, id_produto, int_produto });
     return res.json({ ok:true });
@@ -1612,8 +1610,8 @@ const CHAT_FILE  = path.join(__dirname, 'data', 'chat.json');
 let _cfgServer;
 try { _cfgServer = require('./config.server'); } catch (_) { _cfgServer = {}; }
 const {
-  OMIE_APP_KEY    = process.env.OMIE_APP_KEY    || '3917057082939',
-  OMIE_APP_SECRET = process.env.OMIE_APP_SECRET || '11e503358e3ae0bee91053faa1323629',
+  OMIE_APP_KEY    = process.env.OMIE_APP_KEY    || '',
+  OMIE_APP_SECRET = process.env.OMIE_APP_SECRET || '',
   GITHUB_TOKEN    = process.env.GITHUB_TOKEN,
   GITHUB_OWNER    = process.env.GITHUB_OWNER   || 'qualidafromtherm2',
   GITHUB_REPO     = process.env.GITHUB_REPO    || 'Foto-fromtherm',
@@ -1632,6 +1630,15 @@ const ETAPA_TO_STATUS = {
 const STATUS_TO_ETAPA = Object.fromEntries(
   Object.entries(ETAPA_TO_STATUS).map(([k,v]) => [v, k])
 );
+
+function buildOmieProxyPayload(body, forcedCall) {
+  return {
+    call: forcedCall || body?.call,
+    app_key: OMIE_APP_KEY,
+    app_secret: OMIE_APP_SECRET,
+    param: Array.isArray(body?.param) ? body.param : []
+  };
+}
 
 
 function toOmieDate(d) {
@@ -10520,8 +10527,34 @@ function getDirs(tipo = 'Expedicao') {
 }
 
 
+function hasAuthenticatedSession(req) {
+  return Boolean(req.session?.user?.id);
+}
 
-app.use('/etiquetas', express.static(etiquetasRoot));
+function hasAgentStaticAccess(req) {
+  const token = String(req.get('x-agent-token') || req.query.token || '').trim();
+  return Boolean(AGENTE_TOKEN) && token === AGENTE_TOKEN;
+}
+
+function requireSessionForStatic(req, res, next) {
+  if (hasAuthenticatedSession(req)) return next();
+  return res.sendStatus(401);
+}
+
+function requireSessionOrAgentForStatic(req, res, next) {
+  if (hasAuthenticatedSession(req) || hasAgentStaticAccess(req)) return next();
+  return res.sendStatus(401);
+}
+
+app.use('/etiquetas', requireSessionOrAgentForStatic, express.static(etiquetasRoot, {
+  etag: false,
+  maxAge: 0,
+  dotfiles: 'deny',
+  index: false,
+  setHeaders: (res) => {
+    res.setHeader('Cache-Control', 'no-store');
+  }
+}));
 
 // Garante schema etiqueta e tabela ETQ_recebimento no Postgres
 (async () => {
@@ -10601,7 +10634,7 @@ app.use('/etiquetas', express.static(etiquetasRoot));
 })();
 
 // ── Token simples de autenticação para o agente de impressão ─────────────────
-const AGENTE_TOKEN = process.env.AGENTE_TOKEN || 'sgf-agente-2024';
+const AGENTE_TOKEN = String(process.env.AGENTE_TOKEN || '').trim();
 
 // Estado em memória do agente ativo (sem DB — reseta com restart do servidor)
 const _agenteAtivo  = { ts: 0, printer: '', host: '', version: '' };
@@ -10610,6 +10643,10 @@ const _agentesOnline = new Map(); // key: pcName → { pcName, printers, lastSee
 
 // POST /api/etiquetas/agente/heartbeat — agente anuncia que está online
 app.post('/api/etiquetas/agente/heartbeat', express.json(), async (req, res) => {
+  if (!AGENTE_TOKEN) {
+    console.error('[etiquetas/agente/heartbeat] AGENTE_TOKEN ausente. Recusando requisição.');
+    return res.status(503).json({ error: 'AGENTE_TOKEN não configurado' });
+  }
   const token = req.headers['x-agent-token'];
   if (token !== AGENTE_TOKEN) return res.status(401).json({ error: 'Token inválido' });
   const { printer = '', version = '?', host = '', pcName = '', printers = [], printerAliases = {} } = req.body || {};
@@ -10776,6 +10813,10 @@ app.post('/api/etiquetas/fila', express.json(), async (req, res) => {
 
 // GET /api/etiquetas/fila/pendentes — agente busca trabalhos pendentes
 app.get('/api/etiquetas/fila/pendentes', async (req, res) => {
+  if (!AGENTE_TOKEN) {
+    console.error('[etiquetas/fila/pendentes] AGENTE_TOKEN ausente. Recusando requisição.');
+    return res.status(503).json({ error: 'AGENTE_TOKEN não configurado' });
+  }
   const token = req.headers['x-agent-token'] || req.query.token;
   if (token !== AGENTE_TOKEN) return res.status(401).json({ error: 'Token inválido' });
   // Atualiza heartbeat retrocompat
@@ -10809,6 +10850,10 @@ app.get('/api/etiquetas/fila/pendentes', async (req, res) => {
 
 // POST /api/etiquetas/fila/confirmar — agente confirma impressão ou erro
 app.post('/api/etiquetas/fila/confirmar', express.json(), async (req, res) => {
+  if (!AGENTE_TOKEN) {
+    console.error('[etiquetas/fila/confirmar] AGENTE_TOKEN ausente. Recusando requisição.');
+    return res.status(503).json({ error: 'AGENTE_TOKEN não configurado' });
+  }
   const token = req.headers['x-agent-token'] || req.query.token;
   if (token !== AGENTE_TOKEN) return res.status(401).json({ error: 'Token inválido' });
   try {
@@ -11801,8 +11846,22 @@ app.get('/api/etiquetas/ocupacao', async (req, res) => {
 // Servir lib XLSX local (para importação de estrutura sem depender de CDN externo)
 app.use('/vendor/xlsx', express.static(path.join(__dirname, 'node_modules/xlsx/dist')));
 
+app.use('/pst_prep_eletrica', requireSessionForStatic,
+  express.static(path.join(__dirname, 'pst_prep_eletrica'), {
+    etag: false,
+    maxAge: '1h',
+    dotfiles: 'deny',
+    index: false,
+  })
+);
+
 // Servir agente de impressão local (download para PCs Windows)
-app.use('/agente-impressao', express.static(path.join(__dirname, 'agente_impressao')));
+app.use('/agente-impressao', requireSessionForStatic, express.static(path.join(__dirname, 'agente_impressao'), {
+  etag: false,
+  maxAge: 0,
+  dotfiles: 'deny',
+  index: false,
+}));
 
 // Retorna URL pública do instalador Windows + versão atual do agente
 const _AGENTE_VERSAO_ATUAL    = process.env.AGENTE_VERSAO || '2.6';
@@ -11813,7 +11872,12 @@ app.get('/api/etiquetas/agente-url', (req, res) => {
 });
 
 // Servir anexos de compras
-app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+app.use('/uploads', requireSessionForStatic, express.static(path.join(__dirname, 'uploads'), {
+  etag: false,
+  maxAge: 0,
+  dotfiles: 'deny',
+  index: false,
+}));
 
 // Servir imagens de produtos com fallback transparente (evita 404s no console)
 const _IMAGENS_PROD_DIR = path.join(__dirname, 'img', 'Produto');
@@ -13842,8 +13906,13 @@ function gerarEtiquetaPP({ codMP, op, descricao = '' }) {
   }
 
   // ===================== INÍCIO DA ROTA ======================
-  const dsn = process.env.DATABASE_URL
-    || 'postgresql://intranet_db_yd0w_user:amLpOKjWzzDRhwcR1NF0eolJzzfCY0ho@dpg-d2d4b0a4d50c7385vm50-a/intranet_db_yd0w';
+  const dsn = process.env.DATABASE_URL || '';
+  if (!dsn) {
+    return res.status(500).json({
+      faultstring: 'DATABASE_URL ausente para gerar ordem de produção.',
+      faultcode: 'SOAP-ENV:Server'
+    });
+  }
   const pool = new Pool({ connectionString: dsn, ssl: { rejectUnauthorized: false } });
 
   try {
@@ -13853,8 +13922,8 @@ function gerarEtiquetaPP({ codMP, op, descricao = '' }) {
     // 0) payload de entrada
     const front = req.body || {};
     front.call       = front.call       || 'IncluirOrdemProducao';
-    front.app_key    = front.app_key    || OMIE_APP_KEY;
-    front.app_secret = front.app_secret || OMIE_APP_SECRET;
+    front.app_key    = OMIE_APP_KEY;
+    front.app_secret = OMIE_APP_SECRET;
 
     if (!front.app_key || !front.app_secret) {
       return res.status(200).json({
@@ -14103,10 +14172,12 @@ app.post('/api/omie/estoque/ajuste', express.json(), async (req, res) => {
   console.log('\n[ajuste] payload recebido →\n',
               JSON.stringify(req.body, null, 2));
 
+  const payload = buildOmieProxyPayload(req.body, 'AlterarEstoqueMinimo');
+
   try {
     const data = await omieCall(
       'https://app.omie.com.br/api/v1/estoque/ajuste/',
-      req.body
+      payload
     );
 
     // 2) loga a resposta OK do OMIE
@@ -17437,11 +17508,12 @@ app.post('/api/omie/estoque/resumo', express.json(), async (req, res) => {
 // Rota para servir de proxy à chamada de PosicaoEstoque do OMIE
 app.post('/api/omie/estoque/consulta', express.json(), async (req, res) => {
   console.log('[estoque/consulta] req.body →', JSON.stringify(req.body, null, 2));
+  const payload = buildOmieProxyPayload(req.body);
   try {
     const omieResponse = await fetch('https://app.omie.com.br/api/v1/estoque/consulta/', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(req.body)
+      body: JSON.stringify(payload)
     });
     const text = await omieResponse.text();
     console.log('[estoque/consulta] OMIE responded status', omieResponse.status, 'body:', text);
@@ -19263,14 +19335,30 @@ const STATIC_BLOCKLIST_FILES = new Set([
   '/add_anexos_column.js', '/disable_trigger.js', '/fix_trigger.js',
   '/sync_omie_imagens_estoque.js', '/sync_omie_produtos.js',
   '/watch_print.js', '/teste_simples.js',
+  '/menu_produto.js.backup_errors', '/server.js.bak', '/server.js.bak2',
+  '/server.js.bak3', '/server.js.bak_httpfetch', '/t-temp.txt',
+  '/tart intranet_api', '/tica.recebimentos_nfe_omie',
+  '/uario TEXT', '/uario, NEW.produto_descricao, NEW.status, NEW.departamento',
+  '/uario, OLD.produto_descricao, OLD.status, OLD.departamento',
+]);
+const STATIC_ROOT_PUBLIC_FILES = new Set([
+  '/menu_produto.html',
+  '/menu_produto.js',
+  '/menu_produto.css',
+  '/config.client.js',
+  '/manifest.webmanifest',
+  '/sw.js',
+  '/favicon.ico',
+  '/at-link.html',
 ]);
 const STATIC_BLOCKLIST_PREFIXES = [
   '/.git', '/.env', '/node_modules', '/scripts/', '/sql/', '/data/',
   '/csv/', '/backend/', '/cron/', '/logs/', '/uploads_internal/',
   '/readme/', '/.github/', '/.vscode/', '/api%20omie/', '/api omie/',
-  '/Site_AT/', '/site_at/',
+  '/Site_AT/', '/site_at/', '/routes/', '/src/', '/utils/', '/workers/',
+  '/agente_impressao/', '/_nfe_omie/', '/api omie/', '/api%20omie/',
 ];
-const STATIC_BLOCKLIST_EXT = /\.(bak|bak\d*|backup|sql|sqlite|db|dump|env|pem|key|pfx|p12|log|sh|ps1|psql|tsv)$/i;
+const STATIC_BLOCKLIST_EXT = /\.(bak|bak\d*|backup|sql|sqlite|db|dump|env|pem|key|pfx|p12|log|sh|ps1|psql|tsv|txt|csv|tar|gz|tgz|zip|7z|rar)$/i;
 app.use((req, res, next) => {
   if (req.method !== 'GET' && req.method !== 'HEAD') return next();
   let p;
@@ -19280,6 +19368,9 @@ app.use((req, res, next) => {
   if (STATIC_BLOCKLIST_FILES.has(p)) return res.status(404).end();
   const lower = p.toLowerCase();
   if (STATIC_BLOCKLIST_PREFIXES.some(pref => lower.startsWith(pref.toLowerCase()))) {
+    return res.status(404).end();
+  }
+  if (/^\/[^/]+$/.test(p) && !STATIC_ROOT_PUBLIC_FILES.has(lower)) {
     return res.status(404).end();
   }
   if (STATIC_BLOCKLIST_EXT.test(lower)) return res.status(404).end();

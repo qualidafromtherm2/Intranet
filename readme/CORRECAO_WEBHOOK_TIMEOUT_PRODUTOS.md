@@ -70,7 +70,7 @@ pm2 logs intranet_api --lines 50
 
 ### Teste 2: Simular webhook manualmente
 ```bash
-curl -X POST "http://localhost:5001/api/produtos/webhook?token=11e503358e3ae0bee91053faa1323629" \
+curl -X POST "http://localhost:5001/api/produtos/webhook?token=<OMIE_WEBHOOK_TOKEN>" \
   -H "Content-Type: application/json" \
   -d '{
     "messageId": "test-123",
@@ -183,7 +183,7 @@ Edite um produto na Omie e observe os logs:
 #### 1. Verificar se o token está correto
 ```bash
 echo $OMIE_WEBHOOK_TOKEN
-# Deve ser: 11e503358e3ae0bee91053faa1323629
+# Deve ser: <OMIE_WEBHOOK_TOKEN>
 ```
 
 #### 2. Verificar se as credenciais da Omie estão configuradas

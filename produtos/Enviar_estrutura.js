@@ -7,9 +7,6 @@
  *  • Preenche coluna “Custo real” a partir do cache, sem logs nem CSV
  * ======================================================================= */
 
-import config from '../config.client.js';
-
-
 // === KILL-SWITCH DA OMIE (evita /api/omie/estoque/consulta) ===
 // Se já existir a função, esta substituição entra depois do load:
 // Evita consumir Omie na navegação normal
@@ -21,13 +18,6 @@ function dbg(...msg) {
   console.log('[PedidoCompra]', ...msg);
 }
 
-
-
-const { OMIE_APP_KEY, OMIE_APP_SECRET } = config;
-
-
-
-// no topo do arquivo, logo após `const { OMIE_APP_KEY, OMIE_APP_SECRET } = config;`
 function hojeDDMMYYYY() {
   const d = new Date();
   const day   = String(d.getDate()).padStart(2, '0');
@@ -68,8 +58,6 @@ async function fetchPagina(nPagina = 1) {
 
   const payload = {
     call: 'ListarPosEstoque',
-     app_key:    OMIE_APP_KEY,
-     app_secret: OMIE_APP_SECRET,
      param: [{
        nPagina,
        nRegPorPagina: PAGE_SIZE,
@@ -387,8 +375,6 @@ itens.push({
 
 const payload = {
   call       : 'IncluirEstrutura',
-  app_key    : OMIE_APP_KEY,
-  app_secret : OMIE_APP_SECRET,
   param      : [{ idProduto, itemMalhaIncluir: itens }]
 };
   dbg('🚚 Payload FINAL →\n' + JSON.stringify(payload, null, 2));

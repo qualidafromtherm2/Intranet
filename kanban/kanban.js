@@ -25,8 +25,6 @@ function obterDescricao(codMP) {
   return prod ? prod.descricao : '';
 }
 
-import config from '../config.client.js';
-const { OMIE_APP_KEY, OMIE_APP_SECRET } = config;
 /* ——— Filtro de estoque (true = mostra tudo, false = só baixos) ——— */
 let pcpShowAll = false;           // começa mostrando **apenas** itens em vermelho
 let kanbanCache = [];      // mantém os itens atuais em memória
@@ -58,8 +56,6 @@ async function atualizarEstoqueKanban () {
   /* 1) monta o payload – só 1 página, 50 itens */
   const payload = {
     call      : 'ListarPosEstoque',
-    app_key   : OMIE_APP_KEY,
-    app_secret: OMIE_APP_SECRET,
     param     : [{
       nPagina: 1,
       nRegPorPagina: 50,
@@ -336,9 +332,7 @@ async function fetchAllProducts(filter) {
         apenas_importado_api: 'N',
         filtrar_apenas_omiepdv: 'N',
         filtrar_apenas_descricao: `%${filter}%`
-      }],
-      app_key:    OMIE_APP_KEY,
-      app_secret: OMIE_APP_SECRET
+      }]
     };
 
     console.log(`[OMIE][Page ${page}] Enviando payload:`, payload);
@@ -883,8 +877,6 @@ function attachDoubleClick(itemsKanban) {
     try {
       const payload = {
         call: 'ConsultarPedido',
-        app_key: OMIE_APP_KEY,
-        app_secret: OMIE_APP_SECRET,
         param: [{ numero_pedido: numeroPedido }],
         source: 'kanban/kanban.js:dblclick-detalhes'
       };

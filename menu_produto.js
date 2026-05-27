@@ -1,7 +1,5 @@
 // menu_produto.js
 // v4.0 - Sincronização automática Omie→PostgreSQL antes de abrir produto
-import config from './config.client.js';
-const { OMIE_APP_KEY, OMIE_APP_SECRET } = config;
 const API_BASE = window.location.origin; // já serve https://intranet-30av.onrender.com
 
 // Silencia TODOS os logs de console EXCETO diagnóstico de produtos
@@ -3454,8 +3452,6 @@ async function fetchAndRenderProdutos() {
       headers:     { 'Content-Type':'application/json' },
       body: JSON.stringify({
         call:       'ListarProdutosResumido',
-        app_key:    OMIE_APP_KEY,
-        app_secret: OMIE_APP_SECRET,
         param: [{
           pagina: 1,
           registros_por_pagina: 100,
@@ -57310,15 +57306,13 @@ async function searchProdutosQuery(query, limit = 30) {
 
   // 3) Último recurso: se sua Lista usa Omie, puxa um lote e filtra localmente (mantém seu fallback)
   try {
-    if (typeof API_BASE !== 'undefined' && typeof OMIE_APP_KEY !== 'undefined') {
+    if (typeof API_BASE !== 'undefined') {
       const res = await fetch(`${API_BASE}/api/omie/produtos`, {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           call:       'ListarProdutosResumido',
-          app_key:    OMIE_APP_KEY,
-          app_secret: OMIE_APP_SECRET,
           param: [{ pagina: 1, registros_por_pagina: 500, filtrar_apenas_descricao: '' }]
         })
       });
