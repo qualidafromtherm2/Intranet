@@ -15678,7 +15678,7 @@ app.post('/api/admin/sync/almoxarifado', express.json(), async (req, res) => {
   };
 
   try {
-    // 1) primeira página — **cExibeTodos: 'N'** (apenas itens com saldo)
+    // 1) primeira página — **cExibeTodos: 'S'** (todos os itens, incluindo saldo zero)
     const basePayload = {
       call: 'ListarPosEstoque',
       app_key: OMIE_APP_KEY,
@@ -15687,7 +15687,7 @@ app.post('/api/admin/sync/almoxarifado', express.json(), async (req, res) => {
         nPagina: 1,
         nRegPorPagina: perPage,
         dDataPosicao: dataBR,
-        cExibeTodos : 'N',                       // <<< aqui o ajuste
+        cExibeTodos : 'S',                       // inclui produtos com saldo=0 (necessário para estoque_minimo)
         codigo_local_estoque: Number(localCodigo)
       }]
     };
