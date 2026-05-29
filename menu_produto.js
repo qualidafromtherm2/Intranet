@@ -68474,7 +68474,6 @@ window.initOscilacaoEstoque = (function () {
           valor:   g('vippVlrNF'),
         },
         declaracaoConteudo: itensDecl.length ? {
-          docRemetente:    (document.getElementById('vippDeclDocRemetente')    ? document.getElementById('vippDeclDocRemetente').value    : '').replace(/\D/g, ''),
           docDestinatario: (document.getElementById('vippDeclDocDestinatario') ? document.getElementById('vippDeclDocDestinatario').value : '').replace(/\D/g, ''),
           pesoTotal:       g('vippDeclPesoTotal'),
           itens:           itensDecl,

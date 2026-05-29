@@ -15,6 +15,16 @@ const VIPP_ID_PERFIL = process.env.VIPP_ID_PERFIL || '9363';
 const VIPP_ENDPOINT  = 'http://vpsrv.visualset.com.br/PostagemVipp.asmx';
 const VIPP_IMPRESSAO = 'https://vipp.visualset.com.br/vipp/remoto/ImpressaoRemota.php';
 const VIPP_WEB_URL   = 'https://vipp.visualset.com.br';
+const VIPP_REMETENTE_PADRAO = Object.freeze({
+  nome: process.env.VIPP_REMETENTE_NOME || 'FROM THERM',
+  documento: String(process.env.VIPP_REMETENTE_DOCUMENTO || '12659566000109').replace(/\D/g, ''),
+  endereco: process.env.VIPP_REMETENTE_ENDERECO || 'RUA JOSE AGENOR DA LUZ',
+  numero: process.env.VIPP_REMETENTE_NUMERO || '0',
+  bairro: process.env.VIPP_REMETENTE_BAIRRO || 'REAL PARQUE',
+  cidade: process.env.VIPP_REMETENTE_CIDADE || 'SAO JOSE',
+  uf: process.env.VIPP_REMETENTE_UF || 'SC',
+  cep: process.env.VIPP_REMETENTE_CEP || '88113-317',
+});
 
 // URLs dos logos para etiqueta ZPL (carregados e cacheados na primeira impressão)
 const LOGO_EMPRESA_URL  = 'https://pxhbginkisinegzupqcy.supabase.co/storage/v1/object/public/compras-anexos/favicons/logo_guia_20260323.png';
@@ -694,9 +704,26 @@ router.post('/gerar-etiqueta', async (req, res) => {
           if (envRows.length) {
             const env = envRows[0];
             if (!env.declaracao_url || !String(env.declaracao_url).trimStart().startsWith('^XA')) {
-              const dados = await _resolverDadosDeclaracao(env, '[VIPP] gerar-etiqueta pre-cache', { exigirCamposObrigatorios: true });
-              await _persistirDeclaracaoCache(env.id, dados, dados.chaveNfe || env.chave_dce || '');
-              console.log(`[VIPP] declaracao_url pre-gerada para envio id=${env.id}`);
+              const dadosLocais = _montarDadosDeclaracaoFallback(env);
+              const faltantesLocais = _listarCamposObrigatoriosDeclaracao(dadosLocais);
+
+              if (!faltantesLocais.length) {
+                await _persistirDeclaracaoCache(env.id, dadosLocais, dadosLocais.chaveNfe || env.chave_dce || '');
+                console.log(`[VIPP] declaracao_url pre-gerada localmente para envio id=${env.id}`);
+              } else {
+                const bloqueioSituacao = await _vippGetRateLimit('situacao_postagem');
+                if (bloqueioSituacao) {
+                  console.log(
+                    `[VIPP] gerar-etiqueta: declaracao pendente para envio id=${env.id}; ` +
+                    `faltantes locais: ${faltantesLocais.join(', ')}; ` +
+                    `consulta SituacaoPostagem bloqueada ate ${new Date(bloqueioSituacao.bloqueado_ate).toISOString()}`
+                  );
+                } else {
+                  const dados = await _resolverDadosDeclaracao(env, '[VIPP] gerar-etiqueta pre-cache', { exigirCamposObrigatorios: true });
+                  await _persistirDeclaracaoCache(env.id, dados, dados.chaveNfe || env.chave_dce || '');
+                  console.log(`[VIPP] declaracao_url pre-gerada para envio id=${env.id}`);
+                }
+              }
             }
           }
         } catch (e) {
@@ -1146,6 +1173,17 @@ function _montarEnderecoVipp(destinatario = {}) {
   ].filter(Boolean).join(' - ');
 }
 
+function _montarEnderecoRemetentePadrao() {
+  const cidadeUf = [VIPP_REMETENTE_PADRAO.cidade, VIPP_REMETENTE_PADRAO.uf].filter(Boolean).join('/');
+  return [
+    VIPP_REMETENTE_PADRAO.endereco,
+    VIPP_REMETENTE_PADRAO.numero,
+    VIPP_REMETENTE_PADRAO.bairro,
+    cidadeUf,
+    VIPP_REMETENTE_PADRAO.cep ? `CEP ${VIPP_REMETENTE_PADRAO.cep}` : null,
+  ].filter(Boolean).join(' - ');
+}
+
 function _formatarDataDeclaracao(valor) {
   if (!valor) return '';
   if (/^\d{2}\/\d{2}\/\d{4}$/.test(String(valor))) return String(valor);
@@ -1161,9 +1199,9 @@ function _montarDadosDeclaracaoFallback(envio = {}) {
   const declaracaoConteudo = vippPayload.declaracaoConteudo || {};
   const ect = String(envio.identificacao || '').trim().replace(/\s+/g, '');
   const dadosBase = {
-    remetente: 'FROM THERM SISTEMAS TERMICOS LTDA ME',
-    remDoc: String(declaracaoConteudo.docRemetente || '').trim(),
-    remEndereco: '',
+    remetente: VIPP_REMETENTE_PADRAO.nome,
+    remDoc: String(declaracaoConteudo.docRemetente || VIPP_REMETENTE_PADRAO.documento || '').trim(),
+    remEndereco: _montarEnderecoRemetentePadrao(),
     destinatario: String(destinatario.nome || envio.destinatario || envio.observacao || envio.numero_sep || envio.id_vipp || 'NAO INFORMADO').trim(),
     desDoc: String(declaracaoConteudo.docDestinatario || destinatario.cnpjCpf || '').trim(),
     desEndereco: _montarEnderecoVipp(destinatario),
@@ -1209,10 +1247,18 @@ function _listarCamposObrigatoriosDeclaracao(dados = {}) {
   return faltantes;
 }
 
+function _detalheApiIndicaBloqueioTemporario(detalheApi = '') {
+  const detalhe = String(detalheApi || '');
+  return /SituacaoPostagem bloqueada ate|Limite Gratuito Diario Atingido/i.test(detalhe);
+}
+
 function _montarErroCamposObrigatoriosDeclaracao(faltantes = [], detalheApi = '') {
   const faltantesLimpos = Array.from(new Set((faltantes || []).filter(Boolean)));
+  const orientacao = _detalheApiIndicaBloqueioTemporario(detalheApi)
+    ? ' A etiqueta pode ja ter sido gerada, mas a declaracao depende dos campos faltantes no payload local ou da liberacao da consulta VIPP.'
+    : '';
   const sufixoApi = detalheApi ? ` Consulta VIPP: ${detalheApi}` : '';
-  const err = new Error(`Declaração sem campos obrigatórios: ${faltantesLimpos.join(', ')}.${sufixoApi}`.trim());
+  const err = new Error(`Declaração sem campos obrigatórios: ${faltantesLimpos.join(', ')}.${sufixoApi}${orientacao}`.trim());
   err.camposFaltantes = faltantesLimpos;
   err.detalheApi = detalheApi || '';
   return err;
@@ -1413,10 +1459,9 @@ function _mapearSituacaoPostagem(s = {}, post = {}, etiqueta) {
   })();
 
   return {
-    remetente:   post.NomeRemetente || post.NomeFantasiaRemetente || 'FROM THERM SISTEMAS TERMICOS LTDA ME',
-    remDoc:      fmtCnpj(post.CNPJRemetente),
-    remEndereco,
-    destinatario: post.NomeDestinatario || '',
+    remetente:   post.NomeRemetente || post.NomeFantasiaRemetente || VIPP_REMETENTE_PADRAO.nome,
+    remDoc:      fmtCnpj(post.CNPJRemetente || VIPP_REMETENTE_PADRAO.documento),
+    remEndereco: remEndereco || _montarEnderecoRemetentePadrao(),
     desDoc:      fmtDocumento(documentoDestinatario),
     desEndereco,
     ect:         post.Etiqueta || s.Etiqueta || etiqueta,
@@ -2138,7 +2183,6 @@ router.get('/sep-check', async (req, res) => {
 });
 
 module.exports = router;
-
 // Helpers exportados para uso pelo cron de enriquecimento.
 // Mantem o router como export principal (compatibilidade) e expoe os
 // utilitarios via propriedades.
