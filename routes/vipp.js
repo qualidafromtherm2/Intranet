@@ -22,6 +22,107 @@ const LOGO_EXPRESSA_URL = 'https://pxhbginkisinegzupqcy.supabase.co/storage/v1/o
 const LOGO_CORREIOS_URL = 'https://pxhbginkisinegzupqcy.supabase.co/storage/v1/object/public/compras-anexos/favicons/Logo_Correios.png';
 const _gfCache = new Map();
 
+// ── Cache SQL compartilhado (etiqueta.vipp_situacao_cache) e rate-limit ──────
+const VIPP_CACHE_TTL_MS    = Number(process.env.VIPP_CACHE_TTL_MS    || 6 * 60 * 60 * 1000);  // 6h
+const VIPP_RATE_LIMIT_HINTS = [
+  /limite\s+gratuito/i,
+  /di[áa]rio\s+atingido/i,
+  /quota\s+excedida/i,
+  /requisi[çc][õo]es\s+excedidas/i,
+];
+
+function _eDiaSeguinteBR() {
+  // proximo dia 00:00:00 horario Sao Paulo (UTC-3, sem DST atual)
+  const agora = new Date();
+  const utc = agora.getTime() + agora.getTimezoneOffset() * 60000;
+  const br  = new Date(utc - 3 * 60 * 60 * 1000);
+  br.setHours(24, 0, 0, 0);
+  return new Date(br.getTime() + 3 * 60 * 60 * 1000);
+}
+
+function _ehErroRateLimitVipp(err) {
+  if (!err) return false;
+  const status = err?.response?.status;
+  if (status === 402 || status === 429) return true;
+  const msg = String(err?.message || err || '');
+  return VIPP_RATE_LIMIT_HINTS.some(rx => rx.test(msg));
+}
+
+async function _vippGetRateLimit(endpoint) {
+  try {
+    const { rows } = await dbQuery(
+      `SELECT bloqueado_ate, motivo, http_status
+         FROM etiqueta.vipp_rate_limit
+        WHERE endpoint = $1
+          AND bloqueado_ate IS NOT NULL
+          AND bloqueado_ate > now()
+        LIMIT 1`,
+      [endpoint]
+    );
+    return rows[0] || null;
+  } catch (err) {
+    console.warn('[VIPP] _vippGetRateLimit falhou:', err.message);
+    return null;
+  }
+}
+
+async function _vippMarcarRateLimit(endpoint, err) {
+  try {
+    const status = err?.response?.status || null;
+    const motivo = String(err?.message || 'rate limit').slice(0, 500);
+    const ate = _eDiaSeguinteBR();
+    await dbQuery(
+      `INSERT INTO etiqueta.vipp_rate_limit (endpoint, bloqueado_ate, motivo, http_status, detectado_em, atualizado_em)
+       VALUES ($1, $2, $3, $4, now(), now())
+       ON CONFLICT (endpoint) DO UPDATE
+         SET bloqueado_ate = EXCLUDED.bloqueado_ate,
+             motivo        = EXCLUDED.motivo,
+             http_status   = EXCLUDED.http_status,
+             atualizado_em = now()`,
+      [endpoint, ate, motivo, status]
+    );
+    console.warn(`[VIPP] rate-limit registrado em ${endpoint} ate ${ate.toISOString()}: ${motivo}`);
+  } catch (e) {
+    console.warn('[VIPP] _vippMarcarRateLimit falhou:', e.message);
+  }
+}
+
+async function _vippCacheGet(etiqueta) {
+  try {
+    const { rows } = await dbQuery(
+      `UPDATE etiqueta.vipp_situacao_cache
+          SET hits = hits + 1,
+              ultima_consulta = now()
+        WHERE etiqueta = $1
+          AND expira_em > now()
+        RETURNING dados, fonte`,
+      [etiqueta]
+    );
+    return rows[0] || null;
+  } catch (err) {
+    console.warn('[VIPP] _vippCacheGet falhou:', err.message);
+    return null;
+  }
+}
+
+async function _vippCacheSet(etiqueta, dados, fonte = 'soap', ttlMs = VIPP_CACHE_TTL_MS) {
+  try {
+    await dbQuery(
+      `INSERT INTO etiqueta.vipp_situacao_cache (etiqueta, dados, fonte, capturado_em, expira_em, ultima_consulta, hits)
+       VALUES ($1, $2::jsonb, $3, now(), now() + ($4 || ' milliseconds')::interval, now(), 0)
+       ON CONFLICT (etiqueta) DO UPDATE
+         SET dados           = EXCLUDED.dados,
+             fonte           = EXCLUDED.fonte,
+             capturado_em    = now(),
+             expira_em       = EXCLUDED.expira_em,
+             ultima_consulta = now()`,
+      [etiqueta, JSON.stringify(dados || {}), fonte, String(ttlMs)]
+    );
+  } catch (err) {
+    console.warn('[VIPP] _vippCacheSet falhou:', err.message);
+  }
+}
+
 // ── Sessão web VIPP (PHP session para GerarPPN) ───────────────────────────────
 let _vippWebSession = { cookie: null, expiresAt: 0 };
 
@@ -129,6 +230,15 @@ function extrairTag(xml, tag) {
   return m ? m[1].trim() : '';
 }
 
+function decodeXmlEntities(xml) {
+  return String(xml || '')
+    .replace(/&lt;/g,  '<')
+    .replace(/&gt;/g,  '>')
+    .replace(/&amp;/g, '&')
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'");
+}
+
 // ── Monta XML SOAP de LiberarDownloadConhecimento ────────────────────────────
 function buildSoapLiberar(etiqueta) {
   return `<?xml version="1.0" encoding="utf-8"?>
@@ -147,6 +257,28 @@ function buildSoapLiberar(etiqueta) {
         <StLiberado>1</StLiberado>
       </LiberarPostagem>
     </LiberarDownloadConhecimento>
+  </soap:Body>
+</soap:Envelope>`;
+}
+
+function buildSoapSituacaoPostagem(listaObjetos = [], buscarPor = 'EtiquetaPostagem', stDadosCompletos = '1') {
+  const listaXml = ([]).concat(listaObjetos || [])
+    .filter(Boolean)
+    .map(obj => `<string>${escXml(obj)}</string>`)
+    .join('');
+
+  return `<?xml version="1.0" encoding="utf-8"?>
+<soap:Envelope xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+               xmlns:xsd="http://www.w3.org/2001/XMLSchema"
+               xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/">
+  <soap:Body>
+    <SituacaoPostagem xmlns="http://www.visualset.inf.br/">
+      <Usuario>${escXml(VIPP_USUARIO)}</Usuario>
+      <Senha>${escXml(VIPP_TOKEN)}</Senha>
+      <StDadosCompletos>${escXml(String(stDadosCompletos))}</StDadosCompletos>
+      <BuscarPor>${escXml(buscarPor)}</BuscarPor>
+      <ListaObjeto>${listaXml}</ListaObjeto>
+    </SituacaoPostagem>
   </soap:Body>
 </soap:Envelope>`;
 }
@@ -547,6 +679,29 @@ router.post('/gerar-etiqueta', async (req, res) => {
           [ectCode, n_solic]
         );
         console.log(`[VIPP] identificacao=${ectCode} registrado em envios.solicitacoes → SEP=${n_solic}`);
+
+        // Pré-gera ZPL da declaração local (vipp_payload ja persistido),
+        // evita 1ª impressão chamar API VIPP (cota baixa).
+        try {
+          const { rows: envRows } = await dbQuery(
+            `SELECT id, identificacao, id_vipp, conteudo, observacao, declaracao_url,
+                    numero_sep, chave_dce, vipp_payload
+               FROM envios.solicitacoes
+              WHERE numero_sep = $1
+              LIMIT 1`,
+            [n_solic]
+          );
+          if (envRows.length) {
+            const env = envRows[0];
+            if (!env.declaracao_url || !String(env.declaracao_url).trimStart().startsWith('^XA')) {
+              const dados = await _resolverDadosDeclaracao(env, '[VIPP] gerar-etiqueta pre-cache', { exigirCamposObrigatorios: true });
+              await _persistirDeclaracaoCache(env.id, dados, dados.chaveNfe || env.chave_dce || '');
+              console.log(`[VIPP] declaracao_url pre-gerada para envio id=${env.id}`);
+            }
+          }
+        } catch (e) {
+          console.warn('[VIPP] gerar-etiqueta: falha ao pre-gerar declaracao:', e.message);
+        }
       } catch (e) {
         console.warn('[VIPP] Falha ao atualizar envios.solicitacoes:', e.message);
       }
@@ -590,7 +745,13 @@ router.post('/imprimir-envio', async (req, res) => {
 
     if (cachedUrl.trimStart().startsWith('^XA')) {
       // Cache já é ZPL válido — usa diretamente (reimpressão sem chamar VIPP)
-      zpl = cachedUrl;
+      zpl = await _upgradeLegacyEtiquetaZpl(cachedUrl);
+      if (zpl !== cachedUrl) {
+        dbQuery(
+          `UPDATE envios.solicitacoes SET etiqueta_url = $1 WHERE id = $2`,
+          [zpl, Number(envio_id)]
+        ).catch(e => console.warn('[VIPP] falha ao atualizar ZPL legado em etiqueta_url:', e.message));
+      }
     } else if (cachedUrl.trimStart().startsWith('<?xml') || cachedUrl.trimStart().startsWith('<RECORDS')) {
       // Cache é ZVP XML — converte para ZPL (sem chamar VIPP)
       zpl = await _gerarZplEtiquetaEnvio(cachedUrl);
@@ -669,41 +830,38 @@ router.post('/imprimir-envio', async (req, res) => {
 //
 router.get('/declaracao', async (req, res) => {
   const { id } = req.query;
+  const somenteValidar = String(req.query?.somente_validar || '').trim() === '1';
   if (!id) return res.status(400).json({ ok: false, error: 'Parâmetro id obrigatório' });
 
   try {
     const { rows } = await dbQuery(
-      `SELECT id, declaracao_url, identificacao, id_vipp, conteudo, observacao, usuario
+      `SELECT id, declaracao_url, identificacao, id_vipp, conteudo, observacao, usuario, numero_sep, chave_dce, vipp_payload
          FROM envios.solicitacoes WHERE id = $1 LIMIT 1`,
       [Number(id)]
     );
     if (!rows.length) return res.status(404).json({ ok: false, error: 'Envio não encontrado' });
     const envio = rows[0];
 
+    if (somenteValidar && envio.declaracao_url && envio.declaracao_url.trimStart().startsWith('http')) {
+      return res.json({ ok: true, camposFaltantes: [], origem: 'arquivo' });
+    }
+
     // 1. Se já tem declaração salva como URL (PDF/Supabase) → redireciona
-    if (envio.declaracao_url && envio.declaracao_url.trimStart().startsWith('http')) {
+    if (!somenteValidar && envio.declaracao_url && envio.declaracao_url.trimStart().startsWith('http')) {
       return res.redirect(302, envio.declaracao_url);
     }
 
-    const ect = (envio.identificacao || '').trim().replace(/\s+/g, '');
+    const dados = await _resolverDadosDeclaracao(envio, '[VIPP] declaracao', { exigirCamposObrigatorios: true });
 
-    // 2. Sem código ECT → fallback básico do conteudo salvo
-    if (!ect) {
-      if (!envio.conteudo) {
-        return res.status(404).send('<p>Declaração não disponível para este envio.</p>');
-      }
-      let itens = [];
-      try { itens = JSON.parse(envio.conteudo); } catch { itens = []; }
-      return res.send(_gerarHtmlDeclaracao({
-        remetente: 'FROM THERM SISTEMAS TERMICOS LTDA ME',
-        destinatario: envio.observacao || '',
-        ect: '',
-        itens,
-      }));
+    if (somenteValidar) {
+      return res.json({ ok: true, camposFaltantes: [], origem: 'dados' });
     }
 
-    // 3. Busca dados via GetSituacaoPostagem
-    const dados = await _buscarSituacaoPostagem(ect);
+    try {
+      await _persistirDeclaracaoCache(Number(id), dados, envio.chave_dce || '');
+    } catch (cacheErr) {
+      console.warn('[VIPP] declaracao: falha ao persistir cache ZPL:', cacheErr.message);
+    }
 
     return res.send(_gerarHtmlDeclaracao({
       remetente:   dados.remetente,
@@ -721,6 +879,16 @@ router.get('/declaracao', async (req, res) => {
 
   } catch (err) {
     console.error('[VIPP] declaracao erro:', err.message);
+    if (somenteValidar) {
+      return res.status(err.camposFaltantes?.length ? 422 : 500).json({
+        ok: false,
+        error: err.message,
+        camposFaltantes: err.camposFaltantes || [],
+      });
+    }
+    if (err.camposFaltantes?.length) {
+      return res.status(422).send(_gerarHtmlErroDeclaracao(err));
+    }
     return res.status(500).json({ ok: false, error: err.message });
   }
 });
@@ -868,28 +1036,314 @@ ${chaveFormatada ? `<div class="chave-bar">Chave NF-e: ${chaveFormatada}</div>` 
 </html>`;
 }
 
+function _gerarHtmlErroDeclaracao(err) {
+  const esc = s => String(s || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+  const faltantes = Array.isArray(err?.camposFaltantes) ? err.camposFaltantes : [];
+  const detalheApi = String(err?.detalheApi || '').trim();
+  const itens = faltantes.map(campo => `<li>${esc(campo)}</li>`).join('');
+  return `<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<title>Declaração indisponível</title>
+<style>
+  body { font-family: Arial, sans-serif; margin: 24px; color: #111827; }
+  .box { max-width: 720px; border: 1px solid #fecaca; background: #fef2f2; padding: 20px; border-radius: 8px; }
+  h1 { margin: 0 0 12px; font-size: 22px; }
+  p { margin: 0 0 12px; line-height: 1.45; }
+  ul { margin: 0 0 12px 18px; }
+  .detalhe { color: #991b1b; font-size: 14px; }
+</style>
+</head>
+<body>
+  <div class="box">
+    <h1>Declaração não pode ser gerada</h1>
+    <p>Os campos obrigatórios abaixo continuam faltando mesmo após tentar completar os dados pela API VIPP:</p>
+    <ul>${itens || '<li>Campos obrigatórios não identificados.</li>'}</ul>
+    ${detalheApi ? `<p class="detalhe">Consulta VIPP: ${esc(detalheApi)}</p>` : ''}
+  </div>
+</body>
+</html>`;
+}
+
 // ── Helper: busca dados completos via GetSituacaoPostagem ─────────────────────
 // Retorna objeto pronto para _gerarZplDeclaracao.
-async function _buscarSituacaoPostagem(etiqueta) {
-  const resp = await axios({
-    method: 'get',
-    url: 'http://vpsrv.visualset.com.br/api/v1/conhecimento/GetSituacaoPostagem',
-    params: {
-      usuario: VIPP_USUARIO,
-      senha:   VIPP_TOKEN,
-      StDadosCompletos: 1,
-      BuscarPor: 'EtiquetaPostagem',
-    },
-    data: [etiqueta],
-    headers: { 'Content-Type': 'application/json' },
-    timeout: 15000,
-  });
-  const lista = resp.data && resp.data.SituacaoPostagem;
-  if (!lista || !lista.length) throw new Error('GetSituacaoPostagem: resposta vazia para ' + etiqueta);
-  const s    = lista[0];
-  const post = s.PostagensRastreio || {};
+function _extrairDadosNfeDaPostagem(s = {}, post = {}) {
+  const chaveNfe = String(s.ObservacaoDois || post.ObservacaoDois || '').replace(/\D/g, '').substring(0, 44);
+  const nfeNumDireto = String(s.NumeroNotaFiscal || post.NumeroNotaFiscal || '').replace(/\D/g, '');
+  const nfeSerieDireta = String(s.SerieNotaFiscal || post.SerieNotaFiscal || '').replace(/\D/g, '');
 
-  // Itens de conteúdo (DescricaoConteudo é JSON string)
+  return {
+    chaveNfe,
+    nfeNum: nfeNumDireto || (chaveNfe.length === 44 ? String(parseInt(chaveNfe.substring(25, 34), 10)) : ''),
+    nfeSerie: nfeSerieDireta ? nfeSerieDireta.padStart(3, '0') : (chaveNfe.length === 44 ? chaveNfe.substring(22, 25) : ''),
+  };
+}
+
+function _aplicarFallbackNfe(dados = {}, chaveFallback = '') {
+  const extraidos = _extrairDadosNfeDaPostagem({ ObservacaoDois: chaveFallback }, {});
+  return {
+    ...dados,
+    chaveNfe: dados.chaveNfe || extraidos.chaveNfe,
+    nfeNum: dados.nfeNum || extraidos.nfeNum,
+    nfeSerie: dados.nfeSerie || extraidos.nfeSerie,
+  };
+}
+
+function _normalizarItensConteudoEnvio(conteudo) {
+  if (!conteudo) return [];
+
+  let itens = [];
+  if (Array.isArray(conteudo)) {
+    itens = conteudo;
+  } else {
+    try {
+      itens = JSON.parse(conteudo);
+    } catch {
+      return [];
+    }
+  }
+
+  if (!Array.isArray(itens)) return [];
+
+  return itens
+    .map(it => {
+      const quantidadeNum = Number.parseInt(it?.quantidade, 10) || 1;
+      const valorNum = Number(String(it?.valor_unitario ?? it?.valor ?? '0.01').replace(',', '.'));
+      return {
+        conteudo: String(it?.conteudo || it?.descricao || '').trim(),
+        quantidade: String(quantidadeNum),
+        valor_unitario: Number.isFinite(valorNum) ? valorNum.toFixed(2).replace('.', ',') : '0,01',
+      };
+    })
+    .filter(it => it.conteudo);
+}
+
+function _normalizarVippPayload(vippPayload) {
+  if (!vippPayload) return {};
+  if (typeof vippPayload === 'string') {
+    try {
+      return JSON.parse(vippPayload);
+    } catch {
+      return {};
+    }
+  }
+  return typeof vippPayload === 'object' ? vippPayload : {};
+}
+
+function _montarEnderecoVipp(destinatario = {}) {
+  const cidadeUf = [destinatario.cidade, destinatario.uf].filter(Boolean).join('/');
+  return [
+    destinatario.endereco,
+    destinatario.numero,
+    destinatario.bairro,
+    cidadeUf,
+    destinatario.cep ? `CEP ${destinatario.cep}` : null,
+  ].filter(Boolean).join(' - ');
+}
+
+function _formatarDataDeclaracao(valor) {
+  if (!valor) return '';
+  if (/^\d{2}\/\d{2}\/\d{4}$/.test(String(valor))) return String(valor);
+  const dt = new Date(valor);
+  if (Number.isNaN(dt.getTime())) return String(valor);
+  return dt.toLocaleDateString('pt-BR');
+}
+
+function _montarDadosDeclaracaoFallback(envio = {}) {
+  const vippPayload = _normalizarVippPayload(envio.vipp_payload);
+  const destinatario = vippPayload.destinatario || {};
+  const notaFiscal = vippPayload.notaFiscal || {};
+  const declaracaoConteudo = vippPayload.declaracaoConteudo || {};
+  const ect = String(envio.identificacao || '').trim().replace(/\s+/g, '');
+  const dadosBase = {
+    remetente: 'FROM THERM SISTEMAS TERMICOS LTDA ME',
+    remDoc: String(declaracaoConteudo.docRemetente || '').trim(),
+    remEndereco: '',
+    destinatario: String(destinatario.nome || envio.destinatario || envio.observacao || envio.numero_sep || envio.id_vipp || 'NAO INFORMADO').trim(),
+    desDoc: String(declaracaoConteudo.docDestinatario || destinatario.cnpjCpf || '').trim(),
+    desEndereco: _montarEnderecoVipp(destinatario),
+    ect,
+    chaveNfe: '',
+    itens: _normalizarItensConteudoEnvio(envio.conteudo || declaracaoConteudo.itens || []),
+    nfeNum: String(notaFiscal.numero || '').replace(/\D/g, ''),
+    nfeSerie: String(notaFiscal.serie || '').replace(/\D/g, ''),
+    cnpjTransp: '34.028.316/0001-03',
+    nomeTransp: 'EMPRESA BRASILEIRA DE CORREIOS E TELEGRAFOS',
+    dataEmissao: _formatarDataDeclaracao(notaFiscal.data),
+    protocolo: '',
+  };
+
+  return _aplicarFallbackNfe(dadosBase, envio.chave_dce || '');
+}
+
+function _campoObrigatorioDeclaracaoPresente(value) {
+  const normalizado = String(value ?? '').replace(/\s+/g, ' ').trim();
+  if (!normalizado) return false;
+  return !/^(?:-|---|NAO INFORMADO|NAOINFORMADO)$/i.test(normalizado);
+}
+
+function _itensDeclaracaoValidos(itens = []) {
+  return Array.isArray(itens) && itens.length > 0 && itens.every(item => (
+    _campoObrigatorioDeclaracaoPresente(item?.conteudo) &&
+    _campoObrigatorioDeclaracaoPresente(item?.quantidade) &&
+    _campoObrigatorioDeclaracaoPresente(item?.valor_unitario)
+  ));
+}
+
+function _listarCamposObrigatoriosDeclaracao(dados = {}) {
+  const faltantes = [];
+  if (!_campoObrigatorioDeclaracaoPresente(dados.ect)) faltantes.push('código ECT');
+  if (!_campoObrigatorioDeclaracaoPresente(dados.nfeNum)) faltantes.push('N da NF-e');
+  if (!_campoObrigatorioDeclaracaoPresente(dados.nfeSerie)) faltantes.push('série da NF-e');
+  if (!_campoObrigatorioDeclaracaoPresente(dados.remDoc)) faltantes.push('CNPJ/CPF do remetente');
+  if (!_campoObrigatorioDeclaracaoPresente(dados.remEndereco)) faltantes.push('endereço do remetente');
+  if (!_campoObrigatorioDeclaracaoPresente(dados.destinatario)) faltantes.push('nome do destinatário');
+  if (!_campoObrigatorioDeclaracaoPresente(dados.desDoc)) faltantes.push('documento do destinatário');
+  if (!_campoObrigatorioDeclaracaoPresente(dados.desEndereco)) faltantes.push('endereço do destinatário');
+  if (!_itensDeclaracaoValidos(dados.itens)) faltantes.push('itens da declaração');
+  return faltantes;
+}
+
+function _montarErroCamposObrigatoriosDeclaracao(faltantes = [], detalheApi = '') {
+  const faltantesLimpos = Array.from(new Set((faltantes || []).filter(Boolean)));
+  const sufixoApi = detalheApi ? ` Consulta VIPP: ${detalheApi}` : '';
+  const err = new Error(`Declaração sem campos obrigatórios: ${faltantesLimpos.join(', ')}.${sufixoApi}`.trim());
+  err.camposFaltantes = faltantesLimpos;
+  err.detalheApi = detalheApi || '';
+  return err;
+}
+
+function _temDadosDeclaracao(dados = {}) {
+  return _listarCamposObrigatoriosDeclaracao(dados).length === 0;
+}
+
+// Considera o payload local "completo o suficiente" para gerar a DACE sem
+// precisar chamar a API VIPP (que tem rate limit baixo). Os 5 campos abaixo
+// sao o minimo para uma declaracao impressa coerente.
+function _dadosDeclaracaoCompletos(dados = {}) {
+  return _temDadosDeclaracao(dados);
+}
+
+async function _resolverDadosDeclaracao(envio = {}, contextoLog = '[VIPP] declaracao', opcoes = {}) {
+  const { exigirCamposObrigatorios = false } = opcoes || {};
+  const dadosFallback = _montarDadosDeclaracaoFallback(envio);
+  if (!dadosFallback.ect) {
+    if (exigirCamposObrigatorios) {
+      throw _montarErroCamposObrigatoriosDeclaracao(_listarCamposObrigatoriosDeclaracao(dadosFallback));
+    }
+    return dadosFallback;
+  }
+
+  // Se o payload local ja tem tudo que a DACE precisa, evita ir na API VIPP
+  // (preserva cota e funciona mesmo offline). A API so e consultada quando
+  // realmente faltam dados criticos no payload persistido.
+  if (_dadosDeclaracaoCompletos(dadosFallback)) {
+    return dadosFallback;
+  }
+
+  let dadosResolvidos = dadosFallback;
+  let erroConsulta = null;
+
+  try {
+    const dadosVipp = _aplicarFallbackNfe(await _buscarSituacaoPostagem(dadosFallback.ect), envio.chave_dce);
+    dadosResolvidos = {
+      ...dadosFallback,
+      ...dadosVipp,
+      itens: Array.isArray(dadosVipp.itens) && dadosVipp.itens.length ? dadosVipp.itens : dadosFallback.itens,
+    };
+  } catch (err) {
+    erroConsulta = err;
+  }
+
+  const faltantes = _listarCamposObrigatoriosDeclaracao(dadosResolvidos);
+  if (faltantes.length) {
+    if (exigirCamposObrigatorios) {
+      throw _montarErroCamposObrigatoriosDeclaracao(faltantes, erroConsulta?.message || '');
+    }
+    if (erroConsulta) {
+      console.warn(`${contextoLog}: usando fallback local da declaracao:`, erroConsulta.message);
+    }
+  }
+
+  return dadosResolvidos;
+}
+
+async function _persistirDeclaracaoCache(envioId, dados = {}, chaveDce = '') {
+  const zpl = _gerarZplDeclaracao(dados);
+  await dbQuery(
+    `UPDATE envios.solicitacoes
+        SET declaracao_url = CASE WHEN declaracao_url IS NULL OR declaracao_url = '' THEN $1 ELSE declaracao_url END,
+            chave_dce = CASE WHEN $2 <> '' THEN $2 ELSE chave_dce END
+      WHERE id = $3`,
+    [zpl, chaveDce || dados.chaveNfe || '', Number(envioId)]
+  );
+  return zpl;
+}
+
+function _normalizarProtocoloAutorizacao(value = '') {
+  const cleaned = String(value || '').replace(/\s+/g, ' ').trim();
+  const protocolo = cleaned.match(/\b\d{15,20}\b/);
+  if (!protocolo) return '';
+
+  const dataHora = cleaned.match(/\b\d{2}\/\d{2}\/\d{4}\s+\d{2}:\d{2}:\d{2}\b/);
+  return dataHora ? `${protocolo[0]} - ${dataHora[0]}` : protocolo[0];
+}
+
+function _extrairProtocoloDaPostagem(s = {}, post = {}) {
+  const candidatos = [
+    s.ProtocoloAutorizacao,
+    post.ProtocoloAutorizacao,
+    s.ProtocoloDeAutorizacao,
+    post.ProtocoloDeAutorizacao,
+    s.NumeroProtocoloAutorizacao,
+    post.NumeroProtocoloAutorizacao,
+    s.NrProtocoloAutorizacao,
+    post.NrProtocoloAutorizacao,
+    s.ProtocoloAutorizacaoDce,
+    post.ProtocoloAutorizacaoDce,
+    s.AutorizacaoDce,
+    post.AutorizacaoDce,
+    s.Protocolo,
+    post.Protocolo,
+    s.NrProtocolo,
+    post.NrProtocolo,
+    s.Autorizacao,
+    post.Autorizacao,
+  ];
+
+  for (const value of candidatos) {
+    const protocolo = _normalizarProtocoloAutorizacao(value);
+    if (protocolo) return protocolo;
+  }
+
+  for (const [key, value] of [...Object.entries(s), ...Object.entries(post)]) {
+    if (!/(protoc|autoriz)/i.test(key)) continue;
+    const protocolo = _normalizarProtocoloAutorizacao(value);
+    if (protocolo) return protocolo;
+  }
+
+  for (const value of [...Object.values(s), ...Object.values(post)]) {
+    const protocolo = _normalizarProtocoloAutorizacao(value);
+    if (protocolo) return protocolo;
+  }
+
+  return '';
+}
+
+function _extrairTagsXml(xml, tags = []) {
+  return tags.reduce((acc, tag) => {
+    const value = extrairTag(xml, tag);
+    if (value) acc[tag] = value;
+    return acc;
+  }, {});
+}
+
+function _mapearSituacaoPostagem(s = {}, post = {}, etiqueta) {
   let itens = [];
   if (post.DescricaoConteudo) {
     try {
@@ -901,51 +1355,69 @@ async function _buscarSituacaoPostagem(etiqueta) {
       }));
     } catch {}
   }
-  // Fallback: campo Conteudo (string descritiva)
   if (!itens.length && post.Conteudo) {
     itens = [{ conteudo: post.Conteudo, quantidade: '1', valor_unitario: '0,00' }];
   }
 
-  // Chave NF-e (ObservacaoDois, 44 dígitos)
-  const chaveNfe = String(s.ObservacaoDois || post.ObservacaoDois || '').replace(/\D/g, '').substring(0, 44);
-  const nfeNum   = chaveNfe.length === 44 ? String(parseInt(chaveNfe.substring(25, 34), 10)) : '';
-  const nfeSerie = chaveNfe.length === 44 ? chaveNfe.substring(22, 25) : '';
+  const { chaveNfe, nfeNum, nfeSerie } = _extrairDadosNfeDaPostagem(s, post);
+  const protocolo = _extrairProtocoloDaPostagem(s, post);
 
-  // Formata CNPJ (14 dígitos → XX.XXX.XXX/XXXX-XX)
   const fmtCnpj = n => {
     const d = String(n || '').replace(/\D/g, '').padStart(14, '0');
     return d.replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$/, '$1.$2.$3/$4-$5');
   };
 
+  const fmtDocumento = n => {
+    const digits = String(n || '').replace(/\D/g, '');
+    if (!digits) return '';
+    if (digits.length === 11) {
+      return digits.replace(/^(\d{3})(\d{3})(\d{3})(\d{2})$/, '$1.$2.$3-$4');
+    }
+    if (digits.length === 14) {
+      return digits.replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$/, '$1.$2.$3/$4-$5');
+    }
+    return String(n || '').trim();
+  };
+
   const remEndereco = [
     post.EnderecoRemetente,
     post.NumeroRemetente,
+    post.ComplementoRemetente,
     post.BairroRemetente,
     post.CidadeRemetente && post.UfRemetente ? `${post.CidadeRemetente}/${post.UfRemetente}` : null,
     post.CepRemetente ? `CEP ${post.CepRemetente}` : null,
   ].filter(Boolean).join(' - ');
 
+  const documentoDestinatario =
+    post.DocumentoDestinatario ||
+    post.CpfCnpjDestinatario ||
+    post.CnpjCpfDestinatario ||
+    post.AosCuidados ||
+    '';
+
   const desEndereco = [
     post.EnderecoDestinatario,
     post.NumeroDestinatario,
+    post.ComplementoDestinatario,
     post.BairroDestinatario,
     post.CidadeDestinatario && post.UfDestinatario ? `${post.CidadeDestinatario}/${post.UfDestinatario}` : null,
-    post.CEPDestinatario ? `CEP ${post.CEPDestinatario}` : null,
+    (post.CEPDestinatario || post.CepDestinatario) ? `CEP ${post.CEPDestinatario || post.CepDestinatario}` : null,
   ].filter(Boolean).join(' - ');
 
+  const dataEntrada = s.DataDeEntradaNoVipp || post.DataDeEntradaNoVipp || s.DataPostagem || post.DataPostagem || '';
   const dataEmissao = (() => {
-    if (!s.DataDeEntradaNoVipp) return undefined;
-    const d = new Date(s.DataDeEntradaNoVipp);
-    return isNaN(d.getTime()) ? undefined
+    if (!dataEntrada) return undefined;
+    const d = new Date(dataEntrada);
+    return isNaN(d.getTime()) ? String(dataEntrada)
       : d.toLocaleDateString('pt-BR') + ' ' + d.toLocaleTimeString('pt-BR');
   })();
 
   return {
-    remetente:   post.NomeRemetente   || post.NomeFantasiaRemetente || 'FROM THERM SISTEMAS TERMICOS LTDA ME',
+    remetente:   post.NomeRemetente || post.NomeFantasiaRemetente || 'FROM THERM SISTEMAS TERMICOS LTDA ME',
     remDoc:      fmtCnpj(post.CNPJRemetente),
     remEndereco,
     destinatario: post.NomeDestinatario || '',
-    desDoc:      post.AosCuidados || '',
+    desDoc:      fmtDocumento(documentoDestinatario),
     desEndereco,
     ect:         post.Etiqueta || s.Etiqueta || etiqueta,
     chaveNfe,
@@ -954,9 +1426,150 @@ async function _buscarSituacaoPostagem(etiqueta) {
     nfeSerie,
     cnpjTransp:  fmtCnpj(post.CNPJPostadora),
     nomeTransp:  post.NomeFantasiaPostadora || post.NomePostadora || 'EMPRESA BRASILEIRA DE CORREIOS E TELEGRAFOS',
+    telefoneDestinatario: String(post.TelefoneDestinatario || '').replace(/\D/g, ''),
+    emailDestinatario: post.EmailDestinatario || '',
     dataEmissao,
-    protocolo:   '',
+    protocolo,
   };
+}
+
+async function _buscarSituacaoPostagemSoap(etiqueta) {
+  const soapXml = buildSoapSituacaoPostagem([etiqueta]);
+  const resp = await axios.post(VIPP_ENDPOINT, soapXml, {
+    headers: {
+      'Content-Type': 'text/xml; charset=utf-8',
+      'SOAPAction': '"http://www.visualset.inf.br/SituacaoPostagem"',
+    },
+    timeout: 15000,
+    validateStatus: () => true,
+  });
+
+  if (resp.status !== 200) {
+    throw new Error(`SituacaoPostagem SOAP HTTP ${resp.status}`);
+  }
+
+  const raw = String(resp.data || '');
+  const resultXml = decodeXmlEntities(extrairTag(raw, 'SituacaoPostagemResult') || raw);
+  const listaErros = extrairTag(resultXml, 'ListaErros');
+  if (listaErros) {
+    const descricaoErro = extrairTag(listaErros, 'Descricao') || extrairTag(listaErros, 'DescricaoTipoErro') || 'Erro desconhecido no SOAP SituacaoPostagem';
+    throw new Error(`SituacaoPostagem SOAP: ${descricaoErro}`);
+  }
+
+  const topTags = [
+    'Etiqueta', 'ObservacaoDois', 'NumeroNotaFiscal', 'SerieNotaFiscal', 'DataDeEntradaNoVipp',
+    'DataPostagem', 'ProtocoloAutorizacao', 'ProtocoloDeAutorizacao', 'NumeroProtocoloAutorizacao',
+    'NrProtocoloAutorizacao', 'ProtocoloAutorizacaoDce', 'AutorizacaoDce', 'Protocolo', 'NrProtocolo', 'Autorizacao',
+    'DocumentoDestinatario', 'TelefoneDestinatario', 'EmailDestinatario', 'ComplementoDestinatario', 'ComplementoRemetente',
+    'CpfCnpjDestinatario', 'CnpjCpfDestinatario', 'ObservacaoUm'
+  ];
+  const postTags = [
+    'Etiqueta', 'ObservacaoDois', 'NumeroNotaFiscal', 'SerieNotaFiscal', 'DescricaoConteudo', 'Conteudo',
+    'NomeRemetente', 'NomeFantasiaRemetente', 'CNPJRemetente', 'EnderecoRemetente', 'NumeroRemetente',
+    'ComplementoRemetente', 'BairroRemetente', 'CidadeRemetente', 'UfRemetente', 'CepRemetente', 'NomeDestinatario', 'AosCuidados',
+    'EnderecoDestinatario', 'NumeroDestinatario', 'BairroDestinatario', 'CidadeDestinatario', 'UfDestinatario',
+    'CEPDestinatario', 'CepDestinatario', 'ComplementoDestinatario', 'DocumentoDestinatario', 'TelefoneDestinatario',
+    'EmailDestinatario', 'CpfCnpjDestinatario', 'CnpjCpfDestinatario', 'CNPJPostadora', 'NomeFantasiaPostadora', 'NomePostadora',
+    'DataDeEntradaNoVipp', 'DataPostagem', 'ProtocoloAutorizacao', 'ProtocoloDeAutorizacao', 'NumeroProtocoloAutorizacao',
+    'NrProtocoloAutorizacao', 'ProtocoloAutorizacaoDce', 'AutorizacaoDce', 'Protocolo', 'NrProtocolo', 'Autorizacao', 'ObservacaoUm'
+  ];
+
+  const s = _extrairTagsXml(resultXml, topTags);
+  const post = _extrairTagsXml(resultXml, postTags);
+  if (!Object.keys(s).length && !Object.keys(post).length) {
+    throw new Error('SituacaoPostagem SOAP sem dados parseaveis');
+  }
+
+  return _mapearSituacaoPostagem(s, post, etiqueta);
+}
+
+async function _buscarSituacaoPostagem(etiqueta) {
+  // 1) Cache compartilhado em SQL (etiqueta.vipp_situacao_cache)
+  const hit = await _vippCacheGet(etiqueta);
+  if (hit && hit.dados) {
+    return hit.dados;
+  }
+
+  // 2) Se a credencial esta marcada como bloqueada (402/limite diario),
+  //    nao queima rate limit; deixa o caller usar o fallback local.
+  const bloqueio = await _vippGetRateLimit('situacao_postagem');
+  if (bloqueio) {
+    throw new Error(`SituacaoPostagem bloqueada ate ${new Date(bloqueio.bloqueado_ate).toISOString()}: ${bloqueio.motivo || 'rate limit'}`);
+  }
+
+  let dadosSoap = null;
+  let soapError = null;
+  try {
+    dadosSoap = await _buscarSituacaoPostagemSoap(etiqueta);
+  } catch (err) {
+    soapError = err;
+  }
+
+  let dadosRest = null;
+  let restError = null;
+
+  try {
+    const resp = await axios({
+      method: 'get',
+      url: 'http://vpsrv.visualset.com.br/api/v1/conhecimento/GetSituacaoPostagem',
+      params: {
+        usuario: VIPP_USUARIO,
+        senha:   VIPP_TOKEN,
+        StDadosCompletos: 1,
+        BuscarPor: 'EtiquetaPostagem',
+      },
+      data: [etiqueta],
+      headers: { 'Content-Type': 'application/json' },
+      timeout: 15000,
+    });
+    const lista = resp.data && resp.data.SituacaoPostagem;
+    if (!lista || !lista.length) throw new Error('GetSituacaoPostagem: resposta vazia para ' + etiqueta);
+    dadosRest = _mapearSituacaoPostagem(lista[0], lista[0].PostagensRastreio || {}, etiqueta);
+  } catch (err) {
+    restError = err;
+  }
+
+  // 3) Detecta rate-limit em qualquer um dos dois canais e registra na tabela.
+  if (!dadosSoap && !dadosRest) {
+    if (_ehErroRateLimitVipp(soapError) || _ehErroRateLimitVipp(restError)) {
+      await _vippMarcarRateLimit('situacao_postagem', soapError || restError);
+    }
+    throw soapError || restError || new Error('SituacaoPostagem sem retorno');
+  }
+
+  // 4) Monta resultado priorizando SOAP (mais completo) e popula cache.
+  let resultado;
+  if (dadosSoap) {
+    if (!dadosRest) {
+      resultado = dadosSoap;
+    } else {
+      resultado = {
+        ...dadosRest,
+        ...dadosSoap,
+        protocolo: dadosSoap.protocolo || dadosRest.protocolo,
+        dataEmissao: dadosSoap.dataEmissao || dadosRest.dataEmissao,
+        chaveNfe: dadosSoap.chaveNfe || dadosRest.chaveNfe,
+        nfeNum: dadosSoap.nfeNum || dadosRest.nfeNum,
+        nfeSerie: dadosSoap.nfeSerie || dadosRest.nfeSerie,
+        itens: dadosSoap.itens?.length ? dadosSoap.itens : dadosRest.itens,
+        remDoc: dadosSoap.remDoc || dadosRest.remDoc,
+        remEndereco: dadosSoap.remEndereco || dadosRest.remEndereco,
+        destinatario: dadosSoap.destinatario || dadosRest.destinatario,
+        desDoc: dadosSoap.desDoc || dadosRest.desDoc,
+        desEndereco: dadosSoap.desEndereco || dadosRest.desEndereco,
+        telefoneDestinatario: dadosSoap.telefoneDestinatario || dadosRest.telefoneDestinatario,
+        emailDestinatario: dadosSoap.emailDestinatario || dadosRest.emailDestinatario,
+        cnpjTransp: dadosSoap.cnpjTransp || dadosRest.cnpjTransp,
+        nomeTransp: dadosSoap.nomeTransp || dadosRest.nomeTransp,
+      };
+    }
+  } else {
+    console.warn('[VIPP] SituacaoPostagem SOAP indisponivel, mantendo dados REST:', soapError?.message || 'sem detalhe');
+    resultado = dadosRest;
+  }
+
+  await _vippCacheSet(etiqueta, resultado, dadosSoap ? 'soap' : 'rest');
+  return resultado;
 }
 
 // ── POST /api/vipp/imprimir-declaracao ───────────────────────────────────────
@@ -972,34 +1585,39 @@ router.post('/imprimir-declaracao', async (req, res) => {
   try {
     // 1. Busca dados do envio
     const { rows } = await dbQuery(
-      `SELECT id, identificacao, id_vipp, conteudo, observacao, declaracao_url
+      `SELECT id, identificacao, id_vipp, conteudo, observacao, declaracao_url, numero_sep, chave_dce, vipp_payload
          FROM envios.solicitacoes WHERE id = $1 LIMIT 1`,
       [Number(envio_id)]
     );
     if (!rows.length) return res.status(404).json({ ok: false, error: 'Envio não encontrado' });
     const envio = rows[0];
+    const dadosResolvidos = await _resolverDadosDeclaracao(envio, '[VIPP] imprimir-declaracao', { exigirCamposObrigatorios: true });
+    const chaveDeclaracao = dadosResolvidos.chaveNfe || envio.chave_dce || '';
 
     // 1b. Se já há ZPL em cache, enfileira direto
     if (envio.declaracao_url && envio.declaracao_url.trimStart().startsWith('^XA')) {
+      const zplCache = _gerarZplDeclaracao(dadosResolvidos);
       const filaIns = await dbQuery(
         `INSERT INTO etiqueta."ETQ_fila_impressao" (etq_ids, multiplo, usuario, zpl, quantidade, destino_agente, impressora)
          VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
-        [[], 0, usuario, envio.declaracao_url, 1, destino_agente || null, impressora || null]
+        [[], 0, usuario, zplCache, 1, destino_agente || null, impressora || null]
       );
+      if (zplCache !== envio.declaracao_url || chaveDeclaracao !== (envio.chave_dce || '')) {
+        try {
+          await dbQuery(
+            `UPDATE envios.solicitacoes SET declaracao_url = $1, chave_dce = $2 WHERE id = $3`,
+            [zplCache, chaveDeclaracao || envio.chave_dce || null, Number(envio_id)]
+          );
+        } catch (e) {
+          console.warn('[VIPP] imprimir-declaracao (cache): falha ao atualizar ZPL legado:', e.message);
+        }
+      }
       console.log(`[VIPP] imprimir-declaracao (cache): envio_id=${envio_id} fila_id=${filaIns.rows[0].id}`);
-      return res.json({ ok: true, fila_id: filaIns.rows[0].id, fromCache: true });
+      return res.json({ ok: true, fila_id: filaIns.rows[0].id, fromCache: true, updatedLegacy: zplCache !== envio.declaracao_url });
     }
-
-    const ect = (envio.identificacao || '').trim().replace(/\s+/g, '');
-    if (!ect) {
-      return res.status(400).json({ ok: false, error: 'Envio sem código ECT — declaração não disponível' });
-    }
-
-    // 2. Busca dados completos via GetSituacaoPostagem
-    const dados = await _buscarSituacaoPostagem(ect);
 
     // 3. Gera ZPL
-    const zpl = _gerarZplDeclaracao(dados);
+    const zpl = _gerarZplDeclaracao(dadosResolvidos);
 
     // 4. Enfileira no agente de impressão
     const filaIns = await dbQuery(
@@ -1010,18 +1628,25 @@ router.post('/imprimir-declaracao', async (req, res) => {
     // 5. Persiste ZPL em declaracao_url para reimpressão futura
     try {
       await dbQuery(
-        `UPDATE envios.solicitacoes SET declaracao_url = $1 WHERE id = $2 AND (declaracao_url IS NULL OR declaracao_url = '')`,
-        [zpl, Number(envio_id)]
+        `UPDATE envios.solicitacoes
+            SET declaracao_url = CASE WHEN declaracao_url IS NULL OR declaracao_url = '' THEN $1 ELSE declaracao_url END,
+                chave_dce = CASE WHEN $2 <> '' THEN $2 ELSE chave_dce END
+          WHERE id = $3`,
+        [zpl, dadosResolvidos.chaveNfe || '', Number(envio_id)]
       );
     } catch (e) {
       console.warn('[VIPP] imprimir-declaracao: falha ao salvar ZPL em declaracao_url:', e.message);
     }
-    console.log(`[VIPP] imprimir-declaracao: envio_id=${envio_id} ect=${ect} fila_id=${filaIns.rows[0].id}`);
+    console.log(`[VIPP] imprimir-declaracao: envio_id=${envio_id} ect=${dadosResolvidos.ect || ''} fila_id=${filaIns.rows[0].id}`);
     return res.json({ ok: true, fila_id: filaIns.rows[0].id });
 
   } catch (err) {
     console.error('[VIPP] imprimir-declaracao erro:', err.message);
-    return res.status(502).json({ ok: false, error: err.message || 'Falha ao buscar dados da postagem' });
+    return res.status(err.camposFaltantes?.length ? 422 : 502).json({
+      ok: false,
+      error: err.message || 'Falha ao buscar dados da postagem',
+      camposFaltantes: err.camposFaltantes || [],
+    });
   }
 });
 
@@ -1057,6 +1682,23 @@ async function _imgToGf(url, targetW, targetH) {
     console.warn('[VIPP] _imgToGf falha:', url, e.message);
     return null;
   }
+}
+
+async function _upgradeLegacyEtiquetaZpl(zpl) {
+  let current = String(zpl || '').replace(/\^LH8,8/, '^LH12,12');
+  const legacyQr = /\^FO357,5\^BQN,2,3\^FDQA,([^\^]+)\^FS/;
+  const match = current.match(legacyQr);
+  if (match) {
+    const qrData = match[1];
+    const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?data=${encodeURIComponent(qrData)}&size=136x136&margin=0`;
+    const gfQr = await _imgToGf(qrUrl, 136, 136);
+    if (gfQr) current = current.replace(legacyQr, `^FO357,5${gfQr}`);
+  }
+
+  return current
+    .replace(/\^FO0,142\^A0N,18,18\^FB784,1,,C\^FDContrato: ([^\^]+)\^FS/g, '^FO318,148^A0N,13,12^FB214,2,0,C^FDContrato:\\&$1^FS')
+    .replace(/\^FO574,5/g, '^FO588,5')
+    .replace(/\^FO574,143/g, '^FO588,143');
 }
 
 // Gera ZPL da Etiqueta de Envio — layout fiel ao modelo Correios (VIPP PDF)
@@ -1102,13 +1744,11 @@ async function _gerarZplEtiquetaEnvio(zvpXml) {
   const remCid     = safe(get('rem_cid'), 20);
   const remUf      = safe(get('rem_uf'), 2);
   const remCep     = fmtCep(get('rem_cep'));
-
-  const [gfEmpresa, gfExpressa, gfCorreios] = await Promise.all([
-    _imgToGf(LOGO_EMPRESA_URL,  160, 160),
-    _imgToGf(LOGO_EXPRESSA_URL, 210, 128),
-    _imgToGf(LOGO_CORREIOS_URL, 120,  44),
-  ]);
-
+  const QR_TOP     = 5;
+  const QR_LEFT    = 357;
+  const QR_SIDE    = 136;
+  const CONTRATO_X = 318;
+  const EXPRESSA_X = 588;
   const desCepRaw  = (get('des_cep') || '').replace(/\D/g, '').padStart(8, '0').slice(0, 8);
   const remCepRaw  = (get('rem_cep') || '').replace(/\D/g, '').padStart(8, '0').slice(0, 8);
   const pesoStr    = String(parseInt(get('vol_pes') || '0') || 0).padStart(5, '0').slice(0, 5);
@@ -1117,6 +1757,14 @@ async function _gerarZplEtiquetaEnvio(zvpXml) {
   const srvPad     = String(ectSrvCode).replace(/\D/g, '').padStart(4, '0').slice(0, 4);
   const carPad     = String(get('ctt_car') || '').replace(/\D/g, '').padStart(8, '0').slice(0, 8);
   const qrData = `${desCepRaw}00000${remCepRaw}00000${ectRegRaw}${pesoStr}${cttNroPad}${admPad}${srvPad}${carPad}-00.000000-00.000000|`;
+  const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?data=${encodeURIComponent(qrData)}&size=${QR_SIDE}x${QR_SIDE}&margin=0`;
+
+  const [gfEmpresa, gfExpressa, gfCorreios, gfQrEtiqueta] = await Promise.all([
+    _imgToGf(LOGO_EMPRESA_URL,  160, 160),
+    _imgToGf(LOGO_EXPRESSA_URL, 210, 128),
+    _imgToGf(LOGO_CORREIOS_URL, 120,  44),
+    _imgToGf(qrUrl, QR_SIDE, QR_SIDE),
+  ]);
 
   // Pré-cálculo da altura do box DESTINATÁRIO (^GB desenhado antes do conteúdo)
   // Y_BOX = separador (476) + 12px de margem = 488
@@ -1136,19 +1784,23 @@ async function _gerarZplEtiquetaEnvio(zvpXml) {
     '^XA',
     '^CI13',
     '^PW799',
-    '^LH8,8',
+    '^LH12,12',
     '^LL1218',
     // ══ HEADER ══
     // Logo empresa (canto superior esquerdo, 160×160)
     ...(gfEmpresa ? [`^FO10,5${gfEmpresa}`] : []),
-    // QR code centralizado no rótulo (X=357, mag=3)
-    `^FO357,5^BQN,2,3^FDQA,${qrData}^FS`,
-    // Contrato abaixo do QR — Y=142
-    ...(contrato ? [`^FO0,142^A0N,18,18^FB784,1,,C^FDContrato: ${contrato}^FS`] : []),
+    // Zebra física renderiza o ^BQN de forma ligeiramente diferente do Labelary.
+    // Rasterizar o QR mantém preview e impressão real no mesmo posicionamento.
+    ...(gfQrEtiqueta
+      ? [`^FO${QR_LEFT},${QR_TOP}${gfQrEtiqueta}`]
+      : [`^FO${QR_LEFT},${QR_TOP}^BQN,2,3^FDQA,${qrData}^FS`]
+    ),
+    // Contrato abaixo do QR, centralizado no mesmo eixo do QR e com folga visual.
+    ...(contrato ? [`^FO${CONTRATO_X},148^A0N,13,12^FB214,2,0,C^FDContrato:\\&${contrato}^FS`] : []),
     // Logo EXPRESSA (canto superior direito, 210×128)
-    ...(gfExpressa ? [`^FO574,5${gfExpressa}`] : []),
+    ...(gfExpressa ? [`^FO${EXPRESSA_X},5${gfExpressa}`] : []),
     // Volume centralizado abaixo do logo EXPRESSA
-    `^FO574,143^A0N,18,18^FB210,1,,C^FDVolume: ${volume}/${totalVol}^FS`,
+    `^FO${EXPRESSA_X},143^A0N,18,18^FB210,1,,C^FDVolume: ${volume}/${totalVol}^FS`,
     // Separador header
     '^FO0,173^GB784,3,3^FS',
     // ══ CÓDIGO ECT CENTRALIZADO ══
@@ -1199,10 +1851,40 @@ async function _gerarZplEtiquetaEnvio(zvpXml) {
   return L.join('\n');
 }
 
+function _zplAscii(s, max = 80) {
+  return String(s || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[º°]/g, 'o')
+    .replace(/ª/g, 'a')
+    .replace(/[–—]/g, '-')
+    .replace(/[\^~]/g, '-')
+    .replace(/\|/g, ' ')
+    .substring(0, max);
+}
+
+function _zplHexField(s, max = 1600, escapeChar = '_') {
+  const sanitized = String(s || '')
+    .replace(/[\^~]/g, '-')
+    .replace(/\|/g, ' ')
+    .substring(0, max);
+
+  return Array.from(Buffer.from(sanitized, 'latin1')).map(byte => {
+    const ch = String.fromCharCode(byte);
+    if (byte >= 32 && byte <= 126 && ch !== escapeChar) return ch;
+    return `${escapeChar}${byte.toString(16).toUpperCase().padStart(2, '0')}`;
+  }).join('');
+}
+
+function _getDeclaracaoObservacoesText() {
+  const paragrafo1 = 'É contribuinte de ICMS qualquer pessoa física ou jurídica, que realize, com habitualidade ou em volume que caracterize intuito comercial, operações de circulação de mercadoria ou prestações de serviços de transportes interestadual e intermunicipal e de comunicação, ainda que as operações e prestações se iniciem no exterior (Lei Complementar nº 87/96, Art. 4º).';
+  const paragrafo2 = 'Constitui crime contra a ordem tributária suprimir ou reduzir tributo, ou contribuição social e qualquer acessório: quando negar ou deixar de fornecer, quando obrigatório, nota fiscal ou documento equivalente, relativa a venda de mercadoria ou prestação de serviço, efetivamente realizada ou fornecê-la em desacordo com a legislação. Sob pena de reclusão de 2 (dois) e 5 (cinco) anos, e multa (Lei 8.137/90, Art 1ª, V).';
+  return `${paragrafo1}\\&\\&${paragrafo2}`;
+}
+
 // Gera ZPL da Declaração de Conteúdo para impressora térmica (100x150mm, 203dpi)
 function _gerarZplDeclaracao({ remetente, remDoc, remEndereco, destinatario, desDoc, desEndereco, ect, chaveNfe, itens, nfeNum, nfeSerie, protocolo, dataEmissao, cnpjTransp, nomeTransp }) {
-  // Sanitiza texto para ZPL: remove ^ ~ que são chars de controle ZPL
-  const z = (s, max = 80) => String(s || '').replace(/[\^~]/g, '-').replace(/\|/g, ' ').substring(0, max);
+  const z = _zplAscii;
 
   // Chave NF-e (44 dígitos) — usa zeros se inválida
   const chave = chaveNfe && /^\d{44}$/.test(chaveNfe) ? chaveNfe : '0'.repeat(44);
@@ -1212,7 +1894,12 @@ function _gerarZplDeclaracao({ remetente, remDoc, remEndereco, destinatario, des
   const nfeSerieFmt = nfeSerie ? String(nfeSerie).padStart(3, '0') : '---';
 
   const dataFmt     = dataEmissao || (() => { const d = new Date(); return d.toLocaleDateString('pt-BR') + ' ' + d.toLocaleTimeString('pt-BR'); })();
-  const protocoloFmt = protocolo ? `${z(protocolo, 20)} - ${dataFmt}` : dataFmt;
+  const protocoloRaw = String(protocolo || '').replace(/\s+/g, ' ').trim();
+  const protocoloFmt = protocoloRaw
+    ? (/\d{2}\/\d{2}\/\d{4}\s+\d{2}:\d{2}:\d{2}/.test(protocoloRaw)
+      ? z(protocoloRaw, 60)
+      : `${z(protocoloRaw, 20)} - ${dataFmt}`)
+    : dataFmt;
 
   const sefazUrl = `https://www.nfe.fazenda.gov.br/portal/consultaRecaptcha.aspx?tipoConsulta=completa&chave=${chave}`;
 
@@ -1229,12 +1916,20 @@ function _gerarZplDeclaracao({ remetente, remDoc, remEndereco, destinatario, des
 
   const remAddr = splitAddr(remEndereco);
   const desAddr = splitAddr(desEndereco);
+  const observacoesText = _zplAscii(_getDeclaracaoObservacoesText(), 1600);
 
   const itensFmt   = (itens || []).slice(0, 5);
   const nItens     = Math.max(itensFmt.length, 1);
 
   // ── Y positions ──────────────────────────────────────────────────────────
   const Y0 = 5;
+  const SECTION_HEAD_H = 66;
+  const SECTION_HEAD_TXT_Y = 24;
+  const INFO_ROW_H   = 26;
+  const ITEM_HEAD_H  = 22;
+  const TOTAL_ROW_H  = 66;
+  const DADOS_ROW_H  = 66;
+  const QR_HEAD_H    = 66;
   const HEADER_H    = 118;
   const Y_DIGITS    = Y0 + HEADER_H;           // 123
   const Y_DATA      = Y_DIGITS + 22;           // 145
@@ -1242,29 +1937,29 @@ function _gerarZplDeclaracao({ remetente, remDoc, remEndereco, destinatario, des
   const Y_PROT      = Y_DATA + DATA_H;         // 177
   const FULL_H      = Y_PROT + 22 - Y0;         // 194 — altura total do bloco cabeçalho (outer box + divisor)
   const Y_REM_HEAD  = Y_PROT + 22;             // 199
-  const Y_REM_R1    = Y_REM_HEAD + 22;         // 213
+  const Y_REM_R1    = Y_REM_HEAD + SECTION_HEAD_H;
   const Y_REM_R2    = Y_REM_R1 + 28;           // 241
   const Y_DES_HEAD  = Y_REM_R2 + 28;           // 269
-  const Y_DES_R1    = Y_DES_HEAD + 22;         // 291
+  const Y_DES_R1    = Y_DES_HEAD + SECTION_HEAD_H;
   const Y_DES_R2    = Y_DES_R1 + 28;           // 319
   const Y_TRA_HEAD  = Y_DES_R2 + 28;           // 347
-  const Y_TRA_R1    = Y_TRA_HEAD + 22;         // 369
+  const Y_TRA_R1    = Y_TRA_HEAD + SECTION_HEAD_H;
   const Y_BENS_HEAD = Y_TRA_R1 + 36;           // 405
-  const Y_BENS_TH   = Y_BENS_HEAD + 22 + 8;    // +8px gap visual entre caixa 1 e caixa 2 (alinha com ZPL modelo)
-  const Y_ITEMS     = Y_BENS_TH + 22;          // 441
+  const Y_BENS_TH   = Y_BENS_HEAD + SECTION_HEAD_H + 8;
+  const Y_ITEMS     = Y_BENS_TH + ITEM_HEAD_H;
   const Y_TOTAL     = Y_ITEMS + nItens * 34;   // 475 para 1 item
-  const Y_DADOS     = Y_TOTAL + 22;
-  const Y_INF       = Y_DADOS + 22;
-  const Y_QR_H      = Y_INF + 26;
-  const Y_QR_C      = Y_QR_H + 22;
-  const QR_H        = 163;
-  const LL          = Y_QR_C + QR_H + 4;
+  const Y_DADOS     = Y_TOTAL + TOTAL_ROW_H;
+  const Y_INF       = Y_DADOS + DADOS_ROW_H;
+  const Y_QR_H      = Y_INF + INFO_ROW_H;
+  const Y_QR_C      = Y_QR_H + QR_HEAD_H;
+  const QR_H        = 196;
+  const LL          = Y_QR_C + QR_H + 14;
 
   const lines = [
     '^XA',
-    '^CI28',
+    '^CI13',
     '^PW799',
-    '^LH5,8',
+    '^LH10,18',
     `^LL${LL}`,
 
     // ── Cabeçalho principal (left: DACE info mesclado; right: código de barras) ──
@@ -1272,9 +1967,9 @@ function _gerarZplDeclaracao({ remetente, remDoc, remEndereco, destinatario, des
     `^FO193,${Y0}^GB2,${FULL_H},2^FS`,
     `^FO0,38^A0N,16,9^FB193,1,,C^FDDACE  -  DECLARACAO AUXILIAR\\&^FS`,
     `^FO0,57^A0N,14,8^FB193,1,,C^FDDE  CONTEUDO  ELETRONICA\\&^FS`,
-    `^FO2,100^A0N,18,17^FB191,1,,C^FDN\xB0: ${nfeNumFmt}\\&^FS`,
-    `^FO2,128^A0N,18,17^FB191,1,,C^FDS\xC9RIE: ${nfeSerieFmt}\\&^FS`,
-    `^FO232,20^BY1,3,80^BCN,80,N,N^FD${chave}^FS`,
+    `^FO2,100^A0N,18,17^FB191,1,,C^FDN: ${nfeNumFmt}\\&^FS`,
+    `^FO2,128^A0N,18,17^FB191,1,,C^FDSERIE: ${nfeSerieFmt}\\&^FS`,
+    `^FO220,24^BY2,3,60^BCN,60,N,N,N,A^FD${chave}^FS`,
 
     // ── Dígitos da chave ──
     `^FO198,${Y_DIGITS}^A0N,13,11^FB588,1,,C^FD${z(chaveFormatted, 60)}\\&^FS`,
@@ -1282,16 +1977,16 @@ function _gerarZplDeclaracao({ remetente, remDoc, remEndereco, destinatario, des
     // ── Data emissão / Modalidade ──
     `^FO193,${Y_DATA}^GB596,2,2^FS`,
     `^FO423,${Y_DATA}^GB2,32,2^FS`,
-    `^FO198,${Y_DATA + 4}^A0N,12,10^FB222,2,,^FDData emiss\xE3o: ${z(dataFmt, 40)}^FS`,
+    `^FO198,${Y_DATA + 4}^A0N,12,10^FB222,2,,^FDData emissao: ${z(dataFmt, 40)}^FS`,
     `^FO428,${Y_DATA + 4}^A0N,12,10^FB357,2,,^FDModalidade de Transporte: 0 - TRANSPORTE PELOS CORREIOS\\&^FS`,
 
     // ── Protocolo ──
     `^FO193,${Y_PROT}^GB596,2,2^FS`,
-    `^FO198,${Y_PROT + 4}^A0N,11,9^FB587,1,,^FDProtocolo de autoriza\xE7\xE3o: ${z(protocoloFmt, 70)}^FS`,
+    `^FO198,${Y_PROT + 4}^A0N,11,9^FB587,1,,^FDProtocolo de autorizacao: ${z(protocoloFmt, 70)}^FS`,
 
     // ── CAIXA 1: Identificação ─────────────────────────────────────────────
     // Caixa externa única; divisores internos 1px evitam bordas duplas/grossas
-    `^FO0,${Y_REM_HEAD}^GB789,${Y_BENS_HEAD + 22 - Y_REM_HEAD},2^FS`,
+    `^FO0,${Y_REM_HEAD}^GB789,${Y_BENS_HEAD + SECTION_HEAD_H - Y_REM_HEAD},2^FS`,
     // Divisores horizontais internos (1px, recuados 2px das laterais)
     `^FO2,${Y_REM_R1}^GB785,1,1^FS`,
     `^FO2,${Y_REM_R2}^GB785,1,1^FS`,
@@ -1308,31 +2003,31 @@ function _gerarZplDeclaracao({ remetente, remDoc, remEndereco, destinatario, des
     `^FO230,${Y_DES_R2}^GB2,28,2^FS`,
     `^FO230,${Y_TRA_R1}^GB2,36,2^FS`,
     // ── Remetente
-    `^FO5,${Y_REM_HEAD + 4}^A0N,16,14^FB789,1,,C^FDIDENTIFICACAO DO REMETENTE (USUARIO EMITENTE)\\&^FS`,
+    `^FO5,${Y_REM_HEAD + SECTION_HEAD_TXT_Y}^A0N,16,14^FB789,1,,C^FDIDENTIFICACAO DO REMETENTE (USUARIO EMITENTE)^FS`,
     `^FO5,${Y_REM_R1 + 4}^A0N,13,12^FD${z('CNPJ: ' + (remDoc || 'NAO INFORMADO'), 35)}^FS`,
     `^FO235,${Y_REM_R1 + 4}^A0N,13,12^FD${z('NOME: ' + remetente, 55)}^FS`,
     `^FO5,${Y_REM_R2 + 4}^A0N,13,12^FD${z('CIDADE-UF: ' + (remAddr.cidadeUf || 'NAO INFORMADO'), 35)}^FS`,
-    `^FO235,${Y_REM_R2 + 4}^A0N,13,12^FD${z('ENDERE\xC7O: ' + (remAddr.endereco || remEndereco || '-'), 55)}^FS`,
+    `^FO235,${Y_REM_R2 + 4}^A0N,13,12^FD${z('ENDERECO: ' + (remAddr.endereco || remEndereco || '-'), 55)}^FS`,
     // ── Destinatário
-    `^FO5,${Y_DES_HEAD + 4}^A0N,16,14^FB789,1,,C^FDIDENTIFICACAO DO DESTINATARIO\\&^FS`,
+    `^FO5,${Y_DES_HEAD + SECTION_HEAD_TXT_Y}^A0N,16,14^FB789,1,,C^FDIDENTIFICACAO DO DESTINATARIO^FS`,
     `^FO5,${Y_DES_R1 + 4}^A0N,13,12^FD${z('IDOUTROS: ' + (desDoc || 'NAOINFORMADO'), 35)}^FS`,
     `^FO235,${Y_DES_R1 + 4}^A0N,13,12^FD${z('NOME: ' + destinatario, 55)}^FS`,
     `^FO5,${Y_DES_R2 + 4}^A0N,13,12^FD${z('CIDADE-UF: ' + (desAddr.cidadeUf || 'NAO INFORMADO'), 35)}^FS`,
-    `^FO235,${Y_DES_R2 + 4}^A0N,13,12^FD${z('ENDERE\xC7O: ' + (desAddr.endereco || desEndereco || '-'), 55)}^FS`,
+    `^FO235,${Y_DES_R2 + 4}^A0N,13,12^FD${z('ENDERECO: ' + (desAddr.endereco || desEndereco || '-'), 55)}^FS`,
     // ── Transportadora (ECT)
-    `^FO5,${Y_TRA_HEAD + 4}^A0N,16,14^FB789,1,,C^FDTRANSPORTADORA\\&^FS`,
+    `^FO5,${Y_TRA_HEAD + SECTION_HEAD_TXT_Y}^A0N,16,14^FB789,1,,C^FDTRANSPORTADORA^FS`,
     `^FO5,${Y_TRA_R1 + 3}^A0N,10,8^FB225,2,,^FDCNPJ FISCO/ MARKET/ TRANSP:\\&${z(cnpjTransp || '34.028.316/0001-03', 30)}^FS`,
     `^FO235,${Y_TRA_R1 + 3}^A0N,10,8^FB554,2,,^FDNOME FISCO/ MARKETPLACE/ TRANSPORTADORA: ${z(nomeTransp || 'EMPRESA BRASILEIRA DE CORREIOS E TELEGRAFOS', 55)}^FS`,
     // ── Bens (cabeçalho)
-    `^FO5,${Y_BENS_HEAD + 4}^A0N,16,14^FB789,1,,C^FDIDENTIFICACAO DOS BENS OU MERCADORIAS\\&^FS`,
+    `^FO5,${Y_BENS_HEAD + SECTION_HEAD_TXT_Y}^A0N,16,14^FB789,1,,C^FDIDENTIFICACAO DOS BENS OU MERCADORIAS^FS`,
 
     // ── CAIXA 2: Itens + Dados Adicionais ────────────────────────────────────
     // Outer box (Y_BENS_TH inclui +4px de separação visual da caixa 1)
     `^FO0,${Y_BENS_TH}^GB789,${Y_QR_C + QR_H - Y_BENS_TH},2^FS`,
     // Divisores verticais no cabeçalho da tabela de itens
-    `^FO55,${Y_BENS_TH}^GB2,22,2^FS`,
-    `^FO665,${Y_BENS_TH}^GB2,22,2^FS`,
-    `^FO730,${Y_BENS_TH}^GB2,22,2^FS`,
+    `^FO55,${Y_BENS_TH}^GB2,${ITEM_HEAD_H},2^FS`,
+    `^FO665,${Y_BENS_TH}^GB2,${ITEM_HEAD_H},2^FS`,
+    `^FO730,${Y_BENS_TH}^GB2,${ITEM_HEAD_H},2^FS`,
     `^FO5,${Y_BENS_TH + 4}^A0N,14,13^FDITEM^FS`,
     `^FO60,${Y_BENS_TH + 4}^A0N,14,13^FDDESCRICAO^FS`,
     `^FO670,${Y_BENS_TH + 4}^A0N,14,13^FDQTDE^FS`,
@@ -1364,35 +2059,62 @@ function _gerarZplDeclaracao({ remetente, remDoc, remEndereco, destinatario, des
 
     // Divisor / VALOR TOTAL
     `^FO2,${Y_TOTAL}^GB785,1,1^FS`,
-    `^FO5,${Y_TOTAL + 3}^A0N,14,13^FB789,1,,C^FDVALOR TOTAL R$ ${z(itensFmt.map(it => it.valor_unitario || '0,01').join(' + ') || '0,00', 50)}\\&^FS`,
+    `^FO5,${Y_TOTAL + SECTION_HEAD_TXT_Y}^A0N,14,13^FB789,1,,C^FDVALOR TOTAL R$ ${z(itensFmt.map(it => it.valor_unitario || '0,01').join(' + ') || '0,00', 50)}^FS`,
 
     // Divisor / DADOS ADICIONAIS
     `^FO2,${Y_DADOS}^GB785,1,1^FS`,
-    `^FO5,${Y_DADOS + 4}^A0N,16,14^FB789,1,,C^FDDADOS ADICIONAIS\\&^FS`,
+    `^FO5,${Y_DADOS + SECTION_HEAD_TXT_Y}^A0N,16,14^FB789,1,,C^FDDADOS ADICIONAIS^FS`,
 
     // Divisor / INF COMPLEMENTARES
     `^FO2,${Y_INF}^GB785,1,1^FS`,
-    `^FO185,${Y_INF}^GB2,26,2^FS`,
+    `^FO185,${Y_INF}^GB2,${INFO_ROW_H},2^FS`,
     `^FO5,${Y_INF + 6}^A0N,13,12^FDINF. COMPLEMENTARES:^FS`,
     `^FO190,${Y_INF + 6}^A0N,13,12^FDINFORMACOES ADICIONAIS DO FISCO^FS`,
 
 
     // Divisor / QR-CODE header
     `^FO2,${Y_QR_H}^GB785,1,1^FS`,
-    `^FO210,${Y_QR_H}^GB2,22,2^FS`,
-    `^FO5,${Y_QR_H + 4}^A0N,16,14^FB205,1,,C^FDQR-CODE\\&^FS`,
-    `^FO215,${Y_QR_H + 4}^A0N,16,14^FB580,1,,C^FDOBSERVACOES\\&^FS`,
+    `^FO210,${Y_QR_H}^GB2,${QR_HEAD_H},2^FS`,
+    `^FO5,${Y_QR_H + SECTION_HEAD_TXT_Y}^A0N,16,14^FB205,1,,C^FDQR-CODE^FS`,
+    `^FO215,${Y_QR_H + SECTION_HEAD_TXT_Y}^A0N,16,14^FB580,1,,C^FDOBSERVACOES^FS`,
 
     // Divisor / QR-CODE content
     `^FO2,${Y_QR_C}^GB785,1,1^FS`,
     `^FO210,${Y_QR_C}^GB2,${QR_H},2^FS`,
-    `^FO40,${Y_QR_C - 66}^BQN,3,3^FDQA,https://www.fazenda.pr.gov.br/dce/qrcode?chDCe=${chave}&tpAmb=1^FS`,
-    `^FO215,${Y_QR_C + 5}^A0N,13,12^FB576,8,,^FDE contribuinte de ICMS qualquer pessoa fisica ou juridica que realize com habitualidade ou em volume que caracterize intuito comercial operacoes de circulacao de mercadoria ou prestacoes de servicos de transporte interestadual e intermunicipal de comunicacao.\\&^FS`,
+    `^FO34,${Y_QR_C - 18}^BQN,3,3^FDQA,https://www.fazenda.pr.gov.br/dce/qrcode?chDCe=${chave}&tpAmb=1^FS`,
+    `^FO224,${Y_QR_C + 8}^A0N,15,13^FB548,10,2,L^FD${observacoesText}^FS`,
 
     '^XZ',
   ];
 
   return lines.join('\n');
+}
+
+function _upgradeLegacyDeclaracaoZpl(zpl, chaveFallback = '') {
+  const extraidos = _extrairDadosNfeDaPostagem({ ObservacaoDois: chaveFallback }, {});
+  const nfeNumFmt = extraidos.nfeNum || '---';
+  const nfeSerieFmt = extraidos.nfeSerie ? String(extraidos.nfeSerie).padStart(3, '0') : '---';
+  const observacoesText = _zplAscii(_getDeclaracaoObservacoesText(), 1600);
+
+  let updated = String(zpl || '')
+    .replace(/\^CI28/, '^CI13')
+    .replace(/\^LH5,8/, '^LH10,18')
+    .replace(/\^LL(\d+)/, (_, ll) => `^LL${Number(ll) + 10}`)
+    .replace(/\^FO232,20\^BY1,3,80\^BCN,80,N,N\^FD[^\^]+\^FS/g, `^FO220,24^BY2,3,60^BCN,60,N,N,N,A^FD${extraidos.chaveNfe || '0'.repeat(44)}^FS`)
+    .replace(/\^FD(?:NUMERO|N(?:º|°|Â°)?): [^^]*\^FS/g, `^FDN: ${nfeNumFmt}\\&^FS`)
+    .replace(/\^FDS(?:ÉRIE|ERIE|Â°\/00RIE): [^^]*\^FS/g, `^FDSERIE: ${nfeSerieFmt}\\&^FS`)
+    .replace(/Data emiss[^:]*:/g, 'Data emissao:')
+    .replace(/Protocolo de autoriza[^:]*:/g, 'Protocolo de autorizacao:')
+    .replace(/ENDERE[^:]*:/g, 'ENDERECO:')
+
+  const qrContentMatch = updated.match(/\^FO2,(\d+)\^GB785,1,1\^FS\s*\^FO210,\1\^GB2,\d+,2\^FS\s*\^FO(?:40|34),\d+\^BQN,3,3\^FDQA,[^\^]+\^FS/);
+  if (qrContentMatch) {
+    const qrY = Number(qrContentMatch[1]) - 18;
+    updated = updated.replace(/\^FO(?:40|34),\d+\^BQN,3,3\^FDQA,[^\^]+\^FS/g, `^FO34,${qrY}^BQN,3,3^FDQA,https://www.fazenda.pr.gov.br/dce/qrcode?chDCe=${extraidos.chaveNfe || '0'.repeat(44)}&tpAmb=1^FS`);
+  }
+
+  return updated
+    .replace(/\^FO(?:224|220|218),(\d+)\^A0N,\d+,\d+\^FB\d+,\d+,\d+,[A-Z](?:\^FH_)?\^FD[^\^]*\^FS/g, `^FO224,$1^A0N,15,13^FB548,10,2,L^FD${observacoesText}^FS`);
 }
 
 // ── GET /api/vipp/sep-check ───────────────────────────────────────────────────
@@ -1416,3 +2138,16 @@ router.get('/sep-check', async (req, res) => {
 });
 
 module.exports = router;
+
+// Helpers exportados para uso pelo cron de enriquecimento.
+// Mantem o router como export principal (compatibilidade) e expoe os
+// utilitarios via propriedades.
+module.exports.helpers = {
+  resolverDadosDeclaracao: _resolverDadosDeclaracao,
+  persistirDeclaracaoCache: _persistirDeclaracaoCache,
+  buscarSituacaoPostagem: _buscarSituacaoPostagem,
+  temDadosDeclaracao: _temDadosDeclaracao,
+  dadosDeclaracaoCompletos: _dadosDeclaracaoCompletos,
+  montarDadosDeclaracaoFallback: _montarDadosDeclaracaoFallback,
+  vippEstaBloqueado: () => _vippGetRateLimit('situacao_postagem'),
+};

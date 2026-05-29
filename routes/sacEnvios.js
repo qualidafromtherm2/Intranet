@@ -4405,18 +4405,20 @@ router.post('/solicitacoes/vipp', async (req, res) => {
   const observacao = String(req.body?.observacao || '').trim();
   const idVipp    = String(req.body?.id_vipp    || '').trim() || null;
   const conteudo  = req.body?.conteudo || null; // JSON string de itens [{ conteudo, quantidade }]
+  const vippPayload = req.body?.vipp_payload || null;
   const numeroSep = String(req.body?.numero_sep || '').trim() || null;
 
   if (!usuario) return res.status(400).json({ ok: false, error: 'Usuário é obrigatório.' });
   if (!idVipp && !observacao) return res.status(400).json({ ok: false, error: 'id_vipp ou observação obrigatório.' });
 
   try {
+    await pool.query(`ALTER TABLE envios.solicitacoes ADD COLUMN IF NOT EXISTS vipp_payload JSONB`);
     const result = await pool.query(
       `INSERT INTO envios.solicitacoes
-         (usuario, observacao, numero_sep, status, anexos, conferido, id_vipp, conteudo)
-       VALUES ($1, $2, $3, 'Pendente', '{}', false, $4, $5)
+         (usuario, observacao, numero_sep, status, anexos, conferido, id_vipp, conteudo, vipp_payload)
+       VALUES ($1, $2, $3, 'Pendente', '{}', false, $4, $5, $6)
        RETURNING id, created_at, status, id_vipp, conteudo, observacao`,
-      [usuario, observacao || null, numeroSep, idVipp, conteudo ? String(conteudo) : null]
+      [usuario, observacao || null, numeroSep, idVipp, conteudo ? String(conteudo) : null, vippPayload || null]
     );
     const row = result.rows[0];
     return res.json({ ok: true, id: row.id, created_at: row.created_at, status: row.status, id_vipp: row.id_vipp });

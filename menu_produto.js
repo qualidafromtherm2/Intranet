@@ -18371,6 +18371,25 @@ async function _envioImprimirEtiqueta(envioId, identificacao, btnRef) {
   }
 }
 
+async function _envioValidarDeclaracaoObrigatoria(envioId) {
+  const resp = await fetch(`/api/vipp/declaracao?id=${encodeURIComponent(envioId)}&somente_validar=1`, {
+    credentials: 'include',
+  });
+  let data = null;
+  try {
+    data = await resp.json();
+  } catch {
+    data = null;
+  }
+  if (!resp.ok || !data?.ok) {
+    const campos = Array.isArray(data?.camposFaltantes) && data.camposFaltantes.length
+      ? ` Campos faltantes: ${data.camposFaltantes.join(', ')}.`
+      : '';
+    throw new Error((data?.error || 'Declaração sem dados obrigatórios para impressão.') + campos);
+  }
+  return data;
+}
+
 function setupEnvioPrintButtons(container) {
   if (!container) return;
   _envioCarregarPref();
@@ -18391,6 +18410,8 @@ function setupEnvioPrintButtons(container) {
     const origHtml = btn.innerHTML;
     btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i><span>Imprimindo...</span>';
     try {
+      await _envioValidarDeclaracaoObrigatoria(envioId);
+
       if (pref === '__PDF__') {
         // PDF: abre etiqueta + declaração HTML em abas separadas
         const ecLimpo = String(identificacao).trim().replace(/\s+/g, '');
@@ -68460,6 +68481,12 @@ window.initOscilacaoEstoque = (function () {
         } : null,
         observacao: g('vippObservacao'),
       };
+      var dadosPersistenciaVipp = {
+        destinatario: payload.destinatario,
+        notaFiscal: payload.notaFiscal,
+        declaracaoConteudo: payload.declaracaoConteudo,
+        observacao: payload.observacao,
+      };
 
       // ── Chama backend /api/vipp/postar ──────────────────────────────────
       setStatus('Enviando para VIPP...', false);
@@ -68472,7 +68499,7 @@ window.initOscilacaoEstoque = (function () {
         body: JSON.stringify(payload),
       })
         .then(function (r) { return r.json(); })
-        .then(function (data) {
+        .then(async function (data) {
           if (data.ok) {
             setStatus('', false);
             // Exibe painel de sucesso no rodapé
@@ -68514,13 +68541,19 @@ window.initOscilacaoEstoque = (function () {
                   '</div>';
               }
             }
-            // Cria Sol. de Separação automaticamente com itens da Declaração de Conteúdo
+            // A separação já registra o envio VIPP; a entrada SAC só fica como fallback.
+            var registroEnvioCriadoViaSeparacao = false;
             if (itensDecl.length > 0) {
-              criarSolicitacaoSeparacaoVipp(itensDecl, osNum, g('vippObservacao'), data.idConhecimento || null);
+              registroEnvioCriadoViaSeparacao = await criarSolicitacaoSeparacaoVipp(
+                itensDecl,
+                osNum,
+                g('vippObservacao'),
+                data.idConhecimento || null,
+                dadosPersistenciaVipp
+              );
             }
-            // Se aberto pelo painel SAC, cria entrada em envios.solicitacoes automaticamente
-            if (_vippContextoSac) {
-              criarEntradaSacVipp(itensDecl, osNum, data.idConhecimento || null);
+            if (_vippContextoSac && !registroEnvioCriadoViaSeparacao) {
+              await criarEntradaSacVipp(itensDecl, osNum, data.idConhecimento || null, dadosPersistenciaVipp);
             }
             enviarBtn.disabled = true;
             enviarBtn.innerHTML =
@@ -68544,8 +68577,8 @@ window.initOscilacaoEstoque = (function () {
   }
 
   // ── Cria Sol. de Separação automaticamente após VIPP bem-sucedido ───────────
-  async function criarSolicitacaoSeparacaoVipp(itensDecl, osNum, observacao, idVipp) {
-    if (!itensDecl || !itensDecl.length) return;
+  async function criarSolicitacaoSeparacaoVipp(itensDecl, osNum, observacao, idVipp, dadosVipp) {
+    if (!itensDecl || !itensDecl.length) return false;
     var comentario = osNum ? ('OS' + osNum) : '';
     // Usuário logado
     var nomeUser = '';
@@ -68589,6 +68622,8 @@ window.initOscilacaoEstoque = (function () {
         console.error('[VIPP→Sep] Erro ao adicionar item:', _e2);
       }
     }
+    if (!_adicionados.length) return false;
+
     // Envia a separação (somente os itens adicionados pela OS, não o carrinho inteiro)
     try {
       var _envResp = await fetch('/api/logistica/separacao/enviar', {
@@ -68603,6 +68638,7 @@ window.initOscilacaoEstoque = (function () {
           forcar_novo_sep: true,
           os_num:          osNum   || null,
           id_vipp:         idVipp  || null,
+          vipp_payload:    dadosVipp || null,
           conteudo:        itensDecl.length ? JSON.stringify(itensDecl.map(function(it) {
                              return { conteudo: it.descricao || '', quantidade: parseInt(it.quantidade, 10) || 1 };
                            })) : null
@@ -68621,14 +68657,24 @@ window.initOscilacaoEstoque = (function () {
             _envData.total + ' ' + (_envData.total === 1 ? 'item' : 'itens') + '.';
           _sEl.appendChild(_note);
         }
+        if (_vippContextoSac) {
+          try {
+            var _sacBody = document.getElementById('sacTabelaBody');
+            if (_sacBody && typeof carregarSacSolicitacoes === 'function') {
+              await carregarSacSolicitacoes(_sacBody, { hideDone: false, filterByUser: true });
+            }
+          } catch (_e4) { /* ignora */ }
+        }
+        return true;
       }
     } catch (_e3) {
       console.error('[VIPP→Sep] Erro ao enviar separação:', _e3);
     }
+    return false;
   }
 
   // ── Cria entrada em envios.solicitacoes após VIPP bem-sucedido (contexto SAC) ──
-  async function criarEntradaSacVipp(itensDecl, osNum, idVipp) {
+  async function criarEntradaSacVipp(itensDecl, osNum, idVipp, dadosVipp) {
     var nomeUser = '';
     try {
       var _meResp = await fetch('/api/auth/status', { credentials: 'include' });
@@ -68652,7 +68698,8 @@ window.initOscilacaoEstoque = (function () {
           usuario:    nomeUser,
           observacao: observacao,
           id_vipp:    idVipp || null,
-          conteudo:   conteudoJson
+          conteudo:   conteudoJson,
+          vipp_payload: dadosVipp || null
         })
       });
       var _d = await _resp.json();

@@ -17003,7 +17003,7 @@ app.post('/api/logistica/separacao/enviar', express.json(), async (req, res) => 
     const id_user   = req.session?.user?.id;
     const nome_user = req.session?.user?.username || req.session?.user?.nome || 'desconhecido';
     if (!id_user) return res.status(401).json({ ok: false, error: 'Não autenticado.' });
-    const { solicitado_para, motivo, data_prevista, horario, observacao, item_ids, forcar_novo_sep, os_num, id_vipp, conteudo } = req.body || {};
+    const { solicitado_para, motivo, data_prevista, horario, observacao, item_ids, forcar_novo_sep, os_num, id_vipp, conteudo, vipp_payload } = req.body || {};
     // Quando item_ids for fornecido (ex: VIPP), processa apenas esses itens do carrinho
     const filtroIds = Array.isArray(item_ids) && item_ids.length > 0
       ? item_ids.map(id => parseInt(id, 10)).filter(id => !isNaN(id))
@@ -17153,10 +17153,11 @@ app.post('/api/logistica/separacao/enviar', express.json(), async (req, res) => 
     if (id_vipp) {
       try {
         await pool.query(`ALTER TABLE envios.solicitacoes ADD COLUMN IF NOT EXISTS id_vipp TEXT`);
+        await pool.query(`ALTER TABLE envios.solicitacoes ADD COLUMN IF NOT EXISTS vipp_payload JSONB`);
         await pool.query(
-          `INSERT INTO envios.solicitacoes (usuario, observacao, status, numero_sep, id_vipp, anexos, conferido, conteudo)
-           VALUES ($1, $2, 'Pendente', $3, $4, '{}', false, $5)`,
-          [nome_user, os_num || null, nSolic, String(id_vipp), conteudo || null]
+          `INSERT INTO envios.solicitacoes (usuario, observacao, status, numero_sep, id_vipp, anexos, conferido, conteudo, vipp_payload)
+           VALUES ($1, $2, 'Pendente', $3, $4, '{}', false, $5, $6)`,
+          [nome_user, os_num || null, nSolic, String(id_vipp), conteudo || null, vipp_payload || null]
         );
         console.log(`[Separação/VIPP] Registro em envios.solicitacoes: SEP=${nSolic} VIPP=${id_vipp}`);
       } catch (e) {
@@ -34989,6 +34990,14 @@ app.listen(PORT, HOST, () => {
   // Notificação diária WhatsApp (08:00)
   const { iniciarCronNotificacaoDiaria } = require('./cron/notificacao_diaria_whatsapp');
   iniciarCronNotificacaoDiaria();
+
+  // Enriquecimento periodico de envios VIPP (declaracao local + legados via API)
+  try {
+    const { iniciarCronVippEnrich } = require('./cron/vipp_enrich_envios');
+    iniciarCronVippEnrich();
+  } catch (e) {
+    console.warn('[VIPP-cron] falha ao iniciar:', e.message);
+  }
 });
 
 // DEBUG: sanity check do webhook (GET simples)
