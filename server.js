@@ -10796,7 +10796,7 @@ app.get('/api/etiquetas/agentes-disponiveis', async (req, res) => {
   res.json({ ok: true, agentes: disponiveis });
 });
 
-app.post('/api/etiquetas/imprimir-arquivo', uploadAgentPrintFile.single('arquivo'), async (req, res) => {
+app.post('/api/etiquetas/imprimir-arquivo', ensureLoggedIn, uploadAgentPrintFile.single('arquivo'), async (req, res) => {
   try {
     if (!req.file) {
       return res.status(400).json({ error: 'Selecione um arquivo para imprimir.' });

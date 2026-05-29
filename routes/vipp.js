@@ -1636,30 +1636,19 @@ router.post('/imprimir-declaracao', async (req, res) => {
     );
     if (!rows.length) return res.status(404).json({ ok: false, error: 'Envio não encontrado' });
     const envio = rows[0];
-    const dadosResolvidos = await _resolverDadosDeclaracao(envio, '[VIPP] imprimir-declaracao', { exigirCamposObrigatorios: true });
-    const chaveDeclaracao = dadosResolvidos.chaveNfe || envio.chave_dce || '';
 
-    // 1b. Se já há ZPL em cache, enfileira direto
+    // 1b. Se já há ZPL em cache, enfileira direto sem depender do VIPP
     if (envio.declaracao_url && envio.declaracao_url.trimStart().startsWith('^XA')) {
-      const zplCache = _gerarZplDeclaracao(dadosResolvidos);
       const filaIns = await dbQuery(
         `INSERT INTO etiqueta."ETQ_fila_impressao" (etq_ids, multiplo, usuario, zpl, quantidade, destino_agente, impressora)
          VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
-        [[], 0, usuario, zplCache, 1, destino_agente || null, impressora || null]
+        [[], 0, usuario, envio.declaracao_url, 1, destino_agente || null, impressora || null]
       );
-      if (zplCache !== envio.declaracao_url || chaveDeclaracao !== (envio.chave_dce || '')) {
-        try {
-          await dbQuery(
-            `UPDATE envios.solicitacoes SET declaracao_url = $1, chave_dce = $2 WHERE id = $3`,
-            [zplCache, chaveDeclaracao || envio.chave_dce || null, Number(envio_id)]
-          );
-        } catch (e) {
-          console.warn('[VIPP] imprimir-declaracao (cache): falha ao atualizar ZPL legado:', e.message);
-        }
-      }
       console.log(`[VIPP] imprimir-declaracao (cache): envio_id=${envio_id} fila_id=${filaIns.rows[0].id}`);
-      return res.json({ ok: true, fila_id: filaIns.rows[0].id, fromCache: true, updatedLegacy: zplCache !== envio.declaracao_url });
+      return res.json({ ok: true, fila_id: filaIns.rows[0].id, fromCache: true });
     }
+
+    const dadosResolvidos = await _resolverDadosDeclaracao(envio, '[VIPP] imprimir-declaracao', { exigirCamposObrigatorios: true });
 
     // 3. Gera ZPL
     const zpl = _gerarZplDeclaracao(dadosResolvidos);

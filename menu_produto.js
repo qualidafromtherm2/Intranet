@@ -18404,6 +18404,29 @@ function setupEnvioPrintButtons(container) {
     const identificacao = btn.getAttribute('data-identificacao') || '';
     if (!envioId) return;
     // Se não tem impressora configurada, abre seletor antes de imprimir
+function _envioAbrirJanelasPdf(envioId, identificacao) {
+  const ecLimpo = String(identificacao || '').trim().replace(/\s+/g, '');
+  const etiquetaWin = ecLimpo ? window.open('', '_blank') : null;
+  const declaracaoWin = window.open('', '_blank');
+  return {
+    ecLimpo,
+    etiquetaWin,
+    declaracaoWin,
+    fechar() {
+      try { if (etiquetaWin && !etiquetaWin.closed) etiquetaWin.close(); } catch (_) {}
+      try { if (declaracaoWin && !declaracaoWin.closed) declaracaoWin.close(); } catch (_) {}
+    },
+    navegar() {
+      if (etiquetaWin && ecLimpo) {
+        etiquetaWin.location.href = `/api/vipp/etiqueta?id=${encodeURIComponent(ecLimpo)}&saida=1`;
+      }
+      if (declaracaoWin) {
+        declaracaoWin.location.href = `/api/vipp/declaracao?id=${encodeURIComponent(envioId)}`;
+      }
+    }
+  };
+}
+
     if (!_envioImprPref) {
       const drop = document.getElementById('envioImprGearDropdown');
       if (drop) { await _envioMostrarSeletor(drop); return; }
@@ -18413,13 +18436,16 @@ function setupEnvioPrintButtons(container) {
     const origHtml = btn.innerHTML;
     btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i><span>Imprimindo...</span>';
     try {
-      await _envioValidarDeclaracaoObrigatoria(envioId);
-
       if (pref === '__PDF__') {
-        // PDF: abre etiqueta + declaração HTML em abas separadas
-        const ecLimpo = String(identificacao).trim().replace(/\s+/g, '');
-        if (ecLimpo) window.open(`/api/vipp/etiqueta?id=${encodeURIComponent(ecLimpo)}&saida=1`, '_blank');
-        window.open(`/api/vipp/declaracao?id=${encodeURIComponent(envioId)}`, '_blank');
+        // PDF: abre as abas ainda no gesto do usuário e só navega após a validação
+        const pdfTargets = _envioAbrirJanelasPdf(envioId, identificacao);
+        try {
+          await _envioValidarDeclaracaoObrigatoria(envioId);
+          pdfTargets.navegar();
+        } catch (err) {
+          pdfTargets.fechar();
+          throw err;
+        }
       } else {
         // Agente/impressora: enfileira etiqueta e declaração em paralelo
         const agentDest = _etqParseAgentPref(pref);
