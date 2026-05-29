@@ -28,6 +28,8 @@ const INSTALL_DIR = path.join(
 const CONFIG_PATH = path.join(INSTALL_DIR, 'config.json');
 const LOG_PATH    = path.join(INSTALL_DIR, 'agent.log');
 const FILE_JOB_PREFIX = '__FILEJOB__:';
+const RAW_PRINT_FILE_EXTENSIONS = new Set(['.zpl', '.epl', '.prn', '.pcl', '.spl']);
+const SAFE_ASSOCIATED_PRINT_FILE_EXTENSIONS = new Set(['.pdf', '.txt', '.csv', '.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp', '.tif', '.tiff']);
 
 // ─── Defaults de configuração ────────────────────────────────────────────────
 const DEFAULT_CONFIG = {
@@ -245,10 +247,25 @@ function printFileWithAssociatedApp(filePath, printerName, cb) {
   }
 }
 
+function normalizeFileJobMeta(fileName, mimeType) {
+  const safeFileName = path.basename(String(fileName || 'arquivo').trim() || 'arquivo').slice(0, 180) || 'arquivo';
+  return {
+    fileName: safeFileName,
+    ext: path.extname(safeFileName).toLowerCase(),
+    mimeType: String(mimeType || 'application/octet-stream').trim().toLowerCase().slice(0, 120),
+  };
+}
+
 function isRawPrintFile(fileName, mimeType) {
-  const ext = path.extname(String(fileName || '')).toLowerCase();
-  return ['.zpl', '.epl', '.prn', '.pcl', '.spl'].includes(ext)
-    || /application\/(x-)?zpl/i.test(String(mimeType || ''));
+  const meta = normalizeFileJobMeta(fileName, mimeType);
+  return RAW_PRINT_FILE_EXTENSIONS.has(meta.ext)
+    || /application\/(x-)?zpl/i.test(meta.mimeType);
+}
+
+function isAllowedFilePrint(fileName, mimeType) {
+  const meta = normalizeFileJobMeta(fileName, mimeType);
+  return isRawPrintFile(meta.fileName, meta.mimeType)
+    || SAFE_ASSOCIATED_PRINT_FILE_EXTENSIONS.has(meta.ext);
 }
 
 function parseFileJobPayload(zplPayload) {
@@ -261,12 +278,11 @@ function parseFileJobPayload(zplPayload) {
 }
 
 function printQueuedFile(jobPayload, printerName, cb) {
-  const fileName = String(jobPayload?.fileName || 'arquivo').trim() || 'arquivo';
-  const mimeType = String(jobPayload?.mimeType || 'application/octet-stream').trim();
-  const ext = (() => {
-    const value = path.extname(fileName).toLowerCase();
-    return /^\.[a-z0-9]{1,10}$/.test(value) ? value : '';
-  })();
+  const meta = normalizeFileJobMeta(jobPayload?.fileName, jobPayload?.mimeType);
+  if (!isAllowedFilePrint(meta.fileName, meta.mimeType)) {
+    return cb(new Error('Tipo de arquivo não permitido para impressão manual'));
+  }
+  const ext = /^\.[a-z0-9]{1,10}$/.test(meta.ext) ? meta.ext : '';
   const tempFile = path.join(
     os.tmpdir(),
     'sgf_print_job_' + Date.now() + '_' + Math.random().toString(36).slice(2) + ext
@@ -285,7 +301,7 @@ function printQueuedFile(jobPayload, printerName, cb) {
     cb(err || null);
   };
 
-  if (isRawPrintFile(fileName, mimeType)) {
+  if (isRawPrintFile(meta.fileName, meta.mimeType)) {
     return printRawFile(tempFile, printerName, finish);
   }
   return printFileWithAssociatedApp(tempFile, printerName, finish);

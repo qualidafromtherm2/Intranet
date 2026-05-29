@@ -10639,6 +10639,22 @@ app.use('/etiquetas', requireSessionOrAgentForStatic, express.static(etiquetasRo
 // ── Token simples de autenticação para o agente de impressão ─────────────────
 const AGENTE_TOKEN = String(process.env.AGENTE_TOKEN || '').trim();
 const ETQ_FILE_JOB_PREFIX = '__FILEJOB__:';
+const ETQ_RAW_PRINT_FILE_EXTENSIONS = new Set(['.zpl', '.epl', '.prn', '.pcl', '.spl']);
+const ETQ_SAFE_FILE_PRINT_EXTENSIONS = new Set(['.pdf', '.txt', '.csv', '.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp', '.tif', '.tiff']);
+
+function _etqNormalizarArquivoImpressao(fileName, mimeType) {
+  const safeFileName = path.basename(String(fileName || 'arquivo').trim() || 'arquivo').slice(0, 180) || 'arquivo';
+  return {
+    fileName: safeFileName,
+    ext: path.extname(safeFileName).toLowerCase(),
+    mimeType: String(mimeType || 'application/octet-stream').trim().slice(0, 120),
+  };
+}
+
+function _etqArquivoImpressaoPermitido(fileName, mimeType) {
+  const meta = _etqNormalizarArquivoImpressao(fileName, mimeType);
+  return ETQ_RAW_PRINT_FILE_EXTENSIONS.has(meta.ext) || ETQ_SAFE_FILE_PRINT_EXTENSIONS.has(meta.ext);
+}
 
 function _etqSanitizarPrinterAliases(metaRaw) {
   const meta = metaRaw && typeof metaRaw === 'object' && !Array.isArray(metaRaw) ? metaRaw : {};
@@ -10802,6 +10818,13 @@ app.post('/api/etiquetas/imprimir-arquivo', ensureLoggedIn, uploadAgentPrintFile
       return res.status(400).json({ error: 'Selecione um arquivo para imprimir.' });
     }
 
+    const arquivoMeta = _etqNormalizarArquivoImpressao(req.file.originalname, req.file.mimetype);
+    if (!_etqArquivoImpressaoPermitido(arquivoMeta.fileName, arquivoMeta.mimeType)) {
+      return res.status(400).json({
+        error: 'Tipo de arquivo não permitido. Use PDF, TXT/CSV, imagens ou arquivos raw de etiqueta.'
+      });
+    }
+
     const destinoAgente = String(req.body?.destino_agente || '').trim();
     const impressora = String(req.body?.impressora || '').trim();
     if (!destinoAgente || !impressora) {
@@ -10821,8 +10844,8 @@ app.post('/api/etiquetas/imprimir-arquivo', ensureLoggedIn, uploadAgentPrintFile
 
     const payload = {
       kind: 'file-print',
-      fileName: String(req.file.originalname || 'arquivo').trim().slice(0, 180) || 'arquivo',
-      mimeType: String(req.file.mimetype || 'application/octet-stream').trim().slice(0, 120),
+      fileName: arquivoMeta.fileName,
+      mimeType: arquivoMeta.mimeType,
       contentBase64: req.file.buffer.toString('base64'),
     };
     const filaPayload = `${ETQ_FILE_JOB_PREFIX}${JSON.stringify(payload)}`;
@@ -10989,9 +11012,10 @@ app.post('/api/etiquetas/fila/confirmar', express.json(), async (req, res) => {
     if (success) {
       await pool.query(
         `UPDATE etiqueta."ETQ_fila_impressao"
-           SET status = 'impresso', impresso_em = NOW(), agent_host = $2
+           SET status = 'impresso', impresso_em = NOW(), agent_host = $2,
+               zpl = CASE WHEN zpl LIKE $3 THEN NULL ELSE zpl END
          WHERE id = $1`,
-        [id, agent_host || null]
+        [id, agent_host || null, `${ETQ_FILE_JOB_PREFIX}%`]
       );
     } else {
       await pool.query(

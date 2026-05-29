@@ -1457,11 +1457,19 @@ function _mapearSituacaoPostagem(s = {}, post = {}, etiqueta) {
     return isNaN(d.getTime()) ? String(dataEntrada)
       : d.toLocaleDateString('pt-BR') + ' ' + d.toLocaleTimeString('pt-BR');
   })();
+  const destinatario = String(
+    post.NomeDestinatario
+    || post.AosCuidados
+    || s.NomeDestinatario
+    || s.AosCuidados
+    || ''
+  ).trim();
 
   return {
     remetente:   post.NomeRemetente || post.NomeFantasiaRemetente || VIPP_REMETENTE_PADRAO.nome,
     remDoc:      fmtCnpj(post.CNPJRemetente || VIPP_REMETENTE_PADRAO.documento),
     remEndereco: remEndereco || _montarEnderecoRemetentePadrao(),
+    destinatario,
     desDoc:      fmtDocumento(documentoDestinatario),
     desEndereco,
     ect:         post.Etiqueta || s.Etiqueta || etiqueta,
