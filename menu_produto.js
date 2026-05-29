@@ -3201,20 +3201,23 @@ function renderAlmoxTable(arr) {
 }
 
 // Controle de botões que exigem login
-// Controla a visibilidade dos ícones do header (sino, carrinho, impressora, engrenagem)
+// Controla a visibilidade dos ícones do header (sino, impressão rápida, carrinho, engrenagem)
 function toggleHeaderIcons(isLoggedIn) {
   const bellWrapper = document.getElementById('notification-wrapper');
+  const quickPrintIcon = document.getElementById('header-print-files-icon');
   const cartIcon = document.getElementById('cart-icon');
   const configIcon = document.getElementById('config-icon');
 
   if (isLoggedIn) {
     // Mostra os ícones quando usuário está logado
     if (bellWrapper) bellWrapper.style.display = 'block';
+    if (quickPrintIcon) quickPrintIcon.style.display = 'inline-block';
     if (cartIcon) cartIcon.style.display = 'inline-block';
     if (configIcon) configIcon.style.display = 'inline-block';
   } else {
     // Oculta os ícones quando usuário não está logado
     if (bellWrapper) bellWrapper.style.display = 'none';
+    if (quickPrintIcon) quickPrintIcon.style.display = 'none';
     if (cartIcon) cartIcon.style.display = 'none';
     if (configIcon) configIcon.style.display = 'none';
   }
@@ -25527,6 +25530,7 @@ const avatar     = document.getElementById('profile-icon');
 const etiquetasModal = document.getElementById('etiquetasModal');
 const listaEtiq       = document.getElementById('listaEtiquetas');
 const cartBtn    = document.getElementById('cart-icon');
+const headerQuickPrintBtn = document.getElementById('header-print-files-icon');
 const linksBtn   = document.getElementById('links-icon');
 const linksModal = document.getElementById('linksRapidosModal');
 const linksFecharBtn = document.getElementById('linksRapidosFecharModal');
@@ -25666,6 +25670,11 @@ async function salvarLinkRapido() {
   cartBtn?.addEventListener('click', e => {
     e.preventDefault();
     openComprasFormTab();
+  });
+
+  headerQuickPrintBtn?.addEventListener('click', e => {
+    e.preventDefault();
+    _hdrQuickPrintOpenModal();
   });
 
   linksBtn?.addEventListener('click', e => {
@@ -26814,6 +26823,272 @@ window.openRegistros = async function() {
   document.getElementById('etqConfigImpressorasModal')?.addEventListener('click', e => {
     if (e.target === document.getElementById('etqConfigImpressorasModal'))
       document.getElementById('etqConfigImpressorasModal').style.display = 'none';
+  });
+
+  // ── Impressão rápida de arquivo no header ──────────────────────────────────
+  let _hdrQuickPrintFile = null;
+  let _hdrQuickPrintBusy = false;
+
+  function _hdrQuickPrintEls() {
+    return {
+      modal: document.getElementById('headerQuickPrintModal'),
+      fileInput: document.getElementById('headerQuickPrintFileInput'),
+      fileName: document.getElementById('headerQuickPrintFileName'),
+      printerWrap: document.getElementById('headerQuickPrintPrinterWrap'),
+      printerSelect: document.getElementById('headerQuickPrintPrinterSelect'),
+      printerHint: document.getElementById('headerQuickPrintPrinterHint'),
+      status: document.getElementById('headerQuickPrintStatus'),
+      action: document.getElementById('headerQuickPrintAction'),
+    };
+  }
+
+  function _hdrQuickPrintFormatBytes(bytes) {
+    const value = Number(bytes) || 0;
+    if (value >= 1024 * 1024) return `${(value / (1024 * 1024)).toFixed(1)} MB`;
+    if (value >= 1024) return `${Math.max(1, Math.round(value / 1024))} KB`;
+    return `${value} B`;
+  }
+
+  function _hdrQuickPrintSetStatus(msg, color = '#94a3b8') {
+    const { status } = _hdrQuickPrintEls();
+    if (!status) return;
+    status.textContent = msg || '';
+    status.style.color = color;
+  }
+
+  function _hdrQuickPrintUpdateAction() {
+    const { action, printerSelect } = _hdrQuickPrintEls();
+    if (!action) return;
+
+    const semImpressoraCompativel = Boolean(
+      _hdrQuickPrintFile &&
+      printerSelect &&
+      printerSelect.disabled &&
+      printerSelect.options.length <= 1
+    );
+
+    action.disabled = _hdrQuickPrintBusy || semImpressoraCompativel;
+    if (_hdrQuickPrintBusy) {
+      action.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Enviando...';
+      return;
+    }
+    if (_hdrQuickPrintFile) {
+      action.innerHTML = '<i class="fa-solid fa-paper-plane"></i> Enviar para impressora';
+      return;
+    }
+    action.innerHTML = '<i class="fa-solid fa-print"></i> Imprimir';
+  }
+
+  function _hdrQuickPrintReset() {
+    const els = _hdrQuickPrintEls();
+    _hdrQuickPrintFile = null;
+    if (els.fileInput) els.fileInput.value = '';
+    if (els.fileName) els.fileName.textContent = 'Nenhum arquivo selecionado.';
+    if (els.printerWrap) {
+      els.printerWrap.style.display = 'none';
+      els.printerWrap.style.flexDirection = 'column';
+    }
+    if (els.printerSelect) {
+      els.printerSelect.disabled = false;
+      els.printerSelect.innerHTML = '<option value="">Selecione uma impressora</option>';
+    }
+    if (els.printerHint) els.printerHint.textContent = '';
+    _hdrQuickPrintSetStatus('Clique em Imprimir para anexar um arquivo.', '#94a3b8');
+    _hdrQuickPrintUpdateAction();
+  }
+
+  async function _hdrQuickPrintListarImpressoras() {
+    const cfg = _etqCarregarCfgImpr();
+    const padrao = typeof cfg?.padrao === 'string' && cfg.padrao.startsWith('__AGENT__:') ? cfg.padrao : null;
+    const enabled = Array.isArray(cfg?.enabled)
+      ? cfg.enabled.filter(val => typeof val === 'string' && val.startsWith('__AGENT__:'))
+      : [];
+
+    const resp = await fetch('/api/etiquetas/agentes-disponiveis', { credentials: 'include' });
+    if (!resp.ok) throw new Error(`Falha ao consultar impressoras (${resp.status}).`);
+
+    const data = await resp.json().catch(() => ({}));
+    const agentes = Array.isArray(data?.agentes) ? data.agentes : [];
+    _etqPopularAliasCache(agentes);
+
+    const onlineMap = new Map();
+    for (const ag of agentes) {
+      for (const imp of (ag.printers || [])) {
+        const val = _etqImpressoraParaVal(ag.pcName, imp);
+        if (onlineMap.has(val)) continue;
+        onlineMap.set(val, {
+          val,
+          pcName: ag.pcName,
+          impressora: imp,
+          label: _etqGetDisplayName(val),
+          filePrint: ag?.capabilities?.filePrint === true,
+        });
+      }
+    }
+
+    const orderedValues = enabled.length
+      ? (padrao ? [padrao, ...enabled.filter(val => val !== padrao)] : enabled.slice())
+      : Array.from(onlineMap.keys());
+
+    const seen = new Set();
+    const supported = [];
+    const unsupported = [];
+
+    for (const val of orderedValues) {
+      const item = onlineMap.get(val);
+      if (!item) continue;
+      const key = item.label.toLowerCase().trim();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      (item.filePrint ? supported : unsupported).push(item);
+    }
+
+    return { supported, unsupported };
+  }
+
+  async function _hdrQuickPrintPrepararImpressoras() {
+    const els = _hdrQuickPrintEls();
+    if (!els.printerWrap || !els.printerSelect || !els.printerHint) return;
+
+    els.printerWrap.style.display = 'flex';
+    els.printerSelect.disabled = true;
+    els.printerSelect.innerHTML = '<option value="">Carregando impressoras...</option>';
+    els.printerHint.textContent = '';
+    _hdrQuickPrintSetStatus('Buscando impressoras configuradas...', '#facc15');
+
+    try {
+      const { supported, unsupported } = await _hdrQuickPrintListarImpressoras();
+      if (!supported.length) {
+        els.printerSelect.innerHTML = '<option value="">Nenhuma impressora disponível</option>';
+        const msg = unsupported.length
+          ? 'As impressoras online ainda não suportam impressão de arquivo. Atualize o agente no PC selecionado.'
+          : 'Nenhuma impressora online foi encontrada na sua configuração.';
+        els.printerHint.textContent = msg;
+        _hdrQuickPrintSetStatus(msg, unsupported.length ? '#facc15' : '#f87171');
+        _hdrQuickPrintUpdateAction();
+        return;
+      }
+
+      els.printerSelect.disabled = false;
+      els.printerSelect.innerHTML = [
+        '<option value="">Selecione uma impressora</option>',
+        ...supported.map(item => `<option value="${escapeHtml(item.val)}">${escapeHtml(item.label)}</option>`),
+      ].join('');
+
+      const cfg = _etqCarregarCfgImpr();
+      const pref = (_etqPrinterPref && _etqPrinterPref.startsWith('__AGENT__:'))
+        ? _etqPrinterPref
+        : (typeof cfg?.padrao === 'string' && cfg.padrao.startsWith('__AGENT__:') ? cfg.padrao : '');
+      if (pref && supported.some(item => item.val === pref)) {
+        els.printerSelect.value = pref;
+      }
+
+      els.printerHint.textContent = unsupported.length
+        ? 'Algumas impressoras ficaram ocultas porque o agente nelas ainda não suporta impressão de arquivo.'
+        : 'Lista baseada nas impressoras habilitadas em Configurar impressoras.';
+      _hdrQuickPrintSetStatus('Arquivo carregado. Escolha a impressora e clique novamente em Imprimir.', '#94a3b8');
+    } catch (err) {
+      els.printerSelect.innerHTML = '<option value="">Falha ao carregar</option>';
+      els.printerSelect.disabled = true;
+      _hdrQuickPrintSetStatus(err?.message || 'Não foi possível carregar as impressoras.', '#f87171');
+    }
+
+    _hdrQuickPrintUpdateAction();
+  }
+
+  function _hdrQuickPrintOpenModal() {
+    const { modal } = _hdrQuickPrintEls();
+    if (!modal) return;
+    _hdrQuickPrintBusy = false;
+    _hdrQuickPrintReset();
+    modal.style.display = 'flex';
+  }
+
+  function _hdrQuickPrintCloseModal() {
+    const { modal } = _hdrQuickPrintEls();
+    if (!modal) return;
+    modal.style.display = 'none';
+    _hdrQuickPrintBusy = false;
+    _hdrQuickPrintReset();
+  }
+
+  document.getElementById('headerQuickPrintAction')?.addEventListener('click', async () => {
+    if (_hdrQuickPrintBusy) return;
+    const els = _hdrQuickPrintEls();
+    if (!_hdrQuickPrintFile) {
+      els.fileInput?.click();
+      return;
+    }
+
+    const printerVal = els.printerSelect?.value || '';
+    if (!printerVal) {
+      _hdrQuickPrintSetStatus('Escolha uma impressora configurada antes de enviar o arquivo.', '#f87171');
+      els.printerSelect?.focus();
+      return;
+    }
+
+    const agentDest = _etqParseAgentPref(printerVal);
+    if (!agentDest) {
+      _hdrQuickPrintSetStatus('Selecione uma impressora de agente online para impressão de arquivo.', '#f87171');
+      return;
+    }
+
+    try {
+      _hdrQuickPrintBusy = true;
+      _hdrQuickPrintUpdateAction();
+      _hdrQuickPrintSetStatus('Enfileirando arquivo para impressão...', '#facc15');
+
+      const formData = new FormData();
+      formData.append('arquivo', _hdrQuickPrintFile);
+      formData.append('destino_agente', agentDest.pcName);
+      formData.append('impressora', agentDest.impressora);
+
+      const resp = await fetch('/api/etiquetas/imprimir-arquivo', {
+        method: 'POST',
+        credentials: 'include',
+        body: formData,
+      });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok) {
+        throw new Error(data?.error || `Erro ao enviar arquivo (${resp.status})`);
+      }
+
+      _hdrQuickPrintSetStatus(`Arquivo enviado para ${agentDest.impressora} (${agentDest.pcName}).`, '#4ade80');
+      setTimeout(() => {
+        _hdrQuickPrintCloseModal();
+      }, 900);
+    } catch (err) {
+      _hdrQuickPrintSetStatus(err?.message || 'Falha ao enviar arquivo para impressão.', '#f87171');
+    } finally {
+      _hdrQuickPrintBusy = false;
+      _hdrQuickPrintUpdateAction();
+    }
+  });
+
+  document.getElementById('headerQuickPrintFileInput')?.addEventListener('change', async (event) => {
+    const file = event.target?.files?.[0];
+    if (!file) return;
+
+    _hdrQuickPrintFile = file;
+    const { fileName } = _hdrQuickPrintEls();
+    if (fileName) {
+      fileName.textContent = `${file.name} (${_hdrQuickPrintFormatBytes(file.size)})`;
+    }
+
+    _hdrQuickPrintUpdateAction();
+    await _hdrQuickPrintPrepararImpressoras();
+  });
+
+  document.getElementById('headerQuickPrintPrinterSelect')?.addEventListener('change', () => {
+    _hdrQuickPrintSetStatus('Clique em Imprimir para enviar o arquivo para a impressora escolhida.', '#94a3b8');
+  });
+
+  document.getElementById('headerQuickPrintCancel')?.addEventListener('click', _hdrQuickPrintCloseModal);
+  document.getElementById('headerQuickPrintClose')?.addEventListener('click', _hdrQuickPrintCloseModal);
+  document.getElementById('headerQuickPrintModal')?.addEventListener('click', event => {
+    if (event.target === document.getElementById('headerQuickPrintModal')) {
+      _hdrQuickPrintCloseModal();
+    }
   });
 
   // Inicializa o listbox ao abrir o modal

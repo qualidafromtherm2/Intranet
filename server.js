@@ -27,6 +27,7 @@ const fs  = require('fs');           // todas as funções sync
 const fsp = fs.promises;            // parte assíncrona (equivale a fs/promises)
 const path          = require('path');
 const multer        = require('multer');
+const uploadAgentPrintFile = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
 // logo após os outros requires:
 const archiver = require('archiver');
 const crypto   = require('crypto');
@@ -10620,6 +10621,8 @@ app.use('/etiquetas', requireSessionOrAgentForStatic, express.static(etiquetasRo
         erro_msg    TEXT
       )
     `);
+    await pool.query(`ALTER TABLE etiqueta."ETQ_fila_impressao" ADD COLUMN IF NOT EXISTS destino_agente TEXT`);
+    await pool.query(`ALTER TABLE etiqueta."ETQ_fila_impressao" ADD COLUMN IF NOT EXISTS impressora TEXT`);
     // Tabela de regras de auto-ocultamento por codigo_produto
     await pool.query(`
       CREATE TABLE IF NOT EXISTS etiqueta."ETQ_auto_oculto" (
@@ -10635,11 +10638,69 @@ app.use('/etiquetas', requireSessionOrAgentForStatic, express.static(etiquetasRo
 
 // ── Token simples de autenticação para o agente de impressão ─────────────────
 const AGENTE_TOKEN = String(process.env.AGENTE_TOKEN || '').trim();
+const ETQ_FILE_JOB_PREFIX = '__FILEJOB__:';
+
+function _etqSanitizarPrinterAliases(metaRaw) {
+  const meta = metaRaw && typeof metaRaw === 'object' && !Array.isArray(metaRaw) ? metaRaw : {};
+  const clean = {};
+  for (const [printerName, alias] of Object.entries(meta)) {
+    if (printerName.startsWith('__')) continue;
+    if (typeof alias === 'string' && alias.trim()) clean[printerName] = alias.trim();
+  }
+  return clean;
+}
+
+function _etqExtrairCapabilitiesAgente(metaRaw) {
+  const meta = metaRaw && typeof metaRaw === 'object' && !Array.isArray(metaRaw) ? metaRaw : {};
+  const caps = meta.__capabilities__;
+  return {
+    filePrint: Boolean(caps && typeof caps === 'object' && caps.filePrint === true),
+  };
+}
+
+async function _etqBuscarAgenteDisponivel(pcName) {
+  const nome = String(pcName || '').trim();
+  if (!nome) return null;
+
+  const inMemory = _agentesOnline.get(nome);
+  if (inMemory && (Date.now() - inMemory.lastSeen) < 120000) {
+    return inMemory;
+  }
+
+  try {
+    const { rows } = await pool.query(
+      `SELECT pc_name, printers, printer_aliases, version, host, last_seen
+         FROM etiqueta."ETQ_agentes"
+        WHERE pc_name = $1
+          AND last_seen > now() - INTERVAL '3 minutes'
+        ORDER BY last_seen DESC
+        LIMIT 1`,
+      [nome]
+    );
+    if (!rows.length) return null;
+
+    const row = rows[0];
+    return {
+      pcName: row.pc_name,
+      printers: Array.isArray(row.printers) ? row.printers : [],
+      printerAliases: _etqSanitizarPrinterAliases(row.printer_aliases),
+      capabilities: _etqExtrairCapabilitiesAgente(row.printer_aliases),
+      version: row.version,
+      host: row.host,
+      lastSeen: row.last_seen ? new Date(row.last_seen).getTime() : Date.now(),
+      online: true,
+      fromDb: true,
+    };
+  } catch (err) {
+    console.warn('[etiquetas/agente] falha ao consultar agente específico:', err.message);
+    return null;
+  }
+}
 
 // Estado em memória do agente ativo (sem DB — reseta com restart do servidor)
 const _agenteAtivo  = { ts: 0, printer: '', host: '', version: '' };
 // Map de agentes por pcName — multi-PC support
-const _agentesOnline = new Map(); // key: pcName → { pcName, printers, lastSeen, host, version }
+const _agentesOnline = new Map(); // key: pcName → { pcName, printers, printerAliases, capabilities, lastSeen, host, version }
 
 // POST /api/etiquetas/agente/heartbeat — agente anuncia que está online
 app.post('/api/etiquetas/agente/heartbeat', express.json(), async (req, res) => {
@@ -10649,7 +10710,7 @@ app.post('/api/etiquetas/agente/heartbeat', express.json(), async (req, res) => 
   }
   const token = req.headers['x-agent-token'];
   if (token !== AGENTE_TOKEN) return res.status(401).json({ error: 'Token inválido' });
-  const { printer = '', version = '?', host = '', pcName = '', printers = [], printerAliases = {} } = req.body || {};
+  const { printer = '', version = '?', host = '', pcName = '', printers = [], printerAliases = {}, capabilities = {} } = req.body || {};
   // Compatibilidade retroativa — agente único
   _agenteAtivo.ts      = Date.now();
   _agenteAtivo.printer = printer || _agenteAtivo.printer;
@@ -10658,11 +10719,14 @@ app.post('/api/etiquetas/agente/heartbeat', express.json(), async (req, res) => 
   // Registro multi-agente (in-memory)
   const nome = pcName || host || req.ip;
   const listaPrinters = Array.isArray(printers) && printers.length ? printers : (printer ? [printer] : []);
-  const aliasesObj    = typeof printerAliases === 'object' && printerAliases !== null ? printerAliases : {};
+  const aliasesObj    = _etqSanitizarPrinterAliases(printerAliases);
+  const capsObj       = { filePrint: capabilities?.filePrint === true };
+  const metaPersist   = Object.assign({}, aliasesObj, capsObj.filePrint ? { __capabilities__: capsObj } : {});
   _agentesOnline.set(nome, {
     pcName:         nome,
     printers:       listaPrinters,
     printerAliases: aliasesObj,
+    capabilities:   capsObj,
     lastSeen:       Date.now(),
     host:           host || req.ip,
     version,
@@ -10678,7 +10742,7 @@ app.post('/api/etiquetas/agente/heartbeat', express.json(), async (req, res) => 
          version         = EXCLUDED.version,
          host            = EXCLUDED.host,
          last_seen       = now()`,
-      [nome, JSON.stringify(listaPrinters), JSON.stringify(aliasesObj), version, host || req.ip]
+      [nome, JSON.stringify(listaPrinters), JSON.stringify(metaPersist), version, host || req.ip]
     );
   } catch (e) {
     console.warn('[heartbeat] falha ao persistir agente no banco:', e.message);
@@ -10694,7 +10758,14 @@ app.get('/api/etiquetas/agentes-disponiveis', async (req, res) => {
   // 1. Lê in-memory (produção, onde o heartbeat chegou nesta instância)
   for (const ag of _agentesOnline.values()) {
     if (agora - ag.lastSeen < 120000) {   // online = visto nos últimos 2 min
-      disponiveis.push({ pcName: ag.pcName, printers: ag.printers, printerAliases: ag.printerAliases || {}, version: ag.version, online: true });
+      disponiveis.push({
+        pcName: ag.pcName,
+        printers: ag.printers,
+        printerAliases: ag.printerAliases || {},
+        capabilities: ag.capabilities || {},
+        version: ag.version,
+        online: true,
+      });
     }
   }
   // 2. Se nenhum agente no Map (instância local/dev), consulta o banco
@@ -10707,10 +10778,12 @@ app.get('/api/etiquetas/agentes-disponiveis', async (req, res) => {
           ORDER BY last_seen DESC`
       );
       for (const row of rows) {
+        const rawMeta = row.printer_aliases || {};
         disponiveis.push({
           pcName:         row.pc_name,
           printers:       Array.isArray(row.printers) ? row.printers : [],
-          printerAliases: row.printer_aliases || {},
+          printerAliases: _etqSanitizarPrinterAliases(rawMeta),
+          capabilities:   _etqExtrairCapabilitiesAgente(rawMeta),
           version:        row.version,
           online:         true,
           fromDb:         true,  // sinaliza origem (útil para debug)
@@ -10721,6 +10794,60 @@ app.get('/api/etiquetas/agentes-disponiveis', async (req, res) => {
     }
   }
   res.json({ ok: true, agentes: disponiveis });
+});
+
+app.post('/api/etiquetas/imprimir-arquivo', uploadAgentPrintFile.single('arquivo'), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: 'Selecione um arquivo para imprimir.' });
+    }
+
+    const destinoAgente = String(req.body?.destino_agente || '').trim();
+    const impressora = String(req.body?.impressora || '').trim();
+    if (!destinoAgente || !impressora) {
+      return res.status(400).json({ error: 'Selecione uma impressora de agente online.' });
+    }
+
+    const agente = await _etqBuscarAgenteDisponivel(destinoAgente);
+    if (!agente) {
+      return res.status(404).json({ error: 'Agente offline ou não encontrado para esta impressora.' });
+    }
+    if (!Array.isArray(agente.printers) || !agente.printers.includes(impressora)) {
+      return res.status(400).json({ error: 'A impressora escolhida não está disponível nesse agente.' });
+    }
+    if (!agente.capabilities?.filePrint) {
+      return res.status(409).json({ error: 'O agente dessa impressora ainda não suporta impressão de arquivo. Atualize o agente e tente novamente.' });
+    }
+
+    const payload = {
+      kind: 'file-print',
+      fileName: String(req.file.originalname || 'arquivo').trim().slice(0, 180) || 'arquivo',
+      mimeType: String(req.file.mimetype || 'application/octet-stream').trim().slice(0, 120),
+      contentBase64: req.file.buffer.toString('base64'),
+    };
+    const filaPayload = `${ETQ_FILE_JOB_PREFIX}${JSON.stringify(payload)}`;
+    if (Buffer.byteLength(filaPayload, 'utf8') > 14 * 1024 * 1024) {
+      return res.status(413).json({ error: 'Arquivo muito grande para a fila. Use arquivos de até 10 MB.' });
+    }
+
+    const usuario = String(req.session?.user?.login || req.session?.usuario || '').trim();
+    const filaIns = await pool.query(
+      `INSERT INTO etiqueta."ETQ_fila_impressao" (etq_ids, multiplo, usuario, zpl, quantidade, destino_agente, impressora)
+       VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
+      [[], 0, usuario || null, filaPayload, 1, destinoAgente, impressora]
+    );
+
+    res.json({
+      ok: true,
+      fila_id: filaIns.rows[0].id,
+      arquivo: payload.fileName,
+      impressora,
+      destino_agente: destinoAgente,
+    });
+  } catch (err) {
+    console.error('[etiquetas/imprimir-arquivo]', err);
+    res.status(500).json({ error: err?.message || 'Falha ao enfileirar arquivo para impressão' });
+  }
 });
 
 // GET /api/etiquetas/agente/online — frontend verifica se há agente ativo

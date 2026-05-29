@@ -27,6 +27,7 @@ const INSTALL_DIR = path.join(
 );
 const CONFIG_PATH = path.join(INSTALL_DIR, 'config.json');
 const LOG_PATH    = path.join(INSTALL_DIR, 'agent.log');
+const FILE_JOB_PREFIX = '__FILEJOB__:';
 
 // ─── Defaults de configuração ────────────────────────────────────────────────
 const DEFAULT_CONFIG = {
@@ -193,6 +194,101 @@ ${zpl.replace(/'/g, "''")}
     try { fs.unlinkSync(tmp); } catch {}
     cb(e);
   }
+}
+
+function printRawFile(filePath, printerName, cb) {
+  const scriptPath = path.join(__dirname, 'imprimir.ps1');
+  execFile('powershell.exe',
+    ['-NonInteractive', '-WindowStyle', 'Hidden', '-ExecutionPolicy', 'Bypass', '-File', scriptPath, '-ZplFile', filePath, '-PrinterName', printerName],
+    { timeout: 30000 },
+    (err) => cb(err || null)
+  );
+}
+
+function printFileWithAssociatedApp(filePath, printerName, cb) {
+  const filePathEsc = String(filePath || '').replaceAll("'", "''");
+  const printerNameEsc = String(printerName || '').replaceAll("'", "''");
+  const ps1 = [
+    "$ErrorActionPreference = 'Stop'",
+    "$filePath = '" + filePathEsc + "'",
+    "$printerName = '" + printerNameEsc + "'",
+    'if (-not (Test-Path -LiteralPath $filePath)) {',
+    '  throw "Arquivo temporario nao encontrado: $filePath"',
+    '}',
+    "$proc = Start-Process -FilePath $filePath -Verb PrintTo -ArgumentList ('\"' + $printerName + '\"') -PassThru",
+    'if ($null -ne $proc) {',
+    '  $proc.WaitForExit(15000) | Out-Null',
+    '  if (-not $proc.HasExited) {',
+    '    try { $proc.CloseMainWindow() | Out-Null } catch {}',
+    '    Start-Sleep -Milliseconds 800',
+    '    if (-not $proc.HasExited) {',
+    '      Stop-Process -Id $proc.Id -Force',
+    '    }',
+    '  }',
+    '}',
+  ].join('\n');
+
+  const tmp = path.join(os.tmpdir(), 'sgf_file_print_' + Date.now() + '.ps1');
+  try {
+    fs.writeFileSync(tmp, ps1, 'utf8');
+    execFile('powershell.exe',
+      ['-NonInteractive', '-WindowStyle', 'Hidden', '-ExecutionPolicy', 'Bypass', '-File', tmp],
+      { timeout: 45000 },
+      (err) => {
+        try { fs.unlinkSync(tmp); } catch {}
+        cb(err || null);
+      }
+    );
+  } catch (e) {
+    try { fs.unlinkSync(tmp); } catch {}
+    cb(e);
+  }
+}
+
+function isRawPrintFile(fileName, mimeType) {
+  const ext = path.extname(String(fileName || '')).toLowerCase();
+  return ['.zpl', '.epl', '.prn', '.pcl', '.spl'].includes(ext)
+    || /application\/(x-)?zpl/i.test(String(mimeType || ''));
+}
+
+function parseFileJobPayload(zplPayload) {
+  if (typeof zplPayload !== 'string' || !zplPayload.startsWith(FILE_JOB_PREFIX)) return null;
+  const parsed = JSON.parse(zplPayload.slice(FILE_JOB_PREFIX.length));
+  if (!parsed || typeof parsed.contentBase64 !== 'string') {
+    throw new Error('Payload de arquivo inválido');
+  }
+  return parsed;
+}
+
+function printQueuedFile(jobPayload, printerName, cb) {
+  const fileName = String(jobPayload?.fileName || 'arquivo').trim() || 'arquivo';
+  const mimeType = String(jobPayload?.mimeType || 'application/octet-stream').trim();
+  const ext = (() => {
+    const value = path.extname(fileName).toLowerCase();
+    return /^\.[a-z0-9]{1,10}$/.test(value) ? value : '';
+  })();
+  const tempFile = path.join(
+    os.tmpdir(),
+    'sgf_print_job_' + Date.now() + '_' + Math.random().toString(36).slice(2) + ext
+  );
+
+  try {
+    fs.writeFileSync(tempFile, Buffer.from(jobPayload.contentBase64, 'base64'));
+  } catch (err) {
+    return cb(err);
+  }
+
+  const finish = (err) => {
+    setTimeout(() => {
+      try { fs.unlinkSync(tempFile); } catch {}
+    }, err ? 0 : 30000);
+    cb(err || null);
+  };
+
+  if (isRawPrintFile(fileName, mimeType)) {
+    return printRawFile(tempFile, printerName, finish);
+  }
+  return printFileWithAssociatedApp(tempFile, printerName, finish);
 }
 
 // ─── Lista impressoras via PowerShell ────────────────────────────────────────
@@ -827,7 +923,8 @@ function runService() {
     apiRequest('POST', '/api/etiquetas/agente/heartbeat',
       { printer: c.printer || '', version: AGENT_VERSION, host: os.hostname(),
         pcName: pc, printers: state.printers || [],
-        printerAliases: c.printerAliases || {} },
+        printerAliases: c.printerAliases || {},
+        capabilities: { filePrint: true } },
       c.agentToken, () => {});
   }
   sendHeartbeat();                          // imediato ao iniciar
@@ -879,22 +976,52 @@ function runService() {
         let pending = body.jobs.length;
 
         for (const job of body.jobs) {
-          log(`[poll] Imprimindo job #${job.id} (${job.quantidade} etiqueta(s)) em "${job.impressora || cfg.printer}"`);
           const targetPrinter = job.impressora || cfg.printer;
-          const zplToUse = injectLH(job.zpl, getPrinterConfig(cfg, targetPrinter));
-          printZpl(zplToUse, targetPrinter, (err2) => {
+          let fileJob = null;
+          let historyLabel = `${job.quantidade} etiqueta(s)`;
+          let executePrint;
+
+          try {
+            fileJob = parseFileJobPayload(job.zpl);
+            if (fileJob) {
+              historyLabel = fileJob.fileName || 'arquivo';
+              log(`[poll] Imprimindo job #${job.id} (arquivo: ${historyLabel}) em "${targetPrinter}"`);
+              executePrint = (done) => printQueuedFile(fileJob, targetPrinter, done);
+            } else {
+              log(`[poll] Imprimindo job #${job.id} (${job.quantidade} etiqueta(s)) em "${targetPrinter}"`);
+              const zplToUse = injectLH(job.zpl, getPrinterConfig(cfg, targetPrinter));
+              executePrint = (done) => printZpl(zplToUse, targetPrinter, done);
+            }
+          } catch (prepErr) {
+            const erroMsg = prepErr?.message || 'Falha ao preparar job';
+            state.totalErrors++;
+            state.lastPrint = new Date().toLocaleString('pt-BR');
+            state.lastPrintOk = false;
+            log(`[poll] Job #${job.id} → ERRO: ${erroMsg}`);
+            apiRequest('POST', '/api/etiquetas/fila/confirmar', {
+              id: job.id, success: false, error: erroMsg,
+              agent_host: os.hostname(),
+            }, cfg.agentToken, () => {});
+            pending--;
+            if (pending === 0) resolve();
+            continue;
+          }
+
+          executePrint((err2) => {
             const ok = !err2;
             const erroMsg = err2?.message || null;
             // Atualiza histórico do dia
             const today = new Date().toDateString();
             if (state.todayDate !== today) { state.todayPrints = []; state.todayDate = today; }
-            state.todayPrints.push({ time: new Date().toLocaleTimeString('pt-BR'), jobId: job.id, quantidade: job.quantidade, ok });
+            state.todayPrints.push({ time: new Date().toLocaleTimeString('pt-BR'), jobId: job.id, quantidade: historyLabel, ok });
             if (ok) {
               state.totalPrinted++;
               state.lastPrint = new Date().toLocaleString('pt-BR');
               state.lastPrintOk = true;
-              state.lastZpl = job.zpl;   // guarda ZPL original (sem LH) para reprint
-              state.lastJobId = job.id;
+              if (!fileJob) {
+                state.lastZpl = job.zpl;   // guarda ZPL original (sem LH) para reprint
+                state.lastJobId = job.id;
+              }
               log(`[poll] Job #${job.id} → OK`);
             } else {
               state.totalErrors++;
