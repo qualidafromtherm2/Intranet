@@ -15,8 +15,8 @@ const router = express.Router();
 
 const STATUS_LIST = ['Pendente', 'Em separação', 'Aguardando identificação', 'Aguardando correios', 'Enviado', 'Finalizado'];
 
-const TRACK_USER = String(process.env.TRACK_USER || '').trim();
-const TRACK_TOKEN = String(process.env.TRACK_TOKEN || '').trim();
+const TRACK_USER = process.env.TRACK_USER || 'guest';
+const TRACK_TOKEN = process.env.TRACK_TOKEN || 'guest';
 const TRACK_BASES = [
   ...(process.env.TRACK_BASE_URL ? [process.env.TRACK_BASE_URL] : []),
   'https://api.linketrack.com',
@@ -30,7 +30,7 @@ const WONCA_TRACK_URL = (process.env.WONCA_TRACK_URL || 'https://api-labs.wonca.
 // TrackingMore: fallback com carrier dos Correios
 const TRACKINGMORE_API_KEY = process.env.TRACKINGMORE_API_KEY || process.env.TRACKINGMORE_TOKEN || '';
 const TRACKINGMORE_URL = (process.env.TRACKINGMORE_URL || 'https://api.trackingmore.com/v2/trackings/realtime').replace(/\/$/, '');
-const WHATSAPP_WEBHOOK_VERIFY_TOKEN = String(process.env.WHATSAPP_WEBHOOK_VERIFY_TOKEN || process.env.META_WHATSAPP_VERIFY_TOKEN || '').trim();
+const WHATSAPP_WEBHOOK_VERIFY_TOKEN = String(process.env.WHATSAPP_WEBHOOK_VERIFY_TOKEN || process.env.META_WHATSAPP_VERIFY_TOKEN || 'fromtherm-sac-wa-teste-2026').trim();
 const WHATSAPP_CLOUD_ACCESS_TOKEN = String(process.env.WHATSAPP_CLOUD_ACCESS_TOKEN || process.env.META_WHATSAPP_ACCESS_TOKEN || '').trim();
 const WHATSAPP_GRAPH_API_VERSION = String(process.env.WHATSAPP_GRAPH_API_VERSION || 'v25.0').trim() || 'v25.0';
 const WHATSAPP_CHATBOT_AUTOREPLY_ENABLED = /^(1|true|yes|on)$/i.test(String(process.env.WHATSAPP_CHATBOT_AUTOREPLY_ENABLED || '1').trim());
@@ -4174,26 +4174,13 @@ router.get('/at/atendimentos', async (_req, res) => {
          LEFT JOIN anexos_cnt              anx ON anx.id_at = a.id
          ORDER BY a.id DESC, f.id DESC`
       ),
-      // 2) Busca observacoes + status das solicitações em paralelo
-      pool.query(`SELECT observacao, status FROM envios.solicitacoes WHERE observacao IS NOT NULL ORDER BY id DESC`)
+      // 2) Busca observacoes das solicitações (poucas linhas) em paralelo
+      pool.query(`SELECT observacao FROM envios.solicitacoes WHERE observacao IS NOT NULL`)
     ]);
 
     const tQuery = Date.now() - t0;
 
-    // 3a) Mapa atId → status via padrão OS{id} (match direto com id do AT)
-    const atStatusMap = new Map(); // atId (number) → status mais recente
-    for (const row of solResult.rows) {
-      if (!row.observacao) continue;
-      const mId = row.observacao.match(/^OS\s*(\d+)/i);
-      if (mId) {
-        const atId = parseInt(mId[1], 10);
-        if (!atStatusMap.has(atId)) { // ORDER BY id DESC → first = mais recente
-          atStatusMap.set(atId, row.status);
-        }
-      }
-    }
-
-    // 3b) Computa has_pecas_enviadas em JS (~7ms em vez de ~38s no SQL)
+    // 3) Computa has_pecas_enviadas em JS (~7ms em vez de ~38s no SQL)
     const osPattern = /O\.S\s+(\S+)/gi;
     const osTokens = new Set();
     for (const row of solResult.rows) {
@@ -4212,10 +4199,7 @@ router.get('/at/atendimentos', async (_req, res) => {
     for (const at of rows) {
       const yr = at.data ? new Date(at.data).getFullYear().toString().slice(-2) : '';
       const chaves = [at.atendimento_inicial, yr ? yr + at.id : ''].filter(Boolean);
-      const hasByChave = chaves.some(ch => osTokens.has(ch.replace(/-/g, '')));
-      const statusDireto = atStatusMap.get(at.id) || null;
-      at.has_pecas_enviadas = hasByChave || !!statusDireto;
-      at.envios_status = statusDireto;
+      at.has_pecas_enviadas = chaves.some(ch => osTokens.has(ch.replace(/-/g, '')));
     }
 
     console.log(`[SAC/AT] /at/atendimentos ${rows.length} rows em ${Date.now() - t0}ms (query: ${tQuery}ms)`);
@@ -4399,35 +4383,6 @@ router.patch('/at/fechamento/:id_at', async (req, res) => {
   }
 });
 
-// POST /solicitacoes/vipp — cria entrada de envio SAC a partir de postagem VIPP (sem upload de arquivo)
-router.post('/solicitacoes/vipp', async (req, res) => {
-  const usuario   = String(req.body?.usuario   || '').trim();
-  const observacao = String(req.body?.observacao || '').trim();
-  const idVipp    = String(req.body?.id_vipp    || '').trim() || null;
-  const conteudo  = req.body?.conteudo || null; // JSON string de itens [{ conteudo, quantidade }]
-  const vippPayload = req.body?.vipp_payload || null;
-  const numeroSep = String(req.body?.numero_sep || '').trim() || null;
-
-  if (!usuario) return res.status(400).json({ ok: false, error: 'Usuário é obrigatório.' });
-  if (!idVipp && !observacao) return res.status(400).json({ ok: false, error: 'id_vipp ou observação obrigatório.' });
-
-  try {
-    await pool.query(`ALTER TABLE envios.solicitacoes ADD COLUMN IF NOT EXISTS vipp_payload JSONB`);
-    const result = await pool.query(
-      `INSERT INTO envios.solicitacoes
-         (usuario, observacao, numero_sep, status, anexos, conferido, id_vipp, conteudo, vipp_payload)
-       VALUES ($1, $2, $3, 'Pendente', '{}', false, $4, $5, $6)
-       RETURNING id, created_at, status, id_vipp, conteudo, observacao`,
-      [usuario, observacao || null, numeroSep, idVipp, conteudo ? String(conteudo) : null, vippPayload || null]
-    );
-    const row = result.rows[0];
-    return res.json({ ok: true, id: row.id, created_at: row.created_at, status: row.status, id_vipp: row.id_vipp });
-  } catch (err) {
-    console.error('[SAC] erro ao criar entrada via VIPP:', err);
-    return res.status(500).json({ ok: false, error: 'Erro ao registrar solicitação VIPP.' });
-  }
-});
-
 router.post('/solicitacoes', upload.array('anexos', 2), async (req, res) => {
   const usuario = String(req.body?.usuario || '').trim();
   const observacao = String(req.body?.observacao || '').trim();
@@ -4574,7 +4529,7 @@ router.get('/solicitacoes', async (req, res) => {
     const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 
     const r = await pool.query(
-      `SELECT id, created_at, usuario, observacao, numero_sep, status, conferido, etiqueta_url, declaracao_url, identificacao, conteudo, rastreio_status, rastreio_quando, finalizado_em, id_vipp
+      `SELECT id, created_at, usuario, observacao, numero_sep, status, conferido, etiqueta_url, declaracao_url, identificacao, conteudo, rastreio_status, rastreio_quando, finalizado_em
          FROM envios.solicitacoes
         ${whereClause}
         ORDER BY id DESC
@@ -4754,36 +4709,34 @@ router.get('/rastreio/:codigo', async (req, res) => {
     }
 
     // Tentativa 4: LinkeTrack (com fallback para múltiplas bases)
-    if (TRACK_USER && TRACK_TOKEN) {
-      for (const baseUrl of TRACK_BASES) {
-        try {
-          const cleanBase = baseUrl.replace(/\/$/, '');
-          const urlLinke = `${cleanBase}/track/json?user=${encodeURIComponent(TRACK_USER)}&token=${encodeURIComponent(TRACK_TOKEN)}&codigo=${encodeURIComponent(codigo)}`;
-          const r3 = await fetchWithTimeout(urlLinke, { method: 'GET' });
+    for (const baseUrl of TRACK_BASES) {
+      try {
+        const cleanBase = baseUrl.replace(/\/$/, '');
+        const urlLinke = `${cleanBase}/track/json?user=${encodeURIComponent(TRACK_USER)}&token=${encodeURIComponent(TRACK_TOKEN)}&codigo=${encodeURIComponent(codigo)}`;
+        const r3 = await fetchWithTimeout(urlLinke, { method: 'GET' });
 
-          if (!r3.ok) {
-            lastErr = new Error(`HTTP ${r3.status} em ${cleanBase}`);
-            continue;
-          }
-
-          const data3 = await r3.json();
-          const eventos3 = data3?.eventos || [];
-          const ultimo3 = eventos3[0] || null;
-          const status3 = ultimo3?.status || ultimo3?.descricao || null;
-          const detalhe3 = ultimo3?.subStatus?.join(' | ') || null;
-          const local3 = ultimo3?.local || null;
-          const cidade3 = ultimo3?.cidade || null;
-          const uf3 = ultimo3?.uf || null;
-          const quando3 = ultimo3?.data && ultimo3?.hora ? `${ultimo3.data} ${ultimo3.hora}` : null;
-
-          const payload = { ok: true, codigo, status: status3, detalhe: detalhe3, local: local3, cidade: cidade3, uf: uf3, quando: quando3 };
-          await persistStatus(codigo, { status: status3 || detalhe3 || 'ok', detalhe: detalhe3, local: local3, cidade: cidade3, uf: uf3, quando: quando3 });
-          trackCache.set(codigo, { ok: true, payload, at: now });
-          return res.json(payload);
-        } catch (err) {
-          lastErr = err;
-          if (err?.code === 'ENOTFOUND') continue;
+        if (!r3.ok) {
+          lastErr = new Error(`HTTP ${r3.status} em ${cleanBase}`);
+          continue;
         }
+
+        const data3 = await r3.json();
+        const eventos3 = data3?.eventos || [];
+        const ultimo3 = eventos3[0] || null;
+        const status3 = ultimo3?.status || ultimo3?.descricao || null;
+        const detalhe3 = ultimo3?.subStatus?.join(' | ') || null;
+        const local3 = ultimo3?.local || null;
+        const cidade3 = ultimo3?.cidade || null;
+        const uf3 = ultimo3?.uf || null;
+        const quando3 = ultimo3?.data && ultimo3?.hora ? `${ultimo3.data} ${ultimo3.hora}` : null;
+
+        const payload = { ok: true, codigo, status: status3, detalhe: detalhe3, local: local3, cidade: cidade3, uf: uf3, quando: quando3 };
+        await persistStatus(codigo, { status: status3 || detalhe3 || 'ok', detalhe: detalhe3, local: local3, cidade: cidade3, uf: uf3, quando: quando3 });
+        trackCache.set(codigo, { ok: true, payload, at: now });
+        return res.json(payload);
+      } catch (err) {
+        lastErr = err;
+        if (err?.code === 'ENOTFOUND') continue;
       }
     }
 
@@ -7035,7 +6988,7 @@ router.put('/at/tecnicos/:id', async (req, res) => {
 
 // ── Portal AT: autenticação por token único por técnico ───────────────────────
 const BCRYPT_ROUNDS = 10;
-const AT_SESSION_SECRET = String(process.env.AT_SESSION_SECRET || '').trim();
+const AT_SESSION_SECRET = process.env.AT_SESSION_SECRET || 'at_portal_s3cr3t';
 
 // Cria/retorna token único do técnico e, se id_at informado, vincula ao fechamento
 // GET /at/tecnico/token?nome=NOME&id_at=ID
@@ -7163,10 +7116,6 @@ router.post('/at/tecnico/set-senha', async (req, res) => {
 router.post('/at/tecnico/login', async (req, res) => {
   const { token, senha } = req.body || {};
   if (!token || !senha) return res.status(400).json({ error: 'token e senha obrigatórios' });
-  if (!AT_SESSION_SECRET) {
-    console.error('[AT/login] AT_SESSION_SECRET ausente. Recusando login.');
-    return res.status(503).json({ error: 'AT_SESSION_SECRET não configurado' });
-  }
   const rl = _atLoginRL;
   const key = String(token).slice(0, 16);
   const now = Date.now();
@@ -7561,11 +7510,6 @@ router.get('/whatsapp/webhook', (req, res) => {
   const mode = String(req.query['hub.mode'] || '').trim();
   const token = String(req.query['hub.verify_token'] || '').trim();
   const challenge = String(req.query['hub.challenge'] || '').trim();
-
-  if (!WHATSAPP_WEBHOOK_VERIFY_TOKEN) {
-    console.error('[whatsapp/webhook] WHATSAPP_WEBHOOK_VERIFY_TOKEN ausente. Recusando verificação.');
-    return res.status(503).send('verify_token_not_configured');
-  }
 
   if (mode === 'subscribe' && token && token === WHATSAPP_WEBHOOK_VERIFY_TOKEN) {
     return res.status(200).send(challenge || 'ok');
