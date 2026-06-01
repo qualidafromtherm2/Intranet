@@ -16636,7 +16636,7 @@ app.get('/api/logistica/kanban', async (req, res) => {
   }
 });
 
-// GET /api/logistica/kanban/itens?n_solic=SEP-1000 — Itens detalhados de uma SEP (tooltip/modal)
+// GET /api/logistica/kanban/itens?n_solic=SEP-1000&escopo=global — Itens detalhados de uma SEP (tooltip/modal)
 app.get('/api/logistica/kanban/itens', async (req, res) => {
   try {
     const id_user   = req.session?.user?.id;
@@ -16644,10 +16644,27 @@ app.get('/api/logistica/kanban/itens', async (req, res) => {
     if (!id_user) return res.status(401).json({ ok: false, error: 'Não autenticado.' });
     const { n_solic } = req.query;
     const includeDerivados = String(req.query?.include_derivados || '').toLowerCase();
+    const escopo = String(req.query?.escopo || '').trim().toLowerCase();
+    const escopoGlobal = escopo === 'global' || escopo === 'all' || escopo === 'todos';
 
     if (n_solic) {
       // Itens de uma SEP específica
-      const { rows } = await pool.query(`
+      const itensSql = escopoGlobal
+        ? `
+        SELECT c.id AS carr_id, i.id AS solic_id, i.status, i.observacao, i.motivo,
+               c.codigo_produto, c.descricao, c.unidade,
+               c.quantidade::numeric AS quantidade,
+               c.data_prevista::text, c.horario, c.criado_em::text,
+               c.cod_omie,
+               COALESCE(c.retirada_por, c.nome_user) AS nome_user,
+               rt.codigo_produto_ant, rt.descricao_ant, rt.codigo_produto_novo, rt.descricao_novo
+          FROM solicitacao_produto.itens_solicitados i
+          JOIN logistica.carrinho c ON c.id = i.id_carr
+          LEFT JOIN solicitacao_produto.Registro_troca rt ON rt.id_item_original = i.id
+         WHERE i.n_solic = $1
+         ORDER BY c.criado_em ASC, rt.data_troca DESC
+      `
+        : `
         SELECT c.id AS carr_id, i.id AS solic_id, i.status, i.observacao, i.motivo,
                c.codigo_produto, c.descricao, c.unidade,
                c.quantidade::numeric AS quantidade,
@@ -16661,12 +16678,29 @@ app.get('/api/logistica/kanban/itens', async (req, res) => {
          WHERE i.n_solic = $1
            AND (c.id_user = $2 OR c.retirada_por = $3)
          ORDER BY c.criado_em ASC, rt.data_troca DESC
-      `, [n_solic, id_user, nome_user]);
+      `;
+      const itensParams = escopoGlobal ? [n_solic] : [n_solic, id_user, nome_user];
+      const { rows } = await pool.query(itensSql, itensParams);
 
       let itensDerivados = [];
       if (includeDerivados === '1' || includeDerivados === 'true' || includeDerivados === 'yes') {
         const baseNSolic = String(n_solic).replace(/\.\d+$/, '');
-        const { rows: derivRows } = await pool.query(`
+        const derivSql = escopoGlobal
+          ? `
+             SELECT c.id AS carr_id, i.id AS solic_id, i.n_solic, i.status, i.observacao, i.motivo,
+                 c.codigo_produto, c.descricao, c.unidade,
+                 c.quantidade::numeric AS quantidade,
+                 c.data_prevista::text, c.horario, c.criado_em::text,
+                 c.cod_omie,
+                 COALESCE(c.retirada_por, c.nome_user) AS nome_user,
+                 NULL::text AS codigo_produto_ant, NULL::text AS descricao_ant,
+                 NULL::text AS codigo_produto_novo, NULL::text AS descricao_novo
+            FROM solicitacao_produto.itens_solicitados i
+            JOIN logistica.carrinho c ON c.id = i.id_carr
+           WHERE i.n_solic ~ ($1 || '\\.[0-9]+$')
+           ORDER BY i.n_solic ASC, c.criado_em ASC
+        `
+          : `
              SELECT c.id AS carr_id, i.id AS solic_id, i.n_solic, i.status, i.observacao, i.motivo,
                  c.codigo_produto, c.descricao, c.unidade,
                  c.quantidade::numeric AS quantidade,
@@ -16680,7 +16714,9 @@ app.get('/api/logistica/kanban/itens', async (req, res) => {
            WHERE i.n_solic ~ ($1 || '\\.[0-9]+$')
              AND (c.id_user = $2 OR c.retirada_por = $3)
            ORDER BY i.n_solic ASC, c.criado_em ASC
-        `, [baseNSolic, id_user, nome_user]);
+        `;
+        const derivParams = escopoGlobal ? [baseNSolic] : [baseNSolic, id_user, nome_user];
+        const { rows: derivRows } = await pool.query(derivSql, derivParams);
         itensDerivados = derivRows;
       }
 

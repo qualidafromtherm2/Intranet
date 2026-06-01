@@ -595,5 +595,34 @@ router.get('/sync-ativas', async (req, res) => {
   }
 });
 
+/* ---------------------------------------------------------------
+ * GET /api/producao/iapp/qualidade/inspecoes/lista?page=1&offset=100
+ * Proxy enxuto para listar inspeções da IAPP.
+ * --------------------------------------------------------------- */
+router.get('/iapp/qualidade/inspecoes/lista', async (req, res) => {
+  try {
+    const pageParam = Number.parseInt(String(req.query.page || '1'), 10);
+    const page = Number.isFinite(pageParam) && pageParam > 0 ? pageParam : 1;
+    const offsetParam = Number.parseInt(String(req.query.offset || '100'), 10);
+    const offset = Number.isFinite(offsetParam) && offsetParam > 0 ? offsetParam : 100;
+
+    const data = await iappGet('/qualidade/inspecoes/lista', { page, offset });
+
+    return res.json({
+      ...data,
+      success: data?.success !== false,
+      page: String(data?.page || page),
+      total: Number.isFinite(Number(data?.total)) ? Number(data.total) : 0,
+      response: Array.isArray(data?.response) ? data.response : []
+    });
+  } catch (err) {
+    console.error('[producao] Erro ao listar inspeções IAPP:', err.message);
+    return res.status(err.status || 500).json({
+      success: false,
+      error: err.message || 'Erro ao listar inspeções na IAPP.'
+    });
+  }
+});
+
 module.exports = router;
 
