@@ -366,6 +366,15 @@ window._updateTabCounters = async function() {
   }
 };
 
+function _solBuildKanbanItensUrl(nSolic, opts = {}) {
+  const params = new URLSearchParams();
+  if (nSolic) params.set('n_solic', nSolic);
+  if (opts.includeDerivados) params.set('include_derivados', '1');
+  if (opts.escopoItens === 'global') params.set('escopo', 'global');
+  const query = params.toString();
+  return `/api/logistica/kanban/itens${query ? `?${query}` : ''}`;
+}
+
 // Carrega e renderiza a aba de solicitações como kanban do separador
 window._loadSolicitacoesTab = async function() {
   const board    = document.getElementById('solicitacoesKanbanBoard');
@@ -485,20 +494,21 @@ window._loadSolicitacoesTab = async function() {
         if (acao === 'iniciar') {
           _abrirModalAguardandoRetiradaSep(nSolic, {
             tituloColuna: 'Solicitado',
-            permitirRecebido: false
+            permitirRecebido: false,
+            escopoItens: 'global'
           });
           return;
         }
         cardEl._loading = true;
         try {
-          const ri = await fetch(`/api/logistica/kanban/itens?n_solic=${encodeURIComponent(nSolic)}`, { credentials: 'include' });
+          const ri = await fetch(_solBuildKanbanItensUrl(nSolic, { escopoItens: 'global' }), { credentials: 'include' });
           const di = await ri.json();
           if (!di.ok) throw new Error(di.error || 'Erro ao buscar itens');
           const itens = (di.itens || []).map(it => ({ ...it, solic_ids: [it.solic_id], carr_ids: [it.carr_id] }));
           if (!itens.length) throw new Error('Nenhum item encontrado');
 
           if (acao === 'modal') {
-            _abrirModalSeparacao({ nome_user: itens[0]?.nome_user || nSolic, n_solic: nSolic, itens, origem_status: cardEl.dataset.colStatus || '' }, []);
+            _abrirModalSeparacao({ nome_user: itens[0]?.nome_user || nSolic, n_solic: nSolic, itens, origem_status: cardEl.dataset.colStatus || '', escopoItens: 'global' }, []);
           }
         } catch (err) {
           alert('Erro: ' + err.message);
@@ -532,7 +542,7 @@ window._loadSolicitacoesTab = async function() {
             .catch(e => console.warn('[VIPP] background gerar-etiqueta:', e));
 
           // ── Busca solic_ids e inicia separação normalmente ───────────────
-          const ri = await fetch(`/api/logistica/kanban/itens?n_solic=${encodeURIComponent(nSolic)}`, { credentials: 'include' });
+          const ri = await fetch(_solBuildKanbanItensUrl(nSolic, { escopoItens: 'global' }), { credentials: 'include' });
           const di = await ri.json();
           if (!di.ok) throw new Error(di.error || 'Erro ao buscar itens da SEP.');
           const solicIds = (di.itens || []).map(it => parseInt(it.solic_id, 10)).filter(id => !Number.isNaN(id));
@@ -766,7 +776,7 @@ function _abrirModalSeparacao(grupoAtual, gruposConflito) {
     if (_reloadPending) return;
     _reloadPending = true;
     try {
-      const r = await fetch(`/api/logistica/kanban/itens?n_solic=${encodeURIComponent(grupoAtual.n_solic)}`, { credentials: 'include' });
+      const r = await fetch(_solBuildKanbanItensUrl(grupoAtual.n_solic, { escopoItens: grupoAtual.escopoItens }), { credentials: 'include' });
       const d = await r.json();
       if (!d.ok) return;
       const mapped = (d.itens || []).map(it => ({ ...it, solic_ids: [it.solic_id], carr_ids: [it.carr_id] }));
@@ -1532,6 +1542,7 @@ async function _abrirModalAguardandoRetiradaSep(nSolic, opts = {}) {
 
   const tituloColuna = String(opts.tituloColuna || 'Aguardando retirada');
   const permitirRecebido = !!opts.permitirRecebido;
+  const escopoItens = String(opts.escopoItens || '');
 
   clearTimeout(window._kanbanTooltipTimer);
   window._kanbanTooltipEl?.remove();
@@ -1541,7 +1552,7 @@ async function _abrirModalAguardandoRetiradaSep(nSolic, opts = {}) {
   let itensDerivados = [];
   let estoqueBatch = {};
   try {
-    const r = await fetch(`/api/logistica/kanban/itens?n_solic=${encodeURIComponent(nSolic)}&include_derivados=1`, { credentials: 'include' });
+    const r = await fetch(_solBuildKanbanItensUrl(nSolic, { includeDerivados: true, escopoItens }), { credentials: 'include' });
     const d = await r.json();
     if (!d.ok) {
       alert('Erro ao carregar itens: ' + (d.error || ''));
@@ -1717,12 +1728,12 @@ async function _abrirModalAguardandoRetiradaSep(nSolic, opts = {}) {
       closeModal();
 
       // Recarrega os itens atualizados e abre direto o modal Em Separação
-      const ri = await fetch(`/api/logistica/kanban/itens?n_solic=${encodeURIComponent(nSolic)}`, { credentials: 'include' });
+      const ri = await fetch(_solBuildKanbanItensUrl(nSolic, { escopoItens }), { credentials: 'include' });
       const di = await ri.json();
       if (!di.ok) throw new Error(di.error || 'Erro ao buscar itens após iniciar separação.');
       const itensAtualizados = (di.itens || []).map(it => ({ ...it, solic_ids: [it.solic_id], carr_ids: [it.carr_id] }));
       if (itensAtualizados.length) {
-        _abrirModalSeparacao({ nome_user: itensAtualizados[0]?.nome_user || nSolic, n_solic: nSolic, itens: itensAtualizados, origem_status: 'Separação' }, []);
+        _abrirModalSeparacao({ nome_user: itensAtualizados[0]?.nome_user || nSolic, n_solic: nSolic, itens: itensAtualizados, origem_status: 'Separação', escopoItens }, []);
       }
 
       window._loadSolicitacoesTab.force = true;
@@ -18393,17 +18404,6 @@ async function _envioValidarDeclaracaoObrigatoria(envioId) {
   return data;
 }
 
-function setupEnvioPrintButtons(container) {
-  if (!container) return;
-  _envioCarregarPref();
-  container.addEventListener('click', async (ev) => {
-    const btn = ev.target.closest('.btn-envio-imprimir');
-    if (!btn) return;
-    ev.preventDefault();
-    const envioId = btn.getAttribute('data-envio-id');
-    const identificacao = btn.getAttribute('data-identificacao') || '';
-    if (!envioId) return;
-    // Se não tem impressora configurada, abre seletor antes de imprimir
 function _envioAbrirJanelasPdf(envioId, identificacao) {
   const ecLimpo = String(identificacao || '').trim().replace(/\s+/g, '');
   const etiquetaWin = ecLimpo ? window.open('', '_blank') : null;
@@ -18427,6 +18427,17 @@ function _envioAbrirJanelasPdf(envioId, identificacao) {
   };
 }
 
+function setupEnvioPrintButtons(container) {
+  if (!container) return;
+  _envioCarregarPref();
+  container.addEventListener('click', async (ev) => {
+    const btn = ev.target.closest('.btn-envio-imprimir');
+    if (!btn) return;
+    ev.preventDefault();
+    const envioId = btn.getAttribute('data-envio-id');
+    const identificacao = btn.getAttribute('data-identificacao') || '';
+    if (!envioId) return;
+    // Se não tem impressora configurada, abre seletor antes de imprimir
     if (!_envioImprPref) {
       const drop = document.getElementById('envioImprGearDropdown');
       if (drop) { await _envioMostrarSeletor(drop); return; }
