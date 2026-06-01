@@ -3,6 +3,13 @@ const express = require('express');
 const https   = require('https');
 const router = express.Router();
 const { createClient } = require('@supabase/supabase-js');
+const {
+  syncEngenhariaFichasIapp,
+  syncEngenhariaFichasIappSerial,
+  listEngenhariaFichasDb,
+  isEngenhariaFichasSyncRunning
+} = require('../src/engenhariaFichasSync');
+const { syncEngenhariaOperacoesIapp, syncEngenhariaOperacoesIappSerial, listEngenhariaOperacoesDb } = require('../src/engenhariaOperacoesSync');
 
 const IAPP_BASE = 'https://api.iniciativaaplicativos.com.br/api';
 
@@ -863,13 +870,15 @@ module.exports = (pool) => {
       const params = {};
       const allowed = [
         'identificacao', 'descricao', 'identificacao_produto', 'status',
-        'modelo', 'etapa', 'page', 'limit', 'order', 'direction'
+        'modelo', 'etapa', 'page', 'limit', 'offset', 'order', 'direction'
       ];
       for (const k of allowed) {
         if (req.query[k] !== undefined && req.query[k] !== '') {
           params[k] = req.query[k];
         }
       }
+      if (params.page === undefined) params.page = '1';
+      if (params.offset === undefined && params.limit === undefined) params.offset = '10';
       const data = await iappGet('/engenharia/fichas/lista', params);
       console.log('[GET /api/engenharia/fichas/lista] chaves do retorno iApp:', Object.keys(data), '| qtd response:', Array.isArray(data.response) ? data.response.length : 'N/A');
       if (data.success === false) {
@@ -879,6 +888,187 @@ module.exports = (pool) => {
     } catch (e) {
       console.error('[GET /api/engenharia/fichas/lista] erro:', e.message);
       res.status(e.status || 500).json({ error: e.message });
+    }
+  });
+
+  // ─────────────────────────────────────────────────────────
+  // POST /api/engenharia/fichas/sync
+  // Cria as tabelas locais no schema engenharia e sincroniza
+  // todas as páginas da API de fichas técnicas.
+  // ─────────────────────────────────────────────────────────
+  router.post('/fichas/sync', express.json(), async (req, res) => {
+    try {
+      const rawOffset = req.body?.offset ?? req.query?.offset;
+      const rawStartPage = req.body?.startPage ?? req.query?.startPage;
+      const rawMaxPages = req.body?.maxPages ?? req.query?.maxPages;
+      const rawDelayMs = req.body?.delayMs ?? req.query?.delayMs;
+
+      const summary = await syncEngenhariaFichasIapp({
+        offset: rawOffset,
+        startPage: rawStartPage,
+        maxPages: rawMaxPages,
+        delayMs: rawDelayMs,
+        logger: console
+      });
+
+      res.json({ ok: true, ...summary });
+    } catch (e) {
+      console.error('[POST /api/engenharia/fichas/sync] erro:', e.message);
+      res.status(e.status || 500).json({ ok: false, error: e.message, iappCode: e.iappCode || null });
+    }
+  });
+
+  // ─────────────────────────────────────────────────────────
+  // GET /api/engenharia/fichas/local
+  // Sincroniza com a IAPP antes de listar, depois retorna os
+  // dados lidos do schema engenharia para o modal.
+  // ─────────────────────────────────────────────────────────
+  router.get('/fichas/local', async (req, res) => {
+    try {
+      const shouldSync = String(req.query?.sync ?? '1') !== '0';
+      const waitForSync = String(req.query?.wait ?? '0') === '1';
+      const rawLimit = req.query?.limit;
+      const rawOffset = req.query?.offset;
+      const rawDelayMs = req.query?.delayMs;
+
+      let syncSummary = null;
+      let syncStarted = false;
+      if (shouldSync) {
+        const syncJaEmAndamento = isEngenhariaFichasSyncRunning();
+        const syncPromise = syncEngenhariaFichasIappSerial({
+          offset: rawOffset,
+          delayMs: rawDelayMs,
+          logger: console
+        });
+
+        syncStarted = !syncJaEmAndamento;
+
+        if (waitForSync) {
+          syncSummary = await syncPromise;
+        } else {
+          syncPromise.catch((error) => {
+            console.error('[GET /api/engenharia/fichas/local] erro async sync:', error.message);
+          });
+        }
+      }
+
+      const localData = await listEngenhariaFichasDb({ limit: rawLimit });
+
+      res.json({
+        success: true,
+        source: 'sql',
+        syncExecuted: shouldSync,
+        syncWaited: waitForSync,
+        syncStarted,
+        syncInProgress: isEngenhariaFichasSyncRunning(),
+        syncSummary,
+        total: localData.meta?.total_fichas || localData.fichas.length,
+        meta: localData.meta,
+        response: localData.fichas
+      });
+    } catch (e) {
+      console.error('[GET /api/engenharia/fichas/local] erro:', e.message);
+      res.status(e.status || 500).json({ success: false, error: e.message, iappCode: e.iappCode || null });
+    }
+  });
+
+  // ─────────────────────────────────────────────────────────
+  // GET /api/engenharia/operacoes/lista — proxy para API iApp
+  // Query aceita: identificacao, descricao, linha_producao_id,
+  //               classificacao, data_ultima_atualizacao,
+  //               page, offset, order, direction
+  // ─────────────────────────────────────────────────────────
+  router.get('/operacoes/lista', async (req, res) => {
+    try {
+      const params = {};
+      const allowed = [
+        'identificacao', 'descricao', 'linha_producao_id', 'classificacao',
+        'data_ultima_atualizacao', 'page', 'offset', 'order', 'direction'
+      ];
+
+      for (const k of allowed) {
+        if (req.query[k] !== undefined && req.query[k] !== '') {
+          params[k] = req.query[k];
+        }
+      }
+
+      if (params.page === undefined) params.page = '1';
+      if (params.offset === undefined) params.offset = '100';
+
+      const data = await iappGet('/engenharia/operacoes/lista', params);
+      if (data.success === false) {
+        return res.status(400).json({ error: data.message || data.code || 'Erro iApp', iappCode: data.code });
+      }
+
+      res.json(data);
+    } catch (e) {
+      console.error('[GET /api/engenharia/operacoes/lista] erro:', e.message);
+      res.status(e.status || 500).json({ error: e.message });
+    }
+  });
+
+  // ─────────────────────────────────────────────────────────
+  // POST /api/engenharia/operacoes/sync
+  // Cria as tabelas locais no schema engenharia e sincroniza
+  // todas as páginas da API de operações.
+  // ─────────────────────────────────────────────────────────
+  router.post('/operacoes/sync', express.json(), async (req, res) => {
+    try {
+      const rawOffset = req.body?.offset ?? req.query?.offset;
+      const rawStartPage = req.body?.startPage ?? req.query?.startPage;
+      const rawMaxPages = req.body?.maxPages ?? req.query?.maxPages;
+      const rawDelayMs = req.body?.delayMs ?? req.query?.delayMs;
+
+      const summary = await syncEngenhariaOperacoesIapp({
+        offset: rawOffset,
+        startPage: rawStartPage,
+        maxPages: rawMaxPages,
+        delayMs: rawDelayMs,
+        logger: console
+      });
+
+      res.json({ ok: true, ...summary });
+    } catch (e) {
+      console.error('[POST /api/engenharia/operacoes/sync] erro:', e.message);
+      res.status(e.status || 500).json({ ok: false, error: e.message, iappCode: e.iappCode || null });
+    }
+  });
+
+  // ─────────────────────────────────────────────────────────
+  // GET /api/engenharia/operacoes/local
+  // Sincroniza com a IAPP antes de listar, depois retorna os
+  // dados lidos do schema engenharia para o modal.
+  // ─────────────────────────────────────────────────────────
+  router.get('/operacoes/local', async (req, res) => {
+    try {
+      const shouldSync = String(req.query?.sync ?? '1') !== '0';
+      const rawLimit = req.query?.limit;
+      const rawOffset = req.query?.offset;
+      const rawDelayMs = req.query?.delayMs;
+
+      let syncSummary = null;
+      if (shouldSync) {
+        syncSummary = await syncEngenhariaOperacoesIappSerial({
+          offset: rawOffset,
+          delayMs: rawDelayMs,
+          logger: console
+        });
+      }
+
+      const localData = await listEngenhariaOperacoesDb({ limit: rawLimit });
+
+      res.json({
+        success: true,
+        source: 'sql',
+        syncExecuted: shouldSync,
+        syncSummary,
+        total: localData.meta?.total_operacoes || localData.operacoes.length,
+        meta: localData.meta,
+        response: localData.operacoes
+      });
+    } catch (e) {
+      console.error('[GET /api/engenharia/operacoes/local] erro:', e.message);
+      res.status(e.status || 500).json({ success: false, error: e.message, iappCode: e.iappCode || null });
     }
   });
 
