@@ -16596,6 +16596,7 @@ app.patch('/api/logistica/carrinho/:id/quantidade', express.json(), async (req, 
 app.get('/api/logistica/solicitacoes-kanban', async (req, res) => {
   try {
     const id_user = req.session?.user?.id;
+    const nome_user = req.session?.user?.username || req.session?.user?.nome || '';
     if (!id_user) return res.status(401).json({ ok: false, error: 'Não autenticado.' });
 
     const { rows } = await pool.query(`
@@ -16617,9 +16618,10 @@ app.get('/api/logistica/solicitacoes-kanban', async (req, res) => {
       FROM solicitacao_produto.itens_solicitados i
       JOIN logistica.carrinho c ON c.id = i.id_carr
       WHERE i.n_solic IS NOT NULL
+        AND (c.id_user = $1 OR c.retirada_por = $2)
       GROUP BY i.n_solic, COALESCE(c.retirada_por, c.nome_user)
       ORDER BY MIN(c.criado_em) ASC
-    `);
+    `, [id_user, nome_user]);
 
     const colunas = { 'Solicitado': [], 'Stund-by': [], 'Em Separação': [], 'Separado': [], 'Aguardando retirada': [], 'Concluído': [] };
     rows.forEach(r => { if (colunas[r.coluna]) colunas[r.coluna].push(r); });
