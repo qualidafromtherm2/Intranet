@@ -12222,6 +12222,62 @@ function _abrirAtOsModal(id, navRows) {
   });
 })();
 
+// ============================================================================
+// ENGENHARIA: Download Fromthest
+// ============================================================================
+(function () {
+  const menuLink = document.getElementById('menu-engenharia-fromthest');
+  if (!menuLink) return;
+
+  const DOWNLOAD_URL = 'https://pxhbginkisinegzupqcy.supabase.co/storage/v1/object/public/produtos/fromtherm/Fromtherm-Local-Setup-v1.1.0.exe';
+  const MODAL_ID = 'engenhariaFromthestModal';
+
+  function fecharModal() {
+    const modal = document.getElementById(MODAL_ID);
+    if (modal) modal.remove();
+  }
+
+  function abrirModal() {
+    fecharModal();
+
+    const modal = document.createElement('div');
+    modal.id = MODAL_ID;
+    modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;z-index:10070;padding:16px;';
+
+    modal.innerHTML = `
+      <div style="width:min(100%,440px);background:#111827;border:1px solid rgba(148,163,184,.35);border-radius:14px;box-shadow:0 20px 45px rgba(0,0,0,.45);overflow:hidden;">
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 16px;border-bottom:1px solid rgba(148,163,184,.2);">
+          <h3 style="margin:0;font-size:16px;color:#e5e7eb;font-weight:700;display:flex;align-items:center;gap:8px;">
+            <i class="fa-solid fa-download" style="color:#60a5fa;"></i>
+            Download Fromthest
+          </h3>
+          <button type="button" id="engenhariaFromthestModalClose" style="background:transparent;border:none;color:#94a3b8;font-size:18px;cursor:pointer;line-height:1;padding:0 2px;" aria-label="Fechar modal">&times;</button>
+        </div>
+        <div style="padding:18px 16px 16px;">
+          <p style="margin:0 0 16px;color:#cbd5e1;font-size:13px;line-height:1.45;">Clique no botão abaixo para baixar o instalador local do Fromthest.</p>
+          <a href="${DOWNLOAD_URL}" target="_blank" rel="noopener noreferrer"
+             style="display:inline-flex;align-items:center;gap:8px;padding:10px 14px;border-radius:10px;background:linear-gradient(135deg,#2563eb 0%,#1d4ed8 100%);color:#fff;font-weight:700;font-size:13px;text-decoration:none;">
+            <i class="fa-solid fa-file-arrow-down"></i>
+            Baixar Fromthest
+          </a>
+        </div>
+      </div>`;
+
+    modal.addEventListener('click', (e) => {
+      if (e.target === modal) fecharModal();
+    });
+
+    document.body.appendChild(modal);
+    const btnFechar = document.getElementById('engenhariaFromthestModalClose');
+    if (btnFechar) btnFechar.addEventListener('click', fecharModal);
+  }
+
+  menuLink.addEventListener('click', (e) => {
+    e.preventDefault();
+    abrirModal();
+  });
+})();
+
 // ── Modal Enviar Link (seleção de técnico) ────────────────────────────────────
 (function() {
   const modal        = document.getElementById('atEnviarLinkModal');
