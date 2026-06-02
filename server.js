@@ -31396,7 +31396,7 @@ app.post('/api/compras/pedidos-omie/nfe-associar-pedido', express.json(), async 
     //   • nIdConta = nCodCC do pedido
     //   • cUnidade e nQtde do pedido (ou override do usuário) em cada item
     //   • dVencimento dinâmico conforme compras.contas_omie (tipo CR, melhor_data, fechamento_conta)
-    //   • Se conta especial (GLP/Frigelar): codigo_local_estoque = ESTOQUE_LOCAL_ESPECIAL
+    //   • codigo_local_estoque = #D Recebimento (10408201806) em todos os itens
     const CONTAS_ESPECIAIS = [10507452702, 10440916421];
     const ESTOQUE_LOCAL_ESPECIAL = 10408201806;
     let nCodCC = null;
@@ -31723,7 +31723,7 @@ app.post('/api/compras/pedidos-omie/nfe-associar-pedido', express.json(), async 
           const cUnidadeFinal = override?.cUnidade || cUnidadePedido || null;
 
           const ajustes = {};
-          if (aplicarEstoqueEspecial) ajustes.codigo_local_estoque = ESTOQUE_LOCAL_ESPECIAL;
+          ajustes.codigo_local_estoque = ESTOQUE_LOCAL_ESPECIAL; // sempre direciona para #D Recebimento
           if (cUnidadeFinal) ajustes.cUnidade = cUnidadeFinal;
           const previewItem = (plano?.itens_preview || []).find(p => p.n_sequencia === nSeq);
           const cfopServicoEntrada = previewItem?.item_servico ? previewItem?.servico_cfop_entrada : null;
@@ -31740,7 +31740,8 @@ app.post('/api/compras/pedidos-omie/nfe-associar-pedido', express.json(), async 
         }).filter(Boolean);
 
         recebimentoCache = recebAtual;
-        console.log(`[Compras/NFeAssociarPedido] nIdConta=${nCodCC} estoqueEspecial=${aplicarEstoqueEspecial} dVencimento=${dVencimento} parcelas=${parcelasLista.length} itensEditar=${itensEditarEstoque.length} overrides=${overrideMap.size}`);
+        console.log(`[Compras/NFeAssociarPedido] nIdConta=${nCodCC} localEstoqueRecebimento=${ESTOQUE_LOCAL_ESPECIAL} dVencimento=${dVencimento} parcelas=${parcelasLista.length} itensEditar=${itensEditarEstoque.length} overrides=${overrideMap.size}`);
+
       } catch (errPrep) {
         console.warn('[Compras/NFeAssociarPedido] Falha ao preparar dados de associação:', errPrep?.message);
       }
