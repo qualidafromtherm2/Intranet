@@ -60,8 +60,89 @@ function getSupabase() {
 }
 const ENGENHARIA_BUCKET = 'Engenharia';
 const PASTAS = ['Documento', 'Fotos', 'Videos'];
+const PRODUTOS_BUCKET = 'produtos';
+const FROMTHEST_PREFIX = 'fromtherm';
+
+function parseVersionFromName(fileName) {
+  const match = String(fileName || '').match(/v(\d+)\.(\d+)\.(\d+)/i);
+  if (!match) return [0, 0, 0];
+  return match.slice(1).map((value) => Number.parseInt(value, 10) || 0);
+}
+
+function compareVersionDesc(left, right) {
+  const leftVersion = parseVersionFromName(left?.name);
+  const rightVersion = parseVersionFromName(right?.name);
+  for (let i = 0; i < 3; i += 1) {
+    if (leftVersion[i] !== rightVersion[i]) return rightVersion[i] - leftVersion[i];
+  }
+  return 0;
+}
+
+function resolveFileTimestamp(file) {
+  const candidates = [
+    file?.updated_at,
+    file?.created_at,
+    file?.metadata?.lastModified,
+    file?.metadata?.createdAt,
+    file?.metadata?.updatedAt
+  ];
+
+  for (const candidate of candidates) {
+    if (!candidate) continue;
+    const timestamp = new Date(candidate).getTime();
+    if (Number.isFinite(timestamp) && timestamp > 0) return timestamp;
+  }
+
+  return 0;
+}
 
 module.exports = (pool) => {
+  router.get('/fromthest/latest-installer', async (_req, res) => {
+    try {
+      const supabase = getSupabase();
+      const { data, error } = await supabase.storage.from(PRODUTOS_BUCKET).list(FROMTHEST_PREFIX, {
+        limit: 100,
+        sortBy: { column: 'name', order: 'desc' }
+      });
+
+      if (error) throw error;
+
+      const installer = (Array.isArray(data) ? data : [])
+        .filter((item) => item && item.name && /\.exe$/i.test(item.name) && !String(item.name).endsWith('/'))
+        .sort((left, right) => {
+          const timestampDiff = resolveFileTimestamp(right) - resolveFileTimestamp(left);
+          if (timestampDiff !== 0) return timestampDiff;
+
+          const versionDiff = compareVersionDesc(left, right);
+          if (versionDiff !== 0) return versionDiff;
+
+          return String(right.name || '').localeCompare(String(left.name || ''), 'pt-BR');
+        })[0];
+
+      if (!installer) {
+        return res.status(404).json({ ok: false, error: 'Nenhum instalador .exe encontrado.' });
+      }
+
+      const pathKey = `${FROMTHEST_PREFIX}/${installer.name}`;
+      const { data: publicData } = supabase.storage.from(PRODUTOS_BUCKET).getPublicUrl(pathKey);
+
+      return res.json({
+        ok: true,
+        item: {
+          nome: installer.name,
+          path_key: pathKey,
+          public_url: String(publicData?.publicUrl || '').trim(),
+          created_at: installer.created_at || null,
+          updated_at: installer.updated_at || null,
+          tamanho_bytes: Number(installer?.metadata?.size || 0)
+        }
+      });
+    } catch (e) {
+      console.error('[GET /api/engenharia/fromthest/latest-installer] erro:', e);
+      return res.status(500).json({ ok: false, error: e.message || 'Erro ao localizar o instalador.' });
+    }
+  });
+
   
   // GET /api/engenharia/atividades/:familiaCodigo - Lista atividades de uma família
   router.get('/atividades/:familiaCodigo', async (req, res) => {

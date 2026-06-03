@@ -12215,8 +12215,28 @@ function _abrirAtOsModal(id, navRows) {
   const menuLink = document.getElementById('menu-engenharia-fromthest');
   if (!menuLink) return;
 
-  const DOWNLOAD_URL = 'https://pxhbginkisinegzupqcy.supabase.co/storage/v1/object/public/produtos/fromtherm/Fromtherm-Local-Setup-v1.1.0.exe';
+  const FALLBACK_DOWNLOAD_URL = 'https://pxhbginkisinegzupqcy.supabase.co/storage/v1/object/public/produtos/fromtherm/Fromtherm-Local-Setup-v1.1.0.exe';
+  const DOWNLOAD_META_URL = '/api/engenharia/fromthest/latest-installer';
   const MODAL_ID = 'engenhariaFromthestModal';
+
+  async function obterUltimoInstalador() {
+    const response = await fetch(DOWNLOAD_META_URL, {
+      credentials: 'same-origin',
+      headers: { Accept: 'application/json' }
+    });
+
+    if (!response.ok) {
+      throw new Error(`Falha ao buscar instalador (${response.status})`);
+    }
+
+    const payload = await response.json();
+    const item = payload?.item;
+    if (!item?.public_url) {
+      throw new Error('Resposta sem URL pública do instalador.');
+    }
+
+    return item;
+  }
 
   function fecharModal() {
     const modal = document.getElementById(MODAL_ID);
@@ -12241,7 +12261,9 @@ function _abrirAtOsModal(id, navRows) {
         </div>
         <div style="padding:18px 16px 16px;">
           <p style="margin:0 0 16px;color:#cbd5e1;font-size:13px;line-height:1.45;">Clique no botão abaixo para baixar o instalador local do Fromthest.</p>
-          <a href="${DOWNLOAD_URL}" target="_blank" rel="noopener noreferrer"
+          <p id="engenhariaFromthestStatus" style="margin:0 0 12px;color:#93c5fd;font-size:12px;line-height:1.4;">Buscando a última versão disponível...</p>
+          <a href="${FALLBACK_DOWNLOAD_URL}" target="_blank" rel="noopener noreferrer"
+             id="engenhariaFromthestDownloadLink"
              style="display:inline-flex;align-items:center;gap:8px;padding:10px 14px;border-radius:10px;background:linear-gradient(135deg,#2563eb 0%,#1d4ed8 100%);color:#fff;font-weight:700;font-size:13px;text-decoration:none;">
             <i class="fa-solid fa-file-arrow-down"></i>
             Baixar Fromthest
@@ -12256,6 +12278,30 @@ function _abrirAtOsModal(id, navRows) {
     document.body.appendChild(modal);
     const btnFechar = document.getElementById('engenhariaFromthestModalClose');
     if (btnFechar) btnFechar.addEventListener('click', fecharModal);
+
+    const statusEl = document.getElementById('engenhariaFromthestStatus');
+    const downloadLinkEl = document.getElementById('engenhariaFromthestDownloadLink');
+
+    obterUltimoInstalador()
+      .then((item) => {
+        if (downloadLinkEl) {
+          downloadLinkEl.href = item.public_url;
+          downloadLinkEl.setAttribute('download', item.nome || 'Fromtherm-Local-Setup.exe');
+        }
+        if (statusEl) {
+          statusEl.textContent = item.nome
+            ? `Última versão encontrada: ${item.nome}`
+            : 'Última versão encontrada e pronta para download.';
+          statusEl.style.color = '#86efac';
+        }
+      })
+      .catch((error) => {
+        console.warn('[engenharia] Falha ao carregar última versão do Fromthest:', error);
+        if (statusEl) {
+          statusEl.textContent = 'Não foi possível validar a última versão agora. O botão usará o link padrão.';
+          statusEl.style.color = '#fbbf24';
+        }
+      });
   }
 
   menuLink.addEventListener('click', (e) => {
@@ -68528,7 +68574,7 @@ window.initOscilacaoEstoque = (function () {
         body: JSON.stringify(payload),
       })
         .then(function (r) { return r.json(); })
-        .then(function (data) {
+          .then(async function (data) {
           if (data.ok) {
             setStatus('', false);
             // Exibe painel de sucesso no rodapé
@@ -68570,12 +68616,14 @@ window.initOscilacaoEstoque = (function () {
                   '</div>';
               }
             }
-            // Cria Sol. de Separação automaticamente com itens da Declaração de Conteúdo
+            // Cria Sol. de Separação automaticamente com itens da Declaração de Conteúdo.
+            // No contexto SAC, a entrada direta em envios.solicitacoes vira fallback para evitar duplicidade.
+            var _sepCriada = false;
             if (itensDecl.length > 0) {
-              criarSolicitacaoSeparacaoVipp(itensDecl, osNum, g('vippObservacao'), data.idConhecimento || null);
+              _sepCriada = await criarSolicitacaoSeparacaoVipp(itensDecl, osNum, g('vippObservacao'), data.idConhecimento || null);
             }
-            // Se aberto pelo painel SAC, cria entrada em envios.solicitacoes automaticamente
-            if (_vippContextoSac) {
+            // Se aberto pelo painel SAC, cria entrada apenas quando a separação não gerou solicitação.
+            if (_vippContextoSac && !_sepCriada) {
               criarEntradaSacVipp(itensDecl, osNum, data.idConhecimento || null);
             }
             enviarBtn.disabled = true;
@@ -68601,7 +68649,7 @@ window.initOscilacaoEstoque = (function () {
 
   // ── Cria Sol. de Separação automaticamente após VIPP bem-sucedido ───────────
   async function criarSolicitacaoSeparacaoVipp(itensDecl, osNum, observacao, idVipp) {
-    if (!itensDecl || !itensDecl.length) return;
+    if (!itensDecl || !itensDecl.length) return false;
     var comentario = osNum ? ('OS' + osNum) : '';
     // Usuário logado
     var nomeUser = '';
@@ -68677,9 +68725,12 @@ window.initOscilacaoEstoque = (function () {
             _envData.total + ' ' + (_envData.total === 1 ? 'item' : 'itens') + '.';
           _sEl.appendChild(_note);
         }
+        return true;
       }
+      return false;
     } catch (_e3) {
       console.error('[VIPP→Sep] Erro ao enviar separação:', _e3);
+      return false;
     }
   }
 
