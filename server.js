@@ -30962,6 +30962,16 @@ function calcularScoreAssociacaoNfePedido(itemReceb, itemPedido) {
     }
   }
 
+  // Valor total: reforça match quando valores são iguais/próximos; penaliza divergência >30%
+  const valorRec = Number(itensCabec?.vTotalItem ?? null);
+  const valorPedido = Number(itemPedido?.n_val_tot ?? null);
+  if (Number.isFinite(valorRec) && Number.isFinite(valorPedido) && valorRec > 0 && valorPedido > 0) {
+    const diffPct = Math.abs(valorRec - valorPedido) / Math.max(valorRec, valorPedido);
+    if (diffPct < 0.001) score += 80;
+    else if (diffPct < 0.05) score += 40;
+    else if (diffPct > 0.30) score -= 40;
+  }
+
   return score;
 }
 
@@ -31078,7 +31088,25 @@ async function montarPlanoAssociacaoNfePedido(numeroNfe, numeroPedido, chaveNfe 
 
   const previewItens = [];
 
-  const itensRecebimentoEditar = itensReceb.map((item, idx) => {
+  // Sorted-greedy: pré-calcula o melhor score possível de cada item da NF e processa
+  // em ordem de confiança decrescente, evitando que itens com match fraco "roubem"
+  // itens do pedido de itens com match forte que aparecem depois na sequência da NF.
+  const melhoresScoresPossiveis = itensReceb.map((item) => {
+    let melhor = 0;
+    for (const pedItem of itensPedido) {
+      const s = calcularScoreAssociacaoNfePedido(item, pedItem);
+      if (s > melhor) melhor = s;
+    }
+    return melhor;
+  });
+  const ordemProcessamento = itensReceb
+    .map((_, idx) => idx)
+    .sort((a, b) => melhoresScoresPossiveis[b] - melhoresScoresPossiveis[a]);
+
+  const resultadosPorIdx = new Array(itensReceb.length);
+
+  for (const idx of ordemProcessamento) {
+    const item = itensReceb[idx];
     const itensCabec = item?.itensCabec || {};
     const itensInfoAdic = item?.itensInfoAdic || {};
     const nSequencia = Number(itensCabec?.nSequencia || idx + 1);
@@ -31169,29 +31197,34 @@ async function montarPlanoAssociacaoNfePedido(numeroNfe, numeroPedido, chaveNfe 
       itensIde.nIdItPedidoExistente = nCodItem;
     }
 
-    previewItens.push({
-      n_sequencia: itensIde.nSequencia,
-      nf_codigo_produto: codigoProdutoRec || null,
-      nf_descricao_produto: descricaoProdutoRec || null,
-      nf_qtde: itensCabec?.nQtdeNFe ?? null,
-      nf_unidade: String(itensCabec?.cUnidadeNfe || '').trim() || null,
-      nf_valor_total: itensCabec?.vTotalItem ?? null,
-      nf_cfop: cfopNf || null,
-      item_servico: servicoCfop.servico,
-      servico_cfop_entrada: servicoCfop.cfopEntrada,
-      pedido_item_encontrado: !!itemPedidoVinculo || servicoCfop.servico,
-      pedido_n_cod_item: Number.isFinite(nCodItem) && nCodItem > 0 ? nCodItem : null,
-      pedido_codigo_produto: String(itemPedidoVinculo?.c_produto || '').trim() || null,
-      pedido_descricao_produto: String(itemPedidoVinculo?.c_descricao || '').trim() || null,
-      pedido_qtde: itemPedidoVinculo?.n_qtde ?? null,
-      pedido_unidade: String(itemPedidoVinculo?.c_unidade || '').trim() || null,
-      pedido_valor_total: itemPedidoVinculo?.n_val_tot ?? null,
-      criterio_match: criterioMatch,
-      score_match: scoreMatch
-    });
+    resultadosPorIdx[idx] = {
+      itensIde,
+      previewItem: {
+        n_sequencia: itensIde.nSequencia,
+        nf_codigo_produto: codigoProdutoRec || null,
+        nf_descricao_produto: descricaoProdutoRec || null,
+        nf_qtde: itensCabec?.nQtdeNFe ?? null,
+        nf_unidade: String(itensCabec?.cUnidadeNfe || '').trim() || null,
+        nf_valor_total: itensCabec?.vTotalItem ?? null,
+        nf_cfop: cfopNf || null,
+        item_servico: servicoCfop.servico,
+        servico_cfop_entrada: servicoCfop.cfopEntrada,
+        pedido_item_encontrado: !!itemPedidoVinculo || servicoCfop.servico,
+        pedido_n_cod_item: Number.isFinite(nCodItem) && nCodItem > 0 ? nCodItem : null,
+        pedido_codigo_produto: String(itemPedidoVinculo?.c_produto || '').trim() || null,
+        pedido_descricao_produto: String(itemPedidoVinculo?.c_descricao || '').trim() || null,
+        pedido_qtde: itemPedidoVinculo?.n_qtde ?? null,
+        pedido_unidade: String(itemPedidoVinculo?.c_unidade || '').trim() || null,
+        pedido_valor_total: itemPedidoVinculo?.n_val_tot ?? null,
+        criterio_match: criterioMatch,
+        score_match: scoreMatch
+      }
+    };
+  }
 
-    return { itensIde };
-  });
+  // Reconstrói arrays na ordem original da NF-e
+  const itensRecebimentoEditar = resultadosPorIdx.map((r) => ({ itensIde: r.itensIde }));
+  for (const r of resultadosPorIdx) previewItens.push(r.previewItem);
 
   const itensPedidoInformativos = itensPedido
     .filter(itemPedidoDisponivel)
@@ -31515,8 +31548,9 @@ app.post('/api/compras/pedidos-omie/nfe-associar-pedido', express.json(), async 
     if (nCodCC) {
       try {
         // Busca dados atuais do recebimento + unidades do pedido
+        // Usa ComRetryRedundant para tolerar erros REDUNDANT da Omie (chamadas anteriores na mesma sessão)
         const [recebAtual, pedidoConsulta] = await Promise.all([
-          chamarApiRecebimentoNfeOmie('ConsultarRecebimento', { nIdReceb: Number(plano.n_id_receb) }),
+          chamarApiRecebimentoNfeOmieComRetryRedundant('ConsultarRecebimento', { nIdReceb: Number(plano.n_id_receb) }, { tentativasMaximas: 3, margemSegundos: 8 }),
           fetch('https://app.omie.com.br/api/v1/produtos/pedidocompra/', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -31712,7 +31746,7 @@ app.post('/api/compras/pedidos-omie/nfe-associar-pedido', express.json(), async 
         }
 
         // --- EDITAR cada item: cUnidade + nQtde (do pedido ou override do user) ---
-        // Se conta especial, também aplica codigo_local_estoque
+        // Sempre aplica codigo_local_estoque = ALMOX_LOCAL_PADRAO para itens físicos (não-serviço)
         itensEditarEstoque = plano.itensRecebimentoEditar.map(itemEditar => {
           const nSeq = itemEditar.itensIde?.nSequencia;
           const nIdItPed = itemEditar.itensIde?.nIdItPedidoExistente;
@@ -31722,13 +31756,14 @@ app.post('/api/compras/pedidos-omie/nfe-associar-pedido', express.json(), async 
           const override = overrideMap.get(nSeq);
           const cUnidadeFinal = override?.cUnidade || cUnidadePedido || null;
 
-          const ajustes = {};
-          if (aplicarEstoqueEspecial) ajustes.codigo_local_estoque = ESTOQUE_LOCAL_ESPECIAL;
-          if (cUnidadeFinal) ajustes.cUnidade = cUnidadeFinal;
           const previewItem = (plano?.itens_preview || []).find(p => p.n_sequencia === nSeq);
-          const cfopServicoEntrada = previewItem?.item_servico ? previewItem?.servico_cfop_entrada : null;
+          const isServico = !!(previewItem?.item_servico);
+          const cfopServicoEntrada = isServico ? previewItem?.servico_cfop_entrada : null;
+
+          const ajustes = {};
+          if (!isServico) ajustes.codigo_local_estoque = Number(ALMOX_LOCAL_PADRAO);
+          if (cUnidadeFinal) ajustes.cUnidade = cUnidadeFinal;
           if (cfopServicoEntrada || cfopCalculado) ajustes.cCFOPEntrada = cfopServicoEntrada || cfopCalculado;
-          // Nota: nQtde não é campo válido em itensAjustes da Omie
 
           // Só incluir o item se tiver ajustes
           if (Object.keys(ajustes).length === 0) return null;
@@ -31799,14 +31834,16 @@ app.post('/api/compras/pedidos-omie/nfe-associar-pedido', express.json(), async 
       }
     }
 
-    // ─── Passo 3: EDITAR itens com cUnidade + nQtde (+ codigo_local_estoque se especial) ───
+    // ─── Passo 3: EDITAR itens com codigo_local_estoque + cUnidade + cCFOPEntrada ───
+    // Define armazém (Recebimento) e unidade conforme o pedido.
+    // A Omie não suporta alterar nQtde via AlterarRecebimento — a qtd é calculada pela Omie.
     if (itensEditarEstoque && itensEditarEstoque.length > 0) {
       try {
         const payloadEstoque = {
           ide: { nIdReceb: Number(plano.n_id_receb) },
           itensRecebimentoEditar: itensEditarEstoque
         };
-        console.log('[Compras/NFeAssociarPedido] ===== PASSO 3: estoque =====');
+        console.log('[Compras/NFeAssociarPedido] ===== PASSO 3: estoque + unidade =====');
         console.log(JSON.stringify(payloadEstoque, null, 2));
         console.log('[Compras/NFeAssociarPedido] ===================================');
         await chamarApiRecebimentoNfeOmieComRetryRedundant('AlterarRecebimento', payloadEstoque, {
