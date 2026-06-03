@@ -31429,7 +31429,7 @@ app.post('/api/compras/pedidos-omie/nfe-associar-pedido', express.json(), async 
     //   • nIdConta = nCodCC do pedido
     //   • cUnidade e nQtde do pedido (ou override do usuário) em cada item
     //   • dVencimento dinâmico conforme compras.contas_omie (tipo CR, melhor_data, fechamento_conta)
-    //   • Se conta especial (GLP/Frigelar): codigo_local_estoque = ESTOQUE_LOCAL_ESPECIAL
+    //   • codigo_local_estoque = #D Recebimento (10408201806) em todos os itens
     const CONTAS_ESPECIAIS = [10507452702, 10440916421];
     const ESTOQUE_LOCAL_ESPECIAL = 10408201806;
     let nCodCC = null;
@@ -31761,7 +31761,7 @@ app.post('/api/compras/pedidos-omie/nfe-associar-pedido', express.json(), async 
           const cfopServicoEntrada = isServico ? previewItem?.servico_cfop_entrada : null;
 
           const ajustes = {};
-          if (!isServico) ajustes.codigo_local_estoque = Number(ALMOX_LOCAL_PADRAO);
+          if (!isServico) ajustes.codigo_local_estoque = ESTOQUE_LOCAL_ESPECIAL;
           if (cUnidadeFinal) ajustes.cUnidade = cUnidadeFinal;
           if (cfopServicoEntrada || cfopCalculado) ajustes.cCFOPEntrada = cfopServicoEntrada || cfopCalculado;
 
@@ -31775,7 +31775,8 @@ app.post('/api/compras/pedidos-omie/nfe-associar-pedido', express.json(), async 
         }).filter(Boolean);
 
         recebimentoCache = recebAtual;
-        console.log(`[Compras/NFeAssociarPedido] nIdConta=${nCodCC} estoqueEspecial=${aplicarEstoqueEspecial} dVencimento=${dVencimento} parcelas=${parcelasLista.length} itensEditar=${itensEditarEstoque.length} overrides=${overrideMap.size}`);
+        console.log(`[Compras/NFeAssociarPedido] nIdConta=${nCodCC} localEstoqueRecebimento=${ESTOQUE_LOCAL_ESPECIAL} dVencimento=${dVencimento} parcelas=${parcelasLista.length} itensEditar=${itensEditarEstoque.length} overrides=${overrideMap.size}`);
+
       } catch (errPrep) {
         console.warn('[Compras/NFeAssociarPedido] Falha ao preparar dados de associação:', errPrep?.message);
       }
