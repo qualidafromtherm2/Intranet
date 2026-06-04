@@ -16496,7 +16496,7 @@ app.get('/api/logistica/kanban/itens', async (req, res) => {
     if (n_solic) {
       // Itens de uma SEP específica
       const { rows } = await pool.query(`
-        SELECT c.id AS carr_id, i.id AS solic_id, i.status, i.observacao, i.motivo,
+        SELECT c.id AS carr_id, i.id AS solic_id, i.status, i.observacao, i.motivo, i.cod_local, i.nome_local,
                c.codigo_produto, c.descricao, c.unidade,
                c.quantidade::numeric AS quantidade,
                c.data_prevista::text, c.horario, c.criado_em::text,
@@ -16514,7 +16514,7 @@ app.get('/api/logistica/kanban/itens', async (req, res) => {
       if (includeDerivados === '1' || includeDerivados === 'true' || includeDerivados === 'yes') {
         const baseNSolic = String(n_solic).replace(/\.\d+$/, '');
         const { rows: derivRows } = await pool.query(`
-             SELECT c.id AS carr_id, i.id AS solic_id, i.n_solic, i.status, i.observacao, i.motivo,
+             SELECT c.id AS carr_id, i.id AS solic_id, i.n_solic, i.status, i.observacao, i.motivo, i.cod_local, i.nome_local,
                  c.codigo_produto, c.descricao, c.unidade,
                  c.quantidade::numeric AS quantidade,
                  c.data_prevista::text, c.horario, c.criado_em::text,
@@ -16537,6 +16537,8 @@ app.get('/api/logistica/kanban/itens', async (req, res) => {
         SELECT c.id AS carr_id, NULL::bigint AS solic_id,
                'carrinho' AS status,
            NULL::text AS motivo,
+             NULL::text AS cod_local,
+             NULL::text AS nome_local,
                c.codigo_produto, c.descricao, c.unidade,
                c.quantidade::numeric AS quantidade,
                c.data_prevista::text, c.horario, c.criado_em::text,
@@ -17000,7 +17002,7 @@ app.post('/api/logistica/separacao/enviar', express.json(), async (req, res) => 
     const id_user   = req.session?.user?.id;
     const nome_user = req.session?.user?.username || req.session?.user?.nome || 'desconhecido';
     if (!id_user) return res.status(401).json({ ok: false, error: 'Não autenticado.' });
-    const { solicitado_para, motivo, data_prevista, horario, observacao, item_ids, forcar_novo_sep, os_num, id_vipp, conteudo } = req.body || {};
+    const { solicitado_para, motivo, data_prevista, horario, observacao, item_ids, forcar_novo_sep, os_num, id_vipp, conteudo, origem_vipp } = req.body || {};
     // Quando item_ids for fornecido (ex: VIPP), processa apenas esses itens do carrinho
     const filtroIds = Array.isArray(item_ids) && item_ids.length > 0
       ? item_ids.map(id => parseInt(id, 10)).filter(id => !isNaN(id))
@@ -17008,7 +17010,13 @@ app.post('/api/logistica/separacao/enviar', express.json(), async (req, res) => 
 
     const motivoRaw = String(motivo || '').trim();
     const motivosPermitidos = new Set(['Produção', 'Engenharia', 'venda', 'Assistencia tecnica']);
-    const motivoSolicitacao = motivosPermitidos.has(motivoRaw) ? motivoRaw : 'Produção';
+    const fluxoVipp = !!id_vipp;
+    const origemVippNorm = String(origem_vipp || '').trim().toUpperCase() === 'SAC' ? 'SAC' : 'AT';
+    const motivoSolicitacao = fluxoVipp
+      ? (origemVippNorm === 'SAC' ? 'SAC' : 'AT')
+      : (motivosPermitidos.has(motivoRaw) ? motivoRaw : 'Produção');
+    const VIPP_COD_LOCAL_PADRAO = '10440426539';
+    let vippNomeLocalPadrao = null;
 
     await client.query('BEGIN');
 
@@ -17023,8 +17031,22 @@ app.post('/api/logistica/separacao/enviar', express.json(), async (req, res) => 
       `ALTER TABLE solicitacao_produto.itens_solicitados ADD COLUMN IF NOT EXISTS motivo TEXT`
     );
     await client.query(
+      `ALTER TABLE solicitacao_produto.itens_solicitados ADD COLUMN IF NOT EXISTS cod_local TEXT`
+    );
+    await client.query(
+      `ALTER TABLE solicitacao_produto.itens_solicitados ADD COLUMN IF NOT EXISTS nome_local TEXT`
+    );
+    await client.query(
       `ALTER TABLE logistica.carrinho ADD COLUMN IF NOT EXISTS comentario TEXT`
     );
+
+    if (fluxoVipp) {
+      const { rows: localRows } = await client.query(
+        `SELECT nome FROM public.omie_locais_estoque WHERE local_codigo = $1 LIMIT 1`,
+        [VIPP_COD_LOCAL_PADRAO]
+      );
+      vippNomeLocalPadrao = localRows[0]?.nome || null;
+    }
 
     // Garante tabela de solicitações
     await client.query(`
@@ -17137,9 +17159,16 @@ app.post('/api/logistica/separacao/enviar', express.json(), async (req, res) => 
          data_prevista || null, horario || null, item.comentario || null]
       );
       await client.query(
-        `INSERT INTO solicitacao_produto.itens_solicitados (id_carr, n_solic, status, observacao, motivo)
-         VALUES ($1, $2, 'pendente', $3, $4)`,
-        [item.id, nSolic, observacao || null, motivoSolicitacao]
+        `INSERT INTO solicitacao_produto.itens_solicitados (id_carr, n_solic, status, observacao, motivo, cod_local, nome_local)
+         VALUES ($1, $2, 'pendente', $3, $4, $5, $6)`,
+        [
+          item.id,
+          nSolic,
+          observacao || null,
+          motivoSolicitacao,
+          fluxoVipp ? VIPP_COD_LOCAL_PADRAO : null,
+          fluxoVipp ? vippNomeLocalPadrao : null
+        ]
       );
     }
 

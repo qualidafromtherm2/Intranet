@@ -272,6 +272,35 @@ function _solStatusBadge(status) {
 })();
 
 // mode: 'normal' | 'separado-btn' | 'disabled'
+function _solGetMiniImgHtml(codigoProduto, descricaoProduto) {
+  const codigo = String(codigoProduto || '').trim();
+  const descricao = String(descricaoProduto || '').trim();
+  let imgUrl = '';
+
+  if (codigo && Array.isArray(window.produtosCatalogoOmie) && window.produtosCatalogoOmie.length) {
+    const produtoComImagem = window.produtosCatalogoOmie.find(p =>
+      p.codigo === codigo || String(p.codigo_produto || '') === codigo
+    );
+    imgUrl = String(produtoComImagem?.url_imagem || '').trim();
+  }
+
+  let urlExpirada = false;
+  if (imgUrl && imgUrl.includes('Expires=')) {
+    const match = imgUrl.match(/Expires=(\d+)/);
+    if (match) {
+      const expiresTimestamp = parseInt(match[1], 10);
+      const agora = Math.floor(Date.now() / 1000);
+      urlExpirada = expiresTimestamp < agora;
+    }
+  }
+
+  if (imgUrl && !urlExpirada) {
+    return `<img src="${imgUrl}" alt="${escapeHtml(descricao || codigo)}" style="width:100%;height:100%;object-fit:contain;background:#f8fafc;padding:2px;" onerror="this.onerror=null;this.src='/imagens_produtos/${codigo}.jpg';this.style.objectFit='cover';this.style.padding='0';">`;
+  }
+
+  return `<img src="/imagens_produtos/${codigo}.jpg" alt="${escapeHtml(descricao || codigo)}" style="width:100%;height:100%;object-fit:cover;" onerror="this.style.display='none'">`;
+}
+
 function _solRenderItemRow(item, mode) {
   const solicIds = Array.isArray(item.solic_ids) ? item.solic_ids : (item.solic_id ? [item.solic_id] : []);
   const carrIds  = Array.isArray(item.carr_ids)  ? item.carr_ids  : (item.carr_id  ? [item.carr_id]  : []);
@@ -304,7 +333,7 @@ function _solRenderItemRow(item, mode) {
   return `
     <div data-item-row="${rowKey}" style="display:flex;align-items:center;gap:12px;padding:10px 16px;border-top:1px solid #222;${op}">
       <div style="width:40px;height:40px;border-radius:8px;background:#0f0f0f;overflow:hidden;flex-shrink:0;">
-        <img src="/imagens_produtos/${item.codigo_produto}.jpg" style="width:100%;height:100%;object-fit:cover;" onerror="this.style.display='none'">
+        ${_solGetMiniImgHtml(item.codigo_produto, item.descricao || '')}
       </div>
       <div style="flex:1;min-width:0;">
         <div style="font-weight:700;font-size:.80rem;color:#f59e0b;">${item.codigo_produto}</div>
@@ -582,6 +611,8 @@ function _abrirModalSeparacao(grupoAtual, gruposConflito) {
         map.set(key, { ...it, solic_ids: [], carr_ids: [], quantidade: 0, _allSep: true });
       }
       const a = map.get(key);
+      if (!a.nome_local && it.nome_local) a.nome_local = it.nome_local;
+      if (!a.cod_local && it.cod_local) a.cod_local = it.cod_local;
       const sid = it.solic_id, cid = it.carr_id;
       if (sid && !a.solic_ids.includes(sid)) a.solic_ids.push(sid);
       if (cid && !a.carr_ids.includes(cid))  a.carr_ids.push(cid);
@@ -606,9 +637,9 @@ function _abrirModalSeparacao(grupoAtual, gruposConflito) {
     const swapHistory = it.codigo_produto_ant && it.codigo_produto_novo 
       ? `<div style="font-size:.70rem;color:#a78bfa;margin-top:2px;display:flex;align-items:center;gap:4px;"><i class="fa-solid fa-arrows-rotate" style="color:#a78bfa;"></i><span>${it.codigo_produto_ant} → ${it.codigo_produto_novo}</span></div>`
       : '';
-    // Renderizar endereços
+    // Renderizar destino
     const endList = it.enderecos_pp;
-    let enderecoHtml = '';
+    let destinoHtml = '';
     if (endList && Array.isArray(endList) && endList.length > 0) {
       const cards = endList.map(e => `
         <div style="display:inline-flex;flex-direction:column;gap:1px;background:#1e293b;border:1px solid #334155;border-radius:4px;padding:3px 6px;font-size:.63rem;line-height:1.5;white-space:nowrap;">
@@ -617,21 +648,20 @@ function _abrirModalSeparacao(grupoAtual, gruposConflito) {
           <span><span style="color:#6b7280;">edif.:</span> <span style="color:#67e8f9;font-weight:700;">${e.edificio || '—'}</span></span>
           <span><span style="color:#6b7280;">apto:</span> <span style="color:#67e8f9;font-weight:700;">${e.apartamento || '—'}</span></span>
         </div>`).join('');
-      enderecoHtml = `<div style="display:flex;flex-wrap:wrap;gap:4px;margin-top:3px;align-items:flex-start;">
-        <i class="fa-solid fa-location-dot" style="color:#6b7280;font-size:.65rem;margin-top:3px;"></i>
-        ${cards}
-      </div>`;
+      destinoHtml = `<div style="display:flex;flex-wrap:wrap;gap:4px;align-items:flex-start;">${cards}</div>`;
+    } else if (it.nome_local || it.cod_local) {
+      const destino = it.nome_local || it.cod_local;
+      destinoHtml = `<div style="font-size:.68rem;color:#c4b5fd;font-weight:700;">${destino}</div>`;
     } else {
-      enderecoHtml = `<div style="margin-top:2px;font-size:.65rem;color:#6b7280;font-style:italic;"><i class="fa-solid fa-location-dot" style="margin-right:3px;"></i>Não endereçado</div>`;
+      destinoHtml = `<div style="font-size:.65rem;color:#6b7280;font-style:italic;">Não endereçado</div>`;
     }
 
-    // Seletor de armazém — só para itens já Separados
-    let armazemHtml = '';
+    const locais = (estoqueBatch[it.codigo_produto] || [])
+      .filter(l => Number(l.saldo) > 0)
+      .slice()
+      .sort((a, b) => String(a.local_codigo) === PRINC_ARMZ ? -1 : String(b.local_codigo) === PRINC_ARMZ ? 1 : 0);
+    let origemHtml = '';
     if (isSep) {
-      const locais = (estoqueBatch[it.codigo_produto] || [])
-        .filter(l => Number(l.saldo) > 0)
-        .slice()
-        .sort((a, b) => String(a.local_codigo) === PRINC_ARMZ ? -1 : String(b.local_codigo) === PRINC_ARMZ ? 1 : 0);
       if (locais.length) {
         const btns = locais.map((l, idx) => {
           const isDefault = String(l.local_codigo) === PRINC_ARMZ || (idx === 0);
@@ -646,22 +676,39 @@ function _abrirModalSeparacao(grupoAtual, gruposConflito) {
             ${nome} · ${qty2} ${l.unidade || 'UN'}
           </button>`;
         }).join('');
-        const destLabel = it.nome_local || it.cod_local || '';
-        armazemHtml = `<div class="armazem-sel-wrap" style="margin-top:6px;">
-          <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;flex-wrap:wrap;">
-            <span style="font-size:.60rem;color:#475569;font-weight:600;text-transform:uppercase;letter-spacing:.04em;">
-              <i class="fa-solid fa-warehouse" style="margin-right:4px;color:#3b82f6;"></i>Armazém de retirada
-            </span>
-            ${destLabel ? `<span style="font-size:.60rem;color:#6b7280;">→</span><span style="font-size:.60rem;font-weight:600;text-transform:uppercase;letter-spacing:.04em;padding:2px 6px;border-radius:4px;background:#1e1b4b;color:#a78bfa;border:1px solid #312e81;"><i class="fa-solid fa-location-arrow" style="margin-right:3px;color:#a78bfa;"></i>${destLabel}</span>` : ''}
-          </div>
-          <div style="display:flex;flex-wrap:wrap;gap:4px;">${btns}</div>
-        </div>`;
+        origemHtml = `<div style="display:flex;flex-wrap:wrap;gap:4px;">${btns}</div>`;
       } else if (Object.keys(estoqueBatch).length > 0) {
-        armazemHtml = `<div style="margin-top:5px;font-size:.63rem;color:#fbbf24;font-style:italic;">
+        origemHtml = `<div style="font-size:.63rem;color:#fbbf24;font-style:italic;">
           <i class="fa-solid fa-triangle-exclamation" style="margin-right:3px;"></i>Sem armazém com saldo positivo
         </div>`;
+      } else {
+        origemHtml = `<div style="font-size:.63rem;color:#6b7280;font-style:italic;">Carregando origem...</div>`;
       }
+    } else if (locais.length) {
+      origemHtml = locais.map(l => {
+        const qty2 = Number(l.saldo).toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+        return `<div style="display:flex;flex-direction:column;line-height:1.35;padding:2px 0;">
+          <span style="font-size:.63rem;color:#86efac;">${l.local_nome || l.local_codigo}</span>
+          <span style="font-size:.68rem;color:#f0f0f0;font-weight:700;">${qty2} ${l.unidade || 'UN'}</span>
+        </div>`;
+      }).join('');
+    } else if (Object.keys(estoqueBatch).length > 0) {
+      origemHtml = `<div style="font-size:.63rem;color:#6b7280;font-style:italic;">Sem origem com saldo</div>`;
+    } else {
+      origemHtml = `<div style="font-size:.63rem;color:#6b7280;font-style:italic;">Carregando origem...</div>`;
     }
+
+    const localizacaoHtml = `
+      <div style="margin-top:6px;display:flex;gap:10px;flex-wrap:wrap;align-items:stretch;">
+        <div style="min-width:170px;flex:1;padding:6px 8px;background:#101826;border:1px solid #253041;border-radius:8px;">
+          <div style="font-size:.60rem;color:#60a5fa;font-weight:700;text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px;">Origem</div>
+          ${origemHtml}
+        </div>
+        <div style="min-width:170px;flex:1;padding:6px 8px;background:#1b1730;border:1px solid #312e81;border-radius:8px;">
+          <div style="font-size:.60rem;color:#a78bfa;font-weight:700;text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px;">Destino</div>
+          ${destinoHtml}
+        </div>
+      </div>`;
 
     // Itens de sub-SEPs (já Separado) não têm input de quantidade editável
     const qtyHtml = isSep
@@ -685,7 +732,7 @@ function _abrirModalSeparacao(grupoAtual, gruposConflito) {
            data-unidade="${String(it.unidade || 'UN').replace(/"/g, '&quot;')}"
            style="display:flex;align-items:flex-start;gap:12px;padding:10px 16px;border-top:1px solid #222;">
         <div style="width:40px;height:40px;border-radius:8px;background:#0f0f0f;overflow:hidden;flex-shrink:0;margin-top:2px;">
-          <img src="/imagens_produtos/${it.codigo_produto}.jpg" style="width:100%;height:100%;object-fit:cover;" onerror="this.style.display='none'">
+          ${_solGetMiniImgHtml(it.codigo_produto, it.descricao || '')}
         </div>
         <div style="flex:1;min-width:0;">
           <div style="font-weight:700;font-size:.80rem;color:#f59e0b;">${it.codigo_produto}</div>
@@ -696,8 +743,7 @@ function _abrirModalSeparacao(grupoAtual, gruposConflito) {
             ${hasObs ? `<span title="Item com observação" style="display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:999px;background:#f97316;color:#111;font-weight:800;font-size:.70rem;line-height:1;">!</span>` : ''}
           </div>
           ${swapHistory}
-          ${enderecoHtml}
-          ${armazemHtml}
+          ${localizacaoHtml}
         </div>
           ${qtyHtml}
           ${isSep
@@ -1572,19 +1618,22 @@ async function _abrirModalAguardandoRetiradaSep(nSolic, opts = {}) {
   document.getElementById('modalAguardandoRetiradaSep')?.remove();
 
   const renderLinha = (it) => {
-    // Card de endereço (localização física)
-    let endCard = '';
+    // Card de destino
+    let destinoCard = '';
     const endList = it.enderecos_pp;
     if (endList && Array.isArray(endList) && endList.length > 0) {
-      endCard = endList.map(e => `
+      destinoCard = endList.map(e => `
         <div style="display:inline-flex;flex-direction:column;gap:1px;background:#1e293b;border:1px solid #334155;border-radius:4px;padding:3px 6px;font-size:.65rem;line-height:1.6;white-space:nowrap;">
           <span><span style="color:#6b7280;">rua:</span> <span style="color:#67e8f9;font-weight:700;">${e.rua || '—'}</span></span>
           <span><span style="color:#6b7280;">andar:</span> <span style="color:#67e8f9;font-weight:700;">${e.andar || '—'}</span></span>
           <span><span style="color:#6b7280;">edif.:</span> <span style="color:#67e8f9;font-weight:700;">${e.edificio || '—'}</span></span>
           <span><span style="color:#6b7280;">apto:</span> <span style="color:#67e8f9;font-weight:700;">${e.apartamento || '—'}</span></span>
         </div>`).join('');
+    } else if (it.nome_local || it.cod_local) {
+      const destino = it.nome_local || it.cod_local;
+      destinoCard = `<span style="color:#c4b5fd;font-size:.70rem;font-weight:700;">${destino}</span>`;
     } else {
-      endCard = `<span style="color:#6b7280;font-style:italic;font-size:.68rem;">Não endereçado</span>`;
+      destinoCard = `<span style="color:#6b7280;font-style:italic;font-size:.68rem;">Não endereçado</span>`;
     }
 
     // Armazéns — local_codigo 10717096386 sempre primeiro
@@ -1595,16 +1644,16 @@ async function _abrirModalAguardandoRetiradaSep(nSolic, opts = {}) {
       if (String(b.local_codigo) === PRINCIPAL) return  1;
       return 0;
     });
-    let estoqueColuna = '';
+    let origemColuna = '';
     if (locais.length) {
-      estoqueColuna = locais.map(l =>
+      origemColuna = locais.map(l =>
         `<div style="display:flex;flex-direction:column;line-height:1.3;padding:2px 0;">
           <span style="font-size:.63rem;color:#86efac;">${l.local_nome || l.local_codigo}</span>
           <span style="font-size:.68rem;color:#f0f0f0;font-weight:700;">${Number(l.saldo).toLocaleString('pt-BR',{minimumFractionDigits:0,maximumFractionDigits:2})} ${l.unidade||'UN'}</span>
         </div>`
       ).join('');
     } else {
-      estoqueColuna = `<span style="font-size:.63rem;color:#6b7280;font-style:italic;">Sem estoque</span>`;
+      origemColuna = `<span style="font-size:.63rem;color:#6b7280;font-style:italic;">Sem origem com saldo</span>`;
     }
 
     return `
@@ -1612,11 +1661,16 @@ async function _abrirModalAguardandoRetiradaSep(nSolic, opts = {}) {
       <div style="flex:1;min-width:0;">
         <div style="font-weight:700;font-size:.78rem;color:#f59e0b;">${it.codigo_produto || '—'}</div>
         <div style="font-size:.75rem;color:#d1d5db;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${it.descricao || '—'}</div>
-        <div style="margin-top:4px;display:flex;align-items:flex-start;gap:8px;">
-          <i class="fa-solid fa-location-dot" style="color:#6b7280;font-size:.68rem;margin-top:3px;flex-shrink:0;"></i>
-          ${endCard}
-          <div style="display:flex;flex-direction:column;gap:3px;border-left:1px solid #374151;padding-left:8px;min-width:130px;">
-            ${estoqueColuna}
+        <div style="margin-top:6px;display:flex;gap:10px;flex-wrap:wrap;align-items:stretch;">
+          <div style="min-width:170px;flex:1;padding:6px 8px;background:#101826;border:1px solid #253041;border-radius:8px;">
+            <div style="font-size:.60rem;color:#60a5fa;font-weight:700;text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px;">Origem</div>
+            <div style="display:flex;flex-direction:column;gap:3px;min-width:130px;">
+              ${origemColuna}
+            </div>
+          </div>
+          <div style="min-width:170px;flex:1;padding:6px 8px;background:#1b1730;border:1px solid #312e81;border-radius:8px;">
+            <div style="font-size:.60rem;color:#a78bfa;font-weight:700;text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px;">Destino</div>
+            ${destinoCard}
           </div>
         </div>
       </div>
@@ -10956,6 +11010,10 @@ async function preencherStatusRastreio(container) {
       if (local) partes.push(local);
       if (data.quando) partes.push(new Date(data.quando).toLocaleString('pt-BR'));
       el.textContent = partes.length ? partes.join(' | ') : 'Sem atualização';
+      if (isRastreioEmTransitoOuPosterior(data.status)) {
+        const card = el.closest('.envio-card');
+        if (card) card.remove();
+      }
     } catch (err) {
       console.error('[SAC] erro rastreio', err);
       el.textContent = err?.message || 'Erro ao consultar';
@@ -11015,6 +11073,10 @@ async function preencherStatusVipp(container) {
       if (data.statusSolicitacao) partes.push(data.statusSolicitacao);
       if (data.etiquetaPostagem) partes.push('ECT: ' + data.etiquetaPostagem);
       el.textContent = partes.length ? partes.join(' | ') : 'Aguardando VIPP';
+      if (isRastreioEmTransitoOuPosterior(statusVipp)) {
+        const card = el.closest('.envio-card');
+        if (card) card.remove();
+      }
     } catch (err) {
       console.error('[VIPP] erro status', err);
       el.textContent = 'Erro ao consultar VIPP';
@@ -11042,6 +11104,20 @@ function normalizarTextoEnvioMercadoria(value) {
     .replace(/[\u0300-\u036f]/g, '')
     .toLowerCase()
     .trim();
+}
+
+function isRastreioEmTransitoOuPosterior(statusRaw) {
+  const status = normalizarTextoEnvioMercadoria(statusRaw);
+  if (!status) return false;
+
+  return (
+    status.includes('em transito') ||
+    status.includes('saiu para entrega') ||
+    status.includes('objeto entregue') ||
+    status.includes('entregue ao destinatario') ||
+    status.includes('objeto recebido pelo destinatario') ||
+    status.includes('disponivel para retirada')
+  );
 }
 
 function isCodigoRastreioEnvioMercadoria(value) {
@@ -11079,8 +11155,11 @@ function filtrarEnvioMercadoria(row) {
   const statusFiltro = envioMercadoriaFiltroStatus?.value || '';
   const prazoFiltro = envioMercadoriaFiltroPrazo?.value || '';
   const status = normalizeSacStatus(row?.status || 'Pendente');
+  const rastreioStatus = row?.rastreio_status ? String(row.rastreio_status).trim() : '';
   const identClean = String(row?.identificacao || '').replace(/\s+/g, '').toUpperCase();
   const criado = row?.created_at ? new Date(row.created_at) : null;
+
+  if (isRastreioEmTransitoOuPosterior(rastreioStatus)) return false;
 
   if (statusFiltro && status !== statusFiltro) return false;
 
@@ -68087,6 +68166,55 @@ window.initOscilacaoEstoque = (function () {
   // ── Drag & Drop nos itens do menu lateral ──
   let _dragData = null;
 
+  const _headerShortcutMeta = {
+    'sgf-ai-btn': {
+      nav_key: 'top-shortcut:sgf-ai',
+      nav_label: 'Assistente SGF',
+      nav_selector: '#sgf-ai-btn',
+      icon_class: 'fa-solid fa-robot'
+    },
+    'home-icon': {
+      nav_key: 'top-shortcut:inicio',
+      nav_label: 'Início',
+      nav_selector: '#home-icon',
+      icon_class: 'fa-solid fa-house'
+    },
+    'notification-wrapper': {
+      nav_key: 'top-shortcut:mensagens',
+      nav_label: 'Mensagens',
+      nav_selector: '#bell-icon',
+      icon_class: 'fa-solid fa-bell'
+    },
+    'cart-icon': {
+      nav_key: 'top-shortcut:compras',
+      nav_label: 'Painel de compras',
+      nav_selector: '#cart-icon',
+      icon_class: 'fa-solid fa-shopping-bag'
+    },
+    'links-icon': {
+      nav_key: 'top-shortcut:links-rapidos',
+      nav_label: 'Links rápidos',
+      nav_selector: '#links-icon',
+      icon_class: 'fa-solid fa-link'
+    },
+    'config-icon': {
+      nav_key: 'top-shortcut:atualizar',
+      nav_label: 'Atualizar sistema',
+      nav_selector: '#config-icon',
+      icon_class: 'fa-solid fa-rotate-right'
+    }
+  };
+
+  function _prepararDragData(meta) {
+    if (!meta?.nav_key || !meta?.nav_selector) return null;
+    return {
+      nav_key: meta.nav_key,
+      nav_label: meta.nav_label || meta.nav_key,
+      nav_selector: meta.nav_selector,
+      icon_class: meta.icon_class || 'fa-solid fa-star'
+    };
+  }
+
   function habilitarDragNoMenu() {
     // Seletor correto: .sidebar-content é o container real do menu lateral
     document.querySelectorAll('.sidebar-content .menu-link[data-nav-key]').forEach(link => {
@@ -68107,6 +68235,45 @@ window.initOscilacaoEstoque = (function () {
       });
 
       link.addEventListener('dragend', () => {
+        document.body.classList.remove('dragging-menu-item');
+        dropTarget.classList.remove('drag-over');
+        _dragData = null;
+      });
+    });
+  }
+
+  function habilitarDragNoHeaderProfile() {
+    const headerProfile = document.querySelector('.header-profile');
+    if (!headerProfile) return;
+
+    Array.from(headerProfile.children).forEach((el) => {
+      if (!el || el.id === 'profile-icon') return;
+
+      const meta = _headerShortcutMeta[el.id];
+      if (!meta) return;
+      if (el.dataset.shortcutDragBound === '1') return;
+
+      el.setAttribute('draggable', 'true');
+      el.dataset.shortcutDragBound = '1';
+
+      el.addEventListener('dragstart', (e) => {
+        const style = window.getComputedStyle(el);
+        if (style.display === 'none' || style.visibility === 'hidden') {
+          e.preventDefault();
+          return;
+        }
+
+        _dragData = _prepararDragData(meta);
+        if (!_dragData) {
+          e.preventDefault();
+          return;
+        }
+
+        e.dataTransfer.effectAllowed = 'copy';
+        document.body.classList.add('dragging-menu-item');
+      });
+
+      el.addEventListener('dragend', () => {
         document.body.classList.remove('dragging-menu-item');
         dropTarget.classList.remove('drag-over');
         _dragData = null;
@@ -68149,6 +68316,7 @@ window.initOscilacaoEstoque = (function () {
   function init() {
     carregarAtalhos();
     habilitarDragNoMenu();
+    habilitarDragNoHeaderProfile();
   }
 
   function tentarInit() {
@@ -68412,9 +68580,8 @@ window.initOscilacaoEstoque = (function () {
   }
 
   if (openBtn)   openBtn.addEventListener('click', function () {
-    // atVippBtn é o botão de caminhão dentro do "Editar OS" (painel SAC/AT),
-    // então também é contexto SAC — precisa registrar em envios.solicitacoes.
-    _vippContextoSac = true;
+    // atVippBtn abre via fluxo AT (Abertura de OS).
+    _vippContextoSac = false;
     if (fillFromOsBtn) fillFromOsBtn.style.display = '';
     openModal();
   });
@@ -68610,7 +68777,13 @@ window.initOscilacaoEstoque = (function () {
             // No contexto SAC, a entrada direta em envios.solicitacoes vira fallback para evitar duplicidade.
             var _sepCriada = false;
             if (itensDecl.length > 0) {
-              _sepCriada = await criarSolicitacaoSeparacaoVipp(itensDecl, osNum, g('vippObservacao'), data.idConhecimento || null);
+              _sepCriada = await criarSolicitacaoSeparacaoVipp(
+                itensDecl,
+                osNum,
+                g('vippObservacao'),
+                data.idConhecimento || null,
+                _vippContextoSac ? 'SAC' : 'AT'
+              );
             }
             // Se aberto pelo painel SAC, cria entrada apenas quando a separação não gerou solicitação.
             if (_vippContextoSac && !_sepCriada) {
@@ -68638,7 +68811,7 @@ window.initOscilacaoEstoque = (function () {
   }
 
   // ── Cria Sol. de Separação automaticamente após VIPP bem-sucedido ───────────
-  async function criarSolicitacaoSeparacaoVipp(itensDecl, osNum, observacao, idVipp) {
+  async function criarSolicitacaoSeparacaoVipp(itensDecl, osNum, observacao, idVipp, origemVipp) {
     if (!itensDecl || !itensDecl.length) return false;
     var comentario = osNum ? ('OS' + osNum) : '';
     // Usuário logado
@@ -68699,7 +68872,8 @@ window.initOscilacaoEstoque = (function () {
           id_vipp:         idVipp  || null,
           conteudo:        itensDecl.length ? JSON.stringify(itensDecl.map(function(it) {
                              return { conteudo: it.descricao || '', quantidade: parseInt(it.quantidade, 10) || 1 };
-                           })) : null
+                           })) : null,
+          origem_vipp:     String(origemVipp || '').toUpperCase() === 'SAC' ? 'SAC' : 'AT'
         })
       });
       var _envData = await _envResp.json();
