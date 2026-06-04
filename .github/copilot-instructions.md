@@ -58,6 +58,35 @@
 - Separar commit de infraestrutura/limpeza de commit funcional.
 - Sempre informar comando de validação executado e impacto esperado.
 
+## Regras de economia de contexto
+Antes de executar qualquer tarefa:
+
+1. NÃO leia o projeto inteiro.
+2. NÃO faça varredura completa do repositório.
+3. Solicite apenas os arquivos estritamente necessários.
+4. Considere o restante do sistema inalterado, exceto se houver evidência de dependência direta.
+5. Analise primeiro os arquivos mais próximos da funcionalidade solicitada.
+6. Somente abra novos arquivos se identificar uma dependência real.
+7. Nunca releia arquivos já analisados na mesma tarefa.
+8. Forneça primeiro um plano de alteração indicando quais arquivos pretende modificar.
+9. Limite a análise inicial a no máximo 5 arquivos.
+10. Caso seja necessário ampliar a investigação, explique o motivo antes de continuar.
+
+Para alterações simples:
+
+- Trabalhe apenas com os arquivos diretamente envolvidos.
+- Não faça revisão arquitetural completa.
+- Não execute buscas globais desnecessárias.
+
+Para correções:
+
+- Priorize correção localizada.
+- Evite refatorações amplas.
+- Preserve a estrutura existente.
+
+Objetivo principal:
+Minimizar consumo de contexto e créditos, mantendo a menor alteração possível para atender ao requisito solicitado.
+
 ## Protocolo de commit (CRÍTICO — só commitar quando o usuário pedir)
 Este projeto é editado exclusivamente via GitHub Copilot Chat.
 
