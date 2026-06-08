@@ -18,6 +18,13 @@ const STATUS_EXECUTADO  = 'Executado';
 const STATUS_REPROVADO  = 'Reprovado';
 
 const TIPOS_VALIDOS = new Set(['ENT', 'SAI']);
+const MOTIVOS_OMIE_VALIDOS = new Set(['INV', 'OPS', 'PER', 'PDV']);
+const ERROS_OMIE_NAO_RETRYAVEIS = [
+  /valor unit.rio.+deve ser maior que zero/i,
+  /preenchimento inv.lido da tag\s*\[motivo\]/i,
+  /nenhum produto foi localizado/i,
+  /produto.+n.o encontrado/i
+];
 
 let schemaAjustesOk = false;
 
@@ -154,6 +161,9 @@ function sleep(ms) {
 
 function isErroOmieRetryable({ httpStatus, texto }) {
   const body = String(texto || '');
+  if (ERROS_OMIE_NAO_RETRYAVEIS.some((regex) => regex.test(body))) {
+    return false;
+  }
   return httpStatus === 425
     || httpStatus === 429
     || httpStatus >= 500
@@ -472,18 +482,41 @@ router.post('/reconciliar', express.json(), async (req, res) => {
   }
 });
 
-// GET /api/ajustes — lista últimos 500 ajustes
+// GET /api/ajustes — lista todos os pendentes + histórico recente
 router.get('/', async (_req, res) => {
   try {
     await ensureAjustesSchema();
     const { rows } = await dbQuery(
-      `SELECT id, tipo_operacao, codigo_produto, codigo, descricao, qtd,
+      `WITH pendentes AS (
+         SELECT id, tipo_operacao, codigo_produto, codigo, descricao, qtd,
+                local_estoque, local_nome, data_movimentacao, cmc, motivo, obs,
+                solicitante, status, aprovado_por, aprovado_em,
+                reprovado_por, reprovado_em, motivo_reprovacao, criado_em,
+                0 AS ordem_status
+           FROM mensagens.ajustes_estoque
+          WHERE lower(coalesce(status, '')) NOT IN ('executado', 'reprovado')
+       ),
+       historico AS (
+         SELECT id, tipo_operacao, codigo_produto, codigo, descricao, qtd,
+                local_estoque, local_nome, data_movimentacao, cmc, motivo, obs,
+                solicitante, status, aprovado_por, aprovado_em,
+                reprovado_por, reprovado_em, motivo_reprovacao, criado_em,
+                1 AS ordem_status
+           FROM mensagens.ajustes_estoque
+          WHERE lower(coalesce(status, '')) IN ('executado', 'reprovado')
+          ORDER BY id DESC
+          LIMIT 250
+       )
+       SELECT id, tipo_operacao, codigo_produto, codigo, descricao, qtd,
               local_estoque, local_nome, data_movimentacao, cmc, motivo, obs,
               solicitante, status, aprovado_por, aprovado_em,
               reprovado_por, reprovado_em, motivo_reprovacao, criado_em
-         FROM mensagens.ajustes_estoque
-        ORDER BY id DESC
-        LIMIT 500`
+         FROM (
+           SELECT * FROM pendentes
+           UNION ALL
+           SELECT * FROM historico
+         ) itens
+        ORDER BY ordem_status, id DESC`
     );
     res.json({ ok: true, registros: rows });
   } catch (err) {
