@@ -15997,6 +15997,9 @@ async function initSolicitacaoProdutoSchema() {
     }
 
     await pool.query(`ALTER TABLE solicitacao_produto.itens_solicitados ADD COLUMN IF NOT EXISTS motivo TEXT`);
+    await pool.query(`ALTER TABLE solicitacao_produto.itens_solicitados ADD COLUMN IF NOT EXISTS quantidade_solicitada NUMERIC(18,4)`);
+    await pool.query(`ALTER TABLE solicitacao_produto.itens_solicitados ADD COLUMN IF NOT EXISTS quantidade_separada NUMERIC(18,4)`);
+    await pool.query(`ALTER TABLE solicitacao_produto.solicitacoes_separacao ADD COLUMN IF NOT EXISTS quantidade_original NUMERIC(18,4)`);
 
     await pool.query(`
       CREATE TABLE IF NOT EXISTS solicitacao_produto.movimentacoes_kanban_itens (
@@ -16018,6 +16021,13 @@ async function initSolicitacaoProdutoSchema() {
   }
 }
 
+// Colunas incrementais — idempotente, pode rodar a cada requisição
+async function ensureSolicitacaoProdutoQtyColumns() {
+  await pool.query(`ALTER TABLE solicitacao_produto.itens_solicitados ADD COLUMN IF NOT EXISTS quantidade_solicitada NUMERIC(18,4)`);
+  await pool.query(`ALTER TABLE solicitacao_produto.itens_solicitados ADD COLUMN IF NOT EXISTS quantidade_separada NUMERIC(18,4)`);
+  await pool.query(`ALTER TABLE solicitacao_produto.solicitacoes_separacao ADD COLUMN IF NOT EXISTS quantidade_original NUMERIC(18,4)`);
+}
+
 // Inicializa schema na primeira requisição
 let schemaMigrated = false;
 async function ensureSchemaMigrated() {
@@ -16025,6 +16035,7 @@ async function ensureSchemaMigrated() {
     await initSolicitacaoProdutoSchema();
     schemaMigrated = true;
   }
+  await ensureSolicitacaoProdutoQtyColumns();
 }
 
 async function registrarMovimentacaoKanbanItens(client, solicIds, statusDestino, req, observacao = null) {
@@ -16232,6 +16243,7 @@ app.patch('/api/logistica/itens_solicitados/reverter-pendente', async (req, res)
 
 // PATCH /api/logistica/itens_solicitados/reverter-separacao — Reverte 'Separado' → 'Separação'
 app.patch('/api/logistica/itens_solicitados/reverter-separacao', async (req, res) => {
+  const client = await pool.connect();
   try {
     await ensureSchemaMigrated();
     const id_user = req.session?.user?.id;
@@ -16241,16 +16253,61 @@ app.patch('/api/logistica/itens_solicitados/reverter-separacao', async (req, res
       return res.status(400).json({ ok: false, error: 'solic_ids inválido.' });
     const ids = solic_ids.map(id => parseInt(id, 10)).filter(id => !isNaN(id));
     if (!ids.length) return res.status(400).json({ ok: false, error: 'Nenhum ID válido.' });
-    await registrarMovimentacaoKanbanItens(pool, ids, 'Separação', req);
-    await pool.query(
-      `UPDATE solicitacao_produto.itens_solicitados SET status = 'Separação' WHERE id = ANY($1::bigint[]) AND status = 'Separado'`,
+
+    await client.query('BEGIN');
+
+    // Restaura quantidade original do pedido no carrinho (quando houve Informar qtd)
+    const { rows: restaurados } = await client.query(
+      `UPDATE logistica.carrinho c
+          SET quantidade = i.quantidade_solicitada
+         FROM solicitacao_produto.itens_solicitados i
+        WHERE i.id_carr = c.id
+          AND i.id = ANY($1::bigint[])
+          AND i.status = 'Separado'
+          AND i.quantidade_solicitada IS NOT NULL
+      RETURNING i.id AS solic_id, c.id AS carr_id, i.quantidade_solicitada AS qty_restaurada`,
       [ids]
     );
-    console.log(`[logistica/reverter-separacao] ${ids.length} item(ns) revertido(s) para Separação por user ${id_user}`);
-    res.json({ ok: true });
+
+    // Reverte solicitacoes_separacao para quantidade_original, se existir
+    await client.query(
+      `UPDATE solicitacao_produto.solicitacoes_separacao ss
+          SET quantidade = ss.quantidade_original,
+              quantidade_original = NULL
+        WHERE ss.quantidade_original IS NOT NULL
+          AND ss.id IN (
+            SELECT ss2.id
+              FROM solicitacao_produto.solicitacoes_separacao ss2
+              JOIN solicitacao_produto.itens_solicitados i ON i.id = ANY($1::bigint[])
+              JOIN logistica.carrinho c ON c.id = i.id_carr
+             WHERE ss2.codigo_produto = c.codigo_produto
+               AND ss2.id_user = c.id_user
+               AND ss2.criado_em BETWEEN (c.criado_em - INTERVAL '10 minutes')
+                                     AND (c.criado_em + INTERVAL '10 minutes')
+          )`,
+      [ids]
+    );
+
+    await registrarMovimentacaoKanbanItens(client, ids, 'Separação', req);
+    await client.query(
+      `UPDATE solicitacao_produto.itens_solicitados
+          SET status = 'Separação',
+              quantidade_solicitada = NULL,
+              quantidade_separada = NULL
+        WHERE id = ANY($1::bigint[]) AND status = 'Separado'`,
+      [ids]
+    );
+
+    await client.query('COMMIT');
+    console.log(`[logistica/reverter-separacao] ${ids.length} item(ns) revertido(s) para Separação por user ${id_user}` +
+      (restaurados.length ? `; qty restaurada em ${restaurados.length} carrinho(s)` : ''));
+    res.json({ ok: true, restaurados });
   } catch (err) {
+    try { await client.query('ROLLBACK'); } catch (_) {}
     console.error('[logistica/reverter-separacao] erro:', err);
     res.status(500).json({ ok: false, error: String(err?.message || err) });
+  } finally {
+    client.release();
   }
 });
 
@@ -16287,7 +16344,12 @@ app.patch('/api/logistica/itens_solicitados/separar', async (req, res) => {
     const ids = solic_ids.map(id => parseInt(id, 10)).filter(id => !isNaN(id));
     await registrarMovimentacaoKanbanItens(pool, ids, 'Separado', req);
     await pool.query(
-      `UPDATE solicitacao_produto.itens_solicitados SET status = 'Separado' WHERE id = ANY($1::bigint[])`, [ids]
+      `UPDATE solicitacao_produto.itens_solicitados
+          SET status = 'Separado',
+              quantidade_solicitada = NULL,
+              quantidade_separada = NULL
+        WHERE id = ANY($1::bigint[])`,
+      [ids]
     );
     res.json({ ok: true });
   } catch (err) {
@@ -16295,6 +16357,59 @@ app.patch('/api/logistica/itens_solicitados/separar', async (req, res) => {
     res.status(500).json({ ok: false, error: String(err?.message || err) });
   }
 });
+
+// Atualiza solicitacoes_separacao.quantidade pareando com o carrinho original do envio
+async function syncSolicitacoesSeparacaoQuantidade(client, carrRow, novaQty, qtyOriginal = null) {
+  if (!carrRow) return;
+  const oldQty = qtyOriginal != null ? parseFloat(qtyOriginal) : parseFloat(carrRow.quantidade);
+  if (!Number.isFinite(oldQty)) return;
+  const nova = parseFloat(novaQty);
+  const houveAlteracao = Number.isFinite(nova) && Math.abs(oldQty - nova) > 0.0001;
+  await client.query(`
+    UPDATE solicitacao_produto.solicitacoes_separacao ss
+       SET quantidade = $1,
+           quantidade_original = CASE
+             WHEN $6 THEN COALESCE(ss.quantidade_original, $4::numeric)
+             ELSE ss.quantidade_original
+           END
+     WHERE ss.id = (
+       SELECT ss2.id
+         FROM solicitacao_produto.solicitacoes_separacao ss2
+        WHERE ss2.codigo_produto = $2
+          AND ss2.id_user = $3
+          AND (
+            ABS(ss2.quantidade - $4::numeric) < 0.0001
+            OR ABS(COALESCE(ss2.quantidade_original, ss2.quantidade) - $4::numeric) < 0.0001
+          )
+          AND ss2.criado_em BETWEEN ($5::timestamptz - INTERVAL '10 minutes')
+                                AND ($5::timestamptz + INTERVAL '10 minutes')
+        ORDER BY ss2.id DESC
+        LIMIT 1
+     )
+  `, [novaQty, carrRow.codigo_produto, carrRow.id_user, oldQty, carrRow.criado_em, houveAlteracao]);
+}
+
+async function registrarAlteracaoQuantidadeItem(client, { solicIds, carrId, qtyOriginal, qtySeparada }) {
+  const orig = parseFloat(qtyOriginal);
+  const sep  = parseFloat(qtySeparada);
+  if (!Number.isFinite(orig) || !Number.isFinite(sep) || Math.abs(orig - sep) < 0.0001) return;
+  const sIds = (solicIds || []).map(id => parseInt(id, 10)).filter(id => !isNaN(id));
+  if (sIds.length) {
+    await client.query(
+      `UPDATE solicitacao_produto.itens_solicitados
+          SET quantidade_solicitada = $1, quantidade_separada = $2
+        WHERE id = ANY($3::bigint[])`,
+      [orig, sep, sIds]
+    );
+  } else if (carrId) {
+    await client.query(
+      `UPDATE solicitacao_produto.itens_solicitados
+          SET quantidade_solicitada = $1, quantidade_separada = $2
+        WHERE id_carr = $3`,
+      [orig, sep, carrId]
+    );
+  }
+}
 
 // POST /api/logistica/itens_solicitados/separar-parcial - Separa qty parcial, clona carrinho
 // Lógica: original SEP recebe a qty separada → status Separado
@@ -16313,6 +16428,9 @@ app.post('/api/logistica/itens_solicitados/separar-parcial', async (req, res) =>
 
     await client.query('BEGIN');
     await client.query(`ALTER TABLE solicitacao_produto.itens_solicitados ADD COLUMN IF NOT EXISTS observacao TEXT`);
+    await client.query(`ALTER TABLE solicitacao_produto.itens_solicitados ADD COLUMN IF NOT EXISTS quantidade_solicitada NUMERIC(18,4)`);
+    await client.query(`ALTER TABLE solicitacao_produto.itens_solicitados ADD COLUMN IF NOT EXISTS quantidade_separada NUMERIC(18,4)`);
+    await client.query(`ALTER TABLE solicitacao_produto.solicitacoes_separacao ADD COLUMN IF NOT EXISTS quantidade_original NUMERIC(18,4)`);
 
     const { rows: carrs } = await client.query(
       `SELECT * FROM logistica.carrinho WHERE id = ANY($1::bigint[]) ORDER BY criado_em ASC`, [cIds]
@@ -16322,15 +16440,43 @@ app.post('/api/logistica/itens_solicitados/separar-parcial', async (req, res) =>
     const qtyTotal     = carrs.reduce((s, c) => s + parseFloat(c.quantidade), 0);
     const qtyRemainder = qtyTotal - qtySep; // o que sobra volta para a fila
 
-    // Se não há restante, apenas marca tudo como Separado sem novo SEP
+    // Separação total ou quantidade maior que solicitada (embalagem fechada)
     if (qtyRemainder <= 0.0001) {
+      const primaryCarr = carrs[0];
+      const primaryId   = primaryCarr.id;
+
+      await syncSolicitacoesSeparacaoQuantidade(client, primaryCarr, qtySep, qtyTotal);
+      await registrarAlteracaoQuantidadeItem(client, {
+        solicIds: sIds, carrId: primaryId, qtyOriginal: qtyTotal, qtySeparada: qtySep
+      });
+      await client.query(
+        `UPDATE logistica.carrinho SET quantidade = $1 WHERE id = $2`,
+        [qtySep, primaryId]
+      );
+
+      if (cIds.length > 1) {
+        const extraIds = cIds.filter(id => id !== primaryId);
+        await client.query(
+          `DELETE FROM solicitacao_produto.itens_solicitados WHERE id_carr = ANY($1::bigint[])`,
+          [extraIds]
+        );
+        await client.query(`DELETE FROM logistica.carrinho WHERE id = ANY($1::bigint[])`, [extraIds]);
+      }
+
       if (sIds.length > 0) {
         await client.query(
-          `UPDATE solicitacao_produto.itens_solicitados SET status = 'Separado' WHERE id = ANY($1::bigint[])`, [sIds]
+          `UPDATE solicitacao_produto.itens_solicitados SET status = 'Separado' WHERE id = ANY($1::bigint[])`,
+          [sIds]
+        );
+      } else {
+        await client.query(
+          `UPDATE solicitacao_produto.itens_solicitados SET status = 'Separado' WHERE id_carr = $1`,
+          [primaryId]
         );
       }
+
       await client.query('COMMIT');
-      console.log(`[separar-parcial] separação total (via parcial) de ${carrs[0].codigo_produto} por user ${id_user}`);
+      console.log(`[separar-parcial] separação total/qty ajustada (${qtySep}) de ${primaryCarr.codigo_produto} por user ${id_user}`);
       return res.json({ ok: true, new_n_solic: null });
     }
 
@@ -16400,9 +16546,30 @@ app.post('/api/logistica/itens_solicitados/separar-parcial', async (req, res) =>
 
     // Entries originais remanescentes (com qtySep) → marcados como Separado
     if (keptIds.length > 0) {
+      const primaryKeptId = keptIds[0];
+      const primaryKept   = carrs.find(c => c.id === primaryKeptId) || base;
+
+      if (keptIds.length > 1) {
+        const extraKept = keptIds.slice(1);
+        await client.query(
+          `DELETE FROM solicitacao_produto.itens_solicitados WHERE id_carr = ANY($1::bigint[])`,
+          [extraKept]
+        );
+        await client.query(`DELETE FROM logistica.carrinho WHERE id = ANY($1::bigint[])`, [extraKept]);
+      }
+
       await client.query(
-        `UPDATE solicitacao_produto.itens_solicitados SET status = 'Separado' WHERE id_carr = ANY($1::bigint[])`,
-        [keptIds]
+        `UPDATE logistica.carrinho SET quantidade = $1 WHERE id = $2`,
+        [qtySep, primaryKeptId]
+      );
+      await syncSolicitacoesSeparacaoQuantidade(client, primaryKept, qtySep, qtyTotal);
+      await registrarAlteracaoQuantidadeItem(client, {
+        solicIds: sIds, carrId: primaryKeptId, qtyOriginal: qtyTotal, qtySeparada: qtySep
+      });
+
+      await client.query(
+        `UPDATE solicitacao_produto.itens_solicitados SET status = 'Separado' WHERE id_carr = $1`,
+        [primaryKeptId]
       );
     }
 
@@ -16485,9 +16652,42 @@ app.get('/api/logistica/kanban', async (req, res) => {
   }
 });
 
+async function _logisticaFetchEnderecoPpMap(codigos) {
+  const list = [...new Set((codigos || []).map(s => String(s || '').trim()).filter(Boolean))];
+  if (!list.length) return {};
+  const { rows } = await pool.query(
+    `SELECT codigo, completo, rua, andar, edificio, apartamento
+       FROM logistica."Endereço_pp"
+      WHERE codigo = ANY($1::text[])`,
+    [list]
+  );
+  const dados = {};
+  for (const row of rows) {
+    const cod = String(row.codigo || '').trim();
+    if (!cod) continue;
+    if (!dados[cod]) dados[cod] = [];
+    dados[cod].push({
+      completo: row.completo || null,
+      rua: row.rua || null,
+      andar: row.andar || null,
+      edificio: row.edificio || null,
+      apartamento: row.apartamento || null
+    });
+  }
+  return dados;
+}
+
+function _logisticaAttachEnderecoPp(itens, enderecoMap) {
+  return (itens || []).map(it => {
+    const cod = String(it.codigo_produto || '').trim();
+    return { ...it, endereco_pp: (cod && enderecoMap?.[cod]) ? enderecoMap[cod] : [] };
+  });
+}
+
 // GET /api/logistica/kanban/itens?n_solic=SEP-1000 — Itens detalhados de uma SEP (tooltip/modal)
 app.get('/api/logistica/kanban/itens', async (req, res) => {
   try {
+    await ensureSchemaMigrated();
     const id_user   = req.session?.user?.id;
     if (!id_user) return res.status(401).json({ ok: false, error: 'Não autenticado.' });
     const { n_solic } = req.query;
@@ -16496,9 +16696,12 @@ app.get('/api/logistica/kanban/itens', async (req, res) => {
     if (n_solic) {
       // Itens de uma SEP específica
       const { rows } = await pool.query(`
-        SELECT c.id AS carr_id, i.id AS solic_id, i.status, i.observacao, i.motivo, i.cod_local, i.nome_local,
+        SELECT DISTINCT ON (i.id)
+               c.id AS carr_id, i.id AS solic_id, i.status, i.observacao, i.motivo, i.cod_local, i.nome_local,
                c.codigo_produto, c.descricao, c.unidade,
                c.quantidade::numeric AS quantidade,
+               i.quantidade_solicitada::numeric AS quantidade_solicitada,
+               i.quantidade_separada::numeric AS quantidade_separada,
                c.data_prevista::text, c.horario, c.criado_em::text,
                c.cod_omie,
                COALESCE(c.retirada_por, c.nome_user) AS nome_user,
@@ -16507,7 +16710,7 @@ app.get('/api/logistica/kanban/itens', async (req, res) => {
           JOIN logistica.carrinho c ON c.id = i.id_carr
           LEFT JOIN solicitacao_produto.Registro_troca rt ON rt.id_item_original = i.id
          WHERE i.n_solic = $1
-         ORDER BY c.criado_em ASC, rt.data_troca DESC
+         ORDER BY i.id, c.criado_em ASC, rt.data_troca DESC NULLS LAST
       `, [n_solic]);
 
       let itensDerivados = [];
@@ -16517,6 +16720,8 @@ app.get('/api/logistica/kanban/itens', async (req, res) => {
              SELECT c.id AS carr_id, i.id AS solic_id, i.n_solic, i.status, i.observacao, i.motivo, i.cod_local, i.nome_local,
                  c.codigo_produto, c.descricao, c.unidade,
                  c.quantidade::numeric AS quantidade,
+                 i.quantidade_solicitada::numeric AS quantidade_solicitada,
+                 i.quantidade_separada::numeric AS quantidade_separada,
                  c.data_prevista::text, c.horario, c.criado_em::text,
                  c.cod_omie,
                  COALESCE(c.retirada_por, c.nome_user) AS nome_user,
@@ -16530,7 +16735,16 @@ app.get('/api/logistica/kanban/itens', async (req, res) => {
         itensDerivados = derivRows;
       }
 
-      return res.json({ ok: true, itens: rows, itens_derivados: itensDerivados });
+      const allCodigos = [...new Set([
+        ...rows.map(r => r.codigo_produto),
+        ...itensDerivados.map(r => r.codigo_produto)
+      ].filter(Boolean))];
+      const enderecoMap = await _logisticaFetchEnderecoPpMap(allCodigos);
+      return res.json({
+        ok: true,
+        itens: _logisticaAttachEnderecoPp(rows, enderecoMap),
+        itens_derivados: _logisticaAttachEnderecoPp(itensDerivados, enderecoMap)
+      });
     } else {
       // Carrinho sem SEP
       const { rows } = await pool.query(`
@@ -16553,7 +16767,8 @@ app.get('/api/logistica/kanban/itens', async (req, res) => {
            )
          ORDER BY c.criado_em ASC
       `, [id_user]);
-      return res.json({ ok: true, itens: rows });
+      const enderecoMap = await _logisticaFetchEnderecoPpMap(rows.map(r => r.codigo_produto));
+      return res.json({ ok: true, itens: _logisticaAttachEnderecoPp(rows, enderecoMap) });
     }
   } catch (err) {
     console.error('[logistica/kanban/itens] erro:', err);
@@ -16703,6 +16918,34 @@ app.patch('/api/logistica/itens_solicitados/aguardando-retirada', async (req, re
     res.json({ ok: true });
   } catch (err) {
     console.error('[logistica/aguardando-retirada] erro:', err);
+    res.status(500).json({ ok: false, error: String(err?.message || err) });
+  }
+});
+
+// PATCH /api/logistica/itens_solicitados/reverter-conferido — Reverte 'Aguardando retirada' → 'Separado'
+app.patch('/api/logistica/itens_solicitados/reverter-conferido', async (req, res) => {
+  try {
+    await ensureSchemaMigrated();
+    const id_user = req.session?.user?.id;
+    if (!id_user) return res.status(401).json({ ok: false, error: 'Não autenticado.' });
+    const { solic_ids } = req.body;
+    if (!Array.isArray(solic_ids) || !solic_ids.length)
+      return res.status(400).json({ ok: false, error: 'solic_ids inválido.' });
+    const ids = solic_ids.map(id => parseInt(id, 10)).filter(id => !isNaN(id));
+    if (!ids.length) return res.status(400).json({ ok: false, error: 'Nenhum ID válido.' });
+
+    await registrarMovimentacaoKanbanItens(pool, ids, 'Separado', req);
+    const { rowCount } = await pool.query(
+      `UPDATE solicitacao_produto.itens_solicitados
+          SET status = 'Separado'
+        WHERE id = ANY($1::bigint[]) AND status = 'Aguardando retirada'`,
+      [ids]
+    );
+
+    console.log(`[logistica/reverter-conferido] ${rowCount} item(ns) revertido(s) para Separado por user ${id_user}`);
+    res.json({ ok: true, revertidos: rowCount });
+  } catch (err) {
+    console.error('[logistica/reverter-conferido] erro:', err);
     res.status(500).json({ ok: false, error: String(err?.message || err) });
   }
 });
@@ -17249,6 +17492,20 @@ app.get('/api/logistica/estoque/batch', async (req, res) => {
     res.json({ ok: true, dados, minimos });
   } catch (err) {
     console.error('[logistica/estoque/batch] erro:', err);
+    res.status(500).json({ ok: false, error: String(err?.message || err) });
+  }
+});
+
+// Endereçamento PP por código de produto (logistica."Endereço_pp")
+app.get('/api/logistica/endereco-pp/batch', async (req, res) => {
+  try {
+    const codigos = (req.query.codigos || '').split(',').map(s => s.trim()).filter(Boolean);
+    if (!codigos.length) return res.json({ ok: true, dados: {} });
+
+    const dados = await _logisticaFetchEnderecoPpMap(codigos);
+    res.json({ ok: true, dados });
+  } catch (err) {
+    console.error('[logistica/endereco-pp/batch] erro:', err);
     res.status(500).json({ ok: false, error: String(err?.message || err) });
   }
 });

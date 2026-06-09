@@ -197,6 +197,38 @@ function _solFmtQty(q) {
   const n = parseFloat(q);
   return Number.isInteger(n) ? String(n) : n.toFixed(3).replace(/\.?0+$/, '');
 }
+function _solBtnLoading(btn, label) {
+  if (!btn || btn.dataset.solLoading === '1') return;
+  btn.dataset.solOrigHtml = btn.innerHTML;
+  btn.dataset.solLoading = '1';
+  btn.disabled = true;
+  btn.innerHTML = `<i class="fa-solid fa-spinner fa-spin" style="margin-right:3px;"></i>${label != null ? label : '...'}`;
+}
+function _solBtnRestore(btn, fallbackHtml) {
+  if (!btn) return;
+  btn.disabled = false;
+  btn.dataset.solLoading = '0';
+  btn.innerHTML = btn.dataset.solOrigHtml || fallbackHtml || '';
+  delete btn.dataset.solOrigHtml;
+}
+function _solRowLoading(row, loading) {
+  if (!row) return;
+  row.querySelectorAll('button').forEach(b => { b.disabled = !!loading; });
+  const qtyWrap = row.querySelector('.sep-qty-wrap');
+  if (qtyWrap) qtyWrap.style.opacity = loading ? '0.55' : '1';
+  let sp = row.querySelector('.sep-row-loading');
+  if (loading) {
+    if (!sp && qtyWrap) {
+      sp = document.createElement('span');
+      sp.className = 'sep-row-loading';
+      sp.style.cssText = 'display:inline-flex;align-items:center;margin-left:4px;';
+      sp.innerHTML = '<i class="fa-solid fa-spinner fa-spin" style="color:#93c5fd;font-size:.72rem;"></i>';
+      qtyWrap.appendChild(sp);
+    }
+  } else {
+    sp?.remove();
+  }
+}
 function _solFmtDataPrevista(d) {
   if (!d) return '';
   const s = String(d).substring(0, 10); // garante "YYYY-MM-DD"
@@ -224,6 +256,84 @@ function _solStatusBadge(status) {
   };
   const s = map[status] || { color: '#6b7280', bg: '#1f2937', label: status || '?' };
   return `<span style="display:inline-block;padding:2px 7px;border-radius:20px;font-size:.68rem;font-weight:700;color:${s.color};background:${s.bg};border:1px solid ${s.color}33;">${s.label}</span>`;
+}
+function _solKanbanLoading(show, label) {
+  const id = 'solKanbanLoadingOverlay';
+  if (!show) {
+    document.getElementById(id)?.remove();
+    return;
+  }
+  document.getElementById(id)?.remove();
+  const el = document.createElement('div');
+  el.id = id;
+  el.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:10045;display:flex;align-items:center;justify-content:center;';
+  el.innerHTML = `<div style="background:#1c1c1c;border:1px solid #333;border-radius:12px;padding:22px 30px;display:flex;flex-direction:column;align-items:center;gap:10px;box-shadow:0 12px 40px rgba(0,0,0,.5);">
+    <i class="fa-solid fa-spinner fa-spin" style="font-size:1.6rem;color:#f59e0b;"></i>
+    <span style="color:#d1d5db;font-size:.85rem;font-weight:600;">${label || 'Carregando...'}</span>
+  </div>`;
+  document.body.appendChild(el);
+}
+async function _solCarregarEnderecoBatch(codigos) {
+  const list = [...new Set((codigos || []).map(c => String(c || '').trim()).filter(Boolean))];
+  if (!list.length) return {};
+  try {
+    const r = await fetch('/api/logistica/endereco-pp/batch?codigos=' + encodeURIComponent(list.join(',')), { credentials: 'include' });
+    const d = await r.json();
+    return d.ok ? (d.dados || {}) : {};
+  } catch (_) {
+    return {};
+  }
+}
+function _solMergeEnderecoBatch(itens, batch) {
+  const map = { ...(batch || {}) };
+  for (const it of (itens || [])) {
+    const cod = String(it.codigo_produto || '').trim();
+    if (!cod) continue;
+    const ep = it.endereco_pp;
+    if (Array.isArray(ep) && ep.length && (!map[cod] || !map[cod].length)) map[cod] = ep;
+  }
+  return map;
+}
+function _solEnderecamentoHtml(codigo, enderecoMap, itemFallback) {
+  const cod = String(codigo || '').trim();
+  let registros = cod ? enderecoMap?.[cod] : null;
+  if ((!Array.isArray(registros) || !registros.length) && cod && enderecoMap) {
+    const altKey = Object.keys(enderecoMap).find(k => String(k).trim() === cod);
+    if (altKey) registros = enderecoMap[altKey];
+  }
+  if ((!Array.isArray(registros) || !registros.length) && itemFallback) {
+    const fromItem = itemFallback.endereco_pp || itemFallback.enderecos_pp;
+    if (Array.isArray(fromItem) && fromItem.length) registros = fromItem;
+  }
+  if (!Array.isArray(registros) || !registros.length) return '';
+  const textos = registros.map(ep =>
+    String(ep.completo || '').trim()
+      || [ep.rua, ep.andar, ep.edificio, ep.apartamento].filter(Boolean).join(' · ')
+  ).filter(Boolean);
+  if (!textos.length) return '';
+  return `<div style="padding:6px 8px;background:#1a1508;border:1px solid #854d0e55;border-radius:8px;">
+    <div style="font-size:.60rem;color:#fbbf24;font-weight:700;text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px;">Endereçamento</div>
+    ${textos.map(t => `<div style="font-size:.70rem;color:#fde68a;font-weight:700;word-break:break-word;line-height:1.45;padding:2px 0;">
+      <i class="fa-solid fa-map-pin" style="margin-right:4px;color:#f59e0b;font-size:.62rem;"></i>${t}
+    </div>`).join('')}
+  </div>`;
+}
+function _solDestinoHtml(it) {
+  const endList = it?.enderecos_pp;
+  if (endList && Array.isArray(endList) && endList.length > 0) {
+    return endList.map(e => `
+      <div style="display:inline-flex;flex-direction:column;gap:1px;background:#1e293b;border:1px solid #334155;border-radius:4px;padding:3px 6px;font-size:.63rem;line-height:1.5;white-space:nowrap;">
+        <span><span style="color:#6b7280;">rua:</span> <span style="color:#67e8f9;font-weight:700;">${e.rua || '—'}</span></span>
+        <span><span style="color:#6b7280;">andar:</span> <span style="color:#67e8f9;font-weight:700;">${e.andar || '—'}</span></span>
+        <span><span style="color:#6b7280;">edif.:</span> <span style="color:#67e8f9;font-weight:700;">${e.edificio || '—'}</span></span>
+        <span><span style="color:#6b7280;">apto:</span> <span style="color:#67e8f9;font-weight:700;">${e.apartamento || '—'}</span></span>
+      </div>`).join('');
+  }
+  if (it?.nome_local || it?.cod_local) {
+    const destino = it.nome_local || it.cod_local;
+    return `<div style="font-size:.68rem;color:#c4b5fd;font-weight:700;">${destino}</div>`;
+  }
+  return `<div style="font-size:.65rem;color:#6b7280;font-style:italic;">Não endereçado</div>`;
 }
 
 // Feedback global curto para qualquer botão clicado.
@@ -301,7 +411,7 @@ function _solGetMiniImgHtml(codigoProduto, descricaoProduto) {
   return `<img src="/imagens_produtos/${codigo}.jpg" alt="${escapeHtml(descricao || codigo)}" style="width:100%;height:100%;object-fit:cover;" onerror="this.style.display='none'">`;
 }
 
-function _solRenderItemRow(item, mode) {
+function _solRenderItemRow(item, mode, enderecoMap) {
   const solicIds = Array.isArray(item.solic_ids) ? item.solic_ids : (item.solic_id ? [item.solic_id] : []);
   const carrIds  = Array.isArray(item.carr_ids)  ? item.carr_ids  : (item.carr_id  ? [item.carr_id]  : []);
   const qty      = parseFloat(item.quantidade) || 0;
@@ -310,6 +420,7 @@ function _solRenderItemRow(item, mode) {
   const horario  = item.horario || '';
   const dataHora = [dataPrev, horario].filter(Boolean).join(' ');
   const op = mode === 'disabled' ? 'opacity:.45;pointer-events:none;' : '';
+  const enderecamentoLinha = enderecoMap ? _solEnderecamentoHtml(item.codigo_produto, enderecoMap) : '';
   let btnHtml = '';
   if (mode === 'separado-btn') {
     btnHtml = `
@@ -344,6 +455,7 @@ function _solRenderItemRow(item, mode) {
           <span>${item.unidade || 'UN'}</span>
           ${_solStatusBadge(item.status || 'pendente')}
         </div>
+        ${enderecamentoLinha ? `<div style="margin-top:5px;">${enderecamentoLinha}</div>` : ''}
       </div>
       ${btnHtml}
     </div>`;
@@ -394,6 +506,15 @@ window._updateTabCounters = async function() {
     console.warn('[UPDATE-COUNTERS] Erro geral:', err);
   }
 };
+
+function _solBuildKanbanItensUrl(nSolic, opts = {}) {
+  const params = new URLSearchParams();
+  if (nSolic) params.set('n_solic', nSolic);
+  if (opts.includeDerivados) params.set('include_derivados', '1');
+  if (opts.escopoItens === 'global') params.set('escopo', 'global');
+  const query = params.toString();
+  return `/api/logistica/kanban/itens${query ? `?${query}` : ''}`;
+}
 
 // Carrega e renderiza a aba de solicitações como kanban do separador
 window._loadSolicitacoesTab = async function() {
@@ -512,27 +633,49 @@ window._loadSolicitacoesTab = async function() {
       cardEl.addEventListener('click', async () => {
         if (cardEl._loading) return;
         if (acao === 'iniciar') {
-          _abrirModalAguardandoRetiradaSep(nSolic, {
+          await _abrirModalAguardandoRetiradaSep(nSolic, {
             tituloColuna: 'Solicitado',
-            permitirRecebido: false
+            permitirRecebido: false,
+            escopoItens: 'global'
           });
           return;
         }
         cardEl._loading = true;
+        _solKanbanLoading(true, 'Carregando itens...');
         try {
-          const ri = await fetch(`/api/logistica/kanban/itens?n_solic=${encodeURIComponent(nSolic)}`, { credentials: 'include' });
+          const ri = await fetch(_solBuildKanbanItensUrl(nSolic, { escopoItens: 'global' }), { credentials: 'include' });
           const di = await ri.json();
           if (!di.ok) throw new Error(di.error || 'Erro ao buscar itens');
           const itens = (di.itens || []).map(it => ({ ...it, solic_ids: [it.solic_id], carr_ids: [it.carr_id] }));
           if (!itens.length) throw new Error('Nenhum item encontrado');
 
           if (acao === 'modal') {
-            _abrirModalSeparacao({ nome_user: itens[0]?.nome_user || nSolic, n_solic: nSolic, itens, origem_status: cardEl.dataset.colStatus || '' }, []);
+            const codigos = [...new Set(itens.map(it => it.codigo_produto).filter(Boolean))];
+            let preloaded = {};
+            if (codigos.length) {
+              try {
+                const [re, endMap] = await Promise.all([
+                  fetch('/api/logistica/estoque/batch?codigos=' + encodeURIComponent(codigos.join(',')), { credentials: 'include' }),
+                  _solCarregarEnderecoBatch(codigos)
+                ]);
+                const de = await re.json();
+                preloaded = {
+                  estoqueBatch: de.ok ? (de.dados || {}) : {},
+                  enderecoBatch: _solMergeEnderecoBatch(itens, endMap || {})
+                };
+              } catch (_) {}
+            }
+            await _abrirModalSeparacao(
+              { nome_user: itens[0]?.nome_user || nSolic, n_solic: nSolic, itens, origem_status: cardEl.dataset.colStatus || '', escopoItens: 'global' },
+              [],
+              preloaded
+            );
           }
         } catch (err) {
           alert('Erro: ' + err.message);
         } finally {
           cardEl._loading = false;
+          _solKanbanLoading(false);
         }
       });
     });
@@ -561,7 +704,7 @@ window._loadSolicitacoesTab = async function() {
             .catch(e => console.warn('[VIPP] background gerar-etiqueta:', e));
 
           // ── Busca solic_ids e inicia separação normalmente ───────────────
-          const ri = await fetch(`/api/logistica/kanban/itens?n_solic=${encodeURIComponent(nSolic)}`, { credentials: 'include' });
+          const ri = await fetch(_solBuildKanbanItensUrl(nSolic, { escopoItens: 'global' }), { credentials: 'include' });
           const di = await ri.json();
           if (!di.ok) throw new Error(di.error || 'Erro ao buscar itens da SEP.');
           const solicIds = (di.itens || []).map(it => parseInt(it.solic_id, 10)).filter(id => !Number.isNaN(id));
@@ -596,37 +739,75 @@ window._loadSolicitacoesTab = async function() {
 };
 
 // Modal de separação — agrega por cod_omie, toggle Separado/Separação, parcial gera SEP.X
-function _abrirModalSeparacao(grupoAtual, gruposConflito) {
+async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) {
   document.getElementById('modalSeparacaoLogistica')?.remove();
   const origemStatus = String(grupoAtual?.origem_status || '').trim();
   const refreshAoFechar = origemStatus === 'Solicitado';
   let houveMudanca = false;
 
+  const STATUS_TRABALHO_MODAL_SEP = new Set(['Separação', 'Em Separação', 'Separado', 'Stund-by']);
+  function _itensVisiveisModalSep(itens) {
+    return (itens || []).filter(it => {
+      const st = String(it.status || '');
+      return STATUS_TRABALHO_MODAL_SEP.has(st) || st === 'Aguardando retirada';
+    });
+  }
+
   // Agrega itens por cod_omie (fallback: codigo_produto), somando quantidades
   function _aggItens(itens) {
     const map = new Map();
+    const seenSolic = new Set();
     itens.forEach(it => {
-      const key = it.cod_omie || it.codigo_produto;
+      const sid = it.solic_id;
+      const sidKey = sid != null ? String(sid) : null;
+      if (sidKey && seenSolic.has(sidKey)) return;
+      if (sidKey) seenSolic.add(sidKey);
+
+      const st = String(it.status || '');
+      const bucket = st === 'Aguardando retirada' ? 'conferido' : 'trabalho';
+      const key = `${it.cod_omie || it.codigo_produto}|${bucket}`;
       if (!map.has(key)) {
-        map.set(key, { ...it, solic_ids: [], carr_ids: [], quantidade: 0, _allSep: true });
+        map.set(key, {
+          ...it,
+          solic_ids: [],
+          carr_ids: [],
+          quantidade: 0,
+          quantidade_solicitada: null,
+          quantidade_separada: null,
+          _allSep: true,
+          _isConferido: bucket === 'conferido'
+        });
       }
       const a = map.get(key);
       if (!a.nome_local && it.nome_local) a.nome_local = it.nome_local;
       if (!a.cod_local && it.cod_local) a.cod_local = it.cod_local;
-      const sid = it.solic_id, cid = it.carr_id;
+      if ((!a.endereco_pp || !a.endereco_pp.length) && Array.isArray(it.endereco_pp) && it.endereco_pp.length) {
+        a.endereco_pp = it.endereco_pp;
+      }
+      const cid = it.carr_id;
       if (sid && !a.solic_ids.includes(sid)) a.solic_ids.push(sid);
       if (cid && !a.carr_ids.includes(cid))  a.carr_ids.push(cid);
       if (Array.isArray(it.solic_ids)) it.solic_ids.forEach(id => { if (!a.solic_ids.includes(id)) a.solic_ids.push(id); });
       if (Array.isArray(it.carr_ids))  it.carr_ids.forEach(id  => { if (!a.carr_ids.includes(id))  a.carr_ids.push(id);  });
       a.quantidade += parseFloat(it.quantidade) || 0;
-      if (it.status !== 'Separado') a._allSep = false;
+      const qSol = parseFloat(it.quantidade_solicitada);
+      const qSep = parseFloat(it.quantidade_separada);
+      if (Number.isFinite(qSol)) a.quantidade_solicitada = (parseFloat(a.quantidade_solicitada) || 0) + qSol;
+      if (Number.isFinite(qSep)) a.quantidade_separada = (parseFloat(a.quantidade_separada) || 0) + qSep;
+      if (a._isConferido) a.status = 'Aguardando retirada';
+      else if (it.status !== 'Separado') a._allSep = false;
     });
-    map.forEach(a => { a.status = a._allSep ? 'Separado' : 'Separação'; delete a._allSep; });
+    map.forEach(a => {
+      if (!a._isConferido) a.status = a._allSep ? 'Separado' : 'Separação';
+      delete a._allSep;
+      delete a._isConferido;
+    });
     return [...map.values()];
   }
 
   function _renderAggItem(it, nSolic) {
     const qty      = parseFloat(it.quantidade) || 0;
+    const isConferido = it.status === 'Aguardando retirada';
     const isSep    = it.status === 'Separado';
     const isEmSeparacao = ['Separação', 'Em Separação'].includes(String(it.status || ''));
     const dp       = _solFmtDataPrevista(it.data_prevista);
@@ -637,24 +818,8 @@ function _abrirModalSeparacao(grupoAtual, gruposConflito) {
     const swapHistory = it.codigo_produto_ant && it.codigo_produto_novo 
       ? `<div style="font-size:.70rem;color:#a78bfa;margin-top:2px;display:flex;align-items:center;gap:4px;"><i class="fa-solid fa-arrows-rotate" style="color:#a78bfa;"></i><span>${it.codigo_produto_ant} → ${it.codigo_produto_novo}</span></div>`
       : '';
-    // Renderizar destino
-    const endList = it.enderecos_pp;
-    let destinoHtml = '';
-    if (endList && Array.isArray(endList) && endList.length > 0) {
-      const cards = endList.map(e => `
-        <div style="display:inline-flex;flex-direction:column;gap:1px;background:#1e293b;border:1px solid #334155;border-radius:4px;padding:3px 6px;font-size:.63rem;line-height:1.5;white-space:nowrap;">
-          <span><span style="color:#6b7280;">rua:</span> <span style="color:#67e8f9;font-weight:700;">${e.rua || '—'}</span></span>
-          <span><span style="color:#6b7280;">andar:</span> <span style="color:#67e8f9;font-weight:700;">${e.andar || '—'}</span></span>
-          <span><span style="color:#6b7280;">edif.:</span> <span style="color:#67e8f9;font-weight:700;">${e.edificio || '—'}</span></span>
-          <span><span style="color:#6b7280;">apto:</span> <span style="color:#67e8f9;font-weight:700;">${e.apartamento || '—'}</span></span>
-        </div>`).join('');
-      destinoHtml = `<div style="display:flex;flex-wrap:wrap;gap:4px;align-items:flex-start;">${cards}</div>`;
-    } else if (it.nome_local || it.cod_local) {
-      const destino = it.nome_local || it.cod_local;
-      destinoHtml = `<div style="font-size:.68rem;color:#c4b5fd;font-weight:700;">${destino}</div>`;
-    } else {
-      destinoHtml = `<div style="font-size:.65rem;color:#6b7280;font-style:italic;">Não endereçado</div>`;
-    }
+    const destinoHtml = _solDestinoHtml(it);
+    const enderecamentoHtml = _solEnderecamentoHtml(it.codigo_produto, enderecoBatch, it);
 
     const locais = (estoqueBatch[it.codigo_produto] || [])
       .filter(l => Number(l.saldo) > 0)
@@ -669,14 +834,14 @@ function _abrirModalSeparacao(grupoAtual, gruposConflito) {
           const nome = l.local_nome || cod;
           const qty2 = Number(l.saldo).toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
           return `<button class="armazem-btn" data-cod="${cod}" data-nome="${nome.replace(/"/g,'&quot;')}" data-selected="${isDefault ? '1' : '0'}"
-            style="padding:3px 9px;border-radius:5px;font-size:.65rem;font-weight:700;cursor:pointer;white-space:nowrap;
+            style="padding:4px 9px;border-radius:5px;font-size:.65rem;font-weight:700;cursor:pointer;white-space:normal;word-break:break-word;text-align:left;line-height:1.35;max-width:100%;
                    border:2px solid ${isDefault ? '#16a34a' : '#374151'};
                    background:${isDefault ? '#14532d' : '#111827'};
                    color:${isDefault ? '#86efac' : '#9ca3af'};">
             ${nome} · ${qty2} ${l.unidade || 'UN'}
           </button>`;
         }).join('');
-        origemHtml = `<div style="display:flex;flex-wrap:wrap;gap:4px;">${btns}</div>`;
+        origemHtml = `<div style="display:flex;flex-direction:column;gap:4px;width:100%;">${btns}</div>`;
       } else if (Object.keys(estoqueBatch).length > 0) {
         origemHtml = `<div style="font-size:.63rem;color:#fbbf24;font-style:italic;">
           <i class="fa-solid fa-triangle-exclamation" style="margin-right:3px;"></i>Sem armazém com saldo positivo
@@ -699,25 +864,54 @@ function _abrirModalSeparacao(grupoAtual, gruposConflito) {
     }
 
     const localizacaoHtml = `
-      <div style="margin-top:6px;display:flex;gap:10px;flex-wrap:wrap;align-items:stretch;">
-        <div style="min-width:170px;flex:1;padding:6px 8px;background:#101826;border:1px solid #253041;border-radius:8px;">
-          <div style="font-size:.60rem;color:#60a5fa;font-weight:700;text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px;">Origem</div>
-          ${origemHtml}
-        </div>
-        <div style="min-width:170px;flex:1;padding:6px 8px;background:#1b1730;border:1px solid #312e81;border-radius:8px;">
-          <div style="font-size:.60rem;color:#a78bfa;font-weight:700;text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px;">Destino</div>
-          ${destinoHtml}
+      <div style="margin-top:6px;display:flex;flex-direction:column;gap:6px;">
+        ${enderecamentoHtml}
+        <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:stretch;">
+          <div style="min-width:220px;flex:1 1 240px;padding:6px 8px;background:#101826;border:1px solid #253041;border-radius:8px;">
+            <div style="font-size:.60rem;color:#60a5fa;font-weight:700;text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px;">Origem</div>
+            ${origemHtml}
+          </div>
+          <div style="min-width:170px;flex:1;padding:6px 8px;background:#1b1730;border:1px solid #312e81;border-radius:8px;">
+            <div style="font-size:.60rem;color:#a78bfa;font-weight:700;text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px;">Destino</div>
+            ${destinoHtml}
+          </div>
         </div>
       </div>`;
 
-    // Itens de sub-SEPs (já Separado) não têm input de quantidade editável
-    const qtyHtml = isSep
-      ? `<span style="font-size:.80rem;font-weight:700;color:#f0f0f0;">${_solFmtQty(qty)} ${it.unidade || 'UN'}</span>`
-      : `<div style="display:flex;align-items:center;gap:4px;">
-           <input type="text" inputmode="decimal" class="sep-qty-input" onfocus="this.select()"
-             value="${_solFmtQty(qty)}" data-max="${qty}"
-             style="width:60px;padding:3px 6px;border-radius:5px;border:1px solid #4b5563;background:#111;color:#f0f0f0;font-size:.75rem;text-align:center;">
-           <span style="font-size:.72rem;color:#9ca3af;">/${_solFmtQty(qty)} ${it.unidade || 'UN'}</span>
+    const unidade = it.unidade || 'UN';
+    const qtyOrig = parseFloat(it.quantidade_solicitada);
+    const qtySepReg = parseFloat(it.quantidade_separada);
+    const qtyAlterada = (isSep || isConferido) && Number.isFinite(qtyOrig) && Number.isFinite(qtySepReg)
+      && Math.abs(qtyOrig - qtySepReg) > 0.0001;
+
+    const qtyHtml = isConferido
+      ? (qtyAlterada
+        ? `<div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;min-width:88px;">
+             <span style="font-size:.80rem;font-weight:700;color:#86efac;">${_solFmtQty(qtySepReg)} ${unidade}</span>
+             <table style="font-size:.62rem;border-collapse:collapse;border:1px solid #374151;border-radius:4px;overflow:hidden;">
+               <tr style="background:#1f2937;"><td style="padding:2px 6px;color:#9ca3af;">Solicitado</td><td style="padding:2px 6px;font-weight:700;color:#d1d5db;text-decoration:line-through;">${_solFmtQty(qtyOrig)} ${unidade}</td></tr>
+               <tr style="background:#292419;"><td style="padding:2px 6px;color:#fbbf24;">Separado</td><td style="padding:2px 6px;font-weight:700;color:#fbbf24;">${_solFmtQty(qtySepReg)} ${unidade}</td></tr>
+             </table>
+           </div>`
+        : `<span style="font-size:.80rem;font-weight:700;color:#86efac;">${_solFmtQty(qty)} ${unidade}</span>`)
+      : isSep
+      ? (qtyAlterada
+        ? `<div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;min-width:88px;">
+             <span style="font-size:.80rem;font-weight:700;color:#f0f0f0;">${_solFmtQty(qtySepReg)} ${unidade}</span>
+             <table style="font-size:.62rem;border-collapse:collapse;border:1px solid #374151;border-radius:4px;overflow:hidden;">
+               <tr style="background:#1f2937;">
+                 <td style="padding:2px 6px;color:#9ca3af;white-space:nowrap;">Solicitado</td>
+                 <td style="padding:2px 6px;font-weight:700;color:#d1d5db;text-decoration:line-through;">${_solFmtQty(qtyOrig)} ${unidade}</td>
+               </tr>
+               <tr style="background:#292419;">
+                 <td style="padding:2px 6px;color:#fbbf24;white-space:nowrap;"><i class="fa-solid fa-pen" style="margin-right:2px;font-size:.58rem;"></i>Separado</td>
+                 <td style="padding:2px 6px;font-weight:700;color:#fbbf24;">${_solFmtQty(qtySepReg)} ${unidade}</td>
+               </tr>
+             </table>
+           </div>`
+        : `<span style="font-size:.80rem;font-weight:700;color:#f0f0f0;">${_solFmtQty(qty)} ${unidade}</span>`)
+      : `<div class="sep-qty-wrap" style="display:flex;align-items:center;gap:4px;flex-shrink:0;">
+           <span class="sep-qty-label" style="font-size:.80rem;font-weight:700;color:#f0f0f0;white-space:nowrap;">${_solFmtQty(qty)} ${unidade}</span>
          </div>`;
     return `
       <div data-item-row="${it.cod_omie || it.codigo_produto}"
@@ -730,7 +924,7 @@ function _abrirModalSeparacao(grupoAtual, gruposConflito) {
            data-descricao="${encodeURIComponent(it.descricao || '')}"
            data-observacao="${encodeURIComponent(obsText)}"
            data-unidade="${String(it.unidade || 'UN').replace(/"/g, '&quot;')}"
-           style="display:flex;align-items:flex-start;gap:12px;padding:10px 16px;border-top:1px solid #222;">
+           style="display:flex;align-items:flex-start;gap:12px;padding:10px 16px;border-top:1px solid #222;${isConferido ? 'background:#0c1812;border-left:3px solid #22c55e;' : ''}">
         <div style="width:40px;height:40px;border-radius:8px;background:#0f0f0f;overflow:hidden;flex-shrink:0;margin-top:2px;">
           ${_solGetMiniImgHtml(it.codigo_produto, it.descricao || '')}
         </div>
@@ -739,14 +933,26 @@ function _abrirModalSeparacao(grupoAtual, gruposConflito) {
           <div style="font-size:.78rem;color:#d1d5db;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${it.descricao || '—'}</div>
           <div style="font-size:.73rem;color:#9ca3af;margin-top:2px;display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
             ${dh ? `<i class="fa-regular fa-calendar" style="color:#6b7280;"></i><span>${dh}</span>` : ''}
-            ${_solStatusBadge(it.status || 'Separação')}
+            ${isConferido
+              ? `<span style="display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:20px;font-size:.68rem;font-weight:700;color:#86efac;background:#0f2018;border:1px solid #22c55e55;">
+                   <i class="fa-solid fa-clipboard-check" style="font-size:.62rem;"></i>Conferido
+                 </span>
+                 <span style="font-size:.65rem;color:#6ee7b7;font-style:italic;">aguardando demais itens</span>`
+              : _solStatusBadge(it.status || 'Separação')}
             ${hasObs ? `<span title="Item com observação" style="display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:999px;background:#f97316;color:#111;font-weight:800;font-size:.70rem;line-height:1;">!</span>` : ''}
           </div>
           ${swapHistory}
           ${localizacaoHtml}
         </div>
           ${qtyHtml}
-          ${isSep
+          ${isConferido
+            ? `<div style="display:flex;gap:6px;align-items:flex-start;flex-wrap:wrap;justify-content:flex-end;flex-shrink:0;">
+                 <button class="btn-item-retificar" title="Voltar item para Separado"
+                   style="padding:4px 9px;border:none;border-radius:6px;background:#4b5563;color:#e5e7eb;font-weight:700;font-size:.70rem;cursor:pointer;white-space:nowrap;">
+                   <i class="fa-solid fa-rotate-left" style="margin-right:3px;"></i>Retificar
+                 </button>
+               </div>`
+            : isSep
             ? `<div style="display:flex;gap:6px;align-items:flex-start;flex-wrap:wrap;justify-content:flex-end;flex-shrink:0;">
                  <button class="btn-item-conferido" title="Enviar para Aguardando retirada"
                    style="padding:4px 9px;border:none;border-radius:6px;background:#16a34a;color:#dcfce7;font-weight:700;font-size:.70rem;cursor:pointer;white-space:nowrap;">
@@ -786,24 +992,43 @@ function _abrirModalSeparacao(grupoAtual, gruposConflito) {
       </div>`;
   }
 
-  let aggItens = _aggItens(grupoAtual.itens);
+  let aggItens = _aggItens(_itensVisiveisModalSep(grupoAtual.itens));
   const PRINC_ARMZ = '10717096386';
-  let estoqueBatch = {};
+  let estoqueBatch = preloaded.estoqueBatch || {};
+  let enderecoBatch = _solMergeEnderecoBatch(
+    [...(grupoAtual.itens || []), ...aggItens],
+    preloaded.enderecoBatch || {}
+  );
 
   function _renderLista() {
     const lista = document.getElementById('modalSepItemsList');
     if (lista) lista.innerHTML = aggItens.map(it => _renderAggItem(it, grupoAtual.n_solic)).join('');
+    if (gruposConflito.length) {
+      modal.querySelectorAll('.modal-sep-conflito').forEach((block, idx) => {
+        const g = gruposConflito[idx];
+        const host = block.querySelector('.modal-sep-conflito-itens');
+        if (host && g) host.innerHTML = g.itensConflito.map(i => _solRenderItemRow(i, 'disabled', enderecoBatch)).join('');
+      });
+    }
   }
 
   async function _carregarEstoque() {
-    const codigos = [...new Set(aggItens.map(it => it.codigo_produto).filter(Boolean))];
+    const codigosAgg = aggItens.map(it => it.codigo_produto);
+    const codigosConfl = gruposConflito.flatMap(g => (g.itensConflito || []).map(i => i.codigo_produto));
+    const codigos = [...new Set([...codigosAgg, ...codigosConfl].filter(Boolean))];
     if (!codigos.length) return;
     try {
-      const re = await fetch('/api/logistica/estoque/batch?codigos=' + encodeURIComponent(codigos.join(',')), { credentials: 'include' });
+      const [re, rep] = await Promise.all([
+        fetch('/api/logistica/estoque/batch?codigos=' + encodeURIComponent(codigos.join(',')), { credentials: 'include' }),
+        fetch('/api/logistica/endereco-pp/batch?codigos=' + encodeURIComponent(codigos.join(',')), { credentials: 'include' })
+      ]);
       const de = await re.json();
-      if (de.ok) estoqueBatch = de.dados || {};
+      const dep = await rep.json();
+      if (de.ok) estoqueBatch = { ...estoqueBatch, ...(de.dados || {}) };
+      if (dep.ok) enderecoBatch = _solMergeEnderecoBatch(aggItens, { ...enderecoBatch, ...(dep.dados || {}) });
+      else enderecoBatch = _solMergeEnderecoBatch(aggItens, enderecoBatch);
     } catch (_) {}
-    _renderLista();
+    if (document.getElementById('modalSeparacaoLogistica')) _renderLista();
   }
 
   // Recarrega o SEP original do servidor e re-renderiza lista (sem sub-SEPs — .1 vai para fila pendente)
@@ -812,13 +1037,65 @@ function _abrirModalSeparacao(grupoAtual, gruposConflito) {
     if (_reloadPending) return;
     _reloadPending = true;
     try {
-      const r = await fetch(`/api/logistica/kanban/itens?n_solic=${encodeURIComponent(grupoAtual.n_solic)}`, { credentials: 'include' });
+      const r = await fetch(_solBuildKanbanItensUrl(grupoAtual.n_solic, { escopoItens: grupoAtual.escopoItens }), { credentials: 'include' });
       const d = await r.json();
       if (!d.ok) return;
       const mapped = (d.itens || []).map(it => ({ ...it, solic_ids: [it.solic_id], carr_ids: [it.carr_id] }));
-      aggItens = _aggItens(mapped);
+      const visiveis = _itensVisiveisModalSep(mapped);
+      if (!visiveis.length) {
+        fecharModal();
+        return;
+      }
+      aggItens = _aggItens(visiveis);
       await _carregarEstoque();
     } catch (_) {} finally { _reloadPending = false; }
+  }
+
+  async function _postSepParcial(row, qtySep, motivo) {
+    const solicIds = JSON.parse(row.dataset.solicIds || '[]');
+    const carrIds  = JSON.parse(row.dataset.carrIds  || '[]');
+    const r = await fetch('/api/logistica/itens_solicitados/separar-parcial', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ solic_ids: solicIds, carr_ids: carrIds, quantidade_separada: qtySep, motivo: motivo || '' })
+    });
+    const d = await r.json();
+    if (!d.ok) throw new Error(d.error || 'Erro ao processar separação parcial.');
+    houveMudanca = true;
+    await reloadItems();
+    window._loadSolicitacoesTab.force = true;
+    window._loadSolicitacoesTab();
+    window._loadKanbanSolicitacoesTab.force = true;
+    window._loadKanbanSolicitacoesTab();
+    return d;
+  }
+
+  async function _confirmarSepParcial(row, qtySep, opts = {}) {
+    const unidade  = row.dataset.unidade || 'UN';
+    const qtyTotal = parseFloat(row.dataset.qtyTotal || '0') || 0;
+    if (!Number.isFinite(qtySep) || qtySep <= 0) {
+      alert('Quantidade inválida. Use um valor maior que 0.');
+      return false;
+    }
+    if (qtySep > qtyTotal && !opts.skipHighConfirm) {
+      const ok = confirm(`Você informou ${_solFmtQty(qtySep)} ${unidade}, maior que o solicitado (${_solFmtQty(qtyTotal)} ${unidade}). Confirmar esta quantidade separada?`);
+      if (!ok) return false;
+    }
+    let motivo = opts.motivo;
+    if (motivo == null && qtySep < qtyTotal) {
+      motivo = prompt('Motivo da separação parcial:', '') || '';
+    }
+    _solRowLoading(row, true);
+    try {
+      await _postSepParcial(row, qtySep, motivo);
+      return true;
+    } catch (err) {
+      alert('Erro: ' + (err.message || err));
+      return false;
+    } finally {
+      _solRowLoading(row, false);
+    }
   }
 
   function fecharModal() {
@@ -830,6 +1107,9 @@ function _abrirModalSeparacao(grupoAtual, gruposConflito) {
       window._loadKanbanSolicitacoesTab();
     }
   }
+
+  // Pré-carrega estoque + endereçamento antes de montar o modal (igual ao Solicitado)
+  await _carregarEstoque();
 
   let conflitosHtml = '';
   if (gruposConflito.length > 0) {
@@ -850,7 +1130,7 @@ function _abrirModalSeparacao(grupoAtual, gruposConflito) {
                   <i class="fa-solid fa-boxes-stacked" style="margin-right:3px;"></i>Iniciar separação
                 </button>
               </div>
-              ${g.itensConflito.map(i => _solRenderItemRow(i, 'disabled')).join('')}
+              <div class="modal-sep-conflito-itens">${g.itensConflito.map(i => _solRenderItemRow(i, 'disabled', enderecoBatch)).join('')}</div>
             </div>`;
         }).join('')}
       </div>`;
@@ -876,9 +1156,6 @@ function _abrirModalSeparacao(grupoAtual, gruposConflito) {
     </div>`;
 
   document.body.appendChild(modal);
-
-  // Carrega estoque assim que modal abre
-  _carregarEstoque();
 
   document.getElementById('btnModalSepFechar')?.addEventListener('click', () => fecharModal());
   modal.addEventListener('click', e => { if (e.target === modal) fecharModal(); });
@@ -926,8 +1203,7 @@ function _abrirModalSeparacao(grupoAtual, gruposConflito) {
 
     document.getElementById('btnAcaoSepTudo').addEventListener('click', async () => {
       const btn = document.getElementById('btnAcaoSepTudo');
-      btn.disabled = true;
-      btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin" style="margin-right:4px;"></i>Processando...';
+      _solBtnLoading(btn, 'Processando...');
       try {
         const r = await fetch('/api/logistica/itens_solicitados/separar', {
           method: 'PATCH',
@@ -942,79 +1218,46 @@ function _abrirModalSeparacao(grupoAtual, gruposConflito) {
         await reloadItems();
       } catch (err) {
         alert('Erro: ' + (err.message || err));
-        btn.disabled = false;
-        btn.textContent = 'Separei tudo';
+        _solBtnRestore(btn, 'Separei tudo');
       }
     });
 
     document.getElementById('btnAcaoSepParcial').addEventListener('click', async () => {
-      closeModal();
       const qtyInput = prompt(`Quantidade separada (${unidade}). Pode ser maior que o solicitado quando a embalagem fechada vier com mais unidades:`, _solFmtQty(qtyTotal));
       if (qtyInput === null) return;
       const qtySep = parseFloat(String(qtyInput).replace(',', '.'));
-      if (!Number.isFinite(qtySep) || qtySep <= 0) {
-        alert('Quantidade inválida. Use um valor maior que 0.');
-        return;
-      }
-      if (qtySep > qtyTotal) {
-        const ok = confirm(`Você informou ${_solFmtQty(qtySep)} ${unidade}, maior que o solicitado (${_solFmtQty(qtyTotal)} ${unidade}). Confirmar esta quantidade separada?`);
-        if (!ok) return;
-      }
-      const motivo = qtySep < qtyTotal
-        ? (prompt('Motivo da separação parcial:', '') || '')
-        : '';
-
-      try {
-        const r = await fetch('/api/logistica/itens_solicitados/separar-parcial', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          credentials: 'include',
-          body: JSON.stringify({
-            solic_ids: solicIds,
-            carr_ids: carrIds,
-            quantidade_separada: qtySep,
-            motivo
-          })
-        });
-        const d = await r.json();
-        if (!d.ok) throw new Error(d.error || 'Erro ao processar separação parcial.');
-        houveMudanca = true;
-        await reloadItems();
-        window._loadSolicitacoesTab.force = true;
-        window._loadSolicitacoesTab();
-        window._loadKanbanSolicitacoesTab.force = true;
-        window._loadKanbanSolicitacoesTab();
-      } catch (err) {
-        alert('Erro: ' + (err.message || err));
-      }
+      closeModal();
+      await _confirmarSepParcial(row, qtySep);
     });
 
     const btnNaoSep = document.getElementById('btnAcaoNaoSep');
     if (btnNaoSep) {
       btnNaoSep.addEventListener('click', async () => {
-      const ok = confirm('Confirmar que este item não foi separado?');
-      if (!ok) return;
-      try {
-        for (const sid of solicIds) {
-          const r = await fetch('/api/logistica/itens_solicitados/nao-separar', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            credentials: 'include',
-            body: JSON.stringify({ solic_id: sid })
-          });
-          const d = await r.json();
-          if (!d.ok) throw new Error(d.error || 'Erro ao marcar item como não separado.');
+        const ok = confirm('Confirmar que este item não foi separado?');
+        if (!ok) return;
+        _solBtnLoading(btnNaoSep, 'Processando...');
+        try {
+          for (const sid of solicIds) {
+            const r = await fetch('/api/logistica/itens_solicitados/nao-separar', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              credentials: 'include',
+              body: JSON.stringify({ solic_id: sid })
+            });
+            const d = await r.json();
+            if (!d.ok) throw new Error(d.error || 'Erro ao marcar item como não separado.');
+          }
+          houveMudanca = true;
+          closeModal();
+          await reloadItems();
+          window._loadSolicitacoesTab.force = true;
+          window._loadSolicitacoesTab();
+          window._loadKanbanSolicitacoesTab.force = true;
+          window._loadKanbanSolicitacoesTab();
+        } catch (err) {
+          alert('Erro: ' + (err.message || err));
+          _solBtnRestore(btnNaoSep, '<i class="fa-solid fa-xmark" style="margin-right:2px;"></i>Não separei');
         }
-        houveMudanca = true;
-        closeModal();
-        await reloadItems();
-        window._loadSolicitacoesTab.force = true;
-        window._loadSolicitacoesTab();
-        window._loadKanbanSolicitacoesTab.force = true;
-        window._loadKanbanSolicitacoesTab();
-      } catch (err) {
-        alert('Erro: ' + (err.message || err));
-      }
       });
     }
 
@@ -1186,9 +1429,7 @@ function _abrirModalSeparacao(grupoAtual, gruposConflito) {
       const nome_local = selBtn ? selBtn.dataset.nome : null;
       const quantidade = parseFloat(row.dataset.qtyTotal) || 1;
 
-      btnConferido.disabled = true;
-      const htmlOrig = btnConferido.innerHTML;
-      btnConferido.innerHTML = '<i class="fa-solid fa-spinner fa-spin" style="margin-right:3px;"></i>...';
+      _solBtnLoading(btnConferido);
 
       try {
         const r = await fetch('/api/logistica/itens_solicitados/aguardando-retirada', {
@@ -1200,15 +1441,14 @@ function _abrirModalSeparacao(grupoAtual, gruposConflito) {
         const d = await r.json();
         if (!d.ok) throw new Error(d.error || 'Erro ao marcar como aguardando retirada.');
         houveMudanca = true;
-        await reloadItems();
         window._loadSolicitacoesTab.force = true;
         window._loadSolicitacoesTab();
         window._loadKanbanSolicitacoesTab.force = true;
         window._loadKanbanSolicitacoesTab();
+        await reloadItems();
       } catch (err) {
         alert('Erro: ' + (err.message || err));
-        btnConferido.disabled = false;
-        btnConferido.innerHTML = htmlOrig;
+        _solBtnRestore(btnConferido, '<i class="fa-solid fa-clipboard-check" style="margin-right:3px;"></i>Conferido');
       }
       return;
     }
@@ -1220,11 +1460,13 @@ function _abrirModalSeparacao(grupoAtual, gruposConflito) {
       const solicIds = JSON.parse(row.dataset.solicIds || '[]');
       if (!solicIds.length) return;
 
-      btnRetificar.disabled = true;
-      const htmlOrig = btnRetificar.innerHTML;
-      btnRetificar.innerHTML = '<i class="fa-solid fa-spinner fa-spin" style="margin-right:3px;"></i>...';
+      _solBtnLoading(btnRetificar);
+      const stRow = row.dataset.status || '';
+      const urlRet = stRow === 'Aguardando retirada'
+        ? '/api/logistica/itens_solicitados/reverter-conferido'
+        : '/api/logistica/itens_solicitados/reverter-separacao';
       try {
-        const r = await fetch('/api/logistica/itens_solicitados/reverter-separacao', {
+        const r = await fetch(urlRet, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
           credentials: 'include',
@@ -1240,8 +1482,7 @@ function _abrirModalSeparacao(grupoAtual, gruposConflito) {
         window._loadKanbanSolicitacoesTab();
       } catch (err) {
         alert('Erro: ' + (err.message || err));
-        btnRetificar.disabled = false;
-        btnRetificar.innerHTML = htmlOrig;
+        _solBtnRestore(btnRetificar, '<i class="fa-solid fa-rotate-left" style="margin-right:3px;"></i>Retificar');
       }
       return;
     }
@@ -1250,7 +1491,12 @@ function _abrirModalSeparacao(grupoAtual, gruposConflito) {
     if (btnTrocar && !btnTrocar.disabled) {
       const row = btnTrocar.closest('[data-item-row]');
       if (!row) return;
-      await _abrirTrocaInline(row);
+      _solBtnLoading(btnTrocar);
+      try {
+        await _abrirTrocaInline(row);
+      } finally {
+        _solBtnRestore(btnTrocar);
+      }
       return;
     }
 
@@ -1259,9 +1505,7 @@ function _abrirModalSeparacao(grupoAtual, gruposConflito) {
       const row = btnSepTudo.closest('[data-item-row]');
       if (!row) return;
       const solicIds = JSON.parse(row.dataset.solicIds || '[]');
-      const htmlOrig = btnSepTudo.innerHTML;
-      btnSepTudo.disabled = true;
-      btnSepTudo.innerHTML = '<i class="fa-solid fa-spinner fa-spin" style="margin-right:3px;"></i>...';
+      _solBtnLoading(btnSepTudo);
       try {
         const r = await fetch('/api/logistica/itens_solicitados/separar', {
           method: 'PATCH',
@@ -1275,8 +1519,7 @@ function _abrirModalSeparacao(grupoAtual, gruposConflito) {
         await reloadItems();
       } catch (err) {
         alert('Erro: ' + (err.message || err));
-        btnSepTudo.disabled = false;
-        btnSepTudo.innerHTML = htmlOrig;
+        _solBtnRestore(btnSepTudo, '<i class="fa-solid fa-check" style="margin-right:2px;"></i>Separei tudo');
       }
       return;
     }
@@ -1285,32 +1528,16 @@ function _abrirModalSeparacao(grupoAtual, gruposConflito) {
     if (btnSepParcial && !btnSepParcial.disabled) {
       const row = btnSepParcial.closest('[data-item-row]');
       if (!row) return;
-      const solicIds = JSON.parse(row.dataset.solicIds || '[]');
-      const carrIds  = JSON.parse(row.dataset.carrIds  || '[]');
       const unidade  = row.dataset.unidade || 'UN';
       const qtyTotal = parseFloat(row.dataset.qtyTotal || '0') || 0;
       const qtyInput = prompt(`Quantidade separada (${unidade}). Pode ser maior que o solicitado quando a embalagem fechada vier com mais unidades:`, _solFmtQty(qtyTotal));
       if (qtyInput === null) return;
       const qtySep = parseFloat(String(qtyInput).replace(',', '.'));
-      if (!Number.isFinite(qtySep) || qtySep <= 0) { alert('Quantidade inválida. Use um valor maior que 0.'); return; }
-      if (qtySep > qtyTotal) {
-        const ok = confirm(`Você informou ${_solFmtQty(qtySep)} ${unidade}, maior que o solicitado (${_solFmtQty(qtyTotal)} ${unidade}). Confirmar esta quantidade separada?`);
-        if (!ok) return;
-      }
-      const motivo = qtySep < qtyTotal ? (prompt('Motivo da separação parcial:', '') || '') : '';
+      _solBtnLoading(btnSepParcial, 'Processando...');
       try {
-        const r = await fetch('/api/logistica/itens_solicitados/separar-parcial', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          credentials: 'include',
-          body: JSON.stringify({ solic_ids: solicIds, carr_ids: carrIds, quantidade_separada: qtySep, motivo })
-        });
-        const d = await r.json();
-        if (!d.ok) throw new Error(d.error || 'Erro ao processar separação parcial.');
-        houveMudanca = true;
-        await reloadItems();
-      } catch (err) {
-        alert('Erro: ' + (err.message || err));
+        await _confirmarSepParcial(row, qtySep);
+      } finally {
+        _solBtnRestore(btnSepParcial, '<i class="fa-solid fa-scale-balanced" style="margin-right:2px;"></i>Informar qtd');
       }
       return;
     }
@@ -1322,6 +1549,7 @@ function _abrirModalSeparacao(grupoAtual, gruposConflito) {
       const solicIds = JSON.parse(row.dataset.solicIds || '[]');
       const ok = confirm('Confirmar que este item não foi separado?');
       if (!ok) return;
+      _solBtnLoading(btnNaoSep, 'Processando...');
       try {
         for (const sid of solicIds) {
           const r = await fetch('/api/logistica/itens_solicitados/nao-separar', {
@@ -1335,8 +1563,13 @@ function _abrirModalSeparacao(grupoAtual, gruposConflito) {
         }
         houveMudanca = true;
         await reloadItems();
+        window._loadSolicitacoesTab.force = true;
+        window._loadSolicitacoesTab();
+        window._loadKanbanSolicitacoesTab.force = true;
+        window._loadKanbanSolicitacoesTab();
       } catch (err) {
         alert('Erro: ' + (err.message || err));
+        _solBtnRestore(btnNaoSep, '<i class="fa-solid fa-xmark" style="margin-right:2px;"></i>Não separei');
       }
       return;
     }
@@ -1347,8 +1580,7 @@ function _abrirModalSeparacao(grupoAtual, gruposConflito) {
       const ids      = JSON.parse(conflBtn.dataset.solicIds || '[]');
       const nomeUser = conflBtn.dataset.nomeUser || '';
       if (!ids.length) return;
-      conflBtn.disabled = true;
-      conflBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
+      _solBtnLoading(conflBtn);
       try {
         const r = await fetch('/api/logistica/itens_solicitados/separacao', {
           method: 'PATCH',
@@ -1366,13 +1598,11 @@ function _abrirModalSeparacao(grupoAtual, gruposConflito) {
           if (countEl) countEl.textContent = String(Math.max(0, parseInt(countEl.textContent || '0') - ids.length));
         } else {
           alert('Erro: ' + res.error);
-          conflBtn.disabled = false;
-          conflBtn.innerHTML = '<i class="fa-solid fa-boxes-stacked" style="margin-right:3px;"></i>Iniciar separação';
+          _solBtnRestore(conflBtn, '<i class="fa-solid fa-boxes-stacked" style="margin-right:3px;"></i>Iniciar separação');
         }
       } catch (err) {
         alert('Erro ao iniciar separação.');
-        conflBtn.disabled = false;
-        conflBtn.innerHTML = '<i class="fa-solid fa-boxes-stacked" style="margin-right:3px;"></i>Iniciar separação';
+        _solBtnRestore(conflBtn, '<i class="fa-solid fa-boxes-stacked" style="margin-right:3px;"></i>Iniciar separação');
       }
     }
   });
@@ -1547,23 +1777,27 @@ window._loadKanbanSolicitacoesTab = async function() {
 
       // Clique — abre modal de edição (só em colunas editáveis)
       if (editableCols.has(cardEl.dataset.col)) {
-        cardEl.addEventListener('click', () => _abrirModalEdicaoSep(cardEl.dataset.nSolic || null));
+        cardEl.addEventListener('click', () => { _abrirModalEdicaoSep(cardEl.dataset.nSolic || null); });
       }
 
       // Clique — coluna "Aguardando retirada" abre modal com ação "Recebido"
       if (cardEl.dataset.col === 'Aguardando retirada') {
-        cardEl.addEventListener('click', () => _abrirModalAguardandoRetiradaSep(cardEl.dataset.nSolic || null, {
-          tituloColuna: 'Aguardando retirada',
-          permitirRecebido: true
-        }));
+        cardEl.addEventListener('click', () => {
+          _abrirModalAguardandoRetiradaSep(cardEl.dataset.nSolic || null, {
+            tituloColuna: 'Aguardando retirada',
+            permitirRecebido: true
+          });
+        });
       }
 
       // Clique — coluna "Concluído" abre modal de visualização com o mesmo detalhamento
       if (cardEl.dataset.col === 'Concluído') {
-        cardEl.addEventListener('click', () => _abrirModalAguardandoRetiradaSep(cardEl.dataset.nSolic || null, {
-          tituloColuna: 'Concluído',
-          permitirRecebido: false
-        }));
+        cardEl.addEventListener('click', () => {
+          _abrirModalAguardandoRetiradaSep(cardEl.dataset.nSolic || null, {
+            tituloColuna: 'Concluído',
+            permitirRecebido: false
+          });
+        });
       }
     });
   } catch (err) {
@@ -1578,16 +1812,20 @@ async function _abrirModalAguardandoRetiradaSep(nSolic, opts = {}) {
 
   const tituloColuna = String(opts.tituloColuna || 'Aguardando retirada');
   const permitirRecebido = !!opts.permitirRecebido;
+  const escopoItens = String(opts.escopoItens || '');
 
   clearTimeout(window._kanbanTooltipTimer);
   window._kanbanTooltipEl?.remove();
   window._kanbanTooltipEl = null;
 
+  _solKanbanLoading(true, 'Carregando solicitação...');
+
   let itens = [];
   let itensDerivados = [];
   let estoqueBatch = {};
+  let enderecoBatch = {};
   try {
-    const r = await fetch(`/api/logistica/kanban/itens?n_solic=${encodeURIComponent(nSolic)}&include_derivados=1`, { credentials: 'include' });
+    const r = await fetch(_solBuildKanbanItensUrl(nSolic, { includeDerivados: true, escopoItens }), { credentials: 'include' });
     const d = await r.json();
     if (!d.ok) {
       alert('Erro ao carregar itens: ' + (d.error || ''));
@@ -1596,18 +1834,30 @@ async function _abrirModalAguardandoRetiradaSep(nSolic, opts = {}) {
     itens = Array.isArray(d.itens) ? d.itens : [];
     itensDerivados = Array.isArray(d.itens_derivados) ? d.itens_derivados : [];
 
-    // Carrega estoque por armazém para todos os produtos da solicitação
-    const codigos = [...new Set(itens.map(it => it.codigo_produto).filter(Boolean))];
+    const codigos = [...new Set([
+      ...itens.map(it => it.codigo_produto),
+      ...itensDerivados.map(it => it.codigo_produto)
+    ].filter(Boolean))];
     if (codigos.length) {
       try {
-        const re = await fetch('/api/logistica/estoque/batch?codigos=' + encodeURIComponent(codigos.join(',')), { credentials: 'include' });
+        const [re, rep] = await Promise.all([
+          fetch('/api/logistica/estoque/batch?codigos=' + encodeURIComponent(codigos.join(',')), { credentials: 'include' }),
+          fetch('/api/logistica/endereco-pp/batch?codigos=' + encodeURIComponent(codigos.join(',')), { credentials: 'include' })
+        ]);
         const de = await re.json();
+        const dep = await rep.json();
         if (de.ok) estoqueBatch = de.dados || {};
+        if (dep.ok) enderecoBatch = dep.dados || {};
+        enderecoBatch = _solMergeEnderecoBatch([...itens, ...itensDerivados], enderecoBatch);
       } catch (_) { /* silencia */ }
+    } else {
+      enderecoBatch = _solMergeEnderecoBatch([...itens, ...itensDerivados], enderecoBatch);
     }
   } catch (err) {
     alert('Erro de rede ao carregar a solicitação.');
     return;
+  } finally {
+    _solKanbanLoading(false);
   }
 
   if (!itens.length) {
@@ -1618,23 +1868,8 @@ async function _abrirModalAguardandoRetiradaSep(nSolic, opts = {}) {
   document.getElementById('modalAguardandoRetiradaSep')?.remove();
 
   const renderLinha = (it) => {
-    // Card de destino
-    let destinoCard = '';
-    const endList = it.enderecos_pp;
-    if (endList && Array.isArray(endList) && endList.length > 0) {
-      destinoCard = endList.map(e => `
-        <div style="display:inline-flex;flex-direction:column;gap:1px;background:#1e293b;border:1px solid #334155;border-radius:4px;padding:3px 6px;font-size:.65rem;line-height:1.6;white-space:nowrap;">
-          <span><span style="color:#6b7280;">rua:</span> <span style="color:#67e8f9;font-weight:700;">${e.rua || '—'}</span></span>
-          <span><span style="color:#6b7280;">andar:</span> <span style="color:#67e8f9;font-weight:700;">${e.andar || '—'}</span></span>
-          <span><span style="color:#6b7280;">edif.:</span> <span style="color:#67e8f9;font-weight:700;">${e.edificio || '—'}</span></span>
-          <span><span style="color:#6b7280;">apto:</span> <span style="color:#67e8f9;font-weight:700;">${e.apartamento || '—'}</span></span>
-        </div>`).join('');
-    } else if (it.nome_local || it.cod_local) {
-      const destino = it.nome_local || it.cod_local;
-      destinoCard = `<span style="color:#c4b5fd;font-size:.70rem;font-weight:700;">${destino}</span>`;
-    } else {
-      destinoCard = `<span style="color:#6b7280;font-style:italic;font-size:.68rem;">Não endereçado</span>`;
-    }
+    const destinoCard = _solDestinoHtml(it);
+    const enderecamentoCard = _solEnderecamentoHtml(it.codigo_produto, enderecoBatch, it);
 
     // Armazéns — local_codigo 10717096386 sempre primeiro
     const PRINCIPAL = '10717096386';
@@ -1661,16 +1896,19 @@ async function _abrirModalAguardandoRetiradaSep(nSolic, opts = {}) {
       <div style="flex:1;min-width:0;">
         <div style="font-weight:700;font-size:.78rem;color:#f59e0b;">${it.codigo_produto || '—'}</div>
         <div style="font-size:.75rem;color:#d1d5db;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${it.descricao || '—'}</div>
-        <div style="margin-top:6px;display:flex;gap:10px;flex-wrap:wrap;align-items:stretch;">
-          <div style="min-width:170px;flex:1;padding:6px 8px;background:#101826;border:1px solid #253041;border-radius:8px;">
-            <div style="font-size:.60rem;color:#60a5fa;font-weight:700;text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px;">Origem</div>
-            <div style="display:flex;flex-direction:column;gap:3px;min-width:130px;">
-              ${origemColuna}
+        <div style="margin-top:6px;display:flex;flex-direction:column;gap:6px;">
+          ${enderecamentoCard}
+          <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:stretch;">
+            <div style="min-width:170px;flex:1;padding:6px 8px;background:#101826;border:1px solid #253041;border-radius:8px;">
+              <div style="font-size:.60rem;color:#60a5fa;font-weight:700;text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px;">Origem</div>
+              <div style="display:flex;flex-direction:column;gap:3px;min-width:130px;">
+                ${origemColuna}
+              </div>
             </div>
-          </div>
-          <div style="min-width:170px;flex:1;padding:6px 8px;background:#1b1730;border:1px solid #312e81;border-radius:8px;">
-            <div style="font-size:.60rem;color:#a78bfa;font-weight:700;text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px;">Destino</div>
-            ${destinoCard}
+            <div style="min-width:170px;flex:1;padding:6px 8px;background:#1b1730;border:1px solid #312e81;border-radius:8px;">
+              <div style="font-size:.60rem;color:#a78bfa;font-weight:700;text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px;">Destino</div>
+              ${destinoCard}
+            </div>
           </div>
         </div>
       </div>
@@ -1679,7 +1917,9 @@ async function _abrirModalAguardandoRetiradaSep(nSolic, opts = {}) {
     </div>`;
   };
 
-  const renderLinhaDerivado = (it) => `
+  const renderLinhaDerivado = (it) => {
+    const enderecamentoDeriv = _solEnderecamentoHtml(it.codigo_produto, enderecoBatch, it);
+    return `
     <div style="display:flex;align-items:flex-start;gap:10px;padding:9px 12px;border-top:1px solid #1f2937;">
       <div style="flex:1;min-width:0;">
         <div style="font-weight:700;font-size:.74rem;color:#a78bfa;">${it.n_solic || 'SEP.x'} · ${it.codigo_produto || '—'}</div>
@@ -1687,10 +1927,12 @@ async function _abrirModalAguardandoRetiradaSep(nSolic, opts = {}) {
         ${(String(it.status || '') === 'Stund-by' && String(it.motivo || it.observacao || '').trim())
           ? `<div style="font-size:.70rem;color:#fbbf24;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">Motivo: ${it.motivo || it.observacao}</div>`
           : ''}
+        ${enderecamentoDeriv ? `<div style="margin-top:4px;">${enderecamentoDeriv}</div>` : ''}
       </div>
       <div style="font-size:.72rem;color:#e5e7eb;white-space:nowrap;">${_solFmtQty(it.quantidade)} ${it.unidade || 'UN'}</div>
       <div style="font-size:.70rem;color:#9ca3af;white-space:nowrap;">${it.status || '—'}</div>
     </div>`;
+  };
 
   const modal = document.createElement('div');
   modal.id = 'modalAguardandoRetiradaSep';
@@ -1771,12 +2013,12 @@ async function _abrirModalAguardandoRetiradaSep(nSolic, opts = {}) {
       closeModal();
 
       // Recarrega os itens atualizados e abre direto o modal Em Separação
-      const ri = await fetch(`/api/logistica/kanban/itens?n_solic=${encodeURIComponent(nSolic)}`, { credentials: 'include' });
+      const ri = await fetch(_solBuildKanbanItensUrl(nSolic, { escopoItens }), { credentials: 'include' });
       const di = await ri.json();
       if (!di.ok) throw new Error(di.error || 'Erro ao buscar itens após iniciar separação.');
       const itensAtualizados = (di.itens || []).map(it => ({ ...it, solic_ids: [it.solic_id], carr_ids: [it.carr_id] }));
       if (itensAtualizados.length) {
-        _abrirModalSeparacao({ nome_user: itensAtualizados[0]?.nome_user || nSolic, n_solic: nSolic, itens: itensAtualizados, origem_status: 'Separação' }, []);
+        await _abrirModalSeparacao({ nome_user: itensAtualizados[0]?.nome_user || nSolic, n_solic: nSolic, itens: itensAtualizados, origem_status: 'Separação', escopoItens }, []);
       }
 
       window._loadSolicitacoesTab.force = true;
@@ -1893,17 +2135,25 @@ async function _abrirModalEdicaoSep(nSolic) {
   clearTimeout(window._kanbanTooltipTimer);
   window._kanbanTooltipEl?.remove();
   window._kanbanTooltipEl = null;
+
+  _solKanbanLoading(true, 'Carregando itens...');
+
   const url = nSolic
     ? `/api/logistica/kanban/itens?n_solic=${encodeURIComponent(nSolic)}`
     : '/api/logistica/kanban/itens';
 
   let itens;
+  let enderecoBatch = {};
   try {
     const r = await fetch(url, { credentials: 'include' });
     const d = await r.json();
     if (!d.ok) { alert('Erro ao carregar itens: ' + (d.error || '')); return; }
     itens = d.itens || [];
+    const codigos = [...new Set(itens.map(it => it.codigo_produto).filter(Boolean))];
+    if (codigos.length) enderecoBatch = await _solCarregarEnderecoBatch(codigos);
+    enderecoBatch = _solMergeEnderecoBatch(itens, enderecoBatch);
   } catch (e) { alert('Erro de rede.'); return; }
+  finally { _solKanbanLoading(false); }
 
   // Verifica se algum item mudou para status não editável
   const bloqueados = itens.filter(it => it.status && it.status !== 'pendente' && it.status !== 'carrinho');
@@ -1914,12 +2164,15 @@ async function _abrirModalEdicaoSep(nSolic) {
 
   document.getElementById('modalEdicaoSep')?.remove();
 
-  const renderLinha = (it) => `
+  const renderLinha = (it) => {
+    const enderecamentoEdit = _solEnderecamentoHtml(it.codigo_produto, enderecoBatch, it);
+    return `
     <div data-sep-row="${it.carr_id}" style="display:flex;align-items:center;gap:10px;padding:10px 16px;border-top:1px solid #222;">
       <div style="flex:1;min-width:0;">
         <div style="font-weight:700;font-size:.80rem;color:#f59e0b;">${it.codigo_produto}</div>
         <div style="font-size:.76rem;color:#d1d5db;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${it.descricao || '—'}</div>
         <div style="font-size:.72rem;color:#9ca3af;margin-top:2px;">${_solFmtDataPrevista(it.data_prevista) || ''}${it.horario ? ' ' + it.horario : ''}</div>
+        ${enderecamentoEdit ? `<div style="margin-top:4px;">${enderecamentoEdit}</div>` : ''}
       </div>
       <div style="display:flex;align-items:center;gap:6px;flex-shrink:0;">
         <input type="text" inputmode="decimal"
@@ -1940,6 +2193,7 @@ async function _abrirModalEdicaoSep(nSolic) {
         </button>
       </div>
     </div>`;
+  };
 
   const modal = document.createElement('div');
   modal.id = 'modalEdicaoSep';
@@ -1970,7 +2224,7 @@ async function _abrirModalEdicaoSep(nSolic) {
     btn.addEventListener('click', async () => {
       const carrId = parseInt(btn.dataset.carrId, 10);
       if (!confirm('Excluir este item da solicitação?')) return;
-      btn.disabled = true;
+      _solBtnLoading(btn);
       try {
         const r = await fetch(`/api/logistica/carrinho/${carrId}`, { method: 'DELETE', credentials: 'include' });
         const d = await r.json();
@@ -1984,8 +2238,8 @@ async function _abrirModalEdicaoSep(nSolic) {
             window._loadSolicitacoesTab.force = true;
             window._loadSolicitacoesTab();
           }
-        } else { alert('Erro: ' + d.error); btn.disabled = false; }
-      } catch (_) { alert('Erro ao excluir.'); btn.disabled = false; }
+        } else { alert('Erro: ' + d.error); _solBtnRestore(btn, '<i class="fa-solid fa-trash-can"></i>'); }
+      } catch (_) { alert('Erro ao excluir.'); _solBtnRestore(btn, '<i class="fa-solid fa-trash-can"></i>'); }
     });
   });
 
@@ -1994,9 +2248,10 @@ async function _abrirModalEdicaoSep(nSolic) {
     btn.addEventListener('click', async () => {
       const solicId = parseInt(btn.dataset.solicId, 10);
       if (!solicId) { alert('ID do item não encontrado.'); return; }
-      
+      _solBtnLoading(btn);
       // Abre modal para inserir justificativa
       _abrirModalNaoSeparar(solicId, () => {
+        _solBtnRestore(btn, '<i class="fa-solid fa-ban"></i>');
         // Callback: após salvar, remove a linha e fecha modal se estiver vazio
         btn.closest('[data-sep-row]')?.remove();
         const lista = document.getElementById('sepEditLista');
@@ -67196,6 +67451,102 @@ document.addEventListener('DOMContentLoaded', () => {
 })();
 
 /* ============================================================
+ * Modal de Ordem de Serviço — global (Registrar Produção + Montagem)
+ * ============================================================ */
+window.abrirModalOS = function(osId, osIdentificacao, opId, operacao, status, opIdentificacao) {
+  let modal = document.getElementById('modal-os-detalhe');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'modal-os-detalhe';
+    modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.75);display:flex;align-items:center;justify-content:center;z-index:10500;';
+    modal.addEventListener('click', function(e){ if(e.target===modal) window.fecharModalOS(); });
+    document.addEventListener('keydown', function(e){ if(e.key==='Escape') window.fecharModalOS(); });
+    document.body.appendChild(modal);
+  }
+  modal.innerHTML = `
+    <div style="background:#1e2233;border:1px solid rgba(255,255,255,.12);border-radius:12px;width:min(700px,96vw);max-height:85vh;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,.6);">
+      <div style="display:flex;align-items:center;gap:10px;padding:16px 20px;border-bottom:1px solid rgba(255,255,255,.08);">
+        <div style="flex:1;min-width:0;">
+          <div style="font-size:13px;font-weight:700;color:#e2e8f0;">OS ${osIdentificacao}</div>
+          <div style="font-size:11px;color:#94a3b8;margin-top:2px;">${operacao} &nbsp;·&nbsp; OP ${opIdentificacao}</div>
+        </div>
+        <span style="padding:2px 8px;border-radius:4px;font-size:10px;font-weight:700;background:#1d4ed8;color:#bfdbfe;">${status}</span>
+        <button onclick="window.fecharModalOS()" style="background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.12);border-radius:6px;color:#94a3b8;width:28px;height:28px;display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:13px;flex-shrink:0;">✕</button>
+      </div>
+      <div style="display:flex;gap:8px;padding:14px 20px;border-bottom:1px solid rgba(255,255,255,.06);">
+        <button onclick="window.verEstrutura(${osId})"
+          style="flex:1;padding:8px 0;border-radius:7px;border:1px solid rgba(99,102,241,.5);background:rgba(99,102,241,.15);color:#a5b4fc;font-size:12px;font-weight:600;cursor:pointer;">
+          <i class="fa-solid fa-layer-group" style="margin-right:6px;"></i>Ver estrutura
+        </button>
+        <button onclick="window.verOperacao(${osId})"
+          style="flex:1;padding:8px 0;border-radius:7px;border:1px solid rgba(34,197,94,.4);background:rgba(34,197,94,.1);color:#86efac;font-size:12px;font-weight:600;cursor:pointer;">
+          <i class="fa-solid fa-gears" style="margin-right:6px;"></i>Ver operação
+        </button>
+      </div>
+      <div id="modal-os-conteudo" style="flex:1;overflow-y:auto;padding:16px 20px;">
+        <div style="text-align:center;padding:32px 0;color:#475569;font-size:12px;">Selecione uma opção acima.</div>
+      </div>
+    </div>`;
+  modal.style.display = 'flex';
+};
+
+window.fecharModalOS = function() {
+  const modal = document.getElementById('modal-os-detalhe');
+  if (modal) modal.style.display = 'none';
+};
+
+window.verEstrutura = async function(osId) {
+  const conteudo = document.getElementById('modal-os-conteudo');
+  if (!conteudo) return;
+  conteudo.innerHTML = '<div style="text-align:center;padding:32px 0;color:#94a3b8;font-size:12px;"><i class="fa-solid fa-spinner fa-spin" style="margin-right:6px;"></i>Carregando estrutura...</div>';
+  try {
+    const resp = await fetch(`/api/producao/os-materiais/${osId}`);
+    const data = await resp.json();
+    if (!resp.ok || !data.response) throw new Error(data.error || 'Erro ao carregar');
+    const itens = data.response;
+    if (!itens.length) { conteudo.innerHTML = '<div style="text-align:center;padding:32px 0;color:#475569;font-size:12px;">Nenhum material previsto.</div>'; return; }
+    const custoTotal = itens.reduce((s, i) => s + ((i.produto?.valor_custo||0) * (i.qtde||0)), 0);
+    const linhas = itens.map(i => {
+      const custo = i.produto?.valor_custo || 0;
+      const qtde  = i.qtde || 0;
+      return `<tr style="border-bottom:1px solid rgba(255,255,255,.05);">
+        <td style="padding:6px 8px;font-size:10px;color:#94a3b8;white-space:nowrap;">${i.produto?.identificacao||'—'}</td>
+        <td style="padding:6px 8px;font-size:11px;color:#e2e8f0;">${i.produto?.descricao||'—'}</td>
+        <td style="padding:6px 8px;font-size:10px;color:#64748b;text-align:center;">${i.produto?.unidade_medida||'—'}</td>
+        <td style="padding:6px 8px;font-size:11px;color:#f1f5f9;text-align:right;font-weight:600;">${qtde}</td>
+        <td style="padding:6px 8px;font-size:10px;color:#6ee7b7;text-align:right;">${custo>0?'R$ '+custo.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2}):'—'}</td>
+        <td style="padding:6px 8px;font-size:10px;color:#a5f3fc;text-align:right;">${custo>0?'R$ '+(custo*qtde).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2}):'—'}</td>
+      </tr>`;
+    }).join('');
+    conteudo.innerHTML = `
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+        <span style="font-size:11px;color:#94a3b8;">${itens.length} materiais previstos</span>
+        <span style="font-size:11px;color:#a5f3fc;font-weight:600;">Total: R$ ${custoTotal.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2})}</span>
+      </div>
+      <table style="width:100%;border-collapse:collapse;">
+        <thead>
+          <tr style="border-bottom:1px solid rgba(255,255,255,.1);">
+            <th style="padding:6px 8px;font-size:10px;color:#475569;font-weight:600;text-align:left;">Código</th>
+            <th style="padding:6px 8px;font-size:10px;color:#475569;font-weight:600;text-align:left;">Descrição</th>
+            <th style="padding:6px 8px;font-size:10px;color:#475569;font-weight:600;text-align:center;">UN</th>
+            <th style="padding:6px 8px;font-size:10px;color:#475569;font-weight:600;text-align:right;">Qtde</th>
+            <th style="padding:6px 8px;font-size:10px;color:#475569;font-weight:600;text-align:right;">Custo unit.</th>
+            <th style="padding:6px 8px;font-size:10px;color:#475569;font-weight:600;text-align:right;">Total</th>
+          </tr>
+        </thead>
+        <tbody>${linhas}</tbody>
+      </table>`;
+  } catch(e) {
+    conteudo.innerHTML = `<div style="text-align:center;padding:32px 0;color:#f87171;font-size:12px;"><i class="fa-solid fa-circle-exclamation" style="margin-right:6px;"></i>${e.message}</div>`;
+  }
+};
+
+window.verOperacao = function(osId) {
+  const conteudo = document.getElementById('modal-os-conteudo');
+  if (conteudo) conteudo.innerHTML = '<div style="text-align:center;padding:32px 0;color:#475569;font-size:12px;">Funcionalidade em breve.</div>';
+};
+
+/* ============================================================
  * PRODUÇÃO — Ordens de Produção IAPP (Kanban)
  * ============================================================ */
 (function () {
@@ -67256,7 +67607,9 @@ document.addEventListener('DOMContentLoaded', () => {
         ? (op.ordens_servico || []).filter(os => os.operacao === _filtroOp)
         : (op.ordens_servico || []);
       const osHtml = _osVis.map(os =>
-        `<div style="background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.06);border-radius:5px;padding:5px 8px;display:flex;flex-direction:column;gap:3px;">
+        `<div onclick="event.stopPropagation();window.abrirModalOS(${os.id},'${(os.identificacao||'').replace(/'/g,"\\'")}',${op.id},'${(os.operacao||'').replace(/'/g,"\\'")}','${(os.status||'').replace(/'/g,"\\'")}','${(op.identificacao||'').replace(/'/g,"\\'")}')"
+          style="background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.06);border-radius:5px;padding:5px 8px;display:flex;flex-direction:column;gap:3px;cursor:pointer;transition:background .15s;"
+          onmouseenter="this.style.background='rgba(99,102,241,.12)'" onmouseleave="this.style.background='rgba(255,255,255,.03)'">
           <div style="display:flex;align-items:center;gap:6px;">
             <span style="font-size:10px;color:#94a3b8;min-width:70px;font-weight:600;flex-shrink:0;">${os.identificacao || ('#' + os.id)}</span>
             <span style="font-size:10px;color:#cbd5e1;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${(os.operacao || '').replace(/"/g,'&quot;')}">${os.operacao || '—'}</span>
@@ -67319,6 +67672,11 @@ document.addEventListener('DOMContentLoaded', () => {
         </div>
         <span style="flex-shrink:0;font-size:12px;font-weight:700;background:#312e81;color:#c7d2fe;padding:3px 10px;border-radius:12px;">QTD ${fmtQtde(qtdeTotal)}</span>
       </div>
+      <div style="margin-top:10px;display:flex;flex-wrap:wrap;gap:8px;">
+        <button type="button" class="kanban-group-action-btn" data-group-key="${(prodId || '').replace(/"/g,'&quot;')}" data-produto-codigo="${(prod.identificacao || prodId || '').replace(/"/g,'&quot;')}" style="border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#cbd5e1;border-radius:8px;padding:7px 12px;cursor:pointer;font-size:12px;">
+          Ver estrutura / processo
+        </button>
+      </div>
       ${opsHtml}
     </div>`;
   }
@@ -67355,6 +67713,8 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     if (cntProgramado) cntProgramado.textContent = aProduzir.length;
+    attachProducaoKanbanActionButtons('#registrarProducaoPane', ordens);
+    attachOpCardClickHandlers('#registrarProducaoPane', ordens);
   }
 
   async function carregarOrdens() {
@@ -67490,7 +67850,9 @@ document.addEventListener('DOMContentLoaded', () => {
         ? (op.ordens_servico || []).filter(os => os.operacao === _filtroOp)
         : (op.ordens_servico || []);
       const osHtml = _osVis.map(os =>
-        `<div style="background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.06);border-radius:5px;padding:5px 8px;display:flex;flex-direction:column;gap:3px;">
+        `<div onclick="event.stopPropagation();window.abrirModalOS(${os.id},'${(os.identificacao||'').replace(/'/g,"\\'")}',${op.id},'${(os.operacao||'').replace(/'/g,"\\'")}','${(os.status||'').replace(/'/g,"\\'")}','${(op.identificacao||'').replace(/'/g,"\\'")}')"
+          style="background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.06);border-radius:5px;padding:5px 8px;display:flex;flex-direction:column;gap:3px;cursor:pointer;transition:background .15s;"
+          onmouseenter="this.style.background='rgba(99,102,241,.12)'" onmouseleave="this.style.background='rgba(255,255,255,.03)'">
           <div style="display:flex;align-items:center;gap:6px;">
             <span style="font-size:10px;color:#94a3b8;min-width:70px;font-weight:600;flex-shrink:0;">${os.identificacao || ('#' + os.id)}</span>
             <span style="font-size:10px;color:#cbd5e1;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${(os.operacao || '').replace(/"/g,'&quot;')}">${os.operacao || '—'}</span>
@@ -67542,6 +67904,11 @@ document.addEventListener('DOMContentLoaded', () => {
         </div>
         <span style="flex-shrink:0;font-size:12px;font-weight:700;background:#064e3b;color:#6ee7b7;padding:3px 10px;border-radius:12px;">QTD ${fmtQtde(qtdeTotal)}</span>
       </div>
+      <div style="margin-top:10px;display:flex;flex-wrap:wrap;gap:8px;">
+        <button type="button" class="kanban-group-action-btn" data-group-key="${(prodId || '').replace(/"/g,'&quot;')}" data-produto-codigo="${(prod.identificacao || prodId || '').replace(/"/g,'&quot;')}" style="border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#cbd5e1;border-radius:8px;padding:7px 12px;cursor:pointer;font-size:12px;">
+          Ver estrutura / processo
+        </button>
+      </div>
       ${opsHtml}
     </div>`;
   }
@@ -67575,6 +67942,8 @@ document.addEventListener('DOMContentLoaded', () => {
     renderCol(colProgramado, cntProgramado, aProduzir,  'Nenhuma OP a produzir.');
     renderCol(colProduzindo, cntProduzindo, produzindo, 'Nenhuma OP em produção.');
     renderCol(colOutros,     cntOutros,     outros,     'Nenhuma OP em outros status.');
+    attachProducaoKanbanActionButtons('#montaProducaoPane', ordens);
+    attachOpCardClickHandlers('#montaProducaoPane', ordens);
   }
 
   async function carregarMontagem() {
@@ -67640,9 +68009,188 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 })();
 
-/* =====================================================================
-   POSIÇÃO DE ESTOQUE POR DATA
-   ===================================================================== */
+  function escapeHtml(value) {
+    return String(value ?? '').replace(/[&<>"']/g, (ch) => ({
+      '&': '&amp;',
+      '<': '&lt;',
+      '>': '&gt;',
+      '"': '&quot;',
+      "'": '&#39;'
+    }[ch] || ch));
+  }
+
+  function openProducaoKanbanStructure(produtoCodigo) {
+    const cod = String(produtoCodigo || window.codigoSelecionado || '').trim();
+    if (!cod) return;
+
+    // garante contexto canônico usado pelo PCP/estrutura
+    try { if (typeof window.setPCPProdutoCodigo === 'function') window.setPCPProdutoCodigo(cod); } catch (_) {}
+    try { window.codigoSelecionado = cod; } catch (_) {}
+
+    showMainTab('dadosProduto');
+
+    const estruturaLink = document.querySelector('#produtoTabs .main-header .nav-card[data-target="estruturaProduto"]');
+    if (estruturaLink) {
+      document.querySelectorAll('#produtoTabs .main-header .nav-card').forEach(a => a.classList.remove('active'));
+      estruturaLink.classList.add('active');
+    }
+
+    document.querySelectorAll('#produtoTabs .tab-content .tab-pane').forEach(p => p.style.display = 'none');
+    const pane = document.getElementById('estruturaProduto');
+    if (pane) pane.style.display = 'block';
+
+    // tenta carregar a estrutura com o contexto correto
+    try {
+      if (typeof window.ensurePCPEstruturaAutoLoad === 'function') {
+        // garante que caches/contextos do PCP estejam sincronizados
+        try { window.ensurePCPEstruturaAutoLoad(cod); } catch (e) { console.debug('[PCP] ensurePCPEstruturaAutoLoad falhou:', e); }
+      }
+    } catch (_) {}
+
+    if (typeof window.loadEstruturaProduto === 'function') {
+      window.loadEstruturaProduto(cod);
+    }
+  }
+
+  function openProducaoKanbanProcessModal(groupKey, ops) {
+    const overlay = document.createElement('div');
+    overlay.className = 'kanban-modal-overlay';
+    overlay.addEventListener('click', (ev) => { if (ev.target === overlay) overlay.remove(); });
+
+    const modal = document.createElement('div');
+    modal.className = 'kanban-modal';
+    modal.innerHTML = `
+      <header>
+        <div>
+          <h2>Processo da OP</h2>
+          <span>${escapeHtml(groupKey)}</span>
+        </div>
+        <button class="close-btn" aria-label="Fechar">&times;</button>
+      </header>
+      <div class="kanban-modal-body">
+        <div class="modal-code-block" style="max-height:460px;overflow:auto;">
+          ${ops.map(op => `
+            <div style="margin-bottom:14px;padding-bottom:12px;border-bottom:1px solid rgba(255,255,255,.08);">
+              <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:6px;">
+                <strong>${escapeHtml(op.identificacao || '#' + op.id)}</strong>
+                <span style="font-size:11px;color:#94a3b8;">${escapeHtml(op.status)}</span>
+              </div>
+              ${op.ficha_tecnica ? `<div style="font-size:12px;color:#cbd5e1;line-height:1.5;">${escapeHtml(op.ficha_tecnica)}</div>` : ''}
+              ${(op.ordens_servico || []).map(os => `
+                <div style="margin-top:8px;padding:8px;border-radius:8px;background:rgba(255,255,255,.04);">
+                  <div style="font-size:11px;color:#94a3b8;">${escapeHtml(os.identificacao || '#' + os.id)} - ${escapeHtml(os.operacao || 'Operação')}</div>
+                  <div style="font-size:11px;color:#cbd5e1;">Status: ${escapeHtml(os.status || '—')}</div>
+                  ${os.data_inicio ? `<div style="font-size:11px;color:#94a3b8;">Início: ${escapeHtml(fmtData(os.data_inicio))}</div>` : ''}
+                  ${os.data_final ? `<div style="font-size:11px;color:#94a3b8;">Final: ${escapeHtml(fmtData(os.data_final))}</div>` : ''}
+                </div>`).join('')}
+            </div>`).join('') || '<div style="color:#94a3b8;">Nenhum processo disponível para este grupo.</div>'}
+        </div>
+      </div>
+      <footer>
+        <button type="button" class="modal-secondary">Fechar</button>
+      </footer>
+    `;
+
+    overlay.appendChild(modal);
+    document.body.appendChild(overlay);
+
+    modal.querySelector('.close-btn')?.addEventListener('click', () => overlay.remove());
+    modal.querySelector('.modal-secondary')?.addEventListener('click', () => overlay.remove());
+  }
+
+  function openProducaoKanbanActionsModal(produtoCodigo, groupKey, ops) {
+    const overlay = document.createElement('div');
+    overlay.className = 'kanban-modal-overlay';
+    overlay.addEventListener('click', (ev) => { if (ev.target === overlay) overlay.remove(); });
+
+    const modal = document.createElement('div');
+    modal.className = 'kanban-modal';
+    modal.innerHTML = `
+      <header>
+        <div>
+          <h2>Ações do grupo</h2>
+          <span>${escapeHtml(produtoCodigo || groupKey)}</span>
+        </div>
+        <button class="close-btn" aria-label="Fechar">&times;</button>
+      </header>
+      <div class="kanban-modal-body">
+        <div class="modal-code-block">
+          <p>Escolha uma ação para o grupo de produção:</p>
+          <div style="display:flex;flex-wrap:wrap;gap:10px;margin-top:12px;">
+            <button type="button" id="open-estrutura-btn" class="modal-primary" style="min-width:140px;">Ver estrutura</button>
+            <button type="button" id="open-process-btn" class="modal-secondary" style="min-width:140px;">Processo</button>
+          </div>
+        </div>
+      </div>
+      <footer>
+        <button type="button" class="modal-secondary">Fechar</button>
+      </footer>
+    `;
+
+    overlay.appendChild(modal);
+    document.body.appendChild(overlay);
+
+    const close = () => overlay.remove();
+    modal.querySelector('.close-btn')?.addEventListener('click', close);
+    modal.querySelector('footer .modal-secondary')?.addEventListener('click', close);
+    modal.querySelector('#open-estrutura-btn')?.addEventListener('click', () => {
+      close();
+      openProducaoKanbanStructure(produtoCodigo || groupKey);
+    });
+    modal.querySelector('#open-process-btn')?.addEventListener('click', () => {
+      close();
+      openProducaoKanbanProcessModal(groupKey, ops);
+    });
+  }
+
+  function attachProducaoKanbanActionButtons(containerSelector, ordens) {
+    const container = document.querySelector(containerSelector);
+    if (!container || !ordens) return;
+
+    container.querySelectorAll('.kanban-group-action-btn').forEach(btn => {
+      if (btn.dataset.bound === '1') return;
+      btn.dataset.bound = '1';
+      btn.addEventListener('click', (ev) => {
+        ev.preventDefault();
+        ev.stopPropagation();
+
+        const groupKey = btn.dataset.groupKey || '';
+        const produtoCodigo = btn.dataset.produtoCodigo || groupKey;
+        const ops = ordens.filter(op => (op.produto?.identificacao || String(op.id)) === groupKey);
+
+        openProducaoKanbanActionsModal(produtoCodigo, groupKey, ops);
+      });
+    });
+  }
+
+  // Abre modal ao clicar em um card de OP (fora de botões internos)
+  function attachOpCardClickHandlers(containerSelector, ordens) {
+    const container = document.querySelector(containerSelector);
+    if (!container || !ordens) return;
+
+    container.querySelectorAll('[data-op-id]').forEach(card => {
+      if (card.dataset.opBound === '1') return;
+      card.dataset.opBound = '1';
+      card.addEventListener('click', (ev) => {
+        // Ignora cliques em botões/inputs internos
+        if (ev.target.closest('button, a, input, textarea, select')) return;
+
+        const opId = card.dataset.opId || card.getAttribute('data-op-id');
+        if (!opId) return;
+
+        // Procura a OP nas ordens fornecidas
+        const op = ordens.find(o => String(o.id) === String(opId) || String(o.id) === String(opId));
+        if (!op) return;
+
+        const groupKey = op.produto?.identificacao || String(op.id);
+        const produtoCodigo = op.produto?.identificacao || groupKey;
+
+        // Abre modal de ações para o grupo/OP
+        openProducaoKanbanActionsModal(produtoCodigo, groupKey, [op]);
+      });
+    });
+  }
+
 (function () {
   let posicaoAllDados = [];
   let posicaoPagAtual = 1;
@@ -68561,27 +69109,111 @@ window.initOscilacaoEstoque = (function () {
     document.getElementById('vippDtNF').value = new Date().toISOString().split('T')[0];
   }
 
-  // Transfere dados da OS (edição) para o formulário VIPP — chamado pelo botão "Preencher da OS"
-  function prePopularFromOS() {
+  function _vippFormatarCep(cep) {
+    var clean = String(cep || '').replace(/\D/g, '');
+    if (clean.length !== 8) return String(cep || '').trim();
+    return clean.replace(/(\d{5})(\d{3})/, '$1-$2');
+  }
+
+  function _vippOsIdAtual() {
+    if (typeof _atEditModalCurrentId !== 'undefined' && _atEditModalCurrentId) return String(_atEditModalCurrentId);
+    var osModal = document.getElementById('atOsModal');
+    return (osModal && osModal.dataset.osId) ? String(osModal.dataset.osId) : '';
+  }
+
+  function _vippCepDoModalOs() {
+    var el = document.getElementById('atOsCep');
+    if (!el || el.querySelector('.at-os-loading-spin')) return '';
+    return (el.textContent || '').trim();
+  }
+
+  function _vippRowOsAtual() {
+    var id = _vippOsIdAtual();
+    if (!id) return null;
+    return (_atAllRows || []).find(function (r) { return String(r.id) === String(id); }) || null;
+  }
+
+  function _aplicarVippDadosOs(dados) {
     var g = function (id) { return (document.getElementById(id) ? document.getElementById(id).value : '').trim(); };
+    var vippCepEl = document.getElementById('vippCep');
+    if (!vippCepEl) return;
 
-    document.getElementById('vippNome').value        = g('atEmNome')     || g('atNomeRevendaCliente');
-    document.getElementById('vippCnpjCpf').value     = g('atEmCpf')      || g('atCpfCnpj');
-    document.getElementById('vippTelefone').value    = g('atEmTelefone') || g('atTelefone');
-    document.getElementById('vippCep').value         = g('atCep');
-    document.getElementById('vippEndereco').value    = g('atRua');
-    document.getElementById('vippNumero').value      = g('atNumero');
-    document.getElementById('vippBairro').value      = g('atBairro');
-    document.getElementById('vippCidade').value      = g('atEmCidade')   || g('atCidade');
-    document.getElementById('vippUF').value          = (g('atEmEstado')  || g('atEstado')).toUpperCase();
+    document.getElementById('vippNome').value     = g('atEmNome')     || g('atNomeRevendaCliente');
+    document.getElementById('vippCnpjCpf').value  = g('atEmCpf')      || g('atCpfCnpj');
+    document.getElementById('vippTelefone').value = g('atEmTelefone') || g('atTelefone');
 
-    // Nº NF não é auto-preenchido — usuário preenche manualmente se necessário
+    var cep = String(dados.cep || _vippCepDoModalOs() || g('atCep') || '').trim();
+    vippCepEl.value = _vippFormatarCep(cep);
 
-    // Preenche doc do destinatário na Declaração de Conteúdo
+    var numEl = document.getElementById('vippNumero');
+    var numeroOs = String(dados.numero || g('atNumero') || '').trim();
+    if (numEl && numeroOs) numEl.value = numeroOs;
+
+    if (dados.rua) {
+      var endEl = document.getElementById('vippEndereco');
+      if (endEl) endEl.value = dados.rua;
+    }
+    if (dados.bairro) {
+      var bairroEl = document.getElementById('vippBairro');
+      if (bairroEl) bairroEl.value = dados.bairro;
+    }
+    var cidEl = document.getElementById('vippCidade');
+    var ufEl = document.getElementById('vippUF');
+    var cidade = dados.cidade || g('atEmCidade') || g('atCidade');
+    var uf = String(dados.estado || g('atEmEstado') || g('atEstado') || '').toUpperCase();
+    if (cidEl && cidade) cidEl.value = cidade;
+    if (ufEl && uf) ufEl.value = uf;
+
     var docDestEl = document.getElementById('vippDeclDocDestinatario');
     if (docDestEl) {
       docDestEl.value = (document.getElementById('vippCnpjCpf') ? document.getElementById('vippCnpjCpf').value : '').replace(/\D/g, '');
     }
+
+    if (cep.replace(/\D/g, '').length === 8) buscarCepVipp(cep, true);
+  }
+
+  // Transfere dados da OS (sac.at) para o formulário VIPP — botão "Preencher da OS"
+  function prePopularFromOS() {
+    var row = _vippRowOsAtual();
+    var dados = {
+      cep:    (row && row.cep) || _vippCepDoModalOs() || '',
+      rua:    row && row.rua,
+      bairro: row && row.bairro,
+      numero: row && row.numero,
+      cidade: row && row.cidade,
+      estado: row && row.estado,
+    };
+
+    if (String(dados.cep || '').replace(/\D/g, '').length === 8) {
+      _aplicarVippDadosOs(dados);
+      return;
+    }
+
+    var osId = _vippOsIdAtual();
+    if (!osId) {
+      _aplicarVippDadosOs(dados);
+      return;
+    }
+
+    fetch('/api/sac/at/os-data/' + osId, { credentials: 'same-origin' })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (d) {
+        if (d) {
+          dados.cep = d.cep || dados.cep;
+          if (d.endereco) {
+            var partes = String(d.endereco).split(',');
+            dados.rua = (partes[0] || '').trim();
+            if (!dados.numero && partes[1]) dados.numero = partes[1].trim();
+          }
+          if (d.cidade_uf) {
+            var cu = String(d.cidade_uf).split('/').map(function (s) { return s.trim(); });
+            if (!dados.cidade && cu[0]) dados.cidade = cu[0];
+            if (!dados.estado && cu[1]) dados.estado = cu[1];
+          }
+        }
+        _aplicarVippDadosOs(dados);
+      })
+      .catch(function () { _aplicarVippDadosOs(dados); });
   }
 
   var fillFromOsBtn = document.getElementById('vippPreencherDaOsBtn');
@@ -68655,8 +69287,8 @@ window.initOscilacaoEstoque = (function () {
   // ── Auto-fill de endereço pelo CEP ───────────────────────────────────────
   var vippCepInput = document.getElementById('vippCep');
   var vippCepTimer = null;
-  function buscarCepVipp(cep) {
-    var clean = cep.replace(/\D/g, '');
+  function buscarCepVipp(cep, force) {
+    var clean = String(cep || '').replace(/\D/g, '');
     if (clean.length !== 8) return;
     fetch('/api/sac/at/cep/' + clean, { credentials: 'same-origin' })
       .then(function (r) { return r.ok ? r.json() : null; })
@@ -68666,11 +69298,10 @@ window.initOscilacaoEstoque = (function () {
         var bairro = document.getElementById('vippBairro');
         var cidade = document.getElementById('vippCidade');
         var uf = document.getElementById('vippUF');
-        if (end && d.rua && !end.value)      end.value    = d.rua;
-        if (bairro && d.bairro && !bairro.value) bairro.value = d.bairro;
-        if (cidade && d.municipio)           cidade.value = d.municipio;
-        if (uf && d.uf)                      uf.value     = d.uf.toUpperCase();
-        // Foca no número após preencher
+        if (end && d.rua && (force || !end.value))           end.value    = d.rua;
+        if (bairro && d.bairro && (force || !bairro.value)) bairro.value = d.bairro;
+        if (cidade && d.municipio && (force || !cidade.value)) cidade.value = d.municipio;
+        if (uf && d.uf)                                      uf.value     = String(d.uf).toUpperCase();
         var numEl = document.getElementById('vippNumero');
         if (numEl && !numEl.value) numEl.focus();
       })
