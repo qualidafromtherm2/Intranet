@@ -18,6 +18,7 @@ const STATUS_EXECUTADO  = 'Executado';
 const STATUS_REPROVADO  = 'Reprovado';
 
 const TIPOS_VALIDOS = new Set(['ENT', 'SAI']);
+const MOTIVOS_OMIE_VALIDOS = new Set(['INV', 'OPS', 'PER', 'PDV']);
 
 let schemaAjustesOk = false;
 
@@ -192,7 +193,8 @@ async function incluirAjusteOmie(registro, aprovadoPor) {
 
   const dataObj = normalizarDataMovimentacao(data_movimentacao);
   const tipoOmie = String(tipo_operacao || '').toUpperCase();
-  const motivoOmie = String(motivo || 'AJU').toUpperCase();
+  const motivoNormalizado = String(motivo || 'INV').toUpperCase();
+  const motivoOmie = MOTIVOS_OMIE_VALIDOS.has(motivoNormalizado) ? motivoNormalizado : 'INV';
   const obsTexto = obs
     ? String(obs).slice(0, 200)
     : `Ajuste ${tipoOmie} #${id} - Produto ${codigo || ''}. Executado por ${aprovadoPor}.`;
@@ -506,7 +508,8 @@ router.post('/', express.json(), async (req, res) => {
     const dataMovSql     = formatarDataSql(dataMovObj);
     const solicitante    = String(req.body?.solicitante || '').trim() || null;
     const obs            = String(req.body?.obs || '').trim() || null;
-    const motivo         = String(req.body?.motivo || 'AJU').trim().toUpperCase() || 'AJU';
+    const motivoRaw      = String(req.body?.motivo || 'INV').trim().toUpperCase() || 'INV';
+    const motivo         = MOTIVOS_OMIE_VALIDOS.has(motivoRaw) ? motivoRaw : 'INV';
     const itens          = Array.isArray(req.body?.itens) ? req.body.itens : [];
 
     if (!TIPOS_VALIDOS.has(tipo_operacao)) {
