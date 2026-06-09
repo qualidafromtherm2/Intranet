@@ -20,6 +20,8 @@ const STATUS_REPROVADO  = 'Reprovado';
 const TIPOS_VALIDOS = new Set(['ENT', 'SAI']);
 const MOTIVOS_OMIE_VALIDOS = new Set(['INV', 'OPS', 'PER', 'PDV']);
 const ERROS_OMIE_NAO_RETRYAVEIS = [
+  /api bloqueada por consumo indevido/i,
+  /consumo redundante detectado/i,
   /valor unit.rio.+deve ser maior que zero/i,
   /preenchimento inv.lido da tag\s*\[motivo\]/i,
   /nenhum produto foi localizado/i,

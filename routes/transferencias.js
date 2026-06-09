@@ -7,6 +7,13 @@ const { OMIE_APP_KEY, OMIE_APP_SECRET } = require('../config.server');
 const STATUS_AGUARDANDO = 'Aguardando aprovação';
 const STATUS_TRANSFERIDO = 'Transferido';
 const STATUS_REPROVADO = 'Reprovado';
+const ERROS_OMIE_SEM_RETRY_IMEDIATO = [
+  /api bloqueada por consumo indevido/i,
+  /consumo redundante detectado/i,
+  /nenhum produto foi localizado/i,
+  /produto.+n.o encontrado/i,
+  /valor unit.rio.+deve ser maior que zero/i
+];
 
 let schemaTransferenciasOk = false;
 
@@ -166,6 +173,9 @@ function sleep(ms) {
 
 function isErroOmieRetryable({ httpStatus, texto }) {
   const body = String(texto || '');
+  if (ERROS_OMIE_SEM_RETRY_IMEDIATO.some((regex) => regex.test(body))) {
+    return false;
+  }
   return httpStatus === 425
     || httpStatus === 429
     || httpStatus >= 500
