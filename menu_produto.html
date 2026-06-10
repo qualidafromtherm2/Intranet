@@ -5424,6 +5424,10 @@
                     <i class="fa-solid fa-gear"></i>
                     <span>Impressora</span>
                   </button>
+                  <button id="envioMercadoriaAtualizarRastreioBtn" class="content-button" type="button" title="Consultar rastreio nos Correios para os envios visíveis na lista" style="display:flex;align-items:center;gap:6px;">
+                    <i class="fa-solid fa-location-dot"></i>
+                    <span>Atualizar rastreio</span>
+                  </button>
                   <button id="envioMercadoriaRefreshBtnTop" class="content-button" type="button" style="display:flex;align-items:center;gap:6px;">
                     <i class="fa-solid fa-rotate"></i>
                     <span>Recarregar</span>
@@ -5439,6 +5443,8 @@
                 <div class="envio-metric"><span>Total ativo</span><strong id="envioMetricTotal">0</strong></div>
               </div>
 
+              <div id="envioMercadoriaRastreioStatus" style="display:none;padding:8px 12px;border-radius:8px;font-size:13px;line-height:1.4;"></div>
+
               <div class="envio-mercadoria-filters">
                 <input id="envioMercadoriaBusca" type="search" placeholder="Buscar por ID, requisitante, rastreio, conteúdo ou observação">
                 <select id="envioMercadoriaFiltroStatus">
@@ -5446,8 +5452,6 @@
                   <option value="Pendente">Pendente</option>
                   <option value="Em separação">Em separação</option>
                   <option value="Aguardando correios">Aguardando correios</option>
-                  <option value="Enviado">Enviado</option>
-                  <option value="Finalizado">Finalizado</option>
                 </select>
                 <select id="envioMercadoriaFiltroPrazo">
                   <option value="">Todas as datas</option>

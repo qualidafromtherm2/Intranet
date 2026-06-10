@@ -11233,6 +11233,8 @@ const atSerieModal = document.getElementById('atSerieModal');
 const atSerieModalClose = document.getElementById('atSerieModalClose');
 const atSerieModalTbody = document.getElementById('atSerieModalTbody');
 const envioMercadoriaRefreshBtnTop = document.getElementById('envioMercadoriaRefreshBtnTop'); // painel dedicado
+const envioMercadoriaAtualizarRastreioBtn = document.getElementById('envioMercadoriaAtualizarRastreioBtn');
+const envioMercadoriaRastreioStatus = document.getElementById('envioMercadoriaRastreioStatus');
 const envioMercadoriaTabelaBodyPane = document.getElementById('envioMercadoriaCardsPane') || document.getElementById('envioMercadoriaTabelaBodyPane');
 const envioMercadoriaBusca = document.getElementById('envioMercadoriaBusca');
 const envioMercadoriaFiltroStatus = document.getElementById('envioMercadoriaFiltroStatus');
@@ -11243,6 +11245,101 @@ const envioMetricEnviado = document.getElementById('envioMetricEnviado');
 const envioMetricTotal = document.getElementById('envioMetricTotal');
 const envioMercadoriaMenu = document.getElementById('menu-envio-mercadoria');
 const sacStatusOptions = ['Pendente', 'Em separação', 'Aguardando correios', 'Enviado', 'Finalizado'];
+function setEnvioMercadoriaRastreioStatus(text, isError = false) {
+  if (!envioMercadoriaRastreioStatus) return;
+  if (!text) {
+    envioMercadoriaRastreioStatus.style.display = 'none';
+    envioMercadoriaRastreioStatus.textContent = '';
+    return;
+  }
+  envioMercadoriaRastreioStatus.style.display = 'block';
+  envioMercadoriaRastreioStatus.style.background = isError ? 'rgba(239,68,68,.12)' : 'rgba(34,197,94,.1)';
+  envioMercadoriaRastreioStatus.style.border = isError ? '1px solid rgba(239,68,68,.35)' : '1px solid rgba(34,197,94,.28)';
+  envioMercadoriaRastreioStatus.style.color = isError ? '#fca5a5' : '#86efac';
+  envioMercadoriaRastreioStatus.textContent = text;
+}
+
+function formatarTextoRastreioCorreios(data) {
+  const partes = [];
+  if (data?.status) partes.push(data.status);
+  if (data?.detalhe) partes.push(data.detalhe);
+  const local = [data?.local, data?.cidade, data?.uf].filter(Boolean).join(' - ');
+  if (local) partes.push(local);
+  if (data?.quando) partes.push(new Date(data.quando).toLocaleString('pt-BR'));
+  return partes.length ? partes.join(' | ') : 'Sem atualização';
+}
+
+async function atualizarRastreioEnvioMercadoria() {
+  const container = envioMercadoriaTabelaBodyPane;
+  if (!container) return;
+
+  const spans = container.querySelectorAll('.rast-status');
+  const items = [];
+  spans.forEach((el) => {
+    const codigo = String(el.getAttribute('data-identificacao') || el.getAttribute('data-rastreio') || '')
+      .replace(/\s+/g, '')
+      .toUpperCase();
+    if (isCodigoRastreioEnvioMercadoria(codigo)) {
+      items.push({ el, codigo });
+    }
+  });
+
+  if (!items.length) {
+    setEnvioMercadoriaRastreioStatus('Nenhum código de rastreio válido na lista visível.', true);
+    return;
+  }
+
+  if (envioMercadoriaAtualizarRastreioBtn) envioMercadoriaAtualizarRastreioBtn.disabled = true;
+  setEnvioMercadoriaRastreioStatus(`Consultando ${items.length} rastreio(s) nos Correios...`, false);
+  envioMercadoriaRastreioStatus.style.background = 'rgba(59,130,246,.1)';
+  envioMercadoriaRastreioStatus.style.border = '1px solid rgba(59,130,246,.28)';
+  envioMercadoriaRastreioStatus.style.color = '#93c5fd';
+
+  const avisos = [];
+  let okCount = 0;
+
+  for (const { el, codigo } of items) {
+    el.textContent = 'Consultando...';
+    try {
+      const resp = await fetch(`/api/sac/rastreio/${encodeURIComponent(codigo)}`, { credentials: 'same-origin' });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok || data.ok === false) {
+        const msg = data.error || `Falha ao consultar ${codigo} (HTTP ${resp.status})`;
+        avisos.push(`${codigo}: ${msg}`);
+        el.textContent = msg;
+        continue;
+      }
+      el.textContent = formatarTextoRastreioCorreios(data);
+      okCount += 1;
+
+      if (isRastreioEmTransitoOuPosterior(data.status)) {
+        const card = el.closest('.envio-card');
+        if (card) card.remove();
+      }
+    } catch (err) {
+      const msg = err?.message || 'Erro ao consultar';
+      avisos.push(`${codigo}: ${msg}`);
+      el.textContent = msg;
+    }
+  }
+
+  if (envioMercadoriaAtualizarRastreioBtn) envioMercadoriaAtualizarRastreioBtn.disabled = false;
+
+  if (avisos.length) {
+    setEnvioMercadoriaRastreioStatus(
+      `${okCount} atualizado(s). ${avisos.length} com aviso: ${avisos.join(' | ')}`,
+      true
+    );
+    alert(`Atualização de rastreio concluída com avisos:\n\n${avisos.join('\n')}`);
+  } else {
+    setEnvioMercadoriaRastreioStatus(`${okCount} rastreio(s) atualizado(s) com sucesso.`, false);
+  }
+
+  if (!container.querySelector('.envio-card')) {
+    container.innerHTML = '<div class="envio-empty-state">Nenhum envio combina com os filtros atuais.</div>';
+  }
+}
+
 // Preenche status de rastreio nas células com data-rastreio
 async function preencherStatusRastreio(container) {
   if (!container) return;
@@ -11414,6 +11511,8 @@ function filtrarEnvioMercadoria(row) {
   const identClean = String(row?.identificacao || '').replace(/\s+/g, '').toUpperCase();
   const criado = row?.created_at ? new Date(row.created_at) : null;
 
+  if (status === 'Enviado' || status === 'Finalizado') return false;
+
   if (isRastreioEmTransitoOuPosterior(rastreioStatus)) return false;
 
   if (statusFiltro && status !== statusFiltro) return false;
@@ -11517,7 +11616,7 @@ function renderEnvioMercadoriaCard(r) {
         <div>
           <div class="envio-card-label">Rastreio</div>
           <div class="envio-card-text" style="font-weight:800;color:#f8fafc;">${escapeAtHtml(identRaw)}</div>
-          <small class="rast-status" data-rastreio="${escapeAtHtml(dataRastreio)}" data-id-vipp="${escapeAtHtml(r.id_vipp || '')}" data-envio-id="${escapeAtHtml(String(r.id))}" data-identificacao="${escapeAtHtml(identClean)}" style="display:block;margin-top:5px;color:#94a3b8;line-height:1.35;">${escapeAtHtml(r.id_vipp && !isFinalizado ? 'Consultando VIPP...' : (rastText || (isRastreio ? 'Consultando rastreio...' : 'Sem rastreio válido')))}</small></small>
+          <small class="rast-status" data-rastreio="${escapeAtHtml(dataRastreio)}" data-id-vipp="${escapeAtHtml(r.id_vipp || '')}" data-envio-id="${escapeAtHtml(String(r.id))}" data-identificacao="${escapeAtHtml(identClean)}" style="display:block;margin-top:5px;color:#94a3b8;line-height:1.35;">${escapeAtHtml(rastText || (isRastreio ? 'Clique em Atualizar rastreio para consultar' : 'Sem rastreio válido'))}</small></small>
         </div>
         <span class="envio-status-pill ${statusPillClasse}"><i class="fa-solid fa-circle"></i>${escapeAtHtml(status)}</span>
       </div>
@@ -17694,9 +17793,12 @@ async function carregarSacSolicitacoes(targetBody, { hideDone = false, titleOnly
       return;
     }
     
-    // Filtra registros excluídos na tabela "Envios registrados"
-    const filteredRows = isEnvioMercadoriaPane 
-      ? rows.filter(r => (r.status || '').toLowerCase() !== 'excluído')
+    // Filtra registros excluídos e finalizados na tabela "Envios registrados"
+    const filteredRows = isEnvioMercadoriaPane
+      ? rows.filter((r) => {
+          const st = normalizeSacStatus(r.status);
+          return st !== 'Excluído' && st !== 'Enviado' && st !== 'Finalizado';
+        })
       : rows;
     
     if (!filteredRows.length) {
@@ -17717,8 +17819,6 @@ async function carregarSacSolicitacoes(targetBody, { hideDone = false, titleOnly
         return;
       }
       bodyEl.innerHTML = rowsVisiveis.map(renderEnvioMercadoriaCard).join('');
-      preencherStatusRastreio(bodyEl);
-      preencherStatusVipp(bodyEl);
       return;
     }
     
@@ -18469,7 +18569,11 @@ if (sacRelatorioConteudoUsuarioSelect) {
 // Painel SAC: filtra por usuário logado (filterByUser: true)
 sacRefreshBtn?.addEventListener('click', () => carregarSacSolicitacoes(sacTabelaBody, { hideDone: false, filterByUser: true }));
 // Painel Envio de Mercadoria: mostra todos os registros (filterByUser: false)
-envioMercadoriaRefreshBtnTop?.addEventListener('click', () => carregarSacSolicitacoes(envioMercadoriaTabelaBodyPane, { hideDone: true, filterByUser: false }));
+envioMercadoriaRefreshBtnTop?.addEventListener('click', () => {
+  setEnvioMercadoriaRastreioStatus('');
+  carregarSacSolicitacoes(envioMercadoriaTabelaBodyPane, { hideDone: true, filterByUser: false });
+});
+envioMercadoriaAtualizarRastreioBtn?.addEventListener('click', () => atualizarRastreioEnvioMercadoria());
 
 [envioMercadoriaBusca, envioMercadoriaFiltroStatus, envioMercadoriaFiltroPrazo]
   .filter(Boolean)
