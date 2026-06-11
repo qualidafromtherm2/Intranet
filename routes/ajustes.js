@@ -163,6 +163,9 @@ function sleep(ms) {
 
 function isErroOmieRetryable({ httpStatus, texto }) {
   const body = String(texto || '');
+  if (ERROS_OMIE_NAO_RETRYAVEIS.some((regex) => regex.test(body))) {
+    return false;
+  }
   return httpStatus === 425
     || httpStatus === 429
     || httpStatus >= 500
