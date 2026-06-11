@@ -19681,14 +19681,6 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // Ajuste approve-all button
   const ajusteApproveAllBtn = document.getElementById('solicitacoesAjusteApproveAll');
-  const omieBatchStopRegexes = [
-    /api bloqueada por consumo indevido/i,
-    /consumo redundante detectado/i,
-    /nenhum produto foi localizado/i,
-    /produto.+n.o encontrado/i,
-    /valor unit.rio.+deve ser maior que zero/i
-  ];
-  const shouldStopOmieApprovalBatch = (mensagem) => omieBatchStopRegexes.some((regex) => regex.test(String(mensagem || '')));
   const waitNextOmieBatchItem = (ms = 900) => new Promise(resolve => setTimeout(resolve, ms));
 
   if (ajusteApproveAllBtn && !ajusteApproveAllBtn.__ajusteBound) {
@@ -19705,38 +19697,29 @@ document.addEventListener('DOMContentLoaded', async () => {
       ajusteApproveAllBtn.disabled = true;
       const originalLabel = ajusteApproveAllBtn.textContent;
       const erros = [];
-      let loteInterrompido = false;
-      let aprovados = 0;
+      let processados = 0;
       for (const a of pendentes) {
-        aprovados++;
-        ajusteApproveAllBtn.textContent = `Aprovando ${aprovados}/${pendentes.length}…`;
+        processados++;
+        ajusteApproveAllBtn.textContent = `Aprovando ${processados}/${pendentes.length}…`;
         try {
           const resp = await fetch(`/api/ajustes/${a.id}/aprovar`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ aprovadoPor: usuario }) });
           const json = await resp.json().catch(() => ({}));
           if (!resp.ok || !json?.ok) {
-            const mensagem = `ID ${a.id}: ${json?.error || 'Erro'}`;
-            erros.push(mensagem);
-            if (shouldStopOmieApprovalBatch(json?.error || mensagem)) {
-              loteInterrompido = true;
-              break;
-            }
+            erros.push(`ID ${a.id}: ${json?.error || 'Erro'}`);
           }
         } catch (err) {
-          const mensagem = `ID ${a.id}: ${err?.message || 'Erro de rede'}`;
-          erros.push(mensagem);
-          if (shouldStopOmieApprovalBatch(err?.message || mensagem)) {
-            loteInterrompido = true;
-            break;
-          }
+          erros.push(`ID ${a.id}: ${err?.message || 'Erro de rede'}`);
         }
-        if (aprovados < pendentes.length) {
+        if (processados < pendentes.length) {
           await waitNextOmieBatchItem();
         }
       }
       ajusteApproveAllBtn.textContent = originalLabel;
       ajusteApproveAllBtn.disabled = false;
-      if (loteInterrompido) alert(`Processamento interrompido para evitar novo bloqueio da Omie.\n\nÚltimo erro:\n${erros[erros.length - 1] || 'Erro desconhecido'}`);
-      else if (erros.length) alert(`Concluído com erros:\n${erros.join('\n')}`);
+      if (erros.length) {
+        const sucessos = pendentes.length - erros.length;
+        alert(`Processamento concluído.\nSucesso(s): ${sucessos}\nErro(s): ${erros.length}\n\n${erros.join('\n')}`);
+      }
       else alert('Todos os ajustes pendentes foram executados com sucesso!');
       await carregarSolicitacoesAjustes(true);
     });
@@ -19765,11 +19748,10 @@ document.addEventListener('DOMContentLoaded', async () => {
       transferApproveAllBtn.disabled = true;
       const originalLabel = transferApproveAllBtn.textContent;
       const erros = [];
-      let loteInterrompido = false;
-      let aprovados = 0;
+      let processados = 0;
       for (const t of pendentes) {
-        aprovados++;
-        transferApproveAllBtn.textContent = `Aprovando ${aprovados}/${pendentes.length}…`;
+        processados++;
+        transferApproveAllBtn.textContent = `Aprovando ${processados}/${pendentes.length}…`;
         try {
           const resp = await fetch(`/api/transferencias/${t.id}/aprovar`, {
             method: 'PATCH',
@@ -19778,29 +19760,21 @@ document.addEventListener('DOMContentLoaded', async () => {
           });
           const json = await resp.json().catch(() => ({}));
           if (!resp.ok || !json?.ok) {
-            const mensagem = `ID ${t.id}: ${json?.error || 'Erro'}`;
-            erros.push(mensagem);
-            if (shouldStopOmieApprovalBatch(json?.error || mensagem)) {
-              loteInterrompido = true;
-              break;
-            }
+            erros.push(`ID ${t.id}: ${json?.error || 'Erro'}`);
           }
         } catch (err) {
-          const mensagem = `ID ${t.id}: ${err?.message || 'Erro de rede'}`;
-          erros.push(mensagem);
-          if (shouldStopOmieApprovalBatch(err?.message || mensagem)) {
-            loteInterrompido = true;
-            break;
-          }
+          erros.push(`ID ${t.id}: ${err?.message || 'Erro de rede'}`);
         }
-        if (aprovados < pendentes.length) {
+        if (processados < pendentes.length) {
           await waitNextOmieBatchItem();
         }
       }
       transferApproveAllBtn.textContent = originalLabel;
       transferApproveAllBtn.disabled = false;
-      if (loteInterrompido) alert(`Processamento interrompido para evitar novo bloqueio da Omie.\n\nÚltimo erro:\n${erros[erros.length - 1] || 'Erro desconhecido'}`);
-      else if (erros.length) alert(`Concluído com erros:\n${erros.join('\n')}`);
+      if (erros.length) {
+        const sucessos = pendentes.length - erros.length;
+        alert(`Processamento concluído.\nSucesso(s): ${sucessos}\nErro(s): ${erros.length}\n\n${erros.join('\n')}`);
+      }
       else alert('Todas as transferências pendentes foram executadas com sucesso!');
       await carregarSolicitacoesTransferencias(true);
     });
