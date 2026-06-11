@@ -774,11 +774,13 @@ async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) 
           quantidade: 0,
           quantidade_solicitada: null,
           quantidade_separada: null,
+          urgente: false,
           _allSep: true,
           _isConferido: bucket === 'conferido'
         });
       }
       const a = map.get(key);
+      if (it.urgente) a.urgente = true;
       if (!a.nome_local && it.nome_local) a.nome_local = it.nome_local;
       if (!a.cod_local && it.cod_local) a.cod_local = it.cod_local;
       if ((!a.endereco_pp || !a.endereco_pp.length) && Array.isArray(it.endereco_pp) && it.endereco_pp.length) {
@@ -913,6 +915,7 @@ async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) 
       : `<div class="sep-qty-wrap" style="display:flex;align-items:center;gap:4px;flex-shrink:0;">
            <span class="sep-qty-label" style="font-size:.80rem;font-weight:700;color:#f0f0f0;white-space:nowrap;">${_solFmtQty(qty)} ${unidade}</span>
          </div>`;
+    const isUrgente = !!it.urgente;
     return `
       <div data-item-row="${it.cod_omie || it.codigo_produto}"
            data-n-solic="${nSolic || ''}"
@@ -920,11 +923,12 @@ async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) 
            data-carr-ids='${JSON.stringify(it.carr_ids)}'
            data-qty-total="${qty}"
            data-status="${it.status}"
+           data-urgente="${isUrgente ? '1' : '0'}"
            data-codigo="${String(it.codigo_produto || '').replace(/"/g, '&quot;')}"
            data-descricao="${encodeURIComponent(it.descricao || '')}"
            data-observacao="${encodeURIComponent(obsText)}"
            data-unidade="${String(it.unidade || 'UN').replace(/"/g, '&quot;')}"
-           style="display:flex;align-items:flex-start;gap:12px;padding:10px 16px;border-top:1px solid #222;${isConferido ? 'background:#0c1812;border-left:3px solid #22c55e;' : ''}">
+           style="display:flex;align-items:flex-start;gap:12px;padding:10px 16px;border-top:1px solid #222;${isConferido ? 'background:#0c1812;border-left:3px solid #22c55e;' : ''}${isUrgente ? 'border-left:3px solid #ef4444 !important;' : ''}">
         <div style="width:40px;height:40px;border-radius:8px;background:#0f0f0f;overflow:hidden;flex-shrink:0;margin-top:2px;">
           ${_solGetMiniImgHtml(it.codigo_produto, it.descricao || '')}
         </div>
@@ -940,6 +944,10 @@ async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) 
                  <span style="font-size:.65rem;color:#6ee7b7;font-style:italic;">aguardando demais itens</span>`
               : _solStatusBadge(it.status || 'Separação')}
             ${hasObs ? `<span title="Item com observação" style="display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:999px;background:#f97316;color:#111;font-weight:800;font-size:.70rem;line-height:1;">!</span>` : ''}
+            <button class="btn-item-urgente" title="Urgente, entregar o quanto antes este item"
+              style="display:inline-flex;align-items:center;gap:3px;padding:2px 7px;border-radius:20px;font-size:.67rem;font-weight:700;cursor:pointer;border:1px solid ${isUrgente ? '#ef4444' : '#374151'};background:${isUrgente ? '#450a0a' : 'transparent'};color:${isUrgente ? '#fca5a5' : '#6b7280'};transition:all .15s;">
+              <i class="fa-solid fa-bolt" style="font-size:.63rem;"></i>${isUrgente ? 'Urgente' : ''}
+            </button>
           </div>
           ${swapHistory}
           ${localizacaoHtml}
@@ -1574,6 +1582,37 @@ async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) 
       return;
     }
 
+    const btnUrgente = e.target.closest('.btn-item-urgente');
+    if (btnUrgente && !btnUrgente.disabled) {
+      const row = btnUrgente.closest('[data-item-row]');
+      if (!row) return;
+      const solicIds = JSON.parse(row.dataset.solicIds || '[]');
+      if (!solicIds.length) return;
+      const novoUrgente = row.dataset.urgente !== '1';
+      btnUrgente.disabled = true;
+      try {
+        const r = await fetch('/api/logistica/itens_solicitados/urgente', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ solic_ids: solicIds, urgente: novoUrgente })
+        });
+        const d = await r.json();
+        if (!d.ok) throw new Error(d.error || 'Erro ao atualizar urgência.');
+        row.dataset.urgente = novoUrgente ? '1' : '0';
+        row.style.borderLeft = novoUrgente ? '3px solid #ef4444' : '';
+        btnUrgente.style.border = `1px solid ${novoUrgente ? '#ef4444' : '#374151'}`;
+        btnUrgente.style.background = novoUrgente ? '#450a0a' : 'transparent';
+        btnUrgente.style.color = novoUrgente ? '#fca5a5' : '#6b7280';
+        btnUrgente.innerHTML = `<i class="fa-solid fa-bolt" style="font-size:.63rem;"></i>${novoUrgente ? 'Urgente' : ''}`;
+      } catch (err) {
+        alert('Erro: ' + (err.message || err));
+      } finally {
+        btnUrgente.disabled = false;
+      }
+      return;
+    }
+
     // Botão "Iniciar separação" dos grupos conflitantes
     const conflBtn = e.target.closest('.btn-modal-sep-conflito');
     if (conflBtn && !conflBtn.disabled) {
@@ -1867,6 +1906,10 @@ async function _abrirModalAguardandoRetiradaSep(nSolic, opts = {}) {
 
   document.getElementById('modalAguardandoRetiradaSep')?.remove();
 
+  const currentUserId = String(window.__sessionUser?.id || '');
+  const isAutor = itens.length > 0 && String(itens[0]?.id_user || '') === currentUserId;
+  const isSolicitado = tituloColuna === 'Solicitado';
+
   const renderLinha = (it) => {
     const destinoCard = _solDestinoHtml(it);
     const enderecamentoCard = _solEnderecamentoHtml(it.codigo_produto, enderecoBatch, it);
@@ -1891,10 +1934,18 @@ async function _abrirModalAguardandoRetiradaSep(nSolic, opts = {}) {
       origemColuna = `<span style="font-size:.63rem;color:#6b7280;font-style:italic;">Sem origem com saldo</span>`;
     }
 
+    const isUrg = !!it.urgente;
     return `
-    <div style="display:flex;align-items:flex-start;gap:10px;padding:10px 12px;border-top:1px solid #222;">
+    <div data-solic-id="${it.solic_id || ''}" style="display:flex;align-items:flex-start;gap:10px;padding:10px 12px;border-top:1px solid #222;${isUrg ? 'border-left:3px solid #ef4444;' : ''}">
       <div style="flex:1;min-width:0;">
-        <div style="font-weight:700;font-size:.78rem;color:#f59e0b;">${it.codigo_produto || '—'}</div>
+        <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+          <span style="font-weight:700;font-size:.78rem;color:#f59e0b;">${it.codigo_produto || '—'}</span>
+          <button class="btn-urg-solic" data-solic-id="${it.solic_id || ''}" data-urgente="${isUrg ? '1' : '0'}"
+            title="Urgente, entregar o quanto antes este item"
+            style="display:inline-flex;align-items:center;gap:3px;padding:2px 7px;border-radius:20px;font-size:.67rem;font-weight:700;cursor:pointer;border:1px solid ${isUrg ? '#ef4444' : '#374151'};background:${isUrg ? '#450a0a' : 'transparent'};color:${isUrg ? '#fca5a5' : '#6b7280'};">
+            <i class="fa-solid fa-bolt" style="font-size:.63rem;"></i>${isUrg ? 'Urgente' : ''}
+          </button>
+        </div>
         <div style="font-size:.75rem;color:#d1d5db;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${it.descricao || '—'}</div>
         <div style="margin-top:6px;display:flex;flex-direction:column;gap:6px;">
           ${enderecamentoCard}
@@ -1914,6 +1965,12 @@ async function _abrirModalAguardandoRetiradaSep(nSolic, opts = {}) {
       </div>
       <div style="font-size:.74rem;font-weight:700;color:#f0f0f0;white-space:nowrap;">${_solFmtQty(it.quantidade)} ${it.unidade || 'UN'}</div>
       <div style="font-size:.70rem;color:#9ca3af;white-space:nowrap;">${it.status || '—'}</div>
+      ${isSolicitado && isAutor
+        ? `<button class="btn-del-item-sep" data-solic-id="${it.solic_id || ''}" title="Remover este item da solicitação"
+             style="padding:5px 8px;border:none;border-radius:7px;background:#2a1b1b;color:#f87171;cursor:pointer;flex-shrink:0;">
+             <i class="fa-solid fa-trash-can" style="font-size:.75rem;"></i>
+           </button>`
+        : ''}
     </div>`;
   };
 
@@ -1957,15 +2014,24 @@ async function _abrirModalAguardandoRetiradaSep(nSolic, opts = {}) {
         </div>
       </div>
 
-      <div style="padding:12px 16px;border-top:1px solid #2a2a2a;display:flex;justify-content:flex-end;gap:8px;background:#171717;">
-        ${tituloColuna === 'Solicitado'
-          ? `<button id="btnAguardRetIniciarSep" style="padding:7px 14px;border:none;border-radius:8px;background:#1d4ed8;color:#dbeafe;font-weight:700;font-size:.82rem;cursor:pointer;"><i class="fa-solid fa-play" style="margin-right:4px;"></i>Iniciar separação</button>`
-          : `<button id="btnAguardRetCancelar" style="padding:7px 14px;border:1px solid #4b5563;border-radius:8px;background:transparent;color:#d1d5db;font-weight:700;font-size:.82rem;cursor:pointer;">Fechar</button>`}
-        ${permitirRecebido
-          ? `<button id="btnAguardRetRecebido" style="padding:7px 14px;border:none;border-radius:8px;background:#16a34a;color:#dcfce7;font-weight:700;font-size:.82rem;cursor:pointer;">
-               <i class="fa-solid fa-box-open" style="margin-right:4px;"></i>Recebido
-             </button>`
-          : ''}
+      <div style="padding:12px 16px;border-top:1px solid #2a2a2a;display:flex;justify-content:space-between;align-items:center;gap:8px;background:#171717;flex-wrap:wrap;">
+        <div>
+          ${isSolicitado && isAutor
+            ? `<button id="btnDelSepInteira" style="padding:7px 12px;border:1px solid #7f1d1d;border-radius:8px;background:transparent;color:#f87171;font-weight:700;font-size:.82rem;cursor:pointer;">
+                 <i class="fa-solid fa-trash-can" style="margin-right:4px;"></i>Excluir SEP
+               </button>`
+            : ''}
+        </div>
+        <div style="display:flex;gap:8px;">
+          ${tituloColuna === 'Solicitado'
+            ? `<button id="btnAguardRetIniciarSep" style="padding:7px 14px;border:none;border-radius:8px;background:#1d4ed8;color:#dbeafe;font-weight:700;font-size:.82rem;cursor:pointer;"><i class="fa-solid fa-play" style="margin-right:4px;"></i>Iniciar separação</button>`
+            : `<button id="btnAguardRetCancelar" style="padding:7px 14px;border:1px solid #4b5563;border-radius:8px;background:transparent;color:#d1d5db;font-weight:700;font-size:.82rem;cursor:pointer;">Fechar</button>`}
+          ${permitirRecebido
+            ? `<button id="btnAguardRetRecebido" style="padding:7px 14px;border:none;border-radius:8px;background:#16a34a;color:#dcfce7;font-weight:700;font-size:.82rem;cursor:pointer;">
+                 <i class="fa-solid fa-box-open" style="margin-right:4px;"></i>Recebido
+               </button>`
+            : ''}
+        </div>
       </div>
     </div>`;
 
@@ -1975,6 +2041,89 @@ async function _abrirModalAguardandoRetiradaSep(nSolic, opts = {}) {
   document.getElementById('btnModalAguardRetFechar')?.addEventListener('click', closeModal);
   document.getElementById('btnAguardRetCancelar')?.addEventListener('click', closeModal);
   modal.addEventListener('click', (ev) => { if (ev.target === modal) closeModal(); });
+
+  // Delegação: ⚡ urgente e 🗑 excluir item
+  modal.addEventListener('click', async (ev) => {
+    // Botão urgente por item
+    const btnUrg = ev.target.closest('.btn-urg-solic');
+    if (btnUrg && !btnUrg.disabled) {
+      const solicId = parseInt(btnUrg.dataset.solicId, 10);
+      if (!solicId) return;
+      const novoUrgente = btnUrg.dataset.urgente !== '1';
+      btnUrg.disabled = true;
+      try {
+        const r = await fetch('/api/logistica/itens_solicitados/urgente', {
+          method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ solic_ids: [solicId], urgente: novoUrgente })
+        });
+        const d = await r.json();
+        if (!d.ok) throw new Error(d.error || 'Erro.');
+        btnUrg.dataset.urgente = novoUrgente ? '1' : '0';
+        btnUrg.style.border = `1px solid ${novoUrgente ? '#ef4444' : '#374151'}`;
+        btnUrg.style.background = novoUrgente ? '#450a0a' : 'transparent';
+        btnUrg.style.color = novoUrgente ? '#fca5a5' : '#6b7280';
+        btnUrg.innerHTML = `<i class="fa-solid fa-bolt" style="font-size:.63rem;"></i>${novoUrgente ? 'Urgente' : ''}`;
+        const row = btnUrg.closest('[data-solic-id]');
+        if (row) row.style.borderLeft = novoUrgente ? '3px solid #ef4444' : '';
+      } catch (e) {
+        alert('Erro: ' + e.message);
+      } finally {
+        btnUrg.disabled = false;
+      }
+      return;
+    }
+
+    // Botão excluir item
+    const btnDel = ev.target.closest('.btn-del-item-sep');
+    if (btnDel && !btnDel.disabled) {
+      const solicId = parseInt(btnDel.dataset.solicId, 10);
+      if (!solicId) return;
+      if (!confirm('Remover este item da solicitação? O item voltará para o seu carrinho.')) return;
+      btnDel.disabled = true;
+      try {
+        const r = await fetch(`/api/logistica/itens_solicitados/${solicId}/sep`, {
+          method: 'DELETE', credentials: 'include'
+        });
+        const d = await r.json();
+        if (!d.ok) throw new Error(d.error || 'Erro ao remover item.');
+        btnDel.closest('[data-solic-id]')?.remove();
+        // Se não sobrou nenhum item, fecha o modal
+        const restantes = modal.querySelectorAll('[data-solic-id]').length;
+        if (restantes === 0) {
+          closeModal();
+          window._loadSolicitacoesTab && (window._loadSolicitacoesTab.force = true, window._loadSolicitacoesTab());
+          window._loadKanbanSolicitacoesTab && (window._loadKanbanSolicitacoesTab.force = true, window._loadKanbanSolicitacoesTab());
+        }
+      } catch (e) {
+        alert('Erro: ' + e.message);
+        btnDel.disabled = false;
+      }
+      return;
+    }
+  });
+
+  // Excluir SEP inteira
+  document.getElementById('btnDelSepInteira')?.addEventListener('click', async () => {
+    if (!confirm(`Excluir a SEP ${nSolic} inteira? Todos os itens voltarão para o carrinho.`)) return;
+    const btn = document.getElementById('btnDelSepInteira');
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin" style="margin-right:4px;"></i>Excluindo...';
+    try {
+      const r = await fetch(`/api/logistica/sep/${encodeURIComponent(nSolic)}`, {
+        method: 'DELETE', credentials: 'include'
+      });
+      const d = await r.json();
+      if (!d.ok) throw new Error(d.error || 'Erro ao excluir SEP.');
+      closeModal();
+      window._loadSolicitacoesTab && (window._loadSolicitacoesTab.force = true, window._loadSolicitacoesTab());
+      window._loadKanbanSolicitacoesTab && (window._loadKanbanSolicitacoesTab.force = true, window._loadKanbanSolicitacoesTab());
+    } catch (e) {
+      alert('Erro: ' + e.message);
+      btn.disabled = false;
+      btn.innerHTML = '<i class="fa-solid fa-trash-can" style="margin-right:4px;"></i>Excluir SEP';
+    }
+  });
 
   document.getElementById('btnAguardRetIniciarSep')?.addEventListener('click', async () => {
     const solicIds = itens.map(it => parseInt(it.solic_id, 10)).filter(id => !isNaN(id));
@@ -65619,7 +65768,38 @@ document.addEventListener('DOMContentLoaded', () => {
       const commentStatusEl = info.querySelector('.sep-cart-comment-status');
       // Ações da linha
       const actions = document.createElement('div');
-      actions.style.cssText = 'display:flex;align-items:flex-start;gap:6px;flex-shrink:0;';
+      actions.style.cssText = 'display:flex;align-items:flex-start;gap:6px;flex-shrink:0;flex-direction:column;';
+      // Botão urgente no carrinho
+      const btnUrgCart = document.createElement('button');
+      btnUrgCart.title = 'Urgente, entregar o quanto antes este item';
+      const _setUrgCartStyle = (urg) => {
+        btnUrgCart.innerHTML = `<i class="fa-solid fa-bolt" style="font-size:.63rem;margin-right:${urg ? '3px' : '0'};"></i>${urg ? '<span style="font-size:.68rem;">Urgente</span>' : ''}`;
+        btnUrgCart.style.cssText = `padding:5px 8px;border-radius:8px;border:1px solid ${urg ? '#ef4444' : '#374151'};background:${urg ? '#450a0a' : 'transparent'};color:${urg ? '#fca5a5' : '#6b7280'};cursor:pointer;white-space:nowrap;display:flex;align-items:center;gap:3px;`;
+      };
+      _setUrgCartStyle(!!item.urgente);
+      btnUrgCart.addEventListener('click', async () => {
+        const novoUrgente = !(item.urgente);
+        btnUrgCart.disabled = true;
+        try {
+          const r = await fetch(`/api/logistica/carrinho/${item.id}/urgente`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
+            body: JSON.stringify({ urgente: novoUrgente })
+          });
+          const d = await r.json();
+          if (!d.ok) throw new Error(d.error || 'Erro ao atualizar urgência.');
+          item.urgente = novoUrgente;
+          _setUrgCartStyle(novoUrgente);
+          row.style.borderLeft = novoUrgente ? '3px solid #ef4444' : '';
+        } catch (e) {
+          alert('Erro: ' + e.message);
+        } finally {
+          btnUrgCart.disabled = false;
+        }
+      });
+      actions.appendChild(btnUrgCart);
+
       const alterarQtd = (delta) => {
         const atual = _parseQty(qtyInput.value) || _parseQty(item.quantidade) || 1;
         const proxima = Math.max(1, atual + delta);
