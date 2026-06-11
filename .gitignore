@@ -70,6 +70,17 @@ agente_impressao/*.exe
 # Arquivos pessoais do projeto — não versionar
 csv/1 - Instruções dev.csv
 
+# IA local (Continue) e agentes de orientação — não afetam o runtime do projeto
+.continue/
+.agents/
+AGENTS.md
+ORIENTACAO-RAPIDA.md
+iniciar-ia.sh
+
+# Regras e skills do Cursor Agent — só úteis localmente
+.cursor/rules/
+.cursor/skills/
+
 # lixo operacional / capturas acidentais
 menu_produto.js.backup_errors
 t-temp.txt
