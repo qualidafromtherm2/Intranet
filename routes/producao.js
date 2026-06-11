@@ -595,5 +595,98 @@ router.get('/sync-ativas', async (req, res) => {
   }
 });
 
+/* ---------------------------------------------------------------
+ * GET /api/producao/materiais-previstos/:id
+ * Proxy para IAPP /manufatura/ordens-producao/busca/{id}/materiais-previstos
+ * Aceita o iapp_id da OP (op.id no frontend) ou, via ?tipo=os, o os_id.
+ * Retorna o JSON bruto da API IAPP.
+ * --------------------------------------------------------------- */
+router.get('/materiais-previstos/:id', async (req, res) => {
+  try {
+    const id = req.params.id;
+    const data = await iappGet(`/manufatura/ordens-producao/busca/${id}/materiais-previstos`);
+    return res.json(data);
+  } catch (err) {
+    return res.status(err.status || 500).json({ error: err.message, iappCode: err.iappCode });
+  }
+});
+
+/* ---------------------------------------------------------------
+ * GET /api/producao/apontamentos/:id
+ * Proxy para IAPP /manufatura/ordens-producao/busca/{id}/producao
+ * {id} = iapp_id da OP (op.id no frontend / op_iapp.iapp_id no DB).
+ * Retorna listagem de apontamentos de produção realizados na OP.
+ * --------------------------------------------------------------- */
+router.get('/apontamentos/:id', async (req, res) => {
+  try {
+    const id = req.params.id;
+    const data = await iappGet(`/manufatura/ordens-producao/busca/${id}/producao`);
+    return res.json(data);
+  } catch (err) {
+    return res.status(err.status || 500).json({ error: err.message, iappCode: err.iappCode });
+  }
+});
+
+/* ---------------------------------------------------------------
+ * GET /api/producao/ordem/:id
+ * Proxy para IAPP GET Consultar - /manufatura/ordens-producao/busca/{id}
+ * {id} = iapp_id da OP (op.id no frontend / op_iapp.iapp_id no DB).
+ * Retorna os dados completos da OP (produto, OSs, datas, status, etc.).
+ * --------------------------------------------------------------- */
+router.get('/ordem/:id', async (req, res) => {
+  try {
+    const id = req.params.id;
+    const data = await iappGet(`/manufatura/ordens-producao/busca/${id}`);
+    return res.json(data);
+  } catch (err) {
+    return res.status(err.status || 500).json({ error: err.message, iappCode: err.iappCode });
+  }
+});
+
+/* ---------------------------------------------------------------
+ * GET /api/producao/os-materiais/:id
+ * Proxy para IAPP GET Materiais - /manufatura/ordens-servico/busca/{id}/materiais
+ * {id} = os_id da OS (os.id no frontend / op_iapp_os.os_id no DB).
+ * Retorna materiais vinculados à ordem de serviço (ex.: MONTAGEM 0002673.05).
+ * --------------------------------------------------------------- */
+router.get('/os-materiais/:id', async (req, res) => {
+  try {
+    const id = req.params.id;
+    const data = await iappGet(`/manufatura/ordens-servico/busca/${id}/materiais`);
+    return res.json(data);
+  } catch (err) {
+    return res.status(err.status || 500).json({ error: err.message, iappCode: err.iappCode });
+  }
+});
+
+/* ---------------------------------------------------------------
+ * GET /api/producao/iapp/qualidade/inspecoes/lista?page=1&offset=100
+ * Proxy enxuto para listar inspeções da IAPP.
+ * --------------------------------------------------------------- */
+router.get('/iapp/qualidade/inspecoes/lista', async (req, res) => {
+  try {
+    const pageParam = Number.parseInt(String(req.query.page || '1'), 10);
+    const page = Number.isFinite(pageParam) && pageParam > 0 ? pageParam : 1;
+    const offsetParam = Number.parseInt(String(req.query.offset || '100'), 10);
+    const offset = Number.isFinite(offsetParam) && offsetParam > 0 ? offsetParam : 100;
+
+    const data = await iappGet('/qualidade/inspecoes/lista', { page, offset });
+
+    return res.json({
+      ...data,
+      success: data?.success !== false,
+      page: String(data?.page || page),
+      total: Number.isFinite(Number(data?.total)) ? Number(data.total) : 0,
+      response: Array.isArray(data?.response) ? data.response : []
+    });
+  } catch (err) {
+    console.error('[producao] Erro ao listar inspeções IAPP:', err.message);
+    return res.status(err.status || 500).json({
+      success: false,
+      error: err.message || 'Erro ao listar inspeções na IAPP.'
+    });
+  }
+});
+
 module.exports = router;
 
