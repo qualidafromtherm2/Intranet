@@ -9569,11 +9569,12 @@
                 </h3>
                 <div class="content-text">Dados em tempo real do IAPP — status A Produzir.</div>
               </div>
-              <div style="display:flex;gap:8px;align-items:center;">
+              <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px;">
                 <button id="producaoRecarregarBtn" type="button"
                   style="display:inline-flex;align-items:center;gap:8px;padding:7px 16px;background:linear-gradient(135deg,#6366f1 0%,#4f46e5 100%);color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;">
                   <i class="fa-solid fa-rotate-right"></i> Atualizar
                 </button>
+                <div id="producaoRodape" style="display:none;font-size:12px;color:var(--inactive-color);text-align:right;"></div>
               </div>
             </div>
 
@@ -9635,8 +9636,6 @@
 
             </div>
 
-            <!-- Rodapé de contagem -->
-            <div id="producaoRodape" style="display:none;margin-top:4px;font-size:12px;color:var(--inactive-color);text-align:right;padding:0 4px;"></div>
           </div>
         </div>
 

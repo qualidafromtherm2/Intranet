@@ -476,11 +476,7 @@ window._updateTabCounters = async function() {
         if (respSol.ok) {
           const dataSol = await respSol.json();
           const colunas = dataSol.colunas || {};
-          const contSol = 
-            (colunas['Solicitado']?.length || 0) +
-            (colunas['Em Separação']?.length || 0) +
-            (colunas['Separado']?.length || 0);
-          solicitacoesCountEl.textContent = contSol;
+          solicitacoesCountEl.textContent = _solSomarItensKanbanSep(colunas);
         }
       } catch (err) {
         console.warn('[UPDATE-COUNTERS] Erro ao atualizar contador solicitações:', err);
@@ -506,6 +502,14 @@ window._updateTabCounters = async function() {
     console.warn('[UPDATE-COUNTERS] Erro geral:', err);
   }
 };
+
+function _solSomarItensKanbanSep(colunas) {
+  const cols = ['Solicitado', 'Em Separação', 'Separado'];
+  return cols.reduce((acc, key) => {
+    const cards = colunas?.[key] || [];
+    return acc + cards.reduce((s, sep) => s + (parseInt(sep.total_itens, 10) || 0), 0);
+  }, 0);
+}
 
 function _solBuildKanbanItensUrl(nSolic, opts = {}) {
   const params = new URLSearchParams();
@@ -546,16 +550,9 @@ window._loadSolicitacoesTab = async function() {
 
     board.innerHTML = '';
     let totalCards = 0;
-    let contarSolicitacoes = 0;  // Contador específico: Solicitado + Em Separação + Separado
-
     COLS.forEach(col => {
       const cards = colunas[col.key] || [];
       totalCards += cards.length;
-      
-      // Conta apenas para as 3 colunas específicas
-      if (['Solicitado', 'Em Separação', 'Separado'].includes(col.key)) {
-        contarSolicitacoes += cards.length;
-      }
 
       const colEl = document.createElement('div');
       colEl.style.cssText = 'flex:0 0 200px;display:flex;flex-direction:column;';
@@ -574,15 +571,31 @@ window._loadSolicitacoesTab = async function() {
               : col.acao === 'modal'
                 ? `<span style="font-size:.65rem;color:#22c55e55;margin-top:3px;display:block;"><i class="fa-solid fa-eye" style="margin-right:2px;"></i>Ver itens</span>`
                 : '';
+            const emProcessoSep = col.key === 'Em Separação' || col.key === 'Separado';
+            const separadorNome = String(sep.usuario_separando || '').trim();
+            const separadorHtml = emProcessoSep && separadorNome
+              ? `<div style="margin-top:5px;display:flex;align-items:center;gap:5px;">
+                  <i class="fa-solid fa-boxes-stacked" style="color:#f59e0b;font-size:.72rem;flex-shrink:0;"></i>
+                  <span style="font-size:.72rem;color:#fbbf24;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="Separando: ${separadorNome}">${separadorNome}</span>
+                </div>`
+              : '';
+            const urgenteHtml = emProcessoSep && sep.tem_urgente
+              ? `<div style="margin-top:4px;display:inline-flex;align-items:center;gap:4px;padding:2px 7px;border-radius:20px;font-size:.65rem;font-weight:700;color:#fca5a5;background:#450a0a;border:1px solid #ef4444;" title="Esta SEP tem item urgente">
+                  <i class="fa-solid fa-bolt" style="font-size:.62rem;"></i>Urgente
+                </div>`
+              : '';
             return `
               <div class="solic-kanban-card"
                 data-n-solic="${sep.n_solic}"
                 data-col-acao="${col.acao || ''}"
                 data-col-status="${col.key}"
-                style="background:#1a1a1a;border:1px solid #2a2a2a;border-radius:9px;padding:10px 12px;${cursor}transition:border-color .15s;"
+                style="background:#1a1a1a;border:1px solid #2a2a2a;border-radius:9px;padding:10px 12px;${cursor}transition:border-color .15s;${sep.tem_urgente && emProcessoSep ? 'border-left:3px solid #ef4444;' : ''}"
                 onmouseenter="this.style.borderColor='${col.color}66'"
                 onmouseleave="this.style.borderColor='#2a2a2a'">
-                <span style="font-weight:800;font-size:.85rem;color:#f59e0b;letter-spacing:.03em;">${sep.n_solic}</span>
+                <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+                  <span style="font-weight:800;font-size:.85rem;color:#f59e0b;letter-spacing:.03em;">${sep.n_solic}</span>
+                  ${urgenteHtml}
+                </div>
                 <div style="margin-top:5px;display:flex;align-items:center;gap:5px;">
                   <i class="fa-solid fa-user-circle" style="color:#6b7280;font-size:.75rem;flex-shrink:0;"></i>
                   <span style="font-size:.75rem;color:#d1d5db;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${sep.nome_user}</span>
@@ -597,6 +610,7 @@ window._loadSolicitacoesTab = async function() {
                   <i class="fa-regular fa-clock" style="color:#6b7280;font-size:.72rem;flex-shrink:0;"></i>
                   <span style="font-size:.70rem;color:#6b7280;">Solicitado em ${criadoEm}</span>
                 </div>` : ''}
+                ${separadorHtml}
                 <div style="margin-top:4px;font-size:.71rem;color:#4b5563;">${sep.total_itens} ${sep.total_itens === 1 ? 'item' : 'itens'}</div>
                 ${hint}
               </div>`;
@@ -617,7 +631,7 @@ window._loadSolicitacoesTab = async function() {
       board.appendChild(colEl);
     });
 
-    if (countEl) countEl.textContent = contarSolicitacoes;
+    if (countEl) countEl.textContent = _solSomarItensKanbanSep(colunas);
     if (statusEl) {
       const agora = new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
       statusEl.textContent = `Atualizado às ${agora} · ${totalCards} SEP(s)`;
@@ -738,12 +752,38 @@ window._loadSolicitacoesTab = async function() {
   }
 };
 
+function _solCurrentUserName() {
+  return String(
+    window.__sessionUser?.username ||
+    window.__sessionUser?.login ||
+    window.__sessionUser?.nome ||
+    ''
+  ).trim();
+}
+
 // Modal de separação — agrega por cod_omie, toggle Separado/Separação, parcial gera SEP.X
 async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) {
   document.getElementById('modalSeparacaoLogistica')?.remove();
   const origemStatus = String(grupoAtual?.origem_status || '').trim();
   const refreshAoFechar = origemStatus === 'Solicitado';
   let houveMudanca = false;
+
+  const isStandby = origemStatus === 'Stund-by';
+  const usuarioSeparando = (grupoAtual.itens || [])
+    .map(it => String(it.usuario_separando || '').trim())
+    .find(Boolean) || '';
+  const currentUser = _solCurrentUserName();
+  const podeAgirSep = !isStandby && (!usuarioSeparando || usuarioSeparando === currentUser);
+  const nSolicHdr = grupoAtual.n_solic || '';
+  const podeCancelarSep = !isStandby
+    && (origemStatus === 'Em Separação' || origemStatus === 'Separado')
+    && !!usuarioSeparando
+    && usuarioSeparando === currentUser;
+  const modalTitle = isStandby
+    ? `Stund-by — ${nSolicHdr}`
+    : (origemStatus === 'Em Separação' || origemStatus === 'Separado')
+      ? `Em fase de separação — ${nSolicHdr}`
+      : `Em Separação — ${nSolicHdr}`;
 
   const STATUS_TRABALHO_MODAL_SEP = new Set(['Separação', 'Em Separação', 'Separado', 'Stund-by']);
   function _itensVisiveisModalSep(itens) {
@@ -812,6 +852,7 @@ async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) 
     const isConferido = it.status === 'Aguardando retirada';
     const isSep    = it.status === 'Separado';
     const isEmSeparacao = ['Separação', 'Em Separação'].includes(String(it.status || ''));
+    const readonlySep = isStandby || !podeAgirSep;
     const dp       = _solFmtDataPrevista(it.data_prevista);
     const dh       = [dp, it.horario].filter(Boolean).join(' ');
     const hasObs = !!String(it.observacao || '').trim();
@@ -944,16 +985,18 @@ async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) 
                  <span style="font-size:.65rem;color:#6ee7b7;font-style:italic;">aguardando demais itens</span>`
               : _solStatusBadge(it.status || 'Separação')}
             ${hasObs ? `<span title="Item com observação" style="display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:999px;background:#f97316;color:#111;font-weight:800;font-size:.70rem;line-height:1;">!</span>` : ''}
-            <button class="btn-item-urgente" title="Urgente, entregar o quanto antes este item"
+            ${readonlySep ? '' : `<button class="btn-item-urgente" title="Urgente, entregar o quanto antes este item"
               style="display:inline-flex;align-items:center;gap:3px;padding:2px 7px;border-radius:20px;font-size:.67rem;font-weight:700;cursor:pointer;border:1px solid ${isUrgente ? '#ef4444' : '#374151'};background:${isUrgente ? '#450a0a' : 'transparent'};color:${isUrgente ? '#fca5a5' : '#6b7280'};transition:all .15s;">
               <i class="fa-solid fa-bolt" style="font-size:.63rem;"></i>${isUrgente ? 'Urgente' : ''}
-            </button>
+            </button>`}
           </div>
           ${swapHistory}
           ${localizacaoHtml}
         </div>
           ${qtyHtml}
-          ${isConferido
+          ${readonlySep
+            ? ''
+            : isConferido
             ? `<div style="display:flex;gap:6px;align-items:flex-start;flex-wrap:wrap;justify-content:flex-end;flex-shrink:0;">
                  <button class="btn-item-retificar" title="Voltar item para Separado"
                    style="padding:4px 9px;border:none;border-radius:6px;background:#4b5563;color:#e5e7eb;font-weight:700;font-size:.70rem;cursor:pointer;white-space:nowrap;">
@@ -1150,23 +1193,132 @@ async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) 
   modal.innerHTML = `
     <div style="position:relative;background:#1c1c1c;border:1px solid #2a2a2a;border-radius:16px;width:min(760px,96vw);max-height:92vh;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,.6);">
       <div style="display:flex;align-items:center;gap:10px;padding:16px 20px;border-bottom:1px solid #2a2a2a;background:#171717;flex-shrink:0;">
-        <i class="fa-solid fa-boxes-stacked" style="color:#f59e0b;font-size:1.1rem;"></i>
-        <span style="font-weight:700;font-size:1rem;color:#f0f0f0;" id="modalSeparacaoTitle">Em Separação — ${grupoAtual.nome_user}</span>
+        <i class="fa-solid ${isStandby ? 'fa-bag-shopping' : 'fa-boxes-stacked'}" style="color:${isStandby ? '#ec4899' : '#f59e0b'};font-size:1.1rem;"></i>
+        <span style="font-weight:700;font-size:1rem;color:#f0f0f0;" id="modalSeparacaoTitle">${modalTitle}</span>
         <button id="btnModalSepFechar" style="margin-left:auto;background:none;border:none;color:#9ca3af;font-size:1.3rem;cursor:pointer;padding:2px 6px;line-height:1;">&#x2715;</button>
       </div>
       <div id="modalSepInner" style="overflow-y:auto;flex:1;padding-bottom:16px;">
-        <div style="font-size:.75rem;color:#6b7280;font-weight:700;padding:12px 16px 4px;letter-spacing:.05em;text-transform:uppercase;">Itens em separação</div>
+        ${!podeAgirSep && usuarioSeparando && !isStandby
+          ? `<div style="margin:12px 16px 0;padding:10px 12px;border-radius:8px;background:#1f2937;border:1px solid #374151;font-size:.78rem;color:#d1d5db;">
+               <i class="fa-solid fa-user-lock" style="color:#f59e0b;margin-right:6px;"></i>
+               Separação em andamento por <strong style="color:#fbbf24;">${usuarioSeparando}</strong>. Você pode visualizar, mas não alterar os itens.
+             </div>`
+          : ''}
+        <div style="font-size:.75rem;color:#6b7280;font-weight:700;padding:12px 16px 4px;letter-spacing:.05em;text-transform:uppercase;">${isStandby ? 'Itens em stand-by' : 'Itens em separação'}</div>
         <div id="modalSepItemsList">
           ${aggItens.map(it => _renderAggItem(it, grupoAtual.n_solic)).join('')}
         </div>
         ${conflitosHtml}
       </div>
+      ${isStandby ? `
+      <div style="padding:12px 16px;border-top:1px solid #2a2a2a;display:flex;justify-content:flex-end;align-items:center;gap:8px;background:#171717;flex-wrap:wrap;">
+        <button id="btnStandbySolicitarCompra" style="padding:7px 14px;border:1px solid #4b5563;border-radius:8px;background:transparent;color:#d1d5db;font-weight:700;font-size:.82rem;cursor:pointer;">
+          <i class="fa-solid fa-cart-shopping" style="margin-right:4px;"></i>Solicitar compra
+        </button>
+        <button id="btnStandbyIniciarSep" style="padding:7px 14px;border:none;border-radius:8px;background:#1d4ed8;color:#dbeafe;font-weight:700;font-size:.82rem;cursor:pointer;">
+          <i class="fa-solid fa-play" style="margin-right:4px;"></i>Iniciar separação
+        </button>
+      </div>` : ''}
+      ${podeCancelarSep ? `
+      <div style="padding:12px 16px;border-top:1px solid #2a2a2a;display:flex;justify-content:flex-start;align-items:center;gap:8px;background:#171717;flex-wrap:wrap;">
+        <button id="btnCancelarSeparacao" style="padding:7px 14px;border:1px solid #7f1d1d;border-radius:8px;background:transparent;color:#f87171;font-weight:700;font-size:.82rem;cursor:pointer;">
+          <i class="fa-solid fa-ban" style="margin-right:4px;"></i>Cancelar separação
+        </button>
+      </div>` : ''}
     </div>`;
 
   document.body.appendChild(modal);
 
   document.getElementById('btnModalSepFechar')?.addEventListener('click', () => fecharModal());
   modal.addEventListener('click', e => { if (e.target === modal) fecharModal(); });
+
+  document.getElementById('btnCancelarSeparacao')?.addEventListener('click', async () => {
+    const btn = document.getElementById('btnCancelarSeparacao');
+    if (!btn || btn.disabled) return;
+    if (!confirm('Cancelar a separação desta SEP? Ela voltará para o kanban Solicitado e seu nome será removido como separador.')) return;
+    const solicIds = (grupoAtual.itens || [])
+      .filter(it => ['Separação', 'Em Separação', 'Separado'].includes(String(it.status || '')))
+      .map(it => parseInt(it.solic_id, 10))
+      .filter(id => !Number.isNaN(id));
+    if (!solicIds.length) {
+      alert('Nenhum item em separação para cancelar.');
+      return;
+    }
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin" style="margin-right:4px;"></i>Cancelando...';
+    try {
+      const r = await fetch('/api/logistica/itens_solicitados/cancelar-separacao', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ solic_ids: solicIds })
+      });
+      const d = await r.json();
+      if (!d.ok) throw new Error(d.error || 'Erro ao cancelar separação.');
+      houveMudanca = true;
+      fecharModal();
+      window._loadSolicitacoesTab.force = true;
+      window._loadSolicitacoesTab();
+      window._loadKanbanSolicitacoesTab.force = true;
+      window._loadKanbanSolicitacoesTab();
+      window._updateTabCounters?.();
+    } catch (err) {
+      alert('Erro: ' + (err.message || err));
+      btn.disabled = false;
+      btn.innerHTML = '<i class="fa-solid fa-ban" style="margin-right:4px;"></i>Cancelar separação';
+    }
+  });
+
+  document.getElementById('btnStandbySolicitarCompra')?.addEventListener('click', () => {
+    alert('Função "Solicitar compra" em configuração. Em breve estará disponível.');
+  });
+
+  document.getElementById('btnStandbyIniciarSep')?.addEventListener('click', async () => {
+    const btn = document.getElementById('btnStandbyIniciarSep');
+    if (!btn || btn.disabled) return;
+    const solicIds = (grupoAtual.itens || [])
+      .filter(it => String(it.status || '') === 'Stund-by')
+      .map(it => parseInt(it.solic_id, 10))
+      .filter(id => !Number.isNaN(id));
+    if (!solicIds.length) {
+      alert('Nenhum item em stand-by para iniciar separação.');
+      return;
+    }
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin" style="margin-right:4px;"></i>Iniciando...';
+    try {
+      const r = await fetch('/api/logistica/itens_solicitados/separacao', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ solic_ids: solicIds })
+      });
+      const d = await r.json();
+      if (!d.ok) throw new Error(d.error || 'Erro ao iniciar separação.');
+
+      fecharModal();
+
+      const ri = await fetch(_solBuildKanbanItensUrl(grupoAtual.n_solic, { escopoItens: grupoAtual.escopoItens }), { credentials: 'include' });
+      const di = await ri.json();
+      if (!di.ok) throw new Error(di.error || 'Erro ao buscar itens após iniciar separação.');
+      const itensAtualizados = (di.itens || []).map(it => ({ ...it, solic_ids: [it.solic_id], carr_ids: [it.carr_id] }));
+      if (itensAtualizados.length) {
+        await _abrirModalSeparacao(
+          { nome_user: itensAtualizados[0]?.nome_user || grupoAtual.nome_user, n_solic: grupoAtual.n_solic, itens: itensAtualizados, origem_status: 'Em Separação', escopoItens: grupoAtual.escopoItens },
+          []
+        );
+      }
+
+      window._loadSolicitacoesTab.force = true;
+      window._loadSolicitacoesTab();
+      window._loadKanbanSolicitacoesTab.force = true;
+      window._loadKanbanSolicitacoesTab();
+    } catch (err) {
+      alert('Erro: ' + (err.message || err));
+      btn.disabled = false;
+      btn.innerHTML = '<i class="fa-solid fa-play" style="margin-right:4px;"></i>Iniciar separação';
+    }
+  });
 
   const modalInner = document.getElementById('modalSepInner');
 
@@ -1180,6 +1332,7 @@ async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) 
     const solicIds = JSON.parse(row.dataset.solicIds || '[]');
     const carrIds = JSON.parse(row.dataset.carrIds || '[]');
     const status = row.dataset.status || 'Separação';
+    const nSolicItem = row.dataset.nSolic || '';
 
     const modal = document.createElement('div');
     modal.id = 'modalAcaoItemSep';
@@ -1188,7 +1341,7 @@ async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) 
       <div style="background:#1c1c1c;border:1px solid #2a2a2a;border-radius:16px;width:min(520px,95vw);display:flex;flex-direction:column;overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,.6);">
         <div style="display:flex;align-items:center;gap:10px;padding:16px 20px;border-bottom:1px solid #2a2a2a;background:#171717;">
           <i class="fa-solid fa-list-check" style="color:#f59e0b;font-size:1.05rem;"></i>
-          <span style="font-weight:700;font-size:1rem;color:#f0f0f0;">${coluna || 'Ação do item'}</span>
+          <span style="font-weight:700;font-size:1rem;color:#f0f0f0;">${coluna || 'Ação do item'}${nSolicItem ? ` — ${nSolicItem}` : ''}</span>
           <button id="btnAcaoItemFechar" style="margin-left:auto;background:none;border:none;color:#9ca3af;font-size:1.3rem;cursor:pointer;padding:2px 6px;line-height:1;">&#x2715;</button>
         </div>
         <div style="padding:14px 16px;display:flex;flex-direction:column;gap:8px;">
@@ -2167,7 +2320,7 @@ async function _abrirModalAguardandoRetiradaSep(nSolic, opts = {}) {
       if (!di.ok) throw new Error(di.error || 'Erro ao buscar itens após iniciar separação.');
       const itensAtualizados = (di.itens || []).map(it => ({ ...it, solic_ids: [it.solic_id], carr_ids: [it.carr_id] }));
       if (itensAtualizados.length) {
-        await _abrirModalSeparacao({ nome_user: itensAtualizados[0]?.nome_user || nSolic, n_solic: nSolic, itens: itensAtualizados, origem_status: 'Separação', escopoItens }, []);
+        await _abrirModalSeparacao({ nome_user: itensAtualizados[0]?.nome_user || nSolic, n_solic: nSolic, itens: itensAtualizados, origem_status: 'Em Separação', escopoItens }, []);
       }
 
       window._loadSolicitacoesTab.force = true;
@@ -67779,6 +67932,44 @@ window.fecharModalOS = function() {
   if (modal) modal.style.display = 'none';
 };
 
+async function fetchEstoqueFisicoPorCodigos(codigos) {
+  const unicos = [...new Set((codigos || []).map(c => String(c || '').trim()).filter(Boolean))];
+  if (!unicos.length) return {};
+  try {
+    const resp = await fetch('/api/producao/estoque-fisico', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'same-origin',
+      body: JSON.stringify({ codigos: unicos })
+    });
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.error || 'Erro ao consultar estoque');
+    return data.fisico || {};
+  } catch (err) {
+    console.warn('[producao] estoque-fisico:', err.message || err);
+    return {};
+  }
+}
+
+function getEstoqueFisicoItem(item, fisicoMap) {
+  if (item && item.estoque_fisico != null) return item.estoque_fisico;
+  const cod = String(item?.produto?.identificacao || '').trim();
+  if (!cod || !fisicoMap) return null;
+  if (fisicoMap[cod] != null) return fisicoMap[cod];
+  const upper = cod.toUpperCase();
+  for (const [k, v] of Object.entries(fisicoMap)) {
+    if (String(k).trim().toUpperCase() === upper) return v;
+  }
+  return null;
+}
+
+function fmtQtdeEstoque(v) {
+  if (v == null || v === '') return '—';
+  const n = Number(v);
+  if (!Number.isFinite(n)) return '—';
+  return n.toLocaleString('pt-BR', { maximumFractionDigits: 4 }).replace(/,?0+$/, '').replace(/,$/, '') || String(n);
+}
+
 window.verEstrutura = async function(osId) {
   const conteudo = document.getElementById('modal-os-conteudo');
   if (!conteudo) return;
@@ -67789,15 +67980,21 @@ window.verEstrutura = async function(osId) {
     if (!resp.ok || !data.response) throw new Error(data.error || 'Erro ao carregar');
     const itens = data.response;
     if (!itens.length) { conteudo.innerHTML = '<div style="text-align:center;padding:32px 0;color:#475569;font-size:12px;">Nenhum material previsto.</div>'; return; }
+    const precisaFetchFisico = itens.some(i => i.estoque_fisico == null);
+    const fisicoMap = precisaFetchFisico
+      ? await fetchEstoqueFisicoPorCodigos(itens.map(i => i.produto?.identificacao))
+      : {};
     const custoTotal = itens.reduce((s, i) => s + ((i.produto?.valor_custo||0) * (i.qtde||0)), 0);
     const linhas = itens.map(i => {
       const custo = i.produto?.valor_custo || 0;
       const qtde  = i.qtde || 0;
+      const fisico = getEstoqueFisicoItem(i, fisicoMap);
       return `<tr style="border-bottom:1px solid rgba(255,255,255,.05);">
         <td style="padding:6px 8px;font-size:10px;color:#94a3b8;white-space:nowrap;">${i.produto?.identificacao||'—'}</td>
         <td style="padding:6px 8px;font-size:11px;color:#e2e8f0;">${i.produto?.descricao||'—'}</td>
         <td style="padding:6px 8px;font-size:10px;color:#64748b;text-align:center;">${i.produto?.unidade_medida||'—'}</td>
         <td style="padding:6px 8px;font-size:11px;color:#f1f5f9;text-align:right;font-weight:600;">${qtde}</td>
+        <td style="padding:6px 8px;font-size:11px;color:#fcd34d;text-align:right;font-weight:600;">${fisico != null ? fmtQtdeEstoque(fisico) : '—'}</td>
         <td style="padding:6px 8px;font-size:10px;color:#6ee7b7;text-align:right;">${custo>0?'R$ '+custo.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2}):'—'}</td>
         <td style="padding:6px 8px;font-size:10px;color:#a5f3fc;text-align:right;">${custo>0?'R$ '+(custo*qtde).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2}):'—'}</td>
       </tr>`;
@@ -67814,6 +68011,7 @@ window.verEstrutura = async function(osId) {
             <th style="padding:6px 8px;font-size:10px;color:#475569;font-weight:600;text-align:left;">Descrição</th>
             <th style="padding:6px 8px;font-size:10px;color:#475569;font-weight:600;text-align:center;">UN</th>
             <th style="padding:6px 8px;font-size:10px;color:#475569;font-weight:600;text-align:right;">Qtde</th>
+            <th style="padding:6px 8px;font-size:10px;color:#475569;font-weight:600;text-align:right;">Disponível</th>
             <th style="padding:6px 8px;font-size:10px;color:#475569;font-weight:600;text-align:right;">Custo unit.</th>
             <th style="padding:6px 8px;font-size:10px;color:#475569;font-weight:600;text-align:right;">Total</th>
           </tr>
@@ -67910,7 +68108,7 @@ window.verOperacao = function(osId) {
 
       const detalhesId = `op-det-${op.id}`;
 
-      return `<div data-op-id="${op.id}" style="background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);border-radius:8px;padding:10px 12px;margin-top:8px;">
+      return `<div data-op-id="${op.id}" style="background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);border-radius:8px;padding:10px 12px;margin-top:8px;cursor:pointer;">
         <!-- Cabeçalho sempre visível -->
         <div style="display:flex;align-items:flex-start;gap:8px;">
           <div style="flex:1;min-width:0;">
@@ -67927,7 +68125,7 @@ window.verOperacao = function(osId) {
               ${op.data_previsao_entrega     ? `<span style="font-size:10px;color:#64748b;">Prev. entrega: <b style="color:#a5f3fc;">${fmtData(op.data_previsao_entrega)}</b></span>` : ''}
             </div>
           </div>
-          <button onclick="(function(btn){var d=document.getElementById('${detalhesId}');var aberto=d.style.display!=='none';d.style.display=aberto?'none':'flex';btn.innerHTML=aberto?'<i class=\\'fa-solid fa-chevron-down\\'></i>':'<i class=\\'fa-solid fa-chevron-up\\'></i>';})(this)"
+          <button type="button" class="op-expand-btn" onclick="event.stopPropagation();(function(btn){var d=document.getElementById('${detalhesId}');var aberto=d.style.display!=='none';d.style.display=aberto?'none':'flex';btn.innerHTML=aberto?'<i class=\\'fa-solid fa-chevron-down\\'></i>':'<i class=\\'fa-solid fa-chevron-up\\'></i>';})(this)"
             style="flex-shrink:0;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.12);border-radius:6px;color:#94a3b8;width:26px;height:26px;display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:11px;margin-top:2px;">
             <i class="fa-solid fa-chevron-down"></i>
           </button>
@@ -68153,7 +68351,7 @@ window.verOperacao = function(osId) {
 
       const detId = `monta-op-det-${op.id}`;
 
-      return `<div data-op-id="${op.id}" style="background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);border-radius:8px;padding:10px 12px;margin-top:8px;">
+      return `<div data-op-id="${op.id}" style="background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);border-radius:8px;padding:10px 12px;margin-top:8px;cursor:pointer;">
         <div style="display:flex;align-items:flex-start;gap:8px;">
           <div style="flex:1;min-width:0;">
             <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;">
@@ -68166,7 +68364,7 @@ window.verOperacao = function(osId) {
               ${op.data_previsao_entrega    ? `<span style="font-size:10px;color:#64748b;">Prev. entrega: <b style="color:#a5f3fc;">${fmtData(op.data_previsao_entrega)}</b></span>` : ''}
             </div>
           </div>
-          <button onclick="(function(btn){var d=document.getElementById('${detId}');var aberto=d.style.display!=='none';d.style.display=aberto?'none':'flex';btn.innerHTML=aberto?'<i class=\\'fa-solid fa-chevron-down\\'></i>':'<i class=\\'fa-solid fa-chevron-up\\'></i>';})(this)"
+          <button type="button" class="op-expand-btn" onclick="event.stopPropagation();(function(btn){var d=document.getElementById('${detId}');var aberto=d.style.display!=='none';d.style.display=aberto?'none':'flex';btn.innerHTML=aberto?'<i class=\\'fa-solid fa-chevron-down\\'></i>':'<i class=\\'fa-solid fa-chevron-up\\'></i>';})(this)"
             style="flex-shrink:0;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.12);border-radius:6px;color:#94a3b8;width:26px;height:26px;display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:11px;margin-top:2px;">
             <i class="fa-solid fa-chevron-down"></i>
           </button>
@@ -68303,6 +68501,96 @@ window.verOperacao = function(osId) {
     }[ch] || ch));
   }
 
+  async function openProducaoEstruturaPorIappId(iappId, produtoCodigo) {
+    const overlay = document.createElement('div');
+    overlay.className = 'kanban-modal-overlay';
+    overlay.addEventListener('click', (ev) => { if (ev.target === overlay) overlay.remove(); });
+
+    const modal = document.createElement('div');
+    modal.className = 'kanban-modal';
+    modal.style.maxWidth = '720px';
+    modal.innerHTML = `
+      <header>
+        <div>
+          <h2>Estrutura do produto</h2>
+          <span>${escapeHtml(produtoCodigo || String(iappId))}</span>
+        </div>
+        <button class="close-btn" aria-label="Fechar">&times;</button>
+      </header>
+      <div class="kanban-modal-body" id="estrutura-iapp-body" style="max-height:460px;overflow:auto;">
+        <div style="text-align:center;padding:32px 0;color:#94a3b8;font-size:12px;">
+          <i class="fa-solid fa-spinner fa-spin" style="margin-right:6px;"></i>Carregando estrutura...
+        </div>
+      </div>
+      <footer>
+        <button type="button" class="modal-secondary">Fechar</button>
+      </footer>
+    `;
+
+    overlay.appendChild(modal);
+    document.body.appendChild(overlay);
+
+    const close = () => overlay.remove();
+    modal.querySelector('.close-btn')?.addEventListener('click', close);
+    modal.querySelector('footer .modal-secondary')?.addEventListener('click', close);
+
+    const body = modal.querySelector('#estrutura-iapp-body');
+    try {
+      const resp = await fetch(`/api/producao/materiais-previstos/${iappId}`);
+      const data = await resp.json();
+      if (!resp.ok || !data.success) throw new Error(data.error || 'Erro ao carregar estrutura');
+      const itens = data.response || [];
+      if (!itens.length) {
+        body.innerHTML = '<div style="text-align:center;padding:32px 0;color:#475569;font-size:12px;">Nenhum material previsto.</div>';
+        return;
+      }
+      const precisaFetchFisico = itens.some(i => i.estoque_fisico == null);
+      const fisicoMap = precisaFetchFisico
+        ? await fetchEstoqueFisicoPorCodigos(itens.map(i => i.produto?.identificacao))
+        : {};
+      const fmtMoeda = (v) => v > 0 ? 'R$\u00a0' + Number(v).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '—';
+      const custoTotal = itens.reduce((s, i) => s + ((i.produto?.valor_custo || 0) * (i.qtde || 0)), 0);
+      const linhas = itens.map(i => {
+        const p = i.produto || {};
+        const qtde = i.qtde || 0;
+        const custo = p.valor_custo || 0;
+        const fisico = getEstoqueFisicoItem(i, fisicoMap);
+        return `<tr style="border-bottom:1px solid rgba(255,255,255,.05);">
+          <td style="padding:6px 8px;font-size:10px;color:#94a3b8;white-space:nowrap;">${escapeHtml(p.identificacao || '—')}</td>
+          <td style="padding:6px 8px;font-size:11px;color:#e2e8f0;">${escapeHtml(p.descricao || '—')}</td>
+          <td style="padding:6px 8px;font-size:10px;color:#64748b;text-align:center;">${escapeHtml(p.unidade_medida || '—')}</td>
+          <td style="padding:6px 8px;font-size:10px;color:#94a3b8;text-align:center;">${escapeHtml(p.tipo || '—')}</td>
+          <td style="padding:6px 8px;font-size:11px;color:#f1f5f9;text-align:right;font-weight:600;">${qtde}</td>
+          <td style="padding:6px 8px;font-size:11px;color:#fcd34d;text-align:right;font-weight:600;">${fisico != null ? fmtQtdeEstoque(fisico) : '—'}</td>
+          <td style="padding:6px 8px;font-size:10px;color:#6ee7b7;text-align:right;">${fmtMoeda(custo)}</td>
+          <td style="padding:6px 8px;font-size:10px;color:#a5f3fc;text-align:right;">${fmtMoeda(custo * qtde)}</td>
+        </tr>`;
+      }).join('');
+      body.innerHTML = `
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+          <span style="font-size:11px;color:#94a3b8;">${itens.length} material(is) previsto(s)</span>
+          <span style="font-size:11px;color:#a5f3fc;font-weight:600;">Total: ${fmtMoeda(custoTotal)}</span>
+        </div>
+        <table style="width:100%;border-collapse:collapse;">
+          <thead>
+            <tr style="border-bottom:1px solid rgba(255,255,255,.1);">
+              <th style="padding:6px 8px;font-size:10px;color:#475569;font-weight:600;text-align:left;">Código</th>
+              <th style="padding:6px 8px;font-size:10px;color:#475569;font-weight:600;text-align:left;">Descrição</th>
+              <th style="padding:6px 8px;font-size:10px;color:#475569;font-weight:600;text-align:center;">UN</th>
+              <th style="padding:6px 8px;font-size:10px;color:#475569;font-weight:600;text-align:center;">Tipo</th>
+              <th style="padding:6px 8px;font-size:10px;color:#475569;font-weight:600;text-align:right;">Qtde</th>
+              <th style="padding:6px 8px;font-size:10px;color:#475569;font-weight:600;text-align:right;">Disponível</th>
+              <th style="padding:6px 8px;font-size:10px;color:#475569;font-weight:600;text-align:right;">Custo unit.</th>
+              <th style="padding:6px 8px;font-size:10px;color:#475569;font-weight:600;text-align:right;">Total</th>
+            </tr>
+          </thead>
+          <tbody>${linhas}</tbody>
+        </table>`;
+    } catch (e) {
+      body.innerHTML = `<div style="text-align:center;padding:32px 0;color:#f87171;font-size:12px;"><i class="fa-solid fa-circle-exclamation" style="margin-right:6px;"></i>${escapeHtml(e.message)}</div>`;
+    }
+  }
+
   function openProducaoKanbanStructure(produtoCodigo) {
     const cod = String(produtoCodigo || window.codigoSelecionado || '').trim();
     if (!cod) return;
@@ -68419,7 +68707,9 @@ window.verOperacao = function(osId) {
     modal.querySelector('footer .modal-secondary')?.addEventListener('click', close);
     modal.querySelector('#open-estrutura-btn')?.addEventListener('click', () => {
       close();
-      openProducaoKanbanStructure(produtoCodigo || groupKey);
+      const iappId = ops && ops[0] ? ops[0].id : null;
+      if (!iappId) return;
+      openProducaoEstruturaPorIappId(iappId, produtoCodigo || groupKey);
     });
     modal.querySelector('#open-process-btn')?.addEventListener('click', () => {
       close();
@@ -68456,8 +68746,8 @@ window.verOperacao = function(osId) {
       if (card.dataset.opBound === '1') return;
       card.dataset.opBound = '1';
       card.addEventListener('click', (ev) => {
-        // Ignora cliques em botões/inputs internos
-        if (ev.target.closest('button, a, input, textarea, select')) return;
+        // Ignora cliques em botões/inputs internos ou área expandida da OP
+        if (ev.target.closest('button, a, input, textarea, select, .op-expand-btn, [id^="op-det-"], [id^="monta-op-det-"]')) return;
 
         const opId = card.dataset.opId || card.getAttribute('data-op-id');
         if (!opId) return;

@@ -595,6 +595,38 @@ router.get('/sync-ativas', async (req, res) => {
   }
 });
 
+/** Enriquece itens IAPP com estoque físico (logistica.estoque_atual.fisico) por produto.identificacao = codigo */
+async function enrichMateriaisComFisico(itens) {
+  if (!Array.isArray(itens) || !itens.length) return itens;
+
+  const codigos = [...new Set(
+    itens.map(i => String(i.produto?.identificacao || '').trim()).filter(Boolean)
+  )];
+  if (!codigos.length) return itens;
+
+  const norms = codigos.map(c => c.toUpperCase());
+  const result = await dbQuery(`
+    SELECT UPPER(BTRIM(codigo)) AS codigo_norm, COALESCE(SUM(fisico), 0) AS fisico
+    FROM logistica.estoque_atual
+    WHERE UPPER(BTRIM(codigo)) = ANY($1::text[])
+    GROUP BY UPPER(BTRIM(codigo))
+  `, [norms]);
+
+  const byNorm = {};
+  for (const row of result.rows) {
+    byNorm[row.codigo_norm] = Number(row.fisico) || 0;
+  }
+
+  return itens.map(item => {
+    const cod = String(item.produto?.identificacao || '').trim();
+    const norm = cod.toUpperCase();
+    return {
+      ...item,
+      estoque_fisico: Object.prototype.hasOwnProperty.call(byNorm, norm) ? byNorm[norm] : null
+    };
+  });
+}
+
 /* ---------------------------------------------------------------
  * GET /api/producao/materiais-previstos/:id
  * Proxy para IAPP /manufatura/ordens-producao/busca/{id}/materiais-previstos
@@ -605,6 +637,9 @@ router.get('/materiais-previstos/:id', async (req, res) => {
   try {
     const id = req.params.id;
     const data = await iappGet(`/manufatura/ordens-producao/busca/${id}/materiais-previstos`);
+    if (Array.isArray(data.response)) {
+      data.response = await enrichMateriaisComFisico(data.response);
+    }
     return res.json(data);
   } catch (err) {
     return res.status(err.status || 500).json({ error: err.message, iappCode: err.iappCode });
@@ -653,9 +688,52 @@ router.get('/os-materiais/:id', async (req, res) => {
   try {
     const id = req.params.id;
     const data = await iappGet(`/manufatura/ordens-servico/busca/${id}/materiais`);
+    if (Array.isArray(data.response)) {
+      data.response = await enrichMateriaisComFisico(data.response);
+    }
     return res.json(data);
   } catch (err) {
     return res.status(err.status || 500).json({ error: err.message, iappCode: err.iappCode });
+  }
+});
+
+/* ---------------------------------------------------------------
+ * POST /api/producao/estoque-fisico
+ * Retorna estoque físico (logistica.estoque_atual.fisico) por código de produto.
+ * Body: { codigos: string[] }
+ * Response: { fisico: { [codigo]: number } }
+ * --------------------------------------------------------------- */
+router.post('/estoque-fisico', async (req, res) => {
+  try {
+    const codigos = Array.isArray(req.body?.codigos)
+      ? [...new Set(req.body.codigos.map(c => String(c || '').trim()).filter(Boolean))]
+      : [];
+    if (!codigos.length) return res.json({ fisico: {} });
+
+    const norms = codigos.map(c => c.toUpperCase());
+    const result = await dbQuery(`
+      SELECT UPPER(BTRIM(codigo)) AS codigo_norm, COALESCE(SUM(fisico), 0) AS fisico
+      FROM logistica.estoque_atual
+      WHERE UPPER(BTRIM(codigo)) = ANY($1::text[])
+      GROUP BY UPPER(BTRIM(codigo))
+    `, [norms]);
+
+    const byNorm = {};
+    for (const row of result.rows) {
+      byNorm[row.codigo_norm] = Number(row.fisico) || 0;
+    }
+
+    const fisico = {};
+    for (const cod of codigos) {
+      const norm = cod.toUpperCase();
+      if (Object.prototype.hasOwnProperty.call(byNorm, norm)) {
+        fisico[cod] = byNorm[norm];
+      }
+    }
+    return res.json({ fisico });
+  } catch (err) {
+    console.error('[producao] estoque-fisico:', err.message);
+    return res.status(500).json({ error: err.message || 'Erro ao consultar estoque físico.' });
   }
 });
 

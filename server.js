@@ -16027,6 +16027,7 @@ async function ensureSolicitacaoProdutoQtyColumns() {
   await pool.query(`ALTER TABLE solicitacao_produto.itens_solicitados ADD COLUMN IF NOT EXISTS quantidade_separada NUMERIC(18,4)`);
   await pool.query(`ALTER TABLE solicitacao_produto.solicitacoes_separacao ADD COLUMN IF NOT EXISTS quantidade_original NUMERIC(18,4)`);
   await pool.query(`ALTER TABLE solicitacao_produto.itens_solicitados ADD COLUMN IF NOT EXISTS urgente BOOLEAN DEFAULT FALSE`);
+  await pool.query(`ALTER TABLE solicitacao_produto.itens_solicitados ADD COLUMN IF NOT EXISTS usuario_separando TEXT`);
   await pool.query(`ALTER TABLE solicitacao_produto.solicitacoes_separacao ADD COLUMN IF NOT EXISTS urgente BOOLEAN DEFAULT FALSE`);
   await pool.query(`ALTER TABLE solicitacao_produto.solicitacoes_separacao ADD COLUMN IF NOT EXISTS n_solic TEXT`);
   await pool.query(`ALTER TABLE logistica.carrinho ADD COLUMN IF NOT EXISTS urgente BOOLEAN DEFAULT FALSE`);
@@ -16040,6 +16041,25 @@ async function ensureSchemaMigrated() {
     schemaMigrated = true;
   }
   await ensureSolicitacaoProdutoQtyColumns();
+}
+
+async function assertUsuarioSeparandoPodeAgir(client, solicIds, req) {
+  const ids = (solicIds || []).map(id => parseInt(id, 10)).filter(id => !isNaN(id));
+  if (!ids.length) return { ok: true };
+  const nome_user = String(req.session?.user?.username || req.session?.user?.nome || '').trim();
+  const { rows } = await client.query(
+    `SELECT DISTINCT TRIM(usuario_separando) AS usuario_separando
+       FROM solicitacao_produto.itens_solicitados
+      WHERE id = ANY($1::bigint[])
+        AND usuario_separando IS NOT NULL
+        AND TRIM(usuario_separando) <> ''`,
+    [ids]
+  );
+  const bloqueados = rows.map(r => r.usuario_separando).filter(Boolean);
+  if (bloqueados.length && !bloqueados.every(u => u === nome_user)) {
+    return { ok: false, error: `Esta separação está sendo feita por ${bloqueados[0]}.` };
+  }
+  return { ok: true };
 }
 
 async function registrarMovimentacaoKanbanItens(client, solicIds, statusDestino, req, observacao = null) {
@@ -16207,16 +16227,107 @@ app.patch('/api/logistica/itens_solicitados/separacao', async (req, res) => {
     }
     const ids = solic_ids.map(id => parseInt(id, 10)).filter(id => !isNaN(id));
     if (!ids.length) return res.status(400).json({ ok: false, error: 'Nenhum ID válido.' });
+    const nome_user = String(req.session?.user?.username || req.session?.user?.nome || '').trim();
+    if (!nome_user) return res.status(400).json({ ok: false, error: 'Usuário sem nome na sessão.' });
     await registrarMovimentacaoKanbanItens(pool, ids, 'Separação', req);
     await pool.query(
-      `UPDATE solicitacao_produto.itens_solicitados SET status = 'Separação' WHERE id = ANY($1::bigint[]) AND status = 'pendente'`,
-      [ids]
+      `UPDATE solicitacao_produto.itens_solicitados
+          SET status = 'Separação',
+              usuario_separando = $2
+        WHERE id = ANY($1::bigint[])
+          AND status IN ('pendente', 'Stund-by')`,
+      [ids, nome_user]
     );
-    console.log(`[logistica/separacao] ${ids.length} id(s) enviados para Separação (somente pendente) por user ${id_user}`);
+    console.log(`[logistica/separacao] ${ids.length} id(s) enviados para Separação por ${nome_user} (user ${id_user})`);
     res.json({ ok: true });
   } catch (err) {
     console.error('[logistica/itens_solicitados/separacao] erro:', err);
     res.status(500).json({ ok: false, error: String(err?.message || err) });
+  }
+});
+
+// PATCH /api/logistica/itens_solicitados/cancelar-separacao — Remove separador e volta SEP para Solicitado
+app.patch('/api/logistica/itens_solicitados/cancelar-separacao', async (req, res) => {
+  const client = await pool.connect();
+  try {
+    await ensureSchemaMigrated();
+    const id_user = req.session?.user?.id;
+    const nome_user = String(req.session?.user?.username || req.session?.user?.nome || '').trim();
+    if (!id_user) return res.status(401).json({ ok: false, error: 'Não autenticado.' });
+    if (!nome_user) return res.status(400).json({ ok: false, error: 'Usuário sem nome na sessão.' });
+    const { solic_ids } = req.body;
+    if (!Array.isArray(solic_ids) || !solic_ids.length)
+      return res.status(400).json({ ok: false, error: 'solic_ids inválido.' });
+    const ids = solic_ids.map(id => parseInt(id, 10)).filter(id => !isNaN(id));
+    if (!ids.length) return res.status(400).json({ ok: false, error: 'Nenhum ID válido.' });
+
+    const { rows: itens } = await client.query(
+      `SELECT id, status, usuario_separando
+         FROM solicitacao_produto.itens_solicitados
+        WHERE id = ANY($1::bigint[])
+          AND status IN ('Separação', 'Separado')`,
+      [ids]
+    );
+    if (!itens.length)
+      return res.status(400).json({ ok: false, error: 'Nenhum item em separação encontrado para cancelar.' });
+
+    const idsElegiveis = itens.map(r => r.id);
+    const bloqueado = itens.some(r => String(r.usuario_separando || '').trim() !== nome_user);
+    if (bloqueado)
+      return res.status(403).json({ ok: false, error: 'Só quem iniciou a separação pode cancelar.' });
+
+    await client.query('BEGIN');
+
+    await client.query(
+      `UPDATE logistica.carrinho c
+          SET quantidade = i.quantidade_solicitada
+         FROM solicitacao_produto.itens_solicitados i
+        WHERE i.id_carr = c.id
+          AND i.id = ANY($1::bigint[])
+          AND i.status = 'Separado'
+          AND i.quantidade_solicitada IS NOT NULL`,
+      [idsElegiveis]
+    );
+
+    await client.query(
+      `UPDATE solicitacao_produto.solicitacoes_separacao ss
+          SET quantidade = ss.quantidade_original,
+              quantidade_original = NULL
+        WHERE ss.quantidade_original IS NOT NULL
+          AND ss.id IN (
+            SELECT ss2.id
+              FROM solicitacao_produto.solicitacoes_separacao ss2
+              JOIN solicitacao_produto.itens_solicitados i ON i.id = ANY($1::bigint[])
+              JOIN logistica.carrinho c ON c.id = i.id_carr
+             WHERE ss2.codigo_produto = c.codigo_produto
+               AND ss2.id_user = c.id_user
+               AND ss2.criado_em BETWEEN (c.criado_em - INTERVAL '10 minutes')
+                                     AND (c.criado_em + INTERVAL '10 minutes')
+          )`,
+      [idsElegiveis]
+    );
+
+    await registrarMovimentacaoKanbanItens(client, idsElegiveis, 'pendente', req);
+    await client.query(
+      `UPDATE solicitacao_produto.itens_solicitados
+          SET status = 'pendente',
+              usuario_separando = NULL,
+              quantidade_solicitada = NULL,
+              quantidade_separada = NULL
+        WHERE id = ANY($1::bigint[])
+          AND status IN ('Separação', 'Separado')`,
+      [idsElegiveis]
+    );
+
+    await client.query('COMMIT');
+    console.log(`[logistica/cancelar-separacao] ${idsElegiveis.length} item(ns) revertido(s) para pendente por ${nome_user}`);
+    res.json({ ok: true });
+  } catch (err) {
+    try { await client.query('ROLLBACK'); } catch (_) {}
+    console.error('[logistica/cancelar-separacao] erro:', err);
+    res.status(500).json({ ok: false, error: String(err?.message || err) });
+  } finally {
+    client.release();
   }
 });
 
@@ -16257,6 +16368,8 @@ app.patch('/api/logistica/itens_solicitados/reverter-separacao', async (req, res
       return res.status(400).json({ ok: false, error: 'solic_ids inválido.' });
     const ids = solic_ids.map(id => parseInt(id, 10)).filter(id => !isNaN(id));
     if (!ids.length) return res.status(400).json({ ok: false, error: 'Nenhum ID válido.' });
+    const lock = await assertUsuarioSeparandoPodeAgir(client, ids, req);
+    if (!lock.ok) return res.status(403).json(lock);
 
     await client.query('BEGIN');
 
@@ -16346,6 +16459,8 @@ app.patch('/api/logistica/itens_solicitados/separar', async (req, res) => {
     if (!Array.isArray(solic_ids) || !solic_ids.length)
       return res.status(400).json({ ok: false, error: 'solic_ids inválido.' });
     const ids = solic_ids.map(id => parseInt(id, 10)).filter(id => !isNaN(id));
+    const lock = await assertUsuarioSeparandoPodeAgir(pool, ids, req);
+    if (!lock.ok) return res.status(403).json(lock);
     await registrarMovimentacaoKanbanItens(pool, ids, 'Separado', req);
     await pool.query(
       `UPDATE solicitacao_produto.itens_solicitados
@@ -16429,6 +16544,10 @@ app.post('/api/logistica/itens_solicitados/separar-parcial', async (req, res) =>
       return res.status(400).json({ ok: false, error: 'Dados inválidos.' });
     const cIds = carr_ids.map(id => parseInt(id, 10)).filter(id => !isNaN(id));
     const sIds = (solic_ids || []).map(id => parseInt(id, 10)).filter(id => !isNaN(id));
+    if (sIds.length) {
+      const lock = await assertUsuarioSeparandoPodeAgir(pool, sIds, req);
+      if (!lock.ok) return res.status(403).json(lock);
+    }
 
     await client.query('BEGIN');
     await client.query(`ALTER TABLE solicitacao_produto.itens_solicitados ADD COLUMN IF NOT EXISTS observacao TEXT`);
@@ -16702,6 +16821,7 @@ app.get('/api/logistica/kanban/itens', async (req, res) => {
       const { rows } = await pool.query(`
         SELECT DISTINCT ON (i.id)
                c.id AS carr_id, i.id AS solic_id, i.status, i.observacao, i.motivo, i.cod_local, i.nome_local,
+               i.usuario_separando,
                COALESCE(i.urgente, ss.urgente, false) AS urgente,
                c.id_user,
                c.codigo_produto, c.descricao, c.unidade,
@@ -16726,6 +16846,7 @@ app.get('/api/logistica/kanban/itens', async (req, res) => {
         const baseNSolic = String(n_solic).replace(/\.\d+$/, '');
         const { rows: derivRows } = await pool.query(`
              SELECT c.id AS carr_id, i.id AS solic_id, i.n_solic, i.status, i.observacao, i.motivo, i.cod_local, i.nome_local,
+                 i.usuario_separando,
                  c.codigo_produto, c.descricao, c.unidade,
                  c.quantidade::numeric AS quantidade,
                  i.quantidade_solicitada::numeric AS quantidade_solicitada,
@@ -16828,6 +16949,9 @@ app.get('/api/logistica/solicitacoes-kanban', async (req, res) => {
         MIN(c.horario)                         AS horario,
         COUNT(*)::int                          AS total_itens,
         MIN(c.criado_em)                       AS criado_em_min,
+        MIN(i.criado_em)                       AS item_criado_em,
+        MAX(NULLIF(TRIM(i.usuario_separando), '')) AS usuario_separando,
+        bool_or(COALESCE(i.urgente, false))    AS tem_urgente,
         CASE
           WHEN bool_or(i.status = 'pendente')            THEN 'Solicitado'
           WHEN bool_or(i.status = 'Stund-by')           THEN 'Stund-by'
@@ -16845,6 +16969,11 @@ app.get('/api/logistica/solicitacoes-kanban', async (req, res) => {
 
     const colunas = { 'Solicitado': [], 'Stund-by': [], 'Em Separação': [], 'Separado': [], 'Aguardando retirada': [], 'Concluído': [] };
     rows.forEach(r => { if (colunas[r.coluna]) colunas[r.coluna].push(r); });
+    colunas['Concluído'].sort((a, b) => {
+      const ta = a.item_criado_em ? new Date(a.item_criado_em).getTime() : 0;
+      const tb = b.item_criado_em ? new Date(b.item_criado_em).getTime() : 0;
+      return tb - ta;
+    });
 
     res.json({ ok: true, colunas });
   } catch (err) {
@@ -16900,6 +17029,8 @@ app.patch('/api/logistica/itens_solicitados/aguardando-retirada', async (req, re
     if (!Array.isArray(solic_ids) || !solic_ids.length)
       return res.status(400).json({ ok: false, error: 'solic_ids inválido.' });
     const ids = solic_ids.map(id => parseInt(id, 10)).filter(id => !isNaN(id));
+    const lock = await assertUsuarioSeparandoPodeAgir(pool, ids, req);
+    if (!lock.ok) return res.status(403).json(lock);
     await registrarMovimentacaoKanbanItens(pool, ids, 'Aguardando retirada', req);
     await pool.query(
       `UPDATE solicitacao_produto.itens_solicitados SET status = 'Aguardando retirada' WHERE id = ANY($1::bigint[])`, [ids]
@@ -16941,6 +17072,8 @@ app.patch('/api/logistica/itens_solicitados/reverter-conferido', async (req, res
       return res.status(400).json({ ok: false, error: 'solic_ids inválido.' });
     const ids = solic_ids.map(id => parseInt(id, 10)).filter(id => !isNaN(id));
     if (!ids.length) return res.status(400).json({ ok: false, error: 'Nenhum ID válido.' });
+    const lock = await assertUsuarioSeparandoPodeAgir(pool, ids, req);
+    if (!lock.ok) return res.status(403).json(lock);
 
     await registrarMovimentacaoKanbanItens(pool, ids, 'Separado', req);
     const { rowCount } = await pool.query(
@@ -16989,6 +17122,8 @@ app.patch('/api/logistica/itens_solicitados/urgente', express.json(), async (req
     if (!Array.isArray(solic_ids) || !solic_ids.length)
       return res.status(400).json({ ok: false, error: 'solic_ids inválido.' });
     const ids = solic_ids.map(id => parseInt(id, 10)).filter(id => !isNaN(id));
+    const lock = await assertUsuarioSeparandoPodeAgir(pool, ids, req);
+    if (!lock.ok) return res.status(403).json(lock);
     const valor = !!urgente;
     await pool.query(
       `UPDATE solicitacao_produto.itens_solicitados SET urgente = $1 WHERE id = ANY($2::bigint[])`,
@@ -17124,6 +17259,8 @@ app.post('/api/logistica/itens_solicitados/nao-separar', express.json(), async (
     
     const { solic_id, justificativa } = req.body;
     if (!solic_id) return res.status(400).json({ ok: false, error: 'solic_id inválido.' });
+    const lock = await assertUsuarioSeparandoPodeAgir(pool, [solic_id], req);
+    if (!lock.ok) return res.status(403).json(lock);
     
     await client.query('BEGIN');
 
@@ -17183,10 +17320,10 @@ app.post('/api/logistica/itens_solicitados/nao-separar', express.json(), async (
 
     const newCarrId = newCarrRows[0].id;
 
-    // Cria novo item_solicitado com a nova SEP e status "Stund-by"
+    // Cria novo item_solicitado com a nova SEP e status "Stund-by" (sem separador ativo)
     await client.query(`
-      INSERT INTO solicitacao_produto.itens_solicitados (id_carr, n_solic, status, observacao)
-      VALUES ($1, $2, 'Stund-by', $3)
+      INSERT INTO solicitacao_produto.itens_solicitados (id_carr, n_solic, status, observacao, usuario_separando)
+      VALUES ($1, $2, 'Stund-by', $3, NULL)
     `, [newCarrId, newNSolic, justificativa || null]);
 
     // Registra na tabela solicitacoes_separacao com status "Não separado" e a justificativa
@@ -17227,6 +17364,8 @@ app.post('/api/logistica/itens_solicitados/trocar', express.json(), async (req, 
     const { solic_id, codigo_novo, descricao_novo, unidade_novo, quantidade_nova, motivo } = req.body || {};
     if (!solic_id || !codigo_novo)
       return res.status(400).json({ ok: false, error: 'solic_id e codigo_novo são obrigatórios.' });
+    const lock = await assertUsuarioSeparandoPodeAgir(pool, [solic_id], req);
+    if (!lock.ok) return res.status(403).json(lock);
 
     await client.query('BEGIN');
 
