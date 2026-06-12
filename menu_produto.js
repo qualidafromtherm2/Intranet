@@ -11535,112 +11535,13 @@ const atSerieModal = document.getElementById('atSerieModal');
 const atSerieModalClose = document.getElementById('atSerieModalClose');
 const atSerieModalTbody = document.getElementById('atSerieModalTbody');
 const envioMercadoriaRefreshBtnTop = document.getElementById('envioMercadoriaRefreshBtnTop'); // painel dedicado
-const envioMercadoriaAtualizarRastreioBtn = document.getElementById('envioMercadoriaAtualizarRastreioBtn');
-const envioMercadoriaRastreioStatus = document.getElementById('envioMercadoriaRastreioStatus');
 const envioMercadoriaTabelaBodyPane = document.getElementById('envioMercadoriaCardsPane') || document.getElementById('envioMercadoriaTabelaBodyPane');
-const envioMercadoriaBusca = document.getElementById('envioMercadoriaBusca');
-const envioMercadoriaFiltroStatus = document.getElementById('envioMercadoriaFiltroStatus');
-const envioMercadoriaFiltroPrazo = document.getElementById('envioMercadoriaFiltroPrazo');
 const envioMetricPendente = document.getElementById('envioMetricPendente');
 const envioMetricCorreios = document.getElementById('envioMetricCorreios');
 const envioMetricEnviado = document.getElementById('envioMetricEnviado');
 const envioMetricTotal = document.getElementById('envioMetricTotal');
 const envioMercadoriaMenu = document.getElementById('menu-envio-mercadoria');
 const sacStatusOptions = ['Pendente', 'Em separação', 'Aguardando correios', 'Enviado', 'Finalizado'];
-function setEnvioMercadoriaRastreioStatus(text, isError = false) {
-  if (!envioMercadoriaRastreioStatus) return;
-  if (!text) {
-    envioMercadoriaRastreioStatus.style.display = 'none';
-    envioMercadoriaRastreioStatus.textContent = '';
-    return;
-  }
-  envioMercadoriaRastreioStatus.style.display = 'block';
-  envioMercadoriaRastreioStatus.style.background = isError ? 'rgba(239,68,68,.12)' : 'rgba(34,197,94,.1)';
-  envioMercadoriaRastreioStatus.style.border = isError ? '1px solid rgba(239,68,68,.35)' : '1px solid rgba(34,197,94,.28)';
-  envioMercadoriaRastreioStatus.style.color = isError ? '#fca5a5' : '#86efac';
-  envioMercadoriaRastreioStatus.textContent = text;
-}
-
-function formatarTextoRastreioCorreios(data) {
-  const partes = [];
-  if (data?.status) partes.push(data.status);
-  if (data?.detalhe) partes.push(data.detalhe);
-  const local = [data?.local, data?.cidade, data?.uf].filter(Boolean).join(' - ');
-  if (local) partes.push(local);
-  if (data?.quando) partes.push(new Date(data.quando).toLocaleString('pt-BR'));
-  return partes.length ? partes.join(' | ') : 'Sem atualização';
-}
-
-async function atualizarRastreioEnvioMercadoria() {
-  const container = envioMercadoriaTabelaBodyPane;
-  if (!container) return;
-
-  const spans = container.querySelectorAll('.rast-status');
-  const items = [];
-  spans.forEach((el) => {
-    const codigo = String(el.getAttribute('data-identificacao') || el.getAttribute('data-rastreio') || '')
-      .replace(/\s+/g, '')
-      .toUpperCase();
-    if (isCodigoRastreioEnvioMercadoria(codigo)) {
-      items.push({ el, codigo });
-    }
-  });
-
-  if (!items.length) {
-    setEnvioMercadoriaRastreioStatus('Nenhum código de rastreio válido na lista visível.', true);
-    return;
-  }
-
-  if (envioMercadoriaAtualizarRastreioBtn) envioMercadoriaAtualizarRastreioBtn.disabled = true;
-  setEnvioMercadoriaRastreioStatus(`Consultando ${items.length} rastreio(s) nos Correios...`, false);
-  envioMercadoriaRastreioStatus.style.background = 'rgba(59,130,246,.1)';
-  envioMercadoriaRastreioStatus.style.border = '1px solid rgba(59,130,246,.28)';
-  envioMercadoriaRastreioStatus.style.color = '#93c5fd';
-
-  const avisos = [];
-  let okCount = 0;
-
-  for (const { el, codigo } of items) {
-    el.textContent = 'Consultando...';
-    try {
-      const resp = await fetch(`/api/sac/rastreio/${encodeURIComponent(codigo)}`, { credentials: 'same-origin' });
-      const data = await resp.json().catch(() => ({}));
-      if (!resp.ok || data.ok === false) {
-        const msg = data.error || `Falha ao consultar ${codigo} (HTTP ${resp.status})`;
-        avisos.push(`${codigo}: ${msg}`);
-        el.textContent = msg;
-        continue;
-      }
-      el.textContent = formatarTextoRastreioCorreios(data);
-      okCount += 1;
-
-      if (isRastreioEmTransitoOuPosterior(data.status)) {
-        const card = el.closest('.envio-card');
-        if (card) card.remove();
-      }
-    } catch (err) {
-      const msg = err?.message || 'Erro ao consultar';
-      avisos.push(`${codigo}: ${msg}`);
-      el.textContent = msg;
-    }
-  }
-
-  if (envioMercadoriaAtualizarRastreioBtn) envioMercadoriaAtualizarRastreioBtn.disabled = false;
-
-  if (avisos.length) {
-    setEnvioMercadoriaRastreioStatus(
-      `${okCount} atualizado(s). ${avisos.length} com aviso: ${avisos.join(' | ')}`,
-      true
-    );
-    alert(`Atualização de rastreio concluída com avisos:\n\n${avisos.join('\n')}`);
-  } else {
-    setEnvioMercadoriaRastreioStatus(`${okCount} rastreio(s) atualizado(s) com sucesso.`, false);
-  }
-
-  if (!container.querySelector('.envio-card')) {
-    container.innerHTML = '<div class="envio-empty-state">Nenhum envio combina com os filtros atuais.</div>';
-  }
-}
 
 // Preenche status de rastreio nas células com data-rastreio
 async function preencherStatusRastreio(container) {
@@ -11664,10 +11565,6 @@ async function preencherStatusRastreio(container) {
       if (local) partes.push(local);
       if (data.quando) partes.push(new Date(data.quando).toLocaleString('pt-BR'));
       el.textContent = partes.length ? partes.join(' | ') : 'Sem atualização';
-      if (isRastreioEmTransitoOuPosterior(data.status)) {
-        const card = el.closest('.envio-card');
-        if (card) card.remove();
-      }
     } catch (err) {
       console.error('[SAC] erro rastreio', err);
       el.textContent = err?.message || 'Erro ao consultar';
@@ -11727,10 +11624,6 @@ async function preencherStatusVipp(container) {
       if (data.statusSolicitacao) partes.push(data.statusSolicitacao);
       if (data.etiquetaPostagem) partes.push('ECT: ' + data.etiquetaPostagem);
       el.textContent = partes.length ? partes.join(' | ') : 'Aguardando VIPP';
-      if (isRastreioEmTransitoOuPosterior(statusVipp)) {
-        const card = el.closest('.envio-card');
-        if (card) card.remove();
-      }
     } catch (err) {
       console.error('[VIPP] erro status', err);
       el.textContent = 'Erro ao consultar VIPP';
@@ -11804,40 +11697,11 @@ function atualizarMetricasEnvioMercadoria(rows) {
   if (envioMetricTotal) envioMetricTotal.textContent = total;
 }
 
+const RASTREIO_STATUS_FILA_ENVIO = new Set(['Valida', 'Processamento Vipp']);
+
 function filtrarEnvioMercadoria(row) {
-  const busca = normalizarTextoEnvioMercadoria(envioMercadoriaBusca?.value || '');
-  const statusFiltro = envioMercadoriaFiltroStatus?.value || '';
-  const prazoFiltro = envioMercadoriaFiltroPrazo?.value || '';
-  const status = normalizeSacStatus(row?.status || 'Pendente');
   const rastreioStatus = row?.rastreio_status ? String(row.rastreio_status).trim() : '';
-  const identClean = String(row?.identificacao || '').replace(/\s+/g, '').toUpperCase();
-  const criado = row?.created_at ? new Date(row.created_at) : null;
-
-  if (status === 'Enviado' || status === 'Finalizado') return false;
-
-  if (isRastreioEmTransitoOuPosterior(rastreioStatus)) return false;
-
-  if (statusFiltro && status !== statusFiltro) return false;
-
-  if (prazoFiltro === 'hoje') {
-    const hoje = new Date();
-    if (!criado || criado.toDateString() !== hoje.toDateString()) return false;
-  }
-  if (prazoFiltro === 'sem-rastreio' && isCodigoRastreioEnvioMercadoria(identClean)) return false;
-  if (prazoFiltro === 'com-rastreio' && !isCodigoRastreioEnvioMercadoria(identClean)) return false;
-
-  if (!busca) return true;
-  const searchable = [
-    row?.id,
-    row?.usuario,
-    row?.observacao,
-    row?.numero_sep,
-    row?.identificacao,
-    row?.conteudo,
-    row?.status,
-    row?.rastreio_status
-  ].join(' ');
-  return normalizarTextoEnvioMercadoria(searchable).includes(busca);
+  return RASTREIO_STATUS_FILA_ENVIO.has(rastreioStatus);
 }
 
 function montarConteudoEnvioMercadoria(conteudoRaw) {
@@ -11918,7 +11782,7 @@ function renderEnvioMercadoriaCard(r) {
         <div>
           <div class="envio-card-label">Rastreio</div>
           <div class="envio-card-text" style="font-weight:800;color:#f8fafc;">${escapeAtHtml(identRaw)}</div>
-          <small class="rast-status" data-rastreio="${escapeAtHtml(dataRastreio)}" data-id-vipp="${escapeAtHtml(r.id_vipp || '')}" data-envio-id="${escapeAtHtml(String(r.id))}" data-identificacao="${escapeAtHtml(identClean)}" style="display:block;margin-top:5px;color:#94a3b8;line-height:1.35;">${escapeAtHtml(rastText || (isRastreio ? 'Clique em Atualizar rastreio para consultar' : 'Sem rastreio válido'))}</small></small>
+          <small class="rast-status" data-rastreio="${escapeAtHtml(dataRastreio)}" data-id-vipp="${escapeAtHtml(r.id_vipp || '')}" data-envio-id="${escapeAtHtml(String(r.id))}" data-identificacao="${escapeAtHtml(identClean)}" style="display:block;margin-top:5px;color:#94a3b8;line-height:1.35;">${escapeAtHtml(rastText || (isRastreio ? 'Aguardando atualização automática (7h)' : 'Sem rastreio válido'))}</small></small>
         </div>
         <span class="envio-status-pill ${statusPillClasse}"><i class="fa-solid fa-circle"></i>${escapeAtHtml(status)}</span>
       </div>
@@ -18050,7 +17914,7 @@ if (_atEmAnexarBtn && _atEmAnexarInput) {
   if (_mencaoModal)    _mencaoModal.addEventListener('click', e => { if (e.target === _mencaoModal) _fecharMencaoModal(); });
 })();
 
-async function carregarSacSolicitacoes(targetBody, { hideDone = false, titleOnly = false, filterByUser = false } = {}) {
+async function carregarSacSolicitacoes(targetBody, { hideDone = false, filaLogistica = false, titleOnly = false, filterByUser = false } = {}) {
   const bodyEl = targetBody || sacTabelaBody;
   if (!bodyEl) return;
   
@@ -18066,7 +17930,8 @@ async function carregarSacSolicitacoes(targetBody, { hideDone = false, titleOnly
   try {
     // Monta a URL com os parâmetros necessários
     const params = new URLSearchParams();
-    if (hideDone) params.append('hideDone', '1');
+    if (filaLogistica) params.append('filaLogistica', '1');
+    else if (hideDone) params.append('hideDone', '1');
     if (filterByUser) params.append('filterByUser', '1');
     const url = `/api/sac/solicitacoes${params.toString() ? '?' + params.toString() : ''}`;
     const resp = await fetch(url);
@@ -18076,10 +17941,11 @@ async function carregarSacSolicitacoes(targetBody, { hideDone = false, titleOnly
 
     // Atualiza badge no título da aba com quantidade filtrada (Enviado/Finalizado ocultos)
     // mesmo que a aba ativa seja outra.
-    if (hideDone) {
+    if (filaLogistica || hideDone) {
       const baseTitle = 'SGF';
-      const pendentes = rows.filter(r => normalizeSacStatus(r.status) === 'Pendente');
-      const count = pendentes.length;
+      const count = filaLogistica
+        ? rows.length
+        : rows.filter(r => normalizeSacStatus(r.status) === 'Pendente').length;
       document.title = count > 0 ? `(${count}) ${baseTitle}` : baseTitle;
     }
 
@@ -18095,18 +17961,14 @@ async function carregarSacSolicitacoes(targetBody, { hideDone = false, titleOnly
       return;
     }
     
-    // Filtra registros excluídos e finalizados na tabela "Envios registrados"
     const filteredRows = isEnvioMercadoriaPane
-      ? rows.filter((r) => {
-          const st = normalizeSacStatus(r.status);
-          return st !== 'Excluído' && st !== 'Enviado' && st !== 'Finalizado';
-        })
+      ? rows.filter(filtrarEnvioMercadoria)
       : rows;
-    
+
     if (!filteredRows.length) {
       if (isEnvioMercadoriaPane) {
         atualizarMetricasEnvioMercadoria([]);
-        bodyEl.innerHTML = '<div class="envio-empty-state">Nenhum envio ativo encontrado.</div>';
+        bodyEl.innerHTML = '<div class="envio-empty-state">Nenhum envio com rastreio Valida ou Processamento Vipp.</div>';
         return;
       }
       bodyEl.innerHTML = `<tr><td colspan="${numCols}" style="text-align:center;padding:16px;color:var(--inactive-color);">Nenhum registro.</td></tr>`;
@@ -18115,12 +17977,7 @@ async function carregarSacSolicitacoes(targetBody, { hideDone = false, titleOnly
 
     if (isEnvioMercadoriaPane) {
       atualizarMetricasEnvioMercadoria(filteredRows);
-      const rowsVisiveis = filteredRows.filter(filtrarEnvioMercadoria);
-      if (!rowsVisiveis.length) {
-        bodyEl.innerHTML = '<div class="envio-empty-state">Nenhum envio combina com os filtros atuais.</div>';
-        return;
-      }
-      bodyEl.innerHTML = rowsVisiveis.map(renderEnvioMercadoriaCard).join('');
+      bodyEl.innerHTML = filteredRows.map(renderEnvioMercadoriaCard).join('');
       return;
     }
     
@@ -18872,17 +18729,8 @@ if (sacRelatorioConteudoUsuarioSelect) {
 sacRefreshBtn?.addEventListener('click', () => carregarSacSolicitacoes(sacTabelaBody, { hideDone: false, filterByUser: true }));
 // Painel Envio de Mercadoria: mostra todos os registros (filterByUser: false)
 envioMercadoriaRefreshBtnTop?.addEventListener('click', () => {
-  setEnvioMercadoriaRastreioStatus('');
-  carregarSacSolicitacoes(envioMercadoriaTabelaBodyPane, { hideDone: true, filterByUser: false });
+  carregarSacSolicitacoes(envioMercadoriaTabelaBodyPane, { filaLogistica: true });
 });
-envioMercadoriaAtualizarRastreioBtn?.addEventListener('click', () => atualizarRastreioEnvioMercadoria());
-
-[envioMercadoriaBusca, envioMercadoriaFiltroStatus, envioMercadoriaFiltroPrazo]
-  .filter(Boolean)
-  .forEach((el) => {
-    const evento = el.tagName === 'INPUT' ? 'input' : 'change';
-    el.addEventListener(evento, () => carregarSacSolicitacoes(envioMercadoriaTabelaBodyPane, { hideDone: true, filterByUser: false }));
-  });
 
 // Carrega registros ao abrir o painel SAC (com filtro por usuário)
 if (sacMenuLink) {
@@ -18897,8 +18745,7 @@ if (envioMercadoriaMenu) {
     document.querySelectorAll('.left-side .side-menu a').forEach(a => a.classList.remove('is-active'));
     envioMercadoriaMenu.classList.add('is-active');
     showMainTab('envioMercadoriaPane');
-    // Painel Envio de Mercadoria: mostra todos os registros (filterByUser: false)
-    carregarSacSolicitacoes(envioMercadoriaTabelaBodyPane, { hideDone: true, filterByUser: false });
+    carregarSacSolicitacoes(envioMercadoriaTabelaBodyPane, { filaLogistica: true });
   });
 }
 
@@ -18921,7 +18768,7 @@ function usuarioEhAdminSistema() {
 
 function _atualizarTituloEnvio() {
   if (!envioMercadoriaTabelaBodyPane) return;
-  carregarSacSolicitacoes(envioMercadoriaTabelaBodyPane, { hideDone: true, titleOnly: true });
+  carregarSacSolicitacoes(envioMercadoriaTabelaBodyPane, { filaLogistica: true, titleOnly: true });
 }
 
 function _pararBadgeEnvio() {
@@ -67890,7 +67737,19 @@ document.addEventListener('DOMContentLoaded', () => {
 /* ============================================================
  * Modal de Ordem de Serviço — global (Registrar Produção + Montagem)
  * ============================================================ */
-window.abrirModalOS = function(osId, osIdentificacao, opId, operacao, status, opIdentificacao) {
+window.abrirModalOS = function(osId, osIdentificacao, opId, operacao, status, opIdentificacao, statusProducao, operadorProducao, dataStatusProducao) {
+  window._modalOsCtx = {
+    osId,
+    osIdentificacao: osIdentificacao || '',
+    opId: opId || null,
+    operacao: operacao || '',
+    status: status || '',
+    opIdentificacao: opIdentificacao || '',
+    statusProducao: statusProducao || '',
+    operadorProducao: operadorProducao || '',
+    dataStatusProducao: dataStatusProducao || ''
+  };
+
   let modal = document.getElementById('modal-os-detalhe');
   if (!modal) {
     modal = document.createElement('div');
@@ -67900,31 +67759,172 @@ window.abrirModalOS = function(osId, osIdentificacao, opId, operacao, status, op
     document.addEventListener('keydown', function(e){ if(e.key==='Escape') window.fecharModalOS(); });
     document.body.appendChild(modal);
   }
-  modal.innerHTML = `
+  modal.innerHTML = window._renderModalOSHtml(window._modalOsCtx);
+  modal.style.display = 'flex';
+};
+
+function _fmtDataHoraProducao(str) {
+  if (!str) return '—';
+  const m = String(str).match(/^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})/);
+  if (m) return `${m[3]}/${m[2]}/${m[1]} ${m[4]}:${m[5]}`;
+  return window._fmtDataProducao ? window._fmtDataProducao(str) : str;
+}
+
+function _badgeStatusProducao(status) {
+  const s = String(status || '').trim();
+  if (!s) return '';
+  const cores = {
+    'Iniciado':   { bg: '#14532d', txt: '#bbf7d0' },
+    'Produzindo': { bg: '#065f46', txt: '#6ee7b7' },
+    'Parado':     { bg: '#92400e', txt: '#fcd34d' },
+  };
+  const c = cores[s] || { bg: '#374151', txt: '#d1d5db' };
+  return `<span style="padding:2px 8px;border-radius:4px;font-size:10px;font-weight:700;background:${c.bg};color:${c.txt};">${s}</span>`;
+}
+
+window._renderModalOSHtml = function(ctx) {
+  const st = String(ctx.statusProducao || '').trim();
+  const stLower = st.toLowerCase();
+  const podeIniciar = !st || stLower === 'parado';
+  const podePausar = stLower === 'iniciado' || stLower === 'produzindo';
+
+  return `
     <div style="background:#1e2233;border:1px solid rgba(255,255,255,.12);border-radius:12px;width:min(700px,96vw);max-height:85vh;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,.6);">
       <div style="display:flex;align-items:center;gap:10px;padding:16px 20px;border-bottom:1px solid rgba(255,255,255,.08);">
         <div style="flex:1;min-width:0;">
-          <div style="font-size:13px;font-weight:700;color:#e2e8f0;">OS ${osIdentificacao}</div>
-          <div style="font-size:11px;color:#94a3b8;margin-top:2px;">${operacao} &nbsp;·&nbsp; OP ${opIdentificacao}</div>
+          <div style="font-size:13px;font-weight:700;color:#e2e8f0;">OS ${ctx.osIdentificacao}</div>
+          <div style="font-size:11px;color:#94a3b8;margin-top:2px;">${ctx.operacao} &nbsp;·&nbsp; OP ${ctx.opIdentificacao}</div>
+          ${st ? `<div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:8px;">
+            ${_badgeStatusProducao(st)}
+            ${ctx.operadorProducao ? `<span style="font-size:10px;color:#64748b;">Operador: <b style="color:#94a3b8;">${ctx.operadorProducao}</b></span>` : ''}
+            ${ctx.dataStatusProducao ? `<span style="font-size:10px;color:#64748b;">Em: <b style="color:#94a3b8;">${_fmtDataHoraProducao(ctx.dataStatusProducao)}</b></span>` : ''}
+          </div>` : ''}
         </div>
-        <span style="padding:2px 8px;border-radius:4px;font-size:10px;font-weight:700;background:#1d4ed8;color:#bfdbfe;">${status}</span>
+        <span style="padding:2px 8px;border-radius:4px;font-size:10px;font-weight:700;background:#1d4ed8;color:#bfdbfe;">${ctx.status}</span>
         <button onclick="window.fecharModalOS()" style="background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.12);border-radius:6px;color:#94a3b8;width:28px;height:28px;display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:13px;flex-shrink:0;">✕</button>
       </div>
-      <div style="display:flex;gap:8px;padding:14px 20px;border-bottom:1px solid rgba(255,255,255,.06);">
-        <button onclick="window.verEstrutura(${osId})"
-          style="flex:1;padding:8px 0;border-radius:7px;border:1px solid rgba(99,102,241,.5);background:rgba(99,102,241,.15);color:#a5b4fc;font-size:12px;font-weight:600;cursor:pointer;">
+      <div style="display:flex;flex-wrap:wrap;gap:8px;padding:14px 20px;border-bottom:1px solid rgba(255,255,255,.06);">
+        <button onclick="window.verEstrutura(${ctx.osId})"
+          style="flex:1;min-width:140px;padding:8px 0;border-radius:7px;border:1px solid rgba(99,102,241,.5);background:rgba(99,102,241,.15);color:#a5b4fc;font-size:12px;font-weight:600;cursor:pointer;">
           <i class="fa-solid fa-layer-group" style="margin-right:6px;"></i>Ver estrutura
         </button>
-        <button onclick="window.verOperacao(${osId})"
-          style="flex:1;padding:8px 0;border-radius:7px;border:1px solid rgba(34,197,94,.4);background:rgba(34,197,94,.1);color:#86efac;font-size:12px;font-weight:600;cursor:pointer;">
+        <button onclick="window.verOperacao(${ctx.osId})"
+          style="flex:1;min-width:140px;padding:8px 0;border-radius:7px;border:1px solid rgba(34,197,94,.4);background:rgba(34,197,94,.1);color:#86efac;font-size:12px;font-weight:600;cursor:pointer;">
           <i class="fa-solid fa-gears" style="margin-right:6px;"></i>Ver operação
         </button>
+        ${podeIniciar ? `<button onclick="window.iniciarProducaoOS(${ctx.osId})"
+          style="flex:1;min-width:140px;padding:8px 0;border-radius:7px;border:1px solid rgba(34,197,94,.55);background:rgba(34,197,94,.18);color:#bbf7d0;font-size:12px;font-weight:700;cursor:pointer;">
+          <i class="fa-solid fa-play" style="margin-right:6px;"></i>Iniciar produção
+        </button>` : ''}
+        ${podePausar ? `<button onclick="window.pausarProducaoOS(${ctx.osId})"
+          style="flex:1;min-width:140px;padding:8px 0;border-radius:7px;border:1px solid rgba(249,115,22,.55);background:rgba(249,115,22,.15);color:#fdba74;font-size:12px;font-weight:700;cursor:pointer;">
+          <i class="fa-solid fa-pause" style="margin-right:6px;"></i>Pausar produção
+        </button>` : ''}
       </div>
       <div id="modal-os-conteudo" style="flex:1;overflow-y:auto;padding:16px 20px;">
         <div style="text-align:center;padding:32px 0;color:#475569;font-size:12px;">Selecione uma opção acima.</div>
       </div>
     </div>`;
-  modal.style.display = 'flex';
+};
+
+window._atualizarModalOS = function(patch) {
+  if (!window._modalOsCtx) return;
+  Object.assign(window._modalOsCtx, patch || {});
+  const modal = document.getElementById('modal-os-detalhe');
+  const conteudo = document.getElementById('modal-os-conteudo');
+  const conteudoHtml = conteudo ? conteudo.innerHTML : '';
+  if (modal) {
+    modal.innerHTML = window._renderModalOSHtml(window._modalOsCtx);
+    const novoConteudo = document.getElementById('modal-os-conteudo');
+    if (novoConteudo && conteudoHtml && !conteudoHtml.includes('Selecione uma opção acima')) {
+      novoConteudo.innerHTML = conteudoHtml;
+    }
+  }
+};
+
+window.iniciarProducaoOS = async function(osId) {
+  const conteudo = document.getElementById('modal-os-conteudo');
+  if (conteudo) {
+    conteudo.innerHTML = '<div style="text-align:center;padding:32px 0;color:#94a3b8;font-size:12px;"><i class="fa-solid fa-spinner fa-spin" style="margin-right:6px;"></i>Registrando início...</div>';
+  }
+  try {
+    const resp = await fetch(`/api/producao/os/${osId}/iniciar`, {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json' }
+    });
+    const data = await resp.json();
+    if (!resp.ok || !data.success) throw new Error(data.error || 'Erro ao iniciar produção');
+
+    window._atualizarModalOS({
+      statusProducao: data.status_producao || '',
+      operadorProducao: data.operador || '',
+      dataStatusProducao: data.data_status_producao || ''
+    });
+
+    if (typeof window._producaoRecarregarOrdens === 'function') window._producaoRecarregarOrdens();
+    if (typeof window._montaRecarregarOrdens === 'function') window._montaRecarregarOrdens();
+
+    const conteudo2 = document.getElementById('modal-os-conteudo');
+    if (conteudo2) {
+      conteudo2.innerHTML = `<div style="text-align:center;padding:24px 0;color:#86efac;font-size:12px;">
+        <i class="fa-solid fa-circle-check" style="margin-right:6px;"></i>
+        Produção ${String(data.status_producao || '').toLowerCase() === 'produzindo' ? 'retomada' : 'iniciada'} com sucesso.
+      </div>`;
+    }
+  } catch (e) {
+    const conteudo2 = document.getElementById('modal-os-conteudo');
+    if (conteudo2) {
+      conteudo2.innerHTML = `<div style="text-align:center;padding:32px 0;color:#f87171;font-size:12px;"><i class="fa-solid fa-circle-exclamation" style="margin-right:6px;"></i>${e.message}</div>`;
+    }
+  }
+};
+
+window.pausarProducaoOS = async function(osId) {
+  const motivo = window.prompt('Por que a produção foi pausada?');
+  if (motivo == null) return;
+  if (!String(motivo).trim()) {
+    alert('Informe o motivo da parada.');
+    return;
+  }
+
+  const conteudo = document.getElementById('modal-os-conteudo');
+  if (conteudo) {
+    conteudo.innerHTML = '<div style="text-align:center;padding:32px 0;color:#94a3b8;font-size:12px;"><i class="fa-solid fa-spinner fa-spin" style="margin-right:6px;"></i>Registrando parada...</div>';
+  }
+
+  try {
+    const resp = await fetch(`/api/producao/os/${osId}/pausar`, {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ motivo: String(motivo).trim() })
+    });
+    const data = await resp.json();
+    if (!resp.ok || !data.success) throw new Error(data.error || 'Erro ao pausar produção');
+
+    window._atualizarModalOS({
+      statusProducao: data.status_producao || 'Parado',
+      operadorProducao: data.operador || '',
+      dataStatusProducao: data.data_status_producao || ''
+    });
+
+    if (typeof window._producaoRecarregarOrdens === 'function') window._producaoRecarregarOrdens();
+    if (typeof window._montaRecarregarOrdens === 'function') window._montaRecarregarOrdens();
+
+    const conteudo2 = document.getElementById('modal-os-conteudo');
+    if (conteudo2) {
+      conteudo2.innerHTML = `<div style="text-align:center;padding:24px 0;color:#fdba74;font-size:12px;">
+        <i class="fa-solid fa-circle-pause" style="margin-right:6px;"></i>
+        Produção pausada. Motivo registrado.
+      </div>`;
+    }
+  } catch (e) {
+    const conteudo2 = document.getElementById('modal-os-conteudo');
+    if (conteudo2) {
+      conteudo2.innerHTML = `<div style="text-align:center;padding:32px 0;color:#f87171;font-size:12px;"><i class="fa-solid fa-circle-exclamation" style="margin-right:6px;"></i>${e.message}</div>`;
+    }
+  }
 };
 
 window.fecharModalOS = function() {
@@ -68079,6 +68079,18 @@ window.verOperacao = function(osId) {
     return `<span style="flex-shrink:0;display:inline-block;padding:1px 6px;border-radius:4px;font-size:10px;font-weight:700;background:${c.bg};color:${c.txt};">${status || '—'}</span>`;
   }
 
+  function badgeProducao(status) {
+    const s = String(status || '').trim();
+    if (!s) return '';
+    const cores = {
+      'Iniciado':   { bg: '#14532d', txt: '#bbf7d0' },
+      'Produzindo': { bg: '#065f46', txt: '#6ee7b7' },
+      'Parado':     { bg: '#92400e', txt: '#fcd34d' },
+    };
+    const c = cores[s] || { bg: '#374151', txt: '#d1d5db' };
+    return `<span style="flex-shrink:0;display:inline-block;padding:1px 6px;border-radius:4px;font-size:10px;font-weight:700;background:${c.bg};color:${c.txt};">${s}</span>`;
+  }
+
   function renderGrupo(prodId, ops) {
     const prod = ops[0].produto || {};
     const qtdeTotal = ops.reduce((s, op) => s + (Number(op.qtde) || 0), 0);
@@ -68089,12 +68101,13 @@ window.verOperacao = function(osId) {
         ? (op.ordens_servico || []).filter(os => os.operacao === _filtroOp)
         : (op.ordens_servico || []);
       const osHtml = _osVis.map(os =>
-        `<div onclick="event.stopPropagation();window.abrirModalOS(${os.id},'${(os.identificacao||'').replace(/'/g,"\\'")}',${op.id},'${(os.operacao||'').replace(/'/g,"\\'")}','${(os.status||'').replace(/'/g,"\\'")}','${(op.identificacao||'').replace(/'/g,"\\'")}')"
+        `<div onclick="event.stopPropagation();window.abrirModalOS(${os.id},'${(os.identificacao||'').replace(/'/g,"\\'")}',${op.id},'${(os.operacao||'').replace(/'/g,"\\'")}','${(os.status||'').replace(/'/g,"\\'")}','${(op.identificacao||'').replace(/'/g,"\\'")}','${(os.status_producao||'').replace(/'/g,"\\'")}','${(os.operador||'').replace(/'/g,"\\'")}','${(os.data_status_producao||'').replace(/'/g,"\\'")}')"
           style="background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.06);border-radius:5px;padding:5px 8px;display:flex;flex-direction:column;gap:3px;cursor:pointer;transition:background .15s;"
           onmouseenter="this.style.background='rgba(99,102,241,.12)'" onmouseleave="this.style.background='rgba(255,255,255,.03)'">
           <div style="display:flex;align-items:center;gap:6px;">
             <span style="font-size:10px;color:#94a3b8;min-width:70px;font-weight:600;flex-shrink:0;">${os.identificacao || ('#' + os.id)}</span>
             <span style="font-size:10px;color:#cbd5e1;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${(os.operacao || '').replace(/"/g,'&quot;')}">${os.operacao || '—'}</span>
+            ${badgeProducao(os.status_producao)}
             ${badgeOS(os.status)}
           </div>
           <div style="display:flex;flex-wrap:wrap;gap:10px;padding-left:2px;">
@@ -68102,6 +68115,7 @@ window.verOperacao = function(osId) {
             ${os.data_inicio       ? `<span style="font-size:10px;color:#64748b;">Início: <b style="color:#94a3b8;">${fmtData(os.data_inicio)}</b></span>` : ''}
             ${os.data_final        ? `<span style="font-size:10px;color:#64748b;">Final: <b style="color:#94a3b8;">${fmtData(os.data_final)}</b></span>` : ''}
             ${os.data_encerramento ? `<span style="font-size:10px;color:#64748b;">Encerramento: <b style="color:#94a3b8;">${fmtData(os.data_encerramento)}</b></span>` : ''}
+            ${os.operador          ? `<span style="font-size:10px;color:#64748b;">Operador: <b style="color:#94a3b8;">${os.operador}</b></span>` : ''}
           </div>
         </div>`
       ).join('');
@@ -68265,6 +68279,18 @@ window.verOperacao = function(osId) {
   if (recarrBtn) {
     recarrBtn.addEventListener('click', () => carregarOrdens());
   }
+
+  window._fmtDataProducao = fmtData;
+  window._producaoRecarregarOrdens = async function() {
+    try {
+      const resp = await fetch('/api/producao/ordens');
+      const data = await resp.json();
+      if (resp.ok && data.success) {
+        ordensCarregadas = data.ordens || [];
+        renderKanban(ordensCarregadas);
+      }
+    } catch (_) { /* silencioso */ }
+  };
 })();
 
 
@@ -68322,6 +68348,18 @@ window.verOperacao = function(osId) {
     return `<span style="flex-shrink:0;display:inline-block;padding:1px 6px;border-radius:4px;font-size:10px;font-weight:700;background:${c.bg};color:${c.txt};">${status || '—'}</span>`;
   }
 
+  function badgeProducao(status) {
+    const s = String(status || '').trim();
+    if (!s) return '';
+    const cores = {
+      'Iniciado':   { bg: '#14532d', txt: '#bbf7d0' },
+      'Produzindo': { bg: '#065f46', txt: '#6ee7b7' },
+      'Parado':     { bg: '#92400e', txt: '#fcd34d' },
+    };
+    const c = cores[s] || { bg: '#374151', txt: '#d1d5db' };
+    return `<span style="flex-shrink:0;display:inline-block;padding:1px 6px;border-radius:4px;font-size:10px;font-weight:700;background:${c.bg};color:${c.txt};">${s}</span>`;
+  }
+
   function renderGrupo(prodId, ops) {
     const prod = ops[0].produto || {};
     const qtdeTotal = ops.reduce((s, op) => s + (Number(op.qtde) || 0), 0);
@@ -68332,12 +68370,13 @@ window.verOperacao = function(osId) {
         ? (op.ordens_servico || []).filter(os => os.operacao === _filtroOp)
         : (op.ordens_servico || []);
       const osHtml = _osVis.map(os =>
-        `<div onclick="event.stopPropagation();window.abrirModalOS(${os.id},'${(os.identificacao||'').replace(/'/g,"\\'")}',${op.id},'${(os.operacao||'').replace(/'/g,"\\'")}','${(os.status||'').replace(/'/g,"\\'")}','${(op.identificacao||'').replace(/'/g,"\\'")}')"
+        `<div onclick="event.stopPropagation();window.abrirModalOS(${os.id},'${(os.identificacao||'').replace(/'/g,"\\'")}',${op.id},'${(os.operacao||'').replace(/'/g,"\\'")}','${(os.status||'').replace(/'/g,"\\'")}','${(op.identificacao||'').replace(/'/g,"\\'")}','${(os.status_producao||'').replace(/'/g,"\\'")}','${(os.operador||'').replace(/'/g,"\\'")}','${(os.data_status_producao||'').replace(/'/g,"\\'")}')"
           style="background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.06);border-radius:5px;padding:5px 8px;display:flex;flex-direction:column;gap:3px;cursor:pointer;transition:background .15s;"
           onmouseenter="this.style.background='rgba(99,102,241,.12)'" onmouseleave="this.style.background='rgba(255,255,255,.03)'">
           <div style="display:flex;align-items:center;gap:6px;">
             <span style="font-size:10px;color:#94a3b8;min-width:70px;font-weight:600;flex-shrink:0;">${os.identificacao || ('#' + os.id)}</span>
             <span style="font-size:10px;color:#cbd5e1;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${(os.operacao || '').replace(/"/g,'&quot;')}">${os.operacao || '—'}</span>
+            ${badgeProducao(os.status_producao)}
             ${badgeOS(os.status)}
           </div>
           <div style="display:flex;flex-wrap:wrap;gap:10px;padding-left:2px;">
@@ -68345,6 +68384,7 @@ window.verOperacao = function(osId) {
             ${os.data_inicio       ? `<span style="font-size:10px;color:#64748b;">Início: <b style="color:#94a3b8;">${fmtData(os.data_inicio)}</b></span>` : ''}
             ${os.data_final        ? `<span style="font-size:10px;color:#64748b;">Final: <b style="color:#94a3b8;">${fmtData(os.data_final)}</b></span>` : ''}
             ${os.data_encerramento ? `<span style="font-size:10px;color:#64748b;">Encerramento: <b style="color:#94a3b8;">${fmtData(os.data_encerramento)}</b></span>` : ''}
+            ${os.operador          ? `<span style="font-size:10px;color:#64748b;">Operador: <b style="color:#94a3b8;">${os.operador}</b></span>` : ''}
           </div>
         </div>`
       ).join('');
@@ -68489,6 +68529,17 @@ window.verOperacao = function(osId) {
   if (recarrBtn) {
     recarrBtn.addEventListener('click', () => carregarMontagem());
   }
+
+  window._montaRecarregarOrdens = async function() {
+    try {
+      const resp = await fetch('/api/producao/ordens-montagem');
+      const data = await resp.json();
+      if (resp.ok && data.success) {
+        ordensCarregadas = data.ordens || [];
+        renderKanban(ordensCarregadas);
+      }
+    } catch (_) { /* silencioso */ }
+  };
 })();
 
   function escapeHtml(value) {

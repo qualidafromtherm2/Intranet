@@ -4547,14 +4547,18 @@ router.post('/solicitacoes', upload.array('anexos', 2), async (req, res) => {
 router.get('/solicitacoes', async (req, res) => {
   try {
     const hideDone = String(req.query?.hideDone || '').toLowerCase() === 'true' || req.query?.hideDone === '1';
+    const filaLogistica = String(req.query?.filaLogistica || '').toLowerCase() === 'true' || req.query?.filaLogistica === '1';
     // Novo parâmetro: filterByUser=1 indica que deve filtrar apenas registros do usuário logado
     const filterByUser = String(req.query?.filterByUser || '').toLowerCase() === 'true' || req.query?.filterByUser === '1';
 
     const conditions = [];
     const params = [];
 
-    // Filtro por status (oculta Enviado, Finalizado e Excluído)
-    if (hideDone) {
+    // Fila Envio de mercadoria: apenas rastreio_status Validada ou Processamento Vipp
+    if (filaLogistica) {
+      conditions.push("COALESCE(rastreio_status, '') IN ('Valida', 'Processamento Vipp')");
+    } else if (hideDone) {
+      // Filtro por status (oculta Enviado, Finalizado e Excluído)
       conditions.push("COALESCE(status, '') NOT IN ('Enviado', 'Finalizado', 'Excluído')");
     }
 
@@ -7987,6 +7991,24 @@ router.get('/at-info', async (req, res) => {
   } catch (err) {
     console.error('[SAC/AT-INFO] erro:', err);
     return res.status(500).json({ ok: false, error: 'Falha ao buscar dados do AT.' });
+  }
+});
+
+// Atualização em lote de rastreio (cron manual ou Render)
+router.post('/cron/atualizar-rastreio', async (req, res) => {
+  const secret = String(process.env.CRON_SECRET || '').trim();
+  const auth = String(req.headers['x-cron-secret'] || req.query?.secret || '').trim();
+  if (secret && auth !== secret) {
+    return res.status(401).json({ ok: false, error: 'Não autorizado.' });
+  }
+
+  try {
+    const { executarAtualizacaoRastreioEnvios } = require('../utils/atualizarRastreioEnvios');
+    const resumo = await executarAtualizacaoRastreioEnvios();
+    return res.json({ ok: true, ...resumo });
+  } catch (err) {
+    console.error('[SAC] erro cron atualizar-rastreio:', err);
+    return res.status(500).json({ ok: false, error: err?.message || 'Erro ao atualizar rastreio.' });
   }
 });
 

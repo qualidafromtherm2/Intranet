@@ -35597,6 +35597,9 @@ app.listen(PORT, HOST, () => {
   // Notificação diária WhatsApp (08:00)
   const { iniciarCronNotificacaoDiaria } = require('./cron/notificacao_diaria_whatsapp');
   iniciarCronNotificacaoDiaria();
+  // Atualização diária de rastreio envios (07:00 Brasília)
+  const { iniciarCronAtualizacaoRastreio } = require('./utils/atualizarRastreioEnvios');
+  iniciarCronAtualizacaoRastreio();
 });
 
 // DEBUG: sanity check do webhook (GET simples)
