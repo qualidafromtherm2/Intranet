@@ -19939,7 +19939,7 @@ app.get('/api/config/storage', (_req, res) => {
   res.json({ ok: true, publicBaseUrl: getStoragePublicBaseUrl(), assets: ASSETS });
 });
 
-app.get(['/', '/menu_produto.html', '/kanban/*'], (req, res) => {
+app.get(['/', '/menu_produto.html'], (req, res) => {
   sendStorageHtml(res, 'menu_produto.html');
 });
 
