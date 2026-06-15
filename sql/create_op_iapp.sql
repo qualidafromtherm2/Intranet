@@ -143,9 +143,30 @@ CREATE TABLE IF NOT EXISTS "IAPP_API".op_iapp_os (
   data_ultima_atualizacao TIMESTAMP,
 
   -- Controle
-  sincronizado_em  TIMESTAMP NOT NULL DEFAULT NOW()
+  sincronizado_em  TIMESTAMP NOT NULL DEFAULT NOW(),
+
+  -- Controle Intranet (não sobrescrevido pelo sync IAPP)
+  status_producao       TEXT,   -- Iniciado | Produzindo | Parado
+  operador              TEXT,
+  data_status_producao  TIMESTAMP
 );
 
 CREATE INDEX IF NOT EXISTS idx_iapp_os_op_id  ON "IAPP_API".op_iapp_os (op_iapp_id);
 CREATE INDEX IF NOT EXISTS idx_iapp_os_status ON "IAPP_API".op_iapp_os (status);
+
+-- -------------------------------------------------------------
+-- 4. PARADAS DE PRODUÇÃO (por OS)
+-- -------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS "IAPP_API".op_iapp_os_parada (
+  parada_id     SERIAL PRIMARY KEY,
+  os_id         INTEGER NOT NULL REFERENCES "IAPP_API".op_iapp_os (os_id) ON DELETE CASCADE,
+  op_iapp_id    INTEGER NOT NULL,
+  data_parada   TIMESTAMP NOT NULL DEFAULT NOW(),
+  operador      TEXT,
+  motivo        TEXT NOT NULL,
+  data_retorno  TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_iapp_os_parada_os
+  ON "IAPP_API".op_iapp_os_parada (os_id, data_parada DESC);
 

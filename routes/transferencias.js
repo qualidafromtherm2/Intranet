@@ -354,7 +354,49 @@ router.get('/', async (_req, res) => {
   try {
     await ensureTransferenciasSchema();
     const { rows } = await dbQuery(
-      `SELECT id,
+      `WITH pendentes AS (
+         SELECT id,
+                codigo_produto,
+                codigo,
+                descricao,
+                qtd,
+                origem,
+                destino,
+                data_movimentacao,
+                cmc,
+                solicitante,
+                status,
+                aprovado_pro,
+                reprovado_por,
+                reprovado_em,
+                motivo_reprovacao,
+                0 AS ordem_status
+           FROM mensagens.transferencias
+          WHERE lower(coalesce(status, '')) NOT IN ('transferido', 'reprovado')
+       ),
+       historico AS (
+         SELECT id,
+                codigo_produto,
+                codigo,
+                descricao,
+                qtd,
+                origem,
+                destino,
+                data_movimentacao,
+                cmc,
+                solicitante,
+                status,
+                aprovado_pro,
+                reprovado_por,
+                reprovado_em,
+                motivo_reprovacao,
+                1 AS ordem_status
+           FROM mensagens.transferencias
+          WHERE lower(coalesce(status, '')) IN ('transferido', 'reprovado')
+          ORDER BY id DESC
+          LIMIT 250
+       )
+       SELECT id,
               codigo_produto,
               codigo,
               descricao,
@@ -369,9 +411,12 @@ router.get('/', async (_req, res) => {
               reprovado_por,
               reprovado_em,
               motivo_reprovacao
-         FROM mensagens.transferencias
-        ORDER BY id DESC
-        LIMIT 250`
+         FROM (
+           SELECT * FROM pendentes
+           UNION ALL
+           SELECT * FROM historico
+         ) itens
+        ORDER BY ordem_status, id DESC`
     );
 
     res.json({ ok: true, registros: rows });

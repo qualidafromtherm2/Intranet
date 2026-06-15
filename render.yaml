@@ -25,3 +25,17 @@ services:
         value: "10d9dde2e4e3bac7e62a2cc01bfba01e"
       - key: NODE_ENV
         value: production
+
+  # ── Cron Job: Atualização diária de rastreio (07:00 Brasília = 10:00 UTC) ───
+  - type: cron
+    name: atualizar-rastreio-envios
+    runtime: node
+    region: oregon
+    schedule: "0 10 * * *"
+    buildCommand: npm install --production
+    startCommand: node cron/atualizar_rastreio_envios.js
+    envVars:
+      - key: DATABASE_URL
+        value: postgresql://intranet_db_yd0w_user:amLpOKjWzzDRhwcR1NF0eolJzzfCY0ho@dpg-d2d4b0a4d50c7385vm50-a.oregon-postgres.render.com:5432/intranet_db_yd0w?sslmode=require
+      - key: NODE_ENV
+        value: production

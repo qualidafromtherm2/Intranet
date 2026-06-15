@@ -65,6 +65,60 @@ function iappGet(path, params = {}) {
   });
 }
 
+/**
+ * Faz uma requisição PUT à API IAPP.
+ * @param {string} path  ex: '/manufatura/ordens-producao/atualiza/2009270'
+ * @param {object} body  payload JSON
+ */
+function iappPut(path, body = {}) {
+  return new Promise((resolve, reject) => {
+    const token  = process.env.IAPP_TOKEN;
+    const secret = process.env.IAPP_SECRET;
+
+    if (!token || !secret) {
+      return reject(new Error('IAPP_TOKEN e IAPP_SECRET não configurados no .env'));
+    }
+
+    const payload = JSON.stringify(body);
+    const url = new URL(`${IAPP_BASE}${path}`);
+
+    const options = {
+      hostname: url.hostname,
+      path: url.pathname + url.search,
+      method: 'PUT',
+      headers: {
+        'token': token,
+        'secret': secret,
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(payload)
+      }
+    };
+
+    const req = https.request(options, (resp) => {
+      let data = '';
+      resp.on('data', chunk => { data += chunk; });
+      resp.on('end', () => {
+        try {
+          const json = JSON.parse(data);
+          if (resp.statusCode >= 400) {
+            const err = new Error(json.message || `HTTP ${resp.statusCode}`);
+            err.status = resp.statusCode;
+            err.iappCode = json.code;
+            return reject(err);
+          }
+          resolve(json);
+        } catch (e) {
+          reject(new Error(`Resposta inválida da API IAPP: ${data.slice(0, 200)}`));
+        }
+      });
+    });
+
+    req.on('error', reject);
+    req.write(payload);
+    req.end();
+  });
+}
+
 /* ---------------------------------------------------------------
  * Garante que o schema IAPP_API e as 3 tabelas existem (idempotente)
  * --------------------------------------------------------------- */
@@ -159,9 +213,51 @@ async function garantirTabela() {
     CREATE INDEX IF NOT EXISTS idx_iapp_os_op_id  ON "IAPP_API".op_iapp_os (op_iapp_id);
     CREATE INDEX IF NOT EXISTS idx_iapp_os_status ON "IAPP_API".op_iapp_os (status);
   `);
+
+  await dbQuery(`ALTER TABLE "IAPP_API".op_iapp_os ADD COLUMN IF NOT EXISTS status_producao TEXT`);
+  await dbQuery(`ALTER TABLE "IAPP_API".op_iapp_os ADD COLUMN IF NOT EXISTS operador TEXT`);
+  await dbQuery(`ALTER TABLE "IAPP_API".op_iapp_os ADD COLUMN IF NOT EXISTS data_status_producao TIMESTAMP`);
+
+  await dbQuery(`
+    CREATE TABLE IF NOT EXISTS "IAPP_API".op_iapp_os_parada (
+      parada_id     SERIAL PRIMARY KEY,
+      os_id         INTEGER NOT NULL REFERENCES "IAPP_API".op_iapp_os (os_id) ON DELETE CASCADE,
+      op_iapp_id    INTEGER NOT NULL,
+      data_parada   TIMESTAMP NOT NULL DEFAULT NOW(),
+      operador      TEXT,
+      motivo        TEXT NOT NULL,
+      data_retorno  TIMESTAMP
+    )
+  `);
+  await dbQuery(`
+    CREATE INDEX IF NOT EXISTS idx_iapp_os_parada_os
+      ON "IAPP_API".op_iapp_os_parada (os_id, data_parada DESC)
+  `);
+  await dbQuery(`
+    CREATE INDEX IF NOT EXISTS idx_iapp_os_parada_aberta
+      ON "IAPP_API".op_iapp_os_parada (os_id)
+      WHERE data_retorno IS NULL
+  `);
 }
 
 let tabelaGarantida = false;
+
+function getOperador(req) {
+  return (
+    req.session?.user?.fullName
+    || req.session?.user?.username
+    || req.session?.user?.login
+    || String(req.headers['x-user'] || '').trim()
+    || 'sistema'
+  );
+}
+
+function requireAuth(req, res, next) {
+  if (!req.session?.user?.id && !req.session?.user?.username) {
+    return res.status(401).json({ error: 'Não autenticado.' });
+  }
+  next();
+}
 
 /* ---------------------------------------------------------------
  * Upsert nas 3 tabelas (schema IAPP_API) para um lote de OPs
@@ -456,15 +552,18 @@ async function fromDb(onlyMontagem = false) {
       ) ELSE NULL END AS produto,
       COALESCE(
         json_agg(json_build_object(
-          'id',                os.os_id,
-          'identificacao',     os.identificacao,
-          'status',            os.status,
-          'operacao',          os.operacao,
-          'tempo_total',       os.tempo_total::text,
-          'data_abertura',     os.data_abertura::text,
-          'data_inicio',       os.data_inicio::text,
-          'data_final',        os.data_final::text,
-          'data_encerramento', os.data_encerramento::text
+          'id',                    os.os_id,
+          'identificacao',         os.identificacao,
+          'status',                os.status,
+          'operacao',              os.operacao,
+          'tempo_total',           os.tempo_total::text,
+          'data_abertura',         os.data_abertura::text,
+          'data_inicio',           os.data_inicio::text,
+          'data_final',            os.data_final::text,
+          'data_encerramento',     os.data_encerramento::text,
+          'status_producao',       os.status_producao,
+          'operador',              os.operador,
+          'data_status_producao',  os.data_status_producao::text
         ) ORDER BY os.os_id) FILTER (WHERE os.os_id IS NOT NULL),
         '[]'::json
       ) AS ordens_servico
@@ -592,6 +691,333 @@ router.get('/sync-ativas', async (req, res) => {
   } catch (err) {
     console.error('[producao] Erro em sync-ativas:', err.message);
     return res.status(500).json({ error: err.message });
+  }
+});
+
+/** Enriquece itens IAPP com estoque físico (logistica.estoque_atual.fisico) por produto.identificacao = codigo */
+async function enrichMateriaisComFisico(itens) {
+  if (!Array.isArray(itens) || !itens.length) return itens;
+
+  const codigos = [...new Set(
+    itens.map(i => String(i.produto?.identificacao || '').trim()).filter(Boolean)
+  )];
+  if (!codigos.length) return itens;
+
+  const norms = codigos.map(c => c.toUpperCase());
+  const result = await dbQuery(`
+    SELECT UPPER(BTRIM(codigo)) AS codigo_norm, COALESCE(SUM(fisico), 0) AS fisico
+    FROM logistica.estoque_atual
+    WHERE UPPER(BTRIM(codigo)) = ANY($1::text[])
+    GROUP BY UPPER(BTRIM(codigo))
+  `, [norms]);
+
+  const byNorm = {};
+  for (const row of result.rows) {
+    byNorm[row.codigo_norm] = Number(row.fisico) || 0;
+  }
+
+  return itens.map(item => {
+    const cod = String(item.produto?.identificacao || '').trim();
+    const norm = cod.toUpperCase();
+    return {
+      ...item,
+      estoque_fisico: Object.prototype.hasOwnProperty.call(byNorm, norm) ? byNorm[norm] : null
+    };
+  });
+}
+
+/* ---------------------------------------------------------------
+ * GET /api/producao/materiais-previstos/:id
+ * Proxy para IAPP /manufatura/ordens-producao/busca/{id}/materiais-previstos
+ * Aceita o iapp_id da OP (op.id no frontend) ou, via ?tipo=os, o os_id.
+ * Retorna o JSON bruto da API IAPP.
+ * --------------------------------------------------------------- */
+router.get('/materiais-previstos/:id', async (req, res) => {
+  try {
+    const id = req.params.id;
+    const data = await iappGet(`/manufatura/ordens-producao/busca/${id}/materiais-previstos`);
+    if (Array.isArray(data.response)) {
+      data.response = await enrichMateriaisComFisico(data.response);
+    }
+    return res.json(data);
+  } catch (err) {
+    return res.status(err.status || 500).json({ error: err.message, iappCode: err.iappCode });
+  }
+});
+
+/* ---------------------------------------------------------------
+ * GET /api/producao/apontamentos/:id
+ * Proxy para IAPP /manufatura/ordens-producao/busca/{id}/producao
+ * {id} = iapp_id da OP (op.id no frontend / op_iapp.iapp_id no DB).
+ * Retorna listagem de apontamentos de produção realizados na OP.
+ * --------------------------------------------------------------- */
+router.get('/apontamentos/:id', async (req, res) => {
+  try {
+    const id = req.params.id;
+    const data = await iappGet(`/manufatura/ordens-producao/busca/${id}/producao`);
+    return res.json(data);
+  } catch (err) {
+    return res.status(err.status || 500).json({ error: err.message, iappCode: err.iappCode });
+  }
+});
+
+/* ---------------------------------------------------------------
+ * GET /api/producao/ordem/:id
+ * Proxy para IAPP GET Consultar - /manufatura/ordens-producao/busca/{id}
+ * {id} = iapp_id da OP (op.id no frontend / op_iapp.iapp_id no DB).
+ * Retorna os dados completos da OP (produto, OSs, datas, status, etc.).
+ * --------------------------------------------------------------- */
+router.get('/ordem/:id', async (req, res) => {
+  try {
+    const id = req.params.id;
+    const data = await iappGet(`/manufatura/ordens-producao/busca/${id}`);
+    return res.json(data);
+  } catch (err) {
+    return res.status(err.status || 500).json({ error: err.message, iappCode: err.iappCode });
+  }
+});
+
+/* ---------------------------------------------------------------
+ * PUT /api/producao/ordem/:id
+ * Proxy para IAPP PUT Atualizar - /manufatura/ordens-producao/atualiza/{id}
+ * Body: campos parciais da OP (ex.: { obs: "..." } ou { data_previsao_entrega: "..." }).
+ * --------------------------------------------------------------- */
+router.put('/ordem/:id', express.json(), async (req, res) => {
+  try {
+    const id = req.params.id;
+    const body = req.body && typeof req.body === 'object' ? req.body : {};
+    if (!Object.keys(body).length) {
+      return res.status(400).json({ error: 'Body vazio — informe ao menos um campo para atualizar.' });
+    }
+    const data = await iappPut(`/manufatura/ordens-producao/atualiza/${id}`, body);
+    return res.json(data);
+  } catch (err) {
+    return res.status(err.status || 500).json({ error: err.message, iappCode: err.iappCode });
+  }
+});
+
+/* ---------------------------------------------------------------
+ * GET /api/producao/os-materiais/:id
+ * Proxy para IAPP GET Materiais - /manufatura/ordens-servico/busca/{id}/materiais
+ * {id} = os_id da OS (os.id no frontend / op_iapp_os.os_id no DB).
+ * Retorna materiais vinculados à ordem de serviço (ex.: MONTAGEM 0002673.05).
+ * --------------------------------------------------------------- */
+router.get('/os-materiais/:id', async (req, res) => {
+  try {
+    const id = req.params.id;
+    const data = await iappGet(`/manufatura/ordens-servico/busca/${id}/materiais`);
+    if (Array.isArray(data.response)) {
+      data.response = await enrichMateriaisComFisico(data.response);
+    }
+    return res.json(data);
+  } catch (err) {
+    return res.status(err.status || 500).json({ error: err.message, iappCode: err.iappCode });
+  }
+});
+
+/* ---------------------------------------------------------------
+ * POST /api/producao/estoque-fisico
+ * Retorna estoque físico (logistica.estoque_atual.fisico) por código de produto.
+ * Body: { codigos: string[] }
+ * Response: { fisico: { [codigo]: number } }
+ * --------------------------------------------------------------- */
+router.post('/estoque-fisico', async (req, res) => {
+  try {
+    const codigos = Array.isArray(req.body?.codigos)
+      ? [...new Set(req.body.codigos.map(c => String(c || '').trim()).filter(Boolean))]
+      : [];
+    if (!codigos.length) return res.json({ fisico: {} });
+
+    const norms = codigos.map(c => c.toUpperCase());
+    const result = await dbQuery(`
+      SELECT UPPER(BTRIM(codigo)) AS codigo_norm, COALESCE(SUM(fisico), 0) AS fisico
+      FROM logistica.estoque_atual
+      WHERE UPPER(BTRIM(codigo)) = ANY($1::text[])
+      GROUP BY UPPER(BTRIM(codigo))
+    `, [norms]);
+
+    const byNorm = {};
+    for (const row of result.rows) {
+      byNorm[row.codigo_norm] = Number(row.fisico) || 0;
+    }
+
+    const fisico = {};
+    for (const cod of codigos) {
+      const norm = cod.toUpperCase();
+      if (Object.prototype.hasOwnProperty.call(byNorm, norm)) {
+        fisico[cod] = byNorm[norm];
+      }
+    }
+    return res.json({ fisico });
+  } catch (err) {
+    console.error('[producao] estoque-fisico:', err.message);
+    return res.status(500).json({ error: err.message || 'Erro ao consultar estoque físico.' });
+  }
+});
+
+/* ---------------------------------------------------------------
+ * GET /api/producao/iapp/qualidade/inspecoes/lista?page=1&offset=100
+ * Proxy enxuto para listar inspeções da IAPP.
+ * --------------------------------------------------------------- */
+/* ---------------------------------------------------------------
+ * POST /api/producao/os/:osId/iniciar
+ * Registra início ou retorno de produção na OS (Intranet).
+ * --------------------------------------------------------------- */
+router.post('/os/:osId/iniciar', requireAuth, async (req, res) => {
+  const osId = Number.parseInt(String(req.params.osId || ''), 10);
+  if (!Number.isFinite(osId) || osId <= 0) {
+    return res.status(400).json({ error: 'osId inválido.' });
+  }
+
+  try {
+    if (!tabelaGarantida) { await garantirTabela(); tabelaGarantida = true; }
+
+    const operador = getOperador(req);
+    const atual = await dbQuery(`
+      SELECT os_id, op_iapp_id, status_producao
+      FROM "IAPP_API".op_iapp_os
+      WHERE os_id = $1
+    `, [osId]);
+
+    if (!atual.rows.length) {
+      return res.status(404).json({ error: 'Ordem de serviço não encontrada.' });
+    }
+
+    const row = atual.rows[0];
+    const statusAtual = String(row.status_producao || '').trim();
+    const retomando = statusAtual.toLowerCase() === 'parado';
+    const novoStatus = retomando ? 'Produzindo' : 'Iniciado';
+
+    if (statusAtual && !retomando && ['iniciado', 'produzindo'].includes(statusAtual.toLowerCase())) {
+      return res.json({
+        success: true,
+        already_active: true,
+        os_id: osId,
+        status_producao: statusAtual,
+        operador: operador,
+        message: 'Produção já está em andamento.'
+      });
+    }
+
+    await dbQuery(`
+      UPDATE "IAPP_API".op_iapp_os
+      SET status_producao = $2,
+          operador = $3,
+          data_status_producao = NOW()
+      WHERE os_id = $1
+    `, [osId, novoStatus, operador]);
+
+    if (retomando) {
+      await dbQuery(`
+        UPDATE "IAPP_API".op_iapp_os_parada
+        SET data_retorno = NOW()
+        WHERE os_id = $1 AND data_retorno IS NULL
+      `, [osId]);
+    }
+
+    const updated = await dbQuery(`
+      SELECT os_id, op_iapp_id, status_producao, operador, data_status_producao::text AS data_status_producao
+      FROM "IAPP_API".op_iapp_os
+      WHERE os_id = $1
+    `, [osId]);
+
+    return res.json({ success: true, ...updated.rows[0] });
+  } catch (err) {
+    console.error('[producao] iniciar OS:', err.message);
+    return res.status(500).json({ error: err.message || 'Erro ao iniciar produção.' });
+  }
+});
+
+/* ---------------------------------------------------------------
+ * POST /api/producao/os/:osId/pausar
+ * Body: { motivo: string }
+ * Registra parada e altera status_producao para Parado.
+ * --------------------------------------------------------------- */
+router.post('/os/:osId/pausar', requireAuth, express.json(), async (req, res) => {
+  const osId = Number.parseInt(String(req.params.osId || ''), 10);
+  if (!Number.isFinite(osId) || osId <= 0) {
+    return res.status(400).json({ error: 'osId inválido.' });
+  }
+
+  const motivo = String(req.body?.motivo || '').trim();
+  if (!motivo) {
+    return res.status(400).json({ error: 'Informe o motivo da parada.' });
+  }
+
+  try {
+    if (!tabelaGarantida) { await garantirTabela(); tabelaGarantida = true; }
+
+    const operador = getOperador(req);
+    const atual = await dbQuery(`
+      SELECT os_id, op_iapp_id, status_producao
+      FROM "IAPP_API".op_iapp_os
+      WHERE os_id = $1
+    `, [osId]);
+
+    if (!atual.rows.length) {
+      return res.status(404).json({ error: 'Ordem de serviço não encontrada.' });
+    }
+
+    const statusAtual = String(atual.rows[0].status_producao || '').trim().toLowerCase();
+    if (!['iniciado', 'produzindo'].includes(statusAtual)) {
+      return res.status(400).json({ error: 'Só é possível pausar uma OS com produção iniciada.' });
+    }
+
+    const opIappId = atual.rows[0].op_iapp_id;
+
+    await dbQuery(`
+      UPDATE "IAPP_API".op_iapp_os
+      SET status_producao = 'Parado',
+          operador = $2,
+          data_status_producao = NOW()
+      WHERE os_id = $1
+    `, [osId, operador]);
+
+    const parada = await dbQuery(`
+      INSERT INTO "IAPP_API".op_iapp_os_parada (os_id, op_iapp_id, data_parada, operador, motivo)
+      VALUES ($1, $2, NOW(), $3, $4)
+      RETURNING parada_id, os_id, op_iapp_id, data_parada::text AS data_parada, operador, motivo, data_retorno
+    `, [osId, opIappId, operador, motivo]);
+
+    const updated = await dbQuery(`
+      SELECT os_id, op_iapp_id, status_producao, operador, data_status_producao::text AS data_status_producao
+      FROM "IAPP_API".op_iapp_os
+      WHERE os_id = $1
+    `, [osId]);
+
+    return res.json({
+      success: true,
+      ...updated.rows[0],
+      parada: parada.rows[0]
+    });
+  } catch (err) {
+    console.error('[producao] pausar OS:', err.message);
+    return res.status(500).json({ error: err.message || 'Erro ao pausar produção.' });
+  }
+});
+
+router.get('/iapp/qualidade/inspecoes/lista', async (req, res) => {
+  try {
+    const pageParam = Number.parseInt(String(req.query.page || '1'), 10);
+    const page = Number.isFinite(pageParam) && pageParam > 0 ? pageParam : 1;
+    const offsetParam = Number.parseInt(String(req.query.offset || '100'), 10);
+    const offset = Number.isFinite(offsetParam) && offsetParam > 0 ? offsetParam : 100;
+
+    const data = await iappGet('/qualidade/inspecoes/lista', { page, offset });
+
+    return res.json({
+      ...data,
+      success: data?.success !== false,
+      page: String(data?.page || page),
+      total: Number.isFinite(Number(data?.total)) ? Number(data.total) : 0,
+      response: Array.isArray(data?.response) ? data.response : []
+    });
+  } catch (err) {
+    console.error('[producao] Erro ao listar inspeções IAPP:', err.message);
+    return res.status(err.status || 500).json({
+      success: false,
+      error: err.message || 'Erro ao listar inspeções na IAPP.'
+    });
   }
 });
 

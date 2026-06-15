@@ -15997,6 +15997,9 @@ async function initSolicitacaoProdutoSchema() {
     }
 
     await pool.query(`ALTER TABLE solicitacao_produto.itens_solicitados ADD COLUMN IF NOT EXISTS motivo TEXT`);
+    await pool.query(`ALTER TABLE solicitacao_produto.itens_solicitados ADD COLUMN IF NOT EXISTS quantidade_solicitada NUMERIC(18,4)`);
+    await pool.query(`ALTER TABLE solicitacao_produto.itens_solicitados ADD COLUMN IF NOT EXISTS quantidade_separada NUMERIC(18,4)`);
+    await pool.query(`ALTER TABLE solicitacao_produto.solicitacoes_separacao ADD COLUMN IF NOT EXISTS quantidade_original NUMERIC(18,4)`);
 
     await pool.query(`
       CREATE TABLE IF NOT EXISTS solicitacao_produto.movimentacoes_kanban_itens (
@@ -16018,6 +16021,18 @@ async function initSolicitacaoProdutoSchema() {
   }
 }
 
+// Colunas incrementais — idempotente, pode rodar a cada requisição
+async function ensureSolicitacaoProdutoQtyColumns() {
+  await pool.query(`ALTER TABLE solicitacao_produto.itens_solicitados ADD COLUMN IF NOT EXISTS quantidade_solicitada NUMERIC(18,4)`);
+  await pool.query(`ALTER TABLE solicitacao_produto.itens_solicitados ADD COLUMN IF NOT EXISTS quantidade_separada NUMERIC(18,4)`);
+  await pool.query(`ALTER TABLE solicitacao_produto.solicitacoes_separacao ADD COLUMN IF NOT EXISTS quantidade_original NUMERIC(18,4)`);
+  await pool.query(`ALTER TABLE solicitacao_produto.itens_solicitados ADD COLUMN IF NOT EXISTS urgente BOOLEAN DEFAULT FALSE`);
+  await pool.query(`ALTER TABLE solicitacao_produto.itens_solicitados ADD COLUMN IF NOT EXISTS usuario_separando TEXT`);
+  await pool.query(`ALTER TABLE solicitacao_produto.solicitacoes_separacao ADD COLUMN IF NOT EXISTS urgente BOOLEAN DEFAULT FALSE`);
+  await pool.query(`ALTER TABLE solicitacao_produto.solicitacoes_separacao ADD COLUMN IF NOT EXISTS n_solic TEXT`);
+  await pool.query(`ALTER TABLE logistica.carrinho ADD COLUMN IF NOT EXISTS urgente BOOLEAN DEFAULT FALSE`);
+}
+
 // Inicializa schema na primeira requisição
 let schemaMigrated = false;
 async function ensureSchemaMigrated() {
@@ -16025,6 +16040,26 @@ async function ensureSchemaMigrated() {
     await initSolicitacaoProdutoSchema();
     schemaMigrated = true;
   }
+  await ensureSolicitacaoProdutoQtyColumns();
+}
+
+async function assertUsuarioSeparandoPodeAgir(client, solicIds, req) {
+  const ids = (solicIds || []).map(id => parseInt(id, 10)).filter(id => !isNaN(id));
+  if (!ids.length) return { ok: true };
+  const nome_user = String(req.session?.user?.username || req.session?.user?.nome || '').trim();
+  const { rows } = await client.query(
+    `SELECT DISTINCT TRIM(usuario_separando) AS usuario_separando
+       FROM solicitacao_produto.itens_solicitados
+      WHERE id = ANY($1::bigint[])
+        AND usuario_separando IS NOT NULL
+        AND TRIM(usuario_separando) <> ''`,
+    [ids]
+  );
+  const bloqueados = rows.map(r => r.usuario_separando).filter(Boolean);
+  if (bloqueados.length && !bloqueados.every(u => u === nome_user)) {
+    return { ok: false, error: `Esta separação está sendo feita por ${bloqueados[0]}.` };
+  }
+  return { ok: true };
 }
 
 async function registrarMovimentacaoKanbanItens(client, solicIds, statusDestino, req, observacao = null) {
@@ -16192,16 +16227,107 @@ app.patch('/api/logistica/itens_solicitados/separacao', async (req, res) => {
     }
     const ids = solic_ids.map(id => parseInt(id, 10)).filter(id => !isNaN(id));
     if (!ids.length) return res.status(400).json({ ok: false, error: 'Nenhum ID válido.' });
+    const nome_user = String(req.session?.user?.username || req.session?.user?.nome || '').trim();
+    if (!nome_user) return res.status(400).json({ ok: false, error: 'Usuário sem nome na sessão.' });
     await registrarMovimentacaoKanbanItens(pool, ids, 'Separação', req);
     await pool.query(
-      `UPDATE solicitacao_produto.itens_solicitados SET status = 'Separação' WHERE id = ANY($1::bigint[]) AND status = 'pendente'`,
-      [ids]
+      `UPDATE solicitacao_produto.itens_solicitados
+          SET status = 'Separação',
+              usuario_separando = $2
+        WHERE id = ANY($1::bigint[])
+          AND status IN ('pendente', 'Stund-by')`,
+      [ids, nome_user]
     );
-    console.log(`[logistica/separacao] ${ids.length} id(s) enviados para Separação (somente pendente) por user ${id_user}`);
+    console.log(`[logistica/separacao] ${ids.length} id(s) enviados para Separação por ${nome_user} (user ${id_user})`);
     res.json({ ok: true });
   } catch (err) {
     console.error('[logistica/itens_solicitados/separacao] erro:', err);
     res.status(500).json({ ok: false, error: String(err?.message || err) });
+  }
+});
+
+// PATCH /api/logistica/itens_solicitados/cancelar-separacao — Remove separador e volta SEP para Solicitado
+app.patch('/api/logistica/itens_solicitados/cancelar-separacao', async (req, res) => {
+  const client = await pool.connect();
+  try {
+    await ensureSchemaMigrated();
+    const id_user = req.session?.user?.id;
+    const nome_user = String(req.session?.user?.username || req.session?.user?.nome || '').trim();
+    if (!id_user) return res.status(401).json({ ok: false, error: 'Não autenticado.' });
+    if (!nome_user) return res.status(400).json({ ok: false, error: 'Usuário sem nome na sessão.' });
+    const { solic_ids } = req.body;
+    if (!Array.isArray(solic_ids) || !solic_ids.length)
+      return res.status(400).json({ ok: false, error: 'solic_ids inválido.' });
+    const ids = solic_ids.map(id => parseInt(id, 10)).filter(id => !isNaN(id));
+    if (!ids.length) return res.status(400).json({ ok: false, error: 'Nenhum ID válido.' });
+
+    const { rows: itens } = await client.query(
+      `SELECT id, status, usuario_separando
+         FROM solicitacao_produto.itens_solicitados
+        WHERE id = ANY($1::bigint[])
+          AND status IN ('Separação', 'Separado')`,
+      [ids]
+    );
+    if (!itens.length)
+      return res.status(400).json({ ok: false, error: 'Nenhum item em separação encontrado para cancelar.' });
+
+    const idsElegiveis = itens.map(r => r.id);
+    const bloqueado = itens.some(r => String(r.usuario_separando || '').trim() !== nome_user);
+    if (bloqueado)
+      return res.status(403).json({ ok: false, error: 'Só quem iniciou a separação pode cancelar.' });
+
+    await client.query('BEGIN');
+
+    await client.query(
+      `UPDATE logistica.carrinho c
+          SET quantidade = i.quantidade_solicitada
+         FROM solicitacao_produto.itens_solicitados i
+        WHERE i.id_carr = c.id
+          AND i.id = ANY($1::bigint[])
+          AND i.status = 'Separado'
+          AND i.quantidade_solicitada IS NOT NULL`,
+      [idsElegiveis]
+    );
+
+    await client.query(
+      `UPDATE solicitacao_produto.solicitacoes_separacao ss
+          SET quantidade = ss.quantidade_original,
+              quantidade_original = NULL
+        WHERE ss.quantidade_original IS NOT NULL
+          AND ss.id IN (
+            SELECT ss2.id
+              FROM solicitacao_produto.solicitacoes_separacao ss2
+              JOIN solicitacao_produto.itens_solicitados i ON i.id = ANY($1::bigint[])
+              JOIN logistica.carrinho c ON c.id = i.id_carr
+             WHERE ss2.codigo_produto = c.codigo_produto
+               AND ss2.id_user = c.id_user
+               AND ss2.criado_em BETWEEN (c.criado_em - INTERVAL '10 minutes')
+                                     AND (c.criado_em + INTERVAL '10 minutes')
+          )`,
+      [idsElegiveis]
+    );
+
+    await registrarMovimentacaoKanbanItens(client, idsElegiveis, 'pendente', req);
+    await client.query(
+      `UPDATE solicitacao_produto.itens_solicitados
+          SET status = 'pendente',
+              usuario_separando = NULL,
+              quantidade_solicitada = NULL,
+              quantidade_separada = NULL
+        WHERE id = ANY($1::bigint[])
+          AND status IN ('Separação', 'Separado')`,
+      [idsElegiveis]
+    );
+
+    await client.query('COMMIT');
+    console.log(`[logistica/cancelar-separacao] ${idsElegiveis.length} item(ns) revertido(s) para pendente por ${nome_user}`);
+    res.json({ ok: true });
+  } catch (err) {
+    try { await client.query('ROLLBACK'); } catch (_) {}
+    console.error('[logistica/cancelar-separacao] erro:', err);
+    res.status(500).json({ ok: false, error: String(err?.message || err) });
+  } finally {
+    client.release();
   }
 });
 
@@ -16232,6 +16358,7 @@ app.patch('/api/logistica/itens_solicitados/reverter-pendente', async (req, res)
 
 // PATCH /api/logistica/itens_solicitados/reverter-separacao — Reverte 'Separado' → 'Separação'
 app.patch('/api/logistica/itens_solicitados/reverter-separacao', async (req, res) => {
+  const client = await pool.connect();
   try {
     await ensureSchemaMigrated();
     const id_user = req.session?.user?.id;
@@ -16241,16 +16368,63 @@ app.patch('/api/logistica/itens_solicitados/reverter-separacao', async (req, res
       return res.status(400).json({ ok: false, error: 'solic_ids inválido.' });
     const ids = solic_ids.map(id => parseInt(id, 10)).filter(id => !isNaN(id));
     if (!ids.length) return res.status(400).json({ ok: false, error: 'Nenhum ID válido.' });
-    await registrarMovimentacaoKanbanItens(pool, ids, 'Separação', req);
-    await pool.query(
-      `UPDATE solicitacao_produto.itens_solicitados SET status = 'Separação' WHERE id = ANY($1::bigint[]) AND status = 'Separado'`,
+    const lock = await assertUsuarioSeparandoPodeAgir(client, ids, req);
+    if (!lock.ok) return res.status(403).json(lock);
+
+    await client.query('BEGIN');
+
+    // Restaura quantidade original do pedido no carrinho (quando houve Informar qtd)
+    const { rows: restaurados } = await client.query(
+      `UPDATE logistica.carrinho c
+          SET quantidade = i.quantidade_solicitada
+         FROM solicitacao_produto.itens_solicitados i
+        WHERE i.id_carr = c.id
+          AND i.id = ANY($1::bigint[])
+          AND i.status = 'Separado'
+          AND i.quantidade_solicitada IS NOT NULL
+      RETURNING i.id AS solic_id, c.id AS carr_id, i.quantidade_solicitada AS qty_restaurada`,
       [ids]
     );
-    console.log(`[logistica/reverter-separacao] ${ids.length} item(ns) revertido(s) para Separação por user ${id_user}`);
-    res.json({ ok: true });
+
+    // Reverte solicitacoes_separacao para quantidade_original, se existir
+    await client.query(
+      `UPDATE solicitacao_produto.solicitacoes_separacao ss
+          SET quantidade = ss.quantidade_original,
+              quantidade_original = NULL
+        WHERE ss.quantidade_original IS NOT NULL
+          AND ss.id IN (
+            SELECT ss2.id
+              FROM solicitacao_produto.solicitacoes_separacao ss2
+              JOIN solicitacao_produto.itens_solicitados i ON i.id = ANY($1::bigint[])
+              JOIN logistica.carrinho c ON c.id = i.id_carr
+             WHERE ss2.codigo_produto = c.codigo_produto
+               AND ss2.id_user = c.id_user
+               AND ss2.criado_em BETWEEN (c.criado_em - INTERVAL '10 minutes')
+                                     AND (c.criado_em + INTERVAL '10 minutes')
+          )`,
+      [ids]
+    );
+
+    await registrarMovimentacaoKanbanItens(client, ids, 'Separação', req);
+    await client.query(
+      `UPDATE solicitacao_produto.itens_solicitados
+          SET status = 'Separação',
+              quantidade_solicitada = NULL,
+              quantidade_separada = NULL
+        WHERE id = ANY($1::bigint[]) AND status = 'Separado'`,
+      [ids]
+    );
+
+    await client.query('COMMIT');
+    console.log(`[logistica/reverter-separacao] ${ids.length} item(ns) revertido(s) para Separação por user ${id_user}` +
+      (restaurados.length ? `; qty restaurada em ${restaurados.length} carrinho(s)` : ''));
+    res.json({ ok: true, restaurados });
   } catch (err) {
+    try { await client.query('ROLLBACK'); } catch (_) {}
     console.error('[logistica/reverter-separacao] erro:', err);
     res.status(500).json({ ok: false, error: String(err?.message || err) });
+  } finally {
+    client.release();
   }
 });
 
@@ -16285,9 +16459,16 @@ app.patch('/api/logistica/itens_solicitados/separar', async (req, res) => {
     if (!Array.isArray(solic_ids) || !solic_ids.length)
       return res.status(400).json({ ok: false, error: 'solic_ids inválido.' });
     const ids = solic_ids.map(id => parseInt(id, 10)).filter(id => !isNaN(id));
+    const lock = await assertUsuarioSeparandoPodeAgir(pool, ids, req);
+    if (!lock.ok) return res.status(403).json(lock);
     await registrarMovimentacaoKanbanItens(pool, ids, 'Separado', req);
     await pool.query(
-      `UPDATE solicitacao_produto.itens_solicitados SET status = 'Separado' WHERE id = ANY($1::bigint[])`, [ids]
+      `UPDATE solicitacao_produto.itens_solicitados
+          SET status = 'Separado',
+              quantidade_solicitada = NULL,
+              quantidade_separada = NULL
+        WHERE id = ANY($1::bigint[])`,
+      [ids]
     );
     res.json({ ok: true });
   } catch (err) {
@@ -16295,6 +16476,59 @@ app.patch('/api/logistica/itens_solicitados/separar', async (req, res) => {
     res.status(500).json({ ok: false, error: String(err?.message || err) });
   }
 });
+
+// Atualiza solicitacoes_separacao.quantidade pareando com o carrinho original do envio
+async function syncSolicitacoesSeparacaoQuantidade(client, carrRow, novaQty, qtyOriginal = null) {
+  if (!carrRow) return;
+  const oldQty = qtyOriginal != null ? parseFloat(qtyOriginal) : parseFloat(carrRow.quantidade);
+  if (!Number.isFinite(oldQty)) return;
+  const nova = parseFloat(novaQty);
+  const houveAlteracao = Number.isFinite(nova) && Math.abs(oldQty - nova) > 0.0001;
+  await client.query(`
+    UPDATE solicitacao_produto.solicitacoes_separacao ss
+       SET quantidade = $1,
+           quantidade_original = CASE
+             WHEN $6 THEN COALESCE(ss.quantidade_original, $4::numeric)
+             ELSE ss.quantidade_original
+           END
+     WHERE ss.id = (
+       SELECT ss2.id
+         FROM solicitacao_produto.solicitacoes_separacao ss2
+        WHERE ss2.codigo_produto = $2
+          AND ss2.id_user = $3
+          AND (
+            ABS(ss2.quantidade - $4::numeric) < 0.0001
+            OR ABS(COALESCE(ss2.quantidade_original, ss2.quantidade) - $4::numeric) < 0.0001
+          )
+          AND ss2.criado_em BETWEEN ($5::timestamptz - INTERVAL '10 minutes')
+                                AND ($5::timestamptz + INTERVAL '10 minutes')
+        ORDER BY ss2.id DESC
+        LIMIT 1
+     )
+  `, [novaQty, carrRow.codigo_produto, carrRow.id_user, oldQty, carrRow.criado_em, houveAlteracao]);
+}
+
+async function registrarAlteracaoQuantidadeItem(client, { solicIds, carrId, qtyOriginal, qtySeparada }) {
+  const orig = parseFloat(qtyOriginal);
+  const sep  = parseFloat(qtySeparada);
+  if (!Number.isFinite(orig) || !Number.isFinite(sep) || Math.abs(orig - sep) < 0.0001) return;
+  const sIds = (solicIds || []).map(id => parseInt(id, 10)).filter(id => !isNaN(id));
+  if (sIds.length) {
+    await client.query(
+      `UPDATE solicitacao_produto.itens_solicitados
+          SET quantidade_solicitada = $1, quantidade_separada = $2
+        WHERE id = ANY($3::bigint[])`,
+      [orig, sep, sIds]
+    );
+  } else if (carrId) {
+    await client.query(
+      `UPDATE solicitacao_produto.itens_solicitados
+          SET quantidade_solicitada = $1, quantidade_separada = $2
+        WHERE id_carr = $3`,
+      [orig, sep, carrId]
+    );
+  }
+}
 
 // POST /api/logistica/itens_solicitados/separar-parcial - Separa qty parcial, clona carrinho
 // Lógica: original SEP recebe a qty separada → status Separado
@@ -16310,9 +16544,16 @@ app.post('/api/logistica/itens_solicitados/separar-parcial', async (req, res) =>
       return res.status(400).json({ ok: false, error: 'Dados inválidos.' });
     const cIds = carr_ids.map(id => parseInt(id, 10)).filter(id => !isNaN(id));
     const sIds = (solic_ids || []).map(id => parseInt(id, 10)).filter(id => !isNaN(id));
+    if (sIds.length) {
+      const lock = await assertUsuarioSeparandoPodeAgir(pool, sIds, req);
+      if (!lock.ok) return res.status(403).json(lock);
+    }
 
     await client.query('BEGIN');
     await client.query(`ALTER TABLE solicitacao_produto.itens_solicitados ADD COLUMN IF NOT EXISTS observacao TEXT`);
+    await client.query(`ALTER TABLE solicitacao_produto.itens_solicitados ADD COLUMN IF NOT EXISTS quantidade_solicitada NUMERIC(18,4)`);
+    await client.query(`ALTER TABLE solicitacao_produto.itens_solicitados ADD COLUMN IF NOT EXISTS quantidade_separada NUMERIC(18,4)`);
+    await client.query(`ALTER TABLE solicitacao_produto.solicitacoes_separacao ADD COLUMN IF NOT EXISTS quantidade_original NUMERIC(18,4)`);
 
     const { rows: carrs } = await client.query(
       `SELECT * FROM logistica.carrinho WHERE id = ANY($1::bigint[]) ORDER BY criado_em ASC`, [cIds]
@@ -16322,15 +16563,43 @@ app.post('/api/logistica/itens_solicitados/separar-parcial', async (req, res) =>
     const qtyTotal     = carrs.reduce((s, c) => s + parseFloat(c.quantidade), 0);
     const qtyRemainder = qtyTotal - qtySep; // o que sobra volta para a fila
 
-    // Se não há restante, apenas marca tudo como Separado sem novo SEP
+    // Separação total ou quantidade maior que solicitada (embalagem fechada)
     if (qtyRemainder <= 0.0001) {
+      const primaryCarr = carrs[0];
+      const primaryId   = primaryCarr.id;
+
+      await syncSolicitacoesSeparacaoQuantidade(client, primaryCarr, qtySep, qtyTotal);
+      await registrarAlteracaoQuantidadeItem(client, {
+        solicIds: sIds, carrId: primaryId, qtyOriginal: qtyTotal, qtySeparada: qtySep
+      });
+      await client.query(
+        `UPDATE logistica.carrinho SET quantidade = $1 WHERE id = $2`,
+        [qtySep, primaryId]
+      );
+
+      if (cIds.length > 1) {
+        const extraIds = cIds.filter(id => id !== primaryId);
+        await client.query(
+          `DELETE FROM solicitacao_produto.itens_solicitados WHERE id_carr = ANY($1::bigint[])`,
+          [extraIds]
+        );
+        await client.query(`DELETE FROM logistica.carrinho WHERE id = ANY($1::bigint[])`, [extraIds]);
+      }
+
       if (sIds.length > 0) {
         await client.query(
-          `UPDATE solicitacao_produto.itens_solicitados SET status = 'Separado' WHERE id = ANY($1::bigint[])`, [sIds]
+          `UPDATE solicitacao_produto.itens_solicitados SET status = 'Separado' WHERE id = ANY($1::bigint[])`,
+          [sIds]
+        );
+      } else {
+        await client.query(
+          `UPDATE solicitacao_produto.itens_solicitados SET status = 'Separado' WHERE id_carr = $1`,
+          [primaryId]
         );
       }
+
       await client.query('COMMIT');
-      console.log(`[separar-parcial] separação total (via parcial) de ${carrs[0].codigo_produto} por user ${id_user}`);
+      console.log(`[separar-parcial] separação total/qty ajustada (${qtySep}) de ${primaryCarr.codigo_produto} por user ${id_user}`);
       return res.json({ ok: true, new_n_solic: null });
     }
 
@@ -16400,9 +16669,30 @@ app.post('/api/logistica/itens_solicitados/separar-parcial', async (req, res) =>
 
     // Entries originais remanescentes (com qtySep) → marcados como Separado
     if (keptIds.length > 0) {
+      const primaryKeptId = keptIds[0];
+      const primaryKept   = carrs.find(c => c.id === primaryKeptId) || base;
+
+      if (keptIds.length > 1) {
+        const extraKept = keptIds.slice(1);
+        await client.query(
+          `DELETE FROM solicitacao_produto.itens_solicitados WHERE id_carr = ANY($1::bigint[])`,
+          [extraKept]
+        );
+        await client.query(`DELETE FROM logistica.carrinho WHERE id = ANY($1::bigint[])`, [extraKept]);
+      }
+
       await client.query(
-        `UPDATE solicitacao_produto.itens_solicitados SET status = 'Separado' WHERE id_carr = ANY($1::bigint[])`,
-        [keptIds]
+        `UPDATE logistica.carrinho SET quantidade = $1 WHERE id = $2`,
+        [qtySep, primaryKeptId]
+      );
+      await syncSolicitacoesSeparacaoQuantidade(client, primaryKept, qtySep, qtyTotal);
+      await registrarAlteracaoQuantidadeItem(client, {
+        solicIds: sIds, carrId: primaryKeptId, qtyOriginal: qtyTotal, qtySeparada: qtySep
+      });
+
+      await client.query(
+        `UPDATE solicitacao_produto.itens_solicitados SET status = 'Separado' WHERE id_carr = $1`,
+        [primaryKeptId]
       );
     }
 
@@ -16485,9 +16775,42 @@ app.get('/api/logistica/kanban', async (req, res) => {
   }
 });
 
+async function _logisticaFetchEnderecoPpMap(codigos) {
+  const list = [...new Set((codigos || []).map(s => String(s || '').trim()).filter(Boolean))];
+  if (!list.length) return {};
+  const { rows } = await pool.query(
+    `SELECT codigo, completo, rua, andar, edificio, apartamento
+       FROM logistica."Endereço_pp"
+      WHERE codigo = ANY($1::text[])`,
+    [list]
+  );
+  const dados = {};
+  for (const row of rows) {
+    const cod = String(row.codigo || '').trim();
+    if (!cod) continue;
+    if (!dados[cod]) dados[cod] = [];
+    dados[cod].push({
+      completo: row.completo || null,
+      rua: row.rua || null,
+      andar: row.andar || null,
+      edificio: row.edificio || null,
+      apartamento: row.apartamento || null
+    });
+  }
+  return dados;
+}
+
+function _logisticaAttachEnderecoPp(itens, enderecoMap) {
+  return (itens || []).map(it => {
+    const cod = String(it.codigo_produto || '').trim();
+    return { ...it, endereco_pp: (cod && enderecoMap?.[cod]) ? enderecoMap[cod] : [] };
+  });
+}
+
 // GET /api/logistica/kanban/itens?n_solic=SEP-1000 — Itens detalhados de uma SEP (tooltip/modal)
 app.get('/api/logistica/kanban/itens', async (req, res) => {
   try {
+    await ensureSchemaMigrated();
     const id_user   = req.session?.user?.id;
     if (!id_user) return res.status(401).json({ ok: false, error: 'Não autenticado.' });
     const { n_solic } = req.query;
@@ -16496,18 +16819,26 @@ app.get('/api/logistica/kanban/itens', async (req, res) => {
     if (n_solic) {
       // Itens de uma SEP específica
       const { rows } = await pool.query(`
-        SELECT c.id AS carr_id, i.id AS solic_id, i.status, i.observacao, i.motivo, i.cod_local, i.nome_local,
+        SELECT DISTINCT ON (i.id)
+               c.id AS carr_id, i.id AS solic_id, i.status, i.observacao, i.motivo, i.cod_local, i.nome_local,
+               i.usuario_separando,
+               COALESCE(i.urgente, ss.urgente, false) AS urgente,
+               c.id_user,
                c.codigo_produto, c.descricao, c.unidade,
                c.quantidade::numeric AS quantidade,
+               i.quantidade_solicitada::numeric AS quantidade_solicitada,
+               i.quantidade_separada::numeric AS quantidade_separada,
                c.data_prevista::text, c.horario, c.criado_em::text,
                c.cod_omie,
                COALESCE(c.retirada_por, c.nome_user) AS nome_user,
                rt.codigo_produto_ant, rt.descricao_ant, rt.codigo_produto_novo, rt.descricao_novo
           FROM solicitacao_produto.itens_solicitados i
           JOIN logistica.carrinho c ON c.id = i.id_carr
+          LEFT JOIN solicitacao_produto.solicitacoes_separacao ss
+                 ON ss.n_solic = i.n_solic AND ss.codigo_produto = c.codigo_produto
           LEFT JOIN solicitacao_produto.Registro_troca rt ON rt.id_item_original = i.id
          WHERE i.n_solic = $1
-         ORDER BY c.criado_em ASC, rt.data_troca DESC
+         ORDER BY i.id, c.criado_em ASC, rt.data_troca DESC NULLS LAST
       `, [n_solic]);
 
       let itensDerivados = [];
@@ -16515,8 +16846,11 @@ app.get('/api/logistica/kanban/itens', async (req, res) => {
         const baseNSolic = String(n_solic).replace(/\.\d+$/, '');
         const { rows: derivRows } = await pool.query(`
              SELECT c.id AS carr_id, i.id AS solic_id, i.n_solic, i.status, i.observacao, i.motivo, i.cod_local, i.nome_local,
+                 i.usuario_separando,
                  c.codigo_produto, c.descricao, c.unidade,
                  c.quantidade::numeric AS quantidade,
+                 i.quantidade_solicitada::numeric AS quantidade_solicitada,
+                 i.quantidade_separada::numeric AS quantidade_separada,
                  c.data_prevista::text, c.horario, c.criado_em::text,
                  c.cod_omie,
                  COALESCE(c.retirada_por, c.nome_user) AS nome_user,
@@ -16530,7 +16864,16 @@ app.get('/api/logistica/kanban/itens', async (req, res) => {
         itensDerivados = derivRows;
       }
 
-      return res.json({ ok: true, itens: rows, itens_derivados: itensDerivados });
+      const allCodigos = [...new Set([
+        ...rows.map(r => r.codigo_produto),
+        ...itensDerivados.map(r => r.codigo_produto)
+      ].filter(Boolean))];
+      const enderecoMap = await _logisticaFetchEnderecoPpMap(allCodigos);
+      return res.json({
+        ok: true,
+        itens: _logisticaAttachEnderecoPp(rows, enderecoMap),
+        itens_derivados: _logisticaAttachEnderecoPp(itensDerivados, enderecoMap)
+      });
     } else {
       // Carrinho sem SEP
       const { rows } = await pool.query(`
@@ -16553,7 +16896,8 @@ app.get('/api/logistica/kanban/itens', async (req, res) => {
            )
          ORDER BY c.criado_em ASC
       `, [id_user]);
-      return res.json({ ok: true, itens: rows });
+      const enderecoMap = await _logisticaFetchEnderecoPpMap(rows.map(r => r.codigo_produto));
+      return res.json({ ok: true, itens: _logisticaAttachEnderecoPp(rows, enderecoMap) });
     }
   } catch (err) {
     console.error('[logistica/kanban/itens] erro:', err);
@@ -16605,6 +16949,9 @@ app.get('/api/logistica/solicitacoes-kanban', async (req, res) => {
         MIN(c.horario)                         AS horario,
         COUNT(*)::int                          AS total_itens,
         MIN(c.criado_em)                       AS criado_em_min,
+        MIN(i.criado_em)                       AS item_criado_em,
+        MAX(NULLIF(TRIM(i.usuario_separando), '')) AS usuario_separando,
+        bool_or(COALESCE(i.urgente, false))    AS tem_urgente,
         CASE
           WHEN bool_or(i.status = 'pendente')            THEN 'Solicitado'
           WHEN bool_or(i.status = 'Stund-by')           THEN 'Stund-by'
@@ -16622,6 +16969,11 @@ app.get('/api/logistica/solicitacoes-kanban', async (req, res) => {
 
     const colunas = { 'Solicitado': [], 'Stund-by': [], 'Em Separação': [], 'Separado': [], 'Aguardando retirada': [], 'Concluído': [] };
     rows.forEach(r => { if (colunas[r.coluna]) colunas[r.coluna].push(r); });
+    colunas['Concluído'].sort((a, b) => {
+      const ta = a.item_criado_em ? new Date(a.item_criado_em).getTime() : 0;
+      const tb = b.item_criado_em ? new Date(b.item_criado_em).getTime() : 0;
+      return tb - ta;
+    });
 
     res.json({ ok: true, colunas });
   } catch (err) {
@@ -16677,6 +17029,8 @@ app.patch('/api/logistica/itens_solicitados/aguardando-retirada', async (req, re
     if (!Array.isArray(solic_ids) || !solic_ids.length)
       return res.status(400).json({ ok: false, error: 'solic_ids inválido.' });
     const ids = solic_ids.map(id => parseInt(id, 10)).filter(id => !isNaN(id));
+    const lock = await assertUsuarioSeparandoPodeAgir(pool, ids, req);
+    if (!lock.ok) return res.status(403).json(lock);
     await registrarMovimentacaoKanbanItens(pool, ids, 'Aguardando retirada', req);
     await pool.query(
       `UPDATE solicitacao_produto.itens_solicitados SET status = 'Aguardando retirada' WHERE id = ANY($1::bigint[])`, [ids]
@@ -16707,6 +17061,36 @@ app.patch('/api/logistica/itens_solicitados/aguardando-retirada', async (req, re
   }
 });
 
+// PATCH /api/logistica/itens_solicitados/reverter-conferido — Reverte 'Aguardando retirada' → 'Separado'
+app.patch('/api/logistica/itens_solicitados/reverter-conferido', async (req, res) => {
+  try {
+    await ensureSchemaMigrated();
+    const id_user = req.session?.user?.id;
+    if (!id_user) return res.status(401).json({ ok: false, error: 'Não autenticado.' });
+    const { solic_ids } = req.body;
+    if (!Array.isArray(solic_ids) || !solic_ids.length)
+      return res.status(400).json({ ok: false, error: 'solic_ids inválido.' });
+    const ids = solic_ids.map(id => parseInt(id, 10)).filter(id => !isNaN(id));
+    if (!ids.length) return res.status(400).json({ ok: false, error: 'Nenhum ID válido.' });
+    const lock = await assertUsuarioSeparandoPodeAgir(pool, ids, req);
+    if (!lock.ok) return res.status(403).json(lock);
+
+    await registrarMovimentacaoKanbanItens(pool, ids, 'Separado', req);
+    const { rowCount } = await pool.query(
+      `UPDATE solicitacao_produto.itens_solicitados
+          SET status = 'Separado'
+        WHERE id = ANY($1::bigint[]) AND status = 'Aguardando retirada'`,
+      [ids]
+    );
+
+    console.log(`[logistica/reverter-conferido] ${rowCount} item(ns) revertido(s) para Separado por user ${id_user}`);
+    res.json({ ok: true, revertidos: rowCount });
+  } catch (err) {
+    console.error('[logistica/reverter-conferido] erro:', err);
+    res.status(500).json({ ok: false, error: String(err?.message || err) });
+  }
+});
+
 // PATCH /api/logistica/itens_solicitados/concluido — muda status para 'Concluído'
 app.patch('/api/logistica/itens_solicitados/concluido', async (req, res) => {
   try {
@@ -16728,6 +17112,144 @@ app.patch('/api/logistica/itens_solicitados/concluido', async (req, res) => {
   }
 });
 
+// PATCH /api/logistica/itens_solicitados/urgente — Marca/desmarca itens como urgente
+app.patch('/api/logistica/itens_solicitados/urgente', express.json(), async (req, res) => {
+  try {
+    await ensureSchemaMigrated();
+    const id_user = req.session?.user?.id;
+    if (!id_user) return res.status(401).json({ ok: false, error: 'Não autenticado.' });
+    const { solic_ids, urgente } = req.body;
+    if (!Array.isArray(solic_ids) || !solic_ids.length)
+      return res.status(400).json({ ok: false, error: 'solic_ids inválido.' });
+    const ids = solic_ids.map(id => parseInt(id, 10)).filter(id => !isNaN(id));
+    const lock = await assertUsuarioSeparandoPodeAgir(pool, ids, req);
+    if (!lock.ok) return res.status(403).json(lock);
+    const valor = !!urgente;
+    await pool.query(
+      `UPDATE solicitacao_produto.itens_solicitados SET urgente = $1 WHERE id = ANY($2::bigint[])`,
+      [valor, ids]
+    );
+    // Sincroniza com solicitacoes_separacao (n_solic + codigo_produto)
+    await pool.query(`
+      UPDATE solicitacao_produto.solicitacoes_separacao ss
+         SET urgente = $1
+        FROM solicitacao_produto.itens_solicitados i
+        JOIN logistica.carrinho c ON c.id = i.id_carr
+       WHERE i.id = ANY($2::bigint[])
+         AND ss.n_solic = i.n_solic
+         AND ss.codigo_produto = c.codigo_produto
+    `, [valor, ids]);
+    res.json({ ok: true, urgente: valor });
+  } catch (err) {
+    console.error('[logistica/itens_solicitados/urgente] erro:', err);
+    res.status(500).json({ ok: false, error: String(err?.message || err) });
+  }
+});
+
+// PATCH /api/logistica/carrinho/:id/urgente — Marca/desmarca item do carrinho como urgente
+app.patch('/api/logistica/carrinho/:id/urgente', express.json(), async (req, res) => {
+  try {
+    const id_user = req.session?.user?.id;
+    if (!id_user) return res.status(401).json({ ok: false, error: 'Não autenticado.' });
+    const carr_id = parseInt(req.params.id, 10);
+    if (isNaN(carr_id)) return res.status(400).json({ ok: false, error: 'ID inválido.' });
+    const { urgente } = req.body;
+    const valor = !!urgente;
+    await pool.query(
+      `UPDATE logistica.carrinho SET urgente = $1 WHERE id = $2 AND id_user = $3`,
+      [valor, carr_id, id_user]
+    );
+    res.json({ ok: true, urgente: valor });
+  } catch (err) {
+    console.error('[logistica/carrinho/urgente] erro:', err);
+    res.status(500).json({ ok: false, error: String(err?.message || err) });
+  }
+});
+
+// DELETE /api/logistica/itens_solicitados/:id/sep — Remove um item pendente de uma SEP (só o autor)
+app.delete('/api/logistica/itens_solicitados/:id/sep', async (req, res) => {
+  const client = await pool.connect();
+  try {
+    await ensureSchemaMigrated();
+    const id_user = req.session?.user?.id;
+    if (!id_user) return res.status(401).json({ ok: false, error: 'Não autenticado.' });
+    const solic_id = parseInt(req.params.id, 10);
+    if (isNaN(solic_id)) return res.status(400).json({ ok: false, error: 'ID inválido.' });
+
+    await client.query('BEGIN');
+
+    // Valida: item deve existir, estar pendente e pertencer ao usuário
+    const { rows: check } = await client.query(`
+      SELECT i.id, i.n_solic, i.status, c.id_user, c.codigo_produto
+        FROM solicitacao_produto.itens_solicitados i
+        JOIN logistica.carrinho c ON c.id = i.id_carr
+       WHERE i.id = $1
+    `, [solic_id]);
+    if (!check.length) { await client.query('ROLLBACK'); return res.status(404).json({ ok: false, error: 'Item não encontrado.' }); }
+    const item = check[0];
+    if (item.id_user !== String(id_user)) { await client.query('ROLLBACK'); return res.status(403).json({ ok: false, error: 'Sem permissão.' }); }
+    if (item.status !== 'pendente') { await client.query('ROLLBACK'); return res.status(400).json({ ok: false, error: 'Item não está mais pendente.' }); }
+
+    // Remove de itens_solicitados (carrinho fica livre)
+    await client.query(`DELETE FROM solicitacao_produto.itens_solicitados WHERE id = $1`, [solic_id]);
+    // Remove registro correspondente em solicitacoes_separacao
+    await client.query(`
+      DELETE FROM solicitacao_produto.solicitacoes_separacao
+       WHERE n_solic = $1 AND codigo_produto = $2
+    `, [item.n_solic, item.codigo_produto]);
+
+    await client.query('COMMIT');
+    console.log(`[Sep/Delete item] solic_id=${solic_id} removido por id_user=${id_user}`);
+    res.json({ ok: true });
+  } catch (err) {
+    try { await client.query('ROLLBACK'); } catch (_) {}
+    console.error('[itens_solicitados/delete-sep] erro:', err);
+    res.status(500).json({ ok: false, error: String(err?.message || err) });
+  } finally {
+    client.release();
+  }
+});
+
+// DELETE /api/logistica/sep/:n_solic — Remove SEP inteira (só o autor, só se todos os itens forem pendente)
+app.delete('/api/logistica/sep/:n_solic', async (req, res) => {
+  const client = await pool.connect();
+  try {
+    await ensureSchemaMigrated();
+    const id_user = req.session?.user?.id;
+    if (!id_user) return res.status(401).json({ ok: false, error: 'Não autenticado.' });
+    const n_solic = req.params.n_solic;
+    if (!n_solic) return res.status(400).json({ ok: false, error: 'n_solic inválido.' });
+
+    await client.query('BEGIN');
+
+    // Valida: todos os itens devem ser pendente e pertencer ao usuário
+    const { rows: itens } = await client.query(`
+      SELECT i.id, i.status, c.id_user
+        FROM solicitacao_produto.itens_solicitados i
+        JOIN logistica.carrinho c ON c.id = i.id_carr
+       WHERE i.n_solic = $1
+    `, [n_solic]);
+    if (!itens.length) { await client.query('ROLLBACK'); return res.status(404).json({ ok: false, error: 'SEP não encontrada.' }); }
+    const isAuthor = itens.every(it => it.id_user === String(id_user));
+    if (!isAuthor) { await client.query('ROLLBACK'); return res.status(403).json({ ok: false, error: 'Sem permissão.' }); }
+    const allPendente = itens.every(it => it.status === 'pendente');
+    if (!allPendente) { await client.query('ROLLBACK'); return res.status(400).json({ ok: false, error: 'A SEP possui itens que já saíram do status pendente.' }); }
+
+    await client.query(`DELETE FROM solicitacao_produto.itens_solicitados WHERE n_solic = $1`, [n_solic]);
+    await client.query(`DELETE FROM solicitacao_produto.solicitacoes_separacao WHERE n_solic = $1`, [n_solic]);
+
+    await client.query('COMMIT');
+    console.log(`[Sep/Delete SEP] n_solic=${n_solic} removida por id_user=${id_user}`);
+    res.json({ ok: true });
+  } catch (err) {
+    try { await client.query('ROLLBACK'); } catch (_) {}
+    console.error('[sep/delete] erro:', err);
+    res.status(500).json({ ok: false, error: String(err?.message || err) });
+  } finally {
+    client.release();
+  }
+});
+
 // POST /api/logistica/itens_solicitados/nao-separar — Cria novo SEPxxxx.X para itens não separados
 app.post('/api/logistica/itens_solicitados/nao-separar', express.json(), async (req, res) => {
   const client = await pool.connect();
@@ -16737,6 +17259,8 @@ app.post('/api/logistica/itens_solicitados/nao-separar', express.json(), async (
     
     const { solic_id, justificativa } = req.body;
     if (!solic_id) return res.status(400).json({ ok: false, error: 'solic_id inválido.' });
+    const lock = await assertUsuarioSeparandoPodeAgir(pool, [solic_id], req);
+    if (!lock.ok) return res.status(403).json(lock);
     
     await client.query('BEGIN');
 
@@ -16796,10 +17320,10 @@ app.post('/api/logistica/itens_solicitados/nao-separar', express.json(), async (
 
     const newCarrId = newCarrRows[0].id;
 
-    // Cria novo item_solicitado com a nova SEP e status "Stund-by"
+    // Cria novo item_solicitado com a nova SEP e status "Stund-by" (sem separador ativo)
     await client.query(`
-      INSERT INTO solicitacao_produto.itens_solicitados (id_carr, n_solic, status, observacao)
-      VALUES ($1, $2, 'Stund-by', $3)
+      INSERT INTO solicitacao_produto.itens_solicitados (id_carr, n_solic, status, observacao, usuario_separando)
+      VALUES ($1, $2, 'Stund-by', $3, NULL)
     `, [newCarrId, newNSolic, justificativa || null]);
 
     // Registra na tabela solicitacoes_separacao com status "Não separado" e a justificativa
@@ -16840,6 +17364,8 @@ app.post('/api/logistica/itens_solicitados/trocar', express.json(), async (req, 
     const { solic_id, codigo_novo, descricao_novo, unidade_novo, quantidade_nova, motivo } = req.body || {};
     if (!solic_id || !codigo_novo)
       return res.status(400).json({ ok: false, error: 'solic_id e codigo_novo são obrigatórios.' });
+    const lock = await assertUsuarioSeparandoPodeAgir(pool, [solic_id], req);
+    if (!lock.ok) return res.status(403).json(lock);
 
     await client.query('BEGIN');
 
@@ -16911,8 +17437,9 @@ app.get('/api/logistica/carrinho', async (req, res) => {
     const id_user = req.session?.user?.id;
     if (!id_user) return res.status(401).json({ ok: false, error: 'Não autenticado.' });
     await pool.query(`ALTER TABLE logistica.carrinho ADD COLUMN IF NOT EXISTS comentario TEXT`);
+    await pool.query(`ALTER TABLE logistica.carrinho ADD COLUMN IF NOT EXISTS urgente BOOLEAN DEFAULT FALSE`);
     const { rows } = await pool.query(
-      `SELECT id, codigo_produto, descricao, unidade, quantidade, comentario, criado_em
+      `SELECT id, codigo_produto, descricao, unidade, quantidade, comentario, COALESCE(urgente, false) AS urgente, criado_em
          FROM logistica.carrinho c
         WHERE c.id_user = $1
           AND NOT EXISTS (
@@ -17090,15 +17617,15 @@ app.post('/api/logistica/separacao/enviar', express.json(), async (req, res) => 
       );
     }
 
-    // Busca itens do carrinho do usuário
+    // Busca itens do carrinho do usuário (inclui urgente)
     const { rows: itens } = await client.query(
       filtroIds
-        ? `SELECT id, codigo_produto, descricao, unidade, quantidade, comentario FROM logistica.carrinho
+        ? `SELECT id, codigo_produto, descricao, unidade, quantidade, comentario, COALESCE(urgente, false) AS urgente FROM logistica.carrinho
            WHERE id_user = $1
              AND id = ANY($2::bigint[])
              AND NOT EXISTS (SELECT 1 FROM solicitacao_produto.itens_solicitados i WHERE i.id_carr = logistica.carrinho.id)
            ORDER BY criado_em ASC`
-        : `SELECT id, codigo_produto, descricao, unidade, quantidade, comentario FROM logistica.carrinho
+        : `SELECT id, codigo_produto, descricao, unidade, quantidade, comentario, COALESCE(urgente, false) AS urgente FROM logistica.carrinho
            WHERE id_user = $1
              AND NOT EXISTS (SELECT 1 FROM solicitacao_produto.itens_solicitados i WHERE i.id_carr = logistica.carrinho.id)
            ORDER BY criado_em ASC`,
@@ -17109,18 +17636,16 @@ app.post('/api/logistica/separacao/enviar', express.json(), async (req, res) => 
       return res.status(400).json({ ok: false, error: 'Carrinho vazio.' });
     }
 
-    // ─── Calcula n_solic com regra de janela 14h (horário de Brasília UTC-3) ───
-    const now     = new Date();
-    const brtHour = ((now.getUTCHours() - 3) + 24) % 24;   // BRT = UTC-3 (sem DST no BR desde 2019)
-    const todayBRT = (() => {
-      const d = new Date(now.getTime() - 3 * 3600000);
-      return d.toISOString().slice(0, 10);                   // YYYY-MM-DD em BRT
-    })();
+    // ─── Calcula n_solic ──────────────────────────────────────────────────────
+    // SAC/AT (incluindo VIPP): sempre gera SEP nova.
+    // Outros motivos: reutiliza SEP aberta do mesmo usuário enquanto todos os
+    // itens dela ainda estiverem com status 'pendente'. Se não houver nenhuma
+    // disponível, gera SEP nova.
+    const motivosSempreNovo = new Set(['SAC', 'AT']);
 
     let nSolic = null;
 
-    if (!forcar_novo_sep && brtHour < 14) {
-      // Antes das 14h: reutiliza n_solic do mesmo usuário criado hoje antes das 14h (não aplicável a SEPs VIPP)
+    if (!forcar_novo_sep && !motivosSempreNovo.has(motivoSolicitacao)) {
       const { rows: existing } = await client.query(`
         SELECT DISTINCT i.n_solic
           FROM solicitacao_produto.itens_solicitados i
@@ -17128,10 +17653,14 @@ app.post('/api/logistica/separacao/enviar', express.json(), async (req, res) => 
          WHERE c.id_user = $1
            AND i.n_solic IS NOT NULL
            AND i.n_solic LIKE 'SEP-%'
-           AND (i.criado_em AT TIME ZONE 'America/Sao_Paulo')::date = $2::date
-           AND EXTRACT(HOUR FROM i.criado_em AT TIME ZONE 'America/Sao_Paulo') < 14
+           AND NOT EXISTS (
+             SELECT 1 FROM solicitacao_produto.itens_solicitados i2
+              WHERE i2.n_solic = i.n_solic
+                AND i2.status <> 'pendente'
+           )
+         ORDER BY i.n_solic DESC
          LIMIT 1
-      `, [id_user, todayBRT]);
+      `, [id_user]);
       nSolic = existing[0]?.n_solic || null;
     }
 
@@ -17153,21 +17682,22 @@ app.post('/api/logistica/separacao/enviar', express.json(), async (req, res) => 
     for (const item of itens) {
       await client.query(
         `INSERT INTO solicitacao_produto.solicitacoes_separacao
-           (id_user, nome_user, solicitado_para, codigo_produto, descricao, unidade, quantidade, data_prevista, horario, observacao)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+           (id_user, nome_user, solicitado_para, codigo_produto, descricao, unidade, quantidade, data_prevista, horario, observacao, n_solic, urgente)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
         [id_user, nome_user, solicitado_para || nome_user, item.codigo_produto, item.descricao, item.unidade, item.quantidade,
-         data_prevista || null, horario || null, item.comentario || null]
+         data_prevista || null, horario || null, item.comentario || null, nSolic, item.urgente || false]
       );
       await client.query(
-        `INSERT INTO solicitacao_produto.itens_solicitados (id_carr, n_solic, status, observacao, motivo, cod_local, nome_local)
-         VALUES ($1, $2, 'pendente', $3, $4, $5, $6)`,
+        `INSERT INTO solicitacao_produto.itens_solicitados (id_carr, n_solic, status, observacao, motivo, cod_local, nome_local, urgente)
+         VALUES ($1, $2, 'pendente', $3, $4, $5, $6, $7)`,
         [
           item.id,
           nSolic,
           observacao || null,
           motivoSolicitacao,
           fluxoVipp ? VIPP_COD_LOCAL_PADRAO : null,
-          fluxoVipp ? vippNomeLocalPadrao : null
+          fluxoVipp ? vippNomeLocalPadrao : null,
+          item.urgente || false
         ]
       );
     }
@@ -17249,6 +17779,20 @@ app.get('/api/logistica/estoque/batch', async (req, res) => {
     res.json({ ok: true, dados, minimos });
   } catch (err) {
     console.error('[logistica/estoque/batch] erro:', err);
+    res.status(500).json({ ok: false, error: String(err?.message || err) });
+  }
+});
+
+// Endereçamento PP por código de produto (logistica."Endereço_pp")
+app.get('/api/logistica/endereco-pp/batch', async (req, res) => {
+  try {
+    const codigos = (req.query.codigos || '').split(',').map(s => s.trim()).filter(Boolean);
+    if (!codigos.length) return res.json({ ok: true, dados: {} });
+
+    const dados = await _logisticaFetchEnderecoPpMap(codigos);
+    res.json({ ok: true, dados });
+  } catch (err) {
+    console.error('[logistica/endereco-pp/batch] erro:', err);
     res.status(500).json({ ok: false, error: String(err?.message || err) });
   }
 });
@@ -35053,6 +35597,9 @@ app.listen(PORT, HOST, () => {
   // Notificação diária WhatsApp (08:00)
   const { iniciarCronNotificacaoDiaria } = require('./cron/notificacao_diaria_whatsapp');
   iniciarCronNotificacaoDiaria();
+  // Atualização diária de rastreio envios (07:00 Brasília)
+  const { iniciarCronAtualizacaoRastreio } = require('./utils/atualizarRastreioEnvios');
+  iniciarCronAtualizacaoRastreio();
 });
 
 // DEBUG: sanity check do webhook (GET simples)

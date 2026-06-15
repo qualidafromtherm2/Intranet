@@ -204,7 +204,8 @@ async function incluirAjusteOmie(registro, aprovadoPor) {
 
   const dataObj = normalizarDataMovimentacao(data_movimentacao);
   const tipoOmie = String(tipo_operacao || '').toUpperCase();
-  const motivoOmie = String(motivo || 'AJU').toUpperCase();
+  const motivoNormalizado = String(motivo || 'INV').toUpperCase();
+  const motivoOmie = MOTIVOS_OMIE_VALIDOS.has(motivoNormalizado) ? motivoNormalizado : 'INV';
   const obsTexto = obs
     ? String(obs).slice(0, 200)
     : `Ajuste ${tipoOmie} #${id} - Produto ${codigo || ''}. Executado por ${aprovadoPor}.`;
@@ -484,18 +485,41 @@ router.post('/reconciliar', express.json(), async (req, res) => {
   }
 });
 
-// GET /api/ajustes — lista últimos 500 ajustes
+// GET /api/ajustes — lista todos os pendentes + histórico recente
 router.get('/', async (_req, res) => {
   try {
     await ensureAjustesSchema();
     const { rows } = await dbQuery(
-      `SELECT id, tipo_operacao, codigo_produto, codigo, descricao, qtd,
+      `WITH pendentes AS (
+         SELECT id, tipo_operacao, codigo_produto, codigo, descricao, qtd,
+                local_estoque, local_nome, data_movimentacao, cmc, motivo, obs,
+                solicitante, status, aprovado_por, aprovado_em,
+                reprovado_por, reprovado_em, motivo_reprovacao, criado_em,
+                0 AS ordem_status
+           FROM mensagens.ajustes_estoque
+          WHERE lower(coalesce(status, '')) NOT IN ('executado', 'reprovado')
+       ),
+       historico AS (
+         SELECT id, tipo_operacao, codigo_produto, codigo, descricao, qtd,
+                local_estoque, local_nome, data_movimentacao, cmc, motivo, obs,
+                solicitante, status, aprovado_por, aprovado_em,
+                reprovado_por, reprovado_em, motivo_reprovacao, criado_em,
+                1 AS ordem_status
+           FROM mensagens.ajustes_estoque
+          WHERE lower(coalesce(status, '')) IN ('executado', 'reprovado')
+          ORDER BY id DESC
+          LIMIT 250
+       )
+       SELECT id, tipo_operacao, codigo_produto, codigo, descricao, qtd,
               local_estoque, local_nome, data_movimentacao, cmc, motivo, obs,
               solicitante, status, aprovado_por, aprovado_em,
               reprovado_por, reprovado_em, motivo_reprovacao, criado_em
-         FROM mensagens.ajustes_estoque
-        ORDER BY id DESC
-        LIMIT 500`
+         FROM (
+           SELECT * FROM pendentes
+           UNION ALL
+           SELECT * FROM historico
+         ) itens
+        ORDER BY ordem_status, id DESC`
     );
     res.json({ ok: true, registros: rows });
   } catch (err) {
@@ -518,7 +542,8 @@ router.post('/', express.json(), async (req, res) => {
     const dataMovSql     = formatarDataSql(dataMovObj);
     const solicitante    = String(req.body?.solicitante || '').trim() || null;
     const obs            = String(req.body?.obs || '').trim() || null;
-    const motivo         = String(req.body?.motivo || 'AJU').trim().toUpperCase() || 'AJU';
+    const motivoRaw      = String(req.body?.motivo || 'INV').trim().toUpperCase() || 'INV';
+    const motivo         = MOTIVOS_OMIE_VALIDOS.has(motivoRaw) ? motivoRaw : 'INV';
     const itens          = Array.isArray(req.body?.itens) ? req.body.itens : [];
 
     if (!TIPOS_VALIDOS.has(tipo_operacao)) {
