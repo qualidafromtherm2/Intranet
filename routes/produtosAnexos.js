@@ -9,7 +9,7 @@ const { dbQuery } = require('../src/db');
 const { registrarModificacao } = require('../utils/auditoria');
 const supabase = require('../utils/supabase');
 
-const BUCKET = process.env.SUPABASE_BUCKET || 'produtos';
+const BUCKET = process.env.STORAGE_BUCKET || process.env.SUPABASE_BUCKET || 'produtos';
 
 function isTruthy(value) {
   return ['1', 'true', 'yes', 'on', 'sim'].includes(String(value || '').toLowerCase());

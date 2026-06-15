@@ -2,6 +2,12 @@
 // v4.0 - Sincronização automática Omie→PostgreSQL antes de abrir produto
 const API_BASE = window.location.origin; // já serve https://intranet-30av.onrender.com
 
+window.storagePublicUrl = function storagePublicUrl(relativePath) {
+  const base = String(window.__STORAGE_PUBLIC_BASE_URL || '').replace(/\/$/, '');
+  const rel = String(relativePath || '').replace(/^\/+/, '');
+  return base ? `${base}/${rel}` : '';
+};
+
 // Silencia TODOS os logs de console EXCETO diagnóstico de produtos
 ;(function silenceAllLogs(){
   try {
@@ -12814,7 +12820,7 @@ function _abrirAtOsModal(id, navRows) {
   const menuLink = document.getElementById('menu-engenharia-fromthest');
   if (!menuLink) return;
 
-  const FALLBACK_DOWNLOAD_URL = 'https://pxhbginkisinegzupqcy.supabase.co/storage/v1/object/public/produtos/fromtherm/Fromtherm-Local-Setup-v1.1.0.exe';
+  const FALLBACK_DOWNLOAD_URL = window.storagePublicUrl('produtos/fromtherm/Fromtherm-Local-Setup-v1.1.0.exe');
   const DOWNLOAD_META_URL = '/api/engenharia/fromthest/latest-installer';
   const MODAL_ID = 'engenhariaFromthestModal';
 
@@ -27256,7 +27262,7 @@ window.openRegistros = async function() {
 
   // Botão: Baixar instalador do agente (.exe)
   document.getElementById('etqBtnBaixarAgente')?.addEventListener('click', async () => {
-    const EXE_FALLBACK = 'https://pxhbginkisinegzupqcy.supabase.co/storage/v1/object/public/agente-impressao/agente-impressao-setup.exe';
+    const EXE_FALLBACK = window.storagePublicUrl('agente-impressao/agente-impressao-setup.exe');
     let exeUrl = EXE_FALLBACK;
     try {
       const r = await fetch('/api/etiquetas/agente-url', { credentials: 'include' });
@@ -39236,7 +39242,7 @@ function abrirPedidoCompraCotacaoKanban() {
 <body>
   <div class="header">
     <div class="header-logo">
-      <img src="https://pxhbginkisinegzupqcy.supabase.co/storage/v1/object/public/produtos/assets/Logo_OS.png" alt="Logo" />
+      <img src="${window.storagePublicUrl('produtos/assets/Logo_OS.png')}" alt="Logo" />
     </div>
     <div class="header-empresa">
       <h1>FROMTHERM SISTEMAS TERMICOS LTDA</h1>

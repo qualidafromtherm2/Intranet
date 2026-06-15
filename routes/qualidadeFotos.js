@@ -7,7 +7,7 @@ const { v4: uuidv4 } = require('uuid');
 const mime = require('mime-types');
 const supabase = require('../utils/supabase');
 
-const BUCKET = process.env.SUPABASE_BUCKET || 'produtos';
+const BUCKET = process.env.STORAGE_BUCKET || process.env.SUPABASE_BUCKET || 'produtos';
 const MANUAIS_BUCKET = process.env.QUALIDADE_MANUAIS_BUCKET || 'Manuais';
 const MANUAIS_PREFIX = process.env.QUALIDADE_MANUAIS_PREFIX || 'Manuais principais';
 const MANUAIS_META = [

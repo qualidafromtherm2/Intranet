@@ -2,8 +2,10 @@
 // Carrega as variáveis de ambiente definidas em .env
 // no topo do intranet/server.js
 require('dotenv').config({ path: require('path').resolve(__dirname, '.env'), override: true });
-// Storage de arquivos (R2 ou Supabase) — loga backend na subida do processo
+// utils/supabase.js — carrega R2 na subida (log do backend)
 require('./utils/supabase');
+const { uploadPublicFile, removePublicFiles } = require('./utils/storage');
+const { injectStoragePublicUrls, getStoragePublicBaseUrl, ASSETS, agenteExeUrl } = require('./utils/storageUrls');
 const OMIE_WEBHOOK_TOKEN = process.env.OMIE_WEBHOOK_TOKEN || null; // se NULL, não exige token
 // Em server.js (topo do arquivo)
 // chave: id da etiqueta (p.ex. número da OP), valor: { fileName, printed: boolean }
@@ -11867,8 +11869,7 @@ app.use('/agente-impressao', requireSessionForStatic, express.static(path.join(_
 
 // Retorna URL pública do instalador Windows + versão atual do agente
 const _AGENTE_VERSAO_ATUAL    = process.env.AGENTE_VERSAO || '2.6';
-const _AGENTE_EXE_URL_DEFAULT = process.env.AGENTE_EXE_URL
-  || `https://pxhbginkisinegzupqcy.supabase.co/storage/v1/object/public/agente-impressao/agente-impressao-v${_AGENTE_VERSAO_ATUAL}.exe`;
+const _AGENTE_EXE_URL_DEFAULT = process.env.AGENTE_EXE_URL || agenteExeUrl(_AGENTE_VERSAO_ATUAL);
 app.get('/api/etiquetas/agente-url', (req, res) => {
   res.json({ ok: true, url: _AGENTE_EXE_URL_DEFAULT, versao: _AGENTE_VERSAO_ATUAL });
 });
@@ -11961,8 +11962,8 @@ app.post('/api/upload/bom', upload.single('bom'), async (req, res) => {
   }
 });
 
-// Upload de arquivos para storage (R2 ou Supabase — rota legada /api/upload/supabase)
-app.post('/api/upload/supabase', upload.single('file'), async (req, res) => {
+// Upload de arquivos para storage (R2)
+async function handleUploadStorage(req, res) {
   try {
     if (!req.file) return res.status(400).json({ error: 'Nenhum arquivo enviado' });
 
@@ -11989,23 +11990,23 @@ app.post('/api/upload/supabase', upload.single('file'), async (req, res) => {
         'text/plain', 'application/zip', 'application/x-zip-compressed'
       ];
       if (!bucketExists) {
-        console.log(`[Supabase] Criando bucket '${bucketName}'...`);
+        console.log(`[storage] bucket lógico '${bucketName}'`);
         const { error: createError } = await storageClient.storage.createBucket(bucketName, {
           public: true,
           fileSizeLimit: 10485760, // 10MB
           allowedMimeTypes: allowedMimes
         });
         if (createError) {
-          console.error('[Supabase] Erro ao criar bucket:', createError);
+          console.error('[storage] Erro ao criar bucket:', createError);
         } else {
-          console.log(`[Supabase] Bucket '${bucketName}' criado com sucesso`);
+          console.log(`[storage] Bucket lógico '${bucketName}' ok`);
         }
       } else {
         // Atualiza tipos permitidos para incluir formatos Office adicionados posteriormente
         await storageClient.storage.updateBucket(bucketName, { allowedMimeTypes: allowedMimes }).catch(() => {});
       }
     } catch (bucketError) {
-      console.warn('[Supabase] Erro ao verificar/criar bucket:', bucketError.message);
+      console.warn('[storage] Erro ao verificar bucket:', bucketError.message);
       // Continua com o upload de qualquer forma
     }
     
@@ -12031,12 +12032,15 @@ app.post('/api/upload/supabase', upload.single('file'), async (req, res) => {
       url: publicData.publicUrl
     });
   } catch (err) {
-    console.error('[upload/supabase]', err);
+    console.error('[upload/storage]', err);
     res.status(500).json({ error: String(err) });
   }
-});
+}
 
-// ── Manuais de produto (CRUD via Supabase Storage + coluna JSONB manuais) ──
+app.post('/api/upload/storage', upload.single('file'), handleUploadStorage);
+app.post('/api/upload/supabase', upload.single('file'), handleUploadStorage);
+
+// ── Manuais de produto (CRUD via R2 + coluna JSONB manuais) ──
 const uploadManual = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } });
 
 async function detalharProdutosManuais(listaProdutos = []) {
@@ -12161,27 +12165,12 @@ app.post('/api/produtos/:codigo/manuais', uploadManual.single('arquivo'), async 
     if (!nome) return res.status(400).json({ error: 'Nome do manual obrigatório' });
     if (!req.file) return res.status(400).json({ error: 'Arquivo não enviado' });
 
-    const { createClient } = require('@supabase/supabase-js');
-    const supabaseUrl = process.env.SUPABASE_URL;
-    const supabaseKey = process.env.SUPABASE_SERVICE_ROLE;
-    if (!supabaseUrl || !supabaseKey) return res.status(500).json({ error: 'Supabase não configurado' });
-
-    const supabase = createClient(supabaseUrl, supabaseKey);
-    const bucketName = 'produtos';
     const safeName = req.file.originalname.replace(/[^a-zA-Z0-9._-]/g, '_');
     const filePath = `manuais/${codigo}/${Date.now()}_${safeName}`;
 
-    const { error: upErr } = await supabase.storage.from(bucketName).upload(filePath, req.file.buffer, {
+    const { url } = await uploadPublicFile('produtos', filePath, req.file.buffer, {
       contentType: req.file.mimetype || 'application/pdf',
-      upsert: false
     });
-    if (upErr) {
-      console.error('[Manuais] upload erro:', upErr);
-      return res.status(500).json({ error: upErr.message });
-    }
-
-    const { data: pubData } = supabase.storage.from(bucketName).getPublicUrl(filePath);
-    const url = pubData?.publicUrl || '';
 
     await pool.query(
       `UPDATE public.produtos_omie
@@ -12211,12 +12200,10 @@ app.delete('/api/produtos/:codigo/manuais/:index', async (req, res) => {
 
     const removido = manuais.splice(index, 1)[0];
 
-    // Remove do Supabase Storage
+    // Remove do storage (R2)
     if (removido?.path) {
       try {
-        const { createClient } = require('@supabase/supabase-js');
-        const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE);
-        await supabase.storage.from('produtos').remove([removido.path]);
+        await removePublicFiles('produtos', [removido.path]);
       } catch (storageErr) {
         console.warn('[Manuais] falha ao remover do storage:', storageErr.message);
       }
@@ -19939,6 +19926,27 @@ app.use((req, res, next) => {
 });
 
 // estáticos unificados (CSS/JS/img) — antes das rotas HTML
+function sendStorageHtml(res, filename) {
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
+  const filePath = path.join(__dirname, filename);
+  const html = injectStoragePublicUrls(fs.readFileSync(filePath, 'utf8'));
+  res.type('html').send(html);
+}
+
+app.get('/api/config/storage', (_req, res) => {
+  res.json({ ok: true, publicBaseUrl: getStoragePublicBaseUrl(), assets: ASSETS });
+});
+
+app.get(['/', '/menu_produto.html', '/kanban/*'], (req, res) => {
+  sendStorageHtml(res, 'menu_produto.html');
+});
+
+app.get('/at-link.html', (req, res) => {
+  sendStorageHtml(res, 'at-link.html');
+});
+
 app.use(express.static(path.join(__dirname), {
   etag: false,                 // evita servir HTML por engano via cache
   maxAge: 0,
@@ -19972,15 +19980,8 @@ app.get('/termos-de-uso', (req, res) => {
 
 
 // ────────────────────────────────────────────
-// 5) Só para rotas HTML do seu SPA, devolva o index
+// 5) Rotas HTML do SPA — servidas acima (sendStorageHtml)
 // ────────────────────────────────────────────
-// Isso não intercepta /menu_produto.js, /requisicoes_omie/xx.js, etc.
-app.get(['/', '/menu_produto.html', '/kanban/*'], (req, res) => {
-  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
-  res.setHeader('Pragma', 'no-cache');
-  res.setHeader('Expires', '0');
-  res.sendFile(path.join(__dirname, 'menu_produto.html'));
-});
 
 app.post('/api/produtos/caracteristicas-aplicar-teste', express.json(), async (req, res) => {
   try {
@@ -24771,76 +24772,27 @@ app.post('/api/compras/pedido', async (req, res) => {
         
         console.log(`[Compras] Item ${produto_codigo} - Requisição Direta: ${requisicao_direta} - Status Final: ${statusInicial}`);
         
-        // Processa anexo se houver - SALVA NO SUPABASE
+        // Processa anexo se houver
         let anexosArray = null;
         if (anexo && anexo.base64) {
           try {
-            const { createClient } = require('@supabase/supabase-js');
-            const supabaseUrl = process.env.SUPABASE_URL;
-            const supabaseKey = process.env.SUPABASE_SERVICE_ROLE;
-            
-            if (!supabaseUrl || !supabaseKey) {
-              throw new Error('Credenciais do Supabase não configuradas');
-            }
-            
-            const supabase = createClient(supabaseUrl, supabaseKey);
-            
-            // Converte base64 para buffer
             const buffer = Buffer.from(anexo.base64, 'base64');
-            
-            // Gera nome único para o arquivo
             const timestamp = Date.now();
             const nomeArquivoSanitizado = anexo.nome.replace(/[^a-zA-Z0-9.-]/g, '_');
             const filePath = `compras/${timestamp}_${nomeArquivoSanitizado}`;
-            
-            const bucketName = 'compras-anexos';
-            
-            // Verifica se o bucket existe, se não, cria
-            try {
-              const { data: buckets } = await supabase.storage.listBuckets();
-              const bucketExists = buckets?.some(b => b.name === bucketName);
-              
-              if (!bucketExists) {
-                console.log(`[Compras] Criando bucket '${bucketName}' no Supabase...`);
-                await supabase.storage.createBucket(bucketName, {
-                  public: true,
-                  fileSizeLimit: 10485760,
-                  allowedMimeTypes: ['image/*', 'application/pdf', 'application/msword', 'application/vnd.ms-excel', 'application/vnd.ms-powerpoint', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'application/vnd.openxmlformats-officedocument.presentationml.presentation', 'text/plain', 'application/zip', 'application/x-zip-compressed']
-                });
-              }
-            } catch (bucketError) {
-              console.warn('[Compras] Aviso ao verificar bucket:', bucketError.message);
-            }
-            
-            // Upload para o Supabase
-            const { data: uploadData, error: uploadError } = await supabase.storage
-              .from(bucketName)
-              .upload(filePath, buffer, {
-                contentType: anexo.tipo,
-                upsert: false
-              });
-            
-            if (uploadError) {
-              throw new Error(`Erro no upload Supabase: ${uploadError.message}`);
-            }
-            
-            // Gera URL pública
-            const { data: publicData } = supabase.storage
-              .from(bucketName)
-              .getPublicUrl(filePath);
-            
+            const { url } = await uploadPublicFile('compras-anexos', filePath, buffer, {
+              contentType: anexo.tipo,
+            });
             anexosArray = [{
               nome: anexo.nome,
-              url: publicData.publicUrl,
+              url,
               tipo: anexo.tipo,
               tamanho: anexo.tamanho,
               data_upload: new Date().toISOString()
             }];
-            
-            console.log(`[Compras] Anexo salvo no Supabase: ${anexo.nome} -> ${publicData.publicUrl}`);
+            console.log(`[Compras] Anexo salvo: ${anexo.nome} -> ${url}`);
           } catch (errAnexo) {
             console.error('[Compras] Erro ao processar anexo:', errAnexo);
-            // Continua sem o anexo
           }
         }
         
@@ -25028,81 +24980,33 @@ app.post('/api/compras/solicitacao', express.json(), async (req, res) => {
         
         console.log(`[Compras-Solicitacao] Item ${produto_codigo} - NP: ${np} - Requisição Direta Item: ${requisicao_direta} - Compra Autorizada: ${compraAutorizada} - Requisição Direta Final: ${requisicaoDiretaFinal} - Status: ${statusInicial}`);
         
-        // Processa anexo(s) se houver - SALVA NO SUPABASE
+        // Processa anexo(s) se houver
         let anexosArray = null;
         if (anexo) {
           try {
-            const { createClient } = require('@supabase/supabase-js');
-            const supabaseUrl = process.env.SUPABASE_URL;
-            const supabaseKey = process.env.SUPABASE_SERVICE_ROLE;
-            
-            if (!supabaseUrl || !supabaseKey) {
-              throw new Error('Credenciais do Supabase não configuradas');
-            }
-            
-            const supabase = createClient(supabaseUrl, supabaseKey);
-            const bucketName = 'compras-anexos';
-            
-            // Verifica se o bucket existe, se não, cria
-            try {
-              const { data: buckets } = await supabase.storage.listBuckets();
-              const bucketExists = buckets?.some(b => b.name === bucketName);
-              
-              if (!bucketExists) {
-                console.log(`[Compras-Solicitacao] Criando bucket '${bucketName}' no Supabase...`);
-                await supabase.storage.createBucket(bucketName, {
-                  public: true,
-                  fileSizeLimit: 10485760,
-                  allowedMimeTypes: ['image/*', 'application/pdf', 'application/msword', 'application/vnd.ms-excel', 'application/vnd.ms-powerpoint', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'application/vnd.openxmlformats-officedocument.presentationml.presentation', 'text/plain', 'application/zip', 'application/x-zip-compressed']
-                });
-              }
-            } catch (bucketError) {
-              console.warn('[Compras-Solicitacao] Aviso ao verificar bucket:', bucketError.message);
-            }
-            
-            // Normaliza para array (pode vir como objeto único ou array)
             const anexosParaProcessar = Array.isArray(anexo) ? anexo : [anexo];
             anexosArray = [];
-            
-            // Processa cada anexo
             for (const arq of anexosParaProcessar) {
               if (!arq.base64) continue;
-              
-              // Converte base64 para buffer
               const buffer = Buffer.from(arq.base64, 'base64');
-              
-              // Gera nome único para o arquivo
               const timestamp = Date.now();
               const nomeArquivoSanitizado = arq.nome.replace(/[^a-zA-Z0-9.-]/g, '_');
               const filePath = `compras/${timestamp}_${nomeArquivoSanitizado}`;
-              
-              // Upload para o Supabase
-              const { data: uploadData, error: uploadError } = await supabase.storage
-                .from(bucketName)
-                .upload(filePath, buffer, {
+              try {
+                const { url } = await uploadPublicFile('compras-anexos', filePath, buffer, {
                   contentType: arq.tipo,
-                  upsert: false
                 });
-              
-              if (uploadError) {
+                anexosArray.push({
+                  nome: arq.nome,
+                  url,
+                  tipo: arq.tipo,
+                  tamanho: arq.tamanho,
+                  data_upload: new Date().toISOString()
+                });
+                console.log(`[Compras-Solicitacao] Anexo salvo: ${arq.nome} -> ${url}`);
+              } catch (uploadError) {
                 console.error(`[Compras-Solicitacao] Erro no upload de ${arq.nome}:`, uploadError.message);
-                continue;
               }
-              
-              // Gera URL pública
-              const { data: publicData } = supabase.storage
-                .from(bucketName)
-                .getPublicUrl(filePath);
-              
-              anexosArray.push({
-                nome: arq.nome,
-                url: publicData.publicUrl,
-                tipo: arq.tipo,
-                tamanho: arq.tamanho,
-                data_upload: new Date().toISOString()
-              });
-              
-              console.log(`[Compras-Solicitacao] Anexo salvo: ${arq.nome} -> ${publicData.publicUrl}`);
             }
             
             // Se nenhum anexo foi processado com sucesso, define como null
@@ -27757,7 +27661,7 @@ app.get('/api/compras/imagem-fresca/:codigo_produto', async (req, res) => {
 app.post('/api/admin/sync/imagens-omie', express.json(), (_req, res) => {
   res.status(410).json({
     ok: false,
-    error: 'Endpoint descontinuado. Use scripts/sync_fotos_produtos_supabase.js (Supabase) ou /api/produtos/:codigo/fotos para uploads.'
+    error: 'Endpoint descontinuado. Use scripts/sync_fotos_produtos_supabase.js (R2) ou /api/produtos/:codigo/fotos para uploads.'
   });
 });
 
@@ -33067,44 +32971,24 @@ app.put('/api/compras/item/:id', express.json(), async (req, res) => {
     let anexosUrls = null;
     if (anexos && Array.isArray(anexos) && anexos.length > 0) {
       try {
-        const { createClient } = require('@supabase/supabase-js');
-        const supabaseUrl = process.env.SUPABASE_URL;
-        const supabaseKey = process.env.SUPABASE_SERVICE_ROLE;
-        
-        if (!supabaseUrl || !supabaseKey) {
-          console.error('[Supabase] Credenciais não configuradas');
-          throw new Error('Supabase não configurado');
-        }
-        
-        const supabase = createClient(supabaseUrl, supabaseKey);
-        
         anexosUrls = [];
-        
         for (const anexo of anexos) {
           const buffer = Buffer.from(anexo.base64, 'base64');
           const filePath = `item_${id}/${Date.now()}_${anexo.nome}`;
-          
-          const { data, error } = await supabase.storage
-            .from('compras-anexos')
-            .upload(filePath, buffer, {
+          try {
+            const { url } = await uploadPublicFile('compras-anexos', filePath, buffer, {
               contentType: anexo.tipo,
-              upsert: false
             });
-          
-          if (!error) {
-            const { data: publicData } = supabase.storage
-              .from('compras-anexos')
-              .getPublicUrl(filePath);
-            
             anexosUrls.push({
               nome: anexo.nome,
-              url: publicData.publicUrl,
+              url,
               tipo: anexo.tipo,
               tamanho: anexo.tamanho
             });
+          } catch (uploadErr) {
+            console.error('[Compras] Erro no upload de anexo:', uploadErr.message);
           }
         }
-        
         if (anexosUrls.length > 0) {
           fields.push(`anexos = $${idx++}`);
           values.push(JSON.stringify(anexosUrls));
@@ -33280,75 +33164,34 @@ app.post('/api/compras/cotacoes', express.json(), async (req, res) => {
       return res.status(400).json({ ok: false, error: 'solicitacao_id e fornecedor_nome são obrigatórios' });
     }
     
-    // Processa anexos se houver - SALVA NO SUPABASE
+    // Processa anexos se houver
     let anexosUrls = null;
     if (anexos && Array.isArray(anexos) && anexos.length > 0) {
       console.log(`[Cotações] Processando ${anexos.length} anexos para solicitacao_id ${solicitacao_id}`);
       try {
-        const { createClient } = require('@supabase/supabase-js');
-        const supabaseUrl = process.env.SUPABASE_URL;
-        const supabaseKey = process.env.SUPABASE_SERVICE_ROLE;
-
-        if (!supabaseUrl || !supabaseKey) {
-          throw new Error('Credenciais do Supabase não configuradas');
-        }
-
-        const supabase = createClient(supabaseUrl, supabaseKey);
-        const bucketName = 'compras-anexos';
-
-        // Verifica se o bucket existe, se não, cria
-        try {
-          const { data: buckets } = await supabase.storage.listBuckets();
-          const bucketExists = buckets?.some(b => b.name === bucketName);
-          if (!bucketExists) {
-            console.log(`[Cotações] Criando bucket '${bucketName}' no Supabase...`);
-            await supabase.storage.createBucket(bucketName, {
-              public: true,
-              fileSizeLimit: 10485760,
-              allowedMimeTypes: ['image/*', 'application/pdf', 'application/msword', 'application/vnd.ms-excel', 'application/vnd.ms-powerpoint', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'application/vnd.openxmlformats-officedocument.presentationml.presentation', 'text/plain', 'application/zip', 'application/x-zip-compressed']
-            });
-          }
-        } catch (bucketError) {
-          console.warn('[Cotações] Aviso ao verificar bucket:', bucketError.message);
-        }
-
         anexosUrls = [];
         for (const anexo of anexos) {
           if (!anexo?.base64) continue;
-
           const buffer = Buffer.from(anexo.base64, 'base64');
           const timestamp = Date.now();
           const nomeArquivoSanitizado = (anexo.nome || 'anexo').replace(/[^a-zA-Z0-9.-]/g, '_');
           const filePath = `cotacoes/${solicitacao_id}/${timestamp}_${nomeArquivoSanitizado}`;
-
-          const { error: uploadError } = await supabase.storage
-            .from(bucketName)
-            .upload(filePath, buffer, {
+          try {
+            const { url } = await uploadPublicFile('compras-anexos', filePath, buffer, {
               contentType: anexo.tipo || 'application/octet-stream',
-              upsert: false
             });
-
-          if (uploadError) {
+            anexosUrls.push({
+              nome: anexo.nome,
+              url,
+              tipo: anexo.tipo || 'application/octet-stream',
+              tamanho: anexo.tamanho || 0,
+              data_upload: new Date().toISOString()
+            });
+          } catch (uploadError) {
             console.error(`[Cotações] Erro no upload de ${anexo.nome}:`, uploadError.message);
-            continue;
           }
-
-          const { data: publicData } = supabase.storage
-            .from(bucketName)
-            .getPublicUrl(filePath);
-
-          anexosUrls.push({
-            nome: anexo.nome,
-            url: publicData.publicUrl,
-            tipo: anexo.tipo || 'application/octet-stream',
-            tamanho: anexo.tamanho || 0,
-            data_upload: new Date().toISOString()
-          });
         }
-
-        if (anexosUrls.length === 0) {
-          anexosUrls = null;
-        }
+        if (anexosUrls.length === 0) anexosUrls = null;
       } catch (errAnexo) {
         console.error('[Cotações] Erro ao processar anexos:', errAnexo);
         anexosUrls = null;
@@ -33551,47 +33394,27 @@ app.put('/api/compras/cotacoes/:id', express.json(), async (req, res) => {
     let anexosUrls = null;
     if (anexos && Array.isArray(anexos) && anexos.length > 0) {
       try {
-        const { createClient } = require('@supabase/supabase-js');
-        const supabaseUrl = process.env.SUPABASE_URL;
-        const supabaseKey = process.env.SUPABASE_SERVICE_ROLE;
-        
-        if (!supabaseUrl || !supabaseKey) {
-          console.error('[Supabase] Credenciais não configuradas');
-          throw new Error('Supabase não configurado');
-        }
-        
-        const supabase = createClient(supabaseUrl, supabaseKey);
-        
-        // Busca cotação para pegar solicitacao_id
         const { rows: cotacaoRows } = await pool.query(`
           SELECT solicitacao_id FROM compras.cotacoes WHERE id = $1
         `, [id]);
-        
+
         if (cotacaoRows.length > 0) {
           anexosUrls = [];
-          
           for (const anexo of anexos) {
             const buffer = Buffer.from(anexo.base64, 'base64');
             const filePath = `cotacao_${cotacaoRows[0].solicitacao_id}/${Date.now()}_${anexo.nome}`;
-            
-            const { data, error } = await supabase.storage
-              .from('compras-anexos')
-              .upload(filePath, buffer, {
+            try {
+              const { url } = await uploadPublicFile('compras-anexos', filePath, buffer, {
                 contentType: anexo.tipo,
-                upsert: false
               });
-            
-            if (!error) {
-              const { data: publicData } = supabase.storage
-                .from('compras-anexos')
-                .getPublicUrl(filePath);
-              
               anexosUrls.push({
                 nome: anexo.nome,
-                url: publicData.publicUrl,
+                url,
                 tipo: anexo.tipo,
                 tamanho: anexo.tamanho
               });
+            } catch (uploadErr) {
+              console.error('[Cotações] Erro no upload de anexo:', uploadErr.message);
             }
           }
           

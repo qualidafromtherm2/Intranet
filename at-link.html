@@ -4,16 +4,16 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Portal AT — Fromtherm</title>
-  <link rel="icon" type="image/png" sizes="32x32" href="https://pxhbginkisinegzupqcy.supabase.co/storage/v1/object/public/compras-anexos/favicons/logo_guia_favicon_20260323.png">
-  <link rel="icon" type="image/png" sizes="192x192" href="https://pxhbginkisinegzupqcy.supabase.co/storage/v1/object/public/compras-anexos/favicons/logo_guia_favicon_20260323.png">
-  <link rel="apple-touch-icon" sizes="180x180" href="https://pxhbginkisinegzupqcy.supabase.co/storage/v1/object/public/compras-anexos/favicons/logo_guia_favicon_20260323.png">
-  <link rel="shortcut icon" type="image/png" href="https://pxhbginkisinegzupqcy.supabase.co/storage/v1/object/public/compras-anexos/favicons/logo_guia_favicon_20260323.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="{{STORAGE_PUBLIC_BASE_URL}}/compras-anexos/favicons/logo_guia_favicon_20260323.png">
+  <link rel="icon" type="image/png" sizes="192x192" href="{{STORAGE_PUBLIC_BASE_URL}}/compras-anexos/favicons/logo_guia_favicon_20260323.png">
+  <link rel="apple-touch-icon" sizes="180x180" href="{{STORAGE_PUBLIC_BASE_URL}}/compras-anexos/favicons/logo_guia_favicon_20260323.png">
+  <link rel="shortcut icon" type="image/png" href="{{STORAGE_PUBLIC_BASE_URL}}/compras-anexos/favicons/logo_guia_favicon_20260323.png">
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
     body {
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-      background: url('https://pxhbginkisinegzupqcy.supabase.co/storage/v1/object/public/produtos/assets/fundo.png') center center / cover fixed, linear-gradient(135deg, #0f172a 0%, #1e3a5f 100%);
+      background: url('{{STORAGE_PUBLIC_BASE_URL}}/produtos/assets/fundo.png') center center / cover fixed, linear-gradient(135deg, #0f172a 0%, #1e3a5f 100%);
       min-height: 100vh;
       display: flex;
       align-items: flex-start;
@@ -747,7 +747,7 @@
 	  <div id="dashSection" style="display:none;">
 	    <div class="dash-header">
 	      <div class="dash-head-row">
-	        <img src="https://pxhbginkisinegzupqcy.supabase.co/storage/v1/object/public/produtos/assets/logo.png"
+	        <img src="{{STORAGE_PUBLIC_BASE_URL}}/produtos/assets/logo.png"
 	             alt="Logo" class="dash-logo">
 	        <div class="dash-copy">
 	          <div class="saudacao">Bem-vindo(a)</div>
@@ -758,7 +758,7 @@
 	      </div>
 	      <div class="dash-chat-mobile-slot">
 	        <button type="button" class="sgf-ai-trigger" id="sgf-ai-btn-mobile" title="Assistente técnico" aria-label="Abrir assistente técnico">
-	          <img src="https://pxhbginkisinegzupqcy.supabase.co/storage/v1/object/public/produtos/assets/Gif_chatbot2.gif" alt="Chatbot Fromtherm">
+	          <img src="{{STORAGE_PUBLIC_BASE_URL}}/produtos/assets/Gif_chatbot2.gif" alt="Chatbot Fromtherm">
 	          <span class="sgf-ai-badge" id="sgf-ai-badge-mobile">!</span>
 	        </button>
 	      </div>
@@ -766,7 +766,7 @@
 	    <div class="dash-toolbar">
 	      <div class="tbl-titulo">Meus Atendimentos</div>
 	      <button type="button" class="sgf-ai-trigger" id="sgf-ai-btn-desktop" title="Assistente técnico" aria-label="Abrir assistente técnico">
-	        <img src="https://pxhbginkisinegzupqcy.supabase.co/storage/v1/object/public/produtos/assets/Gif_chatbot2.gif" alt="Chatbot Fromtherm">
+	        <img src="{{STORAGE_PUBLIC_BASE_URL}}/produtos/assets/Gif_chatbot2.gif" alt="Chatbot Fromtherm">
 	        <span class="sgf-ai-badge" id="sgf-ai-badge-desktop">!</span>
 	      </button>
 	      <button id="btnToggleFinaliz" onclick="_toggleFinaliz()"
@@ -796,7 +796,7 @@
 
 	  <div id="sgf-ai-panel" role="dialog" aria-label="Assistente técnico">
 	    <div id="sgf-ai-header">
-	      <div class="sgf-ai-avatar"><img src="https://pxhbginkisinegzupqcy.supabase.co/storage/v1/object/public/produtos/assets/Gif_chatbot2.gif" alt="Chatbot Fromtherm"></div>
+	      <div class="sgf-ai-avatar"><img src="{{STORAGE_PUBLIC_BASE_URL}}/produtos/assets/Gif_chatbot2.gif" alt="Chatbot Fromtherm"></div>
 	      <div class="sgf-ai-title">
 	        <strong>Assistente técnico</strong>
 	        <span>Fromtherm</span>
@@ -840,7 +840,7 @@
         <!-- CABEÇALHO -->
         <div class="at-os-header">
           <div class="at-os-hcol at-os-hcol-logo">
-            <img class="at-os-logo" src="https://pxhbginkisinegzupqcy.supabase.co/storage/v1/object/public/produtos/assets/Logo_OS.png"
+            <img class="at-os-logo" src="{{STORAGE_PUBLIC_BASE_URL}}/produtos/assets/Logo_OS.png"
                  alt="Logo" style="max-height:72px;max-width:160px;object-fit:contain;">
           </div>
           <div class="at-os-hcol at-os-hcol-center">

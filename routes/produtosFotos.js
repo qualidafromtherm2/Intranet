@@ -10,7 +10,7 @@ const { v4: uuidv4 } = require('uuid');
 const mime  = require('mime-types');
 
 const supabase = require('../utils/supabase');
-const BUCKET   = process.env.SUPABASE_BUCKET || 'produtos';
+const BUCKET   = process.env.STORAGE_BUCKET || process.env.SUPABASE_BUCKET || 'produtos';
 
 // -----------------------------------------------------------------------------
 // Helper: converte "04.PP.N.51005" -> 10408353557, ou retorna Number se já vier numérico

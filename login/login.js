@@ -2,6 +2,11 @@
 // opção A (recomendada): sempre a mesma origem
 const API_BASE = '';
 
+function defaultProfileImageUrl() {
+  const base = String(window.__STORAGE_PUBLIC_BASE_URL || '').replace(/\/$/, '');
+  return `${base}/compras-anexos/profile-photos/Captura%20de%20tela%20de%202026-01-29%2015-12-33.png`;
+}
+
 // === HELPERS GLOBAIS: ficam visíveis para qualquer handler/IIFE ===
 window.goToInicio = window.goToInicio || function () {
   // 1) Se existir função de roteamento do app:
@@ -105,7 +110,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
   
   // 📸 Monitor ATIVO para atualizar foto do profile-icon E do modal
-  const defaultImage = 'https://pxhbginkisinegzupqcy.supabase.co/storage/v1/object/public/compras-anexos/profile-photos/Captura%20de%20tela%20de%202026-01-29%2015-12-33.png';
+  const defaultImage = defaultProfileImageUrl();
   
   let lastPhotoUrl = null;
   
@@ -444,7 +449,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       return;
     }
     
-    const defaultImage = 'https://pxhbginkisinegzupqcy.supabase.co/storage/v1/object/public/compras-anexos/profile-photos/Captura%20de%20tela%20de%202026-01-29%2015-12-33.png';
+    const defaultImage = defaultProfileImageUrl();
     
     console.log('[updateHeaderProfileIconFromUser] User:', user);
     console.log('[updateHeaderProfileIconFromUser] foto_perfil_url:', user?.foto_perfil_url);
@@ -465,7 +470,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       return;
     }
     
-    const defaultImage = 'https://pxhbginkisinegzupqcy.supabase.co/storage/v1/object/public/compras-anexos/profile-photos/Captura%20de%20tela%20de%202026-01-29%2015-12-33.png';
+    const defaultImage = defaultProfileImageUrl();
     
     console.log('[updateHeaderProfileIcon] Buscando foto para userId:', userId);
     
@@ -780,7 +785,7 @@ function bindLogout(btn) {
 
     // Reset da foto de perfil para imagem padrão
     const profileIcon = document.getElementById('profile-icon');
-    const defaultImage = 'https://pxhbginkisinegzupqcy.supabase.co/storage/v1/object/public/compras-anexos/profile-photos/Captura%20de%20tela%20de%202026-01-29%2015-12-33.png';
+    const defaultImage = defaultProfileImageUrl();
     if (profileIcon) {
       profileIcon.src = defaultImage;
     }

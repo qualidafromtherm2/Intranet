@@ -17,9 +17,11 @@ const VIPP_IMPRESSAO = 'https://vipp.visualset.com.br/vipp/remoto/ImpressaoRemot
 const VIPP_WEB_URL   = 'https://vipp.visualset.com.br';
 
 // URLs dos logos para etiqueta ZPL (carregados e cacheados na primeira impressão)
-const LOGO_EMPRESA_URL  = 'https://pxhbginkisinegzupqcy.supabase.co/storage/v1/object/public/compras-anexos/favicons/logo_guia_20260323.png';
-const LOGO_EXPRESSA_URL = 'https://pxhbginkisinegzupqcy.supabase.co/storage/v1/object/public/compras-anexos/favicons/expressa_logo.png';
-const LOGO_CORREIOS_URL = 'https://pxhbginkisinegzupqcy.supabase.co/storage/v1/object/public/compras-anexos/favicons/Logo_Correios.png';
+const { ASSETS } = require('../utils/storageUrls');
+
+const LOGO_EMPRESA_URL  = ASSETS.logoGuia;
+const LOGO_EXPRESSA_URL = ASSETS.logoExpressa;
+const LOGO_CORREIOS_URL = ASSETS.logoCorreios;
 const _gfCache = new Map();
 
 // ── Sessão web VIPP (PHP session para GerarPPN) ───────────────────────────────

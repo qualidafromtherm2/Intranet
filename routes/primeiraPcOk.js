@@ -11,7 +11,7 @@ const mime    = require('mime-types');
 const { dbQuery } = require('../src/db');
 const supabase = require('../utils/supabase');
 
-const BUCKET         = process.env.SUPABASE_BUCKET || 'produtos';
+const BUCKET         = process.env.STORAGE_BUCKET || process.env.SUPABASE_BUCKET || 'produtos';
 const STORAGE_PREFIX = 'primeira_pc_ok';
 
 const upload = multer({

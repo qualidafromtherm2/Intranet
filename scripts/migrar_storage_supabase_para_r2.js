@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 /**
- * Copia arquivos do Supabase Storage → Cloudflare R2.
+ * Script de migração one-time Supabase → R2 (já executado em jun/2026).
+ * Para reexecutar: npm i @supabase/supabase-js && configure SUPABASE_URL temporariamente.
  *
  * Requisitos (.env):
  *   SUPABASE_URL, SUPABASE_SERVICE_ROLE  (origem)

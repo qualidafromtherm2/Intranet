@@ -3622,7 +3622,7 @@ const pool = new Pool({
   ssl: { rejectUnauthorized: false }
 });
 
-const BUCKET = process.env.SUPABASE_BUCKET_SAC || process.env.SUPABASE_BUCKET || 'produtos';
+const BUCKET = process.env.STORAGE_BUCKET_SAC || process.env.STORAGE_BUCKET || process.env.SUPABASE_BUCKET || 'produtos';
 
 // Upload em memória, máximo 12MB por arquivo, até 2 arquivos
 const upload = multer({
@@ -5073,8 +5073,21 @@ async function syncAtSerieCacheFromSheets() {
   }
 
   const skipped = registros.length - inserted;
+  let cache_enriquecido_vendas = 0;
+  try {
+    cache_enriquecido_vendas = await enriquecerAtSerieCacheComVendasLote();
+  } catch (enrichErr) {
+    erros.push(`enriquecimento_vendas: ${enrichErr.message}`);
+  }
   const { rows: [{ total_cache }] } = await pool.query('SELECT COUNT(*) AS total_cache FROM sac.at_serie_cache');
-  return { inserted, skipped, total_fontes: registros.length, total_cache: Number(total_cache), erros };
+  return {
+    inserted,
+    skipped,
+    total_fontes: registros.length,
+    total_cache: Number(total_cache),
+    cache_enriquecido_vendas,
+    erros,
+  };
 }
 
 router.post('/at/sync-cache', async (req, res) => {
@@ -5088,6 +5101,193 @@ router.post('/at/sync-cache', async (req, res) => {
   }
 });
 // ── Fim: sync cache ───────────────────────────────────────────────────────────
+
+function _serieCampoVazio(val) {
+  return !String(val || '').trim();
+}
+
+/** Variantes do pedido da planilha (ex.: 17164-B → 17164-B, 17164). */
+function _candidatosPedidoVendas(pedido) {
+  const p = String(pedido || '').trim();
+  if (!p) return [];
+  const out = new Set([p]);
+  const semSufixo = p.replace(/-[A-Za-z]+$/, '').trim();
+  if (semSufixo) out.add(semSufixo);
+  const soNumeros = p.match(/^(\d+)/);
+  if (soNumeros?.[1]) out.add(soNumeros[1]);
+  return [...out];
+}
+
+/** Busca Cliente/NF/Data em "Vendas" a partir do numero_pedido (coluna Pedido da busca). */
+async function buscarDadosVendaPorPedidos(pedidos) {
+  const originais = [...new Set(
+    (pedidos || []).map((p) => String(p || '').trim()).filter(Boolean)
+  )];
+  if (!originais.length) return new Map();
+
+  const candidatoParaOriginais = new Map();
+  const todosCandidatos = new Set();
+  for (const orig of originais) {
+    for (const cand of _candidatosPedidoVendas(orig)) {
+      todosCandidatos.add(cand);
+      if (!candidatoParaOriginais.has(cand)) candidatoParaOriginais.set(cand, []);
+      candidatoParaOriginais.get(cand).push(orig);
+    }
+  }
+
+  const lista = [...todosCandidatos];
+  const { rows } = await pool.query(`
+    WITH pv AS (
+      SELECT DISTINCT ON (TRIM(p.numero_pedido))
+        TRIM(p.numero_pedido) AS numero_pedido,
+        p.codigo_pedido
+      FROM "Vendas".pedidos_venda p
+      WHERE TRIM(COALESCE(p.numero_pedido, '')) = ANY($1::text[])
+      ORDER BY TRIM(p.numero_pedido), p.updated_at DESC NULLS LAST
+    )
+    SELECT DISTINCT ON (pv.numero_pedido)
+      pv.numero_pedido,
+      nf.razao_emitente,
+      nf.numero_nota,
+      nf.chave_nfe,
+      nf.data_emissao
+    FROM pv
+    JOIN "Vendas".notas_fiscais_omie nf
+      ON TRIM(COALESCE(nf.numero_pedido, '')) = TRIM(COALESCE(pv.codigo_pedido::text, ''))
+    WHERE COALESCE(nf.chave_nfe, '') <> ''
+    ORDER BY pv.numero_pedido, nf.updated_at DESC NULLS LAST
+  `, [lista]);
+
+  const map = new Map();
+  for (const r of rows) {
+    const dados = {
+      cliente: r.razao_emitente || '',
+      nota_fiscal: r.numero_nota || '',
+      chave_nfe: r.chave_nfe || '',
+      data_entrega: r.data_emissao || '',
+    };
+    const matched = candidatoParaOriginais.get(String(r.numero_pedido).trim()) || [];
+    for (const orig of matched) {
+      if (!map.has(orig)) map.set(orig, dados);
+    }
+  }
+  return map;
+}
+
+async function persistirEnriquecimentoVendasNoCache(updates) {
+  for (const u of updates) {
+    await pool.query(`
+      UPDATE sac.at_serie_cache
+      SET
+        cliente = CASE
+          WHEN COALESCE(TRIM(cliente), '') = '' THEN COALESCE($2, cliente)
+          ELSE cliente
+        END,
+        nota_fiscal = CASE
+          WHEN COALESCE(TRIM(nota_fiscal), '') = '' THEN COALESCE($3, nota_fiscal)
+          ELSE nota_fiscal
+        END,
+        chave_nfe = CASE
+          WHEN COALESCE(TRIM(chave_nfe), '') = '' THEN COALESCE($4, chave_nfe)
+          ELSE chave_nfe
+        END,
+        data_entrega = CASE
+          WHEN COALESCE(TRIM(data_entrega), '') = '' THEN COALESCE($5, data_entrega)
+          ELSE data_entrega
+        END
+      WHERE TRIM(COALESCE(pedido, '')) = TRIM($1)
+    `, [
+      u.pedido,
+      u.cliente || null,
+      u.nota_fiscal || null,
+      u.chave_nfe || null,
+      u.data_entrega || null,
+    ]);
+  }
+}
+
+async function enriquecerAtSerieCacheComVendasLote() {
+  const { rowCount } = await pool.query(`
+    UPDATE sac.at_serie_cache c
+    SET
+      cliente = COALESCE(NULLIF(TRIM(c.cliente), ''), dados.razao_emitente),
+      nota_fiscal = COALESCE(NULLIF(TRIM(c.nota_fiscal), ''), dados.numero_nota),
+      chave_nfe = COALESCE(NULLIF(TRIM(c.chave_nfe), ''), dados.chave_nfe),
+      data_entrega = COALESCE(NULLIF(TRIM(c.data_entrega), ''), dados.data_emissao)
+    FROM (
+      SELECT DISTINCT ON (TRIM(p.numero_pedido))
+        TRIM(p.numero_pedido) AS numero_pedido,
+        nf.razao_emitente,
+        nf.numero_nota,
+        nf.chave_nfe,
+        nf.data_emissao
+      FROM "Vendas".pedidos_venda p
+      JOIN "Vendas".notas_fiscais_omie nf
+        ON TRIM(COALESCE(nf.numero_pedido, '')) = TRIM(COALESCE(p.codigo_pedido::text, ''))
+      WHERE COALESCE(nf.chave_nfe, '') <> ''
+      ORDER BY TRIM(p.numero_pedido), nf.updated_at DESC NULLS LAST
+    ) dados
+    WHERE (
+      TRIM(COALESCE(c.pedido, '')) = dados.numero_pedido
+      OR REGEXP_REPLACE(TRIM(COALESCE(c.pedido, '')), '-[A-Za-z]+$', '') = dados.numero_pedido
+    )
+      AND (
+        COALESCE(TRIM(c.cliente), '') = ''
+        OR COALESCE(TRIM(c.nota_fiscal), '') = ''
+        OR COALESCE(TRIM(c.data_entrega), '') = ''
+      )
+  `);
+  return rowCount || 0;
+}
+
+async function enriquecerResultadosSerieComVendas(resultados) {
+  if (!Array.isArray(resultados) || !resultados.length) return resultados;
+
+  const pedidosParaBuscar = resultados
+    .filter((r) => (
+      _serieCampoVazio(r.cliente)
+      || _serieCampoVazio(r.nota_fiscal)
+      || _serieCampoVazio(r.data_entrega)
+    ))
+    .map((r) => r.pedido || r.numero_serie)
+    .filter(Boolean);
+
+  if (!pedidosParaBuscar.length) return resultados;
+
+  let vendasMap;
+  try {
+    vendasMap = await buscarDadosVendaPorPedidos(pedidosParaBuscar);
+  } catch (err) {
+    console.warn('[SAC/AT] falha ao enriquecer busca de série com vendas:', err?.message || err);
+    return resultados;
+  }
+
+  if (!vendasMap.size) return resultados;
+
+  const cacheUpdates = [];
+  for (const r of resultados) {
+    const pedidoKey = String(r.pedido || r.numero_serie || '').trim();
+    const dados = vendasMap.get(pedidoKey);
+    if (!dados) continue;
+
+    if (_serieCampoVazio(r.cliente) && dados.cliente) r.cliente = dados.cliente;
+    if (_serieCampoVazio(r.nota_fiscal) && dados.nota_fiscal) r.nota_fiscal = dados.nota_fiscal;
+    if (_serieCampoVazio(r.chave_nfe) && dados.chave_nfe) r.chave_nfe = dados.chave_nfe;
+    if (_serieCampoVazio(r.data_entrega) && dados.data_entrega) r.data_entrega = dados.data_entrega;
+
+    if (pedidoKey && (dados.cliente || dados.nota_fiscal || dados.data_entrega)) {
+      cacheUpdates.push({ pedido: pedidoKey, ...dados });
+    }
+  }
+
+  if (cacheUpdates.length) {
+    persistirEnriquecimentoVendasNoCache(cacheUpdates).catch((err) => {
+      console.warn('[SAC/AT] falha ao atualizar at_serie_cache com vendas:', err?.message || err);
+    });
+  }
+
+  return resultados;
+}
 
 router.get('/at/busca-serie', async (req, res) => {
   const termo = String(req.query?.termo || '').trim();
@@ -5162,6 +5362,7 @@ router.get('/at/busca-serie', async (req, res) => {
             }
           } catch (_) { /* enriquecimento opcional */ }
 
+          await enriquecerResultadosSerieComVendas(resultados);
           return res.json({ ok: true, rows: resultados, source: 'cache' });
         }
 
@@ -5473,6 +5674,8 @@ router.get('/at/busca-serie', async (req, res) => {
         console.warn('[SAC/AT] falha ao enriquecer resultados com at_busca_selecionada:', enrichErr?.message || enrichErr);
       }
     }
+
+    await enriquecerResultadosSerieComVendas(resultados);
 
     const payload = { ok: true, rows: resultados };
     if (fontesComTimeout.length) {

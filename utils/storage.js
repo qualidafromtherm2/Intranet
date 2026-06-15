@@ -1,4 +1,4 @@
-// utils/storage.js — armazenamento unificado (Cloudflare R2 ou Supabase Storage)
+// utils/storage.js — Cloudflare R2 (armazenamento de arquivos)
 require('dotenv').config();
 
 const {
@@ -15,10 +15,6 @@ const R2_SECRET_ACCESS_KEY = process.env.R2_SECRET_ACCESS_KEY || '';
 const R2_BUCKET = process.env.R2_BUCKET || '';
 const R2_PUBLIC_BASE_URL = String(process.env.R2_PUBLIC_BASE_URL || '').replace(/\/$/, '');
 
-const SUPABASE_URL = process.env.SUPABASE_URL || '';
-const SUPABASE_SERVICE_ROLE = process.env.SUPABASE_SERVICE_ROLE || '';
-
-/** Buckets legados do Supabase → prefixos dentro do bucket R2 único */
 const LEGACY_BUCKETS = [
   'produtos',
   'compras-anexos',
@@ -32,23 +28,12 @@ function isR2Configured() {
   return !!(R2_ACCOUNT_ID && R2_ACCESS_KEY_ID && R2_SECRET_ACCESS_KEY && R2_BUCKET && R2_PUBLIC_BASE_URL);
 }
 
-function isSupabaseConfigured() {
-  return !!(SUPABASE_URL && SUPABASE_SERVICE_ROLE);
-}
-
-function getStorageBackend() {
-  if (isR2Configured()) return 'r2';
-  if (isSupabaseConfigured()) return 'supabase';
-  return null;
-}
-
 function assertStorageConfigured() {
-  const backend = getStorageBackend();
-  if (!backend) {
-    console.error('[storage] Configure R2 (R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_BUCKET, R2_PUBLIC_BASE_URL) ou Supabase (SUPABASE_URL, SUPABASE_SERVICE_ROLE).');
+  if (!isR2Configured()) {
+    console.error('[storage] Configure R2: R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_BUCKET, R2_PUBLIC_BASE_URL');
     process.exit(1);
   }
-  return backend;
+  return 'r2';
 }
 
 let _s3 = null;
@@ -66,15 +51,6 @@ function getS3Client() {
   return _s3;
 }
 
-let _supabaseClient = null;
-function getSupabaseClient() {
-  if (!_supabaseClient) {
-    const { createClient } = require('@supabase/supabase-js');
-    _supabaseClient = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE, { auth: { persistSession: false } });
-  }
-  return _supabaseClient;
-}
-
 function normalizeLegacyBucket(name) {
   return String(name || 'produtos').replace(/^\/+|\/+$/g, '') || 'produtos';
 }
@@ -83,7 +59,6 @@ function normalizePath(path) {
   return String(path || '').replace(/^\/+/, '');
 }
 
-/** Chave S3 no R2: {bucketLegado}/{caminho} */
 function r2ObjectKey(legacyBucket, path) {
   const bucket = normalizeLegacyBucket(legacyBucket);
   const p = normalizePath(path);
@@ -95,13 +70,8 @@ function encodePublicUrlPath(key) {
 }
 
 function buildPublicUrl(legacyBucket, path) {
-  if (isR2Configured()) {
-    const key = r2ObjectKey(legacyBucket, path);
-    return `${R2_PUBLIC_BASE_URL}/${encodePublicUrlPath(key)}`;
-  }
-  const sb = getSupabaseClient();
-  const { data } = sb.storage.from(normalizeLegacyBucket(legacyBucket)).getPublicUrl(normalizePath(path));
-  return data?.publicUrl || '';
+  const key = r2ObjectKey(legacyBucket, path);
+  return `${R2_PUBLIC_BASE_URL}/${encodePublicUrlPath(key)}`;
 }
 
 async function r2Upload(legacyBucket, path, buffer, options = {}) {
@@ -216,58 +186,53 @@ function storageFrom(legacyBucket) {
 
   return {
     upload(path, buffer, options = {}) {
-      if (isR2Configured()) return r2Upload(bucketName, path, buffer, options);
-      return getSupabaseClient().storage.from(bucketName).upload(normalizePath(path), buffer, options);
+      return r2Upload(bucketName, path, buffer, options);
     },
-
     getPublicUrl(path) {
-      if (isR2Configured()) {
-        return { data: { publicUrl: buildPublicUrl(bucketName, path) } };
-      }
-      return getSupabaseClient().storage.from(bucketName).getPublicUrl(normalizePath(path));
+      return { data: { publicUrl: buildPublicUrl(bucketName, path) } };
     },
-
     remove(paths) {
-      if (isR2Configured()) return r2Remove(bucketName, paths);
-      return getSupabaseClient().storage.from(bucketName).remove(paths);
+      return r2Remove(bucketName, paths);
     },
-
     list(prefix, options) {
-      if (isR2Configured()) return r2List(bucketName, prefix, options);
-      return getSupabaseClient().storage.from(bucketName).list(prefix, options);
+      return r2List(bucketName, prefix, options);
     },
   };
 }
 
+async function uploadPublicFile(legacyBucket, filePath, buffer, { contentType, upsert = false } = {}) {
+  const ref = storageFrom(legacyBucket);
+  const { error } = await ref.upload(filePath, buffer, { contentType, upsert });
+  if (error) {
+    const err = new Error(error.message || String(error));
+    err.storageError = error;
+    throw err;
+  }
+  const { data } = ref.getPublicUrl(filePath);
+  return { path: filePath, url: data.publicUrl };
+}
+
+async function removePublicFiles(legacyBucket, paths) {
+  const { error } = await storageFrom(legacyBucket).remove(paths);
+  if (error) throw new Error(error.message || String(error));
+}
+
 function createStorageFacade() {
   assertStorageConfigured();
-  const backend = getStorageBackend();
-  if (backend === 'r2') {
-    console.log(`[storage] Backend: Cloudflare R2 (bucket=${R2_BUCKET})`);
-  } else {
-    console.log('[storage] Backend: Supabase Storage (legado — configure R2 para migrar)');
-  }
+  console.log(`[storage] Backend: Cloudflare R2 (bucket=${R2_BUCKET})`);
 
   return {
     storage: {
       from: storageFrom,
-      listBuckets: async () => {
-        if (isR2Configured()) {
-          return { data: LEGACY_BUCKETS.map((name) => ({ name, public: true })), error: null };
-        }
-        return getSupabaseClient().storage.listBuckets();
+      listBuckets: async () => ({
+        data: LEGACY_BUCKETS.map((name) => ({ name, public: true })),
+        error: null,
+      }),
+      createBucket: async (name) => {
+        console.log(`[storage] R2: prefixo lógico "${name}" em ${R2_BUCKET}`);
+        return { data: { name }, error: null };
       },
-      createBucket: async (name, options) => {
-        if (isR2Configured()) {
-          console.log(`[storage] R2: bucket lógico "${name}" (prefixo no bucket ${R2_BUCKET}) — createBucket ignorado`);
-          return { data: { name }, error: null };
-        }
-        return getSupabaseClient().storage.createBucket(name, options);
-      },
-      updateBucket: async (name, options) => {
-        if (isR2Configured()) return { data: { name }, error: null };
-        return getSupabaseClient().storage.updateBucket(name, options);
-      },
+      updateBucket: async (name) => ({ data: { name }, error: null }),
     },
   };
 }
@@ -276,10 +241,10 @@ module.exports = {
   createStorageFacade,
   storageFrom,
   buildPublicUrl,
+  uploadPublicFile,
+  removePublicFiles,
   r2ObjectKey,
-  getStorageBackend,
   isR2Configured,
-  isSupabaseConfigured,
   assertStorageConfigured,
   r2ListAllKeys,
   LEGACY_BUCKETS,

@@ -21,7 +21,12 @@ let _cacheUsers = [];
 let _cacheCargos = [];
 let _cacheFuncoes = [];
 let _cacheSetores = [];
-const DEFAULT_PROFILE_IMAGE = 'https://pxhbginkisinegzupqcy.supabase.co/storage/v1/object/public/compras-anexos/profile-photos/Captura%20de%20tela%20de%202026-01-29%2015-12-33.png';
+function defaultProfileImageUrl() {
+  const base = String(window.__STORAGE_PUBLIC_BASE_URL || '').replace(/\/$/, '');
+  return `${base}/compras-anexos/profile-photos/Captura%20de%20tela%20de%202026-01-29%2015-12-33.png`;
+}
+
+const DEFAULT_PROFILE_IMAGE = defaultProfileImageUrl();
 
 function normalizeId(v) {
   const n = Number(v);

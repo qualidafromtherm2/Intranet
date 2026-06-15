@@ -1,5 +1,4 @@
-// utils/supabase.js — fachada de compatibilidade (R2 ou Supabase Storage)
-// Mantém a API .storage.from() usada em todo o projeto.
+// utils/supabase.js — compatibilidade (.storage.from) → Cloudflare R2
 const { createStorageFacade } = require('./storage');
 
 module.exports = createStorageFacade();

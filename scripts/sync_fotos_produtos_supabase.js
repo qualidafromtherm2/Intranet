@@ -2,7 +2,7 @@
 /* eslint-disable no-console */
 
 // ============================================================================
-// Sincroniza fotos de produtos da Omie para o Supabase Storage
+// Sincroniza fotos de produtos da Omie para Cloudflare R2
 // ----------------------------------------------------------------------------
 // Fluxo:
 //   1. Lista todos os produtos via ListarProdutos (Omie)
@@ -14,13 +14,12 @@
 //
 // USO:
 //   node scripts/sync_fotos_produtos_supabase.js
-//   DRY_RUN=1 node scripts/sync_fotos_produtos_supabase.js   (não escreve nada)
 //
 // VARIÁVEIS DE AMBIENTE:
 //   OMIE_APP_KEY, OMIE_APP_SECRET
-//   DATABASE_URL (ou PGHOST/PGUSER/...)
-//   SUPABASE_URL, SUPABASE_SERVICE_ROLE
-//   SUPABASE_BUCKET (opcional, default = "produtos")
+//   DATABASE_URL
+//   R2_* (Cloudflare R2)
+//   STORAGE_BUCKET (opcional, default = "produtos")
 // ============================================================================
 
 require('dotenv/config');
@@ -32,7 +31,7 @@ const supabase = require('../utils/supabase');
 const OMIE_APP_KEY = process.env.OMIE_APP_KEY || '';
 const OMIE_APP_SECRET = process.env.OMIE_APP_SECRET || '';
 const OMIE_PROD_URL = 'https://app.omie.com.br/api/v1/geral/produtos/';
-const BUCKET = process.env.SUPABASE_BUCKET || 'produtos';
+const BUCKET = process.env.STORAGE_BUCKET || process.env.R2_DEFAULT_PREFIX || 'produtos';
 const PASTA_BASE = 'Fotos_produto';
 const DRY_RUN = String(process.env.DRY_RUN || '').trim() === '1';
 

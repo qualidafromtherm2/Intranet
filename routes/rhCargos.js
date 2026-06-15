@@ -1023,23 +1023,20 @@ router.post('/funcionarios/criar-pasta/:userId', async (req, res) => {
     return res.status(400).json({ error: 'ID inválido' });
   }
   try {
-    const { createClient } = require('@supabase/supabase-js');
-    const supabaseUrl = process.env.SUPABASE_URL;
-    const supabaseKey = process.env.SUPABASE_SERVICE_ROLE;
-    if (!supabaseUrl || !supabaseKey) {
-      return res.status(500).json({ error: 'Supabase não configurado' });
-    }
-    const supabase = createClient(supabaseUrl, supabaseKey);
+    const { uploadPublicFile } = require('../utils/storage');
 
     // Cria arquivo placeholder para garantir que a pasta existe
     const folderPath = `${userId}/.keep`;
-    const { error } = await supabase.storage
-      .from('Funcionarios')
-      .upload(folderPath, Buffer.from(''), { contentType: 'text/plain', upsert: true });
-
-    if (error && !error.message?.includes('already exists')) {
-      console.error('[criar-pasta] erro:', error);
-      return res.status(500).json({ error: error.message });
+    try {
+      await uploadPublicFile('Funcionarios', folderPath, Buffer.from(''), {
+        contentType: 'text/plain',
+        upsert: true,
+      });
+    } catch (error) {
+      if (!String(error.message || '').includes('already exists')) {
+        console.error('[criar-pasta] erro:', error);
+        return res.status(500).json({ error: error.message });
+      }
     }
 
     return res.json({ ok: true, path: `${userId}/` });
