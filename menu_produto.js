@@ -52117,12 +52117,20 @@ function snapshotEdicoesQtdUnidAssociacaoNfe() {
     window.__associarNfeCamposEditados = {};
   }
 
-  previewConteudo.querySelectorAll('.assoc-override-unid, .assoc-override-valor').forEach((input) => {
+  previewConteudo.querySelectorAll('.assoc-override-qtd, .assoc-override-unid, .assoc-override-valor').forEach((input) => {
     const seq = Number(input.dataset.seq || 0);
     if (!seq) return;
 
     if (!window.__associarNfeCamposEditados[seq]) {
       window.__associarNfeCamposEditados[seq] = {};
+    }
+
+    if (input.classList.contains('assoc-override-qtd')) {
+      const textoQtd = String(input.value || '').trim();
+      const qtd = textoQtd
+        ? Number(textoQtd.includes(',') ? textoQtd.replace(/\./g, '').replace(',', '.') : textoQtd)
+        : null;
+      window.__associarNfeCamposEditados[seq].nQtde = Number.isFinite(qtd) ? qtd : null;
     }
 
     if (input.classList.contains('assoc-override-unid')) {
@@ -52451,7 +52459,9 @@ function renderPreviewAssociacaoPedidoNfe(preview) {
               </div>`}
             </td>
             <td style="padding:7px 8px;font-size:11px;color:${corQtd};background:${bgQtd};text-align:right;white-space:nowrap;">${
-              escapeHtml(String(qtdPedido))
+              (!isServico && divergiuQtd)
+                ? `<input type="text" class="assoc-override-qtd" data-seq="${seq}" value="${escapeHtml(fmtQtdBR(qtdPedido))}" style="width:72px;padding:2px 4px;font-size:11px;font-weight:700;color:#b91c1c;border:1px solid #fca5a5;border-radius:4px;text-align:right;background:#fff5f5;" title="Edite a quantidade do item do pedido">`
+                : escapeHtml(String(qtdPedido))
             }</td>
             <td style="padding:7px 8px;font-size:11px;color:${corUnid};background:${bgUnid};text-align:center;white-space:nowrap;">${
               (!isServico && (divergiuQtd || divergiuUnidade))
@@ -52540,7 +52550,7 @@ function renderPreviewAssociacaoPedidoNfe(preview) {
 
   previewWrap.style.display = 'block';
   habilitarDragDropAssociacaoPedidoNfe(preview);
-  previewConteudo.querySelectorAll('.assoc-override-unid, .assoc-override-valor').forEach((input) => {
+  previewConteudo.querySelectorAll('.assoc-override-qtd, .assoc-override-unid, .assoc-override-valor').forEach((input) => {
     input.addEventListener('input', snapshotEdicoesQtdUnidAssociacaoNfe);
     input.addEventListener('change', snapshotEdicoesQtdUnidAssociacaoNfe);
   });
@@ -53330,13 +53340,20 @@ async function confirmarAssociacaoPedidoNfeOmie() {
 
     const previewConteudo = document.getElementById('modalAssociarPedidoNfePreviewConteudo');
     if (previewConteudo) {
-      previewConteudo.querySelectorAll('.assoc-override-unid, .assoc-override-valor').forEach(input => {
+      previewConteudo.querySelectorAll('.assoc-override-qtd, .assoc-override-unid, .assoc-override-valor').forEach(input => {
         const seq = Number(input.dataset.seq || 0);
         if (!seq) return;
         let entry = itensOverrideMap.get(seq);
         if (!entry) {
           entry = { n_sequencia: seq };
           itensOverrideMap.set(seq, entry);
+        }
+        if (input.classList.contains('assoc-override-qtd')) {
+          const textoQtd = String(input.value || '').trim();
+          const qtd = textoQtd
+            ? Number(textoQtd.includes(',') ? textoQtd.replace(/\./g, '').replace(',', '.') : textoQtd)
+            : null;
+          entry.nQtde = Number.isFinite(qtd) ? qtd : null;
         }
         if (input.classList.contains('assoc-override-unid')) {
           entry.cUnidade = String(input.value || '').trim().toUpperCase() || null;
