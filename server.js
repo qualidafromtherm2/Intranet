@@ -31555,20 +31555,114 @@ function normalizarCfopServicoRecebimento(valor) {
   return { servico: false, cfopEntrada: null };
 }
 
+async function listarSugestoesComplementaresAssociacaoNfePedido({
+  itemReceb,
+  nCodPedAtual,
+  nCodFornecedor,
+  limite = 3
+}) {
+  const codFornecedor = Number(nCodFornecedor || 0);
+  const codPedidoAtual = Number(nCodPedAtual || 0);
+  if (!Number.isFinite(codFornecedor) || codFornecedor <= 0) return [];
+  if (!Number.isFinite(codPedidoAtual) || codPedidoAtual <= 0) return [];
+
+  const candidatosResult = await pool.query(
+    `SELECT p.n_cod_ped,
+            p.c_numero,
+            pp.n_cod_item,
+            pp.c_produto,
+            pp.c_descricao,
+            pp.n_qtde,
+            pp.n_val_tot,
+            pp.c_unidade,
+            pp.n_cod_prod
+       FROM compras.pedidos_omie p
+       JOIN compras.pedidos_omie_produtos pp
+         ON pp.n_cod_ped = p.n_cod_ped
+      WHERE p.n_cod_for = $1
+        AND p.n_cod_ped <> $2
+        AND (p.inativo IS NULL OR p.inativo = false)
+        AND COALESCE(BTRIM(p."Etapa_NF"), '') NOT IN ('60', '80')
+      ORDER BY p.updated_at DESC NULLS LAST, p.n_cod_ped DESC, pp.n_cod_item ASC`,
+    [codFornecedor, codPedidoAtual]
+  );
+
+  const itensCabec = itemReceb?.itensCabec || {};
+  const itensInfoAdic = itemReceb?.itensInfoAdic || {};
+  const codigoProdutoRec = String(
+    itensCabec?.cCodigoProduto
+    || itensCabec?.cCodProduto
+    || itensInfoAdic?.cCodIntProd
+    || itensInfoAdic?.cCodigoProduto
+    || ''
+  ).trim();
+  const nIdProdutoRec = Number(itensCabec?.nIdProduto || 0);
+
+  const candidatos = candidatosResult.rows
+    .map((itemPedido) => {
+      const score = calcularScoreAssociacaoNfePedido(itemReceb, itemPedido);
+      const codigoProdutoPedido = String(itemPedido?.c_produto || '').trim();
+      const nCodProdPedido = Number(itemPedido?.n_cod_prod || 0);
+      const matchIdProduto = Number.isFinite(nIdProdutoRec) && nIdProdutoRec > 0
+        && Number.isFinite(nCodProdPedido) && nCodProdPedido > 0
+        && nIdProdutoRec === nCodProdPedido;
+      const matchCodigoProduto = !!codigoProdutoRec && !!codigoProdutoPedido && codigoProdutoRec === codigoProdutoPedido;
+
+      return {
+        ...itemPedido,
+        score_match: score,
+        criterio_match: matchIdProduto
+          ? 'id_produto_pedido_complementar'
+          : matchCodigoProduto
+            ? 'codigo_produto_pedido_complementar'
+            : 'descricao_similar_pedido_complementar',
+        match_id_produto: matchIdProduto,
+        match_codigo_produto: matchCodigoProduto
+      };
+    })
+    .filter((itemPedido) => (
+      itemPedido.match_id_produto
+      || itemPedido.match_codigo_produto
+      || itemPedido.score_match >= 70
+    ))
+    .sort((a, b) => {
+      if (b.score_match !== a.score_match) return b.score_match - a.score_match;
+      const pedidoA = String(a?.c_numero || '');
+      const pedidoB = String(b?.c_numero || '');
+      if (pedidoA !== pedidoB) return pedidoA.localeCompare(pedidoB, 'pt-BR', { numeric: true });
+      return Number(a?.n_cod_item || 0) - Number(b?.n_cod_item || 0);
+    })
+    .slice(0, Math.max(1, Number(limite) || 3))
+    .map((itemPedido) => ({
+      pedido_n_cod_ped: Number(itemPedido?.n_cod_ped || 0) || null,
+      pedido_numero: String(itemPedido?.c_numero || '').trim() || null,
+      pedido_n_cod_item: Number(itemPedido?.n_cod_item || 0) || null,
+      pedido_codigo_produto: String(itemPedido?.c_produto || '').trim() || null,
+      pedido_descricao_produto: String(itemPedido?.c_descricao || '').trim() || null,
+      pedido_qtde: itemPedido?.n_qtde ?? null,
+      pedido_unidade: String(itemPedido?.c_unidade || '').trim() || null,
+      pedido_valor_total: itemPedido?.n_val_tot ?? null,
+      criterio_match: itemPedido?.criterio_match || null,
+      score_match: Number(itemPedido?.score_match || 0) || 0
+    }));
+
+  return candidatos;
+}
+
 async function montarPlanoAssociacaoNfePedido(numeroNfe, numeroPedido, chaveNfe = null, nCodPedInformado = null) {
   const nCodPedNumerico = Number(nCodPedInformado);
   const usarIdDireto = Number.isFinite(nCodPedNumerico) && nCodPedNumerico > 0;
 
   const pedidoResult = usarIdDireto
     ? await pool.query(
-      `SELECT n_cod_ped, c_numero
+      `SELECT n_cod_ped, c_numero, n_cod_for
          FROM compras.pedidos_omie
         WHERE n_cod_ped = $1
         LIMIT 1`,
       [nCodPedNumerico]
     )
     : await pool.query(
-      `SELECT n_cod_ped, c_numero
+      `SELECT n_cod_ped, c_numero, n_cod_for
          FROM compras.pedidos_omie
         WHERE TRIM(COALESCE(c_numero, '')) = TRIM($1)
            OR n_cod_ped::text = TRIM($1)
@@ -31586,6 +31680,7 @@ async function montarPlanoAssociacaoNfePedido(numeroNfe, numeroPedido, chaveNfe 
   if (!Number.isFinite(nCodPed) || nCodPed <= 0) {
     throw new Error('Pedido encontrado com n_cod_ped inválido');
   }
+  const nCodFornecedor = Number(pedido?.n_cod_for || 0) || null;
 
   const recebimento = await localizarRecebimentoOmiePorNumeroNfe(numeroNfe, chaveNfe);
   if (!recebimento?.cabec?.nIdReceb) {
@@ -31658,8 +31753,6 @@ async function montarPlanoAssociacaoNfePedido(numeroNfe, numeroPedido, chaveNfe 
 
     return { item: melhorItem, score: melhorScore };
   };
-
-  const previewItens = [];
 
   // Sorted-greedy: pré-calcula o melhor score possível de cada item da NF e processa
   // em ordem de confiança decrescente, evitando que itens com match fraco "roubem"
@@ -31771,6 +31864,7 @@ async function montarPlanoAssociacaoNfePedido(numeroNfe, numeroPedido, chaveNfe 
     }
 
     resultadosPorIdx[idx] = {
+      itemReceb: item,
       itensIde,
       previewItem: {
         n_sequencia: itensIde.nSequencia,
@@ -31783,6 +31877,8 @@ async function montarPlanoAssociacaoNfePedido(numeroNfe, numeroPedido, chaveNfe 
         item_servico: servicoCfop.servico,
         servico_cfop_entrada: servicoCfop.cfopEntrada,
         pedido_item_encontrado: !!itemPedidoVinculo || servicoCfop.servico,
+        pedido_n_cod_ped: !servicoCfop.servico && itemPedidoVinculo ? nCodPed : null,
+        pedido_numero: !servicoCfop.servico && itemPedidoVinculo ? (String(pedido?.c_numero || '').trim() || null) : null,
         pedido_n_cod_item: Number.isFinite(nCodItem) && nCodItem > 0 ? nCodItem : null,
         pedido_codigo_produto: String(itemPedidoVinculo?.c_produto || '').trim() || null,
         pedido_descricao_produto: String(itemPedidoVinculo?.c_descricao || '').trim() || null,
@@ -31790,18 +31886,33 @@ async function montarPlanoAssociacaoNfePedido(numeroNfe, numeroPedido, chaveNfe 
         pedido_unidade: String(itemPedidoVinculo?.c_unidade || '').trim() || null,
         pedido_valor_total: itemPedidoVinculo?.n_val_tot ?? null,
         criterio_match: criterioMatch,
-        score_match: scoreMatch
+        score_match: scoreMatch,
+        pedido_sugestoes: []
       }
     };
   }
 
+  await Promise.all(resultadosPorIdx.map(async (resultado) => {
+    const previewItem = resultado?.previewItem;
+    if (!previewItem || previewItem.pedido_item_encontrado || previewItem.item_servico) return;
+
+    previewItem.pedido_sugestoes = await listarSugestoesComplementaresAssociacaoNfePedido({
+      itemReceb: resultado.itemReceb,
+      nCodPedAtual: nCodPed,
+      nCodFornecedor,
+      limite: 3
+    });
+  }));
+
+  const previewItens = resultadosPorIdx.map((r) => r.previewItem);
   // Reconstrói arrays na ordem original da NF-e
   const itensRecebimentoEditar = resultadosPorIdx.map((r) => ({ itensIde: r.itensIde }));
-  for (const r of resultadosPorIdx) previewItens.push(r.previewItem);
 
   const itensPedidoInformativos = itensPedido
     .filter(itemPedidoDisponivel)
     .map((itemPedido) => ({
+      pedido_n_cod_ped: nCodPed,
+      pedido_numero: String(pedido?.c_numero || '').trim() || null,
       pedido_n_cod_item: Number(itemPedido?.n_cod_item || 0) || null,
       pedido_codigo_produto: String(itemPedido?.c_produto || '').trim() || null,
       pedido_descricao_produto: String(itemPedido?.c_descricao || '').trim() || null,
@@ -31824,6 +31935,7 @@ async function montarPlanoAssociacaoNfePedido(numeroNfe, numeroPedido, chaveNfe 
     recebimento_omie: recebimento,
     itens_preview: previewItens,
     itens_pedido_informativos: itensPedidoInformativos,
+    n_cod_fornecedor: nCodFornecedor,
     itensRecebimentoEditar
   };
 }
@@ -31956,7 +32068,9 @@ app.post('/api/compras/pedidos-omie/nfe-associar-pedido/preview', express.json()
         categoria: categoriaInfo,
         fornecedor_nome: _fornecedorNome,
         valor_total_nfe: Number.isFinite(_valorTotalNfe) && _valorTotalNfe > 0 ? +_valorTotalNfe.toFixed(2) : null,
-        itens: plano.itens_preview
+        itens: plano.itens_preview,
+        itens_preview: plano.itens_preview,
+        itens_pedido_informativos: plano.itens_pedido_informativos || []
       }
     });
   } catch (err) {
@@ -32093,6 +32207,10 @@ app.post('/api/compras/pedidos-omie/nfe-associar-pedido', express.json(), async 
       if (Number.isFinite(codItemOverride) && codItemOverride > 0) {
         itemEditar.itensIde.nIdItPedidoExistente = codItemOverride;
       }
+      const codPedOverride = Number(override?.nIdPedidoExistente || 0);
+      if (Number.isFinite(codPedOverride) && codPedOverride > 0) {
+        itemEditar.itensIde.nIdPedidoExistente = codPedOverride;
+      }
       const idProdutoServico = Number(override?.nIdProdutoServico || 0);
       if (Number.isFinite(idProdutoServico) && idProdutoServico > 0) {
         itemEditar.itensIde.cAcao = 'ASSOCIAR-PRODUTO';
@@ -32107,6 +32225,66 @@ app.post('/api/compras/pedidos-omie/nfe-associar-pedido', express.json(), async 
         delete itensIde.nIdPedidoExistente;
         delete itensIde.nIdItPedidoExistente;
       }
+    });
+
+    const codItensPedidoAssociados = itensParaEnviar
+      .map((itemEditar) => Number(itemEditar?.itensIde?.nIdItPedidoExistente || 0))
+      .filter((codItem) => Number.isFinite(codItem) && codItem > 0);
+    const itemMetaPorCodItem = {};
+    if (codItensPedidoAssociados.length > 0) {
+      const itensPedidosMeta = await pool.query(
+        `SELECT n_cod_item, n_cod_ped, c_unidade
+           FROM compras.pedidos_omie_produtos
+          WHERE n_cod_item = ANY($1::bigint[])`,
+        [[...new Set(codItensPedidoAssociados)]]
+      );
+
+      itensPedidosMeta.rows.forEach((row) => {
+        const codItem = Number(row?.n_cod_item || 0);
+        if (!codItem) return;
+        itemMetaPorCodItem[String(codItem)] = {
+          n_cod_ped: Number(row?.n_cod_ped || 0) || null,
+          c_unidade: String(row?.c_unidade || '').trim() || null
+        };
+      });
+    }
+
+    itensParaEnviar.forEach((itemEditar) => {
+      const itensIde = itemEditar?.itensIde || {};
+      const acao = String(itensIde?.cAcao || '').trim().toUpperCase();
+      if (acao !== 'ASSOCIAR-PEDIDO') return;
+      const codItem = Number(itensIde?.nIdItPedidoExistente || 0);
+      if (!Number.isFinite(codItem) || codItem <= 0) return;
+      const metaItem = itemMetaPorCodItem[String(codItem)] || null;
+      const codPedMeta = Number(metaItem?.n_cod_ped || 0);
+      if (codPedMeta > 0) {
+        itensIde.nIdPedidoExistente = codPedMeta;
+      }
+    });
+
+    const pedidosAssociadosIds = [
+      ...new Set(
+        itensParaEnviar
+          .map((itemEditar) => Number(itemEditar?.itensIde?.nIdPedidoExistente || 0))
+          .filter((codPed) => Number.isFinite(codPed) && codPed > 0)
+      )
+    ];
+    const pedidosAssociadosInfo = pedidosAssociadosIds.length > 0
+      ? (await pool.query(
+        `SELECT n_cod_ped, c_numero
+           FROM compras.pedidos_omie
+          WHERE n_cod_ped = ANY($1::bigint[])`,
+        [pedidosAssociadosIds]
+      )).rows
+      : [];
+    const pedidosAssociadosInfoPorId = {};
+    pedidosAssociadosInfo.forEach((pedidoInfo) => {
+      const codPed = Number(pedidoInfo?.n_cod_ped || 0);
+      if (!codPed) return;
+      pedidosAssociadosInfoPorId[String(codPed)] = {
+        n_cod_ped: codPed,
+        c_numero: String(pedidoInfo?.c_numero || '').trim() || null
+      };
     });
 
     // Monta parcelas, infoAdicionais e estoque para TODAS as associações
@@ -32192,14 +32370,6 @@ app.post('/api/compras/pedidos-omie/nfe-associar-pedido', express.json(), async 
             }
           }
         }
-
-        // Mapa de unidade por nCodItem do pedido
-        const unidadePorCodItem = {};
-        (pedidoConsulta?.produtos_consulta || []).forEach(p => {
-          if (p.nCodItem) {
-            unidadePorCodItem[String(p.nCodItem)] = p.cUnidade;
-          }
-        });
 
         const parcelasLista = Array.isArray(recebAtual?.parcelas?.parcelasLista)
           ? recebAtual.parcelas.parcelasLista : [];
@@ -32323,7 +32493,7 @@ app.post('/api/compras/pedidos-omie/nfe-associar-pedido', express.json(), async 
         itensEditarEstoque = plano.itensRecebimentoEditar.map(itemEditar => {
           const nSeq = itemEditar.itensIde?.nSequencia;
           const nIdItPed = itemEditar.itensIde?.nIdItPedidoExistente;
-          const cUnidadePedido = nIdItPed ? unidadePorCodItem[String(nIdItPed)] : null;
+          const cUnidadePedido = nIdItPed ? itemMetaPorCodItem[String(nIdItPed)]?.c_unidade : null;
 
           // Override do user tem prioridade sobre o valor do pedido
           const override = overrideMap.get(nSeq);
@@ -32497,9 +32667,20 @@ app.post('/api/compras/pedidos-omie/nfe-associar-pedido', express.json(), async 
     }
 
     const pedidosVinculados = extrairPedidosVinculadosDoRecebimento(recebimentoAposAlteracao);
-    const vinculoConfirmado = pedidosVinculados.includes(String(plano.n_cod_ped))
-      || pedidosVinculados.includes(String(plano.c_numero_pedido || '').trim())
-      || pedidosVinculados.includes(String(numeroPedido).trim());
+    const pedidosEsperadosConfirmacao = pedidosAssociadosIds.length > 0
+      ? pedidosAssociadosIds.flatMap((codPed) => {
+        const infoPedido = pedidosAssociadosInfoPorId[String(codPed)] || {};
+        return [
+          String(codPed),
+          String(infoPedido?.c_numero || '').trim()
+        ].filter(Boolean);
+      })
+      : [
+        String(plano.n_cod_ped),
+        String(plano.c_numero_pedido || '').trim(),
+        String(numeroPedido).trim()
+      ].filter(Boolean);
+    const vinculoConfirmado = pedidosEsperadosConfirmacao.some((pedidoEsperado) => pedidosVinculados.includes(pedidoEsperado));
 
     const numeroNfeVinculada = String(
       recebimentoAposAlteracao?.cabec?.cNumeroNFe ||
@@ -32518,67 +32699,83 @@ app.post('/api/compras/pedidos-omie/nfe-associar-pedido', express.json(), async 
         ADD COLUMN IF NOT EXISTS "NFe vinculada" TEXT
       `);
 
-      try {
-        const { rows: resumoPedidoRows } = await pool.query(
-          `WITH pedido AS (
-             SELECT p.n_cod_ped,
-                    COALESCE(
-                      NULLIF(p.n_valor, 0),
-                      (
-                        SELECT COALESCE(SUM(COALESCE(pp.n_val_tot, 0)), 0)
-                        FROM compras.pedidos_omie_produtos pp
-                        WHERE pp.n_cod_ped = p.n_cod_ped
-                      ),
-                      0
-                    )::numeric AS valor_total
-               FROM compras.pedidos_omie p
-              WHERE p.n_cod_ped = $1
-              LIMIT 1
-           ),
-           recebido AS (
-             SELECT COALESCE(SUM(COALESCE(i.v_total_item, 0)), 0)::numeric AS valor_recebido
-               FROM logistica.recebimentos_nfe_itens i
-               JOIN logistica.recebimentos_nfe_omie r
-                 ON r.n_id_receb = i.n_id_receb
-              WHERE i.n_id_pedido = $1
-                AND COALESCE(r.c_cancelada, 'N') <> 'S'
-           )
-           SELECT COALESCE(p.valor_total, 0) AS valor_total,
-                  COALESCE(rc.valor_recebido, 0) AS valor_recebido
-             FROM pedido p
-             CROSS JOIN recebido rc`,
-          [Number(plano.n_cod_ped)]
-        );
+      for (const codPedAssociado of (pedidosAssociadosIds.length > 0 ? pedidosAssociadosIds : [plano.n_cod_ped])) {
+        try {
+          const { rows: resumoPedidoRows } = await pool.query(
+            `WITH pedido AS (
+               SELECT p.n_cod_ped,
+                      COALESCE(
+                        NULLIF(p.n_valor, 0),
+                        (
+                          SELECT COALESCE(SUM(COALESCE(pp.n_val_tot, 0)), 0)
+                          FROM compras.pedidos_omie_produtos pp
+                          WHERE pp.n_cod_ped = p.n_cod_ped
+                        ),
+                        0
+                      )::numeric AS valor_total
+                 FROM compras.pedidos_omie p
+                WHERE p.n_cod_ped = $1
+                LIMIT 1
+             ),
+             recebido AS (
+               SELECT COALESCE(SUM(COALESCE(i.v_total_item, 0)), 0)::numeric AS valor_recebido
+                 FROM logistica.recebimentos_nfe_itens i
+                 JOIN logistica.recebimentos_nfe_omie r
+                   ON r.n_id_receb = i.n_id_receb
+                WHERE i.n_id_pedido = $1
+                  AND COALESCE(r.c_cancelada, 'N') <> 'S'
+             )
+             SELECT COALESCE(p.valor_total, 0) AS valor_total,
+                    COALESCE(rc.valor_recebido, 0) AS valor_recebido
+               FROM pedido p
+               CROSS JOIN recebido rc`,
+            [Number(codPedAssociado)]
+          );
 
-        if (resumoPedidoRows.length > 0) {
-          valorTotalPedido = Number(resumoPedidoRows[0].valor_total || 0);
-          valorRecebidoPedido = Number(resumoPedidoRows[0].valor_recebido || 0);
-          const margem = 0.01;
+          if (Number(codPedAssociado) === Number(plano.n_cod_ped) && resumoPedidoRows.length > 0) {
+            valorTotalPedido = Number(resumoPedidoRows[0].valor_total || 0);
+            valorRecebidoPedido = Number(resumoPedidoRows[0].valor_recebido || 0);
+          }
 
-          if (valorTotalPedido > 0 && (valorRecebidoPedido + margem) >= valorTotalPedido) {
-            etapaPedidoNf = '60';
+          if (resumoPedidoRows.length > 0) {
+            const valorTotalPedidoAtual = Number(resumoPedidoRows[0].valor_total || 0);
+            const valorRecebidoPedidoAtual = Number(resumoPedidoRows[0].valor_recebido || 0);
+            const margem = 0.01;
+            const etapaPedidoAtual = valorTotalPedidoAtual > 0 && (valorRecebidoPedidoAtual + margem) >= valorTotalPedidoAtual
+              ? '60'
+              : '50';
+
+            if (Number(codPedAssociado) === Number(plano.n_cod_ped)) {
+              etapaPedidoNf = etapaPedidoAtual;
+            }
+
+            console.log(
+              `[Compras/NFeAssociarPedido] Etapa_NF calculada para pedido ${codPedAssociado}: ${etapaPedidoAtual} (recebido=${valorRecebidoPedidoAtual} total=${valorTotalPedidoAtual})`
+            );
+
+            await pool.query(
+              `UPDATE compras.pedidos_omie
+                  SET "NFe vinculada" = $1,
+                      "Etapa_NF" = $2
+                WHERE n_cod_ped = $3`,
+              [numeroNfeVinculada, etapaPedidoAtual, codPedAssociado]
+            );
           } else {
+            await pool.query(
+              `UPDATE compras.pedidos_omie
+                  SET "NFe vinculada" = $1,
+                      "Etapa_NF" = '50'
+                WHERE n_cod_ped = $2`,
+              [numeroNfeVinculada, codPedAssociado]
+            );
+          }
+        } catch (errEtapaPedido) {
+          if (Number(codPedAssociado) === Number(plano.n_cod_ped)) {
             etapaPedidoNf = '50';
           }
-        } else {
-          etapaPedidoNf = '50';
+          console.warn(`[Compras/NFeAssociarPedido] Falha ao calcular etapa parcial/total do pedido ${codPedAssociado}:`, errEtapaPedido?.message);
         }
-
-        console.log(
-          `[Compras/NFeAssociarPedido] Etapa_NF calculada para pedido ${plano.n_cod_ped}: ${etapaPedidoNf} (recebido=${valorRecebidoPedido} total=${valorTotalPedido})`
-        );
-      } catch (errEtapaPedido) {
-        etapaPedidoNf = '50';
-        console.warn('[Compras/NFeAssociarPedido] Falha ao calcular etapa parcial/total do pedido:', errEtapaPedido?.message);
       }
-
-      await pool.query(
-        `UPDATE compras.pedidos_omie
-            SET "NFe vinculada" = $1,
-                "Etapa_NF" = $2
-          WHERE n_cod_ped = $3`,
-        [numeroNfeVinculada, etapaPedidoNf, plano.n_cod_ped]
-      );
     }
 
     if (alertaItemAssociacao && !vinculoConfirmado) {
@@ -32597,6 +32794,10 @@ app.post('/api/compras/pedidos-omie/nfe-associar-pedido', express.json(), async 
         c_numero_nfe: recebimentoAposAlteracao?.cabec?.cNumeroNFe || plano.numero_nfe || null,
         n_cod_ped: plano.n_cod_ped,
         c_numero_pedido: plano.c_numero_pedido || null,
+        pedidos_associados: pedidosAssociadosIds.map((codPed) => ({
+          n_cod_ped: codPed,
+          c_numero_pedido: pedidosAssociadosInfoPorId[String(codPed)]?.c_numero || null
+        })),
         nfe_vinculada: numeroNfeVinculada || null,
         etapa_nf_omie: etapaFinalRecebimento || null,
         etapa_nf_pedido: etapaPedidoNf || null,
