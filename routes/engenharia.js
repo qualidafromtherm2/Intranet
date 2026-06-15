@@ -2,7 +2,7 @@
 const express = require('express');
 const https   = require('https');
 const router = express.Router();
-const { createClient } = require('@supabase/supabase-js');
+const supabaseStorage = require('../utils/supabase');
 
 const IAPP_BASE = 'https://api.iniciativaaplicativos.com.br/api';
 
@@ -53,10 +53,7 @@ function iappGet(path, params = {}) {
 }
 
 function getSupabase() {
-  return createClient(
-    process.env.SUPABASE_URL,
-    process.env.SUPABASE_SERVICE_ROLE
-  );
+  return supabaseStorage;
 }
 const ENGENHARIA_BUCKET = 'Engenharia';
 const PASTAS = ['Documento', 'Fotos', 'Videos'];

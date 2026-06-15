@@ -2,6 +2,8 @@
 // Carrega as variáveis de ambiente definidas em .env
 // no topo do intranet/server.js
 require('dotenv').config({ path: require('path').resolve(__dirname, '.env'), override: true });
+// Storage de arquivos (R2 ou Supabase) — loga backend na subida do processo
+require('./utils/supabase');
 const OMIE_WEBHOOK_TOKEN = process.env.OMIE_WEBHOOK_TOKEN || null; // se NULL, não exige token
 // Em server.js (topo do arquivo)
 // chave: id da etiqueta (p.ex. número da OP), valor: { fileName, printed: boolean }
@@ -11959,22 +11961,12 @@ app.post('/api/upload/bom', upload.single('bom'), async (req, res) => {
   }
 });
 
-// Upload de arquivos para Supabase Storage (compras e outros anexos)
+// Upload de arquivos para storage (R2 ou Supabase — rota legada /api/upload/supabase)
 app.post('/api/upload/supabase', upload.single('file'), async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ error: 'Nenhum arquivo enviado' });
-    
-    const { createClient } = require('@supabase/supabase-js');
-    // Usa as credenciais corretas do .env (service_role para upload no backend)
-    const supabaseUrl = process.env.SUPABASE_URL;
-    const supabaseKey = process.env.SUPABASE_SERVICE_ROLE;
-    
-    if (!supabaseUrl || !supabaseKey) {
-      console.error('[Supabase Upload] Credenciais não configuradas no .env');
-      return res.status(500).json({ error: 'Supabase não configurado' });
-    }
-    
-    const supabase = createClient(supabaseUrl, supabaseKey);
+
+    const storageClient = require('./utils/supabase');
     
     // Permite especificar o bucket via body; padrão: 'compras-anexos'
     const ALLOWED_BUCKETS = ['compras-anexos', 'Funcionarios'];
@@ -11984,7 +11976,7 @@ app.post('/api/upload/supabase', upload.single('file'), async (req, res) => {
     
     // Verifica se o bucket existe, se não existir, cria
     try {
-      const { data: buckets } = await supabase.storage.listBuckets();
+      const { data: buckets } = await storageClient.storage.listBuckets();
       const bucketExists = buckets?.some(b => b.name === bucketName);
       
       const allowedMimes = [
@@ -11998,7 +11990,7 @@ app.post('/api/upload/supabase', upload.single('file'), async (req, res) => {
       ];
       if (!bucketExists) {
         console.log(`[Supabase] Criando bucket '${bucketName}'...`);
-        const { error: createError } = await supabase.storage.createBucket(bucketName, {
+        const { error: createError } = await storageClient.storage.createBucket(bucketName, {
           public: true,
           fileSizeLimit: 10485760, // 10MB
           allowedMimeTypes: allowedMimes
@@ -12010,14 +12002,14 @@ app.post('/api/upload/supabase', upload.single('file'), async (req, res) => {
         }
       } else {
         // Atualiza tipos permitidos para incluir formatos Office adicionados posteriormente
-        await supabase.storage.updateBucket(bucketName, { allowedMimeTypes: allowedMimes }).catch(() => {});
+        await storageClient.storage.updateBucket(bucketName, { allowedMimeTypes: allowedMimes }).catch(() => {});
       }
     } catch (bucketError) {
       console.warn('[Supabase] Erro ao verificar/criar bucket:', bucketError.message);
       // Continua com o upload de qualquer forma
     }
     
-    const { data, error } = await supabase.storage
+    const { data, error } = await storageClient.storage
       .from(bucketName)
       .upload(filePath, req.file.buffer, {
         contentType: req.file.mimetype,
@@ -12025,12 +12017,11 @@ app.post('/api/upload/supabase', upload.single('file'), async (req, res) => {
       });
     
     if (error) {
-      console.error('[Supabase Upload Error]', error);
+      console.error('[Storage Upload Error]', error);
       return res.status(500).json({ error: error.message });
     }
     
-    // Gera URL pública
-    const { data: publicData } = supabase.storage
+    const { data: publicData } = storageClient.storage
       .from(bucketName)
       .getPublicUrl(filePath);
     
