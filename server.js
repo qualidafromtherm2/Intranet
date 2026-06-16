@@ -15869,7 +15869,8 @@ async function initSolicitacaoProdutoSchema() {
           cod_omie       TEXT,
           criado_em      TIMESTAMPTZ NOT NULL DEFAULT now(),
           retirada_por   TEXT,
-          comentario     TEXT
+          comentario     TEXT,
+          urgente        BOOLEAN DEFAULT FALSE
         )
       `);
       
@@ -16008,17 +16009,35 @@ async function ensureSolicitacaoProdutoQtyColumns() {
   await pool.query(`ALTER TABLE solicitacao_produto.itens_solicitados ADD COLUMN IF NOT EXISTS usuario_separando TEXT`);
   await pool.query(`ALTER TABLE solicitacao_produto.solicitacoes_separacao ADD COLUMN IF NOT EXISTS urgente BOOLEAN DEFAULT FALSE`);
   await pool.query(`ALTER TABLE solicitacao_produto.solicitacoes_separacao ADD COLUMN IF NOT EXISTS n_solic TEXT`);
+  await pool.query(`ALTER TABLE logistica.carrinho ADD COLUMN IF NOT EXISTS data_prevista DATE`);
+  await pool.query(`ALTER TABLE logistica.carrinho ADD COLUMN IF NOT EXISTS horario TEXT`);
+  await pool.query(`ALTER TABLE logistica.carrinho ADD COLUMN IF NOT EXISTS cod_omie TEXT`);
+  await pool.query(`ALTER TABLE logistica.carrinho ADD COLUMN IF NOT EXISTS retirada_por TEXT`);
+  await pool.query(`ALTER TABLE logistica.carrinho ADD COLUMN IF NOT EXISTS comentario TEXT`);
   await pool.query(`ALTER TABLE logistica.carrinho ADD COLUMN IF NOT EXISTS urgente BOOLEAN DEFAULT FALSE`);
 }
 
 // Inicializa schema na primeira requisição
 let schemaMigrated = false;
+let schemaColumnsEnsured = false;
+let schemaMigrationPromise = null;
 async function ensureSchemaMigrated() {
-  if (!schemaMigrated) {
-    await initSolicitacaoProdutoSchema();
-    schemaMigrated = true;
+  if (schemaMigrated && schemaColumnsEnsured) return;
+  if (!schemaMigrationPromise) {
+    schemaMigrationPromise = (async () => {
+      if (!schemaMigrated) {
+        await initSolicitacaoProdutoSchema();
+        schemaMigrated = true;
+      }
+      if (!schemaColumnsEnsured) {
+        await ensureSolicitacaoProdutoQtyColumns();
+        schemaColumnsEnsured = true;
+      }
+    })().finally(() => {
+      schemaMigrationPromise = null;
+    });
   }
-  await ensureSolicitacaoProdutoQtyColumns();
+  await schemaMigrationPromise;
 }
 
 async function assertUsuarioSeparandoPodeAgir(client, solicIds, req) {
@@ -16072,37 +16091,6 @@ app.post('/api/logistica/separacao', express.json(), async (req, res) => {
     if (unidadeNorm === 'UN') {
       quantidadeNorm = Math.max(1, Math.round(quantidadeNorm));
     }
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS logistica.carrinho (
-        id             BIGSERIAL PRIMARY KEY,
-        id_user        TEXT NOT NULL,
-        nome_user      TEXT NOT NULL,
-        codigo_produto TEXT NOT NULL,
-        descricao      TEXT,
-        unidade        TEXT NOT NULL DEFAULT 'UN',
-        quantidade     NUMERIC(18,4) NOT NULL,
-        data_prevista  DATE,
-        horario        TEXT,
-        cod_omie       TEXT,
-        criado_em      TIMESTAMPTZ NOT NULL DEFAULT now()
-      )
-    `);
-    // Garante colunas em tabela já existente
-    await pool.query(`ALTER TABLE logistica.carrinho ADD COLUMN IF NOT EXISTS data_prevista DATE`);
-    await pool.query(`ALTER TABLE logistica.carrinho ADD COLUMN IF NOT EXISTS horario TEXT`);
-    await pool.query(`ALTER TABLE logistica.carrinho ADD COLUMN IF NOT EXISTS cod_omie TEXT`);
-    await pool.query(`ALTER TABLE logistica.carrinho ADD COLUMN IF NOT EXISTS retirada_por TEXT`);
-    await pool.query(`ALTER TABLE logistica.carrinho ADD COLUMN IF NOT EXISTS comentario TEXT`);
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS solicitacao_produto.itens_solicitados (
-        id       BIGSERIAL PRIMARY KEY,
-        id_carr  BIGINT,
-        n_solic  TEXT,
-        status   TEXT,
-        observacao TEXT
-      )
-    `);
-    await pool.query(`ALTER TABLE solicitacao_produto.itens_solicitados ADD COLUMN IF NOT EXISTS observacao TEXT`);
     // Busca codigo_produto (Omie) na tabela de produtos
     const omieRes = await pool.query(
       `SELECT codigo_produto FROM public.produtos_omie WHERE codigo = $1 LIMIT 1`,
@@ -17412,12 +17400,19 @@ app.get('/api/logistica/produtos/buscar', async (req, res) => {
 // GET /api/logistica/carrinho - Retorna itens do carrinho do usuário atual
 app.get('/api/logistica/carrinho', async (req, res) => {
   try {
+    await ensureSchemaMigrated();
     const id_user = req.session?.user?.id;
     if (!id_user) return res.status(401).json({ ok: false, error: 'Não autenticado.' });
-    await pool.query(`ALTER TABLE logistica.carrinho ADD COLUMN IF NOT EXISTS comentario TEXT`);
-    await pool.query(`ALTER TABLE logistica.carrinho ADD COLUMN IF NOT EXISTS urgente BOOLEAN DEFAULT FALSE`);
     const { rows } = await pool.query(
-      `SELECT id, codigo_produto, descricao, unidade, quantidade, comentario, COALESCE(urgente, false) AS urgente, criado_em
+      `SELECT
+          c.id,
+          c.codigo_produto,
+          c.descricao,
+          c.unidade,
+          c.quantidade,
+          c.comentario,
+          COALESCE(c.urgente, false) AS urgente,
+          c.criado_em
          FROM logistica.carrinho c
         WHERE c.id_user = $1
           AND NOT EXISTS (
@@ -17436,13 +17431,11 @@ app.get('/api/logistica/carrinho', async (req, res) => {
 // PATCH /api/logistica/carrinho/:id/comentario - Atualiza comentário do item no carrinho
 app.patch('/api/logistica/carrinho/:id/comentario', express.json(), async (req, res) => {
   try {
+    await ensureSchemaMigrated();
     const id_user = req.session?.user?.id;
     if (!id_user) return res.status(401).json({ ok: false, error: 'Não autenticado.' });
     const itemId = parseInt(req.params.id, 10);
     if (!itemId) return res.status(400).json({ ok: false, error: 'ID inválido.' });
-
-    await pool.query(`ALTER TABLE logistica.carrinho ADD COLUMN IF NOT EXISTS comentario TEXT`);
-
     const comentario = String(req.body?.comentario || '').trim() || null;
     const { rowCount } = await pool.query(
       `UPDATE logistica.carrinho
