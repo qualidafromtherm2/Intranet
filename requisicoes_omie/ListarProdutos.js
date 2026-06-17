@@ -70,7 +70,7 @@ function buildListaUrl({ page=1, limit=500, q='', tipoitem='', inativo='N' } = {
 
 async function fetchLista(params) {
   const url  = buildListaUrl(params);
-  const resp = await fetch(url, { cache: 'no-store' });
+  const resp = await fetch(url, { cache: 'no-store', credentials: 'include' });
   if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
   return resp.json();
 }
