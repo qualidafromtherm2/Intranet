@@ -20195,14 +20195,6 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // Ajuste approve-all button
   const ajusteApproveAllBtn = document.getElementById('solicitacoesAjusteApproveAll');
-  const omieBatchStopRegexes = [
-    /api bloqueada por consumo indevido/i,
-    /consumo redundante detectado/i,
-    /nenhum produto foi localizado/i,
-    /produto.+n.o encontrado/i,
-    /valor unit.rio.+deve ser maior que zero/i
-  ];
-  const shouldStopOmieApprovalBatch = (mensagem) => omieBatchStopRegexes.some((regex) => regex.test(String(mensagem || '')));
   const waitNextOmieBatchItem = (ms = 900) => new Promise(resolve => setTimeout(resolve, ms));
 
   if (ajusteApproveAllBtn && !ajusteApproveAllBtn.__ajusteBound) {
@@ -20219,38 +20211,29 @@ document.addEventListener('DOMContentLoaded', async () => {
       ajusteApproveAllBtn.disabled = true;
       const originalLabel = ajusteApproveAllBtn.textContent;
       const erros = [];
-      let loteInterrompido = false;
-      let aprovados = 0;
+      let processados = 0;
       for (const a of pendentes) {
-        aprovados++;
-        ajusteApproveAllBtn.textContent = `Aprovando ${aprovados}/${pendentes.length}…`;
+        processados++;
+        ajusteApproveAllBtn.textContent = `Aprovando ${processados}/${pendentes.length}…`;
         try {
           const resp = await fetch(`/api/ajustes/${a.id}/aprovar`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ aprovadoPor: usuario }) });
           const json = await resp.json().catch(() => ({}));
           if (!resp.ok || !json?.ok) {
-            const mensagem = `ID ${a.id}: ${json?.error || 'Erro'}`;
-            erros.push(mensagem);
-            if (shouldStopOmieApprovalBatch(json?.error || mensagem)) {
-              loteInterrompido = true;
-              break;
-            }
+            erros.push(`ID ${a.id}: ${json?.error || 'Erro'}`);
           }
         } catch (err) {
-          const mensagem = `ID ${a.id}: ${err?.message || 'Erro de rede'}`;
-          erros.push(mensagem);
-          if (shouldStopOmieApprovalBatch(err?.message || mensagem)) {
-            loteInterrompido = true;
-            break;
-          }
+          erros.push(`ID ${a.id}: ${err?.message || 'Erro de rede'}`);
         }
-        if (aprovados < pendentes.length) {
+        if (processados < pendentes.length) {
           await waitNextOmieBatchItem();
         }
       }
       ajusteApproveAllBtn.textContent = originalLabel;
       ajusteApproveAllBtn.disabled = false;
-      if (loteInterrompido) alert(`Processamento interrompido para evitar novo bloqueio da Omie.\n\nÚltimo erro:\n${erros[erros.length - 1] || 'Erro desconhecido'}`);
-      else if (erros.length) alert(`Concluído com erros:\n${erros.join('\n')}`);
+      if (erros.length) {
+        const sucessos = pendentes.length - erros.length;
+        alert(`Processamento concluído.\nSucesso(s): ${sucessos}\nErro(s): ${erros.length}\n\n${erros.join('\n')}`);
+      }
       else alert('Todos os ajustes pendentes foram executados com sucesso!');
       await carregarSolicitacoesAjustes(true);
     });
@@ -20279,11 +20262,10 @@ document.addEventListener('DOMContentLoaded', async () => {
       transferApproveAllBtn.disabled = true;
       const originalLabel = transferApproveAllBtn.textContent;
       const erros = [];
-      let loteInterrompido = false;
-      let aprovados = 0;
+      let processados = 0;
       for (const t of pendentes) {
-        aprovados++;
-        transferApproveAllBtn.textContent = `Aprovando ${aprovados}/${pendentes.length}…`;
+        processados++;
+        transferApproveAllBtn.textContent = `Aprovando ${processados}/${pendentes.length}…`;
         try {
           const resp = await fetch(`/api/transferencias/${t.id}/aprovar`, {
             method: 'PATCH',
@@ -20292,29 +20274,21 @@ document.addEventListener('DOMContentLoaded', async () => {
           });
           const json = await resp.json().catch(() => ({}));
           if (!resp.ok || !json?.ok) {
-            const mensagem = `ID ${t.id}: ${json?.error || 'Erro'}`;
-            erros.push(mensagem);
-            if (shouldStopOmieApprovalBatch(json?.error || mensagem)) {
-              loteInterrompido = true;
-              break;
-            }
+            erros.push(`ID ${t.id}: ${json?.error || 'Erro'}`);
           }
         } catch (err) {
-          const mensagem = `ID ${t.id}: ${err?.message || 'Erro de rede'}`;
-          erros.push(mensagem);
-          if (shouldStopOmieApprovalBatch(err?.message || mensagem)) {
-            loteInterrompido = true;
-            break;
-          }
+          erros.push(`ID ${t.id}: ${err?.message || 'Erro de rede'}`);
         }
-        if (aprovados < pendentes.length) {
+        if (processados < pendentes.length) {
           await waitNextOmieBatchItem();
         }
       }
       transferApproveAllBtn.textContent = originalLabel;
       transferApproveAllBtn.disabled = false;
-      if (loteInterrompido) alert(`Processamento interrompido para evitar novo bloqueio da Omie.\n\nÚltimo erro:\n${erros[erros.length - 1] || 'Erro desconhecido'}`);
-      else if (erros.length) alert(`Concluído com erros:\n${erros.join('\n')}`);
+      if (erros.length) {
+        const sucessos = pendentes.length - erros.length;
+        alert(`Processamento concluído.\nSucesso(s): ${sucessos}\nErro(s): ${erros.length}\n\n${erros.join('\n')}`);
+      }
       else alert('Todas as transferências pendentes foram executadas com sucesso!');
       await carregarSolicitacoesTransferencias(true);
     });
@@ -52149,12 +52123,20 @@ function snapshotEdicoesQtdUnidAssociacaoNfe() {
     window.__associarNfeCamposEditados = {};
   }
 
-  previewConteudo.querySelectorAll('.assoc-override-unid, .assoc-override-valor').forEach((input) => {
+  previewConteudo.querySelectorAll('.assoc-override-qtd, .assoc-override-unid, .assoc-override-valor').forEach((input) => {
     const seq = Number(input.dataset.seq || 0);
     if (!seq) return;
 
     if (!window.__associarNfeCamposEditados[seq]) {
       window.__associarNfeCamposEditados[seq] = {};
+    }
+
+    if (input.classList.contains('assoc-override-qtd')) {
+      const textoQtd = String(input.value || '').trim();
+      const qtd = textoQtd
+        ? Number(textoQtd.includes(',') ? textoQtd.replace(/\./g, '').replace(',', '.') : textoQtd)
+        : null;
+      window.__associarNfeCamposEditados[seq].nQtde = Number.isFinite(qtd) ? qtd : null;
     }
 
     if (input.classList.contains('assoc-override-unid')) {
@@ -52181,6 +52163,8 @@ function trocarVinculoPedidoEntreSequenciasAssociacaoNfe(seqOrigem, seqDestino) 
 
   const camposPedido = [
     'pedido_item_encontrado',
+    'pedido_n_cod_ped',
+    'pedido_numero',
     'pedido_n_cod_item',
     'pedido_codigo_produto',
     'pedido_descricao_produto',
@@ -52289,6 +52273,34 @@ function renderPreviewAssociacaoPedidoNfe(preview) {
   const itensInformativosPedido = Array.isArray(preview?.itens_pedido_informativos)
     ? preview.itens_pedido_informativos
     : [];
+  const pedidoBaseNumero = String(preview?.c_numero_pedido || '').trim();
+  const obterResumoSugestoesPedido = (item) => {
+    const sugestoes = Array.isArray(item?.pedido_sugestoes) ? item.pedido_sugestoes : [];
+    if (!sugestoes.length) return '';
+    const primeira = sugestoes[0] || {};
+    const pedidoNumero = String(primeira?.pedido_numero || primeira?.pedido_n_cod_ped || '').trim();
+    if (!pedidoNumero) return `${sugestoes.length} sugestao(oes) automatica(s) encontrada(s)`;
+    return sugestoes.length === 1
+      ? `Sugestao automatica: pedido ${pedidoNumero}`
+      : `Sugestao automatica: pedido ${pedidoNumero} + ${sugestoes.length - 1}`;
+  };
+  const pedidosEnvolvidos = Array.from(new Map(
+    itens
+      .map((item) => {
+        const numero = String(item?.pedido_numero || '').trim();
+        const nCodPed = Number(item?.pedido_n_cod_ped || 0);
+        if (!numero && !(Number.isFinite(nCodPed) && nCodPed > 0)) return null;
+        const chave = numero || String(nCodPed);
+        return [
+          chave,
+          {
+            numero: numero || String(nCodPed),
+            n_cod_ped: Number.isFinite(nCodPed) && nCodPed > 0 ? nCodPed : null
+          }
+        ];
+      })
+      .filter(Boolean)
+  ).values());
 
   if (!window.__associarNfeCamposEditados || typeof window.__associarNfeCamposEditados !== 'object') {
     window.__associarNfeCamposEditados = {};
@@ -52405,6 +52417,13 @@ function renderPreviewAssociacaoPedidoNfe(preview) {
         const bgQtd = divergiuQtd ? '#fee2e2' : 'transparent';
         const corUnid = divergiuUnidade ? '#b91c1c' : '#0f172a';
         const bgUnid = divergiuUnidade ? '#fee2e2' : 'transparent';
+        const possuiSugestaoPedido = !encontrou && !isServico && Array.isArray(item?.pedido_sugestoes) && item.pedido_sugestoes.length > 0;
+        const resumoSugestoesPedido = possuiSugestaoPedido ? obterResumoSugestoesPedido(item) : '';
+        const pedidoItemNumero = String(item?.pedido_numero || '').trim();
+        const pedidoEhComplementar = !!pedidoItemNumero && !!pedidoBaseNumero && pedidoItemNumero !== pedidoBaseNumero;
+        const badgePedidoItem = pedidoItemNumero
+          ? `<div style="display:inline-flex;align-items:center;gap:6px;font-size:10px;font-weight:800;color:${pedidoEhComplementar ? '#1d4ed8' : '#166534'};background:${pedidoEhComplementar ? '#dbeafe' : '#dcfce7'};border:1px solid ${pedidoEhComplementar ? '#93c5fd' : '#86efac'};border-radius:999px;padding:3px 8px;margin-bottom:4px;">Pedido ${escapeHtml(pedidoItemNumero)}${pedidoEhComplementar ? ' - complementar' : ''}</div>`
+          : '';
 
         return `
           <tr style="border-bottom:1px solid #e2e8f0;background:${!encontrou ? '#fff7ed' : (temDivergencia ? '#fff7f7' : '#f8fafc')};" data-seq="${Number(item?.n_sequencia || 0)}">
@@ -52427,11 +52446,12 @@ function renderPreviewAssociacaoPedidoNfe(preview) {
               <div class="assoc-pedido-draggable" data-seq="${seq}" draggable="true" style="display:flex;align-items:flex-start;gap:8px;padding:6px 8px;border:1px dashed #cbd5e1;border-radius:8px;background:#ffffff;cursor:grab;">
                 <i class="fa-solid fa-grip-vertical" style="margin-top:1px;color:#64748b;"></i>
                 <div style="display:flex;flex-direction:column;gap:2px;min-width:0;">
+                  ${badgePedidoItem}
                   <div style="font-size:11px;font-weight:700;color:#0f172a;">${escapeHtml(String(item?.pedido_codigo_produto || '-'))}</div>
                   <div style="font-size:11px;color:#334155;line-height:1.35;max-width:320px;" title="${escapeHtml(String(item?.pedido_descricao_produto || '-'))}">${escapeHtml(String(item?.pedido_descricao_produto || '-'))}</div>
                 </div>
               </div>` : `
-              <div style="display:flex;align-items:center;gap:8px;padding:6px 8px;border:1px dashed #fed7aa;border-radius:8px;background:#fff7ed;">
+              <div style="display:flex;align-items:center;gap:8px;padding:6px 8px;border:1px dashed #fed7aa;border-radius:8px;background:#fff7ed;flex-wrap:wrap;">
                 ${item?.produto_override && Number(item?.servico_produto_codigo_produto || 0) > 0 ? `
                 <div style="min-width:0;flex:1;">
                   <div style="font-size:11px;font-weight:800;color:#9a3412;">${escapeHtml(String(item?.servico_produto_codigo || '-'))}</div>
@@ -52440,11 +52460,14 @@ function renderPreviewAssociacaoPedidoNfe(preview) {
                 <i class="fa-solid fa-triangle-exclamation" style="color:#ea580c;font-size:12px;flex-shrink:0;"></i>
                 <span style="font-size:11px;color:#9a3412;flex:1;">Sem match — selecione o produto</span>`}
                 <button type="button" class="assoc-produto-override-btn" data-seq="${seq}" style="border:1px solid #fb923c;background:#ea580c;color:#fff;border-radius:7px;padding:5px 8px;font-size:11px;font-weight:700;cursor:pointer;white-space:nowrap;flex-shrink:0;">${item?.produto_override && Number(item?.servico_produto_codigo_produto || 0) > 0 ? 'Alterar' : 'Selecionar produto'}</button>
-                <button type="button" class="assoc-item-pedido-btn" data-seq="${seq}" title="Vincular a um item já presente no pedido" style="border:1px solid #16a34a;background:#15803d;color:#fff;border-radius:7px;padding:5px 8px;font-size:11px;font-weight:700;cursor:pointer;white-space:nowrap;flex-shrink:0;">Item do pedido</button>
+                ${possuiSugestaoPedido ? `<button type="button" class="assoc-sugestao-pedido-btn" data-seq="${seq}" title="Usar a melhor sugestão automática encontrada" style="border:1px solid #60a5fa;background:#2563eb;color:#fff;border-radius:7px;padding:5px 8px;font-size:11px;font-weight:700;cursor:pointer;white-space:nowrap;flex-shrink:0;">Usar sugestão</button>` : ''}
+                <button type="button" class="assoc-item-pedido-btn" data-seq="${seq}" title="Vincular a um item do pedido atual ou de um pedido complementar sugerido" style="border:1px solid #16a34a;background:#15803d;color:#fff;border-radius:7px;padding:5px 8px;font-size:11px;font-weight:700;cursor:pointer;white-space:nowrap;flex-shrink:0;">Escolher item</button>
               </div>`}
             </td>
             <td style="padding:7px 8px;font-size:11px;color:${corQtd};background:${bgQtd};text-align:right;white-space:nowrap;">${
-              escapeHtml(String(qtdPedido))
+              (!isServico && divergiuQtd)
+                ? `<input type="text" class="assoc-override-qtd" data-seq="${seq}" value="${escapeHtml(fmtQtdBR(qtdPedido))}" style="width:72px;padding:2px 4px;font-size:11px;font-weight:700;color:#b91c1c;border:1px solid #fca5a5;border-radius:4px;text-align:right;background:#fff5f5;" title="Edite a quantidade do item do pedido">`
+                : escapeHtml(String(qtdPedido))
             }</td>
             <td style="padding:7px 8px;font-size:11px;color:${corUnid};background:${bgUnid};text-align:center;white-space:nowrap;">${
               (!isServico && (divergiuQtd || divergiuUnidade))
@@ -52483,9 +52506,19 @@ function renderPreviewAssociacaoPedidoNfe(preview) {
       </div>
     `
     : '';
+  const pedidosEnvolvidosHtml = pedidosEnvolvidos.length > 1
+    ? `
+      <div style="margin:0 0 10px;padding:10px 12px;border:1px solid #93c5fd;background:#eff6ff;color:#1d4ed8;border-radius:8px;font-size:12px;">
+        <div style="font-weight:800;margin-bottom:4px;">Esta NF-e sera vinculada a mais de um pedido.</div>
+        <div>Pedidos envolvidos: ${escapeHtml(pedidosEnvolvidos.map((pedido) => pedido.numero).join(', '))}.</div>
+        <div style="margin-top:4px;">Ao concluir a NF, o sistema atualiza cada pedido individualmente conforme o valor realmente recebido em cada um.</div>
+      </div>
+    `
+    : '';
 
   previewConteudo.innerHTML = `
     ${resumoHtml}
+    ${pedidosEnvolvidosHtml}
     ${itensInformativosHtml}
     ${gruposMesmoItem > 0 ? `<div style="margin:0 0 10px;padding:10px 12px;border:1px solid #bbf7d0;background:#ecfdf5;color:#166534;border-radius:8px;font-size:12px;font-weight:700;"><i class="fa-solid fa-layer-group" style="margin-right:6px;"></i>${gruposMesmoItem} linha(s) da NF-e foram agrupadas no mesmo item do pedido. A conferência usa a soma das linhas, não cada linha isolada.</div>` : ''}
     <div style="margin:0 0 10px;padding:9px 12px;border:1px solid #bae6fd;background:#f0f9ff;color:#0c4a6e;border-radius:8px;font-size:12px;font-weight:700;">Arraste o bloco do item do Pedido (coluna azul com ícone <i class="fa-solid fa-grip-vertical"></i>) para outra linha da NF-e para trocar a associação.</div>
@@ -52523,7 +52556,7 @@ function renderPreviewAssociacaoPedidoNfe(preview) {
 
   previewWrap.style.display = 'block';
   habilitarDragDropAssociacaoPedidoNfe(preview);
-  previewConteudo.querySelectorAll('.assoc-override-unid, .assoc-override-valor').forEach((input) => {
+  previewConteudo.querySelectorAll('.assoc-override-qtd, .assoc-override-unid, .assoc-override-valor').forEach((input) => {
     input.addEventListener('input', snapshotEdicoesQtdUnidAssociacaoNfe);
     input.addEventListener('change', snapshotEdicoesQtdUnidAssociacaoNfe);
   });
@@ -52533,22 +52566,77 @@ function renderPreviewAssociacaoPedidoNfe(preview) {
   previewConteudo.querySelectorAll('.assoc-produto-override-btn').forEach((btn) => {
     btn.addEventListener('click', () => abrirModalProdutoServicoAssociacaoNfe(Number(btn.dataset.seq || 0)));
   });
-  previewConteudo.querySelectorAll('.assoc-item-pedido-btn').forEach((btn) => {
-    btn.addEventListener('click', () => abrirPickerItemPedidoAssociacao(Number(btn.dataset.seq || 0)));
+  previewConteudo.querySelectorAll('.assoc-sugestao-pedido-btn').forEach((btn) => {
+    btn.addEventListener('click', () => aplicarSugestaoPedidoAssociacao(Number(btn.dataset.seq || 0), 0));
   });
+  previewConteudo.querySelectorAll('.assoc-item-pedido-btn').forEach((btn) => {
+    btn.addEventListener('click', () => abrirPickerItemPedidoAssociacaoAvancado(Number(btn.dataset.seq || 0)));
+  });
+}
+
+function aplicarVinculoItemPedidoAssociacao(seq, dadosItem = {}) {
+  if (!seq) return false;
+  const item = (window.__associarNfePreviewEstadoItens || []).find(i => Number(i?.n_sequencia || 0) === seq);
+  if (!item) return false;
+
+  const nCodItem = Number(dadosItem?.pedido_n_cod_item || dadosItem?.nCodItem || 0);
+  if (!Number.isFinite(nCodItem) || nCodItem <= 0) return false;
+
+  const nCodPed = Number(dadosItem?.pedido_n_cod_ped || dadosItem?.nCodPed || 0);
+  const numeroPedido = String(dadosItem?.pedido_numero || dadosItem?.numeroPedido || '').trim();
+  const numeroPedidoBase = String(window.__associarNfePreviewAtual?.preview?.c_numero_pedido || '').trim();
+
+  item.pedido_item_encontrado = true;
+  item.pedido_item_override = true;
+  item.pedido_n_cod_ped = Number.isFinite(nCodPed) && nCodPed > 0
+    ? nCodPed
+    : (Number(window.__associarNfePreviewAtual?.preview?.n_cod_ped || 0) || null);
+  item.pedido_numero = numeroPedido || numeroPedidoBase || null;
+  item.pedido_n_cod_item = nCodItem;
+  item.pedido_codigo_produto = dadosItem?.pedido_codigo_produto || dadosItem?.codigo || '';
+  item.pedido_descricao_produto = dadosItem?.pedido_descricao_produto || dadosItem?.descricao || '';
+  item.pedido_qtde = (dadosItem?.pedido_qtde ?? dadosItem?.qtde ?? '') !== '' ? Number(dadosItem?.pedido_qtde ?? dadosItem?.qtde) : null;
+  item.pedido_unidade = dadosItem?.pedido_unidade || dadosItem?.unidade || '';
+  item.pedido_valor_total = (dadosItem?.pedido_valor_total ?? dadosItem?.valor ?? '') !== '' ? Number(dadosItem?.pedido_valor_total ?? dadosItem?.valor) : null;
+  item.criterio_match = item.pedido_numero && numeroPedidoBase && item.pedido_numero !== numeroPedidoBase
+    ? 'ajuste_manual_pedido_complementar'
+    : 'ajuste_manual_item_pedido';
+  item.score_match = 9999;
+  delete item.produto_override;
+
+  renderPreviewAssociacaoPedidoNfe(window.__associarNfePreviewAtual?.preview || {});
+  const btnAssociarMain = document.getElementById('modalAssociarPedidoBtnConfirmar');
+  if (btnAssociarMain) btnAssociarMain.disabled = false;
+  return true;
+}
+
+function aplicarSugestaoPedidoAssociacao(seq, indiceSugestao = 0) {
+  const item = (window.__associarNfePreviewEstadoItens || []).find(i => Number(i?.n_sequencia || 0) === seq);
+  if (!item) return false;
+  const sugestoes = Array.isArray(item?.pedido_sugestoes) ? item.pedido_sugestoes : [];
+  const sugestao = sugestoes[Number(indiceSugestao) || 0];
+  if (!sugestao) return false;
+  return aplicarVinculoItemPedidoAssociacao(seq, sugestao);
 }
 
 function abrirPickerItemPedidoAssociacao(seq) {
   if (!seq) return;
   const preview = window.__associarNfePreviewAtual?.preview || {};
   const numeroPedido = String(preview?.c_numero_pedido || '').trim();
+  const itemAtual = (window.__associarNfePreviewEstadoItens || []).find(i => Number(i?.n_sequencia || 0) === seq);
+  const itensComplementares = Array.isArray(itemAtual?.pedido_sugestoes)
+    ? itemAtual.pedido_sugestoes.map((itemSugestao) => ({ ...itemSugestao, origem_lista: 'pedido_complementar' }))
+    : [];
 
   // Coleta todos os itens do pedido: informativos + matched
   let itensPedido = [
+    ...itensComplementares,
     ...(preview.itens_pedido_informativos || []),
     ...(preview.itens_preview || [])
       .filter(i => i.pedido_item_encontrado && Number(i.pedido_n_cod_item || 0) > 0)
       .map(i => ({
+        pedido_n_cod_ped: i.pedido_n_cod_ped || preview?.n_cod_ped || null,
+        pedido_numero: i.pedido_numero || preview?.c_numero_pedido || null,
         pedido_n_cod_item: i.pedido_n_cod_item,
         pedido_codigo_produto: i.pedido_codigo_produto,
         pedido_descricao_produto: i.pedido_descricao_produto,
@@ -52564,6 +52652,11 @@ function abrirPickerItemPedidoAssociacao(seq) {
     if (!k || seen.has(k)) return false;
     seen.add(k); return true;
   });
+  const itensComplementaresFiltrados = itensComplementares.filter(i => {
+    const k = Number(i.pedido_n_cod_item || 0);
+    if (!k || seen.has(k)) return false;
+    seen.add(k); return true;
+  });
 
   let modal = document.getElementById('modalItemPedidoAssociacao');
   if (modal) modal.remove();
@@ -52575,6 +52668,8 @@ function abrirPickerItemPedidoAssociacao(seq) {
     if (!items.length) return '<div style="font-size:12px;color:#64748b;padding:12px;">Nenhum item encontrado para o pedido.</div>';
     return items.map(it => `
       <button type="button"
+        data-n-cod-ped="${Number(it.pedido_n_cod_ped || 0)}"
+        data-numero-pedido="${escapeHtml(String(it.pedido_numero || numeroPedido || ''))}"
         data-n-cod-item="${Number(it.pedido_n_cod_item || 0)}"
         data-codigo="${escapeHtml(String(it.pedido_codigo_produto || ''))}"
         data-descricao="${escapeHtml(String(it.pedido_descricao_produto || ''))}"
@@ -52583,6 +52678,7 @@ function abrirPickerItemPedidoAssociacao(seq) {
         data-valor="${escapeHtml(String(it.pedido_valor_total ?? ''))}"
         style="display:flex;align-items:center;justify-content:space-between;gap:14px;text-align:left;border:1px solid #bbf7d0;background:#f0fdf4;border-radius:10px;padding:10px;cursor:pointer;width:100%;">
         <span style="min-width:0;">
+          <div style="font-size:10px;font-weight:800;color:${it.origem_lista === 'pedido_complementar' ? '#1d4ed8' : '#166534'};margin-bottom:3px;">Pedido ${escapeHtml(String(it.pedido_numero || numeroPedido || it.pedido_n_cod_ped || '-'))}${it.origem_lista === 'pedido_complementar' ? ' - sugestão automática' : ''}</div>
           <div style="font-weight:800;color:#0f172a;">${escapeHtml(String(it.pedido_codigo_produto || '-'))}</div>
           <div style="font-size:12px;color:#475569;">${escapeHtml(String(it.pedido_descricao_produto || '-'))}</div>
           <div style="font-size:11px;color:#64748b;margin-top:2px;">Qtd: ${escapeHtml(String(it.pedido_qtde ?? '-'))} ${escapeHtml(String(it.pedido_unidade || ''))} · R$ ${escapeHtml(Number(it.pedido_valor_total || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 }))}</div>
@@ -52609,26 +52705,18 @@ function abrirPickerItemPedidoAssociacao(seq) {
   function attachSelectHandlers() {
     modal.querySelectorAll('button[data-n-cod-item]').forEach(btn => {
       btn.onclick = () => {
-        const nCodItem = Number(btn.dataset.nCodItem || 0);
-        if (!nCodItem) return;
-        const item = (window.__associarNfePreviewEstadoItens || []).find(i => Number(i?.n_sequencia || 0) === seq);
-        if (item) {
-          item.pedido_item_encontrado = true;
-          item.pedido_item_override = true;
-          item.pedido_n_cod_item = nCodItem;
-          item.pedido_codigo_produto = btn.dataset.codigo || '';
-          item.pedido_descricao_produto = btn.dataset.descricao || '';
-          item.pedido_qtde = btn.dataset.qtde !== '' ? Number(btn.dataset.qtde) : null;
-          item.pedido_unidade = btn.dataset.unidade || '';
-          item.pedido_valor_total = btn.dataset.valor !== '' ? Number(btn.dataset.valor) : null;
-          item.criterio_match = 'ajuste_manual_item_pedido';
-          item.score_match = 9999;
-          delete item.produto_override;
-        }
+        const aplicado = aplicarVinculoItemPedidoAssociacao(seq, {
+          pedido_n_cod_ped: Number(btn.dataset.nCodPed || 0) || null,
+          pedido_numero: btn.dataset.numeroPedido || '',
+          pedido_n_cod_item: Number(btn.dataset.nCodItem || 0) || null,
+          pedido_codigo_produto: btn.dataset.codigo || '',
+          pedido_descricao_produto: btn.dataset.descricao || '',
+          pedido_qtde: btn.dataset.qtde !== '' ? Number(btn.dataset.qtde) : null,
+          pedido_unidade: btn.dataset.unidade || '',
+          pedido_valor_total: btn.dataset.valor !== '' ? Number(btn.dataset.valor) : null
+        });
+        if (!aplicado) return;
         modal.remove();
-        renderPreviewAssociacaoPedidoNfe(window.__associarNfePreviewAtual?.preview || {});
-        const btnAssociarMain = document.getElementById('modalAssociarPedidoBtnConfirmar');
-        if (btnAssociarMain) btnAssociarMain.disabled = false;
       };
     });
   }
@@ -52642,6 +52730,8 @@ function abrirPickerItemPedidoAssociacao(seq) {
         const itensApi = (data?.pedido?.itens || []).filter(i => Number(i.n_cod_item || 0) > 0);
         lista.innerHTML = itensApi.length
           ? renderItensHtml(itensApi.map(i => ({
+              pedido_n_cod_ped: preview?.n_cod_ped || null,
+              pedido_numero: numeroPedido || null,
               pedido_n_cod_item: i.n_cod_item,
               pedido_codigo_produto: i.c_produto || i.produto_codigo,
               pedido_descricao_produto: i.c_descricao || i.produto_descricao,
@@ -52658,6 +52748,198 @@ function abrirPickerItemPedidoAssociacao(seq) {
   } else {
     attachSelectHandlers();
   }
+}
+
+function abrirPickerItemPedidoAssociacaoAvancado(seq) {
+  if (!seq) return;
+  const preview = window.__associarNfePreviewAtual?.preview || {};
+  const numeroPedidoBase = String(preview?.c_numero_pedido || '').trim();
+  const itemAtual = (window.__associarNfePreviewEstadoItens || []).find((i) => Number(i?.n_sequencia || 0) === seq);
+  const sugestoesComplementares = Array.isArray(itemAtual?.pedido_sugestoes)
+    ? itemAtual.pedido_sugestoes.map((itemSugestao) => ({ ...itemSugestao, origem_lista: 'pedido_complementar' }))
+    : [];
+
+  const dedupeItens = (items, seen = new Set()) => items.filter((item) => {
+    const codItem = Number(item?.pedido_n_cod_item || 0);
+    if (!codItem || seen.has(codItem)) return false;
+    seen.add(codItem);
+    return true;
+  });
+
+  const itensPedidoBase = [
+    ...(preview.itens_pedido_informativos || []),
+    ...(preview.itens_preview || [])
+      .filter((i) => i.pedido_item_encontrado && Number(i.pedido_n_cod_item || 0) > 0)
+      .map((i) => ({
+        pedido_n_cod_ped: i.pedido_n_cod_ped || preview?.n_cod_ped || null,
+        pedido_numero: i.pedido_numero || preview?.c_numero_pedido || null,
+        pedido_n_cod_item: i.pedido_n_cod_item,
+        pedido_codigo_produto: i.pedido_codigo_produto,
+        pedido_descricao_produto: i.pedido_descricao_produto,
+        pedido_qtde: i.pedido_qtde,
+        pedido_unidade: i.pedido_unidade,
+        pedido_valor_total: i.pedido_valor_total,
+        origem_lista: 'pedido_base'
+      }))
+  ];
+
+  const seen = new Set();
+  const sugestoesFiltradas = dedupeItens(sugestoesComplementares, seen);
+  const itensBaseFiltrados = dedupeItens(itensPedidoBase, seen);
+
+  let modal = document.getElementById('modalItemPedidoAssociacaoAvancado');
+  if (modal) modal.remove();
+  modal = document.createElement('div');
+  modal.id = 'modalItemPedidoAssociacaoAvancado';
+  modal.style.cssText = 'position:fixed;inset:0;z-index:2147483647;background:rgba(15,23,42,.70);display:flex;align-items:center;justify-content:center;padding:20px;';
+
+  const renderItensHtml = (items, tituloSecao = '', emptyText = 'Nenhum item encontrado.') => {
+    if (!items.length) {
+      return `
+        ${tituloSecao ? `<div style="font-size:12px;font-weight:800;color:#0f172a;margin:10px 0 6px;">${escapeHtml(tituloSecao)}</div>` : ''}
+        <div style="font-size:12px;color:#64748b;padding:12px;">${escapeHtml(emptyText)}</div>
+      `;
+    }
+    return `
+      ${tituloSecao ? `<div style="font-size:12px;font-weight:800;color:#0f172a;margin:10px 0 6px;">${escapeHtml(tituloSecao)}</div>` : ''}
+      ${items.map((it) => `
+        <button type="button"
+          data-n-cod-ped="${Number(it.pedido_n_cod_ped || 0)}"
+          data-numero-pedido="${escapeHtml(String(it.pedido_numero || numeroPedidoBase || ''))}"
+          data-n-cod-item="${Number(it.pedido_n_cod_item || 0)}"
+          data-codigo="${escapeHtml(String(it.pedido_codigo_produto || ''))}"
+          data-descricao="${escapeHtml(String(it.pedido_descricao_produto || ''))}"
+          data-qtde="${escapeHtml(String(it.pedido_qtde ?? ''))}"
+          data-unidade="${escapeHtml(String(it.pedido_unidade || ''))}"
+          data-valor="${escapeHtml(String(it.pedido_valor_total ?? ''))}"
+          style="display:flex;align-items:center;justify-content:space-between;gap:14px;text-align:left;border:1px solid #bbf7d0;background:#f0fdf4;border-radius:10px;padding:10px;cursor:pointer;width:100%;">
+          <span style="min-width:0;">
+            <div style="font-size:10px;font-weight:800;color:${it.origem_lista === 'pedido_complementar' ? '#1d4ed8' : (it.origem_lista === 'pedido_manual' ? '#7c3aed' : '#166534')};margin-bottom:3px;">Pedido ${escapeHtml(String(it.pedido_numero || numeroPedidoBase || it.pedido_n_cod_ped || '-'))}${it.origem_lista === 'pedido_complementar' ? ' - sugestão automática' : ''}${it.origem_lista === 'pedido_manual' ? ' - carregado manualmente' : ''}</div>
+            <div style="font-weight:800;color:#0f172a;">${escapeHtml(String(it.pedido_codigo_produto || '-'))}</div>
+            <div style="font-size:12px;color:#475569;">${escapeHtml(String(it.pedido_descricao_produto || '-'))}</div>
+            <div style="font-size:11px;color:#64748b;margin-top:2px;">Qtd: ${escapeHtml(String(it.pedido_qtde ?? '-'))} ${escapeHtml(String(it.pedido_unidade || ''))} · R$ ${escapeHtml(Number(it.pedido_valor_total || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 }))}</div>
+          </span>
+          <span style="white-space:nowrap;background:#15803d;color:white;border-radius:8px;padding:7px 10px;font-size:12px;font-weight:800;">Usar este item</span>
+        </button>
+      `).join('')}
+    `;
+  };
+
+  modal.innerHTML = `
+    <div style="width:min(860px,95vw);max-height:85vh;overflow:auto;background:#fff;border:2px solid #16a34a;border-radius:16px;box-shadow:0 24px 80px rgba(0,0,0,.35);padding:18px;">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+        <strong style="font-size:18px;color:#0f172a;">Escolher item para a linha ${escapeHtml(String(seq))} da NF-e</strong>
+        <button type="button" id="modalItemPedidoAvancadoFechar" style="border:0;background:transparent;font-size:26px;cursor:pointer;color:#334155;">&times;</button>
+      </div>
+      <div style="font-size:12px;color:#475569;margin-bottom:12px;">Use a melhor sugestão, escolha outra sugestão listada abaixo ou carregue manualmente outro pedido pelo número.</div>
+      <div id="modalItemPedidoAvancadoLista" style="display:flex;flex-direction:column;gap:8px;">
+        ${sugestoesFiltradas.length > 0 ? renderItensHtml(sugestoesFiltradas, 'Sugestões automáticas de outros pedidos', 'Nenhuma sugestão automática encontrada.') : ''}
+        ${renderItensHtml(itensBaseFiltrados, `Itens do pedido ${numeroPedidoBase || ''}`, 'Nenhum item encontrado no pedido base.')}
+      </div>
+      <div style="margin-top:14px;padding-top:12px;border-top:1px solid #e2e8f0;">
+        <div style="font-size:12px;font-weight:800;color:#0f172a;margin-bottom:8px;">Carregar outro pedido manualmente</div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+          <input id="modalItemPedidoAvancadoNumeroManual" type="text" placeholder="Digite o número do outro pedido" style="flex:1;min-width:240px;padding:10px 12px;border:1px solid #cbd5e1;border-radius:8px;font-size:14px;color:#0f172a;" />
+          <button type="button" id="modalItemPedidoAvancadoBuscarManual" style="border:1px solid #0ea5e9;background:#0284c7;color:#fff;border-radius:8px;padding:9px 12px;font-size:12px;font-weight:800;cursor:pointer;">Carregar pedido</button>
+        </div>
+        <div id="modalItemPedidoAvancadoManualStatus" style="font-size:12px;color:#64748b;margin-top:8px;">Se souber o pedido correto, digite o número e carregue os itens dele.</div>
+        <div id="modalItemPedidoAvancadoListaManual" style="display:flex;flex-direction:column;gap:8px;margin-top:8px;"></div>
+      </div>
+    </div>`;
+
+  document.body.appendChild(modal);
+  modal.querySelector('#modalItemPedidoAvancadoFechar').onclick = () => modal.remove();
+
+  const aplicarSelecao = (btn) => {
+    const aplicado = aplicarVinculoItemPedidoAssociacao(seq, {
+      pedido_n_cod_ped: Number(btn.dataset.nCodPed || 0) || null,
+      pedido_numero: btn.dataset.numeroPedido || '',
+      pedido_n_cod_item: Number(btn.dataset.nCodItem || 0) || null,
+      pedido_codigo_produto: btn.dataset.codigo || '',
+      pedido_descricao_produto: btn.dataset.descricao || '',
+      pedido_qtde: btn.dataset.qtde !== '' ? Number(btn.dataset.qtde) : null,
+      pedido_unidade: btn.dataset.unidade || '',
+      pedido_valor_total: btn.dataset.valor !== '' ? Number(btn.dataset.valor) : null
+    });
+    if (!aplicado) return;
+    modal.remove();
+  };
+
+  const attachSelectHandlers = () => {
+    modal.querySelectorAll('button[data-n-cod-item]').forEach((btn) => {
+      btn.onclick = () => aplicarSelecao(btn);
+    });
+  };
+
+  const listaManual = modal.querySelector('#modalItemPedidoAvancadoListaManual');
+  const statusManual = modal.querySelector('#modalItemPedidoAvancadoManualStatus');
+  const inputManual = modal.querySelector('#modalItemPedidoAvancadoNumeroManual');
+  const btnManual = modal.querySelector('#modalItemPedidoAvancadoBuscarManual');
+
+  const carregarItensPedidoManual = async (numeroPedidoManual) => {
+    const numeroManual = String(numeroPedidoManual || '').trim();
+    if (!numeroManual) {
+      if (statusManual) statusManual.textContent = 'Digite um número de pedido para carregar os itens.';
+      if (listaManual) listaManual.innerHTML = '';
+      return;
+    }
+
+    if (statusManual) statusManual.textContent = `Carregando itens do pedido ${numeroManual}...`;
+    if (listaManual) listaManual.innerHTML = '<div style="font-size:12px;color:#64748b;padding:12px;">Buscando pedido informado...</div>';
+    if (btnManual) btnManual.disabled = true;
+
+    try {
+      const resp = await fetch(`/api/compras/buscar-pedido-compra?numero=${encodeURIComponent(numeroManual)}`, { credentials: 'include', cache: 'no-store' });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok || !data?.pedido) {
+        throw new Error(data?.error || `Falha ao carregar pedido ${numeroManual}.`);
+      }
+
+      const numeroPedidoCarregado = String(data?.pedido?.c_numero || data?.pedido?.numero || numeroManual).trim() || numeroManual;
+      const itensApi = (data?.pedido?.itens || [])
+        .filter((i) => Number(i.n_cod_item || 0) > 0)
+        .map((i) => ({
+          pedido_n_cod_ped: data?.pedido?.n_cod_ped || data?.pedido?.nCodPed || null,
+          pedido_numero: numeroPedidoCarregado,
+          pedido_n_cod_item: i.n_cod_item,
+          pedido_codigo_produto: i.c_produto || i.produto_codigo,
+          pedido_descricao_produto: i.c_descricao || i.produto_descricao,
+          pedido_qtde: i.n_qtde !== undefined ? i.n_qtde : i.quantidade,
+          pedido_unidade: i.c_unidade || i.unidade,
+          pedido_valor_total: i.n_val_tot !== undefined ? i.n_val_tot : i.valor_item,
+          origem_lista: 'pedido_manual'
+        }));
+
+      if (listaManual) {
+        listaManual.innerHTML = renderItensHtml(
+          itensApi,
+          `Itens do pedido ${numeroPedidoCarregado}`,
+          'Nenhum item encontrado no pedido informado.'
+        );
+      }
+      if (statusManual) {
+        statusManual.textContent = itensApi.length > 0
+          ? `Pedido ${numeroPedidoCarregado} carregado. Escolha um item abaixo.`
+          : `Pedido ${numeroPedidoCarregado} encontrado, mas sem itens utilizáveis.`;
+      }
+      attachSelectHandlers();
+    } catch (err) {
+      if (listaManual) listaManual.innerHTML = '';
+      if (statusManual) statusManual.textContent = err?.message || `Erro ao carregar o pedido ${numeroManual}.`;
+    } finally {
+      if (btnManual) btnManual.disabled = false;
+    }
+  };
+
+  btnManual?.addEventListener('click', () => carregarItensPedidoManual(inputManual?.value || ''));
+  inputManual?.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      carregarItensPedidoManual(inputManual?.value || '');
+    }
+  });
+
+  attachSelectHandlers();
 }
 
 function abrirModalProdutoServicoAssociacaoNfe(seq) {
@@ -53015,6 +53297,11 @@ async function confirmarAssociacaoPedidoNfeOmie() {
 
   try {
     const contextoAtual = window.__associarNfeContextoAtual || {};
+    const pedidosEnvolvidosPreview = Array.from(new Set(
+      (Array.isArray(window.__associarNfePreviewEstadoItens) ? window.__associarNfePreviewEstadoItens : [])
+        .map((item) => String(item?.pedido_numero || '').trim())
+        .filter(Boolean)
+    ));
 
     // Coleta overrides de vínculo/Qtd/Unid editados pelo usuário na prévia
     const itensOverrideMap = new Map();
@@ -53049,18 +53336,30 @@ async function confirmarAssociacaoPedidoNfeOmie() {
       }
       const nIdItPedidoExistente = Number(item?.pedido_n_cod_item || 0);
       if (!seq || !Number.isFinite(nIdItPedidoExistente) || nIdItPedidoExistente <= 0) return;
-      itensOverrideMap.set(seq, { n_sequencia: seq, nIdItPedidoExistente });
+      const nIdPedidoExistente = Number(item?.pedido_n_cod_ped || 0);
+      itensOverrideMap.set(seq, {
+        n_sequencia: seq,
+        nIdPedidoExistente: Number.isFinite(nIdPedidoExistente) && nIdPedidoExistente > 0 ? nIdPedidoExistente : null,
+        nIdItPedidoExistente
+      });
     });
 
     const previewConteudo = document.getElementById('modalAssociarPedidoNfePreviewConteudo');
     if (previewConteudo) {
-      previewConteudo.querySelectorAll('.assoc-override-unid, .assoc-override-valor').forEach(input => {
+      previewConteudo.querySelectorAll('.assoc-override-qtd, .assoc-override-unid, .assoc-override-valor').forEach(input => {
         const seq = Number(input.dataset.seq || 0);
         if (!seq) return;
         let entry = itensOverrideMap.get(seq);
         if (!entry) {
           entry = { n_sequencia: seq };
           itensOverrideMap.set(seq, entry);
+        }
+        if (input.classList.contains('assoc-override-qtd')) {
+          const textoQtd = String(input.value || '').trim();
+          const qtd = textoQtd
+            ? Number(textoQtd.includes(',') ? textoQtd.replace(/\./g, '').replace(',', '.') : textoQtd)
+            : null;
+          entry.nQtde = Number.isFinite(qtd) ? qtd : null;
         }
         if (input.classList.contains('assoc-override-unid')) {
           entry.cUnidade = String(input.value || '').trim().toUpperCase() || null;
@@ -53128,12 +53427,25 @@ async function confirmarAssociacaoPedidoNfeOmie() {
     }
     // ─────────────────────────────────────────────────────────────────────
 
+    const pedidosAssociadosRetorno = Array.isArray(data?.dados?.pedidos_associados)
+      ? data.dados.pedidos_associados
+        .map((pedido) => String(pedido?.c_numero_pedido || pedido?.n_cod_ped || '').trim())
+        .filter(Boolean)
+      : [];
+    const pedidosAssociadosExibir = pedidosAssociadosRetorno.length > 0
+      ? pedidosAssociadosRetorno
+      : pedidosEnvolvidosPreview;
+    const resumoPedidosAssociados = pedidosAssociadosExibir.length > 0
+      ? `<div style="margin-top:8px;font-size:12px;color:#166534;font-weight:700;">Pedidos afetados: ${escapeHtml(pedidosAssociadosExibir.join(', '))}</div>`
+      : '';
+
     setStatusModalAssociarPedidoNfe(
       `<div style="display:flex;align-items:flex-start;gap:12px;">
         <i class="fa-solid fa-circle-check" style="font-size:26px;color:#16a34a;margin-top:2px;"></i>
         <div style="flex:1;">
           <div style="font-size:17px;font-weight:800;line-height:1.2;">NF-e associada com sucesso</div>
           <div style="font-size:13px;margin-top:5px;">${escapeHtml(data?.message || `NF-e ${numeroNfe} associada ao pedido ${numeroPedido}.`)}</div>
+          ${resumoPedidosAssociados}
           <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;">
             <button type="button" id="modalAssociarNovaBuscaBtn" style="border:none;border-radius:8px;background:#7c3aed;color:#fff;font-weight:700;padding:9px 13px;cursor:pointer;display:inline-flex;align-items:center;gap:6px;">
               <i class="fa-solid fa-magnifying-glass"></i> Buscar outra NF-e
