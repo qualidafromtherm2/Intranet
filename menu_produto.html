@@ -1192,6 +1192,13 @@
               <div id="movimEnderecoVazio" class="movim-endereco-vazio">Nenhum endereco cadastrado.</div>
               <div id="movimEnderecoLista"></div>
             </div>
+            <div id="movimMesmoArmazemAviso" class="movim-mesmo-arm-aviso" style="display:none;">
+              Mesmo armazem: informe pelo menos um endereco. Nao ha movimentacao na Omie — apenas registro em ETQ_rec_impresso.
+            </div>
+            <label id="movimImprimirEtiquetaWrap" class="movim-imprimir-wrap" style="display:none;">
+              <input type="checkbox" id="movimImprimirEtiqueta">
+              <span>Imprimir etiqueta apos registrar (opcional)</span>
+            </label>
             <div class="movim-field">
               <label for="movimOmieMotivo">Motivo do ajuste (Omie)</label>
               <select id="movimOmieMotivo"></select>
@@ -1253,6 +1260,26 @@
               <input id="movimScanEnderecoInput" type="text" placeholder="Ou digite o endereco manualmente..." autocomplete="off">
               <button id="movimScanEnderecoOk" type="button"><i class="fa-solid fa-check"></i></button>
             </div>
+          </div>
+        </div>
+
+        <!-- Histórico de ajustes de estoque (Omie) -->
+        <div id="movimHistoricoModal" class="movim-hist-overlay" style="display:none;">
+          <div class="movim-hist-panel">
+            <div class="movim-hist-header">
+              <div class="movim-hist-title-wrap">
+                <i class="fa-solid fa-clock-rotate-left"></i>
+                <div>
+                  <span id="movimHistoricoTitulo" class="movim-hist-titulo">Historico de ajustes</span>
+                  <span id="movimHistoricoSubtitulo" class="movim-hist-subtitulo"></span>
+                </div>
+              </div>
+              <button id="movimHistoricoFechar" type="button" class="movim-close" title="Fechar">
+                <i class="fa-solid fa-xmark"></i>
+              </button>
+            </div>
+            <div id="movimHistoricoStatus" class="movim-hist-status">Carregando...</div>
+            <div id="movimHistoricoBody" class="movim-hist-body"></div>
           </div>
         </div>
 

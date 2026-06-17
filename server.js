@@ -11626,14 +11626,16 @@ app.patch('/api/etiquetas/rec-impresso/:id/endereco', express.json(), async (req
 });
 
 // POST /api/etiquetas/rec-impresso/registrar-movimentacao
-// Body: { codigo, descricao?, qtd?, enderecos: ['A1'], complemento?, usuario? }
+// Body: { codigo, descricao?, qtd?, enderecos: ['A1'], complemento?, usuario?, tipo_movimentacao? }
 // Registra endereço(s) a partir do modal Movimentar (lista de produtos), sem Omie.
+// Gera ZPL com ID (mesmo fluxo da Identificação do produto / Armazenar).
 app.post('/api/etiquetas/rec-impresso/registrar-movimentacao', express.json(), async (req, res) => {
   try {
     const codigo    = String(req.body?.codigo || '').trim();
     const descricao = String(req.body?.descricao || '').trim() || null;
     const qtd       = Number(req.body?.qtd) || null;
-    const complemento = String(req.body?.complemento || '').trim() || null;
+    const complementoRaw = String(req.body?.complemento || '').trim() || null;
+    const tipoMov   = String(req.body?.tipo_movimentacao || '').trim().toUpperCase() || null;
     const usuario   = String(req.body?.usuario || req.body?.usuario_criacao || '').trim() || null;
     const enderecosRaw = Array.isArray(req.body?.enderecos) ? req.body.enderecos : [];
     const enderecos = [...new Set(enderecosRaw.map(e => String(e || '').trim()).filter(Boolean))];
@@ -11643,7 +11645,14 @@ app.post('/api/etiquetas/rec-impresso/registrar-movimentacao', express.json(), a
 
     const hoje = new Date();
     const dataEmissao = `${String(hoje.getDate()).padStart(2, '0')}/${String(hoje.getMonth() + 1).padStart(2, '0')}/${hoje.getFullYear()}`;
-    const apontamento = complemento ? `Apontamento: ${complemento}` : null;
+    const complementoPartes = [];
+    if (tipoMov) complementoPartes.push(`Tipo: ${tipoMov}`);
+    if (complementoRaw) complementoPartes.push(`Apontamento: ${complementoRaw}`);
+    const complemento = complementoPartes.length ? complementoPartes.join(' | ') : null;
+
+    const sanitize = (v, max = 999) => String(v || '').slice(0, max).replace(/[\\^~]/g, ' ');
+    const codProd  = sanitize(codigo, 30);
+    const descProd = sanitize(descricao || codigo, 70);
 
     const registros = [];
     for (const endereco of enderecos) {
@@ -11652,16 +11661,114 @@ app.post('/api/etiquetas/rec-impresso/registrar-movimentacao', express.json(), a
            (origem_id, qtd, unidade, data_emissao, conteudo_zpl, usuario_criacao,
             endereco, complemento, codigo_produto, descricao_produto, fonte)
          VALUES (NULL, $1, 'UN', $2, '', $3, $4, $5, $6, $7, 'movimentacao')
-         RETURNING id, endereco, codigo_produto, descricao_produto, qtd`,
-        [qtd, dataEmissao, usuario, endereco, apontamento, codigo, descricao]
+         RETURNING id, endereco, codigo_produto, descricao_produto, qtd, data_emissao`,
+        [qtd, dataEmissao, usuario, endereco, complemento, codigo, descricao]
       );
-      registros.push(rows[0]);
+      const row = rows[0];
+      const idImpresso = row.id;
+      const loteTxt = sanitize(endereco, 40);
+      const zpl = _gerarZplParaImpressao({
+        codProd,
+        descProd,
+        idImpresso,
+        loteTxt,
+        dataExibir: sanitize(row.data_emissao || dataEmissao, 10)
+      });
+      await pool.query(
+        `UPDATE etiqueta."ETQ_rec_impresso" SET conteudo_zpl = $1 WHERE id = $2`,
+        [zpl, idImpresso]
+      );
+      registros.push({ ...row, conteudo_zpl: zpl });
     }
 
     res.json({ ok: true, registros });
   } catch (err) {
     console.error('[etiquetas/rec-impresso/registrar-movimentacao]', err);
     res.status(500).json({ error: err?.message || 'Falha ao registrar endereço(s).' });
+  }
+});
+
+// POST /api/etiquetas/rec-impresso/imprimir-ids
+// Body: { ids: [idImpresso,...], destino_agente?, impressora?, usuario? }
+// Enfileira ZPL já gravado em ETQ_rec_impresso (fonte movimentacao / armazenamento).
+app.post('/api/etiquetas/rec-impresso/imprimir-ids', express.json(), async (req, res) => {
+  try {
+    const ids = Array.isArray(req.body?.ids) ? req.body.ids.map(Number).filter(n => n > 0) : [];
+    if (!ids.length) return res.status(400).json({ error: 'Nenhum id informado.' });
+
+    const result = await pool.query(
+      `SELECT id, codigo_produto, descricao_produto, endereco, data_emissao, conteudo_zpl
+         FROM etiqueta."ETQ_rec_impresso"
+        WHERE id = ANY($1::int[])
+        ORDER BY id`,
+      [ids]
+    );
+    if (!result.rows.length) return res.status(404).json({ error: 'Nenhuma etiqueta encontrada.' });
+
+    const sanitize = (v, max = 999) => String(v || '').slice(0, max).replace(/[\\^~]/g, ' ');
+    const zplBlocks = [];
+
+    for (const row of result.rows) {
+      let zpl = String(row.conteudo_zpl || '').trim();
+      if (!zpl) {
+        const codProd = sanitize(row.codigo_produto, 30);
+        const descProd = sanitize(row.descricao_produto, 70);
+        const loteTxt = sanitize(row.endereco || 'MOV', 40);
+        const dataExibir = sanitize(row.data_emissao, 10);
+        zpl = _gerarZplParaImpressao({ codProd, descProd, idImpresso: row.id, loteTxt, dataExibir });
+        await pool.query(
+          `UPDATE etiqueta."ETQ_rec_impresso" SET conteudo_zpl = $1 WHERE id = $2`,
+          [zpl, row.id]
+        );
+      }
+      zplBlocks.push(zpl);
+    }
+
+    const usuario = String(req.body?.usuario || req.session?.user?.login || req.session?.usuario || '').trim();
+    const destiAg = String(req.body?.destino_agente || '').trim() || null;
+    const impres  = String(req.body?.impressora || '').trim() || null;
+    const printerName = String(req.body?.printer || process.env.PRINTER || 'zebra').trim();
+
+    if (destiAg || impres || req.body?.via_fila !== false) {
+      const filaIns = await pool.query(
+        `INSERT INTO etiqueta."ETQ_fila_impressao" (etq_ids, multiplo, usuario, zpl, quantidade, destino_agente, impressora)
+         VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
+        [[], 0, usuario, zplBlocks.join('\n'), zplBlocks.length, destiAg, impres]
+      );
+      return res.json({ ok: true, fila_id: filaIns.rows[0].id, quantidade: zplBlocks.length, via: 'fila' });
+    }
+
+    const dirPrint = path.join(__dirname, 'etiquetas', 'Recebimento', 'Printed');
+    fs.mkdirSync(dirPrint, { recursive: true });
+    const erros = [];
+    for (let i = 0; i < zplBlocks.length; i++) {
+      const zpl = zplBlocks[i];
+      const idRef = result.rows[i]?.id || i;
+      const fname = `movim_imp${idRef}_${Date.now()}.zpl`;
+      const fpath = path.join(dirPrint, fname);
+      fs.writeFileSync(fpath, zpl, 'utf8');
+      await new Promise((resolve) => {
+        const args = printerName ? ['-P', printerName, '-o', 'raw', fpath] : ['-o', 'raw', fpath];
+        execFile('lpr', args, (err) => {
+          if (err) erros.push(_friendlyLprError(err.message));
+          resolve();
+        });
+      });
+    }
+
+    if (erros.length === zplBlocks.length) {
+      return res.status(200).json({ ok: false, error: erros[0] || 'Falha ao imprimir etiqueta.' });
+    }
+
+    res.json({
+      ok: true,
+      quantidade: zplBlocks.length - erros.length,
+      erros: erros.length ? erros : undefined,
+      via: 'lpr'
+    });
+  } catch (err) {
+    console.error('[etiquetas/rec-impresso/imprimir-ids]', err);
+    res.status(500).json({ error: err?.message || 'Falha ao imprimir etiqueta(s).' });
   }
 });
 

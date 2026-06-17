@@ -65867,13 +65867,13 @@ document.addEventListener('DOMContentLoaded', () => {
     return solicitanteRaw && solicitanteRaw !== '—' ? solicitanteRaw : null;
   }
 
-  async function registrarEnderecosEtq({ codigo, descricao, qtd, enderecos, complemento, usuario }) {
+  async function registrarEnderecosEtq({ codigo, descricao, qtd, enderecos, complemento, usuario, tipoMovimentacao }) {
     if (!enderecos?.length) return { ok: true, registros: [] };
     const resp = await fetch('/api/etiquetas/rec-impresso/registrar-movimentacao', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
-      body: JSON.stringify({ codigo, descricao, qtd, enderecos, complemento, usuario })
+      body: JSON.stringify({ codigo, descricao, qtd, enderecos, complemento, usuario, tipo_movimentacao: tipoMovimentacao })
     });
     let json;
     try { json = await resp.json(); } catch { throw new Error('Resposta inválida ao registrar endereço.'); }
@@ -65915,8 +65915,150 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
+  function isMesmoArmazemMovim() {
+    const origem = String(origemSel?.value || '').trim();
+    const destino = String(localSel?.value || '').trim();
+    return !!(origem && destino && origem === destino);
+  }
+
+  function atualizarUiMesmoArmazem() {
+    const mesmo = isMesmoArmazemMovim();
+    const aviso = document.getElementById('movimMesmoArmazemAviso');
+    const imprWrap = document.getElementById('movimImprimirEtiquetaWrap');
+    if (aviso) aviso.style.display = mesmo ? 'block' : 'none';
+    if (imprWrap) imprWrap.style.display = mesmo ? 'flex' : 'none';
+  }
+
+  function movimEtqImprKey() {
+    const u = String(document.getElementById('userNameDisplay')?.textContent || 'user').trim().replace(/\s+/g, '_');
+    return `etq_impr_cfg_${u}`;
+  }
+
+  function movimObterPrefsImpressora() {
+    try {
+      const cfg = JSON.parse(localStorage.getItem(movimEtqImprKey()) || '{}');
+      const padrao = cfg.padrao || null;
+      if (!padrao) return {};
+      if (padrao.startsWith('__AGENT__:')) {
+        const s = padrao.slice('__AGENT__:'.length);
+        const i = s.indexOf(':');
+        if (i === -1) return { destino_agente: s };
+        return { destino_agente: s.slice(0, i), impressora: s.slice(i + 1), via_fila: true };
+      }
+      if (padrao === '__BP__') return { via_fila: true };
+      if (padrao && padrao !== '__PDF__') return { printer: padrao, via_fila: false };
+      return {};
+    } catch {
+      return { via_fila: true };
+    }
+  }
+
+  async function imprimirEtiquetasMovim(ids) {
+    if (!ids?.length) return { ok: false, error: 'Nenhuma etiqueta para imprimir.' };
+    const usuario = obterSolicitanteMovim();
+    const body = { ids, usuario, ...movimObterPrefsImpressora() };
+    const resp = await fetch('/api/etiquetas/rec-impresso/imprimir-ids', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify(body)
+    });
+    let json;
+    try { json = await resp.json(); } catch {
+      return { ok: false, error: 'Resposta invalida ao imprimir etiqueta.' };
+    }
+    if (!resp.ok || !json?.ok) {
+      return { ok: false, error: json?.error || `Falha ao imprimir (HTTP ${resp.status}).` };
+    }
+    return json;
+  }
+
+  async function salvarEnderecamentoInterno(tipoAcao) {
+    const msg = document.getElementById('movimMensagem');
+    const qtd = obterQtdDaExpressao();
+    const apontamento = String(document.getElementById('movimApontamento')?.value || '').trim() || null;
+    const enderecos = obterEnderecosLidos();
+    const mapTipo = { ENTRADA: 'ENT', SAIDA: 'SAI', TRANSFERENCIA: 'TRF' };
+    const tipoMov = mapTipo[String(tipoAcao || '').toUpperCase()] || String(tipoAcao || '').toUpperCase();
+
+    if (!enderecos.length) {
+      if (msg) {
+        msg.textContent = 'Leia pelo menos um endereco (codigo de barras).';
+        msg.className = 'movim-mensagem erro';
+      }
+      return;
+    }
+    if (!qtd) {
+      if (msg) { msg.textContent = 'Informe uma quantidade valida.'; msg.className = 'movim-mensagem erro'; }
+      return;
+    }
+    if (!_codigoProdutoAtual) {
+      if (msg) { msg.textContent = 'Produto nao identificado.'; msg.className = 'movim-mensagem erro'; }
+      return;
+    }
+
+    const solicitante = obterSolicitanteMovim();
+    const imprimir = !!document.getElementById('movimImprimirEtiqueta')?.checked;
+    limparRetornoOmie();
+    if (msg) { msg.textContent = 'Registrando endereco…'; msg.className = 'movim-mensagem info'; }
+    _processandoAcao = true;
+    setBotoesAcaoDisabled(true);
+
+    try {
+      const etq = await registrarEnderecosEtq({
+        codigo: _codigoProdutoAtual,
+        descricao: _descricaoProdutoAtual,
+        qtd,
+        enderecos,
+        complemento: apontamento,
+        usuario: solicitante,
+        tipoMovimentacao: tipoMov
+      });
+      const ids = (etq.registros || []).map(r => r.id).filter(Boolean);
+      const linhas = [
+        `Produto: ${_codigoProdutoAtual}`,
+        `Tipo: ${tipoMov}`,
+        `Endereco(s): ${enderecos.join(', ')}`,
+        ids.length ? `Etiqueta(s) ETQ: ${ids.join(', ')}` : 'Registro salvo em ETQ_rec_impresso.'
+      ];
+
+      if (imprimir && ids.length) {
+        if (msg) { msg.textContent = 'Enviando etiqueta para impressao…'; msg.className = 'movim-mensagem info'; }
+        const imp = await imprimirEtiquetasMovim(ids);
+        if (imp?.ok) {
+          linhas.push(`${imp.quantidade || ids.length} etiqueta(s) enviada(s) para impressao.`);
+        } else {
+          linhas.push(`Impressao: ${imp?.error || 'falhou — configure a impressora em Identificacao do produto.'}`);
+        }
+      }
+
+      exibirRetornoOmie(montarHtmlRetornoOmie({
+        ok: true,
+        titulo: 'Endereco registrado (sem Omie)',
+        linhas
+      }), 'ok');
+      if (msg) { msg.textContent = 'Endereco registrado.'; msg.className = 'movim-mensagem ok'; }
+      limparEnderecos();
+    } catch (err) {
+      console.error('[modalMovimentacao] enderecamento interno', err);
+      exibirRetornoOmie(montarHtmlRetornoOmie({
+        ok: false,
+        titulo: 'Falha ao registrar endereco',
+        linhas: [String(err?.message || err)]
+      }), 'erro');
+      if (msg) { msg.textContent = 'Falha — veja o retorno abaixo.'; msg.className = 'movim-mensagem erro'; }
+    } finally {
+      _processandoAcao = false;
+      setBotoesAcaoDisabled(false);
+    }
+  }
+
   async function executarAcao(tipo) {
     if (_processandoAcao) return;
+    if (isMesmoArmazemMovim()) {
+      await salvarEnderecamentoInterno(tipo);
+      return;
+    }
     if (tipo === 'TRANSFERENCIA') {
       atualizarMotivosOmie('TRF');
       await salvarTransferencia();
@@ -66082,6 +66224,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
       preencherOrigem(origemSel);
       preencherDestino(localSel);
+      atualizarUiMesmoArmazem();
     } catch (e) {
       console.warn('[modalMovimentacao] erro ao carregar locais:', e);
     }
@@ -66263,19 +66406,10 @@ document.addEventListener('DOMContentLoaded', () => {
     const motivo = obterMotivoOmie('TRF');
     const apontamento = String(document.getElementById('movimApontamento')?.value || '').trim() || null;
     const enderecos = obterEnderecosLidos();
-    const isPortaPalletInterno = origem === destino && origem === MOVIM_DEFAULT_ORIGEM;
 
     if (!destino) {
       if (msg) { msg.textContent = 'Selecione o destino.'; msg.className = 'movim-mensagem erro'; }
       localSel?.focus();
-      return;
-    }
-    if (origem === destino && !isPortaPalletInterno) {
-      if (msg) { msg.textContent = 'Origem e destino devem ser diferentes (exceto Porta Pallet interno).'; msg.className = 'movim-mensagem erro'; }
-      return;
-    }
-    if (isPortaPalletInterno && !enderecos.length) {
-      if (msg) { msg.textContent = 'Leia pelo menos um endereço (código de barras).'; msg.className = 'movim-mensagem erro'; }
       return;
     }
     if (!qtd) {
@@ -66293,31 +66427,6 @@ document.addEventListener('DOMContentLoaded', () => {
     setBotoesAcaoDisabled(true);
 
     try {
-      // Porta Pallet → Porta Pallet: só registra endereço, sem Omie
-      if (isPortaPalletInterno) {
-        if (msg) { msg.textContent = 'Registrando endereço…'; msg.className = 'movim-mensagem info'; }
-        const etq = await registrarEnderecosEtq({
-          codigo: _codigoProdutoAtual,
-          descricao: _descricaoProdutoAtual,
-          qtd,
-          enderecos,
-          complemento: apontamento,
-          usuario: solicitante
-        });
-        const ids = (etq.registros || []).map(r => r.id).filter(Boolean);
-        exibirRetornoOmie(montarHtmlRetornoOmie({
-          ok: true,
-          titulo: 'Endereço registrado (sem movimentação Omie)',
-          linhas: [
-            `Produto: ${_codigoProdutoAtual}`,
-            `Endereço(s): ${enderecos.join(', ')}`,
-            ids.length ? `Registro(s) ETQ: ${ids.join(', ')}` : 'Registro salvo em ETQ_rec_impresso.'
-          ]
-        }), 'ok');
-        if (msg) { msg.textContent = 'Endereço registrado.'; msg.className = 'movim-mensagem ok'; }
-        return;
-      }
-
       if (msg) { msg.textContent = 'Registrando solicitação…'; msg.className = 'movim-mensagem info'; }
 
       const cmc = await buscarCmcOrigem(_codigoProdutoAtual, origem);
@@ -66412,7 +66521,8 @@ document.addEventListener('DOMContentLoaded', () => {
           qtd,
           enderecos,
           complemento: apontamento,
-          usuario: aprovadoPor
+          usuario: aprovadoPor,
+          tipoMovimentacao: 'TRF'
         });
       }
 
@@ -66455,8 +66565,202 @@ document.addEventListener('DOMContentLoaded', () => {
   if (localSel) {
     localSel.addEventListener('change', () => {
       if (_codigoProdutoAtual && localSel.value) carregarEstoque(_codigoProdutoAtual, localSel.value);
+      atualizarUiMesmoArmazem();
     });
   }
+  if (origemSel) {
+    origemSel.addEventListener('change', atualizarUiMesmoArmazem);
+  }
+
+  const histBtn     = document.getElementById('movimHistoricoBtn');
+  const histModal   = document.getElementById('movimHistoricoModal');
+  const histFechar  = document.getElementById('movimHistoricoFechar');
+  const histStatus  = document.getElementById('movimHistoricoStatus');
+  const histBody    = document.getElementById('movimHistoricoBody');
+  const histTitulo  = document.getElementById('movimHistoricoTitulo');
+  const histSub     = document.getElementById('movimHistoricoSubtitulo');
+
+  function fecharHistoricoAjustes() {
+    if (histModal) histModal.style.display = 'none';
+    if (histBody) histBody.innerHTML = '';
+    if (histStatus) {
+      histStatus.textContent = '';
+      histStatus.className = 'movim-hist-status';
+    }
+  }
+
+  function classeTipoHistorico(tipo) {
+    const t = String(tipo || '').toUpperCase();
+    if (t === 'ENT') return 'movim-hist-tipo-ent';
+    if (t === 'SAI') return 'movim-hist-tipo-sai';
+    if (t === 'TRF') return 'movim-hist-tipo-trf';
+    return '';
+  }
+
+  function formatarHistoricoLocal(item) {
+    const origem = item?.codigo_local_estoque;
+    const destino = item?.codigo_local_estoque_destino;
+    if (origem && destino && String(destino) !== '0') {
+      return `${origem} → ${destino}`;
+    }
+    return origem != null && origem !== '' ? String(origem) : '—';
+  }
+
+  function parseDataHistoricoOmie(val) {
+    const s = String(val || '').trim();
+    const m = s.match(/^(\d{2})\/(\d{2})\/(\d{4})/);
+    if (m) return new Date(Number(m[3]), Number(m[2]) - 1, Number(m[1])).getTime();
+    const t = Date.parse(s);
+    return Number.isFinite(t) ? t : 0;
+  }
+
+  function renderHistoricoAjustes(data) {
+    const listaRaw = Array.isArray(data?.ajuste_estoque_lista) ? data.ajuste_estoque_lista : [];
+    const lista = [...listaRaw].sort((a, b) => {
+      const db = parseDataHistoricoOmie(b?.data);
+      const da = parseDataHistoricoOmie(a?.data);
+      if (db !== da) return db - da;
+      return (Number(b?.id_ajuste) || 0) - (Number(a?.id_ajuste) || 0);
+    });
+    const total = data?.total_de_registros ?? lista.length;
+
+    if (histStatus) {
+      histStatus.textContent = `${total} registro(s) na Omie`;
+      histStatus.className = 'movim-hist-status';
+    }
+
+    if (!histBody) return;
+
+    if (!lista.length) {
+      histBody.innerHTML = '<div class="movim-hist-vazio">Nenhum ajuste de estoque encontrado para este produto.</div>';
+      return;
+    }
+
+    const linhas = lista.map(item => {
+      const tipo = String(item?.tipo || '—').toUpperCase();
+      const qtd = item?.quan ?? item?.quantidade ?? '—';
+      const valor = item?.valor != null && item.valor !== '' ? item.valor : '—';
+      const obs = String(item?.obs || '').trim();
+      return `
+        <tr>
+          <td>${escapeHtml(String(item?.data || '—'))}</td>
+          <td class="${classeTipoHistorico(tipo)}">${escapeHtml(tipo)}</td>
+          <td>${escapeHtml(String(qtd))}</td>
+          <td>${escapeHtml(String(item?.motivo || '—'))}</td>
+          <td>${escapeHtml(formatarHistoricoLocal(item))}</td>
+          <td>${escapeHtml(String(valor))}</td>
+          <td class="movim-hist-obs">${escapeHtml(obs || '—')}</td>
+        </tr>
+      `;
+    }).join('');
+
+    histBody.innerHTML = `
+      <table class="movim-hist-table">
+        <thead>
+          <tr>
+            <th>Data</th>
+            <th>Tipo</th>
+            <th>Qtd</th>
+            <th>Motivo</th>
+            <th>Local</th>
+            <th>Valor</th>
+            <th>Observacoes</th>
+          </tr>
+        </thead>
+        <tbody>${linhas}</tbody>
+      </table>
+    `;
+  }
+
+  async function abrirHistoricoAjustes() {
+    if (!histModal) return;
+
+    const idProd = _codigoProdutoOmieAtual;
+    const codigo = _codigoProdutoAtual;
+    if (!idProd && !codigo) {
+      const msg = document.getElementById('movimMensagem');
+      if (msg) {
+        msg.textContent = 'Produto sem ID Omie para consultar historico.';
+        msg.className = 'movim-mensagem erro';
+      }
+      return;
+    }
+
+    if (histTitulo) histTitulo.textContent = _descricaoProdutoAtual || codigo || 'Historico de ajustes';
+    if (histSub) {
+      const partes = [];
+      if (codigo) partes.push('Codigo: ' + codigo);
+      if (idProd) partes.push('ID Omie: ' + idProd);
+      histSub.textContent = partes.join(' · ');
+    }
+    if (histStatus) {
+      histStatus.textContent = 'Consultando historico na Omie...';
+      histStatus.className = 'movim-hist-status';
+    }
+    if (histBody) histBody.innerHTML = '';
+    histModal.style.display = 'flex';
+
+    const params = new URLSearchParams();
+    if (idProd) params.set('id_prod', String(idProd));
+    else params.set('codigo', String(codigo));
+
+    try {
+      const resp = await fetch(`/api/ajustes/historico-omie?${params.toString()}`, { credentials: 'include' });
+      let json;
+      try { json = await resp.json(); } catch {
+        throw new Error('Resposta invalida ao buscar historico.');
+      }
+      if (!resp.ok || !json?.ok) {
+        throw new Error(json?.error || `Falha ao buscar historico (HTTP ${resp.status}).`);
+      }
+      renderHistoricoAjustes(json);
+    } catch (err) {
+      if (histStatus) {
+        histStatus.textContent = String(err?.message || err);
+        histStatus.className = 'movim-hist-status erro';
+      }
+      if (histBody) histBody.innerHTML = '';
+    }
+  }
+
+  if (histBtn) histBtn.addEventListener('click', abrirHistoricoAjustes);
+  if (histFechar) histFechar.addEventListener('click', fecharHistoricoAjustes);
+  if (histModal) {
+    histModal.addEventListener('click', e => {
+      if (e.target === histModal) fecharHistoricoAjustes();
+    });
+  }
+
+  const comprasBtn = document.getElementById('movimComprasBtn');
+
+  async function abrirUltimasComprasMovim() {
+    let idOmie = _codigoProdutoOmieAtual;
+    const codigo = _codigoProdutoAtual;
+    const descricao = _descricaoProdutoAtual || codigo;
+
+    if (!idOmie && codigo) {
+      try {
+        const resp = await fetch(`/api/produtos/detalhe?codigo=${encodeURIComponent(codigo)}`, { credentials: 'include' });
+        const json = await resp.json();
+        if (resp.ok && json?.codigo_produto) idOmie = json.codigo_produto;
+      } catch { /* ignora — tenta abrir sem fallback */ }
+    }
+
+    if (!idOmie) {
+      const msg = document.getElementById('movimMensagem');
+      if (msg) {
+        msg.textContent = 'Produto sem ID Omie para consultar ultimas compras.';
+        msg.className = 'movim-mensagem erro';
+      }
+      return;
+    }
+
+    if (typeof window.abrirModalUltimasCompras === 'function') {
+      window.abrirModalUltimasCompras(idOmie, codigo, descricao);
+    }
+  }
+
+  if (comprasBtn) comprasBtn.addEventListener('click', abrirUltimasComprasMovim);
 
   // Abre o modal
   window.abrirModalMovimentacao = async function(codigo, descricao, codigoProduto) {
@@ -66471,6 +66775,8 @@ document.addEventListener('DOMContentLoaded', () => {
     limparRetornoOmie();
     limparEnderecos();
     atualizarMotivosOmie('TRF');
+    const imprCb = document.getElementById('movimImprimirEtiqueta');
+    if (imprCb) imprCb.checked = false;
 
     const titulo   = document.getElementById('movimTitulo');
     const subtitulo= document.getElementById('movimSubtitulo');
@@ -66479,6 +66785,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (overlay)   overlay.style.display = 'flex';
 
     await carregarLocais();
+    atualizarUiMesmoArmazem();
   };
 })();
 // ===================== FIM MODAL MOVIMENTAÇÃO =====================
