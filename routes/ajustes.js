@@ -18,7 +18,19 @@ const STATUS_EXECUTADO  = 'Executado';
 const STATUS_REPROVADO  = 'Reprovado';
 
 const TIPOS_VALIDOS = new Set(['ENT', 'SAI']);
-const MOTIVOS_OMIE_VALIDOS = new Set(['INV', 'OPS', 'PER', 'PDV']);
+const MOTIVOS_POR_TIPO = {
+  ENT: new Set(['INV', 'OPE', 'PDV', 'INI']),
+  SAI: new Set(['INV', 'PER', 'OPS', 'PDV']),
+  TRF: new Set(['TPQ', 'TRF']),
+  SLD: new Set(['INV', 'INI', 'CMC', 'PDV'])
+};
+
+function motivoValidoParaTipo(tipo, motivo) {
+  const t = String(tipo || '').toUpperCase();
+  const m = String(motivo || '').toUpperCase();
+  const set = MOTIVOS_POR_TIPO[t];
+  return set ? set.has(m) : false;
+}
 const ERROS_OMIE_NAO_RETRYAVEIS = [
   /api bloqueada por consumo indevido/i,
   /consumo redundante detectado/i,
@@ -205,7 +217,7 @@ async function incluirAjusteOmie(registro, aprovadoPor) {
   const dataObj = normalizarDataMovimentacao(data_movimentacao);
   const tipoOmie = String(tipo_operacao || '').toUpperCase();
   const motivoNormalizado = String(motivo || 'INV').toUpperCase();
-  const motivoOmie = MOTIVOS_OMIE_VALIDOS.has(motivoNormalizado) ? motivoNormalizado : 'INV';
+  const motivoOmie = motivoValidoParaTipo(tipoOmie, motivoNormalizado) ? motivoNormalizado : 'INV';
   const obsTexto = obs
     ? String(obs).slice(0, 200)
     : `Ajuste ${tipoOmie} #${id} - Produto ${codigo || ''}. Executado por ${aprovadoPor}.`;
@@ -543,7 +555,7 @@ router.post('/', express.json(), async (req, res) => {
     const solicitante    = String(req.body?.solicitante || '').trim() || null;
     const obs            = String(req.body?.obs || '').trim() || null;
     const motivoRaw      = String(req.body?.motivo || 'INV').trim().toUpperCase() || 'INV';
-    const motivo         = MOTIVOS_OMIE_VALIDOS.has(motivoRaw) ? motivoRaw : 'INV';
+    const motivo         = motivoValidoParaTipo(tipo_operacao, motivoRaw) ? motivoRaw : 'INV';
     const itens          = Array.isArray(req.body?.itens) ? req.body.itens : [];
 
     if (!TIPOS_VALIDOS.has(tipo_operacao)) {

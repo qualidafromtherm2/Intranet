@@ -10623,6 +10623,9 @@ app.use('/etiquetas', requireSessionOrAgentForStatic, express.static(etiquetasRo
     // Migração: colunas de armazenamento
     await pool.query(`ALTER TABLE etiqueta."ETQ_rec_impresso" ADD COLUMN IF NOT EXISTS endereco TEXT`);
     await pool.query(`ALTER TABLE etiqueta."ETQ_rec_impresso" ADD COLUMN IF NOT EXISTS complemento TEXT`);
+    await pool.query(`ALTER TABLE etiqueta."ETQ_rec_impresso" ADD COLUMN IF NOT EXISTS codigo_produto TEXT`);
+    await pool.query(`ALTER TABLE etiqueta."ETQ_rec_impresso" ADD COLUMN IF NOT EXISTS descricao_produto TEXT`);
+    await pool.query(`ALTER TABLE etiqueta."ETQ_rec_impresso" ADD COLUMN IF NOT EXISTS fonte TEXT DEFAULT 'recebimento'`);
     // Tabela de fila de impressão (para agente polling)
     await pool.query(`
       CREATE TABLE IF NOT EXISTS etiqueta."ETQ_fila_impressao" (
@@ -10646,7 +10649,18 @@ app.use('/etiquetas', requireSessionOrAgentForStatic, express.static(etiquetasRo
         criado_em      TIMESTAMPTZ NOT NULL DEFAULT NOW()
       )
     `);
-    console.log('[etiqueta] Schema e tabelas ETQ_recebimento / ETQ_rec_impresso / ETQ_fila_impressao / ETQ_auto_oculto garantidos');
+    // Tabela de registro de agentes de impressão (heartbeat — fallback pós-restart)
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS etiqueta."ETQ_agentes" (
+        pc_name         TEXT        PRIMARY KEY,
+        printers        JSONB       NOT NULL DEFAULT '[]',
+        printer_aliases JSONB       NOT NULL DEFAULT '{}',
+        version         TEXT,
+        host            TEXT,
+        last_seen       TIMESTAMPTZ NOT NULL DEFAULT now()
+      )
+    `);
+    console.log('[etiqueta] Schema e tabelas ETQ_recebimento / ETQ_rec_impresso / ETQ_fila_impressao / ETQ_auto_oculto / ETQ_agentes garantidos');
   } catch (err) {
     console.error('[etiqueta] Falha ao garantir schema/tabela:', err?.message || err);
   }
@@ -11608,6 +11622,46 @@ app.patch('/api/etiquetas/rec-impresso/:id/endereco', express.json(), async (req
   } catch (err) {
     console.error('[etiquetas/rec-impresso/endereco]', err);
     res.status(500).json({ error: err?.message || 'Falha ao registrar endereço' });
+  }
+});
+
+// POST /api/etiquetas/rec-impresso/registrar-movimentacao
+// Body: { codigo, descricao?, qtd?, enderecos: ['A1'], complemento?, usuario? }
+// Registra endereço(s) a partir do modal Movimentar (lista de produtos), sem Omie.
+app.post('/api/etiquetas/rec-impresso/registrar-movimentacao', express.json(), async (req, res) => {
+  try {
+    const codigo    = String(req.body?.codigo || '').trim();
+    const descricao = String(req.body?.descricao || '').trim() || null;
+    const qtd       = Number(req.body?.qtd) || null;
+    const complemento = String(req.body?.complemento || '').trim() || null;
+    const usuario   = String(req.body?.usuario || req.body?.usuario_criacao || '').trim() || null;
+    const enderecosRaw = Array.isArray(req.body?.enderecos) ? req.body.enderecos : [];
+    const enderecos = [...new Set(enderecosRaw.map(e => String(e || '').trim()).filter(Boolean))];
+
+    if (!codigo) return res.status(400).json({ error: 'codigo é obrigatório.' });
+    if (!enderecos.length) return res.status(400).json({ error: 'Informe ao menos um endereço.' });
+
+    const hoje = new Date();
+    const dataEmissao = `${String(hoje.getDate()).padStart(2, '0')}/${String(hoje.getMonth() + 1).padStart(2, '0')}/${hoje.getFullYear()}`;
+    const apontamento = complemento ? `Apontamento: ${complemento}` : null;
+
+    const registros = [];
+    for (const endereco of enderecos) {
+      const { rows } = await pool.query(
+        `INSERT INTO etiqueta."ETQ_rec_impresso"
+           (origem_id, qtd, unidade, data_emissao, conteudo_zpl, usuario_criacao,
+            endereco, complemento, codigo_produto, descricao_produto, fonte)
+         VALUES (NULL, $1, 'UN', $2, '', $3, $4, $5, $6, $7, 'movimentacao')
+         RETURNING id, endereco, codigo_produto, descricao_produto, qtd`,
+        [qtd, dataEmissao, usuario, endereco, apontamento, codigo, descricao]
+      );
+      registros.push(rows[0]);
+    }
+
+    res.json({ ok: true, registros });
+  } catch (err) {
+    console.error('[etiquetas/rec-impresso/registrar-movimentacao]', err);
+    res.status(500).json({ error: err?.message || 'Falha ao registrar endereço(s).' });
   }
 });
 
