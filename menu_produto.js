@@ -1137,14 +1137,14 @@ async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) 
           ${readonlySep
             ? ''
             : isConferido
-            ? `<div class="sep-actions" style="display:flex;gap:6px;align-items:flex-start;flex-wrap:wrap;justify-content:flex-end;flex-shrink:0;">
+            ? `<div class="sep-actions sep-actions--inline" style="display:flex;gap:6px;align-items:flex-start;flex-wrap:wrap;justify-content:flex-end;flex-shrink:0;">
                  <button class="btn-item-retificar" title="Voltar item para Separado"
                    style="padding:4px 9px;border:none;border-radius:6px;background:#4b5563;color:#e5e7eb;font-weight:700;font-size:.70rem;cursor:pointer;white-space:nowrap;">
                    <i class="fa-solid fa-rotate-left" style="margin-right:3px;"></i>Retificar
                  </button>
                </div>`
             : isSep
-            ? `<div class="sep-actions" style="display:flex;gap:6px;align-items:flex-start;flex-wrap:wrap;justify-content:flex-end;flex-shrink:0;">
+            ? `<div class="sep-actions sep-actions--inline" style="display:flex;gap:6px;align-items:flex-start;flex-wrap:wrap;justify-content:flex-end;flex-shrink:0;">
                  <button class="btn-item-conferido" title="Enviar para Aguardando retirada"
                    style="padding:4px 9px;border:none;border-radius:6px;background:#16a34a;color:#dcfce7;font-weight:700;font-size:.70rem;cursor:pointer;white-space:nowrap;">
                    <i class="fa-solid fa-clipboard-check" style="margin-right:3px;"></i>Conferido
@@ -1158,7 +1158,7 @@ async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) 
                    <i class="fa-solid fa-arrows-rotate" style="margin-right:3px;"></i>Trocar
                  </button>
                </div>`
-            : `<div class="sep-actions" style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;">
+            : `<div class="sep-actions sep-actions--grid" style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;">
                  <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;width:100%;">
                    <button class="btn-item-sep-tudo"
                      style="padding:4px 6px;border:none;border-radius:6px;background:#166534;color:#dcfce7;font-weight:700;font-size:.67rem;cursor:pointer;white-space:nowrap;text-align:center;">

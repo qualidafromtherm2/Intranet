@@ -5823,15 +5823,33 @@ ul#comprasList li ,
     flex-wrap: wrap !important;
   }
 
+  #modalSeparacaoLogistica .sep-actions--inline,
+  #modalAguardandoRetiradaSep .sep-actions--inline {
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    width: 100% !important;
+  }
+
+  #modalSeparacaoLogistica .sep-actions--grid,
+  #modalAguardandoRetiradaSep .sep-actions--grid {
+    width: 100% !important;
+  }
+
   #modalSeparacaoLogistica .sep-actions > div,
   #modalAguardandoRetiradaSep .sep-actions > div {
     width: 100% !important;
+    display: grid !important;
     grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    gap: 6px !important;
   }
 
   #modalSeparacaoLogistica .sep-actions button,
   #modalAguardandoRetiradaSep .sep-actions button {
     width: 100% !important;
+    min-height: 42px !important;
+    padding: 8px 10px !important;
+    font-size: .76rem !important;
+    line-height: 1.15 !important;
   }
 
   #modalSeparacaoLogistica .sep-loc-stack,
@@ -5842,6 +5860,7 @@ ul#comprasList li ,
   #modalSeparacaoLogistica .sep-loc-grid,
   #modalAguardandoRetiradaSep .sep-loc-grid {
     flex-direction: column !important;
+    align-items: flex-start !important;
     gap: 6px !important;
   }
 
@@ -5849,7 +5868,14 @@ ul#comprasList li ,
   #modalAguardandoRetiradaSep .sep-loc-box {
     min-width: 0 !important;
     width: 100% !important;
+    flex: 0 0 auto !important;
+    min-height: 0 !important;
     padding: 5px 7px !important;
+  }
+
+  #modalSeparacaoLogistica .sep-loc-box--origin,
+  #modalAguardandoRetiradaSep .sep-loc-box--origin {
+    padding-bottom: 4px !important;
   }
 
   #modalSeparacaoLogistica .sep-loc-box > div:first-child,
@@ -5898,6 +5924,18 @@ ul#comprasList li ,
     white-space: normal !important;
     overflow: visible !important;
     text-overflow: clip !important;
+  }
+
+  #modalSeparacaoLogistica .sep-meta,
+  #modalAguardandoRetiradaSep .sep-meta {
+    margin-top: 1px !important;
+  }
+
+  #modalSeparacaoLogistica .sep-meta button,
+  #modalAguardandoRetiradaSep .sep-meta button {
+    min-height: 28px !important;
+    padding: 3px 8px !important;
+    font-size: .64rem !important;
   }
 
   #modalSeparacaoLogistica .sep-actions > div,
