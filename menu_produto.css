@@ -5708,7 +5708,201 @@ ul#comprasList li ,
 
 @media (max-width: 768px) {
   #kanbanSolicBoard {
+    display: grid !important;
     grid-template-columns: 1fr;
+    gap: 10px !important;
+    overflow-x: visible !important;
+  }
+}
+
+/* ================================================================
+   SEP â€” Responsividade fina para desktop / tablet / mobile
+   ================================================================ */
+
+#solicitacoesConteudo #solicitacoesKanbanBoard,
+#kanbanSolicitacoesConteudo #kanbanSolicBoard {
+  display: grid !important;
+  grid-template-columns: repeat(4, minmax(220px, 1fr));
+  gap: 14px !important;
+  overflow-x: visible !important;
+  align-items: start !important;
+}
+
+@media (max-width: 1280px) {
+  #solicitacoesConteudo #solicitacoesKanbanBoard,
+  #kanbanSolicitacoesConteudo #kanbanSolicBoard {
+    grid-template-columns: repeat(3, minmax(220px, 1fr));
+  }
+}
+
+@media (max-width: 1024px) {
+  #solicitacoesConteudo #solicitacoesKanbanBoard,
+  #kanbanSolicitacoesConteudo #kanbanSolicBoard {
+    grid-template-columns: repeat(2, minmax(240px, 1fr));
+  }
+}
+
+@media (max-width: 768px) {
+  #solicitacoesConteudo #solicitacoesKanbanBoard,
+  #kanbanSolicitacoesConteudo #kanbanSolicBoard {
+    grid-template-columns: 1fr;
+  }
+}
+
+#modalSeparacaoLogistica > div,
+#modalAguardandoRetiradaSep > div {
+  width: min(760px, 96vw);
+  max-height: 92vh;
+}
+
+@media (max-width: 768px) {
+  #modalSeparacaoLogistica,
+  #modalAguardandoRetiradaSep {
+    align-items: stretch !important;
+    justify-content: stretch !important;
+  }
+
+  #modalSeparacaoLogistica > div,
+  #modalAguardandoRetiradaSep > div {
+    width: 100vw !important;
+    height: 100dvh !important;
+    max-height: none !important;
+    border-radius: 0 !important;
+    border-left: 0 !important;
+    border-right: 0 !important;
+  }
+
+  #modalSeparacaoLogistica > div > div:first-child,
+  #modalAguardandoRetiradaSep > div > div:first-child {
+    padding: 12px 14px !important;
+  }
+
+  #modalSepInner {
+    padding-bottom: 10px !important;
+  }
+
+  #modalSeparacaoLogistica .sep-row,
+  #modalAguardandoRetiradaSep .sep-row {
+    flex-direction: column !important;
+    align-items: stretch !important;
+    gap: 8px !important;
+    padding: 10px 12px !important;
+  }
+
+  #modalSeparacaoLogistica .sep-thumb,
+  #modalAguardandoRetiradaSep .sep-thumb {
+    width: 34px !important;
+    height: 34px !important;
+    margin-top: 0 !important;
+  }
+
+  #modalSeparacaoLogistica .sep-main,
+  #modalAguardandoRetiradaSep .sep-main {
+    width: 100% !important;
+  }
+
+  #modalSeparacaoLogistica .sep-meta,
+  #modalAguardandoRetiradaSep .sep-meta {
+    gap: 4px !important;
+    line-height: 1.25 !important;
+  }
+
+  #modalSeparacaoLogistica .sep-qty,
+  #modalAguardandoRetiradaSep .sep-qty,
+  #modalSeparacaoLogistica .sep-actions,
+  #modalAguardandoRetiradaSep .sep-actions {
+    width: 100% !important;
+    justify-content: flex-start !important;
+    align-items: flex-start !important;
+  }
+
+  #modalSeparacaoLogistica .sep-actions,
+  #modalAguardandoRetiradaSep .sep-actions {
+    flex-direction: row !important;
+    gap: 6px !important;
+    flex-wrap: wrap !important;
+  }
+
+  #modalSeparacaoLogistica .sep-actions > div,
+  #modalAguardandoRetiradaSep .sep-actions > div {
+    width: 100% !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+
+  #modalSeparacaoLogistica .sep-actions button,
+  #modalAguardandoRetiradaSep .sep-actions button {
+    width: 100% !important;
+  }
+
+  #modalSeparacaoLogistica .sep-loc-stack,
+  #modalAguardandoRetiradaSep .sep-loc-stack {
+    gap: 4px !important;
+  }
+
+  #modalSeparacaoLogistica .sep-loc-grid,
+  #modalAguardandoRetiradaSep .sep-loc-grid {
+    flex-direction: column !important;
+    gap: 6px !important;
+  }
+
+  #modalSeparacaoLogistica .sep-loc-box,
+  #modalAguardandoRetiradaSep .sep-loc-box {
+    min-width: 0 !important;
+    width: 100% !important;
+    padding: 5px 7px !important;
+  }
+
+  #modalSeparacaoLogistica .sep-loc-box > div:first-child,
+  #modalAguardandoRetiradaSep .sep-loc-box > div:first-child {
+    margin-bottom: 3px !important;
+  }
+
+  #modalSeparacaoLogistica [id^="origens-extra-"],
+  #modalAguardandoRetiradaSep [id^="origens-extra-"] {
+    position: static !important;
+    inset: auto !important;
+    left: auto !important;
+    right: auto !important;
+    top: auto !important;
+    width: 100% !important;
+    max-height: 128px !important;
+    margin-top: 4px !important;
+  }
+
+  #modalSeparacaoLogistica .sol-origem-toggle,
+  #modalAguardandoRetiradaSep .sol-origem-toggle {
+    max-width: 100% !important;
+    white-space: normal !important;
+    text-align: left !important;
+  }
+}
+
+@media (max-width: 480px) {
+  #modalSeparacaoLogistica > div,
+  #modalAguardandoRetiradaSep > div {
+    width: 100vw !important;
+  }
+
+  #modalSeparacaoLogistica .sep-row,
+  #modalAguardandoRetiradaSep .sep-row {
+    padding: 9px 10px !important;
+  }
+
+  #modalSeparacaoLogistica .sep-main > div:first-child,
+  #modalAguardandoRetiradaSep .sep-main > div:first-child {
+    font-size: .76rem !important;
+  }
+
+  #modalSeparacaoLogistica .sep-main > div:nth-child(2),
+  #modalAguardandoRetiradaSep .sep-main > div:nth-child(2) {
+    white-space: normal !important;
+    overflow: visible !important;
+    text-overflow: clip !important;
+  }
+
+  #modalSeparacaoLogistica .sep-actions > div,
+  #modalAguardandoRetiradaSep .sep-actions > div {
+    grid-template-columns: 1fr !important;
   }
 }
 

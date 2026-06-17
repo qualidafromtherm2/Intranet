@@ -1047,14 +1047,14 @@ async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) 
     }
 
     const localizacaoHtml = `
-      <div style="margin-top:6px;display:flex;flex-direction:column;gap:6px;">
+      <div class="sep-loc-stack" style="margin-top:6px;display:flex;flex-direction:column;gap:6px;">
         ${enderecamentoHtml}
-        <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:stretch;">
-          <div style="min-width:220px;flex:1 1 240px;padding:6px 8px;background:#101826;border:1px solid #253041;border-radius:8px;">
+        <div class="sep-loc-grid" style="display:flex;gap:10px;flex-wrap:wrap;align-items:stretch;">
+          <div class="sep-loc-box sep-loc-box--origin" style="min-width:220px;flex:1 1 240px;padding:6px 8px;background:#101826;border:1px solid #253041;border-radius:8px;">
             <div style="font-size:.60rem;color:#60a5fa;font-weight:700;text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px;">Origem</div>
             ${origemHtml}
           </div>
-          <div style="min-width:170px;flex:1;padding:6px 8px;background:#1b1730;border:1px solid #312e81;border-radius:8px;">
+          <div class="sep-loc-box sep-loc-box--dest" style="min-width:170px;flex:1;padding:6px 8px;background:#1b1730;border:1px solid #312e81;border-radius:8px;">
             <div style="font-size:.60rem;color:#a78bfa;font-weight:700;text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px;">Destino</div>
             ${destinoHtml}
           </div>
@@ -1098,7 +1098,7 @@ async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) 
          </div>`;
     const isUrgente = !!it.urgente;
     return `
-      <div data-item-row="${it.cod_omie || it.codigo_produto}"
+      <div class="sep-row sep-row--work" data-item-row="${it.cod_omie || it.codigo_produto}"
            data-n-solic="${nSolic || ''}"
            data-solic-ids='${JSON.stringify(it.solic_ids)}'
            data-carr-ids='${JSON.stringify(it.carr_ids)}'
@@ -1110,13 +1110,13 @@ async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) 
            data-observacao="${encodeURIComponent(obsText)}"
            data-unidade="${String(it.unidade || 'UN').replace(/"/g, '&quot;')}"
            style="display:flex;align-items:flex-start;gap:12px;padding:10px 16px;border-top:1px solid #222;${isConferido ? 'background:#0c1812;border-left:3px solid #22c55e;' : ''}${isUrgente ? 'border-left:3px solid #ef4444 !important;' : ''}">
-        <div style="width:40px;height:40px;border-radius:8px;background:#0f0f0f;overflow:hidden;flex-shrink:0;margin-top:2px;">
+        <div class="sep-thumb" style="width:40px;height:40px;border-radius:8px;background:#0f0f0f;overflow:hidden;flex-shrink:0;margin-top:2px;">
           ${_solGetMiniImgHtml(it.codigo_produto, it.descricao || '')}
         </div>
-        <div style="flex:1;min-width:0;">
+        <div class="sep-main" style="flex:1;min-width:0;">
           <div style="font-weight:700;font-size:.80rem;color:#f59e0b;">${it.codigo_produto}</div>
           <div style="font-size:.78rem;color:#d1d5db;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${it.descricao || '—'}</div>
-          <div style="font-size:.73rem;color:#9ca3af;margin-top:2px;display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+          <div class="sep-meta" style="font-size:.73rem;color:#9ca3af;margin-top:2px;display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
             ${dh ? `<i class="fa-regular fa-calendar" style="color:#6b7280;"></i><span>${dh}</span>` : ''}
             ${isConferido
               ? `<span style="display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:20px;font-size:.68rem;font-weight:700;color:#86efac;background:#0f2018;border:1px solid #22c55e55;">
@@ -1133,18 +1133,18 @@ async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) 
           ${swapHistory}
           ${localizacaoHtml}
         </div>
-          ${qtyHtml}
+          <div class="sep-qty">${qtyHtml}</div>
           ${readonlySep
             ? ''
             : isConferido
-            ? `<div style="display:flex;gap:6px;align-items:flex-start;flex-wrap:wrap;justify-content:flex-end;flex-shrink:0;">
+            ? `<div class="sep-actions" style="display:flex;gap:6px;align-items:flex-start;flex-wrap:wrap;justify-content:flex-end;flex-shrink:0;">
                  <button class="btn-item-retificar" title="Voltar item para Separado"
                    style="padding:4px 9px;border:none;border-radius:6px;background:#4b5563;color:#e5e7eb;font-weight:700;font-size:.70rem;cursor:pointer;white-space:nowrap;">
                    <i class="fa-solid fa-rotate-left" style="margin-right:3px;"></i>Retificar
                  </button>
                </div>`
             : isSep
-            ? `<div style="display:flex;gap:6px;align-items:flex-start;flex-wrap:wrap;justify-content:flex-end;flex-shrink:0;">
+            ? `<div class="sep-actions" style="display:flex;gap:6px;align-items:flex-start;flex-wrap:wrap;justify-content:flex-end;flex-shrink:0;">
                  <button class="btn-item-conferido" title="Enviar para Aguardando retirada"
                    style="padding:4px 9px;border:none;border-radius:6px;background:#16a34a;color:#dcfce7;font-weight:700;font-size:.70rem;cursor:pointer;white-space:nowrap;">
                    <i class="fa-solid fa-clipboard-check" style="margin-right:3px;"></i>Conferido
@@ -1158,7 +1158,7 @@ async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) 
                    <i class="fa-solid fa-arrows-rotate" style="margin-right:3px;"></i>Trocar
                  </button>
                </div>`
-            : `<div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;">
+            : `<div class="sep-actions" style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;">
                  <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;width:100%;">
                    <button class="btn-item-sep-tudo"
                      style="padding:4px 6px;border:none;border-radius:6px;background:#166534;color:#dcfce7;font-weight:700;font-size:.67rem;cursor:pointer;white-space:nowrap;text-align:center;">
