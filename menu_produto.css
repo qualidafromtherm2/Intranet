@@ -10420,6 +10420,69 @@ table.tabela td.num {
   flex: 1; background: #0f172a; border: 1px solid #334155; border-radius: 8px;
   padding: 9px 12px; color: #f1f5f9; font-size: .9rem;
 }
+/* Histórico de ajustes Omie (modal movimentação) */
+.movim-hist-overlay {
+  position: fixed; inset: 0; z-index: 10100;
+  background: rgba(0,0,0,.82); backdrop-filter: blur(6px);
+  display: flex; align-items: center; justify-content: center; padding: 16px;
+}
+.movim-hist-panel {
+  width: min(920px, 100%);
+  max-height: 88vh;
+  background: #1a1d27;
+  border: 1px solid rgba(113,119,144,.28);
+  border-radius: 18px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-shadow: 0 18px 48px rgba(0,0,0,.55);
+}
+.movim-hist-header {
+  display: flex; align-items: flex-start; justify-content: space-between;
+  gap: 12px; padding: 16px 18px; border-bottom: 1px solid rgba(113,119,144,.2);
+}
+.movim-hist-title-wrap { display: flex; align-items: flex-start; gap: 10px; color: #f1f5f9; }
+.movim-hist-title-wrap i { color: #60a5fa; margin-top: 3px; }
+.movim-hist-titulo { display: block; font-size: 1rem; font-weight: 700; }
+.movim-hist-subtitulo { display: block; font-size: .78rem; color: #8ea0b8; margin-top: 2px; }
+.movim-hist-status {
+  padding: 10px 18px; font-size: .84rem; color: #94a3b8;
+  border-bottom: 1px solid rgba(113,119,144,.14);
+}
+.movim-hist-status.erro { color: #f87171; }
+.movim-hist-body {
+  flex: 1; min-height: 120px; overflow: auto; padding: 12px 14px 16px;
+}
+.movim-hist-vazio {
+  color: #6b7280; font-size: .9rem; text-align: center; padding: 28px 12px;
+}
+.movim-hist-table {
+  width: 100%; border-collapse: collapse; font-size: .8rem;
+}
+.movim-hist-table th,
+.movim-hist-table td {
+  padding: 8px 10px; border-bottom: 1px solid rgba(71,85,105,.45);
+  text-align: left; vertical-align: top;
+}
+.movim-hist-table th {
+  color: #9ca3af; font-weight: 600; position: sticky; top: 0;
+  background: #1a1d27; z-index: 1;
+}
+.movim-hist-table td { color: #e2e8f0; }
+.movim-hist-tipo-ent { color: #4ade80; font-weight: 700; }
+.movim-hist-tipo-sai { color: #f87171; font-weight: 700; }
+.movim-hist-tipo-trf { color: #60a5fa; font-weight: 700; }
+.movim-hist-obs { color: #94a3b8; max-width: 220px; word-break: break-word; }
+.movim-mesmo-arm-aviso {
+  font-size: .82rem; color: #fbbf24; background: rgba(251,191,36,.08);
+  border: 1px solid rgba(251,191,36,.25); border-radius: 10px; padding: 10px 12px;
+}
+.movim-imprimir-wrap {
+  display: flex; align-items: center; gap: 8px; font-size: .84rem; color: #cbd5e1;
+  cursor: pointer; user-select: none;
+}
+.movim-imprimir-wrap input { accent-color: #6366f1; }
+
 .movim-scan-manual button {
   background: #059669; color: #fff; border: none; border-radius: 8px;
   padding: 9px 16px; font-weight: 700; cursor: pointer;
