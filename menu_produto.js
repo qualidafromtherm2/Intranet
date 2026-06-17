@@ -1110,7 +1110,7 @@ async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) 
            data-observacao="${encodeURIComponent(obsText)}"
            data-unidade="${String(it.unidade || 'UN').replace(/"/g, '&quot;')}"
            style="display:flex;align-items:flex-start;gap:12px;padding:10px 16px;border-top:1px solid #222;${isConferido ? 'background:#0c1812;border-left:3px solid #22c55e;' : ''}${isUrgente ? 'border-left:3px solid #ef4444 !important;' : ''}">
-        <div class="sep-thumb" style="width:40px;height:40px;border-radius:8px;background:#0f0f0f;overflow:hidden;flex-shrink:0;margin-top:2px;">
+        <div class="sep-thumb" data-preview-title="${String(it.codigo_produto || '').replace(/"/g, '&quot;')} - ${String(it.descricao || '').replace(/"/g, '&quot;')}" style="width:40px;height:40px;border-radius:8px;background:#0f0f0f;overflow:hidden;flex-shrink:0;margin-top:2px;cursor:zoom-in;">
           ${_solGetMiniImgHtml(it.codigo_produto, it.descricao || '')}
         </div>
         <div class="sep-main" style="flex:1;min-width:0;">
@@ -1162,11 +1162,11 @@ async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) 
                  <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;width:100%;">
                    <button class="btn-item-sep-tudo"
                      style="padding:4px 6px;border:none;border-radius:6px;background:#166534;color:#dcfce7;font-weight:700;font-size:.67rem;cursor:pointer;white-space:nowrap;text-align:center;">
-                     <i class="fa-solid fa-check" style="margin-right:2px;"></i>Separei tudo
+                     <i class="fa-solid fa-check" style="margin-right:2px;"></i>Separado
                    </button>
                    <button class="btn-item-sep-parcial"
                      style="padding:4px 6px;border:none;border-radius:6px;background:#b45309;color:#ffedd5;font-weight:700;font-size:.67rem;cursor:pointer;white-space:nowrap;text-align:center;">
-                     <i class="fa-solid fa-scale-balanced" style="margin-right:2px;"></i>Informar qtd
+                     <i class="fa-solid fa-scale-balanced" style="margin-right:2px;"></i>Manual
                    </button>
                    ${isEmSeparacao ? `
                    <button class="btn-item-nao-sep"
@@ -1491,7 +1491,7 @@ async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) 
           <div style="font-size:.82rem;color:#f0f0f0;font-weight:700;">Quantidade original: ${_solFmtQty(qtyTotal)} ${unidade}</div>
         </div>
         <div style="padding:12px 16px;border-top:1px solid #2a2a2a;display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end;background:#171717;">
-          <button id="btnAcaoSepTudo" style="padding:7px 12px;border:none;border-radius:8px;background:#166534;color:#dcfce7;font-weight:700;font-size:.82rem;cursor:pointer;">Separei tudo</button>
+          <button id="btnAcaoSepTudo" style="padding:7px 12px;border:none;border-radius:8px;background:#166534;color:#dcfce7;font-weight:700;font-size:.82rem;cursor:pointer;">Separado</button>
           <button id="btnAcaoSepParcial" style="padding:7px 12px;border:none;border-radius:8px;background:#b45309;color:#ffedd5;font-weight:700;font-size:.82rem;cursor:pointer;">Informar quantidade</button>
           ${status !== 'Stund-by' ? `<button id="btnAcaoNaoSep" style="padding:7px 12px;border:none;border-radius:8px;background:#7c2d12;color:#ffedd5;font-weight:700;font-size:.82rem;cursor:pointer;">Não separei</button>` : ''}
         </div>
@@ -1519,7 +1519,7 @@ async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) 
         await reloadItems();
       } catch (err) {
         alert('Erro: ' + (err.message || err));
-        _solBtnRestore(btn, 'Separei tudo');
+        _solBtnRestore(btn, 'Separado');
       }
     });
 
@@ -1820,7 +1820,7 @@ async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) 
         await reloadItems();
       } catch (err) {
         alert('Erro: ' + (err.message || err));
-        _solBtnRestore(btnSepTudo, '<i class="fa-solid fa-check" style="margin-right:2px;"></i>Separei tudo');
+        _solBtnRestore(btnSepTudo, '<i class="fa-solid fa-check" style="margin-right:2px;"></i>Separado');
       }
       return;
     }
@@ -1838,7 +1838,7 @@ async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) 
       try {
         await _confirmarSepParcial(row, qtySep);
       } finally {
-        _solBtnRestore(btnSepParcial, '<i class="fa-solid fa-scale-balanced" style="margin-right:2px;"></i>Informar qtd');
+        _solBtnRestore(btnSepParcial, '<i class="fa-solid fa-scale-balanced" style="margin-right:2px;"></i>Manual');
       }
       return;
     }

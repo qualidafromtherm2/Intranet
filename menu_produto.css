@@ -5846,9 +5846,9 @@ ul#comprasList li ,
   #modalSeparacaoLogistica .sep-actions button,
   #modalAguardandoRetiradaSep .sep-actions button {
     width: 100% !important;
-    min-height: 42px !important;
-    padding: 8px 10px !important;
-    font-size: .76rem !important;
+    min-height: 44px !important;
+    padding: 9px 10px !important;
+    font-size: .74rem !important;
     line-height: 1.15 !important;
   }
 
@@ -5940,7 +5940,27 @@ ul#comprasList li ,
 
   #modalSeparacaoLogistica .sep-actions > div,
   #modalAguardandoRetiradaSep .sep-actions > div {
-    grid-template-columns: 1fr !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    gap: 6px !important;
+  }
+
+  #modalSeparacaoLogistica .sep-thumb,
+  #modalAguardandoRetiradaSep .sep-thumb {
+    position: relative !important;
+  }
+
+  #modalSeparacaoLogistica .sep-thumb::after,
+  #modalAguardandoRetiradaSep .sep-thumb::after {
+    content: 'Ampliar';
+    position: absolute;
+    inset: auto 0 0 0;
+    background: rgba(15, 23, 42, 0.82);
+    color: #e2e8f0;
+    font-size: .5rem;
+    font-weight: 700;
+    text-align: center;
+    padding: 2px 0;
+    letter-spacing: .02em;
   }
 }
 
