@@ -578,6 +578,7 @@ window._loadSolicitacoesTab = async function() {
                 ? `<span style="font-size:.65rem;color:#22c55e55;margin-top:3px;display:block;"><i class="fa-solid fa-eye" style="margin-right:2px;"></i>Ver itens</span>`
                 : '';
             const emProcessoSep = col.key === 'Em Separação' || col.key === 'Separado';
+            const mostraUrgente = col.key === 'Solicitado' || col.key === 'Stund-by' || emProcessoSep;
             const separadorNome = String(sep.usuario_separando || '').trim();
             const separadorHtml = emProcessoSep && separadorNome
               ? `<div style="margin-top:5px;display:flex;align-items:center;gap:5px;">
@@ -585,7 +586,7 @@ window._loadSolicitacoesTab = async function() {
                   <span style="font-size:.72rem;color:#fbbf24;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="Separando: ${separadorNome}">${separadorNome}</span>
                 </div>`
               : '';
-            const urgenteHtml = emProcessoSep && sep.tem_urgente
+            const urgenteHtml = mostraUrgente && sep.tem_urgente
               ? `<div style="margin-top:4px;display:inline-flex;align-items:center;gap:4px;padding:2px 7px;border-radius:20px;font-size:.65rem;font-weight:700;color:#fca5a5;background:#450a0a;border:1px solid #ef4444;" title="Esta SEP tem item urgente">
                   <i class="fa-solid fa-bolt" style="font-size:.62rem;"></i>Urgente
                 </div>`
@@ -595,7 +596,7 @@ window._loadSolicitacoesTab = async function() {
                 data-n-solic="${sep.n_solic}"
                 data-col-acao="${col.acao || ''}"
                 data-col-status="${col.key}"
-                style="background:#1a1a1a;border:1px solid #2a2a2a;border-radius:9px;padding:10px 12px;${cursor}transition:border-color .15s;${sep.tem_urgente && emProcessoSep ? 'border-left:3px solid #ef4444;' : ''}"
+                style="background:#1a1a1a;border:1px solid #2a2a2a;border-radius:9px;padding:10px 12px;${cursor}transition:border-color .15s;${sep.tem_urgente && mostraUrgente ? 'border-left:3px solid #ef4444;' : ''}"
                 onmouseenter="this.style.borderColor='${col.color}66'"
                 onmouseleave="this.style.borderColor='#2a2a2a'">
                 <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
@@ -3142,7 +3143,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (window.__sessionUser && typeof window.__chatLoadUsers === 'function') {
       window.__chatLoadUsers();
     }
-  }, 1000);
+  }, 5000);
 });
 
 // Estado compartilhado do multiplicador da PCP (fator aplicado às quantidades)
@@ -20352,14 +20353,6 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // Ajuste approve-all button
   const ajusteApproveAllBtn = document.getElementById('solicitacoesAjusteApproveAll');
-  const omieBatchStopRegexes = [
-    /api bloqueada por consumo indevido/i,
-    /consumo redundante detectado/i,
-    /nenhum produto foi localizado/i,
-    /produto.+n.o encontrado/i,
-    /valor unit.rio.+deve ser maior que zero/i
-  ];
-  const shouldStopOmieApprovalBatch = (mensagem) => omieBatchStopRegexes.some((regex) => regex.test(String(mensagem || '')));
   const waitNextOmieBatchItem = (ms = 900) => new Promise(resolve => setTimeout(resolve, ms));
 
   if (ajusteApproveAllBtn && !ajusteApproveAllBtn.__ajusteBound) {
@@ -20376,38 +20369,29 @@ document.addEventListener('DOMContentLoaded', async () => {
       ajusteApproveAllBtn.disabled = true;
       const originalLabel = ajusteApproveAllBtn.textContent;
       const erros = [];
-      let loteInterrompido = false;
-      let aprovados = 0;
+      let processados = 0;
       for (const a of pendentes) {
-        aprovados++;
-        ajusteApproveAllBtn.textContent = `Aprovando ${aprovados}/${pendentes.length}…`;
+        processados++;
+        ajusteApproveAllBtn.textContent = `Aprovando ${processados}/${pendentes.length}…`;
         try {
           const resp = await fetch(`/api/ajustes/${a.id}/aprovar`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ aprovadoPor: usuario }) });
           const json = await resp.json().catch(() => ({}));
           if (!resp.ok || !json?.ok) {
-            const mensagem = `ID ${a.id}: ${json?.error || 'Erro'}`;
-            erros.push(mensagem);
-            if (shouldStopOmieApprovalBatch(json?.error || mensagem)) {
-              loteInterrompido = true;
-              break;
-            }
+            erros.push(`ID ${a.id}: ${json?.error || 'Erro'}`);
           }
         } catch (err) {
-          const mensagem = `ID ${a.id}: ${err?.message || 'Erro de rede'}`;
-          erros.push(mensagem);
-          if (shouldStopOmieApprovalBatch(err?.message || mensagem)) {
-            loteInterrompido = true;
-            break;
-          }
+          erros.push(`ID ${a.id}: ${err?.message || 'Erro de rede'}`);
         }
-        if (aprovados < pendentes.length) {
+        if (processados < pendentes.length) {
           await waitNextOmieBatchItem();
         }
       }
       ajusteApproveAllBtn.textContent = originalLabel;
       ajusteApproveAllBtn.disabled = false;
-      if (loteInterrompido) alert(`Processamento interrompido para evitar novo bloqueio da Omie.\n\nÚltimo erro:\n${erros[erros.length - 1] || 'Erro desconhecido'}`);
-      else if (erros.length) alert(`Concluído com erros:\n${erros.join('\n')}`);
+      if (erros.length) {
+        const sucessos = pendentes.length - erros.length;
+        alert(`Processamento concluído.\nSucesso(s): ${sucessos}\nErro(s): ${erros.length}\n\n${erros.join('\n')}`);
+      }
       else alert('Todos os ajustes pendentes foram executados com sucesso!');
       await carregarSolicitacoesAjustes(true);
     });
@@ -20436,11 +20420,10 @@ document.addEventListener('DOMContentLoaded', async () => {
       transferApproveAllBtn.disabled = true;
       const originalLabel = transferApproveAllBtn.textContent;
       const erros = [];
-      let loteInterrompido = false;
-      let aprovados = 0;
+      let processados = 0;
       for (const t of pendentes) {
-        aprovados++;
-        transferApproveAllBtn.textContent = `Aprovando ${aprovados}/${pendentes.length}…`;
+        processados++;
+        transferApproveAllBtn.textContent = `Aprovando ${processados}/${pendentes.length}…`;
         try {
           const resp = await fetch(`/api/transferencias/${t.id}/aprovar`, {
             method: 'PATCH',
@@ -20449,29 +20432,21 @@ document.addEventListener('DOMContentLoaded', async () => {
           });
           const json = await resp.json().catch(() => ({}));
           if (!resp.ok || !json?.ok) {
-            const mensagem = `ID ${t.id}: ${json?.error || 'Erro'}`;
-            erros.push(mensagem);
-            if (shouldStopOmieApprovalBatch(json?.error || mensagem)) {
-              loteInterrompido = true;
-              break;
-            }
+            erros.push(`ID ${t.id}: ${json?.error || 'Erro'}`);
           }
         } catch (err) {
-          const mensagem = `ID ${t.id}: ${err?.message || 'Erro de rede'}`;
-          erros.push(mensagem);
-          if (shouldStopOmieApprovalBatch(err?.message || mensagem)) {
-            loteInterrompido = true;
-            break;
-          }
+          erros.push(`ID ${t.id}: ${err?.message || 'Erro de rede'}`);
         }
-        if (aprovados < pendentes.length) {
+        if (processados < pendentes.length) {
           await waitNextOmieBatchItem();
         }
       }
       transferApproveAllBtn.textContent = originalLabel;
       transferApproveAllBtn.disabled = false;
-      if (loteInterrompido) alert(`Processamento interrompido para evitar novo bloqueio da Omie.\n\nÚltimo erro:\n${erros[erros.length - 1] || 'Erro desconhecido'}`);
-      else if (erros.length) alert(`Concluído com erros:\n${erros.join('\n')}`);
+      if (erros.length) {
+        const sucessos = pendentes.length - erros.length;
+        alert(`Processamento concluído.\nSucesso(s): ${sucessos}\nErro(s): ${erros.length}\n\n${erros.join('\n')}`);
+      }
       else alert('Todas as transferências pendentes foram executadas com sucesso!');
       await carregarSolicitacoesTransferencias(true);
     });
@@ -44731,7 +44706,11 @@ window.renderizarCatalogoOmie = renderizarCatalogoOmie;
       alert('Erro ao registrar separação: ' + (err.message || err));
     });
   });
-  document.getElementById('modalAcoesBtnMovimentar').addEventListener('click', () => { const {codigo, descricao} = _ctx; fechar(); abrirModalMovimentacao(codigo, descricao); });
+  document.getElementById('modalAcoesBtnMovimentar').addEventListener('click', () => {
+    const { codigo, descricao, codigo_produto } = _ctx;
+    fechar();
+    abrirModalMovimentacao(codigo, descricao, codigo_produto);
+  });
   document.getElementById('modalAcoesBtnCarrinho').addEventListener('click', () => {
     const qtdInput = document.getElementById('modalAcoesQtd');
     const unidadeNorm = String(_ctx.unidade || 'UN').toUpperCase();
@@ -52322,12 +52301,20 @@ function snapshotEdicoesQtdUnidAssociacaoNfe() {
     window.__associarNfeCamposEditados = {};
   }
 
-  previewConteudo.querySelectorAll('.assoc-override-unid, .assoc-override-valor').forEach((input) => {
+  previewConteudo.querySelectorAll('.assoc-override-qtd, .assoc-override-unid, .assoc-override-valor').forEach((input) => {
     const seq = Number(input.dataset.seq || 0);
     if (!seq) return;
 
     if (!window.__associarNfeCamposEditados[seq]) {
       window.__associarNfeCamposEditados[seq] = {};
+    }
+
+    if (input.classList.contains('assoc-override-qtd')) {
+      const textoQtd = String(input.value || '').trim();
+      const qtd = textoQtd
+        ? Number(textoQtd.includes(',') ? textoQtd.replace(/\./g, '').replace(',', '.') : textoQtd)
+        : null;
+      window.__associarNfeCamposEditados[seq].nQtde = Number.isFinite(qtd) ? qtd : null;
     }
 
     if (input.classList.contains('assoc-override-unid')) {
@@ -52354,6 +52341,8 @@ function trocarVinculoPedidoEntreSequenciasAssociacaoNfe(seqOrigem, seqDestino) 
 
   const camposPedido = [
     'pedido_item_encontrado',
+    'pedido_n_cod_ped',
+    'pedido_numero',
     'pedido_n_cod_item',
     'pedido_codigo_produto',
     'pedido_descricao_produto',
@@ -52462,6 +52451,34 @@ function renderPreviewAssociacaoPedidoNfe(preview) {
   const itensInformativosPedido = Array.isArray(preview?.itens_pedido_informativos)
     ? preview.itens_pedido_informativos
     : [];
+  const pedidoBaseNumero = String(preview?.c_numero_pedido || '').trim();
+  const obterResumoSugestoesPedido = (item) => {
+    const sugestoes = Array.isArray(item?.pedido_sugestoes) ? item.pedido_sugestoes : [];
+    if (!sugestoes.length) return '';
+    const primeira = sugestoes[0] || {};
+    const pedidoNumero = String(primeira?.pedido_numero || primeira?.pedido_n_cod_ped || '').trim();
+    if (!pedidoNumero) return `${sugestoes.length} sugestao(oes) automatica(s) encontrada(s)`;
+    return sugestoes.length === 1
+      ? `Sugestao automatica: pedido ${pedidoNumero}`
+      : `Sugestao automatica: pedido ${pedidoNumero} + ${sugestoes.length - 1}`;
+  };
+  const pedidosEnvolvidos = Array.from(new Map(
+    itens
+      .map((item) => {
+        const numero = String(item?.pedido_numero || '').trim();
+        const nCodPed = Number(item?.pedido_n_cod_ped || 0);
+        if (!numero && !(Number.isFinite(nCodPed) && nCodPed > 0)) return null;
+        const chave = numero || String(nCodPed);
+        return [
+          chave,
+          {
+            numero: numero || String(nCodPed),
+            n_cod_ped: Number.isFinite(nCodPed) && nCodPed > 0 ? nCodPed : null
+          }
+        ];
+      })
+      .filter(Boolean)
+  ).values());
 
   if (!window.__associarNfeCamposEditados || typeof window.__associarNfeCamposEditados !== 'object') {
     window.__associarNfeCamposEditados = {};
@@ -52578,6 +52595,13 @@ function renderPreviewAssociacaoPedidoNfe(preview) {
         const bgQtd = divergiuQtd ? '#fee2e2' : 'transparent';
         const corUnid = divergiuUnidade ? '#b91c1c' : '#0f172a';
         const bgUnid = divergiuUnidade ? '#fee2e2' : 'transparent';
+        const possuiSugestaoPedido = !encontrou && !isServico && Array.isArray(item?.pedido_sugestoes) && item.pedido_sugestoes.length > 0;
+        const resumoSugestoesPedido = possuiSugestaoPedido ? obterResumoSugestoesPedido(item) : '';
+        const pedidoItemNumero = String(item?.pedido_numero || '').trim();
+        const pedidoEhComplementar = !!pedidoItemNumero && !!pedidoBaseNumero && pedidoItemNumero !== pedidoBaseNumero;
+        const badgePedidoItem = pedidoItemNumero
+          ? `<div style="display:inline-flex;align-items:center;gap:6px;font-size:10px;font-weight:800;color:${pedidoEhComplementar ? '#1d4ed8' : '#166534'};background:${pedidoEhComplementar ? '#dbeafe' : '#dcfce7'};border:1px solid ${pedidoEhComplementar ? '#93c5fd' : '#86efac'};border-radius:999px;padding:3px 8px;margin-bottom:4px;">Pedido ${escapeHtml(pedidoItemNumero)}${pedidoEhComplementar ? ' - complementar' : ''}</div>`
+          : '';
 
         return `
           <tr style="border-bottom:1px solid #e2e8f0;background:${!encontrou ? '#fff7ed' : (temDivergencia ? '#fff7f7' : '#f8fafc')};" data-seq="${Number(item?.n_sequencia || 0)}">
@@ -52600,11 +52624,12 @@ function renderPreviewAssociacaoPedidoNfe(preview) {
               <div class="assoc-pedido-draggable" data-seq="${seq}" draggable="true" style="display:flex;align-items:flex-start;gap:8px;padding:6px 8px;border:1px dashed #cbd5e1;border-radius:8px;background:#ffffff;cursor:grab;">
                 <i class="fa-solid fa-grip-vertical" style="margin-top:1px;color:#64748b;"></i>
                 <div style="display:flex;flex-direction:column;gap:2px;min-width:0;">
+                  ${badgePedidoItem}
                   <div style="font-size:11px;font-weight:700;color:#0f172a;">${escapeHtml(String(item?.pedido_codigo_produto || '-'))}</div>
                   <div style="font-size:11px;color:#334155;line-height:1.35;max-width:320px;" title="${escapeHtml(String(item?.pedido_descricao_produto || '-'))}">${escapeHtml(String(item?.pedido_descricao_produto || '-'))}</div>
                 </div>
               </div>` : `
-              <div style="display:flex;align-items:center;gap:8px;padding:6px 8px;border:1px dashed #fed7aa;border-radius:8px;background:#fff7ed;">
+              <div style="display:flex;align-items:center;gap:8px;padding:6px 8px;border:1px dashed #fed7aa;border-radius:8px;background:#fff7ed;flex-wrap:wrap;">
                 ${item?.produto_override && Number(item?.servico_produto_codigo_produto || 0) > 0 ? `
                 <div style="min-width:0;flex:1;">
                   <div style="font-size:11px;font-weight:800;color:#9a3412;">${escapeHtml(String(item?.servico_produto_codigo || '-'))}</div>
@@ -52613,11 +52638,14 @@ function renderPreviewAssociacaoPedidoNfe(preview) {
                 <i class="fa-solid fa-triangle-exclamation" style="color:#ea580c;font-size:12px;flex-shrink:0;"></i>
                 <span style="font-size:11px;color:#9a3412;flex:1;">Sem match — selecione o produto</span>`}
                 <button type="button" class="assoc-produto-override-btn" data-seq="${seq}" style="border:1px solid #fb923c;background:#ea580c;color:#fff;border-radius:7px;padding:5px 8px;font-size:11px;font-weight:700;cursor:pointer;white-space:nowrap;flex-shrink:0;">${item?.produto_override && Number(item?.servico_produto_codigo_produto || 0) > 0 ? 'Alterar' : 'Selecionar produto'}</button>
-                <button type="button" class="assoc-item-pedido-btn" data-seq="${seq}" title="Vincular a um item já presente no pedido" style="border:1px solid #16a34a;background:#15803d;color:#fff;border-radius:7px;padding:5px 8px;font-size:11px;font-weight:700;cursor:pointer;white-space:nowrap;flex-shrink:0;">Item do pedido</button>
+                ${possuiSugestaoPedido ? `<button type="button" class="assoc-sugestao-pedido-btn" data-seq="${seq}" title="Usar a melhor sugestão automática encontrada" style="border:1px solid #60a5fa;background:#2563eb;color:#fff;border-radius:7px;padding:5px 8px;font-size:11px;font-weight:700;cursor:pointer;white-space:nowrap;flex-shrink:0;">Usar sugestão</button>` : ''}
+                <button type="button" class="assoc-item-pedido-btn" data-seq="${seq}" title="Vincular a um item do pedido atual ou de um pedido complementar sugerido" style="border:1px solid #16a34a;background:#15803d;color:#fff;border-radius:7px;padding:5px 8px;font-size:11px;font-weight:700;cursor:pointer;white-space:nowrap;flex-shrink:0;">Escolher item</button>
               </div>`}
             </td>
             <td style="padding:7px 8px;font-size:11px;color:${corQtd};background:${bgQtd};text-align:right;white-space:nowrap;">${
-              escapeHtml(String(qtdPedido))
+              (!isServico && divergiuQtd)
+                ? `<input type="text" class="assoc-override-qtd" data-seq="${seq}" value="${escapeHtml(fmtQtdBR(qtdPedido))}" style="width:72px;padding:2px 4px;font-size:11px;font-weight:700;color:#b91c1c;border:1px solid #fca5a5;border-radius:4px;text-align:right;background:#fff5f5;" title="Edite a quantidade do item do pedido">`
+                : escapeHtml(String(qtdPedido))
             }</td>
             <td style="padding:7px 8px;font-size:11px;color:${corUnid};background:${bgUnid};text-align:center;white-space:nowrap;">${
               (!isServico && (divergiuQtd || divergiuUnidade))
@@ -52656,9 +52684,19 @@ function renderPreviewAssociacaoPedidoNfe(preview) {
       </div>
     `
     : '';
+  const pedidosEnvolvidosHtml = pedidosEnvolvidos.length > 1
+    ? `
+      <div style="margin:0 0 10px;padding:10px 12px;border:1px solid #93c5fd;background:#eff6ff;color:#1d4ed8;border-radius:8px;font-size:12px;">
+        <div style="font-weight:800;margin-bottom:4px;">Esta NF-e sera vinculada a mais de um pedido.</div>
+        <div>Pedidos envolvidos: ${escapeHtml(pedidosEnvolvidos.map((pedido) => pedido.numero).join(', '))}.</div>
+        <div style="margin-top:4px;">Ao concluir a NF, o sistema atualiza cada pedido individualmente conforme o valor realmente recebido em cada um.</div>
+      </div>
+    `
+    : '';
 
   previewConteudo.innerHTML = `
     ${resumoHtml}
+    ${pedidosEnvolvidosHtml}
     ${itensInformativosHtml}
     ${gruposMesmoItem > 0 ? `<div style="margin:0 0 10px;padding:10px 12px;border:1px solid #bbf7d0;background:#ecfdf5;color:#166534;border-radius:8px;font-size:12px;font-weight:700;"><i class="fa-solid fa-layer-group" style="margin-right:6px;"></i>${gruposMesmoItem} linha(s) da NF-e foram agrupadas no mesmo item do pedido. A conferência usa a soma das linhas, não cada linha isolada.</div>` : ''}
     <div style="margin:0 0 10px;padding:9px 12px;border:1px solid #bae6fd;background:#f0f9ff;color:#0c4a6e;border-radius:8px;font-size:12px;font-weight:700;">Arraste o bloco do item do Pedido (coluna azul com ícone <i class="fa-solid fa-grip-vertical"></i>) para outra linha da NF-e para trocar a associação.</div>
@@ -52696,7 +52734,7 @@ function renderPreviewAssociacaoPedidoNfe(preview) {
 
   previewWrap.style.display = 'block';
   habilitarDragDropAssociacaoPedidoNfe(preview);
-  previewConteudo.querySelectorAll('.assoc-override-unid, .assoc-override-valor').forEach((input) => {
+  previewConteudo.querySelectorAll('.assoc-override-qtd, .assoc-override-unid, .assoc-override-valor').forEach((input) => {
     input.addEventListener('input', snapshotEdicoesQtdUnidAssociacaoNfe);
     input.addEventListener('change', snapshotEdicoesQtdUnidAssociacaoNfe);
   });
@@ -52706,22 +52744,77 @@ function renderPreviewAssociacaoPedidoNfe(preview) {
   previewConteudo.querySelectorAll('.assoc-produto-override-btn').forEach((btn) => {
     btn.addEventListener('click', () => abrirModalProdutoServicoAssociacaoNfe(Number(btn.dataset.seq || 0)));
   });
-  previewConteudo.querySelectorAll('.assoc-item-pedido-btn').forEach((btn) => {
-    btn.addEventListener('click', () => abrirPickerItemPedidoAssociacao(Number(btn.dataset.seq || 0)));
+  previewConteudo.querySelectorAll('.assoc-sugestao-pedido-btn').forEach((btn) => {
+    btn.addEventListener('click', () => aplicarSugestaoPedidoAssociacao(Number(btn.dataset.seq || 0), 0));
   });
+  previewConteudo.querySelectorAll('.assoc-item-pedido-btn').forEach((btn) => {
+    btn.addEventListener('click', () => abrirPickerItemPedidoAssociacaoAvancado(Number(btn.dataset.seq || 0)));
+  });
+}
+
+function aplicarVinculoItemPedidoAssociacao(seq, dadosItem = {}) {
+  if (!seq) return false;
+  const item = (window.__associarNfePreviewEstadoItens || []).find(i => Number(i?.n_sequencia || 0) === seq);
+  if (!item) return false;
+
+  const nCodItem = Number(dadosItem?.pedido_n_cod_item || dadosItem?.nCodItem || 0);
+  if (!Number.isFinite(nCodItem) || nCodItem <= 0) return false;
+
+  const nCodPed = Number(dadosItem?.pedido_n_cod_ped || dadosItem?.nCodPed || 0);
+  const numeroPedido = String(dadosItem?.pedido_numero || dadosItem?.numeroPedido || '').trim();
+  const numeroPedidoBase = String(window.__associarNfePreviewAtual?.preview?.c_numero_pedido || '').trim();
+
+  item.pedido_item_encontrado = true;
+  item.pedido_item_override = true;
+  item.pedido_n_cod_ped = Number.isFinite(nCodPed) && nCodPed > 0
+    ? nCodPed
+    : (Number(window.__associarNfePreviewAtual?.preview?.n_cod_ped || 0) || null);
+  item.pedido_numero = numeroPedido || numeroPedidoBase || null;
+  item.pedido_n_cod_item = nCodItem;
+  item.pedido_codigo_produto = dadosItem?.pedido_codigo_produto || dadosItem?.codigo || '';
+  item.pedido_descricao_produto = dadosItem?.pedido_descricao_produto || dadosItem?.descricao || '';
+  item.pedido_qtde = (dadosItem?.pedido_qtde ?? dadosItem?.qtde ?? '') !== '' ? Number(dadosItem?.pedido_qtde ?? dadosItem?.qtde) : null;
+  item.pedido_unidade = dadosItem?.pedido_unidade || dadosItem?.unidade || '';
+  item.pedido_valor_total = (dadosItem?.pedido_valor_total ?? dadosItem?.valor ?? '') !== '' ? Number(dadosItem?.pedido_valor_total ?? dadosItem?.valor) : null;
+  item.criterio_match = item.pedido_numero && numeroPedidoBase && item.pedido_numero !== numeroPedidoBase
+    ? 'ajuste_manual_pedido_complementar'
+    : 'ajuste_manual_item_pedido';
+  item.score_match = 9999;
+  delete item.produto_override;
+
+  renderPreviewAssociacaoPedidoNfe(window.__associarNfePreviewAtual?.preview || {});
+  const btnAssociarMain = document.getElementById('modalAssociarPedidoBtnConfirmar');
+  if (btnAssociarMain) btnAssociarMain.disabled = false;
+  return true;
+}
+
+function aplicarSugestaoPedidoAssociacao(seq, indiceSugestao = 0) {
+  const item = (window.__associarNfePreviewEstadoItens || []).find(i => Number(i?.n_sequencia || 0) === seq);
+  if (!item) return false;
+  const sugestoes = Array.isArray(item?.pedido_sugestoes) ? item.pedido_sugestoes : [];
+  const sugestao = sugestoes[Number(indiceSugestao) || 0];
+  if (!sugestao) return false;
+  return aplicarVinculoItemPedidoAssociacao(seq, sugestao);
 }
 
 function abrirPickerItemPedidoAssociacao(seq) {
   if (!seq) return;
   const preview = window.__associarNfePreviewAtual?.preview || {};
   const numeroPedido = String(preview?.c_numero_pedido || '').trim();
+  const itemAtual = (window.__associarNfePreviewEstadoItens || []).find(i => Number(i?.n_sequencia || 0) === seq);
+  const itensComplementares = Array.isArray(itemAtual?.pedido_sugestoes)
+    ? itemAtual.pedido_sugestoes.map((itemSugestao) => ({ ...itemSugestao, origem_lista: 'pedido_complementar' }))
+    : [];
 
   // Coleta todos os itens do pedido: informativos + matched
   let itensPedido = [
+    ...itensComplementares,
     ...(preview.itens_pedido_informativos || []),
     ...(preview.itens_preview || [])
       .filter(i => i.pedido_item_encontrado && Number(i.pedido_n_cod_item || 0) > 0)
       .map(i => ({
+        pedido_n_cod_ped: i.pedido_n_cod_ped || preview?.n_cod_ped || null,
+        pedido_numero: i.pedido_numero || preview?.c_numero_pedido || null,
         pedido_n_cod_item: i.pedido_n_cod_item,
         pedido_codigo_produto: i.pedido_codigo_produto,
         pedido_descricao_produto: i.pedido_descricao_produto,
@@ -52737,6 +52830,11 @@ function abrirPickerItemPedidoAssociacao(seq) {
     if (!k || seen.has(k)) return false;
     seen.add(k); return true;
   });
+  const itensComplementaresFiltrados = itensComplementares.filter(i => {
+    const k = Number(i.pedido_n_cod_item || 0);
+    if (!k || seen.has(k)) return false;
+    seen.add(k); return true;
+  });
 
   let modal = document.getElementById('modalItemPedidoAssociacao');
   if (modal) modal.remove();
@@ -52748,6 +52846,8 @@ function abrirPickerItemPedidoAssociacao(seq) {
     if (!items.length) return '<div style="font-size:12px;color:#64748b;padding:12px;">Nenhum item encontrado para o pedido.</div>';
     return items.map(it => `
       <button type="button"
+        data-n-cod-ped="${Number(it.pedido_n_cod_ped || 0)}"
+        data-numero-pedido="${escapeHtml(String(it.pedido_numero || numeroPedido || ''))}"
         data-n-cod-item="${Number(it.pedido_n_cod_item || 0)}"
         data-codigo="${escapeHtml(String(it.pedido_codigo_produto || ''))}"
         data-descricao="${escapeHtml(String(it.pedido_descricao_produto || ''))}"
@@ -52756,6 +52856,7 @@ function abrirPickerItemPedidoAssociacao(seq) {
         data-valor="${escapeHtml(String(it.pedido_valor_total ?? ''))}"
         style="display:flex;align-items:center;justify-content:space-between;gap:14px;text-align:left;border:1px solid #bbf7d0;background:#f0fdf4;border-radius:10px;padding:10px;cursor:pointer;width:100%;">
         <span style="min-width:0;">
+          <div style="font-size:10px;font-weight:800;color:${it.origem_lista === 'pedido_complementar' ? '#1d4ed8' : '#166534'};margin-bottom:3px;">Pedido ${escapeHtml(String(it.pedido_numero || numeroPedido || it.pedido_n_cod_ped || '-'))}${it.origem_lista === 'pedido_complementar' ? ' - sugestão automática' : ''}</div>
           <div style="font-weight:800;color:#0f172a;">${escapeHtml(String(it.pedido_codigo_produto || '-'))}</div>
           <div style="font-size:12px;color:#475569;">${escapeHtml(String(it.pedido_descricao_produto || '-'))}</div>
           <div style="font-size:11px;color:#64748b;margin-top:2px;">Qtd: ${escapeHtml(String(it.pedido_qtde ?? '-'))} ${escapeHtml(String(it.pedido_unidade || ''))} · R$ ${escapeHtml(Number(it.pedido_valor_total || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 }))}</div>
@@ -52782,26 +52883,18 @@ function abrirPickerItemPedidoAssociacao(seq) {
   function attachSelectHandlers() {
     modal.querySelectorAll('button[data-n-cod-item]').forEach(btn => {
       btn.onclick = () => {
-        const nCodItem = Number(btn.dataset.nCodItem || 0);
-        if (!nCodItem) return;
-        const item = (window.__associarNfePreviewEstadoItens || []).find(i => Number(i?.n_sequencia || 0) === seq);
-        if (item) {
-          item.pedido_item_encontrado = true;
-          item.pedido_item_override = true;
-          item.pedido_n_cod_item = nCodItem;
-          item.pedido_codigo_produto = btn.dataset.codigo || '';
-          item.pedido_descricao_produto = btn.dataset.descricao || '';
-          item.pedido_qtde = btn.dataset.qtde !== '' ? Number(btn.dataset.qtde) : null;
-          item.pedido_unidade = btn.dataset.unidade || '';
-          item.pedido_valor_total = btn.dataset.valor !== '' ? Number(btn.dataset.valor) : null;
-          item.criterio_match = 'ajuste_manual_item_pedido';
-          item.score_match = 9999;
-          delete item.produto_override;
-        }
+        const aplicado = aplicarVinculoItemPedidoAssociacao(seq, {
+          pedido_n_cod_ped: Number(btn.dataset.nCodPed || 0) || null,
+          pedido_numero: btn.dataset.numeroPedido || '',
+          pedido_n_cod_item: Number(btn.dataset.nCodItem || 0) || null,
+          pedido_codigo_produto: btn.dataset.codigo || '',
+          pedido_descricao_produto: btn.dataset.descricao || '',
+          pedido_qtde: btn.dataset.qtde !== '' ? Number(btn.dataset.qtde) : null,
+          pedido_unidade: btn.dataset.unidade || '',
+          pedido_valor_total: btn.dataset.valor !== '' ? Number(btn.dataset.valor) : null
+        });
+        if (!aplicado) return;
         modal.remove();
-        renderPreviewAssociacaoPedidoNfe(window.__associarNfePreviewAtual?.preview || {});
-        const btnAssociarMain = document.getElementById('modalAssociarPedidoBtnConfirmar');
-        if (btnAssociarMain) btnAssociarMain.disabled = false;
       };
     });
   }
@@ -52815,6 +52908,8 @@ function abrirPickerItemPedidoAssociacao(seq) {
         const itensApi = (data?.pedido?.itens || []).filter(i => Number(i.n_cod_item || 0) > 0);
         lista.innerHTML = itensApi.length
           ? renderItensHtml(itensApi.map(i => ({
+              pedido_n_cod_ped: preview?.n_cod_ped || null,
+              pedido_numero: numeroPedido || null,
               pedido_n_cod_item: i.n_cod_item,
               pedido_codigo_produto: i.c_produto || i.produto_codigo,
               pedido_descricao_produto: i.c_descricao || i.produto_descricao,
@@ -52831,6 +52926,198 @@ function abrirPickerItemPedidoAssociacao(seq) {
   } else {
     attachSelectHandlers();
   }
+}
+
+function abrirPickerItemPedidoAssociacaoAvancado(seq) {
+  if (!seq) return;
+  const preview = window.__associarNfePreviewAtual?.preview || {};
+  const numeroPedidoBase = String(preview?.c_numero_pedido || '').trim();
+  const itemAtual = (window.__associarNfePreviewEstadoItens || []).find((i) => Number(i?.n_sequencia || 0) === seq);
+  const sugestoesComplementares = Array.isArray(itemAtual?.pedido_sugestoes)
+    ? itemAtual.pedido_sugestoes.map((itemSugestao) => ({ ...itemSugestao, origem_lista: 'pedido_complementar' }))
+    : [];
+
+  const dedupeItens = (items, seen = new Set()) => items.filter((item) => {
+    const codItem = Number(item?.pedido_n_cod_item || 0);
+    if (!codItem || seen.has(codItem)) return false;
+    seen.add(codItem);
+    return true;
+  });
+
+  const itensPedidoBase = [
+    ...(preview.itens_pedido_informativos || []),
+    ...(preview.itens_preview || [])
+      .filter((i) => i.pedido_item_encontrado && Number(i.pedido_n_cod_item || 0) > 0)
+      .map((i) => ({
+        pedido_n_cod_ped: i.pedido_n_cod_ped || preview?.n_cod_ped || null,
+        pedido_numero: i.pedido_numero || preview?.c_numero_pedido || null,
+        pedido_n_cod_item: i.pedido_n_cod_item,
+        pedido_codigo_produto: i.pedido_codigo_produto,
+        pedido_descricao_produto: i.pedido_descricao_produto,
+        pedido_qtde: i.pedido_qtde,
+        pedido_unidade: i.pedido_unidade,
+        pedido_valor_total: i.pedido_valor_total,
+        origem_lista: 'pedido_base'
+      }))
+  ];
+
+  const seen = new Set();
+  const sugestoesFiltradas = dedupeItens(sugestoesComplementares, seen);
+  const itensBaseFiltrados = dedupeItens(itensPedidoBase, seen);
+
+  let modal = document.getElementById('modalItemPedidoAssociacaoAvancado');
+  if (modal) modal.remove();
+  modal = document.createElement('div');
+  modal.id = 'modalItemPedidoAssociacaoAvancado';
+  modal.style.cssText = 'position:fixed;inset:0;z-index:2147483647;background:rgba(15,23,42,.70);display:flex;align-items:center;justify-content:center;padding:20px;';
+
+  const renderItensHtml = (items, tituloSecao = '', emptyText = 'Nenhum item encontrado.') => {
+    if (!items.length) {
+      return `
+        ${tituloSecao ? `<div style="font-size:12px;font-weight:800;color:#0f172a;margin:10px 0 6px;">${escapeHtml(tituloSecao)}</div>` : ''}
+        <div style="font-size:12px;color:#64748b;padding:12px;">${escapeHtml(emptyText)}</div>
+      `;
+    }
+    return `
+      ${tituloSecao ? `<div style="font-size:12px;font-weight:800;color:#0f172a;margin:10px 0 6px;">${escapeHtml(tituloSecao)}</div>` : ''}
+      ${items.map((it) => `
+        <button type="button"
+          data-n-cod-ped="${Number(it.pedido_n_cod_ped || 0)}"
+          data-numero-pedido="${escapeHtml(String(it.pedido_numero || numeroPedidoBase || ''))}"
+          data-n-cod-item="${Number(it.pedido_n_cod_item || 0)}"
+          data-codigo="${escapeHtml(String(it.pedido_codigo_produto || ''))}"
+          data-descricao="${escapeHtml(String(it.pedido_descricao_produto || ''))}"
+          data-qtde="${escapeHtml(String(it.pedido_qtde ?? ''))}"
+          data-unidade="${escapeHtml(String(it.pedido_unidade || ''))}"
+          data-valor="${escapeHtml(String(it.pedido_valor_total ?? ''))}"
+          style="display:flex;align-items:center;justify-content:space-between;gap:14px;text-align:left;border:1px solid #bbf7d0;background:#f0fdf4;border-radius:10px;padding:10px;cursor:pointer;width:100%;">
+          <span style="min-width:0;">
+            <div style="font-size:10px;font-weight:800;color:${it.origem_lista === 'pedido_complementar' ? '#1d4ed8' : (it.origem_lista === 'pedido_manual' ? '#7c3aed' : '#166534')};margin-bottom:3px;">Pedido ${escapeHtml(String(it.pedido_numero || numeroPedidoBase || it.pedido_n_cod_ped || '-'))}${it.origem_lista === 'pedido_complementar' ? ' - sugestão automática' : ''}${it.origem_lista === 'pedido_manual' ? ' - carregado manualmente' : ''}</div>
+            <div style="font-weight:800;color:#0f172a;">${escapeHtml(String(it.pedido_codigo_produto || '-'))}</div>
+            <div style="font-size:12px;color:#475569;">${escapeHtml(String(it.pedido_descricao_produto || '-'))}</div>
+            <div style="font-size:11px;color:#64748b;margin-top:2px;">Qtd: ${escapeHtml(String(it.pedido_qtde ?? '-'))} ${escapeHtml(String(it.pedido_unidade || ''))} · R$ ${escapeHtml(Number(it.pedido_valor_total || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 }))}</div>
+          </span>
+          <span style="white-space:nowrap;background:#15803d;color:white;border-radius:8px;padding:7px 10px;font-size:12px;font-weight:800;">Usar este item</span>
+        </button>
+      `).join('')}
+    `;
+  };
+
+  modal.innerHTML = `
+    <div style="width:min(860px,95vw);max-height:85vh;overflow:auto;background:#fff;border:2px solid #16a34a;border-radius:16px;box-shadow:0 24px 80px rgba(0,0,0,.35);padding:18px;">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+        <strong style="font-size:18px;color:#0f172a;">Escolher item para a linha ${escapeHtml(String(seq))} da NF-e</strong>
+        <button type="button" id="modalItemPedidoAvancadoFechar" style="border:0;background:transparent;font-size:26px;cursor:pointer;color:#334155;">&times;</button>
+      </div>
+      <div style="font-size:12px;color:#475569;margin-bottom:12px;">Use a melhor sugestão, escolha outra sugestão listada abaixo ou carregue manualmente outro pedido pelo número.</div>
+      <div id="modalItemPedidoAvancadoLista" style="display:flex;flex-direction:column;gap:8px;">
+        ${sugestoesFiltradas.length > 0 ? renderItensHtml(sugestoesFiltradas, 'Sugestões automáticas de outros pedidos', 'Nenhuma sugestão automática encontrada.') : ''}
+        ${renderItensHtml(itensBaseFiltrados, `Itens do pedido ${numeroPedidoBase || ''}`, 'Nenhum item encontrado no pedido base.')}
+      </div>
+      <div style="margin-top:14px;padding-top:12px;border-top:1px solid #e2e8f0;">
+        <div style="font-size:12px;font-weight:800;color:#0f172a;margin-bottom:8px;">Carregar outro pedido manualmente</div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+          <input id="modalItemPedidoAvancadoNumeroManual" type="text" placeholder="Digite o número do outro pedido" style="flex:1;min-width:240px;padding:10px 12px;border:1px solid #cbd5e1;border-radius:8px;font-size:14px;color:#0f172a;" />
+          <button type="button" id="modalItemPedidoAvancadoBuscarManual" style="border:1px solid #0ea5e9;background:#0284c7;color:#fff;border-radius:8px;padding:9px 12px;font-size:12px;font-weight:800;cursor:pointer;">Carregar pedido</button>
+        </div>
+        <div id="modalItemPedidoAvancadoManualStatus" style="font-size:12px;color:#64748b;margin-top:8px;">Se souber o pedido correto, digite o número e carregue os itens dele.</div>
+        <div id="modalItemPedidoAvancadoListaManual" style="display:flex;flex-direction:column;gap:8px;margin-top:8px;"></div>
+      </div>
+    </div>`;
+
+  document.body.appendChild(modal);
+  modal.querySelector('#modalItemPedidoAvancadoFechar').onclick = () => modal.remove();
+
+  const aplicarSelecao = (btn) => {
+    const aplicado = aplicarVinculoItemPedidoAssociacao(seq, {
+      pedido_n_cod_ped: Number(btn.dataset.nCodPed || 0) || null,
+      pedido_numero: btn.dataset.numeroPedido || '',
+      pedido_n_cod_item: Number(btn.dataset.nCodItem || 0) || null,
+      pedido_codigo_produto: btn.dataset.codigo || '',
+      pedido_descricao_produto: btn.dataset.descricao || '',
+      pedido_qtde: btn.dataset.qtde !== '' ? Number(btn.dataset.qtde) : null,
+      pedido_unidade: btn.dataset.unidade || '',
+      pedido_valor_total: btn.dataset.valor !== '' ? Number(btn.dataset.valor) : null
+    });
+    if (!aplicado) return;
+    modal.remove();
+  };
+
+  const attachSelectHandlers = () => {
+    modal.querySelectorAll('button[data-n-cod-item]').forEach((btn) => {
+      btn.onclick = () => aplicarSelecao(btn);
+    });
+  };
+
+  const listaManual = modal.querySelector('#modalItemPedidoAvancadoListaManual');
+  const statusManual = modal.querySelector('#modalItemPedidoAvancadoManualStatus');
+  const inputManual = modal.querySelector('#modalItemPedidoAvancadoNumeroManual');
+  const btnManual = modal.querySelector('#modalItemPedidoAvancadoBuscarManual');
+
+  const carregarItensPedidoManual = async (numeroPedidoManual) => {
+    const numeroManual = String(numeroPedidoManual || '').trim();
+    if (!numeroManual) {
+      if (statusManual) statusManual.textContent = 'Digite um número de pedido para carregar os itens.';
+      if (listaManual) listaManual.innerHTML = '';
+      return;
+    }
+
+    if (statusManual) statusManual.textContent = `Carregando itens do pedido ${numeroManual}...`;
+    if (listaManual) listaManual.innerHTML = '<div style="font-size:12px;color:#64748b;padding:12px;">Buscando pedido informado...</div>';
+    if (btnManual) btnManual.disabled = true;
+
+    try {
+      const resp = await fetch(`/api/compras/buscar-pedido-compra?numero=${encodeURIComponent(numeroManual)}`, { credentials: 'include', cache: 'no-store' });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok || !data?.pedido) {
+        throw new Error(data?.error || `Falha ao carregar pedido ${numeroManual}.`);
+      }
+
+      const numeroPedidoCarregado = String(data?.pedido?.c_numero || data?.pedido?.numero || numeroManual).trim() || numeroManual;
+      const itensApi = (data?.pedido?.itens || [])
+        .filter((i) => Number(i.n_cod_item || 0) > 0)
+        .map((i) => ({
+          pedido_n_cod_ped: data?.pedido?.n_cod_ped || data?.pedido?.nCodPed || null,
+          pedido_numero: numeroPedidoCarregado,
+          pedido_n_cod_item: i.n_cod_item,
+          pedido_codigo_produto: i.c_produto || i.produto_codigo,
+          pedido_descricao_produto: i.c_descricao || i.produto_descricao,
+          pedido_qtde: i.n_qtde !== undefined ? i.n_qtde : i.quantidade,
+          pedido_unidade: i.c_unidade || i.unidade,
+          pedido_valor_total: i.n_val_tot !== undefined ? i.n_val_tot : i.valor_item,
+          origem_lista: 'pedido_manual'
+        }));
+
+      if (listaManual) {
+        listaManual.innerHTML = renderItensHtml(
+          itensApi,
+          `Itens do pedido ${numeroPedidoCarregado}`,
+          'Nenhum item encontrado no pedido informado.'
+        );
+      }
+      if (statusManual) {
+        statusManual.textContent = itensApi.length > 0
+          ? `Pedido ${numeroPedidoCarregado} carregado. Escolha um item abaixo.`
+          : `Pedido ${numeroPedidoCarregado} encontrado, mas sem itens utilizáveis.`;
+      }
+      attachSelectHandlers();
+    } catch (err) {
+      if (listaManual) listaManual.innerHTML = '';
+      if (statusManual) statusManual.textContent = err?.message || `Erro ao carregar o pedido ${numeroManual}.`;
+    } finally {
+      if (btnManual) btnManual.disabled = false;
+    }
+  };
+
+  btnManual?.addEventListener('click', () => carregarItensPedidoManual(inputManual?.value || ''));
+  inputManual?.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      carregarItensPedidoManual(inputManual?.value || '');
+    }
+  });
+
+  attachSelectHandlers();
 }
 
 function abrirModalProdutoServicoAssociacaoNfe(seq) {
@@ -53188,6 +53475,11 @@ async function confirmarAssociacaoPedidoNfeOmie() {
 
   try {
     const contextoAtual = window.__associarNfeContextoAtual || {};
+    const pedidosEnvolvidosPreview = Array.from(new Set(
+      (Array.isArray(window.__associarNfePreviewEstadoItens) ? window.__associarNfePreviewEstadoItens : [])
+        .map((item) => String(item?.pedido_numero || '').trim())
+        .filter(Boolean)
+    ));
 
     // Coleta overrides de vínculo/Qtd/Unid editados pelo usuário na prévia
     const itensOverrideMap = new Map();
@@ -53222,18 +53514,30 @@ async function confirmarAssociacaoPedidoNfeOmie() {
       }
       const nIdItPedidoExistente = Number(item?.pedido_n_cod_item || 0);
       if (!seq || !Number.isFinite(nIdItPedidoExistente) || nIdItPedidoExistente <= 0) return;
-      itensOverrideMap.set(seq, { n_sequencia: seq, nIdItPedidoExistente });
+      const nIdPedidoExistente = Number(item?.pedido_n_cod_ped || 0);
+      itensOverrideMap.set(seq, {
+        n_sequencia: seq,
+        nIdPedidoExistente: Number.isFinite(nIdPedidoExistente) && nIdPedidoExistente > 0 ? nIdPedidoExistente : null,
+        nIdItPedidoExistente
+      });
     });
 
     const previewConteudo = document.getElementById('modalAssociarPedidoNfePreviewConteudo');
     if (previewConteudo) {
-      previewConteudo.querySelectorAll('.assoc-override-unid, .assoc-override-valor').forEach(input => {
+      previewConteudo.querySelectorAll('.assoc-override-qtd, .assoc-override-unid, .assoc-override-valor').forEach(input => {
         const seq = Number(input.dataset.seq || 0);
         if (!seq) return;
         let entry = itensOverrideMap.get(seq);
         if (!entry) {
           entry = { n_sequencia: seq };
           itensOverrideMap.set(seq, entry);
+        }
+        if (input.classList.contains('assoc-override-qtd')) {
+          const textoQtd = String(input.value || '').trim();
+          const qtd = textoQtd
+            ? Number(textoQtd.includes(',') ? textoQtd.replace(/\./g, '').replace(',', '.') : textoQtd)
+            : null;
+          entry.nQtde = Number.isFinite(qtd) ? qtd : null;
         }
         if (input.classList.contains('assoc-override-unid')) {
           entry.cUnidade = String(input.value || '').trim().toUpperCase() || null;
@@ -53301,12 +53605,25 @@ async function confirmarAssociacaoPedidoNfeOmie() {
     }
     // ─────────────────────────────────────────────────────────────────────
 
+    const pedidosAssociadosRetorno = Array.isArray(data?.dados?.pedidos_associados)
+      ? data.dados.pedidos_associados
+        .map((pedido) => String(pedido?.c_numero_pedido || pedido?.n_cod_ped || '').trim())
+        .filter(Boolean)
+      : [];
+    const pedidosAssociadosExibir = pedidosAssociadosRetorno.length > 0
+      ? pedidosAssociadosRetorno
+      : pedidosEnvolvidosPreview;
+    const resumoPedidosAssociados = pedidosAssociadosExibir.length > 0
+      ? `<div style="margin-top:8px;font-size:12px;color:#166534;font-weight:700;">Pedidos afetados: ${escapeHtml(pedidosAssociadosExibir.join(', '))}</div>`
+      : '';
+
     setStatusModalAssociarPedidoNfe(
       `<div style="display:flex;align-items:flex-start;gap:12px;">
         <i class="fa-solid fa-circle-check" style="font-size:26px;color:#16a34a;margin-top:2px;"></i>
         <div style="flex:1;">
           <div style="font-size:17px;font-weight:800;line-height:1.2;">NF-e associada com sucesso</div>
           <div style="font-size:13px;margin-top:5px;">${escapeHtml(data?.message || `NF-e ${numeroNfe} associada ao pedido ${numeroPedido}.`)}</div>
+          ${resumoPedidosAssociados}
           <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;">
             <button type="button" id="modalAssociarNovaBuscaBtn" style="border:none;border-radius:8px;background:#7c3aed;color:#fff;font-weight:700;padding:9px 13px;cursor:pointer;display:inline-flex;align-items:center;gap:6px;">
               <i class="fa-solid fa-magnifying-glass"></i> Buscar outra NF-e
@@ -60715,6 +61032,7 @@ async function salvarEdicaoPIR(id) {
 let currentCenterDate = null;
 let currentCarouselTranslate = 0;
 let carouselDataCache = {};
+let carouselMonthCache = {}; // cache por "YYYY-MM" → dados brutos do mês
 const CAROUSEL_WINDOW_DAYS = 7; // 7 antes e 7 depois (total 15 dias fixos)
 const CARD_WIDTH = 162;         // deve bater com o CSS
 const CARD_GAP = 12;            // gap definido no CSS (.semana-carousel { gap })
@@ -60952,40 +61270,43 @@ async function carregarDadosDia(date) {
   const key = formatDateKey(date);
   const ano = date.getFullYear();
   const mes = date.getMonth() + 1;
-  
+  const mesKey = `${ano}-${String(mes).padStart(2, '0')}`;
+
   try {
-    const resp = await fetch(`/api/pcp/calendario?ano=${ano}&mes=${mes}`, {
-      credentials: 'include'
-    });
-    
-    if (!resp.ok) {
-      console.error('[CARROSSEL] Erro HTTP:', resp.status);
-      carouselDataCache[key] = [];
-      return;
+    // Se o mês já foi buscado, apenas extrai o dia do cache
+    if (!carouselMonthCache[mesKey]) {
+      // Evita múltiplas requisições simultâneas para o mesmo mês
+      if (carouselMonthCache[`${mesKey}__pending`]) {
+        await carouselMonthCache[`${mesKey}__pending`];
+      } else {
+        const fetchPromise = fetch(`/api/pcp/calendario?ano=${ano}&mes=${mes}`, {
+          credentials: 'include'
+        }).then(async resp => {
+          if (!resp.ok) throw new Error('HTTP ' + resp.status);
+          const data = await resp.json();
+          if (!data.ok || !data.data) throw new Error('Resposta inválida');
+          carouselMonthCache[mesKey] = data.data;
+        }).catch(err => {
+          console.error('[CARROSSEL] Erro ao carregar mês:', err);
+          carouselMonthCache[mesKey] = [];
+        }).finally(() => {
+          delete carouselMonthCache[`${mesKey}__pending`];
+        });
+        carouselMonthCache[`${mesKey}__pending`] = fetchPromise;
+        await fetchPromise;
+      }
     }
-    
-    const data = await resp.json();
-    
-    if (!data.ok || !data.data) {
-      console.error('[CARROSSEL] Resposta inválida:', data);
-      carouselDataCache[key] = [];
-      return;
-    }
-    
-    const produtos = data.data
-      .filter(item => {
-        const itemDate = item.data_previsao?.split('T')[0];
-        return itemDate === key;
-      })
+
+    const rawData = carouselMonthCache[mesKey] || [];
+    carouselDataCache[key] = rawData
+      .filter(item => item.data_previsao?.split('T')[0] === key)
       .map(item => ({
         codigo: item.codigo_produto || 'Sem código',
         quantidade: item.quantidade || 0,
         status: item.status || 'aguardando',
         descricao: item.produto_descricao || ''
       }));
-    
-    carouselDataCache[key] = produtos;
-    
+
   } catch (error) {
     console.error('[CARROSSEL] Erro ao carregar dia:', error);
     carouselDataCache[key] = [];
@@ -65471,46 +65792,463 @@ document.addEventListener('DOMContentLoaded', () => {
 (function () {
   const overlay   = document.getElementById('modalMovimentacao');
   const fecharBtn = document.getElementById('movimFecharBtn');
-  const cancelBtn = document.getElementById('movimCancelarBtn');
-  const salvarBtn = document.getElementById('movimSalvarBtn');
   const tipoDiv   = document.getElementById('movimTipo');
   const qtdInput  = document.getElementById('movimQtdInput');
   const qtdResult = document.getElementById('movimQtdResultado');
   const operDiv   = document.getElementById('movimOperadores');
   const localSel  = document.getElementById('movimLocalSelect');
+  const origemSel = document.getElementById('movimOrigemSelect');
+  const calcBtn   = document.getElementById('movimCalcBtn');
+  const calcPopup = document.getElementById('movimCalcPopup');
+  const calcDisp  = document.getElementById('movimCalcDisplay');
+  const scanBtn   = document.getElementById('movimScanEnderecoBtn');
+  const scanModal = document.getElementById('movimScanEnderecoModal');
+  const scanVideo = document.getElementById('movimScanEnderecoVideo');
+  const scanMira  = document.getElementById('movimScanEnderecoMira');
+  const scanStatus= document.getElementById('movimScanEnderecoStatus');
+  const scanInput = document.getElementById('movimScanEnderecoInput');
+  const scanOkBtn = document.getElementById('movimScanEnderecoOk');
+  const scanFechar= document.getElementById('movimScanEnderecoFechar');
+  const omieMotivoSel = document.getElementById('movimOmieMotivo');
 
-  let tipoAtivo = null;
+  const MOVIM_DEFAULT_ORIGEM = '10717096386'; // 2. PORTA PALLET (ALMOXARIFADO)
+  const MOVIM_MOTIVOS = {
+    ENT: [
+      { v: 'INV', l: 'INV — Ajuste por Inventário' },
+      { v: 'OPE', l: 'OPE — Integração OP (Entrada)' },
+      { v: 'PDV', l: 'PDV — Integração PDV' },
+      { v: 'INI', l: 'INI — Estoque Inicial' }
+    ],
+    SAI: [
+      { v: 'INV', l: 'INV — Ajuste por Inventário' },
+      { v: 'PER', l: 'PER — Baixa por Perda/Quebra' },
+      { v: 'OPS', l: 'OPS — Integração OP (Saída)' },
+      { v: 'PDV', l: 'PDV — Integração PDV' }
+    ],
+    TRF: [
+      { v: 'TRF', l: 'TRF — Transferência entre Locais' },
+      { v: 'TPQ', l: 'TPQ — Transferência por Perda/Quebra' }
+    ]
+  };
+  let _processandoAcao = false;
+  let _scanStream = null;
+  let _scanInterval = null;
 
   function fechar() {
     if (overlay) overlay.style.display = 'none';
-    tipoAtivo = null;
+    fecharScanEndereco();
     if (qtdInput)  qtdInput.value = '';
     if (qtdResult) qtdResult.textContent = '';
-    document.querySelectorAll('.movimTipoBtn').forEach(b => b.classList.remove('ativo'));
+    document.querySelectorAll('.movimTipoBtn').forEach(b => b.classList.remove('ativo', 'processando'));
     const msg = document.getElementById('movimMensagem');
     if (msg) { msg.textContent = ''; msg.className = 'movim-mensagem'; }
-    const sol = document.getElementById('movimSolicitante');
-    if (sol) sol.value = '';
     const apo = document.getElementById('movimApontamento');
     if (apo) apo.value = '';
+    if (calcPopup) calcPopup.style.display = 'none';
+    limparRetornoOmie();
+    limparEnderecos();
+    _processandoAcao = false;
   }
 
-  if (fecharBtn) fecharBtn.addEventListener('click', fechar);
-  if (cancelBtn) cancelBtn.addEventListener('click', fechar);
-  if (overlay)   overlay.addEventListener('click', e => { if (e.target === overlay) fechar(); });
+  function limparEnderecos() {
+    const lista = document.getElementById('movimEnderecoLista');
+    const vazio = document.getElementById('movimEnderecoVazio');
+    if (lista) lista.innerHTML = '';
+    if (vazio) vazio.style.display = 'block';
+  }
 
-  // Tipo de movimentação
-  if (tipoDiv) {
-    tipoDiv.addEventListener('click', e => {
-      const btn = e.target.closest('.movimTipoBtn');
-      if (!btn) return;
-      document.querySelectorAll('.movimTipoBtn').forEach(b => b.classList.remove('ativo'));
-      btn.classList.add('ativo');
-      tipoAtivo = btn.dataset.type;
+  function adicionarEndereco(address) {
+    const lista = document.getElementById('movimEnderecoLista');
+    const vazio = document.getElementById('movimEnderecoVazio');
+    const valor = String(address || '').trim();
+    if (!lista || !valor) return;
+
+    const existentes = lista.querySelectorAll('.movim-endereco-item');
+    for (const ex of existentes) {
+      if (ex.dataset.address === valor) return;
+    }
+
+    const item = document.createElement('div');
+    item.className = 'movim-endereco-item';
+    item.dataset.address = valor;
+    item.innerHTML = `
+      <span><i class="fa-solid fa-location-dot" style="color:#60a5fa;margin-right:6px;font-size:10px;"></i>${escapeHtml(valor)}</span>
+      <button type="button" title="Remover"><i class="fa-solid fa-xmark"></i></button>
+    `;
+    item.querySelector('button').addEventListener('click', () => {
+      item.remove();
+      if (!lista.children.length && vazio) vazio.style.display = 'block';
+    });
+
+    lista.appendChild(item);
+    if (vazio) vazio.style.display = 'none';
+  }
+
+  async function pararScanEndereco() {
+    clearInterval(_scanInterval);
+    _scanInterval = null;
+    if (_scanStream) {
+      _scanStream.getTracks().forEach(t => t.stop());
+      _scanStream = null;
+    }
+    if (scanVideo) scanVideo.srcObject = null;
+  }
+
+  function fecharScanEndereco() {
+    pararScanEndereco();
+    if (scanModal) scanModal.style.display = 'none';
+    if (scanInput) scanInput.value = '';
+    if (scanStatus) {
+      scanStatus.textContent = 'Aponte a camera para o codigo do endereco.';
+      scanStatus.style.color = '#94a3b8';
+    }
+  }
+
+  async function iniciarScanEndereco() {
+    await pararScanEndereco();
+    try {
+      _scanStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+      if (scanVideo) {
+        scanVideo.srcObject = _scanStream;
+        await scanVideo.play().catch(() => {});
+      }
+      return true;
+    } catch {
+      if (scanStatus) {
+        scanStatus.textContent = 'Camera nao disponivel. Digite o endereco abaixo.';
+        scanStatus.style.color = '#f59e0b';
+      }
+      return false;
+    }
+  }
+
+  function iniciarDeteccaoEndereco() {
+    clearInterval(_scanInterval);
+    if (!('BarcodeDetector' in window)) {
+      if (scanStatus) {
+        scanStatus.textContent = 'Leitura automatica indisponivel. Digite o codigo abaixo.';
+        scanStatus.style.color = '#f59e0b';
+      }
+      return;
+    }
+    const detector = new BarcodeDetector({
+      formats: ['qr_code', 'code_128', 'code_39', 'ean_13', 'ean_8', 'upc_a', 'data_matrix']
+    });
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+    _scanInterval = setInterval(async () => {
+      if (!scanVideo || scanVideo.readyState < 2) return;
+      canvas.width = scanVideo.videoWidth;
+      canvas.height = scanVideo.videoHeight;
+      ctx.drawImage(scanVideo, 0, 0);
+      try {
+        const barcodes = await detector.detect(canvas);
+        if (barcodes.length > 0) {
+          clearInterval(_scanInterval);
+          _scanInterval = null;
+          if (scanMira) {
+            scanMira.style.borderColor = '#4ade80';
+            setTimeout(() => { if (scanMira) scanMira.style.borderColor = 'rgba(52,211,153,.85)'; }, 600);
+          }
+          registrarEnderecoLido(barcodes[0].rawValue);
+        }
+      } catch { /* ignora frame */ }
+    }, 250);
+  }
+
+  function registrarEnderecoLido(valor) {
+    const endereco = String(valor || '').trim();
+    if (!endereco) return;
+    adicionarEndereco(endereco);
+    if (scanStatus) {
+      scanStatus.textContent = `Endereco registrado: ${endereco}`;
+      scanStatus.style.color = '#4ade80';
+    }
+    setTimeout(fecharScanEndereco, 700);
+  }
+
+  async function abrirScanEndereco() {
+    if (!scanModal) return;
+    if (scanInput) scanInput.value = '';
+    scanModal.style.display = 'flex';
+    const ok = await iniciarScanEndereco();
+    if (ok) iniciarDeteccaoEndereco();
+  }
+
+  if (scanBtn) scanBtn.addEventListener('click', abrirScanEndereco);
+  if (scanFechar) scanFechar.addEventListener('click', fecharScanEndereco);
+  if (scanModal) scanModal.addEventListener('click', e => { if (e.target === scanModal) fecharScanEndereco(); });
+  if (scanOkBtn) {
+    scanOkBtn.addEventListener('click', () => {
+      const valor = scanInput?.value?.trim();
+      if (!valor) return;
+      registrarEnderecoLido(valor);
+    });
+  }
+  if (scanInput) {
+    scanInput.addEventListener('keydown', e => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        const valor = scanInput.value.trim();
+        if (valor) registrarEnderecoLido(valor);
+      }
     });
   }
 
-  // Operadores de quantidade
+  function obterEnderecosLidos() {
+    const lista = document.getElementById('movimEnderecoLista');
+    if (!lista) return [];
+    return Array.from(lista.querySelectorAll('.movim-endereco-item'))
+      .map(el => String(el.dataset.address || '').trim())
+      .filter(Boolean);
+  }
+
+  function atualizarMotivosOmie(tipoOmie) {
+    if (!omieMotivoSel) return;
+    const tipo = String(tipoOmie || 'TRF').toUpperCase();
+    const opcoes = MOVIM_MOTIVOS[tipo] || MOVIM_MOTIVOS.TRF;
+    omieMotivoSel.innerHTML = opcoes.map(o => `<option value="${o.v}">${escapeHtml(o.l)}</option>`).join('');
+  }
+
+  function obterMotivoOmie(tipoOmie) {
+    const tipo = String(tipoOmie || '').toUpperCase();
+    const val = String(omieMotivoSel?.value || '').trim().toUpperCase();
+    const opcoes = MOVIM_MOTIVOS[tipo] || [];
+    if (opcoes.some(o => o.v === val)) return val;
+    return opcoes[0]?.v || 'INV';
+  }
+
+  function obterSolicitanteMovim() {
+    const solicitanteEl = document.getElementById('userNameDisplay');
+    const solicitanteRaw = String(solicitanteEl?.textContent || '').trim();
+    return solicitanteRaw && solicitanteRaw !== '—' ? solicitanteRaw : null;
+  }
+
+  async function registrarEnderecosEtq({ codigo, descricao, qtd, enderecos, complemento, usuario, tipoMovimentacao }) {
+    if (!enderecos?.length) return { ok: true, registros: [] };
+    const resp = await fetch('/api/etiquetas/rec-impresso/registrar-movimentacao', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ codigo, descricao, qtd, enderecos, complemento, usuario, tipo_movimentacao: tipoMovimentacao })
+    });
+    let json;
+    try { json = await resp.json(); } catch { throw new Error('Resposta inválida ao registrar endereço.'); }
+    if (!resp.ok || !json?.ok) throw new Error(json?.error || `Falha ao registrar endereço (HTTP ${resp.status}).`);
+    return json;
+  }
+
+  function limparRetornoOmie() {
+    const el = document.getElementById('movimRetornoOmie');
+    if (el) { el.style.display = 'none'; el.innerHTML = ''; el.className = 'movim-retorno-omie'; }
+  }
+
+  function montarHtmlRetornoOmie({ ok, titulo, linhas, idSolicitacao }) {
+    const icone = ok ? '✅' : '❌';
+    const partes = [`<div class="movim-retorno-titulo">${icone} ${escapeHtml(titulo)}</div>`];
+    if (idSolicitacao) {
+      partes.push(`<div class="movim-retorno-id">Solicitação #${escapeHtml(String(idSolicitacao))}</div>`);
+    }
+    (linhas || []).forEach(l => partes.push(`<div class="movim-retorno-linha">${escapeHtml(l)}</div>`));
+    return partes.join('');
+  }
+
+  function exibirRetornoOmie(html, tipo) {
+    const el = document.getElementById('movimRetornoOmie');
+    if (!el) return;
+    el.className = 'movim-retorno-omie' + (tipo ? ' ' + tipo : '');
+    el.innerHTML = html;
+    el.style.display = 'block';
+    el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
+
+  if (fecharBtn) fecharBtn.addEventListener('click', fechar);
+  if (overlay)   overlay.addEventListener('click', e => { if (e.target === overlay) fechar(); });
+
+  function setBotoesAcaoDisabled(disabled) {
+    document.querySelectorAll('.movimTipoBtn').forEach(b => {
+      b.disabled = !!disabled;
+      b.classList.toggle('processando', !!disabled);
+    });
+  }
+
+  function isMesmoArmazemMovim() {
+    const origem = String(origemSel?.value || '').trim();
+    const destino = String(localSel?.value || '').trim();
+    return !!(origem && destino && origem === destino);
+  }
+
+  function atualizarUiMesmoArmazem() {
+    const mesmo = isMesmoArmazemMovim();
+    const aviso = document.getElementById('movimMesmoArmazemAviso');
+    const imprWrap = document.getElementById('movimImprimirEtiquetaWrap');
+    if (aviso) aviso.style.display = mesmo ? 'block' : 'none';
+    if (imprWrap) imprWrap.style.display = mesmo ? 'flex' : 'none';
+  }
+
+  function movimEtqImprKey() {
+    const u = String(document.getElementById('userNameDisplay')?.textContent || 'user').trim().replace(/\s+/g, '_');
+    return `etq_impr_cfg_${u}`;
+  }
+
+  function movimObterPrefsImpressora() {
+    try {
+      const cfg = JSON.parse(localStorage.getItem(movimEtqImprKey()) || '{}');
+      const padrao = cfg.padrao || null;
+      if (!padrao) return {};
+      if (padrao.startsWith('__AGENT__:')) {
+        const s = padrao.slice('__AGENT__:'.length);
+        const i = s.indexOf(':');
+        if (i === -1) return { destino_agente: s };
+        return { destino_agente: s.slice(0, i), impressora: s.slice(i + 1), via_fila: true };
+      }
+      if (padrao === '__BP__') return { via_fila: true };
+      if (padrao && padrao !== '__PDF__') return { printer: padrao, via_fila: false };
+      return {};
+    } catch {
+      return { via_fila: true };
+    }
+  }
+
+  async function imprimirEtiquetasMovim(ids) {
+    if (!ids?.length) return { ok: false, error: 'Nenhuma etiqueta para imprimir.' };
+    const usuario = obterSolicitanteMovim();
+    const body = { ids, usuario, ...movimObterPrefsImpressora() };
+    const resp = await fetch('/api/etiquetas/rec-impresso/imprimir-ids', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify(body)
+    });
+    let json;
+    try { json = await resp.json(); } catch {
+      return { ok: false, error: 'Resposta invalida ao imprimir etiqueta.' };
+    }
+    if (!resp.ok || !json?.ok) {
+      return { ok: false, error: json?.error || `Falha ao imprimir (HTTP ${resp.status}).` };
+    }
+    return json;
+  }
+
+  async function salvarEnderecamentoInterno(tipoAcao) {
+    const msg = document.getElementById('movimMensagem');
+    const qtd = obterQtdDaExpressao();
+    const apontamento = String(document.getElementById('movimApontamento')?.value || '').trim() || null;
+    const enderecos = obterEnderecosLidos();
+    const mapTipo = { ENTRADA: 'ENT', SAIDA: 'SAI', TRANSFERENCIA: 'TRF' };
+    const tipoMov = mapTipo[String(tipoAcao || '').toUpperCase()] || String(tipoAcao || '').toUpperCase();
+
+    if (!enderecos.length) {
+      if (msg) {
+        msg.textContent = 'Leia pelo menos um endereco (codigo de barras).';
+        msg.className = 'movim-mensagem erro';
+      }
+      return;
+    }
+    if (!qtd) {
+      if (msg) { msg.textContent = 'Informe uma quantidade valida.'; msg.className = 'movim-mensagem erro'; }
+      return;
+    }
+    if (!_codigoProdutoAtual) {
+      if (msg) { msg.textContent = 'Produto nao identificado.'; msg.className = 'movim-mensagem erro'; }
+      return;
+    }
+
+    const solicitante = obterSolicitanteMovim();
+    const imprimir = !!document.getElementById('movimImprimirEtiqueta')?.checked;
+    limparRetornoOmie();
+    if (msg) { msg.textContent = 'Registrando endereco…'; msg.className = 'movim-mensagem info'; }
+    _processandoAcao = true;
+    setBotoesAcaoDisabled(true);
+
+    try {
+      const etq = await registrarEnderecosEtq({
+        codigo: _codigoProdutoAtual,
+        descricao: _descricaoProdutoAtual,
+        qtd,
+        enderecos,
+        complemento: apontamento,
+        usuario: solicitante,
+        tipoMovimentacao: tipoMov
+      });
+      const ids = (etq.registros || []).map(r => r.id).filter(Boolean);
+      const linhas = [
+        `Produto: ${_codigoProdutoAtual}`,
+        `Tipo: ${tipoMov}`,
+        `Endereco(s): ${enderecos.join(', ')}`,
+        ids.length ? `Etiqueta(s) ETQ: ${ids.join(', ')}` : 'Registro salvo em ETQ_rec_impresso.'
+      ];
+
+      if (imprimir && ids.length) {
+        if (msg) { msg.textContent = 'Enviando etiqueta para impressao…'; msg.className = 'movim-mensagem info'; }
+        const imp = await imprimirEtiquetasMovim(ids);
+        if (imp?.ok) {
+          linhas.push(`${imp.quantidade || ids.length} etiqueta(s) enviada(s) para impressao.`);
+        } else {
+          linhas.push(`Impressao: ${imp?.error || 'falhou — configure a impressora em Identificacao do produto.'}`);
+        }
+      }
+
+      exibirRetornoOmie(montarHtmlRetornoOmie({
+        ok: true,
+        titulo: 'Endereco registrado (sem Omie)',
+        linhas
+      }), 'ok');
+      if (msg) { msg.textContent = 'Endereco registrado.'; msg.className = 'movim-mensagem ok'; }
+      limparEnderecos();
+    } catch (err) {
+      console.error('[modalMovimentacao] enderecamento interno', err);
+      exibirRetornoOmie(montarHtmlRetornoOmie({
+        ok: false,
+        titulo: 'Falha ao registrar endereco',
+        linhas: [String(err?.message || err)]
+      }), 'erro');
+      if (msg) { msg.textContent = 'Falha — veja o retorno abaixo.'; msg.className = 'movim-mensagem erro'; }
+    } finally {
+      _processandoAcao = false;
+      setBotoesAcaoDisabled(false);
+    }
+  }
+
+  async function executarAcao(tipo) {
+    if (_processandoAcao) return;
+    if (isMesmoArmazemMovim()) {
+      await salvarEnderecamentoInterno(tipo);
+      return;
+    }
+    if (tipo === 'TRANSFERENCIA') {
+      atualizarMotivosOmie('TRF');
+      await salvarTransferencia();
+      return;
+    }
+    if (tipo === 'ENTRADA') {
+      atualizarMotivosOmie('ENT');
+      await salvarAjuste('ENT');
+      return;
+    }
+    if (tipo === 'SAIDA') {
+      atualizarMotivosOmie('SAI');
+      await salvarAjuste('SAI');
+      return;
+    }
+  }
+
+  // Botões de ação final (ENTRADA / SAIDA / TRANSFERENCIA)
+  if (tipoDiv) {
+    const mapTipoOmie = { ENTRADA: 'ENT', SAIDA: 'SAI', TRANSFERENCIA: 'TRF' };
+    tipoDiv.addEventListener('mouseenter', e => {
+      const btn = e.target.closest('.movimTipoBtn');
+      if (!btn) return;
+      atualizarMotivosOmie(mapTipoOmie[btn.dataset.type] || 'TRF');
+    }, true);
+    tipoDiv.addEventListener('click', e => {
+      const btn = e.target.closest('.movimTipoBtn');
+      if (!btn || btn.disabled) return;
+      executarAcao(btn.dataset.type);
+    });
+  }
+
+  // Operadores de quantidade (mantido para compatibilidade; botões removidos do HTML)
   if (operDiv) {
     operDiv.addEventListener('click', e => {
       const btn = e.target.closest('button[data-insert]');
@@ -65518,6 +66256,69 @@ document.addEventListener('DOMContentLoaded', () => {
       qtdInput.value += btn.dataset.insert;
       qtdInput.focus();
       avaliarExpressao();
+    });
+  }
+
+  // Calculadora popup
+  let _calcExpr = '';
+
+  function _calcRender() {
+    if (calcDisp) calcDisp.textContent = _calcExpr || '0';
+  }
+
+  if (calcBtn && calcPopup) {
+    calcBtn.addEventListener('click', e => {
+      e.stopPropagation();
+      if (calcPopup.style.display !== 'none') {
+        calcPopup.style.display = 'none';
+        return;
+      }
+      _calcExpr = qtdInput ? qtdInput.value : '';
+      _calcRender();
+      const rect = calcBtn.getBoundingClientRect();
+      const popW = 224;
+      let left = rect.right - popW;
+      if (left < 8) left = 8;
+      calcPopup.style.top  = (rect.bottom + 6) + 'px';
+      calcPopup.style.left = left + 'px';
+      calcPopup.style.display = 'block';
+    });
+
+    calcPopup.addEventListener('click', e => {
+      const key = e.target.closest('.movimCalcKey');
+      if (!key) return;
+      e.stopPropagation();
+      const v = key.dataset.v;
+      if (v === 'C') {
+        _calcExpr = '';
+      } else if (v === '←') {
+        _calcExpr = _calcExpr.slice(0, -1);
+      } else if (v === 'OK') {
+        if (_calcExpr.trim()) {
+          try {
+            // eslint-disable-next-line no-new-func
+            const res = Function('"use strict"; return (' + _calcExpr.replace(/,/g, '.') + ')')();
+            if (typeof res === 'number' && isFinite(res)) {
+              if (qtdInput) {
+                qtdInput.value = String(parseFloat(res.toFixed(6)));
+                avaliarExpressao();
+              }
+            }
+          } catch { /* expressão inválida */ }
+        }
+        calcPopup.style.display = 'none';
+        return;
+      } else {
+        _calcExpr += v;
+      }
+      _calcRender();
+    });
+
+    document.addEventListener('click', e => {
+      if (!calcPopup || calcPopup.style.display === 'none') return;
+      if (!calcPopup.contains(e.target) && e.target !== calcBtn) {
+        calcPopup.style.display = 'none';
+      }
     });
   }
 
@@ -65538,24 +66339,49 @@ document.addEventListener('DOMContentLoaded', () => {
   }
   if (qtdInput) qtdInput.addEventListener('input', avaliarExpressao);
 
-  // Carrega os locais de estoque no select
+  // Carrega os locais de estoque nos selects (Local de estoque e Origem)
   async function carregarLocais() {
-    if (!localSel) return;
+    if (!localSel && !origemSel) return;
     try {
       const r = await fetch('/api/armazem/locais?fonte=db');
       const d = await r.json();
-      localSel.innerHTML = '';
-      (d.locais || []).filter(l => !l.inativo).forEach(l => {
-        const opt = document.createElement('option');
-        opt.value = l.codigo_local_estoque;
-        opt.textContent = l.descricao || l.codigo_local_estoque;
-        localSel.appendChild(opt);
-      });
-      // Pré-seleciona o local ALMOXARIFADO por padrão
-      const optAlmox = Array.from(localSel.options).find(o =>
-        o.textContent.toUpperCase().includes('ALMOXARIFADO')
-      );
-      if (optAlmox) localSel.value = optAlmox.value;
+      const locais = (d.locais || []).filter(l => !l.inativo);
+
+      function preencherOrigem(sel) {
+        if (!sel) return;
+        sel.innerHTML = '';
+        locais.forEach(l => {
+          const opt = document.createElement('option');
+          opt.value = l.codigo_local_estoque;
+          opt.textContent = l.descricao || l.codigo_local_estoque;
+          sel.appendChild(opt);
+        });
+        const preferido = MOVIM_DEFAULT_ORIGEM;
+        if (preferido && Array.from(sel.options).some(o => o.value === preferido)) {
+          sel.value = preferido;
+        } else {
+          const optPorta = Array.from(sel.options).find(o =>
+            o.textContent.toUpperCase().includes('PORTA PALLET')
+          );
+          if (optPorta) sel.value = optPorta.value;
+        }
+      }
+
+      function preencherDestino(sel) {
+        if (!sel) return;
+        sel.innerHTML = '<option value="">Selecione o destino…</option>';
+        locais.forEach(l => {
+          const opt = document.createElement('option');
+          opt.value = l.codigo_local_estoque;
+          opt.textContent = l.descricao || l.codigo_local_estoque;
+          sel.appendChild(opt);
+        });
+        sel.value = '';
+      }
+
+      preencherOrigem(origemSel);
+      preencherDestino(localSel);
+      atualizarUiMesmoArmazem();
     } catch (e) {
       console.warn('[modalMovimentacao] erro ao carregar locais:', e);
     }
@@ -65576,15 +66402,539 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Atualiza estoque ao trocar o local
   let _codigoProdutoAtual = null;
+  let _descricaoProdutoAtual = null;
+  let _codigoProdutoOmieAtual = null;
+
+  function obterQtdDaExpressao() {
+    if (!qtdInput) return null;
+    const expr = String(qtdInput.value || '').trim();
+    if (!expr) return null;
+    try {
+      // eslint-disable-next-line no-new-func
+      const val = Function('"use strict"; return (' + expr.replace(/,/g, '.') + ')')();
+      if (typeof val === 'number' && isFinite(val) && val > 0) return val;
+    } catch { /* expressão inválida */ }
+    return null;
+  }
+
+  async function buscarCmcOrigem(codigo, origem) {
+    try {
+      const r = await fetch(`/api/logistica/estoque?local=${encodeURIComponent(origem)}&q=${encodeURIComponent(codigo)}`);
+      const d = await r.json();
+      const item = (d.dados || []).find(i => String(i.codigo || '').trim() === String(codigo || '').trim());
+      if (!item) return null;
+      const cmc = normalizaNumeroParaApi(item.cmc);
+      return cmc > 0 ? cmc : null;
+    } catch {
+      return null;
+    }
+  }
+
+  async function salvarAjuste(tipoOperacao) {
+    const msg = document.getElementById('movimMensagem');
+    const tipo = String(tipoOperacao || '').toUpperCase();
+    const local = tipo === 'ENT'
+      ? String(localSel?.value || '').trim()
+      : String(origemSel?.value || '').trim();
+    const qtd = obterQtdDaExpressao();
+    const motivo = obterMotivoOmie(tipo);
+    const apontamento = String(document.getElementById('movimApontamento')?.value || '').trim() || null;
+
+    if (!local) {
+      if (msg) {
+        msg.textContent = tipo === 'ENT' ? 'Selecione o destino (local de entrada).' : 'Selecione a origem (local de saída).';
+        msg.className = 'movim-mensagem erro';
+      }
+      return;
+    }
+    if (!qtd) {
+      if (msg) { msg.textContent = 'Informe uma quantidade válida.'; msg.className = 'movim-mensagem erro'; }
+      return;
+    }
+    if (!_codigoProdutoAtual) {
+      if (msg) { msg.textContent = 'Produto não identificado.'; msg.className = 'movim-mensagem erro'; }
+      return;
+    }
+
+    const solicitante = obterSolicitanteMovim();
+    limparRetornoOmie();
+    if (msg) { msg.textContent = 'Registrando ajuste…'; msg.className = 'movim-mensagem info'; }
+    _processandoAcao = true;
+    setBotoesAcaoDisabled(true);
+
+    try {
+      const cmc = await buscarCmcOrigem(_codigoProdutoAtual, local);
+      const payload = {
+        tipo_operacao: tipo,
+        local_estoque: local,
+        data_movimentacao: new Date().toISOString().slice(0, 10),
+        solicitante,
+        motivo,
+        obs: apontamento,
+        itens: [{
+          codigo: _codigoProdutoAtual,
+          descricao: _descricaoProdutoAtual || _codigoProdutoAtual,
+          qtd,
+          cmc: cmc || null,
+          codigo_produto: _codigoProdutoOmieAtual || null,
+          codOmie: _codigoProdutoOmieAtual || null
+        }]
+      };
+
+      const resp = await fetch('/api/ajustes', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      let resposta;
+      try { resposta = await resp.json(); } catch { throw new Error('Resposta inválida do servidor.'); }
+      if (!resp.ok || !resposta?.ok) {
+        throw new Error(resposta?.error || resposta?.detail || `Falha ao registrar ajuste (HTTP ${resp.status}).`);
+      }
+
+      const registros = Array.isArray(resposta.registros) ? resposta.registros : [];
+      const idSolicitacao = registros[0]?.id;
+      if (!idSolicitacao) throw new Error('Solicitação criada sem identificador.');
+
+      if (!solicitante || solicitante === 'Usuário') {
+        exibirRetornoOmie(montarHtmlRetornoOmie({
+          ok: false,
+          titulo: 'Solicitação registrada — usuário não identificado',
+          idSolicitacao,
+          linhas: ['Não foi possível enviar para a Omie automaticamente.', 'Aprove em Logística → Armazéns → Ajuste.']
+        }), 'info');
+        if (msg) { msg.textContent = 'Solicitação registrada. Aguardando aprovação.'; msg.className = 'movim-mensagem info'; }
+        return;
+      }
+
+      if (msg) { msg.textContent = 'Enviando para Omie…'; msg.className = 'movim-mensagem info'; }
+      const respAprovar = await fetch(`/api/ajustes/${idSolicitacao}/aprovar`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ aprovadoPor: solicitante })
+      });
+      let jsonAprovar;
+      try { jsonAprovar = await respAprovar.json(); } catch { throw new Error('Resposta inválida ao enviar para Omie.'); }
+
+      if (!respAprovar.ok || !jsonAprovar?.ok) {
+        const errOmie = jsonAprovar?.error || `Falha ao enviar para Omie (HTTP ${respAprovar.status}).`;
+        exibirRetornoOmie(montarHtmlRetornoOmie({
+          ok: false,
+          titulo: 'Omie não confirmou o ajuste',
+          idSolicitacao,
+          linhas: [errOmie, 'A solicitação foi salva. Tente aprovar em Logística → Armazéns → Ajuste.']
+        }), 'erro');
+        if (msg) { msg.textContent = 'Ajuste pendente — veja o retorno abaixo.'; msg.className = 'movim-mensagem erro'; }
+        return;
+      }
+
+      const omie = jsonAprovar.omie || {};
+      const linhasRetorno = [];
+      const descOmie = jsonAprovar.descricao_status || omie.descricao_status;
+      if (descOmie) linhasRetorno.push(`Mensagem Omie: ${descOmie}`);
+      if (!linhasRetorno.length) linhasRetorno.push(`Ajuste ${tipo} concluído com sucesso na Omie.`);
+
+      exibirRetornoOmie(montarHtmlRetornoOmie({
+        ok: true,
+        titulo: `Ajuste ${tipo} enviado para Omie`,
+        idSolicitacao,
+        linhas: linhasRetorno
+      }), 'ok');
+      if (msg) { msg.textContent = 'Ajuste concluído.'; msg.className = 'movim-mensagem ok'; }
+    } catch (err) {
+      console.error('[modalMovimentacao] ajuste', err);
+      exibirRetornoOmie(montarHtmlRetornoOmie({
+        ok: false,
+        titulo: 'Falha ao registrar ajuste',
+        linhas: [String(err?.message || err)]
+      }), 'erro');
+      if (msg) { msg.textContent = 'Falha — veja o retorno abaixo.'; msg.className = 'movim-mensagem erro'; }
+    } finally {
+      _processandoAcao = false;
+      setBotoesAcaoDisabled(false);
+    }
+  }
+
+  async function salvarTransferencia() {
+    const msg = document.getElementById('movimMensagem');
+    const origem = String(origemSel?.value || '').trim() || MOVIM_DEFAULT_ORIGEM;
+    const destino = String(localSel?.value || '').trim();
+    const qtd = obterQtdDaExpressao();
+    const motivo = obterMotivoOmie('TRF');
+    const apontamento = String(document.getElementById('movimApontamento')?.value || '').trim() || null;
+    const enderecos = obterEnderecosLidos();
+
+    if (!destino) {
+      if (msg) { msg.textContent = 'Selecione o destino.'; msg.className = 'movim-mensagem erro'; }
+      localSel?.focus();
+      return;
+    }
+    if (!qtd) {
+      if (msg) { msg.textContent = 'Informe uma quantidade válida.'; msg.className = 'movim-mensagem erro'; }
+      return;
+    }
+    if (!_codigoProdutoAtual) {
+      if (msg) { msg.textContent = 'Produto não identificado.'; msg.className = 'movim-mensagem erro'; }
+      return;
+    }
+
+    const solicitante = obterSolicitanteMovim();
+    limparRetornoOmie();
+    _processandoAcao = true;
+    setBotoesAcaoDisabled(true);
+
+    try {
+      if (msg) { msg.textContent = 'Registrando solicitação…'; msg.className = 'movim-mensagem info'; }
+
+      const cmc = await buscarCmcOrigem(_codigoProdutoAtual, origem);
+      const payload = {
+        origem,
+        destino,
+        data_movimentacao: new Date().toISOString().slice(0, 10),
+        solicitante,
+        itens: [{
+          codigo: _codigoProdutoAtual,
+          descricao: _descricaoProdutoAtual || _codigoProdutoAtual,
+          qtd,
+          cmc: cmc || null,
+          codigo_produto: _codigoProdutoOmieAtual || null,
+          codOmie: _codigoProdutoOmieAtual || null
+        }]
+      };
+
+      const resp = await fetch('/api/transferencias', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+
+      let resposta;
+      try {
+        resposta = await resp.json();
+      } catch {
+        throw new Error('Resposta inválida do servidor.');
+      }
+
+      if (!resp.ok || !resposta?.ok) {
+        const detalhe = resposta?.error || resposta?.detail || `Falha ao registrar transferência (HTTP ${resp.status}).`;
+        throw new Error(detalhe);
+      }
+
+      const registros = Array.isArray(resposta.registros) ? resposta.registros : [];
+      const idSolicitacao = registros[0]?.id;
+      if (!idSolicitacao) {
+        throw new Error('Solicitação criada sem identificador.');
+      }
+
+      const aprovadoPor = solicitante;
+      if (!aprovadoPor || aprovadoPor === 'Usuário') {
+        exibirRetornoOmie(montarHtmlRetornoOmie({
+          ok: false,
+          titulo: 'Solicitação registrada — usuário não identificado',
+          idSolicitacao,
+          linhas: [
+            'Não foi possível enviar para a Omie automaticamente.',
+            'Aprove em Logística → Solicitação de transferência.'
+          ]
+        }), 'info');
+        if (msg) { msg.textContent = 'Solicitação registrada. Aguardando aprovação.'; msg.className = 'movim-mensagem info'; }
+        return;
+      }
+
+      if (msg) { msg.textContent = 'Enviando para Omie…'; msg.className = 'movim-mensagem info'; }
+
+      const respAprovar = await fetch(`/api/transferencias/${idSolicitacao}/aprovar`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ aprovadoPor, motivo })
+      });
+
+      let jsonAprovar;
+      try {
+        jsonAprovar = await respAprovar.json();
+      } catch {
+        throw new Error('Resposta inválida ao enviar para Omie.');
+      }
+
+      if (!respAprovar.ok || !jsonAprovar?.ok) {
+        const errOmie = jsonAprovar?.error || `Falha ao enviar para Omie (HTTP ${respAprovar.status}).`;
+        exibirRetornoOmie(montarHtmlRetornoOmie({
+          ok: false,
+          titulo: 'Omie não confirmou a transferência',
+          idSolicitacao,
+          linhas: [
+            errOmie,
+            'A solicitação foi salva. Tente aprovar em Logística → Solicitação de transferência.'
+          ]
+        }), 'erro');
+        if (msg) { msg.textContent = 'Transferência pendente — veja o retorno abaixo.'; msg.className = 'movim-mensagem erro'; }
+        return;
+      }
+
+      if (enderecos.length) {
+        await registrarEnderecosEtq({
+          codigo: _codigoProdutoAtual,
+          descricao: _descricaoProdutoAtual,
+          qtd,
+          enderecos,
+          complemento: apontamento,
+          usuario: aprovadoPor,
+          tipoMovimentacao: 'TRF'
+        });
+      }
+
+      const omie = jsonAprovar.omie || {};
+      const linhasRetorno = [];
+      const descOmie = jsonAprovar.descricao_status || omie.descricao_status;
+      if (descOmie) linhasRetorno.push(`Mensagem Omie: ${descOmie}`);
+      if (omie.codigo_status !== undefined && omie.codigo_status !== null && omie.codigo_status !== '') {
+        linhasRetorno.push(`Código Omie: ${omie.codigo_status}`);
+      }
+      const idMov = omie.id_mov || omie.nCodMov || omie.codigo_movimento;
+      if (idMov) linhasRetorno.push(`ID movimentação: ${idMov}`);
+      if (enderecos.length) linhasRetorno.push(`Endereço(s) registrado(s): ${enderecos.join(', ')}`);
+      if (!linhasRetorno.length) linhasRetorno.push('Transferência concluída com sucesso na Omie.');
+
+      exibirRetornoOmie(montarHtmlRetornoOmie({
+        ok: true,
+        titulo: 'Transferência enviada para Omie',
+        idSolicitacao,
+        linhas: linhasRetorno
+      }), 'ok');
+      if (msg) { msg.textContent = 'Transferência concluída.'; msg.className = 'movim-mensagem ok'; }
+    } catch (err) {
+      console.error('[modalMovimentacao] transferencia', err);
+      exibirRetornoOmie(montarHtmlRetornoOmie({
+        ok: false,
+        titulo: 'Falha ao registrar transferência',
+        linhas: [String(err?.message || err)]
+      }), 'erro');
+      if (msg) {
+        msg.textContent = 'Falha — veja o retorno da Omie abaixo.';
+        msg.className = 'movim-mensagem erro';
+      }
+    } finally {
+      _processandoAcao = false;
+      setBotoesAcaoDisabled(false);
+    }
+  }
+
   if (localSel) {
     localSel.addEventListener('change', () => {
-      if (_codigoProdutoAtual) carregarEstoque(_codigoProdutoAtual, localSel.value);
+      if (_codigoProdutoAtual && localSel.value) carregarEstoque(_codigoProdutoAtual, localSel.value);
+      atualizarUiMesmoArmazem();
+    });
+  }
+  if (origemSel) {
+    origemSel.addEventListener('change', atualizarUiMesmoArmazem);
+  }
+
+  const histBtn     = document.getElementById('movimHistoricoBtn');
+  const histModal   = document.getElementById('movimHistoricoModal');
+  const histFechar  = document.getElementById('movimHistoricoFechar');
+  const histStatus  = document.getElementById('movimHistoricoStatus');
+  const histBody    = document.getElementById('movimHistoricoBody');
+  const histTitulo  = document.getElementById('movimHistoricoTitulo');
+  const histSub     = document.getElementById('movimHistoricoSubtitulo');
+
+  function fecharHistoricoAjustes() {
+    if (histModal) histModal.style.display = 'none';
+    if (histBody) histBody.innerHTML = '';
+    if (histStatus) {
+      histStatus.textContent = '';
+      histStatus.className = 'movim-hist-status';
+    }
+  }
+
+  function classeTipoHistorico(tipo) {
+    const t = String(tipo || '').toUpperCase();
+    if (t === 'ENT') return 'movim-hist-tipo-ent';
+    if (t === 'SAI') return 'movim-hist-tipo-sai';
+    if (t === 'TRF') return 'movim-hist-tipo-trf';
+    return '';
+  }
+
+  function formatarHistoricoLocal(item) {
+    const origem = item?.codigo_local_estoque;
+    const destino = item?.codigo_local_estoque_destino;
+    if (origem && destino && String(destino) !== '0') {
+      return `${origem} → ${destino}`;
+    }
+    return origem != null && origem !== '' ? String(origem) : '—';
+  }
+
+  function parseDataHistoricoOmie(val) {
+    const s = String(val || '').trim();
+    const m = s.match(/^(\d{2})\/(\d{2})\/(\d{4})/);
+    if (m) return new Date(Number(m[3]), Number(m[2]) - 1, Number(m[1])).getTime();
+    const t = Date.parse(s);
+    return Number.isFinite(t) ? t : 0;
+  }
+
+  function renderHistoricoAjustes(data) {
+    const listaRaw = Array.isArray(data?.ajuste_estoque_lista) ? data.ajuste_estoque_lista : [];
+    const lista = [...listaRaw].sort((a, b) => {
+      const db = parseDataHistoricoOmie(b?.data);
+      const da = parseDataHistoricoOmie(a?.data);
+      if (db !== da) return db - da;
+      return (Number(b?.id_ajuste) || 0) - (Number(a?.id_ajuste) || 0);
+    });
+    const total = data?.total_de_registros ?? lista.length;
+
+    if (histStatus) {
+      histStatus.textContent = `${total} registro(s) na Omie`;
+      histStatus.className = 'movim-hist-status';
+    }
+
+    if (!histBody) return;
+
+    if (!lista.length) {
+      histBody.innerHTML = '<div class="movim-hist-vazio">Nenhum ajuste de estoque encontrado para este produto.</div>';
+      return;
+    }
+
+    const linhas = lista.map(item => {
+      const tipo = String(item?.tipo || '—').toUpperCase();
+      const qtd = item?.quan ?? item?.quantidade ?? '—';
+      const valor = item?.valor != null && item.valor !== '' ? item.valor : '—';
+      const obs = String(item?.obs || '').trim();
+      return `
+        <tr>
+          <td>${escapeHtml(String(item?.data || '—'))}</td>
+          <td class="${classeTipoHistorico(tipo)}">${escapeHtml(tipo)}</td>
+          <td>${escapeHtml(String(qtd))}</td>
+          <td>${escapeHtml(String(item?.motivo || '—'))}</td>
+          <td>${escapeHtml(formatarHistoricoLocal(item))}</td>
+          <td>${escapeHtml(String(valor))}</td>
+          <td class="movim-hist-obs">${escapeHtml(obs || '—')}</td>
+        </tr>
+      `;
+    }).join('');
+
+    histBody.innerHTML = `
+      <table class="movim-hist-table">
+        <thead>
+          <tr>
+            <th>Data</th>
+            <th>Tipo</th>
+            <th>Qtd</th>
+            <th>Motivo</th>
+            <th>Local</th>
+            <th>Valor</th>
+            <th>Observacoes</th>
+          </tr>
+        </thead>
+        <tbody>${linhas}</tbody>
+      </table>
+    `;
+  }
+
+  async function abrirHistoricoAjustes() {
+    if (!histModal) return;
+
+    const idProd = _codigoProdutoOmieAtual;
+    const codigo = _codigoProdutoAtual;
+    if (!idProd && !codigo) {
+      const msg = document.getElementById('movimMensagem');
+      if (msg) {
+        msg.textContent = 'Produto sem ID Omie para consultar historico.';
+        msg.className = 'movim-mensagem erro';
+      }
+      return;
+    }
+
+    if (histTitulo) histTitulo.textContent = _descricaoProdutoAtual || codigo || 'Historico de ajustes';
+    if (histSub) {
+      const partes = [];
+      if (codigo) partes.push('Codigo: ' + codigo);
+      if (idProd) partes.push('ID Omie: ' + idProd);
+      histSub.textContent = partes.join(' · ');
+    }
+    if (histStatus) {
+      histStatus.textContent = 'Consultando historico na Omie...';
+      histStatus.className = 'movim-hist-status';
+    }
+    if (histBody) histBody.innerHTML = '';
+    histModal.style.display = 'flex';
+
+    const params = new URLSearchParams();
+    if (idProd) params.set('id_prod', String(idProd));
+    else params.set('codigo', String(codigo));
+
+    try {
+      const resp = await fetch(`/api/ajustes/historico-omie?${params.toString()}`, { credentials: 'include' });
+      let json;
+      try { json = await resp.json(); } catch {
+        throw new Error('Resposta invalida ao buscar historico.');
+      }
+      if (!resp.ok || !json?.ok) {
+        throw new Error(json?.error || `Falha ao buscar historico (HTTP ${resp.status}).`);
+      }
+      renderHistoricoAjustes(json);
+    } catch (err) {
+      if (histStatus) {
+        histStatus.textContent = String(err?.message || err);
+        histStatus.className = 'movim-hist-status erro';
+      }
+      if (histBody) histBody.innerHTML = '';
+    }
+  }
+
+  if (histBtn) histBtn.addEventListener('click', abrirHistoricoAjustes);
+  if (histFechar) histFechar.addEventListener('click', fecharHistoricoAjustes);
+  if (histModal) {
+    histModal.addEventListener('click', e => {
+      if (e.target === histModal) fecharHistoricoAjustes();
     });
   }
 
+  const comprasBtn = document.getElementById('movimComprasBtn');
+
+  async function abrirUltimasComprasMovim() {
+    let idOmie = _codigoProdutoOmieAtual;
+    const codigo = _codigoProdutoAtual;
+    const descricao = _descricaoProdutoAtual || codigo;
+
+    if (!idOmie && codigo) {
+      try {
+        const resp = await fetch(`/api/produtos/detalhe?codigo=${encodeURIComponent(codigo)}`, { credentials: 'include' });
+        const json = await resp.json();
+        if (resp.ok && json?.codigo_produto) idOmie = json.codigo_produto;
+      } catch { /* ignora — tenta abrir sem fallback */ }
+    }
+
+    if (!idOmie) {
+      const msg = document.getElementById('movimMensagem');
+      if (msg) {
+        msg.textContent = 'Produto sem ID Omie para consultar ultimas compras.';
+        msg.className = 'movim-mensagem erro';
+      }
+      return;
+    }
+
+    if (typeof window.abrirModalUltimasCompras === 'function') {
+      window.abrirModalUltimasCompras(idOmie, codigo, descricao);
+    }
+  }
+
+  if (comprasBtn) comprasBtn.addEventListener('click', abrirUltimasComprasMovim);
+
   // Abre o modal
-  window.abrirModalMovimentacao = async function(codigo, descricao) {
+  window.abrirModalMovimentacao = async function(codigo, descricao, codigoProduto) {
     _codigoProdutoAtual = codigo;
+    _descricaoProdutoAtual = descricao || codigo;
+    _codigoProdutoOmieAtual = codigoProduto || null;
+    document.querySelectorAll('.movimTipoBtn').forEach(b => b.classList.remove('ativo', 'processando'));
+    if (qtdInput) qtdInput.value = '';
+    if (qtdResult) qtdResult.textContent = '';
+    const msg = document.getElementById('movimMensagem');
+    if (msg) { msg.textContent = ''; msg.className = 'movim-mensagem'; }
+    limparRetornoOmie();
+    limparEnderecos();
+    atualizarMotivosOmie('TRF');
+    const imprCb = document.getElementById('movimImprimirEtiqueta');
+    if (imprCb) imprCb.checked = false;
+
     const titulo   = document.getElementById('movimTitulo');
     const subtitulo= document.getElementById('movimSubtitulo');
     if (titulo)    titulo.textContent    = descricao || codigo;
@@ -65592,159 +66942,10 @@ document.addEventListener('DOMContentLoaded', () => {
     if (overlay)   overlay.style.display = 'flex';
 
     await carregarLocais();
-    if (localSel && localSel.value) {
-      await carregarEstoque(codigo, localSel.value);
-    }
+    atualizarUiMesmoArmazem();
   };
-
-  // Salvar (placeholder para lógica futura)
-  if (salvarBtn) {
-    salvarBtn.addEventListener('click', () => {
-      const msg = document.getElementById('movimMensagem');
-      if (!tipoAtivo) {
-        if (msg) { msg.textContent = 'Selecione o tipo de movimentação.'; msg.className = 'movim-mensagem erro'; }
-        return;
-      }
-      // TODO: implementar lógica de salvar
-      if (msg) { msg.textContent = 'Funcionalidade em desenvolvimento.'; msg.className = 'movim-mensagem info'; }
-    });
-  }
 })();
 // ===================== FIM MODAL MOVIMENTAÇÃO =====================
-
-// ===================== PALLET PICKER =====================
-(function () {
-  const NUM_COLS   = 5;
-  const NUM_LEVELS = 4;
-  const NUM_BAYS   = 2;
-
-  let colunaSelecionada = null;
-
-  const overlay   = document.getElementById('modalPalletPicker');
-  const viewSide  = document.getElementById('ppickerViewSide');
-  const viewFront = document.getElementById('ppickerViewFront');
-  const voltarBtn = document.getElementById('ppickerVoltar');
-  const tituloEl  = document.getElementById('ppickerTitulo');
-  const fecharBtn = document.getElementById('ppickerFechar');
-  const abrirBtn  = document.getElementById('movimAbrirPalletBtn');
-
-  if (!overlay) return;
-
-  // ── Vista Lateral: 5 colunas ──────────────────────────────────
-  function renderSide() {
-    colunaSelecionada = null;
-    viewSide.style.display = 'flex';
-    viewFront.style.display = 'none';
-    voltarBtn.style.display = 'none';
-    tituloEl.textContent = 'Selecione a Coluna';
-    viewSide.innerHTML = '';
-
-    for (let c = 1; c <= NUM_COLS; c++) {
-      const wrap = document.createElement('div');
-      wrap.className = 'ppicker-col-wrap';
-
-      // Corpo da coluna com prateleiras
-      const body = document.createElement('div');
-      body.className = 'ppicker-col-body';
-      for (let n = 0; n < NUM_LEVELS; n++) {
-        const space = document.createElement('div'); space.className = 'ppicker-shelf-space';
-        const shelf = document.createElement('div'); shelf.className = 'ppicker-shelf-line';
-        body.appendChild(space);
-        body.appendChild(shelf);
-      }
-
-      const floor = document.createElement('div'); floor.className = 'ppicker-col-floor-strip';
-      const label = document.createElement('div'); label.className = 'ppicker-col-label';
-      label.textContent = 'C' + c;
-
-      wrap.appendChild(body);
-      wrap.appendChild(floor);
-      wrap.appendChild(label);
-      wrap.addEventListener('click', () => { colunaSelecionada = c; renderFront(c); });
-      viewSide.appendChild(wrap);
-    }
-  }
-
-  // ── Vista Frontal: 2 prateleiras × 4 níveis ──────────────────
-  function renderFront(col) {
-    viewSide.style.display = 'none';
-    viewFront.style.display = 'block';
-    voltarBtn.style.display = 'flex';
-    tituloEl.textContent = 'Coluna ' + col + ' — Vista Frontal';
-    viewFront.innerHTML = '';
-
-    // Cabeçalho dos bays
-    const header = document.createElement('div');
-    header.className = 'ppicker-front-bays-header';
-    header.innerHTML = '<div>Prateleira 1</div><div>Prateleira 2</div>';
-    viewFront.appendChild(header);
-
-    // Níveis do topo (N4) até o chão (N1)
-    for (let n = NUM_LEVELS; n >= 1; n--) {
-      const row = document.createElement('div');
-      row.className = 'ppicker-front-row';
-      for (let b = 1; b <= NUM_BAYS; b++) {
-        const cell = document.createElement('div');
-        cell.className = 'ppicker-front-cell';
-        cell.textContent = 'N' + n;
-        const addr = 'C' + col + '.P' + b + '.N' + n;
-        cell.title = addr;
-        cell.addEventListener('click', () => selecionarEndereco(addr));
-        row.appendChild(cell);
-      }
-      viewFront.appendChild(row);
-    }
-
-    const floorLbl = document.createElement('div');
-    floorLbl.className = 'ppicker-front-floor-label';
-    floorLbl.textContent = 'P I S O';
-    viewFront.appendChild(floorLbl);
-  }
-
-  // ── Adiciona endereço na lista do modal ───────────────────────
-  function adicionarEndereco(address) {
-    const lista = document.getElementById('movimEnderecoLista');
-    const vazio = document.getElementById('movimEnderecoVazio');
-    if (!lista) return;
-
-    // Evita duplicata
-    const existentes = lista.querySelectorAll('.movim-endereco-item');
-    for (const ex of existentes) {
-      if (ex.dataset.address === address) return;
-    }
-
-    const item = document.createElement('div');
-    item.className = 'movim-endereco-item';
-    item.dataset.address = address;
-    item.innerHTML = `
-      <span><i class="fa-solid fa-location-dot" style="color:#60a5fa;margin-right:6px;font-size:10px;"></i>${address}</span>
-      <button type="button" title="Remover"><i class="fa-solid fa-xmark"></i></button>
-    `;
-    item.querySelector('button').addEventListener('click', () => {
-      item.remove();
-      if (!lista.children.length && vazio) vazio.style.display = 'block';
-    });
-
-    lista.appendChild(item);
-    if (vazio) vazio.style.display = 'none';
-  }
-
-  function selecionarEndereco(address) {
-    adicionarEndereco(address);
-    fechar();
-  }
-
-  function abrir() { renderSide(); overlay.style.display = 'flex'; }
-  function fechar() { overlay.style.display = 'none'; }
-
-  fecharBtn.addEventListener('click', fechar);
-  voltarBtn.addEventListener('click', renderSide);
-  overlay.addEventListener('click', e => { if (e.target === overlay) fechar(); });
-  if (abrirBtn) abrirBtn.addEventListener('click', abrir);
-
-  window.abrirPalletPicker = abrir;
-})();
-// ===================== FIM PALLET PICKER =====================
 
 // ===================== MODAL CARRINHO DE SEPARAÇÃO =====================
 (function () {

@@ -10351,8 +10351,25 @@ table.tabela td.num {
 }
 .movim-field textarea { min-height: 60px; resize: vertical; }
 
+/* Calculadora de quantidade */
+.movim-qtd-label-row { display: flex; align-items: center; gap: 8px; }
+.movim-qtd-label-row label { margin: 0; flex: 1; font-size: .82rem; color: #9ca3af; }
+.movim-calc-btn { background: #6366f1; color: #fff; border: none; padding: 5px 10px; border-radius: 6px; cursor: pointer; font-size: 13px; line-height: 1; transition: filter .2s; flex-shrink: 0; }
+.movim-calc-btn:hover { filter: brightness(1.18); }
+.movimCalcGrid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 5px; }
+.movimCalcKey { padding: 11px 4px; border: none; border-radius: 7px; background: #2a2d3a; color: #f1f5f9; font-size: .98rem; font-weight: 600; cursor: pointer; transition: background .15s; }
+.movimCalcKey:hover { background: #374151; }
+.movimCalcOp { background: #1f2d4a; color: #93c5fd; }
+.movimCalcOp:hover { background: #1e3a5f; }
+.movimCalcClear { background: #7f1d1d; color: #fca5a5; }
+.movimCalcClear:hover { background: #991b1b; }
+.movimCalcOk { background: #14532d; color: #86efac; grid-column: span 3; font-size: .98rem; }
+.movimCalcOk:hover { background: #166534; }
+
 /* Tipo de movimentação */
 .movim-tipo { display: flex; gap: 10px; flex-wrap: wrap; }
+.movim-tipo-acoes { margin-top: 4px; }
+.movim-tipo-acoes .movimTipoBtn { min-height: 48px; font-size: .95rem; font-weight: 700; }
 .movimTipoBtn {
   flex: 1;
   padding: 12px;
@@ -10371,6 +10388,105 @@ table.tabela td.num {
 .movimTipoBtn[data-type="ENTRADA"].ativo  { background: #166b16; color: #fff; }
 .movimTipoBtn[data-type="SAIDA"].ativo    { background: #8a2020; color: #fff; }
 .movimTipoBtn[data-type="TRANSFERENCIA"].ativo { background: #105c7a; color: #fff; }
+.movimTipoBtn.processando { opacity: .65; cursor: wait; }
+
+.movim-scan-overlay {
+  position: fixed; inset: 0; z-index: 10250;
+  background: rgba(0,0,0,.88); backdrop-filter: blur(6px);
+  display: flex; align-items: center; justify-content: center; padding: 16px;
+}
+.movim-scan-panel {
+  width: min(460px, 92vw); background: #1e293b; border: 1px solid #334155;
+  border-radius: 14px; overflow: hidden; box-shadow: 0 24px 64px rgba(0,0,0,.6);
+}
+.movim-scan-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 14px 18px; background: #0f172a; border-bottom: 1px solid #334155;
+}
+.movim-scan-title-wrap { display: flex; align-items: center; gap: 8px; color: #f1f5f9; font-weight: 700; }
+.movim-scan-title-wrap i { color: #34d399; }
+.movim-scan-viewport { position: relative; background: #000; width: 100%; aspect-ratio: 4/3; overflow: hidden; }
+.movim-scan-viewport video { width: 100%; height: 100%; object-fit: cover; display: block; }
+.movim-scan-mira-wrap {
+  position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; pointer-events: none;
+}
+.movim-scan-mira {
+  width: 200px; height: 200px; border: 3px solid rgba(52,211,153,.85); border-radius: 12px;
+  box-shadow: 0 0 0 3000px rgba(0,0,0,.38); transition: border-color .3s;
+}
+.movim-scan-status { padding: 12px 18px; font-size: .88rem; color: #94a3b8; min-height: 44px; text-align: center; }
+.movim-scan-manual { padding: 2px 18px 16px; display: flex; gap: 8px; }
+.movim-scan-manual input {
+  flex: 1; background: #0f172a; border: 1px solid #334155; border-radius: 8px;
+  padding: 9px 12px; color: #f1f5f9; font-size: .9rem;
+}
+/* Histórico de ajustes Omie (modal movimentação) */
+.movim-hist-overlay {
+  position: fixed; inset: 0; z-index: 10100;
+  background: rgba(0,0,0,.82); backdrop-filter: blur(6px);
+  display: flex; align-items: center; justify-content: center; padding: 16px;
+}
+.movim-hist-panel {
+  width: min(920px, 100%);
+  max-height: 88vh;
+  background: #1a1d27;
+  border: 1px solid rgba(113,119,144,.28);
+  border-radius: 18px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-shadow: 0 18px 48px rgba(0,0,0,.55);
+}
+.movim-hist-header {
+  display: flex; align-items: flex-start; justify-content: space-between;
+  gap: 12px; padding: 16px 18px; border-bottom: 1px solid rgba(113,119,144,.2);
+}
+.movim-hist-title-wrap { display: flex; align-items: flex-start; gap: 10px; color: #f1f5f9; }
+.movim-hist-title-wrap i { color: #60a5fa; margin-top: 3px; }
+.movim-hist-titulo { display: block; font-size: 1rem; font-weight: 700; }
+.movim-hist-subtitulo { display: block; font-size: .78rem; color: #8ea0b8; margin-top: 2px; }
+.movim-hist-status {
+  padding: 10px 18px; font-size: .84rem; color: #94a3b8;
+  border-bottom: 1px solid rgba(113,119,144,.14);
+}
+.movim-hist-status.erro { color: #f87171; }
+.movim-hist-body {
+  flex: 1; min-height: 120px; overflow: auto; padding: 12px 14px 16px;
+}
+.movim-hist-vazio {
+  color: #6b7280; font-size: .9rem; text-align: center; padding: 28px 12px;
+}
+.movim-hist-table {
+  width: 100%; border-collapse: collapse; font-size: .8rem;
+}
+.movim-hist-table th,
+.movim-hist-table td {
+  padding: 8px 10px; border-bottom: 1px solid rgba(71,85,105,.45);
+  text-align: left; vertical-align: top;
+}
+.movim-hist-table th {
+  color: #9ca3af; font-weight: 600; position: sticky; top: 0;
+  background: #1a1d27; z-index: 1;
+}
+.movim-hist-table td { color: #e2e8f0; }
+.movim-hist-tipo-ent { color: #4ade80; font-weight: 700; }
+.movim-hist-tipo-sai { color: #f87171; font-weight: 700; }
+.movim-hist-tipo-trf { color: #60a5fa; font-weight: 700; }
+.movim-hist-obs { color: #94a3b8; max-width: 220px; word-break: break-word; }
+.movim-mesmo-arm-aviso {
+  font-size: .82rem; color: #fbbf24; background: rgba(251,191,36,.08);
+  border: 1px solid rgba(251,191,36,.25); border-radius: 10px; padding: 10px 12px;
+}
+.movim-imprimir-wrap {
+  display: flex; align-items: center; gap: 8px; font-size: .84rem; color: #cbd5e1;
+  cursor: pointer; user-select: none;
+}
+.movim-imprimir-wrap input { accent-color: #6366f1; }
+
+.movim-scan-manual button {
+  background: #059669; color: #fff; border: none; border-radius: 8px;
+  padding: 9px 16px; font-weight: 700; cursor: pointer;
+}
 
 /* Operadores quantidade */
 #movimQtdResultado { min-height: 20px; font-size: .88rem; color: #7bfa8b; text-align: right; }
@@ -10429,6 +10545,33 @@ table.tabela td.num {
 
 /* Ações */
 .movim-acoes { display: flex; gap: 12px; margin-top: 4px; }
+.movim-retorno-omie {
+  margin-top: 4px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  font-size: .86rem;
+  line-height: 1.45;
+  border: 1px solid #374151;
+  background: #141820;
+}
+.movim-retorno-omie.ok {
+  border-color: rgba(34,197,94,.45);
+  background: rgba(22,163,74,.12);
+  color: #bbf7d0;
+}
+.movim-retorno-omie.erro {
+  border-color: rgba(248,113,113,.45);
+  background: rgba(239,68,68,.12);
+  color: #fecaca;
+}
+.movim-retorno-omie.info {
+  border-color: rgba(147,197,253,.35);
+  background: rgba(59,130,246,.10);
+  color: #bfdbfe;
+}
+.movim-retorno-titulo { font-weight: 700; font-size: .92rem; margin-bottom: 6px; }
+.movim-retorno-id { font-size: .78rem; opacity: .85; margin-bottom: 6px; }
+.movim-retorno-linha { font-size: .84rem; }
 .movim-acoes button {
   flex: 1;
   padding: 12px;

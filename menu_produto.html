@@ -1151,7 +1151,6 @@
               </button>
             </div>
             <div class="movim-stock-row">
-              <div id="movimEstoqueAtual" class="movim-stock-badge">Estoque atual: -</div>
               <div class="movim-stock-controls">
                 <button id="movimHistoricoBtn" type="button" class="movim-btn-hist">Ver historico</button>
                 <button id="movimComprasBtn" type="button" class="movim-btn-comp">Ultimas compras</button>
@@ -1161,27 +1160,22 @@
               </div>
             </div>
             <div class="movim-field">
-              <label for="movimLocalSelect">Local de estoque</label>
-              <select id="movimLocalSelect"></select>
-            </div>
-            <div id="movimTipo" class="movim-tipo">
-              <button class="movimTipoBtn" data-type="ENTRADA">ENTRADA</button>
-              <button class="movimTipoBtn" data-type="SAIDA">SAIDA</button>
-              <button class="movimTipoBtn" data-type="TRANSFERENCIA">TRANSFERENCIA</button>
+              <label for="movimOrigemSelect">Origem</label>
+              <select id="movimOrigemSelect"></select>
             </div>
             <div class="movim-field">
-              <label for="movimQtdInput">Quantidade (aceita expressao)</label>
+              <label for="movimLocalSelect">Destino</label>
+              <select id="movimLocalSelect">
+                <option value="">Selecione o destino…</option>
+              </select>
+            </div>
+            <div class="movim-field">
+              <div class="movim-qtd-label-row">
+                <label for="movimQtdInput">Quantidade (aceita expressao)</label>
+                <button type="button" id="movimCalcBtn" class="movim-calc-btn" title="Abrir calculadora"><i class="fa-solid fa-calculator"></i></button>
+              </div>
               <input id="movimQtdInput" type="text" inputmode="decimal" autocomplete="off" placeholder="Ex.: 13,6+2,4">
               <div id="movimQtdResultado"></div>
-              <div id="movimOperadores">
-                <button type="button" data-insert="+">+</button>
-                <button type="button" data-insert="*">*</button>
-                <button type="button" data-insert="/">/</button>
-              </div>
-            </div>
-            <div class="movim-field">
-              <label for="movimSolicitante">Solicitante *</label>
-              <input id="movimSolicitante" type="text" autocomplete="off" placeholder="Nome do solicitante">
             </div>
             <div class="movim-field">
               <label for="movimApontamento">Apontamento (opcional)</label>
@@ -1191,40 +1185,103 @@
             <div class="movim-enderecos">
               <div class="movim-enderecos-header">
                 <h4>Enderecos</h4>
-                <button type="button" class="movim-endereco-add" id="movimAbrirPalletBtn">
-                  <i class="fa-solid fa-warehouse"></i> Abrir
+                <button type="button" class="movim-endereco-add" id="movimScanEnderecoBtn">
+                  <i class="fa-solid fa-camera"></i> Ler codigo
                 </button>
               </div>
               <div id="movimEnderecoVazio" class="movim-endereco-vazio">Nenhum endereco cadastrado.</div>
               <div id="movimEnderecoLista"></div>
             </div>
-            <div class="movim-acoes">
-              <button id="movimCancelarBtn" type="button">Cancelar</button>
-              <button id="movimSalvarBtn" type="button">Salvar</button>
+            <div id="movimMesmoArmazemAviso" class="movim-mesmo-arm-aviso" style="display:none;">
+              Mesmo armazem: informe pelo menos um endereco. Nao ha movimentacao na Omie — apenas registro em ETQ_rec_impresso.
             </div>
+            <label id="movimImprimirEtiquetaWrap" class="movim-imprimir-wrap" style="display:none;">
+              <input type="checkbox" id="movimImprimirEtiqueta">
+              <span>Imprimir etiqueta apos registrar (opcional)</span>
+            </label>
+            <div class="movim-field">
+              <label for="movimOmieMotivo">Motivo do ajuste (Omie)</label>
+              <select id="movimOmieMotivo"></select>
+            </div>
+            <div id="movimTipo" class="movim-tipo movim-tipo-acoes">
+              <button class="movimTipoBtn" data-type="ENTRADA" type="button">ENTRADA</button>
+              <button class="movimTipoBtn" data-type="SAIDA" type="button">SAIDA</button>
+              <button class="movimTipoBtn" data-type="TRANSFERENCIA" type="button">TRANSFERENCIA</button>
+            </div>
+            <div id="movimRetornoOmie" class="movim-retorno-omie" style="display:none;"></div>
           </div>
         </div>
         <!-- ===================== FIM MODAL MOVIMENTAÇÃO ===================== -->
+        <!-- Popup calculadora de quantidade (position:fixed, posicionado via JS) -->
+        <div id="movimCalcPopup" style="display:none;position:fixed;z-index:10200;background:#1e293b;border:1px solid #475569;border-radius:12px;padding:14px;width:224px;box-shadow:0 10px 40px rgba(0,0,0,0.75);">
+          <div id="movimCalcDisplay" style="background:#0f172a;color:#e2e8f0;padding:10px 12px;border-radius:8px;text-align:right;font-size:1.1rem;margin-bottom:10px;min-height:44px;word-break:break-all;line-height:1.6;"></div>
+          <div class="movimCalcGrid">
+            <button type="button" class="movimCalcKey" data-v="7">7</button>
+            <button type="button" class="movimCalcKey" data-v="8">8</button>
+            <button type="button" class="movimCalcKey" data-v="9">9</button>
+            <button type="button" class="movimCalcKey movimCalcClear" data-v="C">C</button>
+            <button type="button" class="movimCalcKey" data-v="4">4</button>
+            <button type="button" class="movimCalcKey" data-v="5">5</button>
+            <button type="button" class="movimCalcKey" data-v="6">6</button>
+            <button type="button" class="movimCalcKey movimCalcOp" data-v="+">+</button>
+            <button type="button" class="movimCalcKey" data-v="1">1</button>
+            <button type="button" class="movimCalcKey" data-v="2">2</button>
+            <button type="button" class="movimCalcKey" data-v="3">3</button>
+            <button type="button" class="movimCalcKey movimCalcOp" data-v="-">−</button>
+            <button type="button" class="movimCalcKey" data-v="0">0</button>
+            <button type="button" class="movimCalcKey" data-v=".">.</button>
+            <button type="button" class="movimCalcKey movimCalcOp" data-v="←">←</button>
+            <button type="button" class="movimCalcKey movimCalcOp" data-v="*">×</button>
+            <button type="button" class="movimCalcKey movimCalcOk" data-v="OK">OK</button>
+            <button type="button" class="movimCalcKey movimCalcOp" data-v="/">/</button>
+          </div>
+        </div>
 
-        <!-- ===================== MODAL PALLET PICKER ===================== -->
-        <div id="modalPalletPicker" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.82);z-index:10100;align-items:center;justify-content:center;">
-          <div class="ppicker-panel">
-            <div class="ppicker-header">
-              <div class="ppicker-header-left">
-                <button id="ppickerVoltar" class="ppicker-voltar" style="display:none;">
-                  <i class="fa-solid fa-arrow-left"></i> Voltar
-                </button>
-                <span id="ppickerTitulo" class="ppicker-titulo">Selecione a Coluna</span>
+        <!-- Câmera: ler endereço (QR / código de barras) -->
+        <div id="movimScanEnderecoModal" class="movim-scan-overlay" style="display:none;">
+          <div class="movim-scan-panel">
+            <div class="movim-scan-header">
+              <div class="movim-scan-title-wrap">
+                <i class="fa-solid fa-qrcode"></i>
+                <span id="movimScanEnderecoTitle">Leia QR Code ou codigo de barras</span>
               </div>
-              <button id="ppickerFechar" class="ppicker-fechar" title="Fechar">
+              <button id="movimScanEnderecoFechar" type="button" class="movim-close" title="Fechar">
                 <i class="fa-solid fa-xmark"></i>
               </button>
             </div>
-            <div id="ppickerViewSide" class="ppicker-side-view"></div>
-            <div id="ppickerViewFront" class="ppicker-front-view" style="display:none;"></div>
+            <div class="movim-scan-viewport">
+              <video id="movimScanEnderecoVideo" autoplay playsinline muted></video>
+              <div class="movim-scan-mira-wrap">
+                <div id="movimScanEnderecoMira" class="movim-scan-mira"></div>
+              </div>
+            </div>
+            <div id="movimScanEnderecoStatus" class="movim-scan-status">Aponte a camera para o codigo do endereco.</div>
+            <div class="movim-scan-manual">
+              <input id="movimScanEnderecoInput" type="text" placeholder="Ou digite o endereco manualmente..." autocomplete="off">
+              <button id="movimScanEnderecoOk" type="button"><i class="fa-solid fa-check"></i></button>
+            </div>
           </div>
         </div>
-        <!-- ===================== FIM PALLET PICKER ===================== -->
+
+        <!-- Histórico de ajustes de estoque (Omie) -->
+        <div id="movimHistoricoModal" class="movim-hist-overlay" style="display:none;">
+          <div class="movim-hist-panel">
+            <div class="movim-hist-header">
+              <div class="movim-hist-title-wrap">
+                <i class="fa-solid fa-clock-rotate-left"></i>
+                <div>
+                  <span id="movimHistoricoTitulo" class="movim-hist-titulo">Historico de ajustes</span>
+                  <span id="movimHistoricoSubtitulo" class="movim-hist-subtitulo"></span>
+                </div>
+              </div>
+              <button id="movimHistoricoFechar" type="button" class="movim-close" title="Fechar">
+                <i class="fa-solid fa-xmark"></i>
+              </button>
+            </div>
+            <div id="movimHistoricoStatus" class="movim-hist-status">Carregando...</div>
+            <div id="movimHistoricoBody" class="movim-hist-body"></div>
+          </div>
+        </div>
 
         <!-- Modal Filtro de Kanbans -->
         <div id="modalFiltroKanbans" class="modal-overlay" style="display:none;">
