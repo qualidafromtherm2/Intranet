@@ -353,6 +353,21 @@ const pool = new Pool({
 pool.on('error', (err) => {
   console.error('[pg] erro em cliente ocioso — ignorado para evitar crash:', err.message);
 });
+const PG_ACTIVE_CLIENT_ERROR_HANDLER = Symbol('pgActiveClientErrorHandler');
+function protegerPgClientAtivo(client, origem = 'pool.connect') {
+  if (!client || typeof client.on !== 'function' || client[PG_ACTIVE_CLIENT_ERROR_HANDLER]) {
+    return client;
+  }
+
+  const handler = (err) => {
+    console.error(`[pg] erro em client ativo (${origem}) — conexão encerrada sem derrubar o servidor:`, err?.message || err);
+    try { client.release?.(err); } catch (_) {}
+  };
+
+  client.on('error', handler);
+  client[PG_ACTIVE_CLIENT_ERROR_HANDLER] = handler;
+  return client;
+}
 const comprasAuditContext = new AsyncLocalStorage();
 const originalPoolQuery = pool.query.bind(pool);
 const originalPoolConnect = pool.connect.bind(pool);
@@ -743,7 +758,7 @@ pool.query = function queryComContexto(...args) {
 
 // Garante app.current_user também para clients obtidos via pool.connect dentro do contexto.
 pool.connect = async function connectComContexto(...args) {
-  const client = await originalPoolConnect(...args);
+  const client = protegerPgClientAtivo(await originalPoolConnect(...args));
   const ctx = comprasAuditContext.getStore();
   if (ctx?.username) {
     try {
@@ -792,7 +807,7 @@ app.use('/api/compras', async (req, res, next) => {
   };
 
   try {
-    client = await originalPoolConnect();
+    client = await pool.connect();
     await client.query(`SELECT set_config('app.current_user', $1, false)`, [username]);
   } catch (err) {
     releaseClient();
