@@ -44514,6 +44514,22 @@ window.renderizarCatalogoOmie = renderizarCatalogoOmie;
     .then(r => r.json())
     .then(data => {
       if (!data.ok) throw new Error(data.error || 'tente novamente.');
+      if (Array.isArray(window.__carrinhoSepCache)) {
+        const existente = window.__carrinhoSepCache.find(item => item.id === data.id || item.codigo_produto === codigo);
+        if (existente) {
+          existente.quantidade = (Number(existente.quantidade) || 0) + qtd;
+        } else {
+          window.__carrinhoSepCache.push({
+            id: data.id,
+            codigo_produto: codigo,
+            descricao,
+            unidade: unidadeNorm,
+            quantidade: qtd,
+            comentario: null,
+            urgente: false
+          });
+        }
+      }
       // Se o item foi somado a um existente (merged), desfaz o +1 provisório
       if (data.merged && badge) {
         const total = Math.max(0, (parseInt(badge.textContent) || 0) - 1);
@@ -65890,21 +65906,21 @@ document.addEventListener('DOMContentLoaded', () => {
   // ── Overlay slide-from-bottom ──
   const ov = document.createElement('div');
   ov.id = 'modalCarrinhoSepOverlay';
-  ov.style.cssText = 'display:none;position:fixed;inset:0;background:rgba(0,0,0,.65);z-index:10300;align-items:flex-end;justify-content:center;';
+  ov.style.cssText = 'display:none;position:fixed;inset:0;background:rgba(2,6,23,.58);backdrop-filter:blur(6px);z-index:10300;align-items:center;justify-content:center;padding:24px;';
 
   ov.innerHTML = `
-    <div id="modalCarrinhoSepPanel" style="width:min(760px,94%);background:#1c1c1c;border-radius:18px 18px 0 0;padding:0;max-height:88vh;display:flex;flex-direction:column;transform:translateY(40px);transition:transform .22s ease;overflow:hidden;">
+    <div id="modalCarrinhoSepPanel" style="width:min(840px,86vw);background:linear-gradient(180deg,rgba(15,23,42,.98) 0%,rgba(15,23,42,.94) 100%);border:1px solid rgba(148,163,184,.22);border-radius:22px;padding:0;max-height:82vh;display:flex;flex-direction:column;transform:translateY(16px) scale(.985);opacity:0;transition:transform .22s ease,opacity .22s ease;overflow:hidden;box-shadow:0 26px 80px rgba(2,6,23,.42);">
       <!-- Header -->
-      <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 18px;border-bottom:1px solid #2a2a2a;flex-shrink:0;">
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid rgba(148,163,184,.16);flex-shrink:0;background:rgba(15,23,42,.72);">
         <div style="display:flex;align-items:center;gap:10px;min-width:0;">
           <h2 style="margin:0;font-size:1.05rem;color:#f0f0f0;font-weight:700;white-space:nowrap;">Sol. de separação</h2>
-          <span id="modalCarrinhoSepCount" style="background:#111827;color:#9ca3af;border:1px solid #273244;border-radius:999px;padding:3px 9px;font-size:.74rem;font-weight:700;white-space:nowrap;">0 itens</span>
+          <span id="modalCarrinhoSepCount" style="background:rgba(30,41,59,.92);color:#cbd5e1;border:1px solid rgba(71,85,105,.85);border-radius:999px;padding:4px 10px;font-size:.74rem;font-weight:800;white-space:nowrap;">0 itens</span>
         </div>
-        <button id="modalCarrinhoSepClose" style="background:none;border:none;cursor:pointer;color:#9ca3af;font-size:22px;line-height:1;padding:4px 8px;">&#x2715;</button>
+        <button id="modalCarrinhoSepClose" style="background:transparent;border:none;cursor:pointer;color:#94a3b8;font-size:22px;line-height:1;padding:6px 8px;border-radius:10px;">&#x2715;</button>
       </div>
       <!-- Itens do carrinho -->
-      <div id="modalCarrinhoSepItems" style="flex:1;min-height:170px;overflow-y:auto;padding:10px 18px 8px;display:flex;flex-direction:column;gap:7px;"></div>
-      <div id="modalCarrinhoSepEmpty" style="display:none;color:#6b7280;font-size:.9rem;padding:24px 20px;text-align:center;">Nenhum produto adicionado.</div>
+      <div id="modalCarrinhoSepItems" style="flex:1;min-height:150px;overflow-y:auto;padding:14px 18px 10px;display:flex;flex-direction:column;gap:10px;background:rgba(15,23,42,.28);"></div>
+      <div id="modalCarrinhoSepEmpty" style="display:none;color:#94a3b8;font-size:.94rem;padding:38px 24px;text-align:center;">Nenhum produto adicionado.</div>
       <!-- Formulário de envio -->
       <div id="modalCarrinhoSepForm" style="border-top:1px solid #2a2a2a;padding:10px 18px 12px;display:flex;flex-direction:column;gap:9px;flex-shrink:0;">
         <div id="modalCarrinhoSepFields" style="display:grid;grid-template-columns:1.1fr 1fr 1.1fr;gap:9px;align-items:end;">
@@ -65947,9 +65963,123 @@ document.addEventListener('DOMContentLoaded', () => {
   const panel = document.getElementById('modalCarrinhoSepPanel');
   const responsiveStyle = document.createElement('style');
   responsiveStyle.textContent = `
+    #modalCarrinhoSepOverlay {
+      transition: opacity .22s ease;
+    }
+    #modalCarrinhoSepPanel {
+      width: min(720px, 86vw) !important;
+      max-height: 78vh !important;
+    }
+    #modalCarrinhoSepClose:hover {
+      background: rgba(30, 41, 59, .92) !important;
+      color: #e2e8f0 !important;
+    }
+    #modalCarrinhoSepItems::-webkit-scrollbar {
+      width: 9px;
+    }
+    #modalCarrinhoSepItems::-webkit-scrollbar-thumb {
+      background: rgba(71, 85, 105, .78);
+      border-radius: 999px;
+    }
+    #modalCarrinhoSepItems::-webkit-scrollbar-track {
+      background: transparent;
+    }
+    #modalCarrinhoSepForm {
+      border-top: 1px solid rgba(148, 163, 184, .14) !important;
+      padding: 14px 18px 16px !important;
+      gap: 12px !important;
+      background: linear-gradient(180deg, rgba(15, 23, 42, .97) 0%, rgba(15, 23, 42, .92) 100%) !important;
+    }
+    #modalCarrinhoSepFields label,
+    #modalCarrinhoSepObsWrap summary {
+      color: #e2e8f0 !important;
+    }
+    #modalCarrinhoSepRequester,
+    #modalCarrinhoSepMotivo,
+    #modalCarrinhoSepDate,
+    #modalCarrinhoSepHorario,
+    #modalCarrinhoSepObs,
+    .sep-cart-qty-input,
+    .sep-cart-comment {
+      background: rgba(15, 23, 42, .82) !important;
+      color: #f8fafc !important;
+      border: 1px solid rgba(71, 85, 105, .9) !important;
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, .02);
+    }
+    #modalCarrinhoSepRequester:focus,
+    #modalCarrinhoSepMotivo:focus,
+    #modalCarrinhoSepDate:focus,
+    #modalCarrinhoSepHorario:focus,
+    #modalCarrinhoSepObs:focus,
+    .sep-cart-qty-input:focus,
+    .sep-cart-comment:focus {
+      outline: none;
+      border-color: rgba(96, 165, 250, .95) !important;
+      box-shadow: 0 0 0 3px rgba(59, 130, 246, .16);
+    }
+    #modalCarrinhoSepObsWrap {
+      border: 1px solid rgba(71, 85, 105, .6) !important;
+      background: rgba(15, 23, 42, .5) !important;
+    }
+    #modalCarrinhoSepObsWrap summary {
+      padding: 10px 12px !important;
+      font-size: .82rem !important;
+    }
+    #modalCarrinhoSepActions {
+      grid-template-columns: minmax(150px, .72fr) minmax(240px, 1.28fr) !important;
+      gap: 12px !important;
+    }
+    #modalCarrinhoSepClear:hover {
+      background: rgba(127, 29, 29, .15) !important;
+    }
+    #modalCarrinhoSepSend {
+      background: linear-gradient(135deg, #facc15 0%, #f59e0b 100%) !important;
+      box-shadow: 0 16px 28px rgba(245, 158, 11, .24);
+    }
+    #modalCarrinhoSepSend:hover {
+      filter: brightness(1.04);
+    }
+    .sep-cart-row {
+      grid-template-columns: 56px minmax(0, 1fr) auto !important;
+      gap: 12px !important;
+      padding: 12px !important;
+      border: 1px solid rgba(51, 65, 85, .9) !important;
+      border-radius: 16px !important;
+      background: linear-gradient(180deg, rgba(15, 23, 42, .9) 0%, rgba(15, 23, 42, .72) 100%) !important;
+      box-shadow: 0 14px 32px rgba(2, 6, 23, .18);
+    }
+    .sep-cart-thumb {
+      width: 56px !important;
+      height: 56px !important;
+      border-radius: 14px !important;
+      border: 1px solid rgba(71, 85, 105, .52);
+      background: rgba(15, 23, 42, .84) !important;
+      display: grid !important;
+      place-items: center !important;
+    }
+    .sep-cart-thumb img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+    .sep-cart-thumb-placeholder {
+      color: #64748b;
+      font-size: 1.1rem;
+    }
+    .sep-cart-actions-row {
+      gap: 8px !important;
+    }
+    .sep-cart-qty-dec,
+    .sep-cart-qty-inc {
+      background: rgba(30, 41, 59, .95) !important;
+      border: 1px solid rgba(71, 85, 105, .95) !important;
+    }
+    .sep-cart-comment-status {
+      color: #94a3b8 !important;
+    }
     @media (max-width: 760px) {
       #modalCarrinhoSepFields { grid-template-columns: 1fr !important; }
-      #modalCarrinhoSepPanel { width: 100% !important; max-height: 92vh !important; }
+      #modalCarrinhoSepPanel { width: 100% !important; max-height: 90vh !important; }
       .sep-cart-row { grid-template-columns: minmax(0,1fr) auto !important; }
       .sep-cart-thumb { display: none !important; }
       .sep-cart-info-grid { grid-template-columns: 1fr !important; }
@@ -65962,7 +66092,9 @@ document.addEventListener('DOMContentLoaded', () => {
   document.head.appendChild(responsiveStyle);
 
   function fechar() {
-    panel.style.transform = 'translateY(40px)';
+    panel.style.transform = 'translateY(16px) scale(.985)';
+    panel.style.opacity = '0';
+    ov.style.opacity = '0';
     setTimeout(() => { ov.style.display = 'none'; }, 220);
   }
 
@@ -65975,6 +66107,28 @@ document.addEventListener('DOMContentLoaded', () => {
     const normalizado = String(value || '').replace(',', '.').trim();
     const n = parseFloat(normalizado);
     return Number.isFinite(n) && n > 0 ? n : null;
+  }
+
+  function _urlImagemCarrinho(item) {
+    let raw = String(item?.url_imagem || '').trim();
+    if (!raw && Array.isArray(window.produtosCatalogoOmie) && window.produtosCatalogoOmie.length) {
+      const produtoComImagem = window.produtosCatalogoOmie.find(p =>
+        p.codigo === item?.codigo_produto || String(p.codigo_produto || '') === String(item?.codigo_produto || '')
+      );
+      raw = String(produtoComImagem?.url_imagem || '').trim();
+    }
+    const valida = raw && (raw.startsWith('http://') || raw.startsWith('https://'));
+    if (!valida) return `/imagens_produtos/${item.codigo_produto}.jpg`;
+    if (raw.includes('Expires=')) {
+      const match = raw.match(/Expires=(\d+)/);
+      if (match?.[1]) {
+        const expiresMs = Number(match[1]) * 1000;
+        if (Number.isFinite(expiresMs) && expiresMs < Date.now()) {
+          return `/imagens_produtos/${item.codigo_produto}.jpg`;
+        }
+      }
+    }
+    return raw;
   }
 
   async function _salvarQuantidadeItem(item, quantidade, input, row) {
@@ -66047,15 +66201,28 @@ document.addEventListener('DOMContentLoaded', () => {
     itens.forEach(item => {
       const row = document.createElement('div');
       row.className = 'sep-cart-row';
-      row.style.cssText = 'display:grid;grid-template-columns:48px minmax(0,1fr) auto;gap:9px;padding:8px 10px;border:1px solid #2a2a2a;border-radius:12px;background:#171717;align-items:start;';
+      row.style.cssText = 'display:grid;grid-template-columns:56px minmax(0,1fr) auto;gap:12px;padding:12px;border:1px solid rgba(51,65,85,.9);border-radius:16px;background:linear-gradient(180deg,rgba(15,23,42,.9) 0%,rgba(15,23,42,.72) 100%);align-items:start;';
       // Thumb imagem
       const thumb = document.createElement('div');
       thumb.className = 'sep-cart-thumb';
-      thumb.style.cssText = 'width:48px;height:48px;border-radius:9px;background:#0f0f0f;overflow:hidden;flex-shrink:0;';
+      thumb.style.cssText = 'width:56px;height:56px;border-radius:14px;background:rgba(15,23,42,.84);overflow:hidden;flex-shrink:0;';
       const imgEl = document.createElement('img');
-      imgEl.src   = `/imagens_produtos/${item.codigo_produto}.jpg`;
+      imgEl.src   = _urlImagemCarrinho(item);
       imgEl.style.cssText = 'width:100%;height:100%;object-fit:cover;';
-      imgEl.onerror = () => { imgEl.style.display = 'none'; };
+      imgEl.onerror = () => {
+        if (imgEl.dataset.fallbackApplied === '1') {
+          imgEl.remove();
+          if (!thumb.querySelector('.sep-cart-thumb-placeholder')) {
+            const placeholder = document.createElement('div');
+            placeholder.className = 'sep-cart-thumb-placeholder';
+            placeholder.innerHTML = '<i class="fa-regular fa-image"></i>';
+            thumb.appendChild(placeholder);
+          }
+          return;
+        }
+        imgEl.dataset.fallbackApplied = '1';
+        imgEl.src = `/imagens_produtos/${item.codigo_produto}.jpg`;
+      };
       thumb.appendChild(imgEl);
       // Info
       const info = document.createElement('div');
@@ -66155,6 +66322,9 @@ document.addEventListener('DOMContentLoaded', () => {
         btn.disabled = true;
         try {
           await fetch(`/api/logistica/carrinho/${item.id}`, { method: 'DELETE', credentials: 'include' });
+          if (Array.isArray(window.__carrinhoSepCache)) {
+            window.__carrinhoSepCache = window.__carrinhoSepCache.filter(cacheItem => cacheItem.id !== item.id);
+          }
           row.remove();
           // Atualiza badge
           const badge = document.getElementById('listaSeparacaoCount');
@@ -66216,15 +66386,30 @@ document.addEventListener('DOMContentLoaded', () => {
     if (sendBtn) sendBtn.disabled = true;
     sel.innerHTML = '<option value="">— carregando... —</option>';
     try {
-      const [usuariosResp, me] = await Promise.all([
-        fetch('/api/usuarios/ativos', { credentials: 'include' }),
-        fetch('/api/auth/status', { credentials: 'include' }).then(r => r.json()).catch(() => ({}))
-      ]);
-      const data = await usuariosResp.json();
+      let lista = Array.isArray(window.__usuariosAtivosCache) ? window.__usuariosAtivosCache.slice() : null;
+      let me = window.__authStatusCache || null;
+
+      if (!lista || !me) {
+        const [usuariosResp, meData] = await Promise.all([
+          lista ? Promise.resolve(null) : fetch('/api/usuarios/ativos', { credentials: 'include' }),
+          me ? Promise.resolve(me) : fetch('/api/auth/status', { credentials: 'include' }).then(r => r.json()).catch(() => ({}))
+        ]);
+
+        if (!lista) {
+          const data = await usuariosResp.json();
+          lista = (data.usuarios || [])
+            .map(u => String(u?.username || '').trim())
+            .filter(Boolean);
+          window.__usuariosAtivosCache = lista.slice();
+        }
+
+        if (!me) {
+          me = meData || {};
+          window.__authStatusCache = me;
+        }
+      }
+
       const meUser = String(me?.user?.username || '').trim();
-      const lista = (data.usuarios || [])
-        .map(u => String(u?.username || '').trim())
-        .filter(Boolean);
 
       if (!lista.length) {
         sel.innerHTML = '<option value="">— nenhum usuário encontrado —</option>';
@@ -66249,33 +66434,51 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
+  async function _carregarItensCarrinhoSep() {
+    try {
+      const resp = await fetch('/api/logistica/carrinho', { credentials: 'include' });
+      const data = await resp.json();
+      const itens = data.itens || [];
+      window.__carrinhoSepCache = itens;
+      _renderItens(itens);
+      const badge = document.getElementById('listaSeparacaoCount');
+      if (badge) {
+        const n = itens.length;
+        badge.textContent = n;
+        badge.style.display = n > 0 ? '' : 'none';
+      }
+    } catch {
+      _renderItens(Array.isArray(window.__carrinhoSepCache) ? window.__carrinhoSepCache : []);
+    }
+  }
+
   async function abrir() {
     ov.style.display = 'flex';
+    ov.style.opacity = '1';
     requestAnimationFrame(() => requestAnimationFrame(() => {
-      panel.style.transform = 'translateY(0)';
+      panel.style.transform = 'translateY(0) scale(1)';
+      panel.style.opacity = '1';
     }));
     // Preenche data de hoje por padrão
     const dateEl = document.getElementById('modalCarrinhoSepDate');
     if (dateEl && !dateEl.value) dateEl.value = new Date().toISOString().slice(0, 10);
 
-    await Promise.all([
-      (async () => {
-        try {
-          const resp = await fetch('/api/logistica/carrinho', { credentials: 'include' });
-          const data = await resp.json();
-          _renderItens(data.itens || []);
-          // Sincroniza badge com total real do servidor
-          const badge = document.getElementById('listaSeparacaoCount');
-          if (badge) {
-            const n = (data.itens || []).length;
-            badge.textContent = n;
-            badge.style.display = n > 0 ? '' : 'none';
-          }
-        } catch { _renderItens([]); }
-      })(),
-      _carregarUsuarios(),
-      _carregarLocaisEstoqueSep()
-    ]);
+    if (Array.isArray(window.__carrinhoSepCache)) {
+      _renderItens(window.__carrinhoSepCache);
+    } else {
+      const container = document.getElementById('modalCarrinhoSepItems');
+      const empty = document.getElementById('modalCarrinhoSepEmpty');
+      const form = document.getElementById('modalCarrinhoSepForm');
+      if (container) {
+        container.innerHTML = '<div style="padding:18px;border:1px dashed rgba(71,85,105,.7);border-radius:14px;color:#94a3b8;text-align:center;font-size:.9rem;">Carregando itens...</div>';
+      }
+      if (empty) empty.style.display = 'none';
+      if (form) form.style.display = 'none';
+    }
+
+    _carregarItensCarrinhoSep();
+    _carregarUsuarios();
+    _carregarLocaisEstoqueSep();
   }
 
   // Enviar separação
@@ -66317,6 +66520,7 @@ document.addEventListener('DOMContentLoaded', () => {
         // Zera badge e fecha modal
         const badge = document.getElementById('listaSeparacaoCount');
         if (badge) { badge.textContent = '0'; badge.style.display = 'none'; }
+        window.__carrinhoSepCache = [];
         document.getElementById('modalCarrinhoSepObs').value = '';
         fechar();
         alert(`Separação enviada com sucesso! (${data.total} ${data.total === 1 ? 'item' : 'itens'})`);
@@ -66358,6 +66562,7 @@ document.addEventListener('DOMContentLoaded', () => {
         badge.textContent = '0';
         badge.style.display = 'none';
       }
+      window.__carrinhoSepCache = [];
     } catch (e) {
       alert(e.message || 'Erro ao excluir lista.');
     } finally {
@@ -66368,6 +66573,31 @@ document.addEventListener('DOMContentLoaded', () => {
   ov.addEventListener('click', e => { if (e.target === ov) fechar(); });
 
   window.abrirModalCarrinhoSeparacao = abrir;
+
+  function _precarregarCarrinhoSeparacao() {
+    if (window.__carrinhoSepPreloading) return;
+    window.__carrinhoSepPreloading = true;
+    Promise.allSettled([
+      _carregarItensCarrinhoSep(),
+      _carregarUsuarios(),
+      _carregarLocaisEstoqueSep()
+    ]).finally(() => {
+      window.__carrinhoSepPreloading = false;
+    });
+  }
+
+  if (!window.__carrinhoSepPreloadedOnce) {
+    const agendarPreload = () => {
+      if (window.__carrinhoSepPreloadedOnce) return;
+      window.__carrinhoSepPreloadedOnce = true;
+      _precarregarCarrinhoSeparacao();
+    };
+    if (typeof window.requestIdleCallback === 'function') {
+      window.requestIdleCallback(agendarPreload, { timeout: 1800 });
+    } else {
+      setTimeout(agendarPreload, 1200);
+    }
+  }
 })();
 // ===================== FIM MODAL CARRINHO DE SEPARAÇÃO =====================
 
@@ -69482,6 +69712,51 @@ window.initOscilacaoEstoque = (function () {
 
   if (!zone || !container || !dropTarget) return;
 
+  window.__atalhoAction = window.__atalhoAction || {};
+  window.__atalhoAction['system-shortcut:compras-carrinho'] = () => {
+    if (typeof window.abrirModalCarrinhoCompras === 'function') window.abrirModalCarrinhoCompras();
+  };
+  window.__atalhoAction['system-shortcut:separacao-carrinho'] = () => {
+    if (typeof window.abrirModalCarrinhoSeparacao === 'function') window.abrirModalCarrinhoSeparacao();
+  };
+
+  const _systemShortcuts = [
+    {
+      nav_key: 'system-shortcut:compras-carrinho',
+      nav_label: 'Carrinho de compras',
+      nav_selector: '#listaProdutosAbrirCarrinhoBtn',
+      icon_class: 'fa-solid fa-cart-shopping',
+      extra_class: 'shortcut-btn--system shortcut-btn--compras'
+    },
+    {
+      nav_key: 'system-shortcut:separacao-carrinho',
+      nav_label: 'Lista de separação',
+      nav_selector: '#listaProdutosAbrirSeparacaoBtn',
+      icon_class: 'fa-solid fa-clipboard-list',
+      extra_class: 'shortcut-btn--system shortcut-btn--separacao'
+    }
+  ];
+
+  function _systemShortcutStorageKey(navKey) {
+    const userId = window.__sessionUser?.id || 'anon';
+    return `sgf-system-shortcut:${userId}:${navKey}`;
+  }
+
+  function _isSystemShortcutEnabled(navKey) {
+    try {
+      const saved = localStorage.getItem(_systemShortcutStorageKey(navKey));
+      return saved === null ? true : saved === '1';
+    } catch (_) {
+      return true;
+    }
+  }
+
+  function _setSystemShortcutEnabled(navKey, enabled) {
+    try {
+      localStorage.setItem(_systemShortcutStorageKey(navKey), enabled ? '1' : '0');
+    } catch (_) {}
+  }
+
   // ── Mapa de observers de badge: nav_key → MutationObserver ──
   const _badgeObservers = new Map();
 
@@ -69538,12 +69813,13 @@ window.initOscilacaoEstoque = (function () {
   function criarBotaoAtalho(atalho) {
     const btn = document.createElement('button');
     btn.type = 'button';
-    btn.className = 'shortcut-btn';
+    btn.className = `shortcut-btn ${atalho.extra_class || ''}`.trim();
     btn.dataset.id = atalho.id;
     btn.dataset.navKey = atalho.nav_key;
+    if (atalho.system_fixed) btn.dataset.systemShortcut = '1';
 
     const iconClass = atalho.icon_class || 'fa-solid fa-star';
-    btn.innerHTML = `<i class="${iconClass}"></i><button class="shortcut-btn-remove" title="Remover atalho" aria-label="Remover atalho">×</button><span class="shortcut-btn-tooltip">${atalho.nav_label}</span>`;
+    btn.innerHTML = `<i class="${iconClass}"></i>${atalho.system_fixed ? '' : '<button class="shortcut-btn-remove" title="Remover atalho" aria-label="Remover atalho">×</button>'}<span class="shortcut-btn-tooltip">${atalho.nav_label}</span>`;
 
     // Clique → executa ação
     btn.addEventListener('click', (e) => {
@@ -69559,17 +69835,40 @@ window.initOscilacaoEstoque = (function () {
     });
 
     // Botão remover
-    btn.querySelector('.shortcut-btn-remove').addEventListener('click', async (e) => {
-      e.stopPropagation();
-      _badgeObservers.get(atalho.nav_key)?.disconnect();
-      _badgeObservers.delete(atalho.nav_key);
-      await removerAtalho(atalho.id, btn);
-    });
+    if (!atalho.system_fixed) {
+      btn.querySelector('.shortcut-btn-remove').addEventListener('click', async (e) => {
+        e.stopPropagation();
+        _badgeObservers.get(atalho.nav_key)?.disconnect();
+        _badgeObservers.delete(atalho.nav_key);
+        await removerAtalho(atalho.id, btn);
+      });
+    }
 
     // Iniciar sincronização de badge (fonte pode não existir ainda → aguarda um frame)
     setTimeout(() => _observarBadge(btn, atalho.nav_key, atalho.nav_selector), 0);
 
     return btn;
+  }
+
+  function renderizarAtalhosDoSistema() {
+    container.querySelectorAll('[data-system-shortcut="1"]').forEach((btn) => {
+      const navKey = btn.dataset.navKey;
+      if (navKey) {
+        _badgeObservers.get(navKey)?.disconnect();
+        _badgeObservers.delete(navKey);
+      }
+      btn.remove();
+    });
+
+    _systemShortcuts
+      .filter((atalho) => _isSystemShortcutEnabled(atalho.nav_key))
+      .forEach((atalho) => {
+        container.appendChild(criarBotaoAtalho({
+          ...atalho,
+          id: atalho.nav_key,
+          system_fixed: true
+        }));
+      });
   }
 
   // ── Carrega atalhos do servidor ──
@@ -69583,8 +69882,10 @@ window.initOscilacaoEstoque = (function () {
       // API retorna array direto
       const lista = Array.isArray(data) ? data : (data.atalhos || []);
       lista.forEach(a => container.appendChild(criarBotaoAtalho(a)));
+      renderizarAtalhosDoSistema();
     } catch (e) {
       console.error('[atalhos] erro ao carregar:', e.message);
+      renderizarAtalhosDoSistema();
     }
   }
 
@@ -69631,6 +69932,24 @@ window.initOscilacaoEstoque = (function () {
 
     const pinados = _navKeyAtual();
     let grupoAtual = '';
+
+    const tituloFixos = document.createElement('div');
+    tituloFixos.className = 'shortcut-modal-group-title';
+    tituloFixos.textContent = 'Atalhos persistentes';
+    modalList.appendChild(tituloFixos);
+
+    _systemShortcuts.forEach((atalho) => {
+      const item = document.createElement('div');
+      item.className = 'shortcut-modal-item' + (_isSystemShortcutEnabled(atalho.nav_key) ? ' is-pinned' : '');
+      item.innerHTML = `<i class="item-icon ${atalho.icon_class}"></i><span class="item-label">${atalho.nav_label}</span><span class="item-toggle">✓</span>`;
+      item.addEventListener('click', () => {
+        const habilitado = item.classList.contains('is-pinned');
+        _setSystemShortcutEnabled(atalho.nav_key, !habilitado);
+        item.classList.toggle('is-pinned', !habilitado);
+        renderizarAtalhosDoSistema();
+      });
+      modalList.appendChild(item);
+    });
 
     document.querySelectorAll('.sidebar-content .menu-link[data-nav-key]').forEach(link => {
       const navKey   = link.dataset.navKey;

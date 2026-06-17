@@ -675,6 +675,12 @@ body.dragging-menu-item .shortcut-drop-target { display: flex; }
   background-color: rgba(255, 255, 255, 0.94);
 }
 
+/* Atalhos flutuantes do painel Lista de Produtos */
+#listaProdutosAbrirCarrinhoBtn,
+#listaProdutosAbrirSeparacaoBtn {
+  display: none !important;
+}
+
 /* Ícones em modo claro */
 .light-mode i {
   color: #1f2937;
@@ -687,6 +693,27 @@ body.dragging-menu-item .shortcut-drop-target { display: flex; }
 .light-mode .fa-duotone,
 .light-mode [class*="fa-"] {
   color: #1f2937 !important;
+}
+
+.shortcut-btn--compras {
+  background: linear-gradient(135deg, #16a34a 0%, #15803d 100%);
+  color: #f0fdf4;
+}
+
+.shortcut-btn--separacao {
+  background: linear-gradient(135deg, #d97706 0%, #b45309 100%);
+  color: #fff7ed;
+}
+
+.shortcut-btn--system .shortcut-btn-remove {
+  display: none !important;
+}
+
+.light-mode .shortcut-btn--compras,
+.light-mode .shortcut-btn--compras i,
+.light-mode .shortcut-btn--separacao,
+.light-mode .shortcut-btn--separacao i {
+  color: inherit !important;
 }
 
 /* Ícones específicos que precisam ser claros em modo claro */
