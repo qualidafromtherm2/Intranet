@@ -1957,6 +1957,35 @@ max-width: 480px;          /* 260 → 480 px; ajuste se quiser */
   color: var(--theme-color, #3b82f6);
   border-bottom-color: var(--theme-color, #3b82f6);
 }
+
+.lp-tab-btn[data-lp-tab="solicitacoesConteudo"] {
+  color: #9ca3af;
+}
+
+.lp-tab-btn[data-lp-tab="solicitacoesConteudo"] i {
+  color: #f59e0b;
+}
+
+.lp-tab-btn[data-lp-tab="solicitacoesConteudo"].lp-tab-active {
+  color: #f59e0b;
+  border-bottom-color: #f59e0b;
+  background: rgba(245, 158, 11, 0.10);
+  box-shadow: inset 0 -1px 0 rgba(245, 158, 11, 0.4);
+}
+
+.lp-tab-btn[data-lp-tab="solicitacoesConteudo"].lp-tab-active i {
+  color: #f59e0b;
+}
+
+:root:not(.light-mode) .lp-tab-btn[data-lp-tab="solicitacoesConteudo"] {
+  color: #6b7280;
+}
+
+:root:not(.light-mode) .lp-tab-btn[data-lp-tab="solicitacoesConteudo"].lp-tab-active {
+  color: #fbbf24;
+  border-bottom-color: #f59e0b;
+  background: rgba(245, 158, 11, 0.12);
+}
 :root:not(.light-mode) .lp-tab-btn {
   color: #6b7280;
 }
@@ -5721,31 +5750,63 @@ ul#comprasList li ,
 
 #solicitacoesConteudo #solicitacoesKanbanBoard,
 #kanbanSolicitacoesConteudo #kanbanSolicBoard {
-  display: grid !important;
-  grid-template-columns: repeat(4, minmax(220px, 1fr));
+  display: flex !important;
+  flex-wrap: nowrap !important;
   gap: 14px !important;
-  overflow-x: visible !important;
-  align-items: start !important;
+  overflow-x: auto !important;
+  overflow-y: visible !important;
+  align-items: flex-start !important;
+  padding-bottom: 8px !important;
+}
+
+#solicitacoesConteudo #solicitacoesKanbanBoard > div,
+#kanbanSolicitacoesConteudo #kanbanSolicBoard > div {
+  flex: 0 0 300px !important;
+  min-width: 300px !important;
+  width: 300px !important;
 }
 
 @media (max-width: 1280px) {
   #solicitacoesConteudo #solicitacoesKanbanBoard,
   #kanbanSolicitacoesConteudo #kanbanSolicBoard {
-    grid-template-columns: repeat(3, minmax(220px, 1fr));
+    gap: 12px !important;
+  }
+
+  #solicitacoesConteudo #solicitacoesKanbanBoard > div,
+  #kanbanSolicitacoesConteudo #kanbanSolicBoard > div {
+    flex-basis: 280px !important;
+    min-width: 280px !important;
+    width: 280px !important;
   }
 }
 
 @media (max-width: 1024px) {
   #solicitacoesConteudo #solicitacoesKanbanBoard,
   #kanbanSolicitacoesConteudo #kanbanSolicBoard {
-    grid-template-columns: repeat(2, minmax(240px, 1fr));
+    gap: 10px !important;
+  }
+
+  #solicitacoesConteudo #solicitacoesKanbanBoard > div,
+  #kanbanSolicitacoesConteudo #kanbanSolicBoard > div {
+    flex-basis: 260px !important;
+    min-width: 260px !important;
+    width: 260px !important;
   }
 }
 
 @media (max-width: 768px) {
   #solicitacoesConteudo #solicitacoesKanbanBoard,
   #kanbanSolicitacoesConteudo #kanbanSolicBoard {
+    display: grid !important;
     grid-template-columns: 1fr;
+    overflow-x: visible !important;
+  }
+
+  #solicitacoesConteudo #solicitacoesKanbanBoard > div,
+  #kanbanSolicitacoesConteudo #kanbanSolicBoard > div {
+    flex: 1 1 auto !important;
+    min-width: 0 !important;
+    width: auto !important;
   }
 }
 
@@ -8150,6 +8211,41 @@ table.tabela td.num {
   padding: 0 2px;
 }
 
+/* --- Ajustes de responsividade para a tela inicial e lista de produtos --- */
+@media (max-width: 1024px) {
+  #paginaInicio .content-wrapper {
+    padding-left: 12px;
+    padding-right: 12px;
+  }
+
+  #paginaInicio .content-section {
+    margin-top: 16px !important;
+  }
+
+  #paginaInicio .title-wrapper {
+    flex-wrap: wrap;
+    align-items: flex-start;
+    gap: 8px;
+  }
+
+  #paginaInicio .semana-carousel {
+    gap: 10px;
+  }
+
+  #paginaInicio .semana-day-card {
+    flex-basis: 150px;
+  }
+
+  #listaProdutos .content-section.lista-produtos-alta {
+    padding: 18px;
+  }
+
+  #listaProdutos #listaProdutosGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    max-height: calc(100vh - 200px) !important;
+  }
+}
+
 /* --- Responsividade mobile do calendário --- */
 @media (max-width: 640px) {
   /* Header mobile: remover ícone de impressora */
@@ -8171,6 +8267,84 @@ table.tabela td.num {
     box-shadow: 0 8px 20px rgba(34, 197, 94, 0.35);
   }
 
+  /* Tela inicial: reduzir o desperdício vertical e dar scroll horizontal aos cards */
+  #paginaInicio .content-wrapper {
+    padding: 8px 10px 24px;
+  }
+
+  #paginaInicio .content-section {
+    margin-top: 14px !important;
+  }
+
+  #paginaInicio .title-wrapper {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 6px;
+    margin-bottom: 12px !important;
+  }
+
+  #paginaInicio .content-section-title {
+    font-size: 15px;
+    line-height: 1.2;
+  }
+
+  #paginaInicio #btnVoltarHoje {
+    width: fit-content;
+    min-height: 34px;
+    padding: 6px 10px;
+    font-size: 12px;
+  }
+
+  #paginaInicio .semana-carousel-container {
+    overflow-x: auto;
+    scroll-snap-type: x proximity;
+    padding-bottom: 4px;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  #paginaInicio .semana-carousel {
+    width: max-content;
+    gap: 8px;
+    padding-right: 8px;
+  }
+
+  #paginaInicio .semana-day-card {
+    flex: 0 0 126px;
+    padding: 7px;
+    scroll-snap-align: start;
+  }
+
+  #paginaInicio .semana-day-header {
+    margin-bottom: 4px;
+  }
+
+  #paginaInicio .semana-day-date {
+    font-size: 14px;
+  }
+
+  #paginaInicio .semana-day-dow,
+  #paginaInicio .semana-day-badge {
+    font-size: 11px;
+  }
+
+  #paginaInicio .semana-produtos {
+    max-height: 112px;
+    gap: 3px;
+  }
+
+  #paginaInicio .semana-produto-item {
+    font-size: 12px;
+    min-height: 18px;
+  }
+
+  #paginaInicio .agenda-cal-layout {
+    gap: 8px;
+  }
+
+  #paginaInicio .agenda-calendario-grid {
+    margin-top: 2px;
+  }
+
   /* Lista de produtos (mobile): 1 card por linha e sem botão modo lista */
   #listaProdutos #viewToggleBtn {
     display: none !important;
@@ -8180,31 +8354,175 @@ table.tabela td.num {
     display: none !important;
   }
 
-  #listaProdutos .filter-bar {
+  #listaProdutos .content-section.lista-produtos-alta {
+    padding: 12px;
+  }
+
+  #listaProdutos .lp-tabs-nav {
+    overflow: visible;
     flex-wrap: wrap;
-    align-items: center;
+    gap: 6px;
+    padding-bottom: 8px;
+    align-items: stretch;
+  }
+
+  #listaProdutos .lp-tabs-nav::-webkit-scrollbar {
+    display: none;
+  }
+
+  #listaProdutos .lp-tab-btn {
+    flex: 1 1 calc(50% - 6px);
+    min-width: 0;
+    white-space: normal;
+    text-align: left;
+    padding: 8px 10px;
+    font-size: 12px;
+    line-height: 1.15;
+  }
+
+  #listaProdutos .lp-tab-btn[data-lp-tab="solicitacoesConteudo"] {
+    border: 1px solid rgba(245, 158, 11, 0.28);
+    border-radius: 12px;
+    background: rgba(245, 158, 11, 0.06);
+  }
+
+  #listaProdutos .lp-tab-btn[data-lp-tab="solicitacoesConteudo"].lp-tab-active {
+    box-shadow: 0 0 0 1px rgba(245, 158, 11, 0.25) inset;
+  }
+
+  #listaProdutos .lp-tabs-nav #productSpinner {
+    flex: 0 0 100%;
+    margin-left: 0;
+    display: flex;
+    justify-content: flex-end;
+  }
+
+  #listaProdutos .filter-bar {
+    display: grid;
+    grid-template-columns: 1fr auto auto auto auto;
     gap: 8px;
+    align-items: center;
   }
 
   #listaProdutos .filter-bar > div:first-child {
-    flex: 1 0 100% !important;
+    grid-column: 1 / -1;
     max-width: 100%;
   }
 
   #listaProdutos .filter-bar input {
     max-width: none;
     width: 100%;
+    height: 42px;
+    font-size: 14px;
+  }
+
+  #listaProdutos .filter-icon {
+    width: 42px;
+    height: 42px;
+    padding: 0;
+    border-radius: 12px;
+    background: var(--content-bg);
+    border: 1px solid var(--border-color);
   }
 
   #listaProdutos #listaProdutosGrid {
     grid-template-columns: 1fr !important;
-    gap: 10px !important;
-    max-height: calc(100vh - 180px) !important;
+    gap: 8px !important;
+    max-height: calc(100vh - 174px) !important;
   }
 
   #listaProdutos #listaProdutosGrid > * {
     width: 100% !important;
     min-width: 0 !important;
+    border-radius: 10px !important;
+    overflow: hidden !important;
+    box-shadow: 0 1px 6px rgba(0,0,0,0.08) !important;
+  }
+
+  #listaProdutos #listaProdutosGrid > * > div:first-child {
+    height: 96px !important;
+  }
+
+  #listaProdutos #listaProdutosGrid > * > div:first-child img,
+  #listaProdutos #listaProdutosGrid > * > div:first-child > div {
+    max-height: 96px !important;
+  }
+
+  #listaProdutos #listaProdutosGrid > * > div:last-child {
+    padding: 8px !important;
+  }
+
+  #listaProdutos #listaProdutosGrid > * > div:last-child > div:nth-child(1) {
+    font-size: 11px !important;
+    margin-bottom: 2px !important;
+  }
+
+  #listaProdutos #listaProdutosGrid > * > div:last-child > div:nth-child(2) {
+    font-size: 12px !important;
+    line-height: 1.2 !important;
+    min-height: 2.4em !important;
+  }
+
+  #listaProdutos #listaProdutosGrid > * > div:last-child > div:nth-child(3) {
+    font-size: 11px !important;
+    margin-top: 4px !important;
+  }
+
+  #listaProdutos #listaProdutosGrid > * > div:last-child > div:nth-child(4) {
+    margin-top: 6px !important;
+  }
+
+  #listaProdutos #listaProdutosGrid > * > div:last-child button {
+    min-height: 34px !important;
+    padding: 7px 10px !important;
+    font-size: 12px !important;
+    border-radius: 8px !important;
+  }
+
+  #listaProdutos .product-details {
+    max-height: calc(100vh - 250px);
+    padding-right: 0;
+  }
+
+  #listaProdutos .product-details li {
+    display: grid;
+    grid-template-columns: minmax(72px, auto) 1fr auto;
+    gap: 6px 10px;
+    align-items: start;
+    padding: 10px 10px 12px;
+    white-space: normal;
+  }
+
+  #listaProdutos .product-details .products {
+    width: auto;
+    flex: none;
+    font-size: 13px;
+    font-weight: 700;
+    line-height: 1.15;
+  }
+
+  #listaProdutos .product-details .status {
+    display: block !important;
+    margin-left: 0;
+    width: auto;
+    font-size: 12px;
+    line-height: 1.25;
+    white-space: normal;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-height: 2.8em;
+  }
+
+  #listaProdutos .product-details .status.expanded {
+    max-height: none;
+  }
+
+  #listaProdutos .product-details .unidade {
+    justify-self: end;
+    align-self: start;
+    font-size: 12px;
+    font-weight: 700;
+    white-space: nowrap;
   }
 
   /* Modal Solicitação de compra: campos em coluna única no mobile */
