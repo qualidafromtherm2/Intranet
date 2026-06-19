@@ -66261,7 +66261,10 @@ document.addEventListener('DOMContentLoaded', () => {
   const calcPopup = document.getElementById('movimCalcPopup');
   const calcDisp  = document.getElementById('movimCalcDisplay');
   const scanBtn   = document.getElementById('movimScanEnderecoBtn');
+  const scanOrigemBtn = document.getElementById('movimScanEnderecoOrigemBtn');
+  const scanDestinoBtn = document.getElementById('movimScanEnderecoDestinoBtn');
   const scanModal = document.getElementById('movimScanEnderecoModal');
+  const scanTitle = document.getElementById('movimScanEnderecoTitle');
   const scanVideo = document.getElementById('movimScanEnderecoVideo');
   const scanMira  = document.getElementById('movimScanEnderecoMira');
   const scanStatus= document.getElementById('movimScanEnderecoStatus');
@@ -66380,6 +66383,9 @@ document.addEventListener('DOMContentLoaded', () => {
   let _processandoAcao = false;
   let _scanStream = null;
   let _scanInterval = null;
+  let _scanModo = 'geral'; // geral | origem | destino
+  let _enderecoOrigemInterno = '';
+  let _enderecoDestinoInterno = '';
 
   function fechar() {
     if (overlay) overlay.style.display = 'none';
@@ -66404,6 +66410,30 @@ document.addEventListener('DOMContentLoaded', () => {
     const vazio = document.getElementById('movimEnderecoVazio');
     if (lista) lista.innerHTML = '';
     if (vazio) vazio.style.display = 'block';
+    _enderecoOrigemInterno = '';
+    _enderecoDestinoInterno = '';
+    renderEnderecoInternoValores();
+  }
+
+  function renderEnderecoInternoValores() {
+    const origemEl = document.getElementById('movimEnderecoOrigemVal');
+    const destinoEl = document.getElementById('movimEnderecoDestinoVal');
+    if (origemEl) {
+      origemEl.textContent = _enderecoOrigemInterno || 'Nao lido';
+      origemEl.classList.toggle('vazio', !_enderecoOrigemInterno);
+    }
+    if (destinoEl) {
+      destinoEl.textContent = _enderecoDestinoInterno || 'Nao lido';
+      destinoEl.classList.toggle('vazio', !_enderecoDestinoInterno);
+    }
+  }
+
+  function definirEnderecoInterno(modo, valor) {
+    const endereco = String(valor || '').trim();
+    if (!endereco) return;
+    if (modo === 'origem') _enderecoOrigemInterno = endereco;
+    else if (modo === 'destino') _enderecoDestinoInterno = endereco;
+    renderEnderecoInternoValores();
   }
 
   function limparEnderecosReferencia() {
@@ -66509,6 +66539,7 @@ document.addEventListener('DOMContentLoaded', () => {
     pararScanEndereco();
     if (scanModal) scanModal.style.display = 'none';
     if (scanInput) scanInput.value = '';
+    _scanModo = 'geral';
     if (scanStatus) {
       scanStatus.textContent = 'Aponte a camera para o codigo do endereco.';
       scanStatus.style.color = '#94a3b8';
@@ -66570,7 +66601,13 @@ document.addEventListener('DOMContentLoaded', () => {
   function registrarEnderecoLido(valor) {
     const endereco = String(valor || '').trim();
     if (!endereco) return;
-    adicionarEndereco(endereco);
+    if (_scanModo === 'origem') {
+      definirEnderecoInterno('origem', endereco);
+    } else if (_scanModo === 'destino') {
+      definirEnderecoInterno('destino', endereco);
+    } else {
+      adicionarEndereco(endereco);
+    }
     if (scanStatus) {
       scanStatus.textContent = `Endereco registrado: ${endereco}`;
       scanStatus.style.color = '#4ade80';
@@ -66578,15 +66615,30 @@ document.addEventListener('DOMContentLoaded', () => {
     setTimeout(fecharScanEndereco, 700);
   }
 
-  async function abrirScanEndereco() {
+  async function abrirScanEndereco(modo) {
     if (!scanModal) return;
-    if (scanInput) scanInput.value = '';
+    _scanModo = modo || 'geral';
+    if (scanTitle) {
+      if (_scanModo === 'origem') scanTitle.textContent = 'Leia o codigo do endereco de ORIGEM';
+      else if (_scanModo === 'destino') scanTitle.textContent = 'Leia o codigo do endereco de DESTINO';
+      else scanTitle.textContent = 'Leia QR Code ou codigo de barras';
+    }
+    if (scanInput) {
+      scanInput.placeholder = _scanModo === 'origem'
+        ? 'Digite o endereco de origem...'
+        : _scanModo === 'destino'
+          ? 'Digite o endereco de destino...'
+          : 'Ou digite o endereco manualmente...';
+      scanInput.value = '';
+    }
     scanModal.style.display = 'flex';
     const ok = await iniciarScanEndereco();
     if (ok) iniciarDeteccaoEndereco();
   }
 
-  if (scanBtn) scanBtn.addEventListener('click', abrirScanEndereco);
+  if (scanBtn) scanBtn.addEventListener('click', () => abrirScanEndereco('geral'));
+  if (scanOrigemBtn) scanOrigemBtn.addEventListener('click', () => abrirScanEndereco('origem'));
+  if (scanDestinoBtn) scanDestinoBtn.addEventListener('click', () => abrirScanEndereco('destino'));
   if (scanFechar) scanFechar.addEventListener('click', fecharScanEndereco);
   if (scanModal) scanModal.addEventListener('click', e => { if (e.target === scanModal) fecharScanEndereco(); });
   if (scanOkBtn) {
@@ -66635,13 +66687,12 @@ document.addEventListener('DOMContentLoaded', () => {
     return solicitanteRaw && solicitanteRaw !== '—' ? solicitanteRaw : null;
   }
 
-  async function registrarEnderecosEtq({ codigo, descricao, qtd, enderecos, complemento, usuario, tipoMovimentacao }) {
-    if (!enderecos?.length) return { ok: true, registros: [] };
+  async function registrarEnderecosEtq(payload) {
     const resp = await fetch('/api/etiquetas/rec-impresso/registrar-movimentacao', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
-      body: JSON.stringify({ codigo, descricao, qtd, enderecos, complemento, usuario, tipo_movimentacao: tipoMovimentacao })
+      body: JSON.stringify(payload)
     });
     let json;
     try { json = await resp.json(); } catch { throw new Error('Resposta inválida ao registrar endereço.'); }
@@ -66693,8 +66744,19 @@ document.addEventListener('DOMContentLoaded', () => {
     const mesmo = isMesmoArmazemMovim();
     const aviso = document.getElementById('movimMesmoArmazemAviso');
     const imprWrap = document.getElementById('movimImprimirEtiquetaWrap');
+    const internoWrap = document.getElementById('movimEnderecoInternoWrap');
+    const externoWrap = document.getElementById('movimEnderecoExternoWrap');
+    const scanGeralBtn = document.getElementById('movimScanEnderecoBtn');
     if (aviso) aviso.style.display = mesmo ? 'block' : 'none';
     if (imprWrap) imprWrap.style.display = mesmo ? 'flex' : 'none';
+    if (internoWrap) internoWrap.style.display = mesmo ? 'flex' : 'none';
+    if (externoWrap) externoWrap.style.display = mesmo ? 'none' : 'block';
+    if (scanGeralBtn) scanGeralBtn.style.display = mesmo ? 'none' : 'inline-flex';
+    if (!mesmo) {
+      _enderecoOrigemInterno = '';
+      _enderecoDestinoInterno = '';
+      renderEnderecoInternoValores();
+    }
   }
 
   function movimEtqImprKey() {
@@ -66745,17 +66807,40 @@ document.addEventListener('DOMContentLoaded', () => {
     const msg = document.getElementById('movimMensagem');
     const qtd = obterQtdDaExpressao();
     const apontamento = String(document.getElementById('movimApontamento')?.value || '').trim() || null;
-    const enderecos = obterEnderecosLidos();
     const mapTipo = { ENTRADA: 'ENT', SAIDA: 'SAI', TRANSFERENCIA: 'TRF' };
     const tipoMov = mapTipo[String(tipoAcao || '').toUpperCase()] || String(tipoAcao || '').toUpperCase();
+    const enderecoOrigem = _enderecoOrigemInterno;
+    const enderecoDestino = _enderecoDestinoInterno;
 
-    if (!enderecos.length) {
+    if (tipoMov === 'TRF') {
+      if (!enderecoOrigem || !enderecoDestino) {
+        if (msg) {
+          msg.textContent = 'Transferencia exige ler codigo de origem e destino.';
+          msg.className = 'movim-mensagem erro';
+        }
+        return;
+      }
+      if (enderecoOrigem === enderecoDestino) {
+        if (msg) {
+          msg.textContent = 'Origem e destino devem ser enderecos diferentes.';
+          msg.className = 'movim-mensagem erro';
+        }
+        return;
+      }
+    } else if (tipoMov === 'SAI' && !enderecoOrigem) {
       if (msg) {
-        msg.textContent = 'Leia pelo menos um endereco (codigo de barras).';
+        msg.textContent = 'Saida exige ler o codigo do endereco de origem.';
+        msg.className = 'movim-mensagem erro';
+      }
+      return;
+    } else if (tipoMov === 'ENT' && !enderecoDestino) {
+      if (msg) {
+        msg.textContent = 'Entrada exige ler o codigo do endereco de destino.';
         msg.className = 'movim-mensagem erro';
       }
       return;
     }
+
     if (!qtd) {
       if (msg) { msg.textContent = 'Informe uma quantidade valida.'; msg.className = 'movim-mensagem erro'; }
       return;
@@ -66768,7 +66853,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const solicitante = obterSolicitanteMovim();
     const imprimir = !!document.getElementById('movimImprimirEtiqueta')?.checked;
     limparRetornoOmie();
-    if (msg) { msg.textContent = 'Registrando endereco…'; msg.className = 'movim-mensagem info'; }
+    if (msg) { msg.textContent = 'Registrando movimentacao interna…'; msg.className = 'movim-mensagem info'; }
     _processandoAcao = true;
     setBotoesAcaoDisabled(true);
 
@@ -66777,18 +66862,21 @@ document.addEventListener('DOMContentLoaded', () => {
         codigo: _codigoProdutoAtual,
         descricao: _descricaoProdutoAtual,
         qtd,
-        enderecos,
+        endereco_origem: enderecoOrigem || null,
+        endereco_destino: enderecoDestino || null,
         complemento: apontamento,
         usuario: solicitante,
-        tipoMovimentacao: tipoMov
+        tipo_movimentacao: tipoMov
       });
       const ids = (etq.registros || []).map(r => r.id).filter(Boolean);
       const linhas = [
         `Produto: ${_codigoProdutoAtual}`,
         `Tipo: ${tipoMov}`,
-        `Endereco(s): ${enderecos.join(', ')}`,
-        ids.length ? `Etiqueta(s) ETQ: ${ids.join(', ')}` : 'Registro salvo em ETQ_rec_impresso.'
-      ];
+        tipoMov !== 'ENT' && enderecoOrigem ? `Origem: ${enderecoOrigem}` : null,
+        tipoMov !== 'SAI' && enderecoDestino ? `Destino: ${enderecoDestino}` : null,
+        `Quantidade: ${qtd}`,
+        ids.length ? `Registro(s) ETQ: ${ids.join(', ')}` : 'Movimentacao salva em ETQ_rec_impresso.'
+      ].filter(Boolean);
 
       if (imprimir && ids.length) {
         if (msg) { msg.textContent = 'Enviando etiqueta para impressao…'; msg.className = 'movim-mensagem info'; }
@@ -66802,17 +66890,17 @@ document.addEventListener('DOMContentLoaded', () => {
 
       exibirRetornoOmie(montarHtmlRetornoOmie({
         ok: true,
-        titulo: 'Endereco registrado (sem Omie)',
+        titulo: 'Movimentacao interna registrada (sem Omie)',
         linhas
       }), 'ok');
-      if (msg) { msg.textContent = 'Endereco registrado.'; msg.className = 'movim-mensagem ok'; }
+      if (msg) { msg.textContent = 'Movimentacao registrada.'; msg.className = 'movim-mensagem ok'; }
       limparEnderecos();
       carregarEnderecosReferencia(_codigoProdutoAtual);
     } catch (err) {
       console.error('[modalMovimentacao] enderecamento interno', err);
       exibirRetornoOmie(montarHtmlRetornoOmie({
         ok: false,
-        titulo: 'Falha ao registrar endereco',
+        titulo: 'Falha ao registrar movimentacao',
         linhas: [String(err?.message || err)]
       }), 'erro');
       if (msg) { msg.textContent = 'Falha — veja o retorno abaixo.'; msg.className = 'movim-mensagem erro'; }
@@ -67296,7 +67384,7 @@ document.addEventListener('DOMContentLoaded', () => {
           enderecos,
           complemento: apontamento,
           usuario: aprovadoPor,
-          tipoMovimentacao: 'TRF'
+          tipo_movimentacao: 'TRF'
         });
       }
 

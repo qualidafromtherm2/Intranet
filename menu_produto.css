@@ -10581,6 +10581,42 @@ table.tabela td.num {
 }
 .movim-endereco-add:hover { background: #333748; }
 .movim-endereco-vazio { font-size: .85rem; color: #6b7280; }
+.movim-endereco-interno { display: flex; flex-direction: column; gap: 10px; }
+.movim-endereco-campo {
+  padding: 10px 12px;
+  background: #1a1f2e;
+  border: 1px solid #2f3545;
+  border-radius: 10px;
+}
+.movim-endereco-campo-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+.movim-endereco-campo-label {
+  font-size: .72rem;
+  font-weight: 700;
+  color: #fbbf24;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+}
+.movim-endereco-valor {
+  font-size: .84rem;
+  font-weight: 700;
+  color: #fde68a;
+  word-break: break-word;
+  line-height: 1.45;
+  padding: 6px 8px;
+  background: #141820;
+  border-radius: 8px;
+  border: 1px dashed #854d0e55;
+}
+.movim-endereco-valor.vazio { color: #6b7280; font-weight: 500; border-style: dotted; }
+.movim-scan-origem { border-color: #7f1d1d; color: #fecaca; }
+.movim-scan-destino { border-color: #166534; color: #bbf7d0; }
 .movim-endereco-referencia-pp:empty { display: none; }
 .movim-endereco-referencia-pp { margin-bottom: 4px; }
 .movim-ref-loading { font-size: .82rem; color: #6b7280; }

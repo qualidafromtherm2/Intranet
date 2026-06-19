@@ -11532,19 +11532,18 @@ app.get('/api/etiquetas/rec-impresso/enderecos-por-produto', async (req, res) =>
     if (!codigo) return res.status(400).json({ ok: false, error: 'codigo é obrigatório.' });
 
     const { rows } = await pool.query(
-      `SELECT DISTINCT ON (TRIM(i.endereco))
-              i.id,
-              TRIM(i.endereco) AS endereco,
-              i.complemento,
-              i.qtd,
-              i.impresso_em,
-              COALESCE(i.codigo_produto, r.codigo_produto) AS codigo_produto,
-              COALESCE(i.fonte, 'recebimento') AS fonte
+      `SELECT TRIM(i.endereco) AS endereco,
+              SUM(COALESCE(i.qtd, 0)) AS qtd,
+              MAX(i.complemento) AS complemento,
+              MAX(i.impresso_em) AS impresso_em,
+              $1::text AS codigo_produto
          FROM etiqueta."ETQ_rec_impresso" i
          LEFT JOIN etiqueta."ETQ_recebimento" r ON r.id = i.origem_id
         WHERE TRIM(COALESCE(i.codigo_produto, r.codigo_produto, '')) = $1
           AND i.endereco IS NOT NULL AND TRIM(i.endereco) <> ''
-        ORDER BY TRIM(i.endereco), i.impresso_em DESC`,
+        GROUP BY TRIM(i.endereco)
+       HAVING SUM(COALESCE(i.qtd, 0)) > 0
+        ORDER BY TRIM(i.endereco)`,
       [codigo]
     );
 
@@ -11698,22 +11697,24 @@ app.patch('/api/etiquetas/rec-impresso/:id/endereco', express.json(), async (req
 });
 
 // POST /api/etiquetas/rec-impresso/registrar-movimentacao
-// Body: { codigo, descricao?, qtd?, enderecos: ['A1'], complemento?, usuario?, tipo_movimentacao? }
-// Registra endereço(s) a partir do modal Movimentar (lista de produtos), sem Omie.
-// Gera ZPL com ID (mesmo fluxo da Identificação do produto / Armazenar).
+// Body: { codigo, descricao?, qtd?, endereco_origem?, endereco_destino?, enderecos?, complemento?, usuario?, tipo_movimentacao? }
+// Porta Pallet (mesmo armazém): ENT credita destino, SAI debita origem, TRF debita origem e credita destino em ETQ_rec_impresso.
 app.post('/api/etiquetas/rec-impresso/registrar-movimentacao', express.json(), async (req, res) => {
+  const client = await pool.connect();
   try {
     const codigo    = String(req.body?.codigo || '').trim();
     const descricao = String(req.body?.descricao || '').trim() || null;
-    const qtd       = Number(req.body?.qtd) || null;
+    const qtd       = Number(req.body?.qtd);
     const complementoRaw = String(req.body?.complemento || '').trim() || null;
     const tipoMov   = String(req.body?.tipo_movimentacao || '').trim().toUpperCase() || null;
     const usuario   = String(req.body?.usuario || req.body?.usuario_criacao || '').trim() || null;
+    const enderecoOrigem  = String(req.body?.endereco_origem  || '').trim() || null;
+    const enderecoDestino = String(req.body?.endereco_destino || '').trim() || null;
     const enderecosRaw = Array.isArray(req.body?.enderecos) ? req.body.enderecos : [];
     const enderecos = [...new Set(enderecosRaw.map(e => String(e || '').trim()).filter(Boolean))];
 
     if (!codigo) return res.status(400).json({ error: 'codigo é obrigatório.' });
-    if (!enderecos.length) return res.status(400).json({ error: 'Informe ao menos um endereço.' });
+    if (!Number.isFinite(qtd) || qtd <= 0) return res.status(400).json({ error: 'Informe uma quantidade válida (> 0).' });
 
     const hoje = new Date();
     const dataEmissao = `${String(hoje.getDate()).padStart(2, '0')}/${String(hoje.getMonth() + 1).padStart(2, '0')}/${hoje.getFullYear()}`;
@@ -11726,39 +11727,234 @@ app.post('/api/etiquetas/rec-impresso/registrar-movimentacao', express.json(), a
     const codProd  = sanitize(codigo, 30);
     const descProd = sanitize(descricao || codigo, 70);
 
-    const registros = [];
-    for (const endereco of enderecos) {
-      const { rows } = await pool.query(
-        `INSERT INTO etiqueta."ETQ_rec_impresso"
-           (origem_id, qtd, unidade, data_emissao, conteudo_zpl, usuario_criacao,
-            endereco, complemento, codigo_produto, descricao_produto, fonte)
-         VALUES (NULL, $1, 'UN', $2, '', $3, $4, $5, $6, $7, 'movimentacao')
-         RETURNING id, endereco, codigo_produto, descricao_produto, qtd, data_emissao`,
-        [qtd, dataEmissao, usuario, endereco, complemento, codigo, descricao]
-      );
-      const row = rows[0];
-      const idImpresso = row.id;
-      const loteTxt = sanitize(endereco, 40);
-      const zpl = _gerarZplParaImpressao({
+    const movInterno =
+      (tipoMov === 'TRF' && enderecoOrigem && enderecoDestino) ||
+      (tipoMov === 'SAI' && enderecoOrigem) ||
+      (tipoMov === 'ENT' && enderecoDestino);
+
+    if (movInterno) {
+      if (tipoMov === 'TRF' && (!enderecoOrigem || !enderecoDestino)) {
+        return res.status(400).json({ error: 'Transferência exige endereço de origem e destino.' });
+      }
+      if (tipoMov === 'SAI' && !enderecoOrigem) {
+        return res.status(400).json({ error: 'Saída exige endereço de origem.' });
+      }
+      if (tipoMov === 'ENT' && !enderecoDestino) {
+        return res.status(400).json({ error: 'Entrada exige endereço de destino.' });
+      }
+      if (tipoMov === 'TRF' && enderecoOrigem === enderecoDestino) {
+        return res.status(400).json({ error: 'Origem e destino devem ser endereços diferentes.' });
+      }
+
+      await client.query('BEGIN');
+      const resultado = await _processarMovimentacaoEtqInterna(client, {
+        codigo,
+        descricao,
+        qtd,
+        tipoMov,
+        enderecoOrigem,
+        enderecoDestino,
+        complemento,
+        usuario,
+        dataEmissao,
         codProd,
         descProd,
-        idImpresso,
-        loteTxt,
-        dataExibir: sanitize(row.data_emissao || dataEmissao, 10)
+        sanitize
       });
-      await pool.query(
-        `UPDATE etiqueta."ETQ_rec_impresso" SET conteudo_zpl = $1 WHERE id = $2`,
-        [zpl, idImpresso]
-      );
-      registros.push({ ...row, conteudo_zpl: zpl });
+      await client.query('COMMIT');
+      return res.json({ ok: true, ...resultado });
+    }
+
+    if (!enderecos.length) return res.status(400).json({ error: 'Informe ao menos um endereço.' });
+
+    const registros = [];
+    for (const endereco of enderecos) {
+      const row = await _insertEtqMovimentacaoEndereco(client, {
+        endereco,
+        qtd,
+        dataEmissao,
+        usuario,
+        complemento,
+        codigo,
+        descricao,
+        codProd,
+        descProd,
+        sanitize
+      });
+      registros.push(row);
     }
 
     res.json({ ok: true, registros });
   } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
     console.error('[etiquetas/rec-impresso/registrar-movimentacao]', err);
     res.status(500).json({ error: err?.message || 'Falha ao registrar endereço(s).' });
+  } finally {
+    client.release();
   }
 });
+
+async function _etqLinhasSaldoEndereco(client, codigo, endereco) {
+  const { rows } = await client.query(
+    `SELECT i.id, i.qtd, i.unidade, i.data_emissao, i.endereco, i.complemento,
+            i.codigo_produto, i.descricao_produto, i.fonte, i.origem_id, i.usuario_criacao
+       FROM etiqueta."ETQ_rec_impresso" i
+       LEFT JOIN etiqueta."ETQ_recebimento" r ON r.id = i.origem_id
+      WHERE TRIM(COALESCE(i.codigo_produto, r.codigo_produto, '')) = $1
+        AND TRIM(COALESCE(i.endereco, '')) = $2
+        AND COALESCE(i.qtd, 0) > 0
+      ORDER BY i.impresso_em ASC NULLS LAST, i.id ASC`,
+    [codigo, endereco]
+  );
+  return rows;
+}
+
+async function _etqDebitarEndereco(client, { codigo, endereco, qtd, usuario }) {
+  const linhas = await _etqLinhasSaldoEndereco(client, codigo, endereco);
+  const total = linhas.reduce((s, r) => s + Number(r.qtd || 0), 0);
+  if (total + 1e-9 < qtd) {
+    throw new Error(`Saldo insuficiente no endereco ${endereco} (${total} disponivel, ${qtd} solicitado).`);
+  }
+  let restante = qtd;
+  const alterados = [];
+  for (const row of linhas) {
+    if (restante <= 0) break;
+    const atual = Number(row.qtd || 0);
+    const debito = Math.min(atual, restante);
+    const novaQtd = Math.max(0, atual - debito);
+    await client.query(
+      `UPDATE etiqueta."ETQ_rec_impresso" SET qtd = $1 WHERE id = $2`,
+      [novaQtd, row.id]
+    );
+    alterados.push({ id: row.id, endereco, qtd_anterior: atual, qtd_nova: novaQtd, delta: -debito });
+    restante -= debito;
+  }
+  return { alterados, linhaReferencia: linhas[0] || null };
+}
+
+async function _insertEtqMovimentacaoEndereco(client, {
+  endereco, qtd, dataEmissao, usuario, complemento, codigo, descricao, codProd, descProd, sanitize, linhaReferencia
+}) {
+  const db = client || pool;
+  const ref = linhaReferencia || null;
+  const { rows } = await db.query(
+    `INSERT INTO etiqueta."ETQ_rec_impresso"
+       (origem_id, qtd, unidade, data_emissao, conteudo_zpl, usuario_criacao,
+        endereco, complemento, codigo_produto, descricao_produto, fonte)
+     VALUES ($1, $2, COALESCE($3, 'UN'), $4, '', $5, $6, $7, $8, $9, COALESCE($10, 'movimentacao'))
+     RETURNING id, endereco, codigo_produto, descricao_produto, qtd, data_emissao`,
+    [
+      ref?.origem_id ?? null,
+      qtd,
+      ref?.unidade || 'UN',
+      ref?.data_emissao || dataEmissao,
+      usuario,
+      endereco,
+      complemento || ref?.complemento || null,
+      codigo || ref?.codigo_produto,
+      descricao || ref?.descricao_produto,
+      ref?.fonte || 'movimentacao'
+    ]
+  );
+  const row = rows[0];
+  const idImpresso = row.id;
+  const loteTxt = sanitize(endereco, 40);
+  const zpl = _gerarZplParaImpressao({
+    codProd,
+    descProd,
+    idImpresso,
+    loteTxt,
+    dataExibir: sanitize(row.data_emissao || dataEmissao, 10)
+  });
+  await db.query(
+    `UPDATE etiqueta."ETQ_rec_impresso" SET conteudo_zpl = $1 WHERE id = $2`,
+    [zpl, idImpresso]
+  );
+  return { ...row, conteudo_zpl: zpl };
+}
+
+async function _etqCreditarEndereco(client, {
+  codigo, descricao, endereco, qtd, usuario, complemento, dataEmissao, codProd, descProd, sanitize, linhaReferencia
+}) {
+  const { rows: existentes } = await client.query(
+    `SELECT i.id, i.qtd
+       FROM etiqueta."ETQ_rec_impresso" i
+       LEFT JOIN etiqueta."ETQ_recebimento" r ON r.id = i.origem_id
+      WHERE TRIM(COALESCE(i.codigo_produto, r.codigo_produto, '')) = $1
+        AND TRIM(COALESCE(i.endereco, '')) = $2
+      ORDER BY COALESCE(i.qtd, 0) DESC, i.id DESC
+      LIMIT 1`,
+    [codigo, endereco]
+  );
+
+  if (existentes.length) {
+    const novaQtd = Number(existentes[0].qtd || 0) + qtd;
+    await client.query(
+      `UPDATE etiqueta."ETQ_rec_impresso" SET qtd = $1 WHERE id = $2`,
+      [novaQtd, existentes[0].id]
+    );
+    return { id: existentes[0].id, endereco, qtd: novaQtd, acao: 'update', delta: qtd };
+  }
+
+  const inserido = await _insertEtqMovimentacaoEndereco(client, {
+    endereco,
+    qtd,
+    dataEmissao,
+    usuario,
+    complemento,
+    codigo,
+    descricao,
+    codProd,
+    descProd,
+    sanitize,
+    linhaReferencia
+  });
+  return { ...inserido, acao: 'insert', delta: qtd };
+}
+
+async function _processarMovimentacaoEtqInterna(client, opts) {
+  const {
+    codigo, descricao, qtd, tipoMov, enderecoOrigem, enderecoDestino,
+    complemento, usuario, dataEmissao, codProd, descProd, sanitize
+  } = opts;
+
+  const movimentacao = { tipo: tipoMov, debitos: [], credito: null };
+  let linhaRef = null;
+
+  if (tipoMov === 'SAI' || tipoMov === 'TRF') {
+    const deb = await _etqDebitarEndereco(client, {
+      codigo,
+      endereco: enderecoOrigem,
+      qtd,
+      usuario
+    });
+    movimentacao.debitos = deb.alterados;
+    linhaRef = deb.linhaReferencia;
+  }
+
+  if (tipoMov === 'ENT' || tipoMov === 'TRF') {
+    movimentacao.credito = await _etqCreditarEndereco(client, {
+      codigo,
+      descricao,
+      endereco: enderecoDestino,
+      qtd,
+      usuario,
+      complemento,
+      dataEmissao,
+      codProd,
+      descProd,
+      sanitize,
+      linhaReferencia: linhaRef
+    });
+  }
+
+  const registros = [
+    ...movimentacao.debitos.map(d => ({ id: d.id, endereco: d.endereco, qtd: d.qtd_nova, acao: 'debito' })),
+    ...(movimentacao.credito ? [{ id: movimentacao.credito.id, endereco: movimentacao.credito.endereco, qtd: movimentacao.credito.qtd, acao: movimentacao.credito.acao }] : [])
+  ];
+
+  return { registros, movimentacao };
+}
 
 // POST /api/etiquetas/rec-impresso/imprimir-ids
 // Body: { ids: [idImpresso,...], destino_agente?, impressora?, usuario? }
