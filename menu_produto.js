@@ -710,6 +710,16 @@ window._loadSolicitacoesTab = async function() {
         cardEl._loading = true;
         _solKanbanLoading(true, 'Carregando itens...');
         try {
+          const cachedModal = _solGetSepModalCache(nSolic, 'global');
+          if (acao === 'modal' && cachedModal?.grupoAtual?.itens?.length) {
+            void _abrirModalSeparacao(
+              cachedModal.grupoAtual,
+              cachedModal.gruposConflito || [],
+              cachedModal.preloaded || {}
+            ).catch(err => console.warn('[SEP] abrir modal cache:', err));
+            return;
+          }
+
           const ri = await fetch(_solBuildKanbanItensUrl(nSolic, { escopoItens: 'global' }), { credentials: 'include' });
           const di = await ri.json();
           if (!di.ok) throw new Error(di.error || 'Erro ao buscar itens');
@@ -732,11 +742,17 @@ window._loadSolicitacoesTab = async function() {
                 };
               } catch (_) {}
             }
-            await _abrirModalSeparacao(
-              { nome_user: itens[0]?.nome_user || nSolic, n_solic: nSolic, itens, origem_status: cardEl.dataset.colStatus || '', escopoItens: 'global' },
+            const grupoAtual = { nome_user: itens[0]?.nome_user || nSolic, n_solic: nSolic, itens, origem_status: cardEl.dataset.colStatus || '', escopoItens: 'global' };
+            _solSetSepModalCache(nSolic, 'global', {
+              grupoAtual,
+              gruposConflito: [],
+              preloaded
+            });
+            void _abrirModalSeparacao(
+              grupoAtual,
               [],
               preloaded
-            );
+            ).catch(err => console.warn('[SEP] abrir modal:', err));
           }
         } catch (err) {
           alert('Erro: ' + err.message);
@@ -805,7 +821,120 @@ function _solCurrentUserName() {
   ).trim();
 }
 
+function _solLocalEhAlmoxGlobal(local) {
+  const codigo = String(local?.local_codigo || '').trim();
+  const nome = String(local?.local_nome || local?.descricao || '').toUpperCase();
+  return codigo === '10717096386' || nome.includes('ALMOXARIFADO') || nome.includes('#ALMOX');
+}
+
+function _solRenderOrigemResumoGlobal(locais, emptyText = 'Carregando origem...') {
+  const list = (Array.isArray(locais) ? locais : [])
+    .filter(l => Number(l?.saldo) > 0)
+    .slice()
+    .sort((a, b) => {
+      const aAlmox = _solLocalEhAlmoxGlobal(a);
+      const bAlmox = _solLocalEhAlmoxGlobal(b);
+      if (aAlmox && !bAlmox) return -1;
+      if (!aAlmox && bAlmox) return 1;
+      return String(a?.local_nome || a?.local_codigo || '')
+        .localeCompare(String(b?.local_nome || b?.local_codigo || ''), 'pt-BR');
+    });
+
+  if (!list.length) {
+    return `<div style="font-size:.63rem;color:#6b7280;font-style:italic;">${emptyText}</div>`;
+  }
+
+  const almox = list.find(_solLocalEhAlmoxGlobal) || list[0];
+  const outros = list.filter(l => l !== almox);
+
+  const renderLinha = (l, destaque = false) => {
+    const qty2 = Number(l.saldo).toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+    const nome = l.local_nome || l.local_codigo || 'â€”';
+    const isAlmox = _solLocalEhAlmoxGlobal(l);
+    return `<div style="display:flex;flex-direction:column;line-height:1.15;padding:1px 0;">
+      <span style="font-size:.61rem;color:${isAlmox || destaque ? '#86efac' : '#cbd5e1'};font-weight:${isAlmox ? '800' : '600'};white-space:normal;word-break:break-word;">
+        ${nome}${isAlmox ? ' <span style="display:inline-block;margin-left:4px;padding:0 5px;border-radius:999px;background:#14532d;border:1px solid #166534;color:#86efac;font-size:.52rem;font-weight:800;vertical-align:middle;">ALMOX</span>' : ''}
+      </span>
+      <span style="font-size:.66rem;color:#f0f0f0;font-weight:700;">${qty2} ${l.unidade || 'UN'}</span>
+    </div>`;
+  };
+
+  if (!outros.length) {
+    return renderLinha(almox, true);
+  }
+
+  const extraId = `origens-extra-${Math.random().toString(36).slice(2, 9)}`;
+  const totalOutros = outros.length;
+  return `<div style="display:flex;flex-direction:column;gap:3px;width:100%;position:relative;overflow:visible;">
+    ${renderLinha(almox, true)}
+    <button type="button" class="sol-origem-toggle" aria-expanded="false" aria-controls="${extraId}"
+      onclick="var d=document.getElementById('${extraId}'); if(d){ var abriu=d.style.display==='none' || d.hidden; d.hidden=false; d.style.display=abriu ? 'flex' : 'none'; this.setAttribute('aria-expanded', String(abriu)); this.textContent = abriu ? 'Ocultar ${totalOutros} outras origens' : 'Ver ${totalOutros} outras origens'; }"
+      style="align-self:flex-start;padding:2px 7px;border-radius:999px;border:1px solid rgba(148,163,184,.28);background:rgba(15,23,42,.72);color:#93c5fd;font-size:.58rem;font-weight:700;cursor:pointer;white-space:nowrap;line-height:1;">
+      Ver ${totalOutros} outras origens
+    </button>
+    <div id="${extraId}" hidden style="position:absolute;left:0;right:0;top:calc(100% + 4px);display:none;flex-direction:column;gap:5px;padding:8px 10px;border:1px solid rgba(148,163,184,.25);border-radius:10px;background:rgba(15,23,42,.98);box-shadow:0 12px 30px rgba(2,6,23,.38);z-index:20;max-height:140px;overflow:auto;">
+      <div style="font-size:.58rem;color:#94a3b8;font-weight:700;text-transform:uppercase;letter-spacing:.04em;">Outras origens</div>
+      ${outros.map(l => renderLinha(l, false)).join('')}
+    </div>
+  </div>`;
+}
+
 // Modal de separação — agrega por cod_omie, toggle Separado/Separação, parcial gera SEP.X
+const __solSepModalCache = new Map();
+const __solSepModalCacheTtlMs = 5 * 60 * 1000;
+const __solAguardRetCache = new Map();
+const __solAguardRetCacheTtlMs = 5 * 60 * 1000;
+
+function _solSepModalCacheKey(nSolic, escopoItens = 'global') {
+  return `${String(escopoItens || 'global').trim()}::${String(nSolic || '').trim()}`;
+}
+
+function _solGetSepModalCache(nSolic, escopoItens = 'global') {
+  const key = _solSepModalCacheKey(nSolic, escopoItens);
+  const entry = __solSepModalCache.get(key);
+  if (!entry) return null;
+  if ((Date.now() - entry.at) > __solSepModalCacheTtlMs) {
+    __solSepModalCache.delete(key);
+    return null;
+  }
+  return entry.data || null;
+}
+
+function _solSetSepModalCache(nSolic, escopoItens = 'global', data = {}) {
+  const key = _solSepModalCacheKey(nSolic, escopoItens);
+  __solSepModalCache.set(key, { at: Date.now(), data });
+}
+
+function _solInvalidateSepModalCache(nSolic, escopoItens = 'global') {
+  const key = _solSepModalCacheKey(nSolic, escopoItens);
+  __solSepModalCache.delete(key);
+}
+
+function _solAguardRetCacheKey(nSolic, tituloColuna = 'Aguardando retirada', escopoItens = '') {
+  return `${String(tituloColuna || 'Aguardando retirada').trim()}::${String(escopoItens || '').trim()}::${String(nSolic || '').trim()}`;
+}
+
+function _solGetAguardRetCache(nSolic, tituloColuna = 'Aguardando retirada', escopoItens = '') {
+  const key = _solAguardRetCacheKey(nSolic, tituloColuna, escopoItens);
+  const entry = __solAguardRetCache.get(key);
+  if (!entry) return null;
+  if ((Date.now() - entry.at) > __solAguardRetCacheTtlMs) {
+    __solAguardRetCache.delete(key);
+    return null;
+  }
+  return entry.data || null;
+}
+
+function _solSetAguardRetCache(nSolic, tituloColuna = 'Aguardando retirada', escopoItens = '', data = {}) {
+  const key = _solAguardRetCacheKey(nSolic, tituloColuna, escopoItens);
+  __solAguardRetCache.set(key, { at: Date.now(), data });
+}
+
+function _solInvalidateAguardRetCache(nSolic, tituloColuna = 'Aguardando retirada', escopoItens = '') {
+  const key = _solAguardRetCacheKey(nSolic, tituloColuna, escopoItens);
+  __solAguardRetCache.delete(key);
+}
+
 async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) {
   document.getElementById('modalSeparacaoLogistica')?.remove();
   const origemStatus = String(grupoAtual?.origem_status || '').trim();
@@ -819,6 +948,7 @@ async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) 
   const currentUser = _solCurrentUserName();
   const podeAgirSep = !isStandby && (!usuarioSeparando || usuarioSeparando === currentUser);
   const nSolicHdr = grupoAtual.n_solic || '';
+  const PRINC_ARMZ = '10717096386';
   const podeCancelarSep = !isStandby
     && (origemStatus === 'Em Separação' || origemStatus === 'Separado')
     && !!usuarioSeparando
@@ -912,8 +1042,11 @@ async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) 
       .filter(l => Number(l.saldo) > 0)
       .slice()
       .sort((a, b) => String(a.local_codigo) === PRINC_ARMZ ? -1 : String(b.local_codigo) === PRINC_ARMZ ? 1 : 0);
-    let origemHtml = '';
-    if (isSep) {
+    let origemHtml = _solRenderOrigemResumoGlobal(
+      estoqueBatch[it.codigo_produto] || [],
+      Object.keys(estoqueBatch).length ? 'Sem origem com saldo' : 'Carregando origem...'
+    );
+    if (false && isSep) {
       if (locais.length) {
         const btns = locais.map((l, idx) => {
           const isDefault = String(l.local_codigo) === PRINC_ARMZ || (idx === 0);
@@ -936,7 +1069,7 @@ async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) 
       } else {
         origemHtml = `<div style="font-size:.63rem;color:#6b7280;font-style:italic;">Carregando origem...</div>`;
       }
-    } else if (locais.length) {
+    } else if (false && locais.length) {
       origemHtml = locais.map(l => {
         const qty2 = Number(l.saldo).toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
         return `<div style="display:flex;flex-direction:column;line-height:1.35;padding:2px 0;">
@@ -944,21 +1077,21 @@ async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) 
           <span style="font-size:.68rem;color:#f0f0f0;font-weight:700;">${qty2} ${l.unidade || 'UN'}</span>
         </div>`;
       }).join('');
-    } else if (Object.keys(estoqueBatch).length > 0) {
+    } else if (false && Object.keys(estoqueBatch).length > 0) {
       origemHtml = `<div style="font-size:.63rem;color:#6b7280;font-style:italic;">Sem origem com saldo</div>`;
-    } else {
+    } else if (false) {
       origemHtml = `<div style="font-size:.63rem;color:#6b7280;font-style:italic;">Carregando origem...</div>`;
     }
 
     const localizacaoHtml = `
-      <div style="margin-top:6px;display:flex;flex-direction:column;gap:6px;">
+      <div class="sep-loc-stack" style="margin-top:6px;display:flex;flex-direction:column;gap:6px;">
         ${enderecamentoHtml}
-        <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:stretch;">
-          <div style="min-width:220px;flex:1 1 240px;padding:6px 8px;background:#101826;border:1px solid #253041;border-radius:8px;">
+        <div class="sep-loc-grid" style="display:flex;gap:10px;flex-wrap:wrap;align-items:stretch;">
+          <div class="sep-loc-box sep-loc-box--origin" style="min-width:220px;flex:1 1 240px;padding:6px 8px;background:#101826;border:1px solid #253041;border-radius:8px;">
             <div style="font-size:.60rem;color:#60a5fa;font-weight:700;text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px;">Origem</div>
             ${origemHtml}
           </div>
-          <div style="min-width:170px;flex:1;padding:6px 8px;background:#1b1730;border:1px solid #312e81;border-radius:8px;">
+          <div class="sep-loc-box sep-loc-box--dest" style="min-width:170px;flex:1;padding:6px 8px;background:#1b1730;border:1px solid #312e81;border-radius:8px;">
             <div style="font-size:.60rem;color:#a78bfa;font-weight:700;text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px;">Destino</div>
             ${destinoHtml}
           </div>
@@ -1002,7 +1135,7 @@ async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) 
          </div>`;
     const isUrgente = !!it.urgente;
     return `
-      <div data-item-row="${it.cod_omie || it.codigo_produto}"
+      <div class="sep-row sep-row--work" data-item-row="${it.cod_omie || it.codigo_produto}"
            data-n-solic="${nSolic || ''}"
            data-solic-ids='${JSON.stringify(it.solic_ids)}'
            data-carr-ids='${JSON.stringify(it.carr_ids)}'
@@ -1014,13 +1147,13 @@ async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) 
            data-observacao="${encodeURIComponent(obsText)}"
            data-unidade="${String(it.unidade || 'UN').replace(/"/g, '&quot;')}"
            style="display:flex;align-items:flex-start;gap:12px;padding:10px 16px;border-top:1px solid #222;${isConferido ? 'background:#0c1812;border-left:3px solid #22c55e;' : ''}${isUrgente ? 'border-left:3px solid #ef4444 !important;' : ''}">
-        <div style="width:40px;height:40px;border-radius:8px;background:#0f0f0f;overflow:hidden;flex-shrink:0;margin-top:2px;">
+        <div class="sep-thumb" data-preview-title="${String(it.codigo_produto || '').replace(/"/g, '&quot;')} - ${String(it.descricao || '').replace(/"/g, '&quot;')}" style="width:40px;height:40px;border-radius:8px;background:#0f0f0f;overflow:hidden;flex-shrink:0;margin-top:2px;cursor:zoom-in;">
           ${_solGetMiniImgHtml(it.codigo_produto, it.descricao || '')}
         </div>
-        <div style="flex:1;min-width:0;">
+        <div class="sep-main" style="flex:1;min-width:0;">
           <div style="font-weight:700;font-size:.80rem;color:#f59e0b;">${it.codigo_produto}</div>
           <div style="font-size:.78rem;color:#d1d5db;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${it.descricao || '—'}</div>
-          <div style="font-size:.73rem;color:#9ca3af;margin-top:2px;display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+          <div class="sep-meta" style="font-size:.73rem;color:#9ca3af;margin-top:2px;display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
             ${dh ? `<i class="fa-regular fa-calendar" style="color:#6b7280;"></i><span>${dh}</span>` : ''}
             ${isConferido
               ? `<span style="display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:20px;font-size:.68rem;font-weight:700;color:#86efac;background:#0f2018;border:1px solid #22c55e55;">
@@ -1037,18 +1170,18 @@ async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) 
           ${swapHistory}
           ${localizacaoHtml}
         </div>
-          ${qtyHtml}
+          <div class="sep-qty">${qtyHtml}</div>
           ${readonlySep
             ? ''
             : isConferido
-            ? `<div style="display:flex;gap:6px;align-items:flex-start;flex-wrap:wrap;justify-content:flex-end;flex-shrink:0;">
+            ? `<div class="sep-actions sep-actions--inline" style="display:flex;gap:6px;align-items:flex-start;flex-wrap:wrap;justify-content:flex-end;flex-shrink:0;">
                  <button class="btn-item-retificar" title="Voltar item para Separado"
                    style="padding:4px 9px;border:none;border-radius:6px;background:#4b5563;color:#e5e7eb;font-weight:700;font-size:.70rem;cursor:pointer;white-space:nowrap;">
                    <i class="fa-solid fa-rotate-left" style="margin-right:3px;"></i>Retificar
                  </button>
                </div>`
             : isSep
-            ? `<div style="display:flex;gap:6px;align-items:flex-start;flex-wrap:wrap;justify-content:flex-end;flex-shrink:0;">
+            ? `<div class="sep-actions sep-actions--inline" style="display:flex;gap:6px;align-items:flex-start;flex-wrap:wrap;justify-content:flex-end;flex-shrink:0;">
                  <button class="btn-item-conferido" title="Enviar para Aguardando retirada"
                    style="padding:4px 9px;border:none;border-radius:6px;background:#16a34a;color:#dcfce7;font-weight:700;font-size:.70rem;cursor:pointer;white-space:nowrap;">
                    <i class="fa-solid fa-clipboard-check" style="margin-right:3px;"></i>Conferido
@@ -1062,15 +1195,15 @@ async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) 
                    <i class="fa-solid fa-arrows-rotate" style="margin-right:3px;"></i>Trocar
                  </button>
                </div>`
-            : `<div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;">
+            : `<div class="sep-actions sep-actions--grid" style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;">
                  <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;width:100%;">
                    <button class="btn-item-sep-tudo"
                      style="padding:4px 6px;border:none;border-radius:6px;background:#166534;color:#dcfce7;font-weight:700;font-size:.67rem;cursor:pointer;white-space:nowrap;text-align:center;">
-                     <i class="fa-solid fa-check" style="margin-right:2px;"></i>Separei tudo
+                     <i class="fa-solid fa-check" style="margin-right:2px;"></i>Separado
                    </button>
                    <button class="btn-item-sep-parcial"
                      style="padding:4px 6px;border:none;border-radius:6px;background:#b45309;color:#ffedd5;font-weight:700;font-size:.67rem;cursor:pointer;white-space:nowrap;text-align:center;">
-                     <i class="fa-solid fa-scale-balanced" style="margin-right:2px;"></i>Informar qtd
+                     <i class="fa-solid fa-scale-balanced" style="margin-right:2px;"></i>Manual
                    </button>
                    ${isEmSeparacao ? `
                    <button class="btn-item-nao-sep"
@@ -1088,7 +1221,6 @@ async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) 
   }
 
   let aggItens = _aggItens(_itensVisiveisModalSep(grupoAtual.itens));
-  const PRINC_ARMZ = '10717096386';
   let estoqueBatch = preloaded.estoqueBatch || {};
   let enderecoBatch = _solMergeEnderecoBatch(
     [...(grupoAtual.itens || []), ...aggItens],
@@ -1196,6 +1328,7 @@ async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) 
   function fecharModal() {
     modal.remove();
     if (houveMudanca || refreshAoFechar) {
+      _solInvalidateSepModalCache(grupoAtual.n_solic, grupoAtual.escopoItens || 'global');
       window._loadSolicitacoesTab.force = true;
       window._loadSolicitacoesTab();
       window._loadKanbanSolicitacoesTab.force = true;
@@ -1396,7 +1529,7 @@ async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) 
           <div style="font-size:.82rem;color:#f0f0f0;font-weight:700;">Quantidade original: ${_solFmtQty(qtyTotal)} ${unidade}</div>
         </div>
         <div style="padding:12px 16px;border-top:1px solid #2a2a2a;display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end;background:#171717;">
-          <button id="btnAcaoSepTudo" style="padding:7px 12px;border:none;border-radius:8px;background:#166534;color:#dcfce7;font-weight:700;font-size:.82rem;cursor:pointer;">Separei tudo</button>
+          <button id="btnAcaoSepTudo" style="padding:7px 12px;border:none;border-radius:8px;background:#166534;color:#dcfce7;font-weight:700;font-size:.82rem;cursor:pointer;">Separado</button>
           <button id="btnAcaoSepParcial" style="padding:7px 12px;border:none;border-radius:8px;background:#b45309;color:#ffedd5;font-weight:700;font-size:.82rem;cursor:pointer;">Informar quantidade</button>
           ${status !== 'Stund-by' ? `<button id="btnAcaoNaoSep" style="padding:7px 12px;border:none;border-radius:8px;background:#7c2d12;color:#ffedd5;font-weight:700;font-size:.82rem;cursor:pointer;">Não separei</button>` : ''}
         </div>
@@ -1424,7 +1557,7 @@ async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) 
         await reloadItems();
       } catch (err) {
         alert('Erro: ' + (err.message || err));
-        _solBtnRestore(btn, 'Separei tudo');
+        _solBtnRestore(btn, 'Separado');
       }
     });
 
@@ -1725,7 +1858,7 @@ async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) 
         await reloadItems();
       } catch (err) {
         alert('Erro: ' + (err.message || err));
-        _solBtnRestore(btnSepTudo, '<i class="fa-solid fa-check" style="margin-right:2px;"></i>Separei tudo');
+        _solBtnRestore(btnSepTudo, '<i class="fa-solid fa-check" style="margin-right:2px;"></i>Separado');
       }
       return;
     }
@@ -1743,7 +1876,7 @@ async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) 
       try {
         await _confirmarSepParcial(row, qtySep);
       } finally {
-        _solBtnRestore(btnSepParcial, '<i class="fa-solid fa-scale-balanced" style="margin-right:2px;"></i>Informar qtd');
+        _solBtnRestore(btnSepParcial, '<i class="fa-solid fa-scale-balanced" style="margin-right:2px;"></i>Manual');
       }
       return;
     }
@@ -2055,46 +2188,59 @@ async function _abrirModalAguardandoRetiradaSep(nSolic, opts = {}) {
   window._kanbanTooltipEl?.remove();
   window._kanbanTooltipEl = null;
 
-  _solKanbanLoading(true, 'Carregando solicitação...');
-
   let itens = [];
   let itensDerivados = [];
   let estoqueBatch = {};
   let enderecoBatch = {};
-  try {
-    const r = await fetch(_solBuildKanbanItensUrl(nSolic, { includeDerivados: true, escopoItens }), { credentials: 'include' });
-    const d = await r.json();
-    if (!d.ok) {
-      alert('Erro ao carregar itens: ' + (d.error || ''));
-      return;
-    }
-    itens = Array.isArray(d.itens) ? d.itens : [];
-    itensDerivados = Array.isArray(d.itens_derivados) ? d.itens_derivados : [];
+  const cacheHit = _solGetAguardRetCache(nSolic, tituloColuna, escopoItens);
+  if (cacheHit) {
+    itens = Array.isArray(cacheHit.itens) ? cacheHit.itens : [];
+    itensDerivados = Array.isArray(cacheHit.itensDerivados) ? cacheHit.itensDerivados : [];
+    estoqueBatch = cacheHit.estoqueBatch || {};
+    enderecoBatch = cacheHit.enderecoBatch || {};
+  } else {
+    _solKanbanLoading(true, 'Carregando solicitação...');
+    try {
+      const r = await fetch(_solBuildKanbanItensUrl(nSolic, { includeDerivados: true, escopoItens }), { credentials: 'include' });
+      const d = await r.json();
+      if (!d.ok) {
+        alert('Erro ao carregar itens: ' + (d.error || ''));
+        return;
+      }
+      itens = Array.isArray(d.itens) ? d.itens : [];
+      itensDerivados = Array.isArray(d.itens_derivados) ? d.itens_derivados : [];
 
-    const codigos = [...new Set([
-      ...itens.map(it => it.codigo_produto),
-      ...itensDerivados.map(it => it.codigo_produto)
-    ].filter(Boolean))];
-    if (codigos.length) {
-      try {
-        const [re, rep] = await Promise.all([
-          fetch('/api/logistica/estoque/batch?codigos=' + encodeURIComponent(codigos.join(',')), { credentials: 'include' }),
-          fetch('/api/logistica/endereco-pp/batch?codigos=' + encodeURIComponent(codigos.join(',')), { credentials: 'include' })
-        ]);
-        const de = await re.json();
-        const dep = await rep.json();
-        if (de.ok) estoqueBatch = de.dados || {};
-        if (dep.ok) enderecoBatch = dep.dados || {};
+      const codigos = [...new Set([
+        ...itens.map(it => it.codigo_produto),
+        ...itensDerivados.map(it => it.codigo_produto)
+      ].filter(Boolean))];
+      if (codigos.length) {
+        try {
+          const [re, rep] = await Promise.all([
+            fetch('/api/logistica/estoque/batch?codigos=' + encodeURIComponent(codigos.join(',')), { credentials: 'include' }),
+            fetch('/api/logistica/endereco-pp/batch?codigos=' + encodeURIComponent(codigos.join(',')), { credentials: 'include' })
+          ]);
+          const de = await re.json();
+          const dep = await rep.json();
+          if (de.ok) estoqueBatch = de.dados || {};
+          if (dep.ok) enderecoBatch = dep.dados || {};
+          enderecoBatch = _solMergeEnderecoBatch([...itens, ...itensDerivados], enderecoBatch);
+        } catch (_) { /* silencia */ }
+      } else {
         enderecoBatch = _solMergeEnderecoBatch([...itens, ...itensDerivados], enderecoBatch);
-      } catch (_) { /* silencia */ }
-    } else {
-      enderecoBatch = _solMergeEnderecoBatch([...itens, ...itensDerivados], enderecoBatch);
+      }
+      _solSetAguardRetCache(nSolic, tituloColuna, escopoItens, {
+        itens,
+        itensDerivados,
+        estoqueBatch,
+        enderecoBatch
+      });
+    } catch (err) {
+      alert('Erro de rede ao carregar a solicitação.');
+      return;
+    } finally {
+      _solKanbanLoading(false);
     }
-  } catch (err) {
-    alert('Erro de rede ao carregar a solicitação.');
-    return;
-  } finally {
-    _solKanbanLoading(false);
   }
 
   if (!itens.length) {
@@ -2120,15 +2266,18 @@ async function _abrirModalAguardandoRetiradaSep(nSolic, opts = {}) {
       if (String(b.local_codigo) === PRINCIPAL) return  1;
       return 0;
     });
-    let origemColuna = '';
-    if (locais.length) {
+    let origemColuna = _solRenderOrigemResumoGlobal(
+      estoqueBatch[it.codigo_produto] || [],
+      Object.keys(estoqueBatch).length ? 'Sem origem com saldo' : 'Carregando origem...'
+    );
+    if (false && locais.length) {
       origemColuna = locais.map(l =>
         `<div style="display:flex;flex-direction:column;line-height:1.3;padding:2px 0;">
           <span style="font-size:.63rem;color:#86efac;">${l.local_nome || l.local_codigo}</span>
           <span style="font-size:.68rem;color:#f0f0f0;font-weight:700;">${Number(l.saldo).toLocaleString('pt-BR',{minimumFractionDigits:0,maximumFractionDigits:2})} ${l.unidade||'UN'}</span>
         </div>`
       ).join('');
-    } else {
+    } else if (false) {
       origemColuna = `<span style="font-size:.63rem;color:#6b7280;font-style:italic;">Sem origem com saldo</span>`;
     }
 
@@ -2285,6 +2434,8 @@ async function _abrirModalAguardandoRetiradaSep(nSolic, opts = {}) {
         });
         const d = await r.json();
         if (!d.ok) throw new Error(d.error || 'Erro ao remover item.');
+        _solInvalidateAguardRetCache(nSolic, tituloColuna, escopoItens);
+        _solInvalidateSepModalCache(nSolic, escopoItens);
         btnDel.closest('[data-solic-id]')?.remove();
         // Se não sobrou nenhum item, fecha o modal
         const restantes = modal.querySelectorAll('[data-solic-id]').length;
@@ -2313,6 +2464,8 @@ async function _abrirModalAguardandoRetiradaSep(nSolic, opts = {}) {
       });
       const d = await r.json();
       if (!d.ok) throw new Error(d.error || 'Erro ao excluir SEP.');
+      _solInvalidateAguardRetCache(nSolic, tituloColuna, escopoItens);
+      _solInvalidateSepModalCache(nSolic, escopoItens);
       closeModal();
       window._loadSolicitacoesTab && (window._loadSolicitacoesTab.force = true, window._loadSolicitacoesTab());
       window._loadKanbanSolicitacoesTab && (window._loadKanbanSolicitacoesTab.force = true, window._loadKanbanSolicitacoesTab());
@@ -2345,6 +2498,8 @@ async function _abrirModalAguardandoRetiradaSep(nSolic, opts = {}) {
       });
       const d = await r.json();
       if (!d.ok) throw new Error(d.error || 'Erro ao iniciar separação.');
+      _solInvalidateAguardRetCache(nSolic, tituloColuna, escopoItens);
+      _solInvalidateSepModalCache(nSolic, escopoItens);
 
       closeModal();
 
@@ -2388,6 +2543,8 @@ async function _abrirModalAguardandoRetiradaSep(nSolic, opts = {}) {
       });
       const d = await r.json();
       if (!d.ok) throw new Error(d.error || 'Erro ao concluir solicitação.');
+      _solInvalidateAguardRetCache(nSolic, tituloColuna, escopoItens);
+      _solInvalidateSepModalCache(nSolic, escopoItens);
 
       closeModal();
       window._loadKanbanSolicitacoesTab.force = true;
@@ -3724,7 +3881,7 @@ modal?.addEventListener('click', (e) => { if (e.target === modal) closeColabModa
 
 let ultimoCodigo = null;      // <-- NOVO
 
-import { initListarProdutosUI } from './requisicoes_omie/ListarProdutos.js';
+import { initListarProdutosUI } from './requisicoes_omie/ListarProdutos.js?v=20260617b';
 import { initDadosColaboradoresUI } from './requisicoes_omie/dados_colaboradores.js';
 import { initRhConfiguracaoCargosUI } from './requisicoes_omie/configuracao_cargos.js';
 import { initRhColaboradoresUI } from './requisicoes_omie/rh_colaboradores.js';
