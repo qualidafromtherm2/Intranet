@@ -510,11 +510,19 @@ window._updateTabCounters = async function() {
 };
 
 function _solSomarItensKanbanSep(colunas) {
-  const cols = ['Solicitado', 'Em Separação', 'Separado'];
+  const cols = ['Solicitado', 'Stund-by', 'Em Separação', 'Separado', 'Aguardando retirada'];
   return cols.reduce((acc, key) => {
     const cards = colunas?.[key] || [];
     return acc + cards.reduce((s, sep) => s + (parseInt(sep.total_itens, 10) || 0), 0);
   }, 0);
+}
+
+function _solSolicIdsParaIniciarSep(itens) {
+  const elegivel = new Set(['pendente', 'Stund-by']);
+  return (itens || [])
+    .filter(it => elegivel.has(String(it.status || '')))
+    .map(it => parseInt(it.solic_id, 10))
+    .filter(id => !Number.isNaN(id));
 }
 
 function _solBuildKanbanItensUrl(nSolic, opts = {}) {
@@ -524,6 +532,37 @@ function _solBuildKanbanItensUrl(nSolic, opts = {}) {
   if (opts.escopoItens === 'global') params.set('escopo', 'global');
   const query = params.toString();
   return `/api/logistica/kanban/itens${query ? `?${query}` : ''}`;
+}
+
+/** Gera código ECT (Correios) via VIPP ao iniciar separação — libera Imprimir em Envio de mercadoria */
+async function _solDispararVippGerarEtiqueta(nSolic, opts = {}) {
+  if (!nSolic) return { ok: false, skipped: true };
+  try {
+    const vc = await fetch(`/api/vipp/sep-check?n_solic=${encodeURIComponent(nSolic)}`, { credentials: 'include' })
+      .then(r => r.json()).catch(() => ({ idVipp: null }));
+    if (!vc?.idVipp) return { ok: false, skipped: true };
+    const r = await fetch('/api/vipp/gerar-etiqueta', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ idConhecimento: vc.idVipp, n_solic: nSolic })
+    });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok || !d.ok) {
+      const msg = d.error || `Falha HTTP ${r.status}`;
+      console.warn('[VIPP] gerar-etiqueta SEP', nSolic, msg);
+      if (opts.alertarErro) alert('Não foi possível gerar a etiqueta dos Correios:\n' + msg + '\n\nO botão Imprimir em Envio de mercadoria só aparece após gerar o código ECT.');
+      return { ok: false, error: msg };
+    }
+    if (opts.recarregarEnvio && typeof carregarSacSolicitacoes === 'function' && envioMercadoriaTabelaBodyPane) {
+      carregarSacSolicitacoes(envioMercadoriaTabelaBodyPane, { filaLogistica: true });
+    }
+    return { ok: true, ectCode: d.ectCode };
+  } catch (e) {
+    console.warn('[VIPP] gerar-etiqueta:', e);
+    if (opts.alertarErro) alert('Erro ao gerar etiqueta VIPP: ' + (e.message || e));
+    return { ok: false, error: e.message || String(e) };
+  }
 }
 
 // Carrega e renderiza a aba de solicitações como kanban do separador
@@ -645,6 +684,13 @@ window._loadSolicitacoesTab = async function() {
     }
     board.dataset.loaded = '1';
 
+    requestAnimationFrame(() => {
+      const firstCard = board.querySelector('.solic-kanban-card');
+      if (firstCard && board.scrollWidth > board.clientWidth) {
+        board.scrollLeft = Math.max(0, firstCard.offsetLeft - 14);
+      }
+    });
+
     // Delegação de clique nos cards
     board.querySelectorAll('.solic-kanban-card').forEach(cardEl => {
       const acao   = cardEl.dataset.colAcao;
@@ -710,26 +756,17 @@ window._loadSolicitacoesTab = async function() {
         btn.disabled = true;
         btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin" style="margin-right:3px;"></i>Iniciando...';
         try {
-          // ── Dispara GerarPPN VIPP em background (sem bloquear) ───────────
-          fetch(`/api/vipp/sep-check?n_solic=${encodeURIComponent(nSolic)}`, { credentials: 'include' })
-            .then(r => r.json()).catch(() => ({ idVipp: null }))
-            .then(vc => {
-              if (!vc?.idVipp) return;
-              return fetch('/api/vipp/gerar-etiqueta', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                credentials: 'include',
-                body: JSON.stringify({ idConhecimento: vc.idVipp, n_solic: nSolic })
-              });
-            })
-            .catch(e => console.warn('[VIPP] background gerar-etiqueta:', e));
+          // ── Gera código ECT (libera Imprimir em Envio de mercadoria) ───────
+          await _solDispararVippGerarEtiqueta(nSolic, { alertarErro: true, recarregarEnvio: true });
 
-          // ── Busca solic_ids e inicia separação normalmente ───────────────
+          // ── Busca solic_ids e inicia separação ───────────────────────────
           const ri = await fetch(_solBuildKanbanItensUrl(nSolic, { escopoItens: 'global' }), { credentials: 'include' });
           const di = await ri.json();
           if (!di.ok) throw new Error(di.error || 'Erro ao buscar itens da SEP.');
-          const solicIds = (di.itens || []).map(it => parseInt(it.solic_id, 10)).filter(id => !Number.isNaN(id));
-          if (!solicIds.length) throw new Error('Nenhum item pendente encontrado para iniciar separação.');
+          const solicIds = _solSolicIdsParaIniciarSep(di.itens || []);
+          if (!solicIds.length) {
+            throw new Error('Esta SEP já saiu de Solicitado. Role o kanban até a coluna "Aguardando retirada" (à direita).');
+          }
 
           const r = await fetch('/api/logistica/itens_solicitados/separacao', {
             method: 'PATCH',
@@ -1294,6 +1331,7 @@ async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) 
     btn.disabled = true;
     btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin" style="margin-right:4px;"></i>Iniciando...';
     try {
+      await _solDispararVippGerarEtiqueta(grupoAtual.n_solic, { alertarErro: true, recarregarEnvio: true });
       const r = await fetch('/api/logistica/itens_solicitados/separacao', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
@@ -2286,28 +2324,17 @@ async function _abrirModalAguardandoRetiradaSep(nSolic, opts = {}) {
   });
 
   document.getElementById('btnAguardRetIniciarSep')?.addEventListener('click', async () => {
-    const solicIds = itens.map(it => parseInt(it.solic_id, 10)).filter(id => !isNaN(id));
+    const solicIds = _solSolicIdsParaIniciarSep(itens);
     if (!solicIds.length) {
-      alert('Não foi possível identificar os itens para iniciar separação.');
+      alert('Esta SEP não tem itens em Solicitado. Se já foi separada, veja a coluna "Aguardando retirada" no kanban (role para a direita).');
       return;
     }
     const btn = document.getElementById('btnAguardRetIniciarSep');
     btn.disabled = true;
     btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin" style="margin-right:4px;"></i>Iniciando...';
     try {
-      // ── Dispara GerarPPN VIPP em background (sem bloquear o usuário) ──────
-      fetch(`/api/vipp/sep-check?n_solic=${encodeURIComponent(nSolic)}`, { credentials: 'include' })
-        .then(r => r.json()).catch(() => ({ idVipp: null }))
-        .then(vc => {
-          if (!vc?.idVipp) return;
-          return fetch('/api/vipp/gerar-etiqueta', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            credentials: 'include',
-            body: JSON.stringify({ idConhecimento: vc.idVipp, n_solic: nSolic })
-          });
-        })
-        .catch(e => console.warn('[VIPP] background gerar-etiqueta:', e));
+      // ── Gera código ECT (libera Imprimir em Envio de mercadoria) ──────────
+      await _solDispararVippGerarEtiqueta(nSolic, { alertarErro: true, recarregarEnvio: true });
 
       // ── Avança itens para "Em Separação" ──────────────────────────────────
       const r = await fetch('/api/logistica/itens_solicitados/separacao', {
@@ -7898,6 +7925,8 @@ qualidadeManuaisPrincipaisBtn?.addEventListener('click', (e) => {
   e.preventDefault();
   const titulo = document.getElementById('qualidadeManuaisTituloPasta');
   if (titulo) titulo.textContent = 'Pasta: Manuais principais';
+  const listaMestraWrap = document.getElementById('qualidadeListaMestraWrap');
+  if (listaMestraWrap) listaMestraWrap.style.display = 'none';
   carregarQualidadeManuaisPrincipais();
 });
 
@@ -7996,6 +8025,8 @@ async function carregarManuaisDeProdutos() {
 
 qualidadeManuaisProdutosBtn?.addEventListener('click', (e) => {
   e.preventDefault();
+  const listaMestraWrap = document.getElementById('qualidadeListaMestraWrap');
+  if (listaMestraWrap) listaMestraWrap.style.display = 'none';
   carregarManuaisDeProdutos();
 });
 
@@ -8007,6 +8038,466 @@ qualidadeManuaisRecarregarBtn?.addEventListener('click', (e) => {
     carregarManuaisDeProdutos();
   } else {
     carregarQualidadeManuaisPrincipais({ force: true });
+  }
+});
+
+// ── Card: Lista Mestra ──
+const qualidadeListaMestraBtn = document.getElementById('qualidadeListaMestraBtn');
+const qualidadeListaMestraWrap = document.getElementById('qualidadeListaMestraWrap');
+const qualidadeListaMestraTbody = document.getElementById('qualidadeListaMestraTbody');
+const qualidadeListaMestraMeta = document.getElementById('qualidadeListaMestraMeta');
+const qualidadeListaMestraRecarregarBtn = document.getElementById('qualidadeListaMestraRecarregarBtn');
+const qualidadeListaMestraEditModal = document.getElementById('qualidadeListaMestraEditModal');
+const qualidadeListaMestraArquivoModal = document.getElementById('qualidadeListaMestraArquivoModal');
+let qualidadeListaMestraCarregando = false;
+let qualidadeListaMestraItens = [];
+let qualidadeListaMestraHistoricoAtual = [];
+
+function ocultarQualidadeManuaisLista() {
+  if (qualidadeManuaisListaWrap) qualidadeManuaisListaWrap.style.display = 'none';
+  if (qualidadeManuaisMeta) qualidadeManuaisMeta.textContent = '';
+}
+
+function parseDataListaMestra(valor) {
+  const s = String(valor || '').trim();
+  if (!s) return null;
+  const partes = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (!partes) return null;
+  let d = Number.parseInt(partes[1], 10);
+  let m = Number.parseInt(partes[2], 10);
+  const y = Number.parseInt(partes[3], 10);
+  if (m > 12 && d <= 12) {
+    const tmp = d;
+    d = m;
+    m = tmp;
+  }
+  if (!y || m < 1 || m > 12 || d < 1 || d > 31) return null;
+  const dt = new Date(y, m - 1, d);
+  if (dt.getFullYear() !== y || dt.getMonth() !== m - 1 || dt.getDate() !== d) return null;
+  return dt;
+}
+
+function proximaRevisaoListaMestraVencida(valor) {
+  const dt = parseDataListaMestra(valor);
+  if (!dt) return false;
+  const hoje = new Date();
+  hoje.setHours(0, 0, 0, 0);
+  dt.setHours(0, 0, 0, 0);
+  return dt < hoje;
+}
+
+function formatarDataHoraListaMestra(valor) {
+  if (!valor) return '';
+  const dt = new Date(valor);
+  if (Number.isNaN(dt.getTime())) return String(valor);
+  return dt.toLocaleString('pt-BR');
+}
+
+function usuarioPodeAtualizarListaMestraArquivo() {
+  return Number(window.__sessionUser?.sector_id) === 2;
+}
+
+function atualizarPermissaoUploadListaMestra() {
+  const pode = usuarioPodeAtualizarListaMestraArquivo();
+  const wrap = document.getElementById('qualidadeListaMestraArquivoUploadWrap');
+  const restrito = document.getElementById('qualidadeListaMestraArquivoUploadRestrito');
+  if (wrap) wrap.style.display = pode ? 'block' : 'none';
+  if (restrito) restrito.style.display = pode ? 'none' : 'block';
+}
+
+function renderQualidadeListaMestraTabela(itens = []) {
+  if (!qualidadeListaMestraTbody) return;
+  const lista = Array.isArray(itens) ? itens : [];
+  if (!lista.length) {
+    qualidadeListaMestraTbody.innerHTML = `
+      <tr><td colspan="10" style="text-align:center;color:var(--inactive-color);padding:18px;">Nenhum documento cadastrado.</td></tr>
+    `;
+    return;
+  }
+  qualidadeListaMestraTbody.innerHTML = lista.map((item) => {
+    const proxima = String(item.proxima_revisao || '').trim();
+    const proximaStyle = proximaRevisaoListaMestraVencida(proxima)
+      ? 'color:#dc2626;font-weight:700;'
+      : '';
+    const temArquivo = !!String(item.documento || '').trim();
+    const docLabel = temArquivo ? 'Ver documento' : 'Enviar arquivo';
+    const docIcon = temArquivo ? 'fa-file-lines' : 'fa-cloud-arrow-up';
+    return `
+    <tr class="qualidade-lista-mestra-row" data-id="${item.id}" style="cursor:pointer;" title="Clique na linha para editar os dados">
+      <td>${qualidadeManuaisEscapeHtml(item.numero_formulario)}</td>
+      <td>${qualidadeManuaisEscapeHtml(item.descricao)}</td>
+      <td>${qualidadeManuaisEscapeHtml(item.autor)}</td>
+      <td>${qualidadeManuaisEscapeHtml(item.classificacao)}</td>
+      <td>${qualidadeManuaisEscapeHtml(item.numero_revisao)}</td>
+      <td>${qualidadeManuaisEscapeHtml(item.data_criacao)}</td>
+      <td>${qualidadeManuaisEscapeHtml(item.revisado)}</td>
+      <td>${qualidadeManuaisEscapeHtml(item.revisado_por)}</td>
+      <td style="${proximaStyle}">${qualidadeManuaisEscapeHtml(proxima)}</td>
+      <td>
+        <button type="button" class="content-button qualidade-lista-mestra-doc-btn" data-id="${item.id}"
+          style="display:inline-flex;align-items:center;gap:6px;font-size:12px;padding:5px 10px;background:linear-gradient(135deg,#9333ea 0%,#7e22ce 100%);color:white;">
+          <i class="fa-solid ${docIcon}"></i>
+          <span>${docLabel}</span>
+        </button>
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+async function carregarQualidadeListaMestra({ force = false } = {}) {
+  if (qualidadeListaMestraCarregando) return;
+  qualidadeListaMestraCarregando = true;
+  try {
+    ocultarQualidadeManuaisLista();
+    if (qualidadeListaMestraWrap) qualidadeListaMestraWrap.style.display = 'block';
+    if (qualidadeListaMestraMeta) qualidadeListaMestraMeta.textContent = 'Carregando...';
+    if (qualidadeListaMestraTbody) {
+      qualidadeListaMestraTbody.innerHTML = `
+        <tr><td colspan="10" style="text-align:center;color:var(--inactive-color);padding:18px;">
+          <i class="fa-solid fa-spinner fa-spin"></i> Carregando lista mestra...
+        </td></tr>`;
+    }
+    const cacheBust = force ? `?t=${Date.now()}` : '';
+    const response = await fetch(`${API_BASE}/api/qualidade/lista-mestra${cacheBust}`, { credentials: 'include' });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const data = await response.json();
+    qualidadeListaMestraItens = Array.isArray(data?.itens) ? data.itens : [];
+    renderQualidadeListaMestraTabela(qualidadeListaMestraItens);
+    if (qualidadeListaMestraMeta) {
+      qualidadeListaMestraMeta.textContent = `Total: ${qualidadeListaMestraItens.length} documento(s)`;
+    }
+  } catch (error) {
+    console.error('[QUALIDADE] Erro ao carregar lista mestra:', error);
+    if (qualidadeListaMestraMeta) qualidadeListaMestraMeta.textContent = 'Erro ao carregar a lista mestra.';
+    if (qualidadeListaMestraTbody) {
+      qualidadeListaMestraTbody.innerHTML = `
+        <tr><td colspan="10" style="text-align:center;color:#b91c1c;padding:18px;">Erro ao carregar os documentos.</td></tr>`;
+    }
+  } finally {
+    qualidadeListaMestraCarregando = false;
+  }
+}
+
+function formatarDataHojeListaMestra() {
+  const hoje = new Date();
+  const d = String(hoje.getDate()).padStart(2, '0');
+  const m = String(hoje.getMonth() + 1).padStart(2, '0');
+  const y = hoje.getFullYear();
+  return `${d}/${m}/${y}`;
+}
+
+function adicionarMesesDataListaMestra(dataStr, meses) {
+  const dt = parseDataListaMestra(dataStr);
+  if (!dt) return '';
+  const alvo = new Date(dt.getFullYear(), dt.getMonth() + meses, dt.getDate());
+  const d = String(alvo.getDate()).padStart(2, '0');
+  const m = String(alvo.getMonth() + 1).padStart(2, '0');
+  const y = alvo.getFullYear();
+  return `${d}/${m}/${y}`;
+}
+
+function obterUsuarioListaMestra() {
+  return window.__sessionUser?.fullName
+    || window.__sessionUser?.username
+    || window.__sessionUser?.login
+    || window.__sessionUser?.nome
+    || 'sistema';
+}
+
+function abrirQualidadeListaMestraEditModal(item) {
+  if (!item || !qualidadeListaMestraEditModal) return;
+  const setVal = (id, val) => {
+    const el = document.getElementById(id);
+    if (el) el.value = val ?? '';
+  };
+  setVal('qualidadeListaMestraEditId', item.id);
+  setVal('qualidadeListaMestraEditNumero', item.numero_formulario);
+  setVal('qualidadeListaMestraEditDescricao', item.descricao);
+  setVal('qualidadeListaMestraEditTipoDocumento', item.tipo_documento);
+  setVal('qualidadeListaMestraEditFormato', item.formato);
+  setVal('qualidadeListaMestraEditClassificacao', item.classificacao);
+  setVal('qualidadeListaMestraEditAutor', item.autor);
+  setVal('qualidadeListaMestraEditRevisao', item.numero_revisao);
+  setVal('qualidadeListaMestraEditDataCriacao', item.data_criacao);
+  setVal('qualidadeListaMestraEditRevisado', item.revisado);
+  setVal('qualidadeListaMestraEditRevisadoPor', item.revisado_por);
+  setVal('qualidadeListaMestraEditProximaRevisao', item.proxima_revisao);
+  setVal('qualidadeListaMestraEditResponsavel', item.responsavel_arquivar_eliminar);
+  setVal('qualidadeListaMestraEditTempoRetencao', item.tempo_retencao);
+  setVal('qualidadeListaMestraEditStatus', item.status);
+  setVal('qualidadeListaMestraEditDataArquivamento', item.data_arquivamento);
+  qualidadeListaMestraEditModal.style.display = 'flex';
+}
+
+function coletarPayloadListaMestraEdit() {
+  return {
+    numero_formulario: document.getElementById('qualidadeListaMestraEditNumero')?.value || '',
+    descricao: document.getElementById('qualidadeListaMestraEditDescricao')?.value || '',
+    tipo_documento: document.getElementById('qualidadeListaMestraEditTipoDocumento')?.value || '',
+    formato: document.getElementById('qualidadeListaMestraEditFormato')?.value || '',
+    classificacao: document.getElementById('qualidadeListaMestraEditClassificacao')?.value || '',
+    autor: document.getElementById('qualidadeListaMestraEditAutor')?.value || '',
+    numero_revisao: document.getElementById('qualidadeListaMestraEditRevisao')?.value || '',
+    data_criacao: document.getElementById('qualidadeListaMestraEditDataCriacao')?.value || '',
+    revisado: document.getElementById('qualidadeListaMestraEditRevisado')?.value || '',
+    revisado_por: document.getElementById('qualidadeListaMestraEditRevisadoPor')?.value || '',
+    proxima_revisao: document.getElementById('qualidadeListaMestraEditProximaRevisao')?.value || '',
+    responsavel_arquivar_eliminar: document.getElementById('qualidadeListaMestraEditResponsavel')?.value || '',
+    tempo_retencao: document.getElementById('qualidadeListaMestraEditTempoRetencao')?.value || '',
+    status: document.getElementById('qualidadeListaMestraEditStatus')?.value || '',
+    data_arquivamento: document.getElementById('qualidadeListaMestraEditDataArquivamento')?.value || ''
+  };
+}
+
+function fecharQualidadeListaMestraEditModal() {
+  if (qualidadeListaMestraEditModal) qualidadeListaMestraEditModal.style.display = 'none';
+}
+
+qualidadeListaMestraBtn?.addEventListener('click', (e) => {
+  e.preventDefault();
+  carregarQualidadeListaMestra();
+});
+
+qualidadeListaMestraRecarregarBtn?.addEventListener('click', (e) => {
+  e.preventDefault();
+  carregarQualidadeListaMestra({ force: true });
+});
+
+qualidadeListaMestraTbody?.addEventListener('click', (e) => {
+  const docBtn = e.target.closest('.qualidade-lista-mestra-doc-btn');
+  if (docBtn) {
+    e.preventDefault();
+    e.stopPropagation();
+    const id = Number(docBtn.dataset.id);
+    const item = qualidadeListaMestraItens.find((i) => Number(i.id) === id);
+    if (item) abrirQualidadeListaMestraArquivoModal(item);
+    return;
+  }
+  const row = e.target.closest('.qualidade-lista-mestra-row');
+  if (!row) return;
+  const id = Number(row.dataset.id);
+  const item = qualidadeListaMestraItens.find((i) => Number(i.id) === id);
+  if (item) abrirQualidadeListaMestraEditModal(item);
+});
+
+document.getElementById('qualidadeListaMestraEditModalClose')?.addEventListener('click', fecharQualidadeListaMestraEditModal);
+document.getElementById('qualidadeListaMestraEditCancelarBtn')?.addEventListener('click', fecharQualidadeListaMestraEditModal);
+qualidadeListaMestraEditModal?.addEventListener('click', (e) => {
+  if (e.target === qualidadeListaMestraEditModal) fecharQualidadeListaMestraEditModal();
+});
+
+document.getElementById('qualidadeListaMestraMarcarRevisadoBtn')?.addEventListener('click', async () => {
+  const id = document.getElementById('qualidadeListaMestraEditId')?.value;
+  if (!id) return;
+  const hoje = formatarDataHojeListaMestra();
+  const usuario = obterUsuarioListaMestra();
+  const revisadoEl = document.getElementById('qualidadeListaMestraEditRevisado');
+  const revisadoPorEl = document.getElementById('qualidadeListaMestraEditRevisadoPor');
+  const proximaEl = document.getElementById('qualidadeListaMestraEditProximaRevisao');
+  const proxima = adicionarMesesDataListaMestra(hoje, 24);
+  if (revisadoEl) revisadoEl.value = hoje;
+  if (revisadoPorEl) revisadoPorEl.value = usuario;
+  if (proximaEl) proximaEl.value = proxima;
+
+  const btn = document.getElementById('qualidadeListaMestraMarcarRevisadoBtn');
+  if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>'; }
+  try {
+    const payload = { ...coletarPayloadListaMestraEdit(), revisado: hoje, revisado_por: usuario, proxima_revisao: proxima };
+    const response = await fetch(`${API_BASE}/api/qualidade/lista-mestra/${id}`, {
+      method: 'PUT',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data?.error || `HTTP ${response.status}`);
+    const idx = qualidadeListaMestraItens.findIndex((i) => Number(i.id) === Number(id));
+    if (idx >= 0 && data?.item) qualidadeListaMestraItens[idx] = data.item;
+    renderQualidadeListaMestraTabela(qualidadeListaMestraItens);
+  } catch (error) {
+    console.error('[QUALIDADE] Erro ao registrar revisão:', error);
+    alert(error?.message || 'Não foi possível registrar a revisão.');
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = '<i class="fa-solid fa-check"></i> Revisado';
+    }
+  }
+});
+
+document.getElementById('qualidadeListaMestraEditSalvarBtn')?.addEventListener('click', async () => {
+  const id = document.getElementById('qualidadeListaMestraEditId')?.value;
+  if (!id) return;
+  const payload = coletarPayloadListaMestraEdit();
+  const btn = document.getElementById('qualidadeListaMestraEditSalvarBtn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Salvando...'; }
+  try {
+    const response = await fetch(`${API_BASE}/api/qualidade/lista-mestra/${id}`, {
+      method: 'PUT',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data?.error || `HTTP ${response.status}`);
+    const idx = qualidadeListaMestraItens.findIndex((i) => Number(i.id) === Number(id));
+    if (idx >= 0 && data?.item) qualidadeListaMestraItens[idx] = data.item;
+    renderQualidadeListaMestraTabela(qualidadeListaMestraItens);
+    fecharQualidadeListaMestraEditModal();
+  } catch (error) {
+    console.error('[QUALIDADE] Erro ao salvar lista mestra:', error);
+    alert(error?.message || 'Não foi possível salvar o documento.');
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = '<i class="fa-solid fa-floppy-disk"></i> Salvar';
+    }
+  }
+});
+
+function atualizarQualidadeListaMestraDownloadLink(item) {
+  const link = document.getElementById('qualidadeListaMestraArquivoBaixarLink');
+  const semArquivo = document.getElementById('qualidadeListaMestraArquivoSemArquivo');
+  const temDoc = !!String(item?.documento || '').trim();
+  const id = Number(item?.id || 0);
+  if (link) {
+    if (temDoc && id) {
+      link.href = `${API_BASE}/api/qualidade/lista-mestra/${id}/download`;
+      link.style.display = 'inline-flex';
+    } else {
+      link.href = '#';
+      link.style.display = 'none';
+    }
+  }
+  if (semArquivo) semArquivo.style.display = temDoc ? 'none' : 'inline';
+}
+
+function renderQualidadeListaMestraHistorico(historico = []) {
+  const tbody = document.getElementById('qualidadeListaMestraHistoricoTbody');
+  if (!tbody) return;
+  const lista = Array.isArray(historico) ? historico : [];
+  if (!lista.length) {
+    tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;color:var(--inactive-color);padding:14px;">Nenhuma versão registrada.</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = lista.map((h) => {
+    const docId = document.getElementById('qualidadeListaMestraArquivoId')?.value;
+    const histLink = h.documento && docId
+      ? `<a href="${qualidadeManuaisEscapeHtml(`${API_BASE}/api/qualidade/lista-mestra/${docId}/download?historico_id=${h.id}`)}" style="color:#2563eb;">Baixar</a>`
+      : '—';
+    return `
+    <tr>
+      <td>${qualidadeManuaisEscapeHtml(h.numero_revisao)}</td>
+      <td>${qualidadeManuaisEscapeHtml(h.descricao_alteracao || '—')}</td>
+      <td>${qualidadeManuaisEscapeHtml(h.inserido_por)}</td>
+      <td>${qualidadeManuaisEscapeHtml(formatarDataHoraListaMestra(h.inserido_em))}</td>
+      <td>${histLink}</td>
+    </tr>`;
+  }).join('');
+}
+
+async function abrirQualidadeListaMestraArquivoModal(item) {
+  if (!item || !qualidadeListaMestraArquivoModal) return;
+  document.getElementById('qualidadeListaMestraArquivoId').value = item.id;
+  document.getElementById('qualidadeListaMestraArquivoModalTitulo').textContent =
+    `${item.numero_formulario || 'Documento'} — Rev. ${item.numero_revisao || '—'}`;
+  const info = document.getElementById('qualidadeListaMestraArquivoInfo');
+  if (info) {
+    info.textContent = item.descricao
+      ? `${item.descricao} | Rev. atual: ${item.numero_revisao || '—'}`
+      : `Rev. atual: ${item.numero_revisao || '—'}`;
+  }
+  document.getElementById('qualidadeListaMestraArquivoDescricao').value = '';
+  document.getElementById('qualidadeListaMestraArquivoInput').value = '';
+  atualizarQualidadeListaMestraDownloadLink(item);
+  atualizarPermissaoUploadListaMestra();
+  qualidadeListaMestraArquivoModal.style.display = 'flex';
+
+  try {
+    const response = await fetch(`${API_BASE}/api/qualidade/lista-mestra/${item.id}/arquivo`, { credentials: 'include' });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const data = await response.json();
+    if (data?.item) {
+      const idx = qualidadeListaMestraItens.findIndex((i) => Number(i.id) === Number(item.id));
+      if (idx >= 0) qualidadeListaMestraItens[idx] = data.item;
+      atualizarQualidadeListaMestraDownloadLink(data.item);
+      if (info) {
+        info.textContent = data.item.descricao
+          ? `${data.item.descricao} | Rev. atual: ${data.item.numero_revisao || '—'}`
+          : `Rev. atual: ${data.item.numero_revisao || '—'}`;
+      }
+      document.getElementById('qualidadeListaMestraArquivoModalTitulo').textContent =
+        `${data.item.numero_formulario || 'Documento'} — Rev. ${data.item.numero_revisao || '—'}`;
+    }
+    qualidadeListaMestraHistoricoAtual = Array.isArray(data?.historico) ? data.historico : [];
+    renderQualidadeListaMestraHistorico(qualidadeListaMestraHistoricoAtual);
+  } catch (error) {
+    console.error('[QUALIDADE] Erro ao carregar histórico:', error);
+    qualidadeListaMestraHistoricoAtual = [];
+    renderQualidadeListaMestraHistorico([]);
+  }
+}
+
+function fecharQualidadeListaMestraArquivoModal() {
+  if (!qualidadeListaMestraArquivoModal) return;
+  qualidadeListaMestraArquivoModal.style.display = 'none';
+}
+
+document.getElementById('qualidadeListaMestraArquivoModalClose')?.addEventListener('click', fecharQualidadeListaMestraArquivoModal);
+qualidadeListaMestraArquivoModal?.addEventListener('click', (e) => {
+  if (e.target === qualidadeListaMestraArquivoModal) fecharQualidadeListaMestraArquivoModal();
+});
+
+document.getElementById('qualidadeListaMestraArquivoEnviarBtn')?.addEventListener('click', async () => {
+  const id = document.getElementById('qualidadeListaMestraArquivoId')?.value;
+  const arquivoInput = document.getElementById('qualidadeListaMestraArquivoInput');
+  const descricao = document.getElementById('qualidadeListaMestraArquivoDescricao')?.value || '';
+  const arquivo = arquivoInput?.files?.[0];
+  if (!id) return;
+  if (!arquivo) {
+    alert('Selecione um arquivo para enviar.');
+    return;
+  }
+  const btn = document.getElementById('qualidadeListaMestraArquivoEnviarBtn');
+  if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Enviando...'; }
+  try {
+    const form = new FormData();
+    form.append('arquivo', arquivo);
+    form.append('descricao_alteracao', descricao);
+    const response = await fetch(`${API_BASE}/api/qualidade/lista-mestra/${id}/arquivo`, {
+      method: 'POST',
+      credentials: 'include',
+      body: form
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data?.error || `HTTP ${response.status}`);
+    if (data?.item) {
+      const idx = qualidadeListaMestraItens.findIndex((i) => Number(i.id) === Number(id));
+      if (idx >= 0) qualidadeListaMestraItens[idx] = data.item;
+      renderQualidadeListaMestraTabela(qualidadeListaMestraItens);
+      document.getElementById('qualidadeListaMestraArquivoModalTitulo').textContent =
+        `${data.item.numero_formulario || 'Documento'} — Rev. ${data.item.numero_revisao || '—'}`;
+      const info = document.getElementById('qualidadeListaMestraArquivoInfo');
+      if (info) {
+        info.textContent = data.item.descricao
+          ? `${data.item.descricao} | Rev. atual: ${data.item.numero_revisao || '—'}`
+          : `Rev. atual: ${data.item.numero_revisao || '—'}`;
+      }
+      atualizarQualidadeListaMestraDownloadLink(data.item);
+    }
+    qualidadeListaMestraHistoricoAtual = Array.isArray(data?.historico) ? data.historico : [];
+    renderQualidadeListaMestraHistorico(qualidadeListaMestraHistoricoAtual);
+    if (arquivoInput) arquivoInput.value = '';
+    document.getElementById('qualidadeListaMestraArquivoDescricao').value = '';
+    alert('Nova versão enviada com sucesso.');
+  } catch (error) {
+    console.error('[QUALIDADE] Erro ao enviar arquivo:', error);
+    alert(error?.message || 'Não foi possível enviar o arquivo.');
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = '<i class="fa-solid fa-cloud-arrow-up"></i> Enviar nova versão';
+    }
   }
 });
 
@@ -11760,9 +12251,12 @@ function renderEnvioMercadoriaCard(r) {
   // Correios tracking só quando não há id_vipp (VIPP é a fonte de verdade nesse caso)
   const dataRastreio = (!r.id_vipp && !rastStatusDisplay && isRastreio && !isFinalizado) ? identClean : '';
   const rastText = [rastStatusDisplay, rastQuandoDisplay].filter(Boolean).join(' | ');
+  const temVippPendente = !!(r.id_vipp && !etiqueta && !temIdentificacao);
   const buttons = (etiqueta || temIdentificacao)
     ? `<button class="content-button btn-envio-imprimir" data-envio-id="${escapeAtHtml(String(r.id))}" data-identificacao="${escapeAtHtml(identRaw)}" style="padding:8px 10px;font-size:12px;display:inline-flex;align-items:center;gap:6px;"><i class="fa-solid fa-print"></i><span>Imprimir</span></button>`
-    : '';
+    : temVippPendente
+      ? `<button class="content-button btn-envio-gerar-etiqueta" data-envio-id="${escapeAtHtml(String(r.id))}" data-n-solic="${escapeAtHtml(r.numero_sep || '')}" style="padding:8px 10px;font-size:12px;display:inline-flex;align-items:center;gap:6px;background:#1d4ed8;color:#dbeafe;border:none;border-radius:8px;cursor:pointer;font-weight:700;"><i class="fa-solid fa-barcode"></i><span>Gerar etiqueta</span></button>`
+      : '';
 
   const statusToken = getStatusTokenEnvioMercadoria(statusRaw);
   const statusClasse = `envio-card-status-${statusToken}`;
@@ -11795,7 +12289,7 @@ function renderEnvioMercadoriaCard(r) {
       </div>
       <div class="envio-card-actions">
         <div class="envio-card-label">Ações</div>
-        ${buttons || '<div class="envio-card-text">Sem anexos.</div>'}
+        ${buttons || (temVippPendente ? '<div class="envio-card-text">Etiqueta ainda não gerada — clique em Gerar etiqueta.</div>' : '<div class="envio-card-text">Sem anexos.</div>')}
       </div>
     </article>`;
 }
@@ -19071,6 +19565,34 @@ function setupEnvioPrintButtons(container) {
   if (!container) return;
   _envioCarregarPref();
   container.addEventListener('click', async (ev) => {
+    const btnGerar = ev.target.closest('.btn-envio-gerar-etiqueta');
+    if (btnGerar && !btnGerar.disabled) {
+      ev.preventDefault();
+      const envioId = btnGerar.getAttribute('data-envio-id');
+      const nSolic = btnGerar.getAttribute('data-n-solic') || '';
+      btnGerar.disabled = true;
+      const origHtml = btnGerar.innerHTML;
+      btnGerar.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i><span>Gerando...</span>';
+      try {
+        const r = await fetch('/api/vipp/gerar-etiqueta', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ envio_id: envioId, n_solic: nSolic || undefined })
+        });
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok || !d.ok) throw new Error(d.error || 'Falha ao gerar etiqueta');
+        if (typeof carregarSacSolicitacoes === 'function' && envioMercadoriaTabelaBodyPane) {
+          carregarSacSolicitacoes(envioMercadoriaTabelaBodyPane, { filaLogistica: true });
+        }
+      } catch (err) {
+        alert('Erro ao gerar etiqueta: ' + (err.message || err));
+        btnGerar.disabled = false;
+        btnGerar.innerHTML = origHtml;
+      }
+      return;
+    }
+
     const btn = ev.target.closest('.btn-envio-imprimir');
     if (!btn) return;
     ev.preventDefault();
@@ -26752,18 +27274,50 @@ window.openRegistros = async function() {
     _etqDropdownBtn?.classList.remove('open');
   }
 
+  function _etqPosicionarDropdown() {
+    if (!_etqDropdownMenu || !_etqDropdownBtn) return;
+    const rect = _etqDropdownBtn.getBoundingClientRect();
+    const menuH = _etqDropdownMenu.offsetHeight || 280;
+    const espacoAbaixo = window.innerHeight - rect.bottom;
+    const abrirAcima = espacoAbaixo < menuH + 12 && rect.top > menuH + 12;
+    _etqDropdownMenu.style.position = 'fixed';
+    _etqDropdownMenu.style.zIndex = '2500';
+    _etqDropdownMenu.style.left = 'auto';
+    _etqDropdownMenu.style.right = `${Math.max(8, window.innerWidth - rect.right)}px`;
+    if (abrirAcima) {
+      _etqDropdownMenu.style.top = 'auto';
+      _etqDropdownMenu.style.bottom = `${window.innerHeight - rect.top + 8}px`;
+    } else {
+      _etqDropdownMenu.style.bottom = 'auto';
+      _etqDropdownMenu.style.top = `${rect.bottom + 8}px`;
+    }
+  }
+
   _etqDropdownBtn?.addEventListener('click', e => {
     e.stopPropagation();
     const aberto = _etqDropdownMenu.style.display !== 'none';
     if (aberto) { _etqFecharDropdown(); }
-    else { _etqDropdownMenu.style.display = 'flex'; _etqDropdownBtn.classList.add('open'); }
+    else {
+      if (_etqDropdownMenu.parentElement !== document.body) {
+        document.body.appendChild(_etqDropdownMenu);
+      }
+      _etqDropdownMenu.style.display = 'flex';
+      _etqDropdownBtn.classList.add('open');
+      _etqPosicionarDropdown();
+    }
   });
 
   // Fechar ao clicar fora
   document.addEventListener('click', e => {
     if (_etqDropdownMenu && _etqDropdownMenu.style.display !== 'none') {
-      if (!document.getElementById('etqConfigMenuWrap')?.contains(e.target)) _etqFecharDropdown();
+      if (!document.getElementById('etqConfigMenuWrap')?.contains(e.target) && !_etqDropdownMenu.contains(e.target)) {
+        _etqFecharDropdown();
+      }
     }
+  });
+
+  window.addEventListener('resize', () => {
+    if (_etqDropdownMenu && _etqDropdownMenu.style.display !== 'none') _etqPosicionarDropdown();
   });
 
   // Fechar dropdown após ações (não após os toggles lista/grade/ocultos)
@@ -44156,6 +44710,71 @@ function renderizarCatalogoOmie(produtos, options = {}) {
 }
 
 // Carrega estoque por local para todos os cards visíveis
+window.__estoqueCardCache = window.__estoqueCardCache || {};
+
+function formatarQtdEstoque(saldo, unidade) {
+  const qtd = Number(saldo).toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+  return unidade ? `${qtd} ${unidade}` : qtd;
+}
+
+function aplicarDeltaListaLocais(locais, deltas) {
+  const lista = (locais || []).map(l => ({ ...l }));
+  for (const d of deltas || []) {
+    const cod = String(d.local_codigo || '').trim();
+    if (!cod) continue;
+    let item = lista.find(l => String(l.local_codigo) === cod);
+    if (item) {
+      item.saldo = Math.max(0, (Number(item.saldo) || 0) + (Number(d.delta) || 0));
+    } else if ((Number(d.delta) || 0) > 0) {
+      lista.push({
+        local_codigo: d.local_codigo,
+        local_nome: d.local_nome || d.local_codigo,
+        saldo: Number(d.delta) || 0,
+        unidade: d.unidade || 'UN'
+      });
+    }
+  }
+  return lista;
+}
+
+function renderHtmlEstoquePorLocal(locais, tema) {
+  if (!locais || locais.length === 0) {
+    if (tema === 'modal') return '<span class="movim-estoque-vazio">Sem estoque registrado</span>';
+    return '<span style="font-size:9px;color:#9ca3af;">Sem estoque</span>';
+  }
+  return locais.map(l => {
+    const nome = escapeHtml(l.local_nome || l.local_codigo || '—');
+    const qtd = formatarQtdEstoque(l.saldo, l.unidade);
+    if (tema === 'modal') {
+      return `<div class="movim-est-linha" data-local-codigo="${escapeHtml(String(l.local_codigo || ''))}">
+        <span class="movim-est-nome">${nome}</span>
+        <span class="movim-est-qtd">${escapeHtml(qtd)}</span>
+      </div>`;
+    }
+    return `<div style="display:flex;justify-content:space-between;font-size:9px;color:#374151;line-height:1.4;">
+      <span style="color:#6b7280;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:70%;">${nome}</span>
+      <span style="font-weight:600;white-space:nowrap;">${escapeHtml(qtd)}</span>
+    </div>`;
+  }).join('');
+}
+
+function atualizarCardEstoqueVisual(codigo) {
+  const el = document.getElementById('estoque-card-' + codigo);
+  if (!el) return;
+  const locais = window.__estoqueCardCache[codigo] || [];
+  el.innerHTML = renderHtmlEstoquePorLocal(locais, 'card');
+}
+
+window.aplicarDeltaEstoqueOtimista = function aplicarDeltaEstoqueOtimista(codigo, deltas) {
+  if (!codigo || !Array.isArray(deltas) || !deltas.length) return;
+  const atual = window.__estoqueCardCache[codigo] || [];
+  window.__estoqueCardCache[codigo] = aplicarDeltaListaLocais(atual, deltas);
+  atualizarCardEstoqueVisual(codigo);
+  if (typeof window.__atualizarMovimEstoqueLocais === 'function') {
+    window.__atualizarMovimEstoqueLocais(codigo, deltas);
+  }
+};
+
 async function carregarEstoqueCards() {
   const placeholders = document.querySelectorAll('[id^="estoque-card-"]');
   if (!placeholders.length) return;
@@ -44172,15 +44791,12 @@ async function carregarEstoqueCards() {
       const cod = el.dataset.codigo;
       const locais = dados[cod];
       if (!locais || locais.length === 0) {
-        el.innerHTML = '<span style="font-size:9px;color:#9ca3af;">Sem estoque</span>';
+        window.__estoqueCardCache[cod] = [];
+        el.innerHTML = renderHtmlEstoquePorLocal([], 'card');
         return;
       }
-      el.innerHTML = locais.map(l =>
-        `<div style="display:flex;justify-content:space-between;font-size:9px;color:#374151;line-height:1.4;">
-          <span style="color:#6b7280;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:70%;">${l.local_nome || l.local_codigo}</span>
-          <span style="font-weight:600;white-space:nowrap;">${Number(l.saldo).toLocaleString('pt-BR', {minimumFractionDigits:0, maximumFractionDigits:2})}${l.unidade ? ' ' + l.unidade : ''}</span>
-        </div>`
-      ).join('');
+      window.__estoqueCardCache[cod] = locais.map(l => ({ ...l }));
+      el.innerHTML = renderHtmlEstoquePorLocal(locais, 'card');
     });
 
     // Preenche badges de mínimo
@@ -65653,6 +66269,94 @@ document.addEventListener('DOMContentLoaded', () => {
   const scanOkBtn = document.getElementById('movimScanEnderecoOk');
   const scanFechar= document.getElementById('movimScanEnderecoFechar');
   const omieMotivoSel = document.getElementById('movimOmieMotivo');
+  const movimEstoqueLocaisEl = document.getElementById('movimEstoqueLocais');
+  let _movimEstoqueLocais = [];
+
+  function renderizarEstoqueModal() {
+    if (!movimEstoqueLocaisEl) return;
+    movimEstoqueLocaisEl.innerHTML = renderHtmlEstoquePorLocal(_movimEstoqueLocais, 'modal');
+    destacarLocaisMovim();
+  }
+
+  function destacarLocaisMovim() {
+    if (!movimEstoqueLocaisEl) return;
+    const origem = String(origemSel?.value || '').trim();
+    const destino = String(localSel?.value || '').trim();
+    movimEstoqueLocaisEl.querySelectorAll('.movim-est-linha').forEach(linha => {
+      const cod = String(linha.dataset.localCodigo || '').trim();
+      linha.classList.toggle('movim-est-destaque', cod && (cod === origem || cod === destino));
+    });
+  }
+
+  async function carregarEstoqueModal(codigo) {
+    if (!codigo) return;
+    if (movimEstoqueLocaisEl) {
+      movimEstoqueLocaisEl.innerHTML = '<span class="movim-estoque-vazio">Carregando estoque por armazém…</span>';
+    }
+    try {
+      const cache = window.__estoqueCardCache?.[codigo];
+      if (window.__estoqueCardCache && codigo in window.__estoqueCardCache) {
+        _movimEstoqueLocais = (cache || []).map(l => ({ ...l }));
+        renderizarEstoqueModal();
+        return;
+      }
+      const resp = await fetch('/api/logistica/estoque/batch?codigos=' + encodeURIComponent(codigo));
+      if (!resp.ok) throw new Error('HTTP ' + resp.status);
+      const json = await resp.json();
+      _movimEstoqueLocais = (json.dados?.[codigo] || []).map(l => ({ ...l }));
+      window.__estoqueCardCache = window.__estoqueCardCache || {};
+      window.__estoqueCardCache[codigo] = _movimEstoqueLocais.map(l => ({ ...l }));
+      renderizarEstoqueModal();
+    } catch (e) {
+      console.warn('[modalMovimentacao] erro ao carregar estoque:', e);
+      _movimEstoqueLocais = [];
+      if (movimEstoqueLocaisEl) {
+        movimEstoqueLocaisEl.innerHTML = '<span class="movim-estoque-vazio">Não foi possível carregar o estoque</span>';
+      }
+    }
+  }
+
+  window.__atualizarMovimEstoqueLocais = function(codigo, deltas) {
+    if (codigo !== _codigoProdutoAtual) return;
+    _movimEstoqueLocais = aplicarDeltaListaLocais(_movimEstoqueLocais, deltas);
+    renderizarEstoqueModal();
+  };
+
+  function montarDeltasMovimentacao({ tipo, origem, destino, qtd, origemNome, destinoNome, unidade }) {
+    const u = unidade || 'UN';
+    if (tipo === 'TRANSFERENCIA') {
+      return [
+        { local_codigo: origem, local_nome: origemNome, delta: -qtd, unidade: u },
+        { local_codigo: destino, local_nome: destinoNome, delta: qtd, unidade: u }
+      ];
+    }
+    if (tipo === 'ENT') {
+      return [{ local_codigo: destino, local_nome: destinoNome, delta: qtd, unidade: u }];
+    }
+    if (tipo === 'SAI') {
+      return [{ local_codigo: origem, local_nome: origemNome, delta: -qtd, unidade: u }];
+    }
+    return [];
+  }
+
+  function aplicarEstoqueOtimistaMovim(tipo, { origem, destino, qtd }) {
+    if (!_codigoProdutoAtual || !qtd) return;
+    const origemNome = origemSel?.selectedOptions?.[0]?.textContent?.trim() || origem;
+    const destinoNome = localSel?.selectedOptions?.[0]?.textContent?.trim() || destino;
+    const unidade = _movimEstoqueLocais?.[0]?.unidade || 'UN';
+    const deltas = montarDeltasMovimentacao({
+      tipo,
+      origem,
+      destino,
+      qtd,
+      origemNome,
+      destinoNome,
+      unidade
+    });
+    if (typeof window.aplicarDeltaEstoqueOtimista === 'function') {
+      window.aplicarDeltaEstoqueOtimista(_codigoProdutoAtual, deltas);
+    }
+  }
 
   const MOVIM_DEFAULT_ORIGEM = '10717096386'; // 2. PORTA PALLET (ALMOXARIFADO)
   const MOVIM_MOTIVOS = {
@@ -65690,6 +66394,8 @@ document.addEventListener('DOMContentLoaded', () => {
     if (calcPopup) calcPopup.style.display = 'none';
     limparRetornoOmie();
     limparEnderecos();
+    limparEnderecosReferencia();
+    _movimEstoqueLocais = [];
     _processandoAcao = false;
   }
 
@@ -65698,6 +66404,68 @@ document.addEventListener('DOMContentLoaded', () => {
     const vazio = document.getElementById('movimEnderecoVazio');
     if (lista) lista.innerHTML = '';
     if (vazio) vazio.style.display = 'block';
+  }
+
+  function limparEnderecosReferencia() {
+    const pp = document.getElementById('movimEnderecoReferenciaPp');
+    const etq = document.getElementById('movimEnderecoEtq');
+    if (pp) pp.innerHTML = '';
+    if (etq) { etq.innerHTML = ''; etq.style.display = 'none'; }
+  }
+
+  function renderMovimEnderecosEtq(lista) {
+    const linhas = (lista || []).map(e => {
+      const end = escapeHtml(String(e.endereco || '').trim());
+      const comp = e.complemento
+        ? `<span class="movim-etq-comp">${escapeHtml(String(e.complemento))}</span>` : '';
+      const qtd = e.qtd != null && e.qtd !== ''
+        ? `<span class="movim-etq-qtd">Qtd: ${escapeHtml(String(e.qtd))}</span>` : '';
+      return `<div class="movim-etq-linha"><i class="fa-solid fa-tag"></i><span>${end}</span>${comp}${qtd}</div>`;
+    }).join('');
+    return `<div class="movim-endereco-etq-titulo">Etiquetas impressas (ETQ_rec_impresso)</div>${linhas}`;
+  }
+
+  async function carregarEnderecosReferencia(codigo) {
+    limparEnderecosReferencia();
+    const cod = String(codigo || '').trim();
+    if (!cod) return;
+
+    const ppEl = document.getElementById('movimEnderecoReferenciaPp');
+    const etqEl = document.getElementById('movimEnderecoEtq');
+    if (ppEl) ppEl.innerHTML = '<span class="movim-ref-loading">Carregando endereçamento…</span>';
+
+    try {
+      const [enderecoMap, etqJson] = await Promise.all([
+        typeof _solCarregarEnderecoBatch === 'function'
+          ? _solCarregarEnderecoBatch([cod])
+          : Promise.resolve({}),
+        fetch('/api/etiquetas/rec-impresso/enderecos-por-produto?codigo=' + encodeURIComponent(cod), { credentials: 'include' })
+          .then(r => r.json())
+          .catch(() => ({ ok: false }))
+      ]);
+
+      if (ppEl) {
+        const html = typeof _solEnderecamentoHtml === 'function'
+          ? _solEnderecamentoHtml(cod, enderecoMap, null)
+          : '';
+        ppEl.innerHTML = html || '';
+      }
+
+      if (etqEl) {
+        const enderecos = etqJson?.ok && Array.isArray(etqJson.enderecos) ? etqJson.enderecos : [];
+        if (enderecos.length) {
+          etqEl.innerHTML = renderMovimEnderecosEtq(enderecos);
+          etqEl.style.display = 'block';
+        } else {
+          etqEl.innerHTML = '';
+          etqEl.style.display = 'none';
+        }
+      }
+    } catch (err) {
+      console.warn('[modalMovimentacao] enderecos referencia', err);
+      if (ppEl) ppEl.innerHTML = '';
+      if (etqEl) { etqEl.innerHTML = ''; etqEl.style.display = 'none'; }
+    }
   }
 
   function adicionarEndereco(address) {
@@ -66039,6 +66807,7 @@ document.addEventListener('DOMContentLoaded', () => {
       }), 'ok');
       if (msg) { msg.textContent = 'Endereco registrado.'; msg.className = 'movim-mensagem ok'; }
       limparEnderecos();
+      carregarEnderecosReferencia(_codigoProdutoAtual);
     } catch (err) {
       console.error('[modalMovimentacao] enderecamento interno', err);
       exibirRetornoOmie(montarHtmlRetornoOmie({
@@ -66384,6 +67153,11 @@ document.addEventListener('DOMContentLoaded', () => {
         linhas: linhasRetorno
       }), 'ok');
       if (msg) { msg.textContent = 'Ajuste concluído.'; msg.className = 'movim-mensagem ok'; }
+      aplicarEstoqueOtimistaMovim(tipo, {
+        origem: tipo === 'SAI' ? local : null,
+        destino: tipo === 'ENT' ? local : null,
+        qtd
+      });
     } catch (err) {
       console.error('[modalMovimentacao] ajuste', err);
       exibirRetornoOmie(montarHtmlRetornoOmie({
@@ -66545,6 +67319,7 @@ document.addEventListener('DOMContentLoaded', () => {
         linhas: linhasRetorno
       }), 'ok');
       if (msg) { msg.textContent = 'Transferência concluída.'; msg.className = 'movim-mensagem ok'; }
+      aplicarEstoqueOtimistaMovim('TRANSFERENCIA', { origem, destino, qtd });
     } catch (err) {
       console.error('[modalMovimentacao] transferencia', err);
       exibirRetornoOmie(montarHtmlRetornoOmie({
@@ -66566,10 +67341,14 @@ document.addEventListener('DOMContentLoaded', () => {
     localSel.addEventListener('change', () => {
       if (_codigoProdutoAtual && localSel.value) carregarEstoque(_codigoProdutoAtual, localSel.value);
       atualizarUiMesmoArmazem();
+      destacarLocaisMovim();
     });
   }
   if (origemSel) {
-    origemSel.addEventListener('change', atualizarUiMesmoArmazem);
+    origemSel.addEventListener('change', () => {
+      atualizarUiMesmoArmazem();
+      destacarLocaisMovim();
+    });
   }
 
   const histBtn     = document.getElementById('movimHistoricoBtn');
@@ -66784,7 +67563,11 @@ document.addEventListener('DOMContentLoaded', () => {
     if (subtitulo) subtitulo.textContent = 'Codigo: ' + codigo;
     if (overlay)   overlay.style.display = 'flex';
 
-    await carregarLocais();
+    await Promise.all([
+      carregarLocais(),
+      carregarEstoqueModal(codigo),
+      carregarEnderecosReferencia(codigo)
+    ]);
     atualizarUiMesmoArmazem();
   };
 })();
@@ -69482,6 +70265,12 @@ window.verOperacao = function(osId) {
 
   const colProgramado = document.getElementById('kanbanProgramado');
   const cntProgramado = document.getElementById('kanbanProgramadoCount');
+  const colSolicitado = document.getElementById('kanbanSolicitado');
+  const cntSolicitado = document.getElementById('kanbanSolicitadoCount');
+  const colProduzindo = document.getElementById('kanbanProduzindo');
+  const cntProduzindo = document.getElementById('kanbanProduzindoCount');
+  const colAguardando = document.getElementById('kanbanAguardando');
+  const cntAguardando = document.getElementById('kanbanAguardandoCount');
 
   // Cache das ordens carregadas para re-renderizar sem nova requisição
   let ordensCarregadas = [];
@@ -69520,12 +70309,48 @@ window.verOperacao = function(osId) {
     const s = String(status || '').trim();
     if (!s) return '';
     const cores = {
+      'Solicitado': { bg: '#1e3a8a', txt: '#bfdbfe' },
       'Iniciado':   { bg: '#14532d', txt: '#bbf7d0' },
       'Produzindo': { bg: '#065f46', txt: '#6ee7b7' },
       'Parado':     { bg: '#92400e', txt: '#fcd34d' },
     };
     const c = cores[s] || { bg: '#374151', txt: '#d1d5db' };
     return `<span style="flex-shrink:0;display:inline-block;padding:1px 6px;border-radius:4px;font-size:10px;font-weight:700;background:${c.bg};color:${c.txt};">${s}</span>`;
+  }
+
+  function osStatusColuna(os, colKey) {
+    const sp = String(os?.status_producao || '').trim();
+    if (colKey === 'programado') return !sp;
+    if (colKey === 'solicitado') return sp === 'Solicitado';
+    if (colKey === 'produzindo') return sp === 'Iniciado' || sp === 'Produzindo';
+    if (colKey === 'aguardando') return sp === 'Parado';
+    return false;
+  }
+
+  function renderKanbanCol(colEl, cntEl, ordens, colKey, operacaoFiltro, msgVazia, onlyAProduzir) {
+    if (!colEl) return;
+    const base = onlyAProduzir ? ordens.filter(op => op.status === 'A PRODUZIR') : ordens;
+    const grupos = {};
+    let totalOs = 0;
+
+    for (const op of base) {
+      const ossCol = (op.ordens_servico || []).filter(os => {
+        if (operacaoFiltro && os.operacao !== operacaoFiltro) return false;
+        return osStatusColuna(os, colKey);
+      });
+      if (!ossCol.length) continue;
+      totalOs += ossCol.length;
+      const key = op.produto?.identificacao || String(op.id);
+      if (!grupos[key]) grupos[key] = [];
+      grupos[key].push({ ...op, ordens_servico: ossCol });
+    }
+
+    if (!Object.keys(grupos).length) {
+      colEl.innerHTML = `<div style="text-align:center;padding:24px 0;color:var(--inactive-color);font-size:12px;">${msgVazia}</div>`;
+    } else {
+      colEl.innerHTML = Object.entries(grupos).map(([k, ops]) => renderGrupo(k, ops)).join('');
+    }
+    if (cntEl) cntEl.textContent = totalOs;
   }
 
   function renderGrupo(prodId, ops) {
@@ -69618,34 +70443,21 @@ window.verOperacao = function(osId) {
   function renderKanban(ordens) {
     const operacaoFiltro = filtroSelect ? filtroSelect.value : '';
 
-    // Aplica filtro por operação se selecionado
     const filtradas = operacaoFiltro
       ? ordens.filter(op =>
           (op.ordens_servico || []).some(os => os.operacao === operacaoFiltro)
         )
       : ordens;
 
-    const aProduzir = filtradas.filter(op => op.status === 'A PRODUZIR');
+    renderKanbanCol(colProgramado, cntProgramado, filtradas, 'programado', operacaoFiltro,
+      operacaoFiltro ? `Nenhuma OS programada com "${operacaoFiltro}".` : 'Nenhuma OP programada.', true);
+    renderKanbanCol(colSolicitado, cntSolicitado, filtradas, 'solicitado', operacaoFiltro,
+      operacaoFiltro ? `Nenhuma OS solicitada com "${operacaoFiltro}".` : 'Nenhuma OS solicitada.', false);
+    renderKanbanCol(colProduzindo, cntProduzindo, filtradas, 'produzindo', operacaoFiltro,
+      'Nenhuma OS em produção.', false);
+    renderKanbanCol(colAguardando, cntAguardando, filtradas, 'aguardando', operacaoFiltro,
+      'Nenhuma OS aguardando retirada.', false);
 
-    // Agrupa por produto.identificacao
-    const grupos = {};
-    for (const op of aProduzir) {
-      const key = op.produto?.identificacao || String(op.id);
-      if (!grupos[key]) grupos[key] = [];
-      grupos[key].push(op);
-    }
-
-    if (Object.keys(grupos).length === 0) {
-      colProgramado.innerHTML = '<div style="text-align:center;padding:24px 0;color:var(--inactive-color);font-size:12px;">'
-        + (operacaoFiltro ? `Nenhuma OP com a operação "${operacaoFiltro}".` : 'Nenhuma OP programada.')
-        + '</div>';
-    } else {
-      colProgramado.innerHTML = Object.entries(grupos)
-        .map(([key, ops]) => renderGrupo(key, ops))
-        .join('');
-    }
-
-    if (cntProgramado) cntProgramado.textContent = aProduzir.length;
     attachProducaoKanbanActionButtons('#registrarProducaoPane', ordens);
     attachOpCardClickHandlers('#registrarProducaoPane', ordens);
   }
@@ -70158,7 +70970,210 @@ window.verOperacao = function(osId) {
     modal.querySelector('.modal-secondary')?.addEventListener('click', () => overlay.remove());
   }
 
-  function openProducaoKanbanActionsModal(produtoCodigo, groupKey, ops) {
+  function _producaoEtqPrefKey() {
+    const u = (document.getElementById('userNameDisplay')?.textContent || 'user').trim().replace(/\s+/g, '_');
+    return `etq_printer_pref_${u}`;
+  }
+
+  function _producaoParseAgentPref(pref) {
+    if (!pref || !pref.startsWith('__AGENT__:')) return null;
+    const s = pref.slice('__AGENT__:'.length);
+    const idx = s.indexOf(':');
+    if (idx === -1) return null;
+    return { pcName: s.slice(0, idx), impressora: s.slice(idx + 1) };
+  }
+
+  function _producaoColetarLinhasOs(ops, operacaoFiltro) {
+    const linhas = [];
+    for (const op of (ops || [])) {
+      const oss = Array.isArray(op.ordens_servico) ? op.ordens_servico : [];
+      const ossVis = oss.filter(os => {
+        if (operacaoFiltro && os.operacao !== operacaoFiltro) return false;
+        return !String(os.status_producao || '').trim();
+      });
+      for (const os of ossVis) {
+        if (!os.id) continue;
+        linhas.push({
+          os_id: os.id,
+          os_identificacao: os.identificacao || ('#' + os.id),
+          operacao: os.operacao || '—',
+          os_status: os.status || '—',
+          op_id: op.id,
+          op_identificacao: op.identificacao || String(op.id),
+          op_qtde: op.qtde,
+          op_status: op.status || '—',
+        });
+      }
+    }
+    return linhas;
+  }
+
+  async function _producaoImprimirOpEtiquetas(items, statusEl, btnRef, onSuccess) {
+    if (!items?.length) return;
+    const orig = btnRef ? btnRef.innerHTML : '';
+    if (btnRef) { btnRef.disabled = true; btnRef.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Imprimindo...'; }
+    const showSt = (msg, cor = '#94a3b8') => {
+      if (!statusEl) return;
+      statusEl.textContent = msg;
+      statusEl.style.color = cor;
+    };
+    try {
+      const usuario = (document.getElementById('userNameDisplay')?.textContent || '').trim();
+      const pref = localStorage.getItem(_producaoEtqPrefKey()) || null;
+      const agentDest = _producaoParseAgentPref(pref);
+      const body = { items, usuario };
+      if (agentDest) {
+        body.destino_agente = agentDest.pcName;
+        body.impressora = agentDest.impressora;
+      } else if (pref && pref !== '__PDF__' && pref !== '__BP__') {
+        body.impressora = pref;
+      }
+      showSt('Enviando para fila de impressão...', '#facc15');
+      const resp = await fetch('/api/etiquetas/iapp-op/imprimir', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify(body),
+      });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok || !data.ok) throw new Error(data.error || `Erro ${resp.status}`);
+      showSt(`${data.quantidade || items.length} etiqueta(s) enfileirada(s). OS movida(s) para Solicitado.`, '#4ade80');
+      if (typeof onSuccess === 'function') await onSuccess();
+    } catch (err) {
+      showSt(err.message || 'Falha ao imprimir.', '#f87171');
+    } finally {
+      if (btnRef) { btnRef.disabled = false; btnRef.innerHTML = orig || '<i class="fa-solid fa-print"></i> Imprimir selecionadas'; }
+    }
+  }
+
+  function openProducaoImprimirOpModal(produtoCodigo, groupKey, ops, operacaoFiltro) {
+    const linhas = _producaoColetarLinhasOs(ops, operacaoFiltro);
+    const overlay = document.createElement('div');
+    overlay.className = 'kanban-modal-overlay';
+    overlay.addEventListener('click', (ev) => { if (ev.target === overlay) overlay.remove(); });
+
+    const modal = document.createElement('div');
+    modal.className = 'kanban-modal';
+    modal.style.maxWidth = '760px';
+    modal.innerHTML = `
+      <header>
+        <div>
+          <h2>Imprimir OP</h2>
+          <span>${escapeHtml(produtoCodigo || groupKey)}</span>
+        </div>
+        <button class="close-btn" aria-label="Fechar">&times;</button>
+      </header>
+      <div class="kanban-modal-body">
+        <div class="modal-code-block">
+          <p style="margin:0 0 8px;font-size:12px;color:#94a3b8;">
+            ${operacaoFiltro
+              ? `Ordens de serviço filtradas pela operação <b style="color:#e2e8f0;">${escapeHtml(operacaoFiltro)}</b>.`
+              : 'Todas as ordens de serviço do grupo.'}
+          </p>
+          <div id="producao-imprimir-op-lista" style="max-height:380px;overflow:auto;margin-top:10px;"></div>
+          <p id="producao-imprimir-op-status" style="margin:10px 0 0;font-size:12px;color:#94a3b8;min-height:18px;"></p>
+        </div>
+      </div>
+      <footer>
+        <button type="button" class="modal-secondary">Fechar</button>
+        <button type="button" id="producao-imprimir-op-btn" class="modal-primary" disabled>
+          <i class="fa-solid fa-print"></i> Imprimir selecionadas
+        </button>
+      </footer>
+    `;
+
+    overlay.appendChild(modal);
+    document.body.appendChild(overlay);
+
+    const close = () => overlay.remove();
+    modal.querySelector('.close-btn')?.addEventListener('click', close);
+    modal.querySelector('footer .modal-secondary')?.addEventListener('click', close);
+
+    const listaEl = modal.querySelector('#producao-imprimir-op-lista');
+    const statusEl = modal.querySelector('#producao-imprimir-op-status');
+    const btnImprimir = modal.querySelector('#producao-imprimir-op-btn');
+    const selecionadas = new Set();
+
+    const atualizarBtn = () => {
+      if (btnImprimir) btnImprimir.disabled = selecionadas.size === 0;
+    };
+
+    if (!linhas.length) {
+      if (listaEl) {
+        listaEl.innerHTML = '<div style="text-align:center;padding:24px 0;color:#64748b;font-size:12px;">Nenhuma ordem de serviço encontrada para este grupo.</div>';
+      }
+    } else if (listaEl) {
+      listaEl.innerHTML = `
+        <table style="width:100%;border-collapse:collapse;">
+          <thead>
+            <tr style="border-bottom:1px solid rgba(255,255,255,.1);">
+              <th style="padding:6px 8px;font-size:10px;color:#475569;text-align:left;width:28px;"></th>
+              <th style="padding:6px 8px;font-size:10px;color:#475569;text-align:left;">OP</th>
+              <th style="padding:6px 8px;font-size:10px;color:#475569;text-align:left;">OS</th>
+              <th style="padding:6px 8px;font-size:10px;color:#475569;text-align:left;">Operação</th>
+              <th style="padding:6px 8px;font-size:10px;color:#475569;text-align:left;">Status OS</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${linhas.map((ln, idx) => {
+              const rowKey = `${ln.op_id}|${ln.os_id ?? 'sem-os'}`;
+              return `<tr style="border-bottom:1px solid rgba(255,255,255,.05);">
+                <td style="padding:6px 8px;">
+                  <input type="checkbox" class="producao-imprimir-op-chk"
+                    data-row-key="${escapeHtml(rowKey)}"
+                    data-os-id="${escapeHtml(String(ln.os_id))}"
+                    data-os-ident="${escapeHtml(ln.os_identificacao)}"
+                    data-op-ident="${escapeHtml(ln.op_identificacao)}" />
+                </td>
+                <td style="padding:6px 8px;font-size:11px;color:#e2e8f0;font-weight:600;">${escapeHtml(ln.op_identificacao)}</td>
+                <td style="padding:6px 8px;font-size:11px;color:#cbd5e1;">${escapeHtml(ln.os_identificacao)}</td>
+                <td style="padding:6px 8px;font-size:11px;color:#94a3b8;">${escapeHtml(ln.operacao)}</td>
+                <td style="padding:6px 8px;font-size:11px;color:#94a3b8;">${escapeHtml(ln.os_status)}</td>
+              </tr>`;
+            }).join('')}
+          </tbody>
+        </table>`;
+
+      listaEl.querySelectorAll('.producao-imprimir-op-chk').forEach(chk => {
+        chk.addEventListener('change', () => {
+          const key = chk.dataset.rowKey || '';
+          if (chk.checked) selecionadas.add(key);
+          else selecionadas.delete(key);
+          atualizarBtn();
+        });
+      });
+    }
+
+    btnImprimir?.addEventListener('click', async () => {
+      const codigo = String(produtoCodigo || groupKey || '').trim();
+      const descricaoPadrao = String(ops?.[0]?.produto?.descricao || '').trim();
+      const items = [];
+      listaEl?.querySelectorAll('.producao-imprimir-op-chk:checked').forEach(chk => {
+        const osId = Number(chk.dataset.osId);
+        const osIdent = String(chk.dataset.osIdent || '').trim();
+        const opIdent = String(chk.dataset.opIdent || '').trim();
+        if (!osId || !osIdent) return;
+        const opRef = (ops || []).find(o => String(o.identificacao || o.id) === opIdent);
+        const descricao = String(opRef?.produto?.descricao || descricaoPadrao || '').trim();
+        items.push({
+          os_id: osId,
+          lote: osIdent,
+          os_identificacao: osIdent,
+          codigo_produto: codigo,
+          descricao_produto: descricao,
+        });
+      });
+      if (!items.length) return;
+      await _producaoImprimirOpEtiquetas(items, statusEl, btnImprimir, async () => {
+        close();
+        if (typeof window._producaoRecarregarOrdens === 'function') {
+          await window._producaoRecarregarOrdens();
+        }
+      });
+    });
+  }
+
+  function openProducaoKanbanActionsModal(produtoCodigo, groupKey, ops, operacaoFiltro) {
     const overlay = document.createElement('div');
     overlay.className = 'kanban-modal-overlay';
     overlay.addEventListener('click', (ev) => { if (ev.target === overlay) overlay.remove(); });
@@ -70179,6 +71194,9 @@ window.verOperacao = function(osId) {
           <div style="display:flex;flex-wrap:wrap;gap:10px;margin-top:12px;">
             <button type="button" id="open-estrutura-btn" class="modal-primary" style="min-width:140px;">Ver estrutura</button>
             <button type="button" id="open-process-btn" class="modal-secondary" style="min-width:140px;">Processo</button>
+            <button type="button" id="open-imprimir-op-btn" class="modal-secondary" style="min-width:140px;">
+              <i class="fa-solid fa-print"></i> Imprimir OP
+            </button>
           </div>
         </div>
       </div>
@@ -70203,11 +71221,16 @@ window.verOperacao = function(osId) {
       close();
       openProducaoKanbanProcessModal(groupKey, ops);
     });
+    modal.querySelector('#open-imprimir-op-btn')?.addEventListener('click', () => {
+      close();
+      openProducaoImprimirOpModal(produtoCodigo, groupKey, ops, operacaoFiltro || '');
+    });
   }
 
   function attachProducaoKanbanActionButtons(containerSelector, ordens) {
     const container = document.querySelector(containerSelector);
     if (!container || !ordens) return;
+    const filtroSelect = container.querySelector('#producaoFiltroOperacao, #montaFiltroOperacao');
 
     container.querySelectorAll('.kanban-group-action-btn').forEach(btn => {
       if (btn.dataset.bound === '1') return;
@@ -70219,8 +71242,9 @@ window.verOperacao = function(osId) {
         const groupKey = btn.dataset.groupKey || '';
         const produtoCodigo = btn.dataset.produtoCodigo || groupKey;
         const ops = ordens.filter(op => (op.produto?.identificacao || String(op.id)) === groupKey);
+        const operacaoFiltro = filtroSelect ? filtroSelect.value : '';
 
-        openProducaoKanbanActionsModal(produtoCodigo, groupKey, ops);
+        openProducaoKanbanActionsModal(produtoCodigo, groupKey, ops, operacaoFiltro);
       });
     });
   }
@@ -70246,9 +71270,11 @@ window.verOperacao = function(osId) {
 
         const groupKey = op.produto?.identificacao || String(op.id);
         const produtoCodigo = op.produto?.identificacao || groupKey;
+        const filtroSelect = container.querySelector('#producaoFiltroOperacao, #montaFiltroOperacao');
+        const operacaoFiltro = filtroSelect ? filtroSelect.value : '';
 
         // Abre modal de ações para o grupo/OP
-        openProducaoKanbanActionsModal(produtoCodigo, groupKey, [op]);
+        openProducaoKanbanActionsModal(produtoCodigo, groupKey, [op], operacaoFiltro);
       });
     });
   }

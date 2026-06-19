@@ -14,7 +14,8 @@ const VIPP_TOKEN     = String(process.env.VIPP_TOKEN || '').trim();
 const VIPP_ID_PERFIL = process.env.VIPP_ID_PERFIL || '9363';
 const VIPP_ENDPOINT  = 'http://vpsrv.visualset.com.br/PostagemVipp.asmx';
 const VIPP_IMPRESSAO = 'https://vipp.visualset.com.br/vipp/remoto/ImpressaoRemota.php';
-const VIPP_WEB_URL   = 'https://vipp.visualset.com.br';
+// VIPP migrou para vipp-novo; override via VIPP_WEB_URL no .env se necessário
+const VIPP_WEB_URL   = (process.env.VIPP_WEB_URL || 'https://vipp-novo.visualset.com.br').replace(/\/$/, '');
 
 // URLs dos logos para etiqueta ZPL (carregados e cacheados na primeira impressão)
 const { ASSETS } = require('../utils/storageUrls');
@@ -528,9 +529,21 @@ router.get('/etiqueta', async (req, res) => {
 // Resposta:  PDF (application/pdf) + header X-ECT-Code com o código alocado
 //
 router.post('/gerar-etiqueta', async (req, res) => {
-  const { idConhecimento, n_solic } = req.body;
+  let { idConhecimento, n_solic, envio_id } = req.body || {};
+  if (!idConhecimento && envio_id) {
+    try {
+      const { rows } = await dbQuery(
+        `SELECT id_vipp, numero_sep FROM envios.solicitacoes WHERE id = $1 LIMIT 1`,
+        [Number(envio_id)]
+      );
+      if (rows[0]?.id_vipp) idConhecimento = rows[0].id_vipp;
+      if (!n_solic && rows[0]?.numero_sep) n_solic = rows[0].numero_sep;
+    } catch (e) {
+      console.warn('[VIPP] gerar-etiqueta envio_id lookup:', e.message);
+    }
+  }
   if (!idConhecimento) {
-    return res.status(400).json({ ok: false, error: 'idConhecimento obrigatório' });
+    return res.status(400).json({ ok: false, error: 'idConhecimento obrigatório (ou envio_id com id_vipp).' });
   }
 
   try {

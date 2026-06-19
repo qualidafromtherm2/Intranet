@@ -493,10 +493,10 @@
        data-nav-key="side:qualidade:manuais"
        data-nav-parent="side:qualidade"
        data-nav-pos="side"
-       data-nav-label="Manuais"
+       data-nav-label="Lista mestra"
        data-nav-selector="#menu-qualidade-manuais">
       <i class="fa-solid fa-book-open" style="margin-right:8px;"></i>
-      Manuais
+      Lista mestra
     </a>
   </div>
 </div>
@@ -1158,6 +1158,9 @@
                   <i class="fa-solid fa-angles-right"></i> Impressao
                 </button>
               </div>
+              <div id="movimEstoqueLocais" class="movim-estoque-locais">
+                <span class="movim-estoque-vazio">Carregando estoque por armazém…</span>
+              </div>
             </div>
             <div class="movim-field">
               <label for="movimOrigemSelect">Origem</label>
@@ -1189,9 +1192,11 @@
                   <i class="fa-solid fa-camera"></i> Ler codigo
                 </button>
               </div>
+              <div id="movimEnderecoReferenciaPp" class="movim-endereco-referencia-pp"></div>
               <div id="movimEnderecoVazio" class="movim-endereco-vazio">Nenhum endereco cadastrado.</div>
               <div id="movimEnderecoLista"></div>
             </div>
+            <div id="movimEnderecoEtq" class="movim-endereco-etq" style="display:none;"></div>
             <div id="movimMesmoArmazemAviso" class="movim-mesmo-arm-aviso" style="display:none;">
               Mesmo armazem: informe pelo menos um endereco. Nao ha movimentacao na Omie — apenas registro em ETQ_rec_impresso.
             </div>
@@ -2613,7 +2618,7 @@
                 <div class="title-wrapper" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
                   <div class="content-section-title" style="display:flex;align-items:center;gap:8px;">
                     <i class="fa-solid fa-book-open" style="color:#2563eb;"></i>
-                    Manuais da Qualidade
+                    Documentos
                   </div>
                 </div>
 
@@ -2639,6 +2644,16 @@
                     </div>
                     <div style="font-size:13px;color:var(--inactive-color);line-height:1.5;">Manuais de instrução anexados aos produtos do catálogo.</div>
                   </div>
+                  <!-- Card: Lista Mestra -->
+                  <div id="qualidadeListaMestraBtn" style="cursor:pointer;padding:24px;border:1px solid var(--border-color);border-radius:14px;background:var(--content-bg);box-shadow:0 4px 16px rgba(15,23,42,.06);transition:transform .15s,box-shadow .15s;" onmouseover="this.style.transform='translateY(-2px)';this.style.boxShadow='0 8px 24px rgba(168,85,247,.15)'" onmouseout="this.style.transform='';this.style.boxShadow='0 4px 16px rgba(15,23,42,.06)'">
+                    <div style="display:flex;align-items:center;gap:14px;margin-bottom:12px;">
+                      <div style="width:48px;height:48px;border-radius:12px;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#f3e8ff 0%,#e9d5ff 100%);color:#9333ea;font-size:20px;flex:0 0 auto;">
+                        <i class="fa-solid fa-table-list"></i>
+                      </div>
+                      <div style="font-weight:700;font-size:16px;color:var(--content-color);">Lista mestra</div>
+                    </div>
+                    <div style="font-size:13px;color:var(--inactive-color);line-height:1.5;">Documentos controlados — número, revisão, datas e responsáveis.</div>
+                  </div>
                 </div>
 
                 <div id="qualidadeManuaisMeta" style="font-size:12px;color:var(--inactive-color);margin-top:12px;"></div>
@@ -2656,6 +2671,220 @@
                       </button>
                     </div>
                     <div id="qualidadeManuaisLista" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:14px;"></div>
+                  </div>
+                </div>
+
+                <div id="qualidadeListaMestraWrap" style="display:none;margin-top:16px;">
+                  <div style="background:var(--content-bg);border:1px solid var(--border-color);border-radius:12px;padding:16px;">
+                    <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:12px;">
+                      <div style="flex:1;min-width:260px;">
+                        <div style="display:flex;align-items:center;gap:8px;">
+                          <i class="fa-solid fa-table-list" style="color:#9333ea;"></i>
+                          <div style="font-weight:600;">Lista mestra de documentos</div>
+                        </div>
+                        <div style="margin-top:8px;font-size:12px;color:var(--inactive-color);line-height:1.5;max-width:900px;">
+                          A atualização dos documentos são de responsabilidade do proprietário do documento; após qualquer atualização o mesmo deve informar a qualidade para que mantenha esta lista atualizada.
+                        </div>
+                      </div>
+                      <button id="qualidadeListaMestraRecarregarBtn" class="content-button" type="button" style="display:inline-flex;align-items:center;gap:6px;background:#334155;color:#fff;font-size:12px;padding:6px 14px;">
+                        <i class="fa-solid fa-rotate-right"></i>
+                        <span>Recarregar</span>
+                      </button>
+                    </div>
+                    <div class="tabela-wrapper" style="overflow:auto;">
+                      <table class="tabela padrao" style="min-width:1450px;">
+                        <thead>
+                          <tr>
+                            <th>Nº formulário</th>
+                            <th>Descrição</th>
+                            <th>Proprietário</th>
+                            <th>Departamento</th>
+                            <th>Nº Rev.</th>
+                            <th>Data criação</th>
+                            <th>Revisado</th>
+                            <th>Revisado por</th>
+                            <th>Próxima revisão</th>
+                            <th>Documento</th>
+                          </tr>
+                        </thead>
+                        <tbody id="qualidadeListaMestraTbody"></tbody>
+                      </table>
+                    </div>
+                    <div id="qualidadeListaMestraMeta" style="font-size:12px;color:var(--inactive-color);margin-top:10px;"></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Modal: editar documento da Lista Mestra -->
+          <div id="qualidadeListaMestraEditModal" class="modal-overlay" style="display:none;z-index:10035;">
+            <div class="modal-container" style="max-width:820px;width:96%;max-height:92vh;overflow-y:auto;">
+              <div class="modal-header">
+                <h3 style="margin:0;display:flex;align-items:center;gap:8px;">
+                  <i class="fa-solid fa-pen-to-square" style="color:#9333ea;"></i>
+                  <span>Editar documento</span>
+                </h3>
+                <button id="qualidadeListaMestraEditModalClose" class="modal-close-btn" type="button">×</button>
+              </div>
+              <div style="padding:18px 20px;display:flex;flex-direction:column;gap:12px;">
+                <input type="hidden" id="qualidadeListaMestraEditId">
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+                  <div class="form-field">
+                    <label for="qualidadeListaMestraEditNumero">Número do formulário</label>
+                    <input type="text" id="qualidadeListaMestraEditNumero" class="form-input" style="width:100%;">
+                  </div>
+                  <div class="form-field">
+                    <label for="qualidadeListaMestraEditRevisao">N° da Rev.</label>
+                    <input type="text" id="qualidadeListaMestraEditRevisao" class="form-input" style="width:100%;">
+                  </div>
+                </div>
+                <div class="form-field">
+                  <label for="qualidadeListaMestraEditDescricao">Descrição</label>
+                  <input type="text" id="qualidadeListaMestraEditDescricao" class="form-input" style="width:100%;">
+                </div>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+                  <div class="form-field">
+                    <label for="qualidadeListaMestraEditTipoDocumento">Tipo de documento</label>
+                    <input type="text" id="qualidadeListaMestraEditTipoDocumento" class="form-input" style="width:100%;">
+                  </div>
+                  <div class="form-field">
+                    <label for="qualidadeListaMestraEditFormato">Formato</label>
+                    <input type="text" id="qualidadeListaMestraEditFormato" class="form-input" style="width:100%;">
+                  </div>
+                </div>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+                  <div class="form-field">
+                    <label for="qualidadeListaMestraEditClassificacao">Classificação</label>
+                    <input type="text" id="qualidadeListaMestraEditClassificacao" class="form-input" style="width:100%;">
+                  </div>
+                  <div class="form-field">
+                    <label for="qualidadeListaMestraEditAutor">Autor</label>
+                    <input type="text" id="qualidadeListaMestraEditAutor" class="form-input" style="width:100%;">
+                  </div>
+                </div>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+                  <div class="form-field">
+                    <label for="qualidadeListaMestraEditDataCriacao">Data de criação</label>
+                    <input type="text" id="qualidadeListaMestraEditDataCriacao" class="form-input" style="width:100%;" placeholder="dd/mm/aaaa">
+                  </div>
+                  <div class="form-field">
+                    <label for="qualidadeListaMestraEditStatus">Status</label>
+                    <input type="text" id="qualidadeListaMestraEditStatus" class="form-input" style="width:100%;">
+                  </div>
+                </div>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;align-items:end;">
+                  <div class="form-field">
+                    <label for="qualidadeListaMestraEditRevisado">Revisado</label>
+                    <div style="display:flex;gap:8px;">
+                      <input type="text" id="qualidadeListaMestraEditRevisado" class="form-input" style="flex:1;" placeholder="dd/mm/aaaa" readonly>
+                      <button id="qualidadeListaMestraMarcarRevisadoBtn" type="button" class="content-button" title="Registrar revisão com data de hoje e seu usuário"
+                        style="white-space:nowrap;background:linear-gradient(135deg,#16a34a 0%,#15803d 100%);color:white;padding:8px 12px;">
+                        <i class="fa-solid fa-check"></i> Revisado
+                      </button>
+                    </div>
+                  </div>
+                  <div class="form-field">
+                    <label for="qualidadeListaMestraEditRevisadoPor">Revisado por</label>
+                    <input type="text" id="qualidadeListaMestraEditRevisadoPor" class="form-input" style="width:100%;" readonly>
+                  </div>
+                </div>
+                <div class="form-field">
+                  <label for="qualidadeListaMestraEditProximaRevisao">Próxima revisão</label>
+                  <input type="text" id="qualidadeListaMestraEditProximaRevisao" class="form-input" style="width:100%;" placeholder="dd/mm/aaaa">
+                </div>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+                  <div class="form-field">
+                    <label for="qualidadeListaMestraEditResponsavel">Responsável por arquivar e eliminar</label>
+                    <input type="text" id="qualidadeListaMestraEditResponsavel" class="form-input" style="width:100%;">
+                  </div>
+                  <div class="form-field">
+                    <label for="qualidadeListaMestraEditTempoRetencao">Tempo de retenção</label>
+                    <input type="text" id="qualidadeListaMestraEditTempoRetencao" class="form-input" style="width:100%;">
+                  </div>
+                </div>
+                <div class="form-field">
+                  <label for="qualidadeListaMestraEditDataArquivamento">Data de arquivamento</label>
+                  <input type="text" id="qualidadeListaMestraEditDataArquivamento" class="form-input" style="width:100%;" placeholder="dd/mm/aaaa">
+                </div>
+                <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:8px;">
+                  <button id="qualidadeListaMestraEditCancelarBtn" class="content-button" type="button" style="background:#6b7280;color:white;">Cancelar</button>
+                  <button id="qualidadeListaMestraEditSalvarBtn" class="content-button" type="button" style="background:linear-gradient(135deg,#9333ea 0%,#7e22ce 100%);color:white;">
+                    <i class="fa-solid fa-floppy-disk"></i> Salvar
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Modal: visualizar / trocar arquivo da Lista Mestra -->
+          <div id="qualidadeListaMestraArquivoModal" class="modal-overlay" style="display:none;z-index:10036;">
+            <div class="modal-container" style="max-width:900px;width:96%;max-height:92vh;overflow-y:auto;">
+              <div class="modal-header">
+                <h3 style="margin:0;display:flex;align-items:center;gap:8px;">
+                  <i class="fa-solid fa-file-lines" style="color:#9333ea;"></i>
+                  <span id="qualidadeListaMestraArquivoModalTitulo">Documento</span>
+                </h3>
+                <button id="qualidadeListaMestraArquivoModalClose" class="modal-close-btn" type="button">×</button>
+              </div>
+              <div style="padding:18px 20px;display:flex;flex-direction:column;gap:16px;">
+                <input type="hidden" id="qualidadeListaMestraArquivoId">
+                <div id="qualidadeListaMestraArquivoInfo" style="font-size:13px;color:var(--inactive-color);"></div>
+
+                <div id="qualidadeListaMestraArquivoDownloadWrap" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+                  <a id="qualidadeListaMestraArquivoBaixarLink" href="#" class="content-button" style="display:none;align-items:center;gap:8px;background:linear-gradient(135deg,#2563eb 0%,#1d4ed8 100%);color:white;text-decoration:none;">
+                    <i class="fa-solid fa-download"></i>
+                    <span>Baixar arquivo atual</span>
+                  </a>
+                  <span id="qualidadeListaMestraArquivoSemArquivo" style="display:none;color:var(--inactive-color);font-size:13px;">
+                    <i class="fa-solid fa-file-circle-question"></i> Nenhum arquivo enviado ainda.
+                  </span>
+                </div>
+
+                <div id="qualidadeListaMestraArquivoUploadWrap" style="border-top:1px solid var(--border-color);padding-top:16px;">
+                  <div style="font-weight:600;margin-bottom:10px;display:flex;align-items:center;gap:8px;">
+                    <i class="fa-solid fa-arrow-rotate-right" style="color:#9333ea;"></i>
+                    Trocar documento (nova revisão)
+                  </div>
+                  <div class="form-field">
+                    <label for="qualidadeListaMestraArquivoDescricao">O que mudou nesta versão?</label>
+                    <textarea id="qualidadeListaMestraArquivoDescricao" rows="3" class="form-input" style="width:100%;resize:vertical;" placeholder="Descreva as alterações feitas nesta revisão..."></textarea>
+                  </div>
+                  <div class="form-field">
+                    <label for="qualidadeListaMestraArquivoInput">Arquivo</label>
+                    <input type="file" id="qualidadeListaMestraArquivoInput" accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.png,.jpg,.jpeg,.webp" style="width:100%;">
+                  </div>
+                  <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:8px;">
+                    <button id="qualidadeListaMestraArquivoEnviarBtn" class="content-button" type="button" style="background:linear-gradient(135deg,#9333ea 0%,#7e22ce 100%);color:white;">
+                      <i class="fa-solid fa-cloud-arrow-up"></i> Enviar nova versão
+                    </button>
+                  </div>
+                </div>
+                <div id="qualidadeListaMestraArquivoUploadRestrito" style="display:none;border-top:1px solid var(--border-color);padding-top:16px;">
+                  <div style="padding:14px 16px;border-radius:10px;background:rgba(234,179,8,.12);border:1px solid rgba(234,179,8,.35);color:#ca8a04;font-size:13px;line-height:1.5;">
+                    <i class="fa-solid fa-lock"></i>
+                    Atualização somente via setor da qualidade
+                  </div>
+                </div>
+
+                <div>
+                  <div style="font-weight:600;margin-bottom:10px;display:flex;align-items:center;gap:8px;">
+                    <i class="fa-solid fa-clock-rotate-left" style="color:#64748b;"></i>
+                    Histórico de versões
+                  </div>
+                  <div class="tabela-wrapper" style="overflow:auto;">
+                    <table class="tabela padrao" style="min-width:700px;">
+                      <thead>
+                        <tr>
+                          <th>Rev.</th>
+                          <th>Alteração</th>
+                          <th>Inserido por</th>
+                          <th>Data</th>
+                          <th>Arquivo</th>
+                        </tr>
+                      </thead>
+                      <tbody id="qualidadeListaMestraHistoricoTbody"></tbody>
+                    </table>
                   </div>
                 </div>
               </div>
@@ -9646,6 +9875,18 @@
                 </div>
               </div>
 
+              <!-- Coluna: Solicitado -->
+              <div style="flex:0 0 340px;min-width:300px;">
+                <div style="display:flex;align-items:center;gap:8px;padding:10px 14px;background:#172554;border-radius:10px 10px 0 0;border:1px solid #1d4ed8;border-bottom:none;">
+                  <span style="width:10px;height:10px;border-radius:50%;background:#3b82f6;display:inline-block;flex-shrink:0;"></span>
+                  <span style="font-size:12px;font-weight:700;color:#93c5fd;text-transform:uppercase;letter-spacing:.5px;">Solicitado</span>
+                  <span id="kanbanSolicitadoCount" style="margin-left:auto;font-size:11px;background:#1e3a8a;color:#bfdbfe;padding:2px 9px;border-radius:10px;font-weight:600;">0</span>
+                </div>
+                <div id="kanbanSolicitado" style="min-height:220px;background:rgba(59,130,246,.04);border:1px solid #1d4ed8;border-top:none;border-radius:0 0 10px 10px;padding:10px;display:flex;flex-direction:column;gap:10px;">
+                  <div style="text-align:center;padding:24px 0;color:var(--inactive-color);font-size:12px;">Nenhuma OS solicitada.</div>
+                </div>
+              </div>
+
               <!-- Coluna: Produzindo -->
               <div style="flex:0 0 340px;min-width:300px;">
                 <div style="display:flex;align-items:center;gap:8px;padding:10px 14px;background:#052e16;border-radius:10px 10px 0 0;border:1px solid #166534;border-bottom:none;">
@@ -10012,7 +10253,7 @@
     border-radius: 14px; width: 92vw; max-width: 960px;
     display: flex; flex-direction: column; gap: 0;
     box-shadow: 0 20px 60px rgba(0,0,0,.5);
-    overflow: hidden; margin-bottom: 40px;
+    overflow: visible; margin-bottom: 40px;
   }
   .etiquetas-modal-header {
     display: flex; align-items: center; justify-content: space-between;
@@ -10187,7 +10428,7 @@
   #etqBtnConfig { color: #a78bfa; }
   #etqBtnConfig.open { background: #7c3aed; color: #fff; }
   .etq-config-dropdown {
-    position: absolute; right: 0; top: calc(100% + 8px); z-index: 9999;
+    position: fixed; z-index: 2500;
     background: #1e293b; border: 1px solid #334155; border-radius: 10px;
     padding: 10px 8px; min-width: 220px;
     box-shadow: 0 8px 32px rgba(0,0,0,.45);
