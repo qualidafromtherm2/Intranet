@@ -10999,6 +10999,73 @@ table.tabela td.num {
 .movimTipoBtn[data-type="TRANSFERENCIA"].ativo { background: #105c7a; color: #fff; }
 .movimTipoBtn.processando { opacity: .65; cursor: wait; }
 
+/* Impressora no modal movimentação */
+.movim-impressora-row {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  padding: 10px 12px; margin-top: 4px;
+  background: rgba(15,23,42,.55); border: 1px solid rgba(51,65,85,.6);
+  border-radius: 10px;
+}
+.movim-impressora-row--modal { margin: 0 16px 12px; }
+.movim-impressora-row label { color: #94a3b8; font-size: .8rem; white-space: nowrap; flex-shrink: 0; }
+.movim-impr-icone { color: #a78bfa; font-size: .85rem; flex-shrink: 0; }
+.movim-listbox-impressora {
+  flex: 1; min-width: 140px; background: #1e293b; color: #f1f5f9;
+  border: 1px solid #334155; border-radius: 7px;
+  padding: 7px 10px; font-size: .85rem; outline: none; cursor: pointer;
+}
+.movim-listbox-impressora:focus { border-color: #7c3aed; }
+.movim-impr-btn-icon {
+  background: #1e293b; border: 1px solid #334155; border-radius: 7px;
+  color: #94a3b8; padding: 7px 10px; cursor: pointer; flex-shrink: 0;
+}
+.movim-impr-btn-icon:hover { color: #e2e8f0; border-color: #475569; }
+
+/* Sub-modal impressão ETQ */
+.movim-imp-overlay {
+  position: fixed; inset: 0; z-index: 10150;
+  background: rgba(0,0,0,.82); backdrop-filter: blur(6px);
+  display: flex; align-items: center; justify-content: center; padding: 16px;
+}
+.movim-imp-panel {
+  width: min(480px, 100%); background: #1a1d27;
+  border: 1px solid rgba(113,119,144,.28); border-radius: 18px;
+  overflow: hidden; box-shadow: 0 18px 48px rgba(0,0,0,.55);
+}
+.movim-imp-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 14px 18px; border-bottom: 1px solid rgba(113,119,144,.22);
+  background: rgba(15,23,42,.72);
+}
+.movim-imp-title-wrap { display: flex; align-items: center; gap: 10px; }
+.movim-imp-title-wrap > i { color: #a78bfa; font-size: 1.1rem; }
+.movim-imp-titulo { display: block; font-weight: 700; color: #f1f5f9; font-size: 1rem; }
+.movim-imp-subtitulo { display: block; font-size: .78rem; color: #94a3b8; margin-top: 2px; }
+.movim-imp-status { padding: 8px 16px; font-size: .85rem; color: #94a3b8; min-height: 28px; }
+.movim-imp-status.erro { color: #f87171; }
+.movim-imp-status.ok { color: #4ade80; }
+.movim-imp-etq-wrap, .movim-imp-qtd-row {
+  padding: 0 16px 12px; display: flex; flex-direction: column; gap: 6px;
+}
+.movim-imp-etq-wrap label, .movim-imp-qtd-row label { color: #94a3b8; font-size: .82rem; font-weight: 600; }
+.movim-imp-etq-wrap select, .movim-imp-qtd-row input {
+  background: #0f172a; border: 1px solid #334155; border-radius: 8px;
+  padding: 10px 12px; color: #f1f5f9; font-size: .92rem; width: 100%; box-sizing: border-box;
+}
+.movim-imp-footer {
+  display: flex; justify-content: flex-end; gap: 10px;
+  padding: 12px 16px 16px; border-top: 1px solid rgba(113,119,144,.18);
+}
+.movim-imp-btn-confirmar {
+  background: linear-gradient(135deg, #7c3aed, #6366f1); color: #fff; border: none;
+  border-radius: 10px; padding: 10px 18px; font-weight: 700; cursor: pointer;
+  display: inline-flex; align-items: center; gap: 8px; font-size: .92rem;
+}
+.movim-imp-btn-cancelar {
+  background: #2a2d3a; color: #d1d5db; border: 1px solid #3f4454;
+  border-radius: 10px; padding: 10px 16px; cursor: pointer; font-size: .92rem;
+}
+
 .movim-scan-overlay {
   position: fixed; inset: 0; z-index: 10250;
   background: rgba(0,0,0,.88); backdrop-filter: blur(6px);

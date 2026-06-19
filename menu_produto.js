@@ -28207,6 +28207,7 @@ window.openRegistros = async function() {
     if (!_etqPrinterPref && cfg.padrao) _etqSalvarPref(cfg.padrao);
     document.getElementById('etqConfigImpressorasModal').style.display = 'none';
     _etqAtualizarListbox();
+    window.dispatchEvent(new CustomEvent('etq-impr-cfg-saved'));
   });
 
   document.getElementById('etqCfgImprCancelar')?.addEventListener('click', () => {
@@ -66522,21 +66523,20 @@ document.addEventListener('DOMContentLoaded', () => {
   const MOVIM_MOTIVOS = {
     ENT: [
       { v: 'INV', l: 'INV — Ajuste por Inventário' },
-      { v: 'OPE', l: 'OPE — Integração OP (Entrada)' },
-      { v: 'PDV', l: 'PDV — Integração PDV' },
       { v: 'INI', l: 'INI — Estoque Inicial' }
     ],
     SAI: [
       { v: 'INV', l: 'INV — Ajuste por Inventário' },
-      { v: 'PER', l: 'PER — Baixa por Perda/Quebra' },
-      { v: 'OPS', l: 'OPS — Integração OP (Saída)' },
-      { v: 'PDV', l: 'PDV — Integração PDV' }
+      { v: 'PER', l: 'PER — Baixa por Perda/Quebra' }
     ],
     TRF: [
       { v: 'TRF', l: 'TRF — Transferência entre Locais' },
       { v: 'TPQ', l: 'TPQ — Transferência por Perda/Quebra' }
     ]
   };
+  const MOVIM_TIPO_ACAO = { ENT: 'ENTRADA', SAI: 'SAIDA', TRF: 'TRANSFERENCIA' };
+  let _movimPrinterPrefTemp = null;
+  let _movimEtqImpressaoLista = [];
   let _processandoAcao = false;
   let _scanStream = null;
   let _scanInterval = null;
@@ -66560,6 +66560,8 @@ document.addEventListener('DOMContentLoaded', () => {
     limparEnderecosReferencia();
     _movimEstoqueLocais = [];
     _processandoAcao = false;
+    resetMotivoOmie();
+    _movimEtqImpressaoLista = [];
   }
 
   function limparEnderecos() {
@@ -66823,18 +66825,88 @@ document.addEventListener('DOMContentLoaded', () => {
       .filter(Boolean);
   }
 
-  function atualizarMotivosOmie(tipoOmie) {
+  function preencherMotivosOmieUnificados() {
     if (!omieMotivoSel) return;
-    const tipo = String(tipoOmie || 'TRF').toUpperCase();
-    const opcoes = MOVIM_MOTIVOS[tipo] || MOVIM_MOTIVOS.TRF;
-    omieMotivoSel.innerHTML = opcoes.map(o => `<option value="${o.v}">${escapeHtml(o.l)}</option>`).join('');
+    const opcoes = ['<option value="">Selecione o motivo…</option>'];
+    const entList = MOVIM_MOTIVOS.ENT || [];
+    const saiList = MOVIM_MOTIVOS.SAI || [];
+    const labelsUnificados = new Set();
+
+    for (const ent of entList) {
+      const saiIgual = saiList.find(s => s.v === ent.v && s.l === ent.l);
+      if (saiIgual) labelsUnificados.add(`${ent.v}\0${ent.l}`);
+    }
+
+    for (const ent of entList) {
+      if (labelsUnificados.has(`${ent.v}\0${ent.l}`)) {
+        opcoes.push(`<option value="ENT,SAI:${ent.v}">Entrada/Saída — ${escapeHtml(ent.l)}</option>`);
+      } else {
+        opcoes.push(`<option value="ENT:${ent.v}">Entrada — ${escapeHtml(ent.l)}</option>`);
+      }
+    }
+    for (const sai of saiList) {
+      if (labelsUnificados.has(`${sai.v}\0${sai.l}`)) continue;
+      opcoes.push(`<option value="SAI:${sai.v}">Saída — ${escapeHtml(sai.l)}</option>`);
+    }
+    for (const o of (MOVIM_MOTIVOS.TRF || [])) {
+      opcoes.push(`<option value="TRF:${o.v}">Transferência — ${escapeHtml(o.l)}</option>`);
+    }
+    omieMotivoSel.innerHTML = opcoes.join('');
+  }
+
+  function resetMotivoOmie() {
+    if (omieMotivoSel) omieMotivoSel.value = '';
+    atualizarBotoesPorMotivo();
+  }
+
+  function parseMotivoSelecionado() {
+    const val = String(omieMotivoSel?.value || '').trim();
+    if (!val || !val.includes(':')) return null;
+    const sep = val.indexOf(':');
+    const tipos = val.slice(0, sep).split(',').map(t => t.trim().toUpperCase()).filter(Boolean);
+    const motivo = val.slice(sep + 1).trim().toUpperCase();
+    if (!tipos.length || !motivo) return null;
+    return { tipos, tipo: tipos[0], motivo };
+  }
+
+  function atualizarBotoesPorMotivo() {
+    const tipoDivEl = document.getElementById('movimTipo');
+    const motivoField = omieMotivoSel?.closest('.movim-field');
+    const mesmo = isMesmoArmazemMovim();
+
+    if (motivoField) motivoField.style.display = mesmo ? 'none' : '';
+
+    if (mesmo) {
+      if (tipoDivEl) tipoDivEl.style.display = 'flex';
+      document.querySelectorAll('.movimTipoBtn').forEach(btn => { btn.style.display = ''; });
+      return;
+    }
+
+    const parsed = parseMotivoSelecionado();
+    if (!tipoDivEl) return;
+    if (!parsed) {
+      tipoDivEl.style.display = 'none';
+      document.querySelectorAll('.movimTipoBtn').forEach(btn => {
+        btn.style.display = 'none';
+        btn.classList.remove('ativo');
+      });
+      return;
+    }
+
+    tipoDivEl.style.display = 'flex';
+    const acoesVisiveis = new Set(parsed.tipos.map(t => MOVIM_TIPO_ACAO[t]).filter(Boolean));
+    document.querySelectorAll('.movimTipoBtn').forEach(btn => {
+      const visivel = acoesVisiveis.has(btn.dataset.type);
+      btn.style.display = visivel ? '' : 'none';
+      btn.classList.toggle('ativo', visivel);
+    });
   }
 
   function obterMotivoOmie(tipoOmie) {
+    const parsed = parseMotivoSelecionado();
+    if (parsed) return parsed.motivo;
     const tipo = String(tipoOmie || '').toUpperCase();
-    const val = String(omieMotivoSel?.value || '').trim().toUpperCase();
     const opcoes = MOVIM_MOTIVOS[tipo] || [];
-    if (opcoes.some(o => o.v === val)) return val;
     return opcoes[0]?.v || 'INV';
   }
 
@@ -66914,6 +66986,82 @@ document.addEventListener('DOMContentLoaded', () => {
       _enderecoDestinoInterno = '';
       renderEnderecoInternoValores();
     }
+    atualizarBotoesPorMotivo();
+  }
+
+  function movimValParaLabelImpressora(val) {
+    if (!val) return '— padrão —';
+    if (val === '__PDF__') return 'PDF';
+    if (val === '__BP__') return 'Agente local';
+    if (val.startsWith('__AGENT__:')) {
+      const s = val.slice('__AGENT__:'.length);
+      const i = s.indexOf(':');
+      return i === -1 ? s : `${s.slice(i + 1)} (${s.slice(0, i)})`;
+    }
+    return val;
+  }
+
+  async function movimAtualizarListboxImpressora() {
+    const selects = [
+      document.getElementById('movimListboxImpressora'),
+      document.getElementById('movimImpListboxImpressora')
+    ].filter(Boolean);
+    if (!selects.length) return;
+
+    let cfg = {};
+    try { cfg = JSON.parse(localStorage.getItem(movimEtqImprKey()) || '{}'); } catch { cfg = {}; }
+    const padrao = cfg.padrao || null;
+    const enabled = Array.isArray(cfg.enabled) ? cfg.enabled : [];
+    const todos = padrao ? [padrao, ...enabled.filter(v => v !== padrao)] : enabled;
+
+    let agentData = [];
+    try {
+      const r = await fetch('/api/etiquetas/agentes-disponiveis', { credentials: 'include' });
+      const d = await r.json();
+      agentData = d.agentes || [];
+    } catch { /* ignora */ }
+
+    function buildOptions() {
+      const opts = ['<option value="">— padrão —</option>'];
+      const seen = new Set();
+      const add = (val, isPadrao) => {
+        const label = movimValParaLabelImpressora(val);
+        const key = label.toLowerCase();
+        if (seen.has(key)) return;
+        seen.add(key);
+        opts.push(`<option value="${escapeHtml(val)}"${isPadrao ? ' style="color:#fbbf24"' : ''}>${isPadrao ? '★ ' : ''}${escapeHtml(label)}</option>`);
+      };
+      if (todos.length === 0) {
+        for (const ag of agentData) {
+          for (const imp of (ag.printers || [])) {
+            add(`__AGENT__:${ag.pcName}:${imp}`, false);
+          }
+        }
+        add('__PDF__', false);
+      } else {
+        for (const val of todos) add(val, val === padrao);
+      }
+      return opts.join('');
+    }
+
+    const html = buildOptions();
+    const pref = _movimPrinterPrefTemp || padrao || '';
+    for (const sel of selects) {
+      sel.innerHTML = html;
+      if (pref) sel.value = pref;
+    }
+  }
+
+  function movimSyncImpressoraSelects(val) {
+    _movimPrinterPrefTemp = val || null;
+    for (const id of ['movimListboxImpressora', 'movimImpListboxImpressora']) {
+      const sel = document.getElementById(id);
+      if (sel && sel.value !== val) sel.value = val || '';
+    }
+  }
+
+  function movimAbrirConfigImpressoras() {
+    document.getElementById('etqBtnConfigImpressoras')?.click();
   }
 
   function movimEtqImprKey() {
@@ -66923,18 +67071,22 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function movimObterPrefsImpressora() {
     try {
+      const selVal = _movimPrinterPrefTemp
+        || document.getElementById('movimListboxImpressora')?.value
+        || document.getElementById('movimImpListboxImpressora')?.value
+        || null;
       const cfg = JSON.parse(localStorage.getItem(movimEtqImprKey()) || '{}');
-      const padrao = cfg.padrao || null;
-      if (!padrao) return {};
-      if (padrao.startsWith('__AGENT__:')) {
-        const s = padrao.slice('__AGENT__:'.length);
+      const escolha = selVal || cfg.padrao || null;
+      if (!escolha) return { via_fila: true };
+      if (escolha.startsWith('__AGENT__:')) {
+        const s = escolha.slice('__AGENT__:'.length);
         const i = s.indexOf(':');
-        if (i === -1) return { destino_agente: s };
+        if (i === -1) return { destino_agente: s, via_fila: true };
         return { destino_agente: s.slice(0, i), impressora: s.slice(i + 1), via_fila: true };
       }
-      if (padrao === '__BP__') return { via_fila: true };
-      if (padrao && padrao !== '__PDF__') return { printer: padrao, via_fila: false };
-      return {};
+      if (escolha === '__BP__') return { via_fila: true };
+      if (escolha === '__PDF__') return { via_fila: true };
+      return { printer: escolha, via_fila: false };
     } catch {
       return { via_fila: true };
     }
@@ -67073,34 +67225,39 @@ document.addEventListener('DOMContentLoaded', () => {
       await salvarEnderecamentoInterno(tipo);
       return;
     }
+    if (!parseMotivoSelecionado()) {
+      const msg = document.getElementById('movimMensagem');
+      if (msg) {
+        msg.textContent = 'Selecione o motivo do ajuste (Omie) antes de confirmar.';
+        msg.className = 'movim-mensagem erro';
+      }
+      omieMotivoSel?.focus();
+      return;
+    }
     if (tipo === 'TRANSFERENCIA') {
-      atualizarMotivosOmie('TRF');
       await salvarTransferencia();
       return;
     }
     if (tipo === 'ENTRADA') {
-      atualizarMotivosOmie('ENT');
       await salvarAjuste('ENT');
       return;
     }
     if (tipo === 'SAIDA') {
-      atualizarMotivosOmie('SAI');
       await salvarAjuste('SAI');
       return;
     }
   }
 
+  if (omieMotivoSel) {
+    preencherMotivosOmieUnificados();
+    omieMotivoSel.addEventListener('change', atualizarBotoesPorMotivo);
+  }
+
   // Botões de ação final (ENTRADA / SAIDA / TRANSFERENCIA)
   if (tipoDiv) {
-    const mapTipoOmie = { ENTRADA: 'ENT', SAIDA: 'SAI', TRANSFERENCIA: 'TRF' };
-    tipoDiv.addEventListener('mouseenter', e => {
-      const btn = e.target.closest('.movimTipoBtn');
-      if (!btn) return;
-      atualizarMotivosOmie(mapTipoOmie[btn.dataset.type] || 'TRF');
-    }, true);
     tipoDiv.addEventListener('click', e => {
       const btn = e.target.closest('.movimTipoBtn');
-      if (!btn || btn.disabled) return;
+      if (!btn || btn.disabled || btn.style.display === 'none') return;
       executarAcao(btn.dataset.type);
     });
   }
@@ -67786,6 +67943,136 @@ document.addEventListener('DOMContentLoaded', () => {
 
   if (comprasBtn) comprasBtn.addEventListener('click', abrirUltimasComprasMovim);
 
+  // ── Impressão ETQ_rec_impresso ───────────────────────────────────────────
+  const impModal = document.getElementById('movimImpressaoModal');
+  const impFechar = document.getElementById('movimImpressaoFechar');
+  const impCancelar = document.getElementById('movimImpressaoCancelar');
+  const impConfirmar = document.getElementById('movimImpressaoConfirmar');
+  const impEtqSel = document.getElementById('movimImpressaoEtqSelect');
+  const impQtdInput = document.getElementById('movimImpressaoQtd');
+  const impStatus = document.getElementById('movimImpressaoStatus');
+  const impBtn = document.getElementById('movimImpressaoBtn');
+
+  function fecharImpressaoMovim() {
+    if (impModal) impModal.style.display = 'none';
+    if (impStatus) { impStatus.textContent = ''; impStatus.className = 'movim-imp-status'; }
+  }
+
+  function renderOpcoesEtqImpressao(lista) {
+    if (!impEtqSel) return;
+    if (!lista.length) {
+      impEtqSel.innerHTML = '<option value="">Nenhuma etiqueta encontrada</option>';
+      return;
+    }
+    impEtqSel.innerHTML = lista.map(etq => {
+      const end = String(etq.endereco || '').trim();
+      const qtd = etq.qtd != null ? ` — Qtd: ${etq.qtd}` : '';
+      const comp = etq.complemento ? ` (${String(etq.complemento).slice(0, 40)})` : '';
+      return `<option value="${etq.id}">${escapeHtml(end)}${escapeHtml(qtd)}${escapeHtml(comp)}</option>`;
+    }).join('');
+  }
+
+  async function abrirImpressaoMovim() {
+    const codigo = _codigoProdutoAtual;
+    if (!codigo) {
+      const msg = document.getElementById('movimMensagem');
+      if (msg) {
+        msg.textContent = 'Produto nao identificado para impressao.';
+        msg.className = 'movim-mensagem erro';
+      }
+      return;
+    }
+
+    const titulo = document.getElementById('movimImpressaoTitulo');
+    const subtitulo = document.getElementById('movimImpressaoSubtitulo');
+    if (titulo) titulo.textContent = 'Imprimir etiqueta';
+    if (subtitulo) subtitulo.textContent = (_descricaoProdutoAtual || codigo) + ' · Codigo: ' + codigo;
+    if (impQtdInput) impQtdInput.value = '1';
+    if (impStatus) { impStatus.textContent = 'Carregando etiquetas…'; impStatus.className = 'movim-imp-status'; }
+    if (impEtqSel) impEtqSel.innerHTML = '<option value="">Carregando…</option>';
+    if (impModal) impModal.style.display = 'flex';
+
+    await movimAtualizarListboxImpressora();
+
+    try {
+      const resp = await fetch('/api/etiquetas/rec-impresso/etiquetas-por-produto?codigo=' + encodeURIComponent(codigo), { credentials: 'include' });
+      const json = await resp.json();
+      if (!resp.ok || !json?.ok) throw new Error(json?.error || `HTTP ${resp.status}`);
+      _movimEtqImpressaoLista = Array.isArray(json.etiquetas) ? json.etiquetas : [];
+      renderOpcoesEtqImpressao(_movimEtqImpressaoLista);
+      if (!_movimEtqImpressaoLista.length) {
+        if (impStatus) {
+          impStatus.textContent = 'Nenhuma etiqueta ETQ_rec_impresso com endereco para este produto.';
+          impStatus.className = 'movim-imp-status erro';
+        }
+      } else if (impStatus) {
+        impStatus.textContent = _movimEtqImpressaoLista.length === 1
+          ? '1 etiqueta disponivel.'
+          : `${_movimEtqImpressaoLista.length} etiquetas — selecione qual imprimir.`;
+        impStatus.className = 'movim-imp-status';
+      }
+    } catch (err) {
+      _movimEtqImpressaoLista = [];
+      if (impEtqSel) impEtqSel.innerHTML = '<option value="">Erro ao carregar</option>';
+      if (impStatus) {
+        impStatus.textContent = String(err?.message || err);
+        impStatus.className = 'movim-imp-status erro';
+      }
+    }
+  }
+
+  async function confirmarImpressaoMovim() {
+    const idEtq = Number(impEtqSel?.value);
+    const qtd = Math.max(1, Math.floor(Number(impQtdInput?.value) || 1));
+    if (!idEtq) {
+      if (impStatus) {
+        impStatus.textContent = 'Selecione uma etiqueta para imprimir.';
+        impStatus.className = 'movim-imp-status erro';
+      }
+      return;
+    }
+    if (impConfirmar) { impConfirmar.disabled = true; }
+    if (impStatus) { impStatus.textContent = 'Enviando para impressao…'; impStatus.className = 'movim-imp-status'; }
+    try {
+      const ids = Array.from({ length: qtd }, () => idEtq);
+      const imp = await imprimirEtiquetasMovim(ids);
+      if (!imp?.ok) throw new Error(imp?.error || 'Falha ao imprimir.');
+      if (impStatus) {
+        impStatus.textContent = `${imp.quantidade || qtd} etiqueta(s) enviada(s) para impressao.`;
+        impStatus.className = 'movim-imp-status ok';
+      }
+      setTimeout(fecharImpressaoMovim, 1200);
+      _movimPrinterPrefTemp = null;
+      movimAtualizarListboxImpressora();
+    } catch (err) {
+      if (impStatus) {
+        impStatus.textContent = String(err?.message || err);
+        impStatus.className = 'movim-imp-status erro';
+      }
+    } finally {
+      if (impConfirmar) impConfirmar.disabled = false;
+    }
+  }
+
+  if (impBtn) impBtn.addEventListener('click', abrirImpressaoMovim);
+  if (impFechar) impFechar.addEventListener('click', fecharImpressaoMovim);
+  if (impCancelar) impCancelar.addEventListener('click', fecharImpressaoMovim);
+  if (impConfirmar) impConfirmar.addEventListener('click', confirmarImpressaoMovim);
+  if (impModal) impModal.addEventListener('click', e => { if (e.target === impModal) fecharImpressaoMovim(); });
+
+  for (const id of ['movimListboxImpressora', 'movimImpListboxImpressora']) {
+    document.getElementById(id)?.addEventListener('change', function () {
+      movimSyncImpressoraSelects(this.value || null);
+    });
+  }
+  for (const id of ['movimBtnRefreshImpressoras', 'movimImpBtnRefreshImpressoras']) {
+    document.getElementById(id)?.addEventListener('click', () => movimAtualizarListboxImpressora());
+  }
+  for (const id of ['movimBtnConfigImpressoras', 'movimImpBtnConfigImpressoras']) {
+    document.getElementById(id)?.addEventListener('click', movimAbrirConfigImpressoras);
+  }
+  window.addEventListener('etq-impr-cfg-saved', () => movimAtualizarListboxImpressora());
+
   // Abre o modal
   window.abrirModalMovimentacao = async function(codigo, descricao, codigoProduto) {
     _codigoProdutoAtual = codigo;
@@ -67798,7 +68085,8 @@ document.addEventListener('DOMContentLoaded', () => {
     if (msg) { msg.textContent = ''; msg.className = 'movim-mensagem'; }
     limparRetornoOmie();
     limparEnderecos();
-    atualizarMotivosOmie('TRF');
+    resetMotivoOmie();
+    _movimPrinterPrefTemp = null;
     const imprCb = document.getElementById('movimImprimirEtiqueta');
     if (imprCb) imprCb.checked = false;
 
@@ -67811,7 +68099,8 @@ document.addEventListener('DOMContentLoaded', () => {
     await Promise.all([
       carregarLocais(),
       carregarEstoqueModal(codigo),
-      carregarEnderecosReferencia(codigo)
+      carregarEnderecosReferencia(codigo),
+      movimAtualizarListboxImpressora()
     ]);
     atualizarUiMesmoArmazem();
   };

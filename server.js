@@ -11564,6 +11564,38 @@ app.get('/api/etiquetas/rec-impresso/enderecos-por-produto', async (req, res) =>
   }
 });
 
+// GET /api/etiquetas/rec-impresso/etiquetas-por-produto?codigo=XXX
+// Registros ETQ_rec_impresso com id (último por endereço, qtd > 0) para reimpressão
+app.get('/api/etiquetas/rec-impresso/etiquetas-por-produto', async (req, res) => {
+  try {
+    const codigo = String(req.query.codigo || '').trim();
+    if (!codigo) return res.status(400).json({ ok: false, error: 'codigo é obrigatório.' });
+
+    const { rows } = await pool.query(
+      `SELECT DISTINCT ON (TRIM(i.endereco))
+              i.id,
+              TRIM(i.endereco) AS endereco,
+              COALESCE(i.qtd, 0) AS qtd,
+              i.complemento,
+              i.data_emissao,
+              i.impresso_em,
+              $1::text AS codigo_produto
+         FROM etiqueta."ETQ_rec_impresso" i
+         LEFT JOIN etiqueta."ETQ_recebimento" r ON r.id = i.origem_id
+        WHERE TRIM(COALESCE(i.codigo_produto, r.codigo_produto, '')) = $1
+          AND i.endereco IS NOT NULL AND TRIM(i.endereco) <> ''
+          AND COALESCE(i.qtd, 0) > 0
+        ORDER BY TRIM(i.endereco), i.id DESC`,
+      [codigo]
+    );
+
+    res.json({ ok: true, codigo, etiquetas: rows });
+  } catch (err) {
+    console.error('[etiquetas/rec-impresso/etiquetas-por-produto]', err);
+    res.status(500).json({ ok: false, error: err?.message || 'Falha ao buscar etiquetas.' });
+  }
+});
+
 // GET /api/etiquetas/rec-impresso?q=texto
 // Retorna registros já impressos de ETQ_rec_impresso, com filtro opcional
 app.get('/api/etiquetas/rec-impresso', async (req, res) => {
