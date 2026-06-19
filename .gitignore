@@ -67,9 +67,6 @@ data/users.json
 # Agente de Impressão — binário compilado (hospedado no Supabase)
 agente_impressao/*.exe
 
-# Arquivos pessoais do projeto — não versionar
-csv/1 - Instruções dev.csv
-
 # IA local (Continue) e agentes de orientação — não afetam o runtime do projeto
 .continue/
 .agents/
@@ -77,11 +74,12 @@ AGENTS.md
 ORIENTACAO-RAPIDA.md
 iniciar-ia.sh
 
-# Regras e skills do Cursor Agent — só úteis localmente
-.cursor/rules/
-.cursor/skills/
-
-# lixo operacional / capturas acidentais
+# Cursor, CSV local, SQL avulso e relatórios de importação — não versionar
+.cursor/
+csv/
+sql/create_qualidade_lista_mestra.sql
+sql/create_qualidade_lista_mestra_historico.sql
+scripts/relatorio_*.json
 menu_produto.js.backup_errors
 t-temp.txt
 tart intranet_api
