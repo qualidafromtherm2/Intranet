@@ -312,17 +312,109 @@ function _solEnderecamentoHtml(codigo, enderecoMap, itemFallback) {
     if (Array.isArray(fromItem) && fromItem.length) registros = fromItem;
   }
   if (!Array.isArray(registros) || !registros.length) return '';
-  const textos = registros.map(ep =>
-    String(ep.completo || '').trim()
-      || [ep.rua, ep.andar, ep.edificio, ep.apartamento].filter(Boolean).join(' · ')
-  ).filter(Boolean);
-  if (!textos.length) return '';
+  const gridCols = 'minmax(70px,1.2fr) repeat(3,minmax(32px,auto)) minmax(40px,.9fr)';
+  const head = `<div style="display:grid;grid-template-columns:${gridCols};gap:4px 8px;font-size:.58rem;color:#94a3b8;text-transform:uppercase;font-weight:700;padding-bottom:4px;border-bottom:1px solid #854d0e44;">
+    <span>Endereço</span><span>ID</span><span>Qtd</span><span>Un</span><span>Compl.</span>
+  </div>`;
+  const linhas = registros.map(ep => {
+    const end = escapeHtml(String(ep.endereco || ep.completo || '').trim());
+    if (!end) return '';
+    const id = escapeHtml(String(ep.id != null ? ep.id : '—'));
+    const qtd = escapeHtml(String(ep.qtd != null ? ep.qtd : '0'));
+    const un = escapeHtml(String(ep.unidade || 'UN'));
+    const comp = String(ep.complemento || '').trim();
+    const compEsc = comp ? escapeHtml(comp) : '—';
+    return `<div style="display:grid;grid-template-columns:${gridCols};gap:4px 8px;padding:4px 0;border-top:1px solid #854d0e33;font-size:.68rem;line-height:1.35;align-items:center;">
+      <span style="color:#fde68a;font-weight:700;word-break:break-word;">${end}</span>
+      <span style="color:#cbd5e1;font-weight:600;">${id}</span>
+      <span style="color:#cbd5e1;font-weight:600;">${qtd}</span>
+      <span style="color:#cbd5e1;font-weight:600;">${un}</span>
+      <span style="color:#94a3b8;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${comp ? escapeHtml(comp) : ''}">${compEsc}</span>
+    </div>`;
+  }).filter(Boolean).join('');
+  if (!linhas) return '';
   return `<div style="padding:6px 8px;background:#1a1508;border:1px solid #854d0e55;border-radius:8px;">
     <div style="font-size:.60rem;color:#fbbf24;font-weight:700;text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px;">Endereçamento</div>
-    ${textos.map(t => `<div style="font-size:.70rem;color:#fde68a;font-weight:700;word-break:break-word;line-height:1.45;padding:2px 0;">
-      <i class="fa-solid fa-map-pin" style="margin-right:4px;color:#f59e0b;font-size:.62rem;"></i>${t}
-    </div>`).join('')}
+    ${head}${linhas}
   </div>`;
+}
+
+function _solEnderecamentoSepInline(codigo, enderecoMap, itemFallback) {
+  const cod = String(codigo || '').trim();
+  let registros = cod ? enderecoMap?.[cod] : null;
+  if ((!Array.isArray(registros) || !registros.length) && cod && enderecoMap) {
+    const altKey = Object.keys(enderecoMap).find(k => String(k).trim() === cod);
+    if (altKey) registros = enderecoMap[altKey];
+  }
+  if ((!Array.isArray(registros) || !registros.length) && itemFallback) {
+    const fromItem = itemFallback.endereco_pp || itemFallback.enderecos_pp;
+    if (Array.isArray(fromItem) && fromItem.length) registros = fromItem;
+  }
+  registros = (registros || []).filter(ep => Number(ep.qtd) > 0);
+  if (!registros.length) {
+    return `<div style="font-size:.62rem;color:#fbbf24;font-style:italic;padding:4px 0;">
+      <i class="fa-solid fa-triangle-exclamation" style="margin-right:4px;"></i>Sem saldo em endereços ETQ
+    </div>`;
+  }
+  const gridCols = 'minmax(60px,1.2fr) repeat(3,minmax(28px,auto)) minmax(36px,.9fr)';
+  const head = `<div style="display:grid;grid-template-columns:${gridCols};gap:3px 6px;font-size:.55rem;color:#94a3b8;text-transform:uppercase;font-weight:700;padding-bottom:3px;border-bottom:1px solid #854d0e44;">
+    <span>End.</span><span>ID</span><span>Qtd</span><span>Un</span><span>Compl.</span>
+  </div>`;
+  const linhas = registros.map(ep => {
+    const end = escapeHtml(String(ep.endereco || ep.completo || '').trim());
+    if (!end) return '';
+    const id = String(ep.id != null ? ep.id : '');
+    const qtd = Number(ep.qtd || 0);
+    const un = escapeHtml(String(ep.unidade || 'UN'));
+    const comp = String(ep.complemento || '').trim();
+    const compEsc = comp ? escapeHtml(comp) : '—';
+    return `<button type="button" class="sep-etq-endereco-row" data-etq-id="${escapeHtml(id)}" data-etq-endereco="${end}" data-etq-qtd="${qtd}"
+      style="display:grid;grid-template-columns:${gridCols};gap:3px 6px;width:100%;padding:5px 4px;border:1px solid #854d0e33;border-radius:6px;background:#1a1508;color:inherit;font:inherit;cursor:pointer;text-align:left;align-items:center;">
+      <span style="color:#fde68a;font-weight:700;word-break:break-word;font-size:.65rem;">${end}</span>
+      <span style="color:#cbd5e1;font-weight:600;font-size:.64rem;">${escapeHtml(id || '—')}</span>
+      <span style="color:#cbd5e1;font-weight:600;font-size:.64rem;">${qtd}</span>
+      <span style="color:#cbd5e1;font-weight:600;font-size:.64rem;">${un}</span>
+      <span style="color:#94a3b8;font-size:.62rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${comp ? escapeHtml(comp) : ''}">${compEsc}</span>
+    </button>`;
+  }).filter(Boolean).join('');
+  if (!linhas) return '';
+  return `<div class="sep-etq-endereco-list" style="padding:6px 8px;background:#141006;border:1px solid #854d0e55;border-radius:8px;">
+    <div style="font-size:.58rem;color:#fbbf24;font-weight:700;text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px;">Endereçamento</div>
+    ${head}${linhas}
+  </div>`;
+}
+
+function _solRenderOrigemSepFase(locais, enderecoMap, codigoProd, princArmz) {
+  const sorted = (Array.isArray(locais) ? locais : [])
+    .filter(l => Number(l?.saldo) > 0)
+    .slice()
+    .sort((a, b) => {
+      if (String(a.local_codigo) === princArmz) return -1;
+      if (String(b.local_codigo) === princArmz) return 1;
+      return String(a?.local_nome || a?.local_codigo || '')
+        .localeCompare(String(b?.local_nome || b?.local_codigo || ''), 'pt-BR');
+    });
+  if (!sorted.length) {
+    return `<div style="font-size:.63rem;color:#6b7280;font-style:italic;">Sem origem com saldo</div>`;
+  }
+  return sorted.map((l, idx) => {
+    const cod = String(l.local_codigo || '');
+    const isAlmox = cod === princArmz;
+    const nome = (l.local_nome || cod).replace(/"/g, '&quot;');
+    const qty2 = Number(l.saldo).toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+    const endHtml = isAlmox ? _solEnderecamentoSepInline(codigoProd, enderecoMap) : '';
+    const isDefault = isAlmox || idx === 0;
+    return `<div class="sol-origem-sep-wrap" style="display:flex;flex-direction:column;gap:4px;width:100%;">
+      <button type="button" class="sol-origem-sep-btn" data-cod="${cod}" data-nome="${nome}" data-is-almox="${isAlmox ? '1' : '0'}" data-selected="${isDefault ? '1' : '0'}"
+        style="padding:5px 9px;border-radius:6px;font-size:.65rem;font-weight:700;cursor:pointer;white-space:normal;word-break:break-word;text-align:left;line-height:1.35;width:100%;
+               border:2px solid ${isDefault ? '#16a34a' : '#374151'};
+               background:${isDefault ? '#14532d' : '#111827'};
+               color:${isDefault ? '#86efac' : '#9ca3af'};">
+        ${l.local_nome || cod} · ${qty2} ${l.unidade || 'UN'}
+      </button>
+      ${isAlmox ? `<div class="sol-origem-sep-etq" style="display:${isDefault ? 'block' : 'none'};">${endHtml}</div>` : ''}
+    </div>`;
+  }).join('');
 }
 function _solDestinoHtml(it) {
   const endList = it?.enderecos_pp;
@@ -942,22 +1034,144 @@ async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) 
   let houveMudanca = false;
 
   const isStandby = origemStatus === 'Stund-by';
-  const usuarioSeparando = (grupoAtual.itens || [])
+  let usuarioSeparando = (grupoAtual.itens || [])
     .map(it => String(it.usuario_separando || '').trim())
     .find(Boolean) || '';
   const currentUser = _solCurrentUserName();
-  const podeAgirSep = !isStandby && (!usuarioSeparando || usuarioSeparando === currentUser);
+  let podeAgirSep = !isStandby && (!usuarioSeparando || usuarioSeparando === currentUser);
+  let perdeuSeparacaoParaOutro = false;
   const nSolicHdr = grupoAtual.n_solic || '';
   const PRINC_ARMZ = '10717096386';
-  const podeCancelarSep = !isStandby
+  let podeCancelarSep = !isStandby
     && (origemStatus === 'Em Separação' || origemStatus === 'Separado')
     && !!usuarioSeparando
     && usuarioSeparando === currentUser;
+
+  function _extrairUsuarioSeparando(itens) {
+    return (itens || [])
+      .map(it => String(it.usuario_separando || '').trim())
+      .find(Boolean) || '';
+  }
+
+  function _syncSepLockFromItens(itens) {
+    const eraAtivo = podeAgirSep;
+    usuarioSeparando = _extrairUsuarioSeparando(itens);
+    const novoPodeAgir = !isStandby && (!usuarioSeparando || usuarioSeparando === currentUser);
+    if (eraAtivo && !novoPodeAgir && usuarioSeparando && usuarioSeparando !== currentUser) {
+      perdeuSeparacaoParaOutro = true;
+    }
+    if (novoPodeAgir) perdeuSeparacaoParaOutro = false;
+    podeAgirSep = novoPodeAgir;
+    podeCancelarSep = !isStandby
+      && (origemStatus === 'Em Separação' || origemStatus === 'Separado')
+      && !!usuarioSeparando
+      && usuarioSeparando === currentUser;
+    grupoAtual.itens = itens;
+  }
+
+  function _htmlBannerSepLock() {
+    if (isStandby || podeAgirSep || !usuarioSeparando) return '';
+    if (perdeuSeparacaoParaOutro) {
+      return `<div style="margin:12px 16px 0;padding:10px 12px;border-radius:8px;background:#1f2937;border:1px solid #374151;font-size:.78rem;color:#d1d5db;">
+        <i class="fa-solid fa-user-lock" style="color:#f59e0b;margin-right:6px;"></i>
+        Separação assumida por <strong style="color:#fbbf24;">${usuarioSeparando}</strong>.
+      </div>`;
+    }
+    return `<div style="margin:12px 16px 0;padding:10px 12px;border-radius:8px;background:#1f2937;border:1px solid #374151;font-size:.78rem;color:#d1d5db;display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+      <span style="flex:1;min-width:200px;">
+        <i class="fa-solid fa-user-lock" style="color:#f59e0b;margin-right:6px;"></i>
+        Separação em andamento por <strong style="color:#fbbf24;">${usuarioSeparando}</strong>. Você pode visualizar, mas não alterar os itens.
+      </span>
+      <button type="button" id="btnAssumirSeparacao" style="padding:6px 12px;border:none;border-radius:8px;background:#1d4ed8;color:#dbeafe;font-weight:700;font-size:.76rem;cursor:pointer;white-space:nowrap;">
+        <i class="fa-solid fa-hand" style="margin-right:4px;"></i>Assumir separação
+      </button>
+    </div>`;
+  }
+
+  function _atualizarBannerSep() {
+    const host = document.getElementById('modalSepLockBanner');
+    if (!host) return;
+    host.innerHTML = _htmlBannerSepLock();
+    const btnCancel = document.getElementById('btnCancelarSeparacao');
+    const wrapCancel = btnCancel?.closest('div');
+    if (wrapCancel) wrapCancel.style.display = podeCancelarSep ? '' : 'none';
+  }
+
+  async function _fetchItensModalSep() {
+    const r = await fetch(_solBuildKanbanItensUrl(grupoAtual.n_solic, { escopoItens: grupoAtual.escopoItens }), { credentials: 'include' });
+    const d = await r.json();
+    if (!d.ok) return null;
+    return (d.itens || []).map(it => ({ ...it, solic_ids: [it.solic_id], carr_ids: [it.carr_id] }));
+  }
+
+  async function _verificarSeparadorSep() {
+    if (isStandby || !podeAgirSep) return podeAgirSep;
+    try {
+      const mapped = await _fetchItensModalSep();
+      if (!mapped) return true;
+      const sep = _extrairUsuarioSeparando(mapped);
+      if (sep && sep !== currentUser) {
+        _syncSepLockFromItens(mapped);
+        _atualizarBannerSep();
+        _renderLista();
+        return false;
+      }
+      return true;
+    } catch (_) {
+      return true;
+    }
+  }
+
+  function _tratarErroSeparadorPerdido(err) {
+    const msg = String(err?.message || err || '');
+    const m = msg.match(/Separação assumida por\s+(.+?)\.?$/i);
+    if (m) {
+      usuarioSeparando = m[1].trim();
+      perdeuSeparacaoParaOutro = true;
+      podeAgirSep = false;
+      podeCancelarSep = false;
+      _atualizarBannerSep();
+      _renderLista();
+      return true;
+    }
+    return false;
+  }
   const modalTitle = isStandby
     ? `Stund-by — ${nSolicHdr}`
     : (origemStatus === 'Em Separação' || origemStatus === 'Separado')
       ? `Em fase de separação — ${nSolicHdr}`
       : `Em Separação — ${nSolicHdr}`;
+  const isFaseSeparacao = origemStatus === 'Em Separação' || origemStatus === 'Separado';
+
+  function _solSepEtqPayloadFromRow(row) {
+    if (!row || row.dataset.requerEtq !== '1') return {};
+    const cod = String(row.dataset.origemCod || '').trim();
+    if (cod !== PRINC_ARMZ) return {};
+    return {
+      cod_local_origem: cod,
+      etq_id: row.dataset.etqId ? parseInt(row.dataset.etqId, 10) : undefined,
+      endereco_origem: row.dataset.etqEndereco || undefined,
+      codigo_produto: row.dataset.codigo || undefined
+    };
+  }
+
+  function _solValidarEtqSepRow(row, qty) {
+    if (!row || row.dataset.requerEtq !== '1') return true;
+    const codOrigem = String(row.dataset.origemCod || '').trim();
+    if (codOrigem !== PRINC_ARMZ) return true;
+    if (!row.dataset.etqId && !row.dataset.etqEndereco) {
+      alert('Selecione um endereço de origem no Almoxarifado (Porta Pallet).');
+      return false;
+    }
+    const saldo = parseFloat(row.dataset.etqQtd || '0');
+    const qtd = parseFloat(qty);
+    if (!Number.isFinite(saldo) || saldo <= 0 || (Number.isFinite(qtd) && saldo + 1e-9 < qtd)) {
+      const cod = row.dataset.codigo || 'item';
+      alert(`Item ${cod} não possui saldo, favor atualizar saldo no processo de movimentação.`);
+      return false;
+    }
+    return true;
+  }
 
   const STATUS_TRABALHO_MODAL_SEP = new Set(['Separação', 'Em Separação', 'Separado', 'Stund-by']);
   function _itensVisiveisModalSep(itens) {
@@ -1036,16 +1250,21 @@ async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) 
       ? `<div style="font-size:.70rem;color:#a78bfa;margin-top:2px;display:flex;align-items:center;gap:4px;"><i class="fa-solid fa-arrows-rotate" style="color:#a78bfa;"></i><span>${it.codigo_produto_ant} → ${it.codigo_produto_novo}</span></div>`
       : '';
     const destinoHtml = _solDestinoHtml(it);
-    const enderecamentoHtml = _solEnderecamentoHtml(it.codigo_produto, enderecoBatch, it);
-
     const locais = (estoqueBatch[it.codigo_produto] || [])
       .filter(l => Number(l.saldo) > 0)
       .slice()
       .sort((a, b) => String(a.local_codigo) === PRINC_ARMZ ? -1 : String(b.local_codigo) === PRINC_ARMZ ? 1 : 0);
-    let origemHtml = _solRenderOrigemResumoGlobal(
-      estoqueBatch[it.codigo_produto] || [],
-      Object.keys(estoqueBatch).length ? 'Sem origem com saldo' : 'Carregando origem...'
-    );
+    const temAlmoxOrigem = locais.some(l => String(l.local_codigo) === PRINC_ARMZ);
+    const usarOrigemSepFase = isFaseSeparacao && temAlmoxOrigem;
+    const enderecamentoHtml = isFaseSeparacao
+      ? ''
+      : _solEnderecamentoHtml(it.codigo_produto, enderecoBatch, it);
+    let origemHtml = usarOrigemSepFase
+      ? _solRenderOrigemSepFase(locais, enderecoBatch, it.codigo_produto, PRINC_ARMZ)
+      : _solRenderOrigemResumoGlobal(
+          estoqueBatch[it.codigo_produto] || [],
+          Object.keys(estoqueBatch).length ? 'Sem origem com saldo' : 'Carregando origem...'
+        );
     if (false && isSep) {
       if (locais.length) {
         const btns = locais.map((l, idx) => {
@@ -1146,6 +1365,11 @@ async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) 
            data-descricao="${encodeURIComponent(it.descricao || '')}"
            data-observacao="${encodeURIComponent(obsText)}"
            data-unidade="${String(it.unidade || 'UN').replace(/"/g, '&quot;')}"
+           data-requer-etq="${usarOrigemSepFase ? '1' : '0'}"
+           data-origem-cod="${usarOrigemSepFase ? PRINC_ARMZ : ''}"
+           data-etq-id=""
+           data-etq-endereco=""
+           data-etq-qtd=""
            style="display:flex;align-items:flex-start;gap:12px;padding:10px 16px;border-top:1px solid #222;${isConferido ? 'background:#0c1812;border-left:3px solid #22c55e;' : ''}${isUrgente ? 'border-left:3px solid #ef4444 !important;' : ''}">
         <div class="sep-thumb" data-preview-title="${String(it.codigo_produto || '').replace(/"/g, '&quot;')} - ${String(it.descricao || '').replace(/"/g, '&quot;')}" style="width:40px;height:40px;border-radius:8px;background:#0f0f0f;overflow:hidden;flex-shrink:0;margin-top:2px;cursor:zoom-in;">
           ${_solGetMiniImgHtml(it.codigo_produto, it.descricao || '')}
@@ -1274,6 +1498,8 @@ async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) 
         return;
       }
       aggItens = _aggItens(visiveis);
+      _syncSepLockFromItens(mapped);
+      _atualizarBannerSep();
       await _carregarEstoque();
     } catch (_) {} finally { _reloadPending = false; }
   }
@@ -1285,7 +1511,13 @@ async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) 
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
-      body: JSON.stringify({ solic_ids: solicIds, carr_ids: carrIds, quantidade_separada: qtySep, motivo: motivo || '' })
+      body: JSON.stringify({
+        solic_ids: solicIds,
+        carr_ids: carrIds,
+        quantidade_separada: qtySep,
+        motivo: motivo || '',
+        ..._solSepEtqPayloadFromRow(row)
+      })
     });
     const d = await r.json();
     if (!d.ok) throw new Error(d.error || 'Erro ao processar separação parcial.');
@@ -1299,6 +1531,8 @@ async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) 
   }
 
   async function _confirmarSepParcial(row, qtySep, opts = {}) {
+    if (!(await _verificarSeparadorSep())) return false;
+    if (!_solValidarEtqSepRow(row, qtySep)) return false;
     const unidade  = row.dataset.unidade || 'UN';
     const qtyTotal = parseFloat(row.dataset.qtyTotal || '0') || 0;
     if (!Number.isFinite(qtySep) || qtySep <= 0) {
@@ -1318,7 +1552,7 @@ async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) 
       await _postSepParcial(row, qtySep, motivo);
       return true;
     } catch (err) {
-      alert('Erro: ' + (err.message || err));
+      if (!_tratarErroSeparadorPerdido(err)) alert('Erro: ' + (err.message || err));
       return false;
     } finally {
       _solRowLoading(row, false);
@@ -1375,12 +1609,7 @@ async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) 
         <button id="btnModalSepFechar" style="margin-left:auto;background:none;border:none;color:#9ca3af;font-size:1.3rem;cursor:pointer;padding:2px 6px;line-height:1;">&#x2715;</button>
       </div>
       <div id="modalSepInner" style="overflow-y:auto;flex:1;padding-bottom:16px;">
-        ${!podeAgirSep && usuarioSeparando && !isStandby
-          ? `<div style="margin:12px 16px 0;padding:10px 12px;border-radius:8px;background:#1f2937;border:1px solid #374151;font-size:.78rem;color:#d1d5db;">
-               <i class="fa-solid fa-user-lock" style="color:#f59e0b;margin-right:6px;"></i>
-               Separação em andamento por <strong style="color:#fbbf24;">${usuarioSeparando}</strong>. Você pode visualizar, mas não alterar os itens.
-             </div>`
-          : ''}
+        <div id="modalSepLockBanner">${_htmlBannerSepLock()}</div>
         <div style="font-size:.75rem;color:#6b7280;font-weight:700;padding:12px 16px 4px;letter-spacing:.05em;text-transform:uppercase;">${isStandby ? 'Itens em stand-by' : 'Itens em separação'}</div>
         <div id="modalSepItemsList">
           ${aggItens.map(it => _renderAggItem(it, grupoAtual.n_solic)).join('')}
@@ -1500,6 +1729,51 @@ async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) 
 
   const modalInner = document.getElementById('modalSepInner');
 
+  modalInner.addEventListener('click', async (e) => {
+    const btnAssumir = e.target.closest('#btnAssumirSeparacao');
+    if (btnAssumir && !btnAssumir.disabled) {
+      const solicIds = (grupoAtual.itens || [])
+        .filter(it => ['Separação', 'Em Separação', 'Separado'].includes(String(it.status || '')))
+        .map(it => parseInt(it.solic_id, 10))
+        .filter(id => !Number.isNaN(id));
+      if (!solicIds.length) {
+        alert('Nenhum item em separação para assumir.');
+        return;
+      }
+      if (!confirm(`Assumir a separação que está com ${usuarioSeparando}? O separador anterior perderá o controle.`)) return;
+      btnAssumir.disabled = true;
+      btnAssumir.innerHTML = '<i class="fa-solid fa-spinner fa-spin" style="margin-right:4px;"></i>Assumindo...';
+      try {
+        const r = await fetch('/api/logistica/itens_solicitados/assumir-separacao', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ solic_ids: solicIds })
+        });
+        const d = await r.json();
+        if (!d.ok) throw new Error(d.error || 'Erro ao assumir separação.');
+        usuarioSeparando = d.usuario_separando || currentUser;
+        perdeuSeparacaoParaOutro = false;
+        podeAgirSep = true;
+        podeCancelarSep = !isStandby
+          && (origemStatus === 'Em Separação' || origemStatus === 'Separado')
+          && usuarioSeparando === currentUser;
+        houveMudanca = true;
+        await reloadItems();
+        _atualizarBannerSep();
+        window._loadSolicitacoesTab.force = true;
+        window._loadSolicitacoesTab();
+        window._loadKanbanSolicitacoesTab.force = true;
+        window._loadKanbanSolicitacoesTab();
+      } catch (err) {
+        alert('Erro: ' + (err.message || err));
+        btnAssumir.disabled = false;
+        btnAssumir.innerHTML = '<i class="fa-solid fa-hand" style="margin-right:4px;"></i>Assumir separação';
+      }
+      return;
+    }
+  });
+
   async function _abrirModalAcaoItemSep(row, coluna) {
     document.getElementById('modalAcaoItemSep')?.remove();
     const codigo = row.dataset.codigo || '';
@@ -1542,13 +1816,15 @@ async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) 
 
     document.getElementById('btnAcaoSepTudo').addEventListener('click', async () => {
       const btn = document.getElementById('btnAcaoSepTudo');
+      if (!(await _verificarSeparadorSep())) return;
+      if (!_solValidarEtqSepRow(row, qtyTotal)) return;
       _solBtnLoading(btn, 'Processando...');
       try {
         const r = await fetch('/api/logistica/itens_solicitados/separar', {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
           credentials: 'include',
-          body: JSON.stringify({ solic_ids: solicIds })
+          body: JSON.stringify({ solic_ids: solicIds, ..._solSepEtqPayloadFromRow(row) })
         });
         const d = await r.json();
         if (!d.ok) throw new Error(d.error || 'Erro ao registrar item separado.');
@@ -1556,12 +1832,13 @@ async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) 
         closeModal();
         await reloadItems();
       } catch (err) {
-        alert('Erro: ' + (err.message || err));
+        if (!_tratarErroSeparadorPerdido(err)) alert('Erro: ' + (err.message || err));
         _solBtnRestore(btn, 'Separado');
       }
     });
 
     document.getElementById('btnAcaoSepParcial').addEventListener('click', async () => {
+      if (!(await _verificarSeparadorSep())) return;
       const qtyInput = prompt(`Quantidade separada (${unidade}). Pode ser maior que o solicitado quando a embalagem fechada vier com mais unidades:`, _solFmtQty(qtyTotal));
       if (qtyInput === null) return;
       const qtySep = parseFloat(String(qtyInput).replace(',', '.'));
@@ -1572,6 +1849,7 @@ async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) 
     const btnNaoSep = document.getElementById('btnAcaoNaoSep');
     if (btnNaoSep) {
       btnNaoSep.addEventListener('click', async () => {
+        if (!(await _verificarSeparadorSep())) return;
         const ok = confirm('Confirmar que este item não foi separado?');
         if (!ok) return;
         _solBtnLoading(btnNaoSep, 'Processando...');
@@ -1594,7 +1872,7 @@ async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) 
           window._loadKanbanSolicitacoesTab.force = true;
           window._loadKanbanSolicitacoesTab();
         } catch (err) {
-          alert('Erro: ' + (err.message || err));
+          if (!_tratarErroSeparadorPerdido(err)) alert('Erro: ' + (err.message || err));
           _solBtnRestore(btnNaoSep, '<i class="fa-solid fa-xmark" style="margin-right:2px;"></i>Não separei');
         }
       });
@@ -1605,6 +1883,7 @@ async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) 
   // Busca inline de troca de produto (sem abrir modal sobre modal)
   async function _abrirTrocaInline(row) {
     if (!row) return;
+    if (!(await _verificarSeparadorSep())) return;
 
     // Mantém somente um editor de troca aberto por vez
     modalInner.querySelectorAll('.sep-troca-inline-wrap').forEach(el => el.remove());
@@ -1700,6 +1979,7 @@ async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) 
       const idx = Number(itemEl.dataset.idx);
       const prod = resultados[idx];
       if (!prod?.codigo) return;
+      if (!(await _verificarSeparadorSep())) return;
 
       input.disabled = true;
       resultadosEl.innerHTML = '<div style="padding:10px 12px;color:#93c5fd;font-size:12px;">Aplicando troca...</div>';
@@ -1728,7 +2008,7 @@ async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) 
         window._loadKanbanSolicitacoesTab.force = true;
         window._loadKanbanSolicitacoesTab();
       } catch (err) {
-        alert('Erro: ' + (err.message || err));
+        if (!_tratarErroSeparadorPerdido(err)) alert('Erro: ' + (err.message || err));
         input.disabled = false;
         resultadosEl.style.display = 'none';
         resultadosEl.innerHTML = '';
@@ -1740,6 +2020,54 @@ async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) 
 
   // Delegação de clique — ações do item
   modalInner.addEventListener('click', async (e) => {
+    const btnOrigemSep = e.target.closest('.sol-origem-sep-btn');
+    if (btnOrigemSep) {
+      const row = btnOrigemSep.closest('[data-item-row]');
+      if (!row) return;
+      const wrap = btnOrigemSep.closest('.sep-loc-box--origin') || btnOrigemSep.closest('.sep-loc-box');
+      if (wrap) {
+        wrap.querySelectorAll('.sol-origem-sep-btn').forEach(b => {
+          const active = b === btnOrigemSep;
+          b.dataset.selected = active ? '1' : '0';
+          b.style.border = '2px solid ' + (active ? '#16a34a' : '#374151');
+          b.style.background = active ? '#14532d' : '#111827';
+          b.style.color = active ? '#86efac' : '#9ca3af';
+        });
+        wrap.querySelectorAll('.sol-origem-sep-etq').forEach(p => {
+          p.style.display = 'none';
+        });
+      }
+      const etqPanel = btnOrigemSep.parentElement?.querySelector('.sol-origem-sep-etq');
+      if (etqPanel) etqPanel.style.display = 'block';
+      const cod = btnOrigemSep.dataset.cod || '';
+      row.dataset.origemCod = cod;
+      if (cod !== PRINC_ARMZ) {
+        row.dataset.etqId = '';
+        row.dataset.etqEndereco = '';
+        row.dataset.etqQtd = '';
+        row.querySelectorAll('.sep-etq-endereco-row').forEach(el => {
+          el.style.borderColor = '#854d0e33';
+          el.style.background = '#1a1508';
+        });
+      }
+      return;
+    }
+
+    const btnEtq = e.target.closest('.sep-etq-endereco-row');
+    if (btnEtq) {
+      const row = btnEtq.closest('[data-item-row]');
+      if (!row) return;
+      row.querySelectorAll('.sep-etq-endereco-row').forEach(el => {
+        const active = el === btnEtq;
+        el.style.borderColor = active ? '#22c55e' : '#854d0e33';
+        el.style.background = active ? '#1a2e1a' : '#1a1508';
+      });
+      row.dataset.etqId = btnEtq.dataset.etqId || '';
+      row.dataset.etqEndereco = btnEtq.dataset.etqEndereco || '';
+      row.dataset.etqQtd = btnEtq.dataset.etqQtd || '';
+      return;
+    }
+
     // Seleção de armazém inline
     const btnArm = e.target.closest('.armazem-btn');
     if (btnArm) {
@@ -1830,6 +2158,7 @@ async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) 
     if (btnTrocar && !btnTrocar.disabled) {
       const row = btnTrocar.closest('[data-item-row]');
       if (!row) return;
+      if (!(await _verificarSeparadorSep())) return;
       _solBtnLoading(btnTrocar);
       try {
         await _abrirTrocaInline(row);
@@ -1843,6 +2172,9 @@ async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) 
     if (btnSepTudo && !btnSepTudo.disabled) {
       const row = btnSepTudo.closest('[data-item-row]');
       if (!row) return;
+      if (!(await _verificarSeparadorSep())) return;
+      const qtyTotal = parseFloat(row.dataset.qtyTotal || '0') || 0;
+      if (!_solValidarEtqSepRow(row, qtyTotal)) return;
       const solicIds = JSON.parse(row.dataset.solicIds || '[]');
       _solBtnLoading(btnSepTudo);
       try {
@@ -1850,14 +2182,14 @@ async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) 
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
           credentials: 'include',
-          body: JSON.stringify({ solic_ids: solicIds })
+          body: JSON.stringify({ solic_ids: solicIds, ..._solSepEtqPayloadFromRow(row) })
         });
         const d = await r.json();
         if (!d.ok) throw new Error(d.error || 'Erro ao registrar item separado.');
         houveMudanca = true;
         await reloadItems();
       } catch (err) {
-        alert('Erro: ' + (err.message || err));
+        if (!_tratarErroSeparadorPerdido(err)) alert('Erro: ' + (err.message || err));
         _solBtnRestore(btnSepTudo, '<i class="fa-solid fa-check" style="margin-right:2px;"></i>Separado');
       }
       return;
@@ -1867,6 +2199,7 @@ async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) 
     if (btnSepParcial && !btnSepParcial.disabled) {
       const row = btnSepParcial.closest('[data-item-row]');
       if (!row) return;
+      if (!(await _verificarSeparadorSep())) return;
       const unidade  = row.dataset.unidade || 'UN';
       const qtyTotal = parseFloat(row.dataset.qtyTotal || '0') || 0;
       const qtyInput = prompt(`Quantidade separada (${unidade}). Pode ser maior que o solicitado quando a embalagem fechada vier com mais unidades:`, _solFmtQty(qtyTotal));
@@ -1885,6 +2218,7 @@ async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) 
     if (btnNaoSep && !btnNaoSep.disabled) {
       const row = btnNaoSep.closest('[data-item-row]');
       if (!row) return;
+      if (!(await _verificarSeparadorSep())) return;
       const solicIds = JSON.parse(row.dataset.solicIds || '[]');
       const ok = confirm('Confirmar que este item não foi separado?');
       if (!ok) return;
@@ -1907,7 +2241,7 @@ async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) 
         window._loadKanbanSolicitacoesTab.force = true;
         window._loadKanbanSolicitacoesTab();
       } catch (err) {
-        alert('Erro: ' + (err.message || err));
+        if (!_tratarErroSeparadorPerdido(err)) alert('Erro: ' + (err.message || err));
         _solBtnRestore(btnNaoSep, '<i class="fa-solid fa-xmark" style="margin-right:2px;"></i>Não separei');
       }
       return;
@@ -66596,22 +66930,104 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function limparEnderecosReferencia() {
-    const pp = document.getElementById('movimEnderecoReferenciaPp');
-    const etq = document.getElementById('movimEnderecoEtq');
-    if (pp) pp.innerHTML = '';
-    if (etq) { etq.innerHTML = ''; etq.style.display = 'none'; }
+    const lista = document.getElementById('movimEnderecoEtqLista');
+    const vazio = document.getElementById('movimEnderecoVazio');
+    if (lista) lista.innerHTML = '';
+    if (vazio) vazio.style.display = 'block';
   }
 
-  function renderMovimEnderecosEtq(lista) {
-    const linhas = (lista || []).map(e => {
-      const end = escapeHtml(String(e.endereco || '').trim());
-      const comp = e.complemento
-        ? `<span class="movim-etq-comp">${escapeHtml(String(e.complemento))}</span>` : '';
-      const qtd = e.qtd != null && e.qtd !== ''
-        ? `<span class="movim-etq-qtd">Qtd: ${escapeHtml(String(e.qtd))}</span>` : '';
-      return `<div class="movim-etq-linha"><i class="fa-solid fa-tag"></i><span>${end}</span>${comp}${qtd}</div>`;
+  function renderMovimEnderecosEtqLista(lista) {
+    const el = document.getElementById('movimEnderecoEtqLista');
+    const vazio = document.getElementById('movimEnderecoVazio');
+    if (!el) return;
+    const itens = (lista || []).filter(e => String(e.endereco || '').trim());
+    if (!itens.length) {
+      el.innerHTML = '';
+      if (vazio) vazio.style.display = 'block';
+      return;
+    }
+    if (vazio) vazio.style.display = 'none';
+    const selecionados = new Set(
+      Array.from(el.querySelectorAll('.movim-etq-linha--selected'))
+        .map(l => String(l.dataset.endereco || '').trim())
+        .filter(Boolean)
+    );
+    const header = `<div class="movim-etq-linha movim-etq-linha--head">
+      <span class="movim-etq-end">Endereço</span>
+      <span class="movim-etq-meta">ID</span>
+      <span class="movim-etq-meta">Qtd</span>
+      <span class="movim-etq-meta">Un</span>
+      <span class="movim-etq-meta movim-etq-meta--comp">Complemento</span>
+      <span></span>
+    </div>`;
+    el.innerHTML = header + itens.map(e => {
+      const end = String(e.endereco || '').trim();
+      const endEsc = escapeHtml(end);
+      const id = Number(e.id);
+      const idEsc = escapeHtml(String(id || '—'));
+      const qtd = escapeHtml(String(e.qtd != null ? e.qtd : '0'));
+      const unidade = escapeHtml(String(e.unidade || 'UN'));
+      const comp = String(e.complemento || '').trim();
+      const compHtml = comp
+        ? `<span class="movim-etq-meta movim-etq-meta--comp" title="${escapeHtml(comp)}">${escapeHtml(comp)}</span>`
+        : '<span class="movim-etq-meta movim-etq-meta--vazio">—</span>';
+      const sel = selecionados.has(end) ? ' movim-etq-linha--selected' : '';
+      const btnPrint = id
+        ? `<button type="button" class="movim-etq-btn-print" data-id="${id}" title="Imprimir etiqueta"><i class="fa-solid fa-print"></i></button>`
+        : '<span></span>';
+      return `<div class="movim-etq-linha${sel}" data-id="${idEsc}" data-endereco="${endEsc}" role="button" tabindex="0" title="Clique para selecionar este endereço">
+        <span class="movim-etq-end">${endEsc}</span>
+        <span class="movim-etq-meta">${idEsc}</span>
+        <span class="movim-etq-meta">${qtd}</span>
+        <span class="movim-etq-meta">${unidade}</span>
+        ${compHtml}
+        ${btnPrint}
+      </div>`;
     }).join('');
-    return `<div class="movim-endereco-etq-titulo">Etiquetas impressas (ETQ_rec_impresso)</div>${linhas}`;
+  }
+
+  function marcarEtqEnderecoSelecionado(endereco, selecionar) {
+    const lista = document.getElementById('movimEnderecoEtqLista');
+    if (!lista) return;
+    const end = String(endereco || '').trim();
+    if (!end) return;
+    lista.querySelectorAll('.movim-etq-linha[data-endereco]').forEach(linha => {
+      if (String(linha.dataset.endereco || '').trim() !== end) return;
+      linha.classList.toggle('movim-etq-linha--selected', selecionar !== false);
+    });
+  }
+
+  function toggleMovimEtqLinhaSelecionada(linha) {
+    if (!linha) return;
+    const endereco = String(linha.dataset.endereco || '').trim();
+    if (!endereco) return;
+    const vaiSelecionar = !linha.classList.contains('movim-etq-linha--selected');
+    marcarEtqEnderecoSelecionado(endereco, vaiSelecionar);
+    if (vaiSelecionar) adicionarEndereco(endereco);
+    else removerEnderecoLido(endereco);
+  }
+
+  async function imprimirEtqLinhaMovim(id, btnEl) {
+    const idNum = Number(id);
+    if (!idNum) return;
+    const msg = document.getElementById('movimMensagem');
+    const origHtml = btnEl?.innerHTML;
+    if (btnEl) { btnEl.disabled = true; btnEl.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>'; }
+    try {
+      const imp = await imprimirEtiquetasMovim([idNum]);
+      if (!imp?.ok) throw new Error(imp?.error || 'Falha ao imprimir etiqueta.');
+      if (msg) {
+        msg.textContent = `Etiqueta ID ${idNum} enviada para impressão.`;
+        msg.className = 'movim-mensagem ok';
+      }
+    } catch (err) {
+      if (msg) {
+        msg.textContent = String(err?.message || err);
+        msg.className = 'movim-mensagem erro';
+      }
+    } finally {
+      if (btnEl) { btnEl.disabled = false; btnEl.innerHTML = origHtml || '<i class="fa-solid fa-print"></i>'; }
+    }
   }
 
   async function carregarEnderecosReferencia(codigo) {
@@ -66619,50 +67035,35 @@ document.addEventListener('DOMContentLoaded', () => {
     const cod = String(codigo || '').trim();
     if (!cod) return;
 
-    const ppEl = document.getElementById('movimEnderecoReferenciaPp');
-    const etqEl = document.getElementById('movimEnderecoEtq');
-    if (ppEl) ppEl.innerHTML = '<span class="movim-ref-loading">Carregando endereçamento…</span>';
+    const listaEl = document.getElementById('movimEnderecoEtqLista');
+    const vazioEl = document.getElementById('movimEnderecoVazio');
+    if (listaEl) listaEl.innerHTML = '<span class="movim-ref-loading">Carregando endereços…</span>';
+    if (vazioEl) vazioEl.style.display = 'none';
 
     try {
-      const [enderecoMap, etqJson] = await Promise.all([
-        typeof _solCarregarEnderecoBatch === 'function'
-          ? _solCarregarEnderecoBatch([cod])
-          : Promise.resolve({}),
-        fetch('/api/etiquetas/rec-impresso/enderecos-por-produto?codigo=' + encodeURIComponent(cod), { credentials: 'include' })
-          .then(r => r.json())
-          .catch(() => ({ ok: false }))
-      ]);
-
-      if (ppEl) {
-        const html = typeof _solEnderecamentoHtml === 'function'
-          ? _solEnderecamentoHtml(cod, enderecoMap, null)
-          : '';
-        ppEl.innerHTML = html || '';
-      }
-
-      if (etqEl) {
-        const enderecos = etqJson?.ok && Array.isArray(etqJson.enderecos) ? etqJson.enderecos : [];
-        if (enderecos.length) {
-          etqEl.innerHTML = renderMovimEnderecosEtq(enderecos);
-          etqEl.style.display = 'block';
-        } else {
-          etqEl.innerHTML = '';
-          etqEl.style.display = 'none';
-        }
-      }
+      const resp = await fetch(
+        '/api/etiquetas/rec-impresso/enderecos-referencia-por-produto?codigo=' + encodeURIComponent(cod),
+        { credentials: 'include' }
+      );
+      let json;
+      try { json = await resp.json(); } catch { json = { ok: false }; }
+      const enderecos = json?.ok && Array.isArray(json.enderecos) ? json.enderecos : [];
+      renderMovimEnderecosEtqLista(enderecos);
     } catch (err) {
       console.warn('[modalMovimentacao] enderecos referencia', err);
-      if (ppEl) ppEl.innerHTML = '';
-      if (etqEl) { etqEl.innerHTML = ''; etqEl.style.display = 'none'; }
+      if (listaEl) listaEl.innerHTML = '';
+      if (vazioEl) vazioEl.style.display = 'block';
     }
   }
 
   function adicionarEndereco(address) {
     const lista = document.getElementById('movimEnderecoLista');
-    const vazio = document.getElementById('movimEnderecoVazio');
     const valor = String(address || '').trim();
-    if (!lista || !valor) return;
+    if (!valor) return;
 
+    marcarEtqEnderecoSelecionado(valor, true);
+
+    if (!lista) return;
     const existentes = lista.querySelectorAll('.movim-endereco-item');
     for (const ex of existentes) {
       if (ex.dataset.address === valor) return;
@@ -66671,17 +67072,19 @@ document.addEventListener('DOMContentLoaded', () => {
     const item = document.createElement('div');
     item.className = 'movim-endereco-item';
     item.dataset.address = valor;
-    item.innerHTML = `
-      <span><i class="fa-solid fa-location-dot" style="color:#60a5fa;margin-right:6px;font-size:10px;"></i>${escapeHtml(valor)}</span>
-      <button type="button" title="Remover"><i class="fa-solid fa-xmark"></i></button>
-    `;
-    item.querySelector('button').addEventListener('click', () => {
-      item.remove();
-      if (!lista.children.length && vazio) vazio.style.display = 'block';
-    });
-
+    item.style.display = 'none';
     lista.appendChild(item);
-    if (vazio) vazio.style.display = 'none';
+  }
+
+  function removerEnderecoLido(address) {
+    const valor = String(address || '').trim();
+    if (!valor) return;
+    marcarEtqEnderecoSelecionado(valor, false);
+    const lista = document.getElementById('movimEnderecoLista');
+    if (!lista) return;
+    lista.querySelectorAll('.movim-endereco-item').forEach(item => {
+      if (String(item.dataset.address || '').trim() === valor) item.remove();
+    });
   }
 
   async function pararScanEndereco() {
@@ -66817,12 +67220,43 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
+  const etqListaBind = document.getElementById('movimEnderecoEtqLista');
+  if (etqListaBind && !etqListaBind.dataset.clickBound) {
+    etqListaBind.dataset.clickBound = '1';
+    etqListaBind.addEventListener('click', e => {
+      const btnPrint = e.target.closest('.movim-etq-btn-print');
+      if (btnPrint) {
+        e.stopPropagation();
+        imprimirEtqLinhaMovim(btnPrint.dataset.id, btnPrint);
+        return;
+      }
+      const linha = e.target.closest('.movim-etq-linha[data-endereco]');
+      if (!linha) return;
+      toggleMovimEtqLinhaSelecionada(linha);
+    });
+    etqListaBind.addEventListener('keydown', e => {
+      if (e.key !== 'Enter' && e.key !== ' ') return;
+      const linha = e.target.closest('.movim-etq-linha[data-endereco]');
+      if (!linha) return;
+      e.preventDefault();
+      toggleMovimEtqLinhaSelecionada(linha);
+    });
+  }
+
   function obterEnderecosLidos() {
+    const etq = document.getElementById('movimEnderecoEtqLista');
+    const fromEtq = etq
+      ? Array.from(etq.querySelectorAll('.movim-etq-linha--selected'))
+          .map(el => String(el.dataset.endereco || '').trim())
+          .filter(Boolean)
+      : [];
     const lista = document.getElementById('movimEnderecoLista');
-    if (!lista) return [];
-    return Array.from(lista.querySelectorAll('.movim-endereco-item'))
-      .map(el => String(el.dataset.address || '').trim())
-      .filter(Boolean);
+    const fromScan = lista
+      ? Array.from(lista.querySelectorAll('.movim-endereco-item'))
+          .map(el => String(el.dataset.address || '').trim())
+          .filter(Boolean)
+      : [];
+    return [...new Set([...fromEtq, ...fromScan])];
   }
 
   function preencherMotivosOmieUnificados() {
@@ -66979,7 +67413,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (aviso) aviso.style.display = mesmo ? 'block' : 'none';
     if (imprWrap) imprWrap.style.display = mesmo ? 'flex' : 'none';
     if (internoWrap) internoWrap.style.display = mesmo ? 'flex' : 'none';
-    if (externoWrap) externoWrap.style.display = mesmo ? 'none' : 'block';
+    if (externoWrap) externoWrap.style.display = 'none';
     if (scanGeralBtn) scanGeralBtn.style.display = mesmo ? 'none' : 'inline-flex';
     if (!mesmo) {
       _enderecoOrigemInterno = '';
@@ -67262,11 +67696,12 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  // Operadores de quantidade (mantido para compatibilidade; botões removidos do HTML)
+  // Operadores de quantidade (+, −, /)
   if (operDiv) {
     operDiv.addEventListener('click', e => {
       const btn = e.target.closest('button[data-insert]');
       if (!btn || !qtdInput) return;
+      e.stopPropagation();
       qtdInput.value += btn.dataset.insert;
       qtdInput.focus();
       avaliarExpressao();
@@ -67289,12 +67724,6 @@ document.addEventListener('DOMContentLoaded', () => {
       }
       _calcExpr = qtdInput ? qtdInput.value : '';
       _calcRender();
-      const rect = calcBtn.getBoundingClientRect();
-      const popW = 224;
-      let left = rect.right - popW;
-      if (left < 8) left = 8;
-      calcPopup.style.top  = (rect.bottom + 6) + 'px';
-      calcPopup.style.left = left + 'px';
       calcPopup.style.display = 'block';
     });
 
@@ -67330,9 +67759,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
     document.addEventListener('click', e => {
       if (!calcPopup || calcPopup.style.display === 'none') return;
-      if (!calcPopup.contains(e.target) && e.target !== calcBtn) {
-        calcPopup.style.display = 'none';
-      }
+      if (calcPopup.contains(e.target) || e.target === calcBtn || calcBtn?.contains(e.target)) return;
+      if (operDiv?.contains(e.target)) return;
+      calcPopup.style.display = 'none';
     });
   }
 

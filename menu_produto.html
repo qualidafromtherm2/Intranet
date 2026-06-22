@@ -1172,12 +1172,42 @@
                 <option value="">Selecione o destino…</option>
               </select>
             </div>
-            <div class="movim-field">
+            <div class="movim-field movim-qtd-field">
               <div class="movim-qtd-label-row">
                 <label for="movimQtdInput">Quantidade (aceita expressao)</label>
                 <button type="button" id="movimCalcBtn" class="movim-calc-btn" title="Abrir calculadora"><i class="fa-solid fa-calculator"></i></button>
               </div>
-              <input id="movimQtdInput" type="text" inputmode="decimal" autocomplete="off" placeholder="Ex.: 13,6+2,4">
+              <div class="movim-qtd-anchor">
+                <input id="movimQtdInput" type="text" inputmode="decimal" autocomplete="off" placeholder="Ex.: 13,6+2,4">
+                <div id="movimOperadores">
+                  <button type="button" data-insert="+">+</button>
+                  <button type="button" data-insert="-">−</button>
+                  <button type="button" data-insert="/">/</button>
+                </div>
+                <div id="movimCalcPopup" class="movim-calc-popup" style="display:none;">
+                  <div id="movimCalcDisplay" class="movim-calc-display"></div>
+                  <div class="movimCalcGrid">
+                    <button type="button" class="movimCalcKey" data-v="7">7</button>
+                    <button type="button" class="movimCalcKey" data-v="8">8</button>
+                    <button type="button" class="movimCalcKey" data-v="9">9</button>
+                    <button type="button" class="movimCalcKey movimCalcClear" data-v="C">C</button>
+                    <button type="button" class="movimCalcKey" data-v="4">4</button>
+                    <button type="button" class="movimCalcKey" data-v="5">5</button>
+                    <button type="button" class="movimCalcKey" data-v="6">6</button>
+                    <button type="button" class="movimCalcKey movimCalcOp" data-v="+">+</button>
+                    <button type="button" class="movimCalcKey" data-v="1">1</button>
+                    <button type="button" class="movimCalcKey" data-v="2">2</button>
+                    <button type="button" class="movimCalcKey" data-v="3">3</button>
+                    <button type="button" class="movimCalcKey movimCalcOp" data-v="-">−</button>
+                    <button type="button" class="movimCalcKey" data-v="0">0</button>
+                    <button type="button" class="movimCalcKey" data-v=".">.</button>
+                    <button type="button" class="movimCalcKey movimCalcOp" data-v="←">←</button>
+                    <button type="button" class="movimCalcKey movimCalcOp" data-v="*">×</button>
+                    <button type="button" class="movimCalcKey movimCalcOk" data-v="OK">OK</button>
+                    <button type="button" class="movimCalcKey movimCalcOp" data-v="/">/</button>
+                  </div>
+                </div>
+              </div>
               <div id="movimQtdResultado"></div>
             </div>
             <div class="movim-field">
@@ -1192,7 +1222,8 @@
                   <i class="fa-solid fa-camera"></i> Ler codigo
                 </button>
               </div>
-              <div id="movimEnderecoReferenciaPp" class="movim-endereco-referencia-pp"></div>
+              <div id="movimEnderecoVazio" class="movim-endereco-vazio">Nenhum endereco cadastrado.</div>
+              <div id="movimEnderecoEtqLista" class="movim-endereco-etq-lista"></div>
               <div id="movimEnderecoInternoWrap" class="movim-endereco-interno" style="display:none;">
                 <div class="movim-endereco-campo" id="movimEnderecoOrigemCampo">
                   <div class="movim-endereco-campo-top">
@@ -1213,12 +1244,10 @@
                   <div id="movimEnderecoDestinoVal" class="movim-endereco-valor vazio">Nao lido</div>
                 </div>
               </div>
-              <div id="movimEnderecoExternoWrap">
-                <div id="movimEnderecoVazio" class="movim-endereco-vazio">Nenhum endereco cadastrado.</div>
+              <div id="movimEnderecoExternoWrap" style="display:none;">
                 <div id="movimEnderecoLista"></div>
               </div>
             </div>
-            <div id="movimEnderecoEtq" class="movim-endereco-etq" style="display:none;"></div>
             <div id="movimMesmoArmazemAviso" class="movim-mesmo-arm-aviso" style="display:none;">
               Mesmo armazem (Porta Pallet): leia os enderecos e confirme com ENTRADA, SAIDA ou TRANSFERENCIA. TRANSFERENCIA exige origem e destino. Nao ha movimentacao na Omie — apenas ajuste em ETQ_rec_impresso.
             </div>
@@ -1254,31 +1283,6 @@
           </div>
         </div>
         <!-- ===================== FIM MODAL MOVIMENTAÇÃO ===================== -->
-        <!-- Popup calculadora de quantidade (position:fixed, posicionado via JS) -->
-        <div id="movimCalcPopup" style="display:none;position:fixed;z-index:10200;background:#1e293b;border:1px solid #475569;border-radius:12px;padding:14px;width:224px;box-shadow:0 10px 40px rgba(0,0,0,0.75);">
-          <div id="movimCalcDisplay" style="background:#0f172a;color:#e2e8f0;padding:10px 12px;border-radius:8px;text-align:right;font-size:1.1rem;margin-bottom:10px;min-height:44px;word-break:break-all;line-height:1.6;"></div>
-          <div class="movimCalcGrid">
-            <button type="button" class="movimCalcKey" data-v="7">7</button>
-            <button type="button" class="movimCalcKey" data-v="8">8</button>
-            <button type="button" class="movimCalcKey" data-v="9">9</button>
-            <button type="button" class="movimCalcKey movimCalcClear" data-v="C">C</button>
-            <button type="button" class="movimCalcKey" data-v="4">4</button>
-            <button type="button" class="movimCalcKey" data-v="5">5</button>
-            <button type="button" class="movimCalcKey" data-v="6">6</button>
-            <button type="button" class="movimCalcKey movimCalcOp" data-v="+">+</button>
-            <button type="button" class="movimCalcKey" data-v="1">1</button>
-            <button type="button" class="movimCalcKey" data-v="2">2</button>
-            <button type="button" class="movimCalcKey" data-v="3">3</button>
-            <button type="button" class="movimCalcKey movimCalcOp" data-v="-">−</button>
-            <button type="button" class="movimCalcKey" data-v="0">0</button>
-            <button type="button" class="movimCalcKey" data-v=".">.</button>
-            <button type="button" class="movimCalcKey movimCalcOp" data-v="←">←</button>
-            <button type="button" class="movimCalcKey movimCalcOp" data-v="*">×</button>
-            <button type="button" class="movimCalcKey movimCalcOk" data-v="OK">OK</button>
-            <button type="button" class="movimCalcKey movimCalcOp" data-v="/">/</button>
-          </div>
-        </div>
-
         <!-- Câmera: ler endereço (QR / código de barras) -->
         <div id="movimScanEnderecoModal" class="movim-scan-overlay" style="display:none;">
           <div class="movim-scan-panel">

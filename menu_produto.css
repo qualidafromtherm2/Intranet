@@ -10963,8 +10963,34 @@ table.tabela td.num {
 /* Calculadora de quantidade */
 .movim-qtd-label-row { display: flex; align-items: center; gap: 8px; }
 .movim-qtd-label-row label { margin: 0; flex: 1; font-size: .82rem; color: #9ca3af; }
+.movim-qtd-anchor { position: relative; display: flex; flex-direction: column; gap: 8px; }
 .movim-calc-btn { background: #6366f1; color: #fff; border: none; padding: 5px 10px; border-radius: 6px; cursor: pointer; font-size: 13px; line-height: 1; transition: filter .2s; flex-shrink: 0; }
 .movim-calc-btn:hover { filter: brightness(1.18); }
+.movim-calc-popup {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  margin-top: 6px;
+  z-index: 20;
+  background: #1e293b;
+  border: 1px solid #475569;
+  border-radius: 12px;
+  padding: 14px;
+  width: 224px;
+  box-shadow: 0 10px 40px rgba(0,0,0,.75);
+}
+.movim-calc-display {
+  background: #0f172a;
+  color: #e2e8f0;
+  padding: 10px 12px;
+  border-radius: 8px;
+  text-align: right;
+  font-size: 1.1rem;
+  margin-bottom: 10px;
+  min-height: 44px;
+  word-break: break-all;
+  line-height: 1.6;
+}
 .movimCalcGrid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 5px; }
 .movimCalcKey { padding: 11px 4px; border: none; border-radius: 7px; background: #2a2d3a; color: #f1f5f9; font-size: .98rem; font-weight: 600; cursor: pointer; transition: background .15s; }
 .movimCalcKey:hover { background: #374151; }
@@ -11255,40 +11281,90 @@ table.tabela td.num {
 .movim-scan-origem { border-color: #7f1d1d; color: #fecaca; }
 .movim-scan-destino { border-color: #166534; color: #bbf7d0; }
 .movim-endereco-referencia-pp:empty { display: none; }
-.movim-endereco-referencia-pp { margin-bottom: 4px; }
-.movim-ref-loading { font-size: .82rem; color: #6b7280; }
-.movim-endereco-etq {
-  padding: 12px 14px;
-  background: #1a2332;
-  border: 1px solid #334155;
-  border-radius: 14px;
+.movim-endereco-etq-lista {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
+  margin-bottom: 8px;
 }
-.movim-endereco-etq-titulo {
-  font-size: .60rem;
-  color: #67e8f9;
+.movim-endereco-etq-lista:empty { display: none; }
+.movim-ref-loading { font-size: .82rem; color: #6b7280; }
+.movim-etq-linha {
+  display: grid;
+  grid-template-columns: minmax(100px, 1.4fr) repeat(3, minmax(44px, auto)) minmax(60px, 1fr) 36px;
+  align-items: center;
+  gap: 8px 12px;
+  padding: 10px 12px;
+  background: #1a2332;
+  border: 1px solid #334155;
+  border-radius: 10px;
+  font-size: .78rem;
+  line-height: 1.35;
+  cursor: pointer;
+  transition: border-color .15s, background .15s, box-shadow .15s;
+}
+.movim-etq-linha:not(.movim-etq-linha--head):hover {
+  border-color: #64748b;
+  background: #1e293b;
+}
+.movim-etq-linha--selected {
+  border-color: #6366f1 !important;
+  background: #1e1b4b !important;
+  box-shadow: 0 0 0 1px rgba(99, 102, 241, .45);
+}
+.movim-etq-linha--head {
+  cursor: default;
+  background: #0f172a;
+  border-color: #475569;
+  font-size: .68rem;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: .04em;
-  margin-bottom: 2px;
+  color: #94a3b8;
+  padding: 8px 12px;
 }
-.movim-etq-linha {
-  display: flex;
+.movim-etq-linha--head:hover { background: #0f172a; border-color: #475569; }
+.movim-etq-btn-print {
+  display: inline-flex;
   align-items: center;
-  flex-wrap: wrap;
-  gap: 6px 10px;
-  font-size: .78rem;
-  color: #e2e8f0;
-  font-weight: 600;
-  line-height: 1.45;
-  padding: 4px 0;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 1px solid #475569;
+  border-radius: 8px;
+  background: #0f172a;
+  color: #a78bfa;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background .15s, color .15s, border-color .15s;
+}
+.movim-etq-btn-print:hover:not(:disabled) {
+  background: #312e81;
+  border-color: #6366f1;
+  color: #e9d5ff;
+}
+.movim-etq-btn-print:disabled { opacity: .55; cursor: wait; }
+.movim-etq-linha--head .movim-etq-end { color: #94a3b8; font-weight: 700; }
+.movim-etq-end {
+  color: #fde68a;
+  font-weight: 700;
   word-break: break-word;
 }
-.movim-etq-linha i { color: #38bdf8; font-size: .68rem; }
-.movim-etq-comp { font-size: .72rem; color: #94a3b8; font-weight: 500; }
-.movim-etq-qtd { font-size: .72rem; color: #a5b4fc; font-weight: 600; }
+.movim-etq-meta {
+  color: #cbd5e1;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.movim-etq-meta--comp {
+  color: #94a3b8;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 140px;
+}
+.movim-etq-meta--vazio { color: #475569; }
 
 /* Ações */
 .movim-acoes { display: flex; gap: 12px; margin-top: 4px; }
