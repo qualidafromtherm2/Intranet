@@ -2,7 +2,12 @@
 // Carrega as variáveis de ambiente definidas em .env
 // no topo do intranet/server.js
 require('dotenv').config({ path: require('path').resolve(__dirname, '.env'), override: true });
-const { pool, dbQuery, isDbEnabled, warmupPgPool, ensureSessionTableReady } = require('./src/db');
+const { pool, sessionPool, dbQuery, isDbEnabled, warmupPgPool, warmupSessionPool, ensureSessionTableReady } = require('./src/db');
+const SERVICE_PROFILE = String(process.env.SERVICE_PROFILE || 'full').trim().toLowerCase();
+const IS_CHAT_SERVICE = SERVICE_PROFILE === 'chat';
+if (IS_CHAT_SERVICE) {
+  console.log('[boot] SERVICE_PROFILE=chat — modo leve (sem SheetsAuto/crons/schemas pesados)');
+}
 // utils/supabase.js — carrega R2 na subida (log do backend)
 require('./utils/supabase');
 const { uploadPublicFile, removePublicFiles } = require('./utils/storage');
@@ -106,12 +111,11 @@ app.post('/api/client-log', express.json({ limit: '200kb' }), (req, res) => {
 
 // Sessão persistida no Postgres (sobrevive a deploys/restart do processo).
 // Requer a tabela public.session (ver sql/create_session_table.sql).
-// Usa o mesmo pool compartilhado (src/db.js) — evita segundo pool na subida.
-const sessionStore = pool
+// Pool dedicado à sessão — login não compete com consultas pesadas da API.
+const sessionStore = sessionPool
   ? new PgSession({
-      pool,
+      pool: sessionPool,
       tableName: 'session',
-      // Tabela já existe em produção — evita SELECT to_regclass a cada request na subida.
       createTableIfMissing: false,
       pruneSessionInterval: 60 * 60,
     })
@@ -1150,7 +1154,7 @@ async function ensureRhReservasSchema() {
   }
 }
 
-ensureRhReservasSchema();
+if (!IS_CHAT_SERVICE) ensureRhReservasSchema();
 
 function extrairTarefasConteudoAtaRh(conteudo) {
   const texto = String(conteudo || '');
@@ -21598,9 +21602,11 @@ async function ensureOverlayTable() {
     )
   `);
 }
-ensureOverlayTable()
-  .then(() => console.log('[db] op_status_overlay pronto'))
-  .catch(err => console.warn('[db] overlay: falha ao garantir tabela:', err?.message || err));
+if (!IS_CHAT_SERVICE) {
+  ensureOverlayTable()
+    .then(() => console.log('[db] op_status_overlay pronto'))
+    .catch(err => console.warn('[db] overlay: falha ao garantir tabela:', err?.message || err));
+}
 
 
 // ====== COMERCIAL: Importador de Pedidos (OMIE → Postgres) ======
@@ -23582,7 +23588,7 @@ async function ensureComprasSchema() {
     console.error('[Compras] Erro ao criar schema:', e);
   }
 }
-ensureComprasSchema();
+if (!IS_CHAT_SERVICE) ensureComprasSchema();
 
 // ============================================================================
 // FORNECEDORES (CLIENTES) DA OMIE
@@ -23635,7 +23641,7 @@ async function ensureFornecedoresSchema() {
     console.error('[Fornecedores] Erro ao criar schema:', e);
   }
 }
-ensureFornecedoresSchema();
+if (!IS_CHAT_SERVICE) ensureFornecedoresSchema();
 
 // Sincroniza todos os fornecedores da Omie
 async function syncFornecedoresOmie() {
@@ -36580,6 +36586,7 @@ async function startServer() {
   if (pool) {
     try {
       await warmupPgPool();
+      if (sessionPool) await warmupSessionPool();
       await ensureSessionTableReady();
     } catch (err) {
       console.error('[db] falha ao preparar pool/session na subida:', err?.message || err);
@@ -36589,7 +36596,10 @@ async function startServer() {
   app.listen(PORT, HOST, () => {
     console.log(`Servidor rodando em http://${HOST}:${PORT}`);
     console.log(`🚀 API rodando em http://localhost:${PORT}`);
-    // Atrasa timers pesados para não competir com login/sessão logo após deploy.
+    if (IS_CHAT_SERVICE) {
+      console.log('[boot] timers pesados desligados (SERVICE_PROFILE=chat)');
+      return;
+    }
     setTimeout(() => {
       iniciarAutoSyncComprasGoogleSheets();
       iniciarAutoSyncWebhooksOmie();
