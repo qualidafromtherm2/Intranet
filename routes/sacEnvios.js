@@ -1,5 +1,4 @@
 const express = require('express');
-const { Pool } = require('pg');
 const multer = require('multer');
 const { v4: uuidv4 } = require('uuid');
 const mime = require('mime-types');
@@ -3617,16 +3616,7 @@ function extractConteudo(textRaw) {
   return JSON.stringify(items);
 }
 
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL || process.env.POSTGRES_URL,
-  ssl: { rejectUnauthorized: false },
-  max: parseInt(process.env.PGPOOL_MAX || '10', 10),
-  idleTimeoutMillis: 30_000,
-  connectionTimeoutMillis: 10_000,
-});
-pool.on('error', (err) => {
-  console.error('[sacEnvios/pg] erro em cliente ocioso:', err?.message || err);
-});
+const { pool } = require('../src/db');
 
 const BUCKET = process.env.STORAGE_BUCKET_SAC || process.env.STORAGE_BUCKET || process.env.SUPABASE_BUCKET || 'produtos';
 

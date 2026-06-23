@@ -1,14 +1,9 @@
 // routes/auth.js (SQL only, com parser e id numérico na sessão)
 const express = require('express');
-const { Pool } = require('pg');
+const { pool } = require('../src/db');
 
 const router = express.Router();
 router.use(express.json()); // garante req.body em /login
-
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  ssl: { rejectUnauthorized: false }
-});
 
 async function carregarExtrasDoUsuario(userId) {
   try {

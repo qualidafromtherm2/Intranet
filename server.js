@@ -2,6 +2,7 @@
 // Carrega as variáveis de ambiente definidas em .env
 // no topo do intranet/server.js
 require('dotenv').config({ path: require('path').resolve(__dirname, '.env'), override: true });
+const { pool, dbQuery, isDbEnabled } = require('./src/db');
 // utils/supabase.js — carrega R2 na subida (log do backend)
 require('./utils/supabase');
 const { uploadPublicFile, removePublicFiles } = require('./utils/storage');
@@ -105,17 +106,17 @@ app.post('/api/client-log', express.json({ limit: '200kb' }), (req, res) => {
 
 // Sessão persistida no Postgres (sobrevive a deploys/restart do processo).
 // Requer a tabela public.session (ver sql/create_session_table.sql).
-const sessionStore = new PgSession({
-  conObject: {
-    connectionString: process.env.DATABASE_URL || process.env.POSTGRES_URL,
-    ssl: { rejectUnauthorized: false }
-  },
-  tableName: 'session',
-  createTableIfMissing: true,            // cria automaticamente se não existir
-  pruneSessionInterval: 60 * 60          // limpa expiradas a cada 1h
-});
+// Usa o mesmo pool compartilhado (src/db.js) — evita segundo pool na subida.
+const sessionStore = pool
+  ? new PgSession({
+      pool,
+      tableName: 'session',
+      createTableIfMissing: true,
+      pruneSessionInterval: 60 * 60,
+    })
+  : null;
 
-sessionStore.on('error', (err) => {
+sessionStore?.on('error', (err) => {
   // Throttle: evita inundação de logs quando o Postgres está em recovery mode (manutenção/failover)
   const msg = err?.message || String(err);
   const now = Date.now();
@@ -142,7 +143,7 @@ if (!process.env.SESSION_SECRET) {
 const SESSION_SECRET = process.env.SESSION_SECRET || 'dev-only-insecure-change-me';
 
 app.use(session({
-  store: sessionStore,
+  store: sessionStore || undefined,
   name: 'sid',
   secret: SESSION_SECRET,
   resave: false,
@@ -354,19 +355,10 @@ app.get('/api/check-version', async (req, res) => {
   }
 });
 
-// Conexão Postgres (Render)
-const { Pool } = require('pg');
-
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL || process.env.POSTGRES_URL,
-  ssl: { rejectUnauthorized: false },
-  max: parseInt(process.env.PGPOOL_MAX || '10', 10),
-  idleTimeoutMillis: 30_000,
-  connectionTimeoutMillis: 10_000,
-});
-pool.on('error', (err) => {
-  console.error('[pg] erro em cliente ocioso — ignorado para evitar crash:', err.message);
-});
+// Pool Postgres compartilhado — importado de src/db.js no topo do arquivo.
+if (!pool) {
+  console.warn('[pg] DATABASE_URL ausente — rotas que dependem do Postgres ficarão limitadas.');
+}
 const PG_ACTIVE_CLIENT_ERROR_HANDLER = Symbol('pgActiveClientErrorHandler');
 function protegerPgClientAtivo(client, origem = 'pool.connect') {
   if (!client || typeof client.on !== 'function' || client[PG_ACTIVE_CLIENT_ERROR_HANDLER]) {
@@ -385,8 +377,33 @@ function protegerPgClientAtivo(client, origem = 'pool.connect') {
   return client;
 }
 const comprasAuditContext = new AsyncLocalStorage();
-const originalPoolQuery = pool.query.bind(pool);
-const originalPoolConnect = pool.connect.bind(pool);
+if (pool) {
+  const originalPoolQuery = pool.query.bind(pool);
+  const originalPoolConnect = pool.connect.bind(pool);
+
+  // Encaminha pool.query para o client de contexto quando a rota está em /api/compras.
+  pool.query = function queryComContexto(...args) {
+    const ctx = comprasAuditContext.getStore();
+    if (ctx?.client) {
+      return ctx.client.query(...args);
+    }
+    return originalPoolQuery(...args);
+  };
+
+  // Garante app.current_user também para clients obtidos via pool.connect dentro do contexto.
+  pool.connect = async function connectComContexto(...args) {
+    const client = protegerPgClientAtivo(await originalPoolConnect(...args));
+    const ctx = comprasAuditContext.getStore();
+    if (ctx?.username) {
+      try {
+        await client.query(`SELECT set_config('app.current_user', $1, false)`, [ctx.username]);
+      } catch (err) {
+        console.warn('[Compras/Auditoria] Falha ao aplicar app.current_user no client:', err?.message || err);
+      }
+    }
+    return client;
+  };
+}
 
 function resolverUsuarioAuditoria(req) {
   const user = req?.session?.user || {};
@@ -762,29 +779,6 @@ async function excluirReservaGoogleCalendar({ username, googleEventId, googleCal
     path: `/calendars/${encodeURIComponent(googleCalendarId)}/events/${encodeURIComponent(googleEventId)}`
   });
 }
-
-// Encaminha pool.query para o client de contexto quando a rota está em /api/compras.
-pool.query = function queryComContexto(...args) {
-  const ctx = comprasAuditContext.getStore();
-  if (ctx?.client) {
-    return ctx.client.query(...args);
-  }
-  return originalPoolQuery(...args);
-};
-
-// Garante app.current_user também para clients obtidos via pool.connect dentro do contexto.
-pool.connect = async function connectComContexto(...args) {
-  const client = protegerPgClientAtivo(await originalPoolConnect(...args));
-  const ctx = comprasAuditContext.getStore();
-  if (ctx?.username) {
-    try {
-      await client.query(`SELECT set_config('app.current_user', $1, false)`, [ctx.username]);
-    } catch (err) {
-      console.warn('[Compras/Auditoria] Falha ao aplicar app.current_user no client:', err?.message || err);
-    }
-  }
-  return client;
-};
 
 // Contexto de auditoria apenas para endpoints de compras.
 app.use('/api/compras', (req, res, next) => {
@@ -1566,7 +1560,6 @@ app.get('/api/users/:id/permissions', async (req,res)=>{
 
 // ─── Config. dinâmica de etiqueta ─────────────────────────
 const etqConfigPath = path.join(__dirname, 'csv', 'Configuração_etq_caracteristicas.csv');
-const { dbQuery, isDbEnabled } = require('./src/db');   // nosso módulo do Passo 1
 const produtosRouter = require('./routes/produtos');
 const engenhariaRouter = require('./routes/engenharia')(pool);
 const comprasRouter = require('./routes/compras')(pool);
