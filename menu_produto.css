@@ -11289,6 +11289,7 @@ table.tabela td.num {
 }
 .movim-endereco-etq-lista:empty { display: none; }
 .movim-ref-loading { font-size: .82rem; color: #6b7280; }
+.movim-ref-erro { font-size: .82rem; color: #f87171; line-height: 1.4; }
 .movim-etq-linha {
   display: grid;
   grid-template-columns: minmax(100px, 1.4fr) repeat(3, minmax(44px, auto)) minmax(60px, 1fr) 36px;

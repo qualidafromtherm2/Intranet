@@ -11667,9 +11667,6 @@ app.get('/api/etiquetas/rec-impresso/enderecos-referencia-por-produto', async (r
     const codigo = String(req.query.codigo || '').trim();
     if (!codigo) return res.status(400).json({ ok: false, error: 'codigo é obrigatório.' });
 
-    const idOmie = await _resolveProdutoOmieCodigoProduto(pool, codigo);
-    if (!idOmie) return res.json({ ok: true, codigo, enderecos: [] });
-
     const { rows } = await pool.query(
       `SELECT DISTINCT ON (TRIM(i.endereco))
               i.id,
@@ -11678,10 +11675,12 @@ app.get('/api/etiquetas/rec-impresso/enderecos-referencia-por-produto', async (r
               COALESCE(NULLIF(TRIM(i.unidade), ''), 'UN') AS unidade,
               i.complemento
          FROM etiqueta."ETQ_rec_impresso" i
-        WHERE TRIM(COALESCE(i.codigo_produto, '')) = $1
+         JOIN public.produtos_omie p
+           ON TRIM(i.codigo_produto) IN (p.codigo_produto::text, TRIM(p.codigo))
+        WHERE (p.codigo = $1 OR p.codigo_produto::text = $1 OR p.codigo_produto_integracao = $1)
           AND i.endereco IS NOT NULL AND TRIM(i.endereco) <> ''
         ORDER BY TRIM(i.endereco), COALESCE(i.qtd, 0) DESC, i.id DESC`,
-      [idOmie]
+      [codigo]
     );
 
     res.json({ ok: true, codigo, enderecos: rows });
@@ -17252,6 +17251,98 @@ app.patch('/api/logistica/itens_solicitados/:id/separado', async (req, res) => {
   }
 });
 
+/** Itens cuja SEP veio do fluxo VIPP (motivo SAC/AT ou vínculo em envios.solicitacoes). */
+async function _logisticaSolicIdsVippSet(db, solicIds) {
+  const ids = (solicIds || []).map(id => parseInt(id, 10)).filter(id => !isNaN(id));
+  if (!ids.length) return new Set();
+  const { rows } = await db.query(
+    `SELECT i.id
+       FROM solicitacao_produto.itens_solicitados i
+      WHERE i.id = ANY($1::bigint[])
+        AND (
+          i.motivo IN ('SAC', 'AT')
+          OR EXISTS (
+            SELECT 1 FROM envios.solicitacoes e
+             WHERE e.numero_sep = i.n_solic
+               AND NULLIF(TRIM(e.id_vipp), '') IS NOT NULL
+          )
+        )`,
+    [ids]
+  );
+  return new Set(rows.map(r => Number(r.id)));
+}
+
+async function _logisticaEnviosVippPosSeparacao(db, solicIds) {
+  const ids = (solicIds || []).map(id => parseInt(id, 10)).filter(id => !isNaN(id));
+  if (!ids.length) return;
+  try {
+    const { rows } = await db.query(
+      `SELECT DISTINCT i.n_solic
+         FROM solicitacao_produto.itens_solicitados i
+        WHERE i.id = ANY($1::bigint[]) AND i.n_solic IS NOT NULL`,
+      [ids]
+    );
+    for (const { n_solic } of rows) {
+      await db.query(
+        `UPDATE envios.solicitacoes
+            SET status = 'Aguardando identificação'
+          WHERE numero_sep = $1 AND NULLIF(TRIM(id_vipp), '') IS NOT NULL`,
+        [n_solic]
+      );
+    }
+  } catch (e) {
+    console.warn('[logistica/vipp-pos-separacao] envios.solicitacoes:', e.message);
+  }
+}
+
+/** VIPP → Concluído direto; demais fluxos → Separado (Aguardando retirada depois). */
+async function _logisticaAplicarStatusPosSeparacao(client, solicIds, req) {
+  const ids = (solicIds || []).map(id => parseInt(id, 10)).filter(id => !isNaN(id));
+  if (!ids.length) return { vipp: 0, normal: 0 };
+
+  const vippSet = await _logisticaSolicIdsVippSet(client, ids);
+  const idsVipp = ids.filter(id => vippSet.has(id));
+  const idsNormal = ids.filter(id => !vippSet.has(id));
+
+  if (idsNormal.length) {
+    await registrarMovimentacaoKanbanItens(client, idsNormal, 'Separado', req);
+    await client.query(
+      `UPDATE solicitacao_produto.itens_solicitados
+          SET status = 'Separado',
+              quantidade_solicitada = NULL,
+              quantidade_separada = NULL
+        WHERE id = ANY($1::bigint[])`,
+      [idsNormal]
+    );
+  }
+
+  if (idsVipp.length) {
+    await registrarMovimentacaoKanbanItens(client, idsVipp, 'Concluído', req);
+    await client.query(
+      `UPDATE solicitacao_produto.itens_solicitados
+          SET status = 'Concluído',
+              quantidade_solicitada = NULL,
+              quantidade_separada = NULL
+        WHERE id = ANY($1::bigint[])`,
+      [idsVipp]
+    );
+    await _logisticaEnviosVippPosSeparacao(client, idsVipp);
+  }
+
+  return { vipp: idsVipp.length, normal: idsNormal.length };
+}
+
+async function _logisticaAplicarStatusPosSeparacaoPorCarr(client, carrIds, req) {
+  const cIds = (carrIds || []).map(id => parseInt(id, 10)).filter(id => !isNaN(id));
+  if (!cIds.length) return { vipp: 0, normal: 0 };
+  const { rows } = await client.query(
+    `SELECT id FROM solicitacao_produto.itens_solicitados WHERE id_carr = ANY($1::bigint[])`,
+    [cIds]
+  );
+  const solicIds = rows.map(r => Number(r.id)).filter(Boolean);
+  return _logisticaAplicarStatusPosSeparacao(client, solicIds, req);
+}
+
 // PATCH /api/logistica/itens_solicitados/separar - Marca array de itens como 'Separado'
 app.patch('/api/logistica/itens_solicitados/separar', async (req, res) => {
   const client = await pool.connect();
@@ -17277,17 +17368,9 @@ app.patch('/api/logistica/itens_solicitados/separar', async (req, res) => {
         qtd
       });
     }
-    await registrarMovimentacaoKanbanItens(client, ids, 'Separado', req);
-    await client.query(
-      `UPDATE solicitacao_produto.itens_solicitados
-          SET status = 'Separado',
-              quantidade_solicitada = NULL,
-              quantidade_separada = NULL
-        WHERE id = ANY($1::bigint[])`,
-      [ids]
-    );
+    const posSep = await _logisticaAplicarStatusPosSeparacao(client, ids, req);
     await client.query('COMMIT');
-    res.json({ ok: true });
+    res.json({ ok: true, ...posSep });
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {});
     if (err?.code === 'ETQ_SALDO_SEPARACAO' || err?.code === 'ETQ_ENDERECO_OBRIGATORIO') {
@@ -17423,15 +17506,9 @@ app.post('/api/logistica/itens_solicitados/separar-parcial', async (req, res) =>
       }
 
       if (sIds.length > 0) {
-        await client.query(
-          `UPDATE solicitacao_produto.itens_solicitados SET status = 'Separado' WHERE id = ANY($1::bigint[])`,
-          [sIds]
-        );
+        await _logisticaAplicarStatusPosSeparacao(client, sIds, req);
       } else {
-        await client.query(
-          `UPDATE solicitacao_produto.itens_solicitados SET status = 'Separado' WHERE id_carr = $1`,
-          [primaryId]
-        );
+        await _logisticaAplicarStatusPosSeparacaoPorCarr(client, [primaryId], req);
       }
 
       await client.query('COMMIT');
@@ -17526,10 +17603,7 @@ app.post('/api/logistica/itens_solicitados/separar-parcial', async (req, res) =>
         solicIds: sIds, carrId: primaryKeptId, qtyOriginal: qtyTotal, qtySeparada: qtySep
       });
 
-      await client.query(
-        `UPDATE solicitacao_produto.itens_solicitados SET status = 'Separado' WHERE id_carr = $1`,
-        [primaryKeptId]
-      );
+      await _logisticaAplicarStatusPosSeparacaoPorCarr(client, [primaryKeptId], req);
     }
 
     await client.query('COMMIT');
@@ -17626,7 +17700,8 @@ async function _logisticaFetchEnderecoEtqMap(codigos) {
             COALESCE(NULLIF(TRIM(i.unidade), ''), 'UN') AS unidade,
             i.complemento
        FROM etiqueta."ETQ_rec_impresso" i
-       JOIN public.produtos_omie p ON p.codigo_produto::text = TRIM(i.codigo_produto)
+       JOIN public.produtos_omie p
+         ON TRIM(i.codigo_produto) IN (p.codigo_produto::text, TRIM(p.codigo))
       WHERE p.codigo = ANY($1::text[])
         AND i.endereco IS NOT NULL AND TRIM(i.endereco) <> ''
       ORDER BY p.codigo, TRIM(i.endereco), COALESCE(i.qtd, 0) DESC, i.id DESC`,
@@ -18383,7 +18458,7 @@ app.post('/api/logistica/separacao/enviar', express.json(), async (req, res) => 
     const id_user   = req.session?.user?.id;
     const nome_user = req.session?.user?.username || req.session?.user?.nome || 'desconhecido';
     if (!id_user) return res.status(401).json({ ok: false, error: 'Não autenticado.' });
-    const { solicitado_para, motivo, data_prevista, horario, observacao, item_ids, forcar_novo_sep, os_num, id_vipp, conteudo, origem_vipp } = req.body || {};
+    const { solicitado_para, motivo, data_prevista, horario, observacao, item_ids, forcar_novo_sep, os_num, id_vipp, conteudo, origem_vipp, local_estoque, local_estoque_nome } = req.body || {};
     // Quando item_ids for fornecido (ex: VIPP), processa apenas esses itens do carrinho
     const filtroIds = Array.isArray(item_ids) && item_ids.length > 0
       ? item_ids.map(id => parseInt(id, 10)).filter(id => !isNaN(id))
@@ -18427,6 +18502,24 @@ app.post('/api/logistica/separacao/enviar', express.json(), async (req, res) => 
         [VIPP_COD_LOCAL_PADRAO]
       );
       vippNomeLocalPadrao = localRows[0]?.nome || null;
+    }
+
+    const codLocalGravar = fluxoVipp
+      ? VIPP_COD_LOCAL_PADRAO
+      : (String(local_estoque || '').trim() || null);
+    let nomeLocalGravar = fluxoVipp
+      ? vippNomeLocalPadrao
+      : (String(local_estoque_nome || '').trim() || null);
+    if (!fluxoVipp && codLocalGravar && !nomeLocalGravar) {
+      const { rows: localRows } = await client.query(
+        `SELECT nome FROM public.omie_locais_estoque WHERE local_codigo = $1 LIMIT 1`,
+        [codLocalGravar]
+      );
+      nomeLocalGravar = localRows[0]?.nome || null;
+    }
+    if (!fluxoVipp && !codLocalGravar) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ ok: false, error: 'Local de estoque é obrigatório.' });
     }
 
     // Garante tabela de solicitações
@@ -18549,8 +18642,8 @@ app.post('/api/logistica/separacao/enviar', express.json(), async (req, res) => 
           nSolic,
           observacao || null,
           motivoSolicitacao,
-          fluxoVipp ? VIPP_COD_LOCAL_PADRAO : null,
-          fluxoVipp ? vippNomeLocalPadrao : null,
+          codLocalGravar,
+          nomeLocalGravar,
           item.urgente || false
         ]
       );

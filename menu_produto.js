@@ -350,10 +350,10 @@ function _solEnderecamentoSepInline(codigo, enderecoMap, itemFallback) {
     const fromItem = itemFallback.endereco_pp || itemFallback.enderecos_pp;
     if (Array.isArray(fromItem) && fromItem.length) registros = fromItem;
   }
-  registros = (registros || []).filter(ep => Number(ep.qtd) > 0);
+  registros = (registros || []).filter(ep => String(ep.endereco || ep.completo || '').trim());
   if (!registros.length) {
-    return `<div style="font-size:.62rem;color:#fbbf24;font-style:italic;padding:4px 0;">
-      <i class="fa-solid fa-triangle-exclamation" style="margin-right:4px;"></i>Sem saldo em endereços ETQ
+    return `<div style="font-size:.62rem;color:#6b7280;font-style:italic;padding:4px 0;">
+      Nenhum endereço cadastrado no ETQ
     </div>`;
   }
   const gridCols = 'minmax(60px,1.2fr) repeat(3,minmax(28px,auto)) minmax(36px,.9fr)';
@@ -368,11 +368,12 @@ function _solEnderecamentoSepInline(codigo, enderecoMap, itemFallback) {
     const un = escapeHtml(String(ep.unidade || 'UN'));
     const comp = String(ep.complemento || '').trim();
     const compEsc = comp ? escapeHtml(comp) : '—';
+    const qtdColor = qtd > 0 ? '#cbd5e1' : '#fbbf24';
     return `<button type="button" class="sep-etq-endereco-row" data-etq-id="${escapeHtml(id)}" data-etq-endereco="${end}" data-etq-qtd="${qtd}"
       style="display:grid;grid-template-columns:${gridCols};gap:3px 6px;width:100%;padding:5px 4px;border:1px solid #854d0e33;border-radius:6px;background:#1a1508;color:inherit;font:inherit;cursor:pointer;text-align:left;align-items:center;">
       <span style="color:#fde68a;font-weight:700;word-break:break-word;font-size:.65rem;">${end}</span>
       <span style="color:#cbd5e1;font-weight:600;font-size:.64rem;">${escapeHtml(id || '—')}</span>
-      <span style="color:#cbd5e1;font-weight:600;font-size:.64rem;">${qtd}</span>
+      <span style="color:${qtdColor};font-weight:600;font-size:.64rem;">${qtd}</span>
       <span style="color:#cbd5e1;font-weight:600;font-size:.64rem;">${un}</span>
       <span style="color:#94a3b8;font-size:.62rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${comp ? escapeHtml(comp) : ''}">${compEsc}</span>
     </button>`;
@@ -803,7 +804,7 @@ window._loadSolicitacoesTab = async function() {
         _solKanbanLoading(true, 'Carregando itens...');
         try {
           const cachedModal = _solGetSepModalCache(nSolic, 'global');
-          if (acao === 'modal' && cachedModal?.grupoAtual?.itens?.length) {
+          if (acao === 'modal' && cachedModal?.grupoAtual?.itens?.length && !document.getElementById('modalSeparacaoLogistica')) {
             void _abrirModalSeparacao(
               cachedModal.grupoAtual,
               cachedModal.gruposConflito || [],
@@ -1028,7 +1029,7 @@ function _solInvalidateAguardRetCache(nSolic, tituloColuna = 'Aguardando retirad
 }
 
 async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) {
-  document.getElementById('modalSeparacaoLogistica')?.remove();
+  document.querySelectorAll('#modalSeparacaoLogistica').forEach(el => el.remove());
   const origemStatus = String(grupoAtual?.origem_status || '').trim();
   const refreshAoFechar = origemStatus === 'Solicitado';
   let houveMudanca = false;
@@ -1088,13 +1089,37 @@ async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) 
     </div>`;
   }
 
-  function _atualizarBannerSep() {
+  function _aplicarEstadoSeparadorAtivo(nomeSeparador) {
+    const nome = String(nomeSeparador || currentUser).trim();
+    usuarioSeparando = nome;
+    perdeuSeparacaoParaOutro = false;
+    podeAgirSep = !isStandby && !!nome && nome === currentUser;
+    podeCancelarSep = !isStandby
+      && (origemStatus === 'Em Separação' || origemStatus === 'Separado')
+      && !!usuarioSeparando
+      && usuarioSeparando === currentUser;
+    (grupoAtual.itens || []).forEach(it => { it.usuario_separando = nome; });
+  }
+
+  function _atualizarUiLockSep() {
     const host = document.getElementById('modalSepLockBanner');
-    if (!host) return;
-    host.innerHTML = _htmlBannerSepLock();
-    const btnCancel = document.getElementById('btnCancelarSeparacao');
-    const wrapCancel = btnCancel?.closest('div');
-    if (wrapCancel) wrapCancel.style.display = podeCancelarSep ? '' : 'none';
+    if (host) host.innerHTML = _htmlBannerSepLock();
+    const footCancel = document.getElementById('modalSepFooterCancel');
+    if (footCancel) footCancel.style.display = podeCancelarSep ? '' : 'none';
+    _renderLista();
+  }
+
+  function _atualizarBannerSep() {
+    _atualizarUiLockSep();
+  }
+
+  function _atualizarCacheModalSep() {
+    _solInvalidateSepModalCache(grupoAtual.n_solic, grupoAtual.escopoItens || 'global');
+    _solSetSepModalCache(grupoAtual.n_solic, grupoAtual.escopoItens || 'global', {
+      grupoAtual: { ...grupoAtual, itens: [...(grupoAtual.itens || [])] },
+      gruposConflito,
+      preloaded: { estoqueBatch, enderecoBatch }
+    });
   }
 
   async function _fetchItensModalSep() {
@@ -1484,9 +1509,10 @@ async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) 
 
   // Recarrega o SEP original do servidor e re-renderiza lista (sem sub-SEPs — .1 vai para fila pendente)
   let _reloadPending = false;
-  async function reloadItems() {
+  async function reloadItems(opts = {}) {
     if (_reloadPending) return;
     _reloadPending = true;
+    const lockAntes = { usuarioSeparando, podeAgirSep, perdeuSeparacaoParaOutro, podeCancelarSep };
     try {
       const r = await fetch(_solBuildKanbanItensUrl(grupoAtual.n_solic, { escopoItens: grupoAtual.escopoItens }), { credentials: 'include' });
       const d = await r.json();
@@ -1498,9 +1524,18 @@ async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) 
         return;
       }
       aggItens = _aggItens(visiveis);
-      _syncSepLockFromItens(mapped);
-      _atualizarBannerSep();
+      grupoAtual.itens = mapped;
+      if (opts.skipLockSync) {
+        usuarioSeparando = lockAntes.usuarioSeparando;
+        podeAgirSep = lockAntes.podeAgirSep;
+        perdeuSeparacaoParaOutro = lockAntes.perdeuSeparacaoParaOutro;
+        podeCancelarSep = lockAntes.podeCancelarSep;
+      } else {
+        _syncSepLockFromItens(mapped);
+      }
       await _carregarEstoque();
+      if (!opts.skipLockSync) _atualizarUiLockSep();
+      else _renderLista();
     } catch (_) {} finally { _reloadPending = false; }
   }
 
@@ -1561,6 +1596,7 @@ async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) 
 
   function fecharModal() {
     modal.remove();
+    document.querySelectorAll('#modalSeparacaoLogistica').forEach(el => el.remove());
     if (houveMudanca || refreshAoFechar) {
       _solInvalidateSepModalCache(grupoAtual.n_solic, grupoAtual.escopoItens || 'global');
       window._loadSolicitacoesTab.force = true;
@@ -1625,8 +1661,8 @@ async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) 
           <i class="fa-solid fa-play" style="margin-right:4px;"></i>Iniciar separação
         </button>
       </div>` : ''}
-      ${podeCancelarSep ? `
-      <div style="padding:12px 16px;border-top:1px solid #2a2a2a;display:flex;justify-content:flex-start;align-items:center;gap:8px;background:#171717;flex-wrap:wrap;">
+      ${!isStandby ? `
+      <div id="modalSepFooterCancel" style="padding:12px 16px;border-top:1px solid #2a2a2a;display:${podeCancelarSep ? 'flex' : 'none'};justify-content:flex-start;align-items:center;gap:8px;background:#171717;flex-wrap:wrap;">
         <button id="btnCancelarSeparacao" style="padding:7px 14px;border:1px solid #7f1d1d;border-radius:8px;background:transparent;color:#f87171;font-weight:700;font-size:.82rem;cursor:pointer;">
           <i class="fa-solid fa-ban" style="margin-right:4px;"></i>Cancelar separação
         </button>
@@ -1752,15 +1788,12 @@ async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) 
         });
         const d = await r.json();
         if (!d.ok) throw new Error(d.error || 'Erro ao assumir separação.');
-        usuarioSeparando = d.usuario_separando || currentUser;
-        perdeuSeparacaoParaOutro = false;
-        podeAgirSep = true;
-        podeCancelarSep = !isStandby
-          && (origemStatus === 'Em Separação' || origemStatus === 'Separado')
-          && usuarioSeparando === currentUser;
+        _aplicarEstadoSeparadorAtivo(d.usuario_separando || currentUser);
         houveMudanca = true;
-        await reloadItems();
-        _atualizarBannerSep();
+        await reloadItems({ skipLockSync: true });
+        _aplicarEstadoSeparadorAtivo(d.usuario_separando || currentUser);
+        _atualizarUiLockSep();
+        _atualizarCacheModalSep();
         window._loadSolicitacoesTab.force = true;
         window._loadSolicitacoesTab();
         window._loadKanbanSolicitacoesTab.force = true;
@@ -66900,9 +66933,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function limparEnderecos() {
     const lista = document.getElementById('movimEnderecoLista');
-    const vazio = document.getElementById('movimEnderecoVazio');
     if (lista) lista.innerHTML = '';
-    if (vazio) vazio.style.display = 'block';
     _enderecoOrigemInterno = '';
     _enderecoDestinoInterno = '';
     renderEnderecoInternoValores();
@@ -66929,11 +66960,26 @@ document.addEventListener('DOMContentLoaded', () => {
     renderEnderecoInternoValores();
   }
 
+  let _movimEnderecosReq = 0;
+  const movimEscHtml = (value) => (
+    typeof escapeHtml === 'function'
+      ? escapeHtml(value)
+      : String(value ?? '').replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]))
+  );
+
   function limparEnderecosReferencia() {
     const lista = document.getElementById('movimEnderecoEtqLista');
     const vazio = document.getElementById('movimEnderecoVazio');
     if (lista) lista.innerHTML = '';
     if (vazio) vazio.style.display = 'block';
+  }
+
+  function mostrarMovimEnderecosEtqEstado(html, { vazio = false } = {}) {
+    const lista = document.getElementById('movimEnderecoEtqLista');
+    const vazioEl = document.getElementById('movimEnderecoVazio');
+    if (!lista) return;
+    lista.innerHTML = html || '';
+    if (vazioEl) vazioEl.style.display = vazio ? 'block' : 'none';
   }
 
   function renderMovimEnderecosEtqLista(lista) {
@@ -66960,30 +67006,37 @@ document.addEventListener('DOMContentLoaded', () => {
       <span class="movim-etq-meta movim-etq-meta--comp">Complemento</span>
       <span></span>
     </div>`;
-    el.innerHTML = header + itens.map(e => {
-      const end = String(e.endereco || '').trim();
-      const endEsc = escapeHtml(end);
-      const id = Number(e.id);
-      const idEsc = escapeHtml(String(id || '—'));
-      const qtd = escapeHtml(String(e.qtd != null ? e.qtd : '0'));
-      const unidade = escapeHtml(String(e.unidade || 'UN'));
-      const comp = String(e.complemento || '').trim();
-      const compHtml = comp
-        ? `<span class="movim-etq-meta movim-etq-meta--comp" title="${escapeHtml(comp)}">${escapeHtml(comp)}</span>`
-        : '<span class="movim-etq-meta movim-etq-meta--vazio">—</span>';
-      const sel = selecionados.has(end) ? ' movim-etq-linha--selected' : '';
-      const btnPrint = id
-        ? `<button type="button" class="movim-etq-btn-print" data-id="${id}" title="Imprimir etiqueta"><i class="fa-solid fa-print"></i></button>`
-        : '<span></span>';
-      return `<div class="movim-etq-linha${sel}" data-id="${idEsc}" data-endereco="${endEsc}" role="button" tabindex="0" title="Clique para selecionar este endereço">
-        <span class="movim-etq-end">${endEsc}</span>
-        <span class="movim-etq-meta">${idEsc}</span>
-        <span class="movim-etq-meta">${qtd}</span>
-        <span class="movim-etq-meta">${unidade}</span>
-        ${compHtml}
-        ${btnPrint}
-      </div>`;
-    }).join('');
+    try {
+      el.innerHTML = header + itens.map(e => {
+        const end = String(e.endereco || '').trim();
+        const endEsc = movimEscHtml(end);
+        const id = Number(e.id);
+        const idEsc = movimEscHtml(String(id || '—'));
+        const qtd = movimEscHtml(String(e.qtd != null ? e.qtd : '0'));
+        const unidade = movimEscHtml(String(e.unidade || 'UN'));
+        const comp = String(e.complemento || '').trim();
+        const compHtml = comp
+          ? `<span class="movim-etq-meta movim-etq-meta--comp" title="${movimEscHtml(comp)}">${movimEscHtml(comp)}</span>`
+          : '<span class="movim-etq-meta movim-etq-meta--vazio">—</span>';
+        const sel = selecionados.has(end) ? ' movim-etq-linha--selected' : '';
+        const btnPrint = id
+          ? `<button type="button" class="movim-etq-btn-print" data-id="${id}" title="Imprimir etiqueta"><i class="fa-solid fa-print"></i></button>`
+          : '<span></span>';
+        return `<div class="movim-etq-linha${sel}" data-id="${idEsc}" data-endereco="${endEsc}" role="button" tabindex="0" title="Clique para selecionar este endereço">
+          <span class="movim-etq-end">${endEsc}</span>
+          <span class="movim-etq-meta">${idEsc}</span>
+          <span class="movim-etq-meta">${qtd}</span>
+          <span class="movim-etq-meta">${unidade}</span>
+          ${compHtml}
+          ${btnPrint}
+        </div>`;
+      }).join('');
+    } catch (err) {
+      console.error('[modalMovimentacao] render enderecos ETQ', err);
+      mostrarMovimEnderecosEtqEstado(
+        '<span class="movim-ref-erro">Erro ao exibir endereços. Feche e abra o modal novamente.</span>'
+      );
+    }
   }
 
   function marcarEtqEnderecoSelecionado(endereco, selecionar) {
@@ -67031,28 +67084,44 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   async function carregarEnderecosReferencia(codigo) {
-    limparEnderecosReferencia();
     const cod = String(codigo || '').trim();
+    const reqId = ++_movimEnderecosReq;
+    limparEnderecosReferencia();
     if (!cod) return;
 
-    const listaEl = document.getElementById('movimEnderecoEtqLista');
-    const vazioEl = document.getElementById('movimEnderecoVazio');
-    if (listaEl) listaEl.innerHTML = '<span class="movim-ref-loading">Carregando endereços…</span>';
-    if (vazioEl) vazioEl.style.display = 'none';
+    mostrarMovimEnderecosEtqEstado('<span class="movim-ref-loading">Carregando endereços…</span>');
+
+    const base = (typeof API_BASE === 'string' && API_BASE) ? API_BASE : window.location.origin;
+    const url = `${base}/api/etiquetas/rec-impresso/enderecos-referencia-por-produto?codigo=${encodeURIComponent(cod)}`;
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 20000);
 
     try {
-      const resp = await fetch(
-        '/api/etiquetas/rec-impresso/enderecos-referencia-por-produto?codigo=' + encodeURIComponent(cod),
-        { credentials: 'include' }
-      );
+      const resp = await fetch(url, {
+        credentials: 'include',
+        cache: 'no-store',
+        signal: controller.signal
+      });
       let json;
       try { json = await resp.json(); } catch { json = { ok: false }; }
-      const enderecos = json?.ok && Array.isArray(json.enderecos) ? json.enderecos : [];
-      renderMovimEnderecosEtqLista(enderecos);
+      if (reqId !== _movimEnderecosReq) return;
+
+      if (!resp.ok || !json?.ok) {
+        const msg = String(json?.error || `Falha ao carregar endereços (HTTP ${resp.status}).`);
+        mostrarMovimEnderecosEtqEstado(`<span class="movim-ref-erro">${movimEscHtml(msg)}</span>`);
+        return;
+      }
+
+      renderMovimEnderecosEtqLista(Array.isArray(json.enderecos) ? json.enderecos : []);
     } catch (err) {
+      if (reqId !== _movimEnderecosReq) return;
       console.warn('[modalMovimentacao] enderecos referencia', err);
-      if (listaEl) listaEl.innerHTML = '';
-      if (vazioEl) vazioEl.style.display = 'block';
+      const msg = err?.name === 'AbortError'
+        ? 'Tempo esgotado ao carregar endereços. Verifique a conexão e tente de novo.'
+        : (err?.message || 'Não foi possível carregar endereços.');
+      mostrarMovimEnderecosEtqEstado(`<span class="movim-ref-erro">${movimEscHtml(msg)}</span>`);
+    } finally {
+      clearTimeout(timeoutId);
     }
   }
 
@@ -68525,10 +68594,10 @@ document.addEventListener('DOMContentLoaded', () => {
     if (subtitulo) subtitulo.textContent = 'Codigo: ' + codigo;
     if (overlay)   overlay.style.display = 'flex';
 
+    void carregarEnderecosReferencia(codigo);
     await Promise.all([
       carregarLocais(),
       carregarEstoqueModal(codigo),
-      carregarEnderecosReferencia(codigo),
       movimAtualizarListboxImpressora()
     ]);
     atualizarUiMesmoArmazem();
@@ -69126,8 +69195,9 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     const selLocal = document.getElementById('modalCarrinhoSepMotivo');
-    const localEstoque = selLocal?.value || '';
-    const localEstoqueNome = selLocal?.options[selLocal.selectedIndex]?.text || '';
+    const optLocal = selLocal?.selectedOptions?.[0];
+    const localEstoque = String(optLocal?.value || '').trim();
+    const localEstoqueNome = String(optLocal?.dataset?.descricao || optLocal?.textContent || '').trim();
     if (!localEstoque) {
       alert('Selecione o local de estoque.');
       return;
