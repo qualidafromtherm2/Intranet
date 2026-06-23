@@ -34,6 +34,46 @@ async function dbQuery(text, params = []) {
   return pool.query(text, params);
 }
 
+async function dbQueryWithRetry(text, params = [], opts = {}) {
+  const retries = Number(opts.retries ?? 4);
+  const delayMs = Number(opts.delayMs ?? 800);
+  let lastErr;
+  for (let i = 0; i < retries; i++) {
+    try {
+      return await dbQuery(text, params);
+    } catch (err) {
+      lastErr = err;
+      const msg = String(err?.message || err);
+      const transient = /terminated unexpectedly|timeout exceeded|ECONNRESET|ECONNREFUSED|connection/i.test(msg);
+      if (!transient || i === retries - 1) throw err;
+      await new Promise((r) => setTimeout(r, delayMs * (i + 1)));
+    }
+  }
+  throw lastErr;
+}
+
+async function warmupPgPool() {
+  if (!pool) return false;
+  await dbQueryWithRetry('SELECT 1 AS ok', [], { retries: 6, delayMs: 1000 });
+  console.log('[db] pool aquecido');
+  return true;
+}
+
+async function ensureSessionTableReady() {
+  if (!pool) return;
+  await dbQueryWithRetry(`
+    CREATE TABLE IF NOT EXISTS public."session" (
+      sid    varchar      NOT NULL,
+      sess   json         NOT NULL,
+      expire timestamp(6) NOT NULL
+    )
+  `, [], { retries: 4, delayMs: 1000 });
+  await dbQueryWithRetry(`
+    CREATE INDEX IF NOT EXISTS "IDX_session_expire" ON public."session" ("expire")
+  `, [], { retries: 3, delayMs: 800 });
+  console.log('[db] tabela session pronta');
+}
+
 async function dbGetClient() {
   if (!pool) throw new Error('DATABASE_URL não configurada (modo local/sem DB).');
   return pool.connect();
@@ -49,6 +89,9 @@ module.exports = {
   pool,
   getPgPoolConfig,
   dbQuery,
+  dbQueryWithRetry,
+  warmupPgPool,
+  ensureSessionTableReady,
   dbGetClient,
   dbClose,
   isDbEnabled,

@@ -2,7 +2,7 @@
 // Carrega as variáveis de ambiente definidas em .env
 // no topo do intranet/server.js
 require('dotenv').config({ path: require('path').resolve(__dirname, '.env'), override: true });
-const { pool, dbQuery, isDbEnabled } = require('./src/db');
+const { pool, dbQuery, isDbEnabled, warmupPgPool, ensureSessionTableReady } = require('./src/db');
 // utils/supabase.js — carrega R2 na subida (log do backend)
 require('./utils/supabase');
 const { uploadPublicFile, removePublicFiles } = require('./utils/storage');
@@ -111,7 +111,8 @@ const sessionStore = pool
   ? new PgSession({
       pool,
       tableName: 'session',
-      createTableIfMissing: true,
+      // Tabela já existe em produção — evita SELECT to_regclass a cada request na subida.
+      createTableIfMissing: false,
       pruneSessionInterval: 60 * 60,
     })
   : null;
@@ -36575,18 +36576,35 @@ function iniciarCronAgendamento() {
 }
 // ──────────────────────────────────────────────────────────────────────────────
 
-app.listen(PORT, HOST, () => {
-  console.log(`Servidor rodando em http://${HOST}:${PORT}`);
-  console.log(`🚀 API rodando em http://localhost:${PORT}`);
-  iniciarAutoSyncComprasGoogleSheets();
-  iniciarAutoSyncWebhooksOmie();
-  iniciarCronAgendamento();
-  // Notificação diária WhatsApp (08:00)
-  const { iniciarCronNotificacaoDiaria } = require('./cron/notificacao_diaria_whatsapp');
-  iniciarCronNotificacaoDiaria();
-  // Atualização diária de rastreio envios (07:00 Brasília)
-  const { iniciarCronAtualizacaoRastreio } = require('./utils/atualizarRastreioEnvios');
-  iniciarCronAtualizacaoRastreio();
+async function startServer() {
+  if (pool) {
+    try {
+      await warmupPgPool();
+      await ensureSessionTableReady();
+    } catch (err) {
+      console.error('[db] falha ao preparar pool/session na subida:', err?.message || err);
+    }
+  }
+
+  app.listen(PORT, HOST, () => {
+    console.log(`Servidor rodando em http://${HOST}:${PORT}`);
+    console.log(`🚀 API rodando em http://localhost:${PORT}`);
+    // Atrasa timers pesados para não competir com login/sessão logo após deploy.
+    setTimeout(() => {
+      iniciarAutoSyncComprasGoogleSheets();
+      iniciarAutoSyncWebhooksOmie();
+      iniciarCronAgendamento();
+      const { iniciarCronNotificacaoDiaria } = require('./cron/notificacao_diaria_whatsapp');
+      iniciarCronNotificacaoDiaria();
+      const { iniciarCronAtualizacaoRastreio } = require('./utils/atualizarRastreioEnvios');
+      iniciarCronAtualizacaoRastreio();
+    }, 15000);
+  });
+}
+
+startServer().catch((err) => {
+  console.error('[boot] falha fatal ao subir servidor:', err?.message || err);
+  process.exit(1);
 });
 
 // DEBUG: sanity check do webhook (GET simples)
