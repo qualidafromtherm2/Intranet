@@ -3619,7 +3619,13 @@ function extractConteudo(textRaw) {
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL || process.env.POSTGRES_URL,
-  ssl: { rejectUnauthorized: false }
+  ssl: { rejectUnauthorized: false },
+  max: parseInt(process.env.PGPOOL_MAX || '10', 10),
+  idleTimeoutMillis: 30_000,
+  connectionTimeoutMillis: 10_000,
+});
+pool.on('error', (err) => {
+  console.error('[sacEnvios/pg] erro em cliente ocioso:', err?.message || err);
 });
 
 const BUCKET = process.env.STORAGE_BUCKET_SAC || process.env.STORAGE_BUCKET || process.env.SUPABASE_BUCKET || 'produtos';

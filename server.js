@@ -360,6 +360,9 @@ const { Pool } = require('pg');
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL || process.env.POSTGRES_URL,
   ssl: { rejectUnauthorized: false },
+  max: parseInt(process.env.PGPOOL_MAX || '10', 10),
+  idleTimeoutMillis: 30_000,
+  connectionTimeoutMillis: 10_000,
 });
 pool.on('error', (err) => {
   console.error('[pg] erro em cliente ocioso — ignorado para evitar crash:', err.message);
@@ -371,8 +374,10 @@ function protegerPgClientAtivo(client, origem = 'pool.connect') {
   }
 
   const handler = (err) => {
-    console.error(`[pg] erro em client ativo (${origem}) — conexão encerrada sem derrubar o servidor:`, err?.message || err);
-    try { client.release?.(err); } catch (_) {}
+    // Só loga: pool.query() já registra once('error') e faz release.
+    // Chamar release aqui causa "Release called on client which has already been released"
+    // e derruba o processo no Render.
+    console.error(`[pg] erro em client ativo (${origem}) — conexão encerrada:`, err?.message || err);
   };
 
   client.on('error', handler);
