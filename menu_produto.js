@@ -67482,29 +67482,44 @@ document.addEventListener('DOMContentLoaded', () => {
     const showCorpo = prontoInterno || prontoOmie;
     mostrarEl('movimQtdFieldWrap', showCorpo);
     mostrarEl('movimApontamentoField', showCorpo);
-    mostrarEl('movimEnderecosSection', showCorpo && (interno || tipoOmie === 'TRANSFERENCIA'));
+    mostrarEl('movimEnderecosSection', showCorpo);
     mostrarEl('movimMesmoArmazemAviso', prontoInterno);
     mostrarEl('movimImprimirEtiquetaWrap', prontoInterno);
     mostrarEl('movimImpressoraRow', prontoInterno);
     if (executarBtn) executarBtn.style.display = showCorpo ? 'flex' : 'none';
 
-    // Endereços — campos internos e leitura
+    // Endereços — campos internos (modo Interno) ou lista ETQ (Omie e Interno)
     const internoWrap = document.getElementById('movimEnderecoInternoWrap');
+    const externoWrap = document.getElementById('movimEnderecoExternoWrap');
     const scanGeralBtn = document.getElementById('movimScanEnderecoBtn');
     const origemCampo = document.getElementById('movimEnderecoOrigemCampo');
     const destinoCampo = document.getElementById('movimEnderecoDestinoCampo');
+    const endHeader = document.querySelector('#movimEnderecosSection .movim-enderecos-header h4');
 
-    if (!showCorpo || !interno) {
+    if (endHeader) {
+      endHeader.textContent = interno
+        ? 'Endereços'
+        : 'Endereços (opcional — só altera saldo por endereço se selecionar)';
+    }
+
+    if (!showCorpo) {
       if (internoWrap) internoWrap.style.display = 'none';
+      if (externoWrap) externoWrap.style.display = 'none';
       if (scanGeralBtn) scanGeralBtn.style.display = 'none';
       if (!interno) limparEnderecosInternos();
+    } else if (!interno) {
+      if (internoWrap) internoWrap.style.display = 'none';
+      if (externoWrap) externoWrap.style.display = '';
+      if (scanGeralBtn) scanGeralBtn.style.display = 'inline-flex';
     } else if (modo === 'ENTRADA') {
       if (internoWrap) internoWrap.style.display = 'flex';
+      if (externoWrap) externoWrap.style.display = 'none';
       if (origemCampo) origemCampo.style.display = 'none';
       if (destinoCampo) destinoCampo.style.display = '';
       if (scanGeralBtn) scanGeralBtn.style.display = 'inline-flex';
     } else if (modo === 'SAIDA') {
       if (internoWrap) internoWrap.style.display = 'flex';
+      if (externoWrap) externoWrap.style.display = 'none';
       if (origemCampo) origemCampo.style.display = '';
       if (destinoCampo) destinoCampo.style.display = 'none';
       if (scanGeralBtn) scanGeralBtn.style.display = 'none';
@@ -67512,6 +67527,7 @@ document.addEventListener('DOMContentLoaded', () => {
       if (scanOrig) scanOrig.style.display = 'none';
     } else if (modo === 'TRANSFERENCIA') {
       if (internoWrap) internoWrap.style.display = 'flex';
+      if (externoWrap) externoWrap.style.display = 'none';
       if (origemCampo) origemCampo.style.display = '';
       if (destinoCampo) destinoCampo.style.display = '';
       if (scanGeralBtn) scanGeralBtn.style.display = 'none';
@@ -68269,6 +68285,29 @@ document.addEventListener('DOMContentLoaded', () => {
       const linhasRetorno = [];
       const descOmie = jsonAprovar.descricao_status || omie.descricao_status;
       if (descOmie) linhasRetorno.push(`Mensagem Omie: ${descOmie}`);
+
+      const enderecos = obterEnderecosLidos();
+      if (enderecos.length) {
+        try {
+          const etqPayload = {
+            codigo: _codigoProdutoAtual,
+            descricao: _descricaoProdutoAtual,
+            qtd,
+            complemento: apontamento,
+            usuario: solicitante,
+            tipo_movimentacao: tipo
+          };
+          if (tipo === 'ENT') etqPayload.endereco_destino = enderecos[0];
+          else if (tipo === 'SAI') etqPayload.endereco_origem = enderecos[0];
+          await registrarEnderecosEtq(etqPayload);
+          linhasRetorno.push(`Endereço atualizado em ETQ: ${enderecos[0]}`);
+          limparSelecoesListaEtq();
+          if (_codigoProdutoAtual) void carregarEnderecosReferencia(_codigoProdutoAtual);
+        } catch (etqErr) {
+          linhasRetorno.push(`Omie OK — endereço: ${etqErr?.message || etqErr}`);
+        }
+      }
+
       if (!linhasRetorno.length) linhasRetorno.push(`Ajuste ${tipo} concluído com sucesso na Omie.`);
 
       exibirRetornoOmie(montarHtmlRetornoOmie({
@@ -68413,20 +68452,37 @@ document.addEventListener('DOMContentLoaded', () => {
         return;
       }
 
-      if (enderecos.length) {
+      if (enderecos.length >= 2) {
         const endOrigem = enderecos[0] || null;
-        const endDestino = enderecos.length >= 2 ? enderecos[1] : null;
-        await registrarEnderecosEtq({
-          codigo: _codigoProdutoAtual,
-          descricao: _descricaoProdutoAtual,
-          qtd,
-          endereco_origem: endOrigem,
-          endereco_destino: endDestino,
-          enderecos,
-          complemento: apontamento,
-          usuario: aprovadoPor,
-          tipo_movimentacao: 'TRF'
-        });
+        const endDestino = enderecos[1] || null;
+        try {
+          await registrarEnderecosEtq({
+            codigo: _codigoProdutoAtual,
+            descricao: _descricaoProdutoAtual,
+            qtd,
+            endereco_origem: endOrigem,
+            endereco_destino: endDestino,
+            enderecos,
+            complemento: apontamento,
+            usuario: aprovadoPor,
+            tipo_movimentacao: 'TRF'
+          });
+        } catch (etqErr) {
+          const omie = jsonAprovar.omie || {};
+          const linhasEtqErro = [];
+          const descOmie = jsonAprovar.descricao_status || omie.descricao_status;
+          if (descOmie) linhasEtqErro.push(`Mensagem Omie: ${descOmie}`);
+          linhasEtqErro.push(`Omie OK — endereço: ${etqErr?.message || etqErr}`);
+          exibirRetornoOmie(montarHtmlRetornoOmie({
+            ok: false,
+            titulo: 'Transferência na Omie — falha no endereço',
+            idSolicitacao,
+            linhas: linhasEtqErro
+          }), 'erro');
+          if (msg) { msg.textContent = 'Omie OK, mas endereço falhou — veja abaixo.'; msg.className = 'movim-mensagem erro'; }
+          aplicarEstoqueOtimistaMovim('TRANSFERENCIA', { origem, destino, qtd });
+          return;
+        }
       }
 
       const omie = jsonAprovar.omie || {};
@@ -68438,7 +68494,7 @@ document.addEventListener('DOMContentLoaded', () => {
       }
       const idMov = omie.id_mov || omie.nCodMov || omie.codigo_movimento;
       if (idMov) linhasRetorno.push(`ID movimentação: ${idMov}`);
-      if (enderecos.length) linhasRetorno.push(`Endereço(s) registrado(s): ${enderecos.join(', ')}`);
+      if (enderecos.length >= 2) linhasRetorno.push(`Endereço(s) registrado(s): ${enderecos.slice(0, 2).join(', ')}`);
       if (!linhasRetorno.length) linhasRetorno.push('Transferência concluída com sucesso na Omie.');
 
       exibirRetornoOmie(montarHtmlRetornoOmie({
@@ -68449,6 +68505,10 @@ document.addEventListener('DOMContentLoaded', () => {
       }), 'ok');
       if (msg) { msg.textContent = 'Transferência concluída.'; msg.className = 'movim-mensagem ok'; }
       aplicarEstoqueOtimistaMovim('TRANSFERENCIA', { origem, destino, qtd });
+      if (enderecos.length >= 2) {
+        limparSelecoesListaEtq();
+        if (_codigoProdutoAtual) void carregarEnderecosReferencia(_codigoProdutoAtual);
+      }
     } catch (err) {
       console.error('[modalMovimentacao] transferencia', err);
       exibirRetornoOmie(montarHtmlRetornoOmie({
