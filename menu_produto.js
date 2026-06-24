@@ -1168,16 +1168,27 @@ async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) 
       : `Em Separação — ${nSolicHdr}`;
   const isFaseSeparacao = origemStatus === 'Em Separação' || origemStatus === 'Separado';
 
-  function _solSepEtqPayloadFromRow(row) {
-    if (!row || row.dataset.requerEtq !== '1') return {};
+  function _solSepPayloadFromRow(row) {
     const cod = String(row.dataset.origemCod || '').trim();
-    if (cod !== PRINC_ARMZ) return {};
-    return {
-      cod_local_origem: cod,
-      etq_id: row.dataset.etqId ? parseInt(row.dataset.etqId, 10) : undefined,
-      endereco_origem: row.dataset.etqEndereco || undefined,
+    const base = {
+      cod_local_origem: cod || undefined,
       codigo_produto: row.dataset.codigo || undefined
     };
+    if (!row || row.dataset.requerEtq !== '1' || cod !== PRINC_ARMZ) return base;
+    return {
+      ...base,
+      etq_id: row.dataset.etqId ? parseInt(row.dataset.etqId, 10) : undefined,
+      endereco_origem: row.dataset.etqEndereco || undefined
+    };
+  }
+
+  function _solValidarOrigemSepRow(row, qty) {
+    const codOrigem = String(row?.dataset?.origemCod || '').trim();
+    if (!codOrigem) {
+      alert('Selecione o armazém de origem antes de separar.');
+      return false;
+    }
+    return _solValidarEtqSepRow(row, qty);
   }
 
   function _solValidarEtqSepRow(row, qty) {
@@ -1551,7 +1562,7 @@ async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) 
         carr_ids: carrIds,
         quantidade_separada: qtySep,
         motivo: motivo || '',
-        ..._solSepEtqPayloadFromRow(row)
+        ..._solSepPayloadFromRow(row)
       })
     });
     const d = await r.json();
@@ -1567,7 +1578,7 @@ async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) 
 
   async function _confirmarSepParcial(row, qtySep, opts = {}) {
     if (!(await _verificarSeparadorSep())) return false;
-    if (!_solValidarEtqSepRow(row, qtySep)) return false;
+    if (!_solValidarOrigemSepRow(row, qtySep)) return false;
     const unidade  = row.dataset.unidade || 'UN';
     const qtyTotal = parseFloat(row.dataset.qtyTotal || '0') || 0;
     if (!Number.isFinite(qtySep) || qtySep <= 0) {
@@ -1850,14 +1861,14 @@ async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) 
     document.getElementById('btnAcaoSepTudo').addEventListener('click', async () => {
       const btn = document.getElementById('btnAcaoSepTudo');
       if (!(await _verificarSeparadorSep())) return;
-      if (!_solValidarEtqSepRow(row, qtyTotal)) return;
+      if (!_solValidarOrigemSepRow(row, qtyTotal)) return;
       _solBtnLoading(btn, 'Processando...');
       try {
         const r = await fetch('/api/logistica/itens_solicitados/separar', {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
           credentials: 'include',
-          body: JSON.stringify({ solic_ids: solicIds, ..._solSepEtqPayloadFromRow(row) })
+          body: JSON.stringify({ solic_ids: solicIds, ..._solSepPayloadFromRow(row) })
         });
         const d = await r.json();
         if (!d.ok) throw new Error(d.error || 'Erro ao registrar item separado.');
@@ -2207,7 +2218,7 @@ async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) 
       if (!row) return;
       if (!(await _verificarSeparadorSep())) return;
       const qtyTotal = parseFloat(row.dataset.qtyTotal || '0') || 0;
-      if (!_solValidarEtqSepRow(row, qtyTotal)) return;
+      if (!_solValidarOrigemSepRow(row, qtyTotal)) return;
       const solicIds = JSON.parse(row.dataset.solicIds || '[]');
       _solBtnLoading(btnSepTudo);
       try {
@@ -2215,7 +2226,7 @@ async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) 
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
           credentials: 'include',
-          body: JSON.stringify({ solic_ids: solicIds, ..._solSepEtqPayloadFromRow(row) })
+          body: JSON.stringify({ solic_ids: solicIds, ..._solSepPayloadFromRow(row) })
         });
         const d = await r.json();
         if (!d.ok) throw new Error(d.error || 'Erro ao registrar item separado.');

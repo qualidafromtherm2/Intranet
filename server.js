@@ -12205,6 +12205,290 @@ async function _etqDebitarEndereco(client, { codigo, endereco, qtd, usuario }) {
 
 const LOGISTICA_ALMOX_LOCAL_COD = '10717096386';
 
+function _omieNormalizaNumeroSeparacao(value) {
+  if (value === null || value === undefined) return null;
+  if (typeof value === 'number') return Number.isFinite(value) ? value : null;
+  const textoOriginal = String(value).trim();
+  if (!textoOriginal) return null;
+  const semEspacos = textoOriginal.replace(/\s+/g, '');
+  const possuiVirgula = semEspacos.includes(',');
+  const possuiPonto = semEspacos.includes('.');
+  let normalizado = semEspacos;
+  if (possuiVirgula && possuiPonto) {
+    if (semEspacos.lastIndexOf(',') > semEspacos.lastIndexOf('.')) {
+      normalizado = semEspacos.replace(/\./g, '').replace(',', '.');
+    } else {
+      normalizado = semEspacos.replace(/,/g, '');
+    }
+  } else if (possuiVirgula) {
+    normalizado = semEspacos.replace(/\./g, '').replace(',', '.');
+  }
+  const parsed = Number(normalizado);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function _omieFormatarDataBRSeparacao(data = new Date()) {
+  const valor = data instanceof Date ? data : new Date(data);
+  const dia = String(valor.getDate()).padStart(2, '0');
+  const mes = String(valor.getMonth() + 1).padStart(2, '0');
+  const ano = String(valor.getFullYear());
+  return `${dia}/${mes}/${ano}`;
+}
+
+async function _logisticaBuscarCmcOmieSeparacao(client, codigo, localCod) {
+  if (!codigo || !localCod) return null;
+  const { rows } = await client.query(
+    `SELECT cmc, preco_unitario
+       FROM logistica.estoque_atual
+      WHERE codigo = $1 AND local_codigo = $2
+      LIMIT 1`,
+    [String(codigo).trim(), String(localCod).trim()]
+  );
+  const cmc = _omieNormalizaNumeroSeparacao(rows[0]?.cmc)
+    || _omieNormalizaNumeroSeparacao(rows[0]?.preco_unitario);
+  return cmc && cmc > 0 ? cmc : null;
+}
+
+async function _omieIncluirTrfEstoqueSeparacao({ origem, destino, id_prod, codigo_texto, qtd, obs }) {
+  if (!OMIE_APP_KEY || !OMIE_APP_SECRET) {
+    const err = new Error('Credenciais Omie não configuradas no servidor.');
+    err.code = 'OMIE_CREDENCIAIS';
+    throw err;
+  }
+  const origemStr = String(origem || '').trim();
+  const destinoStr = String(destino || '').trim();
+  const qtdNum = _omieNormalizaNumeroSeparacao(qtd);
+  const idProdNum = _omieNormalizaNumeroSeparacao(id_prod);
+  if (!origemStr || !destinoStr || !idProdNum || !qtdNum || qtdNum <= 0) {
+    const err = new Error('Dados inválidos para transferência Omie na separação.');
+    err.code = 'OMIE_TRF_SEPARACAO';
+    throw err;
+  }
+  if (origemStr === destinoStr) return null;
+
+  let valor = await _logisticaBuscarCmcOmieSeparacao(pool, codigo_texto, origemStr);
+  if (!valor || valor <= 0) {
+    valor = await _logisticaBuscarCmcOmieSeparacao(pool, codigo_texto, destinoStr);
+  }
+  if (!valor || valor <= 0) {
+    const { rows } = await pool.query(
+      `SELECT COALESCE(NULLIF(valor_unitario, 0), 0.01) AS valor
+         FROM public.produtos_omie
+        WHERE codigo = $1 OR codigo_produto::text = $2
+        LIMIT 1`,
+      [String(codigo_texto || '').trim(), String(id_prod)]
+    );
+    valor = _omieNormalizaNumeroSeparacao(rows[0]?.valor) || 0.01;
+  }
+
+  const payload = {
+    call: 'IncluirAjusteEstoque',
+    app_key: OMIE_APP_KEY,
+    app_secret: OMIE_APP_SECRET,
+    param: [{
+      codigo_local_estoque: origemStr,
+      codigo_local_estoque_destino: destinoStr,
+      id_prod: idProdNum,
+      data: _omieFormatarDataBRSeparacao(),
+      tipo: 'TRF',
+      quan: qtdNum,
+      valor,
+      obs: String(obs || 'Separação logística').slice(0, 200),
+      origem: 'AJU',
+      motivo: 'TRF'
+    }]
+  };
+
+  console.log(`[logistica/omie-trf-sep] ${codigo_texto}: ${origemStr} → ${destinoStr} (${qtdNum})`);
+  const resp = await omieCall('https://app.omie.com.br/api/v1/estoque/ajuste/', payload);
+  if (resp?.faultstring) {
+    const err = new Error(String(resp.faultstring));
+    err.code = 'OMIE_TRF_SEPARACAO';
+    throw err;
+  }
+  if (resp?.codigo_status != null && String(resp.codigo_status) !== '0') {
+    const err = new Error(String(resp.descricao_status || 'Omie rejeitou a transferência de estoque.'));
+    err.code = 'OMIE_TRF_SEPARACAO';
+    throw err;
+  }
+  return resp;
+}
+
+async function _ensureOmieSepColumns(client) {
+  const db = client || pool;
+  await db.query(`ALTER TABLE solicitacao_produto.itens_solicitados ADD COLUMN IF NOT EXISTS omie_sep_origem TEXT`);
+  await db.query(`ALTER TABLE solicitacao_produto.itens_solicitados ADD COLUMN IF NOT EXISTS omie_sep_destino TEXT`);
+  await db.query(`ALTER TABLE solicitacao_produto.itens_solicitados ADD COLUMN IF NOT EXISTS omie_sep_qtd NUMERIC(18,4)`);
+  await db.query(`ALTER TABLE solicitacao_produto.itens_solicitados ADD COLUMN IF NOT EXISTS omie_sep_codigo_produto TEXT`);
+  await db.query(`ALTER TABLE solicitacao_produto.itens_solicitados ADD COLUMN IF NOT EXISTS omie_sep_codigo TEXT`);
+}
+
+async function _logisticaPersistirTrfOmieSeparacao(client, solicIds, { origem, destino, qtd, codigo_produto, codigo }) {
+  const qtdNum = parseFloat(qtd);
+  if (!origem || !destino || !Number.isFinite(qtdNum) || qtdNum <= 0) return;
+  const ids = (solicIds || []).map(id => parseInt(id, 10)).filter(id => !isNaN(id));
+  if (!ids.length) return;
+  await _ensureOmieSepColumns(client);
+
+  const { rows } = await client.query(
+    `SELECT i.id, c.quantidade::numeric AS qty_carr
+       FROM solicitacao_produto.itens_solicitados i
+       JOIN logistica.carrinho c ON c.id = i.id_carr
+      WHERE i.id = ANY($1::bigint[])`,
+    [ids]
+  );
+  const sumCarr = rows.reduce((s, r) => s + (parseFloat(r.qty_carr) || 0), 0);
+  for (const row of rows) {
+    let itemQtd = qtdNum;
+    if (rows.length > 1 && sumCarr > 0) {
+      itemQtd = ((parseFloat(row.qty_carr) || 0) / sumCarr) * qtdNum;
+    }
+    await client.query(
+      `UPDATE solicitacao_produto.itens_solicitados
+          SET omie_sep_origem = $2,
+              omie_sep_destino = $3,
+              omie_sep_qtd = $4,
+              omie_sep_codigo_produto = $5,
+              omie_sep_codigo = $6
+        WHERE id = $1`,
+      [row.id, origem, destino, itemQtd, String(codigo_produto), String(codigo || '')]
+    );
+  }
+}
+
+async function _logisticaExecutarTrfOmieSeparacao(client, solicIds, { cod_local_origem, qtd }) {
+  const origem = String(cod_local_origem || '').trim();
+  if (!origem) {
+    const err = new Error('Selecione o armazém de origem para registrar a transferência na Omie.');
+    err.code = 'OMIE_ORIGEM_OBRIGATORIA';
+    throw err;
+  }
+
+  const ids = (solicIds || []).map(id => parseInt(id, 10)).filter(id => !isNaN(id));
+  if (!ids.length) return;
+
+  const { rows } = await client.query(
+    `SELECT i.id, i.cod_local, i.nome_local, c.codigo_produto, c.quantidade::numeric AS qty
+       FROM solicitacao_produto.itens_solicitados i
+       JOIN logistica.carrinho c ON c.id = i.id_carr
+      WHERE i.id = ANY($1::bigint[])`,
+    [ids]
+  );
+  if (!rows.length) return;
+
+  for (const row of rows) {
+    const destino = String(row.cod_local || '').trim();
+    if (!destino) {
+      const err = new Error(`Item ${row.codigo_produto || ''} sem local de destino (cod_local). A separação exige destino para transferência Omie.`);
+      err.code = 'OMIE_DESTINO_OBRIGATORIO';
+      throw err;
+    }
+  }
+
+  const qtdInformada = parseFloat(qtd);
+  const sumCarr = rows.reduce((s, r) => s + (parseFloat(r.qty) || 0), 0);
+  const grupos = new Map();
+
+  for (const row of rows) {
+    const destino = String(row.cod_local || '').trim();
+    if (!destino || destino === origem) continue;
+    const codigoTexto = String(row.codigo_produto || '').trim();
+    const key = `${destino}|${codigoTexto}`;
+    if (!grupos.has(key)) {
+      grupos.set(key, { destino, codigoTexto, qtd: 0, ids: [] });
+    }
+    let itemQtd = parseFloat(row.qty) || 0;
+    if (Number.isFinite(qtdInformada) && qtdInformada > 0) {
+      itemQtd = rows.length === 1
+        ? qtdInformada
+        : (sumCarr > 0 ? ((parseFloat(row.qty) || 0) / sumCarr) * qtdInformada : qtdInformada);
+    }
+    grupos.get(key).qtd += itemQtd;
+    grupos.get(key).ids.push(row.id);
+  }
+
+  for (const g of grupos.values()) {
+    if (g.qtd <= 0) continue;
+    const idProd = await _resolveProdutoOmieCodigoProduto(client, g.codigoTexto);
+    if (!idProd) {
+      const err = new Error(`Produto "${g.codigoTexto}" não encontrado em produtos_omie.`);
+      err.code = 'OMIE_TRF_SEPARACAO';
+      throw err;
+    }
+    const nomeDest = rows.find(r => String(r.cod_local).trim() === g.destino)?.nome_local || g.destino;
+    await _omieIncluirTrfEstoqueSeparacao({
+      origem,
+      destino: g.destino,
+      id_prod: idProd,
+      codigo_texto: g.codigoTexto,
+      qtd: g.qtd,
+      obs: `SEP logística ${g.codigoTexto}: ${origem} → ${g.destino} (${g.qtd}) ${nomeDest || ''}`.trim()
+    });
+    await _logisticaPersistirTrfOmieSeparacao(client, g.ids, {
+      origem,
+      destino: g.destino,
+      qtd: g.qtd,
+      codigo_produto: idProd,
+      codigo: g.codigoTexto
+    });
+  }
+}
+
+async function _logisticaEstornarTrfOmieSeparacao(client, solicIds) {
+  const ids = (solicIds || []).map(id => parseInt(id, 10)).filter(id => !isNaN(id));
+  if (!ids.length) return;
+  await _ensureOmieSepColumns(client);
+
+  const { rows } = await client.query(
+    `SELECT id, omie_sep_origem, omie_sep_destino, omie_sep_qtd, omie_sep_codigo_produto, omie_sep_codigo
+       FROM solicitacao_produto.itens_solicitados
+      WHERE id = ANY($1::bigint[])
+        AND omie_sep_origem IS NOT NULL
+        AND omie_sep_destino IS NOT NULL
+        AND COALESCE(omie_sep_qtd, 0) > 0`,
+    [ids]
+  );
+  if (!rows.length) return;
+
+  const grupos = new Map();
+  for (const r of rows) {
+    const orig = String(r.omie_sep_origem || '').trim();
+    const dest = String(r.omie_sep_destino || '').trim();
+    const cod = String(r.omie_sep_codigo || '').trim();
+    const idProd = String(r.omie_sep_codigo_produto || '').trim();
+    if (!orig || !dest || orig === dest) continue;
+    const key = `${orig}|${dest}|${idProd}|${cod}`;
+    if (!grupos.has(key)) {
+      grupos.set(key, { origem: orig, destino: dest, id_prod: idProd, codigo: cod, qtd: 0 });
+    }
+    grupos.get(key).qtd += parseFloat(r.omie_sep_qtd) || 0;
+  }
+
+  for (const g of grupos.values()) {
+    if (g.qtd <= 0) continue;
+    await _omieIncluirTrfEstoqueSeparacao({
+      origem: g.destino,
+      destino: g.origem,
+      id_prod: g.id_prod,
+      codigo_texto: g.codigo,
+      qtd: g.qtd,
+      obs: `Retificar SEP ${g.codigo}: estorno ${g.destino} → ${g.origem} (${g.qtd})`
+    });
+  }
+
+  await client.query(
+    `UPDATE solicitacao_produto.itens_solicitados
+        SET omie_sep_origem = NULL,
+            omie_sep_destino = NULL,
+            omie_sep_qtd = NULL,
+            omie_sep_codigo_produto = NULL,
+            omie_sep_codigo = NULL
+      WHERE id = ANY($1::bigint[])`,
+    [ids]
+  );
+  console.log(`[logistica/omie-trf-sep] Estorno Omie: ${grupos.size} transferência(s) revertida(s) em ${ids.length} item(ns)`);
+}
+
 async function _logisticaObterQtyCodigoSeparacao(client, solicIds) {
   const ids = (solicIds || []).map(id => parseInt(id, 10)).filter(id => !isNaN(id));
   if (!ids.length) return { qtd: 0, codigo: null };
@@ -12257,7 +12541,103 @@ async function _etqDebitarSeparacaoAlmox(client, { cod_local_origem, etq_id, end
     throw err;
   }
 
-  return _etqDebitarEndereco(client, { codigo: codigoOmie, endereco, qtd: qtdNum, usuario: null });
+  const debitResult = await _etqDebitarEndereco(client, { codigo: codigoOmie, endereco, qtd: qtdNum, usuario: null });
+  return {
+    ...debitResult,
+    endereco,
+    codigo_omie: codigoOmie,
+    codigo_texto: codigoTexto,
+    qtd: qtdNum
+  };
+}
+
+async function _ensureEtqSepColumns(client) {
+  const db = client || pool;
+  await db.query(`ALTER TABLE solicitacao_produto.itens_solicitados ADD COLUMN IF NOT EXISTS etq_sep_endereco TEXT`);
+  await db.query(`ALTER TABLE solicitacao_produto.itens_solicitados ADD COLUMN IF NOT EXISTS etq_sep_qtd NUMERIC(18,4)`);
+  await db.query(`ALTER TABLE solicitacao_produto.itens_solicitados ADD COLUMN IF NOT EXISTS etq_sep_codigo TEXT`);
+}
+
+/** Grava endereço/qtd debitados em ETQ_rec_impresso para estorno ao retificar. */
+async function _etqPersistirDebitoSeparacao(client, solicIds, { endereco, codigo_omie, qtd }) {
+  const qtdTotal = parseFloat(qtd);
+  if (!endereco || !codigo_omie || !Number.isFinite(qtdTotal) || qtdTotal <= 0) return;
+  const ids = (solicIds || []).map(id => parseInt(id, 10)).filter(id => !isNaN(id));
+  if (!ids.length) return;
+  await _ensureEtqSepColumns(client);
+
+  const { rows } = await client.query(
+    `SELECT i.id, c.quantidade::numeric AS qty_carr
+       FROM solicitacao_produto.itens_solicitados i
+       JOIN logistica.carrinho c ON c.id = i.id_carr
+      WHERE i.id = ANY($1::bigint[])`,
+    [ids]
+  );
+  if (!rows.length) return;
+
+  const sumCarr = rows.reduce((s, r) => s + (parseFloat(r.qty_carr) || 0), 0);
+  for (const row of rows) {
+    let itemQtd = qtdTotal;
+    if (rows.length > 1 && sumCarr > 0) {
+      itemQtd = ((parseFloat(row.qty_carr) || 0) / sumCarr) * qtdTotal;
+    }
+    await client.query(
+      `UPDATE solicitacao_produto.itens_solicitados
+          SET etq_sep_endereco = $2,
+              etq_sep_codigo = $3,
+              etq_sep_qtd = $4
+        WHERE id = $1`,
+      [row.id, endereco, codigo_omie, itemQtd]
+    );
+  }
+}
+
+/** Devolve saldo em ETQ_rec_impresso ao retificar separação (reverter-separacao). */
+async function _etqEstornarDebitoSeparacao(client, solicIds) {
+  const ids = (solicIds || []).map(id => parseInt(id, 10)).filter(id => !isNaN(id));
+  if (!ids.length) return;
+  await _ensureEtqSepColumns(client);
+
+  const { rows } = await client.query(
+    `SELECT id, etq_sep_endereco, etq_sep_codigo, etq_sep_qtd
+       FROM solicitacao_produto.itens_solicitados
+      WHERE id = ANY($1::bigint[])
+        AND etq_sep_endereco IS NOT NULL
+        AND COALESCE(etq_sep_qtd, 0) > 0`,
+    [ids]
+  );
+  if (!rows.length) return;
+
+  const grupos = new Map();
+  for (const r of rows) {
+    const end = String(r.etq_sep_endereco || '').trim();
+    const cod = String(r.etq_sep_codigo || '').trim();
+    if (!end || !cod) continue;
+    const key = `${cod}|${end}`;
+    if (!grupos.has(key)) grupos.set(key, { codigo: cod, endereco: end, qtd: 0 });
+    grupos.get(key).qtd += parseFloat(r.etq_sep_qtd) || 0;
+  }
+
+  for (const g of grupos.values()) {
+    if (g.qtd <= 0) continue;
+    await _etqCreditarEndereco(client, {
+      codigo: g.codigo,
+      endereco: g.endereco,
+      qtd: g.qtd,
+      usuario: null,
+      codigoTexto: g.codigo
+    });
+  }
+
+  await client.query(
+    `UPDATE solicitacao_produto.itens_solicitados
+        SET etq_sep_endereco = NULL,
+            etq_sep_codigo = NULL,
+            etq_sep_qtd = NULL
+      WHERE id = ANY($1::bigint[])`,
+    [ids]
+  );
+  console.log(`[etiqueta] Estorno separação: ${grupos.size} endereço(s) creditado(s) para ${ids.length} item(ns)`);
 }
 
 async function _insertEtqMovimentacaoEndereco(client, {
@@ -17016,6 +17396,14 @@ async function ensureSolicitacaoProdutoQtyColumns() {
   await pool.query(`ALTER TABLE solicitacao_produto.solicitacoes_separacao ADD COLUMN IF NOT EXISTS quantidade_original NUMERIC(18,4)`);
   await pool.query(`ALTER TABLE solicitacao_produto.itens_solicitados ADD COLUMN IF NOT EXISTS urgente BOOLEAN DEFAULT FALSE`);
   await pool.query(`ALTER TABLE solicitacao_produto.itens_solicitados ADD COLUMN IF NOT EXISTS usuario_separando TEXT`);
+  await pool.query(`ALTER TABLE solicitacao_produto.itens_solicitados ADD COLUMN IF NOT EXISTS etq_sep_endereco TEXT`);
+  await pool.query(`ALTER TABLE solicitacao_produto.itens_solicitados ADD COLUMN IF NOT EXISTS etq_sep_qtd NUMERIC(18,4)`);
+  await pool.query(`ALTER TABLE solicitacao_produto.itens_solicitados ADD COLUMN IF NOT EXISTS etq_sep_codigo TEXT`);
+  await pool.query(`ALTER TABLE solicitacao_produto.itens_solicitados ADD COLUMN IF NOT EXISTS omie_sep_origem TEXT`);
+  await pool.query(`ALTER TABLE solicitacao_produto.itens_solicitados ADD COLUMN IF NOT EXISTS omie_sep_destino TEXT`);
+  await pool.query(`ALTER TABLE solicitacao_produto.itens_solicitados ADD COLUMN IF NOT EXISTS omie_sep_qtd NUMERIC(18,4)`);
+  await pool.query(`ALTER TABLE solicitacao_produto.itens_solicitados ADD COLUMN IF NOT EXISTS omie_sep_codigo_produto TEXT`);
+  await pool.query(`ALTER TABLE solicitacao_produto.itens_solicitados ADD COLUMN IF NOT EXISTS omie_sep_codigo TEXT`);
   await pool.query(`ALTER TABLE solicitacao_produto.solicitacoes_separacao ADD COLUMN IF NOT EXISTS urgente BOOLEAN DEFAULT FALSE`);
   await pool.query(`ALTER TABLE solicitacao_produto.solicitacoes_separacao ADD COLUMN IF NOT EXISTS n_solic TEXT`);
   await pool.query(`ALTER TABLE logistica.carrinho ADD COLUMN IF NOT EXISTS data_prevista DATE`);
@@ -17399,6 +17787,9 @@ app.patch('/api/logistica/itens_solicitados/reverter-separacao', async (req, res
 
     await client.query('BEGIN');
 
+    await _etqEstornarDebitoSeparacao(client, ids);
+    await _logisticaEstornarTrfOmieSeparacao(client, ids);
+
     // Restaura quantidade original do pedido no carrinho (quando houve Informar qtd)
     const { rows: restaurados } = await client.query(
       `UPDATE logistica.carrinho c
@@ -17582,9 +17973,10 @@ app.patch('/api/logistica/itens_solicitados/separar', async (req, res) => {
     if (!lock.ok) return res.status(403).json(lock);
 
     await client.query('BEGIN');
+    const { qtd, codigo } = await _logisticaObterQtyCodigoSeparacao(client, ids);
+    let etqDebit = null;
     if (String(cod_local_origem || '').trim() === LOGISTICA_ALMOX_LOCAL_COD) {
-      const { qtd, codigo } = await _logisticaObterQtyCodigoSeparacao(client, ids);
-      await _etqDebitarSeparacaoAlmox(client, {
+      etqDebit = await _etqDebitarSeparacaoAlmox(client, {
         cod_local_origem,
         etq_id,
         endereco_origem,
@@ -17592,12 +17984,21 @@ app.patch('/api/logistica/itens_solicitados/separar', async (req, res) => {
         qtd
       });
     }
+    await _logisticaExecutarTrfOmieSeparacao(client, ids, {
+      cod_local_origem,
+      qtd
+    });
     const posSep = await _logisticaAplicarStatusPosSeparacao(client, ids, req);
+    if (etqDebit?.endereco) {
+      await _etqPersistirDebitoSeparacao(client, ids, etqDebit);
+    }
     await client.query('COMMIT');
     res.json({ ok: true, ...posSep });
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {});
-    if (err?.code === 'ETQ_SALDO_SEPARACAO' || err?.code === 'ETQ_ENDERECO_OBRIGATORIO') {
+    if (err?.code === 'ETQ_SALDO_SEPARACAO' || err?.code === 'ETQ_ENDERECO_OBRIGATORIO'
+      || err?.code === 'OMIE_ORIGEM_OBRIGATORIA' || err?.code === 'OMIE_DESTINO_OBRIGATORIO'
+      || err?.code === 'OMIE_TRF_SEPARACAO' || err?.code === 'OMIE_CREDENCIAIS') {
       return res.status(400).json({ ok: false, error: err.message });
     }
     console.error('[logistica/separar] erro:', err);
@@ -17680,12 +18081,13 @@ app.post('/api/logistica/itens_solicitados/separar-parcial', async (req, res) =>
     }
 
     await client.query('BEGIN');
+    let etqDebit = null;
     if (String(cod_local_origem || '').trim() === LOGISTICA_ALMOX_LOCAL_COD) {
       const codigoRef = codigo_produto || (await client.query(
         `SELECT MIN(codigo_produto) AS codigo FROM logistica.carrinho WHERE id = ANY($1::bigint[])`,
         [cIds]
       )).rows[0]?.codigo;
-      await _etqDebitarSeparacaoAlmox(client, {
+      etqDebit = await _etqDebitarSeparacaoAlmox(client, {
         cod_local_origem,
         etq_id,
         endereco_origem,
@@ -17730,9 +18132,20 @@ app.post('/api/logistica/itens_solicitados/separar-parcial', async (req, res) =>
       }
 
       if (sIds.length > 0) {
+        await _logisticaExecutarTrfOmieSeparacao(client, sIds, { cod_local_origem, qtd: qtySep });
         await _logisticaAplicarStatusPosSeparacao(client, sIds, req);
+        if (etqDebit?.endereco) await _etqPersistirDebitoSeparacao(client, sIds, etqDebit);
       } else {
+        const { rows: solRows } = await client.query(
+          `SELECT id FROM solicitacao_produto.itens_solicitados WHERE id_carr = $1`,
+          [primaryId]
+        );
+        const idsSep = solRows.map(r => r.id);
+        await _logisticaExecutarTrfOmieSeparacao(client, idsSep, { cod_local_origem, qtd: qtySep });
         await _logisticaAplicarStatusPosSeparacaoPorCarr(client, [primaryId], req);
+        if (etqDebit?.endereco) {
+          await _etqPersistirDebitoSeparacao(client, idsSep, etqDebit);
+        }
       }
 
       await client.query('COMMIT');
@@ -17766,6 +18179,19 @@ app.post('/api/logistica/itens_solicitados/separar-parcial', async (req, res) =>
       newNSolic = `${baseN}.${maxSuffix + 1}`;
     }
 
+    let codLocalOrig = null;
+    let nomeLocalOrig = null;
+    let motivoOrig = null;
+    if (sIds.length > 0) {
+      const { rows: [origItem] } = await client.query(
+        `SELECT cod_local, nome_local, motivo FROM solicitacao_produto.itens_solicitados WHERE id = $1`,
+        [sIds[0]]
+      );
+      codLocalOrig = origItem?.cod_local || null;
+      nomeLocalOrig = origItem?.nome_local || null;
+      motivoOrig = origItem?.motivo || null;
+    }
+
     // Cria novo carrinho com o restante (qtyRemainder) → volta para a fila como pendente
     const { rows: [newCarr] } = await client.query(
       `INSERT INTO logistica.carrinho
@@ -17775,8 +18201,10 @@ app.post('/api/logistica/itens_solicitados/separar-parcial', async (req, res) =>
        base.unidade, qtyRemainder, base.data_prevista, base.horario, base.cod_omie]
     );
     await client.query(
-      `INSERT INTO solicitacao_produto.itens_solicitados (id_carr, n_solic, status, observacao) VALUES ($1,$2,'Stund-by',$3)`,
-      [newCarr.id, newNSolic, String(motivo || '').trim() || null]
+      `INSERT INTO solicitacao_produto.itens_solicitados
+         (id_carr, n_solic, status, observacao, cod_local, nome_local, motivo)
+       VALUES ($1,$2,'Stund-by',$3,$4,$5,$6)`,
+      [newCarr.id, newNSolic, String(motivo || '').trim() || null, codLocalOrig, nomeLocalOrig, motivoOrig]
     );
 
     // Reduz os entries originais removendo qtyRemainder do último para o primeiro
@@ -17827,7 +18255,20 @@ app.post('/api/logistica/itens_solicitados/separar-parcial', async (req, res) =>
         solicIds: sIds, carrId: primaryKeptId, qtyOriginal: qtyTotal, qtySeparada: qtySep
       });
 
+      const { rows: solKeptRows } = await client.query(
+        `SELECT id FROM solicitacao_produto.itens_solicitados WHERE id_carr = $1`,
+        [primaryKeptId]
+      );
+      const idsKeptSep = solKeptRows.map(r => r.id);
+      await _logisticaExecutarTrfOmieSeparacao(client, idsKeptSep.length ? idsKeptSep : sIds, {
+        cod_local_origem,
+        qtd: qtySep
+      });
+
       await _logisticaAplicarStatusPosSeparacaoPorCarr(client, [primaryKeptId], req);
+      if (etqDebit?.endereco) {
+        await _etqPersistirDebitoSeparacao(client, idsKeptSep.length ? idsKeptSep : sIds, etqDebit);
+      }
     }
 
     await client.query('COMMIT');
@@ -17835,7 +18276,9 @@ app.post('/api/logistica/itens_solicitados/separar-parcial', async (req, res) =>
     res.json({ ok: true, new_n_solic: newNSolic });
   } catch (err) {
     try { await client.query('ROLLBACK'); } catch (_) {}
-    if (err?.code === 'ETQ_SALDO_SEPARACAO' || err?.code === 'ETQ_ENDERECO_OBRIGATORIO') {
+    if (err?.code === 'ETQ_SALDO_SEPARACAO' || err?.code === 'ETQ_ENDERECO_OBRIGATORIO'
+      || err?.code === 'OMIE_ORIGEM_OBRIGATORIA' || err?.code === 'OMIE_DESTINO_OBRIGATORIO'
+      || err?.code === 'OMIE_TRF_SEPARACAO' || err?.code === 'OMIE_CREDENCIAIS') {
       return res.status(400).json({ ok: false, error: err.message });
     }
     console.error('[separar-parcial] erro:', err);
@@ -18100,6 +18543,10 @@ app.get('/api/logistica/solicitacoes-kanban', async (req, res) => {
         MIN(i.criado_em)                       AS item_criado_em,
         MAX(NULLIF(TRIM(i.usuario_separando), '')) AS usuario_separando,
         bool_or(COALESCE(i.urgente, false))    AS tem_urgente,
+        bool_or(
+          i.status = 'pendente'
+          AND (i.cod_local IS NULL OR TRIM(i.cod_local) = '')
+        ) AS tem_pendente_sem_local,
         CASE
           WHEN bool_or(i.status = 'pendente')            THEN 'Solicitado'
           WHEN bool_or(i.status = 'Stund-by')           THEN 'Stund-by'
@@ -18116,7 +18563,10 @@ app.get('/api/logistica/solicitacoes-kanban', async (req, res) => {
     `);
 
     const colunas = { 'Solicitado': [], 'Stund-by': [], 'Em Separação': [], 'Separado': [], 'Aguardando retirada': [], 'Concluído': [] };
-    rows.forEach(r => { if (colunas[r.coluna]) colunas[r.coluna].push(r); });
+    rows.forEach(r => {
+      if (r.coluna === 'Solicitado' && r.tem_pendente_sem_local) return;
+      if (colunas[r.coluna]) colunas[r.coluna].push(r);
+    });
     colunas['Concluído'].sort((a, b) => {
       const ta = a.item_criado_em ? new Date(a.item_criado_em).getTime() : 0;
       const tb = b.item_criado_em ? new Date(b.item_criado_em).getTime() : 0;
