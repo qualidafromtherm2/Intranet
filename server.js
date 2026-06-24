@@ -10751,6 +10751,17 @@ app.use('/etiquetas', requireSessionOrAgentForStatic, express.static(etiquetasRo
       console.log(`[etiqueta] Apartamento → complemento em ${migApartamento.rowCount} registro(s) ETQ_rec_impresso`);
     }
 
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS etiqueta."_meta" (
+        chave TEXT PRIMARY KEY,
+        valor TEXT
+      )
+    `).catch(() => {});
+
+    await _etqCleanupEResequence(pool).catch(err => {
+      console.error('[etiqueta] cleanup pós-schema:', err?.message || err);
+    });
+
     console.log('[etiqueta] Schema e tabelas ETQ_recebimento / ETQ_rec_impresso / ETQ_fila_impressao / ETQ_auto_oculto / ETQ_agentes garantidos');
   } catch (err) {
     console.error('[etiqueta] Falha ao garantir schema/tabela:', err?.message || err);
@@ -11072,16 +11083,170 @@ async function _resolveProdutoOmieCodigoTexto(db, codigoOuId) {
   return rows[0]?.codigo || raw;
 }
 
+/** Garante codigo_produto (id Omie) e descricao_produto para gravar em ETQ_rec_impresso. */
+async function _etqResolveProdutoCampos(db, { codigoTexto, codigoOmie, descricao, linhaReferencia }) {
+  const ref = linhaReferencia || null;
+  let codigo = String(codigoOmie || ref?.codigo_produto || '').trim();
+  if (!codigo && codigoTexto) {
+    codigo = String(await _resolveProdutoOmieCodigoProduto(db, codigoTexto) || '').trim();
+  }
+  let desc = String(descricao || ref?.descricao_produto || '').trim();
+  if (!desc && codigo) {
+    const { rows } = await (db || pool).query(
+      `SELECT descricao FROM public.produtos_omie
+        WHERE codigo_produto::text = $1 OR codigo = $2
+        LIMIT 1`,
+      [codigo, String(codigoTexto || '').trim()]
+    );
+    desc = String(rows[0]?.descricao || '').trim();
+  }
+  if (!desc) desc = String(codigoTexto || codigo || '').trim();
+  if (!codigo) {
+    const err = new Error('codigo_produto obrigatorio para ETQ_rec_impresso.');
+    err.code = 'ETQ_CODIGO_OBRIGATORIO';
+    throw err;
+  }
+  if (!desc) {
+    const err = new Error('descricao_produto obrigatoria para ETQ_rec_impresso.');
+    err.code = 'ETQ_DESCRICAO_OBRIGATORIA';
+    throw err;
+  }
+  return { codigo_produto: codigo, descricao_produto: desc };
+}
+
+/** Remove registros inválidos, consolida duplicatas e renumera IDs de 1..N (uma vez). */
+async function _etqCleanupEResequence(db) {
+  const conn = db || pool;
+  await conn.query(`CREATE TABLE IF NOT EXISTS etiqueta."_meta" (chave TEXT PRIMARY KEY, valor TEXT)`);
+  const { rows: meta } = await conn.query(
+    `SELECT valor FROM etiqueta."_meta" WHERE chave = 'etq_rec_impresso_cleanup_v2'`
+  );
+  if (meta[0]?.valor === 'done') return;
+
+  const client = await conn.connect();
+  try {
+    await client.query('BEGIN');
+
+    await client.query(`
+      UPDATE etiqueta."ETQ_rec_impresso" i
+         SET codigo_produto = COALESCE(NULLIF(TRIM(i.codigo_produto), ''), p.codigo_produto::text),
+             descricao_produto = COALESCE(
+               NULLIF(TRIM(i.descricao_produto), ''),
+               NULLIF(TRIM(p.descricao), ''),
+               NULLIF(TRIM(r.descricao_produto), '')
+             )
+        FROM etiqueta."ETQ_recebimento" r
+        JOIN public.produtos_omie p ON TRIM(p.codigo) = TRIM(r.codigo_produto)
+       WHERE r.id = i.origem_id
+         AND (
+           NULLIF(TRIM(i.codigo_produto), '') IS NULL
+           OR NULLIF(TRIM(i.descricao_produto), '') IS NULL
+         )
+    `);
+
+    await client.query(`
+      WITH grupos AS (
+        SELECT TRIM(codigo_produto) AS cp,
+               TRIM(endereco) AS en,
+               MIN(id) AS id_manter,
+               SUM(COALESCE(qtd, 0)) AS qtd_total
+          FROM etiqueta."ETQ_rec_impresso"
+         WHERE NULLIF(TRIM(codigo_produto), '') IS NOT NULL
+           AND NULLIF(TRIM(descricao_produto), '') IS NOT NULL
+           AND endereco IS NOT NULL AND TRIM(endereco) <> ''
+         GROUP BY TRIM(codigo_produto), TRIM(endereco)
+        HAVING COUNT(*) > 1
+      )
+      UPDATE etiqueta."ETQ_rec_impresso" i
+         SET qtd = g.qtd_total
+        FROM grupos g
+       WHERE i.id = g.id_manter
+    `);
+
+    await client.query(`
+      WITH grupos AS (
+        SELECT TRIM(codigo_produto) AS cp,
+               TRIM(endereco) AS en,
+               MIN(id) AS id_manter
+          FROM etiqueta."ETQ_rec_impresso"
+         WHERE NULLIF(TRIM(codigo_produto), '') IS NOT NULL
+           AND NULLIF(TRIM(descricao_produto), '') IS NOT NULL
+           AND endereco IS NOT NULL AND TRIM(endereco) <> ''
+         GROUP BY TRIM(codigo_produto), TRIM(endereco)
+        HAVING COUNT(*) > 1
+      )
+      DELETE FROM etiqueta."ETQ_rec_impresso" i
+       USING grupos g
+       WHERE TRIM(i.codigo_produto) = g.cp
+         AND TRIM(i.endereco) = g.en
+         AND i.id <> g.id_manter
+    `);
+
+    const del = await client.query(`
+      DELETE FROM etiqueta."ETQ_rec_impresso"
+       WHERE NULLIF(TRIM(codigo_produto), '') IS NULL
+          OR NULLIF(TRIM(descricao_produto), '') IS NULL
+    `);
+
+    const { rows: cntRows } = await client.query(`SELECT COUNT(*)::int AS n FROM etiqueta."ETQ_rec_impresso"`);
+    const n = cntRows[0]?.n || 0;
+
+    if (n > 0) {
+      await client.query(`
+        CREATE TEMP TABLE _etq_reseq ON COMMIT DROP AS
+        SELECT ROW_NUMBER() OVER (ORDER BY impresso_em NULLS LAST, id) AS new_id,
+               origem_id, qtd, unidade, data_emissao, conteudo_zpl, usuario_criacao, impresso_em,
+               endereco, complemento, codigo_produto, descricao_produto, fonte
+          FROM etiqueta."ETQ_rec_impresso"
+      `);
+      await client.query(`DELETE FROM etiqueta."ETQ_rec_impresso"`);
+      await client.query(`
+        INSERT INTO etiqueta."ETQ_rec_impresso"
+          (id, origem_id, qtd, unidade, data_emissao, conteudo_zpl, usuario_criacao, impresso_em,
+           endereco, complemento, codigo_produto, descricao_produto, fonte)
+        SELECT new_id, origem_id, qtd, unidade, data_emissao, conteudo_zpl, usuario_criacao, impresso_em,
+               endereco, complemento, codigo_produto, descricao_produto, fonte
+          FROM _etq_reseq
+         ORDER BY new_id
+      `);
+      await client.query(
+        `SELECT setval(pg_get_serial_sequence('etiqueta."ETQ_rec_impresso"', 'id'), $1, true)`,
+        [n]
+      );
+    } else {
+      await client.query(
+        `SELECT setval(pg_get_serial_sequence('etiqueta."ETQ_rec_impresso"', 'id'), 1, false)`
+      );
+    }
+
+    await client.query(`
+      INSERT INTO etiqueta."_meta" (chave, valor) VALUES ('etq_rec_impresso_cleanup_v2', 'done')
+      ON CONFLICT (chave) DO UPDATE SET valor = EXCLUDED.valor
+    `);
+
+    await client.query('COMMIT');
+    console.log(`[etiqueta] ETQ_rec_impresso cleanup: ${del.rowCount} removido(s), ${n} registro(s) válido(s), IDs 1..${n}`);
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    console.error('[etiqueta] ETQ_rec_impresso cleanup falhou:', err?.message || err);
+  } finally {
+    client.release();
+  }
+}
+
 /** Insere ETQ_rec_impresso a partir de etiqueta de recebimento (codigo_produto = id Omie). */
 async function _insertEtqRecImpressoRecebimento(db, { origemId, qtd, unidade, dataEmissao, usuario, codProd, descProd }) {
-  const idOmie = await _resolveProdutoOmieCodigoProduto(db, codProd);
+  const campos = await _etqResolveProdutoCampos(db, {
+    codigoTexto: codProd,
+    descricao: descProd
+  });
   const { rows } = await db.query(
     `INSERT INTO etiqueta."ETQ_rec_impresso"
        (origem_id, qtd, unidade, data_emissao, conteudo_zpl, usuario_criacao,
         codigo_produto, descricao_produto, fonte)
      VALUES ($1,$2,$3,$4,'',$5,$6,$7,'recebimento')
      RETURNING id`,
-    [origemId, qtd, unidade, dataEmissao, usuario || null, idOmie, descProd || null]
+    [origemId, qtd, unidade, dataEmissao, usuario || null, campos.codigo_produto, campos.descricao_produto]
   );
   return rows[0].id;
 }
@@ -11880,22 +12045,39 @@ app.post('/api/etiquetas/rec-impresso/registrar-movimentacao', express.json(), a
   const client = await pool.connect();
   try {
     const codigoTexto = String(req.body?.codigo || '').trim();
-    const descricao = String(req.body?.descricao || '').trim() || null;
+    const descricaoRaw = String(req.body?.descricao || '').trim() || null;
     const qtd       = Number(req.body?.qtd);
     const complementoRaw = String(req.body?.complemento || '').trim() || null;
     const tipoMov   = String(req.body?.tipo_movimentacao || '').trim().toUpperCase() || null;
     const usuario   = String(req.body?.usuario || req.body?.usuario_criacao || '').trim() || null;
-    const enderecoOrigem  = String(req.body?.endereco_origem  || '').trim() || null;
-    const enderecoDestino = String(req.body?.endereco_destino || '').trim() || null;
+    let enderecoOrigem  = String(req.body?.endereco_origem  || '').trim() || null;
+    let enderecoDestino = String(req.body?.endereco_destino || '').trim() || null;
     const enderecosRaw = Array.isArray(req.body?.enderecos) ? req.body.enderecos : [];
     const enderecos = [...new Set(enderecosRaw.map(e => String(e || '').trim()).filter(Boolean))];
 
     if (!codigoTexto) return res.status(400).json({ error: 'codigo é obrigatório.' });
     if (!Number.isFinite(qtd) || qtd <= 0) return res.status(400).json({ error: 'Informe uma quantidade válida (> 0).' });
 
-    const codigoOmie = await _resolveProdutoOmieCodigoProduto(client, codigoTexto);
+    const codigoOmie = await _resolveProdutoOmieCodigoProduto(client, codigoTexto)
+      || String(req.body?.codigo_produto_omie || req.body?.codigo_produto || '').trim()
+      || null;
     if (!codigoOmie) {
       return res.status(400).json({ error: `Produto "${codigoTexto}" não encontrado em produtos_omie.` });
+    }
+
+    let descricao = descricaoRaw;
+    if (!descricao) {
+      const { rows: descRows } = await client.query(
+        `SELECT descricao FROM public.produtos_omie
+          WHERE codigo_produto::text = $1 OR codigo = $2 LIMIT 1`,
+        [codigoOmie, codigoTexto]
+      );
+      descricao = descRows[0]?.descricao || codigoTexto;
+    }
+
+    if (tipoMov === 'TRF' && !enderecoOrigem && !enderecoDestino && enderecos.length >= 2) {
+      enderecoOrigem = enderecos[0];
+      enderecoDestino = enderecos[1];
     }
 
     const hoje = new Date();
@@ -11931,6 +12113,7 @@ app.post('/api/etiquetas/rec-impresso/registrar-movimentacao', express.json(), a
       await client.query('BEGIN');
       const resultado = await _processarMovimentacaoEtqInterna(client, {
         codigo: codigoOmie,
+        codigoTexto,
         descricao,
         qtd,
         tipoMov,
@@ -11949,6 +12132,12 @@ app.post('/api/etiquetas/rec-impresso/registrar-movimentacao', express.json(), a
 
     if (!enderecos.length) return res.status(400).json({ error: 'Informe ao menos um endereço.' });
 
+    if (tipoMov === 'TRF') {
+      return res.status(400).json({
+        error: 'Transferência exige endereço de origem e destino (selecione dois endereços na lista).'
+      });
+    }
+
     const registros = [];
     for (const endereco of enderecos) {
       const row = await _insertEtqMovimentacaoEndereco(client, {
@@ -11959,6 +12148,7 @@ app.post('/api/etiquetas/rec-impresso/registrar-movimentacao', express.json(), a
         complemento,
         codigoOmie,
         descricao,
+        codigoTexto,
         codProd,
         descProd,
         sanitize
@@ -12071,10 +12261,17 @@ async function _etqDebitarSeparacaoAlmox(client, { cod_local_origem, etq_id, end
 }
 
 async function _insertEtqMovimentacaoEndereco(client, {
-  endereco, qtd, dataEmissao, usuario, complemento, codigoOmie, descricao, codProd, descProd, sanitize, linhaReferencia
+  endereco, qtd, dataEmissao, usuario, complemento, codigoOmie, descricao, codigoTexto,
+  codProd, descProd, sanitize, linhaReferencia
 }) {
   const db = client || pool;
   const ref = linhaReferencia || null;
+  const campos = await _etqResolveProdutoCampos(db, {
+    codigoTexto: codigoTexto || codProd,
+    codigoOmie,
+    descricao: descricao || descProd,
+    linhaReferencia: ref
+  });
   const { rows } = await db.query(
     `INSERT INTO etiqueta."ETQ_rec_impresso"
        (origem_id, qtd, unidade, data_emissao, conteudo_zpl, usuario_criacao,
@@ -12089,17 +12286,19 @@ async function _insertEtqMovimentacaoEndereco(client, {
       usuario,
       endereco,
       complemento || ref?.complemento || null,
-      codigoOmie || ref?.codigo_produto,
-      descricao || ref?.descricao_produto,
+      campos.codigo_produto,
+      campos.descricao_produto,
       ref?.fonte || 'movimentacao'
     ]
   );
   const row = rows[0];
   const idImpresso = row.id;
   const loteTxt = sanitize(endereco, 40);
+  const zplCodProd = sanitize(codProd || codigoTexto || campos.codigo_produto, 30);
+  const zplDescProd = sanitize(descProd || campos.descricao_produto, 70);
   const zpl = _gerarZplParaImpressao({
-    codProd,
-    descProd,
+    codProd: zplCodProd,
+    descProd: zplDescProd,
     idImpresso,
     loteTxt,
     dataExibir: sanitize(row.data_emissao || dataEmissao, 10)
@@ -12112,23 +12311,38 @@ async function _insertEtqMovimentacaoEndereco(client, {
 }
 
 async function _etqCreditarEndereco(client, {
-  codigo, descricao, endereco, qtd, usuario, complemento, dataEmissao, codProd, descProd, sanitize, linhaReferencia
+  codigo, descricao, endereco, qtd, usuario, complemento, dataEmissao, codigoTexto,
+  codProd, descProd, sanitize, linhaReferencia
 }) {
+  const campos = await _etqResolveProdutoCampos(client, {
+    codigoTexto: codigoTexto || codProd,
+    codigoOmie: codigo,
+    descricao: descricao || descProd,
+    linhaReferencia
+  });
+
   const { rows: existentes } = await client.query(
     `SELECT i.id, i.qtd
        FROM etiqueta."ETQ_rec_impresso" i
-      WHERE TRIM(COALESCE(i.codigo_produto, '')) = $1
-        AND TRIM(COALESCE(i.endereco, '')) = $2
+      WHERE TRIM(COALESCE(i.endereco, '')) = $2
+        AND (
+          TRIM(COALESCE(i.codigo_produto, '')) = $1
+          OR NULLIF(TRIM(COALESCE(i.codigo_produto, '')), '') IS NULL
+        )
       ORDER BY COALESCE(i.qtd, 0) DESC, i.id DESC
       LIMIT 1`,
-    [codigo, endereco]
+    [campos.codigo_produto, endereco]
   );
 
   if (existentes.length) {
     const novaQtd = Number(existentes[0].qtd || 0) + qtd;
     await client.query(
-      `UPDATE etiqueta."ETQ_rec_impresso" SET qtd = $1 WHERE id = $2`,
-      [novaQtd, existentes[0].id]
+      `UPDATE etiqueta."ETQ_rec_impresso"
+          SET qtd = $1,
+              codigo_produto = COALESCE(NULLIF(TRIM(codigo_produto), ''), $3),
+              descricao_produto = COALESCE(NULLIF(TRIM(descricao_produto), ''), $4)
+        WHERE id = $2`,
+      [novaQtd, existentes[0].id, campos.codigo_produto, campos.descricao_produto]
     );
     return { id: existentes[0].id, endereco, qtd: novaQtd, acao: 'update', delta: qtd };
   }
@@ -12139,10 +12353,11 @@ async function _etqCreditarEndereco(client, {
     dataEmissao,
     usuario,
     complemento,
-    codigoOmie: codigo,
-    descricao,
+    codigoOmie: campos.codigo_produto,
+    descricao: campos.descricao_produto,
+    codigoTexto: codigoTexto || codProd,
     codProd,
-    descProd,
+    descProd: campos.descricao_produto,
     sanitize,
     linhaReferencia
   });
@@ -12152,7 +12367,7 @@ async function _etqCreditarEndereco(client, {
 async function _processarMovimentacaoEtqInterna(client, opts) {
   const {
     codigo, descricao, qtd, tipoMov, enderecoOrigem, enderecoDestino,
-    complemento, usuario, dataEmissao, codProd, descProd, sanitize
+    complemento, usuario, dataEmissao, codProd, descProd, sanitize, codigoTexto
   } = opts;
 
   const movimentacao = { tipo: tipoMov, debitos: [], credito: null };
@@ -12178,6 +12393,7 @@ async function _processarMovimentacaoEtqInterna(client, opts) {
       usuario,
       complemento,
       dataEmissao,
+      codigoTexto: opts.codigoTexto,
       codProd,
       descProd,
       sanitize,
@@ -12433,6 +12649,11 @@ app.post('/api/etiquetas/iapp-op/imprimir', express.json(), async (req, res) => 
       const descProd = sanitize(descricao, 70);
       const loteTxt  = sanitize(loteRaw, 40);
       const idOmie = await _resolveProdutoOmieCodigoProduto(pool, codigo);
+      const campos = await _etqResolveProdutoCampos(pool, {
+        codigoTexto: codigo,
+        codigoOmie: idOmie,
+        descricao
+      });
 
       const ins = await pool.query(
         `INSERT INTO etiqueta."ETQ_rec_impresso"
@@ -12440,7 +12661,7 @@ app.post('/api/etiquetas/iapp-op/imprimir', express.json(), async (req, res) => 
             codigo_produto, descricao_produto, fonte)
          VALUES (NULL, 1, 'UN', $1, '', $2, $3, $4, 'iapp_op')
          RETURNING id`,
-        [dataExibir, usuario, idOmie, descProd]
+        [dataExibir, usuario, campos.codigo_produto, campos.descricao_produto]
       );
       const idImpresso = ins.rows[0].id;
       const zpl = _gerarZplParaImpressao({ codProd, descProd, idImpresso, loteTxt, dataExibir });

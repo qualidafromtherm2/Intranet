@@ -120,6 +120,35 @@ function iappPut(path, body = {}) {
 }
 
 /* ---------------------------------------------------------------
+ * Schema Producao.Kanban_programacao — vínculo pedido → programado
+ * --------------------------------------------------------------- */
+let kanbanProgSchemaOk = false;
+
+async function garantirSchemaKanbanProgramacao() {
+  if (kanbanProgSchemaOk) return;
+  await dbQuery(`CREATE SCHEMA IF NOT EXISTS "Producao"`);
+  await dbQuery(`
+    CREATE TABLE IF NOT EXISTS "Producao"."Kanban_programacao" (
+      id              BIGSERIAL PRIMARY KEY,
+      codigo_produto  BIGINT,
+      codigo          TEXT NOT NULL,
+      descricao       TEXT,
+      codigo_pedido   BIGINT NOT NULL,
+      numero_pedido   TEXT,
+      quantidade      NUMERIC(18,4) NOT NULL,
+      created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_kanban_prog_ped_cod
+      ON "Producao"."Kanban_programacao" (codigo_pedido, codigo);
+  `);
+  kanbanProgSchemaOk = true;
+}
+
+function normCodigoSql(expr) {
+  return `UPPER(TRIM(COALESCE(${expr}, '')))`;
+}
+
+/* ---------------------------------------------------------------
  * Garante que o schema IAPP_API e as 3 tabelas existem (idempotente)
  * --------------------------------------------------------------- */
 async function garantirTabela() {
@@ -1018,6 +1047,168 @@ router.get('/iapp/qualidade/inspecoes/lista', async (req, res) => {
       success: false,
       error: err.message || 'Erro ao listar inspeções na IAPP.'
     });
+  }
+});
+
+/* ---------------------------------------------------------------
+ * GET /api/producao/pedidos-kanban
+ * Pedidos de venda (etapa 80) com saldo não programado em Kanban_programacao.
+ * --------------------------------------------------------------- */
+router.get('/pedidos-kanban', async (req, res) => {
+  try {
+    await garantirSchemaKanbanProgramacao();
+
+    const { rows } = await dbQuery(`
+      WITH movimentado AS (
+        SELECT
+          codigo_pedido,
+          ${normCodigoSql('codigo')} AS codigo_norm,
+          SUM(quantidade) AS qtd_mov
+        FROM "Producao"."Kanban_programacao"
+        GROUP BY codigo_pedido, ${normCodigoSql('codigo')}
+      ),
+      itens_saldo AS (
+        SELECT
+          p.codigo_pedido,
+          p.numero_pedido,
+          p.obs_venda,
+          i.seq,
+          i.codigo_produto,
+          i.codigo,
+          i.descricao,
+          GREATEST(COALESCE(i.quantidade, 0) - COALESCE(m.qtd_mov, 0), 0) AS saldo
+        FROM "Vendas".pedidos_venda p
+        JOIN "Vendas".pedidos_venda_itens i
+          ON i.codigo_pedido = p.codigo_pedido
+        LEFT JOIN movimentado m
+          ON m.codigo_pedido = p.codigo_pedido
+         AND m.codigo_norm = ${normCodigoSql('i.codigo')}
+        WHERE TRIM(COALESCE(p.etapa::text, '')) = '80'
+          AND TRIM(COALESCE(p.bloqueado, '')) = 'N'
+          AND TRIM(COALESCE(p.encerrado, '')) IN ('', 'N')
+      )
+      SELECT
+        codigo_pedido,
+        numero_pedido,
+        obs_venda,
+        COALESCE(
+          json_agg(
+            json_build_object(
+              'seq',           seq,
+              'codigo_produto', codigo_produto,
+              'codigo',        codigo,
+              'descricao',     descricao,
+              'quantidade',    saldo::text
+            )
+            ORDER BY seq NULLS LAST, codigo
+          ) FILTER (WHERE saldo > 0),
+          '[]'::json
+        ) AS itens
+      FROM itens_saldo
+      GROUP BY codigo_pedido, numero_pedido, obs_venda
+      HAVING COUNT(*) FILTER (WHERE saldo > 0) > 0
+      ORDER BY numero_pedido ASC NULLS LAST, codigo_pedido ASC
+    `);
+
+    return res.json({ success: true, total: rows.length, pedidos: rows });
+  } catch (err) {
+    console.error('[producao] Erro ao listar pedidos kanban:', err.message);
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/* ---------------------------------------------------------------
+ * POST /api/producao/kanban-programacao
+ * Registra arraste Pedidos → Programado (saldo do pedido >= qtde programada).
+ * Body: { codigo_pedido, codigo, quantidade_programado }
+ * --------------------------------------------------------------- */
+router.post('/kanban-programacao', express.json(), async (req, res) => {
+  try {
+    await garantirSchemaKanbanProgramacao();
+
+    const codigoPedido = Number(req.body?.codigo_pedido);
+    const codigo = String(req.body?.codigo || '').trim();
+    const qtdProgramado = Number(req.body?.quantidade_programado);
+
+    if (!Number.isFinite(codigoPedido) || codigoPedido <= 0) {
+      return res.status(400).json({ success: false, error: 'codigo_pedido inválido.' });
+    }
+    if (!codigo) {
+      return res.status(400).json({ success: false, error: 'codigo do produto é obrigatório.' });
+    }
+    if (!Number.isFinite(qtdProgramado) || qtdProgramado <= 0) {
+      return res.status(400).json({ success: false, error: 'quantidade_programado inválida.' });
+    }
+
+    const { rows: itemRows } = await dbQuery(`
+      SELECT
+        i.codigo_produto,
+        i.codigo,
+        i.descricao,
+        i.quantidade::float8 AS quantidade_original,
+        p.numero_pedido,
+        p.codigo_pedido,
+        COALESCE(m.qtd_mov, 0)::float8 AS quantidade_movimentada
+      FROM "Vendas".pedidos_venda_itens i
+      JOIN "Vendas".pedidos_venda p
+        ON p.codigo_pedido = i.codigo_pedido
+      LEFT JOIN (
+        SELECT codigo_pedido, ${normCodigoSql('codigo')} AS codigo_norm, SUM(quantidade) AS qtd_mov
+        FROM "Producao"."Kanban_programacao"
+        WHERE codigo_pedido = $1
+        GROUP BY codigo_pedido, ${normCodigoSql('codigo')}
+      ) m
+        ON m.codigo_pedido = i.codigo_pedido
+       AND m.codigo_norm = ${normCodigoSql('i.codigo')}
+      WHERE i.codigo_pedido = $1
+        AND ${normCodigoSql('i.codigo')} = ${normCodigoSql('$2')}
+        AND TRIM(COALESCE(p.etapa::text, '')) = '80'
+        AND TRIM(COALESCE(p.bloqueado, '')) = 'N'
+        AND TRIM(COALESCE(p.encerrado, '')) IN ('', 'N')
+      ORDER BY i.seq NULLS LAST
+      LIMIT 1
+    `, [codigoPedido, codigo]);
+
+    if (!itemRows.length) {
+      return res.status(404).json({ success: false, error: 'Item do pedido não encontrado ou pedido inativo.' });
+    }
+
+    const item = itemRows[0];
+    const saldo = Number(item.quantidade_original) - Number(item.quantidade_movimentada);
+
+    if (saldo < qtdProgramado) {
+      return res.status(400).json({
+        success: false,
+        error: `Saldo do pedido (${saldo}) é menor que a quantidade programada (${qtdProgramado}).`,
+        saldo,
+        quantidade_programado: qtdProgramado
+      });
+    }
+
+    const { rows: inserted } = await dbQuery(`
+      INSERT INTO "Producao"."Kanban_programacao" (
+        codigo_produto, codigo, descricao, codigo_pedido, numero_pedido, quantidade
+      ) VALUES ($1, $2, $3, $4, $5, $6)
+      RETURNING id, codigo_produto, codigo, descricao, codigo_pedido, numero_pedido, quantidade::text, created_at
+    `, [
+      item.codigo_produto || null,
+      item.codigo,
+      item.descricao || null,
+      item.codigo_pedido,
+      item.numero_pedido || null,
+      qtdProgramado
+    ]);
+
+    const saldoRestante = saldo - qtdProgramado;
+
+    return res.json({
+      success: true,
+      registro: inserted[0],
+      saldo_restante: saldoRestante
+    });
+  } catch (err) {
+    console.error('[producao] Erro ao registrar kanban programacao:', err.message);
+    return res.status(500).json({ success: false, error: err.message });
   }
 });
 

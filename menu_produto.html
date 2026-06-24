@@ -1163,16 +1163,27 @@
               </div>
             </div>
             <div class="movim-field">
+              <label for="movimOmieMotivo">Motivo do ajuste (Omie)</label>
+              <select id="movimOmieMotivo">
+                <option value="">Selecione o motivo…</option>
+              </select>
+            </div>
+            <div id="movimModoTipo" class="movim-tipo movim-modo-tipo" style="display:none;">
+              <button class="movimModoBtn" data-type="ENTRADA" type="button">ENTRADA</button>
+              <button class="movimModoBtn" data-type="SAIDA" type="button">SAIDA</button>
+              <button class="movimModoBtn" data-type="TRANSFERENCIA" type="button">TRANSFERENCIA</button>
+            </div>
+            <div class="movim-field" id="movimOrigemField" style="display:none;">
               <label for="movimOrigemSelect">Origem</label>
               <select id="movimOrigemSelect"></select>
             </div>
-            <div class="movim-field">
+            <div class="movim-field" id="movimDestinoField" style="display:none;">
               <label for="movimLocalSelect">Destino</label>
               <select id="movimLocalSelect">
                 <option value="">Selecione o destino…</option>
               </select>
             </div>
-            <div class="movim-field movim-qtd-field">
+            <div class="movim-field movim-qtd-field" id="movimQtdFieldWrap" style="display:none;">
               <div class="movim-qtd-label-row">
                 <label for="movimQtdInput">Quantidade (aceita expressao)</label>
                 <button type="button" id="movimCalcBtn" class="movim-calc-btn" title="Abrir calculadora"><i class="fa-solid fa-calculator"></i></button>
@@ -1182,6 +1193,7 @@
                 <div id="movimOperadores">
                   <button type="button" data-insert="+">+</button>
                   <button type="button" data-insert="-">−</button>
+                  <button type="button" data-insert="*">×</button>
                   <button type="button" data-insert="/">/</button>
                 </div>
                 <div id="movimCalcPopup" class="movim-calc-popup" style="display:none;">
@@ -1210,38 +1222,44 @@
               </div>
               <div id="movimQtdResultado"></div>
             </div>
-            <div class="movim-field">
+            <div class="movim-field" id="movimApontamentoField" style="display:none;">
               <label for="movimApontamento">Apontamento (opcional)</label>
               <textarea id="movimApontamento" rows="2" placeholder="Observacoes"></textarea>
             </div>
             <div id="movimMensagem" class="movim-mensagem"></div>
-            <div class="movim-enderecos">
+            <div class="movim-enderecos" id="movimEnderecosSection" style="display:none;">
               <div class="movim-enderecos-header">
                 <h4>Enderecos</h4>
-                <button type="button" class="movim-endereco-add" id="movimScanEnderecoBtn">
-                  <i class="fa-solid fa-camera"></i> Ler codigo
+                <button type="button" class="movim-endereco-add" id="movimScanEnderecoBtn" style="display:none;">
+                  <i class="fa-solid fa-camera"></i> Ler QR code
                 </button>
               </div>
               <div id="movimEnderecoVazio" class="movim-endereco-vazio">Nenhum endereco cadastrado.</div>
               <div id="movimEnderecoEtqLista" class="movim-endereco-etq-lista"></div>
               <div id="movimEnderecoInternoWrap" class="movim-endereco-interno" style="display:none;">
-                <div class="movim-endereco-campo" id="movimEnderecoOrigemCampo">
+                <div class="movim-endereco-campo" id="movimEnderecoOrigemCampo" style="display:none;">
                   <div class="movim-endereco-campo-top">
                     <span class="movim-endereco-campo-label">Endereco origem</span>
-                    <button type="button" class="movim-endereco-add movim-scan-origem" id="movimScanEnderecoOrigemBtn">
-                      <i class="fa-solid fa-camera"></i> Ler codigo origem
-                    </button>
+                    <div class="movim-endereco-campo-acoes">
+                      <button type="button" class="movim-endereco-add movim-scan-origem" id="movimScanEnderecoOrigemBtn">
+                        <i class="fa-solid fa-camera"></i> Ler endereco
+                      </button>
+                      <button type="button" class="movim-endereco-rm" id="movimRmEnderecoOrigemBtn" title="Remover">×</button>
+                    </div>
                   </div>
-                  <div id="movimEnderecoOrigemVal" class="movim-endereco-valor vazio">Nao lido</div>
+                  <div id="movimEnderecoOrigemVal" class="movim-endereco-valor vazio">Nao selecionado</div>
                 </div>
-                <div class="movim-endereco-campo" id="movimEnderecoDestinoCampo">
+                <div class="movim-endereco-campo" id="movimEnderecoDestinoCampo" style="display:none;">
                   <div class="movim-endereco-campo-top">
                     <span class="movim-endereco-campo-label">Endereco destino</span>
-                    <button type="button" class="movim-endereco-add movim-scan-destino" id="movimScanEnderecoDestinoBtn">
-                      <i class="fa-solid fa-camera"></i> Ler codigo destino
-                    </button>
+                    <div class="movim-endereco-campo-acoes">
+                      <button type="button" class="movim-endereco-add movim-scan-destino" id="movimScanEnderecoDestinoBtn">
+                        <i class="fa-solid fa-camera"></i> Ler endereco
+                      </button>
+                      <button type="button" class="movim-endereco-rm" id="movimRmEnderecoDestinoBtn" title="Remover">×</button>
+                    </div>
                   </div>
-                  <div id="movimEnderecoDestinoVal" class="movim-endereco-valor vazio">Nao lido</div>
+                  <div id="movimEnderecoDestinoVal" class="movim-endereco-valor vazio">Nao selecionado</div>
                 </div>
               </div>
               <div id="movimEnderecoExternoWrap" style="display:none;">
@@ -1249,13 +1267,13 @@
               </div>
             </div>
             <div id="movimMesmoArmazemAviso" class="movim-mesmo-arm-aviso" style="display:none;">
-              Mesmo armazem (Porta Pallet): leia os enderecos e confirme com ENTRADA, SAIDA ou TRANSFERENCIA. TRANSFERENCIA exige origem e destino. Nao ha movimentacao na Omie — apenas ajuste em ETQ_rec_impresso.
+              Ajuste interno (sem Omie): escolha ENTRADA, SAIDA ou TRANSFERENCIA, preencha os campos e clique em Executar.
             </div>
             <label id="movimImprimirEtiquetaWrap" class="movim-imprimir-wrap" style="display:none;">
               <input type="checkbox" id="movimImprimirEtiqueta">
               <span>Imprimir etiqueta apos registrar (opcional)</span>
             </label>
-            <div class="movim-impressora-row" id="movimImpressoraRow">
+            <div class="movim-impressora-row" id="movimImpressoraRow" style="display:none;">
               <i class="fa-solid fa-print movim-impr-icone"></i>
               <label for="movimListboxImpressora">Impressora:</label>
               <select id="movimListboxImpressora" class="movim-listbox-impressora">
@@ -1268,17 +1286,9 @@
                 <i class="fa-solid fa-sliders"></i>
               </button>
             </div>
-            <div class="movim-field">
-              <label for="movimOmieMotivo">Motivo do ajuste (Omie)</label>
-              <select id="movimOmieMotivo">
-                <option value="">Selecione o motivo…</option>
-              </select>
-            </div>
-            <div id="movimTipo" class="movim-tipo movim-tipo-acoes" style="display:none;">
-              <button class="movimTipoBtn" data-type="ENTRADA" type="button" style="display:none;">ENTRADA</button>
-              <button class="movimTipoBtn" data-type="SAIDA" type="button" style="display:none;">SAIDA</button>
-              <button class="movimTipoBtn" data-type="TRANSFERENCIA" type="button" style="display:none;">TRANSFERENCIA</button>
-            </div>
+            <button type="button" id="movimExecutarBtn" class="movim-executar-btn" style="display:none;">
+              <i class="fa-solid fa-check"></i> Executar
+            </button>
             <div id="movimRetornoOmie" class="movim-retorno-omie" style="display:none;"></div>
           </div>
         </div>
@@ -9949,8 +9959,30 @@
               </select>
             </div>
 
+            <!-- Filtro por código de produto (clique no item em Pedidos) -->
+            <div id="producaoFiltroCodigoBar" style="display:none;align-items:center;gap:10px;margin-bottom:12px;padding:8px 12px;background:rgba(245,158,11,.08);border:1px solid rgba(245,158,11,.35);border-radius:8px;font-size:12px;color:#fde68a;">
+              <i class="fa-solid fa-filter"></i>
+              <span>Filtrando produto: <b id="producaoFiltroCodigoLabel"></b></span>
+              <button id="producaoLimparFiltroCodigo" type="button"
+                style="margin-left:auto;padding:4px 10px;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.15);border-radius:6px;color:#e2e8f0;font-size:11px;cursor:pointer;">
+                Limpar filtro
+              </button>
+            </div>
+
             <!-- Kanban de OPs -->
             <div id="producaoKanban" style="display:flex;gap:16px;align-items:flex-start;overflow-x:auto;padding:4px 0 16px 0;">
+
+              <!-- Coluna: Pedidos -->
+              <div style="flex:0 0 340px;min-width:300px;">
+                <div style="display:flex;align-items:center;gap:8px;padding:10px 14px;background:#422006;border-radius:10px 10px 0 0;border:1px solid #b45309;border-bottom:none;">
+                  <span style="width:10px;height:10px;border-radius:50%;background:#f59e0b;display:inline-block;flex-shrink:0;"></span>
+                  <span style="font-size:12px;font-weight:700;color:#fcd34d;text-transform:uppercase;letter-spacing:.5px;">Pedidos</span>
+                  <span id="kanbanPedidosCount" style="margin-left:auto;font-size:11px;background:#78350f;color:#fde68a;padding:2px 9px;border-radius:10px;font-weight:600;">0</span>
+                </div>
+                <div id="kanbanPedidos" style="min-height:220px;background:rgba(245,158,11,.04);border:1px solid #b45309;border-top:none;border-radius:0 0 10px 10px;padding:10px;display:flex;flex-direction:column;gap:10px;">
+                  <div style="text-align:center;padding:24px 0;color:var(--inactive-color);font-size:12px;">Clique em "Atualizar" para carregar.</div>
+                </div>
+              </div>
 
               <!-- Coluna: Programado -->
               <div style="flex:0 0 340px;min-width:300px;">

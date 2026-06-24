@@ -66776,7 +66776,8 @@ document.addEventListener('DOMContentLoaded', () => {
 (function () {
   const overlay   = document.getElementById('modalMovimentacao');
   const fecharBtn = document.getElementById('movimFecharBtn');
-  const tipoDiv   = document.getElementById('movimTipo');
+  const modoTipoDiv = document.getElementById('movimModoTipo');
+  const executarBtn = document.getElementById('movimExecutarBtn');
   const qtdInput  = document.getElementById('movimQtdInput');
   const qtdResult = document.getElementById('movimQtdResultado');
   const operDiv   = document.getElementById('movimOperadores');
@@ -66902,6 +66903,7 @@ document.addEventListener('DOMContentLoaded', () => {
     ]
   };
   const MOVIM_TIPO_ACAO = { ENT: 'ENTRADA', SAI: 'SAIDA', TRF: 'TRANSFERENCIA' };
+  let _movimModoInterno = null; // ENTRADA | SAIDA | TRANSFERENCIA (modo Interno)
   let _movimPrinterPrefTemp = null;
   let _movimEtqImpressaoLista = [];
   let _processandoAcao = false;
@@ -66916,7 +66918,9 @@ document.addEventListener('DOMContentLoaded', () => {
     fecharScanEndereco();
     if (qtdInput)  qtdInput.value = '';
     if (qtdResult) qtdResult.textContent = '';
-    document.querySelectorAll('.movimTipoBtn').forEach(b => b.classList.remove('ativo', 'processando'));
+    document.querySelectorAll('.movimModoBtn').forEach(b => b.classList.remove('ativo'));
+    if (executarBtn) { executarBtn.disabled = false; executarBtn.classList.remove('processando'); }
+    _movimModoInterno = null;
     const msg = document.getElementById('movimMensagem');
     if (msg) { msg.textContent = ''; msg.className = 'movim-mensagem'; }
     const apo = document.getElementById('movimApontamento');
@@ -66943,13 +66947,14 @@ document.addEventListener('DOMContentLoaded', () => {
     const origemEl = document.getElementById('movimEnderecoOrigemVal');
     const destinoEl = document.getElementById('movimEnderecoDestinoVal');
     if (origemEl) {
-      origemEl.textContent = _enderecoOrigemInterno || 'Nao lido';
+      origemEl.textContent = _enderecoOrigemInterno || 'Nao selecionado';
       origemEl.classList.toggle('vazio', !_enderecoOrigemInterno);
     }
     if (destinoEl) {
-      destinoEl.textContent = _enderecoDestinoInterno || 'Nao lido';
+      destinoEl.textContent = _enderecoDestinoInterno || 'Nao selecionado';
       destinoEl.classList.toggle('vazio', !_enderecoDestinoInterno);
     }
+    atualizarMarcacaoListaInterno();
   }
 
   function definirEnderecoInterno(modo, valor) {
@@ -67050,14 +67055,62 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
+  function aplicarEnderecoInternoModo(modo, endereco) {
+    const end = String(endereco || '').trim();
+    if (!end) return;
+    if (modo === 'origem') {
+      _enderecoOrigemInterno = end;
+      if (_enderecoDestinoInterno === end) _enderecoDestinoInterno = '';
+    } else {
+      _enderecoDestinoInterno = end;
+      if (_enderecoOrigemInterno === end && _movimModoInterno === 'TRANSFERENCIA') _enderecoOrigemInterno = '';
+    }
+    renderEnderecoInternoValores();
+  }
+
+  function onEtqLinhaClickInterno(linha) {
+    const endereco = String(linha?.dataset?.endereco || '').trim();
+    if (!endereco || !_movimModoInterno) return;
+
+    if (_movimModoInterno === 'ENTRADA') {
+      limparSelecoesListaEtq();
+      marcarEtqEnderecoSelecionado(endereco, true);
+      _enderecoDestinoInterno = endereco;
+      _enderecoOrigemInterno = '';
+    } else if (_movimModoInterno === 'SAIDA') {
+      limparSelecoesListaEtq();
+      marcarEtqEnderecoSelecionado(endereco, true);
+      _enderecoOrigemInterno = endereco;
+      _enderecoDestinoInterno = '';
+    } else if (_movimModoInterno === 'TRANSFERENCIA') {
+      if (!_enderecoOrigemInterno) {
+        _enderecoOrigemInterno = endereco;
+      } else if (!_enderecoDestinoInterno) {
+        if (endereco === _enderecoOrigemInterno) return;
+        _enderecoDestinoInterno = endereco;
+      } else {
+        _enderecoDestinoInterno = endereco;
+      }
+    }
+    renderEnderecoInternoValores();
+  }
+
   function toggleMovimEtqLinhaSelecionada(linha) {
     if (!linha) return;
+    if (isMotivoInterno() && _movimModoInterno) {
+      onEtqLinhaClickInterno(linha);
+      return;
+    }
     const endereco = String(linha.dataset.endereco || '').trim();
     if (!endereco) return;
     const vaiSelecionar = !linha.classList.contains('movim-etq-linha--selected');
     marcarEtqEnderecoSelecionado(endereco, vaiSelecionar);
     if (vaiSelecionar) adicionarEndereco(endereco);
     else removerEnderecoLido(endereco);
+  }
+
+  function sincronizarEnderecosInternosDaLista() {
+    /* legado — endereços internos são definidos por clique/leitura direta */
   }
 
   async function imprimirEtqLinhaMovim(id, btnEl) {
@@ -67232,10 +67285,21 @@ document.addEventListener('DOMContentLoaded', () => {
   function registrarEnderecoLido(valor) {
     const endereco = String(valor || '').trim();
     if (!endereco) return;
-    if (_scanModo === 'origem') {
-      definirEnderecoInterno('origem', endereco);
+
+    if (isMotivoInterno() && _movimModoInterno === 'ENTRADA' && _scanModo === 'geral') {
+      if (enderecoExisteNaListaEtq(endereco)) {
+        limparSelecoesListaEtq();
+        marcarEtqEnderecoSelecionado(endereco, true);
+      } else {
+        limparSelecoesListaEtq();
+      }
+      _enderecoDestinoInterno = endereco;
+      _enderecoOrigemInterno = '';
+      renderEnderecoInternoValores();
+    } else if (_scanModo === 'origem') {
+      aplicarEnderecoInternoModo('origem', endereco);
     } else if (_scanModo === 'destino') {
-      definirEnderecoInterno('destino', endereco);
+      aplicarEnderecoInternoModo('destino', endereco);
     } else {
       adicionarEndereco(endereco);
     }
@@ -67337,7 +67401,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     for (const ent of entList) {
       const saiIgual = saiList.find(s => s.v === ent.v && s.l === ent.l);
-      if (saiIgual) labelsUnificados.add(`${ent.v}\0${ent.l}`);
+      if (saiIgual && ent.v !== 'INV') labelsUnificados.add(`${ent.v}\0${ent.l}`);
     }
 
     for (const ent of entList) {
@@ -67354,12 +67418,107 @@ document.addEventListener('DOMContentLoaded', () => {
     for (const o of (MOVIM_MOTIVOS.TRF || [])) {
       opcoes.push(`<option value="TRF:${o.v}">Transferência — ${escapeHtml(o.l)}</option>`);
     }
+    opcoes.push('<option value="INTERNO">Ajuste fora da Omie — Interno</option>');
     omieMotivoSel.innerHTML = opcoes.join('');
+  }
+
+  function obterTipoExecutarOmie() {
+    const parsed = parseMotivoSelecionado();
+    if (!parsed) return null;
+    if (parsed.tipos.includes('TRF')) return 'TRANSFERENCIA';
+    if (parsed.tipos.includes('ENT') && !parsed.tipos.includes('SAI')) return 'ENTRADA';
+    if (parsed.tipos.includes('SAI') && !parsed.tipos.includes('ENT')) return 'SAIDA';
+    return MOVIM_TIPO_ACAO[parsed.tipos[0]] || null;
+  }
+
+  function mostrarEl(id, visivel) {
+    const el = document.getElementById(id);
+    if (el) el.style.display = visivel ? '' : 'none';
+  }
+
+  function atualizarLayoutMovim() {
+    const interno = isMotivoInterno();
+    const parsed = parseMotivoSelecionado();
+    const tipoOmie = obterTipoExecutarOmie();
+    const modo = _movimModoInterno;
+
+    // Motivo sempre visível
+    if (omieMotivoSel?.closest('.movim-field')) {
+      omieMotivoSel.closest('.movim-field').style.display = '';
+    }
+
+    // Botões de modo (só Interno)
+    if (modoTipoDiv) modoTipoDiv.style.display = interno ? 'flex' : 'none';
+
+    // Reset parcial ao trocar motivo sem modo
+    if (!interno) {
+      _movimModoInterno = null;
+      document.querySelectorAll('.movimModoBtn').forEach(b => b.classList.remove('ativo'));
+    }
+
+    const prontoInterno = interno && !!modo;
+    const prontoOmie = !interno && !!tipoOmie;
+
+    // Armazém origem/destino
+    const showOrigemArm = prontoOmie && (tipoOmie === 'SAIDA' || tipoOmie === 'TRANSFERENCIA');
+    const showDestinoArm = prontoInterno || (prontoOmie && (tipoOmie === 'ENTRADA' || tipoOmie === 'TRANSFERENCIA'));
+
+    mostrarEl('movimOrigemField', showOrigemArm);
+    mostrarEl('movimDestinoField', showDestinoArm || prontoInterno);
+
+    if (interno && (prontoInterno || !modo)) aplicarDestinoPortaPallet();
+
+    const showCorpo = prontoInterno || prontoOmie;
+    mostrarEl('movimQtdFieldWrap', showCorpo);
+    mostrarEl('movimApontamentoField', showCorpo);
+    mostrarEl('movimEnderecosSection', showCorpo && (interno || tipoOmie === 'TRANSFERENCIA'));
+    mostrarEl('movimMesmoArmazemAviso', prontoInterno);
+    mostrarEl('movimImprimirEtiquetaWrap', prontoInterno);
+    mostrarEl('movimImpressoraRow', prontoInterno);
+    if (executarBtn) executarBtn.style.display = showCorpo ? 'flex' : 'none';
+
+    // Endereços — campos internos e leitura
+    const internoWrap = document.getElementById('movimEnderecoInternoWrap');
+    const scanGeralBtn = document.getElementById('movimScanEnderecoBtn');
+    const origemCampo = document.getElementById('movimEnderecoOrigemCampo');
+    const destinoCampo = document.getElementById('movimEnderecoDestinoCampo');
+
+    if (!showCorpo || !interno) {
+      if (internoWrap) internoWrap.style.display = 'none';
+      if (scanGeralBtn) scanGeralBtn.style.display = 'none';
+      if (!interno) limparEnderecosInternos();
+    } else if (modo === 'ENTRADA') {
+      if (internoWrap) internoWrap.style.display = 'flex';
+      if (origemCampo) origemCampo.style.display = 'none';
+      if (destinoCampo) destinoCampo.style.display = '';
+      if (scanGeralBtn) scanGeralBtn.style.display = 'inline-flex';
+    } else if (modo === 'SAIDA') {
+      if (internoWrap) internoWrap.style.display = 'flex';
+      if (origemCampo) origemCampo.style.display = '';
+      if (destinoCampo) destinoCampo.style.display = 'none';
+      if (scanGeralBtn) scanGeralBtn.style.display = 'none';
+      const scanOrig = document.getElementById('movimScanEnderecoOrigemBtn');
+      if (scanOrig) scanOrig.style.display = 'none';
+    } else if (modo === 'TRANSFERENCIA') {
+      if (internoWrap) internoWrap.style.display = 'flex';
+      if (origemCampo) origemCampo.style.display = '';
+      if (destinoCampo) destinoCampo.style.display = '';
+      if (scanGeralBtn) scanGeralBtn.style.display = 'none';
+      const scanOrig = document.getElementById('movimScanEnderecoOrigemBtn');
+      const scanDest = document.getElementById('movimScanEnderecoDestinoBtn');
+      if (scanOrig) scanOrig.style.display = '';
+      if (scanDest) scanDest.style.display = '';
+    }
+
+    destacarLocaisMovim();
   }
 
   function resetMotivoOmie() {
     if (omieMotivoSel) omieMotivoSel.value = '';
-    atualizarBotoesPorMotivo();
+    _movimModoInterno = null;
+    document.querySelectorAll('.movimModoBtn').forEach(b => b.classList.remove('ativo'));
+    limparEnderecosInternos();
+    atualizarLayoutMovim();
   }
 
   function parseMotivoSelecionado() {
@@ -67372,37 +67531,66 @@ document.addEventListener('DOMContentLoaded', () => {
     return { tipos, tipo: tipos[0], motivo };
   }
 
-  function atualizarBotoesPorMotivo() {
-    const tipoDivEl = document.getElementById('movimTipo');
-    const motivoField = omieMotivoSel?.closest('.movim-field');
-    const mesmo = isMesmoArmazemMovim();
+  function isMotivoInterno() {
+    return String(omieMotivoSel?.value || '').trim() === 'INTERNO';
+  }
 
-    if (motivoField) motivoField.style.display = mesmo ? 'none' : '';
+  function isMesmoArmazemMovim() {
+    const origem = String(origemSel?.value || '').trim();
+    const destino = String(localSel?.value || '').trim();
+    return !!(origem && destino && origem === destino);
+  }
 
-    if (mesmo) {
-      if (tipoDivEl) tipoDivEl.style.display = 'flex';
-      document.querySelectorAll('.movimTipoBtn').forEach(btn => { btn.style.display = ''; });
-      return;
-    }
+  function isModoInterno() {
+    return isMotivoInterno();
+  }
 
-    const parsed = parseMotivoSelecionado();
-    if (!tipoDivEl) return;
-    if (!parsed) {
-      tipoDivEl.style.display = 'none';
-      document.querySelectorAll('.movimTipoBtn').forEach(btn => {
-        btn.style.display = 'none';
-        btn.classList.remove('ativo');
-      });
-      return;
-    }
+  function enderecoExisteNaListaEtq(endereco) {
+    const lista = document.getElementById('movimEnderecoEtqLista');
+    if (!lista) return false;
+    const end = String(endereco || '').trim();
+    return Array.from(lista.querySelectorAll('.movim-etq-linha[data-endereco]'))
+      .some(l => String(l.dataset.endereco || '').trim() === end);
+  }
 
-    tipoDivEl.style.display = 'flex';
-    const acoesVisiveis = new Set(parsed.tipos.map(t => MOVIM_TIPO_ACAO[t]).filter(Boolean));
-    document.querySelectorAll('.movimTipoBtn').forEach(btn => {
-      const visivel = acoesVisiveis.has(btn.dataset.type);
-      btn.style.display = visivel ? '' : 'none';
-      btn.classList.toggle('ativo', visivel);
+  function limparSelecoesListaEtq() {
+    const lista = document.getElementById('movimEnderecoEtqLista');
+    if (!lista) return;
+    lista.querySelectorAll('.movim-etq-linha--selected').forEach(l => l.classList.remove('movim-etq-linha--selected'));
+    const hidden = document.getElementById('movimEnderecoLista');
+    if (hidden) hidden.innerHTML = '';
+  }
+
+  function atualizarMarcacaoListaInterno() {
+    const lista = document.getElementById('movimEnderecoEtqLista');
+    if (!lista) return;
+    lista.querySelectorAll('.movim-etq-linha[data-endereco]').forEach(linha => {
+      const end = String(linha.dataset.endereco || '').trim();
+      const ativo = end && (end === _enderecoOrigemInterno || end === _enderecoDestinoInterno);
+      linha.classList.toggle('movim-etq-linha--selected', !!ativo);
+      linha.classList.toggle('movim-etq-linha--origem', end === _enderecoOrigemInterno && !!end);
+      linha.classList.toggle('movim-etq-linha--destino', end === _enderecoDestinoInterno && !!end);
     });
+  }
+
+  function limparEnderecosInternos() {
+    _enderecoOrigemInterno = '';
+    _enderecoDestinoInterno = '';
+    limparSelecoesListaEtq();
+    renderEnderecoInternoValores();
+  }
+
+  function aplicarDestinoPortaPallet() {
+    if (!localSel) return;
+    const preferido = MOVIM_DEFAULT_ORIGEM;
+    if (preferido && Array.from(localSel.options).some(o => o.value === preferido)) {
+      localSel.value = preferido;
+    } else {
+      const optPorta = Array.from(localSel.options).find(o =>
+        o.textContent.toUpperCase().includes('PORTA PALLET')
+      );
+      if (optPorta) localSel.value = optPorta.value;
+    }
   }
 
   function obterMotivoOmie(tipoOmie) {
@@ -67420,11 +67608,15 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   async function registrarEnderecosEtq(payload) {
+    const body = {
+      ...payload,
+      codigo_produto_omie: payload.codigo_produto_omie || _codigoProdutoOmieAtual || null
+    };
     const resp = await fetch('/api/etiquetas/rec-impresso/registrar-movimentacao', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
-      body: JSON.stringify(payload)
+      body: JSON.stringify(body)
     });
     let json;
     try { json = await resp.json(); } catch { throw new Error('Resposta inválida ao registrar endereço.'); }
@@ -67460,36 +67652,14 @@ document.addEventListener('DOMContentLoaded', () => {
   if (overlay)   overlay.addEventListener('click', e => { if (e.target === overlay) fechar(); });
 
   function setBotoesAcaoDisabled(disabled) {
-    document.querySelectorAll('.movimTipoBtn').forEach(b => {
-      b.disabled = !!disabled;
-      b.classList.toggle('processando', !!disabled);
-    });
-  }
-
-  function isMesmoArmazemMovim() {
-    const origem = String(origemSel?.value || '').trim();
-    const destino = String(localSel?.value || '').trim();
-    return !!(origem && destino && origem === destino);
+    if (executarBtn) {
+      executarBtn.disabled = !!disabled;
+      executarBtn.classList.toggle('processando', !!disabled);
+    }
   }
 
   function atualizarUiMesmoArmazem() {
-    const mesmo = isMesmoArmazemMovim();
-    const aviso = document.getElementById('movimMesmoArmazemAviso');
-    const imprWrap = document.getElementById('movimImprimirEtiquetaWrap');
-    const internoWrap = document.getElementById('movimEnderecoInternoWrap');
-    const externoWrap = document.getElementById('movimEnderecoExternoWrap');
-    const scanGeralBtn = document.getElementById('movimScanEnderecoBtn');
-    if (aviso) aviso.style.display = mesmo ? 'block' : 'none';
-    if (imprWrap) imprWrap.style.display = mesmo ? 'flex' : 'none';
-    if (internoWrap) internoWrap.style.display = mesmo ? 'flex' : 'none';
-    if (externoWrap) externoWrap.style.display = 'none';
-    if (scanGeralBtn) scanGeralBtn.style.display = mesmo ? 'none' : 'inline-flex';
-    if (!mesmo) {
-      _enderecoOrigemInterno = '';
-      _enderecoDestinoInterno = '';
-      renderEnderecoInternoValores();
-    }
-    atualizarBotoesPorMotivo();
+    atualizarLayoutMovim();
   }
 
   function movimValParaLabelImpressora(val) {
@@ -67621,13 +67791,15 @@ document.addEventListener('DOMContentLoaded', () => {
     const apontamento = String(document.getElementById('movimApontamento')?.value || '').trim() || null;
     const mapTipo = { ENTRADA: 'ENT', SAIDA: 'SAI', TRANSFERENCIA: 'TRF' };
     const tipoMov = mapTipo[String(tipoAcao || '').toUpperCase()] || String(tipoAcao || '').toUpperCase();
-    const enderecoOrigem = _enderecoOrigemInterno;
-    const enderecoDestino = _enderecoDestinoInterno;
+    let enderecoOrigem = _enderecoOrigemInterno;
+    let enderecoDestino = _enderecoDestinoInterno;
+    if (tipoMov === 'ENT' && !enderecoDestino) enderecoDestino = enderecoOrigem;
+    if (tipoMov === 'SAI' && !enderecoOrigem) enderecoOrigem = enderecoDestino;
 
     if (tipoMov === 'TRF') {
       if (!enderecoOrigem || !enderecoDestino) {
         if (msg) {
-          msg.textContent = 'Transferencia exige ler codigo de origem e destino.';
+          msg.textContent = 'Transferencia exige selecionar origem e destino na lista de enderecos.';
           msg.className = 'movim-mensagem erro';
         }
         return;
@@ -67641,13 +67813,13 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     } else if (tipoMov === 'SAI' && !enderecoOrigem) {
       if (msg) {
-        msg.textContent = 'Saida exige ler o codigo do endereco de origem.';
+        msg.textContent = 'Saida exige selecionar o endereco de origem na lista.';
         msg.className = 'movim-mensagem erro';
       }
       return;
     } else if (tipoMov === 'ENT' && !enderecoDestino) {
       if (msg) {
-        msg.textContent = 'Entrada exige ler o codigo do endereco de destino.';
+        msg.textContent = 'Entrada exige informar o endereco de destino (lista ou leitura QR).';
         msg.className = 'movim-mensagem erro';
       }
       return;
@@ -67707,6 +67879,7 @@ document.addEventListener('DOMContentLoaded', () => {
       }), 'ok');
       if (msg) { msg.textContent = 'Movimentacao registrada.'; msg.className = 'movim-mensagem ok'; }
       limparEnderecos();
+      limparEnderecosInternos();
       carregarEnderecosReferencia(_codigoProdutoAtual);
     } catch (err) {
       console.error('[modalMovimentacao] enderecamento interno', err);
@@ -67722,19 +67895,38 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
+  async function clicarExecutar() {
+    if (_processandoAcao) return;
+    let tipo = null;
+    if (isMotivoInterno()) {
+      tipo = _movimModoInterno;
+      if (!tipo) {
+        const msg = document.getElementById('movimMensagem');
+        if (msg) {
+          msg.textContent = 'Escolha ENTRADA, SAIDA ou TRANSFERENCIA.';
+          msg.className = 'movim-mensagem erro';
+        }
+        return;
+      }
+    } else {
+      tipo = obterTipoExecutarOmie();
+      if (!tipo) {
+        const msg = document.getElementById('movimMensagem');
+        if (msg) {
+          msg.textContent = 'Selecione o motivo do ajuste (Omie) antes de executar.';
+          msg.className = 'movim-mensagem erro';
+        }
+        omieMotivoSel?.focus();
+        return;
+      }
+    }
+    await executarAcao(tipo);
+  }
+
   async function executarAcao(tipo) {
     if (_processandoAcao) return;
-    if (isMesmoArmazemMovim()) {
+    if (isMotivoInterno()) {
       await salvarEnderecamentoInterno(tipo);
-      return;
-    }
-    if (!parseMotivoSelecionado()) {
-      const msg = document.getElementById('movimMensagem');
-      if (msg) {
-        msg.textContent = 'Selecione o motivo do ajuste (Omie) antes de confirmar.';
-        msg.className = 'movim-mensagem erro';
-      }
-      omieMotivoSel?.focus();
       return;
     }
     if (tipo === 'TRANSFERENCIA') {
@@ -67753,19 +67945,41 @@ document.addEventListener('DOMContentLoaded', () => {
 
   if (omieMotivoSel) {
     preencherMotivosOmieUnificados();
-    omieMotivoSel.addEventListener('change', atualizarBotoesPorMotivo);
-  }
-
-  // Botões de ação final (ENTRADA / SAIDA / TRANSFERENCIA)
-  if (tipoDiv) {
-    tipoDiv.addEventListener('click', e => {
-      const btn = e.target.closest('.movimTipoBtn');
-      if (!btn || btn.disabled || btn.style.display === 'none') return;
-      executarAcao(btn.dataset.type);
+    omieMotivoSel.addEventListener('change', () => {
+      _movimModoInterno = null;
+      document.querySelectorAll('.movimModoBtn').forEach(b => b.classList.remove('ativo'));
+      limparEnderecosInternos();
+      atualizarLayoutMovim();
     });
   }
 
-  // Operadores de quantidade (+, −, /)
+  if (modoTipoDiv) {
+    modoTipoDiv.addEventListener('click', e => {
+      const btn = e.target.closest('.movimModoBtn');
+      if (!btn) return;
+      _movimModoInterno = btn.dataset.type;
+      document.querySelectorAll('.movimModoBtn').forEach(b => {
+        b.classList.toggle('ativo', b === btn);
+      });
+      limparEnderecosInternos();
+      atualizarLayoutMovim();
+    });
+  }
+
+  if (executarBtn) {
+    executarBtn.addEventListener('click', () => { void clicarExecutar(); });
+  }
+
+  document.getElementById('movimRmEnderecoOrigemBtn')?.addEventListener('click', () => {
+    _enderecoOrigemInterno = '';
+    renderEnderecoInternoValores();
+  });
+  document.getElementById('movimRmEnderecoDestinoBtn')?.addEventListener('click', () => {
+    _enderecoDestinoInterno = '';
+    renderEnderecoInternoValores();
+  });
+
+  // Operadores de quantidade (+, −, ×, /)
   if (operDiv) {
     operDiv.addEventListener('click', e => {
       const btn = e.target.closest('button[data-insert]');
@@ -68189,10 +68403,14 @@ document.addEventListener('DOMContentLoaded', () => {
       }
 
       if (enderecos.length) {
+        const endOrigem = enderecos[0] || null;
+        const endDestino = enderecos.length >= 2 ? enderecos[1] : null;
         await registrarEnderecosEtq({
           codigo: _codigoProdutoAtual,
           descricao: _descricaoProdutoAtual,
           qtd,
+          endereco_origem: endOrigem,
+          endereco_destino: endDestino,
           enderecos,
           complemento: apontamento,
           usuario: aprovadoPor,
@@ -68576,7 +68794,9 @@ document.addEventListener('DOMContentLoaded', () => {
     _codigoProdutoAtual = codigo;
     _descricaoProdutoAtual = descricao || codigo;
     _codigoProdutoOmieAtual = codigoProduto || null;
-    document.querySelectorAll('.movimTipoBtn').forEach(b => b.classList.remove('ativo', 'processando'));
+    document.querySelectorAll('.movimModoBtn').forEach(b => b.classList.remove('ativo'));
+    if (executarBtn) { executarBtn.disabled = false; executarBtn.classList.remove('processando'); }
+    _movimModoInterno = null;
     if (qtdInput) qtdInput.value = '';
     if (qtdResult) qtdResult.textContent = '';
     const msg = document.getElementById('movimMensagem');
@@ -71295,7 +71515,12 @@ window.verOperacao = function(osId) {
   const recarrBtn     = document.getElementById('producaoRecarregarBtn');
   const filtroBar     = document.getElementById('producaoFiltroBar');
   const filtroSelect  = document.getElementById('producaoFiltroOperacao');
+  const filtroCodigoBar    = document.getElementById('producaoFiltroCodigoBar');
+  const filtroCodigoLabel  = document.getElementById('producaoFiltroCodigoLabel');
+  const btnLimparFiltroCodigo = document.getElementById('producaoLimparFiltroCodigo');
 
+  const colPedidos    = document.getElementById('kanbanPedidos');
+  const cntPedidos    = document.getElementById('kanbanPedidosCount');
   const colProgramado = document.getElementById('kanbanProgramado');
   const cntProgramado = document.getElementById('kanbanProgramadoCount');
   const colSolicitado = document.getElementById('kanbanSolicitado');
@@ -71307,6 +71532,32 @@ window.verOperacao = function(osId) {
 
   // Cache das ordens carregadas para re-renderizar sem nova requisição
   let ordensCarregadas = [];
+  let pedidosCarregados = [];
+  let filtroCodigoProduto = null;
+
+  function normCodigo(c) {
+    return String(c || '').trim().toUpperCase();
+  }
+
+  async function recarregarPedidos() {
+    const resp = await fetch('/api/producao/pedidos-kanban');
+    const data = await resp.json();
+    if (resp.ok && data.success) {
+      pedidosCarregados = data.pedidos || [];
+      return true;
+    }
+    return false;
+  }
+
+  function renderFiltroCodigoBar() {
+    if (!filtroCodigoBar) return;
+    if (filtroCodigoProduto) {
+      filtroCodigoBar.style.display = 'flex';
+      if (filtroCodigoLabel) filtroCodigoLabel.textContent = decodeHtmlEntities(filtroCodigoProduto);
+    } else {
+      filtroCodigoBar.style.display = 'none';
+    }
+  }
 
   function fmtData(str) {
     if (!str) return '—';
@@ -71360,20 +71611,23 @@ window.verOperacao = function(osId) {
     return false;
   }
 
-  function renderKanbanCol(colEl, cntEl, ordens, colKey, operacaoFiltro, msgVazia, onlyAProduzir) {
+  function renderKanbanCol(colEl, cntEl, ordens, colKey, operacaoFiltro, msgVazia, onlyAProduzir, codigoFiltro) {
     if (!colEl) return;
     const base = onlyAProduzir ? ordens.filter(op => op.status === 'A PRODUZIR') : ordens;
     const grupos = {};
     let totalOs = 0;
 
     for (const op of base) {
+      const prodCodigo = op.produto?.identificacao || String(op.id);
+      if (codigoFiltro && normCodigo(prodCodigo) !== normCodigo(codigoFiltro)) continue;
+
       const ossCol = (op.ordens_servico || []).filter(os => {
         if (operacaoFiltro && os.operacao !== operacaoFiltro) return false;
         return osStatusColuna(os, colKey);
       });
       if (!ossCol.length) continue;
       totalOs += ossCol.length;
-      const key = op.produto?.identificacao || String(op.id);
+      const key = prodCodigo;
       if (!grupos[key]) grupos[key] = [];
       grupos[key].push({ ...op, ordens_servico: ossCol });
     }
@@ -71381,12 +71635,12 @@ window.verOperacao = function(osId) {
     if (!Object.keys(grupos).length) {
       colEl.innerHTML = `<div style="text-align:center;padding:24px 0;color:var(--inactive-color);font-size:12px;">${msgVazia}</div>`;
     } else {
-      colEl.innerHTML = Object.entries(grupos).map(([k, ops]) => renderGrupo(k, ops)).join('');
+      colEl.innerHTML = Object.entries(grupos).map(([k, ops]) => renderGrupo(k, ops, colKey)).join('');
     }
     if (cntEl) cntEl.textContent = totalOs;
   }
 
-  function renderGrupo(prodId, ops) {
+  function renderGrupo(prodId, ops, colKey) {
     const prod = ops[0].produto || {};
     const qtdeTotal = ops.reduce((s, op) => s + (Number(op.qtde) || 0), 0);
 
@@ -71450,8 +71704,17 @@ window.verOperacao = function(osId) {
     }).join('');
 
     const descEscapada = (prod.descricao || '').replace(/"/g, '&quot;');
+    const isProgDrop = colKey === 'programado';
+    const prodCodigoAttr = escHtml(prod.identificacao || prodId);
+    const grupoExtraClass = isProgDrop ? ' prog-kanban-grupo' : '';
+    const grupoExtraAttrs = isProgDrop
+      ? ` data-prod-codigo="${prodCodigoAttr}" data-prog-qtde="${qtdeTotal}"`
+      : '';
+    const grupoDropHint = isProgDrop
+      ? '<div style="font-size:10px;color:#818cf8;margin-top:6px;">Solte aqui um item de Pedidos com o mesmo código.</div>'
+      : '';
 
-    return `<div style="background:var(--content-bg,#1e2233);border:1px solid rgba(255,255,255,.1);border-radius:10px;padding:12px;">
+    return `<div class="kanban-prod-grupo${grupoExtraClass}"${grupoExtraAttrs} style="background:var(--content-bg,#1e2233);border:1px solid rgba(255,255,255,.1);border-radius:10px;padding:12px;${isProgDrop ? 'transition:border-color .15s,box-shadow .15s;' : ''}">
       <div style="display:flex;align-items:flex-start;gap:8px;margin-bottom:6px;">
         <div style="flex:1;min-width:0;">
           <div style="font-size:13px;font-weight:700;color:#f59e0b;letter-spacing:.3px;">${prod.identificacao || prodId}</div>
@@ -71468,12 +71731,194 @@ window.verOperacao = function(osId) {
           Ver estrutura / processo
         </button>
       </div>
+      ${grupoDropHint}
       ${opsHtml}
     </div>`;
   }
 
+  function decodeHtmlEntities(str) {
+    const s = String(str ?? '');
+    if (!s.includes('&')) return s;
+    const ta = document.createElement('textarea');
+    ta.innerHTML = s;
+    return ta.value;
+  }
+
+  function escHtml(str) {
+    return String(str ?? '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+
+  function fmtTextoHtml(str) {
+    return escHtml(decodeHtmlEntities(str));
+  }
+
+  function renderColunaPedidos(pedidos, codigoFiltro) {
+    if (!colPedidos) return;
+
+    const lista = pedidos.map(ped => {
+      let itens = Array.isArray(ped.itens) ? ped.itens : [];
+      if (codigoFiltro) {
+        itens = itens.filter(it => normCodigo(it.codigo) === normCodigo(codigoFiltro));
+      }
+      return { ...ped, itens };
+    }).filter(ped => ped.itens.length > 0);
+
+    if (!lista.length) {
+      const msg = codigoFiltro
+        ? `Nenhum pedido com saldo para o produto ${decodeHtmlEntities(codigoFiltro)}.`
+        : 'Nenhum pedido aprovado.';
+      colPedidos.innerHTML = `<div style="text-align:center;padding:24px 0;color:var(--inactive-color);font-size:12px;">${msg}</div>`;
+    } else {
+      colPedidos.innerHTML = lista.map(ped => {
+        const itens = ped.itens || [];
+        const itensHtml = itens.map(it => {
+          const ativo = codigoFiltro && normCodigo(it.codigo) === normCodigo(codigoFiltro);
+          return `
+            <div class="pedido-kanban-item"
+              draggable="true"
+              data-codigo-pedido="${escHtml(ped.codigo_pedido)}"
+              data-numero-pedido="${escHtml(ped.numero_pedido || '')}"
+              data-codigo-produto="${escHtml(it.codigo_produto || '')}"
+              data-codigo="${escHtml(it.codigo || '')}"
+              data-descricao="${escHtml(it.descricao || '')}"
+              data-quantidade="${escHtml(it.quantidade || '0')}"
+              title="Clique para filtrar · Arraste para Programado"
+              style="display:flex;align-items:flex-start;gap:8px;font-size:11px;padding:6px 8px;border-radius:6px;cursor:grab;${ativo ? 'background:rgba(245,158,11,.18);border:1px solid rgba(245,158,11,.45);' : 'background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.06);'}">
+              <span style="flex-shrink:0;font-weight:700;color:#fbbf24;min-width:72px;">${fmtTextoHtml(it.codigo || '—')}</span>
+              <span style="flex:1;color:#e2e8f0;line-height:1.35;">${fmtTextoHtml(it.descricao || '—')}</span>
+              <span style="flex-shrink:0;color:#94a3b8;font-weight:600;">${fmtQtde(it.quantidade)}</span>
+            </div>`;
+        }).join('');
+
+        return `<div style="background:var(--content-bg,#1e2233);border:1px solid rgba(245,158,11,.25);border-radius:10px;padding:12px;">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">
+            <span style="font-size:13px;font-weight:700;color:#fbbf24;">Pedido ${fmtTextoHtml(ped.numero_pedido || '—')}</span>
+            <span style="margin-left:auto;font-size:10px;color:#64748b;">#${fmtTextoHtml(ped.codigo_pedido)}</span>
+          </div>
+          ${ped.obs_venda ? `<div style="font-size:11px;color:#fde68a;line-height:1.4;margin-top:4px;">${fmtTextoHtml(ped.obs_venda)}</div>` : ''}
+          <div style="display:flex;flex-direction:column;gap:4px;margin-top:8px;padding-top:8px;border-top:1px solid rgba(255,255,255,.08);">${itensHtml}</div>
+        </div>`;
+      }).join('');
+    }
+    if (cntPedidos) cntPedidos.textContent = lista.length;
+  }
+
+  async function registrarProgramacaoPedido(payload, progQtde, prodCodigo) {
+    if (normCodigo(payload.codigo) !== normCodigo(prodCodigo)) {
+      alert('Só é possível soltar no mesmo código de produto em Programado.');
+      return false;
+    }
+    const saldoPedido = Number(payload.quantidade);
+    if (!Number.isFinite(saldoPedido) || saldoPedido < progQtde) {
+      alert(`Saldo do pedido (${fmtQtde(saldoPedido)}) é menor que a quantidade programada (${fmtQtde(progQtde)}).`);
+      return false;
+    }
+
+    const resp = await fetch('/api/producao/kanban-programacao', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        codigo_pedido: Number(payload.codigo_pedido),
+        codigo: payload.codigo,
+        quantidade_programado: progQtde
+      })
+    });
+    const data = await resp.json();
+    if (!resp.ok || !data.success) {
+      alert(data.error || 'Erro ao registrar programação.');
+      return false;
+    }
+    return true;
+  }
+
+  function setupPedidosProgramacaoInteractions() {
+    if (colPedidos) {
+      colPedidos.addEventListener('click', (e) => {
+        const item = e.target.closest('.pedido-kanban-item');
+        if (!item) return;
+        filtroCodigoProduto = item.dataset.codigo || null;
+        renderKanban(ordensCarregadas);
+      });
+
+      colPedidos.addEventListener('dragstart', (e) => {
+        const item = e.target.closest('.pedido-kanban-item');
+        if (!item) return;
+        e.dataTransfer.setData('application/json', JSON.stringify({
+          codigo_pedido: item.dataset.codigoPedido,
+          numero_pedido: item.dataset.numeroPedido,
+          codigo_produto: item.dataset.codigoProduto,
+          codigo: item.dataset.codigo,
+          descricao: item.dataset.descricao,
+          quantidade: item.dataset.quantidade
+        }));
+        e.dataTransfer.effectAllowed = 'move';
+        item.style.opacity = '0.55';
+      });
+
+      colPedidos.addEventListener('dragend', (e) => {
+        const item = e.target.closest('.pedido-kanban-item');
+        if (item) item.style.opacity = '';
+      });
+    }
+
+    if (colProgramado) {
+      colProgramado.addEventListener('dragover', (e) => {
+        const zona = e.target.closest('.prog-kanban-grupo');
+        if (!zona) return;
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+        zona.style.borderColor = 'rgba(99,102,241,.8)';
+        zona.style.boxShadow = '0 0 0 2px rgba(99,102,241,.25)';
+      });
+
+      colProgramado.addEventListener('dragleave', (e) => {
+        const zona = e.target.closest('.prog-kanban-grupo');
+        if (!zona) return;
+        if (zona.contains(e.relatedTarget)) return;
+        zona.style.borderColor = 'rgba(255,255,255,.1)';
+        zona.style.boxShadow = '';
+      });
+
+      colProgramado.addEventListener('drop', async (e) => {
+        const zona = e.target.closest('.prog-kanban-grupo');
+        if (!zona) return;
+        e.preventDefault();
+        zona.style.borderColor = 'rgba(255,255,255,.1)';
+        zona.style.boxShadow = '';
+
+        let payload = null;
+        try {
+          payload = JSON.parse(e.dataTransfer.getData('application/json') || 'null');
+        } catch (_) { payload = null; }
+        if (!payload) return;
+
+        const progQtde = Number(zona.dataset.progQtde);
+        const prodCodigo = zona.dataset.prodCodigo || '';
+        if (!Number.isFinite(progQtde) || progQtde <= 0) return;
+
+        const ok = await registrarProgramacaoPedido(payload, progQtde, prodCodigo);
+        if (!ok) return;
+
+        await recarregarPedidos();
+        renderKanban(ordensCarregadas);
+      });
+    }
+
+    btnLimparFiltroCodigo?.addEventListener('click', () => {
+      filtroCodigoProduto = null;
+      renderKanban(ordensCarregadas);
+    });
+  }
+
   // Renderiza o kanban com o subconjunto de ordens fornecido
   function renderKanban(ordens) {
+    renderFiltroCodigoBar();
+    renderColunaPedidos(pedidosCarregados, filtroCodigoProduto);
+
     const operacaoFiltro = filtroSelect ? filtroSelect.value : '';
 
     const filtradas = operacaoFiltro
@@ -71483,13 +71928,13 @@ window.verOperacao = function(osId) {
       : ordens;
 
     renderKanbanCol(colProgramado, cntProgramado, filtradas, 'programado', operacaoFiltro,
-      operacaoFiltro ? `Nenhuma OS programada com "${operacaoFiltro}".` : 'Nenhuma OP programada.', true);
+      operacaoFiltro ? `Nenhuma OS programada com "${operacaoFiltro}".` : 'Nenhuma OP programada.', true, filtroCodigoProduto);
     renderKanbanCol(colSolicitado, cntSolicitado, filtradas, 'solicitado', operacaoFiltro,
-      operacaoFiltro ? `Nenhuma OS solicitada com "${operacaoFiltro}".` : 'Nenhuma OS solicitada.', false);
+      operacaoFiltro ? `Nenhuma OS solicitada com "${operacaoFiltro}".` : 'Nenhuma OS solicitada.', false, null);
     renderKanbanCol(colProduzindo, cntProduzindo, filtradas, 'produzindo', operacaoFiltro,
-      'Nenhuma OS em produção.', false);
+      'Nenhuma OS em produção.', false, null);
     renderKanbanCol(colAguardando, cntAguardando, filtradas, 'aguardando', operacaoFiltro,
-      'Nenhuma OS aguardando retirada.', false);
+      'Nenhuma OS aguardando retirada.', false, null);
 
     attachProducaoKanbanActionButtons('#registrarProducaoPane', ordens);
     attachOpCardClickHandlers('#registrarProducaoPane', ordens);
@@ -71498,19 +71943,25 @@ window.verOperacao = function(osId) {
   async function carregarOrdens() {
     if (!spinner || !colProgramado) return;
     spinner.style.display = 'block';
-    if (spinnerMsg) spinnerMsg.textContent = 'Consultando IAPP...';
+    if (spinnerMsg) spinnerMsg.textContent = 'Consultando IAPP e pedidos...';
     erroDiv.style.display = 'none';
     if (rodape) rodape.style.display = 'none';
     if (filtroBar) filtroBar.style.display = 'none';
+    if (colPedidos) colPedidos.innerHTML = '<div style="text-align:center;padding:24px 0;color:var(--inactive-color);font-size:12px;">Carregando...</div>';
     colProgramado.innerHTML = '<div style="text-align:center;padding:24px 0;color:var(--inactive-color);font-size:12px;">Carregando...</div>';
 
     try {
-      const resp = await fetch('/api/producao/ordens');
-      const data = await resp.json();
+      const [respOrdens, respPedidos] = await Promise.all([
+        fetch('/api/producao/ordens'),
+        fetch('/api/producao/pedidos-kanban')
+      ]);
+      const data = await respOrdens.json();
+      const dataPedidos = await respPedidos.json();
 
-      if (!resp.ok || !data.success) throw new Error(data.error || 'Erro ao consultar ordens de produção');
+      if (!respOrdens.ok || !data.success) throw new Error(data.error || 'Erro ao consultar ordens de produção');
 
       ordensCarregadas = data.ordens || [];
+      pedidosCarregados = (respPedidos.ok && dataPedidos.success) ? (dataPedidos.pedidos || []) : [];
 
       // Coleta operações únicas de todos as OSs
       const operacoesSet = new Set();
@@ -71558,6 +72009,8 @@ window.verOperacao = function(osId) {
     carregarOrdens();
   });
 
+  setupPedidosProgramacaoInteractions();
+
   if (recarrBtn) {
     recarrBtn.addEventListener('click', () => carregarOrdens());
   }
@@ -71565,10 +72018,15 @@ window.verOperacao = function(osId) {
   window._fmtDataProducao = fmtData;
   window._producaoRecarregarOrdens = async function() {
     try {
-      const resp = await fetch('/api/producao/ordens');
+      const [resp, respPedidos] = await Promise.all([
+        fetch('/api/producao/ordens'),
+        fetch('/api/producao/pedidos-kanban')
+      ]);
       const data = await resp.json();
+      const dataPedidos = await respPedidos.json();
       if (resp.ok && data.success) {
         ordensCarregadas = data.ordens || [];
+        pedidosCarregados = (respPedidos.ok && dataPedidos.success) ? (dataPedidos.pedidos || []) : [];
         renderKanban(ordensCarregadas);
       }
     } catch (_) { /* silencioso */ }

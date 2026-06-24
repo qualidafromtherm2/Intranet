@@ -11003,8 +11003,60 @@ table.tabela td.num {
 
 /* Tipo de movimentação */
 .movim-tipo { display: flex; gap: 10px; flex-wrap: wrap; }
+.movim-modo-tipo { margin-top: 2px; margin-bottom: 4px; }
+.movim-modo-tipo .movimModoBtn,
+.movim-tipo-acoes .movimTipoBtn { min-height: 44px; font-size: .88rem; font-weight: 700; }
+.movimModoBtn {
+  flex: 1;
+  min-width: 0;
+  padding: 10px 8px;
+  border-radius: 10px;
+  border: 1px solid #3f4458;
+  background: #2a2d3a;
+  color: #e5e7eb;
+  cursor: pointer;
+  transition: background .15s, transform .1s;
+}
+.movimModoBtn:hover { background: #333748; }
+.movimModoBtn.ativo { transform: translateY(-1px); }
+.movimModoBtn[data-type="ENTRADA"].ativo  { background: #166b16; color: #fff; border-color: #1a7a1a; }
+.movimModoBtn[data-type="SAIDA"].ativo    { background: #8a2020; color: #fff; border-color: #9a2828; }
+.movimModoBtn[data-type="TRANSFERENCIA"].ativo { background: #105c7a; color: #fff; border-color: #146b8a; }
+.movim-executar-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  margin-top: 12px;
+  padding: 14px 16px;
+  border: none;
+  border-radius: 12px;
+  background: linear-gradient(135deg, #1d6b3a, #145a2e);
+  color: #fff;
+  font-size: 1rem;
+  font-weight: 800;
+  cursor: pointer;
+  transition: opacity .15s, transform .1s;
+}
+.movim-executar-btn:hover { opacity: .92; transform: translateY(-1px); }
+.movim-executar-btn:disabled { opacity: .55; cursor: wait; transform: none; }
+.movim-executar-btn.processando { opacity: .65; cursor: wait; }
+.movim-endereco-campo-acoes { display: flex; align-items: center; gap: 6px; }
+.movim-endereco-rm {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  border: 1px solid #4b5563;
+  background: #1f2937;
+  color: #f87171;
+  font-size: 1.2rem;
+  line-height: 1;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.movim-endereco-rm:hover { background: #374151; }
 .movim-tipo-acoes { margin-top: 4px; }
-.movim-tipo-acoes .movimTipoBtn { min-height: 48px; font-size: .95rem; font-weight: 700; }
 .movimTipoBtn {
   flex: 1;
   padding: 12px;
@@ -11281,7 +11333,9 @@ table.tabela td.num {
 .movim-scan-origem { border-color: #7f1d1d; color: #fecaca; }
 .movim-scan-destino { border-color: #166534; color: #bbf7d0; }
 .movim-endereco-referencia-pp:empty { display: none; }
-.movim-endereco-etq-lista {
+.movim-etq-linha--selected { background: rgba(59, 130, 246, .12); outline: 1px solid rgba(59, 130, 246, .35); }
+.movim-etq-linha--origem { box-shadow: inset 3px 0 0 #f59e0b; }
+.movim-etq-linha--destino { box-shadow: inset 3px 0 0 #22c55e; }
   display: flex;
   flex-direction: column;
   gap: 6px;
