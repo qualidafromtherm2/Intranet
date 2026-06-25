@@ -9961,6 +9961,22 @@
               </button>
             </div>
 
+            <!-- Pesquisar modelo ou OP -->
+            <div id="producaoPesquisaBar" style="margin-bottom:12px;">
+              <div style="display:flex;align-items:center;gap:8px;max-width:480px;">
+                <div style="position:relative;flex:1;">
+                  <i class="fa-solid fa-magnifying-glass" style="position:absolute;left:12px;top:50%;transform:translateY(-50%);color:#64748b;font-size:13px;pointer-events:none;"></i>
+                  <input type="search" id="producaoPesquisaInput" autocomplete="off"
+                    placeholder="Pesquisar por modelo ou número de OP..."
+                    style="width:100%;padding:8px 36px 8px 36px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.12);border-radius:8px;color:#e2e8f0;font-size:13px;outline:none;">
+                  <button type="button" id="producaoPesquisaLimpar" title="Limpar pesquisa"
+                    style="display:none;position:absolute;right:8px;top:50%;transform:translateY(-50%);width:22px;height:22px;align-items:center;justify-content:center;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.12);border-radius:50%;color:#94a3b8;font-size:14px;line-height:1;cursor:pointer;padding:0;">
+                    <i class="fa-solid fa-xmark" style="font-size:11px;"></i>
+                  </button>
+                </div>
+              </div>
+            </div>
+
             <!-- Kanban de OPs -->
             <div id="producaoKanban" style="display:flex;gap:16px;align-items:flex-start;overflow-x:auto;padding:4px 0 16px 0;">
 

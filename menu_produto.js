@@ -71591,6 +71591,8 @@ window.verOperacao = function(osId) {
   const filtroCodigoBar    = document.getElementById('producaoFiltroCodigoBar');
   const filtroCodigoLabel  = document.getElementById('producaoFiltroCodigoLabel');
   const btnLimparFiltroCodigo = document.getElementById('producaoLimparFiltroCodigo');
+  const pesquisaInput      = document.getElementById('producaoPesquisaInput');
+  const btnLimparPesquisa  = document.getElementById('producaoPesquisaLimpar');
 
   const colPedidos    = document.getElementById('kanbanPedidos');
   const cntPedidos    = document.getElementById('kanbanPedidosCount');
@@ -71625,9 +71627,34 @@ window.verOperacao = function(osId) {
   let pedidosCarregados = [];
   let programacaoCarregada = [];
   let filtroCodigoProduto = null;
+  let filtroPesquisa = '';
+  let pesquisaDebounce = null;
 
   function normCodigo(c) {
     return String(c || '').trim().toUpperCase();
+  }
+
+  function normPesquisa(str) {
+    return String(str || '').trim().toLowerCase();
+  }
+
+  function opMatchesPesquisa(op) {
+    const termo = normPesquisa(filtroPesquisa);
+    if (!termo) return true;
+    const modelo = normPesquisa(op.produto?.identificacao);
+    const opNum = normPesquisa(op.identificacao);
+    return modelo.includes(termo) || opNum.includes(termo);
+  }
+
+  function pedidoItemMatchesPesquisa(it) {
+    const termo = normPesquisa(filtroPesquisa);
+    if (!termo) return true;
+    return normPesquisa(it.codigo).includes(termo);
+  }
+
+  function atualizarPesquisaBarUi() {
+    if (!btnLimparPesquisa) return;
+    btnLimparPesquisa.style.display = filtroPesquisa ? 'inline-flex' : 'none';
   }
 
   function buildProgramacaoMapByOp(registros) {
@@ -71795,6 +71822,7 @@ window.verOperacao = function(osId) {
     for (const op of base) {
       const prodCodigo = op.produto?.identificacao || String(op.id);
       if (codigoFiltro && normCodigo(prodCodigo) !== normCodigo(codigoFiltro)) continue;
+      if (!opMatchesPesquisa(op)) continue;
       if (!opStatusColuna(op, colKey)) continue;
 
       totalOps += 1;
@@ -71804,7 +71832,10 @@ window.verOperacao = function(osId) {
     }
 
     if (!Object.keys(grupos).length) {
-      colEl.innerHTML = `<div style="text-align:center;padding:24px 0;color:var(--inactive-color);font-size:12px;">${msgVazia}</div>`;
+      const msg = filtroPesquisa
+        ? `Nenhuma OP encontrada para "${escHtml(filtroPesquisa)}".`
+        : msgVazia;
+      colEl.innerHTML = `<div style="text-align:center;padding:24px 0;color:var(--inactive-color);font-size:12px;">${msg}</div>`;
     } else {
       colEl.innerHTML = Object.entries(grupos).map(([k, ops]) => renderGrupo(k, ops, colKey)).join('');
     }
@@ -71910,11 +71941,16 @@ window.verOperacao = function(osId) {
       if (codigoFiltro) {
         itens = itens.filter(it => normCodigo(it.codigo) === normCodigo(codigoFiltro));
       }
+      if (filtroPesquisa) {
+        itens = itens.filter(it => pedidoItemMatchesPesquisa(it));
+      }
       return { ...ped, itens };
     }).filter(ped => ped.itens.length > 0);
 
     if (!lista.length) {
-      const msg = codigoFiltro
+      const msg = filtroPesquisa
+        ? `Nenhum item encontrado para "${decodeHtmlEntities(filtroPesquisa)}".`
+        : codigoFiltro
         ? `Nenhum pedido com saldo para o produto ${decodeHtmlEntities(codigoFiltro)}.`
         : 'Nenhum pedido aprovado.';
       colPedidos.innerHTML = `<div style="text-align:center;padding:24px 0;color:var(--inactive-color);font-size:12px;">${msg}</div>`;
@@ -72172,6 +72208,20 @@ window.verOperacao = function(osId) {
   if (recarrBtn) {
     recarrBtn.addEventListener('click', () => carregarOrdens());
   }
+
+  pesquisaInput?.addEventListener('input', () => {
+    filtroPesquisa = pesquisaInput.value;
+    atualizarPesquisaBarUi();
+    clearTimeout(pesquisaDebounce);
+    pesquisaDebounce = setTimeout(() => renderKanban(ordensCarregadas), 200);
+  });
+
+  btnLimparPesquisa?.addEventListener('click', () => {
+    filtroPesquisa = '';
+    if (pesquisaInput) pesquisaInput.value = '';
+    atualizarPesquisaBarUi();
+    renderKanban(ordensCarregadas);
+  });
 
   window._fmtDataProducao = fmtData;
   async function recarregarProgramacaoERender(colKeys) {
