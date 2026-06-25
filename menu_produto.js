@@ -22948,6 +22948,7 @@ function escapeHtml(str) {
     '\'': '&#39;'
   }[c]));
 }
+if (typeof window.escapeHtml !== 'function') window.escapeHtml = escapeHtml;
 
 function getSelectedOrigemLocal() {
   const sel = document.getElementById('transferOrigem');
@@ -30772,17 +30773,19 @@ async function openComprasFormTab() {
 
 // ===================== CARRINHO DE COMPRAS =====================
 
-// Helper para escape HTML
-if (typeof escapeHtml === 'undefined') {
-  window.escapeHtml = function(str) {
-    return String(str ?? '').replace(/[&<>"']/g, c => ({
-      '&': '&amp;',
-      '<': '&lt;',
-      '>': '&gt;',
-      '"': '&quot;',
-      '\'': '&#39;'
-    }[c]));
-  };
+// Helper para escape HTML (módulo ES: função local não vira window.escapeHtml automaticamente)
+if (typeof window.escapeHtml !== 'function') {
+  window.escapeHtml = typeof escapeHtml === 'function'
+    ? escapeHtml
+    : function(str) {
+        return String(str ?? '').replace(/[&<>"']/g, c => ({
+          '&': '&amp;',
+          '<': '&lt;',
+          '>': '&gt;',
+          '"': '&quot;',
+          '\'': '&#39;'
+        }[c]));
+      };
 }
 
 if (typeof linkifyText === 'undefined') {
