@@ -257,6 +257,7 @@ app.use('/api/ri', require('./routes/ri'));
 app.use('/api/pir', require('./routes/pir'));
 app.use('/api/qualidade', require('./routes/qualidadeFotos'));
 app.use('/api/qualidade', require('./routes/listaMestra'));
+app.use('/api/qualidade/ri-check', require('./routes/qualidadeRiCheck'));
 app.use('/api/registros', require('./routes/registros'));
 app.use('/api/sac', require('./routes/sacEnvios'));
 app.use('/api/ai', require('./routes/ai_assistant'));
@@ -11255,17 +11256,18 @@ async function _insertEtqRecImpressoRecebimento(db, { origemId, qtd, unidade, da
 function _gerarZplParaImpressao({ codProd, descProd, idImpresso, loteTxt, dataExibir }) {
   const qr = `${codProd}|${String(descProd || '').slice(0, 40)}|${loteTxt}|ID${idImpresso}`;
   const descLinha = String(descProd || '').slice(0, 80);
+  const descY = 150; // 132 + altura de uma letra (18) — evita sobrepor o QR
   return [
     '^XA',
     '^CI28',
     '^PW812',
-    '^LL165',
+    '^LL183',
     `^FO10,10^BQN,2,4^FDLA,${qr}^FS`,
     `^FO195,10^A0N,20,20^FDCod. Produto: ${codProd}^FS`,
     `^FO195,34^A0N,20,20^FDID: ${idImpresso}^FS`,
     `^FO195,58^A0N,20,20^FDLote: ${loteTxt}^FS`,
     `^FO195,82^A0N,20,20^FDEmissao: ${dataExibir}^FS`,
-    `^FO10,132^A0N,18,18^FB780,2,0,L,0^FD${descLinha}^FS`,
+    `^FO10,${descY}^A0N,18,18^FB780,2,0,L,0^FD${descLinha}^FS`,
     '^XZ',
   ].join('\n');
 }
@@ -13051,13 +13053,29 @@ app.post('/api/etiquetas/iapp-op/imprimir', express.json(), async (req, res) => 
       );
       zplBlocks.push(zpl);
 
-      await pool.query(
-        `UPDATE "IAPP_API".op_iapp_os
-            SET status_producao = 'Solicitado',
-                data_status_producao = NOW()
-          WHERE os_id = $1`,
+      const opIappRow = await pool.query(
+        `SELECT op_iapp_id FROM "IAPP_API".op_iapp_os WHERE os_id = $1 LIMIT 1`,
         [osId]
       );
+      const opIappId = Number(item.op_iapp_id) || Number(opIappRow.rows[0]?.op_iapp_id) || 0;
+      if (opIappId > 0) {
+        await pool.query(
+          `UPDATE "IAPP_API".op_iapp_os
+              SET status_producao = 'Solicitado',
+                  data_status_producao = NOW()
+            WHERE op_iapp_id = $1
+              AND COALESCE(TRIM(status_producao), '') NOT IN ('Iniciado', 'Produzindo', 'Parado')`,
+          [opIappId]
+        );
+      } else {
+        await pool.query(
+          `UPDATE "IAPP_API".op_iapp_os
+              SET status_producao = 'Solicitado',
+                  data_status_producao = NOW()
+            WHERE os_id = $1`,
+          [osId]
+        );
+      }
       osAtualizadas.push(osId);
     }
 

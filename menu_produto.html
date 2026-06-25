@@ -9951,14 +9951,6 @@
             <!-- Mensagem de erro -->
             <div id="producaoErro" style="display:none;padding:16px;background:#450a0a;border:1px solid #dc2626;border-radius:10px;color:#fca5a5;font-size:13px;margin-bottom:12px;"></div>
 
-            <!-- Filtro por operação de serviço -->
-            <div id="producaoFiltroBar" style="display:none;margin-bottom:12px;">
-              <select id="producaoFiltroOperacao"
-                style="width:100%;max-width:420px;padding:7px 12px;background:#1e2233;color:#e2e8f0;border:1px solid rgba(99,102,241,.4);border-radius:8px;font-size:13px;cursor:pointer;">
-                <option value="">Todas as operações de serviço</option>
-              </select>
-            </div>
-
             <!-- Filtro por código de produto (clique no item em Pedidos) -->
             <div id="producaoFiltroCodigoBar" style="display:none;align-items:center;gap:10px;margin-bottom:12px;padding:8px 12px;background:rgba(245,158,11,.08);border:1px solid rgba(245,158,11,.35);border-radius:8px;font-size:12px;color:#fde68a;">
               <i class="fa-solid fa-filter"></i>
@@ -10000,11 +9992,11 @@
               <div style="flex:0 0 340px;min-width:300px;">
                 <div style="display:flex;align-items:center;gap:8px;padding:10px 14px;background:#172554;border-radius:10px 10px 0 0;border:1px solid #1d4ed8;border-bottom:none;">
                   <span style="width:10px;height:10px;border-radius:50%;background:#3b82f6;display:inline-block;flex-shrink:0;"></span>
-                  <span style="font-size:12px;font-weight:700;color:#93c5fd;text-transform:uppercase;letter-spacing:.5px;">Solicitado</span>
+                  <span style="font-size:12px;font-weight:700;color:#93c5fd;text-transform:uppercase;letter-spacing:.5px;">Montagem hermetica</span>
                   <span id="kanbanSolicitadoCount" style="margin-left:auto;font-size:11px;background:#1e3a8a;color:#bfdbfe;padding:2px 9px;border-radius:10px;font-weight:600;">0</span>
                 </div>
                 <div id="kanbanSolicitado" style="min-height:220px;background:rgba(59,130,246,.04);border:1px solid #1d4ed8;border-top:none;border-radius:0 0 10px 10px;padding:10px;display:flex;flex-direction:column;gap:10px;">
-                  <div style="text-align:center;padding:24px 0;color:var(--inactive-color);font-size:12px;">Nenhuma OS solicitada.</div>
+                  <div style="text-align:center;padding:24px 0;color:var(--inactive-color);font-size:12px;">Nenhuma OP em Montagem hermetica.</div>
                 </div>
               </div>
 
@@ -10012,24 +10004,22 @@
               <div style="flex:0 0 340px;min-width:300px;">
                 <div style="display:flex;align-items:center;gap:8px;padding:10px 14px;background:#052e16;border-radius:10px 10px 0 0;border:1px solid #166534;border-bottom:none;">
                   <span style="width:10px;height:10px;border-radius:50%;background:#22c55e;display:inline-block;flex-shrink:0;"></span>
-                  <span style="font-size:12px;font-weight:700;color:#86efac;text-transform:uppercase;letter-spacing:.5px;">Produzindo</span>
+                  <span style="font-size:12px;font-weight:700;color:#86efac;text-transform:uppercase;letter-spacing:.5px;">Montagem eletrica</span>
                   <span id="kanbanProduzindoCount" style="margin-left:auto;font-size:11px;background:#14532d;color:#bbf7d0;padding:2px 9px;border-radius:10px;font-weight:600;">0</span>
                 </div>
                 <div id="kanbanProduzindo" style="min-height:220px;background:rgba(34,197,94,.04);border:1px solid #166534;border-top:none;border-radius:0 0 10px 10px;padding:10px;display:flex;flex-direction:column;gap:10px;">
-                  <div style="text-align:center;padding:24px 0;color:var(--inactive-color);font-size:12px;">Nenhuma OP em produção.</div>
+                  <div style="text-align:center;padding:24px 0;color:var(--inactive-color);font-size:12px;">Nenhuma OP em Montagem eletrica.</div>
                 </div>
               </div>
 
-              <!-- Coluna: Aguardando Retirada -->
+              <!-- Coluna: No estoque -->
               <div style="flex:0 0 340px;min-width:300px;">
                 <div style="display:flex;align-items:center;gap:8px;padding:10px 14px;background:#431407;border-radius:10px 10px 0 0;border:1px solid #9a3412;border-bottom:none;">
                   <span style="width:10px;height:10px;border-radius:50%;background:#f97316;display:inline-block;flex-shrink:0;"></span>
-                  <span style="font-size:12px;font-weight:700;color:#fdba74;text-transform:uppercase;letter-spacing:.5px;">Aguardando Retirada</span>
+                  <span style="font-size:12px;font-weight:700;color:#fdba74;text-transform:uppercase;letter-spacing:.5px;">Teste</span>
                   <span id="kanbanAguardandoCount" style="margin-left:auto;font-size:11px;background:#7c2d12;color:#fed7aa;padding:2px 9px;border-radius:10px;font-weight:600;">0</span>
                 </div>
-                <div id="kanbanAguardando" style="min-height:220px;background:rgba(249,115,22,.04);border:1px solid #9a3412;border-top:none;border-radius:0 0 10px 10px;padding:10px;display:flex;flex-direction:column;gap:10px;">
-                  <div style="text-align:center;padding:24px 0;color:var(--inactive-color);font-size:12px;">Nenhuma OP aguardando retirada.</div>
-                </div>
+                <div id="kanbanAguardando" style="min-height:220px;background:rgba(249,115,22,.04);border:1px solid #9a3412;border-top:none;border-radius:0 0 10px 10px;padding:10px;display:flex;flex-direction:column;gap:10px;"></div>
               </div>
 
             </div>
@@ -10211,7 +10201,7 @@
 </div>
 
 <!-- Modal de configuração de impressoras (por usuário) -->
-<div id="etqConfigImpressorasModal" style="display:none;position:fixed;inset:0;z-index:2200;background:rgba(0,0,0,.75);backdrop-filter:blur(5px);align-items:center;justify-content:center;">
+<div id="etqConfigImpressorasModal" style="display:none;position:fixed;inset:0;z-index:10050;background:rgba(0,0,0,.75);backdrop-filter:blur(5px);align-items:center;justify-content:center;">
   <div class="etq-cfg-impr-box">
     <div class="etq-cfg-impr-header">
       <div style="display:flex;align-items:center;gap:10px;">

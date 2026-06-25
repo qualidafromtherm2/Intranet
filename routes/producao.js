@@ -141,6 +141,15 @@ async function garantirSchemaKanbanProgramacao() {
     CREATE INDEX IF NOT EXISTS idx_kanban_prog_ped_cod
       ON "Producao"."Kanban_programacao" (codigo_pedido, codigo);
   `);
+  await dbQuery(`ALTER TABLE "Producao"."Kanban_programacao" ADD COLUMN IF NOT EXISTS numero_op TEXT`);
+  await dbQuery(`ALTER TABLE "Producao"."Kanban_programacao" ADD COLUMN IF NOT EXISTS op_iapp_id BIGINT`);
+  await dbQuery(`ALTER TABLE "Producao"."Kanban_programacao" ADD COLUMN IF NOT EXISTS status TEXT`);
+  await dbQuery(`
+    CREATE INDEX IF NOT EXISTS idx_kanban_prog_op_iapp
+      ON "Producao"."Kanban_programacao" (op_iapp_id);
+    CREATE INDEX IF NOT EXISTS idx_kanban_prog_numero_op
+      ON "Producao"."Kanban_programacao" (numero_op);
+  `);
   kanbanProgSchemaOk = true;
 }
 
@@ -1072,6 +1081,7 @@ router.get('/pedidos-kanban', async (req, res) => {
           p.codigo_pedido,
           p.numero_pedido,
           p.obs_venda,
+          p.updated_at,
           i.seq,
           i.codigo_produto,
           i.codigo,
@@ -1091,6 +1101,7 @@ router.get('/pedidos-kanban', async (req, res) => {
         codigo_pedido,
         numero_pedido,
         obs_venda,
+        updated_at::text AS updated_at,
         COALESCE(
           json_agg(
             json_build_object(
@@ -1105,7 +1116,7 @@ router.get('/pedidos-kanban', async (req, res) => {
           '[]'::json
         ) AS itens
       FROM itens_saldo
-      GROUP BY codigo_pedido, numero_pedido, obs_venda
+      GROUP BY codigo_pedido, numero_pedido, obs_venda, updated_at
       HAVING COUNT(*) FILTER (WHERE saldo > 0) > 0
       ORDER BY numero_pedido ASC NULLS LAST, codigo_pedido ASC
     `);
@@ -1120,7 +1131,7 @@ router.get('/pedidos-kanban', async (req, res) => {
 /* ---------------------------------------------------------------
  * POST /api/producao/kanban-programacao
  * Registra arraste Pedidos → Programado (saldo do pedido >= qtde programada).
- * Body: { codigo_pedido, codigo, quantidade_programado }
+ * Body: { codigo_pedido, codigo, quantidade_programado, numero_op, op_iapp_id }
  * --------------------------------------------------------------- */
 router.post('/kanban-programacao', express.json(), async (req, res) => {
   try {
@@ -1129,12 +1140,20 @@ router.post('/kanban-programacao', express.json(), async (req, res) => {
     const codigoPedido = Number(req.body?.codigo_pedido);
     const codigo = String(req.body?.codigo || '').trim();
     const qtdProgramado = Number(req.body?.quantidade_programado);
+    const numeroOp = String(req.body?.numero_op || '').trim();
+    const opIappId = Number(req.body?.op_iapp_id);
 
     if (!Number.isFinite(codigoPedido) || codigoPedido <= 0) {
       return res.status(400).json({ success: false, error: 'codigo_pedido inválido.' });
     }
     if (!codigo) {
       return res.status(400).json({ success: false, error: 'codigo do produto é obrigatório.' });
+    }
+    if (!numeroOp) {
+      return res.status(400).json({ success: false, error: 'numero_op é obrigatório.' });
+    }
+    if (!Number.isFinite(opIappId) || opIappId <= 0) {
+      return res.status(400).json({ success: false, error: 'op_iapp_id inválido.' });
     }
     if (!Number.isFinite(qtdProgramado) || qtdProgramado <= 0) {
       return res.status(400).json({ success: false, error: 'quantidade_programado inválida.' });
@@ -1187,16 +1206,19 @@ router.post('/kanban-programacao', express.json(), async (req, res) => {
 
     const { rows: inserted } = await dbQuery(`
       INSERT INTO "Producao"."Kanban_programacao" (
-        codigo_produto, codigo, descricao, codigo_pedido, numero_pedido, quantidade
-      ) VALUES ($1, $2, $3, $4, $5, $6)
-      RETURNING id, codigo_produto, codigo, descricao, codigo_pedido, numero_pedido, quantidade::text, created_at
+        codigo_produto, codigo, descricao, codigo_pedido, numero_pedido, quantidade, numero_op, op_iapp_id
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+      RETURNING id, codigo_produto, codigo, descricao, codigo_pedido, numero_pedido, quantidade::text,
+                numero_op, op_iapp_id, created_at
     `, [
       item.codigo_produto || null,
       item.codigo,
       item.descricao || null,
       item.codigo_pedido,
       item.numero_pedido || null,
-      qtdProgramado
+      qtdProgramado,
+      numeroOp,
+      opIappId
     ]);
 
     const saldoRestante = saldo - qtdProgramado;
@@ -1208,6 +1230,38 @@ router.post('/kanban-programacao', express.json(), async (req, res) => {
     });
   } catch (err) {
     console.error('[producao] Erro ao registrar kanban programacao:', err.message);
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/* ---------------------------------------------------------------
+ * GET /api/producao/kanban-programacao
+ * Lista vínculos pedido → OP (destaque no kanban).
+ * --------------------------------------------------------------- */
+router.get('/kanban-programacao', async (req, res) => {
+  try {
+    await garantirSchemaKanbanProgramacao();
+
+    const { rows } = await dbQuery(`
+      SELECT
+        id,
+        codigo_produto,
+        codigo,
+        descricao,
+        codigo_pedido,
+        numero_pedido,
+        quantidade::text AS quantidade,
+        numero_op,
+        op_iapp_id,
+        status,
+        created_at
+      FROM "Producao"."Kanban_programacao"
+      ORDER BY created_at DESC, id DESC
+    `);
+
+    return res.json({ success: true, total: rows.length, registros: rows });
+  } catch (err) {
+    console.error('[producao] Erro ao listar kanban programacao:', err.message);
     return res.status(500).json({ success: false, error: err.message });
   }
 });

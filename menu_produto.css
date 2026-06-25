@@ -5481,6 +5481,72 @@ ul#comprasList li ,
   color:#facc15;
 }
 
+/* Registrar produção — cards de OP no kanban */
+.kanban-op-card {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin-top: 8px;
+  cursor: pointer;
+  transition: border-color 0.15s, box-shadow 0.15s, background 0.15s;
+}
+
+.kanban-op-card.op-kanban-vinculado {
+  border-color: rgba(16, 185, 129, 0.7) !important;
+  background: rgba(16, 185, 129, 0.16) !important;
+  box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.28);
+}
+
+.kanban-op-card.op-kanban-vinculado .kanban-op-pedido-numero {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #34d399;
+  background: rgba(16, 185, 129, 0.22);
+  border: 1px solid rgba(16, 185, 129, 0.45);
+  border-radius: 6px;
+  padding: 2px 8px;
+  margin-left: 6px;
+}
+
+.kanban-op-card.prog-kanban-op-drop.op-drop-hover {
+  border-color: rgba(99, 102, 241, 0.8) !important;
+  box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.25);
+}
+
+.kanban-prog-pedido-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  font-weight: 700;
+  color: #6ee7b7;
+  background: rgba(16, 185, 129, 0.18);
+  border: 1px solid rgba(16, 185, 129, 0.35);
+  border-radius: 999px;
+  padding: 2px 8px;
+}
+
+.pedido-analise-btn {
+  flex-shrink: 0;
+  border: 1px solid rgba(99, 102, 241, 0.45);
+  background: rgba(99, 102, 241, 0.14);
+  color: #a5b4fc;
+  border-radius: 6px;
+  padding: 4px 8px;
+  font-size: 10px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.pedido-analise-btn:hover {
+  background: rgba(99, 102, 241, 0.28);
+}
+
 .kanban-modal footer{
   padding:20px 24px;
   border-top:1px solid rgba(148,163,184,0.2);

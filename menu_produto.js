@@ -67701,11 +67701,12 @@ document.addEventListener('DOMContentLoaded', () => {
     return val;
   }
 
+  const MOVIM_IMPRESSORA_SELECT_IDS = ['movimListboxImpressora', 'movimImpListboxImpressora', 'producaoImpListboxImpressora'];
+  const MOVIM_IMPRESSORA_REFRESH_BTN_IDS = ['movimBtnRefreshImpressoras', 'movimImpBtnRefreshImpressoras', 'producaoImpBtnRefreshImpressoras'];
+  const MOVIM_IMPRESSORA_CONFIG_BTN_IDS = ['movimBtnConfigImpressoras', 'movimImpBtnConfigImpressoras', 'producaoImpBtnConfigImpressoras'];
+
   async function movimAtualizarListboxImpressora() {
-    const selects = [
-      document.getElementById('movimListboxImpressora'),
-      document.getElementById('movimImpListboxImpressora')
-    ].filter(Boolean);
+    const selects = MOVIM_IMPRESSORA_SELECT_IDS.map(id => document.getElementById(id)).filter(Boolean);
     if (!selects.length) return;
 
     let cfg = {};
@@ -67754,7 +67755,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function movimSyncImpressoraSelects(val) {
     _movimPrinterPrefTemp = val || null;
-    for (const id of ['movimListboxImpressora', 'movimImpListboxImpressora']) {
+    for (const id of MOVIM_IMPRESSORA_SELECT_IDS) {
       const sel = document.getElementById(id);
       if (sel && sel.value !== val) sel.value = val || '';
     }
@@ -67772,8 +67773,7 @@ document.addEventListener('DOMContentLoaded', () => {
   function movimObterPrefsImpressora() {
     try {
       const selVal = _movimPrinterPrefTemp
-        || document.getElementById('movimListboxImpressora')?.value
-        || document.getElementById('movimImpListboxImpressora')?.value
+        || MOVIM_IMPRESSORA_SELECT_IDS.map(id => document.getElementById(id)?.value).find(v => v) || null
         || null;
       const cfg = JSON.parse(localStorage.getItem(movimEtqImprKey()) || '{}');
       const escolha = selVal || cfg.padrao || null;
@@ -68847,18 +68847,22 @@ document.addEventListener('DOMContentLoaded', () => {
   if (impConfirmar) impConfirmar.addEventListener('click', confirmarImpressaoMovim);
   if (impModal) impModal.addEventListener('click', e => { if (e.target === impModal) fecharImpressaoMovim(); });
 
-  for (const id of ['movimListboxImpressora', 'movimImpListboxImpressora']) {
+  for (const id of MOVIM_IMPRESSORA_SELECT_IDS) {
     document.getElementById(id)?.addEventListener('change', function () {
       movimSyncImpressoraSelects(this.value || null);
     });
   }
-  for (const id of ['movimBtnRefreshImpressoras', 'movimImpBtnRefreshImpressoras']) {
+  for (const id of MOVIM_IMPRESSORA_REFRESH_BTN_IDS) {
     document.getElementById(id)?.addEventListener('click', () => movimAtualizarListboxImpressora());
   }
-  for (const id of ['movimBtnConfigImpressoras', 'movimImpBtnConfigImpressoras']) {
+  for (const id of MOVIM_IMPRESSORA_CONFIG_BTN_IDS) {
     document.getElementById(id)?.addEventListener('click', movimAbrirConfigImpressoras);
   }
   window.addEventListener('etq-impr-cfg-saved', () => movimAtualizarListboxImpressora());
+  window._movimAtualizarListboxImpressora = movimAtualizarListboxImpressora;
+  window._movimSyncImpressoraSelects = movimSyncImpressoraSelects;
+  window._movimAbrirConfigImpressoras = movimAbrirConfigImpressoras;
+  window._movimObterPrefsImpressora = movimObterPrefsImpressora;
 
   // Abre o modal
   window.abrirModalMovimentacao = async function(codigo, descricao, codigoProduto) {
@@ -71584,8 +71588,6 @@ window.verOperacao = function(osId) {
   const erroDiv       = document.getElementById('producaoErro');
   const rodape        = document.getElementById('producaoRodape');
   const recarrBtn     = document.getElementById('producaoRecarregarBtn');
-  const filtroBar     = document.getElementById('producaoFiltroBar');
-  const filtroSelect  = document.getElementById('producaoFiltroOperacao');
   const filtroCodigoBar    = document.getElementById('producaoFiltroCodigoBar');
   const filtroCodigoLabel  = document.getElementById('producaoFiltroCodigoLabel');
   const btnLimparFiltroCodigo = document.getElementById('producaoLimparFiltroCodigo');
@@ -71601,13 +71603,82 @@ window.verOperacao = function(osId) {
   const colAguardando = document.getElementById('kanbanAguardando');
   const cntAguardando = document.getElementById('kanbanAguardandoCount');
 
+  // Nomes exibidos no kanban Registrar produção — ao criar coluna nova, incluir aqui
+  const PRODUCAO_KANBAN_COLUNAS = [
+    { key: 'pedidos', nome: 'Pedidos' },
+    { key: 'programado', nome: 'Programado' },
+    { key: 'solicitado', nome: 'Montagem hermetica' },
+    { key: 'produzindo', nome: 'Montagem eletrica' },
+    { key: 'teste', nome: 'Teste' },
+  ];
+
+  function producaoNomeKanbanPorKey(colKey) {
+    return PRODUCAO_KANBAN_COLUNAS.find(c => c.key === colKey)?.nome || '';
+  }
+
+  function producaoListaNomesKanban() {
+    return PRODUCAO_KANBAN_COLUNAS.map(c => c.nome);
+  }
+
   // Cache das ordens carregadas para re-renderizar sem nova requisição
   let ordensCarregadas = [];
   let pedidosCarregados = [];
+  let programacaoCarregada = [];
   let filtroCodigoProduto = null;
 
   function normCodigo(c) {
     return String(c || '').trim().toUpperCase();
+  }
+
+  function buildProgramacaoMapByOp(registros) {
+    const map = {};
+    for (const reg of (registros || [])) {
+      const opId = Number(reg.op_iapp_id);
+      if (Number.isFinite(opId) && opId > 0) {
+        const idKey = `id:${opId}`;
+        if (!map[idKey]) map[idKey] = [];
+        map[idKey].push(reg);
+      }
+      const opNum = String(reg.numero_op || '').trim();
+      if (opNum) {
+        const opKey = `op:${opNum}`;
+        if (!map[opKey]) map[opKey] = [];
+        if (!map[opKey].some(r => r.id === reg.id)) map[opKey].push(reg);
+      }
+    }
+    return map;
+  }
+
+  function getProgRegsForOp(op, progMapByOp) {
+    const byId = progMapByOp[`id:${Number(op.id)}`] || [];
+    const byNum = progMapByOp[`op:${String(op.identificacao || '').trim()}`] || [];
+    const merged = [...byId];
+    for (const r of byNum) {
+      if (!merged.some(m => m.id === r.id)) merged.push(r);
+    }
+    return merged;
+  }
+
+  async function recarregarProgramacao() {
+    try {
+      const resp = await fetch('/api/producao/kanban-programacao');
+      const data = await resp.json();
+      if (resp.ok && data.success) {
+        programacaoCarregada = data.registros || [];
+        return true;
+      }
+    } catch (_) { /* silencioso */ }
+    return false;
+  }
+
+  function setKanbanProcessando(ativo, msg) {
+    if (!spinner) return;
+    if (ativo) {
+      spinner.style.display = 'block';
+      if (spinnerMsg) spinnerMsg.textContent = msg || 'Processando...';
+    } else {
+      spinner.style.display = 'none';
+    }
   }
 
   async function recarregarPedidos() {
@@ -71635,6 +71706,13 @@ window.verOperacao = function(osId) {
     const m = str.match(/^(\d{4})-(\d{2})-(\d{2})/);
     if (m) return `${m[3]}/${m[2]}/${m[1]}`;
     return str;
+  }
+
+  function fmtDataHora(str) {
+    if (!str) return '—';
+    const m = String(str).match(/^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})/);
+    if (m) return `${m[3]}/${m[2]}/${m[1]} ${m[4]}:${m[5]}`;
+    return fmtData(str);
   }
 
   function fmtMoeda(v) {
@@ -71673,34 +71751,56 @@ window.verOperacao = function(osId) {
     return `<span style="flex-shrink:0;display:inline-block;padding:1px 6px;border-radius:4px;font-size:10px;font-weight:700;background:${c.bg};color:${c.txt};">${s}</span>`;
   }
 
-  function osStatusColuna(os, colKey) {
-    const sp = String(os?.status_producao || '').trim();
-    if (colKey === 'programado') return !sp;
-    if (colKey === 'solicitado') return sp === 'Solicitado';
-    if (colKey === 'produzindo') return sp === 'Iniciado' || sp === 'Produzindo';
-    if (colKey === 'aguardando') return sp === 'Parado';
-    return false;
+  function opKanbanProgStatus(op) {
+    const progMap = buildProgramacaoMapByOp(programacaoCarregada);
+    const regs = getProgRegsForOp(op, progMap);
+    const statuses = regs.map(r => String(r.status || '').trim()).filter(Boolean);
+    if (statuses.includes('Teste')) return 'Teste';
+    if (statuses.includes('Montagem eletrica')) return 'Montagem eletrica';
+    return null;
   }
 
-  function renderKanbanCol(colEl, cntEl, ordens, colKey, operacaoFiltro, msgVazia, onlyAProduzir, codigoFiltro) {
+  function opColunaAtual(op) {
+    const kp = opKanbanProgStatus(op);
+    if (kp === 'Teste') return 'teste';
+    if (kp === 'Montagem eletrica') return 'produzindo';
+
+    const oss = op.ordens_servico || [];
+    if (!oss.length) return 'programado';
+    let temProduzindo = false;
+    let temSolicitado = false;
+    let temSemStatus = false;
+    for (const os of oss) {
+      const sp = String(os.status_producao || '').trim();
+      if (!sp) temSemStatus = true;
+      else if (sp === 'Solicitado') temSolicitado = true;
+      else if (sp === 'Iniciado' || sp === 'Produzindo') temProduzindo = true;
+    }
+    if (temProduzindo) return 'produzindo';
+    if (temSolicitado) return 'solicitado';
+    if (temSemStatus) return 'programado';
+    return 'programado';
+  }
+
+  function opStatusColuna(op, colKey) {
+    return opColunaAtual(op) === colKey;
+  }
+
+  function renderKanbanCol(colEl, cntEl, ordens, colKey, msgVazia, onlyAProduzir, codigoFiltro) {
     if (!colEl) return;
     const base = onlyAProduzir ? ordens.filter(op => op.status === 'A PRODUZIR') : ordens;
     const grupos = {};
-    let totalOs = 0;
+    let totalOps = 0;
 
     for (const op of base) {
       const prodCodigo = op.produto?.identificacao || String(op.id);
       if (codigoFiltro && normCodigo(prodCodigo) !== normCodigo(codigoFiltro)) continue;
+      if (!opStatusColuna(op, colKey)) continue;
 
-      const ossCol = (op.ordens_servico || []).filter(os => {
-        if (operacaoFiltro && os.operacao !== operacaoFiltro) return false;
-        return osStatusColuna(os, colKey);
-      });
-      if (!ossCol.length) continue;
-      totalOs += ossCol.length;
+      totalOps += 1;
       const key = prodCodigo;
       if (!grupos[key]) grupos[key] = [];
-      grupos[key].push({ ...op, ordens_servico: ossCol });
+      grupos[key].push(op);
     }
 
     if (!Object.keys(grupos).length) {
@@ -71708,47 +71808,41 @@ window.verOperacao = function(osId) {
     } else {
       colEl.innerHTML = Object.entries(grupos).map(([k, ops]) => renderGrupo(k, ops, colKey)).join('');
     }
-    if (cntEl) cntEl.textContent = totalOs;
+    if (cntEl) cntEl.textContent = totalOps;
   }
 
   function renderGrupo(prodId, ops, colKey) {
     const prod = ops[0].produto || {};
     const qtdeTotal = ops.reduce((s, op) => s + (Number(op.qtde) || 0), 0);
+    const progMapByOp = buildProgramacaoMapByOp(programacaoCarregada);
+    const podeReceberPedido = ['programado', 'solicitado', 'produzindo'].includes(colKey);
 
     const opsHtml = ops.map(op => {
-      const _filtroOp = filtroSelect ? filtroSelect.value : '';
-      const _osVis = _filtroOp
-        ? (op.ordens_servico || []).filter(os => os.operacao === _filtroOp)
-        : (op.ordens_servico || []);
-      const osHtml = _osVis.map(os =>
-        `<div onclick="event.stopPropagation();window.abrirModalOS(${os.id},'${(os.identificacao||'').replace(/'/g,"\\'")}',${op.id},'${(os.operacao||'').replace(/'/g,"\\'")}','${(os.status||'').replace(/'/g,"\\'")}','${(op.identificacao||'').replace(/'/g,"\\'")}','${(os.status_producao||'').replace(/'/g,"\\'")}','${(os.operador||'').replace(/'/g,"\\'")}','${(os.data_status_producao||'').replace(/'/g,"\\'")}')"
-          style="background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.06);border-radius:5px;padding:5px 8px;display:flex;flex-direction:column;gap:3px;cursor:pointer;transition:background .15s;"
-          onmouseenter="this.style.background='rgba(99,102,241,.12)'" onmouseleave="this.style.background='rgba(255,255,255,.03)'">
-          <div style="display:flex;align-items:center;gap:6px;">
-            <span style="font-size:10px;color:#94a3b8;min-width:70px;font-weight:600;flex-shrink:0;">${os.identificacao || ('#' + os.id)}</span>
-            <span style="font-size:10px;color:#cbd5e1;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${(os.operacao || '').replace(/"/g,'&quot;')}">${os.operacao || '—'}</span>
-            ${badgeProducao(os.status_producao)}
-            ${badgeOS(os.status)}
-          </div>
-          <div style="display:flex;flex-wrap:wrap;gap:10px;padding-left:2px;">
-            ${os.data_abertura     ? `<span style="font-size:10px;color:#64748b;">Abertura: <b style="color:#94a3b8;">${fmtData(os.data_abertura)}</b></span>` : ''}
-            ${os.data_inicio       ? `<span style="font-size:10px;color:#64748b;">Início: <b style="color:#94a3b8;">${fmtData(os.data_inicio)}</b></span>` : ''}
-            ${os.data_final        ? `<span style="font-size:10px;color:#64748b;">Final: <b style="color:#94a3b8;">${fmtData(os.data_final)}</b></span>` : ''}
-            ${os.data_encerramento ? `<span style="font-size:10px;color:#64748b;">Encerramento: <b style="color:#94a3b8;">${fmtData(os.data_encerramento)}</b></span>` : ''}
-            ${os.operador          ? `<span style="font-size:10px;color:#64748b;">Operador: <b style="color:#94a3b8;">${os.operador}</b></span>` : ''}
-          </div>
-        </div>`
-      ).join('');
+      const opRegs = getProgRegsForOp(op, progMapByOp);
+      const isOpVinculado = opRegs.length > 0;
+      const pedidosOp = [...new Set(opRegs.map(r => String(r.numero_pedido || '').trim()).filter(Boolean))];
+      const pedidosOpHtml = pedidosOp.length
+        ? pedidosOp.map(np =>
+            `<span class="kanban-op-pedido-numero"><i class="fa-solid fa-link" style="font-size:9px;"></i>Ped. ${escHtml(np)}</span>`
+          ).join('')
+        : '';
+      const dropClass = podeReceberPedido ? ' prog-kanban-op-drop' : '';
+      const vincClass = isOpVinculado ? ' op-kanban-vinculado' : '';
+      const prodCodigoAttr = escHtml(prod.identificacao || prodId);
+      const opIdentAttr = escHtml(op.identificacao || '');
+      const dropTitle = podeReceberPedido ? 'Solte um item de Pedidos aqui (mesmo código de produto)' : '';
 
-      const detalhesId = `op-det-${op.id}`;
-
-      return `<div data-op-id="${op.id}" style="background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);border-radius:8px;padding:10px 12px;margin-top:8px;cursor:pointer;">
-        <!-- Cabeçalho sempre visível -->
+      return `<div data-op-id="${op.id}" class="kanban-op-card${dropClass}${vincClass}"
+        data-op-ident="${opIdentAttr}"
+        data-op-qtde="${Number(op.qtde) || 0}"
+        data-prod-codigo="${prodCodigoAttr}"
+        title="${dropTitle}">
         <div style="display:flex;align-items:flex-start;gap:8px;">
           <div style="flex:1;min-width:0;">
-            <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;">
+            <div style="display:flex;align-items:center;flex-wrap:wrap;gap:6px;margin-bottom:4px;">
               <span style="font-size:10px;color:#475569;font-weight:600;">#${op.id}</span>
               <span style="font-size:13px;font-weight:700;color:#e2e8f0;">OP ${op.identificacao || '—'}</span>
+              ${pedidosOpHtml}
               <span style="font-size:11px;color:#94a3b8;margin-left:auto;">Qtde: <b style="color:#f1f5f9;">${fmtQtde(op.qtde)}</b></span>
             </div>
             <div style="display:flex;flex-wrap:wrap;gap:8px;">
@@ -71758,34 +71852,15 @@ window.verOperacao = function(osId) {
               ${op.data_previsao_faturamento  ? `<span style="font-size:10px;color:#64748b;">Prev. fat.: <b style="color:#a5f3fc;">${fmtData(op.data_previsao_faturamento)}</b></span>` : ''}
               ${op.data_previsao_entrega     ? `<span style="font-size:10px;color:#64748b;">Prev. entrega: <b style="color:#a5f3fc;">${fmtData(op.data_previsao_entrega)}</b></span>` : ''}
             </div>
+            ${op.obs ? `<div style="font-size:11px;color:#94a3b8;margin-top:6px;">Obs: <span style="color:#fef3c7;">${op.obs}</span></div>` : ''}
           </div>
-          <button type="button" class="op-expand-btn" onclick="event.stopPropagation();(function(btn){var d=document.getElementById('${detalhesId}');var aberto=d.style.display!=='none';d.style.display=aberto?'none':'flex';btn.innerHTML=aberto?'<i class=\\'fa-solid fa-chevron-down\\'></i>':'<i class=\\'fa-solid fa-chevron-up\\'></i>';})(this)"
-            style="flex-shrink:0;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.12);border-radius:6px;color:#94a3b8;width:26px;height:26px;display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:11px;margin-top:2px;">
-            <i class="fa-solid fa-chevron-down"></i>
-          </button>
-        </div>
-        <!-- Detalhes recolhidos por padrão -->
-        <div id="${detalhesId}" style="display:none;flex-direction:column;gap:4px;margin-top:10px;padding-top:10px;border-top:1px solid rgba(255,255,255,.06);">
-          ${op.data_encerramento ? `<div style="font-size:10px;color:#64748b;">Encerramento: <b style="color:#94a3b8;">${fmtData(op.data_encerramento)}</b></div>` : ''}
-          ${op.ficha_tecnica     ? `<div style="font-size:11px;color:#94a3b8;">Ficha técnica: <span style="color:#c7d2fe;">${op.ficha_tecnica}</span></div>` : ''}
-          ${op.obs               ? `<div style="font-size:11px;color:#94a3b8;">Obs: <span style="color:#fef3c7;">${op.obs}</span></div>` : ''}
-          ${osHtml ? `<div style="display:flex;flex-direction:column;gap:4px;margin-top:4px;">${osHtml}</div>` : '<div style="font-size:11px;color:#475569;">Sem ordens de serviço.</div>'}
         </div>
       </div>`;
     }).join('');
 
     const descEscapada = (prod.descricao || '').replace(/"/g, '&quot;');
-    const isProgDrop = colKey === 'programado';
-    const prodCodigoAttr = escHtml(prod.identificacao || prodId);
-    const grupoExtraClass = isProgDrop ? ' prog-kanban-grupo' : '';
-    const grupoExtraAttrs = isProgDrop
-      ? ` data-prod-codigo="${prodCodigoAttr}" data-prog-qtde="${qtdeTotal}"`
-      : '';
-    const grupoDropHint = isProgDrop
-      ? '<div style="font-size:10px;color:#818cf8;margin-top:6px;">Solte aqui um item de Pedidos com o mesmo código.</div>'
-      : '';
 
-    return `<div class="kanban-prod-grupo${grupoExtraClass}"${grupoExtraAttrs} style="background:var(--content-bg,#1e2233);border:1px solid rgba(255,255,255,.1);border-radius:10px;padding:12px;${isProgDrop ? 'transition:border-color .15s,box-shadow .15s;' : ''}">
+    return `<div class="kanban-prod-grupo" data-col-key="${escHtml(colKey)}" style="background:var(--content-bg,#1e2233);border:1px solid rgba(255,255,255,.1);border-radius:10px;padding:12px;">
       <div style="display:flex;align-items:flex-start;gap:8px;margin-bottom:6px;">
         <div style="flex:1;min-width:0;">
           <div style="font-size:13px;font-weight:700;color:#f59e0b;letter-spacing:.3px;">${prod.identificacao || prodId}</div>
@@ -71802,7 +71877,7 @@ window.verOperacao = function(osId) {
           Ver estrutura / processo
         </button>
       </div>
-      ${grupoDropHint}
+      ${podeReceberPedido ? '<div style="font-size:10px;color:#818cf8;margin-top:6px;">Arraste um item de Pedidos sobre a OP desejada.</div>' : ''}
       ${opsHtml}
     </div>`;
   }
@@ -71857,11 +71932,18 @@ window.verOperacao = function(osId) {
               data-codigo="${escHtml(it.codigo || '')}"
               data-descricao="${escHtml(it.descricao || '')}"
               data-quantidade="${escHtml(it.quantidade || '0')}"
-              title="Clique para filtrar · Arraste para Programado"
-              style="display:flex;align-items:flex-start;gap:8px;font-size:11px;padding:6px 8px;border-radius:6px;cursor:grab;${ativo ? 'background:rgba(245,158,11,.18);border:1px solid rgba(245,158,11,.45);' : 'background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.06);'}">
-              <span style="flex-shrink:0;font-weight:700;color:#fbbf24;min-width:72px;">${fmtTextoHtml(it.codigo || '—')}</span>
-              <span style="flex:1;color:#e2e8f0;line-height:1.35;">${fmtTextoHtml(it.descricao || '—')}</span>
-              <span style="flex-shrink:0;color:#94a3b8;font-weight:600;">${fmtQtde(it.quantidade)}</span>
+              title="Clique para filtrar · Arraste para uma OP"
+              style="display:flex;flex-direction:column;gap:6px;font-size:11px;padding:6px 8px;border-radius:6px;cursor:grab;${ativo ? 'background:rgba(245,158,11,.18);border:1px solid rgba(245,158,11,.45);' : 'background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.06);'}">
+              <div style="display:flex;align-items:flex-start;gap:8px;">
+                <span style="flex-shrink:0;font-weight:700;color:#fbbf24;min-width:72px;">${fmtTextoHtml(it.codigo || '—')}</span>
+                <span style="flex:1;color:#e2e8f0;line-height:1.35;">${fmtTextoHtml(it.descricao || '—')}</span>
+                <span style="flex-shrink:0;color:#94a3b8;font-weight:600;">${fmtQtde(it.quantidade)}</span>
+              </div>
+              <div style="display:flex;justify-content:flex-end;">
+                <button type="button" class="pedido-analise-btn" data-produto-codigo="${escHtml(it.codigo || '')}" title="Ver estrutura do produto">
+                  <i class="fa-solid fa-magnifying-glass-chart" style="margin-right:4px;"></i>Analise
+                </button>
+              </div>
             </div>`;
         }).join('');
 
@@ -71869,6 +71951,9 @@ window.verOperacao = function(osId) {
           <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">
             <span style="font-size:13px;font-weight:700;color:#fbbf24;">Pedido ${fmtTextoHtml(ped.numero_pedido || '—')}</span>
             <span style="margin-left:auto;font-size:10px;color:#64748b;">#${fmtTextoHtml(ped.codigo_pedido)}</span>
+          </div>
+          <div style="font-size:10px;color:#64748b;margin-top:2px;">
+            Atualizado: <b style="color:#94a3b8;">${fmtDataHora(ped.updated_at)}</b>
           </div>
           ${ped.obs_venda ? `<div style="font-size:11px;color:#fde68a;line-height:1.4;margin-top:4px;">${fmtTextoHtml(ped.obs_venda)}</div>` : ''}
           <div style="display:flex;flex-direction:column;gap:4px;margin-top:8px;padding-top:8px;border-top:1px solid rgba(255,255,255,.08);">${itensHtml}</div>
@@ -71878,14 +71963,14 @@ window.verOperacao = function(osId) {
     if (cntPedidos) cntPedidos.textContent = lista.length;
   }
 
-  async function registrarProgramacaoPedido(payload, progQtde, prodCodigo) {
+  async function registrarProgramacaoPedido(payload, opQtde, prodCodigo, numeroOp, opIappId) {
     if (normCodigo(payload.codigo) !== normCodigo(prodCodigo)) {
-      alert('Só é possível soltar no mesmo código de produto em Programado.');
+      alert('Só é possível soltar em OP com o mesmo código de produto do pedido.');
       return false;
     }
     const saldoPedido = Number(payload.quantidade);
-    if (!Number.isFinite(saldoPedido) || saldoPedido < progQtde) {
-      alert(`Saldo do pedido (${fmtQtde(saldoPedido)}) é menor que a quantidade programada (${fmtQtde(progQtde)}).`);
+    if (!Number.isFinite(saldoPedido) || saldoPedido < opQtde) {
+      alert(`Saldo do pedido (${fmtQtde(saldoPedido)}) é menor que a quantidade da OP (${fmtQtde(opQtde)}).`);
       return false;
     }
 
@@ -71895,7 +71980,9 @@ window.verOperacao = function(osId) {
       body: JSON.stringify({
         codigo_pedido: Number(payload.codigo_pedido),
         codigo: payload.codigo,
-        quantidade_programado: progQtde
+        quantidade_programado: opQtde,
+        numero_op: numeroOp,
+        op_iapp_id: opIappId
       })
     });
     const data = await resp.json();
@@ -71909,6 +71996,7 @@ window.verOperacao = function(osId) {
   function setupPedidosProgramacaoInteractions() {
     if (colPedidos) {
       colPedidos.addEventListener('click', (e) => {
+        if (e.target.closest('.pedido-analise-btn')) return;
         const item = e.target.closest('.pedido-kanban-item');
         if (!item) return;
         filtroCodigoProduto = item.dataset.codigo || null;
@@ -71936,30 +72024,35 @@ window.verOperacao = function(osId) {
       });
     }
 
-    if (colProgramado) {
-      colProgramado.addEventListener('dragover', (e) => {
-        const zona = e.target.closest('.prog-kanban-grupo');
-        if (!zona) return;
+    function limparHoverOpDrop(colEl) {
+      colEl?.querySelectorAll('.prog-kanban-op-drop.op-drop-hover').forEach(el => el.classList.remove('op-drop-hover'));
+    }
+
+    function bindPedidoDropColuna(colEl) {
+      if (!colEl) return;
+
+      colEl.addEventListener('dragover', (e) => {
+        const opCard = e.target.closest('.prog-kanban-op-drop');
+        if (!opCard) return;
         e.preventDefault();
         e.dataTransfer.dropEffect = 'move';
-        zona.style.borderColor = 'rgba(99,102,241,.8)';
-        zona.style.boxShadow = '0 0 0 2px rgba(99,102,241,.25)';
+        limparHoverOpDrop(colEl);
+        opCard.classList.add('op-drop-hover');
       });
 
-      colProgramado.addEventListener('dragleave', (e) => {
-        const zona = e.target.closest('.prog-kanban-grupo');
-        if (!zona) return;
-        if (zona.contains(e.relatedTarget)) return;
-        zona.style.borderColor = 'rgba(255,255,255,.1)';
-        zona.style.boxShadow = '';
+      colEl.addEventListener('dragleave', (e) => {
+        const opCard = e.target.closest('.prog-kanban-op-drop');
+        if (!opCard) return;
+        if (opCard.contains(e.relatedTarget)) return;
+        opCard.classList.remove('op-drop-hover');
       });
 
-      colProgramado.addEventListener('drop', async (e) => {
-        const zona = e.target.closest('.prog-kanban-grupo');
-        if (!zona) return;
+      colEl.addEventListener('drop', async (e) => {
+        const opCard = e.target.closest('.prog-kanban-op-drop');
+        if (!opCard) return;
         e.preventDefault();
-        zona.style.borderColor = 'rgba(255,255,255,.1)';
-        zona.style.boxShadow = '';
+        e.stopPropagation();
+        limparHoverOpDrop(colEl);
 
         let payload = null;
         try {
@@ -71967,17 +72060,39 @@ window.verOperacao = function(osId) {
         } catch (_) { payload = null; }
         if (!payload) return;
 
-        const progQtde = Number(zona.dataset.progQtde);
-        const prodCodigo = zona.dataset.prodCodigo || '';
-        if (!Number.isFinite(progQtde) || progQtde <= 0) return;
+        const opQtde = Number(opCard.dataset.opQtde);
+        const prodCodigo = opCard.dataset.prodCodigo || '';
+        const numeroOp = opCard.dataset.opIdent || '';
+        const opIappId = Number(opCard.dataset.opId);
+        if (!Number.isFinite(opQtde) || opQtde <= 0) return;
+        if (!numeroOp || !Number.isFinite(opIappId) || opIappId <= 0) return;
 
-        const ok = await registrarProgramacaoPedido(payload, progQtde, prodCodigo);
-        if (!ok) return;
+        setKanbanProcessando(true, 'Vinculando pedido à OP...');
+        try {
+          const ok = await registrarProgramacaoPedido(payload, opQtde, prodCodigo, numeroOp, opIappId);
+          if (!ok) return;
 
-        await recarregarPedidos();
-        renderKanban(ordensCarregadas);
+          await Promise.all([recarregarPedidos(), recarregarProgramacao()]);
+          renderKanban(ordensCarregadas);
+        } finally {
+          setKanbanProcessando(false);
+        }
       });
     }
+
+    [colProgramado, colSolicitado, colProduzindo].forEach(bindPedidoDropColuna);
+
+    colPedidos?.addEventListener('click', (e) => {
+      const btnAnalise = e.target.closest('.pedido-analise-btn');
+      if (!btnAnalise) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const produtoCodigo = btnAnalise.dataset.produtoCodigo || '';
+      if (!produtoCodigo) return;
+      const groupKey = produtoCodigo;
+      const ops = ordensCarregadas.filter(op => (op.produto?.identificacao || String(op.id)) === groupKey);
+      openProducaoKanbanActionsModal(produtoCodigo, groupKey, ops, '', { somenteEstrutura: true, titulo: 'Análise', mostrarEstoque: true });
+    });
 
     btnLimparFiltroCodigo?.addEventListener('click', () => {
       filtroCodigoProduto = null;
@@ -71990,22 +72105,14 @@ window.verOperacao = function(osId) {
     renderFiltroCodigoBar();
     renderColunaPedidos(pedidosCarregados, filtroCodigoProduto);
 
-    const operacaoFiltro = filtroSelect ? filtroSelect.value : '';
-
-    const filtradas = operacaoFiltro
-      ? ordens.filter(op =>
-          (op.ordens_servico || []).some(os => os.operacao === operacaoFiltro)
-        )
-      : ordens;
-
-    renderKanbanCol(colProgramado, cntProgramado, filtradas, 'programado', operacaoFiltro,
-      operacaoFiltro ? `Nenhuma OS programada com "${operacaoFiltro}".` : 'Nenhuma OP programada.', true, filtroCodigoProduto);
-    renderKanbanCol(colSolicitado, cntSolicitado, filtradas, 'solicitado', operacaoFiltro,
-      operacaoFiltro ? `Nenhuma OS solicitada com "${operacaoFiltro}".` : 'Nenhuma OS solicitada.', false, null);
-    renderKanbanCol(colProduzindo, cntProduzindo, filtradas, 'produzindo', operacaoFiltro,
-      'Nenhuma OS em produção.', false, null);
-    renderKanbanCol(colAguardando, cntAguardando, filtradas, 'aguardando', operacaoFiltro,
-      'Nenhuma OS aguardando retirada.', false, null);
+    renderKanbanCol(colProgramado, cntProgramado, ordens, 'programado',
+      'Nenhuma OP programada.', true, filtroCodigoProduto);
+    renderKanbanCol(colSolicitado, cntSolicitado, ordens, 'solicitado',
+      'Nenhuma OP em Montagem hermetica.', false, filtroCodigoProduto);
+    renderKanbanCol(colProduzindo, cntProduzindo, ordens, 'produzindo',
+      'Nenhuma OP em Montagem eletrica.', false, filtroCodigoProduto);
+    renderKanbanCol(colAguardando, cntAguardando, ordens, 'teste',
+      'Nenhuma OP em Teste.', false, filtroCodigoProduto);
 
     attachProducaoKanbanActionButtons('#registrarProducaoPane', ordens);
     attachOpCardClickHandlers('#registrarProducaoPane', ordens);
@@ -72017,39 +72124,24 @@ window.verOperacao = function(osId) {
     if (spinnerMsg) spinnerMsg.textContent = 'Consultando IAPP e pedidos...';
     erroDiv.style.display = 'none';
     if (rodape) rodape.style.display = 'none';
-    if (filtroBar) filtroBar.style.display = 'none';
     if (colPedidos) colPedidos.innerHTML = '<div style="text-align:center;padding:24px 0;color:var(--inactive-color);font-size:12px;">Carregando...</div>';
     colProgramado.innerHTML = '<div style="text-align:center;padding:24px 0;color:var(--inactive-color);font-size:12px;">Carregando...</div>';
 
     try {
-      const [respOrdens, respPedidos] = await Promise.all([
+      const [respOrdens, respPedidos, respProg] = await Promise.all([
         fetch('/api/producao/ordens'),
-        fetch('/api/producao/pedidos-kanban')
+        fetch('/api/producao/pedidos-kanban'),
+        fetch('/api/producao/kanban-programacao')
       ]);
       const data = await respOrdens.json();
       const dataPedidos = await respPedidos.json();
+      const dataProg = await respProg.json();
 
       if (!respOrdens.ok || !data.success) throw new Error(data.error || 'Erro ao consultar ordens de produção');
 
       ordensCarregadas = data.ordens || [];
       pedidosCarregados = (respPedidos.ok && dataPedidos.success) ? (dataPedidos.pedidos || []) : [];
-
-      // Coleta operações únicas de todos as OSs
-      const operacoesSet = new Set();
-      for (const op of ordensCarregadas) {
-        for (const os of (op.ordens_servico || [])) {
-          if (os.operacao) operacoesSet.add(os.operacao);
-        }
-      }
-      const operacoes = [...operacoesSet].sort();
-
-      // Popula o select de filtro
-      if (filtroSelect) {
-        const valorAtual = filtroSelect.value;
-        filtroSelect.innerHTML = '<option value="">Todas as operações de serviço</option>'
-          + operacoes.map(op => `<option value="${op.replace(/"/g,'&quot;')}"${op === valorAtual ? ' selected' : ''}>${op}</option>`).join('');
-        if (filtroBar) filtroBar.style.display = operacoes.length > 0 ? 'block' : 'none';
-      }
+      programacaoCarregada = (respProg.ok && dataProg.success) ? (dataProg.registros || []) : [];
 
       renderKanban(ordensCarregadas);
 
@@ -72067,11 +72159,6 @@ window.verOperacao = function(osId) {
     }
   }
 
-  // Filtro: re-renderiza sem nova requisição ao mudar operação
-  if (filtroSelect) {
-    filtroSelect.addEventListener('change', () => renderKanban(ordensCarregadas));
-  }
-
   menuBtn.addEventListener('click', (e) => {
     e.preventDefault();
     document.querySelectorAll('.left-side .side-menu a').forEach(a => a.classList.remove('is-active'));
@@ -72087,17 +72174,71 @@ window.verOperacao = function(osId) {
   }
 
   window._fmtDataProducao = fmtData;
+  async function recarregarProgramacaoERender(colKeys) {
+    await recarregarProgramacao();
+    return recarregarColunasKanban(colKeys);
+  }
+
+  async function recarregarColunasKanban(colKeys) {
+    try {
+      const resp = await fetch('/api/producao/ordens');
+      const data = await resp.json();
+      if (!resp.ok || !data.success) return false;
+      ordensCarregadas = data.ordens || [];
+      const keys = Array.isArray(colKeys) && colKeys.length ? colKeys : ['programado', 'solicitado', 'produzindo'];
+      if (keys.includes('programado')) {
+        renderKanbanCol(colProgramado, cntProgramado, ordensCarregadas, 'programado',
+          'Nenhuma OP programada.', true, filtroCodigoProduto);
+      }
+      if (keys.includes('solicitado')) {
+        renderKanbanCol(colSolicitado, cntSolicitado, ordensCarregadas, 'solicitado',
+          'Nenhuma OP em Montagem hermetica.', false, filtroCodigoProduto);
+      }
+      if (keys.includes('produzindo')) {
+        renderKanbanCol(colProduzindo, cntProduzindo, ordensCarregadas, 'produzindo',
+          'Nenhuma OP em Montagem eletrica.', false, filtroCodigoProduto);
+      }
+      if (keys.includes('teste')) {
+        renderKanbanCol(colAguardando, cntAguardando, ordensCarregadas, 'teste',
+          'Nenhuma OP em Teste.', false, filtroCodigoProduto);
+      }
+      attachProducaoKanbanActionButtons('#registrarProducaoPane', ordensCarregadas);
+      attachOpCardClickHandlers('#registrarProducaoPane', ordensCarregadas);
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+  window._producaoFiltrarOpsColuna = (ops, colKey) => (ops || []).filter(op => opStatusColuna(op, colKey));
+  window._producaoMarcarOpsSolicitadas = function(opIds) {
+    const ids = new Set((opIds || []).map(id => String(id)));
+    for (const op of ordensCarregadas) {
+      if (!ids.has(String(op.id))) continue;
+      for (const os of (op.ordens_servico || [])) {
+        const sp = String(os.status_producao || '').trim();
+        if (!sp || sp === 'Solicitado') os.status_producao = 'Solicitado';
+      }
+    }
+  };
+  window._producaoRecarregarColunasKanban = recarregarColunasKanban;
+  window._producaoRecarregarProgramacaoColunas = recarregarProgramacaoERender;
+  window._producaoKanbanColunas = () => PRODUCAO_KANBAN_COLUNAS.map(c => ({ ...c }));
+  window._producaoNomeKanbanPorKey = producaoNomeKanbanPorKey;
+  window._producaoListaNomesKanban = producaoListaNomesKanban;
   window._producaoRecarregarOrdens = async function() {
     try {
-      const [resp, respPedidos] = await Promise.all([
+      const [resp, respPedidos, respProg] = await Promise.all([
         fetch('/api/producao/ordens'),
-        fetch('/api/producao/pedidos-kanban')
+        fetch('/api/producao/pedidos-kanban'),
+        fetch('/api/producao/kanban-programacao')
       ]);
       const data = await resp.json();
       const dataPedidos = await respPedidos.json();
+      const dataProg = await respProg.json();
       if (resp.ok && data.success) {
         ordensCarregadas = data.ordens || [];
         pedidosCarregados = (respPedidos.ok && dataPedidos.success) ? (dataPedidos.pedidos || []) : [];
+        programacaoCarregada = (respProg.ok && dataProg.success) ? (dataProg.registros || []) : [];
         renderKanban(ordensCarregadas);
       }
     } catch (_) { /* silencioso */ }
@@ -72545,29 +72686,33 @@ window.verOperacao = function(osId) {
     return { pcName: s.slice(0, idx), impressora: s.slice(idx + 1) };
   }
 
-  function _producaoColetarLinhasOs(ops, operacaoFiltro) {
-    const linhas = [];
-    for (const op of (ops || [])) {
-      const oss = Array.isArray(op.ordens_servico) ? op.ordens_servico : [];
-      const ossVis = oss.filter(os => {
-        if (operacaoFiltro && os.operacao !== operacaoFiltro) return false;
-        return !String(os.status_producao || '').trim();
-      });
-      for (const os of ossVis) {
-        if (!os.id) continue;
-        linhas.push({
-          os_id: os.id,
-          os_identificacao: os.identificacao || ('#' + os.id),
-          operacao: os.operacao || '—',
-          os_status: os.status || '—',
-          op_id: op.id,
-          op_identificacao: op.identificacao || String(op.id),
-          op_qtde: op.qtde,
-          op_status: op.status || '—',
-        });
-      }
+  function _producaoResolverOsDaOp(op) {
+    const oss = Array.isArray(op?.ordens_servico) ? op.ordens_servico : [];
+    return oss.find(os => !String(os.status_producao || '').trim()) || oss[0] || null;
+  }
+
+  function _producaoColetarLinhasOp(ops) {
+    return (ops || []).map(op => ({
+      op_id: op.id,
+      op_identificacao: op.identificacao || String(op.id),
+      op_qtde: op.qtde,
+      op_status: op.status || '—',
+    }));
+  }
+
+  function _producaoObterPrefsImpressora() {
+    if (typeof window._movimObterPrefsImpressora === 'function') {
+      return window._movimObterPrefsImpressora();
     }
-    return linhas;
+    const pref = localStorage.getItem(_producaoEtqPrefKey()) || null;
+    const agentDest = _producaoParseAgentPref(pref);
+    if (agentDest) {
+      return { destino_agente: agentDest.pcName, impressora: agentDest.impressora, via_fila: true };
+    }
+    if (pref && pref !== '__PDF__' && pref !== '__BP__') {
+      return { printer: pref, via_fila: false };
+    }
+    return { via_fila: true };
   }
 
   async function _producaoImprimirOpEtiquetas(items, statusEl, btnRef, onSuccess) {
@@ -72581,14 +72726,13 @@ window.verOperacao = function(osId) {
     };
     try {
       const usuario = (document.getElementById('userNameDisplay')?.textContent || '').trim();
-      const pref = localStorage.getItem(_producaoEtqPrefKey()) || null;
-      const agentDest = _producaoParseAgentPref(pref);
+      const prefs = _producaoObterPrefsImpressora();
       const body = { items, usuario };
-      if (agentDest) {
-        body.destino_agente = agentDest.pcName;
-        body.impressora = agentDest.impressora;
-      } else if (pref && pref !== '__PDF__' && pref !== '__BP__') {
-        body.impressora = pref;
+      if (prefs.destino_agente) {
+        body.destino_agente = prefs.destino_agente;
+        if (prefs.impressora) body.impressora = prefs.impressora;
+      } else if (prefs.printer) {
+        body.impressora = prefs.printer;
       }
       showSt('Enviando para fila de impressão...', '#facc15');
       const resp = await fetch('/api/etiquetas/iapp-op/imprimir', {
@@ -72599,7 +72743,7 @@ window.verOperacao = function(osId) {
       });
       const data = await resp.json().catch(() => ({}));
       if (!resp.ok || !data.ok) throw new Error(data.error || `Erro ${resp.status}`);
-      showSt(`${data.quantidade || items.length} etiqueta(s) enfileirada(s). OS movida(s) para Solicitado.`, '#4ade80');
+      showSt(`${data.quantidade || items.length} etiqueta(s) enfileirada(s). OP movida(s) para Montagem hermetica.`, '#4ade80');
       if (typeof onSuccess === 'function') await onSuccess();
     } catch (err) {
       showSt(err.message || 'Falha ao imprimir.', '#f87171');
@@ -72608,8 +72752,10 @@ window.verOperacao = function(osId) {
     }
   }
 
-  function openProducaoImprimirOpModal(produtoCodigo, groupKey, ops, operacaoFiltro) {
-    const linhas = _producaoColetarLinhasOs(ops, operacaoFiltro);
+  function openProducaoImprimirOpModal(produtoCodigo, groupKey, ops, opts) {
+    const options = opts || {};
+    const fromProgramado = !!options.fromProgramado;
+    const linhas = _producaoColetarLinhasOp(ops);
     const overlay = document.createElement('div');
     overlay.className = 'kanban-modal-overlay';
     overlay.addEventListener('click', (ev) => { if (ev.target === overlay) overlay.remove(); });
@@ -72628,11 +72774,27 @@ window.verOperacao = function(osId) {
       <div class="kanban-modal-body">
         <div class="modal-code-block">
           <p style="margin:0 0 8px;font-size:12px;color:#94a3b8;">
-            ${operacaoFiltro
-              ? `Ordens de serviço filtradas pela operação <b style="color:#e2e8f0;">${escapeHtml(operacaoFiltro)}</b>.`
-              : 'Todas as ordens de serviço do grupo.'}
+            Selecione as ordens de produção (OP) para imprimir etiqueta.
           </p>
-          <div id="producao-imprimir-op-lista" style="max-height:380px;overflow:auto;margin-top:10px;"></div>
+          <div style="display:flex;justify-content:flex-end;margin:8px 0 6px;">
+            <button type="button" id="producao-imprimir-op-sel-todas" class="modal-secondary" style="font-size:11px;padding:4px 10px;">
+              <i class="fa-solid fa-check-double"></i> Selecionar todas
+            </button>
+          </div>
+          <div id="producao-imprimir-op-lista" style="max-height:320px;overflow:auto;margin-top:4px;"></div>
+          <div class="movim-impressora-row movim-impressora-row--modal" style="margin:12px 0 0;padding:0;">
+            <i class="fa-solid fa-print movim-impr-icone"></i>
+            <label for="producaoImpListboxImpressora">Impressora:</label>
+            <select id="producaoImpListboxImpressora" class="movim-listbox-impressora">
+              <option value="">— padrão —</option>
+            </select>
+            <button type="button" id="producaoImpBtnRefreshImpressoras" class="movim-impr-btn-icon" title="Atualizar impressoras">
+              <i class="fa-solid fa-rotate"></i>
+            </button>
+            <button type="button" id="producaoImpBtnConfigImpressoras" class="movim-impr-btn-icon" title="Configurar impressoras">
+              <i class="fa-solid fa-sliders"></i>
+            </button>
+          </div>
           <p id="producao-imprimir-op-status" style="margin:10px 0 0;font-size:12px;color:#94a3b8;min-height:18px;"></p>
         </div>
       </div>
@@ -72654,15 +72816,47 @@ window.verOperacao = function(osId) {
     const listaEl = modal.querySelector('#producao-imprimir-op-lista');
     const statusEl = modal.querySelector('#producao-imprimir-op-status');
     const btnImprimir = modal.querySelector('#producao-imprimir-op-btn');
+    const btnSelTodas = modal.querySelector('#producao-imprimir-op-sel-todas');
     const selecionadas = new Set();
 
     const atualizarBtn = () => {
       if (btnImprimir) btnImprimir.disabled = selecionadas.size === 0;
     };
 
+    const selecionarTodasOps = () => {
+      listaEl?.querySelectorAll('.producao-imprimir-op-chk').forEach(chk => {
+        chk.checked = true;
+        const key = chk.dataset.rowKey || '';
+        if (key) selecionadas.add(key);
+      });
+      atualizarBtn();
+    };
+
+    btnSelTodas?.addEventListener('click', selecionarTodasOps);
+
+    const impSelect = modal.querySelector('#producaoImpListboxImpressora');
+    impSelect?.addEventListener('change', function () {
+      if (typeof window._movimSyncImpressoraSelects === 'function') {
+        window._movimSyncImpressoraSelects(this.value || null);
+      }
+    });
+    modal.querySelector('#producaoImpBtnRefreshImpressoras')?.addEventListener('click', () => {
+      if (typeof window._movimAtualizarListboxImpressora === 'function') {
+        window._movimAtualizarListboxImpressora();
+      }
+    });
+    modal.querySelector('#producaoImpBtnConfigImpressoras')?.addEventListener('click', () => {
+      if (typeof window._movimAbrirConfigImpressoras === 'function') {
+        window._movimAbrirConfigImpressoras();
+      }
+    });
+    if (typeof window._movimAtualizarListboxImpressora === 'function') {
+      window._movimAtualizarListboxImpressora();
+    }
+
     if (!linhas.length) {
       if (listaEl) {
-        listaEl.innerHTML = '<div style="text-align:center;padding:24px 0;color:#64748b;font-size:12px;">Nenhuma ordem de serviço encontrada para este grupo.</div>';
+        listaEl.innerHTML = '<div style="text-align:center;padding:24px 0;color:#64748b;font-size:12px;">Nenhuma OP encontrada para este grupo.</div>';
       }
     } else if (listaEl) {
       listaEl.innerHTML = `
@@ -72671,26 +72865,23 @@ window.verOperacao = function(osId) {
             <tr style="border-bottom:1px solid rgba(255,255,255,.1);">
               <th style="padding:6px 8px;font-size:10px;color:#475569;text-align:left;width:28px;"></th>
               <th style="padding:6px 8px;font-size:10px;color:#475569;text-align:left;">OP</th>
-              <th style="padding:6px 8px;font-size:10px;color:#475569;text-align:left;">OS</th>
-              <th style="padding:6px 8px;font-size:10px;color:#475569;text-align:left;">Operação</th>
-              <th style="padding:6px 8px;font-size:10px;color:#475569;text-align:left;">Status OS</th>
+              <th style="padding:6px 8px;font-size:10px;color:#475569;text-align:right;">Qtde</th>
+              <th style="padding:6px 8px;font-size:10px;color:#475569;text-align:left;">Status</th>
             </tr>
           </thead>
           <tbody>
-            ${linhas.map((ln, idx) => {
-              const rowKey = `${ln.op_id}|${ln.os_id ?? 'sem-os'}`;
+            ${linhas.map((ln) => {
+              const rowKey = `op:${ln.op_id}`;
               return `<tr style="border-bottom:1px solid rgba(255,255,255,.05);">
                 <td style="padding:6px 8px;">
                   <input type="checkbox" class="producao-imprimir-op-chk"
                     data-row-key="${escapeHtml(rowKey)}"
-                    data-os-id="${escapeHtml(String(ln.os_id))}"
-                    data-os-ident="${escapeHtml(ln.os_identificacao)}"
+                    data-op-id="${escapeHtml(String(ln.op_id))}"
                     data-op-ident="${escapeHtml(ln.op_identificacao)}" />
                 </td>
-                <td style="padding:6px 8px;font-size:11px;color:#e2e8f0;font-weight:600;">${escapeHtml(ln.op_identificacao)}</td>
-                <td style="padding:6px 8px;font-size:11px;color:#cbd5e1;">${escapeHtml(ln.os_identificacao)}</td>
-                <td style="padding:6px 8px;font-size:11px;color:#94a3b8;">${escapeHtml(ln.operacao)}</td>
-                <td style="padding:6px 8px;font-size:11px;color:#94a3b8;">${escapeHtml(ln.os_status)}</td>
+                <td style="padding:6px 8px;font-size:11px;color:#e2e8f0;font-weight:600;">OP ${escapeHtml(ln.op_identificacao)}</td>
+                <td style="padding:6px 8px;font-size:11px;color:#cbd5e1;text-align:right;">${escapeHtml(String(ln.op_qtde ?? '—'))}</td>
+                <td style="padding:6px 8px;font-size:11px;color:#94a3b8;">${escapeHtml(ln.op_status)}</td>
               </tr>`;
             }).join('')}
           </tbody>
@@ -72710,32 +72901,434 @@ window.verOperacao = function(osId) {
       const codigo = String(produtoCodigo || groupKey || '').trim();
       const descricaoPadrao = String(ops?.[0]?.produto?.descricao || '').trim();
       const items = [];
+      const semOs = [];
       listaEl?.querySelectorAll('.producao-imprimir-op-chk:checked').forEach(chk => {
-        const osId = Number(chk.dataset.osId);
-        const osIdent = String(chk.dataset.osIdent || '').trim();
-        const opIdent = String(chk.dataset.opIdent || '').trim();
-        if (!osId || !osIdent) return;
-        const opRef = (ops || []).find(o => String(o.identificacao || o.id) === opIdent);
-        const descricao = String(opRef?.produto?.descricao || descricaoPadrao || '').trim();
+        const opId = Number(chk.dataset.opId);
+        const opRef = (ops || []).find(o => String(o.id) === String(opId));
+        if (!opRef) return;
+        const opIdent = String(opRef.identificacao || opRef.id).trim();
+        const osRef = _producaoResolverOsDaOp(opRef);
+        if (!osRef?.id) {
+          semOs.push(opIdent);
+          return;
+        }
+        const descricao = String(opRef.produto?.descricao || descricaoPadrao || '').trim();
         items.push({
-          os_id: osId,
-          lote: osIdent,
-          os_identificacao: osIdent,
+          os_id: osRef.id,
+          op_iapp_id: opRef.id,
+          lote: opIdent,
+          os_identificacao: String(osRef.identificacao || opIdent).trim(),
           codigo_produto: codigo,
           descricao_produto: descricao,
         });
       });
+      if (semOs.length) {
+        alert(`OP(s) sem ordem de serviço vinculada e não impressa(s): ${semOs.join(', ')}`);
+      }
       if (!items.length) return;
       await _producaoImprimirOpEtiquetas(items, statusEl, btnImprimir, async () => {
         close();
-        if (typeof window._producaoRecarregarOrdens === 'function') {
+        const opIds = [...new Set(items.map(it => {
+          const opRef = (ops || []).find(o => (o.ordens_servico || []).some(os => String(os.id) === String(it.os_id)));
+          return opRef?.id;
+        }).filter(Boolean))];
+        if (fromProgramado) {
+          if (typeof window._producaoMarcarOpsSolicitadas === 'function') {
+            window._producaoMarcarOpsSolicitadas(opIds);
+          }
+          if (typeof window._producaoRecarregarColunasKanban === 'function') {
+            await window._producaoRecarregarColunasKanban(['programado', 'solicitado']);
+          }
+        } else if (typeof window._producaoRecarregarOrdens === 'function') {
           await window._producaoRecarregarOrdens();
         }
       });
     });
   }
 
-  function openProducaoKanbanActionsModal(produtoCodigo, groupKey, ops, operacaoFiltro) {
+  async function openProducaoRiCheckModal(op, produtoCodigo, colKey) {
+    const opId = Number(op?.id) || 0;
+    if (!opId) {
+      alert('OP inválida para registro de inspeção.');
+      return;
+    }
+
+    const kanbanLocal = (typeof window._producaoNomeKanbanPorKey === 'function')
+      ? window._producaoNomeKanbanPorKey(colKey)
+      : '';
+    const isHermetica = colKey === 'solicitado';
+    const isEletrica = colKey === 'produzindo';
+
+    const codigo = String(produtoCodigo || op.produto?.identificacao || '').trim();
+    const descricao = String(op.produto?.descricao || '').trim();
+    const opIdent = String(op.identificacao || opId).trim();
+
+    const overlay = document.createElement('div');
+    overlay.className = 'kanban-modal-overlay';
+    overlay.style.zIndex = '10000';
+    overlay.addEventListener('click', (ev) => { if (ev.target === overlay) overlay.remove(); });
+
+    const modal = document.createElement('div');
+    modal.className = 'kanban-modal';
+    modal.style.maxWidth = '860px';
+    modal.innerHTML = `
+      <header>
+        <div>
+          <h2>RI - Registro de inspeção</h2>
+          <span>OP ${escapeHtml(opIdent)} · ${escapeHtml(codigo)}</span>
+        </div>
+        <button class="close-btn" aria-label="Fechar">&times;</button>
+      </header>
+      <div class="kanban-modal-body" style="max-height:520px;overflow:auto;">
+        <div id="ri-check-status" style="font-size:12px;color:#94a3b8;margin-bottom:10px;">Carregando...</div>
+        <div id="ri-check-info" class="modal-code-block" style="margin-bottom:12px;font-size:12px;color:#cbd5e1;"></div>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;gap:10px;flex-wrap:wrap;">
+          <span style="font-size:11px;font-weight:700;color:#94a3b8;text-transform:uppercase;">Verificações</span>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;">
+            <button type="button" id="ri-check-btn-add" class="modal-secondary" style="padding:5px 12px;font-size:12px;">
+              <i class="fa-solid fa-plus"></i> Adicionar check
+            </button>
+            ${isHermetica ? `
+            <button type="button" id="ri-check-btn-liberar" class="modal-primary" style="padding:5px 14px;font-size:12px;background:#166534;">
+              <i class="fa-solid fa-unlock"></i> Liberado
+            </button>` : ''}
+          </div>
+        </div>
+        ${kanbanLocal ? `<p style="font-size:11px;color:#64748b;margin:0 0 8px;">Exibindo verificações do kanban: <b style="color:#93c5fd;">${escapeHtml(kanbanLocal)}</b></p>` : ''}
+        <div id="ri-check-lista"></div>
+      </div>
+      <footer>
+        <button type="button" class="modal-secondary">Fechar</button>
+        <button type="button" id="ri-check-btn-salvar" class="modal-primary">
+          <i class="fa-solid fa-floppy-disk"></i> Salvar
+        </button>
+      </footer>
+    `;
+
+    overlay.appendChild(modal);
+    document.body.appendChild(overlay);
+
+    const close = () => overlay.remove();
+    modal.querySelector('.close-btn')?.addEventListener('click', close);
+    modal.querySelector('footer .modal-secondary')?.addEventListener('click', close);
+
+    const statusEl = modal.querySelector('#ri-check-status');
+    const infoEl = modal.querySelector('#ri-check-info');
+    const listaEl = modal.querySelector('#ri-check-lista');
+    const btnSalvar = modal.querySelector('#ri-check-btn-salvar');
+    const btnLiberar = modal.querySelector('#ri-check-btn-liberar');
+    const btnAdd = modal.querySelector('#ri-check-btn-add');
+
+    let riCheckId = null;
+    let riCheckData = null;
+
+    const renderLista = (verificacoes) => {
+      const items = (verificacoes || []).filter(v => {
+        if (!kanbanLocal) return true;
+        return String(v.local || '').trim() === kanbanLocal;
+      });
+      if (!items.length) {
+        listaEl.innerHTML = `<div style="text-align:center;padding:20px;color:#64748b;font-size:12px;">Nenhuma verificação neste kanban (${escapeHtml(kanbanLocal || '—')}). Clique em + para adicionar.</div>`;
+        return;
+      }
+      listaEl.innerHTML = items.map(v => {
+        const fotoHtml = v.foto
+          ? `<a href="${escapeHtml(v.foto)}" target="_blank" rel="noopener"><img src="${escapeHtml(v.foto)}" alt="Foto" style="max-width:120px;max-height:80px;border-radius:6px;border:1px solid rgba(255,255,255,.15);"></a>`
+          : '<span style="color:#64748b;font-size:11px;">—</span>';
+        const videoHtml = v.video
+          ? `<a href="${escapeHtml(v.video)}" target="_blank" rel="noopener" style="font-size:11px;color:#93c5fd;"><i class="fa-solid fa-video"></i> Ver vídeo</a>`
+          : '<span style="color:#64748b;font-size:11px;">—</span>';
+        return `<div style="border:1px solid rgba(255,255,255,.1);border-radius:10px;padding:12px;margin-bottom:10px;background:rgba(255,255,255,.03);">
+          <div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:4px;">
+            <div style="font-size:13px;font-weight:700;color:#e2e8f0;">${escapeHtml(v.check_nome || '—')}</div>
+            <span style="font-size:10px;color:#818cf8;background:rgba(99,102,241,.15);padding:2px 8px;border-radius:8px;">${escapeHtml(v.local || '—')}</span>
+          </div>
+          <div style="font-size:12px;color:#94a3b8;margin-bottom:8px;">${escapeHtml(v.descricao_check || '—')}</div>
+          <div style="display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap;">
+            <div><div style="font-size:10px;color:#64748b;margin-bottom:4px;">Foto</div>${fotoHtml}</div>
+            <div><div style="font-size:10px;color:#64748b;margin-bottom:4px;">Vídeo</div>${videoHtml}</div>
+          </div>
+        </div>`;
+      }).join('');
+    };
+
+    const renderInfo = (check) => {
+      if (!check) return;
+      riCheckData = check;
+      riCheckId = check.id;
+      const st = String(check.status || 'Em andamento');
+      const stCor = st === 'Liberado' ? '#4ade80' : (st === 'Teste' ? '#fdba74' : '#facc15');
+      infoEl.innerHTML = `
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:8px;">
+          <div><span style="color:#64748b;">ID RI:</span> <b>${escapeHtml(String(check.id))}</b></div>
+          <div><span style="color:#64748b;">Código:</span> <b>${escapeHtml(check.codigo || codigo)}</b></div>
+          <div><span style="color:#64748b;">Status:</span> <b style="color:${stCor};">${escapeHtml(st)}</b></div>
+          <div><span style="color:#64748b;">Usuário:</span> <b>${escapeHtml(check.usuario || '—')}</b></div>
+        </div>
+        ${check.descricao ? `<div style="margin-top:8px;color:#cbd5e1;">${escapeHtml(check.descricao)}</div>` : ''}`;
+      if (btnLiberar) {
+        btnLiberar.disabled = st === 'Liberado' || st === 'Teste';
+        btnLiberar.style.opacity = (st === 'Liberado' || st === 'Teste') ? '0.5' : '1';
+      }
+    };
+
+    const recarregarVerificacoes = async () => {
+      if (!riCheckId) return;
+      const q = kanbanLocal ? `?local=${encodeURIComponent(kanbanLocal)}` : '';
+      const rec = await fetch(`/api/qualidade/ri-check/${riCheckId}${q}`, { credentials: 'include' });
+      const recData = await rec.json();
+      if (rec.ok && recData.ok) {
+        renderInfo(recData.check);
+        renderLista(recData.verificacoes);
+      }
+    };
+
+    const carregar = async () => {
+      statusEl.textContent = 'Carregando registro...';
+      statusEl.style.color = '#94a3b8';
+      try {
+        const resp = await fetch('/api/qualidade/ri-check/abrir', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({
+            op_iapp_id: opId,
+            codigo_produto: codigo,
+            codigo,
+            descricao,
+            kanban_local: kanbanLocal,
+          }),
+        });
+        const data = await resp.json();
+        if (!resp.ok || !data.ok) throw new Error(data.error || `Erro ${resp.status}`);
+        renderInfo(data.check);
+        renderLista(data.verificacoes);
+        statusEl.textContent = '';
+      } catch (err) {
+        statusEl.textContent = err.message || 'Falha ao carregar RI.';
+        statusEl.style.color = '#f87171';
+      }
+    };
+
+    const abrirModalAddVerificacao = async () => {
+      if (!riCheckId) {
+        alert('Aguarde o carregamento do RI.');
+        return;
+      }
+      let nomesKanban = (typeof window._producaoListaNomesKanban === 'function')
+        ? window._producaoListaNomesKanban()
+        : [];
+      if (!nomesKanban.length) {
+        try {
+          const kr = await fetch('/api/qualidade/ri-check/kanbans', { credentials: 'include' });
+          const kd = await kr.json();
+          if (kr.ok && kd.ok) nomesKanban = kd.kanbans || [];
+        } catch (_) { /* ignora */ }
+      }
+      const optsLocal = nomesKanban.map(n => {
+        const sel = n === kanbanLocal ? ' selected' : '';
+        return `<option value="${escapeHtml(n)}"${sel}>${escapeHtml(n)}</option>`;
+      }).join('');
+
+      const sub = document.createElement('div');
+      sub.className = 'kanban-modal-overlay';
+      sub.style.zIndex = '10060';
+      sub.innerHTML = `
+        <div class="kanban-modal" style="max-width:520px;">
+          <header>
+            <div><h2>Nova verificação</h2></div>
+            <button type="button" class="close-btn">&times;</button>
+          </header>
+          <div class="kanban-modal-body">
+            <div class="modal-code-block" style="display:flex;flex-direction:column;gap:10px;">
+              <label style="font-size:12px;color:#94a3b8;">Check *
+                <input type="text" id="ri-verif-check" class="modal-input" style="width:100%;margin-top:4px;padding:8px;" placeholder="Nome do item verificado">
+              </label>
+              <label style="font-size:12px;color:#94a3b8;">Descrição do check
+                <textarea id="ri-verif-desc" rows="3" style="width:100%;margin-top:4px;padding:8px;background:#1e293b;color:#e2e8f0;border:1px solid rgba(255,255,255,.15);border-radius:8px;"></textarea>
+              </label>
+              <label style="font-size:12px;color:#94a3b8;">Local (kanban) *
+                <select id="ri-verif-local" style="width:100%;margin-top:4px;padding:8px;background:#1e293b;color:#e2e8f0;border:1px solid rgba(255,255,255,.15);border-radius:8px;">
+                  ${optsLocal || `<option value="${escapeHtml(kanbanLocal)}">${escapeHtml(kanbanLocal)}</option>`}
+                </select>
+              </label>
+              <label style="font-size:12px;color:#94a3b8;">Foto
+                <input type="file" id="ri-verif-foto" accept="image/*" style="margin-top:4px;color:#cbd5e1;">
+              </label>
+              <label style="font-size:12px;color:#94a3b8;">Vídeo
+                <input type="file" id="ri-verif-video" accept="video/*" style="margin-top:4px;color:#cbd5e1;">
+              </label>
+              <p id="ri-verif-status" style="font-size:12px;color:#94a3b8;min-height:16px;margin:0;"></p>
+            </div>
+          </div>
+          <footer>
+            <button type="button" class="modal-secondary">Cancelar</button>
+            <button type="button" id="ri-verif-salvar" class="modal-primary">Salvar verificação</button>
+          </footer>
+        </div>`;
+      document.body.appendChild(sub);
+      const fecharSub = () => sub.remove();
+      sub.querySelector('.close-btn')?.addEventListener('click', fecharSub);
+      sub.querySelector('.modal-secondary')?.addEventListener('click', fecharSub);
+      sub.addEventListener('click', (e) => { if (e.target === sub) fecharSub(); });
+
+      sub.querySelector('#ri-verif-salvar')?.addEventListener('click', async () => {
+        const checkNome = sub.querySelector('#ri-verif-check')?.value?.trim();
+        const descricaoCheck = sub.querySelector('#ri-verif-desc')?.value?.trim() || '';
+        const localVal = sub.querySelector('#ri-verif-local')?.value?.trim() || kanbanLocal;
+        const fotoFile = sub.querySelector('#ri-verif-foto')?.files?.[0];
+        const videoFile = sub.querySelector('#ri-verif-video')?.files?.[0];
+        const st = sub.querySelector('#ri-verif-status');
+        if (!checkNome) {
+          if (st) { st.textContent = 'Informe o nome do check.'; st.style.color = '#f87171'; }
+          return;
+        }
+        if (!localVal) {
+          if (st) { st.textContent = 'Selecione o local (kanban).'; st.style.color = '#f87171'; }
+          return;
+        }
+        const fd = new FormData();
+        fd.append('check', checkNome);
+        fd.append('descricao_check', descricaoCheck);
+        fd.append('codigo_produto', codigo);
+        fd.append('local', localVal);
+        if (fotoFile) fd.append('foto', fotoFile);
+        if (videoFile) fd.append('video', videoFile);
+        const btn = sub.querySelector('#ri-verif-salvar');
+        if (btn) { btn.disabled = true; btn.textContent = 'Salvando...'; }
+        try {
+          const resp = await fetch(`/api/qualidade/ri-check/${riCheckId}/verificacoes`, {
+            method: 'POST',
+            credentials: 'include',
+            body: fd,
+          });
+          const data = await resp.json();
+          if (!resp.ok || !data.ok) throw new Error(data.error || `Erro ${resp.status}`);
+          fecharSub();
+          await recarregarVerificacoes();
+        } catch (err) {
+          if (st) { st.textContent = err.message || 'Falha ao salvar.'; st.style.color = '#f87171'; }
+        } finally {
+          if (btn) { btn.disabled = false; btn.textContent = 'Salvar verificação'; }
+        }
+      });
+    };
+
+    btnAdd?.addEventListener('click', abrirModalAddVerificacao);
+
+    btnSalvar?.addEventListener('click', async () => {
+      if (!riCheckId) return;
+      btnSalvar.disabled = true;
+      try {
+        const resp = await fetch(`/api/qualidade/ri-check/${riCheckId}/salvar`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({
+            avancar_teste: isEletrica,
+            kanban_local: kanbanLocal,
+          }),
+        });
+        const data = await resp.json();
+        if (!resp.ok || !data.ok) throw new Error(data.error || `Erro ${resp.status}`);
+        renderInfo(data.check);
+        renderLista(data.verificacoes);
+        if (data.avancou_teste) {
+          statusEl.textContent = 'Salvo! Status alterado para Teste. OP movida para o kanban Teste.';
+          statusEl.style.color = '#4ade80';
+          if (typeof window._producaoRecarregarProgramacaoColunas === 'function') {
+            await window._producaoRecarregarProgramacaoColunas(['produzindo', 'teste']);
+          }
+        } else {
+          statusEl.textContent = 'Registro salvo.';
+          statusEl.style.color = '#4ade80';
+        }
+      } catch (err) {
+        statusEl.textContent = err.message || 'Falha ao salvar.';
+        statusEl.style.color = '#f87171';
+      } finally {
+        btnSalvar.disabled = false;
+      }
+    });
+
+    btnLiberar?.addEventListener('click', async () => {
+      if (!riCheckId) return;
+      if (!confirm('Confirmar liberação? A OP irá para Montagem eletrica.')) return;
+      btnLiberar.disabled = true;
+      try {
+        const resp = await fetch(`/api/qualidade/ri-check/${riCheckId}/liberar`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: '{}',
+        });
+        const data = await resp.json();
+        if (!resp.ok || !data.ok) throw new Error(data.error || `Erro ${resp.status}`);
+        renderInfo(data.check);
+        renderLista(data.verificacoes);
+        statusEl.textContent = 'Liberado! OP movida para Montagem eletrica.';
+        statusEl.style.color = '#4ade80';
+        if (typeof window._producaoRecarregarProgramacaoColunas === 'function') {
+          await window._producaoRecarregarProgramacaoColunas(['solicitado', 'produzindo']);
+        }
+      } catch (err) {
+        statusEl.textContent = err.message || 'Falha ao liberar.';
+        statusEl.style.color = '#f87171';
+        btnLiberar.disabled = false;
+      }
+    });
+
+    await carregar();
+  }
+
+  async function carregarEstoqueAnalisePedido(codigo, targetEl) {
+    if (!targetEl) return;
+    const cod = String(codigo || '').trim();
+    targetEl.innerHTML = '<div style="text-align:center;padding:16px;color:#94a3b8;font-size:12px;"><i class="fa-solid fa-spinner fa-spin" style="margin-right:6px;"></i>Carregando estoque...</div>';
+    try {
+      const resp = await fetch(`/api/logistica/estoque?q=${encodeURIComponent(cod)}`);
+      const data = await resp.json();
+      if (!resp.ok || !data.ok) throw new Error(data.error || 'Erro ao carregar estoque');
+      const rows = (data.dados || []).filter(r => String(r.codigo || '').trim().toUpperCase() === cod.toUpperCase());
+      if (!rows.length) {
+        targetEl.innerHTML = '<div style="text-align:center;padding:16px;color:#64748b;font-size:12px;">Nenhum registro em estoque para este produto.</div>';
+        return;
+      }
+      const linhas = rows.map(r => `<tr style="border-bottom:1px solid rgba(255,255,255,.06);">
+        <td style="padding:6px 8px;font-size:11px;color:#e2e8f0;white-space:nowrap;">${escapeHtml(r.codigo || '—')}</td>
+        <td style="padding:6px 8px;font-size:11px;color:#94a3b8;white-space:nowrap;">${escapeHtml(r.cod_int || '—')}</td>
+        <td style="padding:6px 8px;font-size:11px;color:#cbd5e1;">${escapeHtml(r.local_nome || r.local_codigo || '—')}</td>
+        <td style="padding:6px 8px;font-size:11px;color:#fcd34d;text-align:right;font-weight:600;">${escapeHtml(String(r.saldo ?? '—'))}</td>
+      </tr>`).join('');
+      targetEl.innerHTML = `
+        <div style="margin-top:4px;">
+          <div style="font-size:11px;font-weight:700;color:#94a3b8;margin-bottom:8px;text-transform:uppercase;letter-spacing:.4px;">Estoque atual</div>
+          <div style="max-height:220px;overflow:auto;">
+            <table style="width:100%;border-collapse:collapse;">
+              <thead>
+                <tr style="border-bottom:1px solid rgba(255,255,255,.1);">
+                  <th style="padding:6px 8px;font-size:10px;color:#64748b;text-align:left;">Código</th>
+                  <th style="padding:6px 8px;font-size:10px;color:#64748b;text-align:left;">Cod. int.</th>
+                  <th style="padding:6px 8px;font-size:10px;color:#64748b;text-align:left;">Local</th>
+                  <th style="padding:6px 8px;font-size:10px;color:#64748b;text-align:right;">Saldo</th>
+                </tr>
+              </thead>
+              <tbody>${linhas}</tbody>
+            </table>
+          </div>
+        </div>`;
+    } catch (e) {
+      targetEl.innerHTML = `<div style="text-align:center;padding:16px;color:#f87171;font-size:12px;">${escapeHtml(e.message || 'Erro ao carregar estoque.')}</div>`;
+    }
+  }
+
+  function openProducaoKanbanActionsModal(produtoCodigo, groupKey, ops, operacaoFiltro, opts) {
+    const options = opts || {};
+    const somenteEstrutura = !!options.somenteEstrutura;
+    const mostrarEstoque = !!options.mostrarEstoque;
+    const mostrarImprimirOp = options.colKey === 'programado';
+    const mostrarRi = (options.colKey === 'solicitado' || options.colKey === 'produzindo') && ops.length === 1;
+    const tituloModal = options.titulo || 'Ações do grupo';
     const overlay = document.createElement('div');
     overlay.className = 'kanban-modal-overlay';
     overlay.addEventListener('click', (ev) => { if (ev.target === overlay) overlay.remove(); });
@@ -72745,21 +73338,28 @@ window.verOperacao = function(osId) {
     modal.innerHTML = `
       <header>
         <div>
-          <h2>Ações do grupo</h2>
+          <h2>${escapeHtml(tituloModal)}</h2>
           <span>${escapeHtml(produtoCodigo || groupKey)}</span>
         </div>
         <button class="close-btn" aria-label="Fechar">&times;</button>
       </header>
       <div class="kanban-modal-body">
         <div class="modal-code-block">
-          <p>Escolha uma ação para o grupo de produção:</p>
+          <p>${somenteEstrutura ? 'Consulte a estrutura do produto:' : 'Escolha uma ação para o grupo de produção:'}</p>
           <div style="display:flex;flex-wrap:wrap;gap:10px;margin-top:12px;">
             <button type="button" id="open-estrutura-btn" class="modal-primary" style="min-width:140px;">Ver estrutura</button>
+            ${somenteEstrutura ? '' : `
             <button type="button" id="open-process-btn" class="modal-secondary" style="min-width:140px;">Processo</button>
+            ${mostrarImprimirOp ? `
             <button type="button" id="open-imprimir-op-btn" class="modal-secondary" style="min-width:140px;">
               <i class="fa-solid fa-print"></i> Imprimir OP
-            </button>
+            </button>` : ''}
+            ${mostrarRi ? `
+            <button type="button" id="open-ri-check-btn" class="modal-secondary" style="min-width:180px;">
+              <i class="fa-solid fa-clipboard-check"></i> RI - Registro de inspeção
+            </button>` : ''}`}
           </div>
+          ${mostrarEstoque ? '<div id="analise-estoque-pedido"></div>' : ''}
         </div>
       </div>
       <footer>
@@ -72776,17 +73376,31 @@ window.verOperacao = function(osId) {
     modal.querySelector('#open-estrutura-btn')?.addEventListener('click', () => {
       close();
       const iappId = ops && ops[0] ? ops[0].id : null;
-      if (!iappId) return;
+      if (!iappId) {
+        alert('Nenhuma OP encontrada para este produto. A estrutura só pode ser consultada quando existir OP no kanban.');
+        return;
+      }
       openProducaoEstruturaPorIappId(iappId, produtoCodigo || groupKey);
     });
-    modal.querySelector('#open-process-btn')?.addEventListener('click', () => {
-      close();
-      openProducaoKanbanProcessModal(groupKey, ops);
-    });
-    modal.querySelector('#open-imprimir-op-btn')?.addEventListener('click', () => {
-      close();
-      openProducaoImprimirOpModal(produtoCodigo, groupKey, ops, operacaoFiltro || '');
-    });
+    if (!somenteEstrutura) {
+      modal.querySelector('#open-process-btn')?.addEventListener('click', () => {
+        close();
+        openProducaoKanbanProcessModal(groupKey, ops);
+      });
+      modal.querySelector('#open-imprimir-op-btn')?.addEventListener('click', () => {
+        close();
+        openProducaoImprimirOpModal(produtoCodigo, groupKey, ops, { fromProgramado: true });
+      });
+      modal.querySelector('#open-ri-check-btn')?.addEventListener('click', () => {
+        close();
+        const op = ops[0];
+        if (!op) return;
+        openProducaoRiCheckModal(op, produtoCodigo || groupKey, options.colKey || '');
+      });
+    }
+    if (mostrarEstoque) {
+      carregarEstoqueAnalisePedido(produtoCodigo || groupKey, modal.querySelector('#analise-estoque-pedido'));
+    }
   }
 
   function attachProducaoKanbanActionButtons(containerSelector, ordens) {
@@ -72803,10 +73417,15 @@ window.verOperacao = function(osId) {
 
         const groupKey = btn.dataset.groupKey || '';
         const produtoCodigo = btn.dataset.produtoCodigo || groupKey;
-        const ops = ordens.filter(op => (op.produto?.identificacao || String(op.id)) === groupKey);
+        const grupoEl = btn.closest('.kanban-prod-grupo');
+        const colKey = grupoEl?.dataset.colKey || '';
+        const opsGrupo = ordens.filter(op => (op.produto?.identificacao || String(op.id)) === groupKey);
+        const ops = (colKey && typeof window._producaoFiltrarOpsColuna === 'function')
+          ? window._producaoFiltrarOpsColuna(opsGrupo, colKey)
+          : opsGrupo;
         const operacaoFiltro = filtroSelect ? filtroSelect.value : '';
 
-        openProducaoKanbanActionsModal(produtoCodigo, groupKey, ops, operacaoFiltro);
+        openProducaoKanbanActionsModal(produtoCodigo, groupKey, ops, operacaoFiltro, { colKey });
       });
     });
   }
@@ -72832,11 +73451,10 @@ window.verOperacao = function(osId) {
 
         const groupKey = op.produto?.identificacao || String(op.id);
         const produtoCodigo = op.produto?.identificacao || groupKey;
-        const filtroSelect = container.querySelector('#producaoFiltroOperacao, #montaFiltroOperacao');
-        const operacaoFiltro = filtroSelect ? filtroSelect.value : '';
+        const grupoEl = card.closest('.kanban-prod-grupo');
+        const colKey = grupoEl?.dataset.colKey || '';
 
-        // Abre modal de ações para o grupo/OP
-        openProducaoKanbanActionsModal(produtoCodigo, groupKey, [op], operacaoFiltro);
+        openProducaoKanbanActionsModal(produtoCodigo, groupKey, [op], '', { colKey });
       });
     });
   }
