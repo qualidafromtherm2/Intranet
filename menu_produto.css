@@ -5517,6 +5517,12 @@ ul#comprasList li ,
   box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.25);
 }
 
+.kanban-op-card.prog-kanban-op-drop.op-drop-hover-invalid {
+  border-color: rgba(239, 68, 68, 0.9) !important;
+  box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.35);
+  background: rgba(127, 29, 29, 0.18) !important;
+}
+
 .kanban-prog-pedido-badge {
   display: inline-flex;
   align-items: center;
@@ -11164,6 +11170,23 @@ table.tabela td.num {
   color: #94a3b8; padding: 7px 10px; cursor: pointer; flex-shrink: 0;
 }
 .movim-impr-btn-icon:hover { color: #e2e8f0; border-color: #475569; }
+
+/* Listbox postos — modal Gerar OP (Registrar produção) */
+.producao-gerar-op-postos-select {
+  background: #1e293b;
+  color: #f1f5f9;
+  border: 1px solid #334155;
+}
+.producao-gerar-op-postos-select:focus { border-color: #10b981; }
+.producao-gerar-op-postos-select option {
+  background-color: #1e293b;
+  color: #f1f5f9;
+}
+.producao-gerar-op-postos-select option:checked,
+.producao-gerar-op-postos-select option:hover {
+  background-color: #334155;
+  color: #f8fafc;
+}
 
 /* Sub-modal impressão ETQ */
 .movim-imp-overlay {

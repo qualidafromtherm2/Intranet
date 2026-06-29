@@ -4553,6 +4553,7 @@ router.get('/solicitacoes', async (req, res) => {
     // Fila Envio de mercadoria: apenas rastreio_status Validada ou Processamento Vipp
     if (filaLogistica) {
       conditions.push("COALESCE(rastreio_status, '') IN ('Valida', 'Processamento Vipp')");
+      conditions.push("COALESCE(status, '') NOT IN ('Excluído', 'Enviado', 'Finalizado')");
     } else if (hideDone) {
       // Filtro por status (oculta Enviado, Finalizado e Excluído)
       conditions.push("COALESCE(status, '') NOT IN ('Enviado', 'Finalizado', 'Excluído')");

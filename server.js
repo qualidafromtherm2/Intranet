@@ -11,6 +11,7 @@ if (IS_CHAT_SERVICE) {
 // utils/supabase.js — carrega R2 na subida (log do backend)
 require('./utils/supabase');
 const { uploadPublicFile, removePublicFiles } = require('./utils/storage');
+const { registrarControleOperacaoImpressaoOp } = require('./utils/controleOperacoes');
 const { injectStoragePublicUrls, getStoragePublicBaseUrl, ASSETS, agenteExeUrl } = require('./utils/storageUrls');
 const OMIE_WEBHOOK_TOKEN = process.env.OMIE_WEBHOOK_TOKEN || null; // se NULL, não exige token
 // Em server.js (topo do arquivo)
@@ -262,6 +263,7 @@ app.use('/api/registros', require('./routes/registros'));
 app.use('/api/sac', require('./routes/sacEnvios'));
 app.use('/api/ai', require('./routes/ai_assistant'));
 app.use('/api/producao', require('./routes/producao'));
+app.use('/api/estrutura', require('./routes/estrutura'));
 app.use('/api/transformacao-mp', require('./routes/transformacaoMp'));
 app.use('/api/vipp',    require('./routes/vipp'));
 app.use('/api/usuario', require('./routes/usuario'));
@@ -11252,24 +11254,76 @@ async function _insertEtqRecImpressoRecebimento(db, { origemId, qtd, unidade, da
   return rows[0].id;
 }
 
+// ── Helper: quebra descrição da etiqueta (~38 caracteres por linha, respeitando espaços) ──
+const DESC_ETQ_CHARS_POR_LINHA = 39;
+const DESC_ETQ_MAX_LINHAS = 4;
+
+function _quebrarDescricaoEtiqueta(texto, maxChars = DESC_ETQ_CHARS_POR_LINHA, maxLinhas = DESC_ETQ_MAX_LINHAS) {
+  const t = String(texto || '').trim();
+  if (!t) return [];
+  const linhas = [];
+  let resto = t;
+  while (resto.length > 0 && linhas.length < maxLinhas) {
+    if (resto.length <= maxChars) {
+      linhas.push(resto);
+      break;
+    }
+    let corte = resto.lastIndexOf(' ', maxChars);
+    if (corte <= 0) corte = maxChars;
+    linhas.push(resto.slice(0, corte).trim());
+    resto = resto.slice(corte).trim();
+  }
+  return linhas;
+}
+
+function _descricaoParaZpl(descProd) {
+  const limpo = String(descProd || '').slice(0, 160).replace(/[\\^~]/g, ' ');
+  const linhas = _quebrarDescricaoEtiqueta(limpo);
+  return {
+    texto: linhas.join('\\&'),
+    linhas: linhas.length || 1,
+  };
+}
+
 // ── Helper: gera ZPL para IMPRESSÃO física (layout Etiquetas disponíveis) ──
 function _gerarZplParaImpressao({ codProd, descProd, idImpresso, loteTxt, dataExibir }) {
   const qr = `${codProd}|${String(descProd || '').slice(0, 40)}|${loteTxt}|ID${idImpresso}`;
-  const descLinha = String(descProd || '').slice(0, 80);
-  const descY = 150; // 132 + altura de uma letra (18) — evita sobrepor o QR
+  const { texto: descTxt, linhas: numLinhasDesc } = _descricaoParaZpl(descProd);
+  const dadosX = 150; // à direita do QR sem sobrepor (132 encostava no QR)
+  const dadosY = 22;  // margem superior — alinha com o topo visual do QR
+  const descX = 10;   // alinhado à esquerda com o QR
+  const descY = 158;  // abaixo do QR, com folga (era 150 e encostava)
+  const alturaLinhaDesc = 22;
+  const labelLen = Math.max(183, descY + numLinhasDesc * alturaLinhaDesc + 6);
   return [
     '^XA',
     '^CI28',
     '^PW812',
-    '^LL183',
+    `^LL${labelLen}`,
     `^FO10,10^BQN,2,4^FDLA,${qr}^FS`,
-    `^FO195,10^A0N,20,20^FDCod. Produto: ${codProd}^FS`,
-    `^FO195,34^A0N,20,20^FDID: ${idImpresso}^FS`,
-    `^FO195,58^A0N,20,20^FDLote: ${loteTxt}^FS`,
-    `^FO195,82^A0N,20,20^FDEmissao: ${dataExibir}^FS`,
-    `^FO10,${descY}^A0N,18,18^FB780,2,0,L,0^FD${descLinha}^FS`,
+    `^FO${dadosX},${dadosY}^A0N,20,20^FDCod. Produto: ${codProd}^FS`,
+    `^FO${dadosX},${dadosY + 24}^A0N,20,20^FDID: ${idImpresso}^FS`,
+    `^FO${dadosX},${dadosY + 48}^A0N,20,20^FDLote: ${loteTxt}^FS`,
+    `^FO${dadosX},${dadosY + 72}^A0N,20,20^FDEmissao: ${dataExibir}^FS`,
+    `^FO${descX},${descY}^A0N,18,18^FD${descTxt}^FS`,
     '^XZ',
   ].join('\n');
+}
+
+async function _zplCombinadoParaPdf(zplCombinado, labelSize = '4x0.9') {
+  const labelaryResp = await fetch(
+    `http://api.labelary.com/v1/printers/8dpmm/labels/${labelSize}/`,
+    {
+      method: 'POST',
+      headers: { Accept: 'application/pdf', 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: zplCombinado,
+    }
+  );
+  if (!labelaryResp.ok) {
+    const txt = await labelaryResp.text().catch(() => '');
+    throw new Error(`Labelary retornou ${labelaryResp.status}: ${txt.slice(0, 120)}`);
+  }
+  return Buffer.from(await labelaryResp.arrayBuffer());
 }
 
 // ── Etiquetas de Recebimento: gera PDF + salva no banco (1 etiqueta por item) ─
@@ -12977,8 +13031,8 @@ app.post('/api/etiquetas/recebimento/imprimir-modal', express.json(), async (req
 });
 
 // POST /api/etiquetas/iapp-op/imprimir
-// Body: { items: [{ os_id, lote, codigo_produto, descricao_produto? }], destino_agente?, impressora?, usuario? }
-// lote = op_iapp_os.identificacao. Atualiza status_producao para Solicitado.
+// Body: { items: [{ os_id?, op_producao_id?, lote, codigo_produto, descricao_produto? }], destino_agente?, impressora?, usuario? }
+// lote = número da OP. Atualiza kanban para Montagem hermetica.
 app.post('/api/etiquetas/iapp-op/imprimir', express.json(), async (req, res) => {
   try {
     const items = Array.isArray(req.body?.items) ? req.body.items : [];
@@ -13000,10 +13054,12 @@ app.post('/api/etiquetas/iapp-op/imprimir', express.json(), async (req, res) => 
     const osAtualizadas = [];
 
     for (const item of items) {
-      const osId     = Number(item.os_id) || 0;
-      const loteRaw  = String(item.lote || item.os_identificacao || '').trim();
-      const codigo   = String(item.codigo_produto || '').trim();
-      if (!osId || !loteRaw || !codigo) continue;
+      const osId          = Number(item.os_id) || 0;
+      const opProducaoId  = Number(item.op_producao_id) || 0;
+      const loteRaw       = String(item.lote || item.os_identificacao || '').trim();
+      const codigo        = String(item.codigo_produto || '').trim();
+      if (!loteRaw || !codigo) continue;
+      if (!osId && !opProducaoId) continue;
 
       let descricao = String(item.descricao_produto || '').trim();
       if (!descricao) {
@@ -13028,7 +13084,7 @@ app.post('/api/etiquetas/iapp-op/imprimir', express.json(), async (req, res) => 
       }
 
       const codProd  = sanitize(codigo, 30);
-      const descProd = sanitize(descricao, 70);
+      const descProd = sanitize(descricao, 160);
       const loteTxt  = sanitize(loteRaw, 40);
       const idOmie = await _resolveProdutoOmieCodigoProduto(pool, codigo);
       const campos = await _etqResolveProdutoCampos(pool, {
@@ -13053,12 +13109,39 @@ app.post('/api/etiquetas/iapp-op/imprimir', express.json(), async (req, res) => 
       );
       zplBlocks.push(zpl);
 
-      const opIappRow = await pool.query(
-        `SELECT op_iapp_id FROM "IAPP_API".op_iapp_os WHERE os_id = $1 LIMIT 1`,
-        [osId]
-      );
+      const opIappRow = osId
+        ? await pool.query(
+            `SELECT op_iapp_id FROM "IAPP_API".op_iapp_os WHERE os_id = $1 LIMIT 1`,
+            [osId]
+          )
+        : { rows: [] };
       const opIappId = Number(item.op_iapp_id) || Number(opIappRow.rows[0]?.op_iapp_id) || 0;
-      if (opIappId > 0) {
+
+      if (opProducaoId > 0) {
+        const codigoProdutoNum = idOmie ? Number(idOmie) : null;
+        const numeroOpTxt = loteRaw;
+        const updKanban = await pool.query(
+          `UPDATE "Producao"."Kanban_programacao"
+              SET codigo_produto = COALESCE($2, codigo_produto),
+                  codigo = COALESCE(NULLIF($3, ''), codigo),
+                  descricao = COALESCE(NULLIF($4, ''), descricao),
+                  numero_op = COALESCE(NULLIF($5, ''), numero_op),
+                  status = CASE
+                    WHEN COALESCE(TRIM(status), '') IN ('', 'Montagem hermetica') THEN 'Montagem hermetica'
+                    ELSE status
+                  END
+            WHERE op_producao_id = $1`,
+          [opProducaoId, codigoProdutoNum, codigo, descricao, numeroOpTxt]
+        );
+        if (!updKanban.rowCount) {
+          await pool.query(
+            `INSERT INTO "Producao"."Kanban_programacao"
+               (codigo_produto, codigo, descricao, codigo_pedido, quantidade, numero_op, op_producao_id, status)
+             VALUES ($1, $2, $3, 0, 1, $4, $5, 'Montagem hermetica')`,
+            [codigoProdutoNum, codigo, descricao, numeroOpTxt, opProducaoId]
+          );
+        }
+      } else if (opIappId > 0) {
         await pool.query(
           `UPDATE "IAPP_API".op_iapp_os
               SET status_producao = 'Solicitado',
@@ -13067,7 +13150,31 @@ app.post('/api/etiquetas/iapp-op/imprimir', express.json(), async (req, res) => 
               AND COALESCE(TRIM(status_producao), '') NOT IN ('Iniciado', 'Produzindo', 'Parado')`,
           [opIappId]
         );
-      } else {
+
+        const codigoProdutoNum = idOmie ? Number(idOmie) : null;
+        const numeroOpTxt = loteRaw;
+        const updKanban = await pool.query(
+          `UPDATE "Producao"."Kanban_programacao"
+              SET codigo_produto = COALESCE($2, codigo_produto),
+                  codigo = COALESCE(NULLIF($3, ''), codigo),
+                  descricao = COALESCE(NULLIF($4, ''), descricao),
+                  numero_op = COALESCE(NULLIF($5, ''), numero_op),
+                  status = CASE
+                    WHEN COALESCE(TRIM(status), '') IN ('', 'Montagem hermetica') THEN 'Montagem hermetica'
+                    ELSE status
+                  END
+            WHERE op_iapp_id = $1`,
+          [opIappId, codigoProdutoNum, codigo, descricao, numeroOpTxt]
+        );
+        if (!updKanban.rowCount) {
+          await pool.query(
+            `INSERT INTO "Producao"."Kanban_programacao"
+               (codigo_produto, codigo, descricao, codigo_pedido, quantidade, numero_op, op_iapp_id, status)
+             VALUES ($1, $2, $3, 0, 1, $4, $5, 'Montagem hermetica')`,
+            [codigoProdutoNum, codigo, descricao, numeroOpTxt, opIappId]
+          );
+        }
+      } else if (osId > 0) {
         await pool.query(
           `UPDATE "IAPP_API".op_iapp_os
               SET status_producao = 'Solicitado',
@@ -13076,11 +13183,34 @@ app.post('/api/etiquetas/iapp-op/imprimir', express.json(), async (req, res) => 
           [osId]
         );
       }
-      osAtualizadas.push(osId);
+
+      try {
+        await registrarControleOperacaoImpressaoOp({
+          opProducaoId,
+          opIappId,
+          numeroOp: loteRaw,
+          usuario,
+          operacao: 'Imprimir OP',
+        });
+      } catch (ctrlErr) {
+        console.error('[controle_operacoes] Falha ao registrar impressão OP:', ctrlErr.message);
+      }
+
+      if (osId > 0) osAtualizadas.push(osId);
+      else if (opProducaoId > 0) osAtualizadas.push(opProducaoId);
     }
 
     if (!zplBlocks.length) {
       return res.status(400).json({ error: 'Nenhuma OS válida para imprimir.' });
+    }
+
+    const modoPdf = String(req.body?.modo || '').toLowerCase() === 'pdf';
+    if (modoPdf) {
+      const pdfBuffer = await _zplCombinadoParaPdf(zplBlocks.join('\n'));
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', 'inline; filename="etiquetas_op.pdf"');
+      res.setHeader('Cache-Control', 'no-store');
+      return res.send(pdfBuffer);
     }
 
     const filaIns = await pool.query(

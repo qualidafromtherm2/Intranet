@@ -12733,6 +12733,8 @@ function atualizarMetricasEnvioMercadoria(rows) {
 const RASTREIO_STATUS_FILA_ENVIO = new Set(['Valida', 'Processamento Vipp']);
 
 function filtrarEnvioMercadoria(row) {
+  const statusRaw = normalizarTextoEnvioMercadoria(row?.status);
+  if (statusRaw === 'excluido' || statusRaw === 'enviado' || statusRaw === 'finalizado') return false;
   const rastreioStatus = row?.rastreio_status ? String(row.rastreio_status).trim() : '';
   return RASTREIO_STATUS_FILA_ENVIO.has(rastreioStatus);
 }
@@ -20059,6 +20061,19 @@ async function _envioMostrarSeletor(container) {
   });
 }
 
+async function _envioMarcarComoEnviado(envioId) {
+  const resp = await fetch(`/api/sac/solicitacoes/${encodeURIComponent(envioId)}/status`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',
+    body: JSON.stringify({ status: 'Enviado' }),
+  });
+  const data = await resp.json().catch(() => ({}));
+  if (!resp.ok || data.ok === false) {
+    throw new Error(data.error || 'Falha ao marcar envio como Enviado');
+  }
+}
+
 async function _envioImprimirEtiqueta(envioId, identificacao, btnRef) {
   if (btnRef) btnRef.disabled = true;
   try {
@@ -20162,8 +20177,13 @@ function setupEnvioPrintButtons(container) {
         const erros = [!rEtq.ok && ('Etiqueta: ' + (rEtq.error || 'Erro')), !rDec.ok && ('Declaração: ' + (rDec.error || 'Erro'))].filter(Boolean);
         if (erros.length) throw new Error(erros.join(' | '));
       }
-      btn.innerHTML = '<i class="fa-solid fa-check" style="color:#4ade80;"></i><span>Enviado!</span>';
-      setTimeout(() => { btn.innerHTML = origHtml; btn.disabled = false; }, 3000);
+      await _envioMarcarComoEnviado(envioId);
+      if (typeof carregarSacSolicitacoes === 'function' && envioMercadoriaTabelaBodyPane) {
+        await carregarSacSolicitacoes(envioMercadoriaTabelaBodyPane, { filaLogistica: true });
+      } else {
+        btn.innerHTML = '<i class="fa-solid fa-check" style="color:#4ade80;"></i><span>Enviado!</span>';
+        setTimeout(() => { btn.innerHTML = origHtml; btn.disabled = false; }, 3000);
+      }
     } catch (err) {
       alert('Erro ao imprimir: ' + err.message);
       btn.innerHTML = origHtml;
@@ -71607,6 +71627,8 @@ window.verOperacao = function(osId) {
   const cntProduzindo = document.getElementById('kanbanProduzindoCount');
   const colAguardando = document.getElementById('kanbanAguardando');
   const cntAguardando = document.getElementById('kanbanAguardandoCount');
+  const colInspecaoFinal = document.getElementById('kanbanInspecaoFinal');
+  const cntInspecaoFinal = document.getElementById('kanbanInspecaoFinalCount');
 
   // Nomes exibidos no kanban Registrar produção — ao criar coluna nova, incluir aqui
   const PRODUCAO_KANBAN_COLUNAS = [
@@ -71615,6 +71637,7 @@ window.verOperacao = function(osId) {
     { key: 'solicitado', nome: 'Montagem hermetica' },
     { key: 'produzindo', nome: 'Montagem eletrica' },
     { key: 'teste', nome: 'Teste' },
+    { key: 'inspecao_final', nome: 'Inspeção final' },
   ];
 
   function producaoNomeKanbanPorKey(colKey) {
@@ -71632,6 +71655,7 @@ window.verOperacao = function(osId) {
   let filtroCodigoProduto = null;
   let filtroPesquisa = '';
   let pesquisaDebounce = null;
+  let pedidoArrastando = null;
 
   function normCodigo(c) {
     return String(c || '').trim().toUpperCase();
@@ -71642,7 +71666,7 @@ window.verOperacao = function(osId) {
   }
 
   function opMatchesPesquisa(op) {
-    const termo = normPesquisa(filtroPesquisa);
+    const termo = normPesquisa(filtroPesquisa || window._montaFiltroPesquisa || '');
     if (!termo) return true;
     const modelo = normPesquisa(op.produto?.identificacao);
     const opNum = normPesquisa(op.identificacao);
@@ -71663,11 +71687,17 @@ window.verOperacao = function(osId) {
   function buildProgramacaoMapByOp(registros) {
     const map = {};
     for (const reg of (registros || [])) {
+      const opProdId = Number(reg.op_producao_id);
+      if (Number.isFinite(opProdId) && opProdId > 0) {
+        const idKey = `id:${opProdId}`;
+        if (!map[idKey]) map[idKey] = [];
+        map[idKey].push(reg);
+      }
       const opId = Number(reg.op_iapp_id);
       if (Number.isFinite(opId) && opId > 0) {
         const idKey = `id:${opId}`;
         if (!map[idKey]) map[idKey] = [];
-        map[idKey].push(reg);
+        if (!map[idKey].some(r => r.id === reg.id)) map[idKey].push(reg);
       }
       const opNum = String(reg.numero_op || '').trim();
       if (opNum) {
@@ -71745,11 +71775,6 @@ window.verOperacao = function(osId) {
     return fmtData(str);
   }
 
-  function fmtMoeda(v) {
-    if (v == null || v === '') return '—';
-    return 'R$ ' + Number(v).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  }
-
   function fmtQtde(v) {
     if (v == null || v === '') return '—';
     const n = parseFloat(v);
@@ -71781,34 +71806,51 @@ window.verOperacao = function(osId) {
     return `<span style="flex-shrink:0;display:inline-block;padding:1px 6px;border-radius:4px;font-size:10px;font-weight:700;background:${c.bg};color:${c.txt};">${s}</span>`;
   }
 
-  function opKanbanProgStatus(op) {
+  function opKanbanProgRegs(op) {
     const progMap = buildProgramacaoMapByOp(programacaoCarregada);
-    const regs = getProgRegsForOp(op, progMap);
-    const statuses = regs.map(r => String(r.status || '').trim()).filter(Boolean);
-    if (statuses.includes('Teste')) return 'Teste';
-    if (statuses.includes('Montagem eletrica')) return 'Montagem eletrica';
-    return null;
+    return getProgRegsForOp(op, progMap);
+  }
+
+  function normStatusKanban(s) {
+    return String(s || '')
+      .trim()
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/\p{M}/gu, '');
+  }
+
+  function parsePostosKanban(val) {
+    if (!val) return [];
+    if (Array.isArray(val)) return val.map(v => String(v || '').trim()).filter(Boolean);
+    try {
+      const arr = JSON.parse(String(val));
+      return Array.isArray(arr) ? arr.map(v => String(v || '').trim()).filter(Boolean) : [];
+    } catch (_) {
+      return [];
+    }
+  }
+
+  function observacaoVisivelNoKanban(opRegs, colKey) {
+    const obs = opRegs.map(r => String(r.observacao || '').trim()).find(Boolean) || '';
+    if (!obs) return '';
+    const postosPlan = [...new Set(opRegs.flatMap(r => parsePostosKanban(r.postos)))];
+    if (!postosPlan.length || colKey === 'programado') return obs;
+    const nomeCol = producaoNomeKanbanPorKey(colKey);
+    return postosPlan.includes(nomeCol) ? obs : '';
   }
 
   function opColunaAtual(op) {
-    const kp = opKanbanProgStatus(op);
-    if (kp === 'Teste') return 'teste';
-    if (kp === 'Montagem eletrica') return 'produzindo';
+    const regs = opKanbanProgRegs(op);
+    if (!regs.length) return 'programado';
 
-    const oss = op.ordens_servico || [];
-    if (!oss.length) return 'programado';
-    let temProduzindo = false;
-    let temSolicitado = false;
-    let temSemStatus = false;
-    for (const os of oss) {
-      const sp = String(os.status_producao || '').trim();
-      if (!sp) temSemStatus = true;
-      else if (sp === 'Solicitado') temSolicitado = true;
-      else if (sp === 'Iniciado' || sp === 'Produzindo') temProduzindo = true;
-    }
-    if (temProduzindo) return 'produzindo';
-    if (temSolicitado) return 'solicitado';
-    if (temSemStatus) return 'programado';
+    const statuses = regs.map(r => normStatusKanban(r.status)).filter(Boolean);
+    if (statuses.includes('finalizado')) return 'finalizado';
+    if (statuses.includes('inspecao final') || statuses.includes('teste ok')) return 'inspecao_final';
+    if (statuses.includes('teste')) return 'teste';
+    if (statuses.includes('montagem eletrica')) return 'produzindo';
+    if (statuses.includes('montagem hermetica')) return 'solicitado';
+
+    // Vínculo pedido→OP (status vazio) — permanece em Programado até imprimir etiqueta
     return 'programado';
   }
 
@@ -71845,11 +71887,23 @@ window.verOperacao = function(osId) {
     if (cntEl) cntEl.textContent = totalOps;
   }
 
+  function opMontagemRiLiberada(op, colKey) {
+    if (!window._producaoRenderModoMontagem) return true;
+    if (colKey === 'programado') return true;
+    const nomeKanban = producaoNomeKanbanPorKey(colKey);
+    if (!nomeKanban) return true;
+    const map = window._montaRiStatusPorOp || {};
+    const riStatus = map[String(op.id)] || '';
+    if (!riStatus) return false;
+    return normStatusKanban(riStatus) === normStatusKanban(nomeKanban);
+  }
+
   function renderGrupo(prodId, ops, colKey) {
     const prod = ops[0].produto || {};
     const qtdeTotal = ops.reduce((s, op) => s + (Number(op.qtde) || 0), 0);
     const progMapByOp = buildProgramacaoMapByOp(programacaoCarregada);
-    const podeReceberPedido = ['programado', 'solicitado', 'produzindo'].includes(colKey);
+    const modoMontagem = !!window._producaoRenderModoMontagem;
+    const podeReceberPedido = !modoMontagem && ['programado', 'solicitado', 'produzindo'].includes(colKey);
 
     const opsHtml = ops.map(op => {
       const opRegs = getProgRegsForOp(op, progMapByOp);
@@ -71865,12 +71919,29 @@ window.verOperacao = function(osId) {
       const prodCodigoAttr = escHtml(prod.identificacao || prodId);
       const opIdentAttr = escHtml(op.identificacao || '');
       const dropTitle = podeReceberPedido ? 'Solte um item de Pedidos aqui (mesmo código de produto)' : '';
+      const obsKanban = observacaoVisivelNoKanban(opRegs, colKey);
+      const postosPlan = [...new Set(opRegs.flatMap(r => parsePostosKanban(r.postos)))];
+      const postosPlanHtml = postosPlan.length && colKey === 'programado'
+        ? `<div style="font-size:10px;color:#818cf8;margin-top:4px;">Postos: ${postosPlan.map(p => escHtml(p)).join(' · ')}</div>`
+        : '';
 
-      return `<div data-op-id="${op.id}" class="kanban-op-card${dropClass}${vincClass}"
+      const riLiberada = opMontagemRiLiberada(op, colKey);
+      const riBloqueada = modoMontagem && !riLiberada;
+      const riBloqClass = riBloqueada ? ' kanban-op-card-ri-bloqueado' : '';
+      const cardExtraStyle = riBloqueada
+        ? 'background:rgba(245,158,11,.14);border:1px solid rgba(245,158,11,.5);cursor:not-allowed;'
+        : '';
+      const riMsgHtml = riBloqueada
+        ? `<div style="font-size:11px;color:#fbbf24;font-weight:600;margin-top:8px;line-height:1.35;"><i class="fa-solid fa-lock" style="margin-right:5px;font-size:10px;"></i>Aguardando liberação via RI</div>`
+        : '';
+
+      return `<div data-op-id="${op.id}" class="kanban-op-card${dropClass}${vincClass}${riBloqClass}"
+        ${riBloqueada ? 'data-op-ri-bloqueado="1"' : ''}
         data-op-ident="${opIdentAttr}"
         data-op-qtde="${Number(op.qtde) || 0}"
         data-prod-codigo="${prodCodigoAttr}"
-        title="${dropTitle}">
+        title="${riBloqueada ? 'Aguardando liberação via RI' : dropTitle}"
+        style="${cardExtraStyle}">
         <div style="display:flex;align-items:flex-start;gap:8px;">
           <div style="flex:1;min-width:0;">
             <div style="display:flex;align-items:center;flex-wrap:wrap;gap:6px;margin-bottom:4px;">
@@ -71886,7 +71957,10 @@ window.verOperacao = function(osId) {
               ${op.data_previsao_faturamento  ? `<span style="font-size:10px;color:#64748b;">Prev. fat.: <b style="color:#a5f3fc;">${fmtData(op.data_previsao_faturamento)}</b></span>` : ''}
               ${op.data_previsao_entrega     ? `<span style="font-size:10px;color:#64748b;">Prev. entrega: <b style="color:#a5f3fc;">${fmtData(op.data_previsao_entrega)}</b></span>` : ''}
             </div>
+            ${postosPlanHtml}
             ${op.obs ? `<div style="font-size:11px;color:#94a3b8;margin-top:6px;">Obs: <span style="color:#fef3c7;">${op.obs}</span></div>` : ''}
+            ${obsKanban ? `<div style="font-size:11px;color:#94a3b8;margin-top:6px;">Observação: <span style="color:#fde68a;white-space:pre-wrap;">${escHtml(obsKanban)}</span></div>` : ''}
+            ${riMsgHtml}
           </div>
         </div>
       </div>`;
@@ -71901,15 +71975,15 @@ window.verOperacao = function(osId) {
           <div style="font-size:12px;color:#e2e8f0;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;margin-top:2px;line-height:1.4;" title="${descEscapada}">${prod.descricao || '—'}</div>
           <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:4px;">
             ${prod.tipo ? `<span style="font-size:10px;color:#94a3b8;">${prod.tipo}</span>` : ''}
-            ${prod.valor_custo != null ? `<span style="font-size:10px;color:#6ee7b7;font-weight:600;">${fmtMoeda(prod.valor_custo)}</span>` : ''}
           </div>
         </div>
         <span style="flex-shrink:0;font-size:12px;font-weight:700;background:#312e81;color:#c7d2fe;padding:3px 10px;border-radius:12px;">QTD ${fmtQtde(qtdeTotal)}</span>
       </div>
       <div style="margin-top:10px;display:flex;flex-wrap:wrap;gap:8px;">
+        ${modoMontagem ? '' : `
         <button type="button" class="kanban-group-action-btn" data-group-key="${(prodId || '').replace(/"/g,'&quot;')}" data-produto-codigo="${(prod.identificacao || prodId || '').replace(/"/g,'&quot;')}" style="border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#cbd5e1;border-radius:8px;padding:7px 12px;cursor:pointer;font-size:12px;">
           Ver estrutura / processo
-        </button>
+        </button>`}
       </div>
       ${podeReceberPedido ? '<div style="font-size:10px;color:#818cf8;margin-top:6px;">Arraste um item de Pedidos sobre a OP desejada.</div>' : ''}
       ${opsHtml}
@@ -71979,7 +72053,14 @@ window.verOperacao = function(osId) {
                 <span style="flex-shrink:0;color:#94a3b8;font-weight:600;">${fmtQtde(it.quantidade)}</span>
               </div>
               <div style="display:flex;justify-content:flex-end;">
-                <button type="button" class="pedido-analise-btn" data-produto-codigo="${escHtml(it.codigo || '')}" title="Ver estrutura do produto">
+                <button type="button" class="pedido-analise-btn"
+                  data-produto-codigo="${escHtml(it.codigo || '')}"
+                  data-codigo-pedido="${escHtml(ped.codigo_pedido)}"
+                  data-numero-pedido="${escHtml(ped.numero_pedido || '')}"
+                  data-codigo-produto="${escHtml(it.codigo_produto || '')}"
+                  data-descricao="${escHtml(it.descricao || '')}"
+                  data-quantidade="${escHtml(it.quantidade || '0')}"
+                  title="Ver estrutura do produto">
                   <i class="fa-solid fa-magnifying-glass-chart" style="margin-right:4px;"></i>Analise
                 </button>
               </div>
@@ -72002,14 +72083,15 @@ window.verOperacao = function(osId) {
     if (cntPedidos) cntPedidos.textContent = lista.length;
   }
 
-  async function registrarProgramacaoPedido(payload, opQtde, prodCodigo, numeroOp, opIappId) {
+  async function registrarProgramacaoPedido(payload, opQtde, prodCodigo, numeroOp, opProducaoId) {
     if (normCodigo(payload.codigo) !== normCodigo(prodCodigo)) {
-      alert('Só é possível soltar em OP com o mesmo código de produto do pedido.');
+      alert(`Os produtos não são os mesmos.\nPedido: ${payload.codigo || '—'}\nOP: ${prodCodigo || '—'}`);
       return false;
     }
     const saldoPedido = Number(payload.quantidade);
-    if (!Number.isFinite(saldoPedido) || saldoPedido < opQtde) {
-      alert(`Saldo do pedido (${fmtQtde(saldoPedido)}) é menor que a quantidade da OP (${fmtQtde(opQtde)}).`);
+    const qtdOp = Number.isFinite(opQtde) && opQtde > 0 ? opQtde : 1;
+    if (!Number.isFinite(saldoPedido) || saldoPedido < qtdOp) {
+      alert(`Saldo do pedido (${fmtQtde(saldoPedido)}) é menor que a quantidade da OP (${fmtQtde(qtdOp)}).`);
       return false;
     }
 
@@ -72019,9 +72101,9 @@ window.verOperacao = function(osId) {
       body: JSON.stringify({
         codigo_pedido: Number(payload.codigo_pedido),
         codigo: payload.codigo,
-        quantidade_programado: opQtde,
+        quantidade_programado: qtdOp,
         numero_op: numeroOp,
-        op_iapp_id: opIappId
+        op_producao_id: opProducaoId
       })
     });
     const data = await resp.json();
@@ -72045,14 +72127,15 @@ window.verOperacao = function(osId) {
       colPedidos.addEventListener('dragstart', (e) => {
         const item = e.target.closest('.pedido-kanban-item');
         if (!item) return;
-        e.dataTransfer.setData('application/json', JSON.stringify({
+        pedidoArrastando = {
           codigo_pedido: item.dataset.codigoPedido,
           numero_pedido: item.dataset.numeroPedido,
           codigo_produto: item.dataset.codigoProduto,
           codigo: item.dataset.codigo,
           descricao: item.dataset.descricao,
           quantidade: item.dataset.quantidade
-        }));
+        };
+        e.dataTransfer.setData('application/json', JSON.stringify(pedidoArrastando));
         e.dataTransfer.effectAllowed = 'move';
         item.style.opacity = '0.55';
       });
@@ -72060,11 +72143,18 @@ window.verOperacao = function(osId) {
       colPedidos.addEventListener('dragend', (e) => {
         const item = e.target.closest('.pedido-kanban-item');
         if (item) item.style.opacity = '';
+        pedidoArrastando = null;
+        [colProgramado, colSolicitado, colProduzindo].forEach(limparHoverOpDrop);
       });
     }
 
+    function pedidoOpMesmoProduto(pedidoCodigo, opProdCodigo) {
+      return normCodigo(pedidoCodigo) === normCodigo(opProdCodigo);
+    }
+
     function limparHoverOpDrop(colEl) {
-      colEl?.querySelectorAll('.prog-kanban-op-drop.op-drop-hover').forEach(el => el.classList.remove('op-drop-hover'));
+      colEl?.querySelectorAll('.prog-kanban-op-drop.op-drop-hover, .prog-kanban-op-drop.op-drop-hover-invalid')
+        .forEach(el => el.classList.remove('op-drop-hover', 'op-drop-hover-invalid'));
     }
 
     function bindPedidoDropColuna(colEl) {
@@ -72072,18 +72162,19 @@ window.verOperacao = function(osId) {
 
       colEl.addEventListener('dragover', (e) => {
         const opCard = e.target.closest('.prog-kanban-op-drop');
-        if (!opCard) return;
+        if (!opCard || !pedidoArrastando) return;
         e.preventDefault();
-        e.dataTransfer.dropEffect = 'move';
+        const mesmoProduto = pedidoOpMesmoProduto(pedidoArrastando.codigo, opCard.dataset.prodCodigo);
+        e.dataTransfer.dropEffect = mesmoProduto ? 'move' : 'none';
         limparHoverOpDrop(colEl);
-        opCard.classList.add('op-drop-hover');
+        opCard.classList.add(mesmoProduto ? 'op-drop-hover' : 'op-drop-hover-invalid');
       });
 
       colEl.addEventListener('dragleave', (e) => {
         const opCard = e.target.closest('.prog-kanban-op-drop');
         if (!opCard) return;
         if (opCard.contains(e.relatedTarget)) return;
-        opCard.classList.remove('op-drop-hover');
+        opCard.classList.remove('op-drop-hover', 'op-drop-hover-invalid');
       });
 
       colEl.addEventListener('drop', async (e) => {
@@ -72093,22 +72184,28 @@ window.verOperacao = function(osId) {
         e.stopPropagation();
         limparHoverOpDrop(colEl);
 
-        let payload = null;
-        try {
-          payload = JSON.parse(e.dataTransfer.getData('application/json') || 'null');
-        } catch (_) { payload = null; }
+        let payload = pedidoArrastando;
+        if (!payload) {
+          try {
+            payload = JSON.parse(e.dataTransfer.getData('application/json') || 'null');
+          } catch (_) { payload = null; }
+        }
         if (!payload) return;
 
-        const opQtde = Number(opCard.dataset.opQtde);
+        const opQtde = Number(opCard.dataset.opQtde) || 1;
         const prodCodigo = opCard.dataset.prodCodigo || '';
         const numeroOp = opCard.dataset.opIdent || '';
-        const opIappId = Number(opCard.dataset.opId);
-        if (!Number.isFinite(opQtde) || opQtde <= 0) return;
-        if (!numeroOp || !Number.isFinite(opIappId) || opIappId <= 0) return;
+        const opProducaoId = Number(opCard.dataset.opId);
+        if (!numeroOp || !Number.isFinite(opProducaoId) || opProducaoId <= 0) return;
+
+        if (!pedidoOpMesmoProduto(payload.codigo, prodCodigo)) {
+          alert(`Os produtos não são os mesmos.\nPedido: ${payload.codigo || '—'}\nOP: ${prodCodigo || '—'}`);
+          return;
+        }
 
         setKanbanProcessando(true, 'Vinculando pedido à OP...');
         try {
-          const ok = await registrarProgramacaoPedido(payload, opQtde, prodCodigo, numeroOp, opIappId);
+          const ok = await registrarProgramacaoPedido(payload, opQtde, prodCodigo, numeroOp, opProducaoId);
           if (!ok) return;
 
           await Promise.all([recarregarPedidos(), recarregarProgramacao()]);
@@ -72130,7 +72227,21 @@ window.verOperacao = function(osId) {
       if (!produtoCodigo) return;
       const groupKey = produtoCodigo;
       const ops = ordensCarregadas.filter(op => (op.produto?.identificacao || String(op.id)) === groupKey);
-      openProducaoKanbanActionsModal(produtoCodigo, groupKey, ops, '', { somenteEstrutura: true, titulo: 'Análise', mostrarEstoque: true });
+      const pedidoItem = {
+        codigo_pedido: btnAnalise.dataset.codigoPedido,
+        numero_pedido: btnAnalise.dataset.numeroPedido,
+        codigo_produto: btnAnalise.dataset.codigoProduto,
+        codigo: btnAnalise.dataset.produtoCodigo || produtoCodigo,
+        descricao: btnAnalise.dataset.descricao,
+        quantidade: btnAnalise.dataset.quantidade,
+      };
+      openProducaoKanbanActionsModal(produtoCodigo, groupKey, ops, '', {
+        somenteEstrutura: true,
+        titulo: 'Análise',
+        mostrarEstoque: true,
+        ocultarValores: true,
+        pedidoItem,
+      });
     });
 
     btnLimparFiltroCodigo?.addEventListener('click', () => {
@@ -72152,6 +72263,8 @@ window.verOperacao = function(osId) {
       'Nenhuma OP em Montagem eletrica.', false, filtroCodigoProduto);
     renderKanbanCol(colAguardando, cntAguardando, ordens, 'teste',
       'Nenhuma OP em Teste.', false, filtroCodigoProduto);
+    renderKanbanCol(colInspecaoFinal, cntInspecaoFinal, ordens, 'inspecao_final',
+      'Nenhuma OP em Inspeção final.', false, filtroCodigoProduto);
 
     attachProducaoKanbanActionButtons('#registrarProducaoPane', ordens);
     attachOpCardClickHandlers('#registrarProducaoPane', ordens);
@@ -72160,7 +72273,7 @@ window.verOperacao = function(osId) {
   async function carregarOrdens() {
     if (!spinner || !colProgramado) return;
     spinner.style.display = 'block';
-    if (spinnerMsg) spinnerMsg.textContent = 'Consultando IAPP e pedidos...';
+    if (spinnerMsg) spinnerMsg.textContent = 'Carregando OPs e pedidos...';
     erroDiv.style.display = 'none';
     if (rodape) rodape.style.display = 'none';
     if (colPedidos) colPedidos.innerHTML = '<div style="text-align:center;padding:24px 0;color:var(--inactive-color);font-size:12px;">Carregando...</div>';
@@ -72187,7 +72300,7 @@ window.verOperacao = function(osId) {
       if (rodape) {
         rodape.style.display = 'block';
         const sincTs = data.sincronizado_em ? ` · Consultado em: ${fmtData(String(data.sincronizado_em))}` : '';
-        rodape.textContent = `${data.total_ativas} ordem(ns) ativa(s).${sincTs}`;
+        rodape.textContent = `${data.total_ativas || ordensCarregadas.length} OP(s) gerada(s).${sincTs}`;
       }
     } catch (err) {
       erroDiv.style.display = 'block';
@@ -72212,6 +72325,287 @@ window.verOperacao = function(osId) {
     recarrBtn.addEventListener('click', () => carregarOrdens());
   }
 
+  // ── Modal Gerar OP ──────────────────────────────────────────
+  const btnGerarOp          = document.getElementById('producaoGerarOpBtn');
+  const modalGerarOp        = document.getElementById('producaoGerarOpModal');
+  const btnFecharGerarOp    = document.getElementById('producaoGerarOpModalFechar');
+  const inputGerarOp        = document.getElementById('producaoGerarOpBusca');
+  const statusGerarOp       = document.getElementById('producaoGerarOpStatus');
+  const listaGerarOp        = document.getElementById('producaoGerarOpResultados');
+  const painelSelecionado   = document.getElementById('producaoGerarOpSelecionado');
+  const selCodigoEl         = document.getElementById('producaoGerarOpSelCodigo');
+  const selDescricaoEl      = document.getElementById('producaoGerarOpSelDescricao');
+  const btnLimparSel        = document.getElementById('producaoGerarOpLimparSel');
+  const inputQtdGerarOp     = document.getElementById('producaoGerarOpQtd');
+  const btnMenosGerarOp     = document.getElementById('producaoGerarOpMenos');
+  const btnMaisGerarOp      = document.getElementById('producaoGerarOpMais');
+  const selectPostosGerarOp = document.getElementById('producaoGerarOpPostosSelect');
+  const listaPostosGerarOp  = document.getElementById('producaoGerarOpPostosLista');
+  const inputObsGerarOp     = document.getElementById('producaoGerarOpObservacao');
+  const inputQtdObsGerarOp  = document.getElementById('producaoGerarOpObsQtd');
+  const btnMenosObsGerarOp  = document.getElementById('producaoGerarOpObsMenos');
+  const btnMaisObsGerarOp   = document.getElementById('producaoGerarOpObsMais');
+  const btnConfirmarGerarOp = document.getElementById('producaoGerarOpConfirmar');
+  let gerarOpDebounce       = null;
+  let gerarOpSalvando       = false;
+  let gerarOpProdutoSel     = null;
+  let gerarOpPostosSel      = [];
+
+  function lerQtdGerarOp() {
+    const n = Math.floor(Number(inputQtdGerarOp?.value));
+    return Number.isFinite(n) && n >= 1 ? Math.min(n, 200) : 1;
+  }
+
+  function lerQtdObsGerarOp() {
+    const max = lerQtdGerarOp();
+    const n = Math.floor(Number(inputQtdObsGerarOp?.value));
+    const val = Number.isFinite(n) && n >= 1 ? n : max;
+    return Math.min(val, max);
+  }
+
+  function sincronizarQtdObsGerarOp() {
+    const qtd = lerQtdGerarOp();
+    if (inputQtdGerarOp) inputQtdGerarOp.value = String(qtd);
+    const qtdObs = lerQtdObsGerarOp();
+    if (inputQtdObsGerarOp) inputQtdObsGerarOp.value = String(qtdObs);
+    if (inputQtdObsGerarOp) inputQtdObsGerarOp.max = String(qtd);
+  }
+
+  function renderPostosGerarOpLista() {
+    if (!listaPostosGerarOp) return;
+    if (!gerarOpPostosSel.length) {
+      listaPostosGerarOp.innerHTML = '<div style="font-size:11px;color:#64748b;padding:4px 0;">Nenhum posto selecionado.</div>';
+      return;
+    }
+    listaPostosGerarOp.innerHTML = gerarOpPostosSel.map((nome, idx) => `
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 10px;background:rgba(99,102,241,.08);border:1px solid rgba(99,102,241,.25);border-radius:8px;">
+        <span style="font-size:12px;color:#c7d2fe;font-weight:600;">${escHtml(nome)}</span>
+        <button type="button" class="producao-gerar-op-remover-posto" data-idx="${idx}" title="Remover"
+          style="flex-shrink:0;width:24px;height:24px;padding:0;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.12);border-radius:6px;color:#fca5a5;font-size:14px;cursor:pointer;line-height:1;">×</button>
+      </div>
+    `).join('');
+  }
+
+  function mostrarProdutoSelecionadoGerarOp(prod) {
+    gerarOpProdutoSel = prod;
+    if (painelSelecionado) painelSelecionado.style.display = 'block';
+    if (selCodigoEl) selCodigoEl.textContent = prod.codigo || '—';
+    if (selDescricaoEl) selDescricaoEl.textContent = prod.descricao || '—';
+    if (inputQtdGerarOp) inputQtdGerarOp.value = '1';
+    if (inputQtdObsGerarOp) inputQtdObsGerarOp.value = '1';
+    if (inputObsGerarOp) inputObsGerarOp.value = '';
+    gerarOpPostosSel = [];
+    if (selectPostosGerarOp) selectPostosGerarOp.value = '';
+    renderPostosGerarOpLista();
+    sincronizarQtdObsGerarOp();
+    if (listaGerarOp) listaGerarOp.style.display = 'none';
+    if (statusGerarOp) statusGerarOp.style.display = 'none';
+  }
+
+  function limparProdutoSelecionadoGerarOp() {
+    gerarOpProdutoSel = null;
+    gerarOpPostosSel = [];
+    if (painelSelecionado) painelSelecionado.style.display = 'none';
+    if (selCodigoEl) selCodigoEl.textContent = '';
+    if (selDescricaoEl) selDescricaoEl.textContent = '';
+    if (inputQtdGerarOp) inputQtdGerarOp.value = '1';
+    if (inputQtdObsGerarOp) inputQtdObsGerarOp.value = '1';
+    if (inputObsGerarOp) inputObsGerarOp.value = '';
+    if (selectPostosGerarOp) selectPostosGerarOp.value = '';
+    renderPostosGerarOpLista();
+  }
+
+  function resetGerarOpModal() {
+    if (inputGerarOp) inputGerarOp.value = '';
+    if (statusGerarOp) {
+      statusGerarOp.style.display = 'none';
+      statusGerarOp.textContent = '';
+      statusGerarOp.style.color = 'var(--inactive-color)';
+    }
+    if (listaGerarOp) {
+      listaGerarOp.style.display = 'none';
+      listaGerarOp.innerHTML = '';
+    }
+    limparProdutoSelecionadoGerarOp();
+    gerarOpSalvando = false;
+    if (btnConfirmarGerarOp) btnConfirmarGerarOp.disabled = false;
+  }
+
+  function abrirGerarOpModal() {
+    resetGerarOpModal();
+    if (modalGerarOp) modalGerarOp.style.display = 'flex';
+    setTimeout(() => inputGerarOp?.focus(), 80);
+  }
+
+  function fecharGerarOpModal() {
+    if (modalGerarOp) modalGerarOp.style.display = 'none';
+    resetGerarOpModal();
+  }
+
+  function renderGerarOpResultados(itens) {
+    if (!listaGerarOp) return;
+    if (!itens.length) {
+      listaGerarOp.style.display = 'block';
+      listaGerarOp.innerHTML = '<div style="padding:14px;text-align:center;font-size:12px;color:var(--inactive-color);">Nenhum produto encontrado.</div>';
+      return;
+    }
+    listaGerarOp.style.display = 'block';
+    listaGerarOp.innerHTML = itens.map(it => {
+      const codigo = escHtml(String(it.codigo || ''));
+      const descricao = escHtml(String(it.descricao || ''));
+      const codigoProduto = Number(it.codigo_produto);
+      const sel = gerarOpProdutoSel && gerarOpProdutoSel.codigo === it.codigo && gerarOpProdutoSel.codigo_produto === codigoProduto;
+      return `<button type="button" class="producao-gerar-op-item" data-codigo="${codigo}" data-codigo-produto="${codigoProduto}" data-descricao="${descricao}"
+        style="display:block;width:100%;text-align:left;padding:10px 12px;background:${sel ? 'rgba(16,185,129,.12)' : 'transparent'};border:none;border-bottom:1px solid rgba(255,255,255,.06);color:#e2e8f0;cursor:pointer;">
+        <div style="font-size:13px;font-weight:600;">${codigo}</div>
+        <div style="font-size:11px;color:var(--inactive-color);margin-top:2px;">${descricao}</div>
+      </button>`;
+    }).join('');
+  }
+
+  async function buscarProdutosGerarOp(termo) {
+    if (!statusGerarOp) return;
+    statusGerarOp.style.display = 'block';
+    statusGerarOp.style.color = 'var(--inactive-color)';
+    statusGerarOp.textContent = 'Buscando...';
+    try {
+      const resp = await fetch(`/api/producao/op-producao/buscar-produtos?q=${encodeURIComponent(termo)}`);
+      const data = await resp.json();
+      if (!resp.ok || !data.success) throw new Error(data.error || 'Falha na busca.');
+      statusGerarOp.textContent = data.itens?.length ? `${data.itens.length} produto(s) encontrado(s).` : 'Nenhum produto encontrado.';
+      renderGerarOpResultados(data.itens || []);
+    } catch (err) {
+      statusGerarOp.style.color = '#fca5a5';
+      statusGerarOp.textContent = 'Erro: ' + (err.message || 'Falha ao buscar produtos.');
+      if (listaGerarOp) {
+        listaGerarOp.style.display = 'none';
+        listaGerarOp.innerHTML = '';
+      }
+    }
+  }
+
+  async function registrarOpProducaoLote() {
+    if (gerarOpSalvando || !gerarOpProdutoSel) return;
+    const codigo = String(gerarOpProdutoSel.codigo || '').trim();
+    const codigoProduto = Number(gerarOpProdutoSel.codigo_produto);
+    const quantidade = lerQtdGerarOp();
+    const observacao = String(inputObsGerarOp?.value || '').trim();
+    const quantidadeObservacao = observacao ? lerQtdObsGerarOp() : 0;
+    if (!codigo || !Number.isFinite(codigoProduto) || codigoProduto <= 0) return;
+
+    gerarOpSalvando = true;
+    if (btnConfirmarGerarOp) btnConfirmarGerarOp.disabled = true;
+    if (statusGerarOp) {
+      statusGerarOp.style.display = 'block';
+      statusGerarOp.style.color = 'var(--inactive-color)';
+      statusGerarOp.textContent = `Gerando ${quantidade} OP(s)...`;
+    }
+    try {
+      const body = {
+        codigo,
+        codigo_produto: codigoProduto,
+        quantidade,
+        observacao: observacao || undefined,
+        quantidade_observacao: observacao ? quantidadeObservacao : undefined,
+        postos: gerarOpPostosSel.length ? [...gerarOpPostosSel] : undefined,
+      };
+      const resp = await fetch('/api/producao/op-producao/lote', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const data = await resp.json();
+      if (!resp.ok || !data.success) throw new Error(data.error || 'Falha ao gerar OP.');
+      const total = data.total || quantidade;
+      alert(`${total} OP(s) gerada(s) com sucesso!`);
+      fecharGerarOpModal();
+      if (typeof carregarOrdens === 'function') await carregarOrdens();
+    } catch (err) {
+      if (statusGerarOp) {
+        statusGerarOp.style.color = '#fca5a5';
+        statusGerarOp.textContent = 'Erro: ' + (err.message || 'Falha ao gerar OP.');
+      }
+      gerarOpSalvando = false;
+      if (btnConfirmarGerarOp) btnConfirmarGerarOp.disabled = false;
+    }
+  }
+
+  btnGerarOp?.addEventListener('click', abrirGerarOpModal);
+  btnFecharGerarOp?.addEventListener('click', fecharGerarOpModal);
+  modalGerarOp?.addEventListener('click', (e) => {
+    if (e.target === modalGerarOp) fecharGerarOpModal();
+  });
+
+  btnLimparSel?.addEventListener('click', () => {
+    limparProdutoSelecionadoGerarOp();
+    if (inputGerarOp) inputGerarOp.focus();
+  });
+
+  btnMenosGerarOp?.addEventListener('click', () => {
+    if (inputQtdGerarOp) inputQtdGerarOp.value = String(Math.max(1, lerQtdGerarOp() - 1));
+    sincronizarQtdObsGerarOp();
+  });
+  btnMaisGerarOp?.addEventListener('click', () => {
+    if (inputQtdGerarOp) inputQtdGerarOp.value = String(Math.min(200, lerQtdGerarOp() + 1));
+    sincronizarQtdObsGerarOp();
+  });
+  inputQtdGerarOp?.addEventListener('change', sincronizarQtdObsGerarOp);
+
+  btnMenosObsGerarOp?.addEventListener('click', () => {
+    if (inputQtdObsGerarOp) inputQtdObsGerarOp.value = String(Math.max(1, lerQtdObsGerarOp() - 1));
+  });
+  btnMaisObsGerarOp?.addEventListener('click', () => {
+    if (inputQtdObsGerarOp) inputQtdObsGerarOp.value = String(Math.min(lerQtdGerarOp(), lerQtdObsGerarOp() + 1));
+  });
+  inputQtdObsGerarOp?.addEventListener('change', sincronizarQtdObsGerarOp);
+
+  selectPostosGerarOp?.addEventListener('change', () => {
+    const nome = String(selectPostosGerarOp.value || '').trim();
+    selectPostosGerarOp.value = '';
+    if (!nome || gerarOpPostosSel.includes(nome)) return;
+    gerarOpPostosSel.push(nome);
+    renderPostosGerarOpLista();
+  });
+
+  listaPostosGerarOp?.addEventListener('click', (e) => {
+    const btn = e.target.closest('.producao-gerar-op-remover-posto');
+    if (!btn) return;
+    const idx = Number(btn.dataset.idx);
+    if (!Number.isFinite(idx) || idx < 0) return;
+    gerarOpPostosSel.splice(idx, 1);
+    renderPostosGerarOpLista();
+  });
+
+  btnConfirmarGerarOp?.addEventListener('click', registrarOpProducaoLote);
+
+  inputGerarOp?.addEventListener('input', () => {
+    const termo = String(inputGerarOp.value || '').trim();
+    clearTimeout(gerarOpDebounce);
+    if (termo.length < 3) {
+      if (statusGerarOp) {
+        statusGerarOp.style.display = termo.length ? 'block' : 'none';
+        statusGerarOp.style.color = 'var(--inactive-color)';
+        statusGerarOp.textContent = 'Digite pelo menos 3 caracteres.';
+      }
+      if (listaGerarOp) {
+        listaGerarOp.style.display = 'none';
+        listaGerarOp.innerHTML = '';
+      }
+      return;
+    }
+    gerarOpDebounce = setTimeout(() => buscarProdutosGerarOp(termo), 300);
+  });
+
+  listaGerarOp?.addEventListener('click', (e) => {
+    const btn = e.target.closest('.producao-gerar-op-item');
+    if (!btn) return;
+    const codigo = btn.dataset.codigo || '';
+    const codigoProduto = Number(btn.dataset.codigoProduto);
+    const descricao = decodeHtmlEntities(btn.dataset.descricao || '');
+    if (!codigo || !Number.isFinite(codigoProduto) || codigoProduto <= 0) return;
+    mostrarProdutoSelecionadoGerarOp({ codigo, codigo_produto: codigoProduto, descricao });
+  });
+
   pesquisaInput?.addEventListener('input', () => {
     filtroPesquisa = pesquisaInput.value;
     atualizarPesquisaBarUi();
@@ -72234,6 +72628,7 @@ window.verOperacao = function(osId) {
 
   async function recarregarColunasKanban(colKeys) {
     try {
+      await recarregarProgramacao();
       const resp = await fetch('/api/producao/ordens');
       const data = await resp.json();
       if (!resp.ok || !data.success) return false;
@@ -72254,6 +72649,10 @@ window.verOperacao = function(osId) {
       if (keys.includes('teste')) {
         renderKanbanCol(colAguardando, cntAguardando, ordensCarregadas, 'teste',
           'Nenhuma OP em Teste.', false, filtroCodigoProduto);
+      }
+      if (keys.includes('inspecao_final')) {
+        renderKanbanCol(colInspecaoFinal, cntInspecaoFinal, ordensCarregadas, 'inspecao_final',
+          'Nenhuma OP em Inspeção final.', false, filtroCodigoProduto);
       }
       attachProducaoKanbanActionButtons('#registrarProducaoPane', ordensCarregadas);
       attachOpCardClickHandlers('#registrarProducaoPane', ordensCarregadas);
@@ -72277,6 +72676,7 @@ window.verOperacao = function(osId) {
   window._producaoRecarregarProgramacaoColunas = recarregarProgramacaoERender;
   window._producaoKanbanColunas = () => PRODUCAO_KANBAN_COLUNAS.map(c => ({ ...c }));
   window._producaoNomeKanbanPorKey = producaoNomeKanbanPorKey;
+  window._producaoNormStatusKanban = normStatusKanban;
   window._producaoListaNomesKanban = producaoListaNomesKanban;
   window._producaoRecarregarOrdens = async function() {
     try {
@@ -72296,232 +72696,385 @@ window.verOperacao = function(osId) {
       }
     } catch (_) { /* silencioso */ }
   };
+
+  function parseQrEtiquetaOp(raw) {
+    const s = String(raw || '').trim();
+    const parts = s.split('|');
+    if (parts.length >= 3) {
+      return {
+        codigo: parts[0].trim(),
+        lote: parts[2].trim(),
+      };
+    }
+    return null;
+  }
+
+  function encontrarOpPorEtiqueta(lote, codigo) {
+    const loteNorm = normCodigo(lote);
+    if (!loteNorm) return null;
+    let op = ordensCarregadas.find(o => normCodigo(o.identificacao) === loteNorm);
+    if (!op && codigo) {
+      const codNorm = normCodigo(codigo);
+      op = ordensCarregadas.find(o =>
+        normCodigo(o.identificacao) === loteNorm
+        && normCodigo(o.produto?.identificacao) === codNorm
+      );
+    }
+    return op || null;
+  }
+
+  window._producaoOpColunaAtual = opColunaAtual;
+  window._producaoEncontrarOpPorEtiqueta = encontrarOpPorEtiqueta;
+
+  let _producaoQrStream = null;
+  let _producaoQrInterval = null;
+
+  function fecharProducaoQrModal() {
+    clearInterval(_producaoQrInterval);
+    _producaoQrInterval = null;
+    if (_producaoQrStream) {
+      _producaoQrStream.getTracks().forEach(t => t.stop());
+      _producaoQrStream = null;
+    }
+    document.getElementById('producaoQrOpOverlay')?.remove();
+  }
+
+  async function abrirAcoesOpPorEtiqueta(dados) {
+    if (!dados?.lote) {
+      alert('QR Code inválido. Use a etiqueta gerada em Imprimir OP.');
+      return;
+    }
+    let op = encontrarOpPorEtiqueta(dados.lote, dados.codigo);
+    if (!op) {
+      await recarregarColunasKanban(['programado', 'solicitado', 'produzindo', 'teste', 'inspecao_final']);
+      op = encontrarOpPorEtiqueta(dados.lote, dados.codigo);
+    }
+    if (!op) {
+      alert(`OP "${dados.lote}" não encontrada no kanban. Recarregue a tela e tente novamente.`);
+      return;
+    }
+    if (typeof window._producaoOpenKanbanActions === 'function') {
+      window._producaoOpenKanbanActions(op);
+    }
+  }
+
+  function processarQrOpLido(valor) {
+    const dados = parseQrEtiquetaOp(valor);
+    if (!dados) {
+      alert('QR Code não reconhecido. Use a etiqueta gerada em Imprimir OP.');
+      return;
+    }
+    fecharProducaoQrModal();
+    abrirAcoesOpPorEtiqueta(dados);
+  }
+
+  async function abrirProducaoQrScanner() {
+    fecharProducaoQrModal();
+    const overlay = document.createElement('div');
+    overlay.id = 'producaoQrOpOverlay';
+    overlay.className = 'kanban-modal-overlay';
+    overlay.style.zIndex = '10001';
+    overlay.addEventListener('click', (ev) => { if (ev.target === overlay) fecharProducaoQrModal(); });
+
+    const modal = document.createElement('div');
+    modal.className = 'kanban-modal';
+    modal.style.maxWidth = '420px';
+    modal.innerHTML = `
+      <header>
+        <div>
+          <h2>Ler etiqueta OP</h2>
+          <span>Aponte a câmera para o QR Code da etiqueta</span>
+        </div>
+        <button type="button" class="close-btn" aria-label="Fechar">&times;</button>
+      </header>
+      <div class="kanban-modal-body" style="text-align:center;">
+        <div style="position:relative;display:inline-block;border-radius:12px;overflow:hidden;background:#000;max-width:100%;">
+          <video id="producaoQrVideo" autoplay playsinline muted style="width:100%;max-height:280px;display:block;"></video>
+          <div style="position:absolute;inset:20%;border:2px solid rgba(52,211,153,.85);border-radius:8px;pointer-events:none;"></div>
+        </div>
+        <p id="producaoQrStatus" style="font-size:12px;color:#94a3b8;margin:12px 0 8px;">Iniciando câmera...</p>
+        <input type="text" id="producaoQrManual" placeholder="Ou digite/cole o código lido..."
+          style="width:100%;padding:8px 12px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.12);border-radius:8px;color:#e2e8f0;font-size:13px;">
+      </div>
+      <footer>
+        <button type="button" class="modal-secondary">Fechar</button>
+      </footer>
+    `;
+    overlay.appendChild(modal);
+    document.body.appendChild(overlay);
+
+    modal.querySelector('.close-btn')?.addEventListener('click', fecharProducaoQrModal);
+    modal.querySelector('footer .modal-secondary')?.addEventListener('click', fecharProducaoQrModal);
+
+    const video = modal.querySelector('#producaoQrVideo');
+    const statusEl = modal.querySelector('#producaoQrStatus');
+    const manualInput = modal.querySelector('#producaoQrManual');
+
+    manualInput?.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Enter') {
+        ev.preventDefault();
+        processarQrOpLido(manualInput.value);
+      }
+    });
+
+    try {
+      _producaoQrStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+      if (video) {
+        video.srcObject = _producaoQrStream;
+        await video.play().catch(() => {});
+      }
+      if (statusEl) {
+        statusEl.textContent = 'Aponte para o QR Code da etiqueta OP.';
+        statusEl.style.color = '#94a3b8';
+      }
+    } catch {
+      if (statusEl) {
+        statusEl.textContent = 'Câmera indisponível. Digite o código manualmente abaixo.';
+        statusEl.style.color = '#f59e0b';
+      }
+      return;
+    }
+
+    if (!('BarcodeDetector' in window)) {
+      if (statusEl) {
+        statusEl.textContent = 'Leitura automática indisponível neste navegador. Digite o código abaixo.';
+        statusEl.style.color = '#f59e0b';
+      }
+      return;
+    }
+
+    const detector = new BarcodeDetector({ formats: ['qr_code'] });
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+    _producaoQrInterval = setInterval(async () => {
+      if (!video || video.readyState < 2) return;
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      ctx.drawImage(video, 0, 0);
+      try {
+        const barcodes = await detector.detect(canvas);
+        if (barcodes.length > 0) {
+          processarQrOpLido(barcodes[0].rawValue);
+        }
+      } catch { /* ignora frame */ }
+    }, 300);
+  }
+
+  document.getElementById('producaoQrOpBtn')?.addEventListener('click', () => {
+    abrirProducaoQrScanner();
+  });
+
+  window._producaoWithProgramacao = function (programacao, fn) {
+    const backup = programacaoCarregada;
+    programacaoCarregada = programacao || [];
+    try { return fn(); } finally { programacaoCarregada = backup; }
+  };
+  window._producaoRenderKanbanCol = renderKanbanCol;
+  window._producaoGetColunasPosProgramado = function () {
+    return PRODUCAO_KANBAN_COLUNAS.filter(c => c.key !== 'pedidos');
+  };
+  window._producaoProximoKanbanPorKey = function (colKey) {
+    const cols = PRODUCAO_KANBAN_COLUNAS.filter(c => c.key !== 'pedidos');
+    const idx = cols.findIndex(c => c.key === colKey);
+    if (idx < 0 || idx >= cols.length - 1) {
+      return { key: 'finalizado', nome: 'Finalizado' };
+    }
+    return cols[idx + 1];
+  };
+  window._producaoMsgVaziaColuna = function (colKey) {
+    const msgs = {
+      programado: 'Nenhuma OP programada.',
+      solicitado: 'Nenhuma OP em Montagem hermetica.',
+      produzindo: 'Nenhuma OP em Montagem eletrica.',
+      teste: 'Nenhuma OP em Teste.',
+      inspecao_final: 'Nenhuma OP em Inspeção final.',
+    };
+    return msgs[colKey] || `Nenhuma OP em ${producaoNomeKanbanPorKey(colKey) || colKey}.`;
+  };
 })();
 
 
 /* ============================================================
- * PRODUÇÃO MONTAGEM — Ordens de Produção IAPP (Kanban)
+ * PRODUÇÃO MONTAGEM — Kanbans pós-Programado (sem IAPP)
  * ============================================================ */
 (function () {
   const menuBtn = document.getElementById('menu-monta-producao');
   if (!menuBtn) return;
 
-  const spinner      = document.getElementById('montaSpinner');
-  const spinnerMsg   = document.getElementById('montaSpinnerMsg');
-  const erroDiv      = document.getElementById('montaErro');
-  const rodape       = document.getElementById('montaRodape');
-  const recarrBtn    = document.getElementById('montaRecarregarBtn');
-  const filtroBar    = document.getElementById('montaFiltroBar');
-  const filtroSelect = document.getElementById('montaFiltroOperacao');
+  const spinner         = document.getElementById('montaSpinner');
+  const spinnerMsg      = document.getElementById('montaSpinnerMsg');
+  const erroDiv         = document.getElementById('montaErro');
+  const rodape          = document.getElementById('montaRodape');
+  const recarrBtn       = document.getElementById('montaRecarregarBtn');
+  const kanbanContainer = document.getElementById('montaKanban');
+  const pesquisaInput   = document.getElementById('montaPesquisaInput');
+  const btnLimparPesq   = document.getElementById('montaPesquisaLimpar');
 
-  const colProgramado = document.getElementById('montaColProgramado');
-  const cntProgramado = document.getElementById('montaColProgramadoCount');
-  const colProduzindo = document.getElementById('montaColProduzindo');
-  const cntProduzindo = document.getElementById('montaColProduzindoCount');
-  const colOutros     = document.getElementById('montaColOutros');
-  const cntOutros     = document.getElementById('montaColOutrosCount');
+  const MONTA_COL_STYLE = {
+    programado:     { bg: '#1e1b4b', border: '#3730a3', dot: '#6366f1', title: '#a5b4fc', badgeBg: '#312e81', badgeTxt: '#c7d2fe', bodyBg: 'rgba(99,102,241,.04)' },
+    solicitado:     { bg: '#172554', border: '#1d4ed8', dot: '#3b82f6', title: '#93c5fd', badgeBg: '#1e3a8a', badgeTxt: '#bfdbfe', bodyBg: 'rgba(59,130,246,.04)' },
+    produzindo:     { bg: '#052e16', border: '#166534', dot: '#22c55e', title: '#86efac', badgeBg: '#14532d', badgeTxt: '#bbf7d0', bodyBg: 'rgba(34,197,94,.04)' },
+    teste:          { bg: '#431407', border: '#9a3412', dot: '#f97316', title: '#fdba74', badgeBg: '#7c2d12', badgeTxt: '#fed7aa', bodyBg: 'rgba(249,115,22,.04)' },
+    inspecao_final: { bg: '#1e1b4b', border: '#6d28d9', dot: '#a855f7', title: '#d8b4fe', badgeBg: '#4c1d95', badgeTxt: '#e9d5ff', bodyBg: 'rgba(168,85,247,.04)' },
+  };
+  const MONTA_COL_DEFAULT = { bg: '#1c1917', border: '#44403c', dot: '#78716c', title: '#d6d3d1', badgeBg: '#292524', badgeTxt: '#d6d3d1', bodyBg: 'rgba(120,113,108,.04)' };
 
   let ordensCarregadas = [];
+  let programacaoCarregada = [];
+  let filtroPesquisa = '';
+  let pesquisaDebounce = null;
+  const colunasDom = {};
 
-  function fmtData(str) {
-    if (!str) return '—';
-    const m = str.match(/^(\d{4})-(\d{2})-(\d{2})/);
-    if (m) return `${m[3]}/${m[2]}/${m[1]}`;
-    return str;
-  }
-
-  function fmtMoeda(v) {
-    if (v == null || v === '') return '—';
-    return 'R$ ' + Number(v).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  }
-
-  function fmtQtde(v) {
-    if (v == null || v === '') return '—';
-    const n = parseFloat(v);
-    return isNaN(n) ? String(v) : n.toLocaleString('pt-BR', { maximumFractionDigits: 4 }).replace(/,?0+$/, '').replace(/,$/, '') || String(n);
-  }
-
-  function badgeOS(status) {
-    const cores = {
-      'ENCERRADA':    { bg: '#1e293b', txt: '#94a3b8' },
-      'ABERTA':       { bg: '#1d4ed8', txt: '#bfdbfe' },
-      'EM ANDAMENTO': { bg: '#065f46', txt: '#6ee7b7' },
-      'PAUSADA':      { bg: '#92400e', txt: '#fcd34d' },
-    };
-    const s = (status || '').toUpperCase();
-    const c = cores[s] || { bg: '#374151', txt: '#d1d5db' };
-    return `<span style="flex-shrink:0;display:inline-block;padding:1px 6px;border-radius:4px;font-size:10px;font-weight:700;background:${c.bg};color:${c.txt};">${status || '—'}</span>`;
-  }
-
-  function badgeProducao(status) {
-    const s = String(status || '').trim();
-    if (!s) return '';
-    const cores = {
-      'Iniciado':   { bg: '#14532d', txt: '#bbf7d0' },
-      'Produzindo': { bg: '#065f46', txt: '#6ee7b7' },
-      'Parado':     { bg: '#92400e', txt: '#fcd34d' },
-    };
-    const c = cores[s] || { bg: '#374151', txt: '#d1d5db' };
-    return `<span style="flex-shrink:0;display:inline-block;padding:1px 6px;border-radius:4px;font-size:10px;font-weight:700;background:${c.bg};color:${c.txt};">${s}</span>`;
-  }
-
-  function renderGrupo(prodId, ops) {
-    const prod = ops[0].produto || {};
-    const qtdeTotal = ops.reduce((s, op) => s + (Number(op.qtde) || 0), 0);
-
-    const opsHtml = ops.map(op => {
-      const _filtroOp = filtroSelect ? filtroSelect.value : '';
-      const _osVis = _filtroOp
-        ? (op.ordens_servico || []).filter(os => os.operacao === _filtroOp)
-        : (op.ordens_servico || []);
-      const osHtml = _osVis.map(os =>
-        `<div onclick="event.stopPropagation();window.abrirModalOS(${os.id},'${(os.identificacao||'').replace(/'/g,"\\'")}',${op.id},'${(os.operacao||'').replace(/'/g,"\\'")}','${(os.status||'').replace(/'/g,"\\'")}','${(op.identificacao||'').replace(/'/g,"\\'")}','${(os.status_producao||'').replace(/'/g,"\\'")}','${(os.operador||'').replace(/'/g,"\\'")}','${(os.data_status_producao||'').replace(/'/g,"\\'")}')"
-          style="background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.06);border-radius:5px;padding:5px 8px;display:flex;flex-direction:column;gap:3px;cursor:pointer;transition:background .15s;"
-          onmouseenter="this.style.background='rgba(99,102,241,.12)'" onmouseleave="this.style.background='rgba(255,255,255,.03)'">
-          <div style="display:flex;align-items:center;gap:6px;">
-            <span style="font-size:10px;color:#94a3b8;min-width:70px;font-weight:600;flex-shrink:0;">${os.identificacao || ('#' + os.id)}</span>
-            <span style="font-size:10px;color:#cbd5e1;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${(os.operacao || '').replace(/"/g,'&quot;')}">${os.operacao || '—'}</span>
-            ${badgeProducao(os.status_producao)}
-            ${badgeOS(os.status)}
-          </div>
-          <div style="display:flex;flex-wrap:wrap;gap:10px;padding-left:2px;">
-            ${os.data_abertura     ? `<span style="font-size:10px;color:#64748b;">Abertura: <b style="color:#94a3b8;">${fmtData(os.data_abertura)}</b></span>` : ''}
-            ${os.data_inicio       ? `<span style="font-size:10px;color:#64748b;">Início: <b style="color:#94a3b8;">${fmtData(os.data_inicio)}</b></span>` : ''}
-            ${os.data_final        ? `<span style="font-size:10px;color:#64748b;">Final: <b style="color:#94a3b8;">${fmtData(os.data_final)}</b></span>` : ''}
-            ${os.data_encerramento ? `<span style="font-size:10px;color:#64748b;">Encerramento: <b style="color:#94a3b8;">${fmtData(os.data_encerramento)}</b></span>` : ''}
-            ${os.operador          ? `<span style="font-size:10px;color:#64748b;">Operador: <b style="color:#94a3b8;">${os.operador}</b></span>` : ''}
-          </div>
-        </div>`
-      ).join('');
-
-      const detId = `monta-op-det-${op.id}`;
-
-      return `<div data-op-id="${op.id}" style="background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);border-radius:8px;padding:10px 12px;margin-top:8px;cursor:pointer;">
-        <div style="display:flex;align-items:flex-start;gap:8px;">
-          <div style="flex:1;min-width:0;">
-            <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;">
-              <span style="font-size:10px;color:#475569;font-weight:600;">#${op.id}</span>
-              <span style="font-size:13px;font-weight:700;color:#e2e8f0;">OP ${op.identificacao || '—'}</span>
-              <span style="font-size:11px;color:#94a3b8;margin-left:auto;">Qtde: <b style="color:#f1f5f9;">${fmtQtde(op.qtde)}</b></span>
-            </div>
-            <div style="display:flex;flex-wrap:wrap;gap:8px;">
-              ${op.data_abertura            ? `<span style="font-size:10px;color:#64748b;">Abertura: <b style="color:#94a3b8;">${fmtData(op.data_abertura)}</b></span>` : ''}
-              ${op.data_previsao_entrega    ? `<span style="font-size:10px;color:#64748b;">Prev. entrega: <b style="color:#a5f3fc;">${fmtData(op.data_previsao_entrega)}</b></span>` : ''}
-            </div>
-          </div>
-          <button type="button" class="op-expand-btn" onclick="event.stopPropagation();(function(btn){var d=document.getElementById('${detId}');var aberto=d.style.display!=='none';d.style.display=aberto?'none':'flex';btn.innerHTML=aberto?'<i class=\\'fa-solid fa-chevron-down\\'></i>':'<i class=\\'fa-solid fa-chevron-up\\'></i>';})(this)"
-            style="flex-shrink:0;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.12);border-radius:6px;color:#94a3b8;width:26px;height:26px;display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:11px;margin-top:2px;">
-            <i class="fa-solid fa-chevron-down"></i>
-          </button>
-        </div>
-        <div id="${detId}" style="display:none;flex-direction:column;gap:4px;margin-top:10px;padding-top:10px;border-top:1px solid rgba(255,255,255,.06);">
-          ${op.obs ? `<div style="font-size:11px;color:#94a3b8;">Obs: <span style="color:#fef3c7;">${op.obs}</span></div>` : ''}
-          ${osHtml ? `<div style="display:flex;flex-direction:column;gap:4px;margin-top:4px;">${osHtml}</div>` : '<div style="font-size:11px;color:#475569;">Sem ordens de serviço.</div>'}
-        </div>
-      </div>`;
-    }).join('');
-
-    const descEscapada = (prod.descricao || '').replace(/"/g, '&quot;');
-
-    return `<div data-group-id="${prodId}" style="background:var(--content-bg,#1e2233);border:1px solid rgba(255,255,255,.1);border-radius:10px;padding:12px;">
-      <div style="display:flex;align-items:flex-start;gap:8px;margin-bottom:6px;">
-        <div style="flex:1;min-width:0;">
-          <div style="font-size:13px;font-weight:700;color:#34d399;letter-spacing:.3px;">${prod.identificacao || prodId}</div>
-          <div style="font-size:12px;color:#e2e8f0;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;margin-top:2px;line-height:1.4;" title="${descEscapada}">${prod.descricao || '—'}</div>
-        </div>
-        <span style="flex-shrink:0;font-size:12px;font-weight:700;background:#064e3b;color:#6ee7b7;padding:3px 10px;border-radius:12px;">QTD ${fmtQtde(qtdeTotal)}</span>
-      </div>
-      <div style="margin-top:10px;display:flex;flex-wrap:wrap;gap:8px;">
-        <button type="button" class="kanban-group-action-btn" data-group-key="${(prodId || '').replace(/"/g,'&quot;')}" data-produto-codigo="${(prod.identificacao || prodId || '').replace(/"/g,'&quot;')}" style="border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#cbd5e1;border-radius:8px;padding:7px 12px;cursor:pointer;font-size:12px;">
-          Ver estrutura / processo
-        </button>
-      </div>
-      ${opsHtml}
-    </div>`;
-  }
-
-  function renderCol(colEl, cntEl, items, msgVazia) {
-    if (!colEl) return;
-    const operacaoFiltro = filtroSelect ? filtroSelect.value : '';
-    const filtradas = operacaoFiltro
-      ? items.filter(op => (op.ordens_servico || []).some(os => os.operacao === operacaoFiltro))
-      : items;
-
-    if (filtradas.length === 0) {
-      colEl.innerHTML = `<div style="text-align:center;padding:24px 0;color:var(--inactive-color);font-size:12px;">${operacaoFiltro ? `Nenhuma OP com "${operacaoFiltro}".` : msgVazia}</div>`;
-    } else {
-      const grupos = {};
-      for (const op of filtradas) {
-        const key = op.produto?.identificacao || String(op.id);
-        if (!grupos[key]) grupos[key] = [];
-        grupos[key].push(op);
-      }
-      colEl.innerHTML = Object.entries(grupos).map(([k, ops]) => renderGrupo(k, ops)).join('');
+  function getColunasMontagem() {
+    if (typeof window._producaoGetColunasPosProgramado === 'function') {
+      return window._producaoGetColunasPosProgramado();
     }
-    if (cntEl) cntEl.textContent = filtradas.length;
+    return [
+      { key: 'programado', nome: 'Programado' },
+      { key: 'solicitado', nome: 'Montagem hermetica' },
+      { key: 'produzindo', nome: 'Montagem eletrica' },
+      { key: 'teste', nome: 'Teste' },
+      { key: 'inspecao_final', nome: 'Inspeção final' },
+    ];
   }
 
-  function renderKanban(ordens) {
-    const aProduzir = ordens.filter(op => op.status === 'A PRODUZIR');
-    const produzindo = ordens.filter(op => op.status === 'EM PRODUÇÃO' || op.status === 'PRODUZINDO');
-    const outros     = ordens.filter(op => op.status !== 'A PRODUZIR' && op.status !== 'EM PRODUÇÃO' && op.status !== 'PRODUZINDO');
+  function garantirColunasDom() {
+    if (!kanbanContainer) return;
+    const colunas = getColunasMontagem();
+    const keysAtuais = new Set(colunas.map(c => c.key));
+    Object.keys(colunasDom).forEach((key) => {
+      if (!keysAtuais.has(key)) {
+        colunasDom[key]?.wrap?.remove();
+        delete colunasDom[key];
+      }
+    });
+    kanbanContainer.innerHTML = '';
+    colunas.forEach((col) => {
+      const st = MONTA_COL_STYLE[col.key] || MONTA_COL_DEFAULT;
+      const wrap = document.createElement('div');
+      wrap.style.cssText = 'flex:0 0 340px;min-width:300px;';
+      wrap.innerHTML = `
+        <div style="display:flex;align-items:center;gap:8px;padding:10px 14px;background:${st.bg};border-radius:10px 10px 0 0;border:1px solid ${st.border};border-bottom:none;">
+          <span style="width:10px;height:10px;border-radius:50%;background:${st.dot};display:inline-block;flex-shrink:0;"></span>
+          <span style="font-size:12px;font-weight:700;color:${st.title};text-transform:uppercase;letter-spacing:.5px;">${col.nome}</span>
+          <span id="montaCnt_${col.key}" style="margin-left:auto;font-size:11px;background:${st.badgeBg};color:${st.badgeTxt};padding:2px 9px;border-radius:10px;font-weight:600;">0</span>
+        </div>
+        <div id="montaCol_${col.key}" style="min-height:220px;background:${st.bodyBg};border:1px solid ${st.border};border-top:none;border-radius:0 0 10px 10px;padding:10px;display:flex;flex-direction:column;gap:10px;">
+          <div style="text-align:center;padding:24px 0;color:var(--inactive-color);font-size:12px;">Clique em "Atualizar" para carregar.</div>
+        </div>`;
+      kanbanContainer.appendChild(wrap);
+      colunasDom[col.key] = {
+        wrap,
+        colEl: wrap.querySelector(`#montaCol_${col.key}`),
+        cntEl: wrap.querySelector(`#montaCnt_${col.key}`),
+      };
+    });
+  }
 
-    renderCol(colProgramado, cntProgramado, aProduzir,  'Nenhuma OP a produzir.');
-    renderCol(colProduzindo, cntProduzindo, produzindo, 'Nenhuma OP em produção.');
-    renderCol(colOutros,     cntOutros,     outros,     'Nenhuma OP em outros status.');
-    attachProducaoKanbanActionButtons('#montaProducaoPane', ordens);
-    attachOpCardClickHandlers('#montaProducaoPane', ordens);
+  function atualizarPesquisaBarUi() {
+    if (!btnLimparPesq) return;
+    btnLimparPesq.style.display = filtroPesquisa ? 'inline-flex' : 'none';
+  }
+
+  async function carregarRiStatusMontagem(ordens) {
+    const ops = (ordens || []).map(op => ({ op_producao_id: op.id }));
+    if (!ops.length) {
+      window._montaRiStatusPorOp = {};
+      return;
+    }
+    try {
+      const resp = await fetch('/api/qualidade/ri-check/status-por-ops', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ ops }),
+      });
+      const data = await resp.json();
+      window._montaRiStatusPorOp = (resp.ok && data.ok && data.status_por_op)
+        ? data.status_por_op
+        : {};
+    } catch (_) {
+      window._montaRiStatusPorOp = {};
+    }
+  }
+
+  function renderKanbanMontagem() {
+    if (!kanbanContainer) return;
+    garantirColunasDom();
+    window._montaFiltroPesquisa = filtroPesquisa;
+    window._producaoRenderModoMontagem = true;
+    if (typeof window._producaoWithProgramacao === 'function' && typeof window._producaoRenderKanbanCol === 'function') {
+      window._producaoWithProgramacao(programacaoCarregada, () => {
+        getColunasMontagem().forEach((col) => {
+          const dom = colunasDom[col.key];
+          if (!dom) return;
+          const msg = (typeof window._producaoMsgVaziaColuna === 'function')
+            ? window._producaoMsgVaziaColuna(col.key)
+            : `Nenhuma OP em ${col.nome}.`;
+          const onlyAProduzir = col.key === 'programado';
+          window._producaoRenderKanbanCol(dom.colEl, dom.cntEl, ordensCarregadas, col.key, msg, onlyAProduzir, null);
+        });
+      });
+    }
+    window._producaoRenderModoMontagem = false;
+    window._montaFiltroPesquisa = '';
+    if (typeof attachOpCardClickHandlers === 'function') {
+      attachOpCardClickHandlers('#montaProducaoPane', ordensCarregadas);
+    }
   }
 
   async function carregarMontagem() {
-    if (!spinner || !colProgramado) return;
+    if (!spinner || !kanbanContainer) return;
     spinner.style.display = 'block';
-    if (spinnerMsg) spinnerMsg.textContent = 'Consultando IAPP...';
+    if (spinnerMsg) spinnerMsg.textContent = 'Carregando OPs...';
     erroDiv.style.display = 'none';
     if (rodape) rodape.style.display = 'none';
-    if (filtroBar) filtroBar.style.display = 'none';
-    colProgramado.innerHTML = '<div style="text-align:center;padding:24px 0;color:var(--inactive-color);font-size:12px;">Carregando...</div>';
 
     try {
-      const resp = await fetch('/api/producao/ordens-montagem');
-      const data = await resp.json();
-
-      if (!resp.ok || !data.success) throw new Error(data.error || 'Erro ao consultar ordens de montagem');
+      const [respOrdens, respProg] = await Promise.all([
+        fetch('/api/producao/ordens'),
+        fetch('/api/producao/kanban-programacao'),
+      ]);
+      const data = await respOrdens.json();
+      const dataProg = await respProg.json();
+      if (!respOrdens.ok || !data.success) throw new Error(data.error || 'Erro ao consultar ordens de produção');
 
       ordensCarregadas = data.ordens || [];
-
-      const operacoesSet = new Set();
-      for (const op of ordensCarregadas) {
-        for (const os of (op.ordens_servico || [])) {
-          if (os.operacao) operacoesSet.add(os.operacao);
-        }
-      }
-      const operacoes = [...operacoesSet].sort();
-
-      if (filtroSelect) {
-        const valorAtual = filtroSelect.value;
-        filtroSelect.innerHTML = '<option value="">Todas as operações de serviço</option>'
-          + operacoes.map(op => `<option value="${op.replace(/"/g,'&quot;')}"${op === valorAtual ? ' selected' : ''}>${op}</option>`).join('');
-        if (filtroBar) filtroBar.style.display = operacoes.length > 0 ? 'block' : 'none';
-      }
-
-      renderKanban(ordensCarregadas);
+      programacaoCarregada = (respProg.ok && dataProg.success) ? (dataProg.registros || []) : [];
+      await carregarRiStatusMontagem(ordensCarregadas);
+      renderKanbanMontagem();
 
       if (rodape) {
         rodape.style.display = 'block';
-        rodape.textContent = `${data.total_ativas || ordensCarregadas.length} ordem(ns) carregada(s).`;
+        const sincTs = data.sincronizado_em
+          ? ` · Consultado em: ${String(data.sincronizado_em).slice(0, 10).split('-').reverse().join('/')}`
+          : '';
+        rodape.textContent = `${data.total_ativas || ordensCarregadas.length} OP(s) gerada(s).${sincTs}`;
       }
     } catch (err) {
       erroDiv.style.display = 'block';
-      erroDiv.textContent = 'Erro: ' + (err.message || 'Falha ao carregar ordens de montagem.');
+      erroDiv.textContent = 'Erro: ' + (err.message || 'Falha ao carregar produção montagem.');
     } finally {
       spinner.style.display = 'none';
     }
   }
 
-  if (filtroSelect) {
-    filtroSelect.addEventListener('change', () => renderKanban(ordensCarregadas));
+  if (pesquisaInput) {
+    pesquisaInput.addEventListener('input', () => {
+      clearTimeout(pesquisaDebounce);
+      pesquisaDebounce = setTimeout(() => {
+        filtroPesquisa = pesquisaInput.value || '';
+        atualizarPesquisaBarUi();
+        renderKanbanMontagem();
+      }, 250);
+    });
   }
+  btnLimparPesq?.addEventListener('click', () => {
+    filtroPesquisa = '';
+    if (pesquisaInput) pesquisaInput.value = '';
+    atualizarPesquisaBarUi();
+    renderKanbanMontagem();
+  });
 
   menuBtn.addEventListener('click', (e) => {
     e.preventDefault();
@@ -72531,20 +73084,229 @@ window.verOperacao = function(osId) {
     carregarMontagem();
   });
 
-  if (recarrBtn) {
-    recarrBtn.addEventListener('click', () => carregarMontagem());
-  }
+  if (recarrBtn) recarrBtn.addEventListener('click', () => carregarMontagem());
 
-  window._montaRecarregarOrdens = async function() {
+  window._montaRecarregarOrdens = async function () {
     try {
-      const resp = await fetch('/api/producao/ordens-montagem');
+      const [resp, respProg] = await Promise.all([
+        fetch('/api/producao/ordens'),
+        fetch('/api/producao/kanban-programacao'),
+      ]);
       const data = await resp.json();
+      const dataProg = await respProg.json();
       if (resp.ok && data.success) {
         ordensCarregadas = data.ordens || [];
-        renderKanban(ordensCarregadas);
+        programacaoCarregada = (respProg.ok && dataProg.success) ? (dataProg.registros || []) : [];
+        await carregarRiStatusMontagem(ordensCarregadas);
+        renderKanbanMontagem();
       }
     } catch (_) { /* silencioso */ }
   };
+  window._montaProgramacaoCarregada = () => programacaoCarregada;
+})();
+
+
+/* ============================================================
+ * RI — REGISTRO DE INSPEÇÃO — OPs pendentes de RI no posto
+ * ============================================================ */
+(function () {
+  const menuBtn = document.getElementById('menu-ri-registro-inspecao');
+  if (!menuBtn) return;
+
+  const spinner = document.getElementById('riRegistroSpinner');
+  const erroDiv = document.getElementById('riRegistroErro');
+  const rodape = document.getElementById('riRegistroRodape');
+  const recarrBtn = document.getElementById('riRegistroRecarregarBtn');
+  const colEl = document.getElementById('riRegistroKanbanCol');
+  const cntEl = document.getElementById('riRegistroCnt');
+  const pesquisaInput = document.getElementById('riRegistroPesquisaInput');
+  const btnLimparPesq = document.getElementById('riRegistroPesquisaLimpar');
+
+  let pendentesCarregados = [];
+  let ordensParaClick = [];
+  let filtroPesquisa = '';
+  let pesquisaDebounce = null;
+
+  function escHtml(str) {
+    return String(str ?? '').replace(/[&<>"']/g, (ch) => ({
+      '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+    }[ch] || ch));
+  }
+
+  function fmtData(val) {
+    if (!val) return '—';
+    const s = String(val).slice(0, 10);
+    if (s.length < 10) return s;
+    return s.split('-').reverse().join('/');
+  }
+
+  function fmtQtde(v) {
+    const n = Number(v);
+    if (!Number.isFinite(n)) return String(v ?? '—');
+    return n % 1 === 0 ? String(n) : n.toFixed(2);
+  }
+
+  function normPesquisa(str) {
+    return String(str || '').trim().toLowerCase();
+  }
+
+  function itemMatchesPesquisa(item) {
+    const termo = normPesquisa(filtroPesquisa);
+    if (!termo) return true;
+    const modelo = normPesquisa(item.produto?.identificacao);
+    const opNum = normPesquisa(item.numero_op);
+    return modelo.includes(termo) || opNum.includes(termo);
+  }
+
+  function atualizarPesquisaBarUi() {
+    if (!btnLimparPesq) return;
+    btnLimparPesq.style.display = filtroPesquisa ? 'inline-flex' : 'none';
+  }
+
+  function pendingToOp(item) {
+    return {
+      id: item.op_producao_id,
+      identificacao: item.numero_op,
+      qtde: item.qtde,
+      obs: item.obs,
+      data_abertura: item.data_abertura,
+      data_inicio: item.data_inicio,
+      data_final: item.data_final,
+      data_previsao_faturamento: item.data_previsao_faturamento,
+      data_previsao_entrega: item.data_previsao_entrega,
+      produto: item.produto || {},
+      from_op_producao: true,
+      _riColKey: item.col_key,
+      _riPosto: item.posto,
+    };
+  }
+
+  function renderRiKanban() {
+    if (!colEl) return;
+    const filtrados = pendentesCarregados.filter(itemMatchesPesquisa);
+    ordensParaClick = filtrados.map(pendingToOp);
+
+    if (cntEl) cntEl.textContent = String(filtrados.length);
+
+    if (!filtrados.length) {
+      const msg = filtroPesquisa
+        ? `Nenhuma OP encontrada para "${escHtml(filtroPesquisa)}".`
+        : 'Nenhuma OP aguardando RI no posto atual.';
+      colEl.innerHTML = `<div style="text-align:center;padding:24px 0;color:var(--inactive-color);font-size:12px;">${msg}</div>`;
+      return;
+    }
+
+    const grupos = {};
+    for (const item of filtrados) {
+      const cod = item.produto?.identificacao || String(item.op_producao_id);
+      if (!grupos[cod]) grupos[cod] = [];
+      grupos[cod].push(item);
+    }
+
+    colEl.innerHTML = Object.entries(grupos).map(([prodId, items]) => {
+      const prod = items[0].produto || {};
+      const qtdeTotal = items.reduce((s, it) => s + (Number(it.qtde) || 0), 0);
+      const opsHtml = items.map((item) => {
+        const opIdent = escHtml(item.numero_op || '—');
+        const posto = escHtml(item.posto || '');
+        const colKey = escHtml(item.col_key || '');
+        return `<div data-op-id="${item.op_producao_id}" data-ri-col-key="${colKey}" class="kanban-op-card"
+          style="background:rgba(99,102,241,.08);border:1px solid rgba(99,102,241,.35);cursor:pointer;">
+          <div style="display:flex;align-items:flex-start;gap:8px;">
+            <div style="flex:1;min-width:0;">
+              <div style="display:flex;align-items:center;flex-wrap:wrap;gap:6px;margin-bottom:4px;">
+                <span style="font-size:10px;color:#475569;font-weight:600;">#${item.op_producao_id}</span>
+                <span style="font-size:13px;font-weight:700;color:#e2e8f0;">OP ${opIdent}</span>
+                <span style="font-size:10px;font-weight:700;background:#312e81;color:#c7d2fe;padding:2px 8px;border-radius:6px;">${posto}</span>
+                <span style="font-size:11px;color:#94a3b8;margin-left:auto;">Qtde: <b style="color:#f1f5f9;">${fmtQtde(item.qtde)}</b></span>
+              </div>
+              <div style="display:flex;flex-wrap:wrap;gap:8px;">
+                ${item.data_abertura ? `<span style="font-size:10px;color:#64748b;">Abertura: <b style="color:#94a3b8;">${fmtData(item.data_abertura)}</b></span>` : ''}
+                ${item.data_previsao_entrega ? `<span style="font-size:10px;color:#64748b;">Prev. entrega: <b style="color:#a5f3fc;">${fmtData(item.data_previsao_entrega)}</b></span>` : ''}
+              </div>
+              ${item.obs ? `<div style="font-size:11px;color:#94a3b8;margin-top:6px;">Obs: <span style="color:#fef3c7;">${escHtml(item.obs)}</span></div>` : ''}
+              <div style="font-size:11px;color:#a5b4fc;font-weight:600;margin-top:8px;line-height:1.35;">
+                <i class="fa-solid fa-clipboard-check" style="margin-right:5px;font-size:10px;"></i>Clique para registrar RI
+              </div>
+            </div>
+          </div>
+        </div>`;
+      }).join('');
+
+      const descEsc = escHtml(prod.descricao || '—');
+      return `<div class="kanban-prod-grupo" style="background:var(--content-bg,#1e2233);border:1px solid rgba(255,255,255,.1);border-radius:10px;padding:12px;">
+        <div style="display:flex;align-items:flex-start;gap:8px;margin-bottom:6px;">
+          <div style="flex:1;min-width:0;">
+            <div style="font-size:13px;font-weight:700;color:#818cf8;letter-spacing:.3px;">${escHtml(prod.identificacao || prodId)}</div>
+            <div style="font-size:12px;color:#e2e8f0;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;margin-top:2px;line-height:1.4;" title="${descEsc}">${descEsc}</div>
+          </div>
+          <span style="flex-shrink:0;font-size:12px;font-weight:700;background:#312e81;color:#c7d2fe;padding:3px 10px;border-radius:12px;">QTD ${fmtQtde(qtdeTotal)}</span>
+        </div>
+        ${opsHtml}
+      </div>`;
+    }).join('');
+
+    if (typeof attachOpCardClickHandlers === 'function') {
+      attachOpCardClickHandlers('#riRegistroInspecaoPane', ordensParaClick);
+    }
+  }
+
+  async function carregarRiRegistro() {
+    if (!colEl) return;
+    if (spinner) spinner.style.display = 'block';
+    if (erroDiv) erroDiv.style.display = 'none';
+    if (rodape) rodape.style.display = 'none';
+
+    try {
+      const resp = await fetch('/api/qualidade/ri-check/pendentes', { credentials: 'include' });
+      const data = await resp.json();
+      if (!resp.ok || !data.ok) throw new Error(data.error || 'Erro ao consultar RI pendentes');
+
+      pendentesCarregados = data.pendentes || [];
+      renderRiKanban();
+
+      if (rodape) {
+        rodape.style.display = 'block';
+        rodape.textContent = `${data.total || pendentesCarregados.length} OP(s) aguardando RI. · Consultado em: ${new Date().toLocaleString('pt-BR')}`;
+      }
+    } catch (err) {
+      if (erroDiv) {
+        erroDiv.style.display = 'block';
+        erroDiv.textContent = 'Erro: ' + (err.message || 'Falha ao carregar RI pendentes.');
+      }
+    } finally {
+      if (spinner) spinner.style.display = 'none';
+    }
+  }
+
+  if (pesquisaInput) {
+    pesquisaInput.addEventListener('input', () => {
+      clearTimeout(pesquisaDebounce);
+      pesquisaDebounce = setTimeout(() => {
+        filtroPesquisa = pesquisaInput.value || '';
+        atualizarPesquisaBarUi();
+        renderRiKanban();
+      }, 250);
+    });
+  }
+  btnLimparPesq?.addEventListener('click', () => {
+    filtroPesquisa = '';
+    if (pesquisaInput) pesquisaInput.value = '';
+    atualizarPesquisaBarUi();
+    renderRiKanban();
+  });
+
+  menuBtn.addEventListener('click', (e) => {
+    e.preventDefault();
+    document.querySelectorAll('.left-side .side-menu a').forEach(a => a.classList.remove('is-active'));
+    menuBtn.classList.add('is-active');
+    showMainTab('riRegistroInspecaoPane');
+    carregarRiRegistro();
+  });
+
+  recarrBtn?.addEventListener('click', () => carregarRiRegistro());
+
+  window._riRegistroRecarregar = carregarRiRegistro;
 })();
 
   function escapeHtml(value) {
@@ -72557,7 +73319,412 @@ window.verOperacao = function(osId) {
     }[ch] || ch));
   }
 
-  async function openProducaoEstruturaPorIappId(iappId, produtoCodigo) {
+  function estruturaSqlCampoHtml(secKey, fieldKey, value) {
+    const isJson = JSONB_FIELDS_RE.test(fieldKey) || String(value ?? '').length > 100;
+    const val = escapeHtml(String(value ?? ''));
+    const dataSec = escapeHtml(secKey);
+    const dataField = escapeHtml(fieldKey);
+    if (isJson) {
+      return `<label class="estr-sql-field">
+        <span class="estr-sql-label">${dataField}</span>
+        <textarea data-sec="${dataSec}" data-field="${dataField}" rows="4">${val}</textarea>
+      </label>`;
+    }
+    return `<label class="estr-sql-field">
+      <span class="estr-sql-label">${dataField}</span>
+      <input data-sec="${dataSec}" data-field="${dataField}" type="text" value="${val}">
+    </label>`;
+  }
+
+  const JSONB_FIELDS_RE = /^(raw|grupo|subgrupo|tag_grupo|checklists|servicos)$/;
+
+  function estruturaSqlColetarForm(formEl) {
+    const out = {};
+    formEl.querySelectorAll('[data-sec][data-field]').forEach((el) => {
+      const sec = el.dataset.sec;
+      const field = el.dataset.field;
+      if (!out[sec]) out[sec] = {};
+      out[sec][field] = el.value;
+    });
+    return out;
+  }
+
+  async function openEstruturaSqlDadosModal(opts) {
+    const {
+      titulo,
+      subtitulo,
+      getUrl,
+      putUrl,
+      renderFormHtml,
+      buildPayload,
+      onSaved,
+    } = opts;
+
+    const overlay = document.createElement('div');
+    overlay.className = 'kanban-modal-overlay';
+    overlay.style.zIndex = '10050';
+    overlay.addEventListener('click', (ev) => { if (ev.target === overlay) overlay.remove(); });
+
+    const modal = document.createElement('div');
+    modal.className = 'kanban-modal';
+    modal.style.maxWidth = '860px';
+    modal.innerHTML = `
+      <header>
+        <div>
+          <h2>${escapeHtml(titulo)}</h2>
+          <span>${escapeHtml(subtitulo || '')}</span>
+        </div>
+        <button class="close-btn" aria-label="Fechar">&times;</button>
+      </header>
+      <div class="kanban-modal-body" id="estr-sql-editor-body" style="max-height:65vh;overflow:auto;">
+        <div style="text-align:center;padding:32px 0;color:#94a3b8;font-size:12px;">
+          <i class="fa-solid fa-spinner fa-spin" style="margin-right:6px;"></i>Carregando dados...
+        </div>
+      </div>
+      <footer style="display:flex;justify-content:flex-end;gap:8px;flex-wrap:wrap;">
+        <span id="estr-sql-editor-status" style="flex:1;font-size:11px;color:#64748b;align-self:center;"></span>
+        <button type="button" class="modal-primary" id="estr-sql-save-btn">Salvar alterações</button>
+        <button type="button" class="modal-secondary" id="estr-sql-close-btn">Fechar</button>
+      </footer>
+    `;
+
+    overlay.appendChild(modal);
+    document.body.appendChild(overlay);
+
+    const close = () => overlay.remove();
+    modal.querySelector('.close-btn')?.addEventListener('click', close);
+    modal.querySelector('#estr-sql-close-btn')?.addEventListener('click', close);
+
+    const body = modal.querySelector('#estr-sql-editor-body');
+    const statusEl = modal.querySelector('#estr-sql-editor-status');
+    const saveBtn = modal.querySelector('#estr-sql-save-btn');
+    let dadosOriginais = null;
+
+    try {
+      const resp = await fetch(getUrl);
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data.error || 'Erro ao carregar dados');
+      dadosOriginais = data;
+      body.innerHTML = `
+        <style>
+          .estr-sql-sec { margin-bottom:18px; padding-bottom:14px; border-bottom:1px solid rgba(255,255,255,.08); }
+          .estr-sql-sec h3 { margin:0 0 10px; font-size:12px; color:#94a3b8; font-weight:600; text-transform:uppercase; letter-spacing:.04em; }
+          .estr-sql-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(240px,1fr)); gap:8px 12px; }
+          .estr-sql-field { display:block; margin:0; }
+          .estr-sql-label { display:block; font-size:10px; color:#64748b; margin-bottom:4px; }
+          .estr-sql-field input, .estr-sql-field textarea {
+            width:100%; font-size:11px; padding:6px 8px; border-radius:6px;
+            border:1px solid rgba(255,255,255,.12); background:rgba(0,0,0,.25); color:#e2e8f0;
+            box-sizing:border-box;
+          }
+          .estr-sql-field textarea { resize:vertical; min-height:64px; font-family:monospace; }
+        </style>
+        <form id="estr-sql-editor-form">${renderFormHtml(data)}</form>`;
+    } catch (e) {
+      body.innerHTML = `<div style="text-align:center;padding:32px 0;color:#f87171;font-size:12px;">${escapeHtml(e.message)}</div>`;
+      saveBtn.disabled = true;
+      return;
+    }
+
+    saveBtn?.addEventListener('click', async () => {
+      const form = modal.querySelector('#estr-sql-editor-form');
+      if (!form || !dadosOriginais) return;
+      saveBtn.disabled = true;
+      saveBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin" style="margin-right:6px;"></i>Salvando...';
+      if (statusEl) statusEl.textContent = '';
+      try {
+        const collected = estruturaSqlColetarForm(form);
+        const payload = buildPayload(collected, dadosOriginais);
+        const resp = await fetch(putUrl, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        const data = await resp.json();
+        if (!resp.ok) throw new Error(data.error || 'Erro ao salvar');
+        if (statusEl) statusEl.textContent = data.message || 'Salvo com sucesso.';
+        dadosOriginais = data;
+        if (typeof onSaved === 'function') onSaved(data);
+      } catch (e) {
+        if (statusEl) statusEl.textContent = e.message;
+      } finally {
+        saveBtn.disabled = false;
+        saveBtn.innerHTML = 'Salvar alterações';
+      }
+    });
+  }
+
+  function openEstruturaSqlFichaModal(fichaId, onSaved) {
+    const id = Number(fichaId) || 0;
+    if (!id) return;
+    openEstruturaSqlDadosModal({
+      titulo: 'Dados completos do produto',
+      subtitulo: `Ficha SQL #${id}`,
+      getUrl: `/api/estrutura/ficha/${id}/completo`,
+      putUrl: `/api/estrutura/ficha/${id}/completo`,
+      renderFormHtml: (data) => {
+        let html = '<div class="estr-sql-sec"><h3>Ficha técnica</h3><div class="estr-sql-grid">';
+        Object.entries(data.ficha || {}).forEach(([k, v]) => {
+          html += estruturaSqlCampoHtml('ficha', k, v);
+        });
+        html += '</div></div>';
+        (data.operacoes || []).forEach((op) => {
+          html += `<div class="estr-sql-sec"><h3>Operação ${escapeHtml(String(op.operacao))}</h3><div class="estr-sql-grid">`;
+          Object.entries(op.fields || {}).forEach(([k, v]) => {
+            html += estruturaSqlCampoHtml(`operacao_${op.operacao}`, k, v);
+          });
+          html += '</div></div>';
+        });
+        return html;
+      },
+      buildPayload: (collected, data) => ({
+        ficha: collected.ficha || {},
+        operacoes: (data.operacoes || []).map((op) => ({
+          operacao: op.operacao,
+          fields: collected[`operacao_${op.operacao}`] || {},
+        })),
+      }),
+      onSaved,
+    });
+  }
+
+  function openEstruturaSqlItemModal(itemId, onSaved) {
+    const id = Number(itemId) || 0;
+    if (!id) return;
+    openEstruturaSqlDadosModal({
+      titulo: 'Dados completos do item',
+      subtitulo: `Item SQL #${id}`,
+      getUrl: `/api/estrutura/item/${id}/completo`,
+      putUrl: `/api/estrutura/item/${id}/completo`,
+      renderFormHtml: (data) => {
+        const blocos = [
+          ['Item da estrutura', 'item', data.item],
+          ['Produto IAPP', 'produto', data.produto],
+          ['Operação', 'operacao', data.operacao],
+        ];
+        return blocos.filter((b) => b[2] && Object.keys(b[2]).length).map(([tit, sec, fields]) => {
+          let h = `<div class="estr-sql-sec"><h3>${escapeHtml(tit)}</h3><div class="estr-sql-grid">`;
+          Object.entries(fields).forEach(([k, v]) => {
+            h += estruturaSqlCampoHtml(sec, k, v);
+          });
+          h += '</div></div>';
+          return h;
+        }).join('');
+      },
+      buildPayload: (collected) => ({
+        item: collected.item || {},
+        produto: collected.produto || {},
+        operacao: collected.operacao || {},
+      }),
+      onSaved,
+    });
+  }
+
+  let estruturaSqlBuscaDebounce = null;
+
+  function openEstruturaSqlProdutoBuscaModal(opts) {
+    const {
+      titulo,
+      subtitulo,
+      onSelect,
+    } = opts || {};
+
+    const overlay = document.createElement('div');
+    overlay.className = 'kanban-modal-overlay';
+    overlay.style.zIndex = '10060';
+    overlay.addEventListener('click', (ev) => { if (ev.target === overlay) overlay.remove(); });
+
+    const modal = document.createElement('div');
+    modal.className = 'kanban-modal';
+    modal.style.maxWidth = '520px';
+    modal.innerHTML = `
+      <header>
+        <div>
+          <h2>${escapeHtml(titulo || 'Pesquisar produto')}</h2>
+          <span>${escapeHtml(subtitulo || 'Mín. 3 caracteres — fonte: produtos_omie')}</span>
+        </div>
+        <button class="close-btn" aria-label="Fechar">&times;</button>
+      </header>
+      <div class="kanban-modal-body" style="max-height:420px;overflow:auto;">
+        <label style="display:block;margin-bottom:6px;font-size:11px;color:#94a3b8;">Código ou descrição</label>
+        <div style="position:relative;">
+          <i class="fa-solid fa-magnifying-glass" style="position:absolute;left:12px;top:50%;transform:translateY(-50%);color:#64748b;font-size:13px;pointer-events:none;"></i>
+          <input type="search" id="estr-sql-busca-input" autocomplete="off"
+            placeholder="Pesquisar produto..."
+            style="width:100%;padding:9px 12px 9px 36px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.12);border-radius:8px;color:#e2e8f0;font-size:13px;outline:none;box-sizing:border-box;">
+        </div>
+        <div id="estr-sql-busca-status" style="display:none;margin-top:10px;font-size:11px;color:#64748b;"></div>
+        <div id="estr-sql-busca-lista" style="display:none;margin-top:10px;max-height:260px;overflow-y:auto;border:1px solid rgba(255,255,255,.1);border-radius:8px;"></div>
+      </div>
+      <footer style="display:flex;justify-content:flex-end;">
+        <button type="button" class="modal-secondary" id="estr-sql-busca-fechar">Fechar</button>
+      </footer>
+    `;
+
+    overlay.appendChild(modal);
+    document.body.appendChild(overlay);
+
+    const close = () => overlay.remove();
+    modal.querySelector('.close-btn')?.addEventListener('click', close);
+    modal.querySelector('#estr-sql-busca-fechar')?.addEventListener('click', close);
+
+    const input = modal.querySelector('#estr-sql-busca-input');
+    const statusEl = modal.querySelector('#estr-sql-busca-status');
+    const listaEl = modal.querySelector('#estr-sql-busca-lista');
+    let selecionando = false;
+
+    const renderResultados = (itens) => {
+      if (!listaEl) return;
+      if (!itens.length) {
+        listaEl.style.display = 'block';
+        listaEl.innerHTML = '<div style="padding:14px;text-align:center;font-size:12px;color:#64748b;">Nenhum produto encontrado.</div>';
+        return;
+      }
+      listaEl.style.display = 'block';
+      listaEl.innerHTML = itens.map((it) => {
+        const codigo = escapeHtml(String(it.codigo || ''));
+        const descricao = escapeHtml(String(it.descricao || ''));
+        const codigoProduto = Number(it.codigo_produto) || 0;
+        return `<button type="button" class="estr-sql-busca-item" data-codigo="${codigo}" data-codigo-produto="${codigoProduto}"
+          style="display:block;width:100%;text-align:left;padding:10px 12px;background:transparent;border:none;border-bottom:1px solid rgba(255,255,255,.06);color:#e2e8f0;cursor:pointer;">
+          <div style="font-size:13px;font-weight:600;">${codigo}</div>
+          <div style="font-size:11px;color:#64748b;margin-top:2px;">${descricao}</div>
+        </button>`;
+      }).join('');
+    };
+
+    const buscar = async (termo) => {
+      if (!statusEl) return;
+      statusEl.style.display = 'block';
+      statusEl.style.color = '#64748b';
+      statusEl.textContent = 'Buscando...';
+      try {
+        const resp = await fetch(`/api/producao/op-producao/buscar-produtos?q=${encodeURIComponent(termo)}`);
+        const data = await resp.json();
+        if (!resp.ok || !data.success) throw new Error(data.error || 'Falha na busca.');
+        statusEl.textContent = data.itens?.length
+          ? `${data.itens.length} produto(s) encontrado(s).`
+          : 'Nenhum produto encontrado.';
+        renderResultados(data.itens || []);
+      } catch (err) {
+        statusEl.style.color = '#f87171';
+        statusEl.textContent = 'Erro: ' + (err.message || 'Falha ao buscar produtos.');
+        if (listaEl) {
+          listaEl.style.display = 'none';
+          listaEl.innerHTML = '';
+        }
+      }
+    };
+
+    input?.addEventListener('input', () => {
+      const termo = String(input.value || '').trim();
+      if (estruturaSqlBuscaDebounce) clearTimeout(estruturaSqlBuscaDebounce);
+      if (termo.length < 3) {
+        if (statusEl) {
+          statusEl.style.display = termo.length ? 'block' : 'none';
+          statusEl.style.color = '#64748b';
+          statusEl.textContent = 'Digite pelo menos 3 caracteres.';
+        }
+        if (listaEl) {
+          listaEl.style.display = 'none';
+          listaEl.innerHTML = '';
+        }
+        return;
+      }
+      estruturaSqlBuscaDebounce = setTimeout(() => buscar(termo), 300);
+    });
+
+    listaEl?.addEventListener('click', async (ev) => {
+      const btn = ev.target.closest('.estr-sql-busca-item');
+      if (!btn || selecionando) return;
+      const codigo = String(btn.dataset.codigo || '').trim();
+      const codigoProduto = Number(btn.dataset.codigoProduto) || 0;
+      if (!codigo || !codigoProduto) return;
+      selecionando = true;
+      btn.disabled = true;
+      if (statusEl) {
+        statusEl.style.display = 'block';
+        statusEl.style.color = '#64748b';
+        statusEl.textContent = 'Processando...';
+      }
+      try {
+        if (typeof onSelect === 'function') {
+          await onSelect({ codigo, codigo_produto: codigoProduto });
+        }
+        close();
+      } catch (err) {
+        if (statusEl) {
+          statusEl.style.color = '#f87171';
+          statusEl.textContent = err.message || 'Erro ao selecionar produto.';
+        }
+        selecionando = false;
+        btn.disabled = false;
+      }
+    });
+
+    setTimeout(() => input?.focus(), 80);
+  }
+
+  function trocarEstruturaSqlItem(itemId, recarregarLista) {
+    const id = Number(itemId) || 0;
+    if (!id) return;
+    openEstruturaSqlProdutoBuscaModal({
+      titulo: 'Trocar produto do item',
+      subtitulo: 'Selecione o novo produto (produtos_omie)',
+      onSelect: async (prod) => {
+        const resp = await fetch(`/api/estrutura/item/${id}/trocar-produto`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(prod),
+        });
+        const data = await resp.json();
+        if (!resp.ok) throw new Error(data.error || 'Erro ao trocar produto.');
+        if (typeof recarregarLista === 'function') await recarregarLista();
+        openEstruturaSqlItemModal(id, recarregarLista);
+      },
+    });
+  }
+
+  async function excluirEstruturaSqlItem(itemId, recarregarLista) {
+    const id = Number(itemId) || 0;
+    if (!id) return;
+    if (!window.confirm('Remover este item da estrutura no cache SQL?')) return;
+    const resp = await fetch(`/api/estrutura/item/${id}`, { method: 'DELETE' });
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.error || 'Erro ao excluir item.');
+    if (typeof recarregarLista === 'function') await recarregarLista();
+  }
+
+  function adicionarEstruturaSqlItem(fichaId, recarregarLista) {
+    const fid = Number(fichaId) || 0;
+    if (!fid) return;
+    openEstruturaSqlProdutoBuscaModal({
+      titulo: 'Adicionar item à estrutura',
+      subtitulo: 'Selecione o produto (produtos_omie)',
+      onSelect: async (prod) => {
+        const resp = await fetch(`/api/estrutura/ficha/${fid}/item`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(prod),
+        });
+        const data = await resp.json();
+        if (!resp.ok) throw new Error(data.error || 'Erro ao adicionar item.');
+        const novoId = Number(data.item_id) || 0;
+        if (typeof recarregarLista === 'function') await recarregarLista();
+        if (novoId) openEstruturaSqlItemModal(novoId, recarregarLista);
+      },
+    });
+  }
+
+  async function openProducaoEstruturaPorIappId(_iappId, produtoCodigo, opts) {
+    const opProducaoId = Number(opts?.opProducaoId) || 0;
+    const numeroOp = String(opts?.numeroOp || '').trim();
+    const codigo = String(produtoCodigo || '').trim();
+    const params = new URLSearchParams();
+    if (codigo) params.set('codigo', codigo);
+    if (opProducaoId > 0) params.set('op_producao_id', String(opProducaoId));
+    if (numeroOp) params.set('numero_op', numeroOp);
+    const fetchUrl = `/api/producao/estrutura-ficha?${params.toString()}`;
     const overlay = document.createElement('div');
     overlay.className = 'kanban-modal-overlay';
     overlay.addEventListener('click', (ev) => { if (ev.target === overlay) overlay.remove(); });
@@ -72569,7 +73736,7 @@ window.verOperacao = function(osId) {
       <header>
         <div>
           <h2>Estrutura do produto</h2>
-          <span>${escapeHtml(produtoCodigo || String(iappId))}</span>
+          <span>${escapeHtml(codigo || produtoCodigo || '')}</span>
         </div>
         <button class="close-btn" aria-label="Fechar">&times;</button>
       </header>
@@ -72578,7 +73745,9 @@ window.verOperacao = function(osId) {
           <i class="fa-solid fa-spinner fa-spin" style="margin-right:6px;"></i>Carregando estrutura...
         </div>
       </div>
-      <footer>
+      <footer style="display:flex;justify-content:flex-end;gap:8px;flex-wrap:wrap;">
+        <span id="estrutura-sync-status" style="flex:1;font-size:11px;color:#64748b;align-self:center;min-width:120px;"></span>
+        <button type="button" class="modal-primary" id="estrutura-sync-btn">Salvar no banco</button>
         <button type="button" class="modal-secondary">Fechar</button>
       </footer>
     `;
@@ -72586,62 +73755,228 @@ window.verOperacao = function(osId) {
     overlay.appendChild(modal);
     document.body.appendChild(overlay);
 
-    const close = () => overlay.remove();
+    const syncBtn = modal.querySelector('#estrutura-sync-btn');
+    const syncStatus = modal.querySelector('#estrutura-sync-status');
+    let syncPollTimer = null;
+    let fichaInfoLoaded = null;
+    let codigoUsadoLoaded = codigo;
+
+    const pararPollSync = () => {
+      if (syncPollTimer) {
+        clearInterval(syncPollTimer);
+        syncPollTimer = null;
+      }
+    };
+
+    const close = () => {
+      pararPollSync();
+      overlay.remove();
+    };
     modal.querySelector('.close-btn')?.addEventListener('click', close);
     modal.querySelector('footer .modal-secondary')?.addEventListener('click', close);
 
+    const pollSyncStatus = (syncId) => {
+      pararPollSync();
+      syncPollTimer = setInterval(async () => {
+        try {
+          const r = await fetch(`/api/estrutura/sync/${syncId}`);
+          const j = await r.json();
+          if (!r.ok) throw new Error(j.error || 'Erro ao consultar sync');
+          const s = j.sync || {};
+          const pct = s.progresso_total > 0
+            ? Math.round((Number(s.progresso_atual || 0) / Number(s.progresso_total)) * 100)
+            : 0;
+          if (syncStatus) {
+            syncStatus.textContent = s.mensagem
+              ? `${s.mensagem}${s.progresso_total > 0 ? ` (${pct}%)` : ''}`
+              : 'Sincronizando...';
+          }
+          if (s.status === 'ok') {
+            pararPollSync();
+            if (syncBtn) {
+              syncBtn.disabled = false;
+              syncBtn.innerHTML = 'Salvar no banco';
+            }
+            if (syncStatus) syncStatus.textContent = s.mensagem || 'Estrutura salva no banco.';
+            try {
+              const r2 = await fetch(fetchUrl);
+              const d2 = await r2.json();
+              if (r2.ok && typeof renderEstruturaData === 'function') renderEstruturaData(d2);
+            } catch (_) {}
+          } else if (s.status === 'erro') {
+            pararPollSync();
+            if (syncBtn) {
+              syncBtn.disabled = false;
+              syncBtn.innerHTML = 'Salvar no banco';
+            }
+            if (syncStatus) syncStatus.textContent = s.mensagem || 'Erro na sincronização.';
+          }
+        } catch (e) {
+          pararPollSync();
+          if (syncBtn) {
+            syncBtn.disabled = false;
+            syncBtn.innerHTML = 'Salvar no banco';
+          }
+          if (syncStatus) syncStatus.textContent = e.message;
+        }
+      }, 1500);
+    };
+
+    syncBtn?.addEventListener('click', async () => {
+      if (!codigoUsadoLoaded) return;
+      pararPollSync();
+      syncBtn.disabled = true;
+      syncBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin" style="margin-right:6px;"></i>Salvando...';
+      if (syncStatus) syncStatus.textContent = 'Iniciando sincronização (1 req/s IAPP)...';
+      try {
+        const resp = await fetch('/api/estrutura/sync', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            codigo: codigoUsadoLoaded,
+            ficha_id: fichaInfoLoaded?.id || null,
+          }),
+        });
+        const data = await resp.json();
+        if (!resp.ok) throw new Error(data.error || 'Erro ao iniciar sync');
+        pollSyncStatus(data.syncId);
+      } catch (e) {
+        syncBtn.disabled = false;
+        syncBtn.innerHTML = 'Salvar no banco';
+        if (syncStatus) syncStatus.textContent = e.message;
+      }
+    });
+
     const body = modal.querySelector('#estrutura-iapp-body');
-    try {
-      const resp = await fetch(`/api/producao/materiais-previstos/${iappId}`);
-      const data = await resp.json();
-      if (!resp.ok || !data.success) throw new Error(data.error || 'Erro ao carregar estrutura');
+
+    const renderEstruturaData = (data) => {
       const itens = data.response || [];
+      const codigoUsado = data.codigo || codigo;
+      codigoUsadoLoaded = codigoUsado;
+      fichaInfoLoaded = data.ficha || null;
       if (!itens.length) {
-        body.innerHTML = '<div style="text-align:center;padding:32px 0;color:#475569;font-size:12px;">Nenhum material previsto.</div>';
+        body.innerHTML = `<div style="text-align:center;padding:32px 0;color:#475569;font-size:12px;">Nenhuma peça encontrada na ficha técnica para <b>${escapeHtml(codigoUsado)}</b>.</div>`;
         return;
       }
-      const precisaFetchFisico = itens.some(i => i.estoque_fisico == null);
-      const fisicoMap = precisaFetchFisico
-        ? await fetchEstoqueFisicoPorCodigos(itens.map(i => i.produto?.identificacao))
-        : {};
-      const fmtMoeda = (v) => v > 0 ? 'R$\u00a0' + Number(v).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '—';
-      const custoTotal = itens.reduce((s, i) => s + ((i.produto?.valor_custo || 0) * (i.qtde || 0)), 0);
+      const fonte = String(data.fonte || '').toLowerCase() === 'sql' || data.sincronizado_em
+        ? 'sql'
+        : 'iapp';
+      const fonteLabel = fonte === 'sql' ? 'SQL (cache local)' : 'IAPP';
+      const fonteCor = fonte === 'sql' ? '#34d399' : '#60a5fa';
+      const syncEm = data.sincronizado_em
+        ? new Date(data.sincronizado_em).toLocaleString('pt-BR')
+        : '';
+      const syncLabel = fonte === 'sql' && syncEm ? ` · atualizado ${escapeHtml(syncEm)}` : '';
+      const fichaInfo = data.ficha;
+      const isSql = fonte === 'sql';
+      const btnFichaHtml = isSql && fichaInfo?.id
+        ? `<button type="button" class="modal-secondary" id="estrutura-ver-ficha-btn" style="font-size:10px;padding:4px 10px;margin-left:8px;">Ver dados completos do produto</button>`
+        : '';
+      const btnAddHtml = isSql && fichaInfo?.id
+        ? `<button type="button" class="modal-primary" id="estrutura-add-item-btn" style="font-size:10px;padding:4px 10px;margin-left:8px;">Adicionar item</button>`
+        : '';
+      const colAcoes = isSql
+        ? `<th style="padding:6px 8px;font-size:10px;color:#475569;font-weight:600;text-align:center;min-width:150px;">Ações</th>`
+        : '';
       const linhas = itens.map(i => {
-        const p = i.produto || {};
-        const qtde = i.qtde || 0;
-        const custo = p.valor_custo || 0;
-        const fisico = getEstoqueFisicoItem(i, fisicoMap);
+        const ident = i.identificacao || '—';
+        const desc = i.descricao || '—';
+        const tipo = i.status || '—';
+        const modelo = i.modelo || '—';
+        const qtde = i.qtde ?? '—';
+        const etapa = i.etapa || '—';
+        const btnItem = isSql && i.item_id
+          ? `<button type="button" class="estrutura-ver-item-btn modal-secondary" data-item-id="${escapeHtml(String(i.item_id))}" style="font-size:9px;padding:3px 6px;margin:1px;" title="Ver dados completos">Dados</button>`
+          : '';
+        const btnTrocar = isSql && i.item_id
+          ? `<button type="button" class="estrutura-trocar-item-btn modal-secondary" data-item-id="${escapeHtml(String(i.item_id))}" style="font-size:9px;padding:3px 6px;margin:1px;" title="Trocar produto">Trocar</button>`
+          : '';
+        const btnExcluir = isSql && i.item_id
+          ? `<button type="button" class="estrutura-excluir-item-btn" data-item-id="${escapeHtml(String(i.item_id))}" style="font-size:9px;padding:3px 6px;margin:1px;background:#450a0a;color:#fca5a5;border:1px solid #7f1d1d;border-radius:6px;cursor:pointer;" title="Excluir item">Excluir</button>`
+          : '';
+        const tdAcoes = isSql
+          ? `<td style="padding:6px 4px;text-align:center;white-space:nowrap;">${btnItem}${btnTrocar}${btnExcluir}</td>`
+          : '';
         return `<tr style="border-bottom:1px solid rgba(255,255,255,.05);">
-          <td style="padding:6px 8px;font-size:10px;color:#94a3b8;white-space:nowrap;">${escapeHtml(p.identificacao || '—')}</td>
-          <td style="padding:6px 8px;font-size:11px;color:#e2e8f0;">${escapeHtml(p.descricao || '—')}</td>
-          <td style="padding:6px 8px;font-size:10px;color:#64748b;text-align:center;">${escapeHtml(p.unidade_medida || '—')}</td>
-          <td style="padding:6px 8px;font-size:10px;color:#94a3b8;text-align:center;">${escapeHtml(p.tipo || '—')}</td>
-          <td style="padding:6px 8px;font-size:11px;color:#f1f5f9;text-align:right;font-weight:600;">${qtde}</td>
-          <td style="padding:6px 8px;font-size:11px;color:#fcd34d;text-align:right;font-weight:600;">${fisico != null ? fmtQtdeEstoque(fisico) : '—'}</td>
-          <td style="padding:6px 8px;font-size:10px;color:#6ee7b7;text-align:right;">${fmtMoeda(custo)}</td>
-          <td style="padding:6px 8px;font-size:10px;color:#a5f3fc;text-align:right;">${fmtMoeda(custo * qtde)}</td>
+          <td style="padding:6px 8px;font-size:10px;color:#94a3b8;white-space:nowrap;">${escapeHtml(String(ident))}</td>
+          <td style="padding:6px 8px;font-size:11px;color:#e2e8f0;">${escapeHtml(String(desc))}</td>
+          <td style="padding:6px 8px;font-size:10px;color:#64748b;text-align:center;">${escapeHtml(String(tipo))}</td>
+          <td style="padding:6px 8px;font-size:10px;color:#94a3b8;text-align:center;">${escapeHtml(String(modelo))}</td>
+          <td style="padding:6px 8px;font-size:11px;color:#f1f5f9;text-align:right;font-weight:600;">${escapeHtml(String(qtde))}</td>
+          <td style="padding:6px 8px;font-size:10px;color:#cbd5e1;">${escapeHtml(String(etapa))}</td>
+          ${tdAcoes}
         </tr>`;
       }).join('');
+      const fichaLabel = fichaInfo?.identificacao
+        ? ` · ficha ${escapeHtml(String(fichaInfo.identificacao))}`
+        : '';
       body.innerHTML = `
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
-          <span style="font-size:11px;color:#94a3b8;">${itens.length} material(is) previsto(s)</span>
-          <span style="font-size:11px;color:#a5f3fc;font-weight:600;">Total: ${fmtMoeda(custoTotal)}</span>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px;">
+          <span style="font-size:11px;color:#94a3b8;">
+            ${itens.length} peça(s)
+            · <span style="color:${fonteCor};font-weight:600;">${escapeHtml(fonteLabel)}</span>${syncLabel}${fichaLabel}
+            · produto <b style="color:#e2e8f0;">${escapeHtml(codigoUsado)}</b>
+            ${btnFichaHtml}${btnAddHtml}
+          </span>
         </div>
         <table style="width:100%;border-collapse:collapse;">
           <thead>
             <tr style="border-bottom:1px solid rgba(255,255,255,.1);">
               <th style="padding:6px 8px;font-size:10px;color:#475569;font-weight:600;text-align:left;">Código</th>
               <th style="padding:6px 8px;font-size:10px;color:#475569;font-weight:600;text-align:left;">Descrição</th>
-              <th style="padding:6px 8px;font-size:10px;color:#475569;font-weight:600;text-align:center;">UN</th>
               <th style="padding:6px 8px;font-size:10px;color:#475569;font-weight:600;text-align:center;">Tipo</th>
+              <th style="padding:6px 8px;font-size:10px;color:#475569;font-weight:600;text-align:center;">Modelo</th>
               <th style="padding:6px 8px;font-size:10px;color:#475569;font-weight:600;text-align:right;">Qtde</th>
-              <th style="padding:6px 8px;font-size:10px;color:#475569;font-weight:600;text-align:right;">Disponível</th>
-              <th style="padding:6px 8px;font-size:10px;color:#475569;font-weight:600;text-align:right;">Custo unit.</th>
-              <th style="padding:6px 8px;font-size:10px;color:#475569;font-weight:600;text-align:right;">Total</th>
+              <th style="padding:6px 8px;font-size:10px;color:#475569;font-weight:600;text-align:left;">Operação</th>
+              ${colAcoes}
             </tr>
           </thead>
           <tbody>${linhas}</tbody>
         </table>`;
+
+      const recarregarLista = async () => {
+        try {
+          const r = await fetch(fetchUrl);
+          const d = await r.json();
+          if (r.ok) renderEstruturaData(d);
+        } catch (_) {}
+      };
+
+      body.querySelector('#estrutura-ver-ficha-btn')?.addEventListener('click', () => {
+        openEstruturaSqlFichaModal(fichaInfo.id, recarregarLista);
+      });
+      body.querySelector('#estrutura-add-item-btn')?.addEventListener('click', () => {
+        adicionarEstruturaSqlItem(fichaInfo.id, recarregarLista);
+      });
+      body.querySelectorAll('.estrutura-ver-item-btn').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const itemId = Number(btn.dataset.itemId) || 0;
+          openEstruturaSqlItemModal(itemId, recarregarLista);
+        });
+      });
+      body.querySelectorAll('.estrutura-trocar-item-btn').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const itemId = Number(btn.dataset.itemId) || 0;
+          trocarEstruturaSqlItem(itemId, recarregarLista);
+        });
+      });
+      body.querySelectorAll('.estrutura-excluir-item-btn').forEach((btn) => {
+        btn.addEventListener('click', async () => {
+          const itemId = Number(btn.dataset.itemId) || 0;
+          try {
+            await excluirEstruturaSqlItem(itemId, recarregarLista);
+          } catch (err) {
+            alert(err.message || 'Erro ao excluir item.');
+          }
+        });
+      });
+    };
+
+    try {
+      const resp = await fetch(fetchUrl);
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data.error || 'Erro ao carregar estrutura');
+      renderEstruturaData(data);
     } catch (e) {
       body.innerHTML = `<div style="text-align:center;padding:32px 0;color:#f87171;font-size:12px;"><i class="fa-solid fa-circle-exclamation" style="margin-right:6px;"></i>${escapeHtml(e.message)}</div>`;
     }
@@ -72753,7 +74088,24 @@ window.verOperacao = function(osId) {
     }));
   }
 
+  function _producaoEscolhaImpressoraAtual() {
+    const selVal = document.getElementById('producaoImpListboxImpressora')?.value || '';
+    if (selVal) return selVal;
+    if (typeof window._movimPrinterPrefTemp === 'string' && window._movimPrinterPrefTemp) {
+      return window._movimPrinterPrefTemp;
+    }
+    try {
+      const u = String(document.getElementById('userNameDisplay')?.textContent || 'user').trim().replace(/\s+/g, '_');
+      const cfg = JSON.parse(localStorage.getItem(`etq_impr_cfg_${u}`) || '{}');
+      return cfg.padrao || localStorage.getItem(_producaoEtqPrefKey()) || '';
+    } catch {
+      return localStorage.getItem(_producaoEtqPrefKey()) || '';
+    }
+  }
+
   function _producaoObterPrefsImpressora() {
+    const escolha = _producaoEscolhaImpressoraAtual();
+    if (escolha === '__PDF__') return { pdf: true };
     if (typeof window._movimObterPrefsImpressora === 'function') {
       return window._movimObterPrefsImpressora();
     }
@@ -72781,22 +74133,45 @@ window.verOperacao = function(osId) {
       const usuario = (document.getElementById('userNameDisplay')?.textContent || '').trim();
       const prefs = _producaoObterPrefsImpressora();
       const body = { items, usuario };
-      if (prefs.destino_agente) {
+      if (prefs.pdf) {
+        body.modo = 'pdf';
+      } else if (prefs.destino_agente) {
         body.destino_agente = prefs.destino_agente;
         if (prefs.impressora) body.impressora = prefs.impressora;
       } else if (prefs.printer) {
         body.impressora = prefs.printer;
       }
-      showSt('Enviando para fila de impressão...', '#facc15');
+      showSt(prefs.pdf ? 'Gerando PDF...' : 'Enviando para fila de impressão...', '#facc15');
       const resp = await fetch('/api/etiquetas/iapp-op/imprimir', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
         body: JSON.stringify(body),
       });
-      const data = await resp.json().catch(() => ({}));
-      if (!resp.ok || !data.ok) throw new Error(data.error || `Erro ${resp.status}`);
-      showSt(`${data.quantidade || items.length} etiqueta(s) enfileirada(s). OP movida(s) para Montagem hermetica.`, '#4ade80');
+      if (prefs.pdf) {
+        if (!resp.ok) {
+          const errData = await resp.json().catch(() => ({}));
+          throw new Error(errData.error || `Erro ${resp.status}`);
+        }
+        const blob = await resp.blob();
+        const url = URL.createObjectURL(blob);
+        const pdfWin = window.open(url, '_blank');
+        if (!pdfWin) {
+          const a = document.createElement('a');
+          a.href = url;
+          a.target = '_blank';
+          a.rel = 'noopener';
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+        }
+        setTimeout(() => URL.revokeObjectURL(url), 60000);
+        showSt(`${items.length} etiqueta(s) gerada(s) em PDF. OP movida(s) para Montagem hermetica.`, '#4ade80');
+      } else {
+        const data = await resp.json().catch(() => ({}));
+        if (!resp.ok || !data.ok) throw new Error(data.error || `Erro ${resp.status}`);
+        showSt(`${data.quantidade || items.length} etiqueta(s) enfileirada(s). OP movida(s) para Montagem hermetica.`, '#4ade80');
+      }
       if (typeof onSuccess === 'function') await onSuccess();
     } catch (err) {
       showSt(err.message || 'Falha ao imprimir.', '#f87171');
@@ -72948,26 +74323,41 @@ window.verOperacao = function(osId) {
           atualizarBtn();
         });
       });
+
+      if (linhas.length === 1) {
+        const unica = listaEl.querySelector('.producao-imprimir-op-chk');
+        if (unica) {
+          unica.checked = true;
+          const key = unica.dataset.rowKey || '';
+          if (key) selecionadas.add(key);
+          atualizarBtn();
+        }
+      }
     }
 
     btnImprimir?.addEventListener('click', async () => {
       const codigo = String(produtoCodigo || groupKey || '').trim();
       const descricaoPadrao = String(ops?.[0]?.produto?.descricao || '').trim();
       const items = [];
-      const semOs = [];
       listaEl?.querySelectorAll('.producao-imprimir-op-chk:checked').forEach(chk => {
         const opId = Number(chk.dataset.opId);
         const opRef = (ops || []).find(o => String(o.id) === String(opId));
         if (!opRef) return;
         const opIdent = String(opRef.identificacao || opRef.id).trim();
         const osRef = _producaoResolverOsDaOp(opRef);
-        if (!osRef?.id) {
-          semOs.push(opIdent);
+        const descricao = String(opRef.produto?.descricao || descricaoPadrao || '').trim();
+        if (opRef.from_op_producao || !osRef?.id) {
+          items.push({
+            op_producao_id: opRef.id,
+            lote: opIdent,
+            codigo_produto: codigo,
+            descricao_produto: descricao,
+          });
           return;
         }
-        const descricao = String(opRef.produto?.descricao || descricaoPadrao || '').trim();
         items.push({
           os_id: osRef.id,
+          op_producao_id: opRef.id,
           op_iapp_id: opRef.id,
           lote: opIdent,
           os_identificacao: String(osRef.identificacao || opIdent).trim(),
@@ -72975,9 +74365,6 @@ window.verOperacao = function(osId) {
           descricao_produto: descricao,
         });
       });
-      if (semOs.length) {
-        alert(`OP(s) sem ordem de serviço vinculada e não impressa(s): ${semOs.join(', ')}`);
-      }
       if (!items.length) return;
       await _producaoImprimirOpEtiquetas(items, statusEl, btnImprimir, async () => {
         close();
@@ -72986,14 +74373,16 @@ window.verOperacao = function(osId) {
           return opRef?.id;
         }).filter(Boolean))];
         if (fromProgramado) {
-          if (typeof window._producaoMarcarOpsSolicitadas === 'function') {
-            window._producaoMarcarOpsSolicitadas(opIds);
-          }
-          if (typeof window._producaoRecarregarColunasKanban === 'function') {
+          if (typeof window._producaoRecarregarProgramacaoColunas === 'function') {
+            await window._producaoRecarregarProgramacaoColunas(['programado', 'solicitado']);
+          } else if (typeof window._producaoRecarregarColunasKanban === 'function') {
             await window._producaoRecarregarColunasKanban(['programado', 'solicitado']);
           }
         } else if (typeof window._producaoRecarregarOrdens === 'function') {
           await window._producaoRecarregarOrdens();
+        }
+        if (typeof options.onSuccess === 'function') {
+          await options.onSuccess();
         }
       });
     });
@@ -73006,11 +74395,21 @@ window.verOperacao = function(osId) {
       return;
     }
 
+    function normStKanban(s) {
+      if (typeof window._producaoNormStatusKanban === 'function') {
+        return window._producaoNormStatusKanban(s);
+      }
+      return String(s || '').trim().toLowerCase().normalize('NFD').replace(/\p{M}/gu, '');
+    }
+
     const kanbanLocal = (typeof window._producaoNomeKanbanPorKey === 'function')
       ? window._producaoNomeKanbanPorKey(colKey)
       : '';
     const isHermetica = colKey === 'solicitado';
     const isEletrica = colKey === 'produzindo';
+    const isTeste = colKey === 'teste';
+    const isInspecaoFinal = colKey === 'inspecao_final';
+    const isRiAvancar = isHermetica || isEletrica || isTeste || isInspecaoFinal;
 
     const codigo = String(produtoCodigo || op.produto?.identificacao || '').trim();
     const descricao = String(op.produto?.descricao || '').trim();
@@ -73041,20 +74440,33 @@ window.verOperacao = function(osId) {
             <button type="button" id="ri-check-btn-add" class="modal-secondary" style="padding:5px 12px;font-size:12px;">
               <i class="fa-solid fa-plus"></i> Adicionar check
             </button>
-            ${isHermetica ? `
-            <button type="button" id="ri-check-btn-liberar" class="modal-primary" style="padding:5px 14px;font-size:12px;background:#166534;">
-              <i class="fa-solid fa-unlock"></i> Liberado
-            </button>` : ''}
           </div>
         </div>
         ${kanbanLocal ? `<p style="font-size:11px;color:#64748b;margin:0 0 8px;">Exibindo verificações do kanban: <b style="color:#93c5fd;">${escapeHtml(kanbanLocal)}</b></p>` : ''}
         <div id="ri-check-lista"></div>
+        <div style="margin-top:18px;padding-top:14px;border-top:1px solid rgba(255,255,255,.1);">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;gap:10px;flex-wrap:wrap;">
+            <span style="font-size:11px;font-weight:700;color:#94a3b8;text-transform:uppercase;">Ocorrências (falhas detectadas)</span>
+            <button type="button" id="ri-check-btn-ocorrencia" class="modal-secondary" style="padding:5px 12px;font-size:12px;border-color:rgba(248,113,113,.45);color:#fecaca;">
+              <i class="fa-solid fa-triangle-exclamation"></i> Registrar ocorrência
+            </button>
+          </div>
+          <div id="ri-check-lista-niq"></div>
+        </div>
       </div>
-      <footer>
+      <footer style="position:relative;">
+        <div id="ri-check-spinner" style="display:none;position:absolute;inset:0;background:rgba(15,23,42,.88);align-items:center;justify-content:center;gap:10px;z-index:2;flex-direction:column;border-radius:0 0 12px 12px;">
+          <i class="fa-solid fa-spinner fa-spin" style="font-size:22px;color:#6366f1;"></i>
+          <span style="font-size:12px;color:#94a3b8;">Registrando RI...</span>
+        </div>
         <button type="button" class="modal-secondary">Fechar</button>
-        <button type="button" id="ri-check-btn-salvar" class="modal-primary">
+        ${(isRiAvancar) ? `
+        <button type="button" id="ri-check-btn-registrar" class="modal-primary" style="background:#166534;display:none;">
+          <i class="fa-solid fa-clipboard-check"></i> Registrar RI
+        </button>` : `
+        <button type="button" id="ri-check-btn-registrar" class="modal-primary">
           <i class="fa-solid fa-floppy-disk"></i> Salvar
-        </button>
+        </button>`}
       </footer>
     `;
 
@@ -73068,12 +74480,48 @@ window.verOperacao = function(osId) {
     const statusEl = modal.querySelector('#ri-check-status');
     const infoEl = modal.querySelector('#ri-check-info');
     const listaEl = modal.querySelector('#ri-check-lista');
-    const btnSalvar = modal.querySelector('#ri-check-btn-salvar');
-    const btnLiberar = modal.querySelector('#ri-check-btn-liberar');
+    const listaNiqEl = modal.querySelector('#ri-check-lista-niq');
+    const btnRegistrar = modal.querySelector('#ri-check-btn-registrar');
     const btnAdd = modal.querySelector('#ri-check-btn-add');
+    const btnOcorrencia = modal.querySelector('#ri-check-btn-ocorrencia');
+    const spinnerRegistrarEl = modal.querySelector('#ri-check-spinner');
+    const btnFecharFooter = modal.querySelector('footer .modal-secondary');
+    const btnFecharHeader = modal.querySelector('.close-btn');
 
     let riCheckId = null;
     let riCheckData = null;
+    let riDadosProntos = false;
+    let riJaRegistrado = false;
+    let riProdutoMeta = null;
+
+    function atualizarBtnRegistrarVisivel() {
+      if (!btnRegistrar || !isRiAvancar) return;
+      if (spinnerRegistrarEl?.style.display === 'flex') return;
+      if (riJaRegistrado) {
+        btnRegistrar.style.display = 'none';
+        return;
+      }
+      btnRegistrar.style.display = riDadosProntos ? 'inline-flex' : 'none';
+    }
+
+    function setRegistrandoRi(ativo) {
+      if (spinnerRegistrarEl) {
+        spinnerRegistrarEl.style.display = ativo ? 'flex' : 'none';
+      }
+      if (btnFecharFooter) btnFecharFooter.disabled = !!ativo;
+      if (btnFecharHeader) btnFecharHeader.disabled = !!ativo;
+      if (btnAdd) btnAdd.disabled = !!ativo;
+      if (btnOcorrencia) btnOcorrencia.disabled = !!ativo;
+      if (btnRegistrar) {
+        if (ativo) {
+          btnRegistrar.style.display = 'none';
+          btnRegistrar.disabled = true;
+        } else {
+          btnRegistrar.disabled = false;
+          atualizarBtnRegistrarVisivel();
+        }
+      }
+    }
 
     const renderLista = (verificacoes) => {
       const items = (verificacoes || []).filter(v => {
@@ -73105,24 +74553,90 @@ window.verOperacao = function(osId) {
       }).join('');
     };
 
+    const renderListaNiq = (ocorrencias) => {
+      if (!listaNiqEl) return;
+      const items = ocorrencias || [];
+      if (!items.length) {
+        listaNiqEl.innerHTML = '<div style="text-align:center;padding:16px;color:#64748b;font-size:12px;">Nenhuma ocorrência registrada.</div>';
+        return;
+      }
+      listaNiqEl.innerHTML = items.map(o => {
+        const fotoHtml = o.foto
+          ? `<a href="${escapeHtml(o.foto)}" target="_blank" rel="noopener"><img src="${escapeHtml(o.foto)}" alt="Foto" style="max-width:120px;max-height:80px;border-radius:6px;border:1px solid rgba(255,255,255,.15);"></a>`
+          : '<span style="color:#64748b;font-size:11px;">—</span>';
+        const videoHtml = o.video
+          ? `<a href="${escapeHtml(o.video)}" target="_blank" rel="noopener" style="font-size:11px;color:#93c5fd;"><i class="fa-solid fa-video"></i> Ver vídeo</a>`
+          : '<span style="color:#64748b;font-size:11px;">—</span>';
+        const dt = o.created_at ? String(o.created_at).replace('T', ' ').slice(0, 16) : '—';
+        return `<div style="border:1px solid rgba(248,113,113,.25);border-radius:10px;padding:12px;margin-bottom:10px;background:rgba(127,29,29,.12);">
+          <div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:6px;">
+            <div style="font-size:12px;font-weight:700;color:#fecaca;">#${escapeHtml(String(o.id))} · ${escapeHtml(o.falha_detectada || '—')}</div>
+            <span style="font-size:10px;color:#94a3b8;">${escapeHtml(dt)}</span>
+          </div>
+          <div style="display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap;">
+            <div><div style="font-size:10px;color:#64748b;margin-bottom:4px;">Foto</div>${fotoHtml}</div>
+            <div><div style="font-size:10px;color:#64748b;margin-bottom:4px;">Vídeo</div>${videoHtml}</div>
+          </div>
+        </div>`;
+      }).join('');
+    };
+
+    const recarregarNiq = async () => {
+      if (!riCheckId) return;
+      try {
+        const rec = await fetch(`/api/qualidade/ri-check/${riCheckId}/niq`, { credentials: 'include' });
+        const recData = await rec.json();
+        if (rec.ok && recData.ok) renderListaNiq(recData.ocorrencias);
+      } catch (_) { /* silencioso */ }
+    };
+
     const renderInfo = (check) => {
-      if (!check) return;
+      if (!check) {
+        riCheckData = null;
+        riCheckId = null;
+        riDadosProntos = true;
+        const codShow = riProdutoMeta?.codigo || codigo;
+        infoEl.innerHTML = `
+          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:8px;">
+            <div><span style="color:#64748b;">Código:</span> <b>${escapeHtml(codShow)}</b></div>
+            <div><span style="color:#64748b;">OP:</span> <b>${escapeHtml(opIdent)}</b></div>
+            <div><span style="color:#64748b;">Posto:</span> <b style="color:#93c5fd;">${escapeHtml(kanbanLocal || '—')}</b></div>
+            <div><span style="color:#64748b;">Status RI:</span> <b style="color:#facc15;">Aguardando registro</b></div>
+          </div>
+          ${(riProdutoMeta?.descricao || descricao) ? `<div style="margin-top:8px;color:#cbd5e1;">${escapeHtml(riProdutoMeta?.descricao || descricao)}</div>` : ''}
+          <div style="margin-top:10px;font-size:11px;color:#64748b;">Revise as verificações abaixo e clique em <b>Registrar RI</b> para gravar.</div>`;
+        if (btnRegistrar && isRiAvancar) {
+          btnRegistrar.disabled = false;
+          btnRegistrar.style.opacity = '1';
+        }
+        atualizarBtnRegistrarVisivel();
+        return;
+      }
       riCheckData = check;
       riCheckId = check.id;
+      riDadosProntos = !!check.id;
       const st = String(check.status || 'Em andamento');
-      const stCor = st === 'Liberado' ? '#4ade80' : (st === 'Teste' ? '#fdba74' : '#facc15');
+      const stCor = st === 'Liberado' ? '#4ade80'
+        : (st === 'Teste' ? '#fdba74'
+        : (st === 'Teste OK' ? '#d8b4fe'
+        : (st === 'Finalizado' ? '#86efac' : '#facc15')));
       infoEl.innerHTML = `
         <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:8px;">
           <div><span style="color:#64748b;">ID RI:</span> <b>${escapeHtml(String(check.id))}</b></div>
           <div><span style="color:#64748b;">Código:</span> <b>${escapeHtml(check.codigo || codigo)}</b></div>
+          ${check.codigo_produto ? `<div><span style="color:#64748b;">ID produto:</span> <b>${escapeHtml(String(check.codigo_produto))}</b></div>` : ''}
           <div><span style="color:#64748b;">Status:</span> <b style="color:${stCor};">${escapeHtml(st)}</b></div>
           <div><span style="color:#64748b;">Usuário:</span> <b>${escapeHtml(check.usuario || '—')}</b></div>
         </div>
         ${check.descricao ? `<div style="margin-top:8px;color:#cbd5e1;">${escapeHtml(check.descricao)}</div>` : ''}`;
-      if (btnLiberar) {
-        btnLiberar.disabled = st === 'Liberado' || st === 'Teste';
-        btnLiberar.style.opacity = (st === 'Liberado' || st === 'Teste') ? '0.5' : '1';
+      if (btnRegistrar && isRiAvancar) {
+        const bloqueado = kanbanLocal
+          && normStKanban(st) === normStKanban(kanbanLocal);
+        riJaRegistrado = bloqueado;
+        btnRegistrar.disabled = bloqueado;
+        btnRegistrar.style.opacity = bloqueado ? '0.5' : '1';
       }
+      atualizarBtnRegistrarVisivel();
     };
 
     const recarregarVerificacoes = async () => {
@@ -73137,35 +74651,51 @@ window.verOperacao = function(osId) {
     };
 
     const carregar = async () => {
-      statusEl.textContent = 'Carregando registro...';
+      riDadosProntos = false;
+      riJaRegistrado = false;
+      riCheckId = null;
+      riCheckData = null;
+      atualizarBtnRegistrarVisivel();
+      statusEl.textContent = 'Carregando verificações...';
       statusEl.style.color = '#94a3b8';
       try {
-        const resp = await fetch('/api/qualidade/ri-check/abrir', {
+        const resp = await fetch('/api/qualidade/ri-check/preparar', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           credentials: 'include',
           body: JSON.stringify({
+            op_producao_id: opId,
             op_iapp_id: opId,
-            codigo_produto: codigo,
+            numero_op: opIdent,
             codigo,
             descricao,
+            codigo_produto: op.produto?.codigo_produto || op.produto?.id || null,
             kanban_local: kanbanLocal,
           }),
         });
         const data = await resp.json();
         if (!resp.ok || !data.ok) throw new Error(data.error || `Erro ${resp.status}`);
-        renderInfo(data.check);
+        riProdutoMeta = data.produto || null;
+        riJaRegistrado = !!data.ja_registrado;
+        renderInfo(data.check || null);
         renderLista(data.verificacoes);
-        statusEl.textContent = '';
+        renderListaNiq(data.ocorrencias || []);
+        statusEl.textContent = data.template_apenas
+          ? 'Verificações carregadas — clique em Registrar RI para gravar.'
+          : (riJaRegistrado ? 'RI já registrado neste posto.' : '');
+        if (riJaRegistrado) statusEl.style.color = '#4ade80';
+        else statusEl.style.color = '#94a3b8';
       } catch (err) {
         statusEl.textContent = err.message || 'Falha ao carregar RI.';
         statusEl.style.color = '#f87171';
+        riDadosProntos = false;
+        atualizarBtnRegistrarVisivel();
       }
     };
 
     const abrirModalAddVerificacao = async () => {
       if (!riCheckId) {
-        alert('Aguarde o carregamento do RI.');
+        alert('Clique em "Registrar RI" para gravar o registro antes de adicionar verificações.');
         return;
       }
       let nomesKanban = (typeof window._producaoListaNomesKanban === 'function')
@@ -73243,7 +74773,7 @@ window.verOperacao = function(osId) {
         const fd = new FormData();
         fd.append('check', checkNome);
         fd.append('descricao_check', descricaoCheck);
-        fd.append('codigo_produto', codigo);
+        if (riCheckData?.codigo_produto) fd.append('codigo_produto', String(riCheckData.codigo_produto));
         fd.append('local', localVal);
         if (fotoFile) fd.append('foto', fotoFile);
         if (videoFile) fd.append('video', videoFile);
@@ -73269,65 +74799,164 @@ window.verOperacao = function(osId) {
 
     btnAdd?.addEventListener('click', abrirModalAddVerificacao);
 
-    btnSalvar?.addEventListener('click', async () => {
-      if (!riCheckId) return;
-      btnSalvar.disabled = true;
+    const abrirModalRegistrarOcorrencia = () => {
+      if (!riCheckId) {
+        alert('Clique em "Registrar RI" para gravar o registro antes de registrar ocorrências.');
+        return;
+      }
+      const sub = document.createElement('div');
+      sub.className = 'kanban-modal-overlay';
+      sub.style.zIndex = '10060';
+      sub.innerHTML = `
+        <div class="kanban-modal" style="max-width:520px;">
+          <header>
+            <div><h2>Registrar ocorrência</h2><span>OP ${escapeHtml(opIdent)}</span></div>
+            <button type="button" class="close-btn">&times;</button>
+          </header>
+          <div class="kanban-modal-body">
+            <div class="modal-code-block" style="display:flex;flex-direction:column;gap:10px;">
+              <label style="font-size:12px;color:#94a3b8;">Falha detectada *
+                <textarea id="ri-niq-falha" rows="3" style="width:100%;margin-top:4px;padding:8px;background:#1e293b;color:#e2e8f0;border:1px solid rgba(255,255,255,.15);border-radius:8px;" placeholder="Descreva a falha encontrada"></textarea>
+              </label>
+              <label style="font-size:12px;color:#94a3b8;">Foto
+                <input type="file" id="ri-niq-foto" accept="image/*" style="margin-top:4px;color:#cbd5e1;">
+              </label>
+              <label style="font-size:12px;color:#94a3b8;">Vídeo
+                <input type="file" id="ri-niq-video" accept="video/*" style="margin-top:4px;color:#cbd5e1;">
+              </label>
+              <p id="ri-niq-status" style="font-size:12px;color:#94a3b8;min-height:16px;margin:0;"></p>
+            </div>
+          </div>
+          <footer>
+            <button type="button" class="modal-secondary">Cancelar</button>
+            <button type="button" id="ri-niq-salvar" class="modal-primary" style="background:#b91c1c;">Registrar</button>
+          </footer>
+        </div>`;
+      document.body.appendChild(sub);
+      const fecharSub = () => sub.remove();
+      sub.querySelector('.close-btn')?.addEventListener('click', fecharSub);
+      sub.querySelector('.modal-secondary')?.addEventListener('click', fecharSub);
+      sub.addEventListener('click', (e) => { if (e.target === sub) fecharSub(); });
+
+      sub.querySelector('#ri-niq-salvar')?.addEventListener('click', async () => {
+        const falha = sub.querySelector('#ri-niq-falha')?.value?.trim();
+        const fotoFile = sub.querySelector('#ri-niq-foto')?.files?.[0];
+        const videoFile = sub.querySelector('#ri-niq-video')?.files?.[0];
+        const st = sub.querySelector('#ri-niq-status');
+        if (!falha) {
+          if (st) { st.textContent = 'Informe a falha detectada.'; st.style.color = '#f87171'; }
+          return;
+        }
+        const fd = new FormData();
+        fd.append('falha_detectada', falha);
+        if (fotoFile) fd.append('foto', fotoFile);
+        if (videoFile) fd.append('video', videoFile);
+        const btn = sub.querySelector('#ri-niq-salvar');
+        if (btn) { btn.disabled = true; btn.textContent = 'Salvando...'; }
+        try {
+          const resp = await fetch(`/api/qualidade/ri-check/${riCheckId}/niq`, {
+            method: 'POST',
+            credentials: 'include',
+            body: fd,
+          });
+          const data = await resp.json();
+          if (!resp.ok || !data.ok) throw new Error(data.error || `Erro ${resp.status}`);
+          fecharSub();
+          await recarregarNiq();
+          statusEl.textContent = 'Ocorrência registrada.';
+          statusEl.style.color = '#4ade80';
+        } catch (err) {
+          if (st) { st.textContent = err.message || 'Falha ao registrar.'; st.style.color = '#f87171'; }
+        } finally {
+          if (btn) { btn.disabled = false; btn.textContent = 'Registrar'; }
+        }
+      });
+    };
+
+    btnOcorrencia?.addEventListener('click', abrirModalRegistrarOcorrencia);
+
+    btnRegistrar?.addEventListener('click', async () => {
+      if (!riDadosProntos || riJaRegistrado) return;
+      if (isRiAvancar) {
+        const postoLabel = kanbanLocal || 'atual';
+        if (!confirm(`Confirmar registro do RI no posto ${postoLabel}?`)) return;
+      }
+      setRegistrandoRi(true);
       try {
-        const resp = await fetch(`/api/qualidade/ri-check/${riCheckId}/salvar`, {
+        if (!riCheckId) {
+          const respAbrir = await fetch('/api/qualidade/ri-check/abrir', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
+            body: JSON.stringify({
+              op_producao_id: opId,
+              op_iapp_id: opId,
+              numero_op: opIdent,
+              codigo,
+              descricao,
+              codigo_produto: op.produto?.codigo_produto || op.produto?.id || null,
+              kanban_local: kanbanLocal,
+            }),
+          });
+          const dataAbrir = await respAbrir.json();
+          if (!respAbrir.ok || !dataAbrir.ok) throw new Error(dataAbrir.error || `Erro ${respAbrir.status}`);
+          riCheckId = dataAbrir.check?.id || null;
+          if (!riCheckId) throw new Error('Falha ao criar registro RI.');
+          renderInfo(dataAbrir.check);
+          renderLista(dataAbrir.verificacoes);
+        }
+
+        const respSalvar = await fetch(`/api/qualidade/ri-check/${riCheckId}/salvar`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           credentials: 'include',
-          body: JSON.stringify({
-            avancar_teste: isEletrica,
-            kanban_local: kanbanLocal,
-          }),
+          body: JSON.stringify({ kanban_local: kanbanLocal }),
         });
-        const data = await resp.json();
-        if (!resp.ok || !data.ok) throw new Error(data.error || `Erro ${resp.status}`);
-        renderInfo(data.check);
-        renderLista(data.verificacoes);
-        if (data.avancou_teste) {
-          statusEl.textContent = 'Salvo! Status alterado para Teste. OP movida para o kanban Teste.';
+        const dataSalvar = await respSalvar.json();
+        if (!respSalvar.ok || !dataSalvar.ok) throw new Error(dataSalvar.error || `Erro ${respSalvar.status}`);
+
+        if (isRiAvancar) {
+          const respLib = await fetch(`/api/qualidade/ri-check/${riCheckId}/liberar`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
+            body: JSON.stringify({
+              kanban_origem: kanbanLocal,
+              op_producao_id: opId,
+              numero_op: opIdent,
+            }),
+          });
+          const dataLib = await respLib.json();
+          if (!respLib.ok || !dataLib.ok) throw new Error(dataLib.error || `Erro ${respLib.status}`);
+          renderInfo(dataLib.check);
+          renderLista(dataLib.verificacoes);
+          const postoRegistrado = dataLib.kanban_status || kanbanLocal || 'atual';
+          statusEl.textContent = `RI registrado no posto ${postoRegistrado}.`;
           statusEl.style.color = '#4ade80';
-          if (typeof window._producaoRecarregarProgramacaoColunas === 'function') {
-            await window._producaoRecarregarProgramacaoColunas(['produzindo', 'teste']);
+          if (typeof window._riRegistroRecarregar === 'function') {
+            await window._riRegistroRecarregar();
           }
+          if (typeof window._montaRecarregarOrdens === 'function') {
+            await window._montaRecarregarOrdens();
+          }
+          close();
         } else {
+          renderInfo(dataSalvar.check);
+          renderLista(dataSalvar.verificacoes);
           statusEl.textContent = 'Registro salvo.';
           statusEl.style.color = '#4ade80';
         }
       } catch (err) {
-        statusEl.textContent = err.message || 'Falha ao salvar.';
+        statusEl.textContent = err.message || 'Falha ao registrar RI.';
         statusEl.style.color = '#f87171';
-      } finally {
-        btnSalvar.disabled = false;
-      }
-    });
-
-    btnLiberar?.addEventListener('click', async () => {
-      if (!riCheckId) return;
-      if (!confirm('Confirmar liberação? A OP irá para Montagem eletrica.')) return;
-      btnLiberar.disabled = true;
-      try {
-        const resp = await fetch(`/api/qualidade/ri-check/${riCheckId}/liberar`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          credentials: 'include',
-          body: '{}',
-        });
-        const data = await resp.json();
-        if (!resp.ok || !data.ok) throw new Error(data.error || `Erro ${resp.status}`);
-        renderInfo(data.check);
-        renderLista(data.verificacoes);
-        statusEl.textContent = 'Liberado! OP movida para Montagem eletrica.';
-        statusEl.style.color = '#4ade80';
-        if (typeof window._producaoRecarregarProgramacaoColunas === 'function') {
-          await window._producaoRecarregarProgramacaoColunas(['solicitado', 'produzindo']);
+        setRegistrandoRi(false);
+        if (btnRegistrar && isRiAvancar) {
+          const st = String(riCheckData?.status || '');
+          const bloqueado = kanbanLocal
+            && normStKanban(st) === normStKanban(kanbanLocal);
+          btnRegistrar.disabled = bloqueado;
+          btnRegistrar.style.opacity = bloqueado ? '0.5' : '1';
         }
-      } catch (err) {
-        statusEl.textContent = err.message || 'Falha ao liberar.';
-        statusEl.style.color = '#f87171';
-        btnLiberar.disabled = false;
       }
     });
 
@@ -73375,12 +75004,377 @@ window.verOperacao = function(osId) {
     }
   }
 
+  function openGerarOpPedidoModal(pedidoItem, onSuccess) {
+    const saldoPedido = Math.max(0, Math.floor(Number(pedidoItem?.quantidade) || 0));
+    const qtdInicial = Math.max(1, saldoPedido || 1);
+    const codigo = String(pedidoItem?.codigo || '').trim();
+    const codigoProduto = Number(pedidoItem?.codigo_produto);
+    const descricao = String(pedidoItem?.descricao || '').trim();
+    const numeroPedido = String(pedidoItem?.numero_pedido || '').trim();
+    const codigoPedido = Number(pedidoItem?.codigo_pedido);
+
+    if (!codigo || !Number.isFinite(codigoProduto) || codigoProduto <= 0) {
+      alert('Dados do produto do pedido incompletos.');
+      return;
+    }
+
+    const overlay = document.createElement('div');
+    overlay.className = 'kanban-modal-overlay';
+    overlay.style.zIndex = '10061';
+    overlay.addEventListener('click', (ev) => { if (ev.target === overlay) overlay.remove(); });
+
+    const modal = document.createElement('div');
+    modal.className = 'kanban-modal';
+    modal.style.maxWidth = '560px';
+    modal.innerHTML = `
+      <header>
+        <div>
+          <h2>Gerar OP</h2>
+          <span>${escapeHtml(codigo)} · Pedido ${escapeHtml(numeroPedido || '—')}</span>
+        </div>
+        <button class="close-btn" aria-label="Fechar">&times;</button>
+      </header>
+      <div class="kanban-modal-body" style="max-height:460px;overflow:auto;">
+        <p style="margin:0 0 10px;font-size:12px;color:#94a3b8;">${escapeHtml(descricao || '—')}</p>
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:12px;padding:10px 12px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.1);border-radius:8px;">
+          <div>
+            <div style="font-size:11px;color:#64748b;">Saldo do pedido</div>
+            <div style="font-size:18px;font-weight:700;color:#fbbf24;">${saldoPedido || 0}</div>
+          </div>
+          <div style="text-align:right;">
+            <div style="font-size:11px;color:#64748b;margin-bottom:4px;">Quantidade de OPs</div>
+            <div style="display:flex;align-items:center;gap:8px;">
+              <button type="button" id="gerar-op-pedido-menos" class="modal-secondary" style="width:32px;height:32px;padding:0;">−</button>
+              <input type="number" id="gerar-op-pedido-qtd" min="1" max="200" value="${qtdInicial}"
+                style="width:64px;text-align:center;padding:6px 8px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.15);border-radius:6px;color:#f1f5f9;font-size:14px;font-weight:700;">
+              <button type="button" id="gerar-op-pedido-mais" class="modal-secondary" style="width:32px;height:32px;padding:0;">+</button>
+            </div>
+          </div>
+        </div>
+        <div id="gerar-op-pedido-resumo" style="font-size:11px;color:#94a3b8;margin-bottom:8px;"></div>
+        <div id="gerar-op-pedido-lista" style="border:1px solid rgba(255,255,255,.1);border-radius:8px;overflow:hidden;"></div>
+        <p id="gerar-op-pedido-status" style="margin:10px 0 0;font-size:12px;color:#94a3b8;min-height:18px;"></p>
+      </div>
+      <footer>
+        <button type="button" class="modal-secondary">Cancelar</button>
+        <button type="button" id="gerar-op-pedido-confirmar" class="modal-primary">
+          <i class="fa-solid fa-plus"></i> Gerar OPs
+        </button>
+      </footer>
+    `;
+
+    overlay.appendChild(modal);
+    document.body.appendChild(overlay);
+
+    const close = () => overlay.remove();
+    modal.querySelector('.close-btn')?.addEventListener('click', close);
+    modal.querySelector('footer .modal-secondary')?.addEventListener('click', close);
+
+    const inputQtd = modal.querySelector('#gerar-op-pedido-qtd');
+    const listaEl = modal.querySelector('#gerar-op-pedido-lista');
+    const resumoEl = modal.querySelector('#gerar-op-pedido-resumo');
+    const statusEl = modal.querySelector('#gerar-op-pedido-status');
+    const btnConfirmar = modal.querySelector('#gerar-op-pedido-confirmar');
+
+    function lerQtd() {
+      const n = Math.floor(Number(inputQtd?.value));
+      return Number.isFinite(n) && n >= 1 ? Math.min(n, 200) : 1;
+    }
+
+    function renderPreLista() {
+      const qtd = lerQtd();
+      if (inputQtd) inputQtd.value = String(qtd);
+      const vinc = Math.min(qtd, saldoPedido);
+      const extra = Math.max(0, qtd - vinc);
+      if (resumoEl) {
+        resumoEl.innerHTML = vinc > 0
+          ? `<span style="color:#86efac;">${vinc} OP(s) vinculada(s) ao pedido</span>${extra ? ` · <span style="color:#fcd34d;">${extra} somente OP (sem pedido)</span>` : ''}`
+          : `<span style="color:#fcd34d;">${qtd} OP(s) sem vínculo com pedido</span>`;
+      }
+      if (!listaEl) return;
+      listaEl.innerHTML = Array.from({ length: qtd }, (_, i) => {
+        const idx = i + 1;
+        const vinculado = i < vinc;
+        const badge = vinculado
+          ? '<span style="font-size:10px;color:#86efac;background:rgba(34,197,94,.15);padding:2px 8px;border-radius:8px;">Vinculado ao pedido</span>'
+          : '<span style="font-size:10px;color:#fcd34d;background:rgba(245,158,11,.12);padding:2px 8px;border-radius:8px;">Somente OP</span>';
+        return `<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:9px 12px;border-bottom:1px solid rgba(255,255,255,.06);font-size:12px;color:#e2e8f0;">
+          <span><b style="color:#a5b4fc;">Pré-OP #${idx}</b> · qtd 1</span>
+          ${badge}
+        </div>`;
+      }).join('');
+    }
+
+    modal.querySelector('#gerar-op-pedido-menos')?.addEventListener('click', () => {
+      if (inputQtd) inputQtd.value = String(Math.max(1, lerQtd() - 1));
+      renderPreLista();
+    });
+    modal.querySelector('#gerar-op-pedido-mais')?.addEventListener('click', () => {
+      if (inputQtd) inputQtd.value = String(Math.min(200, lerQtd() + 1));
+      renderPreLista();
+    });
+    inputQtd?.addEventListener('input', renderPreLista);
+    inputQtd?.addEventListener('change', renderPreLista);
+    renderPreLista();
+
+    btnConfirmar?.addEventListener('click', async () => {
+      const qtd = lerQtd();
+      btnConfirmar.disabled = true;
+      if (statusEl) {
+        statusEl.textContent = `Gerando ${qtd} OP(s)...`;
+        statusEl.style.color = '#facc15';
+      }
+      try {
+        const body = {
+          codigo,
+          codigo_produto: codigoProduto,
+          quantidade: qtd,
+        };
+        if (Number.isFinite(codigoPedido) && codigoPedido > 0 && saldoPedido > 0) {
+          body.pedido = {
+            codigo_pedido: codigoPedido,
+            numero_pedido: numeroPedido,
+            saldo: saldoPedido,
+          };
+        }
+        const resp = await fetch('/api/producao/op-producao/lote', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify(body),
+        });
+        const data = await resp.json();
+        if (!resp.ok || !data.success) throw new Error(data.error || `Erro ${resp.status}`);
+        close();
+        alert(`${data.total} OP(s) gerada(s).\n${data.vinculadas || 0} vinculada(s) ao pedido.\n${data.somente_op || 0} somente OP.`);
+        if (typeof onSuccess === 'function') await onSuccess();
+        else if (typeof window._producaoRecarregarOrdens === 'function') await window._producaoRecarregarOrdens();
+      } catch (err) {
+        if (statusEl) {
+          statusEl.textContent = err.message || 'Falha ao gerar OPs.';
+          statusEl.style.color = '#f87171';
+        }
+        btnConfirmar.disabled = false;
+      }
+    });
+  }
+
+  async function producaoFinalizarOperacao(ops, colKey) {
+    const lista = Array.isArray(ops) ? ops : [];
+    if (!lista.length) throw new Error('Nenhuma OP selecionada.');
+    const proximo = (typeof window._producaoProximoKanbanPorKey === 'function')
+      ? window._producaoProximoKanbanPorKey(colKey)
+      : null;
+    const proximoStatus = proximo?.nome || 'Finalizado';
+    const usuario = (document.getElementById('userNameDisplay')?.textContent || '').trim();
+    const programacao = (typeof window._montaProgramacaoCarregada === 'function')
+      ? window._montaProgramacaoCarregada()
+      : [];
+
+    for (const op of lista) {
+      const reg = programacao.find((r) =>
+        Number(r.op_producao_id) === Number(op.id)
+        || String(r.numero_op || '').trim().toUpperCase() === String(op.identificacao || '').trim().toUpperCase()
+      );
+      const resp = await fetch('/api/producao/finalizar-operacao', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          op_producao_id: op.from_op_producao !== false ? Number(op.id) : 0,
+          numero_op: op.identificacao || '',
+          kanban_programacao_id: reg?.id || null,
+          col_key: colKey || '',
+          proximo_status: proximoStatus,
+          operacao: proximoStatus,
+          usuario,
+        }),
+      });
+      const data = await resp.json();
+      if (!resp.ok || !data.success) throw new Error(data.error || 'Erro ao finalizar operação');
+    }
+    if (typeof window._montaRecarregarOrdens === 'function') {
+      await window._montaRecarregarOrdens();
+    }
+  }
+
+  async function carregarMotivosParada() {
+    const resp = await fetch('/api/producao/paradas/motivos');
+    const data = await resp.json();
+    if (!resp.ok || !data.success) throw new Error(data.error || 'Erro ao carregar motivos');
+    return data.motivos || [];
+  }
+
+  function preencherDatalistParada(datalistEl, valores, filtro) {
+    if (!datalistEl) return;
+    const f = String(filtro || '').trim().toLowerCase();
+    const unicos = [...new Set((valores || []).map(v => String(v || '').trim()).filter(Boolean))];
+    const lista = f
+      ? unicos.filter(v => v.toLowerCase().includes(f))
+      : unicos;
+    datalistEl.innerHTML = lista.map(v => `<option value="${escapeHtml(v)}"></option>`).join('');
+  }
+
+  function openProducaoParadaModal(ops, colKey, produtoCodigo) {
+    const listaOps = Array.isArray(ops) ? ops : [];
+    const op = listaOps[0];
+    if (!op) return;
+    const operacaoNome = (typeof window._producaoNomeKanbanPorKey === 'function')
+      ? (window._producaoNomeKanbanPorKey(colKey) || colKey || '')
+      : (colKey || '');
+    const programacao = (typeof window._montaProgramacaoCarregada === 'function')
+      ? window._montaProgramacaoCarregada()
+      : [];
+    const reg = programacao.find((r) =>
+      Number(r.op_producao_id) === Number(op.id)
+      || String(r.numero_op || '').trim().toUpperCase() === String(op.identificacao || '').trim().toUpperCase()
+    );
+
+    const overlay = document.createElement('div');
+    overlay.className = 'kanban-modal-overlay';
+    overlay.style.zIndex = '10070';
+    overlay.addEventListener('click', (ev) => { if (ev.target === overlay) overlay.remove(); });
+
+    const modal = document.createElement('div');
+    modal.className = 'kanban-modal';
+    modal.style.maxWidth = '520px';
+    modal.innerHTML = `
+      <header>
+        <div>
+          <h2>Registrar parada</h2>
+          <span>OP ${escapeHtml(op.identificacao || '—')} · ${escapeHtml(produtoCodigo || '')}</span>
+        </div>
+        <button class="close-btn" aria-label="Fechar">&times;</button>
+      </header>
+      <div class="kanban-modal-body">
+        <label style="display:block;margin-bottom:6px;font-size:12px;color:#94a3b8;">Tipo de parada</label>
+        <select id="parada-tipo-select"
+          style="width:100%;padding:9px 12px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.12);border-radius:8px;color:#e2e8f0;font-size:13px;margin-bottom:12px;cursor:pointer;">
+          <option value="">Selecione...</option>
+          <option value="Programada">Programada</option>
+          <option value="Não programada">Não programada</option>
+        </select>
+        <label style="display:block;margin-bottom:6px;font-size:12px;color:#94a3b8;">Motivo</label>
+        <input type="text" id="parada-motivo-input" list="parada-motivo-list" placeholder="Selecione ou digite..."
+          style="width:100%;padding:9px 12px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.12);border-radius:8px;color:#e2e8f0;font-size:13px;margin-bottom:12px;">
+        <datalist id="parada-motivo-list"></datalist>
+        <p id="parada-status" style="font-size:12px;color:#94a3b8;min-height:18px;margin:0;"></p>
+      </div>
+      <footer style="display:flex;justify-content:flex-end;gap:8px;flex-wrap:wrap;">
+        <button type="button" class="modal-secondary" id="parada-fechar-btn">Fechar</button>
+        <button type="button" class="modal-secondary" id="parada-registrar-motivo-btn">Registrar motivo</button>
+        <button type="button" class="modal-primary" id="parada-registrar-btn">
+          <i class="fa-solid fa-circle-pause"></i> Registrar parada
+        </button>
+      </footer>
+    `;
+
+    overlay.appendChild(modal);
+    document.body.appendChild(overlay);
+
+    const close = () => overlay.remove();
+    modal.querySelector('.close-btn')?.addEventListener('click', close);
+    modal.querySelector('#parada-fechar-btn')?.addEventListener('click', close);
+
+    const tipoSelect = modal.querySelector('#parada-tipo-select');
+    const motivoInput = modal.querySelector('#parada-motivo-input');
+    const motivoList = modal.querySelector('#parada-motivo-list');
+    const statusEl = modal.querySelector('#parada-status');
+    let motivosCache = [];
+
+    const atualizarListaMotivos = () => {
+      const motivos = motivosCache.map(m => m.motivo);
+      preencherDatalistParada(motivoList, motivos, '');
+    };
+
+    carregarMotivosParada()
+      .then((rows) => { motivosCache = rows; atualizarListaMotivos(); })
+      .catch((err) => { if (statusEl) statusEl.textContent = err.message; });
+
+    async function salvarMotivo() {
+      const tipo = (tipoSelect?.value || '').trim();
+      const motivo = (motivoInput?.value || '').trim();
+      if (!tipo || !motivo) throw new Error('Informe tipo de parada e motivo.');
+      const resp = await fetch('/api/producao/paradas/motivos', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ tipo_parada: tipo, motivo }),
+      });
+      const data = await resp.json();
+      if (!resp.ok || !data.success) throw new Error(data.error || 'Erro ao registrar motivo');
+      const idx = motivosCache.findIndex(m =>
+        String(m.tipo_parada).toLowerCase() === tipo.toLowerCase()
+        && String(m.motivo).toLowerCase() === motivo.toLowerCase()
+      );
+      if (idx < 0) motivosCache.push(data.motivo);
+      atualizarListaMotivos();
+      return data.motivo;
+    }
+
+    modal.querySelector('#parada-registrar-motivo-btn')?.addEventListener('click', async () => {
+      const btn = modal.querySelector('#parada-registrar-motivo-btn');
+      if (btn) btn.disabled = true;
+      try {
+        await salvarMotivo();
+        if (statusEl) { statusEl.textContent = 'Motivo cadastrado.'; statusEl.style.color = '#4ade80'; }
+      } catch (err) {
+        if (statusEl) { statusEl.textContent = err.message; statusEl.style.color = '#f87171'; }
+      } finally {
+        if (btn) btn.disabled = false;
+      }
+    });
+
+    modal.querySelector('#parada-registrar-btn')?.addEventListener('click', async () => {
+      const btn = modal.querySelector('#parada-registrar-btn');
+      if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Registrando...'; }
+      try {
+        const tipo = (tipoSelect?.value || '').trim();
+        const motivo = (motivoInput?.value || '').trim();
+        if (!tipo || !motivo) throw new Error('Informe tipo de parada e motivo.');
+        await salvarMotivo();
+        const usuario = (document.getElementById('userNameDisplay')?.textContent || '').trim();
+        const resp = await fetch('/api/producao/paradas', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({
+            kanban_programacao_id: reg?.id || null,
+            numero_op: op.identificacao || '',
+            usuario,
+            operacao: operacaoNome,
+            tipo_parada: tipo,
+            motivo,
+          }),
+        });
+        const data = await resp.json();
+        if (!resp.ok || !data.success) throw new Error(data.error || 'Erro ao registrar parada');
+        close();
+        alert('Parada registrada.');
+      } catch (err) {
+        if (statusEl) { statusEl.textContent = err.message; statusEl.style.color = '#f87171'; }
+        if (btn) {
+          btn.disabled = false;
+          btn.innerHTML = '<i class="fa-solid fa-circle-pause"></i> Registrar parada';
+        }
+      }
+    });
+  }
+
   function openProducaoKanbanActionsModal(produtoCodigo, groupKey, ops, operacaoFiltro, opts) {
     const options = opts || {};
     const somenteEstrutura = !!options.somenteEstrutura;
+    const modoMontagem = !!options.modoMontagem;
+    const modoRiRegistro = !!options.modoRiRegistro;
     const mostrarEstoque = !!options.mostrarEstoque;
-    const mostrarImprimirOp = options.colKey === 'programado';
-    const mostrarRi = (options.colKey === 'solicitado' || options.colKey === 'produzindo') && ops.length === 1;
+    const pedidoItem = options.pedidoItem || null;
+    const mostrarGerarOpPedido = !!pedidoItem && !modoMontagem && !modoRiRegistro;
+    const colKeyMonta = options.colKey || '';
+    const mostrarImprimirOpMonta = modoMontagem && colKeyMonta === 'programado';
+    const mostrarFinalizarMonta = modoMontagem && colKeyMonta !== 'programado' && colKeyMonta !== 'finalizado';
+    const mostrarParadaMonta = mostrarFinalizarMonta;
+    const mostrarImprimirOp = !modoMontagem && !modoRiRegistro && colKeyMonta === 'programado';
+    const mostrarRi = modoRiRegistro || (!modoMontagem && (colKeyMonta === 'solicitado' || colKeyMonta === 'produzindo' || colKeyMonta === 'teste' || colKeyMonta === 'inspecao_final') && ops.length === 1);
     const tituloModal = options.titulo || 'Ações do grupo';
     const overlay = document.createElement('div');
     overlay.className = 'kanban-modal-overlay';
@@ -73398,10 +75392,30 @@ window.verOperacao = function(osId) {
       </header>
       <div class="kanban-modal-body">
         <div class="modal-code-block">
-          <p>${somenteEstrutura ? 'Consulte a estrutura do produto:' : 'Escolha uma ação para o grupo de produção:'}</p>
+          <p>${somenteEstrutura ? 'Consulte a estrutura do produto:' : (modoMontagem || modoRiRegistro ? 'Escolha uma ação:' : 'Escolha uma ação para o grupo de produção:')}</p>
           <div style="display:flex;flex-wrap:wrap;gap:10px;margin-top:12px;">
             <button type="button" id="open-estrutura-btn" class="modal-primary" style="min-width:140px;">Ver estrutura</button>
-            ${somenteEstrutura ? '' : `
+            ${mostrarGerarOpPedido ? `
+            <button type="button" id="open-gerar-op-pedido-btn" class="modal-secondary" style="min-width:140px;background:linear-gradient(135deg,#10b981 0%,#059669 100%);color:#fff;border:none;">
+              <i class="fa-solid fa-plus"></i> Gerar OP
+            </button>` : ''}
+            ${modoMontagem ? `
+            ${mostrarImprimirOpMonta ? `
+            <button type="button" id="open-imprimir-op-btn" class="modal-secondary" style="min-width:140px;">
+              <i class="fa-solid fa-print"></i> Imprimir OP
+            </button>` : ''}
+            ${mostrarFinalizarMonta ? `
+            <button type="button" id="open-finalizar-operacao-btn" class="modal-secondary" style="min-width:160px;background:linear-gradient(135deg,#10b981 0%,#059669 100%);color:#fff;border:none;">
+              <i class="fa-solid fa-circle-check"></i> Finalizar operação
+            </button>` : ''}
+            ${mostrarParadaMonta ? `
+            <button type="button" id="open-parada-btn" class="modal-secondary" style="min-width:140px;">
+              <i class="fa-solid fa-circle-pause"></i> Parada
+            </button>` : ''}` : (modoRiRegistro ? `
+            ${mostrarRi ? `
+            <button type="button" id="open-ri-check-btn" class="modal-secondary" style="min-width:180px;">
+              <i class="fa-solid fa-clipboard-check"></i> RI - Registro de inspeção
+            </button>` : ''}` : (somenteEstrutura ? '' : `
             <button type="button" id="open-process-btn" class="modal-secondary" style="min-width:140px;">Processo</button>
             ${mostrarImprimirOp ? `
             <button type="button" id="open-imprimir-op-btn" class="modal-secondary" style="min-width:140px;">
@@ -73410,7 +75424,7 @@ window.verOperacao = function(osId) {
             ${mostrarRi ? `
             <button type="button" id="open-ri-check-btn" class="modal-secondary" style="min-width:180px;">
               <i class="fa-solid fa-clipboard-check"></i> RI - Registro de inspeção
-            </button>` : ''}`}
+            </button>` : ''}`))}
           </div>
           ${mostrarEstoque ? '<div id="analise-estoque-pedido"></div>' : ''}
         </div>
@@ -73428,14 +75442,22 @@ window.verOperacao = function(osId) {
     modal.querySelector('footer .modal-secondary')?.addEventListener('click', close);
     modal.querySelector('#open-estrutura-btn')?.addEventListener('click', () => {
       close();
-      const iappId = ops && ops[0] ? ops[0].id : null;
-      if (!iappId) {
-        alert('Nenhuma OP encontrada para este produto. A estrutura só pode ser consultada quando existir OP no kanban.');
-        return;
-      }
-      openProducaoEstruturaPorIappId(iappId, produtoCodigo || groupKey);
+      const op0 = ops && ops[0];
+      openProducaoEstruturaPorIappId(null, produtoCodigo || groupKey, {
+        ocultarValores: !!options.ocultarValores,
+        opProducaoId: op0?.from_op_producao ? Number(op0.id) : undefined,
+        numeroOp: op0?.identificacao || '',
+      });
     });
-    if (!somenteEstrutura) {
+    modal.querySelector('#open-gerar-op-pedido-btn')?.addEventListener('click', () => {
+      openGerarOpPedidoModal(pedidoItem, async () => {
+        close();
+        if (typeof window._producaoRecarregarOrdens === 'function') {
+          await window._producaoRecarregarOrdens();
+        }
+      });
+    });
+    if (!somenteEstrutura && !modoMontagem) {
       modal.querySelector('#open-process-btn')?.addEventListener('click', () => {
         close();
         openProducaoKanbanProcessModal(groupKey, ops);
@@ -73451,15 +75473,65 @@ window.verOperacao = function(osId) {
         openProducaoRiCheckModal(op, produtoCodigo || groupKey, options.colKey || '');
       });
     }
+    if (modoRiRegistro) {
+      modal.querySelector('#open-ri-check-btn')?.addEventListener('click', () => {
+        close();
+        const op = ops[0];
+        if (!op) return;
+        openProducaoRiCheckModal(op, produtoCodigo || groupKey, options.colKey || '');
+      });
+    }
+    if (modoMontagem) {
+      modal.querySelector('#open-imprimir-op-btn')?.addEventListener('click', () => {
+        close();
+        openProducaoImprimirOpModal(produtoCodigo, groupKey, ops, {
+          fromProgramado: true,
+          onSuccess: async () => {
+            if (typeof window._montaRecarregarOrdens === 'function') {
+              await window._montaRecarregarOrdens();
+            }
+          },
+        });
+      });
+      modal.querySelector('#open-finalizar-operacao-btn')?.addEventListener('click', async () => {
+        const btn = modal.querySelector('#open-finalizar-operacao-btn');
+        if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Registrando...'; }
+        try {
+          await producaoFinalizarOperacao(ops, options.colKey || '');
+          close();
+          alert('Operação finalizada. OP movida para o próximo posto.');
+        } catch (err) {
+          alert(err.message || 'Falha ao finalizar operação.');
+          if (btn) {
+            btn.disabled = false;
+            btn.innerHTML = '<i class="fa-solid fa-circle-check"></i> Finalizar operação';
+          }
+        }
+      });
+      modal.querySelector('#open-parada-btn')?.addEventListener('click', () => {
+        openProducaoParadaModal(ops, options.colKey || '', produtoCodigo || groupKey);
+      });
+    }
     if (mostrarEstoque) {
       carregarEstoqueAnalisePedido(produtoCodigo || groupKey, modal.querySelector('#analise-estoque-pedido'));
     }
   }
 
+  window._producaoOpenKanbanActions = function(op) {
+    if (!op) return;
+    const colKey = typeof window._producaoOpColunaAtual === 'function'
+      ? window._producaoOpColunaAtual(op)
+      : 'programado';
+    const produtoCodigo = op.produto?.identificacao || String(op.id);
+    openProducaoKanbanActionsModal(produtoCodigo, produtoCodigo, [op], '', { colKey, ocultarValores: true });
+  };
+
   function attachProducaoKanbanActionButtons(containerSelector, ordens) {
     const container = document.querySelector(containerSelector);
     if (!container || !ordens) return;
-    const filtroSelect = container.querySelector('#producaoFiltroOperacao, #montaFiltroOperacao');
+    const filtroSelect = container.querySelector('#producaoFiltroOperacao');
+    const modoMontagem = containerSelector === '#montaProducaoPane';
+    const ocultarValores = containerSelector === '#registrarProducaoPane' || modoMontagem;
 
     container.querySelectorAll('.kanban-group-action-btn').forEach(btn => {
       if (btn.dataset.bound === '1') return;
@@ -73478,7 +75550,7 @@ window.verOperacao = function(osId) {
           : opsGrupo;
         const operacaoFiltro = filtroSelect ? filtroSelect.value : '';
 
-        openProducaoKanbanActionsModal(produtoCodigo, groupKey, ops, operacaoFiltro, { colKey });
+        openProducaoKanbanActionsModal(produtoCodigo, groupKey, ops, operacaoFiltro, { colKey, ocultarValores, modoMontagem });
       });
     });
   }
@@ -73487,11 +75559,15 @@ window.verOperacao = function(osId) {
   function attachOpCardClickHandlers(containerSelector, ordens) {
     const container = document.querySelector(containerSelector);
     if (!container || !ordens) return;
+    const modoMontagem = containerSelector === '#montaProducaoPane';
+    const modoRiRegistro = containerSelector === '#riRegistroInspecaoPane';
+    const ocultarValores = containerSelector === '#registrarProducaoPane' || modoMontagem || modoRiRegistro;
 
     container.querySelectorAll('[data-op-id]').forEach(card => {
       if (card.dataset.opBound === '1') return;
       card.dataset.opBound = '1';
       card.addEventListener('click', (ev) => {
+        if (card.dataset.opRiBloqueado === '1') return;
         // Ignora cliques em botões/inputs internos ou área expandida da OP
         if (ev.target.closest('button, a, input, textarea, select, .op-expand-btn, [id^="op-det-"], [id^="monta-op-det-"]')) return;
 
@@ -73505,9 +75581,14 @@ window.verOperacao = function(osId) {
         const groupKey = op.produto?.identificacao || String(op.id);
         const produtoCodigo = op.produto?.identificacao || groupKey;
         const grupoEl = card.closest('.kanban-prod-grupo');
-        const colKey = grupoEl?.dataset.colKey || '';
+        const colKey = card.dataset.riColKey || grupoEl?.dataset.colKey || op._riColKey || '';
 
-        openProducaoKanbanActionsModal(produtoCodigo, groupKey, [op], '', { colKey });
+        openProducaoKanbanActionsModal(produtoCodigo, groupKey, [op], '', {
+          colKey,
+          ocultarValores,
+          modoMontagem,
+          modoRiRegistro,
+        });
       });
     });
   }
