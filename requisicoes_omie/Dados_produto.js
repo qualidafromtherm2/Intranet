@@ -1571,10 +1571,25 @@ if (typeof window.loadFotos === 'function') {
     window.dispatchEvent(new CustomEvent('produto-carregado', {
       detail: {
         codigo,
+        codigo_produto: dados?.codigo_produto || null,
         familia: window.currentProdutoFamilia || ''
       }
     }));
   } catch(_) { /* noop */ }
+
+  if (typeof window.recarregarHistoricoAlteracoes === 'function') {
+    const historicoVisivel = document.getElementById('alteracoesHistoricoTab')?.style.display !== 'none';
+    if (historicoVisivel) {
+      window.recarregarHistoricoAlteracoes();
+    }
+  }
+
+  if (typeof window.recarregarDesenhosTecnico === 'function') {
+    const desenhoVisivel = document.getElementById('desenhoTecnicoTab')?.style.display !== 'none';
+    if (desenhoVisivel) {
+      window.recarregarDesenhosTecnico();
+    }
+  }
 
 }
 

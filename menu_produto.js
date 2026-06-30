@@ -12756,6 +12756,37 @@ function renderMetodoEnvioMercadoriaHtml(metodoEnvioRaw, idVipp) {
   return `<div class="envio-card-metodo">${iconHtml}<span>${escapeAtHtml(metodo)}</span></div>`;
 }
 
+function isEnvioSacCorreiosVipp(r) {
+  const metodo = String(r?.metodo_envio || '').trim();
+  return !!r?.id_vipp || metodo === 'Envio via Correios';
+}
+
+function isEnvioSacManualRastreio(r) {
+  const metodo = String(r?.metodo_envio || '').trim();
+  return metodo === 'Envio via Disktenha' || metodo === 'Envio via transportadora';
+}
+
+function renderSacAcoesRastreabilidadeHtml(r) {
+  const temIdent = !!(r.identificacao && String(r.identificacao).trim().length > 0);
+  if (temIdent) return '';
+  const btnStyle = 'padding:6px 8px;font-size:11px;display:inline-flex;align-items:center;gap:5px;justify-content:center;white-space:normal;line-height:1.25;text-align:center;';
+  const parts = [];
+  if (isEnvioSacCorreiosVipp(r)) {
+    parts.push(
+      `<button class="content-button btn-envio-gerar-etiqueta btn-sac-rastreabilidade" data-envio-id="${escapeAtHtml(String(r.id))}" data-n-solic="${escapeAtHtml(r.numero_sep || '')}"` +
+      ` style="${btnStyle}background:#1d4ed8;color:#dbeafe;border:none;border-radius:8px;cursor:pointer;font-weight:700;">` +
+      `<i class="fa-solid fa-barcode"></i><span>Rastreabilidade</span></button>`
+    );
+  } else if (isEnvioSacManualRastreio(r)) {
+    parts.push(
+      `<button class="content-button btn-sac-inserir-rastreabilidade" data-envio-id="${escapeAtHtml(String(r.id))}"` +
+      ` style="${btnStyle}background:linear-gradient(135deg,#0ea5e9 0%,#0284c7 100%);color:white;border:none;border-radius:8px;cursor:pointer;font-weight:700;">` +
+      `<i class="fa-solid fa-pen-to-square"></i><span>Inserir rastreabilidade</span></button>`
+    );
+  }
+  return parts.join('');
+}
+
 function montarConteudoEnvioMercadoria(conteudoRaw) {
   if (!conteudoRaw) {
     return '<div class="envio-card-text">Sem conteúdo informado.</div>';
@@ -19146,12 +19177,16 @@ async function carregarSacSolicitacoes(targetBody, { hideDone = false, filaLogis
           </tr>`;
       } else {
         // Tabela "Registro de envios" (painel SAC) - SEM coluna Requisitante
-        // Botões de Ação (Editar e Excluir)
+        // Botões de Ação (Rastreabilidade + Excluir)
+        const rastreabilidadeBtn = renderSacAcoesRastreabilidadeHtml(r);
         const acoesButtons = `
-          <button class="content-button btn-sac-excluir" data-id="${r.id}" style="padding:4px 8px;font-size:12px;display:inline-flex;align-items:center;gap:6px;background:linear-gradient(135deg,#ef4444 0%,#dc2626 100%);color:white;">
-            <i class="fa-solid fa-trash"></i>
-            <span>Excluir</span>
-          </button>
+          <div class="sac-acoes-stack">
+            ${rastreabilidadeBtn}
+            <button class="content-button btn-sac-excluir" data-id="${r.id}" style="display:inline-flex;align-items:center;gap:5px;background:linear-gradient(135deg,#ef4444 0%,#dc2626 100%);color:white;border:none;border-radius:8px;cursor:pointer;font-weight:700;">
+              <i class="fa-solid fa-trash"></i>
+              <span>Excluir</span>
+            </button>
+          </div>
         `;
         
         return `
@@ -19164,7 +19199,7 @@ async function carregarSacSolicitacoes(targetBody, { hideDone = false, filaLogis
             <td style="max-width:400px;white-space:pre-wrap;line-height:1.8;padding:12px 8px;vertical-align:top;">${conteudo}</td>
             <td>${statusSelectSac}</td>
             <td>${buttonsSac || '—'}</td>
-            <td style="white-space:nowrap;">${acoesButtons}</td>
+            <td class="sac-acoes-cell">${acoesButtons}</td>
           </tr>`;
       }
     }).join('');
@@ -19974,6 +20009,88 @@ function setupPrintButtons(container) {
 
 setupPrintButtons(sacTabelaBody);
 
+// ── Modal Inserir rastreabilidade (SAC) ─────────────────────────────────────
+(function initSacIdentificacaoModal() {
+  const modal = document.getElementById('sacIdentificacaoModal');
+  const input = document.getElementById('sacIdentificacaoInput');
+  const hiddenId = document.getElementById('sacIdentificacaoEnvioId');
+  const statusEl = document.getElementById('sacIdentificacaoModalStatus');
+  const btnClose = document.getElementById('sacIdentificacaoModalClose');
+  const btnCancel = document.getElementById('sacIdentificacaoCancelarBtn');
+  const btnSave = document.getElementById('sacIdentificacaoSalvarBtn');
+  if (!modal || !input || !hiddenId || !btnSave) return;
+  if (modal.parentElement !== document.body) document.body.appendChild(modal);
+
+  function fecharModalSacIdentificacao() {
+    modal.style.display = 'none';
+    document.body.style.overflow = '';
+    if (statusEl) { statusEl.style.display = 'none'; statusEl.textContent = ''; }
+  }
+
+  window.abrirModalSacIdentificacao = function (envioId, valorAtual) {
+    hiddenId.value = String(envioId || '');
+    input.value = (valorAtual && valorAtual !== '—') ? String(valorAtual).trim() : '';
+    if (statusEl) { statusEl.style.display = 'none'; statusEl.textContent = ''; }
+    modal.style.display = 'flex';
+    document.body.style.overflow = 'hidden';
+    setTimeout(function () { input.focus(); }, 50);
+  };
+
+  btnClose?.addEventListener('click', fecharModalSacIdentificacao);
+  btnCancel?.addEventListener('click', fecharModalSacIdentificacao);
+  modal.addEventListener('click', function (e) { if (e.target === modal) fecharModalSacIdentificacao(); });
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape' && modal.style.display === 'flex') fecharModalSacIdentificacao();
+  });
+
+  btnSave.addEventListener('click', async function () {
+    const envioId = hiddenId.value;
+    const identificacao = input.value.trim();
+    if (!envioId) return;
+    if (!identificacao) {
+      if (statusEl) {
+        statusEl.style.display = 'block';
+        statusEl.textContent = 'Informe o código de rastreabilidade.';
+      }
+      return;
+    }
+    btnSave.disabled = true;
+    try {
+      const resp = await fetch('/api/sac/solicitacoes/' + encodeURIComponent(envioId) + '/identificacao', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ identificacao: identificacao })
+      });
+      const data = await resp.json().catch(function () { return {}; });
+      if (!resp.ok || data.ok === false) throw new Error(data.error || 'Falha ao salvar');
+      fecharModalSacIdentificacao();
+      if (typeof carregarSacSolicitacoes === 'function' && sacTabelaBody) {
+        await carregarSacSolicitacoes(sacTabelaBody, { hideDone: false, filterByUser: true });
+      }
+    } catch (err) {
+      if (statusEl) {
+        statusEl.style.display = 'block';
+        statusEl.textContent = err.message || 'Erro ao salvar rastreabilidade.';
+      }
+    } finally {
+      btnSave.disabled = false;
+    }
+  });
+
+  document.addEventListener('click', function (ev) {
+    const btn = ev.target.closest('.btn-sac-inserir-rastreabilidade');
+    if (!btn) return;
+    ev.preventDefault();
+    const envioId = btn.getAttribute('data-envio-id');
+    if (!envioId) return;
+    const row = btn.closest('tr');
+    const identCell = row ? row.querySelector('td:nth-child(4)') : null;
+    const valorAtual = identCell ? identCell.textContent.split('\n')[0].trim() : '';
+    window.abrirModalSacIdentificacao(envioId, valorAtual);
+  });
+})();
+
 // ── Helper compartilhado: parse de preferência de agente "__AGENT__:pc:imp" ──
 // Definido no escopo global para ser acessível pelas funções de envio e pelo modal de etiquetas
 function _etqParseAgentPref(pref) {
@@ -20181,7 +20298,11 @@ function setupEnvioPrintButtons(container) {
         });
         const d = await r.json().catch(() => ({}));
         if (!r.ok || !d.ok) throw new Error(d.error || 'Falha ao gerar etiqueta');
-        if (typeof carregarSacSolicitacoes === 'function' && envioMercadoriaTabelaBodyPane) {
+        if (btnGerar.closest('#sacTabelaBody')) {
+          if (typeof carregarSacSolicitacoes === 'function' && sacTabelaBody) {
+            await carregarSacSolicitacoes(sacTabelaBody, { hideDone: false, filterByUser: true });
+          }
+        } else if (typeof carregarSacSolicitacoes === 'function' && envioMercadoriaTabelaBodyPane) {
           carregarSacSolicitacoes(envioMercadoriaTabelaBodyPane, { filaLogistica: true });
         }
       } catch (err) {
@@ -20242,6 +20363,7 @@ function setupEnvioPrintButtons(container) {
 }
 
 setupEnvioPrintButtons(envioMercadoriaTabelaBodyPane);
+setupEnvioPrintButtons(sacTabelaBody);
 
 // Gear button: abre/fecha o dropdown de configuração de impressora
 document.getElementById('envioImprGearBtn')?.addEventListener('click', async (ev) => {
@@ -65862,6 +65984,8 @@ window.adicionarNovaLinhaPIR = adicionarNovaLinhaPIR;
     const navGrid = document.getElementById('productNavGrid');
     const cards = document.querySelectorAll('.nav-card:not(.nav-card-action)');
     const btnNovoCard = document.getElementById('btnNovoProdutoCard');
+    const btnAlteracaoCard = document.getElementById('btnAlteracaoProdutoCard');
+    const btnDesenhoTecnicoCard = document.getElementById('btnDesenhoTecnicoCard');
     const sectionTitle = document.getElementById('currentSectionTitle');
     
     if (!hamburger || !navGrid || !cards.length) return false;
@@ -65982,6 +66106,36 @@ window.adicionarNovaLinhaPIR = adicionarNovaLinhaPIR;
         hamburger.classList.remove('active');
       });
     });
+
+    // Handler do botão Desenho técnico
+    if (btnDesenhoTecnicoCard) {
+      btnDesenhoTecnicoCard.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+
+        if (typeof window.abrirModalDesenhoTecnico === 'function') {
+          window.abrirModalDesenhoTecnico();
+        }
+
+        navGrid.style.display = 'none';
+        hamburger.classList.remove('active');
+      });
+    }
+
+    // Handler do botão Alteração de produto
+    if (btnAlteracaoCard) {
+      btnAlteracaoCard.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+
+        if (typeof window.abrirModalAlteracaoProduto === 'function') {
+          window.abrirModalAlteracaoProduto();
+        }
+
+        navGrid.style.display = 'none';
+        hamburger.classList.remove('active');
+      });
+    }
 
     // Handler do botão Novo (não fecha o menu)
     if (btnNovoCard) {
@@ -77273,7 +77427,7 @@ window.initOscilacaoEstoque = (function () {
             );
           }
           if (_vippContextoSac && !_sepCriadaManual) {
-            await criarEntradaSacEnvio(itensDecl, osNum, null, metodoEnvio);
+            await criarEntradaSacEnvio(itensDecl, osNum, null, metodoEnvio, true);
           }
           var statusElManual = document.getElementById('vippModalStatus');
           if (statusElManual) {
@@ -77366,15 +77520,27 @@ window.initOscilacaoEstoque = (function () {
             // Cria Sol. de Separação automaticamente com itens da Declaração de Conteúdo.
             // No contexto SAC, a entrada direta em envios.solicitacoes vira fallback para evitar duplicidade.
             var _sepCriada = false;
-            if (itensDecl.length > 0) {
-              _sepCriada = await criarSolicitacaoSeparacaoVipp(
-                itensDecl,
-                osNum,
-                g('vippObservacao'),
-                data.idConhecimento || null,
-                _vippContextoSac ? 'SAC' : 'AT',
-                'Envio via Correios'
-              );
+            try {
+              if (itensDecl.length > 0) {
+                _sepCriada = await criarSolicitacaoSeparacaoVipp(
+                  itensDecl,
+                  osNum,
+                  g('vippObservacao'),
+                  data.idConhecimento || null,
+                  _vippContextoSac ? 'SAC' : 'AT',
+                  'Envio via Correios'
+                );
+              }
+            } catch (sepErr) {
+              console.error('[VIPP] Falha ao criar SEP:', sepErr);
+              var _sElSep = document.getElementById('vippModalStatus');
+              if (_sElSep) {
+                var _noteSep = document.createElement('div');
+                _noteSep.style.cssText = 'margin-top:8px;padding:6px 10px;background:rgba(239,68,68,.10);border:1px solid #ef444466;border-radius:6px;font-size:12px;color:#fca5a5;';
+                _noteSep.innerHTML = '<i class="fa-solid fa-triangle-exclamation" style="margin-right:5px;"></i>' +
+                  'Postagem criada, mas falhou a separação: ' + (sepErr.message || sepErr) + '.';
+                _sElSep.appendChild(_noteSep);
+              }
             }
             // Se aberto pelo painel SAC, cria entrada apenas quando a separação não gerou solicitação.
             if (_vippContextoSac && !_sepCriada) {
@@ -77449,6 +77615,9 @@ window.initOscilacaoEstoque = (function () {
         console.error('[VIPP→Sep] Erro ao adicionar item:', _e2);
       }
     }
+    if (!_adicionados.length) {
+      throw new Error('Nenhum item válido na declaração. Use o formato CODIGO - DESCRICAO.');
+    }
     // Envia a separação (somente os itens adicionados pela OS, não o carrinho inteiro)
     try {
       var _envResp = await fetch('/api/logistica/separacao/enviar', {
@@ -77471,6 +77640,9 @@ window.initOscilacaoEstoque = (function () {
         })
       });
       var _envData = await _envResp.json();
+      if (!_envResp.ok || !_envData.ok) {
+        throw new Error(_envData.error || ('Falha ao criar separação (HTTP ' + _envResp.status + ')'));
+      }
       if (_envData.ok) {
         var _badge = document.getElementById('listaSeparacaoCount');
         if (_badge) { _badge.textContent = '0'; _badge.style.display = 'none'; }
@@ -77485,20 +77657,20 @@ window.initOscilacaoEstoque = (function () {
         }
         return true;
       }
-      return false;
+      throw new Error('Falha ao criar separação.');
     } catch (_e3) {
       console.error('[VIPP→Sep] Erro ao enviar separação:', _e3);
-      return false;
+      throw _e3;
     }
   }
 
   // ── Cria entrada em envios.solicitacoes após envio (contexto SAC) ──
-  async function criarEntradaSacEnvio(itensDecl, osNum, idVipp, metodoEnvio) {
+  async function criarEntradaSacEnvio(itensDecl, osNum, idVipp, metodoEnvio, throwOnError) {
     var nomeUser = '';
     try {
       var _meResp = await fetch('/api/auth/status', { credentials: 'include' });
       var _me = await _meResp.json();
-      nomeUser = (_me && _me.user && (_me.user.username || _me.user.nome)) || '';
+      nomeUser = (_me && _me.user && (_me.user.username || _me.user.nome || _me.user.fullName)) || '';
     } catch (_e) { /* ignora */ }
 
     // Converte itens para formato [{ conteudo, quantidade }] (mesmo do PDF)
@@ -77546,6 +77718,7 @@ window.initOscilacaoEstoque = (function () {
       }
     } catch (_e3) {
       console.error('[VIPP→SAC] Erro ao criar entrada SAC:', _e3);
+      if (throwOnError) throw _e3;
       var _sElErr = document.getElementById('vippModalStatus');
       if (_sElErr) {
         var _noteErr = document.createElement('div');

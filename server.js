@@ -19306,8 +19306,10 @@ app.post('/api/logistica/separacao/enviar', express.json(), async (req, res) => 
 
     const motivoRaw = String(motivo || '').trim();
     const motivosPermitidos = new Set(['Produção', 'Engenharia', 'venda', 'Assistencia tecnica']);
-    const fluxoVipp = !!id_vipp;
-    const origemVippNorm = String(origem_vipp || '').trim().toUpperCase() === 'SAC' ? 'SAC' : 'AT';
+    const origemVippRaw = String(origem_vipp || '').trim().toUpperCase();
+    const fluxoSacAtEnvio = origemVippRaw === 'SAC' || origemVippRaw === 'AT';
+    const fluxoVipp = !!id_vipp || fluxoSacAtEnvio;
+    const origemVippNorm = origemVippRaw === 'SAC' ? 'SAC' : 'AT';
     const motivoSolicitacao = fluxoVipp
       ? (origemVippNorm === 'SAC' ? 'SAC' : 'AT')
       : (motivosPermitidos.has(motivoRaw) ? motivoRaw : 'Produção');

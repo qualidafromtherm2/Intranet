@@ -724,6 +724,30 @@
       <i class="fa-solid fa-download" style="margin-right:8px;"></i>
       Baixar Fromthest
     </a>
+
+    <a href="#"
+       id="menu-engenharia-alteracoes"
+       class="menu-link"
+       data-nav-key="side:engenharia:alteracoes"
+       data-nav-parent="side:engenharia"
+       data-nav-pos="side"
+       data-nav-label="Histórico de Alterações"
+       data-nav-selector="#menu-engenharia-alteracoes">
+      <i class="fa-solid fa-clock-rotate-left" style="margin-right:8px;"></i>
+      Histórico de Alterações
+    </a>
+
+    <a href="#"
+       id="menu-engenharia-desenho-tecnico"
+       class="menu-link"
+       data-nav-key="side:engenharia:desenho-tecnico"
+       data-nav-parent="side:engenharia"
+       data-nav-pos="side"
+       data-nav-label="Desenho técnico"
+       data-nav-selector="#menu-engenharia-desenho-tecnico">
+      <i class="fa-solid fa-drafting-compass" style="margin-right:8px;"></i>
+      Desenho técnico
+    </a>
   </div>
 </div>
 
@@ -3035,6 +3059,11 @@
                 </div>
 
                 <div class="tabela-wrapper" style="overflow:auto; margin-top:12px;">
+                  <style>
+                    #sacTabelaBody .sac-acoes-stack{display:flex;flex-direction:column;gap:6px;width:100%;min-width:138px;max-width:152px;}
+                    #sacTabelaBody .sac-acoes-stack .content-button{width:100%;box-sizing:border-box;justify-content:center;white-space:normal;line-height:1.25;text-align:center;padding:6px 8px;font-size:11px;}
+                    #sacTabelaBody td.sac-acoes-cell{vertical-align:top;width:152px;max-width:152px;padding:8px 6px;}
+                  </style>
                   <table class="tabela padrao" style="min-width:1050px;">
                     <thead>
                       <tr>
@@ -3054,6 +3083,40 @@
                     </tbody>
                   </table>
                 </div>
+
+        <!-- Modal: Inserir rastreabilidade (SAC) -->
+        <div id="sacIdentificacaoModal" class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="sacIdentificacaoModalTitle"
+          style="position:fixed;inset:0;z-index:10056;display:none;align-items:center;justify-content:center;background:rgba(2,6,23,.78);backdrop-filter:blur(4px);">
+          <div style="width:min(460px,calc(100vw - 26px));border-radius:14px;border:1px solid #2c425c;background:linear-gradient(180deg,rgba(15,23,42,.99) 0%,rgba(17,24,39,.97) 100%);box-shadow:0 24px 56px rgba(0,0,0,.48);overflow:hidden;">
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:14px 18px;border-bottom:1px solid rgba(255,255,255,.08);">
+              <div style="display:flex;align-items:center;gap:10px;">
+                <i class="fa-solid fa-barcode" style="font-size:20px;color:#7dd3fc;"></i>
+                <strong id="sacIdentificacaoModalTitle" style="font-size:15px;color:#e5e7eb;">Inserir rastreabilidade</strong>
+              </div>
+              <button id="sacIdentificacaoModalClose" type="button"
+                style="display:inline-flex;align-items:center;justify-content:center;width:34px;height:34px;border-radius:10px;border:1px solid #374151;background:rgba(255,255,255,.04);color:#e5e7eb;cursor:pointer;">
+                <i class="fa-solid fa-xmark"></i>
+              </button>
+            </div>
+            <div style="padding:18px;display:flex;flex-direction:column;gap:14px;">
+              <input type="hidden" id="sacIdentificacaoEnvioId" value="" />
+              <div class="form-field" style="margin:0;">
+                <label for="sacIdentificacaoInput">Código de rastreabilidade</label>
+                <input id="sacIdentificacaoInput" type="text" placeholder="Ex: código de rastreio ou referência do envio" style="width:100%;" />
+              </div>
+              <div id="sacIdentificacaoModalStatus" style="display:none;font-size:13px;color:#f87171;"></div>
+            </div>
+            <div style="display:flex;justify-content:flex-end;gap:10px;padding:12px 18px 16px;border-top:1px solid rgba(255,255,255,.08);">
+              <button id="sacIdentificacaoCancelarBtn" type="button" class="content-button" style="background:rgba(255,255,255,.06);color:#9ca3af;border:1px solid #374151;">
+                Cancelar
+              </button>
+              <button id="sacIdentificacaoSalvarBtn" type="button" class="content-button" style="background:linear-gradient(135deg,#0ea5e9 0%,#0284c7 100%);color:white;">
+                <i class="fa-solid fa-floppy-disk"></i> Salvar
+              </button>
+            </div>
+          </div>
+        </div>
+
                   <!-- Container do gráfico SAC (inicialmente oculto) -->
                   <div id="sacRelatorioGraficoWrapper" style="display:none; margin-top:24px; background:#181f2a; border-radius:14px; box-shadow:0 2px 12px rgba(0,0,0,0.08); padding:24px;">
                     <div style="display:flex;align-items:center;gap:12px; margin-bottom:18px;flex-wrap:wrap;">
@@ -7704,6 +7767,78 @@
         </div>
       </div>
 
+      <!-- Painel Engenharia: Histórico de Alterações (todos os produtos) -->
+      <div id="engenhariaAlteracoesPane" class="tab-pane" style="display:none;">
+        <div class="content-wrapper">
+          <div class="content-wrapper-header">
+            <div class="content-wrapper-context">
+              <h3 class="img-content" style="display:flex;align-items:center;gap:10px;">
+                <i class="fa-solid fa-clock-rotate-left" style="color:#f97316;"></i>
+                <span>Histórico de Alterações</span>
+              </h3>
+              <div class="content-text">Todos os registros de alteração de produto cadastrados pela engenharia.</div>
+            </div>
+          </div>
+          <div id="engAlteracoesGlobalWrap">
+            <div id="engAlteracoesGlobalLoading" style="display:none;color:var(--inactive-color);font-size:14px;padding:16px 0;">Carregando histórico...</div>
+            <div style="overflow-x:auto;">
+              <table id="engAlteracoesGlobalTable" class="content-list" style="display:none;width:100%;border-collapse:collapse;font-size:13px;min-width:1040px;">
+                <thead>
+                  <tr style="border-bottom:1px solid var(--border-color);text-align:left;">
+                    <th style="padding:10px 8px;color:var(--content-title-color);">Data</th>
+                    <th style="padding:10px 8px;color:var(--content-title-color);">Código OMIE</th>
+                    <th style="padding:10px 8px;color:var(--content-title-color);">Produto</th>
+                    <th style="padding:10px 8px;color:var(--content-title-color);">Antes</th>
+                    <th style="padding:10px 8px;color:var(--content-title-color);">Depois</th>
+                    <th style="padding:10px 8px;color:var(--content-title-color);">Referência</th>
+                    <th style="padding:10px 8px;color:var(--content-title-color);">Anexos</th>
+                    <th style="padding:10px 8px;color:var(--content-title-color);width:90px;">Ações</th>
+                  </tr>
+                </thead>
+                <tbody id="engAlteracoesGlobalBody"></tbody>
+              </table>
+            </div>
+            <p id="engAlteracoesGlobalVazio" style="color:var(--inactive-color);font-size:14px;padding:16px 0;">Nenhuma alteração registrada.</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Painel Engenharia: Desenho técnico (todos os produtos) -->
+      <div id="engenhariaDesenhoTecnicoPane" class="tab-pane" style="display:none;">
+        <div class="content-wrapper">
+          <div class="content-wrapper-header">
+            <div class="content-wrapper-context">
+              <h3 class="img-content" style="display:flex;align-items:center;gap:10px;">
+                <i class="fa-solid fa-drafting-compass" style="color:#6366f1;"></i>
+                <span>Desenho técnico</span>
+              </h3>
+              <div class="content-text">Todos os desenhos técnicos cadastrados por produto.</div>
+            </div>
+          </div>
+          <div id="engDesenhoGlobalWrap">
+            <div id="engDesenhoGlobalLoading" style="display:none;color:var(--inactive-color);font-size:14px;padding:16px 0;">Carregando desenhos...</div>
+            <div style="overflow-x:auto;">
+              <table id="engDesenhoGlobalTable" class="content-list" style="display:none;width:100%;border-collapse:collapse;font-size:13px;min-width:900px;">
+                <thead>
+                  <tr style="border-bottom:1px solid var(--border-color);text-align:left;">
+                    <th style="padding:10px 8px;color:var(--content-title-color);">Data</th>
+                    <th style="padding:10px 8px;color:var(--content-title-color);">Código OMIE</th>
+                    <th style="padding:10px 8px;color:var(--content-title-color);">Produto</th>
+                    <th style="padding:10px 8px;color:var(--content-title-color);">Nome do arquivo</th>
+                    <th style="padding:10px 8px;color:var(--content-title-color);">Versão</th>
+                    <th style="padding:10px 8px;color:var(--content-title-color);">Status</th>
+                    <th style="padding:10px 8px;color:var(--content-title-color);">Anexo</th>
+                    <th style="padding:10px 8px;color:var(--content-title-color);width:90px;">Ações</th>
+                  </tr>
+                </thead>
+                <tbody id="engDesenhoGlobalBody"></tbody>
+              </table>
+            </div>
+            <p id="engDesenhoGlobalVazio" style="color:var(--inactive-color);font-size:14px;padding:16px 0;">Nenhum desenho técnico registrado.</p>
+          </div>
+        </div>
+      </div>
+
       <!-- Painel de Monitoramento do Chatbot -->
       <div id="chatbotMonitorPane" class="tab-pane" style="display:none;">
         <div class="content-wrapper">
@@ -8344,6 +8479,22 @@
       <div class="nav-card-title">Check-Compras</div>
     </div>
 
+    <!-- Card: Desenho técnico -->
+    <div class="nav-card nav-card-action" id="btnDesenhoTecnicoCard" title="Registrar desenho técnico">
+      <div class="nav-card-icon" style="background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%);">
+        <i class="fa-solid fa-drafting-compass"></i>
+      </div>
+      <div class="nav-card-title">Desenho</div>
+    </div>
+
+    <!-- Card: Alteração de produto -->
+    <div class="nav-card nav-card-action" id="btnAlteracaoProdutoCard" title="Registrar alteração de produto">
+      <div class="nav-card-icon" style="background: linear-gradient(135deg, #f97316 0%, #ea580c 100%);">
+        <i class="fa-solid fa-arrows-rotate"></i>
+      </div>
+      <div class="nav-card-title">Alteração</div>
+    </div>
+
     <!-- Card: Novo Produto -->
     <div class="nav-card nav-card-action" id="btnNovoProdutoCard">
       <div class="nav-card-icon" style="background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);">
@@ -8391,6 +8542,7 @@
 
           <!-- Dados do produto -->
           <div id="dadosProduto" class="tab-pane" style="display:none;">
+            <input type="hidden" id="codigo_produto" value="">
             <!-- 1) Cabeçalho com título, descrição e imagem -->
             <div class="content-wrapper">
               <div class="content-wrapper-header">
@@ -8492,6 +8644,24 @@
        Últimas compras
     </a>
 
+    <a href="#" class="main-header-link" data-subtarget="alteracoesHistoricoTab"
+       data-nav-key="produto:dados:alteracoes-historico"
+       data-nav-parent="produto:dados"
+       data-nav-pos="top"
+       data-nav-label="Histórico de Alterações"
+       data-nav-selector='#produtoTabs .main-header .main-header-link[data-subtarget="alteracoesHistoricoTab"]'>
+       Histórico de Alterações
+    </a>
+
+    <a href="#" class="main-header-link" data-subtarget="desenhoTecnicoTab"
+       data-nav-key="produto:dados:desenho-tecnico"
+       data-nav-parent="produto:dados"
+       data-nav-pos="top"
+       data-nav-label="Desenho técnico"
+       data-nav-selector='#produtoTabs .main-header .main-header-link[data-subtarget="desenhoTecnicoTab"]'>
+       Desenho técnico
+    </a>
+
   </div>
 </div>
 
@@ -8590,6 +8760,66 @@
           <tbody id="ultimasComprasBody"></tbody>
         </table>
         <p id="ultimasComprasVazio" style="color: var(--inactive-color); font-size: 14px; padding: 16px 0;">Nenhuma compra encontrada para este produto.</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Aba: Histórico de Alterações -->
+<div id="alteracoesHistoricoTab" class="sub-content" style="display:none">
+  <div class="content-wrapper">
+    <div class="content-section">
+      <div class="content-section-title">Histórico de Alterações</div>
+      <div id="alteracoesHistoricoWrap">
+        <div id="alteracoesHistoricoLoading" style="display:none; color: var(--inactive-color); font-size: 14px; padding: 16px 0;">
+          Carregando histórico...
+        </div>
+        <div style="overflow-x:auto;">
+          <table id="alteracoesHistoricoTable" class="content-list" style="display:none; width:100%; border-collapse:collapse; font-size:13px; min-width:960px;">
+            <thead>
+              <tr style="border-bottom: 1px solid var(--border-color); text-align:left;">
+                <th style="padding:10px 8px; color: var(--content-title-color);">Data</th>
+                <th style="padding:10px 8px; color: var(--content-title-color);">Antes</th>
+                <th style="padding:10px 8px; color: var(--content-title-color);">Depois</th>
+                <th style="padding:10px 8px; color: var(--content-title-color);">Referência</th>
+                <th style="padding:10px 8px; color: var(--content-title-color);">Anexos</th>
+                <th style="padding:10px 8px; color: var(--content-title-color); width:90px;">Ações</th>
+              </tr>
+            </thead>
+            <tbody id="alteracoesHistoricoBody"></tbody>
+          </table>
+        </div>
+        <p id="alteracoesHistoricoVazio" style="color: var(--inactive-color); font-size: 14px; padding: 16px 0;">Nenhuma alteração registrada para este produto.</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Aba: Desenho técnico -->
+<div id="desenhoTecnicoTab" class="sub-content" style="display:none">
+  <div class="content-wrapper">
+    <div class="content-section">
+      <div class="content-section-title">Desenho técnico</div>
+      <div id="desenhoTecnicoWrap">
+        <div id="desenhoTecnicoLoading" style="display:none; color: var(--inactive-color); font-size: 14px; padding: 16px 0;">
+          Carregando desenhos técnicos...
+        </div>
+        <div style="overflow-x:auto;">
+          <table id="desenhoTecnicoTable" class="content-list" style="display:none; width:100%; border-collapse:collapse; font-size:13px; min-width:820px;">
+            <thead>
+              <tr style="border-bottom: 1px solid var(--border-color); text-align:left;">
+                <th style="padding:10px 8px; color: var(--content-title-color);">Data</th>
+                <th style="padding:10px 8px; color: var(--content-title-color);">Nome do arquivo</th>
+                <th style="padding:10px 8px; color: var(--content-title-color);">Versão</th>
+                <th style="padding:10px 8px; color: var(--content-title-color);">Status</th>
+                <th style="padding:10px 8px; color: var(--content-title-color);">Anexo</th>
+                <th style="padding:10px 8px; color: var(--content-title-color); width:90px;">Ações</th>
+              </tr>
+            </thead>
+            <tbody id="desenhoTecnicoBody"></tbody>
+          </table>
+        </div>
+        <p id="desenhoTecnicoVazio" style="color: var(--inactive-color); font-size: 14px; padding: 16px 0;">Nenhum desenho técnico registrado para este produto.</p>
       </div>
     </div>
   </div>
@@ -10524,6 +10754,9 @@
   <script type="module" src="./requisicoes_omie/dados_colaboradores.js"></script>
   <script src="produtos/produto_foto.js?v=20260430c" defer></script>
   <script src="produtos/produto_anexo.js" defer></script>
+  <script src="produtos/alteracao_produto.js?v=20260630c" defer></script>
+  <script src="produtos/desenho_tecnico.js?v=20260630a" defer></script>
+  <script src="produtos/engenharia_paineis.js?v=20260630a" defer></script>
   <script type="module" src="produtos/Enviar_estrutura.js" defer></script>
   <script type="module" src="kanban/kanban_preparacao.js"></script>
 
@@ -18984,6 +19217,170 @@ function attachDropZone(ul) {
 
 })();
 </script>
+
+<!-- ===== MODAL ALTERAÇÃO DE PRODUTO ===== -->
+<div id="modalAlteracaoProduto" class="modal-overlay">
+  <div class="modal-dialog" style="max-width:640px;">
+    <div class="modal-header">
+      <h2 id="modalAlteracaoProdutoTitulo">Alteração de produto</h2>
+      <button type="button" class="modal-close" id="modalAlteracaoProdutoFechar" aria-label="Fechar">&times;</button>
+    </div>
+    <div class="modal-body">
+      <form id="formAlteracaoProduto">
+        <input type="hidden" id="apAlteracaoId" name="alteracao_id" value="">
+        <div class="form-row full-width">
+          <div class="form-group">
+            <label for="apAntes">Antes</label>
+            <textarea id="apAntes" name="antes" rows="3" placeholder="Descreva a situação anterior"></textarea>
+          </div>
+        </div>
+        <div class="form-row full-width">
+          <div class="form-group">
+            <label for="apDepois">Depois</label>
+            <textarea id="apDepois" name="depois" rows="3" placeholder="Descreva a situação após a alteração"></textarea>
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label for="apReferenciaTipo">Referência</label>
+            <select id="apReferenciaTipo" name="referencia_tipo">
+              <option value="">Selecione...</option>
+              <option value="Lote">Lote</option>
+              <option value="Data">Data</option>
+            </select>
+          </div>
+          <div class="form-group" id="apReferenciaLoteWrap" style="display:none;">
+            <label for="apReferenciaLote">Lote</label>
+            <input type="text" id="apReferenciaLote" name="referencia_lote" placeholder="Número do lote">
+          </div>
+          <div class="form-group" id="apReferenciaDataWrap" style="display:none;">
+            <label for="apReferenciaData">Data</label>
+            <input type="date" id="apReferenciaData" name="referencia_data">
+          </div>
+        </div>
+        <div id="apAnexosAtuaisWrap" style="display:none; margin-bottom:12px; padding:12px; background:#374151; border-radius:8px; font-size:13px;">
+          <div style="font-weight:600; margin-bottom:8px; color:#e5e7eb;">Anexos atuais</div>
+          <div id="apAnexosAtuaisLista" style="display:flex; flex-direction:column; gap:6px;"></div>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label for="apFotoAntes">Foto antes</label>
+            <input type="file" id="apFotoAntes" name="foto_antes" accept="image/*" class="ap-file-input">
+            <div class="ap-file-status" id="apFotoAntesStatus" aria-live="polite"></div>
+          </div>
+          <div class="form-group">
+            <label for="apFotoDepois">Foto depois</label>
+            <input type="file" id="apFotoDepois" name="foto_depois" accept="image/*" class="ap-file-input">
+            <div class="ap-file-status" id="apFotoDepoisStatus" aria-live="polite"></div>
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label for="apVideo">Vídeo</label>
+            <input type="file" id="apVideo" name="video" accept="video/*" class="ap-file-input">
+            <div class="ap-file-status" id="apVideoStatus" aria-live="polite"></div>
+          </div>
+          <div class="form-group">
+            <label for="apArquivo">Arquivo</label>
+            <input type="file" id="apArquivo" name="arquivo" class="ap-file-input">
+            <div class="ap-file-status" id="apArquivoStatus" aria-live="polite"></div>
+          </div>
+        </div>
+        <div class="form-row full-width" style="margin-top:8px;">
+          <button type="submit" class="content-button" id="apBtnRegistrar" style="background:linear-gradient(135deg,#f97316 0%,#ea580c 100%);color:white;width:100%;padding:12px;font-weight:600;">
+            <i class="fa-solid fa-floppy-disk"></i> Registrar
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+<style>
+.ap-file-status {
+  margin-top: 6px;
+  min-height: 22px;
+  font-size: 12px;
+  color: #9ca3af;
+}
+.ap-file-status.has-file {
+  color: #34d399;
+  font-weight: 600;
+}
+.ap-file-status .ap-file-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  background: rgba(52, 211, 153, 0.12);
+  border: 1px solid rgba(52, 211, 153, 0.35);
+  border-radius: 999px;
+}
+.dt-file-status {
+  margin-top: 6px;
+  min-height: 22px;
+  font-size: 12px;
+  color: #9ca3af;
+}
+.dt-file-status.has-file {
+  color: #34d399;
+  font-weight: 600;
+}
+.dt-file-status .dt-file-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  background: rgba(52, 211, 153, 0.12);
+  border: 1px solid rgba(52, 211, 153, 0.35);
+  border-radius: 999px;
+}
+</style>
+
+<!-- ===== MODAL DESENHO TÉCNICO ===== -->
+<div id="modalDesenhoTecnico" class="modal-overlay">
+  <div class="modal-dialog" style="max-width:560px;">
+    <div class="modal-header">
+      <h2 id="modalDesenhoTecnicoTitulo">Desenho técnico</h2>
+      <button type="button" class="modal-close" id="modalDesenhoTecnicoFechar" aria-label="Fechar">&times;</button>
+    </div>
+    <div class="modal-body">
+      <form id="formDesenhoTecnico">
+        <input type="hidden" id="dtDesenhoId" value="">
+        <div class="form-row full-width">
+          <div class="form-group">
+            <label for="dtNomeArquivo">Nome do arquivo <span style="color:#f87171;">*</span></label>
+            <input type="text" id="dtNomeArquivo" name="nome_arquivo" required placeholder="Ex.: Planta baixa motor">
+          </div>
+        </div>
+        <div class="form-row full-width" id="dtSubstituirWrap" style="display:none;">
+          <div class="form-group">
+            <label for="dtSubstituir">Substituir</label>
+            <select id="dtSubstituir" name="substituir_id">
+              <option value="">Novo desenho (V1)</option>
+            </select>
+            <small style="color:#9ca3af;display:block;margin-top:6px;">Se escolher um desenho ativo, ele ficará inativo e a versão sobe automaticamente.</small>
+          </div>
+        </div>
+        <div id="dtAnexoAtualWrap" style="display:none; margin-bottom:12px; padding:12px; background:#374151; border-radius:8px; font-size:13px;">
+          <div style="font-weight:600; margin-bottom:6px; color:#e5e7eb;">Anexo atual</div>
+          <a id="dtAnexoAtualLink" href="#" target="_blank" rel="noopener noreferrer" style="color:#38bdf8;text-decoration:underline;">Ver anexo</a>
+        </div>
+        <div class="form-row full-width">
+          <div class="form-group">
+            <label for="dtAnexo">Anexo <span id="dtAnexoObrigatorio" style="color:#f87171;">*</span></label>
+            <input type="file" id="dtAnexo" name="anexo">
+            <div class="dt-file-status" id="dtAnexoStatus" aria-live="polite"></div>
+          </div>
+        </div>
+        <div class="form-row full-width" style="margin-top:8px;">
+          <button type="submit" class="content-button" id="dtBtnRegistrar" style="background:linear-gradient(135deg,#6366f1 0%,#4f46e5 100%);color:white;width:100%;padding:12px;font-weight:600;">
+            <i class="fa-solid fa-floppy-disk"></i> Registrar
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
 
 <!-- Modal Engenharia: Verificações / Anexos / Editar Análise -->
 <div id="ceModalOverlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:99999;overflow-y:auto;padding:32px 16px;">

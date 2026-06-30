@@ -4404,7 +4404,8 @@ router.patch('/at/fechamento/:id_at', async (req, res) => {
 
 // POST /solicitacoes/vipp — cria entrada de envio SAC a partir de postagem VIPP (sem upload de arquivo)
 router.post('/solicitacoes/vipp', async (req, res) => {
-  const usuario   = String(req.body?.usuario   || '').trim();
+  const usuario   = String(req.body?.usuario || '').trim()
+    || String(req.session?.user?.username || req.session?.user?.fullName || req.session?.user?.nome || req.session?.user?.login || '').trim();
   const observacao = String(req.body?.observacao || '').trim();
   const idVipp    = String(req.body?.id_vipp    || '').trim() || null;
   const conteudo  = req.body?.conteudo || null; // JSON string de itens [{ conteudo, quantidade }]
@@ -4853,6 +4854,38 @@ router.patch('/solicitacoes/:id/status', async (req, res) => {
   } catch (err) {
     console.error('[SAC] erro ao atualizar status:', err);
     return res.status(500).json({ ok: false, error: 'Erro ao atualizar status.' });
+  }
+});
+
+// Endpoint para editar identificação (rastreabilidade)
+router.patch('/solicitacoes/:id/identificacao', async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id <= 0) {
+    return res.status(400).json({ ok: false, error: 'ID inválido.' });
+  }
+
+  const identificacao = String(req.body?.identificacao || '').trim();
+  if (!identificacao) {
+    return res.status(400).json({ ok: false, error: 'Identificação é obrigatória.' });
+  }
+
+  try {
+    const r = await pool.query(
+      `UPDATE envios.solicitacoes
+          SET identificacao = $1
+        WHERE id = $2
+      RETURNING id, identificacao`,
+      [identificacao, id]
+    );
+
+    if (!r.rowCount) {
+      return res.status(404).json({ ok: false, error: 'Registro não encontrado.' });
+    }
+
+    return res.json({ ok: true, identificacao: r.rows[0].identificacao });
+  } catch (err) {
+    console.error('[SAC] erro ao atualizar identificação:', err);
+    return res.status(500).json({ ok: false, error: 'Erro ao atualizar identificação.' });
   }
 });
 
