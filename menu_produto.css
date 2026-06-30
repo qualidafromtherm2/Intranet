@@ -5523,6 +5523,35 @@ ul#comprasList li ,
   background: rgba(127, 29, 29, 0.18) !important;
 }
 
+/* OP em parada — borda vermelha */
+.kanban-op-card.kanban-op-card-parada {
+  border: 2px solid #ef4444 !important;
+  box-shadow: 0 0 0 1px rgba(239, 68, 68, 0.35);
+  background: rgba(239, 68, 68, 0.1) !important;
+}
+
+.kanban-op-card-parada-badge {
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(239, 68, 68, 0.18);
+  border: 1px solid rgba(239, 68, 68, 0.55);
+  border-radius: 8px;
+  color: #f87171;
+  font-size: 13px;
+}
+
+/* OP aguardando liberação via RI — borda amarela */
+.kanban-op-card.kanban-op-card-ri-bloqueado {
+  border: 2px solid #f59e0b !important;
+  box-shadow: 0 0 0 1px rgba(245, 158, 11, 0.35);
+  background: rgba(245, 158, 11, 0.1) !important;
+  cursor: not-allowed;
+}
+
 .kanban-prog-pedido-badge {
   display: inline-flex;
   align-items: center;

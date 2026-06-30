@@ -1263,4 +1263,119 @@ router.post('/:id/liberar', requireAuth, express.json(), async (req, res) => {
   }
 });
 
+/** Registra RI_Check no posto Montagem hermetica ao imprimir OP (Programado → Montagem hermetica). */
+async function registrarRiCheckImpressaoOp({
+  opProducaoId = 0,
+  opIappId = 0,
+  numeroOp = '',
+  codigo = '',
+  codigoProduto = null,
+  descricao = '',
+  usuario = '',
+  statusRi = 'Montagem hermetica',
+}) {
+  await garantirSchemaRi();
+  const opRefId = Number(opProducaoId) || Number(opIappId) || 0;
+  if (!opRefId) return null;
+
+  const opProducaoIdGravar = opProducaoId > 0 ? opProducaoId : null;
+  const opIappIdGravar = opIappId > 0 ? opIappId : opRefId;
+  const kanbanProgId = await buscarKanbanProgId(opRefId, numeroOp);
+  const codigoProdutoGravar = codigoProdutoOmieParaGravar(codigoProduto);
+  const statusFinal = String(statusRi || 'Montagem hermetica').trim();
+  const opWhere = `(op_producao_id = $1 OR op_iapp_id = $1)`;
+
+  const { rows: existentes } = await dbQuery(
+    `SELECT id FROM qualidade."RI_Check"
+      WHERE ${opWhere}
+        AND LOWER(TRIM(COALESCE(status, ''))) = LOWER(TRIM($2))
+      ORDER BY id DESC LIMIT 1`,
+    [opRefId, statusFinal]
+  );
+
+  if (existentes.length) {
+    await dbQuery(
+      `UPDATE qualidade."RI_Check"
+          SET codigo_produto = COALESCE($2, codigo_produto),
+              codigo = COALESCE(NULLIF($3, ''), codigo),
+              descricao = COALESCE(NULLIF($4, ''), descricao),
+              id_kanban_programacao = COALESCE($5, id_kanban_programacao),
+              op_producao_id = COALESCE($6, op_producao_id),
+              op_iapp_id = COALESCE($7, op_iapp_id),
+              usuario = $8,
+              updated_at = NOW()
+        WHERE id = $1`,
+      [
+        existentes[0].id,
+        codigoProdutoGravar,
+        codigo || null,
+        descricao || null,
+        kanbanProgId,
+        opProducaoIdGravar,
+        opIappIdGravar,
+        usuario,
+      ]
+    );
+    return { id: existentes[0].id, updated: true };
+  }
+
+  const { rows: emAndamento } = await dbQuery(
+    `SELECT id FROM qualidade."RI_Check"
+      WHERE ${opWhere}
+        AND COALESCE(status, '') NOT IN (
+          'Montagem hermetica', 'Montagem eletrica', 'Liberado',
+          'Teste', 'Inspeção final', 'Teste OK', 'Finalizado'
+        )
+      ORDER BY id DESC LIMIT 1`,
+    [opRefId]
+  );
+
+  if (emAndamento.length) {
+    await dbQuery(
+      `UPDATE qualidade."RI_Check"
+          SET status = $2,
+              codigo_produto = COALESCE($3, codigo_produto),
+              codigo = COALESCE(NULLIF($4, ''), codigo),
+              descricao = COALESCE(NULLIF($5, ''), descricao),
+              id_kanban_programacao = COALESCE($6, id_kanban_programacao),
+              op_producao_id = COALESCE($7, op_producao_id),
+              op_iapp_id = COALESCE($8, op_iapp_id),
+              usuario = $9,
+              updated_at = NOW()
+        WHERE id = $1`,
+      [
+        emAndamento[0].id,
+        statusFinal,
+        codigoProdutoGravar,
+        codigo || null,
+        descricao || null,
+        kanbanProgId,
+        opProducaoIdGravar,
+        opIappIdGravar,
+        usuario,
+      ]
+    );
+    return { id: emAndamento[0].id, updated: true };
+  }
+
+  const ins = await dbQuery(
+    `INSERT INTO qualidade."RI_Check"
+       (id_kanban_programacao, codigo_produto, codigo, descricao, op_iapp_id, op_producao_id, usuario, status)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+     RETURNING id`,
+    [
+      kanbanProgId,
+      codigoProdutoGravar,
+      codigo || null,
+      descricao || null,
+      opIappIdGravar,
+      opProducaoIdGravar,
+      usuario,
+      statusFinal,
+    ]
+  );
+  return { id: ins.rows[0]?.id, created: true };
+}
+
+router.registrarRiCheckImpressaoOp = registrarRiCheckImpressaoOp;
 module.exports = router;

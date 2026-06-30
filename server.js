@@ -12,6 +12,7 @@ if (IS_CHAT_SERVICE) {
 require('./utils/supabase');
 const { uploadPublicFile, removePublicFiles } = require('./utils/storage');
 const { registrarControleOperacaoImpressaoOp } = require('./utils/controleOperacoes');
+const { registrarRiCheckImpressaoOp } = require('./routes/qualidadeRiCheck');
 const { injectStoragePublicUrls, getStoragePublicBaseUrl, ASSETS, agenteExeUrl } = require('./utils/storageUrls');
 const OMIE_WEBHOOK_TOKEN = process.env.OMIE_WEBHOOK_TOKEN || null; // se NULL, não exige token
 // Em server.js (topo do arquivo)
@@ -13032,7 +13033,7 @@ app.post('/api/etiquetas/recebimento/imprimir-modal', express.json(), async (req
 
 // POST /api/etiquetas/iapp-op/imprimir
 // Body: { items: [{ os_id?, op_producao_id?, lote, codigo_produto, descricao_produto? }], destino_agente?, impressora?, usuario? }
-// lote = número da OP. Atualiza kanban para Montagem hermetica.
+// lote = número da OP. Atualiza kanban para Montagem hermetica e registra RI_Check no mesmo posto.
 app.post('/api/etiquetas/iapp-op/imprimir', express.json(), async (req, res) => {
   try {
     const items = Array.isArray(req.body?.items) ? req.body.items : [];
@@ -13194,6 +13195,23 @@ app.post('/api/etiquetas/iapp-op/imprimir', express.json(), async (req, res) => 
         });
       } catch (ctrlErr) {
         console.error('[controle_operacoes] Falha ao registrar impressão OP:', ctrlErr.message);
+      }
+
+      if (opProducaoId > 0 || opIappId > 0) {
+        try {
+          await registrarRiCheckImpressaoOp({
+            opProducaoId,
+            opIappId,
+            numeroOp: loteRaw,
+            codigo,
+            codigoProduto: idOmie ? Number(idOmie) : null,
+            descricao,
+            usuario,
+            statusRi: 'Montagem hermetica',
+          });
+        } catch (riErr) {
+          console.error('[ri_check] Falha ao registrar RI Montagem hermetica na impressão OP:', riErr.message);
+        }
       }
 
       if (osId > 0) osAtualizadas.push(osId);
@@ -19280,7 +19298,7 @@ app.post('/api/logistica/separacao/enviar', express.json(), async (req, res) => 
     const id_user   = req.session?.user?.id;
     const nome_user = req.session?.user?.username || req.session?.user?.nome || 'desconhecido';
     if (!id_user) return res.status(401).json({ ok: false, error: 'Não autenticado.' });
-    const { solicitado_para, motivo, data_prevista, horario, observacao, item_ids, forcar_novo_sep, os_num, id_vipp, conteudo, origem_vipp, local_estoque, local_estoque_nome } = req.body || {};
+    const { solicitado_para, motivo, data_prevista, horario, observacao, item_ids, forcar_novo_sep, os_num, id_vipp, conteudo, origem_vipp, local_estoque, local_estoque_nome, metodo_envio } = req.body || {};
     // Quando item_ids for fornecido (ex: VIPP), processa apenas esses itens do carrinho
     const filtroIds = Array.isArray(item_ids) && item_ids.length > 0
       ? item_ids.map(id => parseInt(id, 10)).filter(id => !isNaN(id))
@@ -19474,18 +19492,20 @@ app.post('/api/logistica/separacao/enviar', express.json(), async (req, res) => 
     await client.query('COMMIT');
     console.log(`[Separação] Pedido ${nSolic} enviado por ${nome_user} (${itens.length} itens)`);
 
-    // Se veio do VIPP, registra em envios.solicitacoes com id_vipp e número SEP
-    if (id_vipp) {
+    // Se veio do fluxo de envio (VIPP ou manual), registra em envios.solicitacoes
+    const metodoEnvio = String(metodo_envio || '').trim() || null;
+    if (id_vipp || metodoEnvio) {
       try {
         await pool.query(`ALTER TABLE envios.solicitacoes ADD COLUMN IF NOT EXISTS id_vipp TEXT`);
+        await pool.query(`ALTER TABLE envios.solicitacoes ADD COLUMN IF NOT EXISTS metodo_envio TEXT`);
         await pool.query(
-          `INSERT INTO envios.solicitacoes (usuario, observacao, status, numero_sep, id_vipp, anexos, conferido, conteudo)
-           VALUES ($1, $2, 'Pendente', $3, $4, '{}', false, $5)`,
-          [nome_user, os_num || null, nSolic, String(id_vipp), conteudo || null]
+          `INSERT INTO envios.solicitacoes (usuario, observacao, status, numero_sep, id_vipp, anexos, conferido, conteudo, metodo_envio)
+           VALUES ($1, $2, 'Pendente', $3, $4, '{}', false, $5, $6)`,
+          [nome_user, os_num || observacao || null, nSolic, id_vipp ? String(id_vipp) : null, conteudo || null, metodoEnvio]
         );
-        console.log(`[Separação/VIPP] Registro em envios.solicitacoes: SEP=${nSolic} VIPP=${id_vipp}`);
+        console.log(`[Separação/Envio] Registro em envios.solicitacoes: SEP=${nSolic} VIPP=${id_vipp || '-'} metodo=${metodoEnvio || '-'}`);
       } catch (e) {
-        console.warn('[Separação/VIPP] Falha ao registrar em envios.solicitacoes:', e.message);
+        console.warn('[Separação/Envio] Falha ao registrar em envios.solicitacoes:', e.message);
       }
     }
 

@@ -3010,14 +3010,7 @@
                   <i class="fa-solid fa-paper-plane" style="color:#22c55e;"></i>
                   Solicitação de envio (SAC)
                 </div>
-                <div style="color:var(--inactive-color);font-size:13px;">Clique em <strong style="color:#e5e7eb;">VIPP</strong> para criar a postagem e gerar a etiqueta automaticamente.</div>
-                <div style="margin-left:auto;display:flex;align-items:center;gap:8px;">
-                  <button id="sacVippBtn" type="button" class="content-button" title="Criar postagem VIPP — gera etiqueta e declaração"
-                    style="display:inline-flex;align-items:center;gap:8px;background:linear-gradient(135deg,#111827 0%,#1f2937 100%);color:white;border:1px solid #374151;">
-                    <img src="https://vipp.visualset.com.br/vipp/img/logo-visualset5.png" alt="VIPP" style="width:18px;height:18px;object-fit:contain;display:block;">
-                    <span>Criar Postagem VIPP</span>
-                  </button>
-                </div>
+                <div style="color:var(--inactive-color);font-size:13px;">Clique em <strong style="color:#e5e7eb;">Solicitar envio</strong> para registrar um novo envio e gerar a etiqueta automaticamente.</div>
               </div>
 
               <div class="content-section" style="margin-top:18px;padding:0;">
@@ -3033,6 +3026,11 @@
                     <button id="sacRelatorioBtn" class="content-button" type="button" style="display:flex;align-items:center;gap:6px;background:linear-gradient(135deg,#0ea5e9 0%,#0284c7 100%);color:white;">
                       <i class="fa-solid fa-chart-bar"></i>
                       <span>Relatório</span>
+                    </button>
+                    <button id="sacVippBtn" type="button" class="content-button" title="Solicitar envio — gera etiqueta e declaração"
+                      style="display:inline-flex;align-items:center;gap:6px;background:linear-gradient(135deg,#111827 0%,#1f2937 100%);color:white;border:1px solid #374151;">
+                      <i class="fa-solid fa-truck-fast"></i>
+                      <span>Solicitar envio</span>
                     </button>
                 </div>
 
@@ -4138,7 +4136,7 @@
           </div>
         </div>
 
-        <!-- ── Modal VIPP — Criar Postagem ──────────────────────────────────────── -->
+        <!-- ── Modal Formulário de envio ──────────────────────────────────────── -->
         <div id="osVippModal" class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="osVippModalTitle"
           style="position:fixed;inset:0;z-index:10055;display:none;align-items:center;justify-content:center;background:rgba(2,6,23,.78);backdrop-filter:blur(4px);">
           <div id="osVippModalCard"
@@ -4146,9 +4144,9 @@
             <!-- Cabeçalho -->
             <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:14px 18px;border-bottom:1px solid rgba(255,255,255,.08);flex-shrink:0;">
               <div style="display:flex;align-items:center;gap:10px;">
-                <img src="https://vipp.visualset.com.br/vipp/img/logo-visualset5.png" alt="VIPP" style="width:26px;height:26px;object-fit:contain;">
-                <strong id="osVippModalTitle" style="font-size:15px;color:#e5e7eb;">VIPP — Criar Postagem</strong>
-                <span style="font-size:11px;color:#94a3b8;background:rgba(148,163,184,.1);border:1px solid rgba(148,163,184,.2);padding:2px 8px;border-radius:999px;">Correios</span>
+                <i class="fa-solid fa-clipboard-list" style="font-size:22px;color:#7dd3fc;"></i>
+                <strong id="osVippModalTitle" style="font-size:15px;color:#e5e7eb;">Formulario de envio</strong>
+                <span id="vippModalCorreiosBadge" style="font-size:11px;color:#94a3b8;background:rgba(148,163,184,.1);border:1px solid rgba(148,163,184,.2);padding:2px 8px;border-radius:999px;">Correios</span>
               </div>
               <button id="osVippModalClose" type="button"
                 style="display:inline-flex;align-items:center;justify-content:center;width:34px;height:34px;border-radius:10px;border:1px solid #374151;background:rgba(255,255,255,.04);color:#e5e7eb;cursor:pointer;">
@@ -4157,6 +4155,22 @@
             </div>
             <!-- Corpo rolável -->
             <div style="overflow-y:auto;padding:18px 18px 4px;display:flex;flex-direction:column;gap:18px;">
+
+              <!-- Seção: Método de envio -->
+              <div>
+                <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;">
+                  <i class="fa-solid fa-route" style="font-size:13px;color:#fbbf24;"></i>
+                  <span style="font-size:13px;font-weight:700;color:#fbbf24;letter-spacing:.04em;text-transform:uppercase;">Método de envio</span>
+                </div>
+                <div class="form-field" style="margin:0;max-width:420px;">
+                  <label for="vippMetodoEnvio">Como será enviado? *</label>
+                  <select id="vippMetodoEnvio" style="width:100%;">
+                    <option value="Envio via Correios" selected>Envio via Correios</option>
+                    <option value="Envio via Disktenha">Envio via Disktenha</option>
+                    <option value="Envio via transportadora">Envio via transportadora</option>
+                  </select>
+                </div>
+              </div>
 
               <!-- Seção: Destinatário -->
               <div>
@@ -4219,21 +4233,25 @@
 
               <!-- Seção: Serviço -->
               <div>
-                <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;">
-                  <i class="fa-solid fa-truck-fast" style="font-size:13px;color:#a78bfa;"></i>
-                  <span style="font-size:13px;font-weight:700;color:#a78bfa;letter-spacing:.04em;text-transform:uppercase;">Serviço de Envio</span>
+                <div id="vippCorreiosServicoBlock">
+                  <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;">
+                    <i class="fa-solid fa-truck-fast" style="font-size:13px;color:#a78bfa;"></i>
+                    <span style="font-size:13px;font-weight:700;color:#a78bfa;letter-spacing:.04em;text-transform:uppercase;">Serviço de Envio</span>
+                  </div>
+                  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px;margin-bottom:10px;">
+                    <div class="form-field" style="margin:0;">
+                      <label for="vippServico">Tipo de serviço (ECT)</label>
+                      <select id="vippServico" style="width:100%;">
+                        <option value="04669">PAC (04669)</option>
+                        <option value="04162" selected>SEDEX (04162)</option>
+                        <option value="04227">SEDEX 12 (04227)</option>
+                        <option value="04804">SEDEX 10 (04804)</option>
+                        <option value="04782">SEDEX Hoje (04782)</option>
+                      </select>
+                    </div>
+                  </div>
                 </div>
                 <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px;">
-                  <div class="form-field" style="margin:0;">
-                    <label for="vippServico">Tipo de serviço (ECT)</label>
-                    <select id="vippServico" style="width:100%;">
-                      <option value="04669">PAC (04669)</option>
-                      <option value="04162" selected>SEDEX (04162)</option>
-                      <option value="04227">SEDEX 12 (04227)</option>
-                      <option value="04804">SEDEX 10 (04804)</option>
-                      <option value="04782">SEDEX Hoje (04782)</option>
-                    </select>
-                  </div>
                   <div class="form-field" style="margin:0;">
                     <label for="vippAdicionais">Aos Cuidados</label>
                     <input id="vippAdicionais" type="text" placeholder="Ex: Dep. Técnico / A/C João" style="width:100%;" />
@@ -4382,7 +4400,7 @@
                 <button id="vippModalEnviarBtn" type="button" class="content-button"
                   style="display:flex;align-items:center;gap:8px;background:linear-gradient(135deg,#111827 0%,#1f2937 100%);color:white;border:1px solid #4b5563;">
                   <img src="https://vipp.visualset.com.br/vipp/img/logo-visualset5.png" alt="" style="width:16px;height:16px;object-fit:contain;">
-                  <span>Criar Postagem VIPP</span>
+                  <span>Criar Postagem Correios</span>
                 </button>
               </div>
             </div>
@@ -5780,6 +5798,12 @@
             .envio-card-id{display:flex;align-items:center;gap:8px;color:#f8fafc;font-weight:800;font-size:15px;}
             .envio-card-sep{display:inline-flex;align-items:center;gap:8px;padding:6px 12px;border-radius:999px;background:linear-gradient(135deg,rgba(56,189,248,.18),rgba(37,99,235,.2));border:1px solid rgba(96,165,250,.28);color:#dbeafe;font-weight:900;font-size:15px;letter-spacing:.02em;white-space:nowrap;}
             .envio-card-sep small{font-size:10px;font-weight:800;letter-spacing:.08em;color:#93c5fd;text-transform:uppercase;}
+            .envio-card-sep-block{display:flex;flex-direction:column;align-items:flex-end;gap:10px;}
+            .envio-card-metodo{display:inline-flex;align-items:center;gap:10px;color:#f8fafc;font-weight:900;font-size:18px;line-height:1.15;letter-spacing:.01em;text-align:right;}
+            .envio-card-metodo-icon{font-size:24px;color:#fbbf24;flex-shrink:0;}
+            .envio-card-metodo-icon-correios{width:28px;height:28px;object-fit:contain;flex-shrink:0;}
+            .envio-card-metodo-icon-truck{color:#38bdf8;}
+            .envio-card-metodo-icon-moto{color:#fb923c;}
             .envio-card-meta{color:#94a3b8;font-size:12px;line-height:1.35;}
             .envio-card-label{color:#64748b;font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px;}
             .envio-card-text{color:#e5e7eb;font-size:13px;line-height:1.35;word-break:break-word;}
@@ -10252,15 +10276,8 @@
               </div>
             </div>
 
-            <div id="riRegistroKanbanWrap" style="max-width:520px;">
-              <div style="display:flex;align-items:center;gap:8px;padding:10px 14px;background:#312e81;border-radius:10px 10px 0 0;border:1px solid #4338ca;border-bottom:none;">
-                <span style="width:10px;height:10px;border-radius:50%;background:#6366f1;display:inline-block;flex-shrink:0;"></span>
-                <span style="font-size:12px;font-weight:700;color:#a5b4fc;text-transform:uppercase;letter-spacing:.5px;">Aguardando RI no posto</span>
-                <span id="riRegistroCnt" style="margin-left:auto;font-size:11px;background:#1e1b4b;color:#c7d2fe;padding:2px 9px;border-radius:10px;font-weight:600;">0</span>
-              </div>
-              <div id="riRegistroKanbanCol" style="min-height:220px;background:rgba(99,102,241,.04);border:1px solid #4338ca;border-top:none;border-radius:0 0 10px 10px;padding:10px;display:flex;flex-direction:column;gap:10px;">
-                <div style="text-align:center;padding:24px 0;color:var(--inactive-color);font-size:12px;">Clique em "Atualizar" para carregar.</div>
-              </div>
+            <div id="riRegistroKanban" style="display:flex;gap:16px;align-items:flex-start;overflow-x:auto;padding:4px 0 16px 0;">
+              <div style="text-align:center;padding:24px 0;color:var(--inactive-color);font-size:12px;width:100%;">Clique em "Atualizar" para carregar.</div>
             </div>
           </div>
         </div>

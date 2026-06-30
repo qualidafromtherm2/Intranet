@@ -3680,6 +3680,9 @@ async function ensureSchema() {
       ADD COLUMN IF NOT EXISTS finalizado_em TIMESTAMPTZ;
 
     ALTER TABLE envios.solicitacoes
+      ADD COLUMN IF NOT EXISTS metodo_envio TEXT;
+
+    ALTER TABLE envios.solicitacoes
       ALTER COLUMN status SET DEFAULT 'Pendente';
 
     CREATE SCHEMA IF NOT EXISTS sac;
@@ -4406,17 +4409,20 @@ router.post('/solicitacoes/vipp', async (req, res) => {
   const idVipp    = String(req.body?.id_vipp    || '').trim() || null;
   const conteudo  = req.body?.conteudo || null; // JSON string de itens [{ conteudo, quantidade }]
   const numeroSep = String(req.body?.numero_sep || '').trim() || null;
+  const metodoEnvio = String(req.body?.metodo_envio || '').trim() || null;
 
   if (!usuario) return res.status(400).json({ ok: false, error: 'Usuário é obrigatório.' });
-  if (!idVipp && !observacao) return res.status(400).json({ ok: false, error: 'id_vipp ou observação obrigatório.' });
+  if (!idVipp && !observacao && !metodoEnvio) {
+    return res.status(400).json({ ok: false, error: 'id_vipp, observação ou método de envio obrigatório.' });
+  }
 
   try {
     const result = await pool.query(
       `INSERT INTO envios.solicitacoes
-         (usuario, observacao, numero_sep, status, anexos, conferido, id_vipp, conteudo)
-       VALUES ($1, $2, $3, 'Pendente', '{}', false, $4, $5)
-       RETURNING id, created_at, status, id_vipp, conteudo, observacao`,
-      [usuario, observacao || null, numeroSep, idVipp, conteudo ? String(conteudo) : null]
+         (usuario, observacao, numero_sep, status, anexos, conferido, id_vipp, conteudo, metodo_envio)
+       VALUES ($1, $2, $3, 'Pendente', '{}', false, $4, $5, $6)
+       RETURNING id, created_at, status, id_vipp, conteudo, observacao, metodo_envio`,
+      [usuario, observacao || null, numeroSep, idVipp, conteudo ? String(conteudo) : null, metodoEnvio]
     );
     const row = result.rows[0];
     return res.json({ ok: true, id: row.id, created_at: row.created_at, status: row.status, id_vipp: row.id_vipp });
@@ -4550,9 +4556,12 @@ router.get('/solicitacoes', async (req, res) => {
     const conditions = [];
     const params = [];
 
-    // Fila Envio de mercadoria: apenas rastreio_status Validada ou Processamento Vipp
+    // Fila Envio de mercadoria: Correios (VIPP) ou envios manuais (Disktenha / transportadora)
     if (filaLogistica) {
-      conditions.push("COALESCE(rastreio_status, '') IN ('Valida', 'Processamento Vipp')");
+      conditions.push(`(
+        COALESCE(rastreio_status, '') IN ('Valida', 'Processamento Vipp')
+        OR COALESCE(metodo_envio, '') IN ('Envio via Disktenha', 'Envio via transportadora')
+      )`);
       conditions.push("COALESCE(status, '') NOT IN ('Excluído', 'Enviado', 'Finalizado')");
     } else if (hideDone) {
       // Filtro por status (oculta Enviado, Finalizado e Excluído)
@@ -4577,7 +4586,7 @@ router.get('/solicitacoes', async (req, res) => {
     const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 
     const r = await pool.query(
-      `SELECT id, created_at, usuario, observacao, numero_sep, status, conferido, etiqueta_url, declaracao_url, identificacao, conteudo, rastreio_status, rastreio_quando, finalizado_em, id_vipp
+      `SELECT id, created_at, usuario, observacao, numero_sep, status, conferido, etiqueta_url, declaracao_url, identificacao, conteudo, rastreio_status, rastreio_quando, finalizado_em, id_vipp, metodo_envio
          FROM envios.solicitacoes
         ${whereClause}
         ORDER BY id DESC

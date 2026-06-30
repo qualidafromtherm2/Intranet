@@ -12735,8 +12735,25 @@ const RASTREIO_STATUS_FILA_ENVIO = new Set(['Valida', 'Processamento Vipp']);
 function filtrarEnvioMercadoria(row) {
   const statusRaw = normalizarTextoEnvioMercadoria(row?.status);
   if (statusRaw === 'excluido' || statusRaw === 'enviado' || statusRaw === 'finalizado') return false;
+  const metodo = String(row?.metodo_envio || '').trim();
+  if (metodo === 'Envio via Disktenha' || metodo === 'Envio via transportadora') return true;
   const rastreioStatus = row?.rastreio_status ? String(row.rastreio_status).trim() : '';
   return RASTREIO_STATUS_FILA_ENVIO.has(rastreioStatus);
+}
+
+function renderMetodoEnvioMercadoriaHtml(metodoEnvioRaw, idVipp) {
+  const metodo = String(metodoEnvioRaw || (idVipp ? 'Envio via Correios' : '')).trim() || 'Envio via Correios';
+  let iconHtml = '';
+  if (metodo === 'Envio via Correios') {
+    iconHtml = '<img src="https://vipp.visualset.com.br/vipp/img/logo-visualset5.png" alt="" class="envio-card-metodo-icon-correios">';
+  } else if (metodo === 'Envio via Disktenha') {
+    iconHtml = '<i class="fa-solid fa-motorcycle envio-card-metodo-icon envio-card-metodo-icon-moto"></i>';
+  } else if (metodo === 'Envio via transportadora') {
+    iconHtml = '<i class="fa-solid fa-truck envio-card-metodo-icon envio-card-metodo-icon-truck"></i>';
+  } else {
+    iconHtml = '<i class="fa-solid fa-paper-plane envio-card-metodo-icon"></i>';
+  }
+  return `<div class="envio-card-metodo">${iconHtml}<span>${escapeAtHtml(metodo)}</span></div>`;
 }
 
 function montarConteudoEnvioMercadoria(conteudoRaw) {
@@ -12788,12 +12805,20 @@ function renderEnvioMercadoriaCard(r) {
   // Correios tracking só quando não há id_vipp (VIPP é a fonte de verdade nesse caso)
   const dataRastreio = (!r.id_vipp && !rastStatusDisplay && isRastreio && !isFinalizado) ? identClean : '';
   const rastText = [rastStatusDisplay, rastQuandoDisplay].filter(Boolean).join(' | ');
-  const temVippPendente = !!(r.id_vipp && !etiqueta && !temIdentificacao);
-  const buttons = (etiqueta || temIdentificacao)
-    ? `<button class="content-button btn-envio-imprimir" data-envio-id="${escapeAtHtml(String(r.id))}" data-identificacao="${escapeAtHtml(identRaw)}" style="padding:8px 10px;font-size:12px;display:inline-flex;align-items:center;gap:6px;"><i class="fa-solid fa-print"></i><span>Imprimir</span></button>`
-    : temVippPendente
-      ? `<button class="content-button btn-envio-gerar-etiqueta" data-envio-id="${escapeAtHtml(String(r.id))}" data-n-solic="${escapeAtHtml(r.numero_sep || '')}" style="padding:8px 10px;font-size:12px;display:inline-flex;align-items:center;gap:6px;background:#1d4ed8;color:#dbeafe;border:none;border-radius:8px;cursor:pointer;font-weight:700;"><i class="fa-solid fa-barcode"></i><span>Gerar etiqueta</span></button>`
-      : '';
+  const metodoEnvio = String(r.metodo_envio || '').trim();
+  const isCorreios = !metodoEnvio || metodoEnvio === 'Envio via Correios';
+  const isEnvioManual = metodoEnvio === 'Envio via Disktenha' || metodoEnvio === 'Envio via transportadora';
+  const temVippPendente = isCorreios && !!(r.id_vipp && !etiqueta && !temIdentificacao);
+  const podeMarcarEnviado = isEnvioManual && !['Enviado', 'Finalizado'].includes(status);
+  const metodoHtml = renderMetodoEnvioMercadoriaHtml(metodoEnvio, r.id_vipp);
+  let buttons = '';
+  if (etiqueta || temIdentificacao) {
+    buttons = `<button class="content-button btn-envio-imprimir" data-envio-id="${escapeAtHtml(String(r.id))}" data-identificacao="${escapeAtHtml(identRaw)}" style="padding:8px 10px;font-size:12px;display:inline-flex;align-items:center;gap:6px;"><i class="fa-solid fa-print"></i><span>Imprimir</span></button>`;
+  } else if (temVippPendente) {
+    buttons = `<button class="content-button btn-envio-gerar-etiqueta" data-envio-id="${escapeAtHtml(String(r.id))}" data-n-solic="${escapeAtHtml(r.numero_sep || '')}" style="padding:8px 10px;font-size:12px;display:inline-flex;align-items:center;gap:6px;background:#1d4ed8;color:#dbeafe;border:none;border-radius:8px;cursor:pointer;font-weight:700;"><i class="fa-solid fa-barcode"></i><span>Gerar etiqueta</span></button>`;
+  } else if (podeMarcarEnviado) {
+    buttons = `<button class="content-button btn-envio-marcar-enviado" data-envio-id="${escapeAtHtml(String(r.id))}" style="padding:8px 10px;font-size:12px;display:inline-flex;align-items:center;gap:6px;background:#15803d;color:#dcfce7;border:none;border-radius:8px;cursor:pointer;font-weight:700;"><i class="fa-solid fa-circle-check"></i><span>Enviado</span></button>`;
+  }
 
   const statusToken = getStatusTokenEnvioMercadoria(statusRaw);
   const statusClasse = `envio-card-status-${statusToken}`;
@@ -12804,7 +12829,10 @@ function renderEnvioMercadoriaCard(r) {
       <div class="envio-card-rastreio">
         <div class="envio-card-heading">
           <div class="envio-card-id"><i class="fa-solid fa-box-open" style="color:#38bdf8;"></i> Envio #${escapeAtHtml(r.id || '-')}</div>
-          <div class="envio-card-sep"><small>SEP</small><span>${numeroSep}</span></div>
+          <div class="envio-card-sep-block">
+            <div class="envio-card-sep"><small>SEP</small><span>${numeroSep}</span></div>
+            ${metodoHtml}
+          </div>
         </div>
         <div class="envio-card-meta">${escapeAtHtml(dataFmt)}<br>Solicitado por <strong style="color:#e5e7eb;">${usuario}</strong></div>
         <div>
@@ -12826,7 +12854,7 @@ function renderEnvioMercadoriaCard(r) {
       </div>
       <div class="envio-card-actions">
         <div class="envio-card-label">Ações</div>
-        ${buttons || (temVippPendente ? '<div class="envio-card-text">Etiqueta ainda não gerada — clique em Gerar etiqueta.</div>' : '<div class="envio-card-text">Sem anexos.</div>')}
+        ${buttons || (temVippPendente ? '<div class="envio-card-text">Etiqueta ainda não gerada — clique em Gerar etiqueta.</div>' : podeMarcarEnviado ? '<div class="envio-card-text">Confirme o envio clicando em Enviado.</div>' : '<div class="envio-card-text">Sem anexos.</div>')}
       </div>
     </article>`;
 }
@@ -20115,6 +20143,27 @@ function setupEnvioPrintButtons(container) {
   if (!container) return;
   _envioCarregarPref();
   container.addEventListener('click', async (ev) => {
+    const btnMarcarEnviado = ev.target.closest('.btn-envio-marcar-enviado');
+    if (btnMarcarEnviado && !btnMarcarEnviado.disabled) {
+      ev.preventDefault();
+      const envioId = btnMarcarEnviado.getAttribute('data-envio-id');
+      if (!envioId) return;
+      btnMarcarEnviado.disabled = true;
+      const origHtmlMarcar = btnMarcarEnviado.innerHTML;
+      btnMarcarEnviado.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i><span>Salvando...</span>';
+      try {
+        await _envioMarcarComoEnviado(envioId);
+        if (typeof carregarSacSolicitacoes === 'function' && envioMercadoriaTabelaBodyPane) {
+          await carregarSacSolicitacoes(envioMercadoriaTabelaBodyPane, { filaLogistica: true });
+        }
+      } catch (err) {
+        alert('Erro ao marcar como Enviado: ' + (err.message || err));
+        btnMarcarEnviado.disabled = false;
+        btnMarcarEnviado.innerHTML = origHtmlMarcar;
+      }
+      return;
+    }
+
     const btnGerar = ev.target.closest('.btn-envio-gerar-etiqueta');
     if (btnGerar && !btnGerar.disabled) {
       ev.preventDefault();
@@ -71858,8 +71907,75 @@ window.verOperacao = function(osId) {
     return opColunaAtual(op) === colKey;
   }
 
+  async function carregarRiStatusPorOps(ordens) {
+    const ops = (ordens || []).map(op => ({ op_producao_id: op.id }));
+    if (!ops.length) {
+      window._montaRiStatusPorOp = {};
+      window._producaoKanbanRiHabilitado = false;
+      return;
+    }
+    try {
+      const resp = await fetch('/api/qualidade/ri-check/status-por-ops', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ ops }),
+      });
+      const data = await resp.json();
+      window._montaRiStatusPorOp = (resp.ok && data.ok && data.status_por_op)
+        ? data.status_por_op
+        : {};
+      window._producaoKanbanRiHabilitado = true;
+    } catch (_) {
+      window._montaRiStatusPorOp = {};
+      window._producaoKanbanRiHabilitado = false;
+    }
+  }
+  window._producaoCarregarRiStatus = carregarRiStatusPorOps;
+
+  async function carregarParadasAtivasPorOps(ordens, progOverride) {
+    const prog = Array.isArray(progOverride) ? progOverride : programacaoCarregada;
+    const ops = (ordens || []).map((op) => {
+      const reg = (prog || []).find((r) =>
+        Number(r.op_producao_id) === Number(op.id)
+        || String(r.numero_op || '').trim().toUpperCase() === String(op.identificacao || '').trim().toUpperCase()
+      );
+      return {
+        op_producao_id: op.id,
+        numero_op: op.identificacao || '',
+        kanban_programacao_id: reg?.id || null,
+      };
+    });
+    if (!ops.length) {
+      window._montaParadaAtivaPorOp = {};
+      return;
+    }
+    try {
+      const resp = await fetch('/api/producao/paradas/ativas-por-ops', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ ops }),
+      });
+      const data = await resp.json();
+      window._montaParadaAtivaPorOp = (resp.ok && data.success && data.paradas_por_op)
+        ? data.paradas_por_op
+        : {};
+    } catch (_) {
+      window._montaParadaAtivaPorOp = {};
+    }
+  }
+  window._producaoCarregarParadasAtivas = carregarParadasAtivasPorOps;
+
+  function opComParadaAtiva(op) {
+    const map = window._montaParadaAtivaPorOp || {};
+    return !!map[String(op?.id)];
+  }
+
   function renderKanbanCol(colEl, cntEl, ordens, colKey, msgVazia, onlyAProduzir, codigoFiltro) {
     if (!colEl) return;
+    const riFlagBackup = window._producaoVerificarRiKanban;
+    if (window._producaoKanbanRiHabilitado) window._producaoVerificarRiKanban = true;
     const base = onlyAProduzir ? ordens.filter(op => op.status === 'A PRODUZIR') : ordens;
     const grupos = {};
     let totalOps = 0;
@@ -71885,10 +72001,11 @@ window.verOperacao = function(osId) {
       colEl.innerHTML = Object.entries(grupos).map(([k, ops]) => renderGrupo(k, ops, colKey)).join('');
     }
     if (cntEl) cntEl.textContent = totalOps;
+    window._producaoVerificarRiKanban = riFlagBackup;
   }
 
   function opMontagemRiLiberada(op, colKey) {
-    if (!window._producaoRenderModoMontagem) return true;
+    if (!window._producaoVerificarRiKanban) return true;
     if (colKey === 'programado') return true;
     const nomeKanban = producaoNomeKanbanPorKey(colKey);
     if (!nomeKanban) return true;
@@ -71926,22 +72043,31 @@ window.verOperacao = function(osId) {
         : '';
 
       const riLiberada = opMontagemRiLiberada(op, colKey);
-      const riBloqueada = modoMontagem && !riLiberada;
+      const riBloqueada = !!window._producaoVerificarRiKanban && !riLiberada;
       const riBloqClass = riBloqueada ? ' kanban-op-card-ri-bloqueado' : '';
-      const cardExtraStyle = riBloqueada
-        ? 'background:rgba(245,158,11,.14);border:1px solid rgba(245,158,11,.5);cursor:not-allowed;'
-        : '';
       const riMsgHtml = riBloqueada
         ? `<div style="font-size:11px;color:#fbbf24;font-weight:600;margin-top:8px;line-height:1.35;"><i class="fa-solid fa-lock" style="margin-right:5px;font-size:10px;"></i>Aguardando liberação via RI</div>`
         : '';
 
-      return `<div data-op-id="${op.id}" class="kanban-op-card${dropClass}${vincClass}${riBloqClass}"
+      const emParada = opComParadaAtiva(op);
+      const paradaClass = emParada ? ' kanban-op-card-parada' : '';
+      const paradaIconHtml = emParada
+        ? `<span class="kanban-op-card-parada-badge" title="OP em parada"><i class="fa-solid fa-circle-pause"></i></span>`
+        : '';
+      const paradaMsgHtml = emParada
+        ? `<div style="font-size:11px;color:#f87171;font-weight:600;margin-top:8px;line-height:1.35;"><i class="fa-solid fa-circle-pause" style="margin-right:5px;font-size:10px;"></i>Produção parada</div>`
+        : '';
+      const cardTitle = emParada
+        ? 'OP em parada'
+        : (riBloqueada ? 'Aguardando liberação via RI' : dropTitle);
+
+      return `<div data-op-id="${op.id}" class="kanban-op-card${dropClass}${vincClass}${riBloqClass}${paradaClass}"
         ${riBloqueada ? 'data-op-ri-bloqueado="1"' : ''}
+        ${emParada ? 'data-op-parada="1"' : ''}
         data-op-ident="${opIdentAttr}"
         data-op-qtde="${Number(op.qtde) || 0}"
         data-prod-codigo="${prodCodigoAttr}"
-        title="${riBloqueada ? 'Aguardando liberação via RI' : dropTitle}"
-        style="${cardExtraStyle}">
+        title="${escHtml(cardTitle)}">
         <div style="display:flex;align-items:flex-start;gap:8px;">
           <div style="flex:1;min-width:0;">
             <div style="display:flex;align-items:center;flex-wrap:wrap;gap:6px;margin-bottom:4px;">
@@ -71949,6 +72075,7 @@ window.verOperacao = function(osId) {
               <span style="font-size:13px;font-weight:700;color:#e2e8f0;">OP ${op.identificacao || '—'}</span>
               ${pedidosOpHtml}
               <span style="font-size:11px;color:#94a3b8;margin-left:auto;">Qtde: <b style="color:#f1f5f9;">${fmtQtde(op.qtde)}</b></span>
+              ${paradaIconHtml}
             </div>
             <div style="display:flex;flex-wrap:wrap;gap:8px;">
               ${op.data_abertura             ? `<span style="font-size:10px;color:#64748b;">Abertura: <b style="color:#94a3b8;">${fmtData(op.data_abertura)}</b></span>` : ''}
@@ -71960,6 +72087,7 @@ window.verOperacao = function(osId) {
             ${postosPlanHtml}
             ${op.obs ? `<div style="font-size:11px;color:#94a3b8;margin-top:6px;">Obs: <span style="color:#fef3c7;">${op.obs}</span></div>` : ''}
             ${obsKanban ? `<div style="font-size:11px;color:#94a3b8;margin-top:6px;">Observação: <span style="color:#fde68a;white-space:pre-wrap;">${escHtml(obsKanban)}</span></div>` : ''}
+            ${paradaMsgHtml}
             ${riMsgHtml}
           </div>
         </div>
@@ -72295,6 +72423,10 @@ window.verOperacao = function(osId) {
       pedidosCarregados = (respPedidos.ok && dataPedidos.success) ? (dataPedidos.pedidos || []) : [];
       programacaoCarregada = (respProg.ok && dataProg.success) ? (dataProg.registros || []) : [];
 
+      await Promise.all([
+        carregarRiStatusPorOps(ordensCarregadas),
+        carregarParadasAtivasPorOps(ordensCarregadas),
+      ]);
       renderKanban(ordensCarregadas);
 
       if (rodape) {
@@ -72633,6 +72765,10 @@ window.verOperacao = function(osId) {
       const data = await resp.json();
       if (!resp.ok || !data.success) return false;
       ordensCarregadas = data.ordens || [];
+      await Promise.all([
+        carregarRiStatusPorOps(ordensCarregadas),
+        carregarParadasAtivasPorOps(ordensCarregadas),
+      ]);
       const keys = Array.isArray(colKeys) && colKeys.length ? colKeys : ['programado', 'solicitado', 'produzindo'];
       if (keys.includes('programado')) {
         renderKanbanCol(colProgramado, cntProgramado, ordensCarregadas, 'programado',
@@ -72977,25 +73113,20 @@ window.verOperacao = function(osId) {
   }
 
   async function carregarRiStatusMontagem(ordens) {
-    const ops = (ordens || []).map(op => ({ op_producao_id: op.id }));
-    if (!ops.length) {
-      window._montaRiStatusPorOp = {};
+    const tasks = [];
+    if (typeof window._producaoCarregarRiStatus === 'function') {
+      tasks.push(window._producaoCarregarRiStatus(ordens));
+    }
+    if (typeof window._producaoCarregarParadasAtivas === 'function') {
+      tasks.push(window._producaoCarregarParadasAtivas(ordens, programacaoCarregada));
+    }
+    if (tasks.length) {
+      await Promise.all(tasks);
       return;
     }
-    try {
-      const resp = await fetch('/api/qualidade/ri-check/status-por-ops', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({ ops }),
-      });
-      const data = await resp.json();
-      window._montaRiStatusPorOp = (resp.ok && data.ok && data.status_por_op)
-        ? data.status_por_op
-        : {};
-    } catch (_) {
-      window._montaRiStatusPorOp = {};
-    }
+    window._montaRiStatusPorOp = {};
+    window._montaParadaAtivaPorOp = {};
+    window._producaoKanbanRiHabilitado = false;
   }
 
   function renderKanbanMontagem() {
@@ -73117,15 +73248,75 @@ window.verOperacao = function(osId) {
   const erroDiv = document.getElementById('riRegistroErro');
   const rodape = document.getElementById('riRegistroRodape');
   const recarrBtn = document.getElementById('riRegistroRecarregarBtn');
-  const colEl = document.getElementById('riRegistroKanbanCol');
-  const cntEl = document.getElementById('riRegistroCnt');
+  const kanbanContainer = document.getElementById('riRegistroKanban');
   const pesquisaInput = document.getElementById('riRegistroPesquisaInput');
   const btnLimparPesq = document.getElementById('riRegistroPesquisaLimpar');
+
+  const RI_COL_STYLE = {
+    programado:     { bg: '#1e1b4b', border: '#3730a3', dot: '#6366f1', title: '#a5b4fc', badgeBg: '#312e81', badgeTxt: '#c7d2fe', bodyBg: 'rgba(99,102,241,.04)' },
+    solicitado:     { bg: '#172554', border: '#1d4ed8', dot: '#3b82f6', title: '#93c5fd', badgeBg: '#1e3a8a', badgeTxt: '#bfdbfe', bodyBg: 'rgba(59,130,246,.04)' },
+    produzindo:     { bg: '#052e16', border: '#166534', dot: '#22c55e', title: '#86efac', badgeBg: '#14532d', badgeTxt: '#bbf7d0', bodyBg: 'rgba(34,197,94,.04)' },
+    teste:          { bg: '#431407', border: '#9a3412', dot: '#f97316', title: '#fdba74', badgeBg: '#7c2d12', badgeTxt: '#fed7aa', bodyBg: 'rgba(249,115,22,.04)' },
+    inspecao_final: { bg: '#1e1b4b', border: '#6d28d9', dot: '#a855f7', title: '#d8b4fe', badgeBg: '#4c1d95', badgeTxt: '#e9d5ff', bodyBg: 'rgba(168,85,247,.04)' },
+  };
+  const RI_COL_DEFAULT = { bg: '#1c1917', border: '#44403c', dot: '#78716c', title: '#d6d3d1', badgeBg: '#292524', badgeTxt: '#d6d3d1', bodyBg: 'rgba(120,113,108,.04)' };
 
   let pendentesCarregados = [];
   let ordensParaClick = [];
   let filtroPesquisa = '';
   let pesquisaDebounce = null;
+  const colunasDom = {};
+
+  function getColunasRi() {
+    if (typeof window._producaoGetColunasPosProgramado === 'function') {
+      return window._producaoGetColunasPosProgramado();
+    }
+    return [
+      { key: 'programado', nome: 'Programado' },
+      { key: 'solicitado', nome: 'Montagem hermetica' },
+      { key: 'produzindo', nome: 'Montagem eletrica' },
+      { key: 'teste', nome: 'Teste' },
+      { key: 'inspecao_final', nome: 'Inspeção final' },
+    ];
+  }
+
+  function msgVaziaColunaRi(colKey, nome) {
+    if (typeof window._producaoMsgVaziaColuna === 'function') {
+      return window._producaoMsgVaziaColuna(colKey);
+    }
+    return `Nenhuma OP aguardando RI em ${nome || colKey}.`;
+  }
+
+  function garantirColunasDom() {
+    if (!kanbanContainer) return;
+    const colunas = getColunasRi();
+    const keysAtuais = new Set(colunas.map(c => c.key));
+    Object.keys(colunasDom).forEach((key) => {
+      if (!keysAtuais.has(key)) {
+        colunasDom[key]?.wrap?.remove();
+        delete colunasDom[key];
+      }
+    });
+    kanbanContainer.innerHTML = '';
+    colunas.forEach((col) => {
+      const st = RI_COL_STYLE[col.key] || RI_COL_DEFAULT;
+      const wrap = document.createElement('div');
+      wrap.style.cssText = 'flex:0 0 340px;min-width:300px;';
+      wrap.innerHTML = `
+        <div style="display:flex;align-items:center;gap:8px;padding:10px 14px;background:${st.bg};border-radius:10px 10px 0 0;border:1px solid ${st.border};border-bottom:none;">
+          <span style="width:10px;height:10px;border-radius:50%;background:${st.dot};display:inline-block;flex-shrink:0;"></span>
+          <span style="font-size:12px;font-weight:700;color:${st.title};text-transform:uppercase;letter-spacing:.5px;">${col.nome}</span>
+          <span id="riRegistroCnt_${col.key}" style="margin-left:auto;font-size:11px;background:${st.badgeBg};color:${st.badgeTxt};padding:2px 9px;border-radius:10px;font-weight:600;">0</span>
+        </div>
+        <div id="riRegistroCol_${col.key}" style="min-height:220px;background:${st.bodyBg};border:1px solid ${st.border};border-top:none;border-radius:0 0 10px 10px;padding:10px;display:flex;flex-direction:column;gap:10px;"></div>`;
+      kanbanContainer.appendChild(wrap);
+      colunasDom[col.key] = {
+        wrap,
+        colEl: wrap.querySelector(`#riRegistroCol_${col.key}`),
+        cntEl: wrap.querySelector(`#riRegistroCnt_${col.key}`),
+      };
+    });
+  }
 
   function escHtml(str) {
     return String(str ?? '').replace(/[&<>"']/g, (ch) => ({
@@ -73181,70 +73372,92 @@ window.verOperacao = function(osId) {
     };
   }
 
-  function renderRiKanban() {
+  function renderRiOpCard(item) {
+    const opIdent = escHtml(item.numero_op || '—');
+    const posto = escHtml(item.posto || '');
+    const colKey = escHtml(item.col_key || '');
+    return `<div data-op-id="${item.op_producao_id}" data-ri-col-key="${colKey}" class="kanban-op-card" style="cursor:pointer;">
+      <div style="display:flex;align-items:flex-start;gap:8px;">
+        <div style="flex:1;min-width:0;">
+          <div style="display:flex;align-items:center;flex-wrap:wrap;gap:6px;margin-bottom:4px;">
+            <span style="font-size:10px;color:#475569;font-weight:600;">#${item.op_producao_id}</span>
+            <span style="font-size:13px;font-weight:700;color:#e2e8f0;">OP ${opIdent}</span>
+            <span style="font-size:10px;font-weight:700;background:#312e81;color:#c7d2fe;padding:2px 8px;border-radius:6px;">${posto}</span>
+            <span style="font-size:11px;color:#94a3b8;margin-left:auto;">Qtde: <b style="color:#f1f5f9;">${fmtQtde(item.qtde)}</b></span>
+          </div>
+          <div style="display:flex;flex-wrap:wrap;gap:8px;">
+            ${item.data_abertura ? `<span style="font-size:10px;color:#64748b;">Abertura: <b style="color:#94a3b8;">${fmtData(item.data_abertura)}</b></span>` : ''}
+            ${item.data_previsao_entrega ? `<span style="font-size:10px;color:#64748b;">Prev. entrega: <b style="color:#a5f3fc;">${fmtData(item.data_previsao_entrega)}</b></span>` : ''}
+          </div>
+          ${item.obs ? `<div style="font-size:11px;color:#94a3b8;margin-top:6px;">Obs: <span style="color:#fef3c7;">${escHtml(item.obs)}</span></div>` : ''}
+          <div style="font-size:11px;color:#a5b4fc;font-weight:600;margin-top:8px;line-height:1.35;">
+            <i class="fa-solid fa-clipboard-check" style="margin-right:5px;font-size:10px;"></i>Clique para registrar RI
+          </div>
+        </div>
+      </div>
+    </div>`;
+  }
+
+  function renderRiKanbanGrupo(prodId, items) {
+    const prod = items[0].produto || {};
+    const qtdeTotal = items.reduce((s, it) => s + (Number(it.qtde) || 0), 0);
+    const opsHtml = items.map(renderRiOpCard).join('');
+    const descEsc = escHtml(prod.descricao || '—');
+    return `<div class="kanban-prod-grupo" style="background:var(--content-bg,#1e2233);border:1px solid rgba(255,255,255,.1);border-radius:10px;padding:12px;">
+      <div style="display:flex;align-items:flex-start;gap:8px;margin-bottom:6px;">
+        <div style="flex:1;min-width:0;">
+          <div style="font-size:13px;font-weight:700;color:#818cf8;letter-spacing:.3px;">${escHtml(prod.identificacao || prodId)}</div>
+          <div style="font-size:12px;color:#e2e8f0;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;margin-top:2px;line-height:1.4;" title="${descEsc}">${descEsc}</div>
+        </div>
+        <span style="flex-shrink:0;font-size:12px;font-weight:700;background:#312e81;color:#c7d2fe;padding:3px 10px;border-radius:12px;">QTD ${fmtQtde(qtdeTotal)}</span>
+      </div>
+      ${opsHtml}
+    </div>`;
+  }
+
+  function renderRiKanbanCol(colEl, cntEl, items, colKey, msgVazia) {
     if (!colEl) return;
-    const filtrados = pendentesCarregados.filter(itemMatchesPesquisa);
-    ordensParaClick = filtrados.map(pendingToOp);
+    const naColuna = items.filter(it => String(it.col_key || '') === colKey);
+    if (cntEl) cntEl.textContent = String(naColuna.length);
 
-    if (cntEl) cntEl.textContent = String(filtrados.length);
-
-    if (!filtrados.length) {
+    if (!naColuna.length) {
       const msg = filtroPesquisa
         ? `Nenhuma OP encontrada para "${escHtml(filtroPesquisa)}".`
-        : 'Nenhuma OP aguardando RI no posto atual.';
+        : msgVazia;
       colEl.innerHTML = `<div style="text-align:center;padding:24px 0;color:var(--inactive-color);font-size:12px;">${msg}</div>`;
       return;
     }
 
     const grupos = {};
-    for (const item of filtrados) {
+    for (const item of naColuna) {
       const cod = item.produto?.identificacao || String(item.op_producao_id);
       if (!grupos[cod]) grupos[cod] = [];
       grupos[cod].push(item);
     }
 
-    colEl.innerHTML = Object.entries(grupos).map(([prodId, items]) => {
-      const prod = items[0].produto || {};
-      const qtdeTotal = items.reduce((s, it) => s + (Number(it.qtde) || 0), 0);
-      const opsHtml = items.map((item) => {
-        const opIdent = escHtml(item.numero_op || '—');
-        const posto = escHtml(item.posto || '');
-        const colKey = escHtml(item.col_key || '');
-        return `<div data-op-id="${item.op_producao_id}" data-ri-col-key="${colKey}" class="kanban-op-card"
-          style="background:rgba(99,102,241,.08);border:1px solid rgba(99,102,241,.35);cursor:pointer;">
-          <div style="display:flex;align-items:flex-start;gap:8px;">
-            <div style="flex:1;min-width:0;">
-              <div style="display:flex;align-items:center;flex-wrap:wrap;gap:6px;margin-bottom:4px;">
-                <span style="font-size:10px;color:#475569;font-weight:600;">#${item.op_producao_id}</span>
-                <span style="font-size:13px;font-weight:700;color:#e2e8f0;">OP ${opIdent}</span>
-                <span style="font-size:10px;font-weight:700;background:#312e81;color:#c7d2fe;padding:2px 8px;border-radius:6px;">${posto}</span>
-                <span style="font-size:11px;color:#94a3b8;margin-left:auto;">Qtde: <b style="color:#f1f5f9;">${fmtQtde(item.qtde)}</b></span>
-              </div>
-              <div style="display:flex;flex-wrap:wrap;gap:8px;">
-                ${item.data_abertura ? `<span style="font-size:10px;color:#64748b;">Abertura: <b style="color:#94a3b8;">${fmtData(item.data_abertura)}</b></span>` : ''}
-                ${item.data_previsao_entrega ? `<span style="font-size:10px;color:#64748b;">Prev. entrega: <b style="color:#a5f3fc;">${fmtData(item.data_previsao_entrega)}</b></span>` : ''}
-              </div>
-              ${item.obs ? `<div style="font-size:11px;color:#94a3b8;margin-top:6px;">Obs: <span style="color:#fef3c7;">${escHtml(item.obs)}</span></div>` : ''}
-              <div style="font-size:11px;color:#a5b4fc;font-weight:600;margin-top:8px;line-height:1.35;">
-                <i class="fa-solid fa-clipboard-check" style="margin-right:5px;font-size:10px;"></i>Clique para registrar RI
-              </div>
-            </div>
-          </div>
-        </div>`;
-      }).join('');
+    colEl.innerHTML = Object.entries(grupos)
+      .map(([prodId, grupoItems]) => renderRiKanbanGrupo(prodId, grupoItems))
+      .join('');
+  }
 
-      const descEsc = escHtml(prod.descricao || '—');
-      return `<div class="kanban-prod-grupo" style="background:var(--content-bg,#1e2233);border:1px solid rgba(255,255,255,.1);border-radius:10px;padding:12px;">
-        <div style="display:flex;align-items:flex-start;gap:8px;margin-bottom:6px;">
-          <div style="flex:1;min-width:0;">
-            <div style="font-size:13px;font-weight:700;color:#818cf8;letter-spacing:.3px;">${escHtml(prod.identificacao || prodId)}</div>
-            <div style="font-size:12px;color:#e2e8f0;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;margin-top:2px;line-height:1.4;" title="${descEsc}">${descEsc}</div>
-          </div>
-          <span style="flex-shrink:0;font-size:12px;font-weight:700;background:#312e81;color:#c7d2fe;padding:3px 10px;border-radius:12px;">QTD ${fmtQtde(qtdeTotal)}</span>
-        </div>
-        ${opsHtml}
-      </div>`;
-    }).join('');
+  function renderRiKanban() {
+    if (!kanbanContainer) return;
+    garantirColunasDom();
+
+    const filtrados = pendentesCarregados.filter(itemMatchesPesquisa);
+    ordensParaClick = filtrados.map(pendingToOp);
+
+    getColunasRi().forEach((col) => {
+      const dom = colunasDom[col.key];
+      if (!dom) return;
+      renderRiKanbanCol(
+        dom.colEl,
+        dom.cntEl,
+        filtrados,
+        col.key,
+        msgVaziaColunaRi(col.key, col.nome)
+      );
+    });
 
     if (typeof attachOpCardClickHandlers === 'function') {
       attachOpCardClickHandlers('#riRegistroInspecaoPane', ordensParaClick);
@@ -73252,7 +73465,7 @@ window.verOperacao = function(osId) {
   }
 
   async function carregarRiRegistro() {
-    if (!colEl) return;
+    if (!kanbanContainer) return;
     if (spinner) spinner.style.display = 'block';
     if (erroDiv) erroDiv.style.display = 'none';
     if (rodape) rodape.style.display = 'none';
@@ -75205,6 +75418,84 @@ window.verOperacao = function(osId) {
     return data.motivos || [];
   }
 
+  function producaoBuscarRegKanbanOp(op) {
+    const programacao = (typeof window._montaProgramacaoCarregada === 'function')
+      ? window._montaProgramacaoCarregada()
+      : [];
+    return programacao.find((r) =>
+      Number(r.op_producao_id) === Number(op?.id)
+      || String(r.numero_op || '').trim().toUpperCase() === String(op?.identificacao || '').trim().toUpperCase()
+    ) || null;
+  }
+
+  async function buscarParadaAtivaOp(op) {
+    if (!op) return null;
+    const reg = producaoBuscarRegKanbanOp(op);
+    const params = new URLSearchParams();
+    if (reg?.id) params.set('kanban_programacao_id', String(reg.id));
+    const numeroOp = String(op.identificacao || '').trim();
+    if (numeroOp) params.set('numero_op', numeroOp);
+    if (!params.toString()) return null;
+    const resp = await fetch(`/api/producao/paradas/ativa?${params}`, { credentials: 'include' });
+    const data = await resp.json();
+    if (!resp.ok || !data.success) throw new Error(data.error || 'Erro ao consultar parada');
+    return data.ativa ? (data.parada || null) : null;
+  }
+
+  function aplicarBotoesParadaActionsModal(modal, paradaAtiva) {
+    const btnFinalizar = modal?.querySelector('#open-finalizar-operacao-btn');
+    const btnParada = modal?.querySelector('#open-parada-btn');
+    if (!btnFinalizar && !btnParada) return;
+
+    if (paradaAtiva) {
+      if (btnFinalizar) {
+        btnFinalizar.disabled = true;
+        btnFinalizar.style.opacity = '0.45';
+        btnFinalizar.style.cursor = 'not-allowed';
+        btnFinalizar.title = 'OP em parada — retome a produção para finalizar.';
+      }
+      if (btnParada) {
+        btnParada.disabled = false;
+        btnParada.dataset.modoParada = 'retomar';
+        btnParada.dataset.paradaId = String(paradaAtiva.id || '');
+        btnParada.style.opacity = '';
+        btnParada.style.cursor = '';
+        btnParada.title = 'Encerrar parada e liberar finalização da operação';
+        btnParada.innerHTML = '<i class="fa-solid fa-circle-play"></i> Retomar produção';
+      }
+    } else {
+      if (btnFinalizar) {
+        btnFinalizar.disabled = false;
+        btnFinalizar.style.opacity = '';
+        btnFinalizar.style.cursor = '';
+        btnFinalizar.title = '';
+      }
+      if (btnParada) {
+        btnParada.disabled = false;
+        btnParada.dataset.modoParada = 'parada';
+        delete btnParada.dataset.paradaId;
+        btnParada.style.opacity = '';
+        btnParada.style.cursor = '';
+        btnParada.title = '';
+        btnParada.innerHTML = '<i class="fa-solid fa-circle-pause"></i> Parada';
+      }
+    }
+  }
+
+  async function retomarParadaProducao(paradaId) {
+    const id = Number(paradaId) || 0;
+    if (!id) throw new Error('Parada inválida.');
+    const resp = await fetch(`/api/producao/paradas/${id}/retomar`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({}),
+    });
+    const data = await resp.json();
+    if (!resp.ok || !data.success) throw new Error(data.error || 'Erro ao retomar produção');
+    return data.parada || null;
+  }
+
   function preencherDatalistParada(datalistEl, valores, filtro) {
     if (!datalistEl) return;
     const f = String(filtro || '').trim().toLowerCase();
@@ -75215,20 +75506,15 @@ window.verOperacao = function(osId) {
     datalistEl.innerHTML = lista.map(v => `<option value="${escapeHtml(v)}"></option>`).join('');
   }
 
-  function openProducaoParadaModal(ops, colKey, produtoCodigo) {
+  function openProducaoParadaModal(ops, colKey, produtoCodigo, opts) {
+    const options = opts || {};
     const listaOps = Array.isArray(ops) ? ops : [];
     const op = listaOps[0];
     if (!op) return;
     const operacaoNome = (typeof window._producaoNomeKanbanPorKey === 'function')
       ? (window._producaoNomeKanbanPorKey(colKey) || colKey || '')
       : (colKey || '');
-    const programacao = (typeof window._montaProgramacaoCarregada === 'function')
-      ? window._montaProgramacaoCarregada()
-      : [];
-    const reg = programacao.find((r) =>
-      Number(r.op_producao_id) === Number(op.id)
-      || String(r.numero_op || '').trim().toUpperCase() === String(op.identificacao || '').trim().toUpperCase()
-    );
+    const reg = producaoBuscarRegKanbanOp(op);
 
     const overlay = document.createElement('div');
     overlay.className = 'kanban-modal-overlay';
@@ -75350,7 +75636,11 @@ window.verOperacao = function(osId) {
         const data = await resp.json();
         if (!resp.ok || !data.success) throw new Error(data.error || 'Erro ao registrar parada');
         close();
-        alert('Parada registrada.');
+        if (typeof options.onSuccess === 'function') {
+          await options.onSuccess(data.parada);
+        } else {
+          alert('Parada registrada.');
+        }
       } catch (err) {
         if (statusEl) { statusEl.textContent = err.message; statusEl.style.color = '#f87171'; }
         if (btn) {
@@ -75495,6 +75785,7 @@ window.verOperacao = function(osId) {
       });
       modal.querySelector('#open-finalizar-operacao-btn')?.addEventListener('click', async () => {
         const btn = modal.querySelector('#open-finalizar-operacao-btn');
+        if (btn?.disabled) return;
         if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Registrando...'; }
         try {
           await producaoFinalizarOperacao(ops, options.colKey || '');
@@ -75503,14 +75794,49 @@ window.verOperacao = function(osId) {
         } catch (err) {
           alert(err.message || 'Falha ao finalizar operação.');
           if (btn) {
-            btn.disabled = false;
+            const paradaAtiva = await buscarParadaAtivaOp(ops[0]).catch(() => null);
+            aplicarBotoesParadaActionsModal(modal, paradaAtiva);
             btn.innerHTML = '<i class="fa-solid fa-circle-check"></i> Finalizar operação';
           }
         }
       });
-      modal.querySelector('#open-parada-btn')?.addEventListener('click', () => {
-        openProducaoParadaModal(ops, options.colKey || '', produtoCodigo || groupKey);
+      modal.querySelector('#open-parada-btn')?.addEventListener('click', async () => {
+        const btnParada = modal.querySelector('#open-parada-btn');
+        if (btnParada?.dataset.modoParada === 'retomar') {
+          const paradaId = btnParada.dataset.paradaId;
+          if (btnParada) {
+            btnParada.disabled = true;
+            btnParada.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Retomando...';
+          }
+          try {
+            await retomarParadaProducao(paradaId);
+            aplicarBotoesParadaActionsModal(modal, null);
+            if (typeof window._montaRecarregarOrdens === 'function') {
+              await window._montaRecarregarOrdens();
+            }
+            alert('Produção retomada.');
+          } catch (err) {
+            alert(err.message || 'Falha ao retomar produção.');
+            aplicarBotoesParadaActionsModal(modal, { id: paradaId });
+          }
+          return;
+        }
+        openProducaoParadaModal(ops, options.colKey || '', produtoCodigo || groupKey, {
+          onSuccess: async (parada) => {
+            aplicarBotoesParadaActionsModal(modal, parada);
+            if (typeof window._montaRecarregarOrdens === 'function') {
+              await window._montaRecarregarOrdens();
+            }
+            alert('Parada registrada.');
+          },
+        });
       });
+
+      if (mostrarParadaMonta && ops[0]) {
+        buscarParadaAtivaOp(ops[0])
+          .then((paradaAtiva) => aplicarBotoesParadaActionsModal(modal, paradaAtiva))
+          .catch(() => { /* silencioso */ });
+      }
     }
     if (mostrarEstoque) {
       carregarEstoqueAnalisePedido(produtoCodigo || groupKey, modal.querySelector('#analise-estoque-pedido'));
@@ -76710,11 +77036,46 @@ window.initOscilacaoEstoque = (function () {
   var fillFromOsBtn = document.getElementById('vippPreencherDaOsBtn');
   if (fillFromOsBtn) fillFromOsBtn.addEventListener('click', prePopularFromOS);
 
+  var metodoEnvioSelect = document.getElementById('vippMetodoEnvio');
+
+  function isMetodoCorreios() {
+    var sel = metodoEnvioSelect || document.getElementById('vippMetodoEnvio');
+    return !sel || sel.value === 'Envio via Correios';
+  }
+
+  function nomeMetodoEnvio(metodo) {
+    return String(metodo || 'Envio via Correios').replace(/^Envio via\s+/i, '').trim();
+  }
+
+  function textoBotaoPostagem(metodo) {
+    return 'Criar Postagem ' + nomeMetodoEnvio(metodo);
+  }
+
+  function atualizarMetodoEnvioUI() {
+    var correios = isMetodoCorreios();
+    var metodo = (metodoEnvioSelect && metodoEnvioSelect.value) || 'Envio via Correios';
+    var block = document.getElementById('vippCorreiosServicoBlock');
+    var badge = document.getElementById('vippModalCorreiosBadge');
+    if (block) block.style.display = correios ? '' : 'none';
+    if (badge) badge.style.display = correios ? '' : 'none';
+    if (enviarBtn && enviarBtn.disabled !== true) {
+      var label = textoBotaoPostagem(metodo);
+      enviarBtn.innerHTML = correios
+        ? '<img src="https://vipp.visualset.com.br/vipp/img/logo-visualset5.png" alt="" style="width:16px;height:16px;object-fit:contain;"><span>' + label + '</span>'
+        : '<i class="fa-solid fa-truck-fast"></i><span>' + label + '</span>';
+    }
+  }
+
+  if (metodoEnvioSelect) {
+    metodoEnvioSelect.addEventListener('change', atualizarMetodoEnvioUI);
+  }
+
   function openModal() {
+    if (metodoEnvioSelect) metodoEnvioSelect.value = 'Envio via Correios';
+    atualizarMetodoEnvioUI();
     if (enviarBtn) {
       enviarBtn.disabled = false;
       enviarBtn.style.opacity = '1';
-      enviarBtn.innerHTML = '<i class="fa-solid fa-paper-plane"></i><span>Criar Postagem</span>';
     }
     if (statusEl) {
       statusEl.innerHTML = '';
@@ -76758,6 +77119,12 @@ window.initOscilacaoEstoque = (function () {
   if (sacVippBtn) sacVippBtn.addEventListener('click', function () {
     _vippContextoSac = true;
     if (fillFromOsBtn) fillFromOsBtn.style.display = 'none';
+    if (metodoEnvioSelect) metodoEnvioSelect.value = 'Envio via Correios';
+    atualizarMetodoEnvioUI();
+    if (enviarBtn) {
+      enviarBtn.disabled = false;
+      enviarBtn.style.opacity = '1';
+    }
     prePopular();
     // Pré-preenche Observação com número da OS/AT se disponível
     var _tit = (document.getElementById('atEditModalTitle') ? document.getElementById('atEditModalTitle').textContent : '').trim();
@@ -76816,9 +77183,11 @@ window.initOscilacaoEstoque = (function () {
 
   // ── Botão Criar Postagem — valida e monta payload ────────────────────────
   if (enviarBtn) {
-    enviarBtn.addEventListener('click', function () {
+    enviarBtn.addEventListener('click', async function () {
       var g = function (id) { return (document.getElementById(id) ? document.getElementById(id).value : '').trim(); };
       var osNum = (document.getElementById('atEditModalTitle') ? document.getElementById('atEditModalTitle').textContent : '').trim().replace(/[^0-9]/g, '');
+      var metodoEnvio = g('vippMetodoEnvio') || 'Envio via Correios';
+      var isCorreios = metodoEnvio === 'Envio via Correios';
 
       var nome     = g('vippNome');
       var endereco = g('vippEndereco');
@@ -76862,7 +77231,7 @@ window.initOscilacaoEstoque = (function () {
           cidade: cidade,
           uf:          uf.toUpperCase(),
         },
-        servico:    g('vippServico'),
+        servico:    isCorreios ? g('vippServico') : '',
         adicionais: g('vippAdicionais'),
         volume: {
           peso:        g('vippPeso'),
@@ -76884,7 +77253,62 @@ window.initOscilacaoEstoque = (function () {
           itens:           itensDecl,
         } : null,
         observacao: g('vippObservacao'),
+        metodo_envio: metodoEnvio,
       };
+
+      if (!isCorreios) {
+        setStatus('Registrando envio...', false);
+        enviarBtn.disabled = true;
+        enviarBtn.style.opacity = '0.6';
+        try {
+          var _sepCriadaManual = false;
+          if (itensDecl.length > 0) {
+            _sepCriadaManual = await criarSolicitacaoSeparacaoVipp(
+              itensDecl,
+              osNum,
+              g('vippObservacao'),
+              null,
+              _vippContextoSac ? 'SAC' : 'AT',
+              metodoEnvio
+            );
+          }
+          if (_vippContextoSac && !_sepCriadaManual) {
+            await criarEntradaSacEnvio(itensDecl, osNum, null, metodoEnvio);
+          }
+          var statusElManual = document.getElementById('vippModalStatus');
+          if (statusElManual) {
+            statusElManual.style.display = 'block';
+            var successHtml =
+              '<div style="margin-bottom:8px;">' +
+              '<i class="fa-solid fa-circle-check" style="color:#34d399;margin-right:6px;"></i>' +
+              '<strong style="color:#34d399;">Envio registrado com sucesso!</strong>' +
+              ' &nbsp; Método: <strong style="color:#7dd3fc;">' + metodoEnvio + '</strong>' +
+              '</div>';
+            if (_sepCriadaManual) {
+              statusElManual.insertAdjacentHTML('afterbegin', successHtml);
+            } else {
+              statusElManual.innerHTML = successHtml;
+            }
+          }
+          if (_vippContextoSac) {
+            try {
+              var _sacBodyManual = document.getElementById('sacTabelaBody');
+              if (_sacBodyManual && typeof carregarSacSolicitacoes === 'function') {
+                await carregarSacSolicitacoes(_sacBodyManual, { hideDone: false, filterByUser: true });
+              }
+            } catch (_eSac) { /* ignora */ }
+          }
+          enviarBtn.innerHTML =
+            '<i class="fa-solid fa-circle-check" style="color:#34d399;"></i>' +
+            '<span style="color:#34d399;">Envio registrado</span>';
+        } catch (errManual) {
+          setStatus('Erro ao registrar envio: ' + (errManual.message || errManual), true);
+          enviarBtn.disabled = false;
+          enviarBtn.style.opacity = '1';
+          atualizarMetodoEnvioUI();
+        }
+        return;
+      }
 
       // ── Chama backend /api/vipp/postar ──────────────────────────────────
       setStatus('Enviando para VIPP...', false);
@@ -76948,12 +77372,13 @@ window.initOscilacaoEstoque = (function () {
                 osNum,
                 g('vippObservacao'),
                 data.idConhecimento || null,
-                _vippContextoSac ? 'SAC' : 'AT'
+                _vippContextoSac ? 'SAC' : 'AT',
+                'Envio via Correios'
               );
             }
             // Se aberto pelo painel SAC, cria entrada apenas quando a separação não gerou solicitação.
             if (_vippContextoSac && !_sepCriada) {
-              criarEntradaSacVipp(itensDecl, osNum, data.idConhecimento || null);
+              criarEntradaSacEnvio(itensDecl, osNum, data.idConhecimento || null, 'Envio via Correios');
             }
             enviarBtn.disabled = true;
             enviarBtn.innerHTML =
@@ -76966,18 +77391,20 @@ window.initOscilacaoEstoque = (function () {
             setStatus('Erro VIPP: ' + msgs, true);
             enviarBtn.disabled = false;
             enviarBtn.style.opacity = '1';
+            atualizarMetodoEnvioUI();
           }
         })
         .catch(function (err) {
           setStatus('Erro de comunicação: ' + err.message, true);
           enviarBtn.disabled = false;
           enviarBtn.style.opacity = '1';
+          atualizarMetodoEnvioUI();
         });
     });
   }
 
   // ── Cria Sol. de Separação automaticamente após VIPP bem-sucedido ───────────
-  async function criarSolicitacaoSeparacaoVipp(itensDecl, osNum, observacao, idVipp, origemVipp) {
+  async function criarSolicitacaoSeparacaoVipp(itensDecl, osNum, observacao, idVipp, origemVipp, metodoEnvio) {
     if (!itensDecl || !itensDecl.length) return false;
     var comentario = osNum ? ('OS' + osNum) : '';
     // Usuário logado
@@ -77036,6 +77463,7 @@ window.initOscilacaoEstoque = (function () {
           forcar_novo_sep: true,
           os_num:          osNum   || null,
           id_vipp:         idVipp  || null,
+          metodo_envio:    metodoEnvio || null,
           conteudo:        itensDecl.length ? JSON.stringify(itensDecl.map(function(it) {
                              return { conteudo: it.descricao || '', quantidade: parseInt(it.quantidade, 10) || 1 };
                            })) : null,
@@ -77064,8 +77492,8 @@ window.initOscilacaoEstoque = (function () {
     }
   }
 
-  // ── Cria entrada em envios.solicitacoes após VIPP bem-sucedido (contexto SAC) ──
-  async function criarEntradaSacVipp(itensDecl, osNum, idVipp) {
+  // ── Cria entrada em envios.solicitacoes após envio (contexto SAC) ──
+  async function criarEntradaSacEnvio(itensDecl, osNum, idVipp, metodoEnvio) {
     var nomeUser = '';
     try {
       var _meResp = await fetch('/api/auth/status', { credentials: 'include' });
@@ -77078,7 +77506,8 @@ window.initOscilacaoEstoque = (function () {
       return { conteudo: it.descricao || '', quantidade: String(parseInt(it.quantidade, 10) || 1) };
     });
     var conteudoJson = conteudoItems.length ? JSON.stringify(conteudoItems) : null;
-    var observacao = osNum ? 'OS' + osNum : '';
+    var obsEl = document.getElementById('vippObservacao');
+    var observacao = osNum ? ('OS' + osNum) : ((obsEl && obsEl.value) ? obsEl.value.trim() : '');
 
     try {
       var _resp = await fetch('/api/sac/solicitacoes/vipp', {
@@ -77089,7 +77518,8 @@ window.initOscilacaoEstoque = (function () {
           usuario:    nomeUser,
           observacao: observacao,
           id_vipp:    idVipp || null,
-          conteudo:   conteudoJson
+          conteudo:   conteudoJson,
+          metodo_envio: metodoEnvio || null
         })
       });
       var _d = await _resp.json();
@@ -77121,7 +77551,7 @@ window.initOscilacaoEstoque = (function () {
         var _noteErr = document.createElement('div');
         _noteErr.style.cssText = 'margin-top:8px;padding:6px 10px;background:rgba(239,68,68,.10);border:1px solid #ef444466;border-radius:6px;font-size:12px;color:#fca5a5;';
         _noteErr.innerHTML = '<i class="fa-solid fa-triangle-exclamation" style="margin-right:5px;"></i>' +
-          'Postagem VIPP criada, mas falhou ao registrar em Envios: ' + (_e3.message || 'erro desconhecido') + '.';
+          'Falhou ao registrar em Envios: ' + (_e3.message || 'erro desconhecido') + '.';
         _sElErr.appendChild(_noteErr);
       }
     }

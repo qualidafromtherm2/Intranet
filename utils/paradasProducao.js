@@ -103,9 +103,99 @@ async function registrarParada({
   return rows[0];
 }
 
+async function buscarParadaAberta({ kanbanProgramacaoId = null, numeroOp = '' }) {
+  await garantirSchemaParadas();
+  const kpId = Number(kanbanProgramacaoId) || null;
+  const nOp = String(numeroOp || '').trim();
+  if (!kpId && !nOp) return null;
+
+  const { rows } = await dbQuery(
+    `SELECT id, kanban_programacao_id, numero_op, usuario, operacao,
+            parada_inicio::text AS parada_inicio,
+            parada_fim::text AS parada_fim,
+            tipo_parada, motivo
+       FROM "Producao"."Paradas"
+      WHERE parada_fim IS NULL
+        AND (
+          ($1::bigint IS NOT NULL AND kanban_programacao_id = $1)
+          OR ($2 <> '' AND UPPER(TRIM(COALESCE(numero_op, ''))) = UPPER(TRIM($2)))
+        )
+      ORDER BY parada_inicio DESC, id DESC
+      LIMIT 1`,
+    [kpId, nOp]
+  );
+  return rows[0] || null;
+}
+
+async function retomarParada(paradaId) {
+  await garantirSchemaParadas();
+  const id = Number(paradaId) || 0;
+  if (!id) throw new Error('Parada inválida.');
+
+  const { rows, rowCount } = await dbQuery(
+    `UPDATE "Producao"."Paradas"
+        SET parada_fim = NOW()
+      WHERE id = $1
+        AND parada_fim IS NULL
+      RETURNING id, kanban_programacao_id, numero_op, usuario, operacao,
+                parada_inicio::text AS parada_inicio,
+                parada_fim::text AS parada_fim,
+                tipo_parada, motivo`,
+    [id]
+  );
+  if (!rowCount) throw new Error('Parada não encontrada ou já encerrada.');
+  return rows[0];
+}
+
+async function listarParadasAbertasPorOps(opsRefs = []) {
+  await garantirSchemaParadas();
+  const refs = Array.isArray(opsRefs) ? opsRefs : [];
+  const numeros = [...new Set(
+    refs.map((o) => String(o.numero_op || '').trim()).filter(Boolean)
+  )];
+  const kpIds = [...new Set(
+    refs.map((o) => Number(o.kanban_programacao_id) || 0).filter((n) => n > 0)
+  )];
+  if (!numeros.length && !kpIds.length) return {};
+
+  const numerosNorm = numeros.map((n) => n.toUpperCase());
+  const { rows } = await dbQuery(
+    `SELECT id, kanban_programacao_id, numero_op, usuario, operacao,
+            parada_inicio::text AS parada_inicio,
+            parada_fim::text AS parada_fim,
+            tipo_parada, motivo
+       FROM "Producao"."Paradas"
+      WHERE parada_fim IS NULL
+        AND (
+          (COALESCE(array_length($1::bigint[], 1), 0) > 0 AND kanban_programacao_id = ANY($1::bigint[]))
+          OR (COALESCE(array_length($2::text[], 1), 0) > 0
+              AND UPPER(TRIM(COALESCE(numero_op, ''))) = ANY($2::text[]))
+        )
+      ORDER BY parada_inicio DESC, id DESC`,
+    [kpIds.length ? kpIds : null, numerosNorm.length ? numerosNorm : null]
+  );
+
+  const out = {};
+  for (const op of refs) {
+    const opId = Number(op.op_producao_id) || 0;
+    if (!opId) continue;
+    const nOp = String(op.numero_op || '').trim().toUpperCase();
+    const kp = Number(op.kanban_programacao_id) || 0;
+    const hit = rows.find((r) =>
+      (kp > 0 && Number(r.kanban_programacao_id) === kp)
+      || (nOp && String(r.numero_op || '').trim().toUpperCase() === nOp)
+    );
+    if (hit) out[String(opId)] = hit;
+  }
+  return out;
+}
+
 module.exports = {
   garantirSchemaParadas,
   listarMotivos,
   registrarMotivo,
   registrarParada,
+  buscarParadaAberta,
+  retomarParada,
+  listarParadasAbertasPorOps,
 };

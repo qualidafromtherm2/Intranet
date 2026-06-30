@@ -11,6 +11,9 @@ const {
   listarMotivos,
   registrarMotivo,
   registrarParada,
+  buscarParadaAberta,
+  retomarParada,
+  listarParadasAbertasPorOps,
 } = require('../utils/paradasProducao');
 
 const router = express.Router();
@@ -1968,9 +1971,18 @@ router.post('/paradas/motivos', express.json(), async (req, res) => {
 router.post('/paradas', express.json(), async (req, res) => {
   try {
     const usuario = String(req.body?.usuario || '').trim() || getOperador(req);
+    const kanbanProgramacaoId = Number(req.body?.kanban_programacao_id) || null;
+    const numeroOp = String(req.body?.numero_op || '').trim();
+    const paradaAberta = await buscarParadaAberta({ kanbanProgramacaoId, numeroOp });
+    if (paradaAberta) {
+      return res.status(409).json({
+        success: false,
+        error: 'Já existe uma parada em andamento para esta OP. Retome a produção antes de registrar outra parada.',
+      });
+    }
     const row = await registrarParada({
-      kanbanProgramacaoId: Number(req.body?.kanban_programacao_id) || null,
-      numeroOp: req.body?.numero_op,
+      kanbanProgramacaoId,
+      numeroOp,
       usuario,
       operacao: req.body?.operacao,
       tipoParada: req.body?.tipo_parada,
@@ -1980,6 +1992,51 @@ router.post('/paradas', express.json(), async (req, res) => {
     return res.json({ success: true, parada: row });
   } catch (err) {
     console.error('[producao] Erro ao registrar parada:', err.message);
+    return res.status(400).json({ success: false, error: err.message });
+  }
+});
+
+/* ---------------------------------------------------------------
+ * GET /api/producao/paradas/ativa — parada em andamento (parada_fim IS NULL)
+ * Query: kanban_programacao_id?, numero_op?
+ * --------------------------------------------------------------- */
+router.get('/paradas/ativa', async (req, res) => {
+  try {
+    const parada = await buscarParadaAberta({
+      kanbanProgramacaoId: req.query?.kanban_programacao_id,
+      numeroOp: req.query?.numero_op,
+    });
+    return res.json({ success: true, ativa: !!parada, parada: parada || null });
+  } catch (err) {
+    console.error('[producao] Erro ao consultar parada ativa:', err.message);
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/* ---------------------------------------------------------------
+ * POST /api/producao/paradas/ativas-por-ops — paradas abertas por OP (kanban)
+ * Body: { ops: [{ op_producao_id, numero_op?, kanban_programacao_id? }] }
+ * --------------------------------------------------------------- */
+router.post('/paradas/ativas-por-ops', express.json(), async (req, res) => {
+  try {
+    const ops = Array.isArray(req.body?.ops) ? req.body.ops : [];
+    const paradasPorOp = await listarParadasAbertasPorOps(ops);
+    return res.json({ success: true, paradas_por_op: paradasPorOp });
+  } catch (err) {
+    console.error('[producao] Erro ao listar paradas ativas por OP:', err.message);
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/* ---------------------------------------------------------------
+ * POST /api/producao/paradas/:id/retomar — encerra parada (parada_fim = NOW)
+ * --------------------------------------------------------------- */
+router.post('/paradas/:id/retomar', express.json(), async (req, res) => {
+  try {
+    const row = await retomarParada(req.params.id);
+    return res.json({ success: true, parada: row });
+  } catch (err) {
+    console.error('[producao] Erro ao retomar parada:', err.message);
     return res.status(400).json({ success: false, error: err.message });
   }
 });
@@ -2013,6 +2070,14 @@ router.post('/finalizar-operacao', express.json(), async (req, res) => {
         [opProducaoId || 0, numeroOp || '']
       );
       kanbanProgramacaoId = rows[0]?.id || null;
+    }
+
+    const paradaAberta = await buscarParadaAberta({ kanbanProgramacaoId, numeroOp });
+    if (paradaAberta) {
+      return res.status(409).json({
+        success: false,
+        error: 'OP com parada em andamento. Retome a produção antes de finalizar.',
+      });
     }
 
     if (kanbanProgramacaoId) {
