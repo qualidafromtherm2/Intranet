@@ -1346,7 +1346,7 @@
                 <div id="movimScanEnderecoMira" class="movim-scan-mira"></div>
               </div>
             </div>
-            <div id="movimScanEnderecoStatus" class="movim-scan-status">Aponte a camera para o codigo do endereco.</div>
+            <div id="movimScanEnderecoStatus" class="movim-scan-status">Alinhe o codigo de barras na faixa horizontal (ou QR Code no centro).</div>
             <div class="movim-scan-manual">
               <input id="movimScanEnderecoInput" type="text" placeholder="Ou digite o endereco manualmente..." autocomplete="off">
               <button id="movimScanEnderecoOk" type="button"><i class="fa-solid fa-check"></i></button>
@@ -10707,10 +10707,10 @@
     </div>
     <!-- Viewport da câmera -->
     <div style="position:relative;background:#000;width:100%;aspect-ratio:4/3;overflow:hidden;">
-      <video id="etqArmazenarVideo" autoplay playsinline muted style="width:100%;height:100%;object-fit:cover;display:block;"></video>
-      <!-- Mira de scan -->
+      <video id="etqArmazenarVideo" autoplay playsinline muted style="width:100%;height:100%;object-fit:contain;display:block;background:#000;"></video>
+      <!-- Mira de scan: quadrada (QR) ou horizontal (código de barras) -->
       <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none;">
-        <div id="etqArmazenarMira" style="width:200px;height:200px;border:3px solid rgba(52,211,153,.85);border-radius:12px;box-shadow:0 0 0 3000px rgba(0,0,0,.38);transition:border-color .3s;"></div>
+        <div id="etqArmazenarMira" style="width:200px;height:200px;border:3px solid rgba(52,211,153,.85);border-radius:12px;box-shadow:0 0 0 3000px rgba(0,0,0,.38);transition:border-color .3s,width .25s,height .25s,border-radius .25s;"></div>
       </div>
     </div>
     <!-- Status do passo atual -->

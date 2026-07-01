@@ -29250,10 +29250,42 @@ window.openRegistros = async function() {
     if (etqArmazenarVideo) etqArmazenarVideo.srcObject = null;
   }
 
+  function _armAtualizarMira() {
+    if (!etqArmazenarMira) return;
+    if (_armStep === 2) {
+      etqArmazenarMira.style.width = 'min(88%, 320px)';
+      etqArmazenarMira.style.height = '88px';
+      etqArmazenarMira.style.borderRadius = '8px';
+    } else {
+      etqArmazenarMira.style.width = '200px';
+      etqArmazenarMira.style.height = '200px';
+      etqArmazenarMira.style.borderRadius = '12px';
+    }
+  }
+
+  function _armCropRegion() {
+    const vw = etqArmazenarVideo?.videoWidth || 0;
+    const vh = etqArmazenarVideo?.videoHeight || 0;
+    if (!vw || !vh) return null;
+    if (_armStep === 2) {
+      const w = Math.round(vw * 0.88);
+      const h = Math.round(vh * 0.30);
+      return { sx: Math.round((vw - w) / 2), sy: Math.round((vh - h) / 2), sw: w, sh: h };
+    }
+    const size = Math.round(Math.min(vw, vh) * 0.65);
+    return { sx: Math.round((vw - size) / 2), sy: Math.round((vh - size) / 2), sw: size, sh: size };
+  }
+
   async function _armIniciarCamera() {
     await _armPararCamera();
     try {
-      _armStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+      _armStream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          facingMode: 'environment',
+          width: { ideal: 1920 },
+          height: { ideal: 1080 },
+        },
+      });
       if (etqArmazenarVideo) {
         etqArmazenarVideo.srcObject = _armStream;
         await etqArmazenarVideo.play().catch(() => {});
@@ -29277,22 +29309,25 @@ window.openRegistros = async function() {
       }
       return;
     }
-    const detector = new BarcodeDetector({
-      formats: ['qr_code', 'code_128', 'code_39', 'ean_13', 'ean_8', 'upc_a', 'data_matrix']
-    });
+    const formats = _armStep === 2
+      ? ['code_128', 'code_39', 'ean_13', 'ean_8', 'upc_a', 'codabar', 'itf', 'data_matrix']
+      : ['qr_code', 'data_matrix'];
+    const detector = new BarcodeDetector({ formats });
     const canvas = document.createElement('canvas');
     const ctx = canvas.getContext('2d');
+    const intervalMs = _armStep === 2 ? 180 : 250;
     _armScanInterval = setInterval(async () => {
       if (!etqArmazenarVideo || etqArmazenarVideo.readyState < 2) return;
-      canvas.width  = etqArmazenarVideo.videoWidth;
-      canvas.height = etqArmazenarVideo.videoHeight;
-      ctx.drawImage(etqArmazenarVideo, 0, 0);
+      const crop = _armCropRegion();
+      if (!crop) return;
+      canvas.width = crop.sw;
+      canvas.height = crop.sh;
+      ctx.drawImage(etqArmazenarVideo, crop.sx, crop.sy, crop.sw, crop.sh, 0, 0, crop.sw, crop.sh);
       try {
         const barcodes = await detector.detect(canvas);
         if (barcodes.length > 0) {
           clearInterval(_armScanInterval);
           _armScanInterval = null;
-          // Pisca mira em verde
           if (etqArmazenarMira) {
             etqArmazenarMira.style.borderColor = '#4ade80';
             setTimeout(() => { if (etqArmazenarMira) etqArmazenarMira.style.borderColor = 'rgba(52,211,153,.85)'; }, 600);
@@ -29300,7 +29335,7 @@ window.openRegistros = async function() {
           onDetect(barcodes[0].rawValue);
         }
       } catch (_) {}
-    }, 250);
+    }, intervalMs);
   }
 
   function _armProcessarCodigo(valor) {
@@ -29321,10 +29356,11 @@ window.openRegistros = async function() {
       }
       _armIdImpresso = id;
       _armStep = 2;
+      _armAtualizarMira();
       // Atualiza UI para passo 2
       if (etqArmazenarTitle)  etqArmazenarTitle.textContent  = 'Leia o código do local';
       if (etqArmazenarIcone)  { etqArmazenarIcone.className = 'fa-solid fa-barcode'; etqArmazenarIcone.style.color = '#a78bfa'; }
-      if (etqArmazenarStatus) { etqArmazenarStatus.textContent = `Produto ID ${id} lido. Aponte para o código de barras do local.`; etqArmazenarStatus.style.color = '#4ade80'; }
+      if (etqArmazenarStatus) { etqArmazenarStatus.textContent = `Produto ID ${id} lido. Alinhe o código de barras na faixa horizontal.`; etqArmazenarStatus.style.color = '#4ade80'; }
       if (etqArmazenarInput)  { etqArmazenarInput.placeholder = 'Ou digite o local manualmente...'; etqArmazenarInput.value = ''; etqArmazenarInput.focus(); }
       _armIniciarScan(_armProcessarCodigo);
     } else {
@@ -29382,6 +29418,7 @@ window.openRegistros = async function() {
     if (etqArmazenarInput)       { etqArmazenarInput.placeholder = 'Ou digite o código manualmente...'; etqArmazenarInput.value = ''; }
     if (etqArmazenarComplemento) etqArmazenarComplemento.value = '';
     if (etqArmazenarMira)        etqArmazenarMira.style.borderColor = 'rgba(52,211,153,.85)';
+    _armAtualizarMira();
     if (etqArmazenarModal)       etqArmazenarModal.style.display = 'flex';
     const ok = await _armIniciarCamera();
     if (ok) _armIniciarScan(_armProcessarCodigo);
@@ -29390,9 +29427,10 @@ window.openRegistros = async function() {
   async function _armAbrirComId(id) {
     _armStep = 2;
     _armIdImpresso = id;
+    _armAtualizarMira();
     if (etqArmazenarTitle)  etqArmazenarTitle.textContent  = 'Leia o código do local';
     if (etqArmazenarIcone)  { etqArmazenarIcone.className = 'fa-solid fa-barcode'; etqArmazenarIcone.style.color = '#a78bfa'; }
-    if (etqArmazenarStatus) { etqArmazenarStatus.textContent = `Produto ID ${id} selecionado. Aponte para o código de barras do local.`; etqArmazenarStatus.style.color = '#4ade80'; }
+    if (etqArmazenarStatus) { etqArmazenarStatus.textContent = `Produto ID ${id} selecionado. Alinhe o código de barras na faixa horizontal.`; etqArmazenarStatus.style.color = '#4ade80'; }
     if (etqArmazenarInput)       { etqArmazenarInput.placeholder = 'Ou digite o local manualmente...'; etqArmazenarInput.value = ''; etqArmazenarInput.focus(); }
     if (etqArmazenarComplemento) etqArmazenarComplemento.value = '';
     if (etqArmazenarMira)        etqArmazenarMira.style.borderColor = 'rgba(52,211,153,.85)';
@@ -67462,15 +67500,38 @@ document.addEventListener('DOMContentLoaded', () => {
     if (scanInput) scanInput.value = '';
     _scanModo = 'geral';
     if (scanStatus) {
-      scanStatus.textContent = 'Aponte a camera para o codigo do endereco.';
+      scanStatus.textContent = 'Alinhe o codigo de barras na faixa horizontal (ou QR Code no centro).';
       scanStatus.style.color = '#94a3b8';
     }
+  }
+
+  function _scanCropHorizontal() {
+    const vw = scanVideo?.videoWidth || 0;
+    const vh = scanVideo?.videoHeight || 0;
+    if (!vw || !vh) return null;
+    const w = Math.round(vw * 0.88);
+    const h = Math.round(vh * 0.30);
+    return { sx: Math.round((vw - w) / 2), sy: Math.round((vh - h) / 2), sw: w, sh: h };
+  }
+
+  function _scanCropSquare() {
+    const vw = scanVideo?.videoWidth || 0;
+    const vh = scanVideo?.videoHeight || 0;
+    if (!vw || !vh) return null;
+    const size = Math.round(Math.min(vw, vh) * 0.65);
+    return { sx: Math.round((vw - size) / 2), sy: Math.round((vh - size) / 2), sw: size, sh: size };
   }
 
   async function iniciarScanEndereco() {
     await pararScanEndereco();
     try {
-      _scanStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+      _scanStream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          facingMode: 'environment',
+          width: { ideal: 1920 },
+          height: { ideal: 1080 },
+        },
+      });
       if (scanVideo) {
         scanVideo.srcObject = _scanStream;
         await scanVideo.play().catch(() => {});
@@ -67494,16 +67555,23 @@ document.addEventListener('DOMContentLoaded', () => {
       }
       return;
     }
-    const detector = new BarcodeDetector({
-      formats: ['qr_code', 'code_128', 'code_39', 'ean_13', 'ean_8', 'upc_a', 'data_matrix']
+    const detectorBarcode = new BarcodeDetector({
+      formats: ['code_128', 'code_39', 'ean_13', 'ean_8', 'upc_a', 'codabar', 'itf', 'data_matrix']
     });
+    const detectorQr = new BarcodeDetector({ formats: ['qr_code', 'data_matrix'] });
     const canvas = document.createElement('canvas');
     const ctx = canvas.getContext('2d');
+    let _scanFrameToggle = 0;
     _scanInterval = setInterval(async () => {
       if (!scanVideo || scanVideo.readyState < 2) return;
-      canvas.width = scanVideo.videoWidth;
-      canvas.height = scanVideo.videoHeight;
-      ctx.drawImage(scanVideo, 0, 0);
+      const useHorizontal = (_scanFrameToggle % 2 === 0);
+      _scanFrameToggle++;
+      const crop = useHorizontal ? _scanCropHorizontal() : _scanCropSquare();
+      if (!crop) return;
+      canvas.width = crop.sw;
+      canvas.height = crop.sh;
+      ctx.drawImage(scanVideo, crop.sx, crop.sy, crop.sw, crop.sh, 0, 0, crop.sw, crop.sh);
+      const detector = useHorizontal ? detectorBarcode : detectorQr;
       try {
         const barcodes = await detector.detect(canvas);
         if (barcodes.length > 0) {
@@ -67516,7 +67584,7 @@ document.addEventListener('DOMContentLoaded', () => {
           registrarEnderecoLido(barcodes[0].rawValue);
         }
       } catch { /* ignora frame */ }
-    }, 250);
+    }, 180);
   }
 
   function registrarEnderecoLido(valor) {
@@ -67562,6 +67630,10 @@ document.addEventListener('DOMContentLoaded', () => {
           ? 'Digite o endereco de destino...'
           : 'Ou digite o endereco manualmente...';
       scanInput.value = '';
+    }
+    if (scanStatus) {
+      scanStatus.textContent = 'Alinhe o codigo de barras na faixa horizontal (ou QR Code no centro).';
+      scanStatus.style.color = '#94a3b8';
     }
     scanModal.style.display = 'flex';
     const ok = await iniciarScanEndereco();

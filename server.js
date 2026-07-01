@@ -11092,7 +11092,9 @@ async function _etqResolveProdutoCampos(db, { codigoTexto, codigoOmie, descricao
   const ref = linhaReferencia || null;
   let codigo = String(codigoOmie || ref?.codigo_produto || '').trim();
   if (!codigo && codigoTexto) {
-    codigo = String(await _resolveProdutoOmieCodigoProduto(db, codigoTexto) || '').trim();
+    const resolved = await _resolveProdutoOmieCodigoProduto(db, codigoTexto);
+    // Produto pode ainda não existir em produtos_omie — usa o código da etiqueta para permitir impressão.
+    codigo = String(resolved || codigoTexto).trim();
   }
   let desc = String(descricao || ref?.descricao_produto || '').trim();
   if (!desc && codigo) {
@@ -12306,6 +12308,25 @@ async function _logisticaBuscarCmcOmieSeparacao(client, codigo, localCod) {
   return cmc && cmc > 0 ? cmc : null;
 }
 
+function _logisticaNomeUsuarioReq(req) {
+  return String(req?.session?.user?.username || req?.session?.user?.nome || '').trim();
+}
+
+/** Texto enviado no campo obs do ajuste TRF Omie (separação / retificação). Evita caracteres não-ASCII (ex.: →). */
+function _omieObsTrfSeparacaoLogistica({ n_solic, codigo, origem, destino, qtd, nomeDest, usuario, retificacao = false }) {
+  const sepNum = String(n_solic || '').trim();
+  const sepPart = sepNum ? `${sepNum} ` : '';
+  const userPart = String(usuario || '').trim();
+  const destPart = String(nomeDest || '').trim();
+  let text;
+  if (retificacao) {
+    text = `Retificar SEP ${sepPart}logística ${codigo}: estorno ${destino} ${origem} (${qtd})${userPart ? ` por ${userPart}` : ''}`;
+  } else {
+    text = `SEP ${sepPart}logística ${codigo}: ${origem} ${destino} (${qtd})${destPart ? ` ${destPart}` : ''}${userPart ? ` por ${userPart}` : ''}`;
+  }
+  return text.replace(/\s+/g, ' ').trim().slice(0, 200);
+}
+
 async function _omieIncluirTrfEstoqueSeparacao({ origem, destino, id_prod, codigo_texto, qtd, obs }) {
   if (!OMIE_APP_KEY || !OMIE_APP_SECRET) {
     const err = new Error('Credenciais Omie não configuradas no servidor.');
@@ -12413,7 +12434,7 @@ async function _logisticaPersistirTrfOmieSeparacao(client, solicIds, { origem, d
   }
 }
 
-async function _logisticaExecutarTrfOmieSeparacao(client, solicIds, { cod_local_origem, qtd }) {
+async function _logisticaExecutarTrfOmieSeparacao(client, solicIds, { cod_local_origem, qtd, nome_user }) {
   const origem = String(cod_local_origem || '').trim();
   if (!origem) {
     const err = new Error('Selecione o armazém de origem para registrar a transferência na Omie.');
@@ -12425,7 +12446,7 @@ async function _logisticaExecutarTrfOmieSeparacao(client, solicIds, { cod_local_
   if (!ids.length) return;
 
   const { rows } = await client.query(
-    `SELECT i.id, i.cod_local, i.nome_local, c.codigo_produto, c.quantidade::numeric AS qty
+    `SELECT i.id, i.n_solic, i.cod_local, i.nome_local, c.codigo_produto, c.quantidade::numeric AS qty
        FROM solicitacao_produto.itens_solicitados i
        JOIN logistica.carrinho c ON c.id = i.id_carr
       WHERE i.id = ANY($1::bigint[])`,
@@ -12452,7 +12473,13 @@ async function _logisticaExecutarTrfOmieSeparacao(client, solicIds, { cod_local_
     const codigoTexto = String(row.codigo_produto || '').trim();
     const key = `${destino}|${codigoTexto}`;
     if (!grupos.has(key)) {
-      grupos.set(key, { destino, codigoTexto, qtd: 0, ids: [] });
+      grupos.set(key, {
+        destino,
+        codigoTexto,
+        n_solic: String(row.n_solic || '').trim(),
+        qtd: 0,
+        ids: []
+      });
     }
     let itemQtd = parseFloat(row.qty) || 0;
     if (Number.isFinite(qtdInformada) && qtdInformada > 0) {
@@ -12479,7 +12506,15 @@ async function _logisticaExecutarTrfOmieSeparacao(client, solicIds, { cod_local_
       id_prod: idProd,
       codigo_texto: g.codigoTexto,
       qtd: g.qtd,
-      obs: `SEP logística ${g.codigoTexto}: ${origem} → ${g.destino} (${g.qtd}) ${nomeDest || ''}`.trim()
+      obs: _omieObsTrfSeparacaoLogistica({
+        n_solic: g.n_solic,
+        codigo: g.codigoTexto,
+        origem,
+        destino: g.destino,
+        qtd: g.qtd,
+        nomeDest,
+        usuario: nome_user
+      })
     });
     await _logisticaPersistirTrfOmieSeparacao(client, g.ids, {
       origem,
@@ -12491,13 +12526,13 @@ async function _logisticaExecutarTrfOmieSeparacao(client, solicIds, { cod_local_
   }
 }
 
-async function _logisticaEstornarTrfOmieSeparacao(client, solicIds) {
+async function _logisticaEstornarTrfOmieSeparacao(client, solicIds, { nome_user } = {}) {
   const ids = (solicIds || []).map(id => parseInt(id, 10)).filter(id => !isNaN(id));
   if (!ids.length) return;
   await _ensureOmieSepColumns(client);
 
   const { rows } = await client.query(
-    `SELECT id, omie_sep_origem, omie_sep_destino, omie_sep_qtd, omie_sep_codigo_produto, omie_sep_codigo
+    `SELECT id, n_solic, omie_sep_origem, omie_sep_destino, omie_sep_qtd, omie_sep_codigo_produto, omie_sep_codigo
        FROM solicitacao_produto.itens_solicitados
       WHERE id = ANY($1::bigint[])
         AND omie_sep_origem IS NOT NULL
@@ -12516,7 +12551,14 @@ async function _logisticaEstornarTrfOmieSeparacao(client, solicIds) {
     if (!orig || !dest || orig === dest) continue;
     const key = `${orig}|${dest}|${idProd}|${cod}`;
     if (!grupos.has(key)) {
-      grupos.set(key, { origem: orig, destino: dest, id_prod: idProd, codigo: cod, qtd: 0 });
+      grupos.set(key, {
+        origem: orig,
+        destino: dest,
+        id_prod: idProd,
+        codigo: cod,
+        n_solic: String(r.n_solic || '').trim(),
+        qtd: 0
+      });
     }
     grupos.get(key).qtd += parseFloat(r.omie_sep_qtd) || 0;
   }
@@ -12529,7 +12571,15 @@ async function _logisticaEstornarTrfOmieSeparacao(client, solicIds) {
       id_prod: g.id_prod,
       codigo_texto: g.codigo,
       qtd: g.qtd,
-      obs: `Retificar SEP ${g.codigo}: estorno ${g.destino} → ${g.origem} (${g.qtd})`
+      obs: _omieObsTrfSeparacaoLogistica({
+        n_solic: g.n_solic,
+        codigo: g.codigo,
+        origem: g.origem,
+        destino: g.destino,
+        qtd: g.qtd,
+        usuario: nome_user,
+        retificacao: true
+      })
     });
   }
 
@@ -17954,7 +18004,7 @@ app.patch('/api/logistica/itens_solicitados/reverter-separacao', async (req, res
     await client.query('BEGIN');
 
     await _etqEstornarDebitoSeparacao(client, ids);
-    await _logisticaEstornarTrfOmieSeparacao(client, ids);
+    await _logisticaEstornarTrfOmieSeparacao(client, ids, { nome_user: _logisticaNomeUsuarioReq(req) });
 
     // Restaura quantidade original do pedido no carrinho (quando houve Informar qtd)
     const { rows: restaurados } = await client.query(
@@ -18152,7 +18202,8 @@ app.patch('/api/logistica/itens_solicitados/separar', async (req, res) => {
     }
     await _logisticaExecutarTrfOmieSeparacao(client, ids, {
       cod_local_origem,
-      qtd
+      qtd,
+      nome_user: _logisticaNomeUsuarioReq(req)
     });
     const posSep = await _logisticaAplicarStatusPosSeparacao(client, ids, req);
     if (etqDebit?.endereco) {
@@ -18298,7 +18349,11 @@ app.post('/api/logistica/itens_solicitados/separar-parcial', async (req, res) =>
       }
 
       if (sIds.length > 0) {
-        await _logisticaExecutarTrfOmieSeparacao(client, sIds, { cod_local_origem, qtd: qtySep });
+        await _logisticaExecutarTrfOmieSeparacao(client, sIds, {
+          cod_local_origem,
+          qtd: qtySep,
+          nome_user: _logisticaNomeUsuarioReq(req)
+        });
         await _logisticaAplicarStatusPosSeparacao(client, sIds, req);
         if (etqDebit?.endereco) await _etqPersistirDebitoSeparacao(client, sIds, etqDebit);
       } else {
@@ -18307,7 +18362,11 @@ app.post('/api/logistica/itens_solicitados/separar-parcial', async (req, res) =>
           [primaryId]
         );
         const idsSep = solRows.map(r => r.id);
-        await _logisticaExecutarTrfOmieSeparacao(client, idsSep, { cod_local_origem, qtd: qtySep });
+        await _logisticaExecutarTrfOmieSeparacao(client, idsSep, {
+          cod_local_origem,
+          qtd: qtySep,
+          nome_user: _logisticaNomeUsuarioReq(req)
+        });
         await _logisticaAplicarStatusPosSeparacaoPorCarr(client, [primaryId], req);
         if (etqDebit?.endereco) {
           await _etqPersistirDebitoSeparacao(client, idsSep, etqDebit);
@@ -18428,7 +18487,8 @@ app.post('/api/logistica/itens_solicitados/separar-parcial', async (req, res) =>
       const idsKeptSep = solKeptRows.map(r => r.id);
       await _logisticaExecutarTrfOmieSeparacao(client, idsKeptSep.length ? idsKeptSep : sIds, {
         cod_local_origem,
-        qtd: qtySep
+        qtd: qtySep,
+        nome_user: _logisticaNomeUsuarioReq(req)
       });
 
       await _logisticaAplicarStatusPosSeparacaoPorCarr(client, [primaryKeptId], req);
