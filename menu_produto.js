@@ -131,6 +131,30 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 });
 
+// Central mobile: mantém o início simples e reutiliza os fluxos legados já validados.
+document.addEventListener('DOMContentLoaded', () => {
+  document.querySelectorAll('[data-mobile-operation]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const operation = button.dataset.mobileOperation;
+
+      if (operation === 'identification') {
+        document.getElementById('menu-identificacao-produto')?.click();
+        return;
+      }
+
+      const productListButton = document.getElementById('btn-omie-list1');
+      if (!productListButton) return;
+      productListButton.click();
+
+      if (operation === 'separation') {
+        window.setTimeout(() => {
+          document.querySelector('.lp-tab-btn[data-lp-tab="solicitacoesConteudo"]')?.click();
+        }, 50);
+      }
+    });
+  });
+});
+
 // ============================================================================
 // GUIAS: Lista de produtos / Solicitações
 // ============================================================================
@@ -44330,37 +44354,47 @@ window.renderizarCatalogoOmie = renderizarCatalogoOmie;
   ov.id = 'modalAcoesProdutoOverlay';
   ov.style.cssText = 'display:none;position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.55);align-items:center;justify-content:center;';
   ov.innerHTML = `
-    <div id="modalAcoesProdutoBox" style="background:#fff;border-radius:12px;width:420px;max-width:92vw;max-height:90vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,.3);animation:fadeInScale .2s ease;">
+    <div id="modalAcoesProdutoBox" class="produto-acoes-panel" role="dialog" aria-modal="true" aria-labelledby="modalAcoesTitulo" style="background:#fff;border-radius:12px;width:420px;max-width:92vw;max-height:90vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,.3);animation:fadeInScale .2s ease;">
       <!-- Cabeçalho -->
-      <div style="padding:16px 20px;border-bottom:1px solid #e5e7eb;display:flex;align-items:center;justify-content:space-between;">
+      <div class="produto-acoes-header" style="padding:16px 20px;border-bottom:1px solid #e5e7eb;display:flex;align-items:center;justify-content:space-between;">
         <div>
           <div id="modalAcoesTitulo" style="font-size:15px;font-weight:700;color:#1f2937;"></div>
           <div id="modalAcoesDescricao" style="font-size:11px;color:#6b7280;margin-top:2px;max-width:300px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"></div>
         </div>
-        <button id="modalAcoesFechar" style="background:none;border:none;font-size:20px;color:#9ca3af;cursor:pointer;padding:4px;" title="Fechar">&times;</button>
+        <button id="modalAcoesFechar" type="button" aria-label="Fechar ações do produto" style="background:none;border:none;font-size:20px;color:#9ca3af;cursor:pointer;padding:4px;" title="Fechar">&times;</button>
       </div>
       <!-- Conteúdo: Botões de ação -->
-      <div id="modalAcoesBotoes" style="padding:16px 20px;display:flex;flex-direction:column;gap:10px;">
-        <div style="display:grid;grid-template-columns:1fr 80px 1fr;gap:8px;align-items:stretch;">
-          <button id="modalAcoesBtnCarrinho" style="background:linear-gradient(135deg,#10b981,#059669);color:#fff;border:none;padding:10px;border-radius:6px;cursor:pointer;font-size:13px;font-weight:600;display:flex;align-items:center;justify-content:center;gap:6px;">
-            <i class="fa-solid fa-cart-plus"></i> Adicionar ao Carrinho
+      <div id="modalAcoesBotoes" style="padding:18px 20px 20px;display:flex;flex-direction:column;gap:12px;">
+        <div style="font-size:12px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:#64748b;">Escolha a ação</div>
+        <div class="produto-acoes-grid" style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;">
+          <button id="modalAcoesBtnCarrinho" type="button" style="background:linear-gradient(135deg,#ecfdf5,#d1fae5);color:#065f46;border:1px solid #a7f3d0;padding:14px 12px;border-radius:12px;cursor:pointer;display:flex;flex-direction:column;align-items:flex-start;gap:8px;text-align:left;">
+            <span style="width:42px;height:42px;border-radius:12px;background:#10b981;color:#fff;display:inline-flex;align-items:center;justify-content:center;font-size:18px;"><i class="fa-solid fa-cart-plus"></i></span>
+            <span style="font-size:14px;font-weight:700;line-height:1.2;">Compra</span>
+            <span style="font-size:11px;color:#047857;line-height:1.35;">Informar quantidade para adicionar ao carrinho</span>
           </button>
-          <input type="number" id="modalAcoesQtd" min="1" value="1" style="width:100%;padding:10px;border:1px solid #d1d5db;border-radius:6px;font-size:16px;line-height:1.1;text-align:center;box-sizing:border-box;min-height:40px;" />
-          <button id="modalAcoesBtnSeparacao" style="background:linear-gradient(135deg,#f59e0b,#d97706);color:#1a1200;border:none;padding:10px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600;display:flex;align-items:center;justify-content:center;gap:6px;">
-            <i class="fa-solid fa-clipboard-list"></i> Adicionar separação
+          <button id="modalAcoesBtnSeparacao" type="button" style="background:linear-gradient(135deg,#fff7ed,#ffedd5);color:#9a3412;border:1px solid #fdba74;padding:14px 12px;border-radius:12px;cursor:pointer;display:flex;flex-direction:column;align-items:flex-start;gap:8px;text-align:left;">
+            <span style="width:42px;height:42px;border-radius:12px;background:#f59e0b;color:#fff;display:inline-flex;align-items:center;justify-content:center;font-size:18px;"><i class="fa-solid fa-clipboard-list"></i></span>
+            <span style="font-size:14px;font-weight:700;line-height:1.2;">Separação</span>
+            <span style="font-size:11px;color:#c2410c;line-height:1.35;">Abrir quantidade para solicitar separação</span>
+          </button>
+          <button id="modalAcoesBtnMovimentar" type="button" style="background:linear-gradient(135deg,#eef2ff,#e0e7ff);color:#3730a3;border:1px solid #c7d2fe;padding:14px 12px;border-radius:12px;cursor:pointer;display:flex;flex-direction:column;align-items:flex-start;gap:8px;text-align:left;">
+            <span style="width:42px;height:42px;border-radius:12px;background:#4f46e5;color:#fff;display:inline-flex;align-items:center;justify-content:center;font-size:18px;"><i class="fa-solid fa-arrows-rotate"></i></span>
+            <span style="font-size:14px;font-weight:700;line-height:1.2;">Movimentação</span>
+            <span style="font-size:11px;color:#4338ca;line-height:1.35;">Entradas, saídas, transferências e ajustes</span>
+          </button>
+          <button id="modalAcoesBtnCompras" type="button" style="background:linear-gradient(135deg,#f5f3ff,#ede9fe);color:#6d28d9;border:1px solid #d8b4fe;padding:14px 12px;border-radius:12px;cursor:pointer;display:flex;flex-direction:column;align-items:flex-start;gap:8px;text-align:left;">
+            <span style="width:42px;height:42px;border-radius:12px;background:#7c3aed;color:#fff;display:inline-flex;align-items:center;justify-content:center;font-size:18px;"><i class="fa-solid fa-receipt"></i></span>
+            <span style="font-size:14px;font-weight:700;line-height:1.2;">Últimas compras</span>
+            <span style="font-size:11px;color:#7c3aed;line-height:1.35;">Consultar histórico recente de compra</span>
+          </button>
+          <button id="modalAcoesBtnManual" type="button" style="grid-column:1 / -1;background:linear-gradient(135deg,#eff6ff,#dbeafe);color:#075985;border:1px solid #93c5fd;padding:14px 12px;border-radius:12px;cursor:pointer;display:flex;align-items:center;gap:12px;text-align:left;">
+            <span style="width:42px;height:42px;border-radius:12px;background:#0ea5e9;color:#fff;display:inline-flex;align-items:center;justify-content:center;font-size:18px;flex:0 0 auto;"><i class="fa-solid fa-book"></i></span>
+            <span style="display:flex;flex-direction:column;gap:4px;min-width:0;">
+              <span style="font-size:14px;font-weight:700;line-height:1.2;">Manual de instrução</span>
+              <span style="font-size:11px;color:#0369a1;line-height:1.35;">Abrir, consultar ou anexar manuais do produto</span>
+            </span>
           </button>
         </div>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
-          <button id="modalAcoesBtnCompras" style="background:#ede9fe;color:#7c3aed;border:1px solid #c4b5fd;padding:10px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600;display:flex;align-items:center;justify-content:center;gap:6px;">
-            <i class="fa-solid fa-receipt"></i> Últimas Compras
-          </button>
-          <button id="modalAcoesBtnMovimentar" style="background:linear-gradient(135deg,#6366f1,#4f46e5);color:#fff;border:none;padding:10px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600;display:flex;align-items:center;justify-content:center;gap:6px;">
-            <i class="fa-solid fa-arrows-rotate"></i> Movimentar
-          </button>
-        </div>
-        <button id="modalAcoesBtnManual" style="background:linear-gradient(135deg,#0ea5e9,#0284c7);color:#fff;border:none;padding:10px;border-radius:6px;cursor:pointer;font-size:13px;font-weight:600;display:flex;align-items:center;justify-content:center;gap:6px;">
-          <i class="fa-solid fa-book"></i> Manual de Instrução
-        </button>
       </div>
       <!-- Conteúdo: Tela de Manuais (oculta por padrão) -->
       <div id="modalAcoesManuais" style="display:none;padding:16px 20px;">
@@ -44385,35 +44419,55 @@ window.renderizarCatalogoOmie = renderizarCatalogoOmie;
   `;
   document.body.appendChild(ov);
 
-  if (!document.getElementById('modalAcoesQtdSpinStyle')) {
-    const spinStyle = document.createElement('style');
-    spinStyle.id = 'modalAcoesQtdSpinStyle';
-    spinStyle.textContent = `
-      #modalAcoesQtd::-webkit-outer-spin-button,
-      #modalAcoesQtd::-webkit-inner-spin-button {
-        width: 24px;
-        height: 24px;
-        transform: scale(1.18);
-        opacity: 1;
-        cursor: pointer;
-      }
-    `;
-    document.head.appendChild(spinStyle);
-  }
+  const qtyOverlay = document.createElement('div');
+  qtyOverlay.id = 'modalAcoesQtdOverlay';
+  qtyOverlay.style.cssText = 'display:none;position:fixed;inset:0;z-index:10001;background:rgba(0,0,0,.62);align-items:center;justify-content:center;padding:20px;';
+  qtyOverlay.innerHTML = `
+    <div role="dialog" aria-modal="true" aria-labelledby="modalAcoesQtdTitulo" style="width:min(360px,92vw);background:#fff;border-radius:18px;box-shadow:0 26px 70px rgba(0,0,0,.34);padding:18px 18px 16px;display:flex;flex-direction:column;gap:12px;">
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:10px;">
+        <div style="min-width:0;">
+          <div id="modalAcoesQtdTitulo" style="font-size:16px;font-weight:800;color:#0f172a;"></div>
+          <div id="modalAcoesQtdProduto" style="font-size:12px;color:#64748b;line-height:1.4;margin-top:4px;"></div>
+        </div>
+        <button id="modalAcoesQtdFechar" type="button" aria-label="Fechar quantidade" style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:999px;width:38px;height:38px;cursor:pointer;color:#64748b;font-size:18px;flex:0 0 auto;">&times;</button>
+      </div>
+      <label for="modalAcoesQtdInput" style="font-size:12px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:#64748b;">Quantidade</label>
+      <input id="modalAcoesQtdInput" type="number" inputmode="decimal" autocomplete="off" placeholder="Digite a quantidade" style="width:100%;box-sizing:border-box;padding:14px 16px;border:1px solid #cbd5e1;border-radius:14px;font-size:20px;font-weight:700;color:#0f172a;background:#fff;" />
+      <div id="modalAcoesQtdErro" style="display:none;font-size:12px;color:#dc2626;font-weight:600;"></div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+        <button id="modalAcoesQtdCancelar" type="button" style="min-height:46px;border-radius:12px;border:1px solid #cbd5e1;background:#fff;color:#334155;font-size:14px;font-weight:700;cursor:pointer;">Cancelar</button>
+        <button id="modalAcoesQtdConfirmar" type="button" style="min-height:46px;border-radius:12px;border:none;background:linear-gradient(135deg,#2563eb,#1d4ed8);color:#fff;font-size:14px;font-weight:700;cursor:pointer;">Confirmar</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(qtyOverlay);
 
   let _ctx = {};
+  let _returnFocus = null;
+  let _qtyCtx = null;
+
+  function getSeparacaoTileHtml() {
+    return `
+      <span style="width:42px;height:42px;border-radius:12px;background:#f59e0b;color:#fff;display:inline-flex;align-items:center;justify-content:center;font-size:18px;"><i class="fa-solid fa-clipboard-list"></i></span>
+      <span style="font-size:14px;font-weight:700;line-height:1.2;">Separação</span>
+      <span style="font-size:11px;color:#c2410c;line-height:1.35;">Abrir quantidade para solicitar separação</span>
+    `;
+  }
 
   function resetBotaoSeparacao() {
     const btn = document.getElementById('modalAcoesBtnSeparacao');
     if (!btn) return;
     btn.disabled = false;
-    btn.innerHTML = '<i class="fa-solid fa-clipboard-list"></i> Adicionar separação';
+    btn.innerHTML = getSeparacaoTileHtml();
   }
 
   function fechar() {
     ov.style.display = 'none';
+    document.body.classList.remove('mobile-modal-open');
     _ctx = {};
     resetBotaoSeparacao();
+    _returnFocus?.focus?.({ preventScroll: true });
+    _returnFocus = null;
   }
 
   function mostrarBotoes() {
@@ -44425,6 +44479,118 @@ window.renderizarCatalogoOmie = renderizarCatalogoOmie;
     document.getElementById('modalAcoesBotoes').style.display = 'none';
     document.getElementById('modalAcoesManuais').style.display = 'block';
     carregarManuaisProduto(_ctx.codigo);
+  }
+
+  function fecharQuantidade() {
+    qtyOverlay.style.display = 'none';
+    document.body.classList.remove('mobile-modal-open');
+    _qtyCtx = null;
+    document.getElementById('modalAcoesQtdErro').style.display = 'none';
+    document.getElementById('modalAcoesQtdErro').textContent = '';
+    document.getElementById('modalAcoesQtdInput').value = '';
+  }
+
+  function obterQuantidadeModal() {
+    const input = document.getElementById('modalAcoesQtdInput');
+    const erro = document.getElementById('modalAcoesQtdErro');
+    const raw = String(input?.value || '').trim().replace(',', '.');
+    const valor = Number(raw);
+    if (!raw || !Number.isFinite(valor) || valor <= 0) {
+      if (erro) {
+        erro.textContent = 'Informe uma quantidade maior que zero.';
+        erro.style.display = 'block';
+      }
+      input?.focus({ preventScroll: true });
+      return null;
+    }
+    if (erro) {
+      erro.textContent = '';
+      erro.style.display = 'none';
+    }
+    return valor;
+  }
+
+  function abrirQuantidade(tipo) {
+    _qtyCtx = { tipo, ..._ctx };
+    document.getElementById('modalAcoesQtdTitulo').textContent = tipo === 'carrinho'
+      ? 'Quantidade para compra'
+      : 'Quantidade para separação';
+    document.getElementById('modalAcoesQtdProduto').textContent = _ctx.descricao || _ctx.codigo || '';
+    const input = document.getElementById('modalAcoesQtdInput');
+    input.value = '';
+    input.min = String(String(_ctx.unidade || 'UN').toUpperCase() === 'UN' ? 1 : 0.001);
+    input.step = String(String(_ctx.unidade || 'UN').toUpperCase() === 'UN' ? 1 : 0.001);
+    qtyOverlay.style.display = 'flex';
+    document.body.classList.add('mobile-modal-open');
+    requestAnimationFrame(() => {
+      try {
+        input.focus({ preventScroll: true });
+        input.select();
+      } catch {}
+    });
+  }
+
+  async function confirmarQuantidade() {
+    if (!_qtyCtx) return;
+    const qtdRaw = obterQuantidadeModal();
+    if (qtdRaw === null) return;
+
+    const unidadeNorm = String(_qtyCtx.unidade || 'UN').toUpperCase();
+    const qtd = unidadeNorm === 'UN' ? Math.max(1, Math.round(qtdRaw)) : qtdRaw;
+
+    if (_qtyCtx.tipo === 'carrinho') {
+      const tempInput = document.createElement('input');
+      tempInput.id = 'catalogo-qtd-' + _qtyCtx.codigo;
+      tempInput.value = qtd;
+      tempInput.style.display = 'none';
+      document.body.appendChild(tempInput);
+      selecionarProdutoCatalogo(_qtyCtx.codigo, _qtyCtx.descricao);
+      tempInput.remove();
+      fecharQuantidade();
+      fechar();
+      return;
+    }
+
+    const badge = document.getElementById('listaSeparacaoCount');
+    if (badge) {
+      const total = (parseInt(badge.textContent, 10) || 0) + 1;
+      badge.textContent = total;
+      badge.style.display = '';
+    }
+
+    try {
+      const resp = await fetch('/api/logistica/separacao', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          codigo: _qtyCtx.codigo,
+          descricao: _qtyCtx.descricao,
+          quantidade: qtd,
+          unidade: unidadeNorm
+        })
+      });
+      const data = await resp.json();
+      if (!data.ok) throw new Error(data.error || 'tente novamente.');
+      if (data.merged && badge) {
+        const total = Math.max(0, (parseInt(badge.textContent, 10) || 0) - 1);
+        badge.textContent = total;
+        badge.style.display = total > 0 ? '' : 'none';
+      }
+      fecharQuantidade();
+      fechar();
+    } catch (err) {
+      if (badge) {
+        const total = Math.max(0, (parseInt(badge.textContent, 10) || 0) - 1);
+        badge.textContent = total;
+        badge.style.display = total > 0 ? '' : 'none';
+      }
+      const erro = document.getElementById('modalAcoesQtdErro');
+      if (erro) {
+        erro.textContent = 'Erro ao registrar separação: ' + (err.message || err);
+        erro.style.display = 'block';
+      }
+    }
   }
 
   async function carregarManuaisProduto(codigo) {
@@ -44497,104 +44663,42 @@ window.renderizarCatalogoOmie = renderizarCatalogoOmie;
 
   // Event listeners
   ov.addEventListener('click', e => { if (e.target === ov) fechar(); });
+  qtyOverlay.addEventListener('click', e => { if (e.target === qtyOverlay) fecharQuantidade(); });
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && ov.style.display !== 'none') fechar();
+    if (event.key === 'Escape' && qtyOverlay.style.display !== 'none') fecharQuantidade();
+  });
   document.getElementById('modalAcoesFechar').addEventListener('click', fechar);
   document.getElementById('modalAcoesBtnManual').addEventListener('click', mostrarManuais);
   document.getElementById('modalManuaisVoltar').addEventListener('click', mostrarBotoes);
   document.getElementById('modalManualBtnEnviar').addEventListener('click', enviarManual);
+  document.getElementById('modalAcoesQtdFechar').addEventListener('click', fecharQuantidade);
+  document.getElementById('modalAcoesQtdCancelar').addEventListener('click', fecharQuantidade);
+  document.getElementById('modalAcoesQtdConfirmar').addEventListener('click', confirmarQuantidade);
+  document.getElementById('modalAcoesQtdInput').addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') confirmarQuantidade();
+  });
 
   document.getElementById('modalAcoesBtnCompras').addEventListener('click', () => { const {codigo_produto, codigo, descricao} = _ctx; fechar(); abrirModalUltimasCompras(codigo_produto, codigo, descricao); });
-  document.getElementById('modalAcoesBtnSeparacao').addEventListener('click', () => {
-    const qtdInput = document.getElementById('modalAcoesQtd');
-    const unidadeNorm = String(_ctx.unidade || 'UN').toUpperCase();
-    let qtd = Number(String(qtdInput?.value || '').replace(',', '.'));
-    if (!Number.isFinite(qtd) || qtd <= 0) {
-      qtdInput?.focus();
-      return;
-    }
-    if (unidadeNorm === 'UN') {
-      qtd = Math.max(1, Math.round(qtd));
-    }
-
-    // Capta contexto antes de fechar o modal
-    const codigo   = _ctx.codigo;
-    const descricao = _ctx.descricao;
-
-    // Fecha imediatamente — não bloqueia o usuário
+  document.getElementById('modalAcoesBtnSeparacao').addEventListener('click', () => abrirQuantidade('separacao'));
+  document.getElementById('modalAcoesBtnMovimentar').addEventListener('click', () => {
+    const {codigo, descricao, codigo_produto} = _ctx;
     fechar();
-
-    // Atualiza badge otimisticamente (+1 provisório)
-    const badge = document.getElementById('listaSeparacaoCount');
-    if (badge) {
-      const total = (parseInt(badge.textContent) || 0) + 1;
-      badge.textContent = total;
-      badge.style.display = '';
-    }
-
-    // Envia em segundo plano
-    fetch('/api/logistica/separacao', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      credentials: 'include',
-      body: JSON.stringify({ codigo, descricao, quantidade: qtd, unidade: unidadeNorm })
-    })
-    .then(r => r.json())
-    .then(data => {
-      if (!data.ok) throw new Error(data.error || 'tente novamente.');
-      // Se o item foi somado a um existente (merged), desfaz o +1 provisório
-      if (data.merged && badge) {
-        const total = Math.max(0, (parseInt(badge.textContent) || 0) - 1);
-        badge.textContent = total;
-        badge.style.display = total > 0 ? '' : 'none';
-      }
-    })
-    .catch(err => {
-      // Desfaz o +1 provisório e avisa
-      if (badge) {
-        const total = Math.max(0, (parseInt(badge.textContent) || 0) - 1);
-        badge.textContent = total;
-        badge.style.display = total > 0 ? '' : 'none';
-      }
-      console.error('[Separação] Erro ao registrar:', err.message || err);
-      alert('Erro ao registrar separação: ' + (err.message || err));
-    });
+    abrirModalMovimentacao(codigo, descricao, codigo_produto);
   });
-  document.getElementById('modalAcoesBtnMovimentar').addEventListener('click', () => { const {codigo, descricao} = _ctx; fechar(); abrirModalMovimentacao(codigo, descricao); });
-  document.getElementById('modalAcoesBtnCarrinho').addEventListener('click', () => {
-    const qtdInput = document.getElementById('modalAcoesQtd');
-    const unidadeNorm = String(_ctx.unidade || 'UN').toUpperCase();
-    let qtd = Number(String(qtdInput?.value || '').replace(',', '.'));
-    if (!Number.isFinite(qtd) || qtd <= 0) qtd = 1;
-    if (unidadeNorm === 'UN') qtd = Math.max(1, Math.round(qtd));
-    const {codigo, descricao} = _ctx;
-    // Cria input temporário para compatibilidade
-    const tempInput = document.createElement('input');
-    tempInput.id = 'catalogo-qtd-' + codigo;
-    tempInput.value = qtd;
-    tempInput.style.display = 'none';
-    document.body.appendChild(tempInput);
-    selecionarProdutoCatalogo(codigo, descricao);
-    tempInput.remove();
-    fechar();
-  });
+  document.getElementById('modalAcoesBtnCarrinho').addEventListener('click', () => abrirQuantidade('carrinho'));
 
   window.abrirModalAcoesProduto = function(codigo, codigoProduto, descricao, unidade) {
+    _returnFocus = document.activeElement;
     _ctx = { codigo, codigo_produto: codigoProduto, descricao, unidade };
     document.getElementById('modalAcoesTitulo').textContent = codigo;
     document.getElementById('modalAcoesDescricao').textContent = descricao;
     resetBotaoSeparacao();
-    const qtdInput = document.getElementById('modalAcoesQtd');
-    qtdInput.value = 1;
-    const unidadeNorm = String(unidade || 'UN').toUpperCase();
-    if (unidadeNorm === 'UN') {
-      qtdInput.min = '1';
-      qtdInput.step = '1';
-    } else {
-      qtdInput.min = '0.001';
-      qtdInput.step = '0.001';
-    }
     document.getElementById('modalManualStatus').textContent = '';
     mostrarBotoes();
     ov.style.display = 'flex';
+    document.body.classList.add('mobile-modal-open');
+    document.getElementById('modalAcoesBtnCarrinho')?.focus({ preventScroll: true });
   };
 })();
 
@@ -65294,61 +65398,1333 @@ document.addEventListener('DOMContentLoaded', () => {
   window.__atalhoAction['side:log:estoque-minimo'] = () => _abrirEstoqueMinimo(null);
 });
 
-// ===================== MODAL MOVIMENTAÇÃO DE ESTOQUE =====================
+// ===================== MODAL MOVIMENTA��O DE ESTOQUE =====================
 (function () {
   const overlay   = document.getElementById('modalMovimentacao');
   const fecharBtn = document.getElementById('movimFecharBtn');
-  const cancelBtn = document.getElementById('movimCancelarBtn');
-  const salvarBtn = document.getElementById('movimSalvarBtn');
-  const tipoDiv   = document.getElementById('movimTipo');
+  const modoTipoDiv = document.getElementById('movimModoTipo');
+  const executarBtn = document.getElementById('movimExecutarBtn');
   const qtdInput  = document.getElementById('movimQtdInput');
   const qtdResult = document.getElementById('movimQtdResultado');
   const operDiv   = document.getElementById('movimOperadores');
   const localSel  = document.getElementById('movimLocalSelect');
+  const origemSel = document.getElementById('movimOrigemSelect');
+  const calcBtn   = document.getElementById('movimCalcBtn');
+  const calcPopup = document.getElementById('movimCalcPopup');
+  const calcDisp  = document.getElementById('movimCalcDisplay');
+  const scanBtn   = document.getElementById('movimScanEnderecoBtn');
+  const scanOrigemBtn = document.getElementById('movimScanEnderecoOrigemBtn');
+  const scanDestinoBtn = document.getElementById('movimScanEnderecoDestinoBtn');
+  const scanModal = document.getElementById('movimScanEnderecoModal');
+  const scanTitle = document.getElementById('movimScanEnderecoTitle');
+  const scanVideo = document.getElementById('movimScanEnderecoVideo');
+  const scanMira  = document.getElementById('movimScanEnderecoMira');
+  const scanStatus= document.getElementById('movimScanEnderecoStatus');
+  const scanInput = document.getElementById('movimScanEnderecoInput');
+  const scanOkBtn = document.getElementById('movimScanEnderecoOk');
+  const scanFechar= document.getElementById('movimScanEnderecoFechar');
+  const omieMotivoSel = document.getElementById('movimOmieMotivo');
+  const movimEstoqueLocaisEl = document.getElementById('movimEstoqueLocais');
+  let _movimEstoqueLocais = [];
 
-  let tipoAtivo = null;
-
-  function fechar() {
-    if (overlay) overlay.style.display = 'none';
-    tipoAtivo = null;
-    if (qtdInput)  qtdInput.value = '';
-    if (qtdResult) qtdResult.textContent = '';
-    document.querySelectorAll('.movimTipoBtn').forEach(b => b.classList.remove('ativo'));
-    const msg = document.getElementById('movimMensagem');
-    if (msg) { msg.textContent = ''; msg.className = 'movim-mensagem'; }
-    const sol = document.getElementById('movimSolicitante');
-    if (sol) sol.value = '';
-    const apo = document.getElementById('movimApontamento');
-    if (apo) apo.value = '';
+  function renderizarEstoqueModal() {
+    if (!movimEstoqueLocaisEl) return;
+    movimEstoqueLocaisEl.innerHTML = renderHtmlEstoquePorLocal(_movimEstoqueLocais, 'modal');
+    destacarLocaisMovim();
   }
 
-  if (fecharBtn) fecharBtn.addEventListener('click', fechar);
-  if (cancelBtn) cancelBtn.addEventListener('click', fechar);
-  if (overlay)   overlay.addEventListener('click', e => { if (e.target === overlay) fechar(); });
-
-  // Tipo de movimentação
-  if (tipoDiv) {
-    tipoDiv.addEventListener('click', e => {
-      const btn = e.target.closest('.movimTipoBtn');
-      if (!btn) return;
-      document.querySelectorAll('.movimTipoBtn').forEach(b => b.classList.remove('ativo'));
-      btn.classList.add('ativo');
-      tipoAtivo = btn.dataset.type;
+  function destacarLocaisMovim() {
+    if (!movimEstoqueLocaisEl) return;
+    const origem = String(origemSel?.value || '').trim();
+    const destino = String(localSel?.value || '').trim();
+    movimEstoqueLocaisEl.querySelectorAll('.movim-est-linha').forEach(linha => {
+      const cod = String(linha.dataset.localCodigo || '').trim();
+      linha.classList.toggle('movim-est-destaque', cod && (cod === origem || cod === destino));
     });
   }
 
-  // Operadores de quantidade
+  async function carregarEstoqueModal(codigo) {
+    if (!codigo) return;
+    if (movimEstoqueLocaisEl) {
+      movimEstoqueLocaisEl.innerHTML = '<span class="movim-estoque-vazio">Carregando estoque por armaz�m�</span>';
+    }
+    try {
+      const cache = window.__estoqueCardCache?.[codigo];
+      if (window.__estoqueCardCache && codigo in window.__estoqueCardCache) {
+        _movimEstoqueLocais = (cache || []).map(l => ({ ...l }));
+        renderizarEstoqueModal();
+        return;
+      }
+      const resp = await fetch('/api/logistica/estoque/batch?codigos=' + encodeURIComponent(codigo));
+      if (!resp.ok) throw new Error('HTTP ' + resp.status);
+      const json = await resp.json();
+      _movimEstoqueLocais = (json.dados?.[codigo] || []).map(l => ({ ...l }));
+      window.__estoqueCardCache = window.__estoqueCardCache || {};
+      window.__estoqueCardCache[codigo] = _movimEstoqueLocais.map(l => ({ ...l }));
+      renderizarEstoqueModal();
+    } catch (e) {
+      console.warn('[modalMovimentacao] erro ao carregar estoque:', e);
+      _movimEstoqueLocais = [];
+      if (movimEstoqueLocaisEl) {
+        movimEstoqueLocaisEl.innerHTML = '<span class="movim-estoque-vazio">N�o foi poss�vel carregar o estoque</span>';
+      }
+    }
+  }
+
+  window.__atualizarMovimEstoqueLocais = function(codigo, deltas) {
+    if (codigo !== _codigoProdutoAtual) return;
+    _movimEstoqueLocais = aplicarDeltaListaLocais(_movimEstoqueLocais, deltas);
+    renderizarEstoqueModal();
+  };
+
+  function montarDeltasMovimentacao({ tipo, origem, destino, qtd, origemNome, destinoNome, unidade }) {
+    const u = unidade || 'UN';
+    if (tipo === 'TRANSFERENCIA') {
+      return [
+        { local_codigo: origem, local_nome: origemNome, delta: -qtd, unidade: u },
+        { local_codigo: destino, local_nome: destinoNome, delta: qtd, unidade: u }
+      ];
+    }
+    if (tipo === 'ENT') {
+      return [{ local_codigo: destino, local_nome: destinoNome, delta: qtd, unidade: u }];
+    }
+    if (tipo === 'SAI') {
+      return [{ local_codigo: origem, local_nome: origemNome, delta: -qtd, unidade: u }];
+    }
+    return [];
+  }
+
+  function aplicarEstoqueOtimistaMovim(tipo, { origem, destino, qtd }) {
+    if (!_codigoProdutoAtual || !qtd) return;
+    const origemNome = origemSel?.selectedOptions?.[0]?.textContent?.trim() || origem;
+    const destinoNome = localSel?.selectedOptions?.[0]?.textContent?.trim() || destino;
+    const unidade = _movimEstoqueLocais?.[0]?.unidade || 'UN';
+    const deltas = montarDeltasMovimentacao({
+      tipo,
+      origem,
+      destino,
+      qtd,
+      origemNome,
+      destinoNome,
+      unidade
+    });
+    if (typeof window.aplicarDeltaEstoqueOtimista === 'function') {
+      window.aplicarDeltaEstoqueOtimista(_codigoProdutoAtual, deltas);
+    }
+  }
+
+  const MOVIM_DEFAULT_ORIGEM = '10717096386'; // 2. PORTA PALLET (ALMOXARIFADO)
+  const MOVIM_MOTIVOS = {
+    ENT: [
+      { v: 'INV', l: 'INV � Ajuste por Invent�rio' },
+      { v: 'INI', l: 'INI � Estoque Inicial' }
+    ],
+    SAI: [
+      { v: 'INV', l: 'INV � Ajuste por Invent�rio' },
+      { v: 'PER', l: 'PER � Baixa por Perda/Quebra' }
+    ],
+    TRF: [
+      { v: 'TRF', l: 'TRF � Transfer�ncia entre Locais' },
+      { v: 'TPQ', l: 'TPQ � Transfer�ncia por Perda/Quebra' }
+    ]
+  };
+  const MOVIM_TIPO_ACAO = { ENT: 'ENTRADA', SAI: 'SAIDA', TRF: 'TRANSFERENCIA' };
+  let _movimModoInterno = null; // ENTRADA | SAIDA | TRANSFERENCIA (modo Interno)
+  let _movimPrinterPrefTemp = null;
+  let _movimEtqImpressaoLista = [];
+  let _processandoAcao = false;
+  let _scanStream = null;
+  let _scanInterval = null;
+  let _scanModo = 'geral'; // geral | origem | destino
+  let _enderecoOrigemInterno = '';
+  let _enderecoDestinoInterno = '';
+
+  function fechar() {
+    if (overlay) overlay.style.display = 'none';
+    fecharScanEndereco();
+    if (qtdInput)  qtdInput.value = '';
+    if (qtdResult) qtdResult.textContent = '';
+    document.querySelectorAll('.movimModoBtn').forEach(b => b.classList.remove('ativo'));
+    if (executarBtn) { executarBtn.disabled = false; executarBtn.classList.remove('processando'); }
+    _movimModoInterno = null;
+    const msg = document.getElementById('movimMensagem');
+    if (msg) { msg.textContent = ''; msg.className = 'movim-mensagem'; }
+    const apo = document.getElementById('movimApontamento');
+    if (apo) apo.value = '';
+    if (calcPopup) calcPopup.style.display = 'none';
+    limparRetornoOmie();
+    limparEnderecos();
+    limparEnderecosReferencia();
+    _movimEstoqueLocais = [];
+    _processandoAcao = false;
+    resetMotivoOmie();
+    _movimEtqImpressaoLista = [];
+  }
+
+  function limparEnderecos() {
+    const lista = document.getElementById('movimEnderecoLista');
+    if (lista) lista.innerHTML = '';
+    _enderecoOrigemInterno = '';
+    _enderecoDestinoInterno = '';
+    renderEnderecoInternoValores();
+  }
+
+  function renderEnderecoInternoValores() {
+    const origemEl = document.getElementById('movimEnderecoOrigemVal');
+    const destinoEl = document.getElementById('movimEnderecoDestinoVal');
+    if (origemEl) {
+      origemEl.textContent = _enderecoOrigemInterno || 'Nao selecionado';
+      origemEl.classList.toggle('vazio', !_enderecoOrigemInterno);
+    }
+    if (destinoEl) {
+      destinoEl.textContent = _enderecoDestinoInterno || 'Nao selecionado';
+      destinoEl.classList.toggle('vazio', !_enderecoDestinoInterno);
+    }
+    atualizarMarcacaoListaInterno();
+  }
+
+  function definirEnderecoInterno(modo, valor) {
+    const endereco = String(valor || '').trim();
+    if (!endereco) return;
+    if (modo === 'origem') _enderecoOrigemInterno = endereco;
+    else if (modo === 'destino') _enderecoDestinoInterno = endereco;
+    renderEnderecoInternoValores();
+  }
+
+  let _movimEnderecosReq = 0;
+  const movimEscHtml = (value) => (
+    typeof escapeHtml === 'function'
+      ? escapeHtml(value)
+      : String(value ?? '').replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]))
+  );
+
+  function limparEnderecosReferencia() {
+    const lista = document.getElementById('movimEnderecoEtqLista');
+    const vazio = document.getElementById('movimEnderecoVazio');
+    if (lista) lista.innerHTML = '';
+    if (vazio) vazio.style.display = 'block';
+  }
+
+  function mostrarMovimEnderecosEtqEstado(html, { vazio = false } = {}) {
+    const lista = document.getElementById('movimEnderecoEtqLista');
+    const vazioEl = document.getElementById('movimEnderecoVazio');
+    if (!lista) return;
+    lista.innerHTML = html || '';
+    if (vazioEl) vazioEl.style.display = vazio ? 'block' : 'none';
+  }
+
+  function renderMovimEnderecosEtqLista(lista) {
+    const el = document.getElementById('movimEnderecoEtqLista');
+    const vazio = document.getElementById('movimEnderecoVazio');
+    if (!el) return;
+    const itens = (lista || []).filter(e => String(e.endereco || '').trim());
+    if (!itens.length) {
+      el.innerHTML = '';
+      if (vazio) vazio.style.display = 'block';
+      return;
+    }
+    if (vazio) vazio.style.display = 'none';
+    const selecionados = new Set(
+      Array.from(el.querySelectorAll('.movim-etq-linha--selected'))
+        .map(l => String(l.dataset.endereco || '').trim())
+        .filter(Boolean)
+    );
+    const header = `<div class="movim-etq-linha movim-etq-linha--head">
+      <span class="movim-etq-end">Endere�o</span>
+      <span class="movim-etq-meta">ID</span>
+      <span class="movim-etq-meta">Qtd</span>
+      <span class="movim-etq-meta">Un</span>
+      <span class="movim-etq-meta movim-etq-meta--comp">Complemento</span>
+      <span></span>
+    </div>`;
+    try {
+      el.innerHTML = header + itens.map(e => {
+        const end = String(e.endereco || '').trim();
+        const endEsc = movimEscHtml(end);
+        const id = Number(e.id);
+        const idEsc = movimEscHtml(String(id || '�'));
+        const qtd = movimEscHtml(String(e.qtd != null ? e.qtd : '0'));
+        const unidade = movimEscHtml(String(e.unidade || 'UN'));
+        const comp = String(e.complemento || '').trim();
+        const compHtml = comp
+          ? `<span class="movim-etq-meta movim-etq-meta--comp" title="${movimEscHtml(comp)}">${movimEscHtml(comp)}</span>`
+          : '<span class="movim-etq-meta movim-etq-meta--vazio">�</span>';
+        const sel = selecionados.has(end) ? ' movim-etq-linha--selected' : '';
+        const btnPrint = id
+          ? `<button type="button" class="movim-etq-btn-print" data-id="${id}" title="Imprimir etiqueta"><i class="fa-solid fa-print"></i></button>`
+          : '<span></span>';
+        return `<div class="movim-etq-linha${sel}" data-id="${idEsc}" data-endereco="${endEsc}" role="button" tabindex="0" title="Clique para selecionar este endere�o">
+          <span class="movim-etq-end">${endEsc}</span>
+          <span class="movim-etq-meta">${idEsc}</span>
+          <span class="movim-etq-meta">${qtd}</span>
+          <span class="movim-etq-meta">${unidade}</span>
+          ${compHtml}
+          ${btnPrint}
+        </div>`;
+      }).join('');
+    } catch (err) {
+      console.error('[modalMovimentacao] render enderecos ETQ', err);
+      mostrarMovimEnderecosEtqEstado(
+        '<span class="movim-ref-erro">Erro ao exibir endere�os. Feche e abra o modal novamente.</span>'
+      );
+    }
+  }
+
+  function marcarEtqEnderecoSelecionado(endereco, selecionar) {
+    const lista = document.getElementById('movimEnderecoEtqLista');
+    if (!lista) return;
+    const end = String(endereco || '').trim();
+    if (!end) return;
+    lista.querySelectorAll('.movim-etq-linha[data-endereco]').forEach(linha => {
+      if (String(linha.dataset.endereco || '').trim() !== end) return;
+      linha.classList.toggle('movim-etq-linha--selected', selecionar !== false);
+    });
+  }
+
+  function aplicarEnderecoInternoModo(modo, endereco) {
+    const end = String(endereco || '').trim();
+    if (!end) return;
+    if (modo === 'origem') {
+      _enderecoOrigemInterno = end;
+      if (_enderecoDestinoInterno === end) _enderecoDestinoInterno = '';
+    } else {
+      _enderecoDestinoInterno = end;
+      if (_enderecoOrigemInterno === end && _movimModoInterno === 'TRANSFERENCIA') _enderecoOrigemInterno = '';
+    }
+    renderEnderecoInternoValores();
+  }
+
+  function onEtqLinhaClickInterno(linha) {
+    const endereco = String(linha?.dataset?.endereco || '').trim();
+    if (!endereco || !_movimModoInterno) return;
+
+    if (_movimModoInterno === 'ENTRADA') {
+      limparSelecoesListaEtq();
+      marcarEtqEnderecoSelecionado(endereco, true);
+      _enderecoDestinoInterno = endereco;
+      _enderecoOrigemInterno = '';
+    } else if (_movimModoInterno === 'SAIDA') {
+      limparSelecoesListaEtq();
+      marcarEtqEnderecoSelecionado(endereco, true);
+      _enderecoOrigemInterno = endereco;
+      _enderecoDestinoInterno = '';
+    } else if (_movimModoInterno === 'TRANSFERENCIA') {
+      if (!_enderecoOrigemInterno) {
+        _enderecoOrigemInterno = endereco;
+      } else if (!_enderecoDestinoInterno) {
+        if (endereco === _enderecoOrigemInterno) return;
+        _enderecoDestinoInterno = endereco;
+      } else {
+        _enderecoDestinoInterno = endereco;
+      }
+    }
+    renderEnderecoInternoValores();
+  }
+
+  function toggleMovimEtqLinhaSelecionada(linha) {
+    if (!linha) return;
+    if (isMotivoInterno() && _movimModoInterno) {
+      onEtqLinhaClickInterno(linha);
+      return;
+    }
+    const endereco = String(linha.dataset.endereco || '').trim();
+    if (!endereco) return;
+    const vaiSelecionar = !linha.classList.contains('movim-etq-linha--selected');
+    marcarEtqEnderecoSelecionado(endereco, vaiSelecionar);
+    if (vaiSelecionar) adicionarEndereco(endereco);
+    else removerEnderecoLido(endereco);
+  }
+
+  function sincronizarEnderecosInternosDaLista() {
+    /* legado � endere�os internos s�o definidos por clique/leitura direta */
+  }
+
+  async function imprimirEtqLinhaMovim(id, btnEl) {
+    const idNum = Number(id);
+    if (!idNum) return;
+    const msg = document.getElementById('movimMensagem');
+    const origHtml = btnEl?.innerHTML;
+    if (btnEl) { btnEl.disabled = true; btnEl.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>'; }
+    try {
+      const imp = await imprimirEtiquetasMovim([idNum]);
+      if (!imp?.ok) throw new Error(imp?.error || 'Falha ao imprimir etiqueta.');
+      if (msg) {
+        msg.textContent = `Etiqueta ID ${idNum} enviada para impress�o.`;
+        msg.className = 'movim-mensagem ok';
+      }
+    } catch (err) {
+      if (msg) {
+        msg.textContent = String(err?.message || err);
+        msg.className = 'movim-mensagem erro';
+      }
+    } finally {
+      if (btnEl) { btnEl.disabled = false; btnEl.innerHTML = origHtml || '<i class="fa-solid fa-print"></i>'; }
+    }
+  }
+
+  async function carregarEnderecosReferencia(codigo) {
+    const cod = String(codigo || '').trim();
+    const reqId = ++_movimEnderecosReq;
+    limparEnderecosReferencia();
+    if (!cod) return;
+
+    mostrarMovimEnderecosEtqEstado('<span class="movim-ref-loading">Carregando endere�os�</span>');
+
+    const base = (typeof API_BASE === 'string' && API_BASE) ? API_BASE : window.location.origin;
+    const url = `${base}/api/etiquetas/rec-impresso/enderecos-referencia-por-produto?codigo=${encodeURIComponent(cod)}`;
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 20000);
+
+    try {
+      const resp = await fetch(url, {
+        credentials: 'include',
+        cache: 'no-store',
+        signal: controller.signal
+      });
+      let json;
+      try { json = await resp.json(); } catch { json = { ok: false }; }
+      if (reqId !== _movimEnderecosReq) return;
+
+      if (!resp.ok || !json?.ok) {
+        const msg = String(json?.error || `Falha ao carregar endere�os (HTTP ${resp.status}).`);
+        mostrarMovimEnderecosEtqEstado(`<span class="movim-ref-erro">${movimEscHtml(msg)}</span>`);
+        return;
+      }
+
+      renderMovimEnderecosEtqLista(Array.isArray(json.enderecos) ? json.enderecos : []);
+    } catch (err) {
+      if (reqId !== _movimEnderecosReq) return;
+      console.warn('[modalMovimentacao] enderecos referencia', err);
+      const msg = err?.name === 'AbortError'
+        ? 'Tempo esgotado ao carregar endere�os. Verifique a conex�o e tente de novo.'
+        : (err?.message || 'N�o foi poss�vel carregar endere�os.');
+      mostrarMovimEnderecosEtqEstado(`<span class="movim-ref-erro">${movimEscHtml(msg)}</span>`);
+    } finally {
+      clearTimeout(timeoutId);
+    }
+  }
+
+  function adicionarEndereco(address) {
+    const lista = document.getElementById('movimEnderecoLista');
+    const valor = String(address || '').trim();
+    if (!valor) return;
+
+    marcarEtqEnderecoSelecionado(valor, true);
+
+    if (!lista) return;
+    const existentes = lista.querySelectorAll('.movim-endereco-item');
+    for (const ex of existentes) {
+      if (ex.dataset.address === valor) return;
+    }
+
+    const item = document.createElement('div');
+    item.className = 'movim-endereco-item';
+    item.dataset.address = valor;
+    item.style.display = 'none';
+    lista.appendChild(item);
+  }
+
+  function removerEnderecoLido(address) {
+    const valor = String(address || '').trim();
+    if (!valor) return;
+    marcarEtqEnderecoSelecionado(valor, false);
+    const lista = document.getElementById('movimEnderecoLista');
+    if (!lista) return;
+    lista.querySelectorAll('.movim-endereco-item').forEach(item => {
+      if (String(item.dataset.address || '').trim() === valor) item.remove();
+    });
+  }
+
+  async function pararScanEndereco() {
+    clearInterval(_scanInterval);
+    _scanInterval = null;
+    if (_scanStream) {
+      _scanStream.getTracks().forEach(t => t.stop());
+      _scanStream = null;
+    }
+    if (scanVideo) scanVideo.srcObject = null;
+  }
+
+  function fecharScanEndereco() {
+    pararScanEndereco();
+    if (scanModal) scanModal.style.display = 'none';
+    if (scanInput) scanInput.value = '';
+    _scanModo = 'geral';
+    if (scanStatus) {
+      scanStatus.textContent = 'Alinhe o codigo de barras na faixa horizontal (ou QR Code no centro).';
+      scanStatus.style.color = '#94a3b8';
+    }
+  }
+
+  function _scanCropHorizontal() {
+    const vw = scanVideo?.videoWidth || 0;
+    const vh = scanVideo?.videoHeight || 0;
+    if (!vw || !vh) return null;
+    const w = Math.round(vw * 0.88);
+    const h = Math.round(vh * 0.30);
+    return { sx: Math.round((vw - w) / 2), sy: Math.round((vh - h) / 2), sw: w, sh: h };
+  }
+
+  function _scanCropSquare() {
+    const vw = scanVideo?.videoWidth || 0;
+    const vh = scanVideo?.videoHeight || 0;
+    if (!vw || !vh) return null;
+    const size = Math.round(Math.min(vw, vh) * 0.65);
+    return { sx: Math.round((vw - size) / 2), sy: Math.round((vh - size) / 2), sw: size, sh: size };
+  }
+
+  async function iniciarScanEndereco() {
+    await pararScanEndereco();
+    try {
+      _scanStream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          facingMode: 'environment',
+          width: { ideal: 1920 },
+          height: { ideal: 1080 },
+        },
+      });
+      if (scanVideo) {
+        scanVideo.srcObject = _scanStream;
+        await scanVideo.play().catch(() => {});
+      }
+      return true;
+    } catch {
+      if (scanStatus) {
+        scanStatus.textContent = 'Camera nao disponivel. Digite o endereco abaixo.';
+        scanStatus.style.color = '#f59e0b';
+      }
+      return false;
+    }
+  }
+
+  function iniciarDeteccaoEndereco() {
+    clearInterval(_scanInterval);
+    if (!('BarcodeDetector' in window)) {
+      if (scanStatus) {
+        scanStatus.textContent = 'Leitura automatica indisponivel. Digite o codigo abaixo.';
+        scanStatus.style.color = '#f59e0b';
+      }
+      return;
+    }
+    const detectorBarcode = new BarcodeDetector({
+      formats: ['code_128', 'code_39', 'ean_13', 'ean_8', 'upc_a', 'codabar', 'itf', 'data_matrix']
+    });
+    const detectorQr = new BarcodeDetector({ formats: ['qr_code', 'data_matrix'] });
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+    let _scanFrameToggle = 0;
+    _scanInterval = setInterval(async () => {
+      if (!scanVideo || scanVideo.readyState < 2) return;
+      const useHorizontal = (_scanFrameToggle % 2 === 0);
+      _scanFrameToggle++;
+      const crop = useHorizontal ? _scanCropHorizontal() : _scanCropSquare();
+      if (!crop) return;
+      canvas.width = crop.sw;
+      canvas.height = crop.sh;
+      ctx.drawImage(scanVideo, crop.sx, crop.sy, crop.sw, crop.sh, 0, 0, crop.sw, crop.sh);
+      const detector = useHorizontal ? detectorBarcode : detectorQr;
+      try {
+        const barcodes = await detector.detect(canvas);
+        if (barcodes.length > 0) {
+          clearInterval(_scanInterval);
+          _scanInterval = null;
+          if (scanMira) {
+            scanMira.style.borderColor = '#4ade80';
+            setTimeout(() => { if (scanMira) scanMira.style.borderColor = 'rgba(52,211,153,.85)'; }, 600);
+          }
+          registrarEnderecoLido(barcodes[0].rawValue);
+        }
+      } catch { /* ignora frame */ }
+    }, 180);
+  }
+
+  function registrarEnderecoLido(valor) {
+    const endereco = String(valor || '').trim();
+    if (!endereco) return;
+
+    if (isMotivoInterno() && _movimModoInterno === 'ENTRADA' && _scanModo === 'geral') {
+      if (enderecoExisteNaListaEtq(endereco)) {
+        limparSelecoesListaEtq();
+        marcarEtqEnderecoSelecionado(endereco, true);
+      } else {
+        limparSelecoesListaEtq();
+      }
+      _enderecoDestinoInterno = endereco;
+      _enderecoOrigemInterno = '';
+      renderEnderecoInternoValores();
+    } else if (_scanModo === 'origem') {
+      aplicarEnderecoInternoModo('origem', endereco);
+    } else if (_scanModo === 'destino') {
+      aplicarEnderecoInternoModo('destino', endereco);
+    } else {
+      adicionarEndereco(endereco);
+    }
+    if (scanStatus) {
+      scanStatus.textContent = `Endereco registrado: ${endereco}`;
+      scanStatus.style.color = '#4ade80';
+    }
+    setTimeout(fecharScanEndereco, 700);
+  }
+
+  async function abrirScanEndereco(modo) {
+    if (!scanModal) return;
+    _scanModo = modo || 'geral';
+    if (scanTitle) {
+      if (_scanModo === 'origem') scanTitle.textContent = 'Leia o codigo do endereco de ORIGEM';
+      else if (_scanModo === 'destino') scanTitle.textContent = 'Leia o codigo do endereco de DESTINO';
+      else scanTitle.textContent = 'Leia QR Code ou codigo de barras';
+    }
+    if (scanInput) {
+      scanInput.placeholder = _scanModo === 'origem'
+        ? 'Digite o endereco de origem...'
+        : _scanModo === 'destino'
+          ? 'Digite o endereco de destino...'
+          : 'Ou digite o endereco manualmente...';
+      scanInput.value = '';
+    }
+    if (scanStatus) {
+      scanStatus.textContent = 'Alinhe o codigo de barras na faixa horizontal (ou QR Code no centro).';
+      scanStatus.style.color = '#94a3b8';
+    }
+    scanModal.style.display = 'flex';
+    const ok = await iniciarScanEndereco();
+    if (ok) iniciarDeteccaoEndereco();
+  }
+
+  if (scanBtn) scanBtn.addEventListener('click', () => abrirScanEndereco('geral'));
+  if (scanOrigemBtn) scanOrigemBtn.addEventListener('click', () => abrirScanEndereco('origem'));
+  if (scanDestinoBtn) scanDestinoBtn.addEventListener('click', () => abrirScanEndereco('destino'));
+  if (scanFechar) scanFechar.addEventListener('click', fecharScanEndereco);
+  if (scanModal) scanModal.addEventListener('click', e => { if (e.target === scanModal) fecharScanEndereco(); });
+  if (scanOkBtn) {
+    scanOkBtn.addEventListener('click', () => {
+      const valor = scanInput?.value?.trim();
+      if (!valor) return;
+      registrarEnderecoLido(valor);
+    });
+  }
+  if (scanInput) {
+    scanInput.addEventListener('keydown', e => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        const valor = scanInput.value.trim();
+        if (valor) registrarEnderecoLido(valor);
+      }
+    });
+  }
+
+  const etqListaBind = document.getElementById('movimEnderecoEtqLista');
+  if (etqListaBind && !etqListaBind.dataset.clickBound) {
+    etqListaBind.dataset.clickBound = '1';
+    etqListaBind.addEventListener('click', e => {
+      const btnPrint = e.target.closest('.movim-etq-btn-print');
+      if (btnPrint) {
+        e.stopPropagation();
+        imprimirEtqLinhaMovim(btnPrint.dataset.id, btnPrint);
+        return;
+      }
+      const linha = e.target.closest('.movim-etq-linha[data-endereco]');
+      if (!linha) return;
+      toggleMovimEtqLinhaSelecionada(linha);
+    });
+    etqListaBind.addEventListener('keydown', e => {
+      if (e.key !== 'Enter' && e.key !== ' ') return;
+      const linha = e.target.closest('.movim-etq-linha[data-endereco]');
+      if (!linha) return;
+      e.preventDefault();
+      toggleMovimEtqLinhaSelecionada(linha);
+    });
+  }
+
+  function obterEnderecosLidos() {
+    const etq = document.getElementById('movimEnderecoEtqLista');
+    const fromEtq = etq
+      ? Array.from(etq.querySelectorAll('.movim-etq-linha--selected'))
+          .map(el => String(el.dataset.endereco || '').trim())
+          .filter(Boolean)
+      : [];
+    const lista = document.getElementById('movimEnderecoLista');
+    const fromScan = lista
+      ? Array.from(lista.querySelectorAll('.movim-endereco-item'))
+          .map(el => String(el.dataset.address || '').trim())
+          .filter(Boolean)
+      : [];
+    return [...new Set([...fromEtq, ...fromScan])];
+  }
+
+  function preencherMotivosOmieUnificados() {
+    if (!omieMotivoSel) return;
+    const opcoes = ['<option value="">Selecione o motivo�</option>'];
+    const entList = MOVIM_MOTIVOS.ENT || [];
+    const saiList = MOVIM_MOTIVOS.SAI || [];
+    const labelsUnificados = new Set();
+
+    for (const ent of entList) {
+      const saiIgual = saiList.find(s => s.v === ent.v && s.l === ent.l);
+      if (saiIgual && ent.v !== 'INV') labelsUnificados.add(`${ent.v}\0${ent.l}`);
+    }
+
+    for (const ent of entList) {
+      if (labelsUnificados.has(`${ent.v}\0${ent.l}`)) {
+        opcoes.push(`<option value="ENT,SAI:${ent.v}">Entrada/Sa�da � ${escapeHtml(ent.l)}</option>`);
+      } else {
+        opcoes.push(`<option value="ENT:${ent.v}">Entrada � ${escapeHtml(ent.l)}</option>`);
+      }
+    }
+    for (const sai of saiList) {
+      if (labelsUnificados.has(`${sai.v}\0${sai.l}`)) continue;
+      opcoes.push(`<option value="SAI:${sai.v}">Sa�da � ${escapeHtml(sai.l)}</option>`);
+    }
+    for (const o of (MOVIM_MOTIVOS.TRF || [])) {
+      opcoes.push(`<option value="TRF:${o.v}">Transfer�ncia � ${escapeHtml(o.l)}</option>`);
+    }
+    opcoes.push('<option value="INTERNO">Ajuste fora da Omie - Interno</option>');
+    omieMotivoSel.innerHTML = opcoes.join('');
+  }
+
+  function obterTipoExecutarOmie() {
+    const parsed = parseMotivoSelecionado();
+    if (!parsed) return null;
+    if (parsed.tipos.includes('TRF')) return 'TRANSFERENCIA';
+    if (parsed.tipos.includes('ENT') && !parsed.tipos.includes('SAI')) return 'ENTRADA';
+    if (parsed.tipos.includes('SAI') && !parsed.tipos.includes('ENT')) return 'SAIDA';
+    return MOVIM_TIPO_ACAO[parsed.tipos[0]] || null;
+  }
+
+  function mostrarEl(id, visivel) {
+    const el = document.getElementById(id);
+    if (el) el.style.display = visivel ? '' : 'none';
+  }
+
+  function atualizarLayoutMovim() {
+    const interno = isMotivoInterno();
+    const parsed = parseMotivoSelecionado();
+    const tipoOmie = obterTipoExecutarOmie();
+    const modo = _movimModoInterno;
+
+    // Motivo sempre vis�vel
+    if (omieMotivoSel?.closest('.movim-field')) {
+      omieMotivoSel.closest('.movim-field').style.display = '';
+    }
+
+    // Bot�es de modo (s� Interno)
+    if (modoTipoDiv) modoTipoDiv.style.display = interno ? 'flex' : 'none';
+
+    // Reset parcial ao trocar motivo sem modo
+    if (!interno) {
+      _movimModoInterno = null;
+      document.querySelectorAll('.movimModoBtn').forEach(b => b.classList.remove('ativo'));
+    }
+
+    const prontoInterno = interno && !!modo;
+    const prontoOmie = !interno && !!tipoOmie;
+
+    // Armaz�m origem/destino
+    const showOrigemArm = prontoOmie && (tipoOmie === 'SAIDA' || tipoOmie === 'TRANSFERENCIA');
+    const showDestinoArm = prontoInterno || (prontoOmie && (tipoOmie === 'ENTRADA' || tipoOmie === 'TRANSFERENCIA'));
+
+    mostrarEl('movimOrigemField', showOrigemArm);
+    mostrarEl('movimDestinoField', showDestinoArm || prontoInterno);
+
+    if (interno && (prontoInterno || !modo)) aplicarDestinoPortaPallet();
+
+    const showCorpo = prontoInterno || prontoOmie;
+    mostrarEl('movimQtdFieldWrap', showCorpo);
+    mostrarEl('movimApontamentoField', showCorpo);
+    mostrarEl('movimEnderecosSection', showCorpo);
+    mostrarEl('movimMesmoArmazemAviso', prontoInterno);
+    mostrarEl('movimImprimirEtiquetaWrap', prontoInterno);
+    mostrarEl('movimImpressoraRow', prontoInterno);
+    if (executarBtn) executarBtn.style.display = showCorpo ? 'flex' : 'none';
+
+    // Endere�os � campos internos (modo Interno) ou lista ETQ (Omie e Interno)
+    const internoWrap = document.getElementById('movimEnderecoInternoWrap');
+    const externoWrap = document.getElementById('movimEnderecoExternoWrap');
+    const scanGeralBtn = document.getElementById('movimScanEnderecoBtn');
+    const origemCampo = document.getElementById('movimEnderecoOrigemCampo');
+    const destinoCampo = document.getElementById('movimEnderecoDestinoCampo');
+    const endHeader = document.querySelector('#movimEnderecosSection .movim-enderecos-header h4');
+
+    if (endHeader) {
+      endHeader.textContent = interno
+        ? 'Endere�os'
+        : 'Endere�os (opcional � s� altera saldo por endere�o se selecionar)';
+    }
+
+    if (!showCorpo) {
+      if (internoWrap) internoWrap.style.display = 'none';
+      if (externoWrap) externoWrap.style.display = 'none';
+      if (scanGeralBtn) scanGeralBtn.style.display = 'none';
+      if (!interno) limparEnderecosInternos();
+    } else if (!interno) {
+      if (internoWrap) internoWrap.style.display = 'none';
+      if (externoWrap) externoWrap.style.display = '';
+      if (scanGeralBtn) scanGeralBtn.style.display = 'inline-flex';
+    } else if (modo === 'ENTRADA') {
+      if (internoWrap) internoWrap.style.display = 'flex';
+      if (externoWrap) externoWrap.style.display = 'none';
+      if (origemCampo) origemCampo.style.display = 'none';
+      if (destinoCampo) destinoCampo.style.display = '';
+      if (scanGeralBtn) scanGeralBtn.style.display = 'inline-flex';
+    } else if (modo === 'SAIDA') {
+      if (internoWrap) internoWrap.style.display = 'flex';
+      if (externoWrap) externoWrap.style.display = 'none';
+      if (origemCampo) origemCampo.style.display = '';
+      if (destinoCampo) destinoCampo.style.display = 'none';
+      if (scanGeralBtn) scanGeralBtn.style.display = 'none';
+      const scanOrig = document.getElementById('movimScanEnderecoOrigemBtn');
+      if (scanOrig) scanOrig.style.display = 'none';
+    } else if (modo === 'TRANSFERENCIA') {
+      if (internoWrap) internoWrap.style.display = 'flex';
+      if (externoWrap) externoWrap.style.display = 'none';
+      if (origemCampo) origemCampo.style.display = '';
+      if (destinoCampo) destinoCampo.style.display = '';
+      if (scanGeralBtn) scanGeralBtn.style.display = 'none';
+      const scanOrig = document.getElementById('movimScanEnderecoOrigemBtn');
+      const scanDest = document.getElementById('movimScanEnderecoDestinoBtn');
+      if (scanOrig) scanOrig.style.display = '';
+      if (scanDest) scanDest.style.display = '';
+    }
+
+    destacarLocaisMovim();
+  }
+
+  function resetMotivoOmie() {
+    if (omieMotivoSel) omieMotivoSel.value = '';
+    _movimModoInterno = null;
+    document.querySelectorAll('.movimModoBtn').forEach(b => b.classList.remove('ativo'));
+    limparEnderecosInternos();
+    atualizarLayoutMovim();
+  }
+
+  function parseMotivoSelecionado() {
+    const val = String(omieMotivoSel?.value || '').trim();
+    if (!val || !val.includes(':')) return null;
+    const sep = val.indexOf(':');
+    const tipos = val.slice(0, sep).split(',').map(t => t.trim().toUpperCase()).filter(Boolean);
+    const motivo = val.slice(sep + 1).trim().toUpperCase();
+    if (!tipos.length || !motivo) return null;
+    return { tipos, tipo: tipos[0], motivo };
+  }
+
+  function isMotivoInterno() {
+    return String(omieMotivoSel?.value || '').trim() === 'INTERNO';
+  }
+
+  function isMesmoArmazemMovim() {
+    const origem = String(origemSel?.value || '').trim();
+    const destino = String(localSel?.value || '').trim();
+    return !!(origem && destino && origem === destino);
+  }
+
+  function isModoInterno() {
+    return isMotivoInterno();
+  }
+
+  function enderecoExisteNaListaEtq(endereco) {
+    const lista = document.getElementById('movimEnderecoEtqLista');
+    if (!lista) return false;
+    const end = String(endereco || '').trim();
+    return Array.from(lista.querySelectorAll('.movim-etq-linha[data-endereco]'))
+      .some(l => String(l.dataset.endereco || '').trim() === end);
+  }
+
+  function limparSelecoesListaEtq() {
+    const lista = document.getElementById('movimEnderecoEtqLista');
+    if (!lista) return;
+    lista.querySelectorAll('.movim-etq-linha--selected').forEach(l => l.classList.remove('movim-etq-linha--selected'));
+    const hidden = document.getElementById('movimEnderecoLista');
+    if (hidden) hidden.innerHTML = '';
+  }
+
+  function atualizarMarcacaoListaInterno() {
+    const lista = document.getElementById('movimEnderecoEtqLista');
+    if (!lista) return;
+    lista.querySelectorAll('.movim-etq-linha[data-endereco]').forEach(linha => {
+      const end = String(linha.dataset.endereco || '').trim();
+      const ativo = end && (end === _enderecoOrigemInterno || end === _enderecoDestinoInterno);
+      linha.classList.toggle('movim-etq-linha--selected', !!ativo);
+      linha.classList.toggle('movim-etq-linha--origem', end === _enderecoOrigemInterno && !!end);
+      linha.classList.toggle('movim-etq-linha--destino', end === _enderecoDestinoInterno && !!end);
+    });
+  }
+
+  function limparEnderecosInternos() {
+    _enderecoOrigemInterno = '';
+    _enderecoDestinoInterno = '';
+    limparSelecoesListaEtq();
+    renderEnderecoInternoValores();
+  }
+
+  function aplicarDestinoPortaPallet() {
+    if (!localSel) return;
+    const preferido = MOVIM_DEFAULT_ORIGEM;
+    if (preferido && Array.from(localSel.options).some(o => o.value === preferido)) {
+      localSel.value = preferido;
+    } else {
+      const optPorta = Array.from(localSel.options).find(o =>
+        o.textContent.toUpperCase().includes('PORTA PALLET')
+      );
+      if (optPorta) localSel.value = optPorta.value;
+    }
+  }
+
+  function obterMotivoOmie(tipoOmie) {
+    const parsed = parseMotivoSelecionado();
+    if (parsed) return parsed.motivo;
+    const tipo = String(tipoOmie || '').toUpperCase();
+    const opcoes = MOVIM_MOTIVOS[tipo] || [];
+    return opcoes[0]?.v || 'INV';
+  }
+
+  function obterSolicitanteMovim() {
+    const solicitanteEl = document.getElementById('userNameDisplay');
+    const solicitanteRaw = String(solicitanteEl?.textContent || '').trim();
+    return solicitanteRaw && solicitanteRaw !== '�' ? solicitanteRaw : null;
+  }
+
+  async function registrarEnderecosEtq(payload) {
+    const body = {
+      ...payload,
+      codigo_produto_omie: payload.codigo_produto_omie || _codigoProdutoOmieAtual || null
+    };
+    const resp = await fetch('/api/etiquetas/rec-impresso/registrar-movimentacao', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify(body)
+    });
+    let json;
+    try { json = await resp.json(); } catch { throw new Error('Resposta inv�lida ao registrar endere�o.'); }
+    if (!resp.ok || !json?.ok) throw new Error(json?.error || `Falha ao registrar endere�o (HTTP ${resp.status}).`);
+    return json;
+  }
+
+  function limparRetornoOmie() {
+    const el = document.getElementById('movimRetornoOmie');
+    if (el) { el.style.display = 'none'; el.innerHTML = ''; el.className = 'movim-retorno-omie'; }
+  }
+
+  function montarHtmlRetornoOmie({ ok, titulo, linhas, idSolicitacao }) {
+    const icone = ok ? '?' : '?';
+    const partes = [`<div class="movim-retorno-titulo">${icone} ${escapeHtml(titulo)}</div>`];
+    if (idSolicitacao) {
+      partes.push(`<div class="movim-retorno-id">Solicita��o #${escapeHtml(String(idSolicitacao))}</div>`);
+    }
+    (linhas || []).forEach(l => partes.push(`<div class="movim-retorno-linha">${escapeHtml(l)}</div>`));
+    return partes.join('');
+  }
+
+  function exibirRetornoOmie(html, tipo) {
+    const el = document.getElementById('movimRetornoOmie');
+    if (!el) return;
+    el.className = 'movim-retorno-omie' + (tipo ? ' ' + tipo : '');
+    el.innerHTML = html;
+    el.style.display = 'block';
+    el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
+
+  if (fecharBtn) fecharBtn.addEventListener('click', fechar);
+  if (overlay)   overlay.addEventListener('click', e => { if (e.target === overlay) fechar(); });
+
+  function setBotoesAcaoDisabled(disabled) {
+    if (executarBtn) {
+      executarBtn.disabled = !!disabled;
+      executarBtn.classList.toggle('processando', !!disabled);
+    }
+  }
+
+  function atualizarUiMesmoArmazem() {
+    atualizarLayoutMovim();
+  }
+
+  function movimValParaLabelImpressora(val) {
+    if (!val) return '� padr�o �';
+    if (val === '__PDF__') return 'PDF';
+    if (val === '__BP__') return 'Agente local';
+    if (val.startsWith('__AGENT__:')) {
+      const s = val.slice('__AGENT__:'.length);
+      const i = s.indexOf(':');
+      return i === -1 ? s : `${s.slice(i + 1)} (${s.slice(0, i)})`;
+    }
+    return val;
+  }
+
+  const MOVIM_IMPRESSORA_SELECT_IDS = ['movimListboxImpressora', 'movimImpListboxImpressora', 'producaoImpListboxImpressora'];
+  const MOVIM_IMPRESSORA_REFRESH_BTN_IDS = ['movimBtnRefreshImpressoras', 'movimImpBtnRefreshImpressoras', 'producaoImpBtnRefreshImpressoras'];
+  const MOVIM_IMPRESSORA_CONFIG_BTN_IDS = ['movimBtnConfigImpressoras', 'movimImpBtnConfigImpressoras', 'producaoImpBtnConfigImpressoras'];
+
+  async function movimAtualizarListboxImpressora() {
+    const selects = MOVIM_IMPRESSORA_SELECT_IDS.map(id => document.getElementById(id)).filter(Boolean);
+    if (!selects.length) return;
+
+    let cfg = {};
+    try { cfg = JSON.parse(localStorage.getItem(movimEtqImprKey()) || '{}'); } catch { cfg = {}; }
+    const padrao = cfg.padrao || null;
+    const enabled = Array.isArray(cfg.enabled) ? cfg.enabled : [];
+    const todos = padrao ? [padrao, ...enabled.filter(v => v !== padrao)] : enabled;
+
+    let agentData = [];
+    try {
+      const r = await fetch('/api/etiquetas/agentes-disponiveis', { credentials: 'include' });
+      const d = await r.json();
+      agentData = d.agentes || [];
+    } catch { /* ignora */ }
+
+    function buildOptions() {
+      const opts = ['<option value="">� padr�o �</option>'];
+      const seen = new Set();
+      const add = (val, isPadrao) => {
+        const label = movimValParaLabelImpressora(val);
+        const key = label.toLowerCase();
+        if (seen.has(key)) return;
+        seen.add(key);
+        opts.push(`<option value="${escapeHtml(val)}"${isPadrao ? ' style="color:#fbbf24"' : ''}>${isPadrao ? '? ' : ''}${escapeHtml(label)}</option>`);
+      };
+      if (todos.length === 0) {
+        for (const ag of agentData) {
+          for (const imp of (ag.printers || [])) {
+            add(`__AGENT__:${ag.pcName}:${imp}`, false);
+          }
+        }
+        add('__PDF__', false);
+      } else {
+        for (const val of todos) add(val, val === padrao);
+      }
+      return opts.join('');
+    }
+
+    const html = buildOptions();
+    const pref = _movimPrinterPrefTemp || padrao || '';
+    for (const sel of selects) {
+      sel.innerHTML = html;
+      if (pref) sel.value = pref;
+    }
+  }
+
+  function movimSyncImpressoraSelects(val) {
+    _movimPrinterPrefTemp = val || null;
+    for (const id of MOVIM_IMPRESSORA_SELECT_IDS) {
+      const sel = document.getElementById(id);
+      if (sel && sel.value !== val) sel.value = val || '';
+    }
+  }
+
+  function movimAbrirConfigImpressoras() {
+    document.getElementById('etqBtnConfigImpressoras')?.click();
+  }
+
+  function movimEtqImprKey() {
+    const u = String(document.getElementById('userNameDisplay')?.textContent || 'user').trim().replace(/\s+/g, '_');
+    return `etq_impr_cfg_${u}`;
+  }
+
+  function movimObterPrefsImpressora() {
+    try {
+      const selVal = _movimPrinterPrefTemp
+        || MOVIM_IMPRESSORA_SELECT_IDS.map(id => document.getElementById(id)?.value).find(v => v) || null
+        || null;
+      const cfg = JSON.parse(localStorage.getItem(movimEtqImprKey()) || '{}');
+      const escolha = selVal || cfg.padrao || null;
+      if (!escolha) return { via_fila: true };
+      if (escolha.startsWith('__AGENT__:')) {
+        const s = escolha.slice('__AGENT__:'.length);
+        const i = s.indexOf(':');
+        if (i === -1) return { destino_agente: s, via_fila: true };
+        return { destino_agente: s.slice(0, i), impressora: s.slice(i + 1), via_fila: true };
+      }
+      if (escolha === '__BP__') return { via_fila: true };
+      if (escolha === '__PDF__') return { via_fila: true };
+      return { printer: escolha, via_fila: false };
+    } catch {
+      return { via_fila: true };
+    }
+  }
+
+  async function imprimirEtiquetasMovim(ids) {
+    if (!ids?.length) return { ok: false, error: 'Nenhuma etiqueta para imprimir.' };
+    const usuario = obterSolicitanteMovim();
+    const body = { ids, usuario, ...movimObterPrefsImpressora() };
+    const resp = await fetch('/api/etiquetas/rec-impresso/imprimir-ids', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify(body)
+    });
+    let json;
+    try { json = await resp.json(); } catch {
+      return { ok: false, error: 'Resposta invalida ao imprimir etiqueta.' };
+    }
+    if (!resp.ok || !json?.ok) {
+      return { ok: false, error: json?.error || `Falha ao imprimir (HTTP ${resp.status}).` };
+    }
+    return json;
+  }
+
+  async function salvarEnderecamentoInterno(tipoAcao) {
+    const msg = document.getElementById('movimMensagem');
+    const qtd = obterQtdDaExpressao();
+    const apontamento = String(document.getElementById('movimApontamento')?.value || '').trim() || null;
+    const mapTipo = { ENTRADA: 'ENT', SAIDA: 'SAI', TRANSFERENCIA: 'TRF' };
+    const tipoMov = mapTipo[String(tipoAcao || '').toUpperCase()] || String(tipoAcao || '').toUpperCase();
+    let enderecoOrigem = _enderecoOrigemInterno;
+    let enderecoDestino = _enderecoDestinoInterno;
+    if (tipoMov === 'ENT' && !enderecoDestino) enderecoDestino = enderecoOrigem;
+    if (tipoMov === 'SAI' && !enderecoOrigem) enderecoOrigem = enderecoDestino;
+
+    if (tipoMov === 'TRF') {
+      if (!enderecoOrigem || !enderecoDestino) {
+        if (msg) {
+          msg.textContent = 'Transferencia exige selecionar origem e destino na lista de enderecos.';
+          msg.className = 'movim-mensagem erro';
+        }
+        return;
+      }
+      if (enderecoOrigem === enderecoDestino) {
+        if (msg) {
+          msg.textContent = 'Origem e destino devem ser enderecos diferentes.';
+          msg.className = 'movim-mensagem erro';
+        }
+        return;
+      }
+    } else if (tipoMov === 'SAI' && !enderecoOrigem) {
+      if (msg) {
+        msg.textContent = 'Saida exige selecionar o endereco de origem na lista.';
+        msg.className = 'movim-mensagem erro';
+      }
+      return;
+    } else if (tipoMov === 'ENT' && !enderecoDestino) {
+      if (msg) {
+        msg.textContent = 'Entrada exige informar o endereco de destino (lista ou leitura QR).';
+        msg.className = 'movim-mensagem erro';
+      }
+      return;
+    }
+
+    if (!qtd) {
+      if (msg) { msg.textContent = 'Informe uma quantidade valida.'; msg.className = 'movim-mensagem erro'; }
+      return;
+    }
+    if (!_codigoProdutoAtual) {
+      if (msg) { msg.textContent = 'Produto nao identificado.'; msg.className = 'movim-mensagem erro'; }
+      return;
+    }
+
+    const solicitante = obterSolicitanteMovim();
+    const imprimir = !!document.getElementById('movimImprimirEtiqueta')?.checked;
+    limparRetornoOmie();
+    if (msg) { msg.textContent = 'Registrando movimentacao interna�'; msg.className = 'movim-mensagem info'; }
+    _processandoAcao = true;
+    setBotoesAcaoDisabled(true);
+
+    try {
+      const etq = await registrarEnderecosEtq({
+        codigo: _codigoProdutoAtual,
+        descricao: _descricaoProdutoAtual,
+        qtd,
+        endereco_origem: enderecoOrigem || null,
+        endereco_destino: enderecoDestino || null,
+        complemento: apontamento,
+        usuario: solicitante,
+        tipo_movimentacao: tipoMov
+      });
+      const ids = (etq.registros || []).map(r => r.id).filter(Boolean);
+      const linhas = [
+        `Produto: ${_codigoProdutoAtual}`,
+        `Tipo: ${tipoMov}`,
+        tipoMov !== 'ENT' && enderecoOrigem ? `Origem: ${enderecoOrigem}` : null,
+        tipoMov !== 'SAI' && enderecoDestino ? `Destino: ${enderecoDestino}` : null,
+        `Quantidade: ${qtd}`,
+        ids.length ? `Registro(s) ETQ: ${ids.join(', ')}` : 'Movimentacao salva em ETQ_rec_impresso.'
+      ].filter(Boolean);
+
+      if (imprimir && ids.length) {
+        if (msg) { msg.textContent = 'Enviando etiqueta para impressao�'; msg.className = 'movim-mensagem info'; }
+        const imp = await imprimirEtiquetasMovim(ids);
+        if (imp?.ok) {
+          linhas.push(`${imp.quantidade || ids.length} etiqueta(s) enviada(s) para impressao.`);
+        } else {
+          linhas.push(`Impressao: ${imp?.error || 'falhou � configure a impressora em Identificacao do produto.'}`);
+        }
+      }
+
+      exibirRetornoOmie(montarHtmlRetornoOmie({
+        ok: true,
+        titulo: 'Movimentacao interna registrada (sem Omie)',
+        linhas
+      }), 'ok');
+      if (msg) { msg.textContent = 'Movimentacao registrada.'; msg.className = 'movim-mensagem ok'; }
+      limparEnderecos();
+      limparEnderecosInternos();
+      carregarEnderecosReferencia(_codigoProdutoAtual);
+    } catch (err) {
+      console.error('[modalMovimentacao] enderecamento interno', err);
+      exibirRetornoOmie(montarHtmlRetornoOmie({
+        ok: false,
+        titulo: 'Falha ao registrar movimentacao',
+        linhas: [String(err?.message || err)]
+      }), 'erro');
+      if (msg) { msg.textContent = 'Falha � veja o retorno abaixo.'; msg.className = 'movim-mensagem erro'; }
+    } finally {
+      _processandoAcao = false;
+      setBotoesAcaoDisabled(false);
+    }
+  }
+
+  async function clicarExecutar() {
+    if (_processandoAcao) return;
+    let tipo = null;
+    if (isMotivoInterno()) {
+      tipo = _movimModoInterno;
+      if (!tipo) {
+        const msg = document.getElementById('movimMensagem');
+        if (msg) {
+          msg.textContent = 'Escolha ENTRADA, SAIDA ou TRANSFERENCIA.';
+          msg.className = 'movim-mensagem erro';
+        }
+        return;
+      }
+    } else {
+      tipo = obterTipoExecutarOmie();
+      if (!tipo) {
+        const msg = document.getElementById('movimMensagem');
+        if (msg) {
+          msg.textContent = 'Selecione o motivo do ajuste (Omie) antes de executar.';
+          msg.className = 'movim-mensagem erro';
+        }
+        omieMotivoSel?.focus();
+        return;
+      }
+    }
+    await executarAcao(tipo);
+  }
+
+  async function executarAcao(tipo) {
+    if (_processandoAcao) return;
+    if (isMotivoInterno()) {
+      await salvarEnderecamentoInterno(tipo);
+      return;
+    }
+    if (tipo === 'TRANSFERENCIA') {
+      await salvarTransferencia();
+      return;
+    }
+    if (tipo === 'ENTRADA') {
+      await salvarAjuste('ENT');
+      return;
+    }
+    if (tipo === 'SAIDA') {
+      await salvarAjuste('SAI');
+      return;
+    }
+  }
+
+  if (omieMotivoSel) {
+    preencherMotivosOmieUnificados();
+    omieMotivoSel.addEventListener('change', () => {
+      _movimModoInterno = null;
+      document.querySelectorAll('.movimModoBtn').forEach(b => b.classList.remove('ativo'));
+      limparEnderecosInternos();
+      atualizarLayoutMovim();
+    });
+  }
+
+  if (modoTipoDiv) {
+    modoTipoDiv.addEventListener('click', e => {
+      const btn = e.target.closest('.movimModoBtn');
+      if (!btn) return;
+      _movimModoInterno = btn.dataset.type;
+      document.querySelectorAll('.movimModoBtn').forEach(b => {
+        b.classList.toggle('ativo', b === btn);
+      });
+      limparEnderecosInternos();
+      atualizarLayoutMovim();
+    });
+  }
+
+  if (executarBtn) {
+    executarBtn.addEventListener('click', () => { void clicarExecutar(); });
+  }
+
+  document.getElementById('movimRmEnderecoOrigemBtn')?.addEventListener('click', () => {
+    _enderecoOrigemInterno = '';
+    renderEnderecoInternoValores();
+  });
+  document.getElementById('movimRmEnderecoDestinoBtn')?.addEventListener('click', () => {
+    _enderecoDestinoInterno = '';
+    renderEnderecoInternoValores();
+  });
+
+  // Operadores de quantidade (+, -, �, /)
   if (operDiv) {
     operDiv.addEventListener('click', e => {
       const btn = e.target.closest('button[data-insert]');
       if (!btn || !qtdInput) return;
+      e.stopPropagation();
       qtdInput.value += btn.dataset.insert;
       qtdInput.focus();
       avaliarExpressao();
     });
   }
 
-  // Avalia expressão matemática
+  // Calculadora popup
+  let _calcExpr = '';
+
+  function _calcRender() {
+    if (calcDisp) calcDisp.textContent = _calcExpr || '0';
+  }
+
+  if (calcBtn && calcPopup) {
+    calcBtn.addEventListener('click', e => {
+      e.stopPropagation();
+      if (calcPopup.style.display !== 'none') {
+        calcPopup.style.display = 'none';
+        return;
+      }
+      _calcExpr = qtdInput ? qtdInput.value : '';
+      _calcRender();
+      calcPopup.style.display = 'block';
+    });
+
+    calcPopup.addEventListener('click', e => {
+      const key = e.target.closest('.movimCalcKey');
+      if (!key) return;
+      e.stopPropagation();
+      const v = key.dataset.v;
+      if (v === 'C') {
+        _calcExpr = '';
+      } else if (v === '?') {
+        _calcExpr = _calcExpr.slice(0, -1);
+      } else if (v === 'OK') {
+        if (_calcExpr.trim()) {
+          try {
+            // eslint-disable-next-line no-new-func
+            const res = Function('"use strict"; return (' + _calcExpr.replace(/,/g, '.') + ')')();
+            if (typeof res === 'number' && isFinite(res)) {
+              if (qtdInput) {
+                qtdInput.value = String(parseFloat(res.toFixed(6)));
+                avaliarExpressao();
+              }
+            }
+          } catch { /* express�o inv�lida */ }
+        }
+        calcPopup.style.display = 'none';
+        return;
+      } else {
+        _calcExpr += v;
+      }
+      _calcRender();
+    });
+
+    document.addEventListener('click', e => {
+      if (!calcPopup || calcPopup.style.display === 'none') return;
+      if (calcPopup.contains(e.target) || e.target === calcBtn || calcBtn?.contains(e.target)) return;
+      if (operDiv?.contains(e.target)) return;
+      calcPopup.style.display = 'none';
+    });
+  }
+
+  // Avalia express�o matem�tica
   function avaliarExpressao() {
     if (!qtdInput || !qtdResult) return;
     try {
@@ -65365,24 +66741,49 @@ document.addEventListener('DOMContentLoaded', () => {
   }
   if (qtdInput) qtdInput.addEventListener('input', avaliarExpressao);
 
-  // Carrega os locais de estoque no select
+  // Carrega os locais de estoque nos selects (Local de estoque e Origem)
   async function carregarLocais() {
-    if (!localSel) return;
+    if (!localSel && !origemSel) return;
     try {
       const r = await fetch('/api/armazem/locais?fonte=db');
       const d = await r.json();
-      localSel.innerHTML = '';
-      (d.locais || []).filter(l => !l.inativo).forEach(l => {
-        const opt = document.createElement('option');
-        opt.value = l.codigo_local_estoque;
-        opt.textContent = l.descricao || l.codigo_local_estoque;
-        localSel.appendChild(opt);
-      });
-      // Pré-seleciona o local ALMOXARIFADO por padrão
-      const optAlmox = Array.from(localSel.options).find(o =>
-        o.textContent.toUpperCase().includes('ALMOXARIFADO')
-      );
-      if (optAlmox) localSel.value = optAlmox.value;
+      const locais = (d.locais || []).filter(l => !l.inativo);
+
+      function preencherOrigem(sel) {
+        if (!sel) return;
+        sel.innerHTML = '';
+        locais.forEach(l => {
+          const opt = document.createElement('option');
+          opt.value = l.codigo_local_estoque;
+          opt.textContent = l.descricao || l.codigo_local_estoque;
+          sel.appendChild(opt);
+        });
+        const preferido = MOVIM_DEFAULT_ORIGEM;
+        if (preferido && Array.from(sel.options).some(o => o.value === preferido)) {
+          sel.value = preferido;
+        } else {
+          const optPorta = Array.from(sel.options).find(o =>
+            o.textContent.toUpperCase().includes('PORTA PALLET')
+          );
+          if (optPorta) sel.value = optPorta.value;
+        }
+      }
+
+      function preencherDestino(sel) {
+        if (!sel) return;
+        sel.innerHTML = '<option value="">Selecione o destino�</option>';
+        locais.forEach(l => {
+          const opt = document.createElement('option');
+          opt.value = l.codigo_local_estoque;
+          opt.textContent = l.descricao || l.codigo_local_estoque;
+          sel.appendChild(opt);
+        });
+        sel.value = '';
+      }
+
+      preencherOrigem(origemSel);
+      preencherDestino(localSel);
+      atualizarUiMesmoArmazem();
     } catch (e) {
       console.warn('[modalMovimentacao] erro ao carregar locais:', e);
     }
@@ -65397,181 +66798,756 @@ document.addEventListener('DOMContentLoaded', () => {
       const r = await fetch(`/api/logistica/estoque?local=${local}&q=${encodeURIComponent(codigo)}`);
       const d = await r.json();
       const item = (d.dados || []).find(i => i.codigo === codigo);
-      badge.textContent = item ? `Estoque atual: ${Number(item.saldo)} UN` : 'Estoque atual: —';
-    } catch { badge.textContent = 'Estoque atual: —'; }
+      badge.textContent = item ? `Estoque atual: ${Number(item.saldo)} UN` : 'Estoque atual: �';
+    } catch { badge.textContent = 'Estoque atual: �'; }
   }
 
   // Atualiza estoque ao trocar o local
   let _codigoProdutoAtual = null;
+  let _descricaoProdutoAtual = null;
+  let _codigoProdutoOmieAtual = null;
+
+  function obterQtdDaExpressao() {
+    if (!qtdInput) return null;
+    const expr = String(qtdInput.value || '').trim();
+    if (!expr) return null;
+    try {
+      // eslint-disable-next-line no-new-func
+      const val = Function('"use strict"; return (' + expr.replace(/,/g, '.') + ')')();
+      if (typeof val === 'number' && isFinite(val) && val > 0) return val;
+    } catch { /* express�o inv�lida */ }
+    return null;
+  }
+
+  async function buscarCmcOrigem(codigo, origem) {
+    try {
+      const r = await fetch(`/api/logistica/estoque?local=${encodeURIComponent(origem)}&q=${encodeURIComponent(codigo)}`);
+      const d = await r.json();
+      const item = (d.dados || []).find(i => String(i.codigo || '').trim() === String(codigo || '').trim());
+      if (!item) return null;
+      const cmc = normalizaNumeroParaApi(item.cmc);
+      return cmc > 0 ? cmc : null;
+    } catch {
+      return null;
+    }
+  }
+
+  async function salvarAjuste(tipoOperacao) {
+    const msg = document.getElementById('movimMensagem');
+    const tipo = String(tipoOperacao || '').toUpperCase();
+    const local = tipo === 'ENT'
+      ? String(localSel?.value || '').trim()
+      : String(origemSel?.value || '').trim();
+    const qtd = obterQtdDaExpressao();
+    const motivo = obterMotivoOmie(tipo);
+    const apontamento = String(document.getElementById('movimApontamento')?.value || '').trim() || null;
+
+    if (!local) {
+      if (msg) {
+        msg.textContent = tipo === 'ENT' ? 'Selecione o destino (local de entrada).' : 'Selecione a origem (local de sa�da).';
+        msg.className = 'movim-mensagem erro';
+      }
+      return;
+    }
+    if (!qtd) {
+      if (msg) { msg.textContent = 'Informe uma quantidade v�lida.'; msg.className = 'movim-mensagem erro'; }
+      return;
+    }
+    if (!_codigoProdutoAtual) {
+      if (msg) { msg.textContent = 'Produto n�o identificado.'; msg.className = 'movim-mensagem erro'; }
+      return;
+    }
+
+    const solicitante = obterSolicitanteMovim();
+    limparRetornoOmie();
+    if (msg) { msg.textContent = 'Registrando ajuste�'; msg.className = 'movim-mensagem info'; }
+    _processandoAcao = true;
+    setBotoesAcaoDisabled(true);
+
+    try {
+      const cmc = await buscarCmcOrigem(_codigoProdutoAtual, local);
+      const payload = {
+        tipo_operacao: tipo,
+        local_estoque: local,
+        data_movimentacao: new Date().toISOString().slice(0, 10),
+        solicitante,
+        motivo,
+        obs: apontamento,
+        itens: [{
+          codigo: _codigoProdutoAtual,
+          descricao: _descricaoProdutoAtual || _codigoProdutoAtual,
+          qtd,
+          cmc: cmc || null,
+          codigo_produto: _codigoProdutoOmieAtual || null,
+          codOmie: _codigoProdutoOmieAtual || null
+        }]
+      };
+
+      const resp = await fetch('/api/ajustes', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      let resposta;
+      try { resposta = await resp.json(); } catch { throw new Error('Resposta inv�lida do servidor.'); }
+      if (!resp.ok || !resposta?.ok) {
+        throw new Error(resposta?.error || resposta?.detail || `Falha ao registrar ajuste (HTTP ${resp.status}).`);
+      }
+
+      const registros = Array.isArray(resposta.registros) ? resposta.registros : [];
+      const idSolicitacao = registros[0]?.id;
+      if (!idSolicitacao) throw new Error('Solicita��o criada sem identificador.');
+
+      if (!solicitante || solicitante === 'Usu�rio') {
+        exibirRetornoOmie(montarHtmlRetornoOmie({
+          ok: false,
+          titulo: 'Solicita��o registrada � usu�rio n�o identificado',
+          idSolicitacao,
+          linhas: ['N�o foi poss�vel enviar para a Omie automaticamente.', 'Aprove em Log�stica ? Armaz�ns ? Ajuste.']
+        }), 'info');
+        if (msg) { msg.textContent = 'Solicita��o registrada. Aguardando aprova��o.'; msg.className = 'movim-mensagem info'; }
+        return;
+      }
+
+      if (msg) { msg.textContent = 'Enviando para Omie�'; msg.className = 'movim-mensagem info'; }
+      const respAprovar = await fetch(`/api/ajustes/${idSolicitacao}/aprovar`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ aprovadoPor: solicitante })
+      });
+      let jsonAprovar;
+      try { jsonAprovar = await respAprovar.json(); } catch { throw new Error('Resposta inv�lida ao enviar para Omie.'); }
+
+      if (!respAprovar.ok || !jsonAprovar?.ok) {
+        const errOmie = jsonAprovar?.error || `Falha ao enviar para Omie (HTTP ${respAprovar.status}).`;
+        exibirRetornoOmie(montarHtmlRetornoOmie({
+          ok: false,
+          titulo: 'Omie n�o confirmou o ajuste',
+          idSolicitacao,
+          linhas: [errOmie, 'A solicita��o foi salva. Tente aprovar em Log�stica ? Armaz�ns ? Ajuste.']
+        }), 'erro');
+        if (msg) { msg.textContent = 'Ajuste pendente � veja o retorno abaixo.'; msg.className = 'movim-mensagem erro'; }
+        return;
+      }
+
+      const omie = jsonAprovar.omie || {};
+      const linhasRetorno = [];
+      const descOmie = jsonAprovar.descricao_status || omie.descricao_status;
+      if (descOmie) linhasRetorno.push(`Mensagem Omie: ${descOmie}`);
+
+      const enderecos = obterEnderecosLidos();
+      if (enderecos.length) {
+        try {
+          const etqPayload = {
+            codigo: _codigoProdutoAtual,
+            descricao: _descricaoProdutoAtual,
+            qtd,
+            complemento: apontamento,
+            usuario: solicitante,
+            tipo_movimentacao: tipo
+          };
+          if (tipo === 'ENT') etqPayload.endereco_destino = enderecos[0];
+          else if (tipo === 'SAI') etqPayload.endereco_origem = enderecos[0];
+          await registrarEnderecosEtq(etqPayload);
+          linhasRetorno.push(`Endere�o atualizado em ETQ: ${enderecos[0]}`);
+          limparSelecoesListaEtq();
+          if (_codigoProdutoAtual) void carregarEnderecosReferencia(_codigoProdutoAtual);
+        } catch (etqErr) {
+          linhasRetorno.push(`Omie OK � endere�o: ${etqErr?.message || etqErr}`);
+        }
+      }
+
+      if (!linhasRetorno.length) linhasRetorno.push(`Ajuste ${tipo} conclu�do com sucesso na Omie.`);
+
+      exibirRetornoOmie(montarHtmlRetornoOmie({
+        ok: true,
+        titulo: `Ajuste ${tipo} enviado para Omie`,
+        idSolicitacao,
+        linhas: linhasRetorno
+      }), 'ok');
+      if (msg) { msg.textContent = 'Ajuste conclu�do.'; msg.className = 'movim-mensagem ok'; }
+      aplicarEstoqueOtimistaMovim(tipo, {
+        origem: tipo === 'SAI' ? local : null,
+        destino: tipo === 'ENT' ? local : null,
+        qtd
+      });
+    } catch (err) {
+      console.error('[modalMovimentacao] ajuste', err);
+      exibirRetornoOmie(montarHtmlRetornoOmie({
+        ok: false,
+        titulo: 'Falha ao registrar ajuste',
+        linhas: [String(err?.message || err)]
+      }), 'erro');
+      if (msg) { msg.textContent = 'Falha � veja o retorno abaixo.'; msg.className = 'movim-mensagem erro'; }
+    } finally {
+      _processandoAcao = false;
+      setBotoesAcaoDisabled(false);
+    }
+  }
+
+  async function salvarTransferencia() {
+    const msg = document.getElementById('movimMensagem');
+    const origem = String(origemSel?.value || '').trim() || MOVIM_DEFAULT_ORIGEM;
+    const destino = String(localSel?.value || '').trim();
+    const qtd = obterQtdDaExpressao();
+    const motivo = obterMotivoOmie('TRF');
+    const apontamento = String(document.getElementById('movimApontamento')?.value || '').trim() || null;
+    const enderecos = obterEnderecosLidos();
+
+    if (!destino) {
+      if (msg) { msg.textContent = 'Selecione o destino.'; msg.className = 'movim-mensagem erro'; }
+      localSel?.focus();
+      return;
+    }
+    if (!qtd) {
+      if (msg) { msg.textContent = 'Informe uma quantidade v�lida.'; msg.className = 'movim-mensagem erro'; }
+      return;
+    }
+    if (!_codigoProdutoAtual) {
+      if (msg) { msg.textContent = 'Produto n�o identificado.'; msg.className = 'movim-mensagem erro'; }
+      return;
+    }
+
+    const solicitante = obterSolicitanteMovim();
+    limparRetornoOmie();
+    _processandoAcao = true;
+    setBotoesAcaoDisabled(true);
+
+    try {
+      if (msg) { msg.textContent = 'Registrando solicita��o�'; msg.className = 'movim-mensagem info'; }
+
+      const cmc = await buscarCmcOrigem(_codigoProdutoAtual, origem);
+      const payload = {
+        origem,
+        destino,
+        data_movimentacao: new Date().toISOString().slice(0, 10),
+        solicitante,
+        itens: [{
+          codigo: _codigoProdutoAtual,
+          descricao: _descricaoProdutoAtual || _codigoProdutoAtual,
+          qtd,
+          cmc: cmc || null,
+          codigo_produto: _codigoProdutoOmieAtual || null,
+          codOmie: _codigoProdutoOmieAtual || null
+        }]
+      };
+
+      const resp = await fetch('/api/transferencias', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+
+      let resposta;
+      try {
+        resposta = await resp.json();
+      } catch {
+        throw new Error('Resposta inv�lida do servidor.');
+      }
+
+      if (!resp.ok || !resposta?.ok) {
+        const detalhe = resposta?.error || resposta?.detail || `Falha ao registrar transfer�ncia (HTTP ${resp.status}).`;
+        throw new Error(detalhe);
+      }
+
+      const registros = Array.isArray(resposta.registros) ? resposta.registros : [];
+      const idSolicitacao = registros[0]?.id;
+      if (!idSolicitacao) {
+        throw new Error('Solicita��o criada sem identificador.');
+      }
+
+      const aprovadoPor = solicitante;
+      if (!aprovadoPor || aprovadoPor === 'Usu�rio') {
+        exibirRetornoOmie(montarHtmlRetornoOmie({
+          ok: false,
+          titulo: 'Solicita��o registrada � usu�rio n�o identificado',
+          idSolicitacao,
+          linhas: [
+            'N�o foi poss�vel enviar para a Omie automaticamente.',
+            'Aprove em Log�stica ? Solicita��o de transfer�ncia.'
+          ]
+        }), 'info');
+        if (msg) { msg.textContent = 'Solicita��o registrada. Aguardando aprova��o.'; msg.className = 'movim-mensagem info'; }
+        return;
+      }
+
+      if (msg) { msg.textContent = 'Enviando para Omie�'; msg.className = 'movim-mensagem info'; }
+
+      const respAprovar = await fetch(`/api/transferencias/${idSolicitacao}/aprovar`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ aprovadoPor, motivo })
+      });
+
+      let jsonAprovar;
+      try {
+        jsonAprovar = await respAprovar.json();
+      } catch {
+        throw new Error('Resposta inv�lida ao enviar para Omie.');
+      }
+
+      if (!respAprovar.ok || !jsonAprovar?.ok) {
+        const errOmie = jsonAprovar?.error || `Falha ao enviar para Omie (HTTP ${respAprovar.status}).`;
+        exibirRetornoOmie(montarHtmlRetornoOmie({
+          ok: false,
+          titulo: 'Omie n�o confirmou a transfer�ncia',
+          idSolicitacao,
+          linhas: [
+            errOmie,
+            'A solicita��o foi salva. Tente aprovar em Log�stica ? Solicita��o de transfer�ncia.'
+          ]
+        }), 'erro');
+        if (msg) { msg.textContent = 'Transfer�ncia pendente � veja o retorno abaixo.'; msg.className = 'movim-mensagem erro'; }
+        return;
+      }
+
+      if (enderecos.length >= 2) {
+        const endOrigem = enderecos[0] || null;
+        const endDestino = enderecos[1] || null;
+        try {
+          await registrarEnderecosEtq({
+            codigo: _codigoProdutoAtual,
+            descricao: _descricaoProdutoAtual,
+            qtd,
+            endereco_origem: endOrigem,
+            endereco_destino: endDestino,
+            enderecos,
+            complemento: apontamento,
+            usuario: aprovadoPor,
+            tipo_movimentacao: 'TRF'
+          });
+        } catch (etqErr) {
+          const omie = jsonAprovar.omie || {};
+          const linhasEtqErro = [];
+          const descOmie = jsonAprovar.descricao_status || omie.descricao_status;
+          if (descOmie) linhasEtqErro.push(`Mensagem Omie: ${descOmie}`);
+          linhasEtqErro.push(`Omie OK � endere�o: ${etqErr?.message || etqErr}`);
+          exibirRetornoOmie(montarHtmlRetornoOmie({
+            ok: false,
+            titulo: 'Transfer�ncia na Omie � falha no endere�o',
+            idSolicitacao,
+            linhas: linhasEtqErro
+          }), 'erro');
+          if (msg) { msg.textContent = 'Omie OK, mas endere�o falhou � veja abaixo.'; msg.className = 'movim-mensagem erro'; }
+          aplicarEstoqueOtimistaMovim('TRANSFERENCIA', { origem, destino, qtd });
+          return;
+        }
+      }
+
+      const omie = jsonAprovar.omie || {};
+      const linhasRetorno = [];
+      const descOmie = jsonAprovar.descricao_status || omie.descricao_status;
+      if (descOmie) linhasRetorno.push(`Mensagem Omie: ${descOmie}`);
+      if (omie.codigo_status !== undefined && omie.codigo_status !== null && omie.codigo_status !== '') {
+        linhasRetorno.push(`C�digo Omie: ${omie.codigo_status}`);
+      }
+      const idMov = omie.id_mov || omie.nCodMov || omie.codigo_movimento;
+      if (idMov) linhasRetorno.push(`ID movimenta��o: ${idMov}`);
+      if (enderecos.length >= 2) linhasRetorno.push(`Endere�o(s) registrado(s): ${enderecos.slice(0, 2).join(', ')}`);
+      if (!linhasRetorno.length) linhasRetorno.push('Transfer�ncia conclu�da com sucesso na Omie.');
+
+      exibirRetornoOmie(montarHtmlRetornoOmie({
+        ok: true,
+        titulo: 'Transfer�ncia enviada para Omie',
+        idSolicitacao,
+        linhas: linhasRetorno
+      }), 'ok');
+      if (msg) { msg.textContent = 'Transfer�ncia conclu�da.'; msg.className = 'movim-mensagem ok'; }
+      aplicarEstoqueOtimistaMovim('TRANSFERENCIA', { origem, destino, qtd });
+      if (enderecos.length >= 2) {
+        limparSelecoesListaEtq();
+        if (_codigoProdutoAtual) void carregarEnderecosReferencia(_codigoProdutoAtual);
+      }
+    } catch (err) {
+      console.error('[modalMovimentacao] transferencia', err);
+      exibirRetornoOmie(montarHtmlRetornoOmie({
+        ok: false,
+        titulo: 'Falha ao registrar transfer�ncia',
+        linhas: [String(err?.message || err)]
+      }), 'erro');
+      if (msg) {
+        msg.textContent = 'Falha � veja o retorno da Omie abaixo.';
+        msg.className = 'movim-mensagem erro';
+      }
+    } finally {
+      _processandoAcao = false;
+      setBotoesAcaoDisabled(false);
+    }
+  }
+
   if (localSel) {
     localSel.addEventListener('change', () => {
-      if (_codigoProdutoAtual) carregarEstoque(_codigoProdutoAtual, localSel.value);
+      if (_codigoProdutoAtual && localSel.value) carregarEstoque(_codigoProdutoAtual, localSel.value);
+      atualizarUiMesmoArmazem();
+      destacarLocaisMovim();
+    });
+  }
+  if (origemSel) {
+    origemSel.addEventListener('change', () => {
+      atualizarUiMesmoArmazem();
+      destacarLocaisMovim();
     });
   }
 
+  const histBtn     = document.getElementById('movimHistoricoBtn');
+  const histModal   = document.getElementById('movimHistoricoModal');
+  const histFechar  = document.getElementById('movimHistoricoFechar');
+  const histStatus  = document.getElementById('movimHistoricoStatus');
+  const histBody    = document.getElementById('movimHistoricoBody');
+  const histTitulo  = document.getElementById('movimHistoricoTitulo');
+  const histSub     = document.getElementById('movimHistoricoSubtitulo');
+
+  function fecharHistoricoAjustes() {
+    if (histModal) histModal.style.display = 'none';
+    if (histBody) histBody.innerHTML = '';
+    if (histStatus) {
+      histStatus.textContent = '';
+      histStatus.className = 'movim-hist-status';
+    }
+  }
+
+  function classeTipoHistorico(tipo) {
+    const t = String(tipo || '').toUpperCase();
+    if (t === 'ENT') return 'movim-hist-tipo-ent';
+    if (t === 'SAI') return 'movim-hist-tipo-sai';
+    if (t === 'TRF') return 'movim-hist-tipo-trf';
+    return '';
+  }
+
+  function formatarHistoricoLocal(item) {
+    const origem = item?.codigo_local_estoque;
+    const destino = item?.codigo_local_estoque_destino;
+    if (origem && destino && String(destino) !== '0') {
+      return `${origem} ? ${destino}`;
+    }
+    return origem != null && origem !== '' ? String(origem) : '�';
+  }
+
+  function parseDataHistoricoOmie(val) {
+    const s = String(val || '').trim();
+    const m = s.match(/^(\d{2})\/(\d{2})\/(\d{4})/);
+    if (m) return new Date(Number(m[3]), Number(m[2]) - 1, Number(m[1])).getTime();
+    const t = Date.parse(s);
+    return Number.isFinite(t) ? t : 0;
+  }
+
+  function renderHistoricoAjustes(data) {
+    const listaRaw = Array.isArray(data?.ajuste_estoque_lista) ? data.ajuste_estoque_lista : [];
+    const lista = [...listaRaw].sort((a, b) => {
+      const db = parseDataHistoricoOmie(b?.data);
+      const da = parseDataHistoricoOmie(a?.data);
+      if (db !== da) return db - da;
+      return (Number(b?.id_ajuste) || 0) - (Number(a?.id_ajuste) || 0);
+    });
+    const total = data?.total_de_registros ?? lista.length;
+
+    if (histStatus) {
+      histStatus.textContent = `${total} registro(s) na Omie`;
+      histStatus.className = 'movim-hist-status';
+    }
+
+    if (!histBody) return;
+
+    if (!lista.length) {
+      histBody.innerHTML = '<div class="movim-hist-vazio">Nenhum ajuste de estoque encontrado para este produto.</div>';
+      return;
+    }
+
+    const linhas = lista.map(item => {
+      const tipo = String(item?.tipo || '�').toUpperCase();
+      const qtd = item?.quan ?? item?.quantidade ?? '�';
+      const valor = item?.valor != null && item.valor !== '' ? item.valor : '�';
+      const obs = String(item?.obs || '').trim();
+      return `
+        <tr>
+          <td>${escapeHtml(String(item?.data || '�'))}</td>
+          <td class="${classeTipoHistorico(tipo)}">${escapeHtml(tipo)}</td>
+          <td>${escapeHtml(String(qtd))}</td>
+          <td>${escapeHtml(String(item?.motivo || '�'))}</td>
+          <td>${escapeHtml(formatarHistoricoLocal(item))}</td>
+          <td>${escapeHtml(String(valor))}</td>
+          <td class="movim-hist-obs">${escapeHtml(obs || '�')}</td>
+        </tr>
+      `;
+    }).join('');
+
+    histBody.innerHTML = `
+      <table class="movim-hist-table">
+        <thead>
+          <tr>
+            <th>Data</th>
+            <th>Tipo</th>
+            <th>Qtd</th>
+            <th>Motivo</th>
+            <th>Local</th>
+            <th>Valor</th>
+            <th>Observacoes</th>
+          </tr>
+        </thead>
+        <tbody>${linhas}</tbody>
+      </table>
+    `;
+  }
+
+  async function abrirHistoricoAjustes() {
+    if (!histModal) return;
+
+    const idProd = _codigoProdutoOmieAtual;
+    const codigo = _codigoProdutoAtual;
+    if (!idProd && !codigo) {
+      const msg = document.getElementById('movimMensagem');
+      if (msg) {
+        msg.textContent = 'Produto sem ID Omie para consultar historico.';
+        msg.className = 'movim-mensagem erro';
+      }
+      return;
+    }
+
+    if (histTitulo) histTitulo.textContent = _descricaoProdutoAtual || codigo || 'Historico de ajustes';
+    if (histSub) {
+      const partes = [];
+      if (codigo) partes.push('Codigo: ' + codigo);
+      if (idProd) partes.push('ID Omie: ' + idProd);
+      histSub.textContent = partes.join(' � ');
+    }
+    if (histStatus) {
+      histStatus.textContent = 'Consultando historico na Omie...';
+      histStatus.className = 'movim-hist-status';
+    }
+    if (histBody) histBody.innerHTML = '';
+    histModal.style.display = 'flex';
+
+    const params = new URLSearchParams();
+    if (idProd) params.set('id_prod', String(idProd));
+    else params.set('codigo', String(codigo));
+
+    try {
+      const resp = await fetch(`/api/ajustes/historico-omie?${params.toString()}`, { credentials: 'include' });
+      let json;
+      try { json = await resp.json(); } catch {
+        throw new Error('Resposta invalida ao buscar historico.');
+      }
+      if (!resp.ok || !json?.ok) {
+        throw new Error(json?.error || `Falha ao buscar historico (HTTP ${resp.status}).`);
+      }
+      renderHistoricoAjustes(json);
+    } catch (err) {
+      if (histStatus) {
+        histStatus.textContent = String(err?.message || err);
+        histStatus.className = 'movim-hist-status erro';
+      }
+      if (histBody) histBody.innerHTML = '';
+    }
+  }
+
+  if (histBtn) histBtn.addEventListener('click', abrirHistoricoAjustes);
+  if (histFechar) histFechar.addEventListener('click', fecharHistoricoAjustes);
+  if (histModal) {
+    histModal.addEventListener('click', e => {
+      if (e.target === histModal) fecharHistoricoAjustes();
+    });
+  }
+
+  const comprasBtn = document.getElementById('movimComprasBtn');
+
+  async function abrirUltimasComprasMovim() {
+    let idOmie = _codigoProdutoOmieAtual;
+    const codigo = _codigoProdutoAtual;
+    const descricao = _descricaoProdutoAtual || codigo;
+
+    if (!idOmie && codigo) {
+      try {
+        const resp = await fetch(`/api/produtos/detalhe?codigo=${encodeURIComponent(codigo)}`, { credentials: 'include' });
+        const json = await resp.json();
+        if (resp.ok && json?.codigo_produto) idOmie = json.codigo_produto;
+      } catch { /* ignora � tenta abrir sem fallback */ }
+    }
+
+    if (!idOmie) {
+      const msg = document.getElementById('movimMensagem');
+      if (msg) {
+        msg.textContent = 'Produto sem ID Omie para consultar ultimas compras.';
+        msg.className = 'movim-mensagem erro';
+      }
+      return;
+    }
+
+    if (typeof window.abrirModalUltimasCompras === 'function') {
+      window.abrirModalUltimasCompras(idOmie, codigo, descricao);
+    }
+  }
+
+  if (comprasBtn) comprasBtn.addEventListener('click', abrirUltimasComprasMovim);
+
+  // -- Impress�o ETQ_rec_impresso -------------------------------------------
+  const impModal = document.getElementById('movimImpressaoModal');
+  const impFechar = document.getElementById('movimImpressaoFechar');
+  const impCancelar = document.getElementById('movimImpressaoCancelar');
+  const impConfirmar = document.getElementById('movimImpressaoConfirmar');
+  const impEtqSel = document.getElementById('movimImpressaoEtqSelect');
+  const impQtdInput = document.getElementById('movimImpressaoQtd');
+  const impStatus = document.getElementById('movimImpressaoStatus');
+  const impBtn = document.getElementById('movimImpressaoBtn');
+
+  function fecharImpressaoMovim() {
+    if (impModal) impModal.style.display = 'none';
+    if (impStatus) { impStatus.textContent = ''; impStatus.className = 'movim-imp-status'; }
+  }
+
+  function renderOpcoesEtqImpressao(lista) {
+    if (!impEtqSel) return;
+    if (!lista.length) {
+      impEtqSel.innerHTML = '<option value="">Nenhuma etiqueta encontrada</option>';
+      return;
+    }
+    impEtqSel.innerHTML = lista.map(etq => {
+      const end = String(etq.endereco || '').trim();
+      const qtd = etq.qtd != null ? ` � Qtd: ${etq.qtd}` : '';
+      const comp = etq.complemento ? ` (${String(etq.complemento).slice(0, 40)})` : '';
+      return `<option value="${etq.id}">${escapeHtml(end)}${escapeHtml(qtd)}${escapeHtml(comp)}</option>`;
+    }).join('');
+  }
+
+  async function abrirImpressaoMovim() {
+    const codigo = _codigoProdutoAtual;
+    if (!codigo) {
+      const msg = document.getElementById('movimMensagem');
+      if (msg) {
+        msg.textContent = 'Produto nao identificado para impressao.';
+        msg.className = 'movim-mensagem erro';
+      }
+      return;
+    }
+
+    const titulo = document.getElementById('movimImpressaoTitulo');
+    const subtitulo = document.getElementById('movimImpressaoSubtitulo');
+    if (titulo) titulo.textContent = 'Imprimir etiqueta';
+    if (subtitulo) subtitulo.textContent = (_descricaoProdutoAtual || codigo) + ' � Codigo: ' + codigo;
+    if (impQtdInput) impQtdInput.value = '1';
+    if (impStatus) { impStatus.textContent = 'Carregando etiquetas�'; impStatus.className = 'movim-imp-status'; }
+    if (impEtqSel) impEtqSel.innerHTML = '<option value="">Carregando�</option>';
+    if (impModal) impModal.style.display = 'flex';
+
+    await movimAtualizarListboxImpressora();
+
+    try {
+      const resp = await fetch('/api/etiquetas/rec-impresso/etiquetas-por-produto?codigo=' + encodeURIComponent(codigo), { credentials: 'include' });
+      const json = await resp.json();
+      if (!resp.ok || !json?.ok) throw new Error(json?.error || `HTTP ${resp.status}`);
+      _movimEtqImpressaoLista = Array.isArray(json.etiquetas) ? json.etiquetas : [];
+      renderOpcoesEtqImpressao(_movimEtqImpressaoLista);
+      if (!_movimEtqImpressaoLista.length) {
+        if (impStatus) {
+          impStatus.textContent = 'Nenhuma etiqueta ETQ_rec_impresso com endereco para este produto.';
+          impStatus.className = 'movim-imp-status erro';
+        }
+      } else if (impStatus) {
+        impStatus.textContent = _movimEtqImpressaoLista.length === 1
+          ? '1 etiqueta disponivel.'
+          : `${_movimEtqImpressaoLista.length} etiquetas � selecione qual imprimir.`;
+        impStatus.className = 'movim-imp-status';
+      }
+    } catch (err) {
+      _movimEtqImpressaoLista = [];
+      if (impEtqSel) impEtqSel.innerHTML = '<option value="">Erro ao carregar</option>';
+      if (impStatus) {
+        impStatus.textContent = String(err?.message || err);
+        impStatus.className = 'movim-imp-status erro';
+      }
+    }
+  }
+
+  async function confirmarImpressaoMovim() {
+    const idEtq = Number(impEtqSel?.value);
+    const qtd = Math.max(1, Math.floor(Number(impQtdInput?.value) || 1));
+    if (!idEtq) {
+      if (impStatus) {
+        impStatus.textContent = 'Selecione uma etiqueta para imprimir.';
+        impStatus.className = 'movim-imp-status erro';
+      }
+      return;
+    }
+    if (impConfirmar) { impConfirmar.disabled = true; }
+    if (impStatus) { impStatus.textContent = 'Enviando para impressao�'; impStatus.className = 'movim-imp-status'; }
+    try {
+      const ids = Array.from({ length: qtd }, () => idEtq);
+      const imp = await imprimirEtiquetasMovim(ids);
+      if (!imp?.ok) throw new Error(imp?.error || 'Falha ao imprimir.');
+      if (impStatus) {
+        impStatus.textContent = `${imp.quantidade || qtd} etiqueta(s) enviada(s) para impressao.`;
+        impStatus.className = 'movim-imp-status ok';
+      }
+      setTimeout(fecharImpressaoMovim, 1200);
+      _movimPrinterPrefTemp = null;
+      movimAtualizarListboxImpressora();
+    } catch (err) {
+      if (impStatus) {
+        impStatus.textContent = String(err?.message || err);
+        impStatus.className = 'movim-imp-status erro';
+      }
+    } finally {
+      if (impConfirmar) impConfirmar.disabled = false;
+    }
+  }
+
+  if (impBtn) impBtn.addEventListener('click', abrirImpressaoMovim);
+  if (impFechar) impFechar.addEventListener('click', fecharImpressaoMovim);
+  if (impCancelar) impCancelar.addEventListener('click', fecharImpressaoMovim);
+  if (impConfirmar) impConfirmar.addEventListener('click', confirmarImpressaoMovim);
+  if (impModal) impModal.addEventListener('click', e => { if (e.target === impModal) fecharImpressaoMovim(); });
+
+  for (const id of MOVIM_IMPRESSORA_SELECT_IDS) {
+    document.getElementById(id)?.addEventListener('change', function () {
+      movimSyncImpressoraSelects(this.value || null);
+    });
+  }
+  for (const id of MOVIM_IMPRESSORA_REFRESH_BTN_IDS) {
+    document.getElementById(id)?.addEventListener('click', () => movimAtualizarListboxImpressora());
+  }
+  for (const id of MOVIM_IMPRESSORA_CONFIG_BTN_IDS) {
+    document.getElementById(id)?.addEventListener('click', movimAbrirConfigImpressoras);
+  }
+  window.addEventListener('etq-impr-cfg-saved', () => movimAtualizarListboxImpressora());
+  window._movimAtualizarListboxImpressora = movimAtualizarListboxImpressora;
+  window._movimSyncImpressoraSelects = movimSyncImpressoraSelects;
+  window._movimAbrirConfigImpressoras = movimAbrirConfigImpressoras;
+  window._movimObterPrefsImpressora = movimObterPrefsImpressora;
+
   // Abre o modal
-  window.abrirModalMovimentacao = async function(codigo, descricao) {
+  window.abrirModalMovimentacao = async function(codigo, descricao, codigoProduto) {
     _codigoProdutoAtual = codigo;
+    _descricaoProdutoAtual = descricao || codigo;
+    _codigoProdutoOmieAtual = codigoProduto || null;
+    document.querySelectorAll('.movimModoBtn').forEach(b => b.classList.remove('ativo'));
+    if (executarBtn) { executarBtn.disabled = false; executarBtn.classList.remove('processando'); }
+    _movimModoInterno = null;
+    if (qtdInput) qtdInput.value = '';
+    if (qtdResult) qtdResult.textContent = '';
+    const msg = document.getElementById('movimMensagem');
+    if (msg) { msg.textContent = ''; msg.className = 'movim-mensagem'; }
+    limparRetornoOmie();
+    limparEnderecos();
+    resetMotivoOmie();
+    _movimPrinterPrefTemp = null;
+    const imprCb = document.getElementById('movimImprimirEtiqueta');
+    if (imprCb) imprCb.checked = false;
+
     const titulo   = document.getElementById('movimTitulo');
     const subtitulo= document.getElementById('movimSubtitulo');
     if (titulo)    titulo.textContent    = descricao || codigo;
     if (subtitulo) subtitulo.textContent = 'Codigo: ' + codigo;
     if (overlay)   overlay.style.display = 'flex';
 
-    await carregarLocais();
-    if (localSel && localSel.value) {
-      await carregarEstoque(codigo, localSel.value);
-    }
+    void carregarEnderecosReferencia(codigo);
+    await Promise.all([
+      carregarLocais(),
+      carregarEstoqueModal(codigo),
+      movimAtualizarListboxImpressora()
+    ]);
+    atualizarUiMesmoArmazem();
   };
-
-  // Salvar (placeholder para lógica futura)
-  if (salvarBtn) {
-    salvarBtn.addEventListener('click', () => {
-      const msg = document.getElementById('movimMensagem');
-      if (!tipoAtivo) {
-        if (msg) { msg.textContent = 'Selecione o tipo de movimentação.'; msg.className = 'movim-mensagem erro'; }
-        return;
-      }
-      // TODO: implementar lógica de salvar
-      if (msg) { msg.textContent = 'Funcionalidade em desenvolvimento.'; msg.className = 'movim-mensagem info'; }
-    });
-  }
 })();
-// ===================== FIM MODAL MOVIMENTAÇÃO =====================
-
-// ===================== PALLET PICKER =====================
-(function () {
-  const NUM_COLS   = 5;
-  const NUM_LEVELS = 4;
-  const NUM_BAYS   = 2;
-
-  let colunaSelecionada = null;
-
-  const overlay   = document.getElementById('modalPalletPicker');
-  const viewSide  = document.getElementById('ppickerViewSide');
-  const viewFront = document.getElementById('ppickerViewFront');
-  const voltarBtn = document.getElementById('ppickerVoltar');
-  const tituloEl  = document.getElementById('ppickerTitulo');
-  const fecharBtn = document.getElementById('ppickerFechar');
-  const abrirBtn  = document.getElementById('movimAbrirPalletBtn');
-
-  if (!overlay) return;
-
-  // ── Vista Lateral: 5 colunas ──────────────────────────────────
-  function renderSide() {
-    colunaSelecionada = null;
-    viewSide.style.display = 'flex';
-    viewFront.style.display = 'none';
-    voltarBtn.style.display = 'none';
-    tituloEl.textContent = 'Selecione a Coluna';
-    viewSide.innerHTML = '';
-
-    for (let c = 1; c <= NUM_COLS; c++) {
-      const wrap = document.createElement('div');
-      wrap.className = 'ppicker-col-wrap';
-
-      // Corpo da coluna com prateleiras
-      const body = document.createElement('div');
-      body.className = 'ppicker-col-body';
-      for (let n = 0; n < NUM_LEVELS; n++) {
-        const space = document.createElement('div'); space.className = 'ppicker-shelf-space';
-        const shelf = document.createElement('div'); shelf.className = 'ppicker-shelf-line';
-        body.appendChild(space);
-        body.appendChild(shelf);
-      }
-
-      const floor = document.createElement('div'); floor.className = 'ppicker-col-floor-strip';
-      const label = document.createElement('div'); label.className = 'ppicker-col-label';
-      label.textContent = 'C' + c;
-
-      wrap.appendChild(body);
-      wrap.appendChild(floor);
-      wrap.appendChild(label);
-      wrap.addEventListener('click', () => { colunaSelecionada = c; renderFront(c); });
-      viewSide.appendChild(wrap);
-    }
-  }
-
-  // ── Vista Frontal: 2 prateleiras × 4 níveis ──────────────────
-  function renderFront(col) {
-    viewSide.style.display = 'none';
-    viewFront.style.display = 'block';
-    voltarBtn.style.display = 'flex';
-    tituloEl.textContent = 'Coluna ' + col + ' — Vista Frontal';
-    viewFront.innerHTML = '';
-
-    // Cabeçalho dos bays
-    const header = document.createElement('div');
-    header.className = 'ppicker-front-bays-header';
-    header.innerHTML = '<div>Prateleira 1</div><div>Prateleira 2</div>';
-    viewFront.appendChild(header);
-
-    // Níveis do topo (N4) até o chão (N1)
-    for (let n = NUM_LEVELS; n >= 1; n--) {
-      const row = document.createElement('div');
-      row.className = 'ppicker-front-row';
-      for (let b = 1; b <= NUM_BAYS; b++) {
-        const cell = document.createElement('div');
-        cell.className = 'ppicker-front-cell';
-        cell.textContent = 'N' + n;
-        const addr = 'C' + col + '.P' + b + '.N' + n;
-        cell.title = addr;
-        cell.addEventListener('click', () => selecionarEndereco(addr));
-        row.appendChild(cell);
-      }
-      viewFront.appendChild(row);
-    }
-
-    const floorLbl = document.createElement('div');
-    floorLbl.className = 'ppicker-front-floor-label';
-    floorLbl.textContent = 'P I S O';
-    viewFront.appendChild(floorLbl);
-  }
-
-  // ── Adiciona endereço na lista do modal ───────────────────────
-  function adicionarEndereco(address) {
-    const lista = document.getElementById('movimEnderecoLista');
-    const vazio = document.getElementById('movimEnderecoVazio');
-    if (!lista) return;
-
-    // Evita duplicata
-    const existentes = lista.querySelectorAll('.movim-endereco-item');
-    for (const ex of existentes) {
-      if (ex.dataset.address === address) return;
-    }
-
-    const item = document.createElement('div');
-    item.className = 'movim-endereco-item';
-    item.dataset.address = address;
-    item.innerHTML = `
-      <span><i class="fa-solid fa-location-dot" style="color:#60a5fa;margin-right:6px;font-size:10px;"></i>${address}</span>
-      <button type="button" title="Remover"><i class="fa-solid fa-xmark"></i></button>
-    `;
-    item.querySelector('button').addEventListener('click', () => {
-      item.remove();
-      if (!lista.children.length && vazio) vazio.style.display = 'block';
-    });
-
-    lista.appendChild(item);
-    if (vazio) vazio.style.display = 'none';
-  }
-
-  function selecionarEndereco(address) {
-    adicionarEndereco(address);
-    fechar();
-  }
-
-  function abrir() { renderSide(); overlay.style.display = 'flex'; }
-  function fechar() { overlay.style.display = 'none'; }
-
-  fecharBtn.addEventListener('click', fechar);
-  voltarBtn.addEventListener('click', renderSide);
-  overlay.addEventListener('click', e => { if (e.target === overlay) fechar(); });
-  if (abrirBtn) abrirBtn.addEventListener('click', abrir);
-
-  window.abrirPalletPicker = abrir;
-})();
-// ===================== FIM PALLET PICKER =====================
+// ===================== FIM MODAL MOVIMENTA��O =====================
 
 // ===================== MODAL CARRINHO DE SEPARAÇÃO =====================
 (function () {
@@ -70416,3 +72392,4 @@ window._vippAbrirEtiqueta = function (idConhecimento, saida) {
       if (btn) { btn.disabled = false; btn.style.opacity = '1'; }
     });
 };
+
