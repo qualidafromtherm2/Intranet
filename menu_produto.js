@@ -72392,4 +72392,3 @@ window._vippAbrirEtiqueta = function (idConhecimento, saida) {
       if (btn) { btn.disabled = false; btn.style.opacity = '1'; }
     });
 };
-
