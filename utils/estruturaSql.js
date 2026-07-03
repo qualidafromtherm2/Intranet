@@ -193,6 +193,8 @@ function mapItensSqlParaResposta(rows) {
     produto_tipo: row.produto_tipo || null,
     ncm: row.ncm || null,
     valor_custo: row.valor_custo ?? null,
+    valor_venda: row.valor_venda ?? null,
+    preco: Number(row.valor_custo ?? row.valor_venda) || 0,
     operacao_unidade: row.operacao_unidade || null,
     tempo_operacao: row.tempo_operacao ?? null,
     tempo_preparacao: row.tempo_preparacao ?? null,
@@ -569,6 +571,7 @@ async function lerEstruturaDoSql(codigoProduto, opts = {}) {
             pi.tipo AS produto_tipo,
             pi.ncm,
             pi.valor_custo,
+            pi.valor_venda,
             fo.unidade AS operacao_unidade,
             fo.tempo_operacao,
             fo.tempo_preparacao

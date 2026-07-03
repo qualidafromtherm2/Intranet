@@ -1106,6 +1106,93 @@ router.get('/materiais-previstos/:id', async (req, res) => {
   }
 });
 
+/** Carrega estrutura (cache SQL ou IAPP) para um código/OP. */
+async function carregarEstruturaFichaPayload(query = {}) {
+  await garantirSchemaKanbanProgramacao();
+  await garantirSchemaOpProducao();
+
+  const opProducaoId = Number(query?.op_producao_id) || 0;
+  const numeroOp = String(query?.numero_op || '').trim();
+  let codigoFallback = String(query?.codigo || '').trim();
+
+  if (opProducaoId > 0) {
+    const { rows } = await dbQuery(
+      `SELECT codigo, n_op FROM "Producao"."OP_producao" WHERE id = $1 LIMIT 1`,
+      [opProducaoId]
+    );
+    if (rows[0]?.codigo) codigoFallback = String(rows[0].codigo).trim();
+  }
+
+  const codigo = await resolverCodigoKanbanProduto({
+    opProducaoId,
+    numeroOp,
+    codigoFallback,
+  });
+
+  if (!codigo) {
+    const err = new Error('Código do produto não informado.');
+    err.status = 400;
+    throw err;
+  }
+
+  const cacheSql = await lerEstruturaCachePorCodigos(
+    [codigo, codigoFallback],
+    { fichaId: Number(query?.ficha_id) || 0 }
+  );
+  if (cacheSql?.itens?.length) {
+    return {
+      success: true,
+      codigo: cacheSql.codigo || codigo,
+      fonte: 'sql',
+      sincronizado_em: cacheSql.sincronizado_em,
+      ficha: cacheSql.ficha,
+      total: cacheSql.itens.length,
+      response: cacheSql.itens,
+    };
+  }
+
+  const { ficha, itens } = await montarEstruturaFichaPorCodigo(codigo);
+  return {
+    success: true,
+    codigo,
+    fonte: 'iapp',
+    ficha,
+    total: itens.length,
+    response: itens,
+  };
+}
+
+/** Imagem pos=0 em public.produtos_omie_imagens pelo código textual do produto. */
+async function buscarImagemProdutoPosZero(codigoProduto) {
+  const codigo = String(codigoProduto || '').trim();
+  if (!codigo) return null;
+  const { rows } = await dbQuery(
+    `SELECT p.codigo,
+            p.descricao,
+            p.codigo_produto,
+            i.url_imagem,
+            i.pos
+       FROM public.produtos_omie p
+       JOIN public.produtos_omie_imagens i
+         ON i.codigo_produto = p.codigo_produto
+      WHERE UPPER(BTRIM(p.codigo)) = UPPER(BTRIM($1))
+        AND COALESCE(i.pos, 0) = 0
+        AND COALESCE(i.ativo, true) = true
+      ORDER BY i.pos ASC
+      LIMIT 1`,
+    [codigo]
+  );
+  const row = rows[0];
+  if (!row?.url_imagem) return null;
+  return {
+    codigo: row.codigo,
+    descricao: row.descricao,
+    codigo_produto: row.codigo_produto,
+    url_imagem: row.url_imagem,
+    pos: row.pos,
+  };
+}
+
 /* ---------------------------------------------------------------
  * GET /api/producao/estrutura-ficha
  * Estrutura (BOM): prioriza cache schema estrutura; senão busca IAPP.
@@ -1113,57 +1200,130 @@ router.get('/materiais-previstos/:id', async (req, res) => {
  * --------------------------------------------------------------- */
 router.get('/estrutura-ficha', async (req, res) => {
   try {
-    await garantirSchemaKanbanProgramacao();
-    await garantirSchemaOpProducao();
+    const payload = await carregarEstruturaFichaPayload(req.query);
+    if (payload.fonte === 'sql') {
+      console.log('[estrutura-ficha] fonte=sql codigo=%s itens=%s', payload.codigo, payload.total);
+    } else {
+      console.log('[estrutura-ficha] fonte=iapp codigo=%s (sem cache SQL)', payload.codigo);
+    }
+    return res.json(payload);
+  } catch (err) {
+    return res.status(err.status || 500).json({ error: err.message, iappCode: err.iappCode });
+  }
+});
 
-    const opProducaoId = Number(req.query?.op_producao_id) || 0;
-    const numeroOp = String(req.query?.numero_op || '').trim();
-    let codigoFallback = String(req.query?.codigo || '').trim();
+/** Preenche `preco` em cada item (não é impresso; só filtro no modal). */
+async function enriquecerItensEstruturaComPreco(itens) {
+  const lista = Array.isArray(itens) ? itens : [];
+  const codigos = [...new Set(
+    lista
+      .map((i) => String(i?.identificacao || '').trim())
+      .filter(Boolean)
+  )];
+  const precoPorCodigo = new Map();
 
-    if (opProducaoId > 0) {
-      const { rows } = await dbQuery(
-        `SELECT codigo, n_op FROM "Producao"."OP_producao" WHERE id = $1 LIMIT 1`,
-        [opProducaoId]
+  if (codigos.length) {
+    const norms = codigos.map((c) => c.toUpperCase());
+    try {
+      const { rows: omieRows } = await dbQuery(
+        `SELECT UPPER(BTRIM(codigo)) AS codigo_norm,
+                COALESCE(valor_unitario, preco_definido, 0) AS preco
+           FROM public.produtos_omie
+          WHERE UPPER(BTRIM(codigo)) = ANY($1::text[])`,
+        [norms]
       );
-      if (rows[0]?.codigo) codigoFallback = String(rows[0].codigo).trim();
-    }
+      for (const row of omieRows) {
+        precoPorCodigo.set(row.codigo_norm, Number(row.preco) || 0);
+      }
+    } catch (_) { /* ignora */ }
 
-    const codigo = await resolverCodigoKanbanProduto({
-      opProducaoId,
-      numeroOp,
-      codigoFallback,
-    });
+    try {
+      const { rows: iappRows } = await dbQuery(
+        `SELECT UPPER(BTRIM(identificacao)) AS codigo_norm,
+                COALESCE(valor_custo, valor_venda, 0) AS preco
+           FROM estrutura.produto_iapp
+          WHERE UPPER(BTRIM(identificacao)) = ANY($1::text[])`,
+        [norms]
+      );
+      for (const row of iappRows) {
+        const atual = precoPorCodigo.get(row.codigo_norm);
+        if (atual == null || atual === 0) {
+          precoPorCodigo.set(row.codigo_norm, Number(row.preco) || 0);
+        }
+      }
+    } catch (_) { /* ignora */ }
+  }
 
-    if (!codigo) {
-      return res.status(400).json({ error: 'Código do produto não informado.' });
-    }
+  return lista.map((item) => {
+    const cod = String(item?.identificacao || '').trim().toUpperCase();
+    const direto = Number(item?.valor_custo ?? item?.valor_venda ?? item?.preco);
+    const preco = Number.isFinite(direto) && direto > 0
+      ? direto
+      : (precoPorCodigo.get(cod) || 0);
+    return {
+      ...item,
+      preco,
+      valor_custo: item?.valor_custo ?? preco,
+    };
+  });
+}
 
-    const cacheSql = await lerEstruturaCachePorCodigos(
-      [codigo, codigoFallback],
-      { fichaId: Number(req.query?.ficha_id) || 0 }
+/* ---------------------------------------------------------------
+ * GET /api/producao/ficha-tecnica-impressao
+ * Dados para impressão da ficha técnica: estrutura + diagrama (se houver
+ * item com "DIAGRAMA" na descrição → imagem pos=0 em produtos_omie_imagens).
+ * Cada item inclui `preco` (não impresso; filtro no modal).
+ * Query: codigo?, op_producao_id?, numero_op?
+ * --------------------------------------------------------------- */
+router.get('/ficha-tecnica-impressao', async (req, res) => {
+  try {
+    const payload = await carregarEstruturaFichaPayload(req.query);
+    const itens = await enriquecerItensEstruturaComPreco(
+      Array.isArray(payload.response) ? payload.response : []
     );
-    if (cacheSql?.itens?.length) {
-      console.log('[estrutura-ficha] fonte=sql codigo=%s itens=%s', codigo, cacheSql.itens.length);
-      return res.json({
-        success: true,
-        codigo: cacheSql.codigo || codigo,
-        fonte: 'sql',
-        sincronizado_em: cacheSql.sincronizado_em,
-        ficha: cacheSql.ficha,
-        total: cacheSql.itens.length,
-        response: cacheSql.itens,
+
+    const itensDiagrama = itens.filter((item) =>
+      String(item?.descricao || '').toUpperCase().includes('DIAGRAMA')
+    );
+
+    const diagramas = [];
+    const vistos = new Set();
+    for (const item of itensDiagrama) {
+      const codItem = String(item?.identificacao || '').trim();
+      if (!codItem || vistos.has(codItem.toUpperCase())) continue;
+      vistos.add(codItem.toUpperCase());
+      const img = await buscarImagemProdutoPosZero(codItem);
+      diagramas.push({
+        codigo: codItem,
+        descricao: item?.descricao || '',
+        preco: Number(item?.preco) || 0,
+        url_imagem: img?.url_imagem || null,
+        codigo_produto: img?.codigo_produto || null,
       });
     }
 
-    console.log('[estrutura-ficha] fonte=iapp codigo=%s (sem cache SQL)', codigo);
-    const { ficha, itens } = await montarEstruturaFichaPorCodigo(codigo);
+    let descricaoProduto = String(payload.ficha?.descricao || '').trim();
+    if (!descricaoProduto) {
+      const { rows } = await dbQuery(
+        `SELECT descricao
+           FROM public.produtos_omie
+          WHERE UPPER(BTRIM(codigo)) = UPPER(BTRIM($1))
+          LIMIT 1`,
+        [payload.codigo]
+      );
+      descricaoProduto = String(rows[0]?.descricao || '').trim();
+    }
+
     return res.json({
       success: true,
-      codigo,
-      fonte: 'iapp',
-      ficha,
+      codigo: payload.codigo,
+      descricao: descricaoProduto,
+      fonte: payload.fonte,
+      sincronizado_em: payload.sincronizado_em || null,
+      ficha: payload.ficha,
       total: itens.length,
-      response: itens,
+      itens,
+      diagramas,
     });
   } catch (err) {
     return res.status(err.status || 500).json({ error: err.message, iappCode: err.iappCode });

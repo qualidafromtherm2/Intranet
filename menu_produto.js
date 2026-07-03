@@ -68077,9 +68077,9 @@ document.addEventListener('DOMContentLoaded', () => {
     return val;
   }
 
-  const MOVIM_IMPRESSORA_SELECT_IDS = ['movimListboxImpressora', 'movimImpListboxImpressora', 'producaoImpListboxImpressora'];
-  const MOVIM_IMPRESSORA_REFRESH_BTN_IDS = ['movimBtnRefreshImpressoras', 'movimImpBtnRefreshImpressoras', 'producaoImpBtnRefreshImpressoras'];
-  const MOVIM_IMPRESSORA_CONFIG_BTN_IDS = ['movimBtnConfigImpressoras', 'movimImpBtnConfigImpressoras', 'producaoImpBtnConfigImpressoras'];
+  const MOVIM_IMPRESSORA_SELECT_IDS = ['movimListboxImpressora', 'movimImpListboxImpressora', 'producaoImpListboxImpressora', 'producaoFichaImpListboxImpressora'];
+  const MOVIM_IMPRESSORA_REFRESH_BTN_IDS = ['movimBtnRefreshImpressoras', 'movimImpBtnRefreshImpressoras', 'producaoImpBtnRefreshImpressoras', 'producaoFichaImpBtnRefreshImpressoras'];
+  const MOVIM_IMPRESSORA_CONFIG_BTN_IDS = ['movimBtnConfigImpressoras', 'movimImpBtnConfigImpressoras', 'producaoImpBtnConfigImpressoras', 'producaoFichaImpBtnConfigImpressoras'];
 
   async function movimAtualizarListboxImpressora() {
     const selects = MOVIM_IMPRESSORA_SELECT_IDS.map(id => document.getElementById(id)).filter(Boolean);
@@ -75418,6 +75418,319 @@ window.verOperacao = function(osId) {
     });
   }
 
+  function _producaoEscolhaImpressoraFicha() {
+    const selVal = document.getElementById('producaoFichaImpListboxImpressora')?.value || '';
+    if (selVal) return selVal;
+    return _producaoEscolhaImpressoraAtual();
+  }
+
+  function _producaoPrecoItemFicha(item) {
+    const n = Number(item?.preco ?? item?.valor_custo ?? item?.valor_venda);
+    return Number.isFinite(n) ? n : 0;
+  }
+
+  function _producaoFiltrarItensFichaPorPrecoMin(itens, valorMinimo) {
+    const min = Number(valorMinimo);
+    const limiar = Number.isFinite(min) ? min : 0;
+    return (Array.isArray(itens) ? itens : []).filter((item) => _producaoPrecoItemFicha(item) > limiar);
+  }
+
+  function _producaoMontarHtmlFichaTecnica(data, meta) {
+    const codigo = String(data?.codigo || meta?.codigo || '').trim();
+    const descricao = String(data?.descricao || meta?.descricao || '').trim();
+    const numeroOp = String(meta?.numeroOp || '').trim();
+    const valorMinimo = meta?.valorMinimo;
+    const itensTodos = Array.isArray(data?.itens) ? data.itens : [];
+    const itens = _producaoFiltrarItensFichaPorPrecoMin(itensTodos, valorMinimo);
+    const codigosFiltrados = new Set(
+      itens.map((i) => String(i.identificacao || '').trim().toUpperCase()).filter(Boolean)
+    );
+    const diagramas = (Array.isArray(data?.diagramas) ? data.diagramas : []).filter((d) => {
+      const cod = String(d.codigo || '').trim().toUpperCase();
+      if (cod && codigosFiltrados.has(cod)) return true;
+      return _producaoPrecoItemFicha(d) > (Number(valorMinimo) || 0);
+    });
+    const agora = new Date().toLocaleString('pt-BR');
+    const minNum = Number(valorMinimo);
+    const minLabel = Number.isFinite(minNum)
+      ? minNum.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 4 })
+      : '0';
+
+    const linhas = itens.map((i) => `
+      <tr>
+        <td>${escapeHtml(String(i.identificacao || '—'))}</td>
+        <td>${escapeHtml(String(i.descricao || '—'))}</td>
+        <td style="text-align:right;">${escapeHtml(String(i.qtde ?? '—'))}</td>
+      </tr>`).join('');
+
+    const blocosDiagrama = diagramas.map((d) => {
+      const titulo = `${d.codigo || ''}${d.descricao ? ` — ${d.descricao}` : ''}`.trim();
+      if (d.url_imagem) {
+        return `
+          <div class="diagrama-bloco">
+            <div class="diagrama-titulo">${escapeHtml(titulo || 'Diagrama')}</div>
+            <img src="${escapeHtml(d.url_imagem)}" alt="${escapeHtml(titulo || 'Diagrama')}" />
+          </div>`;
+      }
+      return `
+        <div class="diagrama-bloco diagrama-sem-img">
+          <div class="diagrama-titulo">${escapeHtml(titulo || 'Diagrama')}</div>
+          <p>Imagem não encontrada para este item (pos = 0).</p>
+        </div>`;
+    }).join('');
+
+    return `<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <title>Ficha técnica — ${escapeHtml(codigo)}</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { font-family: Arial, Helvetica, sans-serif; color: #0f172a; margin: 24px; font-size: 12px; }
+    h1 { font-size: 18px; margin: 0 0 4px; }
+    .meta { color: #475569; margin-bottom: 16px; line-height: 1.5; }
+    .meta b { color: #0f172a; }
+    table { width: 100%; border-collapse: collapse; margin-top: 8px; }
+    th, td { border: 1px solid #cbd5e1; padding: 6px 8px; vertical-align: top; }
+    th { background: #f1f5f9; text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: .02em; }
+    .sec-title { margin: 20px 0 8px; font-size: 14px; font-weight: 700; border-bottom: 2px solid #0f172a; padding-bottom: 4px; }
+    .diagrama-bloco { margin-top: 12px; page-break-inside: avoid; }
+    .diagrama-titulo { font-weight: 600; margin-bottom: 8px; }
+    .diagrama-bloco img { max-width: 100%; max-height: 420px; border: 1px solid #cbd5e1; display: block; }
+    .diagrama-sem-img { color: #64748b; font-style: italic; }
+    .vazio { color: #64748b; padding: 16px 0; }
+    @media print {
+      body { margin: 12mm; }
+      .no-print { display: none !important; }
+    }
+  </style>
+</head>
+<body>
+  <h1>Ficha técnica</h1>
+  <div class="meta">
+    <div><b>Produto:</b> ${escapeHtml(codigo)}${descricao ? ` — ${escapeHtml(descricao)}` : ''}</div>
+    ${numeroOp ? `<div><b>OP:</b> ${escapeHtml(numeroOp)}</div>` : ''}
+    <div><b>Emitido em:</b> ${escapeHtml(agora)}</div>
+    <div><b>Itens impressos:</b> ${itens.length} de ${itensTodos.length} (preço &gt; ${escapeHtml(minLabel)})</div>
+  </div>
+
+  <div class="sec-title">Estrutura do produto</div>
+  ${itens.length ? `
+  <table>
+    <thead>
+      <tr>
+        <th>Código</th>
+        <th>Descrição</th>
+        <th style="text-align:right;">Qtde</th>
+      </tr>
+    </thead>
+    <tbody>${linhas}</tbody>
+  </table>` : '<p class="vazio">Nenhum item com preço acima do valor mínimo informado.</p>'}
+
+  ${diagramas.length ? `
+  <div class="sec-title">Diagrama</div>
+  ${blocosDiagrama}` : ''}
+</body>
+</html>`;
+  }
+
+  function openProducaoImprimirFichaTecnicaModal(produtoCodigo, groupKey, ops) {
+    const codigo = String(produtoCodigo || groupKey || '').trim();
+    const op0 = ops && ops[0];
+    const numeroOp = String(op0?.identificacao || '').trim();
+    const descricaoPadrao = String(op0?.produto?.descricao || '').trim();
+    const opProducaoId = op0?.from_op_producao ? Number(op0.id) : 0;
+
+    const overlay = document.createElement('div');
+    overlay.className = 'kanban-modal-overlay';
+    overlay.addEventListener('click', (ev) => { if (ev.target === overlay) overlay.remove(); });
+
+    const modal = document.createElement('div');
+    modal.className = 'kanban-modal';
+    modal.style.maxWidth = '640px';
+    modal.innerHTML = `
+      <header>
+        <div>
+          <h2>Imprimir ficha técnica</h2>
+          <span>${escapeHtml(codigo)}${numeroOp ? ` · OP ${escapeHtml(numeroOp)}` : ''}</span>
+        </div>
+        <button class="close-btn" aria-label="Fechar">&times;</button>
+      </header>
+      <div class="kanban-modal-body">
+        <div class="modal-code-block">
+          <p style="margin:0 0 8px;font-size:12px;color:#94a3b8;">
+            Monta a ficha com a estrutura do produto (Código, Descrição e Qtde) e, se houver item com “DIAGRAMA” na descrição,
+            inclui a imagem (pos = 0) abaixo da lista. O preço não é impresso — serve só para o filtro abaixo.
+          </p>
+          <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end;margin:12px 0 0;">
+            <div style="flex:1;min-width:180px;">
+              <label for="producaoFichaValorMinimo" style="display:block;font-size:11px;color:#94a3b8;margin-bottom:4px;">
+                Valor mínimo (preço &gt; este valor)
+              </label>
+              <input
+                type="number"
+                id="producaoFichaValorMinimo"
+                min="0"
+                step="0.01"
+                value="0"
+                placeholder="0"
+                style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid rgba(255,255,255,.14);background:rgba(15,23,42,.55);color:#e2e8f0;font-size:13px;box-sizing:border-box;"
+              />
+            </div>
+          </div>
+          <div class="movim-impressora-row movim-impressora-row--modal" style="margin:12px 0 0;padding:0;">
+            <i class="fa-solid fa-print movim-impr-icone"></i>
+            <label for="producaoFichaImpListboxImpressora">Impressora:</label>
+            <select id="producaoFichaImpListboxImpressora" class="movim-listbox-impressora">
+              <option value="">— padrão —</option>
+            </select>
+            <button type="button" id="producaoFichaImpBtnRefreshImpressoras" class="movim-impr-btn-icon" title="Atualizar impressoras">
+              <i class="fa-solid fa-rotate"></i>
+            </button>
+            <button type="button" id="producaoFichaImpBtnConfigImpressoras" class="movim-impr-btn-icon" title="Configurar impressoras">
+              <i class="fa-solid fa-sliders"></i>
+            </button>
+          </div>
+          <p id="producao-imprimir-ficha-status" style="margin:10px 0 0;font-size:12px;color:#94a3b8;min-height:18px;"></p>
+        </div>
+      </div>
+      <footer>
+        <button type="button" class="modal-secondary">Fechar</button>
+        <button type="button" id="producao-imprimir-ficha-btn" class="modal-primary">
+          <i class="fa-solid fa-print"></i> Imprimir ficha técnica
+        </button>
+      </footer>
+    `;
+
+    overlay.appendChild(modal);
+    document.body.appendChild(overlay);
+
+    const close = () => overlay.remove();
+    modal.querySelector('.close-btn')?.addEventListener('click', close);
+    modal.querySelector('footer .modal-secondary')?.addEventListener('click', close);
+
+    const statusEl = modal.querySelector('#producao-imprimir-ficha-status');
+    const btnImprimir = modal.querySelector('#producao-imprimir-ficha-btn');
+    const valorMinInput = modal.querySelector('#producaoFichaValorMinimo');
+    const showSt = (msg, cor = '#94a3b8') => {
+      if (!statusEl) return;
+      statusEl.textContent = msg;
+      statusEl.style.color = cor;
+    };
+
+    const impSelect = modal.querySelector('#producaoFichaImpListboxImpressora');
+    impSelect?.addEventListener('change', function () {
+      if (typeof window._movimSyncImpressoraSelects === 'function') {
+        window._movimSyncImpressoraSelects(this.value || null);
+      }
+    });
+    modal.querySelector('#producaoFichaImpBtnRefreshImpressoras')?.addEventListener('click', () => {
+      if (typeof window._movimAtualizarListboxImpressora === 'function') {
+        window._movimAtualizarListboxImpressora();
+      }
+    });
+    modal.querySelector('#producaoFichaImpBtnConfigImpressoras')?.addEventListener('click', () => {
+      if (typeof window._movimAbrirConfigImpressoras === 'function') {
+        window._movimAbrirConfigImpressoras();
+      }
+    });
+    if (typeof window._movimAtualizarListboxImpressora === 'function') {
+      window._movimAtualizarListboxImpressora();
+    }
+
+    btnImprimir?.addEventListener('click', async () => {
+      const orig = btnImprimir.innerHTML;
+      btnImprimir.disabled = true;
+      btnImprimir.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Montando ficha...';
+      showSt('Carregando estrutura e diagrama...', '#facc15');
+      try {
+        const params = new URLSearchParams();
+        if (codigo) params.set('codigo', codigo);
+        if (opProducaoId > 0) params.set('op_producao_id', String(opProducaoId));
+        if (numeroOp) params.set('numero_op', numeroOp);
+
+        const resp = await fetch(`/api/producao/ficha-tecnica-impressao?${params.toString()}`, {
+          credentials: 'include',
+        });
+        const data = await resp.json().catch(() => ({}));
+        if (!resp.ok || data.success === false) {
+          throw new Error(data.error || `Erro ${resp.status}`);
+        }
+
+        const valorMinRaw = String(valorMinInput?.value ?? '0').trim().replace(',', '.');
+        const valorMinimo = Number(valorMinRaw);
+        if (!Number.isFinite(valorMinimo) || valorMinimo < 0) {
+          throw new Error('Informe um valor mínimo válido (número ≥ 0).');
+        }
+
+        const itensFiltrados = _producaoFiltrarItensFichaPorPrecoMin(data.itens, valorMinimo);
+        if (!itensFiltrados.length) {
+          throw new Error(`Nenhum item com preço maior que ${valorMinimo.toLocaleString('pt-BR')}.`);
+        }
+
+        const html = _producaoMontarHtmlFichaTecnica(data, {
+          codigo,
+          descricao: descricaoPadrao,
+          numeroOp,
+          valorMinimo,
+        });
+        const escolha = _producaoEscolhaImpressoraFicha();
+        const modoPdf = escolha === '__PDF__';
+        showSt(
+          `Imprimindo ${itensFiltrados.length} de ${(data.itens || []).length} item(ns) (preço > ${valorMinimo.toLocaleString('pt-BR')})...`,
+          '#facc15'
+        );
+
+        const win = window.open('', '_blank');
+        if (!win) {
+          throw new Error('Pop-up bloqueado. Permita janelas pop-up para imprimir a ficha.');
+        }
+        win.document.open();
+        win.document.write(html);
+        win.document.close();
+
+        if (modoPdf) {
+          showSt('Ficha aberta em nova aba (modo PDF). Use imprimir/salvar do navegador.', '#4ade80');
+        } else {
+          showSt('Enviando para impressão...', '#facc15');
+          const tentarImprimir = () => {
+            try {
+              win.focus();
+              win.print();
+              showSt('Ficha enviada para impressão.', '#4ade80');
+            } catch (errPrint) {
+              showSt(errPrint.message || 'Falha ao abrir diálogo de impressão.', '#f87171');
+            }
+          };
+          // Aguarda imagens do diagrama carregarem antes de imprimir
+          const imgs = [...win.document.images];
+          if (!imgs.length) {
+            setTimeout(tentarImprimir, 200);
+          } else {
+            let pendentes = imgs.length;
+            const done = () => {
+              pendentes -= 1;
+              if (pendentes <= 0) setTimeout(tentarImprimir, 120);
+            };
+            imgs.forEach((img) => {
+              if (img.complete) done();
+              else {
+                img.addEventListener('load', done, { once: true });
+                img.addEventListener('error', done, { once: true });
+              }
+            });
+            setTimeout(() => { if (pendentes > 0) tentarImprimir(); }, 4000);
+          }
+        }
+      } catch (err) {
+        showSt(err.message || 'Falha ao montar ficha técnica.', '#f87171');
+      } finally {
+        btnImprimir.disabled = false;
+        btnImprimir.innerHTML = orig;
+      }
+    });
+  }
+
   async function openProducaoRiCheckModal(op, produtoCodigo, colKey) {
     const opId = Number(op?.id) || 0;
     if (!opId) {
@@ -76545,6 +76858,12 @@ window.verOperacao = function(osId) {
     const mostrarFinalizarMonta = modoMontagem && colKeyMonta !== 'programado' && colKeyMonta !== 'finalizado';
     const mostrarParadaMonta = mostrarFinalizarMonta;
     const mostrarImprimirOp = !modoMontagem && !modoRiRegistro && colKeyMonta === 'programado';
+    const colsFichaTecnica = ['programado', 'solicitado', 'produzindo', 'teste', 'inspecao_final'];
+    const mostrarImprimirFicha = modoRegistrarProducao
+      && !modoMontagem
+      && !modoRiRegistro
+      && !somenteEstrutura
+      && colsFichaTecnica.includes(colKeyMonta);
     const mostrarRi = modoRiRegistro || (!modoMontagem && (colKeyMonta === 'solicitado' || colKeyMonta === 'produzindo' || colKeyMonta === 'teste' || colKeyMonta === 'inspecao_final') && ops.length === 1);
     const tituloModal = options.titulo || 'Ações do grupo';
     const overlay = document.createElement('div');
@@ -76591,6 +76910,10 @@ window.verOperacao = function(osId) {
             ${mostrarImprimirOp ? `
             <button type="button" id="open-imprimir-op-btn" class="modal-secondary" style="min-width:140px;">
               <i class="fa-solid fa-print"></i> Imprimir OP
+            </button>` : ''}
+            ${mostrarImprimirFicha ? `
+            <button type="button" id="open-imprimir-ficha-btn" class="modal-secondary" style="min-width:180px;">
+              <i class="fa-solid fa-file-lines"></i> Imprimir ficha técnica
             </button>` : ''}
             ${mostrarRi ? `
             <button type="button" id="open-ri-check-btn" class="modal-secondary" style="min-width:180px;">
@@ -76640,6 +76963,10 @@ window.verOperacao = function(osId) {
       modal.querySelector('#open-imprimir-op-btn')?.addEventListener('click', () => {
         close();
         openProducaoImprimirOpModal(produtoCodigo, groupKey, ops, { fromProgramado: true });
+      });
+      modal.querySelector('#open-imprimir-ficha-btn')?.addEventListener('click', () => {
+        close();
+        openProducaoImprimirFichaTecnicaModal(produtoCodigo, groupKey, ops);
       });
       modal.querySelector('#open-ri-check-btn')?.addEventListener('click', () => {
         close();
