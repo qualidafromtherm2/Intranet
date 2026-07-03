@@ -10635,11 +10635,12 @@ app.use('/etiquetas', requireSessionOrAgentForStatic, express.static(etiquetasRo
         impresso_em       TIMESTAMPTZ NOT NULL DEFAULT NOW()
       )
     `);
-    // Migração: remove colunas redundantes (dados já existem em ETQ_recebimento via origem_id)
-    for (const col of ['numero_nfe','numero_pedido','lote','codigo_produto','descricao_produto','fornecedor']) {
+    // Migração: remove colunas legadas de recebimento (NÃO remover codigo_produto/descricao_produto —
+    // são usados em impressão de OP e endereçamento, com origem_id NULL).
+    for (const col of ['numero_nfe', 'numero_pedido', 'lote', 'fornecedor']) {
       await pool.query(`ALTER TABLE etiqueta."ETQ_rec_impresso" DROP COLUMN IF EXISTS ${col}`).catch(() => {});
     }
-    // Migração: colunas de armazenamento
+    // Migração: colunas de armazenamento / produto
     await pool.query(`ALTER TABLE etiqueta."ETQ_rec_impresso" ADD COLUMN IF NOT EXISTS endereco TEXT`);
     await pool.query(`ALTER TABLE etiqueta."ETQ_rec_impresso" ADD COLUMN IF NOT EXISTS complemento TEXT`);
     await pool.query(`ALTER TABLE etiqueta."ETQ_rec_impresso" ADD COLUMN IF NOT EXISTS codigo_produto TEXT`);
@@ -10718,44 +10719,25 @@ app.use('/etiquetas', requireSessionOrAgentForStatic, express.static(etiquetasRo
     if (backfillEtq.rowCount > 0) {
       console.log(`[etiqueta] Backfill codigo_produto em ${backfillEtq.rowCount} registro(s) ETQ_rec_impresso`);
     }
-    // Migra referência de endereçamento PP (logistica."Endereço_pp") → ETQ_rec_impresso
-    const migEnderecoPp = await pool.query(`
-      INSERT INTO etiqueta."ETQ_rec_impresso"
-        (origem_id, qtd, unidade, data_emissao, conteudo_zpl, usuario_criacao,
-         endereco, codigo_produto, descricao_produto, complemento, fonte)
-      SELECT NULL, 0, 'UN',
-             to_char(CURRENT_DATE, 'DD/MM/YYYY'), '', 'migracao_endereco_pp',
-             TRIM(ep.completo),
-             ep.codigo_produto::text,
-             ep.descricao,
-             NULLIF(TRIM(ep.apartamento), ''),
-             'endereco_pp'
-        FROM logistica."Endereço_pp" ep
-       WHERE ep.completo IS NOT NULL AND TRIM(ep.completo) <> ''
-         AND ep.codigo_produto IS NOT NULL
-         AND NOT EXISTS (
-           SELECT 1 FROM etiqueta."ETQ_rec_impresso" i
-            WHERE TRIM(COALESCE(i.endereco, '')) = TRIM(ep.completo)
-              AND TRIM(COALESCE(i.codigo_produto, '')) = ep.codigo_produto::text
-         )
-    `).catch(() => ({ rowCount: 0 }));
-    if (migEnderecoPp.rowCount > 0) {
-      console.log(`[etiqueta] Migrados ${migEnderecoPp.rowCount} endereço(s) de Endereço_pp para ETQ_rec_impresso`);
-    }
-    // Transfere apartamento (Endereço_pp) → complemento (ETQ_rec_impresso) nos itens correspondentes
-    const migApartamento = await pool.query(`
+    // Backfill via ZPL: "Cod. Produto: XXX" → produtos_omie.codigo → id Omie + descrição
+    const backfillEtqZpl = await pool.query(`
       UPDATE etiqueta."ETQ_rec_impresso" i
-         SET complemento = NULLIF(TRIM(ep.apartamento), '')
-        FROM logistica."Endereço_pp" ep
-       WHERE TRIM(COALESCE(i.endereco, '')) = TRIM(ep.completo)
-         AND TRIM(COALESCE(i.codigo_produto, '')) = ep.codigo_produto::text
-         AND ep.apartamento IS NOT NULL AND TRIM(ep.apartamento) <> ''
-         AND (i.complemento IS NULL OR TRIM(i.complemento) = '')
+         SET codigo_produto = p.codigo_produto::text,
+             descricao_produto = COALESCE(
+               NULLIF(TRIM(i.descricao_produto), ''),
+               NULLIF(TRIM(p.descricao), '')
+             )
+        FROM public.produtos_omie p
+       WHERE (i.codigo_produto IS NULL OR TRIM(i.codigo_produto) = '')
+         AND i.conteudo_zpl IS NOT NULL
+         AND TRIM(i.conteudo_zpl) <> ''
+         AND TRIM(SUBSTRING(i.conteudo_zpl FROM 'Cod\\. Produto: ([^\\^\\n\\r]+)')) <> ''
+         AND TRIM(p.codigo) = TRIM(SUBSTRING(i.conteudo_zpl FROM 'Cod\\. Produto: ([^\\^\\n\\r]+)'))
+         AND p.codigo_produto IS NOT NULL
     `).catch(() => ({ rowCount: 0 }));
-    if (migApartamento.rowCount > 0) {
-      console.log(`[etiqueta] Apartamento → complemento em ${migApartamento.rowCount} registro(s) ETQ_rec_impresso`);
+    if (backfillEtqZpl.rowCount > 0) {
+      console.log(`[etiqueta] Backfill via ZPL em ${backfillEtqZpl.rowCount} registro(s) ETQ_rec_impresso`);
     }
-
     await pool.query(`
       CREATE TABLE IF NOT EXISTS etiqueta."_meta" (
         chave TEXT PRIMARY KEY,
@@ -10763,8 +10745,14 @@ app.use('/etiquetas', requireSessionOrAgentForStatic, express.static(etiquetasRo
       )
     `).catch(() => {});
 
-    await _etqCleanupEResequence(pool).catch(err => {
-      console.error('[etiqueta] cleanup pós-schema:', err?.message || err);
+    // Sanitiza lixo de migração antiga (Endereço_pp sem código, qtd=0) e importa catálogo 1x.
+    await _etqSanitizarEMigrarEnderecoPp(pool).catch(err => {
+      console.error('[etiqueta] sanitizar/migrar Endereço_pp:', err?.message || err);
+    });
+
+    // Apenas backfill seguro — NÃO apaga histórico nem renumera IDs (IDs vão no ZPL).
+    await _etqBackfillRecImpressoSeguro(pool).catch(err => {
+      console.error('[etiqueta] backfill seguro ETQ_rec_impresso:', err?.message || err);
     });
 
     console.log('[etiqueta] Schema e tabelas ETQ_recebimento / ETQ_rec_impresso / ETQ_fila_impressao / ETQ_auto_oculto / ETQ_agentes garantidos');
@@ -11088,6 +11076,15 @@ async function _resolveProdutoOmieCodigoTexto(db, codigoOuId) {
   return rows[0]?.codigo || raw;
 }
 
+/** Garante colunas usadas em impressão de OP / endereçamento em ETQ_rec_impresso. */
+async function _etqEnsureRecImpressoCols(db = pool) {
+  await db.query(`ALTER TABLE etiqueta."ETQ_rec_impresso" ADD COLUMN IF NOT EXISTS codigo_produto TEXT`);
+  await db.query(`ALTER TABLE etiqueta."ETQ_rec_impresso" ADD COLUMN IF NOT EXISTS descricao_produto TEXT`);
+  await db.query(`ALTER TABLE etiqueta."ETQ_rec_impresso" ADD COLUMN IF NOT EXISTS fonte TEXT DEFAULT 'recebimento'`);
+  await db.query(`ALTER TABLE etiqueta."ETQ_rec_impresso" ADD COLUMN IF NOT EXISTS endereco TEXT`);
+  await db.query(`ALTER TABLE etiqueta."ETQ_rec_impresso" ADD COLUMN IF NOT EXISTS complemento TEXT`);
+}
+
 /** Garante codigo_produto (id Omie) e descricao_produto para gravar em ETQ_rec_impresso. */
 async function _etqResolveProdutoCampos(db, { codigoTexto, codigoOmie, descricao, linhaReferencia }) {
   const ref = linhaReferencia || null;
@@ -11121,124 +11118,123 @@ async function _etqResolveProdutoCampos(db, { codigoTexto, codigoOmie, descricao
   return { codigo_produto: codigo, descricao_produto: desc };
 }
 
-/** Remove registros inválidos, consolida duplicatas e renumera IDs de 1..N (uma vez). */
-async function _etqCleanupEResequence(db) {
+/**
+ * Remove lixo da migração Endereço_pp (qtd=0 sem código) e importa o catálogo 1x.
+ * NÃO mexe em impressões (recebimento/iapp_op) nem em saldo real (qtd > 0).
+ */
+async function _etqSanitizarEMigrarEnderecoPp(db) {
   const conn = db || pool;
   await conn.query(`CREATE TABLE IF NOT EXISTS etiqueta."_meta" (chave TEXT PRIMARY KEY, valor TEXT)`);
+
+  // Órfãos gerados quando codigo_produto foi dropado e a migração reinseriu sem match.
+  const delOrfaos = await conn.query(`
+    DELETE FROM etiqueta."ETQ_rec_impresso"
+     WHERE fonte = 'endereco_pp'
+       AND COALESCE(qtd, 0) = 0
+       AND (codigo_produto IS NULL OR TRIM(codigo_produto) = '')
+       AND (conteudo_zpl IS NULL OR TRIM(conteudo_zpl) = '')
+  `);
+  if (delOrfaos.rowCount > 0) {
+    console.log(`[etiqueta] Removidos ${delOrfaos.rowCount} registro(s) lixo endereco_pp (sem código/qtd/zpl)`);
+  }
+
   const { rows: meta } = await conn.query(
-    `SELECT valor FROM etiqueta."_meta" WHERE chave = 'etq_rec_impresso_cleanup_v2'`
+    `SELECT valor FROM etiqueta."_meta" WHERE chave = 'etq_endereco_pp_migrado_v3'`
   );
   if (meta[0]?.valor === 'done') return;
 
-  const client = await conn.connect();
-  try {
-    await client.query('BEGIN');
+  // Catálogo de referência (qtd=0) a partir de Endereço_pp — uma vez.
+  const mig = await conn.query(`
+    INSERT INTO etiqueta."ETQ_rec_impresso"
+      (origem_id, qtd, unidade, data_emissao, conteudo_zpl, usuario_criacao,
+       endereco, codigo_produto, descricao_produto, complemento, fonte)
+    SELECT NULL, 0, 'UN',
+           to_char(CURRENT_DATE, 'DD/MM/YYYY'), '', 'migracao_endereco_pp',
+           TRIM(ep.completo),
+           TRIM(ep.codigo_produto::text),
+           NULLIF(TRIM(ep.descricao), ''),
+           NULLIF(TRIM(ep.apartamento), ''),
+           'endereco_pp'
+      FROM logistica."Endereço_pp" ep
+     WHERE ep.completo IS NOT NULL AND TRIM(ep.completo) <> ''
+       AND ep.codigo_produto IS NOT NULL
+       AND TRIM(ep.codigo_produto::text) <> ''
+       AND NOT EXISTS (
+         SELECT 1 FROM etiqueta."ETQ_rec_impresso" i
+          WHERE TRIM(COALESCE(i.endereco, '')) = TRIM(ep.completo)
+            AND TRIM(COALESCE(i.codigo_produto, '')) = TRIM(ep.codigo_produto::text)
+       )
+  `);
 
-    await client.query(`
-      UPDATE etiqueta."ETQ_rec_impresso" i
-         SET codigo_produto = COALESCE(NULLIF(TRIM(i.codigo_produto), ''), p.codigo_produto::text),
-             descricao_produto = COALESCE(
-               NULLIF(TRIM(i.descricao_produto), ''),
-               NULLIF(TRIM(p.descricao), ''),
-               NULLIF(TRIM(r.descricao_produto), '')
-             )
-        FROM etiqueta."ETQ_recebimento" r
-        JOIN public.produtos_omie p ON TRIM(p.codigo) = TRIM(r.codigo_produto)
-       WHERE r.id = i.origem_id
-         AND (
-           NULLIF(TRIM(i.codigo_produto), '') IS NULL
-           OR NULLIF(TRIM(i.descricao_produto), '') IS NULL
-         )
-    `);
+  await conn.query(`
+    UPDATE etiqueta."ETQ_rec_impresso" i
+       SET complemento = NULLIF(TRIM(ep.apartamento), ''),
+           descricao_produto = COALESCE(NULLIF(TRIM(i.descricao_produto), ''), NULLIF(TRIM(ep.descricao), ''))
+      FROM logistica."Endereço_pp" ep
+     WHERE TRIM(COALESCE(i.endereco, '')) = TRIM(ep.completo)
+       AND TRIM(COALESCE(i.codigo_produto, '')) = TRIM(ep.codigo_produto::text)
+       AND (
+         (ep.apartamento IS NOT NULL AND TRIM(ep.apartamento) <> ''
+           AND (i.complemento IS NULL OR TRIM(i.complemento) = ''))
+         OR (i.descricao_produto IS NULL OR TRIM(i.descricao_produto) = '')
+       )
+  `);
 
-    await client.query(`
-      WITH grupos AS (
-        SELECT TRIM(codigo_produto) AS cp,
-               TRIM(endereco) AS en,
-               MIN(id) AS id_manter,
-               SUM(COALESCE(qtd, 0)) AS qtd_total
-          FROM etiqueta."ETQ_rec_impresso"
-         WHERE NULLIF(TRIM(codigo_produto), '') IS NOT NULL
-           AND NULLIF(TRIM(descricao_produto), '') IS NOT NULL
-           AND endereco IS NOT NULL AND TRIM(endereco) <> ''
-         GROUP BY TRIM(codigo_produto), TRIM(endereco)
-        HAVING COUNT(*) > 1
-      )
-      UPDATE etiqueta."ETQ_rec_impresso" i
-         SET qtd = g.qtd_total
-        FROM grupos g
-       WHERE i.id = g.id_manter
-    `);
+  await conn.query(`
+    INSERT INTO etiqueta."_meta" (chave, valor) VALUES ('etq_endereco_pp_migrado_v3', 'done')
+    ON CONFLICT (chave) DO UPDATE SET valor = EXCLUDED.valor
+  `);
 
-    await client.query(`
-      WITH grupos AS (
-        SELECT TRIM(codigo_produto) AS cp,
-               TRIM(endereco) AS en,
-               MIN(id) AS id_manter
-          FROM etiqueta."ETQ_rec_impresso"
-         WHERE NULLIF(TRIM(codigo_produto), '') IS NOT NULL
-           AND NULLIF(TRIM(descricao_produto), '') IS NOT NULL
-           AND endereco IS NOT NULL AND TRIM(endereco) <> ''
-         GROUP BY TRIM(codigo_produto), TRIM(endereco)
-        HAVING COUNT(*) > 1
-      )
-      DELETE FROM etiqueta."ETQ_rec_impresso" i
-       USING grupos g
-       WHERE TRIM(i.codigo_produto) = g.cp
-         AND TRIM(i.endereco) = g.en
-         AND i.id <> g.id_manter
-    `);
+  console.log(`[etiqueta] Catálogo Endereço_pp: +${mig.rowCount} referência(s) (migração única v3)`);
+}
 
-    const del = await client.query(`
-      DELETE FROM etiqueta."ETQ_rec_impresso"
-       WHERE NULLIF(TRIM(codigo_produto), '') IS NULL
-          OR NULLIF(TRIM(descricao_produto), '') IS NULL
-    `);
+/** Backfill seguro de codigo/descricao — nunca apaga nem renumera IDs. */
+async function _etqBackfillRecImpressoSeguro(db) {
+  const conn = db || pool;
 
-    const { rows: cntRows } = await client.query(`SELECT COUNT(*)::int AS n FROM etiqueta."ETQ_rec_impresso"`);
-    const n = cntRows[0]?.n || 0;
+  await conn.query(`
+    UPDATE etiqueta."ETQ_rec_impresso" i
+       SET codigo_produto = COALESCE(NULLIF(TRIM(i.codigo_produto), ''), p.codigo_produto::text),
+           descricao_produto = COALESCE(
+             NULLIF(TRIM(i.descricao_produto), ''),
+             NULLIF(TRIM(p.descricao), ''),
+             NULLIF(TRIM(r.descricao_produto), '')
+           )
+      FROM etiqueta."ETQ_recebimento" r
+      JOIN public.produtos_omie p ON TRIM(p.codigo) = TRIM(r.codigo_produto)
+     WHERE r.id = i.origem_id
+       AND (
+         NULLIF(TRIM(i.codigo_produto), '') IS NULL
+         OR NULLIF(TRIM(i.descricao_produto), '') IS NULL
+       )
+  `);
 
-    if (n > 0) {
-      await client.query(`
-        CREATE TEMP TABLE _etq_reseq ON COMMIT DROP AS
-        SELECT ROW_NUMBER() OVER (ORDER BY impresso_em NULLS LAST, id) AS new_id,
-               origem_id, qtd, unidade, data_emissao, conteudo_zpl, usuario_criacao, impresso_em,
-               endereco, complemento, codigo_produto, descricao_produto, fonte
-          FROM etiqueta."ETQ_rec_impresso"
-      `);
-      await client.query(`DELETE FROM etiqueta."ETQ_rec_impresso"`);
-      await client.query(`
-        INSERT INTO etiqueta."ETQ_rec_impresso"
-          (id, origem_id, qtd, unidade, data_emissao, conteudo_zpl, usuario_criacao, impresso_em,
-           endereco, complemento, codigo_produto, descricao_produto, fonte)
-        SELECT new_id, origem_id, qtd, unidade, data_emissao, conteudo_zpl, usuario_criacao, impresso_em,
-               endereco, complemento, codigo_produto, descricao_produto, fonte
-          FROM _etq_reseq
-         ORDER BY new_id
-      `);
-      await client.query(
-        `SELECT setval(pg_get_serial_sequence('etiqueta."ETQ_rec_impresso"', 'id'), $1, true)`,
-        [n]
-      );
-    } else {
-      await client.query(
-        `SELECT setval(pg_get_serial_sequence('etiqueta."ETQ_rec_impresso"', 'id'), 1, false)`
-      );
-    }
+  await conn.query(`
+    UPDATE etiqueta."ETQ_rec_impresso" i
+       SET codigo_produto = p.codigo_produto::text,
+           descricao_produto = COALESCE(
+             NULLIF(TRIM(i.descricao_produto), ''),
+             NULLIF(TRIM(p.descricao), '')
+           )
+      FROM public.produtos_omie p
+     WHERE (i.codigo_produto IS NULL OR TRIM(i.codigo_produto) = '')
+       AND i.conteudo_zpl IS NOT NULL
+       AND TRIM(i.conteudo_zpl) <> ''
+       AND TRIM(SUBSTRING(i.conteudo_zpl FROM 'Cod\\. Produto: ([^\\^\\n\\r]+)')) <> ''
+       AND TRIM(p.codigo) = TRIM(SUBSTRING(i.conteudo_zpl FROM 'Cod\\. Produto: ([^\\^\\n\\r]+)'))
+       AND p.codigo_produto IS NOT NULL
+  `);
 
-    await client.query(`
-      INSERT INTO etiqueta."_meta" (chave, valor) VALUES ('etq_rec_impresso_cleanup_v2', 'done')
-      ON CONFLICT (chave) DO UPDATE SET valor = EXCLUDED.valor
-    `);
-
-    await client.query('COMMIT');
-    console.log(`[etiqueta] ETQ_rec_impresso cleanup: ${del.rowCount} removido(s), ${n} registro(s) válido(s), IDs 1..${n}`);
-  } catch (err) {
-    await client.query('ROLLBACK').catch(() => {});
-    console.error('[etiqueta] ETQ_rec_impresso cleanup falhou:', err?.message || err);
-  } finally {
-    client.release();
-  }
+  // codigo_produto gravado como texto (produtos_omie.codigo) → id Omie
+  await conn.query(`
+    UPDATE etiqueta."ETQ_rec_impresso" i
+       SET codigo_produto = p.codigo_produto::text,
+           descricao_produto = COALESCE(NULLIF(TRIM(i.descricao_produto), ''), NULLIF(TRIM(p.descricao), ''))
+      FROM public.produtos_omie p
+     WHERE TRIM(i.codigo_produto) = TRIM(p.codigo)
+       AND p.codigo_produto IS NOT NULL
+       AND TRIM(i.codigo_produto) <> TRIM(p.codigo_produto::text)
+  `);
 }
 
 /** Insere ETQ_rec_impresso a partir de etiqueta de recebimento (codigo_produto = id Omie). */
@@ -13089,6 +13085,8 @@ app.post('/api/etiquetas/iapp-op/imprimir', express.json(), async (req, res) => 
   try {
     const items = Array.isArray(req.body?.items) ? req.body.items : [];
     if (!items.length) return res.status(400).json({ error: 'Nenhuma OS informada.' });
+
+    await _etqEnsureRecImpressoCols(pool);
 
     const usuario = String(req.body?.usuario || req.session?.user?.login || req.session?.usuario || '').trim();
     const destiAg = String(req.body?.destino_agente || '').trim() || null;

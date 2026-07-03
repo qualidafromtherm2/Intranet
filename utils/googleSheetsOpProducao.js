@@ -12,7 +12,8 @@ function montarFormulaPedido(rowNum) {
   if (!Number.isFinite(r) || r < 1) {
     throw new Error('Número de linha inválido para fórmula PEDIDO');
   }
-  return `=SEERRO(PROCV(TO_TEXT(F${r});PEDIDOS!C:I;7;0);SEERRO(PROCV(F${r}*1;PEDIDOS!C:I;7;0);SEERRO(PROCV("*"&F${r}&"*";PEDIDOS!C:I;7;0);"ESTOQUE")))`;
+  // Sintaxe US (IFERROR/VLOOKUP) — Google converte para SEERRO/PROCV na planilha pt-BR
+  return `=IFERROR(VLOOKUP(F${r},PEDIDOS!C:I,7,FALSE),IFERROR(VLOOKUP(F${r}*1,PEDIDOS!C:I,7,FALSE),IFERROR(VLOOKUP("*"&F${r}&"*",PEDIDOS!C:I,7,FALSE),"ESTOQUE")))`;
 }
 
 /**
