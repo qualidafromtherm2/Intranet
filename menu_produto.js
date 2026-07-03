@@ -1358,6 +1358,10 @@ async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) 
     const qtySepReg = parseFloat(it.quantidade_separada);
     const qtyAlterada = (isSep || isConferido) && Number.isFinite(qtyOrig) && Number.isFinite(qtySepReg)
       && Math.abs(qtyOrig - qtySepReg) > 0.0001;
+    const qtdManualPendente = isEmSeparacao && Number.isFinite(qtyOrig) && Number.isFinite(qtySepReg)
+      && Math.abs(qtyOrig - qtySepReg) > 0.0001;
+    const qtyStandbyPend = qtdManualPendente && qtySepReg < qtyOrig ? qtyOrig - qtySepReg : 0;
+    const qtyExtraPend = qtdManualPendente && qtySepReg > qtyOrig ? qtySepReg - qtyOrig : 0;
 
     const qtyHtml = isConferido
       ? (qtyAlterada
@@ -1385,6 +1389,16 @@ async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) 
              </table>
            </div>`
         : `<span style="font-size:.80rem;font-weight:700;color:#f0f0f0;">${_solFmtQty(qty)} ${unidade}</span>`)
+      : qtdManualPendente
+      ? `<div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;min-width:100px;">
+           <span style="font-size:.68rem;color:#fbbf24;font-weight:700;"><i class="fa-solid fa-hourglass-half" style="margin-right:2px;font-size:.58rem;"></i>Aguardando Separado</span>
+           <table style="font-size:.62rem;border-collapse:collapse;border:1px solid #374151;border-radius:4px;overflow:hidden;">
+             <tr style="background:#1f2937;"><td style="padding:2px 6px;color:#9ca3af;white-space:nowrap;">Original</td><td style="padding:2px 6px;font-weight:700;color:#d1d5db;">${_solFmtQty(qtyOrig)} ${unidade}</td></tr>
+             <tr style="background:#292419;"><td style="padding:2px 6px;color:#86efac;white-space:nowrap;">Separar</td><td style="padding:2px 6px;font-weight:700;color:#86efac;">${_solFmtQty(qtySepReg)} ${unidade}</td></tr>
+             ${qtyStandbyPend > 0.0001 ? `<tr style="background:#2a1a2a;"><td style="padding:2px 6px;color:#ec4899;white-space:nowrap;">Stand-by</td><td style="padding:2px 6px;font-weight:700;color:#ec4899;">${_solFmtQty(qtyStandbyPend)} ${unidade}</td></tr>` : ''}
+             ${qtyExtraPend > 0.0001 ? `<tr style="background:#1a2a1a;"><td style="padding:2px 6px;color:#a78bfa;white-space:nowrap;">A mais</td><td style="padding:2px 6px;font-weight:700;color:#a78bfa;">${_solFmtQty(qtyExtraPend)} ${unidade}</td></tr>` : ''}
+           </table>
+         </div>`
       : `<div class="sep-qty-wrap" style="display:flex;align-items:center;gap:4px;flex-shrink:0;">
            <span class="sep-qty-label" style="font-size:.80rem;font-weight:700;color:#f0f0f0;white-space:nowrap;">${_solFmtQty(qty)} ${unidade}</span>
          </div>`;
@@ -1395,6 +1409,8 @@ async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) 
            data-solic-ids='${JSON.stringify(it.solic_ids)}'
            data-carr-ids='${JSON.stringify(it.carr_ids)}'
            data-qty-total="${qty}"
+           data-qty-orig="${Number.isFinite(qtyOrig) ? qtyOrig : ''}"
+           data-qty-sep-reg="${Number.isFinite(qtySepReg) ? qtySepReg : ''}"
            data-status="${it.status}"
            data-urgente="${isUrgente ? '1' : '0'}"
            data-codigo="${String(it.codigo_produto || '').replace(/"/g, '&quot;')}"
@@ -1550,7 +1566,33 @@ async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) 
     } catch (_) {} finally { _reloadPending = false; }
   }
 
-  async function _postSepParcial(row, qtySep, motivo) {
+  async function _postRegistrarQtdManual(row, qtySep, motivo) {
+    const solicIds = JSON.parse(row.dataset.solicIds || '[]');
+    const carrIds  = JSON.parse(row.dataset.carrIds  || '[]');
+    const r = await fetch('/api/logistica/itens_solicitados/registrar-qtd-manual', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({
+        solic_ids: solicIds,
+        carr_ids: carrIds,
+        quantidade_separada: qtySep,
+        motivo: motivo || '',
+        ..._solSepPayloadFromRow(row)
+      })
+    });
+    const d = await r.json();
+    if (!d.ok) throw new Error(d.error || 'Erro ao registrar quantidade manual.');
+    houveMudanca = true;
+    await reloadItems();
+    window._loadSolicitacoesTab.force = true;
+    window._loadSolicitacoesTab();
+    window._loadKanbanSolicitacoesTab.force = true;
+    window._loadKanbanSolicitacoesTab();
+    return d;
+  }
+
+  async function _postExecutarSepParcial(row, qtySep, motivo) {
     const solicIds = JSON.parse(row.dataset.solicIds || '[]');
     const carrIds  = JSON.parse(row.dataset.carrIds  || '[]');
     const r = await fetch('/api/logistica/itens_solicitados/separar-parcial', {
@@ -1574,6 +1616,66 @@ async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) 
     window._loadKanbanSolicitacoesTab.force = true;
     window._loadKanbanSolicitacoesTab();
     return d;
+  }
+
+  async function _executarSeparadoItem(row) {
+    if (!(await _verificarSeparadorSep())) return false;
+    const qtyTotal = parseFloat(row.dataset.qtyTotal || '0') || 0;
+    const solicIds = JSON.parse(row.dataset.solicIds || '[]');
+    const qtySepReg = parseFloat(row.dataset.qtySepReg || '');
+    const qtyOrigReg = parseFloat(row.dataset.qtyOrig || '');
+    const temQtdManual = Number.isFinite(qtySepReg) && Number.isFinite(qtyOrigReg)
+      && Math.abs(qtyOrigReg - qtySepReg) > 0.0001;
+
+    if (temQtdManual) {
+      if (!_solValidarOrigemSepRow(row, qtySepReg)) return false;
+      _solRowLoading(row, true);
+      try {
+        const motivo = decodeURIComponent(row.dataset.observacao || '');
+        const d = await _postExecutarSepParcial(row, qtySepReg, motivo);
+        if (d.reintegrado) {
+          alert(`Produto devolvido à SEP original (${d.n_solic || 'original'}).`);
+        }
+        return true;
+      } catch (err) {
+        if (!_tratarErroSeparadorPerdido(err)) alert('Erro: ' + (err.message || err));
+        return false;
+      } finally {
+        _solRowLoading(row, false);
+      }
+    }
+
+    if (!_solValidarOrigemSepRow(row, qtyTotal)) return false;
+    _solRowLoading(row, true);
+    try {
+      const r = await fetch('/api/logistica/itens_solicitados/separar', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ solic_ids: solicIds, ..._solSepPayloadFromRow(row) })
+      });
+      const d = await r.json();
+      if (!d.ok) throw new Error(d.error || 'Erro ao registrar item separado.');
+      if (d.reintegrado) {
+        alert(`Produto devolvido à SEP original (${d.n_solic || 'original'}).`);
+      }
+      houveMudanca = true;
+      await reloadItems();
+      window._loadSolicitacoesTab.force = true;
+      window._loadSolicitacoesTab();
+      window._loadKanbanSolicitacoesTab.force = true;
+      window._loadKanbanSolicitacoesTab();
+      return true;
+    } catch (err) {
+      if (!_tratarErroSeparadorPerdido(err)) alert('Erro: ' + (err.message || err));
+      return false;
+    } finally {
+      _solRowLoading(row, false);
+    }
+  }
+
+  async function _postSepParcial(row, qtySep, motivo) {
+    return _postRegistrarQtdManual(row, qtySep, motivo);
   }
 
   async function _confirmarSepParcial(row, qtySep, opts = {}) {
@@ -1861,20 +1963,10 @@ async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) 
     document.getElementById('btnAcaoSepTudo').addEventListener('click', async () => {
       const btn = document.getElementById('btnAcaoSepTudo');
       if (!(await _verificarSeparadorSep())) return;
-      if (!_solValidarOrigemSepRow(row, qtyTotal)) return;
       _solBtnLoading(btn, 'Processando...');
       try {
-        const r = await fetch('/api/logistica/itens_solicitados/separar', {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          credentials: 'include',
-          body: JSON.stringify({ solic_ids: solicIds, ..._solSepPayloadFromRow(row) })
-        });
-        const d = await r.json();
-        if (!d.ok) throw new Error(d.error || 'Erro ao registrar item separado.');
-        houveMudanca = true;
         closeModal();
-        await reloadItems();
+        await _executarSeparadoItem(row);
       } catch (err) {
         if (!_tratarErroSeparadorPerdido(err)) alert('Erro: ' + (err.message || err));
         _solBtnRestore(btn, 'Separado');
@@ -2216,24 +2308,10 @@ async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) 
     if (btnSepTudo && !btnSepTudo.disabled) {
       const row = btnSepTudo.closest('[data-item-row]');
       if (!row) return;
-      if (!(await _verificarSeparadorSep())) return;
-      const qtyTotal = parseFloat(row.dataset.qtyTotal || '0') || 0;
-      if (!_solValidarOrigemSepRow(row, qtyTotal)) return;
-      const solicIds = JSON.parse(row.dataset.solicIds || '[]');
       _solBtnLoading(btnSepTudo);
       try {
-        const r = await fetch('/api/logistica/itens_solicitados/separar', {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          credentials: 'include',
-          body: JSON.stringify({ solic_ids: solicIds, ..._solSepPayloadFromRow(row) })
-        });
-        const d = await r.json();
-        if (!d.ok) throw new Error(d.error || 'Erro ao registrar item separado.');
-        houveMudanca = true;
-        await reloadItems();
-      } catch (err) {
-        if (!_tratarErroSeparadorPerdido(err)) alert('Erro: ' + (err.message || err));
+        await _executarSeparadoItem(row);
+      } finally {
         _solBtnRestore(btnSepTudo, '<i class="fa-solid fa-check" style="margin-right:2px;"></i>Separado');
       }
       return;
@@ -2249,7 +2327,7 @@ async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) 
       const qtyInput = prompt(`Quantidade separada (${unidade}). Pode ser maior que o solicitado quando a embalagem fechada vier com mais unidades:`, _solFmtQty(qtyTotal));
       if (qtyInput === null) return;
       const qtySep = parseFloat(String(qtyInput).replace(',', '.'));
-      _solBtnLoading(btnSepParcial, 'Processando...');
+      _solBtnLoading(btnSepParcial, 'Registrando...');
       try {
         await _confirmarSepParcial(row, qtySep);
       } finally {
@@ -72193,6 +72271,46 @@ window.verOperacao = function(osId) {
   }
   window._producaoCarregarParadasAtivas = carregarParadasAtivasPorOps;
 
+  async function carregarTemposPostoPorOps(ordens, progOverride) {
+    const prog = Array.isArray(progOverride) ? progOverride : programacaoCarregada;
+    const postoCols = ['solicitado', 'produzindo', 'teste', 'inspecao_final'];
+    const ops = (ordens || []).filter(op => postoCols.includes(opColunaAtual(op))).map((op) => {
+      const reg = (prog || []).find((r) =>
+        Number(r.op_producao_id) === Number(op.id)
+        || String(r.numero_op || '').trim().toUpperCase() === String(op.identificacao || '').trim().toUpperCase()
+      );
+      return {
+        op_producao_id: op.id,
+        numero_op: op.identificacao || '',
+        kanban_programacao_id: reg?.id || null,
+      };
+    });
+    if (!ops.length) {
+      window._producaoTempoPostoPorOp = {};
+      return;
+    }
+    try {
+      const resp = await fetch('/api/producao/tempo/ativos-por-ops', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ ops }),
+      });
+      const data = await resp.json();
+      window._producaoTempoPostoPorOp = (resp.ok && data.success && data.tempos_por_op)
+        ? data.tempos_por_op
+        : {};
+    } catch (_) {
+      window._producaoTempoPostoPorOp = {};
+    }
+  }
+  window._producaoCarregarTemposPosto = carregarTemposPostoPorOps;
+
+  function opTempoPostoInfo(op) {
+    const map = window._producaoTempoPostoPorOp || {};
+    return map[`id:${op?.id}`] || map[`op:${String(op?.identificacao || '').trim().toUpperCase()}`] || null;
+  }
+
   function opComParadaAtiva(op) {
     const map = window._montaParadaAtivaPorOp || {};
     return !!map[String(op?.id)];
@@ -72283,6 +72401,17 @@ window.verOperacao = function(osId) {
       const paradaMsgHtml = emParada
         ? `<div style="font-size:11px;color:#f87171;font-weight:600;margin-top:8px;line-height:1.35;"><i class="fa-solid fa-circle-pause" style="margin-right:5px;font-size:10px;"></i>Produção parada</div>`
         : '';
+      const tempoInfo = opTempoPostoInfo(op);
+      const tempoPostoHtml = (tempoInfo && (tempoInfo.tempo_formatado !== '—' || tempoInfo.tempo_total_formatado !== '—'))
+        ? `<div class="kanban-op-tempo-posto" style="font-size:11px;color:#67e8f9;font-weight:600;margin-top:8px;line-height:1.35;">
+            <i class="fa-solid fa-hourglass-half" style="margin-right:5px;font-size:10px;"></i>
+            Tempo no posto: <b class="kanban-op-tempo-posto-valor">${escHtml(tempoInfo.tempo_formatado || '—')}</b>
+            ${tempoInfo.posto_origem ? `<span style="font-weight:400;color:#94a3b8;"> · ${escHtml(tempoInfo.posto_origem)}</span>` : ''}
+            ${tempoInfo.tempo_total_formatado && tempoInfo.tempo_total_formatado !== '—'
+              ? `<span style="font-weight:400;color:#94a3b8;"> · Total OP: <b class="kanban-op-tempo-total-valor">${escHtml(tempoInfo.tempo_total_formatado)}</b></span>`
+              : ''}
+          </div>`
+        : '';
       const cardTitle = emParada
         ? 'OP em parada'
         : (riBloqueada ? 'Aguardando liberação via RI' : dropTitle);
@@ -72313,6 +72442,7 @@ window.verOperacao = function(osId) {
             ${postosPlanHtml}
             ${op.obs ? `<div style="font-size:11px;color:#94a3b8;margin-top:6px;">Obs: <span style="color:#fef3c7;">${op.obs}</span></div>` : ''}
             ${obsKanban ? `<div style="font-size:11px;color:#94a3b8;margin-top:6px;">Observação: <span style="color:#fde68a;white-space:pre-wrap;">${escHtml(obsKanban)}</span></div>` : ''}
+            ${tempoPostoHtml}
             ${paradaMsgHtml}
             ${riMsgHtml}
           </div>
@@ -72646,12 +72776,14 @@ window.verOperacao = function(osId) {
       if (!respOrdens.ok || !data.success) throw new Error(data.error || 'Erro ao consultar ordens de produção');
 
       ordensCarregadas = data.ordens || [];
+      window._producaoOrdensAtivas = ordensCarregadas;
       pedidosCarregados = (respPedidos.ok && dataPedidos.success) ? (dataPedidos.pedidos || []) : [];
       programacaoCarregada = (respProg.ok && dataProg.success) ? (dataProg.registros || []) : [];
 
       await Promise.all([
         carregarRiStatusPorOps(ordensCarregadas),
         carregarParadasAtivasPorOps(ordensCarregadas),
+        carregarTemposPostoPorOps(ordensCarregadas),
       ]);
       renderKanban(ordensCarregadas);
 
@@ -72682,6 +72814,323 @@ window.verOperacao = function(osId) {
   if (recarrBtn) {
     recarrBtn.addEventListener('click', () => carregarOrdens());
   }
+
+  // ── Modal turno do dia / padrão ─────────────────────────────
+  (function setupProducaoTurnoModal() {
+    const modal = document.getElementById('producaoTurnoModal');
+    if (!modal) return;
+
+    const titulo = document.getElementById('producaoTurnoModalTitulo');
+    const modoInput = document.getElementById('producaoTurnoModalModo');
+    const dataRow = document.getElementById('producaoTurnoDataRow');
+    const dataInput = document.getElementById('producaoTurnoData');
+    const inicioInput = document.getElementById('producaoTurnoInicio');
+    const fimInput = document.getElementById('producaoTurnoFim');
+    const cafeIniInput = document.getElementById('producaoTurnoCafeIni');
+    const cafeFimInput = document.getElementById('producaoTurnoCafeFim');
+    const refIniInput = document.getElementById('producaoTurnoRefeicaoIni');
+    const refFimInput = document.getElementById('producaoTurnoRefeicaoFim');
+    const fimSemanaChk = document.getElementById('producaoTurnoFimSemana');
+    const obsInput = document.getElementById('producaoTurnoObs');
+    const nomeInput = document.getElementById('producaoTurnoNome');
+    const nomesList = document.getElementById('producaoTurnoNomesList');
+    const statusEl = document.getElementById('producaoTurnoStatus');
+    const btnFechar = document.getElementById('producaoTurnoModalFechar');
+    const btnCancelar = document.getElementById('producaoTurnoCancelar');
+    const btnSalvar = document.getElementById('producaoTurnoSalvar');
+
+    function hojeIso() {
+      const d = new Date();
+      const off = d.getTimezoneOffset();
+      const local = new Date(d.getTime() - off * 60000);
+      return local.toISOString().slice(0, 10);
+    }
+
+    function preencherForm(t) {
+      if (!t) return;
+      if (nomeInput && t.nome) nomeInput.value = t.nome;
+      if (nomeInput && t.nome_turno) nomeInput.value = t.nome_turno;
+      if (inicioInput) inicioInput.value = (t.inicio_turno || '').slice(0, 5);
+      if (fimInput) fimInput.value = (t.fim_turno || '').slice(0, 5);
+      if (cafeIniInput) cafeIniInput.value = t.cafe_inicio ? String(t.cafe_inicio).slice(0, 5) : '';
+      if (cafeFimInput) cafeFimInput.value = t.cafe_fim ? String(t.cafe_fim).slice(0, 5) : '';
+      if (refIniInput) refIniInput.value = t.refeicao_inicio ? String(t.refeicao_inicio).slice(0, 5) : '';
+      if (refFimInput) refFimInput.value = t.refeicao_fim ? String(t.refeicao_fim).slice(0, 5) : '';
+      if (fimSemanaChk) fimSemanaChk.checked = !!t.trabalho_fim_semana;
+      if (obsInput) obsInput.value = t.observacao || '';
+    }
+
+    function nomeTurnoAtual() {
+      return String(nomeInput?.value || '').trim() || 'Padrão';
+    }
+
+    async function carregarListaNomes() {
+      const usuario = (document.getElementById('userNameDisplay')?.textContent || '').trim();
+      if (!nomesList || !usuario) return [];
+      try {
+        const resp = await fetch(`/api/producao/turno/padrao?usuario=${encodeURIComponent(usuario)}`, { credentials: 'include' });
+        const data = await resp.json();
+        const padroes = (resp.ok && data.success && Array.isArray(data.padroes)) ? data.padroes : [];
+        nomesList.innerHTML = padroes.map(p => `<option value="${String(p.nome || '').replace(/"/g, '&quot;')}"></option>`).join('');
+        return padroes;
+      } catch (_) {
+        return [];
+      }
+    }
+
+    async function carregarTurnoSelecionado() {
+      const usuario = (document.getElementById('userNameDisplay')?.textContent || '').trim();
+      const nome = nomeTurnoAtual();
+      const m = modoInput?.value === 'padrao' ? 'padrao' : 'dia';
+      if (!usuario || !nome) return;
+      try {
+        if (m === 'dia') {
+          const dataRef = dataInput?.value || hojeIso();
+          const respDia = await fetch(
+            `/api/producao/turno/dia?data=${encodeURIComponent(dataRef)}&nome_turno=${encodeURIComponent(nome)}&usuario=${encodeURIComponent(usuario)}`,
+            { credentials: 'include' }
+          );
+          const dataDia = await respDia.json();
+          if (respDia.ok && dataDia.success && dataDia.turno) {
+            preencherForm(dataDia.turno);
+            return;
+          }
+        }
+        const resp = await fetch(
+          `/api/producao/turno/padrao?usuario=${encodeURIComponent(usuario)}&nome=${encodeURIComponent(nome)}`,
+          { credentials: 'include' }
+        );
+        const data = await resp.json();
+        if (resp.ok && data.success && data.padrao) preencherForm(data.padrao);
+      } catch (_) { /* sem dados */ }
+    }
+
+    function payloadTurno() {
+      return {
+        nome: nomeTurnoAtual(),
+        nome_turno: nomeTurnoAtual(),
+        data_referencia: dataInput?.value || hojeIso(),
+        inicio_turno: inicioInput?.value || '',
+        fim_turno: fimInput?.value || '',
+        cafe_inicio: cafeIniInput?.value || null,
+        cafe_fim: cafeFimInput?.value || null,
+        refeicao_inicio: refIniInput?.value || null,
+        refeicao_fim: refFimInput?.value || null,
+        trabalho_fim_semana: !!fimSemanaChk?.checked,
+        observacao: obsInput?.value || '',
+      };
+    }
+
+    async function abrir(modo) {
+      if (!modal) return;
+      const m = modo === 'padrao' ? 'padrao' : 'dia';
+      if (modoInput) modoInput.value = m;
+      if (titulo) {
+        titulo.innerHTML = m === 'padrao'
+          ? '<i class="fa-solid fa-sliders" style="color:#6366f1;"></i> Padrão de turno'
+          : '<i class="fa-solid fa-clock" style="color:#6366f1;"></i> Turno do dia';
+      }
+      if (dataRow) dataRow.style.display = m === 'dia' ? 'block' : 'none';
+      if (dataInput) dataInput.value = hojeIso();
+      if (nomeInput) nomeInput.value = '';
+      if (statusEl) statusEl.textContent = '';
+      modal.style.display = 'flex';
+
+      const padroes = await carregarListaNomes();
+      if (nomeInput && padroes.length) nomeInput.value = padroes[0].nome || '';
+      await carregarTurnoSelecionado();
+    }
+
+    function fechar() {
+      if (modal) modal.style.display = 'none';
+    }
+
+    async function salvar() {
+      if (!btnSalvar) return;
+      const m = modoInput?.value === 'padrao' ? 'padrao' : 'dia';
+      const usuario = (document.getElementById('userNameDisplay')?.textContent || '').trim();
+      const body = { ...payloadTurno(), usuario };
+      const url = m === 'padrao' ? '/api/producao/turno/padrao' : '/api/producao/turno/dia';
+      btnSalvar.disabled = true;
+      if (statusEl) { statusEl.textContent = 'Salvando...'; statusEl.style.color = '#94a3b8'; }
+      try {
+        const resp = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify(body),
+        });
+        const data = await resp.json();
+        if (!resp.ok || !data.success) throw new Error(data.error || 'Falha ao salvar turno.');
+        if (statusEl) {
+          statusEl.textContent = m === 'padrao' ? 'Padrão salvo.' : 'Turno do dia registrado.';
+          statusEl.style.color = '#86efac';
+        }
+        setTimeout(fechar, 600);
+        if (typeof window._producaoRecarregarOrdens === 'function') window._producaoRecarregarOrdens();
+        else if (typeof window._montaRecarregarOrdens === 'function') window._montaRecarregarOrdens();
+      } catch (err) {
+        if (statusEl) { statusEl.textContent = err.message || 'Erro ao salvar.'; statusEl.style.color = '#f87171'; }
+      } finally {
+        btnSalvar.disabled = false;
+      }
+    }
+
+    nomeInput?.addEventListener('change', () => { carregarTurnoSelecionado(); });
+    nomeInput?.addEventListener('blur', () => { carregarTurnoSelecionado(); });
+    dataInput?.addEventListener('change', () => {
+      if (modoInput?.value === 'dia') carregarTurnoSelecionado();
+    });
+    document.getElementById('producaoTurnoDiaBtn')?.addEventListener('click', () => abrir('dia'));
+    document.getElementById('montaTurnoDiaBtn')?.addEventListener('click', () => abrir('dia'));
+    document.getElementById('montaTurnoPadraoBtn')?.addEventListener('click', () => abrir('padrao'));
+    btnFechar?.addEventListener('click', fechar);
+    btnCancelar?.addEventListener('click', fechar);
+    btnSalvar?.addEventListener('click', salvar);
+    modal.addEventListener('click', (e) => { if (e.target === modal) fechar(); });
+
+    window._producaoAbrirTurnoModal = abrir;
+
+    /* Configuração — Registrar produção (menu + notificação OP) */
+    const producaoConfigBtn = document.getElementById('producaoConfigBtn');
+    const producaoConfigModal = document.getElementById('producaoConfigModal');
+    const producaoConfigModalFechar = document.getElementById('producaoConfigModalFechar');
+    const producaoConfigPadraoTurnoBtn = document.getElementById('producaoConfigPadraoTurnoBtn');
+    const producaoConfigNotifBtn = document.getElementById('producaoConfigNotifBtn');
+    const producaoNotifModal = document.getElementById('producaoNotifModal');
+    const producaoNotifModalFechar = document.getElementById('producaoNotifModalFechar');
+    const producaoNotifVoltarBtn = document.getElementById('producaoNotifVoltarBtn');
+    const producaoNotifSalvarBtn = document.getElementById('producaoNotifSalvarBtn');
+    const producaoNotifTelefone = document.getElementById('producaoNotifTelefone');
+    const producaoNotifPermissaoOp = document.getElementById('producaoNotifPermissaoOp');
+    const producaoNotifAviso = document.getElementById('producaoNotifAviso');
+
+    function setProducaoNotifAviso(msg, tipo = 'info') {
+      if (!producaoNotifAviso) return;
+      if (!msg) {
+        producaoNotifAviso.style.display = 'none';
+        producaoNotifAviso.textContent = '';
+        return;
+      }
+      const cores = {
+        info: { bg: 'rgba(99,102,241,.12)', color: '#a5b4fc', border: 'rgba(99,102,241,.25)' },
+        success: { bg: 'rgba(34,197,94,.12)', color: '#86efac', border: 'rgba(34,197,94,.25)' },
+        error: { bg: 'rgba(239,68,68,.12)', color: '#fca5a5', border: 'rgba(239,68,68,.25)' },
+      };
+      const c = cores[tipo] || cores.info;
+      Object.assign(producaoNotifAviso.style, {
+        display: 'block',
+        background: c.bg,
+        color: c.color,
+        border: `1px solid ${c.border}`,
+      });
+      producaoNotifAviso.textContent = msg;
+    }
+
+    function abrirProducaoConfigModal() {
+      if (producaoConfigModal) producaoConfigModal.style.display = 'flex';
+    }
+
+    function fecharProducaoConfigModal() {
+      if (producaoConfigModal) producaoConfigModal.style.display = 'none';
+    }
+
+    async function abrirProducaoNotifModal() {
+      if (!producaoNotifModal) return;
+      setProducaoNotifAviso('');
+      fecharProducaoConfigModal();
+      producaoNotifModal.style.display = 'flex';
+      try {
+        const resp = await fetch('/api/producao/notificacao/whatsapp', { credentials: 'include' });
+        const json = await resp.json().catch(() => ({}));
+        if (!resp.ok || !json.ok) throw new Error(json.error || 'Falha ao carregar configuração.');
+        const cfg = json.config || {};
+        if (producaoNotifTelefone) producaoNotifTelefone.value = cfg.telefone_contato || '';
+        if (producaoNotifPermissaoOp) producaoNotifPermissaoOp.checked = cfg.permissao_op === true;
+      } catch (err) {
+        setProducaoNotifAviso(err.message || 'Erro ao carregar.', 'error');
+      }
+    }
+
+    function fecharProducaoNotifModal() {
+      if (producaoNotifModal) producaoNotifModal.style.display = 'none';
+      setProducaoNotifAviso('');
+    }
+
+    async function salvarProducaoNotifConfig() {
+      const telefone = String(producaoNotifTelefone?.value || '').trim();
+      if (!telefone) {
+        setProducaoNotifAviso('Informe o número do WhatsApp.', 'error');
+        return;
+      }
+      if (producaoNotifSalvarBtn) producaoNotifSalvarBtn.disabled = true;
+      setProducaoNotifAviso('Salvando...', 'info');
+      try {
+        const resp = await fetch('/api/producao/notificacao/whatsapp', {
+          method: 'PUT',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            telefone_contato: telefone,
+            permissao_op: producaoNotifPermissaoOp?.checked === true,
+          }),
+        });
+        const json = await resp.json().catch(() => ({}));
+        if (!resp.ok || !json.ok) throw new Error(json.error || 'Falha ao salvar.');
+        setProducaoNotifAviso('Configuração salva com sucesso.', 'success');
+        setTimeout(() => fecharProducaoNotifModal(), 1200);
+      } catch (err) {
+        setProducaoNotifAviso(err.message || 'Erro ao salvar.', 'error');
+      } finally {
+        if (producaoNotifSalvarBtn) producaoNotifSalvarBtn.disabled = false;
+      }
+    }
+
+    producaoConfigBtn?.addEventListener('click', abrirProducaoConfigModal);
+    producaoConfigModalFechar?.addEventListener('click', fecharProducaoConfigModal);
+    producaoConfigModal?.addEventListener('click', (e) => {
+      if (e.target === producaoConfigModal) fecharProducaoConfigModal();
+    });
+    producaoConfigPadraoTurnoBtn?.addEventListener('click', () => {
+      fecharProducaoConfigModal();
+      abrir('padrao');
+    });
+    producaoConfigNotifBtn?.addEventListener('click', abrirProducaoNotifModal);
+    producaoNotifModalFechar?.addEventListener('click', fecharProducaoNotifModal);
+    producaoNotifVoltarBtn?.addEventListener('click', () => {
+      fecharProducaoNotifModal();
+      abrirProducaoConfigModal();
+    });
+    producaoNotifSalvarBtn?.addEventListener('click', salvarProducaoNotifConfig);
+    producaoNotifModal?.addEventListener('click', (e) => {
+      if (e.target === producaoNotifModal) fecharProducaoNotifModal();
+    });
+
+    setInterval(async () => {
+      const regPane = document.getElementById('registrarProducaoPane');
+      const montaPane = document.getElementById('montaProducaoPane');
+      const visivel = (regPane && regPane.style.display !== 'none')
+        || (montaPane && montaPane.style.display !== 'none');
+      if (!visivel || typeof window._producaoCarregarTemposPosto !== 'function') return;
+      const ordens = window._producaoOrdensAtivas || [];
+      if (!ordens.length) return;
+      const prog = typeof window._montaProgramacaoCarregada === 'function'
+        ? window._montaProgramacaoCarregada() : [];
+      await window._producaoCarregarTemposPosto(ordens, prog);
+      document.querySelectorAll('.kanban-op-card[data-op-id] .kanban-op-tempo-posto b.kanban-op-tempo-posto-valor').forEach((el) => {
+        const card = el.closest('.kanban-op-card');
+        const opId = card?.getAttribute('data-op-id');
+        const info = window._producaoTempoPostoPorOp?.[`id:${opId}`];
+        if (info?.tempo_formatado) el.textContent = info.tempo_formatado;
+      });
+      document.querySelectorAll('.kanban-op-card[data-op-id] .kanban-op-tempo-total-valor').forEach((el) => {
+        const card = el.closest('.kanban-op-card');
+        const opId = card?.getAttribute('data-op-id');
+        const info = window._producaoTempoPostoPorOp?.[`id:${opId}`];
+        if (info?.tempo_total_formatado) el.textContent = info.tempo_total_formatado;
+      });
+    }, 60000);
+  })();
 
   // ── Modal Gerar OP ──────────────────────────────────────────
   const btnGerarOp          = document.getElementById('producaoGerarOpBtn');
@@ -72875,7 +73324,11 @@ window.verOperacao = function(osId) {
       const data = await resp.json();
       if (!resp.ok || !data.success) throw new Error(data.error || 'Falha ao gerar OP.');
       const total = data.total || quantidade;
-      alert(`${total} OP(s) gerada(s) com sucesso!`);
+      let msg = `${total} OP(s) gerada(s) com sucesso!`;
+      if (data.planilha && data.planilha.ok === false) {
+        msg += `\n\nAtenção: não foi possível registrar na planilha Google.\n${data.planilha.error || 'Erro desconhecido.'}`;
+      }
+      alert(msg);
       fecharGerarOpModal();
       if (typeof carregarOrdens === 'function') await carregarOrdens();
     } catch (err) {
@@ -72991,9 +73444,11 @@ window.verOperacao = function(osId) {
       const data = await resp.json();
       if (!resp.ok || !data.success) return false;
       ordensCarregadas = data.ordens || [];
+      window._producaoOrdensAtivas = ordensCarregadas;
       await Promise.all([
         carregarRiStatusPorOps(ordensCarregadas),
         carregarParadasAtivasPorOps(ordensCarregadas),
+        carregarTemposPostoPorOps(ordensCarregadas),
       ]);
       const keys = Array.isArray(colKeys) && colKeys.length ? colKeys : ['programado', 'solicitado', 'produzindo'];
       if (keys.includes('programado')) {
@@ -73052,12 +73507,14 @@ window.verOperacao = function(osId) {
       const dataProg = await respProg.json();
       if (resp.ok && data.success) {
         ordensCarregadas = data.ordens || [];
+      window._producaoOrdensAtivas = ordensCarregadas;
         pedidosCarregados = (respPedidos.ok && dataPedidos.success) ? (dataPedidos.pedidos || []) : [];
         programacaoCarregada = (respProg.ok && dataProg.success) ? (dataProg.registros || []) : [];
         renderKanban(ordensCarregadas);
       }
     } catch (_) { /* silencioso */ }
   };
+  window._producaoProgramacaoCarregada = () => programacaoCarregada;
 
   function parseQrEtiquetaOp(raw) {
     const s = String(raw || '').trim();
@@ -73243,6 +73700,15 @@ window.verOperacao = function(osId) {
     }
     return cols[idx + 1];
   };
+  window._producaoAnteriorKanbanPorKey = function (colKey) {
+    const cols = PRODUCAO_KANBAN_COLUNAS.filter(c => c.key !== 'pedidos');
+    const idx = cols.findIndex(c => c.key === colKey);
+    if (idx <= 0) return null;
+    return cols[idx - 1];
+  };
+  window._producaoColunasRetrocederOp = function () {
+    return ['solicitado', 'produzindo', 'teste', 'inspecao_final'];
+  };
   window._producaoMsgVaziaColuna = function (colKey) {
     const msgs = {
       programado: 'Nenhuma OP programada.',
@@ -73397,8 +73863,15 @@ window.verOperacao = function(osId) {
       if (!respOrdens.ok || !data.success) throw new Error(data.error || 'Erro ao consultar ordens de produção');
 
       ordensCarregadas = data.ordens || [];
+      window._producaoOrdensAtivas = ordensCarregadas;
       programacaoCarregada = (respProg.ok && dataProg.success) ? (dataProg.registros || []) : [];
-      await carregarRiStatusMontagem(ordensCarregadas);
+      await Promise.all([
+        carregarRiStatusMontagem(ordensCarregadas),
+        typeof window._producaoCarregarParadasAtivas === 'function'
+          ? window._producaoCarregarParadasAtivas(ordensCarregadas, programacaoCarregada) : Promise.resolve(),
+        typeof window._producaoCarregarTemposPosto === 'function'
+          ? window._producaoCarregarTemposPosto(ordensCarregadas, programacaoCarregada) : Promise.resolve(),
+      ]);
       renderKanbanMontagem();
 
       if (rodape) {
@@ -73453,8 +73926,15 @@ window.verOperacao = function(osId) {
       const dataProg = await respProg.json();
       if (resp.ok && data.success) {
         ordensCarregadas = data.ordens || [];
+      window._producaoOrdensAtivas = ordensCarregadas;
         programacaoCarregada = (respProg.ok && dataProg.success) ? (dataProg.registros || []) : [];
-        await carregarRiStatusMontagem(ordensCarregadas);
+        await Promise.all([
+          carregarRiStatusMontagem(ordensCarregadas),
+          typeof window._producaoCarregarParadasAtivas === 'function'
+            ? window._producaoCarregarParadasAtivas(ordensCarregadas, programacaoCarregada) : Promise.resolve(),
+          typeof window._producaoCarregarTemposPosto === 'function'
+            ? window._producaoCarregarTemposPosto(ordensCarregadas, programacaoCarregada) : Promise.resolve(),
+        ]);
         renderKanbanMontagem();
       }
     } catch (_) { /* silencioso */ }
@@ -73474,6 +73954,17 @@ window.verOperacao = function(osId) {
   const erroDiv = document.getElementById('riRegistroErro');
   const rodape = document.getElementById('riRegistroRodape');
   const recarrBtn = document.getElementById('riRegistroRecarregarBtn');
+  const configBtn = document.getElementById('riRegistroConfigBtn');
+  const configModal = document.getElementById('riRegistroConfigModal');
+  const configModalFechar = document.getElementById('riRegistroConfigModalFechar');
+  const permissaoWhatsBtn = document.getElementById('riRegistroPermissaoWhatsBtn');
+  const whatsModal = document.getElementById('riRegistroWhatsModal');
+  const whatsModalFechar = document.getElementById('riRegistroWhatsModalFechar');
+  const whatsVoltarBtn = document.getElementById('riRegistroWhatsVoltarBtn');
+  const whatsSalvarBtn = document.getElementById('riRegistroWhatsSalvarBtn');
+  const whatsTelefoneInput = document.getElementById('riRegistroWhatsTelefone');
+  const whatsAtivoInput = document.getElementById('riRegistroWhatsAtivo');
+  const whatsAviso = document.getElementById('riRegistroWhatsAviso');
   const kanbanContainer = document.getElementById('riRegistroKanban');
   const pesquisaInput = document.getElementById('riRegistroPesquisaInput');
   const btnLimparPesq = document.getElementById('riRegistroPesquisaLimpar');
@@ -73744,6 +74235,106 @@ window.verOperacao = function(osId) {
   });
 
   recarrBtn?.addEventListener('click', () => carregarRiRegistro());
+
+  function setRiWhatsAviso(msg, tipo = 'info') {
+    if (!whatsAviso) return;
+    if (!msg) {
+      whatsAviso.style.display = 'none';
+      whatsAviso.textContent = '';
+      return;
+    }
+    const cores = {
+      info: { bg: 'rgba(99,102,241,.12)', color: '#a5b4fc', border: 'rgba(99,102,241,.25)' },
+      success: { bg: 'rgba(34,197,94,.12)', color: '#86efac', border: 'rgba(34,197,94,.25)' },
+      error: { bg: 'rgba(239,68,68,.12)', color: '#fca5a5', border: 'rgba(239,68,68,.25)' },
+    };
+    const c = cores[tipo] || cores.info;
+    Object.assign(whatsAviso.style, {
+      display: 'block',
+      background: c.bg,
+      color: c.color,
+      border: `1px solid ${c.border}`,
+    });
+    whatsAviso.textContent = msg;
+  }
+
+  function abrirRiConfigModal() {
+    if (!configModal) return;
+    configModal.style.display = 'flex';
+  }
+
+  function fecharRiConfigModal() {
+    if (configModal) configModal.style.display = 'none';
+  }
+
+  async function abrirRiWhatsModal() {
+    if (!whatsModal) return;
+    setRiWhatsAviso('');
+    fecharRiConfigModal();
+    whatsModal.style.display = 'flex';
+    try {
+      const resp = await fetch('/api/qualidade/ri-check/config/whatsapp', { credentials: 'include' });
+      const json = await resp.json().catch(() => ({}));
+      if (!resp.ok || !json.ok) throw new Error(json.error || 'Falha ao carregar configuração.');
+      const cfg = json.config || {};
+      if (whatsTelefoneInput) {
+        whatsTelefoneInput.value = cfg.telefone_contato || cfg.telefone_whatsapp || '';
+      }
+      if (whatsAtivoInput) whatsAtivoInput.checked = cfg.permissao_ri === true;
+    } catch (err) {
+      setRiWhatsAviso(err.message || 'Erro ao carregar.', 'error');
+    }
+  }
+
+  function fecharRiWhatsModal() {
+    if (whatsModal) whatsModal.style.display = 'none';
+    setRiWhatsAviso('');
+  }
+
+  async function salvarRiWhatsConfig() {
+    const telefone = String(whatsTelefoneInput?.value || '').trim();
+    if (!telefone) {
+      setRiWhatsAviso('Informe o número do WhatsApp.', 'error');
+      return;
+    }
+    if (whatsSalvarBtn) whatsSalvarBtn.disabled = true;
+    setRiWhatsAviso('Salvando...', 'info');
+    try {
+      const resp = await fetch('/api/qualidade/ri-check/config/whatsapp', {
+        method: 'PUT',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          telefone_contato: telefone,
+          permissao_ri: whatsAtivoInput?.checked === true,
+        }),
+      });
+      const json = await resp.json().catch(() => ({}));
+      if (!resp.ok || !json.ok) throw new Error(json.error || 'Falha ao salvar.');
+      setRiWhatsAviso('Número salvo com sucesso.', 'success');
+      setTimeout(() => fecharRiWhatsModal(), 1200);
+    } catch (err) {
+      setRiWhatsAviso(err.message || 'Erro ao salvar.', 'error');
+    } finally {
+      if (whatsSalvarBtn) whatsSalvarBtn.disabled = false;
+    }
+  }
+
+  configBtn?.addEventListener('click', abrirRiConfigModal);
+  configModalFechar?.addEventListener('click', fecharRiConfigModal);
+  configModal?.addEventListener('click', (e) => {
+    if (e.target === configModal) fecharRiConfigModal();
+  });
+  permissaoWhatsBtn?.addEventListener('click', abrirRiWhatsModal);
+  whatsModalFechar?.addEventListener('click', fecharRiWhatsModal);
+  whatsVoltarBtn?.addEventListener('click', () => {
+    fecharRiWhatsModal();
+    abrirRiConfigModal();
+  });
+  whatsSalvarBtn?.addEventListener('click', salvarRiWhatsConfig);
+  whatsModal?.addEventListener('click', (e) => {
+    if (e.target === whatsModal) fecharRiWhatsModal();
+  });
 
   window._riRegistroRecarregar = carregarRiRegistro;
 })();
@@ -75605,6 +76196,9 @@ window.verOperacao = function(osId) {
       ? window._producaoProximoKanbanPorKey(colKey)
       : null;
     const proximoStatus = proximo?.nome || 'Finalizado';
+    const postoAtual = (typeof window._producaoNomeKanbanPorKey === 'function')
+      ? (window._producaoNomeKanbanPorKey(colKey) || '')
+      : '';
     const usuario = (document.getElementById('userNameDisplay')?.textContent || '').trim();
     const programacao = (typeof window._montaProgramacaoCarregada === 'function')
       ? window._montaProgramacaoCarregada()
@@ -75624,6 +76218,7 @@ window.verOperacao = function(osId) {
           numero_op: op.identificacao || '',
           kanban_programacao_id: reg?.id || null,
           col_key: colKey || '',
+          posto_atual: postoAtual,
           proximo_status: proximoStatus,
           operacao: proximoStatus,
           usuario,
@@ -75635,6 +76230,54 @@ window.verOperacao = function(osId) {
     if (typeof window._montaRecarregarOrdens === 'function') {
       await window._montaRecarregarOrdens();
     }
+  }
+
+  async function producaoRetrocederOp(ops, colKey) {
+    const lista = Array.isArray(ops) ? ops : [];
+    if (!lista.length) throw new Error('Nenhuma OP selecionada.');
+    const retrocedeCols = (typeof window._producaoColunasRetrocederOp === 'function')
+      ? window._producaoColunasRetrocederOp()
+      : ['solicitado', 'produzindo', 'teste', 'inspecao_final'];
+    if (!retrocedeCols.includes(colKey)) {
+      throw new Error('Retroceder OP não está disponível neste kanban.');
+    }
+    const anterior = (typeof window._producaoAnteriorKanbanPorKey === 'function')
+      ? window._producaoAnteriorKanbanPorKey(colKey)
+      : null;
+    const nomeAnterior = anterior?.nome || 'Programado';
+    const usuario = (document.getElementById('userNameDisplay')?.textContent || '').trim();
+    const programacao = (typeof window._montaProgramacaoCarregada === 'function')
+      ? window._montaProgramacaoCarregada()
+      : (typeof window._producaoProgramacaoCarregada === 'function'
+        ? window._producaoProgramacaoCarregada()
+        : []);
+
+    for (const op of lista) {
+      const reg = programacao.find((r) =>
+        Number(r.op_producao_id) === Number(op.id)
+        || String(r.numero_op || '').trim().toUpperCase() === String(op.identificacao || '').trim().toUpperCase()
+      );
+      const resp = await fetch('/api/producao/retroceder-op', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          op_producao_id: op.from_op_producao !== false ? Number(op.id) : 0,
+          numero_op: op.identificacao || '',
+          kanban_programacao_id: reg?.id || null,
+          col_key: colKey || '',
+          usuario,
+        }),
+      });
+      const data = await resp.json();
+      if (!resp.ok || !data.success) throw new Error(data.error || 'Erro ao retroceder OP');
+    }
+    if (typeof window._producaoRecarregarOrdens === 'function') {
+      await window._producaoRecarregarOrdens();
+    } else if (typeof window._montaRecarregarOrdens === 'function') {
+      await window._montaRecarregarOrdens();
+    }
+    return nomeAnterior;
   }
 
   async function carregarMotivosParada() {
@@ -75882,10 +76525,22 @@ window.verOperacao = function(osId) {
     const somenteEstrutura = !!options.somenteEstrutura;
     const modoMontagem = !!options.modoMontagem;
     const modoRiRegistro = !!options.modoRiRegistro;
+    const modoRegistrarProducao = !!options.modoRegistrarProducao;
     const mostrarEstoque = !!options.mostrarEstoque;
     const pedidoItem = options.pedidoItem || null;
     const mostrarGerarOpPedido = !!pedidoItem && !modoMontagem && !modoRiRegistro;
     const colKeyMonta = options.colKey || '';
+    const retrocedeCols = (typeof window._producaoColunasRetrocederOp === 'function')
+      ? window._producaoColunasRetrocederOp()
+      : ['solicitado', 'produzindo', 'teste', 'inspecao_final'];
+    const mostrarRetrocederOp = modoRegistrarProducao
+      && !modoMontagem
+      && !modoRiRegistro
+      && retrocedeCols.includes(colKeyMonta)
+      && ops.length === 1;
+    const nomeKanbanAnterior = mostrarRetrocederOp && (typeof window._producaoAnteriorKanbanPorKey === 'function')
+      ? (window._producaoAnteriorKanbanPorKey(colKeyMonta)?.nome || 'Programado')
+      : '';
     const mostrarImprimirOpMonta = modoMontagem && colKeyMonta === 'programado';
     const mostrarFinalizarMonta = modoMontagem && colKeyMonta !== 'programado' && colKeyMonta !== 'finalizado';
     const mostrarParadaMonta = mostrarFinalizarMonta;
@@ -75940,6 +76595,10 @@ window.verOperacao = function(osId) {
             ${mostrarRi ? `
             <button type="button" id="open-ri-check-btn" class="modal-secondary" style="min-width:180px;">
               <i class="fa-solid fa-clipboard-check"></i> RI - Registro de inspeção
+            </button>` : ''}
+            ${mostrarRetrocederOp ? `
+            <button type="button" id="open-retroceder-op-btn" class="modal-secondary" style="min-width:160px;border-color:rgba(248,113,113,.45);color:#fecaca;">
+              <i class="fa-solid fa-arrow-left"></i> Retroceder OP
             </button>` : ''}`))}
           </div>
           ${mostrarEstoque ? '<div id="analise-estoque-pedido"></div>' : ''}
@@ -75987,6 +76646,24 @@ window.verOperacao = function(osId) {
         const op = ops[0];
         if (!op) return;
         openProducaoRiCheckModal(op, produtoCodigo || groupKey, options.colKey || '');
+      });
+      modal.querySelector('#open-retroceder-op-btn')?.addEventListener('click', async () => {
+        const btn = modal.querySelector('#open-retroceder-op-btn');
+        if (btn?.disabled) return;
+        const destino = nomeKanbanAnterior || 'kanban anterior';
+        if (!confirm(`Retroceder esta OP para ${destino}?\n\nO registro de RI do posto anterior será desfeito.`)) return;
+        if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Retrocedendo...'; }
+        try {
+          const destinoFinal = await producaoRetrocederOp(ops, options.colKey || '');
+          close();
+          alert(`OP retrocedida para ${destinoFinal || destino}.`);
+        } catch (err) {
+          alert(err.message || 'Falha ao retroceder OP.');
+          if (btn) {
+            btn.disabled = false;
+            btn.innerHTML = '<i class="fa-solid fa-arrow-left"></i> Retroceder OP';
+          }
+        }
       });
     }
     if (modoRiRegistro) {
@@ -76075,7 +76752,11 @@ window.verOperacao = function(osId) {
       ? window._producaoOpColunaAtual(op)
       : 'programado';
     const produtoCodigo = op.produto?.identificacao || String(op.id);
-    openProducaoKanbanActionsModal(produtoCodigo, produtoCodigo, [op], '', { colKey, ocultarValores: true });
+    openProducaoKanbanActionsModal(produtoCodigo, produtoCodigo, [op], '', {
+      colKey,
+      ocultarValores: true,
+      modoRegistrarProducao: true,
+    });
   };
 
   function attachProducaoKanbanActionButtons(containerSelector, ordens) {
@@ -76083,7 +76764,8 @@ window.verOperacao = function(osId) {
     if (!container || !ordens) return;
     const filtroSelect = container.querySelector('#producaoFiltroOperacao');
     const modoMontagem = containerSelector === '#montaProducaoPane';
-    const ocultarValores = containerSelector === '#registrarProducaoPane' || modoMontagem;
+    const modoRegistrarProducao = containerSelector === '#registrarProducaoPane';
+    const ocultarValores = modoRegistrarProducao || modoMontagem;
 
     container.querySelectorAll('.kanban-group-action-btn').forEach(btn => {
       if (btn.dataset.bound === '1') return;
@@ -76102,7 +76784,9 @@ window.verOperacao = function(osId) {
           : opsGrupo;
         const operacaoFiltro = filtroSelect ? filtroSelect.value : '';
 
-        openProducaoKanbanActionsModal(produtoCodigo, groupKey, ops, operacaoFiltro, { colKey, ocultarValores, modoMontagem });
+        openProducaoKanbanActionsModal(produtoCodigo, groupKey, ops, operacaoFiltro, {
+          colKey, ocultarValores, modoMontagem, modoRegistrarProducao,
+        });
       });
     });
   }
@@ -76113,7 +76797,8 @@ window.verOperacao = function(osId) {
     if (!container || !ordens) return;
     const modoMontagem = containerSelector === '#montaProducaoPane';
     const modoRiRegistro = containerSelector === '#riRegistroInspecaoPane';
-    const ocultarValores = containerSelector === '#registrarProducaoPane' || modoMontagem || modoRiRegistro;
+    const modoRegistrarProducao = containerSelector === '#registrarProducaoPane';
+    const ocultarValores = modoRegistrarProducao || modoMontagem || modoRiRegistro;
 
     container.querySelectorAll('[data-op-id]').forEach(card => {
       if (card.dataset.opBound === '1') return;
@@ -76140,6 +76825,7 @@ window.verOperacao = function(osId) {
           ocultarValores,
           modoMontagem,
           modoRiRegistro,
+          modoRegistrarProducao,
         });
       });
     });

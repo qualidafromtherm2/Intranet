@@ -1,6 +1,13 @@
 // routes/qualidadeRiCheck.js — RI Registro de Inspeção (kanban produção)
 'use strict';
 
+const { registrarRiConcluida } = require('../utils/tempoProducao');
+const {
+  dispararNotificacaoRiCheck,
+  obterConfigNotificacaoUsuario,
+  salvarConfigNotificacaoUsuario,
+} = require('../utils/riCheckWhatsappNotificacao');
+
 const express = require('express');
 const router = express.Router();
 const multer = require('multer');
@@ -24,6 +31,10 @@ function getUsuario(req) {
     || String(req.headers['x-user'] || '').trim()
     || 'sistema'
   );
+}
+
+function getUserId(req) {
+  return Number(req.session?.user?.id) || 0;
 }
 
 function requireAuth(req, res, next) {
@@ -543,6 +554,7 @@ async function atualizarStatusKanbanOp(opRefId, statusKanban, check, checkStatus
       `UPDATE qualidade."RI_Check" SET status = $2, updated_at = NOW() WHERE id = $1`,
       [check.id, checkStatusRi]
     );
+    dispararNotificacaoRiCheck(check.id);
   }
 
   const statusFinal = String(statusKanban || '').trim();
@@ -801,6 +813,49 @@ router.get('/pendentes', requireAuth, async (_req, res) => {
 });
 
 // GET /api/qualidade/ri-check/kanbans — nomes das colunas do kanban Registrar produção
+// GET /api/qualidade/ri-check/config/whatsapp — configuração do usuário logado
+router.get('/config/whatsapp', requireAuth, async (req, res) => {
+  try {
+    const userId = getUserId(req);
+    if (!userId) return res.status(401).json({ ok: false, error: 'Usuário não identificado.' });
+
+    const config = await obterConfigNotificacaoUsuario(userId);
+    return res.json({
+      ok: true,
+      config: config || {
+        telefone_contato: '',
+        permissao_op: false,
+        permissao_ri: false,
+      },
+    });
+  } catch (err) {
+    console.error('[qualidade/ri-check/config/whatsapp GET]', err);
+    return res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// PUT /api/qualidade/ri-check/config/whatsapp — salvar número do usuário logado
+router.put('/config/whatsapp', requireAuth, express.json(), async (req, res) => {
+  try {
+    const userId = getUserId(req);
+    if (!userId) return res.status(401).json({ ok: false, error: 'Usuário não identificado.' });
+
+    const username = req.session?.user?.username || getUsuario(req);
+    const body = req.body || {};
+    const config = await salvarConfigNotificacaoUsuario({
+      userId,
+      username,
+      telefoneContato: body.telefone_contato ?? body.telefone_whatsapp,
+      permissaoRi: body.permissao_ri ?? body.ativo,
+    });
+
+    return res.json({ ok: true, config });
+  } catch (err) {
+    console.error('[qualidade/ri-check/config/whatsapp PUT]', err);
+    return res.status(400).json({ ok: false, error: err.message });
+  }
+});
+
 router.get('/kanbans', requireAuth, (_req, res) => {
   return res.json({
     ok: true,
@@ -1007,6 +1062,7 @@ router.post('/abrir', requireAuth, express.json(), async (req, res) => {
           WHERE id = $1`,
         [checkId, codigoProdutoGravar, codigoGravar, descricaoGravar, kanbanProgId, opProducaoId, usuario]
       );
+      dispararNotificacaoRiCheck(checkId);
     } else {
       const ins = await dbQuery(
         `INSERT INTO qualidade."RI_Check"
@@ -1016,6 +1072,7 @@ router.post('/abrir', requireAuth, express.json(), async (req, res) => {
         [kanbanProgId, codigoProdutoGravar, codigoGravar, descricaoGravar, opRefId, opProducaoId, usuario]
       );
       checkId = ins.rows[0].id;
+      dispararNotificacaoRiCheck(checkId);
     }
 
     if (camposProd.idOmie) {
@@ -1090,6 +1147,7 @@ router.post('/:id/verificacoes', requireAuth, upload.fields([
     );
 
     await dbQuery(`UPDATE qualidade."RI_Check" SET updated_at = NOW() WHERE id = $1`, [checkId]);
+    dispararNotificacaoRiCheck(checkId);
 
     return res.json({ ok: true, verificacao: ins.rows[0] });
   } catch (err) {
@@ -1167,6 +1225,7 @@ router.post('/:id/niq', requireAuth, upload.fields([
     );
 
     await dbQuery(`UPDATE qualidade."RI_Check" SET updated_at = NOW() WHERE id = $1`, [checkId]);
+    dispararNotificacaoRiCheck(checkId);
 
     return res.json({ ok: true, ocorrencia: ins.rows[0] });
   } catch (err) {
@@ -1194,6 +1253,7 @@ router.post('/:id/salvar', requireAuth, express.json(), async (req, res) => {
       [checkId, usuario]
     );
     if (!rowCount) return res.status(404).json({ ok: false, error: 'RI não encontrado.' });
+    dispararNotificacaoRiCheck(checkId);
 
     if (avancarTeste) {
       const opRefId = resolverOpRefId(dadosAtual.check);
@@ -1245,6 +1305,23 @@ router.post('/:id/liberar', requireAuth, express.json(), async (req, res) => {
         WHERE id = $1`,
       [checkId, statusRi, usuario]
     );
+    dispararNotificacaoRiCheck(checkId);
+
+    try {
+      const kanbanProgId = Number(check.id_kanban_programacao) || null;
+      const opProdId = Number(check.op_producao_id) || Number(check.op_iapp_id) || opRefId;
+      await registrarRiConcluida({
+        kanbanProgramacaoId: kanbanProgId,
+        opProducaoId: opProdId,
+        numeroOp: numeroOp || '',
+        postoOrigem: statusRi,
+        riCheckId: checkId,
+        usuario,
+        operacao: `RI registrada — ${statusRi}`,
+      });
+    } catch (tempoErr) {
+      console.error('[tempo_producao] Falha ao registrar RI concluída:', tempoErr.message);
+    }
 
     const localFiltro = kanbanOrigem || statusRi || null;
     const atualizado = await carregarCheckCompleto(checkId, localFiltro);
@@ -1316,6 +1393,7 @@ async function registrarRiCheckImpressaoOp({
         usuario,
       ]
     );
+    dispararNotificacaoRiCheck(existentes[0].id);
     return { id: existentes[0].id, updated: true };
   }
 
@@ -1355,6 +1433,7 @@ async function registrarRiCheckImpressaoOp({
         usuario,
       ]
     );
+    dispararNotificacaoRiCheck(emAndamento[0].id);
     return { id: emAndamento[0].id, updated: true };
   }
 
@@ -1374,8 +1453,30 @@ async function registrarRiCheckImpressaoOp({
       statusFinal,
     ]
   );
+  dispararNotificacaoRiCheck(ins.rows[0]?.id);
   return { id: ins.rows[0]?.id, created: true };
 }
 
+/** Desfaz registro de RI no posto (status volta para Em andamento). */
+async function reverterRiCheckNoPosto(opRefId, postoKanban) {
+  const opId = Number(opRefId) || 0;
+  const posto = String(postoKanban || '').trim();
+  if (!opId || !posto) return null;
+
+  const row = await buscarCheckRiOpNoPosto(opId, posto);
+  if (!row?.id) return null;
+
+  await dbQuery(
+    `UPDATE qualidade."RI_Check"
+        SET status = 'Em andamento',
+            updated_at = NOW()
+      WHERE id = $1`,
+    [row.id]
+  );
+  dispararNotificacaoRiCheck(row.id);
+  return row.id;
+}
+
 router.registrarRiCheckImpressaoOp = registrarRiCheckImpressaoOp;
+router.reverterRiCheckNoPosto = reverterRiCheckNoPosto;
 module.exports = router;

@@ -24,7 +24,8 @@ cp .env.example .env
 ```
 
 2. Preencha o `.env` com credenciais locais (nunca commitar credenciais reais).
-3. Rodar em desenvolvimento:
+3. Para subir local com PM2, porta 5001, SQL + Omie: **[readme/AMBIENTE_LOCAL_DEV.md](readme/AMBIENTE_LOCAL_DEV.md)** (guia focado em **Windows**; anexo Linux no final).
+4. Alternativa rápida sem PM2:
 
 ```bash
 npm run dev

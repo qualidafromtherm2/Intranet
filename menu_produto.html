@@ -10200,6 +10200,14 @@
               </div>
               <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px;">
                 <div style="display:flex;gap:8px;align-items:center;">
+                  <button id="producaoTurnoDiaBtn" type="button"
+                    style="display:inline-flex;align-items:center;gap:8px;padding:7px 14px;background:rgba(255,255,255,.08);color:#e2e8f0;border:1px solid rgba(255,255,255,.15);border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;">
+                    <i class="fa-solid fa-clock"></i> Turno do dia
+                  </button>
+                  <button id="producaoConfigBtn" type="button"
+                    style="display:inline-flex;align-items:center;gap:8px;padding:7px 14px;background:rgba(255,255,255,.06);color:#e2e8f0;border:1px solid rgba(255,255,255,.14);border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;">
+                    <i class="fa-solid fa-gear"></i> Configuração
+                  </button>
                   <button id="producaoGerarOpBtn" type="button"
                     style="display:inline-flex;align-items:center;gap:8px;padding:7px 16px;background:linear-gradient(135deg,#10b981 0%,#059669 100%);color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;">
                     <i class="fa-solid fa-plus"></i> Gerar OP
@@ -10414,6 +10422,151 @@
           </div>
         </div>
 
+        <!-- Modal Configuração — Registrar produção -->
+        <div id="producaoConfigModal" style="display:none;position:fixed;inset:0;z-index:12000;background:rgba(0,0,0,.55);align-items:center;justify-content:center;padding:20px;">
+          <div style="width:100%;max-width:480px;background:#1e293b;border:1px solid rgba(255,255,255,.12);border-radius:12px;box-shadow:0 20px 50px rgba(0,0,0,.45);overflow:hidden;">
+            <div style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid rgba(255,255,255,.08);">
+              <h3 style="margin:0;font-size:16px;font-weight:700;color:#f1f5f9;display:flex;align-items:center;gap:8px;">
+                <i class="fa-solid fa-gear" style="color:#6366f1;"></i> Configuração
+              </h3>
+              <button type="button" id="producaoConfigModalFechar" title="Fechar"
+                style="width:32px;height:32px;border:none;border-radius:8px;background:rgba(255,255,255,.06);color:#94a3b8;font-size:20px;line-height:1;cursor:pointer;">&times;</button>
+            </div>
+            <div style="padding:20px;display:flex;flex-direction:column;gap:10px;">
+              <button type="button" id="producaoConfigPadraoTurnoBtn"
+                style="width:100%;display:flex;align-items:center;gap:12px;padding:14px 16px;background:rgba(99,102,241,.1);border:1px solid rgba(99,102,241,.25);border-radius:10px;color:#c7d2fe;font-size:14px;font-weight:600;cursor:pointer;text-align:left;">
+                <i class="fa-solid fa-sliders" style="font-size:20px;color:#6366f1;"></i>
+                <span>
+                  <span style="display:block;">Padrão de turno</span>
+                  <span style="display:block;font-size:12px;font-weight:400;color:#94a3b8;margin-top:2px;">Configurar horários padrão do turno</span>
+                </span>
+                <i class="fa-solid fa-chevron-right" style="margin-left:auto;color:#64748b;"></i>
+              </button>
+              <button type="button" id="producaoConfigNotifBtn"
+                style="width:100%;display:flex;align-items:center;gap:12px;padding:14px 16px;background:rgba(34,197,94,.08);border:1px solid rgba(34,197,94,.22);border-radius:10px;color:#bbf7d0;font-size:14px;font-weight:600;cursor:pointer;text-align:left;">
+                <i class="fa-brands fa-whatsapp" style="font-size:22px;color:#22c55e;"></i>
+                <span>
+                  <span style="display:block;">Permissão de notificação</span>
+                  <span style="display:block;font-size:12px;font-weight:400;color:#94a3b8;margin-top:2px;">Receber avisos de OP no WhatsApp</span>
+                </span>
+                <i class="fa-solid fa-chevron-right" style="margin-left:auto;color:#64748b;"></i>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Modal Permissão de notificação — Registrar produção (OP) -->
+        <div id="producaoNotifModal" style="display:none;position:fixed;inset:0;z-index:12001;background:rgba(0,0,0,.55);align-items:center;justify-content:center;padding:20px;">
+          <div style="width:100%;max-width:440px;background:#1e293b;border:1px solid rgba(255,255,255,.12);border-radius:12px;box-shadow:0 20px 50px rgba(0,0,0,.45);overflow:hidden;">
+            <div style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid rgba(255,255,255,.08);">
+              <h3 style="margin:0;font-size:16px;font-weight:700;color:#f1f5f9;display:flex;align-items:center;gap:8px;">
+                <i class="fa-brands fa-whatsapp" style="color:#22c55e;"></i> Permissão de notificação
+              </h3>
+              <button type="button" id="producaoNotifModalFechar" title="Fechar"
+                style="width:32px;height:32px;border:none;border-radius:8px;background:rgba(255,255,255,.06);color:#94a3b8;font-size:20px;line-height:1;cursor:pointer;">&times;</button>
+            </div>
+            <div style="padding:20px;">
+              <p style="margin:0 0 16px;font-size:13px;color:#94a3b8;line-height:1.5;">
+                Cadastre seu número para receber mensagem no WhatsApp quando houver registro de tempo de OP (posto).
+              </p>
+              <label style="display:block;margin-bottom:14px;">
+                <span style="display:block;font-size:12px;font-weight:600;color:#cbd5e1;margin-bottom:6px;">Número do WhatsApp</span>
+                <input type="tel" id="producaoNotifTelefone" autocomplete="tel"
+                  placeholder="(41) 99999-9999"
+                  style="width:100%;padding:10px 12px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.12);border-radius:8px;color:#e2e8f0;font-size:14px;outline:none;box-sizing:border-box;">
+              </label>
+              <label style="display:flex;align-items:center;gap:10px;margin-bottom:16px;cursor:pointer;">
+                <input type="checkbox" id="producaoNotifPermissaoOp"
+                  style="width:18px;height:18px;cursor:pointer;">
+                <span style="font-size:13px;color:#e2e8f0;">Permitir que o WhatsApp envie notificações de OP</span>
+              </label>
+              <div id="producaoNotifAviso" style="display:none;margin-bottom:12px;padding:10px 12px;border-radius:8px;font-size:13px;"></div>
+              <div style="display:flex;gap:10px;justify-content:flex-end;">
+                <button type="button" id="producaoNotifVoltarBtn"
+                  style="padding:8px 14px;background:rgba(255,255,255,.06);color:#cbd5e1;border:1px solid rgba(255,255,255,.12);border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;">
+                  Voltar
+                </button>
+                <button type="button" id="producaoNotifSalvarBtn"
+                  style="padding:8px 16px;background:linear-gradient(135deg,#22c55e 0%,#16a34a 100%);color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;">
+                  Salvar
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Modal Configurar turno (Registrar produção / Montagem) -->
+        <div id="producaoTurnoModal" class="modal-overlay" style="display:none;z-index:10065;">
+          <div class="modal-box" style="max-width:520px;width:95%;">
+            <div class="modal-header" style="display:flex;align-items:center;justify-content:space-between;gap:12px;">
+              <h3 id="producaoTurnoModalTitulo" style="margin:0;font-size:1rem;font-weight:700;color:#f1f5f9;display:flex;align-items:center;gap:8px;">
+                <i class="fa-solid fa-clock" style="color:#6366f1;"></i> Configurar turno
+              </h3>
+              <button id="producaoTurnoModalFechar" class="modal-close-btn" type="button" title="Fechar">
+                <i class="fas fa-times"></i>
+              </button>
+            </div>
+            <div class="modal-body" style="padding-top:12px;">
+              <input type="hidden" id="producaoTurnoModalModo" value="dia">
+              <div style="margin-bottom:12px;">
+                <label for="producaoTurnoNome" style="display:block;margin-bottom:6px;font-size:12px;color:var(--inactive-color);">
+                  Nome do turno
+                </label>
+                <input type="text" id="producaoTurnoNome" list="producaoTurnoNomesList"
+                  placeholder="Ex.: Turno 1, Manhã, Noite..."
+                  style="width:100%;padding:9px 12px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.12);border-radius:8px;color:#e2e8f0;font-size:13px;outline:none;">
+                <datalist id="producaoTurnoNomesList"></datalist>
+                <div style="font-size:11px;color:#64748b;margin-top:4px;">Escolha um turno existente ou digite um nome novo.</div>
+              </div>
+              <div id="producaoTurnoDataRow" style="margin-bottom:12px;">
+                <label for="producaoTurnoData" style="display:block;margin-bottom:6px;font-size:12px;color:var(--inactive-color);">Data</label>
+                <input type="date" id="producaoTurnoData"
+                  style="width:100%;padding:9px 12px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.12);border-radius:8px;color:#e2e8f0;font-size:13px;outline:none;">
+              </div>
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+                <div>
+                  <label for="producaoTurnoInicio" style="display:block;margin-bottom:6px;font-size:12px;color:var(--inactive-color);">Início do turno</label>
+                  <input type="time" id="producaoTurnoInicio" style="width:100%;padding:9px 12px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.12);border-radius:8px;color:#e2e8f0;font-size:13px;">
+                </div>
+                <div>
+                  <label for="producaoTurnoFim" style="display:block;margin-bottom:6px;font-size:12px;color:var(--inactive-color);">Fim do turno</label>
+                  <input type="time" id="producaoTurnoFim" style="width:100%;padding:9px 12px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.12);border-radius:8px;color:#e2e8f0;font-size:13px;">
+                </div>
+                <div>
+                  <label for="producaoTurnoCafeIni" style="display:block;margin-bottom:6px;font-size:12px;color:var(--inactive-color);">Café início</label>
+                  <input type="time" id="producaoTurnoCafeIni" style="width:100%;padding:9px 12px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.12);border-radius:8px;color:#e2e8f0;font-size:13px;">
+                </div>
+                <div>
+                  <label for="producaoTurnoCafeFim" style="display:block;margin-bottom:6px;font-size:12px;color:var(--inactive-color);">Café fim</label>
+                  <input type="time" id="producaoTurnoCafeFim" style="width:100%;padding:9px 12px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.12);border-radius:8px;color:#e2e8f0;font-size:13px;">
+                </div>
+                <div>
+                  <label for="producaoTurnoRefeicaoIni" style="display:block;margin-bottom:6px;font-size:12px;color:var(--inactive-color);">Refeição início</label>
+                  <input type="time" id="producaoTurnoRefeicaoIni" style="width:100%;padding:9px 12px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.12);border-radius:8px;color:#e2e8f0;font-size:13px;">
+                </div>
+                <div>
+                  <label for="producaoTurnoRefeicaoFim" style="display:block;margin-bottom:6px;font-size:12px;color:var(--inactive-color);">Refeição fim</label>
+                  <input type="time" id="producaoTurnoRefeicaoFim" style="width:100%;padding:9px 12px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.12);border-radius:8px;color:#e2e8f0;font-size:13px;">
+                </div>
+              </div>
+              <label style="display:flex;align-items:center;gap:8px;margin-top:12px;font-size:12px;color:#cbd5e1;cursor:pointer;">
+                <input type="checkbox" id="producaoTurnoFimSemana" style="width:16px;height:16px;">
+                Registrar trabalho no sábado/domingo
+              </label>
+              <label for="producaoTurnoObs" style="display:block;margin:12px 0 6px;font-size:12px;color:var(--inactive-color);">Observação</label>
+              <textarea id="producaoTurnoObs" rows="2" placeholder="Observações do turno..."
+                style="width:100%;padding:10px 12px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.12);border-radius:8px;color:#e2e8f0;font-size:13px;resize:vertical;"></textarea>
+              <p id="producaoTurnoStatus" style="margin:10px 0 0;font-size:12px;color:#94a3b8;min-height:18px;"></p>
+            </div>
+            <div class="modal-footer" style="display:flex;justify-content:flex-end;gap:8px;padding:12px 16px;">
+              <button type="button" id="producaoTurnoCancelar" class="modal-secondary">Cancelar</button>
+              <button type="button" id="producaoTurnoSalvar" class="modal-primary">
+                <i class="fa-solid fa-check"></i> Salvar
+              </button>
+            </div>
+          </div>
+        </div>
+
         <!-- Painel Produção: Montagem (kanbans pós-Programado) -->
         <div id="montaProducaoPane" class="tab-pane" style="display:none;">
           <div class="content-wrapper">
@@ -10427,6 +10580,14 @@
               </div>
               <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px;">
                 <div style="display:flex;gap:8px;align-items:center;">
+                  <button id="montaTurnoDiaBtn" type="button"
+                    style="display:inline-flex;align-items:center;gap:8px;padding:7px 14px;background:rgba(255,255,255,.08);color:#e2e8f0;border:1px solid rgba(255,255,255,.15);border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;">
+                    <i class="fa-solid fa-clock"></i> Turno do dia
+                  </button>
+                  <button id="montaTurnoPadraoBtn" type="button"
+                    style="display:inline-flex;align-items:center;gap:8px;padding:7px 14px;background:rgba(255,255,255,.08);color:#e2e8f0;border:1px solid rgba(255,255,255,.15);border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;">
+                    <i class="fa-solid fa-sliders"></i> Padrão de turno
+                  </button>
                   <button id="montaRecarregarBtn" type="button"
                     style="display:inline-flex;align-items:center;gap:8px;padding:7px 16px;background:linear-gradient(135deg,#10b981 0%,#059669 100%);color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;">
                     <i class="fa-solid fa-rotate-right"></i> Atualizar
@@ -10475,6 +10636,10 @@
               </div>
               <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px;">
                 <div style="display:flex;gap:8px;align-items:center;">
+                  <button id="riRegistroConfigBtn" type="button"
+                    style="display:inline-flex;align-items:center;gap:8px;padding:7px 16px;background:rgba(255,255,255,.06);color:#e2e8f0;border:1px solid rgba(255,255,255,.14);border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;">
+                    <i class="fa-solid fa-gear"></i> Configuração
+                  </button>
                   <button id="riRegistroRecarregarBtn" type="button"
                     style="display:inline-flex;align-items:center;gap:8px;padding:7px 16px;background:linear-gradient(135deg,#6366f1 0%,#4f46e5 100%);color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;">
                     <i class="fa-solid fa-rotate-right"></i> Atualizar
@@ -10508,6 +10673,70 @@
 
             <div id="riRegistroKanban" style="display:flex;gap:16px;align-items:flex-start;overflow-x:auto;padding:4px 0 16px 0;">
               <div style="text-align:center;padding:24px 0;color:var(--inactive-color);font-size:12px;width:100%;">Clique em "Atualizar" para carregar.</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Modal Configuração — RI Registro de inspeção -->
+        <div id="riRegistroConfigModal" style="display:none;position:fixed;inset:0;z-index:12000;background:rgba(0,0,0,.55);align-items:center;justify-content:center;padding:20px;">
+          <div style="width:100%;max-width:480px;background:#1e293b;border:1px solid rgba(255,255,255,.12);border-radius:12px;box-shadow:0 20px 50px rgba(0,0,0,.45);overflow:hidden;">
+            <div style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid rgba(255,255,255,.08);">
+              <h3 style="margin:0;font-size:16px;font-weight:700;color:#f1f5f9;display:flex;align-items:center;gap:8px;">
+                <i class="fa-solid fa-gear" style="color:#6366f1;"></i> Configuração
+              </h3>
+              <button type="button" id="riRegistroConfigModalFechar" title="Fechar"
+                style="width:32px;height:32px;border:none;border-radius:8px;background:rgba(255,255,255,.06);color:#94a3b8;font-size:20px;line-height:1;cursor:pointer;">&times;</button>
+            </div>
+            <div style="padding:20px;">
+              <button type="button" id="riRegistroPermissaoWhatsBtn"
+                style="width:100%;display:flex;align-items:center;gap:12px;padding:14px 16px;background:rgba(99,102,241,.1);border:1px solid rgba(99,102,241,.25);border-radius:10px;color:#c7d2fe;font-size:14px;font-weight:600;cursor:pointer;text-align:left;">
+                <i class="fa-brands fa-whatsapp" style="font-size:22px;color:#22c55e;"></i>
+                <span>
+                  <span style="display:block;">Permissão de notificação</span>
+                  <span style="display:block;font-size:12px;font-weight:400;color:#94a3b8;margin-top:2px;">Receber avisos de RI no WhatsApp</span>
+                </span>
+                <i class="fa-solid fa-chevron-right" style="margin-left:auto;color:#64748b;"></i>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Modal Permissão Whats — RI -->
+        <div id="riRegistroWhatsModal" style="display:none;position:fixed;inset:0;z-index:12001;background:rgba(0,0,0,.55);align-items:center;justify-content:center;padding:20px;">
+          <div style="width:100%;max-width:440px;background:#1e293b;border:1px solid rgba(255,255,255,.12);border-radius:12px;box-shadow:0 20px 50px rgba(0,0,0,.45);overflow:hidden;">
+            <div style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid rgba(255,255,255,.08);">
+              <h3 style="margin:0;font-size:16px;font-weight:700;color:#f1f5f9;display:flex;align-items:center;gap:8px;">
+                <i class="fa-brands fa-whatsapp" style="color:#22c55e;"></i> Permissão de notificação
+              </h3>
+              <button type="button" id="riRegistroWhatsModalFechar" title="Fechar"
+                style="width:32px;height:32px;border:none;border-radius:8px;background:rgba(255,255,255,.06);color:#94a3b8;font-size:20px;line-height:1;cursor:pointer;">&times;</button>
+            </div>
+            <div style="padding:20px;">
+              <p style="margin:0 0 16px;font-size:13px;color:#94a3b8;line-height:1.5;">
+                Informe seu número para receber mensagem no WhatsApp sempre que uma RI for criada ou atualizada.
+              </p>
+              <label style="display:block;margin-bottom:14px;">
+                <span style="display:block;font-size:12px;font-weight:600;color:#cbd5e1;margin-bottom:6px;">Número do WhatsApp</span>
+                <input type="tel" id="riRegistroWhatsTelefone" autocomplete="tel"
+                  placeholder="(41) 99999-9999"
+                  style="width:100%;padding:10px 12px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.12);border-radius:8px;color:#e2e8f0;font-size:14px;outline:none;box-sizing:border-box;">
+              </label>
+              <label style="display:flex;align-items:center;gap:10px;margin-bottom:16px;cursor:pointer;">
+                <input type="checkbox" id="riRegistroWhatsAtivo" checked
+                  style="width:18px;height:18px;cursor:pointer;">
+                <span style="font-size:13px;color:#e2e8f0;">Permitir que o WhatsApp envie notificações de RI</span>
+              </label>
+              <div id="riRegistroWhatsAviso" style="display:none;margin-bottom:12px;padding:10px 12px;border-radius:8px;font-size:13px;"></div>
+              <div style="display:flex;gap:10px;justify-content:flex-end;">
+                <button type="button" id="riRegistroWhatsVoltarBtn"
+                  style="padding:8px 14px;background:rgba(255,255,255,.06);color:#cbd5e1;border:1px solid rgba(255,255,255,.12);border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;">
+                  Voltar
+                </button>
+                <button type="button" id="riRegistroWhatsSalvarBtn"
+                  style="padding:8px 16px;background:linear-gradient(135deg,#22c55e 0%,#16a34a 100%);color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;">
+                  Salvar
+                </button>
+              </div>
             </div>
           </div>
         </div>

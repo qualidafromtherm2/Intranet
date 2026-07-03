@@ -15,6 +15,24 @@ const {
   retomarParada,
   listarParadasAbertasPorOps,
 } = require('../utils/paradasProducao');
+const { reverterRiCheckNoPosto } = require('./qualidadeRiCheck');
+const {
+  iniciarCicloPosto,
+  encerrarCicloPosto,
+  calcularTemposPostoPorOps,
+  salvarTurnoPadrao,
+  buscarTurnoPadrao,
+  listarTurnosPadrao,
+  buscarTurnoDia,
+  registrarTurnoDia,
+  listarTurnosDia,
+  dateKeyInTz,
+} = require('../utils/tempoProducao');
+const { registrarOpsGeradasNaPlanilha } = require('../utils/googleSheetsOpProducao');
+const {
+  obterConfigNotificacaoUsuario,
+  salvarConfigNotificacaoUsuario,
+} = require('../utils/riCheckWhatsappNotificacao');
 
 const router = express.Router();
 
@@ -343,6 +361,10 @@ function getOperador(req) {
     || String(req.headers['x-user'] || '').trim()
     || 'sistema'
   );
+}
+
+function getUserId(req) {
+  return Number(req.session?.user?.id) || 0;
 }
 
 function requireAuth(req, res, next) {
@@ -1923,12 +1945,26 @@ router.post('/op-producao/lote', express.json(), async (req, res) => {
       });
     }
 
+    let planilha = { ok: true, skipped: true };
+    if (process.env.GOOGLE_SHEETS_OP_WEBHOOK_URL) {
+      try {
+        planilha = await registrarOpsGeradasNaPlanilha({
+          modelo: codigo,
+          ops: criadas,
+        });
+      } catch (planilhaErr) {
+        console.error('[producao] Falha ao registrar OPs na planilha Google:', planilhaErr.message);
+        planilha = { ok: false, error: planilhaErr.message };
+      }
+    }
+
     return res.json({
       success: true,
       total: criadas.length,
       vinculadas,
       somente_op: criadas.length - vinculadas,
       registros: criadas,
+      planilha,
     });
   } catch (err) {
     console.error('[producao] Erro ao gerar OP lote:', err.message);
@@ -2042,6 +2078,119 @@ router.post('/paradas/:id/retomar', express.json(), async (req, res) => {
 });
 
 /* ---------------------------------------------------------------
+ * Turno e tempo de produção — schema Tempo_Producao
+ * --------------------------------------------------------------- */
+router.get('/turno/padrao', async (req, res) => {
+  try {
+    const usuario = String(req.query?.usuario || '').trim() || getOperador(req);
+    if (!usuario) return res.status(400).json({ success: false, error: 'Usuário não identificado.' });
+    const nome = String(req.query?.nome || '').trim();
+    if (nome) {
+      const padrao = await buscarTurnoPadrao(usuario, nome);
+      return res.json({ success: true, padrao });
+    }
+    const padroes = await listarTurnosPadrao(usuario);
+    return res.json({ success: true, padroes });
+  } catch (err) {
+    console.error('[producao] Erro ao buscar turno padrão:', err.message);
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+router.post('/turno/padrao', express.json(), async (req, res) => {
+  try {
+    const usuario = String(req.body?.usuario || '').trim() || getOperador(req);
+    if (!usuario) return res.status(400).json({ success: false, error: 'Usuário não identificado.' });
+    const padrao = await salvarTurnoPadrao(usuario, req.body);
+    return res.json({ success: true, padrao });
+  } catch (err) {
+    console.error('[producao] Erro ao salvar turno padrão:', err.message);
+    return res.status(400).json({ success: false, error: err.message });
+  }
+});
+
+router.get('/turno/dia', async (req, res) => {
+  try {
+    const dataRef = String(req.query?.data || dateKeyInTz(new Date())).slice(0, 10);
+    const nomeTurno = String(req.query?.nome_turno || req.query?.nome || '').trim();
+    const usuario = String(req.query?.usuario || '').trim() || getOperador(req);
+    if (nomeTurno) {
+      const turno = await buscarTurnoDia(dataRef, nomeTurno, usuario);
+      return res.json({ success: true, data: dataRef, turno });
+    }
+    const turnos = await listarTurnosDia(dataRef);
+    return res.json({ success: true, data: dataRef, turnos });
+  } catch (err) {
+    console.error('[producao] Erro ao listar turnos do dia:', err.message);
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+router.post('/turno/dia', express.json(), async (req, res) => {
+  try {
+    const usuario = String(req.body?.usuario || '').trim() || getOperador(req);
+    if (!usuario) return res.status(400).json({ success: false, error: 'Usuário não identificado.' });
+    const turno = await registrarTurnoDia(usuario, req.body);
+    return res.json({ success: true, turno });
+  } catch (err) {
+    console.error('[producao] Erro ao registrar turno do dia:', err.message);
+    return res.status(400).json({ success: false, error: err.message });
+  }
+});
+
+// GET /api/producao/notificacao/whatsapp — telefone + permissão OP do usuário logado
+router.get('/notificacao/whatsapp', requireAuth, async (req, res) => {
+  try {
+    const userId = getUserId(req);
+    if (!userId) return res.status(401).json({ ok: false, error: 'Usuário não identificado.' });
+    const config = await obterConfigNotificacaoUsuario(userId);
+    return res.json({
+      ok: true,
+      config: config || {
+        telefone_contato: '',
+        permissao_op: false,
+        permissao_ri: false,
+      },
+    });
+  } catch (err) {
+    console.error('[producao/notificacao/whatsapp GET]', err);
+    return res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// PUT /api/producao/notificacao/whatsapp — salvar telefone e/ou permissões
+router.put('/notificacao/whatsapp', requireAuth, express.json(), async (req, res) => {
+  try {
+    const userId = getUserId(req);
+    if (!userId) return res.status(401).json({ ok: false, error: 'Usuário não identificado.' });
+    const username = req.session?.user?.username || getOperador(req);
+    const body = req.body || {};
+    const config = await salvarConfigNotificacaoUsuario({
+      userId,
+      username,
+      telefoneContato: body.telefone_contato,
+      permissaoOp: body.permissao_op,
+      permissaoRi: body.permissao_ri,
+    });
+    return res.json({ ok: true, config });
+  } catch (err) {
+    console.error('[producao/notificacao/whatsapp PUT]', err);
+    return res.status(400).json({ ok: false, error: err.message });
+  }
+});
+
+router.post('/tempo/ativos-por-ops', express.json(), async (req, res) => {
+  try {
+    const ops = Array.isArray(req.body?.ops) ? req.body.ops : [];
+    const tempos = await calcularTemposPostoPorOps(ops);
+    return res.json({ success: true, tempos_por_op: tempos });
+  } catch (err) {
+    console.error('[producao] Erro ao calcular tempos por OP:', err.message);
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/* ---------------------------------------------------------------
  * POST /api/producao/finalizar-operacao — Controle_operacoes + próximo posto
  * --------------------------------------------------------------- */
 router.post('/finalizar-operacao', express.json(), async (req, res) => {
@@ -2052,12 +2201,141 @@ router.post('/finalizar-operacao', express.json(), async (req, res) => {
     const operacao = proximoStatus || 'Finalizar operação';
     const usuario = String(req.body?.usuario || '').trim() || getOperador(req);
     let kanbanProgramacaoId = Number(req.body?.kanban_programacao_id) || null;
+    const postoAtualBody = String(req.body?.posto_atual || '').trim();
 
     if (!numeroOp && opProducaoId <= 0) {
       return res.status(400).json({ success: false, error: 'Informe numero_op ou op_producao_id.' });
     }
     if (!proximoStatus) {
       return res.status(400).json({ success: false, error: 'Próximo posto não informado.' });
+    }
+
+    if (!kanbanProgramacaoId) {
+      const { rows } = await dbQuery(
+        `SELECT id, status FROM "Producao"."Kanban_programacao"
+          WHERE ($1::bigint > 0 AND op_producao_id = $1)
+             OR ($2::text <> '' AND UPPER(TRIM(COALESCE(numero_op, ''))) = UPPER(TRIM($2)))
+          ORDER BY created_at DESC, id DESC
+          LIMIT 1`,
+        [opProducaoId || 0, numeroOp || '']
+      );
+      kanbanProgramacaoId = rows[0]?.id || null;
+      if (!postoAtualBody && rows[0]?.status) {
+        req._postoAtualKanban = String(rows[0].status).trim();
+      }
+    } else if (!postoAtualBody) {
+      const { rows } = await dbQuery(
+        `SELECT status FROM "Producao"."Kanban_programacao" WHERE id = $1`,
+        [kanbanProgramacaoId]
+      );
+      req._postoAtualKanban = String(rows[0]?.status || '').trim();
+    }
+
+    const postoAtual = postoAtualBody || req._postoAtualKanban || '';
+
+    const paradaAberta = await buscarParadaAberta({ kanbanProgramacaoId, numeroOp });
+    if (paradaAberta) {
+      return res.status(409).json({
+        success: false,
+        error: 'OP com parada em andamento. Retome a produção antes de finalizar.',
+      });
+    }
+
+    try {
+      if (postoAtual) {
+        await encerrarCicloPosto({
+          kanbanProgramacaoId,
+          opProducaoId,
+          numeroOp,
+          postoOrigem: postoAtual,
+          usuario,
+        });
+      }
+    } catch (tempoErr) {
+      console.error('[tempo_producao] Falha ao encerrar ciclo posto:', tempoErr.message);
+    }
+
+    if (kanbanProgramacaoId) {
+      await dbQuery(
+        `UPDATE "Producao"."Kanban_programacao"
+            SET status = $1
+          WHERE id = $2`,
+        [proximoStatus, kanbanProgramacaoId]
+      );
+    }
+
+    try {
+      await iniciarCicloPosto({
+        kanbanProgramacaoId,
+        opProducaoId,
+        numeroOp,
+        postoOrigem: proximoStatus,
+        operacao: `Entrada em ${proximoStatus}`,
+        usuario,
+      });
+    } catch (tempoErr) {
+      console.error('[tempo_producao] Falha ao iniciar ciclo no próximo posto:', tempoErr.message);
+    }
+
+    const row = await registrarControleOperacaoImpressaoOp({
+      kanbanProgramacaoId,
+      opProducaoId,
+      numeroOp,
+      usuario,
+      operacao,
+    });
+    return res.json({ success: true, registro: row, kanban_programacao_id: kanbanProgramacaoId, status: proximoStatus });
+  } catch (err) {
+    console.error('[producao] Erro ao finalizar operação:', err.message);
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/** Colunas do kanban Registrar produção que permitem retroceder OP. */
+const RETROCEDER_KANBAN_POR_COL_KEY = {
+  solicitado: {
+    status_destino: null,
+    posto_desfeito: 'Montagem hermetica',
+    operacoes_desfeitas: ['Montagem hermetica', 'Imprimir OP'],
+  },
+  produzindo: {
+    status_destino: 'Montagem hermetica',
+    posto_desfeito: 'Montagem hermetica',
+    operacoes_desfeitas: ['Montagem eletrica'],
+  },
+  teste: {
+    status_destino: 'Montagem eletrica',
+    posto_desfeito: 'Montagem eletrica',
+    operacoes_desfeitas: ['Teste'],
+  },
+  inspecao_final: {
+    status_destino: 'Teste',
+    posto_desfeito: 'Teste',
+    operacoes_desfeitas: ['Inspeção final', 'Teste OK'],
+  },
+};
+
+/* ---------------------------------------------------------------
+ * POST /api/producao/retroceder-op — volta OP ao kanban anterior
+ * --------------------------------------------------------------- */
+router.post('/retroceder-op', express.json(), async (req, res) => {
+  try {
+    const opProducaoId = Number(req.body?.op_producao_id) || 0;
+    const numeroOp = String(req.body?.numero_op || '').trim();
+    const colKey = String(req.body?.col_key || '').trim();
+    const usuario = String(req.body?.usuario || '').trim() || getOperador(req);
+    let kanbanProgramacaoId = Number(req.body?.kanban_programacao_id) || null;
+
+    if (!numeroOp && opProducaoId <= 0) {
+      return res.status(400).json({ success: false, error: 'Informe numero_op ou op_producao_id.' });
+    }
+
+    const cfg = RETROCEDER_KANBAN_POR_COL_KEY[colKey];
+    if (!cfg) {
+      return res.status(400).json({
+        success: false,
+        error: 'Retroceder OP só está disponível em Montagem hermetica, Montagem eletrica, Teste ou Inspeção final.',
+      });
     }
 
     if (!kanbanProgramacaoId) {
@@ -2076,8 +2354,14 @@ router.post('/finalizar-operacao', express.json(), async (req, res) => {
     if (paradaAberta) {
       return res.status(409).json({
         success: false,
-        error: 'OP com parada em andamento. Retome a produção antes de finalizar.',
+        error: 'OP com parada em andamento. Retome a produção antes de retroceder.',
       });
+    }
+
+    const opRefId = opProducaoId > 0 ? opProducaoId : null;
+    let riRevertido = null;
+    if (opRefId && cfg.posto_desfeito) {
+      riRevertido = await reverterRiCheckNoPosto(opRefId, cfg.posto_desfeito);
     }
 
     if (kanbanProgramacaoId) {
@@ -2085,20 +2369,51 @@ router.post('/finalizar-operacao', express.json(), async (req, res) => {
         `UPDATE "Producao"."Kanban_programacao"
             SET status = $1
           WHERE id = $2`,
-        [proximoStatus, kanbanProgramacaoId]
+        [cfg.status_destino, kanbanProgramacaoId]
       );
     }
 
-    const row = await registrarControleOperacaoImpressaoOp({
+    const operacoes = (cfg.operacoes_desfeitas || []).filter(Boolean);
+    for (const operacaoNome of operacoes) {
+      const params = [operacaoNome];
+      let whereOp = '';
+      if (kanbanProgramacaoId) {
+        params.push(kanbanProgramacaoId);
+        whereOp = 'AND kanban_programacao_id = $2';
+      } else if (numeroOp) {
+        params.push(numeroOp);
+        whereOp = `AND UPPER(TRIM(COALESCE(numero_op, ''))) = UPPER(TRIM($2))`;
+      }
+      await dbQuery(
+        `DELETE FROM "Producao"."Controle_operacoes"
+          WHERE id = (
+            SELECT id FROM "Producao"."Controle_operacoes"
+             WHERE operacao = $1
+               ${whereOp}
+             ORDER BY inicio DESC NULLS LAST, id DESC
+             LIMIT 1
+          )`,
+        params
+      );
+    }
+
+    await registrarControleOperacaoImpressaoOp({
       kanbanProgramacaoId,
       opProducaoId,
       numeroOp,
       usuario,
-      operacao,
+      operacao: `Retroceder OP → ${cfg.status_destino || 'Programado'}`,
     });
-    return res.json({ success: true, registro: row, kanban_programacao_id: kanbanProgramacaoId, status: proximoStatus });
+
+    return res.json({
+      success: true,
+      kanban_programacao_id: kanbanProgramacaoId,
+      status: cfg.status_destino,
+      posto_ri_desfeito: cfg.posto_desfeito,
+      ri_check_id_revertido: riRevertido,
+    });
   } catch (err) {
-    console.error('[producao] Erro ao finalizar operação:', err.message);
+    console.error('[producao] Erro ao retroceder OP:', err.message);
     return res.status(500).json({ success: false, error: err.message });
   }
 });

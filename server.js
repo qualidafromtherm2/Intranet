@@ -12,6 +12,7 @@ if (IS_CHAT_SERVICE) {
 require('./utils/supabase');
 const { uploadPublicFile, removePublicFiles } = require('./utils/storage');
 const { registrarControleOperacaoImpressaoOp } = require('./utils/controleOperacoes');
+const { iniciarCicloPosto } = require('./utils/tempoProducao');
 const { registrarRiCheckImpressaoOp } = require('./routes/qualidadeRiCheck');
 const { injectStoragePublicUrls, getStoragePublicBaseUrl, ASSETS, agenteExeUrl } = require('./utils/storageUrls');
 const OMIE_WEBHOOK_TOKEN = process.env.OMIE_WEBHOOK_TOKEN || null; // se NULL, não exige token
@@ -13262,6 +13263,26 @@ app.post('/api/etiquetas/iapp-op/imprimir', express.json(), async (req, res) => 
         } catch (riErr) {
           console.error('[ri_check] Falha ao registrar RI Montagem hermetica na impressão OP:', riErr.message);
         }
+
+        try {
+          const kpRes = await pool.query(
+            `SELECT id FROM "Producao"."Kanban_programacao"
+              WHERE ($1::bigint > 0 AND op_producao_id = $1)
+                 OR ($2::bigint > 0 AND op_iapp_id = $2)
+              ORDER BY id DESC LIMIT 1`,
+            [opProducaoId || 0, opIappId || 0]
+          );
+          await iniciarCicloPosto({
+            kanbanProgramacaoId: kpRes.rows[0]?.id || null,
+            opProducaoId,
+            numeroOp: loteRaw,
+            postoOrigem: 'Montagem hermetica',
+            operacao: 'Imprimir OP — Montagem hermetica',
+            usuario,
+          });
+        } catch (tempoErr) {
+          console.error('[tempo_producao] Falha ao iniciar ciclo na impressão OP:', tempoErr.message);
+        }
       }
 
       if (osId > 0) osAtualizadas.push(osId);
@@ -18189,6 +18210,13 @@ app.patch('/api/logistica/itens_solicitados/separar', async (req, res) => {
     if (!lock.ok) return res.status(403).json(lock);
 
     await client.query('BEGIN');
+
+    const reint = await _logisticaReintegrarStandbySePossivel(client, ids);
+    if (reint.reintegrated) {
+      await client.query('COMMIT');
+      return res.json({ ok: true, reintegrado: true, n_solic: reint.n_solic_base, vipp: 0, normal: 0 });
+    }
+
     const { qtd, codigo } = await _logisticaObterQtyCodigoSeparacao(client, ids);
     let etqDebit = null;
     if (String(cod_local_origem || '').trim() === LOGISTICA_ALMOX_LOCAL_COD) {
@@ -18278,6 +18306,145 @@ async function registrarAlteracaoQuantidadeItem(client, { solicIds, carrId, qtyO
   }
 }
 
+const _LOGISTICA_STATUS_ANTES_RETIRADA = ['pendente', 'Stund-by', 'Separação', 'Separado'];
+
+/** Item de SEP derivada (SEP-1000.1) em stand-by: devolve qty à SEP original se ainda ativa. */
+async function _logisticaReintegrarStandbySePossivel(client, solicIds) {
+  const ids = (solicIds || []).map(id => parseInt(id, 10)).filter(id => !isNaN(id));
+  if (!ids.length) return { reintegrated: false, n_solic_base: null };
+
+  const { rows: items } = await client.query(
+    `SELECT i.id, i.n_solic, i.status, c.id AS carr_id, c.quantidade, c.codigo_produto
+       FROM solicitacao_produto.itens_solicitados i
+       JOIN logistica.carrinho c ON c.id = i.id_carr
+      WHERE i.id = ANY($1::bigint[])`,
+    [ids]
+  );
+
+  let anyReintegrated = false;
+  let nSolicBase = null;
+
+  for (const item of items) {
+    const nSolic = String(item.n_solic || '');
+    const m = nSolic.match(/^(.+)\.(\d+)$/);
+    if (!m) continue;
+
+    const baseNSolic = m[1];
+    const qtyStandby = parseFloat(item.quantidade) || 0;
+    if (qtyStandby <= 0) continue;
+
+    const { rows: parents } = await client.query(
+      `SELECT i.id, i.status, c.id AS carr_id, c.quantidade
+         FROM solicitacao_produto.itens_solicitados i
+         JOIN logistica.carrinho c ON c.id = i.id_carr
+        WHERE i.n_solic = $1
+          AND c.codigo_produto = $2
+          AND i.status = ANY($3::text[])
+        ORDER BY i.id ASC
+        LIMIT 1`,
+      [baseNSolic, item.codigo_produto, _LOGISTICA_STATUS_ANTES_RETIRADA]
+    );
+    if (!parents.length) continue;
+
+    const parent = parents[0];
+    const parentQty = parseFloat(parent.quantidade) || 0;
+
+    await client.query(
+      `UPDATE logistica.carrinho SET quantidade = $1 WHERE id = $2`,
+      [parentQty + qtyStandby, parent.carr_id]
+    );
+    await client.query(
+      `UPDATE solicitacao_produto.itens_solicitados
+          SET quantidade_solicitada = NULL, quantidade_separada = NULL
+        WHERE id = $1`,
+      [parent.id]
+    );
+    await client.query(`DELETE FROM solicitacao_produto.itens_solicitados WHERE id = $1`, [item.id]);
+    await client.query(`DELETE FROM logistica.carrinho WHERE id = $1`, [item.carr_id]);
+
+    anyReintegrated = true;
+    nSolicBase = baseNSolic;
+    console.log(`[standby-reintegrar] ${qtyStandby} de ${item.codigo_produto} devolvido de ${nSolic} → ${baseNSolic}`);
+  }
+
+  return { reintegrated: anyReintegrated, n_solic_base: nSolicBase };
+}
+
+// POST /api/logistica/itens_solicitados/registrar-qtd-manual — grava qty sem separar (aguarda botão Separado)
+app.post('/api/logistica/itens_solicitados/registrar-qtd-manual', express.json(), async (req, res) => {
+  const client = await pool.connect();
+  try {
+    await ensureSolicitacaoProdutoQtyColumns();
+    const id_user = req.session?.user?.id;
+    if (!id_user) return res.status(401).json({ ok: false, error: 'Não autenticado.' });
+
+    const { carr_ids, solic_ids, quantidade_separada, motivo } = req.body || {};
+    const qtySep = parseFloat(quantidade_separada);
+    if (!Array.isArray(carr_ids) || !carr_ids.length || !Number.isFinite(qtySep) || qtySep <= 0) {
+      return res.status(400).json({ ok: false, error: 'Dados inválidos.' });
+    }
+
+    const cIds = carr_ids.map(id => parseInt(id, 10)).filter(id => !isNaN(id));
+    const sIds = (solic_ids || []).map(id => parseInt(id, 10)).filter(id => !isNaN(id));
+    if (sIds.length) {
+      const lock = await assertUsuarioSeparandoPodeAgir(pool, sIds, req);
+      if (!lock.ok) return res.status(403).json(lock);
+    }
+
+    await client.query('BEGIN');
+
+    const { rows: carrs } = await client.query(
+      `SELECT * FROM logistica.carrinho WHERE id = ANY($1::bigint[]) ORDER BY criado_em ASC`,
+      [cIds]
+    );
+    if (!carrs.length) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ ok: false, error: 'Carrinho não encontrado.' });
+    }
+
+    const qtyTotal = carrs.reduce((s, c) => s + parseFloat(c.quantidade), 0);
+    const motivoStr = String(motivo || '').trim() || null;
+    const qtyStandby = qtySep < qtyTotal ? qtyTotal - qtySep : 0;
+    const qtyExtra = qtySep > qtyTotal ? qtySep - qtyTotal : 0;
+
+    if (sIds.length) {
+      await client.query(
+        `UPDATE solicitacao_produto.itens_solicitados
+            SET quantidade_solicitada = $1,
+                quantidade_separada = $2,
+                observacao = CASE WHEN $4::text IS NOT NULL AND $5 > 0 THEN $4 ELSE observacao END
+          WHERE id = ANY($3::bigint[])`,
+        [qtyTotal, qtySep, sIds, motivoStr, qtyStandby]
+      );
+    } else {
+      await client.query(
+        `UPDATE solicitacao_produto.itens_solicitados
+            SET quantidade_solicitada = $1,
+                quantidade_separada = $2,
+                observacao = CASE WHEN $4::text IS NOT NULL AND $5 > 0 THEN $4 ELSE observacao END
+          WHERE id_carr = ANY($3::bigint[])`,
+        [qtyTotal, qtySep, cIds, motivoStr, qtyStandby]
+      );
+    }
+
+    await client.query('COMMIT');
+    console.log(`[registrar-qtd-manual] qty original ${qtyTotal}, separada ${qtySep}, standby ${qtyStandby}, extra ${qtyExtra} por user ${id_user}`);
+    res.json({
+      ok: true,
+      quantidade_original: qtyTotal,
+      quantidade_separada: qtySep,
+      quantidade_standby: qtyStandby,
+      quantidade_extra: qtyExtra
+    });
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    console.error('[registrar-qtd-manual] erro:', err);
+    res.status(500).json({ ok: false, error: String(err?.message || err) });
+  } finally {
+    client.release();
+  }
+});
+
 // POST /api/logistica/itens_solicitados/separar-parcial - Separa qty parcial, clona carrinho
 // Lógica: original SEP recebe a qty separada → status Separado
 //         novo SEP-NNNN.X recebe o restante → status pendente (volta à fila de Solicitados)
@@ -18298,6 +18465,21 @@ app.post('/api/logistica/itens_solicitados/separar-parcial', async (req, res) =>
     }
 
     await client.query('BEGIN');
+
+    let idsReint = sIds;
+    if (!idsReint.length && cIds.length) {
+      const { rows: solRows } = await client.query(
+        `SELECT id FROM solicitacao_produto.itens_solicitados WHERE id_carr = ANY($1::bigint[])`,
+        [cIds]
+      );
+      idsReint = solRows.map(r => Number(r.id)).filter(Boolean);
+    }
+    const reint = await _logisticaReintegrarStandbySePossivel(client, idsReint);
+    if (reint.reintegrated) {
+      await client.query('COMMIT');
+      return res.json({ ok: true, reintegrado: true, n_solic: reint.n_solic_base, new_n_solic: null });
+    }
+
     let etqDebit = null;
     if (String(cod_local_origem || '').trim() === LOGISTICA_ALMOX_LOCAL_COD) {
       const codigoRef = codigo_produto || (await client.query(
@@ -37507,6 +37689,8 @@ async function startServer() {
       iniciarCronAgendamento();
       const { iniciarCronNotificacaoDiaria } = require('./cron/notificacao_diaria_whatsapp');
       iniciarCronNotificacaoDiaria();
+      const { iniciarCronTurnoDiaAutomatico } = require('./cron/turno_dia_automatico');
+      iniciarCronTurnoDiaAutomatico();
       const { iniciarCronAtualizacaoRastreio } = require('./utils/atualizarRastreioEnvios');
       iniciarCronAtualizacaoRastreio();
     }, 15000);
