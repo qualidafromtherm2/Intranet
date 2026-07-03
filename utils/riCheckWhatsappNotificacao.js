@@ -96,6 +96,25 @@ function montarMensagemRegistroTempo(reg) {
   ].join('\n');
 }
 
+function montarMensagemTransicaoPosto({ numeroOp, postoDe, postoPara, inicio, fim, usuarioFim }) {
+  const de = String(postoDe || '').trim();
+  const para = String(postoPara || '').trim();
+  const linhaPosto = de && para && de !== para
+    ? `Posto: De ${de} para: ${para}`
+    : `Posto: ${para || de || '—'}`;
+
+  return [
+    '*Registro de tempo — OP*',
+    '',
+    `Número OP: ${numeroOp ?? '—'}`,
+    linhaPosto,
+    'Tipo: posto',
+    `Início: ${formatarDataHoraBr(inicio)}`,
+    `Fim: ${formatarDataHoraBr(fim)}`,
+    `Usuário fim: ${usuarioFim ?? '—'}`,
+  ].join('\n');
+}
+
 async function listarDestinatariosPorPermissao(campoPermissao) {
   await garantirSchemaWhatsConfig();
   const campo = campoPermissao === 'permissao_op' ? 'permissao_op' : 'permissao_ri';
@@ -185,16 +204,60 @@ async function notificarRegistroTempoWhatsappPorId(registroId) {
   await enviarParaDestinatarios(destinatarios, montarMensagemRegistroTempo(rows[0]));
 }
 
-function dispararNotificacaoRiCheck(checkId) {
-  if (!checkId) return;
-  notificarRiCheckWhatsappPorId(checkId).catch((err) => {
-    console.error(TAG, err?.message || err);
+async function notificarTransicaoPostoWhatsapp({
+  numeroOp,
+  postoDe,
+  postoPara,
+  inicio,
+  fim,
+  usuarioFim,
+}) {
+  if (!whatsappConfigurado()) return;
+
+  await garantirSchemaWhatsConfig();
+  const destinatarios = await listarDestinatariosPorPermissao('permissao_op');
+  const mensagem = montarMensagemTransicaoPosto({
+    numeroOp,
+    postoDe,
+    postoPara,
+    inicio,
+    fim,
+    usuarioFim,
   });
+  await enviarParaDestinatarios(destinatarios, mensagem);
+}
+
+const RI_DEBOUNCE_MS = 3000;
+const riCheckDebounceTimers = new Map();
+
+function dispararNotificacaoRiCheck(checkId) {
+  const id = Number(checkId) || 0;
+  if (!id) return;
+
+  if (riCheckDebounceTimers.has(id)) {
+    clearTimeout(riCheckDebounceTimers.get(id));
+  }
+
+  const timer = setTimeout(() => {
+    riCheckDebounceTimers.delete(id);
+    notificarRiCheckWhatsappPorId(id).catch((err) => {
+      console.error(TAG, err?.message || err);
+    });
+  }, RI_DEBOUNCE_MS);
+
+  riCheckDebounceTimers.set(id, timer);
 }
 
 function dispararNotificacaoRegistroTempo(registroId) {
   if (!registroId) return;
   notificarRegistroTempoWhatsappPorId(registroId).catch((err) => {
+    console.error(TAG, err?.message || err);
+  });
+}
+
+function dispararNotificacaoTransicaoPosto(dados) {
+  if (!dados?.postoDe && !dados?.postoPara) return;
+  notificarTransicaoPostoWhatsapp(dados).catch((err) => {
     console.error(TAG, err?.message || err);
   });
 }
@@ -296,8 +359,10 @@ module.exports = {
   garantirSchemaRiWhatsConfig: garantirSchemaWhatsConfig,
   dispararNotificacaoRiCheck,
   dispararNotificacaoRegistroTempo,
+  dispararNotificacaoTransicaoPosto,
   notificarRiCheckWhatsappPorId,
   notificarRegistroTempoWhatsappPorId,
+  notificarTransicaoPostoWhatsapp,
   obterConfigNotificacaoUsuario,
   salvarConfigNotificacaoUsuario,
   obterConfigRiWhatsUsuario,

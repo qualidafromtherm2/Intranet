@@ -29,6 +29,7 @@ const {
   dateKeyInTz,
 } = require('../utils/tempoProducao');
 const { registrarOpsGeradasNaPlanilha } = require('../utils/googleSheetsOpProducao');
+const { dispararNotificacaoTransicaoPosto, dispararNotificacaoRegistroTempo } = require('../utils/riCheckWhatsappNotificacao');
 const {
   obterConfigNotificacaoUsuario,
   salvarConfigNotificacaoUsuario,
@@ -2241,15 +2242,18 @@ router.post('/finalizar-operacao', express.json(), async (req, res) => {
       });
     }
 
+    let postoFechado = null;
     try {
       if (postoAtual) {
-        await encerrarCicloPosto({
+        const fechados = await encerrarCicloPosto({
           kanbanProgramacaoId,
           opProducaoId,
           numeroOp,
           postoOrigem: postoAtual,
           usuario,
+          skipNotificacao: true,
         });
+        postoFechado = (fechados || []).find((r) => String(r.tipo_registro || '').trim() === 'posto') || null;
       }
     } catch (tempoErr) {
       console.error('[tempo_producao] Falha ao encerrar ciclo posto:', tempoErr.message);
@@ -2272,9 +2276,23 @@ router.post('/finalizar-operacao', express.json(), async (req, res) => {
         postoOrigem: proximoStatus,
         operacao: `Entrada em ${proximoStatus}`,
         usuario,
+        skipNotificacao: true,
       });
     } catch (tempoErr) {
       console.error('[tempo_producao] Falha ao iniciar ciclo no próximo posto:', tempoErr.message);
+    }
+
+    if (postoFechado && postoAtual && proximoStatus && postoAtual !== proximoStatus) {
+      dispararNotificacaoTransicaoPosto({
+        numeroOp: postoFechado.numero_op || numeroOp,
+        postoDe: postoAtual,
+        postoPara: proximoStatus,
+        inicio: postoFechado.inicio,
+        fim: postoFechado.fim,
+        usuarioFim: postoFechado.usuario_fim || usuario,
+      });
+    } else if (postoFechado?.id) {
+      dispararNotificacaoRegistroTempo(postoFechado.id);
     }
 
     const row = await registrarControleOperacaoImpressaoOp({

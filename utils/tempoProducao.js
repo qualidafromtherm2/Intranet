@@ -1,5 +1,5 @@
 const { dbQuery } = require('../src/db');
-const { dispararNotificacaoRegistroTempo } = require('./riCheckWhatsappNotificacao');
+const { dispararNotificacaoRegistroTempo, dispararNotificacaoTransicaoPosto } = require('./riCheckWhatsappNotificacao');
 
 let schemaCriado = false;
 let schemaMigrado = false;
@@ -290,6 +290,7 @@ async function encerrarRegistrosAbertos({
   postoOrigem = null,
   tipos = null,
   usuario = '',
+  skipNotificacao = false,
 }) {
   await garantirSchemaTempoProducao();
   const params = [opProducaoId || 0, numeroOp || '', kanbanProgramacaoId || null];
@@ -316,7 +317,7 @@ async function encerrarRegistrosAbertos({
     params
   );
   for (const row of rows) {
-    if (String(row.tipo_registro || '').trim() === 'posto') {
+    if (!skipNotificacao && String(row.tipo_registro || '').trim() === 'posto') {
       dispararNotificacaoRegistroTempo(row.id);
     }
   }
@@ -332,6 +333,7 @@ async function iniciarRegistroTempo({
   operacao = null,
   riCheckId = null,
   usuario = '',
+  skipNotificacao = false,
 }) {
   await garantirSchemaTempoProducao();
   const posto = String(postoOrigem || '').trim();
@@ -345,6 +347,7 @@ async function iniciarRegistroTempo({
     postoOrigem: posto,
     tipos: [tipo],
     usuario,
+    skipNotificacao,
   });
 
   const { rows } = await dbQuery(
@@ -366,7 +369,7 @@ async function iniciarRegistroTempo({
     ]
   );
   const reg = rows[0] || null;
-  if (reg && tipo === 'posto') {
+  if (reg && tipo === 'posto' && !skipNotificacao) {
     dispararNotificacaoRegistroTempo(reg.id);
   }
   return reg;
@@ -374,8 +377,19 @@ async function iniciarRegistroTempo({
 
 /** Entrada no posto (após Programado): inicia tempo total do posto + fase RI. */
 async function iniciarCicloPosto(opts) {
-  const base = { ...opts, tipoRegistro: 'posto', operacao: opts.operacao || 'Tempo no posto' };
-  const ri = { ...opts, tipoRegistro: 'ri', operacao: opts.operacao || 'Aguardando RI' };
+  const { skipNotificacao, ...rest } = opts || {};
+  const base = {
+    ...rest,
+    tipoRegistro: 'posto',
+    operacao: rest.operacao || 'Tempo no posto',
+    skipNotificacao,
+  };
+  const ri = {
+    ...rest,
+    tipoRegistro: 'ri',
+    operacao: rest.operacao || 'Aguardando RI',
+    skipNotificacao,
+  };
   const posto = await iniciarRegistroTempo(base);
   const riReg = await iniciarRegistroTempo(ri);
   return { posto, ri: riReg };
@@ -398,6 +412,7 @@ async function encerrarCicloPosto(opts) {
   return encerrarRegistrosAbertos({
     ...opts,
     tipos: ['posto', 'ri', 'trabalho'],
+    skipNotificacao: opts?.skipNotificacao === true,
   });
 }
 
