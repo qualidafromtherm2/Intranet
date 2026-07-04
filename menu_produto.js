@@ -557,6 +557,12 @@ window._loadSolicitacoesTab = async function() {
   const countEl  = document.getElementById('solicitacoesCount');
   if (!board) return;
 
+  const isMobileBoard = window.matchMedia('(max-width: 640px), (max-width: 900px) and (max-height: 500px)').matches;
+  board.style.display = isMobileBoard ? 'grid' : 'flex';
+  board.style.gridTemplateColumns = isMobileBoard ? '1fr' : '';
+  board.style.gap = '14px';
+  board.style.overflowX = isMobileBoard ? 'hidden' : 'auto';
+
   if (board.dataset.loaded === '1' && !window._loadSolicitacoesTab.force) return;
   window._loadSolicitacoesTab.force = false;
 
@@ -585,7 +591,9 @@ window._loadSolicitacoesTab = async function() {
       totalCards += cards.length;
 
       const colEl = document.createElement('div');
-      colEl.style.cssText = 'flex:0 0 200px;display:flex;flex-direction:column;';
+      colEl.style.cssText = isMobileBoard
+        ? 'width:100%;min-width:0;display:flex;flex-direction:column;'
+        : 'flex:0 0 200px;display:flex;flex-direction:column;';
 
       const cardsHtml = cards.length === 0
         ? `<div style="padding:14px;text-align:center;color:#374151;font-size:.73rem;">Nenhum</div>`
@@ -1837,6 +1845,13 @@ window._loadKanbanSolicitacoesTab = async function() {
   const board    = document.getElementById('kanbanSolicBoard');
   const statusEl = document.getElementById('kanbanSolicStatus');
   if (!board) return;
+
+  const isMobileBoard = window.matchMedia('(max-width: 640px), (max-width: 900px) and (max-height: 500px)').matches;
+  board.style.display = 'grid';
+  board.style.gridTemplateColumns = isMobileBoard ? '1fr' : 'repeat(6, minmax(0, 1fr))';
+  board.style.gap = '12px';
+  board.style.overflowX = isMobileBoard ? 'hidden' : 'visible';
+
   if (board.dataset.loaded === '1' && !window._loadKanbanSolicitacoesTab.force) return;
   window._loadKanbanSolicitacoesTab.force = false;
 
@@ -1868,7 +1883,9 @@ window._loadKanbanSolicitacoesTab = async function() {
       totalCards += cards.length;
 
       const colEl = document.createElement('div');
-      colEl.style.cssText = 'flex:0 0 200px;display:flex;flex-direction:column;';
+      colEl.style.cssText = isMobileBoard
+        ? 'width:100%;min-width:0;display:flex;flex-direction:column;'
+        : 'flex:0 0 200px;display:flex;flex-direction:column;';
 
       const colBg = isLight ? '#ffffff' : '#141a27';
       const colBorder = isLight ? '#e2e8f0' : '#1e293b';

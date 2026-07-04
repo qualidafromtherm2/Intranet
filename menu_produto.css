@@ -12469,6 +12469,28 @@ body.mobile-modal-open {
   }
 
   /* A��es do produto: bottom sheet confort�vel para o polegar. */
+  /* Tela de separação no mobile: empilha as colunas para leitura e toque. */
+  #listaProdutos #solicitacoesConteudo #solicitacoesKanbanBoard,
+  #listaProdutos #kanbanSolicitacoesConteudo #kanbanSolicBoard {
+    display: grid !important;
+    grid-template-columns: 1fr !important;
+    gap: 12px !important;
+    overflow-x: hidden !important;
+  }
+
+  #listaProdutos #solicitacoesConteudo #solicitacoesKanbanBoard > div,
+  #listaProdutos #kanbanSolicitacoesConteudo #kanbanSolicBoard > div {
+    width: 100% !important;
+    min-width: 0 !important;
+    flex: none !important;
+  }
+
+  #listaProdutos #solicitacoesConteudo #solicitacoesKanbanBoard > div > div,
+  #listaProdutos #kanbanSolicitacoesConteudo #kanbanSolicBoard > div > div {
+    min-height: 0 !important;
+    max-height: none !important;
+  }
+
   #modalAcoesProdutoOverlay {
     align-items: flex-end !important;
     padding: 0 !important;
