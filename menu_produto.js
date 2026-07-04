@@ -348,11 +348,11 @@ function _solEnderecamentoHtml(codigo, enderecoMap, itemFallback) {
     </div>`).join('')}
   </div>`;
 }
-function _solDestinoHtml(it) {
+function _solDestinoHtml(it, compact = false) {
   const endList = it?.enderecos_pp;
   if (endList && Array.isArray(endList) && endList.length > 0) {
     return endList.map(e => `
-      <div style="display:inline-flex;flex-direction:column;gap:1px;background:#1e293b;border:1px solid #334155;border-radius:4px;padding:3px 6px;font-size:.63rem;line-height:1.5;white-space:nowrap;">
+      <div style="display:${compact ? 'block' : 'inline-flex'};flex-direction:column;gap:1px;background:#1e293b;border:1px solid #334155;border-radius:4px;padding:3px 6px;font-size:.63rem;line-height:1.5;${compact ? 'white-space:normal;word-break:break-word;max-width:100%;' : 'white-space:nowrap;'}">
         <span><span style="color:#6b7280;">rua:</span> <span style="color:#67e8f9;font-weight:700;">${e.rua || '—'}</span></span>
         <span><span style="color:#6b7280;">andar:</span> <span style="color:#67e8f9;font-weight:700;">${e.andar || '—'}</span></span>
         <span><span style="color:#6b7280;">edif.:</span> <span style="color:#67e8f9;font-weight:700;">${e.edificio || '—'}</span></span>
@@ -886,6 +886,7 @@ async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) 
   }
 
   function _renderAggItem(it, nSolic) {
+    const isCompact = window.matchMedia('(max-width: 640px), (max-width: 900px) and (max-height: 500px)').matches;
     const qty      = parseFloat(it.quantidade) || 0;
     const isConferido = it.status === 'Aguardando retirada';
     const isSep    = it.status === 'Separado';
@@ -899,7 +900,7 @@ async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) 
     const swapHistory = it.codigo_produto_ant && it.codigo_produto_novo 
       ? `<div style="font-size:.70rem;color:#a78bfa;margin-top:2px;display:flex;align-items:center;gap:4px;"><i class="fa-solid fa-arrows-rotate" style="color:#a78bfa;"></i><span>${it.codigo_produto_ant} → ${it.codigo_produto_novo}</span></div>`
       : '';
-    const destinoHtml = _solDestinoHtml(it);
+    const destinoHtml = _solDestinoHtml(it, isCompact);
     const enderecamentoHtml = _solEnderecamentoHtml(it.codigo_produto, enderecoBatch, it);
 
     const locais = (estoqueBatch[it.codigo_produto] || [])
@@ -947,12 +948,12 @@ async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) 
     const localizacaoHtml = `
       <div style="margin-top:6px;display:flex;flex-direction:column;gap:6px;">
         ${enderecamentoHtml}
-        <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:stretch;">
-          <div style="min-width:220px;flex:1 1 240px;padding:6px 8px;background:#101826;border:1px solid #253041;border-radius:8px;">
+        <div style="display:${isCompact ? 'flex;flex-direction:column;gap:8px;align-items:stretch' : 'flex;gap:10px;flex-wrap:wrap;align-items:stretch'};">
+          <div style="min-width:${isCompact ? '0' : '220px'};flex:1 1 ${isCompact ? 'auto' : '240px'};padding:6px 8px;background:#101826;border:1px solid #253041;border-radius:8px;">
             <div style="font-size:.60rem;color:#60a5fa;font-weight:700;text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px;">Origem</div>
             ${origemHtml}
           </div>
-          <div style="min-width:170px;flex:1;padding:6px 8px;background:#1b1730;border:1px solid #312e81;border-radius:8px;">
+          <div style="min-width:${isCompact ? '0' : '170px'};flex:1;padding:6px 8px;background:#1b1730;border:1px solid #312e81;border-radius:8px;">
             <div style="font-size:.60rem;color:#a78bfa;font-weight:700;text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px;">Destino</div>
             ${destinoHtml}
           </div>
@@ -1035,48 +1036,48 @@ async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) 
           ${readonlySep
             ? ''
             : isConferido
-            ? `<div style="display:flex;gap:6px;align-items:flex-start;flex-wrap:wrap;justify-content:flex-end;flex-shrink:0;">
+            ? `<div style="display:grid;grid-template-columns:${isCompact ? '1fr 1fr' : 'auto'};gap:6px;align-items:flex-start;justify-content:flex-end;flex-shrink:0;width:${isCompact ? '100%' : 'auto'};">
                  <button class="btn-item-retificar" title="Voltar item para Separado"
-                   style="padding:4px 9px;border:none;border-radius:6px;background:#4b5563;color:#e5e7eb;font-weight:700;font-size:.70rem;cursor:pointer;white-space:nowrap;">
+                   style="padding:4px 9px;border:none;border-radius:6px;background:#4b5563;color:#e5e7eb;font-weight:700;font-size:.70rem;cursor:pointer;white-space:nowrap;min-height:32px;">
                    <i class="fa-solid fa-rotate-left" style="margin-right:3px;"></i>Retificar
                  </button>
                </div>`
             : isSep
-            ? `<div style="display:flex;gap:6px;align-items:flex-start;flex-wrap:wrap;justify-content:flex-end;flex-shrink:0;">
+            ? `<div style="display:grid;grid-template-columns:${isCompact ? '1fr 1fr' : 'auto auto auto'};gap:6px;align-items:flex-start;justify-content:flex-end;flex-shrink:0;width:${isCompact ? '100%' : 'auto'};">
                  <button class="btn-item-conferido" title="Enviar para Aguardando retirada"
-                   style="padding:4px 9px;border:none;border-radius:6px;background:#16a34a;color:#dcfce7;font-weight:700;font-size:.70rem;cursor:pointer;white-space:nowrap;">
+                   style="padding:4px 9px;border:none;border-radius:6px;background:#16a34a;color:#dcfce7;font-weight:700;font-size:.70rem;cursor:pointer;white-space:nowrap;min-height:32px;">
                    <i class="fa-solid fa-clipboard-check" style="margin-right:3px;"></i>Conferido
                  </button>
                  <button class="btn-item-retificar" title="Voltar item para Em Separação"
-                   style="padding:4px 9px;border:none;border-radius:6px;background:#4b5563;color:#e5e7eb;font-weight:700;font-size:.70rem;cursor:pointer;white-space:nowrap;">
+                   style="padding:4px 9px;border:none;border-radius:6px;background:#4b5563;color:#e5e7eb;font-weight:700;font-size:.70rem;cursor:pointer;white-space:nowrap;min-height:32px;">
                    <i class="fa-solid fa-rotate-left" style="margin-right:3px;"></i>Retificar
                  </button>
                  <button class="btn-item-trocar" title="Trocar este produto"
-                   style="padding:4px 9px;border:none;border-radius:6px;background:#7c3aed;color:#f3e8ff;font-weight:700;font-size:.70rem;cursor:pointer;white-space:nowrap;">
+                   style="padding:4px 9px;border:none;border-radius:6px;background:#7c3aed;color:#f3e8ff;font-weight:700;font-size:.70rem;cursor:pointer;white-space:nowrap;min-height:32px;">
                    <i class="fa-solid fa-arrows-rotate" style="margin-right:3px;"></i>Trocar
                  </button>
                </div>`
-            : `<div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;">
+            : `<div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;width:${isCompact ? '100%' : 'auto'};">
                  <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;width:100%;">
                    <button class="btn-item-sep-tudo"
-                     style="padding:4px 6px;border:none;border-radius:6px;background:#166534;color:#dcfce7;font-weight:700;font-size:.67rem;cursor:pointer;white-space:nowrap;text-align:center;">
+                     style="padding:4px 6px;border:none;border-radius:6px;background:#166534;color:#dcfce7;font-weight:700;font-size:.67rem;cursor:pointer;white-space:nowrap;text-align:center;min-height:32px;">
                      <i class="fa-solid fa-check" style="margin-right:2px;"></i>Separei tudo
                    </button>
                    <button class="btn-item-sep-parcial"
-                     style="padding:4px 6px;border:none;border-radius:6px;background:#b45309;color:#ffedd5;font-weight:700;font-size:.67rem;cursor:pointer;white-space:nowrap;text-align:center;">
+                     style="padding:4px 6px;border:none;border-radius:6px;background:#b45309;color:#ffedd5;font-weight:700;font-size:.67rem;cursor:pointer;white-space:nowrap;text-align:center;min-height:32px;">
                      <i class="fa-solid fa-scale-balanced" style="margin-right:2px;"></i>Informar qtd
                    </button>
                    ${isEmSeparacao ? `
                    <button class="btn-item-nao-sep"
-                     style="padding:4px 6px;border:none;border-radius:6px;background:#7c2d12;color:#ffedd5;font-weight:700;font-size:.67rem;cursor:pointer;white-space:nowrap;text-align:center;">
+                     style="padding:4px 6px;border:none;border-radius:6px;background:#7c2d12;color:#ffedd5;font-weight:700;font-size:.67rem;cursor:pointer;white-space:nowrap;text-align:center;min-height:32px;">
                      <i class="fa-solid fa-xmark" style="margin-right:2px;"></i>Não separei
                    </button>
                    <button class="btn-item-trocar" title="Trocar este produto"
-                     style="padding:4px 6px;border:none;border-radius:6px;background:#7c3aed;color:#f3e8ff;font-weight:700;font-size:.67rem;cursor:pointer;white-space:nowrap;text-align:center;">
+                     style="padding:4px 6px;border:none;border-radius:6px;background:#7c3aed;color:#f3e8ff;font-weight:700;font-size:.67rem;cursor:pointer;white-space:nowrap;text-align:center;min-height:32px;">
                      <i class="fa-solid fa-arrows-rotate" style="margin-right:2px;"></i>Trocar
                    </button>` : ''}
                  </div>
-                 ${obsText ? `<div style="font-size:.63rem;color:#93c5fd;text-align:right;max-width:200px;word-break:break-word;"><i class="fa-solid fa-comment" style="margin-right:3px;color:#6b7280;"></i>${obsText}</div>` : ''}
+                 ${obsText ? `<div style="font-size:.63rem;color:#93c5fd;text-align:${isCompact ? 'left' : 'right'};max-width:${isCompact ? '100%' : '200px'};word-break:break-word;"><i class="fa-solid fa-comment" style="margin-right:3px;color:#6b7280;"></i>${obsText}</div>` : ''}
                </div>`}
       </div>`;
   }

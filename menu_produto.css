@@ -12491,6 +12491,63 @@ body.mobile-modal-open {
     max-height: none !important;
   }
 
+  /* Modal de separação: mais confortável no celular e sem cards espremidos. */
+  #modalSeparacaoLogistica {
+    align-items: flex-end !important;
+    padding: 0 !important;
+    background: rgba(0, 0, 0, .78) !important;
+  }
+
+  #modalSeparacaoLogistica > div {
+    width: 100% !important;
+    max-width: none !important;
+    height: 100dvh !important;
+    max-height: 100dvh !important;
+    border-radius: 0 !important;
+  }
+
+  #modalSeparacaoLogistica #modalSepInner {
+    padding-bottom: 12px !important;
+  }
+
+  #modalSeparacaoLogistica #modalSepItemsList [data-item-row] {
+    display: grid !important;
+    grid-template-columns: 40px minmax(0, 1fr) !important;
+    gap: 10px !important;
+    align-items: start !important;
+    padding: 10px 12px !important;
+  }
+
+  #modalSeparacaoLogistica #modalSepItemsList [data-item-row] > :nth-child(3),
+  #modalSeparacaoLogistica #modalSepItemsList [data-item-row] > :nth-child(4) {
+    grid-column: 1 / -1 !important;
+    width: 100% !important;
+    justify-self: stretch !important;
+  }
+
+  #modalSeparacaoLogistica #modalSepItemsList [data-item-row] > :nth-child(4) {
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    gap: 6px !important;
+  }
+
+  #modalSeparacaoLogistica #modalSepItemsList [data-item-row] > :nth-child(4) button {
+    min-height: 34px !important;
+    font-size: .64rem !important;
+    white-space: normal !important;
+    line-height: 1.15 !important;
+  }
+
+  #modalSeparacaoLogistica #modalSepItemsList .armazem-btn {
+    font-size: .62rem !important;
+    line-height: 1.25 !important;
+  }
+
+  #modalSeparacaoLogistica #modalSepItemsList [data-item-row] [style*="background:#101826"],
+  #modalSeparacaoLogistica #modalSepItemsList [data-item-row] [style*="background:#1b1730"] {
+    min-width: 0 !important;
+  }
+
   #modalAcoesProdutoOverlay {
     align-items: flex-end !important;
     padding: 0 !important;
