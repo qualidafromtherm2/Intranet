@@ -26,6 +26,7 @@ const LEGACY_BUCKETS = [
   'Manuais',
   'Engenharia',
   'agente-impressao',
+  'AT',
 ];
 
 function isR2Configured() {

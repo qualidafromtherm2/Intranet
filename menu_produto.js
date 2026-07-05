@@ -14279,8 +14279,9 @@ function _abrirAtOsModal(id, navRows) {
     if (!tecNome) { alert('Nome do técnico não encontrado.'); return; }
     if (!confirm(`Resetar senha de "${tecNome}"?\n\nO técnico precisará criar uma nova senha ao acessar o link.`)) return;
     var orig = btn.innerHTML;
+    var iconBtn = btn.classList.contains('at-tec-icon-btn');
     btn.disabled = true;
-    btn.innerHTML = '⏳…';
+    btn.innerHTML = iconBtn ? '<i class="fas fa-circle-notch fa-spin"></i>' : '⏳…';
     try {
       var r = await fetch('/api/sac/at/tecnico/reset-senha', {
         method: 'POST',
@@ -14293,7 +14294,7 @@ function _abrirAtOsModal(id, navRows) {
         alert('Erro: ' + (err.error || r.status));
         btn.innerHTML = orig; btn.disabled = false; return;
       }
-      btn.innerHTML = '✅ Senha resetada!';
+      btn.innerHTML = iconBtn ? '<i class="fas fa-check"></i>' : '✅ Senha resetada!';
       setTimeout(function() { btn.innerHTML = orig; btn.disabled = false; }, 2500);
     } catch (e) {
       alert('Erro ao resetar senha: ' + e.message);
@@ -14308,8 +14309,9 @@ function _abrirAtOsModal(id, navRows) {
     var osModal = document.getElementById('atOsModal');
     var osId    = (osModal && osModal.dataset.osId) || '';
     var orig = btn.innerHTML;
+    var iconBtn = btn.classList.contains('at-tec-icon-btn');
     btn.disabled = true;
-    btn.innerHTML = '⏳…';
+    btn.innerHTML = iconBtn ? '<i class="fas fa-circle-notch fa-spin"></i>' : '⏳…';
     try {
       var params = new URLSearchParams({ nome: tecNome });
       if (osId) params.set('id_at', osId);
@@ -14319,7 +14321,7 @@ function _abrirAtOsModal(id, navRows) {
       var url = location.origin + '/at-link.html?token=' + encodeURIComponent(d.token);
       if (navigator.clipboard && navigator.clipboard.writeText) {
         await navigator.clipboard.writeText(url);
-        btn.innerHTML = '✅ Link copiado!';
+        btn.innerHTML = iconBtn ? '<i class="fas fa-check"></i>' : '✅ Link copiado!';
         // Atualiza _atAllRows para que o botão Retirar habilite ao reabrir o modal
         if (osId && window._atAllRows) {
           const rowIdx = window._atAllRows.findIndex(rr => String(rr.id) === String(osId));
@@ -14604,6 +14606,7 @@ function _abrirAtOsModal(id, navRows) {
   const alimBtn  = document.getElementById('atConfigAlimMenuBtn');
   const updTecBtn= document.getElementById('atAtualizarTecBtn');
   const atalhosBtn = document.getElementById('atSacAtalhosMenuBtn');
+  const matApoioBtn = document.getElementById('atMaterialApoioMenuBtn');
   if (!wrapBtn || !dropMenu) return;
 
   let open = false;
@@ -14643,6 +14646,13 @@ function _abrirAtOsModal(id, navRows) {
       fecharDrop();
       const loadEvent = new CustomEvent('sacAtalhosOpen');
       document.dispatchEvent(loadEvent);
+    });
+  }
+
+  if (matApoioBtn) {
+    matApoioBtn.addEventListener('click', () => {
+      fecharDrop();
+      document.dispatchEvent(new CustomEvent('atMaterialApoioOpen'));
     });
   }
 })();
@@ -14872,6 +14882,459 @@ function _abrirAtOsModal(id, navRows) {
   }
 })();
 
+// ── Modal Material de apoio ───────────────────────────────────────────────────
+(function() {
+  const modal       = document.getElementById('atMaterialApoioModal');
+  const closeBtn    = document.getElementById('atMaterialApoioModalClose');
+  const cardsView   = document.getElementById('atMatApoioCardsView');
+  const cardsGrid   = document.getElementById('atMatApoioCardsGrid');
+  const tableView   = document.getElementById('atMatApoioTableView');
+  const voltarBtn   = document.getElementById('atMatApoioVoltarBtn');
+  const tipoTitulo  = document.getElementById('atMatApoioTipoTitulo');
+  const addBtn      = document.getElementById('atMaterialApoioAddBtn');
+  const addCardBtn  = document.getElementById('atMaterialApoioAddCardBtn');
+  const tbody       = document.getElementById('atMaterialApoioTbody');
+  const formModal   = document.getElementById('atMaterialApoioFormModal');
+  const formClose   = document.getElementById('atMaterialApoioFormClose');
+  const formTitle   = document.getElementById('atMaterialApoioFormTitle');
+  const editIdInp   = document.getElementById('atMatApoioEditId');
+  const nomeInp     = document.getElementById('atMatApoioNome');
+  const tipoInp     = document.getElementById('atMatApoioTipo');
+  const tiposList   = document.getElementById('atMatApoioTiposList');
+  const formatoSel  = document.getElementById('atMatApoioFormato');
+  const publicoInp  = document.getElementById('atMatApoioPublico');
+  const arquivoInp  = document.getElementById('atMatApoioArquivo');
+  const anexoBtn    = document.getElementById('atMatApoioAnexoBtn');
+  const arquivoNome = document.getElementById('atMatApoioArquivoNome');
+  const arquivoAtual= document.getElementById('atMatApoioArquivoAtual');
+  const enviarBtn   = document.getElementById('atMatApoioEnviarBtn');
+  const formMsg     = document.getElementById('atMatApoioFormMsg');
+  if (!modal || !tbody || !cardsGrid) return;
+
+  let allItens = [];
+  let tipoAtivo = null;
+  let pollTimer = null;
+
+  function showFormMsg(txt, ok) {
+    if (!formMsg) return;
+    formMsg.textContent = txt;
+    formMsg.style.color = ok ? '#4ade80' : '#f87171';
+    formMsg.style.display = 'inline';
+    setTimeout(() => { formMsg.style.display = 'none'; }, 4000);
+  }
+
+  function formatoIcon(fmt) {
+    if (fmt === 'PDF') return 'fa-file-pdf';
+    if (fmt === 'Video') return 'fa-file-video';
+    return 'fa-file-image';
+  }
+
+  function normalizarId(id) {
+    const n = Number(id);
+    return Number.isFinite(n) && n > 0 ? n : 0;
+  }
+
+  function buscarItem(id) {
+    return allItens.find(x => normalizarId(x.id) === normalizarId(id)) || null;
+  }
+
+  function renderArquivoCell(item) {
+    const status = String(item.status_upload || 'concluido');
+    if (status === 'enviando') {
+      return `<span style="display:inline-flex;align-items:center;gap:6px;color:#fbbf24;font-size:12px;">
+        <i class="fas fa-circle-notch fa-spin"></i> upload...
+      </span>`;
+    }
+    if (status === 'erro') {
+      const err = item.upload_erro ? ` title="${escapeAtHtml(item.upload_erro)}"` : '';
+      return `<span style="color:#f87171;font-size:12px;"${err}>Falha no upload</span>`;
+    }
+    if (item.url_publica) {
+      return `<a href="${escapeAtHtml(item.url_publica)}" target="_blank" rel="noopener noreferrer" style="color:#38bdf8;font-size:12px;text-decoration:none;">
+        ${escapeAtHtml(item.nome_arquivo)}
+      </a>`;
+    }
+    return `<span style="color:var(--inactive-color);font-size:12px;">${escapeAtHtml(item.nome_arquivo)}</span>`;
+  }
+
+  function temUploadPendente(itens) {
+    return (itens || []).some(i => String(i.status_upload || '') === 'enviando');
+  }
+
+  function pararPoll() {
+    if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+  }
+
+  function iniciarPollSeNecessario() {
+    pararPoll();
+    if (!temUploadPendente(allItens) || modal.style.display === 'none') return;
+    pollTimer = setInterval(() => loadMateriais(true), 3000);
+  }
+
+  function mostrarCards() {
+    tipoAtivo = null;
+    if (cardsView) cardsView.style.display = 'block';
+    if (tableView) tableView.style.display = 'none';
+    renderTipoCards();
+  }
+
+  function mostrarTabela(tipo) {
+    tipoAtivo = String(tipo || '').trim();
+    if (!tipoAtivo) { mostrarCards(); return; }
+    if (cardsView) cardsView.style.display = 'none';
+    if (tableView) tableView.style.display = 'flex';
+    if (tipoTitulo) tipoTitulo.textContent = tipoAtivo;
+    renderTabelaTipo();
+  }
+
+  function agruparPorTipo(itens) {
+    const map = new Map();
+    (itens || []).forEach(item => {
+      const t = String(item.tipo || '').trim() || 'Sem tipo';
+      if (!map.has(t)) map.set(t, []);
+      map.get(t).push(item);
+    });
+    return [...map.entries()].sort((a, b) => a[0].localeCompare(b[0], 'pt-BR'));
+  }
+
+  function renderTipoCards() {
+    const grupos = agruparPorTipo(allItens);
+    if (!grupos.length) {
+      cardsGrid.innerHTML = '<div style="grid-column:1/-1;text-align:center;color:var(--inactive-color);padding:28px;">Nenhum material cadastrado.<br><span style="font-size:12px;">Clique em <strong>Adicionar material</strong> para começar.</span></div>';
+      return;
+    }
+    cardsGrid.innerHTML = grupos.map(([tipo, lista]) => {
+      const qtd = lista.length;
+      const pub = lista.filter(i => i.publico).length;
+      return `<button type="button" class="at-mat-apoio-tipo-card" data-tipo="${escapeAtHtml(tipo)}"
+        style="cursor:pointer;text-align:left;padding:16px;border-radius:12px;border:1px solid rgba(52,211,153,.25);background:linear-gradient(135deg,rgba(5,150,105,.18) 0%,rgba(15,23,42,.6) 100%);color:#e5e7eb;transition:transform .12s,box-shadow .12s;"
+        onmouseover="this.style.transform='translateY(-2px)';this.style.boxShadow='0 8px 20px rgba(5,150,105,.2)'"
+        onmouseout="this.style.transform='';this.style.boxShadow=''">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
+          <i class="fa-solid fa-layer-group" style="color:#34d399;font-size:18px;"></i>
+          <span style="font-weight:700;font-size:14px;line-height:1.3;">${escapeAtHtml(tipo)}</span>
+        </div>
+        <div style="font-size:12px;color:#94a3b8;">${qtd} material${qtd !== 1 ? 'is' : ''}${pub ? ` · ${pub} público${pub !== 1 ? 's' : ''}` : ''}</div>
+      </button>`;
+    }).join('');
+    cardsGrid.querySelectorAll('.at-mat-apoio-tipo-card').forEach(card => {
+      card.addEventListener('click', () => mostrarTabela(card.dataset.tipo || ''));
+    });
+  }
+
+  function itensDoTipoAtivo() {
+    if (!tipoAtivo) return [];
+    return allItens.filter(i => String(i.tipo || '').trim() === tipoAtivo);
+  }
+
+  async function loadTipos() {
+    if (!tiposList) return;
+    try {
+      const r = await fetch('/api/sac/at/material-apoio/tipos', { credentials: 'same-origin' });
+      const d = await r.json();
+      const tipos = d.ok ? (d.tipos || []) : [];
+      tiposList.innerHTML = tipos.map(t => `<option value="${escapeAtHtml(t)}">`).join('');
+    } catch (_) { /* ignora */ }
+  }
+
+  function abrirFormulario(item, tipoPreFill) {
+    if (!formModal) return;
+    const editando = !!(item && normalizarId(item.id));
+    if (formTitle) {
+      formTitle.innerHTML = editando
+        ? '<i class="fa-solid fa-pen" style="color:#34d399;"></i> Editar material'
+        : '<i class="fa-solid fa-file-circle-plus" style="color:#34d399;"></i> Adicionar material';
+    }
+    if (editIdInp) editIdInp.value = editando ? String(item.id) : '';
+    if (nomeInp) nomeInp.value = editando ? (item.nome || '') : '';
+    if (tipoInp) {
+      tipoInp.value = editando ? (item.tipo || '') : (tipoPreFill || tipoAtivo || '');
+      tipoInp.readOnly = !editando && !!(tipoPreFill || tipoAtivo);
+      tipoInp.style.opacity = tipoInp.readOnly ? '0.85' : '1';
+    }
+    if (formatoSel) formatoSel.value = editando ? (item.formato || '') : '';
+    if (publicoInp) publicoInp.checked = editando ? !!item.publico : false;
+    if (arquivoInp) arquivoInp.value = '';
+    if (arquivoNome) arquivoNome.textContent = 'Nenhum arquivo selecionado';
+    if (arquivoAtual) {
+      if (editando && item.nome_arquivo) {
+        arquivoAtual.style.display = 'block';
+        arquivoAtual.textContent = `Arquivo atual: ${item.nome_arquivo} (deixe em branco para manter)`;
+      } else {
+        arquivoAtual.style.display = 'none';
+        arquivoAtual.textContent = '';
+      }
+    }
+    if (enviarBtn) {
+      enviarBtn.disabled = false;
+      enviarBtn.innerHTML = editando
+        ? '<i class="fa-solid fa-floppy-disk"></i> Salvar'
+        : '<i class="fa-solid fa-cloud-arrow-up"></i> Enviar';
+    }
+    if (formMsg) formMsg.style.display = 'none';
+    loadTipos();
+    formModal.style.display = 'flex';
+  }
+
+  function renderTabelaTipo() {
+    const itens = itensDoTipoAtivo();
+    if (!itens.length) {
+      tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--inactive-color);padding:20px;">Nenhum material neste tipo.</td></tr>';
+      return;
+    }
+    tbody.innerHTML = itens.map(item => `
+      <tr data-id="${item.id}">
+        <td style="font-weight:600;">${escapeAtHtml(item.nome)}</td>
+        <td><span style="display:inline-flex;align-items:center;gap:5px;"><i class="fa-solid ${formatoIcon(item.formato)}" style="color:#94a3b8;"></i>${escapeAtHtml(item.formato)}</span></td>
+        <td>${renderArquivoCell(item)}</td>
+        <td style="text-align:center;">
+          <input type="checkbox" class="at-mat-apoio-pub-chk" data-id="${item.id}" ${item.publico ? 'checked' : ''}
+            title="Material público" style="width:16px;height:16px;cursor:pointer;">
+        </td>
+        <td style="white-space:nowrap;">
+          <button type="button" class="at-mat-apoio-edit-btn" data-id="${item.id}" title="Editar"
+            style="background:rgba(14,165,233,.15);color:#38bdf8;border:1px solid rgba(14,165,233,.3);border-radius:4px;padding:3px 8px;cursor:pointer;font-size:12px;margin-right:4px;">
+            <i class="fa-solid fa-pen"></i>
+          </button>
+          <button type="button" class="at-mat-apoio-del-btn" data-id="${item.id}" title="Excluir"
+            style="background:rgba(239,68,68,.15);color:#ef4444;border:1px solid rgba(239,68,68,.3);border-radius:4px;padding:3px 8px;cursor:pointer;font-size:12px;">
+            <i class="fa-solid fa-trash"></i>
+          </button>
+        </td>
+      </tr>`).join('');
+
+    tbody.querySelectorAll('.at-mat-apoio-edit-btn').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const item = buscarItem(btn.dataset.id);
+        if (item) abrirFormulario(item);
+        else { alert('Registro não encontrado.'); loadMateriais(true); }
+      });
+    });
+
+    tbody.querySelectorAll('.at-mat-apoio-del-btn').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const id = normalizarId(btn.dataset.id);
+        const item = buscarItem(id);
+        if (!item || !confirm(`Excluir "${item.nome}"?`)) return;
+        allItens = allItens.filter(x => normalizarId(x.id) !== id);
+        renderTabelaTipo();
+        try {
+          const r = await fetch(`/api/sac/at/material-apoio/${id}`, { method: 'DELETE', credentials: 'same-origin' });
+          const d = await r.json();
+          if (!d.ok) { alert(d.error || 'Erro ao excluir.'); loadMateriais(true); }
+        } catch (_) {
+          alert('Erro de rede.');
+          loadMateriais(true);
+        }
+      });
+    });
+
+    tbody.querySelectorAll('.at-mat-apoio-pub-chk').forEach(chk => {
+      chk.addEventListener('change', async () => {
+        const id = normalizarId(chk.dataset.id);
+        const novo = chk.checked;
+        chk.disabled = true;
+        try {
+          const r = await fetch(`/api/sac/at/material-apoio/${id}/publico`, {
+            method: 'PATCH',
+            credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ publico: novo }),
+          });
+          const d = await r.json();
+          if (d.ok) mergeItem(d.item);
+          else { chk.checked = !novo; alert(d.error || 'Erro ao salvar.'); }
+        } catch (_) {
+          chk.checked = !novo;
+          alert('Erro de rede.');
+        } finally {
+          chk.disabled = false;
+        }
+      });
+    });
+
+    iniciarPollSeNecessario();
+  }
+
+  function mergeItem(item) {
+    const id = normalizarId(item?.id);
+    if (!id) return;
+    const idx = allItens.findIndex(x => normalizarId(x.id) === id);
+    if (idx >= 0) allItens[idx] = item;
+    else allItens.push(item);
+    allItens.sort((a, b) => {
+      const ta = String(a.tipo || '').localeCompare(String(b.tipo || ''), 'pt-BR');
+      if (ta !== 0) return ta;
+      return String(a.nome || '').localeCompare(String(b.nome || ''), 'pt-BR');
+    });
+    const tipoItem = String(item.tipo || '').trim();
+    if (tipoAtivo) {
+      if (tipoItem !== tipoAtivo) mostrarCards();
+      else renderTabelaTipo();
+    } else {
+      renderTipoCards();
+    }
+  }
+
+  function removerItemPorId(id) {
+    allItens = allItens.filter(x => normalizarId(x.id) !== normalizarId(id));
+    if (tipoAtivo) renderTabelaTipo();
+    else renderTipoCards();
+  }
+
+  function itemOtimista(nome, tipo, formato, publico, editId) {
+    const extGuess = formato === 'PDF' ? 'pdf' : (formato === 'Video' ? 'mp4' : 'jpg');
+    return {
+      id: editId || -Date.now(),
+      nome,
+      tipo,
+      formato,
+      nome_arquivo: `${nome.replace(/\s+/g, '_')}.${extGuess}`,
+      url_publica: null,
+      status_upload: 'enviando',
+      upload_erro: null,
+      publico: !!publico,
+    };
+  }
+
+  async function loadMateriais(silent) {
+    if (!silent && !tipoAtivo) {
+      cardsGrid.innerHTML = '<div style="grid-column:1/-1;text-align:center;color:var(--inactive-color);padding:28px;"><i class="fas fa-circle-notch fa-spin"></i> Carregando…</div>';
+    }
+    if (!silent && tipoAtivo) {
+      tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--inactive-color);padding:20px;">Carregando…</td></tr>';
+    }
+    try {
+      const r = await fetch('/api/sac/at/material-apoio', { credentials: 'same-origin' });
+      const d = await r.json();
+      if (d.ok) {
+        allItens = d.itens || [];
+        if (tipoAtivo) {
+          if (!allItens.some(i => String(i.tipo || '').trim() === tipoAtivo)) mostrarCards();
+          else renderTabelaTipo();
+        } else {
+          renderTipoCards();
+        }
+        iniciarPollSeNecessario();
+      } else if (!silent) {
+        if (tipoAtivo) tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:#f87171;">Erro ao carregar.</td></tr>';
+        else cardsGrid.innerHTML = '<div style="grid-column:1/-1;text-align:center;color:#f87171;">Erro ao carregar.</div>';
+      }
+    } catch (_) {
+      if (!silent) {
+        if (tipoAtivo) tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:#f87171;">Erro de rede.</td></tr>';
+        else cardsGrid.innerHTML = '<div style="grid-column:1/-1;text-align:center;color:#f87171;">Erro de rede.</div>';
+      }
+    }
+  }
+
+  document.addEventListener('atMaterialApoioOpen', () => {
+    modal.style.display = 'flex';
+    mostrarCards();
+    loadMateriais(false);
+    loadTipos();
+  });
+
+  if (closeBtn) closeBtn.addEventListener('click', () => { modal.style.display = 'none'; pararPoll(); });
+  modal.addEventListener('click', e => {
+    if (e.target === modal) { modal.style.display = 'none'; pararPoll(); }
+  });
+
+  if (voltarBtn) voltarBtn.addEventListener('click', () => mostrarCards());
+  if (addBtn) addBtn.addEventListener('click', () => abrirFormulario(null, tipoAtivo));
+  if (addCardBtn) addCardBtn.addEventListener('click', () => abrirFormulario(null, null));
+
+  if (formClose) formClose.addEventListener('click', () => { if (formModal) formModal.style.display = 'none'; });
+  if (formModal) formModal.addEventListener('click', e => { if (e.target === formModal) formModal.style.display = 'none'; });
+
+  if (anexoBtn && arquivoInp) {
+    anexoBtn.addEventListener('click', () => arquivoInp.click());
+    arquivoInp.addEventListener('change', () => {
+      const f = arquivoInp.files?.[0];
+      if (arquivoNome) arquivoNome.textContent = f ? f.name : 'Nenhum arquivo selecionado';
+    });
+  }
+
+  if (enviarBtn) {
+    enviarBtn.addEventListener('click', async () => {
+      const nome = nomeInp ? nomeInp.value.trim() : '';
+      const tipo = tipoInp ? tipoInp.value.trim() : '';
+      const formato = formatoSel ? formatoSel.value : '';
+      const publico = publicoInp ? publicoInp.checked : false;
+      const editId = editIdInp ? normalizarId(editIdInp.value) : 0;
+      const arquivo = arquivoInp?.files?.[0];
+
+      if (!nome) { showFormMsg('Informe o nome.', false); return; }
+      if (!tipo) { showFormMsg('Informe o tipo.', false); return; }
+      if (!formato) { showFormMsg('Selecione o formato.', false); return; }
+      if (!editId && !arquivo) { showFormMsg('Selecione um arquivo para anexar.', false); return; }
+
+      const fd = new FormData();
+      fd.append('nome', nome);
+      fd.append('tipo', tipo);
+      fd.append('formato', formato);
+      fd.append('publico', publico ? '1' : '0');
+      if (arquivo) fd.append('arquivo', arquivo);
+
+      const otimistaId = editId || -Date.now();
+      formModal.style.display = 'none';
+
+      if (!tipoAtivo || tipoAtivo !== tipo) {
+        tipoAtivo = tipo;
+        if (tableView) tableView.style.display = 'flex';
+        if (cardsView) cardsView.style.display = 'none';
+        if (tipoTitulo) tipoTitulo.textContent = tipo;
+      }
+
+      if (arquivo || !editId) {
+        mergeItem(itemOtimista(nome, tipo, formato, publico, editId || otimistaId));
+      } else if (editId) {
+        const atual = buscarItem(editId);
+        mergeItem({
+          ...(atual || {}),
+          id: editId,
+          nome,
+          tipo,
+          formato,
+          publico,
+          status_upload: arquivo ? 'enviando' : (atual?.status_upload || 'concluido'),
+        });
+      }
+
+      enviarBtn.disabled = true;
+      try {
+        const url = editId
+          ? `/api/sac/at/material-apoio/${editId}`
+          : '/api/sac/at/material-apoio';
+        const r = await fetch(url, {
+          method: editId ? 'PUT' : 'POST',
+          credentials: 'same-origin',
+          body: fd,
+        });
+        const d = await r.json();
+        if (d.ok) {
+          if (!editId) removerItemPorId(otimistaId);
+          mergeItem(d.item);
+          loadTipos();
+        } else {
+          if (!editId) removerItemPorId(otimistaId);
+          else loadMateriais(true);
+          alert(d.error || 'Erro ao salvar.');
+        }
+      } catch (_) {
+        if (!editId) removerItemPorId(otimistaId);
+        else loadMateriais(true);
+        alert('Erro de rede.');
+      } finally {
+        enviarBtn.disabled = false;
+        if (tipoInp) { tipoInp.readOnly = false; tipoInp.style.opacity = '1'; }
+      }
+    });
+  }
+})();
+
 // ── Modal configuração Alimentação ───────────────────────────────────────────
 (function() {
   const modal  = document.getElementById('atAlimentacaoModal');
@@ -15050,10 +15513,15 @@ function _abrirAtOsModal(id, navRows) {
                 ${t.tipo ? ' &nbsp;·&nbsp; ' + escapeAtHtml(t.tipo) : ''}
               </div>
             </div>
-            <button onclick="event.stopPropagation();window._atResetarSenhaTecnico(this)" data-tec="${tNome}"
+            <button class="at-tec-icon-btn" onclick="event.stopPropagation();window._atCopiarLinkOs(this)" data-tec="${tNome}"
+              title="Copiar link do técnico"
+              style="display:inline-flex;align-items:center;justify-content:center;width:32px;height:32px;background:#3b82f6;color:#fff;font-size:14px;padding:0;border-radius:6px;border:none;cursor:pointer;flex-shrink:0;">
+              <i class="fas fa-link"></i>
+            </button>
+            <button class="at-tec-icon-btn" onclick="event.stopPropagation();window._atResetarSenhaTecnico(this)" data-tec="${tNome}"
               title="Resetar senha — técnico precisará criar uma nova senha ao acessar o link"
-              style="display:inline-flex;align-items:center;gap:4px;background:#dc2626;color:#fff;font-size:11px;font-weight:600;padding:5px 11px;border-radius:6px;border:none;cursor:pointer;white-space:nowrap;flex-shrink:0;">
-              🔑 Resetar Senha
+              style="display:inline-flex;align-items:center;justify-content:center;width:32px;height:32px;background:#dc2626;color:#fff;font-size:14px;padding:0;border-radius:6px;border:none;cursor:pointer;flex-shrink:0;">
+              <i class="fas fa-key"></i>
             </button>
           </div>`;
         }).join('');
@@ -15152,9 +15620,11 @@ function _abrirAtOsModal(id, navRows) {
       if (lat) lat.value = d.lat != null ? d.lat : '';
       if (lng) lng.value = d.lng != null ? d.lng : '';
       const endInput = document.getElementById('atTecFormEndereco');
-      if (endInput && (d.rua || d.bairro)) {
-        endInput.value = [d.rua, d.bairro].filter(Boolean).join(', ');
-      }
+      const numInput = document.getElementById('atTecFormNumero');
+      const bairroInput = document.getElementById('atTecFormBairro');
+      if (endInput && d.rua) endInput.value = d.rua;
+      if (bairroInput && d.bairro) bairroInput.value = d.bairro;
+      if (numInput && !numInput.value) numInput.value = '';
       const coordInfo = d.lat != null ? ` · GPS obtido ✓` : '';
       setCepStatus(`${d.municipio || ''}${d.uf ? ' / ' + d.uf : ''}${coordInfo}`, true);
     } catch {
@@ -15189,7 +15659,7 @@ function _abrirAtOsModal(id, navRows) {
     document.getElementById('atTecFormLng').value = '';
 
     // Limpa campos visíveis
-    ['atTecFormNome','atTecFormCep','atTecFormEndereco','atTecFormCnpjCpf','atTecFormMunicipio','atTecFormUf','atTecFormCelular'].forEach(fid => {
+    ['atTecFormNome','atTecFormCep','atTecFormEndereco','atTecFormNumero','atTecFormBairro','atTecFormComplemento','atTecFormCnpjCpf','atTecFormMunicipio','atTecFormUf','atTecFormCelular'].forEach(fid => {
       const el = document.getElementById(fid);
       if (el) el.value = '';
     });
@@ -15219,9 +15689,15 @@ function _abrirAtOsModal(id, navRows) {
         const nome = document.getElementById('atTecFormNome');
         const cnpjEl = document.getElementById('atTecFormCnpjCpf');
         const endEl  = document.getElementById('atTecFormEndereco');
+        const numEl  = document.getElementById('atTecFormNumero');
+        const bairroEl = document.getElementById('atTecFormBairro');
+        const compEl = document.getElementById('atTecFormComplemento');
         if (nome)   nome.value   = data.nome     || '';
         if (cnpjEl) cnpjEl.value = data.cnpj_cpf || '';
         if (endEl)  endEl.value  = data.endereco || '';
+        if (numEl)  numEl.value  = data.numero || '';
+        if (bairroEl) bairroEl.value = data.bairro || '';
+        if (compEl) compEl.value = data.complemento || '';
         if (mun)    mun.value    = data.municipio || '';
         if (uf)     uf.value     = data.uf || '';
         if (cel)    cel.value    = data.celular || '';
@@ -15247,6 +15723,9 @@ function _abrirAtOsModal(id, navRows) {
       const nome      = document.getElementById('atTecFormNome')?.value.trim() || '';
       const cnpj_cpf  = document.getElementById('atTecFormCnpjCpf')?.value.trim() || '';
       const endereco  = document.getElementById('atTecFormEndereco')?.value.trim() || '';
+      const numero    = document.getElementById('atTecFormNumero')?.value.trim() || '';
+      const bairro    = document.getElementById('atTecFormBairro')?.value.trim() || '';
+      const complemento = document.getElementById('atTecFormComplemento')?.value.trim() || '';
       const cep       = (document.getElementById('atTecFormCep')?.value || '').replace(/\D/g,'');
       const municipio = document.getElementById('atTecFormMunicipio')?.value.trim() || '';
       const uf        = document.getElementById('atTecFormUf')?.value.trim().toUpperCase() || '';
@@ -15259,7 +15738,7 @@ function _abrirAtOsModal(id, navRows) {
       const erros = [];
       if (!nome)      erros.push('Nome');
       if (!cnpj_cpf)  erros.push('CNPJ/CPF');
-      if (!endereco)  erros.push('Endereço');
+      if (!endereco)  erros.push('Logradouro');
       if (!cep || cep.length !== 8) erros.push('CEP válido');
       if (!municipio) erros.push('Cidade / Município');
       if (!uf)        erros.push('Estado (UF)');
@@ -15271,7 +15750,7 @@ function _abrirAtOsModal(id, navRows) {
       setMsg('Salvando...', 'ok');
 
       const body = {
-        nome, cnpj_cpf, endereco, cep, municipio, uf, celular, tipo,
+        nome, cnpj_cpf, endereco, numero, bairro, complemento, cep, municipio, uf, celular, tipo,
         lat: lat !== '' ? parseFloat(lat) : null,
         lng: lng !== '' ? parseFloat(lng) : null,
       };
@@ -78228,6 +78707,41 @@ window.initOscilacaoEstoque = (function () {
     if (cep.replace(/\D/g, '').length === 8) buscarCepVipp(cep, true);
   }
 
+  function _aplicarVippDadosDestino(dados) {
+    if (!dados) return;
+    var nomeEl = document.getElementById('vippNome');
+    var cpfEl = document.getElementById('vippCnpjCpf');
+    var telEl = document.getElementById('vippTelefone');
+    var cepEl = document.getElementById('vippCep');
+    var endEl = document.getElementById('vippEndereco');
+    var numEl = document.getElementById('vippNumero');
+    var bairroEl = document.getElementById('vippBairro');
+    var cidEl = document.getElementById('vippCidade');
+    var ufEl = document.getElementById('vippUF');
+    var docDestEl = document.getElementById('vippDeclDocDestinatario');
+
+    if (nomeEl && dados.nome) nomeEl.value = dados.nome;
+    if (cpfEl && dados.cnpj_cpf) cpfEl.value = dados.cnpj_cpf;
+    if (telEl && dados.telefone) telEl.value = dados.telefone;
+
+    var cep = String(dados.cep || '').trim();
+    if (cepEl && cep) cepEl.value = _vippFormatarCep(cep);
+    if (endEl && dados.endereco) endEl.value = dados.endereco;
+    if (numEl && dados.numero) numEl.value = dados.numero;
+    if (bairroEl && dados.bairro) bairroEl.value = dados.bairro;
+    var compEl = document.getElementById('vippComplemento');
+    if (compEl && dados.complemento) compEl.value = dados.complemento;
+    var emailEl = document.getElementById('vippEmail');
+    if (emailEl && dados.email) emailEl.value = dados.email;
+    if (cidEl && dados.cidade) cidEl.value = dados.cidade;
+    if (ufEl && dados.estado) ufEl.value = String(dados.estado).toUpperCase();
+
+    if (docDestEl && cpfEl) {
+      docDestEl.value = String(cpfEl.value || '').replace(/\D/g, '');
+    }
+    if (cep.replace(/\D/g, '').length === 8) buscarCepVipp(cep, false);
+  }
+
   // Transfere dados da OS (sac.at) para o formulário VIPP — botão "Preencher da OS"
   function prePopularFromOS() {
     var row = _vippRowOsAtual();
@@ -78275,6 +78789,342 @@ window.initOscilacaoEstoque = (function () {
   var fillFromOsBtn = document.getElementById('vippPreencherDaOsBtn');
   if (fillFromOsBtn) fillFromOsBtn.addEventListener('click', prePopularFromOS);
 
+  function prePopularFromTecnico() {
+    var osId = _vippOsIdAtual();
+    if (!osId) {
+      setStatus('Abra uma OS em edição para preencher o técnico.', true);
+      return;
+    }
+    var nomeTec = (document.getElementById('atEmFechTecnico') ? document.getElementById('atEmFechTecnico').value : '').trim();
+    if (!nomeTec) {
+      var row = _vippRowOsAtual();
+      nomeTec = (row && row.tecnico_nome) ? String(row.tecnico_nome).trim() : '';
+    }
+    if (!nomeTec) {
+      setStatus('Esta OS não possui técnico vinculado.', true);
+      return;
+    }
+
+    var params = new URLSearchParams();
+    if (nomeTec) params.set('nome', nomeTec);
+    setStatus('Buscando dados do técnico...', false);
+    fetch('/api/sac/at/vipp-preencher-tecnico/' + encodeURIComponent(osId) + '?' + params.toString(), {
+      credentials: 'same-origin',
+    })
+      .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
+      .then(function (res) {
+        if (!res.ok || !res.j?.dados) throw new Error(res.j?.error || 'Técnico não encontrado.');
+        _aplicarVippDadosDestino(res.j.dados);
+        setStatus('Dados do técnico preenchidos: ' + (res.j.tecnico_nome || nomeTec), false);
+      })
+      .catch(function (err) {
+        setStatus(err.message || 'Falha ao preencher técnico.', true);
+      });
+  }
+
+  var fillFromTecBtn = document.getElementById('vippPreencherTecnicoBtn');
+  if (fillFromTecBtn) fillFromTecBtn.addEventListener('click', prePopularFromTecnico);
+
+  function resetarFormularioVipp() {
+    var idsTexto = [
+      'vippNome', 'vippCnpjCpf', 'vippTelefone', 'vippEmail', 'vippCep',
+      'vippEndereco', 'vippNumero', 'vippComplemento', 'vippBairro', 'vippCidade', 'vippUF',
+      'vippAdicionais', 'vippDeclDocRemetente', 'vippDeclDocDestinatario', 'vippDeclBusca',
+      'vippNrNF', 'vippSerieNF', 'vippVlrNF', 'vippObservacao',
+    ];
+    idsTexto.forEach(function (id) {
+      var el = document.getElementById(id);
+      if (el) el.value = '';
+    });
+
+    var metodoEl = document.getElementById('vippMetodoEnvio');
+    if (metodoEl) metodoEl.value = 'Envio via Correios';
+
+    var servicoEl = document.getElementById('vippServico');
+    if (servicoEl) servicoEl.value = '04162';
+
+    var defaultsNum = {
+      vippPeso: '300',
+      vippAltura: '7',
+      vippLargura: '22',
+      vippComprimento: '15',
+      vippDeclPesoTotal: '300',
+    };
+    Object.keys(defaultsNum).forEach(function (id) {
+      var el = document.getElementById(id);
+      if (el) el.value = defaultsNum[id];
+    });
+
+    var dtNf = document.getElementById('vippDtNF');
+    if (dtNf) dtNf.value = '';
+
+    limparDecl();
+    _vippOcultarBotaoTelefone();
+    if (typeof _vippOcultarNomeSugestoes === 'function') _vippOcultarNomeSugestoes();
+    if (declBuscaResultados) declBuscaResultados.style.display = 'none';
+
+    atualizarMetodoEnvioUI();
+    setStatus('Formulário limpo.', false);
+  }
+
+  var resetVippBtn = document.getElementById('vippResetarDadosBtn');
+  if (resetVippBtn) resetVippBtn.addEventListener('click', resetarFormularioVipp);
+
+  var vippTelefoneEl = document.getElementById('vippTelefone');
+  var vippTelFillBtn = document.getElementById('vippPreencherPorTelefoneBtn');
+  var vippTelFillLbl = document.getElementById('vippPreencherPorTelefoneLbl');
+  var _vippTelMatchCache = null;
+  var _vippTelLookupTimer = null;
+
+  function _vippOcultarBotaoTelefone() {
+    _vippTelMatchCache = null;
+    if (vippTelFillBtn) {
+      vippTelFillBtn.style.display = 'none';
+      vippTelFillBtn.disabled = false;
+    }
+  }
+
+  function _vippBuscarDestinoPorTelefone() {
+    if (!vippTelefoneEl) return;
+    var tel = String(vippTelefoneEl.value || '').trim();
+    var digits = tel.replace(/\D/g, '');
+    if (digits.length < 8) {
+      _vippOcultarBotaoTelefone();
+      return;
+    }
+    fetch('/api/sac/at/vipp-buscar-por-telefone?telefone=' + encodeURIComponent(tel), {
+      credentials: 'same-origin',
+    })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (data) {
+        if (!data || !data.encontrado || !data.dados) {
+          _vippOcultarBotaoTelefone();
+          return;
+        }
+        _vippTelMatchCache = data;
+        if (vippTelFillBtn) {
+          vippTelFillBtn.style.display = 'inline-flex';
+          if (vippTelFillLbl) vippTelFillLbl.textContent = data.label || 'Preencher';
+          vippTelFillBtn.title = data.label || 'Preencher dados encontrados para este telefone';
+        }
+      })
+      .catch(function () { _vippOcultarBotaoTelefone(); });
+  }
+
+  if (vippTelefoneEl) {
+    vippTelefoneEl.addEventListener('input', function () {
+      clearTimeout(_vippTelLookupTimer);
+      _vippTelLookupTimer = setTimeout(_vippBuscarDestinoPorTelefone, 450);
+    });
+    vippTelefoneEl.addEventListener('blur', _vippBuscarDestinoPorTelefone);
+  }
+  if (vippTelFillBtn) {
+    vippTelFillBtn.addEventListener('click', function () {
+      if (!_vippTelMatchCache || !_vippTelMatchCache.dados) return;
+      _aplicarVippDadosDestino(_vippTelMatchCache.dados);
+      var fonte = _vippTelMatchCache.fonte === 'tecnico' ? 'técnico' : 'OS';
+      setStatus('Dados preenchidos a partir do ' + fonte + '.', false);
+    });
+  }
+
+  // ── Autocomplete do campo Nome (técnicos + fornecedores Omie) ─────────────
+  var _vippNomeTimer = null;
+  var _vippNomeSeq = 0;
+  var _vippNomeIgnorarBusca = false;
+  var _vippNomeSugScrollEl = null;
+
+  function _vippGetNomeInput() {
+    return document.getElementById('vippNome');
+  }
+
+  function _vippEscHtml(s) {
+    return String(s || '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/"/g, '&quot;');
+  }
+
+  function _vippEnsureNomeSugestoesEl() {
+    var el = document.getElementById('vippNomeSugestoes');
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'vippNomeSugestoes';
+      el.setAttribute('role', 'listbox');
+      el.setAttribute('aria-label', 'Sugestões de destinatário');
+      document.body.appendChild(el);
+    } else if (el.parentElement !== document.body) {
+      document.body.appendChild(el);
+    }
+    el.style.position = 'fixed';
+    el.style.zIndex = '10080';
+    el.style.maxHeight = '240px';
+    el.style.overflowY = 'auto';
+    el.style.background = '#1e293b';
+    el.style.border = '1px solid rgba(255,255,255,.14)';
+    el.style.borderRadius = '8px';
+    el.style.boxShadow = '0 10px 28px rgba(0,0,0,.45)';
+    return el;
+  }
+
+  function _vippPosicionarNomeSugestoes() {
+    var input = _vippGetNomeInput();
+    var sug = document.getElementById('vippNomeSugestoes');
+    if (!input || !sug || sug.style.display === 'none') return;
+    var r = input.getBoundingClientRect();
+    sug.style.left = Math.max(8, r.left) + 'px';
+    sug.style.top = (r.bottom + 4) + 'px';
+    sug.style.width = Math.max(220, r.width) + 'px';
+  }
+
+  function _vippOcultarNomeSugestoes() {
+    var sug = document.getElementById('vippNomeSugestoes');
+    if (sug) {
+      sug.style.display = 'none';
+      sug.innerHTML = '';
+    }
+    if (_vippNomeSugScrollEl) {
+      _vippNomeSugScrollEl.removeEventListener('scroll', _vippPosicionarNomeSugestoes);
+      _vippNomeSugScrollEl = null;
+    }
+    window.removeEventListener('resize', _vippPosicionarNomeSugestoes);
+  }
+
+  function _vippBindNomeSugestoesScroll() {
+    var input = _vippGetNomeInput();
+    if (!input) return;
+    var scrollEl = input.closest('[style*="overflow"]') || modal;
+    if (_vippNomeSugScrollEl && _vippNomeSugScrollEl !== scrollEl) {
+      _vippNomeSugScrollEl.removeEventListener('scroll', _vippPosicionarNomeSugestoes);
+    }
+    _vippNomeSugScrollEl = scrollEl;
+    if (scrollEl) scrollEl.addEventListener('scroll', _vippPosicionarNomeSugestoes, { passive: true });
+    window.addEventListener('resize', _vippPosicionarNomeSugestoes, { passive: true });
+  }
+
+  function _vippRenderNomeSugestoes(itens) {
+    var sug = _vippEnsureNomeSugestoesEl();
+    if (!itens || !itens.length) {
+      _vippOcultarNomeSugestoes();
+      return;
+    }
+    sug.innerHTML = itens.map(function (item) {
+      var icone = item.fonte === 'tecnico' ? 'fa-user-gear' : 'fa-building';
+      var cor = item.fonte === 'tecnico' ? '#6ee7b7' : '#93c5fd';
+      return '<button type="button" class="vipp-nome-sug-item" role="option"' +
+        ' data-fonte="' + _vippEscHtml(item.fonte) + '"' +
+        ' data-id="' + _vippEscHtml(String(item.id)) + '"' +
+        ' data-label="' + _vippEscHtml(item.label) + '"' +
+        ' style="display:block;width:100%;text-align:left;padding:9px 12px;border:none;border-bottom:1px solid rgba(255,255,255,.06);background:transparent;color:#e5e7eb;cursor:pointer;">' +
+        '<div style="display:flex;align-items:flex-start;gap:8px;">' +
+          '<i class="fa-solid ' + icone + '" style="color:' + cor + ';margin-top:2px;font-size:12px;"></i>' +
+          '<div style="min-width:0;flex:1;">' +
+            '<div style="font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + _vippEscHtml(item.label) + '</div>' +
+            '<div style="font-size:11px;color:#9ca3af;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + _vippEscHtml(item.sub || '') + '</div>' +
+          '</div>' +
+        '</div>' +
+      '</button>';
+    }).join('');
+    sug.style.display = 'block';
+    _vippBindNomeSugestoesScroll();
+    _vippPosicionarNomeSugestoes();
+
+    sug.querySelectorAll('.vipp-nome-sug-item').forEach(function (btn) {
+      btn.addEventListener('mousedown', function (e) {
+        e.preventDefault();
+      });
+      btn.addEventListener('click', function () {
+        var fonte = btn.getAttribute('data-fonte');
+        var id = btn.getAttribute('data-id');
+        var label = btn.getAttribute('data-label') || '';
+        var nomeEl = _vippGetNomeInput();
+        if (!fonte || !id) return;
+        _vippOcultarNomeSugestoes();
+        _vippNomeIgnorarBusca = true;
+        if (nomeEl) nomeEl.value = label;
+        setStatus('Carregando dados de ' + (fonte === 'tecnico' ? 'técnico' : 'fornecedor') + '...', false);
+        fetch('/api/sac/at/vipp-destino-detalhe?fonte=' + encodeURIComponent(fonte) + '&id=' + encodeURIComponent(id), {
+          credentials: 'same-origin',
+        })
+          .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
+          .then(function (res) {
+            if (!res.ok || !res.j?.dados) throw new Error(res.j?.error || 'Não foi possível carregar os dados.');
+            _aplicarVippDadosDestino(res.j.dados);
+            if (nomeEl && res.j.label) nomeEl.value = res.j.label;
+            var tipo = res.j.fonte === 'tecnico' ? 'técnico' : 'fornecedor';
+            setStatus('Dados preenchidos a partir do cadastro de ' + tipo + '.', false);
+          })
+          .catch(function (err) {
+            setStatus(err.message || 'Falha ao preencher destinatário.', true);
+          })
+          .finally(function () {
+            setTimeout(function () { _vippNomeIgnorarBusca = false; }, 300);
+          });
+      });
+    });
+  }
+
+  function _vippBuscarNomeSugestoes() {
+    if (_vippNomeIgnorarBusca) return;
+    var nomeEl = _vippGetNomeInput();
+    if (!nomeEl) return;
+    var q = String(nomeEl.value || '').trim();
+    if (q.length < 5) {
+      _vippOcultarNomeSugestoes();
+      return;
+    }
+    var seq = ++_vippNomeSeq;
+    var sug = _vippEnsureNomeSugestoesEl();
+    sug.style.display = 'block';
+    sug.innerHTML = '<div style="padding:10px 12px;font-size:12px;color:#9ca3af;">Buscando...</div>';
+    _vippPosicionarNomeSugestoes();
+
+    fetch('/api/sac/at/vipp-buscar-nome?q=' + encodeURIComponent(q), { credentials: 'same-origin' })
+      .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
+      .then(function (res) {
+        if (seq !== _vippNomeSeq) return;
+        if (!res.ok || !res.j?.ok) {
+          _vippOcultarNomeSugestoes();
+          if (!res.ok) setStatus((res.j && res.j.error) || 'Falha ao buscar nome.', true);
+          return;
+        }
+        var itens = res.j.itens || [];
+        if (!itens.length) {
+          var sugEmpty = _vippEnsureNomeSugestoesEl();
+          sugEmpty.innerHTML = '<div style="padding:10px 12px;font-size:12px;color:#9ca3af;">Nenhum técnico ou fornecedor encontrado.</div>';
+          sugEmpty.style.display = 'block';
+          _vippPosicionarNomeSugestoes();
+          return;
+        }
+        _vippRenderNomeSugestoes(itens);
+      })
+      .catch(function () {
+        if (seq === _vippNomeSeq) _vippOcultarNomeSugestoes();
+      });
+  }
+
+  if (modal) {
+    modal.addEventListener('input', function (e) {
+      if (!e.target || e.target.id !== 'vippNome') return;
+      clearTimeout(_vippNomeTimer);
+      _vippNomeTimer = setTimeout(_vippBuscarNomeSugestoes, 300);
+    });
+    modal.addEventListener('focusout', function (e) {
+      if (!e.target || e.target.id !== 'vippNome') return;
+      setTimeout(_vippOcultarNomeSugestoes, 220);
+    });
+    modal.addEventListener('keydown', function (e) {
+      if (e.target && e.target.id === 'vippNome' && e.key === 'Escape') _vippOcultarNomeSugestoes();
+    });
+  }
+
+  document.addEventListener('click', function (e) {
+    var nomeEl = _vippGetNomeInput();
+    var sug = document.getElementById('vippNomeSugestoes');
+    if (!nomeEl || !sug || sug.style.display === 'none') return;
+    if (e.target === nomeEl || sug.contains(e.target)) return;
+    _vippOcultarNomeSugestoes();
+  });
+
   var metodoEnvioSelect = document.getElementById('vippMetodoEnvio');
 
   function isMetodoCorreios() {
@@ -78321,6 +79171,8 @@ window.initOscilacaoEstoque = (function () {
       statusEl.style.display = 'none';
     }
     prePopular();
+    _vippOcultarBotaoTelefone();
+    _vippOcultarNomeSugestoes();
     // Define texto padrão da Observação visual: "OS{numero}" (+ Aos Cuidados, se preenchido)
     var _tit = (document.getElementById('atEditModalTitle') ? document.getElementById('atEditModalTitle').textContent : '').trim();
     var _osN = _tit.replace(/[^0-9]/g, '');
@@ -78335,6 +79187,7 @@ window.initOscilacaoEstoque = (function () {
   }
 
   function closeModal() {
+    _vippOcultarNomeSugestoes();
     modal.style.display = 'none';
     document.body.style.overflow = '';
   }
@@ -78350,6 +79203,7 @@ window.initOscilacaoEstoque = (function () {
     // atVippBtn abre via fluxo AT (Abertura de OS).
     _vippContextoSac = false;
     if (fillFromOsBtn) fillFromOsBtn.style.display = '';
+    if (fillFromTecBtn) fillFromTecBtn.style.display = '';
     openModal();
   });
 
@@ -78358,6 +79212,7 @@ window.initOscilacaoEstoque = (function () {
   if (sacVippBtn) sacVippBtn.addEventListener('click', function () {
     _vippContextoSac = true;
     if (fillFromOsBtn) fillFromOsBtn.style.display = 'none';
+    if (fillFromTecBtn) fillFromTecBtn.style.display = 'none';
     if (metodoEnvioSelect) metodoEnvioSelect.value = 'Envio via Correios';
     atualizarMetodoEnvioUI();
     if (enviarBtn) {
