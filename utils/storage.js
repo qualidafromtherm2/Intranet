@@ -4,10 +4,14 @@ require('dotenv').config();
 const {
   S3Client,
   PutObjectCommand,
+  CopyObjectCommand,
   DeleteObjectCommand,
   ListObjectsV2Command,
   HeadObjectCommand,
 } = require('@aws-sdk/client-s3');
+
+// 1 ano para imagens/assets estáticos (nomes únicos com ID/hash)
+const DEFAULT_CACHE_CONTROL = 'public, max-age=31536000, immutable';
 
 const R2_ACCOUNT_ID = process.env.R2_ACCOUNT_ID || '';
 const R2_ACCESS_KEY_ID = process.env.R2_ACCESS_KEY_ID || '';
@@ -22,6 +26,7 @@ const LEGACY_BUCKETS = [
   'Manuais',
   'Engenharia',
   'agente-impressao',
+  'AT',
 ];
 
 function isR2Configured() {
@@ -96,6 +101,7 @@ async function r2Upload(legacyBucket, path, buffer, options = {}) {
       Key: key,
       Body: buffer,
       ContentType: options.contentType || 'application/octet-stream',
+      CacheControl: options.cacheControl ?? DEFAULT_CACHE_CONTROL,
     }));
     return { data: { path: normalizePath(path), Key: key }, error: null };
   } catch (err) {
@@ -156,6 +162,17 @@ async function r2List(legacyBucket, prefix = '', options = {}) {
   } catch (err) {
     return { data: null, error: err };
   }
+}
+
+async function r2UpdateCacheControl(key, contentType, cacheControl = DEFAULT_CACHE_CONTROL) {
+  await getS3Client().send(new CopyObjectCommand({
+    Bucket: R2_BUCKET,
+    CopySource: `${R2_BUCKET}/${key}`,
+    Key: key,
+    ContentType: contentType || 'application/octet-stream',
+    CacheControl: cacheControl,
+    MetadataDirective: 'REPLACE',
+  }));
 }
 
 async function r2ListAllKeys(legacyBucket, prefix = '') {
@@ -244,10 +261,13 @@ module.exports = {
   uploadPublicFile,
   removePublicFiles,
   r2ObjectKey,
+  r2UpdateCacheControl,
   isR2Configured,
   assertStorageConfigured,
   r2ListAllKeys,
   LEGACY_BUCKETS,
+  R2_ACCOUNT_ID,
   R2_BUCKET,
   R2_PUBLIC_BASE_URL,
+  DEFAULT_CACHE_CONTROL,
 };

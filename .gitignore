@@ -14,8 +14,20 @@ pnpm-debug.log*
 # variáveis de ambiente
 .env.*.local
 
-# configurações do VS Code
+# IDE, IA local e ferramentas de desenvolvimento (mantém local, não sobe pro GitHub)
 .vscode/
+.vs/
+.idea/
+.codex
+skills-lock.json
+diagrama.puml
+.cursor/
+.continue/
+.agents/
+AGENTS.md
+ORIENTACAO-RAPIDA.md
+iniciar-ia.sh
+.github/
 
 # arquivos do sistema
 .DS_Store
@@ -36,8 +48,6 @@ server.js.backup_*
 data/kanban_preparacao.json
 
 # arquivos temporarios e de editor
-.idea/
-.vs/
 *.swp
 *.swo
 *.tmp
@@ -62,26 +72,67 @@ cookies.txt
 *.pfx
 *.p12
 intranet_db_*.sql
-data/users.json
+
+# dados locais / uploads de teste (não afetam o site em produção)
+data/
+uploads/
+mensagens/
+
+# documentação interna e app auxiliar local (site principal não usa)
+readme/
+Site_AT/
+CONTRIBUTING.md
+colaborador-fluxo-branch-seguro.instructions.md
+
+# diagnósticos e notas temporárias na raiz
+DIAGNOSTICO_*.md
+HISTORICO_CONVERSA_*.md
+CORRECAO_*.md
+SOLUCAO_*.md
+GUIA_SISTEMA_*.md
+eventos.csv
+_nfe_omie
+
+# scripts avulsos de migração/teste na raiz (já aplicados ou só local)
+/add_anexos_column.js
+/add_reprovacao_columns.sql
+/add_status_retificar.sql
+/atualizar.sql
+/disable_trigger.js
+/fix_trigger.js
+/verify_schema.js
+/teste_simples.js
+/Middleware.js
+/LocalEstoqueJsonClient.js
+/watch_print.js
+/sync_omie_imagens_estoque.js
+/sync_omie_produtos.js
+
+# scripts arquivados e de teste/debug (não rodam no Render)
+scripts/_archive/
+scripts/teste_*
+scripts/test_*
+scripts/debug_*
+scripts/relatorio_*.json
+
+# referências obsoletas
+routes/produtos_webhook_fix.js
+sql/teste_*.sql
+
+# CSV local extra (manter no GitHub só os usados pelo site: BOM, Tipo, Configuração)
+csv/*
+!csv/BOM.csv
+!csv/Tipo.csv
+!csv/Configuração_etq_caracteristicas.csv
+
+# SQL avulso duplicado (schema já está nas rotas)
+sql/create_qualidade_lista_mestra.sql
+sql/create_qualidade_lista_mestra_historico.sql
 
 # Agente de Impressão — binário compilado (hospedado no Supabase)
 agente_impressao/*.exe
 
-# Arquivos pessoais do projeto — não versionar
-csv/1 - Instruções dev.csv
-
-# IA local (Continue) e agentes de orientação — não afetam o runtime do projeto
-.continue/
-.agents/
-AGENTS.md
-ORIENTACAO-RAPIDA.md
-iniciar-ia.sh
-
-# Regras e skills do Cursor Agent — só úteis localmente
-.cursor/rules/
-.cursor/skills/
-
-# lixo operacional / capturas acidentais
+# lixo acidental de terminal (nunca versionar)
 menu_produto.js.backup_errors
 t-temp.txt
 tart intranet_api

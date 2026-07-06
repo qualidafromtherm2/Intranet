@@ -499,9 +499,37 @@ async function syncRequisicoesCompra(cfg) {
 
 // ════════════════════════════════════════════════════════════════════════════
 // SYNC: Produtos Omie
+// Usa omie_upsert_produto (mesma função do webhook) — PK = codigo_produto.
+// O INSERT antigo falhava em silêncio (colunas erradas + sem codigo_produto).
 // ════════════════════════════════════════════════════════════════════════════
+async function garantirGuardProdutosOmie() {
+  // Permite escrita via webhook, cron agendado e sync manual/scripts.
+  await pool.query(`
+    CREATE OR REPLACE FUNCTION public.trg_guard_produtos_omie_webhook_only()
+    RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+    DECLARE
+      v_source text;
+    BEGIN
+      v_source := lower(trim(coalesce(current_setting('app.produtos_omie_write_source', true), '')));
+      IF v_source NOT IN ('omie_webhook', 'omie_cron', 'omie_manual', 'omie_sync') THEN
+        RAISE EXCEPTION 'Escrita em public.produtos_omie permitida apenas via Omie (webhook/cron/sync). source=%', v_source
+          USING ERRCODE = '42501';
+      END IF;
+      IF TG_OP = 'DELETE' THEN
+        RETURN OLD;
+      END IF;
+      RETURN NEW;
+    END;
+    $$;
+  `);
+}
+
 async function syncProdutosOmie() {
   log('── [produtos_omie] Iniciando...');
+  await garantirGuardProdutosOmie();
+
   let pagina = 1, totalPaginas = 1, sincronizados = 0, erros = 0;
 
   while (pagina <= totalPaginas) {
@@ -509,42 +537,27 @@ async function syncProdutosOmie() {
       pagina, registros_por_pagina: 50, apenas_importado_api: 'N',
       filtrar_apenas_omiepdv: 'N', exibir_caracteristicas: 'N'
     });
-    totalPaginas = data.nTotalPaginas || data.total_de_paginas || 1;
+    totalPaginas = Number(data.nTotalPaginas || data.total_de_paginas || 1);
     const lista = data.produto_servico_cadastro || [];
     log(`  Página ${pagina}/${totalPaginas} — ${lista.length} produtos`);
     if (!lista.length) break;
 
     const client = await pool.connect();
     try {
+      await client.query("SELECT set_config('app.produtos_omie_write_source', 'omie_cron', true)");
       for (const p of lista) {
-        const codInt = p.codigo_produto_integracao || p.codigo;
-        if (!codInt) continue;
+        if (!p?.codigo_produto && !p?.codigo) continue;
         try {
-          await client.query(`
-            INSERT INTO public.produtos_omie (
-              codigo, descricao, codigo_produto_integracao,
-              unidade, ncm, valor_unitario,
-              tipo_item, familia_codigo, familia_descricao,
-              ativo, updated_at
-            ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,NOW())
-            ON CONFLICT (codigo) DO UPDATE SET
-              descricao=EXCLUDED.descricao,
-              unidade=EXCLUDED.unidade,
-              valor_unitario=EXCLUDED.valor_unitario,
-              tipo_item=EXCLUDED.tipo_item,
-              familia_codigo=EXCLUDED.familia_codigo,
-              familia_descricao=EXCLUDED.familia_descricao,
-              ativo=EXCLUDED.ativo,
-              updated_at=NOW()
-          `,[
-            p.codigo||codInt, p.descricao||null, codInt,
-            p.unidade||null, p.ncm||null, p.valor_unitario||null,
-            p.tipo_item||null,
-            p.familia?.codigo||null, p.familia?.descricao||null,
-            p.inativo !== 'S',
-          ]);
+          const obj = { ...p };
+          if (!obj.codigo_produto_integracao) {
+            obj.codigo_produto_integracao = obj.codigo || String(obj.codigo_produto || '');
+          }
+          await client.query('SELECT omie_upsert_produto($1::jsonb)', [obj]);
           sincronizados++;
-        } catch(e) { erros++; }
+        } catch (e) {
+          erros++;
+          if (erros <= 5) log(`  erro produto ${p.codigo || p.codigo_produto}: ${e.message}`);
+        }
       }
     } finally { client.release(); }
     pagina++;

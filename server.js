@@ -2,9 +2,18 @@
 // Carrega as variáveis de ambiente definidas em .env
 // no topo do intranet/server.js
 require('dotenv').config({ path: require('path').resolve(__dirname, '.env'), override: true });
+const { pool, sessionPool, dbQuery, isDbEnabled, warmupPgPool, warmupSessionPool, ensureSessionTableReady } = require('./src/db');
+const SERVICE_PROFILE = String(process.env.SERVICE_PROFILE || 'full').trim().toLowerCase();
+const IS_CHAT_SERVICE = SERVICE_PROFILE === 'chat';
+if (IS_CHAT_SERVICE) {
+  console.log('[boot] SERVICE_PROFILE=chat — modo leve (sem SheetsAuto/crons/schemas pesados)');
+}
 // utils/supabase.js — carrega R2 na subida (log do backend)
 require('./utils/supabase');
 const { uploadPublicFile, removePublicFiles } = require('./utils/storage');
+const { registrarControleOperacaoImpressaoOp } = require('./utils/controleOperacoes');
+const { iniciarCicloPosto } = require('./utils/tempoProducao');
+const { registrarRiCheckImpressaoOp } = require('./routes/qualidadeRiCheck');
 const { injectStoragePublicUrls, getStoragePublicBaseUrl, ASSETS, agenteExeUrl } = require('./utils/storageUrls');
 const OMIE_WEBHOOK_TOKEN = process.env.OMIE_WEBHOOK_TOKEN || null; // se NULL, não exige token
 // Em server.js (topo do arquivo)
@@ -105,17 +114,17 @@ app.post('/api/client-log', express.json({ limit: '200kb' }), (req, res) => {
 
 // Sessão persistida no Postgres (sobrevive a deploys/restart do processo).
 // Requer a tabela public.session (ver sql/create_session_table.sql).
-const sessionStore = new PgSession({
-  conObject: {
-    connectionString: process.env.DATABASE_URL || process.env.POSTGRES_URL,
-    ssl: { rejectUnauthorized: false }
-  },
-  tableName: 'session',
-  createTableIfMissing: true,            // cria automaticamente se não existir
-  pruneSessionInterval: 60 * 60          // limpa expiradas a cada 1h
-});
+// Pool dedicado à sessão — login não compete com consultas pesadas da API.
+const sessionStore = sessionPool
+  ? new PgSession({
+      pool: sessionPool,
+      tableName: 'session',
+      createTableIfMissing: false,
+      pruneSessionInterval: 60 * 60,
+    })
+  : null;
 
-sessionStore.on('error', (err) => {
+sessionStore?.on('error', (err) => {
   // Throttle: evita inundação de logs quando o Postgres está em recovery mode (manutenção/failover)
   const msg = err?.message || String(err);
   const now = Date.now();
@@ -142,7 +151,7 @@ if (!process.env.SESSION_SECRET) {
 const SESSION_SECRET = process.env.SESSION_SECRET || 'dev-only-insecure-change-me';
 
 app.use(session({
-  store: sessionStore,
+  store: sessionStore || undefined,
   name: 'sid',
   secret: SESSION_SECRET,
   resave: false,
@@ -199,6 +208,16 @@ const API_PUBLIC_PREFIXES = [
   '/api/auth/',          // login, status, logout, first-password, tema
   '/api/client-log',     // log de erros do front (já validado/limitado)
   '/api/produtos/stream',// SSE do progresso de sync (somente leitura)
+  '/api/produtos/lista', // catálogo de produtos (leitura)
+  '/api/produtos/detalhe', // detalhe do produto (leitura)
+  '/api/produtos/detalhes/', // detalhe alternativo por código (leitura)
+  '/api/produtos/ultimas-compras', // histórico do produto (leitura)
+  '/api/produtos/familias', // famílias para filtros (leitura)
+  '/api/produtos/unidades', // unidades para filtros/formulários (leitura)
+  '/api/produtos/search', // busca de produto (leitura)
+  '/api/produtos/imagem/', // imagem do produto (leitura)
+  '/api/produtos/codigos', // mapeamento de códigos (leitura)
+  '/api/produtos/total-omie', // contagem de produtos na Omie (leitura)
   '/api/produtos/webhook', // webhook Omie de produtos (validado por token na própria rota)
   '/api/webhooks/',      // webhooks Omie (validados por chkOmieToken)
   '/api/cep',            // consulta de CEP (proxy público)
@@ -209,6 +228,7 @@ const API_PUBLIC_PREFIXES = [
   '/api/sac/at/tecnico/atendimentos', // listar OS
   '/api/sac/at/tecnico/os-portal/',   // detalhes de uma OS
   '/api/sac/at/tecnico/fechamento/',  // fechamento + evidências + NFe
+  '/api/sac/at/tecnico/material-apoio', // materiais públicos (portal técnico)
   '/api/ai/manual-chat',              // chatbot do portal AT
   '/api/sac/whatsapp/webhook',        // webhook Meta WhatsApp Cloud (verificação GET + POST de mensagens)
   // ── Agente de impressão (auth própria via x-agent-token) ──
@@ -240,10 +260,13 @@ app.use('/api/rh', require('./routes/rhCargos'));
 app.use('/api/ri', require('./routes/ri'));
 app.use('/api/pir', require('./routes/pir'));
 app.use('/api/qualidade', require('./routes/qualidadeFotos'));
+app.use('/api/qualidade', require('./routes/listaMestra'));
+app.use('/api/qualidade/ri-check', require('./routes/qualidadeRiCheck'));
 app.use('/api/registros', require('./routes/registros'));
 app.use('/api/sac', require('./routes/sacEnvios'));
 app.use('/api/ai', require('./routes/ai_assistant'));
 app.use('/api/producao', require('./routes/producao'));
+app.use('/api/estrutura', require('./routes/estrutura'));
 app.use('/api/transformacao-mp', require('./routes/transformacaoMp'));
 app.use('/api/vipp',    require('./routes/vipp'));
 app.use('/api/usuario', require('./routes/usuario'));
@@ -343,19 +366,55 @@ app.get('/api/check-version', async (req, res) => {
   }
 });
 
-// Conexão Postgres (Render)
-const { Pool } = require('pg');
+// Pool Postgres compartilhado — importado de src/db.js no topo do arquivo.
+if (!pool) {
+  console.warn('[pg] DATABASE_URL ausente — rotas que dependem do Postgres ficarão limitadas.');
+}
+const PG_ACTIVE_CLIENT_ERROR_HANDLER = Symbol('pgActiveClientErrorHandler');
+function protegerPgClientAtivo(client, origem = 'pool.connect') {
+  if (!client || typeof client.on !== 'function' || client[PG_ACTIVE_CLIENT_ERROR_HANDLER]) {
+    return client;
+  }
 
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL || process.env.POSTGRES_URL,
-  ssl: { rejectUnauthorized: false },
-});
-pool.on('error', (err) => {
-  console.error('[pg] erro em cliente ocioso — ignorado para evitar crash:', err.message);
-});
+  const handler = (err) => {
+    // Só loga: pool.query() já registra once('error') e faz release.
+    // Chamar release aqui causa "Release called on client which has already been released"
+    // e derruba o processo no Render.
+    console.error(`[pg] erro em client ativo (${origem}) — conexão encerrada:`, err?.message || err);
+  };
+
+  client.on('error', handler);
+  client[PG_ACTIVE_CLIENT_ERROR_HANDLER] = handler;
+  return client;
+}
 const comprasAuditContext = new AsyncLocalStorage();
-const originalPoolQuery = pool.query.bind(pool);
-const originalPoolConnect = pool.connect.bind(pool);
+if (pool) {
+  const originalPoolQuery = pool.query.bind(pool);
+  const originalPoolConnect = pool.connect.bind(pool);
+
+  // Encaminha pool.query para o client de contexto quando a rota está em /api/compras.
+  pool.query = function queryComContexto(...args) {
+    const ctx = comprasAuditContext.getStore();
+    if (ctx?.client) {
+      return ctx.client.query(...args);
+    }
+    return originalPoolQuery(...args);
+  };
+
+  // Garante app.current_user também para clients obtidos via pool.connect dentro do contexto.
+  pool.connect = async function connectComContexto(...args) {
+    const client = protegerPgClientAtivo(await originalPoolConnect(...args));
+    const ctx = comprasAuditContext.getStore();
+    if (ctx?.username) {
+      try {
+        await client.query(`SELECT set_config('app.current_user', $1, false)`, [ctx.username]);
+      } catch (err) {
+        console.warn('[Compras/Auditoria] Falha ao aplicar app.current_user no client:', err?.message || err);
+      }
+    }
+    return client;
+  };
+}
 
 function resolverUsuarioAuditoria(req) {
   const user = req?.session?.user || {};
@@ -732,29 +791,6 @@ async function excluirReservaGoogleCalendar({ username, googleEventId, googleCal
   });
 }
 
-// Encaminha pool.query para o client de contexto quando a rota está em /api/compras.
-pool.query = function queryComContexto(...args) {
-  const ctx = comprasAuditContext.getStore();
-  if (ctx?.client) {
-    return ctx.client.query(...args);
-  }
-  return originalPoolQuery(...args);
-};
-
-// Garante app.current_user também para clients obtidos via pool.connect dentro do contexto.
-pool.connect = async function connectComContexto(...args) {
-  const client = await originalPoolConnect(...args);
-  const ctx = comprasAuditContext.getStore();
-  if (ctx?.username) {
-    try {
-      await client.query(`SELECT set_config('app.current_user', $1, false)`, [ctx.username]);
-    } catch (err) {
-      console.warn('[Compras/Auditoria] Falha ao aplicar app.current_user no client:', err?.message || err);
-    }
-  }
-  return client;
-};
-
 // Contexto de auditoria apenas para endpoints de compras.
 app.use('/api/compras', (req, res, next) => {
   const inicio = Date.now();
@@ -792,7 +828,7 @@ app.use('/api/compras', async (req, res, next) => {
   };
 
   try {
-    client = await originalPoolConnect();
+    client = await pool.connect();
     await client.query(`SELECT set_config('app.current_user', $1, false)`, [username]);
   } catch (err) {
     releaseClient();
@@ -1124,7 +1160,7 @@ async function ensureRhReservasSchema() {
   }
 }
 
-ensureRhReservasSchema();
+if (!IS_CHAT_SERVICE) ensureRhReservasSchema();
 
 function extrairTarefasConteudoAtaRh(conteudo) {
   const texto = String(conteudo || '');
@@ -1535,7 +1571,6 @@ app.get('/api/users/:id/permissions', async (req,res)=>{
 
 // ─── Config. dinâmica de etiqueta ─────────────────────────
 const etqConfigPath = path.join(__dirname, 'csv', 'Configuração_etq_caracteristicas.csv');
-const { dbQuery, isDbEnabled } = require('./src/db');   // nosso módulo do Passo 1
 const produtosRouter = require('./routes/produtos');
 const engenhariaRouter = require('./routes/engenharia')(pool);
 const comprasRouter = require('./routes/compras')(pool);
@@ -10601,13 +10636,17 @@ app.use('/etiquetas', requireSessionOrAgentForStatic, express.static(etiquetasRo
         impresso_em       TIMESTAMPTZ NOT NULL DEFAULT NOW()
       )
     `);
-    // Migração: remove colunas redundantes (dados já existem em ETQ_recebimento via origem_id)
-    for (const col of ['numero_nfe','numero_pedido','lote','codigo_produto','descricao_produto','fornecedor']) {
+    // Migração: remove colunas legadas de recebimento (NÃO remover codigo_produto/descricao_produto —
+    // são usados em impressão de OP e endereçamento, com origem_id NULL).
+    for (const col of ['numero_nfe', 'numero_pedido', 'lote', 'fornecedor']) {
       await pool.query(`ALTER TABLE etiqueta."ETQ_rec_impresso" DROP COLUMN IF EXISTS ${col}`).catch(() => {});
     }
-    // Migração: colunas de armazenamento
+    // Migração: colunas de armazenamento / produto
     await pool.query(`ALTER TABLE etiqueta."ETQ_rec_impresso" ADD COLUMN IF NOT EXISTS endereco TEXT`);
     await pool.query(`ALTER TABLE etiqueta."ETQ_rec_impresso" ADD COLUMN IF NOT EXISTS complemento TEXT`);
+    await pool.query(`ALTER TABLE etiqueta."ETQ_rec_impresso" ADD COLUMN IF NOT EXISTS codigo_produto TEXT`);
+    await pool.query(`ALTER TABLE etiqueta."ETQ_rec_impresso" ADD COLUMN IF NOT EXISTS descricao_produto TEXT`);
+    await pool.query(`ALTER TABLE etiqueta."ETQ_rec_impresso" ADD COLUMN IF NOT EXISTS fonte TEXT DEFAULT 'recebimento'`);
     // Tabela de fila de impressão (para agente polling)
     await pool.query(`
       CREATE TABLE IF NOT EXISTS etiqueta."ETQ_fila_impressao" (
@@ -10631,7 +10670,93 @@ app.use('/etiquetas', requireSessionOrAgentForStatic, express.static(etiquetasRo
         criado_em      TIMESTAMPTZ NOT NULL DEFAULT NOW()
       )
     `);
-    console.log('[etiqueta] Schema e tabelas ETQ_recebimento / ETQ_rec_impresso / ETQ_fila_impressao / ETQ_auto_oculto garantidos');
+    // Tabela de registro de agentes de impressão (heartbeat — fallback pós-restart)
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS etiqueta."ETQ_agentes" (
+        pc_name         TEXT        PRIMARY KEY,
+        printers        JSONB       NOT NULL DEFAULT '[]',
+        printer_aliases JSONB       NOT NULL DEFAULT '{}',
+        version         TEXT,
+        host            TEXT,
+        last_seen       TIMESTAMPTZ NOT NULL DEFAULT now()
+      )
+    `);
+    // Corrige codigo_produto gravado como produtos_omie.codigo → produtos_omie.codigo_produto
+    const fixCodigoEtq = await pool.query(`
+      UPDATE etiqueta."ETQ_rec_impresso" i
+         SET codigo_produto = p.codigo_produto::text
+        FROM public.produtos_omie p
+       WHERE TRIM(i.codigo_produto) = TRIM(p.codigo)
+         AND p.codigo_produto IS NOT NULL
+         AND TRIM(i.codigo_produto) <> TRIM(p.codigo_produto::text)
+    `).catch(() => ({ rowCount: 0 }));
+    if (fixCodigoEtq.rowCount > 0) {
+      console.log(`[etiqueta] Corrigido codigo_produto (codigo→id Omie) em ${fixCodigoEtq.rowCount} registro(s) ETQ_rec_impresso`);
+    }
+    const fixCodigoEtqRec = await pool.query(`
+      UPDATE etiqueta."ETQ_rec_impresso" i
+         SET codigo_produto = p.codigo_produto::text
+        FROM etiqueta."ETQ_recebimento" r
+        JOIN public.produtos_omie p ON TRIM(p.codigo) = TRIM(r.codigo_produto)
+       WHERE r.id = i.origem_id
+         AND TRIM(COALESCE(i.codigo_produto, '')) = TRIM(r.codigo_produto)
+         AND TRIM(i.codigo_produto) <> TRIM(p.codigo_produto::text)
+    `).catch(() => ({ rowCount: 0 }));
+    if (fixCodigoEtqRec.rowCount > 0) {
+      console.log(`[etiqueta] Corrigido codigo_produto via recebimento em ${fixCodigoEtqRec.rowCount} registro(s) ETQ_rec_impresso`);
+    }
+    // Preenche codigo_produto/descricao_produto em registros antigos (id Omie via produtos_omie)
+    const backfillEtq = await pool.query(`
+      UPDATE etiqueta."ETQ_rec_impresso" i
+         SET codigo_produto = p.codigo_produto::text,
+             descricao_produto = COALESCE(NULLIF(TRIM(i.descricao_produto), ''), r.descricao_produto),
+             fonte = COALESCE(NULLIF(TRIM(i.fonte), ''), 'recebimento')
+        FROM etiqueta."ETQ_recebimento" r
+        JOIN public.produtos_omie p ON TRIM(p.codigo) = TRIM(r.codigo_produto)
+       WHERE r.id = i.origem_id
+         AND (i.codigo_produto IS NULL OR TRIM(i.codigo_produto) = '' OR TRIM(i.codigo_produto) = TRIM(r.codigo_produto))
+         AND p.codigo_produto IS NOT NULL
+    `).catch(() => ({ rowCount: 0 }));
+    if (backfillEtq.rowCount > 0) {
+      console.log(`[etiqueta] Backfill codigo_produto em ${backfillEtq.rowCount} registro(s) ETQ_rec_impresso`);
+    }
+    // Backfill via ZPL: "Cod. Produto: XXX" → produtos_omie.codigo → id Omie + descrição
+    const backfillEtqZpl = await pool.query(`
+      UPDATE etiqueta."ETQ_rec_impresso" i
+         SET codigo_produto = p.codigo_produto::text,
+             descricao_produto = COALESCE(
+               NULLIF(TRIM(i.descricao_produto), ''),
+               NULLIF(TRIM(p.descricao), '')
+             )
+        FROM public.produtos_omie p
+       WHERE (i.codigo_produto IS NULL OR TRIM(i.codigo_produto) = '')
+         AND i.conteudo_zpl IS NOT NULL
+         AND TRIM(i.conteudo_zpl) <> ''
+         AND TRIM(SUBSTRING(i.conteudo_zpl FROM 'Cod\\. Produto: ([^\\^\\n\\r]+)')) <> ''
+         AND TRIM(p.codigo) = TRIM(SUBSTRING(i.conteudo_zpl FROM 'Cod\\. Produto: ([^\\^\\n\\r]+)'))
+         AND p.codigo_produto IS NOT NULL
+    `).catch(() => ({ rowCount: 0 }));
+    if (backfillEtqZpl.rowCount > 0) {
+      console.log(`[etiqueta] Backfill via ZPL em ${backfillEtqZpl.rowCount} registro(s) ETQ_rec_impresso`);
+    }
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS etiqueta."_meta" (
+        chave TEXT PRIMARY KEY,
+        valor TEXT
+      )
+    `).catch(() => {});
+
+    // Sanitiza lixo de migração antiga (Endereço_pp sem código, qtd=0) e importa catálogo 1x.
+    await _etqSanitizarEMigrarEnderecoPp(pool).catch(err => {
+      console.error('[etiqueta] sanitizar/migrar Endereço_pp:', err?.message || err);
+    });
+
+    // Apenas backfill seguro — NÃO apaga histórico nem renumera IDs (IDs vão no ZPL).
+    await _etqBackfillRecImpressoSeguro(pool).catch(err => {
+      console.error('[etiqueta] backfill seguro ETQ_rec_impresso:', err?.message || err);
+    });
+
+    console.log('[etiqueta] Schema e tabelas ETQ_recebimento / ETQ_rec_impresso / ETQ_fila_impressao / ETQ_auto_oculto / ETQ_agentes garantidos');
   } catch (err) {
     console.error('[etiqueta] Falha ao garantir schema/tabela:', err?.message || err);
   }
@@ -10778,14 +10903,15 @@ app.post('/api/etiquetas/fila', express.json(), async (req, res) => {
       }
 
       for (const qtdEtq of lotes) {
-        const ins = await pool.query(
-          `INSERT INTO etiqueta."ETQ_rec_impresso"
-             (origem_id, qtd, unidade, data_emissao, conteudo_zpl, usuario_criacao)
-           VALUES ($1,$2,$3,$4,'',$5)
-           RETURNING id`,
-          [row.id, qtdEtq, row.unidade, row.data_emissao, usuario]
-        );
-        const idImpresso = ins.rows[0].id;
+        const idImpresso = await _insertEtqRecImpressoRecebimento(pool, {
+          origemId: row.id,
+          qtd: qtdEtq,
+          unidade: row.unidade,
+          dataEmissao: row.data_emissao,
+          usuario,
+          codProd,
+          descProd
+        });
         const zpl = _gerarZplParaImpressao({ codProd, descProd, idImpresso, loteTxt, dataExibir });
         await pool.query(
           `UPDATE etiqueta."ETQ_rec_impresso" SET conteudo_zpl = $1 WHERE id = $2`,
@@ -10919,28 +11045,286 @@ function _friendlyLprError(msg) {
   return 'Falha na comunicação com a impressora. Verifique se ela está ligada e configurada corretamente.';
 }
 
-// ── Helper: gera ZPL para IMPRESSÃO física (mostra ID da impressão, sem qtd) ──
-// Layout p/ etiqueta 5×3 cm (50×30 mm, 203 dpi → 399×240 dots)
+/** Resolve public.produtos_omie.codigo_produto (id Omie) a partir de codigo, id ou integracao. */
+async function _resolveProdutoOmieCodigoProduto(db, codigoOuId) {
+  const raw = String(codigoOuId || '').trim();
+  if (!raw) return null;
+  const { rows } = await (db || pool).query(
+    `SELECT codigo_produto::text AS id_omie
+       FROM public.produtos_omie
+      WHERE codigo = $1
+         OR codigo_produto::text = $1
+         OR codigo_produto_integracao = $1
+      LIMIT 1`,
+    [raw]
+  );
+  return rows[0]?.id_omie || null;
+}
+
+/** Código legível do produto (produtos_omie.codigo) para ZPL e exibição. */
+async function _resolveProdutoOmieCodigoTexto(db, codigoOuId) {
+  const raw = String(codigoOuId || '').trim();
+  if (!raw) return null;
+  const { rows } = await (db || pool).query(
+    `SELECT codigo
+       FROM public.produtos_omie
+      WHERE codigo = $1
+         OR codigo_produto::text = $1
+         OR codigo_produto_integracao = $1
+      LIMIT 1`,
+    [raw]
+  );
+  return rows[0]?.codigo || raw;
+}
+
+/** Garante colunas usadas em impressão de OP / endereçamento em ETQ_rec_impresso. */
+async function _etqEnsureRecImpressoCols(db = pool) {
+  await db.query(`ALTER TABLE etiqueta."ETQ_rec_impresso" ADD COLUMN IF NOT EXISTS codigo_produto TEXT`);
+  await db.query(`ALTER TABLE etiqueta."ETQ_rec_impresso" ADD COLUMN IF NOT EXISTS descricao_produto TEXT`);
+  await db.query(`ALTER TABLE etiqueta."ETQ_rec_impresso" ADD COLUMN IF NOT EXISTS fonte TEXT DEFAULT 'recebimento'`);
+  await db.query(`ALTER TABLE etiqueta."ETQ_rec_impresso" ADD COLUMN IF NOT EXISTS endereco TEXT`);
+  await db.query(`ALTER TABLE etiqueta."ETQ_rec_impresso" ADD COLUMN IF NOT EXISTS complemento TEXT`);
+}
+
+/** Garante codigo_produto (id Omie) e descricao_produto para gravar em ETQ_rec_impresso. */
+async function _etqResolveProdutoCampos(db, { codigoTexto, codigoOmie, descricao, linhaReferencia }) {
+  const ref = linhaReferencia || null;
+  let codigo = String(codigoOmie || ref?.codigo_produto || '').trim();
+  if (!codigo && codigoTexto) {
+    const resolved = await _resolveProdutoOmieCodigoProduto(db, codigoTexto);
+    // Produto pode ainda não existir em produtos_omie — usa o código da etiqueta para permitir impressão.
+    codigo = String(resolved || codigoTexto).trim();
+  }
+  let desc = String(descricao || ref?.descricao_produto || '').trim();
+  if (!desc && codigo) {
+    const { rows } = await (db || pool).query(
+      `SELECT descricao FROM public.produtos_omie
+        WHERE codigo_produto::text = $1 OR codigo = $2
+        LIMIT 1`,
+      [codigo, String(codigoTexto || '').trim()]
+    );
+    desc = String(rows[0]?.descricao || '').trim();
+  }
+  if (!desc) desc = String(codigoTexto || codigo || '').trim();
+  if (!codigo) {
+    const err = new Error('codigo_produto obrigatorio para ETQ_rec_impresso.');
+    err.code = 'ETQ_CODIGO_OBRIGATORIO';
+    throw err;
+  }
+  if (!desc) {
+    const err = new Error('descricao_produto obrigatoria para ETQ_rec_impresso.');
+    err.code = 'ETQ_DESCRICAO_OBRIGATORIA';
+    throw err;
+  }
+  return { codigo_produto: codigo, descricao_produto: desc };
+}
+
+/**
+ * Remove lixo da migração Endereço_pp (qtd=0 sem código) e importa o catálogo 1x.
+ * NÃO mexe em impressões (recebimento/iapp_op) nem em saldo real (qtd > 0).
+ */
+async function _etqSanitizarEMigrarEnderecoPp(db) {
+  const conn = db || pool;
+  await conn.query(`CREATE TABLE IF NOT EXISTS etiqueta."_meta" (chave TEXT PRIMARY KEY, valor TEXT)`);
+
+  // Órfãos gerados quando codigo_produto foi dropado e a migração reinseriu sem match.
+  const delOrfaos = await conn.query(`
+    DELETE FROM etiqueta."ETQ_rec_impresso"
+     WHERE fonte = 'endereco_pp'
+       AND COALESCE(qtd, 0) = 0
+       AND (codigo_produto IS NULL OR TRIM(codigo_produto) = '')
+       AND (conteudo_zpl IS NULL OR TRIM(conteudo_zpl) = '')
+  `);
+  if (delOrfaos.rowCount > 0) {
+    console.log(`[etiqueta] Removidos ${delOrfaos.rowCount} registro(s) lixo endereco_pp (sem código/qtd/zpl)`);
+  }
+
+  const { rows: meta } = await conn.query(
+    `SELECT valor FROM etiqueta."_meta" WHERE chave = 'etq_endereco_pp_migrado_v3'`
+  );
+  if (meta[0]?.valor === 'done') return;
+
+  // Catálogo de referência (qtd=0) a partir de Endereço_pp — uma vez.
+  const mig = await conn.query(`
+    INSERT INTO etiqueta."ETQ_rec_impresso"
+      (origem_id, qtd, unidade, data_emissao, conteudo_zpl, usuario_criacao,
+       endereco, codigo_produto, descricao_produto, complemento, fonte)
+    SELECT NULL, 0, 'UN',
+           to_char(CURRENT_DATE, 'DD/MM/YYYY'), '', 'migracao_endereco_pp',
+           TRIM(ep.completo),
+           TRIM(ep.codigo_produto::text),
+           NULLIF(TRIM(ep.descricao), ''),
+           NULLIF(TRIM(ep.apartamento), ''),
+           'endereco_pp'
+      FROM logistica."Endereço_pp" ep
+     WHERE ep.completo IS NOT NULL AND TRIM(ep.completo) <> ''
+       AND ep.codigo_produto IS NOT NULL
+       AND TRIM(ep.codigo_produto::text) <> ''
+       AND NOT EXISTS (
+         SELECT 1 FROM etiqueta."ETQ_rec_impresso" i
+          WHERE TRIM(COALESCE(i.endereco, '')) = TRIM(ep.completo)
+            AND TRIM(COALESCE(i.codigo_produto, '')) = TRIM(ep.codigo_produto::text)
+       )
+  `);
+
+  await conn.query(`
+    UPDATE etiqueta."ETQ_rec_impresso" i
+       SET complemento = NULLIF(TRIM(ep.apartamento), ''),
+           descricao_produto = COALESCE(NULLIF(TRIM(i.descricao_produto), ''), NULLIF(TRIM(ep.descricao), ''))
+      FROM logistica."Endereço_pp" ep
+     WHERE TRIM(COALESCE(i.endereco, '')) = TRIM(ep.completo)
+       AND TRIM(COALESCE(i.codigo_produto, '')) = TRIM(ep.codigo_produto::text)
+       AND (
+         (ep.apartamento IS NOT NULL AND TRIM(ep.apartamento) <> ''
+           AND (i.complemento IS NULL OR TRIM(i.complemento) = ''))
+         OR (i.descricao_produto IS NULL OR TRIM(i.descricao_produto) = '')
+       )
+  `);
+
+  await conn.query(`
+    INSERT INTO etiqueta."_meta" (chave, valor) VALUES ('etq_endereco_pp_migrado_v3', 'done')
+    ON CONFLICT (chave) DO UPDATE SET valor = EXCLUDED.valor
+  `);
+
+  console.log(`[etiqueta] Catálogo Endereço_pp: +${mig.rowCount} referência(s) (migração única v3)`);
+}
+
+/** Backfill seguro de codigo/descricao — nunca apaga nem renumera IDs. */
+async function _etqBackfillRecImpressoSeguro(db) {
+  const conn = db || pool;
+
+  await conn.query(`
+    UPDATE etiqueta."ETQ_rec_impresso" i
+       SET codigo_produto = COALESCE(NULLIF(TRIM(i.codigo_produto), ''), p.codigo_produto::text),
+           descricao_produto = COALESCE(
+             NULLIF(TRIM(i.descricao_produto), ''),
+             NULLIF(TRIM(p.descricao), ''),
+             NULLIF(TRIM(r.descricao_produto), '')
+           )
+      FROM etiqueta."ETQ_recebimento" r
+      JOIN public.produtos_omie p ON TRIM(p.codigo) = TRIM(r.codigo_produto)
+     WHERE r.id = i.origem_id
+       AND (
+         NULLIF(TRIM(i.codigo_produto), '') IS NULL
+         OR NULLIF(TRIM(i.descricao_produto), '') IS NULL
+       )
+  `);
+
+  await conn.query(`
+    UPDATE etiqueta."ETQ_rec_impresso" i
+       SET codigo_produto = p.codigo_produto::text,
+           descricao_produto = COALESCE(
+             NULLIF(TRIM(i.descricao_produto), ''),
+             NULLIF(TRIM(p.descricao), '')
+           )
+      FROM public.produtos_omie p
+     WHERE (i.codigo_produto IS NULL OR TRIM(i.codigo_produto) = '')
+       AND i.conteudo_zpl IS NOT NULL
+       AND TRIM(i.conteudo_zpl) <> ''
+       AND TRIM(SUBSTRING(i.conteudo_zpl FROM 'Cod\\. Produto: ([^\\^\\n\\r]+)')) <> ''
+       AND TRIM(p.codigo) = TRIM(SUBSTRING(i.conteudo_zpl FROM 'Cod\\. Produto: ([^\\^\\n\\r]+)'))
+       AND p.codigo_produto IS NOT NULL
+  `);
+
+  // codigo_produto gravado como texto (produtos_omie.codigo) → id Omie
+  await conn.query(`
+    UPDATE etiqueta."ETQ_rec_impresso" i
+       SET codigo_produto = p.codigo_produto::text,
+           descricao_produto = COALESCE(NULLIF(TRIM(i.descricao_produto), ''), NULLIF(TRIM(p.descricao), ''))
+      FROM public.produtos_omie p
+     WHERE TRIM(i.codigo_produto) = TRIM(p.codigo)
+       AND p.codigo_produto IS NOT NULL
+       AND TRIM(i.codigo_produto) <> TRIM(p.codigo_produto::text)
+  `);
+}
+
+/** Insere ETQ_rec_impresso a partir de etiqueta de recebimento (codigo_produto = id Omie). */
+async function _insertEtqRecImpressoRecebimento(db, { origemId, qtd, unidade, dataEmissao, usuario, codProd, descProd }) {
+  const campos = await _etqResolveProdutoCampos(db, {
+    codigoTexto: codProd,
+    descricao: descProd
+  });
+  const { rows } = await db.query(
+    `INSERT INTO etiqueta."ETQ_rec_impresso"
+       (origem_id, qtd, unidade, data_emissao, conteudo_zpl, usuario_criacao,
+        codigo_produto, descricao_produto, fonte)
+     VALUES ($1,$2,$3,$4,'',$5,$6,$7,'recebimento')
+     RETURNING id`,
+    [origemId, qtd, unidade, dataEmissao, usuario || null, campos.codigo_produto, campos.descricao_produto]
+  );
+  return rows[0].id;
+}
+
+// ── Helper: quebra descrição da etiqueta (~38 caracteres por linha, respeitando espaços) ──
+const DESC_ETQ_CHARS_POR_LINHA = 39;
+const DESC_ETQ_MAX_LINHAS = 4;
+
+function _quebrarDescricaoEtiqueta(texto, maxChars = DESC_ETQ_CHARS_POR_LINHA, maxLinhas = DESC_ETQ_MAX_LINHAS) {
+  const t = String(texto || '').trim();
+  if (!t) return [];
+  const linhas = [];
+  let resto = t;
+  while (resto.length > 0 && linhas.length < maxLinhas) {
+    if (resto.length <= maxChars) {
+      linhas.push(resto);
+      break;
+    }
+    let corte = resto.lastIndexOf(' ', maxChars);
+    if (corte <= 0) corte = maxChars;
+    linhas.push(resto.slice(0, corte).trim());
+    resto = resto.slice(corte).trim();
+  }
+  return linhas;
+}
+
+function _descricaoParaZpl(descProd) {
+  const limpo = String(descProd || '').slice(0, 160).replace(/[\\^~]/g, ' ');
+  const linhas = _quebrarDescricaoEtiqueta(limpo);
+  return {
+    texto: linhas.join('\\&'),
+    linhas: linhas.length || 1,
+  };
+}
+
+// ── Helper: gera ZPL para IMPRESSÃO física (layout Etiquetas disponíveis) ──
 function _gerarZplParaImpressao({ codProd, descProd, idImpresso, loteTxt, dataExibir }) {
-  const qr = `${codProd}|${descProd.slice(0, 40)}|${loteTxt}|ID${idImpresso}`;
+  const qr = `${codProd}|${String(descProd || '').slice(0, 40)}|${loteTxt}|ID${idImpresso}`;
+  const { texto: descTxt, linhas: numLinhasDesc } = _descricaoParaZpl(descProd);
+  const dadosX = 150; // à direita do QR sem sobrepor (132 encostava no QR)
+  const dadosY = 22;  // margem superior — alinha com o topo visual do QR
+  const descX = 10;   // alinhado à esquerda com o QR
+  const descY = 158;  // abaixo do QR, com folga (era 150 e encostava)
+  const alturaLinhaDesc = 22;
+  const labelLen = Math.max(183, descY + numLinhasDesc * alturaLinhaDesc + 6);
   return [
     '^XA',
     '^CI28',
-    '^PW399',          // 50 mm @ 203 dpi — sobrescrito pelo agente
-    '^LL240',          // 30 mm @ 203 dpi — sobrescrito pelo agente
-    // QR code — canto superior esquerdo, escala 5 (~165×165 dots)
-    `^FO5,5^BQN,2,5^FDLA,${qr}^FS`,
-    // Código do produto — só o valor, sem rótulo
-    `^FO178,8^A0N,20,20^FD${codProd}^FS`,
-    // ID, Lote e data na coluna direita
-    `^FO178,32^A0N,20,20^FDID: ${idImpresso}^FS`,
-    `^FO178,56^A0N,20,20^FDLote:^FS`,
-    `^FO178,80^A0N,20,20^FD${loteTxt}^FS`,
-    `^FO178,104^A0N,20,20^FDEmissao: ${dataExibir}^FS`,
-    // Descrição abaixo do QR — até 2 linhas, sem rótulo
-    `^FO5,190^A0N,20,20^FB385,2,0,L,0^FD${descProd.slice(0, 60)}^FS`,
+    '^PW812',
+    `^LL${labelLen}`,
+    `^FO10,10^BQN,2,4^FDLA,${qr}^FS`,
+    `^FO${dadosX},${dadosY}^A0N,20,20^FDCod. Produto: ${codProd}^FS`,
+    `^FO${dadosX},${dadosY + 24}^A0N,20,20^FDID: ${idImpresso}^FS`,
+    `^FO${dadosX},${dadosY + 48}^A0N,20,20^FDLote: ${loteTxt}^FS`,
+    `^FO${dadosX},${dadosY + 72}^A0N,20,20^FDEmissao: ${dataExibir}^FS`,
+    `^FO${descX},${descY}^A0N,18,18^FD${descTxt}^FS`,
     '^XZ',
   ].join('\n');
+}
+
+async function _zplCombinadoParaPdf(zplCombinado, labelSize = '4x0.9') {
+  const labelaryResp = await fetch(
+    `http://api.labelary.com/v1/printers/8dpmm/labels/${labelSize}/`,
+    {
+      method: 'POST',
+      headers: { Accept: 'application/pdf', 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: zplCombinado,
+    }
+  );
+  if (!labelaryResp.ok) {
+    const txt = await labelaryResp.text().catch(() => '');
+    throw new Error(`Labelary retornou ${labelaryResp.status}: ${txt.slice(0, 120)}`);
+  }
+  return Buffer.from(await labelaryResp.arrayBuffer());
 }
 
 // ── Etiquetas de Recebimento: gera PDF + salva no banco (1 etiqueta por item) ─
@@ -11284,14 +11668,15 @@ app.get('/api/etiquetas/recebimento/pdf-download', async (req, res) => {
       }
 
       for (const qtdEtq of lotes) {
-        const ins = await pool.query(
-          `INSERT INTO etiqueta."ETQ_rec_impresso"
-             (origem_id, qtd, unidade, data_emissao, conteudo_zpl, usuario_criacao)
-           VALUES ($1,$2,$3,$4,'',$5)
-           RETURNING id`,
-          [row.id, qtdEtq, row.unidade, row.data_emissao, usuarioImpressao]
-        );
-        const idImpresso = ins.rows[0].id;
+        const idImpresso = await _insertEtqRecImpressoRecebimento(pool, {
+          origemId: row.id,
+          qtd: qtdEtq,
+          unidade: row.unidade,
+          dataEmissao: row.data_emissao,
+          usuario: usuarioImpressao,
+          codProd,
+          descProd
+        });
 
         const zpl = _gerarZplParaImpressao({ codProd, descProd, idImpresso, loteTxt, dataExibir });
 
@@ -11363,14 +11748,15 @@ app.get('/api/etiquetas/recebimento/zpl-download', async (req, res) => {
       const loteTxt    = sanitize(row.lote, 40);
       const dataExibir = sanitize(row.data_emissao, 10);
 
-      const ins = await pool.query(
-        `INSERT INTO etiqueta."ETQ_rec_impresso"
-           (origem_id, qtd, unidade, data_emissao, conteudo_zpl, usuario_criacao)
-         VALUES ($1,$2,$3,$4,'',$5)
-         RETURNING id`,
-        [row.id, row.qtd, row.unidade, row.data_emissao, usuarioImpressao]
-      );
-      const idImpresso = ins.rows[0].id;
+      const idImpresso = await _insertEtqRecImpressoRecebimento(pool, {
+        origemId: row.id,
+        qtd: row.qtd,
+        unidade: row.unidade,
+        dataEmissao: row.data_emissao,
+        usuario: usuarioImpressao,
+        codProd,
+        descProd
+      });
       const zpl = _gerarZplParaImpressao({ codProd, descProd, idImpresso, loteTxt, dataExibir });
 
       await pool.query(
@@ -11437,14 +11823,15 @@ app.post('/api/etiquetas/recebimento/imprimir-local', express.json(), async (req
       }
 
       for (const qtdEtq of lotes) {
-        const ins = await pool.query(
-          `INSERT INTO etiqueta."ETQ_rec_impresso"
-             (origem_id, qtd, unidade, data_emissao, conteudo_zpl, usuario_criacao)
-           VALUES ($1,$2,$3,$4,'',$5)
-           RETURNING id`,
-          [row.id, qtdEtq, row.unidade, row.data_emissao, usuarioImpressao]
-        );
-        const idImpresso = ins.rows[0].id;
+        const idImpresso = await _insertEtqRecImpressoRecebimento(pool, {
+          origemId: row.id,
+          qtd: qtdEtq,
+          unidade: row.unidade,
+          dataEmissao: row.data_emissao,
+          usuario: usuarioImpressao,
+          codProd,
+          descProd
+        });
         const zpl = _gerarZplParaImpressao({ codProd, descProd, idImpresso, loteTxt, dataExibir });
         await pool.query(
           `UPDATE etiqueta."ETQ_rec_impresso" SET conteudo_zpl = $1 WHERE id = $2`,
@@ -11463,6 +11850,102 @@ app.post('/api/etiquetas/recebimento/imprimir-local', express.json(), async (req
   } catch (err) {
     console.error('[etiquetas/imprimir-local]', err);
     res.status(500).json({ error: err?.message || 'Falha ao gerar ZPL' });
+  }
+});
+
+// GET /api/etiquetas/rec-impresso/enderecos-por-produto?codigo=XXX
+// Endereços já registrados em ETQ_rec_impresso para um código de produto
+app.get('/api/etiquetas/rec-impresso/enderecos-por-produto', async (req, res) => {
+  try {
+    const codigo = String(req.query.codigo || '').trim();
+    if (!codigo) return res.status(400).json({ ok: false, error: 'codigo é obrigatório.' });
+
+    const idOmie = await _resolveProdutoOmieCodigoProduto(pool, codigo);
+    if (!idOmie) return res.json({ ok: true, codigo, enderecos: [] });
+
+    const { rows } = await pool.query(
+      `SELECT TRIM(i.endereco) AS endereco,
+              SUM(COALESCE(i.qtd, 0)) AS qtd,
+              MAX(i.complemento) AS complemento,
+              MAX(i.impresso_em) AS impresso_em,
+              $2::text AS codigo_produto
+         FROM etiqueta."ETQ_rec_impresso" i
+        WHERE TRIM(COALESCE(i.codigo_produto, '')) = $1
+          AND i.endereco IS NOT NULL AND TRIM(i.endereco) <> ''
+        GROUP BY TRIM(i.endereco)
+       HAVING SUM(COALESCE(i.qtd, 0)) > 0
+        ORDER BY TRIM(i.endereco)`,
+      [idOmie, codigo]
+    );
+
+    res.json({ ok: true, codigo, enderecos: rows });
+  } catch (err) {
+    console.error('[etiquetas/rec-impresso/enderecos-por-produto]', err);
+    res.status(500).json({ ok: false, error: err?.message || 'Falha ao buscar endereços.' });
+  }
+});
+
+// GET /api/etiquetas/rec-impresso/enderecos-referencia-por-produto?codigo=XXX
+// Todos os endereços distintos em ETQ_rec_impresso (referência + saldo), para o modal de movimentação
+app.get('/api/etiquetas/rec-impresso/enderecos-referencia-por-produto', async (req, res) => {
+  try {
+    const codigo = String(req.query.codigo || '').trim();
+    if (!codigo) return res.status(400).json({ ok: false, error: 'codigo é obrigatório.' });
+
+    const { rows } = await pool.query(
+      `SELECT DISTINCT ON (TRIM(i.endereco))
+              i.id,
+              TRIM(i.endereco) AS endereco,
+              COALESCE(i.qtd, 0) AS qtd,
+              COALESCE(NULLIF(TRIM(i.unidade), ''), 'UN') AS unidade,
+              i.complemento
+         FROM etiqueta."ETQ_rec_impresso" i
+         JOIN public.produtos_omie p
+           ON TRIM(i.codigo_produto) IN (p.codigo_produto::text, TRIM(p.codigo))
+        WHERE (p.codigo = $1 OR p.codigo_produto::text = $1 OR p.codigo_produto_integracao = $1)
+          AND i.endereco IS NOT NULL AND TRIM(i.endereco) <> ''
+        ORDER BY TRIM(i.endereco), COALESCE(i.qtd, 0) DESC, i.id DESC`,
+      [codigo]
+    );
+
+    res.json({ ok: true, codigo, enderecos: rows });
+  } catch (err) {
+    console.error('[etiquetas/rec-impresso/enderecos-referencia-por-produto]', err);
+    res.status(500).json({ ok: false, error: err?.message || 'Falha ao buscar endereços de referência.' });
+  }
+});
+
+// GET /api/etiquetas/rec-impresso/etiquetas-por-produto?codigo=XXX
+// Registros ETQ_rec_impresso com id (último por endereço, qtd > 0) para reimpressão
+app.get('/api/etiquetas/rec-impresso/etiquetas-por-produto', async (req, res) => {
+  try {
+    const codigo = String(req.query.codigo || '').trim();
+    if (!codigo) return res.status(400).json({ ok: false, error: 'codigo é obrigatório.' });
+
+    const idOmie = await _resolveProdutoOmieCodigoProduto(pool, codigo);
+    if (!idOmie) return res.json({ ok: true, codigo, etiquetas: [] });
+
+    const { rows } = await pool.query(
+      `SELECT DISTINCT ON (TRIM(i.endereco))
+              i.id,
+              TRIM(i.endereco) AS endereco,
+              COALESCE(i.qtd, 0) AS qtd,
+              i.complemento,
+              i.data_emissao,
+              i.impresso_em,
+              $2::text AS codigo_produto
+         FROM etiqueta."ETQ_rec_impresso" i
+        WHERE TRIM(COALESCE(i.codigo_produto, '')) = $1
+          AND i.endereco IS NOT NULL AND TRIM(i.endereco) <> ''
+          AND COALESCE(i.qtd, 0) > 0
+        ORDER BY TRIM(i.endereco), i.id DESC`,
+      [idOmie, codigo]
+    );
+
+    res.json({ ok: true, codigo, etiquetas: rows });
+  } catch (err) {
+    console.error('[etiquetas/rec-impresso/etiquetas-por-produto]', err);
+    res.status(500).json({ ok: false, error: err?.message || 'Falha ao buscar etiquetas.' });
   }
 });
 
@@ -11515,9 +11998,25 @@ app.patch('/api/etiquetas/rec-impresso/:id/endereco', express.json(), async (req
     const complemento = String(req.body?.complemento || '').trim();
     if (!id || !endereco) return res.status(400).json({ error: 'id e endereco são obrigatórios.' });
 
-    // 1. Salva endereço (e complemento opcional) e busca dados do produto
+    // 1. Salva endereço (e complemento opcional) e preenche codigo/descricao se vazios
     const result = await pool.query(
-      `UPDATE etiqueta."ETQ_rec_impresso" SET endereco = $1, complemento = $2 WHERE id = $3 RETURNING id, endereco, complemento, origem_id, qtd`,
+      `UPDATE etiqueta."ETQ_rec_impresso" i
+          SET endereco = $1,
+              complemento = $2,
+              codigo_produto = COALESCE(
+                NULLIF(TRIM(i.codigo_produto), ''),
+                (SELECT p.codigo_produto::text
+                   FROM etiqueta."ETQ_recebimento" r
+                   JOIN public.produtos_omie p ON TRIM(p.codigo) = TRIM(r.codigo_produto)
+                  WHERE r.id = i.origem_id
+                  LIMIT 1)
+              ),
+              descricao_produto = COALESCE(
+                NULLIF(TRIM(i.descricao_produto), ''),
+                (SELECT r.descricao_produto FROM etiqueta."ETQ_recebimento" r WHERE r.id = i.origem_id LIMIT 1)
+              )
+        WHERE i.id = $3
+        RETURNING i.id, i.endereco, i.complemento, i.origem_id, i.qtd, i.codigo_produto, i.descricao_produto`,
       [endereco, complemento || null, id]
     );
     if (!result.rows.length) return res.status(404).json({ error: 'Registro não encontrado.' });
@@ -11596,6 +12095,890 @@ app.patch('/api/etiquetas/rec-impresso/:id/endereco', express.json(), async (req
   }
 });
 
+// POST /api/etiquetas/rec-impresso/registrar-movimentacao
+// Body: { codigo, descricao?, qtd?, endereco_origem?, endereco_destino?, enderecos?, complemento?, usuario?, tipo_movimentacao? }
+// Porta Pallet (mesmo armazém): ENT credita destino, SAI debita origem, TRF debita origem e credita destino em ETQ_rec_impresso.
+app.post('/api/etiquetas/rec-impresso/registrar-movimentacao', express.json(), async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const codigoTexto = String(req.body?.codigo || '').trim();
+    const descricaoRaw = String(req.body?.descricao || '').trim() || null;
+    const qtd       = Number(req.body?.qtd);
+    const complementoRaw = String(req.body?.complemento || '').trim() || null;
+    const tipoMov   = String(req.body?.tipo_movimentacao || '').trim().toUpperCase() || null;
+    const usuario   = String(req.body?.usuario || req.body?.usuario_criacao || '').trim() || null;
+    let enderecoOrigem  = String(req.body?.endereco_origem  || '').trim() || null;
+    let enderecoDestino = String(req.body?.endereco_destino || '').trim() || null;
+    const enderecosRaw = Array.isArray(req.body?.enderecos) ? req.body.enderecos : [];
+    const enderecos = [...new Set(enderecosRaw.map(e => String(e || '').trim()).filter(Boolean))];
+
+    if (!codigoTexto) return res.status(400).json({ error: 'codigo é obrigatório.' });
+    if (!Number.isFinite(qtd) || qtd <= 0) return res.status(400).json({ error: 'Informe uma quantidade válida (> 0).' });
+
+    const codigoOmie = await _resolveProdutoOmieCodigoProduto(client, codigoTexto)
+      || String(req.body?.codigo_produto_omie || req.body?.codigo_produto || '').trim()
+      || null;
+    if (!codigoOmie) {
+      return res.status(400).json({ error: `Produto "${codigoTexto}" não encontrado em produtos_omie.` });
+    }
+
+    let descricao = descricaoRaw;
+    if (!descricao) {
+      const { rows: descRows } = await client.query(
+        `SELECT descricao FROM public.produtos_omie
+          WHERE codigo_produto::text = $1 OR codigo = $2 LIMIT 1`,
+        [codigoOmie, codigoTexto]
+      );
+      descricao = descRows[0]?.descricao || codigoTexto;
+    }
+
+    if (tipoMov === 'TRF' && !enderecoOrigem && !enderecoDestino && enderecos.length >= 2) {
+      enderecoOrigem = enderecos[0];
+      enderecoDestino = enderecos[1];
+    }
+
+    const hoje = new Date();
+    const dataEmissao = `${String(hoje.getDate()).padStart(2, '0')}/${String(hoje.getMonth() + 1).padStart(2, '0')}/${hoje.getFullYear()}`;
+    const complementoPartes = [];
+    if (tipoMov) complementoPartes.push(`Tipo: ${tipoMov}`);
+    if (complementoRaw) complementoPartes.push(`Apontamento: ${complementoRaw}`);
+    const complemento = complementoPartes.length ? complementoPartes.join(' | ') : null;
+
+    const sanitize = (v, max = 999) => String(v || '').slice(0, max).replace(/[\\^~]/g, ' ');
+    const codProd  = sanitize(await _resolveProdutoOmieCodigoTexto(client, codigoTexto) || codigoTexto, 30);
+    const descProd = sanitize(descricao || codigoTexto, 70);
+
+    const movInterno =
+      (tipoMov === 'TRF' && enderecoOrigem && enderecoDestino) ||
+      (tipoMov === 'SAI' && enderecoOrigem) ||
+      (tipoMov === 'ENT' && enderecoDestino);
+
+    if (movInterno) {
+      if (tipoMov === 'TRF' && (!enderecoOrigem || !enderecoDestino)) {
+        return res.status(400).json({ error: 'Transferência exige endereço de origem e destino.' });
+      }
+      if (tipoMov === 'SAI' && !enderecoOrigem) {
+        return res.status(400).json({ error: 'Saída exige endereço de origem.' });
+      }
+      if (tipoMov === 'ENT' && !enderecoDestino) {
+        return res.status(400).json({ error: 'Entrada exige endereço de destino.' });
+      }
+      if (tipoMov === 'TRF' && enderecoOrigem === enderecoDestino) {
+        return res.status(400).json({ error: 'Origem e destino devem ser endereços diferentes.' });
+      }
+
+      await client.query('BEGIN');
+      const resultado = await _processarMovimentacaoEtqInterna(client, {
+        codigo: codigoOmie,
+        codigoTexto,
+        descricao,
+        qtd,
+        tipoMov,
+        enderecoOrigem,
+        enderecoDestino,
+        complemento,
+        usuario,
+        dataEmissao,
+        codProd,
+        descProd,
+        sanitize
+      });
+      await client.query('COMMIT');
+      return res.json({ ok: true, ...resultado });
+    }
+
+    if (!enderecos.length) return res.status(400).json({ error: 'Informe ao menos um endereço.' });
+
+    if (tipoMov === 'TRF') {
+      return res.status(400).json({
+        error: 'Transferência exige endereço de origem e destino (selecione dois endereços na lista).'
+      });
+    }
+
+    const registros = [];
+    for (const endereco of enderecos) {
+      const row = await _insertEtqMovimentacaoEndereco(client, {
+        endereco,
+        qtd,
+        dataEmissao,
+        usuario,
+        complemento,
+        codigoOmie,
+        descricao,
+        codigoTexto,
+        codProd,
+        descProd,
+        sanitize
+      });
+      registros.push(row);
+    }
+
+    res.json({ ok: true, registros });
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    console.error('[etiquetas/rec-impresso/registrar-movimentacao]', err);
+    res.status(500).json({ error: err?.message || 'Falha ao registrar endereço(s).' });
+  } finally {
+    client.release();
+  }
+});
+
+async function _etqLinhasSaldoEndereco(client, codigoOmie, endereco) {
+  const { rows } = await client.query(
+    `SELECT i.id, i.qtd, i.unidade, i.data_emissao, i.endereco, i.complemento,
+            i.codigo_produto, i.descricao_produto, i.fonte, i.origem_id, i.usuario_criacao
+       FROM etiqueta."ETQ_rec_impresso" i
+      WHERE TRIM(COALESCE(i.codigo_produto, '')) = $1
+        AND TRIM(COALESCE(i.endereco, '')) = $2
+        AND COALESCE(i.qtd, 0) > 0
+      ORDER BY i.impresso_em ASC NULLS LAST, i.id ASC`,
+    [codigoOmie, endereco]
+  );
+  return rows;
+}
+
+async function _etqDebitarEndereco(client, { codigo, endereco, qtd, usuario }) {
+  const linhas = await _etqLinhasSaldoEndereco(client, codigo, endereco);
+  const total = linhas.reduce((s, r) => s + Number(r.qtd || 0), 0);
+  if (total + 1e-9 < qtd) {
+    throw new Error(`Saldo insuficiente no endereco ${endereco} (${total} disponivel, ${qtd} solicitado).`);
+  }
+  let restante = qtd;
+  const alterados = [];
+  for (const row of linhas) {
+    if (restante <= 0) break;
+    const atual = Number(row.qtd || 0);
+    const debito = Math.min(atual, restante);
+    const novaQtd = Math.max(0, atual - debito);
+    await client.query(
+      `UPDATE etiqueta."ETQ_rec_impresso" SET qtd = $1 WHERE id = $2`,
+      [novaQtd, row.id]
+    );
+    alterados.push({ id: row.id, endereco, qtd_anterior: atual, qtd_nova: novaQtd, delta: -debito });
+    restante -= debito;
+  }
+  return { alterados, linhaReferencia: linhas[0] || null };
+}
+
+const LOGISTICA_ALMOX_LOCAL_COD = '10717096386';
+
+function _omieNormalizaNumeroSeparacao(value) {
+  if (value === null || value === undefined) return null;
+  if (typeof value === 'number') return Number.isFinite(value) ? value : null;
+  const textoOriginal = String(value).trim();
+  if (!textoOriginal) return null;
+  const semEspacos = textoOriginal.replace(/\s+/g, '');
+  const possuiVirgula = semEspacos.includes(',');
+  const possuiPonto = semEspacos.includes('.');
+  let normalizado = semEspacos;
+  if (possuiVirgula && possuiPonto) {
+    if (semEspacos.lastIndexOf(',') > semEspacos.lastIndexOf('.')) {
+      normalizado = semEspacos.replace(/\./g, '').replace(',', '.');
+    } else {
+      normalizado = semEspacos.replace(/,/g, '');
+    }
+  } else if (possuiVirgula) {
+    normalizado = semEspacos.replace(/\./g, '').replace(',', '.');
+  }
+  const parsed = Number(normalizado);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function _omieFormatarDataBRSeparacao(data = new Date()) {
+  const valor = data instanceof Date ? data : new Date(data);
+  const dia = String(valor.getDate()).padStart(2, '0');
+  const mes = String(valor.getMonth() + 1).padStart(2, '0');
+  const ano = String(valor.getFullYear());
+  return `${dia}/${mes}/${ano}`;
+}
+
+async function _logisticaBuscarCmcOmieSeparacao(client, codigo, localCod) {
+  if (!codigo || !localCod) return null;
+  const { rows } = await client.query(
+    `SELECT cmc, preco_unitario
+       FROM logistica.estoque_atual
+      WHERE codigo = $1 AND local_codigo = $2
+      LIMIT 1`,
+    [String(codigo).trim(), String(localCod).trim()]
+  );
+  const cmc = _omieNormalizaNumeroSeparacao(rows[0]?.cmc)
+    || _omieNormalizaNumeroSeparacao(rows[0]?.preco_unitario);
+  return cmc && cmc > 0 ? cmc : null;
+}
+
+function _logisticaNomeUsuarioReq(req) {
+  return String(req?.session?.user?.username || req?.session?.user?.nome || '').trim();
+}
+
+/** Texto enviado no campo obs do ajuste TRF Omie (separação / retificação). Evita caracteres não-ASCII (ex.: →). */
+function _omieObsTrfSeparacaoLogistica({ n_solic, codigo, origem, destino, qtd, nomeDest, usuario, retificacao = false }) {
+  const sepNum = String(n_solic || '').trim();
+  const sepPart = sepNum ? `${sepNum} ` : '';
+  const userPart = String(usuario || '').trim();
+  const destPart = String(nomeDest || '').trim();
+  let text;
+  if (retificacao) {
+    text = `Retificar SEP ${sepPart}logística ${codigo}: estorno ${destino} ${origem} (${qtd})${userPart ? ` por ${userPart}` : ''}`;
+  } else {
+    text = `SEP ${sepPart}logística ${codigo}: ${origem} ${destino} (${qtd})${destPart ? ` ${destPart}` : ''}${userPart ? ` por ${userPart}` : ''}`;
+  }
+  return text.replace(/\s+/g, ' ').trim().slice(0, 200);
+}
+
+async function _omieIncluirTrfEstoqueSeparacao({ origem, destino, id_prod, codigo_texto, qtd, obs }) {
+  if (!OMIE_APP_KEY || !OMIE_APP_SECRET) {
+    const err = new Error('Credenciais Omie não configuradas no servidor.');
+    err.code = 'OMIE_CREDENCIAIS';
+    throw err;
+  }
+  const origemStr = String(origem || '').trim();
+  const destinoStr = String(destino || '').trim();
+  const qtdNum = _omieNormalizaNumeroSeparacao(qtd);
+  const idProdNum = _omieNormalizaNumeroSeparacao(id_prod);
+  if (!origemStr || !destinoStr || !idProdNum || !qtdNum || qtdNum <= 0) {
+    const err = new Error('Dados inválidos para transferência Omie na separação.');
+    err.code = 'OMIE_TRF_SEPARACAO';
+    throw err;
+  }
+  if (origemStr === destinoStr) return null;
+
+  let valor = await _logisticaBuscarCmcOmieSeparacao(pool, codigo_texto, origemStr);
+  if (!valor || valor <= 0) {
+    valor = await _logisticaBuscarCmcOmieSeparacao(pool, codigo_texto, destinoStr);
+  }
+  if (!valor || valor <= 0) {
+    const { rows } = await pool.query(
+      `SELECT COALESCE(NULLIF(valor_unitario, 0), 0.01) AS valor
+         FROM public.produtos_omie
+        WHERE codigo = $1 OR codigo_produto::text = $2
+        LIMIT 1`,
+      [String(codigo_texto || '').trim(), String(id_prod)]
+    );
+    valor = _omieNormalizaNumeroSeparacao(rows[0]?.valor) || 0.01;
+  }
+
+  const payload = {
+    call: 'IncluirAjusteEstoque',
+    app_key: OMIE_APP_KEY,
+    app_secret: OMIE_APP_SECRET,
+    param: [{
+      codigo_local_estoque: origemStr,
+      codigo_local_estoque_destino: destinoStr,
+      id_prod: idProdNum,
+      data: _omieFormatarDataBRSeparacao(),
+      tipo: 'TRF',
+      quan: qtdNum,
+      valor,
+      obs: String(obs || 'Separação logística').slice(0, 200),
+      origem: 'AJU',
+      motivo: 'TRF'
+    }]
+  };
+
+  console.log(`[logistica/omie-trf-sep] ${codigo_texto}: ${origemStr} → ${destinoStr} (${qtdNum})`);
+  const resp = await omieCall('https://app.omie.com.br/api/v1/estoque/ajuste/', payload);
+  if (resp?.faultstring) {
+    const err = new Error(String(resp.faultstring));
+    err.code = 'OMIE_TRF_SEPARACAO';
+    throw err;
+  }
+  if (resp?.codigo_status != null && String(resp.codigo_status) !== '0') {
+    const err = new Error(String(resp.descricao_status || 'Omie rejeitou a transferência de estoque.'));
+    err.code = 'OMIE_TRF_SEPARACAO';
+    throw err;
+  }
+  return resp;
+}
+
+async function _ensureOmieSepColumns(client) {
+  const db = client || pool;
+  await db.query(`ALTER TABLE solicitacao_produto.itens_solicitados ADD COLUMN IF NOT EXISTS omie_sep_origem TEXT`);
+  await db.query(`ALTER TABLE solicitacao_produto.itens_solicitados ADD COLUMN IF NOT EXISTS omie_sep_destino TEXT`);
+  await db.query(`ALTER TABLE solicitacao_produto.itens_solicitados ADD COLUMN IF NOT EXISTS omie_sep_qtd NUMERIC(18,4)`);
+  await db.query(`ALTER TABLE solicitacao_produto.itens_solicitados ADD COLUMN IF NOT EXISTS omie_sep_codigo_produto TEXT`);
+  await db.query(`ALTER TABLE solicitacao_produto.itens_solicitados ADD COLUMN IF NOT EXISTS omie_sep_codigo TEXT`);
+}
+
+async function _logisticaPersistirTrfOmieSeparacao(client, solicIds, { origem, destino, qtd, codigo_produto, codigo }) {
+  const qtdNum = parseFloat(qtd);
+  if (!origem || !destino || !Number.isFinite(qtdNum) || qtdNum <= 0) return;
+  const ids = (solicIds || []).map(id => parseInt(id, 10)).filter(id => !isNaN(id));
+  if (!ids.length) return;
+  await _ensureOmieSepColumns(client);
+
+  const { rows } = await client.query(
+    `SELECT i.id, c.quantidade::numeric AS qty_carr
+       FROM solicitacao_produto.itens_solicitados i
+       JOIN logistica.carrinho c ON c.id = i.id_carr
+      WHERE i.id = ANY($1::bigint[])`,
+    [ids]
+  );
+  const sumCarr = rows.reduce((s, r) => s + (parseFloat(r.qty_carr) || 0), 0);
+  for (const row of rows) {
+    let itemQtd = qtdNum;
+    if (rows.length > 1 && sumCarr > 0) {
+      itemQtd = ((parseFloat(row.qty_carr) || 0) / sumCarr) * qtdNum;
+    }
+    await client.query(
+      `UPDATE solicitacao_produto.itens_solicitados
+          SET omie_sep_origem = $2,
+              omie_sep_destino = $3,
+              omie_sep_qtd = $4,
+              omie_sep_codigo_produto = $5,
+              omie_sep_codigo = $6
+        WHERE id = $1`,
+      [row.id, origem, destino, itemQtd, String(codigo_produto), String(codigo || '')]
+    );
+  }
+}
+
+async function _logisticaExecutarTrfOmieSeparacao(client, solicIds, { cod_local_origem, qtd, nome_user }) {
+  const origem = String(cod_local_origem || '').trim();
+  if (!origem) {
+    const err = new Error('Selecione o armazém de origem para registrar a transferência na Omie.');
+    err.code = 'OMIE_ORIGEM_OBRIGATORIA';
+    throw err;
+  }
+
+  const ids = (solicIds || []).map(id => parseInt(id, 10)).filter(id => !isNaN(id));
+  if (!ids.length) return;
+
+  const { rows } = await client.query(
+    `SELECT i.id, i.n_solic, i.cod_local, i.nome_local, c.codigo_produto, c.quantidade::numeric AS qty
+       FROM solicitacao_produto.itens_solicitados i
+       JOIN logistica.carrinho c ON c.id = i.id_carr
+      WHERE i.id = ANY($1::bigint[])`,
+    [ids]
+  );
+  if (!rows.length) return;
+
+  for (const row of rows) {
+    const destino = String(row.cod_local || '').trim();
+    if (!destino) {
+      const err = new Error(`Item ${row.codigo_produto || ''} sem local de destino (cod_local). A separação exige destino para transferência Omie.`);
+      err.code = 'OMIE_DESTINO_OBRIGATORIO';
+      throw err;
+    }
+  }
+
+  const qtdInformada = parseFloat(qtd);
+  const sumCarr = rows.reduce((s, r) => s + (parseFloat(r.qty) || 0), 0);
+  const grupos = new Map();
+
+  for (const row of rows) {
+    const destino = String(row.cod_local || '').trim();
+    if (!destino || destino === origem) continue;
+    const codigoTexto = String(row.codigo_produto || '').trim();
+    const key = `${destino}|${codigoTexto}`;
+    if (!grupos.has(key)) {
+      grupos.set(key, {
+        destino,
+        codigoTexto,
+        n_solic: String(row.n_solic || '').trim(),
+        qtd: 0,
+        ids: []
+      });
+    }
+    let itemQtd = parseFloat(row.qty) || 0;
+    if (Number.isFinite(qtdInformada) && qtdInformada > 0) {
+      itemQtd = rows.length === 1
+        ? qtdInformada
+        : (sumCarr > 0 ? ((parseFloat(row.qty) || 0) / sumCarr) * qtdInformada : qtdInformada);
+    }
+    grupos.get(key).qtd += itemQtd;
+    grupos.get(key).ids.push(row.id);
+  }
+
+  for (const g of grupos.values()) {
+    if (g.qtd <= 0) continue;
+    const idProd = await _resolveProdutoOmieCodigoProduto(client, g.codigoTexto);
+    if (!idProd) {
+      const err = new Error(`Produto "${g.codigoTexto}" não encontrado em produtos_omie.`);
+      err.code = 'OMIE_TRF_SEPARACAO';
+      throw err;
+    }
+    const nomeDest = rows.find(r => String(r.cod_local).trim() === g.destino)?.nome_local || g.destino;
+    await _omieIncluirTrfEstoqueSeparacao({
+      origem,
+      destino: g.destino,
+      id_prod: idProd,
+      codigo_texto: g.codigoTexto,
+      qtd: g.qtd,
+      obs: _omieObsTrfSeparacaoLogistica({
+        n_solic: g.n_solic,
+        codigo: g.codigoTexto,
+        origem,
+        destino: g.destino,
+        qtd: g.qtd,
+        nomeDest,
+        usuario: nome_user
+      })
+    });
+    await _logisticaPersistirTrfOmieSeparacao(client, g.ids, {
+      origem,
+      destino: g.destino,
+      qtd: g.qtd,
+      codigo_produto: idProd,
+      codigo: g.codigoTexto
+    });
+  }
+}
+
+async function _logisticaEstornarTrfOmieSeparacao(client, solicIds, { nome_user } = {}) {
+  const ids = (solicIds || []).map(id => parseInt(id, 10)).filter(id => !isNaN(id));
+  if (!ids.length) return;
+  await _ensureOmieSepColumns(client);
+
+  const { rows } = await client.query(
+    `SELECT id, n_solic, omie_sep_origem, omie_sep_destino, omie_sep_qtd, omie_sep_codigo_produto, omie_sep_codigo
+       FROM solicitacao_produto.itens_solicitados
+      WHERE id = ANY($1::bigint[])
+        AND omie_sep_origem IS NOT NULL
+        AND omie_sep_destino IS NOT NULL
+        AND COALESCE(omie_sep_qtd, 0) > 0`,
+    [ids]
+  );
+  if (!rows.length) return;
+
+  const grupos = new Map();
+  for (const r of rows) {
+    const orig = String(r.omie_sep_origem || '').trim();
+    const dest = String(r.omie_sep_destino || '').trim();
+    const cod = String(r.omie_sep_codigo || '').trim();
+    const idProd = String(r.omie_sep_codigo_produto || '').trim();
+    if (!orig || !dest || orig === dest) continue;
+    const key = `${orig}|${dest}|${idProd}|${cod}`;
+    if (!grupos.has(key)) {
+      grupos.set(key, {
+        origem: orig,
+        destino: dest,
+        id_prod: idProd,
+        codigo: cod,
+        n_solic: String(r.n_solic || '').trim(),
+        qtd: 0
+      });
+    }
+    grupos.get(key).qtd += parseFloat(r.omie_sep_qtd) || 0;
+  }
+
+  for (const g of grupos.values()) {
+    if (g.qtd <= 0) continue;
+    await _omieIncluirTrfEstoqueSeparacao({
+      origem: g.destino,
+      destino: g.origem,
+      id_prod: g.id_prod,
+      codigo_texto: g.codigo,
+      qtd: g.qtd,
+      obs: _omieObsTrfSeparacaoLogistica({
+        n_solic: g.n_solic,
+        codigo: g.codigo,
+        origem: g.origem,
+        destino: g.destino,
+        qtd: g.qtd,
+        usuario: nome_user,
+        retificacao: true
+      })
+    });
+  }
+
+  await client.query(
+    `UPDATE solicitacao_produto.itens_solicitados
+        SET omie_sep_origem = NULL,
+            omie_sep_destino = NULL,
+            omie_sep_qtd = NULL,
+            omie_sep_codigo_produto = NULL,
+            omie_sep_codigo = NULL
+      WHERE id = ANY($1::bigint[])`,
+    [ids]
+  );
+  console.log(`[logistica/omie-trf-sep] Estorno Omie: ${grupos.size} transferência(s) revertida(s) em ${ids.length} item(ns)`);
+}
+
+async function _logisticaObterQtyCodigoSeparacao(client, solicIds) {
+  const ids = (solicIds || []).map(id => parseInt(id, 10)).filter(id => !isNaN(id));
+  if (!ids.length) return { qtd: 0, codigo: null };
+  const { rows } = await client.query(
+    `SELECT SUM(c.quantidade::numeric) AS total, MIN(c.codigo_produto) AS codigo
+       FROM solicitacao_produto.itens_solicitados i
+       JOIN logistica.carrinho c ON c.id = i.id_carr
+      WHERE i.id = ANY($1::bigint[])`,
+    [ids]
+  );
+  return { qtd: parseFloat(rows[0]?.total) || 0, codigo: rows[0]?.codigo || null };
+}
+
+async function _etqDebitarSeparacaoAlmox(client, { cod_local_origem, etq_id, endereco_origem, codigo_produto, qtd }) {
+  if (String(cod_local_origem || '').trim() !== LOGISTICA_ALMOX_LOCAL_COD) return null;
+  if (!etq_id && !endereco_origem) {
+    const err = new Error('Selecione o endereço de origem no Almoxarifado (Porta Pallet).');
+    err.code = 'ETQ_ENDERECO_OBRIGATORIO';
+    throw err;
+  }
+  const qtdNum = parseFloat(qtd);
+  if (!Number.isFinite(qtdNum) || qtdNum <= 0) return null;
+
+  const codigoTexto = String(codigo_produto || '').trim();
+  const codigoOmie = await _resolveProdutoOmieCodigoProduto(client, codigoTexto);
+  if (!codigoOmie) throw new Error(`Produto "${codigoTexto}" não encontrado em produtos_omie.`);
+
+  let endereco = String(endereco_origem || '').trim();
+  if (etq_id) {
+    const { rows } = await client.query(
+      `SELECT TRIM(endereco) AS endereco, COALESCE(qtd, 0) AS qtd
+         FROM etiqueta."ETQ_rec_impresso"
+        WHERE id = $1`,
+      [parseInt(etq_id, 10)]
+    );
+    if (!rows[0]?.endereco) throw new Error('Endereço ETQ não encontrado.');
+    endereco = rows[0].endereco;
+  }
+  if (!endereco) {
+    const err = new Error('Selecione o endereço de origem no Almoxarifado (Porta Pallet).');
+    err.code = 'ETQ_ENDERECO_OBRIGATORIO';
+    throw err;
+  }
+
+  const linhas = await _etqLinhasSaldoEndereco(client, codigoOmie, endereco);
+  const total = linhas.reduce((s, r) => s + Number(r.qtd || 0), 0);
+  if (total <= 0 || total + 1e-9 < qtdNum) {
+    const err = new Error(`Item ${codigoTexto} não possui saldo, favor atualizar saldo no processo de movimentação.`);
+    err.code = 'ETQ_SALDO_SEPARACAO';
+    throw err;
+  }
+
+  const debitResult = await _etqDebitarEndereco(client, { codigo: codigoOmie, endereco, qtd: qtdNum, usuario: null });
+  return {
+    ...debitResult,
+    endereco,
+    codigo_omie: codigoOmie,
+    codigo_texto: codigoTexto,
+    qtd: qtdNum
+  };
+}
+
+async function _ensureEtqSepColumns(client) {
+  const db = client || pool;
+  await db.query(`ALTER TABLE solicitacao_produto.itens_solicitados ADD COLUMN IF NOT EXISTS etq_sep_endereco TEXT`);
+  await db.query(`ALTER TABLE solicitacao_produto.itens_solicitados ADD COLUMN IF NOT EXISTS etq_sep_qtd NUMERIC(18,4)`);
+  await db.query(`ALTER TABLE solicitacao_produto.itens_solicitados ADD COLUMN IF NOT EXISTS etq_sep_codigo TEXT`);
+}
+
+/** Grava endereço/qtd debitados em ETQ_rec_impresso para estorno ao retificar. */
+async function _etqPersistirDebitoSeparacao(client, solicIds, { endereco, codigo_omie, qtd }) {
+  const qtdTotal = parseFloat(qtd);
+  if (!endereco || !codigo_omie || !Number.isFinite(qtdTotal) || qtdTotal <= 0) return;
+  const ids = (solicIds || []).map(id => parseInt(id, 10)).filter(id => !isNaN(id));
+  if (!ids.length) return;
+  await _ensureEtqSepColumns(client);
+
+  const { rows } = await client.query(
+    `SELECT i.id, c.quantidade::numeric AS qty_carr
+       FROM solicitacao_produto.itens_solicitados i
+       JOIN logistica.carrinho c ON c.id = i.id_carr
+      WHERE i.id = ANY($1::bigint[])`,
+    [ids]
+  );
+  if (!rows.length) return;
+
+  const sumCarr = rows.reduce((s, r) => s + (parseFloat(r.qty_carr) || 0), 0);
+  for (const row of rows) {
+    let itemQtd = qtdTotal;
+    if (rows.length > 1 && sumCarr > 0) {
+      itemQtd = ((parseFloat(row.qty_carr) || 0) / sumCarr) * qtdTotal;
+    }
+    await client.query(
+      `UPDATE solicitacao_produto.itens_solicitados
+          SET etq_sep_endereco = $2,
+              etq_sep_codigo = $3,
+              etq_sep_qtd = $4
+        WHERE id = $1`,
+      [row.id, endereco, codigo_omie, itemQtd]
+    );
+  }
+}
+
+/** Devolve saldo em ETQ_rec_impresso ao retificar separação (reverter-separacao). */
+async function _etqEstornarDebitoSeparacao(client, solicIds) {
+  const ids = (solicIds || []).map(id => parseInt(id, 10)).filter(id => !isNaN(id));
+  if (!ids.length) return;
+  await _ensureEtqSepColumns(client);
+
+  const { rows } = await client.query(
+    `SELECT id, etq_sep_endereco, etq_sep_codigo, etq_sep_qtd
+       FROM solicitacao_produto.itens_solicitados
+      WHERE id = ANY($1::bigint[])
+        AND etq_sep_endereco IS NOT NULL
+        AND COALESCE(etq_sep_qtd, 0) > 0`,
+    [ids]
+  );
+  if (!rows.length) return;
+
+  const grupos = new Map();
+  for (const r of rows) {
+    const end = String(r.etq_sep_endereco || '').trim();
+    const cod = String(r.etq_sep_codigo || '').trim();
+    if (!end || !cod) continue;
+    const key = `${cod}|${end}`;
+    if (!grupos.has(key)) grupos.set(key, { codigo: cod, endereco: end, qtd: 0 });
+    grupos.get(key).qtd += parseFloat(r.etq_sep_qtd) || 0;
+  }
+
+  for (const g of grupos.values()) {
+    if (g.qtd <= 0) continue;
+    await _etqCreditarEndereco(client, {
+      codigo: g.codigo,
+      endereco: g.endereco,
+      qtd: g.qtd,
+      usuario: null,
+      codigoTexto: g.codigo
+    });
+  }
+
+  await client.query(
+    `UPDATE solicitacao_produto.itens_solicitados
+        SET etq_sep_endereco = NULL,
+            etq_sep_codigo = NULL,
+            etq_sep_qtd = NULL
+      WHERE id = ANY($1::bigint[])`,
+    [ids]
+  );
+  console.log(`[etiqueta] Estorno separação: ${grupos.size} endereço(s) creditado(s) para ${ids.length} item(ns)`);
+}
+
+async function _insertEtqMovimentacaoEndereco(client, {
+  endereco, qtd, dataEmissao, usuario, complemento, codigoOmie, descricao, codigoTexto,
+  codProd, descProd, sanitize, linhaReferencia
+}) {
+  const db = client || pool;
+  const ref = linhaReferencia || null;
+  const campos = await _etqResolveProdutoCampos(db, {
+    codigoTexto: codigoTexto || codProd,
+    codigoOmie,
+    descricao: descricao || descProd,
+    linhaReferencia: ref
+  });
+  const { rows } = await db.query(
+    `INSERT INTO etiqueta."ETQ_rec_impresso"
+       (origem_id, qtd, unidade, data_emissao, conteudo_zpl, usuario_criacao,
+        endereco, complemento, codigo_produto, descricao_produto, fonte)
+     VALUES ($1, $2, COALESCE($3, 'UN'), $4, '', $5, $6, $7, $8, $9, COALESCE($10, 'movimentacao'))
+     RETURNING id, endereco, codigo_produto, descricao_produto, qtd, data_emissao`,
+    [
+      ref?.origem_id ?? null,
+      qtd,
+      ref?.unidade || 'UN',
+      ref?.data_emissao || dataEmissao,
+      usuario,
+      endereco,
+      complemento || ref?.complemento || null,
+      campos.codigo_produto,
+      campos.descricao_produto,
+      ref?.fonte || 'movimentacao'
+    ]
+  );
+  const row = rows[0];
+  const idImpresso = row.id;
+  const loteTxt = sanitize(endereco, 40);
+  const zplCodProd = sanitize(codProd || codigoTexto || campos.codigo_produto, 30);
+  const zplDescProd = sanitize(descProd || campos.descricao_produto, 70);
+  const zpl = _gerarZplParaImpressao({
+    codProd: zplCodProd,
+    descProd: zplDescProd,
+    idImpresso,
+    loteTxt,
+    dataExibir: sanitize(row.data_emissao || dataEmissao, 10)
+  });
+  await db.query(
+    `UPDATE etiqueta."ETQ_rec_impresso" SET conteudo_zpl = $1 WHERE id = $2`,
+    [zpl, idImpresso]
+  );
+  return { ...row, conteudo_zpl: zpl };
+}
+
+async function _etqCreditarEndereco(client, {
+  codigo, descricao, endereco, qtd, usuario, complemento, dataEmissao, codigoTexto,
+  codProd, descProd, sanitize, linhaReferencia
+}) {
+  const campos = await _etqResolveProdutoCampos(client, {
+    codigoTexto: codigoTexto || codProd,
+    codigoOmie: codigo,
+    descricao: descricao || descProd,
+    linhaReferencia
+  });
+
+  const { rows: existentes } = await client.query(
+    `SELECT i.id, i.qtd
+       FROM etiqueta."ETQ_rec_impresso" i
+      WHERE TRIM(COALESCE(i.endereco, '')) = $2
+        AND (
+          TRIM(COALESCE(i.codigo_produto, '')) = $1
+          OR NULLIF(TRIM(COALESCE(i.codigo_produto, '')), '') IS NULL
+        )
+      ORDER BY COALESCE(i.qtd, 0) DESC, i.id DESC
+      LIMIT 1`,
+    [campos.codigo_produto, endereco]
+  );
+
+  if (existentes.length) {
+    const novaQtd = Number(existentes[0].qtd || 0) + qtd;
+    await client.query(
+      `UPDATE etiqueta."ETQ_rec_impresso"
+          SET qtd = $1,
+              codigo_produto = COALESCE(NULLIF(TRIM(codigo_produto), ''), $3),
+              descricao_produto = COALESCE(NULLIF(TRIM(descricao_produto), ''), $4)
+        WHERE id = $2`,
+      [novaQtd, existentes[0].id, campos.codigo_produto, campos.descricao_produto]
+    );
+    return { id: existentes[0].id, endereco, qtd: novaQtd, acao: 'update', delta: qtd };
+  }
+
+  const inserido = await _insertEtqMovimentacaoEndereco(client, {
+    endereco,
+    qtd,
+    dataEmissao,
+    usuario,
+    complemento,
+    codigoOmie: campos.codigo_produto,
+    descricao: campos.descricao_produto,
+    codigoTexto: codigoTexto || codProd,
+    codProd,
+    descProd: campos.descricao_produto,
+    sanitize,
+    linhaReferencia
+  });
+  return { ...inserido, acao: 'insert', delta: qtd };
+}
+
+async function _processarMovimentacaoEtqInterna(client, opts) {
+  const {
+    codigo, descricao, qtd, tipoMov, enderecoOrigem, enderecoDestino,
+    complemento, usuario, dataEmissao, codProd, descProd, sanitize, codigoTexto
+  } = opts;
+
+  const movimentacao = { tipo: tipoMov, debitos: [], credito: null };
+  let linhaRef = null;
+
+  if (tipoMov === 'SAI' || tipoMov === 'TRF') {
+    const deb = await _etqDebitarEndereco(client, {
+      codigo,
+      endereco: enderecoOrigem,
+      qtd,
+      usuario
+    });
+    movimentacao.debitos = deb.alterados;
+    linhaRef = deb.linhaReferencia;
+  }
+
+  if (tipoMov === 'ENT' || tipoMov === 'TRF') {
+    movimentacao.credito = await _etqCreditarEndereco(client, {
+      codigo,
+      descricao,
+      endereco: enderecoDestino,
+      qtd,
+      usuario,
+      complemento,
+      dataEmissao,
+      codigoTexto: opts.codigoTexto,
+      codProd,
+      descProd,
+      sanitize,
+      linhaReferencia: linhaRef
+    });
+  }
+
+  const registros = [
+    ...movimentacao.debitos.map(d => ({ id: d.id, endereco: d.endereco, qtd: d.qtd_nova, acao: 'debito' })),
+    ...(movimentacao.credito ? [{ id: movimentacao.credito.id, endereco: movimentacao.credito.endereco, qtd: movimentacao.credito.qtd, acao: movimentacao.credito.acao }] : [])
+  ];
+
+  return { registros, movimentacao };
+}
+
+// POST /api/etiquetas/rec-impresso/imprimir-ids
+// Body: { ids: [idImpresso,...], destino_agente?, impressora?, usuario? }
+// Enfileira ZPL já gravado em ETQ_rec_impresso (fonte movimentacao / armazenamento).
+app.post('/api/etiquetas/rec-impresso/imprimir-ids', express.json(), async (req, res) => {
+  try {
+    const ids = Array.isArray(req.body?.ids) ? req.body.ids.map(Number).filter(n => n > 0) : [];
+    if (!ids.length) return res.status(400).json({ error: 'Nenhum id informado.' });
+
+    const result = await pool.query(
+      `SELECT id, codigo_produto, descricao_produto, endereco, data_emissao, conteudo_zpl
+         FROM etiqueta."ETQ_rec_impresso"
+        WHERE id = ANY($1::int[])
+        ORDER BY id`,
+      [ids]
+    );
+    if (!result.rows.length) return res.status(404).json({ error: 'Nenhuma etiqueta encontrada.' });
+
+    const sanitize = (v, max = 999) => String(v || '').slice(0, max).replace(/[\\^~]/g, ' ');
+    const zplBlocks = [];
+
+    for (const row of result.rows) {
+      let zpl = String(row.conteudo_zpl || '').trim();
+      if (!zpl) {
+        const codigoTexto = await _resolveProdutoOmieCodigoTexto(pool, row.codigo_produto) || row.codigo_produto;
+        const codProd = sanitize(codigoTexto, 30);
+        const descProd = sanitize(row.descricao_produto, 70);
+        const loteTxt = sanitize(row.endereco || 'MOV', 40);
+        const dataExibir = sanitize(row.data_emissao, 10);
+        zpl = _gerarZplParaImpressao({ codProd, descProd, idImpresso: row.id, loteTxt, dataExibir });
+        await pool.query(
+          `UPDATE etiqueta."ETQ_rec_impresso" SET conteudo_zpl = $1 WHERE id = $2`,
+          [zpl, row.id]
+        );
+      }
+      zplBlocks.push(zpl);
+    }
+
+    const usuario = String(req.body?.usuario || req.session?.user?.login || req.session?.usuario || '').trim();
+    const destiAg = String(req.body?.destino_agente || '').trim() || null;
+    const impres  = String(req.body?.impressora || '').trim() || null;
+    const printerName = String(req.body?.printer || process.env.PRINTER || 'zebra').trim();
+
+    if (destiAg || impres || req.body?.via_fila !== false) {
+      const filaIns = await pool.query(
+        `INSERT INTO etiqueta."ETQ_fila_impressao" (etq_ids, multiplo, usuario, zpl, quantidade, destino_agente, impressora)
+         VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
+        [[], 0, usuario, zplBlocks.join('\n'), zplBlocks.length, destiAg, impres]
+      );
+      return res.json({ ok: true, fila_id: filaIns.rows[0].id, quantidade: zplBlocks.length, via: 'fila' });
+    }
+
+    const dirPrint = path.join(__dirname, 'etiquetas', 'Recebimento', 'Printed');
+    fs.mkdirSync(dirPrint, { recursive: true });
+    const erros = [];
+    for (let i = 0; i < zplBlocks.length; i++) {
+      const zpl = zplBlocks[i];
+      const idRef = result.rows[i]?.id || i;
+      const fname = `movim_imp${idRef}_${Date.now()}.zpl`;
+      const fpath = path.join(dirPrint, fname);
+      fs.writeFileSync(fpath, zpl, 'utf8');
+      await new Promise((resolve) => {
+        const args = printerName ? ['-P', printerName, '-o', 'raw', fpath] : ['-o', 'raw', fpath];
+        execFile('lpr', args, (err) => {
+          if (err) erros.push(_friendlyLprError(err.message));
+          resolve();
+        });
+      });
+    }
+
+    if (erros.length === zplBlocks.length) {
+      return res.status(200).json({ ok: false, error: erros[0] || 'Falha ao imprimir etiqueta.' });
+    }
+
+    res.json({
+      ok: true,
+      quantidade: zplBlocks.length - erros.length,
+      erros: erros.length ? erros : undefined,
+      via: 'lpr'
+    });
+  } catch (err) {
+    console.error('[etiquetas/rec-impresso/imprimir-ids]', err);
+    res.status(500).json({ error: err?.message || 'Falha ao imprimir etiqueta(s).' });
+  }
+});
+
 // ── Imprime etiqueta(s) pelo modal direto via ZPL → lpr ─────────────────────
 // POST /api/etiquetas/recebimento/imprimir-modal
 // Body: { ids: [1, 2, ...], printer?: string, usuario?: string }
@@ -11633,14 +13016,15 @@ app.post('/api/etiquetas/recebimento/imprimir-modal', express.json(), async (req
       const dataExibir = sanitize(row.data_emissao, 10);
 
       // 1. Insere placeholder para obter o id da impressão
-      const ins = await pool.query(
-        `INSERT INTO etiqueta."ETQ_rec_impresso"
-           (origem_id, qtd, unidade, data_emissao, conteudo_zpl, usuario_criacao)
-         VALUES ($1,$2,$3,$4,'',$5)
-         RETURNING id`,
-        [row.id, row.qtd, row.unidade, row.data_emissao, usuarioImpressao]
-      );
-      const idImpresso = ins.rows[0].id;
+      const idImpresso = await _insertEtqRecImpressoRecebimento(pool, {
+        origemId: row.id,
+        qtd: row.qtd,
+        unidade: row.unidade,
+        dataEmissao: row.data_emissao,
+        usuario: usuarioImpressao,
+        codProd,
+        descProd
+      });
 
       // 2. Gera ZPL definitivo com ID (sem qtd)
       const zpl = _gerarZplParaImpressao({ codProd, descProd, idImpresso, loteTxt, dataExibir });
@@ -11692,6 +13076,246 @@ app.post('/api/etiquetas/recebimento/imprimir-modal', express.json(), async (req
   } catch (err) {
     console.error('[etiquetas/imprimir-modal]', err);
     res.status(500).json({ error: err?.message || 'Falha ao imprimir etiqueta' });
+  }
+});
+
+// POST /api/etiquetas/iapp-op/imprimir
+// Body: { items: [{ os_id?, op_producao_id?, lote, codigo_produto, descricao_produto? }], destino_agente?, impressora?, usuario? }
+// lote = número da OP. Atualiza kanban para Montagem hermetica e registra RI_Check no mesmo posto.
+app.post('/api/etiquetas/iapp-op/imprimir', express.json(), async (req, res) => {
+  try {
+    const items = Array.isArray(req.body?.items) ? req.body.items : [];
+    if (!items.length) return res.status(400).json({ error: 'Nenhuma OS informada.' });
+
+    await _etqEnsureRecImpressoCols(pool);
+
+    const usuario = String(req.body?.usuario || req.session?.user?.login || req.session?.usuario || '').trim();
+    const destiAg = String(req.body?.destino_agente || '').trim() || null;
+    const impres  = String(req.body?.impressora || '').trim() || null;
+    const sanitize = (v, max = 999) => String(v || '').slice(0, max).replace(/[\\^~]/g, ' ');
+
+    const hoje = new Date();
+    const dataExibir = [
+      String(hoje.getDate()).padStart(2, '0'),
+      String(hoje.getMonth() + 1).padStart(2, '0'),
+      hoje.getFullYear(),
+    ].join('/');
+
+    const zplBlocks = [];
+    const osAtualizadas = [];
+
+    for (const item of items) {
+      const osId          = Number(item.os_id) || 0;
+      const opProducaoId  = Number(item.op_producao_id) || 0;
+      const loteRaw       = String(item.lote || item.os_identificacao || '').trim();
+      const codigo        = String(item.codigo_produto || '').trim();
+      if (!loteRaw || !codigo) continue;
+      if (!osId && !opProducaoId) continue;
+
+      let descricao = String(item.descricao_produto || '').trim();
+      if (!descricao) {
+        try {
+          const { rows } = await pool.query(
+            `SELECT descricao FROM "IAPP_API".op_iapp_produto WHERE identificacao = $1 LIMIT 1`,
+            [codigo]
+          );
+          descricao = rows[0]?.descricao || '';
+        } catch (_) {}
+      }
+      if (!descricao) {
+        try {
+          const { rows } = await pool.query(
+            `SELECT descricao FROM produtos WHERE codigo = $1 LIMIT 1`,
+            [codigo]
+          );
+          descricao = rows[0]?.descricao || codigo;
+        } catch (_) {
+          descricao = codigo;
+        }
+      }
+
+      const codProd  = sanitize(codigo, 30);
+      const descProd = sanitize(descricao, 160);
+      const loteTxt  = sanitize(loteRaw, 40);
+      const idOmie = await _resolveProdutoOmieCodigoProduto(pool, codigo);
+      const campos = await _etqResolveProdutoCampos(pool, {
+        codigoTexto: codigo,
+        codigoOmie: idOmie,
+        descricao
+      });
+
+      const ins = await pool.query(
+        `INSERT INTO etiqueta."ETQ_rec_impresso"
+           (origem_id, qtd, unidade, data_emissao, conteudo_zpl, usuario_criacao,
+            codigo_produto, descricao_produto, fonte)
+         VALUES (NULL, 1, 'UN', $1, '', $2, $3, $4, 'iapp_op')
+         RETURNING id`,
+        [dataExibir, usuario, campos.codigo_produto, campos.descricao_produto]
+      );
+      const idImpresso = ins.rows[0].id;
+      const zpl = _gerarZplParaImpressao({ codProd, descProd, idImpresso, loteTxt, dataExibir });
+      await pool.query(
+        `UPDATE etiqueta."ETQ_rec_impresso" SET conteudo_zpl = $1 WHERE id = $2`,
+        [zpl, idImpresso]
+      );
+      zplBlocks.push(zpl);
+
+      const opIappRow = osId
+        ? await pool.query(
+            `SELECT op_iapp_id FROM "IAPP_API".op_iapp_os WHERE os_id = $1 LIMIT 1`,
+            [osId]
+          )
+        : { rows: [] };
+      const opIappId = Number(item.op_iapp_id) || Number(opIappRow.rows[0]?.op_iapp_id) || 0;
+
+      if (opProducaoId > 0) {
+        const codigoProdutoNum = idOmie ? Number(idOmie) : null;
+        const numeroOpTxt = loteRaw;
+        const updKanban = await pool.query(
+          `UPDATE "Producao"."Kanban_programacao"
+              SET codigo_produto = COALESCE($2, codigo_produto),
+                  codigo = COALESCE(NULLIF($3, ''), codigo),
+                  descricao = COALESCE(NULLIF($4, ''), descricao),
+                  numero_op = COALESCE(NULLIF($5, ''), numero_op),
+                  status = CASE
+                    WHEN COALESCE(TRIM(status), '') IN ('', 'Montagem hermetica') THEN 'Montagem hermetica'
+                    ELSE status
+                  END
+            WHERE op_producao_id = $1`,
+          [opProducaoId, codigoProdutoNum, codigo, descricao, numeroOpTxt]
+        );
+        if (!updKanban.rowCount) {
+          await pool.query(
+            `INSERT INTO "Producao"."Kanban_programacao"
+               (codigo_produto, codigo, descricao, codigo_pedido, quantidade, numero_op, op_producao_id, status)
+             VALUES ($1, $2, $3, 0, 1, $4, $5, 'Montagem hermetica')`,
+            [codigoProdutoNum, codigo, descricao, numeroOpTxt, opProducaoId]
+          );
+        }
+      } else if (opIappId > 0) {
+        await pool.query(
+          `UPDATE "IAPP_API".op_iapp_os
+              SET status_producao = 'Solicitado',
+                  data_status_producao = NOW()
+            WHERE op_iapp_id = $1
+              AND COALESCE(TRIM(status_producao), '') NOT IN ('Iniciado', 'Produzindo', 'Parado')`,
+          [opIappId]
+        );
+
+        const codigoProdutoNum = idOmie ? Number(idOmie) : null;
+        const numeroOpTxt = loteRaw;
+        const updKanban = await pool.query(
+          `UPDATE "Producao"."Kanban_programacao"
+              SET codigo_produto = COALESCE($2, codigo_produto),
+                  codigo = COALESCE(NULLIF($3, ''), codigo),
+                  descricao = COALESCE(NULLIF($4, ''), descricao),
+                  numero_op = COALESCE(NULLIF($5, ''), numero_op),
+                  status = CASE
+                    WHEN COALESCE(TRIM(status), '') IN ('', 'Montagem hermetica') THEN 'Montagem hermetica'
+                    ELSE status
+                  END
+            WHERE op_iapp_id = $1`,
+          [opIappId, codigoProdutoNum, codigo, descricao, numeroOpTxt]
+        );
+        if (!updKanban.rowCount) {
+          await pool.query(
+            `INSERT INTO "Producao"."Kanban_programacao"
+               (codigo_produto, codigo, descricao, codigo_pedido, quantidade, numero_op, op_iapp_id, status)
+             VALUES ($1, $2, $3, 0, 1, $4, $5, 'Montagem hermetica')`,
+            [codigoProdutoNum, codigo, descricao, numeroOpTxt, opIappId]
+          );
+        }
+      } else if (osId > 0) {
+        await pool.query(
+          `UPDATE "IAPP_API".op_iapp_os
+              SET status_producao = 'Solicitado',
+                  data_status_producao = NOW()
+            WHERE os_id = $1`,
+          [osId]
+        );
+      }
+
+      try {
+        await registrarControleOperacaoImpressaoOp({
+          opProducaoId,
+          opIappId,
+          numeroOp: loteRaw,
+          usuario,
+          operacao: 'Imprimir OP',
+        });
+      } catch (ctrlErr) {
+        console.error('[controle_operacoes] Falha ao registrar impressão OP:', ctrlErr.message);
+      }
+
+      if (opProducaoId > 0 || opIappId > 0) {
+        try {
+          await registrarRiCheckImpressaoOp({
+            opProducaoId,
+            opIappId,
+            numeroOp: loteRaw,
+            codigo,
+            codigoProduto: idOmie ? Number(idOmie) : null,
+            descricao,
+            usuario,
+            statusRi: 'Montagem hermetica',
+          });
+        } catch (riErr) {
+          console.error('[ri_check] Falha ao registrar RI Montagem hermetica na impressão OP:', riErr.message);
+        }
+
+        try {
+          const kpRes = await pool.query(
+            `SELECT id FROM "Producao"."Kanban_programacao"
+              WHERE ($1::bigint > 0 AND op_producao_id = $1)
+                 OR ($2::bigint > 0 AND op_iapp_id = $2)
+              ORDER BY id DESC LIMIT 1`,
+            [opProducaoId || 0, opIappId || 0]
+          );
+          await iniciarCicloPosto({
+            kanbanProgramacaoId: kpRes.rows[0]?.id || null,
+            opProducaoId,
+            numeroOp: loteRaw,
+            postoOrigem: 'Montagem hermetica',
+            operacao: 'Imprimir OP — Montagem hermetica',
+            usuario,
+          });
+        } catch (tempoErr) {
+          console.error('[tempo_producao] Falha ao iniciar ciclo na impressão OP:', tempoErr.message);
+        }
+      }
+
+      if (osId > 0) osAtualizadas.push(osId);
+      else if (opProducaoId > 0) osAtualizadas.push(opProducaoId);
+    }
+
+    if (!zplBlocks.length) {
+      return res.status(400).json({ error: 'Nenhuma OS válida para imprimir.' });
+    }
+
+    const modoPdf = String(req.body?.modo || '').toLowerCase() === 'pdf';
+    if (modoPdf) {
+      const pdfBuffer = await _zplCombinadoParaPdf(zplBlocks.join('\n'));
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', 'inline; filename="etiquetas_op.pdf"');
+      res.setHeader('Cache-Control', 'no-store');
+      return res.send(pdfBuffer);
+    }
+
+    const filaIns = await pool.query(
+      `INSERT INTO etiqueta."ETQ_fila_impressao" (etq_ids, multiplo, usuario, zpl, quantidade, destino_agente, impressora)
+       VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
+      [[], 0, usuario, zplBlocks.join('\n'), zplBlocks.length, destiAg, impres]
+    );
+
+    return res.json({
+      ok: true,
+      fila_id: filaIns.rows[0].id,
+      quantidade: zplBlocks.length,
+      os_atualizadas: osAtualizadas,
+    });
+  } catch (err) {
+    console.error('[etiquetas/iapp-op/imprimir]', err);
+    return res.status(500).json({ error: err?.message || 'Falha ao enfileirar impressão.' });
   }
 });
 
@@ -11747,14 +13371,15 @@ app.post('/api/etiquetas/recebimento/imprimir-multiplo', express.json(), async (
       const qtdEtq = lotes[i];
 
       // 1. Insere placeholder → obtém id da impressão
-      const ins = await pool.query(
-        `INSERT INTO etiqueta."ETQ_rec_impresso"
-           (origem_id, qtd, unidade, data_emissao, conteudo_zpl, usuario_criacao)
-         VALUES ($1,$2,$3,$4,'',$5)
-         RETURNING id`,
-        [etq.id, qtdEtq, etq.unidade, etq.data_emissao, usuarioImpressao]
-      );
-      const idImpresso = ins.rows[0].id;
+      const idImpresso = await _insertEtqRecImpressoRecebimento(pool, {
+        origemId: etq.id,
+        qtd: qtdEtq,
+        unidade: etq.unidade,
+        dataEmissao: etq.data_emissao,
+        usuario: usuarioImpressao,
+        codProd,
+        descProd
+      });
 
       // 2. Gera ZPL com ID (sem qtd)
       const zpl = _gerarZplParaImpressao({ codProd, descProd, idImpresso, loteTxt, dataExibir });
@@ -11818,14 +13443,14 @@ app.get('/api/etiquetas/ocupacao', async (req, res) => {
     const { rows } = await pool.query(`
       SELECT
         i.endereco,
-        r.codigo_produto,
+        COALESCE(p.codigo, i.codigo_produto) AS codigo_produto,
         SUM(i.qtd)     AS qtd_total,
         MAX(i.unidade) AS unidade
       FROM etiqueta."ETQ_rec_impresso" i
-      JOIN etiqueta."ETQ_recebimento"  r ON r.id = i.origem_id
+      LEFT JOIN public.produtos_omie p ON p.codigo_produto::text = TRIM(i.codigo_produto)
       WHERE i.endereco IS NOT NULL AND i.endereco <> ''
-      GROUP BY i.endereco, r.codigo_produto
-      ORDER BY i.endereco, r.codigo_produto
+      GROUP BY i.endereco, COALESCE(p.codigo, i.codigo_produto)
+      ORDER BY i.endereco, COALESCE(p.codigo, i.codigo_produto)
     `);
 
     /* Agrupa por endereço: { "01-04-01-001": [{codigo_produto, qtd_total, unidade}, ...] } */
@@ -15869,7 +17494,8 @@ async function initSolicitacaoProdutoSchema() {
           cod_omie       TEXT,
           criado_em      TIMESTAMPTZ NOT NULL DEFAULT now(),
           retirada_por   TEXT,
-          comentario     TEXT
+          comentario     TEXT,
+          urgente        BOOLEAN DEFAULT FALSE
         )
       `);
       
@@ -16006,19 +17632,45 @@ async function ensureSolicitacaoProdutoQtyColumns() {
   await pool.query(`ALTER TABLE solicitacao_produto.solicitacoes_separacao ADD COLUMN IF NOT EXISTS quantidade_original NUMERIC(18,4)`);
   await pool.query(`ALTER TABLE solicitacao_produto.itens_solicitados ADD COLUMN IF NOT EXISTS urgente BOOLEAN DEFAULT FALSE`);
   await pool.query(`ALTER TABLE solicitacao_produto.itens_solicitados ADD COLUMN IF NOT EXISTS usuario_separando TEXT`);
+  await pool.query(`ALTER TABLE solicitacao_produto.itens_solicitados ADD COLUMN IF NOT EXISTS etq_sep_endereco TEXT`);
+  await pool.query(`ALTER TABLE solicitacao_produto.itens_solicitados ADD COLUMN IF NOT EXISTS etq_sep_qtd NUMERIC(18,4)`);
+  await pool.query(`ALTER TABLE solicitacao_produto.itens_solicitados ADD COLUMN IF NOT EXISTS etq_sep_codigo TEXT`);
+  await pool.query(`ALTER TABLE solicitacao_produto.itens_solicitados ADD COLUMN IF NOT EXISTS omie_sep_origem TEXT`);
+  await pool.query(`ALTER TABLE solicitacao_produto.itens_solicitados ADD COLUMN IF NOT EXISTS omie_sep_destino TEXT`);
+  await pool.query(`ALTER TABLE solicitacao_produto.itens_solicitados ADD COLUMN IF NOT EXISTS omie_sep_qtd NUMERIC(18,4)`);
+  await pool.query(`ALTER TABLE solicitacao_produto.itens_solicitados ADD COLUMN IF NOT EXISTS omie_sep_codigo_produto TEXT`);
+  await pool.query(`ALTER TABLE solicitacao_produto.itens_solicitados ADD COLUMN IF NOT EXISTS omie_sep_codigo TEXT`);
   await pool.query(`ALTER TABLE solicitacao_produto.solicitacoes_separacao ADD COLUMN IF NOT EXISTS urgente BOOLEAN DEFAULT FALSE`);
   await pool.query(`ALTER TABLE solicitacao_produto.solicitacoes_separacao ADD COLUMN IF NOT EXISTS n_solic TEXT`);
+  await pool.query(`ALTER TABLE logistica.carrinho ADD COLUMN IF NOT EXISTS data_prevista DATE`);
+  await pool.query(`ALTER TABLE logistica.carrinho ADD COLUMN IF NOT EXISTS horario TEXT`);
+  await pool.query(`ALTER TABLE logistica.carrinho ADD COLUMN IF NOT EXISTS cod_omie TEXT`);
+  await pool.query(`ALTER TABLE logistica.carrinho ADD COLUMN IF NOT EXISTS retirada_por TEXT`);
+  await pool.query(`ALTER TABLE logistica.carrinho ADD COLUMN IF NOT EXISTS comentario TEXT`);
   await pool.query(`ALTER TABLE logistica.carrinho ADD COLUMN IF NOT EXISTS urgente BOOLEAN DEFAULT FALSE`);
 }
 
 // Inicializa schema na primeira requisição
 let schemaMigrated = false;
+let schemaColumnsEnsured = false;
+let schemaMigrationPromise = null;
 async function ensureSchemaMigrated() {
-  if (!schemaMigrated) {
-    await initSolicitacaoProdutoSchema();
-    schemaMigrated = true;
+  if (schemaMigrated && schemaColumnsEnsured) return;
+  if (!schemaMigrationPromise) {
+    schemaMigrationPromise = (async () => {
+      if (!schemaMigrated) {
+        await initSolicitacaoProdutoSchema();
+        schemaMigrated = true;
+      }
+      if (!schemaColumnsEnsured) {
+        await ensureSolicitacaoProdutoQtyColumns();
+        schemaColumnsEnsured = true;
+      }
+    })().finally(() => {
+      schemaMigrationPromise = null;
+    });
   }
-  await ensureSolicitacaoProdutoQtyColumns();
+  await schemaMigrationPromise;
 }
 
 async function assertUsuarioSeparandoPodeAgir(client, solicIds, req) {
@@ -16035,7 +17687,7 @@ async function assertUsuarioSeparandoPodeAgir(client, solicIds, req) {
   );
   const bloqueados = rows.map(r => r.usuario_separando).filter(Boolean);
   if (bloqueados.length && !bloqueados.every(u => u === nome_user)) {
-    return { ok: false, error: `Esta separação está sendo feita por ${bloqueados[0]}.` };
+    return { ok: false, error: `Separação assumida por ${bloqueados[0]}.`, usuario_separando: bloqueados[0] };
   }
   return { ok: true };
 }
@@ -16072,37 +17724,6 @@ app.post('/api/logistica/separacao', express.json(), async (req, res) => {
     if (unidadeNorm === 'UN') {
       quantidadeNorm = Math.max(1, Math.round(quantidadeNorm));
     }
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS logistica.carrinho (
-        id             BIGSERIAL PRIMARY KEY,
-        id_user        TEXT NOT NULL,
-        nome_user      TEXT NOT NULL,
-        codigo_produto TEXT NOT NULL,
-        descricao      TEXT,
-        unidade        TEXT NOT NULL DEFAULT 'UN',
-        quantidade     NUMERIC(18,4) NOT NULL,
-        data_prevista  DATE,
-        horario        TEXT,
-        cod_omie       TEXT,
-        criado_em      TIMESTAMPTZ NOT NULL DEFAULT now()
-      )
-    `);
-    // Garante colunas em tabela já existente
-    await pool.query(`ALTER TABLE logistica.carrinho ADD COLUMN IF NOT EXISTS data_prevista DATE`);
-    await pool.query(`ALTER TABLE logistica.carrinho ADD COLUMN IF NOT EXISTS horario TEXT`);
-    await pool.query(`ALTER TABLE logistica.carrinho ADD COLUMN IF NOT EXISTS cod_omie TEXT`);
-    await pool.query(`ALTER TABLE logistica.carrinho ADD COLUMN IF NOT EXISTS retirada_por TEXT`);
-    await pool.query(`ALTER TABLE logistica.carrinho ADD COLUMN IF NOT EXISTS comentario TEXT`);
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS solicitacao_produto.itens_solicitados (
-        id       BIGSERIAL PRIMARY KEY,
-        id_carr  BIGINT,
-        n_solic  TEXT,
-        status   TEXT,
-        observacao TEXT
-      )
-    `);
-    await pool.query(`ALTER TABLE solicitacao_produto.itens_solicitados ADD COLUMN IF NOT EXISTS observacao TEXT`);
     // Busca codigo_produto (Omie) na tabela de produtos
     const omieRes = await pool.query(
       `SELECT codigo_produto FROM public.produtos_omie WHERE codigo = $1 LIMIT 1`,
@@ -16207,17 +17828,29 @@ app.patch('/api/logistica/itens_solicitados/separacao', async (req, res) => {
     if (!ids.length) return res.status(400).json({ ok: false, error: 'Nenhum ID válido.' });
     const nome_user = String(req.session?.user?.username || req.session?.user?.nome || '').trim();
     if (!nome_user) return res.status(400).json({ ok: false, error: 'Usuário sem nome na sessão.' });
-    await registrarMovimentacaoKanbanItens(pool, ids, 'Separação', req);
+    const { rows: elegiveis } = await pool.query(
+      `SELECT id FROM solicitacao_produto.itens_solicitados
+        WHERE id = ANY($1::bigint[])
+          AND status IN ('pendente', 'Stund-by')`,
+      [ids]
+    );
+    if (!elegiveis.length) {
+      return res.status(409).json({
+        ok: false,
+        error: 'Nenhum item elegível para iniciar separação (status deve ser Solicitado ou Stund-by).'
+      });
+    }
+    const idsElegiveis = elegiveis.map(r => r.id);
+    await registrarMovimentacaoKanbanItens(pool, idsElegiveis, 'Separação', req);
     await pool.query(
       `UPDATE solicitacao_produto.itens_solicitados
           SET status = 'Separação',
               usuario_separando = $2
-        WHERE id = ANY($1::bigint[])
-          AND status IN ('pendente', 'Stund-by')`,
-      [ids, nome_user]
+        WHERE id = ANY($1::bigint[])`,
+      [idsElegiveis, nome_user]
     );
-    console.log(`[logistica/separacao] ${ids.length} id(s) enviados para Separação por ${nome_user} (user ${id_user})`);
-    res.json({ ok: true });
+    console.log(`[logistica/separacao] ${idsElegiveis.length} id(s) enviados para Separação por ${nome_user} (user ${id_user})`);
+    res.json({ ok: true, atualizados: idsElegiveis.length });
   } catch (err) {
     console.error('[logistica/itens_solicitados/separacao] erro:', err);
     res.status(500).json({ ok: false, error: String(err?.message || err) });
@@ -16309,6 +17942,45 @@ app.patch('/api/logistica/itens_solicitados/cancelar-separacao', async (req, res
   }
 });
 
+// PATCH /api/logistica/itens_solicitados/assumir-separacao — Transfere usuario_separando para quem clicou
+app.patch('/api/logistica/itens_solicitados/assumir-separacao', async (req, res) => {
+  try {
+    await ensureSchemaMigrated();
+    const id_user = req.session?.user?.id;
+    const nome_user = String(req.session?.user?.username || req.session?.user?.nome || '').trim();
+    if (!id_user) return res.status(401).json({ ok: false, error: 'Não autenticado.' });
+    if (!nome_user) return res.status(400).json({ ok: false, error: 'Usuário sem nome na sessão.' });
+    const { solic_ids } = req.body;
+    if (!Array.isArray(solic_ids) || !solic_ids.length)
+      return res.status(400).json({ ok: false, error: 'solic_ids inválido.' });
+    const ids = solic_ids.map(id => parseInt(id, 10)).filter(id => !isNaN(id));
+    if (!ids.length) return res.status(400).json({ ok: false, error: 'Nenhum ID válido.' });
+
+    const { rows: itens } = await pool.query(
+      `SELECT id, status, usuario_separando
+         FROM solicitacao_produto.itens_solicitados
+        WHERE id = ANY($1::bigint[])
+          AND status IN ('Separação', 'Em Separação', 'Separado')`,
+      [ids]
+    );
+    if (!itens.length)
+      return res.status(400).json({ ok: false, error: 'Nenhum item em separação encontrado.' });
+
+    const idsElegiveis = itens.map(r => r.id);
+    await pool.query(
+      `UPDATE solicitacao_produto.itens_solicitados
+          SET usuario_separando = $2
+        WHERE id = ANY($1::bigint[])`,
+      [idsElegiveis, nome_user]
+    );
+    console.log(`[logistica/assumir-separacao] ${idsElegiveis.length} item(ns) assumido(s) por ${nome_user} (user ${id_user})`);
+    res.json({ ok: true, usuario_separando: nome_user, atualizados: idsElegiveis.length });
+  } catch (err) {
+    console.error('[logistica/assumir-separacao] erro:', err);
+    res.status(500).json({ ok: false, error: String(err?.message || err) });
+  }
+});
+
 // PATCH /api/logistica/itens_solicitados/reverter-pendente - Reverte itens para 'pendente'
 app.patch('/api/logistica/itens_solicitados/reverter-pendente', async (req, res) => {
   try {
@@ -16350,6 +18022,9 @@ app.patch('/api/logistica/itens_solicitados/reverter-separacao', async (req, res
     if (!lock.ok) return res.status(403).json(lock);
 
     await client.query('BEGIN');
+
+    await _etqEstornarDebitoSeparacao(client, ids);
+    await _logisticaEstornarTrfOmieSeparacao(client, ids, { nome_user: _logisticaNomeUsuarioReq(req) });
 
     // Restaura quantidade original do pedido no carrinho (quando houve Informar qtd)
     const { rows: restaurados } = await client.query(
@@ -16427,31 +18102,153 @@ app.patch('/api/logistica/itens_solicitados/:id/separado', async (req, res) => {
   }
 });
 
-// PATCH /api/logistica/itens_solicitados/separar - Marca array de itens como 'Separado'
-app.patch('/api/logistica/itens_solicitados/separar', async (req, res) => {
+/** Itens cuja SEP veio do fluxo VIPP (motivo SAC/AT ou vínculo em envios.solicitacoes). */
+async function _logisticaSolicIdsVippSet(db, solicIds) {
+  const ids = (solicIds || []).map(id => parseInt(id, 10)).filter(id => !isNaN(id));
+  if (!ids.length) return new Set();
+  const { rows } = await db.query(
+    `SELECT i.id
+       FROM solicitacao_produto.itens_solicitados i
+      WHERE i.id = ANY($1::bigint[])
+        AND (
+          i.motivo IN ('SAC', 'AT')
+          OR EXISTS (
+            SELECT 1 FROM envios.solicitacoes e
+             WHERE e.numero_sep = i.n_solic
+               AND NULLIF(TRIM(e.id_vipp), '') IS NOT NULL
+          )
+        )`,
+    [ids]
+  );
+  return new Set(rows.map(r => Number(r.id)));
+}
+
+async function _logisticaEnviosVippPosSeparacao(db, solicIds) {
+  const ids = (solicIds || []).map(id => parseInt(id, 10)).filter(id => !isNaN(id));
+  if (!ids.length) return;
   try {
-    await ensureSchemaMigrated();
-    const id_user = req.session?.user?.id;
-    if (!id_user) return res.status(401).json({ ok: false, error: 'Não autenticado.' });
-    const { solic_ids } = req.body;
-    if (!Array.isArray(solic_ids) || !solic_ids.length)
-      return res.status(400).json({ ok: false, error: 'solic_ids inválido.' });
-    const ids = solic_ids.map(id => parseInt(id, 10)).filter(id => !isNaN(id));
-    const lock = await assertUsuarioSeparandoPodeAgir(pool, ids, req);
-    if (!lock.ok) return res.status(403).json(lock);
-    await registrarMovimentacaoKanbanItens(pool, ids, 'Separado', req);
-    await pool.query(
+    const { rows } = await db.query(
+      `SELECT DISTINCT i.n_solic
+         FROM solicitacao_produto.itens_solicitados i
+        WHERE i.id = ANY($1::bigint[]) AND i.n_solic IS NOT NULL`,
+      [ids]
+    );
+    for (const { n_solic } of rows) {
+      await db.query(
+        `UPDATE envios.solicitacoes
+            SET status = 'Aguardando identificação'
+          WHERE numero_sep = $1 AND NULLIF(TRIM(id_vipp), '') IS NOT NULL`,
+        [n_solic]
+      );
+    }
+  } catch (e) {
+    console.warn('[logistica/vipp-pos-separacao] envios.solicitacoes:', e.message);
+  }
+}
+
+/** VIPP → Concluído direto; demais fluxos → Separado (Aguardando retirada depois). */
+async function _logisticaAplicarStatusPosSeparacao(client, solicIds, req) {
+  const ids = (solicIds || []).map(id => parseInt(id, 10)).filter(id => !isNaN(id));
+  if (!ids.length) return { vipp: 0, normal: 0 };
+
+  const vippSet = await _logisticaSolicIdsVippSet(client, ids);
+  const idsVipp = ids.filter(id => vippSet.has(id));
+  const idsNormal = ids.filter(id => !vippSet.has(id));
+
+  if (idsNormal.length) {
+    await registrarMovimentacaoKanbanItens(client, idsNormal, 'Separado', req);
+    await client.query(
       `UPDATE solicitacao_produto.itens_solicitados
           SET status = 'Separado',
               quantidade_solicitada = NULL,
               quantidade_separada = NULL
         WHERE id = ANY($1::bigint[])`,
-      [ids]
+      [idsNormal]
     );
-    res.json({ ok: true });
+  }
+
+  if (idsVipp.length) {
+    await registrarMovimentacaoKanbanItens(client, idsVipp, 'Concluído', req);
+    await client.query(
+      `UPDATE solicitacao_produto.itens_solicitados
+          SET status = 'Concluído',
+              quantidade_solicitada = NULL,
+              quantidade_separada = NULL
+        WHERE id = ANY($1::bigint[])`,
+      [idsVipp]
+    );
+    await _logisticaEnviosVippPosSeparacao(client, idsVipp);
+  }
+
+  return { vipp: idsVipp.length, normal: idsNormal.length };
+}
+
+async function _logisticaAplicarStatusPosSeparacaoPorCarr(client, carrIds, req) {
+  const cIds = (carrIds || []).map(id => parseInt(id, 10)).filter(id => !isNaN(id));
+  if (!cIds.length) return { vipp: 0, normal: 0 };
+  const { rows } = await client.query(
+    `SELECT id FROM solicitacao_produto.itens_solicitados WHERE id_carr = ANY($1::bigint[])`,
+    [cIds]
+  );
+  const solicIds = rows.map(r => Number(r.id)).filter(Boolean);
+  return _logisticaAplicarStatusPosSeparacao(client, solicIds, req);
+}
+
+// PATCH /api/logistica/itens_solicitados/separar - Marca array de itens como 'Separado'
+app.patch('/api/logistica/itens_solicitados/separar', async (req, res) => {
+  const client = await pool.connect();
+  try {
+    await ensureSchemaMigrated();
+    const id_user = req.session?.user?.id;
+    if (!id_user) return res.status(401).json({ ok: false, error: 'Não autenticado.' });
+    const { solic_ids, cod_local_origem, etq_id, endereco_origem, codigo_produto } = req.body;
+    if (!Array.isArray(solic_ids) || !solic_ids.length)
+      return res.status(400).json({ ok: false, error: 'solic_ids inválido.' });
+    const ids = solic_ids.map(id => parseInt(id, 10)).filter(id => !isNaN(id));
+    const lock = await assertUsuarioSeparandoPodeAgir(pool, ids, req);
+    if (!lock.ok) return res.status(403).json(lock);
+
+    await client.query('BEGIN');
+
+    const reint = await _logisticaReintegrarStandbySePossivel(client, ids);
+    if (reint.reintegrated) {
+      await client.query('COMMIT');
+      return res.json({ ok: true, reintegrado: true, n_solic: reint.n_solic_base, vipp: 0, normal: 0 });
+    }
+
+    const { qtd, codigo } = await _logisticaObterQtyCodigoSeparacao(client, ids);
+    let etqDebit = null;
+    if (String(cod_local_origem || '').trim() === LOGISTICA_ALMOX_LOCAL_COD) {
+      etqDebit = await _etqDebitarSeparacaoAlmox(client, {
+        cod_local_origem,
+        etq_id,
+        endereco_origem,
+        codigo_produto: codigo_produto || codigo,
+        qtd
+      });
+    }
+    await _logisticaExecutarTrfOmieSeparacao(client, ids, {
+      cod_local_origem,
+      qtd,
+      nome_user: _logisticaNomeUsuarioReq(req)
+    });
+    const posSep = await _logisticaAplicarStatusPosSeparacao(client, ids, req);
+    if (etqDebit?.endereco) {
+      await _etqPersistirDebitoSeparacao(client, ids, etqDebit);
+    }
+    await client.query('COMMIT');
+    res.json({ ok: true, ...posSep });
   } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    if (err?.code === 'ETQ_SALDO_SEPARACAO' || err?.code === 'ETQ_ENDERECO_OBRIGATORIO'
+      || err?.code === 'OMIE_ORIGEM_OBRIGATORIA' || err?.code === 'OMIE_DESTINO_OBRIGATORIO'
+      || err?.code === 'OMIE_TRF_SEPARACAO' || err?.code === 'OMIE_CREDENCIAIS') {
+      return res.status(400).json({ ok: false, error: err.message });
+    }
     console.error('[logistica/separar] erro:', err);
     res.status(500).json({ ok: false, error: String(err?.message || err) });
+  } finally {
+    client.release();
   }
 });
 
@@ -16508,6 +18305,145 @@ async function registrarAlteracaoQuantidadeItem(client, { solicIds, carrId, qtyO
   }
 }
 
+const _LOGISTICA_STATUS_ANTES_RETIRADA = ['pendente', 'Stund-by', 'Separação', 'Separado'];
+
+/** Item de SEP derivada (SEP-1000.1) em stand-by: devolve qty à SEP original se ainda ativa. */
+async function _logisticaReintegrarStandbySePossivel(client, solicIds) {
+  const ids = (solicIds || []).map(id => parseInt(id, 10)).filter(id => !isNaN(id));
+  if (!ids.length) return { reintegrated: false, n_solic_base: null };
+
+  const { rows: items } = await client.query(
+    `SELECT i.id, i.n_solic, i.status, c.id AS carr_id, c.quantidade, c.codigo_produto
+       FROM solicitacao_produto.itens_solicitados i
+       JOIN logistica.carrinho c ON c.id = i.id_carr
+      WHERE i.id = ANY($1::bigint[])`,
+    [ids]
+  );
+
+  let anyReintegrated = false;
+  let nSolicBase = null;
+
+  for (const item of items) {
+    const nSolic = String(item.n_solic || '');
+    const m = nSolic.match(/^(.+)\.(\d+)$/);
+    if (!m) continue;
+
+    const baseNSolic = m[1];
+    const qtyStandby = parseFloat(item.quantidade) || 0;
+    if (qtyStandby <= 0) continue;
+
+    const { rows: parents } = await client.query(
+      `SELECT i.id, i.status, c.id AS carr_id, c.quantidade
+         FROM solicitacao_produto.itens_solicitados i
+         JOIN logistica.carrinho c ON c.id = i.id_carr
+        WHERE i.n_solic = $1
+          AND c.codigo_produto = $2
+          AND i.status = ANY($3::text[])
+        ORDER BY i.id ASC
+        LIMIT 1`,
+      [baseNSolic, item.codigo_produto, _LOGISTICA_STATUS_ANTES_RETIRADA]
+    );
+    if (!parents.length) continue;
+
+    const parent = parents[0];
+    const parentQty = parseFloat(parent.quantidade) || 0;
+
+    await client.query(
+      `UPDATE logistica.carrinho SET quantidade = $1 WHERE id = $2`,
+      [parentQty + qtyStandby, parent.carr_id]
+    );
+    await client.query(
+      `UPDATE solicitacao_produto.itens_solicitados
+          SET quantidade_solicitada = NULL, quantidade_separada = NULL
+        WHERE id = $1`,
+      [parent.id]
+    );
+    await client.query(`DELETE FROM solicitacao_produto.itens_solicitados WHERE id = $1`, [item.id]);
+    await client.query(`DELETE FROM logistica.carrinho WHERE id = $1`, [item.carr_id]);
+
+    anyReintegrated = true;
+    nSolicBase = baseNSolic;
+    console.log(`[standby-reintegrar] ${qtyStandby} de ${item.codigo_produto} devolvido de ${nSolic} → ${baseNSolic}`);
+  }
+
+  return { reintegrated: anyReintegrated, n_solic_base: nSolicBase };
+}
+
+// POST /api/logistica/itens_solicitados/registrar-qtd-manual — grava qty sem separar (aguarda botão Separado)
+app.post('/api/logistica/itens_solicitados/registrar-qtd-manual', express.json(), async (req, res) => {
+  const client = await pool.connect();
+  try {
+    await ensureSolicitacaoProdutoQtyColumns();
+    const id_user = req.session?.user?.id;
+    if (!id_user) return res.status(401).json({ ok: false, error: 'Não autenticado.' });
+
+    const { carr_ids, solic_ids, quantidade_separada, motivo } = req.body || {};
+    const qtySep = parseFloat(quantidade_separada);
+    if (!Array.isArray(carr_ids) || !carr_ids.length || !Number.isFinite(qtySep) || qtySep <= 0) {
+      return res.status(400).json({ ok: false, error: 'Dados inválidos.' });
+    }
+
+    const cIds = carr_ids.map(id => parseInt(id, 10)).filter(id => !isNaN(id));
+    const sIds = (solic_ids || []).map(id => parseInt(id, 10)).filter(id => !isNaN(id));
+    if (sIds.length) {
+      const lock = await assertUsuarioSeparandoPodeAgir(pool, sIds, req);
+      if (!lock.ok) return res.status(403).json(lock);
+    }
+
+    await client.query('BEGIN');
+
+    const { rows: carrs } = await client.query(
+      `SELECT * FROM logistica.carrinho WHERE id = ANY($1::bigint[]) ORDER BY criado_em ASC`,
+      [cIds]
+    );
+    if (!carrs.length) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ ok: false, error: 'Carrinho não encontrado.' });
+    }
+
+    const qtyTotal = carrs.reduce((s, c) => s + parseFloat(c.quantidade), 0);
+    const motivoStr = String(motivo || '').trim() || null;
+    const qtyStandby = qtySep < qtyTotal ? qtyTotal - qtySep : 0;
+    const qtyExtra = qtySep > qtyTotal ? qtySep - qtyTotal : 0;
+
+    if (sIds.length) {
+      await client.query(
+        `UPDATE solicitacao_produto.itens_solicitados
+            SET quantidade_solicitada = $1,
+                quantidade_separada = $2,
+                observacao = CASE WHEN $4::text IS NOT NULL AND $5 > 0 THEN $4 ELSE observacao END
+          WHERE id = ANY($3::bigint[])`,
+        [qtyTotal, qtySep, sIds, motivoStr, qtyStandby]
+      );
+    } else {
+      await client.query(
+        `UPDATE solicitacao_produto.itens_solicitados
+            SET quantidade_solicitada = $1,
+                quantidade_separada = $2,
+                observacao = CASE WHEN $4::text IS NOT NULL AND $5 > 0 THEN $4 ELSE observacao END
+          WHERE id_carr = ANY($3::bigint[])`,
+        [qtyTotal, qtySep, cIds, motivoStr, qtyStandby]
+      );
+    }
+
+    await client.query('COMMIT');
+    console.log(`[registrar-qtd-manual] qty original ${qtyTotal}, separada ${qtySep}, standby ${qtyStandby}, extra ${qtyExtra} por user ${id_user}`);
+    res.json({
+      ok: true,
+      quantidade_original: qtyTotal,
+      quantidade_separada: qtySep,
+      quantidade_standby: qtyStandby,
+      quantidade_extra: qtyExtra
+    });
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    console.error('[registrar-qtd-manual] erro:', err);
+    res.status(500).json({ ok: false, error: String(err?.message || err) });
+  } finally {
+    client.release();
+  }
+});
+
 // POST /api/logistica/itens_solicitados/separar-parcial - Separa qty parcial, clona carrinho
 // Lógica: original SEP recebe a qty separada → status Separado
 //         novo SEP-NNNN.X recebe o restante → status pendente (volta à fila de Solicitados)
@@ -16516,7 +18452,7 @@ app.post('/api/logistica/itens_solicitados/separar-parcial', async (req, res) =>
   try {
     const id_user = req.session?.user?.id;
     if (!id_user) return res.status(401).json({ ok: false, error: 'Não autenticado.' });
-    const { carr_ids, solic_ids, quantidade_separada, motivo } = req.body;
+    const { carr_ids, solic_ids, quantidade_separada, motivo, cod_local_origem, etq_id, endereco_origem, codigo_produto } = req.body;
     const qtySep = parseFloat(quantidade_separada);
     if (!Array.isArray(carr_ids) || !carr_ids.length || isNaN(qtySep) || qtySep <= 0)
       return res.status(400).json({ ok: false, error: 'Dados inválidos.' });
@@ -16528,6 +18464,35 @@ app.post('/api/logistica/itens_solicitados/separar-parcial', async (req, res) =>
     }
 
     await client.query('BEGIN');
+
+    let idsReint = sIds;
+    if (!idsReint.length && cIds.length) {
+      const { rows: solRows } = await client.query(
+        `SELECT id FROM solicitacao_produto.itens_solicitados WHERE id_carr = ANY($1::bigint[])`,
+        [cIds]
+      );
+      idsReint = solRows.map(r => Number(r.id)).filter(Boolean);
+    }
+    const reint = await _logisticaReintegrarStandbySePossivel(client, idsReint);
+    if (reint.reintegrated) {
+      await client.query('COMMIT');
+      return res.json({ ok: true, reintegrado: true, n_solic: reint.n_solic_base, new_n_solic: null });
+    }
+
+    let etqDebit = null;
+    if (String(cod_local_origem || '').trim() === LOGISTICA_ALMOX_LOCAL_COD) {
+      const codigoRef = codigo_produto || (await client.query(
+        `SELECT MIN(codigo_produto) AS codigo FROM logistica.carrinho WHERE id = ANY($1::bigint[])`,
+        [cIds]
+      )).rows[0]?.codigo;
+      etqDebit = await _etqDebitarSeparacaoAlmox(client, {
+        cod_local_origem,
+        etq_id,
+        endereco_origem,
+        codigo_produto: codigoRef,
+        qtd: qtySep
+      });
+    }
     await client.query(`ALTER TABLE solicitacao_produto.itens_solicitados ADD COLUMN IF NOT EXISTS observacao TEXT`);
     await client.query(`ALTER TABLE solicitacao_produto.itens_solicitados ADD COLUMN IF NOT EXISTS quantidade_solicitada NUMERIC(18,4)`);
     await client.query(`ALTER TABLE solicitacao_produto.itens_solicitados ADD COLUMN IF NOT EXISTS quantidade_separada NUMERIC(18,4)`);
@@ -16565,15 +18530,28 @@ app.post('/api/logistica/itens_solicitados/separar-parcial', async (req, res) =>
       }
 
       if (sIds.length > 0) {
-        await client.query(
-          `UPDATE solicitacao_produto.itens_solicitados SET status = 'Separado' WHERE id = ANY($1::bigint[])`,
-          [sIds]
-        );
+        await _logisticaExecutarTrfOmieSeparacao(client, sIds, {
+          cod_local_origem,
+          qtd: qtySep,
+          nome_user: _logisticaNomeUsuarioReq(req)
+        });
+        await _logisticaAplicarStatusPosSeparacao(client, sIds, req);
+        if (etqDebit?.endereco) await _etqPersistirDebitoSeparacao(client, sIds, etqDebit);
       } else {
-        await client.query(
-          `UPDATE solicitacao_produto.itens_solicitados SET status = 'Separado' WHERE id_carr = $1`,
+        const { rows: solRows } = await client.query(
+          `SELECT id FROM solicitacao_produto.itens_solicitados WHERE id_carr = $1`,
           [primaryId]
         );
+        const idsSep = solRows.map(r => r.id);
+        await _logisticaExecutarTrfOmieSeparacao(client, idsSep, {
+          cod_local_origem,
+          qtd: qtySep,
+          nome_user: _logisticaNomeUsuarioReq(req)
+        });
+        await _logisticaAplicarStatusPosSeparacaoPorCarr(client, [primaryId], req);
+        if (etqDebit?.endereco) {
+          await _etqPersistirDebitoSeparacao(client, idsSep, etqDebit);
+        }
       }
 
       await client.query('COMMIT');
@@ -16607,6 +18585,19 @@ app.post('/api/logistica/itens_solicitados/separar-parcial', async (req, res) =>
       newNSolic = `${baseN}.${maxSuffix + 1}`;
     }
 
+    let codLocalOrig = null;
+    let nomeLocalOrig = null;
+    let motivoOrig = null;
+    if (sIds.length > 0) {
+      const { rows: [origItem] } = await client.query(
+        `SELECT cod_local, nome_local, motivo FROM solicitacao_produto.itens_solicitados WHERE id = $1`,
+        [sIds[0]]
+      );
+      codLocalOrig = origItem?.cod_local || null;
+      nomeLocalOrig = origItem?.nome_local || null;
+      motivoOrig = origItem?.motivo || null;
+    }
+
     // Cria novo carrinho com o restante (qtyRemainder) → volta para a fila como pendente
     const { rows: [newCarr] } = await client.query(
       `INSERT INTO logistica.carrinho
@@ -16616,8 +18607,10 @@ app.post('/api/logistica/itens_solicitados/separar-parcial', async (req, res) =>
        base.unidade, qtyRemainder, base.data_prevista, base.horario, base.cod_omie]
     );
     await client.query(
-      `INSERT INTO solicitacao_produto.itens_solicitados (id_carr, n_solic, status, observacao) VALUES ($1,$2,'Stund-by',$3)`,
-      [newCarr.id, newNSolic, String(motivo || '').trim() || null]
+      `INSERT INTO solicitacao_produto.itens_solicitados
+         (id_carr, n_solic, status, observacao, cod_local, nome_local, motivo)
+       VALUES ($1,$2,'Stund-by',$3,$4,$5,$6)`,
+      [newCarr.id, newNSolic, String(motivo || '').trim() || null, codLocalOrig, nomeLocalOrig, motivoOrig]
     );
 
     // Reduz os entries originais removendo qtyRemainder do último para o primeiro
@@ -16668,10 +18661,21 @@ app.post('/api/logistica/itens_solicitados/separar-parcial', async (req, res) =>
         solicIds: sIds, carrId: primaryKeptId, qtyOriginal: qtyTotal, qtySeparada: qtySep
       });
 
-      await client.query(
-        `UPDATE solicitacao_produto.itens_solicitados SET status = 'Separado' WHERE id_carr = $1`,
+      const { rows: solKeptRows } = await client.query(
+        `SELECT id FROM solicitacao_produto.itens_solicitados WHERE id_carr = $1`,
         [primaryKeptId]
       );
+      const idsKeptSep = solKeptRows.map(r => r.id);
+      await _logisticaExecutarTrfOmieSeparacao(client, idsKeptSep.length ? idsKeptSep : sIds, {
+        cod_local_origem,
+        qtd: qtySep,
+        nome_user: _logisticaNomeUsuarioReq(req)
+      });
+
+      await _logisticaAplicarStatusPosSeparacaoPorCarr(client, [primaryKeptId], req);
+      if (etqDebit?.endereco) {
+        await _etqPersistirDebitoSeparacao(client, idsKeptSep.length ? idsKeptSep : sIds, etqDebit);
+      }
     }
 
     await client.query('COMMIT');
@@ -16679,6 +18683,11 @@ app.post('/api/logistica/itens_solicitados/separar-parcial', async (req, res) =>
     res.json({ ok: true, new_n_solic: newNSolic });
   } catch (err) {
     try { await client.query('ROLLBACK'); } catch (_) {}
+    if (err?.code === 'ETQ_SALDO_SEPARACAO' || err?.code === 'ETQ_ENDERECO_OBRIGATORIO'
+      || err?.code === 'OMIE_ORIGEM_OBRIGATORIA' || err?.code === 'OMIE_DESTINO_OBRIGATORIO'
+      || err?.code === 'OMIE_TRF_SEPARACAO' || err?.code === 'OMIE_CREDENCIAIS') {
+      return res.status(400).json({ ok: false, error: err.message });
+    }
     console.error('[separar-parcial] erro:', err);
     res.status(500).json({ ok: false, error: String(err?.message || err) });
   } finally {
@@ -16753,13 +18762,23 @@ app.get('/api/logistica/kanban', async (req, res) => {
   }
 });
 
-async function _logisticaFetchEnderecoPpMap(codigos) {
+async function _logisticaFetchEnderecoEtqMap(codigos) {
   const list = [...new Set((codigos || []).map(s => String(s || '').trim()).filter(Boolean))];
   if (!list.length) return {};
   const { rows } = await pool.query(
-    `SELECT codigo, completo, rua, andar, edificio, apartamento
-       FROM logistica."Endereço_pp"
-      WHERE codigo = ANY($1::text[])`,
+    `SELECT DISTINCT ON (p.codigo, TRIM(i.endereco))
+            p.codigo,
+            i.id,
+            TRIM(i.endereco) AS endereco,
+            COALESCE(i.qtd, 0) AS qtd,
+            COALESCE(NULLIF(TRIM(i.unidade), ''), 'UN') AS unidade,
+            i.complemento
+       FROM etiqueta."ETQ_rec_impresso" i
+       JOIN public.produtos_omie p
+         ON TRIM(i.codigo_produto) IN (p.codigo_produto::text, TRIM(p.codigo))
+      WHERE p.codigo = ANY($1::text[])
+        AND i.endereco IS NOT NULL AND TRIM(i.endereco) <> ''
+      ORDER BY p.codigo, TRIM(i.endereco), COALESCE(i.qtd, 0) DESC, i.id DESC`,
     [list]
   );
   const dados = {};
@@ -16768,11 +18787,12 @@ async function _logisticaFetchEnderecoPpMap(codigos) {
     if (!cod) continue;
     if (!dados[cod]) dados[cod] = [];
     dados[cod].push({
-      completo: row.completo || null,
-      rua: row.rua || null,
-      andar: row.andar || null,
-      edificio: row.edificio || null,
-      apartamento: row.apartamento || null
+      id: row.id,
+      endereco: row.endereco || null,
+      completo: row.endereco || null,
+      qtd: row.qtd,
+      unidade: row.unidade || 'UN',
+      complemento: row.complemento || null
     });
   }
   return dados;
@@ -16846,7 +18866,7 @@ app.get('/api/logistica/kanban/itens', async (req, res) => {
         ...rows.map(r => r.codigo_produto),
         ...itensDerivados.map(r => r.codigo_produto)
       ].filter(Boolean))];
-      const enderecoMap = await _logisticaFetchEnderecoPpMap(allCodigos);
+      const enderecoMap = await _logisticaFetchEnderecoEtqMap(allCodigos);
       return res.json({
         ok: true,
         itens: _logisticaAttachEnderecoPp(rows, enderecoMap),
@@ -16874,7 +18894,7 @@ app.get('/api/logistica/kanban/itens', async (req, res) => {
            )
          ORDER BY c.criado_em ASC
       `, [id_user]);
-      const enderecoMap = await _logisticaFetchEnderecoPpMap(rows.map(r => r.codigo_produto));
+      const enderecoMap = await _logisticaFetchEnderecoEtqMap(rows.map(r => r.codigo_produto));
       return res.json({ ok: true, itens: _logisticaAttachEnderecoPp(rows, enderecoMap) });
     }
   } catch (err) {
@@ -16930,6 +18950,10 @@ app.get('/api/logistica/solicitacoes-kanban', async (req, res) => {
         MIN(i.criado_em)                       AS item_criado_em,
         MAX(NULLIF(TRIM(i.usuario_separando), '')) AS usuario_separando,
         bool_or(COALESCE(i.urgente, false))    AS tem_urgente,
+        bool_or(
+          i.status = 'pendente'
+          AND (i.cod_local IS NULL OR TRIM(i.cod_local) = '')
+        ) AS tem_pendente_sem_local,
         CASE
           WHEN bool_or(i.status = 'pendente')            THEN 'Solicitado'
           WHEN bool_or(i.status = 'Stund-by')           THEN 'Stund-by'
@@ -16946,7 +18970,10 @@ app.get('/api/logistica/solicitacoes-kanban', async (req, res) => {
     `);
 
     const colunas = { 'Solicitado': [], 'Stund-by': [], 'Em Separação': [], 'Separado': [], 'Aguardando retirada': [], 'Concluído': [] };
-    rows.forEach(r => { if (colunas[r.coluna]) colunas[r.coluna].push(r); });
+    rows.forEach(r => {
+      if (r.coluna === 'Solicitado' && r.tem_pendente_sem_local) return;
+      if (colunas[r.coluna]) colunas[r.coluna].push(r);
+    });
     colunas['Concluído'].sort((a, b) => {
       const ta = a.item_criado_em ? new Date(a.item_criado_em).getTime() : 0;
       const tb = b.item_criado_em ? new Date(b.item_criado_em).getTime() : 0;
@@ -17412,12 +19439,19 @@ app.get('/api/logistica/produtos/buscar', async (req, res) => {
 // GET /api/logistica/carrinho - Retorna itens do carrinho do usuário atual
 app.get('/api/logistica/carrinho', async (req, res) => {
   try {
+    await ensureSchemaMigrated();
     const id_user = req.session?.user?.id;
     if (!id_user) return res.status(401).json({ ok: false, error: 'Não autenticado.' });
-    await pool.query(`ALTER TABLE logistica.carrinho ADD COLUMN IF NOT EXISTS comentario TEXT`);
-    await pool.query(`ALTER TABLE logistica.carrinho ADD COLUMN IF NOT EXISTS urgente BOOLEAN DEFAULT FALSE`);
     const { rows } = await pool.query(
-      `SELECT id, codigo_produto, descricao, unidade, quantidade, comentario, COALESCE(urgente, false) AS urgente, criado_em
+      `SELECT
+          c.id,
+          c.codigo_produto,
+          c.descricao,
+          c.unidade,
+          c.quantidade,
+          c.comentario,
+          COALESCE(c.urgente, false) AS urgente,
+          c.criado_em
          FROM logistica.carrinho c
         WHERE c.id_user = $1
           AND NOT EXISTS (
@@ -17436,13 +19470,11 @@ app.get('/api/logistica/carrinho', async (req, res) => {
 // PATCH /api/logistica/carrinho/:id/comentario - Atualiza comentário do item no carrinho
 app.patch('/api/logistica/carrinho/:id/comentario', express.json(), async (req, res) => {
   try {
+    await ensureSchemaMigrated();
     const id_user = req.session?.user?.id;
     if (!id_user) return res.status(401).json({ ok: false, error: 'Não autenticado.' });
     const itemId = parseInt(req.params.id, 10);
     if (!itemId) return res.status(400).json({ ok: false, error: 'ID inválido.' });
-
-    await pool.query(`ALTER TABLE logistica.carrinho ADD COLUMN IF NOT EXISTS comentario TEXT`);
-
     const comentario = String(req.body?.comentario || '').trim() || null;
     const { rowCount } = await pool.query(
       `UPDATE logistica.carrinho
@@ -17507,7 +19539,7 @@ app.post('/api/logistica/separacao/enviar', express.json(), async (req, res) => 
     const id_user   = req.session?.user?.id;
     const nome_user = req.session?.user?.username || req.session?.user?.nome || 'desconhecido';
     if (!id_user) return res.status(401).json({ ok: false, error: 'Não autenticado.' });
-    const { solicitado_para, motivo, data_prevista, horario, observacao, item_ids, forcar_novo_sep, os_num, id_vipp, conteudo, origem_vipp } = req.body || {};
+    const { solicitado_para, motivo, data_prevista, horario, observacao, item_ids, forcar_novo_sep, os_num, id_vipp, conteudo, origem_vipp, local_estoque, local_estoque_nome, metodo_envio } = req.body || {};
     // Quando item_ids for fornecido (ex: VIPP), processa apenas esses itens do carrinho
     const filtroIds = Array.isArray(item_ids) && item_ids.length > 0
       ? item_ids.map(id => parseInt(id, 10)).filter(id => !isNaN(id))
@@ -17515,8 +19547,10 @@ app.post('/api/logistica/separacao/enviar', express.json(), async (req, res) => 
 
     const motivoRaw = String(motivo || '').trim();
     const motivosPermitidos = new Set(['Produção', 'Engenharia', 'venda', 'Assistencia tecnica']);
-    const fluxoVipp = !!id_vipp;
-    const origemVippNorm = String(origem_vipp || '').trim().toUpperCase() === 'SAC' ? 'SAC' : 'AT';
+    const origemVippRaw = String(origem_vipp || '').trim().toUpperCase();
+    const fluxoSacAtEnvio = origemVippRaw === 'SAC' || origemVippRaw === 'AT';
+    const fluxoVipp = !!id_vipp || fluxoSacAtEnvio;
+    const origemVippNorm = origemVippRaw === 'SAC' ? 'SAC' : 'AT';
     const motivoSolicitacao = fluxoVipp
       ? (origemVippNorm === 'SAC' ? 'SAC' : 'AT')
       : (motivosPermitidos.has(motivoRaw) ? motivoRaw : 'Produção');
@@ -17551,6 +19585,24 @@ app.post('/api/logistica/separacao/enviar', express.json(), async (req, res) => 
         [VIPP_COD_LOCAL_PADRAO]
       );
       vippNomeLocalPadrao = localRows[0]?.nome || null;
+    }
+
+    const codLocalGravar = fluxoVipp
+      ? VIPP_COD_LOCAL_PADRAO
+      : (String(local_estoque || '').trim() || null);
+    let nomeLocalGravar = fluxoVipp
+      ? vippNomeLocalPadrao
+      : (String(local_estoque_nome || '').trim() || null);
+    if (!fluxoVipp && codLocalGravar && !nomeLocalGravar) {
+      const { rows: localRows } = await client.query(
+        `SELECT nome FROM public.omie_locais_estoque WHERE local_codigo = $1 LIMIT 1`,
+        [codLocalGravar]
+      );
+      nomeLocalGravar = localRows[0]?.nome || null;
+    }
+    if (!fluxoVipp && !codLocalGravar) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ ok: false, error: 'Local de estoque é obrigatório.' });
     }
 
     // Garante tabela de solicitações
@@ -17673,8 +19725,8 @@ app.post('/api/logistica/separacao/enviar', express.json(), async (req, res) => 
           nSolic,
           observacao || null,
           motivoSolicitacao,
-          fluxoVipp ? VIPP_COD_LOCAL_PADRAO : null,
-          fluxoVipp ? vippNomeLocalPadrao : null,
+          codLocalGravar,
+          nomeLocalGravar,
           item.urgente || false
         ]
       );
@@ -17683,18 +19735,20 @@ app.post('/api/logistica/separacao/enviar', express.json(), async (req, res) => 
     await client.query('COMMIT');
     console.log(`[Separação] Pedido ${nSolic} enviado por ${nome_user} (${itens.length} itens)`);
 
-    // Se veio do VIPP, registra em envios.solicitacoes com id_vipp e número SEP
-    if (id_vipp) {
+    // Se veio do fluxo de envio (VIPP ou manual), registra em envios.solicitacoes
+    const metodoEnvio = String(metodo_envio || '').trim() || null;
+    if (id_vipp || metodoEnvio) {
       try {
         await pool.query(`ALTER TABLE envios.solicitacoes ADD COLUMN IF NOT EXISTS id_vipp TEXT`);
+        await pool.query(`ALTER TABLE envios.solicitacoes ADD COLUMN IF NOT EXISTS metodo_envio TEXT`);
         await pool.query(
-          `INSERT INTO envios.solicitacoes (usuario, observacao, status, numero_sep, id_vipp, anexos, conferido, conteudo)
-           VALUES ($1, $2, 'Pendente', $3, $4, '{}', false, $5)`,
-          [nome_user, os_num || null, nSolic, String(id_vipp), conteudo || null]
+          `INSERT INTO envios.solicitacoes (usuario, observacao, status, numero_sep, id_vipp, anexos, conferido, conteudo, metodo_envio)
+           VALUES ($1, $2, 'Pendente', $3, $4, '{}', false, $5, $6)`,
+          [nome_user, os_num || observacao || null, nSolic, id_vipp ? String(id_vipp) : null, conteudo || null, metodoEnvio]
         );
-        console.log(`[Separação/VIPP] Registro em envios.solicitacoes: SEP=${nSolic} VIPP=${id_vipp}`);
+        console.log(`[Separação/Envio] Registro em envios.solicitacoes: SEP=${nSolic} VIPP=${id_vipp || '-'} metodo=${metodoEnvio || '-'}`);
       } catch (e) {
-        console.warn('[Separação/VIPP] Falha ao registrar em envios.solicitacoes:', e.message);
+        console.warn('[Separação/Envio] Falha ao registrar em envios.solicitacoes:', e.message);
       }
     }
 
@@ -17732,7 +19786,12 @@ app.get('/api/logistica/estoque/batch', async (req, res) => {
     // Passo 1: coleta todos os dados
     for (const row of rows) {
       if (!dados[row.codigo]) dados[row.codigo] = [];
-      dados[row.codigo].push({ local_nome: row.local_nome || row.local_codigo, saldo: row.saldo, unidade: row.unidade || '' });
+      dados[row.codigo].push({
+        local_codigo: row.local_codigo,
+        local_nome: row.local_nome || row.local_codigo,
+        saldo: row.saldo,
+        unidade: row.unidade || ''
+      });
 
       if (!minimos[row.codigo]) minimos[row.codigo] = { min: 0, saldoAlmox: null, abaixo: false };
       const min = parseFloat(row.estoque_minimo) || 0;
@@ -17761,16 +19820,16 @@ app.get('/api/logistica/estoque/batch', async (req, res) => {
   }
 });
 
-// Endereçamento PP por código de produto (logistica."Endereço_pp")
+// Endereçamento por código de produto (etiqueta."ETQ_rec_impresso" — substitui logistica."Endereço_pp")
 app.get('/api/logistica/endereco-pp/batch', async (req, res) => {
   try {
     const codigos = (req.query.codigos || '').split(',').map(s => s.trim()).filter(Boolean);
     if (!codigos.length) return res.json({ ok: true, dados: {} });
 
-    const dados = await _logisticaFetchEnderecoPpMap(codigos);
+    const dados = await _logisticaFetchEnderecoEtqMap(codigos);
     res.json({ ok: true, dados });
   } catch (err) {
-    console.error('[logistica/endereco-pp/batch] erro:', err);
+    console.error('[logistica/endereco-pp/batch]', err);
     res.status(500).json({ ok: false, error: String(err?.message || err) });
   }
 });
@@ -20625,9 +22684,11 @@ async function ensureOverlayTable() {
     )
   `);
 }
-ensureOverlayTable()
-  .then(() => console.log('[db] op_status_overlay pronto'))
-  .catch(err => console.warn('[db] overlay: falha ao garantir tabela:', err?.message || err));
+if (!IS_CHAT_SERVICE) {
+  ensureOverlayTable()
+    .then(() => console.log('[db] op_status_overlay pronto'))
+    .catch(err => console.warn('[db] overlay: falha ao garantir tabela:', err?.message || err));
+}
 
 
 // ====== COMERCIAL: Importador de Pedidos (OMIE → Postgres) ======
@@ -22609,7 +24670,7 @@ async function ensureComprasSchema() {
     console.error('[Compras] Erro ao criar schema:', e);
   }
 }
-ensureComprasSchema();
+if (!IS_CHAT_SERVICE) ensureComprasSchema();
 
 // ============================================================================
 // FORNECEDORES (CLIENTES) DA OMIE
@@ -22662,7 +24723,7 @@ async function ensureFornecedoresSchema() {
     console.error('[Fornecedores] Erro ao criar schema:', e);
   }
 }
-ensureFornecedoresSchema();
+if (!IS_CHAT_SERVICE) ensureFornecedoresSchema();
 
 // Sincroniza todos os fornecedores da Omie
 async function syncFornecedoresOmie() {
@@ -31450,20 +33511,114 @@ function normalizarCfopServicoRecebimento(valor) {
   return { servico: false, cfopEntrada: null };
 }
 
+async function listarSugestoesComplementaresAssociacaoNfePedido({
+  itemReceb,
+  nCodPedAtual,
+  nCodFornecedor,
+  limite = 3
+}) {
+  const codFornecedor = Number(nCodFornecedor || 0);
+  const codPedidoAtual = Number(nCodPedAtual || 0);
+  if (!Number.isFinite(codFornecedor) || codFornecedor <= 0) return [];
+  if (!Number.isFinite(codPedidoAtual) || codPedidoAtual <= 0) return [];
+
+  const candidatosResult = await pool.query(
+    `SELECT p.n_cod_ped,
+            p.c_numero,
+            pp.n_cod_item,
+            pp.c_produto,
+            pp.c_descricao,
+            pp.n_qtde,
+            pp.n_val_tot,
+            pp.c_unidade,
+            pp.n_cod_prod
+       FROM compras.pedidos_omie p
+       JOIN compras.pedidos_omie_produtos pp
+         ON pp.n_cod_ped = p.n_cod_ped
+      WHERE p.n_cod_for = $1
+        AND p.n_cod_ped <> $2
+        AND (p.inativo IS NULL OR p.inativo = false)
+        AND COALESCE(BTRIM(p."Etapa_NF"), '') NOT IN ('60', '80')
+      ORDER BY p.updated_at DESC NULLS LAST, p.n_cod_ped DESC, pp.n_cod_item ASC`,
+    [codFornecedor, codPedidoAtual]
+  );
+
+  const itensCabec = itemReceb?.itensCabec || {};
+  const itensInfoAdic = itemReceb?.itensInfoAdic || {};
+  const codigoProdutoRec = String(
+    itensCabec?.cCodigoProduto
+    || itensCabec?.cCodProduto
+    || itensInfoAdic?.cCodIntProd
+    || itensInfoAdic?.cCodigoProduto
+    || ''
+  ).trim();
+  const nIdProdutoRec = Number(itensCabec?.nIdProduto || 0);
+
+  const candidatos = candidatosResult.rows
+    .map((itemPedido) => {
+      const score = calcularScoreAssociacaoNfePedido(itemReceb, itemPedido);
+      const codigoProdutoPedido = String(itemPedido?.c_produto || '').trim();
+      const nCodProdPedido = Number(itemPedido?.n_cod_prod || 0);
+      const matchIdProduto = Number.isFinite(nIdProdutoRec) && nIdProdutoRec > 0
+        && Number.isFinite(nCodProdPedido) && nCodProdPedido > 0
+        && nIdProdutoRec === nCodProdPedido;
+      const matchCodigoProduto = !!codigoProdutoRec && !!codigoProdutoPedido && codigoProdutoRec === codigoProdutoPedido;
+
+      return {
+        ...itemPedido,
+        score_match: score,
+        criterio_match: matchIdProduto
+          ? 'id_produto_pedido_complementar'
+          : matchCodigoProduto
+            ? 'codigo_produto_pedido_complementar'
+            : 'descricao_similar_pedido_complementar',
+        match_id_produto: matchIdProduto,
+        match_codigo_produto: matchCodigoProduto
+      };
+    })
+    .filter((itemPedido) => (
+      itemPedido.match_id_produto
+      || itemPedido.match_codigo_produto
+      || itemPedido.score_match >= 70
+    ))
+    .sort((a, b) => {
+      if (b.score_match !== a.score_match) return b.score_match - a.score_match;
+      const pedidoA = String(a?.c_numero || '');
+      const pedidoB = String(b?.c_numero || '');
+      if (pedidoA !== pedidoB) return pedidoA.localeCompare(pedidoB, 'pt-BR', { numeric: true });
+      return Number(a?.n_cod_item || 0) - Number(b?.n_cod_item || 0);
+    })
+    .slice(0, Math.max(1, Number(limite) || 3))
+    .map((itemPedido) => ({
+      pedido_n_cod_ped: Number(itemPedido?.n_cod_ped || 0) || null,
+      pedido_numero: String(itemPedido?.c_numero || '').trim() || null,
+      pedido_n_cod_item: Number(itemPedido?.n_cod_item || 0) || null,
+      pedido_codigo_produto: String(itemPedido?.c_produto || '').trim() || null,
+      pedido_descricao_produto: String(itemPedido?.c_descricao || '').trim() || null,
+      pedido_qtde: itemPedido?.n_qtde ?? null,
+      pedido_unidade: String(itemPedido?.c_unidade || '').trim() || null,
+      pedido_valor_total: itemPedido?.n_val_tot ?? null,
+      criterio_match: itemPedido?.criterio_match || null,
+      score_match: Number(itemPedido?.score_match || 0) || 0
+    }));
+
+  return candidatos;
+}
+
 async function montarPlanoAssociacaoNfePedido(numeroNfe, numeroPedido, chaveNfe = null, nCodPedInformado = null) {
   const nCodPedNumerico = Number(nCodPedInformado);
   const usarIdDireto = Number.isFinite(nCodPedNumerico) && nCodPedNumerico > 0;
 
   const pedidoResult = usarIdDireto
     ? await pool.query(
-      `SELECT n_cod_ped, c_numero
+      `SELECT n_cod_ped, c_numero, n_cod_for
          FROM compras.pedidos_omie
         WHERE n_cod_ped = $1
         LIMIT 1`,
       [nCodPedNumerico]
     )
     : await pool.query(
-      `SELECT n_cod_ped, c_numero
+      `SELECT n_cod_ped, c_numero, n_cod_for
          FROM compras.pedidos_omie
         WHERE TRIM(COALESCE(c_numero, '')) = TRIM($1)
            OR n_cod_ped::text = TRIM($1)
@@ -31481,6 +33636,7 @@ async function montarPlanoAssociacaoNfePedido(numeroNfe, numeroPedido, chaveNfe 
   if (!Number.isFinite(nCodPed) || nCodPed <= 0) {
     throw new Error('Pedido encontrado com n_cod_ped inválido');
   }
+  const nCodFornecedor = Number(pedido?.n_cod_for || 0) || null;
 
   const recebimento = await localizarRecebimentoOmiePorNumeroNfe(numeroNfe, chaveNfe);
   if (!recebimento?.cabec?.nIdReceb) {
@@ -31553,8 +33709,6 @@ async function montarPlanoAssociacaoNfePedido(numeroNfe, numeroPedido, chaveNfe 
 
     return { item: melhorItem, score: melhorScore };
   };
-
-  const previewItens = [];
 
   // Sorted-greedy: pré-calcula o melhor score possível de cada item da NF e processa
   // em ordem de confiança decrescente, evitando que itens com match fraco "roubem"
@@ -31666,6 +33820,7 @@ async function montarPlanoAssociacaoNfePedido(numeroNfe, numeroPedido, chaveNfe 
     }
 
     resultadosPorIdx[idx] = {
+      itemReceb: item,
       itensIde,
       previewItem: {
         n_sequencia: itensIde.nSequencia,
@@ -31678,6 +33833,8 @@ async function montarPlanoAssociacaoNfePedido(numeroNfe, numeroPedido, chaveNfe 
         item_servico: servicoCfop.servico,
         servico_cfop_entrada: servicoCfop.cfopEntrada,
         pedido_item_encontrado: !!itemPedidoVinculo || servicoCfop.servico,
+        pedido_n_cod_ped: !servicoCfop.servico && itemPedidoVinculo ? nCodPed : null,
+        pedido_numero: !servicoCfop.servico && itemPedidoVinculo ? (String(pedido?.c_numero || '').trim() || null) : null,
         pedido_n_cod_item: Number.isFinite(nCodItem) && nCodItem > 0 ? nCodItem : null,
         pedido_codigo_produto: String(itemPedidoVinculo?.c_produto || '').trim() || null,
         pedido_descricao_produto: String(itemPedidoVinculo?.c_descricao || '').trim() || null,
@@ -31685,18 +33842,33 @@ async function montarPlanoAssociacaoNfePedido(numeroNfe, numeroPedido, chaveNfe 
         pedido_unidade: String(itemPedidoVinculo?.c_unidade || '').trim() || null,
         pedido_valor_total: itemPedidoVinculo?.n_val_tot ?? null,
         criterio_match: criterioMatch,
-        score_match: scoreMatch
+        score_match: scoreMatch,
+        pedido_sugestoes: []
       }
     };
   }
 
+  await Promise.all(resultadosPorIdx.map(async (resultado) => {
+    const previewItem = resultado?.previewItem;
+    if (!previewItem || previewItem.pedido_item_encontrado || previewItem.item_servico) return;
+
+    previewItem.pedido_sugestoes = await listarSugestoesComplementaresAssociacaoNfePedido({
+      itemReceb: resultado.itemReceb,
+      nCodPedAtual: nCodPed,
+      nCodFornecedor,
+      limite: 3
+    });
+  }));
+
+  const previewItens = resultadosPorIdx.map((r) => r.previewItem);
   // Reconstrói arrays na ordem original da NF-e
   const itensRecebimentoEditar = resultadosPorIdx.map((r) => ({ itensIde: r.itensIde }));
-  for (const r of resultadosPorIdx) previewItens.push(r.previewItem);
 
   const itensPedidoInformativos = itensPedido
     .filter(itemPedidoDisponivel)
     .map((itemPedido) => ({
+      pedido_n_cod_ped: nCodPed,
+      pedido_numero: String(pedido?.c_numero || '').trim() || null,
       pedido_n_cod_item: Number(itemPedido?.n_cod_item || 0) || null,
       pedido_codigo_produto: String(itemPedido?.c_produto || '').trim() || null,
       pedido_descricao_produto: String(itemPedido?.c_descricao || '').trim() || null,
@@ -31719,6 +33891,7 @@ async function montarPlanoAssociacaoNfePedido(numeroNfe, numeroPedido, chaveNfe 
     recebimento_omie: recebimento,
     itens_preview: previewItens,
     itens_pedido_informativos: itensPedidoInformativos,
+    n_cod_fornecedor: nCodFornecedor,
     itensRecebimentoEditar
   };
 }
@@ -31851,7 +34024,9 @@ app.post('/api/compras/pedidos-omie/nfe-associar-pedido/preview', express.json()
         categoria: categoriaInfo,
         fornecedor_nome: _fornecedorNome,
         valor_total_nfe: Number.isFinite(_valorTotalNfe) && _valorTotalNfe > 0 ? +_valorTotalNfe.toFixed(2) : null,
-        itens: plano.itens_preview
+        itens: plano.itens_preview,
+        itens_preview: plano.itens_preview,
+        itens_pedido_informativos: plano.itens_pedido_informativos || []
       }
     });
   } catch (err) {
@@ -31988,6 +34163,10 @@ app.post('/api/compras/pedidos-omie/nfe-associar-pedido', express.json(), async 
       if (Number.isFinite(codItemOverride) && codItemOverride > 0) {
         itemEditar.itensIde.nIdItPedidoExistente = codItemOverride;
       }
+      const codPedOverride = Number(override?.nIdPedidoExistente || 0);
+      if (Number.isFinite(codPedOverride) && codPedOverride > 0) {
+        itemEditar.itensIde.nIdPedidoExistente = codPedOverride;
+      }
       const idProdutoServico = Number(override?.nIdProdutoServico || 0);
       if (Number.isFinite(idProdutoServico) && idProdutoServico > 0) {
         itemEditar.itensIde.cAcao = 'ASSOCIAR-PRODUTO';
@@ -32002,6 +34181,66 @@ app.post('/api/compras/pedidos-omie/nfe-associar-pedido', express.json(), async 
         delete itensIde.nIdPedidoExistente;
         delete itensIde.nIdItPedidoExistente;
       }
+    });
+
+    const codItensPedidoAssociados = itensParaEnviar
+      .map((itemEditar) => Number(itemEditar?.itensIde?.nIdItPedidoExistente || 0))
+      .filter((codItem) => Number.isFinite(codItem) && codItem > 0);
+    const itemMetaPorCodItem = {};
+    if (codItensPedidoAssociados.length > 0) {
+      const itensPedidosMeta = await pool.query(
+        `SELECT n_cod_item, n_cod_ped, c_unidade
+           FROM compras.pedidos_omie_produtos
+          WHERE n_cod_item = ANY($1::bigint[])`,
+        [[...new Set(codItensPedidoAssociados)]]
+      );
+
+      itensPedidosMeta.rows.forEach((row) => {
+        const codItem = Number(row?.n_cod_item || 0);
+        if (!codItem) return;
+        itemMetaPorCodItem[String(codItem)] = {
+          n_cod_ped: Number(row?.n_cod_ped || 0) || null,
+          c_unidade: String(row?.c_unidade || '').trim() || null
+        };
+      });
+    }
+
+    itensParaEnviar.forEach((itemEditar) => {
+      const itensIde = itemEditar?.itensIde || {};
+      const acao = String(itensIde?.cAcao || '').trim().toUpperCase();
+      if (acao !== 'ASSOCIAR-PEDIDO') return;
+      const codItem = Number(itensIde?.nIdItPedidoExistente || 0);
+      if (!Number.isFinite(codItem) || codItem <= 0) return;
+      const metaItem = itemMetaPorCodItem[String(codItem)] || null;
+      const codPedMeta = Number(metaItem?.n_cod_ped || 0);
+      if (codPedMeta > 0) {
+        itensIde.nIdPedidoExistente = codPedMeta;
+      }
+    });
+
+    const pedidosAssociadosIds = [
+      ...new Set(
+        itensParaEnviar
+          .map((itemEditar) => Number(itemEditar?.itensIde?.nIdPedidoExistente || 0))
+          .filter((codPed) => Number.isFinite(codPed) && codPed > 0)
+      )
+    ];
+    const pedidosAssociadosInfo = pedidosAssociadosIds.length > 0
+      ? (await pool.query(
+        `SELECT n_cod_ped, c_numero
+           FROM compras.pedidos_omie
+          WHERE n_cod_ped = ANY($1::bigint[])`,
+        [pedidosAssociadosIds]
+      )).rows
+      : [];
+    const pedidosAssociadosInfoPorId = {};
+    pedidosAssociadosInfo.forEach((pedidoInfo) => {
+      const codPed = Number(pedidoInfo?.n_cod_ped || 0);
+      if (!codPed) return;
+      pedidosAssociadosInfoPorId[String(codPed)] = {
+        n_cod_ped: codPed,
+        c_numero: String(pedidoInfo?.c_numero || '').trim() || null
+      };
     });
 
     // Monta parcelas, infoAdicionais e estoque para TODAS as associações
@@ -32087,14 +34326,6 @@ app.post('/api/compras/pedidos-omie/nfe-associar-pedido', express.json(), async 
             }
           }
         }
-
-        // Mapa de unidade por nCodItem do pedido
-        const unidadePorCodItem = {};
-        (pedidoConsulta?.produtos_consulta || []).forEach(p => {
-          if (p.nCodItem) {
-            unidadePorCodItem[String(p.nCodItem)] = p.cUnidade;
-          }
-        });
 
         const parcelasLista = Array.isArray(recebAtual?.parcelas?.parcelasLista)
           ? recebAtual.parcelas.parcelasLista : [];
@@ -32218,7 +34449,7 @@ app.post('/api/compras/pedidos-omie/nfe-associar-pedido', express.json(), async 
         itensEditarEstoque = plano.itensRecebimentoEditar.map(itemEditar => {
           const nSeq = itemEditar.itensIde?.nSequencia;
           const nIdItPed = itemEditar.itensIde?.nIdItPedidoExistente;
-          const cUnidadePedido = nIdItPed ? unidadePorCodItem[String(nIdItPed)] : null;
+          const cUnidadePedido = nIdItPed ? itemMetaPorCodItem[String(nIdItPed)]?.c_unidade : null;
 
           // Override do user tem prioridade sobre o valor do pedido
           const override = overrideMap.get(nSeq);
@@ -32392,9 +34623,20 @@ app.post('/api/compras/pedidos-omie/nfe-associar-pedido', express.json(), async 
     }
 
     const pedidosVinculados = extrairPedidosVinculadosDoRecebimento(recebimentoAposAlteracao);
-    const vinculoConfirmado = pedidosVinculados.includes(String(plano.n_cod_ped))
-      || pedidosVinculados.includes(String(plano.c_numero_pedido || '').trim())
-      || pedidosVinculados.includes(String(numeroPedido).trim());
+    const pedidosEsperadosConfirmacao = pedidosAssociadosIds.length > 0
+      ? pedidosAssociadosIds.flatMap((codPed) => {
+        const infoPedido = pedidosAssociadosInfoPorId[String(codPed)] || {};
+        return [
+          String(codPed),
+          String(infoPedido?.c_numero || '').trim()
+        ].filter(Boolean);
+      })
+      : [
+        String(plano.n_cod_ped),
+        String(plano.c_numero_pedido || '').trim(),
+        String(numeroPedido).trim()
+      ].filter(Boolean);
+    const vinculoConfirmado = pedidosEsperadosConfirmacao.some((pedidoEsperado) => pedidosVinculados.includes(pedidoEsperado));
 
     const numeroNfeVinculada = String(
       recebimentoAposAlteracao?.cabec?.cNumeroNFe ||
@@ -32413,67 +34655,83 @@ app.post('/api/compras/pedidos-omie/nfe-associar-pedido', express.json(), async 
         ADD COLUMN IF NOT EXISTS "NFe vinculada" TEXT
       `);
 
-      try {
-        const { rows: resumoPedidoRows } = await pool.query(
-          `WITH pedido AS (
-             SELECT p.n_cod_ped,
-                    COALESCE(
-                      NULLIF(p.n_valor, 0),
-                      (
-                        SELECT COALESCE(SUM(COALESCE(pp.n_val_tot, 0)), 0)
-                        FROM compras.pedidos_omie_produtos pp
-                        WHERE pp.n_cod_ped = p.n_cod_ped
-                      ),
-                      0
-                    )::numeric AS valor_total
-               FROM compras.pedidos_omie p
-              WHERE p.n_cod_ped = $1
-              LIMIT 1
-           ),
-           recebido AS (
-             SELECT COALESCE(SUM(COALESCE(i.v_total_item, 0)), 0)::numeric AS valor_recebido
-               FROM logistica.recebimentos_nfe_itens i
-               JOIN logistica.recebimentos_nfe_omie r
-                 ON r.n_id_receb = i.n_id_receb
-              WHERE i.n_id_pedido = $1
-                AND COALESCE(r.c_cancelada, 'N') <> 'S'
-           )
-           SELECT COALESCE(p.valor_total, 0) AS valor_total,
-                  COALESCE(rc.valor_recebido, 0) AS valor_recebido
-             FROM pedido p
-             CROSS JOIN recebido rc`,
-          [Number(plano.n_cod_ped)]
-        );
+      for (const codPedAssociado of (pedidosAssociadosIds.length > 0 ? pedidosAssociadosIds : [plano.n_cod_ped])) {
+        try {
+          const { rows: resumoPedidoRows } = await pool.query(
+            `WITH pedido AS (
+               SELECT p.n_cod_ped,
+                      COALESCE(
+                        NULLIF(p.n_valor, 0),
+                        (
+                          SELECT COALESCE(SUM(COALESCE(pp.n_val_tot, 0)), 0)
+                          FROM compras.pedidos_omie_produtos pp
+                          WHERE pp.n_cod_ped = p.n_cod_ped
+                        ),
+                        0
+                      )::numeric AS valor_total
+                 FROM compras.pedidos_omie p
+                WHERE p.n_cod_ped = $1
+                LIMIT 1
+             ),
+             recebido AS (
+               SELECT COALESCE(SUM(COALESCE(i.v_total_item, 0)), 0)::numeric AS valor_recebido
+                 FROM logistica.recebimentos_nfe_itens i
+                 JOIN logistica.recebimentos_nfe_omie r
+                   ON r.n_id_receb = i.n_id_receb
+                WHERE i.n_id_pedido = $1
+                  AND COALESCE(r.c_cancelada, 'N') <> 'S'
+             )
+             SELECT COALESCE(p.valor_total, 0) AS valor_total,
+                    COALESCE(rc.valor_recebido, 0) AS valor_recebido
+               FROM pedido p
+               CROSS JOIN recebido rc`,
+            [Number(codPedAssociado)]
+          );
 
-        if (resumoPedidoRows.length > 0) {
-          valorTotalPedido = Number(resumoPedidoRows[0].valor_total || 0);
-          valorRecebidoPedido = Number(resumoPedidoRows[0].valor_recebido || 0);
-          const margem = 0.01;
+          if (Number(codPedAssociado) === Number(plano.n_cod_ped) && resumoPedidoRows.length > 0) {
+            valorTotalPedido = Number(resumoPedidoRows[0].valor_total || 0);
+            valorRecebidoPedido = Number(resumoPedidoRows[0].valor_recebido || 0);
+          }
 
-          if (valorTotalPedido > 0 && (valorRecebidoPedido + margem) >= valorTotalPedido) {
-            etapaPedidoNf = '60';
+          if (resumoPedidoRows.length > 0) {
+            const valorTotalPedidoAtual = Number(resumoPedidoRows[0].valor_total || 0);
+            const valorRecebidoPedidoAtual = Number(resumoPedidoRows[0].valor_recebido || 0);
+            const margem = 0.01;
+            const etapaPedidoAtual = valorTotalPedidoAtual > 0 && (valorRecebidoPedidoAtual + margem) >= valorTotalPedidoAtual
+              ? '60'
+              : '50';
+
+            if (Number(codPedAssociado) === Number(plano.n_cod_ped)) {
+              etapaPedidoNf = etapaPedidoAtual;
+            }
+
+            console.log(
+              `[Compras/NFeAssociarPedido] Etapa_NF calculada para pedido ${codPedAssociado}: ${etapaPedidoAtual} (recebido=${valorRecebidoPedidoAtual} total=${valorTotalPedidoAtual})`
+            );
+
+            await pool.query(
+              `UPDATE compras.pedidos_omie
+                  SET "NFe vinculada" = $1,
+                      "Etapa_NF" = $2
+                WHERE n_cod_ped = $3`,
+              [numeroNfeVinculada, etapaPedidoAtual, codPedAssociado]
+            );
           } else {
+            await pool.query(
+              `UPDATE compras.pedidos_omie
+                  SET "NFe vinculada" = $1,
+                      "Etapa_NF" = '50'
+                WHERE n_cod_ped = $2`,
+              [numeroNfeVinculada, codPedAssociado]
+            );
+          }
+        } catch (errEtapaPedido) {
+          if (Number(codPedAssociado) === Number(plano.n_cod_ped)) {
             etapaPedidoNf = '50';
           }
-        } else {
-          etapaPedidoNf = '50';
+          console.warn(`[Compras/NFeAssociarPedido] Falha ao calcular etapa parcial/total do pedido ${codPedAssociado}:`, errEtapaPedido?.message);
         }
-
-        console.log(
-          `[Compras/NFeAssociarPedido] Etapa_NF calculada para pedido ${plano.n_cod_ped}: ${etapaPedidoNf} (recebido=${valorRecebidoPedido} total=${valorTotalPedido})`
-        );
-      } catch (errEtapaPedido) {
-        etapaPedidoNf = '50';
-        console.warn('[Compras/NFeAssociarPedido] Falha ao calcular etapa parcial/total do pedido:', errEtapaPedido?.message);
       }
-
-      await pool.query(
-        `UPDATE compras.pedidos_omie
-            SET "NFe vinculada" = $1,
-                "Etapa_NF" = $2
-          WHERE n_cod_ped = $3`,
-        [numeroNfeVinculada, etapaPedidoNf, plano.n_cod_ped]
-      );
     }
 
     if (alertaItemAssociacao && !vinculoConfirmado) {
@@ -32492,6 +34750,10 @@ app.post('/api/compras/pedidos-omie/nfe-associar-pedido', express.json(), async 
         c_numero_nfe: recebimentoAposAlteracao?.cabec?.cNumeroNFe || plano.numero_nfe || null,
         n_cod_ped: plano.n_cod_ped,
         c_numero_pedido: plano.c_numero_pedido || null,
+        pedidos_associados: pedidosAssociadosIds.map((codPed) => ({
+          n_cod_ped: codPed,
+          c_numero_pedido: pedidosAssociadosInfoPorId[String(codPed)]?.c_numero || null
+        })),
         nfe_vinculada: numeroNfeVinculada || null,
         etapa_nf_omie: etapaFinalRecebimento || null,
         etapa_nf_pedido: etapaPedidoNf || null,
@@ -35402,18 +37664,41 @@ function iniciarCronAgendamento() {
 }
 // ──────────────────────────────────────────────────────────────────────────────
 
-app.listen(PORT, HOST, () => {
-  console.log(`Servidor rodando em http://${HOST}:${PORT}`);
-  console.log(`🚀 API rodando em http://localhost:${PORT}`);
-  iniciarAutoSyncComprasGoogleSheets();
-  iniciarAutoSyncWebhooksOmie();
-  iniciarCronAgendamento();
-  // Notificação diária WhatsApp (08:00)
-  const { iniciarCronNotificacaoDiaria } = require('./cron/notificacao_diaria_whatsapp');
-  iniciarCronNotificacaoDiaria();
-  // Atualização diária de rastreio envios (07:00 Brasília)
-  const { iniciarCronAtualizacaoRastreio } = require('./utils/atualizarRastreioEnvios');
-  iniciarCronAtualizacaoRastreio();
+async function startServer() {
+  if (pool) {
+    try {
+      await warmupPgPool();
+      if (sessionPool) await warmupSessionPool();
+      await ensureSessionTableReady();
+    } catch (err) {
+      console.error('[db] falha ao preparar pool/session na subida:', err?.message || err);
+    }
+  }
+
+  app.listen(PORT, HOST, () => {
+    console.log(`Servidor rodando em http://${HOST}:${PORT}`);
+    console.log(`🚀 API rodando em http://localhost:${PORT}`);
+    if (IS_CHAT_SERVICE) {
+      console.log('[boot] timers pesados desligados (SERVICE_PROFILE=chat)');
+      return;
+    }
+    setTimeout(() => {
+      iniciarAutoSyncComprasGoogleSheets();
+      iniciarAutoSyncWebhooksOmie();
+      iniciarCronAgendamento();
+      const { iniciarCronNotificacaoDiaria } = require('./cron/notificacao_diaria_whatsapp');
+      iniciarCronNotificacaoDiaria();
+      const { iniciarCronTurnoDiaAutomatico } = require('./cron/turno_dia_automatico');
+      iniciarCronTurnoDiaAutomatico();
+      const { iniciarCronAtualizacaoRastreio } = require('./utils/atualizarRastreioEnvios');
+      iniciarCronAtualizacaoRastreio();
+    }, 15000);
+  });
+}
+
+startServer().catch((err) => {
+  console.error('[boot] falha fatal ao subir servidor:', err?.message || err);
+  process.exit(1);
 });
 
 // DEBUG: sanity check do webhook (GET simples)

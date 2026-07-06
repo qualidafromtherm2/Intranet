@@ -336,16 +336,30 @@ function _solEnderecamentoHtml(codigo, enderecoMap, itemFallback) {
     if (Array.isArray(fromItem) && fromItem.length) registros = fromItem;
   }
   if (!Array.isArray(registros) || !registros.length) return '';
-  const textos = registros.map(ep =>
-    String(ep.completo || '').trim()
-      || [ep.rua, ep.andar, ep.edificio, ep.apartamento].filter(Boolean).join(' · ')
-  ).filter(Boolean);
-  if (!textos.length) return '';
+  const gridCols = 'minmax(70px,1.2fr) repeat(3,minmax(32px,auto)) minmax(40px,.9fr)';
+  const head = `<div style="display:grid;grid-template-columns:${gridCols};gap:4px 8px;font-size:.58rem;color:#94a3b8;text-transform:uppercase;font-weight:700;padding-bottom:4px;border-bottom:1px solid #854d0e44;">
+    <span>Endereço</span><span>ID</span><span>Qtd</span><span>Un</span><span>Compl.</span>
+  </div>`;
+  const linhas = registros.map(ep => {
+    const end = escapeHtml(String(ep.endereco || ep.completo || '').trim());
+    if (!end) return '';
+    const id = escapeHtml(String(ep.id != null ? ep.id : '—'));
+    const qtd = escapeHtml(String(ep.qtd != null ? ep.qtd : '0'));
+    const un = escapeHtml(String(ep.unidade || 'UN'));
+    const comp = String(ep.complemento || '').trim();
+    const compEsc = comp ? escapeHtml(comp) : '—';
+    return `<div style="display:grid;grid-template-columns:${gridCols};gap:4px 8px;padding:4px 0;border-top:1px solid #854d0e33;font-size:.68rem;line-height:1.35;align-items:center;">
+      <span style="color:#fde68a;font-weight:700;word-break:break-word;">${end}</span>
+      <span style="color:#cbd5e1;font-weight:600;">${id}</span>
+      <span style="color:#cbd5e1;font-weight:600;">${qtd}</span>
+      <span style="color:#cbd5e1;font-weight:600;">${un}</span>
+      <span style="color:#94a3b8;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${comp ? escapeHtml(comp) : ''}">${compEsc}</span>
+    </div>`;
+  }).filter(Boolean).join('');
+  if (!linhas) return '';
   return `<div style="padding:6px 8px;background:#1a1508;border:1px solid #854d0e55;border-radius:8px;">
     <div style="font-size:.60rem;color:#fbbf24;font-weight:700;text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px;">Endereçamento</div>
-    ${textos.map(t => `<div style="font-size:.70rem;color:#fde68a;font-weight:700;word-break:break-word;line-height:1.45;padding:2px 0;">
-      <i class="fa-solid fa-map-pin" style="margin-right:4px;color:#f59e0b;font-size:.62rem;"></i>${t}
-    </div>`).join('')}
+    ${head}${linhas}
   </div>`;
 }
 function _solDestinoHtml(it, compact = false) {
@@ -534,11 +548,19 @@ window._updateTabCounters = async function() {
 };
 
 function _solSomarItensKanbanSep(colunas) {
-  const cols = ['Solicitado', 'Em Separação', 'Separado'];
+  const cols = ['Solicitado', 'Stund-by', 'Em Separação', 'Separado', 'Aguardando retirada'];
   return cols.reduce((acc, key) => {
     const cards = colunas?.[key] || [];
     return acc + cards.reduce((s, sep) => s + (parseInt(sep.total_itens, 10) || 0), 0);
   }, 0);
+}
+
+function _solSolicIdsParaIniciarSep(itens) {
+  const elegivel = new Set(['pendente', 'Stund-by']);
+  return (itens || [])
+    .filter(it => elegivel.has(String(it.status || '')))
+    .map(it => parseInt(it.solic_id, 10))
+    .filter(id => !Number.isNaN(id));
 }
 
 function _solBuildKanbanItensUrl(nSolic, opts = {}) {
@@ -548,6 +570,37 @@ function _solBuildKanbanItensUrl(nSolic, opts = {}) {
   if (opts.escopoItens === 'global') params.set('escopo', 'global');
   const query = params.toString();
   return `/api/logistica/kanban/itens${query ? `?${query}` : ''}`;
+}
+
+/** Gera código ECT (Correios) via VIPP ao iniciar separação — libera Imprimir em Envio de mercadoria */
+async function _solDispararVippGerarEtiqueta(nSolic, opts = {}) {
+  if (!nSolic) return { ok: false, skipped: true };
+  try {
+    const vc = await fetch(`/api/vipp/sep-check?n_solic=${encodeURIComponent(nSolic)}`, { credentials: 'include' })
+      .then(r => r.json()).catch(() => ({ idVipp: null }));
+    if (!vc?.idVipp) return { ok: false, skipped: true };
+    const r = await fetch('/api/vipp/gerar-etiqueta', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ idConhecimento: vc.idVipp, n_solic: nSolic })
+    });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok || !d.ok) {
+      const msg = d.error || `Falha HTTP ${r.status}`;
+      console.warn('[VIPP] gerar-etiqueta SEP', nSolic, msg);
+      if (opts.alertarErro) alert('Não foi possível gerar a etiqueta dos Correios:\n' + msg + '\n\nO botão Imprimir em Envio de mercadoria só aparece após gerar o código ECT.');
+      return { ok: false, error: msg };
+    }
+    if (opts.recarregarEnvio && typeof carregarSacSolicitacoes === 'function' && envioMercadoriaTabelaBodyPane) {
+      carregarSacSolicitacoes(envioMercadoriaTabelaBodyPane, { filaLogistica: true });
+    }
+    return { ok: true, ectCode: d.ectCode };
+  } catch (e) {
+    console.warn('[VIPP] gerar-etiqueta:', e);
+    if (opts.alertarErro) alert('Erro ao gerar etiqueta VIPP: ' + (e.message || e));
+    return { ok: false, error: e.message || String(e) };
+  }
 }
 
 // Carrega e renderiza a aba de solicitações como kanban do separador
@@ -610,6 +663,7 @@ window._loadSolicitacoesTab = async function() {
                 ? `<span style="font-size:.65rem;color:#22c55e55;margin-top:3px;display:block;"><i class="fa-solid fa-eye" style="margin-right:2px;"></i>Ver itens</span>`
                 : '';
             const emProcessoSep = col.key === 'Em Separação' || col.key === 'Separado';
+            const mostraUrgente = col.key === 'Solicitado' || col.key === 'Stund-by' || emProcessoSep;
             const separadorNome = String(sep.usuario_separando || '').trim();
             const separadorHtml = emProcessoSep && separadorNome
               ? `<div style="margin-top:5px;display:flex;align-items:center;gap:5px;">
@@ -617,7 +671,7 @@ window._loadSolicitacoesTab = async function() {
                   <span style="font-size:.72rem;color:#fbbf24;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="Separando: ${separadorNome}">${separadorNome}</span>
                 </div>`
               : '';
-            const urgenteHtml = emProcessoSep && sep.tem_urgente
+            const urgenteHtml = mostraUrgente && sep.tem_urgente
               ? `<div style="margin-top:4px;display:inline-flex;align-items:center;gap:4px;padding:2px 7px;border-radius:20px;font-size:.65rem;font-weight:700;color:#fca5a5;background:#450a0a;border:1px solid #ef4444;" title="Esta SEP tem item urgente">
                   <i class="fa-solid fa-bolt" style="font-size:.62rem;"></i>Urgente
                 </div>`
@@ -627,7 +681,7 @@ window._loadSolicitacoesTab = async function() {
                 data-n-solic="${sep.n_solic}"
                 data-col-acao="${col.acao || ''}"
                 data-col-status="${col.key}"
-                style="background:#1a1a1a;border:1px solid #2a2a2a;border-radius:9px;padding:10px 12px;${cursor}transition:border-color .15s;${sep.tem_urgente && emProcessoSep ? 'border-left:3px solid #ef4444;' : ''}"
+                style="background:#1a1a1a;border:1px solid #2a2a2a;border-radius:9px;padding:10px 12px;${cursor}transition:border-color .15s;${sep.tem_urgente && mostraUrgente ? 'border-left:3px solid #ef4444;' : ''}"
                 onmouseenter="this.style.borderColor='${col.color}66'"
                 onmouseleave="this.style.borderColor='#2a2a2a'">
                 <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
@@ -676,6 +730,13 @@ window._loadSolicitacoesTab = async function() {
     }
     board.dataset.loaded = '1';
 
+    requestAnimationFrame(() => {
+      const firstCard = board.querySelector('.solic-kanban-card');
+      if (firstCard && board.scrollWidth > board.clientWidth) {
+        board.scrollLeft = Math.max(0, firstCard.offsetLeft - 14);
+      }
+    });
+
     // Delegação de clique nos cards
     board.querySelectorAll('.solic-kanban-card').forEach(cardEl => {
       const acao   = cardEl.dataset.colAcao;
@@ -695,6 +756,16 @@ window._loadSolicitacoesTab = async function() {
         cardEl._loading = true;
         _solKanbanLoading(true, 'Carregando itens...');
         try {
+          const cachedModal = _solGetSepModalCache(nSolic, 'global');
+          if (acao === 'modal' && cachedModal?.grupoAtual?.itens?.length && !document.getElementById('modalSeparacaoLogistica')) {
+            void _abrirModalSeparacao(
+              cachedModal.grupoAtual,
+              cachedModal.gruposConflito || [],
+              cachedModal.preloaded || {}
+            ).catch(err => console.warn('[SEP] abrir modal cache:', err));
+            return;
+          }
+
           const ri = await fetch(_solBuildKanbanItensUrl(nSolic, { escopoItens: 'global' }), { credentials: 'include' });
           const di = await ri.json();
           if (!di.ok) throw new Error(di.error || 'Erro ao buscar itens');
@@ -717,11 +788,17 @@ window._loadSolicitacoesTab = async function() {
                 };
               } catch (_) {}
             }
-            await _abrirModalSeparacao(
-              { nome_user: itens[0]?.nome_user || nSolic, n_solic: nSolic, itens, origem_status: cardEl.dataset.colStatus || '', escopoItens: 'global' },
+            const grupoAtual = { nome_user: itens[0]?.nome_user || nSolic, n_solic: nSolic, itens, origem_status: cardEl.dataset.colStatus || '', escopoItens: 'global' };
+            _solSetSepModalCache(nSolic, 'global', {
+              grupoAtual,
+              gruposConflito: [],
+              preloaded
+            });
+            void _abrirModalSeparacao(
+              grupoAtual,
               [],
               preloaded
-            );
+            ).catch(err => console.warn('[SEP] abrir modal:', err));
           }
         } catch (err) {
           alert('Erro: ' + err.message);
@@ -741,26 +818,17 @@ window._loadSolicitacoesTab = async function() {
         btn.disabled = true;
         btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin" style="margin-right:3px;"></i>Iniciando...';
         try {
-          // ── Dispara GerarPPN VIPP em background (sem bloquear) ───────────
-          fetch(`/api/vipp/sep-check?n_solic=${encodeURIComponent(nSolic)}`, { credentials: 'include' })
-            .then(r => r.json()).catch(() => ({ idVipp: null }))
-            .then(vc => {
-              if (!vc?.idVipp) return;
-              return fetch('/api/vipp/gerar-etiqueta', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                credentials: 'include',
-                body: JSON.stringify({ idConhecimento: vc.idVipp, n_solic: nSolic })
-              });
-            })
-            .catch(e => console.warn('[VIPP] background gerar-etiqueta:', e));
+          // ── Gera código ECT (libera Imprimir em Envio de mercadoria) ───────
+          await _solDispararVippGerarEtiqueta(nSolic, { alertarErro: true, recarregarEnvio: true });
 
-          // ── Busca solic_ids e inicia separação normalmente ───────────────
+          // ── Busca solic_ids e inicia separação ───────────────────────────
           const ri = await fetch(_solBuildKanbanItensUrl(nSolic, { escopoItens: 'global' }), { credentials: 'include' });
           const di = await ri.json();
           if (!di.ok) throw new Error(di.error || 'Erro ao buscar itens da SEP.');
-          const solicIds = (di.itens || []).map(it => parseInt(it.solic_id, 10)).filter(id => !Number.isNaN(id));
-          if (!solicIds.length) throw new Error('Nenhum item pendente encontrado para iniciar separação.');
+          const solicIds = _solSolicIdsParaIniciarSep(di.itens || []);
+          if (!solicIds.length) {
+            throw new Error('Esta SEP já saiu de Solicitado. Role o kanban até a coluna "Aguardando retirada" (à direita).');
+          }
 
           const r = await fetch('/api/logistica/itens_solicitados/separacao', {
             method: 'PATCH',
@@ -799,29 +867,300 @@ function _solCurrentUserName() {
   ).trim();
 }
 
+function _solLocalEhAlmoxGlobal(local) {
+  const codigo = String(local?.local_codigo || '').trim();
+  const nome = String(local?.local_nome || local?.descricao || '').toUpperCase();
+  return codigo === '10717096386' || nome.includes('ALMOXARIFADO') || nome.includes('#ALMOX');
+}
+
+function _solRenderOrigemResumoGlobal(locais, emptyText = 'Carregando origem...') {
+  const list = (Array.isArray(locais) ? locais : [])
+    .filter(l => Number(l?.saldo) > 0)
+    .slice()
+    .sort((a, b) => {
+      const aAlmox = _solLocalEhAlmoxGlobal(a);
+      const bAlmox = _solLocalEhAlmoxGlobal(b);
+      if (aAlmox && !bAlmox) return -1;
+      if (!aAlmox && bAlmox) return 1;
+      return String(a?.local_nome || a?.local_codigo || '')
+        .localeCompare(String(b?.local_nome || b?.local_codigo || ''), 'pt-BR');
+    });
+
+  if (!list.length) {
+    return `<div style="font-size:.63rem;color:#6b7280;font-style:italic;">${emptyText}</div>`;
+  }
+
+  const almox = list.find(_solLocalEhAlmoxGlobal) || list[0];
+  const outros = list.filter(l => l !== almox);
+
+  const renderLinha = (l, destaque = false) => {
+    const qty2 = Number(l.saldo).toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+    const nome = l.local_nome || l.local_codigo || 'â€”';
+    const isAlmox = _solLocalEhAlmoxGlobal(l);
+    return `<div style="display:flex;flex-direction:column;line-height:1.15;padding:1px 0;">
+      <span style="font-size:.61rem;color:${isAlmox || destaque ? '#86efac' : '#cbd5e1'};font-weight:${isAlmox ? '800' : '600'};white-space:normal;word-break:break-word;">
+        ${nome}${isAlmox ? ' <span style="display:inline-block;margin-left:4px;padding:0 5px;border-radius:999px;background:#14532d;border:1px solid #166534;color:#86efac;font-size:.52rem;font-weight:800;vertical-align:middle;">ALMOX</span>' : ''}
+      </span>
+      <span style="font-size:.66rem;color:#f0f0f0;font-weight:700;">${qty2} ${l.unidade || 'UN'}</span>
+    </div>`;
+  };
+
+  if (!outros.length) {
+    return renderLinha(almox, true);
+  }
+
+  const extraId = `origens-extra-${Math.random().toString(36).slice(2, 9)}`;
+  const totalOutros = outros.length;
+  return `<div style="display:flex;flex-direction:column;gap:3px;width:100%;position:relative;overflow:visible;">
+    ${renderLinha(almox, true)}
+    <button type="button" class="sol-origem-toggle" aria-expanded="false" aria-controls="${extraId}"
+      onclick="var d=document.getElementById('${extraId}'); if(d){ var abriu=d.style.display==='none' || d.hidden; d.hidden=false; d.style.display=abriu ? 'flex' : 'none'; this.setAttribute('aria-expanded', String(abriu)); this.textContent = abriu ? 'Ocultar ${totalOutros} outras origens' : 'Ver ${totalOutros} outras origens'; }"
+      style="align-self:flex-start;padding:2px 7px;border-radius:999px;border:1px solid rgba(148,163,184,.28);background:rgba(15,23,42,.72);color:#93c5fd;font-size:.58rem;font-weight:700;cursor:pointer;white-space:nowrap;line-height:1;">
+      Ver ${totalOutros} outras origens
+    </button>
+    <div id="${extraId}" hidden style="position:absolute;left:0;right:0;top:calc(100% + 4px);display:none;flex-direction:column;gap:5px;padding:8px 10px;border:1px solid rgba(148,163,184,.25);border-radius:10px;background:rgba(15,23,42,.98);box-shadow:0 12px 30px rgba(2,6,23,.38);z-index:20;max-height:140px;overflow:auto;">
+      <div style="font-size:.58rem;color:#94a3b8;font-weight:700;text-transform:uppercase;letter-spacing:.04em;">Outras origens</div>
+      ${outros.map(l => renderLinha(l, false)).join('')}
+    </div>
+  </div>`;
+}
+
 // Modal de separação — agrega por cod_omie, toggle Separado/Separação, parcial gera SEP.X
+const __solSepModalCache = new Map();
+const __solSepModalCacheTtlMs = 5 * 60 * 1000;
+const __solAguardRetCache = new Map();
+const __solAguardRetCacheTtlMs = 5 * 60 * 1000;
+
+function _solSepModalCacheKey(nSolic, escopoItens = 'global') {
+  return `${String(escopoItens || 'global').trim()}::${String(nSolic || '').trim()}`;
+}
+
+function _solGetSepModalCache(nSolic, escopoItens = 'global') {
+  const key = _solSepModalCacheKey(nSolic, escopoItens);
+  const entry = __solSepModalCache.get(key);
+  if (!entry) return null;
+  if ((Date.now() - entry.at) > __solSepModalCacheTtlMs) {
+    __solSepModalCache.delete(key);
+    return null;
+  }
+  return entry.data || null;
+}
+
+function _solSetSepModalCache(nSolic, escopoItens = 'global', data = {}) {
+  const key = _solSepModalCacheKey(nSolic, escopoItens);
+  __solSepModalCache.set(key, { at: Date.now(), data });
+}
+
+function _solInvalidateSepModalCache(nSolic, escopoItens = 'global') {
+  const key = _solSepModalCacheKey(nSolic, escopoItens);
+  __solSepModalCache.delete(key);
+}
+
+function _solAguardRetCacheKey(nSolic, tituloColuna = 'Aguardando retirada', escopoItens = '') {
+  return `${String(tituloColuna || 'Aguardando retirada').trim()}::${String(escopoItens || '').trim()}::${String(nSolic || '').trim()}`;
+}
+
+function _solGetAguardRetCache(nSolic, tituloColuna = 'Aguardando retirada', escopoItens = '') {
+  const key = _solAguardRetCacheKey(nSolic, tituloColuna, escopoItens);
+  const entry = __solAguardRetCache.get(key);
+  if (!entry) return null;
+  if ((Date.now() - entry.at) > __solAguardRetCacheTtlMs) {
+    __solAguardRetCache.delete(key);
+    return null;
+  }
+  return entry.data || null;
+}
+
+function _solSetAguardRetCache(nSolic, tituloColuna = 'Aguardando retirada', escopoItens = '', data = {}) {
+  const key = _solAguardRetCacheKey(nSolic, tituloColuna, escopoItens);
+  __solAguardRetCache.set(key, { at: Date.now(), data });
+}
+
+function _solInvalidateAguardRetCache(nSolic, tituloColuna = 'Aguardando retirada', escopoItens = '') {
+  const key = _solAguardRetCacheKey(nSolic, tituloColuna, escopoItens);
+  __solAguardRetCache.delete(key);
+}
+
 async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) {
-  document.getElementById('modalSeparacaoLogistica')?.remove();
+  document.querySelectorAll('#modalSeparacaoLogistica').forEach(el => el.remove());
   const origemStatus = String(grupoAtual?.origem_status || '').trim();
   const refreshAoFechar = origemStatus === 'Solicitado';
   let houveMudanca = false;
 
   const isStandby = origemStatus === 'Stund-by';
-  const usuarioSeparando = (grupoAtual.itens || [])
+  let usuarioSeparando = (grupoAtual.itens || [])
     .map(it => String(it.usuario_separando || '').trim())
     .find(Boolean) || '';
   const currentUser = _solCurrentUserName();
-  const podeAgirSep = !isStandby && (!usuarioSeparando || usuarioSeparando === currentUser);
+  let podeAgirSep = !isStandby && (!usuarioSeparando || usuarioSeparando === currentUser);
+  let perdeuSeparacaoParaOutro = false;
   const nSolicHdr = grupoAtual.n_solic || '';
-  const podeCancelarSep = !isStandby
+  const PRINC_ARMZ = '10717096386';
+  let podeCancelarSep = !isStandby
     && (origemStatus === 'Em Separação' || origemStatus === 'Separado')
     && !!usuarioSeparando
     && usuarioSeparando === currentUser;
+
+  function _extrairUsuarioSeparando(itens) {
+    return (itens || [])
+      .map(it => String(it.usuario_separando || '').trim())
+      .find(Boolean) || '';
+  }
+
+  function _syncSepLockFromItens(itens) {
+    const eraAtivo = podeAgirSep;
+    usuarioSeparando = _extrairUsuarioSeparando(itens);
+    const novoPodeAgir = !isStandby && (!usuarioSeparando || usuarioSeparando === currentUser);
+    if (eraAtivo && !novoPodeAgir && usuarioSeparando && usuarioSeparando !== currentUser) {
+      perdeuSeparacaoParaOutro = true;
+    }
+    if (novoPodeAgir) perdeuSeparacaoParaOutro = false;
+    podeAgirSep = novoPodeAgir;
+    podeCancelarSep = !isStandby
+      && (origemStatus === 'Em Separação' || origemStatus === 'Separado')
+      && !!usuarioSeparando
+      && usuarioSeparando === currentUser;
+    grupoAtual.itens = itens;
+  }
+
+  function _htmlBannerSepLock() {
+    if (isStandby || podeAgirSep || !usuarioSeparando) return '';
+    if (perdeuSeparacaoParaOutro) {
+      return `<div style="margin:12px 16px 0;padding:10px 12px;border-radius:8px;background:#1f2937;border:1px solid #374151;font-size:.78rem;color:#d1d5db;">
+        <i class="fa-solid fa-user-lock" style="color:#f59e0b;margin-right:6px;"></i>
+        Separação assumida por <strong style="color:#fbbf24;">${usuarioSeparando}</strong>.
+      </div>`;
+    }
+    return `<div style="margin:12px 16px 0;padding:10px 12px;border-radius:8px;background:#1f2937;border:1px solid #374151;font-size:.78rem;color:#d1d5db;display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+      <span style="flex:1;min-width:200px;">
+        <i class="fa-solid fa-user-lock" style="color:#f59e0b;margin-right:6px;"></i>
+        Separação em andamento por <strong style="color:#fbbf24;">${usuarioSeparando}</strong>. Você pode visualizar, mas não alterar os itens.
+      </span>
+      <button type="button" id="btnAssumirSeparacao" style="padding:6px 12px;border:none;border-radius:8px;background:#1d4ed8;color:#dbeafe;font-weight:700;font-size:.76rem;cursor:pointer;white-space:nowrap;">
+        <i class="fa-solid fa-hand" style="margin-right:4px;"></i>Assumir separação
+      </button>
+    </div>`;
+  }
+
+  function _aplicarEstadoSeparadorAtivo(nomeSeparador) {
+    const nome = String(nomeSeparador || currentUser).trim();
+    usuarioSeparando = nome;
+    perdeuSeparacaoParaOutro = false;
+    podeAgirSep = !isStandby && !!nome && nome === currentUser;
+    podeCancelarSep = !isStandby
+      && (origemStatus === 'Em Separação' || origemStatus === 'Separado')
+      && !!usuarioSeparando
+      && usuarioSeparando === currentUser;
+    (grupoAtual.itens || []).forEach(it => { it.usuario_separando = nome; });
+  }
+
+  function _atualizarUiLockSep() {
+    const host = document.getElementById('modalSepLockBanner');
+    if (host) host.innerHTML = _htmlBannerSepLock();
+    const footCancel = document.getElementById('modalSepFooterCancel');
+    if (footCancel) footCancel.style.display = podeCancelarSep ? '' : 'none';
+    _renderLista();
+  }
+
+  function _atualizarBannerSep() {
+    _atualizarUiLockSep();
+  }
+
+  function _atualizarCacheModalSep() {
+    _solInvalidateSepModalCache(grupoAtual.n_solic, grupoAtual.escopoItens || 'global');
+    _solSetSepModalCache(grupoAtual.n_solic, grupoAtual.escopoItens || 'global', {
+      grupoAtual: { ...grupoAtual, itens: [...(grupoAtual.itens || [])] },
+      gruposConflito,
+      preloaded: { estoqueBatch, enderecoBatch }
+    });
+  }
+
+  async function _fetchItensModalSep() {
+    const r = await fetch(_solBuildKanbanItensUrl(grupoAtual.n_solic, { escopoItens: grupoAtual.escopoItens }), { credentials: 'include' });
+    const d = await r.json();
+    if (!d.ok) return null;
+    return (d.itens || []).map(it => ({ ...it, solic_ids: [it.solic_id], carr_ids: [it.carr_id] }));
+  }
+
+  async function _verificarSeparadorSep() {
+    if (isStandby || !podeAgirSep) return podeAgirSep;
+    try {
+      const mapped = await _fetchItensModalSep();
+      if (!mapped) return true;
+      const sep = _extrairUsuarioSeparando(mapped);
+      if (sep && sep !== currentUser) {
+        _syncSepLockFromItens(mapped);
+        _atualizarBannerSep();
+        _renderLista();
+        return false;
+      }
+      return true;
+    } catch (_) {
+      return true;
+    }
+  }
+
+  function _tratarErroSeparadorPerdido(err) {
+    const msg = String(err?.message || err || '');
+    const m = msg.match(/Separação assumida por\s+(.+?)\.?$/i);
+    if (m) {
+      usuarioSeparando = m[1].trim();
+      perdeuSeparacaoParaOutro = true;
+      podeAgirSep = false;
+      podeCancelarSep = false;
+      _atualizarBannerSep();
+      _renderLista();
+      return true;
+    }
+    return false;
+  }
   const modalTitle = isStandby
     ? `Stund-by — ${nSolicHdr}`
     : (origemStatus === 'Em Separação' || origemStatus === 'Separado')
       ? `Em fase de separação — ${nSolicHdr}`
       : `Em Separação — ${nSolicHdr}`;
+  const isFaseSeparacao = origemStatus === 'Em Separação' || origemStatus === 'Separado';
+
+  function _solSepPayloadFromRow(row) {
+    const cod = String(row.dataset.origemCod || '').trim();
+    const base = {
+      cod_local_origem: cod || undefined,
+      codigo_produto: row.dataset.codigo || undefined
+    };
+    if (!row || row.dataset.requerEtq !== '1' || cod !== PRINC_ARMZ) return base;
+    return {
+      ...base,
+      etq_id: row.dataset.etqId ? parseInt(row.dataset.etqId, 10) : undefined,
+      endereco_origem: row.dataset.etqEndereco || undefined
+    };
+  }
+
+  function _solValidarOrigemSepRow(row, qty) {
+    const codOrigem = String(row?.dataset?.origemCod || '').trim();
+    if (!codOrigem) {
+      alert('Selecione o armazém de origem antes de separar.');
+      return false;
+    }
+    return _solValidarEtqSepRow(row, qty);
+  }
+
+  function _solValidarEtqSepRow(row, qty) {
+    if (!row || row.dataset.requerEtq !== '1') return true;
+    const codOrigem = String(row.dataset.origemCod || '').trim();
+    if (codOrigem !== PRINC_ARMZ) return true;
+    if (!row.dataset.etqId && !row.dataset.etqEndereco) {
+      alert('Selecione um endereço de origem no Almoxarifado (Porta Pallet).');
+      return false;
+    }
+    const saldo = parseFloat(row.dataset.etqQtd || '0');
+    const qtd = parseFloat(qty);
+    if (!Number.isFinite(saldo) || saldo <= 0 || (Number.isFinite(qtd) && saldo + 1e-9 < qtd)) {
+      const cod = row.dataset.codigo || 'item';
+      alert(`Item ${cod} não possui saldo, favor atualizar saldo no processo de movimentação.`);
+      return false;
+    }
+    return true;
+  }
 
   const STATUS_TRABALHO_MODAL_SEP = new Set(['Separação', 'Em Separação', 'Separado', 'Stund-by']);
   function _itensVisiveisModalSep(itens) {
@@ -907,8 +1246,18 @@ async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) 
       .filter(l => Number(l.saldo) > 0)
       .slice()
       .sort((a, b) => String(a.local_codigo) === PRINC_ARMZ ? -1 : String(b.local_codigo) === PRINC_ARMZ ? 1 : 0);
-    let origemHtml = '';
-    if (isSep) {
+    const temAlmoxOrigem = locais.some(l => String(l.local_codigo) === PRINC_ARMZ);
+    const usarOrigemSepFase = isFaseSeparacao && temAlmoxOrigem;
+    const enderecamentoHtml = isFaseSeparacao
+      ? ''
+      : _solEnderecamentoHtml(it.codigo_produto, enderecoBatch, it);
+    let origemHtml = usarOrigemSepFase
+      ? _solRenderOrigemSepFase(locais, enderecoBatch, it.codigo_produto, PRINC_ARMZ)
+      : _solRenderOrigemResumoGlobal(
+          estoqueBatch[it.codigo_produto] || [],
+          Object.keys(estoqueBatch).length ? 'Sem origem com saldo' : 'Carregando origem...'
+        );
+    if (false && isSep) {
       if (locais.length) {
         const btns = locais.map((l, idx) => {
           const isDefault = String(l.local_codigo) === PRINC_ARMZ || (idx === 0);
@@ -931,7 +1280,7 @@ async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) 
       } else {
         origemHtml = `<div style="font-size:.63rem;color:#6b7280;font-style:italic;">Carregando origem...</div>`;
       }
-    } else if (locais.length) {
+    } else if (false && locais.length) {
       origemHtml = locais.map(l => {
         const qty2 = Number(l.saldo).toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
         return `<div style="display:flex;flex-direction:column;line-height:1.35;padding:2px 0;">
@@ -939,14 +1288,14 @@ async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) 
           <span style="font-size:.68rem;color:#f0f0f0;font-weight:700;">${qty2} ${l.unidade || 'UN'}</span>
         </div>`;
       }).join('');
-    } else if (Object.keys(estoqueBatch).length > 0) {
+    } else if (false && Object.keys(estoqueBatch).length > 0) {
       origemHtml = `<div style="font-size:.63rem;color:#6b7280;font-style:italic;">Sem origem com saldo</div>`;
-    } else {
+    } else if (false) {
       origemHtml = `<div style="font-size:.63rem;color:#6b7280;font-style:italic;">Carregando origem...</div>`;
     }
 
     const localizacaoHtml = `
-      <div style="margin-top:6px;display:flex;flex-direction:column;gap:6px;">
+      <div class="sep-loc-stack" style="margin-top:6px;display:flex;flex-direction:column;gap:6px;">
         ${enderecamentoHtml}
         <div style="display:${isCompact ? 'flex;flex-direction:column;gap:8px;align-items:stretch' : 'flex;gap:10px;flex-wrap:wrap;align-items:stretch'};">
           <div style="min-width:${isCompact ? '0' : '220px'};flex:1 1 ${isCompact ? 'auto' : '240px'};padding:6px 8px;background:#101826;border:1px solid #253041;border-radius:8px;">
@@ -965,6 +1314,10 @@ async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) 
     const qtySepReg = parseFloat(it.quantidade_separada);
     const qtyAlterada = (isSep || isConferido) && Number.isFinite(qtyOrig) && Number.isFinite(qtySepReg)
       && Math.abs(qtyOrig - qtySepReg) > 0.0001;
+    const qtdManualPendente = isEmSeparacao && Number.isFinite(qtyOrig) && Number.isFinite(qtySepReg)
+      && Math.abs(qtyOrig - qtySepReg) > 0.0001;
+    const qtyStandbyPend = qtdManualPendente && qtySepReg < qtyOrig ? qtyOrig - qtySepReg : 0;
+    const qtyExtraPend = qtdManualPendente && qtySepReg > qtyOrig ? qtySepReg - qtyOrig : 0;
 
     const qtyHtml = isConferido
       ? (qtyAlterada
@@ -992,30 +1345,47 @@ async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) 
              </table>
            </div>`
         : `<span style="font-size:.80rem;font-weight:700;color:#f0f0f0;">${_solFmtQty(qty)} ${unidade}</span>`)
+      : qtdManualPendente
+      ? `<div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;min-width:100px;">
+           <span style="font-size:.68rem;color:#fbbf24;font-weight:700;"><i class="fa-solid fa-hourglass-half" style="margin-right:2px;font-size:.58rem;"></i>Aguardando Separado</span>
+           <table style="font-size:.62rem;border-collapse:collapse;border:1px solid #374151;border-radius:4px;overflow:hidden;">
+             <tr style="background:#1f2937;"><td style="padding:2px 6px;color:#9ca3af;white-space:nowrap;">Original</td><td style="padding:2px 6px;font-weight:700;color:#d1d5db;">${_solFmtQty(qtyOrig)} ${unidade}</td></tr>
+             <tr style="background:#292419;"><td style="padding:2px 6px;color:#86efac;white-space:nowrap;">Separar</td><td style="padding:2px 6px;font-weight:700;color:#86efac;">${_solFmtQty(qtySepReg)} ${unidade}</td></tr>
+             ${qtyStandbyPend > 0.0001 ? `<tr style="background:#2a1a2a;"><td style="padding:2px 6px;color:#ec4899;white-space:nowrap;">Stand-by</td><td style="padding:2px 6px;font-weight:700;color:#ec4899;">${_solFmtQty(qtyStandbyPend)} ${unidade}</td></tr>` : ''}
+             ${qtyExtraPend > 0.0001 ? `<tr style="background:#1a2a1a;"><td style="padding:2px 6px;color:#a78bfa;white-space:nowrap;">A mais</td><td style="padding:2px 6px;font-weight:700;color:#a78bfa;">${_solFmtQty(qtyExtraPend)} ${unidade}</td></tr>` : ''}
+           </table>
+         </div>`
       : `<div class="sep-qty-wrap" style="display:flex;align-items:center;gap:4px;flex-shrink:0;">
            <span class="sep-qty-label" style="font-size:.80rem;font-weight:700;color:#f0f0f0;white-space:nowrap;">${_solFmtQty(qty)} ${unidade}</span>
          </div>`;
     const isUrgente = !!it.urgente;
     return `
-      <div data-item-row="${it.cod_omie || it.codigo_produto}"
+      <div class="sep-row sep-row--work" data-item-row="${it.cod_omie || it.codigo_produto}"
            data-n-solic="${nSolic || ''}"
            data-solic-ids='${JSON.stringify(it.solic_ids)}'
            data-carr-ids='${JSON.stringify(it.carr_ids)}'
            data-qty-total="${qty}"
+           data-qty-orig="${Number.isFinite(qtyOrig) ? qtyOrig : ''}"
+           data-qty-sep-reg="${Number.isFinite(qtySepReg) ? qtySepReg : ''}"
            data-status="${it.status}"
            data-urgente="${isUrgente ? '1' : '0'}"
            data-codigo="${String(it.codigo_produto || '').replace(/"/g, '&quot;')}"
            data-descricao="${encodeURIComponent(it.descricao || '')}"
            data-observacao="${encodeURIComponent(obsText)}"
            data-unidade="${String(it.unidade || 'UN').replace(/"/g, '&quot;')}"
+           data-requer-etq="${usarOrigemSepFase ? '1' : '0'}"
+           data-origem-cod="${usarOrigemSepFase ? PRINC_ARMZ : ''}"
+           data-etq-id=""
+           data-etq-endereco=""
+           data-etq-qtd=""
            style="display:flex;align-items:flex-start;gap:12px;padding:10px 16px;border-top:1px solid #222;${isConferido ? 'background:#0c1812;border-left:3px solid #22c55e;' : ''}${isUrgente ? 'border-left:3px solid #ef4444 !important;' : ''}">
-        <div style="width:40px;height:40px;border-radius:8px;background:#0f0f0f;overflow:hidden;flex-shrink:0;margin-top:2px;">
+        <div class="sep-thumb" data-preview-title="${String(it.codigo_produto || '').replace(/"/g, '&quot;')} - ${String(it.descricao || '').replace(/"/g, '&quot;')}" style="width:40px;height:40px;border-radius:8px;background:#0f0f0f;overflow:hidden;flex-shrink:0;margin-top:2px;cursor:zoom-in;">
           ${_solGetMiniImgHtml(it.codigo_produto, it.descricao || '')}
         </div>
-        <div style="flex:1;min-width:0;">
+        <div class="sep-main" style="flex:1;min-width:0;">
           <div style="font-weight:700;font-size:.80rem;color:#f59e0b;">${it.codigo_produto}</div>
           <div style="font-size:.78rem;color:#d1d5db;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${it.descricao || '—'}</div>
-          <div style="font-size:.73rem;color:#9ca3af;margin-top:2px;display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+          <div class="sep-meta" style="font-size:.73rem;color:#9ca3af;margin-top:2px;display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
             ${dh ? `<i class="fa-regular fa-calendar" style="color:#6b7280;"></i><span>${dh}</span>` : ''}
             ${isConferido
               ? `<span style="display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:20px;font-size:.68rem;font-weight:700;color:#86efac;background:#0f2018;border:1px solid #22c55e55;">
@@ -1032,7 +1402,7 @@ async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) 
           ${swapHistory}
           ${localizacaoHtml}
         </div>
-          ${qtyHtml}
+          <div class="sep-qty">${qtyHtml}</div>
           ${readonlySep
             ? ''
             : isConferido
@@ -1083,7 +1453,6 @@ async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) 
   }
 
   let aggItens = _aggItens(_itensVisiveisModalSep(grupoAtual.itens));
-  const PRINC_ARMZ = '10717096386';
   let estoqueBatch = preloaded.estoqueBatch || {};
   let enderecoBatch = _solMergeEnderecoBatch(
     [...(grupoAtual.itens || []), ...aggItens],
@@ -1123,9 +1492,10 @@ async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) 
 
   // Recarrega o SEP original do servidor e re-renderiza lista (sem sub-SEPs — .1 vai para fila pendente)
   let _reloadPending = false;
-  async function reloadItems() {
+  async function reloadItems(opts = {}) {
     if (_reloadPending) return;
     _reloadPending = true;
+    const lockAntes = { usuarioSeparando, podeAgirSep, perdeuSeparacaoParaOutro, podeCancelarSep };
     try {
       const r = await fetch(_solBuildKanbanItensUrl(grupoAtual.n_solic, { escopoItens: grupoAtual.escopoItens }), { credentials: 'include' });
       const d = await r.json();
@@ -1137,18 +1507,61 @@ async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) 
         return;
       }
       aggItens = _aggItens(visiveis);
+      grupoAtual.itens = mapped;
+      if (opts.skipLockSync) {
+        usuarioSeparando = lockAntes.usuarioSeparando;
+        podeAgirSep = lockAntes.podeAgirSep;
+        perdeuSeparacaoParaOutro = lockAntes.perdeuSeparacaoParaOutro;
+        podeCancelarSep = lockAntes.podeCancelarSep;
+      } else {
+        _syncSepLockFromItens(mapped);
+      }
       await _carregarEstoque();
+      if (!opts.skipLockSync) _atualizarUiLockSep();
+      else _renderLista();
     } catch (_) {} finally { _reloadPending = false; }
   }
 
-  async function _postSepParcial(row, qtySep, motivo) {
+  async function _postRegistrarQtdManual(row, qtySep, motivo) {
+    const solicIds = JSON.parse(row.dataset.solicIds || '[]');
+    const carrIds  = JSON.parse(row.dataset.carrIds  || '[]');
+    const r = await fetch('/api/logistica/itens_solicitados/registrar-qtd-manual', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({
+        solic_ids: solicIds,
+        carr_ids: carrIds,
+        quantidade_separada: qtySep,
+        motivo: motivo || '',
+        ..._solSepPayloadFromRow(row)
+      })
+    });
+    const d = await r.json();
+    if (!d.ok) throw new Error(d.error || 'Erro ao registrar quantidade manual.');
+    houveMudanca = true;
+    await reloadItems();
+    window._loadSolicitacoesTab.force = true;
+    window._loadSolicitacoesTab();
+    window._loadKanbanSolicitacoesTab.force = true;
+    window._loadKanbanSolicitacoesTab();
+    return d;
+  }
+
+  async function _postExecutarSepParcial(row, qtySep, motivo) {
     const solicIds = JSON.parse(row.dataset.solicIds || '[]');
     const carrIds  = JSON.parse(row.dataset.carrIds  || '[]');
     const r = await fetch('/api/logistica/itens_solicitados/separar-parcial', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
-      body: JSON.stringify({ solic_ids: solicIds, carr_ids: carrIds, quantidade_separada: qtySep, motivo: motivo || '' })
+      body: JSON.stringify({
+        solic_ids: solicIds,
+        carr_ids: carrIds,
+        quantidade_separada: qtySep,
+        motivo: motivo || '',
+        ..._solSepPayloadFromRow(row)
+      })
     });
     const d = await r.json();
     if (!d.ok) throw new Error(d.error || 'Erro ao processar separação parcial.');
@@ -1161,7 +1574,69 @@ async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) 
     return d;
   }
 
+  async function _executarSeparadoItem(row) {
+    if (!(await _verificarSeparadorSep())) return false;
+    const qtyTotal = parseFloat(row.dataset.qtyTotal || '0') || 0;
+    const solicIds = JSON.parse(row.dataset.solicIds || '[]');
+    const qtySepReg = parseFloat(row.dataset.qtySepReg || '');
+    const qtyOrigReg = parseFloat(row.dataset.qtyOrig || '');
+    const temQtdManual = Number.isFinite(qtySepReg) && Number.isFinite(qtyOrigReg)
+      && Math.abs(qtyOrigReg - qtySepReg) > 0.0001;
+
+    if (temQtdManual) {
+      if (!_solValidarOrigemSepRow(row, qtySepReg)) return false;
+      _solRowLoading(row, true);
+      try {
+        const motivo = decodeURIComponent(row.dataset.observacao || '');
+        const d = await _postExecutarSepParcial(row, qtySepReg, motivo);
+        if (d.reintegrado) {
+          alert(`Produto devolvido à SEP original (${d.n_solic || 'original'}).`);
+        }
+        return true;
+      } catch (err) {
+        if (!_tratarErroSeparadorPerdido(err)) alert('Erro: ' + (err.message || err));
+        return false;
+      } finally {
+        _solRowLoading(row, false);
+      }
+    }
+
+    if (!_solValidarOrigemSepRow(row, qtyTotal)) return false;
+    _solRowLoading(row, true);
+    try {
+      const r = await fetch('/api/logistica/itens_solicitados/separar', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ solic_ids: solicIds, ..._solSepPayloadFromRow(row) })
+      });
+      const d = await r.json();
+      if (!d.ok) throw new Error(d.error || 'Erro ao registrar item separado.');
+      if (d.reintegrado) {
+        alert(`Produto devolvido à SEP original (${d.n_solic || 'original'}).`);
+      }
+      houveMudanca = true;
+      await reloadItems();
+      window._loadSolicitacoesTab.force = true;
+      window._loadSolicitacoesTab();
+      window._loadKanbanSolicitacoesTab.force = true;
+      window._loadKanbanSolicitacoesTab();
+      return true;
+    } catch (err) {
+      if (!_tratarErroSeparadorPerdido(err)) alert('Erro: ' + (err.message || err));
+      return false;
+    } finally {
+      _solRowLoading(row, false);
+    }
+  }
+
+  async function _postSepParcial(row, qtySep, motivo) {
+    return _postRegistrarQtdManual(row, qtySep, motivo);
+  }
+
   async function _confirmarSepParcial(row, qtySep, opts = {}) {
+    if (!(await _verificarSeparadorSep())) return false;
+    if (!_solValidarOrigemSepRow(row, qtySep)) return false;
     const unidade  = row.dataset.unidade || 'UN';
     const qtyTotal = parseFloat(row.dataset.qtyTotal || '0') || 0;
     if (!Number.isFinite(qtySep) || qtySep <= 0) {
@@ -1181,7 +1656,7 @@ async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) 
       await _postSepParcial(row, qtySep, motivo);
       return true;
     } catch (err) {
-      alert('Erro: ' + (err.message || err));
+      if (!_tratarErroSeparadorPerdido(err)) alert('Erro: ' + (err.message || err));
       return false;
     } finally {
       _solRowLoading(row, false);
@@ -1190,7 +1665,9 @@ async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) 
 
   function fecharModal() {
     modal.remove();
+    document.querySelectorAll('#modalSeparacaoLogistica').forEach(el => el.remove());
     if (houveMudanca || refreshAoFechar) {
+      _solInvalidateSepModalCache(grupoAtual.n_solic, grupoAtual.escopoItens || 'global');
       window._loadSolicitacoesTab.force = true;
       window._loadSolicitacoesTab();
       window._loadKanbanSolicitacoesTab.force = true;
@@ -1237,12 +1714,7 @@ async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) 
         <button id="btnModalSepFechar" style="margin-left:auto;background:none;border:none;color:#9ca3af;font-size:1.3rem;cursor:pointer;padding:2px 6px;line-height:1;">&#x2715;</button>
       </div>
       <div id="modalSepInner" style="overflow-y:auto;flex:1;padding-bottom:16px;">
-        ${!podeAgirSep && usuarioSeparando && !isStandby
-          ? `<div style="margin:12px 16px 0;padding:10px 12px;border-radius:8px;background:#1f2937;border:1px solid #374151;font-size:.78rem;color:#d1d5db;">
-               <i class="fa-solid fa-user-lock" style="color:#f59e0b;margin-right:6px;"></i>
-               Separação em andamento por <strong style="color:#fbbf24;">${usuarioSeparando}</strong>. Você pode visualizar, mas não alterar os itens.
-             </div>`
-          : ''}
+        <div id="modalSepLockBanner">${_htmlBannerSepLock()}</div>
         <div style="font-size:.75rem;color:#6b7280;font-weight:700;padding:12px 16px 4px;letter-spacing:.05em;text-transform:uppercase;">${isStandby ? 'Itens em stand-by' : 'Itens em separação'}</div>
         <div id="modalSepItemsList">
           ${aggItens.map(it => _renderAggItem(it, grupoAtual.n_solic)).join('')}
@@ -1258,8 +1730,8 @@ async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) 
           <i class="fa-solid fa-play" style="margin-right:4px;"></i>Iniciar separação
         </button>
       </div>` : ''}
-      ${podeCancelarSep ? `
-      <div style="padding:12px 16px;border-top:1px solid #2a2a2a;display:flex;justify-content:flex-start;align-items:center;gap:8px;background:#171717;flex-wrap:wrap;">
+      ${!isStandby ? `
+      <div id="modalSepFooterCancel" style="padding:12px 16px;border-top:1px solid #2a2a2a;display:${podeCancelarSep ? 'flex' : 'none'};justify-content:flex-start;align-items:center;gap:8px;background:#171717;flex-wrap:wrap;">
         <button id="btnCancelarSeparacao" style="padding:7px 14px;border:1px solid #7f1d1d;border-radius:8px;background:transparent;color:#f87171;font-weight:700;font-size:.82rem;cursor:pointer;">
           <i class="fa-solid fa-ban" style="margin-right:4px;"></i>Cancelar separação
         </button>
@@ -1326,6 +1798,7 @@ async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) 
     btn.disabled = true;
     btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin" style="margin-right:4px;"></i>Iniciando...';
     try {
+      await _solDispararVippGerarEtiqueta(grupoAtual.n_solic, { alertarErro: true, recarregarEnvio: true });
       const r = await fetch('/api/logistica/itens_solicitados/separacao', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
@@ -1361,6 +1834,48 @@ async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) 
 
   const modalInner = document.getElementById('modalSepInner');
 
+  modalInner.addEventListener('click', async (e) => {
+    const btnAssumir = e.target.closest('#btnAssumirSeparacao');
+    if (btnAssumir && !btnAssumir.disabled) {
+      const solicIds = (grupoAtual.itens || [])
+        .filter(it => ['Separação', 'Em Separação', 'Separado'].includes(String(it.status || '')))
+        .map(it => parseInt(it.solic_id, 10))
+        .filter(id => !Number.isNaN(id));
+      if (!solicIds.length) {
+        alert('Nenhum item em separação para assumir.');
+        return;
+      }
+      if (!confirm(`Assumir a separação que está com ${usuarioSeparando}? O separador anterior perderá o controle.`)) return;
+      btnAssumir.disabled = true;
+      btnAssumir.innerHTML = '<i class="fa-solid fa-spinner fa-spin" style="margin-right:4px;"></i>Assumindo...';
+      try {
+        const r = await fetch('/api/logistica/itens_solicitados/assumir-separacao', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ solic_ids: solicIds })
+        });
+        const d = await r.json();
+        if (!d.ok) throw new Error(d.error || 'Erro ao assumir separação.');
+        _aplicarEstadoSeparadorAtivo(d.usuario_separando || currentUser);
+        houveMudanca = true;
+        await reloadItems({ skipLockSync: true });
+        _aplicarEstadoSeparadorAtivo(d.usuario_separando || currentUser);
+        _atualizarUiLockSep();
+        _atualizarCacheModalSep();
+        window._loadSolicitacoesTab.force = true;
+        window._loadSolicitacoesTab();
+        window._loadKanbanSolicitacoesTab.force = true;
+        window._loadKanbanSolicitacoesTab();
+      } catch (err) {
+        alert('Erro: ' + (err.message || err));
+        btnAssumir.disabled = false;
+        btnAssumir.innerHTML = '<i class="fa-solid fa-hand" style="margin-right:4px;"></i>Assumir separação';
+      }
+      return;
+    }
+  });
+
   async function _abrirModalAcaoItemSep(row, coluna) {
     document.getElementById('modalAcaoItemSep')?.remove();
     const codigo = row.dataset.codigo || '';
@@ -1390,7 +1905,7 @@ async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) 
           <div style="font-size:.82rem;color:#f0f0f0;font-weight:700;">Quantidade original: ${_solFmtQty(qtyTotal)} ${unidade}</div>
         </div>
         <div style="padding:12px 16px;border-top:1px solid #2a2a2a;display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end;background:#171717;">
-          <button id="btnAcaoSepTudo" style="padding:7px 12px;border:none;border-radius:8px;background:#166534;color:#dcfce7;font-weight:700;font-size:.82rem;cursor:pointer;">Separei tudo</button>
+          <button id="btnAcaoSepTudo" style="padding:7px 12px;border:none;border-radius:8px;background:#166534;color:#dcfce7;font-weight:700;font-size:.82rem;cursor:pointer;">Separado</button>
           <button id="btnAcaoSepParcial" style="padding:7px 12px;border:none;border-radius:8px;background:#b45309;color:#ffedd5;font-weight:700;font-size:.82rem;cursor:pointer;">Informar quantidade</button>
           ${status !== 'Stund-by' ? `<button id="btnAcaoNaoSep" style="padding:7px 12px;border:none;border-radius:8px;background:#7c2d12;color:#ffedd5;font-weight:700;font-size:.82rem;cursor:pointer;">Não separei</button>` : ''}
         </div>
@@ -1403,26 +1918,19 @@ async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) 
 
     document.getElementById('btnAcaoSepTudo').addEventListener('click', async () => {
       const btn = document.getElementById('btnAcaoSepTudo');
+      if (!(await _verificarSeparadorSep())) return;
       _solBtnLoading(btn, 'Processando...');
       try {
-        const r = await fetch('/api/logistica/itens_solicitados/separar', {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          credentials: 'include',
-          body: JSON.stringify({ solic_ids: solicIds })
-        });
-        const d = await r.json();
-        if (!d.ok) throw new Error(d.error || 'Erro ao registrar item separado.');
-        houveMudanca = true;
         closeModal();
-        await reloadItems();
+        await _executarSeparadoItem(row);
       } catch (err) {
-        alert('Erro: ' + (err.message || err));
-        _solBtnRestore(btn, 'Separei tudo');
+        if (!_tratarErroSeparadorPerdido(err)) alert('Erro: ' + (err.message || err));
+        _solBtnRestore(btn, 'Separado');
       }
     });
 
     document.getElementById('btnAcaoSepParcial').addEventListener('click', async () => {
+      if (!(await _verificarSeparadorSep())) return;
       const qtyInput = prompt(`Quantidade separada (${unidade}). Pode ser maior que o solicitado quando a embalagem fechada vier com mais unidades:`, _solFmtQty(qtyTotal));
       if (qtyInput === null) return;
       const qtySep = parseFloat(String(qtyInput).replace(',', '.'));
@@ -1433,6 +1941,7 @@ async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) 
     const btnNaoSep = document.getElementById('btnAcaoNaoSep');
     if (btnNaoSep) {
       btnNaoSep.addEventListener('click', async () => {
+        if (!(await _verificarSeparadorSep())) return;
         const ok = confirm('Confirmar que este item não foi separado?');
         if (!ok) return;
         _solBtnLoading(btnNaoSep, 'Processando...');
@@ -1455,7 +1964,7 @@ async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) 
           window._loadKanbanSolicitacoesTab.force = true;
           window._loadKanbanSolicitacoesTab();
         } catch (err) {
-          alert('Erro: ' + (err.message || err));
+          if (!_tratarErroSeparadorPerdido(err)) alert('Erro: ' + (err.message || err));
           _solBtnRestore(btnNaoSep, '<i class="fa-solid fa-xmark" style="margin-right:2px;"></i>Não separei');
         }
       });
@@ -1466,6 +1975,7 @@ async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) 
   // Busca inline de troca de produto (sem abrir modal sobre modal)
   async function _abrirTrocaInline(row) {
     if (!row) return;
+    if (!(await _verificarSeparadorSep())) return;
 
     // Mantém somente um editor de troca aberto por vez
     modalInner.querySelectorAll('.sep-troca-inline-wrap').forEach(el => el.remove());
@@ -1561,6 +2071,7 @@ async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) 
       const idx = Number(itemEl.dataset.idx);
       const prod = resultados[idx];
       if (!prod?.codigo) return;
+      if (!(await _verificarSeparadorSep())) return;
 
       input.disabled = true;
       resultadosEl.innerHTML = '<div style="padding:10px 12px;color:#93c5fd;font-size:12px;">Aplicando troca...</div>';
@@ -1589,7 +2100,7 @@ async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) 
         window._loadKanbanSolicitacoesTab.force = true;
         window._loadKanbanSolicitacoesTab();
       } catch (err) {
-        alert('Erro: ' + (err.message || err));
+        if (!_tratarErroSeparadorPerdido(err)) alert('Erro: ' + (err.message || err));
         input.disabled = false;
         resultadosEl.style.display = 'none';
         resultadosEl.innerHTML = '';
@@ -1601,6 +2112,54 @@ async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) 
 
   // Delegação de clique — ações do item
   modalInner.addEventListener('click', async (e) => {
+    const btnOrigemSep = e.target.closest('.sol-origem-sep-btn');
+    if (btnOrigemSep) {
+      const row = btnOrigemSep.closest('[data-item-row]');
+      if (!row) return;
+      const wrap = btnOrigemSep.closest('.sep-loc-box--origin') || btnOrigemSep.closest('.sep-loc-box');
+      if (wrap) {
+        wrap.querySelectorAll('.sol-origem-sep-btn').forEach(b => {
+          const active = b === btnOrigemSep;
+          b.dataset.selected = active ? '1' : '0';
+          b.style.border = '2px solid ' + (active ? '#16a34a' : '#374151');
+          b.style.background = active ? '#14532d' : '#111827';
+          b.style.color = active ? '#86efac' : '#9ca3af';
+        });
+        wrap.querySelectorAll('.sol-origem-sep-etq').forEach(p => {
+          p.style.display = 'none';
+        });
+      }
+      const etqPanel = btnOrigemSep.parentElement?.querySelector('.sol-origem-sep-etq');
+      if (etqPanel) etqPanel.style.display = 'block';
+      const cod = btnOrigemSep.dataset.cod || '';
+      row.dataset.origemCod = cod;
+      if (cod !== PRINC_ARMZ) {
+        row.dataset.etqId = '';
+        row.dataset.etqEndereco = '';
+        row.dataset.etqQtd = '';
+        row.querySelectorAll('.sep-etq-endereco-row').forEach(el => {
+          el.style.borderColor = '#854d0e33';
+          el.style.background = '#1a1508';
+        });
+      }
+      return;
+    }
+
+    const btnEtq = e.target.closest('.sep-etq-endereco-row');
+    if (btnEtq) {
+      const row = btnEtq.closest('[data-item-row]');
+      if (!row) return;
+      row.querySelectorAll('.sep-etq-endereco-row').forEach(el => {
+        const active = el === btnEtq;
+        el.style.borderColor = active ? '#22c55e' : '#854d0e33';
+        el.style.background = active ? '#1a2e1a' : '#1a1508';
+      });
+      row.dataset.etqId = btnEtq.dataset.etqId || '';
+      row.dataset.etqEndereco = btnEtq.dataset.etqEndereco || '';
+      row.dataset.etqQtd = btnEtq.dataset.etqQtd || '';
+      return;
+    }
+
     // Seleção de armazém inline
     const btnArm = e.target.closest('.armazem-btn');
     if (btnArm) {
@@ -1691,6 +2250,7 @@ async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) 
     if (btnTrocar && !btnTrocar.disabled) {
       const row = btnTrocar.closest('[data-item-row]');
       if (!row) return;
+      if (!(await _verificarSeparadorSep())) return;
       _solBtnLoading(btnTrocar);
       try {
         await _abrirTrocaInline(row);
@@ -1704,22 +2264,11 @@ async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) 
     if (btnSepTudo && !btnSepTudo.disabled) {
       const row = btnSepTudo.closest('[data-item-row]');
       if (!row) return;
-      const solicIds = JSON.parse(row.dataset.solicIds || '[]');
       _solBtnLoading(btnSepTudo);
       try {
-        const r = await fetch('/api/logistica/itens_solicitados/separar', {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          credentials: 'include',
-          body: JSON.stringify({ solic_ids: solicIds })
-        });
-        const d = await r.json();
-        if (!d.ok) throw new Error(d.error || 'Erro ao registrar item separado.');
-        houveMudanca = true;
-        await reloadItems();
-      } catch (err) {
-        alert('Erro: ' + (err.message || err));
-        _solBtnRestore(btnSepTudo, '<i class="fa-solid fa-check" style="margin-right:2px;"></i>Separei tudo');
+        await _executarSeparadoItem(row);
+      } finally {
+        _solBtnRestore(btnSepTudo, '<i class="fa-solid fa-check" style="margin-right:2px;"></i>Separado');
       }
       return;
     }
@@ -1728,16 +2277,17 @@ async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) 
     if (btnSepParcial && !btnSepParcial.disabled) {
       const row = btnSepParcial.closest('[data-item-row]');
       if (!row) return;
+      if (!(await _verificarSeparadorSep())) return;
       const unidade  = row.dataset.unidade || 'UN';
       const qtyTotal = parseFloat(row.dataset.qtyTotal || '0') || 0;
       const qtyInput = prompt(`Quantidade separada (${unidade}). Pode ser maior que o solicitado quando a embalagem fechada vier com mais unidades:`, _solFmtQty(qtyTotal));
       if (qtyInput === null) return;
       const qtySep = parseFloat(String(qtyInput).replace(',', '.'));
-      _solBtnLoading(btnSepParcial, 'Processando...');
+      _solBtnLoading(btnSepParcial, 'Registrando...');
       try {
         await _confirmarSepParcial(row, qtySep);
       } finally {
-        _solBtnRestore(btnSepParcial, '<i class="fa-solid fa-scale-balanced" style="margin-right:2px;"></i>Informar qtd');
+        _solBtnRestore(btnSepParcial, '<i class="fa-solid fa-scale-balanced" style="margin-right:2px;"></i>Manual');
       }
       return;
     }
@@ -1746,6 +2296,7 @@ async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) 
     if (btnNaoSep && !btnNaoSep.disabled) {
       const row = btnNaoSep.closest('[data-item-row]');
       if (!row) return;
+      if (!(await _verificarSeparadorSep())) return;
       const solicIds = JSON.parse(row.dataset.solicIds || '[]');
       const ok = confirm('Confirmar que este item não foi separado?');
       if (!ok) return;
@@ -1768,7 +2319,7 @@ async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) 
         window._loadKanbanSolicitacoesTab.force = true;
         window._loadKanbanSolicitacoesTab();
       } catch (err) {
-        alert('Erro: ' + (err.message || err));
+        if (!_tratarErroSeparadorPerdido(err)) alert('Erro: ' + (err.message || err));
         _solBtnRestore(btnNaoSep, '<i class="fa-solid fa-xmark" style="margin-right:2px;"></i>Não separei');
       }
       return;
@@ -2058,46 +2609,59 @@ async function _abrirModalAguardandoRetiradaSep(nSolic, opts = {}) {
   window._kanbanTooltipEl?.remove();
   window._kanbanTooltipEl = null;
 
-  _solKanbanLoading(true, 'Carregando solicitação...');
-
   let itens = [];
   let itensDerivados = [];
   let estoqueBatch = {};
   let enderecoBatch = {};
-  try {
-    const r = await fetch(_solBuildKanbanItensUrl(nSolic, { includeDerivados: true, escopoItens }), { credentials: 'include' });
-    const d = await r.json();
-    if (!d.ok) {
-      alert('Erro ao carregar itens: ' + (d.error || ''));
-      return;
-    }
-    itens = Array.isArray(d.itens) ? d.itens : [];
-    itensDerivados = Array.isArray(d.itens_derivados) ? d.itens_derivados : [];
+  const cacheHit = _solGetAguardRetCache(nSolic, tituloColuna, escopoItens);
+  if (cacheHit) {
+    itens = Array.isArray(cacheHit.itens) ? cacheHit.itens : [];
+    itensDerivados = Array.isArray(cacheHit.itensDerivados) ? cacheHit.itensDerivados : [];
+    estoqueBatch = cacheHit.estoqueBatch || {};
+    enderecoBatch = cacheHit.enderecoBatch || {};
+  } else {
+    _solKanbanLoading(true, 'Carregando solicitação...');
+    try {
+      const r = await fetch(_solBuildKanbanItensUrl(nSolic, { includeDerivados: true, escopoItens }), { credentials: 'include' });
+      const d = await r.json();
+      if (!d.ok) {
+        alert('Erro ao carregar itens: ' + (d.error || ''));
+        return;
+      }
+      itens = Array.isArray(d.itens) ? d.itens : [];
+      itensDerivados = Array.isArray(d.itens_derivados) ? d.itens_derivados : [];
 
-    const codigos = [...new Set([
-      ...itens.map(it => it.codigo_produto),
-      ...itensDerivados.map(it => it.codigo_produto)
-    ].filter(Boolean))];
-    if (codigos.length) {
-      try {
-        const [re, rep] = await Promise.all([
-          fetch('/api/logistica/estoque/batch?codigos=' + encodeURIComponent(codigos.join(',')), { credentials: 'include' }),
-          fetch('/api/logistica/endereco-pp/batch?codigos=' + encodeURIComponent(codigos.join(',')), { credentials: 'include' })
-        ]);
-        const de = await re.json();
-        const dep = await rep.json();
-        if (de.ok) estoqueBatch = de.dados || {};
-        if (dep.ok) enderecoBatch = dep.dados || {};
+      const codigos = [...new Set([
+        ...itens.map(it => it.codigo_produto),
+        ...itensDerivados.map(it => it.codigo_produto)
+      ].filter(Boolean))];
+      if (codigos.length) {
+        try {
+          const [re, rep] = await Promise.all([
+            fetch('/api/logistica/estoque/batch?codigos=' + encodeURIComponent(codigos.join(',')), { credentials: 'include' }),
+            fetch('/api/logistica/endereco-pp/batch?codigos=' + encodeURIComponent(codigos.join(',')), { credentials: 'include' })
+          ]);
+          const de = await re.json();
+          const dep = await rep.json();
+          if (de.ok) estoqueBatch = de.dados || {};
+          if (dep.ok) enderecoBatch = dep.dados || {};
+          enderecoBatch = _solMergeEnderecoBatch([...itens, ...itensDerivados], enderecoBatch);
+        } catch (_) { /* silencia */ }
+      } else {
         enderecoBatch = _solMergeEnderecoBatch([...itens, ...itensDerivados], enderecoBatch);
-      } catch (_) { /* silencia */ }
-    } else {
-      enderecoBatch = _solMergeEnderecoBatch([...itens, ...itensDerivados], enderecoBatch);
+      }
+      _solSetAguardRetCache(nSolic, tituloColuna, escopoItens, {
+        itens,
+        itensDerivados,
+        estoqueBatch,
+        enderecoBatch
+      });
+    } catch (err) {
+      alert('Erro de rede ao carregar a solicitação.');
+      return;
+    } finally {
+      _solKanbanLoading(false);
     }
-  } catch (err) {
-    alert('Erro de rede ao carregar a solicitação.');
-    return;
-  } finally {
-    _solKanbanLoading(false);
   }
 
   if (!itens.length) {
@@ -2123,15 +2687,18 @@ async function _abrirModalAguardandoRetiradaSep(nSolic, opts = {}) {
       if (String(b.local_codigo) === PRINCIPAL) return  1;
       return 0;
     });
-    let origemColuna = '';
-    if (locais.length) {
+    let origemColuna = _solRenderOrigemResumoGlobal(
+      estoqueBatch[it.codigo_produto] || [],
+      Object.keys(estoqueBatch).length ? 'Sem origem com saldo' : 'Carregando origem...'
+    );
+    if (false && locais.length) {
       origemColuna = locais.map(l =>
         `<div style="display:flex;flex-direction:column;line-height:1.3;padding:2px 0;">
           <span style="font-size:.63rem;color:#86efac;">${l.local_nome || l.local_codigo}</span>
           <span style="font-size:.68rem;color:#f0f0f0;font-weight:700;">${Number(l.saldo).toLocaleString('pt-BR',{minimumFractionDigits:0,maximumFractionDigits:2})} ${l.unidade||'UN'}</span>
         </div>`
       ).join('');
-    } else {
+    } else if (false) {
       origemColuna = `<span style="font-size:.63rem;color:#6b7280;font-style:italic;">Sem origem com saldo</span>`;
     }
 
@@ -2288,6 +2855,8 @@ async function _abrirModalAguardandoRetiradaSep(nSolic, opts = {}) {
         });
         const d = await r.json();
         if (!d.ok) throw new Error(d.error || 'Erro ao remover item.');
+        _solInvalidateAguardRetCache(nSolic, tituloColuna, escopoItens);
+        _solInvalidateSepModalCache(nSolic, escopoItens);
         btnDel.closest('[data-solic-id]')?.remove();
         // Se não sobrou nenhum item, fecha o modal
         const restantes = modal.querySelectorAll('[data-solic-id]').length;
@@ -2316,6 +2885,8 @@ async function _abrirModalAguardandoRetiradaSep(nSolic, opts = {}) {
       });
       const d = await r.json();
       if (!d.ok) throw new Error(d.error || 'Erro ao excluir SEP.');
+      _solInvalidateAguardRetCache(nSolic, tituloColuna, escopoItens);
+      _solInvalidateSepModalCache(nSolic, escopoItens);
       closeModal();
       window._loadSolicitacoesTab && (window._loadSolicitacoesTab.force = true, window._loadSolicitacoesTab());
       window._loadKanbanSolicitacoesTab && (window._loadKanbanSolicitacoesTab.force = true, window._loadKanbanSolicitacoesTab());
@@ -2327,28 +2898,17 @@ async function _abrirModalAguardandoRetiradaSep(nSolic, opts = {}) {
   });
 
   document.getElementById('btnAguardRetIniciarSep')?.addEventListener('click', async () => {
-    const solicIds = itens.map(it => parseInt(it.solic_id, 10)).filter(id => !isNaN(id));
+    const solicIds = _solSolicIdsParaIniciarSep(itens);
     if (!solicIds.length) {
-      alert('Não foi possível identificar os itens para iniciar separação.');
+      alert('Esta SEP não tem itens em Solicitado. Se já foi separada, veja a coluna "Aguardando retirada" no kanban (role para a direita).');
       return;
     }
     const btn = document.getElementById('btnAguardRetIniciarSep');
     btn.disabled = true;
     btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin" style="margin-right:4px;"></i>Iniciando...';
     try {
-      // ── Dispara GerarPPN VIPP em background (sem bloquear o usuário) ──────
-      fetch(`/api/vipp/sep-check?n_solic=${encodeURIComponent(nSolic)}`, { credentials: 'include' })
-        .then(r => r.json()).catch(() => ({ idVipp: null }))
-        .then(vc => {
-          if (!vc?.idVipp) return;
-          return fetch('/api/vipp/gerar-etiqueta', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            credentials: 'include',
-            body: JSON.stringify({ idConhecimento: vc.idVipp, n_solic: nSolic })
-          });
-        })
-        .catch(e => console.warn('[VIPP] background gerar-etiqueta:', e));
+      // ── Gera código ECT (libera Imprimir em Envio de mercadoria) ──────────
+      await _solDispararVippGerarEtiqueta(nSolic, { alertarErro: true, recarregarEnvio: true });
 
       // ── Avança itens para "Em Separação" ──────────────────────────────────
       const r = await fetch('/api/logistica/itens_solicitados/separacao', {
@@ -2359,6 +2919,8 @@ async function _abrirModalAguardandoRetiradaSep(nSolic, opts = {}) {
       });
       const d = await r.json();
       if (!d.ok) throw new Error(d.error || 'Erro ao iniciar separação.');
+      _solInvalidateAguardRetCache(nSolic, tituloColuna, escopoItens);
+      _solInvalidateSepModalCache(nSolic, escopoItens);
 
       closeModal();
 
@@ -2402,6 +2964,8 @@ async function _abrirModalAguardandoRetiradaSep(nSolic, opts = {}) {
       });
       const d = await r.json();
       if (!d.ok) throw new Error(d.error || 'Erro ao concluir solicitação.');
+      _solInvalidateAguardRetCache(nSolic, tituloColuna, escopoItens);
+      _solInvalidateSepModalCache(nSolic, escopoItens);
 
       closeModal();
       window._loadKanbanSolicitacoesTab.force = true;
@@ -3027,7 +3591,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (window.__sessionUser && typeof window.__chatLoadUsers === 'function') {
       window.__chatLoadUsers();
     }
-  }, 1000);
+  }, 5000);
 });
 
 // Estado compartilhado do multiplicador da PCP (fator aplicado às quantidades)
@@ -3738,7 +4302,7 @@ modal?.addEventListener('click', (e) => { if (e.target === modal) closeColabModa
 
 let ultimoCodigo = null;      // <-- NOVO
 
-import { initListarProdutosUI } from './requisicoes_omie/ListarProdutos.js';
+import { initListarProdutosUI } from './requisicoes_omie/ListarProdutos.js?v=20260617b';
 import { initDadosColaboradoresUI } from './requisicoes_omie/dados_colaboradores.js';
 import { initRhConfiguracaoCargosUI } from './requisicoes_omie/configuracao_cargos.js';
 import { initRhColaboradoresUI } from './requisicoes_omie/rh_colaboradores.js';
@@ -7939,6 +8503,8 @@ qualidadeManuaisPrincipaisBtn?.addEventListener('click', (e) => {
   e.preventDefault();
   const titulo = document.getElementById('qualidadeManuaisTituloPasta');
   if (titulo) titulo.textContent = 'Pasta: Manuais principais';
+  const listaMestraWrap = document.getElementById('qualidadeListaMestraWrap');
+  if (listaMestraWrap) listaMestraWrap.style.display = 'none';
   carregarQualidadeManuaisPrincipais();
 });
 
@@ -8037,6 +8603,8 @@ async function carregarManuaisDeProdutos() {
 
 qualidadeManuaisProdutosBtn?.addEventListener('click', (e) => {
   e.preventDefault();
+  const listaMestraWrap = document.getElementById('qualidadeListaMestraWrap');
+  if (listaMestraWrap) listaMestraWrap.style.display = 'none';
   carregarManuaisDeProdutos();
 });
 
@@ -8048,6 +8616,466 @@ qualidadeManuaisRecarregarBtn?.addEventListener('click', (e) => {
     carregarManuaisDeProdutos();
   } else {
     carregarQualidadeManuaisPrincipais({ force: true });
+  }
+});
+
+// ── Card: Lista Mestra ──
+const qualidadeListaMestraBtn = document.getElementById('qualidadeListaMestraBtn');
+const qualidadeListaMestraWrap = document.getElementById('qualidadeListaMestraWrap');
+const qualidadeListaMestraTbody = document.getElementById('qualidadeListaMestraTbody');
+const qualidadeListaMestraMeta = document.getElementById('qualidadeListaMestraMeta');
+const qualidadeListaMestraRecarregarBtn = document.getElementById('qualidadeListaMestraRecarregarBtn');
+const qualidadeListaMestraEditModal = document.getElementById('qualidadeListaMestraEditModal');
+const qualidadeListaMestraArquivoModal = document.getElementById('qualidadeListaMestraArquivoModal');
+let qualidadeListaMestraCarregando = false;
+let qualidadeListaMestraItens = [];
+let qualidadeListaMestraHistoricoAtual = [];
+
+function ocultarQualidadeManuaisLista() {
+  if (qualidadeManuaisListaWrap) qualidadeManuaisListaWrap.style.display = 'none';
+  if (qualidadeManuaisMeta) qualidadeManuaisMeta.textContent = '';
+}
+
+function parseDataListaMestra(valor) {
+  const s = String(valor || '').trim();
+  if (!s) return null;
+  const partes = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (!partes) return null;
+  let d = Number.parseInt(partes[1], 10);
+  let m = Number.parseInt(partes[2], 10);
+  const y = Number.parseInt(partes[3], 10);
+  if (m > 12 && d <= 12) {
+    const tmp = d;
+    d = m;
+    m = tmp;
+  }
+  if (!y || m < 1 || m > 12 || d < 1 || d > 31) return null;
+  const dt = new Date(y, m - 1, d);
+  if (dt.getFullYear() !== y || dt.getMonth() !== m - 1 || dt.getDate() !== d) return null;
+  return dt;
+}
+
+function proximaRevisaoListaMestraVencida(valor) {
+  const dt = parseDataListaMestra(valor);
+  if (!dt) return false;
+  const hoje = new Date();
+  hoje.setHours(0, 0, 0, 0);
+  dt.setHours(0, 0, 0, 0);
+  return dt < hoje;
+}
+
+function formatarDataHoraListaMestra(valor) {
+  if (!valor) return '';
+  const dt = new Date(valor);
+  if (Number.isNaN(dt.getTime())) return String(valor);
+  return dt.toLocaleString('pt-BR');
+}
+
+function usuarioPodeAtualizarListaMestraArquivo() {
+  return Number(window.__sessionUser?.sector_id) === 2;
+}
+
+function atualizarPermissaoUploadListaMestra() {
+  const pode = usuarioPodeAtualizarListaMestraArquivo();
+  const wrap = document.getElementById('qualidadeListaMestraArquivoUploadWrap');
+  const restrito = document.getElementById('qualidadeListaMestraArquivoUploadRestrito');
+  if (wrap) wrap.style.display = pode ? 'block' : 'none';
+  if (restrito) restrito.style.display = pode ? 'none' : 'block';
+}
+
+function renderQualidadeListaMestraTabela(itens = []) {
+  if (!qualidadeListaMestraTbody) return;
+  const lista = Array.isArray(itens) ? itens : [];
+  if (!lista.length) {
+    qualidadeListaMestraTbody.innerHTML = `
+      <tr><td colspan="10" style="text-align:center;color:var(--inactive-color);padding:18px;">Nenhum documento cadastrado.</td></tr>
+    `;
+    return;
+  }
+  qualidadeListaMestraTbody.innerHTML = lista.map((item) => {
+    const proxima = String(item.proxima_revisao || '').trim();
+    const proximaStyle = proximaRevisaoListaMestraVencida(proxima)
+      ? 'color:#dc2626;font-weight:700;'
+      : '';
+    const temArquivo = !!String(item.documento || '').trim();
+    const docLabel = temArquivo ? 'Ver documento' : 'Enviar arquivo';
+    const docIcon = temArquivo ? 'fa-file-lines' : 'fa-cloud-arrow-up';
+    return `
+    <tr class="qualidade-lista-mestra-row" data-id="${item.id}" style="cursor:pointer;" title="Clique na linha para editar os dados">
+      <td>${qualidadeManuaisEscapeHtml(item.numero_formulario)}</td>
+      <td>${qualidadeManuaisEscapeHtml(item.descricao)}</td>
+      <td>${qualidadeManuaisEscapeHtml(item.autor)}</td>
+      <td>${qualidadeManuaisEscapeHtml(item.classificacao)}</td>
+      <td>${qualidadeManuaisEscapeHtml(item.numero_revisao)}</td>
+      <td>${qualidadeManuaisEscapeHtml(item.data_criacao)}</td>
+      <td>${qualidadeManuaisEscapeHtml(item.revisado)}</td>
+      <td>${qualidadeManuaisEscapeHtml(item.revisado_por)}</td>
+      <td style="${proximaStyle}">${qualidadeManuaisEscapeHtml(proxima)}</td>
+      <td>
+        <button type="button" class="content-button qualidade-lista-mestra-doc-btn" data-id="${item.id}"
+          style="display:inline-flex;align-items:center;gap:6px;font-size:12px;padding:5px 10px;background:linear-gradient(135deg,#9333ea 0%,#7e22ce 100%);color:white;">
+          <i class="fa-solid ${docIcon}"></i>
+          <span>${docLabel}</span>
+        </button>
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+async function carregarQualidadeListaMestra({ force = false } = {}) {
+  if (qualidadeListaMestraCarregando) return;
+  qualidadeListaMestraCarregando = true;
+  try {
+    ocultarQualidadeManuaisLista();
+    if (qualidadeListaMestraWrap) qualidadeListaMestraWrap.style.display = 'block';
+    if (qualidadeListaMestraMeta) qualidadeListaMestraMeta.textContent = 'Carregando...';
+    if (qualidadeListaMestraTbody) {
+      qualidadeListaMestraTbody.innerHTML = `
+        <tr><td colspan="10" style="text-align:center;color:var(--inactive-color);padding:18px;">
+          <i class="fa-solid fa-spinner fa-spin"></i> Carregando lista mestra...
+        </td></tr>`;
+    }
+    const cacheBust = force ? `?t=${Date.now()}` : '';
+    const response = await fetch(`${API_BASE}/api/qualidade/lista-mestra${cacheBust}`, { credentials: 'include' });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const data = await response.json();
+    qualidadeListaMestraItens = Array.isArray(data?.itens) ? data.itens : [];
+    renderQualidadeListaMestraTabela(qualidadeListaMestraItens);
+    if (qualidadeListaMestraMeta) {
+      qualidadeListaMestraMeta.textContent = `Total: ${qualidadeListaMestraItens.length} documento(s)`;
+    }
+  } catch (error) {
+    console.error('[QUALIDADE] Erro ao carregar lista mestra:', error);
+    if (qualidadeListaMestraMeta) qualidadeListaMestraMeta.textContent = 'Erro ao carregar a lista mestra.';
+    if (qualidadeListaMestraTbody) {
+      qualidadeListaMestraTbody.innerHTML = `
+        <tr><td colspan="10" style="text-align:center;color:#b91c1c;padding:18px;">Erro ao carregar os documentos.</td></tr>`;
+    }
+  } finally {
+    qualidadeListaMestraCarregando = false;
+  }
+}
+
+function formatarDataHojeListaMestra() {
+  const hoje = new Date();
+  const d = String(hoje.getDate()).padStart(2, '0');
+  const m = String(hoje.getMonth() + 1).padStart(2, '0');
+  const y = hoje.getFullYear();
+  return `${d}/${m}/${y}`;
+}
+
+function adicionarMesesDataListaMestra(dataStr, meses) {
+  const dt = parseDataListaMestra(dataStr);
+  if (!dt) return '';
+  const alvo = new Date(dt.getFullYear(), dt.getMonth() + meses, dt.getDate());
+  const d = String(alvo.getDate()).padStart(2, '0');
+  const m = String(alvo.getMonth() + 1).padStart(2, '0');
+  const y = alvo.getFullYear();
+  return `${d}/${m}/${y}`;
+}
+
+function obterUsuarioListaMestra() {
+  return window.__sessionUser?.fullName
+    || window.__sessionUser?.username
+    || window.__sessionUser?.login
+    || window.__sessionUser?.nome
+    || 'sistema';
+}
+
+function abrirQualidadeListaMestraEditModal(item) {
+  if (!item || !qualidadeListaMestraEditModal) return;
+  const setVal = (id, val) => {
+    const el = document.getElementById(id);
+    if (el) el.value = val ?? '';
+  };
+  setVal('qualidadeListaMestraEditId', item.id);
+  setVal('qualidadeListaMestraEditNumero', item.numero_formulario);
+  setVal('qualidadeListaMestraEditDescricao', item.descricao);
+  setVal('qualidadeListaMestraEditTipoDocumento', item.tipo_documento);
+  setVal('qualidadeListaMestraEditFormato', item.formato);
+  setVal('qualidadeListaMestraEditClassificacao', item.classificacao);
+  setVal('qualidadeListaMestraEditAutor', item.autor);
+  setVal('qualidadeListaMestraEditRevisao', item.numero_revisao);
+  setVal('qualidadeListaMestraEditDataCriacao', item.data_criacao);
+  setVal('qualidadeListaMestraEditRevisado', item.revisado);
+  setVal('qualidadeListaMestraEditRevisadoPor', item.revisado_por);
+  setVal('qualidadeListaMestraEditProximaRevisao', item.proxima_revisao);
+  setVal('qualidadeListaMestraEditResponsavel', item.responsavel_arquivar_eliminar);
+  setVal('qualidadeListaMestraEditTempoRetencao', item.tempo_retencao);
+  setVal('qualidadeListaMestraEditStatus', item.status);
+  setVal('qualidadeListaMestraEditDataArquivamento', item.data_arquivamento);
+  qualidadeListaMestraEditModal.style.display = 'flex';
+}
+
+function coletarPayloadListaMestraEdit() {
+  return {
+    numero_formulario: document.getElementById('qualidadeListaMestraEditNumero')?.value || '',
+    descricao: document.getElementById('qualidadeListaMestraEditDescricao')?.value || '',
+    tipo_documento: document.getElementById('qualidadeListaMestraEditTipoDocumento')?.value || '',
+    formato: document.getElementById('qualidadeListaMestraEditFormato')?.value || '',
+    classificacao: document.getElementById('qualidadeListaMestraEditClassificacao')?.value || '',
+    autor: document.getElementById('qualidadeListaMestraEditAutor')?.value || '',
+    numero_revisao: document.getElementById('qualidadeListaMestraEditRevisao')?.value || '',
+    data_criacao: document.getElementById('qualidadeListaMestraEditDataCriacao')?.value || '',
+    revisado: document.getElementById('qualidadeListaMestraEditRevisado')?.value || '',
+    revisado_por: document.getElementById('qualidadeListaMestraEditRevisadoPor')?.value || '',
+    proxima_revisao: document.getElementById('qualidadeListaMestraEditProximaRevisao')?.value || '',
+    responsavel_arquivar_eliminar: document.getElementById('qualidadeListaMestraEditResponsavel')?.value || '',
+    tempo_retencao: document.getElementById('qualidadeListaMestraEditTempoRetencao')?.value || '',
+    status: document.getElementById('qualidadeListaMestraEditStatus')?.value || '',
+    data_arquivamento: document.getElementById('qualidadeListaMestraEditDataArquivamento')?.value || ''
+  };
+}
+
+function fecharQualidadeListaMestraEditModal() {
+  if (qualidadeListaMestraEditModal) qualidadeListaMestraEditModal.style.display = 'none';
+}
+
+qualidadeListaMestraBtn?.addEventListener('click', (e) => {
+  e.preventDefault();
+  carregarQualidadeListaMestra();
+});
+
+qualidadeListaMestraRecarregarBtn?.addEventListener('click', (e) => {
+  e.preventDefault();
+  carregarQualidadeListaMestra({ force: true });
+});
+
+qualidadeListaMestraTbody?.addEventListener('click', (e) => {
+  const docBtn = e.target.closest('.qualidade-lista-mestra-doc-btn');
+  if (docBtn) {
+    e.preventDefault();
+    e.stopPropagation();
+    const id = Number(docBtn.dataset.id);
+    const item = qualidadeListaMestraItens.find((i) => Number(i.id) === id);
+    if (item) abrirQualidadeListaMestraArquivoModal(item);
+    return;
+  }
+  const row = e.target.closest('.qualidade-lista-mestra-row');
+  if (!row) return;
+  const id = Number(row.dataset.id);
+  const item = qualidadeListaMestraItens.find((i) => Number(i.id) === id);
+  if (item) abrirQualidadeListaMestraEditModal(item);
+});
+
+document.getElementById('qualidadeListaMestraEditModalClose')?.addEventListener('click', fecharQualidadeListaMestraEditModal);
+document.getElementById('qualidadeListaMestraEditCancelarBtn')?.addEventListener('click', fecharQualidadeListaMestraEditModal);
+qualidadeListaMestraEditModal?.addEventListener('click', (e) => {
+  if (e.target === qualidadeListaMestraEditModal) fecharQualidadeListaMestraEditModal();
+});
+
+document.getElementById('qualidadeListaMestraMarcarRevisadoBtn')?.addEventListener('click', async () => {
+  const id = document.getElementById('qualidadeListaMestraEditId')?.value;
+  if (!id) return;
+  const hoje = formatarDataHojeListaMestra();
+  const usuario = obterUsuarioListaMestra();
+  const revisadoEl = document.getElementById('qualidadeListaMestraEditRevisado');
+  const revisadoPorEl = document.getElementById('qualidadeListaMestraEditRevisadoPor');
+  const proximaEl = document.getElementById('qualidadeListaMestraEditProximaRevisao');
+  const proxima = adicionarMesesDataListaMestra(hoje, 24);
+  if (revisadoEl) revisadoEl.value = hoje;
+  if (revisadoPorEl) revisadoPorEl.value = usuario;
+  if (proximaEl) proximaEl.value = proxima;
+
+  const btn = document.getElementById('qualidadeListaMestraMarcarRevisadoBtn');
+  if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>'; }
+  try {
+    const payload = { ...coletarPayloadListaMestraEdit(), revisado: hoje, revisado_por: usuario, proxima_revisao: proxima };
+    const response = await fetch(`${API_BASE}/api/qualidade/lista-mestra/${id}`, {
+      method: 'PUT',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data?.error || `HTTP ${response.status}`);
+    const idx = qualidadeListaMestraItens.findIndex((i) => Number(i.id) === Number(id));
+    if (idx >= 0 && data?.item) qualidadeListaMestraItens[idx] = data.item;
+    renderQualidadeListaMestraTabela(qualidadeListaMestraItens);
+  } catch (error) {
+    console.error('[QUALIDADE] Erro ao registrar revisão:', error);
+    alert(error?.message || 'Não foi possível registrar a revisão.');
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = '<i class="fa-solid fa-check"></i> Revisado';
+    }
+  }
+});
+
+document.getElementById('qualidadeListaMestraEditSalvarBtn')?.addEventListener('click', async () => {
+  const id = document.getElementById('qualidadeListaMestraEditId')?.value;
+  if (!id) return;
+  const payload = coletarPayloadListaMestraEdit();
+  const btn = document.getElementById('qualidadeListaMestraEditSalvarBtn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Salvando...'; }
+  try {
+    const response = await fetch(`${API_BASE}/api/qualidade/lista-mestra/${id}`, {
+      method: 'PUT',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data?.error || `HTTP ${response.status}`);
+    const idx = qualidadeListaMestraItens.findIndex((i) => Number(i.id) === Number(id));
+    if (idx >= 0 && data?.item) qualidadeListaMestraItens[idx] = data.item;
+    renderQualidadeListaMestraTabela(qualidadeListaMestraItens);
+    fecharQualidadeListaMestraEditModal();
+  } catch (error) {
+    console.error('[QUALIDADE] Erro ao salvar lista mestra:', error);
+    alert(error?.message || 'Não foi possível salvar o documento.');
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = '<i class="fa-solid fa-floppy-disk"></i> Salvar';
+    }
+  }
+});
+
+function atualizarQualidadeListaMestraDownloadLink(item) {
+  const link = document.getElementById('qualidadeListaMestraArquivoBaixarLink');
+  const semArquivo = document.getElementById('qualidadeListaMestraArquivoSemArquivo');
+  const temDoc = !!String(item?.documento || '').trim();
+  const id = Number(item?.id || 0);
+  if (link) {
+    if (temDoc && id) {
+      link.href = `${API_BASE}/api/qualidade/lista-mestra/${id}/download`;
+      link.style.display = 'inline-flex';
+    } else {
+      link.href = '#';
+      link.style.display = 'none';
+    }
+  }
+  if (semArquivo) semArquivo.style.display = temDoc ? 'none' : 'inline';
+}
+
+function renderQualidadeListaMestraHistorico(historico = []) {
+  const tbody = document.getElementById('qualidadeListaMestraHistoricoTbody');
+  if (!tbody) return;
+  const lista = Array.isArray(historico) ? historico : [];
+  if (!lista.length) {
+    tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;color:var(--inactive-color);padding:14px;">Nenhuma versão registrada.</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = lista.map((h) => {
+    const docId = document.getElementById('qualidadeListaMestraArquivoId')?.value;
+    const histLink = h.documento && docId
+      ? `<a href="${qualidadeManuaisEscapeHtml(`${API_BASE}/api/qualidade/lista-mestra/${docId}/download?historico_id=${h.id}`)}" style="color:#2563eb;">Baixar</a>`
+      : '—';
+    return `
+    <tr>
+      <td>${qualidadeManuaisEscapeHtml(h.numero_revisao)}</td>
+      <td>${qualidadeManuaisEscapeHtml(h.descricao_alteracao || '—')}</td>
+      <td>${qualidadeManuaisEscapeHtml(h.inserido_por)}</td>
+      <td>${qualidadeManuaisEscapeHtml(formatarDataHoraListaMestra(h.inserido_em))}</td>
+      <td>${histLink}</td>
+    </tr>`;
+  }).join('');
+}
+
+async function abrirQualidadeListaMestraArquivoModal(item) {
+  if (!item || !qualidadeListaMestraArquivoModal) return;
+  document.getElementById('qualidadeListaMestraArquivoId').value = item.id;
+  document.getElementById('qualidadeListaMestraArquivoModalTitulo').textContent =
+    `${item.numero_formulario || 'Documento'} — Rev. ${item.numero_revisao || '—'}`;
+  const info = document.getElementById('qualidadeListaMestraArquivoInfo');
+  if (info) {
+    info.textContent = item.descricao
+      ? `${item.descricao} | Rev. atual: ${item.numero_revisao || '—'}`
+      : `Rev. atual: ${item.numero_revisao || '—'}`;
+  }
+  document.getElementById('qualidadeListaMestraArquivoDescricao').value = '';
+  document.getElementById('qualidadeListaMestraArquivoInput').value = '';
+  atualizarQualidadeListaMestraDownloadLink(item);
+  atualizarPermissaoUploadListaMestra();
+  qualidadeListaMestraArquivoModal.style.display = 'flex';
+
+  try {
+    const response = await fetch(`${API_BASE}/api/qualidade/lista-mestra/${item.id}/arquivo`, { credentials: 'include' });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const data = await response.json();
+    if (data?.item) {
+      const idx = qualidadeListaMestraItens.findIndex((i) => Number(i.id) === Number(item.id));
+      if (idx >= 0) qualidadeListaMestraItens[idx] = data.item;
+      atualizarQualidadeListaMestraDownloadLink(data.item);
+      if (info) {
+        info.textContent = data.item.descricao
+          ? `${data.item.descricao} | Rev. atual: ${data.item.numero_revisao || '—'}`
+          : `Rev. atual: ${data.item.numero_revisao || '—'}`;
+      }
+      document.getElementById('qualidadeListaMestraArquivoModalTitulo').textContent =
+        `${data.item.numero_formulario || 'Documento'} — Rev. ${data.item.numero_revisao || '—'}`;
+    }
+    qualidadeListaMestraHistoricoAtual = Array.isArray(data?.historico) ? data.historico : [];
+    renderQualidadeListaMestraHistorico(qualidadeListaMestraHistoricoAtual);
+  } catch (error) {
+    console.error('[QUALIDADE] Erro ao carregar histórico:', error);
+    qualidadeListaMestraHistoricoAtual = [];
+    renderQualidadeListaMestraHistorico([]);
+  }
+}
+
+function fecharQualidadeListaMestraArquivoModal() {
+  if (!qualidadeListaMestraArquivoModal) return;
+  qualidadeListaMestraArquivoModal.style.display = 'none';
+}
+
+document.getElementById('qualidadeListaMestraArquivoModalClose')?.addEventListener('click', fecharQualidadeListaMestraArquivoModal);
+qualidadeListaMestraArquivoModal?.addEventListener('click', (e) => {
+  if (e.target === qualidadeListaMestraArquivoModal) fecharQualidadeListaMestraArquivoModal();
+});
+
+document.getElementById('qualidadeListaMestraArquivoEnviarBtn')?.addEventListener('click', async () => {
+  const id = document.getElementById('qualidadeListaMestraArquivoId')?.value;
+  const arquivoInput = document.getElementById('qualidadeListaMestraArquivoInput');
+  const descricao = document.getElementById('qualidadeListaMestraArquivoDescricao')?.value || '';
+  const arquivo = arquivoInput?.files?.[0];
+  if (!id) return;
+  if (!arquivo) {
+    alert('Selecione um arquivo para enviar.');
+    return;
+  }
+  const btn = document.getElementById('qualidadeListaMestraArquivoEnviarBtn');
+  if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Enviando...'; }
+  try {
+    const form = new FormData();
+    form.append('arquivo', arquivo);
+    form.append('descricao_alteracao', descricao);
+    const response = await fetch(`${API_BASE}/api/qualidade/lista-mestra/${id}/arquivo`, {
+      method: 'POST',
+      credentials: 'include',
+      body: form
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data?.error || `HTTP ${response.status}`);
+    if (data?.item) {
+      const idx = qualidadeListaMestraItens.findIndex((i) => Number(i.id) === Number(id));
+      if (idx >= 0) qualidadeListaMestraItens[idx] = data.item;
+      renderQualidadeListaMestraTabela(qualidadeListaMestraItens);
+      document.getElementById('qualidadeListaMestraArquivoModalTitulo').textContent =
+        `${data.item.numero_formulario || 'Documento'} — Rev. ${data.item.numero_revisao || '—'}`;
+      const info = document.getElementById('qualidadeListaMestraArquivoInfo');
+      if (info) {
+        info.textContent = data.item.descricao
+          ? `${data.item.descricao} | Rev. atual: ${data.item.numero_revisao || '—'}`
+          : `Rev. atual: ${data.item.numero_revisao || '—'}`;
+      }
+      atualizarQualidadeListaMestraDownloadLink(data.item);
+    }
+    qualidadeListaMestraHistoricoAtual = Array.isArray(data?.historico) ? data.historico : [];
+    renderQualidadeListaMestraHistorico(qualidadeListaMestraHistoricoAtual);
+    if (arquivoInput) arquivoInput.value = '';
+    document.getElementById('qualidadeListaMestraArquivoDescricao').value = '';
+    alert('Nova versão enviada com sucesso.');
+  } catch (error) {
+    console.error('[QUALIDADE] Erro ao enviar arquivo:', error);
+    alert(error?.message || 'Não foi possível enviar o arquivo.');
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = '<i class="fa-solid fa-cloud-arrow-up"></i> Enviar nova versão';
+    }
   }
 });
 
@@ -11748,8 +12776,58 @@ function atualizarMetricasEnvioMercadoria(rows) {
 const RASTREIO_STATUS_FILA_ENVIO = new Set(['Valida', 'Processamento Vipp']);
 
 function filtrarEnvioMercadoria(row) {
+  const statusRaw = normalizarTextoEnvioMercadoria(row?.status);
+  if (statusRaw === 'excluido' || statusRaw === 'enviado' || statusRaw === 'finalizado') return false;
+  const metodo = String(row?.metodo_envio || '').trim();
+  if (metodo === 'Envio via Disktenha' || metodo === 'Envio via transportadora') return true;
   const rastreioStatus = row?.rastreio_status ? String(row.rastreio_status).trim() : '';
   return RASTREIO_STATUS_FILA_ENVIO.has(rastreioStatus);
+}
+
+function renderMetodoEnvioMercadoriaHtml(metodoEnvioRaw, idVipp) {
+  const metodo = String(metodoEnvioRaw || (idVipp ? 'Envio via Correios' : '')).trim() || 'Envio via Correios';
+  let iconHtml = '';
+  if (metodo === 'Envio via Correios') {
+    iconHtml = '<img src="https://vipp.visualset.com.br/vipp/img/logo-visualset5.png" alt="" class="envio-card-metodo-icon-correios">';
+  } else if (metodo === 'Envio via Disktenha') {
+    iconHtml = '<i class="fa-solid fa-motorcycle envio-card-metodo-icon envio-card-metodo-icon-moto"></i>';
+  } else if (metodo === 'Envio via transportadora') {
+    iconHtml = '<i class="fa-solid fa-truck envio-card-metodo-icon envio-card-metodo-icon-truck"></i>';
+  } else {
+    iconHtml = '<i class="fa-solid fa-paper-plane envio-card-metodo-icon"></i>';
+  }
+  return `<div class="envio-card-metodo">${iconHtml}<span>${escapeAtHtml(metodo)}</span></div>`;
+}
+
+function isEnvioSacCorreiosVipp(r) {
+  const metodo = String(r?.metodo_envio || '').trim();
+  return !!r?.id_vipp || metodo === 'Envio via Correios';
+}
+
+function isEnvioSacManualRastreio(r) {
+  const metodo = String(r?.metodo_envio || '').trim();
+  return metodo === 'Envio via Disktenha' || metodo === 'Envio via transportadora';
+}
+
+function renderSacAcoesRastreabilidadeHtml(r) {
+  const temIdent = !!(r.identificacao && String(r.identificacao).trim().length > 0);
+  if (temIdent) return '';
+  const btnStyle = 'padding:6px 8px;font-size:11px;display:inline-flex;align-items:center;gap:5px;justify-content:center;white-space:normal;line-height:1.25;text-align:center;';
+  const parts = [];
+  if (isEnvioSacCorreiosVipp(r)) {
+    parts.push(
+      `<button class="content-button btn-envio-gerar-etiqueta btn-sac-rastreabilidade" data-envio-id="${escapeAtHtml(String(r.id))}" data-n-solic="${escapeAtHtml(r.numero_sep || '')}"` +
+      ` style="${btnStyle}background:#1d4ed8;color:#dbeafe;border:none;border-radius:8px;cursor:pointer;font-weight:700;">` +
+      `<i class="fa-solid fa-barcode"></i><span>Rastreabilidade</span></button>`
+    );
+  } else if (isEnvioSacManualRastreio(r)) {
+    parts.push(
+      `<button class="content-button btn-sac-inserir-rastreabilidade" data-envio-id="${escapeAtHtml(String(r.id))}"` +
+      ` style="${btnStyle}background:linear-gradient(135deg,#0ea5e9 0%,#0284c7 100%);color:white;border:none;border-radius:8px;cursor:pointer;font-weight:700;">` +
+      `<i class="fa-solid fa-pen-to-square"></i><span>Inserir rastreabilidade</span></button>`
+    );
+  }
+  return parts.join('');
 }
 
 function montarConteudoEnvioMercadoria(conteudoRaw) {
@@ -11801,9 +12879,20 @@ function renderEnvioMercadoriaCard(r) {
   // Correios tracking só quando não há id_vipp (VIPP é a fonte de verdade nesse caso)
   const dataRastreio = (!r.id_vipp && !rastStatusDisplay && isRastreio && !isFinalizado) ? identClean : '';
   const rastText = [rastStatusDisplay, rastQuandoDisplay].filter(Boolean).join(' | ');
-  const buttons = (etiqueta || temIdentificacao)
-    ? `<button class="content-button btn-envio-imprimir" data-envio-id="${escapeAtHtml(String(r.id))}" data-identificacao="${escapeAtHtml(identRaw)}" style="padding:8px 10px;font-size:12px;display:inline-flex;align-items:center;gap:6px;"><i class="fa-solid fa-print"></i><span>Imprimir</span></button>`
-    : '';
+  const metodoEnvio = String(r.metodo_envio || '').trim();
+  const isCorreios = !metodoEnvio || metodoEnvio === 'Envio via Correios';
+  const isEnvioManual = metodoEnvio === 'Envio via Disktenha' || metodoEnvio === 'Envio via transportadora';
+  const temVippPendente = isCorreios && !!(r.id_vipp && !etiqueta && !temIdentificacao);
+  const podeMarcarEnviado = isEnvioManual && !['Enviado', 'Finalizado'].includes(status);
+  const metodoHtml = renderMetodoEnvioMercadoriaHtml(metodoEnvio, r.id_vipp);
+  let buttons = '';
+  if (etiqueta || temIdentificacao) {
+    buttons = `<button class="content-button btn-envio-imprimir" data-envio-id="${escapeAtHtml(String(r.id))}" data-identificacao="${escapeAtHtml(identRaw)}" style="padding:8px 10px;font-size:12px;display:inline-flex;align-items:center;gap:6px;"><i class="fa-solid fa-print"></i><span>Imprimir</span></button>`;
+  } else if (temVippPendente) {
+    buttons = `<button class="content-button btn-envio-gerar-etiqueta" data-envio-id="${escapeAtHtml(String(r.id))}" data-n-solic="${escapeAtHtml(r.numero_sep || '')}" style="padding:8px 10px;font-size:12px;display:inline-flex;align-items:center;gap:6px;background:#1d4ed8;color:#dbeafe;border:none;border-radius:8px;cursor:pointer;font-weight:700;"><i class="fa-solid fa-barcode"></i><span>Gerar etiqueta</span></button>`;
+  } else if (podeMarcarEnviado) {
+    buttons = `<button class="content-button btn-envio-marcar-enviado" data-envio-id="${escapeAtHtml(String(r.id))}" style="padding:8px 10px;font-size:12px;display:inline-flex;align-items:center;gap:6px;background:#15803d;color:#dcfce7;border:none;border-radius:8px;cursor:pointer;font-weight:700;"><i class="fa-solid fa-circle-check"></i><span>Enviado</span></button>`;
+  }
 
   const statusToken = getStatusTokenEnvioMercadoria(statusRaw);
   const statusClasse = `envio-card-status-${statusToken}`;
@@ -11814,7 +12903,10 @@ function renderEnvioMercadoriaCard(r) {
       <div class="envio-card-rastreio">
         <div class="envio-card-heading">
           <div class="envio-card-id"><i class="fa-solid fa-box-open" style="color:#38bdf8;"></i> Envio #${escapeAtHtml(r.id || '-')}</div>
-          <div class="envio-card-sep"><small>SEP</small><span>${numeroSep}</span></div>
+          <div class="envio-card-sep-block">
+            <div class="envio-card-sep"><small>SEP</small><span>${numeroSep}</span></div>
+            ${metodoHtml}
+          </div>
         </div>
         <div class="envio-card-meta">${escapeAtHtml(dataFmt)}<br>Solicitado por <strong style="color:#e5e7eb;">${usuario}</strong></div>
         <div>
@@ -11836,7 +12928,7 @@ function renderEnvioMercadoriaCard(r) {
       </div>
       <div class="envio-card-actions">
         <div class="envio-card-label">Ações</div>
-        ${buttons || '<div class="envio-card-text">Sem anexos.</div>'}
+        ${buttons || (temVippPendente ? '<div class="envio-card-text">Etiqueta ainda não gerada — clique em Gerar etiqueta.</div>' : podeMarcarEnviado ? '<div class="envio-card-text">Confirme o envio clicando em Enviado.</div>' : '<div class="envio-card-text">Sem anexos.</div>')}
       </div>
     </article>`;
 }
@@ -13152,8 +14244,9 @@ function _abrirAtOsModal(id, navRows) {
     if (!tecNome) { alert('Nome do técnico não encontrado.'); return; }
     if (!confirm(`Resetar senha de "${tecNome}"?\n\nO técnico precisará criar uma nova senha ao acessar o link.`)) return;
     var orig = btn.innerHTML;
+    var iconBtn = btn.classList.contains('at-tec-icon-btn');
     btn.disabled = true;
-    btn.innerHTML = '⏳…';
+    btn.innerHTML = iconBtn ? '<i class="fas fa-circle-notch fa-spin"></i>' : '⏳…';
     try {
       var r = await fetch('/api/sac/at/tecnico/reset-senha', {
         method: 'POST',
@@ -13166,7 +14259,7 @@ function _abrirAtOsModal(id, navRows) {
         alert('Erro: ' + (err.error || r.status));
         btn.innerHTML = orig; btn.disabled = false; return;
       }
-      btn.innerHTML = '✅ Senha resetada!';
+      btn.innerHTML = iconBtn ? '<i class="fas fa-check"></i>' : '✅ Senha resetada!';
       setTimeout(function() { btn.innerHTML = orig; btn.disabled = false; }, 2500);
     } catch (e) {
       alert('Erro ao resetar senha: ' + e.message);
@@ -13181,8 +14274,9 @@ function _abrirAtOsModal(id, navRows) {
     var osModal = document.getElementById('atOsModal');
     var osId    = (osModal && osModal.dataset.osId) || '';
     var orig = btn.innerHTML;
+    var iconBtn = btn.classList.contains('at-tec-icon-btn');
     btn.disabled = true;
-    btn.innerHTML = '⏳…';
+    btn.innerHTML = iconBtn ? '<i class="fas fa-circle-notch fa-spin"></i>' : '⏳…';
     try {
       var params = new URLSearchParams({ nome: tecNome });
       if (osId) params.set('id_at', osId);
@@ -13192,7 +14286,7 @@ function _abrirAtOsModal(id, navRows) {
       var url = location.origin + '/at-link.html?token=' + encodeURIComponent(d.token);
       if (navigator.clipboard && navigator.clipboard.writeText) {
         await navigator.clipboard.writeText(url);
-        btn.innerHTML = '✅ Link copiado!';
+        btn.innerHTML = iconBtn ? '<i class="fas fa-check"></i>' : '✅ Link copiado!';
         // Atualiza _atAllRows para que o botão Retirar habilite ao reabrir o modal
         if (osId && window._atAllRows) {
           const rowIdx = window._atAllRows.findIndex(rr => String(rr.id) === String(osId));
@@ -13477,6 +14571,7 @@ function _abrirAtOsModal(id, navRows) {
   const alimBtn  = document.getElementById('atConfigAlimMenuBtn');
   const updTecBtn= document.getElementById('atAtualizarTecBtn');
   const atalhosBtn = document.getElementById('atSacAtalhosMenuBtn');
+  const matApoioBtn = document.getElementById('atMaterialApoioMenuBtn');
   if (!wrapBtn || !dropMenu) return;
 
   let open = false;
@@ -13516,6 +14611,13 @@ function _abrirAtOsModal(id, navRows) {
       fecharDrop();
       const loadEvent = new CustomEvent('sacAtalhosOpen');
       document.dispatchEvent(loadEvent);
+    });
+  }
+
+  if (matApoioBtn) {
+    matApoioBtn.addEventListener('click', () => {
+      fecharDrop();
+      document.dispatchEvent(new CustomEvent('atMaterialApoioOpen'));
     });
   }
 })();
@@ -13745,6 +14847,459 @@ function _abrirAtOsModal(id, navRows) {
   }
 })();
 
+// ── Modal Material de apoio ───────────────────────────────────────────────────
+(function() {
+  const modal       = document.getElementById('atMaterialApoioModal');
+  const closeBtn    = document.getElementById('atMaterialApoioModalClose');
+  const cardsView   = document.getElementById('atMatApoioCardsView');
+  const cardsGrid   = document.getElementById('atMatApoioCardsGrid');
+  const tableView   = document.getElementById('atMatApoioTableView');
+  const voltarBtn   = document.getElementById('atMatApoioVoltarBtn');
+  const tipoTitulo  = document.getElementById('atMatApoioTipoTitulo');
+  const addBtn      = document.getElementById('atMaterialApoioAddBtn');
+  const addCardBtn  = document.getElementById('atMaterialApoioAddCardBtn');
+  const tbody       = document.getElementById('atMaterialApoioTbody');
+  const formModal   = document.getElementById('atMaterialApoioFormModal');
+  const formClose   = document.getElementById('atMaterialApoioFormClose');
+  const formTitle   = document.getElementById('atMaterialApoioFormTitle');
+  const editIdInp   = document.getElementById('atMatApoioEditId');
+  const nomeInp     = document.getElementById('atMatApoioNome');
+  const tipoInp     = document.getElementById('atMatApoioTipo');
+  const tiposList   = document.getElementById('atMatApoioTiposList');
+  const formatoSel  = document.getElementById('atMatApoioFormato');
+  const publicoInp  = document.getElementById('atMatApoioPublico');
+  const arquivoInp  = document.getElementById('atMatApoioArquivo');
+  const anexoBtn    = document.getElementById('atMatApoioAnexoBtn');
+  const arquivoNome = document.getElementById('atMatApoioArquivoNome');
+  const arquivoAtual= document.getElementById('atMatApoioArquivoAtual');
+  const enviarBtn   = document.getElementById('atMatApoioEnviarBtn');
+  const formMsg     = document.getElementById('atMatApoioFormMsg');
+  if (!modal || !tbody || !cardsGrid) return;
+
+  let allItens = [];
+  let tipoAtivo = null;
+  let pollTimer = null;
+
+  function showFormMsg(txt, ok) {
+    if (!formMsg) return;
+    formMsg.textContent = txt;
+    formMsg.style.color = ok ? '#4ade80' : '#f87171';
+    formMsg.style.display = 'inline';
+    setTimeout(() => { formMsg.style.display = 'none'; }, 4000);
+  }
+
+  function formatoIcon(fmt) {
+    if (fmt === 'PDF') return 'fa-file-pdf';
+    if (fmt === 'Video') return 'fa-file-video';
+    return 'fa-file-image';
+  }
+
+  function normalizarId(id) {
+    const n = Number(id);
+    return Number.isFinite(n) && n > 0 ? n : 0;
+  }
+
+  function buscarItem(id) {
+    return allItens.find(x => normalizarId(x.id) === normalizarId(id)) || null;
+  }
+
+  function renderArquivoCell(item) {
+    const status = String(item.status_upload || 'concluido');
+    if (status === 'enviando') {
+      return `<span style="display:inline-flex;align-items:center;gap:6px;color:#fbbf24;font-size:12px;">
+        <i class="fas fa-circle-notch fa-spin"></i> upload...
+      </span>`;
+    }
+    if (status === 'erro') {
+      const err = item.upload_erro ? ` title="${escapeAtHtml(item.upload_erro)}"` : '';
+      return `<span style="color:#f87171;font-size:12px;"${err}>Falha no upload</span>`;
+    }
+    if (item.url_publica) {
+      return `<a href="${escapeAtHtml(item.url_publica)}" target="_blank" rel="noopener noreferrer" style="color:#38bdf8;font-size:12px;text-decoration:none;">
+        ${escapeAtHtml(item.nome_arquivo)}
+      </a>`;
+    }
+    return `<span style="color:var(--inactive-color);font-size:12px;">${escapeAtHtml(item.nome_arquivo)}</span>`;
+  }
+
+  function temUploadPendente(itens) {
+    return (itens || []).some(i => String(i.status_upload || '') === 'enviando');
+  }
+
+  function pararPoll() {
+    if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+  }
+
+  function iniciarPollSeNecessario() {
+    pararPoll();
+    if (!temUploadPendente(allItens) || modal.style.display === 'none') return;
+    pollTimer = setInterval(() => loadMateriais(true), 3000);
+  }
+
+  function mostrarCards() {
+    tipoAtivo = null;
+    if (cardsView) cardsView.style.display = 'block';
+    if (tableView) tableView.style.display = 'none';
+    renderTipoCards();
+  }
+
+  function mostrarTabela(tipo) {
+    tipoAtivo = String(tipo || '').trim();
+    if (!tipoAtivo) { mostrarCards(); return; }
+    if (cardsView) cardsView.style.display = 'none';
+    if (tableView) tableView.style.display = 'flex';
+    if (tipoTitulo) tipoTitulo.textContent = tipoAtivo;
+    renderTabelaTipo();
+  }
+
+  function agruparPorTipo(itens) {
+    const map = new Map();
+    (itens || []).forEach(item => {
+      const t = String(item.tipo || '').trim() || 'Sem tipo';
+      if (!map.has(t)) map.set(t, []);
+      map.get(t).push(item);
+    });
+    return [...map.entries()].sort((a, b) => a[0].localeCompare(b[0], 'pt-BR'));
+  }
+
+  function renderTipoCards() {
+    const grupos = agruparPorTipo(allItens);
+    if (!grupos.length) {
+      cardsGrid.innerHTML = '<div style="grid-column:1/-1;text-align:center;color:var(--inactive-color);padding:28px;">Nenhum material cadastrado.<br><span style="font-size:12px;">Clique em <strong>Adicionar material</strong> para começar.</span></div>';
+      return;
+    }
+    cardsGrid.innerHTML = grupos.map(([tipo, lista]) => {
+      const qtd = lista.length;
+      const pub = lista.filter(i => i.publico).length;
+      return `<button type="button" class="at-mat-apoio-tipo-card" data-tipo="${escapeAtHtml(tipo)}"
+        style="cursor:pointer;text-align:left;padding:16px;border-radius:12px;border:1px solid rgba(52,211,153,.25);background:linear-gradient(135deg,rgba(5,150,105,.18) 0%,rgba(15,23,42,.6) 100%);color:#e5e7eb;transition:transform .12s,box-shadow .12s;"
+        onmouseover="this.style.transform='translateY(-2px)';this.style.boxShadow='0 8px 20px rgba(5,150,105,.2)'"
+        onmouseout="this.style.transform='';this.style.boxShadow=''">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
+          <i class="fa-solid fa-layer-group" style="color:#34d399;font-size:18px;"></i>
+          <span style="font-weight:700;font-size:14px;line-height:1.3;">${escapeAtHtml(tipo)}</span>
+        </div>
+        <div style="font-size:12px;color:#94a3b8;">${qtd} material${qtd !== 1 ? 'is' : ''}${pub ? ` · ${pub} público${pub !== 1 ? 's' : ''}` : ''}</div>
+      </button>`;
+    }).join('');
+    cardsGrid.querySelectorAll('.at-mat-apoio-tipo-card').forEach(card => {
+      card.addEventListener('click', () => mostrarTabela(card.dataset.tipo || ''));
+    });
+  }
+
+  function itensDoTipoAtivo() {
+    if (!tipoAtivo) return [];
+    return allItens.filter(i => String(i.tipo || '').trim() === tipoAtivo);
+  }
+
+  async function loadTipos() {
+    if (!tiposList) return;
+    try {
+      const r = await fetch('/api/sac/at/material-apoio/tipos', { credentials: 'same-origin' });
+      const d = await r.json();
+      const tipos = d.ok ? (d.tipos || []) : [];
+      tiposList.innerHTML = tipos.map(t => `<option value="${escapeAtHtml(t)}">`).join('');
+    } catch (_) { /* ignora */ }
+  }
+
+  function abrirFormulario(item, tipoPreFill) {
+    if (!formModal) return;
+    const editando = !!(item && normalizarId(item.id));
+    if (formTitle) {
+      formTitle.innerHTML = editando
+        ? '<i class="fa-solid fa-pen" style="color:#34d399;"></i> Editar material'
+        : '<i class="fa-solid fa-file-circle-plus" style="color:#34d399;"></i> Adicionar material';
+    }
+    if (editIdInp) editIdInp.value = editando ? String(item.id) : '';
+    if (nomeInp) nomeInp.value = editando ? (item.nome || '') : '';
+    if (tipoInp) {
+      tipoInp.value = editando ? (item.tipo || '') : (tipoPreFill || tipoAtivo || '');
+      tipoInp.readOnly = !editando && !!(tipoPreFill || tipoAtivo);
+      tipoInp.style.opacity = tipoInp.readOnly ? '0.85' : '1';
+    }
+    if (formatoSel) formatoSel.value = editando ? (item.formato || '') : '';
+    if (publicoInp) publicoInp.checked = editando ? !!item.publico : false;
+    if (arquivoInp) arquivoInp.value = '';
+    if (arquivoNome) arquivoNome.textContent = 'Nenhum arquivo selecionado';
+    if (arquivoAtual) {
+      if (editando && item.nome_arquivo) {
+        arquivoAtual.style.display = 'block';
+        arquivoAtual.textContent = `Arquivo atual: ${item.nome_arquivo} (deixe em branco para manter)`;
+      } else {
+        arquivoAtual.style.display = 'none';
+        arquivoAtual.textContent = '';
+      }
+    }
+    if (enviarBtn) {
+      enviarBtn.disabled = false;
+      enviarBtn.innerHTML = editando
+        ? '<i class="fa-solid fa-floppy-disk"></i> Salvar'
+        : '<i class="fa-solid fa-cloud-arrow-up"></i> Enviar';
+    }
+    if (formMsg) formMsg.style.display = 'none';
+    loadTipos();
+    formModal.style.display = 'flex';
+  }
+
+  function renderTabelaTipo() {
+    const itens = itensDoTipoAtivo();
+    if (!itens.length) {
+      tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--inactive-color);padding:20px;">Nenhum material neste tipo.</td></tr>';
+      return;
+    }
+    tbody.innerHTML = itens.map(item => `
+      <tr data-id="${item.id}">
+        <td style="font-weight:600;">${escapeAtHtml(item.nome)}</td>
+        <td><span style="display:inline-flex;align-items:center;gap:5px;"><i class="fa-solid ${formatoIcon(item.formato)}" style="color:#94a3b8;"></i>${escapeAtHtml(item.formato)}</span></td>
+        <td>${renderArquivoCell(item)}</td>
+        <td style="text-align:center;">
+          <input type="checkbox" class="at-mat-apoio-pub-chk" data-id="${item.id}" ${item.publico ? 'checked' : ''}
+            title="Material público" style="width:16px;height:16px;cursor:pointer;">
+        </td>
+        <td style="white-space:nowrap;">
+          <button type="button" class="at-mat-apoio-edit-btn" data-id="${item.id}" title="Editar"
+            style="background:rgba(14,165,233,.15);color:#38bdf8;border:1px solid rgba(14,165,233,.3);border-radius:4px;padding:3px 8px;cursor:pointer;font-size:12px;margin-right:4px;">
+            <i class="fa-solid fa-pen"></i>
+          </button>
+          <button type="button" class="at-mat-apoio-del-btn" data-id="${item.id}" title="Excluir"
+            style="background:rgba(239,68,68,.15);color:#ef4444;border:1px solid rgba(239,68,68,.3);border-radius:4px;padding:3px 8px;cursor:pointer;font-size:12px;">
+            <i class="fa-solid fa-trash"></i>
+          </button>
+        </td>
+      </tr>`).join('');
+
+    tbody.querySelectorAll('.at-mat-apoio-edit-btn').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const item = buscarItem(btn.dataset.id);
+        if (item) abrirFormulario(item);
+        else { alert('Registro não encontrado.'); loadMateriais(true); }
+      });
+    });
+
+    tbody.querySelectorAll('.at-mat-apoio-del-btn').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const id = normalizarId(btn.dataset.id);
+        const item = buscarItem(id);
+        if (!item || !confirm(`Excluir "${item.nome}"?`)) return;
+        allItens = allItens.filter(x => normalizarId(x.id) !== id);
+        renderTabelaTipo();
+        try {
+          const r = await fetch(`/api/sac/at/material-apoio/${id}`, { method: 'DELETE', credentials: 'same-origin' });
+          const d = await r.json();
+          if (!d.ok) { alert(d.error || 'Erro ao excluir.'); loadMateriais(true); }
+        } catch (_) {
+          alert('Erro de rede.');
+          loadMateriais(true);
+        }
+      });
+    });
+
+    tbody.querySelectorAll('.at-mat-apoio-pub-chk').forEach(chk => {
+      chk.addEventListener('change', async () => {
+        const id = normalizarId(chk.dataset.id);
+        const novo = chk.checked;
+        chk.disabled = true;
+        try {
+          const r = await fetch(`/api/sac/at/material-apoio/${id}/publico`, {
+            method: 'PATCH',
+            credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ publico: novo }),
+          });
+          const d = await r.json();
+          if (d.ok) mergeItem(d.item);
+          else { chk.checked = !novo; alert(d.error || 'Erro ao salvar.'); }
+        } catch (_) {
+          chk.checked = !novo;
+          alert('Erro de rede.');
+        } finally {
+          chk.disabled = false;
+        }
+      });
+    });
+
+    iniciarPollSeNecessario();
+  }
+
+  function mergeItem(item) {
+    const id = normalizarId(item?.id);
+    if (!id) return;
+    const idx = allItens.findIndex(x => normalizarId(x.id) === id);
+    if (idx >= 0) allItens[idx] = item;
+    else allItens.push(item);
+    allItens.sort((a, b) => {
+      const ta = String(a.tipo || '').localeCompare(String(b.tipo || ''), 'pt-BR');
+      if (ta !== 0) return ta;
+      return String(a.nome || '').localeCompare(String(b.nome || ''), 'pt-BR');
+    });
+    const tipoItem = String(item.tipo || '').trim();
+    if (tipoAtivo) {
+      if (tipoItem !== tipoAtivo) mostrarCards();
+      else renderTabelaTipo();
+    } else {
+      renderTipoCards();
+    }
+  }
+
+  function removerItemPorId(id) {
+    allItens = allItens.filter(x => normalizarId(x.id) !== normalizarId(id));
+    if (tipoAtivo) renderTabelaTipo();
+    else renderTipoCards();
+  }
+
+  function itemOtimista(nome, tipo, formato, publico, editId) {
+    const extGuess = formato === 'PDF' ? 'pdf' : (formato === 'Video' ? 'mp4' : 'jpg');
+    return {
+      id: editId || -Date.now(),
+      nome,
+      tipo,
+      formato,
+      nome_arquivo: `${nome.replace(/\s+/g, '_')}.${extGuess}`,
+      url_publica: null,
+      status_upload: 'enviando',
+      upload_erro: null,
+      publico: !!publico,
+    };
+  }
+
+  async function loadMateriais(silent) {
+    if (!silent && !tipoAtivo) {
+      cardsGrid.innerHTML = '<div style="grid-column:1/-1;text-align:center;color:var(--inactive-color);padding:28px;"><i class="fas fa-circle-notch fa-spin"></i> Carregando…</div>';
+    }
+    if (!silent && tipoAtivo) {
+      tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--inactive-color);padding:20px;">Carregando…</td></tr>';
+    }
+    try {
+      const r = await fetch('/api/sac/at/material-apoio', { credentials: 'same-origin' });
+      const d = await r.json();
+      if (d.ok) {
+        allItens = d.itens || [];
+        if (tipoAtivo) {
+          if (!allItens.some(i => String(i.tipo || '').trim() === tipoAtivo)) mostrarCards();
+          else renderTabelaTipo();
+        } else {
+          renderTipoCards();
+        }
+        iniciarPollSeNecessario();
+      } else if (!silent) {
+        if (tipoAtivo) tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:#f87171;">Erro ao carregar.</td></tr>';
+        else cardsGrid.innerHTML = '<div style="grid-column:1/-1;text-align:center;color:#f87171;">Erro ao carregar.</div>';
+      }
+    } catch (_) {
+      if (!silent) {
+        if (tipoAtivo) tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:#f87171;">Erro de rede.</td></tr>';
+        else cardsGrid.innerHTML = '<div style="grid-column:1/-1;text-align:center;color:#f87171;">Erro de rede.</div>';
+      }
+    }
+  }
+
+  document.addEventListener('atMaterialApoioOpen', () => {
+    modal.style.display = 'flex';
+    mostrarCards();
+    loadMateriais(false);
+    loadTipos();
+  });
+
+  if (closeBtn) closeBtn.addEventListener('click', () => { modal.style.display = 'none'; pararPoll(); });
+  modal.addEventListener('click', e => {
+    if (e.target === modal) { modal.style.display = 'none'; pararPoll(); }
+  });
+
+  if (voltarBtn) voltarBtn.addEventListener('click', () => mostrarCards());
+  if (addBtn) addBtn.addEventListener('click', () => abrirFormulario(null, tipoAtivo));
+  if (addCardBtn) addCardBtn.addEventListener('click', () => abrirFormulario(null, null));
+
+  if (formClose) formClose.addEventListener('click', () => { if (formModal) formModal.style.display = 'none'; });
+  if (formModal) formModal.addEventListener('click', e => { if (e.target === formModal) formModal.style.display = 'none'; });
+
+  if (anexoBtn && arquivoInp) {
+    anexoBtn.addEventListener('click', () => arquivoInp.click());
+    arquivoInp.addEventListener('change', () => {
+      const f = arquivoInp.files?.[0];
+      if (arquivoNome) arquivoNome.textContent = f ? f.name : 'Nenhum arquivo selecionado';
+    });
+  }
+
+  if (enviarBtn) {
+    enviarBtn.addEventListener('click', async () => {
+      const nome = nomeInp ? nomeInp.value.trim() : '';
+      const tipo = tipoInp ? tipoInp.value.trim() : '';
+      const formato = formatoSel ? formatoSel.value : '';
+      const publico = publicoInp ? publicoInp.checked : false;
+      const editId = editIdInp ? normalizarId(editIdInp.value) : 0;
+      const arquivo = arquivoInp?.files?.[0];
+
+      if (!nome) { showFormMsg('Informe o nome.', false); return; }
+      if (!tipo) { showFormMsg('Informe o tipo.', false); return; }
+      if (!formato) { showFormMsg('Selecione o formato.', false); return; }
+      if (!editId && !arquivo) { showFormMsg('Selecione um arquivo para anexar.', false); return; }
+
+      const fd = new FormData();
+      fd.append('nome', nome);
+      fd.append('tipo', tipo);
+      fd.append('formato', formato);
+      fd.append('publico', publico ? '1' : '0');
+      if (arquivo) fd.append('arquivo', arquivo);
+
+      const otimistaId = editId || -Date.now();
+      formModal.style.display = 'none';
+
+      if (!tipoAtivo || tipoAtivo !== tipo) {
+        tipoAtivo = tipo;
+        if (tableView) tableView.style.display = 'flex';
+        if (cardsView) cardsView.style.display = 'none';
+        if (tipoTitulo) tipoTitulo.textContent = tipo;
+      }
+
+      if (arquivo || !editId) {
+        mergeItem(itemOtimista(nome, tipo, formato, publico, editId || otimistaId));
+      } else if (editId) {
+        const atual = buscarItem(editId);
+        mergeItem({
+          ...(atual || {}),
+          id: editId,
+          nome,
+          tipo,
+          formato,
+          publico,
+          status_upload: arquivo ? 'enviando' : (atual?.status_upload || 'concluido'),
+        });
+      }
+
+      enviarBtn.disabled = true;
+      try {
+        const url = editId
+          ? `/api/sac/at/material-apoio/${editId}`
+          : '/api/sac/at/material-apoio';
+        const r = await fetch(url, {
+          method: editId ? 'PUT' : 'POST',
+          credentials: 'same-origin',
+          body: fd,
+        });
+        const d = await r.json();
+        if (d.ok) {
+          if (!editId) removerItemPorId(otimistaId);
+          mergeItem(d.item);
+          loadTipos();
+        } else {
+          if (!editId) removerItemPorId(otimistaId);
+          else loadMateriais(true);
+          alert(d.error || 'Erro ao salvar.');
+        }
+      } catch (_) {
+        if (!editId) removerItemPorId(otimistaId);
+        else loadMateriais(true);
+        alert('Erro de rede.');
+      } finally {
+        enviarBtn.disabled = false;
+        if (tipoInp) { tipoInp.readOnly = false; tipoInp.style.opacity = '1'; }
+      }
+    });
+  }
+})();
+
 // ── Modal configuração Alimentação ───────────────────────────────────────────
 (function() {
   const modal  = document.getElementById('atAlimentacaoModal');
@@ -13923,10 +15478,15 @@ function _abrirAtOsModal(id, navRows) {
                 ${t.tipo ? ' &nbsp;·&nbsp; ' + escapeAtHtml(t.tipo) : ''}
               </div>
             </div>
-            <button onclick="event.stopPropagation();window._atResetarSenhaTecnico(this)" data-tec="${tNome}"
+            <button class="at-tec-icon-btn" onclick="event.stopPropagation();window._atCopiarLinkOs(this)" data-tec="${tNome}"
+              title="Copiar link do técnico"
+              style="display:inline-flex;align-items:center;justify-content:center;width:32px;height:32px;background:#3b82f6;color:#fff;font-size:14px;padding:0;border-radius:6px;border:none;cursor:pointer;flex-shrink:0;">
+              <i class="fas fa-link"></i>
+            </button>
+            <button class="at-tec-icon-btn" onclick="event.stopPropagation();window._atResetarSenhaTecnico(this)" data-tec="${tNome}"
               title="Resetar senha — técnico precisará criar uma nova senha ao acessar o link"
-              style="display:inline-flex;align-items:center;gap:4px;background:#dc2626;color:#fff;font-size:11px;font-weight:600;padding:5px 11px;border-radius:6px;border:none;cursor:pointer;white-space:nowrap;flex-shrink:0;">
-              🔑 Resetar Senha
+              style="display:inline-flex;align-items:center;justify-content:center;width:32px;height:32px;background:#dc2626;color:#fff;font-size:14px;padding:0;border-radius:6px;border:none;cursor:pointer;flex-shrink:0;">
+              <i class="fas fa-key"></i>
             </button>
           </div>`;
         }).join('');
@@ -14025,9 +15585,11 @@ function _abrirAtOsModal(id, navRows) {
       if (lat) lat.value = d.lat != null ? d.lat : '';
       if (lng) lng.value = d.lng != null ? d.lng : '';
       const endInput = document.getElementById('atTecFormEndereco');
-      if (endInput && (d.rua || d.bairro)) {
-        endInput.value = [d.rua, d.bairro].filter(Boolean).join(', ');
-      }
+      const numInput = document.getElementById('atTecFormNumero');
+      const bairroInput = document.getElementById('atTecFormBairro');
+      if (endInput && d.rua) endInput.value = d.rua;
+      if (bairroInput && d.bairro) bairroInput.value = d.bairro;
+      if (numInput && !numInput.value) numInput.value = '';
       const coordInfo = d.lat != null ? ` · GPS obtido ✓` : '';
       setCepStatus(`${d.municipio || ''}${d.uf ? ' / ' + d.uf : ''}${coordInfo}`, true);
     } catch {
@@ -14062,7 +15624,7 @@ function _abrirAtOsModal(id, navRows) {
     document.getElementById('atTecFormLng').value = '';
 
     // Limpa campos visíveis
-    ['atTecFormNome','atTecFormCep','atTecFormEndereco','atTecFormCnpjCpf','atTecFormMunicipio','atTecFormUf','atTecFormCelular'].forEach(fid => {
+    ['atTecFormNome','atTecFormCep','atTecFormEndereco','atTecFormNumero','atTecFormBairro','atTecFormComplemento','atTecFormCnpjCpf','atTecFormMunicipio','atTecFormUf','atTecFormCelular'].forEach(fid => {
       const el = document.getElementById(fid);
       if (el) el.value = '';
     });
@@ -14092,9 +15654,15 @@ function _abrirAtOsModal(id, navRows) {
         const nome = document.getElementById('atTecFormNome');
         const cnpjEl = document.getElementById('atTecFormCnpjCpf');
         const endEl  = document.getElementById('atTecFormEndereco');
+        const numEl  = document.getElementById('atTecFormNumero');
+        const bairroEl = document.getElementById('atTecFormBairro');
+        const compEl = document.getElementById('atTecFormComplemento');
         if (nome)   nome.value   = data.nome     || '';
         if (cnpjEl) cnpjEl.value = data.cnpj_cpf || '';
         if (endEl)  endEl.value  = data.endereco || '';
+        if (numEl)  numEl.value  = data.numero || '';
+        if (bairroEl) bairroEl.value = data.bairro || '';
+        if (compEl) compEl.value = data.complemento || '';
         if (mun)    mun.value    = data.municipio || '';
         if (uf)     uf.value     = data.uf || '';
         if (cel)    cel.value    = data.celular || '';
@@ -14120,6 +15688,9 @@ function _abrirAtOsModal(id, navRows) {
       const nome      = document.getElementById('atTecFormNome')?.value.trim() || '';
       const cnpj_cpf  = document.getElementById('atTecFormCnpjCpf')?.value.trim() || '';
       const endereco  = document.getElementById('atTecFormEndereco')?.value.trim() || '';
+      const numero    = document.getElementById('atTecFormNumero')?.value.trim() || '';
+      const bairro    = document.getElementById('atTecFormBairro')?.value.trim() || '';
+      const complemento = document.getElementById('atTecFormComplemento')?.value.trim() || '';
       const cep       = (document.getElementById('atTecFormCep')?.value || '').replace(/\D/g,'');
       const municipio = document.getElementById('atTecFormMunicipio')?.value.trim() || '';
       const uf        = document.getElementById('atTecFormUf')?.value.trim().toUpperCase() || '';
@@ -14132,7 +15703,7 @@ function _abrirAtOsModal(id, navRows) {
       const erros = [];
       if (!nome)      erros.push('Nome');
       if (!cnpj_cpf)  erros.push('CNPJ/CPF');
-      if (!endereco)  erros.push('Endereço');
+      if (!endereco)  erros.push('Logradouro');
       if (!cep || cep.length !== 8) erros.push('CEP válido');
       if (!municipio) erros.push('Cidade / Município');
       if (!uf)        erros.push('Estado (UF)');
@@ -14144,7 +15715,7 @@ function _abrirAtOsModal(id, navRows) {
       setMsg('Salvando...', 'ok');
 
       const body = {
-        nome, cnpj_cpf, endereco, cep, municipio, uf, celular, tipo,
+        nome, cnpj_cpf, endereco, numero, bairro, complemento, cep, municipio, uf, celular, tipo,
         lat: lat !== '' ? parseFloat(lat) : null,
         lng: lng !== '' ? parseFloat(lng) : null,
       };
@@ -18128,12 +19699,16 @@ async function carregarSacSolicitacoes(targetBody, { hideDone = false, filaLogis
           </tr>`;
       } else {
         // Tabela "Registro de envios" (painel SAC) - SEM coluna Requisitante
-        // Botões de Ação (Editar e Excluir)
+        // Botões de Ação (Rastreabilidade + Excluir)
+        const rastreabilidadeBtn = renderSacAcoesRastreabilidadeHtml(r);
         const acoesButtons = `
-          <button class="content-button btn-sac-excluir" data-id="${r.id}" style="padding:4px 8px;font-size:12px;display:inline-flex;align-items:center;gap:6px;background:linear-gradient(135deg,#ef4444 0%,#dc2626 100%);color:white;">
-            <i class="fa-solid fa-trash"></i>
-            <span>Excluir</span>
-          </button>
+          <div class="sac-acoes-stack">
+            ${rastreabilidadeBtn}
+            <button class="content-button btn-sac-excluir" data-id="${r.id}" style="display:inline-flex;align-items:center;gap:5px;background:linear-gradient(135deg,#ef4444 0%,#dc2626 100%);color:white;border:none;border-radius:8px;cursor:pointer;font-weight:700;">
+              <i class="fa-solid fa-trash"></i>
+              <span>Excluir</span>
+            </button>
+          </div>
         `;
         
         return `
@@ -18146,7 +19721,7 @@ async function carregarSacSolicitacoes(targetBody, { hideDone = false, filaLogis
             <td style="max-width:400px;white-space:pre-wrap;line-height:1.8;padding:12px 8px;vertical-align:top;">${conteudo}</td>
             <td>${statusSelectSac}</td>
             <td>${buttonsSac || '—'}</td>
-            <td style="white-space:nowrap;">${acoesButtons}</td>
+            <td class="sac-acoes-cell">${acoesButtons}</td>
           </tr>`;
       }
     }).join('');
@@ -18956,6 +20531,88 @@ function setupPrintButtons(container) {
 
 setupPrintButtons(sacTabelaBody);
 
+// ── Modal Inserir rastreabilidade (SAC) ─────────────────────────────────────
+(function initSacIdentificacaoModal() {
+  const modal = document.getElementById('sacIdentificacaoModal');
+  const input = document.getElementById('sacIdentificacaoInput');
+  const hiddenId = document.getElementById('sacIdentificacaoEnvioId');
+  const statusEl = document.getElementById('sacIdentificacaoModalStatus');
+  const btnClose = document.getElementById('sacIdentificacaoModalClose');
+  const btnCancel = document.getElementById('sacIdentificacaoCancelarBtn');
+  const btnSave = document.getElementById('sacIdentificacaoSalvarBtn');
+  if (!modal || !input || !hiddenId || !btnSave) return;
+  if (modal.parentElement !== document.body) document.body.appendChild(modal);
+
+  function fecharModalSacIdentificacao() {
+    modal.style.display = 'none';
+    document.body.style.overflow = '';
+    if (statusEl) { statusEl.style.display = 'none'; statusEl.textContent = ''; }
+  }
+
+  window.abrirModalSacIdentificacao = function (envioId, valorAtual) {
+    hiddenId.value = String(envioId || '');
+    input.value = (valorAtual && valorAtual !== '—') ? String(valorAtual).trim() : '';
+    if (statusEl) { statusEl.style.display = 'none'; statusEl.textContent = ''; }
+    modal.style.display = 'flex';
+    document.body.style.overflow = 'hidden';
+    setTimeout(function () { input.focus(); }, 50);
+  };
+
+  btnClose?.addEventListener('click', fecharModalSacIdentificacao);
+  btnCancel?.addEventListener('click', fecharModalSacIdentificacao);
+  modal.addEventListener('click', function (e) { if (e.target === modal) fecharModalSacIdentificacao(); });
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape' && modal.style.display === 'flex') fecharModalSacIdentificacao();
+  });
+
+  btnSave.addEventListener('click', async function () {
+    const envioId = hiddenId.value;
+    const identificacao = input.value.trim();
+    if (!envioId) return;
+    if (!identificacao) {
+      if (statusEl) {
+        statusEl.style.display = 'block';
+        statusEl.textContent = 'Informe o código de rastreabilidade.';
+      }
+      return;
+    }
+    btnSave.disabled = true;
+    try {
+      const resp = await fetch('/api/sac/solicitacoes/' + encodeURIComponent(envioId) + '/identificacao', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ identificacao: identificacao })
+      });
+      const data = await resp.json().catch(function () { return {}; });
+      if (!resp.ok || data.ok === false) throw new Error(data.error || 'Falha ao salvar');
+      fecharModalSacIdentificacao();
+      if (typeof carregarSacSolicitacoes === 'function' && sacTabelaBody) {
+        await carregarSacSolicitacoes(sacTabelaBody, { hideDone: false, filterByUser: true });
+      }
+    } catch (err) {
+      if (statusEl) {
+        statusEl.style.display = 'block';
+        statusEl.textContent = err.message || 'Erro ao salvar rastreabilidade.';
+      }
+    } finally {
+      btnSave.disabled = false;
+    }
+  });
+
+  document.addEventListener('click', function (ev) {
+    const btn = ev.target.closest('.btn-sac-inserir-rastreabilidade');
+    if (!btn) return;
+    ev.preventDefault();
+    const envioId = btn.getAttribute('data-envio-id');
+    if (!envioId) return;
+    const row = btn.closest('tr');
+    const identCell = row ? row.querySelector('td:nth-child(4)') : null;
+    const valorAtual = identCell ? identCell.textContent.split('\n')[0].trim() : '';
+    window.abrirModalSacIdentificacao(envioId, valorAtual);
+  });
+})();
+
 // ── Helper compartilhado: parse de preferência de agente "__AGENT__:pc:imp" ──
 // Definido no escopo global para ser acessível pelas funções de envio e pelo modal de etiquetas
 function _etqParseAgentPref(pref) {
@@ -19071,6 +20728,19 @@ async function _envioMostrarSeletor(container) {
   });
 }
 
+async function _envioMarcarComoEnviado(envioId) {
+  const resp = await fetch(`/api/sac/solicitacoes/${encodeURIComponent(envioId)}/status`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',
+    body: JSON.stringify({ status: 'Enviado' }),
+  });
+  const data = await resp.json().catch(() => ({}));
+  if (!resp.ok || data.ok === false) {
+    throw new Error(data.error || 'Falha ao marcar envio como Enviado');
+  }
+}
+
 async function _envioImprimirEtiqueta(envioId, identificacao, btnRef) {
   if (btnRef) btnRef.disabled = true;
   try {
@@ -19112,6 +20782,59 @@ function setupEnvioPrintButtons(container) {
   if (!container) return;
   _envioCarregarPref();
   container.addEventListener('click', async (ev) => {
+    const btnMarcarEnviado = ev.target.closest('.btn-envio-marcar-enviado');
+    if (btnMarcarEnviado && !btnMarcarEnviado.disabled) {
+      ev.preventDefault();
+      const envioId = btnMarcarEnviado.getAttribute('data-envio-id');
+      if (!envioId) return;
+      btnMarcarEnviado.disabled = true;
+      const origHtmlMarcar = btnMarcarEnviado.innerHTML;
+      btnMarcarEnviado.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i><span>Salvando...</span>';
+      try {
+        await _envioMarcarComoEnviado(envioId);
+        if (typeof carregarSacSolicitacoes === 'function' && envioMercadoriaTabelaBodyPane) {
+          await carregarSacSolicitacoes(envioMercadoriaTabelaBodyPane, { filaLogistica: true });
+        }
+      } catch (err) {
+        alert('Erro ao marcar como Enviado: ' + (err.message || err));
+        btnMarcarEnviado.disabled = false;
+        btnMarcarEnviado.innerHTML = origHtmlMarcar;
+      }
+      return;
+    }
+
+    const btnGerar = ev.target.closest('.btn-envio-gerar-etiqueta');
+    if (btnGerar && !btnGerar.disabled) {
+      ev.preventDefault();
+      const envioId = btnGerar.getAttribute('data-envio-id');
+      const nSolic = btnGerar.getAttribute('data-n-solic') || '';
+      btnGerar.disabled = true;
+      const origHtml = btnGerar.innerHTML;
+      btnGerar.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i><span>Gerando...</span>';
+      try {
+        const r = await fetch('/api/vipp/gerar-etiqueta', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ envio_id: envioId, n_solic: nSolic || undefined })
+        });
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok || !d.ok) throw new Error(d.error || 'Falha ao gerar etiqueta');
+        if (btnGerar.closest('#sacTabelaBody')) {
+          if (typeof carregarSacSolicitacoes === 'function' && sacTabelaBody) {
+            await carregarSacSolicitacoes(sacTabelaBody, { hideDone: false, filterByUser: true });
+          }
+        } else if (typeof carregarSacSolicitacoes === 'function' && envioMercadoriaTabelaBodyPane) {
+          carregarSacSolicitacoes(envioMercadoriaTabelaBodyPane, { filaLogistica: true });
+        }
+      } catch (err) {
+        alert('Erro ao gerar etiqueta: ' + (err.message || err));
+        btnGerar.disabled = false;
+        btnGerar.innerHTML = origHtml;
+      }
+      return;
+    }
+
     const btn = ev.target.closest('.btn-envio-imprimir');
     if (!btn) return;
     ev.preventDefault();
@@ -19146,8 +20869,13 @@ function setupEnvioPrintButtons(container) {
         const erros = [!rEtq.ok && ('Etiqueta: ' + (rEtq.error || 'Erro')), !rDec.ok && ('Declaração: ' + (rDec.error || 'Erro'))].filter(Boolean);
         if (erros.length) throw new Error(erros.join(' | '));
       }
-      btn.innerHTML = '<i class="fa-solid fa-check" style="color:#4ade80;"></i><span>Enviado!</span>';
-      setTimeout(() => { btn.innerHTML = origHtml; btn.disabled = false; }, 3000);
+      await _envioMarcarComoEnviado(envioId);
+      if (typeof carregarSacSolicitacoes === 'function' && envioMercadoriaTabelaBodyPane) {
+        await carregarSacSolicitacoes(envioMercadoriaTabelaBodyPane, { filaLogistica: true });
+      } else {
+        btn.innerHTML = '<i class="fa-solid fa-check" style="color:#4ade80;"></i><span>Enviado!</span>';
+        setTimeout(() => { btn.innerHTML = origHtml; btn.disabled = false; }, 3000);
+      }
     } catch (err) {
       alert('Erro ao imprimir: ' + err.message);
       btn.innerHTML = origHtml;
@@ -19157,6 +20885,7 @@ function setupEnvioPrintButtons(container) {
 }
 
 setupEnvioPrintButtons(envioMercadoriaTabelaBodyPane);
+setupEnvioPrintButtons(sacTabelaBody);
 
 // Gear button: abre/fecha o dropdown de configuração de impressora
 document.getElementById('envioImprGearBtn')?.addEventListener('click', async (ev) => {
@@ -20237,14 +21966,6 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // Ajuste approve-all button
   const ajusteApproveAllBtn = document.getElementById('solicitacoesAjusteApproveAll');
-  const omieBatchStopRegexes = [
-    /api bloqueada por consumo indevido/i,
-    /consumo redundante detectado/i,
-    /nenhum produto foi localizado/i,
-    /produto.+n.o encontrado/i,
-    /valor unit.rio.+deve ser maior que zero/i
-  ];
-  const shouldStopOmieApprovalBatch = (mensagem) => omieBatchStopRegexes.some((regex) => regex.test(String(mensagem || '')));
   const waitNextOmieBatchItem = (ms = 900) => new Promise(resolve => setTimeout(resolve, ms));
 
   if (ajusteApproveAllBtn && !ajusteApproveAllBtn.__ajusteBound) {
@@ -20261,38 +21982,29 @@ document.addEventListener('DOMContentLoaded', async () => {
       ajusteApproveAllBtn.disabled = true;
       const originalLabel = ajusteApproveAllBtn.textContent;
       const erros = [];
-      let loteInterrompido = false;
-      let aprovados = 0;
+      let processados = 0;
       for (const a of pendentes) {
-        aprovados++;
-        ajusteApproveAllBtn.textContent = `Aprovando ${aprovados}/${pendentes.length}…`;
+        processados++;
+        ajusteApproveAllBtn.textContent = `Aprovando ${processados}/${pendentes.length}…`;
         try {
           const resp = await fetch(`/api/ajustes/${a.id}/aprovar`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ aprovadoPor: usuario }) });
           const json = await resp.json().catch(() => ({}));
           if (!resp.ok || !json?.ok) {
-            const mensagem = `ID ${a.id}: ${json?.error || 'Erro'}`;
-            erros.push(mensagem);
-            if (shouldStopOmieApprovalBatch(json?.error || mensagem)) {
-              loteInterrompido = true;
-              break;
-            }
+            erros.push(`ID ${a.id}: ${json?.error || 'Erro'}`);
           }
         } catch (err) {
-          const mensagem = `ID ${a.id}: ${err?.message || 'Erro de rede'}`;
-          erros.push(mensagem);
-          if (shouldStopOmieApprovalBatch(err?.message || mensagem)) {
-            loteInterrompido = true;
-            break;
-          }
+          erros.push(`ID ${a.id}: ${err?.message || 'Erro de rede'}`);
         }
-        if (aprovados < pendentes.length) {
+        if (processados < pendentes.length) {
           await waitNextOmieBatchItem();
         }
       }
       ajusteApproveAllBtn.textContent = originalLabel;
       ajusteApproveAllBtn.disabled = false;
-      if (loteInterrompido) alert(`Processamento interrompido para evitar novo bloqueio da Omie.\n\nÚltimo erro:\n${erros[erros.length - 1] || 'Erro desconhecido'}`);
-      else if (erros.length) alert(`Concluído com erros:\n${erros.join('\n')}`);
+      if (erros.length) {
+        const sucessos = pendentes.length - erros.length;
+        alert(`Processamento concluído.\nSucesso(s): ${sucessos}\nErro(s): ${erros.length}\n\n${erros.join('\n')}`);
+      }
       else alert('Todos os ajustes pendentes foram executados com sucesso!');
       await carregarSolicitacoesAjustes(true);
     });
@@ -20321,11 +22033,10 @@ document.addEventListener('DOMContentLoaded', async () => {
       transferApproveAllBtn.disabled = true;
       const originalLabel = transferApproveAllBtn.textContent;
       const erros = [];
-      let loteInterrompido = false;
-      let aprovados = 0;
+      let processados = 0;
       for (const t of pendentes) {
-        aprovados++;
-        transferApproveAllBtn.textContent = `Aprovando ${aprovados}/${pendentes.length}…`;
+        processados++;
+        transferApproveAllBtn.textContent = `Aprovando ${processados}/${pendentes.length}…`;
         try {
           const resp = await fetch(`/api/transferencias/${t.id}/aprovar`, {
             method: 'PATCH',
@@ -20334,29 +22045,21 @@ document.addEventListener('DOMContentLoaded', async () => {
           });
           const json = await resp.json().catch(() => ({}));
           if (!resp.ok || !json?.ok) {
-            const mensagem = `ID ${t.id}: ${json?.error || 'Erro'}`;
-            erros.push(mensagem);
-            if (shouldStopOmieApprovalBatch(json?.error || mensagem)) {
-              loteInterrompido = true;
-              break;
-            }
+            erros.push(`ID ${t.id}: ${json?.error || 'Erro'}`);
           }
         } catch (err) {
-          const mensagem = `ID ${t.id}: ${err?.message || 'Erro de rede'}`;
-          erros.push(mensagem);
-          if (shouldStopOmieApprovalBatch(err?.message || mensagem)) {
-            loteInterrompido = true;
-            break;
-          }
+          erros.push(`ID ${t.id}: ${err?.message || 'Erro de rede'}`);
         }
-        if (aprovados < pendentes.length) {
+        if (processados < pendentes.length) {
           await waitNextOmieBatchItem();
         }
       }
       transferApproveAllBtn.textContent = originalLabel;
       transferApproveAllBtn.disabled = false;
-      if (loteInterrompido) alert(`Processamento interrompido para evitar novo bloqueio da Omie.\n\nÚltimo erro:\n${erros[erros.length - 1] || 'Erro desconhecido'}`);
-      else if (erros.length) alert(`Concluído com erros:\n${erros.join('\n')}`);
+      if (erros.length) {
+        const sucessos = pendentes.length - erros.length;
+        alert(`Processamento concluído.\nSucesso(s): ${sucessos}\nErro(s): ${erros.length}\n\n${erros.join('\n')}`);
+      }
       else alert('Todas as transferências pendentes foram executadas com sucesso!');
       await carregarSolicitacoesTransferencias(true);
     });
@@ -21958,6 +23661,7 @@ function escapeHtml(str) {
     '\'': '&#39;'
   }[c]));
 }
+if (typeof window.escapeHtml !== 'function') window.escapeHtml = escapeHtml;
 
 function getSelectedOrigemLocal() {
   const sel = document.getElementById('transferOrigem');
@@ -26819,18 +28523,50 @@ window.openRegistros = async function() {
     _etqDropdownBtn?.classList.remove('open');
   }
 
+  function _etqPosicionarDropdown() {
+    if (!_etqDropdownMenu || !_etqDropdownBtn) return;
+    const rect = _etqDropdownBtn.getBoundingClientRect();
+    const menuH = _etqDropdownMenu.offsetHeight || 280;
+    const espacoAbaixo = window.innerHeight - rect.bottom;
+    const abrirAcima = espacoAbaixo < menuH + 12 && rect.top > menuH + 12;
+    _etqDropdownMenu.style.position = 'fixed';
+    _etqDropdownMenu.style.zIndex = '2500';
+    _etqDropdownMenu.style.left = 'auto';
+    _etqDropdownMenu.style.right = `${Math.max(8, window.innerWidth - rect.right)}px`;
+    if (abrirAcima) {
+      _etqDropdownMenu.style.top = 'auto';
+      _etqDropdownMenu.style.bottom = `${window.innerHeight - rect.top + 8}px`;
+    } else {
+      _etqDropdownMenu.style.bottom = 'auto';
+      _etqDropdownMenu.style.top = `${rect.bottom + 8}px`;
+    }
+  }
+
   _etqDropdownBtn?.addEventListener('click', e => {
     e.stopPropagation();
     const aberto = _etqDropdownMenu.style.display !== 'none';
     if (aberto) { _etqFecharDropdown(); }
-    else { _etqDropdownMenu.style.display = 'flex'; _etqDropdownBtn.classList.add('open'); }
+    else {
+      if (_etqDropdownMenu.parentElement !== document.body) {
+        document.body.appendChild(_etqDropdownMenu);
+      }
+      _etqDropdownMenu.style.display = 'flex';
+      _etqDropdownBtn.classList.add('open');
+      _etqPosicionarDropdown();
+    }
   });
 
   // Fechar ao clicar fora
   document.addEventListener('click', e => {
     if (_etqDropdownMenu && _etqDropdownMenu.style.display !== 'none') {
-      if (!document.getElementById('etqConfigMenuWrap')?.contains(e.target)) _etqFecharDropdown();
+      if (!document.getElementById('etqConfigMenuWrap')?.contains(e.target) && !_etqDropdownMenu.contains(e.target)) {
+        _etqFecharDropdown();
+      }
     }
+  });
+
+  window.addEventListener('resize', () => {
+    if (_etqDropdownMenu && _etqDropdownMenu.style.display !== 'none') _etqPosicionarDropdown();
   });
 
   // Fechar dropdown após ações (não após os toggles lista/grade/ocultos)
@@ -27563,6 +29299,7 @@ window.openRegistros = async function() {
     if (!_etqPrinterPref && cfg.padrao) _etqSalvarPref(cfg.padrao);
     document.getElementById('etqConfigImpressorasModal').style.display = 'none';
     _etqAtualizarListbox();
+    window.dispatchEvent(new CustomEvent('etq-impr-cfg-saved'));
   });
 
   document.getElementById('etqCfgImprCancelar')?.addEventListener('click', () => {
@@ -28035,10 +29772,42 @@ window.openRegistros = async function() {
     if (etqArmazenarVideo) etqArmazenarVideo.srcObject = null;
   }
 
+  function _armAtualizarMira() {
+    if (!etqArmazenarMira) return;
+    if (_armStep === 2) {
+      etqArmazenarMira.style.width = 'min(88%, 320px)';
+      etqArmazenarMira.style.height = '88px';
+      etqArmazenarMira.style.borderRadius = '8px';
+    } else {
+      etqArmazenarMira.style.width = '200px';
+      etqArmazenarMira.style.height = '200px';
+      etqArmazenarMira.style.borderRadius = '12px';
+    }
+  }
+
+  function _armCropRegion() {
+    const vw = etqArmazenarVideo?.videoWidth || 0;
+    const vh = etqArmazenarVideo?.videoHeight || 0;
+    if (!vw || !vh) return null;
+    if (_armStep === 2) {
+      const w = Math.round(vw * 0.88);
+      const h = Math.round(vh * 0.30);
+      return { sx: Math.round((vw - w) / 2), sy: Math.round((vh - h) / 2), sw: w, sh: h };
+    }
+    const size = Math.round(Math.min(vw, vh) * 0.65);
+    return { sx: Math.round((vw - size) / 2), sy: Math.round((vh - size) / 2), sw: size, sh: size };
+  }
+
   async function _armIniciarCamera() {
     await _armPararCamera();
     try {
-      _armStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+      _armStream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          facingMode: 'environment',
+          width: { ideal: 1920 },
+          height: { ideal: 1080 },
+        },
+      });
       if (etqArmazenarVideo) {
         etqArmazenarVideo.srcObject = _armStream;
         await etqArmazenarVideo.play().catch(() => {});
@@ -28062,22 +29831,25 @@ window.openRegistros = async function() {
       }
       return;
     }
-    const detector = new BarcodeDetector({
-      formats: ['qr_code', 'code_128', 'code_39', 'ean_13', 'ean_8', 'upc_a', 'data_matrix']
-    });
+    const formats = _armStep === 2
+      ? ['code_128', 'code_39', 'ean_13', 'ean_8', 'upc_a', 'codabar', 'itf', 'data_matrix']
+      : ['qr_code', 'data_matrix'];
+    const detector = new BarcodeDetector({ formats });
     const canvas = document.createElement('canvas');
     const ctx = canvas.getContext('2d');
+    const intervalMs = _armStep === 2 ? 180 : 250;
     _armScanInterval = setInterval(async () => {
       if (!etqArmazenarVideo || etqArmazenarVideo.readyState < 2) return;
-      canvas.width  = etqArmazenarVideo.videoWidth;
-      canvas.height = etqArmazenarVideo.videoHeight;
-      ctx.drawImage(etqArmazenarVideo, 0, 0);
+      const crop = _armCropRegion();
+      if (!crop) return;
+      canvas.width = crop.sw;
+      canvas.height = crop.sh;
+      ctx.drawImage(etqArmazenarVideo, crop.sx, crop.sy, crop.sw, crop.sh, 0, 0, crop.sw, crop.sh);
       try {
         const barcodes = await detector.detect(canvas);
         if (barcodes.length > 0) {
           clearInterval(_armScanInterval);
           _armScanInterval = null;
-          // Pisca mira em verde
           if (etqArmazenarMira) {
             etqArmazenarMira.style.borderColor = '#4ade80';
             setTimeout(() => { if (etqArmazenarMira) etqArmazenarMira.style.borderColor = 'rgba(52,211,153,.85)'; }, 600);
@@ -28085,7 +29857,7 @@ window.openRegistros = async function() {
           onDetect(barcodes[0].rawValue);
         }
       } catch (_) {}
-    }, 250);
+    }, intervalMs);
   }
 
   function _armProcessarCodigo(valor) {
@@ -28106,10 +29878,11 @@ window.openRegistros = async function() {
       }
       _armIdImpresso = id;
       _armStep = 2;
+      _armAtualizarMira();
       // Atualiza UI para passo 2
       if (etqArmazenarTitle)  etqArmazenarTitle.textContent  = 'Leia o código do local';
       if (etqArmazenarIcone)  { etqArmazenarIcone.className = 'fa-solid fa-barcode'; etqArmazenarIcone.style.color = '#a78bfa'; }
-      if (etqArmazenarStatus) { etqArmazenarStatus.textContent = `Produto ID ${id} lido. Aponte para o código de barras do local.`; etqArmazenarStatus.style.color = '#4ade80'; }
+      if (etqArmazenarStatus) { etqArmazenarStatus.textContent = `Produto ID ${id} lido. Alinhe o código de barras na faixa horizontal.`; etqArmazenarStatus.style.color = '#4ade80'; }
       if (etqArmazenarInput)  { etqArmazenarInput.placeholder = 'Ou digite o local manualmente...'; etqArmazenarInput.value = ''; etqArmazenarInput.focus(); }
       _armIniciarScan(_armProcessarCodigo);
     } else {
@@ -28167,6 +29940,7 @@ window.openRegistros = async function() {
     if (etqArmazenarInput)       { etqArmazenarInput.placeholder = 'Ou digite o código manualmente...'; etqArmazenarInput.value = ''; }
     if (etqArmazenarComplemento) etqArmazenarComplemento.value = '';
     if (etqArmazenarMira)        etqArmazenarMira.style.borderColor = 'rgba(52,211,153,.85)';
+    _armAtualizarMira();
     if (etqArmazenarModal)       etqArmazenarModal.style.display = 'flex';
     const ok = await _armIniciarCamera();
     if (ok) _armIniciarScan(_armProcessarCodigo);
@@ -28175,9 +29949,10 @@ window.openRegistros = async function() {
   async function _armAbrirComId(id) {
     _armStep = 2;
     _armIdImpresso = id;
+    _armAtualizarMira();
     if (etqArmazenarTitle)  etqArmazenarTitle.textContent  = 'Leia o código do local';
     if (etqArmazenarIcone)  { etqArmazenarIcone.className = 'fa-solid fa-barcode'; etqArmazenarIcone.style.color = '#a78bfa'; }
-    if (etqArmazenarStatus) { etqArmazenarStatus.textContent = `Produto ID ${id} selecionado. Aponte para o código de barras do local.`; etqArmazenarStatus.style.color = '#4ade80'; }
+    if (etqArmazenarStatus) { etqArmazenarStatus.textContent = `Produto ID ${id} selecionado. Alinhe o código de barras na faixa horizontal.`; etqArmazenarStatus.style.color = '#4ade80'; }
     if (etqArmazenarInput)       { etqArmazenarInput.placeholder = 'Ou digite o local manualmente...'; etqArmazenarInput.value = ''; etqArmazenarInput.focus(); }
     if (etqArmazenarComplemento) etqArmazenarComplemento.value = '';
     if (etqArmazenarMira)        etqArmazenarMira.style.borderColor = 'rgba(52,211,153,.85)';
@@ -29749,17 +31524,19 @@ async function openComprasFormTab() {
 
 // ===================== CARRINHO DE COMPRAS =====================
 
-// Helper para escape HTML
-if (typeof escapeHtml === 'undefined') {
-  window.escapeHtml = function(str) {
-    return String(str ?? '').replace(/[&<>"']/g, c => ({
-      '&': '&amp;',
-      '<': '&lt;',
-      '>': '&gt;',
-      '"': '&quot;',
-      '\'': '&#39;'
-    }[c]));
-  };
+// Helper para escape HTML (módulo ES: função local não vira window.escapeHtml automaticamente)
+if (typeof window.escapeHtml !== 'function') {
+  window.escapeHtml = typeof escapeHtml === 'function'
+    ? escapeHtml
+    : function(str) {
+        return String(str ?? '').replace(/[&<>"']/g, c => ({
+          '&': '&amp;',
+          '<': '&lt;',
+          '>': '&gt;',
+          '"': '&quot;',
+          '\'': '&#39;'
+        }[c]));
+      };
 }
 
 if (typeof linkifyText === 'undefined') {
@@ -44223,6 +46000,71 @@ function renderizarCatalogoOmie(produtos, options = {}) {
 }
 
 // Carrega estoque por local para todos os cards visíveis
+window.__estoqueCardCache = window.__estoqueCardCache || {};
+
+function formatarQtdEstoque(saldo, unidade) {
+  const qtd = Number(saldo).toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+  return unidade ? `${qtd} ${unidade}` : qtd;
+}
+
+function aplicarDeltaListaLocais(locais, deltas) {
+  const lista = (locais || []).map(l => ({ ...l }));
+  for (const d of deltas || []) {
+    const cod = String(d.local_codigo || '').trim();
+    if (!cod) continue;
+    let item = lista.find(l => String(l.local_codigo) === cod);
+    if (item) {
+      item.saldo = Math.max(0, (Number(item.saldo) || 0) + (Number(d.delta) || 0));
+    } else if ((Number(d.delta) || 0) > 0) {
+      lista.push({
+        local_codigo: d.local_codigo,
+        local_nome: d.local_nome || d.local_codigo,
+        saldo: Number(d.delta) || 0,
+        unidade: d.unidade || 'UN'
+      });
+    }
+  }
+  return lista;
+}
+
+function renderHtmlEstoquePorLocal(locais, tema) {
+  if (!locais || locais.length === 0) {
+    if (tema === 'modal') return '<span class="movim-estoque-vazio">Sem estoque registrado</span>';
+    return '<span style="font-size:9px;color:#9ca3af;">Sem estoque</span>';
+  }
+  return locais.map(l => {
+    const nome = escapeHtml(l.local_nome || l.local_codigo || '—');
+    const qtd = formatarQtdEstoque(l.saldo, l.unidade);
+    if (tema === 'modal') {
+      return `<div class="movim-est-linha" data-local-codigo="${escapeHtml(String(l.local_codigo || ''))}">
+        <span class="movim-est-nome">${nome}</span>
+        <span class="movim-est-qtd">${escapeHtml(qtd)}</span>
+      </div>`;
+    }
+    return `<div style="display:flex;justify-content:space-between;font-size:9px;color:#374151;line-height:1.4;">
+      <span style="color:#6b7280;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:70%;">${nome}</span>
+      <span style="font-weight:600;white-space:nowrap;">${escapeHtml(qtd)}</span>
+    </div>`;
+  }).join('');
+}
+
+function atualizarCardEstoqueVisual(codigo) {
+  const el = document.getElementById('estoque-card-' + codigo);
+  if (!el) return;
+  const locais = window.__estoqueCardCache[codigo] || [];
+  el.innerHTML = renderHtmlEstoquePorLocal(locais, 'card');
+}
+
+window.aplicarDeltaEstoqueOtimista = function aplicarDeltaEstoqueOtimista(codigo, deltas) {
+  if (!codigo || !Array.isArray(deltas) || !deltas.length) return;
+  const atual = window.__estoqueCardCache[codigo] || [];
+  window.__estoqueCardCache[codigo] = aplicarDeltaListaLocais(atual, deltas);
+  atualizarCardEstoqueVisual(codigo);
+  if (typeof window.__atualizarMovimEstoqueLocais === 'function') {
+    window.__atualizarMovimEstoqueLocais(codigo, deltas);
+  }
+};
+
 async function carregarEstoqueCards() {
   const placeholders = document.querySelectorAll('[id^="estoque-card-"]');
   if (!placeholders.length) return;
@@ -44239,15 +46081,12 @@ async function carregarEstoqueCards() {
       const cod = el.dataset.codigo;
       const locais = dados[cod];
       if (!locais || locais.length === 0) {
-        el.innerHTML = '<span style="font-size:9px;color:#9ca3af;">Sem estoque</span>';
+        window.__estoqueCardCache[cod] = [];
+        el.innerHTML = renderHtmlEstoquePorLocal([], 'card');
         return;
       }
-      el.innerHTML = locais.map(l =>
-        `<div style="display:flex;justify-content:space-between;font-size:9px;color:#374151;line-height:1.4;">
-          <span style="color:#6b7280;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:70%;">${l.local_nome || l.local_codigo}</span>
-          <span style="font-weight:600;white-space:nowrap;">${Number(l.saldo).toLocaleString('pt-BR', {minimumFractionDigits:0, maximumFractionDigits:2})}${l.unidade ? ' ' + l.unidade : ''}</span>
-        </div>`
-      ).join('');
+      window.__estoqueCardCache[cod] = locais.map(l => ({ ...l }));
+      el.innerHTML = renderHtmlEstoquePorLocal(locais, 'card');
     });
 
     // Preenche badges de mínimo
@@ -52271,12 +54110,20 @@ function snapshotEdicoesQtdUnidAssociacaoNfe() {
     window.__associarNfeCamposEditados = {};
   }
 
-  previewConteudo.querySelectorAll('.assoc-override-unid, .assoc-override-valor').forEach((input) => {
+  previewConteudo.querySelectorAll('.assoc-override-qtd, .assoc-override-unid, .assoc-override-valor').forEach((input) => {
     const seq = Number(input.dataset.seq || 0);
     if (!seq) return;
 
     if (!window.__associarNfeCamposEditados[seq]) {
       window.__associarNfeCamposEditados[seq] = {};
+    }
+
+    if (input.classList.contains('assoc-override-qtd')) {
+      const textoQtd = String(input.value || '').trim();
+      const qtd = textoQtd
+        ? Number(textoQtd.includes(',') ? textoQtd.replace(/\./g, '').replace(',', '.') : textoQtd)
+        : null;
+      window.__associarNfeCamposEditados[seq].nQtde = Number.isFinite(qtd) ? qtd : null;
     }
 
     if (input.classList.contains('assoc-override-unid')) {
@@ -52303,6 +54150,8 @@ function trocarVinculoPedidoEntreSequenciasAssociacaoNfe(seqOrigem, seqDestino) 
 
   const camposPedido = [
     'pedido_item_encontrado',
+    'pedido_n_cod_ped',
+    'pedido_numero',
     'pedido_n_cod_item',
     'pedido_codigo_produto',
     'pedido_descricao_produto',
@@ -52411,6 +54260,34 @@ function renderPreviewAssociacaoPedidoNfe(preview) {
   const itensInformativosPedido = Array.isArray(preview?.itens_pedido_informativos)
     ? preview.itens_pedido_informativos
     : [];
+  const pedidoBaseNumero = String(preview?.c_numero_pedido || '').trim();
+  const obterResumoSugestoesPedido = (item) => {
+    const sugestoes = Array.isArray(item?.pedido_sugestoes) ? item.pedido_sugestoes : [];
+    if (!sugestoes.length) return '';
+    const primeira = sugestoes[0] || {};
+    const pedidoNumero = String(primeira?.pedido_numero || primeira?.pedido_n_cod_ped || '').trim();
+    if (!pedidoNumero) return `${sugestoes.length} sugestao(oes) automatica(s) encontrada(s)`;
+    return sugestoes.length === 1
+      ? `Sugestao automatica: pedido ${pedidoNumero}`
+      : `Sugestao automatica: pedido ${pedidoNumero} + ${sugestoes.length - 1}`;
+  };
+  const pedidosEnvolvidos = Array.from(new Map(
+    itens
+      .map((item) => {
+        const numero = String(item?.pedido_numero || '').trim();
+        const nCodPed = Number(item?.pedido_n_cod_ped || 0);
+        if (!numero && !(Number.isFinite(nCodPed) && nCodPed > 0)) return null;
+        const chave = numero || String(nCodPed);
+        return [
+          chave,
+          {
+            numero: numero || String(nCodPed),
+            n_cod_ped: Number.isFinite(nCodPed) && nCodPed > 0 ? nCodPed : null
+          }
+        ];
+      })
+      .filter(Boolean)
+  ).values());
 
   if (!window.__associarNfeCamposEditados || typeof window.__associarNfeCamposEditados !== 'object') {
     window.__associarNfeCamposEditados = {};
@@ -52527,6 +54404,13 @@ function renderPreviewAssociacaoPedidoNfe(preview) {
         const bgQtd = divergiuQtd ? '#fee2e2' : 'transparent';
         const corUnid = divergiuUnidade ? '#b91c1c' : '#0f172a';
         const bgUnid = divergiuUnidade ? '#fee2e2' : 'transparent';
+        const possuiSugestaoPedido = !encontrou && !isServico && Array.isArray(item?.pedido_sugestoes) && item.pedido_sugestoes.length > 0;
+        const resumoSugestoesPedido = possuiSugestaoPedido ? obterResumoSugestoesPedido(item) : '';
+        const pedidoItemNumero = String(item?.pedido_numero || '').trim();
+        const pedidoEhComplementar = !!pedidoItemNumero && !!pedidoBaseNumero && pedidoItemNumero !== pedidoBaseNumero;
+        const badgePedidoItem = pedidoItemNumero
+          ? `<div style="display:inline-flex;align-items:center;gap:6px;font-size:10px;font-weight:800;color:${pedidoEhComplementar ? '#1d4ed8' : '#166534'};background:${pedidoEhComplementar ? '#dbeafe' : '#dcfce7'};border:1px solid ${pedidoEhComplementar ? '#93c5fd' : '#86efac'};border-radius:999px;padding:3px 8px;margin-bottom:4px;">Pedido ${escapeHtml(pedidoItemNumero)}${pedidoEhComplementar ? ' - complementar' : ''}</div>`
+          : '';
 
         return `
           <tr style="border-bottom:1px solid #e2e8f0;background:${!encontrou ? '#fff7ed' : (temDivergencia ? '#fff7f7' : '#f8fafc')};" data-seq="${Number(item?.n_sequencia || 0)}">
@@ -52549,11 +54433,12 @@ function renderPreviewAssociacaoPedidoNfe(preview) {
               <div class="assoc-pedido-draggable" data-seq="${seq}" draggable="true" style="display:flex;align-items:flex-start;gap:8px;padding:6px 8px;border:1px dashed #cbd5e1;border-radius:8px;background:#ffffff;cursor:grab;">
                 <i class="fa-solid fa-grip-vertical" style="margin-top:1px;color:#64748b;"></i>
                 <div style="display:flex;flex-direction:column;gap:2px;min-width:0;">
+                  ${badgePedidoItem}
                   <div style="font-size:11px;font-weight:700;color:#0f172a;">${escapeHtml(String(item?.pedido_codigo_produto || '-'))}</div>
                   <div style="font-size:11px;color:#334155;line-height:1.35;max-width:320px;" title="${escapeHtml(String(item?.pedido_descricao_produto || '-'))}">${escapeHtml(String(item?.pedido_descricao_produto || '-'))}</div>
                 </div>
               </div>` : `
-              <div style="display:flex;align-items:center;gap:8px;padding:6px 8px;border:1px dashed #fed7aa;border-radius:8px;background:#fff7ed;">
+              <div style="display:flex;align-items:center;gap:8px;padding:6px 8px;border:1px dashed #fed7aa;border-radius:8px;background:#fff7ed;flex-wrap:wrap;">
                 ${item?.produto_override && Number(item?.servico_produto_codigo_produto || 0) > 0 ? `
                 <div style="min-width:0;flex:1;">
                   <div style="font-size:11px;font-weight:800;color:#9a3412;">${escapeHtml(String(item?.servico_produto_codigo || '-'))}</div>
@@ -52562,11 +54447,14 @@ function renderPreviewAssociacaoPedidoNfe(preview) {
                 <i class="fa-solid fa-triangle-exclamation" style="color:#ea580c;font-size:12px;flex-shrink:0;"></i>
                 <span style="font-size:11px;color:#9a3412;flex:1;">Sem match — selecione o produto</span>`}
                 <button type="button" class="assoc-produto-override-btn" data-seq="${seq}" style="border:1px solid #fb923c;background:#ea580c;color:#fff;border-radius:7px;padding:5px 8px;font-size:11px;font-weight:700;cursor:pointer;white-space:nowrap;flex-shrink:0;">${item?.produto_override && Number(item?.servico_produto_codigo_produto || 0) > 0 ? 'Alterar' : 'Selecionar produto'}</button>
-                <button type="button" class="assoc-item-pedido-btn" data-seq="${seq}" title="Vincular a um item já presente no pedido" style="border:1px solid #16a34a;background:#15803d;color:#fff;border-radius:7px;padding:5px 8px;font-size:11px;font-weight:700;cursor:pointer;white-space:nowrap;flex-shrink:0;">Item do pedido</button>
+                ${possuiSugestaoPedido ? `<button type="button" class="assoc-sugestao-pedido-btn" data-seq="${seq}" title="Usar a melhor sugestão automática encontrada" style="border:1px solid #60a5fa;background:#2563eb;color:#fff;border-radius:7px;padding:5px 8px;font-size:11px;font-weight:700;cursor:pointer;white-space:nowrap;flex-shrink:0;">Usar sugestão</button>` : ''}
+                <button type="button" class="assoc-item-pedido-btn" data-seq="${seq}" title="Vincular a um item do pedido atual ou de um pedido complementar sugerido" style="border:1px solid #16a34a;background:#15803d;color:#fff;border-radius:7px;padding:5px 8px;font-size:11px;font-weight:700;cursor:pointer;white-space:nowrap;flex-shrink:0;">Escolher item</button>
               </div>`}
             </td>
             <td style="padding:7px 8px;font-size:11px;color:${corQtd};background:${bgQtd};text-align:right;white-space:nowrap;">${
-              escapeHtml(String(qtdPedido))
+              (!isServico && divergiuQtd)
+                ? `<input type="text" class="assoc-override-qtd" data-seq="${seq}" value="${escapeHtml(fmtQtdBR(qtdPedido))}" style="width:72px;padding:2px 4px;font-size:11px;font-weight:700;color:#b91c1c;border:1px solid #fca5a5;border-radius:4px;text-align:right;background:#fff5f5;" title="Edite a quantidade do item do pedido">`
+                : escapeHtml(String(qtdPedido))
             }</td>
             <td style="padding:7px 8px;font-size:11px;color:${corUnid};background:${bgUnid};text-align:center;white-space:nowrap;">${
               (!isServico && (divergiuQtd || divergiuUnidade))
@@ -52605,9 +54493,19 @@ function renderPreviewAssociacaoPedidoNfe(preview) {
       </div>
     `
     : '';
+  const pedidosEnvolvidosHtml = pedidosEnvolvidos.length > 1
+    ? `
+      <div style="margin:0 0 10px;padding:10px 12px;border:1px solid #93c5fd;background:#eff6ff;color:#1d4ed8;border-radius:8px;font-size:12px;">
+        <div style="font-weight:800;margin-bottom:4px;">Esta NF-e sera vinculada a mais de um pedido.</div>
+        <div>Pedidos envolvidos: ${escapeHtml(pedidosEnvolvidos.map((pedido) => pedido.numero).join(', '))}.</div>
+        <div style="margin-top:4px;">Ao concluir a NF, o sistema atualiza cada pedido individualmente conforme o valor realmente recebido em cada um.</div>
+      </div>
+    `
+    : '';
 
   previewConteudo.innerHTML = `
     ${resumoHtml}
+    ${pedidosEnvolvidosHtml}
     ${itensInformativosHtml}
     ${gruposMesmoItem > 0 ? `<div style="margin:0 0 10px;padding:10px 12px;border:1px solid #bbf7d0;background:#ecfdf5;color:#166534;border-radius:8px;font-size:12px;font-weight:700;"><i class="fa-solid fa-layer-group" style="margin-right:6px;"></i>${gruposMesmoItem} linha(s) da NF-e foram agrupadas no mesmo item do pedido. A conferência usa a soma das linhas, não cada linha isolada.</div>` : ''}
     <div style="margin:0 0 10px;padding:9px 12px;border:1px solid #bae6fd;background:#f0f9ff;color:#0c4a6e;border-radius:8px;font-size:12px;font-weight:700;">Arraste o bloco do item do Pedido (coluna azul com ícone <i class="fa-solid fa-grip-vertical"></i>) para outra linha da NF-e para trocar a associação.</div>
@@ -52645,7 +54543,7 @@ function renderPreviewAssociacaoPedidoNfe(preview) {
 
   previewWrap.style.display = 'block';
   habilitarDragDropAssociacaoPedidoNfe(preview);
-  previewConteudo.querySelectorAll('.assoc-override-unid, .assoc-override-valor').forEach((input) => {
+  previewConteudo.querySelectorAll('.assoc-override-qtd, .assoc-override-unid, .assoc-override-valor').forEach((input) => {
     input.addEventListener('input', snapshotEdicoesQtdUnidAssociacaoNfe);
     input.addEventListener('change', snapshotEdicoesQtdUnidAssociacaoNfe);
   });
@@ -52655,22 +54553,77 @@ function renderPreviewAssociacaoPedidoNfe(preview) {
   previewConteudo.querySelectorAll('.assoc-produto-override-btn').forEach((btn) => {
     btn.addEventListener('click', () => abrirModalProdutoServicoAssociacaoNfe(Number(btn.dataset.seq || 0)));
   });
-  previewConteudo.querySelectorAll('.assoc-item-pedido-btn').forEach((btn) => {
-    btn.addEventListener('click', () => abrirPickerItemPedidoAssociacao(Number(btn.dataset.seq || 0)));
+  previewConteudo.querySelectorAll('.assoc-sugestao-pedido-btn').forEach((btn) => {
+    btn.addEventListener('click', () => aplicarSugestaoPedidoAssociacao(Number(btn.dataset.seq || 0), 0));
   });
+  previewConteudo.querySelectorAll('.assoc-item-pedido-btn').forEach((btn) => {
+    btn.addEventListener('click', () => abrirPickerItemPedidoAssociacaoAvancado(Number(btn.dataset.seq || 0)));
+  });
+}
+
+function aplicarVinculoItemPedidoAssociacao(seq, dadosItem = {}) {
+  if (!seq) return false;
+  const item = (window.__associarNfePreviewEstadoItens || []).find(i => Number(i?.n_sequencia || 0) === seq);
+  if (!item) return false;
+
+  const nCodItem = Number(dadosItem?.pedido_n_cod_item || dadosItem?.nCodItem || 0);
+  if (!Number.isFinite(nCodItem) || nCodItem <= 0) return false;
+
+  const nCodPed = Number(dadosItem?.pedido_n_cod_ped || dadosItem?.nCodPed || 0);
+  const numeroPedido = String(dadosItem?.pedido_numero || dadosItem?.numeroPedido || '').trim();
+  const numeroPedidoBase = String(window.__associarNfePreviewAtual?.preview?.c_numero_pedido || '').trim();
+
+  item.pedido_item_encontrado = true;
+  item.pedido_item_override = true;
+  item.pedido_n_cod_ped = Number.isFinite(nCodPed) && nCodPed > 0
+    ? nCodPed
+    : (Number(window.__associarNfePreviewAtual?.preview?.n_cod_ped || 0) || null);
+  item.pedido_numero = numeroPedido || numeroPedidoBase || null;
+  item.pedido_n_cod_item = nCodItem;
+  item.pedido_codigo_produto = dadosItem?.pedido_codigo_produto || dadosItem?.codigo || '';
+  item.pedido_descricao_produto = dadosItem?.pedido_descricao_produto || dadosItem?.descricao || '';
+  item.pedido_qtde = (dadosItem?.pedido_qtde ?? dadosItem?.qtde ?? '') !== '' ? Number(dadosItem?.pedido_qtde ?? dadosItem?.qtde) : null;
+  item.pedido_unidade = dadosItem?.pedido_unidade || dadosItem?.unidade || '';
+  item.pedido_valor_total = (dadosItem?.pedido_valor_total ?? dadosItem?.valor ?? '') !== '' ? Number(dadosItem?.pedido_valor_total ?? dadosItem?.valor) : null;
+  item.criterio_match = item.pedido_numero && numeroPedidoBase && item.pedido_numero !== numeroPedidoBase
+    ? 'ajuste_manual_pedido_complementar'
+    : 'ajuste_manual_item_pedido';
+  item.score_match = 9999;
+  delete item.produto_override;
+
+  renderPreviewAssociacaoPedidoNfe(window.__associarNfePreviewAtual?.preview || {});
+  const btnAssociarMain = document.getElementById('modalAssociarPedidoBtnConfirmar');
+  if (btnAssociarMain) btnAssociarMain.disabled = false;
+  return true;
+}
+
+function aplicarSugestaoPedidoAssociacao(seq, indiceSugestao = 0) {
+  const item = (window.__associarNfePreviewEstadoItens || []).find(i => Number(i?.n_sequencia || 0) === seq);
+  if (!item) return false;
+  const sugestoes = Array.isArray(item?.pedido_sugestoes) ? item.pedido_sugestoes : [];
+  const sugestao = sugestoes[Number(indiceSugestao) || 0];
+  if (!sugestao) return false;
+  return aplicarVinculoItemPedidoAssociacao(seq, sugestao);
 }
 
 function abrirPickerItemPedidoAssociacao(seq) {
   if (!seq) return;
   const preview = window.__associarNfePreviewAtual?.preview || {};
   const numeroPedido = String(preview?.c_numero_pedido || '').trim();
+  const itemAtual = (window.__associarNfePreviewEstadoItens || []).find(i => Number(i?.n_sequencia || 0) === seq);
+  const itensComplementares = Array.isArray(itemAtual?.pedido_sugestoes)
+    ? itemAtual.pedido_sugestoes.map((itemSugestao) => ({ ...itemSugestao, origem_lista: 'pedido_complementar' }))
+    : [];
 
   // Coleta todos os itens do pedido: informativos + matched
   let itensPedido = [
+    ...itensComplementares,
     ...(preview.itens_pedido_informativos || []),
     ...(preview.itens_preview || [])
       .filter(i => i.pedido_item_encontrado && Number(i.pedido_n_cod_item || 0) > 0)
       .map(i => ({
+        pedido_n_cod_ped: i.pedido_n_cod_ped || preview?.n_cod_ped || null,
+        pedido_numero: i.pedido_numero || preview?.c_numero_pedido || null,
         pedido_n_cod_item: i.pedido_n_cod_item,
         pedido_codigo_produto: i.pedido_codigo_produto,
         pedido_descricao_produto: i.pedido_descricao_produto,
@@ -52686,6 +54639,11 @@ function abrirPickerItemPedidoAssociacao(seq) {
     if (!k || seen.has(k)) return false;
     seen.add(k); return true;
   });
+  const itensComplementaresFiltrados = itensComplementares.filter(i => {
+    const k = Number(i.pedido_n_cod_item || 0);
+    if (!k || seen.has(k)) return false;
+    seen.add(k); return true;
+  });
 
   let modal = document.getElementById('modalItemPedidoAssociacao');
   if (modal) modal.remove();
@@ -52697,6 +54655,8 @@ function abrirPickerItemPedidoAssociacao(seq) {
     if (!items.length) return '<div style="font-size:12px;color:#64748b;padding:12px;">Nenhum item encontrado para o pedido.</div>';
     return items.map(it => `
       <button type="button"
+        data-n-cod-ped="${Number(it.pedido_n_cod_ped || 0)}"
+        data-numero-pedido="${escapeHtml(String(it.pedido_numero || numeroPedido || ''))}"
         data-n-cod-item="${Number(it.pedido_n_cod_item || 0)}"
         data-codigo="${escapeHtml(String(it.pedido_codigo_produto || ''))}"
         data-descricao="${escapeHtml(String(it.pedido_descricao_produto || ''))}"
@@ -52705,6 +54665,7 @@ function abrirPickerItemPedidoAssociacao(seq) {
         data-valor="${escapeHtml(String(it.pedido_valor_total ?? ''))}"
         style="display:flex;align-items:center;justify-content:space-between;gap:14px;text-align:left;border:1px solid #bbf7d0;background:#f0fdf4;border-radius:10px;padding:10px;cursor:pointer;width:100%;">
         <span style="min-width:0;">
+          <div style="font-size:10px;font-weight:800;color:${it.origem_lista === 'pedido_complementar' ? '#1d4ed8' : '#166534'};margin-bottom:3px;">Pedido ${escapeHtml(String(it.pedido_numero || numeroPedido || it.pedido_n_cod_ped || '-'))}${it.origem_lista === 'pedido_complementar' ? ' - sugestão automática' : ''}</div>
           <div style="font-weight:800;color:#0f172a;">${escapeHtml(String(it.pedido_codigo_produto || '-'))}</div>
           <div style="font-size:12px;color:#475569;">${escapeHtml(String(it.pedido_descricao_produto || '-'))}</div>
           <div style="font-size:11px;color:#64748b;margin-top:2px;">Qtd: ${escapeHtml(String(it.pedido_qtde ?? '-'))} ${escapeHtml(String(it.pedido_unidade || ''))} · R$ ${escapeHtml(Number(it.pedido_valor_total || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 }))}</div>
@@ -52731,26 +54692,18 @@ function abrirPickerItemPedidoAssociacao(seq) {
   function attachSelectHandlers() {
     modal.querySelectorAll('button[data-n-cod-item]').forEach(btn => {
       btn.onclick = () => {
-        const nCodItem = Number(btn.dataset.nCodItem || 0);
-        if (!nCodItem) return;
-        const item = (window.__associarNfePreviewEstadoItens || []).find(i => Number(i?.n_sequencia || 0) === seq);
-        if (item) {
-          item.pedido_item_encontrado = true;
-          item.pedido_item_override = true;
-          item.pedido_n_cod_item = nCodItem;
-          item.pedido_codigo_produto = btn.dataset.codigo || '';
-          item.pedido_descricao_produto = btn.dataset.descricao || '';
-          item.pedido_qtde = btn.dataset.qtde !== '' ? Number(btn.dataset.qtde) : null;
-          item.pedido_unidade = btn.dataset.unidade || '';
-          item.pedido_valor_total = btn.dataset.valor !== '' ? Number(btn.dataset.valor) : null;
-          item.criterio_match = 'ajuste_manual_item_pedido';
-          item.score_match = 9999;
-          delete item.produto_override;
-        }
+        const aplicado = aplicarVinculoItemPedidoAssociacao(seq, {
+          pedido_n_cod_ped: Number(btn.dataset.nCodPed || 0) || null,
+          pedido_numero: btn.dataset.numeroPedido || '',
+          pedido_n_cod_item: Number(btn.dataset.nCodItem || 0) || null,
+          pedido_codigo_produto: btn.dataset.codigo || '',
+          pedido_descricao_produto: btn.dataset.descricao || '',
+          pedido_qtde: btn.dataset.qtde !== '' ? Number(btn.dataset.qtde) : null,
+          pedido_unidade: btn.dataset.unidade || '',
+          pedido_valor_total: btn.dataset.valor !== '' ? Number(btn.dataset.valor) : null
+        });
+        if (!aplicado) return;
         modal.remove();
-        renderPreviewAssociacaoPedidoNfe(window.__associarNfePreviewAtual?.preview || {});
-        const btnAssociarMain = document.getElementById('modalAssociarPedidoBtnConfirmar');
-        if (btnAssociarMain) btnAssociarMain.disabled = false;
       };
     });
   }
@@ -52764,6 +54717,8 @@ function abrirPickerItemPedidoAssociacao(seq) {
         const itensApi = (data?.pedido?.itens || []).filter(i => Number(i.n_cod_item || 0) > 0);
         lista.innerHTML = itensApi.length
           ? renderItensHtml(itensApi.map(i => ({
+              pedido_n_cod_ped: preview?.n_cod_ped || null,
+              pedido_numero: numeroPedido || null,
               pedido_n_cod_item: i.n_cod_item,
               pedido_codigo_produto: i.c_produto || i.produto_codigo,
               pedido_descricao_produto: i.c_descricao || i.produto_descricao,
@@ -52780,6 +54735,198 @@ function abrirPickerItemPedidoAssociacao(seq) {
   } else {
     attachSelectHandlers();
   }
+}
+
+function abrirPickerItemPedidoAssociacaoAvancado(seq) {
+  if (!seq) return;
+  const preview = window.__associarNfePreviewAtual?.preview || {};
+  const numeroPedidoBase = String(preview?.c_numero_pedido || '').trim();
+  const itemAtual = (window.__associarNfePreviewEstadoItens || []).find((i) => Number(i?.n_sequencia || 0) === seq);
+  const sugestoesComplementares = Array.isArray(itemAtual?.pedido_sugestoes)
+    ? itemAtual.pedido_sugestoes.map((itemSugestao) => ({ ...itemSugestao, origem_lista: 'pedido_complementar' }))
+    : [];
+
+  const dedupeItens = (items, seen = new Set()) => items.filter((item) => {
+    const codItem = Number(item?.pedido_n_cod_item || 0);
+    if (!codItem || seen.has(codItem)) return false;
+    seen.add(codItem);
+    return true;
+  });
+
+  const itensPedidoBase = [
+    ...(preview.itens_pedido_informativos || []),
+    ...(preview.itens_preview || [])
+      .filter((i) => i.pedido_item_encontrado && Number(i.pedido_n_cod_item || 0) > 0)
+      .map((i) => ({
+        pedido_n_cod_ped: i.pedido_n_cod_ped || preview?.n_cod_ped || null,
+        pedido_numero: i.pedido_numero || preview?.c_numero_pedido || null,
+        pedido_n_cod_item: i.pedido_n_cod_item,
+        pedido_codigo_produto: i.pedido_codigo_produto,
+        pedido_descricao_produto: i.pedido_descricao_produto,
+        pedido_qtde: i.pedido_qtde,
+        pedido_unidade: i.pedido_unidade,
+        pedido_valor_total: i.pedido_valor_total,
+        origem_lista: 'pedido_base'
+      }))
+  ];
+
+  const seen = new Set();
+  const sugestoesFiltradas = dedupeItens(sugestoesComplementares, seen);
+  const itensBaseFiltrados = dedupeItens(itensPedidoBase, seen);
+
+  let modal = document.getElementById('modalItemPedidoAssociacaoAvancado');
+  if (modal) modal.remove();
+  modal = document.createElement('div');
+  modal.id = 'modalItemPedidoAssociacaoAvancado';
+  modal.style.cssText = 'position:fixed;inset:0;z-index:2147483647;background:rgba(15,23,42,.70);display:flex;align-items:center;justify-content:center;padding:20px;';
+
+  const renderItensHtml = (items, tituloSecao = '', emptyText = 'Nenhum item encontrado.') => {
+    if (!items.length) {
+      return `
+        ${tituloSecao ? `<div style="font-size:12px;font-weight:800;color:#0f172a;margin:10px 0 6px;">${escapeHtml(tituloSecao)}</div>` : ''}
+        <div style="font-size:12px;color:#64748b;padding:12px;">${escapeHtml(emptyText)}</div>
+      `;
+    }
+    return `
+      ${tituloSecao ? `<div style="font-size:12px;font-weight:800;color:#0f172a;margin:10px 0 6px;">${escapeHtml(tituloSecao)}</div>` : ''}
+      ${items.map((it) => `
+        <button type="button"
+          data-n-cod-ped="${Number(it.pedido_n_cod_ped || 0)}"
+          data-numero-pedido="${escapeHtml(String(it.pedido_numero || numeroPedidoBase || ''))}"
+          data-n-cod-item="${Number(it.pedido_n_cod_item || 0)}"
+          data-codigo="${escapeHtml(String(it.pedido_codigo_produto || ''))}"
+          data-descricao="${escapeHtml(String(it.pedido_descricao_produto || ''))}"
+          data-qtde="${escapeHtml(String(it.pedido_qtde ?? ''))}"
+          data-unidade="${escapeHtml(String(it.pedido_unidade || ''))}"
+          data-valor="${escapeHtml(String(it.pedido_valor_total ?? ''))}"
+          style="display:flex;align-items:center;justify-content:space-between;gap:14px;text-align:left;border:1px solid #bbf7d0;background:#f0fdf4;border-radius:10px;padding:10px;cursor:pointer;width:100%;">
+          <span style="min-width:0;">
+            <div style="font-size:10px;font-weight:800;color:${it.origem_lista === 'pedido_complementar' ? '#1d4ed8' : (it.origem_lista === 'pedido_manual' ? '#7c3aed' : '#166534')};margin-bottom:3px;">Pedido ${escapeHtml(String(it.pedido_numero || numeroPedidoBase || it.pedido_n_cod_ped || '-'))}${it.origem_lista === 'pedido_complementar' ? ' - sugestão automática' : ''}${it.origem_lista === 'pedido_manual' ? ' - carregado manualmente' : ''}</div>
+            <div style="font-weight:800;color:#0f172a;">${escapeHtml(String(it.pedido_codigo_produto || '-'))}</div>
+            <div style="font-size:12px;color:#475569;">${escapeHtml(String(it.pedido_descricao_produto || '-'))}</div>
+            <div style="font-size:11px;color:#64748b;margin-top:2px;">Qtd: ${escapeHtml(String(it.pedido_qtde ?? '-'))} ${escapeHtml(String(it.pedido_unidade || ''))} · R$ ${escapeHtml(Number(it.pedido_valor_total || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 }))}</div>
+          </span>
+          <span style="white-space:nowrap;background:#15803d;color:white;border-radius:8px;padding:7px 10px;font-size:12px;font-weight:800;">Usar este item</span>
+        </button>
+      `).join('')}
+    `;
+  };
+
+  modal.innerHTML = `
+    <div style="width:min(860px,95vw);max-height:85vh;overflow:auto;background:#fff;border:2px solid #16a34a;border-radius:16px;box-shadow:0 24px 80px rgba(0,0,0,.35);padding:18px;">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+        <strong style="font-size:18px;color:#0f172a;">Escolher item para a linha ${escapeHtml(String(seq))} da NF-e</strong>
+        <button type="button" id="modalItemPedidoAvancadoFechar" style="border:0;background:transparent;font-size:26px;cursor:pointer;color:#334155;">&times;</button>
+      </div>
+      <div style="font-size:12px;color:#475569;margin-bottom:12px;">Use a melhor sugestão, escolha outra sugestão listada abaixo ou carregue manualmente outro pedido pelo número.</div>
+      <div id="modalItemPedidoAvancadoLista" style="display:flex;flex-direction:column;gap:8px;">
+        ${sugestoesFiltradas.length > 0 ? renderItensHtml(sugestoesFiltradas, 'Sugestões automáticas de outros pedidos', 'Nenhuma sugestão automática encontrada.') : ''}
+        ${renderItensHtml(itensBaseFiltrados, `Itens do pedido ${numeroPedidoBase || ''}`, 'Nenhum item encontrado no pedido base.')}
+      </div>
+      <div style="margin-top:14px;padding-top:12px;border-top:1px solid #e2e8f0;">
+        <div style="font-size:12px;font-weight:800;color:#0f172a;margin-bottom:8px;">Carregar outro pedido manualmente</div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+          <input id="modalItemPedidoAvancadoNumeroManual" type="text" placeholder="Digite o número do outro pedido" style="flex:1;min-width:240px;padding:10px 12px;border:1px solid #cbd5e1;border-radius:8px;font-size:14px;color:#0f172a;" />
+          <button type="button" id="modalItemPedidoAvancadoBuscarManual" style="border:1px solid #0ea5e9;background:#0284c7;color:#fff;border-radius:8px;padding:9px 12px;font-size:12px;font-weight:800;cursor:pointer;">Carregar pedido</button>
+        </div>
+        <div id="modalItemPedidoAvancadoManualStatus" style="font-size:12px;color:#64748b;margin-top:8px;">Se souber o pedido correto, digite o número e carregue os itens dele.</div>
+        <div id="modalItemPedidoAvancadoListaManual" style="display:flex;flex-direction:column;gap:8px;margin-top:8px;"></div>
+      </div>
+    </div>`;
+
+  document.body.appendChild(modal);
+  modal.querySelector('#modalItemPedidoAvancadoFechar').onclick = () => modal.remove();
+
+  const aplicarSelecao = (btn) => {
+    const aplicado = aplicarVinculoItemPedidoAssociacao(seq, {
+      pedido_n_cod_ped: Number(btn.dataset.nCodPed || 0) || null,
+      pedido_numero: btn.dataset.numeroPedido || '',
+      pedido_n_cod_item: Number(btn.dataset.nCodItem || 0) || null,
+      pedido_codigo_produto: btn.dataset.codigo || '',
+      pedido_descricao_produto: btn.dataset.descricao || '',
+      pedido_qtde: btn.dataset.qtde !== '' ? Number(btn.dataset.qtde) : null,
+      pedido_unidade: btn.dataset.unidade || '',
+      pedido_valor_total: btn.dataset.valor !== '' ? Number(btn.dataset.valor) : null
+    });
+    if (!aplicado) return;
+    modal.remove();
+  };
+
+  const attachSelectHandlers = () => {
+    modal.querySelectorAll('button[data-n-cod-item]').forEach((btn) => {
+      btn.onclick = () => aplicarSelecao(btn);
+    });
+  };
+
+  const listaManual = modal.querySelector('#modalItemPedidoAvancadoListaManual');
+  const statusManual = modal.querySelector('#modalItemPedidoAvancadoManualStatus');
+  const inputManual = modal.querySelector('#modalItemPedidoAvancadoNumeroManual');
+  const btnManual = modal.querySelector('#modalItemPedidoAvancadoBuscarManual');
+
+  const carregarItensPedidoManual = async (numeroPedidoManual) => {
+    const numeroManual = String(numeroPedidoManual || '').trim();
+    if (!numeroManual) {
+      if (statusManual) statusManual.textContent = 'Digite um número de pedido para carregar os itens.';
+      if (listaManual) listaManual.innerHTML = '';
+      return;
+    }
+
+    if (statusManual) statusManual.textContent = `Carregando itens do pedido ${numeroManual}...`;
+    if (listaManual) listaManual.innerHTML = '<div style="font-size:12px;color:#64748b;padding:12px;">Buscando pedido informado...</div>';
+    if (btnManual) btnManual.disabled = true;
+
+    try {
+      const resp = await fetch(`/api/compras/buscar-pedido-compra?numero=${encodeURIComponent(numeroManual)}`, { credentials: 'include', cache: 'no-store' });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok || !data?.pedido) {
+        throw new Error(data?.error || `Falha ao carregar pedido ${numeroManual}.`);
+      }
+
+      const numeroPedidoCarregado = String(data?.pedido?.c_numero || data?.pedido?.numero || numeroManual).trim() || numeroManual;
+      const itensApi = (data?.pedido?.itens || [])
+        .filter((i) => Number(i.n_cod_item || 0) > 0)
+        .map((i) => ({
+          pedido_n_cod_ped: data?.pedido?.n_cod_ped || data?.pedido?.nCodPed || null,
+          pedido_numero: numeroPedidoCarregado,
+          pedido_n_cod_item: i.n_cod_item,
+          pedido_codigo_produto: i.c_produto || i.produto_codigo,
+          pedido_descricao_produto: i.c_descricao || i.produto_descricao,
+          pedido_qtde: i.n_qtde !== undefined ? i.n_qtde : i.quantidade,
+          pedido_unidade: i.c_unidade || i.unidade,
+          pedido_valor_total: i.n_val_tot !== undefined ? i.n_val_tot : i.valor_item,
+          origem_lista: 'pedido_manual'
+        }));
+
+      if (listaManual) {
+        listaManual.innerHTML = renderItensHtml(
+          itensApi,
+          `Itens do pedido ${numeroPedidoCarregado}`,
+          'Nenhum item encontrado no pedido informado.'
+        );
+      }
+      if (statusManual) {
+        statusManual.textContent = itensApi.length > 0
+          ? `Pedido ${numeroPedidoCarregado} carregado. Escolha um item abaixo.`
+          : `Pedido ${numeroPedidoCarregado} encontrado, mas sem itens utilizáveis.`;
+      }
+      attachSelectHandlers();
+    } catch (err) {
+      if (listaManual) listaManual.innerHTML = '';
+      if (statusManual) statusManual.textContent = err?.message || `Erro ao carregar o pedido ${numeroManual}.`;
+    } finally {
+      if (btnManual) btnManual.disabled = false;
+    }
+  };
+
+  btnManual?.addEventListener('click', () => carregarItensPedidoManual(inputManual?.value || ''));
+  inputManual?.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      carregarItensPedidoManual(inputManual?.value || '');
+    }
+  });
+
+  attachSelectHandlers();
 }
 
 function abrirModalProdutoServicoAssociacaoNfe(seq) {
@@ -53137,6 +55284,11 @@ async function confirmarAssociacaoPedidoNfeOmie() {
 
   try {
     const contextoAtual = window.__associarNfeContextoAtual || {};
+    const pedidosEnvolvidosPreview = Array.from(new Set(
+      (Array.isArray(window.__associarNfePreviewEstadoItens) ? window.__associarNfePreviewEstadoItens : [])
+        .map((item) => String(item?.pedido_numero || '').trim())
+        .filter(Boolean)
+    ));
 
     // Coleta overrides de vínculo/Qtd/Unid editados pelo usuário na prévia
     const itensOverrideMap = new Map();
@@ -53171,18 +55323,30 @@ async function confirmarAssociacaoPedidoNfeOmie() {
       }
       const nIdItPedidoExistente = Number(item?.pedido_n_cod_item || 0);
       if (!seq || !Number.isFinite(nIdItPedidoExistente) || nIdItPedidoExistente <= 0) return;
-      itensOverrideMap.set(seq, { n_sequencia: seq, nIdItPedidoExistente });
+      const nIdPedidoExistente = Number(item?.pedido_n_cod_ped || 0);
+      itensOverrideMap.set(seq, {
+        n_sequencia: seq,
+        nIdPedidoExistente: Number.isFinite(nIdPedidoExistente) && nIdPedidoExistente > 0 ? nIdPedidoExistente : null,
+        nIdItPedidoExistente
+      });
     });
 
     const previewConteudo = document.getElementById('modalAssociarPedidoNfePreviewConteudo');
     if (previewConteudo) {
-      previewConteudo.querySelectorAll('.assoc-override-unid, .assoc-override-valor').forEach(input => {
+      previewConteudo.querySelectorAll('.assoc-override-qtd, .assoc-override-unid, .assoc-override-valor').forEach(input => {
         const seq = Number(input.dataset.seq || 0);
         if (!seq) return;
         let entry = itensOverrideMap.get(seq);
         if (!entry) {
           entry = { n_sequencia: seq };
           itensOverrideMap.set(seq, entry);
+        }
+        if (input.classList.contains('assoc-override-qtd')) {
+          const textoQtd = String(input.value || '').trim();
+          const qtd = textoQtd
+            ? Number(textoQtd.includes(',') ? textoQtd.replace(/\./g, '').replace(',', '.') : textoQtd)
+            : null;
+          entry.nQtde = Number.isFinite(qtd) ? qtd : null;
         }
         if (input.classList.contains('assoc-override-unid')) {
           entry.cUnidade = String(input.value || '').trim().toUpperCase() || null;
@@ -53250,12 +55414,25 @@ async function confirmarAssociacaoPedidoNfeOmie() {
     }
     // ─────────────────────────────────────────────────────────────────────
 
+    const pedidosAssociadosRetorno = Array.isArray(data?.dados?.pedidos_associados)
+      ? data.dados.pedidos_associados
+        .map((pedido) => String(pedido?.c_numero_pedido || pedido?.n_cod_ped || '').trim())
+        .filter(Boolean)
+      : [];
+    const pedidosAssociadosExibir = pedidosAssociadosRetorno.length > 0
+      ? pedidosAssociadosRetorno
+      : pedidosEnvolvidosPreview;
+    const resumoPedidosAssociados = pedidosAssociadosExibir.length > 0
+      ? `<div style="margin-top:8px;font-size:12px;color:#166534;font-weight:700;">Pedidos afetados: ${escapeHtml(pedidosAssociadosExibir.join(', '))}</div>`
+      : '';
+
     setStatusModalAssociarPedidoNfe(
       `<div style="display:flex;align-items:flex-start;gap:12px;">
         <i class="fa-solid fa-circle-check" style="font-size:26px;color:#16a34a;margin-top:2px;"></i>
         <div style="flex:1;">
           <div style="font-size:17px;font-weight:800;line-height:1.2;">NF-e associada com sucesso</div>
           <div style="font-size:13px;margin-top:5px;">${escapeHtml(data?.message || `NF-e ${numeroNfe} associada ao pedido ${numeroPedido}.`)}</div>
+          ${resumoPedidosAssociados}
           <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;">
             <button type="button" id="modalAssociarNovaBuscaBtn" style="border:none;border-radius:8px;background:#7c3aed;color:#fff;font-weight:700;padding:9px 13px;cursor:pointer;display:inline-flex;align-items:center;gap:6px;">
               <i class="fa-solid fa-magnifying-glass"></i> Buscar outra NF-e
@@ -60664,6 +62841,7 @@ async function salvarEdicaoPIR(id) {
 let currentCenterDate = null;
 let currentCarouselTranslate = 0;
 let carouselDataCache = {};
+let carouselMonthCache = {}; // cache por "YYYY-MM" → dados brutos do mês
 const CAROUSEL_WINDOW_DAYS = 7; // 7 antes e 7 depois (total 15 dias fixos)
 const CARD_WIDTH = 162;         // deve bater com o CSS
 const CARD_GAP = 12;            // gap definido no CSS (.semana-carousel { gap })
@@ -60901,40 +63079,43 @@ async function carregarDadosDia(date) {
   const key = formatDateKey(date);
   const ano = date.getFullYear();
   const mes = date.getMonth() + 1;
-  
+  const mesKey = `${ano}-${String(mes).padStart(2, '0')}`;
+
   try {
-    const resp = await fetch(`/api/pcp/calendario?ano=${ano}&mes=${mes}`, {
-      credentials: 'include'
-    });
-    
-    if (!resp.ok) {
-      console.error('[CARROSSEL] Erro HTTP:', resp.status);
-      carouselDataCache[key] = [];
-      return;
+    // Se o mês já foi buscado, apenas extrai o dia do cache
+    if (!carouselMonthCache[mesKey]) {
+      // Evita múltiplas requisições simultâneas para o mesmo mês
+      if (carouselMonthCache[`${mesKey}__pending`]) {
+        await carouselMonthCache[`${mesKey}__pending`];
+      } else {
+        const fetchPromise = fetch(`/api/pcp/calendario?ano=${ano}&mes=${mes}`, {
+          credentials: 'include'
+        }).then(async resp => {
+          if (!resp.ok) throw new Error('HTTP ' + resp.status);
+          const data = await resp.json();
+          if (!data.ok || !data.data) throw new Error('Resposta inválida');
+          carouselMonthCache[mesKey] = data.data;
+        }).catch(err => {
+          console.error('[CARROSSEL] Erro ao carregar mês:', err);
+          carouselMonthCache[mesKey] = [];
+        }).finally(() => {
+          delete carouselMonthCache[`${mesKey}__pending`];
+        });
+        carouselMonthCache[`${mesKey}__pending`] = fetchPromise;
+        await fetchPromise;
+      }
     }
-    
-    const data = await resp.json();
-    
-    if (!data.ok || !data.data) {
-      console.error('[CARROSSEL] Resposta inválida:', data);
-      carouselDataCache[key] = [];
-      return;
-    }
-    
-    const produtos = data.data
-      .filter(item => {
-        const itemDate = item.data_previsao?.split('T')[0];
-        return itemDate === key;
-      })
+
+    const rawData = carouselMonthCache[mesKey] || [];
+    carouselDataCache[key] = rawData
+      .filter(item => item.data_previsao?.split('T')[0] === key)
       .map(item => ({
         codigo: item.codigo_produto || 'Sem código',
         quantidade: item.quantidade || 0,
         status: item.status || 'aguardando',
         descricao: item.produto_descricao || ''
       }));
-    
-    carouselDataCache[key] = produtos;
-    
+
   } catch (error) {
     console.error('[CARROSSEL] Erro ao carregar dia:', error);
     carouselDataCache[key] = [];
@@ -64423,6 +66604,8 @@ window.adicionarNovaLinhaPIR = adicionarNovaLinhaPIR;
     const navGrid = document.getElementById('productNavGrid');
     const cards = document.querySelectorAll('.nav-card:not(.nav-card-action)');
     const btnNovoCard = document.getElementById('btnNovoProdutoCard');
+    const btnAlteracaoCard = document.getElementById('btnAlteracaoProdutoCard');
+    const btnDesenhoTecnicoCard = document.getElementById('btnDesenhoTecnicoCard');
     const sectionTitle = document.getElementById('currentSectionTitle');
     
     if (!hamburger || !navGrid || !cards.length) return false;
@@ -64543,6 +66726,36 @@ window.adicionarNovaLinhaPIR = adicionarNovaLinhaPIR;
         hamburger.classList.remove('active');
       });
     });
+
+    // Handler do botão Desenho técnico
+    if (btnDesenhoTecnicoCard) {
+      btnDesenhoTecnicoCard.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+
+        if (typeof window.abrirModalDesenhoTecnico === 'function') {
+          window.abrirModalDesenhoTecnico();
+        }
+
+        navGrid.style.display = 'none';
+        hamburger.classList.remove('active');
+      });
+    }
+
+    // Handler do botão Alteração de produto
+    if (btnAlteracaoCard) {
+      btnAlteracaoCard.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+
+        if (typeof window.abrirModalAlteracaoProduto === 'function') {
+          window.abrirModalAlteracaoProduto();
+        }
+
+        navGrid.style.display = 'none';
+        hamburger.classList.remove('active');
+      });
+    }
 
     // Handler do botão Novo (não fecha o menu)
     if (btnNovoCard) {
@@ -67572,21 +69785,21 @@ document.addEventListener('DOMContentLoaded', () => {
   // ── Overlay slide-from-bottom ──
   const ov = document.createElement('div');
   ov.id = 'modalCarrinhoSepOverlay';
-  ov.style.cssText = 'display:none;position:fixed;inset:0;background:rgba(0,0,0,.65);z-index:10300;align-items:flex-end;justify-content:center;';
+  ov.style.cssText = 'display:none;position:fixed;inset:0;background:rgba(2,6,23,.58);backdrop-filter:blur(6px);z-index:10300;align-items:center;justify-content:center;padding:24px;';
 
   ov.innerHTML = `
-    <div id="modalCarrinhoSepPanel" style="width:min(760px,94%);background:#1c1c1c;border-radius:18px 18px 0 0;padding:0;max-height:88vh;display:flex;flex-direction:column;transform:translateY(40px);transition:transform .22s ease;overflow:hidden;">
+    <div id="modalCarrinhoSepPanel" style="width:min(840px,86vw);background:linear-gradient(180deg,rgba(15,23,42,.98) 0%,rgba(15,23,42,.94) 100%);border:1px solid rgba(148,163,184,.22);border-radius:22px;padding:0;max-height:82vh;display:flex;flex-direction:column;transform:translateY(16px) scale(.985);opacity:0;transition:transform .22s ease,opacity .22s ease;overflow:hidden;box-shadow:0 26px 80px rgba(2,6,23,.42);">
       <!-- Header -->
-      <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 18px;border-bottom:1px solid #2a2a2a;flex-shrink:0;">
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid rgba(148,163,184,.16);flex-shrink:0;background:rgba(15,23,42,.72);">
         <div style="display:flex;align-items:center;gap:10px;min-width:0;">
           <h2 style="margin:0;font-size:1.05rem;color:#f0f0f0;font-weight:700;white-space:nowrap;">Sol. de separação</h2>
-          <span id="modalCarrinhoSepCount" style="background:#111827;color:#9ca3af;border:1px solid #273244;border-radius:999px;padding:3px 9px;font-size:.74rem;font-weight:700;white-space:nowrap;">0 itens</span>
+          <span id="modalCarrinhoSepCount" style="background:rgba(30,41,59,.92);color:#cbd5e1;border:1px solid rgba(71,85,105,.85);border-radius:999px;padding:4px 10px;font-size:.74rem;font-weight:800;white-space:nowrap;">0 itens</span>
         </div>
-        <button id="modalCarrinhoSepClose" style="background:none;border:none;cursor:pointer;color:#9ca3af;font-size:22px;line-height:1;padding:4px 8px;">&#x2715;</button>
+        <button id="modalCarrinhoSepClose" style="background:transparent;border:none;cursor:pointer;color:#94a3b8;font-size:22px;line-height:1;padding:6px 8px;border-radius:10px;">&#x2715;</button>
       </div>
       <!-- Itens do carrinho -->
-      <div id="modalCarrinhoSepItems" style="flex:1;min-height:170px;overflow-y:auto;padding:10px 18px 8px;display:flex;flex-direction:column;gap:7px;"></div>
-      <div id="modalCarrinhoSepEmpty" style="display:none;color:#6b7280;font-size:.9rem;padding:24px 20px;text-align:center;">Nenhum produto adicionado.</div>
+      <div id="modalCarrinhoSepItems" style="flex:1;min-height:150px;overflow-y:auto;padding:14px 18px 10px;display:flex;flex-direction:column;gap:10px;background:rgba(15,23,42,.28);"></div>
+      <div id="modalCarrinhoSepEmpty" style="display:none;color:#94a3b8;font-size:.94rem;padding:38px 24px;text-align:center;">Nenhum produto adicionado.</div>
       <!-- Formulário de envio -->
       <div id="modalCarrinhoSepForm" style="border-top:1px solid #2a2a2a;padding:10px 18px 12px;display:flex;flex-direction:column;gap:9px;flex-shrink:0;">
         <div id="modalCarrinhoSepFields" style="display:grid;grid-template-columns:1.1fr 1fr 1.1fr;gap:9px;align-items:end;">
@@ -67629,9 +69842,123 @@ document.addEventListener('DOMContentLoaded', () => {
   const panel = document.getElementById('modalCarrinhoSepPanel');
   const responsiveStyle = document.createElement('style');
   responsiveStyle.textContent = `
+    #modalCarrinhoSepOverlay {
+      transition: opacity .22s ease;
+    }
+    #modalCarrinhoSepPanel {
+      width: min(720px, 86vw) !important;
+      max-height: 78vh !important;
+    }
+    #modalCarrinhoSepClose:hover {
+      background: rgba(30, 41, 59, .92) !important;
+      color: #e2e8f0 !important;
+    }
+    #modalCarrinhoSepItems::-webkit-scrollbar {
+      width: 9px;
+    }
+    #modalCarrinhoSepItems::-webkit-scrollbar-thumb {
+      background: rgba(71, 85, 105, .78);
+      border-radius: 999px;
+    }
+    #modalCarrinhoSepItems::-webkit-scrollbar-track {
+      background: transparent;
+    }
+    #modalCarrinhoSepForm {
+      border-top: 1px solid rgba(148, 163, 184, .14) !important;
+      padding: 14px 18px 16px !important;
+      gap: 12px !important;
+      background: linear-gradient(180deg, rgba(15, 23, 42, .97) 0%, rgba(15, 23, 42, .92) 100%) !important;
+    }
+    #modalCarrinhoSepFields label,
+    #modalCarrinhoSepObsWrap summary {
+      color: #e2e8f0 !important;
+    }
+    #modalCarrinhoSepRequester,
+    #modalCarrinhoSepMotivo,
+    #modalCarrinhoSepDate,
+    #modalCarrinhoSepHorario,
+    #modalCarrinhoSepObs,
+    .sep-cart-qty-input,
+    .sep-cart-comment {
+      background: rgba(15, 23, 42, .82) !important;
+      color: #f8fafc !important;
+      border: 1px solid rgba(71, 85, 105, .9) !important;
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, .02);
+    }
+    #modalCarrinhoSepRequester:focus,
+    #modalCarrinhoSepMotivo:focus,
+    #modalCarrinhoSepDate:focus,
+    #modalCarrinhoSepHorario:focus,
+    #modalCarrinhoSepObs:focus,
+    .sep-cart-qty-input:focus,
+    .sep-cart-comment:focus {
+      outline: none;
+      border-color: rgba(96, 165, 250, .95) !important;
+      box-shadow: 0 0 0 3px rgba(59, 130, 246, .16);
+    }
+    #modalCarrinhoSepObsWrap {
+      border: 1px solid rgba(71, 85, 105, .6) !important;
+      background: rgba(15, 23, 42, .5) !important;
+    }
+    #modalCarrinhoSepObsWrap summary {
+      padding: 10px 12px !important;
+      font-size: .82rem !important;
+    }
+    #modalCarrinhoSepActions {
+      grid-template-columns: minmax(150px, .72fr) minmax(240px, 1.28fr) !important;
+      gap: 12px !important;
+    }
+    #modalCarrinhoSepClear:hover {
+      background: rgba(127, 29, 29, .15) !important;
+    }
+    #modalCarrinhoSepSend {
+      background: linear-gradient(135deg, #facc15 0%, #f59e0b 100%) !important;
+      box-shadow: 0 16px 28px rgba(245, 158, 11, .24);
+    }
+    #modalCarrinhoSepSend:hover {
+      filter: brightness(1.04);
+    }
+    .sep-cart-row {
+      grid-template-columns: 56px minmax(0, 1fr) auto !important;
+      gap: 12px !important;
+      padding: 12px !important;
+      border: 1px solid rgba(51, 65, 85, .9) !important;
+      border-radius: 16px !important;
+      background: linear-gradient(180deg, rgba(15, 23, 42, .9) 0%, rgba(15, 23, 42, .72) 100%) !important;
+      box-shadow: 0 14px 32px rgba(2, 6, 23, .18);
+    }
+    .sep-cart-thumb {
+      width: 56px !important;
+      height: 56px !important;
+      border-radius: 14px !important;
+      border: 1px solid rgba(71, 85, 105, .52);
+      background: rgba(15, 23, 42, .84) !important;
+      display: grid !important;
+      place-items: center !important;
+    }
+    .sep-cart-thumb img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+    .sep-cart-thumb-placeholder {
+      color: #64748b;
+      font-size: 1.1rem;
+    }
+    .sep-cart-actions-row {
+      gap: 8px !important;
+    }
+    .sep-cart-qty-dec,
+    .sep-cart-qty-inc {
+      background: rgba(30, 41, 59, .95) !important;
+      border: 1px solid rgba(71, 85, 105, .95) !important;
+    }
+    .sep-cart-comment-status {
+      color: #94a3b8 !important;
+    }
     @media (max-width: 760px) {
       #modalCarrinhoSepFields { grid-template-columns: 1fr !important; }
-      #modalCarrinhoSepPanel { width: 100% !important; max-height: 92vh !important; }
+      #modalCarrinhoSepPanel { width: 100% !important; max-height: 90vh !important; }
       .sep-cart-row { grid-template-columns: minmax(0,1fr) auto !important; }
       .sep-cart-thumb { display: none !important; }
       .sep-cart-info-grid { grid-template-columns: 1fr !important; }
@@ -67644,7 +69971,9 @@ document.addEventListener('DOMContentLoaded', () => {
   document.head.appendChild(responsiveStyle);
 
   function fechar() {
-    panel.style.transform = 'translateY(40px)';
+    panel.style.transform = 'translateY(16px) scale(.985)';
+    panel.style.opacity = '0';
+    ov.style.opacity = '0';
     setTimeout(() => { ov.style.display = 'none'; }, 220);
   }
 
@@ -67657,6 +69986,28 @@ document.addEventListener('DOMContentLoaded', () => {
     const normalizado = String(value || '').replace(',', '.').trim();
     const n = parseFloat(normalizado);
     return Number.isFinite(n) && n > 0 ? n : null;
+  }
+
+  function _urlImagemCarrinho(item) {
+    let raw = String(item?.url_imagem || '').trim();
+    if (!raw && Array.isArray(window.produtosCatalogoOmie) && window.produtosCatalogoOmie.length) {
+      const produtoComImagem = window.produtosCatalogoOmie.find(p =>
+        p.codigo === item?.codigo_produto || String(p.codigo_produto || '') === String(item?.codigo_produto || '')
+      );
+      raw = String(produtoComImagem?.url_imagem || '').trim();
+    }
+    const valida = raw && (raw.startsWith('http://') || raw.startsWith('https://'));
+    if (!valida) return `/imagens_produtos/${item.codigo_produto}.jpg`;
+    if (raw.includes('Expires=')) {
+      const match = raw.match(/Expires=(\d+)/);
+      if (match?.[1]) {
+        const expiresMs = Number(match[1]) * 1000;
+        if (Number.isFinite(expiresMs) && expiresMs < Date.now()) {
+          return `/imagens_produtos/${item.codigo_produto}.jpg`;
+        }
+      }
+    }
+    return raw;
   }
 
   async function _salvarQuantidadeItem(item, quantidade, input, row) {
@@ -67729,15 +70080,28 @@ document.addEventListener('DOMContentLoaded', () => {
     itens.forEach(item => {
       const row = document.createElement('div');
       row.className = 'sep-cart-row';
-      row.style.cssText = 'display:grid;grid-template-columns:48px minmax(0,1fr) auto;gap:9px;padding:8px 10px;border:1px solid #2a2a2a;border-radius:12px;background:#171717;align-items:start;';
+      row.style.cssText = 'display:grid;grid-template-columns:56px minmax(0,1fr) auto;gap:12px;padding:12px;border:1px solid rgba(51,65,85,.9);border-radius:16px;background:linear-gradient(180deg,rgba(15,23,42,.9) 0%,rgba(15,23,42,.72) 100%);align-items:start;';
       // Thumb imagem
       const thumb = document.createElement('div');
       thumb.className = 'sep-cart-thumb';
-      thumb.style.cssText = 'width:48px;height:48px;border-radius:9px;background:#0f0f0f;overflow:hidden;flex-shrink:0;';
+      thumb.style.cssText = 'width:56px;height:56px;border-radius:14px;background:rgba(15,23,42,.84);overflow:hidden;flex-shrink:0;';
       const imgEl = document.createElement('img');
-      imgEl.src   = `/imagens_produtos/${item.codigo_produto}.jpg`;
+      imgEl.src   = _urlImagemCarrinho(item);
       imgEl.style.cssText = 'width:100%;height:100%;object-fit:cover;';
-      imgEl.onerror = () => { imgEl.style.display = 'none'; };
+      imgEl.onerror = () => {
+        if (imgEl.dataset.fallbackApplied === '1') {
+          imgEl.remove();
+          if (!thumb.querySelector('.sep-cart-thumb-placeholder')) {
+            const placeholder = document.createElement('div');
+            placeholder.className = 'sep-cart-thumb-placeholder';
+            placeholder.innerHTML = '<i class="fa-regular fa-image"></i>';
+            thumb.appendChild(placeholder);
+          }
+          return;
+        }
+        imgEl.dataset.fallbackApplied = '1';
+        imgEl.src = `/imagens_produtos/${item.codigo_produto}.jpg`;
+      };
       thumb.appendChild(imgEl);
       // Info
       const info = document.createElement('div');
@@ -67837,6 +70201,9 @@ document.addEventListener('DOMContentLoaded', () => {
         btn.disabled = true;
         try {
           await fetch(`/api/logistica/carrinho/${item.id}`, { method: 'DELETE', credentials: 'include' });
+          if (Array.isArray(window.__carrinhoSepCache)) {
+            window.__carrinhoSepCache = window.__carrinhoSepCache.filter(cacheItem => cacheItem.id !== item.id);
+          }
           row.remove();
           // Atualiza badge
           const badge = document.getElementById('listaSeparacaoCount');
@@ -67898,15 +70265,30 @@ document.addEventListener('DOMContentLoaded', () => {
     if (sendBtn) sendBtn.disabled = true;
     sel.innerHTML = '<option value="">— carregando... —</option>';
     try {
-      const [usuariosResp, me] = await Promise.all([
-        fetch('/api/usuarios/ativos', { credentials: 'include' }),
-        fetch('/api/auth/status', { credentials: 'include' }).then(r => r.json()).catch(() => ({}))
-      ]);
-      const data = await usuariosResp.json();
+      let lista = Array.isArray(window.__usuariosAtivosCache) ? window.__usuariosAtivosCache.slice() : null;
+      let me = window.__authStatusCache || null;
+
+      if (!lista || !me) {
+        const [usuariosResp, meData] = await Promise.all([
+          lista ? Promise.resolve(null) : fetch('/api/usuarios/ativos', { credentials: 'include' }),
+          me ? Promise.resolve(me) : fetch('/api/auth/status', { credentials: 'include' }).then(r => r.json()).catch(() => ({}))
+        ]);
+
+        if (!lista) {
+          const data = await usuariosResp.json();
+          lista = (data.usuarios || [])
+            .map(u => String(u?.username || '').trim())
+            .filter(Boolean);
+          window.__usuariosAtivosCache = lista.slice();
+        }
+
+        if (!me) {
+          me = meData || {};
+          window.__authStatusCache = me;
+        }
+      }
+
       const meUser = String(me?.user?.username || '').trim();
-      const lista = (data.usuarios || [])
-        .map(u => String(u?.username || '').trim())
-        .filter(Boolean);
 
       if (!lista.length) {
         sel.innerHTML = '<option value="">— nenhum usuário encontrado —</option>';
@@ -67931,33 +70313,51 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
+  async function _carregarItensCarrinhoSep() {
+    try {
+      const resp = await fetch('/api/logistica/carrinho', { credentials: 'include' });
+      const data = await resp.json();
+      const itens = data.itens || [];
+      window.__carrinhoSepCache = itens;
+      _renderItens(itens);
+      const badge = document.getElementById('listaSeparacaoCount');
+      if (badge) {
+        const n = itens.length;
+        badge.textContent = n;
+        badge.style.display = n > 0 ? '' : 'none';
+      }
+    } catch {
+      _renderItens(Array.isArray(window.__carrinhoSepCache) ? window.__carrinhoSepCache : []);
+    }
+  }
+
   async function abrir() {
     ov.style.display = 'flex';
+    ov.style.opacity = '1';
     requestAnimationFrame(() => requestAnimationFrame(() => {
-      panel.style.transform = 'translateY(0)';
+      panel.style.transform = 'translateY(0) scale(1)';
+      panel.style.opacity = '1';
     }));
     // Preenche data de hoje por padrão
     const dateEl = document.getElementById('modalCarrinhoSepDate');
     if (dateEl && !dateEl.value) dateEl.value = new Date().toISOString().slice(0, 10);
 
-    await Promise.all([
-      (async () => {
-        try {
-          const resp = await fetch('/api/logistica/carrinho', { credentials: 'include' });
-          const data = await resp.json();
-          _renderItens(data.itens || []);
-          // Sincroniza badge com total real do servidor
-          const badge = document.getElementById('listaSeparacaoCount');
-          if (badge) {
-            const n = (data.itens || []).length;
-            badge.textContent = n;
-            badge.style.display = n > 0 ? '' : 'none';
-          }
-        } catch { _renderItens([]); }
-      })(),
-      _carregarUsuarios(),
-      _carregarLocaisEstoqueSep()
-    ]);
+    if (Array.isArray(window.__carrinhoSepCache)) {
+      _renderItens(window.__carrinhoSepCache);
+    } else {
+      const container = document.getElementById('modalCarrinhoSepItems');
+      const empty = document.getElementById('modalCarrinhoSepEmpty');
+      const form = document.getElementById('modalCarrinhoSepForm');
+      if (container) {
+        container.innerHTML = '<div style="padding:18px;border:1px dashed rgba(71,85,105,.7);border-radius:14px;color:#94a3b8;text-align:center;font-size:.9rem;">Carregando itens...</div>';
+      }
+      if (empty) empty.style.display = 'none';
+      if (form) form.style.display = 'none';
+    }
+
+    _carregarItensCarrinhoSep();
+    _carregarUsuarios();
+    _carregarLocaisEstoqueSep();
   }
 
   // Enviar separação
@@ -67970,8 +70370,9 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     const selLocal = document.getElementById('modalCarrinhoSepMotivo');
-    const localEstoque = selLocal?.value || '';
-    const localEstoqueNome = selLocal?.options[selLocal.selectedIndex]?.text || '';
+    const optLocal = selLocal?.selectedOptions?.[0];
+    const localEstoque = String(optLocal?.value || '').trim();
+    const localEstoqueNome = String(optLocal?.dataset?.descricao || optLocal?.textContent || '').trim();
     if (!localEstoque) {
       alert('Selecione o local de estoque.');
       return;
@@ -67999,6 +70400,7 @@ document.addEventListener('DOMContentLoaded', () => {
         // Zera badge e fecha modal
         const badge = document.getElementById('listaSeparacaoCount');
         if (badge) { badge.textContent = '0'; badge.style.display = 'none'; }
+        window.__carrinhoSepCache = [];
         document.getElementById('modalCarrinhoSepObs').value = '';
         fechar();
         alert(`Separação enviada com sucesso! (${data.total} ${data.total === 1 ? 'item' : 'itens'})`);
@@ -68040,6 +70442,7 @@ document.addEventListener('DOMContentLoaded', () => {
         badge.textContent = '0';
         badge.style.display = 'none';
       }
+      window.__carrinhoSepCache = [];
     } catch (e) {
       alert(e.message || 'Erro ao excluir lista.');
     } finally {
@@ -68050,6 +70453,31 @@ document.addEventListener('DOMContentLoaded', () => {
   ov.addEventListener('click', e => { if (e.target === ov) fechar(); });
 
   window.abrirModalCarrinhoSeparacao = abrir;
+
+  function _precarregarCarrinhoSeparacao() {
+    if (window.__carrinhoSepPreloading) return;
+    window.__carrinhoSepPreloading = true;
+    Promise.allSettled([
+      _carregarItensCarrinhoSep(),
+      _carregarUsuarios(),
+      _carregarLocaisEstoqueSep()
+    ]).finally(() => {
+      window.__carrinhoSepPreloading = false;
+    });
+  }
+
+  if (!window.__carrinhoSepPreloadedOnce) {
+    const agendarPreload = () => {
+      if (window.__carrinhoSepPreloadedOnce) return;
+      window.__carrinhoSepPreloadedOnce = true;
+      _precarregarCarrinhoSeparacao();
+    };
+    if (typeof window.requestIdleCallback === 'function') {
+      window.requestIdleCallback(agendarPreload, { timeout: 1800 });
+    } else {
+      setTimeout(agendarPreload, 1200);
+    }
+  }
 })();
 // ===================== FIM MODAL CARRINHO DE SEPARAÇÃO =====================
 
@@ -70040,14 +72468,155 @@ window.verOperacao = function(osId) {
   const erroDiv       = document.getElementById('producaoErro');
   const rodape        = document.getElementById('producaoRodape');
   const recarrBtn     = document.getElementById('producaoRecarregarBtn');
-  const filtroBar     = document.getElementById('producaoFiltroBar');
-  const filtroSelect  = document.getElementById('producaoFiltroOperacao');
+  const filtroCodigoBar    = document.getElementById('producaoFiltroCodigoBar');
+  const filtroCodigoLabel  = document.getElementById('producaoFiltroCodigoLabel');
+  const btnLimparFiltroCodigo = document.getElementById('producaoLimparFiltroCodigo');
+  const pesquisaInput      = document.getElementById('producaoPesquisaInput');
+  const btnLimparPesquisa  = document.getElementById('producaoPesquisaLimpar');
 
+  const colPedidos    = document.getElementById('kanbanPedidos');
+  const cntPedidos    = document.getElementById('kanbanPedidosCount');
   const colProgramado = document.getElementById('kanbanProgramado');
   const cntProgramado = document.getElementById('kanbanProgramadoCount');
+  const colSolicitado = document.getElementById('kanbanSolicitado');
+  const cntSolicitado = document.getElementById('kanbanSolicitadoCount');
+  const colProduzindo = document.getElementById('kanbanProduzindo');
+  const cntProduzindo = document.getElementById('kanbanProduzindoCount');
+  const colAguardando = document.getElementById('kanbanAguardando');
+  const cntAguardando = document.getElementById('kanbanAguardandoCount');
+  const colInspecaoFinal = document.getElementById('kanbanInspecaoFinal');
+  const cntInspecaoFinal = document.getElementById('kanbanInspecaoFinalCount');
+
+  // Nomes exibidos no kanban Registrar produção — ao criar coluna nova, incluir aqui
+  const PRODUCAO_KANBAN_COLUNAS = [
+    { key: 'pedidos', nome: 'Pedidos' },
+    { key: 'programado', nome: 'Programado' },
+    { key: 'solicitado', nome: 'Montagem hermetica' },
+    { key: 'produzindo', nome: 'Montagem eletrica' },
+    { key: 'teste', nome: 'Teste' },
+    { key: 'inspecao_final', nome: 'Inspeção final' },
+  ];
+
+  function producaoNomeKanbanPorKey(colKey) {
+    return PRODUCAO_KANBAN_COLUNAS.find(c => c.key === colKey)?.nome || '';
+  }
+
+  function producaoListaNomesKanban() {
+    return PRODUCAO_KANBAN_COLUNAS.map(c => c.nome);
+  }
 
   // Cache das ordens carregadas para re-renderizar sem nova requisição
   let ordensCarregadas = [];
+  let pedidosCarregados = [];
+  let programacaoCarregada = [];
+  let filtroCodigoProduto = null;
+  let filtroPesquisa = '';
+  let pesquisaDebounce = null;
+  let pedidoArrastando = null;
+
+  function normCodigo(c) {
+    return String(c || '').trim().toUpperCase();
+  }
+
+  function normPesquisa(str) {
+    return String(str || '').trim().toLowerCase();
+  }
+
+  function opMatchesPesquisa(op) {
+    const termo = normPesquisa(filtroPesquisa || window._montaFiltroPesquisa || '');
+    if (!termo) return true;
+    const modelo = normPesquisa(op.produto?.identificacao);
+    const opNum = normPesquisa(op.identificacao);
+    return modelo.includes(termo) || opNum.includes(termo);
+  }
+
+  function pedidoItemMatchesPesquisa(it) {
+    const termo = normPesquisa(filtroPesquisa);
+    if (!termo) return true;
+    return normPesquisa(it.codigo).includes(termo);
+  }
+
+  function atualizarPesquisaBarUi() {
+    if (!btnLimparPesquisa) return;
+    btnLimparPesquisa.style.display = filtroPesquisa ? 'inline-flex' : 'none';
+  }
+
+  function buildProgramacaoMapByOp(registros) {
+    const map = {};
+    for (const reg of (registros || [])) {
+      const opProdId = Number(reg.op_producao_id);
+      if (Number.isFinite(opProdId) && opProdId > 0) {
+        const idKey = `id:${opProdId}`;
+        if (!map[idKey]) map[idKey] = [];
+        map[idKey].push(reg);
+      }
+      const opId = Number(reg.op_iapp_id);
+      if (Number.isFinite(opId) && opId > 0) {
+        const idKey = `id:${opId}`;
+        if (!map[idKey]) map[idKey] = [];
+        if (!map[idKey].some(r => r.id === reg.id)) map[idKey].push(reg);
+      }
+      const opNum = String(reg.numero_op || '').trim();
+      if (opNum) {
+        const opKey = `op:${opNum}`;
+        if (!map[opKey]) map[opKey] = [];
+        if (!map[opKey].some(r => r.id === reg.id)) map[opKey].push(reg);
+      }
+    }
+    return map;
+  }
+
+  function getProgRegsForOp(op, progMapByOp) {
+    const byId = progMapByOp[`id:${Number(op.id)}`] || [];
+    const byNum = progMapByOp[`op:${String(op.identificacao || '').trim()}`] || [];
+    const merged = [...byId];
+    for (const r of byNum) {
+      if (!merged.some(m => m.id === r.id)) merged.push(r);
+    }
+    return merged;
+  }
+
+  async function recarregarProgramacao() {
+    try {
+      const resp = await fetch('/api/producao/kanban-programacao');
+      const data = await resp.json();
+      if (resp.ok && data.success) {
+        programacaoCarregada = data.registros || [];
+        return true;
+      }
+    } catch (_) { /* silencioso */ }
+    return false;
+  }
+
+  function setKanbanProcessando(ativo, msg) {
+    if (!spinner) return;
+    if (ativo) {
+      spinner.style.display = 'block';
+      if (spinnerMsg) spinnerMsg.textContent = msg || 'Processando...';
+    } else {
+      spinner.style.display = 'none';
+    }
+  }
+
+  async function recarregarPedidos() {
+    const resp = await fetch('/api/producao/pedidos-kanban');
+    const data = await resp.json();
+    if (resp.ok && data.success) {
+      pedidosCarregados = data.pedidos || [];
+      return true;
+    }
+    return false;
+  }
+
+  function renderFiltroCodigoBar() {
+    if (!filtroCodigoBar) return;
+    if (filtroCodigoProduto) {
+      filtroCodigoBar.style.display = 'flex';
+      if (filtroCodigoLabel) filtroCodigoLabel.textContent = decodeHtmlEntities(filtroCodigoProduto);
+    } else {
+      filtroCodigoBar.style.display = 'none';
+    }
+  }
 
   function fmtData(str) {
     if (!str) return '—';
@@ -70056,9 +72625,11 @@ window.verOperacao = function(osId) {
     return str;
   }
 
-  function fmtMoeda(v) {
-    if (v == null || v === '') return '—';
-    return 'R$ ' + Number(v).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  function fmtDataHora(str) {
+    if (!str) return '—';
+    const m = String(str).match(/^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})/);
+    if (m) return `${m[3]}/${m[2]}/${m[1]} ${m[4]}:${m[5]}`;
+    return fmtData(str);
   }
 
   function fmtQtde(v) {
@@ -70083,6 +72654,7 @@ window.verOperacao = function(osId) {
     const s = String(status || '').trim();
     if (!s) return '';
     const cores = {
+      'Solicitado': { bg: '#1e3a8a', txt: '#bfdbfe' },
       'Iniciado':   { bg: '#14532d', txt: '#bbf7d0' },
       'Produzindo': { bg: '#065f46', txt: '#6ee7b7' },
       'Parado':     { bg: '#92400e', txt: '#fcd34d' },
@@ -70091,45 +72663,278 @@ window.verOperacao = function(osId) {
     return `<span style="flex-shrink:0;display:inline-block;padding:1px 6px;border-radius:4px;font-size:10px;font-weight:700;background:${c.bg};color:${c.txt};">${s}</span>`;
   }
 
-  function renderGrupo(prodId, ops) {
+  function opKanbanProgRegs(op) {
+    const progMap = buildProgramacaoMapByOp(programacaoCarregada);
+    return getProgRegsForOp(op, progMap);
+  }
+
+  function normStatusKanban(s) {
+    return String(s || '')
+      .trim()
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/\p{M}/gu, '');
+  }
+
+  function parsePostosKanban(val) {
+    if (!val) return [];
+    if (Array.isArray(val)) return val.map(v => String(v || '').trim()).filter(Boolean);
+    try {
+      const arr = JSON.parse(String(val));
+      return Array.isArray(arr) ? arr.map(v => String(v || '').trim()).filter(Boolean) : [];
+    } catch (_) {
+      return [];
+    }
+  }
+
+  function observacaoVisivelNoKanban(opRegs, colKey) {
+    const obs = opRegs.map(r => String(r.observacao || '').trim()).find(Boolean) || '';
+    if (!obs) return '';
+    const postosPlan = [...new Set(opRegs.flatMap(r => parsePostosKanban(r.postos)))];
+    if (!postosPlan.length || colKey === 'programado') return obs;
+    const nomeCol = producaoNomeKanbanPorKey(colKey);
+    return postosPlan.includes(nomeCol) ? obs : '';
+  }
+
+  function opColunaAtual(op) {
+    const regs = opKanbanProgRegs(op);
+    if (!regs.length) return 'programado';
+
+    const statuses = regs.map(r => normStatusKanban(r.status)).filter(Boolean);
+    if (statuses.includes('finalizado')) return 'finalizado';
+    if (statuses.includes('inspecao final') || statuses.includes('teste ok')) return 'inspecao_final';
+    if (statuses.includes('teste')) return 'teste';
+    if (statuses.includes('montagem eletrica')) return 'produzindo';
+    if (statuses.includes('montagem hermetica')) return 'solicitado';
+
+    // Vínculo pedido→OP (status vazio) — permanece em Programado até imprimir etiqueta
+    return 'programado';
+  }
+
+  function opStatusColuna(op, colKey) {
+    return opColunaAtual(op) === colKey;
+  }
+
+  async function carregarRiStatusPorOps(ordens) {
+    const ops = (ordens || []).map(op => ({ op_producao_id: op.id }));
+    if (!ops.length) {
+      window._montaRiStatusPorOp = {};
+      window._producaoKanbanRiHabilitado = false;
+      return;
+    }
+    try {
+      const resp = await fetch('/api/qualidade/ri-check/status-por-ops', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ ops }),
+      });
+      const data = await resp.json();
+      window._montaRiStatusPorOp = (resp.ok && data.ok && data.status_por_op)
+        ? data.status_por_op
+        : {};
+      window._producaoKanbanRiHabilitado = true;
+    } catch (_) {
+      window._montaRiStatusPorOp = {};
+      window._producaoKanbanRiHabilitado = false;
+    }
+  }
+  window._producaoCarregarRiStatus = carregarRiStatusPorOps;
+
+  async function carregarParadasAtivasPorOps(ordens, progOverride) {
+    const prog = Array.isArray(progOverride) ? progOverride : programacaoCarregada;
+    const ops = (ordens || []).map((op) => {
+      const reg = (prog || []).find((r) =>
+        Number(r.op_producao_id) === Number(op.id)
+        || String(r.numero_op || '').trim().toUpperCase() === String(op.identificacao || '').trim().toUpperCase()
+      );
+      return {
+        op_producao_id: op.id,
+        numero_op: op.identificacao || '',
+        kanban_programacao_id: reg?.id || null,
+      };
+    });
+    if (!ops.length) {
+      window._montaParadaAtivaPorOp = {};
+      return;
+    }
+    try {
+      const resp = await fetch('/api/producao/paradas/ativas-por-ops', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ ops }),
+      });
+      const data = await resp.json();
+      window._montaParadaAtivaPorOp = (resp.ok && data.success && data.paradas_por_op)
+        ? data.paradas_por_op
+        : {};
+    } catch (_) {
+      window._montaParadaAtivaPorOp = {};
+    }
+  }
+  window._producaoCarregarParadasAtivas = carregarParadasAtivasPorOps;
+
+  async function carregarTemposPostoPorOps(ordens, progOverride) {
+    const prog = Array.isArray(progOverride) ? progOverride : programacaoCarregada;
+    const postoCols = ['solicitado', 'produzindo', 'teste', 'inspecao_final'];
+    const ops = (ordens || []).filter(op => postoCols.includes(opColunaAtual(op))).map((op) => {
+      const reg = (prog || []).find((r) =>
+        Number(r.op_producao_id) === Number(op.id)
+        || String(r.numero_op || '').trim().toUpperCase() === String(op.identificacao || '').trim().toUpperCase()
+      );
+      return {
+        op_producao_id: op.id,
+        numero_op: op.identificacao || '',
+        kanban_programacao_id: reg?.id || null,
+      };
+    });
+    if (!ops.length) {
+      window._producaoTempoPostoPorOp = {};
+      return;
+    }
+    try {
+      const resp = await fetch('/api/producao/tempo/ativos-por-ops', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ ops }),
+      });
+      const data = await resp.json();
+      window._producaoTempoPostoPorOp = (resp.ok && data.success && data.tempos_por_op)
+        ? data.tempos_por_op
+        : {};
+    } catch (_) {
+      window._producaoTempoPostoPorOp = {};
+    }
+  }
+  window._producaoCarregarTemposPosto = carregarTemposPostoPorOps;
+
+  function opTempoPostoInfo(op) {
+    const map = window._producaoTempoPostoPorOp || {};
+    return map[`id:${op?.id}`] || map[`op:${String(op?.identificacao || '').trim().toUpperCase()}`] || null;
+  }
+
+  function opComParadaAtiva(op) {
+    const map = window._montaParadaAtivaPorOp || {};
+    return !!map[String(op?.id)];
+  }
+
+  function renderKanbanCol(colEl, cntEl, ordens, colKey, msgVazia, onlyAProduzir, codigoFiltro) {
+    if (!colEl) return;
+    const riFlagBackup = window._producaoVerificarRiKanban;
+    if (window._producaoKanbanRiHabilitado) window._producaoVerificarRiKanban = true;
+    const base = onlyAProduzir ? ordens.filter(op => op.status === 'A PRODUZIR') : ordens;
+    const grupos = {};
+    let totalOps = 0;
+
+    for (const op of base) {
+      const prodCodigo = op.produto?.identificacao || String(op.id);
+      if (codigoFiltro && normCodigo(prodCodigo) !== normCodigo(codigoFiltro)) continue;
+      if (!opMatchesPesquisa(op)) continue;
+      if (!opStatusColuna(op, colKey)) continue;
+
+      totalOps += 1;
+      const key = prodCodigo;
+      if (!grupos[key]) grupos[key] = [];
+      grupos[key].push(op);
+    }
+
+    if (!Object.keys(grupos).length) {
+      const msg = filtroPesquisa
+        ? `Nenhuma OP encontrada para "${escHtml(filtroPesquisa)}".`
+        : msgVazia;
+      colEl.innerHTML = `<div style="text-align:center;padding:24px 0;color:var(--inactive-color);font-size:12px;">${msg}</div>`;
+    } else {
+      colEl.innerHTML = Object.entries(grupos).map(([k, ops]) => renderGrupo(k, ops, colKey)).join('');
+    }
+    if (cntEl) cntEl.textContent = totalOps;
+    window._producaoVerificarRiKanban = riFlagBackup;
+  }
+
+  function opMontagemRiLiberada(op, colKey) {
+    if (!window._producaoVerificarRiKanban) return true;
+    if (colKey === 'programado') return true;
+    const nomeKanban = producaoNomeKanbanPorKey(colKey);
+    if (!nomeKanban) return true;
+    const map = window._montaRiStatusPorOp || {};
+    const riStatus = map[String(op.id)] || '';
+    if (!riStatus) return false;
+    return normStatusKanban(riStatus) === normStatusKanban(nomeKanban);
+  }
+
+  function renderGrupo(prodId, ops, colKey) {
     const prod = ops[0].produto || {};
     const qtdeTotal = ops.reduce((s, op) => s + (Number(op.qtde) || 0), 0);
+    const progMapByOp = buildProgramacaoMapByOp(programacaoCarregada);
+    const modoMontagem = !!window._producaoRenderModoMontagem;
+    const podeReceberPedido = !modoMontagem && ['programado', 'solicitado', 'produzindo'].includes(colKey);
 
     const opsHtml = ops.map(op => {
-      const _filtroOp = filtroSelect ? filtroSelect.value : '';
-      const _osVis = _filtroOp
-        ? (op.ordens_servico || []).filter(os => os.operacao === _filtroOp)
-        : (op.ordens_servico || []);
-      const osHtml = _osVis.map(os =>
-        `<div onclick="event.stopPropagation();window.abrirModalOS(${os.id},'${(os.identificacao||'').replace(/'/g,"\\'")}',${op.id},'${(os.operacao||'').replace(/'/g,"\\'")}','${(os.status||'').replace(/'/g,"\\'")}','${(op.identificacao||'').replace(/'/g,"\\'")}','${(os.status_producao||'').replace(/'/g,"\\'")}','${(os.operador||'').replace(/'/g,"\\'")}','${(os.data_status_producao||'').replace(/'/g,"\\'")}')"
-          style="background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.06);border-radius:5px;padding:5px 8px;display:flex;flex-direction:column;gap:3px;cursor:pointer;transition:background .15s;"
-          onmouseenter="this.style.background='rgba(99,102,241,.12)'" onmouseleave="this.style.background='rgba(255,255,255,.03)'">
-          <div style="display:flex;align-items:center;gap:6px;">
-            <span style="font-size:10px;color:#94a3b8;min-width:70px;font-weight:600;flex-shrink:0;">${os.identificacao || ('#' + os.id)}</span>
-            <span style="font-size:10px;color:#cbd5e1;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${(os.operacao || '').replace(/"/g,'&quot;')}">${os.operacao || '—'}</span>
-            ${badgeProducao(os.status_producao)}
-            ${badgeOS(os.status)}
-          </div>
-          <div style="display:flex;flex-wrap:wrap;gap:10px;padding-left:2px;">
-            ${os.data_abertura     ? `<span style="font-size:10px;color:#64748b;">Abertura: <b style="color:#94a3b8;">${fmtData(os.data_abertura)}</b></span>` : ''}
-            ${os.data_inicio       ? `<span style="font-size:10px;color:#64748b;">Início: <b style="color:#94a3b8;">${fmtData(os.data_inicio)}</b></span>` : ''}
-            ${os.data_final        ? `<span style="font-size:10px;color:#64748b;">Final: <b style="color:#94a3b8;">${fmtData(os.data_final)}</b></span>` : ''}
-            ${os.data_encerramento ? `<span style="font-size:10px;color:#64748b;">Encerramento: <b style="color:#94a3b8;">${fmtData(os.data_encerramento)}</b></span>` : ''}
-            ${os.operador          ? `<span style="font-size:10px;color:#64748b;">Operador: <b style="color:#94a3b8;">${os.operador}</b></span>` : ''}
-          </div>
-        </div>`
-      ).join('');
+      const opRegs = getProgRegsForOp(op, progMapByOp);
+      const isOpVinculado = opRegs.length > 0;
+      const pedidosOp = [...new Set(opRegs.map(r => String(r.numero_pedido || '').trim()).filter(Boolean))];
+      const pedidosOpHtml = pedidosOp.length
+        ? pedidosOp.map(np =>
+            `<span class="kanban-op-pedido-numero"><i class="fa-solid fa-link" style="font-size:9px;"></i>Ped. ${escHtml(np)}</span>`
+          ).join('')
+        : '';
+      const dropClass = podeReceberPedido ? ' prog-kanban-op-drop' : '';
+      const vincClass = isOpVinculado ? ' op-kanban-vinculado' : '';
+      const prodCodigoAttr = escHtml(prod.identificacao || prodId);
+      const opIdentAttr = escHtml(op.identificacao || '');
+      const dropTitle = podeReceberPedido ? 'Solte um item de Pedidos aqui (mesmo código de produto)' : '';
+      const obsKanban = observacaoVisivelNoKanban(opRegs, colKey);
+      const postosPlan = [...new Set(opRegs.flatMap(r => parsePostosKanban(r.postos)))];
+      const postosPlanHtml = postosPlan.length && colKey === 'programado'
+        ? `<div style="font-size:10px;color:#818cf8;margin-top:4px;">Postos: ${postosPlan.map(p => escHtml(p)).join(' · ')}</div>`
+        : '';
 
-      const detalhesId = `op-det-${op.id}`;
+      const riLiberada = opMontagemRiLiberada(op, colKey);
+      const riBloqueada = !!window._producaoVerificarRiKanban && !riLiberada;
+      const riBloqClass = riBloqueada ? ' kanban-op-card-ri-bloqueado' : '';
+      const riMsgHtml = riBloqueada
+        ? `<div style="font-size:11px;color:#fbbf24;font-weight:600;margin-top:8px;line-height:1.35;"><i class="fa-solid fa-lock" style="margin-right:5px;font-size:10px;"></i>Aguardando liberação via RI</div>`
+        : '';
 
-      return `<div data-op-id="${op.id}" style="background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);border-radius:8px;padding:10px 12px;margin-top:8px;cursor:pointer;">
-        <!-- Cabeçalho sempre visível -->
+      const emParada = opComParadaAtiva(op);
+      const paradaClass = emParada ? ' kanban-op-card-parada' : '';
+      const paradaIconHtml = emParada
+        ? `<span class="kanban-op-card-parada-badge" title="OP em parada"><i class="fa-solid fa-circle-pause"></i></span>`
+        : '';
+      const paradaMsgHtml = emParada
+        ? `<div style="font-size:11px;color:#f87171;font-weight:600;margin-top:8px;line-height:1.35;"><i class="fa-solid fa-circle-pause" style="margin-right:5px;font-size:10px;"></i>Produção parada</div>`
+        : '';
+      const tempoInfo = opTempoPostoInfo(op);
+      const tempoPostoHtml = (tempoInfo && (tempoInfo.tempo_formatado !== '—' || tempoInfo.tempo_total_formatado !== '—'))
+        ? `<div class="kanban-op-tempo-posto" style="font-size:11px;color:#67e8f9;font-weight:600;margin-top:8px;line-height:1.35;">
+            <i class="fa-solid fa-hourglass-half" style="margin-right:5px;font-size:10px;"></i>
+            Tempo no posto: <b class="kanban-op-tempo-posto-valor">${escHtml(tempoInfo.tempo_formatado || '—')}</b>
+            ${tempoInfo.posto_origem ? `<span style="font-weight:400;color:#94a3b8;"> · ${escHtml(tempoInfo.posto_origem)}</span>` : ''}
+            ${tempoInfo.tempo_total_formatado && tempoInfo.tempo_total_formatado !== '—'
+              ? `<span style="font-weight:400;color:#94a3b8;"> · Total OP: <b class="kanban-op-tempo-total-valor">${escHtml(tempoInfo.tempo_total_formatado)}</b></span>`
+              : ''}
+          </div>`
+        : '';
+      const cardTitle = emParada
+        ? 'OP em parada'
+        : (riBloqueada ? 'Aguardando liberação via RI' : dropTitle);
+
+      return `<div data-op-id="${op.id}" class="kanban-op-card${dropClass}${vincClass}${riBloqClass}${paradaClass}"
+        ${riBloqueada ? 'data-op-ri-bloqueado="1"' : ''}
+        ${emParada ? 'data-op-parada="1"' : ''}
+        data-op-ident="${opIdentAttr}"
+        data-op-qtde="${Number(op.qtde) || 0}"
+        data-prod-codigo="${prodCodigoAttr}"
+        title="${escHtml(cardTitle)}">
         <div style="display:flex;align-items:flex-start;gap:8px;">
           <div style="flex:1;min-width:0;">
-            <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;">
+            <div style="display:flex;align-items:center;flex-wrap:wrap;gap:6px;margin-bottom:4px;">
               <span style="font-size:10px;color:#475569;font-weight:600;">#${op.id}</span>
               <span style="font-size:13px;font-weight:700;color:#e2e8f0;">OP ${op.identificacao || '—'}</span>
+              ${pedidosOpHtml}
               <span style="font-size:11px;color:#94a3b8;margin-left:auto;">Qtde: <b style="color:#f1f5f9;">${fmtQtde(op.qtde)}</b></span>
+              ${paradaIconHtml}
             </div>
             <div style="display:flex;flex-wrap:wrap;gap:8px;">
               ${op.data_abertura             ? `<span style="font-size:10px;color:#64748b;">Abertura: <b style="color:#94a3b8;">${fmtData(op.data_abertura)}</b></span>` : ''}
@@ -70138,77 +72943,317 @@ window.verOperacao = function(osId) {
               ${op.data_previsao_faturamento  ? `<span style="font-size:10px;color:#64748b;">Prev. fat.: <b style="color:#a5f3fc;">${fmtData(op.data_previsao_faturamento)}</b></span>` : ''}
               ${op.data_previsao_entrega     ? `<span style="font-size:10px;color:#64748b;">Prev. entrega: <b style="color:#a5f3fc;">${fmtData(op.data_previsao_entrega)}</b></span>` : ''}
             </div>
+            ${postosPlanHtml}
+            ${op.obs ? `<div style="font-size:11px;color:#94a3b8;margin-top:6px;">Obs: <span style="color:#fef3c7;">${op.obs}</span></div>` : ''}
+            ${obsKanban ? `<div style="font-size:11px;color:#94a3b8;margin-top:6px;">Observação: <span style="color:#fde68a;white-space:pre-wrap;">${escHtml(obsKanban)}</span></div>` : ''}
+            ${tempoPostoHtml}
+            ${paradaMsgHtml}
+            ${riMsgHtml}
           </div>
-          <button type="button" class="op-expand-btn" onclick="event.stopPropagation();(function(btn){var d=document.getElementById('${detalhesId}');var aberto=d.style.display!=='none';d.style.display=aberto?'none':'flex';btn.innerHTML=aberto?'<i class=\\'fa-solid fa-chevron-down\\'></i>':'<i class=\\'fa-solid fa-chevron-up\\'></i>';})(this)"
-            style="flex-shrink:0;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.12);border-radius:6px;color:#94a3b8;width:26px;height:26px;display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:11px;margin-top:2px;">
-            <i class="fa-solid fa-chevron-down"></i>
-          </button>
-        </div>
-        <!-- Detalhes recolhidos por padrão -->
-        <div id="${detalhesId}" style="display:none;flex-direction:column;gap:4px;margin-top:10px;padding-top:10px;border-top:1px solid rgba(255,255,255,.06);">
-          ${op.data_encerramento ? `<div style="font-size:10px;color:#64748b;">Encerramento: <b style="color:#94a3b8;">${fmtData(op.data_encerramento)}</b></div>` : ''}
-          ${op.ficha_tecnica     ? `<div style="font-size:11px;color:#94a3b8;">Ficha técnica: <span style="color:#c7d2fe;">${op.ficha_tecnica}</span></div>` : ''}
-          ${op.obs               ? `<div style="font-size:11px;color:#94a3b8;">Obs: <span style="color:#fef3c7;">${op.obs}</span></div>` : ''}
-          ${osHtml ? `<div style="display:flex;flex-direction:column;gap:4px;margin-top:4px;">${osHtml}</div>` : '<div style="font-size:11px;color:#475569;">Sem ordens de serviço.</div>'}
         </div>
       </div>`;
     }).join('');
 
     const descEscapada = (prod.descricao || '').replace(/"/g, '&quot;');
 
-    return `<div style="background:var(--content-bg,#1e2233);border:1px solid rgba(255,255,255,.1);border-radius:10px;padding:12px;">
+    return `<div class="kanban-prod-grupo" data-col-key="${escHtml(colKey)}" style="background:var(--content-bg,#1e2233);border:1px solid rgba(255,255,255,.1);border-radius:10px;padding:12px;">
       <div style="display:flex;align-items:flex-start;gap:8px;margin-bottom:6px;">
         <div style="flex:1;min-width:0;">
           <div style="font-size:13px;font-weight:700;color:#f59e0b;letter-spacing:.3px;">${prod.identificacao || prodId}</div>
           <div style="font-size:12px;color:#e2e8f0;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;margin-top:2px;line-height:1.4;" title="${descEscapada}">${prod.descricao || '—'}</div>
           <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:4px;">
             ${prod.tipo ? `<span style="font-size:10px;color:#94a3b8;">${prod.tipo}</span>` : ''}
-            ${prod.valor_custo != null ? `<span style="font-size:10px;color:#6ee7b7;font-weight:600;">${fmtMoeda(prod.valor_custo)}</span>` : ''}
           </div>
         </div>
         <span style="flex-shrink:0;font-size:12px;font-weight:700;background:#312e81;color:#c7d2fe;padding:3px 10px;border-radius:12px;">QTD ${fmtQtde(qtdeTotal)}</span>
       </div>
       <div style="margin-top:10px;display:flex;flex-wrap:wrap;gap:8px;">
+        ${modoMontagem ? '' : `
         <button type="button" class="kanban-group-action-btn" data-group-key="${(prodId || '').replace(/"/g,'&quot;')}" data-produto-codigo="${(prod.identificacao || prodId || '').replace(/"/g,'&quot;')}" style="border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#cbd5e1;border-radius:8px;padding:7px 12px;cursor:pointer;font-size:12px;">
           Ver estrutura / processo
-        </button>
+        </button>`}
       </div>
+      ${podeReceberPedido ? '<div style="font-size:10px;color:#818cf8;margin-top:6px;">Arraste um item de Pedidos sobre a OP desejada.</div>' : ''}
       ${opsHtml}
     </div>`;
   }
 
+  function decodeHtmlEntities(str) {
+    const s = String(str ?? '');
+    if (!s.includes('&')) return s;
+    const ta = document.createElement('textarea');
+    ta.innerHTML = s;
+    return ta.value;
+  }
+
+  function escHtml(str) {
+    return String(str ?? '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+
+  function fmtTextoHtml(str) {
+    return escHtml(decodeHtmlEntities(str));
+  }
+
+  function renderColunaPedidos(pedidos, codigoFiltro) {
+    if (!colPedidos) return;
+
+    const lista = pedidos.map(ped => {
+      let itens = Array.isArray(ped.itens) ? ped.itens : [];
+      if (codigoFiltro) {
+        itens = itens.filter(it => normCodigo(it.codigo) === normCodigo(codigoFiltro));
+      }
+      if (filtroPesquisa) {
+        itens = itens.filter(it => pedidoItemMatchesPesquisa(it));
+      }
+      return { ...ped, itens };
+    }).filter(ped => ped.itens.length > 0);
+
+    if (!lista.length) {
+      const msg = filtroPesquisa
+        ? `Nenhum item encontrado para "${decodeHtmlEntities(filtroPesquisa)}".`
+        : codigoFiltro
+        ? `Nenhum pedido com saldo para o produto ${decodeHtmlEntities(codigoFiltro)}.`
+        : 'Nenhum pedido aprovado.';
+      colPedidos.innerHTML = `<div style="text-align:center;padding:24px 0;color:var(--inactive-color);font-size:12px;">${msg}</div>`;
+    } else {
+      colPedidos.innerHTML = lista.map(ped => {
+        const itens = ped.itens || [];
+        const itensHtml = itens.map(it => {
+          const ativo = codigoFiltro && normCodigo(it.codigo) === normCodigo(codigoFiltro);
+          return `
+            <div class="pedido-kanban-item"
+              draggable="true"
+              data-codigo-pedido="${escHtml(ped.codigo_pedido)}"
+              data-numero-pedido="${escHtml(ped.numero_pedido || '')}"
+              data-codigo-produto="${escHtml(it.codigo_produto || '')}"
+              data-codigo="${escHtml(it.codigo || '')}"
+              data-descricao="${escHtml(it.descricao || '')}"
+              data-quantidade="${escHtml(it.quantidade || '0')}"
+              title="Clique para filtrar · Arraste para uma OP"
+              style="display:flex;flex-direction:column;gap:6px;font-size:11px;padding:6px 8px;border-radius:6px;cursor:grab;${ativo ? 'background:rgba(245,158,11,.18);border:1px solid rgba(245,158,11,.45);' : 'background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.06);'}">
+              <div style="display:flex;align-items:flex-start;gap:8px;">
+                <span style="flex-shrink:0;font-weight:700;color:#fbbf24;min-width:72px;">${fmtTextoHtml(it.codigo || '—')}</span>
+                <span style="flex:1;color:#e2e8f0;line-height:1.35;">${fmtTextoHtml(it.descricao || '—')}</span>
+                <span style="flex-shrink:0;color:#94a3b8;font-weight:600;">${fmtQtde(it.quantidade)}</span>
+              </div>
+              <div style="display:flex;justify-content:flex-end;">
+                <button type="button" class="pedido-analise-btn"
+                  data-produto-codigo="${escHtml(it.codigo || '')}"
+                  data-codigo-pedido="${escHtml(ped.codigo_pedido)}"
+                  data-numero-pedido="${escHtml(ped.numero_pedido || '')}"
+                  data-codigo-produto="${escHtml(it.codigo_produto || '')}"
+                  data-descricao="${escHtml(it.descricao || '')}"
+                  data-quantidade="${escHtml(it.quantidade || '0')}"
+                  title="Ver estrutura do produto">
+                  <i class="fa-solid fa-magnifying-glass-chart" style="margin-right:4px;"></i>Analise
+                </button>
+              </div>
+            </div>`;
+        }).join('');
+
+        return `<div style="background:var(--content-bg,#1e2233);border:1px solid rgba(245,158,11,.25);border-radius:10px;padding:12px;">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">
+            <span style="font-size:13px;font-weight:700;color:#fbbf24;">Pedido ${fmtTextoHtml(ped.numero_pedido || '—')}</span>
+            <span style="margin-left:auto;font-size:10px;color:#64748b;">#${fmtTextoHtml(ped.codigo_pedido)}</span>
+          </div>
+          <div style="font-size:10px;color:#64748b;margin-top:2px;">
+            Atualizado: <b style="color:#94a3b8;">${fmtDataHora(ped.updated_at)}</b>
+          </div>
+          ${ped.obs_venda ? `<div style="font-size:11px;color:#fde68a;line-height:1.4;margin-top:4px;">${fmtTextoHtml(ped.obs_venda)}</div>` : ''}
+          <div style="display:flex;flex-direction:column;gap:4px;margin-top:8px;padding-top:8px;border-top:1px solid rgba(255,255,255,.08);">${itensHtml}</div>
+        </div>`;
+      }).join('');
+    }
+    if (cntPedidos) cntPedidos.textContent = lista.length;
+  }
+
+  async function registrarProgramacaoPedido(payload, opQtde, prodCodigo, numeroOp, opProducaoId) {
+    if (normCodigo(payload.codigo) !== normCodigo(prodCodigo)) {
+      alert(`Os produtos não são os mesmos.\nPedido: ${payload.codigo || '—'}\nOP: ${prodCodigo || '—'}`);
+      return false;
+    }
+    const saldoPedido = Number(payload.quantidade);
+    const qtdOp = Number.isFinite(opQtde) && opQtde > 0 ? opQtde : 1;
+    if (!Number.isFinite(saldoPedido) || saldoPedido < qtdOp) {
+      alert(`Saldo do pedido (${fmtQtde(saldoPedido)}) é menor que a quantidade da OP (${fmtQtde(qtdOp)}).`);
+      return false;
+    }
+
+    const resp = await fetch('/api/producao/kanban-programacao', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        codigo_pedido: Number(payload.codigo_pedido),
+        codigo: payload.codigo,
+        quantidade_programado: qtdOp,
+        numero_op: numeroOp,
+        op_producao_id: opProducaoId
+      })
+    });
+    const data = await resp.json();
+    if (!resp.ok || !data.success) {
+      alert(data.error || 'Erro ao registrar programação.');
+      return false;
+    }
+    return true;
+  }
+
+  function setupPedidosProgramacaoInteractions() {
+    if (colPedidos) {
+      colPedidos.addEventListener('click', (e) => {
+        if (e.target.closest('.pedido-analise-btn')) return;
+        const item = e.target.closest('.pedido-kanban-item');
+        if (!item) return;
+        filtroCodigoProduto = item.dataset.codigo || null;
+        renderKanban(ordensCarregadas);
+      });
+
+      colPedidos.addEventListener('dragstart', (e) => {
+        const item = e.target.closest('.pedido-kanban-item');
+        if (!item) return;
+        pedidoArrastando = {
+          codigo_pedido: item.dataset.codigoPedido,
+          numero_pedido: item.dataset.numeroPedido,
+          codigo_produto: item.dataset.codigoProduto,
+          codigo: item.dataset.codigo,
+          descricao: item.dataset.descricao,
+          quantidade: item.dataset.quantidade
+        };
+        e.dataTransfer.setData('application/json', JSON.stringify(pedidoArrastando));
+        e.dataTransfer.effectAllowed = 'move';
+        item.style.opacity = '0.55';
+      });
+
+      colPedidos.addEventListener('dragend', (e) => {
+        const item = e.target.closest('.pedido-kanban-item');
+        if (item) item.style.opacity = '';
+        pedidoArrastando = null;
+        [colProgramado, colSolicitado, colProduzindo].forEach(limparHoverOpDrop);
+      });
+    }
+
+    function pedidoOpMesmoProduto(pedidoCodigo, opProdCodigo) {
+      return normCodigo(pedidoCodigo) === normCodigo(opProdCodigo);
+    }
+
+    function limparHoverOpDrop(colEl) {
+      colEl?.querySelectorAll('.prog-kanban-op-drop.op-drop-hover, .prog-kanban-op-drop.op-drop-hover-invalid')
+        .forEach(el => el.classList.remove('op-drop-hover', 'op-drop-hover-invalid'));
+    }
+
+    function bindPedidoDropColuna(colEl) {
+      if (!colEl) return;
+
+      colEl.addEventListener('dragover', (e) => {
+        const opCard = e.target.closest('.prog-kanban-op-drop');
+        if (!opCard || !pedidoArrastando) return;
+        e.preventDefault();
+        const mesmoProduto = pedidoOpMesmoProduto(pedidoArrastando.codigo, opCard.dataset.prodCodigo);
+        e.dataTransfer.dropEffect = mesmoProduto ? 'move' : 'none';
+        limparHoverOpDrop(colEl);
+        opCard.classList.add(mesmoProduto ? 'op-drop-hover' : 'op-drop-hover-invalid');
+      });
+
+      colEl.addEventListener('dragleave', (e) => {
+        const opCard = e.target.closest('.prog-kanban-op-drop');
+        if (!opCard) return;
+        if (opCard.contains(e.relatedTarget)) return;
+        opCard.classList.remove('op-drop-hover', 'op-drop-hover-invalid');
+      });
+
+      colEl.addEventListener('drop', async (e) => {
+        const opCard = e.target.closest('.prog-kanban-op-drop');
+        if (!opCard) return;
+        e.preventDefault();
+        e.stopPropagation();
+        limparHoverOpDrop(colEl);
+
+        let payload = pedidoArrastando;
+        if (!payload) {
+          try {
+            payload = JSON.parse(e.dataTransfer.getData('application/json') || 'null');
+          } catch (_) { payload = null; }
+        }
+        if (!payload) return;
+
+        const opQtde = Number(opCard.dataset.opQtde) || 1;
+        const prodCodigo = opCard.dataset.prodCodigo || '';
+        const numeroOp = opCard.dataset.opIdent || '';
+        const opProducaoId = Number(opCard.dataset.opId);
+        if (!numeroOp || !Number.isFinite(opProducaoId) || opProducaoId <= 0) return;
+
+        if (!pedidoOpMesmoProduto(payload.codigo, prodCodigo)) {
+          alert(`Os produtos não são os mesmos.\nPedido: ${payload.codigo || '—'}\nOP: ${prodCodigo || '—'}`);
+          return;
+        }
+
+        setKanbanProcessando(true, 'Vinculando pedido à OP...');
+        try {
+          const ok = await registrarProgramacaoPedido(payload, opQtde, prodCodigo, numeroOp, opProducaoId);
+          if (!ok) return;
+
+          await Promise.all([recarregarPedidos(), recarregarProgramacao()]);
+          renderKanban(ordensCarregadas);
+        } finally {
+          setKanbanProcessando(false);
+        }
+      });
+    }
+
+    [colProgramado, colSolicitado, colProduzindo].forEach(bindPedidoDropColuna);
+
+    colPedidos?.addEventListener('click', (e) => {
+      const btnAnalise = e.target.closest('.pedido-analise-btn');
+      if (!btnAnalise) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const produtoCodigo = btnAnalise.dataset.produtoCodigo || '';
+      if (!produtoCodigo) return;
+      const groupKey = produtoCodigo;
+      const ops = ordensCarregadas.filter(op => (op.produto?.identificacao || String(op.id)) === groupKey);
+      const pedidoItem = {
+        codigo_pedido: btnAnalise.dataset.codigoPedido,
+        numero_pedido: btnAnalise.dataset.numeroPedido,
+        codigo_produto: btnAnalise.dataset.codigoProduto,
+        codigo: btnAnalise.dataset.produtoCodigo || produtoCodigo,
+        descricao: btnAnalise.dataset.descricao,
+        quantidade: btnAnalise.dataset.quantidade,
+      };
+      openProducaoKanbanActionsModal(produtoCodigo, groupKey, ops, '', {
+        somenteEstrutura: true,
+        titulo: 'Análise',
+        mostrarEstoque: true,
+        ocultarValores: true,
+        pedidoItem,
+      });
+    });
+
+    btnLimparFiltroCodigo?.addEventListener('click', () => {
+      filtroCodigoProduto = null;
+      renderKanban(ordensCarregadas);
+    });
+  }
+
   // Renderiza o kanban com o subconjunto de ordens fornecido
   function renderKanban(ordens) {
-    const operacaoFiltro = filtroSelect ? filtroSelect.value : '';
+    renderFiltroCodigoBar();
+    renderColunaPedidos(pedidosCarregados, filtroCodigoProduto);
 
-    // Aplica filtro por operação se selecionado
-    const filtradas = operacaoFiltro
-      ? ordens.filter(op =>
-          (op.ordens_servico || []).some(os => os.operacao === operacaoFiltro)
-        )
-      : ordens;
+    renderKanbanCol(colProgramado, cntProgramado, ordens, 'programado',
+      'Nenhuma OP programada.', true, filtroCodigoProduto);
+    renderKanbanCol(colSolicitado, cntSolicitado, ordens, 'solicitado',
+      'Nenhuma OP em Montagem hermetica.', false, filtroCodigoProduto);
+    renderKanbanCol(colProduzindo, cntProduzindo, ordens, 'produzindo',
+      'Nenhuma OP em Montagem eletrica.', false, filtroCodigoProduto);
+    renderKanbanCol(colAguardando, cntAguardando, ordens, 'teste',
+      'Nenhuma OP em Teste.', false, filtroCodigoProduto);
+    renderKanbanCol(colInspecaoFinal, cntInspecaoFinal, ordens, 'inspecao_final',
+      'Nenhuma OP em Inspeção final.', false, filtroCodigoProduto);
 
-    const aProduzir = filtradas.filter(op => op.status === 'A PRODUZIR');
-
-    // Agrupa por produto.identificacao
-    const grupos = {};
-    for (const op of aProduzir) {
-      const key = op.produto?.identificacao || String(op.id);
-      if (!grupos[key]) grupos[key] = [];
-      grupos[key].push(op);
-    }
-
-    if (Object.keys(grupos).length === 0) {
-      colProgramado.innerHTML = '<div style="text-align:center;padding:24px 0;color:var(--inactive-color);font-size:12px;">'
-        + (operacaoFiltro ? `Nenhuma OP com a operação "${operacaoFiltro}".` : 'Nenhuma OP programada.')
-        + '</div>';
-    } else {
-      colProgramado.innerHTML = Object.entries(grupos)
-        .map(([key, ops]) => renderGrupo(key, ops))
-        .join('');
-    }
-
-    if (cntProgramado) cntProgramado.textContent = aProduzir.length;
     attachProducaoKanbanActionButtons('#registrarProducaoPane', ordens);
     attachOpCardClickHandlers('#registrarProducaoPane', ordens);
   }
@@ -70216,43 +73261,40 @@ window.verOperacao = function(osId) {
   async function carregarOrdens() {
     if (!spinner || !colProgramado) return;
     spinner.style.display = 'block';
-    if (spinnerMsg) spinnerMsg.textContent = 'Consultando IAPP...';
+    if (spinnerMsg) spinnerMsg.textContent = 'Carregando OPs e pedidos...';
     erroDiv.style.display = 'none';
     if (rodape) rodape.style.display = 'none';
-    if (filtroBar) filtroBar.style.display = 'none';
+    if (colPedidos) colPedidos.innerHTML = '<div style="text-align:center;padding:24px 0;color:var(--inactive-color);font-size:12px;">Carregando...</div>';
     colProgramado.innerHTML = '<div style="text-align:center;padding:24px 0;color:var(--inactive-color);font-size:12px;">Carregando...</div>';
 
     try {
-      const resp = await fetch('/api/producao/ordens');
-      const data = await resp.json();
+      const [respOrdens, respPedidos, respProg] = await Promise.all([
+        fetch('/api/producao/ordens'),
+        fetch('/api/producao/pedidos-kanban'),
+        fetch('/api/producao/kanban-programacao')
+      ]);
+      const data = await respOrdens.json();
+      const dataPedidos = await respPedidos.json();
+      const dataProg = await respProg.json();
 
-      if (!resp.ok || !data.success) throw new Error(data.error || 'Erro ao consultar ordens de produção');
+      if (!respOrdens.ok || !data.success) throw new Error(data.error || 'Erro ao consultar ordens de produção');
 
       ordensCarregadas = data.ordens || [];
+      window._producaoOrdensAtivas = ordensCarregadas;
+      pedidosCarregados = (respPedidos.ok && dataPedidos.success) ? (dataPedidos.pedidos || []) : [];
+      programacaoCarregada = (respProg.ok && dataProg.success) ? (dataProg.registros || []) : [];
 
-      // Coleta operações únicas de todos as OSs
-      const operacoesSet = new Set();
-      for (const op of ordensCarregadas) {
-        for (const os of (op.ordens_servico || [])) {
-          if (os.operacao) operacoesSet.add(os.operacao);
-        }
-      }
-      const operacoes = [...operacoesSet].sort();
-
-      // Popula o select de filtro
-      if (filtroSelect) {
-        const valorAtual = filtroSelect.value;
-        filtroSelect.innerHTML = '<option value="">Todas as operações de serviço</option>'
-          + operacoes.map(op => `<option value="${op.replace(/"/g,'&quot;')}"${op === valorAtual ? ' selected' : ''}>${op}</option>`).join('');
-        if (filtroBar) filtroBar.style.display = operacoes.length > 0 ? 'block' : 'none';
-      }
-
+      await Promise.all([
+        carregarRiStatusPorOps(ordensCarregadas),
+        carregarParadasAtivasPorOps(ordensCarregadas),
+        carregarTemposPostoPorOps(ordensCarregadas),
+      ]);
       renderKanban(ordensCarregadas);
 
       if (rodape) {
         rodape.style.display = 'block';
         const sincTs = data.sincronizado_em ? ` · Consultado em: ${fmtData(String(data.sincronizado_em))}` : '';
-        rodape.textContent = `${data.total_ativas} ordem(ns) ativa(s).${sincTs}`;
+        rodape.textContent = `${data.total_ativas || ordensCarregadas.length} OP(s) gerada(s).${sincTs}`;
       }
     } catch (err) {
       erroDiv.style.display = 'block';
@@ -70263,11 +73305,6 @@ window.verOperacao = function(osId) {
     }
   }
 
-  // Filtro: re-renderiza sem nova requisição ao mudar operação
-  if (filtroSelect) {
-    filtroSelect.addEventListener('change', () => renderKanban(ordensCarregadas));
-  }
-
   menuBtn.addEventListener('click', (e) => {
     e.preventDefault();
     document.querySelectorAll('.left-side .side-menu a').forEach(a => a.classList.remove('is-active'));
@@ -70276,247 +73313,1102 @@ window.verOperacao = function(osId) {
     carregarOrdens();
   });
 
+  setupPedidosProgramacaoInteractions();
+
   if (recarrBtn) {
     recarrBtn.addEventListener('click', () => carregarOrdens());
   }
 
-  window._fmtDataProducao = fmtData;
-  window._producaoRecarregarOrdens = async function() {
+  // ── Modal turno do dia / padrão ─────────────────────────────
+  (function setupProducaoTurnoModal() {
+    const modal = document.getElementById('producaoTurnoModal');
+    if (!modal) return;
+
+    const titulo = document.getElementById('producaoTurnoModalTitulo');
+    const modoInput = document.getElementById('producaoTurnoModalModo');
+    const dataRow = document.getElementById('producaoTurnoDataRow');
+    const dataInput = document.getElementById('producaoTurnoData');
+    const inicioInput = document.getElementById('producaoTurnoInicio');
+    const fimInput = document.getElementById('producaoTurnoFim');
+    const cafeIniInput = document.getElementById('producaoTurnoCafeIni');
+    const cafeFimInput = document.getElementById('producaoTurnoCafeFim');
+    const refIniInput = document.getElementById('producaoTurnoRefeicaoIni');
+    const refFimInput = document.getElementById('producaoTurnoRefeicaoFim');
+    const fimSemanaChk = document.getElementById('producaoTurnoFimSemana');
+    const obsInput = document.getElementById('producaoTurnoObs');
+    const nomeInput = document.getElementById('producaoTurnoNome');
+    const nomesList = document.getElementById('producaoTurnoNomesList');
+    const statusEl = document.getElementById('producaoTurnoStatus');
+    const btnFechar = document.getElementById('producaoTurnoModalFechar');
+    const btnCancelar = document.getElementById('producaoTurnoCancelar');
+    const btnSalvar = document.getElementById('producaoTurnoSalvar');
+
+    function hojeIso() {
+      const d = new Date();
+      const off = d.getTimezoneOffset();
+      const local = new Date(d.getTime() - off * 60000);
+      return local.toISOString().slice(0, 10);
+    }
+
+    function preencherForm(t) {
+      if (!t) return;
+      if (nomeInput && t.nome) nomeInput.value = t.nome;
+      if (nomeInput && t.nome_turno) nomeInput.value = t.nome_turno;
+      if (inicioInput) inicioInput.value = (t.inicio_turno || '').slice(0, 5);
+      if (fimInput) fimInput.value = (t.fim_turno || '').slice(0, 5);
+      if (cafeIniInput) cafeIniInput.value = t.cafe_inicio ? String(t.cafe_inicio).slice(0, 5) : '';
+      if (cafeFimInput) cafeFimInput.value = t.cafe_fim ? String(t.cafe_fim).slice(0, 5) : '';
+      if (refIniInput) refIniInput.value = t.refeicao_inicio ? String(t.refeicao_inicio).slice(0, 5) : '';
+      if (refFimInput) refFimInput.value = t.refeicao_fim ? String(t.refeicao_fim).slice(0, 5) : '';
+      if (fimSemanaChk) fimSemanaChk.checked = !!t.trabalho_fim_semana;
+      if (obsInput) obsInput.value = t.observacao || '';
+    }
+
+    function nomeTurnoAtual() {
+      return String(nomeInput?.value || '').trim() || 'Padrão';
+    }
+
+    async function carregarListaNomes() {
+      const usuario = (document.getElementById('userNameDisplay')?.textContent || '').trim();
+      if (!nomesList || !usuario) return [];
+      try {
+        const resp = await fetch(`/api/producao/turno/padrao?usuario=${encodeURIComponent(usuario)}`, { credentials: 'include' });
+        const data = await resp.json();
+        const padroes = (resp.ok && data.success && Array.isArray(data.padroes)) ? data.padroes : [];
+        nomesList.innerHTML = padroes.map(p => `<option value="${String(p.nome || '').replace(/"/g, '&quot;')}"></option>`).join('');
+        return padroes;
+      } catch (_) {
+        return [];
+      }
+    }
+
+    async function carregarTurnoSelecionado() {
+      const usuario = (document.getElementById('userNameDisplay')?.textContent || '').trim();
+      const nome = nomeTurnoAtual();
+      const m = modoInput?.value === 'padrao' ? 'padrao' : 'dia';
+      if (!usuario || !nome) return;
+      try {
+        if (m === 'dia') {
+          const dataRef = dataInput?.value || hojeIso();
+          const respDia = await fetch(
+            `/api/producao/turno/dia?data=${encodeURIComponent(dataRef)}&nome_turno=${encodeURIComponent(nome)}&usuario=${encodeURIComponent(usuario)}`,
+            { credentials: 'include' }
+          );
+          const dataDia = await respDia.json();
+          if (respDia.ok && dataDia.success && dataDia.turno) {
+            preencherForm(dataDia.turno);
+            return;
+          }
+        }
+        const resp = await fetch(
+          `/api/producao/turno/padrao?usuario=${encodeURIComponent(usuario)}&nome=${encodeURIComponent(nome)}`,
+          { credentials: 'include' }
+        );
+        const data = await resp.json();
+        if (resp.ok && data.success && data.padrao) preencherForm(data.padrao);
+      } catch (_) { /* sem dados */ }
+    }
+
+    function payloadTurno() {
+      return {
+        nome: nomeTurnoAtual(),
+        nome_turno: nomeTurnoAtual(),
+        data_referencia: dataInput?.value || hojeIso(),
+        inicio_turno: inicioInput?.value || '',
+        fim_turno: fimInput?.value || '',
+        cafe_inicio: cafeIniInput?.value || null,
+        cafe_fim: cafeFimInput?.value || null,
+        refeicao_inicio: refIniInput?.value || null,
+        refeicao_fim: refFimInput?.value || null,
+        trabalho_fim_semana: !!fimSemanaChk?.checked,
+        observacao: obsInput?.value || '',
+      };
+    }
+
+    async function abrir(modo) {
+      if (!modal) return;
+      const m = modo === 'padrao' ? 'padrao' : 'dia';
+      if (modoInput) modoInput.value = m;
+      if (titulo) {
+        titulo.innerHTML = m === 'padrao'
+          ? '<i class="fa-solid fa-sliders" style="color:#6366f1;"></i> Padrão de turno'
+          : '<i class="fa-solid fa-clock" style="color:#6366f1;"></i> Turno do dia';
+      }
+      if (dataRow) dataRow.style.display = m === 'dia' ? 'block' : 'none';
+      if (dataInput) dataInput.value = hojeIso();
+      if (nomeInput) nomeInput.value = '';
+      if (statusEl) statusEl.textContent = '';
+      modal.style.display = 'flex';
+
+      const padroes = await carregarListaNomes();
+      if (nomeInput && padroes.length) nomeInput.value = padroes[0].nome || '';
+      await carregarTurnoSelecionado();
+    }
+
+    function fechar() {
+      if (modal) modal.style.display = 'none';
+    }
+
+    async function salvar() {
+      if (!btnSalvar) return;
+      const m = modoInput?.value === 'padrao' ? 'padrao' : 'dia';
+      const usuario = (document.getElementById('userNameDisplay')?.textContent || '').trim();
+      const body = { ...payloadTurno(), usuario };
+      const url = m === 'padrao' ? '/api/producao/turno/padrao' : '/api/producao/turno/dia';
+      btnSalvar.disabled = true;
+      if (statusEl) { statusEl.textContent = 'Salvando...'; statusEl.style.color = '#94a3b8'; }
+      try {
+        const resp = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify(body),
+        });
+        const data = await resp.json();
+        if (!resp.ok || !data.success) throw new Error(data.error || 'Falha ao salvar turno.');
+        if (statusEl) {
+          statusEl.textContent = m === 'padrao' ? 'Padrão salvo.' : 'Turno do dia registrado.';
+          statusEl.style.color = '#86efac';
+        }
+        setTimeout(fechar, 600);
+        if (typeof window._producaoRecarregarOrdens === 'function') window._producaoRecarregarOrdens();
+        else if (typeof window._montaRecarregarOrdens === 'function') window._montaRecarregarOrdens();
+      } catch (err) {
+        if (statusEl) { statusEl.textContent = err.message || 'Erro ao salvar.'; statusEl.style.color = '#f87171'; }
+      } finally {
+        btnSalvar.disabled = false;
+      }
+    }
+
+    nomeInput?.addEventListener('change', () => { carregarTurnoSelecionado(); });
+    nomeInput?.addEventListener('blur', () => { carregarTurnoSelecionado(); });
+    dataInput?.addEventListener('change', () => {
+      if (modoInput?.value === 'dia') carregarTurnoSelecionado();
+    });
+    document.getElementById('producaoTurnoDiaBtn')?.addEventListener('click', () => abrir('dia'));
+    document.getElementById('montaTurnoDiaBtn')?.addEventListener('click', () => abrir('dia'));
+    document.getElementById('montaTurnoPadraoBtn')?.addEventListener('click', () => abrir('padrao'));
+    btnFechar?.addEventListener('click', fechar);
+    btnCancelar?.addEventListener('click', fechar);
+    btnSalvar?.addEventListener('click', salvar);
+    modal.addEventListener('click', (e) => { if (e.target === modal) fechar(); });
+
+    window._producaoAbrirTurnoModal = abrir;
+
+    /* Configuração — Registrar produção (menu + notificação OP) */
+    const producaoConfigBtn = document.getElementById('producaoConfigBtn');
+    const producaoConfigModal = document.getElementById('producaoConfigModal');
+    const producaoConfigModalFechar = document.getElementById('producaoConfigModalFechar');
+    const producaoConfigPadraoTurnoBtn = document.getElementById('producaoConfigPadraoTurnoBtn');
+    const producaoConfigNotifBtn = document.getElementById('producaoConfigNotifBtn');
+    const producaoNotifModal = document.getElementById('producaoNotifModal');
+    const producaoNotifModalFechar = document.getElementById('producaoNotifModalFechar');
+    const producaoNotifVoltarBtn = document.getElementById('producaoNotifVoltarBtn');
+    const producaoNotifSalvarBtn = document.getElementById('producaoNotifSalvarBtn');
+    const producaoNotifTelefone = document.getElementById('producaoNotifTelefone');
+    const producaoNotifPermissaoOp = document.getElementById('producaoNotifPermissaoOp');
+    const producaoNotifAviso = document.getElementById('producaoNotifAviso');
+
+    function setProducaoNotifAviso(msg, tipo = 'info') {
+      if (!producaoNotifAviso) return;
+      if (!msg) {
+        producaoNotifAviso.style.display = 'none';
+        producaoNotifAviso.textContent = '';
+        return;
+      }
+      const cores = {
+        info: { bg: 'rgba(99,102,241,.12)', color: '#a5b4fc', border: 'rgba(99,102,241,.25)' },
+        success: { bg: 'rgba(34,197,94,.12)', color: '#86efac', border: 'rgba(34,197,94,.25)' },
+        error: { bg: 'rgba(239,68,68,.12)', color: '#fca5a5', border: 'rgba(239,68,68,.25)' },
+      };
+      const c = cores[tipo] || cores.info;
+      Object.assign(producaoNotifAviso.style, {
+        display: 'block',
+        background: c.bg,
+        color: c.color,
+        border: `1px solid ${c.border}`,
+      });
+      producaoNotifAviso.textContent = msg;
+    }
+
+    function abrirProducaoConfigModal() {
+      if (producaoConfigModal) producaoConfigModal.style.display = 'flex';
+    }
+
+    function fecharProducaoConfigModal() {
+      if (producaoConfigModal) producaoConfigModal.style.display = 'none';
+    }
+
+    async function abrirProducaoNotifModal() {
+      if (!producaoNotifModal) return;
+      setProducaoNotifAviso('');
+      fecharProducaoConfigModal();
+      producaoNotifModal.style.display = 'flex';
+      try {
+        const resp = await fetch('/api/producao/notificacao/whatsapp', { credentials: 'include' });
+        const json = await resp.json().catch(() => ({}));
+        if (!resp.ok || !json.ok) throw new Error(json.error || 'Falha ao carregar configuração.');
+        const cfg = json.config || {};
+        if (producaoNotifTelefone) producaoNotifTelefone.value = cfg.telefone_contato || '';
+        if (producaoNotifPermissaoOp) producaoNotifPermissaoOp.checked = cfg.permissao_op === true;
+      } catch (err) {
+        setProducaoNotifAviso(err.message || 'Erro ao carregar.', 'error');
+      }
+    }
+
+    function fecharProducaoNotifModal() {
+      if (producaoNotifModal) producaoNotifModal.style.display = 'none';
+      setProducaoNotifAviso('');
+    }
+
+    async function salvarProducaoNotifConfig() {
+      const telefone = String(producaoNotifTelefone?.value || '').trim();
+      if (!telefone) {
+        setProducaoNotifAviso('Informe o número do WhatsApp.', 'error');
+        return;
+      }
+      if (producaoNotifSalvarBtn) producaoNotifSalvarBtn.disabled = true;
+      setProducaoNotifAviso('Salvando...', 'info');
+      try {
+        const resp = await fetch('/api/producao/notificacao/whatsapp', {
+          method: 'PUT',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            telefone_contato: telefone,
+            permissao_op: producaoNotifPermissaoOp?.checked === true,
+          }),
+        });
+        const json = await resp.json().catch(() => ({}));
+        if (!resp.ok || !json.ok) throw new Error(json.error || 'Falha ao salvar.');
+        setProducaoNotifAviso('Configuração salva com sucesso.', 'success');
+        setTimeout(() => fecharProducaoNotifModal(), 1200);
+      } catch (err) {
+        setProducaoNotifAviso(err.message || 'Erro ao salvar.', 'error');
+      } finally {
+        if (producaoNotifSalvarBtn) producaoNotifSalvarBtn.disabled = false;
+      }
+    }
+
+    producaoConfigBtn?.addEventListener('click', abrirProducaoConfigModal);
+    producaoConfigModalFechar?.addEventListener('click', fecharProducaoConfigModal);
+    producaoConfigModal?.addEventListener('click', (e) => {
+      if (e.target === producaoConfigModal) fecharProducaoConfigModal();
+    });
+    producaoConfigPadraoTurnoBtn?.addEventListener('click', () => {
+      fecharProducaoConfigModal();
+      abrir('padrao');
+    });
+    producaoConfigNotifBtn?.addEventListener('click', abrirProducaoNotifModal);
+    producaoNotifModalFechar?.addEventListener('click', fecharProducaoNotifModal);
+    producaoNotifVoltarBtn?.addEventListener('click', () => {
+      fecharProducaoNotifModal();
+      abrirProducaoConfigModal();
+    });
+    producaoNotifSalvarBtn?.addEventListener('click', salvarProducaoNotifConfig);
+    producaoNotifModal?.addEventListener('click', (e) => {
+      if (e.target === producaoNotifModal) fecharProducaoNotifModal();
+    });
+
+    setInterval(async () => {
+      const regPane = document.getElementById('registrarProducaoPane');
+      const montaPane = document.getElementById('montaProducaoPane');
+      const visivel = (regPane && regPane.style.display !== 'none')
+        || (montaPane && montaPane.style.display !== 'none');
+      if (!visivel || typeof window._producaoCarregarTemposPosto !== 'function') return;
+      const ordens = window._producaoOrdensAtivas || [];
+      if (!ordens.length) return;
+      const prog = typeof window._montaProgramacaoCarregada === 'function'
+        ? window._montaProgramacaoCarregada() : [];
+      await window._producaoCarregarTemposPosto(ordens, prog);
+      document.querySelectorAll('.kanban-op-card[data-op-id] .kanban-op-tempo-posto b.kanban-op-tempo-posto-valor').forEach((el) => {
+        const card = el.closest('.kanban-op-card');
+        const opId = card?.getAttribute('data-op-id');
+        const info = window._producaoTempoPostoPorOp?.[`id:${opId}`];
+        if (info?.tempo_formatado) el.textContent = info.tempo_formatado;
+      });
+      document.querySelectorAll('.kanban-op-card[data-op-id] .kanban-op-tempo-total-valor').forEach((el) => {
+        const card = el.closest('.kanban-op-card');
+        const opId = card?.getAttribute('data-op-id');
+        const info = window._producaoTempoPostoPorOp?.[`id:${opId}`];
+        if (info?.tempo_total_formatado) el.textContent = info.tempo_total_formatado;
+      });
+    }, 60000);
+  })();
+
+  // ── Modal Gerar OP ──────────────────────────────────────────
+  const btnGerarOp          = document.getElementById('producaoGerarOpBtn');
+  const modalGerarOp        = document.getElementById('producaoGerarOpModal');
+  const btnFecharGerarOp    = document.getElementById('producaoGerarOpModalFechar');
+  const inputGerarOp        = document.getElementById('producaoGerarOpBusca');
+  const statusGerarOp       = document.getElementById('producaoGerarOpStatus');
+  const listaGerarOp        = document.getElementById('producaoGerarOpResultados');
+  const painelSelecionado   = document.getElementById('producaoGerarOpSelecionado');
+  const selCodigoEl         = document.getElementById('producaoGerarOpSelCodigo');
+  const selDescricaoEl      = document.getElementById('producaoGerarOpSelDescricao');
+  const btnLimparSel        = document.getElementById('producaoGerarOpLimparSel');
+  const inputQtdGerarOp     = document.getElementById('producaoGerarOpQtd');
+  const btnMenosGerarOp     = document.getElementById('producaoGerarOpMenos');
+  const btnMaisGerarOp      = document.getElementById('producaoGerarOpMais');
+  const selectPostosGerarOp = document.getElementById('producaoGerarOpPostosSelect');
+  const listaPostosGerarOp  = document.getElementById('producaoGerarOpPostosLista');
+  const inputObsGerarOp     = document.getElementById('producaoGerarOpObservacao');
+  const inputQtdObsGerarOp  = document.getElementById('producaoGerarOpObsQtd');
+  const btnMenosObsGerarOp  = document.getElementById('producaoGerarOpObsMenos');
+  const btnMaisObsGerarOp   = document.getElementById('producaoGerarOpObsMais');
+  const btnConfirmarGerarOp = document.getElementById('producaoGerarOpConfirmar');
+  let gerarOpDebounce       = null;
+  let gerarOpSalvando       = false;
+  let gerarOpProdutoSel     = null;
+  let gerarOpPostosSel      = [];
+
+  function lerQtdGerarOp() {
+    const n = Math.floor(Number(inputQtdGerarOp?.value));
+    return Number.isFinite(n) && n >= 1 ? Math.min(n, 200) : 1;
+  }
+
+  function lerQtdObsGerarOp() {
+    const max = lerQtdGerarOp();
+    const n = Math.floor(Number(inputQtdObsGerarOp?.value));
+    const val = Number.isFinite(n) && n >= 1 ? n : max;
+    return Math.min(val, max);
+  }
+
+  function sincronizarQtdObsGerarOp() {
+    const qtd = lerQtdGerarOp();
+    if (inputQtdGerarOp) inputQtdGerarOp.value = String(qtd);
+    const qtdObs = lerQtdObsGerarOp();
+    if (inputQtdObsGerarOp) inputQtdObsGerarOp.value = String(qtdObs);
+    if (inputQtdObsGerarOp) inputQtdObsGerarOp.max = String(qtd);
+  }
+
+  function renderPostosGerarOpLista() {
+    if (!listaPostosGerarOp) return;
+    if (!gerarOpPostosSel.length) {
+      listaPostosGerarOp.innerHTML = '<div style="font-size:11px;color:#64748b;padding:4px 0;">Nenhum posto selecionado.</div>';
+      return;
+    }
+    listaPostosGerarOp.innerHTML = gerarOpPostosSel.map((nome, idx) => `
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 10px;background:rgba(99,102,241,.08);border:1px solid rgba(99,102,241,.25);border-radius:8px;">
+        <span style="font-size:12px;color:#c7d2fe;font-weight:600;">${escHtml(nome)}</span>
+        <button type="button" class="producao-gerar-op-remover-posto" data-idx="${idx}" title="Remover"
+          style="flex-shrink:0;width:24px;height:24px;padding:0;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.12);border-radius:6px;color:#fca5a5;font-size:14px;cursor:pointer;line-height:1;">×</button>
+      </div>
+    `).join('');
+  }
+
+  function mostrarProdutoSelecionadoGerarOp(prod) {
+    gerarOpProdutoSel = prod;
+    if (painelSelecionado) painelSelecionado.style.display = 'block';
+    if (selCodigoEl) selCodigoEl.textContent = prod.codigo || '—';
+    if (selDescricaoEl) selDescricaoEl.textContent = prod.descricao || '—';
+    if (inputQtdGerarOp) inputQtdGerarOp.value = '1';
+    if (inputQtdObsGerarOp) inputQtdObsGerarOp.value = '1';
+    if (inputObsGerarOp) inputObsGerarOp.value = '';
+    gerarOpPostosSel = [];
+    if (selectPostosGerarOp) selectPostosGerarOp.value = '';
+    renderPostosGerarOpLista();
+    sincronizarQtdObsGerarOp();
+    if (listaGerarOp) listaGerarOp.style.display = 'none';
+    if (statusGerarOp) statusGerarOp.style.display = 'none';
+  }
+
+  function limparProdutoSelecionadoGerarOp() {
+    gerarOpProdutoSel = null;
+    gerarOpPostosSel = [];
+    if (painelSelecionado) painelSelecionado.style.display = 'none';
+    if (selCodigoEl) selCodigoEl.textContent = '';
+    if (selDescricaoEl) selDescricaoEl.textContent = '';
+    if (inputQtdGerarOp) inputQtdGerarOp.value = '1';
+    if (inputQtdObsGerarOp) inputQtdObsGerarOp.value = '1';
+    if (inputObsGerarOp) inputObsGerarOp.value = '';
+    if (selectPostosGerarOp) selectPostosGerarOp.value = '';
+    renderPostosGerarOpLista();
+  }
+
+  function resetGerarOpModal() {
+    if (inputGerarOp) inputGerarOp.value = '';
+    if (statusGerarOp) {
+      statusGerarOp.style.display = 'none';
+      statusGerarOp.textContent = '';
+      statusGerarOp.style.color = 'var(--inactive-color)';
+    }
+    if (listaGerarOp) {
+      listaGerarOp.style.display = 'none';
+      listaGerarOp.innerHTML = '';
+    }
+    limparProdutoSelecionadoGerarOp();
+    gerarOpSalvando = false;
+    if (btnConfirmarGerarOp) btnConfirmarGerarOp.disabled = false;
+  }
+
+  function abrirGerarOpModal() {
+    resetGerarOpModal();
+    if (modalGerarOp) modalGerarOp.style.display = 'flex';
+    setTimeout(() => inputGerarOp?.focus(), 80);
+  }
+
+  function fecharGerarOpModal() {
+    if (modalGerarOp) modalGerarOp.style.display = 'none';
+    resetGerarOpModal();
+  }
+
+  function renderGerarOpResultados(itens) {
+    if (!listaGerarOp) return;
+    if (!itens.length) {
+      listaGerarOp.style.display = 'block';
+      listaGerarOp.innerHTML = '<div style="padding:14px;text-align:center;font-size:12px;color:var(--inactive-color);">Nenhum produto encontrado.</div>';
+      return;
+    }
+    listaGerarOp.style.display = 'block';
+    listaGerarOp.innerHTML = itens.map(it => {
+      const codigo = escHtml(String(it.codigo || ''));
+      const descricao = escHtml(String(it.descricao || ''));
+      const codigoProduto = Number(it.codigo_produto);
+      const sel = gerarOpProdutoSel && gerarOpProdutoSel.codigo === it.codigo && gerarOpProdutoSel.codigo_produto === codigoProduto;
+      return `<button type="button" class="producao-gerar-op-item" data-codigo="${codigo}" data-codigo-produto="${codigoProduto}" data-descricao="${descricao}"
+        style="display:block;width:100%;text-align:left;padding:10px 12px;background:${sel ? 'rgba(16,185,129,.12)' : 'transparent'};border:none;border-bottom:1px solid rgba(255,255,255,.06);color:#e2e8f0;cursor:pointer;">
+        <div style="font-size:13px;font-weight:600;">${codigo}</div>
+        <div style="font-size:11px;color:var(--inactive-color);margin-top:2px;">${descricao}</div>
+      </button>`;
+    }).join('');
+  }
+
+  async function buscarProdutosGerarOp(termo) {
+    if (!statusGerarOp) return;
+    statusGerarOp.style.display = 'block';
+    statusGerarOp.style.color = 'var(--inactive-color)';
+    statusGerarOp.textContent = 'Buscando...';
     try {
+      const resp = await fetch(`/api/producao/op-producao/buscar-produtos?q=${encodeURIComponent(termo)}`);
+      const data = await resp.json();
+      if (!resp.ok || !data.success) throw new Error(data.error || 'Falha na busca.');
+      statusGerarOp.textContent = data.itens?.length ? `${data.itens.length} produto(s) encontrado(s).` : 'Nenhum produto encontrado.';
+      renderGerarOpResultados(data.itens || []);
+    } catch (err) {
+      statusGerarOp.style.color = '#fca5a5';
+      statusGerarOp.textContent = 'Erro: ' + (err.message || 'Falha ao buscar produtos.');
+      if (listaGerarOp) {
+        listaGerarOp.style.display = 'none';
+        listaGerarOp.innerHTML = '';
+      }
+    }
+  }
+
+  async function registrarOpProducaoLote() {
+    if (gerarOpSalvando || !gerarOpProdutoSel) return;
+    const codigo = String(gerarOpProdutoSel.codigo || '').trim();
+    const codigoProduto = Number(gerarOpProdutoSel.codigo_produto);
+    const quantidade = lerQtdGerarOp();
+    const observacao = String(inputObsGerarOp?.value || '').trim();
+    const quantidadeObservacao = observacao ? lerQtdObsGerarOp() : 0;
+    if (!codigo || !Number.isFinite(codigoProduto) || codigoProduto <= 0) return;
+
+    gerarOpSalvando = true;
+    if (btnConfirmarGerarOp) btnConfirmarGerarOp.disabled = true;
+    if (statusGerarOp) {
+      statusGerarOp.style.display = 'block';
+      statusGerarOp.style.color = 'var(--inactive-color)';
+      statusGerarOp.textContent = `Gerando ${quantidade} OP(s)...`;
+    }
+    try {
+      const body = {
+        codigo,
+        codigo_produto: codigoProduto,
+        quantidade,
+        observacao: observacao || undefined,
+        quantidade_observacao: observacao ? quantidadeObservacao : undefined,
+        postos: gerarOpPostosSel.length ? [...gerarOpPostosSel] : undefined,
+      };
+      const resp = await fetch('/api/producao/op-producao/lote', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const data = await resp.json();
+      if (!resp.ok || !data.success) throw new Error(data.error || 'Falha ao gerar OP.');
+      const total = data.total || quantidade;
+      let msg = `${total} OP(s) gerada(s) com sucesso!`;
+      if (data.planilha && data.planilha.ok === false) {
+        msg += `\n\nAtenção: não foi possível registrar na planilha Google.\n${data.planilha.error || 'Erro desconhecido.'}`;
+      }
+      alert(msg);
+      fecharGerarOpModal();
+      if (typeof carregarOrdens === 'function') await carregarOrdens();
+    } catch (err) {
+      if (statusGerarOp) {
+        statusGerarOp.style.color = '#fca5a5';
+        statusGerarOp.textContent = 'Erro: ' + (err.message || 'Falha ao gerar OP.');
+      }
+      gerarOpSalvando = false;
+      if (btnConfirmarGerarOp) btnConfirmarGerarOp.disabled = false;
+    }
+  }
+
+  btnGerarOp?.addEventListener('click', abrirGerarOpModal);
+  btnFecharGerarOp?.addEventListener('click', fecharGerarOpModal);
+  modalGerarOp?.addEventListener('click', (e) => {
+    if (e.target === modalGerarOp) fecharGerarOpModal();
+  });
+
+  btnLimparSel?.addEventListener('click', () => {
+    limparProdutoSelecionadoGerarOp();
+    if (inputGerarOp) inputGerarOp.focus();
+  });
+
+  btnMenosGerarOp?.addEventListener('click', () => {
+    if (inputQtdGerarOp) inputQtdGerarOp.value = String(Math.max(1, lerQtdGerarOp() - 1));
+    sincronizarQtdObsGerarOp();
+  });
+  btnMaisGerarOp?.addEventListener('click', () => {
+    if (inputQtdGerarOp) inputQtdGerarOp.value = String(Math.min(200, lerQtdGerarOp() + 1));
+    sincronizarQtdObsGerarOp();
+  });
+  inputQtdGerarOp?.addEventListener('change', sincronizarQtdObsGerarOp);
+
+  btnMenosObsGerarOp?.addEventListener('click', () => {
+    if (inputQtdObsGerarOp) inputQtdObsGerarOp.value = String(Math.max(1, lerQtdObsGerarOp() - 1));
+  });
+  btnMaisObsGerarOp?.addEventListener('click', () => {
+    if (inputQtdObsGerarOp) inputQtdObsGerarOp.value = String(Math.min(lerQtdGerarOp(), lerQtdObsGerarOp() + 1));
+  });
+  inputQtdObsGerarOp?.addEventListener('change', sincronizarQtdObsGerarOp);
+
+  selectPostosGerarOp?.addEventListener('change', () => {
+    const nome = String(selectPostosGerarOp.value || '').trim();
+    selectPostosGerarOp.value = '';
+    if (!nome || gerarOpPostosSel.includes(nome)) return;
+    gerarOpPostosSel.push(nome);
+    renderPostosGerarOpLista();
+  });
+
+  listaPostosGerarOp?.addEventListener('click', (e) => {
+    const btn = e.target.closest('.producao-gerar-op-remover-posto');
+    if (!btn) return;
+    const idx = Number(btn.dataset.idx);
+    if (!Number.isFinite(idx) || idx < 0) return;
+    gerarOpPostosSel.splice(idx, 1);
+    renderPostosGerarOpLista();
+  });
+
+  btnConfirmarGerarOp?.addEventListener('click', registrarOpProducaoLote);
+
+  inputGerarOp?.addEventListener('input', () => {
+    const termo = String(inputGerarOp.value || '').trim();
+    clearTimeout(gerarOpDebounce);
+    if (termo.length < 3) {
+      if (statusGerarOp) {
+        statusGerarOp.style.display = termo.length ? 'block' : 'none';
+        statusGerarOp.style.color = 'var(--inactive-color)';
+        statusGerarOp.textContent = 'Digite pelo menos 3 caracteres.';
+      }
+      if (listaGerarOp) {
+        listaGerarOp.style.display = 'none';
+        listaGerarOp.innerHTML = '';
+      }
+      return;
+    }
+    gerarOpDebounce = setTimeout(() => buscarProdutosGerarOp(termo), 300);
+  });
+
+  listaGerarOp?.addEventListener('click', (e) => {
+    const btn = e.target.closest('.producao-gerar-op-item');
+    if (!btn) return;
+    const codigo = btn.dataset.codigo || '';
+    const codigoProduto = Number(btn.dataset.codigoProduto);
+    const descricao = decodeHtmlEntities(btn.dataset.descricao || '');
+    if (!codigo || !Number.isFinite(codigoProduto) || codigoProduto <= 0) return;
+    mostrarProdutoSelecionadoGerarOp({ codigo, codigo_produto: codigoProduto, descricao });
+  });
+
+  pesquisaInput?.addEventListener('input', () => {
+    filtroPesquisa = pesquisaInput.value;
+    atualizarPesquisaBarUi();
+    clearTimeout(pesquisaDebounce);
+    pesquisaDebounce = setTimeout(() => renderKanban(ordensCarregadas), 200);
+  });
+
+  btnLimparPesquisa?.addEventListener('click', () => {
+    filtroPesquisa = '';
+    if (pesquisaInput) pesquisaInput.value = '';
+    atualizarPesquisaBarUi();
+    renderKanban(ordensCarregadas);
+  });
+
+  window._fmtDataProducao = fmtData;
+  async function recarregarProgramacaoERender(colKeys) {
+    await recarregarProgramacao();
+    return recarregarColunasKanban(colKeys);
+  }
+
+  async function recarregarColunasKanban(colKeys) {
+    try {
+      await recarregarProgramacao();
       const resp = await fetch('/api/producao/ordens');
       const data = await resp.json();
+      if (!resp.ok || !data.success) return false;
+      ordensCarregadas = data.ordens || [];
+      window._producaoOrdensAtivas = ordensCarregadas;
+      await Promise.all([
+        carregarRiStatusPorOps(ordensCarregadas),
+        carregarParadasAtivasPorOps(ordensCarregadas),
+        carregarTemposPostoPorOps(ordensCarregadas),
+      ]);
+      const keys = Array.isArray(colKeys) && colKeys.length ? colKeys : ['programado', 'solicitado', 'produzindo'];
+      if (keys.includes('programado')) {
+        renderKanbanCol(colProgramado, cntProgramado, ordensCarregadas, 'programado',
+          'Nenhuma OP programada.', true, filtroCodigoProduto);
+      }
+      if (keys.includes('solicitado')) {
+        renderKanbanCol(colSolicitado, cntSolicitado, ordensCarregadas, 'solicitado',
+          'Nenhuma OP em Montagem hermetica.', false, filtroCodigoProduto);
+      }
+      if (keys.includes('produzindo')) {
+        renderKanbanCol(colProduzindo, cntProduzindo, ordensCarregadas, 'produzindo',
+          'Nenhuma OP em Montagem eletrica.', false, filtroCodigoProduto);
+      }
+      if (keys.includes('teste')) {
+        renderKanbanCol(colAguardando, cntAguardando, ordensCarregadas, 'teste',
+          'Nenhuma OP em Teste.', false, filtroCodigoProduto);
+      }
+      if (keys.includes('inspecao_final')) {
+        renderKanbanCol(colInspecaoFinal, cntInspecaoFinal, ordensCarregadas, 'inspecao_final',
+          'Nenhuma OP em Inspeção final.', false, filtroCodigoProduto);
+      }
+      attachProducaoKanbanActionButtons('#registrarProducaoPane', ordensCarregadas);
+      attachOpCardClickHandlers('#registrarProducaoPane', ordensCarregadas);
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+  window._producaoFiltrarOpsColuna = (ops, colKey) => (ops || []).filter(op => opStatusColuna(op, colKey));
+  window._producaoMarcarOpsSolicitadas = function(opIds) {
+    const ids = new Set((opIds || []).map(id => String(id)));
+    for (const op of ordensCarregadas) {
+      if (!ids.has(String(op.id))) continue;
+      for (const os of (op.ordens_servico || [])) {
+        const sp = String(os.status_producao || '').trim();
+        if (!sp || sp === 'Solicitado') os.status_producao = 'Solicitado';
+      }
+    }
+  };
+  window._producaoRecarregarColunasKanban = recarregarColunasKanban;
+  window._producaoRecarregarProgramacaoColunas = recarregarProgramacaoERender;
+  window._producaoKanbanColunas = () => PRODUCAO_KANBAN_COLUNAS.map(c => ({ ...c }));
+  window._producaoNomeKanbanPorKey = producaoNomeKanbanPorKey;
+  window._producaoNormStatusKanban = normStatusKanban;
+  window._producaoListaNomesKanban = producaoListaNomesKanban;
+  window._producaoRecarregarOrdens = async function() {
+    try {
+      const [resp, respPedidos, respProg] = await Promise.all([
+        fetch('/api/producao/ordens'),
+        fetch('/api/producao/pedidos-kanban'),
+        fetch('/api/producao/kanban-programacao')
+      ]);
+      const data = await resp.json();
+      const dataPedidos = await respPedidos.json();
+      const dataProg = await respProg.json();
       if (resp.ok && data.success) {
         ordensCarregadas = data.ordens || [];
+      window._producaoOrdensAtivas = ordensCarregadas;
+        pedidosCarregados = (respPedidos.ok && dataPedidos.success) ? (dataPedidos.pedidos || []) : [];
+        programacaoCarregada = (respProg.ok && dataProg.success) ? (dataProg.registros || []) : [];
         renderKanban(ordensCarregadas);
       }
     } catch (_) { /* silencioso */ }
+  };
+  window._producaoProgramacaoCarregada = () => programacaoCarregada;
+
+  function parseQrEtiquetaOp(raw) {
+    const s = String(raw || '').trim();
+    const parts = s.split('|');
+    if (parts.length >= 3) {
+      return {
+        codigo: parts[0].trim(),
+        lote: parts[2].trim(),
+      };
+    }
+    return null;
+  }
+
+  function encontrarOpPorEtiqueta(lote, codigo) {
+    const loteNorm = normCodigo(lote);
+    if (!loteNorm) return null;
+    let op = ordensCarregadas.find(o => normCodigo(o.identificacao) === loteNorm);
+    if (!op && codigo) {
+      const codNorm = normCodigo(codigo);
+      op = ordensCarregadas.find(o =>
+        normCodigo(o.identificacao) === loteNorm
+        && normCodigo(o.produto?.identificacao) === codNorm
+      );
+    }
+    return op || null;
+  }
+
+  window._producaoOpColunaAtual = opColunaAtual;
+  window._producaoEncontrarOpPorEtiqueta = encontrarOpPorEtiqueta;
+
+  let _producaoQrStream = null;
+  let _producaoQrInterval = null;
+
+  function fecharProducaoQrModal() {
+    clearInterval(_producaoQrInterval);
+    _producaoQrInterval = null;
+    if (_producaoQrStream) {
+      _producaoQrStream.getTracks().forEach(t => t.stop());
+      _producaoQrStream = null;
+    }
+    document.getElementById('producaoQrOpOverlay')?.remove();
+  }
+
+  async function abrirAcoesOpPorEtiqueta(dados) {
+    if (!dados?.lote) {
+      alert('QR Code inválido. Use a etiqueta gerada em Imprimir OP.');
+      return;
+    }
+    let op = encontrarOpPorEtiqueta(dados.lote, dados.codigo);
+    if (!op) {
+      await recarregarColunasKanban(['programado', 'solicitado', 'produzindo', 'teste', 'inspecao_final']);
+      op = encontrarOpPorEtiqueta(dados.lote, dados.codigo);
+    }
+    if (!op) {
+      alert(`OP "${dados.lote}" não encontrada no kanban. Recarregue a tela e tente novamente.`);
+      return;
+    }
+    if (typeof window._producaoOpenKanbanActions === 'function') {
+      window._producaoOpenKanbanActions(op);
+    }
+  }
+
+  function processarQrOpLido(valor) {
+    const dados = parseQrEtiquetaOp(valor);
+    if (!dados) {
+      alert('QR Code não reconhecido. Use a etiqueta gerada em Imprimir OP.');
+      return;
+    }
+    fecharProducaoQrModal();
+    abrirAcoesOpPorEtiqueta(dados);
+  }
+
+  async function abrirProducaoQrScanner() {
+    fecharProducaoQrModal();
+    const overlay = document.createElement('div');
+    overlay.id = 'producaoQrOpOverlay';
+    overlay.className = 'kanban-modal-overlay';
+    overlay.style.zIndex = '10001';
+    overlay.addEventListener('click', (ev) => { if (ev.target === overlay) fecharProducaoQrModal(); });
+
+    const modal = document.createElement('div');
+    modal.className = 'kanban-modal';
+    modal.style.maxWidth = '420px';
+    modal.innerHTML = `
+      <header>
+        <div>
+          <h2>Ler etiqueta OP</h2>
+          <span>Aponte a câmera para o QR Code da etiqueta</span>
+        </div>
+        <button type="button" class="close-btn" aria-label="Fechar">&times;</button>
+      </header>
+      <div class="kanban-modal-body" style="text-align:center;">
+        <div style="position:relative;display:inline-block;border-radius:12px;overflow:hidden;background:#000;max-width:100%;">
+          <video id="producaoQrVideo" autoplay playsinline muted style="width:100%;max-height:280px;display:block;"></video>
+          <div style="position:absolute;inset:20%;border:2px solid rgba(52,211,153,.85);border-radius:8px;pointer-events:none;"></div>
+        </div>
+        <p id="producaoQrStatus" style="font-size:12px;color:#94a3b8;margin:12px 0 8px;">Iniciando câmera...</p>
+        <input type="text" id="producaoQrManual" placeholder="Ou digite/cole o código lido..."
+          style="width:100%;padding:8px 12px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.12);border-radius:8px;color:#e2e8f0;font-size:13px;">
+      </div>
+      <footer>
+        <button type="button" class="modal-secondary">Fechar</button>
+      </footer>
+    `;
+    overlay.appendChild(modal);
+    document.body.appendChild(overlay);
+
+    modal.querySelector('.close-btn')?.addEventListener('click', fecharProducaoQrModal);
+    modal.querySelector('footer .modal-secondary')?.addEventListener('click', fecharProducaoQrModal);
+
+    const video = modal.querySelector('#producaoQrVideo');
+    const statusEl = modal.querySelector('#producaoQrStatus');
+    const manualInput = modal.querySelector('#producaoQrManual');
+
+    manualInput?.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Enter') {
+        ev.preventDefault();
+        processarQrOpLido(manualInput.value);
+      }
+    });
+
+    try {
+      _producaoQrStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+      if (video) {
+        video.srcObject = _producaoQrStream;
+        await video.play().catch(() => {});
+      }
+      if (statusEl) {
+        statusEl.textContent = 'Aponte para o QR Code da etiqueta OP.';
+        statusEl.style.color = '#94a3b8';
+      }
+    } catch {
+      if (statusEl) {
+        statusEl.textContent = 'Câmera indisponível. Digite o código manualmente abaixo.';
+        statusEl.style.color = '#f59e0b';
+      }
+      return;
+    }
+
+    if (!('BarcodeDetector' in window)) {
+      if (statusEl) {
+        statusEl.textContent = 'Leitura automática indisponível neste navegador. Digite o código abaixo.';
+        statusEl.style.color = '#f59e0b';
+      }
+      return;
+    }
+
+    const detector = new BarcodeDetector({ formats: ['qr_code'] });
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+    _producaoQrInterval = setInterval(async () => {
+      if (!video || video.readyState < 2) return;
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      ctx.drawImage(video, 0, 0);
+      try {
+        const barcodes = await detector.detect(canvas);
+        if (barcodes.length > 0) {
+          processarQrOpLido(barcodes[0].rawValue);
+        }
+      } catch { /* ignora frame */ }
+    }, 300);
+  }
+
+  document.getElementById('producaoQrOpBtn')?.addEventListener('click', () => {
+    abrirProducaoQrScanner();
+  });
+
+  window._producaoWithProgramacao = function (programacao, fn) {
+    const backup = programacaoCarregada;
+    programacaoCarregada = programacao || [];
+    try { return fn(); } finally { programacaoCarregada = backup; }
+  };
+  window._producaoRenderKanbanCol = renderKanbanCol;
+  window._producaoGetColunasPosProgramado = function () {
+    return PRODUCAO_KANBAN_COLUNAS.filter(c => c.key !== 'pedidos');
+  };
+  window._producaoProximoKanbanPorKey = function (colKey) {
+    const cols = PRODUCAO_KANBAN_COLUNAS.filter(c => c.key !== 'pedidos');
+    const idx = cols.findIndex(c => c.key === colKey);
+    if (idx < 0 || idx >= cols.length - 1) {
+      return { key: 'finalizado', nome: 'Finalizado' };
+    }
+    return cols[idx + 1];
+  };
+  window._producaoAnteriorKanbanPorKey = function (colKey) {
+    const cols = PRODUCAO_KANBAN_COLUNAS.filter(c => c.key !== 'pedidos');
+    const idx = cols.findIndex(c => c.key === colKey);
+    if (idx <= 0) return null;
+    return cols[idx - 1];
+  };
+  window._producaoColunasRetrocederOp = function () {
+    return ['solicitado', 'produzindo', 'teste', 'inspecao_final'];
+  };
+  window._producaoMsgVaziaColuna = function (colKey) {
+    const msgs = {
+      programado: 'Nenhuma OP programada.',
+      solicitado: 'Nenhuma OP em Montagem hermetica.',
+      produzindo: 'Nenhuma OP em Montagem eletrica.',
+      teste: 'Nenhuma OP em Teste.',
+      inspecao_final: 'Nenhuma OP em Inspeção final.',
+    };
+    return msgs[colKey] || `Nenhuma OP em ${producaoNomeKanbanPorKey(colKey) || colKey}.`;
   };
 })();
 
 
 /* ============================================================
- * PRODUÇÃO MONTAGEM — Ordens de Produção IAPP (Kanban)
+ * PRODUÇÃO MONTAGEM — Kanbans pós-Programado (sem IAPP)
  * ============================================================ */
 (function () {
   const menuBtn = document.getElementById('menu-monta-producao');
   if (!menuBtn) return;
 
-  const spinner      = document.getElementById('montaSpinner');
-  const spinnerMsg   = document.getElementById('montaSpinnerMsg');
-  const erroDiv      = document.getElementById('montaErro');
-  const rodape       = document.getElementById('montaRodape');
-  const recarrBtn    = document.getElementById('montaRecarregarBtn');
-  const filtroBar    = document.getElementById('montaFiltroBar');
-  const filtroSelect = document.getElementById('montaFiltroOperacao');
+  const spinner         = document.getElementById('montaSpinner');
+  const spinnerMsg      = document.getElementById('montaSpinnerMsg');
+  const erroDiv         = document.getElementById('montaErro');
+  const rodape          = document.getElementById('montaRodape');
+  const recarrBtn       = document.getElementById('montaRecarregarBtn');
+  const kanbanContainer = document.getElementById('montaKanban');
+  const pesquisaInput   = document.getElementById('montaPesquisaInput');
+  const btnLimparPesq   = document.getElementById('montaPesquisaLimpar');
 
-  const colProgramado = document.getElementById('montaColProgramado');
-  const cntProgramado = document.getElementById('montaColProgramadoCount');
-  const colProduzindo = document.getElementById('montaColProduzindo');
-  const cntProduzindo = document.getElementById('montaColProduzindoCount');
-  const colOutros     = document.getElementById('montaColOutros');
-  const cntOutros     = document.getElementById('montaColOutrosCount');
+  const MONTA_COL_STYLE = {
+    programado:     { bg: '#1e1b4b', border: '#3730a3', dot: '#6366f1', title: '#a5b4fc', badgeBg: '#312e81', badgeTxt: '#c7d2fe', bodyBg: 'rgba(99,102,241,.04)' },
+    solicitado:     { bg: '#172554', border: '#1d4ed8', dot: '#3b82f6', title: '#93c5fd', badgeBg: '#1e3a8a', badgeTxt: '#bfdbfe', bodyBg: 'rgba(59,130,246,.04)' },
+    produzindo:     { bg: '#052e16', border: '#166534', dot: '#22c55e', title: '#86efac', badgeBg: '#14532d', badgeTxt: '#bbf7d0', bodyBg: 'rgba(34,197,94,.04)' },
+    teste:          { bg: '#431407', border: '#9a3412', dot: '#f97316', title: '#fdba74', badgeBg: '#7c2d12', badgeTxt: '#fed7aa', bodyBg: 'rgba(249,115,22,.04)' },
+    inspecao_final: { bg: '#1e1b4b', border: '#6d28d9', dot: '#a855f7', title: '#d8b4fe', badgeBg: '#4c1d95', badgeTxt: '#e9d5ff', bodyBg: 'rgba(168,85,247,.04)' },
+  };
+  const MONTA_COL_DEFAULT = { bg: '#1c1917', border: '#44403c', dot: '#78716c', title: '#d6d3d1', badgeBg: '#292524', badgeTxt: '#d6d3d1', bodyBg: 'rgba(120,113,108,.04)' };
 
   let ordensCarregadas = [];
+  let programacaoCarregada = [];
+  let filtroPesquisa = '';
+  let pesquisaDebounce = null;
+  const colunasDom = {};
 
-  function fmtData(str) {
-    if (!str) return '—';
-    const m = str.match(/^(\d{4})-(\d{2})-(\d{2})/);
-    if (m) return `${m[3]}/${m[2]}/${m[1]}`;
-    return str;
-  }
-
-  function fmtMoeda(v) {
-    if (v == null || v === '') return '—';
-    return 'R$ ' + Number(v).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  }
-
-  function fmtQtde(v) {
-    if (v == null || v === '') return '—';
-    const n = parseFloat(v);
-    return isNaN(n) ? String(v) : n.toLocaleString('pt-BR', { maximumFractionDigits: 4 }).replace(/,?0+$/, '').replace(/,$/, '') || String(n);
-  }
-
-  function badgeOS(status) {
-    const cores = {
-      'ENCERRADA':    { bg: '#1e293b', txt: '#94a3b8' },
-      'ABERTA':       { bg: '#1d4ed8', txt: '#bfdbfe' },
-      'EM ANDAMENTO': { bg: '#065f46', txt: '#6ee7b7' },
-      'PAUSADA':      { bg: '#92400e', txt: '#fcd34d' },
-    };
-    const s = (status || '').toUpperCase();
-    const c = cores[s] || { bg: '#374151', txt: '#d1d5db' };
-    return `<span style="flex-shrink:0;display:inline-block;padding:1px 6px;border-radius:4px;font-size:10px;font-weight:700;background:${c.bg};color:${c.txt};">${status || '—'}</span>`;
-  }
-
-  function badgeProducao(status) {
-    const s = String(status || '').trim();
-    if (!s) return '';
-    const cores = {
-      'Iniciado':   { bg: '#14532d', txt: '#bbf7d0' },
-      'Produzindo': { bg: '#065f46', txt: '#6ee7b7' },
-      'Parado':     { bg: '#92400e', txt: '#fcd34d' },
-    };
-    const c = cores[s] || { bg: '#374151', txt: '#d1d5db' };
-    return `<span style="flex-shrink:0;display:inline-block;padding:1px 6px;border-radius:4px;font-size:10px;font-weight:700;background:${c.bg};color:${c.txt};">${s}</span>`;
-  }
-
-  function renderGrupo(prodId, ops) {
-    const prod = ops[0].produto || {};
-    const qtdeTotal = ops.reduce((s, op) => s + (Number(op.qtde) || 0), 0);
-
-    const opsHtml = ops.map(op => {
-      const _filtroOp = filtroSelect ? filtroSelect.value : '';
-      const _osVis = _filtroOp
-        ? (op.ordens_servico || []).filter(os => os.operacao === _filtroOp)
-        : (op.ordens_servico || []);
-      const osHtml = _osVis.map(os =>
-        `<div onclick="event.stopPropagation();window.abrirModalOS(${os.id},'${(os.identificacao||'').replace(/'/g,"\\'")}',${op.id},'${(os.operacao||'').replace(/'/g,"\\'")}','${(os.status||'').replace(/'/g,"\\'")}','${(op.identificacao||'').replace(/'/g,"\\'")}','${(os.status_producao||'').replace(/'/g,"\\'")}','${(os.operador||'').replace(/'/g,"\\'")}','${(os.data_status_producao||'').replace(/'/g,"\\'")}')"
-          style="background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.06);border-radius:5px;padding:5px 8px;display:flex;flex-direction:column;gap:3px;cursor:pointer;transition:background .15s;"
-          onmouseenter="this.style.background='rgba(99,102,241,.12)'" onmouseleave="this.style.background='rgba(255,255,255,.03)'">
-          <div style="display:flex;align-items:center;gap:6px;">
-            <span style="font-size:10px;color:#94a3b8;min-width:70px;font-weight:600;flex-shrink:0;">${os.identificacao || ('#' + os.id)}</span>
-            <span style="font-size:10px;color:#cbd5e1;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${(os.operacao || '').replace(/"/g,'&quot;')}">${os.operacao || '—'}</span>
-            ${badgeProducao(os.status_producao)}
-            ${badgeOS(os.status)}
-          </div>
-          <div style="display:flex;flex-wrap:wrap;gap:10px;padding-left:2px;">
-            ${os.data_abertura     ? `<span style="font-size:10px;color:#64748b;">Abertura: <b style="color:#94a3b8;">${fmtData(os.data_abertura)}</b></span>` : ''}
-            ${os.data_inicio       ? `<span style="font-size:10px;color:#64748b;">Início: <b style="color:#94a3b8;">${fmtData(os.data_inicio)}</b></span>` : ''}
-            ${os.data_final        ? `<span style="font-size:10px;color:#64748b;">Final: <b style="color:#94a3b8;">${fmtData(os.data_final)}</b></span>` : ''}
-            ${os.data_encerramento ? `<span style="font-size:10px;color:#64748b;">Encerramento: <b style="color:#94a3b8;">${fmtData(os.data_encerramento)}</b></span>` : ''}
-            ${os.operador          ? `<span style="font-size:10px;color:#64748b;">Operador: <b style="color:#94a3b8;">${os.operador}</b></span>` : ''}
-          </div>
-        </div>`
-      ).join('');
-
-      const detId = `monta-op-det-${op.id}`;
-
-      return `<div data-op-id="${op.id}" style="background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);border-radius:8px;padding:10px 12px;margin-top:8px;cursor:pointer;">
-        <div style="display:flex;align-items:flex-start;gap:8px;">
-          <div style="flex:1;min-width:0;">
-            <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;">
-              <span style="font-size:10px;color:#475569;font-weight:600;">#${op.id}</span>
-              <span style="font-size:13px;font-weight:700;color:#e2e8f0;">OP ${op.identificacao || '—'}</span>
-              <span style="font-size:11px;color:#94a3b8;margin-left:auto;">Qtde: <b style="color:#f1f5f9;">${fmtQtde(op.qtde)}</b></span>
-            </div>
-            <div style="display:flex;flex-wrap:wrap;gap:8px;">
-              ${op.data_abertura            ? `<span style="font-size:10px;color:#64748b;">Abertura: <b style="color:#94a3b8;">${fmtData(op.data_abertura)}</b></span>` : ''}
-              ${op.data_previsao_entrega    ? `<span style="font-size:10px;color:#64748b;">Prev. entrega: <b style="color:#a5f3fc;">${fmtData(op.data_previsao_entrega)}</b></span>` : ''}
-            </div>
-          </div>
-          <button type="button" class="op-expand-btn" onclick="event.stopPropagation();(function(btn){var d=document.getElementById('${detId}');var aberto=d.style.display!=='none';d.style.display=aberto?'none':'flex';btn.innerHTML=aberto?'<i class=\\'fa-solid fa-chevron-down\\'></i>':'<i class=\\'fa-solid fa-chevron-up\\'></i>';})(this)"
-            style="flex-shrink:0;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.12);border-radius:6px;color:#94a3b8;width:26px;height:26px;display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:11px;margin-top:2px;">
-            <i class="fa-solid fa-chevron-down"></i>
-          </button>
-        </div>
-        <div id="${detId}" style="display:none;flex-direction:column;gap:4px;margin-top:10px;padding-top:10px;border-top:1px solid rgba(255,255,255,.06);">
-          ${op.obs ? `<div style="font-size:11px;color:#94a3b8;">Obs: <span style="color:#fef3c7;">${op.obs}</span></div>` : ''}
-          ${osHtml ? `<div style="display:flex;flex-direction:column;gap:4px;margin-top:4px;">${osHtml}</div>` : '<div style="font-size:11px;color:#475569;">Sem ordens de serviço.</div>'}
-        </div>
-      </div>`;
-    }).join('');
-
-    const descEscapada = (prod.descricao || '').replace(/"/g, '&quot;');
-
-    return `<div data-group-id="${prodId}" style="background:var(--content-bg,#1e2233);border:1px solid rgba(255,255,255,.1);border-radius:10px;padding:12px;">
-      <div style="display:flex;align-items:flex-start;gap:8px;margin-bottom:6px;">
-        <div style="flex:1;min-width:0;">
-          <div style="font-size:13px;font-weight:700;color:#34d399;letter-spacing:.3px;">${prod.identificacao || prodId}</div>
-          <div style="font-size:12px;color:#e2e8f0;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;margin-top:2px;line-height:1.4;" title="${descEscapada}">${prod.descricao || '—'}</div>
-        </div>
-        <span style="flex-shrink:0;font-size:12px;font-weight:700;background:#064e3b;color:#6ee7b7;padding:3px 10px;border-radius:12px;">QTD ${fmtQtde(qtdeTotal)}</span>
-      </div>
-      <div style="margin-top:10px;display:flex;flex-wrap:wrap;gap:8px;">
-        <button type="button" class="kanban-group-action-btn" data-group-key="${(prodId || '').replace(/"/g,'&quot;')}" data-produto-codigo="${(prod.identificacao || prodId || '').replace(/"/g,'&quot;')}" style="border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#cbd5e1;border-radius:8px;padding:7px 12px;cursor:pointer;font-size:12px;">
-          Ver estrutura / processo
-        </button>
-      </div>
-      ${opsHtml}
-    </div>`;
-  }
-
-  function renderCol(colEl, cntEl, items, msgVazia) {
-    if (!colEl) return;
-    const operacaoFiltro = filtroSelect ? filtroSelect.value : '';
-    const filtradas = operacaoFiltro
-      ? items.filter(op => (op.ordens_servico || []).some(os => os.operacao === operacaoFiltro))
-      : items;
-
-    if (filtradas.length === 0) {
-      colEl.innerHTML = `<div style="text-align:center;padding:24px 0;color:var(--inactive-color);font-size:12px;">${operacaoFiltro ? `Nenhuma OP com "${operacaoFiltro}".` : msgVazia}</div>`;
-    } else {
-      const grupos = {};
-      for (const op of filtradas) {
-        const key = op.produto?.identificacao || String(op.id);
-        if (!grupos[key]) grupos[key] = [];
-        grupos[key].push(op);
-      }
-      colEl.innerHTML = Object.entries(grupos).map(([k, ops]) => renderGrupo(k, ops)).join('');
+  function getColunasMontagem() {
+    if (typeof window._producaoGetColunasPosProgramado === 'function') {
+      return window._producaoGetColunasPosProgramado();
     }
-    if (cntEl) cntEl.textContent = filtradas.length;
+    return [
+      { key: 'programado', nome: 'Programado' },
+      { key: 'solicitado', nome: 'Montagem hermetica' },
+      { key: 'produzindo', nome: 'Montagem eletrica' },
+      { key: 'teste', nome: 'Teste' },
+      { key: 'inspecao_final', nome: 'Inspeção final' },
+    ];
   }
 
-  function renderKanban(ordens) {
-    const aProduzir = ordens.filter(op => op.status === 'A PRODUZIR');
-    const produzindo = ordens.filter(op => op.status === 'EM PRODUÇÃO' || op.status === 'PRODUZINDO');
-    const outros     = ordens.filter(op => op.status !== 'A PRODUZIR' && op.status !== 'EM PRODUÇÃO' && op.status !== 'PRODUZINDO');
+  function garantirColunasDom() {
+    if (!kanbanContainer) return;
+    const colunas = getColunasMontagem();
+    const keysAtuais = new Set(colunas.map(c => c.key));
+    Object.keys(colunasDom).forEach((key) => {
+      if (!keysAtuais.has(key)) {
+        colunasDom[key]?.wrap?.remove();
+        delete colunasDom[key];
+      }
+    });
+    kanbanContainer.innerHTML = '';
+    colunas.forEach((col) => {
+      const st = MONTA_COL_STYLE[col.key] || MONTA_COL_DEFAULT;
+      const wrap = document.createElement('div');
+      wrap.style.cssText = 'flex:0 0 340px;min-width:300px;';
+      wrap.innerHTML = `
+        <div style="display:flex;align-items:center;gap:8px;padding:10px 14px;background:${st.bg};border-radius:10px 10px 0 0;border:1px solid ${st.border};border-bottom:none;">
+          <span style="width:10px;height:10px;border-radius:50%;background:${st.dot};display:inline-block;flex-shrink:0;"></span>
+          <span style="font-size:12px;font-weight:700;color:${st.title};text-transform:uppercase;letter-spacing:.5px;">${col.nome}</span>
+          <span id="montaCnt_${col.key}" style="margin-left:auto;font-size:11px;background:${st.badgeBg};color:${st.badgeTxt};padding:2px 9px;border-radius:10px;font-weight:600;">0</span>
+        </div>
+        <div id="montaCol_${col.key}" style="min-height:220px;background:${st.bodyBg};border:1px solid ${st.border};border-top:none;border-radius:0 0 10px 10px;padding:10px;display:flex;flex-direction:column;gap:10px;">
+          <div style="text-align:center;padding:24px 0;color:var(--inactive-color);font-size:12px;">Clique em "Atualizar" para carregar.</div>
+        </div>`;
+      kanbanContainer.appendChild(wrap);
+      colunasDom[col.key] = {
+        wrap,
+        colEl: wrap.querySelector(`#montaCol_${col.key}`),
+        cntEl: wrap.querySelector(`#montaCnt_${col.key}`),
+      };
+    });
+  }
 
-    renderCol(colProgramado, cntProgramado, aProduzir,  'Nenhuma OP a produzir.');
-    renderCol(colProduzindo, cntProduzindo, produzindo, 'Nenhuma OP em produção.');
-    renderCol(colOutros,     cntOutros,     outros,     'Nenhuma OP em outros status.');
-    attachProducaoKanbanActionButtons('#montaProducaoPane', ordens);
-    attachOpCardClickHandlers('#montaProducaoPane', ordens);
+  function atualizarPesquisaBarUi() {
+    if (!btnLimparPesq) return;
+    btnLimparPesq.style.display = filtroPesquisa ? 'inline-flex' : 'none';
+  }
+
+  async function carregarRiStatusMontagem(ordens) {
+    const tasks = [];
+    if (typeof window._producaoCarregarRiStatus === 'function') {
+      tasks.push(window._producaoCarregarRiStatus(ordens));
+    }
+    if (typeof window._producaoCarregarParadasAtivas === 'function') {
+      tasks.push(window._producaoCarregarParadasAtivas(ordens, programacaoCarregada));
+    }
+    if (tasks.length) {
+      await Promise.all(tasks);
+      return;
+    }
+    window._montaRiStatusPorOp = {};
+    window._montaParadaAtivaPorOp = {};
+    window._producaoKanbanRiHabilitado = false;
+  }
+
+  function renderKanbanMontagem() {
+    if (!kanbanContainer) return;
+    garantirColunasDom();
+    window._montaFiltroPesquisa = filtroPesquisa;
+    window._producaoRenderModoMontagem = true;
+    if (typeof window._producaoWithProgramacao === 'function' && typeof window._producaoRenderKanbanCol === 'function') {
+      window._producaoWithProgramacao(programacaoCarregada, () => {
+        getColunasMontagem().forEach((col) => {
+          const dom = colunasDom[col.key];
+          if (!dom) return;
+          const msg = (typeof window._producaoMsgVaziaColuna === 'function')
+            ? window._producaoMsgVaziaColuna(col.key)
+            : `Nenhuma OP em ${col.nome}.`;
+          const onlyAProduzir = col.key === 'programado';
+          window._producaoRenderKanbanCol(dom.colEl, dom.cntEl, ordensCarregadas, col.key, msg, onlyAProduzir, null);
+        });
+      });
+    }
+    window._producaoRenderModoMontagem = false;
+    window._montaFiltroPesquisa = '';
+    if (typeof attachOpCardClickHandlers === 'function') {
+      attachOpCardClickHandlers('#montaProducaoPane', ordensCarregadas);
+    }
   }
 
   async function carregarMontagem() {
-    if (!spinner || !colProgramado) return;
+    if (!spinner || !kanbanContainer) return;
     spinner.style.display = 'block';
-    if (spinnerMsg) spinnerMsg.textContent = 'Consultando IAPP...';
+    if (spinnerMsg) spinnerMsg.textContent = 'Carregando OPs...';
     erroDiv.style.display = 'none';
     if (rodape) rodape.style.display = 'none';
-    if (filtroBar) filtroBar.style.display = 'none';
-    colProgramado.innerHTML = '<div style="text-align:center;padding:24px 0;color:var(--inactive-color);font-size:12px;">Carregando...</div>';
 
     try {
-      const resp = await fetch('/api/producao/ordens-montagem');
-      const data = await resp.json();
-
-      if (!resp.ok || !data.success) throw new Error(data.error || 'Erro ao consultar ordens de montagem');
+      const [respOrdens, respProg] = await Promise.all([
+        fetch('/api/producao/ordens'),
+        fetch('/api/producao/kanban-programacao'),
+      ]);
+      const data = await respOrdens.json();
+      const dataProg = await respProg.json();
+      if (!respOrdens.ok || !data.success) throw new Error(data.error || 'Erro ao consultar ordens de produção');
 
       ordensCarregadas = data.ordens || [];
-
-      const operacoesSet = new Set();
-      for (const op of ordensCarregadas) {
-        for (const os of (op.ordens_servico || [])) {
-          if (os.operacao) operacoesSet.add(os.operacao);
-        }
-      }
-      const operacoes = [...operacoesSet].sort();
-
-      if (filtroSelect) {
-        const valorAtual = filtroSelect.value;
-        filtroSelect.innerHTML = '<option value="">Todas as operações de serviço</option>'
-          + operacoes.map(op => `<option value="${op.replace(/"/g,'&quot;')}"${op === valorAtual ? ' selected' : ''}>${op}</option>`).join('');
-        if (filtroBar) filtroBar.style.display = operacoes.length > 0 ? 'block' : 'none';
-      }
-
-      renderKanban(ordensCarregadas);
+      window._producaoOrdensAtivas = ordensCarregadas;
+      programacaoCarregada = (respProg.ok && dataProg.success) ? (dataProg.registros || []) : [];
+      await Promise.all([
+        carregarRiStatusMontagem(ordensCarregadas),
+        typeof window._producaoCarregarParadasAtivas === 'function'
+          ? window._producaoCarregarParadasAtivas(ordensCarregadas, programacaoCarregada) : Promise.resolve(),
+        typeof window._producaoCarregarTemposPosto === 'function'
+          ? window._producaoCarregarTemposPosto(ordensCarregadas, programacaoCarregada) : Promise.resolve(),
+      ]);
+      renderKanbanMontagem();
 
       if (rodape) {
         rodape.style.display = 'block';
-        rodape.textContent = `${data.total_ativas || ordensCarregadas.length} ordem(ns) carregada(s).`;
+        const sincTs = data.sincronizado_em
+          ? ` · Consultado em: ${String(data.sincronizado_em).slice(0, 10).split('-').reverse().join('/')}`
+          : '';
+        rodape.textContent = `${data.total_ativas || ordensCarregadas.length} OP(s) gerada(s).${sincTs}`;
       }
     } catch (err) {
       erroDiv.style.display = 'block';
-      erroDiv.textContent = 'Erro: ' + (err.message || 'Falha ao carregar ordens de montagem.');
+      erroDiv.textContent = 'Erro: ' + (err.message || 'Falha ao carregar produção montagem.');
     } finally {
       spinner.style.display = 'none';
     }
   }
 
-  if (filtroSelect) {
-    filtroSelect.addEventListener('change', () => renderKanban(ordensCarregadas));
+  if (pesquisaInput) {
+    pesquisaInput.addEventListener('input', () => {
+      clearTimeout(pesquisaDebounce);
+      pesquisaDebounce = setTimeout(() => {
+        filtroPesquisa = pesquisaInput.value || '';
+        atualizarPesquisaBarUi();
+        renderKanbanMontagem();
+      }, 250);
+    });
   }
+  btnLimparPesq?.addEventListener('click', () => {
+    filtroPesquisa = '';
+    if (pesquisaInput) pesquisaInput.value = '';
+    atualizarPesquisaBarUi();
+    renderKanbanMontagem();
+  });
 
   menuBtn.addEventListener('click', (e) => {
     e.preventDefault();
@@ -70526,20 +74418,429 @@ window.verOperacao = function(osId) {
     carregarMontagem();
   });
 
-  if (recarrBtn) {
-    recarrBtn.addEventListener('click', () => carregarMontagem());
-  }
+  if (recarrBtn) recarrBtn.addEventListener('click', () => carregarMontagem());
 
-  window._montaRecarregarOrdens = async function() {
+  window._montaRecarregarOrdens = async function () {
     try {
-      const resp = await fetch('/api/producao/ordens-montagem');
+      const [resp, respProg] = await Promise.all([
+        fetch('/api/producao/ordens'),
+        fetch('/api/producao/kanban-programacao'),
+      ]);
       const data = await resp.json();
+      const dataProg = await respProg.json();
       if (resp.ok && data.success) {
         ordensCarregadas = data.ordens || [];
-        renderKanban(ordensCarregadas);
+      window._producaoOrdensAtivas = ordensCarregadas;
+        programacaoCarregada = (respProg.ok && dataProg.success) ? (dataProg.registros || []) : [];
+        await Promise.all([
+          carregarRiStatusMontagem(ordensCarregadas),
+          typeof window._producaoCarregarParadasAtivas === 'function'
+            ? window._producaoCarregarParadasAtivas(ordensCarregadas, programacaoCarregada) : Promise.resolve(),
+          typeof window._producaoCarregarTemposPosto === 'function'
+            ? window._producaoCarregarTemposPosto(ordensCarregadas, programacaoCarregada) : Promise.resolve(),
+        ]);
+        renderKanbanMontagem();
       }
     } catch (_) { /* silencioso */ }
   };
+  window._montaProgramacaoCarregada = () => programacaoCarregada;
+})();
+
+
+/* ============================================================
+ * RI — REGISTRO DE INSPEÇÃO — OPs pendentes de RI no posto
+ * ============================================================ */
+(function () {
+  const menuBtn = document.getElementById('menu-ri-registro-inspecao');
+  if (!menuBtn) return;
+
+  const spinner = document.getElementById('riRegistroSpinner');
+  const erroDiv = document.getElementById('riRegistroErro');
+  const rodape = document.getElementById('riRegistroRodape');
+  const recarrBtn = document.getElementById('riRegistroRecarregarBtn');
+  const configBtn = document.getElementById('riRegistroConfigBtn');
+  const configModal = document.getElementById('riRegistroConfigModal');
+  const configModalFechar = document.getElementById('riRegistroConfigModalFechar');
+  const permissaoWhatsBtn = document.getElementById('riRegistroPermissaoWhatsBtn');
+  const whatsModal = document.getElementById('riRegistroWhatsModal');
+  const whatsModalFechar = document.getElementById('riRegistroWhatsModalFechar');
+  const whatsVoltarBtn = document.getElementById('riRegistroWhatsVoltarBtn');
+  const whatsSalvarBtn = document.getElementById('riRegistroWhatsSalvarBtn');
+  const whatsTelefoneInput = document.getElementById('riRegistroWhatsTelefone');
+  const whatsAtivoInput = document.getElementById('riRegistroWhatsAtivo');
+  const whatsAviso = document.getElementById('riRegistroWhatsAviso');
+  const kanbanContainer = document.getElementById('riRegistroKanban');
+  const pesquisaInput = document.getElementById('riRegistroPesquisaInput');
+  const btnLimparPesq = document.getElementById('riRegistroPesquisaLimpar');
+
+  const RI_COL_STYLE = {
+    programado:     { bg: '#1e1b4b', border: '#3730a3', dot: '#6366f1', title: '#a5b4fc', badgeBg: '#312e81', badgeTxt: '#c7d2fe', bodyBg: 'rgba(99,102,241,.04)' },
+    solicitado:     { bg: '#172554', border: '#1d4ed8', dot: '#3b82f6', title: '#93c5fd', badgeBg: '#1e3a8a', badgeTxt: '#bfdbfe', bodyBg: 'rgba(59,130,246,.04)' },
+    produzindo:     { bg: '#052e16', border: '#166534', dot: '#22c55e', title: '#86efac', badgeBg: '#14532d', badgeTxt: '#bbf7d0', bodyBg: 'rgba(34,197,94,.04)' },
+    teste:          { bg: '#431407', border: '#9a3412', dot: '#f97316', title: '#fdba74', badgeBg: '#7c2d12', badgeTxt: '#fed7aa', bodyBg: 'rgba(249,115,22,.04)' },
+    inspecao_final: { bg: '#1e1b4b', border: '#6d28d9', dot: '#a855f7', title: '#d8b4fe', badgeBg: '#4c1d95', badgeTxt: '#e9d5ff', bodyBg: 'rgba(168,85,247,.04)' },
+  };
+  const RI_COL_DEFAULT = { bg: '#1c1917', border: '#44403c', dot: '#78716c', title: '#d6d3d1', badgeBg: '#292524', badgeTxt: '#d6d3d1', bodyBg: 'rgba(120,113,108,.04)' };
+
+  let pendentesCarregados = [];
+  let ordensParaClick = [];
+  let filtroPesquisa = '';
+  let pesquisaDebounce = null;
+  const colunasDom = {};
+
+  function getColunasRi() {
+    if (typeof window._producaoGetColunasPosProgramado === 'function') {
+      return window._producaoGetColunasPosProgramado();
+    }
+    return [
+      { key: 'programado', nome: 'Programado' },
+      { key: 'solicitado', nome: 'Montagem hermetica' },
+      { key: 'produzindo', nome: 'Montagem eletrica' },
+      { key: 'teste', nome: 'Teste' },
+      { key: 'inspecao_final', nome: 'Inspeção final' },
+    ];
+  }
+
+  function msgVaziaColunaRi(colKey, nome) {
+    if (typeof window._producaoMsgVaziaColuna === 'function') {
+      return window._producaoMsgVaziaColuna(colKey);
+    }
+    return `Nenhuma OP aguardando RI em ${nome || colKey}.`;
+  }
+
+  function garantirColunasDom() {
+    if (!kanbanContainer) return;
+    const colunas = getColunasRi();
+    const keysAtuais = new Set(colunas.map(c => c.key));
+    Object.keys(colunasDom).forEach((key) => {
+      if (!keysAtuais.has(key)) {
+        colunasDom[key]?.wrap?.remove();
+        delete colunasDom[key];
+      }
+    });
+    kanbanContainer.innerHTML = '';
+    colunas.forEach((col) => {
+      const st = RI_COL_STYLE[col.key] || RI_COL_DEFAULT;
+      const wrap = document.createElement('div');
+      wrap.style.cssText = 'flex:0 0 340px;min-width:300px;';
+      wrap.innerHTML = `
+        <div style="display:flex;align-items:center;gap:8px;padding:10px 14px;background:${st.bg};border-radius:10px 10px 0 0;border:1px solid ${st.border};border-bottom:none;">
+          <span style="width:10px;height:10px;border-radius:50%;background:${st.dot};display:inline-block;flex-shrink:0;"></span>
+          <span style="font-size:12px;font-weight:700;color:${st.title};text-transform:uppercase;letter-spacing:.5px;">${col.nome}</span>
+          <span id="riRegistroCnt_${col.key}" style="margin-left:auto;font-size:11px;background:${st.badgeBg};color:${st.badgeTxt};padding:2px 9px;border-radius:10px;font-weight:600;">0</span>
+        </div>
+        <div id="riRegistroCol_${col.key}" style="min-height:220px;background:${st.bodyBg};border:1px solid ${st.border};border-top:none;border-radius:0 0 10px 10px;padding:10px;display:flex;flex-direction:column;gap:10px;"></div>`;
+      kanbanContainer.appendChild(wrap);
+      colunasDom[col.key] = {
+        wrap,
+        colEl: wrap.querySelector(`#riRegistroCol_${col.key}`),
+        cntEl: wrap.querySelector(`#riRegistroCnt_${col.key}`),
+      };
+    });
+  }
+
+  function escHtml(str) {
+    return String(str ?? '').replace(/[&<>"']/g, (ch) => ({
+      '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+    }[ch] || ch));
+  }
+
+  function fmtData(val) {
+    if (!val) return '—';
+    const s = String(val).slice(0, 10);
+    if (s.length < 10) return s;
+    return s.split('-').reverse().join('/');
+  }
+
+  function fmtQtde(v) {
+    const n = Number(v);
+    if (!Number.isFinite(n)) return String(v ?? '—');
+    return n % 1 === 0 ? String(n) : n.toFixed(2);
+  }
+
+  function normPesquisa(str) {
+    return String(str || '').trim().toLowerCase();
+  }
+
+  function itemMatchesPesquisa(item) {
+    const termo = normPesquisa(filtroPesquisa);
+    if (!termo) return true;
+    const modelo = normPesquisa(item.produto?.identificacao);
+    const opNum = normPesquisa(item.numero_op);
+    return modelo.includes(termo) || opNum.includes(termo);
+  }
+
+  function atualizarPesquisaBarUi() {
+    if (!btnLimparPesq) return;
+    btnLimparPesq.style.display = filtroPesquisa ? 'inline-flex' : 'none';
+  }
+
+  function pendingToOp(item) {
+    return {
+      id: item.op_producao_id,
+      identificacao: item.numero_op,
+      qtde: item.qtde,
+      obs: item.obs,
+      data_abertura: item.data_abertura,
+      data_inicio: item.data_inicio,
+      data_final: item.data_final,
+      data_previsao_faturamento: item.data_previsao_faturamento,
+      data_previsao_entrega: item.data_previsao_entrega,
+      produto: item.produto || {},
+      from_op_producao: true,
+      _riColKey: item.col_key,
+      _riPosto: item.posto,
+    };
+  }
+
+  function renderRiOpCard(item) {
+    const opIdent = escHtml(item.numero_op || '—');
+    const posto = escHtml(item.posto || '');
+    const colKey = escHtml(item.col_key || '');
+    return `<div data-op-id="${item.op_producao_id}" data-ri-col-key="${colKey}" class="kanban-op-card" style="cursor:pointer;">
+      <div style="display:flex;align-items:flex-start;gap:8px;">
+        <div style="flex:1;min-width:0;">
+          <div style="display:flex;align-items:center;flex-wrap:wrap;gap:6px;margin-bottom:4px;">
+            <span style="font-size:10px;color:#475569;font-weight:600;">#${item.op_producao_id}</span>
+            <span style="font-size:13px;font-weight:700;color:#e2e8f0;">OP ${opIdent}</span>
+            <span style="font-size:10px;font-weight:700;background:#312e81;color:#c7d2fe;padding:2px 8px;border-radius:6px;">${posto}</span>
+            <span style="font-size:11px;color:#94a3b8;margin-left:auto;">Qtde: <b style="color:#f1f5f9;">${fmtQtde(item.qtde)}</b></span>
+          </div>
+          <div style="display:flex;flex-wrap:wrap;gap:8px;">
+            ${item.data_abertura ? `<span style="font-size:10px;color:#64748b;">Abertura: <b style="color:#94a3b8;">${fmtData(item.data_abertura)}</b></span>` : ''}
+            ${item.data_previsao_entrega ? `<span style="font-size:10px;color:#64748b;">Prev. entrega: <b style="color:#a5f3fc;">${fmtData(item.data_previsao_entrega)}</b></span>` : ''}
+          </div>
+          ${item.obs ? `<div style="font-size:11px;color:#94a3b8;margin-top:6px;">Obs: <span style="color:#fef3c7;">${escHtml(item.obs)}</span></div>` : ''}
+          <div style="font-size:11px;color:#a5b4fc;font-weight:600;margin-top:8px;line-height:1.35;">
+            <i class="fa-solid fa-clipboard-check" style="margin-right:5px;font-size:10px;"></i>Clique para registrar RI
+          </div>
+        </div>
+      </div>
+    </div>`;
+  }
+
+  function renderRiKanbanGrupo(prodId, items) {
+    const prod = items[0].produto || {};
+    const qtdeTotal = items.reduce((s, it) => s + (Number(it.qtde) || 0), 0);
+    const opsHtml = items.map(renderRiOpCard).join('');
+    const descEsc = escHtml(prod.descricao || '—');
+    return `<div class="kanban-prod-grupo" style="background:var(--content-bg,#1e2233);border:1px solid rgba(255,255,255,.1);border-radius:10px;padding:12px;">
+      <div style="display:flex;align-items:flex-start;gap:8px;margin-bottom:6px;">
+        <div style="flex:1;min-width:0;">
+          <div style="font-size:13px;font-weight:700;color:#818cf8;letter-spacing:.3px;">${escHtml(prod.identificacao || prodId)}</div>
+          <div style="font-size:12px;color:#e2e8f0;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;margin-top:2px;line-height:1.4;" title="${descEsc}">${descEsc}</div>
+        </div>
+        <span style="flex-shrink:0;font-size:12px;font-weight:700;background:#312e81;color:#c7d2fe;padding:3px 10px;border-radius:12px;">QTD ${fmtQtde(qtdeTotal)}</span>
+      </div>
+      ${opsHtml}
+    </div>`;
+  }
+
+  function renderRiKanbanCol(colEl, cntEl, items, colKey, msgVazia) {
+    if (!colEl) return;
+    const naColuna = items.filter(it => String(it.col_key || '') === colKey);
+    if (cntEl) cntEl.textContent = String(naColuna.length);
+
+    if (!naColuna.length) {
+      const msg = filtroPesquisa
+        ? `Nenhuma OP encontrada para "${escHtml(filtroPesquisa)}".`
+        : msgVazia;
+      colEl.innerHTML = `<div style="text-align:center;padding:24px 0;color:var(--inactive-color);font-size:12px;">${msg}</div>`;
+      return;
+    }
+
+    const grupos = {};
+    for (const item of naColuna) {
+      const cod = item.produto?.identificacao || String(item.op_producao_id);
+      if (!grupos[cod]) grupos[cod] = [];
+      grupos[cod].push(item);
+    }
+
+    colEl.innerHTML = Object.entries(grupos)
+      .map(([prodId, grupoItems]) => renderRiKanbanGrupo(prodId, grupoItems))
+      .join('');
+  }
+
+  function renderRiKanban() {
+    if (!kanbanContainer) return;
+    garantirColunasDom();
+
+    const filtrados = pendentesCarregados.filter(itemMatchesPesquisa);
+    ordensParaClick = filtrados.map(pendingToOp);
+
+    getColunasRi().forEach((col) => {
+      const dom = colunasDom[col.key];
+      if (!dom) return;
+      renderRiKanbanCol(
+        dom.colEl,
+        dom.cntEl,
+        filtrados,
+        col.key,
+        msgVaziaColunaRi(col.key, col.nome)
+      );
+    });
+
+    if (typeof attachOpCardClickHandlers === 'function') {
+      attachOpCardClickHandlers('#riRegistroInspecaoPane', ordensParaClick);
+    }
+  }
+
+  async function carregarRiRegistro() {
+    if (!kanbanContainer) return;
+    if (spinner) spinner.style.display = 'block';
+    if (erroDiv) erroDiv.style.display = 'none';
+    if (rodape) rodape.style.display = 'none';
+
+    try {
+      const resp = await fetch('/api/qualidade/ri-check/pendentes', { credentials: 'include' });
+      const data = await resp.json();
+      if (!resp.ok || !data.ok) throw new Error(data.error || 'Erro ao consultar RI pendentes');
+
+      pendentesCarregados = data.pendentes || [];
+      renderRiKanban();
+
+      if (rodape) {
+        rodape.style.display = 'block';
+        rodape.textContent = `${data.total || pendentesCarregados.length} OP(s) aguardando RI. · Consultado em: ${new Date().toLocaleString('pt-BR')}`;
+      }
+    } catch (err) {
+      if (erroDiv) {
+        erroDiv.style.display = 'block';
+        erroDiv.textContent = 'Erro: ' + (err.message || 'Falha ao carregar RI pendentes.');
+      }
+    } finally {
+      if (spinner) spinner.style.display = 'none';
+    }
+  }
+
+  if (pesquisaInput) {
+    pesquisaInput.addEventListener('input', () => {
+      clearTimeout(pesquisaDebounce);
+      pesquisaDebounce = setTimeout(() => {
+        filtroPesquisa = pesquisaInput.value || '';
+        atualizarPesquisaBarUi();
+        renderRiKanban();
+      }, 250);
+    });
+  }
+  btnLimparPesq?.addEventListener('click', () => {
+    filtroPesquisa = '';
+    if (pesquisaInput) pesquisaInput.value = '';
+    atualizarPesquisaBarUi();
+    renderRiKanban();
+  });
+
+  menuBtn.addEventListener('click', (e) => {
+    e.preventDefault();
+    document.querySelectorAll('.left-side .side-menu a').forEach(a => a.classList.remove('is-active'));
+    menuBtn.classList.add('is-active');
+    showMainTab('riRegistroInspecaoPane');
+    carregarRiRegistro();
+  });
+
+  recarrBtn?.addEventListener('click', () => carregarRiRegistro());
+
+  function setRiWhatsAviso(msg, tipo = 'info') {
+    if (!whatsAviso) return;
+    if (!msg) {
+      whatsAviso.style.display = 'none';
+      whatsAviso.textContent = '';
+      return;
+    }
+    const cores = {
+      info: { bg: 'rgba(99,102,241,.12)', color: '#a5b4fc', border: 'rgba(99,102,241,.25)' },
+      success: { bg: 'rgba(34,197,94,.12)', color: '#86efac', border: 'rgba(34,197,94,.25)' },
+      error: { bg: 'rgba(239,68,68,.12)', color: '#fca5a5', border: 'rgba(239,68,68,.25)' },
+    };
+    const c = cores[tipo] || cores.info;
+    Object.assign(whatsAviso.style, {
+      display: 'block',
+      background: c.bg,
+      color: c.color,
+      border: `1px solid ${c.border}`,
+    });
+    whatsAviso.textContent = msg;
+  }
+
+  function abrirRiConfigModal() {
+    if (!configModal) return;
+    configModal.style.display = 'flex';
+  }
+
+  function fecharRiConfigModal() {
+    if (configModal) configModal.style.display = 'none';
+  }
+
+  async function abrirRiWhatsModal() {
+    if (!whatsModal) return;
+    setRiWhatsAviso('');
+    fecharRiConfigModal();
+    whatsModal.style.display = 'flex';
+    try {
+      const resp = await fetch('/api/qualidade/ri-check/config/whatsapp', { credentials: 'include' });
+      const json = await resp.json().catch(() => ({}));
+      if (!resp.ok || !json.ok) throw new Error(json.error || 'Falha ao carregar configuração.');
+      const cfg = json.config || {};
+      if (whatsTelefoneInput) {
+        whatsTelefoneInput.value = cfg.telefone_contato || cfg.telefone_whatsapp || '';
+      }
+      if (whatsAtivoInput) whatsAtivoInput.checked = cfg.permissao_ri === true;
+    } catch (err) {
+      setRiWhatsAviso(err.message || 'Erro ao carregar.', 'error');
+    }
+  }
+
+  function fecharRiWhatsModal() {
+    if (whatsModal) whatsModal.style.display = 'none';
+    setRiWhatsAviso('');
+  }
+
+  async function salvarRiWhatsConfig() {
+    const telefone = String(whatsTelefoneInput?.value || '').trim();
+    if (!telefone) {
+      setRiWhatsAviso('Informe o número do WhatsApp.', 'error');
+      return;
+    }
+    if (whatsSalvarBtn) whatsSalvarBtn.disabled = true;
+    setRiWhatsAviso('Salvando...', 'info');
+    try {
+      const resp = await fetch('/api/qualidade/ri-check/config/whatsapp', {
+        method: 'PUT',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          telefone_contato: telefone,
+          permissao_ri: whatsAtivoInput?.checked === true,
+        }),
+      });
+      const json = await resp.json().catch(() => ({}));
+      if (!resp.ok || !json.ok) throw new Error(json.error || 'Falha ao salvar.');
+      setRiWhatsAviso('Número salvo com sucesso.', 'success');
+      setTimeout(() => fecharRiWhatsModal(), 1200);
+    } catch (err) {
+      setRiWhatsAviso(err.message || 'Erro ao salvar.', 'error');
+    } finally {
+      if (whatsSalvarBtn) whatsSalvarBtn.disabled = false;
+    }
+  }
+
+  configBtn?.addEventListener('click', abrirRiConfigModal);
+  configModalFechar?.addEventListener('click', fecharRiConfigModal);
+  configModal?.addEventListener('click', (e) => {
+    if (e.target === configModal) fecharRiConfigModal();
+  });
+  permissaoWhatsBtn?.addEventListener('click', abrirRiWhatsModal);
+  whatsModalFechar?.addEventListener('click', fecharRiWhatsModal);
+  whatsVoltarBtn?.addEventListener('click', () => {
+    fecharRiWhatsModal();
+    abrirRiConfigModal();
+  });
+  whatsSalvarBtn?.addEventListener('click', salvarRiWhatsConfig);
+  whatsModal?.addEventListener('click', (e) => {
+    if (e.target === whatsModal) fecharRiWhatsModal();
+  });
+
+  window._riRegistroRecarregar = carregarRiRegistro;
 })();
 
   function escapeHtml(value) {
@@ -70552,7 +74853,412 @@ window.verOperacao = function(osId) {
     }[ch] || ch));
   }
 
-  async function openProducaoEstruturaPorIappId(iappId, produtoCodigo) {
+  function estruturaSqlCampoHtml(secKey, fieldKey, value) {
+    const isJson = JSONB_FIELDS_RE.test(fieldKey) || String(value ?? '').length > 100;
+    const val = escapeHtml(String(value ?? ''));
+    const dataSec = escapeHtml(secKey);
+    const dataField = escapeHtml(fieldKey);
+    if (isJson) {
+      return `<label class="estr-sql-field">
+        <span class="estr-sql-label">${dataField}</span>
+        <textarea data-sec="${dataSec}" data-field="${dataField}" rows="4">${val}</textarea>
+      </label>`;
+    }
+    return `<label class="estr-sql-field">
+      <span class="estr-sql-label">${dataField}</span>
+      <input data-sec="${dataSec}" data-field="${dataField}" type="text" value="${val}">
+    </label>`;
+  }
+
+  const JSONB_FIELDS_RE = /^(raw|grupo|subgrupo|tag_grupo|checklists|servicos)$/;
+
+  function estruturaSqlColetarForm(formEl) {
+    const out = {};
+    formEl.querySelectorAll('[data-sec][data-field]').forEach((el) => {
+      const sec = el.dataset.sec;
+      const field = el.dataset.field;
+      if (!out[sec]) out[sec] = {};
+      out[sec][field] = el.value;
+    });
+    return out;
+  }
+
+  async function openEstruturaSqlDadosModal(opts) {
+    const {
+      titulo,
+      subtitulo,
+      getUrl,
+      putUrl,
+      renderFormHtml,
+      buildPayload,
+      onSaved,
+    } = opts;
+
+    const overlay = document.createElement('div');
+    overlay.className = 'kanban-modal-overlay';
+    overlay.style.zIndex = '10050';
+    overlay.addEventListener('click', (ev) => { if (ev.target === overlay) overlay.remove(); });
+
+    const modal = document.createElement('div');
+    modal.className = 'kanban-modal';
+    modal.style.maxWidth = '860px';
+    modal.innerHTML = `
+      <header>
+        <div>
+          <h2>${escapeHtml(titulo)}</h2>
+          <span>${escapeHtml(subtitulo || '')}</span>
+        </div>
+        <button class="close-btn" aria-label="Fechar">&times;</button>
+      </header>
+      <div class="kanban-modal-body" id="estr-sql-editor-body" style="max-height:65vh;overflow:auto;">
+        <div style="text-align:center;padding:32px 0;color:#94a3b8;font-size:12px;">
+          <i class="fa-solid fa-spinner fa-spin" style="margin-right:6px;"></i>Carregando dados...
+        </div>
+      </div>
+      <footer style="display:flex;justify-content:flex-end;gap:8px;flex-wrap:wrap;">
+        <span id="estr-sql-editor-status" style="flex:1;font-size:11px;color:#64748b;align-self:center;"></span>
+        <button type="button" class="modal-primary" id="estr-sql-save-btn">Salvar alterações</button>
+        <button type="button" class="modal-secondary" id="estr-sql-close-btn">Fechar</button>
+      </footer>
+    `;
+
+    overlay.appendChild(modal);
+    document.body.appendChild(overlay);
+
+    const close = () => overlay.remove();
+    modal.querySelector('.close-btn')?.addEventListener('click', close);
+    modal.querySelector('#estr-sql-close-btn')?.addEventListener('click', close);
+
+    const body = modal.querySelector('#estr-sql-editor-body');
+    const statusEl = modal.querySelector('#estr-sql-editor-status');
+    const saveBtn = modal.querySelector('#estr-sql-save-btn');
+    let dadosOriginais = null;
+
+    try {
+      const resp = await fetch(getUrl);
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data.error || 'Erro ao carregar dados');
+      dadosOriginais = data;
+      body.innerHTML = `
+        <style>
+          .estr-sql-sec { margin-bottom:18px; padding-bottom:14px; border-bottom:1px solid rgba(255,255,255,.08); }
+          .estr-sql-sec h3 { margin:0 0 10px; font-size:12px; color:#94a3b8; font-weight:600; text-transform:uppercase; letter-spacing:.04em; }
+          .estr-sql-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(240px,1fr)); gap:8px 12px; }
+          .estr-sql-field { display:block; margin:0; }
+          .estr-sql-label { display:block; font-size:10px; color:#64748b; margin-bottom:4px; }
+          .estr-sql-field input, .estr-sql-field textarea {
+            width:100%; font-size:11px; padding:6px 8px; border-radius:6px;
+            border:1px solid rgba(255,255,255,.12); background:rgba(0,0,0,.25); color:#e2e8f0;
+            box-sizing:border-box;
+          }
+          .estr-sql-field textarea { resize:vertical; min-height:64px; font-family:monospace; }
+        </style>
+        <form id="estr-sql-editor-form">${renderFormHtml(data)}</form>`;
+    } catch (e) {
+      body.innerHTML = `<div style="text-align:center;padding:32px 0;color:#f87171;font-size:12px;">${escapeHtml(e.message)}</div>`;
+      saveBtn.disabled = true;
+      return;
+    }
+
+    saveBtn?.addEventListener('click', async () => {
+      const form = modal.querySelector('#estr-sql-editor-form');
+      if (!form || !dadosOriginais) return;
+      saveBtn.disabled = true;
+      saveBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin" style="margin-right:6px;"></i>Salvando...';
+      if (statusEl) statusEl.textContent = '';
+      try {
+        const collected = estruturaSqlColetarForm(form);
+        const payload = buildPayload(collected, dadosOriginais);
+        const resp = await fetch(putUrl, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        const data = await resp.json();
+        if (!resp.ok) throw new Error(data.error || 'Erro ao salvar');
+        if (statusEl) statusEl.textContent = data.message || 'Salvo com sucesso.';
+        dadosOriginais = data;
+        if (typeof onSaved === 'function') onSaved(data);
+      } catch (e) {
+        if (statusEl) statusEl.textContent = e.message;
+      } finally {
+        saveBtn.disabled = false;
+        saveBtn.innerHTML = 'Salvar alterações';
+      }
+    });
+  }
+
+  function openEstruturaSqlFichaModal(fichaId, onSaved) {
+    const id = Number(fichaId) || 0;
+    if (!id) return;
+    openEstruturaSqlDadosModal({
+      titulo: 'Dados completos do produto',
+      subtitulo: `Ficha SQL #${id}`,
+      getUrl: `/api/estrutura/ficha/${id}/completo`,
+      putUrl: `/api/estrutura/ficha/${id}/completo`,
+      renderFormHtml: (data) => {
+        let html = '<div class="estr-sql-sec"><h3>Ficha técnica</h3><div class="estr-sql-grid">';
+        Object.entries(data.ficha || {}).forEach(([k, v]) => {
+          html += estruturaSqlCampoHtml('ficha', k, v);
+        });
+        html += '</div></div>';
+        (data.operacoes || []).forEach((op) => {
+          html += `<div class="estr-sql-sec"><h3>Operação ${escapeHtml(String(op.operacao))}</h3><div class="estr-sql-grid">`;
+          Object.entries(op.fields || {}).forEach(([k, v]) => {
+            html += estruturaSqlCampoHtml(`operacao_${op.operacao}`, k, v);
+          });
+          html += '</div></div>';
+        });
+        return html;
+      },
+      buildPayload: (collected, data) => ({
+        ficha: collected.ficha || {},
+        operacoes: (data.operacoes || []).map((op) => ({
+          operacao: op.operacao,
+          fields: collected[`operacao_${op.operacao}`] || {},
+        })),
+      }),
+      onSaved,
+    });
+  }
+
+  function openEstruturaSqlItemModal(itemId, onSaved) {
+    const id = Number(itemId) || 0;
+    if (!id) return;
+    openEstruturaSqlDadosModal({
+      titulo: 'Dados completos do item',
+      subtitulo: `Item SQL #${id}`,
+      getUrl: `/api/estrutura/item/${id}/completo`,
+      putUrl: `/api/estrutura/item/${id}/completo`,
+      renderFormHtml: (data) => {
+        const blocos = [
+          ['Item da estrutura', 'item', data.item],
+          ['Produto IAPP', 'produto', data.produto],
+          ['Operação', 'operacao', data.operacao],
+        ];
+        return blocos.filter((b) => b[2] && Object.keys(b[2]).length).map(([tit, sec, fields]) => {
+          let h = `<div class="estr-sql-sec"><h3>${escapeHtml(tit)}</h3><div class="estr-sql-grid">`;
+          Object.entries(fields).forEach(([k, v]) => {
+            h += estruturaSqlCampoHtml(sec, k, v);
+          });
+          h += '</div></div>';
+          return h;
+        }).join('');
+      },
+      buildPayload: (collected) => ({
+        item: collected.item || {},
+        produto: collected.produto || {},
+        operacao: collected.operacao || {},
+      }),
+      onSaved,
+    });
+  }
+
+  let estruturaSqlBuscaDebounce = null;
+
+  function openEstruturaSqlProdutoBuscaModal(opts) {
+    const {
+      titulo,
+      subtitulo,
+      onSelect,
+    } = opts || {};
+
+    const overlay = document.createElement('div');
+    overlay.className = 'kanban-modal-overlay';
+    overlay.style.zIndex = '10060';
+    overlay.addEventListener('click', (ev) => { if (ev.target === overlay) overlay.remove(); });
+
+    const modal = document.createElement('div');
+    modal.className = 'kanban-modal';
+    modal.style.maxWidth = '520px';
+    modal.innerHTML = `
+      <header>
+        <div>
+          <h2>${escapeHtml(titulo || 'Pesquisar produto')}</h2>
+          <span>${escapeHtml(subtitulo || 'Mín. 3 caracteres — fonte: produtos_omie')}</span>
+        </div>
+        <button class="close-btn" aria-label="Fechar">&times;</button>
+      </header>
+      <div class="kanban-modal-body" style="max-height:420px;overflow:auto;">
+        <label style="display:block;margin-bottom:6px;font-size:11px;color:#94a3b8;">Código ou descrição</label>
+        <div style="position:relative;">
+          <i class="fa-solid fa-magnifying-glass" style="position:absolute;left:12px;top:50%;transform:translateY(-50%);color:#64748b;font-size:13px;pointer-events:none;"></i>
+          <input type="search" id="estr-sql-busca-input" autocomplete="off"
+            placeholder="Pesquisar produto..."
+            style="width:100%;padding:9px 12px 9px 36px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.12);border-radius:8px;color:#e2e8f0;font-size:13px;outline:none;box-sizing:border-box;">
+        </div>
+        <div id="estr-sql-busca-status" style="display:none;margin-top:10px;font-size:11px;color:#64748b;"></div>
+        <div id="estr-sql-busca-lista" style="display:none;margin-top:10px;max-height:260px;overflow-y:auto;border:1px solid rgba(255,255,255,.1);border-radius:8px;"></div>
+      </div>
+      <footer style="display:flex;justify-content:flex-end;">
+        <button type="button" class="modal-secondary" id="estr-sql-busca-fechar">Fechar</button>
+      </footer>
+    `;
+
+    overlay.appendChild(modal);
+    document.body.appendChild(overlay);
+
+    const close = () => overlay.remove();
+    modal.querySelector('.close-btn')?.addEventListener('click', close);
+    modal.querySelector('#estr-sql-busca-fechar')?.addEventListener('click', close);
+
+    const input = modal.querySelector('#estr-sql-busca-input');
+    const statusEl = modal.querySelector('#estr-sql-busca-status');
+    const listaEl = modal.querySelector('#estr-sql-busca-lista');
+    let selecionando = false;
+
+    const renderResultados = (itens) => {
+      if (!listaEl) return;
+      if (!itens.length) {
+        listaEl.style.display = 'block';
+        listaEl.innerHTML = '<div style="padding:14px;text-align:center;font-size:12px;color:#64748b;">Nenhum produto encontrado.</div>';
+        return;
+      }
+      listaEl.style.display = 'block';
+      listaEl.innerHTML = itens.map((it) => {
+        const codigo = escapeHtml(String(it.codigo || ''));
+        const descricao = escapeHtml(String(it.descricao || ''));
+        const codigoProduto = Number(it.codigo_produto) || 0;
+        return `<button type="button" class="estr-sql-busca-item" data-codigo="${codigo}" data-codigo-produto="${codigoProduto}"
+          style="display:block;width:100%;text-align:left;padding:10px 12px;background:transparent;border:none;border-bottom:1px solid rgba(255,255,255,.06);color:#e2e8f0;cursor:pointer;">
+          <div style="font-size:13px;font-weight:600;">${codigo}</div>
+          <div style="font-size:11px;color:#64748b;margin-top:2px;">${descricao}</div>
+        </button>`;
+      }).join('');
+    };
+
+    const buscar = async (termo) => {
+      if (!statusEl) return;
+      statusEl.style.display = 'block';
+      statusEl.style.color = '#64748b';
+      statusEl.textContent = 'Buscando...';
+      try {
+        const resp = await fetch(`/api/producao/op-producao/buscar-produtos?q=${encodeURIComponent(termo)}`);
+        const data = await resp.json();
+        if (!resp.ok || !data.success) throw new Error(data.error || 'Falha na busca.');
+        statusEl.textContent = data.itens?.length
+          ? `${data.itens.length} produto(s) encontrado(s).`
+          : 'Nenhum produto encontrado.';
+        renderResultados(data.itens || []);
+      } catch (err) {
+        statusEl.style.color = '#f87171';
+        statusEl.textContent = 'Erro: ' + (err.message || 'Falha ao buscar produtos.');
+        if (listaEl) {
+          listaEl.style.display = 'none';
+          listaEl.innerHTML = '';
+        }
+      }
+    };
+
+    input?.addEventListener('input', () => {
+      const termo = String(input.value || '').trim();
+      if (estruturaSqlBuscaDebounce) clearTimeout(estruturaSqlBuscaDebounce);
+      if (termo.length < 3) {
+        if (statusEl) {
+          statusEl.style.display = termo.length ? 'block' : 'none';
+          statusEl.style.color = '#64748b';
+          statusEl.textContent = 'Digite pelo menos 3 caracteres.';
+        }
+        if (listaEl) {
+          listaEl.style.display = 'none';
+          listaEl.innerHTML = '';
+        }
+        return;
+      }
+      estruturaSqlBuscaDebounce = setTimeout(() => buscar(termo), 300);
+    });
+
+    listaEl?.addEventListener('click', async (ev) => {
+      const btn = ev.target.closest('.estr-sql-busca-item');
+      if (!btn || selecionando) return;
+      const codigo = String(btn.dataset.codigo || '').trim();
+      const codigoProduto = Number(btn.dataset.codigoProduto) || 0;
+      if (!codigo || !codigoProduto) return;
+      selecionando = true;
+      btn.disabled = true;
+      if (statusEl) {
+        statusEl.style.display = 'block';
+        statusEl.style.color = '#64748b';
+        statusEl.textContent = 'Processando...';
+      }
+      try {
+        if (typeof onSelect === 'function') {
+          await onSelect({ codigo, codigo_produto: codigoProduto });
+        }
+        close();
+      } catch (err) {
+        if (statusEl) {
+          statusEl.style.color = '#f87171';
+          statusEl.textContent = err.message || 'Erro ao selecionar produto.';
+        }
+        selecionando = false;
+        btn.disabled = false;
+      }
+    });
+
+    setTimeout(() => input?.focus(), 80);
+  }
+
+  function trocarEstruturaSqlItem(itemId, recarregarLista) {
+    const id = Number(itemId) || 0;
+    if (!id) return;
+    openEstruturaSqlProdutoBuscaModal({
+      titulo: 'Trocar produto do item',
+      subtitulo: 'Selecione o novo produto (produtos_omie)',
+      onSelect: async (prod) => {
+        const resp = await fetch(`/api/estrutura/item/${id}/trocar-produto`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(prod),
+        });
+        const data = await resp.json();
+        if (!resp.ok) throw new Error(data.error || 'Erro ao trocar produto.');
+        if (typeof recarregarLista === 'function') await recarregarLista();
+        openEstruturaSqlItemModal(id, recarregarLista);
+      },
+    });
+  }
+
+  async function excluirEstruturaSqlItem(itemId, recarregarLista) {
+    const id = Number(itemId) || 0;
+    if (!id) return;
+    if (!window.confirm('Remover este item da estrutura no cache SQL?')) return;
+    const resp = await fetch(`/api/estrutura/item/${id}`, { method: 'DELETE' });
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.error || 'Erro ao excluir item.');
+    if (typeof recarregarLista === 'function') await recarregarLista();
+  }
+
+  function adicionarEstruturaSqlItem(fichaId, recarregarLista) {
+    const fid = Number(fichaId) || 0;
+    if (!fid) return;
+    openEstruturaSqlProdutoBuscaModal({
+      titulo: 'Adicionar item à estrutura',
+      subtitulo: 'Selecione o produto (produtos_omie)',
+      onSelect: async (prod) => {
+        const resp = await fetch(`/api/estrutura/ficha/${fid}/item`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(prod),
+        });
+        const data = await resp.json();
+        if (!resp.ok) throw new Error(data.error || 'Erro ao adicionar item.');
+        const novoId = Number(data.item_id) || 0;
+        if (typeof recarregarLista === 'function') await recarregarLista();
+        if (novoId) openEstruturaSqlItemModal(novoId, recarregarLista);
+      },
+    });
+  }
+
+  async function openProducaoEstruturaPorIappId(_iappId, produtoCodigo, opts) {
+    const opProducaoId = Number(opts?.opProducaoId) || 0;
+    const numeroOp = String(opts?.numeroOp || '').trim();
+    const codigo = String(produtoCodigo || '').trim();
+    const params = new URLSearchParams();
+    if (codigo) params.set('codigo', codigo);
+    if (opProducaoId > 0) params.set('op_producao_id', String(opProducaoId));
+    if (numeroOp) params.set('numero_op', numeroOp);
+    const fetchUrl = `/api/producao/estrutura-ficha?${params.toString()}`;
     const overlay = document.createElement('div');
     overlay.className = 'kanban-modal-overlay';
     overlay.addEventListener('click', (ev) => { if (ev.target === overlay) overlay.remove(); });
@@ -70564,7 +75270,7 @@ window.verOperacao = function(osId) {
       <header>
         <div>
           <h2>Estrutura do produto</h2>
-          <span>${escapeHtml(produtoCodigo || String(iappId))}</span>
+          <span>${escapeHtml(codigo || produtoCodigo || '')}</span>
         </div>
         <button class="close-btn" aria-label="Fechar">&times;</button>
       </header>
@@ -70573,7 +75279,9 @@ window.verOperacao = function(osId) {
           <i class="fa-solid fa-spinner fa-spin" style="margin-right:6px;"></i>Carregando estrutura...
         </div>
       </div>
-      <footer>
+      <footer style="display:flex;justify-content:flex-end;gap:8px;flex-wrap:wrap;">
+        <span id="estrutura-sync-status" style="flex:1;font-size:11px;color:#64748b;align-self:center;min-width:120px;"></span>
+        <button type="button" class="modal-primary" id="estrutura-sync-btn">Salvar no banco</button>
         <button type="button" class="modal-secondary">Fechar</button>
       </footer>
     `;
@@ -70581,62 +75289,228 @@ window.verOperacao = function(osId) {
     overlay.appendChild(modal);
     document.body.appendChild(overlay);
 
-    const close = () => overlay.remove();
+    const syncBtn = modal.querySelector('#estrutura-sync-btn');
+    const syncStatus = modal.querySelector('#estrutura-sync-status');
+    let syncPollTimer = null;
+    let fichaInfoLoaded = null;
+    let codigoUsadoLoaded = codigo;
+
+    const pararPollSync = () => {
+      if (syncPollTimer) {
+        clearInterval(syncPollTimer);
+        syncPollTimer = null;
+      }
+    };
+
+    const close = () => {
+      pararPollSync();
+      overlay.remove();
+    };
     modal.querySelector('.close-btn')?.addEventListener('click', close);
     modal.querySelector('footer .modal-secondary')?.addEventListener('click', close);
 
+    const pollSyncStatus = (syncId) => {
+      pararPollSync();
+      syncPollTimer = setInterval(async () => {
+        try {
+          const r = await fetch(`/api/estrutura/sync/${syncId}`);
+          const j = await r.json();
+          if (!r.ok) throw new Error(j.error || 'Erro ao consultar sync');
+          const s = j.sync || {};
+          const pct = s.progresso_total > 0
+            ? Math.round((Number(s.progresso_atual || 0) / Number(s.progresso_total)) * 100)
+            : 0;
+          if (syncStatus) {
+            syncStatus.textContent = s.mensagem
+              ? `${s.mensagem}${s.progresso_total > 0 ? ` (${pct}%)` : ''}`
+              : 'Sincronizando...';
+          }
+          if (s.status === 'ok') {
+            pararPollSync();
+            if (syncBtn) {
+              syncBtn.disabled = false;
+              syncBtn.innerHTML = 'Salvar no banco';
+            }
+            if (syncStatus) syncStatus.textContent = s.mensagem || 'Estrutura salva no banco.';
+            try {
+              const r2 = await fetch(fetchUrl);
+              const d2 = await r2.json();
+              if (r2.ok && typeof renderEstruturaData === 'function') renderEstruturaData(d2);
+            } catch (_) {}
+          } else if (s.status === 'erro') {
+            pararPollSync();
+            if (syncBtn) {
+              syncBtn.disabled = false;
+              syncBtn.innerHTML = 'Salvar no banco';
+            }
+            if (syncStatus) syncStatus.textContent = s.mensagem || 'Erro na sincronização.';
+          }
+        } catch (e) {
+          pararPollSync();
+          if (syncBtn) {
+            syncBtn.disabled = false;
+            syncBtn.innerHTML = 'Salvar no banco';
+          }
+          if (syncStatus) syncStatus.textContent = e.message;
+        }
+      }, 1500);
+    };
+
+    syncBtn?.addEventListener('click', async () => {
+      if (!codigoUsadoLoaded) return;
+      pararPollSync();
+      syncBtn.disabled = true;
+      syncBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin" style="margin-right:6px;"></i>Salvando...';
+      if (syncStatus) syncStatus.textContent = 'Iniciando sincronização (1 req/s IAPP)...';
+      try {
+        const resp = await fetch('/api/estrutura/sync', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            codigo: codigoUsadoLoaded,
+            ficha_id: fichaInfoLoaded?.id || null,
+          }),
+        });
+        const data = await resp.json();
+        if (!resp.ok) throw new Error(data.error || 'Erro ao iniciar sync');
+        pollSyncStatus(data.syncId);
+      } catch (e) {
+        syncBtn.disabled = false;
+        syncBtn.innerHTML = 'Salvar no banco';
+        if (syncStatus) syncStatus.textContent = e.message;
+      }
+    });
+
     const body = modal.querySelector('#estrutura-iapp-body');
-    try {
-      const resp = await fetch(`/api/producao/materiais-previstos/${iappId}`);
-      const data = await resp.json();
-      if (!resp.ok || !data.success) throw new Error(data.error || 'Erro ao carregar estrutura');
+
+    const renderEstruturaData = (data) => {
       const itens = data.response || [];
+      const codigoUsado = data.codigo || codigo;
+      codigoUsadoLoaded = codigoUsado;
+      fichaInfoLoaded = data.ficha || null;
       if (!itens.length) {
-        body.innerHTML = '<div style="text-align:center;padding:32px 0;color:#475569;font-size:12px;">Nenhum material previsto.</div>';
+        body.innerHTML = `<div style="text-align:center;padding:32px 0;color:#475569;font-size:12px;">Nenhuma peça encontrada na ficha técnica para <b>${escapeHtml(codigoUsado)}</b>.</div>`;
         return;
       }
-      const precisaFetchFisico = itens.some(i => i.estoque_fisico == null);
-      const fisicoMap = precisaFetchFisico
-        ? await fetchEstoqueFisicoPorCodigos(itens.map(i => i.produto?.identificacao))
-        : {};
-      const fmtMoeda = (v) => v > 0 ? 'R$\u00a0' + Number(v).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '—';
-      const custoTotal = itens.reduce((s, i) => s + ((i.produto?.valor_custo || 0) * (i.qtde || 0)), 0);
+      const fonte = String(data.fonte || '').toLowerCase() === 'sql' || data.sincronizado_em
+        ? 'sql'
+        : 'iapp';
+      const fonteLabel = fonte === 'sql' ? 'SQL (cache local)' : 'IAPP';
+      const fonteCor = fonte === 'sql' ? '#34d399' : '#60a5fa';
+      const syncEm = data.sincronizado_em
+        ? new Date(data.sincronizado_em).toLocaleString('pt-BR')
+        : '';
+      const syncLabel = fonte === 'sql' && syncEm ? ` · atualizado ${escapeHtml(syncEm)}` : '';
+      const fichaInfo = data.ficha;
+      const isSql = fonte === 'sql';
+      const btnFichaHtml = isSql && fichaInfo?.id
+        ? `<button type="button" class="modal-secondary" id="estrutura-ver-ficha-btn" style="font-size:10px;padding:4px 10px;margin-left:8px;">Ver dados completos do produto</button>`
+        : '';
+      const btnAddHtml = isSql && fichaInfo?.id
+        ? `<button type="button" class="modal-primary" id="estrutura-add-item-btn" style="font-size:10px;padding:4px 10px;margin-left:8px;">Adicionar item</button>`
+        : '';
+      const colAcoes = isSql
+        ? `<th style="padding:6px 8px;font-size:10px;color:#475569;font-weight:600;text-align:center;min-width:150px;">Ações</th>`
+        : '';
       const linhas = itens.map(i => {
-        const p = i.produto || {};
-        const qtde = i.qtde || 0;
-        const custo = p.valor_custo || 0;
-        const fisico = getEstoqueFisicoItem(i, fisicoMap);
+        const ident = i.identificacao || '—';
+        const desc = i.descricao || '—';
+        const tipo = i.status || '—';
+        const modelo = i.modelo || '—';
+        const qtde = i.qtde ?? '—';
+        const etapa = i.etapa || '—';
+        const btnItem = isSql && i.item_id
+          ? `<button type="button" class="estrutura-ver-item-btn modal-secondary" data-item-id="${escapeHtml(String(i.item_id))}" style="font-size:9px;padding:3px 6px;margin:1px;" title="Ver dados completos">Dados</button>`
+          : '';
+        const btnTrocar = isSql && i.item_id
+          ? `<button type="button" class="estrutura-trocar-item-btn modal-secondary" data-item-id="${escapeHtml(String(i.item_id))}" style="font-size:9px;padding:3px 6px;margin:1px;" title="Trocar produto">Trocar</button>`
+          : '';
+        const btnExcluir = isSql && i.item_id
+          ? `<button type="button" class="estrutura-excluir-item-btn" data-item-id="${escapeHtml(String(i.item_id))}" style="font-size:9px;padding:3px 6px;margin:1px;background:#450a0a;color:#fca5a5;border:1px solid #7f1d1d;border-radius:6px;cursor:pointer;" title="Excluir item">Excluir</button>`
+          : '';
+        const tdAcoes = isSql
+          ? `<td style="padding:6px 4px;text-align:center;white-space:nowrap;">${btnItem}${btnTrocar}${btnExcluir}</td>`
+          : '';
         return `<tr style="border-bottom:1px solid rgba(255,255,255,.05);">
-          <td style="padding:6px 8px;font-size:10px;color:#94a3b8;white-space:nowrap;">${escapeHtml(p.identificacao || '—')}</td>
-          <td style="padding:6px 8px;font-size:11px;color:#e2e8f0;">${escapeHtml(p.descricao || '—')}</td>
-          <td style="padding:6px 8px;font-size:10px;color:#64748b;text-align:center;">${escapeHtml(p.unidade_medida || '—')}</td>
-          <td style="padding:6px 8px;font-size:10px;color:#94a3b8;text-align:center;">${escapeHtml(p.tipo || '—')}</td>
-          <td style="padding:6px 8px;font-size:11px;color:#f1f5f9;text-align:right;font-weight:600;">${qtde}</td>
-          <td style="padding:6px 8px;font-size:11px;color:#fcd34d;text-align:right;font-weight:600;">${fisico != null ? fmtQtdeEstoque(fisico) : '—'}</td>
-          <td style="padding:6px 8px;font-size:10px;color:#6ee7b7;text-align:right;">${fmtMoeda(custo)}</td>
-          <td style="padding:6px 8px;font-size:10px;color:#a5f3fc;text-align:right;">${fmtMoeda(custo * qtde)}</td>
+          <td style="padding:6px 8px;font-size:10px;color:#94a3b8;white-space:nowrap;">${escapeHtml(String(ident))}</td>
+          <td style="padding:6px 8px;font-size:11px;color:#e2e8f0;">${escapeHtml(String(desc))}</td>
+          <td style="padding:6px 8px;font-size:10px;color:#64748b;text-align:center;">${escapeHtml(String(tipo))}</td>
+          <td style="padding:6px 8px;font-size:10px;color:#94a3b8;text-align:center;">${escapeHtml(String(modelo))}</td>
+          <td style="padding:6px 8px;font-size:11px;color:#f1f5f9;text-align:right;font-weight:600;">${escapeHtml(String(qtde))}</td>
+          <td style="padding:6px 8px;font-size:10px;color:#cbd5e1;">${escapeHtml(String(etapa))}</td>
+          ${tdAcoes}
         </tr>`;
       }).join('');
+      const fichaLabel = fichaInfo?.identificacao
+        ? ` · ficha ${escapeHtml(String(fichaInfo.identificacao))}`
+        : '';
       body.innerHTML = `
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
-          <span style="font-size:11px;color:#94a3b8;">${itens.length} material(is) previsto(s)</span>
-          <span style="font-size:11px;color:#a5f3fc;font-weight:600;">Total: ${fmtMoeda(custoTotal)}</span>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px;">
+          <span style="font-size:11px;color:#94a3b8;">
+            ${itens.length} peça(s)
+            · <span style="color:${fonteCor};font-weight:600;">${escapeHtml(fonteLabel)}</span>${syncLabel}${fichaLabel}
+            · produto <b style="color:#e2e8f0;">${escapeHtml(codigoUsado)}</b>
+            ${btnFichaHtml}${btnAddHtml}
+          </span>
         </div>
         <table style="width:100%;border-collapse:collapse;">
           <thead>
             <tr style="border-bottom:1px solid rgba(255,255,255,.1);">
               <th style="padding:6px 8px;font-size:10px;color:#475569;font-weight:600;text-align:left;">Código</th>
               <th style="padding:6px 8px;font-size:10px;color:#475569;font-weight:600;text-align:left;">Descrição</th>
-              <th style="padding:6px 8px;font-size:10px;color:#475569;font-weight:600;text-align:center;">UN</th>
               <th style="padding:6px 8px;font-size:10px;color:#475569;font-weight:600;text-align:center;">Tipo</th>
+              <th style="padding:6px 8px;font-size:10px;color:#475569;font-weight:600;text-align:center;">Modelo</th>
               <th style="padding:6px 8px;font-size:10px;color:#475569;font-weight:600;text-align:right;">Qtde</th>
-              <th style="padding:6px 8px;font-size:10px;color:#475569;font-weight:600;text-align:right;">Disponível</th>
-              <th style="padding:6px 8px;font-size:10px;color:#475569;font-weight:600;text-align:right;">Custo unit.</th>
-              <th style="padding:6px 8px;font-size:10px;color:#475569;font-weight:600;text-align:right;">Total</th>
+              <th style="padding:6px 8px;font-size:10px;color:#475569;font-weight:600;text-align:left;">Operação</th>
+              ${colAcoes}
             </tr>
           </thead>
           <tbody>${linhas}</tbody>
         </table>`;
+
+      const recarregarLista = async () => {
+        try {
+          const r = await fetch(fetchUrl);
+          const d = await r.json();
+          if (r.ok) renderEstruturaData(d);
+        } catch (_) {}
+      };
+
+      body.querySelector('#estrutura-ver-ficha-btn')?.addEventListener('click', () => {
+        openEstruturaSqlFichaModal(fichaInfo.id, recarregarLista);
+      });
+      body.querySelector('#estrutura-add-item-btn')?.addEventListener('click', () => {
+        adicionarEstruturaSqlItem(fichaInfo.id, recarregarLista);
+      });
+      body.querySelectorAll('.estrutura-ver-item-btn').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const itemId = Number(btn.dataset.itemId) || 0;
+          openEstruturaSqlItemModal(itemId, recarregarLista);
+        });
+      });
+      body.querySelectorAll('.estrutura-trocar-item-btn').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const itemId = Number(btn.dataset.itemId) || 0;
+          trocarEstruturaSqlItem(itemId, recarregarLista);
+        });
+      });
+      body.querySelectorAll('.estrutura-excluir-item-btn').forEach((btn) => {
+        btn.addEventListener('click', async () => {
+          const itemId = Number(btn.dataset.itemId) || 0;
+          try {
+            await excluirEstruturaSqlItem(itemId, recarregarLista);
+          } catch (err) {
+            alert(err.message || 'Erro ao excluir item.');
+          }
+        });
+      });
+    };
+
+    try {
+      const resp = await fetch(fetchUrl);
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data.error || 'Erro ao carregar estrutura');
+      renderEstruturaData(data);
     } catch (e) {
       body.innerHTML = `<div style="text-align:center;padding:32px 0;color:#f87171;font-size:12px;"><i class="fa-solid fa-circle-exclamation" style="margin-right:6px;"></i>${escapeHtml(e.message)}</div>`;
     }
@@ -70721,7 +75595,1781 @@ window.verOperacao = function(osId) {
     modal.querySelector('.modal-secondary')?.addEventListener('click', () => overlay.remove());
   }
 
-  function openProducaoKanbanActionsModal(produtoCodigo, groupKey, ops) {
+  function _producaoEtqPrefKey() {
+    const u = (document.getElementById('userNameDisplay')?.textContent || 'user').trim().replace(/\s+/g, '_');
+    return `etq_printer_pref_${u}`;
+  }
+
+  function _producaoParseAgentPref(pref) {
+    if (!pref || !pref.startsWith('__AGENT__:')) return null;
+    const s = pref.slice('__AGENT__:'.length);
+    const idx = s.indexOf(':');
+    if (idx === -1) return null;
+    return { pcName: s.slice(0, idx), impressora: s.slice(idx + 1) };
+  }
+
+  function _producaoResolverOsDaOp(op) {
+    const oss = Array.isArray(op?.ordens_servico) ? op.ordens_servico : [];
+    return oss.find(os => !String(os.status_producao || '').trim()) || oss[0] || null;
+  }
+
+  function _producaoColetarLinhasOp(ops) {
+    return (ops || []).map(op => ({
+      op_id: op.id,
+      op_identificacao: op.identificacao || String(op.id),
+      op_qtde: op.qtde,
+      op_status: op.status || '—',
+    }));
+  }
+
+  function _producaoEscolhaImpressoraAtual() {
+    const selVal = document.getElementById('producaoImpListboxImpressora')?.value || '';
+    if (selVal) return selVal;
+    if (typeof window._movimPrinterPrefTemp === 'string' && window._movimPrinterPrefTemp) {
+      return window._movimPrinterPrefTemp;
+    }
+    try {
+      const u = String(document.getElementById('userNameDisplay')?.textContent || 'user').trim().replace(/\s+/g, '_');
+      const cfg = JSON.parse(localStorage.getItem(`etq_impr_cfg_${u}`) || '{}');
+      return cfg.padrao || localStorage.getItem(_producaoEtqPrefKey()) || '';
+    } catch {
+      return localStorage.getItem(_producaoEtqPrefKey()) || '';
+    }
+  }
+
+  function _producaoObterPrefsImpressora() {
+    const escolha = _producaoEscolhaImpressoraAtual();
+    if (escolha === '__PDF__') return { pdf: true };
+    if (typeof window._movimObterPrefsImpressora === 'function') {
+      return window._movimObterPrefsImpressora();
+    }
+    const pref = localStorage.getItem(_producaoEtqPrefKey()) || null;
+    const agentDest = _producaoParseAgentPref(pref);
+    if (agentDest) {
+      return { destino_agente: agentDest.pcName, impressora: agentDest.impressora, via_fila: true };
+    }
+    if (pref && pref !== '__PDF__' && pref !== '__BP__') {
+      return { printer: pref, via_fila: false };
+    }
+    return { via_fila: true };
+  }
+
+  async function _producaoImprimirOpEtiquetas(items, statusEl, btnRef, onSuccess) {
+    if (!items?.length) return;
+    const orig = btnRef ? btnRef.innerHTML : '';
+    if (btnRef) { btnRef.disabled = true; btnRef.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Imprimindo...'; }
+    const showSt = (msg, cor = '#94a3b8') => {
+      if (!statusEl) return;
+      statusEl.textContent = msg;
+      statusEl.style.color = cor;
+    };
+    try {
+      const usuario = (document.getElementById('userNameDisplay')?.textContent || '').trim();
+      const prefs = _producaoObterPrefsImpressora();
+      const body = { items, usuario };
+      if (prefs.pdf) {
+        body.modo = 'pdf';
+      } else if (prefs.destino_agente) {
+        body.destino_agente = prefs.destino_agente;
+        if (prefs.impressora) body.impressora = prefs.impressora;
+      } else if (prefs.printer) {
+        body.impressora = prefs.printer;
+      }
+      showSt(prefs.pdf ? 'Gerando PDF...' : 'Enviando para fila de impressão...', '#facc15');
+      const resp = await fetch('/api/etiquetas/iapp-op/imprimir', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify(body),
+      });
+      if (prefs.pdf) {
+        if (!resp.ok) {
+          const errData = await resp.json().catch(() => ({}));
+          throw new Error(errData.error || `Erro ${resp.status}`);
+        }
+        const blob = await resp.blob();
+        const url = URL.createObjectURL(blob);
+        const pdfWin = window.open(url, '_blank');
+        if (!pdfWin) {
+          const a = document.createElement('a');
+          a.href = url;
+          a.target = '_blank';
+          a.rel = 'noopener';
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+        }
+        setTimeout(() => URL.revokeObjectURL(url), 60000);
+        showSt(`${items.length} etiqueta(s) gerada(s) em PDF. OP movida(s) para Montagem hermetica.`, '#4ade80');
+      } else {
+        const data = await resp.json().catch(() => ({}));
+        if (!resp.ok || !data.ok) throw new Error(data.error || `Erro ${resp.status}`);
+        showSt(`${data.quantidade || items.length} etiqueta(s) enfileirada(s). OP movida(s) para Montagem hermetica.`, '#4ade80');
+      }
+      if (typeof onSuccess === 'function') await onSuccess();
+    } catch (err) {
+      showSt(err.message || 'Falha ao imprimir.', '#f87171');
+    } finally {
+      if (btnRef) { btnRef.disabled = false; btnRef.innerHTML = orig || '<i class="fa-solid fa-print"></i> Imprimir selecionadas'; }
+    }
+  }
+
+  function openProducaoImprimirOpModal(produtoCodigo, groupKey, ops, opts) {
+    const options = opts || {};
+    const fromProgramado = !!options.fromProgramado;
+    const linhas = _producaoColetarLinhasOp(ops);
+    const overlay = document.createElement('div');
+    overlay.className = 'kanban-modal-overlay';
+    overlay.addEventListener('click', (ev) => { if (ev.target === overlay) overlay.remove(); });
+
+    const modal = document.createElement('div');
+    modal.className = 'kanban-modal';
+    modal.style.maxWidth = '760px';
+    modal.innerHTML = `
+      <header>
+        <div>
+          <h2>Imprimir OP</h2>
+          <span>${escapeHtml(produtoCodigo || groupKey)}</span>
+        </div>
+        <button class="close-btn" aria-label="Fechar">&times;</button>
+      </header>
+      <div class="kanban-modal-body">
+        <div class="modal-code-block">
+          <p style="margin:0 0 8px;font-size:12px;color:#94a3b8;">
+            Selecione as ordens de produção (OP) para imprimir etiqueta.
+          </p>
+          <div style="display:flex;justify-content:flex-end;margin:8px 0 6px;">
+            <button type="button" id="producao-imprimir-op-sel-todas" class="modal-secondary" style="font-size:11px;padding:4px 10px;">
+              <i class="fa-solid fa-check-double"></i> Selecionar todas
+            </button>
+          </div>
+          <div id="producao-imprimir-op-lista" style="max-height:320px;overflow:auto;margin-top:4px;"></div>
+          <div class="movim-impressora-row movim-impressora-row--modal" style="margin:12px 0 0;padding:0;">
+            <i class="fa-solid fa-print movim-impr-icone"></i>
+            <label for="producaoImpListboxImpressora">Impressora:</label>
+            <select id="producaoImpListboxImpressora" class="movim-listbox-impressora">
+              <option value="">— padrão —</option>
+            </select>
+            <button type="button" id="producaoImpBtnRefreshImpressoras" class="movim-impr-btn-icon" title="Atualizar impressoras">
+              <i class="fa-solid fa-rotate"></i>
+            </button>
+            <button type="button" id="producaoImpBtnConfigImpressoras" class="movim-impr-btn-icon" title="Configurar impressoras">
+              <i class="fa-solid fa-sliders"></i>
+            </button>
+          </div>
+          <p id="producao-imprimir-op-status" style="margin:10px 0 0;font-size:12px;color:#94a3b8;min-height:18px;"></p>
+        </div>
+      </div>
+      <footer>
+        <button type="button" class="modal-secondary">Fechar</button>
+        <button type="button" id="producao-imprimir-op-btn" class="modal-primary" disabled>
+          <i class="fa-solid fa-print"></i> Imprimir selecionadas
+        </button>
+      </footer>
+    `;
+
+    overlay.appendChild(modal);
+    document.body.appendChild(overlay);
+
+    const close = () => overlay.remove();
+    modal.querySelector('.close-btn')?.addEventListener('click', close);
+    modal.querySelector('footer .modal-secondary')?.addEventListener('click', close);
+
+    const listaEl = modal.querySelector('#producao-imprimir-op-lista');
+    const statusEl = modal.querySelector('#producao-imprimir-op-status');
+    const btnImprimir = modal.querySelector('#producao-imprimir-op-btn');
+    const btnSelTodas = modal.querySelector('#producao-imprimir-op-sel-todas');
+    const selecionadas = new Set();
+
+    const atualizarBtn = () => {
+      if (btnImprimir) btnImprimir.disabled = selecionadas.size === 0;
+    };
+
+    const selecionarTodasOps = () => {
+      listaEl?.querySelectorAll('.producao-imprimir-op-chk').forEach(chk => {
+        chk.checked = true;
+        const key = chk.dataset.rowKey || '';
+        if (key) selecionadas.add(key);
+      });
+      atualizarBtn();
+    };
+
+    btnSelTodas?.addEventListener('click', selecionarTodasOps);
+
+    const impSelect = modal.querySelector('#producaoImpListboxImpressora');
+    impSelect?.addEventListener('change', function () {
+      if (typeof window._movimSyncImpressoraSelects === 'function') {
+        window._movimSyncImpressoraSelects(this.value || null);
+      }
+    });
+    modal.querySelector('#producaoImpBtnRefreshImpressoras')?.addEventListener('click', () => {
+      if (typeof window._movimAtualizarListboxImpressora === 'function') {
+        window._movimAtualizarListboxImpressora();
+      }
+    });
+    modal.querySelector('#producaoImpBtnConfigImpressoras')?.addEventListener('click', () => {
+      if (typeof window._movimAbrirConfigImpressoras === 'function') {
+        window._movimAbrirConfigImpressoras();
+      }
+    });
+    if (typeof window._movimAtualizarListboxImpressora === 'function') {
+      window._movimAtualizarListboxImpressora();
+    }
+
+    if (!linhas.length) {
+      if (listaEl) {
+        listaEl.innerHTML = '<div style="text-align:center;padding:24px 0;color:#64748b;font-size:12px;">Nenhuma OP encontrada para este grupo.</div>';
+      }
+    } else if (listaEl) {
+      listaEl.innerHTML = `
+        <table style="width:100%;border-collapse:collapse;">
+          <thead>
+            <tr style="border-bottom:1px solid rgba(255,255,255,.1);">
+              <th style="padding:6px 8px;font-size:10px;color:#475569;text-align:left;width:28px;"></th>
+              <th style="padding:6px 8px;font-size:10px;color:#475569;text-align:left;">OP</th>
+              <th style="padding:6px 8px;font-size:10px;color:#475569;text-align:right;">Qtde</th>
+              <th style="padding:6px 8px;font-size:10px;color:#475569;text-align:left;">Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${linhas.map((ln) => {
+              const rowKey = `op:${ln.op_id}`;
+              return `<tr style="border-bottom:1px solid rgba(255,255,255,.05);">
+                <td style="padding:6px 8px;">
+                  <input type="checkbox" class="producao-imprimir-op-chk"
+                    data-row-key="${escapeHtml(rowKey)}"
+                    data-op-id="${escapeHtml(String(ln.op_id))}"
+                    data-op-ident="${escapeHtml(ln.op_identificacao)}" />
+                </td>
+                <td style="padding:6px 8px;font-size:11px;color:#e2e8f0;font-weight:600;">OP ${escapeHtml(ln.op_identificacao)}</td>
+                <td style="padding:6px 8px;font-size:11px;color:#cbd5e1;text-align:right;">${escapeHtml(String(ln.op_qtde ?? '—'))}</td>
+                <td style="padding:6px 8px;font-size:11px;color:#94a3b8;">${escapeHtml(ln.op_status)}</td>
+              </tr>`;
+            }).join('')}
+          </tbody>
+        </table>`;
+
+      listaEl.querySelectorAll('.producao-imprimir-op-chk').forEach(chk => {
+        chk.addEventListener('change', () => {
+          const key = chk.dataset.rowKey || '';
+          if (chk.checked) selecionadas.add(key);
+          else selecionadas.delete(key);
+          atualizarBtn();
+        });
+      });
+
+      if (linhas.length === 1) {
+        const unica = listaEl.querySelector('.producao-imprimir-op-chk');
+        if (unica) {
+          unica.checked = true;
+          const key = unica.dataset.rowKey || '';
+          if (key) selecionadas.add(key);
+          atualizarBtn();
+        }
+      }
+    }
+
+    btnImprimir?.addEventListener('click', async () => {
+      const codigo = String(produtoCodigo || groupKey || '').trim();
+      const descricaoPadrao = String(ops?.[0]?.produto?.descricao || '').trim();
+      const items = [];
+      listaEl?.querySelectorAll('.producao-imprimir-op-chk:checked').forEach(chk => {
+        const opId = Number(chk.dataset.opId);
+        const opRef = (ops || []).find(o => String(o.id) === String(opId));
+        if (!opRef) return;
+        const opIdent = String(opRef.identificacao || opRef.id).trim();
+        const osRef = _producaoResolverOsDaOp(opRef);
+        const descricao = String(opRef.produto?.descricao || descricaoPadrao || '').trim();
+        if (opRef.from_op_producao || !osRef?.id) {
+          items.push({
+            op_producao_id: opRef.id,
+            lote: opIdent,
+            codigo_produto: codigo,
+            descricao_produto: descricao,
+          });
+          return;
+        }
+        items.push({
+          os_id: osRef.id,
+          op_producao_id: opRef.id,
+          op_iapp_id: opRef.id,
+          lote: opIdent,
+          os_identificacao: String(osRef.identificacao || opIdent).trim(),
+          codigo_produto: codigo,
+          descricao_produto: descricao,
+        });
+      });
+      if (!items.length) return;
+      await _producaoImprimirOpEtiquetas(items, statusEl, btnImprimir, async () => {
+        close();
+        const opIds = [...new Set(items.map(it => {
+          const opRef = (ops || []).find(o => (o.ordens_servico || []).some(os => String(os.id) === String(it.os_id)));
+          return opRef?.id;
+        }).filter(Boolean))];
+        if (fromProgramado) {
+          if (typeof window._producaoRecarregarProgramacaoColunas === 'function') {
+            await window._producaoRecarregarProgramacaoColunas(['programado', 'solicitado']);
+          } else if (typeof window._producaoRecarregarColunasKanban === 'function') {
+            await window._producaoRecarregarColunasKanban(['programado', 'solicitado']);
+          }
+        } else if (typeof window._producaoRecarregarOrdens === 'function') {
+          await window._producaoRecarregarOrdens();
+        }
+        if (typeof options.onSuccess === 'function') {
+          await options.onSuccess();
+        }
+      });
+    });
+  }
+
+  function _producaoEscolhaImpressoraFicha() {
+    const selVal = document.getElementById('producaoFichaImpListboxImpressora')?.value || '';
+    if (selVal) return selVal;
+    return _producaoEscolhaImpressoraAtual();
+  }
+
+  function _producaoPrecoItemFicha(item) {
+    const n = Number(item?.preco ?? item?.valor_custo ?? item?.valor_venda);
+    return Number.isFinite(n) ? n : 0;
+  }
+
+  function _producaoFiltrarItensFichaPorPrecoMin(itens, valorMinimo) {
+    const min = Number(valorMinimo);
+    const limiar = Number.isFinite(min) ? min : 0;
+    return (Array.isArray(itens) ? itens : []).filter((item) => _producaoPrecoItemFicha(item) > limiar);
+  }
+
+  function _producaoMontarHtmlFichaTecnica(data, meta) {
+    const codigo = String(data?.codigo || meta?.codigo || '').trim();
+    const descricao = String(data?.descricao || meta?.descricao || '').trim();
+    const numeroOp = String(meta?.numeroOp || '').trim();
+    const valorMinimo = meta?.valorMinimo;
+    const itensTodos = Array.isArray(data?.itens) ? data.itens : [];
+    const itens = _producaoFiltrarItensFichaPorPrecoMin(itensTodos, valorMinimo);
+    const codigosFiltrados = new Set(
+      itens.map((i) => String(i.identificacao || '').trim().toUpperCase()).filter(Boolean)
+    );
+    const diagramas = (Array.isArray(data?.diagramas) ? data.diagramas : []).filter((d) => {
+      const cod = String(d.codigo || '').trim().toUpperCase();
+      if (cod && codigosFiltrados.has(cod)) return true;
+      return _producaoPrecoItemFicha(d) > (Number(valorMinimo) || 0);
+    });
+    const agora = new Date().toLocaleString('pt-BR');
+    const minNum = Number(valorMinimo);
+    const minLabel = Number.isFinite(minNum)
+      ? minNum.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 4 })
+      : '0';
+
+    const linhas = itens.map((i) => `
+      <tr>
+        <td>${escapeHtml(String(i.identificacao || '—'))}</td>
+        <td>${escapeHtml(String(i.descricao || '—'))}</td>
+        <td style="text-align:right;">${escapeHtml(String(i.qtde ?? '—'))}</td>
+      </tr>`).join('');
+
+    const blocosDiagrama = diagramas.map((d) => {
+      const titulo = `${d.codigo || ''}${d.descricao ? ` — ${d.descricao}` : ''}`.trim();
+      if (d.url_imagem) {
+        return `
+          <div class="diagrama-bloco">
+            <div class="diagrama-titulo">${escapeHtml(titulo || 'Diagrama')}</div>
+            <img src="${escapeHtml(d.url_imagem)}" alt="${escapeHtml(titulo || 'Diagrama')}" />
+          </div>`;
+      }
+      return `
+        <div class="diagrama-bloco diagrama-sem-img">
+          <div class="diagrama-titulo">${escapeHtml(titulo || 'Diagrama')}</div>
+          <p>Imagem não encontrada para este item (pos = 0).</p>
+        </div>`;
+    }).join('');
+
+    return `<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <title>Ficha técnica — ${escapeHtml(codigo)}</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { font-family: Arial, Helvetica, sans-serif; color: #0f172a; margin: 24px; font-size: 12px; }
+    h1 { font-size: 18px; margin: 0 0 4px; }
+    .meta { color: #475569; margin-bottom: 16px; line-height: 1.5; }
+    .meta b { color: #0f172a; }
+    table { width: 100%; border-collapse: collapse; margin-top: 8px; }
+    th, td { border: 1px solid #cbd5e1; padding: 6px 8px; vertical-align: top; }
+    th { background: #f1f5f9; text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: .02em; }
+    .sec-title { margin: 20px 0 8px; font-size: 14px; font-weight: 700; border-bottom: 2px solid #0f172a; padding-bottom: 4px; }
+    .diagrama-bloco { margin-top: 12px; page-break-inside: avoid; }
+    .diagrama-titulo { font-weight: 600; margin-bottom: 8px; }
+    .diagrama-bloco img { max-width: 100%; max-height: 420px; border: 1px solid #cbd5e1; display: block; }
+    .diagrama-sem-img { color: #64748b; font-style: italic; }
+    .vazio { color: #64748b; padding: 16px 0; }
+    @media print {
+      body { margin: 12mm; }
+      .no-print { display: none !important; }
+    }
+  </style>
+</head>
+<body>
+  <h1>Ficha técnica</h1>
+  <div class="meta">
+    <div><b>Produto:</b> ${escapeHtml(codigo)}${descricao ? ` — ${escapeHtml(descricao)}` : ''}</div>
+    ${numeroOp ? `<div><b>OP:</b> ${escapeHtml(numeroOp)}</div>` : ''}
+    <div><b>Emitido em:</b> ${escapeHtml(agora)}</div>
+    <div><b>Itens impressos:</b> ${itens.length} de ${itensTodos.length} (preço &gt; ${escapeHtml(minLabel)})</div>
+  </div>
+
+  <div class="sec-title">Estrutura do produto</div>
+  ${itens.length ? `
+  <table>
+    <thead>
+      <tr>
+        <th>Código</th>
+        <th>Descrição</th>
+        <th style="text-align:right;">Qtde</th>
+      </tr>
+    </thead>
+    <tbody>${linhas}</tbody>
+  </table>` : '<p class="vazio">Nenhum item com preço acima do valor mínimo informado.</p>'}
+
+  ${diagramas.length ? `
+  <div class="sec-title">Diagrama</div>
+  ${blocosDiagrama}` : ''}
+</body>
+</html>`;
+  }
+
+  function openProducaoImprimirFichaTecnicaModal(produtoCodigo, groupKey, ops) {
+    const codigo = String(produtoCodigo || groupKey || '').trim();
+    const op0 = ops && ops[0];
+    const numeroOp = String(op0?.identificacao || '').trim();
+    const descricaoPadrao = String(op0?.produto?.descricao || '').trim();
+    const opProducaoId = op0?.from_op_producao ? Number(op0.id) : 0;
+
+    const overlay = document.createElement('div');
+    overlay.className = 'kanban-modal-overlay';
+    overlay.addEventListener('click', (ev) => { if (ev.target === overlay) overlay.remove(); });
+
+    const modal = document.createElement('div');
+    modal.className = 'kanban-modal';
+    modal.style.maxWidth = '640px';
+    modal.innerHTML = `
+      <header>
+        <div>
+          <h2>Imprimir ficha técnica</h2>
+          <span>${escapeHtml(codigo)}${numeroOp ? ` · OP ${escapeHtml(numeroOp)}` : ''}</span>
+        </div>
+        <button class="close-btn" aria-label="Fechar">&times;</button>
+      </header>
+      <div class="kanban-modal-body">
+        <div class="modal-code-block">
+          <p style="margin:0 0 8px;font-size:12px;color:#94a3b8;">
+            Monta a ficha com a estrutura do produto (Código, Descrição e Qtde) e, se houver item com “DIAGRAMA” na descrição,
+            inclui a imagem (pos = 0) abaixo da lista. O preço não é impresso — serve só para o filtro abaixo.
+          </p>
+          <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end;margin:12px 0 0;">
+            <div style="flex:1;min-width:180px;">
+              <label for="producaoFichaValorMinimo" style="display:block;font-size:11px;color:#94a3b8;margin-bottom:4px;">
+                Valor mínimo (preço &gt; este valor)
+              </label>
+              <input
+                type="number"
+                id="producaoFichaValorMinimo"
+                min="0"
+                step="0.01"
+                value="0"
+                placeholder="0"
+                style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid rgba(255,255,255,.14);background:rgba(15,23,42,.55);color:#e2e8f0;font-size:13px;box-sizing:border-box;"
+              />
+            </div>
+          </div>
+          <div class="movim-impressora-row movim-impressora-row--modal" style="margin:12px 0 0;padding:0;">
+            <i class="fa-solid fa-print movim-impr-icone"></i>
+            <label for="producaoFichaImpListboxImpressora">Impressora:</label>
+            <select id="producaoFichaImpListboxImpressora" class="movim-listbox-impressora">
+              <option value="">— padrão —</option>
+            </select>
+            <button type="button" id="producaoFichaImpBtnRefreshImpressoras" class="movim-impr-btn-icon" title="Atualizar impressoras">
+              <i class="fa-solid fa-rotate"></i>
+            </button>
+            <button type="button" id="producaoFichaImpBtnConfigImpressoras" class="movim-impr-btn-icon" title="Configurar impressoras">
+              <i class="fa-solid fa-sliders"></i>
+            </button>
+          </div>
+          <p id="producao-imprimir-ficha-status" style="margin:10px 0 0;font-size:12px;color:#94a3b8;min-height:18px;"></p>
+        </div>
+      </div>
+      <footer>
+        <button type="button" class="modal-secondary">Fechar</button>
+        <button type="button" id="producao-imprimir-ficha-btn" class="modal-primary">
+          <i class="fa-solid fa-print"></i> Imprimir ficha técnica
+        </button>
+      </footer>
+    `;
+
+    overlay.appendChild(modal);
+    document.body.appendChild(overlay);
+
+    const close = () => overlay.remove();
+    modal.querySelector('.close-btn')?.addEventListener('click', close);
+    modal.querySelector('footer .modal-secondary')?.addEventListener('click', close);
+
+    const statusEl = modal.querySelector('#producao-imprimir-ficha-status');
+    const btnImprimir = modal.querySelector('#producao-imprimir-ficha-btn');
+    const valorMinInput = modal.querySelector('#producaoFichaValorMinimo');
+    const showSt = (msg, cor = '#94a3b8') => {
+      if (!statusEl) return;
+      statusEl.textContent = msg;
+      statusEl.style.color = cor;
+    };
+
+    const impSelect = modal.querySelector('#producaoFichaImpListboxImpressora');
+    impSelect?.addEventListener('change', function () {
+      if (typeof window._movimSyncImpressoraSelects === 'function') {
+        window._movimSyncImpressoraSelects(this.value || null);
+      }
+    });
+    modal.querySelector('#producaoFichaImpBtnRefreshImpressoras')?.addEventListener('click', () => {
+      if (typeof window._movimAtualizarListboxImpressora === 'function') {
+        window._movimAtualizarListboxImpressora();
+      }
+    });
+    modal.querySelector('#producaoFichaImpBtnConfigImpressoras')?.addEventListener('click', () => {
+      if (typeof window._movimAbrirConfigImpressoras === 'function') {
+        window._movimAbrirConfigImpressoras();
+      }
+    });
+    if (typeof window._movimAtualizarListboxImpressora === 'function') {
+      window._movimAtualizarListboxImpressora();
+    }
+
+    btnImprimir?.addEventListener('click', async () => {
+      const orig = btnImprimir.innerHTML;
+      btnImprimir.disabled = true;
+      btnImprimir.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Montando ficha...';
+      showSt('Carregando estrutura e diagrama...', '#facc15');
+      try {
+        const params = new URLSearchParams();
+        if (codigo) params.set('codigo', codigo);
+        if (opProducaoId > 0) params.set('op_producao_id', String(opProducaoId));
+        if (numeroOp) params.set('numero_op', numeroOp);
+
+        const resp = await fetch(`/api/producao/ficha-tecnica-impressao?${params.toString()}`, {
+          credentials: 'include',
+        });
+        const data = await resp.json().catch(() => ({}));
+        if (!resp.ok || data.success === false) {
+          throw new Error(data.error || `Erro ${resp.status}`);
+        }
+
+        const valorMinRaw = String(valorMinInput?.value ?? '0').trim().replace(',', '.');
+        const valorMinimo = Number(valorMinRaw);
+        if (!Number.isFinite(valorMinimo) || valorMinimo < 0) {
+          throw new Error('Informe um valor mínimo válido (número ≥ 0).');
+        }
+
+        const itensFiltrados = _producaoFiltrarItensFichaPorPrecoMin(data.itens, valorMinimo);
+        if (!itensFiltrados.length) {
+          throw new Error(`Nenhum item com preço maior que ${valorMinimo.toLocaleString('pt-BR')}.`);
+        }
+
+        const html = _producaoMontarHtmlFichaTecnica(data, {
+          codigo,
+          descricao: descricaoPadrao,
+          numeroOp,
+          valorMinimo,
+        });
+        const escolha = _producaoEscolhaImpressoraFicha();
+        const modoPdf = escolha === '__PDF__';
+        showSt(
+          `Imprimindo ${itensFiltrados.length} de ${(data.itens || []).length} item(ns) (preço > ${valorMinimo.toLocaleString('pt-BR')})...`,
+          '#facc15'
+        );
+
+        const win = window.open('', '_blank');
+        if (!win) {
+          throw new Error('Pop-up bloqueado. Permita janelas pop-up para imprimir a ficha.');
+        }
+        win.document.open();
+        win.document.write(html);
+        win.document.close();
+
+        if (modoPdf) {
+          showSt('Ficha aberta em nova aba (modo PDF). Use imprimir/salvar do navegador.', '#4ade80');
+        } else {
+          showSt('Enviando para impressão...', '#facc15');
+          const tentarImprimir = () => {
+            try {
+              win.focus();
+              win.print();
+              showSt('Ficha enviada para impressão.', '#4ade80');
+            } catch (errPrint) {
+              showSt(errPrint.message || 'Falha ao abrir diálogo de impressão.', '#f87171');
+            }
+          };
+          // Aguarda imagens do diagrama carregarem antes de imprimir
+          const imgs = [...win.document.images];
+          if (!imgs.length) {
+            setTimeout(tentarImprimir, 200);
+          } else {
+            let pendentes = imgs.length;
+            const done = () => {
+              pendentes -= 1;
+              if (pendentes <= 0) setTimeout(tentarImprimir, 120);
+            };
+            imgs.forEach((img) => {
+              if (img.complete) done();
+              else {
+                img.addEventListener('load', done, { once: true });
+                img.addEventListener('error', done, { once: true });
+              }
+            });
+            setTimeout(() => { if (pendentes > 0) tentarImprimir(); }, 4000);
+          }
+        }
+      } catch (err) {
+        showSt(err.message || 'Falha ao montar ficha técnica.', '#f87171');
+      } finally {
+        btnImprimir.disabled = false;
+        btnImprimir.innerHTML = orig;
+      }
+    });
+  }
+
+  async function openProducaoRiCheckModal(op, produtoCodigo, colKey) {
+    const opId = Number(op?.id) || 0;
+    if (!opId) {
+      alert('OP inválida para registro de inspeção.');
+      return;
+    }
+
+    function normStKanban(s) {
+      if (typeof window._producaoNormStatusKanban === 'function') {
+        return window._producaoNormStatusKanban(s);
+      }
+      return String(s || '').trim().toLowerCase().normalize('NFD').replace(/\p{M}/gu, '');
+    }
+
+    const kanbanLocal = (typeof window._producaoNomeKanbanPorKey === 'function')
+      ? window._producaoNomeKanbanPorKey(colKey)
+      : '';
+    const isHermetica = colKey === 'solicitado';
+    const isEletrica = colKey === 'produzindo';
+    const isTeste = colKey === 'teste';
+    const isInspecaoFinal = colKey === 'inspecao_final';
+    const isRiAvancar = isHermetica || isEletrica || isTeste || isInspecaoFinal;
+
+    const codigo = String(produtoCodigo || op.produto?.identificacao || '').trim();
+    const descricao = String(op.produto?.descricao || '').trim();
+    const opIdent = String(op.identificacao || opId).trim();
+
+    const overlay = document.createElement('div');
+    overlay.className = 'kanban-modal-overlay';
+    overlay.style.zIndex = '10000';
+    overlay.addEventListener('click', (ev) => { if (ev.target === overlay) overlay.remove(); });
+
+    const modal = document.createElement('div');
+    modal.className = 'kanban-modal';
+    modal.style.maxWidth = '860px';
+    modal.innerHTML = `
+      <header>
+        <div>
+          <h2>RI - Registro de inspeção</h2>
+          <span>OP ${escapeHtml(opIdent)} · ${escapeHtml(codigo)}</span>
+        </div>
+        <button class="close-btn" aria-label="Fechar">&times;</button>
+      </header>
+      <div class="kanban-modal-body" style="max-height:520px;overflow:auto;">
+        <div id="ri-check-status" style="font-size:12px;color:#94a3b8;margin-bottom:10px;">Carregando...</div>
+        <div id="ri-check-info" class="modal-code-block" style="margin-bottom:12px;font-size:12px;color:#cbd5e1;"></div>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;gap:10px;flex-wrap:wrap;">
+          <span style="font-size:11px;font-weight:700;color:#94a3b8;text-transform:uppercase;">Verificações</span>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;">
+            <button type="button" id="ri-check-btn-add" class="modal-secondary" style="padding:5px 12px;font-size:12px;">
+              <i class="fa-solid fa-plus"></i> Adicionar check
+            </button>
+          </div>
+        </div>
+        ${kanbanLocal ? `<p style="font-size:11px;color:#64748b;margin:0 0 8px;">Exibindo verificações do kanban: <b style="color:#93c5fd;">${escapeHtml(kanbanLocal)}</b></p>` : ''}
+        <div id="ri-check-lista"></div>
+        <div style="margin-top:18px;padding-top:14px;border-top:1px solid rgba(255,255,255,.1);">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;gap:10px;flex-wrap:wrap;">
+            <span style="font-size:11px;font-weight:700;color:#94a3b8;text-transform:uppercase;">Ocorrências (falhas detectadas)</span>
+            <button type="button" id="ri-check-btn-ocorrencia" class="modal-secondary" style="padding:5px 12px;font-size:12px;border-color:rgba(248,113,113,.45);color:#fecaca;">
+              <i class="fa-solid fa-triangle-exclamation"></i> Registrar ocorrência
+            </button>
+          </div>
+          <div id="ri-check-lista-niq"></div>
+        </div>
+      </div>
+      <footer style="position:relative;">
+        <div id="ri-check-spinner" style="display:none;position:absolute;inset:0;background:rgba(15,23,42,.88);align-items:center;justify-content:center;gap:10px;z-index:2;flex-direction:column;border-radius:0 0 12px 12px;">
+          <i class="fa-solid fa-spinner fa-spin" style="font-size:22px;color:#6366f1;"></i>
+          <span style="font-size:12px;color:#94a3b8;">Registrando RI...</span>
+        </div>
+        <button type="button" class="modal-secondary">Fechar</button>
+        ${(isRiAvancar) ? `
+        <button type="button" id="ri-check-btn-registrar" class="modal-primary" style="background:#166534;display:none;">
+          <i class="fa-solid fa-clipboard-check"></i> Registrar RI
+        </button>` : `
+        <button type="button" id="ri-check-btn-registrar" class="modal-primary">
+          <i class="fa-solid fa-floppy-disk"></i> Salvar
+        </button>`}
+      </footer>
+    `;
+
+    overlay.appendChild(modal);
+    document.body.appendChild(overlay);
+
+    const close = () => overlay.remove();
+    modal.querySelector('.close-btn')?.addEventListener('click', close);
+    modal.querySelector('footer .modal-secondary')?.addEventListener('click', close);
+
+    const statusEl = modal.querySelector('#ri-check-status');
+    const infoEl = modal.querySelector('#ri-check-info');
+    const listaEl = modal.querySelector('#ri-check-lista');
+    const listaNiqEl = modal.querySelector('#ri-check-lista-niq');
+    const btnRegistrar = modal.querySelector('#ri-check-btn-registrar');
+    const btnAdd = modal.querySelector('#ri-check-btn-add');
+    const btnOcorrencia = modal.querySelector('#ri-check-btn-ocorrencia');
+    const spinnerRegistrarEl = modal.querySelector('#ri-check-spinner');
+    const btnFecharFooter = modal.querySelector('footer .modal-secondary');
+    const btnFecharHeader = modal.querySelector('.close-btn');
+
+    let riCheckId = null;
+    let riCheckData = null;
+    let riDadosProntos = false;
+    let riJaRegistrado = false;
+    let riProdutoMeta = null;
+
+    function atualizarBtnRegistrarVisivel() {
+      if (!btnRegistrar || !isRiAvancar) return;
+      if (spinnerRegistrarEl?.style.display === 'flex') return;
+      if (riJaRegistrado) {
+        btnRegistrar.style.display = 'none';
+        return;
+      }
+      btnRegistrar.style.display = riDadosProntos ? 'inline-flex' : 'none';
+    }
+
+    function setRegistrandoRi(ativo) {
+      if (spinnerRegistrarEl) {
+        spinnerRegistrarEl.style.display = ativo ? 'flex' : 'none';
+      }
+      if (btnFecharFooter) btnFecharFooter.disabled = !!ativo;
+      if (btnFecharHeader) btnFecharHeader.disabled = !!ativo;
+      if (btnAdd) btnAdd.disabled = !!ativo;
+      if (btnOcorrencia) btnOcorrencia.disabled = !!ativo;
+      if (btnRegistrar) {
+        if (ativo) {
+          btnRegistrar.style.display = 'none';
+          btnRegistrar.disabled = true;
+        } else {
+          btnRegistrar.disabled = false;
+          atualizarBtnRegistrarVisivel();
+        }
+      }
+    }
+
+    const renderLista = (verificacoes) => {
+      const items = (verificacoes || []).filter(v => {
+        if (!kanbanLocal) return true;
+        return String(v.local || '').trim() === kanbanLocal;
+      });
+      if (!items.length) {
+        listaEl.innerHTML = `<div style="text-align:center;padding:20px;color:#64748b;font-size:12px;">Nenhuma verificação neste kanban (${escapeHtml(kanbanLocal || '—')}). Clique em + para adicionar.</div>`;
+        return;
+      }
+      listaEl.innerHTML = items.map(v => {
+        const fotoHtml = v.foto
+          ? `<a href="${escapeHtml(v.foto)}" target="_blank" rel="noopener"><img src="${escapeHtml(v.foto)}" alt="Foto" style="max-width:120px;max-height:80px;border-radius:6px;border:1px solid rgba(255,255,255,.15);"></a>`
+          : '<span style="color:#64748b;font-size:11px;">—</span>';
+        const videoHtml = v.video
+          ? `<a href="${escapeHtml(v.video)}" target="_blank" rel="noopener" style="font-size:11px;color:#93c5fd;"><i class="fa-solid fa-video"></i> Ver vídeo</a>`
+          : '<span style="color:#64748b;font-size:11px;">—</span>';
+        return `<div style="border:1px solid rgba(255,255,255,.1);border-radius:10px;padding:12px;margin-bottom:10px;background:rgba(255,255,255,.03);">
+          <div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:4px;">
+            <div style="font-size:13px;font-weight:700;color:#e2e8f0;">${escapeHtml(v.check_nome || '—')}</div>
+            <span style="font-size:10px;color:#818cf8;background:rgba(99,102,241,.15);padding:2px 8px;border-radius:8px;">${escapeHtml(v.local || '—')}</span>
+          </div>
+          <div style="font-size:12px;color:#94a3b8;margin-bottom:8px;">${escapeHtml(v.descricao_check || '—')}</div>
+          <div style="display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap;">
+            <div><div style="font-size:10px;color:#64748b;margin-bottom:4px;">Foto</div>${fotoHtml}</div>
+            <div><div style="font-size:10px;color:#64748b;margin-bottom:4px;">Vídeo</div>${videoHtml}</div>
+          </div>
+        </div>`;
+      }).join('');
+    };
+
+    const renderListaNiq = (ocorrencias) => {
+      if (!listaNiqEl) return;
+      const items = ocorrencias || [];
+      if (!items.length) {
+        listaNiqEl.innerHTML = '<div style="text-align:center;padding:16px;color:#64748b;font-size:12px;">Nenhuma ocorrência registrada.</div>';
+        return;
+      }
+      listaNiqEl.innerHTML = items.map(o => {
+        const fotoHtml = o.foto
+          ? `<a href="${escapeHtml(o.foto)}" target="_blank" rel="noopener"><img src="${escapeHtml(o.foto)}" alt="Foto" style="max-width:120px;max-height:80px;border-radius:6px;border:1px solid rgba(255,255,255,.15);"></a>`
+          : '<span style="color:#64748b;font-size:11px;">—</span>';
+        const videoHtml = o.video
+          ? `<a href="${escapeHtml(o.video)}" target="_blank" rel="noopener" style="font-size:11px;color:#93c5fd;"><i class="fa-solid fa-video"></i> Ver vídeo</a>`
+          : '<span style="color:#64748b;font-size:11px;">—</span>';
+        const dt = o.created_at ? String(o.created_at).replace('T', ' ').slice(0, 16) : '—';
+        return `<div style="border:1px solid rgba(248,113,113,.25);border-radius:10px;padding:12px;margin-bottom:10px;background:rgba(127,29,29,.12);">
+          <div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:6px;">
+            <div style="font-size:12px;font-weight:700;color:#fecaca;">#${escapeHtml(String(o.id))} · ${escapeHtml(o.falha_detectada || '—')}</div>
+            <span style="font-size:10px;color:#94a3b8;">${escapeHtml(dt)}</span>
+          </div>
+          <div style="display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap;">
+            <div><div style="font-size:10px;color:#64748b;margin-bottom:4px;">Foto</div>${fotoHtml}</div>
+            <div><div style="font-size:10px;color:#64748b;margin-bottom:4px;">Vídeo</div>${videoHtml}</div>
+          </div>
+        </div>`;
+      }).join('');
+    };
+
+    const recarregarNiq = async () => {
+      if (!riCheckId) return;
+      try {
+        const rec = await fetch(`/api/qualidade/ri-check/${riCheckId}/niq`, { credentials: 'include' });
+        const recData = await rec.json();
+        if (rec.ok && recData.ok) renderListaNiq(recData.ocorrencias);
+      } catch (_) { /* silencioso */ }
+    };
+
+    const renderInfo = (check) => {
+      if (!check) {
+        riCheckData = null;
+        riCheckId = null;
+        riDadosProntos = true;
+        const codShow = riProdutoMeta?.codigo || codigo;
+        infoEl.innerHTML = `
+          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:8px;">
+            <div><span style="color:#64748b;">Código:</span> <b>${escapeHtml(codShow)}</b></div>
+            <div><span style="color:#64748b;">OP:</span> <b>${escapeHtml(opIdent)}</b></div>
+            <div><span style="color:#64748b;">Posto:</span> <b style="color:#93c5fd;">${escapeHtml(kanbanLocal || '—')}</b></div>
+            <div><span style="color:#64748b;">Status RI:</span> <b style="color:#facc15;">Aguardando registro</b></div>
+          </div>
+          ${(riProdutoMeta?.descricao || descricao) ? `<div style="margin-top:8px;color:#cbd5e1;">${escapeHtml(riProdutoMeta?.descricao || descricao)}</div>` : ''}
+          <div style="margin-top:10px;font-size:11px;color:#64748b;">Revise as verificações abaixo e clique em <b>Registrar RI</b> para gravar.</div>`;
+        if (btnRegistrar && isRiAvancar) {
+          btnRegistrar.disabled = false;
+          btnRegistrar.style.opacity = '1';
+        }
+        atualizarBtnRegistrarVisivel();
+        return;
+      }
+      riCheckData = check;
+      riCheckId = check.id;
+      riDadosProntos = !!check.id;
+      const st = String(check.status || 'Em andamento');
+      const stCor = st === 'Liberado' ? '#4ade80'
+        : (st === 'Teste' ? '#fdba74'
+        : (st === 'Teste OK' ? '#d8b4fe'
+        : (st === 'Finalizado' ? '#86efac' : '#facc15')));
+      infoEl.innerHTML = `
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:8px;">
+          <div><span style="color:#64748b;">ID RI:</span> <b>${escapeHtml(String(check.id))}</b></div>
+          <div><span style="color:#64748b;">Código:</span> <b>${escapeHtml(check.codigo || codigo)}</b></div>
+          ${check.codigo_produto ? `<div><span style="color:#64748b;">ID produto:</span> <b>${escapeHtml(String(check.codigo_produto))}</b></div>` : ''}
+          <div><span style="color:#64748b;">Status:</span> <b style="color:${stCor};">${escapeHtml(st)}</b></div>
+          <div><span style="color:#64748b;">Usuário:</span> <b>${escapeHtml(check.usuario || '—')}</b></div>
+        </div>
+        ${check.descricao ? `<div style="margin-top:8px;color:#cbd5e1;">${escapeHtml(check.descricao)}</div>` : ''}`;
+      if (btnRegistrar && isRiAvancar) {
+        const bloqueado = kanbanLocal
+          && normStKanban(st) === normStKanban(kanbanLocal);
+        riJaRegistrado = bloqueado;
+        btnRegistrar.disabled = bloqueado;
+        btnRegistrar.style.opacity = bloqueado ? '0.5' : '1';
+      }
+      atualizarBtnRegistrarVisivel();
+    };
+
+    const recarregarVerificacoes = async () => {
+      if (!riCheckId) return;
+      const q = kanbanLocal ? `?local=${encodeURIComponent(kanbanLocal)}` : '';
+      const rec = await fetch(`/api/qualidade/ri-check/${riCheckId}${q}`, { credentials: 'include' });
+      const recData = await rec.json();
+      if (rec.ok && recData.ok) {
+        renderInfo(recData.check);
+        renderLista(recData.verificacoes);
+      }
+    };
+
+    const carregar = async () => {
+      riDadosProntos = false;
+      riJaRegistrado = false;
+      riCheckId = null;
+      riCheckData = null;
+      atualizarBtnRegistrarVisivel();
+      statusEl.textContent = 'Carregando verificações...';
+      statusEl.style.color = '#94a3b8';
+      try {
+        const resp = await fetch('/api/qualidade/ri-check/preparar', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({
+            op_producao_id: opId,
+            op_iapp_id: opId,
+            numero_op: opIdent,
+            codigo,
+            descricao,
+            codigo_produto: op.produto?.codigo_produto || op.produto?.id || null,
+            kanban_local: kanbanLocal,
+          }),
+        });
+        const data = await resp.json();
+        if (!resp.ok || !data.ok) throw new Error(data.error || `Erro ${resp.status}`);
+        riProdutoMeta = data.produto || null;
+        riJaRegistrado = !!data.ja_registrado;
+        renderInfo(data.check || null);
+        renderLista(data.verificacoes);
+        renderListaNiq(data.ocorrencias || []);
+        statusEl.textContent = data.template_apenas
+          ? 'Verificações carregadas — clique em Registrar RI para gravar.'
+          : (riJaRegistrado ? 'RI já registrado neste posto.' : '');
+        if (riJaRegistrado) statusEl.style.color = '#4ade80';
+        else statusEl.style.color = '#94a3b8';
+      } catch (err) {
+        statusEl.textContent = err.message || 'Falha ao carregar RI.';
+        statusEl.style.color = '#f87171';
+        riDadosProntos = false;
+        atualizarBtnRegistrarVisivel();
+      }
+    };
+
+    const abrirModalAddVerificacao = async () => {
+      if (!riCheckId) {
+        alert('Clique em "Registrar RI" para gravar o registro antes de adicionar verificações.');
+        return;
+      }
+      let nomesKanban = (typeof window._producaoListaNomesKanban === 'function')
+        ? window._producaoListaNomesKanban()
+        : [];
+      if (!nomesKanban.length) {
+        try {
+          const kr = await fetch('/api/qualidade/ri-check/kanbans', { credentials: 'include' });
+          const kd = await kr.json();
+          if (kr.ok && kd.ok) nomesKanban = kd.kanbans || [];
+        } catch (_) { /* ignora */ }
+      }
+      const optsLocal = nomesKanban.map(n => {
+        const sel = n === kanbanLocal ? ' selected' : '';
+        return `<option value="${escapeHtml(n)}"${sel}>${escapeHtml(n)}</option>`;
+      }).join('');
+
+      const sub = document.createElement('div');
+      sub.className = 'kanban-modal-overlay';
+      sub.style.zIndex = '10060';
+      sub.innerHTML = `
+        <div class="kanban-modal" style="max-width:520px;">
+          <header>
+            <div><h2>Nova verificação</h2></div>
+            <button type="button" class="close-btn">&times;</button>
+          </header>
+          <div class="kanban-modal-body">
+            <div class="modal-code-block" style="display:flex;flex-direction:column;gap:10px;">
+              <label style="font-size:12px;color:#94a3b8;">Check *
+                <input type="text" id="ri-verif-check" class="modal-input" style="width:100%;margin-top:4px;padding:8px;" placeholder="Nome do item verificado">
+              </label>
+              <label style="font-size:12px;color:#94a3b8;">Descrição do check
+                <textarea id="ri-verif-desc" rows="3" style="width:100%;margin-top:4px;padding:8px;background:#1e293b;color:#e2e8f0;border:1px solid rgba(255,255,255,.15);border-radius:8px;"></textarea>
+              </label>
+              <label style="font-size:12px;color:#94a3b8;">Local (kanban) *
+                <select id="ri-verif-local" style="width:100%;margin-top:4px;padding:8px;background:#1e293b;color:#e2e8f0;border:1px solid rgba(255,255,255,.15);border-radius:8px;">
+                  ${optsLocal || `<option value="${escapeHtml(kanbanLocal)}">${escapeHtml(kanbanLocal)}</option>`}
+                </select>
+              </label>
+              <label style="font-size:12px;color:#94a3b8;">Foto
+                <input type="file" id="ri-verif-foto" accept="image/*" style="margin-top:4px;color:#cbd5e1;">
+              </label>
+              <label style="font-size:12px;color:#94a3b8;">Vídeo
+                <input type="file" id="ri-verif-video" accept="video/*" style="margin-top:4px;color:#cbd5e1;">
+              </label>
+              <p id="ri-verif-status" style="font-size:12px;color:#94a3b8;min-height:16px;margin:0;"></p>
+            </div>
+          </div>
+          <footer>
+            <button type="button" class="modal-secondary">Cancelar</button>
+            <button type="button" id="ri-verif-salvar" class="modal-primary">Salvar verificação</button>
+          </footer>
+        </div>`;
+      document.body.appendChild(sub);
+      const fecharSub = () => sub.remove();
+      sub.querySelector('.close-btn')?.addEventListener('click', fecharSub);
+      sub.querySelector('.modal-secondary')?.addEventListener('click', fecharSub);
+      sub.addEventListener('click', (e) => { if (e.target === sub) fecharSub(); });
+
+      sub.querySelector('#ri-verif-salvar')?.addEventListener('click', async () => {
+        const checkNome = sub.querySelector('#ri-verif-check')?.value?.trim();
+        const descricaoCheck = sub.querySelector('#ri-verif-desc')?.value?.trim() || '';
+        const localVal = sub.querySelector('#ri-verif-local')?.value?.trim() || kanbanLocal;
+        const fotoFile = sub.querySelector('#ri-verif-foto')?.files?.[0];
+        const videoFile = sub.querySelector('#ri-verif-video')?.files?.[0];
+        const st = sub.querySelector('#ri-verif-status');
+        if (!checkNome) {
+          if (st) { st.textContent = 'Informe o nome do check.'; st.style.color = '#f87171'; }
+          return;
+        }
+        if (!localVal) {
+          if (st) { st.textContent = 'Selecione o local (kanban).'; st.style.color = '#f87171'; }
+          return;
+        }
+        const fd = new FormData();
+        fd.append('check', checkNome);
+        fd.append('descricao_check', descricaoCheck);
+        if (riCheckData?.codigo_produto) fd.append('codigo_produto', String(riCheckData.codigo_produto));
+        fd.append('local', localVal);
+        if (fotoFile) fd.append('foto', fotoFile);
+        if (videoFile) fd.append('video', videoFile);
+        const btn = sub.querySelector('#ri-verif-salvar');
+        if (btn) { btn.disabled = true; btn.textContent = 'Salvando...'; }
+        try {
+          const resp = await fetch(`/api/qualidade/ri-check/${riCheckId}/verificacoes`, {
+            method: 'POST',
+            credentials: 'include',
+            body: fd,
+          });
+          const data = await resp.json();
+          if (!resp.ok || !data.ok) throw new Error(data.error || `Erro ${resp.status}`);
+          fecharSub();
+          await recarregarVerificacoes();
+        } catch (err) {
+          if (st) { st.textContent = err.message || 'Falha ao salvar.'; st.style.color = '#f87171'; }
+        } finally {
+          if (btn) { btn.disabled = false; btn.textContent = 'Salvar verificação'; }
+        }
+      });
+    };
+
+    btnAdd?.addEventListener('click', abrirModalAddVerificacao);
+
+    const abrirModalRegistrarOcorrencia = () => {
+      if (!riCheckId) {
+        alert('Clique em "Registrar RI" para gravar o registro antes de registrar ocorrências.');
+        return;
+      }
+      const sub = document.createElement('div');
+      sub.className = 'kanban-modal-overlay';
+      sub.style.zIndex = '10060';
+      sub.innerHTML = `
+        <div class="kanban-modal" style="max-width:520px;">
+          <header>
+            <div><h2>Registrar ocorrência</h2><span>OP ${escapeHtml(opIdent)}</span></div>
+            <button type="button" class="close-btn">&times;</button>
+          </header>
+          <div class="kanban-modal-body">
+            <div class="modal-code-block" style="display:flex;flex-direction:column;gap:10px;">
+              <label style="font-size:12px;color:#94a3b8;">Falha detectada *
+                <textarea id="ri-niq-falha" rows="3" style="width:100%;margin-top:4px;padding:8px;background:#1e293b;color:#e2e8f0;border:1px solid rgba(255,255,255,.15);border-radius:8px;" placeholder="Descreva a falha encontrada"></textarea>
+              </label>
+              <label style="font-size:12px;color:#94a3b8;">Foto
+                <input type="file" id="ri-niq-foto" accept="image/*" style="margin-top:4px;color:#cbd5e1;">
+              </label>
+              <label style="font-size:12px;color:#94a3b8;">Vídeo
+                <input type="file" id="ri-niq-video" accept="video/*" style="margin-top:4px;color:#cbd5e1;">
+              </label>
+              <p id="ri-niq-status" style="font-size:12px;color:#94a3b8;min-height:16px;margin:0;"></p>
+            </div>
+          </div>
+          <footer>
+            <button type="button" class="modal-secondary">Cancelar</button>
+            <button type="button" id="ri-niq-salvar" class="modal-primary" style="background:#b91c1c;">Registrar</button>
+          </footer>
+        </div>`;
+      document.body.appendChild(sub);
+      const fecharSub = () => sub.remove();
+      sub.querySelector('.close-btn')?.addEventListener('click', fecharSub);
+      sub.querySelector('.modal-secondary')?.addEventListener('click', fecharSub);
+      sub.addEventListener('click', (e) => { if (e.target === sub) fecharSub(); });
+
+      sub.querySelector('#ri-niq-salvar')?.addEventListener('click', async () => {
+        const falha = sub.querySelector('#ri-niq-falha')?.value?.trim();
+        const fotoFile = sub.querySelector('#ri-niq-foto')?.files?.[0];
+        const videoFile = sub.querySelector('#ri-niq-video')?.files?.[0];
+        const st = sub.querySelector('#ri-niq-status');
+        if (!falha) {
+          if (st) { st.textContent = 'Informe a falha detectada.'; st.style.color = '#f87171'; }
+          return;
+        }
+        const fd = new FormData();
+        fd.append('falha_detectada', falha);
+        if (fotoFile) fd.append('foto', fotoFile);
+        if (videoFile) fd.append('video', videoFile);
+        const btn = sub.querySelector('#ri-niq-salvar');
+        if (btn) { btn.disabled = true; btn.textContent = 'Salvando...'; }
+        try {
+          const resp = await fetch(`/api/qualidade/ri-check/${riCheckId}/niq`, {
+            method: 'POST',
+            credentials: 'include',
+            body: fd,
+          });
+          const data = await resp.json();
+          if (!resp.ok || !data.ok) throw new Error(data.error || `Erro ${resp.status}`);
+          fecharSub();
+          await recarregarNiq();
+          statusEl.textContent = 'Ocorrência registrada.';
+          statusEl.style.color = '#4ade80';
+        } catch (err) {
+          if (st) { st.textContent = err.message || 'Falha ao registrar.'; st.style.color = '#f87171'; }
+        } finally {
+          if (btn) { btn.disabled = false; btn.textContent = 'Registrar'; }
+        }
+      });
+    };
+
+    btnOcorrencia?.addEventListener('click', abrirModalRegistrarOcorrencia);
+
+    btnRegistrar?.addEventListener('click', async () => {
+      if (!riDadosProntos || riJaRegistrado) return;
+      if (isRiAvancar) {
+        const postoLabel = kanbanLocal || 'atual';
+        if (!confirm(`Confirmar registro do RI no posto ${postoLabel}?`)) return;
+      }
+      setRegistrandoRi(true);
+      try {
+        if (!riCheckId) {
+          const respAbrir = await fetch('/api/qualidade/ri-check/abrir', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
+            body: JSON.stringify({
+              op_producao_id: opId,
+              op_iapp_id: opId,
+              numero_op: opIdent,
+              codigo,
+              descricao,
+              codigo_produto: op.produto?.codigo_produto || op.produto?.id || null,
+              kanban_local: kanbanLocal,
+            }),
+          });
+          const dataAbrir = await respAbrir.json();
+          if (!respAbrir.ok || !dataAbrir.ok) throw new Error(dataAbrir.error || `Erro ${respAbrir.status}`);
+          riCheckId = dataAbrir.check?.id || null;
+          if (!riCheckId) throw new Error('Falha ao criar registro RI.');
+          renderInfo(dataAbrir.check);
+          renderLista(dataAbrir.verificacoes);
+        }
+
+        const respSalvar = await fetch(`/api/qualidade/ri-check/${riCheckId}/salvar`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ kanban_local: kanbanLocal }),
+        });
+        const dataSalvar = await respSalvar.json();
+        if (!respSalvar.ok || !dataSalvar.ok) throw new Error(dataSalvar.error || `Erro ${respSalvar.status}`);
+
+        if (isRiAvancar) {
+          const respLib = await fetch(`/api/qualidade/ri-check/${riCheckId}/liberar`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
+            body: JSON.stringify({
+              kanban_origem: kanbanLocal,
+              op_producao_id: opId,
+              numero_op: opIdent,
+            }),
+          });
+          const dataLib = await respLib.json();
+          if (!respLib.ok || !dataLib.ok) throw new Error(dataLib.error || `Erro ${respLib.status}`);
+          renderInfo(dataLib.check);
+          renderLista(dataLib.verificacoes);
+          const postoRegistrado = dataLib.kanban_status || kanbanLocal || 'atual';
+          statusEl.textContent = `RI registrado no posto ${postoRegistrado}.`;
+          statusEl.style.color = '#4ade80';
+          if (typeof window._riRegistroRecarregar === 'function') {
+            await window._riRegistroRecarregar();
+          }
+          if (typeof window._montaRecarregarOrdens === 'function') {
+            await window._montaRecarregarOrdens();
+          }
+          close();
+        } else {
+          renderInfo(dataSalvar.check);
+          renderLista(dataSalvar.verificacoes);
+          statusEl.textContent = 'Registro salvo.';
+          statusEl.style.color = '#4ade80';
+        }
+      } catch (err) {
+        statusEl.textContent = err.message || 'Falha ao registrar RI.';
+        statusEl.style.color = '#f87171';
+        setRegistrandoRi(false);
+        if (btnRegistrar && isRiAvancar) {
+          const st = String(riCheckData?.status || '');
+          const bloqueado = kanbanLocal
+            && normStKanban(st) === normStKanban(kanbanLocal);
+          btnRegistrar.disabled = bloqueado;
+          btnRegistrar.style.opacity = bloqueado ? '0.5' : '1';
+        }
+      }
+    });
+
+    await carregar();
+  }
+
+  async function carregarEstoqueAnalisePedido(codigo, targetEl) {
+    if (!targetEl) return;
+    const cod = String(codigo || '').trim();
+    targetEl.innerHTML = '<div style="text-align:center;padding:16px;color:#94a3b8;font-size:12px;"><i class="fa-solid fa-spinner fa-spin" style="margin-right:6px;"></i>Carregando estoque...</div>';
+    try {
+      const resp = await fetch(`/api/logistica/estoque?q=${encodeURIComponent(cod)}`);
+      const data = await resp.json();
+      if (!resp.ok || !data.ok) throw new Error(data.error || 'Erro ao carregar estoque');
+      const rows = (data.dados || []).filter(r => String(r.codigo || '').trim().toUpperCase() === cod.toUpperCase());
+      if (!rows.length) {
+        targetEl.innerHTML = '<div style="text-align:center;padding:16px;color:#64748b;font-size:12px;">Nenhum registro em estoque para este produto.</div>';
+        return;
+      }
+      const linhas = rows.map(r => `<tr style="border-bottom:1px solid rgba(255,255,255,.06);">
+        <td style="padding:6px 8px;font-size:11px;color:#e2e8f0;white-space:nowrap;">${escapeHtml(r.codigo || '—')}</td>
+        <td style="padding:6px 8px;font-size:11px;color:#94a3b8;white-space:nowrap;">${escapeHtml(r.cod_int || '—')}</td>
+        <td style="padding:6px 8px;font-size:11px;color:#cbd5e1;">${escapeHtml(r.local_nome || r.local_codigo || '—')}</td>
+        <td style="padding:6px 8px;font-size:11px;color:#fcd34d;text-align:right;font-weight:600;">${escapeHtml(String(r.saldo ?? '—'))}</td>
+      </tr>`).join('');
+      targetEl.innerHTML = `
+        <div style="margin-top:4px;">
+          <div style="font-size:11px;font-weight:700;color:#94a3b8;margin-bottom:8px;text-transform:uppercase;letter-spacing:.4px;">Estoque atual</div>
+          <div style="max-height:220px;overflow:auto;">
+            <table style="width:100%;border-collapse:collapse;">
+              <thead>
+                <tr style="border-bottom:1px solid rgba(255,255,255,.1);">
+                  <th style="padding:6px 8px;font-size:10px;color:#64748b;text-align:left;">Código</th>
+                  <th style="padding:6px 8px;font-size:10px;color:#64748b;text-align:left;">Cod. int.</th>
+                  <th style="padding:6px 8px;font-size:10px;color:#64748b;text-align:left;">Local</th>
+                  <th style="padding:6px 8px;font-size:10px;color:#64748b;text-align:right;">Saldo</th>
+                </tr>
+              </thead>
+              <tbody>${linhas}</tbody>
+            </table>
+          </div>
+        </div>`;
+    } catch (e) {
+      targetEl.innerHTML = `<div style="text-align:center;padding:16px;color:#f87171;font-size:12px;">${escapeHtml(e.message || 'Erro ao carregar estoque.')}</div>`;
+    }
+  }
+
+  function openGerarOpPedidoModal(pedidoItem, onSuccess) {
+    const saldoPedido = Math.max(0, Math.floor(Number(pedidoItem?.quantidade) || 0));
+    const qtdInicial = Math.max(1, saldoPedido || 1);
+    const codigo = String(pedidoItem?.codigo || '').trim();
+    const codigoProduto = Number(pedidoItem?.codigo_produto);
+    const descricao = String(pedidoItem?.descricao || '').trim();
+    const numeroPedido = String(pedidoItem?.numero_pedido || '').trim();
+    const codigoPedido = Number(pedidoItem?.codigo_pedido);
+
+    if (!codigo || !Number.isFinite(codigoProduto) || codigoProduto <= 0) {
+      alert('Dados do produto do pedido incompletos.');
+      return;
+    }
+
+    const overlay = document.createElement('div');
+    overlay.className = 'kanban-modal-overlay';
+    overlay.style.zIndex = '10061';
+    overlay.addEventListener('click', (ev) => { if (ev.target === overlay) overlay.remove(); });
+
+    const modal = document.createElement('div');
+    modal.className = 'kanban-modal';
+    modal.style.maxWidth = '560px';
+    modal.innerHTML = `
+      <header>
+        <div>
+          <h2>Gerar OP</h2>
+          <span>${escapeHtml(codigo)} · Pedido ${escapeHtml(numeroPedido || '—')}</span>
+        </div>
+        <button class="close-btn" aria-label="Fechar">&times;</button>
+      </header>
+      <div class="kanban-modal-body" style="max-height:460px;overflow:auto;">
+        <p style="margin:0 0 10px;font-size:12px;color:#94a3b8;">${escapeHtml(descricao || '—')}</p>
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:12px;padding:10px 12px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.1);border-radius:8px;">
+          <div>
+            <div style="font-size:11px;color:#64748b;">Saldo do pedido</div>
+            <div style="font-size:18px;font-weight:700;color:#fbbf24;">${saldoPedido || 0}</div>
+          </div>
+          <div style="text-align:right;">
+            <div style="font-size:11px;color:#64748b;margin-bottom:4px;">Quantidade de OPs</div>
+            <div style="display:flex;align-items:center;gap:8px;">
+              <button type="button" id="gerar-op-pedido-menos" class="modal-secondary" style="width:32px;height:32px;padding:0;">−</button>
+              <input type="number" id="gerar-op-pedido-qtd" min="1" max="200" value="${qtdInicial}"
+                style="width:64px;text-align:center;padding:6px 8px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.15);border-radius:6px;color:#f1f5f9;font-size:14px;font-weight:700;">
+              <button type="button" id="gerar-op-pedido-mais" class="modal-secondary" style="width:32px;height:32px;padding:0;">+</button>
+            </div>
+          </div>
+        </div>
+        <div id="gerar-op-pedido-resumo" style="font-size:11px;color:#94a3b8;margin-bottom:8px;"></div>
+        <div id="gerar-op-pedido-lista" style="border:1px solid rgba(255,255,255,.1);border-radius:8px;overflow:hidden;"></div>
+        <p id="gerar-op-pedido-status" style="margin:10px 0 0;font-size:12px;color:#94a3b8;min-height:18px;"></p>
+      </div>
+      <footer>
+        <button type="button" class="modal-secondary">Cancelar</button>
+        <button type="button" id="gerar-op-pedido-confirmar" class="modal-primary">
+          <i class="fa-solid fa-plus"></i> Gerar OPs
+        </button>
+      </footer>
+    `;
+
+    overlay.appendChild(modal);
+    document.body.appendChild(overlay);
+
+    const close = () => overlay.remove();
+    modal.querySelector('.close-btn')?.addEventListener('click', close);
+    modal.querySelector('footer .modal-secondary')?.addEventListener('click', close);
+
+    const inputQtd = modal.querySelector('#gerar-op-pedido-qtd');
+    const listaEl = modal.querySelector('#gerar-op-pedido-lista');
+    const resumoEl = modal.querySelector('#gerar-op-pedido-resumo');
+    const statusEl = modal.querySelector('#gerar-op-pedido-status');
+    const btnConfirmar = modal.querySelector('#gerar-op-pedido-confirmar');
+
+    function lerQtd() {
+      const n = Math.floor(Number(inputQtd?.value));
+      return Number.isFinite(n) && n >= 1 ? Math.min(n, 200) : 1;
+    }
+
+    function renderPreLista() {
+      const qtd = lerQtd();
+      if (inputQtd) inputQtd.value = String(qtd);
+      const vinc = Math.min(qtd, saldoPedido);
+      const extra = Math.max(0, qtd - vinc);
+      if (resumoEl) {
+        resumoEl.innerHTML = vinc > 0
+          ? `<span style="color:#86efac;">${vinc} OP(s) vinculada(s) ao pedido</span>${extra ? ` · <span style="color:#fcd34d;">${extra} somente OP (sem pedido)</span>` : ''}`
+          : `<span style="color:#fcd34d;">${qtd} OP(s) sem vínculo com pedido</span>`;
+      }
+      if (!listaEl) return;
+      listaEl.innerHTML = Array.from({ length: qtd }, (_, i) => {
+        const idx = i + 1;
+        const vinculado = i < vinc;
+        const badge = vinculado
+          ? '<span style="font-size:10px;color:#86efac;background:rgba(34,197,94,.15);padding:2px 8px;border-radius:8px;">Vinculado ao pedido</span>'
+          : '<span style="font-size:10px;color:#fcd34d;background:rgba(245,158,11,.12);padding:2px 8px;border-radius:8px;">Somente OP</span>';
+        return `<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:9px 12px;border-bottom:1px solid rgba(255,255,255,.06);font-size:12px;color:#e2e8f0;">
+          <span><b style="color:#a5b4fc;">Pré-OP #${idx}</b> · qtd 1</span>
+          ${badge}
+        </div>`;
+      }).join('');
+    }
+
+    modal.querySelector('#gerar-op-pedido-menos')?.addEventListener('click', () => {
+      if (inputQtd) inputQtd.value = String(Math.max(1, lerQtd() - 1));
+      renderPreLista();
+    });
+    modal.querySelector('#gerar-op-pedido-mais')?.addEventListener('click', () => {
+      if (inputQtd) inputQtd.value = String(Math.min(200, lerQtd() + 1));
+      renderPreLista();
+    });
+    inputQtd?.addEventListener('input', renderPreLista);
+    inputQtd?.addEventListener('change', renderPreLista);
+    renderPreLista();
+
+    btnConfirmar?.addEventListener('click', async () => {
+      const qtd = lerQtd();
+      btnConfirmar.disabled = true;
+      if (statusEl) {
+        statusEl.textContent = `Gerando ${qtd} OP(s)...`;
+        statusEl.style.color = '#facc15';
+      }
+      try {
+        const body = {
+          codigo,
+          codigo_produto: codigoProduto,
+          quantidade: qtd,
+        };
+        if (Number.isFinite(codigoPedido) && codigoPedido > 0 && saldoPedido > 0) {
+          body.pedido = {
+            codigo_pedido: codigoPedido,
+            numero_pedido: numeroPedido,
+            saldo: saldoPedido,
+          };
+        }
+        const resp = await fetch('/api/producao/op-producao/lote', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify(body),
+        });
+        const data = await resp.json();
+        if (!resp.ok || !data.success) throw new Error(data.error || `Erro ${resp.status}`);
+        close();
+        alert(`${data.total} OP(s) gerada(s).\n${data.vinculadas || 0} vinculada(s) ao pedido.\n${data.somente_op || 0} somente OP.`);
+        if (typeof onSuccess === 'function') await onSuccess();
+        else if (typeof window._producaoRecarregarOrdens === 'function') await window._producaoRecarregarOrdens();
+      } catch (err) {
+        if (statusEl) {
+          statusEl.textContent = err.message || 'Falha ao gerar OPs.';
+          statusEl.style.color = '#f87171';
+        }
+        btnConfirmar.disabled = false;
+      }
+    });
+  }
+
+  async function producaoFinalizarOperacao(ops, colKey) {
+    const lista = Array.isArray(ops) ? ops : [];
+    if (!lista.length) throw new Error('Nenhuma OP selecionada.');
+    const proximo = (typeof window._producaoProximoKanbanPorKey === 'function')
+      ? window._producaoProximoKanbanPorKey(colKey)
+      : null;
+    const proximoStatus = proximo?.nome || 'Finalizado';
+    const postoAtual = (typeof window._producaoNomeKanbanPorKey === 'function')
+      ? (window._producaoNomeKanbanPorKey(colKey) || '')
+      : '';
+    const usuario = (document.getElementById('userNameDisplay')?.textContent || '').trim();
+    const programacao = (typeof window._montaProgramacaoCarregada === 'function')
+      ? window._montaProgramacaoCarregada()
+      : [];
+
+    for (const op of lista) {
+      const reg = programacao.find((r) =>
+        Number(r.op_producao_id) === Number(op.id)
+        || String(r.numero_op || '').trim().toUpperCase() === String(op.identificacao || '').trim().toUpperCase()
+      );
+      const resp = await fetch('/api/producao/finalizar-operacao', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          op_producao_id: op.from_op_producao !== false ? Number(op.id) : 0,
+          numero_op: op.identificacao || '',
+          kanban_programacao_id: reg?.id || null,
+          col_key: colKey || '',
+          posto_atual: postoAtual,
+          proximo_status: proximoStatus,
+          operacao: proximoStatus,
+          usuario,
+        }),
+      });
+      const data = await resp.json();
+      if (!resp.ok || !data.success) throw new Error(data.error || 'Erro ao finalizar operação');
+    }
+    if (typeof window._montaRecarregarOrdens === 'function') {
+      await window._montaRecarregarOrdens();
+    }
+  }
+
+  async function producaoRetrocederOp(ops, colKey) {
+    const lista = Array.isArray(ops) ? ops : [];
+    if (!lista.length) throw new Error('Nenhuma OP selecionada.');
+    const retrocedeCols = (typeof window._producaoColunasRetrocederOp === 'function')
+      ? window._producaoColunasRetrocederOp()
+      : ['solicitado', 'produzindo', 'teste', 'inspecao_final'];
+    if (!retrocedeCols.includes(colKey)) {
+      throw new Error('Retroceder OP não está disponível neste kanban.');
+    }
+    const anterior = (typeof window._producaoAnteriorKanbanPorKey === 'function')
+      ? window._producaoAnteriorKanbanPorKey(colKey)
+      : null;
+    const nomeAnterior = anterior?.nome || 'Programado';
+    const usuario = (document.getElementById('userNameDisplay')?.textContent || '').trim();
+    const programacao = (typeof window._montaProgramacaoCarregada === 'function')
+      ? window._montaProgramacaoCarregada()
+      : (typeof window._producaoProgramacaoCarregada === 'function'
+        ? window._producaoProgramacaoCarregada()
+        : []);
+
+    for (const op of lista) {
+      const reg = programacao.find((r) =>
+        Number(r.op_producao_id) === Number(op.id)
+        || String(r.numero_op || '').trim().toUpperCase() === String(op.identificacao || '').trim().toUpperCase()
+      );
+      const resp = await fetch('/api/producao/retroceder-op', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          op_producao_id: op.from_op_producao !== false ? Number(op.id) : 0,
+          numero_op: op.identificacao || '',
+          kanban_programacao_id: reg?.id || null,
+          col_key: colKey || '',
+          usuario,
+        }),
+      });
+      const data = await resp.json();
+      if (!resp.ok || !data.success) throw new Error(data.error || 'Erro ao retroceder OP');
+    }
+    if (typeof window._producaoRecarregarOrdens === 'function') {
+      await window._producaoRecarregarOrdens();
+    } else if (typeof window._montaRecarregarOrdens === 'function') {
+      await window._montaRecarregarOrdens();
+    }
+    return nomeAnterior;
+  }
+
+  async function carregarMotivosParada() {
+    const resp = await fetch('/api/producao/paradas/motivos');
+    const data = await resp.json();
+    if (!resp.ok || !data.success) throw new Error(data.error || 'Erro ao carregar motivos');
+    return data.motivos || [];
+  }
+
+  function producaoBuscarRegKanbanOp(op) {
+    const programacao = (typeof window._montaProgramacaoCarregada === 'function')
+      ? window._montaProgramacaoCarregada()
+      : [];
+    return programacao.find((r) =>
+      Number(r.op_producao_id) === Number(op?.id)
+      || String(r.numero_op || '').trim().toUpperCase() === String(op?.identificacao || '').trim().toUpperCase()
+    ) || null;
+  }
+
+  async function buscarParadaAtivaOp(op) {
+    if (!op) return null;
+    const reg = producaoBuscarRegKanbanOp(op);
+    const params = new URLSearchParams();
+    if (reg?.id) params.set('kanban_programacao_id', String(reg.id));
+    const numeroOp = String(op.identificacao || '').trim();
+    if (numeroOp) params.set('numero_op', numeroOp);
+    if (!params.toString()) return null;
+    const resp = await fetch(`/api/producao/paradas/ativa?${params}`, { credentials: 'include' });
+    const data = await resp.json();
+    if (!resp.ok || !data.success) throw new Error(data.error || 'Erro ao consultar parada');
+    return data.ativa ? (data.parada || null) : null;
+  }
+
+  function aplicarBotoesParadaActionsModal(modal, paradaAtiva) {
+    const btnFinalizar = modal?.querySelector('#open-finalizar-operacao-btn');
+    const btnParada = modal?.querySelector('#open-parada-btn');
+    if (!btnFinalizar && !btnParada) return;
+
+    if (paradaAtiva) {
+      if (btnFinalizar) {
+        btnFinalizar.disabled = true;
+        btnFinalizar.style.opacity = '0.45';
+        btnFinalizar.style.cursor = 'not-allowed';
+        btnFinalizar.title = 'OP em parada — retome a produção para finalizar.';
+      }
+      if (btnParada) {
+        btnParada.disabled = false;
+        btnParada.dataset.modoParada = 'retomar';
+        btnParada.dataset.paradaId = String(paradaAtiva.id || '');
+        btnParada.style.opacity = '';
+        btnParada.style.cursor = '';
+        btnParada.title = 'Encerrar parada e liberar finalização da operação';
+        btnParada.innerHTML = '<i class="fa-solid fa-circle-play"></i> Retomar produção';
+      }
+    } else {
+      if (btnFinalizar) {
+        btnFinalizar.disabled = false;
+        btnFinalizar.style.opacity = '';
+        btnFinalizar.style.cursor = '';
+        btnFinalizar.title = '';
+      }
+      if (btnParada) {
+        btnParada.disabled = false;
+        btnParada.dataset.modoParada = 'parada';
+        delete btnParada.dataset.paradaId;
+        btnParada.style.opacity = '';
+        btnParada.style.cursor = '';
+        btnParada.title = '';
+        btnParada.innerHTML = '<i class="fa-solid fa-circle-pause"></i> Parada';
+      }
+    }
+  }
+
+  async function retomarParadaProducao(paradaId) {
+    const id = Number(paradaId) || 0;
+    if (!id) throw new Error('Parada inválida.');
+    const resp = await fetch(`/api/producao/paradas/${id}/retomar`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({}),
+    });
+    const data = await resp.json();
+    if (!resp.ok || !data.success) throw new Error(data.error || 'Erro ao retomar produção');
+    return data.parada || null;
+  }
+
+  function preencherDatalistParada(datalistEl, valores, filtro) {
+    if (!datalistEl) return;
+    const f = String(filtro || '').trim().toLowerCase();
+    const unicos = [...new Set((valores || []).map(v => String(v || '').trim()).filter(Boolean))];
+    const lista = f
+      ? unicos.filter(v => v.toLowerCase().includes(f))
+      : unicos;
+    datalistEl.innerHTML = lista.map(v => `<option value="${escapeHtml(v)}"></option>`).join('');
+  }
+
+  function openProducaoParadaModal(ops, colKey, produtoCodigo, opts) {
+    const options = opts || {};
+    const listaOps = Array.isArray(ops) ? ops : [];
+    const op = listaOps[0];
+    if (!op) return;
+    const operacaoNome = (typeof window._producaoNomeKanbanPorKey === 'function')
+      ? (window._producaoNomeKanbanPorKey(colKey) || colKey || '')
+      : (colKey || '');
+    const reg = producaoBuscarRegKanbanOp(op);
+
+    const overlay = document.createElement('div');
+    overlay.className = 'kanban-modal-overlay';
+    overlay.style.zIndex = '10070';
+    overlay.addEventListener('click', (ev) => { if (ev.target === overlay) overlay.remove(); });
+
+    const modal = document.createElement('div');
+    modal.className = 'kanban-modal';
+    modal.style.maxWidth = '520px';
+    modal.innerHTML = `
+      <header>
+        <div>
+          <h2>Registrar parada</h2>
+          <span>OP ${escapeHtml(op.identificacao || '—')} · ${escapeHtml(produtoCodigo || '')}</span>
+        </div>
+        <button class="close-btn" aria-label="Fechar">&times;</button>
+      </header>
+      <div class="kanban-modal-body">
+        <label style="display:block;margin-bottom:6px;font-size:12px;color:#94a3b8;">Tipo de parada</label>
+        <select id="parada-tipo-select"
+          style="width:100%;padding:9px 12px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.12);border-radius:8px;color:#e2e8f0;font-size:13px;margin-bottom:12px;cursor:pointer;">
+          <option value="">Selecione...</option>
+          <option value="Programada">Programada</option>
+          <option value="Não programada">Não programada</option>
+        </select>
+        <label style="display:block;margin-bottom:6px;font-size:12px;color:#94a3b8;">Motivo</label>
+        <input type="text" id="parada-motivo-input" list="parada-motivo-list" placeholder="Selecione ou digite..."
+          style="width:100%;padding:9px 12px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.12);border-radius:8px;color:#e2e8f0;font-size:13px;margin-bottom:12px;">
+        <datalist id="parada-motivo-list"></datalist>
+        <p id="parada-status" style="font-size:12px;color:#94a3b8;min-height:18px;margin:0;"></p>
+      </div>
+      <footer style="display:flex;justify-content:flex-end;gap:8px;flex-wrap:wrap;">
+        <button type="button" class="modal-secondary" id="parada-fechar-btn">Fechar</button>
+        <button type="button" class="modal-secondary" id="parada-registrar-motivo-btn">Registrar motivo</button>
+        <button type="button" class="modal-primary" id="parada-registrar-btn">
+          <i class="fa-solid fa-circle-pause"></i> Registrar parada
+        </button>
+      </footer>
+    `;
+
+    overlay.appendChild(modal);
+    document.body.appendChild(overlay);
+
+    const close = () => overlay.remove();
+    modal.querySelector('.close-btn')?.addEventListener('click', close);
+    modal.querySelector('#parada-fechar-btn')?.addEventListener('click', close);
+
+    const tipoSelect = modal.querySelector('#parada-tipo-select');
+    const motivoInput = modal.querySelector('#parada-motivo-input');
+    const motivoList = modal.querySelector('#parada-motivo-list');
+    const statusEl = modal.querySelector('#parada-status');
+    let motivosCache = [];
+
+    const atualizarListaMotivos = () => {
+      const motivos = motivosCache.map(m => m.motivo);
+      preencherDatalistParada(motivoList, motivos, '');
+    };
+
+    carregarMotivosParada()
+      .then((rows) => { motivosCache = rows; atualizarListaMotivos(); })
+      .catch((err) => { if (statusEl) statusEl.textContent = err.message; });
+
+    async function salvarMotivo() {
+      const tipo = (tipoSelect?.value || '').trim();
+      const motivo = (motivoInput?.value || '').trim();
+      if (!tipo || !motivo) throw new Error('Informe tipo de parada e motivo.');
+      const resp = await fetch('/api/producao/paradas/motivos', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ tipo_parada: tipo, motivo }),
+      });
+      const data = await resp.json();
+      if (!resp.ok || !data.success) throw new Error(data.error || 'Erro ao registrar motivo');
+      const idx = motivosCache.findIndex(m =>
+        String(m.tipo_parada).toLowerCase() === tipo.toLowerCase()
+        && String(m.motivo).toLowerCase() === motivo.toLowerCase()
+      );
+      if (idx < 0) motivosCache.push(data.motivo);
+      atualizarListaMotivos();
+      return data.motivo;
+    }
+
+    modal.querySelector('#parada-registrar-motivo-btn')?.addEventListener('click', async () => {
+      const btn = modal.querySelector('#parada-registrar-motivo-btn');
+      if (btn) btn.disabled = true;
+      try {
+        await salvarMotivo();
+        if (statusEl) { statusEl.textContent = 'Motivo cadastrado.'; statusEl.style.color = '#4ade80'; }
+      } catch (err) {
+        if (statusEl) { statusEl.textContent = err.message; statusEl.style.color = '#f87171'; }
+      } finally {
+        if (btn) btn.disabled = false;
+      }
+    });
+
+    modal.querySelector('#parada-registrar-btn')?.addEventListener('click', async () => {
+      const btn = modal.querySelector('#parada-registrar-btn');
+      if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Registrando...'; }
+      try {
+        const tipo = (tipoSelect?.value || '').trim();
+        const motivo = (motivoInput?.value || '').trim();
+        if (!tipo || !motivo) throw new Error('Informe tipo de parada e motivo.');
+        await salvarMotivo();
+        const usuario = (document.getElementById('userNameDisplay')?.textContent || '').trim();
+        const resp = await fetch('/api/producao/paradas', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({
+            kanban_programacao_id: reg?.id || null,
+            numero_op: op.identificacao || '',
+            usuario,
+            operacao: operacaoNome,
+            tipo_parada: tipo,
+            motivo,
+          }),
+        });
+        const data = await resp.json();
+        if (!resp.ok || !data.success) throw new Error(data.error || 'Erro ao registrar parada');
+        close();
+        if (typeof options.onSuccess === 'function') {
+          await options.onSuccess(data.parada);
+        } else {
+          alert('Parada registrada.');
+        }
+      } catch (err) {
+        if (statusEl) { statusEl.textContent = err.message; statusEl.style.color = '#f87171'; }
+        if (btn) {
+          btn.disabled = false;
+          btn.innerHTML = '<i class="fa-solid fa-circle-pause"></i> Registrar parada';
+        }
+      }
+    });
+  }
+
+  function openProducaoKanbanActionsModal(produtoCodigo, groupKey, ops, operacaoFiltro, opts) {
+    const options = opts || {};
+    const somenteEstrutura = !!options.somenteEstrutura;
+    const modoMontagem = !!options.modoMontagem;
+    const modoRiRegistro = !!options.modoRiRegistro;
+    const modoRegistrarProducao = !!options.modoRegistrarProducao;
+    const mostrarEstoque = !!options.mostrarEstoque;
+    const pedidoItem = options.pedidoItem || null;
+    const mostrarGerarOpPedido = !!pedidoItem && !modoMontagem && !modoRiRegistro;
+    const colKeyMonta = options.colKey || '';
+    const retrocedeCols = (typeof window._producaoColunasRetrocederOp === 'function')
+      ? window._producaoColunasRetrocederOp()
+      : ['solicitado', 'produzindo', 'teste', 'inspecao_final'];
+    const mostrarRetrocederOp = modoRegistrarProducao
+      && !modoMontagem
+      && !modoRiRegistro
+      && retrocedeCols.includes(colKeyMonta)
+      && ops.length === 1;
+    const nomeKanbanAnterior = mostrarRetrocederOp && (typeof window._producaoAnteriorKanbanPorKey === 'function')
+      ? (window._producaoAnteriorKanbanPorKey(colKeyMonta)?.nome || 'Programado')
+      : '';
+    const mostrarImprimirOpMonta = modoMontagem && colKeyMonta === 'programado';
+    const mostrarFinalizarMonta = modoMontagem && colKeyMonta !== 'programado' && colKeyMonta !== 'finalizado';
+    const mostrarParadaMonta = mostrarFinalizarMonta;
+    const mostrarImprimirOp = !modoMontagem && !modoRiRegistro && colKeyMonta === 'programado';
+    const colsFichaTecnica = ['programado', 'solicitado', 'produzindo', 'teste', 'inspecao_final'];
+    const mostrarImprimirFicha = modoRegistrarProducao
+      && !modoMontagem
+      && !modoRiRegistro
+      && !somenteEstrutura
+      && colsFichaTecnica.includes(colKeyMonta);
+    const mostrarRi = modoRiRegistro || (!modoMontagem && (colKeyMonta === 'solicitado' || colKeyMonta === 'produzindo' || colKeyMonta === 'teste' || colKeyMonta === 'inspecao_final') && ops.length === 1);
+    const tituloModal = options.titulo || 'Ações do grupo';
     const overlay = document.createElement('div');
     overlay.className = 'kanban-modal-overlay';
     overlay.addEventListener('click', (ev) => { if (ev.target === overlay) overlay.remove(); });
@@ -70731,18 +77379,56 @@ window.verOperacao = function(osId) {
     modal.innerHTML = `
       <header>
         <div>
-          <h2>Ações do grupo</h2>
+          <h2>${escapeHtml(tituloModal)}</h2>
           <span>${escapeHtml(produtoCodigo || groupKey)}</span>
         </div>
         <button class="close-btn" aria-label="Fechar">&times;</button>
       </header>
       <div class="kanban-modal-body">
         <div class="modal-code-block">
-          <p>Escolha uma ação para o grupo de produção:</p>
+          <p>${somenteEstrutura ? 'Consulte a estrutura do produto:' : (modoMontagem || modoRiRegistro ? 'Escolha uma ação:' : 'Escolha uma ação para o grupo de produção:')}</p>
           <div style="display:flex;flex-wrap:wrap;gap:10px;margin-top:12px;">
             <button type="button" id="open-estrutura-btn" class="modal-primary" style="min-width:140px;">Ver estrutura</button>
+            ${mostrarGerarOpPedido ? `
+            <button type="button" id="open-gerar-op-pedido-btn" class="modal-secondary" style="min-width:140px;background:linear-gradient(135deg,#10b981 0%,#059669 100%);color:#fff;border:none;">
+              <i class="fa-solid fa-plus"></i> Gerar OP
+            </button>` : ''}
+            ${modoMontagem ? `
+            ${mostrarImprimirOpMonta ? `
+            <button type="button" id="open-imprimir-op-btn" class="modal-secondary" style="min-width:140px;">
+              <i class="fa-solid fa-print"></i> Imprimir OP
+            </button>` : ''}
+            ${mostrarFinalizarMonta ? `
+            <button type="button" id="open-finalizar-operacao-btn" class="modal-secondary" style="min-width:160px;background:linear-gradient(135deg,#10b981 0%,#059669 100%);color:#fff;border:none;">
+              <i class="fa-solid fa-circle-check"></i> Finalizar operação
+            </button>` : ''}
+            ${mostrarParadaMonta ? `
+            <button type="button" id="open-parada-btn" class="modal-secondary" style="min-width:140px;">
+              <i class="fa-solid fa-circle-pause"></i> Parada
+            </button>` : ''}` : (modoRiRegistro ? `
+            ${mostrarRi ? `
+            <button type="button" id="open-ri-check-btn" class="modal-secondary" style="min-width:180px;">
+              <i class="fa-solid fa-clipboard-check"></i> RI - Registro de inspeção
+            </button>` : ''}` : (somenteEstrutura ? '' : `
             <button type="button" id="open-process-btn" class="modal-secondary" style="min-width:140px;">Processo</button>
+            ${mostrarImprimirOp ? `
+            <button type="button" id="open-imprimir-op-btn" class="modal-secondary" style="min-width:140px;">
+              <i class="fa-solid fa-print"></i> Imprimir OP
+            </button>` : ''}
+            ${mostrarImprimirFicha ? `
+            <button type="button" id="open-imprimir-ficha-btn" class="modal-secondary" style="min-width:180px;">
+              <i class="fa-solid fa-file-lines"></i> Imprimir ficha técnica
+            </button>` : ''}
+            ${mostrarRi ? `
+            <button type="button" id="open-ri-check-btn" class="modal-secondary" style="min-width:180px;">
+              <i class="fa-solid fa-clipboard-check"></i> RI - Registro de inspeção
+            </button>` : ''}
+            ${mostrarRetrocederOp ? `
+            <button type="button" id="open-retroceder-op-btn" class="modal-secondary" style="min-width:160px;border-color:rgba(248,113,113,.45);color:#fecaca;">
+              <i class="fa-solid fa-arrow-left"></i> Retroceder OP
+            </button>` : ''}`))}
           </div>
+          ${mostrarEstoque ? '<div id="analise-estoque-pedido"></div>' : ''}
         </div>
       </div>
       <footer>
@@ -70758,19 +77444,159 @@ window.verOperacao = function(osId) {
     modal.querySelector('footer .modal-secondary')?.addEventListener('click', close);
     modal.querySelector('#open-estrutura-btn')?.addEventListener('click', () => {
       close();
-      const iappId = ops && ops[0] ? ops[0].id : null;
-      if (!iappId) return;
-      openProducaoEstruturaPorIappId(iappId, produtoCodigo || groupKey);
+      const op0 = ops && ops[0];
+      openProducaoEstruturaPorIappId(null, produtoCodigo || groupKey, {
+        ocultarValores: !!options.ocultarValores,
+        opProducaoId: op0?.from_op_producao ? Number(op0.id) : undefined,
+        numeroOp: op0?.identificacao || '',
+      });
     });
-    modal.querySelector('#open-process-btn')?.addEventListener('click', () => {
-      close();
-      openProducaoKanbanProcessModal(groupKey, ops);
+    modal.querySelector('#open-gerar-op-pedido-btn')?.addEventListener('click', () => {
+      openGerarOpPedidoModal(pedidoItem, async () => {
+        close();
+        if (typeof window._producaoRecarregarOrdens === 'function') {
+          await window._producaoRecarregarOrdens();
+        }
+      });
     });
+    if (!somenteEstrutura && !modoMontagem) {
+      modal.querySelector('#open-process-btn')?.addEventListener('click', () => {
+        close();
+        openProducaoKanbanProcessModal(groupKey, ops);
+      });
+      modal.querySelector('#open-imprimir-op-btn')?.addEventListener('click', () => {
+        close();
+        openProducaoImprimirOpModal(produtoCodigo, groupKey, ops, { fromProgramado: true });
+      });
+      modal.querySelector('#open-imprimir-ficha-btn')?.addEventListener('click', () => {
+        close();
+        openProducaoImprimirFichaTecnicaModal(produtoCodigo, groupKey, ops);
+      });
+      modal.querySelector('#open-ri-check-btn')?.addEventListener('click', () => {
+        close();
+        const op = ops[0];
+        if (!op) return;
+        openProducaoRiCheckModal(op, produtoCodigo || groupKey, options.colKey || '');
+      });
+      modal.querySelector('#open-retroceder-op-btn')?.addEventListener('click', async () => {
+        const btn = modal.querySelector('#open-retroceder-op-btn');
+        if (btn?.disabled) return;
+        const destino = nomeKanbanAnterior || 'kanban anterior';
+        if (!confirm(`Retroceder esta OP para ${destino}?\n\nO registro de RI do posto anterior será desfeito.`)) return;
+        if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Retrocedendo...'; }
+        try {
+          const destinoFinal = await producaoRetrocederOp(ops, options.colKey || '');
+          close();
+          alert(`OP retrocedida para ${destinoFinal || destino}.`);
+        } catch (err) {
+          alert(err.message || 'Falha ao retroceder OP.');
+          if (btn) {
+            btn.disabled = false;
+            btn.innerHTML = '<i class="fa-solid fa-arrow-left"></i> Retroceder OP';
+          }
+        }
+      });
+    }
+    if (modoRiRegistro) {
+      modal.querySelector('#open-ri-check-btn')?.addEventListener('click', () => {
+        close();
+        const op = ops[0];
+        if (!op) return;
+        openProducaoRiCheckModal(op, produtoCodigo || groupKey, options.colKey || '');
+      });
+    }
+    if (modoMontagem) {
+      modal.querySelector('#open-imprimir-op-btn')?.addEventListener('click', () => {
+        close();
+        openProducaoImprimirOpModal(produtoCodigo, groupKey, ops, {
+          fromProgramado: true,
+          onSuccess: async () => {
+            if (typeof window._montaRecarregarOrdens === 'function') {
+              await window._montaRecarregarOrdens();
+            }
+          },
+        });
+      });
+      modal.querySelector('#open-finalizar-operacao-btn')?.addEventListener('click', async () => {
+        const btn = modal.querySelector('#open-finalizar-operacao-btn');
+        if (btn?.disabled) return;
+        if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Registrando...'; }
+        try {
+          await producaoFinalizarOperacao(ops, options.colKey || '');
+          close();
+          alert('Operação finalizada. OP movida para o próximo posto.');
+        } catch (err) {
+          alert(err.message || 'Falha ao finalizar operação.');
+          if (btn) {
+            const paradaAtiva = await buscarParadaAtivaOp(ops[0]).catch(() => null);
+            aplicarBotoesParadaActionsModal(modal, paradaAtiva);
+            btn.innerHTML = '<i class="fa-solid fa-circle-check"></i> Finalizar operação';
+          }
+        }
+      });
+      modal.querySelector('#open-parada-btn')?.addEventListener('click', async () => {
+        const btnParada = modal.querySelector('#open-parada-btn');
+        if (btnParada?.dataset.modoParada === 'retomar') {
+          const paradaId = btnParada.dataset.paradaId;
+          if (btnParada) {
+            btnParada.disabled = true;
+            btnParada.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Retomando...';
+          }
+          try {
+            await retomarParadaProducao(paradaId);
+            aplicarBotoesParadaActionsModal(modal, null);
+            if (typeof window._montaRecarregarOrdens === 'function') {
+              await window._montaRecarregarOrdens();
+            }
+            alert('Produção retomada.');
+          } catch (err) {
+            alert(err.message || 'Falha ao retomar produção.');
+            aplicarBotoesParadaActionsModal(modal, { id: paradaId });
+          }
+          return;
+        }
+        openProducaoParadaModal(ops, options.colKey || '', produtoCodigo || groupKey, {
+          onSuccess: async (parada) => {
+            aplicarBotoesParadaActionsModal(modal, parada);
+            if (typeof window._montaRecarregarOrdens === 'function') {
+              await window._montaRecarregarOrdens();
+            }
+            alert('Parada registrada.');
+          },
+        });
+      });
+
+      if (mostrarParadaMonta && ops[0]) {
+        buscarParadaAtivaOp(ops[0])
+          .then((paradaAtiva) => aplicarBotoesParadaActionsModal(modal, paradaAtiva))
+          .catch(() => { /* silencioso */ });
+      }
+    }
+    if (mostrarEstoque) {
+      carregarEstoqueAnalisePedido(produtoCodigo || groupKey, modal.querySelector('#analise-estoque-pedido'));
+    }
   }
+
+  window._producaoOpenKanbanActions = function(op) {
+    if (!op) return;
+    const colKey = typeof window._producaoOpColunaAtual === 'function'
+      ? window._producaoOpColunaAtual(op)
+      : 'programado';
+    const produtoCodigo = op.produto?.identificacao || String(op.id);
+    openProducaoKanbanActionsModal(produtoCodigo, produtoCodigo, [op], '', {
+      colKey,
+      ocultarValores: true,
+      modoRegistrarProducao: true,
+    });
+  };
 
   function attachProducaoKanbanActionButtons(containerSelector, ordens) {
     const container = document.querySelector(containerSelector);
     if (!container || !ordens) return;
+    const filtroSelect = container.querySelector('#producaoFiltroOperacao');
+    const modoMontagem = containerSelector === '#montaProducaoPane';
+    const modoRegistrarProducao = containerSelector === '#registrarProducaoPane';
+    const ocultarValores = modoRegistrarProducao || modoMontagem;
 
     container.querySelectorAll('.kanban-group-action-btn').forEach(btn => {
       if (btn.dataset.bound === '1') return;
@@ -70781,9 +77607,17 @@ window.verOperacao = function(osId) {
 
         const groupKey = btn.dataset.groupKey || '';
         const produtoCodigo = btn.dataset.produtoCodigo || groupKey;
-        const ops = ordens.filter(op => (op.produto?.identificacao || String(op.id)) === groupKey);
+        const grupoEl = btn.closest('.kanban-prod-grupo');
+        const colKey = grupoEl?.dataset.colKey || '';
+        const opsGrupo = ordens.filter(op => (op.produto?.identificacao || String(op.id)) === groupKey);
+        const ops = (colKey && typeof window._producaoFiltrarOpsColuna === 'function')
+          ? window._producaoFiltrarOpsColuna(opsGrupo, colKey)
+          : opsGrupo;
+        const operacaoFiltro = filtroSelect ? filtroSelect.value : '';
 
-        openProducaoKanbanActionsModal(produtoCodigo, groupKey, ops);
+        openProducaoKanbanActionsModal(produtoCodigo, groupKey, ops, operacaoFiltro, {
+          colKey, ocultarValores, modoMontagem, modoRegistrarProducao,
+        });
       });
     });
   }
@@ -70792,11 +77626,16 @@ window.verOperacao = function(osId) {
   function attachOpCardClickHandlers(containerSelector, ordens) {
     const container = document.querySelector(containerSelector);
     if (!container || !ordens) return;
+    const modoMontagem = containerSelector === '#montaProducaoPane';
+    const modoRiRegistro = containerSelector === '#riRegistroInspecaoPane';
+    const modoRegistrarProducao = containerSelector === '#registrarProducaoPane';
+    const ocultarValores = modoRegistrarProducao || modoMontagem || modoRiRegistro;
 
     container.querySelectorAll('[data-op-id]').forEach(card => {
       if (card.dataset.opBound === '1') return;
       card.dataset.opBound = '1';
       card.addEventListener('click', (ev) => {
+        if (card.dataset.opRiBloqueado === '1') return;
         // Ignora cliques em botões/inputs internos ou área expandida da OP
         if (ev.target.closest('button, a, input, textarea, select, .op-expand-btn, [id^="op-det-"], [id^="monta-op-det-"]')) return;
 
@@ -70809,9 +77648,16 @@ window.verOperacao = function(osId) {
 
         const groupKey = op.produto?.identificacao || String(op.id);
         const produtoCodigo = op.produto?.identificacao || groupKey;
+        const grupoEl = card.closest('.kanban-prod-grupo');
+        const colKey = card.dataset.riColKey || grupoEl?.dataset.colKey || op._riColKey || '';
 
-        // Abre modal de ações para o grupo/OP
-        openProducaoKanbanActionsModal(produtoCodigo, groupKey, [op]);
+        openProducaoKanbanActionsModal(produtoCodigo, groupKey, [op], '', {
+          colKey,
+          ocultarValores,
+          modoMontagem,
+          modoRiRegistro,
+          modoRegistrarProducao,
+        });
       });
     });
   }
@@ -71164,6 +78010,51 @@ window.initOscilacaoEstoque = (function () {
 
   if (!zone || !container || !dropTarget) return;
 
+  window.__atalhoAction = window.__atalhoAction || {};
+  window.__atalhoAction['system-shortcut:compras-carrinho'] = () => {
+    if (typeof window.abrirModalCarrinhoCompras === 'function') window.abrirModalCarrinhoCompras();
+  };
+  window.__atalhoAction['system-shortcut:separacao-carrinho'] = () => {
+    if (typeof window.abrirModalCarrinhoSeparacao === 'function') window.abrirModalCarrinhoSeparacao();
+  };
+
+  const _systemShortcuts = [
+    {
+      nav_key: 'system-shortcut:compras-carrinho',
+      nav_label: 'Carrinho de compras',
+      nav_selector: '#listaProdutosAbrirCarrinhoBtn',
+      icon_class: 'fa-solid fa-cart-shopping',
+      extra_class: 'shortcut-btn--system shortcut-btn--compras'
+    },
+    {
+      nav_key: 'system-shortcut:separacao-carrinho',
+      nav_label: 'Lista de separação',
+      nav_selector: '#listaProdutosAbrirSeparacaoBtn',
+      icon_class: 'fa-solid fa-clipboard-list',
+      extra_class: 'shortcut-btn--system shortcut-btn--separacao'
+    }
+  ];
+
+  function _systemShortcutStorageKey(navKey) {
+    const userId = window.__sessionUser?.id || 'anon';
+    return `sgf-system-shortcut:${userId}:${navKey}`;
+  }
+
+  function _isSystemShortcutEnabled(navKey) {
+    try {
+      const saved = localStorage.getItem(_systemShortcutStorageKey(navKey));
+      return saved === null ? true : saved === '1';
+    } catch (_) {
+      return true;
+    }
+  }
+
+  function _setSystemShortcutEnabled(navKey, enabled) {
+    try {
+      localStorage.setItem(_systemShortcutStorageKey(navKey), enabled ? '1' : '0');
+    } catch (_) {}
+  }
+
   // ── Mapa de observers de badge: nav_key → MutationObserver ──
   const _badgeObservers = new Map();
 
@@ -71220,12 +78111,13 @@ window.initOscilacaoEstoque = (function () {
   function criarBotaoAtalho(atalho) {
     const btn = document.createElement('button');
     btn.type = 'button';
-    btn.className = 'shortcut-btn';
+    btn.className = `shortcut-btn ${atalho.extra_class || ''}`.trim();
     btn.dataset.id = atalho.id;
     btn.dataset.navKey = atalho.nav_key;
+    if (atalho.system_fixed) btn.dataset.systemShortcut = '1';
 
     const iconClass = atalho.icon_class || 'fa-solid fa-star';
-    btn.innerHTML = `<i class="${iconClass}"></i><button class="shortcut-btn-remove" title="Remover atalho" aria-label="Remover atalho">×</button><span class="shortcut-btn-tooltip">${atalho.nav_label}</span>`;
+    btn.innerHTML = `<i class="${iconClass}"></i>${atalho.system_fixed ? '' : '<button class="shortcut-btn-remove" title="Remover atalho" aria-label="Remover atalho">×</button>'}<span class="shortcut-btn-tooltip">${atalho.nav_label}</span>`;
 
     // Clique → executa ação
     btn.addEventListener('click', (e) => {
@@ -71241,17 +78133,40 @@ window.initOscilacaoEstoque = (function () {
     });
 
     // Botão remover
-    btn.querySelector('.shortcut-btn-remove').addEventListener('click', async (e) => {
-      e.stopPropagation();
-      _badgeObservers.get(atalho.nav_key)?.disconnect();
-      _badgeObservers.delete(atalho.nav_key);
-      await removerAtalho(atalho.id, btn);
-    });
+    if (!atalho.system_fixed) {
+      btn.querySelector('.shortcut-btn-remove').addEventListener('click', async (e) => {
+        e.stopPropagation();
+        _badgeObservers.get(atalho.nav_key)?.disconnect();
+        _badgeObservers.delete(atalho.nav_key);
+        await removerAtalho(atalho.id, btn);
+      });
+    }
 
     // Iniciar sincronização de badge (fonte pode não existir ainda → aguarda um frame)
     setTimeout(() => _observarBadge(btn, atalho.nav_key, atalho.nav_selector), 0);
 
     return btn;
+  }
+
+  function renderizarAtalhosDoSistema() {
+    container.querySelectorAll('[data-system-shortcut="1"]').forEach((btn) => {
+      const navKey = btn.dataset.navKey;
+      if (navKey) {
+        _badgeObservers.get(navKey)?.disconnect();
+        _badgeObservers.delete(navKey);
+      }
+      btn.remove();
+    });
+
+    _systemShortcuts
+      .filter((atalho) => _isSystemShortcutEnabled(atalho.nav_key))
+      .forEach((atalho) => {
+        container.appendChild(criarBotaoAtalho({
+          ...atalho,
+          id: atalho.nav_key,
+          system_fixed: true
+        }));
+      });
   }
 
   // ── Carrega atalhos do servidor ──
@@ -71265,8 +78180,10 @@ window.initOscilacaoEstoque = (function () {
       // API retorna array direto
       const lista = Array.isArray(data) ? data : (data.atalhos || []);
       lista.forEach(a => container.appendChild(criarBotaoAtalho(a)));
+      renderizarAtalhosDoSistema();
     } catch (e) {
       console.error('[atalhos] erro ao carregar:', e.message);
+      renderizarAtalhosDoSistema();
     }
   }
 
@@ -71313,6 +78230,24 @@ window.initOscilacaoEstoque = (function () {
 
     const pinados = _navKeyAtual();
     let grupoAtual = '';
+
+    const tituloFixos = document.createElement('div');
+    tituloFixos.className = 'shortcut-modal-group-title';
+    tituloFixos.textContent = 'Atalhos persistentes';
+    modalList.appendChild(tituloFixos);
+
+    _systemShortcuts.forEach((atalho) => {
+      const item = document.createElement('div');
+      item.className = 'shortcut-modal-item' + (_isSystemShortcutEnabled(atalho.nav_key) ? ' is-pinned' : '');
+      item.innerHTML = `<i class="item-icon ${atalho.icon_class}"></i><span class="item-label">${atalho.nav_label}</span><span class="item-toggle">✓</span>`;
+      item.addEventListener('click', () => {
+        const habilitado = item.classList.contains('is-pinned');
+        _setSystemShortcutEnabled(atalho.nav_key, !habilitado);
+        item.classList.toggle('is-pinned', !habilitado);
+        renderizarAtalhosDoSistema();
+      });
+      modalList.appendChild(item);
+    });
 
     document.querySelectorAll('.sidebar-content .menu-link[data-nav-key]').forEach(link => {
       const navKey   = link.dataset.navKey;
@@ -71797,6 +78732,41 @@ window.initOscilacaoEstoque = (function () {
     if (cep.replace(/\D/g, '').length === 8) buscarCepVipp(cep, true);
   }
 
+  function _aplicarVippDadosDestino(dados) {
+    if (!dados) return;
+    var nomeEl = document.getElementById('vippNome');
+    var cpfEl = document.getElementById('vippCnpjCpf');
+    var telEl = document.getElementById('vippTelefone');
+    var cepEl = document.getElementById('vippCep');
+    var endEl = document.getElementById('vippEndereco');
+    var numEl = document.getElementById('vippNumero');
+    var bairroEl = document.getElementById('vippBairro');
+    var cidEl = document.getElementById('vippCidade');
+    var ufEl = document.getElementById('vippUF');
+    var docDestEl = document.getElementById('vippDeclDocDestinatario');
+
+    if (nomeEl && dados.nome) nomeEl.value = dados.nome;
+    if (cpfEl && dados.cnpj_cpf) cpfEl.value = dados.cnpj_cpf;
+    if (telEl && dados.telefone) telEl.value = dados.telefone;
+
+    var cep = String(dados.cep || '').trim();
+    if (cepEl && cep) cepEl.value = _vippFormatarCep(cep);
+    if (endEl && dados.endereco) endEl.value = dados.endereco;
+    if (numEl && dados.numero) numEl.value = dados.numero;
+    if (bairroEl && dados.bairro) bairroEl.value = dados.bairro;
+    var compEl = document.getElementById('vippComplemento');
+    if (compEl && dados.complemento) compEl.value = dados.complemento;
+    var emailEl = document.getElementById('vippEmail');
+    if (emailEl && dados.email) emailEl.value = dados.email;
+    if (cidEl && dados.cidade) cidEl.value = dados.cidade;
+    if (ufEl && dados.estado) ufEl.value = String(dados.estado).toUpperCase();
+
+    if (docDestEl && cpfEl) {
+      docDestEl.value = String(cpfEl.value || '').replace(/\D/g, '');
+    }
+    if (cep.replace(/\D/g, '').length === 8) buscarCepVipp(cep, false);
+  }
+
   // Transfere dados da OS (sac.at) para o formulário VIPP — botão "Preencher da OS"
   function prePopularFromOS() {
     var row = _vippRowOsAtual();
@@ -71844,17 +78814,390 @@ window.initOscilacaoEstoque = (function () {
   var fillFromOsBtn = document.getElementById('vippPreencherDaOsBtn');
   if (fillFromOsBtn) fillFromOsBtn.addEventListener('click', prePopularFromOS);
 
+  function prePopularFromTecnico() {
+    var osId = _vippOsIdAtual();
+    if (!osId) {
+      setStatus('Abra uma OS em edição para preencher o técnico.', true);
+      return;
+    }
+    var nomeTec = (document.getElementById('atEmFechTecnico') ? document.getElementById('atEmFechTecnico').value : '').trim();
+    if (!nomeTec) {
+      var row = _vippRowOsAtual();
+      nomeTec = (row && row.tecnico_nome) ? String(row.tecnico_nome).trim() : '';
+    }
+    if (!nomeTec) {
+      setStatus('Esta OS não possui técnico vinculado.', true);
+      return;
+    }
+
+    var params = new URLSearchParams();
+    if (nomeTec) params.set('nome', nomeTec);
+    setStatus('Buscando dados do técnico...', false);
+    fetch('/api/sac/at/vipp-preencher-tecnico/' + encodeURIComponent(osId) + '?' + params.toString(), {
+      credentials: 'same-origin',
+    })
+      .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
+      .then(function (res) {
+        if (!res.ok || !res.j?.dados) throw new Error(res.j?.error || 'Técnico não encontrado.');
+        _aplicarVippDadosDestino(res.j.dados);
+        setStatus('Dados do técnico preenchidos: ' + (res.j.tecnico_nome || nomeTec), false);
+      })
+      .catch(function (err) {
+        setStatus(err.message || 'Falha ao preencher técnico.', true);
+      });
+  }
+
+  var fillFromTecBtn = document.getElementById('vippPreencherTecnicoBtn');
+  if (fillFromTecBtn) fillFromTecBtn.addEventListener('click', prePopularFromTecnico);
+
+  function resetarFormularioVipp() {
+    var idsTexto = [
+      'vippNome', 'vippCnpjCpf', 'vippTelefone', 'vippEmail', 'vippCep',
+      'vippEndereco', 'vippNumero', 'vippComplemento', 'vippBairro', 'vippCidade', 'vippUF',
+      'vippAdicionais', 'vippDeclDocRemetente', 'vippDeclDocDestinatario', 'vippDeclBusca',
+      'vippNrNF', 'vippSerieNF', 'vippVlrNF', 'vippObservacao',
+    ];
+    idsTexto.forEach(function (id) {
+      var el = document.getElementById(id);
+      if (el) el.value = '';
+    });
+
+    var metodoEl = document.getElementById('vippMetodoEnvio');
+    if (metodoEl) metodoEl.value = 'Envio via Correios';
+
+    var servicoEl = document.getElementById('vippServico');
+    if (servicoEl) servicoEl.value = '04162';
+
+    var defaultsNum = {
+      vippPeso: '300',
+      vippAltura: '7',
+      vippLargura: '22',
+      vippComprimento: '15',
+      vippDeclPesoTotal: '300',
+    };
+    Object.keys(defaultsNum).forEach(function (id) {
+      var el = document.getElementById(id);
+      if (el) el.value = defaultsNum[id];
+    });
+
+    var dtNf = document.getElementById('vippDtNF');
+    if (dtNf) dtNf.value = '';
+
+    limparDecl();
+    _vippOcultarBotaoTelefone();
+    if (typeof _vippOcultarNomeSugestoes === 'function') _vippOcultarNomeSugestoes();
+    if (declBuscaResultados) declBuscaResultados.style.display = 'none';
+
+    atualizarMetodoEnvioUI();
+    setStatus('Formulário limpo.', false);
+  }
+
+  var resetVippBtn = document.getElementById('vippResetarDadosBtn');
+  if (resetVippBtn) resetVippBtn.addEventListener('click', resetarFormularioVipp);
+
+  var vippTelefoneEl = document.getElementById('vippTelefone');
+  var vippTelFillBtn = document.getElementById('vippPreencherPorTelefoneBtn');
+  var vippTelFillLbl = document.getElementById('vippPreencherPorTelefoneLbl');
+  var _vippTelMatchCache = null;
+  var _vippTelLookupTimer = null;
+
+  function _vippOcultarBotaoTelefone() {
+    _vippTelMatchCache = null;
+    if (vippTelFillBtn) {
+      vippTelFillBtn.style.display = 'none';
+      vippTelFillBtn.disabled = false;
+    }
+  }
+
+  function _vippBuscarDestinoPorTelefone() {
+    if (!vippTelefoneEl) return;
+    var tel = String(vippTelefoneEl.value || '').trim();
+    var digits = tel.replace(/\D/g, '');
+    if (digits.length < 8) {
+      _vippOcultarBotaoTelefone();
+      return;
+    }
+    fetch('/api/sac/at/vipp-buscar-por-telefone?telefone=' + encodeURIComponent(tel), {
+      credentials: 'same-origin',
+    })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (data) {
+        if (!data || !data.encontrado || !data.dados) {
+          _vippOcultarBotaoTelefone();
+          return;
+        }
+        _vippTelMatchCache = data;
+        if (vippTelFillBtn) {
+          vippTelFillBtn.style.display = 'inline-flex';
+          if (vippTelFillLbl) vippTelFillLbl.textContent = data.label || 'Preencher';
+          vippTelFillBtn.title = data.label || 'Preencher dados encontrados para este telefone';
+        }
+      })
+      .catch(function () { _vippOcultarBotaoTelefone(); });
+  }
+
+  if (vippTelefoneEl) {
+    vippTelefoneEl.addEventListener('input', function () {
+      clearTimeout(_vippTelLookupTimer);
+      _vippTelLookupTimer = setTimeout(_vippBuscarDestinoPorTelefone, 450);
+    });
+    vippTelefoneEl.addEventListener('blur', _vippBuscarDestinoPorTelefone);
+  }
+  if (vippTelFillBtn) {
+    vippTelFillBtn.addEventListener('click', function () {
+      if (!_vippTelMatchCache || !_vippTelMatchCache.dados) return;
+      _aplicarVippDadosDestino(_vippTelMatchCache.dados);
+      var fonte = _vippTelMatchCache.fonte === 'tecnico' ? 'técnico' : 'OS';
+      setStatus('Dados preenchidos a partir do ' + fonte + '.', false);
+    });
+  }
+
+  // ── Autocomplete do campo Nome (técnicos + fornecedores Omie) ─────────────
+  var _vippNomeTimer = null;
+  var _vippNomeSeq = 0;
+  var _vippNomeIgnorarBusca = false;
+  var _vippNomeSugScrollEl = null;
+
+  function _vippGetNomeInput() {
+    return document.getElementById('vippNome');
+  }
+
+  function _vippEscHtml(s) {
+    return String(s || '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/"/g, '&quot;');
+  }
+
+  function _vippEnsureNomeSugestoesEl() {
+    var el = document.getElementById('vippNomeSugestoes');
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'vippNomeSugestoes';
+      el.setAttribute('role', 'listbox');
+      el.setAttribute('aria-label', 'Sugestões de destinatário');
+      document.body.appendChild(el);
+    } else if (el.parentElement !== document.body) {
+      document.body.appendChild(el);
+    }
+    el.style.position = 'fixed';
+    el.style.zIndex = '10080';
+    el.style.maxHeight = '240px';
+    el.style.overflowY = 'auto';
+    el.style.background = '#1e293b';
+    el.style.border = '1px solid rgba(255,255,255,.14)';
+    el.style.borderRadius = '8px';
+    el.style.boxShadow = '0 10px 28px rgba(0,0,0,.45)';
+    return el;
+  }
+
+  function _vippPosicionarNomeSugestoes() {
+    var input = _vippGetNomeInput();
+    var sug = document.getElementById('vippNomeSugestoes');
+    if (!input || !sug || sug.style.display === 'none') return;
+    var r = input.getBoundingClientRect();
+    sug.style.left = Math.max(8, r.left) + 'px';
+    sug.style.top = (r.bottom + 4) + 'px';
+    sug.style.width = Math.max(220, r.width) + 'px';
+  }
+
+  function _vippOcultarNomeSugestoes() {
+    var sug = document.getElementById('vippNomeSugestoes');
+    if (sug) {
+      sug.style.display = 'none';
+      sug.innerHTML = '';
+    }
+    if (_vippNomeSugScrollEl) {
+      _vippNomeSugScrollEl.removeEventListener('scroll', _vippPosicionarNomeSugestoes);
+      _vippNomeSugScrollEl = null;
+    }
+    window.removeEventListener('resize', _vippPosicionarNomeSugestoes);
+  }
+
+  function _vippBindNomeSugestoesScroll() {
+    var input = _vippGetNomeInput();
+    if (!input) return;
+    var scrollEl = input.closest('[style*="overflow"]') || modal;
+    if (_vippNomeSugScrollEl && _vippNomeSugScrollEl !== scrollEl) {
+      _vippNomeSugScrollEl.removeEventListener('scroll', _vippPosicionarNomeSugestoes);
+    }
+    _vippNomeSugScrollEl = scrollEl;
+    if (scrollEl) scrollEl.addEventListener('scroll', _vippPosicionarNomeSugestoes, { passive: true });
+    window.addEventListener('resize', _vippPosicionarNomeSugestoes, { passive: true });
+  }
+
+  function _vippRenderNomeSugestoes(itens) {
+    var sug = _vippEnsureNomeSugestoesEl();
+    if (!itens || !itens.length) {
+      _vippOcultarNomeSugestoes();
+      return;
+    }
+    sug.innerHTML = itens.map(function (item) {
+      var icone = item.fonte === 'tecnico' ? 'fa-user-gear' : 'fa-building';
+      var cor = item.fonte === 'tecnico' ? '#6ee7b7' : '#93c5fd';
+      return '<button type="button" class="vipp-nome-sug-item" role="option"' +
+        ' data-fonte="' + _vippEscHtml(item.fonte) + '"' +
+        ' data-id="' + _vippEscHtml(String(item.id)) + '"' +
+        ' data-label="' + _vippEscHtml(item.label) + '"' +
+        ' style="display:block;width:100%;text-align:left;padding:9px 12px;border:none;border-bottom:1px solid rgba(255,255,255,.06);background:transparent;color:#e5e7eb;cursor:pointer;">' +
+        '<div style="display:flex;align-items:flex-start;gap:8px;">' +
+          '<i class="fa-solid ' + icone + '" style="color:' + cor + ';margin-top:2px;font-size:12px;"></i>' +
+          '<div style="min-width:0;flex:1;">' +
+            '<div style="font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + _vippEscHtml(item.label) + '</div>' +
+            '<div style="font-size:11px;color:#9ca3af;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + _vippEscHtml(item.sub || '') + '</div>' +
+          '</div>' +
+        '</div>' +
+      '</button>';
+    }).join('');
+    sug.style.display = 'block';
+    _vippBindNomeSugestoesScroll();
+    _vippPosicionarNomeSugestoes();
+
+    sug.querySelectorAll('.vipp-nome-sug-item').forEach(function (btn) {
+      btn.addEventListener('mousedown', function (e) {
+        e.preventDefault();
+      });
+      btn.addEventListener('click', function () {
+        var fonte = btn.getAttribute('data-fonte');
+        var id = btn.getAttribute('data-id');
+        var label = btn.getAttribute('data-label') || '';
+        var nomeEl = _vippGetNomeInput();
+        if (!fonte || !id) return;
+        _vippOcultarNomeSugestoes();
+        _vippNomeIgnorarBusca = true;
+        if (nomeEl) nomeEl.value = label;
+        setStatus('Carregando dados de ' + (fonte === 'tecnico' ? 'técnico' : 'fornecedor') + '...', false);
+        fetch('/api/sac/at/vipp-destino-detalhe?fonte=' + encodeURIComponent(fonte) + '&id=' + encodeURIComponent(id), {
+          credentials: 'same-origin',
+        })
+          .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
+          .then(function (res) {
+            if (!res.ok || !res.j?.dados) throw new Error(res.j?.error || 'Não foi possível carregar os dados.');
+            _aplicarVippDadosDestino(res.j.dados);
+            if (nomeEl && res.j.label) nomeEl.value = res.j.label;
+            var tipo = res.j.fonte === 'tecnico' ? 'técnico' : 'fornecedor';
+            setStatus('Dados preenchidos a partir do cadastro de ' + tipo + '.', false);
+          })
+          .catch(function (err) {
+            setStatus(err.message || 'Falha ao preencher destinatário.', true);
+          })
+          .finally(function () {
+            setTimeout(function () { _vippNomeIgnorarBusca = false; }, 300);
+          });
+      });
+    });
+  }
+
+  function _vippBuscarNomeSugestoes() {
+    if (_vippNomeIgnorarBusca) return;
+    var nomeEl = _vippGetNomeInput();
+    if (!nomeEl) return;
+    var q = String(nomeEl.value || '').trim();
+    if (q.length < 5) {
+      _vippOcultarNomeSugestoes();
+      return;
+    }
+    var seq = ++_vippNomeSeq;
+    var sug = _vippEnsureNomeSugestoesEl();
+    sug.style.display = 'block';
+    sug.innerHTML = '<div style="padding:10px 12px;font-size:12px;color:#9ca3af;">Buscando...</div>';
+    _vippPosicionarNomeSugestoes();
+
+    fetch('/api/sac/at/vipp-buscar-nome?q=' + encodeURIComponent(q), { credentials: 'same-origin' })
+      .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
+      .then(function (res) {
+        if (seq !== _vippNomeSeq) return;
+        if (!res.ok || !res.j?.ok) {
+          _vippOcultarNomeSugestoes();
+          if (!res.ok) setStatus((res.j && res.j.error) || 'Falha ao buscar nome.', true);
+          return;
+        }
+        var itens = res.j.itens || [];
+        if (!itens.length) {
+          var sugEmpty = _vippEnsureNomeSugestoesEl();
+          sugEmpty.innerHTML = '<div style="padding:10px 12px;font-size:12px;color:#9ca3af;">Nenhum técnico ou fornecedor encontrado.</div>';
+          sugEmpty.style.display = 'block';
+          _vippPosicionarNomeSugestoes();
+          return;
+        }
+        _vippRenderNomeSugestoes(itens);
+      })
+      .catch(function () {
+        if (seq === _vippNomeSeq) _vippOcultarNomeSugestoes();
+      });
+  }
+
+  if (modal) {
+    modal.addEventListener('input', function (e) {
+      if (!e.target || e.target.id !== 'vippNome') return;
+      clearTimeout(_vippNomeTimer);
+      _vippNomeTimer = setTimeout(_vippBuscarNomeSugestoes, 300);
+    });
+    modal.addEventListener('focusout', function (e) {
+      if (!e.target || e.target.id !== 'vippNome') return;
+      setTimeout(_vippOcultarNomeSugestoes, 220);
+    });
+    modal.addEventListener('keydown', function (e) {
+      if (e.target && e.target.id === 'vippNome' && e.key === 'Escape') _vippOcultarNomeSugestoes();
+    });
+  }
+
+  document.addEventListener('click', function (e) {
+    var nomeEl = _vippGetNomeInput();
+    var sug = document.getElementById('vippNomeSugestoes');
+    if (!nomeEl || !sug || sug.style.display === 'none') return;
+    if (e.target === nomeEl || sug.contains(e.target)) return;
+    _vippOcultarNomeSugestoes();
+  });
+
+  var metodoEnvioSelect = document.getElementById('vippMetodoEnvio');
+
+  function isMetodoCorreios() {
+    var sel = metodoEnvioSelect || document.getElementById('vippMetodoEnvio');
+    return !sel || sel.value === 'Envio via Correios';
+  }
+
+  function nomeMetodoEnvio(metodo) {
+    return String(metodo || 'Envio via Correios').replace(/^Envio via\s+/i, '').trim();
+  }
+
+  function textoBotaoPostagem(metodo) {
+    return 'Criar Postagem ' + nomeMetodoEnvio(metodo);
+  }
+
+  function atualizarMetodoEnvioUI() {
+    var correios = isMetodoCorreios();
+    var metodo = (metodoEnvioSelect && metodoEnvioSelect.value) || 'Envio via Correios';
+    var block = document.getElementById('vippCorreiosServicoBlock');
+    var badge = document.getElementById('vippModalCorreiosBadge');
+    if (block) block.style.display = correios ? '' : 'none';
+    if (badge) badge.style.display = correios ? '' : 'none';
+    if (enviarBtn && enviarBtn.disabled !== true) {
+      var label = textoBotaoPostagem(metodo);
+      enviarBtn.innerHTML = correios
+        ? '<img src="https://vipp.visualset.com.br/vipp/img/logo-visualset5.png" alt="" style="width:16px;height:16px;object-fit:contain;"><span>' + label + '</span>'
+        : '<i class="fa-solid fa-truck-fast"></i><span>' + label + '</span>';
+    }
+  }
+
+  if (metodoEnvioSelect) {
+    metodoEnvioSelect.addEventListener('change', atualizarMetodoEnvioUI);
+  }
+
   function openModal() {
+    if (metodoEnvioSelect) metodoEnvioSelect.value = 'Envio via Correios';
+    atualizarMetodoEnvioUI();
     if (enviarBtn) {
       enviarBtn.disabled = false;
       enviarBtn.style.opacity = '1';
-      enviarBtn.innerHTML = '<i class="fa-solid fa-paper-plane"></i><span>Criar Postagem</span>';
     }
     if (statusEl) {
       statusEl.innerHTML = '';
       statusEl.style.display = 'none';
     }
     prePopular();
+    _vippOcultarBotaoTelefone();
+    _vippOcultarNomeSugestoes();
     // Define texto padrão da Observação visual: "OS{numero}" (+ Aos Cuidados, se preenchido)
     var _tit = (document.getElementById('atEditModalTitle') ? document.getElementById('atEditModalTitle').textContent : '').trim();
     var _osN = _tit.replace(/[^0-9]/g, '');
@@ -71869,6 +79212,7 @@ window.initOscilacaoEstoque = (function () {
   }
 
   function closeModal() {
+    _vippOcultarNomeSugestoes();
     modal.style.display = 'none';
     document.body.style.overflow = '';
   }
@@ -71884,6 +79228,7 @@ window.initOscilacaoEstoque = (function () {
     // atVippBtn abre via fluxo AT (Abertura de OS).
     _vippContextoSac = false;
     if (fillFromOsBtn) fillFromOsBtn.style.display = '';
+    if (fillFromTecBtn) fillFromTecBtn.style.display = '';
     openModal();
   });
 
@@ -71892,6 +79237,13 @@ window.initOscilacaoEstoque = (function () {
   if (sacVippBtn) sacVippBtn.addEventListener('click', function () {
     _vippContextoSac = true;
     if (fillFromOsBtn) fillFromOsBtn.style.display = 'none';
+    if (fillFromTecBtn) fillFromTecBtn.style.display = 'none';
+    if (metodoEnvioSelect) metodoEnvioSelect.value = 'Envio via Correios';
+    atualizarMetodoEnvioUI();
+    if (enviarBtn) {
+      enviarBtn.disabled = false;
+      enviarBtn.style.opacity = '1';
+    }
     prePopular();
     // Pré-preenche Observação com número da OS/AT se disponível
     var _tit = (document.getElementById('atEditModalTitle') ? document.getElementById('atEditModalTitle').textContent : '').trim();
@@ -71950,9 +79302,11 @@ window.initOscilacaoEstoque = (function () {
 
   // ── Botão Criar Postagem — valida e monta payload ────────────────────────
   if (enviarBtn) {
-    enviarBtn.addEventListener('click', function () {
+    enviarBtn.addEventListener('click', async function () {
       var g = function (id) { return (document.getElementById(id) ? document.getElementById(id).value : '').trim(); };
       var osNum = (document.getElementById('atEditModalTitle') ? document.getElementById('atEditModalTitle').textContent : '').trim().replace(/[^0-9]/g, '');
+      var metodoEnvio = g('vippMetodoEnvio') || 'Envio via Correios';
+      var isCorreios = metodoEnvio === 'Envio via Correios';
 
       var nome     = g('vippNome');
       var endereco = g('vippEndereco');
@@ -71996,7 +79350,7 @@ window.initOscilacaoEstoque = (function () {
           cidade: cidade,
           uf:          uf.toUpperCase(),
         },
-        servico:    g('vippServico'),
+        servico:    isCorreios ? g('vippServico') : '',
         adicionais: g('vippAdicionais'),
         volume: {
           peso:        g('vippPeso'),
@@ -72018,7 +79372,62 @@ window.initOscilacaoEstoque = (function () {
           itens:           itensDecl,
         } : null,
         observacao: g('vippObservacao'),
+        metodo_envio: metodoEnvio,
       };
+
+      if (!isCorreios) {
+        setStatus('Registrando envio...', false);
+        enviarBtn.disabled = true;
+        enviarBtn.style.opacity = '0.6';
+        try {
+          var _sepCriadaManual = false;
+          if (itensDecl.length > 0) {
+            _sepCriadaManual = await criarSolicitacaoSeparacaoVipp(
+              itensDecl,
+              osNum,
+              g('vippObservacao'),
+              null,
+              _vippContextoSac ? 'SAC' : 'AT',
+              metodoEnvio
+            );
+          }
+          if (_vippContextoSac && !_sepCriadaManual) {
+            await criarEntradaSacEnvio(itensDecl, osNum, null, metodoEnvio, true);
+          }
+          var statusElManual = document.getElementById('vippModalStatus');
+          if (statusElManual) {
+            statusElManual.style.display = 'block';
+            var successHtml =
+              '<div style="margin-bottom:8px;">' +
+              '<i class="fa-solid fa-circle-check" style="color:#34d399;margin-right:6px;"></i>' +
+              '<strong style="color:#34d399;">Envio registrado com sucesso!</strong>' +
+              ' &nbsp; Método: <strong style="color:#7dd3fc;">' + metodoEnvio + '</strong>' +
+              '</div>';
+            if (_sepCriadaManual) {
+              statusElManual.insertAdjacentHTML('afterbegin', successHtml);
+            } else {
+              statusElManual.innerHTML = successHtml;
+            }
+          }
+          if (_vippContextoSac) {
+            try {
+              var _sacBodyManual = document.getElementById('sacTabelaBody');
+              if (_sacBodyManual && typeof carregarSacSolicitacoes === 'function') {
+                await carregarSacSolicitacoes(_sacBodyManual, { hideDone: false, filterByUser: true });
+              }
+            } catch (_eSac) { /* ignora */ }
+          }
+          enviarBtn.innerHTML =
+            '<i class="fa-solid fa-circle-check" style="color:#34d399;"></i>' +
+            '<span style="color:#34d399;">Envio registrado</span>';
+        } catch (errManual) {
+          setStatus('Erro ao registrar envio: ' + (errManual.message || errManual), true);
+          enviarBtn.disabled = false;
+          enviarBtn.style.opacity = '1';
+          atualizarMetodoEnvioUI();
+        }
+        return;
+      }
 
       // ── Chama backend /api/vipp/postar ──────────────────────────────────
       setStatus('Enviando para VIPP...', false);
@@ -72076,18 +79485,31 @@ window.initOscilacaoEstoque = (function () {
             // Cria Sol. de Separação automaticamente com itens da Declaração de Conteúdo.
             // No contexto SAC, a entrada direta em envios.solicitacoes vira fallback para evitar duplicidade.
             var _sepCriada = false;
-            if (itensDecl.length > 0) {
-              _sepCriada = await criarSolicitacaoSeparacaoVipp(
-                itensDecl,
-                osNum,
-                g('vippObservacao'),
-                data.idConhecimento || null,
-                _vippContextoSac ? 'SAC' : 'AT'
-              );
+            try {
+              if (itensDecl.length > 0) {
+                _sepCriada = await criarSolicitacaoSeparacaoVipp(
+                  itensDecl,
+                  osNum,
+                  g('vippObservacao'),
+                  data.idConhecimento || null,
+                  _vippContextoSac ? 'SAC' : 'AT',
+                  'Envio via Correios'
+                );
+              }
+            } catch (sepErr) {
+              console.error('[VIPP] Falha ao criar SEP:', sepErr);
+              var _sElSep = document.getElementById('vippModalStatus');
+              if (_sElSep) {
+                var _noteSep = document.createElement('div');
+                _noteSep.style.cssText = 'margin-top:8px;padding:6px 10px;background:rgba(239,68,68,.10);border:1px solid #ef444466;border-radius:6px;font-size:12px;color:#fca5a5;';
+                _noteSep.innerHTML = '<i class="fa-solid fa-triangle-exclamation" style="margin-right:5px;"></i>' +
+                  'Postagem criada, mas falhou a separação: ' + (sepErr.message || sepErr) + '.';
+                _sElSep.appendChild(_noteSep);
+              }
             }
             // Se aberto pelo painel SAC, cria entrada apenas quando a separação não gerou solicitação.
             if (_vippContextoSac && !_sepCriada) {
-              criarEntradaSacVipp(itensDecl, osNum, data.idConhecimento || null);
+              criarEntradaSacEnvio(itensDecl, osNum, data.idConhecimento || null, 'Envio via Correios');
             }
             enviarBtn.disabled = true;
             enviarBtn.innerHTML =
@@ -72100,18 +79522,20 @@ window.initOscilacaoEstoque = (function () {
             setStatus('Erro VIPP: ' + msgs, true);
             enviarBtn.disabled = false;
             enviarBtn.style.opacity = '1';
+            atualizarMetodoEnvioUI();
           }
         })
         .catch(function (err) {
           setStatus('Erro de comunicação: ' + err.message, true);
           enviarBtn.disabled = false;
           enviarBtn.style.opacity = '1';
+          atualizarMetodoEnvioUI();
         });
     });
   }
 
   // ── Cria Sol. de Separação automaticamente após VIPP bem-sucedido ───────────
-  async function criarSolicitacaoSeparacaoVipp(itensDecl, osNum, observacao, idVipp, origemVipp) {
+  async function criarSolicitacaoSeparacaoVipp(itensDecl, osNum, observacao, idVipp, origemVipp, metodoEnvio) {
     if (!itensDecl || !itensDecl.length) return false;
     var comentario = osNum ? ('OS' + osNum) : '';
     // Usuário logado
@@ -72156,6 +79580,9 @@ window.initOscilacaoEstoque = (function () {
         console.error('[VIPP→Sep] Erro ao adicionar item:', _e2);
       }
     }
+    if (!_adicionados.length) {
+      throw new Error('Nenhum item válido na declaração. Use o formato CODIGO - DESCRICAO.');
+    }
     // Envia a separação (somente os itens adicionados pela OS, não o carrinho inteiro)
     try {
       var _envResp = await fetch('/api/logistica/separacao/enviar', {
@@ -72170,6 +79597,7 @@ window.initOscilacaoEstoque = (function () {
           forcar_novo_sep: true,
           os_num:          osNum   || null,
           id_vipp:         idVipp  || null,
+          metodo_envio:    metodoEnvio || null,
           conteudo:        itensDecl.length ? JSON.stringify(itensDecl.map(function(it) {
                              return { conteudo: it.descricao || '', quantidade: parseInt(it.quantidade, 10) || 1 };
                            })) : null,
@@ -72177,6 +79605,9 @@ window.initOscilacaoEstoque = (function () {
         })
       });
       var _envData = await _envResp.json();
+      if (!_envResp.ok || !_envData.ok) {
+        throw new Error(_envData.error || ('Falha ao criar separação (HTTP ' + _envResp.status + ')'));
+      }
       if (_envData.ok) {
         var _badge = document.getElementById('listaSeparacaoCount');
         if (_badge) { _badge.textContent = '0'; _badge.style.display = 'none'; }
@@ -72191,20 +79622,20 @@ window.initOscilacaoEstoque = (function () {
         }
         return true;
       }
-      return false;
+      throw new Error('Falha ao criar separação.');
     } catch (_e3) {
       console.error('[VIPP→Sep] Erro ao enviar separação:', _e3);
-      return false;
+      throw _e3;
     }
   }
 
-  // ── Cria entrada em envios.solicitacoes após VIPP bem-sucedido (contexto SAC) ──
-  async function criarEntradaSacVipp(itensDecl, osNum, idVipp) {
+  // ── Cria entrada em envios.solicitacoes após envio (contexto SAC) ──
+  async function criarEntradaSacEnvio(itensDecl, osNum, idVipp, metodoEnvio, throwOnError) {
     var nomeUser = '';
     try {
       var _meResp = await fetch('/api/auth/status', { credentials: 'include' });
       var _me = await _meResp.json();
-      nomeUser = (_me && _me.user && (_me.user.username || _me.user.nome)) || '';
+      nomeUser = (_me && _me.user && (_me.user.username || _me.user.nome || _me.user.fullName)) || '';
     } catch (_e) { /* ignora */ }
 
     // Converte itens para formato [{ conteudo, quantidade }] (mesmo do PDF)
@@ -72212,7 +79643,8 @@ window.initOscilacaoEstoque = (function () {
       return { conteudo: it.descricao || '', quantidade: String(parseInt(it.quantidade, 10) || 1) };
     });
     var conteudoJson = conteudoItems.length ? JSON.stringify(conteudoItems) : null;
-    var observacao = osNum ? 'OS' + osNum : '';
+    var obsEl = document.getElementById('vippObservacao');
+    var observacao = osNum ? ('OS' + osNum) : ((obsEl && obsEl.value) ? obsEl.value.trim() : '');
 
     try {
       var _resp = await fetch('/api/sac/solicitacoes/vipp', {
@@ -72223,7 +79655,8 @@ window.initOscilacaoEstoque = (function () {
           usuario:    nomeUser,
           observacao: observacao,
           id_vipp:    idVipp || null,
-          conteudo:   conteudoJson
+          conteudo:   conteudoJson,
+          metodo_envio: metodoEnvio || null
         })
       });
       var _d = await _resp.json();
@@ -72250,12 +79683,13 @@ window.initOscilacaoEstoque = (function () {
       }
     } catch (_e3) {
       console.error('[VIPP→SAC] Erro ao criar entrada SAC:', _e3);
+      if (throwOnError) throw _e3;
       var _sElErr = document.getElementById('vippModalStatus');
       if (_sElErr) {
         var _noteErr = document.createElement('div');
         _noteErr.style.cssText = 'margin-top:8px;padding:6px 10px;background:rgba(239,68,68,.10);border:1px solid #ef444466;border-radius:6px;font-size:12px;color:#fca5a5;';
         _noteErr.innerHTML = '<i class="fa-solid fa-triangle-exclamation" style="margin-right:5px;"></i>' +
-          'Postagem VIPP criada, mas falhou ao registrar em Envios: ' + (_e3.message || 'erro desconhecido') + '.';
+          'Falhou ao registrar em Envios: ' + (_e3.message || 'erro desconhecido') + '.';
         _sElErr.appendChild(_noteErr);
       }
     }

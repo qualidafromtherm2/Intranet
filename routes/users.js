@@ -1,14 +1,9 @@
 // routes/users.js — SQL only (com self-or-manage e salvamento de permissões)
 const express = require('express');
-const { Pool } = require('pg');
+const { pool } = require('../src/db');
 
 const router = express.Router();
 router.use(express.json());
-
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  ssl: { rejectUnauthorized: false }
-});
 
 let _hasProfileOperCol = null;
 async function hasOperacaoProfileColumn() {

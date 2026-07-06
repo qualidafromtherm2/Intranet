@@ -960,5 +960,11 @@ module.exports = (pool) => {
     }
   });
 
+  const alteracoesProdutoRouter = require('./engenhariaAlteracoesProduto')(pool);
+  router.use('/alteracoes-produto', alteracoesProdutoRouter);
+
+  const desenhoTecnicoRouter = require('./engenhariaDesenhoTecnico')(pool);
+  router.use('/desenho-tecnico', desenhoTecnicoRouter);
+
   return router;
 };

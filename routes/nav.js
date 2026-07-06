@@ -1,14 +1,9 @@
 // routes/nav.js
 const express = require('express');
-const { Pool } = require('pg');
+const { pool } = require('../src/db');
 
 const router = express.Router();
 router.use(express.json());
-
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  ssl: { rejectUnauthorized: false }
-});
 
 // checa se o usuário logado pode "gerenciar colaboradores" (mesma regra que lista usuários)
 async function hasManagePermission(userId) {

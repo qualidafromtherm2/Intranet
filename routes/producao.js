@@ -5,10 +5,42 @@
 const express = require('express');
 const https   = require('https');
 const { dbQuery } = require('../src/db');
+const { lerEstruturaCachePorCodigos } = require('../utils/estruturaSql');
+const { registrarControleOperacaoImpressaoOp } = require('../utils/controleOperacoes');
+const {
+  listarMotivos,
+  registrarMotivo,
+  registrarParada,
+  buscarParadaAberta,
+  retomarParada,
+  listarParadasAbertasPorOps,
+} = require('../utils/paradasProducao');
+const { reverterRiCheckNoPosto } = require('./qualidadeRiCheck');
+const {
+  iniciarCicloPosto,
+  encerrarCicloPosto,
+  calcularTemposPostoPorOps,
+  salvarTurnoPadrao,
+  buscarTurnoPadrao,
+  listarTurnosPadrao,
+  buscarTurnoDia,
+  registrarTurnoDia,
+  listarTurnosDia,
+  dateKeyInTz,
+} = require('../utils/tempoProducao');
+const { registrarOpsGeradasNaPlanilha } = require('../utils/googleSheetsOpProducao');
+const { dispararNotificacaoTransicaoPosto, dispararNotificacaoRegistroTempo } = require('../utils/riCheckWhatsappNotificacao');
+const {
+  obterConfigNotificacaoUsuario,
+  salvarConfigNotificacaoUsuario,
+} = require('../utils/riCheckWhatsappNotificacao');
 
 const router = express.Router();
 
 const IAPP_BASE = 'https://api.iniciativaaplicativos.com.br/api';
+
+/** Tipo IAPP exibido no kanban Registrar produção (ex.: "03 - Produto em Processo" fica de fora). */
+const TIPO_PRODUTO_ACABADO = '04 - Produto Acabado';
 
 /** Aguarda N milissegundos */
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -117,6 +149,86 @@ function iappPut(path, body = {}) {
     req.write(payload);
     req.end();
   });
+}
+
+/* ---------------------------------------------------------------
+ * Schema Producao.Kanban_programacao — vínculo pedido → programado
+ * --------------------------------------------------------------- */
+let kanbanProgSchemaOk = false;
+
+async function garantirSchemaKanbanProgramacao() {
+  if (kanbanProgSchemaOk) return;
+  await dbQuery(`CREATE SCHEMA IF NOT EXISTS "Producao"`);
+  await dbQuery(`
+    CREATE TABLE IF NOT EXISTS "Producao"."Kanban_programacao" (
+      id              BIGSERIAL PRIMARY KEY,
+      codigo_produto  BIGINT,
+      codigo          TEXT NOT NULL,
+      descricao       TEXT,
+      codigo_pedido   BIGINT NOT NULL,
+      numero_pedido   TEXT,
+      quantidade      NUMERIC(18,4) NOT NULL,
+      created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_kanban_prog_ped_cod
+      ON "Producao"."Kanban_programacao" (codigo_pedido, codigo);
+  `);
+  await dbQuery(`ALTER TABLE "Producao"."Kanban_programacao" ADD COLUMN IF NOT EXISTS numero_op TEXT`);
+  await dbQuery(`ALTER TABLE "Producao"."Kanban_programacao" ADD COLUMN IF NOT EXISTS op_iapp_id BIGINT`);
+  await dbQuery(`ALTER TABLE "Producao"."Kanban_programacao" ADD COLUMN IF NOT EXISTS op_producao_id BIGINT`);
+  await dbQuery(`ALTER TABLE "Producao"."Kanban_programacao" ADD COLUMN IF NOT EXISTS status TEXT`);
+  await dbQuery(`ALTER TABLE "Producao"."Kanban_programacao" ADD COLUMN IF NOT EXISTS observacao TEXT`);
+  await dbQuery(`ALTER TABLE "Producao"."Kanban_programacao" ADD COLUMN IF NOT EXISTS postos TEXT`);
+  await dbQuery(`
+    CREATE INDEX IF NOT EXISTS idx_kanban_prog_op_iapp
+      ON "Producao"."Kanban_programacao" (op_iapp_id);
+    CREATE INDEX IF NOT EXISTS idx_kanban_prog_op_producao
+      ON "Producao"."Kanban_programacao" (op_producao_id);
+    CREATE INDEX IF NOT EXISTS idx_kanban_prog_numero_op
+      ON "Producao"."Kanban_programacao" (numero_op);
+  `);
+  kanbanProgSchemaOk = true;
+}
+
+function normCodigoSql(expr) {
+  return `UPPER(TRIM(COALESCE(${expr}, '')))`;
+}
+
+function escapeLikePattern(term) {
+  return String(term ?? '').replace(/[%_\\]/g, '\\$&');
+}
+
+/* ---------------------------------------------------------------
+ * Schema Producao.OP_producao — OPs geradas manualmente
+ * --------------------------------------------------------------- */
+let opProducaoSchemaOk = false;
+
+async function garantirSchemaOpProducao() {
+  if (opProducaoSchemaOk) return;
+  await dbQuery(`CREATE SCHEMA IF NOT EXISTS "Producao"`);
+  await dbQuery(`
+    CREATE TABLE IF NOT EXISTS "Producao"."OP_producao" (
+      id              BIGSERIAL PRIMARY KEY,
+      n_op            TEXT,
+      codigo_produto  BIGINT,
+      codigo          TEXT NOT NULL,
+      created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_op_producao_codigo
+      ON "Producao"."OP_producao" (codigo);
+    CREATE INDEX IF NOT EXISTS idx_op_producao_n_op
+      ON "Producao"."OP_producao" (n_op);
+  `);
+  opProducaoSchemaOk = true;
+}
+
+/** Formato DDMMAAID — dia, mês, ano (2 dígitos) + id do registro */
+function gerarNOp(id) {
+  const now = new Date();
+  const dd = String(now.getDate()).padStart(2, '0');
+  const mm = String(now.getMonth() + 1).padStart(2, '0');
+  const aa = String(now.getFullYear()).slice(-2);
+  return `${dd}${mm}${aa}${id}`;
 }
 
 /* ---------------------------------------------------------------
@@ -250,6 +362,10 @@ function getOperador(req) {
     || String(req.headers['x-user'] || '').trim()
     || 'sistema'
   );
+}
+
+function getUserId(req) {
+  return Number(req.session?.user?.id) || 0;
 }
 
 function requireAuth(req, res, next) {
@@ -508,15 +624,49 @@ async function syncEncerradosBackground() {
 }
 
 /* ---------------------------------------------------------------
- * fromDb(onlyMontagem)
- * Lê ordens do cache DB (rápido). Usado na carga inicial do kanban.
- * onlyMontagem=false → status='A PRODUZIR'
- * onlyMontagem=true  → status!='ENCERRADO' + produto.tipo='04 - Produto Acabado'
+ * fromOpProducaoDb — kanban Registrar produção (OPs geradas internamente)
  * --------------------------------------------------------------- */
-async function fromDb(onlyMontagem = false) {
+async function fromOpProducaoDb() {
+  await garantirSchemaOpProducao();
+  const { rows } = await dbQuery(`
+    SELECT
+      op.id,
+      op.n_op                         AS identificacao,
+      'A PRODUZIR'                    AS status,
+      '1'::text                       AS qtde,
+      op.created_at::text             AS data_abertura,
+      op.created_at::text             AS sincronizado_em,
+      json_build_object(
+        'id',             op.codigo_produto,
+        'identificacao',  op.codigo,
+        'descricao',      COALESCE(po.descricao, ''),
+        'tipo',           '04 - Produto Acabado'
+      )                               AS produto,
+      '[]'::json                      AS ordens_servico,
+      true                            AS from_op_producao
+    FROM "Producao"."OP_producao" op
+    LEFT JOIN public.produtos_omie po ON po.codigo_produto = op.codigo_produto
+    ORDER BY op.created_at DESC, op.id DESC
+  `);
+  return rows;
+}
+
+/* ---------------------------------------------------------------
+ * fromDb(opts)
+ * Lê ordens do cache IAPP (painel Montagem e integrações legadas).
+ * onlyMontagem=true       → status!='ENCERRADO' + produto.tipo=PA
+ * onlyProdutoAcabado=true → filtra produto.tipo=PA (com status A PRODUZIR se não montagem)
+ * --------------------------------------------------------------- */
+async function fromDb(opts = {}) {
+  const onlyMontagem = opts === true || opts?.onlyMontagem === true;
+  const onlyProdutoAcabado = onlyMontagem || opts?.onlyProdutoAcabado === true;
+  const filtroTipoPa = onlyProdutoAcabado
+    ? `AND TRIM(COALESCE(p.tipo,'')) = '${TIPO_PRODUTO_ACABADO}'`
+    : '';
+
   const whereExtra = onlyMontagem
-    ? `AND op.status != 'ENCERRADO' AND TRIM(COALESCE(p.tipo,'')) = '04 - Produto Acabado'`
-    : `AND op.status = 'A PRODUZIR'`;
+    ? `AND op.status != 'ENCERRADO' ${filtroTipoPa}`
+    : `AND op.status = 'A PRODUZIR' ${filtroTipoPa}`;
 
   const { rows } = await dbQuery(`
     SELECT
@@ -586,17 +736,22 @@ async function fromDb(onlyMontagem = false) {
 
 /* ---------------------------------------------------------------
  * GET /api/producao/ordens
- * Carga rápida do cache DB. Front chama /sync-ativas em seguida.
+ * Kanban Registrar produção — OPs da tabela Producao.OP_producao.
  * --------------------------------------------------------------- */
 router.get('/ordens', async (req, res) => {
   try {
-    if (!tabelaGarantida) { await garantirTabela(); tabelaGarantida = true; }
-    const ordens = await fromDb(false);
+    const ordens = await fromOpProducaoDb();
     const agora  = new Date().toISOString();
-    setImmediate(() => syncEncerradosBackground());
-    return res.json({ success: true, total_consultado: ordens.length, total_ativas: ordens.length, ordens, sincronizado_em: agora, from_db: true });
+    return res.json({
+      success: true,
+      total_consultado: ordens.length,
+      total_ativas: ordens.length,
+      ordens,
+      sincronizado_em: agora,
+      from_op_producao: true,
+    });
   } catch (err) {
-    console.error('[producao] Erro ao ler ordens do DB:', err.message);
+    console.error('[producao] Erro ao ler OP_producao:', err.message);
     return res.status(500).json({ error: err.message });
   }
 });
@@ -608,7 +763,7 @@ router.get('/ordens', async (req, res) => {
 router.get('/ordens-montagem', async (req, res) => {
   try {
     if (!tabelaGarantida) { await garantirTabela(); tabelaGarantida = true; }
-    const ordens = await fromDb(true);
+    const ordens = await fromDb({ onlyMontagem: true });
     const agora  = new Date().toISOString();
     setImmediate(() => syncEncerradosBackground());
     return res.json({ success: true, total_consultado: ordens.length, total_ativas: ordens.length, ordens, sincronizado_em: agora, from_db: true });
@@ -682,7 +837,9 @@ router.get('/sync-ativas', async (req, res) => {
     if (todasOPs.length > 0) await upsertOps(todasOPs);
 
     // Retorna lista atualizada do DB (já inclui os recém-upsertados)
-    const ordens = await fromDb(onlyMontagem);
+    const ordens = await fromDb(
+      onlyMontagem ? { onlyMontagem: true } : { onlyProdutoAcabado: true }
+    );
     const agora  = new Date().toISOString();
 
     setImmediate(() => syncEncerradosBackground());
@@ -726,6 +883,213 @@ async function enrichMateriaisComFisico(itens) {
   });
 }
 
+/** Código do produto em Kanban_programacao (prioridade sobre fallback da OP). */
+async function resolverCodigoKanbanProduto({ opProducaoId, numeroOp, codigoFallback }) {
+  const opProdId = Number(opProducaoId) || 0;
+  const nOp = String(numeroOp || '').trim();
+  const fallback = String(codigoFallback || '').trim();
+
+  if (opProdId > 0) {
+    const { rows } = await dbQuery(
+      `SELECT codigo
+         FROM "Producao"."Kanban_programacao"
+        WHERE op_producao_id = $1
+          AND COALESCE(TRIM(codigo), '') <> ''
+        ORDER BY id DESC
+        LIMIT 1`,
+      [opProdId]
+    );
+    if (rows[0]?.codigo) return String(rows[0].codigo).trim();
+  }
+
+  if (nOp) {
+    const { rows } = await dbQuery(
+      `SELECT codigo
+         FROM "Producao"."Kanban_programacao"
+        WHERE UPPER(TRIM(COALESCE(numero_op, ''))) = UPPER(TRIM($1))
+          AND COALESCE(TRIM(codigo), '') <> ''
+        ORDER BY id DESC
+        LIMIT 1`,
+      [nOp]
+    );
+    if (rows[0]?.codigo) return String(rows[0].codigo).trim();
+  }
+
+  return fallback;
+}
+
+const FICHA_LISTA_PAGE_SIZE = 10;
+
+function normalizarCodigoProduto(codigo) {
+  return String(codigo || '').trim().toUpperCase();
+}
+
+/** Localiza a ficha cujo campo produto = código informado (lista paginada IAPP). */
+async function buscarFichaTecnicaPorCodigoProduto(codigoProduto) {
+  const codigoNorm = normalizarCodigoProduto(codigoProduto);
+  if (!codigoNorm) return null;
+
+  let page = 1;
+  while (page <= 100) {
+    const data = await iappGet('/engenharia/fichas/lista', {
+      page,
+      offset: FICHA_LISTA_PAGE_SIZE,
+    });
+    if (data.success === false) {
+      throw new Error(data.message || data.code || 'Erro ao listar fichas técnicas no IAPP.');
+    }
+
+    const batch = Array.isArray(data.response) ? data.response : [];
+    const hit = batch.find(
+      (f) => normalizarCodigoProduto(f?.produto) === codigoNorm
+    );
+    if (hit) return hit;
+
+    if (batch.length < FICHA_LISTA_PAGE_SIZE) break;
+    page += 1;
+  }
+
+  return null;
+}
+
+/** Detalhe completo da ficha (operacoes, materiais, subprodutos). */
+async function consultarFichaTecnicaPorId(fichaId) {
+  const id = Number(fichaId) || 0;
+  if (!id) return null;
+
+  const data = await iappGet(`/engenharia/fichas/busca/${id}`);
+  if (data.success === false) {
+    throw new Error(data.message || data.code || 'Ficha técnica não encontrada no IAPP.');
+  }
+  return data.response || null;
+}
+
+/** Achata operacoes[].materiais[] e operacoes[].subprodutos[] em linhas da tabela. */
+function achatarEstruturaFicha(ficha) {
+  const rows = [];
+  for (const op of (ficha?.operacoes || [])) {
+    const etapa = op?.operacao ?? '—';
+    for (const item of (op?.materiais || [])) {
+      rows.push({
+        produto_ref: item?.produto,
+        qtde: item?.qtde ?? 0,
+        etapa,
+        status: 'Material',
+      });
+    }
+    for (const item of (op?.subprodutos || [])) {
+      rows.push({
+        produto_ref: item?.produto,
+        qtde: item?.qtde ?? 0,
+        etapa,
+        status: 'Subproduto',
+      });
+    }
+  }
+  return rows;
+}
+
+/** Resolve referências de produto (id numérico IAPP ou código) para identificacao + descricao. */
+async function resolverReferenciasProdutoIapp(refs) {
+  const cache = new Map();
+  const unique = [...new Set(
+    refs
+      .map((ref) => String(ref ?? '').trim())
+      .filter(Boolean)
+  )];
+
+  const chunkSize = 12;
+  for (let i = 0; i < unique.length; i += chunkSize) {
+    const chunk = unique.slice(i, i + chunkSize);
+    await Promise.all(chunk.map(async (ref) => {
+      if (/^\d+$/.test(ref)) {
+        try {
+          const data = await iappGet(`/engenharia/produtos/busca/${ref}`);
+          if (data.response) {
+            cache.set(ref, data.response);
+            return;
+          }
+        } catch (_) { /* fallback abaixo */ }
+      }
+
+      cache.set(ref, {
+        identificacao: ref,
+        descricao: ref,
+      });
+    }));
+  }
+
+  const codigosOmie = [...cache.values()]
+    .map((p) => String(p?.identificacao || '').trim())
+    .filter(Boolean);
+  if (codigosOmie.length) {
+    const norms = codigosOmie.map((c) => c.toUpperCase());
+    const { rows } = await dbQuery(
+      `SELECT UPPER(BTRIM(codigo)) AS codigo_norm, codigo, descricao
+         FROM public.produtos_omie
+        WHERE UPPER(BTRIM(codigo)) = ANY($1::text[])`,
+      [norms]
+    );
+    const byNorm = {};
+    for (const row of rows) byNorm[row.codigo_norm] = row;
+    for (const [ref, prod] of cache.entries()) {
+      const norm = String(prod?.identificacao || '').trim().toUpperCase();
+      if (byNorm[norm]?.descricao) {
+        cache.set(ref, {
+          ...prod,
+          descricao: byNorm[norm].descricao,
+        });
+      }
+    }
+  }
+
+  return cache;
+}
+
+async function montarEstruturaFichaPorCodigo(codigoProduto) {
+  const codigo = String(codigoProduto || '').trim();
+  const fichaResumo = await buscarFichaTecnicaPorCodigoProduto(codigo);
+  if (!fichaResumo) {
+    return { ficha: null, itens: [] };
+  }
+
+  const ficha = await consultarFichaTecnicaPorId(fichaResumo.id) || fichaResumo;
+  const achatado = achatarEstruturaFicha(ficha);
+  const cache = await resolverReferenciasProdutoIapp(achatado.map((i) => i.produto_ref));
+
+  const itens = achatado.map((row) => {
+    const ref = String(row.produto_ref ?? '').trim();
+    const prod = cache.get(ref) || { identificacao: ref, descricao: ref };
+    return {
+      identificacao: prod.identificacao || ref || '—',
+      descricao: prod.descricao || prod.identificacao || ref || '—',
+      status: row.status || '—',
+      modelo: '—',
+      qtde: row.qtde ?? 0,
+      etapa: row.etapa ?? '—',
+    };
+  });
+
+  return {
+    ficha: {
+      id: ficha.id,
+      identificacao: ficha.identificacao,
+      descricao: ficha.descricao,
+      produto: ficha.produto,
+      status: ficha.status,
+    },
+    itens,
+  };
+}
+
+async function buscarMateriaisPrevistosIapp(iappId) {
+  const data = await iappGet(`/manufatura/ordens-producao/busca/${iappId}/materiais-previstos`);
+  if (Array.isArray(data.response)) {
+    data.response = await enrichMateriaisComFisico(data.response);
+  }
+  return data;
+}
+
 /* ---------------------------------------------------------------
  * GET /api/producao/materiais-previstos/:id
  * Proxy para IAPP /manufatura/ordens-producao/busca/{id}/materiais-previstos
@@ -735,11 +1099,232 @@ async function enrichMateriaisComFisico(itens) {
 router.get('/materiais-previstos/:id', async (req, res) => {
   try {
     const id = req.params.id;
-    const data = await iappGet(`/manufatura/ordens-producao/busca/${id}/materiais-previstos`);
-    if (Array.isArray(data.response)) {
-      data.response = await enrichMateriaisComFisico(data.response);
-    }
+    const data = await buscarMateriaisPrevistosIapp(id);
     return res.json(data);
+  } catch (err) {
+    return res.status(err.status || 500).json({ error: err.message, iappCode: err.iappCode });
+  }
+});
+
+/** Carrega estrutura (cache SQL ou IAPP) para um código/OP. */
+async function carregarEstruturaFichaPayload(query = {}) {
+  await garantirSchemaKanbanProgramacao();
+  await garantirSchemaOpProducao();
+
+  const opProducaoId = Number(query?.op_producao_id) || 0;
+  const numeroOp = String(query?.numero_op || '').trim();
+  let codigoFallback = String(query?.codigo || '').trim();
+
+  if (opProducaoId > 0) {
+    const { rows } = await dbQuery(
+      `SELECT codigo, n_op FROM "Producao"."OP_producao" WHERE id = $1 LIMIT 1`,
+      [opProducaoId]
+    );
+    if (rows[0]?.codigo) codigoFallback = String(rows[0].codigo).trim();
+  }
+
+  const codigo = await resolverCodigoKanbanProduto({
+    opProducaoId,
+    numeroOp,
+    codigoFallback,
+  });
+
+  if (!codigo) {
+    const err = new Error('Código do produto não informado.');
+    err.status = 400;
+    throw err;
+  }
+
+  const cacheSql = await lerEstruturaCachePorCodigos(
+    [codigo, codigoFallback],
+    { fichaId: Number(query?.ficha_id) || 0 }
+  );
+  if (cacheSql?.itens?.length) {
+    return {
+      success: true,
+      codigo: cacheSql.codigo || codigo,
+      fonte: 'sql',
+      sincronizado_em: cacheSql.sincronizado_em,
+      ficha: cacheSql.ficha,
+      total: cacheSql.itens.length,
+      response: cacheSql.itens,
+    };
+  }
+
+  const { ficha, itens } = await montarEstruturaFichaPorCodigo(codigo);
+  return {
+    success: true,
+    codigo,
+    fonte: 'iapp',
+    ficha,
+    total: itens.length,
+    response: itens,
+  };
+}
+
+/** Imagem pos=0 em public.produtos_omie_imagens pelo código textual do produto. */
+async function buscarImagemProdutoPosZero(codigoProduto) {
+  const codigo = String(codigoProduto || '').trim();
+  if (!codigo) return null;
+  const { rows } = await dbQuery(
+    `SELECT p.codigo,
+            p.descricao,
+            p.codigo_produto,
+            i.url_imagem,
+            i.pos
+       FROM public.produtos_omie p
+       JOIN public.produtos_omie_imagens i
+         ON i.codigo_produto = p.codigo_produto
+      WHERE UPPER(BTRIM(p.codigo)) = UPPER(BTRIM($1))
+        AND COALESCE(i.pos, 0) = 0
+        AND COALESCE(i.ativo, true) = true
+      ORDER BY i.pos ASC
+      LIMIT 1`,
+    [codigo]
+  );
+  const row = rows[0];
+  if (!row?.url_imagem) return null;
+  return {
+    codigo: row.codigo,
+    descricao: row.descricao,
+    codigo_produto: row.codigo_produto,
+    url_imagem: row.url_imagem,
+    pos: row.pos,
+  };
+}
+
+/* ---------------------------------------------------------------
+ * GET /api/producao/estrutura-ficha
+ * Estrutura (BOM): prioriza cache schema estrutura; senão busca IAPP.
+ * Query: codigo?, op_producao_id?, numero_op?
+ * --------------------------------------------------------------- */
+router.get('/estrutura-ficha', async (req, res) => {
+  try {
+    const payload = await carregarEstruturaFichaPayload(req.query);
+    if (payload.fonte === 'sql') {
+      console.log('[estrutura-ficha] fonte=sql codigo=%s itens=%s', payload.codigo, payload.total);
+    } else {
+      console.log('[estrutura-ficha] fonte=iapp codigo=%s (sem cache SQL)', payload.codigo);
+    }
+    return res.json(payload);
+  } catch (err) {
+    return res.status(err.status || 500).json({ error: err.message, iappCode: err.iappCode });
+  }
+});
+
+/** Preenche `preco` em cada item (não é impresso; só filtro no modal). */
+async function enriquecerItensEstruturaComPreco(itens) {
+  const lista = Array.isArray(itens) ? itens : [];
+  const codigos = [...new Set(
+    lista
+      .map((i) => String(i?.identificacao || '').trim())
+      .filter(Boolean)
+  )];
+  const precoPorCodigo = new Map();
+
+  if (codigos.length) {
+    const norms = codigos.map((c) => c.toUpperCase());
+    try {
+      const { rows: omieRows } = await dbQuery(
+        `SELECT UPPER(BTRIM(codigo)) AS codigo_norm,
+                COALESCE(valor_unitario, preco_definido, 0) AS preco
+           FROM public.produtos_omie
+          WHERE UPPER(BTRIM(codigo)) = ANY($1::text[])`,
+        [norms]
+      );
+      for (const row of omieRows) {
+        precoPorCodigo.set(row.codigo_norm, Number(row.preco) || 0);
+      }
+    } catch (_) { /* ignora */ }
+
+    try {
+      const { rows: iappRows } = await dbQuery(
+        `SELECT UPPER(BTRIM(identificacao)) AS codigo_norm,
+                COALESCE(valor_custo, valor_venda, 0) AS preco
+           FROM estrutura.produto_iapp
+          WHERE UPPER(BTRIM(identificacao)) = ANY($1::text[])`,
+        [norms]
+      );
+      for (const row of iappRows) {
+        const atual = precoPorCodigo.get(row.codigo_norm);
+        if (atual == null || atual === 0) {
+          precoPorCodigo.set(row.codigo_norm, Number(row.preco) || 0);
+        }
+      }
+    } catch (_) { /* ignora */ }
+  }
+
+  return lista.map((item) => {
+    const cod = String(item?.identificacao || '').trim().toUpperCase();
+    const direto = Number(item?.valor_custo ?? item?.valor_venda ?? item?.preco);
+    const preco = Number.isFinite(direto) && direto > 0
+      ? direto
+      : (precoPorCodigo.get(cod) || 0);
+    return {
+      ...item,
+      preco,
+      valor_custo: item?.valor_custo ?? preco,
+    };
+  });
+}
+
+/* ---------------------------------------------------------------
+ * GET /api/producao/ficha-tecnica-impressao
+ * Dados para impressão da ficha técnica: estrutura + diagrama (se houver
+ * item com "DIAGRAMA" na descrição → imagem pos=0 em produtos_omie_imagens).
+ * Cada item inclui `preco` (não impresso; filtro no modal).
+ * Query: codigo?, op_producao_id?, numero_op?
+ * --------------------------------------------------------------- */
+router.get('/ficha-tecnica-impressao', async (req, res) => {
+  try {
+    const payload = await carregarEstruturaFichaPayload(req.query);
+    const itens = await enriquecerItensEstruturaComPreco(
+      Array.isArray(payload.response) ? payload.response : []
+    );
+
+    const itensDiagrama = itens.filter((item) =>
+      String(item?.descricao || '').toUpperCase().includes('DIAGRAMA')
+    );
+
+    const diagramas = [];
+    const vistos = new Set();
+    for (const item of itensDiagrama) {
+      const codItem = String(item?.identificacao || '').trim();
+      if (!codItem || vistos.has(codItem.toUpperCase())) continue;
+      vistos.add(codItem.toUpperCase());
+      const img = await buscarImagemProdutoPosZero(codItem);
+      diagramas.push({
+        codigo: codItem,
+        descricao: item?.descricao || '',
+        preco: Number(item?.preco) || 0,
+        url_imagem: img?.url_imagem || null,
+        codigo_produto: img?.codigo_produto || null,
+      });
+    }
+
+    let descricaoProduto = String(payload.ficha?.descricao || '').trim();
+    if (!descricaoProduto) {
+      const { rows } = await dbQuery(
+        `SELECT descricao
+           FROM public.produtos_omie
+          WHERE UPPER(BTRIM(codigo)) = UPPER(BTRIM($1))
+          LIMIT 1`,
+        [payload.codigo]
+      );
+      descricaoProduto = String(rows[0]?.descricao || '').trim();
+    }
+
+    return res.json({
+      success: true,
+      codigo: payload.codigo,
+      descricao: descricaoProduto,
+      fonte: payload.fonte,
+      sincronizado_em: payload.sincronizado_em || null,
+      ficha: payload.ficha,
+      total: itens.length,
+      itens,
+      diagramas,
+    });
   } catch (err) {
     return res.status(err.status || 500).json({ error: err.message, iappCode: err.iappCode });
   }
@@ -1018,6 +1603,996 @@ router.get('/iapp/qualidade/inspecoes/lista', async (req, res) => {
       success: false,
       error: err.message || 'Erro ao listar inspeções na IAPP.'
     });
+  }
+});
+
+/* ---------------------------------------------------------------
+ * GET /api/producao/pedidos-kanban
+ * Pedidos de venda (etapa 80) com saldo não programado — somente itens 04 (PA).
+ * --------------------------------------------------------------- */
+router.get('/pedidos-kanban', async (req, res) => {
+  try {
+    await garantirSchemaKanbanProgramacao();
+
+    const { rows } = await dbQuery(`
+      WITH movimentado AS (
+        SELECT
+          codigo_pedido,
+          ${normCodigoSql('codigo')} AS codigo_norm,
+          SUM(quantidade) AS qtd_mov
+        FROM "Producao"."Kanban_programacao"
+        GROUP BY codigo_pedido, ${normCodigoSql('codigo')}
+      ),
+      itens_saldo AS (
+        SELECT
+          p.codigo_pedido,
+          p.numero_pedido,
+          p.obs_venda,
+          p.updated_at,
+          i.seq,
+          i.codigo_produto,
+          i.codigo,
+          i.descricao,
+          GREATEST(COALESCE(i.quantidade, 0) - COALESCE(m.qtd_mov, 0), 0) AS saldo
+        FROM "Vendas".pedidos_venda p
+        JOIN "Vendas".pedidos_venda_itens i
+          ON i.codigo_pedido = p.codigo_pedido
+        JOIN public.produtos_omie po
+          ON ${normCodigoSql('po.codigo')} = ${normCodigoSql('i.codigo')}
+        LEFT JOIN movimentado m
+          ON m.codigo_pedido = p.codigo_pedido
+         AND m.codigo_norm = ${normCodigoSql('i.codigo')}
+        WHERE TRIM(COALESCE(p.etapa::text, '')) = '80'
+          AND TRIM(COALESCE(p.bloqueado, '')) = 'N'
+          AND TRIM(COALESCE(p.encerrado, '')) IN ('', 'N')
+          AND TRIM(COALESCE(po.tipoitem, '')) IN ('04', '4')
+      )
+      SELECT
+        codigo_pedido,
+        numero_pedido,
+        obs_venda,
+        updated_at::text AS updated_at,
+        COALESCE(
+          json_agg(
+            json_build_object(
+              'seq',           seq,
+              'codigo_produto', codigo_produto,
+              'codigo',        codigo,
+              'descricao',     descricao,
+              'quantidade',    saldo::text
+            )
+            ORDER BY seq NULLS LAST, codigo
+          ) FILTER (WHERE saldo > 0),
+          '[]'::json
+        ) AS itens
+      FROM itens_saldo
+      GROUP BY codigo_pedido, numero_pedido, obs_venda, updated_at
+      HAVING COUNT(*) FILTER (WHERE saldo > 0) > 0
+      ORDER BY numero_pedido ASC NULLS LAST, codigo_pedido ASC
+    `);
+
+    return res.json({ success: true, total: rows.length, pedidos: rows });
+  } catch (err) {
+    console.error('[producao] Erro ao listar pedidos kanban:', err.message);
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/* ---------------------------------------------------------------
+ * POST /api/producao/kanban-programacao
+ * Registra arraste Pedidos → Programado (saldo do pedido >= qtde programada).
+ * Body: { codigo_pedido, codigo, quantidade_programado, numero_op, op_producao_id }
+ * --------------------------------------------------------------- */
+router.post('/kanban-programacao', express.json(), async (req, res) => {
+  try {
+    await garantirSchemaKanbanProgramacao();
+    await garantirSchemaOpProducao();
+
+    const codigoPedido = Number(req.body?.codigo_pedido);
+    const codigo = String(req.body?.codigo || '').trim();
+    const qtdProgramado = Number(req.body?.quantidade_programado);
+    const numeroOp = String(req.body?.numero_op || '').trim();
+    const opProducaoId = Number(req.body?.op_producao_id);
+
+    if (!Number.isFinite(codigoPedido) || codigoPedido <= 0) {
+      return res.status(400).json({ success: false, error: 'codigo_pedido inválido.' });
+    }
+    if (!codigo) {
+      return res.status(400).json({ success: false, error: 'codigo do produto é obrigatório.' });
+    }
+    if (!numeroOp) {
+      return res.status(400).json({ success: false, error: 'numero_op é obrigatório.' });
+    }
+    if (!Number.isFinite(opProducaoId) || opProducaoId <= 0) {
+      return res.status(400).json({ success: false, error: 'op_producao_id inválido.' });
+    }
+    if (!Number.isFinite(qtdProgramado) || qtdProgramado <= 0) {
+      return res.status(400).json({ success: false, error: 'quantidade_programado inválida.' });
+    }
+
+    const { rows: itemRows } = await dbQuery(`
+      SELECT
+        i.codigo_produto,
+        i.codigo,
+        i.descricao,
+        i.quantidade::float8 AS quantidade_original,
+        p.numero_pedido,
+        p.codigo_pedido,
+        COALESCE(m.qtd_mov, 0)::float8 AS quantidade_movimentada
+      FROM "Vendas".pedidos_venda_itens i
+      JOIN "Vendas".pedidos_venda p
+        ON p.codigo_pedido = i.codigo_pedido
+      JOIN public.produtos_omie po
+        ON ${normCodigoSql('po.codigo')} = ${normCodigoSql('i.codigo')}
+      LEFT JOIN (
+        SELECT codigo_pedido, ${normCodigoSql('codigo')} AS codigo_norm, SUM(quantidade) AS qtd_mov
+        FROM "Producao"."Kanban_programacao"
+        WHERE codigo_pedido = $1
+        GROUP BY codigo_pedido, ${normCodigoSql('codigo')}
+      ) m
+        ON m.codigo_pedido = i.codigo_pedido
+       AND m.codigo_norm = ${normCodigoSql('i.codigo')}
+      WHERE i.codigo_pedido = $1
+        AND ${normCodigoSql('i.codigo')} = ${normCodigoSql('$2')}
+        AND TRIM(COALESCE(p.etapa::text, '')) = '80'
+        AND TRIM(COALESCE(p.bloqueado, '')) = 'N'
+        AND TRIM(COALESCE(p.encerrado, '')) IN ('', 'N')
+        AND TRIM(COALESCE(po.tipoitem, '')) IN ('04', '4')
+      ORDER BY i.seq NULLS LAST
+      LIMIT 1
+    `, [codigoPedido, codigo]);
+
+    if (!itemRows.length) {
+      return res.status(404).json({ success: false, error: 'Item do pedido não encontrado, pedido inativo ou produto não é 04 - Produto Acabado.' });
+    }
+
+    const { rows: opPaRows } = await dbQuery(`
+      SELECT op.id, op.n_op, op.codigo
+        FROM "Producao"."OP_producao" op
+       WHERE op.id = $1
+         AND UPPER(TRIM(COALESCE(op.codigo, ''))) = UPPER(TRIM($2))
+       LIMIT 1
+    `, [opProducaoId, codigo]);
+    if (!opPaRows.length) {
+      return res.status(400).json({
+        success: false,
+        error: 'OP não encontrada em OP_producao ou código do produto não confere.',
+      });
+    }
+
+    const item = itemRows[0];
+    const saldo = Number(item.quantidade_original) - Number(item.quantidade_movimentada);
+
+    if (saldo < qtdProgramado) {
+      return res.status(400).json({
+        success: false,
+        error: `Saldo do pedido (${saldo}) é menor que a quantidade programada (${qtdProgramado}).`,
+        saldo,
+        quantidade_programado: qtdProgramado
+      });
+    }
+
+    const { rows: inserted } = await dbQuery(`
+      INSERT INTO "Producao"."Kanban_programacao" (
+        codigo_produto, codigo, descricao, codigo_pedido, numero_pedido, quantidade, numero_op, op_producao_id
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+      RETURNING id, codigo_produto, codigo, descricao, codigo_pedido, numero_pedido, quantidade::text,
+                numero_op, op_producao_id, created_at
+    `, [
+      item.codigo_produto || null,
+      item.codigo,
+      item.descricao || null,
+      item.codigo_pedido,
+      item.numero_pedido || null,
+      qtdProgramado,
+      numeroOp,
+      opProducaoId
+    ]);
+
+    const saldoRestante = saldo - qtdProgramado;
+
+    return res.json({
+      success: true,
+      registro: inserted[0],
+      saldo_restante: saldoRestante
+    });
+  } catch (err) {
+    console.error('[producao] Erro ao registrar kanban programacao:', err.message);
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/* ---------------------------------------------------------------
+ * GET /api/producao/kanban-programacao
+ * Lista vínculos pedido → OP (destaque no kanban).
+ * --------------------------------------------------------------- */
+router.get('/kanban-programacao', async (req, res) => {
+  try {
+    await garantirSchemaKanbanProgramacao();
+
+    const { rows } = await dbQuery(`
+      SELECT
+        id,
+        codigo_produto,
+        codigo,
+        descricao,
+        codigo_pedido,
+        numero_pedido,
+        quantidade::text AS quantidade,
+        numero_op,
+        op_iapp_id,
+        op_producao_id,
+        status,
+        observacao,
+        postos,
+        created_at
+      FROM "Producao"."Kanban_programacao"
+      ORDER BY created_at DESC, id DESC
+    `);
+
+    return res.json({ success: true, total: rows.length, registros: rows });
+  } catch (err) {
+    console.error('[producao] Erro ao listar kanban programacao:', err.message);
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/* ---------------------------------------------------------------
+ * GET /api/producao/op-producao/buscar-produtos?q=...
+ * Busca em public.produtos_omie (codigo, descricao) — mín. 3 caracteres.
+ * --------------------------------------------------------------- */
+router.get('/op-producao/buscar-produtos', async (req, res) => {
+  try {
+    const raw = String(req.query?.q || '').trim();
+    if (raw.length < 3) {
+      return res.json({ success: true, itens: [] });
+    }
+
+    const likeContains = `%${escapeLikePattern(raw)}%`;
+    const likePrefix = `${escapeLikePattern(raw)}%`;
+
+    const { rows } = await dbQuery(`
+      SELECT codigo_produto, codigo, descricao
+      FROM public.produtos_omie
+      WHERE codigo ILIKE $1 ESCAPE '\\'
+         OR descricao ILIKE $1 ESCAPE '\\'
+      ORDER BY
+        CASE WHEN codigo ILIKE $2 ESCAPE '\\' THEN 0 ELSE 1 END,
+        CASE WHEN descricao ILIKE $2 ESCAPE '\\' THEN 0 ELSE 1 END,
+        codigo
+      LIMIT 40
+    `, [likeContains, likePrefix]);
+
+    return res.json({ success: true, itens: rows });
+  } catch (err) {
+    console.error('[producao] Erro ao buscar produtos para OP:', err.message);
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/* ---------------------------------------------------------------
+ * POST /api/producao/op-producao
+ * Body: { codigo_produto, codigo }
+ * Gera N_OP no formato DDMMAAID.
+ * --------------------------------------------------------------- */
+router.post('/op-producao', express.json(), async (req, res) => {
+  try {
+    await garantirSchemaOpProducao();
+    await garantirSchemaKanbanProgramacao();
+
+    const codigo = String(req.body?.codigo || '').trim();
+    const codigoProduto = Number(req.body?.codigo_produto);
+    const observacao = String(req.body?.observacao || '').trim() || null;
+    const postos = Array.isArray(req.body?.postos)
+      ? req.body.postos.map(p => String(p || '').trim()).filter(Boolean)
+      : [];
+    const postosJson = postos.length ? JSON.stringify(postos) : null;
+
+    if (!codigo) {
+      return res.status(400).json({ success: false, error: 'codigo é obrigatório.' });
+    }
+    if (!Number.isFinite(codigoProduto) || codigoProduto <= 0) {
+      return res.status(400).json({ success: false, error: 'codigo_produto inválido.' });
+    }
+
+    const { rows: prodRows } = await dbQuery(
+      `SELECT codigo_produto, codigo, descricao
+         FROM public.produtos_omie
+        WHERE codigo_produto = $1 AND codigo = $2
+        LIMIT 1`,
+      [codigoProduto, codigo]
+    );
+    if (!prodRows.length) {
+      return res.status(404).json({ success: false, error: 'Produto não encontrado.' });
+    }
+    const descricaoProd = prodRows[0].descricao || null;
+
+    const { rows } = await dbQuery(
+      `INSERT INTO "Producao"."OP_producao" (codigo_produto, codigo, created_at)
+       VALUES ($1, $2, NOW())
+       RETURNING id, created_at`,
+      [codigoProduto, codigo]
+    );
+
+    const id = rows[0].id;
+    const nOp = gerarNOp(id);
+
+    await dbQuery(
+      `UPDATE "Producao"."OP_producao" SET n_op = $1 WHERE id = $2`,
+      [nOp, id]
+    );
+
+    await dbQuery(`
+      INSERT INTO "Producao"."Kanban_programacao" (
+        codigo_produto, codigo, descricao, codigo_pedido, quantidade, numero_op, op_producao_id, observacao, postos
+      ) VALUES ($1, $2, $3, 0, 1, $4, $5, $6, $7)
+    `, [codigoProduto, codigo, descricaoProd, nOp, id, observacao, postosJson]);
+
+    return res.json({
+      success: true,
+      registro: {
+        id,
+        n_op: nOp,
+        codigo_produto: codigoProduto,
+        codigo,
+        observacao,
+        postos,
+        created_at: rows[0].created_at,
+      },
+    });
+  } catch (err) {
+    console.error('[producao] Erro ao gerar OP:', err.message);
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/* ---------------------------------------------------------------
+ * POST /api/producao/op-producao/lote
+ * Body: { codigo_produto, codigo, quantidade, pedido?: { codigo_pedido, numero_pedido, saldo } }
+ * Cria N OPs; vincula às primeiras min(N, saldo) ao pedido (qty 1 cada); restante só OP.
+ * --------------------------------------------------------------- */
+router.post('/op-producao/lote', express.json(), async (req, res) => {
+  try {
+    await garantirSchemaOpProducao();
+    await garantirSchemaKanbanProgramacao();
+
+    const codigo = String(req.body?.codigo || '').trim();
+    const codigoProduto = Number(req.body?.codigo_produto);
+    const quantidade = Math.floor(Number(req.body?.quantidade));
+    const pedido = req.body?.pedido || null;
+    const observacaoTexto = String(req.body?.observacao || '').trim() || null;
+    const postos = Array.isArray(req.body?.postos)
+      ? req.body.postos.map(p => String(p || '').trim()).filter(Boolean)
+      : [];
+    const postosJson = postos.length ? JSON.stringify(postos) : null;
+    let quantidadeObservacao = observacaoTexto
+      ? Math.floor(Number(req.body?.quantidade_observacao ?? quantidade))
+      : 0;
+    if (!Number.isFinite(quantidadeObservacao) || quantidadeObservacao < 0) quantidadeObservacao = 0;
+    if (quantidadeObservacao > quantidade) quantidadeObservacao = quantidade;
+
+    if (!codigo) {
+      return res.status(400).json({ success: false, error: 'codigo é obrigatório.' });
+    }
+    if (!Number.isFinite(codigoProduto) || codigoProduto <= 0) {
+      return res.status(400).json({ success: false, error: 'codigo_produto inválido.' });
+    }
+    if (!Number.isFinite(quantidade) || quantidade < 1 || quantidade > 200) {
+      return res.status(400).json({ success: false, error: 'quantidade deve ser entre 1 e 200.' });
+    }
+
+    const { rows: prodRows } = await dbQuery(
+      `SELECT codigo_produto, codigo, descricao
+         FROM public.produtos_omie
+        WHERE codigo_produto = $1 AND codigo = $2
+        LIMIT 1`,
+      [codigoProduto, codigo]
+    );
+    if (!prodRows.length) {
+      return res.status(404).json({ success: false, error: 'Produto não encontrado.' });
+    }
+    const descricaoProd = prodRows[0].descricao || null;
+
+    const codigoPedido = pedido ? Number(pedido.codigo_pedido) : 0;
+    const numeroPedido = pedido ? String(pedido.numero_pedido || '').trim() : '';
+    const saldoPedido = pedido ? Number(pedido.saldo) : 0;
+    const vincularPedido = Number.isFinite(codigoPedido) && codigoPedido > 0;
+
+    let saldoRestante = 0;
+    let itemPedido = null;
+    if (vincularPedido) {
+      const { rows: itemRows } = await dbQuery(`
+        SELECT
+          i.codigo_produto,
+          i.codigo,
+          i.descricao,
+          i.quantidade::float8 AS quantidade_original,
+          p.numero_pedido,
+          p.codigo_pedido,
+          COALESCE(m.qtd_mov, 0)::float8 AS quantidade_movimentada
+        FROM "Vendas".pedidos_venda_itens i
+        JOIN "Vendas".pedidos_venda p ON p.codigo_pedido = i.codigo_pedido
+        JOIN public.produtos_omie po
+          ON ${normCodigoSql('po.codigo')} = ${normCodigoSql('i.codigo')}
+        LEFT JOIN (
+          SELECT codigo_pedido, ${normCodigoSql('codigo')} AS codigo_norm, SUM(quantidade) AS qtd_mov
+          FROM "Producao"."Kanban_programacao"
+          WHERE codigo_pedido = $1
+          GROUP BY codigo_pedido, ${normCodigoSql('codigo')}
+        ) m ON m.codigo_pedido = i.codigo_pedido
+           AND m.codigo_norm = ${normCodigoSql('i.codigo')}
+        WHERE i.codigo_pedido = $1
+          AND ${normCodigoSql('i.codigo')} = ${normCodigoSql('$2')}
+          AND TRIM(COALESCE(p.etapa::text, '')) = '80'
+          AND TRIM(COALESCE(p.bloqueado, '')) = 'N'
+          AND TRIM(COALESCE(p.encerrado, '')) IN ('', 'N')
+          AND TRIM(COALESCE(po.tipoitem, '')) IN ('04', '4')
+        ORDER BY i.seq NULLS LAST
+        LIMIT 1
+      `, [codigoPedido, codigo]);
+
+      if (!itemRows.length) {
+        return res.status(404).json({ success: false, error: 'Item do pedido não encontrado ou pedido inativo.' });
+      }
+      itemPedido = itemRows[0];
+      saldoRestante = Number(itemPedido.quantidade_original) - Number(itemPedido.quantidade_movimentada);
+    }
+
+    const maxVinculos = vincularPedido
+      ? Math.min(quantidade, Math.max(0, Math.floor(saldoRestante)))
+      : 0;
+
+    const criadas = [];
+    let vinculadas = 0;
+
+    for (let i = 0; i < quantidade; i++) {
+      const { rows } = await dbQuery(
+        `INSERT INTO "Producao"."OP_producao" (codigo_produto, codigo, created_at)
+         VALUES ($1, $2, NOW())
+         RETURNING id, created_at`,
+        [codigoProduto, codigo]
+      );
+      const id = rows[0].id;
+      const nOp = gerarNOp(id);
+      await dbQuery(
+        `UPDATE "Producao"."OP_producao" SET n_op = $1 WHERE id = $2`,
+        [nOp, id]
+      );
+
+      const obsParaEstaOp = observacaoTexto && i < quantidadeObservacao ? observacaoTexto : null;
+
+      let vinculado = false;
+      if (vincularPedido && vinculadas < maxVinculos && saldoRestante >= 1) {
+        await dbQuery(`
+          INSERT INTO "Producao"."Kanban_programacao" (
+            codigo_produto, codigo, descricao, codigo_pedido, numero_pedido, quantidade, numero_op, op_producao_id, observacao, postos
+          ) VALUES ($1, $2, $3, $4, $5, 1, $6, $7, $8, $9)
+        `, [
+          itemPedido?.codigo_produto || codigoProduto,
+          codigo,
+          itemPedido?.descricao || descricaoProd,
+          codigoPedido,
+          itemPedido?.numero_pedido || numeroPedido || null,
+          nOp,
+          id,
+          obsParaEstaOp,
+          postosJson,
+        ]);
+        vinculado = true;
+        vinculadas += 1;
+        saldoRestante -= 1;
+      } else {
+        await dbQuery(`
+          INSERT INTO "Producao"."Kanban_programacao" (
+            codigo_produto, codigo, descricao, codigo_pedido, quantidade, numero_op, op_producao_id, observacao, postos
+          ) VALUES ($1, $2, $3, 0, 1, $4, $5, $6, $7)
+        `, [
+          codigoProduto,
+          codigo,
+          descricaoProd,
+          nOp,
+          id,
+          obsParaEstaOp,
+          postosJson,
+        ]);
+      }
+
+      criadas.push({
+        id,
+        n_op: nOp,
+        codigo_produto: codigoProduto,
+        codigo,
+        vinculado_pedido: vinculado,
+      });
+    }
+
+    let planilha = { ok: true, skipped: true };
+    if (process.env.GOOGLE_SHEETS_OP_WEBHOOK_URL) {
+      try {
+        planilha = await registrarOpsGeradasNaPlanilha({
+          modelo: codigo,
+          ops: criadas,
+        });
+      } catch (planilhaErr) {
+        console.error('[producao] Falha ao registrar OPs na planilha Google:', planilhaErr.message);
+        planilha = { ok: false, error: planilhaErr.message };
+      }
+    }
+
+    return res.json({
+      success: true,
+      total: criadas.length,
+      vinculadas,
+      somente_op: criadas.length - vinculadas,
+      registros: criadas,
+      planilha,
+    });
+  } catch (err) {
+    console.error('[producao] Erro ao gerar OP lote:', err.message);
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/* ---------------------------------------------------------------
+ * GET /api/producao/paradas/motivos — lista tipos/motivos cadastrados
+ * --------------------------------------------------------------- */
+router.get('/paradas/motivos', async (req, res) => {
+  try {
+    const motivos = await listarMotivos();
+    return res.json({ success: true, motivos });
+  } catch (err) {
+    console.error('[producao] Erro ao listar motivos parada:', err.message);
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/* ---------------------------------------------------------------
+ * POST /api/producao/paradas/motivos — cadastra tipo + motivo
+ * --------------------------------------------------------------- */
+router.post('/paradas/motivos', express.json(), async (req, res) => {
+  try {
+    const row = await registrarMotivo({
+      tipoParada: req.body?.tipo_parada,
+      motivo: req.body?.motivo,
+    });
+    return res.json({ success: true, motivo: row });
+  } catch (err) {
+    console.error('[producao] Erro ao registrar motivo parada:', err.message);
+    return res.status(400).json({ success: false, error: err.message });
+  }
+});
+
+/* ---------------------------------------------------------------
+ * POST /api/producao/paradas — registra parada de produção
+ * --------------------------------------------------------------- */
+router.post('/paradas', express.json(), async (req, res) => {
+  try {
+    const usuario = String(req.body?.usuario || '').trim() || getOperador(req);
+    const kanbanProgramacaoId = Number(req.body?.kanban_programacao_id) || null;
+    const numeroOp = String(req.body?.numero_op || '').trim();
+    const paradaAberta = await buscarParadaAberta({ kanbanProgramacaoId, numeroOp });
+    if (paradaAberta) {
+      return res.status(409).json({
+        success: false,
+        error: 'Já existe uma parada em andamento para esta OP. Retome a produção antes de registrar outra parada.',
+      });
+    }
+    const row = await registrarParada({
+      kanbanProgramacaoId,
+      numeroOp,
+      usuario,
+      operacao: req.body?.operacao,
+      tipoParada: req.body?.tipo_parada,
+      motivo: req.body?.motivo,
+      paradaFim: req.body?.parada_fim || null,
+    });
+    return res.json({ success: true, parada: row });
+  } catch (err) {
+    console.error('[producao] Erro ao registrar parada:', err.message);
+    return res.status(400).json({ success: false, error: err.message });
+  }
+});
+
+/* ---------------------------------------------------------------
+ * GET /api/producao/paradas/ativa — parada em andamento (parada_fim IS NULL)
+ * Query: kanban_programacao_id?, numero_op?
+ * --------------------------------------------------------------- */
+router.get('/paradas/ativa', async (req, res) => {
+  try {
+    const parada = await buscarParadaAberta({
+      kanbanProgramacaoId: req.query?.kanban_programacao_id,
+      numeroOp: req.query?.numero_op,
+    });
+    return res.json({ success: true, ativa: !!parada, parada: parada || null });
+  } catch (err) {
+    console.error('[producao] Erro ao consultar parada ativa:', err.message);
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/* ---------------------------------------------------------------
+ * POST /api/producao/paradas/ativas-por-ops — paradas abertas por OP (kanban)
+ * Body: { ops: [{ op_producao_id, numero_op?, kanban_programacao_id? }] }
+ * --------------------------------------------------------------- */
+router.post('/paradas/ativas-por-ops', express.json(), async (req, res) => {
+  try {
+    const ops = Array.isArray(req.body?.ops) ? req.body.ops : [];
+    const paradasPorOp = await listarParadasAbertasPorOps(ops);
+    return res.json({ success: true, paradas_por_op: paradasPorOp });
+  } catch (err) {
+    console.error('[producao] Erro ao listar paradas ativas por OP:', err.message);
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/* ---------------------------------------------------------------
+ * POST /api/producao/paradas/:id/retomar — encerra parada (parada_fim = NOW)
+ * --------------------------------------------------------------- */
+router.post('/paradas/:id/retomar', express.json(), async (req, res) => {
+  try {
+    const row = await retomarParada(req.params.id);
+    return res.json({ success: true, parada: row });
+  } catch (err) {
+    console.error('[producao] Erro ao retomar parada:', err.message);
+    return res.status(400).json({ success: false, error: err.message });
+  }
+});
+
+/* ---------------------------------------------------------------
+ * Turno e tempo de produção — schema Tempo_Producao
+ * --------------------------------------------------------------- */
+router.get('/turno/padrao', async (req, res) => {
+  try {
+    const usuario = String(req.query?.usuario || '').trim() || getOperador(req);
+    if (!usuario) return res.status(400).json({ success: false, error: 'Usuário não identificado.' });
+    const nome = String(req.query?.nome || '').trim();
+    if (nome) {
+      const padrao = await buscarTurnoPadrao(usuario, nome);
+      return res.json({ success: true, padrao });
+    }
+    const padroes = await listarTurnosPadrao(usuario);
+    return res.json({ success: true, padroes });
+  } catch (err) {
+    console.error('[producao] Erro ao buscar turno padrão:', err.message);
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+router.post('/turno/padrao', express.json(), async (req, res) => {
+  try {
+    const usuario = String(req.body?.usuario || '').trim() || getOperador(req);
+    if (!usuario) return res.status(400).json({ success: false, error: 'Usuário não identificado.' });
+    const padrao = await salvarTurnoPadrao(usuario, req.body);
+    return res.json({ success: true, padrao });
+  } catch (err) {
+    console.error('[producao] Erro ao salvar turno padrão:', err.message);
+    return res.status(400).json({ success: false, error: err.message });
+  }
+});
+
+router.get('/turno/dia', async (req, res) => {
+  try {
+    const dataRef = String(req.query?.data || dateKeyInTz(new Date())).slice(0, 10);
+    const nomeTurno = String(req.query?.nome_turno || req.query?.nome || '').trim();
+    const usuario = String(req.query?.usuario || '').trim() || getOperador(req);
+    if (nomeTurno) {
+      const turno = await buscarTurnoDia(dataRef, nomeTurno, usuario);
+      return res.json({ success: true, data: dataRef, turno });
+    }
+    const turnos = await listarTurnosDia(dataRef);
+    return res.json({ success: true, data: dataRef, turnos });
+  } catch (err) {
+    console.error('[producao] Erro ao listar turnos do dia:', err.message);
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+router.post('/turno/dia', express.json(), async (req, res) => {
+  try {
+    const usuario = String(req.body?.usuario || '').trim() || getOperador(req);
+    if (!usuario) return res.status(400).json({ success: false, error: 'Usuário não identificado.' });
+    const turno = await registrarTurnoDia(usuario, req.body);
+    return res.json({ success: true, turno });
+  } catch (err) {
+    console.error('[producao] Erro ao registrar turno do dia:', err.message);
+    return res.status(400).json({ success: false, error: err.message });
+  }
+});
+
+// GET /api/producao/notificacao/whatsapp — telefone + permissão OP do usuário logado
+router.get('/notificacao/whatsapp', requireAuth, async (req, res) => {
+  try {
+    const userId = getUserId(req);
+    if (!userId) return res.status(401).json({ ok: false, error: 'Usuário não identificado.' });
+    const config = await obterConfigNotificacaoUsuario(userId);
+    return res.json({
+      ok: true,
+      config: config || {
+        telefone_contato: '',
+        permissao_op: false,
+        permissao_ri: false,
+      },
+    });
+  } catch (err) {
+    console.error('[producao/notificacao/whatsapp GET]', err);
+    return res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// PUT /api/producao/notificacao/whatsapp — salvar telefone e/ou permissões
+router.put('/notificacao/whatsapp', requireAuth, express.json(), async (req, res) => {
+  try {
+    const userId = getUserId(req);
+    if (!userId) return res.status(401).json({ ok: false, error: 'Usuário não identificado.' });
+    const username = req.session?.user?.username || getOperador(req);
+    const body = req.body || {};
+    const config = await salvarConfigNotificacaoUsuario({
+      userId,
+      username,
+      telefoneContato: body.telefone_contato,
+      permissaoOp: body.permissao_op,
+      permissaoRi: body.permissao_ri,
+    });
+    return res.json({ ok: true, config });
+  } catch (err) {
+    console.error('[producao/notificacao/whatsapp PUT]', err);
+    return res.status(400).json({ ok: false, error: err.message });
+  }
+});
+
+router.post('/tempo/ativos-por-ops', express.json(), async (req, res) => {
+  try {
+    const ops = Array.isArray(req.body?.ops) ? req.body.ops : [];
+    const tempos = await calcularTemposPostoPorOps(ops);
+    return res.json({ success: true, tempos_por_op: tempos });
+  } catch (err) {
+    console.error('[producao] Erro ao calcular tempos por OP:', err.message);
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/* ---------------------------------------------------------------
+ * POST /api/producao/finalizar-operacao — Controle_operacoes + próximo posto
+ * --------------------------------------------------------------- */
+router.post('/finalizar-operacao', express.json(), async (req, res) => {
+  try {
+    const opProducaoId = Number(req.body?.op_producao_id) || 0;
+    const numeroOp = String(req.body?.numero_op || '').trim();
+    const proximoStatus = String(req.body?.proximo_status || req.body?.operacao || '').trim();
+    const operacao = proximoStatus || 'Finalizar operação';
+    const usuario = String(req.body?.usuario || '').trim() || getOperador(req);
+    let kanbanProgramacaoId = Number(req.body?.kanban_programacao_id) || null;
+    const postoAtualBody = String(req.body?.posto_atual || '').trim();
+
+    if (!numeroOp && opProducaoId <= 0) {
+      return res.status(400).json({ success: false, error: 'Informe numero_op ou op_producao_id.' });
+    }
+    if (!proximoStatus) {
+      return res.status(400).json({ success: false, error: 'Próximo posto não informado.' });
+    }
+
+    if (!kanbanProgramacaoId) {
+      const { rows } = await dbQuery(
+        `SELECT id, status FROM "Producao"."Kanban_programacao"
+          WHERE ($1::bigint > 0 AND op_producao_id = $1)
+             OR ($2::text <> '' AND UPPER(TRIM(COALESCE(numero_op, ''))) = UPPER(TRIM($2)))
+          ORDER BY created_at DESC, id DESC
+          LIMIT 1`,
+        [opProducaoId || 0, numeroOp || '']
+      );
+      kanbanProgramacaoId = rows[0]?.id || null;
+      if (!postoAtualBody && rows[0]?.status) {
+        req._postoAtualKanban = String(rows[0].status).trim();
+      }
+    } else if (!postoAtualBody) {
+      const { rows } = await dbQuery(
+        `SELECT status FROM "Producao"."Kanban_programacao" WHERE id = $1`,
+        [kanbanProgramacaoId]
+      );
+      req._postoAtualKanban = String(rows[0]?.status || '').trim();
+    }
+
+    const postoAtual = postoAtualBody || req._postoAtualKanban || '';
+
+    const paradaAberta = await buscarParadaAberta({ kanbanProgramacaoId, numeroOp });
+    if (paradaAberta) {
+      return res.status(409).json({
+        success: false,
+        error: 'OP com parada em andamento. Retome a produção antes de finalizar.',
+      });
+    }
+
+    let postoFechado = null;
+    try {
+      if (postoAtual) {
+        const fechados = await encerrarCicloPosto({
+          kanbanProgramacaoId,
+          opProducaoId,
+          numeroOp,
+          postoOrigem: postoAtual,
+          usuario,
+          skipNotificacao: true,
+        });
+        postoFechado = (fechados || []).find((r) => String(r.tipo_registro || '').trim() === 'posto') || null;
+      }
+    } catch (tempoErr) {
+      console.error('[tempo_producao] Falha ao encerrar ciclo posto:', tempoErr.message);
+    }
+
+    if (kanbanProgramacaoId) {
+      await dbQuery(
+        `UPDATE "Producao"."Kanban_programacao"
+            SET status = $1
+          WHERE id = $2`,
+        [proximoStatus, kanbanProgramacaoId]
+      );
+    }
+
+    try {
+      await iniciarCicloPosto({
+        kanbanProgramacaoId,
+        opProducaoId,
+        numeroOp,
+        postoOrigem: proximoStatus,
+        operacao: `Entrada em ${proximoStatus}`,
+        usuario,
+        skipNotificacao: true,
+      });
+    } catch (tempoErr) {
+      console.error('[tempo_producao] Falha ao iniciar ciclo no próximo posto:', tempoErr.message);
+    }
+
+    if (postoFechado && postoAtual && proximoStatus && postoAtual !== proximoStatus) {
+      dispararNotificacaoTransicaoPosto({
+        numeroOp: postoFechado.numero_op || numeroOp,
+        postoDe: postoAtual,
+        postoPara: proximoStatus,
+        inicio: postoFechado.inicio,
+        fim: postoFechado.fim,
+        usuarioFim: postoFechado.usuario_fim || usuario,
+      });
+    } else if (postoFechado?.id) {
+      dispararNotificacaoRegistroTempo(postoFechado.id);
+    }
+
+    const row = await registrarControleOperacaoImpressaoOp({
+      kanbanProgramacaoId,
+      opProducaoId,
+      numeroOp,
+      usuario,
+      operacao,
+    });
+    return res.json({ success: true, registro: row, kanban_programacao_id: kanbanProgramacaoId, status: proximoStatus });
+  } catch (err) {
+    console.error('[producao] Erro ao finalizar operação:', err.message);
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/** Colunas do kanban Registrar produção que permitem retroceder OP. */
+const RETROCEDER_KANBAN_POR_COL_KEY = {
+  solicitado: {
+    status_destino: null,
+    posto_desfeito: 'Montagem hermetica',
+    operacoes_desfeitas: ['Montagem hermetica', 'Imprimir OP'],
+  },
+  produzindo: {
+    status_destino: 'Montagem hermetica',
+    posto_desfeito: 'Montagem hermetica',
+    operacoes_desfeitas: ['Montagem eletrica'],
+  },
+  teste: {
+    status_destino: 'Montagem eletrica',
+    posto_desfeito: 'Montagem eletrica',
+    operacoes_desfeitas: ['Teste'],
+  },
+  inspecao_final: {
+    status_destino: 'Teste',
+    posto_desfeito: 'Teste',
+    operacoes_desfeitas: ['Inspeção final', 'Teste OK'],
+  },
+};
+
+/* ---------------------------------------------------------------
+ * POST /api/producao/retroceder-op — volta OP ao kanban anterior
+ * --------------------------------------------------------------- */
+router.post('/retroceder-op', express.json(), async (req, res) => {
+  try {
+    const opProducaoId = Number(req.body?.op_producao_id) || 0;
+    const numeroOp = String(req.body?.numero_op || '').trim();
+    const colKey = String(req.body?.col_key || '').trim();
+    const usuario = String(req.body?.usuario || '').trim() || getOperador(req);
+    let kanbanProgramacaoId = Number(req.body?.kanban_programacao_id) || null;
+
+    if (!numeroOp && opProducaoId <= 0) {
+      return res.status(400).json({ success: false, error: 'Informe numero_op ou op_producao_id.' });
+    }
+
+    const cfg = RETROCEDER_KANBAN_POR_COL_KEY[colKey];
+    if (!cfg) {
+      return res.status(400).json({
+        success: false,
+        error: 'Retroceder OP só está disponível em Montagem hermetica, Montagem eletrica, Teste ou Inspeção final.',
+      });
+    }
+
+    if (!kanbanProgramacaoId) {
+      const { rows } = await dbQuery(
+        `SELECT id FROM "Producao"."Kanban_programacao"
+          WHERE ($1::bigint > 0 AND op_producao_id = $1)
+             OR ($2::text <> '' AND UPPER(TRIM(COALESCE(numero_op, ''))) = UPPER(TRIM($2)))
+          ORDER BY created_at DESC, id DESC
+          LIMIT 1`,
+        [opProducaoId || 0, numeroOp || '']
+      );
+      kanbanProgramacaoId = rows[0]?.id || null;
+    }
+
+    const paradaAberta = await buscarParadaAberta({ kanbanProgramacaoId, numeroOp });
+    if (paradaAberta) {
+      return res.status(409).json({
+        success: false,
+        error: 'OP com parada em andamento. Retome a produção antes de retroceder.',
+      });
+    }
+
+    const opRefId = opProducaoId > 0 ? opProducaoId : null;
+    let riRevertido = null;
+    if (opRefId && cfg.posto_desfeito) {
+      riRevertido = await reverterRiCheckNoPosto(opRefId, cfg.posto_desfeito);
+    }
+
+    if (kanbanProgramacaoId) {
+      await dbQuery(
+        `UPDATE "Producao"."Kanban_programacao"
+            SET status = $1
+          WHERE id = $2`,
+        [cfg.status_destino, kanbanProgramacaoId]
+      );
+    }
+
+    const operacoes = (cfg.operacoes_desfeitas || []).filter(Boolean);
+    for (const operacaoNome of operacoes) {
+      const params = [operacaoNome];
+      let whereOp = '';
+      if (kanbanProgramacaoId) {
+        params.push(kanbanProgramacaoId);
+        whereOp = 'AND kanban_programacao_id = $2';
+      } else if (numeroOp) {
+        params.push(numeroOp);
+        whereOp = `AND UPPER(TRIM(COALESCE(numero_op, ''))) = UPPER(TRIM($2))`;
+      }
+      await dbQuery(
+        `DELETE FROM "Producao"."Controle_operacoes"
+          WHERE id = (
+            SELECT id FROM "Producao"."Controle_operacoes"
+             WHERE operacao = $1
+               ${whereOp}
+             ORDER BY inicio DESC NULLS LAST, id DESC
+             LIMIT 1
+          )`,
+        params
+      );
+    }
+
+    await registrarControleOperacaoImpressaoOp({
+      kanbanProgramacaoId,
+      opProducaoId,
+      numeroOp,
+      usuario,
+      operacao: `Retroceder OP → ${cfg.status_destino || 'Programado'}`,
+    });
+
+    return res.json({
+      success: true,
+      kanban_programacao_id: kanbanProgramacaoId,
+      status: cfg.status_destino,
+      posto_ri_desfeito: cfg.posto_desfeito,
+      ri_check_id_revertido: riRevertido,
+    });
+  } catch (err) {
+    console.error('[producao] Erro ao retroceder OP:', err.message);
+    return res.status(500).json({ success: false, error: err.message });
   }
 });
 

@@ -12,7 +12,6 @@ const path = require('path');
 const crypto = require('crypto');
 const { execFile } = require('child_process');
 const { promisify } = require('util');
-const { Pool } = require('pg');
 const JSZip = require('jszip');
 const supabase = require('../utils/supabase');
 
@@ -102,13 +101,7 @@ const UFS_BRASIL = new Set([
   'SP', 'SE', 'TO'
 ]);
 
-const dbConnectionString = process.env.DATABASE_URL || process.env.POSTGRES_URL || '';
-const dbPool = dbConnectionString
-  ? new Pool({
-      connectionString: dbConnectionString,
-      ssl: { rejectUnauthorized: false }
-    })
-  : null;
+const { pool: dbPool } = require('../src/db');
 
 let schemaCache = { expiresAt: 0, text: '' };
 let chatbotLogTableReadyPromise = null;

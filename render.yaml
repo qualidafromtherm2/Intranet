@@ -2,6 +2,23 @@
 # render.yaml — Configuração do Render para o projeto Intranet
 # ============================================================
 # Documentação: https://render.com/docs/infrastructure-as-code
+#
+# Segredos (DATABASE_URL, OMIE_*) ficam no Dashboard da Render ou no .env local.
+# Nunca commitar valores reais aqui — use sync: false.
+
+envVarGroups:
+  - name: intranet-cron-secrets
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: OMIE_APP_KEY
+        sync: false
+      - key: OMIE_APP_SECRET
+        sync: false
+      - key: NODE_ENV
+        value: production
+      - key: PGPOOL_MAX
+        value: "5"
 
 services:
 
@@ -12,19 +29,12 @@ services:
   - type: cron
     name: sync-agendamento-omie
     runtime: node
-    region: oregon           # mesma região do banco Postgres no Render
-    schedule: "*/5 * * * *"  # A cada 5 min — o script decide se executa via proxima_execucao
-    buildCommand: npm install --production
+    region: oregon
+    schedule: "*/5 * * * *"
+    buildCommand: npm ci --omit=dev
     startCommand: node cron/sync_agendamento.js
-    envVars:
-      - key: DATABASE_URL
-        value: postgresql://intranet_db_yd0w_user:amLpOKjWzzDRhwcR1NF0eolJzzfCY0ho@dpg-d2d4b0a4d50c7385vm50-a.oregon-postgres.render.com:5432/intranet_db_yd0w?sslmode=require
-      - key: OMIE_APP_KEY
-        value: "4244634488206"
-      - key: OMIE_APP_SECRET
-        value: "10d9dde2e4e3bac7e62a2cc01bfba01e"
-      - key: NODE_ENV
-        value: production
+    envVarGroups:
+      - name: intranet-cron-secrets
 
   # ── Cron Job: Atualização diária de rastreio (07:00 Brasília = 10:00 UTC) ───
   - type: cron
@@ -32,10 +42,10 @@ services:
     runtime: node
     region: oregon
     schedule: "0 10 * * *"
-    buildCommand: npm install --production
+    buildCommand: npm ci --omit=dev
     startCommand: node cron/atualizar_rastreio_envios.js
     envVars:
       - key: DATABASE_URL
-        value: postgresql://intranet_db_yd0w_user:amLpOKjWzzDRhwcR1NF0eolJzzfCY0ho@dpg-d2d4b0a4d50c7385vm50-a.oregon-postgres.render.com:5432/intranet_db_yd0w?sslmode=require
+        sync: false
       - key: NODE_ENV
         value: production

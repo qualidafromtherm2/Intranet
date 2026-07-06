@@ -182,7 +182,7 @@ function isErroOmieRetryable({ httpStatus, texto }) {
     || /too many|rate limit|consumo redundante|requisi/i.test(body);
 }
 
-async function incluirAjusteEstoqueOmie({ origem, destino, codigo_produto, qtd, codigo, id, cmc, data_movimentacao }, aprovadoPor) {
+async function incluirAjusteEstoqueOmie({ origem, destino, codigo_produto, qtd, codigo, id, cmc, data_movimentacao, motivo }, aprovadoPor) {
   if (!OMIE_APP_KEY || !OMIE_APP_SECRET) {
     const err = new Error('Credenciais da Omie ausentes.');
     err.status = 500;
@@ -204,6 +204,8 @@ async function incluirAjusteEstoqueOmie({ origem, destino, codigo_produto, qtd, 
     throw err;
   }
   const dataMovimentacao = normalizarDataMovimentacao(data_movimentacao);
+  const motivoNormalizado = String(motivo || 'TRF').toUpperCase();
+  const motivoOmie = (motivoNormalizado === 'TPQ' || motivoNormalizado === 'TRF') ? motivoNormalizado : 'TRF';
 
   const payload = {
     call: 'IncluirAjusteEstoque',
@@ -219,7 +221,7 @@ async function incluirAjusteEstoqueOmie({ origem, destino, codigo_produto, qtd, 
         obs: `Solicitação de transferência #${id} do produto ${codigo || ''}. Aprovado por ${aprovadoPor}.`,
         origem: 'AJU',
         tipo: 'TRF',
-        motivo: 'TRF',
+        motivo: motivoOmie,
         valor: valorCmc
       }
     ]
@@ -586,7 +588,8 @@ router.patch('/:id/aprovar', express.json(), async (req, res) => {
       return res.status(409).json({ error: 'Esta solicitação já foi marcada como transferida.' });
     }
 
-    const respostaOmie = await incluirAjusteEstoqueOmie(registroAtual, aprovadoPor);
+    const motivoOmie = String(req.body?.motivo || 'TRF').trim().toUpperCase() || 'TRF';
+    const respostaOmie = await incluirAjusteEstoqueOmie({ ...registroAtual, motivo: motivoOmie }, aprovadoPor);
 
     const updateSql = `
       UPDATE mensagens.transferencias

@@ -1,19 +1,14 @@
 // routes/auth.js (SQL only, com parser e id numérico na sessão)
 const express = require('express');
-const { Pool } = require('pg');
+const { pool } = require('../src/db');
 
 const router = express.Router();
 router.use(express.json()); // garante req.body em /login
 
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  ssl: { rejectUnauthorized: false }
-});
-
 async function carregarExtrasDoUsuario(userId) {
   try {
     const { rows } = await pool.query(
-      `SELECT s.name AS setor_nome, u.foto_perfil_url, u.conta_google, f.name AS funcao_nome
+      `SELECT s.name AS setor_nome, up.sector_id, u.foto_perfil_url, u.conta_google, f.name AS funcao_nome
          FROM public.auth_user u
          LEFT JOIN public.auth_user_profile up ON up.user_id = u.id
          LEFT JOIN public.auth_sector s ON s.id = up.sector_id
@@ -24,13 +19,14 @@ async function carregarExtrasDoUsuario(userId) {
     );
     return { 
       setor: rows[0]?.setor_nome || null,
+      sector_id: rows[0]?.sector_id != null ? Number(rows[0].sector_id) : null,
       foto_perfil_url: rows[0]?.foto_perfil_url || null,
       conta_google: rows[0]?.conta_google || null,
       funcao_nome: rows[0]?.funcao_nome || null
     };
   } catch (e) {
     console.warn('[auth] não foi possível carregar dados extras do usuário', e.message);
-    return { setor: null, foto_perfil_url: null, conta_google: null };
+    return { setor: null, sector_id: null, foto_perfil_url: null, conta_google: null };
   }
 }
 
@@ -62,7 +58,8 @@ router.post('/login', async (req, res) => {
         id: String(u.id),                 // << id numérico correto
         username: u.username,
         roles: u.roles,
-        setor: extras.setor
+        setor: extras.setor,
+        sector_id: extras.sector_id
       };
       req.session.save(() => res.json({ ok: true, user: req.session.user }));
     });

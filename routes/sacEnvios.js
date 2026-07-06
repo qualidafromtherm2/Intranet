@@ -1,5 +1,4 @@
 const express = require('express');
-const { Pool } = require('pg');
 const multer = require('multer');
 const { v4: uuidv4 } = require('uuid');
 const mime = require('mime-types');
@@ -10,6 +9,13 @@ const bcrypt = require('bcrypt');
 const crypto = require('crypto');
 
 const supabase = require('../utils/supabase');
+const { uploadPublicFile, removePublicFiles } = require('../utils/storage');
+const {
+  parseEnderecoTecnicoLegado,
+  corrigirCamposEnderecoTecnico,
+  normalizarEnderecoTecnicoRow,
+  sanitizarCamposEnderecoTecnico,
+} = require('../utils/tecnicoEndereco');
 
 const router = express.Router();
 
@@ -245,6 +251,30 @@ function buildWhatsappPhoneCandidates(value) {
   }
 
   return Array.from(out);
+}
+
+/** Candidatos para match flexível (com/sem +55, DDD, 9º dígito, fixo 10 dígitos). */
+function buildPhoneMatchCandidates(value) {
+  const out = new Set(buildWhatsappPhoneCandidates(value));
+  const digits = normalizePhoneDigits(value);
+  if (!digits) return [];
+
+  const variants = new Set([digits]);
+  if (digits.startsWith('55') && digits.length > 11) variants.add(digits.slice(2));
+  if (digits.length >= 11) variants.add(digits.slice(-11));
+  if (digits.length >= 10) variants.add(digits.slice(-10));
+
+  for (const v of variants) {
+    if (!v || v.length < 8) continue;
+    out.add(v);
+    if (v.length === 10) out.add(`55${v}`);
+    if (v.length === 11) {
+      out.add(`55${v}`);
+      if (v[2] === '9') out.add(`55${v.slice(0, 2)}${v.slice(3)}`);
+    }
+  }
+
+  return Array.from(out).filter((v) => v.length >= 8);
 }
 
 function sanitizeWhatsappMediaFileName(label, fallbackExt = 'pdf') {
@@ -3617,10 +3647,7 @@ function extractConteudo(textRaw) {
   return JSON.stringify(items);
 }
 
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL || process.env.POSTGRES_URL,
-  ssl: { rejectUnauthorized: false }
-});
+const { pool } = require('../src/db');
 
 const BUCKET = process.env.STORAGE_BUCKET_SAC || process.env.STORAGE_BUCKET || process.env.SUPABASE_BUCKET || 'produtos';
 
@@ -3684,6 +3711,9 @@ async function ensureSchema() {
       ADD COLUMN IF NOT EXISTS finalizado_em TIMESTAMPTZ;
 
     ALTER TABLE envios.solicitacoes
+      ADD COLUMN IF NOT EXISTS metodo_envio TEXT;
+
+    ALTER TABLE envios.solicitacoes
       ALTER COLUMN status SET DEFAULT 'Pendente';
 
     CREATE SCHEMA IF NOT EXISTS sac;
@@ -3733,6 +3763,29 @@ async function ensureSchema() {
       alimentacao   TEXT NOT NULL,
       criado_em     TIMESTAMP NOT NULL DEFAULT NOW()
     );
+
+    CREATE TABLE IF NOT EXISTS sac.material_apoio (
+      id              BIGSERIAL PRIMARY KEY,
+      nome            TEXT NOT NULL,
+      tipo            TEXT NOT NULL,
+      formato         TEXT NOT NULL,
+      nome_arquivo    TEXT NOT NULL,
+      path_key        TEXT NOT NULL,
+      url_publica     TEXT,
+      content_type    TEXT,
+      tamanho_bytes   BIGINT,
+      status_upload   TEXT NOT NULL DEFAULT 'enviando',
+      upload_erro     TEXT,
+      publico         BOOLEAN NOT NULL DEFAULT false,
+      criado_por      TEXT,
+      criado_em       TIMESTAMP NOT NULL DEFAULT NOW(),
+      atualizado_em   TIMESTAMP
+    );
+
+    ALTER TABLE sac.material_apoio ADD COLUMN IF NOT EXISTS status_upload TEXT NOT NULL DEFAULT 'concluido';
+    ALTER TABLE sac.material_apoio ADD COLUMN IF NOT EXISTS upload_erro TEXT;
+    ALTER TABLE sac.material_apoio ALTER COLUMN url_publica DROP NOT NULL;
+    ALTER TABLE sac.material_apoio ADD COLUMN IF NOT EXISTS publico BOOLEAN NOT NULL DEFAULT false;
 
     CREATE TABLE IF NOT EXISTS sac.tag (
       id         BIGSERIAL PRIMARY KEY,
@@ -3785,6 +3838,9 @@ async function ensureSchema() {
     ALTER TABLE sac.controle_tecnicos ADD COLUMN IF NOT EXISTS senha TEXT;
     ALTER TABLE sac.controle_tecnicos ADD COLUMN IF NOT EXISTS token TEXT;
     ALTER TABLE sac.controle_tecnicos ADD COLUMN IF NOT EXISTS qtd_atend_ult_1_ano INTEGER DEFAULT 0;
+    ALTER TABLE sac.controle_tecnicos ADD COLUMN IF NOT EXISTS numero TEXT;
+    ALTER TABLE sac.controle_tecnicos ADD COLUMN IF NOT EXISTS bairro TEXT;
+    ALTER TABLE sac.controle_tecnicos ADD COLUMN IF NOT EXISTS complemento TEXT;
     ALTER TABLE sac.controle_tecnicos ADD COLUMN IF NOT EXISTS id BIGSERIAL;
     CREATE UNIQUE INDEX IF NOT EXISTS controle_tecnicos_token_idx ON sac.controle_tecnicos(token) WHERE token IS NOT NULL;
     CREATE UNIQUE INDEX IF NOT EXISTS controle_tecnicos_id_idx    ON sac.controle_tecnicos(id);
@@ -3871,9 +3927,56 @@ async function ensureSchema() {
   `);
 }
 
-ensureSchema().catch(err => {
-  console.error('[SAC] falha ao garantir schema/tabela envios:', err);
-});
+async function migrarEnderecosControleTecnicos() {
+  const { rows } = await pool.query(
+    `SELECT id, endereco, numero, bairro, complemento
+       FROM sac.controle_tecnicos
+      WHERE endereco IS NOT NULL
+        AND BTRIM(endereco) <> ''
+        AND (
+          BTRIM(COALESCE(numero, '')) = ''
+          AND BTRIM(COALESCE(bairro, '')) = ''
+          AND BTRIM(COALESCE(complemento, '')) = ''
+        )
+        AND (
+          endereco LIKE '%,%'
+          OR endereco LIKE '% - %'
+          OR endereco ~ '\\([^)]+\\)\\s*$'
+        )`
+  );
+
+  if (!rows.length) return { migrated: 0 };
+
+  let migrated = 0;
+  for (const row of rows) {
+    const parsed = corrigirCamposEnderecoTecnico(row);
+    if (!parsed.endereco && !parsed.numero && !parsed.bairro && !parsed.complemento) continue;
+    await pool.query(
+      `UPDATE sac.controle_tecnicos
+          SET endereco = $1, numero = $2, bairro = $3, complemento = $4
+        WHERE id = $5`,
+      [
+        parsed.endereco || row.endereco,
+        parsed.numero || null,
+        parsed.bairro || null,
+        parsed.complemento || null,
+        row.id,
+      ]
+    );
+    migrated += 1;
+  }
+
+  if (migrated > 0) {
+    console.log(`[SAC/AT] endereços de técnicos migrados: ${migrated}`);
+  }
+  return { migrated };
+}
+
+ensureSchema()
+  .then(() => migrarEnderecosControleTecnicos())
+  .catch(err => {
+    console.error('[SAC] falha ao garantir schema/tabela envios:', err);
+  });
 
 // ── Sync automático do cache de série ────────────────────────────────────────
 // Executa ao iniciar o servidor e depois a cada 2 horas automaticamente.
@@ -4405,22 +4508,26 @@ router.patch('/at/fechamento/:id_at', async (req, res) => {
 
 // POST /solicitacoes/vipp — cria entrada de envio SAC a partir de postagem VIPP (sem upload de arquivo)
 router.post('/solicitacoes/vipp', async (req, res) => {
-  const usuario   = String(req.body?.usuario   || '').trim();
+  const usuario   = String(req.body?.usuario || '').trim()
+    || String(req.session?.user?.username || req.session?.user?.fullName || req.session?.user?.nome || req.session?.user?.login || '').trim();
   const observacao = String(req.body?.observacao || '').trim();
   const idVipp    = String(req.body?.id_vipp    || '').trim() || null;
   const conteudo  = req.body?.conteudo || null; // JSON string de itens [{ conteudo, quantidade }]
   const numeroSep = String(req.body?.numero_sep || '').trim() || null;
+  const metodoEnvio = String(req.body?.metodo_envio || '').trim() || null;
 
   if (!usuario) return res.status(400).json({ ok: false, error: 'Usuário é obrigatório.' });
-  if (!idVipp && !observacao) return res.status(400).json({ ok: false, error: 'id_vipp ou observação obrigatório.' });
+  if (!idVipp && !observacao && !metodoEnvio) {
+    return res.status(400).json({ ok: false, error: 'id_vipp, observação ou método de envio obrigatório.' });
+  }
 
   try {
     const result = await pool.query(
       `INSERT INTO envios.solicitacoes
-         (usuario, observacao, numero_sep, status, anexos, conferido, id_vipp, conteudo)
-       VALUES ($1, $2, $3, 'Pendente', '{}', false, $4, $5)
-       RETURNING id, created_at, status, id_vipp, conteudo, observacao`,
-      [usuario, observacao || null, numeroSep, idVipp, conteudo ? String(conteudo) : null]
+         (usuario, observacao, numero_sep, status, anexos, conferido, id_vipp, conteudo, metodo_envio)
+       VALUES ($1, $2, $3, 'Pendente', '{}', false, $4, $5, $6)
+       RETURNING id, created_at, status, id_vipp, conteudo, observacao, metodo_envio`,
+      [usuario, observacao || null, numeroSep, idVipp, conteudo ? String(conteudo) : null, metodoEnvio]
     );
     const row = result.rows[0];
     return res.json({ ok: true, id: row.id, created_at: row.created_at, status: row.status, id_vipp: row.id_vipp });
@@ -4554,9 +4661,13 @@ router.get('/solicitacoes', async (req, res) => {
     const conditions = [];
     const params = [];
 
-    // Fila Envio de mercadoria: apenas rastreio_status Validada ou Processamento Vipp
+    // Fila Envio de mercadoria: Correios (VIPP) ou envios manuais (Disktenha / transportadora)
     if (filaLogistica) {
-      conditions.push("COALESCE(rastreio_status, '') IN ('Valida', 'Processamento Vipp')");
+      conditions.push(`(
+        COALESCE(rastreio_status, '') IN ('Valida', 'Processamento Vipp')
+        OR COALESCE(metodo_envio, '') IN ('Envio via Disktenha', 'Envio via transportadora')
+      )`);
+      conditions.push("COALESCE(status, '') NOT IN ('Excluído', 'Enviado', 'Finalizado')");
     } else if (hideDone) {
       // Filtro por status (oculta Enviado, Finalizado e Excluído)
       conditions.push("COALESCE(status, '') NOT IN ('Enviado', 'Finalizado', 'Excluído')");
@@ -4580,7 +4691,7 @@ router.get('/solicitacoes', async (req, res) => {
     const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 
     const r = await pool.query(
-      `SELECT id, created_at, usuario, observacao, numero_sep, status, conferido, etiqueta_url, declaracao_url, identificacao, conteudo, rastreio_status, rastreio_quando, finalizado_em, id_vipp
+      `SELECT id, created_at, usuario, observacao, numero_sep, status, conferido, etiqueta_url, declaracao_url, identificacao, conteudo, rastreio_status, rastreio_quando, finalizado_em, id_vipp, metodo_envio
          FROM envios.solicitacoes
         ${whereClause}
         ORDER BY id DESC
@@ -4847,6 +4958,38 @@ router.patch('/solicitacoes/:id/status', async (req, res) => {
   } catch (err) {
     console.error('[SAC] erro ao atualizar status:', err);
     return res.status(500).json({ ok: false, error: 'Erro ao atualizar status.' });
+  }
+});
+
+// Endpoint para editar identificação (rastreabilidade)
+router.patch('/solicitacoes/:id/identificacao', async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id <= 0) {
+    return res.status(400).json({ ok: false, error: 'ID inválido.' });
+  }
+
+  const identificacao = String(req.body?.identificacao || '').trim();
+  if (!identificacao) {
+    return res.status(400).json({ ok: false, error: 'Identificação é obrigatória.' });
+  }
+
+  try {
+    const r = await pool.query(
+      `UPDATE envios.solicitacoes
+          SET identificacao = $1
+        WHERE id = $2
+      RETURNING id, identificacao`,
+      [identificacao, id]
+    );
+
+    if (!r.rowCount) {
+      return res.status(404).json({ ok: false, error: 'Registro não encontrado.' });
+    }
+
+    return res.json({ ok: true, identificacao: r.rows[0].identificacao });
+  } catch (err) {
+    console.error('[SAC] erro ao atualizar identificação:', err);
+    return res.status(500).json({ ok: false, error: 'Erro ao atualizar identificação.' });
   }
 });
 
@@ -6175,6 +6318,307 @@ router.get('/at/os-data/:id', async (req, res) => {
   }
 });
 
+function mapVippDestinoTecnico(row) {
+  if (!row) return null;
+  const addr = normalizarEnderecoTecnicoRow(row);
+  return {
+    nome: row.nome || '',
+    cnpj_cpf: row.cnpj_cpf || '',
+    telefone: row.celular || '',
+    email: '',
+    cep: row.cep || '',
+    endereco: addr.endereco || '',
+    numero: addr.numero || '',
+    bairro: addr.bairro || '',
+    complemento: addr.complemento || '',
+    cidade: row.municipio || '',
+    estado: row.uf || '',
+  };
+}
+
+function mapVippDestinoFornecedor(row) {
+  if (!row) return null;
+
+  let cidade = String(row.cidade || '').trim();
+  const cidadeUf = cidade.match(/^(.+?)\s*\([A-Z]{2}\)\s*$/i);
+  if (cidadeUf) cidade = cidadeUf[1].trim();
+
+  const ddd = String(row.telefone1_ddd || '').replace(/\D/g, '');
+  const tel = String(row.telefone1_numero || '').replace(/\D/g, '');
+  let telefone = '';
+  if (ddd && tel) {
+    telefone = tel.length >= 8
+      ? `(${ddd}) ${tel.replace(/(\d{4,5})(\d{4})$/, '$1-$2')}`
+      : `(${ddd}) ${tel}`;
+  } else {
+    telefone = tel || ddd;
+  }
+
+  let numero = String(row.endereco_numero || '').trim();
+  if (!numero || numero === '0' || numero === '00') numero = '';
+
+  const emailRaw = String(row.email || '').trim();
+  const email = emailRaw ? emailRaw.split(/[,;]/)[0].trim() : '';
+
+  return {
+    nome: String(row.razao_social || row.nome_fantasia || '').trim(),
+    cnpj_cpf: row.cnpj_cpf || '',
+    telefone,
+    email,
+    cep: row.cep || '',
+    endereco: row.endereco || '',
+    numero,
+    bairro: row.bairro || '',
+    complemento: row.complemento || '',
+    cidade,
+    estado: String(row.estado || '').trim().toUpperCase(),
+  };
+}
+
+function mapVippDestinoAt(row) {
+  if (!row) return null;
+  return {
+    nome: row.nome_revenda_cliente || '',
+    cnpj_cpf: row.cpf_cnpj || '',
+    telefone: row.numero_telefone || '',
+    cep: row.cep || '',
+    endereco: row.rua || '',
+    numero: row.numero || '',
+    bairro: row.bairro || '',
+    cidade: row.cidade || '',
+    estado: row.estado || '',
+    id_at: row.id || null,
+  };
+}
+
+async function buscarTecnicoControlePorOs(idAt, nomeFallback) {
+  const id = Number(idAt) || 0;
+  if (!id) return null;
+
+  const porId = await pool.query(
+    `SELECT ct.id, ct.nome, ct.cnpj_cpf, ct.endereco, ct.numero, ct.bairro, ct.complemento,
+            ct.municipio, ct.uf, ct.cep, ct.celular
+       FROM sac.fechamento f
+       JOIN sac.controle_tecnicos ct ON ct.id = f.id_tecnico
+      WHERE f.id_at = $1
+        AND f.id_tecnico IS NOT NULL
+      ORDER BY f.id DESC
+      LIMIT 1`,
+    [id]
+  );
+  if (porId.rows[0]) return porId.rows[0];
+
+  const nome = String(nomeFallback || '').trim();
+  if (!nome) return null;
+
+  const { rows } = await pool.query(
+    `SELECT id, nome, cnpj_cpf, endereco, numero, bairro, complemento, municipio, uf, cep, celular
+       FROM sac.controle_tecnicos
+      WHERE UPPER(BTRIM(nome)) = UPPER(BTRIM($1))
+      LIMIT 1`,
+    [nome]
+  );
+  return rows[0] || null;
+}
+
+async function buscarVippDestinoPorTelefone(telefone) {
+  const candidates = buildPhoneMatchCandidates(telefone);
+  if (!candidates.length) return { encontrado: false };
+
+  const suffix10 = [...new Set(candidates.filter((c) => c.length >= 10).map((c) => c.slice(-10)))];
+  const suffix11 = [...new Set(candidates.filter((c) => c.length >= 11).map((c) => c.slice(-11)))];
+
+  const phoneWhereParts = [`regexp_replace(celular, '\\D', '', 'g') = ANY($1::text[])`];
+  const phoneParams = [candidates];
+  if (suffix10.length) {
+    phoneParams.push(suffix10);
+    phoneWhereParts.push(`RIGHT(regexp_replace(celular, '\\D', '', 'g'), 10) = ANY($${phoneParams.length}::text[])`);
+  }
+  if (suffix11.length) {
+    phoneParams.push(suffix11);
+    phoneWhereParts.push(`RIGHT(regexp_replace(celular, '\\D', '', 'g'), 11) = ANY($${phoneParams.length}::text[])`);
+  }
+
+  const { rows: tecRows } = await pool.query(
+    `SELECT id, nome, cnpj_cpf, endereco, numero, bairro, complemento, municipio, uf, cep, celular
+       FROM sac.controle_tecnicos
+      WHERE COALESCE(BTRIM(celular), '') <> ''
+        AND (${phoneWhereParts.join(' OR ')})
+      LIMIT 1`,
+    phoneParams
+  );
+  if (tecRows[0]) {
+    return {
+      encontrado: true,
+      fonte: 'tecnico',
+      label: `Técnico: ${tecRows[0].nome || 'cadastrado'}`,
+      dados: mapVippDestinoTecnico(tecRows[0]),
+    };
+  }
+
+  const atWhereParts = [`regexp_replace(numero_telefone, '\\D', '', 'g') = ANY($1::text[])`];
+  const atParams = [candidates];
+  if (suffix10.length) {
+    atParams.push(suffix10);
+    atWhereParts.push(`RIGHT(regexp_replace(numero_telefone, '\\D', '', 'g'), 10) = ANY($${atParams.length}::text[])`);
+  }
+  if (suffix11.length) {
+    atParams.push(suffix11);
+    atWhereParts.push(`RIGHT(regexp_replace(numero_telefone, '\\D', '', 'g'), 11) = ANY($${atParams.length}::text[])`);
+  }
+
+  const { rows: atRows } = await pool.query(
+    `SELECT id, nome_revenda_cliente, numero_telefone, cpf_cnpj, cep, rua, numero, bairro, cidade, estado
+       FROM sac.at
+      WHERE COALESCE(BTRIM(numero_telefone), '') <> ''
+        AND (${atWhereParts.join(' OR ')})
+      ORDER BY id DESC
+      LIMIT 1`,
+    atParams
+  );
+  if (atRows[0]) {
+    return {
+      encontrado: true,
+      fonte: 'at',
+      label: `OS #${atRows[0].id}: ${atRows[0].nome_revenda_cliente || 'cliente'}`,
+      dados: mapVippDestinoAt(atRows[0]),
+    };
+  }
+
+  return { encontrado: false };
+}
+
+// GET /at/vipp-preencher-tecnico/:id_at — destinatário VIPP a partir do técnico da OS
+router.get('/at/vipp-preencher-tecnico/:id_at', async (req, res) => {
+  const idAt = parseInt(req.params.id_at, 10);
+  if (!idAt || idAt < 1) return res.status(400).json({ error: 'id_at inválido.' });
+  try {
+    const nomeFallback = String(req.query?.nome || '').trim();
+    const tecnico = await buscarTecnicoControlePorOs(idAt, nomeFallback);
+    if (!tecnico) {
+      return res.status(404).json({ error: 'Nenhum técnico vinculado a esta OS.' });
+    }
+    return res.json({
+      ok: true,
+      tecnico_nome: tecnico.nome || '',
+      dados: mapVippDestinoTecnico(tecnico),
+    });
+  } catch (err) {
+    console.error('[SAC/AT] erro vipp-preencher-tecnico:', err);
+    return res.status(500).json({ error: err.message || 'Falha ao buscar técnico.' });
+  }
+});
+
+// GET /at/vipp-buscar-por-telefone?telefone= — técnico ou OS pelo celular informado
+router.get('/at/vipp-buscar-por-telefone', async (req, res) => {
+  try {
+    const resultado = await buscarVippDestinoPorTelefone(req.query?.telefone);
+    return res.json({ ok: true, ...resultado });
+  } catch (err) {
+    console.error('[SAC/AT] erro vipp-buscar-por-telefone:', err);
+    return res.status(500).json({ error: err.message || 'Falha ao buscar telefone.' });
+  }
+});
+
+// GET /at/vipp-buscar-nome?q= — autocomplete de técnicos e fornecedores (mín. 5 caracteres)
+router.get('/at/vipp-buscar-nome', async (req, res) => {
+  const q = String(req.query?.q || '').trim();
+  if (q.length < 5) {
+    return res.json({ ok: true, itens: [] });
+  }
+  const like = `%${q}%`;
+  try {
+    const [tecRes, fornRes] = await Promise.all([
+      pool.query(
+        `SELECT id, nome, municipio, uf
+           FROM sac.controle_tecnicos
+          WHERE nome ILIKE $1
+          ORDER BY nome
+          LIMIT 12`,
+        [like]
+      ),
+      pool.query(
+        `SELECT id, razao_social, nome_fantasia, cidade, estado
+           FROM omie.fornecedores
+          WHERE COALESCE(inativo, false) = false
+            AND (razao_social ILIKE $1 OR nome_fantasia ILIKE $1)
+          ORDER BY razao_social
+          LIMIT 12`,
+        [like]
+      ),
+    ]);
+
+    const itens = [
+      ...tecRes.rows.map((r) => ({
+        fonte: 'tecnico',
+        id: r.id,
+        label: r.nome,
+        sub: ['Técnico', r.municipio, r.uf].filter(Boolean).join(' · '),
+      })),
+      ...fornRes.rows.map((r) => ({
+        fonte: 'fornecedor',
+        id: r.id,
+        label: r.razao_social || r.nome_fantasia,
+        sub: ['Fornecedor', r.cidade, r.estado].filter(Boolean).join(' · '),
+      })),
+    ].slice(0, 20);
+
+    return res.json({ ok: true, itens });
+  } catch (err) {
+    console.error('[SAC/AT] erro vipp-buscar-nome:', err);
+    return res.status(500).json({ ok: false, error: err.message || 'Falha ao buscar nome.' });
+  }
+});
+
+// GET /at/vipp-destino-detalhe?fonte=tecnico|fornecedor&id= — dados completos para preencher VIPP
+router.get('/at/vipp-destino-detalhe', async (req, res) => {
+  const fonte = String(req.query?.fonte || '').trim().toLowerCase();
+  const id = parseInt(req.query?.id, 10);
+  if (!id || id < 1) return res.status(400).json({ error: 'id inválido.' });
+  if (!['tecnico', 'fornecedor'].includes(fonte)) {
+    return res.status(400).json({ error: 'fonte inválida.' });
+  }
+
+  try {
+    if (fonte === 'tecnico') {
+      const { rows } = await pool.query(
+        `SELECT id, nome, cnpj_cpf, endereco, numero, bairro, complemento, municipio, uf, cep, celular
+           FROM sac.controle_tecnicos
+          WHERE id = $1
+          LIMIT 1`,
+        [id]
+      );
+      if (!rows[0]) return res.status(404).json({ error: 'Técnico não encontrado.' });
+      return res.json({
+        ok: true,
+        fonte,
+        label: rows[0].nome,
+        dados: mapVippDestinoTecnico(rows[0]),
+      });
+    }
+
+    const { rows } = await pool.query(
+      `SELECT id, razao_social, nome_fantasia, cnpj_cpf, telefone1_ddd, telefone1_numero, email,
+              endereco, endereco_numero, complemento, bairro, cidade, estado, cep
+         FROM omie.fornecedores
+        WHERE id = $1
+        LIMIT 1`,
+      [id]
+    );
+    if (!rows[0]) return res.status(404).json({ error: 'Fornecedor não encontrado.' });
+    const dados = mapVippDestinoFornecedor(rows[0]);
+    return res.json({
+      ok: true,
+      fonte,
+      label: dados.nome,
+      dados,
+    });
+  } catch (err) {
+    console.error('[SAC/AT] erro vipp-destino-detalhe:', err);
+    return res.status(500).json({ error: err.message || 'Falha ao buscar destinatário.' });
+  }
+});
+
 // ── GRÁFICOS AT ──────────────────────────────────────────────────────────────
 // GET /at/graficos/mencoes-por-mes — menções agrupadas por mês, excluindo AT tipo Atendimento rápido
 router.get('/at/graficos/mencoes-por-mes', async (req, res) => {
@@ -7008,6 +7452,347 @@ router.delete('/at/alimentacao/:id', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// ─── Material de apoio (R2: AT/material de apoio/) ───────────────────────────
+const MAT_APOIO_BUCKET = 'AT';
+const MAT_APOIO_PASTA = 'material de apoio';
+const MAT_APOIO_FORMATOS = ['Video', 'foto', 'PDF'];
+const materialApoioUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 120 * 1024 * 1024 },
+});
+
+function materialApoioSanitizeNome(raw) {
+  return String(raw || '')
+    .replace(/[^a-zA-Z0-9À-ÿ _.-]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 120);
+}
+
+function materialApoioExtFromFile(file) {
+  const mimeExt = mime.extension(file.mimetype);
+  const originalExt = String(file.originalname || '').split('.').pop();
+  return String(mimeExt || originalExt || 'bin').replace(/[^a-zA-Z0-9]/g, '').toLowerCase() || 'bin';
+}
+
+function materialApoioValidarFormato(formato, file) {
+  const fmt = String(formato || '').trim();
+  if (!MAT_APOIO_FORMATOS.includes(fmt)) return 'Formato inválido. Use Video, foto ou PDF.';
+  const ext = materialApoioExtFromFile(file);
+  const mime = String(file.mimetype || '').toLowerCase();
+  if (fmt === 'PDF') {
+    if (ext !== 'pdf' && !mime.includes('pdf')) return 'Para formato PDF, envie um arquivo .pdf.';
+  } else if (fmt === 'foto') {
+    const ok = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'heic', 'heif'].includes(ext)
+      || mime.startsWith('image/');
+    if (!ok) return 'Para formato foto, envie uma imagem (jpg, png, etc.).';
+  } else if (fmt === 'Video') {
+    const ok = ['mp4', 'webm', 'mov', 'avi', 'mkv', 'm4v'].includes(ext)
+      || mime.startsWith('video/');
+    if (!ok) return 'Para formato Video, envie um vídeo (mp4, webm, etc.).';
+  }
+  return null;
+}
+
+function materialApoioBuildFileName(nome, file) {
+  const base = materialApoioSanitizeNome(nome).replace(/\s/g, '_') || 'arquivo';
+  const ext = materialApoioExtFromFile(file);
+  return `${base}.${ext}`;
+}
+
+function materialApoioParsePublico(val) {
+  if (val === true || val === 1) return true;
+  const s = String(val ?? '').trim().toLowerCase();
+  return s === 'true' || s === '1' || s === 'on' || s === 'yes';
+}
+
+function materialApoioMapRow(row) {
+  return {
+    id: row.id,
+    nome: row.nome,
+    tipo: row.tipo,
+    formato: row.formato,
+    nome_arquivo: row.nome_arquivo,
+    path_key: row.path_key,
+    url_publica: row.url_publica || null,
+    content_type: row.content_type,
+    tamanho_bytes: row.tamanho_bytes,
+    status_upload: row.status_upload || 'concluido',
+    upload_erro: row.upload_erro || null,
+    publico: row.publico === true,
+    criado_por: row.criado_por,
+    criado_em: row.criado_em,
+    atualizado_em: row.atualizado_em,
+  };
+}
+
+async function materialApoioUploadBackground({ id, pathKey, buffer, contentType, oldPathKey }) {
+  try {
+    const { url } = await uploadPublicFile(MAT_APOIO_BUCKET, pathKey, buffer, {
+      contentType: contentType || 'application/octet-stream',
+      upsert: true,
+    });
+    await pool.query(
+      `UPDATE sac.material_apoio
+          SET url_publica = $2, status_upload = 'concluido', upload_erro = NULL, atualizado_em = NOW()
+        WHERE id = $1`,
+      [id, url]
+    );
+    if (oldPathKey && oldPathKey !== pathKey) {
+      try { await removePublicFiles(MAT_APOIO_BUCKET, oldPathKey); } catch (_) { /* ignora */ }
+    }
+  } catch (err) {
+    console.error('[SAC/material-apoio] upload background erro:', err);
+    await pool.query(
+      `UPDATE sac.material_apoio
+          SET status_upload = 'erro', upload_erro = $2, atualizado_em = NOW()
+        WHERE id = $1`,
+      [id, String(err.message || err).slice(0, 500)]
+    );
+  }
+}
+
+function materialApoioDispararUploadBackground(opts) {
+  setImmediate(() => {
+    materialApoioUploadBackground(opts).catch((err) => {
+      console.error('[SAC/material-apoio] falha inesperada no upload background:', err);
+    });
+  });
+}
+
+// GET /at/material-apoio/tipos — tipos já cadastrados
+router.get('/at/material-apoio/tipos', async (_req, res) => {
+  try {
+    await ensureSchema();
+    const { rows } = await pool.query(
+      `SELECT DISTINCT TRIM(tipo) AS tipo
+         FROM sac.material_apoio
+        WHERE tipo IS NOT NULL AND TRIM(tipo) != ''
+        ORDER BY 1`
+    );
+    res.json({ ok: true, tipos: rows.map((r) => r.tipo) });
+  } catch (err) {
+    console.error('[SAC/material-apoio] GET tipos erro:', err);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// GET /at/material-apoio — lista materiais (somente banco, sem Cloudflare)
+router.get('/at/material-apoio', async (_req, res) => {
+  try {
+    await ensureSchema();
+    const { rows } = await pool.query(
+      `SELECT id, nome, tipo, formato, nome_arquivo, path_key, url_publica,
+              content_type, tamanho_bytes, status_upload, upload_erro, publico,
+              criado_por, criado_em, atualizado_em
+         FROM sac.material_apoio
+        ORDER BY tipo, nome`
+    );
+    res.json({ ok: true, itens: rows.map(materialApoioMapRow) });
+  } catch (err) {
+    console.error('[SAC/material-apoio] GET erro:', err);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// POST /at/material-apoio — grava no banco e responde rápido; upload R2 em background
+router.post('/at/material-apoio', materialApoioUpload.single('arquivo'), async (req, res) => {
+  const nome = materialApoioSanitizeNome(req.body?.nome);
+  const tipo = String(req.body?.tipo || '').trim().slice(0, 80);
+  const formato = String(req.body?.formato || '').trim();
+  const publico = materialApoioParsePublico(req.body?.publico);
+  if (!nome) return res.status(400).json({ ok: false, error: 'Informe o nome.' });
+  if (!tipo) return res.status(400).json({ ok: false, error: 'Informe o tipo.' });
+  if (!MAT_APOIO_FORMATOS.includes(formato)) {
+    return res.status(400).json({ ok: false, error: 'Formato inválido. Use Video, foto ou PDF.' });
+  }
+  if (!req.file?.buffer?.length) {
+    return res.status(400).json({ ok: false, error: 'Selecione um arquivo para anexar.' });
+  }
+  const fmtErr = materialApoioValidarFormato(formato, req.file);
+  if (fmtErr) return res.status(400).json({ ok: false, error: fmtErr });
+
+  const usuario = req.session?.user?.fullName || req.session?.user?.username || 'sistema';
+  const nomeArquivo = materialApoioBuildFileName(nome, req.file);
+  const pathKey = `${MAT_APOIO_PASTA}/${nomeArquivo}`;
+  const fileBuffer = Buffer.from(req.file.buffer);
+  const contentType = req.file.mimetype || 'application/octet-stream';
+
+  try {
+    await ensureSchema();
+    const { rows: dup } = await pool.query(
+      'SELECT id FROM sac.material_apoio WHERE nome_arquivo = $1 LIMIT 1',
+      [nomeArquivo]
+    );
+    if (dup.length) {
+      return res.status(409).json({ ok: false, error: 'Já existe um arquivo com este nome. Altere o nome ou edite o registro existente.' });
+    }
+
+    const ins = await pool.query(
+      `INSERT INTO sac.material_apoio
+         (nome, tipo, formato, nome_arquivo, path_key, url_publica, content_type, tamanho_bytes, status_upload, publico, criado_por)
+       VALUES ($1,$2,$3,$4,$5,NULL,$6,$7,'enviando',$8,$9)
+       RETURNING id, nome, tipo, formato, nome_arquivo, path_key, url_publica,
+                 content_type, tamanho_bytes, status_upload, upload_erro, publico,
+                 criado_por, criado_em, atualizado_em`,
+      [nome, tipo, formato, nomeArquivo, pathKey, contentType, req.file.size || null, publico, usuario]
+    );
+
+    const item = materialApoioMapRow(ins.rows[0]);
+    res.json({ ok: true, item });
+
+    materialApoioDispararUploadBackground({
+      id: item.id,
+      pathKey,
+      buffer: fileBuffer,
+      contentType,
+    });
+  } catch (err) {
+    console.error('[SAC/material-apoio] POST erro:', err);
+    res.status(500).json({ ok: false, error: err.message || 'Falha ao salvar material.' });
+  }
+});
+
+// PUT /at/material-apoio/:id — metadados imediatos; arquivo novo em background
+router.put('/at/material-apoio/:id', materialApoioUpload.single('arquivo'), async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (!id) return res.status(400).json({ ok: false, error: 'ID inválido.' });
+
+  const nome = materialApoioSanitizeNome(req.body?.nome);
+  const tipo = String(req.body?.tipo || '').trim().slice(0, 80);
+  const formato = String(req.body?.formato || '').trim();
+  const publico = materialApoioParsePublico(req.body?.publico);
+  if (!nome) return res.status(400).json({ ok: false, error: 'Informe o nome.' });
+  if (!tipo) return res.status(400).json({ ok: false, error: 'Informe o tipo.' });
+  if (!MAT_APOIO_FORMATOS.includes(formato)) {
+    return res.status(400).json({ ok: false, error: 'Formato inválido. Use Video, foto ou PDF.' });
+  }
+
+  try {
+    await ensureSchema();
+    const { rows } = await pool.query('SELECT * FROM sac.material_apoio WHERE id = $1', [id]);
+    if (!rows.length) return res.status(404).json({ ok: false, error: 'Material não encontrado.' });
+    const atual = rows[0];
+
+    let nomeArquivo = atual.nome_arquivo;
+    let pathKey = atual.path_key;
+    let urlPublica = atual.url_publica;
+    let contentType = atual.content_type;
+    let tamanho = atual.tamanho_bytes;
+    let statusUpload = atual.status_upload || 'concluido';
+    let uploadErro = atual.upload_erro;
+    let oldPathKey = null;
+    let fileBuffer = null;
+
+    if (req.file?.buffer?.length) {
+      const fmtErr = materialApoioValidarFormato(formato, req.file);
+      if (fmtErr) return res.status(400).json({ ok: false, error: fmtErr });
+
+      const novoNomeArquivo = materialApoioBuildFileName(nome, req.file);
+      const novoPathKey = `${MAT_APOIO_PASTA}/${novoNomeArquivo}`;
+
+      if (novoNomeArquivo !== atual.nome_arquivo) {
+        const { rows: dup } = await pool.query(
+          'SELECT id FROM sac.material_apoio WHERE nome_arquivo = $1 AND id != $2 LIMIT 1',
+          [novoNomeArquivo, id]
+        );
+        if (dup.length) {
+          return res.status(409).json({ ok: false, error: 'Já existe outro arquivo com este nome.' });
+        }
+      }
+
+      oldPathKey = atual.path_key;
+      nomeArquivo = novoNomeArquivo;
+      pathKey = novoPathKey;
+      contentType = req.file.mimetype || null;
+      tamanho = req.file.size || null;
+      statusUpload = 'enviando';
+      uploadErro = null;
+      fileBuffer = Buffer.from(req.file.buffer);
+    }
+
+    const upd = await pool.query(
+      `UPDATE sac.material_apoio
+          SET nome = $2, tipo = $3, formato = $4,
+              nome_arquivo = $5, path_key = $6, url_publica = $7,
+              content_type = $8, tamanho_bytes = $9,
+              status_upload = $10, upload_erro = $11, publico = $12, atualizado_em = NOW()
+        WHERE id = $1
+        RETURNING id, nome, tipo, formato, nome_arquivo, path_key, url_publica,
+                  content_type, tamanho_bytes, status_upload, upload_erro, publico,
+                  criado_por, criado_em, atualizado_em`,
+      [
+        id, nome, tipo, formato, nomeArquivo, pathKey, urlPublica,
+        contentType, tamanho, statusUpload, uploadErro, publico,
+      ]
+    );
+
+    const item = materialApoioMapRow(upd.rows[0]);
+    res.json({ ok: true, item });
+
+    if (fileBuffer) {
+      materialApoioDispararUploadBackground({
+        id,
+        pathKey,
+        buffer: fileBuffer,
+        contentType: contentType || 'application/octet-stream',
+        oldPathKey,
+      });
+    }
+  } catch (err) {
+    console.error('[SAC/material-apoio] PUT erro:', err);
+    res.status(500).json({ ok: false, error: err.message || 'Falha ao atualizar material.' });
+  }
+});
+
+// PATCH /at/material-apoio/:id/publico — alterna visibilidade pública
+router.patch('/at/material-apoio/:id/publico', express.json(), async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (!id) return res.status(400).json({ ok: false, error: 'ID inválido.' });
+  const publico = materialApoioParsePublico(req.body?.publico);
+  try {
+    await ensureSchema();
+    const { rows } = await pool.query(
+      `UPDATE sac.material_apoio
+          SET publico = $2, atualizado_em = NOW()
+        WHERE id = $1
+        RETURNING id, nome, tipo, formato, nome_arquivo, path_key, url_publica,
+                  content_type, tamanho_bytes, status_upload, upload_erro, publico,
+                  criado_por, criado_em, atualizado_em`,
+      [id, publico]
+    );
+    if (!rows.length) return res.status(404).json({ ok: false, error: 'Material não encontrado.' });
+    res.json({ ok: true, item: materialApoioMapRow(rows[0]) });
+  } catch (err) {
+    console.error('[SAC/material-apoio] PATCH publico erro:', err);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// DELETE /at/material-apoio/:id — remove do banco na hora; R2 em background
+router.delete('/at/material-apoio/:id', async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (!id) return res.status(400).json({ ok: false, error: 'ID inválido.' });
+  try {
+    await ensureSchema();
+    const { rows } = await pool.query(
+      'DELETE FROM sac.material_apoio WHERE id = $1 RETURNING path_key, status_upload',
+      [id]
+    );
+    if (!rows.length) return res.status(404).json({ ok: false, error: 'Material não encontrado.' });
+    res.json({ ok: true });
+    const pathKey = rows[0].path_key;
+    if (pathKey && rows[0].status_upload === 'concluido') {
+      setImmediate(() => {
+        removePublicFiles(MAT_APOIO_BUCKET, pathKey).catch(() => {});
+      });
+    }
+  } catch (err) {
+    console.error('[SAC/material-apoio] DELETE erro:', err);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 // GET /at/tecnicos/ufs — lista UFs distintas disponíveis
 router.get('/at/tecnicos/ufs', async (req, res) => {
   try {
@@ -7171,12 +7956,14 @@ router.get('/at/tecnicos/:id', async (req, res) => {
   if (!id || id < 1) return res.status(400).json({ error: 'ID inválido.' });
   try {
     const { rows } = await pool.query(
-      `SELECT id, nome, cnpj_cpf, endereco, municipio, uf, cep, celular, tipo, lat, lng, qtd_atend_ult_1_ano
+      `SELECT id, nome, cnpj_cpf, endereco, numero, bairro, complemento, municipio, uf, cep, celular, tipo, lat, lng, qtd_atend_ult_1_ano
        FROM sac.controle_tecnicos WHERE id = $1 LIMIT 1`,
       [id]
     );
     if (!rows.length) return res.status(404).json({ error: 'Técnico não encontrado.' });
-    res.json(rows[0]);
+    const row = rows[0];
+    const addr = normalizarEnderecoTecnicoRow(row);
+    res.json({ ...row, ...addr });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -7184,16 +7971,22 @@ router.get('/at/tecnicos/:id', async (req, res) => {
 
 // POST /at/tecnicos — cria novo técnico
 router.post('/at/tecnicos', async (req, res) => {
-  const { nome, cnpj_cpf, endereco, municipio, uf, cep, celular, tipo, lat, lng } = req.body || {};
+  const { nome, cnpj_cpf, endereco, numero, bairro, complemento, municipio, uf, cep, celular, tipo, lat, lng } = req.body || {};
   if (!nome || !String(nome).trim()) return res.status(400).json({ error: 'Nome obrigatório.' });
+  const addr = sanitizarCamposEnderecoTecnico({ endereco, numero, bairro, complemento });
+  if (!addr.endereco) return res.status(400).json({ error: 'Endereço (rua/logradouro) obrigatório.' });
   try {
     const { rows } = await pool.query(
-      `INSERT INTO sac.controle_tecnicos (nome, cnpj_cpf, endereco, municipio, uf, cep, celular, tipo, lat, lng)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id, nome, cnpj_cpf, endereco, municipio, uf, cep, celular, tipo, lat, lng`,
+      `INSERT INTO sac.controle_tecnicos (nome, cnpj_cpf, endereco, numero, bairro, complemento, municipio, uf, cep, celular, tipo, lat, lng)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+       RETURNING id, nome, cnpj_cpf, endereco, numero, bairro, complemento, municipio, uf, cep, celular, tipo, lat, lng`,
       [
         String(nome).trim(),
         cnpj_cpf  ? String(cnpj_cpf).trim()  : null,
-        endereco  ? String(endereco).trim()  : null,
+        addr.endereco,
+        addr.numero || null,
+        addr.bairro || null,
+        addr.complemento || null,
         municipio ? String(municipio).trim() : null,
         uf        ? String(uf).trim().toUpperCase() : null,
         cep       ? String(cep).replace(/\D/g, '') || null : null,
@@ -7213,18 +8006,24 @@ router.post('/at/tecnicos', async (req, res) => {
 router.put('/at/tecnicos/:id', async (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (!id || id < 1) return res.status(400).json({ error: 'ID inválido.' });
-  const { nome, cnpj_cpf, endereco, municipio, uf, cep, celular, tipo, lat, lng } = req.body || {};
+  const { nome, cnpj_cpf, endereco, numero, bairro, complemento, municipio, uf, cep, celular, tipo, lat, lng } = req.body || {};
   if (!nome || !String(nome).trim()) return res.status(400).json({ error: 'Nome obrigatório.' });
+  const addr = sanitizarCamposEnderecoTecnico({ endereco, numero, bairro, complemento });
+  if (!addr.endereco) return res.status(400).json({ error: 'Endereço (rua/logradouro) obrigatório.' });
   try {
     const { rows } = await pool.query(
       `UPDATE sac.controle_tecnicos
-       SET nome=$1, cnpj_cpf=$2, endereco=$3, municipio=$4, uf=$5, cep=$6, celular=$7, tipo=$8, lat=$9, lng=$10
-       WHERE id=$11
-       RETURNING id, nome, cnpj_cpf, endereco, municipio, uf, cep, celular, tipo, lat, lng`,
+       SET nome=$1, cnpj_cpf=$2, endereco=$3, numero=$4, bairro=$5, complemento=$6,
+           municipio=$7, uf=$8, cep=$9, celular=$10, tipo=$11, lat=$12, lng=$13
+       WHERE id=$14
+       RETURNING id, nome, cnpj_cpf, endereco, numero, bairro, complemento, municipio, uf, cep, celular, tipo, lat, lng`,
       [
         String(nome).trim(),
         cnpj_cpf  ? String(cnpj_cpf).trim()  : null,
-        endereco  ? String(endereco).trim()  : null,
+        addr.endereco,
+        addr.numero || null,
+        addr.bairro || null,
+        addr.complemento || null,
         municipio ? String(municipio).trim() : null,
         uf        ? String(uf).trim().toUpperCase() : null,
         cep       ? String(cep).replace(/\D/g, '') || null : null,
@@ -7414,6 +8213,29 @@ router.post('/at/tecnico/login', async (req, res) => {
   }
 });
 const _atLoginRL = new Map();
+
+// GET /at/tecnico/material-apoio?token=TOKEN — materiais públicos (somente consulta no portal)
+router.get('/at/tecnico/material-apoio', async (req, res) => {
+  const token = String(req.query.token || '').trim();
+  if (!token || token.length < 32) return res.status(401).json({ ok: false, error: 'token inválido' });
+  try {
+    const { rows: valid } = await pool.query(
+      `SELECT 1 AS ok FROM sac.controle_tecnicos WHERE token = $1 LIMIT 1`,
+      [token]
+    );
+    if (!valid.length) return res.status(404).json({ ok: false, error: 'Link inválido' });
+    const { rows } = await pool.query(
+      `SELECT id, nome, tipo, formato, nome_arquivo, url_publica, status_upload, upload_erro
+         FROM sac.material_apoio
+        WHERE publico = true
+        ORDER BY tipo, nome`
+    );
+    res.json({ ok: true, itens: rows.map(materialApoioMapRow) });
+  } catch (err) {
+    console.error('[AT/tecnico/material-apoio] erro:', err);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
 
 // GET /at/tecnico/atendimentos?token=TOKEN — lista OS vinculados a este técnico
 router.get('/at/tecnico/atendimentos', async (req, res) => {
