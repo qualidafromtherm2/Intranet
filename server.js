@@ -11077,13 +11077,16 @@ async function _resolveProdutoOmieCodigoTexto(db, codigoOuId) {
   return rows[0]?.codigo || raw;
 }
 
+let _etqRecImpressoColsReady = false;
 /** Garante colunas usadas em impressão de OP / endereçamento em ETQ_rec_impresso. */
 async function _etqEnsureRecImpressoCols(db = pool) {
+  if (_etqRecImpressoColsReady) return;
   await db.query(`ALTER TABLE etiqueta."ETQ_rec_impresso" ADD COLUMN IF NOT EXISTS codigo_produto TEXT`);
   await db.query(`ALTER TABLE etiqueta."ETQ_rec_impresso" ADD COLUMN IF NOT EXISTS descricao_produto TEXT`);
   await db.query(`ALTER TABLE etiqueta."ETQ_rec_impresso" ADD COLUMN IF NOT EXISTS fonte TEXT DEFAULT 'recebimento'`);
   await db.query(`ALTER TABLE etiqueta."ETQ_rec_impresso" ADD COLUMN IF NOT EXISTS endereco TEXT`);
   await db.query(`ALTER TABLE etiqueta."ETQ_rec_impresso" ADD COLUMN IF NOT EXISTS complemento TEXT`);
+  _etqRecImpressoColsReady = true;
 }
 
 /** Garante codigo_produto (id Omie) e descricao_produto para gravar em ETQ_rec_impresso. */
@@ -11850,6 +11853,17 @@ app.post('/api/etiquetas/recebimento/imprimir-local', express.json(), async (req
   } catch (err) {
     console.error('[etiquetas/imprimir-local]', err);
     res.status(500).json({ error: err?.message || 'Falha ao gerar ZPL' });
+  }
+});
+
+// Garante codigo_produto / descricao_produto antes de qualquer rota rec-impresso
+app.use('/api/etiquetas/rec-impresso', async (req, res, next) => {
+  try {
+    await _etqEnsureRecImpressoCols(pool);
+    next();
+  } catch (err) {
+    console.error('[etiquetas/rec-impresso] ensure cols:', err);
+    res.status(500).json({ ok: false, error: err?.message || 'Falha schema ETQ_rec_impresso' });
   }
 });
 

@@ -1201,18 +1201,25 @@ async function buscarImagemProdutoPosZero(codigoProduto) {
 router.get('/estrutura-ficha', async (req, res) => {
   try {
     const payload = await carregarEstruturaFichaPayload(req.query);
+    const itens = await enriquecerItensEstruturaComPreco(
+      Array.isArray(payload.response) ? payload.response : []
+    );
     if (payload.fonte === 'sql') {
-      console.log('[estrutura-ficha] fonte=sql codigo=%s itens=%s', payload.codigo, payload.total);
+      console.log('[estrutura-ficha] fonte=sql codigo=%s itens=%s', payload.codigo, itens.length);
     } else {
       console.log('[estrutura-ficha] fonte=iapp codigo=%s (sem cache SQL)', payload.codigo);
     }
-    return res.json(payload);
+    return res.json({
+      ...payload,
+      response: itens,
+      total: itens.length,
+    });
   } catch (err) {
     return res.status(err.status || 500).json({ error: err.message, iappCode: err.iappCode });
   }
 });
 
-/** Preenche `preco` em cada item (não é impresso; só filtro no modal). */
+/** Preenche `preco` (CMC) e `valor_total` em cada item — usado na estrutura e filtro da ficha. */
 async function enriquecerItensEstruturaComPreco(itens) {
   const lista = Array.isArray(itens) ? itens : [];
   const codigos = [...new Set(
@@ -1220,35 +1227,23 @@ async function enriquecerItensEstruturaComPreco(itens) {
       .map((i) => String(i?.identificacao || '').trim())
       .filter(Boolean)
   )];
-  const precoPorCodigo = new Map();
+  const cmcPorCodigo = new Map();
 
   if (codigos.length) {
     const norms = codigos.map((c) => c.toUpperCase());
     try {
-      const { rows: omieRows } = await dbQuery(
+      const { rows } = await dbQuery(
         `SELECT UPPER(BTRIM(codigo)) AS codigo_norm,
-                COALESCE(valor_unitario, preco_definido, 0) AS preco
-           FROM public.produtos_omie
-          WHERE UPPER(BTRIM(codigo)) = ANY($1::text[])`,
+                MAX(cmc) FILTER (WHERE cmc IS NOT NULL AND cmc > 0) AS cmc
+           FROM logistica.estoque_atual
+          WHERE UPPER(BTRIM(codigo)) = ANY($1::text[])
+          GROUP BY UPPER(BTRIM(codigo))`,
         [norms]
       );
-      for (const row of omieRows) {
-        precoPorCodigo.set(row.codigo_norm, Number(row.preco) || 0);
-      }
-    } catch (_) { /* ignora */ }
-
-    try {
-      const { rows: iappRows } = await dbQuery(
-        `SELECT UPPER(BTRIM(identificacao)) AS codigo_norm,
-                COALESCE(valor_custo, valor_venda, 0) AS preco
-           FROM estrutura.produto_iapp
-          WHERE UPPER(BTRIM(identificacao)) = ANY($1::text[])`,
-        [norms]
-      );
-      for (const row of iappRows) {
-        const atual = precoPorCodigo.get(row.codigo_norm);
-        if (atual == null || atual === 0) {
-          precoPorCodigo.set(row.codigo_norm, Number(row.preco) || 0);
+      for (const row of rows) {
+        const cmc = Number(row.cmc);
+        if (Number.isFinite(cmc) && cmc > 0) {
+          cmcPorCodigo.set(row.codigo_norm, cmc);
         }
       }
     } catch (_) { /* ignora */ }
@@ -1256,14 +1251,14 @@ async function enriquecerItensEstruturaComPreco(itens) {
 
   return lista.map((item) => {
     const cod = String(item?.identificacao || '').trim().toUpperCase();
-    const direto = Number(item?.valor_custo ?? item?.valor_venda ?? item?.preco);
-    const preco = Number.isFinite(direto) && direto > 0
-      ? direto
-      : (precoPorCodigo.get(cod) || 0);
+    const cmc = cmcPorCodigo.get(cod) || 0;
+    const qtde = Number(item?.qtde);
+    const q = Number.isFinite(qtde) ? qtde : 0;
     return {
       ...item,
-      preco,
-      valor_custo: item?.valor_custo ?? preco,
+      cmc,
+      preco: cmc,
+      valor_total: cmc * q,
     };
   });
 }
@@ -1272,7 +1267,7 @@ async function enriquecerItensEstruturaComPreco(itens) {
  * GET /api/producao/ficha-tecnica-impressao
  * Dados para impressão da ficha técnica: estrutura + diagrama (se houver
  * item com "DIAGRAMA" na descrição → imagem pos=0 em produtos_omie_imagens).
- * Cada item inclui `preco` (não impresso; filtro no modal).
+ * Cada item inclui `cmc`/`preco` e `valor_total` (não impressos; filtro no modal).
  * Query: codigo?, op_producao_id?, numero_op?
  * --------------------------------------------------------------- */
 router.get('/ficha-tecnica-impressao', async (req, res) => {
@@ -1296,7 +1291,10 @@ router.get('/ficha-tecnica-impressao', async (req, res) => {
       diagramas.push({
         codigo: codItem,
         descricao: item?.descricao || '',
+        cmc: Number(item?.cmc ?? item?.preco) || 0,
         preco: Number(item?.preco) || 0,
+        qtde: Number(item?.qtde) || 0,
+        valor_total: Number(item?.valor_total) || 0,
         url_imagem: img?.url_imagem || null,
         codigo_produto: img?.codigo_produto || null,
       });
