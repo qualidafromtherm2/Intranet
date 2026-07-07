@@ -146,7 +146,7 @@ document.addEventListener('DOMContentLoaded', () => {
       if (!productListButton) return;
       productListButton.click();
 
-      if (operation === 'separation') {
+      if (operation === 'separation' && typeof usuarioPodeVerGuiaSeparacao === 'function' && usuarioPodeVerGuiaSeparacao()) {
         window.setTimeout(() => {
           document.querySelector('.lp-tab-btn[data-lp-tab="solicitacoesConteudo"]')?.click();
         }, 50);
@@ -1215,6 +1215,14 @@ async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) 
     };
   }
 
+  function _modalSepIgnorarSaldoEtq() {
+    return !!document.getElementById('modalSepIgnorarSaldoEtq')?.checked;
+  }
+
+  function _solSepPayloadExtras() {
+    return _modalSepIgnorarSaldoEtq() ? { ignorar_saldo_etq: true } : {};
+  }
+
   function _solValidarOrigemSepRow(row, qty) {
     const codOrigem = String(row?.dataset?.origemCod || '').trim();
     if (!codOrigem) {
@@ -1225,6 +1233,7 @@ async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) 
   }
 
   function _solValidarEtqSepRow(row, qty) {
+    if (_modalSepIgnorarSaldoEtq()) return true;
     if (!row || row.dataset.requerEtq !== '1') return true;
     const codOrigem = String(row.dataset.origemCod || '').trim();
     if (codOrigem !== PRINC_ARMZ) return true;
@@ -1613,7 +1622,8 @@ async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) 
         carr_ids: carrIds,
         quantidade_separada: qtySep,
         motivo: motivo || '',
-        ..._solSepPayloadFromRow(row)
+        ..._solSepPayloadFromRow(row),
+        ..._solSepPayloadExtras()
       })
     });
     const d = await r.json();
@@ -1639,7 +1649,8 @@ async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) 
         carr_ids: carrIds,
         quantidade_separada: qtySep,
         motivo: motivo || '',
-        ..._solSepPayloadFromRow(row)
+        ..._solSepPayloadFromRow(row),
+        ..._solSepPayloadExtras()
       })
     });
     const d = await r.json();
@@ -1687,7 +1698,7 @@ async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) 
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
-        body: JSON.stringify({ solic_ids: solicIds, ..._solSepPayloadFromRow(row) })
+        body: JSON.stringify({ solic_ids: solicIds, ..._solSepPayloadFromRow(row), ..._solSepPayloadExtras() })
       });
       const d = await r.json();
       if (!d.ok) throw new Error(d.error || 'Erro ao registrar item separado.');
@@ -1794,7 +1805,14 @@ async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) 
       </div>
       <div id="modalSepInner" style="overflow-y:auto;flex:1;padding-bottom:16px;">
         <div id="modalSepLockBanner">${_htmlBannerSepLock()}</div>
-        <div style="font-size:.75rem;color:#6b7280;font-weight:700;padding:12px 16px 4px;letter-spacing:.05em;text-transform:uppercase;">${isStandby ? 'Itens em stand-by' : 'Itens em separação'}</div>
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 16px 4px;flex-wrap:wrap;">
+          <div style="font-size:.75rem;color:#6b7280;font-weight:700;letter-spacing:.05em;text-transform:uppercase;">${isStandby ? 'Itens em stand-by' : 'Itens em separação'}</div>
+          ${!isStandby ? `
+          <label title="Permite concluir a separação e transferir na Omie sem debitar saldo em ETQ_rec_impresso quando o endereço estiver zerado ou abaixo do solicitado." style="display:flex;align-items:center;gap:6px;cursor:pointer;user-select:none;font-size:.72rem;color:#9ca3af;font-weight:600;">
+            <input type="checkbox" id="modalSepIgnorarSaldoEtq" style="accent-color:#f59e0b;cursor:pointer;width:14px;height:14px;" />
+            Permitir sem saldo no endereço
+          </label>` : ''}
+        </div>
         <div id="modalSepItemsList">
           ${aggItens.map(it => _renderAggItem(it, grupoAtual.n_solic)).join('')}
         </div>
@@ -20478,6 +20496,26 @@ function _rolesDoUsuario() {
 
 function usuarioEhAdminSistema() {
   return _rolesDoUsuario().some((role) => String(role || '').trim().toLowerCase() === 'admin');
+}
+
+function usuarioPodeVerGuiaSeparacao() {
+  if (usuarioEhAdminSistema()) return true;
+  const setorNome = String(window.__sessionUser?.setor || window.__sessionUser?.sector || '').trim().toLowerCase();
+  if (setorNome === 'logistica' || setorNome.includes('logist')) return true;
+  return _rolesDoUsuario().some((role) => String(role || '').trim().toLowerCase() === 'logistica');
+}
+
+function atualizarVisibilidadeGuiaSeparacao() {
+  const pode = usuarioPodeVerGuiaSeparacao();
+  const tabBtn = document.querySelector('.lp-tab-btn[data-lp-tab="solicitacoesConteudo"]');
+  const tabPane = document.getElementById('solicitacoesConteudo');
+  if (tabBtn) tabBtn.style.display = pode ? '' : 'none';
+  if (!pode) {
+    if (tabPane) tabPane.style.display = 'none';
+    if (tabBtn?.classList.contains('lp-tab-active')) {
+      document.querySelector('.lp-tab-btn[data-lp-tab="listaProdutosConteudo"]')?.click();
+    }
+  }
 }
 
 function _atualizarTituloEnvio() {
@@ -60836,6 +60874,7 @@ async function applyCurrentUserPermissionsToUI(){
     // Sem cache ou cache desatualizada: aguarda para não revelar UI vazia
     await refresh();
   }
+  atualizarVisibilidadeGuiaSeparacao();
 }
 
 // Variável para rastrear se o usuário estava logado na última verificação

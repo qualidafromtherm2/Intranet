@@ -12622,13 +12622,8 @@ async function _logisticaObterQtyCodigoSeparacao(client, solicIds) {
   return { qtd: parseFloat(rows[0]?.total) || 0, codigo: rows[0]?.codigo || null };
 }
 
-async function _etqDebitarSeparacaoAlmox(client, { cod_local_origem, etq_id, endereco_origem, codigo_produto, qtd }) {
+async function _etqDebitarSeparacaoAlmox(client, { cod_local_origem, etq_id, endereco_origem, codigo_produto, qtd, ignorar_saldo_etq }) {
   if (String(cod_local_origem || '').trim() !== LOGISTICA_ALMOX_LOCAL_COD) return null;
-  if (!etq_id && !endereco_origem) {
-    const err = new Error('Selecione o endereço de origem no Almoxarifado (Porta Pallet).');
-    err.code = 'ETQ_ENDERECO_OBRIGATORIO';
-    throw err;
-  }
   const qtdNum = parseFloat(qtd);
   if (!Number.isFinite(qtdNum) || qtdNum <= 0) return null;
 
@@ -12644,10 +12639,14 @@ async function _etqDebitarSeparacaoAlmox(client, { cod_local_origem, etq_id, end
         WHERE id = $1`,
       [parseInt(etq_id, 10)]
     );
-    if (!rows[0]?.endereco) throw new Error('Endereço ETQ não encontrado.');
+    if (!rows[0]?.endereco) {
+      if (ignorar_saldo_etq) return null;
+      throw new Error('Endereço ETQ não encontrado.');
+    }
     endereco = rows[0].endereco;
   }
   if (!endereco) {
+    if (ignorar_saldo_etq) return null;
     const err = new Error('Selecione o endereço de origem no Almoxarifado (Porta Pallet).');
     err.code = 'ETQ_ENDERECO_OBRIGATORIO';
     throw err;
@@ -12656,6 +12655,7 @@ async function _etqDebitarSeparacaoAlmox(client, { cod_local_origem, etq_id, end
   const linhas = await _etqLinhasSaldoEndereco(client, codigoOmie, endereco);
   const total = linhas.reduce((s, r) => s + Number(r.qtd || 0), 0);
   if (total <= 0 || total + 1e-9 < qtdNum) {
+    if (ignorar_saldo_etq) return null;
     const err = new Error(`Item ${codigoTexto} não possui saldo, favor atualizar saldo no processo de movimentação.`);
     err.code = 'ETQ_SALDO_SEPARACAO';
     throw err;
@@ -18221,7 +18221,7 @@ app.patch('/api/logistica/itens_solicitados/separar', async (req, res) => {
     await ensureSchemaMigrated();
     const id_user = req.session?.user?.id;
     if (!id_user) return res.status(401).json({ ok: false, error: 'Não autenticado.' });
-    const { solic_ids, cod_local_origem, etq_id, endereco_origem, codigo_produto } = req.body;
+    const { solic_ids, cod_local_origem, etq_id, endereco_origem, codigo_produto, ignorar_saldo_etq } = req.body;
     if (!Array.isArray(solic_ids) || !solic_ids.length)
       return res.status(400).json({ ok: false, error: 'solic_ids inválido.' });
     const ids = solic_ids.map(id => parseInt(id, 10)).filter(id => !isNaN(id));
@@ -18244,7 +18244,8 @@ app.patch('/api/logistica/itens_solicitados/separar', async (req, res) => {
         etq_id,
         endereco_origem,
         codigo_produto: codigo_produto || codigo,
-        qtd
+        qtd,
+        ignorar_saldo_etq: !!ignorar_saldo_etq
       });
     }
     await _logisticaExecutarTrfOmieSeparacao(client, ids, {
@@ -18472,7 +18473,7 @@ app.post('/api/logistica/itens_solicitados/separar-parcial', async (req, res) =>
   try {
     const id_user = req.session?.user?.id;
     if (!id_user) return res.status(401).json({ ok: false, error: 'Não autenticado.' });
-    const { carr_ids, solic_ids, quantidade_separada, motivo, cod_local_origem, etq_id, endereco_origem, codigo_produto } = req.body;
+    const { carr_ids, solic_ids, quantidade_separada, motivo, cod_local_origem, etq_id, endereco_origem, codigo_produto, ignorar_saldo_etq } = req.body;
     const qtySep = parseFloat(quantidade_separada);
     if (!Array.isArray(carr_ids) || !carr_ids.length || isNaN(qtySep) || qtySep <= 0)
       return res.status(400).json({ ok: false, error: 'Dados inválidos.' });
@@ -18510,7 +18511,8 @@ app.post('/api/logistica/itens_solicitados/separar-parcial', async (req, res) =>
         etq_id,
         endereco_origem,
         codigo_produto: codigoRef,
-        qtd: qtySep
+        qtd: qtySep,
+        ignorar_saldo_etq: !!ignorar_saldo_etq
       });
     }
     await client.query(`ALTER TABLE solicitacao_produto.itens_solicitados ADD COLUMN IF NOT EXISTS observacao TEXT`);
