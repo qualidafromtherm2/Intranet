@@ -229,6 +229,7 @@ const API_PUBLIC_PREFIXES = [
   '/api/sac/at/tecnico/os-portal/',   // detalhes de uma OS
   '/api/sac/at/tecnico/fechamento/',  // fechamento + evidências + NFe
   '/api/sac/at/tecnico/material-apoio', // materiais públicos (portal técnico)
+  '/api/sac/at/tecnico/separacao/',     // solicitação de produtos (portal técnico — auth por token)
   '/api/ai/manual-chat',              // chatbot do portal AT
   '/api/sac/whatsapp/webhook',        // webhook Meta WhatsApp Cloud (verificação GET + POST de mensagens)
   // ── Agente de impressão (auth própria via x-agent-token) ──
@@ -18103,12 +18104,15 @@ app.patch('/api/logistica/itens_solicitados/:id/separado', async (req, res) => {
     if (!id_user) return res.status(401).json({ ok: false, error: 'Não autenticado.' });
     const itemId = parseInt(req.params.id, 10);
     if (!itemId) return res.status(400).json({ ok: false, error: 'ID inválido.' });
-    await registrarMovimentacaoKanbanItens(pool, [itemId], 'Separado', req);
+    const skipSet = await _logisticaSolicIdsVippSet(pool, [itemId]);
+    const statusDestino = skipSet.has(itemId) ? 'Concluído' : 'Separado';
+    await registrarMovimentacaoKanbanItens(pool, [itemId], statusDestino, req);
     await pool.query(
-      `UPDATE solicitacao_produto.itens_solicitados SET status = 'Separado' WHERE id = $1`,
-      [itemId]
+      `UPDATE solicitacao_produto.itens_solicitados SET status = $2 WHERE id = $1`,
+      [itemId, statusDestino]
     );
-    console.log(`[logistica/separado] item #${itemId} marcado como Separado por user ${id_user}`);
+    if (skipSet.has(itemId)) await _logisticaEnviosVippPosSeparacao(pool, [itemId]);
+    console.log(`[logistica/separado] item #${itemId} marcado como ${statusDestino} por user ${id_user}`);
     res.json({ ok: true });
   } catch (err) {
     console.error('[logistica/separado] erro:', err);
@@ -18116,16 +18120,18 @@ app.patch('/api/logistica/itens_solicitados/:id/separado', async (req, res) => {
   }
 });
 
-/** Itens cuja SEP veio do fluxo VIPP (motivo SAC/AT ou vínculo em envios.solicitacoes). */
+/** Itens cuja SEP veio do fluxo VIPP (motivo SAC/AT), portal AT ou vínculo em envios.solicitacoes. */
 async function _logisticaSolicIdsVippSet(db, solicIds) {
   const ids = (solicIds || []).map(id => parseInt(id, 10)).filter(id => !isNaN(id));
   if (!ids.length) return new Set();
   const { rows } = await db.query(
     `SELECT i.id
        FROM solicitacao_produto.itens_solicitados i
+       JOIN logistica.carrinho c ON c.id = i.id_carr
       WHERE i.id = ANY($1::bigint[])
         AND (
           i.motivo IN ('SAC', 'AT')
+          OR c.id_user LIKE 'at:%'
           OR EXISTS (
             SELECT 1 FROM envios.solicitacoes e
              WHERE e.numero_sep = i.n_solic
@@ -19050,16 +19056,36 @@ app.patch('/api/logistica/itens_solicitados/aguardando-retirada', async (req, re
     const ids = solic_ids.map(id => parseInt(id, 10)).filter(id => !isNaN(id));
     const lock = await assertUsuarioSeparandoPodeAgir(pool, ids, req);
     if (!lock.ok) return res.status(403).json(lock);
-    await registrarMovimentacaoKanbanItens(pool, ids, 'Aguardando retirada', req);
-    await pool.query(
-      `UPDATE solicitacao_produto.itens_solicitados SET status = 'Aguardando retirada' WHERE id = ANY($1::bigint[])`, [ids]
-    );
+    const skipSet = await _logisticaSolicIdsVippSet(pool, ids);
+    const idsSkip = ids.filter(id => skipSet.has(id));
+    const idsNormal = ids.filter(id => !skipSet.has(id));
+
+    if (idsNormal.length) {
+      await registrarMovimentacaoKanbanItens(pool, idsNormal, 'Aguardando retirada', req);
+      await pool.query(
+        `UPDATE solicitacao_produto.itens_solicitados SET status = 'Aguardando retirada' WHERE id = ANY($1::bigint[])`,
+        [idsNormal]
+      );
+    }
+    if (idsSkip.length) {
+      await registrarMovimentacaoKanbanItens(pool, idsSkip, 'Concluído', req);
+      await pool.query(
+        `UPDATE solicitacao_produto.itens_solicitados SET status = 'Concluído' WHERE id = ANY($1::bigint[])`,
+        [idsSkip]
+      );
+      await _logisticaEnviosVippPosSeparacao(pool, idsSkip);
+    }
 
     // Se a SEP tem origem VIPP, atualiza status em envios.solicitacoes
     try {
+      const idsEnvio = idsNormal.length ? idsNormal : [];
+      if (!idsEnvio.length) {
+        res.json({ ok: true, concluido_direto: idsSkip.length });
+        return;
+      }
       const { rows: sepRows } = await pool.query(
         `SELECT DISTINCT n_solic FROM solicitacao_produto.itens_solicitados WHERE id = ANY($1::bigint[]) AND n_solic IS NOT NULL`,
-        [ids]
+        [idsEnvio]
       );
       for (const { n_solic } of sepRows) {
         await pool.query(

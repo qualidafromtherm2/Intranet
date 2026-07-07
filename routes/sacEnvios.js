@@ -8192,6 +8192,58 @@ router.put('/at/tecnicos/:id', async (req, res) => {
 const BCRYPT_ROUNDS = 10;
 const AT_SESSION_SECRET = String(process.env.AT_SESSION_SECRET || '').trim();
 
+// ── Portal AT: solicitação de produtos / separação (CNPJs autorizados) ────────
+const AT_SEP_CNPJS_PERMITIDOS = new Set(['05240837000121', '48407161000120']);
+const AT_SEP_LOCAL_ESTOQUE = '10408747792';
+
+function _atNormCnpj(v) {
+  return String(v || '').replace(/\D/g, '');
+}
+
+function _atSepCnpjPermitido(cnpj_cpf) {
+  return AT_SEP_CNPJS_PERMITIDOS.has(_atNormCnpj(cnpj_cpf));
+}
+
+function _atSepIdUser(tecId) {
+  return `at:${tecId}`;
+}
+
+async function _atResolverTecnicoToken(token) {
+  const tok = String(token || '').trim();
+  if (!tok || tok.length < 32) return null;
+  const { rows } = await pool.query(
+    `SELECT id, nome, cnpj_cpf, tipo FROM sac.controle_tecnicos WHERE token = $1 LIMIT 1`,
+    [tok]
+  );
+  return rows[0] || null;
+}
+
+async function _atResolverTecnicoSep(token) {
+  const tecnico = await _atResolverTecnicoToken(token);
+  if (!tecnico) return { error: 'Link inválido', status: 404 };
+  if (!_atSepCnpjPermitido(tecnico.cnpj_cpf)) {
+    return { error: 'Funcionalidade não disponível para este técnico.', status: 403 };
+  }
+  return { tecnico };
+}
+
+let _atSepSchemaOk = false;
+async function _atEnsureSepSchema(db) {
+  const client = db || pool;
+  if (_atSepSchemaOk) return;
+  await client.query(`ALTER TABLE logistica.carrinho ADD COLUMN IF NOT EXISTS comentario TEXT`);
+  await client.query(`ALTER TABLE logistica.carrinho ADD COLUMN IF NOT EXISTS urgente BOOLEAN DEFAULT FALSE`);
+  await client.query(`ALTER TABLE solicitacao_produto.itens_solicitados ADD COLUMN IF NOT EXISTS criado_em TIMESTAMPTZ DEFAULT now()`);
+  await client.query(`ALTER TABLE solicitacao_produto.itens_solicitados ADD COLUMN IF NOT EXISTS observacao TEXT`);
+  await client.query(`ALTER TABLE solicitacao_produto.itens_solicitados ADD COLUMN IF NOT EXISTS motivo TEXT`);
+  await client.query(`ALTER TABLE solicitacao_produto.itens_solicitados ADD COLUMN IF NOT EXISTS cod_local TEXT`);
+  await client.query(`ALTER TABLE solicitacao_produto.itens_solicitados ADD COLUMN IF NOT EXISTS nome_local TEXT`);
+  await client.query(`ALTER TABLE solicitacao_produto.solicitacoes_separacao ADD COLUMN IF NOT EXISTS justificativa_nao_separacao TEXT`);
+  await client.query(`ALTER TABLE solicitacao_produto.solicitacoes_separacao ADD COLUMN IF NOT EXISTS urgente BOOLEAN DEFAULT FALSE`);
+  await client.query(`ALTER TABLE solicitacao_produto.solicitacoes_separacao ADD COLUMN IF NOT EXISTS n_solic TEXT`);
+  _atSepSchemaOk = true;
+}
+
 // Cria/retorna token único do técnico e, se id_at informado, vincula ao fechamento
 // GET /at/tecnico/token?nome=NOME&id_at=ID
 router.get('/at/tecnico/token', async (req, res) => {
@@ -9193,6 +9245,431 @@ router.get('/at-info', async (req, res) => {
   } catch (err) {
     console.error('[SAC/AT-INFO] erro:', err);
     return res.status(500).json({ ok: false, error: 'Falha ao buscar dados do AT.' });
+  }
+});
+
+// GET /at/tecnico/separacao/permissao?token= — verifica CNPJ autorizado
+router.get('/at/tecnico/separacao/permissao', async (req, res) => {
+  const token = String(req.query.token || '').trim();
+  try {
+    const tecnico = await _atResolverTecnicoToken(token);
+    if (!tecnico) return res.status(404).json({ ok: false, error: 'Link inválido' });
+    res.json({ ok: true, permitido: _atSepCnpjPermitido(tecnico.cnpj_cpf) });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// GET /at/tecnico/separacao/produtos?q=&token= — busca em produtos_omie (mín. 4 caracteres)
+router.get('/at/tecnico/separacao/produtos', async (req, res) => {
+  const token = String(req.query.token || '').trim();
+  const q = String(req.query.q || '').trim();
+  if (q.length < 4) return res.json({ ok: true, itens: [] });
+  const auth = await _atResolverTecnicoSep(token);
+  if (auth.error) return res.status(auth.status).json({ ok: false, error: auth.error });
+  try {
+    const term = `%${q}%`;
+    const { rows } = await pool.query(
+      `SELECT
+          po.codigo,
+          po.codigo_produto,
+          po.descricao,
+          COALESCE(po.unidade, 'UN') AS unidade,
+          img.url_imagem
+         FROM public.produtos_omie po
+         LEFT JOIN LATERAL (
+           SELECT i.url_imagem
+             FROM public.produtos_omie_imagens i
+            WHERE i.codigo_produto = po.codigo_produto
+              AND i.ativo = true
+              AND i.url_imagem IS NOT NULL
+              AND TRIM(i.url_imagem) <> ''
+            ORDER BY i.pos ASC
+            LIMIT 1
+         ) img ON true
+        WHERE CAST(po.codigo_produto AS TEXT) ILIKE $1
+           OR po.descricao ILIKE $1
+        ORDER BY po.codigo ASC
+        LIMIT 40`,
+      [term]
+    );
+    res.json({ ok: true, itens: rows });
+  } catch (err) {
+    console.error('[AT/separacao/produtos] erro:', err);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// POST /at/tecnico/separacao  { token, codigo, descricao, quantidade, unidade }
+router.post('/at/tecnico/separacao', express.json(), async (req, res) => {
+  const { token, codigo, descricao, quantidade, unidade } = req.body || {};
+  const auth = await _atResolverTecnicoSep(token);
+  if (auth.error) return res.status(auth.status).json({ ok: false, error: auth.error });
+  const { tecnico } = auth;
+  if (!codigo || !quantidade || Number(quantidade) <= 0) {
+    return res.status(400).json({ ok: false, error: 'Código e quantidade são obrigatórios.' });
+  }
+  const unidadeNorm = String(unidade || 'UN').toUpperCase();
+  let quantidadeNorm = Number(quantidade);
+  if (unidadeNorm === 'UN') quantidadeNorm = Math.max(1, Math.round(quantidadeNorm));
+  const id_user = _atSepIdUser(tecnico.id);
+  const nome_user = String(tecnico.nome || '').trim();
+  try {
+    await _atEnsureSepSchema();
+    const omieRes = await pool.query(
+      `SELECT codigo_produto FROM public.produtos_omie WHERE codigo = $1 LIMIT 1`,
+      [codigo]
+    );
+    const cod_omie = omieRes.rows[0]?.codigo_produto || null;
+    const { rows: existentes } = await pool.query(
+      `SELECT c.id
+         FROM logistica.carrinho c
+        WHERE c.id_user = $1
+          AND c.codigo_produto = $2
+          AND COALESCE(c.unidade, 'UN') = COALESCE($3, 'UN')
+          AND NOT EXISTS (
+            SELECT 1 FROM solicitacao_produto.itens_solicitados i WHERE i.id_carr = c.id
+          )
+        ORDER BY c.criado_em ASC
+        LIMIT 1`,
+      [id_user, codigo, unidadeNorm]
+    );
+    if (existentes.length) {
+      const existenteId = existentes[0].id;
+      await pool.query(
+        `UPDATE logistica.carrinho
+            SET quantidade = quantidade + $1,
+                descricao = COALESCE(descricao, $2),
+                cod_omie = COALESCE(cod_omie, $3),
+                nome_user = $4
+          WHERE id = $5`,
+        [quantidadeNorm, descricao || null, cod_omie, nome_user, existenteId]
+      );
+      return res.json({ ok: true, id: existenteId, merged: true });
+    }
+    const { rows } = await pool.query(
+      `INSERT INTO logistica.carrinho (id_user, nome_user, codigo_produto, descricao, unidade, quantidade, cod_omie)
+       VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
+      [id_user, nome_user, codigo, descricao || null, unidadeNorm, quantidadeNorm, cod_omie]
+    );
+    res.json({ ok: true, id: rows[0].id, merged: false });
+  } catch (err) {
+    console.error('[AT/separacao POST] erro:', err);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// GET /at/tecnico/separacao/carrinho?token=
+router.get('/at/tecnico/separacao/carrinho', async (req, res) => {
+  const token = String(req.query.token || '').trim();
+  const auth = await _atResolverTecnicoSep(token);
+  if (auth.error) return res.status(auth.status).json({ ok: false, error: auth.error });
+  const id_user = _atSepIdUser(auth.tecnico.id);
+  try {
+    await _atEnsureSepSchema();
+    const { rows } = await pool.query(
+      `SELECT c.id, c.codigo_produto, c.descricao, c.unidade, c.quantidade,
+              c.comentario, COALESCE(c.urgente, false) AS urgente, c.criado_em,
+              img.url_imagem
+         FROM logistica.carrinho c
+         LEFT JOIN public.produtos_omie po ON po.codigo = c.codigo_produto
+         LEFT JOIN LATERAL (
+           SELECT i.url_imagem
+             FROM public.produtos_omie_imagens i
+            WHERE i.codigo_produto = po.codigo_produto
+              AND i.ativo = true
+              AND i.url_imagem IS NOT NULL
+              AND TRIM(i.url_imagem) <> ''
+            ORDER BY i.pos ASC
+            LIMIT 1
+         ) img ON true
+        WHERE c.id_user = $1
+          AND NOT EXISTS (
+            SELECT 1 FROM solicitacao_produto.itens_solicitados i WHERE i.id_carr = c.id
+          )
+        ORDER BY c.criado_em ASC`,
+      [id_user]
+    );
+    const { rows: localRows } = await pool.query(
+      `SELECT nome FROM public.omie_locais_estoque WHERE local_codigo = $1 LIMIT 1`,
+      [AT_SEP_LOCAL_ESTOQUE]
+    );
+    res.json({
+      ok: true,
+      itens: rows,
+      nome_user: auth.tecnico.nome,
+      local_estoque: AT_SEP_LOCAL_ESTOQUE,
+      local_nome: localRows[0]?.nome || '7. area vermelha'
+    });
+  } catch (err) {
+    console.error('[AT/separacao/carrinho GET] erro:', err);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// PATCH /at/tecnico/separacao/carrinho/:id/quantidade  { token, quantidade }
+router.patch('/at/tecnico/separacao/carrinho/:id/quantidade', express.json(), async (req, res) => {
+  const auth = await _atResolverTecnicoSep(req.body?.token);
+  if (auth.error) return res.status(auth.status).json({ ok: false, error: auth.error });
+  const itemId = parseInt(req.params.id, 10);
+  const qty = Number(req.body?.quantidade);
+  if (!itemId || !Number.isFinite(qty) || qty <= 0) {
+    return res.status(400).json({ ok: false, error: 'Quantidade inválida.' });
+  }
+  const id_user = _atSepIdUser(auth.tecnico.id);
+  try {
+    const { rowCount } = await pool.query(
+      `UPDATE logistica.carrinho SET quantidade = $1
+        WHERE id = $2 AND id_user = $3
+          AND NOT EXISTS (
+            SELECT 1 FROM solicitacao_produto.itens_solicitados i WHERE i.id_carr = logistica.carrinho.id
+          )`,
+      [qty, itemId, id_user]
+    );
+    if (!rowCount) return res.status(404).json({ ok: false, error: 'Item não encontrado.' });
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// PATCH /at/tecnico/separacao/carrinho/:id/comentario  { token, comentario }
+router.patch('/at/tecnico/separacao/carrinho/:id/comentario', express.json(), async (req, res) => {
+  const auth = await _atResolverTecnicoSep(req.body?.token);
+  if (auth.error) return res.status(auth.status).json({ ok: false, error: auth.error });
+  const itemId = parseInt(req.params.id, 10);
+  const comentario = String(req.body?.comentario || '').trim() || null;
+  const id_user = _atSepIdUser(auth.tecnico.id);
+  try {
+    const { rowCount } = await pool.query(
+      `UPDATE logistica.carrinho SET comentario = $1
+        WHERE id = $2 AND id_user = $3
+          AND NOT EXISTS (
+            SELECT 1 FROM solicitacao_produto.itens_solicitados i WHERE i.id_carr = logistica.carrinho.id
+          )`,
+      [comentario, itemId, id_user]
+    );
+    if (!rowCount) return res.status(404).json({ ok: false, error: 'Item não encontrado.' });
+    res.json({ ok: true, comentario });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// DELETE /at/tecnico/separacao/carrinho/:id?token=
+router.delete('/at/tecnico/separacao/carrinho/:id', async (req, res) => {
+  const token = String(req.query.token || req.body?.token || '').trim();
+  const auth = await _atResolverTecnicoSep(token);
+  if (auth.error) return res.status(auth.status).json({ ok: false, error: auth.error });
+  const itemId = parseInt(req.params.id, 10);
+  const id_user = _atSepIdUser(auth.tecnico.id);
+  try {
+    await pool.query(`DELETE FROM logistica.carrinho WHERE id = $1 AND id_user = $2`, [itemId, id_user]);
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// DELETE /at/tecnico/separacao/carrinho?token= — limpa carrinho
+router.delete('/at/tecnico/separacao/carrinho', async (req, res) => {
+  const token = String(req.query.token || '').trim();
+  const auth = await _atResolverTecnicoSep(token);
+  if (auth.error) return res.status(auth.status).json({ ok: false, error: auth.error });
+  const id_user = _atSepIdUser(auth.tecnico.id);
+  try {
+    const { rowCount } = await pool.query(
+      `DELETE FROM logistica.carrinho c
+        WHERE c.id_user = $1
+          AND NOT EXISTS (
+            SELECT 1 FROM solicitacao_produto.itens_solicitados i WHERE i.id_carr = c.id
+          )`,
+      [id_user]
+    );
+    res.json({ ok: true, deleted: rowCount || 0 });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// POST /at/tecnico/separacao/enviar  { token, data_prevista, horario, observacao }
+router.post('/at/tecnico/separacao/enviar', express.json(), async (req, res) => {
+  const { token, data_prevista, horario, observacao } = req.body || {};
+  const auth = await _atResolverTecnicoSep(token);
+  if (auth.error) return res.status(auth.status).json({ ok: false, error: auth.error });
+  const { tecnico } = auth;
+  const id_user = _atSepIdUser(tecnico.id);
+  const nome_user = String(tecnico.nome || '').trim();
+  const solicitadoPara = nome_user;
+  const client = await pool.connect();
+  try {
+    await _atEnsureSepSchema(client);
+    await client.query('BEGIN');
+
+    const { rows: localRows } = await client.query(
+      `SELECT nome FROM public.omie_locais_estoque WHERE local_codigo = $1 LIMIT 1`,
+      [AT_SEP_LOCAL_ESTOQUE]
+    );
+    const codLocalGravar = AT_SEP_LOCAL_ESTOQUE;
+    const nomeLocalGravar = localRows[0]?.nome || '7. area vermelha';
+
+    const { rows: itens } = await client.query(
+      `SELECT id, codigo_produto, descricao, unidade, quantidade, comentario,
+              COALESCE(urgente, false) AS urgente
+         FROM logistica.carrinho
+        WHERE id_user = $1
+          AND NOT EXISTS (
+            SELECT 1 FROM solicitacao_produto.itens_solicitados i WHERE i.id_carr = logistica.carrinho.id
+          )
+        ORDER BY criado_em ASC`,
+      [id_user]
+    );
+    if (!itens.length) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ ok: false, error: 'Carrinho vazio.' });
+    }
+
+    await client.query(
+      `UPDATE logistica.carrinho
+          SET data_prevista = $1, horario = $2, retirada_por = $3, nome_user = $4
+        WHERE id_user = $5
+          AND NOT EXISTS (
+            SELECT 1 FROM solicitacao_produto.itens_solicitados i WHERE i.id_carr = logistica.carrinho.id
+          )`,
+      [data_prevista || null, horario || null, solicitadoPara, nome_user, id_user]
+    );
+
+    const { rows: [seq] } = await client.query(`
+      SELECT COALESCE(MAX(
+        CASE WHEN n_solic ~ '^SEP-[0-9]+$'
+             THEN SUBSTRING(n_solic FROM 5)::integer
+             ELSE NULL END
+      ), 999) + 1 AS next_num
+        FROM solicitacao_produto.itens_solicitados
+    `);
+    const nSolic = `SEP-${Math.max(1000, seq.next_num)}`;
+
+    for (const item of itens) {
+      await client.query(
+        `INSERT INTO solicitacao_produto.solicitacoes_separacao
+           (id_user, nome_user, solicitado_para, codigo_produto, descricao, unidade, quantidade,
+            data_prevista, horario, observacao, n_solic, urgente)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+        [id_user, nome_user, solicitadoPara, item.codigo_produto, item.descricao, item.unidade,
+         item.quantidade, data_prevista || null, horario || null, item.comentario || null,
+         nSolic, item.urgente || false]
+      );
+      await client.query(
+        `INSERT INTO solicitacao_produto.itens_solicitados
+           (id_carr, n_solic, status, observacao, motivo, cod_local, nome_local, urgente)
+         VALUES ($1, $2, 'pendente', $3, 'AT', $4, $5, $6)`,
+        [item.id, nSolic, observacao || null, codLocalGravar, nomeLocalGravar, item.urgente || false]
+      );
+    }
+
+    await client.query('COMMIT');
+    console.log(`[AT/Separação] ${nSolic} enviado por ${nome_user} (${itens.length} itens)`);
+    res.json({ ok: true, total: itens.length, n_solic: nSolic });
+  } catch (err) {
+    try { await client.query('ROLLBACK'); } catch (_) {}
+    console.error('[AT/separacao/enviar] erro:', err);
+    res.status(500).json({ ok: false, error: err.message });
+  } finally {
+    client.release();
+  }
+});
+
+// GET /at/tecnico/separacao/acompanhamento?token= — SEPs do técnico (portal AT) com status por etapa
+router.get('/at/tecnico/separacao/acompanhamento', async (req, res) => {
+  const token = String(req.query.token || '').trim();
+  const auth = await _atResolverTecnicoSep(token);
+  if (auth.error) return res.status(auth.status).json({ ok: false, error: auth.error });
+  const id_user = _atSepIdUser(auth.tecnico.id);
+  try {
+    const { rows } = await pool.query(
+      `SELECT
+          i.n_solic,
+          COALESCE(c.retirada_por, c.nome_user) AS solicitante,
+          MIN(c.data_prevista)::text AS data_prevista,
+          MIN(c.horario) AS horario,
+          COUNT(*)::int AS total_itens,
+          MIN(c.criado_em) AS criado_em,
+          MAX(i.criado_em) AS atualizado_em,
+          bool_or(COALESCE(i.urgente, false)) AS tem_urgente,
+          CASE
+            WHEN bool_or(i.status = 'pendente') THEN 'Solicitado'
+            WHEN bool_or(i.status = 'Stund-by') THEN 'Stund-by'
+            WHEN bool_or(i.status IN ('Separação', 'Em Separação')) THEN 'Em Separação'
+            WHEN bool_or(i.status = 'Separado') THEN 'Separado'
+            WHEN bool_or(i.status = 'Aguardando retirada') THEN 'Aguardando retirada'
+            ELSE 'Concluído'
+          END AS status_sep
+         FROM solicitacao_produto.itens_solicitados i
+         JOIN logistica.carrinho c ON c.id = i.id_carr
+        WHERE i.n_solic IS NOT NULL
+          AND c.id_user = $1
+        GROUP BY i.n_solic, COALESCE(c.retirada_por, c.nome_user)
+        ORDER BY MIN(c.criado_em) DESC
+        LIMIT 120`,
+      [id_user]
+    );
+
+    const nSolicList = rows.map(r => r.n_solic).filter(Boolean);
+    let itensMap = {};
+    if (nSolicList.length) {
+      const { rows: itensRows } = await pool.query(
+        `SELECT
+            i.n_solic,
+            c.codigo_produto,
+            c.descricao,
+            c.unidade,
+            c.quantidade,
+            i.status,
+            COALESCE(i.urgente, false) AS urgente
+           FROM solicitacao_produto.itens_solicitados i
+           JOIN logistica.carrinho c ON c.id = i.id_carr
+          WHERE i.n_solic = ANY($1::text[])
+            AND c.id_user = $2
+          ORDER BY i.n_solic, c.criado_em ASC`,
+        [nSolicList, id_user]
+      );
+      itensMap = itensRows.reduce((acc, it) => {
+        const key = it.n_solic;
+        if (!acc[key]) acc[key] = [];
+        acc[key].push({
+          codigo_produto: it.codigo_produto,
+          descricao: it.descricao,
+          unidade: it.unidade,
+          quantidade: it.quantidade,
+          status: it.status,
+          urgente: it.urgente
+        });
+        return acc;
+      }, {});
+    }
+
+    const seps = rows.map(r => ({
+      n_solic: r.n_solic,
+      solicitante: r.solicitante,
+      data_prevista: r.data_prevista,
+      horario: r.horario,
+      total_itens: r.total_itens,
+      criado_em: r.criado_em,
+      atualizado_em: r.atualizado_em,
+      tem_urgente: r.tem_urgente,
+      status_sep: r.status_sep,
+      itens: itensMap[r.n_solic] || []
+    })).sort((a, b) => {
+      const aDone = a.status_sep === 'Concluído' ? 1 : 0;
+      const bDone = b.status_sep === 'Concluído' ? 1 : 0;
+      if (aDone !== bDone) return aDone - bDone;
+      return new Date(b.criado_em || 0) - new Date(a.criado_em || 0);
+    });
+
+    res.json({ ok: true, seps });
+  } catch (err) {
+    console.error('[AT/separacao/acompanhamento] erro:', err);
+    res.status(500).json({ ok: false, error: err.message });
   }
 });
 

@@ -471,6 +471,236 @@
     }
     .mat-apoio-voltar-btn:hover { background: rgba(255,255,255,.1); }
 
+    /* ── Solicitar produtos / separação (portal AT) ── */
+    #atSepPesquisaModal .modal-container {
+      max-height: 92vh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    #atSepPesquisaModal .at-sep-pesquisa-body {
+      padding: 16px 18px 20px;
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+      flex: 1;
+      overflow: hidden;
+    }
+    .at-sep-search-wrap {
+      position: relative;
+      margin-bottom: 0;
+      display: flex;
+      flex-direction: column;
+      flex: 1;
+      min-height: 0;
+    }
+    .at-sep-search-input {
+      width: 100%; padding: 10px 12px; border-radius: 10px; border: 1px solid rgba(148,163,184,.35);
+      background: rgba(15,23,42,.6); color: #f1f5f9; font-size: 14px; outline: none;
+      flex-shrink: 0;
+    }
+    .at-sep-search-input:focus { border-color: #f59e0b; box-shadow: 0 0 0 3px rgba(245,158,11,.15); }
+    .at-sep-results {
+      margin-top: 10px;
+      min-height: 0;
+      max-height: 0;
+      overflow: hidden;
+      border-radius: 12px;
+      border: 1px solid transparent;
+      background: #0f172a;
+      box-shadow: none;
+      display: block;
+      transition: max-height .15s ease;
+    }
+    .at-sep-results.open {
+      min-height: 228px;
+      max-height: min(300px, 46vh);
+      overflow-y: auto;
+      border-color: rgba(71,85,105,.85);
+      box-shadow: 0 12px 32px rgba(0,0,0,.35);
+    }
+    .at-sep-result-item {
+      display: grid; grid-template-columns: 44px minmax(0,1fr); gap: 10px; align-items: start;
+      padding: 9px 12px; border-bottom: 1px solid rgba(51,65,85,.6);
+      min-height: 68px; width: 100%; text-align: left;
+      background: transparent; color: inherit; font: inherit;
+    }
+    .at-sep-result-item:last-child { border-bottom: none; }
+    .at-sep-result-thumb {
+      width: 44px; height: 44px; border-radius: 8px; overflow: hidden;
+      background: rgba(30,41,59,.9); border: 1px solid rgba(71,85,105,.6);
+      display: grid; place-items: center; color: #64748b; font-size: 1rem; flex-shrink: 0;
+      padding: 0; cursor: zoom-in; transition: border-color .12s, transform .12s;
+    }
+    .at-sep-result-thumb:hover {
+      border-color: #f59e0b;
+      transform: scale(1.04);
+    }
+    .at-sep-result-thumb img { width: 100%; height: 100%; object-fit: cover; pointer-events: none; }
+    .at-sep-result-main {
+      display: block; width: 100%; min-width: 0; padding: 0; margin: 0;
+      border: none; background: transparent; color: inherit; text-align: left;
+      cursor: pointer; border-radius: 8px; transition: background .12s;
+    }
+    .at-sep-result-main:hover { background: rgba(30,41,59,.55); }
+    .at-sep-result-code { font-weight: 700; font-size: 12px; color: #f59e0b; line-height: 1.25; }
+    .at-sep-result-desc {
+      font-size: 12px; color: #cbd5e1; line-height: 1.35;
+      display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+    }
+    .at-sep-pesquisa-foot {
+      flex-shrink: 0;
+      margin-top: 10px;
+    }
+    /* Botões flutuantes — separação (igual menu_produto) */
+    .at-sep-float-group {
+      position: fixed;
+      bottom: 20px;
+      right: 20px;
+      z-index: 10020;
+      display: none;
+      flex-direction: column;
+      gap: 10px;
+      align-items: flex-end;
+    }
+    .at-sep-float-group.is-visible { display: flex; }
+    .at-sep-float-btn {
+      position: relative;
+      width: 48px;
+      height: 48px;
+      border-radius: 50%;
+      border: none;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      background: linear-gradient(135deg, #d97706 0%, #b45309 100%);
+      color: #fff7ed;
+      box-shadow: 0 6px 20px rgba(0,0,0,.35);
+      transition: transform .2s ease, box-shadow .2s ease;
+    }
+    .at-sep-float-btn--acompanhar {
+      background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
+      color: #dbeafe;
+    }
+    .at-sep-float-btn:hover {
+      transform: scale(1.08);
+      box-shadow: 0 8px 24px rgba(0,0,0,.42);
+    }
+    .at-sep-float-btn i { font-size: 18px; color: inherit; }
+    .at-sep-float-badge {
+      position: absolute;
+      top: -4px;
+      right: -4px;
+      min-width: 18px;
+      height: 18px;
+      padding: 0 5px;
+      border-radius: 999px;
+      background: #f59e0b;
+      color: #1a1200;
+      font-size: 10px;
+      font-weight: 800;
+      line-height: 18px;
+      text-align: center;
+      box-shadow: 0 2px 6px rgba(0,0,0,.25);
+    }
+    #atSepFotoModal .at-sep-foto-viewer {
+      max-width: min(92vw, 720px);
+      max-height: 82vh;
+      margin: auto;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 12px;
+      padding: 12px;
+    }
+    #atSepFotoModal img {
+      max-width: 100%;
+      max-height: calc(82vh - 80px);
+      object-fit: contain;
+      border-radius: 10px;
+      background: #0f172a;
+    }
+    #atSepFotoModal .at-sep-foto-titulo {
+      color: #e2e8f0;
+      font-size: 13px;
+      font-weight: 600;
+      text-align: center;
+      line-height: 1.35;
+      max-width: 100%;
+    }
+    .at-sep-acomp-table-wrap {
+      overflow: auto;
+      max-height: min(58vh, 520px);
+      border: 1px solid rgba(71,85,105,.55);
+      border-radius: 12px;
+    }
+    .at-sep-acomp-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 12px;
+      min-width: 520px;
+    }
+    .at-sep-acomp-table thead th {
+      position: sticky;
+      top: 0;
+      z-index: 1;
+      background: #1f2937;
+      color: #9ca3af;
+      text-align: left;
+      padding: 9px 10px;
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: .04em;
+      border-bottom: 1px solid rgba(255,255,255,.08);
+    }
+    .at-sep-acomp-table tbody td {
+      padding: 10px;
+      border-bottom: 1px solid rgba(255,255,255,.06);
+      color: #e5e7eb;
+      vertical-align: top;
+    }
+    .at-sep-acomp-table tbody tr:hover { background: rgba(255,255,255,.04); }
+    .at-sep-status {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 3px 9px;
+      border-radius: 999px;
+      font-size: 11px;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+    .at-sep-status--solicitado { background: rgba(59,130,246,.18); color: #93c5fd; border: 1px solid rgba(59,130,246,.35); }
+    .at-sep-status--standby { background: rgba(236,72,153,.15); color: #f9a8d4; border: 1px solid rgba(236,72,153,.35); }
+    .at-sep-status--separacao { background: rgba(245,158,11,.16); color: #fcd34d; border: 1px solid rgba(245,158,11,.35); }
+    .at-sep-status--separado { background: rgba(34,197,94,.14); color: #86efac; border: 1px solid rgba(34,197,94,.35); }
+    .at-sep-status--retirada { background: rgba(167,139,250,.14); color: #c4b5fd; border: 1px solid rgba(167,139,250,.35); }
+    .at-sep-status--concluido { background: rgba(156,163,175,.14); color: #d1d5db; border: 1px solid rgba(156,163,175,.35); }
+    .at-sep-acomp-itens {
+      margin-top: 6px;
+      font-size: 11px;
+      color: #94a3b8;
+      line-height: 1.45;
+    }
+    .at-sep-acomp-itens span { display: block; }
+    .at-sep-cart-row {
+      display: grid; grid-template-columns: 48px minmax(0,1fr) auto; gap: 10px;
+      padding: 10px; border: 1px solid rgba(51,65,85,.8); border-radius: 12px;
+      background: rgba(15,23,42,.55); margin-bottom: 8px; align-items: start;
+    }
+    .at-sep-cart-thumb { width: 48px; height: 48px; border-radius: 8px; overflow: hidden; background: #1e293b; }
+    .at-sep-cart-thumb img { width: 100%; height: 100%; object-fit: cover; }
+    .at-sep-field-label { font-size: 11px; font-weight: 700; color: #94a3b8; text-transform: uppercase; margin-bottom: 4px; }
+    .at-sep-field-fixed {
+      padding: 8px 10px; border-radius: 8px; border: 1px solid rgba(71,85,105,.7);
+      background: rgba(30,41,59,.6); color: #e2e8f0; font-size: 13px;
+    }
+    .at-sep-input {
+      width: 100%; padding: 8px 10px; border-radius: 8px; border: 1px solid rgba(71,85,105,.7);
+      background: rgba(15,23,42,.7); color: #f8fafc; font-size: 13px; box-sizing: border-box;
+    }
+
     /* ── Documento branco (cópia exata de menu_produto.html) ── */
     .at-os-doc {
       background: #fff; color: #111; font-family: Arial, sans-serif;
@@ -812,6 +1042,9 @@
 	          style="padding:6px 14px;border-radius:20px;border:1px solid #059669;background:rgba(5,150,105,.15);color:#34d399;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap;">
 	          <i class="fa-solid fa-folder-open" style="margin-right:5px;"></i>Material de apoio
 	        </button>
+	        <button id="btnSolicitarProdutos" type="button" onclick="abrirModalSolicitarProdutos()" style="display:none;padding:6px 14px;border-radius:20px;border:1px solid #d97706;background:rgba(245,158,11,.15);color:#fbbf24;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap;">
+	          <i class="fa-solid fa-boxes-stacked" style="margin-right:5px;"></i>Solicitar produtos
+	        </button>
 	        <button id="btnToggleFinaliz" onclick="_toggleFinaliz()"
 	          style="padding:6px 14px;border-radius:20px;border:1px solid #d97706;background:rgba(217,119,6,.12);color:#f59e0b;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap;">
 	          Exibir finalizados
@@ -836,6 +1069,16 @@
         </tbody>
       </table>
 	    </div>
+	  </div>
+
+	  <div class="at-sep-float-group" id="atSepFloatGroup">
+	    <button type="button" id="atSepFloatAcompBtn" class="at-sep-float-btn at-sep-float-btn--acompanhar" onclick="abrirModalAtAcompanhamento()" title="Acompanhar separações" aria-label="Acompanhar separações">
+	      <i class="fa-solid fa-list-check"></i>
+	    </button>
+	    <button type="button" id="atSepFloatBtn" class="at-sep-float-btn" onclick="abrirModalAtCarrinhoSep()" title="Lista de separação" aria-label="Lista de separação">
+	      <i class="fa-solid fa-clipboard-list"></i>
+	      <span id="atSepFloatBadge" class="at-sep-float-badge" style="display:none;">0</span>
+	    </button>
 	  </div>
 
 	  <div id="sgf-ai-panel" role="dialog" aria-label="Assistente técnico">
@@ -2000,7 +2243,7 @@
           return;
         }
         localStorage.setItem(SESS_KEY, d.session);
-        localStorage.setItem(SESS_KEY + '_u', JSON.stringify({ nome: d.nome, tipo: d.tipo }));
+        localStorage.setItem(SESS_KEY + '_u', JSON.stringify({ nome: d.nome, tipo: d.tipo, cnpj_cpf: d.cnpj_cpf || '' }));
         mostrarDash(d);
         carregarAtendimentos();
       } catch { setErro('loginErro', 'Erro de conexão.'); }
@@ -2011,6 +2254,7 @@
 	      document.getElementById('dashNome').textContent = d.nome || '—';
 	      document.getElementById('dashTipo').textContent = d.tipo || '';
 	      mostrar('dashSection');
+	      _carregarBtnSolicitarProdutos(d.cnpj_cpf);
 	      resetPortalAiConversation({ showWelcome: true });
 	      _matApoioCarregar(true);
 	    }
@@ -2020,6 +2264,8 @@
 	      resetPortalAiConversation({ showWelcome: false });
 	      localStorage.removeItem(SESS_KEY);
 	      localStorage.removeItem(SESS_KEY + '_u');
+	      document.getElementById('atSepFloatGroup')?.classList.remove('is-visible');
+	      document.getElementById('btnSolicitarProdutos').style.display = 'none';
 	      document.getElementById('senhaLogin').value = '';
 	      mostrar('loadingSection');
 	      init();
@@ -2675,6 +2921,495 @@
       _matApoioPararPoll();
     }
 
+    // ── Solicitar produtos / separação (portal AT) ─────────────────────────
+    const AT_SEP_CNPJS = new Set(['05240837000121', '48407161000120']);
+    const AT_SEP_LOCAL_NOME = '7. area vermelha';
+    let _atSepSearchTimer = null;
+    let _atSepCtx = null;
+
+    function _atNormCnpj(v) {
+      return String(v || '').replace(/\D/g, '');
+    }
+
+    function _atSepPermitido(cnpj) {
+      return AT_SEP_CNPJS.has(_atNormCnpj(cnpj));
+    }
+
+    function _atDashNome() {
+      return document.getElementById('dashNome')?.textContent?.trim() || '';
+    }
+
+    async function _carregarBtnSolicitarProdutos(cnpj) {
+      const btn = document.getElementById('btnSolicitarProdutos');
+      const floatGroup = document.getElementById('atSepFloatGroup');
+      let permitido = false;
+      if (cnpj) {
+        permitido = _atSepPermitido(cnpj);
+        if (btn) btn.style.display = permitido ? '' : 'none';
+        if (floatGroup) floatGroup.classList.toggle('is-visible', permitido);
+        if (permitido) _atSepAtualizarBadge();
+        return;
+      }
+      if (!TOKEN) {
+        if (btn) btn.style.display = 'none';
+        if (floatGroup) floatGroup.classList.remove('is-visible');
+        return;
+      }
+      try {
+        const r = await fetch(`${BASE}/api/sac/at/tecnico/separacao/permissao?token=${encodeURIComponent(TOKEN)}`);
+        const d = await r.json();
+        permitido = !!(d.ok && d.permitido);
+        if (btn) btn.style.display = permitido ? '' : 'none';
+        if (floatGroup) floatGroup.classList.toggle('is-visible', permitido);
+        if (permitido) _atSepAtualizarBadge();
+      } catch {
+        if (btn) btn.style.display = 'none';
+        if (floatGroup) floatGroup.classList.remove('is-visible');
+      }
+    }
+
+    async function _atSepAtualizarBadge(count) {
+      const badge = document.getElementById('atSepFloatBadge');
+      if (!badge) return;
+      let total = Number.isFinite(count) ? count : null;
+      if (total == null) {
+        try {
+          const r = await fetch(`${BASE}/api/sac/at/tecnico/separacao/carrinho?token=${encodeURIComponent(TOKEN)}`);
+          const d = await r.json();
+          total = (d.itens || []).length;
+        } catch {
+          total = 0;
+        }
+      }
+      badge.textContent = total;
+      badge.style.display = total > 0 ? '' : 'none';
+    }
+
+    function abrirAtSepFotoViewer(url, titulo) {
+      const modal = document.getElementById('atSepFotoModal');
+      const img = document.getElementById('atSepFotoImg');
+      const tit = document.getElementById('atSepFotoTitulo');
+      if (!modal || !img) return;
+      img.src = url || '';
+      img.alt = titulo || 'Foto do produto';
+      if (tit) tit.textContent = titulo || '';
+      modal.classList.add('open');
+      document.body.style.overflow = 'hidden';
+    }
+
+    function fecharAtSepFotoViewer() {
+      const modal = document.getElementById('atSepFotoModal');
+      const img = document.getElementById('atSepFotoImg');
+      if (modal) modal.classList.remove('open');
+      if (img) img.src = '';
+      const outroModalAberto = document.querySelector('#atSepPesquisaModal.open, #atSepQtdModal.open, #atSepCarrinhoModal.open, #atSepAcompModal.open');
+      if (!outroModalAberto) document.body.style.overflow = '';
+    }
+
+    function _atSepSelecionarProduto(codigo, descricao, unidade) {
+      _atSepCtx = { codigo, descricao, unidade: unidade || 'UN' };
+      fecharModalSolicitarProdutos();
+      abrirModalAtSepQtd();
+    }
+
+    function _atSepImgUrl(item) {
+      const raw = String(item?.url_imagem || '').trim();
+      if (raw && (raw.startsWith('http://') || raw.startsWith('https://'))) return raw;
+      if (item?.codigo_produto) return `/imagens_produtos/${item.codigo_produto}.jpg`;
+      return '';
+    }
+
+    function abrirModalSolicitarProdutos(opts = {}) {
+      const modal = document.getElementById('atSepPesquisaModal');
+      if (!modal) return;
+      const input = document.getElementById('atSepPesquisaInput');
+      const results = document.getElementById('atSepPesquisaResults');
+      if (!opts.manterBusca) {
+        if (input) input.value = '';
+        if (results) { results.innerHTML = ''; results.classList.remove('open'); }
+      } else if (results && input?.value.trim().length >= 4) {
+        results.classList.add('open');
+      }
+      modal.classList.add('open');
+      document.body.style.overflow = 'hidden';
+      setTimeout(() => input?.focus(), 80);
+    }
+
+    function fecharModalSolicitarProdutos() {
+      document.getElementById('atSepPesquisaModal')?.classList.remove('open');
+      document.getElementById('atSepPesquisaResults')?.classList.remove('open');
+      document.body.style.overflow = '';
+    }
+
+    async function _atSepBuscarProdutos(q) {
+      const results = document.getElementById('atSepPesquisaResults');
+      if (!results) return;
+      if (q.length < 4) {
+        results.innerHTML = '';
+        results.classList.remove('open');
+        return;
+      }
+      results.innerHTML = '<div style="padding:14px;color:#94a3b8;font-size:12px;text-align:center;">Buscando…</div>';
+      results.classList.add('open');
+      try {
+        const r = await fetch(`${BASE}/api/sac/at/tecnico/separacao/produtos?token=${encodeURIComponent(TOKEN)}&q=${encodeURIComponent(q)}`);
+        const d = await r.json();
+        const itens = d.itens || [];
+        if (!itens.length) {
+          results.innerHTML = '<div style="padding:14px;color:#94a3b8;font-size:12px;text-align:center;">Nenhum produto encontrado.</div>';
+          return;
+        }
+        results.innerHTML = itens.map(p => {
+          const img = _atSepImgUrl(p);
+          const thumb = img
+            ? `<img src="${esc(img)}" alt="" onerror="this.parentElement.innerHTML='<i class=\\'fa-regular fa-image\\'></i>'">`
+            : '<i class="fa-regular fa-image"></i>';
+          const imgAttr = esc(img || '');
+          const codigo = esc(p.codigo);
+          const descricao = esc(p.descricao || '');
+          const unidade = esc(p.unidade || 'UN');
+          const tituloFoto = esc((p.codigo || '') + ' — ' + (p.descricao || ''));
+          return `<div class="at-sep-result-item">
+            <button type="button" class="at-sep-result-thumb" data-img="${imgAttr}" data-titulo="${tituloFoto}" title="Ver foto">${thumb}</button>
+            <button type="button" class="at-sep-result-main" data-codigo="${codigo}" data-descricao="${descricao}" data-unidade="${unidade}">
+              <div class="at-sep-result-code">${codigo}</div>
+              <div class="at-sep-result-desc">${descricao}</div>
+            </button>
+          </div>`;
+        }).join('');
+        results.querySelectorAll('.at-sep-result-thumb').forEach(btn => {
+          btn.addEventListener('click', (ev) => {
+            ev.stopPropagation();
+            const url = btn.dataset.img || '';
+            if (!url) { alert('Este produto não tem foto cadastrada.'); return; }
+            abrirAtSepFotoViewer(url, btn.dataset.titulo || '');
+          });
+        });
+        results.querySelectorAll('.at-sep-result-main').forEach(btn => {
+          btn.addEventListener('click', () => {
+            _atSepSelecionarProduto(btn.dataset.codigo, btn.dataset.descricao, btn.dataset.unidade);
+          });
+        });
+      } catch {
+        results.innerHTML = '<div style="padding:14px;color:#f87171;font-size:12px;text-align:center;">Erro ao buscar.</div>';
+      }
+    }
+
+    function abrirModalAtSepQtd() {
+      if (!_atSepCtx) return;
+      const modal = document.getElementById('atSepQtdModal');
+      const prod = document.getElementById('atSepQtdProd');
+      const unit = document.getElementById('atSepQtdUnit');
+      const inp = document.getElementById('atSepQtdInput');
+      if (prod) prod.textContent = _atSepCtx.descricao || _atSepCtx.codigo;
+      if (unit) unit.textContent = 'SOLICITAR COMO: ' + (_atSepCtx.unidade || 'UN');
+      if (inp) {
+        inp.value = '1';
+        inp.min = (_atSepCtx.unidade || 'UN') === 'UN' ? '1' : '0.001';
+        inp.step = (_atSepCtx.unidade || 'UN') === 'UN' ? '1' : '0.001';
+      }
+      modal?.classList.add('open');
+    }
+
+    function fecharModalAtSepQtd(voltarPesquisa) {
+      document.getElementById('atSepQtdModal')?.classList.remove('open');
+      _atSepCtx = null;
+      if (voltarPesquisa !== false) abrirModalSolicitarProdutos({ manterBusca: true });
+    }
+
+    async function confirmarAtSepQtd() {
+      if (!_atSepCtx) return;
+      const inp = document.getElementById('atSepQtdInput');
+      let qty = Number(String(inp?.value || '').replace(',', '.'));
+      if (!Number.isFinite(qty) || qty <= 0) { inp?.focus(); return; }
+      if ((_atSepCtx.unidade || 'UN') === 'UN') qty = Math.max(1, Math.round(qty));
+      const btn = document.getElementById('atSepQtdOk');
+      if (btn) { btn.disabled = true; btn.textContent = 'Salvando…'; }
+      try {
+        const r = await fetch(`${BASE}/api/sac/at/tecnico/separacao`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            token: TOKEN,
+            codigo: _atSepCtx.codigo,
+            descricao: _atSepCtx.descricao,
+            quantidade: qty,
+            unidade: _atSepCtx.unidade || 'UN'
+          })
+        });
+        const d = await r.json();
+        if (!d.ok) throw new Error(d.error || 'Erro ao adicionar.');
+        fecharModalAtSepQtd();
+        await _atSepAtualizarBadge();
+      } catch (e) {
+        alert(e.message || 'Erro ao adicionar separação.');
+      } finally {
+        if (btn) { btn.disabled = false; btn.textContent = 'Confirmar'; }
+      }
+    }
+
+    function _atFmtQty(q) {
+      const n = parseFloat(q);
+      return Number.isInteger(n) ? String(n) : n.toFixed(3).replace(/\.?0+$/, '');
+    }
+
+    async function abrirModalAtCarrinhoSep() {
+      document.getElementById('atSepPesquisaModal')?.classList.remove('open');
+      document.getElementById('atSepQtdModal')?.classList.remove('open');
+      document.getElementById('atSepAcompModal')?.classList.remove('open');
+      fecharAtSepFotoViewer();
+      _atSepCtx = null;
+      const modal = document.getElementById('atSepCarrinhoModal');
+      if (!modal) return;
+      modal.classList.add('open');
+      document.body.style.overflow = 'hidden';
+      const nome = _atDashNome();
+      const respEl = document.getElementById('atSepCarrinhoResp');
+      const localEl = document.getElementById('atSepCarrinhoLocal');
+      if (respEl) respEl.textContent = nome || '—';
+      if (localEl) localEl.textContent = AT_SEP_LOCAL_NOME;
+      const dateEl = document.getElementById('atSepCarrinhoDate');
+      if (dateEl && !dateEl.value) dateEl.value = new Date().toISOString().slice(0, 10);
+      await _atSepRenderCarrinho();
+    }
+
+    function fecharModalAtCarrinhoSep() {
+      document.getElementById('atSepCarrinhoModal')?.classList.remove('open');
+      if (!document.querySelector('#atSepPesquisaModal.open, #atSepQtdModal.open, #atSepAcompModal.open, #atSepFotoModal.open')) {
+        document.body.style.overflow = '';
+      }
+    }
+
+    async function _atSepRenderCarrinho() {
+      const list = document.getElementById('atSepCarrinhoItens');
+      const empty = document.getElementById('atSepCarrinhoEmpty');
+      const form = document.getElementById('atSepCarrinhoForm');
+      const count = document.getElementById('atSepCarrinhoCount');
+      if (!list) return;
+      list.innerHTML = '<div style="padding:16px;color:#94a3b8;text-align:center;">Carregando…</div>';
+      try {
+        const r = await fetch(`${BASE}/api/sac/at/tecnico/separacao/carrinho?token=${encodeURIComponent(TOKEN)}`);
+        const d = await r.json();
+        const itens = d.itens || [];
+        if (d.local_nome) {
+          const localEl = document.getElementById('atSepCarrinhoLocal');
+          if (localEl) localEl.textContent = d.local_nome;
+        }
+        if (d.nome_user) {
+          const respEl = document.getElementById('atSepCarrinhoResp');
+          if (respEl) respEl.textContent = d.nome_user;
+        }
+        if (count) count.textContent = itens.length + (itens.length === 1 ? ' item' : ' itens');
+        _atSepAtualizarBadge(itens.length);
+        list.innerHTML = '';
+        if (!itens.length) {
+          if (empty) empty.style.display = 'block';
+          if (form) form.style.display = 'none';
+          return;
+        }
+        if (empty) empty.style.display = 'none';
+        if (form) form.style.display = 'block';
+        itens.forEach(item => {
+          const row = document.createElement('div');
+          row.className = 'at-sep-cart-row';
+          const img = _atSepImgUrl(item);
+          row.innerHTML = `
+            <div class="at-sep-cart-thumb">${img ? `<img src="${esc(img)}" alt="" onerror="this.style.display='none'">` : ''}</div>
+            <div style="min-width:0;">
+              <div style="font-weight:700;font-size:12px;color:#f59e0b;">${esc(item.codigo_produto)}</div>
+              <div style="font-size:12px;color:#cbd5e1;margin-bottom:6px;">${esc(item.descricao || '')}</div>
+              <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+                <span style="font-size:11px;color:#94a3b8;">Qtd.</span>
+                <input type="text" class="at-sep-input at-sep-qty" data-id="${item.id}" value="${_atFmtQty(item.quantidade)}" style="width:70px;text-align:center;">
+                <span style="font-size:11px;color:#94a3b8;">${esc(item.unidade || 'UN')}</span>
+              </div>
+              <textarea class="at-sep-input at-sep-comment" data-id="${item.id}" rows="1" placeholder="Comentário deste item" style="margin-top:6px;font-size:12px;">${esc(item.comentario || '')}</textarea>
+            </div>
+            <button type="button" class="at-sep-remove" data-id="${item.id}" title="Remover" style="background:#450a0a;border:none;border-radius:8px;color:#f87171;padding:6px 8px;cursor:pointer;"><i class="fa-solid fa-trash-can"></i></button>`;
+          list.appendChild(row);
+        });
+        list.querySelectorAll('.at-sep-qty').forEach(inp => {
+          inp.addEventListener('change', async () => {
+            const id = inp.dataset.id;
+            const qty = parseFloat(String(inp.value).replace(',', '.'));
+            if (!id || !Number.isFinite(qty) || qty <= 0) return;
+            await fetch(`${BASE}/api/sac/at/tecnico/separacao/carrinho/${id}/quantidade`, {
+              method: 'PATCH',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ token: TOKEN, quantidade: qty })
+            });
+          });
+        });
+        list.querySelectorAll('.at-sep-comment').forEach(ta => {
+          let timer = null;
+          ta.addEventListener('input', () => {
+            clearTimeout(timer);
+            timer = setTimeout(async () => {
+              const id = ta.dataset.id;
+              if (!id) return;
+              await fetch(`${BASE}/api/sac/at/tecnico/separacao/carrinho/${id}/comentario`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ token: TOKEN, comentario: ta.value })
+              });
+            }, 600);
+          });
+        });
+        list.querySelectorAll('.at-sep-remove').forEach(btn => {
+          btn.addEventListener('click', async () => {
+            const id = btn.dataset.id;
+            if (!id) return;
+            await fetch(`${BASE}/api/sac/at/tecnico/separacao/carrinho/${id}?token=${encodeURIComponent(TOKEN)}`, { method: 'DELETE' });
+            await _atSepRenderCarrinho();
+          });
+        });
+      } catch {
+        list.innerHTML = '<div style="padding:16px;color:#f87171;text-align:center;">Erro ao carregar lista.</div>';
+      }
+    }
+
+    async function enviarAtSeparacao() {
+      const btn = document.getElementById('atSepCarrinhoSend');
+      if (btn) { btn.disabled = true; btn.textContent = 'Enviando…'; }
+      try {
+        const r = await fetch(`${BASE}/api/sac/at/tecnico/separacao/enviar`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            token: TOKEN,
+            data_prevista: document.getElementById('atSepCarrinhoDate')?.value || null,
+            horario: document.getElementById('atSepCarrinhoHorario')?.value || '17:30',
+            observacao: document.getElementById('atSepCarrinhoObs')?.value?.trim() || null
+          })
+        });
+        const d = await r.json();
+        if (!d.ok) throw new Error(d.error || 'Erro ao enviar.');
+        document.getElementById('atSepCarrinhoObs').value = '';
+        fecharModalAtCarrinhoSep();
+        await _atSepAtualizarBadge(0);
+        alert(`Separação enviada com sucesso! (${d.total} ${d.total === 1 ? 'item' : 'itens'}) — ${d.n_solic || ''}`);
+      } catch (e) {
+        alert(e.message || 'Erro ao enviar separação.');
+      } finally {
+        if (btn) { btn.disabled = false; btn.textContent = 'Enviar separação'; }
+      }
+    }
+
+    async function limparAtCarrinhoSep() {
+      if (!confirm('Deseja excluir todos os itens desta lista?')) return;
+      await fetch(`${BASE}/api/sac/at/tecnico/separacao/carrinho?token=${encodeURIComponent(TOKEN)}`, { method: 'DELETE' });
+      await _atSepRenderCarrinho();
+    }
+
+    const AT_SEP_STATUS_META = {
+      'Solicitado': { cls: 'solicitado', icon: 'fa-clock' },
+      'Stund-by': { cls: 'standby', icon: 'fa-bag-shopping' },
+      'Em Separação': { cls: 'separacao', icon: 'fa-boxes-stacked' },
+      'Separado': { cls: 'separado', icon: 'fa-check-circle' },
+      'Aguardando retirada': { cls: 'retirada', icon: 'fa-hourglass-half' },
+      'Concluído': { cls: 'concluido', icon: 'fa-flag-checkered' }
+    };
+
+    function _atFmtDataSep(v) {
+      if (!v) return '—';
+      const d = new Date(v);
+      return Number.isNaN(d.getTime()) ? String(v) : d.toLocaleDateString('pt-BR');
+    }
+
+    function _atFmtDataHoraSep(v) {
+      if (!v) return '—';
+      const d = new Date(v);
+      return Number.isNaN(d.getTime()) ? '—' : d.toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+    }
+
+    function _atSepStatusHtml(status) {
+      const meta = AT_SEP_STATUS_META[status] || { cls: 'concluido', icon: 'fa-circle' };
+      return `<span class="at-sep-status at-sep-status--${meta.cls}"><i class="fa-solid ${meta.icon}" style="font-size:.68rem;"></i>${esc(status)}</span>`;
+    }
+
+    function _atSepItensResumoHtml(itens) {
+      const lista = Array.isArray(itens) ? itens : [];
+      if (!lista.length) return '<span style="color:#64748b;">—</span>';
+      const max = 4;
+      const visiveis = lista.slice(0, max).map(it =>
+        `<span>${esc(it.codigo_produto)} · ${esc(it.descricao || '')} (${_atFmtQty(it.quantidade)} ${esc(it.unidade || 'UN')})</span>`
+      ).join('');
+      const extra = lista.length > max ? `<span style="color:#64748b;">+ ${lista.length - max} item(ns)</span>` : '';
+      return `<div class="at-sep-acomp-itens">${visiveis}${extra}</div>`;
+    }
+
+    async function _atSepCarregarAcompanhamento() {
+      const tbody = document.getElementById('atSepAcompTbody');
+      const statusEl = document.getElementById('atSepAcompStatus');
+      if (!tbody) return;
+      tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:#94a3b8;padding:24px;">Carregando…</td></tr>';
+      if (statusEl) statusEl.textContent = '';
+      try {
+        const r = await fetch(`${BASE}/api/sac/at/tecnico/separacao/acompanhamento?token=${encodeURIComponent(TOKEN)}`);
+        const d = await r.json();
+        if (!d.ok) throw new Error(d.error || 'Erro ao carregar.');
+        const seps = d.seps || [];
+        if (!seps.length) {
+          tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:#94a3b8;padding:28px;">Nenhuma separação encontrada.</td></tr>';
+          return;
+        }
+        tbody.innerHTML = seps.map(sep => {
+          const dataPrev = [sep.data_prevista ? _atFmtDataSep(sep.data_prevista) : '', sep.horario || ''].filter(Boolean).join(' ');
+          const urgente = sep.tem_urgente
+            ? '<span style="display:inline-flex;margin-left:6px;padding:2px 7px;border-radius:999px;font-size:10px;font-weight:700;color:#fca5a5;background:#450a0a;border:1px solid #ef4444;"><i class="fa-solid fa-bolt" style="margin-right:3px;"></i>Urgente</span>'
+            : '';
+          return `<tr>
+            <td style="font-weight:800;color:#f59e0b;white-space:nowrap;">${esc(sep.n_solic)}${urgente}</td>
+            <td style="white-space:nowrap;">${_atFmtDataHoraSep(sep.criado_em)}</td>
+            <td style="white-space:nowrap;">${esc(dataPrev || '—')}</td>
+            <td style="text-align:center;">${sep.total_itens || 0}</td>
+            <td>${_atSepStatusHtml(sep.status_sep)}</td>
+            <td>${_atSepItensResumoHtml(sep.itens)}</td>
+          </tr>`;
+        }).join('');
+        if (statusEl) {
+          const agora = new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+          statusEl.textContent = `${seps.length} SEP(s) · atualizado às ${agora}`;
+        }
+      } catch (e) {
+        tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;color:#f87171;padding:24px;">${esc(e.message || 'Erro ao carregar.')}</td></tr>`;
+      }
+    }
+
+    function abrirModalAtAcompanhamento() {
+      const modal = document.getElementById('atSepAcompModal');
+      if (!modal) return;
+      document.getElementById('atSepPesquisaModal')?.classList.remove('open');
+      document.getElementById('atSepQtdModal')?.classList.remove('open');
+      document.getElementById('atSepCarrinhoModal')?.classList.remove('open');
+      fecharAtSepFotoViewer();
+      modal.classList.add('open');
+      document.body.style.overflow = 'hidden';
+      _atSepCarregarAcompanhamento();
+    }
+
+    function fecharModalAtAcompanhamento() {
+      document.getElementById('atSepAcompModal')?.classList.remove('open');
+      if (!document.querySelector('#atSepPesquisaModal.open, #atSepQtdModal.open, #atSepCarrinhoModal.open, #atSepFotoModal.open')) {
+        document.body.style.overflow = '';
+      }
+    }
+
+    document.addEventListener('DOMContentLoaded', () => {
+      const pesq = document.getElementById('atSepPesquisaInput');
+      if (pesq) {
+        pesq.addEventListener('input', () => {
+          clearTimeout(_atSepSearchTimer);
+          const q = pesq.value.trim();
+          _atSepSearchTimer = setTimeout(() => _atSepBuscarProdutos(q), 320);
+        });
+      }
+      document.getElementById('atSepQtdOk')?.addEventListener('click', confirmarAtSepQtd);
+      document.getElementById('atSepQtdCancel')?.addEventListener('click', fecharModalAtSepQtd);
+      document.getElementById('atSepCarrinhoSend')?.addEventListener('click', enviarAtSeparacao);
+      document.getElementById('atSepCarrinhoClear')?.addEventListener('click', limparAtCarrinhoSep);
+    });
+
 	    bindPortalAi();
 	    init();
 	  </script>
@@ -2808,6 +3543,136 @@
       </div>
       <!-- Viewer grande -->
       <div class="evid-viewer" id="evidViewer" style="display:none;"></div>
+    </div>
+  </div>
+
+  <!-- Modal Solicitar produtos (pesquisa) -->
+  <div class="modal-overlay" id="atSepPesquisaModal" onclick="if(event.target===this)fecharModalSolicitarProdutos()">
+    <div class="modal-container" style="max-width:560px;">
+      <div class="modal-header">
+        <span class="modal-header-title"><i class="fa-solid fa-magnifying-glass" style="margin-right:6px;color:#f59e0b;"></i>Solicitar produtos</span>
+        <button class="modal-close-btn" onclick="fecharModalSolicitarProdutos()">✕ Fechar</button>
+      </div>
+      <div class="at-sep-pesquisa-body">
+        <div class="at-sep-search-wrap">
+          <label class="at-sep-field-label" for="atSepPesquisaInput">Pesquisar</label>
+          <input id="atSepPesquisaInput" class="at-sep-search-input" type="search" placeholder="Digite ao menos 4 caracteres (código ou descrição)…" autocomplete="off">
+          <div id="atSepPesquisaResults" class="at-sep-results"></div>
+        </div>
+        <div class="at-sep-pesquisa-foot">
+          <p style="font-size:11px;color:#94a3b8;margin-top:0;">Busca na base de produtos por código Omie ou descrição. Toque na foto para ampliar; no restante da linha para adicionar.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal quantidade -->
+  <div class="modal-overlay" id="atSepQtdModal" onclick="if(event.target===this)fecharModalAtSepQtd()">
+    <div class="modal-container" style="max-width:400px;">
+      <div class="modal-header">
+        <span class="modal-header-title">Quantidade para separação</span>
+        <button class="modal-close-btn" type="button" onclick="fecharModalAtSepQtd()">✕ Fechar</button>
+      </div>
+      <div style="padding:16px 18px 20px;display:flex;flex-direction:column;gap:12px;">
+        <div id="atSepQtdProd" style="font-weight:700;color:#e5e7eb;font-size:14px;"></div>
+        <div id="atSepQtdUnit" style="display:inline-block;padding:8px 10px;border-radius:10px;background:rgba(245,158,11,.15);border:1px solid rgba(245,158,11,.4);color:#fbbf24;font-weight:700;font-size:13px;"></div>
+        <input id="atSepQtdInput" type="number" min="1" step="1" value="1" class="at-sep-input" style="font-size:16px;">
+        <div style="display:flex;gap:10px;">
+          <button id="atSepQtdCancel" type="button" style="flex:1;padding:10px;border-radius:10px;border:1px solid rgba(71,85,105,.8);background:transparent;color:#e2e8f0;font-weight:700;cursor:pointer;">Cancelar</button>
+          <button id="atSepQtdOk" type="button" style="flex:1;padding:10px;border-radius:10px;border:none;background:#f59e0b;color:#1a1200;font-weight:800;cursor:pointer;">Confirmar</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal ampliar foto do produto -->
+  <div class="modal-overlay" id="atSepFotoModal" onclick="if(event.target===this)fecharAtSepFotoViewer()">
+    <div class="at-sep-foto-viewer" onclick="event.stopPropagation()">
+      <div id="atSepFotoTitulo" class="at-sep-foto-titulo"></div>
+      <img id="atSepFotoImg" src="" alt="Foto do produto">
+      <button type="button" class="modal-close-btn" onclick="fecharAtSepFotoViewer()" style="align-self:flex-end;">✕ Fechar</button>
+    </div>
+  </div>
+
+  <!-- Modal Sol. de separação -->
+  <div class="modal-overlay" id="atSepCarrinhoModal" onclick="if(event.target===this)fecharModalAtCarrinhoSep()">
+    <div class="modal-container" style="max-width:680px;max-height:90vh;display:flex;flex-direction:column;">
+      <div class="modal-header" style="flex-shrink:0;">
+        <span class="modal-header-title">Sol. de separação <span id="atSepCarrinhoCount" style="color:#f59e0b;margin-left:6px;">0 itens</span></span>
+        <button class="modal-close-btn" onclick="fecharModalAtCarrinhoSep()">✕ Fechar</button>
+      </div>
+      <div style="padding:12px 16px;overflow-y:auto;flex:1;min-height:120px;">
+        <div id="atSepCarrinhoItens"></div>
+        <div id="atSepCarrinhoEmpty" style="display:none;text-align:center;color:#94a3b8;padding:28px;font-size:13px;">Nenhum produto adicionado.</div>
+      </div>
+      <div id="atSepCarrinhoForm" style="display:none;border-top:1px solid rgba(255,255,255,.1);padding:14px 16px 18px;flex-shrink:0;">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px;">
+          <div>
+            <div class="at-sep-field-label">Resp. retirada</div>
+            <div id="atSepCarrinhoResp" class="at-sep-field-fixed">—</div>
+          </div>
+          <div>
+            <div class="at-sep-field-label">Local de estoque</div>
+            <div id="atSepCarrinhoLocal" class="at-sep-field-fixed">7. area vermelha</div>
+          </div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr auto;gap:8px;margin-bottom:10px;">
+          <div>
+            <div class="at-sep-field-label">Data prevista</div>
+            <input id="atSepCarrinhoDate" type="date" class="at-sep-input">
+          </div>
+          <div>
+            <div class="at-sep-field-label">Horário</div>
+            <select id="atSepCarrinhoHorario" class="at-sep-input">
+              <option value="08:00">08:00</option>
+              <option value="12:00">12:00</option>
+              <option value="17:30" selected>17:30</option>
+            </select>
+          </div>
+        </div>
+        <div style="margin-bottom:12px;">
+          <div class="at-sep-field-label">Observação geral</div>
+          <textarea id="atSepCarrinhoObs" rows="2" class="at-sep-input" placeholder="Instruções para o almoxarifado"></textarea>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1.4fr;gap:10px;">
+          <button id="atSepCarrinhoClear" type="button" style="padding:10px;border-radius:10px;border:1px solid #7f1d1d;background:transparent;color:#f87171;font-weight:700;cursor:pointer;">Excluir lista</button>
+          <button id="atSepCarrinhoSend" type="button" style="padding:10px;border-radius:10px;border:none;background:#f59e0b;color:#1a1200;font-weight:800;cursor:pointer;">Enviar separação</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal acompanhar separações -->
+  <div class="modal-overlay" id="atSepAcompModal" onclick="if(event.target===this)fecharModalAtAcompanhamento()">
+    <div class="modal-container" style="max-width:960px;width:96%;max-height:90vh;display:flex;flex-direction:column;">
+      <div class="modal-header" style="flex-shrink:0;">
+        <span class="modal-header-title"><i class="fa-solid fa-list-check" style="margin-right:6px;color:#38bdf8;"></i>Acompanhar separações</span>
+        <div style="display:flex;align-items:center;gap:8px;">
+          <button type="button" class="modal-close-btn" onclick="_atSepCarregarAcompanhamento()" title="Atualizar lista" style="font-size:12px;padding:6px 10px;"><i class="fa-solid fa-rotate-right"></i></button>
+          <button class="modal-close-btn" type="button" onclick="fecharModalAtAcompanhamento()">✕ Fechar</button>
+        </div>
+      </div>
+      <div style="padding:10px 16px 6px;flex-shrink:0;">
+        <p style="margin:0;font-size:12px;color:#94a3b8;">Suas solicitações de separação (SEP) e o status atual de cada etapa.</p>
+        <div id="atSepAcompStatus" style="margin-top:6px;font-size:11px;color:#64748b;"></div>
+      </div>
+      <div class="at-sep-acomp-table-wrap" style="flex:1;min-height:0;padding:0 16px 16px;">
+        <table class="at-sep-acomp-table">
+          <thead>
+            <tr>
+              <th>SEP</th>
+              <th>Solicitado em</th>
+              <th>Previsto</th>
+              <th style="text-align:center;">Itens</th>
+              <th>Status</th>
+              <th>Produtos</th>
+            </tr>
+          </thead>
+          <tbody id="atSepAcompTbody">
+            <tr><td colspan="6" style="text-align:center;color:#94a3b8;padding:24px;">Carregando…</td></tr>
+          </tbody>
+        </table>
+      </div>
     </div>
   </div>
 
