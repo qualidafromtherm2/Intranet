@@ -544,7 +544,7 @@ async function syncProdutosOmie() {
 
     const client = await pool.connect();
     try {
-      await client.query("SELECT set_config('app.produtos_omie_write_source', 'omie_cron', true)");
+      await client.query("SELECT set_config('app.produtos_omie_write_source', 'omie_cron', false)");
       for (const p of lista) {
         if (!p?.codigo_produto && !p?.codigo) continue;
         try {

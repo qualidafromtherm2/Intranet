@@ -58,7 +58,7 @@ window.__listaReady    = null; // Promise do preload
 let __preloadPromise = null;
 
 /* --------------------- Helpers HTTP (sem cache) ----------------------- */
-function buildListaUrl({ page=1, limit=500, q='', tipoitem='', inativo='N' } = {}) {
+function buildListaUrl({ page=1, limit=500, q='', tipoitem='', inativo='' } = {}) {
   const params = new URLSearchParams({
     page: String(page),
     limit: String(limit),
@@ -92,7 +92,7 @@ async function preloadFromDB() {
       let loaded   = 0;
 
       while (true) {
-        const data  = await fetchLista({ page, limit, inativo: 'N' });
+        const data  = await fetchLista({ page, limit });
         const itens = Array.isArray(data.itens) ? data.itens : [];
 
         if (total === null) {

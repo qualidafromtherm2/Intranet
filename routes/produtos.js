@@ -25,9 +25,9 @@ async function ensureProdutosOmieWebhookOnlyGuard() {
       DECLARE
         v_source text;
       BEGIN
-        v_source := current_setting('app.produtos_omie_write_source', true);
-        IF COALESCE(v_source, '') <> 'omie_webhook' THEN
-          RAISE EXCEPTION 'Escrita em public.produtos_omie permitida apenas via webhook da Omie'
+        v_source := lower(trim(coalesce(current_setting('app.produtos_omie_write_source', true), '')));
+        IF v_source NOT IN ('omie_webhook', 'omie_cron', 'omie_manual', 'omie_sync') THEN
+          RAISE EXCEPTION 'Escrita em public.produtos_omie permitida apenas via Omie (webhook/cron/sync). source=%', v_source
             USING ERRCODE = '42501';
         END IF;
 
@@ -47,9 +47,26 @@ async function ensureProdutosOmieWebhookOnlyGuard() {
       EXECUTE FUNCTION public.trg_guard_produtos_omie_webhook_only();
     `);
 
-    console.log('[produtos] Proteção ativa: public.produtos_omie só aceita escrita via webhook Omie');
+    console.log('[produtos] Proteção ativa: public.produtos_omie aceita escrita via webhook/cron/sync Omie');
   } catch (err) {
     console.error('[produtos] Falha ao instalar proteção da public.produtos_omie:', String(err));
+  }
+}
+
+async function upsertProdutoOmieComSource(item, source = 'omie_sync') {
+  const obj = ensureIntegrationKey({ ...item });
+  const client = await dbGetClient();
+  try {
+    await client.query('BEGIN');
+    await client.query("SELECT set_config('app.produtos_omie_write_source', $1, false)", [source]);
+    await client.query('SELECT omie_upsert_produto($1::jsonb)', [obj]);
+    await client.query('COMMIT');
+    return obj;
+  } catch (e) {
+    try { await client.query('ROLLBACK'); } catch (_) {}
+    throw e;
+  } finally {
+    client.release();
   }
 }
 
@@ -438,7 +455,7 @@ async function processWebhookInBackground(app, body, messageId) {
 
       client = await dbGetClient();
       await client.query('BEGIN');
-      await client.query("SELECT set_config('app.produtos_omie_write_source', 'omie_webhook', true)");
+      await client.query("SELECT set_config('app.produtos_omie_write_source', 'omie_webhook', false)");
       await client.query('SELECT omie_upsert_produto($1::jsonb)', [obj]);
       await client.query('COMMIT');
 
@@ -635,11 +652,6 @@ router.get('/familias', async (req, res) => {
 // Usa Server-Sent Events (SSE) para enviar atualizações em tempo real
 // ============================================================================
 router.post('/sincronizar-completo', async (req, res) => {
-  return res.status(403).json({
-    ok: false,
-    error: 'Sincronização manual desabilitada: public.produtos_omie é mantida exclusivamente pelo webhook da Omie.'
-  });
-
   // Configura SSE
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
@@ -706,31 +718,19 @@ router.post('/sincronizar-completo', async (req, res) => {
     }
   }
 
-  // Função para processar um produto
-  async function processarProduto(produto, index, total) {
+  // Função para processar um produto (usa ListarProdutos — mesmo payload do cron)
+  async function processarProduto(produto) {
     const codigoProduto = produto.codigo_produto;
     const codigo = produto.codigo;
     const descricao = produto.descricao || '';
 
     try {
-      // Consulta detalhes completos do produto
-      const produtoCompleto = await consultarProdutoOmie({
-        codigo_produto: codigoProduto,
-        codigo: codigo
-      });
-
-      if (!produtoCompleto) {
-        enviarEvento('log', {
-          mensagem: `⏭️ Produto ${codigo} (${codigoProduto}) - payload vazio, pulando`,
-          nivel: 'warning'
-        });
+      if (!codigoProduto && !codigo) {
         stats.processados++;
         return;
       }
 
-      // Salva no banco
-      const obj = ensureIntegrationKey({ ...produtoCompleto });
-      await dbQuery('SELECT omie_upsert_produto($1::jsonb)', [obj]);
+      await upsertProdutoOmieComSource(produto, 'omie_sync');
 
       stats.sucesso++;
       stats.processados++;
@@ -818,7 +818,7 @@ router.post('/sincronizar-completo', async (req, res) => {
       const produtos = resultado.produto_servico_cadastro || [];
 
       for (const produto of produtos) {
-        await processarProduto(produto, stats.processados + 1, stats.total);
+        await processarProduto(produto);
       }
 
       await sleep(DELAY_ENTRE_PAGINAS_MS);
