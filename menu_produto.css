@@ -11144,7 +11144,37 @@ table.tabela td.num {
   display: flex; align-items: center; gap: 8px; font-size: .84rem; color: #cbd5e1;
   cursor: pointer; user-select: none;
 }
+.movim-imprimir-wrap input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  min-width: 18px;
+  min-height: 18px;
+  max-width: 18px;
+  max-height: 18px;
+  flex: 0 0 18px;
+  margin: 0;
+}
 .movim-imprimir-wrap input { accent-color: #6366f1; }
+.movim-executar-btn {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  padding: 12px;
+  border: none;
+  border-radius: 12px;
+  background: #4f46e5;
+  color: #fff;
+  font-weight: 700;
+  font-size: .95rem;
+  cursor: pointer;
+  margin-top: 4px;
+  transition: filter .2s;
+}
+.movim-executar-btn:hover { filter: brightness(1.08); }
+.movim-executar-btn:disabled,
+.movim-executar-btn.processando { opacity: .65; cursor: wait; }
 
 .movim-scan-manual button {
   background: #059669; color: #fff; border: none; border-radius: 8px;
@@ -13510,11 +13540,14 @@ body.mobile-modal-open {
     width: 100%;
     height: 100dvh;
     max-height: 100dvh;
+    min-height: 0;
     border: 0;
     border-radius: 0;
-    padding: 0 var(--mobile-gutter) calc(12px + env(safe-area-inset-bottom));
+    padding: 0 var(--mobile-gutter) calc(88px + env(safe-area-inset-bottom));
     gap: 14px;
     box-shadow: none;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
     overscroll-behavior: contain;
     animation: mobileSheetIn 220ms ease-out;
   }
@@ -13597,7 +13630,7 @@ body.mobile-modal-open {
   }
 
   .movim-field select,
-  .movim-field input,
+  .movim-field input:not([type="checkbox"]):not([type="radio"]),
   .movim-field textarea {
     width: 100%;
     min-height: var(--mobile-touch);
@@ -13605,6 +13638,26 @@ body.mobile-modal-open {
     padding: 12px;
     border-radius: 8px;
     font-size: 16px;
+  }
+
+  .movim-imprimir-wrap input[type="checkbox"] {
+    width: 20px;
+    height: 20px;
+    min-width: 20px;
+    min-height: 20px;
+    max-width: 20px;
+    max-height: 20px;
+    flex: 0 0 20px;
+  }
+
+  .movim-executar-btn {
+    position: sticky;
+    bottom: calc(8px + env(safe-area-inset-bottom));
+    z-index: 6;
+    min-height: var(--mobile-touch);
+    border-radius: 8px;
+    font-size: 15px;
+    box-shadow: 0 -10px 28px rgba(0, 0, 0, .42);
   }
 
   .movim-field textarea {
@@ -14025,6 +14078,16 @@ body.mobile-modal-open {
   color: #cbd5e1;
   cursor: pointer;
   user-select: none;
+}
+.movim-imprimir-wrap input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  min-width: 18px;
+  min-height: 18px;
+  max-width: 18px;
+  max-height: 18px;
+  flex: 0 0 18px;
+  margin: 0;
 }
 .movim-imprimir-wrap input { accent-color: #6366f1; }
 .movim-endereco-etq-lista {

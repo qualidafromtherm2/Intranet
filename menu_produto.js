@@ -67877,16 +67877,16 @@ document.addEventListener('DOMContentLoaded', () => {
   const MOVIM_DEFAULT_ORIGEM = '10717096386'; // 2. PORTA PALLET (ALMOXARIFADO)
   const MOVIM_MOTIVOS = {
     ENT: [
-      { v: 'INV', l: 'INV � Ajuste por Invent�rio' },
-      { v: 'INI', l: 'INI � Estoque Inicial' }
+      { v: 'INV', l: 'INV | Ajuste por Inventário' },
+      { v: 'INI', l: 'INI | Estoque Inicial' }
     ],
     SAI: [
-      { v: 'INV', l: 'INV � Ajuste por Invent�rio' },
-      { v: 'PER', l: 'PER � Baixa por Perda/Quebra' }
+      { v: 'INV', l: 'INV | Ajuste por Inventário' },
+      { v: 'PER', l: 'PER | Baixa por Perda/Quebra' }
     ],
     TRF: [
-      { v: 'TRF', l: 'TRF � Transfer�ncia entre Locais' },
-      { v: 'TPQ', l: 'TPQ � Transfer�ncia por Perda/Quebra' }
+      { v: 'TRF', l: 'TRF | Transferência entre Locais' },
+      { v: 'TPQ', l: 'TPQ | Transferência por Perda/Quebra' }
     ]
   };
   const MOVIM_TIPO_ACAO = { ENT: 'ENTRADA', SAI: 'SAIDA', TRF: 'TRANSFERENCIA' };
@@ -67991,7 +67991,7 @@ document.addEventListener('DOMContentLoaded', () => {
         .filter(Boolean)
     );
     const header = `<div class="movim-etq-linha movim-etq-linha--head">
-      <span class="movim-etq-end">Endere�o</span>
+      <span class="movim-etq-end">Endereço</span>
       <span class="movim-etq-meta">ID</span>
       <span class="movim-etq-meta">Qtd</span>
       <span class="movim-etq-meta">Un</span>
@@ -68415,7 +68415,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function preencherMotivosOmieUnificados() {
     if (!omieMotivoSel) return;
-    const opcoes = ['<option value="">Selecione o motivo�</option>'];
+    const opcoes = ['<option value="">Selecione o motivo…</option>'];
     const entList = MOVIM_MOTIVOS.ENT || [];
     const saiList = MOVIM_MOTIVOS.SAI || [];
     const labelsUnificados = new Set();
@@ -68427,17 +68427,17 @@ document.addEventListener('DOMContentLoaded', () => {
 
     for (const ent of entList) {
       if (labelsUnificados.has(`${ent.v}\0${ent.l}`)) {
-        opcoes.push(`<option value="ENT,SAI:${ent.v}">Entrada/Sa�da � ${escapeHtml(ent.l)}</option>`);
+        opcoes.push(`<option value="ENT,SAI:${ent.v}">Entrada/Saída | ${escapeHtml(ent.l)}</option>`);
       } else {
-        opcoes.push(`<option value="ENT:${ent.v}">Entrada � ${escapeHtml(ent.l)}</option>`);
+        opcoes.push(`<option value="ENT:${ent.v}">Entrada | ${escapeHtml(ent.l)}</option>`);
       }
     }
     for (const sai of saiList) {
       if (labelsUnificados.has(`${sai.v}\0${sai.l}`)) continue;
-      opcoes.push(`<option value="SAI:${sai.v}">Sa�da � ${escapeHtml(sai.l)}</option>`);
+      opcoes.push(`<option value="SAI:${sai.v}">Saída | ${escapeHtml(sai.l)}</option>`);
     }
     for (const o of (MOVIM_MOTIVOS.TRF || [])) {
-      opcoes.push(`<option value="TRF:${o.v}">Transfer�ncia � ${escapeHtml(o.l)}</option>`);
+      opcoes.push(`<option value="TRF:${o.v}">Transferência | ${escapeHtml(o.l)}</option>`);
     }
     opcoes.push('<option value="INTERNO">Ajuste fora da Omie - Interno</option>');
     omieMotivoSel.innerHTML = opcoes.join('');
@@ -68508,8 +68508,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
     if (endHeader) {
       endHeader.textContent = interno
-        ? 'Endere�os'
-        : 'Endere�os (opcional � s� altera saldo por endere�o se selecionar)';
+        ? 'Endereços'
+        : 'Endereços (opcional — só altera saldo por endereço se selecionar)';
     }
 
     if (!showCorpo) {
@@ -68700,7 +68700,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function movimValParaLabelImpressora(val) {
-    if (!val) return '� padr�o �';
+    if (!val) return '— padrão —';
     if (val === '__PDF__') return 'PDF';
     if (val === '__BP__') return 'Agente local';
     if (val.startsWith('__AGENT__:')) {
@@ -68733,14 +68733,14 @@ document.addEventListener('DOMContentLoaded', () => {
     } catch { /* ignora */ }
 
     function buildOptions() {
-      const opts = ['<option value="">� padr�o �</option>'];
+      const opts = ['<option value="">— padrão —</option>'];
       const seen = new Set();
       const add = (val, isPadrao) => {
         const label = movimValParaLabelImpressora(val);
         const key = label.toLowerCase();
         if (seen.has(key)) return;
         seen.add(key);
-        opts.push(`<option value="${escapeHtml(val)}"${isPadrao ? ' style="color:#fbbf24"' : ''}>${isPadrao ? '? ' : ''}${escapeHtml(label)}</option>`);
+        opts.push(`<option value="${escapeHtml(val)}"${isPadrao ? ' style="color:#fbbf24"' : ''}>${isPadrao ? '★ ' : ''}${escapeHtml(label)}</option>`);
       };
       if (todos.length === 0) {
         for (const ag of agentData) {
