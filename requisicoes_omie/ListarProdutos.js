@@ -55,6 +55,7 @@ function updateSpinnerPct(val) {
 /* --------------------- CACHE GLOBAL ----------------------------------- */
 window.__omieFullCache = [];   // array de produtos
 window.__listaReady    = null; // Promise do preload
+let __preloadPromise = null;
 
 /* --------------------- Helpers HTTP (sem cache) ----------------------- */
 function buildListaUrl({ page=1, limit=500, q='', tipoitem='', inativo='N' } = {}) {
@@ -77,41 +78,49 @@ async function fetchLista(params) {
 
 /* --------------------- PRELOAD do banco (paginado) -------------------- */
 async function preloadFromDB() {
-  try {
-    spinnerFinished = false;
-    showProductSpinner();
+  if (__preloadPromise) return __preloadPromise;
 
-    window.__omieFullCache = [];
-    let page     = 1;
-    const limit  = 500; // o back limita ao teto dele
-    let total    = null;
-    let loaded   = 0;
+  __preloadPromise = (async () => {
+    try {
+      spinnerFinished = false;
+      showProductSpinner();
 
-    while (true) {
-      const data  = await fetchLista({ page, limit, inativo: 'N' });
-      const itens = Array.isArray(data.itens) ? data.itens : [];
+      window.__omieFullCache = [];
+      let page     = 1;
+      const limit  = 500; // o back limita ao teto dele
+      let total    = null;
+      let loaded   = 0;
 
-      if (total === null) {
-        total = Number(data.total || 0);
-        if (typeof window.setListaTitulo === 'function') {
-          window.setListaTitulo(total);
+      while (true) {
+        const data  = await fetchLista({ page, limit, inativo: 'N' });
+        const itens = Array.isArray(data.itens) ? data.itens : [];
+
+        if (total === null) {
+          total = Number(data.total || 0);
+          if (typeof window.setListaTitulo === 'function') {
+            window.setListaTitulo(total);
+          }
         }
+
+        if (!itens.length) break;
+
+        window.__omieFullCache.push(...itens);
+        loaded += itens.length;
+
+        updateSpinnerPct(total ? (loaded / total) * 100 : 0);
+
+        if (total && loaded >= total) break; // terminou tudo
+        page++;
       }
 
-      if (!itens.length) break;
-
-      window.__omieFullCache.push(...itens);
-      loaded += itens.length;
-
-      updateSpinnerPct(total ? (loaded / total) * 100 : 0);
-
-      if (total && loaded >= total) break; // terminou tudo
-      page++;
+      return true;
+    } finally {
+      hideProductSpinner();
+      __preloadPromise = null;
     }
-  } finally {
-    hideProductSpinner();
-  }
-  return true;
+  })();
+
+  return __preloadPromise;
 }
 
 /* --------------------- RENDER ---------------------------------------- */
@@ -223,6 +232,11 @@ const __gridState = {
   loading: false
 };
 
+const __paginationState = {
+  currentPage: 1,
+  pageSize: 25
+};
+
 let __externalFilterFn = null;
 let __externalFilterLabel = '';
 
@@ -231,7 +245,104 @@ function applyExternalFilter(itens) {
   return (Array.isArray(itens) ? itens : []).filter(__externalFilterFn);
 }
 
-function renderListaFiltradaComTitulo(pane, itens) {
+function ensureListaRefs() {
+  if (!__listaRefs.ul) __listaRefs.ul = document.getElementById('listaProdutosList');
+  if (!__listaRefs.grid) __listaRefs.grid = document.getElementById('listaProdutosGrid');
+  if (!__listaRefs.toggleBtn) __listaRefs.toggleBtn = document.getElementById('viewToggleBtn');
+  if (!__listaRefs.pagination) __listaRefs.pagination = document.getElementById('pagination');
+  return __listaRefs;
+}
+
+function resetListaPagination() {
+  __paginationState.currentPage = 1;
+}
+
+function clampListaPage(totalPages) {
+  const safeTotalPages = Math.max(1, Number(totalPages) || 1);
+  const nextPage = Math.min(Math.max(1, __paginationState.currentPage), safeTotalPages);
+  __paginationState.currentPage = nextPage;
+  return nextPage;
+}
+
+function getListaPagedItems(itens) {
+  const source = Array.isArray(itens) ? itens : [];
+  const totalItems = source.length;
+  const totalPages = Math.max(1, Math.ceil(totalItems / __paginationState.pageSize));
+  const currentPage = clampListaPage(totalPages);
+  const start = (currentPage - 1) * __paginationState.pageSize;
+
+  return {
+    totalItems,
+    totalPages,
+    currentPage,
+    pageItems: source.slice(start, start + __paginationState.pageSize)
+  };
+}
+
+function renderListaPagination(totalItems) {
+  const { pagination } = ensureListaRefs();
+  if (!pagination) return;
+
+  if (__listaViewMode !== 'list') {
+    pagination.innerHTML = '';
+    return;
+  }
+
+  const totalPages = Math.max(1, Math.ceil((Number(totalItems) || 0) / __paginationState.pageSize));
+  const currentPage = clampListaPage(totalPages);
+  const pageStart = totalItems > 0 ? ((currentPage - 1) * __paginationState.pageSize) + 1 : 0;
+  const pageEnd = totalItems > 0 ? Math.min(totalItems, currentPage * __paginationState.pageSize) : 0;
+  const prevDisabled = currentPage <= 1;
+  const nextDisabled = currentPage >= totalPages;
+
+  pagination.style.display = 'flex';
+  pagination.innerHTML = `
+    <button type="button" class="content-button" data-page-action="prev" ${prevDisabled ? 'disabled' : ''}>
+      Anterior
+    </button>
+    <span>${totalItems ? `${pageStart}-${pageEnd} de ${totalItems}` : 'Nenhum produto encontrado'}</span>
+    <button type="button" class="content-button" data-page-action="next" ${nextDisabled ? 'disabled' : ''}>
+      Próxima
+    </button>
+    <span>Página ${currentPage}/${totalPages}</span>
+    <button type="button" class="content-button ${__paginationState.pageSize === 25 ? 'active' : ''}" data-page-size="25">
+      25
+    </button>
+    <button type="button" class="content-button ${__paginationState.pageSize === 50 ? 'active' : ''}" data-page-size="50">
+      50
+    </button>
+  `;
+
+  pagination.querySelectorAll('[data-page-action]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const action = btn.getAttribute('data-page-action');
+      const delta = action === 'next' ? 1 : -1;
+      __paginationState.currentPage = Math.min(
+        Math.max(1, __paginationState.currentPage + delta),
+        totalPages
+      );
+      renderListaFiltradaComTitulo(document.getElementById(__listaPaneId), getFiltered(), { resetPage: false });
+      const ul = __listaRefs.ul;
+      if (ul) ul.scrollTop = 0;
+    });
+  });
+
+  pagination.querySelectorAll('[data-page-size]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const nextSize = Number(btn.getAttribute('data-page-size'));
+      if (!Number.isFinite(nextSize) || nextSize === __paginationState.pageSize) return;
+      __paginationState.pageSize = nextSize;
+      resetListaPagination();
+      renderListaFiltradaComTitulo(document.getElementById(__listaPaneId), getFiltered(), { resetPage: false });
+      const ul = __listaRefs.ul;
+      if (ul) ul.scrollTop = 0;
+    });
+  });
+}
+
+function renderListaFiltradaComTitulo(pane, itens, options = {}) {
+  const { resetPage = true } = options;
+  if (resetPage) resetListaPagination();
   const itensFiltrados = applyExternalFilter(itens);
   renderListaView(itensFiltrados);
 
@@ -244,7 +355,7 @@ function renderListaFiltradaComTitulo(pane, itens) {
 }
 
 function updateListaViewUI() {
-  const { ul, grid, toggleBtn, pagination } = __listaRefs;
+  const { ul, grid, toggleBtn, pagination } = ensureListaRefs();
   if (!ul || !grid || !toggleBtn) return;
 
   const isGrid = __listaViewMode === 'grid';
@@ -278,11 +389,14 @@ function updateListaViewUI() {
 }
 
 function renderListaView(itens) {
-  const { ul, grid } = __listaRefs;
+  const { ul, grid } = ensureListaRefs();
   if (__listaViewMode === 'grid') {
     renderGrid(grid, itens);
   } else if (ul) {
-    renderList(ul, itens);
+    const { totalItems, pageItems } = getListaPagedItems(itens);
+    renderList(ul, pageItems);
+    renderListaPagination(totalItems);
+    ul.scrollTop = 0;
   }
 }
 
@@ -302,6 +416,7 @@ function setCacheDirty(flag) {
 function renderFromCache() {
   // Garante que o modo de visualização correto seja aplicado antes de renderizar
   updateListaViewUI();
+  ensureListaRefs();
   // Fallback: aplica diretamente no DOM caso __listaRefs ainda não estejam populados
   const gridEl = document.getElementById('listaProdutosGrid');
   const ulEl   = document.getElementById('listaProdutosList');
@@ -321,7 +436,7 @@ function renderFromCache() {
   setCache(window.__omieFullCache || []);
   const itens = getFiltered();
   const pane = document.getElementById(__listaPaneId);
-  renderListaFiltradaComTitulo(pane, itens);
+  renderListaFiltradaComTitulo(pane, itens, { resetPage: true });
 }
 
 async function hardRefreshLista() {
@@ -566,7 +681,7 @@ window.__forceListaRefresh = async function () {
 
     // 3) redesenha a UL
     const pane = document.getElementById(__listaPaneId);
-    renderListaFiltradaComTitulo(pane, itens);
+    renderListaFiltradaComTitulo(pane, itens, { resetPage: true });
   } catch (e) {
     console.warn('forceListaRefresh falhou:', e);
   }
@@ -579,7 +694,7 @@ window.__setListaProdutosExternalFilter = function (fn, label = '') {
   const pane = document.getElementById(__listaPaneId);
   setCache(window.__omieFullCache || []);
   const itens = getFiltered();
-  renderListaFiltradaComTitulo(pane, itens);
+  renderListaFiltradaComTitulo(pane, itens, { resetPage: true });
 };
 
 window.__clearListaProdutosExternalFilter = function () {
@@ -588,7 +703,7 @@ window.__clearListaProdutosExternalFilter = function () {
   const pane = document.getElementById(__listaPaneId);
   setCache(window.__omieFullCache || []);
   const itens = getFiltered();
-  renderListaFiltradaComTitulo(pane, itens);
+  renderListaFiltradaComTitulo(pane, itens, { resetPage: true });
 };
 
 // Handler do menu: mostra a aba e força refresh SEM F5
@@ -658,3 +773,9 @@ function bindViewToggle() {
     renderListaView(getFiltered());
   });
 }
+
+window.__setListaProdutosViewMode = function (mode) {
+  __listaViewMode = String(mode || '').toLowerCase() === 'list' ? 'list' : 'grid';
+  updateListaViewUI();
+  renderListaView(getFiltered());
+};

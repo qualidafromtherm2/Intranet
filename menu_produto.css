@@ -121,7 +121,7 @@
 
 /* -------------------------------------------------
    CSS original do seu form (cole TODO este bloco)
-   — lembrando de manter o @import do Montserrat no topo
+   � lembrando de manter o @import do Montserrat no topo
 ------------------------------------------------- */
 @import url("https://fonts.googleapis.com/css?family=Montserrat:400,800");
 
@@ -192,7 +192,7 @@ body {
   height: 100vh;
 }
 
-/* ====== Lista de sugestões (Descrição breve do pedido) ====== */
+/* ====== Lista de sugest�es (Descri��o breve do pedido) ====== */
 #catalogoDescricaoLista {
   position: absolute;
   top: calc(100% + 6px);
@@ -288,7 +288,7 @@ img {
   flex-direction: row-reverse;
 }
 
-/* Botão de atalho individual */
+/* Bot�o de atalho individual */
 .shortcut-btn {
   position: relative;
   width: 42px;
@@ -311,7 +311,7 @@ img {
 }
 .shortcut-btn i { font-size: 16px; color: inherit; }
 
-/* Tooltip customizado abaixo do ícone */
+/* Tooltip customizado abaixo do �cone */
 .shortcut-btn-tooltip {
   position: absolute;
   bottom: calc(100% + 10px);
@@ -357,7 +357,7 @@ img {
   border-top-color: #1f2937;
 }
 
-/* Botão ×  de remover atalho */
+/* Bot�o �  de remover atalho */
 .shortcut-btn-remove {
   display: none;
   position: absolute;
@@ -406,7 +406,7 @@ img {
   gap: 8px;
 }
 
-/* Alvo de drop — visível apenas enquanto arrasta */
+/* Alvo de drop � vis�vel apenas enquanto arrasta */
 .shortcut-drop-target {
   display: none;
   align-items: center;
@@ -438,7 +438,7 @@ body.dragging-menu-item .shortcut-drop-target { display: flex; }
   transform: scale(1.06);
 }
 
-/* Botão de gerenciar atalhos (engrenagem) */
+/* Bot�o de gerenciar atalhos (engrenagem) */
 .shortcut-manage-btn {
   position: relative;
   width: 36px;
@@ -462,7 +462,7 @@ body.dragging-menu-item .shortcut-drop-target { display: flex; }
   transform: rotate(30deg);
 }
 
-/* Botão gerenciar atalhos standalone (posição fixa, canto inferior direito) */
+/* Bot�o gerenciar atalhos standalone (posi��o fixa, canto inferior direito) */
 .shortcut-manage-btn--fixed {
   position: fixed;
   bottom: 16px;
@@ -547,7 +547,7 @@ body.dragging-menu-item .shortcut-drop-target { display: flex; }
   border-bottom-color: rgba(0,0,0,.08);
 }
 
-/* Toggle de tema quando está inline dentro do modal (sobrescreve position:fixed) */
+/* Toggle de tema quando est� inline dentro do modal (sobrescreve position:fixed) */
 .dark-light-inline {
   position: static !important;
   bottom: auto !important;
@@ -620,7 +620,7 @@ body.dragging-menu-item .shortcut-drop-target { display: flex; }
   padding: 10px 10px 4px;
 }
 
-/* Badge no item de menu lateral — estoque mínimo */
+/* Badge no item de menu lateral � estoque m�nimo */
 .side-minimo-badge {
   display: inline-flex;
   align-items: center;
@@ -675,13 +675,7 @@ body.dragging-menu-item .shortcut-drop-target { display: flex; }
   background-color: rgba(255, 255, 255, 0.94);
 }
 
-/* Atalhos flutuantes do painel Lista de Produtos */
-#listaProdutosAbrirCarrinhoBtn,
-#listaProdutosAbrirSeparacaoBtn {
-  display: none !important;
-}
-
-/* Ícones em modo claro */
+/* �cones em modo claro */
 .light-mode i {
   color: #1f2937;
 }
@@ -695,28 +689,7 @@ body.dragging-menu-item .shortcut-drop-target { display: flex; }
   color: #1f2937 !important;
 }
 
-.shortcut-btn--compras {
-  background: linear-gradient(135deg, #16a34a 0%, #15803d 100%);
-  color: #f0fdf4;
-}
-
-.shortcut-btn--separacao {
-  background: linear-gradient(135deg, #d97706 0%, #b45309 100%);
-  color: #fff7ed;
-}
-
-.shortcut-btn--system .shortcut-btn-remove {
-  display: none !important;
-}
-
-.light-mode .shortcut-btn--compras,
-.light-mode .shortcut-btn--compras i,
-.light-mode .shortcut-btn--separacao,
-.light-mode .shortcut-btn--separacao i {
-  color: inherit !important;
-}
-
-/* Ícones específicos que precisam ser claros em modo claro */
+/* �cones espec�ficos que precisam ser claros em modo claro */
 .light-mode .header-profile i {
   color: #6b7280;
 }
@@ -819,7 +792,7 @@ body.light-mode {
   border-bottom: 2px solid var(--theme-color);
 }
 
-/* badge do usuário fica após o menu; margem garante respiro visual */
+/* badge do usu�rio fica ap�s o menu; margem garante respiro visual */
 .user-badge {
   margin-left: 12px;
 }
@@ -843,8 +816,8 @@ body.light-mode {
   }
 }
 
-.search-bar {                /* sempre visível */
-  flex: 1 1 260px;          /* cresce até 100%, mas parte de 260  */
+.search-bar {                /* sempre vis�vel */
+  flex: 1 1 260px;          /* cresce at� 100%, mas parte de 260  */
   min-width: 0;             /* permite encolher em telas bem pequenas */
   height: 40px;
   display: flex;
@@ -870,11 +843,11 @@ background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www
 }
 
 .search-bar.active {           /* estado aberto (classe vem do JS) */
-max-width: 480px;          /* 260 → 480 px; ajuste se quiser */
+max-width: 480px;          /* 260 ? 480 px; ajuste se quiser */
 
 }
 
-.search-bar.active input {     /* o próprio <input> ganha foco */
+.search-bar.active input {     /* o pr�prio <input> ganha foco */
   cursor: text;
 }
 .search-bar input::-moz-placeholder {
@@ -900,17 +873,17 @@ max-width: 480px;          /* 260 → 480 px; ajuste se quiser */
   margin-left: auto;         /* empurra p/ borda direita           */
   display: flex;
   align-items: center;
-  gap: 16px;                 /* distância igual entre os ícones    */
+  gap: 16px;                 /* dist�ncia igual entre os �cones    */
   padding-left: 40px;        /* mesmo recuo que o campo de busca   */
   flex: 0 0 200px;
-  flex-shrink: 0;            /* ❸ NUNCA encolha              */
+  flex-shrink: 0;            /* ? NUNCA encolha              */
 
 }
 
 .header-menu{
   display:flex;
   flex: 0 1 auto;          /* deixa o menu encolher         */
-  overflow:hidden;         /* esconde links que não cabem   */
+  overflow:hidden;         /* esconde links que n�o cabem   */
 }
 
 .header-profile svg {
@@ -1044,7 +1017,7 @@ max-width: 480px;          /* 260 → 480 px; ajuste se quiser */
   display: block !important;
 }
 
-/* Customização da scrollbar do menu lateral */
+/* Customiza��o da scrollbar do menu lateral */
 .sidebar-content::-webkit-scrollbar {
   width: 6px;
 }
@@ -1162,7 +1135,7 @@ max-width: 480px;          /* 260 → 480 px; ajuste se quiser */
   height: 56px;              /* barra mais compacta */
   padding: 0 12px;           /* leve respiro lateral */
   flex-shrink: 0;
-  gap: 8px;                  /* espaço entre "+ Novo" e guias */
+  gap: 8px;                  /* espa�o entre "+ Novo" e guias */
 }
 .main-header { overflow: visible; }
 
@@ -1179,9 +1152,9 @@ max-width: 480px;          /* 260 → 480 px; ajuste se quiser */
   align-items: center;
   flex: 1 1 auto;            /* ocupa o restante da linha */
   min-width: 0;              /* permite encolher para overflow-x */
-  overflow-x: auto;          /* mantém em uma linha com rolagem */
+  overflow-x: auto;          /* mant�m em uma linha com rolagem */
   white-space: nowrap;       /* impede quebra das guias */
-  gap: 0;                    /* guias controlam o próprio padding */
+  gap: 0;                    /* guias controlam o pr�prio padding */
   -webkit-overflow-scrolling: touch;
 }
 @media screen and (max-width: 1055px) {
@@ -1197,16 +1170,16 @@ max-width: 480px;          /* 260 → 480 px; ajuste se quiser */
 .main-header .header-menu a {
   display: inline-flex;
   align-items: center;
-  height: 40px;              /* mesma altura visual do botão */
+  height: 40px;              /* mesma altura visual do bot�o */
   line-height: 40px;
   padding: 0 16px;           /* padding horizontal apenas */
 }
 
-/* Estilo para o botão Novo */
+/* Estilo para o bot�o Novo */
 .btn-novo-produto {
   flex-shrink: 0;
   white-space: nowrap;
-  height: 40px;               /* igual às guias */
+  height: 40px;               /* igual �s guias */
   padding: 0 16px;            /* alinha baseline com tabs */
 }
 
@@ -1227,7 +1200,7 @@ max-width: 480px;          /* 260 → 480 px; ajuste se quiser */
   display: flex;
   flex-direction: column;
   flex-grow: 1;
-  /* evita que o conteúdo interno force largura além do disponível */
+  /* evita que o conte�do interno force largura al�m do dispon�vel */
   min-width: 0;
   min-height: 0;
 }
@@ -1251,16 +1224,16 @@ max-width: 480px;          /* 260 → 480 px; ajuste se quiser */
   height: 100%;
   overflow: auto;
   background-color: var(--theme-bg-color);
-  /* permite que filhos em flex/grids não estourem a largura */
+  /* permite que filhos em flex/grids n�o estourem a largura */
   min-width: 0;
 }
 
-/* Ajusta o topo do painel de compras para reduzir espaço vazio */
+/* Ajusta o topo do painel de compras para reduzir espa�o vazio */
 #comprasFormPane .content-wrapper {
   padding-top: 0;
 }
 
-/* Compras (lista): trava barra superior + cabeçalho sem transparência */
+/* Compras (lista): trava barra superior + cabe�alho sem transpar�ncia */
 #minhasComprasWrapper {
   --compras-lista-topo-offset: 64px;
   margin-top: 0 !important;
@@ -1313,7 +1286,7 @@ max-width: 480px;          /* 260 → 480 px; ajuste se quiser */
   background-clip: padding-box;
 }
 
-/* Não fixar cabeçalhos de tabelas internas (produtos) */
+/* N�o fixar cabe�alhos de tabelas internas (produtos) */
 #listaMinhasSolicitacoes #listaMinhasSolicitacoesTabela tbody table thead th {
   position: static !important;
   top: auto !important;
@@ -1421,7 +1394,7 @@ max-width: 480px;          /* 260 → 480 px; ajuste se quiser */
   white-space: nowrap;
 }
 
-/* === Botões consistentes (RI/PIR e afins) === */
+/* === Bot�es consistentes (RI/PIR e afins) === */
 .btn {
   display: inline-flex;
   align-items: center;
@@ -1453,7 +1426,7 @@ max-width: 480px;          /* 260 → 480 px; ajuste se quiser */
   color: #fff;
 }
 
-/* --- PIR: select de frequência (fundo escuro) ---------------------------- */
+/* --- PIR: select de frequ�ncia (fundo escuro) ---------------------------- */
 #pirFrequencia,
 #editPirFrequencia {
   background: #0f172a;
@@ -1469,9 +1442,9 @@ max-width: 480px;          /* 260 → 480 px; ajuste se quiser */
 .content-wrapper-img{
   max-height:180px;       /* escolha a altura que caiba bem no card          */
   width:auto;
-  object-fit:contain;     /* não estica a imagem                             */
+  object-fit:contain;     /* n�o estica a imagem                             */
   margin-left:auto;       /* empurra a imagem para a borda direita do card   */
-  border-radius:6px;      /* opcional – deixa cantos suaves                  */
+  border-radius:6px;      /* opcional � deixa cantos suaves                  */
 }
 @media screen and (max-width: 570px) {
   .content-wrapper-img {
@@ -1532,7 +1505,7 @@ max-width: 480px;          /* 260 → 480 px; ajuste se quiser */
   margin-right: 16px;
   flex-shrink: 0;
 }
-/* Override: não aplicar margem nem largura gigante nos ícones de ação da PCP */
+/* Override: n�o aplicar margem nem largura gigante nos �cones de a��o da PCP */
 #listaPecasPCPList .acao svg { margin:0 !important; width:16px; height:16px; }
 
 .products {
@@ -1843,7 +1816,7 @@ max-width: 480px;          /* 260 → 480 px; ajuste se quiser */
 .product-details {
   max-height: 600px;    /* ajuste pra caber bem no layout */
   overflow-y: auto;     /* aparece a scrollbar quando ultrapassar */
-  padding-right: 8px;    /* para o scroll não cobrir o conteúdo */
+  padding-right: 8px;    /* para o scroll n�o cobrir o conte�do */
 }
 .product-details::-webkit-scrollbar {
   width: 6px;
@@ -1872,7 +1845,7 @@ max-width: 480px;          /* 260 → 480 px; ajuste se quiser */
   width: 70px;
   text-align: center;
 
-  /* ESPAÇO extra entre o label e o select */
+  /* ESPA�O extra entre o label e o select */
   margin-left: 12px;
 
   /* seta customizada (SVG inline) */
@@ -1896,7 +1869,7 @@ max-width: 480px;          /* 260 → 480 px; ajuste se quiser */
   align-items: center;
 }
 
-/* 2) aumentamos um pouco a coluna de rótulo (se quiser) */
+/* 2) aumentamos um pouco a coluna de r�tulo (se quiser) */
 .product-details .products {
   flex: 0 0 200px;    /* antes era 150px, agora cabe um pouco mais */
 }
@@ -1919,14 +1892,14 @@ max-width: 480px;          /* 260 → 480 px; ajuste se quiser */
   text-overflow: clip;
   max-height: none;
 }
-/* 4) mantém o botão sempre à direita */
+/* 4) mant�m o bot�o sempre � direita */
 .product-details .button-wrapper {
   flex: 0 0 auto;
 }
 
-/* ————————————————————————————————
-   Guias: Lista de produtos / Solicitações
-   ———————————————————————————————— */
+/* ��������������������������������
+   Guias: Lista de produtos / Solicita��es
+   �������������������������������� */
 .lp-tabs-nav {
   display: flex;
   align-items: center;
@@ -2010,9 +1983,9 @@ max-width: 480px;          /* 260 → 480 px; ajuste se quiser */
   box-shadow: 0 2px 0 #334155;
 }
 
-/* ————————————————————————————————
-   Lista de produtos - Linhas clicáveis (sem botão Abrir)
-   ———————————————————————————————— */
+/* ��������������������������������
+   Lista de produtos - Linhas clic�veis (sem bot�o Abrir)
+   �������������������������������� */
 .product-list-item {
   cursor: pointer !important;
   transition: all 0.2s ease;
@@ -2033,22 +2006,22 @@ max-width: 480px;          /* 260 → 480 px; ajuste se quiser */
   display: none;
 }
 
-/* ————————————————————————————————
-   Destacar e reposicionar o código do produto
-   ———————————————————————————————— */
+/* ��������������������������������
+   Destacar e reposicionar o c�digo do produto
+   �������������������������������� */
   
   .content-wrapper-header .img-content #productTitle {
-    /* dobra o tamanho do texto, coloca em negrito e afasta um pouco do ícone */
+    /* dobra o tamanho do texto, coloca em negrito e afasta um pouco do �cone */
     font-size: 1.5em;
     font-weight: 500;
     margin-left: 0.5rem;
   }
   
-  /* ————————————————————————————————
-   Aumentar tamanho da descrição do produto
-   ———————————————————————————————— */
+  /* ��������������������������������
+   Aumentar tamanho da descri��o do produto
+   �������������������������������� */
 .content-wrapper-header .content-text {
-  font-size: 1.2em; /* ajuste o valor conforme sua preferência */
+  font-size: 1.2em; /* ajuste o valor conforme sua prefer�ncia */
   line-height: 1.5em;
 }
 
@@ -2059,11 +2032,11 @@ max-width: 480px;          /* 260 → 480 px; ajuste se quiser */
 
 /* novo logo no lugar das bolinhas */
 .menu-logo {
-  width: 120px;           /* aumenta largura para melhor proporção */
-  height: 60px;           /* aumenta altura para não cortar a logo */
+  width: 120px;           /* aumenta largura para melhor propor��o */
+  height: 60px;           /* aumenta altura para n�o cortar a logo */
   object-fit: contain;    /* mostra a imagem inteira, sem cortar */
-  margin-right: 195px;    /* mantém o espaçamento para a direita */
-  flex-shrink: 0;         /* não deixa encolher */
+  margin-right: 195px;    /* mant�m o espa�amento para a direita */
+  flex-shrink: 0;         /* n�o deixa encolher */
   background: transparent;
   display: block;
 }
@@ -2121,7 +2094,7 @@ max-width: 480px;          /* 260 → 480 px; ajuste se quiser */
   margin: 0 4px;
 }
 
-/* filtro de código (mesmo estilo da search-bar) */
+/* filtro de c�digo (mesmo estilo da search-bar) */
 .filter-bar {
   display: flex;
   align-items: center;
@@ -2158,14 +2131,14 @@ max-width: 480px;          /* 260 → 480 px; ajuste se quiser */
 .title-wrapper {
   display: flex;
   align-items: center;
-  gap: 0.5em; /* espaçamento entre texto e spinner */
+  gap: 0.5em; /* espa�amento entre texto e spinner */
 }
 
 #productSpinner {
   display: block;
   width: 50px;
   height: 50px;
-  margin: 0;          /* fica colado ao lado do título */
+  margin: 0;          /* fica colado ao lado do t�tulo */
   position: relative;
 }
 
@@ -2186,14 +2159,14 @@ max-width: 480px;          /* 260 → 480 px; ajuste se quiser */
 }
 
 #productSpinner:after {
-  /* o tamanho do pseudo-elemento também se ajusta automaticamente
-     à nova largura/altura do container */
+  /* o tamanho do pseudo-elemento tamb�m se ajusta automaticamente
+     � nova largura/altura do container */
   content: attr(data-pct) "%";
   position: absolute;
   left: 50%;
   top: 50%;
   transform: translate(-50%, -50%);
-  font-size: 0.8em;    /* reduz fonte pra caber no 50×50 */
+  font-size: 0.8em;    /* reduz fonte pra caber no 50�50 */
   line-height: 1;
   width: auto;
   height: auto;
@@ -2211,7 +2184,7 @@ max-width: 480px;          /* 260 → 480 px; ajuste se quiser */
   white-space: nowrap;
 }
 
-/* Ajusta o botão do filtro para ficar igual aos outros ícones */
+/* Ajusta o bot�o do filtro para ficar igual aos outros �cones */
 .filter-icon {
   background: none;
   border: none;
@@ -2223,12 +2196,12 @@ max-width: 480px;          /* 260 → 480 px; ajuste se quiser */
   color: currentColor;
 }
 
-/* se precisar, força o stroke do SVG */
+/* se precisar, for�a o stroke do SVG */
 .filter-icon svg {
   stroke: currentColor;
 }
 .filter-icon.active {
-  color: #ff0000; /* ou qualquer cor que você queira para "ativo" */
+  color: #ff0000; /* ou qualquer cor que voc� queira para "ativo" */
 }
 
 
@@ -2535,10 +2508,10 @@ body .options .option:nth-child(5) {
 body .options .option:nth-child(6) {
   --defaultBackground:#AC92EC;
 }
-/* ativa: cresce com base fixa → garante expansão igual em qualquer posição */
+/* ativa: cresce com base fixa ? garante expans�o igual em qualquer posi��o */
 /* ativa: garante base de largura para realmente expandir */
 body .options .option.active {
-  flex: 1 1 600px;      /* <<< base explícita; você já tem max-width:600px logo abaixo */
+  flex: 1 1 600px;      /* <<< base expl�cita; voc� j� tem max-width:600px logo abaixo */
   transform: scale(1);
   max-width: 600px;
   margin: 0px;
@@ -2559,9 +2532,9 @@ body .options .option.active .label .info > div {
   left: 0px;
   opacity: 1;
 }
-/* não-ativas: estreitas e elásticas */
+/* n�o-ativas: estreitas e el�sticas */
 body .options .option:not(.active) {
-  flex: 1 1 60px;       /* <<< base estreita estável (antes só flex-grow) */
+  flex: 1 1 60px;       /* <<< base estreita est�vel (antes s� flex-grow) */
   border-radius: 30px;
 }
 
@@ -2627,7 +2600,7 @@ body .options .option .label .info .sub {
 #listaFotos .options {
     display: flex;
   align-items: stretch;
-  gap: 10px;          /* opcional: espaçamento entre cartões */
+  gap: 10px;          /* opcional: espa�amento entre cart�es */
   
   min-width: 0 !important;
   max-width: none !important;
@@ -2636,7 +2609,7 @@ body .options .option .label .info .sub {
   height: 400px;
   overflow: hidden;
 }
-/* Escopo específico da guia Fotos (se desejar isolar o comportamento) */
+/* Escopo espec�fico da guia Fotos (se desejar isolar o comportamento) */
 #listaFotos .options .option.active     { flex: 1 1 600px; }
 #listaFotos .options .option:not(.active) { flex: 1 1 60px; }
 
@@ -2757,7 +2730,7 @@ body .options .option .label .info .sub {
   background: rgba(20, 184, 166, 0.12);
 }
 
-/* Qualidade: ajustes do formulário de inspeção */
+/* Qualidade: ajustes do formul�rio de inspe��o */
 .qualidade-imagem-box img {
   width: 100% !important;
   max-height: 200px;
@@ -2778,7 +2751,7 @@ body .options .option .label .info .sub {
   box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.2);
 }
 
-/* Modal de gestão de fotos */
+/* Modal de gest�o de fotos */
 .foto-gestao-modal { position: fixed; inset: 0; z-index: 9999; display: none; align-items: center; justify-content: center; }
 .foto-gestao-modal .fg-overlay { position: absolute; inset: 0; background: rgba(0,0,0,0.55); }
 .foto-gestao-modal .fg-content { position: relative; background: #0f172a; color: #e5e7eb; width: min(900px, 96%); max-height: 80vh; border-radius: 12px; overflow: hidden; display: flex; flex-direction: column; box-shadow: 0 25px 60px rgba(0,0,0,0.35); border: 1px solid rgba(255,255,255,0.08); }
@@ -2811,23 +2784,23 @@ body .options .option .label .info .sub {
 
 
 
-/* ────────────────────────────────────────────────────────────────
+/* ----------------------------------------------------------------
    E S T R U T U R A   D E   P R O D U T O   (#estruturaProduto)
    Bloco completo e autossuficiente
-   ──────────────────────────────────────────────────────────────── */
+   ---------------------------------------------------------------- */
 
-   /* — Descrição: reticências + tooltip nativo (title) e sem “invadir” QTD — */
+   /* � Descri��o: retic�ncias + tooltip nativo (title) e sem �invadir� QTD � */
 #estruturaProduto #malha .desc{
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   min-width: 0;           /* permite a coluna encolher no grid */
-  cursor: help;           /* indica que há texto completo no title */
+  cursor: help;           /* indica que h� texto completo no title */
 }
 
-/* — container da lista — */
+/* � container da lista � */
 #estruturaProduto .content-section ul#malha{
-  display:block;               /* força UL a bloco */
+  display:block;               /* for�a UL a bloco */
   list-style:none;
   margin:0;
   padding:0;
@@ -2836,7 +2809,7 @@ body .options .option .label .info .sub {
   overflow-x:auto;             /* scroll horiz. se apertar */
 }
 
-/* — cabeçalho de grupo por Operação — */
+/* � cabe�alho de grupo por Opera��o � */
 #estruturaProduto .content-section ul#malha li.category-header{
   display:flex;
   flex-direction:column;
@@ -2848,7 +2821,7 @@ body .options .option .label .info .sub {
   background: #1a1a1a;
   border: 1px solid rgba(255,255,255,0.06);
 }
-/* linha superior: texto à esquerda, botões à direita */
+/* linha superior: texto � esquerda, bot�es � direita */
 #estruturaProduto .content-section ul#malha li.category-header .cat-header-top{
   display:flex;
   align-items:center;
@@ -2879,7 +2852,7 @@ body .options .option .label .info .sub {
   filter:brightness(1.1);
 }
 
-/* — botões de gerenciamento de operação no category-header — */
+/* � bot�es de gerenciamento de opera��o no category-header � */
 #estruturaProduto .content-section ul#malha li.category-header .cat-op-actions{
   display:flex;
   align-items:center;
@@ -2933,8 +2906,8 @@ body .options .option .label .info .sub {
   background:rgba(147,197,253,.18);
   color:#60a5fa;
 }
-/* animação de spin usada no spinner dos botões */@keyframes _spin{to{transform:rotate(360deg)}}
-/* — barra de ação inline no category-header (modo seleção) — */
+/* anima��o de spin usada no spinner dos bot�es */@keyframes _spin{to{transform:rotate(360deg)}}
+/* � barra de a��o inline no category-header (modo sele��o) � */
 #estruturaProduto .content-section ul#malha li.category-header .cat-op-bar{
   width:100%;
   padding-top:8px;
@@ -2942,12 +2915,12 @@ body .options .option .label .info .sub {
   border-top:1px solid rgba(255,255,255,.06);
 }
 
-/* — cabeçalho fixo (6 colunas) — */
+/* � cabe�alho fixo (6 colunas) � */
 #estruturaProduto .content-section ul#malha li.header-row{
   display:grid;
   grid-template-columns:
-      120px                       /* Código   */
-      minmax(0,1fr)           /* Descrição*/
+      120px                       /* C�digo   */
+      minmax(0,1fr)           /* Descri��o*/
       60px                        /* QTD      */
       70px                        /* Unidade  */
       90px                        /* Custo    */
@@ -2962,10 +2935,10 @@ body .options .option .label .info .sub {
 }
 #estruturaProduto .content-section ul#malha li.header-row div:nth-child(1),
 #estruturaProduto .content-section ul#malha li.header-row div:nth-child(2){
-  text-align:left;               /* Código e Descrição à esquerda */
+  text-align:left;               /* C�digo e Descri��o � esquerda */
 }
 
-/* — linhas de dados (mesma grade) — */
+/* � linhas de dados (mesma grade) � */
 #estruturaProduto .content-section ul#malha li:not(.category-header):not(.header-row){
   display:grid;
   grid-template-columns: 120px minmax(0,1fr) 60px 70px 90px 120px;
@@ -2975,13 +2948,13 @@ body .options .option .label .info .sub {
 }
 
 
-/* 2ª coluna (Descrição) — a célula pode encolher de verdade */
+/* 2� coluna (Descri��o) � a c�lula pode encolher de verdade */
 #estruturaProduto .content-section ul#malha li:not(.category-header):not(.header-row) > div:nth-child(2){
-  min-width: 0;           /* crítico para grid item poder encolher */
+  min-width: 0;           /* cr�tico para grid item poder encolher */
   overflow: hidden;
 }
 
-/* conteúdo da descrição com “…” e tooltip nativo via title */
+/* conte�do da descri��o com ��� e tooltip nativo via title */
 #estruturaProduto .content-section ul#malha li:not(.category-header):not(.header-row) > div.desc{
   overflow: hidden;
   text-overflow: ellipsis;
@@ -2989,19 +2962,19 @@ body .options .option .label .info .sub {
   cursor: help;
 }
 
-/* cabeçalho: evita que o <th>/<div> 2 também “trave” o grid */
+/* cabe�alho: evita que o <th>/<div> 2 tamb�m �trave� o grid */
 #estruturaProduto .content-section ul#malha li.header-row > div:nth-child(2){
   min-width: 0;
 }
 
-/* — células alinhadas — */
+/* � c�lulas alinhadas � */
 #estruturaProduto .content-section ul#malha li.header-row > *,
 #estruturaProduto .content-section ul#malha li:not(.category-header):not(.header-row) > *{
   justify-self:start;
   margin:0; width:auto;
 }
 
-/* — cabeçalhos de categoria (full-width) — */
+/* � cabe�alhos de categoria (full-width) � */
 #estruturaProduto .content-section ul#malha li.category-header{
   display:block;
   background:rgba(144,119,119,.41);
@@ -3010,46 +2983,46 @@ body .options .option .label .info .sub {
   cursor:default;
 }
 
-/* — remove pontinho verde e recuos na descrição — */
+/* � remove pontinho verde e recuos na descri��o � */
 #estruturaProduto #malha .status-circle{ display:none; }
-/* Descrição (2ª coluna) — uma linha com “…” e sem invadir QTD */
+/* Descri��o (2� coluna) � uma linha com ��� e sem invadir QTD */
 #estruturaProduto #malha .status{
   display:block;
   margin:0; padding:0;
   min-width: 0;              /* permite encolher dentro do grid */
   overflow: hidden;          /* corta o excedente */
-  text-overflow: ellipsis;   /* mostra “…” */
+  text-overflow: ellipsis;   /* mostra ��� */
   white-space: nowrap;       /* 1 linha */
   cursor: help;              /* indica tooltip nativo (title) */
 }
 
 #estruturaProduto #malha .status-text{ margin-left:0; }
 
-/* — centraliza valores numéricos — */
+/* � centraliza valores num�ricos � */
 #estruturaProduto #malha .qtd,
 #estruturaProduto #malha .unidade,
 #estruturaProduto #malha .custo-real{
   text-align:center;
 }
 
-/* — centraliza o botão “Editar” (6.ª coluna) — */
+/* � centraliza o bot�o �Editar� (6.� coluna) � */
 #estruturaProduto #malha .button-wrapper{
   display:flex;
   justify-content:center;
 }
 
-/* ── Destaque visual do cabeçalho sticky ───────────────────────── */
+/* -- Destaque visual do cabe�alho sticky ------------------------- */
 #estruturaProduto .content-section ul#malha li.header-row{
   background: rgba(16,18,27,0.92);   /* fundo bem mais opaco       */
-  backdrop-filter: blur(4px);        /* leve desfoque atrás (edge) */
+  backdrop-filter: blur(4px);        /* leve desfoque atr�s (edge) */
   border-bottom: 1px solid var(--border-color);
 }
 
-/* (opcional) se quiser um efeito “barra flutuante” ainda mais visível */
+/* (opcional) se quiser um efeito �barra flutuante� ainda mais vis�vel */
 #estruturaProduto .content-section ul#malha li.header-row::after{
   content:'';
   position:absolute; left:0; right:0; bottom:-1px; height:1px;
-  background: var(--border-color);   /* linha divisória fina       */
+  background: var(--border-color);   /* linha divis�ria fina       */
 }
 
 /* === Estrutura de produto: fallback sem .content-section === */
@@ -3063,7 +3036,7 @@ body .options .option .label .info .sub {
   overflow-x: auto; /* scroll horizontal se apertar */
 }
 
-/* Cabeçalho (6 colunas) */
+/* Cabe�alho (6 colunas) */
 #estruturaProduto ul#malha li.header-row{
   display: grid;
   grid-template-columns: 120px minmax(0,1fr) 60px 70px 90px 120px;
@@ -3075,11 +3048,11 @@ body .options .option .label .info .sub {
 }
 #estruturaProduto ul#malha li.header-row > div:nth-child(1),
 #estruturaProduto ul#malha li.header-row > div:nth-child(2){
-  text-align: left; /* Código e Descrição à esquerda */
+  text-align: left; /* C�digo e Descri��o � esquerda */
   min-width: 0;
 }
 
-/* Linhas de dados (mesma grade do cabeçalho) */
+/* Linhas de dados (mesma grade do cabe�alho) */
 #estruturaProduto ul#malha li:not(.category-header):not(.header-row){
   display: grid;
   grid-template-columns: 120px minmax(0,1fr) 60px 70px 90px 120px;
@@ -3088,10 +3061,10 @@ body .options .option .label .info .sub {
   padding: 8px 18px;
 }
 
-/* 2ª coluna pode encolher de verdade */
+/* 2� coluna pode encolher de verdade */
 #estruturaProduto ul#malha li > div:nth-child(2){ min-width: 0; }
 
-/* Texto da descrição: “…” + tooltip nativo (title) */
+/* Texto da descri��o: ��� + tooltip nativo (title) */
 #estruturaProduto ul#malha li > div.desc,
 #estruturaProduto ul#malha li > div.status{
   overflow: hidden;
@@ -3101,7 +3074,7 @@ body .options .option .label .info .sub {
   cursor: help;
 }
 
-/* Centraliza numéricos e o botão Editar (compatível com seu tema) */
+/* Centraliza num�ricos e o bot�o Editar (compat�vel com seu tema) */
 #estruturaProduto #malha .qtd,
 #estruturaProduto #malha .unidade,
 #estruturaProduto #malha .custo-real { text-align: center; }
@@ -3110,21 +3083,21 @@ body .options .option .label .info .sub {
   display: flex; justify-content: center;
 }
 
-/* ──────────────────────────────────────────────────
-   Layout de Lista de Peças idêntico à Estrutura de produto
-   ────────────────────────────────────────────────── */
+/* --------------------------------------------------
+   Layout de Lista de Pe�as id�ntico � Estrutura de produto
+   -------------------------------------------------- */
 
-   /* ===== PCP: Ações + sub-estrutura (reaproveita o look da guia "Estrutura de produto") ===== */
+   /* ===== PCP: A��es + sub-estrutura (reaproveita o look da guia "Estrutura de produto") ===== */
 
-/* botões de ação na última coluna */
-/* PCP – célula de ações (linhas): alinhada à ESQUERDA */
+/* bot�es de a��o na �ltima coluna */
+/* PCP � c�lula de a��es (linhas): alinhada � ESQUERDA */
 #listaPecasPCPList .acoes{
   display:flex;
   align-items:center;
   justify-content:flex-start; /* <- era flex-end */
   gap:8px;
 }
-/* PCP – força alinhamento à esquerda em todos os contextos da lista */
+/* PCP � for�a alinhamento � esquerda em todos os contextos da lista */
 #listaPecasPCPList.grid-pecas li.data-row .acao,
 #listaPecasPCPList.grid-pecas li.data-row .acoes{
   display:flex;
@@ -3133,7 +3106,7 @@ body .options .option .label .info .sub {
   gap:8px;
 }
 
-/* PCP – título da coluna “Ação” alinhado à ESQUERDA */
+/* PCP � t�tulo da coluna �A��o� alinhado � ESQUERDA */
 #listaPecasPCPList .header-row .acao,
 #listaPecasPCPList .header-row .acoes,
 #listaPecasPCPList .header-row > *:last-child{
@@ -3141,28 +3114,28 @@ body .options .option .label .info .sub {
   text-align:left !important;
 }
 
-/* PCP — Centralizar o título da coluna "Ação" no cabeçalho */
+/* PCP � Centralizar o t�tulo da coluna "A��o" no cabe�alho */
 #listaPecasPCPList.grid-pecas .header-row { 
   /* garante que o header use a mesma malha */
   display: grid;
   grid-template-columns: var(--pcp-grid);
 }
 
-/* todos os cabeçalhos viram flex para controle fino de alinhamento */
+/* todos os cabe�alhos viram flex para controle fino de alinhamento */
 #listaPecasPCPList.grid-pecas .header-row > * {
   display: flex;
   align-items: center;
 }
 
-/* célula "Ação" (última) centralizada */
+/* c�lula "A��o" (�ltima) centralizada */
 #listaPecasPCPList.grid-pecas .header-row > *:last-child {
-  justify-content: center !important;  /* centra conteúdo */
+  justify-content: center !important;  /* centra conte�do */
   text-align: center !important;       /* texto central */
-  justify-self: stretch !important;    /* evita travar à direita por regras antigas */
-  padding-right: 0 !important;         /* remove empurrão à direita, se houver */
+  justify-self: stretch !important;    /* evita travar � direita por regras antigas */
+  padding-right: 0 !important;         /* remove empurr�o � direita, se houver */
 }
 
-/* PCP – evita centralização herdada de outras áreas */
+/* PCP � evita centraliza��o herdada de outras �reas */
 .data-row .acao{ justify-content:flex-start; }
 
 #listaPecasPCPList .icon-btn{
@@ -3179,7 +3152,7 @@ body .options .option .label .info .sub {
 #listaPecasPCPList .icon-btn svg, 
 #listaPecasPCPList .icon-btn svg *{ stroke: currentColor; fill: none; }
 
-/* linha “sub-estrutura” logo abaixo da peça clicada */
+/* linha �sub-estrutura� logo abaixo da pe�a clicada */
 #listaPecasPCPList li.sub-estrutura-row{ padding: 0; }
 #listaPecasPCPList li.sub-estrutura-row > .sub-estrutura{
   grid-column: 1 / -1;
@@ -3193,11 +3166,11 @@ body .options .option .label .info .sub {
   font-weight: 600; margin: 0 0 6px; opacity: .9;
 }
 
-/* grid interna (simplificada — mesma vibe da guia Estrutura) */
+/* grid interna (simplificada � mesma vibe da guia Estrutura) */
 #listaPecasPCPList li.sub-estrutura-row ul.malha-sub{
   list-style: none; margin: 0; padding: 0;
 }
-/* Grid das linhas da sub-estrutura: Cod | Desc | Un | Qtd | Custo | Ações */
+/* Grid das linhas da sub-estrutura: Cod | Desc | Un | Qtd | Custo | A��es */
 #listaPecasPCPList li.sub-estrutura-row ul.malha-sub li{
   display: grid;
   grid-template-columns: 140px minmax(260px,0.75fr) 70px 80px 90px minmax(168px,0.35fr);
@@ -3243,8 +3216,8 @@ body .options .option .label .info .sub {
   #listaPecasTab .content-section ul#listaPecasList li.header-row {
     display: grid;
     grid-template-columns:
-        120px                       /* Código          */
-        minmax(220px,1fr)           /* Descrição       */
+        120px                       /* C�digo          */
+        minmax(220px,1fr)           /* Descri��o       */
         60px                        /* QTD             */
         70px                        /* Unidade         */
         90px                        /* Valor sugerido  */
@@ -3260,7 +3233,7 @@ body .options .option .label .info .sub {
     text-align: center;
   }
   #listaPecasTab .content-section ul#listaPecasList li.header-row div:nth-child(-n+2) {
-    text-align: left;  /* Código e Descrição à esquerda */
+    text-align: left;  /* C�digo e Descri��o � esquerda */
   }
   
   #listaPecasTab .content-section ul#listaPecasList li:not(.category-header):not(.header-row) {
@@ -3280,7 +3253,7 @@ body .options .option .label .info .sub {
     cursor: default;
   }
   
-  /* remove pontinho e recuo na descrição */
+  /* remove pontinho e recuo na descri��o */
   #listaPecasTab #listaPecasList .status-circle { display: none; }
   #listaPecasTab #listaPecasList .status {
     display: block;
@@ -3293,21 +3266,21 @@ body .options .option .label .info .sub {
     word-break: break-word;
   }
   
-  /* centraliza colunas numéricas */
+  /* centraliza colunas num�ricas */
   #listaPecasTab #listaPecasList .qtd,
   #listaPecasTab #listaPecasList .unidade,
   #listaPecasTab #listaPecasList .valor {
     text-align: center;
   }
   
-  /* botão “Abrir” centralizado */
+  /* bot�o �Abrir� centralizado */
   #listaPecasTab #listaPecasList .button-wrapper {
     width: auto;
     display: flex;
     justify-content: center;
   }
   
-  /* ajusta largura das colunas para não herdar os estilos globais */
+  /* ajusta largura das colunas para n�o herdar os estilos globais */
   #listaPecasTab #listaPecasList .products,
   #listaPecasTab #listaPecasList .status {
     width: auto;
@@ -3340,9 +3313,9 @@ body .options .option .label .info .sub {
 
 /* -------------------------------------------------
    CSS original do seu form (cole TODO este bloco)
-   — lembrando de manter o @import do Montserrat no topo
+   � lembrando de manter o @import do Montserrat no topo
 ------------------------------------------------- */
-/* ─────────── Scoped Form CSS (cole aqui) ─────────── */
+/* ----------- Scoped Form CSS (cole aqui) ----------- */
 .auth-popup,
 .auth-popup * {
   box-sizing: border-box;
@@ -3524,7 +3497,7 @@ body .options .option .label .info .sub {
 
 .auth-popup .container.right-panel-active .overlay {
   transform: translateX(50%);
-  position: relative; /* Já definido, mas reforça o contexto */
+  position: relative; /* J� definido, mas refor�a o contexto */
 }
 
 .auth-popup .overlay-panel {
@@ -3597,7 +3570,7 @@ body .options .option .label .info .sub {
   text-decoration: none;
 }
 
-/* botão “×” */
+/* bot�o �ה */
 .auth-popup .close-auth {
   position: absolute;
   top: 1rem;       /* afasta 16px do topo do modal */
@@ -3607,10 +3580,10 @@ body .options .option .label .info .sub {
   font-size: 1.5rem;  /* ou ajuste como preferir */
   line-height: 1;
   cursor: pointer;
-  color: #333;     /* mesma cor dos títulos */
+  color: #333;     /* mesma cor dos t�tulos */
   padding: 0;
 }
-/* ─────────────────────────────────────────────────────────── */
+/* ----------------------------------------------------------- */
 
 .title-wrapper { display:flex; align-items:center; gap:0.5em; }
 
@@ -3630,7 +3603,7 @@ body .options .option .label .info .sub {
 .spinner-box {
   display: flex;
   align-items: center;
-  gap: 0.5em;                     /* distância entre círculo e texto */
+  gap: 0.5em;                     /* dist�ncia entre c�rculo e texto */
 }
 
 #estoqueSpinner {
@@ -3670,7 +3643,7 @@ body .options .option .label .info .sub {
   white-space: nowrap;
 }
 
-/* ─── Faz o sub-painel de Detalhes ocupar tudo e rolar internamente ─── */
+/* --- Faz o sub-painel de Detalhes ocupar tudo e rolar internamente --- */
 /* ==============================
    CONTROLE DE TAMANHO + SCROLL
    ============================== */
@@ -3693,10 +3666,10 @@ ul#comprasList,
     max-height: calc(var(--inner-max-items) * var(--inner-row-height));
     overflow-y: auto;
     overflow-x: hidden;
-    padding-right: 8px; /* evita o conteúdo “sumir” sob o scroll */
+    padding-right: 8px; /* evita o conte�do �sumir� sob o scroll */
   }
   
-  /* garante que cada item fique visível (remove hides antigos) */
+  /* garante que cada item fique vis�vel (remove hides antigos) */
   ul#detalhesList li,
   ul#cadastroList li,
   ul#financeiroList li,
@@ -3710,7 +3683,7 @@ ul#comprasList li ,
      2) COMPACTAR ALTURA DAS SUB-TABS E WRAPPER
      ====================================== */
   
-  /* Barrazinha de subtabs (aba interna do “Dados do produto”) */
+  /* Barrazinha de subtabs (aba interna do �Dados do produto�) */
   #dadosProduto > .main-header {
     height: 48px;         /* diminui de 58px para 48px */
     padding: 0 20px;      /* menos padding lateral */
@@ -3750,7 +3723,7 @@ ul#comprasList li ,
   padding: 8px 0;
 }
 
-/* coluna de label (“Tipo item”, “Marca”, etc) */
+/* coluna de label (�Tipo item�, �Marca�, etc) */
 .adobe-product .products {
   flex-shrink: 0;
   width: 150px; /* ajusta conforme seu layout */
@@ -3760,36 +3733,36 @@ ul#comprasList li ,
 /* coluna de valor */
 .adobe-product .status-text {
   flex: 1;
-  white-space: pre-wrap;      /* preserva quebras que você queira */
+  white-space: pre-wrap;      /* preserva quebras que voc� queira */
   word-break: break-word;     /* quebra palavras muito longas */
   overflow-wrap: break-word;  /* compatibilidade */
   margin-right: 16px;
 }
 
-/* wrapper do botão */
+/* wrapper do bot�o */
 .adobe-product .button-wrapper {
   flex-shrink: 0;
 }
 
-/* opcional: ajuste nos botões pra ficarem alinhados no topo */
+/* opcional: ajuste nos bot�es pra ficarem alinhados no topo */
 .adobe-product .content-button {
   align-self: flex-start;
 }
-/* ==== Quebra de linha em “Descrição detalhada” e “Obs internas” ==== */
-/* Aplica somente na aba “Detalhes do produto” (#dadosProduto) */
+/* ==== Quebra de linha em �Descri��o detalhada� e �Obs internas� ==== */
+/* Aplica somente na aba �Detalhes do produto� (#dadosProduto) */
 #dadosProduto .content-section ul#detalhesList li .status-text {
-  white-space: normal !important;    /* permite múltiplas linhas */
+  white-space: normal !important;    /* permite m�ltiplas linhas */
   word-break: break-word !important; /* quebra palavras muito longas */
   overflow-wrap: break-word !important;
 }
 
-/* Garante que o botão fique sempre no topo direito */
+/* Garante que o bot�o fique sempre no topo direito */
 #dadosProduto .content-section ul#detalhesList li .button-wrapper {
   align-self: flex-start !important;
 }
 
-/* ─── Mesma formatação de “product-details” para PDV e Compras ─── */
-/* ─── Mesma formatação “tabela” para PDV e Compras ─── */
+/* --- Mesma formata��o de �product-details� para PDV e Compras --- */
+/* --- Mesma formata��o �tabela� para PDV e Compras --- */
 .content-section ul#pdvList,
 .content-section ul#comprasList {
   display: flex;
@@ -3910,7 +3883,7 @@ ul#comprasList li ,
 }
 
 
-/* 4) Faz o título ocupar toda a largura */
+/* 4) Faz o t�tulo ocupar toda a largura */
 #pecasFilterForm > strong {
   grid-column: 1 / -1;
   margin-bottom: 0.5rem;
@@ -3919,7 +3892,7 @@ ul#comprasList li ,
   display: none;
 }
 
-/* 5) Cada bloco de categoria também vira um pequeno grid interno */
+/* 5) Cada bloco de categoria tamb�m vira um pequeno grid interno */
 #pecasFilterForm .category-filter {
   display: grid;
   grid-template-rows: auto auto auto;
@@ -3959,7 +3932,7 @@ ul#comprasList li ,
   padding: 1rem;
 }
 
-/* estiliza cada “célula” do grid, que agora são .filter-row */
+/* estiliza cada �c�lula� do grid, que agora s�o .filter-row */
 .filter-panel.show .filter-row {
   display: flex;
   flex-direction: column;
@@ -3976,7 +3949,7 @@ ul#comprasList li ,
   font-weight: 500;
 }
 
-/* faz os selects/tags ocuparem 100% da célula */
+/* faz os selects/tags ocuparem 100% da c�lula */
 .filter-panel.show .filter-row select,
 .filter-panel.show .filter-row .tags {
   width: 100%;
@@ -3993,17 +3966,17 @@ ul#comprasList li ,
 }
 
 
-/* cabeçalho clicável */
+/* cabe�alho clic�vel */
 .category-header.collapsible  { cursor:pointer; }
 
-/* ícone de expandir/retrair */
+/* �cone de expandir/retrair */
 .expand-icon {
   margin-left: 8px;
   font-size: 14px;
-  pointer-events:none;         /* clique vai no <li>, não no <i>  */
+  pointer-events:none;         /* clique vai no <li>, n�o no <i>  */
 }
 
-/* toolbar de Características */
+/* toolbar de Caracter�sticas */
 .caract-toolbar i.fa-wrench,
 .caract-toolbar i.fas.fa-wrench {
   font-size: 1.2em;
@@ -4021,7 +3994,7 @@ ul#comprasList li ,
   border-radius: 6px;
     width: max-content !important;
   height: auto !important;
-  white-space: nowrap;      /* evita quebra de linha nos ícones */
+  white-space: nowrap;      /* evita quebra de linha nos �cones */
 }
 
 .caract-menu.show {
@@ -4039,16 +4012,16 @@ ul#comprasList li ,
   margin: 0 4px;
   cursor: pointer;
 }
-/* quando JS fizer menu.style.display = 'flex', aí aparece */
+/* quando JS fizer menu.style.display = 'flex', a� aparece */
 .delete-icon {
-  margin-left: 12px;  /* ajuste até ficar na posição desejada */
+  margin-left: 12px;  /* ajuste at� ficar na posi��o desejada */
 }
-/* filtro oculto por padrão */
+/* filtro oculto por padr�o */
 .filter-panel {
   display: none;
 }
 
-/* quando receber a classe .show (clicou no ícone), exibe o painel */
+/* quando receber a classe .show (clicou no �cone), exibe o painel */
 .filter-panel.show {
   display: block; /* ou flex, se seu layout usar flexbox */
 }
@@ -4062,8 +4035,8 @@ ul#comprasList li ,
   border-bottom: 1px solid var(--border-color);
 }
 
-/* Listbox padrão da intranet */
-/* mantém o estilo do select */
+/* Listbox padr�o da intranet */
+/* mant�m o estilo do select */
 .content-select {
   margin-left: 1rem;
   padding: 0.375rem 0.75rem;
@@ -4074,12 +4047,12 @@ ul#comprasList li ,
   min-width: 120px;
 }
 
-/* realça a borda do select quando focado */
+/* real�a a borda do select quando focado */
 .content-select:focus {
   outline: 2px solid var(--primary-color);
 }
 
-/* Reset das opções para branco/preto */
+/* Reset das op��es para branco/preto */
 .content-select option {
   background-color: #fff;
   color: #000;
@@ -4092,7 +4065,7 @@ ul#comprasList li ,
   color: #fff;
 }
 
-/* Garante que a opção “checked” continue preta sobre branco */
+/* Garante que a op��o �checked� continue preta sobre branco */
 .content-select option:checked {
   background-color: #fff;
   color: #000;
@@ -4106,15 +4079,15 @@ ul#comprasList li ,
 
 /* Novo container que engloba ambas as listas */
 .menu-scroll {
-  max-height: 450px;      /* altura máxima do bloco inteiro */
-  overflow-y: auto;       /* barra única para tudo que ultrapassar */
-  padding-right: 0.5rem;  /* mantém espaço interno à direita */
+  max-height: 450px;      /* altura m�xima do bloco inteiro */
+  overflow-y: auto;       /* barra �nica para tudo que ultrapassar */
+  padding-right: 0.5rem;  /* mant�m espa�o interno � direita */
 }
 
-/* painel lateral de notificações */
+/* painel lateral de notifica��es */
 .side-panel {
-  position: fixed;          /* flutuante, não dentro do flow */
-  top: 70px;                /* ajuste à altura do cabeçalho */
+  position: fixed;          /* flutuante, n�o dentro do flow */
+  top: 70px;                /* ajuste � altura do cabe�alho */
   right: 0;
   width: 320px;
   max-width: 90vw;
@@ -4125,7 +4098,7 @@ ul#comprasList li ,
   overflow-y: auto;
   z-index: 2000;
 }
-/* começa invisível; será exibido com JS */
+/* come�a invis�vel; ser� exibido com JS */
 .hidden   { display: none; }
 .visible  { display: block; }
 
@@ -4156,12 +4129,12 @@ ul#comprasList li ,
   overflow-y: auto;
   overflow-x: hidden;
   padding-right: 10px; /* evita corte de sombras no scroll */
-  padding-bottom: 20px; /* garante espaço após o último item */
+  padding-bottom: 20px; /* garante espa�o ap�s o �ltimo item */
 }
 
-/* =========  BLOCO DE INFORMAÇÕES DO COLABORADOR  ========== */
+/* =========  BLOCO DE INFORMA��ES DO COLABORADOR  ========== */
 #loggedInContainer{
-  padding: 18px 12px;          /* espaçamento interno */
+  padding: 18px 12px;          /* espa�amento interno */
   line-height: 1.35;
 }
 
@@ -4180,18 +4153,18 @@ ul#comprasList li ,
   color: #fff;             /* texto branco */
 }
 #loggedInContainer.on-overlay p {
-  color: #e6e6e6;          /* um branco levemente cinza pros parágrafos */
+  color: #e6e6e6;          /* um branco levemente cinza pros par�grafos */
 }
-/* Quando os dados da Omie estão sobre o overlay roxo */
+/* Quando os dados da Omie est�o sobre o overlay roxo */
 #loggedInContainer.on-overlay {
-  color:#fff;                    /* títulos em branco */
+  color:#fff;                    /* t�tulos em branco */
 }
 #loggedInContainer.on-overlay p {
-  color:#e6e6e6;                 /* parágrafos cinza-claro */
+  color:#e6e6e6;                 /* par�grafos cinza-claro */
 }
-/* centraliza o conteúdo da coluna cinza quando logado */
+/* centraliza o conte�do da coluna cinza quando logado */
 .sign-in-container.centered {
-  display:          flex    !important;   /* sobrepõe display:block original  */
+  display:          flex    !important;   /* sobrep�e display:block original  */
   flex-direction:   column;
   justify-content:  center;               /* centra na vertical              */
   align-items:      center;               /* centra na horizontal            */
@@ -4202,10 +4175,10 @@ ul#comprasList li ,
 .sign-in-container.centered p,
 .sign-in-container.centered button{
   width: 100%;             /* garante alinhamento */
-  margin: 8px 0;           /* espaçamento suave   */
+  margin: 8px 0;           /* espa�amento suave   */
 }
-/* botão Deslogar ganha o mesmo vermelho do #btnLogout
-   somente quando está no painel cinza (.centered) */
+/* bot�o Deslogar ganha o mesmo vermelho do #btnLogout
+   somente quando est� no painel cinza (.centered) */
    .sign-in-container.centered #btnOverlayLogout{
     background-color:#ff4b2b !important;
     border-color:#ff4b2b   !important;
@@ -4217,38 +4190,38 @@ ul#comprasList li ,
   #loggedInContainer span{
     font-weight:300;
   }
-/* garante que o cabeçalho fique sempre na frente do overlay */
+/* garante que o cabe�alho fique sempre na frente do overlay */
 .auth-popup h2{
   position: relative;   /* cria novo contexto */
   z-index: 150;         /* maior que .overlay-container (100) */
 }
-/* Barra cinza que corre de fora a fora atrás do <h2> */
+/* Barra cinza que corre de fora a fora atr�s do <h2> */
 .auth-popup::before{
   content:"";
   position:absolute;
   top:0; left:0;
   width:100%;
-  height:60px;                /* ajuste → mesma altura do <h2> */
+  height:60px;                /* ajuste ? mesma altura do <h2> */
   background:#f6f5f7;         /* mesma cor do painel cinza     */
   z-index:120;                /* fica acima do overlay (100) e
                                  abaixo do h2 (150)             */
 }
 
-/* garante que o título continue no topo da nova barra */
+/* garante que o t�tulo continue no topo da nova barra */
 .auth-popup h2{
   position:relative;
-  z-index:150;                /* já havia sido colocado antes  */
+  z-index:150;                /* j� havia sido colocado antes  */
   margin:0;
   padding:16px 0;             /* opcional: afasta texto da borda */
   width:100%;
   text-align:center;
 }
-/* Ajuste do espaçamento interno nas linhas de detalhes */
+/* Ajuste do espa�amento interno nas linhas de detalhes */
 #colabDetailsList li.detail-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  /* aumenta padding à esquerda e à direita */
+  /* aumenta padding � esquerda e � direita */
   padding: 0.5rem 1rem;
   border-bottom: 1px solid var(--border-color);
 }
@@ -4265,13 +4238,13 @@ ul#comprasList li ,
 }
 /* Limita a altura do painel de detalhes e ativa scroll interno */
 #colabDetailsList {
-  max-height: 480px;      /* ajuste este valor até ficar certinho até "Código do Vendedor" */
+  max-height: 480px;      /* ajuste este valor at� ficar certinho at� "C�digo do Vendedor" */
   overflow-y: auto;
-  /* opcional: deixa o scroll sempre visível, se quiser */
+  /* opcional: deixa o scroll sempre vis�vel, se quiser */
   /* scrollbar-width: thin; */
 }
 
-/* mantém o título fixo ao rolar (se quiser) */
+/* mant�m o t�tulo fixo ao rolar (se quiser) */
 #colabDetails .title-wrapper {
   position: sticky;
   top: 0;
@@ -4280,7 +4253,7 @@ ul#comprasList li ,
   padding-top: 0.5rem;
   padding-bottom: 0.5rem;
 }
-/* Container geral dos botões e lista */
+/* Container geral dos bot�es e lista */
 #colabDetails .title-wrapper {
   /* transforma o wrapper num flex-container em coluna */
   display: flex !important;
@@ -4289,7 +4262,7 @@ ul#comprasList li ,
   gap: 0.75rem;
 }
 
-/* Primeira linha: Anexo + Voltar à lista */
+/* Primeira linha: Anexo + Voltar � lista */
 #anexoRow1 {
   display: flex;
   gap: 0.5rem;
@@ -4315,7 +4288,7 @@ ul#comprasList li ,
   border-radius: 0.375rem;
 }
 
-/* Ajuste para botões (opcional) */
+/* Ajuste para bot�es (opcional) */
 #anexoRow1 .content-button,
 #anexoRow2 .content-button {
   flex-shrink: 0;
@@ -4333,14 +4306,14 @@ ul#comprasList li ,
 .icon-button:hover {
   color: var(--button-inactive);
 }
-/* container com posicionamento relativo + espaço interno só para empurrar o conteúdo */
+/* container com posicionamento relativo + espa�o interno s� para empurrar o conte�do */
 #colabDetails {
   position: relative;
   padding-top: 80px; /* empurra o restante para baixo, acomodando a foto */
 }
 
 /* placeholder absoluto, colado ao topo e centralizado */
-/* Remove o absolute antigo e força o img a preencher o wrapper */
+/* Remove o absolute antigo e for�a o img a preencher o wrapper */
 #colabPhoto {
   position: static !important;
   top: auto !important;
@@ -4357,14 +4330,14 @@ ul#comprasList li ,
   position: relative;
 }
 
-/* desfaz o flex/margin/padding do título */
+/* desfaz o flex/margin/padding do t�tulo */
 #colabDetails .title-wrapper {
   display: block;
   margin: 0;
   padding: 0;
 }
 
-/* fixa o botão de voltar no topo, à direita */
+/* fixa o bot�o de voltar no topo, � direita */
 #colabDetails #backToList {
   position: absolute;
   top: 16px;
@@ -4376,7 +4349,7 @@ ul#comprasList li ,
   position: relative;
 }
 
-/* botão “Voltar” permanece colado à direita */
+/* bot�o �Voltar� permanece colado � direita */
 #colabDetails #backToList {
   position: absolute;
   top: 16px;
@@ -4384,15 +4357,15 @@ ul#comprasList li ,
   margin: 0;
 }
 
-/* botão “Anexo” fica à esquerda do “Voltar” */
+/* bot�o �Anexo� fica � esquerda do �Voltar� */
 #colabDetails #attachAnexo {
   position: absolute;
   top: 16px;
-  right: 72px;    /* 24px (do back) + botão de 40px + gap */
+  right: 72px;    /* 24px (do back) + bot�o de 40px + gap */
   margin: 0;
 }
 
-/* título centralizado na mesma linha */
+/* t�tulo centralizado na mesma linha */
 #colabDetails .content-section-title {
   position: absolute;
   top: calc(8px + 27px + 16px) !important;       
@@ -4401,7 +4374,7 @@ ul#comprasList li ,
   margin: 0;
 }
 
-/* wrapper circular que “segura” o drag em todo o círculo */
+/* wrapper circular que �segura� o drag em todo o c�rculo */
 #colabPhotoWrapper {
   position: absolute;
   top: 8px;              /* mesmo top que o img tinha */
@@ -4410,11 +4383,11 @@ ul#comprasList li ,
   width: 120px;
   height: 120px;
   border-radius: 50%;
-  overflow: hidden;      /* esconde partes fora do círculo */
+  overflow: hidden;      /* esconde partes fora do c�rculo */
   cursor: grab;          /* cursor aparece em todo o wrapper */
 }
 .caract-toolbar .caract-menu .content-button {
-  all: unset;                /* remove todos os estilos de botão */
+  all: unset;                /* remove todos os estilos de bot�o */
   cursor: pointer;
   display: inline-flex;
   align-items: center;
@@ -4435,7 +4408,7 @@ ul#comprasList li ,
   color: #b30000;              /* texto vermelho escuro */
 }
 
-/* ─── Wrappers principais: empilham em coluna ─── */
+/* --- Wrappers principais: empilham em coluna --- */
 .main-container,
 .tab-content,
 .tab-pane,
@@ -4447,7 +4420,7 @@ ul#comprasList li ,
   min-height: 0;   /* habilita scroll interno nos filhos */
 }
 
-/* ─── Cards ─── */
+/* --- Cards --- */
 .kanban-list li:not(.placeholder) {
   background: rgba(255,255,255,0.05);
   border: 1px solid rgba(255,255,255,0.2);
@@ -4464,7 +4437,7 @@ ul#comprasList li ,
 }
 
 
-/* ─── Placeholder de drag (pontilhado no tamanho dos cards) ─── */
+/* --- Placeholder de drag (pontilhado no tamanho dos cards) --- */
 .kanban-list li.placeholder {
   border: 2px dashed rgba(255,255,255,0.3);
   border-radius: 4px;
@@ -4473,14 +4446,14 @@ ul#comprasList li ,
 }
 
 
-/* ─── Título do card ─── */
+/* --- T�tulo do card --- */
 .kanban-card-header {
   margin: 0 0 6px;
   font-weight: 600;
   color: #fff;
 }
 
-/* ─── Itens dentro do card ─── */
+/* --- Itens dentro do card --- */
 .kanban-card-items {
   list-style: none;
   margin: 0;
@@ -4495,7 +4468,7 @@ ul#comprasList li ,
   gap: 4px;
   color: #fff;
 }
-/* ─── Kanban Board: mantém em linha ─── */
+/* --- Kanban Board: mant�m em linha --- */
 .kanban-board {
   display: flex;
   flex-direction: row;
@@ -4503,22 +4476,22 @@ ul#comprasList li ,
   flex: 1 1 auto;
   min-height: 0;
   overflow-x: auto;
-  overflow-y: auto; /* Adiciona rolagem vertical também */
-  max-height: 100vh; /* Garante que não ultrapasse a tela */
+  overflow-y: auto; /* Adiciona rolagem vertical tamb�m */
+  max-height: 100vh; /* Garante que n�o ultrapasse a tela */
   justify-content: center;
   /* garante que cada coluna fique alinhada ao topo */
   align-items: flex-start;
-  margin-top: 0px; /* Remove margem superior para ocupar mais espaço */
+  margin-top: 0px; /* Remove margem superior para ocupar mais espa�o */
 }
-/* ─── Cada coluna ocupa espaço na largura e faz scroll interno ─── */
+/* --- Cada coluna ocupa espa�o na largura e faz scroll interno --- */
 .kanban-column {
-  flex: 0 0 200px;      /* largura fixa - não cresce nem diminui */
-  min-width: 200px;     /* garante largura mínima */
-  max-width: 200px;     /* garante largura máxima */
+  flex: 0 0 200px;      /* largura fixa - n�o cresce nem diminui */
+  min-width: 200px;     /* garante largura m�nima */
+  max-width: 200px;     /* garante largura m�xima */
   width: 200px;         /* largura definida */
   display: flex;
   flex-direction: column;
-  min-height: 0;        /* <— habilita scroll no conteúdo */
+  min-height: 0;        /* <� habilita scroll no conte�do */
   background: rgba(32,34,50,0.8);
   border: 1px solid rgba(255,255,255,0.2);
   border-radius: 8px;
@@ -4559,7 +4532,7 @@ ul#comprasList li ,
 .light-mode .kanban-container::-webkit-scrollbar-thumb:hover {
   background: rgba(0, 0, 0, 0.5);
 }
-/* ─── Cabeçalho sticky ─── */
+/* --- Cabe�alho sticky --- */
 .kanban-header {
   flex: 0 0 auto;
   padding: 6px 4px;
@@ -4576,19 +4549,19 @@ ul#comprasList li ,
   overflow: hidden;
   text-overflow: ellipsis;
 }
-/* ─── Lista de cards: scroll vertical ─── */
+/* --- Lista de cards: scroll vertical --- */
 .kanban-list {
   flex: 1 1 auto;
-  min-height: 0;       /* <— muito importante */
+  min-height: 0;       /* <� muito importante */
   overflow-y: auto;
   margin: 0;
   padding: 6px 6px 200px 6px;
   list-style: none;
-  /* Sem max-height fixo - usa o espaço disponível */
+  /* Sem max-height fixo - usa o espa�o dispon�vel */
   box-sizing: border-box;
 }
 
-/* ─── Barra de scroll interna ─── */
+/* --- Barra de scroll interna --- */
 .kanban-list::-webkit-scrollbar {
   width: 6px;
 }
@@ -4676,7 +4649,7 @@ ul#comprasList li ,
   margin-top: 4px;
 }
 
-/* ─── Botões dos cards do kanban ─── */
+/* --- Bot�es dos cards do kanban --- */
 .kanban-card-actions {
   display: flex;
   gap: 8px;
@@ -4744,17 +4717,17 @@ ul#comprasList li ,
 }
 
 
-/* ─── Caixa de Detalhes ─── */
+/* --- Caixa de Detalhes --- */
 .detalhes-box {
   background: var(--content-bg);
   border-radius: 8px;
   box-shadow: 0 2px 8px rgba(0,0,0,0.2);
   padding: 16px;
   margin: 16px 8px; /* 16px em cima/baixo e 8px nas laterais */
-  color: #fff;    /* ← letras agora em branco */
+  color: #fff;    /* ? letras agora em branco */
 }
 
-/* cabeçalho dentro da caixa */
+/* cabe�alho dentro da caixa */
 .detalhes-box .box-header {
   border-bottom: 1px solid var(--border-color);
   padding-bottom: 8px;
@@ -4765,7 +4738,7 @@ ul#comprasList li ,
   font-size: 1.25rem;
 }
 
-/* conteúdo interno */
+/* conte�do interno */
 .detalhes-box .box-content p {
   margin: 6px 0;
   line-height: 1.4;
@@ -4786,7 +4759,7 @@ ul#comprasList li ,
 .table-det th {
   font-weight: 600;
 }
-/* força branco em todos os textos da caixa de detalhes */
+/* for�a branco em todos os textos da caixa de detalhes */
 .detalhes-box .box-header,
 .detalhes-box .box-content,
 .detalhes-box .box-content p,
@@ -4794,7 +4767,7 @@ ul#comprasList li ,
 .table-det td {
   color: #fff;
 }
-/* ─── Popup de Cliente ─── */
+/* --- Popup de Cliente --- */
 .cliente-popup {
   position: absolute;
   background: var(--popup-bg);
@@ -4829,21 +4802,21 @@ ul#comprasList li ,
   color: #333 !important;           /* texto mais escuro */
 }
 
-/* garantir que a cor dos spans internos também seja ajustada */
+/* garantir que a cor dos spans internos tamb�m seja ajustada */
 .kanban-list li.stock-ok .item-code,
 .kanban-list li.stock-low .item-code {
   color: inherit !important;
 }
-/* vermelho para itens com qt=0 e tipoItem≠04 */
+/* vermelho para itens com qt=0 e tipoItem?04 */
 .kanban-list li.stock-error {
   background-color: #ffe5e5 !important;
   color: #333 !important;
 }
 
-/* --- seta após Obs. item --- */
+/* --- seta ap�s Obs. item --- */
 .item-obs {
   position: relative;
-  padding-right: 34px;      /* deixa espaço para a seta */
+  padding-right: 34px;      /* deixa espa�o para a seta */
 }
 .item-obs .obs-arrow {
   position: absolute;
@@ -4851,21 +4824,21 @@ ul#comprasList li ,
   top: 50%;
   transform: translateY(-50%);
   font-size: 14px;
-  cursor: pointer;     /* mostra a mãozinha ao passar o mouse */
+  cursor: pointer;     /* mostra a m�ozinha ao passar o mouse */
   /* deixa a seta verde e destacada */
-  color: #28a745;      /* verde “bootstrap success” */
+  color: #28a745;      /* verde �bootstrap success� */
   font-weight: 900;    /* negrito */
-  font-size: 18px;     /* opcional – aumente ou remova se não quiser */
+  font-size: 18px;     /* opcional � aumente ou remova se n�o quiser */
 }
 /* Destaque para o texto de carregamento na aba Detalhes */
 #detalhesContainer .loading-details {
   color: #39FF14;      /* verde fluorescente */
-  padding: 4px;        /* espaçamento interno */
-  margin: 8px 0;       /* espaço acima e abaixo */
+  padding: 4px;        /* espa�amento interno */
+  margin: 8px 0;       /* espa�o acima e abaixo */
   font-weight: 600;    /* deixa o texto mais forte */
 }
 
-/* ícone de proibição junto ao Estq.(0) */
+/* �cone de proibi��o junto ao Estq.(0) */
 .no-drag-icon {
   margin-left: 4px;
   color: #F44336;
@@ -4873,12 +4846,12 @@ ul#comprasList li ,
   vertical-align: middle;
 }
 
-/* Y – spinner visível em qualquer fundo */
+/* Y � spinner vis�vel em qualquer fundo */
 .kanban-spinner {
   margin-left: 8px;
-  display: none;        /* fica invisível até ser ativado */
-  font-size: 1.25rem;   /* 20 px aprox. – ligeiramente maior */
-  color: #e60000 !important;  /* vermelho forte para não “sumir” */
+  display: none;        /* fica invis�vel at� ser ativado */
+  font-size: 1.25rem;   /* 20 px aprox. � ligeiramente maior */
+  color: #e60000 !important;  /* vermelho forte para n�o �sumir� */
 }
 
 .kanban-card {
@@ -4985,7 +4958,7 @@ ul#comprasList li ,
   padding: 24px;
 }
 
-/* Campos avançados do modal de compras */
+/* Campos avan�ados do modal de compras */
 .compras-campos-toggle {
   background: #111827;
   color: #e5e7eb;
@@ -5018,7 +4991,7 @@ ul#comprasList li ,
   border: 0 !important;
 }
 
-/* Modal de ações do Kanban (hamburger) */
+/* Modal de a��es do Kanban (hamburger) */
 .compras-acoes-modal {
   background: #111827;
   border: 1px solid #1f2937;
@@ -5059,7 +5032,7 @@ ul#comprasList li ,
   font-weight: 600;
 }
 
-/* Filtros do catálogo Omie */
+/* Filtros do cat�logo Omie */
 .catalogo-filtros-toggle {
   background: #1f2937;
   color: #e5e7eb;
@@ -5391,7 +5364,7 @@ ul#comprasList li ,
   transform:none;
 }
 
-/* Botão editar, visual semelhante ao excluir porém em azul */
+/* Bot�o editar, visual semelhante ao excluir por�m em azul */
 .op-row .op-editar{
   background:none;
   border:none;
@@ -6345,18 +6318,18 @@ ul#comprasList li ,
   letter-spacing: 0.04em;
 }
 
-/* ─── Marcador de pedido duplicado ─── */
+/* --- Marcador de pedido duplicado --- */
 /* remove qualquer .duplicate-marker que ainda exista */
 .duplicate-marker{display:none!important;}
 
-/* classe aplicada ao <li> que é duplicado */
+/* classe aplicada ao <li> que � duplicado */
 li.duplicado{
-  /* já existe `position:relative` nos cards que tinham o span,
+  /* j� existe `position:relative` nos cards que tinham o span,
      mas garantimos para todos: */
   position:relative;
 }
 
-/* sobrepõe 50 % à direita em vermelho */
+/* sobrep�e 50 % � direita em vermelho */
 li.duplicado::after{
   content:'';
   position:absolute;
@@ -6365,30 +6338,30 @@ li.duplicado::after{
   width:2%;            /* metade do card */
   height:100%;
   background:#F44336;   /* vermelho alerta */
-  border-top-right-radius:4px;     /* mantém o mesmo arredondado */
+  border-top-right-radius:4px;     /* mant�m o mesmo arredondado */
   border-bottom-right-radius:4px;  /*   usado nos seus cards */
-  pointer-events:none;  /* não atrapalha drag & drop */
+  pointer-events:none;  /* n�o atrapalha drag & drop */
 }
 
-/* ≡ Container Geral dos Detalhes ≡ */
+/* = Container Geral dos Detalhes = */
 .detalhes-wrapper {
-  /* Use cor de fundo suave para destacar sobre o restante da página */
+  /* Use cor de fundo suave para destacar sobre o restante da p�gina */
   background-color: #f5f7fa;  
   border-radius: 8px;
   padding: 1.5rem;
-  /* Sombra suave para “levantar” o cartão */
+  /* Sombra suave para �levantar� o cart�o */
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
   margin: 1rem 0;
 }
 
-/* ≡ Cabeçalho dos Dados do Pedido ≡ */
+/* = Cabe�alho dos Dados do Pedido = */
 .detalhes-header {
   display: flex;
   flex-wrap: wrap;
   gap: 2rem;
   margin-bottom: 1.5rem;
 }
-/* Cada bloco (Quantidade / Observação) fica num “cardzinho” secundário */
+/* Cada bloco (Quantidade / Observa��o) fica num �cardzinho� secund�rio */
 .campo-detalhe {
   display: flex;
   flex-direction: column;
@@ -6411,7 +6384,7 @@ li.duplicado::after{
   color: #1e293b;
 }
 
-/* ≡ Tabela de Itens ≡ */
+/* = Tabela de Itens = */
 .tabela-detalhes {
   width: 100%;
   border-collapse: separate;
@@ -6419,7 +6392,7 @@ li.duplicado::after{
   background-color: #ffffff;
   border-radius: 6px;
   overflow: hidden;
-  /* Sombra sutil para o “cartão de tabela” */
+  /* Sombra sutil para o �cart�o de tabela� */
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.04);
 }
 .tabela-detalhes thead {
@@ -6485,20 +6458,20 @@ li.duplicado::after{
 }
 
 
-/* ===== Estilo unificado para todos os ícones em header-profile ===== */
-/* ===== Header – Ícones do perfil ===== */
+/* ===== Estilo unificado para todos os �cones em header-profile ===== */
+/* ===== Header � �cones do perfil ===== */
 .header-profile{
   margin-left:auto;          /* cola tudo na direita do header           */
   display:flex;
   align-items:center;
-  gap:16px;                  /* distância IGUAL entre todos os filhos   */
+  gap:16px;                  /* dist�ncia IGUAL entre todos os filhos   */
   padding-left:40px;         /* recuo igual ao campo de busca (opcional)*/
 }
 
 /* sinos / impressora / nuvem */
 .header-profile i,
 .header-profile svg{
-  font-size:1.4rem;          /* mesmo “tamanho visual”                   */
+  font-size:1.4rem;          /* mesmo �tamanho visual�                   */
   color:#f9fafb;
   cursor:pointer;
   transition:transform .2s,color .2s;
@@ -6522,7 +6495,7 @@ li.duplicado::after{
   display:flex;align-items:center;justify-content:center;
 }
 
-/* foto do usuário */
+/* foto do usu�rio */
 .profile-img{
   width:32px;height:32px;
   border-radius:50%;
@@ -6540,7 +6513,7 @@ li.duplicado::after{
 .modal-content{background:#fff;border-radius:8px;padding:1.5rem;max-height:80vh;
                overflow:auto;width:min(92vw,500px);box-shadow:0 6px 18px #0003}
 
-/* Z-index específico para modais de compras */
+/* Z-index espec�fico para modais de compras */
 #modalAprovacaoRequisicao{position:fixed!important;z-index:10002!important}
 #modalObservacaoRetificacao{position:fixed!important;z-index:10005!important}
 .close-modal{cursor:pointer;font-size:1.3rem;float:right;margin-left:auto}
@@ -6568,7 +6541,7 @@ li.duplicado::after{
 .etiquetas-list .btn-print    { color:#fff; background:#3a6df0; }
 .etiquetas-list .btn-print:hover { filter:brightness(1.1); }
 
-/* === 2. Formulário de LOGIN =============================== */
+/* === 2. Formul�rio de LOGIN =============================== */
 .auth-popup form,
 .auth-popup form h1,
 .auth-popup form label,
@@ -6577,43 +6550,43 @@ li.duplicado::after{
 .auth-popup form input        { color:#333; }
 .auth-popup form input::placeholder { color:#777; }   /* placeholder cinza */
 
-/* 1. Esconde por padrão */
+/* 1. Esconde por padr�o */
 .kanban-column.empty .placeholder {
   display: none;
 }
 
-/* 2. Mostra em dragover, sem animação piscante */
+/* 2. Mostra em dragover, sem anima��o piscante */
 .kanban-column.empty.dragover .placeholder {
   display: block;
   animation: none !important;       /* remove qualquer keyframe ligado */
-  opacity: 1 !important;            /* força opacidade total */
-  border: 2px dashed #ccc;          /* estilo estático de guia */
+  opacity: 1 !important;            /* for�a opacidade total */
+  border: 2px dashed #ccc;          /* estilo est�tico de guia */
 }
-/* espaço extra e placeholder estático */
+/* espa�o extra e placeholder est�tico */
 .kanban-column.drop-expand {
   padding-bottom: 60px;              /* altura reservada */
   transition: padding-bottom .2s ease;
 }
 .kanban-column.drop-expand .placeholder {
-  display: block;                    /* força exibição */
-  height: 50px;                      /* ajuste à altura do cartão */
+  display: block;                    /* for�a exibi��o */
+  height: 50px;                      /* ajuste � altura do cart�o */
   margin: 5px 0;
   border: 2px dashed #888;           /* guia visual */
   opacity: 1 !important;
   animation: none !important;
 }
-/* escondido por padrão */
+/* escondido por padr�o */
 .kanban-column .placeholder {
   display: none;
 }
 
-/* styling para o cartão de loading */
+/* styling para o cart�o de loading */
 .kanban-card.loading {
   position: relative;
   opacity: 0.6;
   pointer-events: none;
 }
-/* a “barra” de progresso */
+/* a �barra� de progresso */
 .loading-bar {
   position: absolute;
   bottom: 0;
@@ -6634,7 +6607,7 @@ li.duplicado::after{
   50%  { width: 100%; }
   100% { width: 0; }
 }
-/* ícone de “+” junto ao título */
+/* �cone de �+� junto ao t�tulo */
 .kanban-header .add-btn {
   margin-left: 8px;
   cursor: pointer;
@@ -6645,7 +6618,7 @@ li.duplicado::after{
   color: #0b75c9;
 }
 
-/* container de pesquisa oculto por padrão */
+/* container de pesquisa oculto por padr�o */
 .kanban-header .add-container {
   display: none;
   padding: 8px;
@@ -6701,7 +6674,7 @@ li.duplicado::after{
   margin-top: 4px;
 }
 
-/* Ajuste da cor padrão do texto */
+/* Ajuste da cor padr�o do texto */
 .add-results,
 .add-results .result-item {
   color: #E0E0E0;               /* texto claro */
@@ -6743,9 +6716,9 @@ li.duplicado::after{
 .add-results::-webkit-scrollbar-track {
   background-color: #1F1F23;
 }
-/* ──────────────────────────────────────────────────
-   Layout de Lista de Peças idêntico à Estrutura de produto
-   ────────────────────────────────────────────────── */
+/* --------------------------------------------------
+   Layout de Lista de Pe�as id�ntico � Estrutura de produto
+   -------------------------------------------------- */
 #listaPecasPCP .content-section ul#listaPecasPCPList {
   display: block;
   list-style: none;
@@ -6789,7 +6762,7 @@ li.duplicado::after{
   cursor: default;
 }
 
-/* remove pontinho e recuo na descrição */
+/* remove pontinho e recuo na descri��o */
 #listaPecasPCP #listaPecasPCPList .status-circle { display: none; }
 #listaPecasPCP #listaPecasPCPList .status {
   display: block;
@@ -6825,24 +6798,24 @@ li.duplicado::after{
   padding: 6px 18px;
 }
 
-/* ─── Botão ⋯ ───────────────────────────────────── */
+/* --- Bot�o ? ------------------------------------- */
 .more-btn{
   font-size:24px;
-  color:var(--theme-color);  /* branco/lilás do tema */
+  color:var(--theme-color);  /* branco/lil�s do tema */
   background:none;
   border:none;
   cursor:pointer;
-  display:none;      /*   ←  começa escondido   */
+  display:none;      /*   ?  come�a escondido   */
 }
 .more-menu.open{ display:flex; }
 
 .more-btn:hover{
   color:var(--theme-color);
 }
-/* ─── Dropdown oculto ───────────────────────────── */
+/* --- Dropdown oculto ----------------------------- */
 .more-menu{
   position:absolute;
-  top:58px;                 /* logo abaixo do cabeçalho de 58 px */
+  top:58px;                 /* logo abaixo do cabe�alho de 58 px */
   right:30px;               /* mesmo padding do header */
   display:none;
   flex-direction:column;
@@ -6862,23 +6835,23 @@ li.duplicado::after{
   background:var(--dropdown-hover);
 }
 .more-menu.open{display:flex;}
-.header{position:relative;}     /* referência para o dropdown */
+.header{position:relative;}     /* refer�ncia para o dropdown */
 
 .header {
   display: flex;
   align-items: center;
   padding: 0 30px;
-  gap: 0;                 /* já tinha boa parte disso no seu CSS */
+  gap: 0;                 /* j� tinha boa parte disso no seu CSS */
 }
 
-/* nav que pode “estourar” */
+/* nav que pode �estourar� */
 .header-menu {
   flex: 1 1 auto;
   display: flex;
-  overflow: hidden;       /* corta o que não couber */
+  overflow: hidden;       /* corta o que n�o couber */
 }
 
-/* botão ⋯ */
+/* bot�o ? */
 .more-btn {
   flex: 0 0 auto;
   font-size: 24px;
@@ -6887,7 +6860,7 @@ li.duplicado::after{
   border: none;
   cursor: pointer;
   color: var(--inactive-color);
-  display: none;          /* aparece só quando houver abas ocultas */
+  display: none;          /* aparece s� quando houver abas ocultas */
 }
 
 /* dropdown */
@@ -6911,7 +6884,7 @@ li.duplicado::after{
 }
 .more-menu a:hover { background: var(--dropdown-hover); }
 .more-menu.open   { display: flex; }
-/* valor de estoque em cinza claro para não poluir */
+/* valor de estoque em cinza claro para n�o poluir */
 #listaPecasPCPList .est {
   color: var(--inactive-color);
   font-size: 0.9em;
@@ -6919,7 +6892,7 @@ li.duplicado::after{
 
 
 
-/* ----- lista de peças PCP ----- */
+/* ----- lista de pe�as PCP ----- */
 #listaPecasPCPList li {
   display: flex;
   gap: .5rem;
@@ -6936,7 +6909,7 @@ li.duplicado::after{
 #listaPecasPCPList .est   { margin-left: .5rem; flex-shrink: 0; }
 
 
-/* estoque crítico */
+/* estoque cr�tico */
 #listaPecasPCPList .est.low {
   color: #e74c3c;          /* vermelho */
   font-weight: 600;
@@ -6952,7 +6925,7 @@ li.duplicado::after{
 .code-bar .plus-btn{
   border:none;
   background:none;
-  color:#8cf;             /* cor de destaque – mude à vontade          */
+  color:#8cf;             /* cor de destaque � mude � vontade          */
   font-size:1.1rem;
   cursor:pointer;
   line-height:1;
@@ -6964,7 +6937,7 @@ li.duplicado::after{
 /* faz o wrapper quebrar linha */
 #listaPecasPCP .title-wrapper{
   display: flex;
-  flex-wrap: wrap;      /* ← permite nova linha */
+  flex-wrap: wrap;      /* ? permite nova linha */
   align-items: center;
   gap: .5rem;
 }
@@ -6993,7 +6966,7 @@ li.duplicado::after{
   background: rgba(15,23,42,0.85);
 }
 
-/* botão de limpar filtros da lista PCP */
+/* bot�o de limpar filtros da lista PCP */
 .clear-btn{
   margin-left: 8px;
   padding: 4px 10px;
@@ -7019,12 +6992,12 @@ li.duplicado::after{
   margin-right:8px;
 }
 
-/* campo de texto ocupa todo o espaço que sobrar */
+/* campo de texto ocupa todo o espa�o que sobrar */
 #descFilterPCP{
   flex:1 1 auto;
 }
 
-/* botão-ícone “Limpar” */
+/* bot�o-�cone �Limpar� */
 .clear-icon{
   flex:0 0 auto;
   background:transparent;
@@ -7037,11 +7010,11 @@ li.duplicado::after{
 .clear-icon:hover{
   color:#fff;
 }
-/* ——— Código no topo da guia “Dados do produto” ——— */
+/* ��� C�digo no topo da guia �Dados do produto� ��� */
 #productTitle {
   text-transform: uppercase;
 }
-/* cartão que acabou de ser criado na coluna Aguardando prazo */
+/* cart�o que acabou de ser criado na coluna Aguardando prazo */
 .flash-new {
   background: #235c23 !important;   /* verde escuro */
   color: #fff;                      /* texto branco p/ contraste */
@@ -7049,10 +7022,10 @@ li.duplicado::after{
 }
 
 
-/* ——— Tabelas do módulo Armazéns ——— */
+/* ��� Tabelas do m�dulo Armaz�ns ��� */
 table.tabela {
   width: 100%;
-  border-collapse: collapse;      /* cola linhas -> some o “pulo” */
+  border-collapse: collapse;      /* cola linhas -> some o �pulo� */
   border-spacing: 0;
   color: #eee;
   font-size: 0.9rem;
@@ -7069,7 +7042,7 @@ table.tabela td {
   border: 1px solid #444;         /* linhas discretas */
 }
 
-/* Colunas ordenáveis */
+/* Colunas orden�veis */
 table.tabela th.sortable {
   cursor: pointer;
   user-select: none;
@@ -7107,7 +7080,7 @@ table.tabela td.num {
   font-variant-numeric: tabular-nums;  /* algarismos alinhados */
 }
 
-/* ——— Paginação ——— */
+/* ��� Pagina��o ��� */
 .almox-pager {
   display: flex;
   gap: 6px;
@@ -7124,7 +7097,7 @@ table.tabela td.num {
   cursor: pointer;
 }
 
-/* ——— Área rolável em ambas as direções ——— */
+/* ��� �rea rol�vel em ambas as dire��es ��� */
 .almox-wrapper {
   max-height: 60vh;          /* rolagem vertical               */
   overflow-y: auto;
@@ -7132,9 +7105,9 @@ table.tabela td.num {
   margin-bottom: 8px;
 }
 
-/* ——— Larguras fixas e reticências ——— */
+/* ��� Larguras fixas e retic�ncias ��� */
 .almox-wrapper table {
-  table-layout: fixed;   /* força as larguras abaixo */
+  table-layout: fixed;   /* for�a as larguras abaixo */
   width: 100%;
 }
 
@@ -7142,7 +7115,7 @@ table.tabela td.num {
   position: sticky;
   top: 0;
   z-index: 5;
-  background: #222; /* reforça cor quando estiver fixo */
+  background: #222; /* refor�a cor quando estiver fixo */
 }
 
 .almox-wrapper tbody tr {
@@ -7152,16 +7125,16 @@ table.tabela td.num {
   background: #3a3a3a;
 }
 
-/* 1ª coluna – Código */
+/* 1� coluna � C�digo */
 .almox-wrapper td:nth-child(1),
 .almox-wrapper th:nth-child(1) {
-  width: 120px;          /* ~⅔ da largura anterior */
+  width: 120px;          /* ~? da largura anterior */
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-/* 2ª coluna – Descrição (reticências) */
+/* 2� coluna � Descri��o (retic�ncias) */
 .almox-wrapper td:nth-child(2),
 .almox-wrapper th:nth-child(2) {
   width: 360px;          /* ajuste conforme seu layout */
@@ -7170,7 +7143,7 @@ table.tabela td.num {
   text-overflow: ellipsis;
 }
 
-/* Demais colunas numéricas — largura enxuta */
+/* Demais colunas num�ricas � largura enxuta */
 .almox-wrapper td:nth-child(n+3),
 .almox-wrapper th:nth-child(n+3) {
   width: 100px;   /* estava 80px */
@@ -7178,13 +7151,13 @@ table.tabela td.num {
 
 /* Ajuste fino de larguras ----------------------------------- */
 .almox-wrapper th:nth-child(1),
-.almox-wrapper td:nth-child(1) { width: 120px; }  /* CÓDIGO      */
+.almox-wrapper td:nth-child(1) { width: 120px; }  /* C�DIGO      */
 .almox-wrapper th:nth-child(2),
-.almox-wrapper td:nth-child(2) { width: 320px; }  /* DESCRIÇÃO   */
+.almox-wrapper td:nth-child(2) { width: 320px; }  /* DESCRI��O   */
 .almox-wrapper th:nth-child(n+3),
-.almox-wrapper td:nth-child(n+3) { width: 100px; } /* numéricas   */
+.almox-wrapper td:nth-child(n+3) { width: 100px; } /* num�ricas   */
 
-/* ——— campo de busca ——— */
+/* ��� campo de busca ��� */
 .search-box {
   margin-left: 12px;
   padding: 4px 6px;
@@ -7197,7 +7170,7 @@ table.tabela td.num {
 }
 .search-box::placeholder { color:#777; }
 
-/* ——— total CMC (à direita do campo de busca) ——— */
+/* ��� total CMC (� direita do campo de busca) ��� */
 .cmc-total {
   margin-left: 16px;
   font-size: 0.85rem;
@@ -7224,7 +7197,7 @@ table.tabela td.num {
 
 
 
-/* — filtro por tipo — */
+/* � filtro por tipo � */
 .filter-icon {
   margin-left: 10px;
   background: transparent;
@@ -7537,9 +7510,9 @@ table.tabela td.num {
 }
 
 
-/* --- Painel Início --- */
+/* --- Painel In�cio --- */
 .inicio-grid{
-  /* layout anterior em flex podia forçar largura em alguns cenários */
+  /* layout anterior em flex podia for�ar largura em alguns cen�rios */
   /* usamos grid responsivo que quebra automaticamente */
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
@@ -7560,22 +7533,22 @@ table.tabela td.num {
   transition:.25s;
 }
 .inicio-btn:hover{background:var(--hover-menu-bg);}
-/* mantém o comportamento original */
+/* mant�m o comportamento original */
 .header .header-menu > .menu-link:hover {
-  cursor: pointer;          /* 👈 força a mãozinha */
+  cursor: pointer;          /* ?? for�a a m�ozinha */
 }
 
 .iniciar-prod-btn{ margin-bottom:1rem; }
 
-/* --- Carrossel Semanal (Página Início) --- */
+/* --- Carrossel Semanal (P�gina In�cio) --- */
 #paginaInicio .content-wrapper {
-  /* garante que o conteúdo role internamente sem “estourar” o app */
+  /* garante que o conte�do role internamente sem �estourar� o app */
   overflow: auto;
 }
 
 .semana-carousel-container {
   position: relative;
-  overflow: hidden;     /* importante: limita a faixa visível */
+  overflow: hidden;     /* importante: limita a faixa vis�vel */
   width: 100%;
 }
 
@@ -7586,7 +7559,7 @@ table.tabela td.num {
 }
 
 .semana-day-card {
-  flex: 0 0 162px; /* largura usada nos cálculos do JS */
+  flex: 0 0 162px; /* largura usada nos c�lculos do JS */
   background: var(--content-bg);
   border: 1px solid var(--border-color);
   border-radius: 10px;
@@ -7633,7 +7606,7 @@ table.tabela td.num {
   flex-direction: column;
   gap: 6px;
   max-height: 220px; /* evita crescer indefinidamente */
-  overflow: hidden;  /* mantém tudo dentro do card */
+  overflow: hidden;  /* mant�m tudo dentro do card */
 }
 
 .semana-produto-item {
@@ -7649,7 +7622,7 @@ table.tabela td.num {
   font-size: 12px;
 }
 
-/* Layout do Calendário: grade estreita à esq + painel lateral à dir */
+/* Layout do Calend�rio: grade estreita � esq + painel lateral � dir */
 .agenda-cal-layout {
   display: flex;
   gap: 16px;
@@ -7669,7 +7642,7 @@ table.tabela td.num {
   gap: 14px;
 }
 
-/* Navegador de mês no painel lateral */
+/* Navegador de m�s no painel lateral */
 .agenda-sidebar-nav {
   display: flex;
   align-items: center;
@@ -7681,7 +7654,7 @@ table.tabela td.num {
   border-radius: 10px;
 }
 
-/* Legenda de ícones */
+/* Legenda de �cones */
 .agenda-sidebar-legenda {
   padding: 10px 12px;
   background: var(--content-bg);
@@ -7820,7 +7793,7 @@ table.tabela td.num {
   to { transform: rotate(360deg); }
 }
 
-/* Lembrete — pequeno ícone legado (mantido para não quebrar outros usos) */
+/* Lembrete � pequeno �cone legado (mantido para n�o quebrar outros usos) */
 .agenda-cal-lembrete-item {
   width: 18px;
   height: 18px;
@@ -7859,7 +7832,7 @@ table.tabela td.num {
   color: var(--inactive-color);
 }
 
-/* Chip de reserva/lembrete — barra horizontal compacta */
+/* Chip de reserva/lembrete � barra horizontal compacta */
 .agenda-cal-reserva-item {
   display: flex;
   flex-direction: row;
@@ -7876,7 +7849,7 @@ table.tabela td.num {
   width: 100%;
 }
 
-/* Bloco das duas horas (início e fim) empilhadas */
+/* Bloco das duas horas (in�cio e fim) empilhadas */
 .agenda-chip-horas {
   display: flex;
   flex-direction: column;
@@ -7885,7 +7858,7 @@ table.tabela td.num {
   width: 100%;
 }
 
-/* Linha de ícones extras (café, convocado) — sempre ocupa espaço para manter hora posicionada */
+/* Linha de �cones extras (caf�, convocado) � sempre ocupa espa�o para manter hora posicionada */
 .agenda-chip-icons {
   display: flex;
   flex-direction: row;
@@ -7896,49 +7869,49 @@ table.tabela td.num {
   min-height: 14px;
 }
 
-/* Auditório — roxo */
+/* Audit�rio � roxo */
 .agenda-cal-reserva-item.is-auditorio {
   background: rgba(139,92,246,.22);
   border: 1px solid rgba(139,92,246,.55);
   color: #ddd6fe;
 }
 
-/* Sala de reunião — verde */
+/* Sala de reuni�o � verde */
 .agenda-cal-reserva-item.is-sala {
   background: rgba(16,185,129,.18);
   border: 1px solid rgba(16,185,129,.45);
   color: #d1fae5;
 }
 
-/* Reunião online — azul */
+/* Reuni�o online � azul */
 .agenda-cal-reserva-item.is-online {
   background: rgba(59,130,246,.18);
   border: 1px solid rgba(59,130,246,.45);
   color: #bfdbfe;
 }
 
-/* Visita — laranja */
+/* Visita � laranja */
 .agenda-cal-reserva-item.is-visita {
   background: rgba(251,146,60,.18);
   border: 1px solid rgba(251,146,60,.45);
   color: #fed7aa;
 }
 
-/* Evento — rosa */
+/* Evento � rosa */
 .agenda-cal-reserva-item.is-evento {
   background: rgba(244,114,182,.18);
   border: 1px solid rgba(244,114,182,.45);
   color: #fbcfe8;
 }
 
-/* Lembrete — amarelo, texto escuro */
+/* Lembrete � amarelo, texto escuro */
 .agenda-cal-reserva-item.is-lembrete {
   background: rgba(251,191,36,.22);
   border: 1px solid rgba(251,191,36,.55);
   color: #1a1400;
 }
 
-/* Chip já passou — só ícone, opaco */
+/* Chip j� passou � s� �cone, opaco */
 .agenda-cal-reserva-item.is-past-chip {
   opacity: .38;
   padding: 2px 3px;
@@ -7947,7 +7920,7 @@ table.tabela td.num {
   flex-shrink: 0;
 }
 
-/* Chip passado NÃO realizado — ícone vermelho de alerta */
+/* Chip passado N�O realizado � �cone vermelho de alerta */
 .agenda-cal-reserva-item.is-past-chip.is-nao-realizada {
   opacity: .85;
   background: rgba(239, 68, 68, .15);
@@ -7955,7 +7928,7 @@ table.tabela td.num {
   color: #fca5a5;
 }
 
-/* Linha de ícones de eventos passados — enfileirada no final da célula */
+/* Linha de �cones de eventos passados � enfileirada no final da c�lula */
 .agenda-cal-past-row {
   display: flex;
   flex-direction: row;
@@ -7964,7 +7937,7 @@ table.tabela td.num {
   margin-top: 2px;
 }
 
-/* Ícone do tipo de sala dentro do chip */
+/* �cone do tipo de sala dentro do chip */
 .agenda-chip-room-icon {
   font-size: 10px;
   flex-shrink: 0;
@@ -8029,7 +8002,7 @@ table.tabela td.num {
   font-weight: 600;
 }
 
-/* Ícone de café dentro do chip */
+/* �cone de caf� dentro do chip */
 .agenda-chip-cafe-icon {
   color: #fbbf24;
   font-size: 9px;
@@ -8037,7 +8010,7 @@ table.tabela td.num {
   margin-left: auto;
 }
 
-/* Ícone de convocado dentro do chip */
+/* �cone de convocado dentro do chip */
 .agenda-chip-convocado-icon {
   color: #34d399;
   font-size: 9px;
@@ -8082,7 +8055,7 @@ table.tabela td.num {
   opacity: 1;
 }
 
-/* ── Custom dropdown tipo de reserva ── */
+/* -- Custom dropdown tipo de reserva -- */
 .agenda-tipo-picker {
   position: relative;
 }
@@ -8312,49 +8285,14 @@ table.tabela td.num {
   padding: 0 2px;
 }
 
-/* --- Ajustes de responsividade para a tela inicial e lista de produtos --- */
-@media (max-width: 1024px) {
-  #paginaInicio .content-wrapper {
-    padding-left: 12px;
-    padding-right: 12px;
-  }
-
-  #paginaInicio .content-section {
-    margin-top: 16px !important;
-  }
-
-  #paginaInicio .title-wrapper {
-    flex-wrap: wrap;
-    align-items: flex-start;
-    gap: 8px;
-  }
-
-  #paginaInicio .semana-carousel {
-    gap: 10px;
-  }
-
-  #paginaInicio .semana-day-card {
-    flex-basis: 150px;
-  }
-
-  #listaProdutos .content-section.lista-produtos-alta {
-    padding: 18px;
-  }
-
-  #listaProdutos #listaProdutosGrid {
-    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
-    max-height: calc(100vh - 200px) !important;
-  }
-}
-
-/* --- Responsividade mobile do calendário --- */
-@media (max-width: 640px) {
-  /* Header mobile: remover ícone de impressora */
+/* --- Responsividade mobile do calend�rio --- */
+@media (max-width: 640px), (max-width: 900px) and (max-height: 500px) {
+  /* Header mobile: remover �cone de impressora */
   #print-icon {
     display: none !important;
   }
 
-  /* Página de compras (mobile): mostrar somente botão dedicado para abrir solicitação */
+  /* P�gina de compras (mobile): mostrar somente bot�o dedicado para abrir solicita��o */
   #comprasFormPane .content-section,
   #comprasFormPane #minhasComprasWrapper {
     display: none !important;
@@ -8368,85 +8306,7 @@ table.tabela td.num {
     box-shadow: 0 8px 20px rgba(34, 197, 94, 0.35);
   }
 
-  /* Tela inicial: reduzir o desperdício vertical e dar scroll horizontal aos cards */
-  #paginaInicio .content-wrapper {
-    padding: 8px 10px 24px;
-  }
-
-  #paginaInicio .content-section {
-    margin-top: 14px !important;
-  }
-
-  #paginaInicio .title-wrapper {
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 6px;
-    margin-bottom: 12px !important;
-  }
-
-  #paginaInicio .content-section-title {
-    font-size: 15px;
-    line-height: 1.2;
-  }
-
-  #paginaInicio #btnVoltarHoje {
-    width: fit-content;
-    min-height: 34px;
-    padding: 6px 10px;
-    font-size: 12px;
-  }
-
-  #paginaInicio .semana-carousel-container {
-    overflow-x: auto;
-    scroll-snap-type: x proximity;
-    padding-bottom: 4px;
-    -webkit-overflow-scrolling: touch;
-  }
-
-  #paginaInicio .semana-carousel {
-    width: max-content;
-    gap: 8px;
-    padding-right: 8px;
-  }
-
-  #paginaInicio .semana-day-card {
-    flex: 0 0 126px;
-    padding: 7px;
-    scroll-snap-align: start;
-  }
-
-  #paginaInicio .semana-day-header {
-    margin-bottom: 4px;
-  }
-
-  #paginaInicio .semana-day-date {
-    font-size: 14px;
-  }
-
-  #paginaInicio .semana-day-dow,
-  #paginaInicio .semana-day-badge {
-    font-size: 11px;
-  }
-
-  #paginaInicio .semana-produtos {
-    max-height: 112px;
-    gap: 3px;
-  }
-
-  #paginaInicio .semana-produto-item {
-    font-size: 12px;
-    min-height: 18px;
-  }
-
-  #paginaInicio .agenda-cal-layout {
-    gap: 8px;
-  }
-
-  #paginaInicio .agenda-calendario-grid {
-    margin-top: 2px;
-  }
-
-  /* Lista de produtos (mobile): 1 card por linha e sem botão modo lista */
+  /* Lista de produtos (mobile): 1 card por linha e sem bot�o modo lista */
   #listaProdutos #viewToggleBtn {
     display: none !important;
   }
@@ -8626,7 +8486,7 @@ table.tabela td.num {
     white-space: nowrap;
   }
 
-  /* Modal Solicitação de compra: campos em coluna única no mobile */
+  /* Modal Solicita��o de compra: campos em coluna �nica no mobile */
   #modalCatalogoOmie #modalCatalogoOmieContent {
     width: 98% !important;
     max-height: 92vh !important;
@@ -8721,7 +8581,7 @@ table.tabela td.num {
     justify-content: center;
   }
 
-  /* Qualidade fábrica (mobile): botões em linha e formulário em coluna única */
+  /* Qualidade f�brica (mobile): bot�es em linha e formul�rio em coluna �nica */
   #qualidadeFabricaPane #qualidadeAcoesRapidas {
     display: grid !important;
     grid-template-columns: 1fr 1fr;
@@ -8801,7 +8661,7 @@ table.tabela td.num {
     padding: 9px 10px;
   }
 
-  /* No mobile, manter apenas o menu superior de ícones */
+  /* No mobile, manter apenas o menu superior de �cones */
   #appHeader {
     display: flex !important;
     justify-content: flex-end;
@@ -8825,7 +8685,7 @@ table.tabela td.num {
     gap: 14px;
   }
 
-  /* Reativar ícone hamburger lateral no mobile */
+  /* Reativar �cone hamburger lateral no mobile */
   .left-side {
     display: flex !important;
     position: fixed;
@@ -8852,13 +8712,13 @@ table.tabela td.num {
     max-height: 72vh;
   }
 
-  /* Remove espaço lateral excessivo no mobile (principalmente à direita) */
+  /* Remove espa�o lateral excessivo no mobile (principalmente � direita) */
   #paginaInicio .content-wrapper {
     padding-left: 8px;
     padding-right: 8px;
   }
 
-  /* Layout: sidebar vai para baixo do calendário */
+  /* Layout: sidebar vai para baixo do calend�rio */
   .agenda-cal-layout {
     flex-direction: column;
     width: 100%;
@@ -8872,7 +8732,7 @@ table.tabela td.num {
     max-width: 100%;
   }
 
-  /* No mobile, esconder campos laterais para simplificar a visualização */
+  /* No mobile, esconder campos laterais para simplificar a visualiza��o */
   #agendaToggleMinhasReunioes,
   #agendaFiltroUsuario,
   .agenda-sidebar-nav,
@@ -8890,12 +8750,12 @@ table.tabela td.num {
     padding: 0;
   }
 
-  /* Botão "Somente minhas" ocupa linha inteira */
+  /* Bot�o "Somente minhas" ocupa linha inteira */
   #agendaToggleMinhasReunioes {
     width: 100%;
   }
 
-  /* Navegador de mês e legenda lado a lado */
+  /* Navegador de m�s e legenda lado a lado */
   .agenda-sidebar-nav {
     flex: 1 1 140px;
   }
@@ -8903,24 +8763,24 @@ table.tabela td.num {
     flex: 1 1 140px;
   }
 
-  /* Grid do calendário: gap mínimo para aproveitar espaço */
+  /* Grid do calend�rio: gap m�nimo para aproveitar espa�o */
   .agenda-calendario-grid {
     gap: 2px;
   }
 
-  /* Cabeçalho dos dias da semana menor */
+  /* Cabe�alho dos dias da semana menor */
   .agenda-cal-head {
     font-size: 9px;
     padding: 2px 0;
   }
 
-  /* Células do calendário: mais altas para caber os chips */
+  /* C�lulas do calend�rio: mais altas para caber os chips */
   .agenda-cal-day {
     min-height: 80px;
     padding: 2px;
   }
 
-  /* Número do dia menor */
+  /* N�mero do dia menor */
   .agenda-cal-num {
     font-size: 10px;
     margin-bottom: 2px;
@@ -8973,7 +8833,7 @@ table.tabela td.num {
     border-radius: 10px;
   }
 
-  /* Formulário de criação: colunas viram uma */
+  /* Formul�rio de cria��o: colunas viram uma */
   .agenda-form-grid {
     grid-template-columns: 1fr;
   }
@@ -8986,8 +8846,8 @@ table.tabela td.num {
 .status-aguardando, .status-novo { color: #93c5fd; }
 
 
-  /* Força 8 colunas só para a lista do PCP */
-  /* já está usando grid de 8 colunas; garantimos e alinham-se as células */
+  /* For�a 8 colunas s� para a lista do PCP */
+  /* j� est� usando grid de 8 colunas; garantimos e alinham-se as c�lulas */
   #listaPecasPCPList.grid-pecas li {
   display: grid;
   /*                cod   desc  unid  qtd   perda qtdb   qpro   qalm   acao   */
@@ -9028,7 +8888,7 @@ table.tabela td.num {
   }
   .pcp-tip.show { opacity: 1; }
 
-  /* ——— Login sempre no topo ——— */
+  /* ��� Login sempre no topo ��� */
 .overlay-app {
   position: fixed;
   inset: 0;                 /* top/right/bottom/left:0 */
@@ -9036,13 +8896,13 @@ table.tabela td.num {
   pointer-events: all;
 }
 
-.overlay-app.is-active {    /* já existia, reforço para interação */
+.overlay-app.is-active {    /* j� existia, refor�o para intera��o */
   visibility: visible;
   opacity: 1;
   pointer-events: all;
 }
 
-/* o conteúdo do popup também ganha uma camada própria */
+/* o conte�do do popup tamb�m ganha uma camada pr�pria */
 .overlay-app .auth-popup {
   position: relative;
   z-index: 12001;           /* acima do backdrop */
@@ -9059,7 +8919,7 @@ table.tabela td.num {
 
 .colab-pane .row {
   display: grid;
-  grid-template-columns: 80px 1fr 1fr 140px; /* ID | Usuário | Papéis | Ações */
+  grid-template-columns: 80px 1fr 1fr 140px; /* ID | Usu�rio | Pap�is | A��es */
   gap: 12px;
   align-items: center;
   padding: 12px 16px;
@@ -9088,7 +8948,7 @@ table.tabela td.num {
   font-style: italic;
 }
 
-/* Grupo guardado por login: estilo básico pra quando está desabilitado */
+/* Grupo guardado por login: estilo b�sico pra quando est� desabilitado */
 .auth-group .auth-disabled {
   opacity: 0.55;
   cursor: not-allowed;
@@ -9106,7 +8966,7 @@ table.tabela td.num {
   transform: none;
 }
 
-/* PCP – compactar filtros */
+/* PCP � compactar filtros */
 #codeFilterPCP,
 #descFilterPCP {
   flex: none !important;
@@ -9127,12 +8987,12 @@ table.tabela td.num {
   font-weight: 700;
 }
 
-/* larguras específicas */
+/* larguras espec�ficas */
 #codeFilterPCP { width: 120px !important; }
 #descFilterPCP { width: 200px !important; }
 
-/* Botões ícone na coluna Ação */
-/* Botões ícone na coluna Ação */
+/* Bot�es �cone na coluna A��o */
+/* Bot�es �cone na coluna A��o */
 .icon-btn, .produce-btn {
   position: relative;                 /* para centralizar o SVG */
   display: inline-block;
@@ -9151,7 +9011,7 @@ table.tabela td.num {
 .icon-btn:active, .produce-btn:active { transform: translateY(0); }
 
 .icon-btn svg, .produce-btn svg {
-  position: absolute;                 /* centrado matemático */
+  position: absolute;                 /* centrado matem�tico */
   left: 50%;
   top: 50%;
   transform: translate(-50%, -50%);
@@ -9162,7 +9022,7 @@ table.tabela td.num {
 }
 
 .produce-btn { border-color:#2563eb; }
-.produce-btn svg { fill:#facc15; }     /* amarelo produção */
+.produce-btn svg { fill:#facc15; }     /* amarelo produ��o */
 
 
 /* feedback opcional quando aciona produzir */
@@ -9172,7 +9032,7 @@ table.tabela td.num {
   50%     { background: rgba(34,197,94,0.15); }
 }
 
-/* Coluna Ação: centralizar os botões-ícone */
+/* Coluna A��o: centralizar os bot�es-�cone */
 .data-row .acao {
   display: flex;
   align-items: center;
@@ -9199,9 +9059,9 @@ table.tabela td.num {
 }
 .icon-btn svg, .produce-btn svg { display:block; margin:0; }
 .produce-btn { border-color:#2563eb; }
-.produce-btn svg { fill:#facc15; } /* amarelo produção */
+.produce-btn svg { fill:#facc15; } /* amarelo produ��o */
 
-/* Botão-ícone inline, usado em títulos de seção (ex.: Estrutura de produto) */
+/* Bot�o-�cone inline, usado em t�tulos de se��o (ex.: Estrutura de produto) */
 .icon-inline-btn{
   display:inline-flex; align-items:center; justify-content:center;
   width:32px; height:32px;
@@ -9213,7 +9073,7 @@ table.tabela td.num {
 .icon-inline-btn:active{ transform:translateY(1px); }
 .icon-inline-btn svg{ display:block; }
 
-/* Botão-ícone ao lado do título "Estrutura de produto" */
+/* Bot�o-�cone ao lado do t�tulo "Estrutura de produto" */
 .icon-inline-btn{
   background: transparent;           /* nada de quadrado branco */
   border: none;
@@ -9222,7 +9082,7 @@ table.tabela td.num {
   align-items: center;
   justify-content: center;
   border-radius: 6px;
-  color: var(--theme-color);         /* ícone acompanha o tema */
+  color: var(--theme-color);         /* �cone acompanha o tema */
   line-height: 1;
   cursor: pointer;
   transition: background .2s, opacity .2s;
@@ -9241,17 +9101,17 @@ table.tabela td.num {
 /* contraste em modo claro */
 .light-mode .icon-inline-btn { color: #333; }
 
-/* Ajuste para conter a descrição */
+/* Ajuste para conter a descri��o */
 .desc {
   overflow: hidden;           /* esconde o que ultrapassar */
-  text-overflow: ellipsis;   /* mostra reticências */
+  text-overflow: ellipsis;   /* mostra retic�ncias */
   white-space: nowrap;       /* impede quebra de linha */
   min-width: 0;              /* permite que o texto seja truncado */
-  max-width: 100%;           /* não ultrapassa a largura da coluna */
-  padding-right: 10px;       /* mantém espaço da próxima coluna */
+  max-width: 100%;           /* n�o ultrapassa a largura da coluna */
+  padding-right: 10px;       /* mant�m espa�o da pr�xima coluna */
 }
 
-/* — Ações (trocar, expandir, abrir) — */
+/* � A��es (trocar, expandir, abrir) � */
 #estruturaProduto #malha .acoes{
   display:flex; justify-content:center; align-items:center; gap:8px;
 }
@@ -9263,11 +9123,11 @@ table.tabela td.num {
   background: rgba(255,255,255,.06);
   cursor:pointer;
   transition: transform .08s ease, background .12s ease, border-color .12s ease;
-    color: #fff;                             /* <- ícone branco */
-  background: rgba(255,255,255,.06);       /* mantém o fundo atual */
+    color: #fff;                             /* <- �cone branco */
+  background: rgba(255,255,255,.06);       /* mant�m o fundo atual */
   border: 1px solid rgba(255,255,255,.10); /* borda sutil */
 }
-/* Força os SVGs das ações a usarem a cor do botão (branco) */
+/* For�a os SVGs das a��es a usarem a cor do bot�o (branco) */
 #estruturaProduto #malha .icon-btn svg,
 #estruturaProduto #malha .icon-btn svg *{
   stroke: currentColor !important;
@@ -9289,7 +9149,7 @@ table.tabela td.num {
   width:18px; height:18px; display:block;
 }
 
-/* mantém alinhamento das colunas numéricas */
+/* mant�m alinhamento das colunas num�ricas */
 #estruturaProduto #malha .qtd,
 #estruturaProduto #malha .unidade,
 #estruturaProduto #malha .custo-real{ text-align:center; }
@@ -9320,7 +9180,7 @@ table.tabela td.num {
   padding: 6px 12px;
 }
 #estruturaProduto #malha li.sub-estrutura-row ul.malha-sub li > div:nth-child(2){
-  min-width: 0;                      /* permite ellipsis na 2ª coluna */
+  min-width: 0;                      /* permite ellipsis na 2� coluna */
 }
 #estruturaProduto #malha li.sub-estrutura-row .desc{
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; padding-right: 10px;
@@ -9328,7 +9188,7 @@ table.tabela td.num {
 #estruturaProduto #malha li.sub-estrutura-row .acoes{
   display: flex; gap: 8px; justify-content: flex-end; align-items: center;
 }
-/* herda ícones brancos do botão principal */
+/* herda �cones brancos do bot�o principal */
 #estruturaProduto #malha .icon-btn svg,
 #estruturaProduto #malha .icon-btn svg *{
   stroke: currentColor; fill: none;
@@ -9336,7 +9196,7 @@ table.tabela td.num {
 
 
 
-/* ===== Sub-estrutura (sem cabeçalho, mesma grade, cor diferente) ===== */
+/* ===== Sub-estrutura (sem cabe�alho, mesma grade, cor diferente) ===== */
 #estruturaProduto #malha li.sub-estrutura-row{ padding: 0; }
 #estruturaProduto #malha li.sub-estrutura-row > .sub-estrutura{
   grid-column: 1 / -1;
@@ -9372,16 +9232,16 @@ table.tabela td.num {
 }
 
 
-/* garante ícones brancos */
+/* garante �cones brancos */
 #estruturaProduto #malha .icon-btn svg,
 #estruturaProduto #malha .icon-btn svg *{
   stroke: currentColor;
   fill: none;
 }
 
-/* — Linhas filhas: mesma grade, outra cor — */
+/* � Linhas filhas: mesma grade, outra cor � */
 
-/* === Sub-estrutura: cabeçalho do grupo (linha inteira) ================== */
+/* === Sub-estrutura: cabe�alho do grupo (linha inteira) ================== */
 /* Deixa muito claro que essas linhas pertencem ao item clicado */
 #estruturaProduto #malha li.child-group-header{
   display: grid;
@@ -9392,7 +9252,7 @@ table.tabela td.num {
 #estruturaProduto #malha li.child-group-header .child-group-title{
   display: flex; align-items: center; gap: 8px;
   font-size: .92rem; font-weight: 600; letter-spacing: .2px;
-  color: #cfe3ff;                     /* título azulado */
+  color: #cfe3ff;                     /* t�tulo azulado */
   text-transform: none;
 }
 #estruturaProduto #malha li.child-group-header .child-group-title .pip{
@@ -9401,12 +9261,12 @@ table.tabela td.num {
   box-shadow: 0 0 0 4px rgba(59,130,246,.18); /* aura */
 }
 
-/* === Sub-estrutura: bloco visual contínuo =============================== */
-/* já existe o .child-row; aqui intensificamos a borda “em bloco” e o recuo */
+/* === Sub-estrutura: bloco visual cont�nuo =============================== */
+/* j� existe o .child-row; aqui intensificamos a borda �em bloco� e o recuo */
 #estruturaProduto #malha li.child-row{
   position: relative;
   background: rgba(59,130,246,.08);                 /* azul claro */
-  /* barra de conexão à esquerda para “nidar” visualmente */
+  /* barra de conex�o � esquerda para �nidar� visualmente */
   border-left: 4px solid rgba(59,130,246,.45);
   padding-left: 14px;                                /* compensa a barra */
   box-shadow:
@@ -9425,22 +9285,22 @@ table.tabela td.num {
     inset -2px 0 0 rgba(59,130,246,.30),
     inset 0 -2px 0 rgba(59,130,246,.45);
 }
-/* espaço suave entre as linhas internas sem quebrar a moldura */
+/* espa�o suave entre as linhas internas sem quebrar a moldura */
 #estruturaProduto #malha li.child-row + li.child-row{ margin-top: 4px; }
 
-/* Ícones dentro da sub-lista ligeiramente “desbotados” para não disputar com o título */
+/* �cones dentro da sub-lista ligeiramente �desbotados� para n�o disputar com o t�tulo */
 #estruturaProduto #malha li.child-row .icon-btn{ opacity: .9 }
 #estruturaProduto #malha li.child-row .icon-btn:hover{ opacity: 1 }
 
-/* (opcional) sublinha a descrição só dentro das child-row quando hover */
+/* (opcional) sublinha a descri��o s� dentro das child-row quando hover */
 #estruturaProduto #malha li.child-row:hover .desc{
   text-decoration: underline; text-decoration-color: rgba(59,130,246,.6);
 }
 
 #estruturaProduto #malha li.child-row{
   background: rgba(59,130,246,.08);        /* azul claro discreto */
-  border-radius: 0;                         /* o raio vem no primeiro/último */
-  /* laterais do bloco (contínuas) */
+  border-radius: 0;                         /* o raio vem no primeiro/�ltimo */
+  /* laterais do bloco (cont�nuas) */
   box-shadow:
     inset 2px 0 0 rgba(59,130,246,.45),     /* borda esquerda do grupo */
     inset -2px 0 0 rgba(59,130,246,.45);    /* borda direita do grupo */
@@ -9448,7 +9308,7 @@ table.tabela td.num {
 
 /* primeira do grupo: ativa topo + cantos */
 #estruturaProduto #malha li.child-row.child-first{
-  margin-top: 8px;                          /* “margem” superior do bloco */
+  margin-top: 8px;                          /* �margem� superior do bloco */
   border-top-left-radius: 10px;
   border-top-right-radius: 10px;
   box-shadow:
@@ -9457,9 +9317,9 @@ table.tabela td.num {
     inset 0 2px 0 rgba(59,130,246,.45);     /* linha do topo */
 }
 
-/* última do grupo: ativa fundo + cantos */
+/* �ltima do grupo: ativa fundo + cantos */
 #estruturaProduto #malha li.child-row.child-last{
-  margin-bottom: 10px;                      /* “margem” inferior do bloco */
+  margin-bottom: 10px;                      /* �margem� inferior do bloco */
   border-bottom-left-radius: 10px;
   border-bottom-right-radius: 10px;
   box-shadow:
@@ -9474,14 +9334,14 @@ table.tabela td.num {
 }
 
 
-/* ícones sempre brancos */
+/* �cones sempre brancos */
 #estruturaProduto #malha .icon-btn svg,
 #estruturaProduto #malha .icon-btn svg *{
   stroke: currentColor !important;
   fill: none !important;
 }
 
-/* Estrutura: escondido por padrão; o JS exibe quando houver filhos */
+/* Estrutura: escondido por padr�o; o JS exibe quando houver filhos */
 #estruturaProduto #malha .icon-btn[data-action="estrutura"]{
   display: none;
 }
@@ -9489,11 +9349,11 @@ table.tabela td.num {
 /* ===== Editor de Troca (inline, 1 campo) ===== */
 #estruturaProduto #malha li.swap-row{
   display: grid;
-  grid-template-columns: 120px minmax(0,1fr) 60px 70px 90px 120px; /* igual à tabela */
+  grid-template-columns: 120px minmax(0,1fr) 60px 70px 90px 120px; /* igual � tabela */
   column-gap: 1rem;
   align-items: start;
   padding: 8px 12px;
-  background: rgba(234,179,8,.08); /* âmbar sutil p/ “modo edição” */
+  background: rgba(234,179,8,.08); /* �mbar sutil p/ �modo edi��o� */
   border-radius: 10px;
   box-shadow:
     inset 2px 0 0 rgba(234,179,8,.35),
@@ -9539,12 +9399,12 @@ table.tabela td.num {
 #estruturaProduto #malha .qtd,
 #estruturaProduto #malha .unidade,
 #estruturaProduto #malha .custo-real { text-align: center; }
-/* Operação fica padrão (esquerda); se quiser nomear classe: */
+/* Opera��o fica padr�o (esquerda); se quiser nomear classe: */
 #estruturaProduto #malha .operacao { text-align:left; }
 
 /* Spinner da aba "Estrutura de produto" (independente) */
 #estruturaSpinner{
-  display:none;           /* visível só durante import/atualizações */
+  display:none;           /* vis�vel s� durante import/atualiza��es */
   width:18px; height:18px;
   align-items:center;
   margin-left:.5rem;
@@ -9558,15 +9418,15 @@ table.tabela td.num {
   stroke-dasharray: 90; stroke-dashoffset: 60;
 }
 
-/* Spinner da aba "Estrutura de produto" — mesmo visual do Kanban */
+/* Spinner da aba "Estrutura de produto" � mesmo visual do Kanban */
 #estruturaSpinner{
-  display: none;            /* fica oculto por padrão */
+  display: none;            /* fica oculto por padr�o */
   align-items: center;
   gap: 6px;
 }
 
 #estruturaSpinner .kanban-spinner{
-  display: inline-block !important; /* sobrepõe regra global do Kanban */
+  display: inline-block !important; /* sobrep�e regra global do Kanban */
   font-size: 16px;                  /* mesmo tamanho usado no Kanban */
   width: 16px;
   height: 16px;
@@ -9574,33 +9434,33 @@ table.tabela td.num {
 }
 
 /* ======================================================================
-   PCP – Lista de peças (guia PCP)
-   PATCH V3 — garante visibilidade da coluna "Ação":
+   PCP � Lista de pe�as (guia PCP)
+   PATCH V3 � garante visibilidade da coluna "A��o":
    - Ajusta a malha para caber sem cortar (larguras mais compactas);
    - Ativa overflow-x:auto no UL da PCP quando em modo grid-pecas;
-   - Mantém tudo escopado à PCP sem afetar outras áreas.
-   Layout: Código | Descrição | Unid | Qtd | Qtd prod | Qtd Pro | Qtd Alm | Ação
+   - Mant�m tudo escopado � PCP sem afetar outras �reas.
+   Layout: C�digo | Descri��o | Unid | Qtd | Qtd prod | Qtd Pro | Qtd Alm | A��o
    ====================================================================== */
 
-/* PCP – grade padrão: Código | Descrição | Unid | Qtd | Qtd prod | Arm Pro | Almox | Ação */
+/* PCP � grade padr�o: C�digo | Descri��o | Unid | Qtd | Qtd prod | Arm Pro | Almox | A��o */
 #listaPecasPCPList {
-  /* Usamos uma variável para compartilhar o mesmo grid entre header e linhas */
-  --pcp-grid: 150px                /* Código (mais largo p/ evitar truncar demais) */
-               minmax(160px,0.65fr)/* Descrição (reduz um pouco para abrir espaço ao código) */
+  /* Usamos uma vari�vel para compartilhar o mesmo grid entre header e linhas */
+  --pcp-grid: 150px                /* C�digo (mais largo p/ evitar truncar demais) */
+               minmax(160px,0.65fr)/* Descri��o (reduz um pouco para abrir espa�o ao c�digo) */
                60px                /* Unid */
                60px                /* Qtd */
                70px                /* Qtd prod */
                60px                /* Arm Pro */
                60px                /* Arm Alm */
-               minmax(160px,0.25fr);/* Ação: ícones com folga */
+               minmax(160px,0.25fr);/* A��o: �cones com folga */
 }
 
 #listaPecasPCPList.grid-pecas {
   width: 100%;
-  overflow-x: auto; /* segurança em telas muito estreitas */
+  overflow-x: auto; /* seguran�a em telas muito estreitas */
 }
 
-/* Cabeçalho e linhas de dados usam a mesma malha */
+/* Cabe�alho e linhas de dados usam a mesma malha */
 #listaPecasPCPList .header-row,
 #listaPecasPCPList li.data-row {
   display: grid;
@@ -9609,36 +9469,36 @@ table.tabela td.num {
   align-items: center;
 }
 
-/* MUITO IMPORTANTE: permitir encolhimento da célula em grids */
+/* MUITO IMPORTANTE: permitir encolhimento da c�lula em grids */
 #listaPecasPCPList .desc {
-  min-width: 0;                 /* sem isto, a descrição empurra e corta os botões */
+  min-width: 0;                 /* sem isto, a descri��o empurra e corta os bot�es */
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
 }
 
-/* Ajuste da célula de ações para não encolher demais */
-/* PCP — célula de ações alinhada à ESQUERDA e na ordem LTR */
+/* Ajuste da c�lula de a��es para n�o encolher demais */
+/* PCP � c�lula de a��es alinhada � ESQUERDA e na ordem LTR */
 #listaPecasPCPList .acao {
   display: flex;
   align-items: center;
   justify-content: flex-start; /* antes: flex-end */
   gap: 8px;
-  min-width: 200px;            /* ajuste que você já vinha usando */
+  min-width: 200px;            /* ajuste que voc� j� vinha usando */
   overflow: visible;
 }
 
-/* override seguro só na PCP */
+/* override seguro s� na PCP */
 #listaPecasPCPList.grid-pecas .acao { justify-content: flex-start !important; }
 
-/* PCP — título da coluna Ação alinhado à esquerda */
+/* PCP � t�tulo da coluna A��o alinhado � esquerda */
 #listaPecasPCPList .header-row > *:last-child {
   text-align: left;
   justify-content: flex-start;
 }
 
 
-/* Botões não devem “shrinkar” dentro do flex */
+/* Bot�es n�o devem �shrinkar� dentro do flex */
 #listaPecasPCPList .acao .icon-btn {
   flex: 0 0 auto;
   width: 36px;
@@ -9658,7 +9518,7 @@ table.tabela td.num {
   box-sizing: border-box;
 }
 
-/* Cabeçalho fixo com a mesma grade */
+/* Cabe�alho fixo com a mesma grade */
 #listaPecasPCPList.grid-pecas li.header-row {
   position: sticky;
   top: 0;
@@ -9674,7 +9534,7 @@ table.tabela td.num {
   text-align: left;
 }
 
-/* Descrição com elipse */
+/* Descri��o com elipse */
 #listaPecasPCPList.grid-pecas .desc {
   overflow: hidden;
   text-overflow: ellipsis;
@@ -9700,7 +9560,7 @@ table.tabela td.num {
   min-width:0;
 }
 
-/* Números centralizados e tabulares */
+/* N�meros centralizados e tabulares */
 #listaPecasPCPList.grid-pecas .unid,
 #listaPecasPCPList.grid-pecas .qtd,
 #listaPecasPCPList.grid-pecas .qtdprod,
@@ -9710,14 +9570,14 @@ table.tabela td.num {
   font-variant-numeric: tabular-nums;
 }
 
-/* Ação centralizada sem quebra e com largura mínima coerente */
+/* A��o centralizada sem quebra e com largura m�nima coerente */
 #listaPecasPCPList.grid-pecas .acao {
   display: flex;
   justify-content: center;
   align-items: center;
   gap: 6px;
   white-space: nowrap;
-  min-width: 80px;   /* segurança extra para não "sumir" ao encolher a grade */
+  min-width: 80px;   /* seguran�a extra para n�o "sumir" ao encolher a grade */
   overflow: hidden;
 }
 #listaPecasPCPList.grid-pecas .acao svg {
@@ -9727,7 +9587,7 @@ table.tabela td.num {
 }
 
 
-/* ── PCP: sub-estrutura (abre logo abaixo da linha) ─────────────────── */
+/* -- PCP: sub-estrutura (abre logo abaixo da linha) ------------------- */
 #listaPecasPCPList .pcp-subestrutura { padding: 0; }
 #listaPecasPCPList .pcp-subestrutura > .sub-wrap{
   grid-column: 1 / -1;
@@ -9744,8 +9604,8 @@ table.tabela td.num {
   list-style: none; margin: 0; padding: 0;
   overflow-x: auto;
 }
-/* Cod | Desc | Unid | Qtd | Qtd prod | Qtd Pro | Qtd Alm | Ação */
-/* Grid da sub-estrutura: Cod | Desc | Unid | Qtd | Qtd prod | Qtd Pro | Qtd Alm | Ação */
+/* Cod | Desc | Unid | Qtd | Qtd prod | Qtd Pro | Qtd Alm | A��o */
+/* Grid da sub-estrutura: Cod | Desc | Unid | Qtd | Qtd prod | Qtd Pro | Qtd Alm | A��o */
 #listaPecasPCPList .pcp-subestrutura .sub-grid .child-row,
 /* Header da sub-estrutura */
 #listaPecasPCPList .pcp-subestrutura .sub-grid .sub-header{
@@ -9755,7 +9615,7 @@ table.tabela td.num {
   align-items: center;
   padding: 6px 18px;
   width: 100%;
-  min-width: 850px; /* mantém espaço mínimo p/ coluna de ação; ativa scroll horizontal quando necessário */
+  min-width: 850px; /* mant�m espa�o m�nimo p/ coluna de a��o; ativa scroll horizontal quando necess�rio */
   border-radius: 8px;
 }
 
@@ -9820,7 +9680,7 @@ table.tabela td.num {
   justify-content:flex-start;
 }
 
-/* ── PCP: agrupamento visual para itens de preparação (códigos PP) ─────────────────── */
+/* -- PCP: agrupamento visual para itens de prepara��o (c�digos PP) ------------------- */
 #listaPecasPCPList.grid-pecas li.pcp-pp-group,
 #listaPecasPCPList.grid-pecas li.pcp-section-divider{
   display: block !important;
@@ -9920,7 +9780,7 @@ table.tabela td.num {
   gap:4px;
 }
 #listaPecasPCPList .pcp-pp-card-list .pp-subitem-row .cod::before{
-  content: '↳';
+  content: '?';
   position: absolute;
   left: 0;
   color: rgba(34,197,94,0.85);
@@ -10052,11 +9912,11 @@ table.tabela td.num {
 /* ============================= FIM DO PATCH PCP V3 ============================= */
 
 /* ======================================================================
-   PCP — destaque visual para itens com PP + esconder botão Produzir
-   (Use estas classes no HTML/JS já implementado)
-   - Adicione a classe `is-pp` no elemento do código (ex.: <div class="cod is-pp">)
+   PCP � destaque visual para itens com PP + esconder bot�o Produzir
+   (Use estas classes no HTML/JS j� implementado)
+   - Adicione a classe `is-pp` no elemento do c�digo (ex.: <div class="cod is-pp">)
      ou na linha inteira com `pp` (ex.: <li class="data-row pp">).
-   - Para itens que NÃO possuem PP, coloque a classe `no-pp` na linha.
+   - Para itens que N�O possuem PP, coloque a classe `no-pp` na linha.
    ====================================================================== */
 :root{ --pp-green:#22c55e; } /* verde */
 
@@ -10069,31 +9929,31 @@ table.tabela td.num {
   font-weight: 600;
 }
 
-/* Esconde o botão Produzir em itens sem PP */
+/* Esconde o bot�o Produzir em itens sem PP */
 #listaPecasPCPList li.no-pp .produce-btn,
 #listaPecasPCPList .pcp-subestrutura .child-row.no-pp .produce-btn{
   display: none !important;
 }
 
-/* Ação: pequena folga extra para caber o novo botão “Trocar” */
+/* A��o: pequena folga extra para caber o novo bot�o �Trocar� */
 #listaPecasPCPList.grid-pecas .acao{
-  min-width: 112px;  /* era 80px; espaço p/ +1 ícone */
+  min-width: 112px;  /* era 80px; espa�o p/ +1 �cone */
   gap: 8px;
 }
 
-/* Sub-estrutura: cabeçalho já incluído; apenas reforço de contraste */
+/* Sub-estrutura: cabe�alho j� inclu�do; apenas refor�o de contraste */
 #listaPecasPCPList .pcp-subestrutura .sub-grid .sub-header{
   background: rgba(16,18,27,0.72);
   border: 1px solid rgba(255,255,255,.14);
 }
-/* Códigos PP em verde (vence regras mais específicas do tema) */
+/* C�digos PP em verde (vence regras mais espec�ficas do tema) */
 #listaPecasPCPList li.data-row .cod.pp,
 #listaPecasPCPList .pcp-subestrutura .child-row .cod.pp {
   color: #22c55e !important;
   font-weight: 600 !important;
 }
 
-/* ── Painel "Trocar produto" (PCP + Estrutura de produto) ─────────────────── */
+/* -- Painel "Trocar produto" (PCP + Estrutura de produto) ------------------- */
 #listaPecasPCPList li.pcp-troca,
 #estruturaProduto #malha li.pcp-troca { padding: 0; }
 
@@ -10122,7 +9982,7 @@ table.tabela td.num {
 #listaPecasPCPList .troca-input:focus,
 #estruturaProduto #malha .troca-input:focus{ border-color: rgba(255,255,255,.28); }
 
-/* Lista de resultados (com espaçamento) */
+/* Lista de resultados (com espa�amento) */
 #listaPecasPCPList .troca-results,
 #estruturaProduto #malha .troca-results{
   list-style: none; margin: 6px 0 0; padding: 2px 2px 2px 0;
@@ -10161,7 +10021,7 @@ table.tabela td.num {
   grid-column: 1 / -1; background: none; border: 0; padding: 4px 2px; border-radius: 0; opacity: .8;
 }
 
-/* PP em verde também nos resultados */
+/* PP em verde tamb�m nos resultados */
 #listaPecasPCPList .troca-results .cod.pp,
 #estruturaProduto #malha .troca-results .cod.pp{ color:#22c55e; font-weight:600; }
 
@@ -10172,23 +10032,23 @@ table.tabela td.num {
 
 
 /* ============================================================
-   PCP — FIX DEFINITIVO: ícones cortados dentro dos botões
+   PCP � FIX DEFINITIVO: �cones cortados dentro dos bot�es
    Escopo: APENAS na lista PCP (grid-pecas), sem afetar o resto.
-   — Resolve conflitos de:
-     • tamanhos divergentes de .icon-btn/.produce-btn
-     • svg posicionado como absolute (cortava/ desalinhava)
-     • overflow:hidden em ancestrais
+   � Resolve conflitos de:
+     � tamanhos divergentes de .icon-btn/.produce-btn
+     � svg posicionado como absolute (cortava/ desalinhava)
+     � overflow:hidden em ancestrais
    ============================================================ */
 
-/* Nunca corte conteúdo das linhas/cabeçalho/coluna Ação na PCP */
+/* Nunca corte conte�do das linhas/cabe�alho/coluna A��o na PCP */
 #listaPecasPCPList.grid-pecas li,
 #listaPecasPCPList.grid-pecas .header-row,
 #listaPecasPCPList.grid-pecas .acao {
   overflow: visible !important;
-  min-height: 38px;              /* garante altura mínima confortável */
+  min-height: 38px;              /* garante altura m�nima confort�vel */
 }
 
-/* Botões da coluna Ação: tamanho fixo, centrados por flex */
+/* Bot�es da coluna A��o: tamanho fixo, centrados por flex */
 #listaPecasPCPList.grid-pecas .acao .icon-btn,
 #listaPecasPCPList.grid-pecas .acao .produce-btn {
   display: inline-flex !important;
@@ -10202,17 +10062,17 @@ table.tabela td.num {
 
   border-radius: 10px !important;
   flex: 0 0 auto !important;
-  overflow: visible !important;   /* não aparar o SVG */
+  overflow: visible !important;   /* n�o aparar o SVG */
 }
 
-/* Ícones dentro dos botões: blocados e sem absolute (para não “cortar”) */
+/* �cones dentro dos bot�es: blocados e sem absolute (para n�o �cortar�) */
 #listaPecasPCPList.grid-pecas .acao .icon-btn svg,
 #listaPecasPCPList.grid-pecas .acao .produce-btn svg {
   display: block !important;
   width: 18px !important;
   height: 18px !important;
 
-  position: static !important;    /* sobrepõe qualquer absolute herdado */
+  position: static !important;    /* sobrep�e qualquer absolute herdado */
   left: auto !important;
   top: auto !important;
   transform: none !important;
@@ -10222,14 +10082,14 @@ table.tabela td.num {
 
 
 /* ============================================================
-   PCP — ICON CLIP FIX v3 (prioridade alta, não-invasivo)
-   - Garante caixa 40x40 nos botões de Ação
-   - Reduz e centraliza QUALQUER tipo de ícone (svg, i.fa, pseudo ::before, texto)
+   PCP � ICON CLIP FIX v3 (prioridade alta, n�o-invasivo)
+   - Garante caixa 40x40 nos bot�es de A��o
+   - Reduz e centraliza QUALQUER tipo de �cone (svg, i.fa, pseudo ::before, texto)
    - Remove clipping por overflow/clip/mask em ancestrais
-   - Mantém impacto restrito à PCP
+   - Mant�m impacto restrito � PCP
    ============================================================ */
 
-/* Nunca cortar conteúdo na PCP */
+/* Nunca cortar conte�do na PCP */
 #listaPecasPCPList.grid-pecas,
 #listaPecasPCPList.grid-pecas * {
   clip: auto !important;
@@ -10253,7 +10113,7 @@ table.tabela td.num {
   min-width: 200px !important;
 }
 
-/* Caixa do botão — 40x40, centro perfeito, nada de corte */
+/* Caixa do bot�o � 40x40, centro perfeito, nada de corte */
 #listaPecasPCPList.grid-pecas .acao .icon-btn,
 #listaPecasPCPList.grid-pecas .acao .produce-btn {
   display: inline-flex !important;
@@ -10270,13 +10130,13 @@ table.tabela td.num {
   flex: 0 0 auto !important;
 }
 
-/* Zera fontes do botão para que conteúdo interno controle o tamanho */
+/* Zera fontes do bot�o para que conte�do interno controle o tamanho */
 #listaPecasPCPList.grid-pecas .acao .icon-btn,
 #listaPecasPCPList.grid-pecas .acao .produce-btn {
   font-size: 0 !important;
 }
 
-/* Quaisquer filhos do botão (svg, i, .fa, span, pseudo) centralizados e menores que a caixa */
+/* Quaisquer filhos do bot�o (svg, i, .fa, span, pseudo) centralizados e menores que a caixa */
 #listaPecasPCPList.grid-pecas .acao .icon-btn > *,
 #listaPecasPCPList.grid-pecas .acao .produce-btn > * {
   display: block !important;
@@ -10291,7 +10151,7 @@ table.tabela td.num {
   overflow: visible !important;
 }
 
-/* Suporte explícito a Font Awesome / ícones por texto */
+/* Suporte expl�cito a Font Awesome / �cones por texto */
 #listaPecasPCPList.grid-pecas .acao .icon-btn i,
 #listaPecasPCPList.grid-pecas .acao .icon-btn .fa,
 #listaPecasPCPList.grid-pecas .acao .produce-btn i,
@@ -10305,7 +10165,7 @@ table.tabela td.num {
   text-align: center !important;
 }
 
-/* SVG com traço não deve “estourar” */
+/* SVG com tra�o n�o deve �estourar� */
 #listaPecasPCPList.grid-pecas .acao .icon-btn svg,
 #listaPecasPCPList.grid-pecas .acao .produce-btn svg {
   width: 22px !important;
@@ -10315,13 +10175,13 @@ table.tabela td.num {
   vector-effect: non-scaling-stroke;
 }
 
-/* Evita que cliques no ícone falhem por conta do scale */
+/* Evita que cliques no �cone falhem por conta do scale */
 #listaPecasPCPList.grid-pecas .acao .icon-btn > *,
 #listaPecasPCPList.grid-pecas .acao .produce-btn > * {
   pointer-events: none !important;
 }
 
-/* Descrição realmente encolhe */
+/* Descri��o realmente encolhe */
 #listaPecasPCPList.grid-pecas .desc {
   min-width: 0 !important;
   overflow: hidden !important;
@@ -10329,12 +10189,12 @@ table.tabela td.num {
   text-overflow: ellipsis !important;
 }
 
-/* PCP: desliga pseudo-ícones herdados e garante caixa dos botões */
+/* PCP: desliga pseudo-�cones herdados e garante caixa dos bot�es */
 #listaPecasPCPList.grid-pecas .acao .status-button::before,
 #listaPecasPCPList.grid-pecas .acao .status-button::after,
 #listaPecasPCPList.grid-pecas .acao .icon-btn::before,
 #listaPecasPCPList.grid-pecas .acao .produce-btn::before {
-  content: none !important;     /* remove “o  ‹” etc. */
+  content: none !important;     /* remove �o  �� etc. */
 }
 
 #listaPecasPCPList.grid-pecas .acao .icon-btn,
@@ -10359,11 +10219,11 @@ table.tabela td.num {
   height: 22px !important;
 }
 
-/* === PCP • Painel de troca de produto (UI apenas) === */
+/* === PCP � Painel de troca de produto (UI apenas) === */
 .pcp-troca .troca-wrap{
   padding: 8px 10px;
   border-left: 3px solid var(--border-color, #3b82f6);
-  background: var(--panel, rgba(255,255,255,0.04)); /* mantém tema escuro */
+  background: var(--panel, rgba(255,255,255,0.04)); /* mant�m tema escuro */
   color: var(--fg, #e5e7eb);                         /* texto claro no tema escuro */
   border-radius: 8px;
 }
@@ -10391,7 +10251,7 @@ table.tabela td.num {
   overflow: auto;
   border: 1px solid var(--border, #374151);
   border-radius: 6px;
-  background: var(--panel, rgba(0,0,0,.25)); /* NÃO usar branco no tema escuro */
+  background: var(--panel, rgba(0,0,0,.25)); /* N�O usar branco no tema escuro */
 }
 
 .pcp-troca .troca-results li{
@@ -10431,7 +10291,7 @@ table.tabela td.num {
   text-overflow: ellipsis;
 }
 
-/* Badge "trocado" dentro da célula de Descrição, sem deslocar colunas */
+/* Badge "trocado" dentro da c�lula de Descri��o, sem deslocar colunas */
 .swap-pill{
   display: inline-block;
   margin-left: 6px;
@@ -10444,11 +10304,11 @@ table.tabela td.num {
   vertical-align: middle;
 }
 
-/* PCP — descrição de item trocado: amarelo, sem selo */
+/* PCP � descri��o de item trocado: amarelo, sem selo */
 .data-row .desc.desc-trocado,
 .pcp-subestrutura .desc.desc-trocado{
-  color: #facc15;         /* amarelo legível no tema escuro */
-  font-weight: 600;       /* leve ênfase */
+  color: #facc15;         /* amarelo leg�vel no tema escuro */
+  font-weight: 600;       /* leve �nfase */
 }
 
 /* caso ainda exista algum .swap-pill no DOM antigo, esconder */
@@ -10486,7 +10346,7 @@ table.tabela td.num {
 }
 
 /* ============================================================
-   NAVIGATION CARDS SYSTEM - Grid de Navegação Moderna
+   NAVIGATION CARDS SYSTEM - Grid de Navega��o Moderna
    ============================================================ */
 
 .nav-hamburger {
@@ -10641,10 +10501,10 @@ table.tabela td.num {
 }
 
 /* ============================================================
-   TAB HEADERS - Sistema de Cabeçalhos Padronizados
+   TAB HEADERS - Sistema de Cabe�alhos Padronizados
    ============================================================ */
 
-/* Container principal do cabeçalho da tab */
+/* Container principal do cabe�alho da tab */
 .tab-header {
   display: flex;
   align-items: center;
@@ -10652,7 +10512,7 @@ table.tabela td.num {
   margin-bottom: 16px;
 }
 
-/* Ícone do cabeçalho */
+/* �cone do cabe�alho */
 .tab-header-icon {
   width: 40px;
   height: 40px;
@@ -10668,7 +10528,7 @@ table.tabela td.num {
   font-size: 18px;
 }
 
-/* Ícone pequeno (para estrutura) */
+/* �cone pequeno (para estrutura) */
 .tab-header-icon.small {
   width: 36px;
   height: 36px;
@@ -10678,7 +10538,7 @@ table.tabela td.num {
   font-size: 16px;
 }
 
-/* Conteúdo textual */
+/* Conte�do textual */
 .tab-header-content {
   flex: 1;
   min-width: 0;
@@ -10699,7 +10559,7 @@ table.tabela td.num {
   line-height: 1.4;
 }
 
-/* Cards de seção com gradiente sutil */
+/* Cards de se��o com gradiente sutil */
 .tab-section-card {
   background: linear-gradient(135deg, var(--content-bg) 0%, rgba(0, 0, 0, 0.02) 100%);
   border: 1px solid var(--border-color);
@@ -10749,7 +10609,7 @@ table.tabela td.num {
   box-shadow: 0 4px 12px rgba(34, 197, 94, 0.35);
 }
 
-/* Botões de ação padronizados */
+/* Bot�es de a��o padronizados */
 .tab-action-btn {
   padding: 10px 16px;
   border: none;
@@ -10784,7 +10644,7 @@ table.tabela td.num {
   box-shadow: 0 2px 8px rgba(34, 197, 94, 0.3);
 }
 
-/* Cards de conteúdo com gradientes sutis por tema */
+/* Cards de conte�do com gradientes sutis por tema */
 .tab-section-card.theme-purple {
   background: linear-gradient(135deg, var(--content-bg) 0%, rgba(139, 92, 246, 0.04) 100%);
 }
@@ -10885,7 +10745,7 @@ table.tabela td.num {
 /* Cache bust 1768834639 */
 
 
-/* Animação de spinner para carregamento */
+/* Anima��o de spinner para carregamento */
 @keyframes spin {
   from {
     transform: rotate(0deg);
@@ -10895,14 +10755,14 @@ table.tabela td.num {
   }
 }
 
-/* Estilo para ícone de atualização quando há nova versão */
+/* Estilo para �cone de atualiza��o quando h� nova vers�o */
 #config-icon.update-available {
   animation: spin 2s linear infinite;
   color: #ff9800;
   font-weight: bold;
 }
 
-/* ===================== MODAL MOVIMENTAÇÃO DE ESTOQUE ===================== */
+/* ===================== MODAL MOVIMENTA��O DE ESTOQUE ===================== */
 .movim-overlay {
   position: fixed;
   inset: 0;
@@ -11049,6 +10909,7 @@ table.tabela td.num {
 /* Local de estoque + tipo */
 .movim-field { display: flex; flex-direction: column; gap: 6px; }
 .movim-field label { font-size: .82rem; color: #9ca3af; }
+.movim-field-label { font-size: .82rem; color: #9ca3af; }
 .movim-field select,
 .movim-field input,
 .movim-field textarea {
@@ -11061,55 +10922,13 @@ table.tabela td.num {
 }
 .movim-field textarea { min-height: 60px; resize: vertical; }
 
-/* Calculadora de quantidade */
-.movim-qtd-label-row { display: flex; align-items: center; gap: 8px; }
-.movim-qtd-label-row label { margin: 0; flex: 1; font-size: .82rem; color: #9ca3af; }
-.movim-qtd-anchor { position: relative; display: flex; flex-direction: column; gap: 8px; }
-.movim-calc-btn { background: #6366f1; color: #fff; border: none; padding: 5px 10px; border-radius: 6px; cursor: pointer; font-size: 13px; line-height: 1; transition: filter .2s; flex-shrink: 0; }
-.movim-calc-btn:hover { filter: brightness(1.18); }
-.movim-calc-popup {
-  position: absolute;
-  top: 100%;
-  left: 0;
-  margin-top: 6px;
-  z-index: 20;
-  background: #1e293b;
-  border: 1px solid #475569;
-  border-radius: 12px;
-  padding: 14px;
-  width: 224px;
-  box-shadow: 0 10px 40px rgba(0,0,0,.75);
-}
-.movim-calc-display {
-  background: #0f172a;
-  color: #e2e8f0;
-  padding: 10px 12px;
-  border-radius: 8px;
-  text-align: right;
-  font-size: 1.1rem;
-  margin-bottom: 10px;
-  min-height: 44px;
-  word-break: break-all;
-  line-height: 1.6;
-}
-.movimCalcGrid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 5px; }
-.movimCalcKey { padding: 11px 4px; border: none; border-radius: 7px; background: #2a2d3a; color: #f1f5f9; font-size: .98rem; font-weight: 600; cursor: pointer; transition: background .15s; }
-.movimCalcKey:hover { background: #374151; }
-.movimCalcOp { background: #1f2d4a; color: #93c5fd; }
-.movimCalcOp:hover { background: #1e3a5f; }
-.movimCalcClear { background: #7f1d1d; color: #fca5a5; }
-.movimCalcClear:hover { background: #991b1b; }
-.movimCalcOk { background: #14532d; color: #86efac; grid-column: span 3; font-size: .98rem; }
-.movimCalcOk:hover { background: #166534; }
-
-/* Tipo de movimentação */
+/* Tipo de movimenta��o */
 .movim-tipo { display: flex; gap: 10px; flex-wrap: wrap; }
 .movim-modo-tipo { margin-top: 2px; margin-bottom: 4px; }
-.movim-modo-tipo .movimModoBtn,
-.movim-tipo-acoes .movimTipoBtn { min-height: 44px; font-size: .88rem; font-weight: 700; }
 .movimModoBtn {
   flex: 1;
   min-width: 0;
+  min-height: 44px;
   padding: 10px 8px;
   border-radius: 10px;
   border: 1px solid #3f4458;
@@ -11117,47 +10936,14 @@ table.tabela td.num {
   color: #e5e7eb;
   cursor: pointer;
   transition: background .15s, transform .1s;
+  font-size: .88rem;
+  font-weight: 700;
 }
 .movimModoBtn:hover { background: #333748; }
 .movimModoBtn.ativo { transform: translateY(-1px); }
 .movimModoBtn[data-type="ENTRADA"].ativo  { background: #166b16; color: #fff; border-color: #1a7a1a; }
 .movimModoBtn[data-type="SAIDA"].ativo    { background: #8a2020; color: #fff; border-color: #9a2828; }
 .movimModoBtn[data-type="TRANSFERENCIA"].ativo { background: #105c7a; color: #fff; border-color: #146b8a; }
-.movim-executar-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  width: 100%;
-  margin-top: 12px;
-  padding: 14px 16px;
-  border: none;
-  border-radius: 12px;
-  background: linear-gradient(135deg, #1d6b3a, #145a2e);
-  color: #fff;
-  font-size: 1rem;
-  font-weight: 800;
-  cursor: pointer;
-  transition: opacity .15s, transform .1s;
-}
-.movim-executar-btn:hover { opacity: .92; transform: translateY(-1px); }
-.movim-executar-btn:disabled { opacity: .55; cursor: wait; transform: none; }
-.movim-executar-btn.processando { opacity: .65; cursor: wait; }
-.movim-endereco-campo-acoes { display: flex; align-items: center; gap: 6px; }
-.movim-endereco-rm {
-  width: 32px;
-  height: 32px;
-  border-radius: 8px;
-  border: 1px solid #4b5563;
-  background: #1f2937;
-  color: #f87171;
-  font-size: 1.2rem;
-  line-height: 1;
-  cursor: pointer;
-  flex-shrink: 0;
-}
-.movim-endereco-rm:hover { background: #374151; }
-.movim-tipo-acoes { margin-top: 4px; }
 .movimTipoBtn {
   flex: 1;
   padding: 12px;
@@ -11387,7 +11173,7 @@ table.tabela td.num {
 .movim-mensagem.erro  { color: #ff7373; }
 .movim-mensagem.info  { color: #93c5fd; }
 
-/* Endereços */
+/* Endere�os */
 .movim-enderecos {
   display: flex;
   flex-direction: column;
@@ -11544,7 +11330,7 @@ table.tabela td.num {
 }
 .movim-etq-meta--vazio { color: #475569; }
 
-/* Ações */
+/* A��es */
 .movim-acoes { display: flex; gap: 12px; margin-top: 4px; }
 .movim-retorno-omie {
   margin-top: 4px;
@@ -11587,7 +11373,7 @@ table.tabela td.num {
 #movimCancelarBtn:hover { filter: brightness(1.1); }
 #movimSalvarBtn { background: #4f46e5; color: #fff; }
 #movimSalvarBtn:hover { filter: brightness(1.1); }
-/* Media queries responsividade modal movimentação */
+/* Media queries responsividade modal movimenta��o */
 @media (max-width: 480px) {
   .movim-panel {
     padding: 16px 14px;
@@ -11607,7 +11393,7 @@ table.tabela td.num {
 @media (max-width: 360px) {
   .movimTipoBtn[data-type="TRANSFERENCIA"] { font-size: .72rem; padding: 10px 2px; }
 }
-/* ===================== FIM MODAL MOVIMENTAÇÃO ===================== */
+/* ===================== FIM MODAL MOVIMENTA��O ===================== */
 
 /* ===================== PALLET PICKER ===================== */
 .ppicker-panel {
@@ -11729,7 +11515,7 @@ table.tabela td.num {
   text-align: center; font-size: 10px; font-weight: 700;
   color: #374151; letter-spacing: 4px; margin-top: 6px;
 }
-/* Itens de endereço no modal movimentação */
+/* Itens de endere�o no modal movimenta��o */
 .movim-endereco-item {
   display: flex; justify-content: space-between; align-items: center;
   background: #1a2535; border: 1px solid #2e4a6a;
@@ -11750,13 +11536,13 @@ table.tabela td.num {
 
 
 /* ================================================================
-   ██████  MODO ESCURO/CLARO — Overrides completos
-   Garante que TODAS as seções se adaptem corretamente ao tema.
+   ������  MODO ESCURO/CLARO � Overrides completos
+   Garante que TODAS as se��es se adaptem corretamente ao tema.
    ================================================================ */
 
-/* ────────────────────────────────────────────────────────────────
-   1. MODO ESCURO — Seções com cores claras hardcoded
-   ──────────────────────────────────────────────────────────────── */
+/* ----------------------------------------------------------------
+   1. MODO ESCURO � Se��es com cores claras hardcoded
+   ---------------------------------------------------------------- */
 
 /* --- Detalhes de Pedido --- */
 :root:not(.light-mode) .detalhes-wrapper {
@@ -11817,7 +11603,7 @@ table.tabela td.num {
   color: #e2e8f0 !important;
 }
 
-/* --- Auth Popup (Login) — mantém visual original (fundo branco) em ambos os modos --- */
+/* --- Auth Popup (Login) � mant�m visual original (fundo branco) em ambos os modos --- */
 
 /* --- Compras: Tabela (dark) --- */
 :root:not(.light-mode) #listaMinhasSolicitacoes table {
@@ -11844,11 +11630,11 @@ table.tabela td.num {
 }
 
 
-/* ────────────────────────────────────────────────────────────────
-   2. MODO CLARO — Seções com cores escuras hardcoded
-   ──────────────────────────────────────────────────────────────── */
+/* ----------------------------------------------------------------
+   2. MODO CLARO � Se��es com cores escuras hardcoded
+   ---------------------------------------------------------------- */
 
-/* --- Tabelas Armazéns --- */
+/* --- Tabelas Armaz�ns --- */
 .light-mode table.tabela {
   color: #1f2937;
 }
@@ -11920,7 +11706,7 @@ table.tabela td.num {
   color: #1f2937;
 }
 
-/* --- Transferências --- */
+/* --- Transfer�ncias --- */
 .light-mode .transfer-search-dropdown {
   background: #ffffff;
   border-color: #e5e7eb;
@@ -12127,7 +11913,7 @@ table.tabela td.num {
   border-top-color: #e5e7eb;
 }
 
-/* --- Kanban Card meta e botões --- */
+/* --- Kanban Card meta e bot�es --- */
 .light-mode .kanban-card .kanban-op-list {
   color: #374151;
 }
@@ -12274,7 +12060,7 @@ table.tabela td.num {
   color: #1f2937;
 }
 
-/* --- Foto Gestão Modal --- */
+/* --- Foto Gest�o Modal --- */
 .light-mode .foto-gestao-modal .fg-content {
   background: #ffffff;
   color: #1f2937;
@@ -12370,7 +12156,7 @@ table.tabela td.num {
   color: #1e40af;
 }
 
-/* --- Formulário Compras Modal --- */
+/* --- Formul�rio Compras Modal --- */
 .light-mode #comprasModalForm .form-field label {
   color: #374151;
 }
@@ -12382,7 +12168,7 @@ table.tabela td.num {
   color: #ef4444;
 }
 
-/* --- Inputs genéricos no modo claro --- */
+/* --- Inputs gen�ricos no modo claro --- */
 .light-mode input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not(.btn):not(.btn-print),
 .light-mode select,
 .light-mode textarea {
@@ -12440,7 +12226,7 @@ table.tabela td.num {
   color: #1f2937;
 }
 
-/* --- Compras Ações Modal --- */
+/* --- Compras A��es Modal --- */
 .light-mode .compras-acoes-modal {
   color: #1f2937;
 }
@@ -12448,7 +12234,7 @@ table.tabela td.num {
   color: #374151;
 }
 
-/* --- Status circle (mantém cores semânticas) --- */
+/* --- Status circle (mant�m cores sem�nticas) --- */
 .light-mode .status-circle.blue { background-color: #396df0; }
 .light-mode .status-circle.green { background-color: #3bf083; }
 
@@ -12463,7 +12249,7 @@ table.tabela td.num {
   background: rgba(0, 0, 0, 0.35);
 }
 
-/* --- Flash cartão novo modo claro --- */
+/* --- Flash cart�o novo modo claro --- */
 .light-mode .flash-new {
   background: #bbf7d0 !important;
   color: #166534;
@@ -12497,7 +12283,7 @@ table.tabela td.num {
   color: #ffffff;
 }
 
-/* --- Ícones dentro de botões e contextos específicos --- */
+/* --- �cones dentro de bot�es e contextos espec�ficos --- */
 .light-mode .header-menu a {
   color: #6b7280;
 }
@@ -12509,7 +12295,7 @@ table.tabela td.num {
 
 /* --- Elementos com inline styles que precisam de dark override --- */
 
-/* Gráficos e cards de compras com background branco */
+/* Gr�ficos e cards de compras com background branco */
 :root:not(.light-mode) #graficoPizzaCard,
 :root:not(.light-mode) #graficoMesesWrapper,
 :root:not(.light-mode) #graficoPizzaDetalheWrapper {
@@ -12522,7 +12308,7 @@ table.tabela td.num {
   box-shadow: 0 8px 32px rgba(0,0,0,0.5) !important;
 }
 
-/* Tabela de solicitações (compras) */
+/* Tabela de solicita��es (compras) */
 :root:not(.light-mode) #listaMinhasSolicitacoesTabela {
   background: #111827 !important;
   border-color: #334155 !important;
@@ -12647,7 +12433,7 @@ table.tabela td.num {
   color: #e2e8f0 !important;
 }
 
-/* Modais genéricos com background branco inline */
+/* Modais gen�ricos com background branco inline */
 :root:not(.light-mode) .modal-content,
 :root:not(.light-mode) .modal-header,
 :root:not(.light-mode) .modal-footer {
@@ -12655,7 +12441,7 @@ table.tabela td.num {
   color: #e2e8f0 !important;
 }
 
-/* Containers de info com fundo branco dentro de seções */
+/* Containers de info com fundo branco dentro de se��es */
 :root:not(.light-mode) #minhasComprasWrapper div[style*="background:#fff"],
 :root:not(.light-mode) #minhasComprasWrapper div[style*="background: #fff"] {
   background: #1e293b !important;
@@ -12680,12 +12466,12 @@ table.tabela td.num {
   color: #e2e8f0 !important;
 }
 
-/* Compras: cards de gráficos */
+/* Compras: cards de gr�ficos */
 :root:not(.light-mode) #minhasComprasWrapper [style*="box-shadow:0 2px 12px"] {
   box-shadow: 0 2px 12px rgba(0,0,0,0.3) !important;
 }
 
-/* Inputs de catálogo/compras com fundo branco inline */
+/* Inputs de cat�logo/compras com fundo branco inline */
 :root:not(.light-mode) #comprasFormPane input[style*="background:#ffffff"],
 :root:not(.light-mode) #comprasFormPane input[style*="background: #ffffff"] {
   background: #0f172a !important;
@@ -12693,12 +12479,12 @@ table.tabela td.num {
   border-color: #334155 !important;
 }
 
-/* --- Ata de Reunião / Agenda Modal — modo claro --- */
+/* --- Ata de Reuni�o / Agenda Modal � modo claro --- */
 .light-mode .agenda-modal-overlay {
   background: rgba(107, 114, 128, 0.5);
 }
 
-/* Calendário de reservas no modo claro: aumenta contraste dos chips */
+/* Calend�rio de reservas no modo claro: aumenta contraste dos chips */
 .light-mode .agenda-cal-reserva-item {
   font-weight: 700;
 }
@@ -12955,7 +12741,7 @@ table.tabela td.num {
   border-color: #334155 !important;
 }
 
-/* Dark mode para Modal "Meus Itens - aguardando aprovação" */
+/* Dark mode para Modal "Meus Itens - aguardando aprova��o" */
 :root:not(.light-mode) #modalPedidoBody {
   background: #0f172a !important;
   color: #e2e8f0 !important;
@@ -12995,8 +12781,8 @@ table.tabela td.num {
 }
 
 /* ================================================================
-   Dark mode — Kanban "Compras" (colunas kanban-column-minhas)
-   Inline styles no JS usam #f8fafc/#ffffff → sobrescrevemos aqui
+   Dark mode � Kanban "Compras" (colunas kanban-column-minhas)
+   Inline styles no JS usam #f8fafc/#ffffff ? sobrescrevemos aqui
    ================================================================ */
 
 /* Colunas */
@@ -13011,7 +12797,7 @@ table.tabela td.num {
   box-shadow: 0 1px 3px rgba(0,0,0,0.35) !important;
 }
 
-/* Badge de grupo (req. número) com background #f3f4f6 */
+/* Badge de grupo (req. n�mero) com background #f3f4f6 */
 :root:not(.light-mode) .kanban-column-minhas .kanban-card [style*="background:#f3f4f6"] {
   background: #0f172a !important;
   border-color: #334155 !important;
@@ -13023,7 +12809,7 @@ table.tabela td.num {
   color: #94a3b8 !important;
 }
 
-/* Botões "expandir itens" (chevron) */
+/* Bot�es "expandir itens" (chevron) */
 :root:not(.light-mode) .kanban-column-minhas .kanban-card [style*="background:#e5e7eb"] {
   background: #334155 !important;
   color: #e2e8f0 !important;
@@ -13035,24 +12821,24 @@ table.tabela td.num {
   border-color: #334155 !important;
 }
 
-/* Badge contador de itens (verde #10b981 — mantém cor; só texto branco já está ok) */
+/* Badge contador de itens (verde #10b981 � mant�m cor; s� texto branco j� est� ok) */
 
 /* ================================================================
-   KANBAN DE SOLICITAÇÕES — Modo escuro (melhor contraste)
+   KANBAN DE SOLICITA��ES � Modo escuro (melhor contraste)
    ================================================================ */
 
-/* Colunas — fundo mais distinguível */
+/* Colunas � fundo mais distingu�vel */
 :root:not(.light-mode) #kanbanSolicBoard > div > div {
   background: #141a27 !important;
   border-color: #1e293b !important;
 }
 
-/* Headers de coluna — fundo levemente mais claro */
+/* Headers de coluna � fundo levemente mais claro */
 :root:not(.light-mode) #kanbanSolicBoard > div > div > div:first-child {
   border-bottom-width: 2px !important;
 }
 
-/* Cards SEP — melhor destaque */
+/* Cards SEP � melhor destaque */
 :root:not(.light-mode) .kanban-sep-card {
   background: #1e293b !important;
   border-color: #334155 !important;
@@ -13075,7 +12861,7 @@ table.tabela td.num {
   border-color: #334155 !important;
 }
 
-/* Modal de edição SEP */
+/* Modal de edi��o SEP */
 :root:not(.light-mode) #modalEdicaoSep > div {
   background: #1e293b !important;
   border-color: #334155 !important;
@@ -13094,7 +12880,7 @@ table.tabela td.num {
 }
 
 /* ================================================================
-   KANBAN DE SOLICITAÇÕES — Modo claro
+   KANBAN DE SOLICITA��ES � Modo claro
    ================================================================ */
 
 /* Board container */
@@ -13103,7 +12889,7 @@ table.tabela td.num {
   border-color: #e2e8f0 !important;
 }
 
-/* Coluna headers — manter cores de cada coluna, mas fundo claro */
+/* Coluna headers � manter cores de cada coluna, mas fundo claro */
 .light-mode #kanbanSolicBoard > div > div > div:first-child {
   background: #f8fafc !important;
 }
@@ -13117,19 +12903,19 @@ table.tabela td.num {
   border-color: #94a3b8 !important;
 }
 
-/* Card — nome SEP (amarelo ok no escuro, precisa escurecer no claro) */
+/* Card � nome SEP (amarelo ok no escuro, precisa escurecer no claro) */
 .light-mode .kanban-sep-card span[style*="color:#f59e0b"],
 .light-mode .kanban-sep-card span[style*="color: #f59e0b"] {
   color: #b45309 !important;
 }
 
-/* Card — nome do usuário */
+/* Card � nome do usu�rio */
 .light-mode .kanban-sep-card span[style*="color:#d1d5db"],
 .light-mode .kanban-sep-card span[style*="color: #d1d5db"] {
   color: #374151 !important;
 }
 
-/* Card — data e ícones */
+/* Card � data e �cones */
 .light-mode .kanban-sep-card span[style*="color:#9ca3af"],
 .light-mode .kanban-sep-card span[style*="color: #9ca3af"] {
   color: #6b7280 !important;
@@ -13138,12 +12924,12 @@ table.tabela td.num {
   color: #9ca3af !important;
 }
 
-/* Card — hint "clique para editar" */
+/* Card � hint "clique para editar" */
 .light-mode .kanban-sep-card span[style*="color:#4b5563"] {
   color: #9ca3af !important;
 }
 
-/* Card — link "No carrinho" */
+/* Card � link "No carrinho" */
 .light-mode .kanban-sep-card span[style*="color:#6b7280"][style*="font-style:italic"] {
   color: #6b7280 !important;
 }
@@ -13177,7 +12963,7 @@ table.tabela td.num {
   border-color: #e5e7eb !important;
 }
 
-/* Modal de edição SEP */
+/* Modal de edi��o SEP */
 .light-mode #modalEdicaoSep > div {
   background: #ffffff !important;
   border-color: #e2e8f0 !important;
@@ -13214,3 +13000,1148 @@ table.tabela td.num {
 /* ================================================================
    FIM DO BLOCO DE MODO ESCURO/CLARO
    ================================================================ */
+
+/* ================================================================
+   OPERA��O RESPONSIVA: HOME, PRODUTOS E MOVIMENTA��O
+   ================================================================ */
+.mobile-operations-home {
+  display: none;
+}
+
+.mobile-filter-label {
+  display: none;
+}
+
+.lp-tab-count {
+  min-width: 22px;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, .16);
+  font-variant-numeric: tabular-nums;
+  font-size: 11px;
+  line-height: 1.4;
+  text-align: center;
+}
+
+.mobile-operation-card,
+.movim-panel button,
+.movim-panel select,
+.movim-panel input,
+.movim-panel textarea,
+#modalAcoesProdutoOverlay button,
+#modalAcoesProdutoOverlay input {
+  touch-action: manipulation;
+}
+
+.mobile-operation-card:focus-visible,
+.movim-panel button:focus-visible,
+.movim-panel select:focus-visible,
+.movim-panel input:focus-visible,
+.movim-panel textarea:focus-visible,
+#modalAcoesProdutoOverlay button:focus-visible,
+#modalAcoesProdutoOverlay input:focus-visible {
+  outline: 3px solid #60a5fa;
+  outline-offset: 2px;
+}
+
+.movim-field-label {
+  font-size: .82rem;
+  color: #9ca3af;
+}
+
+.movim-stock-controls button {
+  align-items: center;
+  display: inline-flex;
+  gap: 7px;
+  justify-content: center;
+}
+
+.movim-qtd-support {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 20px;
+}
+
+.movim-helper {
+  color: #7f8aa3;
+  font-size: .78rem;
+}
+
+body.mobile-modal-open {
+  overflow: hidden;
+}
+
+@keyframes mobileSheetIn {
+  from { opacity: 0; transform: translateY(20px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@media (max-width: 900px) and (max-height: 500px) {
+    .mobile-operations-home {
+        max-width: 760px;
+    }
+
+    .mobile-operations-home > p {
+        margin-bottom: 12px;
+    }
+
+    .mobile-operations-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .mobile-operation-card {
+        min-height: 84px !important;
+    }
+
+    .mobile-operation-card-primary {
+        grid-column: 1 / -1;
+    }
+
+    .mobile-operation-card:not(.mobile-operation-card-primary) .mobile-operation-copy small {
+        display: none;
+    }
+}
+
+@media (min-width: 641px) and (max-width: 1024px) {
+  #listaProdutos #listaProdutosGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+
+  .movim-panel {
+    width: min(680px, calc(100vw - 32px));
+  }
+}
+
+@media (max-width: 640px), (max-width: 900px) and (max-height: 500px) {
+  :root {
+    --mobile-gutter: 16px;
+    --mobile-touch: 48px;
+    --mobile-surface: #171b26;
+    --mobile-surface-raised: #202633;
+    --mobile-border: #30394a;
+    --mobile-text: #f8fafc;
+    --mobile-muted: #a8b3c5;
+    --mobile-accent: #22c55e;
+  }
+
+  /* No celular, a home vira uma central das �reas j� preparadas. */
+  #paginaInicio .content-wrapper {
+    min-height: calc(100dvh - 58px);
+    padding: 18px var(--mobile-gutter) calc(28px + env(safe-area-inset-bottom));
+  }
+
+  #paginaInicio .content-wrapper > :not(.mobile-operations-home) {
+    display: none !important;
+  }
+
+  .mobile-operations-home {
+    display: block;
+    width: 100%;
+    max-width: 520px;
+    margin: 0 auto;
+  }
+
+  .mobile-operations-eyebrow {
+    color: #86efac;
+    font-size: 12px;
+    font-weight: 800;
+    letter-spacing: .12em;
+    margin-bottom: 8px;
+    text-transform: uppercase;
+  }
+
+  .mobile-operations-home h1 {
+    color: var(--mobile-text);
+    font-size: clamp(24px, 7vw, 30px);
+    line-height: 1.15;
+    margin: 0;
+  }
+
+  .mobile-operations-home > p {
+    color: var(--mobile-muted);
+    font-size: 15px;
+    line-height: 1.5;
+    margin: 8px 0 22px;
+  }
+
+  .mobile-operations-grid {
+    display: grid;
+    gap: 12px;
+  }
+
+  .mobile-operation-card {
+    width: 100%;
+    min-height: 96px;
+    display: grid;
+    grid-template-columns: 48px minmax(0, 1fr) 20px;
+    align-items: center;
+    gap: 14px;
+    padding: 16px;
+    border: 1px solid var(--border-color, var(--mobile-border));
+    border-radius: 8px;
+    background: var(--content-bg, var(--mobile-surface-raised));
+    color: var(--theme-color, var(--mobile-text));
+    cursor: pointer;
+    text-align: left;
+    transition: border-color 180ms ease, background 180ms ease, transform 120ms ease;
+  }
+
+  .mobile-operation-card-primary {
+    border-color: rgba(34, 197, 94, .58);
+    background: linear-gradient(110deg, rgba(34, 197, 94, .15), rgba(34, 197, 94, .04));
+  }
+
+  .mobile-operation-card:active {
+    transform: scale(.98);
+  }
+
+  .mobile-operation-icon {
+    width: 48px;
+    height: 48px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 8px;
+    background: rgba(59, 130, 246, .14);
+    color: #93c5fd;
+    font-size: 20px;
+  }
+
+  .mobile-operation-card-primary .mobile-operation-icon {
+    background: rgba(34, 197, 94, .16);
+    color: #86efac;
+  }
+
+  .mobile-operation-copy {
+    min-width: 0;
+    display: grid;
+    gap: 5px;
+  }
+
+  .mobile-operation-copy strong {
+    color: inherit;
+    font-size: 16px;
+    line-height: 1.3;
+  }
+
+  .mobile-operation-copy small {
+    color: var(--mobile-muted);
+    font-size: 13px;
+    line-height: 1.4;
+  }
+
+  .mobile-operation-chevron {
+    color: #64748b;
+    font-size: 13px;
+    justify-self: end;
+  }
+
+  .mobile-operations-note {
+    display: flex;
+    align-items: flex-start;
+    gap: 9px;
+    margin-top: 20px;
+    padding: 12px;
+    border-radius: 8px;
+    background: rgba(148, 163, 184, .08);
+    color: var(--mobile-muted);
+    font-size: 12px;
+    line-height: 1.45;
+  }
+
+  .mobile-operations-note i {
+    margin-top: 2px;
+  }
+
+  /* O drawer m�vel lista apenas rotas homologadas para telas pequenas. */
+  #sidebarContent .side-wrapper:not(.mobile-ready-group) {
+    display: none !important;
+  }
+
+  #sidebarContent .mobile-ready-group .side-menu > a:not([data-mobile-ready="true"]) {
+    display: none !important;
+  }
+
+  #sidebarContent {
+    width: min(272px, calc(100vw - 62px));
+    max-height: calc(100dvh - 92px);
+    overscroll-behavior: contain;
+  }
+
+  #sidebarContent .side-menu a {
+    min-height: var(--mobile-touch);
+    display: flex;
+    align-items: center;
+  }
+
+  .sidebar-hamburger {
+    width: 44px;
+    height: 44px;
+  }
+
+  .shortcut-items-container {
+    display: none !important;
+  }
+
+  /* A lista usa o scroll da p�gina, evitando duas barras concorrentes. */
+  #listaProdutos .content-wrapper {
+    padding: 10px var(--mobile-gutter) calc(24px + env(safe-area-inset-bottom));
+  }
+
+  #listaProdutos .lista-produtos-alta {
+    padding: 0;
+  }
+
+  #listaProdutos #listaProdutosGrid {
+    max-height: none !important;
+    overflow: visible !important;
+    grid-auto-rows: auto !important;
+  }
+
+  #listaProdutos button[onclick*="abrirModalAcoesProduto"] {
+    min-height: 44px !important;
+    padding: 10px 12px !important;
+  }
+
+  #listaProdutos .lp-tabs-nav {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    margin-bottom: 12px;
+  }
+
+  #listaProdutos .lp-tab-btn {
+    min-width: 0;
+    min-height: var(--mobile-touch);
+    padding: 8px 10px;
+    justify-content: center;
+    text-align: center;
+    white-space: normal;
+    line-height: 1.25;
+  }
+
+  #listaProdutos .lp-tab-count {
+    flex: 0 0 auto;
+  }
+
+  #listaProdutos .lp-tab-btn[data-lp-tab="kanbanSolicitacoesConteudo"] {
+    display: none !important;
+  }
+
+  #listaProdutos .filter-bar {
+    position: sticky;
+    top: 58px;
+    z-index: 40;
+    padding: 8px 0;
+    background: var(--theme-bg-color, #11151f);
+  }
+
+  #listaProdutos .filter-bar input {
+    min-height: var(--mobile-touch);
+    font-size: 16px;
+  }
+
+  #listaProdutos .filter-icon {
+    min-width: 0;
+    min-height: var(--mobile-touch);
+    flex: 1 1 0;
+    display: inline-flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    padding: 6px 8px;
+  }
+
+  #listaProdutos .filter-bar > .filter-icon {
+    max-width: none;
+  }
+
+  #listaProdutos .mobile-filter-label {
+    display: inline;
+    font-size: 11px;
+    line-height: 1;
+  }
+
+  /* A��es do produto: bottom sheet confort�vel para o polegar. */
+  /* Tela de separação no mobile: empilha as colunas para leitura e toque. */
+  #listaProdutos #solicitacoesConteudo #solicitacoesKanbanBoard,
+  #listaProdutos #kanbanSolicitacoesConteudo #kanbanSolicBoard {
+    display: grid !important;
+    grid-template-columns: 1fr !important;
+    gap: 12px !important;
+    overflow-x: hidden !important;
+  }
+
+  #listaProdutos #solicitacoesConteudo #solicitacoesKanbanBoard > div,
+  #listaProdutos #kanbanSolicitacoesConteudo #kanbanSolicBoard > div {
+    width: 100% !important;
+    min-width: 0 !important;
+    flex: none !important;
+  }
+
+  #listaProdutos #solicitacoesConteudo #solicitacoesKanbanBoard > div > div,
+  #listaProdutos #kanbanSolicitacoesConteudo #kanbanSolicBoard > div > div {
+    min-height: 0 !important;
+    max-height: none !important;
+  }
+
+  /* Modal de separação: mais confortável no celular e sem cards espremidos. */
+  #modalSeparacaoLogistica {
+    align-items: flex-end !important;
+    padding: 0 !important;
+    background: rgba(0, 0, 0, .78) !important;
+  }
+
+  #modalSeparacaoLogistica > div {
+    width: 100% !important;
+    max-width: none !important;
+    height: 100dvh !important;
+    max-height: 100dvh !important;
+    border-radius: 0 !important;
+  }
+
+  #modalSeparacaoLogistica #modalSepInner {
+    padding-bottom: 12px !important;
+  }
+
+  #modalSeparacaoLogistica #modalSepItemsList [data-item-row] {
+    display: grid !important;
+    grid-template-columns: 40px minmax(0, 1fr) !important;
+    gap: 10px !important;
+    align-items: start !important;
+    padding: 10px 12px !important;
+  }
+
+  #modalSeparacaoLogistica #modalSepItemsList [data-item-row] > :nth-child(3),
+  #modalSeparacaoLogistica #modalSepItemsList [data-item-row] > :nth-child(4) {
+    grid-column: 1 / -1 !important;
+    width: 100% !important;
+    justify-self: stretch !important;
+  }
+
+  #modalSeparacaoLogistica #modalSepItemsList [data-item-row] > :nth-child(4) {
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    gap: 6px !important;
+  }
+
+  #modalSeparacaoLogistica #modalSepItemsList [data-item-row] > :nth-child(4) button {
+    min-height: 34px !important;
+    font-size: .64rem !important;
+    white-space: normal !important;
+    line-height: 1.15 !important;
+  }
+
+  #modalSeparacaoLogistica #modalSepItemsList .armazem-btn {
+    font-size: .62rem !important;
+    line-height: 1.25 !important;
+  }
+
+  #modalSeparacaoLogistica #modalSepItemsList [data-item-row] [style*="background:#101826"],
+  #modalSeparacaoLogistica #modalSepItemsList [data-item-row] [style*="background:#1b1730"] {
+    min-width: 0 !important;
+  }
+
+  #modalAcoesProdutoOverlay {
+    align-items: flex-end !important;
+    padding: 0 !important;
+  }
+
+  #modalAcoesProdutoBox.produto-acoes-panel {
+    width: 100% !important;
+    max-width: none !important;
+    max-height: min(92dvh, 720px) !important;
+    border-radius: 16px 16px 0 0 !important;
+    padding-bottom: env(safe-area-inset-bottom);
+    animation: mobileSheetIn 220ms ease-out !important;
+  }
+
+  .produto-acoes-header {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    padding: 16px !important;
+    background: #fff;
+  }
+
+  #modalAcoesDescricao {
+    max-width: calc(100vw - 90px) !important;
+  }
+
+  #modalAcoesFechar {
+    width: var(--mobile-touch);
+    height: var(--mobile-touch);
+    flex: 0 0 var(--mobile-touch);
+    border-radius: 50% !important;
+  }
+
+  #modalAcoesBotoes,
+  #modalAcoesManuais {
+    padding: 14px 16px 20px !important;
+  }
+
+  .produto-acoes-primary-grid {
+    grid-template-columns: minmax(0, 1fr) 88px !important;
+  }
+
+  .produto-acoes-primary-grid > :nth-child(3) {
+    grid-column: 1 / -1;
+  }
+
+  #modalAcoesBotoes button,
+  #modalAcoesBotoes input,
+  #modalAcoesManuais button,
+  #modalAcoesManuais input {
+    min-height: var(--mobile-touch) !important;
+    font-size: 14px !important;
+  }
+
+  /* Movimenta��o: tela operacional inteira, sem modal espremido. */
+  .movim-overlay {
+    align-items: flex-end;
+    padding: 0;
+    background: rgba(4, 7, 12, .84);
+  }
+
+  .movim-panel {
+    width: 100%;
+    height: 100dvh;
+    max-height: 100dvh;
+    border: 0;
+    border-radius: 0;
+    padding: 0 var(--mobile-gutter) calc(12px + env(safe-area-inset-bottom));
+    gap: 14px;
+    box-shadow: none;
+    overscroll-behavior: contain;
+    animation: mobileSheetIn 220ms ease-out;
+  }
+
+  .movim-header {
+    position: sticky;
+    top: 0;
+    z-index: 5;
+    margin: 0 calc(var(--mobile-gutter) * -1);
+    padding: calc(12px + env(safe-area-inset-top)) var(--mobile-gutter) 12px;
+    background: #1a1d27;
+    border-bottom-color: var(--mobile-border);
+  }
+
+  .movim-header-info {
+    min-width: 0;
+  }
+
+  .movim-titulo {
+    font-size: 16px;
+    line-height: 1.3;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .movim-subtitulo {
+    color: var(--mobile-muted);
+    font-size: 12px;
+  }
+
+  .movim-close {
+    width: var(--mobile-touch);
+    height: var(--mobile-touch);
+    flex: 0 0 var(--mobile-touch);
+    padding: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 20px;
+  }
+
+  .movim-stock-row {
+    gap: 10px;
+  }
+
+  .movim-stock-badge {
+    flex-basis: 100%;
+    padding: 12px 14px;
+    border-radius: 8px;
+    font-size: 18px;
+  }
+
+  .movim-stock-controls {
+    width: 100%;
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .movim-btn-hist,
+  .movim-btn-comp,
+  .movim-btn-print {
+    min-width: 0;
+    min-height: var(--mobile-touch);
+    padding: 8px 5px;
+    border-radius: 8px;
+    font-size: 12px;
+  }
+
+  .movim-field {
+    gap: 7px;
+  }
+
+  .movim-field label,
+  .movim-field-label {
+    color: #c2cad8;
+    font-size: 13px;
+    font-weight: 650;
+  }
+
+  .movim-field select,
+  .movim-field input,
+  .movim-field textarea {
+    width: 100%;
+    min-height: var(--mobile-touch);
+    box-sizing: border-box;
+    padding: 12px;
+    border-radius: 8px;
+    font-size: 16px;
+  }
+
+  .movim-field textarea {
+    min-height: 82px;
+  }
+
+  .movim-tipo {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .movimTipoBtn {
+    min-width: 0;
+    min-height: var(--mobile-touch);
+    padding: 8px 4px;
+    border-radius: 8px;
+    font-size: 12px;
+    text-transform: none;
+  }
+
+  #movimOperadores {
+    gap: 8px;
+  }
+
+  #movimOperadores button {
+    min-height: var(--mobile-touch);
+    padding: 8px;
+    border-radius: 8px;
+    font-size: 20px;
+  }
+
+  .movim-enderecos {
+    padding: 12px;
+    border-radius: 8px;
+  }
+
+  .movim-endereco-add {
+    min-height: var(--mobile-touch);
+    padding: 8px 12px;
+    border-radius: 8px;
+  }
+
+  .movim-endereco-item {
+    min-height: 48px;
+    box-sizing: border-box;
+  }
+
+  .movim-endereco-item button {
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  .movim-mensagem:not(:empty) {
+    min-height: 0;
+    padding: 10px 12px;
+    border-radius: 8px;
+    background: rgba(148, 163, 184, .08);
+  }
+
+  .movim-acoes {
+    position: sticky;
+    bottom: calc(-12px - env(safe-area-inset-bottom));
+    z-index: 5;
+    margin: 4px calc(var(--mobile-gutter) * -1) 0;
+    padding: 12px var(--mobile-gutter) calc(12px + env(safe-area-inset-bottom));
+    background: #1a1d27;
+    border-top: 1px solid var(--mobile-border);
+    gap: 10px;
+  }
+
+  .movim-acoes button {
+    min-height: var(--mobile-touch);
+    padding: 10px;
+    border-radius: 8px;
+    font-size: 15px;
+  }
+
+  .ppicker-fechar,
+  .ppicker-voltar,
+  .ppicker-front-cell {
+    min-height: 44px;
+  }
+
+  /* Identifica��o: preserva a lista densa, mas torna todos os controles toc�veis. */
+  #etiquetasModal {
+    align-items: stretch !important;
+    padding: 0 !important;
+    overflow: hidden !important;
+  }
+
+  #etiquetasModal .etiquetas-modal-box {
+    width: 100vw !important;
+    max-width: none !important;
+    height: 100dvh !important;
+    margin: 0 !important;
+    border-width: 0 !important;
+    border-radius: 0 !important;
+  }
+
+  #etiquetasModal .etiquetas-modal-header {
+    padding: calc(10px + env(safe-area-inset-top)) 16px 10px !important;
+  }
+
+  #etiquetasModal .etiquetas-modal-close,
+  #etiquetasModal .etq-view-btn {
+    width: 44px !important;
+    height: 44px !important;
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  #etiquetasModal .etiquetas-modal-search-row {
+    display: grid !important;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 8px !important;
+    padding: 10px 16px !important;
+  }
+
+  #etiquetasModal .etiquetas-search-wrap {
+    min-height: 48px;
+    box-sizing: border-box;
+  }
+
+  #etiquetasModal .etiquetas-search-wrap input {
+    width: 100%;
+    min-width: 0;
+    min-height: 44px;
+    font-size: 16px !important;
+  }
+
+  #etiquetasModal .etq-view-toggle {
+    min-height: 48px;
+  }
+
+  #etiquetasModal .etq-impressora-row {
+    padding: 8px 16px !important;
+    gap: 8px !important;
+  }
+
+  #etiquetasModal .etq-listbox-impressora {
+    min-width: 0;
+    min-height: 44px;
+    font-size: 16px !important;
+  }
+
+  #etiquetasModal .etiquetas-grid {
+    flex: 1;
+    min-height: 0;
+    max-height: none !important;
+    padding: 10px 16px calc(16px + env(safe-area-inset-bottom)) !important;
+    overscroll-behavior: contain;
+  }
+
+  #etiquetasModal .etiquetas-grid.view-list .etq-card {
+    min-height: 64px !important;
+  }
+
+  #etiquetasModal .etiquetas-grid.view-list .etq-card-actions {
+    padding: 8px 8px 8px 0 !important;
+    gap: 6px !important;
+  }
+
+  #etiquetasModal .etq-btn-imprimir-unit,
+  #etiquetasModal .etq-btn-multiplo,
+  #etiquetasModal .etq-btn-ocultar,
+  #etiquetasModal .etq-btn-reimprimir,
+  #etiquetasModal .etq-btn-armazenar {
+    min-height: 44px !important;
+    padding: 7px 10px !important;
+  }
+}
+
+.light-mode .mobile-operation-card {
+  background: #fff;
+  color: #0f172a;
+  border-color: #dbe3ec;
+}
+
+.light-mode .mobile-operation-card-primary {
+  border-color: rgba(5, 150, 105, .45);
+  background: linear-gradient(110deg, rgba(5, 150, 105, .10), #fff);
+}
+
+.light-mode .mobile-operations-note {
+  background: #eef2f7;
+  color: #475569;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mobile-operation-card,
+  .movim-panel,
+  #modalAcoesProdutoBox.produto-acoes-panel {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+
+/* ===================== MOVIMENTA��O RESTAURADA DO ORIGIN/MAIN ===================== */
+.movim-endereco-campo-acoes { display: flex; align-items: center; gap: 6px; }
+.movim-endereco-rm {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  border: 1px solid #4b5563;
+  background: #1f2937;
+  color: #f87171;
+  font-size: 1.2rem;
+  line-height: 1;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.movim-endereco-rm:hover { background: #374151; }
+.movim-impressora-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 10px 12px;
+  margin-top: 4px;
+  background: rgba(15,23,42,.55);
+  border: 1px solid rgba(51,65,85,.6);
+  border-radius: 10px;
+}
+.movim-impressora-row--modal { margin: 0 16px 12px; }
+.movim-impressora-row label { color: #94a3b8; font-size: .8rem; white-space: nowrap; flex-shrink: 0; }
+.movim-impr-icone { color: #a78bfa; font-size: .85rem; flex-shrink: 0; }
+.movim-listbox-impressora {
+  flex: 1;
+  min-width: 140px;
+  background: #1e293b;
+  color: #f1f5f9;
+  border: 1px solid #334155;
+  border-radius: 7px;
+  padding: 7px 10px;
+  font-size: .85rem;
+  outline: none;
+  cursor: pointer;
+}
+.movim-listbox-impressora:focus { border-color: #7c3aed; }
+.movim-impr-btn-icon {
+  background: #1e293b;
+  border: 1px solid #334155;
+  border-radius: 7px;
+  color: #94a3b8;
+  padding: 7px 10px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.movim-impr-btn-icon:hover { color: #e2e8f0; border-color: #475569; }
+.movim-imp-overlay,
+.movim-scan-overlay,
+.movim-hist-overlay {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: rgba(0,0,0,.82);
+  backdrop-filter: blur(6px);
+}
+.movim-imp-overlay { z-index: 10150; }
+.movim-scan-overlay { z-index: 10250; background: rgba(0,0,0,.88); }
+.movim-hist-overlay { z-index: 10100; }
+.movim-imp-panel,
+.movim-scan-panel,
+.movim-hist-panel {
+  background: #1a1d27;
+  border: 1px solid rgba(113,119,144,.28);
+  border-radius: 18px;
+  overflow: hidden;
+  box-shadow: 0 18px 48px rgba(0,0,0,.55);
+}
+.movim-imp-panel { width: min(480px, 100%); }
+.movim-scan-panel { width: min(460px, 92vw); background: #1e293b; border-color: #334155; }
+.movim-hist-panel { width: min(920px, 100%); max-height: 88vh; display: flex; flex-direction: column; }
+.movim-imp-header,
+.movim-scan-header,
+.movim-hist-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 18px;
+  background: rgba(15,23,42,.72);
+  border-bottom: 1px solid rgba(113,119,144,.22);
+}
+.movim-hist-header { align-items: flex-start; padding: 16px 18px; }
+.movim-imp-title-wrap,
+.movim-scan-title-wrap,
+.movim-hist-title-wrap { display: flex; align-items: center; gap: 10px; }
+.movim-hist-title-wrap { align-items: flex-start; color: #f1f5f9; }
+.movim-imp-title-wrap > i { color: #a78bfa; font-size: 1.1rem; }
+.movim-scan-title-wrap { color: #f1f5f9; font-weight: 700; }
+.movim-scan-title-wrap i { color: #34d399; }
+.movim-hist-title-wrap i { color: #60a5fa; margin-top: 3px; }
+.movim-imp-titulo,
+.movim-hist-titulo { display: block; font-weight: 700; color: #f1f5f9; }
+.movim-hist-titulo { font-size: 1rem; }
+.movim-imp-subtitulo,
+.movim-hist-subtitulo { display: block; font-size: .78rem; color: #94a3b8; margin-top: 2px; }
+.movim-imp-status,
+.movim-hist-status { padding: 10px 18px; font-size: .84rem; color: #94a3b8; }
+.movim-imp-status.erro,
+.movim-hist-status.erro { color: #f87171; }
+.movim-imp-status.ok { color: #4ade80; }
+.movim-imp-etq-wrap,
+.movim-imp-qtd-row {
+  padding: 0 16px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.movim-imp-etq-wrap label,
+.movim-imp-qtd-row label { color: #94a3b8; font-size: .82rem; font-weight: 600; }
+.movim-imp-etq-wrap select,
+.movim-imp-qtd-row input {
+  background: #0f172a;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  padding: 10px 12px;
+  color: #f1f5f9;
+  font-size: .92rem;
+  width: 100%;
+  box-sizing: border-box;
+}
+.movim-imp-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 12px 16px 16px;
+  border-top: 1px solid rgba(113,119,144,.18);
+}
+.movim-imp-btn-confirmar {
+  background: linear-gradient(135deg, #7c3aed, #6366f1);
+  color: #fff;
+  border: none;
+  border-radius: 10px;
+  padding: 10px 18px;
+  font-weight: 700;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: .92rem;
+}
+.movim-imp-btn-cancelar {
+  background: #2a2d3a;
+  color: #d1d5db;
+  border: 1px solid #3f4454;
+  border-radius: 10px;
+  padding: 10px 16px;
+  cursor: pointer;
+  font-size: .92rem;
+}
+.movim-scan-viewport { position: relative; background: #000; width: 100%; aspect-ratio: 4/3; overflow: hidden; }
+.movim-scan-viewport video { width: 100%; height: 100%; object-fit: contain; display: block; background: #000; }
+.movim-scan-mira-wrap { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; pointer-events: none; }
+.movim-scan-mira {
+  width: min(88%, 320px);
+  height: 88px;
+  border: 3px solid rgba(52,211,153,.85);
+  border-radius: 8px;
+  box-shadow: 0 0 0 3000px rgba(0,0,0,.38);
+  transition: border-color .3s, width .25s, height .25s, border-radius .25s;
+}
+.movim-scan-status { padding: 12px 18px; font-size: .88rem; color: #94a3b8; min-height: 44px; text-align: center; }
+.movim-scan-manual { padding: 2px 18px 16px; display: flex; gap: 8px; }
+.movim-scan-manual input {
+  flex: 1;
+  background: #0f172a;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  padding: 9px 12px;
+  color: #f1f5f9;
+  font-size: .9rem;
+}
+.movim-scan-manual button {
+  background: #059669;
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  padding: 9px 16px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.movim-hist-body { flex: 1; min-height: 120px; overflow: auto; padding: 12px 14px 16px; }
+.movim-hist-vazio { color: #6b7280; font-size: .9rem; text-align: center; padding: 28px 12px; }
+.movim-hist-table { width: 100%; border-collapse: collapse; font-size: .8rem; }
+.movim-hist-table th,
+.movim-hist-table td {
+  padding: 8px 10px;
+  border-bottom: 1px solid rgba(71,85,105,.45);
+  text-align: left;
+  vertical-align: top;
+}
+.movim-hist-table th { color: #9ca3af; font-weight: 600; position: sticky; top: 0; background: #1a1d27; z-index: 1; }
+.movim-hist-table td { color: #e2e8f0; }
+.movim-hist-tipo-ent { color: #4ade80; font-weight: 700; }
+.movim-hist-tipo-sai { color: #f87171; font-weight: 700; }
+.movim-hist-tipo-trf { color: #60a5fa; font-weight: 700; }
+.movim-hist-obs { color: #94a3b8; max-width: 220px; word-break: break-word; }
+.movim-mesmo-arm-aviso {
+  font-size: .78rem;
+  color: #9ca3af;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  padding: 0 0 4px;
+  line-height: 1.35;
+}
+.movim-imprimir-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: .84rem;
+  color: #cbd5e1;
+  cursor: pointer;
+  user-select: none;
+}
+.movim-imprimir-wrap input { accent-color: #6366f1; }
+.movim-endereco-etq-lista {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.movim-endereco-etq-lista:empty { display: none; }
+.movim-endereco-campo {
+  padding: 10px 12px;
+  background: #1a1f2e;
+  border: 1px solid #2f3545;
+  border-radius: 10px;
+}
+.movim-endereco-campo-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+.movim-endereco-campo-label {
+  font-size: .72rem;
+  font-weight: 700;
+  color: #fbbf24;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+}
+.movim-endereco-valor {
+  font-size: .84rem;
+  font-weight: 700;
+  color: #fde68a;
+  word-break: break-word;
+  line-height: 1.45;
+  padding: 6px 8px;
+  background: #141820;
+  border-radius: 8px;
+  border: 1px dashed #854d0e55;
+}
+.movim-endereco-valor.vazio { color: #6b7280; font-weight: 500; border-style: dotted; }
+.movim-scan-origem { border-color: #7f1d1d; color: #fecaca; }
+.movim-scan-destino { border-color: #166534; color: #bbf7d0; }
+.movim-ref-loading { font-size: .82rem; color: #6b7280; }
+.movim-ref-erro { font-size: .82rem; color: #f87171; line-height: 1.4; }
+.movim-etq-linha {
+  display: grid;
+  grid-template-columns: minmax(100px, 1.4fr) repeat(3, minmax(44px, auto)) minmax(60px, 1fr) 36px;
+  align-items: center;
+  gap: 8px 12px;
+  padding: 10px 12px;
+  background: #1a2332;
+  border: 1px solid #334155;
+  border-radius: 10px;
+  font-size: .78rem;
+  line-height: 1.35;
+  cursor: pointer;
+  transition: border-color .15s, background .15s, box-shadow .15s;
+}
+.movim-etq-linha:not(.movim-etq-linha--head):hover { border-color: #64748b; background: #1e293b; }
+.movim-etq-linha--selected {
+  border-color: #6366f1 !important;
+  background: #1e1b4b !important;
+  box-shadow: 0 0 0 1px rgba(99, 102, 241, .45);
+}
+.movim-etq-linha--origem { box-shadow: inset 3px 0 0 #f59e0b; }
+.movim-etq-linha--destino { box-shadow: inset 3px 0 0 #22c55e; }
+.movim-etq-linha--head {
+  cursor: default;
+  background: #0f172a;
+  border-color: #475569;
+  font-size: .68rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  color: #94a3b8;
+  padding: 8px 12px;
+}
+.movim-etq-linha--head:hover { background: #0f172a; border-color: #475569; }
+.movim-etq-btn-print {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 1px solid #475569;
+  border-radius: 8px;
+  background: #0f172a;
+  color: #a78bfa;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background .15s, color .15s, border-color .15s;
+}
+.movim-etq-btn-print:hover:not(:disabled) { background: #312e81; border-color: #6366f1; color: #e9d5ff; }
+.movim-etq-btn-print:disabled { opacity: .55; cursor: wait; }
+.movim-etq-end { color: #fde68a; font-weight: 700; word-break: break-word; }
+.movim-etq-linha--head .movim-etq-end { color: #94a3b8; }
+.movim-etq-meta { color: #cbd5e1; font-weight: 600; white-space: nowrap; }
+.movim-etq-meta--comp {
+  color: #94a3b8;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 140px;
+}
+.movim-etq-meta--vazio { color: #475569; }
+@media (max-width: 640px) {
+  .movim-etq-linha { grid-template-columns: 1fr; gap: 6px; }
+  .movim-imp-footer { flex-direction: column; }
+  .movim-imp-btn-confirmar,
+  .movim-imp-btn-cancelar,
+  .movim-scan-manual button {
+    width: 100%;
+    justify-content: center;
+  }
+  .movim-scan-manual { flex-direction: column; }
+}
