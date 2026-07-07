@@ -131,6 +131,30 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 });
 
+// Central mobile: mantém o início simples e reutiliza os fluxos legados já validados.
+document.addEventListener('DOMContentLoaded', () => {
+  document.querySelectorAll('[data-mobile-operation]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const operation = button.dataset.mobileOperation;
+
+      if (operation === 'identification') {
+        document.getElementById('menu-identificacao-produto')?.click();
+        return;
+      }
+
+      const productListButton = document.getElementById('btn-omie-list1');
+      if (!productListButton) return;
+      productListButton.click();
+
+      if (operation === 'separation') {
+        window.setTimeout(() => {
+          document.querySelector('.lp-tab-btn[data-lp-tab="solicitacoesConteudo"]')?.click();
+        }, 50);
+      }
+    });
+  });
+});
+
 // ============================================================================
 // GUIAS: Lista de produtos / Solicitações
 // ============================================================================
@@ -417,11 +441,12 @@ function _solRenderOrigemSepFase(locais, enderecoMap, codigoProd, princArmz) {
     </div>`;
   }).join('');
 }
-function _solDestinoHtml(it) {
+
+function _solDestinoHtml(it, compact = false) {
   const endList = it?.enderecos_pp;
   if (endList && Array.isArray(endList) && endList.length > 0) {
     return endList.map(e => `
-      <div style="display:inline-flex;flex-direction:column;gap:1px;background:#1e293b;border:1px solid #334155;border-radius:4px;padding:3px 6px;font-size:.63rem;line-height:1.5;white-space:nowrap;">
+      <div style="display:${compact ? 'block' : 'inline-flex'};flex-direction:column;gap:1px;background:#1e293b;border:1px solid #334155;border-radius:4px;padding:3px 6px;font-size:.63rem;line-height:1.5;${compact ? 'white-space:normal;word-break:break-word;max-width:100%;' : 'white-space:nowrap;'}">
         <span><span style="color:#6b7280;">rua:</span> <span style="color:#67e8f9;font-weight:700;">${e.rua || '—'}</span></span>
         <span><span style="color:#6b7280;">andar:</span> <span style="color:#67e8f9;font-weight:700;">${e.andar || '—'}</span></span>
         <span><span style="color:#6b7280;">edif.:</span> <span style="color:#67e8f9;font-weight:700;">${e.edificio || '—'}</span></span>
@@ -665,6 +690,12 @@ window._loadSolicitacoesTab = async function() {
   const countEl  = document.getElementById('solicitacoesCount');
   if (!board) return;
 
+  const isMobileBoard = window.matchMedia('(max-width: 640px), (max-width: 900px) and (max-height: 500px)').matches;
+  board.style.display = isMobileBoard ? 'grid' : 'flex';
+  board.style.gridTemplateColumns = isMobileBoard ? '1fr' : '';
+  board.style.gap = '14px';
+  board.style.overflowX = isMobileBoard ? 'hidden' : 'auto';
+
   if (board.dataset.loaded === '1' && !window._loadSolicitacoesTab.force) return;
   window._loadSolicitacoesTab.force = false;
 
@@ -693,7 +724,9 @@ window._loadSolicitacoesTab = async function() {
       totalCards += cards.length;
 
       const colEl = document.createElement('div');
-      colEl.style.cssText = 'flex:0 0 200px;display:flex;flex-direction:column;';
+      colEl.style.cssText = isMobileBoard
+        ? 'width:100%;min-width:0;display:flex;flex-direction:column;'
+        : 'flex:0 0 200px;display:flex;flex-direction:column;';
 
       const cardsHtml = cards.length === 0
         ? `<div style="padding:14px;text-align:center;color:#374151;font-size:.73rem;">Nenhum</div>`
@@ -1272,6 +1305,7 @@ async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) 
   }
 
   function _renderAggItem(it, nSolic) {
+    const isCompact = window.matchMedia('(max-width: 640px), (max-width: 900px) and (max-height: 500px)').matches;
     const qty      = parseFloat(it.quantidade) || 0;
     const isConferido = it.status === 'Aguardando retirada';
     const isSep    = it.status === 'Separado';
@@ -1285,7 +1319,8 @@ async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) 
     const swapHistory = it.codigo_produto_ant && it.codigo_produto_novo 
       ? `<div style="font-size:.70rem;color:#a78bfa;margin-top:2px;display:flex;align-items:center;gap:4px;"><i class="fa-solid fa-arrows-rotate" style="color:#a78bfa;"></i><span>${it.codigo_produto_ant} → ${it.codigo_produto_novo}</span></div>`
       : '';
-    const destinoHtml = _solDestinoHtml(it);
+    const destinoHtml = _solDestinoHtml(it, isCompact);
+
     const locais = (estoqueBatch[it.codigo_produto] || [])
       .filter(l => Number(l.saldo) > 0)
       .slice()
@@ -1341,12 +1376,12 @@ async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) 
     const localizacaoHtml = `
       <div class="sep-loc-stack" style="margin-top:6px;display:flex;flex-direction:column;gap:6px;">
         ${enderecamentoHtml}
-        <div class="sep-loc-grid" style="display:flex;gap:10px;flex-wrap:wrap;align-items:stretch;">
-          <div class="sep-loc-box sep-loc-box--origin" style="min-width:220px;flex:1 1 240px;padding:6px 8px;background:#101826;border:1px solid #253041;border-radius:8px;">
+        <div style="display:${isCompact ? 'flex;flex-direction:column;gap:8px;align-items:stretch' : 'flex;gap:10px;flex-wrap:wrap;align-items:stretch'};">
+          <div style="min-width:${isCompact ? '0' : '220px'};flex:1 1 ${isCompact ? 'auto' : '240px'};padding:6px 8px;background:#101826;border:1px solid #253041;border-radius:8px;">
             <div style="font-size:.60rem;color:#60a5fa;font-weight:700;text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px;">Origem</div>
             ${origemHtml}
           </div>
-          <div class="sep-loc-box sep-loc-box--dest" style="min-width:170px;flex:1;padding:6px 8px;background:#1b1730;border:1px solid #312e81;border-radius:8px;">
+          <div style="min-width:${isCompact ? '0' : '170px'};flex:1;padding:6px 8px;background:#1b1730;border:1px solid #312e81;border-radius:8px;">
             <div style="font-size:.60rem;color:#a78bfa;font-weight:700;text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px;">Destino</div>
             ${destinoHtml}
           </div>
@@ -1450,48 +1485,48 @@ async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) 
           ${readonlySep
             ? ''
             : isConferido
-            ? `<div class="sep-actions sep-actions--inline" style="display:flex;gap:6px;align-items:flex-start;flex-wrap:wrap;justify-content:flex-end;flex-shrink:0;">
+            ? `<div style="display:grid;grid-template-columns:${isCompact ? '1fr 1fr' : 'auto'};gap:6px;align-items:flex-start;justify-content:flex-end;flex-shrink:0;width:${isCompact ? '100%' : 'auto'};">
                  <button class="btn-item-retificar" title="Voltar item para Separado"
-                   style="padding:4px 9px;border:none;border-radius:6px;background:#4b5563;color:#e5e7eb;font-weight:700;font-size:.70rem;cursor:pointer;white-space:nowrap;">
+                   style="padding:4px 9px;border:none;border-radius:6px;background:#4b5563;color:#e5e7eb;font-weight:700;font-size:.70rem;cursor:pointer;white-space:nowrap;min-height:32px;">
                    <i class="fa-solid fa-rotate-left" style="margin-right:3px;"></i>Retificar
                  </button>
                </div>`
             : isSep
-            ? `<div class="sep-actions sep-actions--inline" style="display:flex;gap:6px;align-items:flex-start;flex-wrap:wrap;justify-content:flex-end;flex-shrink:0;">
+            ? `<div style="display:grid;grid-template-columns:${isCompact ? '1fr 1fr' : 'auto auto auto'};gap:6px;align-items:flex-start;justify-content:flex-end;flex-shrink:0;width:${isCompact ? '100%' : 'auto'};">
                  <button class="btn-item-conferido" title="Enviar para Aguardando retirada"
-                   style="padding:4px 9px;border:none;border-radius:6px;background:#16a34a;color:#dcfce7;font-weight:700;font-size:.70rem;cursor:pointer;white-space:nowrap;">
+                   style="padding:4px 9px;border:none;border-radius:6px;background:#16a34a;color:#dcfce7;font-weight:700;font-size:.70rem;cursor:pointer;white-space:nowrap;min-height:32px;">
                    <i class="fa-solid fa-clipboard-check" style="margin-right:3px;"></i>Conferido
                  </button>
                  <button class="btn-item-retificar" title="Voltar item para Em Separação"
-                   style="padding:4px 9px;border:none;border-radius:6px;background:#4b5563;color:#e5e7eb;font-weight:700;font-size:.70rem;cursor:pointer;white-space:nowrap;">
+                   style="padding:4px 9px;border:none;border-radius:6px;background:#4b5563;color:#e5e7eb;font-weight:700;font-size:.70rem;cursor:pointer;white-space:nowrap;min-height:32px;">
                    <i class="fa-solid fa-rotate-left" style="margin-right:3px;"></i>Retificar
                  </button>
                  <button class="btn-item-trocar" title="Trocar este produto"
-                   style="padding:4px 9px;border:none;border-radius:6px;background:#7c3aed;color:#f3e8ff;font-weight:700;font-size:.70rem;cursor:pointer;white-space:nowrap;">
+                   style="padding:4px 9px;border:none;border-radius:6px;background:#7c3aed;color:#f3e8ff;font-weight:700;font-size:.70rem;cursor:pointer;white-space:nowrap;min-height:32px;">
                    <i class="fa-solid fa-arrows-rotate" style="margin-right:3px;"></i>Trocar
                  </button>
                </div>`
-            : `<div class="sep-actions sep-actions--grid" style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;">
+            : `<div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;width:${isCompact ? '100%' : 'auto'};">
                  <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;width:100%;">
                    <button class="btn-item-sep-tudo"
-                     style="padding:4px 6px;border:none;border-radius:6px;background:#166534;color:#dcfce7;font-weight:700;font-size:.67rem;cursor:pointer;white-space:nowrap;text-align:center;">
-                     <i class="fa-solid fa-check" style="margin-right:2px;"></i>Separado
+                     style="padding:4px 6px;border:none;border-radius:6px;background:#166534;color:#dcfce7;font-weight:700;font-size:.67rem;cursor:pointer;white-space:nowrap;text-align:center;min-height:32px;">
+                     <i class="fa-solid fa-check" style="margin-right:2px;"></i>Separei tudo
                    </button>
                    <button class="btn-item-sep-parcial"
-                     style="padding:4px 6px;border:none;border-radius:6px;background:#b45309;color:#ffedd5;font-weight:700;font-size:.67rem;cursor:pointer;white-space:nowrap;text-align:center;">
-                     <i class="fa-solid fa-scale-balanced" style="margin-right:2px;"></i>Manual
+                     style="padding:4px 6px;border:none;border-radius:6px;background:#b45309;color:#ffedd5;font-weight:700;font-size:.67rem;cursor:pointer;white-space:nowrap;text-align:center;min-height:32px;">
+                     <i class="fa-solid fa-scale-balanced" style="margin-right:2px;"></i>Informar qtd
                    </button>
                    ${isEmSeparacao ? `
                    <button class="btn-item-nao-sep"
-                     style="padding:4px 6px;border:none;border-radius:6px;background:#7c2d12;color:#ffedd5;font-weight:700;font-size:.67rem;cursor:pointer;white-space:nowrap;text-align:center;">
+                     style="padding:4px 6px;border:none;border-radius:6px;background:#7c2d12;color:#ffedd5;font-weight:700;font-size:.67rem;cursor:pointer;white-space:nowrap;text-align:center;min-height:32px;">
                      <i class="fa-solid fa-xmark" style="margin-right:2px;"></i>Não separei
                    </button>
                    <button class="btn-item-trocar" title="Trocar este produto"
-                     style="padding:4px 6px;border:none;border-radius:6px;background:#7c3aed;color:#f3e8ff;font-weight:700;font-size:.67rem;cursor:pointer;white-space:nowrap;text-align:center;">
+                     style="padding:4px 6px;border:none;border-radius:6px;background:#7c3aed;color:#f3e8ff;font-weight:700;font-size:.67rem;cursor:pointer;white-space:nowrap;text-align:center;min-height:32px;">
                      <i class="fa-solid fa-arrows-rotate" style="margin-right:2px;"></i>Trocar
                    </button>` : ''}
                  </div>
-                 ${obsText ? `<div style="font-size:.63rem;color:#93c5fd;text-align:right;max-width:200px;word-break:break-word;"><i class="fa-solid fa-comment" style="margin-right:3px;color:#6b7280;"></i>${obsText}</div>` : ''}
+                 ${obsText ? `<div style="font-size:.63rem;color:#93c5fd;text-align:${isCompact ? 'left' : 'right'};max-width:${isCompact ? '100%' : '200px'};word-break:break-word;"><i class="fa-solid fa-comment" style="margin-right:3px;color:#6b7280;"></i>${obsText}</div>` : ''}
                </div>`}
       </div>`;
   }
@@ -2441,6 +2476,13 @@ window._loadKanbanSolicitacoesTab = async function() {
   const board    = document.getElementById('kanbanSolicBoard');
   const statusEl = document.getElementById('kanbanSolicStatus');
   if (!board) return;
+
+  const isMobileBoard = window.matchMedia('(max-width: 640px), (max-width: 900px) and (max-height: 500px)').matches;
+  board.style.display = 'grid';
+  board.style.gridTemplateColumns = isMobileBoard ? '1fr' : 'repeat(6, minmax(0, 1fr))';
+  board.style.gap = '12px';
+  board.style.overflowX = isMobileBoard ? 'hidden' : 'visible';
+
   if (board.dataset.loaded === '1' && !window._loadKanbanSolicitacoesTab.force) return;
   window._loadKanbanSolicitacoesTab.force = false;
 
@@ -2472,7 +2514,9 @@ window._loadKanbanSolicitacoesTab = async function() {
       totalCards += cards.length;
 
       const colEl = document.createElement('div');
-      colEl.style.cssText = 'flex:0 0 200px;display:flex;flex-direction:column;';
+      colEl.style.cssText = isMobileBoard
+        ? 'width:100%;min-width:0;display:flex;flex-direction:column;'
+        : 'flex:0 0 200px;display:flex;flex-direction:column;';
 
       const colBg = isLight ? '#ffffff' : '#141a27';
       const colBorder = isLight ? '#e2e8f0' : '#1e293b';
@@ -46258,37 +46302,47 @@ window.renderizarCatalogoOmie = renderizarCatalogoOmie;
   ov.id = 'modalAcoesProdutoOverlay';
   ov.style.cssText = 'display:none;position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.55);align-items:center;justify-content:center;';
   ov.innerHTML = `
-    <div id="modalAcoesProdutoBox" style="background:#fff;border-radius:12px;width:420px;max-width:92vw;max-height:90vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,.3);animation:fadeInScale .2s ease;">
+    <div id="modalAcoesProdutoBox" class="produto-acoes-panel" role="dialog" aria-modal="true" aria-labelledby="modalAcoesTitulo" style="background:#fff;border-radius:12px;width:420px;max-width:92vw;max-height:90vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,.3);animation:fadeInScale .2s ease;">
       <!-- Cabeçalho -->
-      <div style="padding:16px 20px;border-bottom:1px solid #e5e7eb;display:flex;align-items:center;justify-content:space-between;">
+      <div class="produto-acoes-header" style="padding:16px 20px;border-bottom:1px solid #e5e7eb;display:flex;align-items:center;justify-content:space-between;">
         <div>
           <div id="modalAcoesTitulo" style="font-size:15px;font-weight:700;color:#1f2937;"></div>
           <div id="modalAcoesDescricao" style="font-size:11px;color:#6b7280;margin-top:2px;max-width:300px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"></div>
         </div>
-        <button id="modalAcoesFechar" style="background:none;border:none;font-size:20px;color:#9ca3af;cursor:pointer;padding:4px;" title="Fechar">&times;</button>
+        <button id="modalAcoesFechar" type="button" aria-label="Fechar ações do produto" style="background:none;border:none;font-size:20px;color:#9ca3af;cursor:pointer;padding:4px;" title="Fechar">&times;</button>
       </div>
       <!-- Conteúdo: Botões de ação -->
-      <div id="modalAcoesBotoes" style="padding:16px 20px;display:flex;flex-direction:column;gap:10px;">
-        <div style="display:grid;grid-template-columns:1fr 80px 1fr;gap:8px;align-items:stretch;">
-          <button id="modalAcoesBtnCarrinho" style="background:linear-gradient(135deg,#10b981,#059669);color:#fff;border:none;padding:10px;border-radius:6px;cursor:pointer;font-size:13px;font-weight:600;display:flex;align-items:center;justify-content:center;gap:6px;">
-            <i class="fa-solid fa-cart-plus"></i> Adicionar ao Carrinho
+      <div id="modalAcoesBotoes" style="padding:18px 20px 20px;display:flex;flex-direction:column;gap:12px;">
+        <div style="font-size:12px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:#64748b;">Escolha a ação</div>
+        <div class="produto-acoes-grid" style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;">
+          <button id="modalAcoesBtnCarrinho" type="button" style="background:linear-gradient(135deg,#ecfdf5,#d1fae5);color:#065f46;border:1px solid #a7f3d0;padding:14px 12px;border-radius:12px;cursor:pointer;display:flex;flex-direction:column;align-items:flex-start;gap:8px;text-align:left;">
+            <span style="width:42px;height:42px;border-radius:12px;background:#10b981;color:#fff;display:inline-flex;align-items:center;justify-content:center;font-size:18px;"><i class="fa-solid fa-cart-plus"></i></span>
+            <span style="font-size:14px;font-weight:700;line-height:1.2;">Compra</span>
+            <span style="font-size:11px;color:#047857;line-height:1.35;">Informar quantidade para adicionar ao carrinho</span>
           </button>
-          <input type="number" id="modalAcoesQtd" min="1" value="1" style="width:100%;padding:10px;border:1px solid #d1d5db;border-radius:6px;font-size:16px;line-height:1.1;text-align:center;box-sizing:border-box;min-height:40px;" />
-          <button id="modalAcoesBtnSeparacao" style="background:linear-gradient(135deg,#f59e0b,#d97706);color:#1a1200;border:none;padding:10px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600;display:flex;align-items:center;justify-content:center;gap:6px;">
-            <i class="fa-solid fa-clipboard-list"></i> Adicionar separação
+          <button id="modalAcoesBtnSeparacao" type="button" style="background:linear-gradient(135deg,#fff7ed,#ffedd5);color:#9a3412;border:1px solid #fdba74;padding:14px 12px;border-radius:12px;cursor:pointer;display:flex;flex-direction:column;align-items:flex-start;gap:8px;text-align:left;">
+            <span style="width:42px;height:42px;border-radius:12px;background:#f59e0b;color:#fff;display:inline-flex;align-items:center;justify-content:center;font-size:18px;"><i class="fa-solid fa-clipboard-list"></i></span>
+            <span style="font-size:14px;font-weight:700;line-height:1.2;">Separação</span>
+            <span style="font-size:11px;color:#c2410c;line-height:1.35;">Abrir quantidade para solicitar separação</span>
+          </button>
+          <button id="modalAcoesBtnMovimentar" type="button" style="background:linear-gradient(135deg,#eef2ff,#e0e7ff);color:#3730a3;border:1px solid #c7d2fe;padding:14px 12px;border-radius:12px;cursor:pointer;display:flex;flex-direction:column;align-items:flex-start;gap:8px;text-align:left;">
+            <span style="width:42px;height:42px;border-radius:12px;background:#4f46e5;color:#fff;display:inline-flex;align-items:center;justify-content:center;font-size:18px;"><i class="fa-solid fa-arrows-rotate"></i></span>
+            <span style="font-size:14px;font-weight:700;line-height:1.2;">Movimentação</span>
+            <span style="font-size:11px;color:#4338ca;line-height:1.35;">Entradas, saídas, transferências e ajustes</span>
+          </button>
+          <button id="modalAcoesBtnCompras" type="button" style="background:linear-gradient(135deg,#f5f3ff,#ede9fe);color:#6d28d9;border:1px solid #d8b4fe;padding:14px 12px;border-radius:12px;cursor:pointer;display:flex;flex-direction:column;align-items:flex-start;gap:8px;text-align:left;">
+            <span style="width:42px;height:42px;border-radius:12px;background:#7c3aed;color:#fff;display:inline-flex;align-items:center;justify-content:center;font-size:18px;"><i class="fa-solid fa-receipt"></i></span>
+            <span style="font-size:14px;font-weight:700;line-height:1.2;">Últimas compras</span>
+            <span style="font-size:11px;color:#7c3aed;line-height:1.35;">Consultar histórico recente de compra</span>
+          </button>
+          <button id="modalAcoesBtnManual" type="button" style="grid-column:1 / -1;background:linear-gradient(135deg,#eff6ff,#dbeafe);color:#075985;border:1px solid #93c5fd;padding:14px 12px;border-radius:12px;cursor:pointer;display:flex;align-items:center;gap:12px;text-align:left;">
+            <span style="width:42px;height:42px;border-radius:12px;background:#0ea5e9;color:#fff;display:inline-flex;align-items:center;justify-content:center;font-size:18px;flex:0 0 auto;"><i class="fa-solid fa-book"></i></span>
+            <span style="display:flex;flex-direction:column;gap:4px;min-width:0;">
+              <span style="font-size:14px;font-weight:700;line-height:1.2;">Manual de instrução</span>
+              <span style="font-size:11px;color:#0369a1;line-height:1.35;">Abrir, consultar ou anexar manuais do produto</span>
+            </span>
           </button>
         </div>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
-          <button id="modalAcoesBtnCompras" style="background:#ede9fe;color:#7c3aed;border:1px solid #c4b5fd;padding:10px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600;display:flex;align-items:center;justify-content:center;gap:6px;">
-            <i class="fa-solid fa-receipt"></i> Últimas Compras
-          </button>
-          <button id="modalAcoesBtnMovimentar" style="background:linear-gradient(135deg,#6366f1,#4f46e5);color:#fff;border:none;padding:10px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600;display:flex;align-items:center;justify-content:center;gap:6px;">
-            <i class="fa-solid fa-arrows-rotate"></i> Movimentar
-          </button>
-        </div>
-        <button id="modalAcoesBtnManual" style="background:linear-gradient(135deg,#0ea5e9,#0284c7);color:#fff;border:none;padding:10px;border-radius:6px;cursor:pointer;font-size:13px;font-weight:600;display:flex;align-items:center;justify-content:center;gap:6px;">
-          <i class="fa-solid fa-book"></i> Manual de Instrução
-        </button>
       </div>
       <!-- Conteúdo: Tela de Manuais (oculta por padrão) -->
       <div id="modalAcoesManuais" style="display:none;padding:16px 20px;">
@@ -46313,35 +46367,55 @@ window.renderizarCatalogoOmie = renderizarCatalogoOmie;
   `;
   document.body.appendChild(ov);
 
-  if (!document.getElementById('modalAcoesQtdSpinStyle')) {
-    const spinStyle = document.createElement('style');
-    spinStyle.id = 'modalAcoesQtdSpinStyle';
-    spinStyle.textContent = `
-      #modalAcoesQtd::-webkit-outer-spin-button,
-      #modalAcoesQtd::-webkit-inner-spin-button {
-        width: 24px;
-        height: 24px;
-        transform: scale(1.18);
-        opacity: 1;
-        cursor: pointer;
-      }
-    `;
-    document.head.appendChild(spinStyle);
-  }
+  const qtyOverlay = document.createElement('div');
+  qtyOverlay.id = 'modalAcoesQtdOverlay';
+  qtyOverlay.style.cssText = 'display:none;position:fixed;inset:0;z-index:10001;background:rgba(0,0,0,.62);align-items:center;justify-content:center;padding:20px;';
+  qtyOverlay.innerHTML = `
+    <div role="dialog" aria-modal="true" aria-labelledby="modalAcoesQtdTitulo" style="width:min(360px,92vw);background:#fff;border-radius:18px;box-shadow:0 26px 70px rgba(0,0,0,.34);padding:18px 18px 16px;display:flex;flex-direction:column;gap:12px;">
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:10px;">
+        <div style="min-width:0;">
+          <div id="modalAcoesQtdTitulo" style="font-size:16px;font-weight:800;color:#0f172a;"></div>
+          <div id="modalAcoesQtdProduto" style="font-size:12px;color:#64748b;line-height:1.4;margin-top:4px;"></div>
+        </div>
+        <button id="modalAcoesQtdFechar" type="button" aria-label="Fechar quantidade" style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:999px;width:38px;height:38px;cursor:pointer;color:#64748b;font-size:18px;flex:0 0 auto;">&times;</button>
+      </div>
+      <label for="modalAcoesQtdInput" style="font-size:12px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:#64748b;">Quantidade</label>
+      <input id="modalAcoesQtdInput" type="number" inputmode="decimal" autocomplete="off" placeholder="Digite a quantidade" style="width:100%;box-sizing:border-box;padding:14px 16px;border:1px solid #cbd5e1;border-radius:14px;font-size:20px;font-weight:700;color:#0f172a;background:#fff;" />
+      <div id="modalAcoesQtdErro" style="display:none;font-size:12px;color:#dc2626;font-weight:600;"></div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+        <button id="modalAcoesQtdCancelar" type="button" style="min-height:46px;border-radius:12px;border:1px solid #cbd5e1;background:#fff;color:#334155;font-size:14px;font-weight:700;cursor:pointer;">Cancelar</button>
+        <button id="modalAcoesQtdConfirmar" type="button" style="min-height:46px;border-radius:12px;border:none;background:linear-gradient(135deg,#2563eb,#1d4ed8);color:#fff;font-size:14px;font-weight:700;cursor:pointer;">Confirmar</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(qtyOverlay);
 
   let _ctx = {};
+  let _returnFocus = null;
+  let _qtyCtx = null;
+
+  function getSeparacaoTileHtml() {
+    return `
+      <span style="width:42px;height:42px;border-radius:12px;background:#f59e0b;color:#fff;display:inline-flex;align-items:center;justify-content:center;font-size:18px;"><i class="fa-solid fa-clipboard-list"></i></span>
+      <span style="font-size:14px;font-weight:700;line-height:1.2;">Separação</span>
+      <span style="font-size:11px;color:#c2410c;line-height:1.35;">Abrir quantidade para solicitar separação</span>
+    `;
+  }
 
   function resetBotaoSeparacao() {
     const btn = document.getElementById('modalAcoesBtnSeparacao');
     if (!btn) return;
     btn.disabled = false;
-    btn.innerHTML = '<i class="fa-solid fa-clipboard-list"></i> Adicionar separação';
+    btn.innerHTML = getSeparacaoTileHtml();
   }
 
   function fechar() {
     ov.style.display = 'none';
+    document.body.classList.remove('mobile-modal-open');
     _ctx = {};
     resetBotaoSeparacao();
+    _returnFocus?.focus?.({ preventScroll: true });
+    _returnFocus = null;
   }
 
   function mostrarBotoes() {
@@ -46353,6 +46427,118 @@ window.renderizarCatalogoOmie = renderizarCatalogoOmie;
     document.getElementById('modalAcoesBotoes').style.display = 'none';
     document.getElementById('modalAcoesManuais').style.display = 'block';
     carregarManuaisProduto(_ctx.codigo);
+  }
+
+  function fecharQuantidade() {
+    qtyOverlay.style.display = 'none';
+    document.body.classList.remove('mobile-modal-open');
+    _qtyCtx = null;
+    document.getElementById('modalAcoesQtdErro').style.display = 'none';
+    document.getElementById('modalAcoesQtdErro').textContent = '';
+    document.getElementById('modalAcoesQtdInput').value = '';
+  }
+
+  function obterQuantidadeModal() {
+    const input = document.getElementById('modalAcoesQtdInput');
+    const erro = document.getElementById('modalAcoesQtdErro');
+    const raw = String(input?.value || '').trim().replace(',', '.');
+    const valor = Number(raw);
+    if (!raw || !Number.isFinite(valor) || valor <= 0) {
+      if (erro) {
+        erro.textContent = 'Informe uma quantidade maior que zero.';
+        erro.style.display = 'block';
+      }
+      input?.focus({ preventScroll: true });
+      return null;
+    }
+    if (erro) {
+      erro.textContent = '';
+      erro.style.display = 'none';
+    }
+    return valor;
+  }
+
+  function abrirQuantidade(tipo) {
+    _qtyCtx = { tipo, ..._ctx };
+    document.getElementById('modalAcoesQtdTitulo').textContent = tipo === 'carrinho'
+      ? 'Quantidade para compra'
+      : 'Quantidade para separação';
+    document.getElementById('modalAcoesQtdProduto').textContent = _ctx.descricao || _ctx.codigo || '';
+    const input = document.getElementById('modalAcoesQtdInput');
+    input.value = '';
+    input.min = String(String(_ctx.unidade || 'UN').toUpperCase() === 'UN' ? 1 : 0.001);
+    input.step = String(String(_ctx.unidade || 'UN').toUpperCase() === 'UN' ? 1 : 0.001);
+    qtyOverlay.style.display = 'flex';
+    document.body.classList.add('mobile-modal-open');
+    requestAnimationFrame(() => {
+      try {
+        input.focus({ preventScroll: true });
+        input.select();
+      } catch {}
+    });
+  }
+
+  async function confirmarQuantidade() {
+    if (!_qtyCtx) return;
+    const qtdRaw = obterQuantidadeModal();
+    if (qtdRaw === null) return;
+
+    const unidadeNorm = String(_qtyCtx.unidade || 'UN').toUpperCase();
+    const qtd = unidadeNorm === 'UN' ? Math.max(1, Math.round(qtdRaw)) : qtdRaw;
+
+    if (_qtyCtx.tipo === 'carrinho') {
+      const tempInput = document.createElement('input');
+      tempInput.id = 'catalogo-qtd-' + _qtyCtx.codigo;
+      tempInput.value = qtd;
+      tempInput.style.display = 'none';
+      document.body.appendChild(tempInput);
+      selecionarProdutoCatalogo(_qtyCtx.codigo, _qtyCtx.descricao);
+      tempInput.remove();
+      fecharQuantidade();
+      fechar();
+      return;
+    }
+
+    const badge = document.getElementById('listaSeparacaoCount');
+    if (badge) {
+      const total = (parseInt(badge.textContent, 10) || 0) + 1;
+      badge.textContent = total;
+      badge.style.display = '';
+    }
+
+    try {
+      const resp = await fetch('/api/logistica/separacao', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          codigo: _qtyCtx.codigo,
+          descricao: _qtyCtx.descricao,
+          quantidade: qtd,
+          unidade: unidadeNorm
+        })
+      });
+      const data = await resp.json();
+      if (!data.ok) throw new Error(data.error || 'tente novamente.');
+      if (data.merged && badge) {
+        const total = Math.max(0, (parseInt(badge.textContent, 10) || 0) - 1);
+        badge.textContent = total;
+        badge.style.display = total > 0 ? '' : 'none';
+      }
+      fecharQuantidade();
+      fechar();
+    } catch (err) {
+      if (badge) {
+        const total = Math.max(0, (parseInt(badge.textContent, 10) || 0) - 1);
+        badge.textContent = total;
+        badge.style.display = total > 0 ? '' : 'none';
+      }
+      const erro = document.getElementById('modalAcoesQtdErro');
+      if (erro) {
+        erro.textContent = 'Erro ao registrar separação: ' + (err.message || err);
+        erro.style.display = 'block';
+      }
+    }
   }
 
   async function carregarManuaisProduto(codigo) {
@@ -46425,124 +46611,42 @@ window.renderizarCatalogoOmie = renderizarCatalogoOmie;
 
   // Event listeners
   ov.addEventListener('click', e => { if (e.target === ov) fechar(); });
+  qtyOverlay.addEventListener('click', e => { if (e.target === qtyOverlay) fecharQuantidade(); });
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && ov.style.display !== 'none') fechar();
+    if (event.key === 'Escape' && qtyOverlay.style.display !== 'none') fecharQuantidade();
+  });
   document.getElementById('modalAcoesFechar').addEventListener('click', fechar);
   document.getElementById('modalAcoesBtnManual').addEventListener('click', mostrarManuais);
   document.getElementById('modalManuaisVoltar').addEventListener('click', mostrarBotoes);
   document.getElementById('modalManualBtnEnviar').addEventListener('click', enviarManual);
+  document.getElementById('modalAcoesQtdFechar').addEventListener('click', fecharQuantidade);
+  document.getElementById('modalAcoesQtdCancelar').addEventListener('click', fecharQuantidade);
+  document.getElementById('modalAcoesQtdConfirmar').addEventListener('click', confirmarQuantidade);
+  document.getElementById('modalAcoesQtdInput').addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') confirmarQuantidade();
+  });
 
   document.getElementById('modalAcoesBtnCompras').addEventListener('click', () => { const {codigo_produto, codigo, descricao} = _ctx; fechar(); abrirModalUltimasCompras(codigo_produto, codigo, descricao); });
-  document.getElementById('modalAcoesBtnSeparacao').addEventListener('click', () => {
-    const qtdInput = document.getElementById('modalAcoesQtd');
-    const unidadeNorm = String(_ctx.unidade || 'UN').toUpperCase();
-    let qtd = Number(String(qtdInput?.value || '').replace(',', '.'));
-    if (!Number.isFinite(qtd) || qtd <= 0) {
-      qtdInput?.focus();
-      return;
-    }
-    if (unidadeNorm === 'UN') {
-      qtd = Math.max(1, Math.round(qtd));
-    }
-
-    // Capta contexto antes de fechar o modal
-    const codigo   = _ctx.codigo;
-    const descricao = _ctx.descricao;
-
-    // Fecha imediatamente — não bloqueia o usuário
-    fechar();
-
-    // Atualiza badge otimisticamente (+1 provisório)
-    const badge = document.getElementById('listaSeparacaoCount');
-    if (badge) {
-      const total = (parseInt(badge.textContent) || 0) + 1;
-      badge.textContent = total;
-      badge.style.display = '';
-    }
-
-    // Envia em segundo plano
-    fetch('/api/logistica/separacao', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      credentials: 'include',
-      body: JSON.stringify({ codigo, descricao, quantidade: qtd, unidade: unidadeNorm })
-    })
-    .then(r => r.json())
-    .then(data => {
-      if (!data.ok) throw new Error(data.error || 'tente novamente.');
-      if (Array.isArray(window.__carrinhoSepCache)) {
-        const existente = window.__carrinhoSepCache.find(item => item.id === data.id || item.codigo_produto === codigo);
-        if (existente) {
-          existente.quantidade = (Number(existente.quantidade) || 0) + qtd;
-        } else {
-          window.__carrinhoSepCache.push({
-            id: data.id,
-            codigo_produto: codigo,
-            descricao,
-            unidade: unidadeNorm,
-            quantidade: qtd,
-            comentario: null,
-            urgente: false
-          });
-        }
-      }
-      // Se o item foi somado a um existente (merged), desfaz o +1 provisório
-      if (data.merged && badge) {
-        const total = Math.max(0, (parseInt(badge.textContent) || 0) - 1);
-        badge.textContent = total;
-        badge.style.display = total > 0 ? '' : 'none';
-      }
-    })
-    .catch(err => {
-      // Desfaz o +1 provisório e avisa
-      if (badge) {
-        const total = Math.max(0, (parseInt(badge.textContent) || 0) - 1);
-        badge.textContent = total;
-        badge.style.display = total > 0 ? '' : 'none';
-      }
-      console.error('[Separação] Erro ao registrar:', err.message || err);
-      alert('Erro ao registrar separação: ' + (err.message || err));
-    });
-  });
+  document.getElementById('modalAcoesBtnSeparacao').addEventListener('click', () => abrirQuantidade('separacao'));
   document.getElementById('modalAcoesBtnMovimentar').addEventListener('click', () => {
-    const { codigo, descricao, codigo_produto } = _ctx;
+    const {codigo, descricao, codigo_produto} = _ctx;
     fechar();
     abrirModalMovimentacao(codigo, descricao, codigo_produto);
   });
-  document.getElementById('modalAcoesBtnCarrinho').addEventListener('click', () => {
-    const qtdInput = document.getElementById('modalAcoesQtd');
-    const unidadeNorm = String(_ctx.unidade || 'UN').toUpperCase();
-    let qtd = Number(String(qtdInput?.value || '').replace(',', '.'));
-    if (!Number.isFinite(qtd) || qtd <= 0) qtd = 1;
-    if (unidadeNorm === 'UN') qtd = Math.max(1, Math.round(qtd));
-    const {codigo, descricao} = _ctx;
-    // Cria input temporário para compatibilidade
-    const tempInput = document.createElement('input');
-    tempInput.id = 'catalogo-qtd-' + codigo;
-    tempInput.value = qtd;
-    tempInput.style.display = 'none';
-    document.body.appendChild(tempInput);
-    selecionarProdutoCatalogo(codigo, descricao);
-    tempInput.remove();
-    fechar();
-  });
+  document.getElementById('modalAcoesBtnCarrinho').addEventListener('click', () => abrirQuantidade('carrinho'));
 
   window.abrirModalAcoesProduto = function(codigo, codigoProduto, descricao, unidade) {
+    _returnFocus = document.activeElement;
     _ctx = { codigo, codigo_produto: codigoProduto, descricao, unidade };
     document.getElementById('modalAcoesTitulo').textContent = codigo;
     document.getElementById('modalAcoesDescricao').textContent = descricao;
     resetBotaoSeparacao();
-    const qtdInput = document.getElementById('modalAcoesQtd');
-    qtdInput.value = 1;
-    const unidadeNorm = String(unidade || 'UN').toUpperCase();
-    if (unidadeNorm === 'UN') {
-      qtdInput.min = '1';
-      qtdInput.step = '1';
-    } else {
-      qtdInput.min = '0.001';
-      qtdInput.step = '0.001';
-    }
     document.getElementById('modalManualStatus').textContent = '';
     mostrarBotoes();
     ov.style.display = 'flex';
+    document.body.classList.add('mobile-modal-open');
+    document.getElementById('modalAcoesBtnCarrinho')?.focus({ preventScroll: true });
   };
 })();
 
@@ -67616,7 +67720,7 @@ document.addEventListener('DOMContentLoaded', () => {
   window.__atalhoAction['side:log:estoque-minimo'] = () => _abrirEstoqueMinimo(null);
 });
 
-// ===================== MODAL MOVIMENTAÇÃO DE ESTOQUE =====================
+// ===================== MODAL MOVIMENTA��O DE ESTOQUE =====================
 (function () {
   const overlay   = document.getElementById('modalMovimentacao');
   const fecharBtn = document.getElementById('movimFecharBtn');
@@ -67664,7 +67768,7 @@ document.addEventListener('DOMContentLoaded', () => {
   async function carregarEstoqueModal(codigo) {
     if (!codigo) return;
     if (movimEstoqueLocaisEl) {
-      movimEstoqueLocaisEl.innerHTML = '<span class="movim-estoque-vazio">Carregando estoque por armazém…</span>';
+      movimEstoqueLocaisEl.innerHTML = '<span class="movim-estoque-vazio">Carregando estoque por armaz�m�</span>';
     }
     try {
       const cache = window.__estoqueCardCache?.[codigo];
@@ -67684,7 +67788,7 @@ document.addEventListener('DOMContentLoaded', () => {
       console.warn('[modalMovimentacao] erro ao carregar estoque:', e);
       _movimEstoqueLocais = [];
       if (movimEstoqueLocaisEl) {
-        movimEstoqueLocaisEl.innerHTML = '<span class="movim-estoque-vazio">Não foi possível carregar o estoque</span>';
+        movimEstoqueLocaisEl.innerHTML = '<span class="movim-estoque-vazio">N�o foi poss�vel carregar o estoque</span>';
       }
     }
   }
@@ -67734,16 +67838,16 @@ document.addEventListener('DOMContentLoaded', () => {
   const MOVIM_DEFAULT_ORIGEM = '10717096386'; // 2. PORTA PALLET (ALMOXARIFADO)
   const MOVIM_MOTIVOS = {
     ENT: [
-      { v: 'INV', l: 'INV — Ajuste por Inventário' },
-      { v: 'INI', l: 'INI — Estoque Inicial' }
+      { v: 'INV', l: 'INV � Ajuste por Invent�rio' },
+      { v: 'INI', l: 'INI � Estoque Inicial' }
     ],
     SAI: [
-      { v: 'INV', l: 'INV — Ajuste por Inventário' },
-      { v: 'PER', l: 'PER — Baixa por Perda/Quebra' }
+      { v: 'INV', l: 'INV � Ajuste por Invent�rio' },
+      { v: 'PER', l: 'PER � Baixa por Perda/Quebra' }
     ],
     TRF: [
-      { v: 'TRF', l: 'TRF — Transferência entre Locais' },
-      { v: 'TPQ', l: 'TPQ — Transferência por Perda/Quebra' }
+      { v: 'TRF', l: 'TRF � Transfer�ncia entre Locais' },
+      { v: 'TPQ', l: 'TPQ � Transfer�ncia por Perda/Quebra' }
     ]
   };
   const MOVIM_TIPO_ACAO = { ENT: 'ENTRADA', SAI: 'SAIDA', TRF: 'TRANSFERENCIA' };
@@ -67848,7 +67952,7 @@ document.addEventListener('DOMContentLoaded', () => {
         .filter(Boolean)
     );
     const header = `<div class="movim-etq-linha movim-etq-linha--head">
-      <span class="movim-etq-end">Endereço</span>
+      <span class="movim-etq-end">Endere�o</span>
       <span class="movim-etq-meta">ID</span>
       <span class="movim-etq-meta">Qtd</span>
       <span class="movim-etq-meta">Un</span>
@@ -67860,18 +67964,18 @@ document.addEventListener('DOMContentLoaded', () => {
         const end = String(e.endereco || '').trim();
         const endEsc = movimEscHtml(end);
         const id = Number(e.id);
-        const idEsc = movimEscHtml(String(id || '—'));
+        const idEsc = movimEscHtml(String(id || '�'));
         const qtd = movimEscHtml(String(e.qtd != null ? e.qtd : '0'));
         const unidade = movimEscHtml(String(e.unidade || 'UN'));
         const comp = String(e.complemento || '').trim();
         const compHtml = comp
           ? `<span class="movim-etq-meta movim-etq-meta--comp" title="${movimEscHtml(comp)}">${movimEscHtml(comp)}</span>`
-          : '<span class="movim-etq-meta movim-etq-meta--vazio">—</span>';
+          : '<span class="movim-etq-meta movim-etq-meta--vazio">�</span>';
         const sel = selecionados.has(end) ? ' movim-etq-linha--selected' : '';
         const btnPrint = id
           ? `<button type="button" class="movim-etq-btn-print" data-id="${id}" title="Imprimir etiqueta"><i class="fa-solid fa-print"></i></button>`
           : '<span></span>';
-        return `<div class="movim-etq-linha${sel}" data-id="${idEsc}" data-endereco="${endEsc}" role="button" tabindex="0" title="Clique para selecionar este endereço">
+        return `<div class="movim-etq-linha${sel}" data-id="${idEsc}" data-endereco="${endEsc}" role="button" tabindex="0" title="Clique para selecionar este endere�o">
           <span class="movim-etq-end">${endEsc}</span>
           <span class="movim-etq-meta">${idEsc}</span>
           <span class="movim-etq-meta">${qtd}</span>
@@ -67883,7 +67987,7 @@ document.addEventListener('DOMContentLoaded', () => {
     } catch (err) {
       console.error('[modalMovimentacao] render enderecos ETQ', err);
       mostrarMovimEnderecosEtqEstado(
-        '<span class="movim-ref-erro">Erro ao exibir endereços. Feche e abra o modal novamente.</span>'
+        '<span class="movim-ref-erro">Erro ao exibir endere�os. Feche e abra o modal novamente.</span>'
       );
     }
   }
@@ -67954,7 +68058,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function sincronizarEnderecosInternosDaLista() {
-    /* legado — endereços internos são definidos por clique/leitura direta */
+    /* legado � endere�os internos s�o definidos por clique/leitura direta */
   }
 
   async function imprimirEtqLinhaMovim(id, btnEl) {
@@ -67967,7 +68071,7 @@ document.addEventListener('DOMContentLoaded', () => {
       const imp = await imprimirEtiquetasMovim([idNum]);
       if (!imp?.ok) throw new Error(imp?.error || 'Falha ao imprimir etiqueta.');
       if (msg) {
-        msg.textContent = `Etiqueta ID ${idNum} enviada para impressão.`;
+        msg.textContent = `Etiqueta ID ${idNum} enviada para impress�o.`;
         msg.className = 'movim-mensagem ok';
       }
     } catch (err) {
@@ -67986,7 +68090,7 @@ document.addEventListener('DOMContentLoaded', () => {
     limparEnderecosReferencia();
     if (!cod) return;
 
-    mostrarMovimEnderecosEtqEstado('<span class="movim-ref-loading">Carregando endereços…</span>');
+    mostrarMovimEnderecosEtqEstado('<span class="movim-ref-loading">Carregando endere�os�</span>');
 
     const base = (typeof API_BASE === 'string' && API_BASE) ? API_BASE : window.location.origin;
     const url = `${base}/api/etiquetas/rec-impresso/enderecos-referencia-por-produto?codigo=${encodeURIComponent(cod)}`;
@@ -68004,7 +68108,7 @@ document.addEventListener('DOMContentLoaded', () => {
       if (reqId !== _movimEnderecosReq) return;
 
       if (!resp.ok || !json?.ok) {
-        const msg = String(json?.error || `Falha ao carregar endereços (HTTP ${resp.status}).`);
+        const msg = String(json?.error || `Falha ao carregar endere�os (HTTP ${resp.status}).`);
         mostrarMovimEnderecosEtqEstado(`<span class="movim-ref-erro">${movimEscHtml(msg)}</span>`);
         return;
       }
@@ -68014,8 +68118,8 @@ document.addEventListener('DOMContentLoaded', () => {
       if (reqId !== _movimEnderecosReq) return;
       console.warn('[modalMovimentacao] enderecos referencia', err);
       const msg = err?.name === 'AbortError'
-        ? 'Tempo esgotado ao carregar endereços. Verifique a conexão e tente de novo.'
-        : (err?.message || 'Não foi possível carregar endereços.');
+        ? 'Tempo esgotado ao carregar endere�os. Verifique a conex�o e tente de novo.'
+        : (err?.message || 'N�o foi poss�vel carregar endere�os.');
       mostrarMovimEnderecosEtqEstado(`<span class="movim-ref-erro">${movimEscHtml(msg)}</span>`);
     } finally {
       clearTimeout(timeoutId);
@@ -68272,7 +68376,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function preencherMotivosOmieUnificados() {
     if (!omieMotivoSel) return;
-    const opcoes = ['<option value="">Selecione o motivo…</option>'];
+    const opcoes = ['<option value="">Selecione o motivo�</option>'];
     const entList = MOVIM_MOTIVOS.ENT || [];
     const saiList = MOVIM_MOTIVOS.SAI || [];
     const labelsUnificados = new Set();
@@ -68284,19 +68388,19 @@ document.addEventListener('DOMContentLoaded', () => {
 
     for (const ent of entList) {
       if (labelsUnificados.has(`${ent.v}\0${ent.l}`)) {
-        opcoes.push(`<option value="ENT,SAI:${ent.v}">Entrada/Saída — ${escapeHtml(ent.l)}</option>`);
+        opcoes.push(`<option value="ENT,SAI:${ent.v}">Entrada/Sa�da � ${escapeHtml(ent.l)}</option>`);
       } else {
-        opcoes.push(`<option value="ENT:${ent.v}">Entrada — ${escapeHtml(ent.l)}</option>`);
+        opcoes.push(`<option value="ENT:${ent.v}">Entrada � ${escapeHtml(ent.l)}</option>`);
       }
     }
     for (const sai of saiList) {
       if (labelsUnificados.has(`${sai.v}\0${sai.l}`)) continue;
-      opcoes.push(`<option value="SAI:${sai.v}">Saída — ${escapeHtml(sai.l)}</option>`);
+      opcoes.push(`<option value="SAI:${sai.v}">Sa�da � ${escapeHtml(sai.l)}</option>`);
     }
     for (const o of (MOVIM_MOTIVOS.TRF || [])) {
-      opcoes.push(`<option value="TRF:${o.v}">Transferência — ${escapeHtml(o.l)}</option>`);
+      opcoes.push(`<option value="TRF:${o.v}">Transfer�ncia � ${escapeHtml(o.l)}</option>`);
     }
-    opcoes.push('<option value="INTERNO">Ajuste fora da Omie — Interno</option>');
+    opcoes.push('<option value="INTERNO">Ajuste fora da Omie - Interno</option>');
     omieMotivoSel.innerHTML = opcoes.join('');
   }
 
@@ -68320,12 +68424,12 @@ document.addEventListener('DOMContentLoaded', () => {
     const tipoOmie = obterTipoExecutarOmie();
     const modo = _movimModoInterno;
 
-    // Motivo sempre visível
+    // Motivo sempre vis�vel
     if (omieMotivoSel?.closest('.movim-field')) {
       omieMotivoSel.closest('.movim-field').style.display = '';
     }
 
-    // Botões de modo (só Interno)
+    // Bot�es de modo (s� Interno)
     if (modoTipoDiv) modoTipoDiv.style.display = interno ? 'flex' : 'none';
 
     // Reset parcial ao trocar motivo sem modo
@@ -68337,7 +68441,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const prontoInterno = interno && !!modo;
     const prontoOmie = !interno && !!tipoOmie;
 
-    // Armazém origem/destino
+    // Armaz�m origem/destino
     const showOrigemArm = prontoOmie && (tipoOmie === 'SAIDA' || tipoOmie === 'TRANSFERENCIA');
     const showDestinoArm = prontoInterno || (prontoOmie && (tipoOmie === 'ENTRADA' || tipoOmie === 'TRANSFERENCIA'));
 
@@ -68355,7 +68459,7 @@ document.addEventListener('DOMContentLoaded', () => {
     mostrarEl('movimImpressoraRow', prontoInterno);
     if (executarBtn) executarBtn.style.display = showCorpo ? 'flex' : 'none';
 
-    // Endereços — campos internos (modo Interno) ou lista ETQ (Omie e Interno)
+    // Endere�os � campos internos (modo Interno) ou lista ETQ (Omie e Interno)
     const internoWrap = document.getElementById('movimEnderecoInternoWrap');
     const externoWrap = document.getElementById('movimEnderecoExternoWrap');
     const scanGeralBtn = document.getElementById('movimScanEnderecoBtn');
@@ -68365,8 +68469,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
     if (endHeader) {
       endHeader.textContent = interno
-        ? 'Endereços'
-        : 'Endereços (opcional — só altera saldo por endereço se selecionar)';
+        ? 'Endere�os'
+        : 'Endere�os (opcional � s� altera saldo por endere�o se selecionar)';
     }
 
     if (!showCorpo) {
@@ -68498,7 +68602,7 @@ document.addEventListener('DOMContentLoaded', () => {
   function obterSolicitanteMovim() {
     const solicitanteEl = document.getElementById('userNameDisplay');
     const solicitanteRaw = String(solicitanteEl?.textContent || '').trim();
-    return solicitanteRaw && solicitanteRaw !== '—' ? solicitanteRaw : null;
+    return solicitanteRaw && solicitanteRaw !== '�' ? solicitanteRaw : null;
   }
 
   async function registrarEnderecosEtq(payload) {
@@ -68513,8 +68617,8 @@ document.addEventListener('DOMContentLoaded', () => {
       body: JSON.stringify(body)
     });
     let json;
-    try { json = await resp.json(); } catch { throw new Error('Resposta inválida ao registrar endereço.'); }
-    if (!resp.ok || !json?.ok) throw new Error(json?.error || `Falha ao registrar endereço (HTTP ${resp.status}).`);
+    try { json = await resp.json(); } catch { throw new Error('Resposta inv�lida ao registrar endere�o.'); }
+    if (!resp.ok || !json?.ok) throw new Error(json?.error || `Falha ao registrar endere�o (HTTP ${resp.status}).`);
     return json;
   }
 
@@ -68524,10 +68628,10 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function montarHtmlRetornoOmie({ ok, titulo, linhas, idSolicitacao }) {
-    const icone = ok ? '✅' : '❌';
+    const icone = ok ? '?' : '?';
     const partes = [`<div class="movim-retorno-titulo">${icone} ${escapeHtml(titulo)}</div>`];
     if (idSolicitacao) {
-      partes.push(`<div class="movim-retorno-id">Solicitação #${escapeHtml(String(idSolicitacao))}</div>`);
+      partes.push(`<div class="movim-retorno-id">Solicita��o #${escapeHtml(String(idSolicitacao))}</div>`);
     }
     (linhas || []).forEach(l => partes.push(`<div class="movim-retorno-linha">${escapeHtml(l)}</div>`));
     return partes.join('');
@@ -68557,7 +68661,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function movimValParaLabelImpressora(val) {
-    if (!val) return '— padrão —';
+    if (!val) return '� padr�o �';
     if (val === '__PDF__') return 'PDF';
     if (val === '__BP__') return 'Agente local';
     if (val.startsWith('__AGENT__:')) {
@@ -68568,9 +68672,9 @@ document.addEventListener('DOMContentLoaded', () => {
     return val;
   }
 
-  const MOVIM_IMPRESSORA_SELECT_IDS = ['movimListboxImpressora', 'movimImpListboxImpressora', 'producaoImpListboxImpressora', 'producaoFichaImpListboxImpressora'];
-  const MOVIM_IMPRESSORA_REFRESH_BTN_IDS = ['movimBtnRefreshImpressoras', 'movimImpBtnRefreshImpressoras', 'producaoImpBtnRefreshImpressoras', 'producaoFichaImpBtnRefreshImpressoras'];
-  const MOVIM_IMPRESSORA_CONFIG_BTN_IDS = ['movimBtnConfigImpressoras', 'movimImpBtnConfigImpressoras', 'producaoImpBtnConfigImpressoras', 'producaoFichaImpBtnConfigImpressoras'];
+  const MOVIM_IMPRESSORA_SELECT_IDS = ['movimListboxImpressora', 'movimImpListboxImpressora', 'producaoImpListboxImpressora'];
+  const MOVIM_IMPRESSORA_REFRESH_BTN_IDS = ['movimBtnRefreshImpressoras', 'movimImpBtnRefreshImpressoras', 'producaoImpBtnRefreshImpressoras'];
+  const MOVIM_IMPRESSORA_CONFIG_BTN_IDS = ['movimBtnConfigImpressoras', 'movimImpBtnConfigImpressoras', 'producaoImpBtnConfigImpressoras'];
 
   async function movimAtualizarListboxImpressora() {
     const selects = MOVIM_IMPRESSORA_SELECT_IDS.map(id => document.getElementById(id)).filter(Boolean);
@@ -68590,14 +68694,14 @@ document.addEventListener('DOMContentLoaded', () => {
     } catch { /* ignora */ }
 
     function buildOptions() {
-      const opts = ['<option value="">— padrão —</option>'];
+      const opts = ['<option value="">� padr�o �</option>'];
       const seen = new Set();
       const add = (val, isPadrao) => {
         const label = movimValParaLabelImpressora(val);
         const key = label.toLowerCase();
         if (seen.has(key)) return;
         seen.add(key);
-        opts.push(`<option value="${escapeHtml(val)}"${isPadrao ? ' style="color:#fbbf24"' : ''}>${isPadrao ? '★ ' : ''}${escapeHtml(label)}</option>`);
+        opts.push(`<option value="${escapeHtml(val)}"${isPadrao ? ' style="color:#fbbf24"' : ''}>${isPadrao ? '? ' : ''}${escapeHtml(label)}</option>`);
       };
       if (todos.length === 0) {
         for (const ag of agentData) {
@@ -68731,7 +68835,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const solicitante = obterSolicitanteMovim();
     const imprimir = !!document.getElementById('movimImprimirEtiqueta')?.checked;
     limparRetornoOmie();
-    if (msg) { msg.textContent = 'Registrando movimentacao interna…'; msg.className = 'movim-mensagem info'; }
+    if (msg) { msg.textContent = 'Registrando movimentacao interna�'; msg.className = 'movim-mensagem info'; }
     _processandoAcao = true;
     setBotoesAcaoDisabled(true);
 
@@ -68757,12 +68861,12 @@ document.addEventListener('DOMContentLoaded', () => {
       ].filter(Boolean);
 
       if (imprimir && ids.length) {
-        if (msg) { msg.textContent = 'Enviando etiqueta para impressao…'; msg.className = 'movim-mensagem info'; }
+        if (msg) { msg.textContent = 'Enviando etiqueta para impressao�'; msg.className = 'movim-mensagem info'; }
         const imp = await imprimirEtiquetasMovim(ids);
         if (imp?.ok) {
           linhas.push(`${imp.quantidade || ids.length} etiqueta(s) enviada(s) para impressao.`);
         } else {
-          linhas.push(`Impressao: ${imp?.error || 'falhou — configure a impressora em Identificacao do produto.'}`);
+          linhas.push(`Impressao: ${imp?.error || 'falhou � configure a impressora em Identificacao do produto.'}`);
         }
       }
 
@@ -68782,7 +68886,7 @@ document.addEventListener('DOMContentLoaded', () => {
         titulo: 'Falha ao registrar movimentacao',
         linhas: [String(err?.message || err)]
       }), 'erro');
-      if (msg) { msg.textContent = 'Falha — veja o retorno abaixo.'; msg.className = 'movim-mensagem erro'; }
+      if (msg) { msg.textContent = 'Falha � veja o retorno abaixo.'; msg.className = 'movim-mensagem erro'; }
     } finally {
       _processandoAcao = false;
       setBotoesAcaoDisabled(false);
@@ -68873,7 +68977,7 @@ document.addEventListener('DOMContentLoaded', () => {
     renderEnderecoInternoValores();
   });
 
-  // Operadores de quantidade (+, −, ×, /)
+  // Operadores de quantidade (+, -, �, /)
   if (operDiv) {
     operDiv.addEventListener('click', e => {
       const btn = e.target.closest('button[data-insert]');
@@ -68911,7 +69015,7 @@ document.addEventListener('DOMContentLoaded', () => {
       const v = key.dataset.v;
       if (v === 'C') {
         _calcExpr = '';
-      } else if (v === '←') {
+      } else if (v === '?') {
         _calcExpr = _calcExpr.slice(0, -1);
       } else if (v === 'OK') {
         if (_calcExpr.trim()) {
@@ -68924,7 +69028,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 avaliarExpressao();
               }
             }
-          } catch { /* expressão inválida */ }
+          } catch { /* express�o inv�lida */ }
         }
         calcPopup.style.display = 'none';
         return;
@@ -68942,7 +69046,7 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  // Avalia expressão matemática
+  // Avalia express�o matem�tica
   function avaliarExpressao() {
     if (!qtdInput || !qtdResult) return;
     try {
@@ -68989,7 +69093,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
       function preencherDestino(sel) {
         if (!sel) return;
-        sel.innerHTML = '<option value="">Selecione o destino…</option>';
+        sel.innerHTML = '<option value="">Selecione o destino�</option>';
         locais.forEach(l => {
           const opt = document.createElement('option');
           opt.value = l.codigo_local_estoque;
@@ -69016,8 +69120,8 @@ document.addEventListener('DOMContentLoaded', () => {
       const r = await fetch(`/api/logistica/estoque?local=${local}&q=${encodeURIComponent(codigo)}`);
       const d = await r.json();
       const item = (d.dados || []).find(i => i.codigo === codigo);
-      badge.textContent = item ? `Estoque atual: ${Number(item.saldo)} UN` : 'Estoque atual: —';
-    } catch { badge.textContent = 'Estoque atual: —'; }
+      badge.textContent = item ? `Estoque atual: ${Number(item.saldo)} UN` : 'Estoque atual: �';
+    } catch { badge.textContent = 'Estoque atual: �'; }
   }
 
   // Atualiza estoque ao trocar o local
@@ -69033,7 +69137,7 @@ document.addEventListener('DOMContentLoaded', () => {
       // eslint-disable-next-line no-new-func
       const val = Function('"use strict"; return (' + expr.replace(/,/g, '.') + ')')();
       if (typeof val === 'number' && isFinite(val) && val > 0) return val;
-    } catch { /* expressão inválida */ }
+    } catch { /* express�o inv�lida */ }
     return null;
   }
 
@@ -69062,23 +69166,23 @@ document.addEventListener('DOMContentLoaded', () => {
 
     if (!local) {
       if (msg) {
-        msg.textContent = tipo === 'ENT' ? 'Selecione o destino (local de entrada).' : 'Selecione a origem (local de saída).';
+        msg.textContent = tipo === 'ENT' ? 'Selecione o destino (local de entrada).' : 'Selecione a origem (local de sa�da).';
         msg.className = 'movim-mensagem erro';
       }
       return;
     }
     if (!qtd) {
-      if (msg) { msg.textContent = 'Informe uma quantidade válida.'; msg.className = 'movim-mensagem erro'; }
+      if (msg) { msg.textContent = 'Informe uma quantidade v�lida.'; msg.className = 'movim-mensagem erro'; }
       return;
     }
     if (!_codigoProdutoAtual) {
-      if (msg) { msg.textContent = 'Produto não identificado.'; msg.className = 'movim-mensagem erro'; }
+      if (msg) { msg.textContent = 'Produto n�o identificado.'; msg.className = 'movim-mensagem erro'; }
       return;
     }
 
     const solicitante = obterSolicitanteMovim();
     limparRetornoOmie();
-    if (msg) { msg.textContent = 'Registrando ajuste…'; msg.className = 'movim-mensagem info'; }
+    if (msg) { msg.textContent = 'Registrando ajuste�'; msg.className = 'movim-mensagem info'; }
     _processandoAcao = true;
     setBotoesAcaoDisabled(true);
 
@@ -69107,44 +69211,44 @@ document.addEventListener('DOMContentLoaded', () => {
         body: JSON.stringify(payload)
       });
       let resposta;
-      try { resposta = await resp.json(); } catch { throw new Error('Resposta inválida do servidor.'); }
+      try { resposta = await resp.json(); } catch { throw new Error('Resposta inv�lida do servidor.'); }
       if (!resp.ok || !resposta?.ok) {
         throw new Error(resposta?.error || resposta?.detail || `Falha ao registrar ajuste (HTTP ${resp.status}).`);
       }
 
       const registros = Array.isArray(resposta.registros) ? resposta.registros : [];
       const idSolicitacao = registros[0]?.id;
-      if (!idSolicitacao) throw new Error('Solicitação criada sem identificador.');
+      if (!idSolicitacao) throw new Error('Solicita��o criada sem identificador.');
 
-      if (!solicitante || solicitante === 'Usuário') {
+      if (!solicitante || solicitante === 'Usu�rio') {
         exibirRetornoOmie(montarHtmlRetornoOmie({
           ok: false,
-          titulo: 'Solicitação registrada — usuário não identificado',
+          titulo: 'Solicita��o registrada � usu�rio n�o identificado',
           idSolicitacao,
-          linhas: ['Não foi possível enviar para a Omie automaticamente.', 'Aprove em Logística → Armazéns → Ajuste.']
+          linhas: ['N�o foi poss�vel enviar para a Omie automaticamente.', 'Aprove em Log�stica ? Armaz�ns ? Ajuste.']
         }), 'info');
-        if (msg) { msg.textContent = 'Solicitação registrada. Aguardando aprovação.'; msg.className = 'movim-mensagem info'; }
+        if (msg) { msg.textContent = 'Solicita��o registrada. Aguardando aprova��o.'; msg.className = 'movim-mensagem info'; }
         return;
       }
 
-      if (msg) { msg.textContent = 'Enviando para Omie…'; msg.className = 'movim-mensagem info'; }
+      if (msg) { msg.textContent = 'Enviando para Omie�'; msg.className = 'movim-mensagem info'; }
       const respAprovar = await fetch(`/api/ajustes/${idSolicitacao}/aprovar`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ aprovadoPor: solicitante })
       });
       let jsonAprovar;
-      try { jsonAprovar = await respAprovar.json(); } catch { throw new Error('Resposta inválida ao enviar para Omie.'); }
+      try { jsonAprovar = await respAprovar.json(); } catch { throw new Error('Resposta inv�lida ao enviar para Omie.'); }
 
       if (!respAprovar.ok || !jsonAprovar?.ok) {
         const errOmie = jsonAprovar?.error || `Falha ao enviar para Omie (HTTP ${respAprovar.status}).`;
         exibirRetornoOmie(montarHtmlRetornoOmie({
           ok: false,
-          titulo: 'Omie não confirmou o ajuste',
+          titulo: 'Omie n�o confirmou o ajuste',
           idSolicitacao,
-          linhas: [errOmie, 'A solicitação foi salva. Tente aprovar em Logística → Armazéns → Ajuste.']
+          linhas: [errOmie, 'A solicita��o foi salva. Tente aprovar em Log�stica ? Armaz�ns ? Ajuste.']
         }), 'erro');
-        if (msg) { msg.textContent = 'Ajuste pendente — veja o retorno abaixo.'; msg.className = 'movim-mensagem erro'; }
+        if (msg) { msg.textContent = 'Ajuste pendente � veja o retorno abaixo.'; msg.className = 'movim-mensagem erro'; }
         return;
       }
 
@@ -69167,15 +69271,15 @@ document.addEventListener('DOMContentLoaded', () => {
           if (tipo === 'ENT') etqPayload.endereco_destino = enderecos[0];
           else if (tipo === 'SAI') etqPayload.endereco_origem = enderecos[0];
           await registrarEnderecosEtq(etqPayload);
-          linhasRetorno.push(`Endereço atualizado em ETQ: ${enderecos[0]}`);
+          linhasRetorno.push(`Endere�o atualizado em ETQ: ${enderecos[0]}`);
           limparSelecoesListaEtq();
           if (_codigoProdutoAtual) void carregarEnderecosReferencia(_codigoProdutoAtual);
         } catch (etqErr) {
-          linhasRetorno.push(`Omie OK — endereço: ${etqErr?.message || etqErr}`);
+          linhasRetorno.push(`Omie OK � endere�o: ${etqErr?.message || etqErr}`);
         }
       }
 
-      if (!linhasRetorno.length) linhasRetorno.push(`Ajuste ${tipo} concluído com sucesso na Omie.`);
+      if (!linhasRetorno.length) linhasRetorno.push(`Ajuste ${tipo} conclu�do com sucesso na Omie.`);
 
       exibirRetornoOmie(montarHtmlRetornoOmie({
         ok: true,
@@ -69183,7 +69287,7 @@ document.addEventListener('DOMContentLoaded', () => {
         idSolicitacao,
         linhas: linhasRetorno
       }), 'ok');
-      if (msg) { msg.textContent = 'Ajuste concluído.'; msg.className = 'movim-mensagem ok'; }
+      if (msg) { msg.textContent = 'Ajuste conclu�do.'; msg.className = 'movim-mensagem ok'; }
       aplicarEstoqueOtimistaMovim(tipo, {
         origem: tipo === 'SAI' ? local : null,
         destino: tipo === 'ENT' ? local : null,
@@ -69196,7 +69300,7 @@ document.addEventListener('DOMContentLoaded', () => {
         titulo: 'Falha ao registrar ajuste',
         linhas: [String(err?.message || err)]
       }), 'erro');
-      if (msg) { msg.textContent = 'Falha — veja o retorno abaixo.'; msg.className = 'movim-mensagem erro'; }
+      if (msg) { msg.textContent = 'Falha � veja o retorno abaixo.'; msg.className = 'movim-mensagem erro'; }
     } finally {
       _processandoAcao = false;
       setBotoesAcaoDisabled(false);
@@ -69218,11 +69322,11 @@ document.addEventListener('DOMContentLoaded', () => {
       return;
     }
     if (!qtd) {
-      if (msg) { msg.textContent = 'Informe uma quantidade válida.'; msg.className = 'movim-mensagem erro'; }
+      if (msg) { msg.textContent = 'Informe uma quantidade v�lida.'; msg.className = 'movim-mensagem erro'; }
       return;
     }
     if (!_codigoProdutoAtual) {
-      if (msg) { msg.textContent = 'Produto não identificado.'; msg.className = 'movim-mensagem erro'; }
+      if (msg) { msg.textContent = 'Produto n�o identificado.'; msg.className = 'movim-mensagem erro'; }
       return;
     }
 
@@ -69232,7 +69336,7 @@ document.addEventListener('DOMContentLoaded', () => {
     setBotoesAcaoDisabled(true);
 
     try {
-      if (msg) { msg.textContent = 'Registrando solicitação…'; msg.className = 'movim-mensagem info'; }
+      if (msg) { msg.textContent = 'Registrando solicita��o�'; msg.className = 'movim-mensagem info'; }
 
       const cmc = await buscarCmcOrigem(_codigoProdutoAtual, origem);
       const payload = {
@@ -69260,36 +69364,36 @@ document.addEventListener('DOMContentLoaded', () => {
       try {
         resposta = await resp.json();
       } catch {
-        throw new Error('Resposta inválida do servidor.');
+        throw new Error('Resposta inv�lida do servidor.');
       }
 
       if (!resp.ok || !resposta?.ok) {
-        const detalhe = resposta?.error || resposta?.detail || `Falha ao registrar transferência (HTTP ${resp.status}).`;
+        const detalhe = resposta?.error || resposta?.detail || `Falha ao registrar transfer�ncia (HTTP ${resp.status}).`;
         throw new Error(detalhe);
       }
 
       const registros = Array.isArray(resposta.registros) ? resposta.registros : [];
       const idSolicitacao = registros[0]?.id;
       if (!idSolicitacao) {
-        throw new Error('Solicitação criada sem identificador.');
+        throw new Error('Solicita��o criada sem identificador.');
       }
 
       const aprovadoPor = solicitante;
-      if (!aprovadoPor || aprovadoPor === 'Usuário') {
+      if (!aprovadoPor || aprovadoPor === 'Usu�rio') {
         exibirRetornoOmie(montarHtmlRetornoOmie({
           ok: false,
-          titulo: 'Solicitação registrada — usuário não identificado',
+          titulo: 'Solicita��o registrada � usu�rio n�o identificado',
           idSolicitacao,
           linhas: [
-            'Não foi possível enviar para a Omie automaticamente.',
-            'Aprove em Logística → Solicitação de transferência.'
+            'N�o foi poss�vel enviar para a Omie automaticamente.',
+            'Aprove em Log�stica ? Solicita��o de transfer�ncia.'
           ]
         }), 'info');
-        if (msg) { msg.textContent = 'Solicitação registrada. Aguardando aprovação.'; msg.className = 'movim-mensagem info'; }
+        if (msg) { msg.textContent = 'Solicita��o registrada. Aguardando aprova��o.'; msg.className = 'movim-mensagem info'; }
         return;
       }
 
-      if (msg) { msg.textContent = 'Enviando para Omie…'; msg.className = 'movim-mensagem info'; }
+      if (msg) { msg.textContent = 'Enviando para Omie�'; msg.className = 'movim-mensagem info'; }
 
       const respAprovar = await fetch(`/api/transferencias/${idSolicitacao}/aprovar`, {
         method: 'PATCH',
@@ -69301,21 +69405,21 @@ document.addEventListener('DOMContentLoaded', () => {
       try {
         jsonAprovar = await respAprovar.json();
       } catch {
-        throw new Error('Resposta inválida ao enviar para Omie.');
+        throw new Error('Resposta inv�lida ao enviar para Omie.');
       }
 
       if (!respAprovar.ok || !jsonAprovar?.ok) {
         const errOmie = jsonAprovar?.error || `Falha ao enviar para Omie (HTTP ${respAprovar.status}).`;
         exibirRetornoOmie(montarHtmlRetornoOmie({
           ok: false,
-          titulo: 'Omie não confirmou a transferência',
+          titulo: 'Omie n�o confirmou a transfer�ncia',
           idSolicitacao,
           linhas: [
             errOmie,
-            'A solicitação foi salva. Tente aprovar em Logística → Solicitação de transferência.'
+            'A solicita��o foi salva. Tente aprovar em Log�stica ? Solicita��o de transfer�ncia.'
           ]
         }), 'erro');
-        if (msg) { msg.textContent = 'Transferência pendente — veja o retorno abaixo.'; msg.className = 'movim-mensagem erro'; }
+        if (msg) { msg.textContent = 'Transfer�ncia pendente � veja o retorno abaixo.'; msg.className = 'movim-mensagem erro'; }
         return;
       }
 
@@ -69339,14 +69443,14 @@ document.addEventListener('DOMContentLoaded', () => {
           const linhasEtqErro = [];
           const descOmie = jsonAprovar.descricao_status || omie.descricao_status;
           if (descOmie) linhasEtqErro.push(`Mensagem Omie: ${descOmie}`);
-          linhasEtqErro.push(`Omie OK — endereço: ${etqErr?.message || etqErr}`);
+          linhasEtqErro.push(`Omie OK � endere�o: ${etqErr?.message || etqErr}`);
           exibirRetornoOmie(montarHtmlRetornoOmie({
             ok: false,
-            titulo: 'Transferência na Omie — falha no endereço',
+            titulo: 'Transfer�ncia na Omie � falha no endere�o',
             idSolicitacao,
             linhas: linhasEtqErro
           }), 'erro');
-          if (msg) { msg.textContent = 'Omie OK, mas endereço falhou — veja abaixo.'; msg.className = 'movim-mensagem erro'; }
+          if (msg) { msg.textContent = 'Omie OK, mas endere�o falhou � veja abaixo.'; msg.className = 'movim-mensagem erro'; }
           aplicarEstoqueOtimistaMovim('TRANSFERENCIA', { origem, destino, qtd });
           return;
         }
@@ -69357,20 +69461,20 @@ document.addEventListener('DOMContentLoaded', () => {
       const descOmie = jsonAprovar.descricao_status || omie.descricao_status;
       if (descOmie) linhasRetorno.push(`Mensagem Omie: ${descOmie}`);
       if (omie.codigo_status !== undefined && omie.codigo_status !== null && omie.codigo_status !== '') {
-        linhasRetorno.push(`Código Omie: ${omie.codigo_status}`);
+        linhasRetorno.push(`C�digo Omie: ${omie.codigo_status}`);
       }
       const idMov = omie.id_mov || omie.nCodMov || omie.codigo_movimento;
-      if (idMov) linhasRetorno.push(`ID movimentação: ${idMov}`);
-      if (enderecos.length >= 2) linhasRetorno.push(`Endereço(s) registrado(s): ${enderecos.slice(0, 2).join(', ')}`);
-      if (!linhasRetorno.length) linhasRetorno.push('Transferência concluída com sucesso na Omie.');
+      if (idMov) linhasRetorno.push(`ID movimenta��o: ${idMov}`);
+      if (enderecos.length >= 2) linhasRetorno.push(`Endere�o(s) registrado(s): ${enderecos.slice(0, 2).join(', ')}`);
+      if (!linhasRetorno.length) linhasRetorno.push('Transfer�ncia conclu�da com sucesso na Omie.');
 
       exibirRetornoOmie(montarHtmlRetornoOmie({
         ok: true,
-        titulo: 'Transferência enviada para Omie',
+        titulo: 'Transfer�ncia enviada para Omie',
         idSolicitacao,
         linhas: linhasRetorno
       }), 'ok');
-      if (msg) { msg.textContent = 'Transferência concluída.'; msg.className = 'movim-mensagem ok'; }
+      if (msg) { msg.textContent = 'Transfer�ncia conclu�da.'; msg.className = 'movim-mensagem ok'; }
       aplicarEstoqueOtimistaMovim('TRANSFERENCIA', { origem, destino, qtd });
       if (enderecos.length >= 2) {
         limparSelecoesListaEtq();
@@ -69380,11 +69484,11 @@ document.addEventListener('DOMContentLoaded', () => {
       console.error('[modalMovimentacao] transferencia', err);
       exibirRetornoOmie(montarHtmlRetornoOmie({
         ok: false,
-        titulo: 'Falha ao registrar transferência',
+        titulo: 'Falha ao registrar transfer�ncia',
         linhas: [String(err?.message || err)]
       }), 'erro');
       if (msg) {
-        msg.textContent = 'Falha — veja o retorno da Omie abaixo.';
+        msg.textContent = 'Falha � veja o retorno da Omie abaixo.';
         msg.className = 'movim-mensagem erro';
       }
     } finally {
@@ -69436,9 +69540,9 @@ document.addEventListener('DOMContentLoaded', () => {
     const origem = item?.codigo_local_estoque;
     const destino = item?.codigo_local_estoque_destino;
     if (origem && destino && String(destino) !== '0') {
-      return `${origem} → ${destino}`;
+      return `${origem} ? ${destino}`;
     }
-    return origem != null && origem !== '' ? String(origem) : '—';
+    return origem != null && origem !== '' ? String(origem) : '�';
   }
 
   function parseDataHistoricoOmie(val) {
@@ -69472,19 +69576,19 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     const linhas = lista.map(item => {
-      const tipo = String(item?.tipo || '—').toUpperCase();
-      const qtd = item?.quan ?? item?.quantidade ?? '—';
-      const valor = item?.valor != null && item.valor !== '' ? item.valor : '—';
+      const tipo = String(item?.tipo || '�').toUpperCase();
+      const qtd = item?.quan ?? item?.quantidade ?? '�';
+      const valor = item?.valor != null && item.valor !== '' ? item.valor : '�';
       const obs = String(item?.obs || '').trim();
       return `
         <tr>
-          <td>${escapeHtml(String(item?.data || '—'))}</td>
+          <td>${escapeHtml(String(item?.data || '�'))}</td>
           <td class="${classeTipoHistorico(tipo)}">${escapeHtml(tipo)}</td>
           <td>${escapeHtml(String(qtd))}</td>
-          <td>${escapeHtml(String(item?.motivo || '—'))}</td>
+          <td>${escapeHtml(String(item?.motivo || '�'))}</td>
           <td>${escapeHtml(formatarHistoricoLocal(item))}</td>
           <td>${escapeHtml(String(valor))}</td>
-          <td class="movim-hist-obs">${escapeHtml(obs || '—')}</td>
+          <td class="movim-hist-obs">${escapeHtml(obs || '�')}</td>
         </tr>
       `;
     }).join('');
@@ -69526,7 +69630,7 @@ document.addEventListener('DOMContentLoaded', () => {
       const partes = [];
       if (codigo) partes.push('Codigo: ' + codigo);
       if (idProd) partes.push('ID Omie: ' + idProd);
-      histSub.textContent = partes.join(' · ');
+      histSub.textContent = partes.join(' � ');
     }
     if (histStatus) {
       histStatus.textContent = 'Consultando historico na Omie...';
@@ -69578,7 +69682,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const resp = await fetch(`/api/produtos/detalhe?codigo=${encodeURIComponent(codigo)}`, { credentials: 'include' });
         const json = await resp.json();
         if (resp.ok && json?.codigo_produto) idOmie = json.codigo_produto;
-      } catch { /* ignora — tenta abrir sem fallback */ }
+      } catch { /* ignora � tenta abrir sem fallback */ }
     }
 
     if (!idOmie) {
@@ -69597,7 +69701,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   if (comprasBtn) comprasBtn.addEventListener('click', abrirUltimasComprasMovim);
 
-  // ── Impressão ETQ_rec_impresso ───────────────────────────────────────────
+  // -- Impress�o ETQ_rec_impresso -------------------------------------------
   const impModal = document.getElementById('movimImpressaoModal');
   const impFechar = document.getElementById('movimImpressaoFechar');
   const impCancelar = document.getElementById('movimImpressaoCancelar');
@@ -69620,7 +69724,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     impEtqSel.innerHTML = lista.map(etq => {
       const end = String(etq.endereco || '').trim();
-      const qtd = etq.qtd != null ? ` — Qtd: ${etq.qtd}` : '';
+      const qtd = etq.qtd != null ? ` � Qtd: ${etq.qtd}` : '';
       const comp = etq.complemento ? ` (${String(etq.complemento).slice(0, 40)})` : '';
       return `<option value="${etq.id}">${escapeHtml(end)}${escapeHtml(qtd)}${escapeHtml(comp)}</option>`;
     }).join('');
@@ -69640,10 +69744,10 @@ document.addEventListener('DOMContentLoaded', () => {
     const titulo = document.getElementById('movimImpressaoTitulo');
     const subtitulo = document.getElementById('movimImpressaoSubtitulo');
     if (titulo) titulo.textContent = 'Imprimir etiqueta';
-    if (subtitulo) subtitulo.textContent = (_descricaoProdutoAtual || codigo) + ' · Codigo: ' + codigo;
+    if (subtitulo) subtitulo.textContent = (_descricaoProdutoAtual || codigo) + ' � Codigo: ' + codigo;
     if (impQtdInput) impQtdInput.value = '1';
-    if (impStatus) { impStatus.textContent = 'Carregando etiquetas…'; impStatus.className = 'movim-imp-status'; }
-    if (impEtqSel) impEtqSel.innerHTML = '<option value="">Carregando…</option>';
+    if (impStatus) { impStatus.textContent = 'Carregando etiquetas�'; impStatus.className = 'movim-imp-status'; }
+    if (impEtqSel) impEtqSel.innerHTML = '<option value="">Carregando�</option>';
     if (impModal) impModal.style.display = 'flex';
 
     await movimAtualizarListboxImpressora();
@@ -69662,7 +69766,7 @@ document.addEventListener('DOMContentLoaded', () => {
       } else if (impStatus) {
         impStatus.textContent = _movimEtqImpressaoLista.length === 1
           ? '1 etiqueta disponivel.'
-          : `${_movimEtqImpressaoLista.length} etiquetas — selecione qual imprimir.`;
+          : `${_movimEtqImpressaoLista.length} etiquetas � selecione qual imprimir.`;
         impStatus.className = 'movim-imp-status';
       }
     } catch (err) {
@@ -69686,7 +69790,7 @@ document.addEventListener('DOMContentLoaded', () => {
       return;
     }
     if (impConfirmar) { impConfirmar.disabled = true; }
-    if (impStatus) { impStatus.textContent = 'Enviando para impressao…'; impStatus.className = 'movim-imp-status'; }
+    if (impStatus) { impStatus.textContent = 'Enviando para impressao�'; impStatus.className = 'movim-imp-status'; }
     try {
       const ids = Array.from({ length: qtd }, () => idEtq);
       const imp = await imprimirEtiquetasMovim(ids);
@@ -69765,7 +69869,7 @@ document.addEventListener('DOMContentLoaded', () => {
     atualizarUiMesmoArmazem();
   };
 })();
-// ===================== FIM MODAL MOVIMENTAÇÃO =====================
+// ===================== FIM MODAL MOVIMENTA��O =====================
 
 // ===================== MODAL CARRINHO DE SEPARAÇÃO =====================
 (function () {
