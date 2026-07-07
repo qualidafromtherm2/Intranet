@@ -70494,7 +70494,9 @@ document.addEventListener('DOMContentLoaded', () => {
         window.__carrinhoSepCache = [];
         document.getElementById('modalCarrinhoSepObs').value = '';
         fechar();
-        alert(`Separação enviada com sucesso! (${data.total} ${data.total === 1 ? 'item' : 'itens'})`);
+        const sepInfo = data.n_solic ? ` (${data.n_solic})` : '';
+        const unificado = data.reutilizada ? ' Itens unificados à SEP já aberta para este responsável.' : '';
+        alert(`Separação enviada com sucesso${sepInfo}! ${data.total} ${data.total === 1 ? 'item' : 'itens'}.${unificado}`);
       } else {
         alert('Erro: ' + (data.error || 'tente novamente.'));
       }

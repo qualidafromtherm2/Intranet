@@ -19708,50 +19708,47 @@ app.post('/api/logistica/separacao/enviar', express.json(), async (req, res) => 
 
     // ─── Calcula n_solic ──────────────────────────────────────────────────────
     // SAC/AT (incluindo VIPP): sempre gera SEP nova.
-    // Outros motivos: reutiliza SEP aberta do mesmo solicitante + mesmo
-    // solicitado_para enquanto todos os itens ainda estiverem 'pendente'.
-    // SEP com solicitado_para diferente nunca é reutilizada.
+    // Outros motivos: uma SEP por Resp. retirada — reutiliza SEP aberta do mesmo
+    // solicitado_para (independente de quem montou o carrinho) enquanto todos os
+    // itens ainda estiverem em Solicitado/Stund-by. Após "Iniciar separação"
+    // (status Separação ou além), gera SEP nova.
     const motivosSempreNovo = new Set(['SAC', 'AT']);
     const solicitadoPara = String(solicitado_para || nome_user).trim();
 
     let nSolic = null;
+    let nSolicReutilizada = false;
 
     if (!forcar_novo_sep && !motivosSempreNovo.has(motivoSolicitacao)) {
       const { rows: existing } = await client.query(`
         SELECT DISTINCT i.n_solic
           FROM solicitacao_produto.itens_solicitados i
           JOIN logistica.carrinho c ON c.id = i.id_carr
-         WHERE c.id_user = $1
-           AND i.n_solic IS NOT NULL
+         WHERE i.n_solic IS NOT NULL
            AND i.n_solic ~ '^SEP-[0-9]+$'
            AND NOT EXISTS (
              SELECT 1 FROM solicitacao_produto.itens_solicitados i2
               WHERE i2.n_solic = i.n_solic
-                AND i2.status <> 'pendente'
+                AND i2.status NOT IN ('pendente', 'Stund-by')
            )
            AND NOT EXISTS (
              SELECT 1
                FROM solicitacao_produto.itens_solicitados i3
                JOIN logistica.carrinho c3 ON c3.id = i3.id_carr
               WHERE i3.n_solic = i.n_solic
-                AND (
-                  COALESCE(NULLIF(TRIM(c3.retirada_por), ''), c3.nome_user) IS DISTINCT FROM $2
-                  OR c3.nome_user IS DISTINCT FROM $3
-                )
+                AND COALESCE(NULLIF(TRIM(c3.retirada_por), ''), c3.nome_user) IS DISTINCT FROM $1
            )
            AND EXISTS (
              SELECT 1
                FROM solicitacao_produto.itens_solicitados i4
                JOIN logistica.carrinho c4 ON c4.id = i4.id_carr
               WHERE i4.n_solic = i.n_solic
-                AND c4.id_user = $1
-                AND COALESCE(NULLIF(TRIM(c4.retirada_por), ''), c4.nome_user) = $2
-                AND c4.nome_user = $3
+                AND COALESCE(NULLIF(TRIM(c4.retirada_por), ''), c4.nome_user) = $1
            )
          ORDER BY i.n_solic DESC
          LIMIT 1
-      `, [id_user, solicitadoPara, nome_user]);
+      `, [solicitadoPara]);
       nSolic = existing[0]?.n_solic || null;
+      nSolicReutilizada = !!nSolic;
     }
 
     if (!nSolic) {
@@ -19793,7 +19790,7 @@ app.post('/api/logistica/separacao/enviar', express.json(), async (req, res) => 
     }
 
     await client.query('COMMIT');
-    console.log(`[Separação] Pedido ${nSolic} enviado por ${nome_user} (${itens.length} itens)`);
+    console.log(`[Separação] Pedido ${nSolic} enviado por ${nome_user} (${itens.length} itens${nSolicReutilizada ? ', unificado com SEP aberta' : ''})`);
 
     // Se veio do fluxo de envio (VIPP ou manual), registra em envios.solicitacoes
     const metodoEnvio = String(metodo_envio || '').trim() || null;
@@ -19812,7 +19809,7 @@ app.post('/api/logistica/separacao/enviar', express.json(), async (req, res) => 
       }
     }
 
-    res.json({ ok: true, total: itens.length, n_solic: nSolic });
+    res.json({ ok: true, total: itens.length, n_solic: nSolic, reutilizada: nSolicReutilizada });
   } catch (err) {
     try { await client.query('ROLLBACK'); } catch (_) {}
     console.error('[logistica/separacao/enviar] erro:', err);
