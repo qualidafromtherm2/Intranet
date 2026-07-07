@@ -19682,10 +19682,11 @@ app.post('/api/logistica/separacao/enviar', express.json(), async (req, res) => 
 
     // ─── Calcula n_solic ──────────────────────────────────────────────────────
     // SAC/AT (incluindo VIPP): sempre gera SEP nova.
-    // Outros motivos: reutiliza SEP aberta do mesmo usuário enquanto todos os
-    // itens dela ainda estiverem com status 'pendente'. Se não houver nenhuma
-    // disponível, gera SEP nova.
+    // Outros motivos: reutiliza SEP aberta do mesmo solicitante + mesmo
+    // solicitado_para enquanto todos os itens ainda estiverem 'pendente'.
+    // SEP com solicitado_para diferente nunca é reutilizada.
     const motivosSempreNovo = new Set(['SAC', 'AT']);
+    const solicitadoPara = String(solicitado_para || nome_user).trim();
 
     let nSolic = null;
 
@@ -19696,15 +19697,34 @@ app.post('/api/logistica/separacao/enviar', express.json(), async (req, res) => 
           JOIN logistica.carrinho c ON c.id = i.id_carr
          WHERE c.id_user = $1
            AND i.n_solic IS NOT NULL
-           AND i.n_solic LIKE 'SEP-%'
+           AND i.n_solic ~ '^SEP-[0-9]+$'
            AND NOT EXISTS (
              SELECT 1 FROM solicitacao_produto.itens_solicitados i2
               WHERE i2.n_solic = i.n_solic
                 AND i2.status <> 'pendente'
            )
+           AND NOT EXISTS (
+             SELECT 1
+               FROM solicitacao_produto.itens_solicitados i3
+               JOIN logistica.carrinho c3 ON c3.id = i3.id_carr
+              WHERE i3.n_solic = i.n_solic
+                AND (
+                  COALESCE(NULLIF(TRIM(c3.retirada_por), ''), c3.nome_user) IS DISTINCT FROM $2
+                  OR c3.nome_user IS DISTINCT FROM $3
+                )
+           )
+           AND EXISTS (
+             SELECT 1
+               FROM solicitacao_produto.itens_solicitados i4
+               JOIN logistica.carrinho c4 ON c4.id = i4.id_carr
+              WHERE i4.n_solic = i.n_solic
+                AND c4.id_user = $1
+                AND COALESCE(NULLIF(TRIM(c4.retirada_por), ''), c4.nome_user) = $2
+                AND c4.nome_user = $3
+           )
          ORDER BY i.n_solic DESC
          LIMIT 1
-      `, [id_user]);
+      `, [id_user, solicitadoPara, nome_user]);
       nSolic = existing[0]?.n_solic || null;
     }
 
