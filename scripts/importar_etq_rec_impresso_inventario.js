@@ -16,11 +16,9 @@ const path = require('path');
 const { parse } = require('csv-parse');
 const { Pool } = require('pg');
 
-const CSV_PATH = process.argv[2] || path.join(
-  process.env.HOME || '/home/leandro',
-  'Downloads',
-  'INVENTARIO FROMTHERM - produtos_enderecos (1).csv'
-);
+const { resolveInventarioCsv } = require('../utils/etqRecImpressoBackfill');
+
+const CSV_PATH = resolveInventarioCsv(process.argv[2]);
 
 const BATCH_SIZE = 150;
 const COLS = 7; // por linha no INSERT (qtd fica NULL fixo no SQL)
@@ -34,8 +32,8 @@ const pool = new Pool({
 });
 
 async function lerCsv(filePath) {
-  if (!fs.existsSync(filePath)) {
-    throw new Error(`CSV não encontrado: ${filePath}`);
+  if (!filePath || !fs.existsSync(filePath)) {
+    throw new Error(`CSV não encontrado: ${filePath || '(nenhum caminho)'}`);
   }
   return new Promise((resolve, reject) => {
     const rows = [];
@@ -108,6 +106,9 @@ async function inserirLote(client, lote) {
 }
 
 async function main() {
+  if (!CSV_PATH) {
+    throw new Error('CSV de inventário não encontrado. Informe o caminho ou versione produtos/inventario_produtos_enderecos.csv');
+  }
   console.log(`CSV: ${CSV_PATH}`);
   const raw = await lerCsv(CSV_PATH);
   console.log(`Linhas lidas no CSV: ${raw.length}`);

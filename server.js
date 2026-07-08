@@ -15,6 +15,7 @@ const { registrarControleOperacaoImpressaoOp } = require('./utils/controleOperac
 const { iniciarCicloPosto } = require('./utils/tempoProducao');
 const { registrarRiCheckImpressaoOp } = require('./routes/qualidadeRiCheck');
 const { injectStoragePublicUrls, getStoragePublicBaseUrl, ASSETS, agenteExeUrl } = require('./utils/storageUrls');
+const etqRecImpressoBackfill = require('./utils/etqRecImpressoBackfill');
 const OMIE_WEBHOOK_TOKEN = process.env.OMIE_WEBHOOK_TOKEN || null; // se NULL, não exige token
 // Em server.js (topo do arquivo)
 // chave: id da etiqueta (p.ex. número da OP), valor: { fileName, printed: boolean }
@@ -10747,12 +10748,17 @@ app.use('/etiquetas', requireSessionOrAgentForStatic, express.static(etiquetasRo
       )
     `).catch(() => {});
 
+    // Catálogo inventário → Endereço_pp (CSV versionado no repo) + backfill automático.
+    await _etqGarantirCatalogoEnderecoPp(pool).catch(err => {
+      console.error('[etiqueta] garantir Endereço_pp:', err?.message || err);
+    });
+
     // Sanitiza lixo de migração antiga (Endereço_pp sem código, qtd=0) e importa catálogo 1x.
     await _etqSanitizarEMigrarEnderecoPp(pool).catch(err => {
       console.error('[etiqueta] sanitizar/migrar Endereço_pp:', err?.message || err);
     });
 
-    // Apenas backfill seguro — NÃO apaga histórico nem renumera IDs (IDs vão no ZPL).
+    // Backfill seguro — NÃO apaga histórico nem renumera IDs (IDs vão no ZPL).
     await _etqBackfillRecImpressoSeguro(pool).catch(err => {
       console.error('[etiqueta] backfill seguro ETQ_rec_impresso:', err?.message || err);
     });
@@ -11193,76 +11199,14 @@ async function _etqSanitizarEMigrarEnderecoPp(db) {
   console.log(`[etiqueta] Catálogo Endereço_pp: +${mig.rowCount} referência(s) (migração única v3)`);
 }
 
+/** Garante logistica."Endereço_pp" a partir do CSV de inventário versionado no repo. */
+async function _etqGarantirCatalogoEnderecoPp(db) {
+  await etqRecImpressoBackfill.garantirEnderecoPp(db || pool);
+}
+
 /** Backfill seguro de codigo/descricao — nunca apaga nem renumera IDs. */
 async function _etqBackfillRecImpressoSeguro(db) {
-  const conn = db || pool;
-  let total = 0;
-
-  const rec = await conn.query(`
-    UPDATE etiqueta."ETQ_rec_impresso" i
-       SET codigo_produto = COALESCE(NULLIF(TRIM(i.codigo_produto), ''), p.codigo_produto::text),
-           descricao_produto = COALESCE(
-             NULLIF(TRIM(i.descricao_produto), ''),
-             NULLIF(TRIM(p.descricao), ''),
-             NULLIF(TRIM(r.descricao_produto), '')
-           )
-      FROM etiqueta."ETQ_recebimento" r
-      JOIN public.produtos_omie p ON TRIM(p.codigo) = TRIM(r.codigo_produto)
-     WHERE r.id = i.origem_id
-       AND (
-         NULLIF(TRIM(i.codigo_produto), '') IS NULL
-         OR NULLIF(TRIM(i.descricao_produto), '') IS NULL
-       )
-  `);
-  total += rec.rowCount || 0;
-
-  const zpl = await conn.query(`
-    UPDATE etiqueta."ETQ_rec_impresso" i
-       SET codigo_produto = p.codigo_produto::text,
-           descricao_produto = COALESCE(
-             NULLIF(TRIM(i.descricao_produto), ''),
-             NULLIF(TRIM(p.descricao), '')
-           )
-      FROM public.produtos_omie p
-     WHERE (i.codigo_produto IS NULL OR TRIM(i.codigo_produto) = '')
-       AND i.conteudo_zpl IS NOT NULL
-       AND TRIM(i.conteudo_zpl) <> ''
-       AND TRIM(SUBSTRING(i.conteudo_zpl FROM 'Cod\\. Produto: ([^\\^\\n\\r]+)')) <> ''
-       AND TRIM(p.codigo) = TRIM(SUBSTRING(i.conteudo_zpl FROM 'Cod\\. Produto: ([^\\^\\n\\r]+)'))
-       AND p.codigo_produto IS NOT NULL
-  `);
-  total += zpl.rowCount || 0;
-
-  // inventario / catálogo: endereço → logistica."Endereço_pp" (quando existir)
-  const ep = await conn.query(`
-    UPDATE etiqueta."ETQ_rec_impresso" i
-       SET codigo_produto = COALESCE(NULLIF(TRIM(i.codigo_produto), ''), ep.codigo_produto::text),
-           descricao_produto = COALESCE(
-             NULLIF(TRIM(i.descricao_produto), ''),
-             NULLIF(TRIM(ep.descricao), '')
-           )
-      FROM logistica."Endereço_pp" ep
-     WHERE TRIM(COALESCE(i.endereco, '')) = TRIM(ep.completo)
-       AND ep.codigo_produto IS NOT NULL
-       AND (
-         NULLIF(TRIM(i.codigo_produto), '') IS NULL
-         OR NULLIF(TRIM(i.descricao_produto), '') IS NULL
-       )
-  `).catch(() => ({ rowCount: 0 }));
-  total += ep.rowCount || 0;
-
-  // codigo_produto gravado como texto (produtos_omie.codigo) → id Omie
-  const fix = await conn.query(`
-    UPDATE etiqueta."ETQ_rec_impresso" i
-       SET codigo_produto = p.codigo_produto::text,
-           descricao_produto = COALESCE(NULLIF(TRIM(i.descricao_produto), ''), NULLIF(TRIM(p.descricao), ''))
-      FROM public.produtos_omie p
-     WHERE TRIM(i.codigo_produto) = TRIM(p.codigo)
-       AND p.codigo_produto IS NOT NULL
-       AND TRIM(i.codigo_produto) <> TRIM(p.codigo_produto::text)
-  `);
-  total += fix.rowCount || 0;
-
+  const total = await etqRecImpressoBackfill.backfillEtqRecImpresso(db || pool);
   if (total > 0) {
     console.log(`[etiqueta] Backfill seguro ETQ_rec_impresso: ${total} campo(s) preenchido(s)`);
   }

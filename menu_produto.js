@@ -10277,6 +10277,18 @@ if (sacAtGraficosMenuLink) {
   });
 }
 
+const sacAtRelatorioMenuLink = document.getElementById('menu-sac-at-relatorio');
+if (sacAtRelatorioMenuLink) {
+  sacAtRelatorioMenuLink.addEventListener('click', (e) => {
+    e.preventDefault();
+    document.querySelectorAll('.left-side .side-menu a').forEach(a => a.classList.remove('is-active'));
+    sacAtRelatorioMenuLink.classList.add('is-active');
+    showMainTab('sacAtPane');
+    setSacAtModoVisual('relatorio');
+    window._iniciarRelatorioGerencialAt?.();
+  });
+}
+
 const vendasGraficosMenuLink = document.getElementById('menu-vendas-graficos');
 if (vendasGraficosMenuLink) {
   vendasGraficosMenuLink.addEventListener('click', (e) => {
@@ -13239,6 +13251,8 @@ let _atViewMode      = 'card'; // 'tabela' | 'card'
 let _atSortCol       = 'id';
 let _atSortDir       = 'desc'; // 'asc' | 'desc'
 let _atFiltroTimer   = null;
+let _atGuiaAtiva     = 'principal'; // 'principal' | 'nf_at'
+let _atRowsVisiveis  = [];   // última lista renderizada (guia principal)
 
 const _atFormatDateBr = (value) => {
   if (!value) return '-';
@@ -13280,6 +13294,14 @@ function _atNormText(value) {
     .trim();
 }
 
+function _atGetStatus(row) {
+  return _atNormText(row?.status);
+}
+
+function _atIsAguardandoNfAt(row) {
+  return _atGetStatus(row) === 'aguardando nf at';
+}
+
 /** Lê os filtros avançados do painel; retorna objeto com os valores ativos */
 function _atLerFiltros() {
   const tipoEl = document.getElementById('atFiltroTipo');
@@ -13289,31 +13311,16 @@ function _atLerFiltros() {
     status:   (statusEl ? statusEl.value : 'EXCLUIR_FECHADO').trim(),
     dataIni:  (document.getElementById('atFiltroDataIni')?.value || '').trim(),
     dataFim:  (document.getElementById('atFiltroDataFim')?.value || '').trim(),
+    incluirNfAt: !!document.getElementById('atFiltroIncluirNfAt')?.checked,
   };
 }
 
-/** Atualiza o badge "!" no botão de filtro quando há filtros não-padrão */
-function _atAtualizarFiltroBadge(f) {
-  const badge = document.getElementById('atFiltroBadge');
-  const btn   = document.getElementById('atFiltroBtn');
-  if (!badge || !btn) return;
-  // dataIni preenchido conta como ativo apenas se diferente do padrão (vazio = 2026 automático não é considerado ativo)
-  const ativo = f.tipo !== 'EXCLUIR_RAPIDO' || f.status !== 'EXCLUIR_FECHADO' || f.dataIni || f.dataFim;
-  badge.style.display = ativo ? 'inline-block' : 'none';
-  btn.style.borderColor = ativo ? '#0ea5e9' : '';
-  btn.style.color = ativo ? '#0ea5e9' : '';
-}
+function _atFiltrarRows(allRows, opts = {}) {
+  const q = String(opts.q ?? document.getElementById('atAtendimentosFiltro')?.value ?? '').toLowerCase().trim();
+  const f = opts.f ?? _atLerFiltros();
+  const guia = opts.guia ?? _atGuiaAtiva;
+  let rows = Array.isArray(allRows) ? allRows : [];
 
-/** Filtra + ordena e re-renderiza conforme o modo atual */
-function _atRenderCurrent() {
-  const filtroEl = document.getElementById('atAtendimentosFiltro');
-  const q = String(filtroEl?.value || '').toLowerCase().trim();
-  const f = _atLerFiltros();
-  _atAtualizarFiltroBadge(f);
-
-  let rows = _atAllRows;
-
-  // Filtro de texto livre — busca nas colunas específicas
   if (q) {
     const _at = v => String(v ?? '').toLowerCase().includes(q);
     rows = rows.filter(r =>
@@ -13331,11 +13338,7 @@ function _atRenderCurrent() {
       _at(r.data_entrega)         ||
       _at(r.tecnico_nome)
     );
-  }
-
-  // Quando há busca de texto livre ativa, ignora todos os filtros avançados
-  if (!q) {
-    // Filtro Tipo
+  } else {
     if (f.tipo === 'EXCLUIR_RAPIDO') {
       rows = rows.filter(r => _atNormText(r.tipo) !== 'atendimento rapido');
     } else if (f.tipo) {
@@ -13343,15 +13346,18 @@ function _atRenderCurrent() {
       rows = rows.filter(r => _atNormText(r.tipo) === tipoFiltroNorm);
     }
 
-    // Filtro Status OS
-    if (f.status === 'EXCLUIR_FECHADO') {
-      rows = rows.filter(r => _atNormText(r.status) !== 'fechado');
-    } else if (f.status) {
-      const statusFiltroNorm = _atNormText(f.status);
-      rows = rows.filter(r => _atNormText(r.status) === statusFiltroNorm);
+    if (guia === 'principal') {
+      if (f.status === 'EXCLUIR_FECHADO') {
+        rows = rows.filter(r => _atGetStatus(r) !== 'fechado');
+      } else if (f.status) {
+        const statusFiltroNorm = _atNormText(f.status);
+        rows = rows.filter(r => _atGetStatus(r) === statusFiltroNorm);
+      }
+      if (!f.incluirNfAt && f.status !== 'Aguardando NF AT') {
+        rows = rows.filter(r => !_atIsAguardandoNfAt(r));
+      }
     }
 
-    // Filtro Data — padrão: apenas registros de 2026 em diante
     const dataPadraoIni = new Date('2026-01-01T00:00:00');
     if (f.dataIni) {
       const ini = new Date(f.dataIni + 'T00:00:00');
@@ -13360,14 +13366,167 @@ function _atRenderCurrent() {
       rows = rows.filter(r => r.data && new Date(r.data) >= dataPadraoIni);
     }
   }
+
   if (f.dataFim && !q) {
     const fim = new Date(f.dataFim + 'T23:59:59');
     rows = rows.filter(r => r.data && new Date(r.data) <= fim);
   }
 
+  if (guia === 'nf_at') {
+    rows = rows.filter(_atIsAguardandoNfAt);
+  } else if (q && !f.incluirNfAt && f.status !== 'Aguardando NF AT') {
+    rows = rows.filter(r => !_atIsAguardandoNfAt(r));
+  }
+
+  return rows;
+}
+
+function _atAtualizarContadoresGuias() {
+  const q = String(document.getElementById('atAtendimentosFiltro')?.value || '').toLowerCase().trim();
+  const f = _atLerFiltros();
+  const cPrincipal = _atFiltrarRows(_atAllRows, { q, f, guia: 'principal' }).length;
+  const cNfAt = _atFiltrarRows(_atAllRows, { q, f, guia: 'nf_at' }).length;
+  const elPrincipal = document.getElementById('atGuiaPrincipalCount');
+  const elNfAt = document.getElementById('atGuiaNfAtCount');
+  if (elPrincipal) elPrincipal.textContent = String(cPrincipal);
+  if (elNfAt) elNfAt.textContent = String(cNfAt);
+}
+
+function _atAtualizarGuiasUi() {
+  const btnPrincipal = document.getElementById('atGuiaPrincipalBtn');
+  const btnNfAt = document.getElementById('atGuiaNfAtBtn');
+  const chkWrap = document.getElementById('atFiltroIncluirNfAtWrap');
+  const ativo = {
+    bg: 'rgba(14,165,233,.18)',
+    border: '#0ea5e9',
+    color: '#e0f2fe',
+    badgeBg: '#0ea5e9',
+    badgeColor: '#fff',
+  };
+  const inativo = {
+    bg: 'var(--input-bg,#1e2535)',
+    border: 'var(--border-color,#374151)',
+    color: 'var(--inactive-color)',
+    badgeBg: '#374151',
+    badgeColor: '#e5e7eb',
+  };
+
+  [btnPrincipal, btnNfAt].forEach(btn => {
+    if (!btn) return;
+    const isActive = btn.dataset.guia === _atGuiaAtiva;
+    const st = isActive ? ativo : inativo;
+    btn.style.background = st.bg;
+    btn.style.borderColor = st.border;
+    btn.style.color = st.color;
+    const badge = btn.querySelector('span[id$="Count"]');
+    if (badge) {
+      badge.style.background = st.badgeBg;
+      badge.style.color = st.badgeColor;
+    }
+  });
+
+  if (chkWrap) chkWrap.style.display = _atGuiaAtiva === 'principal' ? '' : 'none';
+}
+
+async function _atEnsureXlsxLib() {
+  if (typeof XLSX !== 'undefined') return;
+  const localSrc = (window.API_BASE ? window.API_BASE.replace(/\/+$/, '') : '') + '/vendor/xlsx/xlsx.full.min.js';
+  const cdnSrc = 'https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js';
+  await new Promise((resolve, reject) => {
+    const script = document.createElement('script');
+    script.src = localSrc;
+    script.onload = resolve;
+    script.onerror = () => {
+      const fallback = document.createElement('script');
+      fallback.src = cdnSrc;
+      fallback.onload = resolve;
+      fallback.onerror = () => reject(new Error('Falha ao carregar biblioteca XLSX'));
+      document.head.appendChild(fallback);
+    };
+    document.head.appendChild(script);
+  });
+}
+
+async function _atExportarExcelPrincipal() {
+  const btn = document.getElementById('atBaixarExcelMenuBtn');
+  const prevHtml = btn ? btn.innerHTML : '';
+  try {
+    const q = String(document.getElementById('atAtendimentosFiltro')?.value || '').toLowerCase().trim();
+    const f = _atLerFiltros();
+    const rows = [..._atFiltrarRows(_atAllRows, { q, f, guia: 'principal' })]
+      .sort((a, b) => _atCompare(a, b, _atSortCol, _atSortDir));
+    if (!rows.length) {
+      alert('Nenhum atendimento na guia principal para exportar.');
+      return;
+    }
+    if (btn) {
+      btn.disabled = true;
+      btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin" style="color:#22c55e;"></i> Gerando...';
+    }
+    await _atEnsureXlsxLib();
+    const exportRows = rows.map(r => ({
+      ID: r.id ?? '',
+      Data: _atFormatDateBr(r.data),
+      Tipo: r.tipo ?? '',
+      'Status OS': r.status || r.status_os || '',
+      'Nome revenda/cliente': r.nome_revenda_cliente ?? '',
+      'Descreva reclamação': r.descreva_reclamacao ?? '',
+      Pedido: r.pedido ?? '',
+      'Ordem produção': r.ordem_producao ?? '',
+      Modelo: r.modelo ?? '',
+      Cliente: r.cliente ?? '',
+      'Nota fiscal': r.nota_fiscal ?? '',
+      'Data entrega': r.data_entrega ?? '',
+      '1º TESTE / TIPO DE GÁS': r.teste_tipo_gas ?? '',
+      'Atend. inicial': r.atendimento_inicial ?? '',
+      Telefone: r.telefone ?? '',
+      Estado: r.estado ?? '',
+      Técnico: r.tecnico_nome ?? '',
+    }));
+    const worksheet = XLSX.utils.json_to_sheet(exportRows);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'AT Principal');
+    const stamp = new Date().toISOString().slice(0, 10);
+    XLSX.writeFile(workbook, `at_guia_principal_${stamp}.xlsx`);
+  } catch (err) {
+    console.error('[SAC/AT] erro ao exportar Excel', err);
+    alert('Erro ao exportar Excel.');
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = prevHtml || '<i class="fa-solid fa-file-excel" style="color:#22c55e;"></i> Baixar Excel';
+    }
+  }
+}
+
+/** Atualiza o badge "!" no botão de filtro quando há filtros não-padrão */
+function _atAtualizarFiltroBadge(f) {
+  const badge = document.getElementById('atFiltroBadge');
+  const btn   = document.getElementById('atFiltroBtn');
+  if (!badge || !btn) return;
+  // dataIni preenchido conta como ativo apenas se diferente do padrão (vazio = 2026 automático não é considerado ativo)
+  const ativo = f.tipo !== 'EXCLUIR_RAPIDO' || f.status !== 'EXCLUIR_FECHADO' || f.incluirNfAt || f.dataIni || f.dataFim;
+  badge.style.display = ativo ? 'inline-block' : 'none';
+  btn.style.borderColor = ativo ? '#0ea5e9' : '';
+  btn.style.color = ativo ? '#0ea5e9' : '';
+}
+
+/** Filtra + ordena e re-renderiza conforme o modo atual */
+function _atRenderCurrent() {
+  const filtroEl = document.getElementById('atAtendimentosFiltro');
+  const q = String(filtroEl?.value || '').toLowerCase().trim();
+  const f = _atLerFiltros();
+  _atAtualizarFiltroBadge(f);
+  _atAtualizarGuiasUi();
+  _atAtualizarContadoresGuias();
+
+  let rows = _atFiltrarRows(_atAllRows, { q, f, guia: _atGuiaAtiva });
   rows = [...rows].sort((a, b) => _atCompare(a, b, _atSortCol, _atSortDir));
 
-  setAtAtendimentosStatus(`${rows.length} atendimento(s).`, false);
+  if (_atGuiaAtiva === 'principal') _atRowsVisiveis = rows;
+
+  const guiaLabel = _atGuiaAtiva === 'nf_at' ? 'Aguardando NF AT' : 'Indefinido e outros';
+  setAtAtendimentosStatus(`${rows.length} atendimento(s) — ${guiaLabel}.`, false);
 
   if (_atViewMode === 'card') {
     _renderAtCards(rows);
@@ -13685,33 +13844,10 @@ function _abrirAtOsModal(id, navRows) {
   if (navRows) {
     _atOsNavRows = navRows;
   } else {
-    // Coleta rows visíveis (mesma lógica de filtro de _atRenderCurrent)
     const filtroEl = document.getElementById('atAtendimentosFiltro');
     const q = String(filtroEl?.value || '').toLowerCase().trim();
     const f = _atLerFiltros();
-    let rows = _atAllRows;
-    if (q) {
-      const _at = v => String(v ?? '').toLowerCase().includes(q);
-      rows = rows.filter(r =>
-        _at(r.id) || _at(r.atendimento_inicial) ||
-        _at(r.nome_revenda_cliente) || _at(r.telefone) || _at(r.cpf_cnpj) ||
-        _at(r.estado) || _at(r.descreva_reclamacao) || _at(r.pedido) ||
-        _at(r.modelo) || _at(r.nota_fiscal) || _at(r.tecnico_nome)
-      );
-    }
-    if (f.tipo === 'EXCLUIR_RAPIDO') rows = rows.filter(r => _atNormText(r.tipo) !== 'atendimento rapido');
-    else if (f.tipo) {
-      const tipoFiltroNorm = _atNormText(f.tipo);
-      rows = rows.filter(r => _atNormText(r.tipo) === tipoFiltroNorm);
-    }
-    if (f.status === 'EXCLUIR_FECHADO') rows = rows.filter(r => _atNormText(r.status) !== 'fechado');
-    else if (f.status) {
-      const statusFiltroNorm = _atNormText(f.status);
-      rows = rows.filter(r => _atNormText(r.status) === statusFiltroNorm);
-    }
-    if (f.dataIni) { const ini = new Date(f.dataIni+'T00:00:00'); rows = rows.filter(r => r.data && new Date(r.data) >= ini); }
-    else { rows = rows.filter(r => r.data && new Date(r.data) >= new Date('2026-01-01T00:00:00')); }
-    if (f.dataFim) { const fim = new Date(f.dataFim+'T23:59:59'); rows = rows.filter(r => r.data && new Date(r.data) <= fim); }
+    let rows = _atFiltrarRows(_atAllRows, { q, f, guia: _atGuiaAtiva });
     rows = [...rows].sort((a, b) => _atCompare(a, b, _atSortCol, _atSortDir));
     _atOsNavRows = rows;
   }
@@ -14717,6 +14853,14 @@ function _abrirAtOsModal(id, navRows) {
       document.dispatchEvent(new CustomEvent('atMaterialApoioOpen'));
     });
   }
+
+  const excelBtn = document.getElementById('atBaixarExcelMenuBtn');
+  if (excelBtn) {
+    excelBtn.addEventListener('click', () => {
+      fecharDrop();
+      _atExportarExcelPrincipal();
+    });
+  }
 })();
 
 // ── Modal Meus Atalhos (sac.sac_atalhos) ─────────────────────────────────────
@@ -14981,6 +15125,7 @@ function _abrirAtOsModal(id, navRows) {
   const anexoBtn    = document.getElementById('atMatApoioAnexoBtn');
   const arquivoNome = document.getElementById('atMatApoioArquivoNome');
   const arquivoAtual= document.getElementById('atMatApoioArquivoAtual');
+  const anexosLista = document.getElementById('atMatApoioAnexosLista');
   const enviarBtn   = document.getElementById('atMatApoioEnviarBtn');
   const formMsg     = document.getElementById('atMatApoioFormMsg');
   if (!modal || !tbody || !cardsGrid) return;
@@ -15012,27 +15157,102 @@ function _abrirAtOsModal(id, navRows) {
     return allItens.find(x => normalizarId(x.id) === normalizarId(id)) || null;
   }
 
-  function renderArquivoCell(item) {
-    const status = String(item.status_upload || 'concluido');
+  function anexosDoItem(item) {
+    if (Array.isArray(item?.anexos)) return item.anexos;
+    if (item?.nome_arquivo) {
+      return [{
+        id: item.id,
+        nome_arquivo: item.nome_arquivo,
+        url_publica: item.url_publica,
+        status_upload: item.status_upload,
+        upload_erro: item.upload_erro,
+      }];
+    }
+    return [];
+  }
+
+  function renderAnexoCell(anexo) {
+    const status = String(anexo.status_upload || 'concluido');
     if (status === 'enviando') {
       return `<span style="display:inline-flex;align-items:center;gap:6px;color:#fbbf24;font-size:12px;">
-        <i class="fas fa-circle-notch fa-spin"></i> upload...
+        <i class="fas fa-circle-notch fa-spin"></i> ${escapeAtHtml(anexo.nome_arquivo)}…
       </span>`;
     }
     if (status === 'erro') {
-      const err = item.upload_erro ? ` title="${escapeAtHtml(item.upload_erro)}"` : '';
-      return `<span style="color:#f87171;font-size:12px;"${err}>Falha no upload</span>`;
+      const err = anexo.upload_erro ? ` title="${escapeAtHtml(anexo.upload_erro)}"` : '';
+      return `<span style="color:#f87171;font-size:12px;"${err}>${escapeAtHtml(anexo.nome_arquivo)} — falha</span>`;
     }
-    if (item.url_publica) {
-      return `<a href="${escapeAtHtml(item.url_publica)}" target="_blank" rel="noopener noreferrer" style="color:#38bdf8;font-size:12px;text-decoration:none;">
-        ${escapeAtHtml(item.nome_arquivo)}
+    if (anexo.url_publica) {
+      return `<a href="${escapeAtHtml(anexo.url_publica)}" target="_blank" rel="noopener noreferrer" style="color:#38bdf8;font-size:12px;text-decoration:none;display:block;">
+        ${escapeAtHtml(anexo.nome_arquivo)}
       </a>`;
     }
-    return `<span style="color:var(--inactive-color);font-size:12px;">${escapeAtHtml(item.nome_arquivo)}</span>`;
+    return `<span style="color:var(--inactive-color);font-size:12px;display:block;">${escapeAtHtml(anexo.nome_arquivo)}</span>`;
+  }
+
+  function renderArquivosCell(item) {
+    const anexos = anexosDoItem(item);
+    if (!anexos.length) {
+      return '<span style="color:var(--inactive-color);font-size:12px;">Sem anexos</span>';
+    }
+    return `<div style="display:flex;flex-direction:column;gap:3px;">${anexos.map(renderAnexoCell).join('')}</div>`;
+  }
+
+  function renderAnexosAtuaisForm(item) {
+    if (!anexosLista) return;
+    const anexos = anexosDoItem(item);
+    if (!anexos.length) {
+      anexosLista.style.display = 'none';
+      anexosLista.innerHTML = '';
+      return;
+    }
+    anexosLista.style.display = 'block';
+    anexosLista.innerHTML = `
+      <div style="font-size:11px;color:#94a3b8;margin-bottom:4px;">Anexos atuais (${anexos.length}):</div>
+      <div style="display:flex;flex-direction:column;gap:4px;">
+        ${anexos.map((a) => `
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:6px 8px;border-radius:6px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);">
+            <span style="font-size:12px;color:#e5e7eb;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeAtHtml(a.nome_arquivo)}</span>
+            <button type="button" class="at-mat-apoio-del-anexo-btn" data-anexo-id="${a.id}" title="Remover anexo"
+              style="flex-shrink:0;background:rgba(239,68,68,.15);color:#ef4444;border:1px solid rgba(239,68,68,.3);border-radius:4px;padding:2px 7px;cursor:pointer;font-size:11px;">
+              <i class="fa-solid fa-trash"></i>
+            </button>
+          </div>`).join('')}
+      </div>`;
+    anexosLista.querySelectorAll('.at-mat-apoio-del-anexo-btn').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        const anexoId = normalizarId(btn.dataset.anexoId);
+        const materialId = normalizarId(editIdInp?.value);
+        if (!anexoId || !materialId) return;
+        if (!confirm('Remover este anexo?')) return;
+        btn.disabled = true;
+        try {
+          const r = await fetch(`/api/sac/at/material-apoio/anexo/${anexoId}`, { method: 'DELETE', credentials: 'same-origin' });
+          const d = await r.json();
+          if (d.ok) {
+            mergeItem(d.item);
+            abrirFormulario(d.item, d.item.tipo);
+          } else {
+            alert(d.error || 'Erro ao remover anexo.');
+          }
+        } catch (_) {
+          alert('Erro de rede.');
+        } finally {
+          btn.disabled = false;
+        }
+      });
+    });
+  }
+
+  function renderArquivoCell(item) {
+    return renderArquivosCell(item);
   }
 
   function temUploadPendente(itens) {
-    return (itens || []).some(i => String(i.status_upload || '') === 'enviando');
+    return (itens || []).some((i) => {
+      if (String(i.status_upload || '') === 'enviando') return true;
+      return anexosDoItem(i).some((a) => String(a.status_upload || '') === 'enviando');
+    });
   }
 
   function pararPoll() {
@@ -15131,14 +15351,11 @@ function _abrirAtOsModal(id, navRows) {
     if (arquivoInp) arquivoInp.value = '';
     if (arquivoNome) arquivoNome.textContent = 'Nenhum arquivo selecionado';
     if (arquivoAtual) {
-      if (editando && item.nome_arquivo) {
-        arquivoAtual.style.display = 'block';
-        arquivoAtual.textContent = `Arquivo atual: ${item.nome_arquivo} (deixe em branco para manter)`;
-      } else {
-        arquivoAtual.style.display = 'none';
-        arquivoAtual.textContent = '';
-      }
+      arquivoAtual.style.display = 'none';
+      arquivoAtual.textContent = '';
     }
+    if (editando) renderAnexosAtuaisForm(item);
+    else if (anexosLista) { anexosLista.style.display = 'none'; anexosLista.innerHTML = ''; }
     if (enviarBtn) {
       enviarBtn.disabled = false;
       enviarBtn.innerHTML = editando
@@ -15160,7 +15377,7 @@ function _abrirAtOsModal(id, navRows) {
       <tr data-id="${item.id}">
         <td style="font-weight:600;">${escapeAtHtml(item.nome)}</td>
         <td><span style="display:inline-flex;align-items:center;gap:5px;"><i class="fa-solid ${formatoIcon(item.formato)}" style="color:#94a3b8;"></i>${escapeAtHtml(item.formato)}</span></td>
-        <td>${renderArquivoCell(item)}</td>
+        <td>${renderArquivosCell(item)}</td>
         <td style="text-align:center;">
           <input type="checkbox" class="at-mat-apoio-pub-chk" data-id="${item.id}" ${item.publico ? 'checked' : ''}
             title="Material público" style="width:16px;height:16px;cursor:pointer;">
@@ -15258,16 +15475,25 @@ function _abrirAtOsModal(id, navRows) {
     else renderTipoCards();
   }
 
-  function itemOtimista(nome, tipo, formato, publico, editId) {
+  function itemOtimista(nome, tipo, formato, publico, editId, arquivos) {
     const extGuess = formato === 'PDF' ? 'pdf' : (formato === 'Video' ? 'mp4' : 'jpg');
+    const anexos = (arquivos && arquivos.length)
+      ? [...arquivos].map((f, idx) => ({
+        id: -(Date.now() + idx),
+        nome_arquivo: f.name || `${nome.replace(/\s+/g, '_')}_${idx + 1}.${extGuess}`,
+        url_publica: null,
+        status_upload: 'enviando',
+        upload_erro: null,
+      }))
+      : [];
     return {
       id: editId || -Date.now(),
       nome,
       tipo,
       formato,
-      nome_arquivo: `${nome.replace(/\s+/g, '_')}.${extGuess}`,
+      anexos,
       url_publica: null,
-      status_upload: 'enviando',
+      status_upload: anexos.length ? 'enviando' : 'concluido',
       upload_erro: null,
       publico: !!publico,
     };
@@ -15326,8 +15552,12 @@ function _abrirAtOsModal(id, navRows) {
   if (anexoBtn && arquivoInp) {
     anexoBtn.addEventListener('click', () => arquivoInp.click());
     arquivoInp.addEventListener('change', () => {
-      const f = arquivoInp.files?.[0];
-      if (arquivoNome) arquivoNome.textContent = f ? f.name : 'Nenhum arquivo selecionado';
+      const files = arquivoInp.files ? [...arquivoInp.files] : [];
+      if (arquivoNome) {
+        arquivoNome.textContent = files.length
+          ? `${files.length} arquivo${files.length !== 1 ? 's' : ''} selecionado${files.length !== 1 ? 's' : ''}`
+          : 'Nenhum arquivo selecionado';
+      }
     });
   }
 
@@ -15338,19 +15568,12 @@ function _abrirAtOsModal(id, navRows) {
       const formato = formatoSel ? formatoSel.value : '';
       const publico = publicoInp ? publicoInp.checked : false;
       const editId = editIdInp ? normalizarId(editIdInp.value) : 0;
-      const arquivo = arquivoInp?.files?.[0];
+      const arquivos = arquivoInp?.files ? [...arquivoInp.files] : [];
 
       if (!nome) { showFormMsg('Informe o nome.', false); return; }
       if (!tipo) { showFormMsg('Informe o tipo.', false); return; }
       if (!formato) { showFormMsg('Selecione o formato.', false); return; }
-      if (!editId && !arquivo) { showFormMsg('Selecione um arquivo para anexar.', false); return; }
-
-      const fd = new FormData();
-      fd.append('nome', nome);
-      fd.append('tipo', tipo);
-      fd.append('formato', formato);
-      fd.append('publico', publico ? '1' : '0');
-      if (arquivo) fd.append('arquivo', arquivo);
+      if (!editId && !arquivos.length) { showFormMsg('Selecione ao menos um arquivo para anexar.', false); return; }
 
       const otimistaId = editId || -Date.now();
       formModal.style.display = 'none';
@@ -15362,8 +15585,8 @@ function _abrirAtOsModal(id, navRows) {
         if (tipoTitulo) tipoTitulo.textContent = tipo;
       }
 
-      if (arquivo || !editId) {
-        mergeItem(itemOtimista(nome, tipo, formato, publico, editId || otimistaId));
+      if (arquivos.length || !editId) {
+        mergeItem(itemOtimista(nome, tipo, formato, publico, editId || otimistaId, arquivos));
       } else if (editId) {
         const atual = buscarItem(editId);
         mergeItem({
@@ -15373,29 +15596,64 @@ function _abrirAtOsModal(id, navRows) {
           tipo,
           formato,
           publico,
-          status_upload: arquivo ? 'enviando' : (atual?.status_upload || 'concluido'),
         });
       }
 
       enviarBtn.disabled = true;
       try {
-        const url = editId
-          ? `/api/sac/at/material-apoio/${editId}`
-          : '/api/sac/at/material-apoio';
-        const r = await fetch(url, {
-          method: editId ? 'PUT' : 'POST',
-          credentials: 'same-origin',
-          body: fd,
-        });
-        const d = await r.json();
-        if (d.ok) {
-          if (!editId) removerItemPorId(otimistaId);
-          mergeItem(d.item);
+        if (editId) {
+          const rMeta = await fetch(`/api/sac/at/material-apoio/${editId}`, {
+            method: 'PUT',
+            credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ nome, tipo, formato, publico }),
+          });
+          const dMeta = await rMeta.json();
+          if (!dMeta.ok) {
+            loadMateriais(true);
+            alert(dMeta.error || 'Erro ao salvar.');
+            return;
+          }
+          let itemFinal = dMeta.item;
+          if (arquivos.length) {
+            const fd = new FormData();
+            arquivos.forEach((f) => fd.append('arquivo', f));
+            const rAnx = await fetch(`/api/sac/at/material-apoio/${editId}/anexos`, {
+              method: 'POST',
+              credentials: 'same-origin',
+              body: fd,
+            });
+            const dAnx = await rAnx.json();
+            if (!dAnx.ok) {
+              mergeItem(itemFinal);
+              alert(dAnx.error || 'Metadados salvos, mas falha ao anexar arquivos.');
+              return;
+            }
+            itemFinal = dAnx.item;
+          }
+          mergeItem(itemFinal);
           loadTipos();
         } else {
-          if (!editId) removerItemPorId(otimistaId);
-          else loadMateriais(true);
-          alert(d.error || 'Erro ao salvar.');
+          const fd = new FormData();
+          fd.append('nome', nome);
+          fd.append('tipo', tipo);
+          fd.append('formato', formato);
+          fd.append('publico', publico ? '1' : '0');
+          arquivos.forEach((f) => fd.append('arquivo', f));
+          const r = await fetch('/api/sac/at/material-apoio', {
+            method: 'POST',
+            credentials: 'same-origin',
+            body: fd,
+          });
+          const d = await r.json();
+          if (d.ok) {
+            removerItemPorId(otimistaId);
+            mergeItem(d.item);
+            loadTipos();
+          } else {
+            removerItemPorId(otimistaId);
+            alert(d.error || 'Erro ao salvar.');
+          }
         }
       } catch (_) {
         if (!editId) removerItemPorId(otimistaId);
@@ -16249,6 +16507,7 @@ function abrirTelaAtFormulario() {
 function setSacAtModoVisual(mode = 'at') {
   const sacAtPane = document.getElementById('sacAtPane');
   const sacAtGraficosPane = document.getElementById('sacAtGraficosPane');
+  const sacAtRelatorioPane = document.getElementById('sacAtRelatorioPane');
   const vendasGraficosPane = document.getElementById('vendasGraficosPane');
   const vendasControlePane = document.getElementById('vendasControlePane');
   const vendasMapaPane     = document.getElementById('vendasMapaPane');
@@ -16260,6 +16519,22 @@ function setSacAtModoVisual(mode = 'at') {
     Array.from(wrapper.children).forEach((child) => {
       if (!(child instanceof HTMLElement)) return;
       if (child === sacAtGraficosPane) {
+        child.style.display = 'flex';
+        return;
+      }
+      if (child.classList.contains('modal-overlay') || child.id === 'atLightbox' || child.id === 'atWhatsappModal') {
+        return;
+      }
+      child.style.display = 'none';
+    });
+    return;
+  }
+
+  if (mode === 'relatorio') {
+    sacAtPane.style.display = 'flex';
+    Array.from(wrapper.children).forEach((child) => {
+      if (!(child instanceof HTMLElement)) return;
+      if (child === sacAtRelatorioPane) {
         child.style.display = 'flex';
         return;
       }
@@ -16321,7 +16596,7 @@ function setSacAtModoVisual(mode = 'at') {
 
   Array.from(wrapper.children).forEach((child) => {
     if (!(child instanceof HTMLElement)) return;
-    if (child === sacAtGraficosPane || child === vendasGraficosPane || child === vendasControlePane || child === vendasMapaPane || child.id === 'atGraficosView') {
+    if (child === sacAtGraficosPane || child === sacAtRelatorioPane || child === vendasGraficosPane || child === vendasControlePane || child === vendasMapaPane || child.id === 'atGraficosView') {
       child.style.display = 'none';
       return;
     }
@@ -17106,13 +17381,32 @@ if (_atFiltroLimparBtn) {
     const statusEl = document.getElementById('atFiltroStatus');
     const iniEl    = document.getElementById('atFiltroDataIni');
     const fimEl    = document.getElementById('atFiltroDataFim');
+    const incluirNfEl = document.getElementById('atFiltroIncluirNfAt');
     if (tipoEl)   tipoEl.value   = 'EXCLUIR_RAPIDO';
     if (statusEl) statusEl.value = 'EXCLUIR_FECHADO';
     if (iniEl)    iniEl.value    = '';
     if (fimEl)    fimEl.value    = '';
+    if (incluirNfEl) incluirNfEl.checked = false;
     panel.style.display = 'none';
     _atRenderCurrent();
   });
+})();
+
+// ── Guias Indefinido e outros / Aguardando NF AT ─────────────────────────────
+(function _initAtGuiasStatus() {
+  const btnPrincipal = document.getElementById('atGuiaPrincipalBtn');
+  const btnNfAt = document.getElementById('atGuiaNfAtBtn');
+  const incluirNfEl = document.getElementById('atFiltroIncluirNfAt');
+
+  function trocarGuia(guia) {
+    if (_atGuiaAtiva === guia) return;
+    _atGuiaAtiva = guia;
+    _atRenderCurrent();
+  }
+
+  if (btnPrincipal) btnPrincipal.addEventListener('click', () => trocarGuia('principal'));
+  if (btnNfAt) btnNfAt.addEventListener('click', () => trocarGuia('nf_at'));
+  if (incluirNfEl) incluirNfEl.addEventListener('change', () => { if (_atGuiaAtiva === 'principal') _atRenderCurrent(); });
 })();
 
 // Ordenação por coluna (modo tabela)
@@ -18464,6 +18758,1125 @@ ${pivotHtml('Menções (Pós abertura de OS)', '#4c1d95', data.mencoes)}
   };
 })();
 
+// ── Relatório Gerencial AT (Fase 2 — layout Fromtherm + páginas) ─────────────
+(function () {
+  let _relGerInit = false;
+  let _relGerData = null;
+  let _relGerTextos = null;
+  let _relGerSecao = 'executivo';
+  const _charts = {};
+  const _chartsRendered = new Set();
+
+  const CORES = ['#1e3a5f', '#f59e0b', '#10b981', '#ef4444', '#8b5cf6', '#06b6d4', '#ec4899', '#84cc16'];
+  const MOEDA = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
+
+  const SECOES = [
+    { id: 'executivo',  label: 'Dashboard Executivo',       icon: 'fa-gauge-high',       pg: 1 },
+    { id: 'geografico', label: 'Distribuição Geográfica',   icon: 'fa-map-location-dot', pg: 2 },
+    { id: 'modelos',    label: 'Modelos',                   icon: 'fa-award',            pg: 3 },
+    { id: 'defeitos',   label: 'Tipo de Defeito',           icon: 'fa-tags',             pg: 4 },
+    { id: 'evolucao',   label: 'Evolução Semanal',          icon: 'fa-chart-column',     pg: 5 },
+    { id: 'pareto',     label: 'Pareto 80/20',              icon: 'fa-chart-line',       pg: 6 },
+    { id: 'financeiro', label: 'Análise Financeira',        icon: 'fa-coins',            pg: 7 },
+    { id: 'plano',      label: 'Plano de Ação',             icon: 'fa-list-check',       pg: 8 },
+    { id: 'conclusao',  label: 'Conclusão Executiva',       icon: 'fa-flag-checkered',   pg: 9 },
+  ];
+
+  function _mesPadrao() {
+    const d = new Date();
+    d.setDate(1);
+    d.setMonth(d.getMonth() - 1);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+  }
+
+  function _fmtData(raw) {
+    if (!raw) return '-';
+    const d = new Date(raw);
+    if (Number.isNaN(d.getTime())) return String(raw).slice(0, 10);
+    return d.toLocaleDateString('pt-BR');
+  }
+
+  function _fmtDataGeracao() {
+    return new Date().toLocaleDateString('pt-BR');
+  }
+
+  function _esc(s) {
+    return String(s ?? '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+
+  function _linhasParaLista(text) {
+    return String(text || '').split('\n').map(s => s.trim()).filter(Boolean);
+  }
+
+  function _gerarTextosPadrao(data) {
+    const kpis = data.kpis || {};
+    const topTags = (data.pareto || []).slice(0, 5);
+    const topEstados = (data.por_estado || []).slice(0, 3);
+    const topModelos = (data.por_modelo || []).slice(0, 3);
+    const pctConc = kpis.total_os ? Math.round((kpis.concluidas / kpis.total_os) * 100) : 0;
+    const tagsCrit = topTags.slice(0, 3).map(r => r.tag).join(', ') || 'nenhuma tag predominante';
+    const estTop = topEstados.map(r => `${r.estado} (${r.total})`).join(', ') || '—';
+    const modTop = topModelos.map(r => `${r.modelo} (${r.total})`).join(', ') || '—';
+
+    const plano_acao = topTags.slice(0, 3).map((r, i) => ({
+      acao: `Ação ${i + 1}`,
+      descricao: `Tratar incidências relacionadas a "${r.tag}" (${r.total} ocorrência(s))`,
+      responsavel: '',
+      prazo: '',
+      prioridade: i === 0 ? 'alta' : (i === 1 ? 'media' : 'baixa'),
+    }));
+    if (!plano_acao.length) {
+      plano_acao.push({ acao: '', descricao: '', responsavel: '', prazo: '', prioridade: 'media' });
+    }
+
+    return {
+      plano_acao,
+      conclusao_resumo: `No mês analisado foram registradas ${kpis.total_os || 0} ordens de serviço, com ${kpis.concluidas || 0} concluídas (${pctConc}%) e ${kpis.em_andamento || 0} em andamento. O valor total de mão de obra informada foi de ${MOEDA.format(kpis.total_mo || 0)}.`,
+      conclusao_pontos_criticos: [
+        `Tags mais frequentes: ${tagsCrit}`,
+        `Estados com maior volume: ${estTop}`,
+        `Modelos com maior incidência: ${modTop}`,
+      ].join('\n'),
+      conclusao_oportunidades: [
+        'Reforçar treinamento nos defeitos do Pareto (80/20)',
+        'Monitorar O.S. em andamento para reduzir tempo de resposta',
+        'Padronizar registro de M.O. nas O.S. concluídas',
+      ].join('\n'),
+    };
+  }
+
+  function _resolverTextos(data) {
+    const padrao = _gerarTextosPadrao(data);
+    const salvo = data.textos?.salvo;
+    if (salvo) {
+      const plano = Array.isArray(data.textos.plano_acao) ? data.textos.plano_acao : [];
+      return {
+        plano_acao: plano.length ? plano : [{ acao: '', descricao: '', responsavel: '', prazo: '', prioridade: 'media' }],
+        conclusao_resumo: data.textos.conclusao_resumo || '',
+        conclusao_pontos_criticos: data.textos.conclusao_pontos_criticos || '',
+        conclusao_oportunidades: data.textos.conclusao_oportunidades || '',
+        editado_por: data.textos.editado_por || null,
+        editado_em: data.textos.editado_em || null,
+      };
+    }
+    return {
+      ...padrao,
+      editado_por: null,
+      editado_em: null,
+    };
+  }
+
+  function _prioLabel(p) {
+    const v = String(p || 'media').toLowerCase();
+    if (v === 'alta') return 'ALTA';
+    if (v === 'baixa') return 'BAIXA';
+    return 'MÉDIA';
+  }
+
+  function _prioClass(p) {
+    const v = String(p || 'media').toLowerCase();
+    if (v === 'alta') return 'at-rel-ger-prio-alta';
+    if (v === 'baixa') return 'at-rel-ger-prio-baixa';
+    return 'at-rel-ger-prio-media';
+  }
+
+  function _destroyChart(key) {
+    if (_charts[key]) {
+      _charts[key].destroy();
+      _charts[key] = null;
+    }
+  }
+
+  function _destroyAllCharts() {
+    Object.keys(_charts).forEach(_destroyChart);
+    _chartsRendered.clear();
+  }
+
+  function _headerHtml(periodo) {
+    return `
+      <div class="at-rel-ger-header">
+        <div class="at-rel-ger-header-top">
+          <div class="at-rel-ger-brand">
+            <div class="at-rel-ger-logo">FT</div>
+            <div>
+              <div class="at-rel-ger-brand-name">FROMTHERM</div>
+              <div class="at-rel-ger-brand-sub">BOMBAS DE CALOR</div>
+            </div>
+          </div>
+          <div class="at-rel-ger-header-title">
+            <div class="at-rel-ger-report-type">Relatório Gerencial Assistência Técnica</div>
+            <div class="at-rel-ger-periodo">${_esc(periodo)}</div>
+          </div>
+          <div class="at-rel-ger-meta">
+            <div><span>Departamento:</span> Qualidade / AT</div>
+            <div><span>Data:</span> ${_esc(_fmtDataGeracao())}</div>
+            <div><span>Versão:</span> 1.0</div>
+          </div>
+        </div>
+        <div class="at-rel-ger-header-bar"></div>
+      </div>`;
+  }
+
+  function _footerHtml(pg) {
+    return `
+      <div class="at-rel-ger-footer">
+        <div class="slogan">Qualidade que transforma. Conforto que dura.</div>
+        <div class="pagina">Página ${pg} de ${SECOES.length}</div>
+      </div>`;
+  }
+
+  function _montarEstruturaPaginas() {
+    const nav = document.getElementById('atRelGerNav');
+    const pagesWrap = document.getElementById('atRelGerPages');
+    if (!nav || !pagesWrap) return;
+
+    const navBtns = SECOES.map(s => `
+      <button type="button" class="at-rel-ger-nav-btn${s.id === _relGerSecao ? ' is-active' : ''}"
+        data-sec="${s.id}" title="Página ${s.pg}">
+        <span class="pg-num">${s.pg}</span>
+        <i class="fa-solid ${s.icon}"></i>
+        <span>${s.label}</span>
+      </button>
+    `).join('');
+    nav.innerHTML = `<div class="at-rel-ger-nav-title">Páginas do relatório</div>${navBtns}`;
+
+    const periodo = _relGerData?.periodo || '—';
+    pagesWrap.innerHTML = `
+      <div class="at-rel-ger-page${_relGerSecao === 'executivo' ? ' is-active' : ''}" data-sec="executivo">
+        ${_headerHtml(periodo)}
+        <div class="at-rel-ger-sec-title"><i class="fa-solid fa-gauge-high"></i> Dashboard Executivo</div>
+        <div class="at-rel-ger-body">
+          <div id="atRelGerKpis" class="at-rel-ger-kpis"></div>
+          <div class="at-rel-ger-grid-2">
+            <div class="at-rel-ger-card">
+              <h4>Status das O.S.</h4>
+              <div class="at-rel-ger-chart sm"><canvas id="atRelGerChartStatus"></canvas></div>
+            </div>
+            <div class="at-rel-ger-card">
+              <h4>Mão de Obra por Estado</h4>
+              <div class="at-rel-ger-chart sm"><canvas id="atRelGerChartMoEstado"></canvas></div>
+            </div>
+          </div>
+        </div>
+        ${_footerHtml(1)}
+      </div>
+
+      <div class="at-rel-ger-page${_relGerSecao === 'geografico' ? ' is-active' : ''}" data-sec="geografico">
+        ${_headerHtml(periodo)}
+        <div class="at-rel-ger-sec-title"><i class="fa-solid fa-map-location-dot"></i> Distribuição Geográfica</div>
+        <div class="at-rel-ger-body">
+          <div class="at-rel-ger-grid-2">
+            <div class="at-rel-ger-card">
+              <h4>O.S. por Estado</h4>
+              <div class="at-rel-ger-chart"><canvas id="atRelGerChartEstado"></canvas></div>
+            </div>
+            <div class="at-rel-ger-card">
+              <h4>Participação por Estado (%)</h4>
+              <div class="at-rel-ger-chart"><canvas id="atRelGerChartEstadoDonut"></canvas></div>
+            </div>
+          </div>
+        </div>
+        ${_footerHtml(2)}
+      </div>
+
+      <div class="at-rel-ger-page${_relGerSecao === 'modelos' ? ' is-active' : ''}" data-sec="modelos">
+        ${_headerHtml(periodo)}
+        <div class="at-rel-ger-sec-title"><i class="fa-solid fa-award"></i> Modelos com Maior Incidência</div>
+        <div class="at-rel-ger-body">
+          <div class="at-rel-ger-grid-2">
+            <div class="at-rel-ger-card">
+              <h4>Ranking de Modelos</h4>
+              <div class="at-rel-ger-chart lg"><canvas id="atRelGerChartModelo"></canvas></div>
+            </div>
+            <div class="at-rel-ger-card">
+              <h4>Tabela — Modelo × Quantidade</h4>
+              <div style="overflow:auto;max-height:300px;">
+                <table class="at-rel-ger-tbl">
+                  <thead><tr><th>Modelo</th><th class="r">Qtd</th></tr></thead>
+                  <tbody id="atRelGerModeloBody"></tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+        ${_footerHtml(3)}
+      </div>
+
+      <div class="at-rel-ger-page${_relGerSecao === 'defeitos' ? ' is-active' : ''}" data-sec="defeitos">
+        ${_headerHtml(periodo)}
+        <div class="at-rel-ger-sec-title"><i class="fa-solid fa-tags"></i> Análise por Tipo de Defeito (Tags)</div>
+        <div class="at-rel-ger-body">
+          <div class="at-rel-ger-grid-2">
+            <div class="at-rel-ger-card">
+              <h4>Tabela de Tags</h4>
+              <div style="overflow:auto;max-height:300px;">
+                <table class="at-rel-ger-tbl">
+                  <thead><tr><th>Tag / Defeito</th><th class="r">Qtd</th><th class="r">%</th></tr></thead>
+                  <tbody id="atRelGerTagBody"></tbody>
+                </table>
+              </div>
+            </div>
+            <div class="at-rel-ger-card">
+              <h4>Distribuição por Tag (%)</h4>
+              <div class="at-rel-ger-chart lg"><canvas id="atRelGerChartTag"></canvas></div>
+            </div>
+          </div>
+        </div>
+        ${_footerHtml(4)}
+      </div>
+
+      <div class="at-rel-ger-page${_relGerSecao === 'evolucao' ? ' is-active' : ''}" data-sec="evolucao">
+        ${_headerHtml(periodo)}
+        <div class="at-rel-ger-sec-title"><i class="fa-solid fa-chart-column"></i> Evolução dos Chamados</div>
+        <div class="at-rel-ger-body">
+          <div class="at-rel-ger-grid-2">
+            <div class="at-rel-ger-card">
+              <h4>O.S. abertas por semana</h4>
+              <div class="at-rel-ger-chart"><canvas id="atRelGerChartSemana"></canvas></div>
+            </div>
+            <div class="at-rel-ger-card">
+              <h4>Status das O.S. no mês</h4>
+              <div class="at-rel-ger-chart"><canvas id="atRelGerChartStatusEvol"></canvas></div>
+            </div>
+          </div>
+        </div>
+        ${_footerHtml(5)}
+      </div>
+
+      <div class="at-rel-ger-page${_relGerSecao === 'pareto' ? ' is-active' : ''}" data-sec="pareto">
+        ${_headerHtml(periodo)}
+        <div class="at-rel-ger-sec-title"><i class="fa-solid fa-chart-line"></i> Pareto (80/20) dos Defeitos</div>
+        <div class="at-rel-ger-body">
+          <div class="at-rel-ger-card" style="margin-bottom:14px;">
+            <h4>Gráfico Pareto — frequência e % acumulado</h4>
+            <div class="at-rel-ger-chart lg"><canvas id="atRelGerChartPareto"></canvas></div>
+          </div>
+          <div class="at-rel-ger-card">
+            <h4>Tabela Pareto</h4>
+            <div style="overflow:auto;max-height:260px;">
+              <table class="at-rel-ger-tbl">
+                <thead><tr><th>Tag</th><th class="r">Qtd</th><th class="r">%</th><th class="r">Acum.</th></tr></thead>
+                <tbody id="atRelGerParetoBody"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+        ${_footerHtml(6)}
+      </div>
+
+      <div class="at-rel-ger-page${_relGerSecao === 'financeiro' ? ' is-active' : ''}" data-sec="financeiro">
+        ${_headerHtml(periodo)}
+        <div class="at-rel-ger-sec-title"><i class="fa-solid fa-coins"></i> Análise Técnica e Financeira</div>
+        <div class="at-rel-ger-body">
+          <div class="at-rel-ger-grid-2" style="margin-bottom:14px;">
+            <div class="at-rel-ger-card">
+              <h4>Observações Técnicas — principais ocorrências</h4>
+              <ul id="atRelGerObsTecnicas" class="at-rel-ger-obs-list"></ul>
+            </div>
+            <div class="at-rel-ger-card">
+              <h4>Resumo financeiro do mês</h4>
+              <div id="atRelGerResumoFin" style="font-size:12px;color:#475569;line-height:1.7;"></div>
+            </div>
+          </div>
+          <div class="at-rel-ger-card">
+            <h4>O.S. concluídas — Mão de Obra informada</h4>
+            <div style="overflow:auto;max-height:320px;">
+              <table class="at-rel-ger-tbl">
+                <thead><tr><th>O.S.</th><th>UF</th><th>Data</th><th class="r">M.O. R$</th></tr></thead>
+                <tbody id="atRelGerFinanceiroBody"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+        ${_footerHtml(7)}
+      </div>
+
+      <div class="at-rel-ger-page${_relGerSecao === 'plano' ? ' is-active' : ''}" data-sec="plano">
+        ${_headerHtml(periodo)}
+        <div class="at-rel-ger-sec-title"><i class="fa-solid fa-list-check"></i> Plano de Ação</div>
+        <div class="at-rel-ger-body">
+          <div class="at-rel-ger-edit-toolbar">
+            <button type="button" id="atRelGerAddPlanoBtn" class="at-rel-ger-btn"><i class="fa-solid fa-plus"></i> Adicionar ação</button>
+            <button type="button" id="atRelGerSalvarPlanoBtn" class="at-rel-ger-btn primary"><i class="fa-solid fa-floppy-disk"></i> Salvar plano</button>
+            <span id="atRelGerPlanoStatus" class="status-msg"></span>
+          </div>
+          <div style="overflow:auto;">
+            <table class="at-rel-ger-tbl at-rel-ger-plano-tbl">
+              <thead>
+                <tr>
+                  <th style="min-width:110px;">Ação</th>
+                  <th style="min-width:180px;">Descrição</th>
+                  <th style="min-width:110px;">Responsável</th>
+                  <th style="min-width:90px;">Prazo</th>
+                  <th style="min-width:90px;">Prioridade</th>
+                  <th style="width:40px;"></th>
+                </tr>
+              </thead>
+              <tbody id="atRelGerPlanoBody"></tbody>
+            </table>
+          </div>
+        </div>
+        ${_footerHtml(8)}
+      </div>
+
+      <div class="at-rel-ger-page${_relGerSecao === 'conclusao' ? ' is-active' : ''}" data-sec="conclusao">
+        ${_headerHtml(periodo)}
+        <div class="at-rel-ger-sec-title"><i class="fa-solid fa-flag-checkered"></i> Conclusão Executiva</div>
+        <div class="at-rel-ger-body">
+          <div class="at-rel-ger-edit-toolbar">
+            <button type="button" id="atRelGerRestaurarConcBtn" class="at-rel-ger-btn warn"><i class="fa-solid fa-wand-magic-sparkles"></i> Restaurar sugestão automática</button>
+            <button type="button" id="atRelGerSalvarConcBtn" class="at-rel-ger-btn primary"><i class="fa-solid fa-floppy-disk"></i> Salvar conclusão</button>
+            <span id="atRelGerConcStatus" class="status-msg"></span>
+          </div>
+          <div class="at-rel-ger-field">
+            <label for="atRelGerConcResumo">Resumo do período</label>
+            <textarea id="atRelGerConcResumo" placeholder="Texto executivo sobre o desempenho do mês..."></textarea>
+          </div>
+          <div class="at-rel-ger-grid-2">
+            <div class="at-rel-ger-field">
+              <label for="atRelGerConcCriticos">Pontos críticos (um por linha)</label>
+              <textarea id="atRelGerConcCriticos" placeholder="Ex.: Tags mais frequentes: Display, Instalação..."></textarea>
+            </div>
+            <div class="at-rel-ger-field">
+              <label for="atRelGerConcOportunidades">Oportunidades (um por linha)</label>
+              <textarea id="atRelGerConcOportunidades" placeholder="Ex.: Reforçar treinamento técnico..."></textarea>
+            </div>
+          </div>
+          <div id="atRelGerConclusaoPreview"></div>
+          <div class="at-rel-ger-total-banner" style="margin-top:16px;">
+            <div class="lbl">Total de O.S. no mês</div>
+            <div class="val" id="atRelGerTotalOsBanner">0</div>
+          </div>
+          <div id="atRelGerEditadoEm" style="margin-top:10px;font-size:11px;color:#94a3b8;text-align:right;"></div>
+        </div>
+        ${_footerHtml(9)}
+      </div>
+    `;
+
+    nav.querySelectorAll('.at-rel-ger-nav-btn').forEach(btn => {
+      btn.addEventListener('click', () => _trocarSecao(btn.dataset.sec));
+    });
+    _wireEditaveis();
+  }
+
+  function _trocarSecao(sec) {
+    if (!sec) return;
+    _relGerSecao = sec;
+    document.querySelectorAll('.at-rel-ger-nav-btn').forEach(b => {
+      b.classList.toggle('is-active', b.dataset.sec === sec);
+    });
+    document.querySelectorAll('.at-rel-ger-page').forEach(p => {
+      p.classList.toggle('is-active', p.dataset.sec === sec);
+    });
+    if (_relGerData && !_chartsRendered.has(sec)) {
+      _renderChartsSecao(sec, _relGerData);
+    }
+    requestAnimationFrame(() => {
+      Object.values(_charts).forEach(ch => ch?.resize?.());
+    });
+  }
+
+  function _renderChartsSecao(sec, data) {
+    if (_chartsRendered.has(sec)) return;
+    _chartsRendered.add(sec);
+
+    const statusRows = data.por_status || [];
+    const estRows = data.por_estado || [];
+    const modRows = data.por_modelo || [];
+    const tagRows = data.por_tag || [];
+    const semRows = data.evolucao_semanal || [];
+    const paretoRows = data.pareto || [];
+
+    if (sec === 'executivo') {
+      _destroyChart('status');
+      const cStatus = document.getElementById('atRelGerChartStatus');
+      if (cStatus) {
+        _charts.status = new Chart(cStatus.getContext('2d'), {
+          type: 'doughnut',
+          data: {
+            labels: statusRows.map(r => r.status),
+            datasets: [{ data: statusRows.map(r => r.total), backgroundColor: ['#10b981', '#f59e0b', '#94a3b8'], borderColor: '#fff', borderWidth: 2 }],
+          },
+          options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom', labels: { color: '#475569', font: { size: 11 } } } } },
+        });
+      }
+      _destroyChart('moEstado');
+      const cMo = document.getElementById('atRelGerChartMoEstado');
+      if (cMo) {
+        const top = estRows.slice(0, 8);
+        _charts.moEstado = new Chart(cMo.getContext('2d'), {
+          type: 'doughnut',
+          data: {
+            labels: top.map(r => r.estado),
+            datasets: [{ data: top.map(r => r.total), backgroundColor: top.map((_, i) => CORES[i % CORES.length]), borderColor: '#fff', borderWidth: 2 }],
+          },
+          options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'right', labels: { color: '#475569', font: { size: 10 }, boxWidth: 10 } } } },
+        });
+      }
+    }
+
+    if (sec === 'geografico') {
+      _destroyChart('estado');
+      const cEstado = document.getElementById('atRelGerChartEstado');
+      if (cEstado) {
+        const top = estRows.slice(0, 12);
+        _charts.estado = new Chart(cEstado.getContext('2d'), {
+          type: 'bar',
+          data: { labels: top.map(r => r.estado), datasets: [{ label: 'O.S.', data: top.map(r => r.total), backgroundColor: '#1e3a5fcc', borderColor: '#1e3a5f', borderWidth: 1, borderRadius: 4 }] },
+          options: { ..._chartOptsBarH(), indexAxis: 'y' },
+        });
+      }
+      _destroyChart('estadoDonut');
+      const cEstDonut = document.getElementById('atRelGerChartEstadoDonut');
+      if (cEstDonut) {
+        const top = estRows.slice(0, 8);
+        _charts.estadoDonut = new Chart(cEstDonut.getContext('2d'), {
+          type: 'doughnut',
+          data: {
+            labels: top.map(r => r.estado),
+            datasets: [{ data: top.map(r => r.total), backgroundColor: top.map((_, i) => CORES[i % CORES.length]), borderColor: '#fff', borderWidth: 2 }],
+          },
+          options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'right', labels: { color: '#475569', font: { size: 10 }, boxWidth: 10 } } } },
+        });
+      }
+    }
+
+    if (sec === 'modelos') {
+      _destroyChart('modelo');
+      const cModelo = document.getElementById('atRelGerChartModelo');
+      if (cModelo) {
+        _charts.modelo = new Chart(cModelo.getContext('2d'), {
+          type: 'bar',
+          data: { labels: modRows.map(r => r.modelo), datasets: [{ label: 'O.S.', data: modRows.map(r => r.total), backgroundColor: '#f59e0bcc', borderColor: '#ea580c', borderWidth: 1, borderRadius: 4 }] },
+          options: { ..._chartOptsBarH(), indexAxis: 'y' },
+        });
+      }
+    }
+
+    if (sec === 'defeitos') {
+      _destroyChart('tag');
+      const cTag = document.getElementById('atRelGerChartTag');
+      if (cTag) {
+        const top = tagRows.slice(0, 8);
+        _charts.tag = new Chart(cTag.getContext('2d'), {
+          type: 'doughnut',
+          data: {
+            labels: top.map(r => r.tag),
+            datasets: [{ data: top.map(r => r.total), backgroundColor: top.map((_, i) => CORES[i % CORES.length]), borderColor: '#fff', borderWidth: 2 }],
+          },
+          options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'right', labels: { color: '#475569', font: { size: 10 }, boxWidth: 10 } } } },
+        });
+      }
+    }
+
+    if (sec === 'evolucao') {
+      _destroyChart('semana');
+      const cSemana = document.getElementById('atRelGerChartSemana');
+      if (cSemana) {
+        _charts.semana = new Chart(cSemana.getContext('2d'), {
+          type: 'bar',
+          data: { labels: semRows.map(r => r.semana), datasets: [{ label: 'O.S. abertas', data: semRows.map(r => r.total), backgroundColor: '#0ea5e9cc', borderColor: '#0284c7', borderWidth: 1, borderRadius: 6 }] },
+          options: _chartOptsBarV(),
+        });
+      }
+      _destroyChart('statusEvol');
+      const cStatusEvol = document.getElementById('atRelGerChartStatusEvol');
+      if (cStatusEvol) {
+        _charts.statusEvol = new Chart(cStatusEvol.getContext('2d'), {
+          type: 'doughnut',
+          data: {
+            labels: statusRows.map(r => r.status),
+            datasets: [{ data: statusRows.map(r => r.total), backgroundColor: ['#10b981', '#f59e0b'], borderColor: '#fff', borderWidth: 2 }],
+          },
+          options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom', labels: { color: '#475569' } } } },
+        });
+      }
+    }
+
+    if (sec === 'pareto') {
+      _destroyChart('pareto');
+      const cPareto = document.getElementById('atRelGerChartPareto');
+      if (cPareto && paretoRows.length) {
+        const top = paretoRows.slice(0, 8);
+        _charts.pareto = new Chart(cPareto.getContext('2d'), {
+          type: 'bar',
+          data: {
+            labels: top.map(r => r.tag),
+            datasets: [
+              { type: 'bar', label: 'Frequência', data: top.map(r => r.total), backgroundColor: '#1e3a5fcc', borderColor: '#1e3a5f', borderWidth: 1, borderRadius: 4, yAxisID: 'y' },
+              { type: 'line', label: '% Acumulado', data: top.map(r => r.pct_acum), borderColor: '#ea580c', backgroundColor: '#ea580c', borderWidth: 2, pointRadius: 4, tension: 0.3, yAxisID: 'y1' },
+            ],
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: { legend: { labels: { color: '#475569' } } },
+            scales: {
+              x: { ticks: { color: '#334155', font: { size: 10 } }, grid: { display: false } },
+              y: { position: 'left', beginAtZero: true, ticks: { color: '#64748b', stepSize: 1 }, grid: { color: '#e2e8f0' } },
+              y1: { position: 'right', min: 0, max: 100, ticks: { color: '#ea580c', callback: v => v + '%' }, grid: { drawOnChartArea: false } },
+            },
+          },
+        });
+      }
+    }
+  }
+
+  function _chartOptsBarH() {
+    return {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { beginAtZero: true, ticks: { color: '#64748b', stepSize: 1 }, grid: { color: '#e2e8f0' } },
+        y: { ticks: { color: '#334155', font: { size: 11 } }, grid: { display: false } },
+      },
+    };
+  }
+
+  function _chartOptsBarV() {
+    return {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { ticks: { color: '#334155' }, grid: { display: false } },
+        y: { beginAtZero: true, ticks: { color: '#64748b', stepSize: 1 }, grid: { color: '#e2e8f0' } },
+      },
+    };
+  }
+
+  function _renderKpis(kpis) {
+    const wrap = document.getElementById('atRelGerKpis');
+    if (!wrap) return;
+    const cards = [
+      { label: 'Total O.S.', value: kpis.total_os, cor: '#1e3a5f' },
+      { label: 'Concluídas', value: kpis.concluidas, cor: '#10b981' },
+      { label: 'Em andamento', value: kpis.em_andamento, cor: '#f59e0b' },
+      { label: 'Estados atendidos', value: kpis.estados_atendidos, cor: '#06b6d4' },
+      { label: 'Modelos atendidos', value: kpis.modelos_atendidos, cor: '#8b5cf6' },
+      { label: 'Total M.O.', value: MOEDA.format(kpis.total_mo || 0), cor: '#22c55e' },
+      { label: 'Custo médio / O.S.', value: MOEDA.format(kpis.custo_medio || 0), cor: '#ea580c' },
+      { label: 'O.S. no mês', value: kpis.abertas_mes, cor: '#2563eb' },
+    ];
+    wrap.innerHTML = cards.map(c => `
+      <div class="at-rel-ger-kpi" style="--kpi-cor:${c.cor}">
+        <div class="lbl">${c.label}</div>
+        <div class="val">${c.value}</div>
+      </div>
+    `).join('');
+  }
+
+  function _renderCharts(data) {
+    _renderChartsSecao(_relGerSecao, data);
+  }
+
+  function _renderTabelas(data) {
+    const tagTotal = (data.por_tag || []).reduce((s, r) => s + r.total, 0);
+
+    const modBody = document.getElementById('atRelGerModeloBody');
+    if (modBody) {
+      const rows = data.por_modelo || [];
+      modBody.innerHTML = rows.length
+        ? rows.map(r => `<tr><td>${_esc(r.modelo)}</td><td class="r">${r.total}</td></tr>`).join('')
+        : '<tr><td colspan="2" style="text-align:center;color:#94a3b8;">Nenhum modelo no período.</td></tr>';
+    }
+
+    const tagBody = document.getElementById('atRelGerTagBody');
+    if (tagBody) {
+      const rows = data.por_tag || [];
+      tagBody.innerHTML = rows.length
+        ? rows.map(r => {
+          const pct = tagTotal ? Math.round((r.total / tagTotal) * 1000) / 10 : 0;
+          return `<tr><td>${_esc(r.tag)}</td><td class="r">${r.total}</td><td class="r">${pct}%</td></tr>`;
+        }).join('')
+        : '<tr><td colspan="3" style="text-align:center;color:#94a3b8;">Nenhuma tag no período.</td></tr>';
+    }
+
+    const paretoBody = document.getElementById('atRelGerParetoBody');
+    if (paretoBody) {
+      const rows = data.pareto || [];
+      paretoBody.innerHTML = rows.length
+        ? rows.map(r => `<tr><td>${_esc(r.tag)}</td><td class="r">${r.total}</td><td class="r">${r.pct}%</td><td class="r">${r.pct_acum}%</td></tr>`).join('')
+        : '<tr><td colspan="4" style="text-align:center;color:#94a3b8;">Nenhum defeito no período.</td></tr>';
+    }
+
+    const finBody = document.getElementById('atRelGerFinanceiroBody');
+    if (finBody) {
+      const rows = data.financeiro || [];
+      finBody.innerHTML = rows.length
+        ? rows.map(r => `<tr><td>${_esc(r.os)}</td><td>${_esc(r.estado || '-')}</td><td>${_fmtData(r.data)}</td><td class="r">${MOEDA.format(r.valor_mo || 0)}</td></tr>`).join('')
+        : '<tr><td colspan="4" style="text-align:center;color:#94a3b8;">Nenhuma M.O. informada no período.</td></tr>';
+    }
+  }
+
+  function _coletarTextosForm() {
+    const planoRows = [];
+    document.querySelectorAll('#atRelGerPlanoBody tr').forEach(tr => {
+      planoRows.push({
+        acao: tr.querySelector('.plano-acao')?.value?.trim() || '',
+        descricao: tr.querySelector('.plano-desc')?.value?.trim() || '',
+        responsavel: tr.querySelector('.plano-resp')?.value?.trim() || '',
+        prazo: tr.querySelector('.plano-prazo')?.value?.trim() || '',
+        prioridade: tr.querySelector('.plano-prio')?.value || 'media',
+      });
+    });
+    return {
+      plano_acao: planoRows,
+      conclusao_resumo: document.getElementById('atRelGerConcResumo')?.value?.trim() || '',
+      conclusao_pontos_criticos: document.getElementById('atRelGerConcCriticos')?.value?.trim() || '',
+      conclusao_oportunidades: document.getElementById('atRelGerConcOportunidades')?.value?.trim() || '',
+    };
+  }
+
+  function _renderPlanoTabela() {
+    const body = document.getElementById('atRelGerPlanoBody');
+    if (!body || !_relGerTextos) return;
+    const rows = _relGerTextos.plano_acao || [];
+    body.innerHTML = rows.map((r, idx) => `
+      <tr data-idx="${idx}">
+        <td><input class="plano-acao" type="text" value="${_esc(r.acao || '')}" placeholder="Ação"></td>
+        <td><input class="plano-desc" type="text" value="${_esc(r.descricao || '')}" placeholder="Descrição"></td>
+        <td><input class="plano-resp" type="text" value="${_esc(r.responsavel || '')}" placeholder="Responsável"></td>
+        <td><input class="plano-prazo" type="text" value="${_esc(r.prazo || '')}" placeholder="DD/MM/AA"></td>
+        <td>
+          <select class="plano-prio">
+            <option value="alta"${r.prioridade === 'alta' ? ' selected' : ''}>ALTA</option>
+            <option value="media"${!r.prioridade || r.prioridade === 'media' ? ' selected' : ''}>MÉDIA</option>
+            <option value="baixa"${r.prioridade === 'baixa' ? ' selected' : ''}>BAIXA</option>
+          </select>
+        </td>
+        <td><button type="button" class="at-rel-ger-btn-icon plano-rem" title="Remover"><i class="fa-solid fa-trash"></i></button></td>
+      </tr>
+    `).join('') || `<tr><td colspan="6" style="text-align:center;color:#94a3b8;">Nenhuma ação cadastrada.</td></tr>`;
+
+    body.querySelectorAll('.plano-rem').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const tr = btn.closest('tr');
+        const idx = parseInt(tr?.dataset.idx || '-1', 10);
+        if (idx < 0 || !_relGerTextos) return;
+        Object.assign(_relGerTextos, _coletarTextosForm());
+        _relGerTextos.plano_acao.splice(idx, 1);
+        if (!_relGerTextos.plano_acao.length) {
+          _relGerTextos.plano_acao.push({ acao: '', descricao: '', responsavel: '', prazo: '', prioridade: 'media' });
+        }
+        _renderPlanoTabela();
+      });
+    });
+  }
+
+  function _renderConclusaoPreview() {
+    const preview = document.getElementById('atRelGerConclusaoPreview');
+    if (!preview || !_relGerTextos) return;
+    const criticos = _linhasParaLista(_relGerTextos.conclusao_pontos_criticos);
+    const oportunidades = _linhasParaLista(_relGerTextos.conclusao_oportunidades);
+    preview.innerHTML = `
+      <div class="at-rel-ger-grid-2" style="margin-top:8px;">
+        <div class="at-rel-ger-conclusao-box">
+          <h5>Prévia — Pontos críticos</h5>
+          ${criticos.length ? `<ul>${criticos.map(l => `<li>${_esc(l)}</li>`).join('')}</ul>` : '<p style="color:#94a3b8;">Nenhum ponto crítico informado.</p>'}
+        </div>
+        <div class="at-rel-ger-conclusao-box">
+          <h5>Prévia — Oportunidades</h5>
+          ${oportunidades.length ? `<ul>${oportunidades.map(l => `<li>${_esc(l)}</li>`).join('')}</ul>` : '<p style="color:#94a3b8;">Nenhuma oportunidade informada.</p>'}
+        </div>
+      </div>
+    `;
+  }
+
+  function _renderEditaveis() {
+    if (!_relGerTextos) return;
+    const resumoEl = document.getElementById('atRelGerConcResumo');
+    const critEl = document.getElementById('atRelGerConcCriticos');
+    const opEl = document.getElementById('atRelGerConcOportunidades');
+    if (resumoEl) resumoEl.value = _relGerTextos.conclusao_resumo || '';
+    if (critEl) critEl.value = _relGerTextos.conclusao_pontos_criticos || '';
+    if (opEl) opEl.value = _relGerTextos.conclusao_oportunidades || '';
+    _renderPlanoTabela();
+    _renderConclusaoPreview();
+
+    const editadoEl = document.getElementById('atRelGerEditadoEm');
+    if (editadoEl) {
+      if (_relGerTextos.editado_em) {
+        const quem = _relGerTextos.editado_por ? ` por ${_esc(_relGerTextos.editado_por)}` : '';
+        editadoEl.textContent = `Última alteração${quem}: ${new Date(_relGerTextos.editado_em).toLocaleString('pt-BR')}`;
+      } else {
+        editadoEl.textContent = 'Sugestão automática — edite e salve para manter no banco.';
+      }
+    }
+  }
+
+  function _setStatusMsg(elId, msg, tipo = '') {
+    const el = document.getElementById(elId);
+    if (!el) return;
+    el.textContent = msg || '';
+    el.className = 'status-msg' + (tipo ? ` ${tipo}` : '');
+  }
+
+  async function _salvarTextos(origem = 'tudo') {
+    if (!_relGerData) return;
+    const mes = document.getElementById('atRelGerMes')?.value || _mesPadrao();
+    const coletado = _coletarTextosForm();
+    _relGerTextos = { ..._relGerTextos, ...coletado };
+
+    const btnPlano = document.getElementById('atRelGerSalvarPlanoBtn');
+    const btnConc = document.getElementById('atRelGerSalvarConcBtn');
+    if (btnPlano) btnPlano.disabled = true;
+    if (btnConc) btnConc.disabled = true;
+    _setStatusMsg('atRelGerPlanoStatus', 'Salvando...');
+    _setStatusMsg('atRelGerConcStatus', 'Salvando...');
+
+    try {
+      const resp = await fetch('/api/sac/at/relatorio-gerencial/textos', {
+        method: 'PUT',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mes, ...coletado }),
+      });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok || data.ok === false) throw new Error(data.error || 'Erro ao salvar.');
+
+      _relGerTextos = { ..._relGerTextos, ...(data.textos || {}), salvo: true };
+      if (_relGerData) _relGerData.textos = data.textos;
+      _renderEditaveis();
+
+      const okMsg = 'Salvo com sucesso.';
+      if (origem === 'plano' || origem === 'tudo') _setStatusMsg('atRelGerPlanoStatus', okMsg, 'ok');
+      if (origem === 'conclusao' || origem === 'tudo') _setStatusMsg('atRelGerConcStatus', okMsg, 'ok');
+    } catch (err) {
+      const errMsg = err.message || 'Erro ao salvar.';
+      if (origem === 'plano' || origem === 'tudo') _setStatusMsg('atRelGerPlanoStatus', errMsg, 'err');
+      if (origem === 'conclusao' || origem === 'tudo') _setStatusMsg('atRelGerConcStatus', errMsg, 'err');
+    } finally {
+      if (btnPlano) btnPlano.disabled = false;
+      if (btnConc) btnConc.disabled = false;
+    }
+  }
+
+  function _wireEditaveis() {
+    const addBtn = document.getElementById('atRelGerAddPlanoBtn');
+    if (addBtn) {
+      const novo = addBtn.cloneNode(true);
+      addBtn.parentNode.replaceChild(novo, addBtn);
+      novo.addEventListener('click', () => {
+        if (!_relGerTextos) return;
+        Object.assign(_relGerTextos, _coletarTextosForm());
+        _relGerTextos.plano_acao.push({ acao: '', descricao: '', responsavel: '', prazo: '', prioridade: 'media' });
+        _renderPlanoTabela();
+      });
+    }
+
+    const salvarPlano = document.getElementById('atRelGerSalvarPlanoBtn');
+    if (salvarPlano) {
+      const novo = salvarPlano.cloneNode(true);
+      salvarPlano.parentNode.replaceChild(novo, salvarPlano);
+      novo.addEventListener('click', () => _salvarTextos('plano'));
+    }
+
+    const salvarConc = document.getElementById('atRelGerSalvarConcBtn');
+    if (salvarConc) {
+      const novo = salvarConc.cloneNode(true);
+      salvarConc.parentNode.replaceChild(novo, salvarConc);
+      novo.addEventListener('click', () => _salvarTextos('conclusao'));
+    }
+
+    const restaurar = document.getElementById('atRelGerRestaurarConcBtn');
+    if (restaurar) {
+      const novo = restaurar.cloneNode(true);
+      restaurar.parentNode.replaceChild(novo, restaurar);
+      novo.addEventListener('click', () => {
+        if (!_relGerData) return;
+        const padrao = _gerarTextosPadrao(_relGerData);
+        _relGerTextos.conclusao_resumo = padrao.conclusao_resumo;
+        _relGerTextos.conclusao_pontos_criticos = padrao.conclusao_pontos_criticos;
+        _relGerTextos.conclusao_oportunidades = padrao.conclusao_oportunidades;
+        _renderEditaveis();
+        _setStatusMsg('atRelGerConcStatus', 'Sugestão automática restaurada. Clique em Salvar para gravar.', '');
+      });
+    }
+
+    ['atRelGerConcResumo', 'atRelGerConcCriticos', 'atRelGerConcOportunidades'].forEach(id => {
+      const el = document.getElementById(id);
+      if (!el) return;
+      el.addEventListener('input', () => {
+        if (!_relGerTextos) return;
+        _relGerTextos.conclusao_resumo = document.getElementById('atRelGerConcResumo')?.value || '';
+        _relGerTextos.conclusao_pontos_criticos = document.getElementById('atRelGerConcCriticos')?.value || '';
+        _relGerTextos.conclusao_oportunidades = document.getElementById('atRelGerConcOportunidades')?.value || '';
+        _renderConclusaoPreview();
+      });
+    });
+  }
+
+  function _renderTextos(data) {
+    const kpis = data.kpis || {};
+    const topTags = (data.pareto || []).slice(0, 5);
+
+    const obsEl = document.getElementById('atRelGerObsTecnicas');
+    if (obsEl) {
+      const itens = topTags.length
+        ? topTags.map(r => `<li><strong>${_esc(r.tag)}</strong> — ${r.total} ocorrência(s) (${r.pct}% do total)</li>`)
+        : ['<li>Nenhuma ocorrência registrada no período.</li>'];
+      obsEl.innerHTML = itens.join('');
+    }
+
+    const resFin = document.getElementById('atRelGerResumoFin');
+    if (resFin) {
+      resFin.innerHTML = `
+        <div><strong>Total M.O. informada:</strong> ${MOEDA.format(kpis.total_mo || 0)}</div>
+        <div><strong>Custo médio por O.S.:</strong> ${MOEDA.format(kpis.custo_medio || 0)}</div>
+        <div><strong>O.S. concluídas:</strong> ${kpis.concluidas || 0} de ${kpis.total_os || 0}</div>
+        <div><strong>Taxa de conclusão:</strong> ${kpis.total_os ? Math.round((kpis.concluidas / kpis.total_os) * 100) : 0}%</div>
+      `;
+    }
+
+    const banner = document.getElementById('atRelGerTotalOsBanner');
+    if (banner) banner.textContent = String(kpis.total_os || 0);
+  }
+
+  function _htmlConclusaoParaPdf(textos) {
+    const criticos = _linhasParaLista(textos?.conclusao_pontos_criticos);
+    const oportunidades = _linhasParaLista(textos?.conclusao_oportunidades);
+    return `
+      <div class="box"><p>${_esc(textos?.conclusao_resumo || '')}</p></div>
+      <div class="row">
+        <div class="box"><h3>Pontos críticos</h3><ul>${criticos.map(l => `<li>${_esc(l)}</li>`).join('') || '<li>—</li>'}</ul></div>
+        <div class="box"><h3>Oportunidades</h3><ul>${oportunidades.map(l => `<li>${_esc(l)}</li>`).join('') || '<li>—</li>'}</ul></div>
+      </div>
+    `;
+  }
+
+  function _htmlPlanoParaPdf(plano) {
+    const rows = Array.isArray(plano) ? plano : [];
+    if (!rows.length) return '<p>Nenhuma ação cadastrada.</p>';
+    const prioStyle = (p) => {
+      const v = String(p || 'media').toLowerCase();
+      if (v === 'alta') return 'background:#fee2e2;color:#b91c1c;';
+      if (v === 'baixa') return 'background:#dcfce7;color:#15803d;';
+      return 'background:#fef9c3;color:#a16207;';
+    };
+    return `<table><thead><tr><th>Ação</th><th>Descrição</th><th>Responsável</th><th>Prazo</th><th>Prioridade</th></tr></thead><tbody>${
+      rows.map(r => `<tr>
+        <td>${_esc(r.acao)}</td>
+        <td>${_esc(r.descricao)}</td>
+        <td>${_esc(r.responsavel)}</td>
+        <td>${_esc(r.prazo)}</td>
+        <td><span style="${prioStyle(r.prioridade)}font-weight:800;padding:2px 6px;border-radius:4px;font-size:9px;">${_prioLabel(r.prioridade)}</span></td>
+      </tr>`).join('')
+    }</tbody></table>`;
+  }
+
+  async function _carregarRelatorio() {
+    const mesEl = document.getElementById('atRelGerMes');
+    const statusEl = document.getElementById('atRelGerStatus');
+    const erroEl = document.getElementById('atRelGerErro');
+    const conteudoEl = document.getElementById('atRelGerConteudo');
+    const mes = mesEl?.value || _mesPadrao();
+    if (mesEl && !mesEl.value) mesEl.value = mes;
+
+    if (statusEl) { statusEl.style.display = 'block'; statusEl.textContent = 'Carregando relatório...'; }
+    if (erroEl) erroEl.style.display = 'none';
+    if (conteudoEl) conteudoEl.style.display = 'none';
+
+    try {
+      const resp = await fetch(`/api/sac/at/relatorio-gerencial?mes=${encodeURIComponent(mes)}`, { credentials: 'include' });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok || data.ok === false) throw new Error(data.error || 'Erro ao carregar relatório.');
+
+      _destroyAllCharts();
+      _relGerData = data;
+      _relGerTextos = _resolverTextos(data);
+      _montarEstruturaPaginas();
+      _renderKpis(data.kpis || {});
+      _renderCharts(data);
+      _renderTabelas(data);
+      _renderTextos(data);
+      _renderEditaveis();
+
+      if (statusEl) statusEl.style.display = 'none';
+      if (conteudoEl) conteudoEl.style.display = 'block';
+    } catch (err) {
+      if (statusEl) statusEl.style.display = 'none';
+      if (erroEl) {
+        erroEl.style.display = 'block';
+        erroEl.textContent = err.message || 'Erro ao carregar relatório.';
+      }
+    }
+  }
+
+  function _canvasParaImg(canvas) {
+    if (!canvas) return '';
+    const tmp = document.createElement('canvas');
+    tmp.width = canvas.width;
+    tmp.height = canvas.height;
+    const ctx = tmp.getContext('2d');
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, tmp.width, tmp.height);
+    ctx.drawImage(canvas, 0, 0);
+    return tmp.toDataURL('image/png');
+  }
+
+  function _pdfHeader(periodo) {
+    return `
+      <div class="pdf-hdr">
+        <div class="pdf-brand"><div class="pdf-logo">FT</div><div><div class="pdf-name">FROMTHERM</div><div class="pdf-sub">BOMBAS DE CALOR</div></div></div>
+        <div class="pdf-title"><div class="pdf-type">Relatório Gerencial Assistência Técnica</div><div class="pdf-per">${_esc(periodo)}</div></div>
+        <div class="pdf-meta"><div><b>Departamento:</b> Qualidade / AT</div><div><b>Data:</b> ${_esc(_fmtDataGeracao())}</div><div><b>Versão:</b> 1.0</div></div>
+      </div>
+      <div class="pdf-bar"></div>`;
+  }
+
+  function _pdfFooter(pg) {
+    return `<div class="pdf-ftr"><div class="pdf-slogan">Qualidade que transforma. Conforto que dura.</div><div class="pdf-pg">Página ${pg} de ${SECOES.length}</div></div>`;
+  }
+
+  async function _exportarPdf() {
+    if (!_relGerData) {
+      alert('Carregue o relatório antes de exportar.');
+      return;
+    }
+    const btn = document.getElementById('atRelGerPdfBtn');
+    if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Gerando...'; }
+
+    try {
+      const d = _relGerData;
+      const kpis = d.kpis || {};
+      const periodo = d.periodo || '';
+      const secaoSalva = _relGerSecao;
+
+      // Renderiza gráficos de todas as páginas antes de capturar imagens
+      for (const s of SECOES) {
+        if (s.id === 'conclusao' || s.id === 'financeiro' || s.id === 'plano') continue;
+        document.querySelectorAll('.at-rel-ger-page').forEach(p => {
+          p.classList.toggle('is-active', p.dataset.sec === s.id);
+        });
+        if (!_chartsRendered.has(s.id)) _renderChartsSecao(s.id, d);
+        await new Promise(r => setTimeout(r, 60));
+      }
+      _trocarSecao(secaoSalva);
+      await new Promise(r => setTimeout(r, 80));
+
+      const imgs = {
+        status: _canvasParaImg(document.getElementById('atRelGerChartStatus')),
+        moEstado: _canvasParaImg(document.getElementById('atRelGerChartMoEstado')),
+        estado: _canvasParaImg(document.getElementById('atRelGerChartEstado')),
+        estadoDonut: _canvasParaImg(document.getElementById('atRelGerChartEstadoDonut')),
+        modelo: _canvasParaImg(document.getElementById('atRelGerChartModelo')),
+        tag: _canvasParaImg(document.getElementById('atRelGerChartTag')),
+        semana: _canvasParaImg(document.getElementById('atRelGerChartSemana')),
+        pareto: _canvasParaImg(document.getElementById('atRelGerChartPareto')),
+      };
+
+      const kpiHtml = [
+        ['Total O.S.', kpis.total_os], ['Concluídas', kpis.concluidas], ['Em andamento', kpis.em_andamento],
+        ['Estados', kpis.estados_atendidos], ['Modelos', kpis.modelos_atendidos],
+        ['Total M.O.', MOEDA.format(kpis.total_mo || 0)], ['Custo médio', MOEDA.format(kpis.custo_medio || 0)],
+        ['O.S. no mês', kpis.abertas_mes],
+      ].map(([l, v]) => `<div class="kpi"><div class="lbl">${l}</div><div class="val">${v}</div></div>`).join('');
+
+      const modTbl = (d.por_modelo || []).map(r => `<tr><td>${_esc(r.modelo)}</td><td class="r">${r.total}</td></tr>`).join('') || '<tr><td colspan="2">—</td></tr>';
+      const tagTbl = (d.por_tag || []).map(r => {
+        const tot = (d.por_tag || []).reduce((s, x) => s + x.total, 0);
+        const pct = tot ? Math.round((r.total / tot) * 1000) / 10 : 0;
+        return `<tr><td>${_esc(r.tag)}</td><td class="r">${r.total}</td><td class="r">${pct}%</td></tr>`;
+      }).join('') || '<tr><td colspan="3">—</td></tr>';
+      const paretoTbl = (d.pareto || []).map(r => `<tr><td>${_esc(r.tag)}</td><td class="r">${r.total}</td><td class="r">${r.pct}%</td><td class="r">${r.pct_acum}%</td></tr>`).join('') || '<tr><td colspan="4">—</td></tr>';
+      const finTbl = (d.financeiro || []).map(r => `<tr><td>${_esc(r.os)}</td><td>${_esc(r.estado || '-')}</td><td>${_fmtData(r.data)}</td><td class="r">${MOEDA.format(r.valor_mo || 0)}</td></tr>`).join('') || '<tr><td colspan="4">—</td></tr>';
+
+      const obsHtml = (d.pareto || []).slice(0, 5).map(r =>
+        `<li><b>${_esc(r.tag)}</b> — ${r.total} ocorrência(s) (${r.pct}%)</li>`
+      ).join('') || '<li>Nenhuma ocorrência.</li>';
+
+      const textosPdf = _coletarTextosForm();
+      const concHtml = _htmlConclusaoParaPdf(textosPdf);
+      const planoHtml = _htmlPlanoParaPdf(textosPdf.plano_acao);
+
+      const pages = [
+        `<div class="pdf-page">${_pdfHeader(periodo)}<div class="sec">Dashboard Executivo</div><div class="kpis">${kpiHtml}</div><div class="row">${imgs.status ? `<div class="box"><h3>Status</h3><img src="${imgs.status}"></div>` : ''}${imgs.moEstado ? `<div class="box"><h3>M.O. por Estado</h3><img src="${imgs.moEstado}"></div>` : ''}</div>${_pdfFooter(1)}</div>`,
+        `<div class="pdf-page">${_pdfHeader(periodo)}<div class="sec">Distribuição Geográfica</div><div class="row">${imgs.estado ? `<div class="box"><h3>Por Estado</h3><img src="${imgs.estado}"></div>` : ''}${imgs.estadoDonut ? `<div class="box"><h3>% por Estado</h3><img src="${imgs.estadoDonut}"></div>` : ''}</div>${_pdfFooter(2)}</div>`,
+        `<div class="pdf-page">${_pdfHeader(periodo)}<div class="sec">Modelos com Maior Incidência</div><div class="row">${imgs.modelo ? `<div class="box"><h3>Gráfico</h3><img src="${imgs.modelo}"></div>` : ''}<div class="box"><h3>Tabela</h3><table><thead><tr><th>Modelo</th><th class="r">Qtd</th></tr></thead><tbody>${modTbl}</tbody></table></div></div>${_pdfFooter(3)}</div>`,
+        `<div class="pdf-page">${_pdfHeader(periodo)}<div class="sec">Análise por Tipo de Defeito</div><div class="row"><div class="box"><h3>Tabela</h3><table><thead><tr><th>Tag</th><th class="r">Qtd</th><th class="r">%</th></tr></thead><tbody>${tagTbl}</tbody></table></div>${imgs.tag ? `<div class="box"><h3>Gráfico</h3><img src="${imgs.tag}"></div>` : ''}</div>${_pdfFooter(4)}</div>`,
+        `<div class="pdf-page">${_pdfHeader(periodo)}<div class="sec">Evolução dos Chamados</div>${imgs.semana ? `<div class="box"><h3>Por semana</h3><img src="${imgs.semana}"></div>` : ''}${_pdfFooter(5)}</div>`,
+        `<div class="pdf-page">${_pdfHeader(periodo)}<div class="sec">Pareto (80/20)</div>${imgs.pareto ? `<div class="box"><img src="${imgs.pareto}"></div>` : ''}<table><thead><tr><th>Tag</th><th class="r">Qtd</th><th class="r">%</th><th class="r">Acum.</th></tr></thead><tbody>${paretoTbl}</tbody></table>${_pdfFooter(6)}</div>`,
+        `<div class="pdf-page">${_pdfHeader(periodo)}<div class="sec">Análise Financeira</div><ul>${obsHtml}</ul><table><thead><tr><th>O.S.</th><th>UF</th><th>Data</th><th class="r">M.O.</th></tr></thead><tbody>${finTbl}</tbody></table>${_pdfFooter(7)}</div>`,
+        `<div class="pdf-page">${_pdfHeader(periodo)}<div class="sec">Plano de Ação</div>${planoHtml}${_pdfFooter(8)}</div>`,
+        `<div class="pdf-page">${_pdfHeader(periodo)}<div class="sec">Conclusão Executiva</div>${concHtml}<div class="total-banner"><div class="lbl">Total de O.S. no mês</div><div class="val">${kpis.total_os || 0}</div></div>${_pdfFooter(9)}</div>`,
+      ].join('');
+
+      const html = `<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8">
+<title>Relatório Gerencial AT — ${periodo}</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: Segoe UI, Arial, sans-serif; font-size: 11px; color: #1e293b; background: #fff; }
+  .pdf-page { page-break-after: always; padding: 20px 28px 16px; min-height: 100vh; display: flex; flex-direction: column; }
+  .pdf-page:last-child { page-break-after: auto; }
+  .pdf-hdr { display: grid; grid-template-columns: 1fr 2fr 1fr; gap: 12px; align-items: center; margin-bottom: 8px; }
+  .pdf-brand { display: flex; gap: 8px; align-items: center; }
+  .pdf-logo { width: 36px; height: 36px; border-radius: 8px; background: #1e3a5f; color: #fff; font-weight: 900; display: flex; align-items: center; justify-content: center; }
+  .pdf-name { font-size: 13px; font-weight: 800; color: #1e3a5f; }
+  .pdf-sub { font-size: 8px; color: #64748b; letter-spacing: .06em; }
+  .pdf-title { text-align: center; }
+  .pdf-type { font-size: 10px; font-weight: 800; color: #1e3a5f; text-transform: uppercase; }
+  .pdf-per { font-size: 16px; font-weight: 900; color: #ea580c; }
+  .pdf-meta { font-size: 9px; color: #475569; text-align: right; line-height: 1.5; }
+  .pdf-bar { height: 3px; background: linear-gradient(90deg,#1e3a5f,#0ea5e9,#f59e0b); border-radius: 2px; margin-bottom: 12px; }
+  .sec { background: #1e3a5f; color: #fff; padding: 8px 12px; border-radius: 6px; font-weight: 800; font-size: 12px; margin-bottom: 12px; }
+  .kpis { display: grid; grid-template-columns: repeat(4,1fr); gap: 8px; margin-bottom: 12px; }
+  .kpi { border: 1px solid #e2e8f0; border-radius: 6px; padding: 8px; background: #f8fafc; }
+  .kpi .lbl { font-size: 8px; color: #64748b; text-transform: uppercase; font-weight: 700; }
+  .kpi .val { font-size: 15px; font-weight: 900; color: #1e3a5f; margin-top: 2px; }
+  .row { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
+  .box { flex: 1; min-width: 200px; border: 1px solid #e2e8f0; border-radius: 6px; padding: 8px; }
+  .box h3 { font-size: 11px; color: #1e3a5f; margin-bottom: 6px; }
+  img { max-width: 100%; height: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 10px; margin-bottom: 10px; }
+  th { background: #1e3a5f; color: #fff; padding: 5px 8px; text-align: left; }
+  td { padding: 5px 8px; border-bottom: 1px solid #e2e8f0; }
+  th.r, td.r { text-align: right; }
+  ul { padding-left: 16px; margin-bottom: 10px; line-height: 1.6; }
+  .pdf-ftr { margin-top: auto; padding-top: 10px; border-top: 2px solid #e2e8f0; display: flex; justify-content: space-between; font-size: 9px; color: #64748b; }
+  .pdf-slogan { font-style: italic; color: #1e3a5f; font-weight: 600; }
+  .pdf-pg { font-weight: 700; color: #ea580c; }
+  .total-banner { text-align: center; padding: 16px; background: #1e3a5f; color: #fff; border-radius: 8px; margin-top: 12px; }
+  .total-banner .lbl { font-size: 10px; opacity: .85; }
+  .total-banner .val { font-size: 28px; font-weight: 900; }
+  @media print { .pdf-page { min-height: auto; } }
+</style></head><body>${pages}
+<script>window.onload=function(){setTimeout(function(){window.print();},500);};</script></body></html>`;
+
+      const w = window.open('', '_blank');
+      if (!w) throw new Error('Pop-up bloqueado. Permita pop-ups para exportar o PDF.');
+      w.document.open();
+      w.document.write(html);
+      w.document.close();
+    } catch (err) {
+      alert('Erro ao exportar PDF: ' + (err.message || err));
+    } finally {
+      if (btn) {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="fa-solid fa-file-pdf"></i> Exportar PDF';
+      }
+    }
+  }
+
+  window._iniciarRelatorioGerencialAt = function () {
+    const mesEl = document.getElementById('atRelGerMes');
+    if (mesEl && !mesEl.value) mesEl.value = _mesPadrao();
+
+    if (!_relGerInit) {
+      _relGerInit = true;
+      mesEl?.addEventListener('change', _carregarRelatorio);
+      document.getElementById('atRelGerAtualizarBtn')?.addEventListener('click', _carregarRelatorio);
+      document.getElementById('atRelGerPdfBtn')?.addEventListener('click', _exportarPdf);
+    }
+    _carregarRelatorio();
+  };
+})();
+
 // ── Gráficos Vendas ─────────────────────────────────────────────────────────
 (function () {
   let _vendasGraf1Instance = null;
@@ -19501,6 +20914,7 @@ if (_atStatusBtn && _atStatusDropdown) {
         // Atualiza cache local
         const rowIdx = _atAllRows.findIndex(r => String(r.id) === String(id));
         if (rowIdx >= 0) _atAllRows[rowIdx].status = d.status;
+        _atRenderCurrent();
       } catch(err) {
         console.error('[AT] erro status', err);
         alert('Erro de rede ao atualizar status.');

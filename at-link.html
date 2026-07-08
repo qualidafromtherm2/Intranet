@@ -2756,21 +2756,45 @@
       return 'fa-file-image';
     }
 
-    function _matApoioRenderArquivo(item) {
-      const status = String(item.status_upload || 'concluido');
+    function _matApoioAnexos(item) {
+      if (Array.isArray(item?.anexos)) return item.anexos;
+      if (item?.nome_arquivo) {
+        return [{
+          nome_arquivo: item.nome_arquivo,
+          url_publica: item.url_publica,
+          status_upload: item.status_upload,
+          upload_erro: item.upload_erro,
+        }];
+      }
+      return [];
+    }
+
+    function _matApoioRenderAnexo(anexo) {
+      const status = String(anexo.status_upload || 'concluido');
       if (status === 'enviando') {
         return '<span style="display:inline-flex;align-items:center;gap:6px;color:#fbbf24;font-size:12px;">' +
-          '<i class="fas fa-circle-notch fa-spin"></i> upload...</span>';
+          '<i class="fas fa-circle-notch fa-spin"></i> ' + esc(anexo.nome_arquivo) + '…</span>';
       }
       if (status === 'erro') {
-        const err = item.upload_erro ? ' title="' + esc(item.upload_erro) + '"' : '';
-        return '<span style="color:#f87171;font-size:12px;"' + err + '>Falha no upload</span>';
+        const err = anexo.upload_erro ? ' title="' + esc(anexo.upload_erro) + '"' : '';
+        return '<span style="color:#f87171;font-size:12px;"' + err + '>' + esc(anexo.nome_arquivo) + ' — falha</span>';
       }
-      if (item.url_publica) {
-        return '<a href="' + esc(item.url_publica) + '" target="_blank" rel="noopener noreferrer" ' +
-          'style="color:#38bdf8;font-size:12px;text-decoration:none;">' + esc(item.nome_arquivo) + '</a>';
+      if (anexo.url_publica) {
+        return '<a href="' + esc(anexo.url_publica) + '" target="_blank" rel="noopener noreferrer" ' +
+          'style="color:#38bdf8;font-size:12px;text-decoration:none;display:block;">' + esc(anexo.nome_arquivo) + '</a>';
       }
-      return '<span class="mat-apoio-muted" style="font-size:12px;">' + esc(item.nome_arquivo) + '</span>';
+      return '<span class="mat-apoio-muted" style="font-size:12px;display:block;">' + esc(anexo.nome_arquivo) + '</span>';
+    }
+
+    function _matApoioRenderArquivos(item) {
+      const anexos = _matApoioAnexos(item);
+      if (!anexos.length) return '<span class="mat-apoio-muted" style="font-size:12px;">Sem anexos</span>';
+      return '<div style="display:flex;flex-direction:column;gap:3px;">' +
+        anexos.map((a) => _matApoioRenderAnexo(a)).join('') + '</div>';
+    }
+
+    function _matApoioRenderArquivo(item) {
+      return _matApoioRenderArquivos(item);
     }
 
     function _matApoioAgrupar(itens) {
@@ -2843,7 +2867,7 @@
         '<td><span style="display:inline-flex;align-items:center;gap:5px;">' +
         '<i class="fa-solid ' + _matApoioFormatoIcon(item.formato) + '" style="color:#94a3b8;"></i>' +
         esc(item.formato) + '</span></td>' +
-        '<td>' + _matApoioRenderArquivo(item) + '</td></tr>'
+        '<td>' + _matApoioRenderArquivos(item) + '</td></tr>'
       ).join('');
       _matApoioIniciarPoll();
     }
@@ -2854,7 +2878,10 @@
 
     function _matApoioIniciarPoll() {
       _matApoioPararPoll();
-      const pendente = _matApoio.itens.some(i => String(i.status_upload || '') === 'enviando');
+      const pendente = _matApoio.itens.some((i) => {
+        if (String(i.status_upload || '') === 'enviando') return true;
+        return _matApoioAnexos(i).some((a) => String(a.status_upload || '') === 'enviando');
+      });
       const modal = document.getElementById('matApoioModal');
       if (!pendente || !modal || !modal.classList.contains('open')) return;
       _matApoio.pollTimer = setInterval(() => _matApoioCarregar(true), 3000);
@@ -3518,7 +3545,7 @@
                 <tr>
                   <th>Nome</th>
                   <th>Formato</th>
-                  <th>Arquivo</th>
+                  <th>Anexos</th>
                 </tr>
               </thead>
               <tbody id="matApoioTbody">

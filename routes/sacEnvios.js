@@ -3803,6 +3803,44 @@ async function ensureSchema() {
     ALTER TABLE sac.material_apoio ALTER COLUMN url_publica DROP NOT NULL;
     ALTER TABLE sac.material_apoio ADD COLUMN IF NOT EXISTS publico BOOLEAN NOT NULL DEFAULT false;
 
+    CREATE TABLE IF NOT EXISTS sac.material_apoio_anexo (
+      id              BIGSERIAL PRIMARY KEY,
+      material_id     BIGINT NOT NULL REFERENCES sac.material_apoio(id) ON DELETE CASCADE,
+      nome_arquivo    TEXT NOT NULL,
+      path_key        TEXT NOT NULL,
+      url_publica     TEXT,
+      content_type    TEXT,
+      tamanho_bytes   BIGINT,
+      status_upload   TEXT NOT NULL DEFAULT 'enviando',
+      upload_erro     TEXT,
+      criado_em       TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_material_apoio_anexo_mid ON sac.material_apoio_anexo (material_id);
+
+    DO $matApoioMigr$
+    BEGIN
+      IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+         WHERE table_schema = 'sac' AND table_name = 'material_apoio' AND column_name = 'path_key'
+      ) THEN
+        INSERT INTO sac.material_apoio_anexo
+          (material_id, nome_arquivo, path_key, url_publica, content_type, tamanho_bytes, status_upload, upload_erro)
+        SELECT m.id, m.nome_arquivo, m.path_key, m.url_publica, m.content_type, m.tamanho_bytes,
+               COALESCE(NULLIF(TRIM(m.status_upload), ''), 'concluido'), m.upload_erro
+          FROM sac.material_apoio m
+         WHERE m.path_key IS NOT NULL AND TRIM(m.path_key) != ''
+           AND NOT EXISTS (SELECT 1 FROM sac.material_apoio_anexo a WHERE a.material_id = m.id LIMIT 1);
+
+        ALTER TABLE sac.material_apoio DROP COLUMN IF EXISTS nome_arquivo;
+        ALTER TABLE sac.material_apoio DROP COLUMN IF EXISTS path_key;
+        ALTER TABLE sac.material_apoio DROP COLUMN IF EXISTS url_publica;
+        ALTER TABLE sac.material_apoio DROP COLUMN IF EXISTS content_type;
+        ALTER TABLE sac.material_apoio DROP COLUMN IF EXISTS tamanho_bytes;
+        ALTER TABLE sac.material_apoio DROP COLUMN IF EXISTS status_upload;
+        ALTER TABLE sac.material_apoio DROP COLUMN IF EXISTS upload_erro;
+      END IF;
+    END $matApoioMigr$;
+
     CREATE TABLE IF NOT EXISTS sac.tag (
       id         BIGSERIAL PRIMARY KEY,
       nome       TEXT NOT NULL UNIQUE,
@@ -3940,6 +3978,19 @@ async function ensureSchema() {
       ON sac.at_serie_cache (pedido);
     CREATE INDEX IF NOT EXISTS at_serie_cache_op_idx
       ON sac.at_serie_cache (ordem_producao);
+
+    CREATE TABLE IF NOT EXISTS sac.at_relatorio_gerencial (
+      id BIGSERIAL PRIMARY KEY,
+      mes CHAR(7) NOT NULL UNIQUE,
+      plano_acao JSONB NOT NULL DEFAULT '[]'::jsonb,
+      conclusao_resumo TEXT,
+      conclusao_pontos_criticos TEXT,
+      conclusao_oportunidades TEXT,
+      editado_por TEXT,
+      editado_em TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS at_relatorio_gerencial_mes_idx
+      ON sac.at_relatorio_gerencial (mes);
   `).then(() => undefined).catch((err) => {
     _ensureSchemaPromise = null;
     throw err;
@@ -6857,6 +6908,289 @@ router.get('/at/graficos/relatorio', async (req, res) => {
   }
 });
 
+// GET /at/relatorio-gerencial — dashboard executivo AT por mês (YYYY-MM)
+router.get('/at/relatorio-gerencial', async (req, res) => {
+  try {
+    await ensureSchema();
+    const mesRaw = String(req.query.mes || '').trim();
+    if (!/^\d{4}-\d{2}$/.test(mesRaw)) {
+      return res.status(400).json({ ok: false, error: 'Parâmetro mes inválido (use YYYY-MM).' });
+    }
+    const [, mesNumStr] = mesRaw.split('-');
+    const mesNum = parseInt(mesNumStr, 10);
+    if (mesNum < 1 || mesNum > 12) {
+      return res.status(400).json({ ok: false, error: 'Parâmetro mes inválido.' });
+    }
+
+    const mesInicio = `${mesRaw}-01`;
+    const nomesMes = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
+    const [anoStr] = mesRaw.split('-');
+    const periodoLabel = `${nomesMes[mesNum - 1]}/${anoStr}`;
+
+    const baseCte = `
+      WITH base AS (
+        SELECT DISTINCT ON (a.id)
+          a.id,
+          a.data,
+          COALESCE(NULLIF(TRIM(a.estado), ''), 'N/D') AS estado,
+          COALESCE(NULLIF(TRIM(a.tag_problema), ''), '(sem tag)') AS tag,
+          COALESCE(
+            NULLIF(
+              CONCAT(
+                COALESCE(SUBSTRING(TRIM(COALESCE(s.modelo, a.modelo, '')) FROM '^[A-Za-z]+'), ''),
+                CASE
+                  WHEN UPPER(TRIM(COALESCE(s.modelo, a.modelo, ''))) ~ 'BR$' THEN 'BR'
+                  WHEN UPPER(TRIM(COALESCE(s.modelo, a.modelo, ''))) ~ 'W$'  THEN 'W'
+                  ELSE ''
+                END
+              ),
+              ''
+            ),
+            '(sem modelo)'
+          ) AS modelo,
+          f.valor_total_mao_obra,
+          CASE
+            WHEN LOWER(COALESCE(f.status_os, '')) IN ('finalizado', 'fechado')
+              OR f.data_conclusao_servico IS NOT NULL
+            THEN 'concluida'
+            ELSE 'em_andamento'
+          END AS status_grupo
+        FROM sac.at a
+        LEFT JOIN sac.at_busca_selecionada s ON s.id_at = a.id
+        LEFT JOIN sac.fechamento f ON f.id_at = a.id
+        WHERE a.data >= $1::date
+          AND a.data < ($1::date + INTERVAL '1 month')
+          AND LOWER(TRIM(COALESCE(a.tipo, ''))) = 'qualidade'
+        ORDER BY a.id, f.id DESC NULLS LAST
+      )
+    `;
+
+    const [
+      rKpi,
+      rEstado,
+      rModelo,
+      rTag,
+      rStatus,
+      rSemana,
+      rFinanceiro,
+    ] = await Promise.all([
+      pool.query(`${baseCte}
+        SELECT
+          COUNT(*)::int AS total_os,
+          COUNT(*) FILTER (WHERE status_grupo = 'concluida')::int AS concluidas,
+          COUNT(*) FILTER (WHERE status_grupo = 'em_andamento')::int AS em_andamento,
+          COUNT(DISTINCT estado) FILTER (WHERE estado <> 'N/D')::int AS estados_atendidos,
+          COUNT(DISTINCT modelo) FILTER (WHERE modelo <> '(sem modelo)')::int AS modelos_atendidos,
+          COALESCE(SUM(valor_total_mao_obra) FILTER (WHERE status_grupo = 'concluida'), 0)::float AS total_mo,
+          COALESCE(AVG(valor_total_mao_obra) FILTER (
+            WHERE status_grupo = 'concluida' AND valor_total_mao_obra IS NOT NULL AND valor_total_mao_obra > 0
+          ), 0)::float AS custo_medio
+        FROM base
+      `, [mesInicio]),
+      pool.query(`${baseCte}
+        SELECT estado, COUNT(*)::int AS total
+        FROM base
+        GROUP BY estado
+        ORDER BY total DESC, estado
+      `, [mesInicio]),
+      pool.query(`${baseCte}
+        SELECT modelo, COUNT(*)::int AS total
+        FROM base
+        GROUP BY modelo
+        ORDER BY total DESC, modelo
+        LIMIT 10
+      `, [mesInicio]),
+      pool.query(`${baseCte}
+        SELECT tag, COUNT(*)::int AS total
+        FROM base
+        GROUP BY tag
+        ORDER BY total DESC, tag
+      `, [mesInicio]),
+      pool.query(`${baseCte}
+        SELECT status_grupo, COUNT(*)::int AS total
+        FROM base
+        GROUP BY status_grupo
+        ORDER BY status_grupo
+      `, [mesInicio]),
+      pool.query(`${baseCte}
+        SELECT
+          LEAST(5, GREATEST(1, CEIL(EXTRACT(DAY FROM data) / 7.0)::int)) AS semana,
+          COUNT(*)::int AS total
+        FROM base
+        GROUP BY 1
+        ORDER BY 1
+      `, [mesInicio]),
+      pool.query(`${baseCte}
+        SELECT
+          id,
+          estado,
+          data,
+          valor_total_mao_obra
+        FROM base
+        WHERE status_grupo = 'concluida'
+          AND valor_total_mao_obra IS NOT NULL
+          AND valor_total_mao_obra > 0
+        ORDER BY data ASC, id ASC
+      `, [mesInicio]),
+    ]);
+
+    const kpi = rKpi.rows[0] || {};
+    const tags = rTag.rows || [];
+    const tagTotal = tags.reduce((s, r) => s + (r.total || 0), 0);
+    let acum = 0;
+    const pareto = tags.map((r) => {
+      acum += r.total || 0;
+      return {
+        tag: r.tag,
+        total: r.total,
+        pct: tagTotal ? Math.round((r.total / tagTotal) * 1000) / 10 : 0,
+        pct_acum: tagTotal ? Math.round((acum / tagTotal) * 1000) / 10 : 0,
+      };
+    });
+
+    const { rows: rTextos } = await pool.query(
+      `SELECT plano_acao, conclusao_resumo, conclusao_pontos_criticos, conclusao_oportunidades,
+              editado_por, editado_em
+         FROM sac.at_relatorio_gerencial
+        WHERE mes = $1`,
+      [mesRaw]
+    );
+    const txtRow = rTextos[0];
+    const textos = txtRow ? {
+      plano_acao: Array.isArray(txtRow.plano_acao) ? txtRow.plano_acao : [],
+      conclusao_resumo: txtRow.conclusao_resumo || '',
+      conclusao_pontos_criticos: txtRow.conclusao_pontos_criticos || '',
+      conclusao_oportunidades: txtRow.conclusao_oportunidades || '',
+      editado_por: txtRow.editado_por || null,
+      editado_em: txtRow.editado_em || null,
+      salvo: true,
+    } : {
+      plano_acao: [],
+      conclusao_resumo: '',
+      conclusao_pontos_criticos: '',
+      conclusao_oportunidades: '',
+      editado_por: null,
+      editado_em: null,
+      salvo: false,
+    };
+
+    return res.json({
+      ok: true,
+      mes: mesRaw,
+      periodo: periodoLabel,
+      kpis: {
+        total_os: kpi.total_os || 0,
+        concluidas: kpi.concluidas || 0,
+        em_andamento: kpi.em_andamento || 0,
+        estados_atendidos: kpi.estados_atendidos || 0,
+        modelos_atendidos: kpi.modelos_atendidos || 0,
+        total_mo: Math.round((kpi.total_mo || 0) * 100) / 100,
+        custo_medio: Math.round((kpi.custo_medio || 0) * 100) / 100,
+        abertas_mes: kpi.total_os || 0,
+      },
+      por_estado: rEstado.rows,
+      por_modelo: rModelo.rows,
+      por_tag: tags,
+      por_status: (rStatus.rows || []).map((r) => ({
+        status: r.status_grupo === 'concluida' ? 'Concluídas' : 'Em andamento',
+        total: r.total,
+      })),
+      evolucao_semanal: (rSemana.rows || []).map((r) => ({
+        semana: `Sem ${r.semana}`,
+        total: r.total,
+      })),
+      pareto,
+      financeiro: (rFinanceiro.rows || []).map((r) => ({
+        id: r.id,
+        os: `${String(new Date(r.data).getFullYear()).slice(-2)} - ${r.id}`,
+        estado: r.estado,
+        data: r.data,
+        valor_mo: Math.round(Number(r.valor_total_mao_obra || 0) * 100) / 100,
+      })),
+      textos,
+    });
+  } catch (err) {
+    console.error('[SAC/AT] erro relatorio-gerencial:', err);
+    return res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// PUT /at/relatorio-gerencial/textos — salva plano de ação e conclusão executiva do mês
+router.put('/at/relatorio-gerencial/textos', async (req, res) => {
+  try {
+    await ensureSchema();
+    const mesRaw = String(req.body?.mes || '').trim();
+    if (!/^\d{4}-\d{2}$/.test(mesRaw)) {
+      return res.status(400).json({ ok: false, error: 'Parâmetro mes inválido (use YYYY-MM).' });
+    }
+
+    const planoRaw = req.body?.plano_acao;
+    if (!Array.isArray(planoRaw)) {
+      return res.status(400).json({ ok: false, error: 'plano_acao deve ser uma lista.' });
+    }
+
+    const prioridadesValidas = new Set(['alta', 'media', 'baixa']);
+    const plano_acao = planoRaw.map((item) => {
+      const prioridade = String(item?.prioridade || 'media').toLowerCase().trim();
+      return {
+        acao: String(item?.acao || '').trim().slice(0, 200),
+        descricao: String(item?.descricao || '').trim().slice(0, 500),
+        responsavel: String(item?.responsavel || '').trim().slice(0, 120),
+        prazo: String(item?.prazo || '').trim().slice(0, 40),
+        prioridade: prioridadesValidas.has(prioridade) ? prioridade : 'media',
+      };
+    }).filter((item) => item.acao || item.descricao || item.responsavel || item.prazo);
+
+    const conclusao_resumo = String(req.body?.conclusao_resumo || '').trim().slice(0, 4000);
+    const conclusao_pontos_criticos = String(req.body?.conclusao_pontos_criticos || '').trim().slice(0, 4000);
+    const conclusao_oportunidades = String(req.body?.conclusao_oportunidades || '').trim().slice(0, 4000);
+
+    const usuarioLogado = req.session?.user?.fullName
+      || req.session?.user?.username
+      || req.session?.user?.login
+      || 'sistema';
+
+    const { rows } = await pool.query(
+      `INSERT INTO sac.at_relatorio_gerencial (
+         mes, plano_acao, conclusao_resumo, conclusao_pontos_criticos, conclusao_oportunidades, editado_por, editado_em
+       ) VALUES ($1, $2::jsonb, $3, $4, $5, $6, NOW())
+       ON CONFLICT (mes) DO UPDATE SET
+         plano_acao = EXCLUDED.plano_acao,
+         conclusao_resumo = EXCLUDED.conclusao_resumo,
+         conclusao_pontos_criticos = EXCLUDED.conclusao_pontos_criticos,
+         conclusao_oportunidades = EXCLUDED.conclusao_oportunidades,
+         editado_por = EXCLUDED.editado_por,
+         editado_em = NOW()
+       RETURNING mes, plano_acao, conclusao_resumo, conclusao_pontos_criticos, conclusao_oportunidades, editado_por, editado_em`,
+      [
+        mesRaw,
+        JSON.stringify(plano_acao),
+        conclusao_resumo || null,
+        conclusao_pontos_criticos || null,
+        conclusao_oportunidades || null,
+        usuarioLogado,
+      ]
+    );
+
+    const row = rows[0];
+    return res.json({
+      ok: true,
+      textos: {
+        plano_acao: row.plano_acao || [],
+        conclusao_resumo: row.conclusao_resumo || '',
+        conclusao_pontos_criticos: row.conclusao_pontos_criticos || '',
+        conclusao_oportunidades: row.conclusao_oportunidades || '',
+        editado_por: row.editado_por,
+        editado_em: row.editado_em,
+        salvo: true,
+      },
+    });
+  } catch (err) {
+    console.error('[SAC/AT] erro salvar textos relatorio-gerencial:', err);
+    return res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 // GET /at/graficos/por-estado-mes — quantidade de atendimentos por estado agrupado por mês/ano
 router.get('/at/graficos/por-estado-mes', async (req, res) => {  try {
     const tipo = String(req.query.tipo || '').trim();
@@ -7603,6 +7937,7 @@ router.delete('/atalhos/:id', async (req, res) => {
 const MAT_APOIO_BUCKET = 'AT';
 const MAT_APOIO_PASTA = 'material de apoio';
 const MAT_APOIO_FORMATOS = ['Video', 'foto', 'PDF'];
+const MAT_APOIO_MAX_ANEXOS = 20;
 const materialApoioUpload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 120 * 1024 * 1024 },
@@ -7641,10 +7976,13 @@ function materialApoioValidarFormato(formato, file) {
   return null;
 }
 
-function materialApoioBuildFileName(nome, file) {
+function materialApoioBuildFileName(nome, file, uniqueSuffix) {
   const base = materialApoioSanitizeNome(nome).replace(/\s/g, '_') || 'arquivo';
   const ext = materialApoioExtFromFile(file);
-  return `${base}.${ext}`;
+  const origBase = String(file.originalname || '').replace(/\.[^.]+$/, '').slice(0, 60);
+  const safeOrig = origBase.replace(/[^a-zA-Z0-9_-]/g, '_').replace(/_+/g, '_') || 'arquivo';
+  const suf = uniqueSuffix ? `_${uniqueSuffix}` : '';
+  return `${base}_${safeOrig}${suf}.${ext}`;
 }
 
 function materialApoioParsePublico(val) {
@@ -7653,12 +7991,9 @@ function materialApoioParsePublico(val) {
   return s === 'true' || s === '1' || s === 'on' || s === 'yes';
 }
 
-function materialApoioMapRow(row) {
+function materialApoioMapAnexo(row) {
   return {
     id: row.id,
-    nome: row.nome,
-    tipo: row.tipo,
-    formato: row.formato,
     nome_arquivo: row.nome_arquivo,
     path_key: row.path_key,
     url_publica: row.url_publica || null,
@@ -7666,24 +8001,75 @@ function materialApoioMapRow(row) {
     tamanho_bytes: row.tamanho_bytes,
     status_upload: row.status_upload || 'concluido',
     upload_erro: row.upload_erro || null,
+    criado_em: row.criado_em,
+  };
+}
+
+function materialApoioStatusAgregado(anexos) {
+  const lista = anexos || [];
+  if (lista.some((a) => String(a.status_upload || '') === 'enviando')) return 'enviando';
+  if (lista.some((a) => String(a.status_upload || '') === 'erro')) return 'erro';
+  return 'concluido';
+}
+
+function materialApoioMapRow(row, anexos) {
+  const anexosList = (anexos || []).map(materialApoioMapAnexo);
+  return {
+    id: row.id,
+    nome: row.nome,
+    tipo: row.tipo,
+    formato: row.formato,
     publico: row.publico === true,
     criado_por: row.criado_por,
     criado_em: row.criado_em,
     atualizado_em: row.atualizado_em,
+    anexos: anexosList,
+    status_upload: materialApoioStatusAgregado(anexosList),
   };
 }
 
-async function materialApoioUploadBackground({ id, pathKey, buffer, contentType, oldPathKey }) {
+async function materialApoioFetchAnexosMap(materialIds) {
+  const ids = [...new Set((materialIds || []).map((id) => Number(id)).filter((id) => id > 0))];
+  if (!ids.length) return new Map();
+  const { rows } = await pool.query(
+    `SELECT id, material_id, nome_arquivo, path_key, url_publica,
+            content_type, tamanho_bytes, status_upload, upload_erro, criado_em
+       FROM sac.material_apoio_anexo
+      WHERE material_id = ANY($1::bigint[])
+      ORDER BY material_id, criado_em ASC, id ASC`,
+    [ids]
+  );
+  const map = new Map();
+  rows.forEach((row) => {
+    const mid = Number(row.material_id);
+    if (!map.has(mid)) map.set(mid, []);
+    map.get(mid).push(row);
+  });
+  return map;
+}
+
+async function materialApoioFetchItemCompleto(id) {
+  const { rows } = await pool.query(
+    `SELECT id, nome, tipo, formato, publico, criado_por, criado_em, atualizado_em
+       FROM sac.material_apoio WHERE id = $1`,
+    [id]
+  );
+  if (!rows.length) return null;
+  const anexosMap = await materialApoioFetchAnexosMap([id]);
+  return materialApoioMapRow(rows[0], anexosMap.get(id) || []);
+}
+
+async function materialApoioUploadBackgroundAnexo({ anexoId, pathKey, buffer, contentType, oldPathKey }) {
   try {
     const { url } = await uploadPublicFile(MAT_APOIO_BUCKET, pathKey, buffer, {
       contentType: contentType || 'application/octet-stream',
       upsert: true,
     });
     await pool.query(
-      `UPDATE sac.material_apoio
-          SET url_publica = $2, status_upload = 'concluido', upload_erro = NULL, atualizado_em = NOW()
+      `UPDATE sac.material_apoio_anexo
+          SET url_publica = $2, status_upload = 'concluido', upload_erro = NULL
         WHERE id = $1`,
-      [id, url]
+      [anexoId, url]
     );
     if (oldPathKey && oldPathKey !== pathKey) {
       try { await removePublicFiles(MAT_APOIO_BUCKET, oldPathKey); } catch (_) { /* ignora */ }
@@ -7691,20 +8077,59 @@ async function materialApoioUploadBackground({ id, pathKey, buffer, contentType,
   } catch (err) {
     console.error('[SAC/material-apoio] upload background erro:', err);
     await pool.query(
-      `UPDATE sac.material_apoio
-          SET status_upload = 'erro', upload_erro = $2, atualizado_em = NOW()
+      `UPDATE sac.material_apoio_anexo
+          SET status_upload = 'erro', upload_erro = $2
         WHERE id = $1`,
-      [id, String(err.message || err).slice(0, 500)]
+      [anexoId, String(err.message || err).slice(0, 500)]
     );
   }
 }
 
 function materialApoioDispararUploadBackground(opts) {
   setImmediate(() => {
-    materialApoioUploadBackground(opts).catch((err) => {
+    materialApoioUploadBackgroundAnexo(opts).catch((err) => {
       console.error('[SAC/material-apoio] falha inesperada no upload background:', err);
     });
   });
+}
+
+async function materialApoioInserirAnexos({ materialId, formato, nomeMaterial, files }) {
+  const inseridos = [];
+  for (let i = 0; i < files.length; i += 1) {
+    const file = files[i];
+    const fmtErr = materialApoioValidarFormato(formato, file);
+    if (fmtErr) throw new Error(fmtErr);
+
+    const uniqueSuffix = `${Date.now().toString(36)}_${i + 1}`;
+    const nomeArquivo = materialApoioBuildFileName(nomeMaterial, file, uniqueSuffix);
+    const pathKey = `${MAT_APOIO_PASTA}/${materialId}/${nomeArquivo}`;
+    const fileBuffer = Buffer.from(file.buffer);
+    const contentType = file.mimetype || 'application/octet-stream';
+
+    const { rows: dup } = await pool.query(
+      'SELECT id FROM sac.material_apoio_anexo WHERE path_key = $1 LIMIT 1',
+      [pathKey]
+    );
+    if (dup.length) throw new Error(`Já existe um anexo com o caminho "${nomeArquivo}".`);
+
+    const ins = await pool.query(
+      `INSERT INTO sac.material_apoio_anexo
+         (material_id, nome_arquivo, path_key, url_publica, content_type, tamanho_bytes, status_upload)
+       VALUES ($1,$2,$3,NULL,$4,$5,'enviando')
+       RETURNING id, material_id, nome_arquivo, path_key, url_publica,
+                 content_type, tamanho_bytes, status_upload, upload_erro, criado_em`,
+      [materialId, nomeArquivo, pathKey, contentType, file.size || null]
+    );
+    const anexo = materialApoioMapAnexo(ins.rows[0]);
+    inseridos.push(anexo);
+    materialApoioDispararUploadBackground({
+      anexoId: anexo.id,
+      pathKey,
+      buffer: fileBuffer,
+      contentType,
+    });
+  }
+  return inseridos;
 }
 
 // GET /at/material-apoio/tipos — tipos já cadastrados
@@ -7724,84 +8149,76 @@ router.get('/at/material-apoio/tipos', async (_req, res) => {
   }
 });
 
-// GET /at/material-apoio — lista materiais (somente banco, sem Cloudflare)
+// GET /at/material-apoio — lista materiais com anexos
 router.get('/at/material-apoio', async (_req, res) => {
   try {
     await ensureSchema();
     const { rows } = await pool.query(
-      `SELECT id, nome, tipo, formato, nome_arquivo, path_key, url_publica,
-              content_type, tamanho_bytes, status_upload, upload_erro, publico,
-              criado_por, criado_em, atualizado_em
+      `SELECT id, nome, tipo, formato, publico, criado_por, criado_em, atualizado_em
          FROM sac.material_apoio
         ORDER BY tipo, nome`
     );
-    res.json({ ok: true, itens: rows.map(materialApoioMapRow) });
+    const anexosMap = await materialApoioFetchAnexosMap(rows.map((r) => r.id));
+    res.json({
+      ok: true,
+      itens: rows.map((row) => materialApoioMapRow(row, anexosMap.get(Number(row.id)) || [])),
+    });
   } catch (err) {
     console.error('[SAC/material-apoio] GET erro:', err);
     res.status(500).json({ ok: false, error: err.message });
   }
 });
 
-// POST /at/material-apoio — grava no banco e responde rápido; upload R2 em background
-router.post('/at/material-apoio', materialApoioUpload.single('arquivo'), async (req, res) => {
+// POST /at/material-apoio — cria material + um ou mais anexos
+router.post('/at/material-apoio', materialApoioUpload.array('arquivo', MAT_APOIO_MAX_ANEXOS), async (req, res) => {
   const nome = materialApoioSanitizeNome(req.body?.nome);
   const tipo = String(req.body?.tipo || '').trim().slice(0, 80);
   const formato = String(req.body?.formato || '').trim();
   const publico = materialApoioParsePublico(req.body?.publico);
+  const files = Array.isArray(req.files) ? req.files.filter((f) => f?.buffer?.length) : [];
+
   if (!nome) return res.status(400).json({ ok: false, error: 'Informe o nome.' });
   if (!tipo) return res.status(400).json({ ok: false, error: 'Informe o tipo.' });
   if (!MAT_APOIO_FORMATOS.includes(formato)) {
     return res.status(400).json({ ok: false, error: 'Formato inválido. Use Video, foto ou PDF.' });
   }
-  if (!req.file?.buffer?.length) {
-    return res.status(400).json({ ok: false, error: 'Selecione um arquivo para anexar.' });
+  if (!files.length) {
+    return res.status(400).json({ ok: false, error: 'Selecione ao menos um arquivo para anexar.' });
   }
-  const fmtErr = materialApoioValidarFormato(formato, req.file);
-  if (fmtErr) return res.status(400).json({ ok: false, error: fmtErr });
 
   const usuario = req.session?.user?.fullName || req.session?.user?.username || 'sistema';
-  const nomeArquivo = materialApoioBuildFileName(nome, req.file);
-  const pathKey = `${MAT_APOIO_PASTA}/${nomeArquivo}`;
-  const fileBuffer = Buffer.from(req.file.buffer);
-  const contentType = req.file.mimetype || 'application/octet-stream';
 
   try {
     await ensureSchema();
-    const { rows: dup } = await pool.query(
-      'SELECT id FROM sac.material_apoio WHERE nome_arquivo = $1 LIMIT 1',
-      [nomeArquivo]
-    );
-    if (dup.length) {
-      return res.status(409).json({ ok: false, error: 'Já existe um arquivo com este nome. Altere o nome ou edite o registro existente.' });
-    }
-
     const ins = await pool.query(
-      `INSERT INTO sac.material_apoio
-         (nome, tipo, formato, nome_arquivo, path_key, url_publica, content_type, tamanho_bytes, status_upload, publico, criado_por)
-       VALUES ($1,$2,$3,$4,$5,NULL,$6,$7,'enviando',$8,$9)
-       RETURNING id, nome, tipo, formato, nome_arquivo, path_key, url_publica,
-                 content_type, tamanho_bytes, status_upload, upload_erro, publico,
-                 criado_por, criado_em, atualizado_em`,
-      [nome, tipo, formato, nomeArquivo, pathKey, contentType, req.file.size || null, publico, usuario]
+      `INSERT INTO sac.material_apoio (nome, tipo, formato, publico, criado_por)
+       VALUES ($1,$2,$3,$4,$5)
+       RETURNING id, nome, tipo, formato, publico, criado_por, criado_em, atualizado_em`,
+      [nome, tipo, formato, publico, usuario]
     );
-
-    const item = materialApoioMapRow(ins.rows[0]);
-    res.json({ ok: true, item });
-
-    materialApoioDispararUploadBackground({
-      id: item.id,
-      pathKey,
-      buffer: fileBuffer,
-      contentType,
-    });
+    const materialId = ins.rows[0].id;
+    try {
+      const anexos = await materialApoioInserirAnexos({
+        materialId,
+        formato,
+        nomeMaterial: nome,
+        files,
+      });
+      res.json({ ok: true, item: materialApoioMapRow(ins.rows[0], anexos) });
+    } catch (anexoErr) {
+      await pool.query('DELETE FROM sac.material_apoio WHERE id = $1', [materialId]);
+      throw anexoErr;
+    }
   } catch (err) {
     console.error('[SAC/material-apoio] POST erro:', err);
-    res.status(500).json({ ok: false, error: err.message || 'Falha ao salvar material.' });
+    const msg = String(err.message || err);
+    const is400 = msg.includes('Formato') || msg.includes('PDF') || msg.includes('foto') || msg.includes('Video');
+    res.status(is400 ? 400 : 500).json({ ok: false, error: msg || 'Falha ao salvar material.' });
   }
 });
 
-// PUT /at/material-apoio/:id — metadados imediatos; arquivo novo em background
-router.put('/at/material-apoio/:id', materialApoioUpload.single('arquivo'), async (req, res) => {
+// PUT /at/material-apoio/:id — atualiza metadados do material
+router.put('/at/material-apoio/:id', express.json(), async (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (!id) return res.status(400).json({ ok: false, error: 'ID inválido.' });
 
@@ -7817,78 +8234,91 @@ router.put('/at/material-apoio/:id', materialApoioUpload.single('arquivo'), asyn
 
   try {
     await ensureSchema();
-    const { rows } = await pool.query('SELECT * FROM sac.material_apoio WHERE id = $1', [id]);
-    if (!rows.length) return res.status(404).json({ ok: false, error: 'Material não encontrado.' });
-    const atual = rows[0];
-
-    let nomeArquivo = atual.nome_arquivo;
-    let pathKey = atual.path_key;
-    let urlPublica = atual.url_publica;
-    let contentType = atual.content_type;
-    let tamanho = atual.tamanho_bytes;
-    let statusUpload = atual.status_upload || 'concluido';
-    let uploadErro = atual.upload_erro;
-    let oldPathKey = null;
-    let fileBuffer = null;
-
-    if (req.file?.buffer?.length) {
-      const fmtErr = materialApoioValidarFormato(formato, req.file);
-      if (fmtErr) return res.status(400).json({ ok: false, error: fmtErr });
-
-      const novoNomeArquivo = materialApoioBuildFileName(nome, req.file);
-      const novoPathKey = `${MAT_APOIO_PASTA}/${novoNomeArquivo}`;
-
-      if (novoNomeArquivo !== atual.nome_arquivo) {
-        const { rows: dup } = await pool.query(
-          'SELECT id FROM sac.material_apoio WHERE nome_arquivo = $1 AND id != $2 LIMIT 1',
-          [novoNomeArquivo, id]
-        );
-        if (dup.length) {
-          return res.status(409).json({ ok: false, error: 'Já existe outro arquivo com este nome.' });
-        }
-      }
-
-      oldPathKey = atual.path_key;
-      nomeArquivo = novoNomeArquivo;
-      pathKey = novoPathKey;
-      contentType = req.file.mimetype || null;
-      tamanho = req.file.size || null;
-      statusUpload = 'enviando';
-      uploadErro = null;
-      fileBuffer = Buffer.from(req.file.buffer);
-    }
-
     const upd = await pool.query(
       `UPDATE sac.material_apoio
-          SET nome = $2, tipo = $3, formato = $4,
-              nome_arquivo = $5, path_key = $6, url_publica = $7,
-              content_type = $8, tamanho_bytes = $9,
-              status_upload = $10, upload_erro = $11, publico = $12, atualizado_em = NOW()
+          SET nome = $2, tipo = $3, formato = $4, publico = $5, atualizado_em = NOW()
         WHERE id = $1
-        RETURNING id, nome, tipo, formato, nome_arquivo, path_key, url_publica,
-                  content_type, tamanho_bytes, status_upload, upload_erro, publico,
-                  criado_por, criado_em, atualizado_em`,
-      [
-        id, nome, tipo, formato, nomeArquivo, pathKey, urlPublica,
-        contentType, tamanho, statusUpload, uploadErro, publico,
-      ]
+        RETURNING id, nome, tipo, formato, publico, criado_por, criado_em, atualizado_em`,
+      [id, nome, tipo, formato, publico]
     );
-
-    const item = materialApoioMapRow(upd.rows[0]);
-    res.json({ ok: true, item });
-
-    if (fileBuffer) {
-      materialApoioDispararUploadBackground({
-        id,
-        pathKey,
-        buffer: fileBuffer,
-        contentType: contentType || 'application/octet-stream',
-        oldPathKey,
-      });
-    }
+    if (!upd.rows.length) return res.status(404).json({ ok: false, error: 'Material não encontrado.' });
+    const anexosMap = await materialApoioFetchAnexosMap([id]);
+    res.json({ ok: true, item: materialApoioMapRow(upd.rows[0], anexosMap.get(id) || []) });
   } catch (err) {
     console.error('[SAC/material-apoio] PUT erro:', err);
     res.status(500).json({ ok: false, error: err.message || 'Falha ao atualizar material.' });
+  }
+});
+
+// POST /at/material-apoio/:id/anexos — adiciona anexos a material existente
+router.post('/at/material-apoio/:id/anexos', materialApoioUpload.array('arquivo', MAT_APOIO_MAX_ANEXOS), async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (!id) return res.status(400).json({ ok: false, error: 'ID inválido.' });
+  const files = Array.isArray(req.files) ? req.files.filter((f) => f?.buffer?.length) : [];
+  if (!files.length) return res.status(400).json({ ok: false, error: 'Selecione ao menos um arquivo.' });
+
+  try {
+    await ensureSchema();
+    const { rows } = await pool.query(
+      'SELECT id, nome, formato FROM sac.material_apoio WHERE id = $1',
+      [id]
+    );
+    if (!rows.length) return res.status(404).json({ ok: false, error: 'Material não encontrado.' });
+    const material = rows[0];
+
+    const { rows: cntRows } = await pool.query(
+      'SELECT COUNT(*)::int AS qtd FROM sac.material_apoio_anexo WHERE material_id = $1',
+      [id]
+    );
+    const qtdAtual = cntRows[0]?.qtd || 0;
+    if (qtdAtual + files.length > MAT_APOIO_MAX_ANEXOS) {
+      return res.status(400).json({
+        ok: false,
+        error: `Limite de ${MAT_APOIO_MAX_ANEXOS} anexos por material (atual: ${qtdAtual}).`,
+      });
+    }
+
+    await materialApoioInserirAnexos({
+      materialId: id,
+      formato: material.formato,
+      nomeMaterial: material.nome,
+      files,
+    });
+    const item = await materialApoioFetchItemCompleto(id);
+    res.json({ ok: true, item });
+  } catch (err) {
+    console.error('[SAC/material-apoio] POST anexos erro:', err);
+    const msg = String(err.message || err);
+    const is400 = msg.includes('Formato') || msg.includes('PDF') || msg.includes('foto') || msg.includes('Video') || msg.includes('Limite');
+    res.status(is400 ? 400 : 500).json({ ok: false, error: msg || 'Falha ao anexar arquivos.' });
+  }
+});
+
+// DELETE /at/material-apoio/anexo/:anexoId — remove um anexo
+router.delete('/at/material-apoio/anexo/:anexoId', async (req, res) => {
+  const anexoId = parseInt(req.params.anexoId, 10);
+  if (!anexoId) return res.status(400).json({ ok: false, error: 'ID do anexo inválido.' });
+  try {
+    await ensureSchema();
+    const { rows } = await pool.query(
+      `DELETE FROM sac.material_apoio_anexo
+        WHERE id = $1
+        RETURNING material_id, path_key, status_upload`,
+      [anexoId]
+    );
+    if (!rows.length) return res.status(404).json({ ok: false, error: 'Anexo não encontrado.' });
+    const materialId = rows[0].material_id;
+    const pathKey = rows[0].path_key;
+    if (pathKey && rows[0].status_upload === 'concluido') {
+      setImmediate(() => {
+        removePublicFiles(MAT_APOIO_BUCKET, pathKey).catch(() => {});
+      });
+    }
+    const item = await materialApoioFetchItemCompleto(materialId);
+    res.json({ ok: true, item });
+  } catch (err) {
+    console.error('[SAC/material-apoio] DELETE anexo erro:', err);
+    res.status(500).json({ ok: false, error: err.message });
   }
 });
 
@@ -7903,37 +8333,41 @@ router.patch('/at/material-apoio/:id/publico', express.json(), async (req, res) 
       `UPDATE sac.material_apoio
           SET publico = $2, atualizado_em = NOW()
         WHERE id = $1
-        RETURNING id, nome, tipo, formato, nome_arquivo, path_key, url_publica,
-                  content_type, tamanho_bytes, status_upload, upload_erro, publico,
-                  criado_por, criado_em, atualizado_em`,
+        RETURNING id, nome, tipo, formato, publico, criado_por, criado_em, atualizado_em`,
       [id, publico]
     );
     if (!rows.length) return res.status(404).json({ ok: false, error: 'Material não encontrado.' });
-    res.json({ ok: true, item: materialApoioMapRow(rows[0]) });
+    const anexosMap = await materialApoioFetchAnexosMap([id]);
+    res.json({ ok: true, item: materialApoioMapRow(rows[0], anexosMap.get(id) || []) });
   } catch (err) {
     console.error('[SAC/material-apoio] PATCH publico erro:', err);
     res.status(500).json({ ok: false, error: err.message });
   }
 });
 
-// DELETE /at/material-apoio/:id — remove do banco na hora; R2 em background
+// DELETE /at/material-apoio/:id — remove material e todos os anexos
 router.delete('/at/material-apoio/:id', async (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (!id) return res.status(400).json({ ok: false, error: 'ID inválido.' });
   try {
     await ensureSchema();
+    const { rows: anexos } = await pool.query(
+      `SELECT path_key, status_upload FROM sac.material_apoio_anexo WHERE material_id = $1`,
+      [id]
+    );
     const { rows } = await pool.query(
-      'DELETE FROM sac.material_apoio WHERE id = $1 RETURNING path_key, status_upload',
+      'DELETE FROM sac.material_apoio WHERE id = $1 RETURNING id',
       [id]
     );
     if (!rows.length) return res.status(404).json({ ok: false, error: 'Material não encontrado.' });
     res.json({ ok: true });
-    const pathKey = rows[0].path_key;
-    if (pathKey && rows[0].status_upload === 'concluido') {
-      setImmediate(() => {
-        removePublicFiles(MAT_APOIO_BUCKET, pathKey).catch(() => {});
-      });
-    }
+    anexos.forEach((a) => {
+      if (a.path_key && a.status_upload === 'concluido') {
+        setImmediate(() => {
+          removePublicFiles(MAT_APOIO_BUCKET, a.path_key).catch(() => {});
+        });
+      }
+    });
   } catch (err) {
     console.error('[SAC/material-apoio] DELETE erro:', err);
     res.status(500).json({ ok: false, error: err.message });
@@ -8424,12 +8858,16 @@ router.get('/at/tecnico/material-apoio', async (req, res) => {
     );
     if (!valid.length) return res.status(404).json({ ok: false, error: 'Link inválido' });
     const { rows } = await pool.query(
-      `SELECT id, nome, tipo, formato, nome_arquivo, url_publica, status_upload, upload_erro
+      `SELECT id, nome, tipo, formato, publico, criado_por, criado_em, atualizado_em
          FROM sac.material_apoio
         WHERE publico = true
         ORDER BY tipo, nome`
     );
-    res.json({ ok: true, itens: rows.map(materialApoioMapRow) });
+    const anexosMap = await materialApoioFetchAnexosMap(rows.map((r) => r.id));
+    res.json({
+      ok: true,
+      itens: rows.map((row) => materialApoioMapRow(row, anexosMap.get(Number(row.id)) || [])),
+    });
   } catch (err) {
     console.error('[AT/tecnico/material-apoio] erro:', err);
     res.status(500).json({ ok: false, error: err.message });
