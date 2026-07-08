@@ -7174,6 +7174,54 @@
               }
             </style>
 
+            <!-- Seção: Local de estoque padrão por setor -->
+            <div class="content-section" style="margin-top: 40px; background: linear-gradient(135deg, var(--content-bg) 0%, rgba(139, 92, 246, 0.03) 100%); border: 1px solid var(--border-color); border-radius: 16px; padding: 28px; box-shadow: 0 2px 12px rgba(0,0,0,0.05);">
+              <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 20px;">
+                <div style="width: 48px; height: 48px; background: linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%); border-radius: 12px; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 12px rgba(139, 92, 246, 0.3);">
+                  <i class="fa-solid fa-warehouse" style="color: white; font-size: 22px;"></i>
+                </div>
+                <div style="flex: 1;">
+                  <h3 style="margin: 0 0 4px 0; color: var(--content-title-color); font-size: 20px; font-weight: 600;">Local de estoque por setor</h3>
+                  <p style="margin: 0; color: var(--inactive-color); font-size: 13px;">
+                    Define o local de entrega padrão no modal &quot;Sol. de separação&quot; (Minhas Separações) conforme o setor do usuário
+                  </p>
+                </div>
+                <div id="setorLocalSpinner" style="display:none; color: #8b5cf6;">
+                  <i class="fa-solid fa-spinner fa-spin" style="font-size: 24px;"></i>
+                </div>
+                <button id="setorLocalSaveBtn" class="btn" type="button" style="padding: 10px 20px; background: linear-gradient(135deg, #10b981 0%, #059669 100%); border: none; border-radius: 8px; color: white; font-weight: 500; display: flex; align-items: center; gap: 8px; box-shadow: 0 2px 8px rgba(16, 185, 129, 0.3);">
+                  <i class="fa-solid fa-save"></i> Salvar
+                </button>
+              </div>
+
+              <div id="setorLocalError" style="display:none; background: linear-gradient(135deg, #fecaca 0%, #fca5a5 100%); border-left: 4px solid #ef4444; padding: 14px 18px; border-radius: 8px; margin-bottom: 20px;">
+                <span id="setorLocalErrorText" style="color: #991b1b; font-size: 13px; font-weight: 500;"></span>
+              </div>
+
+              <div style="background: var(--content-bg); border: 1px solid var(--border-color); border-radius: 12px; overflow: hidden;">
+                <table class="tabela padrao" id="setorLocalTable" style="width:100%; border-collapse:collapse; margin: 0;">
+                  <thead>
+                    <tr style="background: linear-gradient(135deg, rgba(139, 92, 246, 0.1) 0%, rgba(124, 58, 237, 0.08) 100%);">
+                      <th style="text-align:left; padding: 16px 20px; font-weight: 600; font-size: 13px; color: var(--content-title-color); text-transform: uppercase; letter-spacing: 0.5px; border-bottom: 2px solid #8b5cf6; width: 35%;">
+                        <i class="fa-solid fa-building" style="color: #8b5cf6; margin-right: 6px;"></i>Setor
+                      </th>
+                      <th style="text-align:left; padding: 16px 20px; font-weight: 600; font-size: 13px; color: var(--content-title-color); text-transform: uppercase; letter-spacing: 0.5px; border-bottom: 2px solid #8b5cf6;">
+                        <i class="fa-solid fa-warehouse" style="color: #8b5cf6; margin-right: 6px;"></i>Local de estoque padrão
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody id="setorLocalTbody">
+                    <tr>
+                      <td colspan="2" style="padding: 40px 20px; text-align: center; color: var(--inactive-color); font-size: 14px;">
+                        <i class="fa-solid fa-spinner fa-spin" style="font-size: 24px; color: #8b5cf6; display: block; margin-bottom: 12px;"></i>
+                        Carregando setores...
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
             <!-- Seção: Configuração de Campos Obrigatórios -->
             <div class="content-section" style="margin-top: 40px; background: linear-gradient(135deg, var(--content-bg) 0%, rgba(59, 130, 246, 0.03) 100%); border: 1px solid var(--border-color); border-radius: 16px; padding: 28px; box-shadow: 0 2px 12px rgba(0,0,0,0.05);">
               <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 20px;">

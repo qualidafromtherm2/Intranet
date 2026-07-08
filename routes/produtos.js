@@ -849,4 +849,98 @@ router.post('/sincronizar-completo', async (req, res) => {
   }
 });
 
+// ── Múltiplo de separação (coluna manual em produtos_omie) ─────────────────
+let ensureProdutosOmieMultiploColumnPromise = null;
+
+async function ensureProdutosOmieMultiploColumn() {
+  if (!ensureProdutosOmieMultiploColumnPromise) {
+    ensureProdutosOmieMultiploColumnPromise = dbQuery(`
+      ALTER TABLE public.produtos_omie
+      ADD COLUMN IF NOT EXISTS multiplo NUMERIC
+    `).catch((err) => {
+      ensureProdutosOmieMultiploColumnPromise = null;
+      throw err;
+    });
+  }
+  await ensureProdutosOmieMultiploColumnPromise;
+}
+
+async function atualizarMultiploProdutoOmie(codigo, multiplo) {
+  const client = await dbGetClient();
+  try {
+    await client.query('BEGIN');
+    await client.query("SELECT set_config('app.produtos_omie_write_source', 'omie_manual', true)");
+    const result = await client.query(
+      `UPDATE public.produtos_omie
+          SET multiplo = $2
+        WHERE codigo = $1
+        RETURNING codigo, multiplo`,
+      [codigo, multiplo]
+    );
+    await client.query('COMMIT');
+    return result;
+  } catch (e) {
+    try { await client.query('ROLLBACK'); } catch (_) {}
+    throw e;
+  } finally {
+    client.release();
+  }
+}
+
+router.get('/:codigo/multiplo', async (req, res) => {
+  try {
+    await ensureProdutosOmieMultiploColumn();
+    const codigo = String(req.params.codigo || '').trim();
+    if (!codigo) return res.status(400).json({ ok: false, error: 'Código obrigatório' });
+
+    const { rows } = await dbQuery(
+      `SELECT codigo, multiplo FROM public.produtos_omie WHERE codigo = $1 LIMIT 1`,
+      [codigo]
+    );
+    if (!rows.length) return res.status(404).json({ ok: false, error: 'Produto não encontrado' });
+
+    const multiplo = rows[0].multiplo != null ? Number(rows[0].multiplo) : null;
+    res.json({
+      ok: true,
+      codigo: rows[0].codigo,
+      multiplo: Number.isFinite(multiplo) && multiplo > 0 ? multiplo : null
+    });
+  } catch (err) {
+    console.error('[GET /api/produtos/:codigo/multiplo]', err);
+    res.status(500).json({ ok: false, error: String(err.message || err) });
+  }
+});
+
+router.put('/:codigo/multiplo', express.json(), async (req, res) => {
+  try {
+    await ensureProdutosOmieMultiploColumn();
+    const codigo = String(req.params.codigo || '').trim();
+    if (!codigo) return res.status(400).json({ ok: false, error: 'Código obrigatório' });
+
+    const raw = req.body?.multiplo;
+    if (raw === null || raw === '' || raw === undefined) {
+      const result = await atualizarMultiploProdutoOmie(codigo, null);
+      if (!result.rows.length) return res.status(404).json({ ok: false, error: 'Produto não encontrado' });
+      return res.json({ ok: true, codigo, multiplo: null });
+    }
+
+    const multiplo = Number(String(raw).replace(',', '.'));
+    if (!Number.isFinite(multiplo) || multiplo <= 0) {
+      return res.status(400).json({ ok: false, error: 'Informe um múltiplo maior que zero.' });
+    }
+
+    const result = await atualizarMultiploProdutoOmie(codigo, multiplo);
+    if (!result.rows.length) return res.status(404).json({ ok: false, error: 'Produto não encontrado' });
+
+    res.json({
+      ok: true,
+      codigo: result.rows[0].codigo,
+      multiplo: Number(result.rows[0].multiplo)
+    });
+  } catch (err) {
+    console.error('[PUT /api/produtos/:codigo/multiplo]', err);
+    res.status(500).json({ ok: false, error: String(err.message || err) });
+  }
+});
+
 module.exports = router;

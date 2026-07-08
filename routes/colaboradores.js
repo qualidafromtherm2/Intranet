@@ -143,15 +143,61 @@ async function withTx(fn) {
   finally { client.release(); }
 }
 
+async function ensureAuthSectorLocaisColumns() {
+  await pool.query(`ALTER TABLE public.auth_sector ADD COLUMN IF NOT EXISTS descricao_loc TEXT`);
+  await pool.query(`ALTER TABLE public.auth_sector ADD COLUMN IF NOT EXISTS cod_local TEXT`);
+}
+
 /* ======= SETORES ======= */
 router.get('/setores', async (req, res) => {
   try {
+    await ensureAuthSectorLocaisColumns();
     const { rows } = await pool.query(
-      'SELECT id, name FROM public.auth_sector WHERE active IS DISTINCT FROM false ORDER BY name'
+      `SELECT id, name, descricao_loc, cod_local
+         FROM public.auth_sector
+        WHERE active IS DISTINCT FROM false
+        ORDER BY name`
     );
     res.json(rows);
   } catch (e) {
     res.status(500).json({ error: 'Erro ao listar setores' });
+  }
+});
+
+// Salva local de estoque padrão por setor (Definições → Logística)
+router.put('/setores/locais-padrao', async (req, res) => {
+  const setores = Array.isArray(req.body?.setores) ? req.body.setores : [];
+  if (!setores.length) {
+    return res.status(400).json({ ok: false, error: 'Nenhum setor informado.' });
+  }
+  const client = await pool.connect();
+  try {
+    await ensureAuthSectorLocaisColumns();
+    await client.query('BEGIN');
+    for (const s of setores) {
+      const id = Number(s.id);
+      if (!Number.isInteger(id) || id <= 0) continue;
+      const codLocal = s.cod_local != null && String(s.cod_local).trim() !== ''
+        ? String(s.cod_local).trim()
+        : null;
+      const descricaoLoc = s.descricao_loc != null && String(s.descricao_loc).trim() !== ''
+        ? String(s.descricao_loc).trim()
+        : null;
+      await client.query(
+        `UPDATE public.auth_sector
+            SET cod_local = $2, descricao_loc = $3
+          WHERE id = $1`,
+        [id, codLocal, descricaoLoc]
+      );
+    }
+    await client.query('COMMIT');
+    res.json({ ok: true });
+  } catch (e) {
+    await client.query('ROLLBACK');
+    console.error('[colaboradores/setores/locais-padrao]', e);
+    res.status(500).json({ ok: false, error: 'Erro ao salvar locais por setor' });
+  } finally {
+    client.release();
   }
 });
 

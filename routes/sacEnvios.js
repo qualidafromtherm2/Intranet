@@ -3800,7 +3800,16 @@ async function ensureSchema() {
 
     ALTER TABLE sac.material_apoio ADD COLUMN IF NOT EXISTS status_upload TEXT NOT NULL DEFAULT 'concluido';
     ALTER TABLE sac.material_apoio ADD COLUMN IF NOT EXISTS upload_erro TEXT;
-    ALTER TABLE sac.material_apoio ALTER COLUMN url_publica DROP NOT NULL;
+    ALTER TABLE sac.material_apoio ADD COLUMN IF NOT EXISTS url_publica TEXT;
+    DO $matApoioUrlPub$
+    BEGIN
+      IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+         WHERE table_schema = 'sac' AND table_name = 'material_apoio' AND column_name = 'url_publica'
+      ) THEN
+        ALTER TABLE sac.material_apoio ALTER COLUMN url_publica DROP NOT NULL;
+      END IF;
+    END $matApoioUrlPub$;
     ALTER TABLE sac.material_apoio ADD COLUMN IF NOT EXISTS publico BOOLEAN NOT NULL DEFAULT false;
 
     CREATE TABLE IF NOT EXISTS sac.material_apoio_anexo (

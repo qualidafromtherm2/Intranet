@@ -26545,6 +26545,7 @@ btnCache.addEventListener('click', async e => {
   console.log('[DEBUG] iniciando initListarProdutosUI…');
   await initListarProdutosUI('listaProdutos', 'listaProdutosList');
   console.log('[DEBUG] initListarProdutosUI completo');
+  void window.preloadLocaisEstoqueCache?.();
 
   // === [B] Clique em um produto da lista -> abre "Dados do produto" ===
 (function bindOpenFromListOnce(){
@@ -26610,6 +26611,23 @@ if (btnProducaoPrimeiraPecaOk) {
     if (inputPesquisa) inputPesquisa.focus();
   });
 }
+
+// === Cache global de locais Omie (reutilizado em separação e Definições) ===
+window.preloadLocaisEstoqueCache = async function preloadLocaisEstoqueCache(force = false) {
+  if (!force && Array.isArray(window.__locaisEstoqueCache) && window.__locaisEstoqueCache.length) {
+    return window.__locaisEstoqueCache;
+  }
+  try {
+    const resp = await fetch('/api/armazem/locais?fonte=omie', { credentials: 'include' });
+    const data = await resp.json();
+    const locais = (data.locais || []).filter(l => !l.inativo && l.inativo !== 'S');
+    window.__locaisEstoqueCache = locais;
+    return locais;
+  } catch (e) {
+    console.warn('[preloadLocaisEstoqueCache] erro:', e);
+    return window.__locaisEstoqueCache || [];
+  }
+};
 
 // === Definições (Famílias) =================================================
 (function initDefinicoes(){
@@ -26872,6 +26890,7 @@ if (btnProducaoPrimeiraPecaOk) {
     
     // carrega famílias
     await fetchFamilias();
+    await carregarSetorLocaisConfig();
     
     // Não carrega campos automaticamente - só quando selecionar uma família
     // loadCamposConfig();
@@ -26879,6 +26898,110 @@ if (btnProducaoPrimeiraPecaOk) {
 
   refreshBtn()?.addEventListener('click', e => { e.preventDefault(); fetchFamilias(true); });
   saveBtn()?.addEventListener('click', e => { e.preventDefault(); saveAllChanges(); });
+
+  // === Local de estoque padrão por setor ===
+  function montarOpcoesLocaisSelect(locais, valorAtual) {
+    const opts = ['<option value="">— Nenhum (usuário escolhe) —</option>'];
+    (locais || []).forEach(l => {
+      const cod = String(l.codigo_local_estoque || '');
+      const desc = String(l.descricao || cod);
+      const sel = valorAtual && String(valorAtual) === cod ? ' selected' : '';
+      opts.push(`<option value="${cod}" data-descricao="${desc.replace(/"/g, '&quot;')}"${sel}>${desc}</option>`);
+    });
+    return opts.join('');
+  }
+
+  async function carregarSetorLocaisConfig() {
+    const tbody = document.getElementById('setorLocalTbody');
+    const spinner = document.getElementById('setorLocalSpinner');
+    const errBox = document.getElementById('setorLocalError');
+    const errText = document.getElementById('setorLocalErrorText');
+    if (!tbody) return;
+    if (spinner) spinner.style.display = 'block';
+    if (errBox) errBox.style.display = 'none';
+    try {
+      const [setoresResp, locais] = await Promise.all([
+        fetch(`${API_BASE}/api/colaboradores/setores`, { credentials: 'include' }),
+        window.preloadLocaisEstoqueCache()
+      ]);
+      const setores = await setoresResp.json();
+      if (!setoresResp.ok) throw new Error(setores?.error || 'Erro ao carregar setores');
+      window.__setoresLocaisCache = setores;
+      if (!Array.isArray(setores) || !setores.length) {
+        tbody.innerHTML = '<tr><td colspan="2" style="padding:40px 20px;text-align:center;color:var(--inactive-color);">Nenhum setor cadastrado.</td></tr>';
+        return;
+      }
+      tbody.innerHTML = setores.map(s => `
+        <tr data-sector-id="${s.id}">
+          <td style="padding:14px 20px;font-weight:600;">${String(s.name || '').replace(/</g, '&lt;')}</td>
+          <td style="padding:14px 20px;">
+            <select class="setor-local-select form-control" style="width:100%;padding:10px 14px;font-size:14px;border:2px solid var(--border-color);border-radius:8px;background:var(--content-bg);">
+              ${montarOpcoesLocaisSelect(locais, s.cod_local)}
+            </select>
+          </td>
+        </tr>
+      `).join('');
+    } catch (e) {
+      if (errBox && errText) {
+        errText.textContent = 'Erro ao carregar: ' + (e?.message || e);
+        errBox.style.display = 'block';
+      }
+      tbody.innerHTML = '<tr><td colspan="2" style="padding:40px 20px;text-align:center;color:#ef4444;">Falha ao carregar setores.</td></tr>';
+    } finally {
+      if (spinner) spinner.style.display = 'none';
+    }
+  }
+
+  async function salvarSetorLocaisConfig() {
+    const btn = document.getElementById('setorLocalSaveBtn');
+    const errBox = document.getElementById('setorLocalError');
+    const errText = document.getElementById('setorLocalErrorText');
+    const rows = document.querySelectorAll('#setorLocalTbody tr[data-sector-id]');
+    if (!rows.length) {
+      alert('Nenhum setor para salvar.');
+      return;
+    }
+    const setores = Array.from(rows).map(tr => {
+      const sel = tr.querySelector('.setor-local-select');
+      const opt = sel?.selectedOptions?.[0];
+      return {
+        id: tr.dataset.sectorId,
+        cod_local: opt?.value || null,
+        descricao_loc: opt?.dataset?.descricao || (opt?.value ? opt.textContent : null)
+      };
+    });
+    if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Salvando...'; }
+    if (errBox) errBox.style.display = 'none';
+    try {
+      const res = await fetch(`${API_BASE}/api/colaboradores/setores/locais-padrao`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ setores })
+      });
+      const json = await res.json();
+      if (!res.ok || !json.ok) throw new Error(json.error || 'Erro ao salvar');
+      window.__setoresLocaisCache = null;
+      alert('Locais por setor salvos com sucesso!');
+    } catch (e) {
+      if (errBox && errText) {
+        errText.textContent = e?.message || String(e);
+        errBox.style.display = 'block';
+      } else {
+        alert('Erro: ' + (e?.message || e));
+      }
+    } finally {
+      if (btn) {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="fa-solid fa-save"></i> Salvar';
+      }
+    }
+  }
+
+  document.getElementById('setorLocalSaveBtn')?.addEventListener('click', e => {
+    e.preventDefault();
+    salvarSetorLocaisConfig();
+  });
 
   // === Configuração de Campos Obrigatórios ===
   
@@ -47833,6 +47956,16 @@ window.renderizarCatalogoOmie = renderizarCatalogoOmie;
       </div>
       <label for="modalAcoesQtdInput" style="font-size:12px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:#64748b;">Quantidade</label>
       <input id="modalAcoesQtdInput" type="number" inputmode="decimal" autocomplete="off" placeholder="Digite a quantidade" style="width:100%;box-sizing:border-box;padding:14px 16px;border:1px solid #cbd5e1;border-radius:14px;font-size:20px;font-weight:700;color:#0f172a;background:#fff;" />
+      <div id="modalAcoesQtdMultiploRow" style="display:none;flex-direction:column;gap:8px;">
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+          <button id="modalAcoesQtdBtnCadMultiplo" type="button" style="min-height:40px;padding:0 14px;border-radius:10px;border:1px solid #fdba74;background:#fff7ed;color:#9a3412;font-size:12px;font-weight:700;cursor:pointer;">
+            <i class="fa-solid fa-pen-to-square" style="margin-right:6px;"></i>Cadastrar múltiplo
+          </button>
+          <button id="modalAcoesQtdBtnUsarMultiplo" type="button" style="display:none;min-height:40px;padding:0 14px;border-radius:10px;border:1px solid #f59e0b;background:linear-gradient(135deg,#fff7ed,#ffedd5);color:#9a3412;font-size:13px;font-weight:800;cursor:pointer;">
+            + <span id="modalAcoesQtdMultiploValor">0</span>
+          </button>
+        </div>
+      </div>
       <div id="modalAcoesQtdErro" style="display:none;font-size:12px;color:#dc2626;font-weight:600;"></div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
         <button id="modalAcoesQtdCancelar" type="button" style="min-height:46px;border-radius:12px;border:1px solid #cbd5e1;background:#fff;color:#334155;font-size:14px;font-weight:700;cursor:pointer;">Cancelar</button>
@@ -47841,6 +47974,24 @@ window.renderizarCatalogoOmie = renderizarCatalogoOmie;
     </div>
   `;
   document.body.appendChild(qtyOverlay);
+
+  const cadMultiploOverlay = document.createElement('div');
+  cadMultiploOverlay.id = 'modalCadMultiploOverlay';
+  cadMultiploOverlay.style.cssText = 'display:none;position:fixed;inset:0;z-index:10002;background:rgba(0,0,0,.68);align-items:center;justify-content:center;padding:20px;';
+  cadMultiploOverlay.innerHTML = `
+    <div role="dialog" aria-modal="true" style="width:min(340px,92vw);background:#fff;border-radius:16px;box-shadow:0 24px 64px rgba(0,0,0,.34);padding:18px;display:flex;flex-direction:column;gap:12px;">
+      <div style="font-size:16px;font-weight:800;color:#0f172a;">Cadastrar múltiplo</div>
+      <div id="modalCadMultiploProduto" style="font-size:12px;color:#64748b;line-height:1.4;"></div>
+      <label for="modalCadMultiploInput" style="font-size:12px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.04em;">Múltiplo</label>
+      <input id="modalCadMultiploInput" type="number" min="0.001" step="0.001" inputmode="decimal" placeholder="Ex.: 50" style="width:100%;box-sizing:border-box;padding:12px 14px;border:1px solid #cbd5e1;border-radius:12px;font-size:18px;font-weight:700;color:#0f172a;" />
+      <div id="modalCadMultiploErro" style="display:none;font-size:12px;color:#dc2626;font-weight:600;"></div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+        <button id="modalCadMultiploCancelar" type="button" style="min-height:44px;border-radius:12px;border:1px solid #cbd5e1;background:#fff;color:#334155;font-weight:700;cursor:pointer;">Cancelar</button>
+        <button id="modalCadMultiploSalvar" type="button" style="min-height:44px;border-radius:12px;border:none;background:linear-gradient(135deg,#f59e0b,#d97706);color:#fff;font-weight:700;cursor:pointer;">Salvar</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(cadMultiploOverlay);
 
   let _ctx = {};
   let _returnFocus = null;
@@ -47888,6 +48039,117 @@ window.renderizarCatalogoOmie = renderizarCatalogoOmie;
     document.getElementById('modalAcoesQtdErro').style.display = 'none';
     document.getElementById('modalAcoesQtdErro').textContent = '';
     document.getElementById('modalAcoesQtdInput').value = '';
+    const multiploRow = document.getElementById('modalAcoesQtdMultiploRow');
+    if (multiploRow) multiploRow.style.display = 'none';
+    const btnUsar = document.getElementById('modalAcoesQtdBtnUsarMultiplo');
+    if (btnUsar) btnUsar.style.display = 'none';
+  }
+
+  function formatarMultiploExibicao(valor) {
+    const n = Number(valor);
+    if (!Number.isFinite(n)) return '0';
+    return n.toLocaleString('pt-BR', { maximumFractionDigits: 4 });
+  }
+
+  function atualizarUiMultiploQtd(multiplo) {
+    const btnUsar = document.getElementById('modalAcoesQtdBtnUsarMultiplo');
+    const spanVal = document.getElementById('modalAcoesQtdMultiploValor');
+    if (!_qtyCtx) return;
+    if (Number.isFinite(multiplo) && multiplo > 0) {
+      _qtyCtx.multiplo = multiplo;
+      if (spanVal) spanVal.textContent = formatarMultiploExibicao(multiplo);
+      if (btnUsar) {
+        btnUsar.style.display = '';
+        btnUsar.title = `Somar ${formatarMultiploExibicao(multiplo)} à quantidade`;
+      }
+    } else {
+      _qtyCtx.multiplo = null;
+      if (btnUsar) btnUsar.style.display = 'none';
+    }
+  }
+
+  async function carregarMultiploProduto(codigo) {
+    atualizarUiMultiploQtd(null);
+    if (!codigo) return;
+    try {
+      const resp = await fetch('/api/produtos/' + encodeURIComponent(codigo) + '/multiplo', { credentials: 'include' });
+      const data = await resp.json();
+      if (resp.ok && data.ok) {
+        atualizarUiMultiploQtd(data.multiplo != null ? Number(data.multiplo) : null);
+      }
+    } catch (err) {
+      console.warn('[multiplo] falha ao carregar:', err);
+    }
+  }
+
+  function fecharCadMultiplo() {
+    cadMultiploOverlay.style.display = 'none';
+    const erro = document.getElementById('modalCadMultiploErro');
+    if (erro) { erro.style.display = 'none'; erro.textContent = ''; }
+  }
+
+  function abrirCadMultiplo() {
+    if (!_qtyCtx?.codigo) return;
+    document.getElementById('modalCadMultiploProduto').textContent = _qtyCtx.descricao || _qtyCtx.codigo;
+    const input = document.getElementById('modalCadMultiploInput');
+    if (input) {
+      input.value = _qtyCtx.multiplo != null && _qtyCtx.multiplo > 0
+        ? String(_qtyCtx.multiplo)
+        : '';
+    }
+    cadMultiploOverlay.style.display = 'flex';
+    requestAnimationFrame(() => input?.focus({ preventScroll: true }));
+  }
+
+  async function salvarCadMultiplo() {
+    if (!_qtyCtx?.codigo) return;
+    const input = document.getElementById('modalCadMultiploInput');
+    const erro = document.getElementById('modalCadMultiploErro');
+    const raw = String(input?.value || '').trim().replace(',', '.');
+    const multiplo = Number(raw);
+    if (!raw || !Number.isFinite(multiplo) || multiplo <= 0) {
+      if (erro) {
+        erro.textContent = 'Informe um múltiplo maior que zero.';
+        erro.style.display = 'block';
+      }
+      input?.focus({ preventScroll: true });
+      return;
+    }
+    const btn = document.getElementById('modalCadMultiploSalvar');
+    if (btn) { btn.disabled = true; btn.textContent = 'Salvando...'; }
+    if (erro) { erro.style.display = 'none'; erro.textContent = ''; }
+    try {
+      const resp = await fetch('/api/produtos/' + encodeURIComponent(_qtyCtx.codigo) + '/multiplo', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ multiplo })
+      });
+      const data = await resp.json();
+      if (!resp.ok || !data.ok) throw new Error(data.error || 'Erro ao salvar múltiplo.');
+      atualizarUiMultiploQtd(Number(data.multiplo));
+      fecharCadMultiplo();
+    } catch (err) {
+      if (erro) {
+        erro.textContent = err.message || 'Erro ao salvar múltiplo.';
+        erro.style.display = 'block';
+      }
+    } finally {
+      if (btn) { btn.disabled = false; btn.textContent = 'Salvar'; }
+    }
+  }
+
+  function somarMultiploNaQuantidade() {
+    const multiplo = Number(_qtyCtx?.multiplo);
+    if (!Number.isFinite(multiplo) || multiplo <= 0) return;
+    const input = document.getElementById('modalAcoesQtdInput');
+    if (!input) return;
+    const unidadeNorm = String(_qtyCtx?.unidade || 'UN').toUpperCase();
+    const atual = Number(String(input.value || '').replace(',', '.')) || 0;
+    let novo = atual + multiplo;
+    if (unidadeNorm === 'UN') novo = Math.max(1, Math.round(novo));
+    input.value = String(novo);
+    input.focus({ preventScroll: true });
   }
 
   function obterQuantidadeModal() {
@@ -47911,7 +48173,7 @@ window.renderizarCatalogoOmie = renderizarCatalogoOmie;
   }
 
   function abrirQuantidade(tipo) {
-    _qtyCtx = { tipo, ..._ctx };
+    _qtyCtx = { tipo, ..._ctx, multiplo: null };
     document.getElementById('modalAcoesQtdTitulo').textContent = tipo === 'carrinho'
       ? 'Quantidade para compra'
       : 'Quantidade para separação';
@@ -47920,6 +48182,15 @@ window.renderizarCatalogoOmie = renderizarCatalogoOmie;
     input.value = '';
     input.min = String(String(_ctx.unidade || 'UN').toUpperCase() === 'UN' ? 1 : 0.001);
     input.step = String(String(_ctx.unidade || 'UN').toUpperCase() === 'UN' ? 1 : 0.001);
+    const multiploRow = document.getElementById('modalAcoesQtdMultiploRow');
+    if (multiploRow) {
+      multiploRow.style.display = tipo === 'separacao' ? 'flex' : 'none';
+    }
+    if (tipo === 'separacao') {
+      void carregarMultiploProduto(_ctx.codigo);
+    } else {
+      atualizarUiMultiploQtd(null);
+    }
     qtyOverlay.style.display = 'flex';
     document.body.classList.add('mobile-modal-open');
     requestAnimationFrame(() => {
@@ -48064,8 +48335,10 @@ window.renderizarCatalogoOmie = renderizarCatalogoOmie;
   // Event listeners
   ov.addEventListener('click', e => { if (e.target === ov) fechar(); });
   qtyOverlay.addEventListener('click', e => { if (e.target === qtyOverlay) fecharQuantidade(); });
+  cadMultiploOverlay.addEventListener('click', e => { if (e.target === cadMultiploOverlay) fecharCadMultiplo(); });
   document.addEventListener('keydown', (event) => {
     if (event.key === 'Escape' && ov.style.display !== 'none') fechar();
+    if (event.key === 'Escape' && cadMultiploOverlay.style.display !== 'none') fecharCadMultiplo();
     if (event.key === 'Escape' && qtyOverlay.style.display !== 'none') fecharQuantidade();
   });
   document.getElementById('modalAcoesFechar').addEventListener('click', fechar);
@@ -48077,6 +48350,14 @@ window.renderizarCatalogoOmie = renderizarCatalogoOmie;
   document.getElementById('modalAcoesQtdConfirmar').addEventListener('click', confirmarQuantidade);
   document.getElementById('modalAcoesQtdInput').addEventListener('keydown', (event) => {
     if (event.key === 'Enter') confirmarQuantidade();
+  });
+  document.getElementById('modalAcoesQtdBtnCadMultiplo')?.addEventListener('click', abrirCadMultiplo);
+  document.getElementById('modalAcoesQtdBtnUsarMultiplo')?.addEventListener('click', somarMultiploNaQuantidade);
+  document.getElementById('modalCadMultiploCancelar')?.addEventListener('click', fecharCadMultiplo);
+  document.getElementById('modalCadMultiploSalvar')?.addEventListener('click', salvarCadMultiplo);
+  document.getElementById('modalCadMultiploInput')?.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') salvarCadMultiplo();
+    if (event.key === 'Escape') fecharCadMultiplo();
   });
 
   document.getElementById('modalAcoesBtnCompras').addEventListener('click', () => { const {codigo_produto, codigo, descricao} = _ctx; fechar(); abrirModalUltimasCompras(codigo_produto, codigo, descricao); });
@@ -71779,25 +72060,51 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
+  async function _aplicarLocalPadraoSetorUsuario() {
+    const sel = document.getElementById('modalCarrinhoSepMotivo');
+    if (!sel || sel.options.length <= 1) return;
+
+    let me = window.__authStatusCache;
+    if (!me?.user?.sector_id) {
+      try {
+        const r = await fetch('/api/auth/status', { credentials: 'include' });
+        me = await r.json();
+        window.__authStatusCache = me;
+      } catch { return; }
+    }
+    const sectorId = me?.user?.sector_id;
+    if (!sectorId) return;
+
+    let setores = window.__setoresLocaisCache;
+    if (!Array.isArray(setores)) {
+      try {
+        const r = await fetch('/api/colaboradores/setores', { credentials: 'include' });
+        setores = await r.json();
+        window.__setoresLocaisCache = setores;
+      } catch { return; }
+    }
+    const sector = setores.find(s => Number(s.id) === Number(sectorId));
+    const codLocal = sector?.cod_local != null ? String(sector.cod_local).trim() : '';
+    if (!codLocal) return;
+    if (Array.from(sel.options).some(o => o.value === codLocal)) {
+      sel.value = codLocal;
+    }
+  }
+
   async function _carregarLocaisEstoqueSep() {
     const sel = document.getElementById('modalCarrinhoSepMotivo');
     if (!sel) return;
     sel.innerHTML = '<option value="">— carregando... —</option>';
     try {
-      let locais = window.__locaisEstoqueCache;
-      if (!locais) {
-        const resp = await fetch('/api/armazem/locais?fonte=omie', { credentials: 'include' });
-        const data = await resp.json();
-        locais = (data.locais || []).filter(l => l.inativo !== 'S');
-        window.__locaisEstoqueCache = locais;
-      }
+      const locais = await window.preloadLocaisEstoqueCache();
       if (!locais.length) {
         sel.innerHTML = '<option value="">— nenhum local encontrado —</option>';
         return;
       }
       sel.innerHTML = '<option value="">\u2014 Selecione o local \u2014</option>' + locais
-        .map(l => `<option value="${l.codigo_local_estoque}" data-descricao="${l.descricao}">${l.nIdent ? l.nIdent + '. ' : ''}${l.descricao}</option>`)
+        .map(l => `<option value="${l.codigo_local_estoque}" data-descricao="${String(l.descricao || '').replace(/"/g, '&quot;')}">${l.nIdent ? l.nIdent + '. ' : ''}${l.descricao}</option>`)
         .join('');
+      await _aplicarLocalPadraoSetorUsuario();
     } catch {
       sel.innerHTML = '<option value="">— erro ao carregar —</option>';
     }
