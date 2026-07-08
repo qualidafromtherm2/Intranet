@@ -11196,8 +11196,9 @@ async function _etqSanitizarEMigrarEnderecoPp(db) {
 /** Backfill seguro de codigo/descricao — nunca apaga nem renumera IDs. */
 async function _etqBackfillRecImpressoSeguro(db) {
   const conn = db || pool;
+  let total = 0;
 
-  await conn.query(`
+  const rec = await conn.query(`
     UPDATE etiqueta."ETQ_rec_impresso" i
        SET codigo_produto = COALESCE(NULLIF(TRIM(i.codigo_produto), ''), p.codigo_produto::text),
            descricao_produto = COALESCE(
@@ -11213,8 +11214,9 @@ async function _etqBackfillRecImpressoSeguro(db) {
          OR NULLIF(TRIM(i.descricao_produto), '') IS NULL
        )
   `);
+  total += rec.rowCount || 0;
 
-  await conn.query(`
+  const zpl = await conn.query(`
     UPDATE etiqueta."ETQ_rec_impresso" i
        SET codigo_produto = p.codigo_produto::text,
            descricao_produto = COALESCE(
@@ -11229,9 +11231,28 @@ async function _etqBackfillRecImpressoSeguro(db) {
        AND TRIM(p.codigo) = TRIM(SUBSTRING(i.conteudo_zpl FROM 'Cod\\. Produto: ([^\\^\\n\\r]+)'))
        AND p.codigo_produto IS NOT NULL
   `);
+  total += zpl.rowCount || 0;
+
+  // inventario / catálogo: endereço → logistica."Endereço_pp" (quando existir)
+  const ep = await conn.query(`
+    UPDATE etiqueta."ETQ_rec_impresso" i
+       SET codigo_produto = COALESCE(NULLIF(TRIM(i.codigo_produto), ''), ep.codigo_produto::text),
+           descricao_produto = COALESCE(
+             NULLIF(TRIM(i.descricao_produto), ''),
+             NULLIF(TRIM(ep.descricao), '')
+           )
+      FROM logistica."Endereço_pp" ep
+     WHERE TRIM(COALESCE(i.endereco, '')) = TRIM(ep.completo)
+       AND ep.codigo_produto IS NOT NULL
+       AND (
+         NULLIF(TRIM(i.codigo_produto), '') IS NULL
+         OR NULLIF(TRIM(i.descricao_produto), '') IS NULL
+       )
+  `).catch(() => ({ rowCount: 0 }));
+  total += ep.rowCount || 0;
 
   // codigo_produto gravado como texto (produtos_omie.codigo) → id Omie
-  await conn.query(`
+  const fix = await conn.query(`
     UPDATE etiqueta."ETQ_rec_impresso" i
        SET codigo_produto = p.codigo_produto::text,
            descricao_produto = COALESCE(NULLIF(TRIM(i.descricao_produto), ''), NULLIF(TRIM(p.descricao), ''))
@@ -11240,6 +11261,11 @@ async function _etqBackfillRecImpressoSeguro(db) {
        AND p.codigo_produto IS NOT NULL
        AND TRIM(i.codigo_produto) <> TRIM(p.codigo_produto::text)
   `);
+  total += fix.rowCount || 0;
+
+  if (total > 0) {
+    console.log(`[etiqueta] Backfill seguro ETQ_rec_impresso: ${total} campo(s) preenchido(s)`);
+  }
 }
 
 /** Insere ETQ_rec_impresso a partir de etiqueta de recebimento (codigo_produto = id Omie). */

@@ -159,10 +159,18 @@ async function main() {
     const { rows: chk } = await client.query(
       `SELECT COUNT(*)::int AS total,
               COUNT(*) FILTER (WHERE qtd IS NULL)::int AS qtd_nula,
-              COUNT(DISTINCT endereco)::int AS enderecos
+              COUNT(DISTINCT endereco)::int AS enderecos,
+              COUNT(*) FILTER (WHERE codigo_produto IS NULL OR TRIM(codigo_produto) = '')::int AS sem_codigo,
+              COUNT(*) FILTER (WHERE descricao_produto IS NULL OR TRIM(descricao_produto) = '')::int AS sem_descricao
          FROM etiqueta."ETQ_rec_impresso"`
     );
     console.log('Verificação:', chk[0]);
+    if (chk[0].sem_codigo > 0) {
+      throw new Error(
+        `Importação inconsistente: ${chk[0].sem_codigo} registro(s) sem codigo_produto. ` +
+        'Execute node scripts/backfill_etq_rec_impresso_produto.js'
+      );
+    }
 
     await client.query('COMMIT');
     console.log(`Concluído: ${inseridos} registro(s) em etiqueta."ETQ_rec_impresso".`);
