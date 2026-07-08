@@ -1,6 +1,6 @@
 /**
  * utils/etqRecImpressoBackfill.js
- * Garante catálogo Endereço_pp (inventário) e preenche codigo/descricao em ETQ_rec_impresso.
+ * Preenche codigo/descricao em ETQ_rec_impresso (recebimento, ZPL, CSV inventário).
  */
 const fs = require('fs');
 const path = require('path');
@@ -22,31 +22,9 @@ function resolveInventarioCsv(csvPath) {
   return null;
 }
 
-async function garantirEnderecoPp(conn, csvPath) {
-  await conn.query('CREATE SCHEMA IF NOT EXISTS logistica');
-  await conn.query(`
-    CREATE TABLE IF NOT EXISTS logistica."Endereço_pp" (
-      id            SERIAL PRIMARY KEY,
-      codigo_produto BIGINT,
-      codigo        TEXT,
-      descricao     TEXT,
-      completo      TEXT,
-      rua           TEXT,
-      andar         TEXT,
-      edificio      TEXT,
-      apartamento   TEXT
-    )
-  `);
-
-  const { rows: cnt } = await conn.query(`SELECT COUNT(*)::int AS n FROM logistica."Endereço_pp"`);
-  if (cnt[0].n > 0) return 0;
-
+async function lerInventarioCsv(csvPath) {
   const resolved = resolveInventarioCsv(csvPath);
-  if (!resolved) {
-    console.warn('[etiqueta] CSV inventário não encontrado — Endereço_pp vazio.');
-    return 0;
-  }
-
+  if (!resolved) return { path: null, records: [] };
   const records = await new Promise((resolve, reject) => {
     const rows = [];
     fs.createReadStream(resolved)
@@ -55,39 +33,73 @@ async function garantirEnderecoPp(conn, csvPath) {
       .on('error', reject)
       .on('end', () => resolve(rows));
   });
-
-  const BATCH = 150;
-  const COLS = 8;
-  let inseridos = 0;
-  for (let i = 0; i < records.length; i += BATCH) {
-    const lote = records.slice(i, i + BATCH);
-    const ph = lote.map((_, idx) => {
-      const b = idx * COLS;
-      return `($${b + 1},$${b + 2},$${b + 3},$${b + 4},$${b + 5},$${b + 6},$${b + 7},$${b + 8})`;
-    }).join(',');
-    const flat = lote.flatMap((row) => [
-      row.codigo_produto ? String(row.codigo_produto).trim() : null,
-      row.codigo || null,
-      row.descricao || null,
-      row.completo || null,
-      row.rua || null,
-      row.andar || null,
-      row.edificio || null,
-      row.apartamento || null,
-    ]);
-    await conn.query(
-      `INSERT INTO logistica."Endereço_pp"
-         (codigo_produto, codigo, descricao, completo, rua, andar, edificio, apartamento)
-       VALUES ${ph}`,
-      flat
-    );
-    inseridos += lote.length;
-  }
-  console.log(`[etiqueta] Endereço_pp carregado de ${path.basename(resolved)}: ${inseridos} registro(s)`);
-  return inseridos;
+  return { path: resolved, records };
 }
 
-async function backfillEtqRecImpresso(conn) {
+/** Backfill ETQ_rec_impresso a partir do CSV de inventário (endereço → produto). */
+async function backfillFromInventarioCsv(conn, csvPath) {
+  const { path: resolved, records } = await lerInventarioCsv(csvPath);
+  if (!records.length) {
+    if (!resolved) {
+      console.warn('[etiqueta] CSV inventário não encontrado — backfill por endereço ignorado.');
+    }
+    return 0;
+  }
+
+  const valid = records
+    .map((row) => ({
+      endereco: String(row.completo || '').trim(),
+      codigo_produto: row.codigo_produto != null ? String(row.codigo_produto).trim() : '',
+      descricao: String(row.descricao || '').trim(),
+      complemento: String(row.apartamento || '').trim() || null,
+    }))
+    .filter((r) => r.endereco && r.codigo_produto);
+
+  const BATCH = 150;
+  const COLS = 4;
+  let total = 0;
+
+  for (let i = 0; i < valid.length; i += BATCH) {
+    const lote = valid.slice(i, i + BATCH);
+    const ph = lote.map((_, idx) => {
+      const b = idx * COLS;
+      return `($${b + 1}::text,$${b + 2}::text,$${b + 3}::text,$${b + 4}::text)`;
+    }).join(',');
+    const flat = lote.flatMap((r) => [
+      r.endereco,
+      r.codigo_produto,
+      r.descricao || null,
+      r.complemento,
+    ]);
+    const res = await conn.query(
+      `UPDATE etiqueta."ETQ_rec_impresso" i
+          SET codigo_produto = COALESCE(NULLIF(TRIM(i.codigo_produto), ''), v.codigo_produto),
+              descricao_produto = COALESCE(
+                NULLIF(TRIM(i.descricao_produto), ''),
+                NULLIF(TRIM(v.descricao), '')
+              ),
+              complemento = COALESCE(
+                NULLIF(TRIM(i.complemento), ''),
+                NULLIF(TRIM(v.complemento), '')
+              )
+         FROM (VALUES ${ph}) AS v(endereco, codigo_produto, descricao, complemento)
+        WHERE TRIM(COALESCE(i.endereco, '')) = TRIM(v.endereco)
+          AND (
+            NULLIF(TRIM(i.codigo_produto), '') IS NULL
+            OR NULLIF(TRIM(i.descricao_produto), '') IS NULL
+          )`,
+      flat
+    );
+    total += res.rowCount || 0;
+  }
+
+  if (total > 0) {
+    console.log(`[etiqueta] Backfill inventário (${path.basename(resolved)}): ${total} registro(s)`);
+  }
+  return total;
+}
+
+async function backfillEtqRecImpresso(conn, csvPath) {
   let total = 0;
 
   const rec = await conn.query(`
@@ -125,22 +137,7 @@ async function backfillEtqRecImpresso(conn) {
   `);
   total += zpl.rowCount || 0;
 
-  const ep = await conn.query(`
-    UPDATE etiqueta."ETQ_rec_impresso" i
-       SET codigo_produto = COALESCE(NULLIF(TRIM(i.codigo_produto), ''), ep.codigo_produto::text),
-           descricao_produto = COALESCE(
-             NULLIF(TRIM(i.descricao_produto), ''),
-             NULLIF(TRIM(ep.descricao), '')
-           )
-      FROM logistica."Endereço_pp" ep
-     WHERE TRIM(COALESCE(i.endereco, '')) = TRIM(ep.completo)
-       AND ep.codigo_produto IS NOT NULL
-       AND (
-         NULLIF(TRIM(i.codigo_produto), '') IS NULL
-         OR NULLIF(TRIM(i.descricao_produto), '') IS NULL
-       )
-  `).catch(() => ({ rowCount: 0 }));
-  total += ep.rowCount || 0;
+  total += await backfillFromInventarioCsv(conn, csvPath);
 
   const fix = await conn.query(`
     UPDATE etiqueta."ETQ_rec_impresso" i
@@ -159,6 +156,7 @@ async function backfillEtqRecImpresso(conn) {
 module.exports = {
   INVENTARIO_CSV_REL,
   resolveInventarioCsv,
-  garantirEnderecoPp,
+  lerInventarioCsv,
+  backfillFromInventarioCsv,
   backfillEtqRecImpresso,
 };

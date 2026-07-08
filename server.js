@@ -10748,17 +10748,15 @@ app.use('/etiquetas', requireSessionOrAgentForStatic, express.static(etiquetasRo
       )
     `).catch(() => {});
 
-    // Catálogo inventário → Endereço_pp (CSV versionado no repo) + backfill automático.
-    await _etqGarantirCatalogoEnderecoPp(pool).catch(err => {
-      console.error('[etiqueta] garantir Endereço_pp:', err?.message || err);
+    // Tabela legada removida — catálogo de endereços fica em ETQ_rec_impresso + CSV no repo.
+    await pool.query(`DROP TABLE IF EXISTS logistica."Endereço_pp"`).catch(() => {});
+
+    // Limpa registros órfãos de migração antiga (fonte endereco_pp sem dados úteis).
+    await _etqLimparOrfaosLegado(pool).catch(err => {
+      console.error('[etiqueta] limpar órfãos legado:', err?.message || err);
     });
 
-    // Sanitiza lixo de migração antiga (Endereço_pp sem código, qtd=0) e importa catálogo 1x.
-    await _etqSanitizarEMigrarEnderecoPp(pool).catch(err => {
-      console.error('[etiqueta] sanitizar/migrar Endereço_pp:', err?.message || err);
-    });
-
-    // Backfill seguro — NÃO apaga histórico nem renumera IDs (IDs vão no ZPL).
+    // Backfill automático (recebimento, ZPL, CSV inventário).
     await _etqBackfillRecImpressoSeguro(pool).catch(err => {
       console.error('[etiqueta] backfill seguro ETQ_rec_impresso:', err?.message || err);
     });
@@ -11129,79 +11127,19 @@ async function _etqResolveProdutoCampos(db, { codigoTexto, codigoOmie, descricao
   return { codigo_produto: codigo, descricao_produto: desc };
 }
 
-/**
- * Remove lixo da migração Endereço_pp (qtd=0 sem código) e importa o catálogo 1x.
- * NÃO mexe em impressões (recebimento/iapp_op) nem em saldo real (qtd > 0).
- */
-async function _etqSanitizarEMigrarEnderecoPp(db) {
+/** Remove registros lixo de migração antiga (fonte endereco_pp sem código/qtd/zpl). */
+async function _etqLimparOrfaosLegado(db) {
   const conn = db || pool;
-  await conn.query(`CREATE TABLE IF NOT EXISTS etiqueta."_meta" (chave TEXT PRIMARY KEY, valor TEXT)`);
-
-  // Órfãos gerados quando codigo_produto foi dropado e a migração reinseriu sem match.
   const delOrfaos = await conn.query(`
     DELETE FROM etiqueta."ETQ_rec_impresso"
-     WHERE fonte = 'endereco_pp'
+     WHERE fonte IN ('endereco_pp', 'migracao_endereco_pp')
        AND COALESCE(qtd, 0) = 0
        AND (codigo_produto IS NULL OR TRIM(codigo_produto) = '')
        AND (conteudo_zpl IS NULL OR TRIM(conteudo_zpl) = '')
   `);
   if (delOrfaos.rowCount > 0) {
-    console.log(`[etiqueta] Removidos ${delOrfaos.rowCount} registro(s) lixo endereco_pp (sem código/qtd/zpl)`);
+    console.log(`[etiqueta] Removidos ${delOrfaos.rowCount} registro(s) lixo legado endereco_pp`);
   }
-
-  const { rows: meta } = await conn.query(
-    `SELECT valor FROM etiqueta."_meta" WHERE chave = 'etq_endereco_pp_migrado_v3'`
-  );
-  if (meta[0]?.valor === 'done') return;
-
-  // Catálogo de referência (qtd=0) a partir de Endereço_pp — uma vez.
-  const mig = await conn.query(`
-    INSERT INTO etiqueta."ETQ_rec_impresso"
-      (origem_id, qtd, unidade, data_emissao, conteudo_zpl, usuario_criacao,
-       endereco, codigo_produto, descricao_produto, complemento, fonte)
-    SELECT NULL, 0, 'UN',
-           to_char(CURRENT_DATE, 'DD/MM/YYYY'), '', 'migracao_endereco_pp',
-           TRIM(ep.completo),
-           TRIM(ep.codigo_produto::text),
-           NULLIF(TRIM(ep.descricao), ''),
-           NULLIF(TRIM(ep.apartamento), ''),
-           'endereco_pp'
-      FROM logistica."Endereço_pp" ep
-     WHERE ep.completo IS NOT NULL AND TRIM(ep.completo) <> ''
-       AND ep.codigo_produto IS NOT NULL
-       AND TRIM(ep.codigo_produto::text) <> ''
-       AND NOT EXISTS (
-         SELECT 1 FROM etiqueta."ETQ_rec_impresso" i
-          WHERE TRIM(COALESCE(i.endereco, '')) = TRIM(ep.completo)
-            AND TRIM(COALESCE(i.codigo_produto, '')) = TRIM(ep.codigo_produto::text)
-       )
-  `);
-
-  await conn.query(`
-    UPDATE etiqueta."ETQ_rec_impresso" i
-       SET complemento = NULLIF(TRIM(ep.apartamento), ''),
-           descricao_produto = COALESCE(NULLIF(TRIM(i.descricao_produto), ''), NULLIF(TRIM(ep.descricao), ''))
-      FROM logistica."Endereço_pp" ep
-     WHERE TRIM(COALESCE(i.endereco, '')) = TRIM(ep.completo)
-       AND TRIM(COALESCE(i.codigo_produto, '')) = TRIM(ep.codigo_produto::text)
-       AND (
-         (ep.apartamento IS NOT NULL AND TRIM(ep.apartamento) <> ''
-           AND (i.complemento IS NULL OR TRIM(i.complemento) = ''))
-         OR (i.descricao_produto IS NULL OR TRIM(i.descricao_produto) = '')
-       )
-  `);
-
-  await conn.query(`
-    INSERT INTO etiqueta."_meta" (chave, valor) VALUES ('etq_endereco_pp_migrado_v3', 'done')
-    ON CONFLICT (chave) DO UPDATE SET valor = EXCLUDED.valor
-  `);
-
-  console.log(`[etiqueta] Catálogo Endereço_pp: +${mig.rowCount} referência(s) (migração única v3)`);
-}
-
-/** Garante logistica."Endereço_pp" a partir do CSV de inventário versionado no repo. */
-async function _etqGarantirCatalogoEnderecoPp(db) {
-  await etqRecImpressoBackfill.garantirEnderecoPp(db || pool);
 }
 
 /** Backfill seguro de codigo/descricao — nunca apaga nem renumera IDs. */

@@ -10,10 +10,7 @@
  */
 require('dotenv').config();
 const { Pool } = require('pg');
-const {
-  garantirEnderecoPp,
-  backfillEtqRecImpresso,
-} = require('../utils/etqRecImpressoBackfill');
+const { backfillEtqRecImpresso } = require('../utils/etqRecImpressoBackfill');
 
 const pool = new Pool({
   connectionString:
@@ -42,8 +39,7 @@ async function main() {
     await resumo(client, 'Antes');
 
     await client.query('BEGIN');
-    await garantirEnderecoPp(client, csvPath);
-    const n = await backfillEtqRecImpresso(client);
+    const n = await backfillEtqRecImpresso(client, csvPath);
     await client.query('COMMIT');
     console.log(`Total atualizado: ${n}`);
 

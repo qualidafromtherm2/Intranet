@@ -3,7 +3,7 @@
  *
  * Zera etiqueta."ETQ_rec_impresso" e repopula somente com o CSV de inventário
  * (produtos × endereços). Campos ausentes no CSV seguem a lógica da migração
- * endereco_pp: unidade UN, data_emissao hoje, complemento = apartamento, etc.
+ * Campos ausentes no CSV: unidade UN, data_emissao hoje, complemento = apartamento, etc.
  * qtd fica NULL (vazio).
  *
  * Uso:
