@@ -10756,7 +10756,7 @@ app.use('/etiquetas', requireSessionOrAgentForStatic, express.static(etiquetasRo
       console.error('[etiqueta] limpar órfãos legado:', err?.message || err);
     });
 
-    // Backfill automático (recebimento, ZPL, CSV inventário).
+    // Backfill automático (somente banco: recebimento, ZPL, produtos_omie, mesmo endereço).
     await _etqBackfillRecImpressoSeguro(pool).catch(err => {
       console.error('[etiqueta] backfill seguro ETQ_rec_impresso:', err?.message || err);
     });

@@ -1,12 +1,11 @@
 /**
  * scripts/backfill_etq_rec_impresso_produto.js
  *
- * Preenche codigo_produto e descricao_produto em etiqueta."ETQ_rec_impresso".
- * O boot da API já faz isso automaticamente; use este script só para forçar manualmente.
+ * Preenche codigo_produto e descricao_produto em etiqueta."ETQ_rec_impresso"
+ * usando apenas dados do banco (recebimento, ZPL, produtos_omie, mesmo endereço).
+ * O boot da API já faz isso automaticamente.
  *
- * Uso:
- *   node scripts/backfill_etq_rec_impresso_produto.js
- *   node scripts/backfill_etq_rec_impresso_produto.js "/caminho/inventario.csv"
+ * Uso: node scripts/backfill_etq_rec_impresso_produto.js
  */
 require('dotenv').config();
 const { Pool } = require('pg');
@@ -32,14 +31,13 @@ async function resumo(client, label) {
 }
 
 async function main() {
-  const csvPath = process.argv[2] || null;
   const client = await pool.connect();
   try {
     console.log('=== Backfill ETQ_rec_impresso (codigo_produto / descricao_produto) ===');
     await resumo(client, 'Antes');
 
     await client.query('BEGIN');
-    const n = await backfillEtqRecImpresso(client, csvPath);
+    const n = await backfillEtqRecImpresso(client);
     await client.query('COMMIT');
     console.log(`Total atualizado: ${n}`);
 

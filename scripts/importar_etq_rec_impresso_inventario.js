@@ -2,12 +2,10 @@
  * scripts/importar_etq_rec_impresso_inventario.js
  *
  * Zera etiqueta."ETQ_rec_impresso" e repopula somente com o CSV de inventário
- * (produtos × endereços). Campos ausentes no CSV seguem a lógica da migração
- * Campos ausentes no CSV: unidade UN, data_emissao hoje, complemento = apartamento, etc.
+ * (produtos × endereços). Campos ausentes no CSV: unidade UN, data_emissao hoje,
  * qtd fica NULL (vazio).
  *
- * Uso:
- *   node scripts/importar_etq_rec_impresso_inventario.js
+ * Uso (somente importação manual pontual — a API não usa CSV):
  *   node scripts/importar_etq_rec_impresso_inventario.js "/caminho/arquivo.csv"
  */
 require('dotenv').config();
@@ -16,9 +14,7 @@ const path = require('path');
 const { parse } = require('csv-parse');
 const { Pool } = require('pg');
 
-const { resolveInventarioCsv } = require('../utils/etqRecImpressoBackfill');
-
-const CSV_PATH = resolveInventarioCsv(process.argv[2]);
+const CSV_PATH = process.argv[2] ? path.resolve(process.argv[2]) : null;
 
 const BATCH_SIZE = 150;
 const COLS = 7; // por linha no INSERT (qtd fica NULL fixo no SQL)
@@ -107,7 +103,7 @@ async function inserirLote(client, lote) {
 
 async function main() {
   if (!CSV_PATH) {
-    throw new Error('CSV de inventário não encontrado. Informe o caminho ou versione produtos/inventario_produtos_enderecos.csv');
+    throw new Error('Informe o caminho do CSV: node scripts/importar_etq_rec_impresso_inventario.js "/caminho/arquivo.csv"');
   }
   console.log(`CSV: ${CSV_PATH}`);
   const raw = await lerCsv(CSV_PATH);
