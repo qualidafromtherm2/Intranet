@@ -1080,8 +1080,40 @@ max-width: 480px;          /* 260 ? 480 px; ajuste se quiser */
 }
 
 @media screen and (max-width: 945px) {
+  /* Tablet/celular: menu lateral vira hambúrguer flutuante (não some). */
   .left-side {
-    display: none;
+    display: flex !important;
+    position: fixed;
+    left: 8px;
+    top: 66px;
+    width: auto;
+    height: auto !important;
+    padding: 0;
+    border-right: none;
+    background: transparent;
+    z-index: 1200;
+    flex-basis: auto;
+  }
+
+  .sidebar-hamburger {
+    width: 40px;
+    height: 40px;
+    font-size: 18px;
+  }
+
+  .sidebar-content {
+    left: 48px;
+    top: 0;
+    bottom: auto;
+    width: min(272px, calc(100vw - 62px));
+    max-height: calc(100dvh - 92px);
+    overscroll-behavior: contain;
+  }
+
+  #sidebarContent .side-menu a {
+    min-height: 44px;
+    display: flex;
+    align-items: center;
   }
 }
 
@@ -13141,6 +13173,18 @@ body.mobile-modal-open {
 
   .movim-panel {
     width: min(680px, calc(100vw - 32px));
+    max-height: calc(100dvh - 24px - env(safe-area-inset-bottom, 0px));
+    padding-bottom: calc(24px + 80px + env(safe-area-inset-bottom, 0px));
+    scroll-padding-bottom: calc(80px + env(safe-area-inset-bottom, 0px));
+  }
+
+  .movim-executar-btn {
+    position: sticky;
+    bottom: calc(80px + env(safe-area-inset-bottom, 0px));
+    z-index: 6;
+    min-height: 48px;
+    margin-top: 8px;
+    box-shadow: 0 -10px 28px rgba(0, 0, 0, .42);
   }
 }
 
@@ -13543,7 +13587,7 @@ body.mobile-modal-open {
     min-height: 0;
     border: 0;
     border-radius: 0;
-    padding: 0 var(--mobile-gutter) calc(88px + env(safe-area-inset-bottom));
+    padding: 0 var(--mobile-gutter) calc(96px + env(safe-area-inset-bottom, 0px));
     gap: 14px;
     box-shadow: none;
     overflow-y: auto;
@@ -13652,7 +13696,7 @@ body.mobile-modal-open {
 
   .movim-executar-btn {
     position: sticky;
-    bottom: calc(8px + env(safe-area-inset-bottom));
+    bottom: calc(80px + env(safe-area-inset-bottom, 0px));
     z-index: 6;
     min-height: var(--mobile-touch);
     border-radius: 8px;
