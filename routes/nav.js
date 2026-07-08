@@ -1,20 +1,39 @@
 // routes/nav.js
 const express = require('express');
-const { pool } = require('../src/db');
+const { Pool } = require('pg');
 
 const router = express.Router();
 router.use(express.json());
 
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: { rejectUnauthorized: false }
+});
+
+function isDevSessionFallbackEnabled() {
+  const sessionMode = String(process.env.SESSION_STORE_MODE || '').trim().toLowerCase();
+  const inMemorySession = sessionMode === 'memory' || sessionMode === 'mem' || sessionMode === 'local';
+  const devSessionFlag = String(process.env.DEV_SESSION_IN_MEMORY || '').trim() === '1';
+  return process.env.NODE_ENV !== 'production' && (inMemorySession || devSessionFlag);
+}
+
 // checa se o usuário logado pode "gerenciar colaboradores" (mesma regra que lista usuários)
 async function hasManagePermission(userId) {
-  const { rows } = await pool.query(
-    `SELECT EXISTS(
-       SELECT 1 FROM public.auth_user_permissions_tree($1) t
-       WHERE t.key='side:rh:cad-colab' AND t.allowed
-     ) AS ok`,
-    [userId]
-  );
-  return !!rows[0]?.ok;
+  if (isDevSessionFallbackEnabled()) return true;
+
+  try {
+    const { rows } = await pool.query(
+      `SELECT EXISTS(
+         SELECT 1 FROM public.auth_user_permissions_tree($1) t
+         WHERE t.key='side:rh:cad-colab' AND t.allowed
+       ) AS ok`,
+      [userId]
+    );
+    return !!rows[0]?.ok;
+  } catch (err) {
+    console.warn('[nav] falha ao verificar permissão; assumindo sem acesso em modo normal:', err?.message || err);
+    return false;
+  }
 }
 
 function requireLogin(req, res, next) {
@@ -32,6 +51,10 @@ router.post('/sync', requireLogin, async (req, res) => {
   const me = req.session.user;
   if (!(await hasManagePermission(me.id))) {
     return res.status(403).json({ error: 'Sem permissão' });
+  }
+
+  if (isDevSessionFallbackEnabled()) {
+    return res.json({ ok: true, upserted: 0, dev: true, skipped: true });
   }
 
   const nodes = Array.isArray(req.body?.nodes) ? req.body.nodes : [];
@@ -206,6 +229,10 @@ router.post('/sync', requireLogin, async (req, res) => {
 
 // debug opcional
 router.get('/known', requireLogin, async (_req, res) => {
+  if (isDevSessionFallbackEnabled()) {
+    return res.json([]);
+  }
+
   const { rows } = await pool.query(
     `SELECT id, key, label, position, parent_id, sort, selector
        FROM public.nav_node

@@ -3657,8 +3657,11 @@ const upload = multer({
   limits: { fileSize: 12 * 1024 * 1024, files: 2 }
 });
 
+let _ensureSchemaPromise = null;
+
 async function ensureSchema() {
-  await pool.query(`
+  if (_ensureSchemaPromise) return _ensureSchemaPromise;
+  _ensureSchemaPromise = pool.query(`
     CREATE SCHEMA IF NOT EXISTS envios;
     CREATE TABLE IF NOT EXISTS envios.solicitacoes (
       id SERIAL PRIMARY KEY,
@@ -3763,6 +3766,19 @@ async function ensureSchema() {
       alimentacao   TEXT NOT NULL,
       criado_em     TIMESTAMP NOT NULL DEFAULT NOW()
     );
+
+    CREATE TABLE IF NOT EXISTS sac.sac_atalhos (
+      id          SERIAL PRIMARY KEY,
+      user_id     INTEGER NOT NULL REFERENCES public.auth_user(id) ON DELETE CASCADE,
+      label       TEXT NOT NULL,
+      url         TEXT NOT NULL,
+      icon_class  TEXT NOT NULL DEFAULT 'fa-solid fa-link',
+      icon_color  TEXT NOT NULL DEFAULT '#38bdf8',
+      sort_order  INTEGER NOT NULL DEFAULT 0,
+      created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_sac_atalhos_user_id ON sac.sac_atalhos (user_id);
 
     CREATE TABLE IF NOT EXISTS sac.material_apoio (
       id              BIGSERIAL PRIMARY KEY,
@@ -3924,7 +3940,31 @@ async function ensureSchema() {
       ON sac.at_serie_cache (pedido);
     CREATE INDEX IF NOT EXISTS at_serie_cache_op_idx
       ON sac.at_serie_cache (ordem_producao);
+  `).then(() => undefined).catch((err) => {
+    _ensureSchemaPromise = null;
+    throw err;
+  });
+  return _ensureSchemaPromise;
+}
+
+let _sacAtalhosSchemaReady = false;
+async function ensureSacAtalhosSchema() {
+  if (_sacAtalhosSchemaReady) return;
+  await pool.query(`
+    CREATE SCHEMA IF NOT EXISTS sac;
+    CREATE TABLE IF NOT EXISTS sac.sac_atalhos (
+      id          SERIAL PRIMARY KEY,
+      user_id     INTEGER NOT NULL REFERENCES public.auth_user(id) ON DELETE CASCADE,
+      label       TEXT NOT NULL,
+      url         TEXT NOT NULL,
+      icon_class  TEXT NOT NULL DEFAULT 'fa-solid fa-link',
+      icon_color  TEXT NOT NULL DEFAULT '#38bdf8',
+      sort_order  INTEGER NOT NULL DEFAULT 0,
+      created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+    CREATE INDEX IF NOT EXISTS idx_sac_atalhos_user_id ON sac.sac_atalhos (user_id);
   `);
+  _sacAtalhosSchemaReady = true;
 }
 
 async function migrarEnderecosControleTecnicos() {
@@ -7452,6 +7492,113 @@ router.delete('/at/alimentacao/:id', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// ─── Meus Atalhos (sac.sac_atalhos) — links por usuário no painel AT ─────────
+function sacAtalhosUserId(req) {
+  return Number(req.session?.user?.id) || 0;
+}
+
+function sacAtalhosValidarUrl(raw) {
+  let url = String(raw || '').trim();
+  if (!url) return { ok: false, error: 'URL é obrigatória.' };
+  if (!/^https?:\/\//i.test(url)) url = `https://${url}`;
+  try {
+    const parsed = new URL(url);
+    if (!['http:', 'https:'].includes(parsed.protocol)) {
+      return { ok: false, error: 'Use uma URL http ou https.' };
+    }
+    return { ok: true, url };
+  } catch {
+    return { ok: false, error: 'URL inválida.' };
+  }
+}
+
+router.get('/atalhos', async (req, res) => {
+  const userId = sacAtalhosUserId(req);
+  if (!userId) return res.status(401).json({ ok: false, error: 'Não autenticado.' });
+  try {
+    await ensureSacAtalhosSchema();
+    const { rows } = await pool.query(
+      `SELECT id, label, url, icon_class, icon_color, sort_order, created_at
+       FROM sac.sac_atalhos
+       WHERE user_id = $1
+       ORDER BY sort_order, created_at, id`,
+      [userId]
+    );
+    res.json({ ok: true, atalhos: rows });
+  } catch (err) {
+    console.error('[SAC/atalhos] GET erro:', err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+router.post('/atalhos', async (req, res) => {
+  const userId = sacAtalhosUserId(req);
+  if (!userId) return res.status(401).json({ ok: false, error: 'Não autenticado.' });
+  const label = String(req.body?.label || '').trim();
+  const iconClass = String(req.body?.icon_class || 'fa-solid fa-link').trim() || 'fa-solid fa-link';
+  const iconColor = String(req.body?.icon_color || '#38bdf8').trim() || '#38bdf8';
+  const sortOrder = Number.isFinite(Number(req.body?.sort_order)) ? Number(req.body.sort_order) : 0;
+  if (!label) return res.status(400).json({ ok: false, error: 'Nome do atalho é obrigatório.' });
+  const urlCheck = sacAtalhosValidarUrl(req.body?.url);
+  if (!urlCheck.ok) return res.status(400).json({ ok: false, error: urlCheck.error });
+  try {
+    await ensureSacAtalhosSchema();
+    const { rows } = await pool.query(
+      `INSERT INTO sac.sac_atalhos (user_id, label, url, icon_class, icon_color, sort_order)
+       VALUES ($1, $2, $3, $4, $5, $6)
+       RETURNING id, label, url, icon_class, icon_color, sort_order, created_at`,
+      [userId, label, urlCheck.url, iconClass, iconColor, sortOrder]
+    );
+    res.json({ ok: true, atalho: rows[0] });
+  } catch (err) {
+    console.error('[SAC/atalhos] POST erro:', err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+router.put('/atalhos/:id', async (req, res) => {
+  const userId = sacAtalhosUserId(req);
+  if (!userId) return res.status(401).json({ ok: false, error: 'Não autenticado.' });
+  const id = parseInt(req.params.id, 10);
+  if (!id) return res.status(400).json({ ok: false, error: 'ID inválido.' });
+  const label = String(req.body?.label || '').trim();
+  const iconClass = String(req.body?.icon_class || 'fa-solid fa-link').trim() || 'fa-solid fa-link';
+  const iconColor = String(req.body?.icon_color || '#38bdf8').trim() || '#38bdf8';
+  const sortOrder = Number.isFinite(Number(req.body?.sort_order)) ? Number(req.body.sort_order) : 0;
+  if (!label) return res.status(400).json({ ok: false, error: 'Nome do atalho é obrigatório.' });
+  const urlCheck = sacAtalhosValidarUrl(req.body?.url);
+  if (!urlCheck.ok) return res.status(400).json({ ok: false, error: urlCheck.error });
+  try {
+    await ensureSacAtalhosSchema();
+    const { rowCount } = await pool.query(
+      `UPDATE sac.sac_atalhos
+       SET label = $1, url = $2, icon_class = $3, icon_color = $4, sort_order = $5
+       WHERE id = $6 AND user_id = $7`,
+      [label, urlCheck.url, iconClass, iconColor, sortOrder, id, userId]
+    );
+    if (!rowCount) return res.status(404).json({ ok: false, error: 'Atalho não encontrado.' });
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[SAC/atalhos] PUT erro:', err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+router.delete('/atalhos/:id', async (req, res) => {
+  const userId = sacAtalhosUserId(req);
+  if (!userId) return res.status(401).json({ ok: false, error: 'Não autenticado.' });
+  const id = parseInt(req.params.id, 10);
+  if (!id) return res.status(400).json({ ok: false, error: 'ID inválido.' });
+  try {
+    await ensureSacAtalhosSchema();
+    await pool.query('DELETE FROM sac.sac_atalhos WHERE id = $1 AND user_id = $2', [id, userId]);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[SAC/atalhos] DELETE erro:', err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 // ─── Material de apoio (R2: AT/material de apoio/) ───────────────────────────
 const MAT_APOIO_BUCKET = 'AT';
 const MAT_APOIO_PASTA = 'material de apoio';
@@ -8588,6 +8735,36 @@ router.post('/at/tecnico/fechamento/:id_at/evidencias', atUpload.array('evidenci
   }
 });
 
+// DELETE /at/tecnico/fechamento/:id_at/evidencias/:id_evidencia?token=TOKEN — remove evidência
+router.delete('/at/tecnico/fechamento/:id_at/evidencias/:id_evidencia', async (req, res) => {
+  const token = String(req.query.token || '').trim();
+  const id_at = parseInt(req.params.id_at, 10);
+  const idEvidencia = parseInt(req.params.id_evidencia, 10);
+  if (!token || token.length < 32) return res.status(401).json({ error: 'token inválido' });
+  if (!id_at || !idEvidencia) return res.status(400).json({ error: 'Parâmetros inválidos.' });
+  try {
+    const { rows: tRows } = await pool.query(
+      `SELECT ct.id FROM sac.controle_tecnicos ct
+       JOIN sac.fechamento f ON f.id_tecnico = ct.id
+       WHERE ct.token = $1 AND f.id_at = $2 LIMIT 1`,
+      [token, id_at]
+    );
+    if (!tRows.length) return res.status(403).json({ error: 'Acesso negado.' });
+    const { rows } = await pool.query(
+      `DELETE FROM sac.at_anexos WHERE id = $1 AND id_at = $2 RETURNING path_key`,
+      [idEvidencia, id_at]
+    );
+    if (!rows.length) return res.status(404).json({ error: 'Anexo não encontrado.' });
+    supabase.storage.from(AT_BUCKET).remove([rows[0].path_key]).catch(e =>
+      console.warn('[AT/evidencias] falha ao remover do storage:', e?.message)
+    );
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[AT/evidencias] delete erro:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 router.get('/whatsapp/webhook', (req, res) => {
   const mode = String(req.query['hub.mode'] || '').trim();
   const token = String(req.query['hub.verify_token'] || '').trim();
@@ -8752,6 +8929,10 @@ router.get('/whatsapp/conversations', async (req, res) => {
   const limitValue = Number.parseInt(String(req.query.limit || ''), 10);
   const limit = Number.isFinite(limitValue) ? Math.min(Math.max(limitValue, 1), 100) : 30;
 
+  if (process.env.NODE_ENV !== 'production' && String(process.env.DEV_SESSION_IN_MEMORY || '').trim() === '1') {
+    return res.json({ ok: true, conversations: [] });
+  }
+
   try {
     const { rows } = await pool.query(
       `WITH base AS (
@@ -8812,6 +8993,9 @@ router.get('/whatsapp/conversations', async (req, res) => {
     return res.json({ ok: true, conversations: rows });
   } catch (err) {
     console.error('[SAC/WhatsApp] erro ao listar conversas:', err);
+    if (process.env.NODE_ENV !== 'production' && String(process.env.DEV_SESSION_IN_MEMORY || '').trim() === '1') {
+      return res.json({ ok: true, conversations: [] });
+    }
     return res.status(500).json({ ok: false, error: 'Falha ao listar conversas do WhatsApp.' });
   }
 });

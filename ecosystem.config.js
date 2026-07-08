@@ -11,12 +11,17 @@ module.exports = {
     },
 
 
-{
+  {
   name: 'intranet_api',
   script: './server.js',
   watch: false,
   env: {
     PORT: 5001,
+    R2_ACCOUNT_ID: process.env.R2_ACCOUNT_ID || 'local',
+    R2_ACCESS_KEY_ID: process.env.R2_ACCESS_KEY_ID || 'local',
+    R2_SECRET_ACCESS_KEY: process.env.R2_SECRET_ACCESS_KEY || 'local',
+    R2_BUCKET: process.env.R2_BUCKET || 'intranet-fromtherm',
+    R2_PUBLIC_BASE_URL: process.env.R2_PUBLIC_BASE_URL || 'http://localhost:5001/r2',
     TRACKINGMORE_API_KEY: 'h5mfcv6x-mwn8-89iz-nl6i-g3m0139q02k6',
     GOOGLE_SHEETS_WEBHOOK_URL: 'https://script.google.com/macros/s/AKfycbwf4_bEwxzU59N5N9K5Ks1lUE0mP3XznPQrUgVSAfTm3-tdtgBjb0XUUHJAyjVXQwciEA/exec',
     GOOGLE_SHEETS_OP_WEBHOOK_URL: 'https://script.google.com/macros/s/AKfycbyjr60Iw3OpWMSwD7NDJ1D5qigSTCj-fuzAKI546EIlfZFt65Mxy40_K5y2R1dJ2mpLyQ/exec',
@@ -26,6 +31,11 @@ module.exports = {
   },
   env_pg: {
     PORT: 5001,
+    R2_ACCOUNT_ID: process.env.R2_ACCOUNT_ID || 'local',
+    R2_ACCESS_KEY_ID: process.env.R2_ACCESS_KEY_ID || 'local',
+    R2_SECRET_ACCESS_KEY: process.env.R2_SECRET_ACCESS_KEY || 'local',
+    R2_BUCKET: process.env.R2_BUCKET || 'intranet-fromtherm',
+    R2_PUBLIC_BASE_URL: process.env.R2_PUBLIC_BASE_URL || 'http://localhost:5001/r2',
     TRACKINGMORE_API_KEY: 'h5mfcv6x-mwn8-89iz-nl6i-g3m0139q02k6',
     GOOGLE_SHEETS_WEBHOOK_URL: 'https://script.google.com/macros/s/AKfycbwf4_bEwxzU59N5N9K5Ks1lUE0mP3XznPQrUgVSAfTm3-tdtgBjb0XUUHJAyjVXQwciEA/exec',
     GOOGLE_SHEETS_OP_WEBHOOK_URL: 'https://script.google.com/macros/s/AKfycbyjr60Iw3OpWMSwD7NDJ1D5qigSTCj-fuzAKI546EIlfZFt65Mxy40_K5y2R1dJ2mpLyQ/exec',

@@ -37,6 +37,13 @@ function requireAuth(req, res, next) {
   next();
 }
 
+function isDevSessionFallbackEnabled() {
+  const sessionMode = String(process.env.SESSION_STORE_MODE || '').trim().toLowerCase();
+  const inMemorySession = sessionMode === 'memory' || sessionMode === 'mem' || sessionMode === 'local';
+  const devSessionFlag = String(process.env.DEV_SESSION_IN_MEMORY || '').trim() === '1';
+  return process.env.NODE_ENV !== 'production' && (inMemorySession || devSessionFlag);
+}
+
 // GET /api/usuario/preferencias/:chave
 router.get('/preferencias/:chave', requireAuth, async (req, res) => {
   const { chave } = req.params;
@@ -49,6 +56,9 @@ router.get('/preferencias/:chave', requireAuth, async (req, res) => {
     return res.json({ valor: rows.length ? rows[0].valor : null });
   } catch (e) {
     console.error('[usuario] Erro ao buscar preferência:', e.message);
+    if (isDevSessionFallbackEnabled()) {
+      return res.json({ valor: null, dev: true });
+    }
     return res.status(500).json({ ok: false, error: e.message });
   }
 });
@@ -68,6 +78,9 @@ router.post('/preferencias', requireAuth, async (req, res) => {
     return res.json({ ok: true });
   } catch (e) {
     console.error('[usuario] Erro ao salvar preferência:', e.message);
+    if (isDevSessionFallbackEnabled()) {
+      return res.json({ ok: true, dev: true, skipped: true });
+    }
     return res.status(500).json({ ok: false, error: e.message });
   }
 });

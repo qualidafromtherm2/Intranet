@@ -5610,10 +5610,11 @@
               <span id="sacAtalhoAddMsg" style="font-size:12px;margin-left:10px;color:#f87171;display:none;"></span>
             </div>
             <!-- Lista de atalhos salvos -->
-            <div id="sacAtalhosList" style="overflow-y:auto;flex:1;padding:10px 16px;">
-              <div id="sacAtalhosLoading" style="text-align:center;padding:24px;color:var(--inactive-color);font-size:13px;">
+            <div style="position:relative;flex:1;min-height:120px;display:flex;flex-direction:column;">
+              <div id="sacAtalhosLoading" style="display:none;text-align:center;padding:24px;color:var(--inactive-color);font-size:13px;">
                 <i class="fas fa-circle-notch fa-spin"></i> Carregando...
               </div>
+              <div id="sacAtalhosList" style="overflow-y:auto;flex:1;padding:10px 16px;"></div>
             </div>
           </div>
         </div>

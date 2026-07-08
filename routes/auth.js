@@ -1,14 +1,52 @@
 // routes/auth.js (SQL only, com parser e id numérico na sessão)
 const express = require('express');
-const { pool } = require('../src/db');
+const { Pool } = require('pg');
 
 const router = express.Router();
 router.use(express.json()); // garante req.body em /login
 
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: { rejectUnauthorized: false }
+});
+
+function isDevSessionFallbackEnabled() {
+  const sessionMode = String(process.env.SESSION_STORE_MODE || '').trim().toLowerCase();
+  const inMemorySession = sessionMode === 'memory' || sessionMode === 'mem' || sessionMode === 'local';
+  const devSessionFlag = String(process.env.DEV_SESSION_IN_MEMORY || '').trim() === '1';
+  return process.env.NODE_ENV !== 'production' && (inMemorySession || devSessionFlag);
+}
+
+function buildDevLoginUser(user) {
+  const username = String(user || '').trim();
+  return {
+    id: `dev:${username || 'local'}`,
+    username: username || 'dev',
+    roles: ['dev'],
+    setor: 'Desenvolvimento',
+    dev_login: true,
+  };
+}
+
+function applyDevSession(req, res, username, nextUrl = '/menu_produto.html#inicio') {
+  const devUser = buildDevLoginUser(username);
+  return req.session.regenerate((regenErr) => {
+    if (regenErr) {
+      console.error('[auth/dev-login] fallback dev: falha ao regenerar sessão', regenErr);
+      return res.status(500).send('Falha ao criar sessão dev');
+    }
+    req.session.user = devUser;
+    return req.session.save(() => {
+      if (res.headersSent) return;
+      res.redirect(302, nextUrl);
+    });
+  });
+}
+
 async function carregarExtrasDoUsuario(userId) {
   try {
     const { rows } = await pool.query(
-      `SELECT s.name AS setor_nome, up.sector_id, u.foto_perfil_url, u.conta_google, f.name AS funcao_nome
+      `SELECT s.name AS setor_nome, u.foto_perfil_url, u.conta_google, f.name AS funcao_nome
          FROM public.auth_user u
          LEFT JOIN public.auth_user_profile up ON up.user_id = u.id
          LEFT JOIN public.auth_sector s ON s.id = up.sector_id
@@ -19,14 +57,13 @@ async function carregarExtrasDoUsuario(userId) {
     );
     return { 
       setor: rows[0]?.setor_nome || null,
-      sector_id: rows[0]?.sector_id != null ? Number(rows[0].sector_id) : null,
       foto_perfil_url: rows[0]?.foto_perfil_url || null,
       conta_google: rows[0]?.conta_google || null,
       funcao_nome: rows[0]?.funcao_nome || null
     };
   } catch (e) {
     console.warn('[auth] não foi possível carregar dados extras do usuário', e.message);
-    return { setor: null, sector_id: null, foto_perfil_url: null, conta_google: null };
+    return { setor: null, foto_perfil_url: null, conta_google: null };
   }
 }
 
@@ -58,15 +95,44 @@ router.post('/login', async (req, res) => {
         id: String(u.id),                 // << id numérico correto
         username: u.username,
         roles: u.roles,
-        setor: extras.setor,
-        sector_id: extras.sector_id
+        setor: extras.setor
       };
       req.session.save(() => res.json({ ok: true, user: req.session.user }));
     });
   } catch (err) {
     console.error('[auth/login]', err);
-    res.status(500).json({ error: 'Falha no login' });
+    const fallbackAllowed = isDevSessionFallbackEnabled();
+    if (fallbackAllowed) {
+      const { user } = req.body || {};
+      const devUser = buildDevLoginUser(user);
+      return req.session.regenerate((regenErr) => {
+        if (regenErr) {
+          console.error('[auth/login] fallback dev: falha ao regenerar sessão', regenErr);
+          return res.status(500).json({ error: 'Falha no login' });
+        }
+        req.session.user = devUser;
+        return req.session.save(() => {
+          console.warn('[auth/login] fallback de desenvolvimento ativado: login sem banco');
+          res.json({ ok: true, user: req.session.user, dev: true, fallback: 'session-memory' });
+        });
+      });
+    }
+
+    res.status(503).json({
+      error: 'Falha no login',
+      detail: 'Banco de dados indisponível para autenticação',
+    });
   }
+});
+
+router.get('/dev-login', (req, res) => {
+  if (!isDevSessionFallbackEnabled()) {
+    return res.status(404).send('Not found');
+  }
+
+  const username = String(req.query.user || req.query.username || 'dev').trim();
+  const nextUrl = String(req.query.next || '/menu_produto.html#inicio').trim() || '/menu_produto.html#inicio';
+  return applyDevSession(req, res, username, nextUrl);
 });
 
 // POST /first-password
@@ -233,4 +299,3 @@ router.post('/logout', (req, res) => {
 });
 
 module.exports = router;
-

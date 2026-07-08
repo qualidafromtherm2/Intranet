@@ -3,6 +3,13 @@ const express  = require('express');
 const router   = express.Router();
 const { dbQuery, dbGetClient } = require('../src/db');
 
+function isDevSessionFallbackEnabled() {
+  const sessionMode = String(process.env.SESSION_STORE_MODE || '').trim().toLowerCase();
+  const inMemorySession = sessionMode === 'memory' || sessionMode === 'mem' || sessionMode === 'local';
+  const devSessionFlag = String(process.env.DEV_SESSION_IN_MEMORY || '').trim() === '1';
+  return process.env.NODE_ENV !== 'production' && (inMemorySession || devSessionFlag);
+}
+
 // === Config Omie (para fallback ConsultarProduto) ============================
 const OMIE_WEBHOOK_TOKEN = process.env.OMIE_WEBHOOK_TOKEN || '';
 const OMIE_APP_KEY       = process.env.OMIE_APP_KEY || '';
@@ -278,12 +285,20 @@ router.post('/locais', async (req, res) => {
 //   limit?    → itens por página (default 50, máx 500)
 // ============================================================================
 router.get('/lista', async (req, res) => {
+  let limit = Math.min(parseInt(req.query.limit || '50', 10), 500);
+  let page = Math.max(parseInt(req.query.page  || '1', 10), 1);
   try {
+    if (isDevSessionFallbackEnabled()) {
+      res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+      res.set('Pragma', 'no-cache');
+      res.set('Expires', '0');
+      res.set('Surrogate-Control', 'no-store');
+      return res.json({ total: 0, page, limit, itens: [], dev: true, fallback: 'empty-list' });
+    }
+
     const q        = (req.query.q || '').trim() || null;
     const tipoitem = (req.query.tipoitem || '').trim() || null;
     const inativo  = (req.query.inativo  || '').trim() || null;
-    const limit    = Math.min(parseInt(req.query.limit || '50', 10), 500);
-    const page     = Math.max(parseInt(req.query.page  || '1', 10), 1);
     const offset   = (page - 1) * limit;
 
     const sql = `
@@ -339,6 +354,13 @@ router.get('/lista', async (req, res) => {
     res.json({ total, page, limit, itens });
   } catch (err) {
     console.error('[produtos/lista] erro →', err);
+    if (isDevSessionFallbackEnabled()) {
+      res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+      res.set('Pragma', 'no-cache');
+      res.set('Expires', '0');
+      res.set('Surrogate-Control', 'no-store');
+      return res.json({ total: 0, page, limit, itens: [], dev: true, fallback: 'empty-list' });
+    }
     res.status(500).json({ error: 'Falha ao consultar produtos.' });
   }
 });

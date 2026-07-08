@@ -1240,7 +1240,7 @@ async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) 
       ? `<div style="font-size:.70rem;color:#a78bfa;margin-top:2px;display:flex;align-items:center;gap:4px;"><i class="fa-solid fa-arrows-rotate" style="color:#a78bfa;"></i><span>${it.codigo_produto_ant} → ${it.codigo_produto_novo}</span></div>`
       : '';
     const destinoHtml = _solDestinoHtml(it, isCompact);
-    const enderecamentoHtml = _solEnderecamentoHtml(it.codigo_produto, enderecoBatch, it);
+    const enderecamentoHtmlBase = _solEnderecamentoHtml(it.codigo_produto, enderecoBatch, it);
 
     const locais = (estoqueBatch[it.codigo_produto] || [])
       .filter(l => Number(l.saldo) > 0)
@@ -1250,7 +1250,7 @@ async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) 
     const usarOrigemSepFase = isFaseSeparacao && temAlmoxOrigem;
     const enderecamentoHtml = isFaseSeparacao
       ? ''
-      : _solEnderecamentoHtml(it.codigo_produto, enderecoBatch, it);
+      : enderecamentoHtmlBase;
     let origemHtml = usarOrigemSepFase
       ? _solRenderOrigemSepFase(locais, enderecoBatch, it.codigo_produto, PRINC_ARMZ)
       : _solRenderOrigemResumoGlobal(
@@ -14691,22 +14691,32 @@ function _abrirAtOsModal(id, navRows) {
     setTimeout(() => { addMsg.style.display = 'none'; }, 3000);
   }
 
+  function setAtalhosLoading(on) {
+    if (loading) loading.style.display = on ? 'block' : 'none';
+  }
+
   async function loadAtalhos() {
-    if (loading) loading.style.display = 'block';
-    list.querySelectorAll('.sac-atalho-item').forEach(el => el.remove());
+    setAtalhosLoading(true);
     try {
       const r = await fetch('/api/sac/atalhos', { credentials: 'same-origin' });
-      const d = await r.json();
-      if (loading) loading.style.display = 'none';
-      if (!d.ok || !d.atalhos.length) {
+      let d = {};
+      try { d = await r.json(); } catch (_) {}
+      setAtalhosLoading(false);
+      if (!r.ok || d.ok === false) {
+        const msg = d.error || `Erro ao carregar (${r.status || 'rede'}).`;
+        list.innerHTML = `<div style="color:#f87171;padding:12px;font-size:13px;">${escapeAtHtml(msg)}</div>`;
+        return;
+      }
+      const atalhos = Array.isArray(d.atalhos) ? d.atalhos : [];
+      if (!atalhos.length) {
         list.innerHTML = '<div style="text-align:center;padding:24px;color:var(--inactive-color);font-size:13px;">Nenhum atalho salvo ainda.</div>';
         return;
       }
       list.innerHTML = '';
-      d.atalhos.forEach(a => renderAtalhoItem(a));
-    } catch(e) {
-      if (loading) loading.style.display = 'none';
-      list.innerHTML = '<div style="color:#f87171;padding:12px;">Erro ao carregar.</div>';
+      atalhos.forEach(a => renderAtalhoItem(a));
+    } catch (e) {
+      setAtalhosLoading(false);
+      list.innerHTML = '<div style="color:#f87171;padding:12px;font-size:13px;">Erro ao carregar.</div>';
     }
   }
 
@@ -14822,10 +14832,11 @@ function _abrirAtOsModal(id, navRows) {
   if (addBtn) {
     addBtn.addEventListener('click', async () => {
       const label    = labelInp ? labelInp.value.trim() : '';
-      const url      = urlInp   ? urlInp.value.trim()   : '';
+      let url        = urlInp   ? urlInp.value.trim()   : '';
       const iconClass= iconSel  ? iconSel.value          : 'fa-solid fa-link';
       if (!label) { showMsg('Informe o nome do atalho.', false); return; }
       if (!url)   { showMsg('Informe a URL.', false); return; }
+      if (!/^https?:\/\//i.test(url)) url = `https://${url}`;
       addBtn.disabled = true;
       try {
         const r = await fetch('/api/sac/atalhos', {
@@ -14834,8 +14845,9 @@ function _abrirAtOsModal(id, navRows) {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ label, url, icon_class: iconClass, icon_color: '#38bdf8' })
         });
-        const d = await r.json();
-        if (d.ok) {
+        let d = {};
+        try { d = await r.json(); } catch (_) {}
+        if (r.ok && d.ok) {
           labelInp.value = ''; urlInp.value = '';
           buildIconGrid('fa-solid fa-link'); iconSel.value = 'fa-solid fa-link';
           showMsg('Atalho salvo!', true);
@@ -60745,6 +60757,7 @@ async function applyCurrentUserPermissionsToUI(){
     // Sem cache ou cache desatualizada: aguarda para não revelar UI vazia
     await refresh();
   }
+
 }
 
 // Variável para rastrear se o usuário estava logado na última verificação
@@ -70254,6 +70267,14 @@ document.addEventListener('DOMContentLoaded', () => {
       sel.innerHTML = '<option value="">\u2014 Selecione o local \u2014</option>' + locais
         .map(l => `<option value="${l.codigo_local_estoque}" data-descricao="${l.descricao}">${l.nIdent ? l.nIdent + '. ' : ''}${l.descricao}</option>`)
         .join('');
+
+      const localPadrao = _obterLocalPadraoSepUsuario();
+      if (localPadrao) {
+        const optPadrao = locais.find(l => String(l.nIdent || '').trim() === localPadrao);
+        if (optPadrao) {
+          sel.value = String(optPadrao.codigo_local_estoque || '');
+        }
+      }
     } catch {
       sel.innerHTML = '<option value="">— erro ao carregar —</option>';
     }
@@ -75265,7 +75286,7 @@ window.verOperacao = function(osId) {
 
     const modal = document.createElement('div');
     modal.className = 'kanban-modal';
-    modal.style.maxWidth = '720px';
+    modal.style.maxWidth = '920px';
     modal.innerHTML = `
       <header>
         <div>
@@ -75415,10 +75436,9 @@ window.verOperacao = function(osId) {
       const linhas = itens.map(i => {
         const ident = i.identificacao || '—';
         const desc = i.descricao || '—';
-        const tipo = i.status || '—';
-        const modelo = i.modelo || '—';
         const qtde = i.qtde ?? '—';
-        const etapa = i.etapa || '—';
+        const vlrUn = _producaoFmtVlrFicha(i.cmc ?? i.preco ?? _producaoPrecoItemFicha(i));
+        const vlrTotal = _producaoFmtVlrFicha(i.valor_total ?? _producaoValorTotalItemFicha(i));
         const btnItem = isSql && i.item_id
           ? `<button type="button" class="estrutura-ver-item-btn modal-secondary" data-item-id="${escapeHtml(String(i.item_id))}" style="font-size:9px;padding:3px 6px;margin:1px;" title="Ver dados completos">Dados</button>`
           : '';
@@ -75431,13 +75451,14 @@ window.verOperacao = function(osId) {
         const tdAcoes = isSql
           ? `<td style="padding:6px 4px;text-align:center;white-space:nowrap;">${btnItem}${btnTrocar}${btnExcluir}</td>`
           : '';
-        return `<tr style="border-bottom:1px solid rgba(255,255,255,.05);">
+        const codDrill = String(ident).trim();
+        const podeDrill = codDrill && codDrill !== '—';
+        return `<tr class="estrutura-item-row${podeDrill ? ' estrutura-item-row--drill' : ''}" data-codigo="${escapeHtml(codDrill)}" style="border-bottom:1px solid rgba(255,255,255,.05);${podeDrill ? 'cursor:pointer;' : ''}" title="${podeDrill ? 'Clique para abrir a estrutura deste item (se houver)' : ''}">
           <td style="padding:6px 8px;font-size:10px;color:#94a3b8;white-space:nowrap;">${escapeHtml(String(ident))}</td>
           <td style="padding:6px 8px;font-size:11px;color:#e2e8f0;">${escapeHtml(String(desc))}</td>
-          <td style="padding:6px 8px;font-size:10px;color:#64748b;text-align:center;">${escapeHtml(String(tipo))}</td>
-          <td style="padding:6px 8px;font-size:10px;color:#94a3b8;text-align:center;">${escapeHtml(String(modelo))}</td>
           <td style="padding:6px 8px;font-size:11px;color:#f1f5f9;text-align:right;font-weight:600;">${escapeHtml(String(qtde))}</td>
-          <td style="padding:6px 8px;font-size:10px;color:#cbd5e1;">${escapeHtml(String(etapa))}</td>
+          <td style="padding:6px 8px;font-size:10px;color:#cbd5e1;text-align:right;white-space:nowrap;">${escapeHtml(vlrUn)}</td>
+          <td style="padding:6px 8px;font-size:10px;color:#e2e8f0;text-align:right;font-weight:600;white-space:nowrap;">${escapeHtml(vlrTotal)}</td>
           ${tdAcoes}
         </tr>`;
       }).join('');
@@ -75453,15 +75474,15 @@ window.verOperacao = function(osId) {
             ${btnFichaHtml}${btnAddHtml}
           </span>
         </div>
+        <p id="estrutura-drill-hint" style="margin:0 0 8px;font-size:11px;color:#94a3b8;min-height:16px;"></p>
         <table style="width:100%;border-collapse:collapse;">
           <thead>
             <tr style="border-bottom:1px solid rgba(255,255,255,.1);">
               <th style="padding:6px 8px;font-size:10px;color:#475569;font-weight:600;text-align:left;">Código</th>
               <th style="padding:6px 8px;font-size:10px;color:#475569;font-weight:600;text-align:left;">Descrição</th>
-              <th style="padding:6px 8px;font-size:10px;color:#475569;font-weight:600;text-align:center;">Tipo</th>
-              <th style="padding:6px 8px;font-size:10px;color:#475569;font-weight:600;text-align:center;">Modelo</th>
               <th style="padding:6px 8px;font-size:10px;color:#475569;font-weight:600;text-align:right;">Qtde</th>
-              <th style="padding:6px 8px;font-size:10px;color:#475569;font-weight:600;text-align:left;">Operação</th>
+              <th style="padding:6px 8px;font-size:10px;color:#475569;font-weight:600;text-align:right;">Vlr un.</th>
+              <th style="padding:6px 8px;font-size:10px;color:#475569;font-weight:600;text-align:right;">Vlr Total</th>
               ${colAcoes}
             </tr>
           </thead>
@@ -75501,6 +75522,41 @@ window.verOperacao = function(osId) {
             await excluirEstruturaSqlItem(itemId, recarregarLista);
           } catch (err) {
             alert(err.message || 'Erro ao excluir item.');
+          }
+        });
+      });
+
+      const drillHint = body.querySelector('#estrutura-drill-hint');
+      body.querySelectorAll('.estrutura-item-row--drill').forEach((tr) => {
+        tr.addEventListener('click', async (ev) => {
+          if (ev.target.closest('button')) return;
+          const codItem = String(tr.dataset.codigo || '').trim();
+          if (!codItem || codItem === '—') return;
+          if (drillHint) {
+            drillHint.style.color = '#facc15';
+            drillHint.textContent = `Consultando estrutura de ${codItem}...`;
+          }
+          try {
+            const subParams = new URLSearchParams({ codigo: codItem });
+            const subResp = await fetch(`/api/producao/estrutura-ficha?${subParams.toString()}`);
+            const subData = await subResp.json();
+            if (!subResp.ok) throw new Error(subData.error || `Erro ${subResp.status}`);
+            const subItens = subData.response || [];
+            if (!subItens.length) {
+              if (drillHint) {
+                drillHint.style.color = '#94a3b8';
+                drillHint.textContent = `${codItem} não possui estrutura cadastrada.`;
+                setTimeout(() => { if (drillHint) drillHint.textContent = ''; }, 2800);
+              }
+              return;
+            }
+            if (drillHint) drillHint.textContent = '';
+            openProducaoEstruturaPorIappId(null, codItem, {});
+          } catch (err) {
+            if (drillHint) {
+              drillHint.style.color = '#f87171';
+              drillHint.textContent = err.message || 'Erro ao abrir estrutura do item.';
+            }
           }
         });
       });
@@ -75928,15 +75984,38 @@ window.verOperacao = function(osId) {
     return _producaoEscolhaImpressoraAtual();
   }
 
+  function _producaoFmtVlrFicha(valor) {
+    const n = Number(valor);
+    if (!Number.isFinite(n)) return '—';
+    return n.toLocaleString('pt-BR', {
+      style: 'currency',
+      currency: 'BRL',
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    });
+  }
+
   function _producaoPrecoItemFicha(item) {
-    const n = Number(item?.preco ?? item?.valor_custo ?? item?.valor_venda);
+    const n = Number(item?.cmc ?? item?.preco);
     return Number.isFinite(n) ? n : 0;
+  }
+
+  /** CMC × qtde na estrutura — usado no filtro da ficha (não é impresso). */
+  function _producaoValorTotalItemFicha(item) {
+    const direto = Number(item?.valor_total);
+    if (Number.isFinite(direto)) return direto;
+    const preco = _producaoPrecoItemFicha(item);
+    const qtde = Number(item?.qtde);
+    const q = Number.isFinite(qtde) ? qtde : 0;
+    return preco * q;
   }
 
   function _producaoFiltrarItensFichaPorPrecoMin(itens, valorMinimo) {
     const min = Number(valorMinimo);
     const limiar = Number.isFinite(min) ? min : 0;
-    return (Array.isArray(itens) ? itens : []).filter((item) => _producaoPrecoItemFicha(item) > limiar);
+    return (Array.isArray(itens) ? itens : []).filter(
+      (item) => _producaoValorTotalItemFicha(item) > limiar
+    );
   }
 
   function _producaoMontarHtmlFichaTecnica(data, meta) {
@@ -75946,25 +76025,20 @@ window.verOperacao = function(osId) {
     const valorMinimo = meta?.valorMinimo;
     const itensTodos = Array.isArray(data?.itens) ? data.itens : [];
     const itens = _producaoFiltrarItensFichaPorPrecoMin(itensTodos, valorMinimo);
-    const codigosFiltrados = new Set(
-      itens.map((i) => String(i.identificacao || '').trim().toUpperCase()).filter(Boolean)
-    );
-    const diagramas = (Array.isArray(data?.diagramas) ? data.diagramas : []).filter((d) => {
-      const cod = String(d.codigo || '').trim().toUpperCase();
-      if (cod && codigosFiltrados.has(cod)) return true;
-      return _producaoPrecoItemFicha(d) > (Number(valorMinimo) || 0);
-    });
+    const diagramas = Array.isArray(data?.diagramas) ? data.diagramas : [];
     const agora = new Date().toLocaleString('pt-BR');
     const minNum = Number(valorMinimo);
     const minLabel = Number.isFinite(minNum)
-      ? minNum.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 4 })
-      : '0';
+      ? minNum.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+      : '0,00';
 
     const linhas = itens.map((i) => `
       <tr>
         <td>${escapeHtml(String(i.identificacao || '—'))}</td>
         <td>${escapeHtml(String(i.descricao || '—'))}</td>
         <td style="text-align:right;">${escapeHtml(String(i.qtde ?? '—'))}</td>
+        <td style="text-align:right;white-space:nowrap;">${escapeHtml(_producaoFmtVlrFicha(i.cmc ?? i.preco ?? _producaoPrecoItemFicha(i)))}</td>
+        <td style="text-align:right;white-space:nowrap;font-weight:600;">${escapeHtml(_producaoFmtVlrFicha(i.valor_total ?? _producaoValorTotalItemFicha(i)))}</td>
       </tr>`).join('');
 
     const blocosDiagrama = diagramas.map((d) => {
@@ -76015,7 +76089,7 @@ window.verOperacao = function(osId) {
     <div><b>Produto:</b> ${escapeHtml(codigo)}${descricao ? ` — ${escapeHtml(descricao)}` : ''}</div>
     ${numeroOp ? `<div><b>OP:</b> ${escapeHtml(numeroOp)}</div>` : ''}
     <div><b>Emitido em:</b> ${escapeHtml(agora)}</div>
-    <div><b>Itens impressos:</b> ${itens.length} de ${itensTodos.length} (preço &gt; ${escapeHtml(minLabel)})</div>
+    <div><b>Itens impressos:</b> ${itens.length} de ${itensTodos.length} (Vlr Total &gt; R$ ${escapeHtml(minLabel)})</div>
   </div>
 
   <div class="sec-title">Estrutura do produto</div>
@@ -76026,10 +76100,12 @@ window.verOperacao = function(osId) {
         <th>Código</th>
         <th>Descrição</th>
         <th style="text-align:right;">Qtde</th>
+        <th style="text-align:right;">Vlr un.</th>
+        <th style="text-align:right;">Vlr Total</th>
       </tr>
     </thead>
     <tbody>${linhas}</tbody>
-  </table>` : '<p class="vazio">Nenhum item com preço acima do valor mínimo informado.</p>'}
+  </table>` : '<p class="vazio">Nenhum item com Vlr Total acima do mínimo informado.</p>'}
 
   ${diagramas.length ? `
   <div class="sec-title">Diagrama</div>
@@ -76063,13 +76139,13 @@ window.verOperacao = function(osId) {
       <div class="kanban-modal-body">
         <div class="modal-code-block">
           <p style="margin:0 0 8px;font-size:12px;color:#94a3b8;">
-            Monta a ficha com a estrutura do produto (Código, Descrição e Qtde) e, se houver item com “DIAGRAMA” na descrição,
-            inclui a imagem (pos = 0) abaixo da lista. O preço não é impresso — serve só para o filtro abaixo.
+            Monta a ficha com a estrutura do produto (Código, Descrição, Qtde, Vlr un. e Vlr Total) e, se houver item com “DIAGRAMA” na descrição,
+            inclui a imagem (pos = 0) abaixo da lista. O filtro abaixo usa o <b>Vlr Total</b> (CMC × quantidade), igual ao modal Ver estrutura.
           </p>
           <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end;margin:12px 0 0;">
             <div style="flex:1;min-width:180px;">
               <label for="producaoFichaValorMinimo" style="display:block;font-size:11px;color:#94a3b8;margin-bottom:4px;">
-                Valor mínimo (preço &gt; este valor)
+                Valor mínimo em R$ (Vlr Total &gt; este valor)
               </label>
               <input
                 type="number"
@@ -76169,7 +76245,7 @@ window.verOperacao = function(osId) {
 
         const itensFiltrados = _producaoFiltrarItensFichaPorPrecoMin(data.itens, valorMinimo);
         if (!itensFiltrados.length) {
-          throw new Error(`Nenhum item com preço maior que ${valorMinimo.toLocaleString('pt-BR')}.`);
+          throw new Error(`Nenhum item com Vlr Total maior que R$ ${valorMinimo.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}.`);
         }
 
         const html = _producaoMontarHtmlFichaTecnica(data, {
@@ -76181,7 +76257,7 @@ window.verOperacao = function(osId) {
         const escolha = _producaoEscolhaImpressoraFicha();
         const modoPdf = escolha === '__PDF__';
         showSt(
-          `Imprimindo ${itensFiltrados.length} de ${(data.itens || []).length} item(ns) (preço > ${valorMinimo.toLocaleString('pt-BR')})...`,
+          `Imprimindo ${itensFiltrados.length} de ${(data.itens || []).length} item(ns) (Vlr Total > R$ ${valorMinimo.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })})...`,
           '#facc15'
         );
 
@@ -78059,6 +78135,68 @@ window.initOscilacaoEstoque = (function () {
   const _badgeObservers = new Map();
 
   // Busca o elemento de badge dentro do item de menu fonte
+  const _sepLocalPadraoPorUsuario = {
+    'abel.p': '3',
+    'alexsrandro.j': '3',
+    'ana.v': '5',
+    'bruna.c': '5',
+    'bruno.r': '3',
+    'carlos.b': '5',
+    'carlos.k': '5',
+    'clayton.g': '5',
+    'denis.m': '3',
+    'eduardo6760': '3',
+    'eline.v': '5',
+    'eloysa': '5',
+    'fabiano.c': '3',
+    'francisco.c': '3',
+    'giliandro m.': '3',
+    'guilherme.o': '3',
+    'jair.r': '3',
+    'jonatas.c': '3',
+    'jose.e': '3',
+    'josé.e': '3',
+    'josildo.a': '3',
+    'juliana.v': '5',
+    'leandro.b': '3',
+    'leandro c.': '3',
+    'leandro.s': '3',
+    'luan.c': '3',
+    'luis.f': '3',
+    'marcio.a': '3',
+    'marcos.j': '3',
+    'marilia.v': '5',
+    'paola.c': '3',
+    'paulo.c': '3',
+    'priscilla.s': '5',
+    'rafael.l': '3',
+    'samuel.s': '3',
+    'sandro.m': '3',
+    'sheyla.b': '5',
+    'sinara.r': '5',
+    'thiago.j': '3',
+    'user.teste': '3',
+    'vinicius.r': '3',
+    'wellington.c': '3'
+  };
+
+  function _normalizarLoginSep(valor) {
+    return String(valor || '')
+      .trim()
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '');
+  }
+
+  function _obterLocalPadraoSepUsuario() {
+    const login =
+      window.__sessionUser?.username ||
+      window.__sessionUser?.login ||
+      window.__sessionUser?.nome ||
+      '';
+    return _sepLocalPadraoPorUsuario[_normalizarLoginSep(login)] || '';
+  }
+
   function _sourceBadgeEl(navSelector) {
     if (!navSelector) return null;
     const menuEl = document.querySelector(navSelector);
