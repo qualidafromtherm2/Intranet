@@ -3625,6 +3625,7 @@ function extractConteudo(textRaw) {
 }
 
 const { pool } = require('../src/db');
+const { VENDAS_NF_POR_PEDIDO_CTE, vendasNfJoinPedidoSql } = require('../utils/vendasNfJoin');
 
 const BUCKET = process.env.STORAGE_BUCKET_SAC || process.env.STORAGE_BUCKET || process.env.SUPABASE_BUCKET || 'produtos';
 
@@ -4543,7 +4544,7 @@ router.patch('/at/status/:id', async (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (!id || id <= 0) return res.status(400).json({ ok: false, error: 'ID inválido.' });
 
-  const VALORES_VALIDOS = ['Aberto', 'Fechado', 'Aguardando NF AT'];
+  const VALORES_VALIDOS = ['Aberto', 'Fechado', 'Aguardando NF AT', 'Excluido'];
   const { status } = req.body || {};
   if (!status || !VALORES_VALIDOS.includes(status)) {
     return res.status(400).json({ ok: false, error: `Status inválido. Use: ${VALORES_VALIDOS.join(', ')}.` });
@@ -6910,24 +6911,94 @@ router.get('/at/graficos/relatorio', async (req, res) => {
   }
 });
 
-// GET /at/relatorio-gerencial — dashboard executivo AT por mês (YYYY-MM)
+function mesAtualReferencia(refDate = new Date()) {
+  const ano = refDate.getFullYear();
+  const mesNum = refDate.getMonth() + 1;
+  const pad = (n) => String(n).padStart(2, '0');
+  return {
+    ano,
+    mesNum,
+    mesRaw: `${ano}-${pad(mesNum)}`,
+  };
+}
+
+function calcAtRelatorioGerencialPeriodo(modoRaw, refDate = new Date()) {
+  const modosValidos = new Set(['mes', '3m', '6m', 'anual']);
+  const modo = modosValidos.has(modoRaw) ? modoRaw : 'mes';
+  const nomesMes = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
+  const { ano, mesNum, mesRaw } = mesAtualReferencia(refDate);
+  const pad = (n) => String(n).padStart(2, '0');
+  const fmtYmd = (y, m, d = 1) => `${y}-${pad(m)}-${pad(d)}`;
+  const mesLabel = (y, m) => (m >= 1 && m <= 12 ? `${nomesMes[m - 1]}/${y}` : `${y}-${pad(m)}`);
+
+  if (modo === 'mes') {
+    const nextM = mesNum === 12 ? 1 : mesNum + 1;
+    const nextY = mesNum === 12 ? ano + 1 : ano;
+    return {
+      modo,
+      mesRef: mesRaw,
+      inicio: fmtYmd(ano, mesNum),
+      fimExclusive: fmtYmd(nextY, nextM),
+      label: mesLabel(ano, mesNum),
+      meses: [mesRaw],
+      evolucaoTipo: 'semana',
+    };
+  }
+
+  const qtd = modo === '3m' ? 3 : (modo === '6m' ? 6 : 12);
+  const inicioDate = new Date(ano, mesNum - 1 - qtd, 1);
+  const meses = [];
+  for (let i = 0; i < qtd; i += 1) {
+    const d = new Date(inicioDate.getFullYear(), inicioDate.getMonth() + i, 1);
+    meses.push(`${d.getFullYear()}-${pad(d.getMonth() + 1)}`);
+  }
+  const fimY = mesNum === 1 ? ano - 1 : ano;
+  const fimM = mesNum === 1 ? 12 : mesNum - 1;
+
+  return {
+    modo,
+    mesRef: mesRaw,
+    inicio: fmtYmd(inicioDate.getFullYear(), inicioDate.getMonth() + 1),
+    fimExclusive: fmtYmd(ano, mesNum),
+    label: `${mesLabel(inicioDate.getFullYear(), inicioDate.getMonth() + 1)} a ${mesLabel(fimY, fimM)}`,
+    meses,
+    evolucaoTipo: 'mes',
+  };
+}
+
+function buildAtRelatorioGerencialTipoFilter(tipoRaw) {
+  const tipo = String(tipoRaw || '').trim();
+  if (!tipo) return '';
+  const safe = tipo.replace(/'/g, "''");
+  return ` AND LOWER(TRIM(COALESCE(a.tipo, ''))) = LOWER('${safe}')`;
+}
+
+// GET /at/relatorio-gerencial — dashboard executivo AT (período + tipo)
 router.get('/at/relatorio-gerencial', async (req, res) => {
   try {
     await ensureSchema();
-    const mesRaw = String(req.query.mes || '').trim();
-    if (!/^\d{4}-\d{2}$/.test(mesRaw)) {
-      return res.status(400).json({ ok: false, error: 'Parâmetro mes inválido (use YYYY-MM).' });
-    }
-    const [, mesNumStr] = mesRaw.split('-');
-    const mesNum = parseInt(mesNumStr, 10);
-    if (mesNum < 1 || mesNum > 12) {
-      return res.status(400).json({ ok: false, error: 'Parâmetro mes inválido.' });
-    }
+    const modoRaw = String(req.query.modo || 'mes').trim().toLowerCase();
+    const tipoParam = req.query.tipo;
+    const tipoFiltro = tipoParam === undefined || tipoParam === null
+      ? 'Qualidade'
+      : String(tipoParam).trim();
+    const refAtual = mesAtualReferencia();
+    const tipoSql = buildAtRelatorioGerencialTipoFilter(tipoFiltro);
+    const periodoCfg = calcAtRelatorioGerencialPeriodo(modoRaw);
+    const {
+      inicio: mesInicio,
+      fimExclusive: mesFimExclusive,
+      label: periodoLabel,
+      modo,
+      meses: mesesPeriodo,
+      evolucaoTipo,
+      mesRef: mesRaw,
+    } = periodoCfg;
+    const rangeParams = [mesInicio, mesFimExclusive];
 
-    const mesInicio = `${mesRaw}-01`;
     const nomesMes = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
-    const [anoStr] = mesRaw.split('-');
-    const periodoLabel = `${nomesMes[mesNum - 1]}/${anoStr}`;
+    const anoStr = String(refAtual.ano);
+    const mesNum = refAtual.mesNum;
 
     const baseCte = `
       WITH base AS (
@@ -6950,6 +7021,7 @@ router.get('/at/relatorio-gerencial', async (req, res) => {
             ),
             '(sem modelo)'
           ) AS modelo,
+          TRIM(COALESCE(a.status, '')) AS status_os,
           f.valor_total_mao_obra,
           CASE
             WHEN LOWER(COALESCE(f.status_os, '')) IN ('finalizado', 'fechado')
@@ -6961,20 +7033,76 @@ router.get('/at/relatorio-gerencial', async (req, res) => {
         LEFT JOIN sac.at_busca_selecionada s ON s.id_at = a.id
         LEFT JOIN sac.fechamento f ON f.id_at = a.id
         WHERE a.data >= $1::date
-          AND a.data < ($1::date + INTERVAL '1 month')
-          AND LOWER(TRIM(COALESCE(a.tipo, ''))) = 'qualidade'
+          AND a.data < $2::date${tipoSql}
         ORDER BY a.id, f.id DESC NULLS LAST
       )
     `;
+
+    const loteBaseCte = `
+      WITH lote_base AS (
+        SELECT DISTINCT ON (a.id)
+          a.id,
+          COALESCE(NULLIF(TRIM(a.tag_problema), ''), '(sem tag)') AS tag,
+          COALESCE(
+            NULLIF(
+              CONCAT(
+                COALESCE(SUBSTRING(TRIM(COALESCE(s.modelo, a.modelo, '')) FROM '^[A-Za-z]+'), ''),
+                CASE
+                  WHEN UPPER(TRIM(COALESCE(s.modelo, a.modelo, ''))) ~ 'BR$' THEN 'BR'
+                  WHEN UPPER(TRIM(COALESCE(s.modelo, a.modelo, ''))) ~ 'W$'  THEN 'W'
+                  ELSE ''
+                END
+              ),
+              ''
+            ),
+            '(sem modelo)'
+          ) AS modelo,
+          CASE
+            WHEN s.data_entrega IS NULL OR TRIM(s.data_entrega) = '' THEN NULL
+            WHEN TRIM(s.data_entrega) ~ '^\\d{4}-\\d{2}-\\d{2}' THEN SUBSTRING(TRIM(s.data_entrega) FROM 1 FOR 10)::date
+            WHEN TRIM(s.data_entrega) ~ '^\\d{1,2}/\\d{1,2}/\\d{4}'
+              THEN to_date(regexp_replace(SUBSTRING(TRIM(s.data_entrega) FROM 1 FOR 10), ' .*', ''), 'DD/MM/YYYY')
+            ELSE NULL
+          END AS data_entrega_dt
+        FROM sac.at a
+        INNER JOIN sac.at_busca_selecionada s ON s.id_at = a.id
+        WHERE a.data >= $1::date
+          AND a.data < $2::date${tipoSql}
+        ORDER BY a.id, s.id DESC
+      )
+    `;
+
+    const evolucaoSql = evolucaoTipo === 'mes'
+      ? `${baseCte}
+        SELECT
+          TO_CHAR(DATE_TRUNC('month', data), 'YYYY-MM') AS mes_key,
+          COUNT(*)::int AS total
+        FROM base
+        GROUP BY 1
+        ORDER BY 1`
+      : `${baseCte}
+        SELECT
+          LEAST(5, GREATEST(1, CEIL(EXTRACT(DAY FROM data) / 7.0)::int)) AS semana,
+          COUNT(*)::int AS total
+        FROM base
+        GROUP BY 1
+        ORDER BY 1`;
 
     const [
       rKpi,
       rEstado,
       rModelo,
       rTag,
+      rTagModelo,
       rStatus,
-      rSemana,
+      rEvolucao,
       rFinanceiro,
+      rLoteMes,
+      rLoteMesModelo,
+      rLoteModeloJanela,
+      rLoteTagJanela,
+      rLoteTagModeloJanela,
+      rLoteTotalJanela,
     ] = await Promise.all([
       pool.query(`${baseCte}
         SELECT
@@ -6983,45 +7111,45 @@ router.get('/at/relatorio-gerencial', async (req, res) => {
           COUNT(*) FILTER (WHERE status_grupo = 'em_andamento')::int AS em_andamento,
           COUNT(DISTINCT estado) FILTER (WHERE estado <> 'N/D')::int AS estados_atendidos,
           COUNT(DISTINCT modelo) FILTER (WHERE modelo <> '(sem modelo)')::int AS modelos_atendidos,
+          COUNT(*) FILTER (WHERE status_os = 'Aguardando NF AT')::int AS pendente_fechamento_tecnico,
           COALESCE(SUM(valor_total_mao_obra) FILTER (WHERE status_grupo = 'concluida'), 0)::float AS total_mo,
           COALESCE(AVG(valor_total_mao_obra) FILTER (
             WHERE status_grupo = 'concluida' AND valor_total_mao_obra IS NOT NULL AND valor_total_mao_obra > 0
           ), 0)::float AS custo_medio
         FROM base
-      `, [mesInicio]),
+      `, rangeParams),
       pool.query(`${baseCte}
         SELECT estado, COUNT(*)::int AS total
         FROM base
         GROUP BY estado
         ORDER BY total DESC, estado
-      `, [mesInicio]),
+      `, rangeParams),
       pool.query(`${baseCte}
         SELECT modelo, COUNT(*)::int AS total
         FROM base
         GROUP BY modelo
         ORDER BY total DESC, modelo
         LIMIT 10
-      `, [mesInicio]),
+      `, rangeParams),
       pool.query(`${baseCte}
         SELECT tag, COUNT(*)::int AS total
         FROM base
         GROUP BY tag
         ORDER BY total DESC, tag
-      `, [mesInicio]),
+      `, rangeParams),
+      pool.query(`${baseCte}
+        SELECT tag, modelo, COUNT(*)::int AS total
+        FROM base
+        GROUP BY tag, modelo
+        ORDER BY tag, total DESC, modelo
+      `, rangeParams),
       pool.query(`${baseCte}
         SELECT status_grupo, COUNT(*)::int AS total
         FROM base
         GROUP BY status_grupo
         ORDER BY status_grupo
-      `, [mesInicio]),
-      pool.query(`${baseCte}
-        SELECT
-          LEAST(5, GREATEST(1, CEIL(EXTRACT(DAY FROM data) / 7.0)::int)) AS semana,
-          COUNT(*)::int AS total
-        FROM base
-        GROUP BY 1
-        ORDER BY 1
-      `, [mesInicio]),
+      `, rangeParams),
+      pool.query(evolucaoSql, rangeParams),
       pool.query(`${baseCte}
         SELECT
           id,
@@ -7033,7 +7161,52 @@ router.get('/at/relatorio-gerencial', async (req, res) => {
           AND valor_total_mao_obra IS NOT NULL
           AND valor_total_mao_obra > 0
         ORDER BY data ASC, id ASC
-      `, [mesInicio]),
+      `, rangeParams),
+      pool.query(`${loteBaseCte}
+        SELECT
+          to_char(data_entrega_dt, 'YYYY-MM') AS mes,
+          COUNT(*)::int AS total
+        FROM lote_base
+        WHERE data_entrega_dt IS NOT NULL
+        GROUP BY 1
+        ORDER BY 1
+      `, rangeParams),
+      pool.query(`${loteBaseCte}
+        SELECT
+          to_char(data_entrega_dt, 'YYYY-MM') AS mes,
+          modelo,
+          COUNT(*)::int AS total
+        FROM lote_base
+        WHERE data_entrega_dt IS NOT NULL
+        GROUP BY 1, 2
+        ORDER BY 1, 3 DESC, 2
+      `, rangeParams),
+      pool.query(`${loteBaseCte}
+        SELECT modelo, COUNT(*)::int AS total
+        FROM lote_base
+        WHERE data_entrega_dt IS NOT NULL
+        GROUP BY modelo
+        ORDER BY total DESC, modelo
+      `, rangeParams),
+      pool.query(`${loteBaseCte}
+        SELECT tag, COUNT(*)::int AS total
+        FROM lote_base
+        WHERE data_entrega_dt IS NOT NULL
+        GROUP BY tag
+        ORDER BY total DESC, tag
+      `, rangeParams),
+      pool.query(`${loteBaseCte}
+        SELECT tag, modelo, COUNT(*)::int AS total
+        FROM lote_base
+        WHERE data_entrega_dt IS NOT NULL
+        GROUP BY tag, modelo
+        ORDER BY tag, total DESC, modelo
+      `, rangeParams),
+      pool.query(`${loteBaseCte}
+        SELECT COUNT(*)::int AS total
+        FROM lote_base
+        WHERE data_entrega_dt IS NOT NULL
+      `, rangeParams),
     ]);
 
     const kpi = rKpi.rows[0] || {};
@@ -7049,6 +7222,36 @@ router.get('/at/relatorio-gerencial', async (req, res) => {
         pct_acum: tagTotal ? Math.round((acum / tagTotal) * 1000) / 10 : 0,
       };
     });
+
+    const janelaLoteFimLabel = (() => {
+      const d = new Date(mesFimExclusive);
+      d.setDate(d.getDate() - 1);
+      return d.toLocaleDateString('pt-BR');
+    })();
+    const janelaLoteInicioLabel = new Date(mesInicio).toLocaleDateString('pt-BR');
+    const janelaLoteMeses = mesesPeriodo;
+    const lotePorMes = (rLoteMes.rows || []).map((r) => {
+      const [y, m] = String(r.mes || '').split('-');
+      const mi = parseInt(m, 10);
+      return {
+        mes: r.mes,
+        label: mi >= 1 && mi <= 12 ? `${nomesMes[mi - 1]}/${y}` : r.mes,
+        total: r.total,
+      };
+    });
+    const lotePorMesModelo = (rLoteMesModelo.rows || []).map((r) => {
+      const [y, m] = String(r.mes || '').split('-');
+      const mi = parseInt(m, 10);
+      return {
+        mes: r.mes,
+        label: mi >= 1 && mi <= 12 ? `${nomesMes[mi - 1]}/${y}` : r.mes,
+        modelo: r.modelo,
+        total: r.total,
+      };
+    });
+    const loteModelosJanela = rLoteModeloJanela.rows || [];
+    const loteTagsJanela = rLoteTagJanela.rows || [];
+    const loteTagTotal = loteTagsJanela.reduce((s, r) => s + (r.total || 0), 0);
 
     const { rows: rTextos } = await pool.query(
       `SELECT plano_acao, conclusao_resumo, conclusao_pontos_criticos, conclusao_oportunidades,
@@ -7079,7 +7282,10 @@ router.get('/at/relatorio-gerencial', async (req, res) => {
     return res.json({
       ok: true,
       mes: mesRaw,
+      modo,
+      tipo: tipoFiltro || 'Todos',
       periodo: periodoLabel,
+      evolucao_tipo: evolucaoTipo,
       kpis: {
         total_os: kpi.total_os || 0,
         concluidas: kpi.concluidas || 0,
@@ -7089,18 +7295,33 @@ router.get('/at/relatorio-gerencial', async (req, res) => {
         total_mo: Math.round((kpi.total_mo || 0) * 100) / 100,
         custo_medio: Math.round((kpi.custo_medio || 0) * 100) / 100,
         abertas_mes: kpi.total_os || 0,
+        pendente_fechamento_tecnico: kpi.pendente_fechamento_tecnico || 0,
       },
       por_estado: rEstado.rows,
       por_modelo: rModelo.rows,
       por_tag: tags,
+      tag_por_modelo: rTagModelo.rows || [],
       por_status: (rStatus.rows || []).map((r) => ({
         status: r.status_grupo === 'concluida' ? 'Concluídas' : 'Em andamento',
         total: r.total,
       })),
-      evolucao_semanal: (rSemana.rows || []).map((r) => ({
-        semana: `Sem ${r.semana}`,
-        total: r.total,
-      })),
+      evolucao_semanal: evolucaoTipo === 'semana'
+        ? (rEvolucao.rows || []).map((r) => ({
+          semana: `Sem ${r.semana}`,
+          total: r.total,
+        }))
+        : [],
+      evolucao_mensal: evolucaoTipo === 'mes'
+        ? (rEvolucao.rows || []).map((r) => {
+          const [y, m] = String(r.mes_key || '').split('-');
+          const mi = parseInt(m, 10);
+          return {
+            mes: r.mes_key,
+            label: mi >= 1 && mi <= 12 ? `${nomesMes[mi - 1]}/${y}` : r.mes_key,
+            total: r.total,
+          };
+        })
+        : [],
       pareto,
       financeiro: (rFinanceiro.rows || []).map((r) => ({
         id: r.id,
@@ -7109,6 +7330,23 @@ router.get('/at/relatorio-gerencial', async (req, res) => {
         data: r.data,
         valor_mo: Math.round(Number(r.valor_total_mao_obra || 0) * 100) / 100,
       })),
+      analise_lote: {
+        por_mes_entrega: lotePorMes,
+        por_mes_modelo: lotePorMesModelo,
+        por_modelo_janela_3m: loteModelosJanela,
+        janela_3m: {
+          inicio: janelaLoteInicioLabel,
+          fim: janelaLoteFimLabel,
+          meses: janelaLoteMeses,
+          total_maquinas: rLoteTotalJanela.rows[0]?.total || 0,
+        },
+        defeitos_janela_3m: loteTagsJanela.map((r) => ({
+          tag: r.tag,
+          total: r.total,
+          pct: loteTagTotal ? Math.round((r.total / loteTagTotal) * 1000) / 10 : 0,
+        })),
+        tag_por_modelo_janela: rLoteTagModeloJanela.rows || [],
+      },
       textos,
     });
   } catch (err) {
@@ -7287,21 +7525,7 @@ router.get('/at/graficos/por-tag-problema-mes', async (req, res) => {
 router.get('/vendas/graficos/valor-estado-mes', async (_req, res) => {
   try {
     const { rows } = await pool.query(`
-      WITH nf_por_pedido AS (
-        SELECT
-          numero_pedido,
-          MAX(
-            CASE
-              WHEN TRIM(COALESCE(data_emissao, '')) ~ '^\\d{4}-\\d{2}-\\d{2}'
-                THEN LEFT(TRIM(data_emissao), 10)::date
-              WHEN TRIM(COALESCE(data_emissao, '')) ~ '^\\d{2}/\\d{2}/\\d{4}$'
-                THEN TO_DATE(TRIM(data_emissao), 'DD/MM/YYYY')
-              ELSE NULL
-            END
-          ) AS data_emissao_dt
-        FROM "Vendas".notas_fiscais_omie
-        GROUP BY numero_pedido
-      ),
+      WITH ${VENDAS_NF_POR_PEDIDO_CTE},
       pedidos_cfop_ignorado AS (
         SELECT DISTINCT codigo_pedido
         FROM "Vendas".pedidos_venda_itens
@@ -7321,7 +7545,7 @@ router.get('/vendas/graficos/valor-estado-mes', async (_req, res) => {
         END                                                                 AS etapa_descricao
       FROM "Vendas".pedidos_venda p
       JOIN nf_por_pedido nf
-        ON TRIM(COALESCE(nf.numero_pedido, '')) = TRIM(COALESCE(p.codigo_pedido::text, ''))
+        ON ${vendasNfJoinPedidoSql('nf', 'p')}
       LEFT JOIN omie.fornecedores f
         ON TRIM(COALESCE(f.codigo_cliente_omie::text, '')) = TRIM(COALESCE(p.codigo_cliente::text, ''))
       WHERE TRIM(COALESCE(p.etapa::text, '')) = '70'
@@ -7545,21 +7769,7 @@ router.get('/vendas/graficos/mapa-brasil', async (req, res) => {
 router.get('/vendas/graficos/quantidade-familia-mes', async (_req, res) => {
   try {
     const { rows } = await pool.query(`
-      WITH nf_por_pedido AS (
-        SELECT
-          numero_pedido,
-          MAX(
-            CASE
-              WHEN TRIM(COALESCE(data_emissao, '')) ~ '^\\d{4}-\\d{2}-\\d{2}'
-                THEN LEFT(TRIM(data_emissao), 10)::date
-              WHEN TRIM(COALESCE(data_emissao, '')) ~ '^\\d{2}/\\d{2}/\\d{4}$'
-                THEN TO_DATE(TRIM(data_emissao), 'DD/MM/YYYY')
-              ELSE NULL
-            END
-          ) AS data_emissao_dt
-        FROM "Vendas".notas_fiscais_omie
-        GROUP BY numero_pedido
-      ),
+      WITH ${VENDAS_NF_POR_PEDIDO_CTE},
       itens_validos AS (
         SELECT
           i.codigo_pedido,
@@ -7576,7 +7786,7 @@ router.get('/vendas/graficos/quantidade-familia-mes', async (_req, res) => {
       FROM itens_validos iv
       JOIN "Vendas".pedidos_venda p ON p.codigo_pedido = iv.codigo_pedido
       JOIN nf_por_pedido nf
-        ON TRIM(COALESCE(nf.numero_pedido, '')) = TRIM(COALESCE(p.codigo_pedido::text, ''))
+        ON ${vendasNfJoinPedidoSql('nf', 'p')}
       WHERE TRIM(COALESCE(p.etapa::text, '')) = '70'
         AND nf.data_emissao_dt IS NOT NULL
       GROUP BY 1, 2
@@ -7597,21 +7807,7 @@ router.get('/vendas/graficos/quantidade-familia-mes/detalhe', async (req, res) =
   if (!familia || !mes) return res.status(400).json({ ok: false, error: 'familia e mes são obrigatórios.' });
   try {
     const { rows } = await pool.query(`
-      WITH nf_por_pedido AS (
-        SELECT
-          numero_pedido,
-          MAX(
-            CASE
-              WHEN TRIM(COALESCE(data_emissao, '')) ~ '^\\d{4}-\\d{2}-\\d{2}'
-                THEN LEFT(TRIM(data_emissao), 10)::date
-              WHEN TRIM(COALESCE(data_emissao, '')) ~ '^\\d{2}/\\d{2}/\\d{4}$'
-                THEN TO_DATE(TRIM(data_emissao), 'DD/MM/YYYY')
-              ELSE NULL
-            END
-          ) AS data_emissao_dt
-        FROM "Vendas".notas_fiscais_omie
-        GROUP BY numero_pedido
-      )
+      WITH ${VENDAS_NF_POR_PEDIDO_CTE}
       SELECT
         p.numero_pedido,
         i.codigo    AS codigo_item,
@@ -7621,7 +7817,7 @@ router.get('/vendas/graficos/quantidade-familia-mes/detalhe', async (req, res) =
       FROM "Vendas".pedidos_venda_itens i
       JOIN "Vendas".pedidos_venda p ON p.codigo_pedido = i.codigo_pedido
       JOIN nf_por_pedido nf
-        ON TRIM(COALESCE(nf.numero_pedido, '')) = TRIM(COALESCE(p.codigo_pedido::text, ''))
+        ON ${vendasNfJoinPedidoSql('nf', 'p')}
       LEFT JOIN public.produtos_omie po ON TRIM(po.codigo) = TRIM(i.codigo)
       WHERE COALESCE(NULLIF(TRIM(po.descricao_familia), ''), '(sem família)') = $1
         AND TO_CHAR(DATE_TRUNC('month', nf.data_emissao_dt), 'YYYY-MM') = $2
@@ -7643,21 +7839,7 @@ router.get('/vendas/graficos/quantidade-familia-mes/detalhe', async (req, res) =
 router.get('/vendas/graficos/valor-familia-mes', async (_req, res) => {
   try {
     const { rows } = await pool.query(`
-      WITH nf_por_pedido AS (
-        SELECT
-          numero_pedido,
-          MAX(
-            CASE
-              WHEN TRIM(COALESCE(data_emissao, '')) ~ '^\\d{4}-\\d{2}-\\d{2}'
-                THEN LEFT(TRIM(data_emissao), 10)::date
-              WHEN TRIM(COALESCE(data_emissao, '')) ~ '^\\d{2}/\\d{2}/\\d{4}$'
-                THEN TO_DATE(TRIM(data_emissao), 'DD/MM/YYYY')
-              ELSE NULL
-            END
-          ) AS data_emissao_dt
-        FROM "Vendas".notas_fiscais_omie
-        GROUP BY numero_pedido
-      ),
+      WITH ${VENDAS_NF_POR_PEDIDO_CTE},
       itens_validos AS (
         SELECT
           i.codigo_pedido,
@@ -7674,7 +7856,7 @@ router.get('/vendas/graficos/valor-familia-mes', async (_req, res) => {
       FROM itens_validos iv
       JOIN "Vendas".pedidos_venda p ON p.codigo_pedido = iv.codigo_pedido
       JOIN nf_por_pedido nf
-        ON TRIM(COALESCE(nf.numero_pedido, '')) = TRIM(COALESCE(p.codigo_pedido::text, ''))
+        ON ${vendasNfJoinPedidoSql('nf', 'p')}
       WHERE TRIM(COALESCE(p.etapa::text, '')) = '70'
         AND nf.data_emissao_dt IS NOT NULL
       GROUP BY 1, 2
@@ -7695,21 +7877,7 @@ router.get('/vendas/graficos/valor-familia-mes/detalhe', async (req, res) => {
   if (!familia || !mes) return res.status(400).json({ ok: false, error: 'familia e mes são obrigatórios.' });
   try {
     const { rows } = await pool.query(`
-      WITH nf_por_pedido AS (
-        SELECT
-          numero_pedido,
-          MAX(
-            CASE
-              WHEN TRIM(COALESCE(data_emissao, '')) ~ '^\\d{4}-\\d{2}-\\d{2}'
-                THEN LEFT(TRIM(data_emissao), 10)::date
-              WHEN TRIM(COALESCE(data_emissao, '')) ~ '^\\d{2}/\\d{2}/\\d{4}$'
-                THEN TO_DATE(TRIM(data_emissao), 'DD/MM/YYYY')
-              ELSE NULL
-            END
-          ) AS data_emissao_dt
-        FROM "Vendas".notas_fiscais_omie
-        GROUP BY numero_pedido
-      )
+      WITH ${VENDAS_NF_POR_PEDIDO_CTE}
       SELECT
         p.numero_pedido,
         i.codigo      AS codigo_item,
@@ -7719,7 +7887,7 @@ router.get('/vendas/graficos/valor-familia-mes/detalhe', async (req, res) => {
       FROM "Vendas".pedidos_venda_itens i
       JOIN "Vendas".pedidos_venda p ON p.codigo_pedido = i.codigo_pedido
       JOIN nf_por_pedido nf
-        ON TRIM(COALESCE(nf.numero_pedido, '')) = TRIM(COALESCE(p.codigo_pedido::text, ''))
+        ON ${vendasNfJoinPedidoSql('nf', 'p')}
       LEFT JOIN public.produtos_omie po ON TRIM(po.codigo) = TRIM(i.codigo)
       WHERE COALESCE(NULLIF(TRIM(po.descricao_familia), ''), '(sem família)') = $1
         AND TO_CHAR(DATE_TRUNC('month', nf.data_emissao_dt), 'YYYY-MM') = $2

@@ -9,9 +9,12 @@ const Jimp        = require('jimp');
 const router = express.Router();
 
 // ── Credenciais (variáveis de ambiente; padrão = homologação VisualSet) ───────
-const VIPP_USUARIO   = process.env.VIPP_USUARIO   || 'onbiws';
-const VIPP_TOKEN     = String(process.env.VIPP_TOKEN || '').trim();
-const VIPP_ID_PERFIL = process.env.VIPP_ID_PERFIL || '9363';
+const VIPP_USUARIO        = process.env.VIPP_USUARIO        || 'onbiws';
+const VIPP_TOKEN          = String(process.env.VIPP_TOKEN || '').trim();
+const VIPP_ID_PERFIL      = process.env.VIPP_ID_PERFIL      || '9363';
+const VIPP_CONTRATO       = String(process.env.VIPP_CONTRATO || '').trim();
+const VIPP_CARTAO         = String(process.env.VIPP_CARTAO   || '').trim();
+const VIPP_CODIGO_ADMIN   = String(process.env.VIPP_CODIGO_ADMIN || process.env.VIPP_COD_ADMIN || '').trim();
 const VIPP_ENDPOINT  = 'http://vpsrv.visualset.com.br/PostagemVipp.asmx';
 const VIPP_IMPRESSAO = 'https://vipp.visualset.com.br/vipp/remoto/ImpressaoRemota.php';
 // VIPP migrou para vipp-novo; override via VIPP_WEB_URL no .env se necessário
@@ -80,8 +83,26 @@ async function getVippWebSession() {
   return _vippWebSession.cookie;
 }
 
+const MSG_VIPP_INDISPONIVEL = 'VIPP fora do ar, aguarde alguns minutos e tente novamente.';
+
+function isVippIndisponivel(msg) {
+  const txt = String(msg || '');
+  return /GTW-00|GTW-\d{3}|cartaopostagem|Token expirado|Token N[aã]o Retornado|Problemas Na Autentica|IdCorreios|Codigo de acesso|Falha ao conectar com VIPP|Tempo limite esgotado|Servi[cç]o indispon[ií]vel|Usuario Nao Logado|ETIMEDOUT|ECONNRESET|ECONNABORTED|socket hang up|\b502\b|\b503\b/i.test(txt);
+}
+
+function traduzirErroGatewayVipp(msg) {
+  if (isVippIndisponivel(msg)) return MSG_VIPP_INDISPONIVEL;
+  return String(msg || '');
+}
+
+function respostaErroVipp(err) {
+  const bruto = err?.message || err || '';
+  const error = traduzirErroGatewayVipp(bruto);
+  return { ok: false, error, vippIndisponivel: error === MSG_VIPP_INDISPONIVEL };
+}
+
 // ── Aloca código ECT dos Correios para uma postagem via GerarPPN.php ──────────
-async function gerarECT(idConhecimento) {
+async function gerarECT(idConhecimento, tentativa = 1) {
   const cookie = await getVippWebSession();
   const r = await axios.post(
     `${VIPP_WEB_URL}/vipp/entradadados/digitacao/GerarPPN.php`,
@@ -90,6 +111,7 @@ async function gerarECT(idConhecimento) {
       headers: {
         'Content-Type': 'application/x-www-form-urlencoded',
         'Cookie': cookie,
+        'Referer': `${VIPP_WEB_URL}/vipp/entradadados/FrmCheckList.php`,
         'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
       },
       timeout: 20000,
@@ -107,13 +129,14 @@ async function gerarECT(idConhecimento) {
     if (ectMatch) return ectMatch[1];
   }
 
-  // Falha de autenticação: invalida cache e propaga erro
-  if (d?.Msg === 'Usuario Nao Logado') {
+  const msg = String(d?.Msg || '');
+  const precisaRelogin = /Usuario Nao Logado|GTW-007|Token expirado/i.test(msg);
+  if (precisaRelogin && tentativa < 2) {
     _vippWebSession = { cookie: null, expiresAt: 0 };
-    throw new Error('[VIPP] Sessão expirada — tente novamente');
+    return gerarECT(idConhecimento, tentativa + 1);
   }
 
-  throw new Error(`[VIPP] Falha ao gerar ECT: Sts=${d?.Sts} Msg=${d?.Msg}`);
+  throw new Error(traduzirErroGatewayVipp(msg) || `[VIPP] Falha ao gerar ECT: Sts=${d?.Sts}`);
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -130,6 +153,16 @@ function escXml(s) {
 function extrairTag(xml, tag) {
   const m = xml.match(new RegExp('<' + tag + '[^>]*>([\\s\\S]*?)<\\/' + tag + '>', 'i'));
   return m ? m[1].trim() : '';
+}
+
+function buildContratoEctXml() {
+  if (!VIPP_CONTRATO && !VIPP_CARTAO && !VIPP_CODIGO_ADMIN) return '';
+  return `
+        <ContratoEct>
+          <NrContrato>${escXml(VIPP_CONTRATO)}</NrContrato>
+          <CodigoAdministrativo>${escXml(VIPP_CODIGO_ADMIN)}</CodigoAdministrativo>
+          <NrCartao>${escXml(VIPP_CARTAO)}</NrCartao>
+        </ContratoEct>`;
 }
 
 // ── Monta XML SOAP de LiberarDownloadConhecimento ────────────────────────────
@@ -216,7 +249,7 @@ function buildSoap(p) {
           <Usuario>${escXml(VIPP_USUARIO)}</Usuario>
           <Token>${escXml(VIPP_TOKEN)}</Token>
           <IdPerfil>${escXml(VIPP_ID_PERFIL)}</IdPerfil>
-        </PerfilVipp>
+        </PerfilVipp>${buildContratoEctXml()}
         <Destinatario>
           <CnpjCpf>${escXml(dest.cnpjCpf)}</CnpjCpf>
           <Nome>${escXml(dest.nome)}</Nome>
@@ -326,9 +359,18 @@ router.post('/postar', async (req, res) => {
 
     // Sem status válido = falha
     console.warn('[VIPP] Postagem rejeitada. Status:', idStatus, '| Erros:', erros);
+    const errosTraduzidos = erros.map(traduzirErroGatewayVipp);
+    const msgGateway = xmlParaDump.match(/GTW-\d{3}[^"<]*/)?.[0] || '';
+    if (msgGateway && !errosTraduzidos.includes(MSG_VIPP_INDISPONIVEL)) {
+      errosTraduzidos.unshift(traduzirErroGatewayVipp(msgGateway));
+    }
+    const listaErros = errosTraduzidos.length ? errosTraduzidos : ['VIPP rejeitou a postagem. Verifique os dados.'];
+    const vippIndisponivel = listaErros.some(e => e === MSG_VIPP_INDISPONIVEL);
     return res.json({
       ok:    false,
-      erros: erros.length ? erros : ['VIPP rejeitou a postagem. Verifique os dados.'],
+      erros: listaErros,
+      error: vippIndisponivel ? MSG_VIPP_INDISPONIVEL : listaErros[0],
+      vippIndisponivel,
       stPostagem,
       idStatus,
       idConhecimento,
@@ -339,7 +381,7 @@ router.post('/postar', async (req, res) => {
     const detail = err.response?.data ? String(err.response.data).substring(0, 1500) : err.message;
     console.error('[VIPP] Erro ao chamar PostarObjeto:', err.message);
     if (err.response?.data) console.error('[VIPP] Response body:', String(err.response.data).substring(0, 1500));
-    return res.status(502).json({ ok: false, error: 'Falha ao conectar com VIPP', detail });
+    return res.status(502).json({ ...respostaErroVipp(err.message || 'Falha ao conectar com VIPP'), detail });
   }
 });
 
@@ -562,7 +604,7 @@ router.post('/gerar-etiqueta', async (req, res) => {
 
   } catch (err) {
     console.error('[VIPP] gerar-etiqueta erro:', err.message);
-    return res.status(502).json({ ok: false, error: err.message });
+    return res.status(502).json(respostaErroVipp(err));
   }
 });
 

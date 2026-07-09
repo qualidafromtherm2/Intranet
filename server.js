@@ -10,6 +10,7 @@ if (IS_CHAT_SERVICE) {
 }
 // utils/supabase.js — carrega R2 na subida (log do backend)
 require('./utils/supabase');
+const { resolveNumeroPedidoFromWebhook } = require('./utils/vendasNfJoin');
 const { uploadPublicFile, removePublicFiles } = require('./utils/storage');
 const { registrarControleOperacaoImpressaoOp } = require('./utils/controleOperacoes');
 const { iniciarCicloPosto } = require('./utils/tempoProducao');
@@ -266,6 +267,7 @@ app.use('/api/qualidade', require('./routes/listaMestra'));
 app.use('/api/qualidade/ri-check', require('./routes/qualidadeRiCheck'));
 app.use('/api/registros', require('./routes/registros'));
 app.use('/api/sac', require('./routes/sacEnvios'));
+app.use('/api/sac', require('./routes/vendasRelatorio'));
 app.use('/api/ai', require('./routes/ai_assistant'));
 app.use('/api/producao', require('./routes/producao'));
 app.use('/api/estrutura', require('./routes/estrutura'));
@@ -6871,7 +6873,7 @@ app.post([
         statusUltimo,
         numeroNota: parsed.numeroNota,
         chaveNfe: parsed.chaveNfe,
-        numeroPedido: parsed.numeroPedido,
+        numeroPedido: resolveNumeroPedidoFromWebhook(parsed.numeroPedido, parsed.idPedidoOmie),
         acao: parsed.acao,
         idNfOmie: parsed.idNfOmie,
         serie: parsed.serie,
@@ -6900,7 +6902,7 @@ app.post([
         status: statusUltimo,
         numeroNota: parsed.numeroNota,
         chaveNfe: parsed.chaveNfe,
-        numeroPedido: parsed.numeroPedido,
+        numeroPedido: resolveNumeroPedidoFromWebhook(parsed.numeroPedido, parsed.idPedidoOmie),
         messageId,
         author,
         payload: body,

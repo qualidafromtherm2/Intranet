@@ -652,6 +652,21 @@ function _solBuildKanbanItensUrl(nSolic, opts = {}) {
   return `/api/logistica/kanban/itens${query ? `?${query}` : ''}`;
 }
 
+const _VIPP_MSG_INDISPONIVEL = 'VIPP fora do ar, aguarde alguns minutos e tente novamente.';
+
+function _vippErroIndisponivel(texto) {
+  const t = String(texto || '');
+  return t.includes(_VIPP_MSG_INDISPONIVEL) || /GTW-00|Token expirado|cartaopostagem|Token N[aã]o Retornado|Problemas Na Autentica|IdCorreios|Codigo de acesso|Falha ao conectar com VIPP|Tempo limite|Servi[cç]o indispon[ií]vel|Usuario Nao Logado|\b502\b|\b503\b/i.test(t);
+}
+
+/** Mensagem amigável para falhas temporárias do VIPP (Envio de mercadoria, AT e Solicitação de envio). */
+function _vippMsgErroUsuario(errOrMsg, payload) {
+  if (payload && payload.vippIndisponivel) return _VIPP_MSG_INDISPONIVEL;
+  if (Array.isArray(payload?.erros) && payload.erros.some(_vippErroIndisponivel)) return _VIPP_MSG_INDISPONIVEL;
+  const bruto = typeof errOrMsg === 'string' ? errOrMsg : (errOrMsg?.message || String(errOrMsg || ''));
+  return _vippErroIndisponivel(bruto) ? _VIPP_MSG_INDISPONIVEL : (bruto || 'Erro ao comunicar com VIPP.');
+}
+
 /** Gera código ECT (Correios) via VIPP ao iniciar separação — libera Imprimir em Envio de mercadoria */
 async function _solDispararVippGerarEtiqueta(nSolic, opts = {}) {
   if (!nSolic) return { ok: false, skipped: true };
@@ -667,10 +682,10 @@ async function _solDispararVippGerarEtiqueta(nSolic, opts = {}) {
     });
     const d = await r.json().catch(() => ({}));
     if (!r.ok || !d.ok) {
-      const msg = d.error || `Falha HTTP ${r.status}`;
+      const msg = _vippMsgErroUsuario(d.error || `Falha HTTP ${r.status}`, d);
       console.warn('[VIPP] gerar-etiqueta SEP', nSolic, msg);
-      if (opts.alertarErro) alert('Não foi possível gerar a etiqueta dos Correios:\n' + msg + '\n\nO botão Imprimir em Envio de mercadoria só aparece após gerar o código ECT.');
-      return { ok: false, error: msg };
+      if (opts.alertarErro) alert(msg);
+      return { ok: false, error: msg, vippIndisponivel: !!d.vippIndisponivel || msg === _VIPP_MSG_INDISPONIVEL };
     }
     if (opts.recarregarEnvio && typeof carregarSacSolicitacoes === 'function' && envioMercadoriaTabelaBodyPane) {
       carregarSacSolicitacoes(envioMercadoriaTabelaBodyPane, { filaLogistica: true });
@@ -678,8 +693,9 @@ async function _solDispararVippGerarEtiqueta(nSolic, opts = {}) {
     return { ok: true, ectCode: d.ectCode };
   } catch (e) {
     console.warn('[VIPP] gerar-etiqueta:', e);
-    if (opts.alertarErro) alert('Erro ao gerar etiqueta VIPP: ' + (e.message || e));
-    return { ok: false, error: e.message || String(e) };
+    const msg = _vippMsgErroUsuario(e);
+    if (opts.alertarErro) alert(msg);
+    return { ok: false, error: msg, vippIndisponivel: msg === _VIPP_MSG_INDISPONIVEL };
   }
 }
 
@@ -10327,6 +10343,18 @@ if (vendasMapaMenuLink) {
   });
 }
 
+const vendasRelatorioMenuLink = document.getElementById('menu-vendas-relatorio');
+if (vendasRelatorioMenuLink) {
+  vendasRelatorioMenuLink.addEventListener('click', (e) => {
+    e.preventDefault();
+    document.querySelectorAll('.left-side .side-menu a').forEach(a => a.classList.remove('is-active'));
+    vendasRelatorioMenuLink.classList.add('is-active');
+    showMainTab('sacAtPane');
+    setSacAtModoVisual('vendas-relatorio');
+    window._iniciarRelatorioGerencialVendas?.();
+  });
+}
+
 // COMPRAS: Configurações de Departamentos e Categorias
 const comprasConfigMenuLink = document.getElementById('menu-compras-configuracoes');
 if (comprasConfigMenuLink) {
@@ -13304,6 +13332,10 @@ function _atIsAguardandoNfAt(row) {
   return _atGetStatus(row) === 'aguardando nf at';
 }
 
+function _atIsExcluido(row) {
+  return _atGetStatus(row) === 'excluido';
+}
+
 /** Lê os filtros avançados do painel; retorna objeto com os valores ativos */
 function _atLerFiltros() {
   const tipoEl = document.getElementById('atFiltroTipo');
@@ -13341,14 +13373,20 @@ function _atFiltrarRows(allRows, opts = {}) {
       _at(r.tecnico_nome)
     );
   } else {
-    if (f.tipo === 'EXCLUIR_RAPIDO') {
-      rows = rows.filter(r => _atNormText(r.tipo) !== 'atendimento rapido');
-    } else if (f.tipo) {
-      const tipoFiltroNorm = _atNormText(f.tipo);
-      rows = rows.filter(r => _atNormText(r.tipo) === tipoFiltroNorm);
+    if (f.tipo === 'EXCLUIDOS') {
+      rows = rows.filter(_atIsExcluido);
+    } else {
+      rows = rows.filter(r => !_atIsExcluido(r));
+
+      if (f.tipo === 'EXCLUIR_RAPIDO') {
+        rows = rows.filter(r => _atNormText(r.tipo) !== 'atendimento rapido');
+      } else if (f.tipo) {
+        const tipoFiltroNorm = _atNormText(f.tipo);
+        rows = rows.filter(r => _atNormText(r.tipo) === tipoFiltroNorm);
+      }
     }
 
-    if (guia === 'principal') {
+    if (guia === 'principal' && f.tipo !== 'EXCLUIDOS') {
       if (f.status === 'EXCLUIR_FECHADO') {
         rows = rows.filter(r => _atGetStatus(r) !== 'fechado');
       } else if (f.status) {
@@ -13376,8 +13414,12 @@ function _atFiltrarRows(allRows, opts = {}) {
 
   if (guia === 'nf_at') {
     rows = rows.filter(_atIsAguardandoNfAt);
-  } else if (q && !f.incluirNfAt && f.status !== 'Aguardando NF AT') {
+  } else if (q && f.tipo !== 'EXCLUIDOS' && !f.incluirNfAt && f.status !== 'Aguardando NF AT') {
     rows = rows.filter(r => !_atIsAguardandoNfAt(r));
+  }
+
+  if (q && f.tipo !== 'EXCLUIDOS') {
+    rows = rows.filter(r => !_atIsExcluido(r));
   }
 
   return rows;
@@ -13507,7 +13549,7 @@ function _atAtualizarFiltroBadge(f) {
   const btn   = document.getElementById('atFiltroBtn');
   if (!badge || !btn) return;
   // dataIni preenchido conta como ativo apenas se diferente do padrão (vazio = 2026 automático não é considerado ativo)
-  const ativo = f.tipo !== 'EXCLUIR_RAPIDO' || f.status !== 'EXCLUIR_FECHADO' || f.incluirNfAt || f.dataIni || f.dataFim;
+  const ativo = f.tipo !== 'EXCLUIR_RAPIDO' || f.status !== 'EXCLUIR_FECHADO' || f.incluirNfAt || f.dataIni || f.dataFim || f.tipo === 'EXCLUIDOS';
   badge.style.display = ativo ? 'inline-block' : 'none';
   btn.style.borderColor = ativo ? '#0ea5e9' : '';
   btn.style.color = ativo ? '#0ea5e9' : '';
@@ -16229,6 +16271,9 @@ function _abrirAtEditModal(id) {
   // Badge de status da OS
   _atStatusOsAtualizarBadge(row.status);
 
+  const excluirBtn = document.getElementById('atExcluirOsBtn');
+  if (excluirBtn) excluirBtn.style.display = _atIsExcluido(row) ? 'none' : 'flex';
+
   // Reset anexos pendentes e carrega existentes
   _atEmAnexosPendentes = [];
   _atEmRenderChips();
@@ -16512,6 +16557,7 @@ function setSacAtModoVisual(mode = 'at') {
   const vendasGraficosPane = document.getElementById('vendasGraficosPane');
   const vendasControlePane = document.getElementById('vendasControlePane');
   const vendasMapaPane     = document.getElementById('vendasMapaPane');
+  const vendasRelatorioPane = document.getElementById('vendasRelatorioPane');
   const wrapper = sacAtGraficosPane?.parentElement;
   if (!sacAtPane || !sacAtGraficosPane || !wrapper) return;
 
@@ -16595,9 +16641,25 @@ function setSacAtModoVisual(mode = 'at') {
     return;
   }
 
+  if (mode === 'vendas-relatorio') {
+    sacAtPane.style.display = 'flex';
+    Array.from(wrapper.children).forEach((child) => {
+      if (!(child instanceof HTMLElement)) return;
+      if (child === vendasRelatorioPane) {
+        child.style.display = 'flex';
+        return;
+      }
+      if (child.classList.contains('modal-overlay') || child.id === 'atLightbox' || child.id === 'atWhatsappModal') {
+        return;
+      }
+      child.style.display = 'none';
+    });
+    return;
+  }
+
   Array.from(wrapper.children).forEach((child) => {
     if (!(child instanceof HTMLElement)) return;
-    if (child === sacAtGraficosPane || child === sacAtRelatorioPane || child === vendasGraficosPane || child === vendasControlePane || child === vendasMapaPane || child.id === 'atGraficosView') {
+    if (child === sacAtGraficosPane || child === sacAtRelatorioPane || child === vendasGraficosPane || child === vendasControlePane || child === vendasMapaPane || child === vendasRelatorioPane || child.id === 'atGraficosView') {
       child.style.display = 'none';
       return;
     }
@@ -18765,6 +18827,7 @@ ${pivotHtml('Menções (Pós abertura de OS)', '#4c1d95', data.mencoes)}
   let _relGerData = null;
   let _relGerTextos = null;
   let _relGerSecao = 'executivo';
+  let _relGerLote3m = false;
   const _charts = {};
   const _chartsRendered = new Set();
 
@@ -18779,16 +18842,10 @@ ${pivotHtml('Menções (Pós abertura de OS)', '#4c1d95', data.mencoes)}
     { id: 'evolucao',   label: 'Evolução Semanal',          icon: 'fa-chart-column',     pg: 5 },
     { id: 'pareto',     label: 'Pareto 80/20',              icon: 'fa-chart-line',       pg: 6 },
     { id: 'financeiro', label: 'Análise Financeira',        icon: 'fa-coins',            pg: 7 },
-    { id: 'plano',      label: 'Plano de Ação',             icon: 'fa-list-check',       pg: 8 },
-    { id: 'conclusao',  label: 'Conclusão Executiva',       icon: 'fa-flag-checkered',   pg: 9 },
+    { id: 'lote',       label: 'Análise de Lote',           icon: 'fa-layer-group',      pg: 8 },
+    { id: 'plano',      label: 'Plano de Ação',             icon: 'fa-list-check',       pg: 9 },
+    { id: 'conclusao',  label: 'Conclusão Executiva',       icon: 'fa-flag-checkered',   pg: 10 },
   ];
-
-  function _mesPadrao() {
-    const d = new Date();
-    d.setDate(1);
-    d.setMonth(d.getMonth() - 1);
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-  }
 
   function _fmtData(raw) {
     if (!raw) return '-';
@@ -18836,7 +18893,7 @@ ${pivotHtml('Menções (Pós abertura de OS)', '#4c1d95', data.mencoes)}
 
     return {
       plano_acao,
-      conclusao_resumo: `No mês analisado foram registradas ${kpis.total_os || 0} ordens de serviço, com ${kpis.concluidas || 0} concluídas (${pctConc}%) e ${kpis.em_andamento || 0} em andamento. O valor total de mão de obra informada foi de ${MOEDA.format(kpis.total_mo || 0)}.`,
+      conclusao_resumo: `${data.modo && data.modo !== 'mes' ? 'No período analisado' : 'No mês analisado'} foram registradas ${kpis.total_os || 0} ordens de serviço, com ${kpis.concluidas || 0} concluídas (${pctConc}%) e ${kpis.em_andamento || 0} em andamento. O valor total de mão de obra informada foi de ${MOEDA.format(kpis.total_mo || 0)}.`,
       conclusao_pontos_criticos: [
         `Tags mais frequentes: ${tagsCrit}`,
         `Estados com maior volume: ${estTop}`,
@@ -18897,7 +18954,15 @@ ${pivotHtml('Menções (Pós abertura de OS)', '#4c1d95', data.mencoes)}
     _chartsRendered.clear();
   }
 
-  function _headerHtml(periodo) {
+  function _tipoRelGerLabel(tipo) {
+    const v = String(tipo || '').trim();
+    if (!v || v === 'Todos') return 'Todos';
+    if (v.toLowerCase() === 'atendimento rápido' || v.toLowerCase() === 'atendimento rapido') return 'Atend. Rápido';
+    return v;
+  }
+
+  function _headerHtml(periodo, tipoLabel) {
+    const tipoTxt = tipoLabel ? ` · ${_esc(tipoLabel)}` : '';
     return `
       <div class="at-rel-ger-header">
         <div class="at-rel-ger-header-top">
@@ -18910,7 +18975,7 @@ ${pivotHtml('Menções (Pós abertura de OS)', '#4c1d95', data.mencoes)}
           </div>
           <div class="at-rel-ger-header-title">
             <div class="at-rel-ger-report-type">Relatório Gerencial Assistência Técnica</div>
-            <div class="at-rel-ger-periodo">${_esc(periodo)}</div>
+            <div class="at-rel-ger-periodo">${_esc(periodo)}${tipoTxt}</div>
           </div>
           <div class="at-rel-ger-meta">
             <div><span>Departamento:</span> Qualidade / AT</div>
@@ -18946,9 +19011,11 @@ ${pivotHtml('Menções (Pós abertura de OS)', '#4c1d95', data.mencoes)}
     nav.innerHTML = `<div class="at-rel-ger-nav-title">Páginas do relatório</div>${navBtns}`;
 
     const periodo = _relGerData?.periodo || '—';
+    const tipoLabel = _tipoRelGerLabel(_relGerData?.tipo);
+    const hdr = (pgPeriodo) => _headerHtml(pgPeriodo || periodo, tipoLabel);
     pagesWrap.innerHTML = `
       <div class="at-rel-ger-page${_relGerSecao === 'executivo' ? ' is-active' : ''}" data-sec="executivo">
-        ${_headerHtml(periodo)}
+        ${hdr()}
         <div class="at-rel-ger-sec-title"><i class="fa-solid fa-gauge-high"></i> Dashboard Executivo</div>
         <div class="at-rel-ger-body">
           <div id="atRelGerKpis" class="at-rel-ger-kpis"></div>
@@ -18967,7 +19034,7 @@ ${pivotHtml('Menções (Pós abertura de OS)', '#4c1d95', data.mencoes)}
       </div>
 
       <div class="at-rel-ger-page${_relGerSecao === 'geografico' ? ' is-active' : ''}" data-sec="geografico">
-        ${_headerHtml(periodo)}
+        ${hdr()}
         <div class="at-rel-ger-sec-title"><i class="fa-solid fa-map-location-dot"></i> Distribuição Geográfica</div>
         <div class="at-rel-ger-body">
           <div class="at-rel-ger-grid-2">
@@ -18985,7 +19052,7 @@ ${pivotHtml('Menções (Pós abertura de OS)', '#4c1d95', data.mencoes)}
       </div>
 
       <div class="at-rel-ger-page${_relGerSecao === 'modelos' ? ' is-active' : ''}" data-sec="modelos">
-        ${_headerHtml(periodo)}
+        ${hdr()}
         <div class="at-rel-ger-sec-title"><i class="fa-solid fa-award"></i> Modelos com Maior Incidência</div>
         <div class="at-rel-ger-body">
           <div class="at-rel-ger-grid-2">
@@ -19008,7 +19075,7 @@ ${pivotHtml('Menções (Pós abertura de OS)', '#4c1d95', data.mencoes)}
       </div>
 
       <div class="at-rel-ger-page${_relGerSecao === 'defeitos' ? ' is-active' : ''}" data-sec="defeitos">
-        ${_headerHtml(periodo)}
+        ${hdr()}
         <div class="at-rel-ger-sec-title"><i class="fa-solid fa-tags"></i> Análise por Tipo de Defeito (Tags)</div>
         <div class="at-rel-ger-body">
           <div class="at-rel-ger-grid-2">
@@ -19031,16 +19098,16 @@ ${pivotHtml('Menções (Pós abertura de OS)', '#4c1d95', data.mencoes)}
       </div>
 
       <div class="at-rel-ger-page${_relGerSecao === 'evolucao' ? ' is-active' : ''}" data-sec="evolucao">
-        ${_headerHtml(periodo)}
+        ${hdr()}
         <div class="at-rel-ger-sec-title"><i class="fa-solid fa-chart-column"></i> Evolução dos Chamados</div>
         <div class="at-rel-ger-body">
           <div class="at-rel-ger-grid-2">
             <div class="at-rel-ger-card">
-              <h4>O.S. abertas por semana</h4>
+              <h4 id="atRelGerEvolSemanaTitle">O.S. abertas por semana</h4>
               <div class="at-rel-ger-chart"><canvas id="atRelGerChartSemana"></canvas></div>
             </div>
             <div class="at-rel-ger-card">
-              <h4>Status das O.S. no mês</h4>
+              <h4 id="atRelGerEvolStatusTitle">Status das O.S. no mês</h4>
               <div class="at-rel-ger-chart"><canvas id="atRelGerChartStatusEvol"></canvas></div>
             </div>
           </div>
@@ -19049,7 +19116,7 @@ ${pivotHtml('Menções (Pós abertura de OS)', '#4c1d95', data.mencoes)}
       </div>
 
       <div class="at-rel-ger-page${_relGerSecao === 'pareto' ? ' is-active' : ''}" data-sec="pareto">
-        ${_headerHtml(periodo)}
+        ${hdr()}
         <div class="at-rel-ger-sec-title"><i class="fa-solid fa-chart-line"></i> Pareto (80/20) dos Defeitos</div>
         <div class="at-rel-ger-body">
           <div class="at-rel-ger-card" style="margin-bottom:14px;">
@@ -19070,7 +19137,7 @@ ${pivotHtml('Menções (Pós abertura de OS)', '#4c1d95', data.mencoes)}
       </div>
 
       <div class="at-rel-ger-page${_relGerSecao === 'financeiro' ? ' is-active' : ''}" data-sec="financeiro">
-        ${_headerHtml(periodo)}
+        ${hdr()}
         <div class="at-rel-ger-sec-title"><i class="fa-solid fa-coins"></i> Análise Técnica e Financeira</div>
         <div class="at-rel-ger-body">
           <div class="at-rel-ger-grid-2" style="margin-bottom:14px;">
@@ -19096,8 +19163,31 @@ ${pivotHtml('Menções (Pós abertura de OS)', '#4c1d95', data.mencoes)}
         ${_footerHtml(7)}
       </div>
 
+      <div class="at-rel-ger-page${_relGerSecao === 'lote' ? ' is-active' : ''}" data-sec="lote">
+        ${hdr()}
+        <div class="at-rel-ger-sec-title"><i class="fa-solid fa-layer-group"></i> Análise de Lote — por data de entrega</div>
+        <div class="at-rel-ger-body">
+          <div class="at-rel-ger-edit-toolbar" style="margin-bottom:12px;">
+            <button type="button" id="atRelGerLote3mBtn" class="at-rel-ger-btn primary">
+              <i class="fa-solid fa-calendar-days"></i> Últimos 3 meses
+            </button>
+            <span id="atRelGerLoteJanelaInfo" class="status-msg"></span>
+          </div>
+          <div class="at-rel-ger-card" style="margin-bottom:14px;">
+            <h4 id="atRelGerLoteChartTitle">Máquinas com problema — por mês de entrega e modelo</h4>
+            <div class="at-rel-ger-chart lg"><canvas id="atRelGerChartLote"></canvas></div>
+          </div>
+          <div class="at-rel-ger-card">
+            <h4 id="atRelGerLoteDefTitle">Defeitos no período</h4>
+            <div id="atRelGerLoteDefList" class="at-rel-ger-def-list"></div>
+          </div>
+          <div id="atRelGerLoteResumo" style="margin-top:10px;font-size:12px;color:#64748b;line-height:1.6;"></div>
+        </div>
+        ${_footerHtml(8)}
+      </div>
+
       <div class="at-rel-ger-page${_relGerSecao === 'plano' ? ' is-active' : ''}" data-sec="plano">
-        ${_headerHtml(periodo)}
+        ${hdr()}
         <div class="at-rel-ger-sec-title"><i class="fa-solid fa-list-check"></i> Plano de Ação</div>
         <div class="at-rel-ger-body">
           <div class="at-rel-ger-edit-toolbar">
@@ -19121,11 +19211,11 @@ ${pivotHtml('Menções (Pós abertura de OS)', '#4c1d95', data.mencoes)}
             </table>
           </div>
         </div>
-        ${_footerHtml(8)}
+        ${_footerHtml(9)}
       </div>
 
       <div class="at-rel-ger-page${_relGerSecao === 'conclusao' ? ' is-active' : ''}" data-sec="conclusao">
-        ${_headerHtml(periodo)}
+        ${hdr()}
         <div class="at-rel-ger-sec-title"><i class="fa-solid fa-flag-checkered"></i> Conclusão Executiva</div>
         <div class="at-rel-ger-body">
           <div class="at-rel-ger-edit-toolbar">
@@ -19149,12 +19239,12 @@ ${pivotHtml('Menções (Pós abertura de OS)', '#4c1d95', data.mencoes)}
           </div>
           <div id="atRelGerConclusaoPreview"></div>
           <div class="at-rel-ger-total-banner" style="margin-top:16px;">
-            <div class="lbl">Total de O.S. no mês</div>
+            <div class="lbl" id="atRelGerTotalOsLbl">Total de O.S. no mês</div>
             <div class="val" id="atRelGerTotalOsBanner">0</div>
           </div>
           <div id="atRelGerEditadoEm" style="margin-top:10px;font-size:11px;color:#94a3b8;text-align:right;"></div>
         </div>
-        ${_footerHtml(9)}
+        ${_footerHtml(10)}
       </div>
     `;
 
@@ -19162,6 +19252,285 @@ ${pivotHtml('Menções (Pós abertura de OS)', '#4c1d95', data.mencoes)}
       btn.addEventListener('click', () => _trocarSecao(btn.dataset.sec));
     });
     _wireEditaveis();
+    _wireLoteBtn();
+  }
+
+  function _isRelGerMultiMes(data) {
+    return !!(data?.modo && data.modo !== 'mes');
+  }
+
+  function _atualizarLabelsPeriodo(data) {
+    const multi = _isRelGerMultiMes(data);
+    const semTitle = document.getElementById('atRelGerEvolSemanaTitle');
+    if (semTitle) {
+      semTitle.textContent = data?.evolucao_tipo === 'mes'
+        ? 'O.S. abertas por mês'
+        : 'O.S. abertas por semana';
+    }
+    const statusTitle = document.getElementById('atRelGerEvolStatusTitle');
+    if (statusTitle) {
+      statusTitle.textContent = multi ? 'Status das O.S. no período' : 'Status das O.S. no mês';
+    }
+    const totalLbl = document.getElementById('atRelGerTotalOsLbl');
+    if (totalLbl) totalLbl.textContent = multi ? 'Total de O.S. no período' : 'Total de O.S. no mês';
+    const loteBtn = document.getElementById('atRelGerLote3mBtn');
+    if (loteBtn) loteBtn.style.display = multi ? 'none' : '';
+  }
+
+  function _dadosParetoStackedModelo(data) {
+    const paretoRows = (data.pareto || []).slice(0, 8);
+    const tagModeloRows = data.tag_por_modelo || [];
+    const tags = paretoRows.map((r) => r.tag);
+    const modeloTotals = {};
+    tagModeloRows.forEach((r) => {
+      if (!tags.includes(r.tag)) return;
+      modeloTotals[r.modelo] = (modeloTotals[r.modelo] || 0) + (r.total || 0);
+    });
+    const topModelos = Object.entries(modeloTotals)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 10)
+      .map(([modelo]) => modelo);
+    const barDatasets = topModelos.map((modelo, i) => ({
+      type: 'bar',
+      label: modelo,
+      stack: 'freq',
+      data: tags.map((tag) => {
+        const row = tagModeloRows.find((r) => r.tag === tag && r.modelo === modelo);
+        return row?.total || 0;
+      }),
+      backgroundColor: `${CORES[i % CORES.length]}cc`,
+      borderColor: CORES[i % CORES.length],
+      borderWidth: 1,
+      borderRadius: 4,
+      yAxisID: 'y',
+    }));
+    return {
+      labels: tags,
+      datasets: [
+        ...barDatasets,
+        {
+          type: 'line',
+          label: '% Acumulado',
+          data: paretoRows.map((r) => r.pct_acum),
+          borderColor: '#ea580c',
+          backgroundColor: '#ea580c',
+          borderWidth: 2,
+          pointRadius: 4,
+          tension: 0.3,
+          yAxisID: 'y1',
+          stack: 'line',
+        },
+      ],
+      paretoRows,
+    };
+  }
+
+  function _destroyLoteDefPies() {
+    Object.keys(_charts).forEach((key) => {
+      if (key.startsWith('loteDefPie')) _destroyChart(key);
+    });
+  }
+
+  function _tituloLoteEmpilhado(data) {
+    const periodo = data?.periodo || 'período';
+    return `Máquinas com problema — O.S. abertas em ${periodo} (por mês de entrega e modelo)`;
+  }
+
+  function _tituloLoteEmpilhadoJanela(data) {
+    return _tituloLoteEmpilhado(data);
+  }
+
+  function _buildLoteStackedFromRows(rows) {
+    const mesesOrd = [...new Set(rows.map(r => r.mes))].sort();
+    const mesLabels = mesesOrd.map((mes) => {
+      const found = rows.find(r => r.mes === mes);
+      return found?.label || mes;
+    });
+    const modeloTotals = {};
+    rows.forEach((r) => { modeloTotals[r.modelo] = (modeloTotals[r.modelo] || 0) + (r.total || 0); });
+    const topModelos = Object.entries(modeloTotals)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 10)
+      .map(([modelo]) => modelo);
+    const datasets = topModelos.map((modelo, i) => ({
+      label: modelo,
+      data: mesesOrd.map((mes) => {
+        const row = rows.find(r => r.mes === mes && r.modelo === modelo);
+        return row?.total || 0;
+      }),
+      backgroundColor: `${CORES[i % CORES.length]}cc`,
+      borderColor: CORES[i % CORES.length],
+      borderWidth: 1,
+      borderRadius: 4,
+    }));
+    return { labels: mesLabels, mesesOrd, datasets, rows, topModelos };
+  }
+
+  function _dadosTagModeloMap(data) {
+    const rows = data?.analise_lote?.tag_por_modelo_janela || [];
+    const map = {};
+    rows.forEach((r) => {
+      if (!map[r.tag]) map[r.tag] = [];
+      map[r.tag].push({ modelo: r.modelo, total: r.total });
+    });
+    return map;
+  }
+
+  function _renderChartLoteEmpilhado(canvasId, chartKey, stacked) {
+    _destroyChart(chartKey);
+    const canvas = document.getElementById(canvasId);
+    if (!canvas || !stacked?.labels?.length) return;
+    _charts[chartKey] = new Chart(canvas.getContext('2d'), {
+      type: 'bar',
+      data: {
+        labels: stacked.labels,
+        datasets: stacked.datasets,
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: {
+            display: true,
+            position: 'bottom',
+            labels: { color: '#475569', font: { size: 10 }, boxWidth: 10 },
+          },
+        },
+        scales: {
+          x: { stacked: true, ticks: { color: '#334155' }, grid: { display: false } },
+          y: { stacked: true, beginAtZero: true, ticks: { color: '#64748b', stepSize: 1 }, grid: { color: '#e2e8f0' } },
+        },
+      },
+    });
+  }
+
+  function _renderLoteDefPies(data, defRows) {
+    _destroyLoteDefPies();
+    const tagModelo = _dadosTagModeloMap(data);
+    defRows.slice(0, 5).forEach((r, i) => {
+      const modelos = (tagModelo[r.tag] || []).slice(0, 8);
+      const canvas = document.getElementById(`atRelGerLoteDefPie${i}`);
+      if (!canvas || !modelos.length) return;
+      _charts[`loteDefPie${i}`] = new Chart(canvas.getContext('2d'), {
+        type: 'pie',
+        data: {
+          labels: modelos.map((m) => m.modelo),
+          datasets: [{
+            data: modelos.map((m) => m.total),
+            backgroundColor: modelos.map((_, j) => CORES[j % CORES.length]),
+            borderColor: '#fff',
+            borderWidth: 1,
+          }],
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: { display: false },
+            tooltip: {
+              callbacks: {
+                label: (ctx) => ` ${ctx.label}: ${ctx.raw}`,
+              },
+            },
+          },
+        },
+      });
+    });
+  }
+
+  function _dadosLoteMesModelo(data) {
+    const lote = data?.analise_lote || {};
+    return lote.por_mes_modelo || [];
+  }
+
+  function _dadosLoteMesModeloJanela(data) {
+    return _dadosLoteMesModelo(data);
+  }
+
+  function _dadosLoteStacked(data) {
+    return _buildLoteStackedFromRows(_dadosLoteMesModelo(data));
+  }
+
+  function _dadosLoteStackedJanela(data) {
+    return _buildLoteStackedFromRows(_dadosLoteMesModeloJanela(data));
+  }
+
+  function _dadosLoteChart(data) {
+    const lote = data?.analise_lote || {};
+    return lote.por_mes_entrega || [];
+  }
+
+  function _dadosLoteDefeitos(data) {
+    const lote = data?.analise_lote || {};
+    if ((lote.defeitos_janela_3m || []).length) return lote.defeitos_janela_3m;
+    return (data?.por_tag || []).map(r => {
+      const tot = (data.por_tag || []).reduce((s, x) => s + x.total, 0);
+      return { tag: r.tag, total: r.total, pct: tot ? Math.round((r.total / tot) * 1000) / 10 : 0 };
+    });
+  }
+
+  function _renderLoteConteudo(data) {
+    const lote = data?.analise_lote || {};
+    const janela = lote.janela_3m || {};
+    const btn = document.getElementById('atRelGerLote3mBtn');
+    const info = document.getElementById('atRelGerLoteJanelaInfo');
+    const chartTitle = document.getElementById('atRelGerLoteChartTitle');
+    const defTitle = document.getElementById('atRelGerLoteDefTitle');
+    const resumo = document.getElementById('atRelGerLoteResumo');
+
+    if (btn) btn.style.display = 'none';
+    if (info) {
+      info.textContent = `O.S. abertas em ${data.periodo || '—'} · ${janela.total_maquinas || 0} máquina(s) com data de entrega · gráfico por mês de entrega`;
+    }
+    if (chartTitle) {
+      chartTitle.textContent = _tituloLoteEmpilhado(data);
+    }
+    if (defTitle) {
+      defTitle.textContent = `Defeitos nas O.S. abertas em ${data.periodo || '—'}`;
+    }
+
+    const defRows = _dadosLoteDefeitos(data).slice(0, 5);
+    const defList = document.getElementById('atRelGerLoteDefList');
+    if (defList) {
+      defList.innerHTML = defRows.length
+        ? defRows.map((r, i) => `
+          <div class="at-rel-ger-def-row">
+            <div class="at-rel-ger-def-meta">
+              <div class="tag">${_esc(r.tag)}</div>
+              <div class="sub">${r.total} ocorrência(s) · ${r.pct}% do período</div>
+            </div>
+            <div class="at-rel-ger-def-pie"><canvas id="atRelGerLoteDefPie${i}"></canvas></div>
+          </div>
+        `).join('')
+        : '<p style="color:#94a3b8;">Nenhum defeito no período.</p>';
+    }
+
+    if (resumo) {
+      const stacked = _dadosLoteStacked(data);
+      const totalChart = stacked.rows.reduce((s, r) => s + (r.total || 0), 0);
+      const modelosAtivos = stacked.topModelos.length;
+      const mesesEntrega = stacked.mesesOrd.length;
+      const modeloJanela = (lote.por_modelo_janela_3m || []).slice(0, 5)
+        .map(r => `${r.modelo} (${r.total})`).join(', ') || '—';
+      resumo.innerHTML = `<strong>${janela.total_maquinas || 0}</strong> máquina(s) com O.S. abertas entre <strong>${_esc(janela.inicio || '—')}</strong> e <strong>${_esc(janela.fim || '—')}</strong>. No gráfico: <strong>${totalChart}</strong> registro(s) em <strong>${mesesEntrega}</strong> mês(es) de entrega e <strong>${modelosAtivos}</strong> modelo(s). Principais: ${modeloJanela}.`;
+    }
+
+    _chartsRendered.delete('lote');
+    _destroyChart('lote');
+    _destroyLoteDefPies();
+    const lotePage = document.querySelector('.at-rel-ger-page[data-sec="lote"]');
+    if (lotePage?.classList.contains('is-active')) _renderChartsSecao('lote', data);
+  }
+
+  function _wireLoteBtn() {
+    const btn = document.getElementById('atRelGerLote3mBtn');
+    if (!btn) return;
+    const novo = btn.cloneNode(true);
+    btn.parentNode.replaceChild(novo, btn);
+    novo.addEventListener('click', () => {
+      _relGerLote3m = !_relGerLote3m;
+      if (_relGerData) _renderLoteConteudo(_relGerData);
+    });
   }
 
   function _trocarSecao(sec) {
@@ -19173,9 +19542,8 @@ ${pivotHtml('Menções (Pós abertura de OS)', '#4c1d95', data.mencoes)}
     document.querySelectorAll('.at-rel-ger-page').forEach(p => {
       p.classList.toggle('is-active', p.dataset.sec === sec);
     });
-    if (_relGerData && !_chartsRendered.has(sec)) {
-      _renderChartsSecao(sec, _relGerData);
-    }
+    if (_relGerData && sec === 'lote') _renderLoteConteudo(_relGerData);
+    else if (_relGerData && !_chartsRendered.has(sec)) _renderChartsSecao(sec, _relGerData);
     requestAnimationFrame(() => {
       Object.values(_charts).forEach(ch => ch?.resize?.());
     });
@@ -19189,7 +19557,7 @@ ${pivotHtml('Menções (Pós abertura de OS)', '#4c1d95', data.mencoes)}
     const estRows = data.por_estado || [];
     const modRows = data.por_modelo || [];
     const tagRows = data.por_tag || [];
-    const semRows = data.evolucao_semanal || [];
+    const semRows = data.evolucao_tipo === 'mes' ? (data.evolucao_mensal || []) : (data.evolucao_semanal || []);
     const paretoRows = data.pareto || [];
 
     if (sec === 'executivo') {
@@ -19278,9 +19646,23 @@ ${pivotHtml('Menções (Pós abertura de OS)', '#4c1d95', data.mencoes)}
       _destroyChart('semana');
       const cSemana = document.getElementById('atRelGerChartSemana');
       if (cSemana) {
+        const evolLabels = data.evolucao_tipo === 'mes'
+          ? semRows.map(r => r.label || r.mes)
+          : semRows.map(r => r.semana);
+        const evolData = semRows.map(r => r.total);
         _charts.semana = new Chart(cSemana.getContext('2d'), {
           type: 'bar',
-          data: { labels: semRows.map(r => r.semana), datasets: [{ label: 'O.S. abertas', data: semRows.map(r => r.total), backgroundColor: '#0ea5e9cc', borderColor: '#0284c7', borderWidth: 1, borderRadius: 6 }] },
+          data: {
+            labels: evolLabels,
+            datasets: [{
+              label: data.evolucao_tipo === 'mes' ? 'O.S. abertas' : 'O.S. abertas',
+              data: evolData,
+              backgroundColor: '#0ea5e9cc',
+              borderColor: '#0284c7',
+              borderWidth: 1,
+              borderRadius: 6,
+            }],
+          },
           options: _chartOptsBarV(),
         });
       }
@@ -19301,29 +19683,52 @@ ${pivotHtml('Menções (Pós abertura de OS)', '#4c1d95', data.mencoes)}
     if (sec === 'pareto') {
       _destroyChart('pareto');
       const cPareto = document.getElementById('atRelGerChartPareto');
-      if (cPareto && paretoRows.length) {
-        const top = paretoRows.slice(0, 8);
+      const paretoStacked = _dadosParetoStackedModelo(data);
+      if (cPareto && paretoStacked.labels.length) {
         _charts.pareto = new Chart(cPareto.getContext('2d'), {
           type: 'bar',
           data: {
-            labels: top.map(r => r.tag),
-            datasets: [
-              { type: 'bar', label: 'Frequência', data: top.map(r => r.total), backgroundColor: '#1e3a5fcc', borderColor: '#1e3a5f', borderWidth: 1, borderRadius: 4, yAxisID: 'y' },
-              { type: 'line', label: '% Acumulado', data: top.map(r => r.pct_acum), borderColor: '#ea580c', backgroundColor: '#ea580c', borderWidth: 2, pointRadius: 4, tension: 0.3, yAxisID: 'y1' },
-            ],
+            labels: paretoStacked.labels,
+            datasets: paretoStacked.datasets,
           },
           options: {
             responsive: true,
             maintainAspectRatio: false,
-            plugins: { legend: { labels: { color: '#475569' } } },
+            plugins: {
+              legend: {
+                labels: { color: '#475569', font: { size: 10 }, boxWidth: 10 },
+              },
+            },
             scales: {
-              x: { ticks: { color: '#334155', font: { size: 10 } }, grid: { display: false } },
-              y: { position: 'left', beginAtZero: true, ticks: { color: '#64748b', stepSize: 1 }, grid: { color: '#e2e8f0' } },
-              y1: { position: 'right', min: 0, max: 100, ticks: { color: '#ea580c', callback: v => v + '%' }, grid: { drawOnChartArea: false } },
+              x: {
+                stacked: true,
+                ticks: { color: '#334155', font: { size: 10 } },
+                grid: { display: false },
+              },
+              y: {
+                stacked: true,
+                position: 'left',
+                beginAtZero: true,
+                ticks: { color: '#64748b', stepSize: 1 },
+                grid: { color: '#e2e8f0' },
+              },
+              y1: {
+                position: 'right',
+                min: 0,
+                max: 100,
+                ticks: { color: '#ea580c', callback: (v) => `${v}%` },
+                grid: { drawOnChartArea: false },
+              },
             },
           },
         });
       }
+    }
+
+    if (sec === 'lote') {
+      const defRows = _dadosLoteDefeitos(data).slice(0, 5);
+      _renderChartLoteEmpilhado('atRelGerChartLote', 'lote', _dadosLoteStacked(data));
+      _renderLoteDefPies(data, defRows);
     }
   }
 
@@ -19351,18 +19756,18 @@ ${pivotHtml('Menções (Pós abertura de OS)', '#4c1d95', data.mencoes)}
     };
   }
 
-  function _renderKpis(kpis) {
+  function _renderKpis(kpis, data) {
     const wrap = document.getElementById('atRelGerKpis');
     if (!wrap) return;
     const cards = [
       { label: 'Total O.S.', value: kpis.total_os, cor: '#1e3a5f' },
       { label: 'Concluídas', value: kpis.concluidas, cor: '#10b981' },
       { label: 'Em andamento', value: kpis.em_andamento, cor: '#f59e0b' },
-      { label: 'Estados atendidos', value: kpis.estados_atendidos, cor: '#06b6d4' },
+      { label: 'Pendente de fechamento do tecnico', value: kpis.pendente_fechamento_tecnico || 0, cor: '#f97316' },
       { label: 'Modelos atendidos', value: kpis.modelos_atendidos, cor: '#8b5cf6' },
       { label: 'Total M.O.', value: MOEDA.format(kpis.total_mo || 0), cor: '#22c55e' },
       { label: 'Custo médio / O.S.', value: MOEDA.format(kpis.custo_medio || 0), cor: '#ea580c' },
-      { label: 'O.S. no mês', value: kpis.abertas_mes, cor: '#2563eb' },
+      { label: 'Estados atendidos', value: kpis.estados_atendidos, cor: '#06b6d4' },
     ];
     wrap.innerHTML = cards.map(c => `
       <div class="at-rel-ger-kpi" style="--kpi-cor:${c.cor}">
@@ -19520,7 +19925,8 @@ ${pivotHtml('Menções (Pós abertura de OS)', '#4c1d95', data.mencoes)}
 
   async function _salvarTextos(origem = 'tudo') {
     if (!_relGerData) return;
-    const mes = document.getElementById('atRelGerMes')?.value || _mesPadrao();
+    const mes = _relGerData.mes;
+    if (!mes) return;
     const coletado = _coletarTextosForm();
     _relGerTextos = { ..._relGerTextos, ...coletado };
 
@@ -19672,30 +20078,36 @@ ${pivotHtml('Menções (Pós abertura de OS)', '#4c1d95', data.mencoes)}
   }
 
   async function _carregarRelatorio() {
-    const mesEl = document.getElementById('atRelGerMes');
+    const modoEl = document.getElementById('atRelGerModo');
+    const tipoEl = document.getElementById('atRelGerTipo');
     const statusEl = document.getElementById('atRelGerStatus');
     const erroEl = document.getElementById('atRelGerErro');
     const conteudoEl = document.getElementById('atRelGerConteudo');
-    const mes = mesEl?.value || _mesPadrao();
-    if (mesEl && !mesEl.value) mesEl.value = mes;
+    const modo = modoEl?.value || 'mes';
+    const tipo = tipoEl ? tipoEl.value : 'Qualidade';
 
     if (statusEl) { statusEl.style.display = 'block'; statusEl.textContent = 'Carregando relatório...'; }
     if (erroEl) erroEl.style.display = 'none';
     if (conteudoEl) conteudoEl.style.display = 'none';
 
     try {
-      const resp = await fetch(`/api/sac/at/relatorio-gerencial?mes=${encodeURIComponent(mes)}`, { credentials: 'include' });
+      const qs = new URLSearchParams({ modo });
+      if (tipo !== undefined && tipo !== null) qs.set('tipo', tipo);
+      const resp = await fetch(`/api/sac/at/relatorio-gerencial?${qs.toString()}`, { credentials: 'include' });
       const data = await resp.json().catch(() => ({}));
       if (!resp.ok || data.ok === false) throw new Error(data.error || 'Erro ao carregar relatório.');
 
       _destroyAllCharts();
+      if (modo !== 'mes') _relGerLote3m = false;
       _relGerData = data;
       _relGerTextos = _resolverTextos(data);
       _montarEstruturaPaginas();
-      _renderKpis(data.kpis || {});
+      _atualizarLabelsPeriodo(data);
+      _renderKpis(data.kpis || {}, data);
       _renderCharts(data);
       _renderTabelas(data);
       _renderTextos(data);
+      _renderLoteConteudo(data);
       _renderEditaveis();
 
       if (statusEl) statusEl.style.display = 'none';
@@ -19711,21 +20123,110 @@ ${pivotHtml('Menções (Pós abertura de OS)', '#4c1d95', data.mencoes)}
 
   function _canvasParaImg(canvas) {
     if (!canvas) return '';
-    const tmp = document.createElement('canvas');
-    tmp.width = canvas.width;
-    tmp.height = canvas.height;
-    const ctx = tmp.getContext('2d');
-    ctx.fillStyle = '#ffffff';
-    ctx.fillRect(0, 0, tmp.width, tmp.height);
-    ctx.drawImage(canvas, 0, 0);
-    return tmp.toDataURL('image/png');
+    const chartInst = typeof Chart !== 'undefined' ? Chart.getChart(canvas) : null;
+    if (chartInst) {
+      try {
+        chartInst.resize();
+        chartInst.update('none');
+      } catch (_) { /* segue para captura */ }
+      if (typeof chartInst.toBase64Image === 'function') {
+        try {
+          const dataUrl = chartInst.toBase64Image('image/png', 1);
+          if (dataUrl && dataUrl.length > 30) return dataUrl;
+        } catch (_) { /* fallback abaixo */ }
+      }
+    }
+    const w = canvas.width || 0;
+    const h = canvas.height || 0;
+    if (!w || !h) return '';
+    try {
+      const tmp = document.createElement('canvas');
+      tmp.width = w;
+      tmp.height = h;
+      const ctx = tmp.getContext('2d');
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, tmp.width, tmp.height);
+      ctx.drawImage(canvas, 0, 0, w, h);
+      return tmp.toDataURL('image/png');
+    } catch (_) {
+      return '';
+    }
   }
 
-  function _pdfHeader(periodo) {
+  function _destroyChartsSecao(sec) {
+    const map = {
+      executivo: ['status', 'moEstado'],
+      geografico: ['estado', 'estadoDonut'],
+      modelos: ['modelo'],
+      defeitos: ['tag'],
+      evolucao: ['semana', 'statusEvol'],
+      pareto: ['pareto'],
+      lote: ['lote'],
+    };
+    (map[sec] || []).forEach(_destroyChart);
+    if (sec === 'lote') _destroyLoteDefPies();
+    _chartsRendered.delete(sec);
+  }
+
+  async function _aguardarChartsSecao(sec) {
+    const map = {
+      executivo: ['status', 'moEstado'],
+      geografico: ['estado', 'estadoDonut'],
+      modelos: ['modelo'],
+      defeitos: ['tag'],
+      evolucao: ['semana', 'statusEvol'],
+      pareto: ['pareto'],
+      lote: ['lote'],
+    };
+    const keys = map[sec] || [];
+    for (let i = 0; i < 12; i++) {
+      let pronto = true;
+      keys.forEach((key) => {
+        const ch = _charts[key];
+        if (!ch) return;
+        const c = ch.canvas;
+        if (!c?.width || !c?.height) {
+          pronto = false;
+          try {
+            ch.resize();
+            ch.update('none');
+          } catch (_) { /* tenta de novo */ }
+        }
+      });
+      if (pronto) break;
+      await new Promise(r => setTimeout(r, 60));
+    }
+  }
+
+  async function _prepararSecaoPdf(sec, data) {
+    _relGerSecao = sec;
+    document.querySelectorAll('.at-rel-ger-page').forEach(p => {
+      p.classList.toggle('is-active', p.dataset.sec === sec);
+    });
+    _destroyChartsSecao(sec);
+    if (sec === 'lote') {
+      if (!_isRelGerMultiMes(data)) _relGerLote3m = true;
+      _renderLoteConteudo(data);
+    } else {
+      _renderChartsSecao(sec, data);
+    }
+    await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+    await new Promise(r => setTimeout(r, 120));
+    Object.values(_charts).forEach(ch => {
+      try {
+        ch?.resize?.();
+        ch?.update?.('none');
+      } catch (_) { /* ignora */ }
+    });
+    await _aguardarChartsSecao(sec);
+  }
+
+  function _pdfHeader(periodo, tipoLabel) {
+    const tipoTxt = tipoLabel ? ` · ${_esc(tipoLabel)}` : '';
     return `
       <div class="pdf-hdr">
         <div class="pdf-brand"><div class="pdf-logo">FT</div><div><div class="pdf-name">FROMTHERM</div><div class="pdf-sub">BOMBAS DE CALOR</div></div></div>
-        <div class="pdf-title"><div class="pdf-type">Relatório Gerencial Assistência Técnica</div><div class="pdf-per">${_esc(periodo)}</div></div>
+        <div class="pdf-title"><div class="pdf-type">Relatório Gerencial Assistência Técnica</div><div class="pdf-per">${_esc(periodo)}${tipoTxt}</div></div>
         <div class="pdf-meta"><div><b>Departamento:</b> Qualidade / AT</div><div><b>Data:</b> ${_esc(_fmtDataGeracao())}</div><div><b>Versão:</b> 1.0</div></div>
       </div>
       <div class="pdf-bar"></div>`;
@@ -19747,36 +20248,63 @@ ${pivotHtml('Menções (Pós abertura de OS)', '#4c1d95', data.mencoes)}
       const d = _relGerData;
       const kpis = d.kpis || {};
       const periodo = d.periodo || '';
+      const tipoPdf = _tipoRelGerLabel(d.tipo);
+      const pdfHdr = (p) => _pdfHeader(p || periodo, tipoPdf);
       const secaoSalva = _relGerSecao;
+      const lote3mSalvo = _relGerLote3m;
+      const imgs = {};
 
-      // Renderiza gráficos de todas as páginas antes de capturar imagens
+      // Renderiza e captura cada página com gráfico enquanto ela está visível
       for (const s of SECOES) {
         if (s.id === 'conclusao' || s.id === 'financeiro' || s.id === 'plano') continue;
-        document.querySelectorAll('.at-rel-ger-page').forEach(p => {
-          p.classList.toggle('is-active', p.dataset.sec === s.id);
-        });
-        if (!_chartsRendered.has(s.id)) _renderChartsSecao(s.id, d);
-        await new Promise(r => setTimeout(r, 60));
+        await _prepararSecaoPdf(s.id, d);
+        if (s.id === 'executivo') {
+          imgs.status = _canvasParaImg(document.getElementById('atRelGerChartStatus'));
+          imgs.moEstado = _canvasParaImg(document.getElementById('atRelGerChartMoEstado'));
+        } else if (s.id === 'geografico') {
+          imgs.estado = _canvasParaImg(document.getElementById('atRelGerChartEstado'));
+          imgs.estadoDonut = _canvasParaImg(document.getElementById('atRelGerChartEstadoDonut'));
+        } else if (s.id === 'modelos') {
+          imgs.modelo = _canvasParaImg(document.getElementById('atRelGerChartModelo'));
+        } else if (s.id === 'defeitos') {
+          imgs.tag = _canvasParaImg(document.getElementById('atRelGerChartTag'));
+        } else if (s.id === 'evolucao') {
+          imgs.semana = _canvasParaImg(document.getElementById('atRelGerChartSemana'));
+          imgs.statusEvol = _canvasParaImg(document.getElementById('atRelGerChartStatusEvol'));
+        } else if (s.id === 'pareto') {
+          imgs.pareto = _canvasParaImg(document.getElementById('atRelGerChartPareto'));
+        } else if (s.id === 'lote') {
+          imgs.lote = _canvasParaImg(document.getElementById('atRelGerChartLote'));
+          imgs.loteDefPies = [];
+          for (let i = 0; i < 5; i += 1) {
+            const pieImg = _canvasParaImg(document.getElementById(`atRelGerLoteDefPie${i}`));
+            if (pieImg) imgs.loteDefPies.push(pieImg);
+          }
+        }
       }
-      _trocarSecao(secaoSalva);
+
+      _relGerLote3m = lote3mSalvo;
+      _relGerSecao = secaoSalva;
+      document.querySelectorAll('.at-rel-ger-nav-btn').forEach(b => {
+        b.classList.toggle('is-active', b.dataset.sec === secaoSalva);
+      });
+      document.querySelectorAll('.at-rel-ger-page').forEach(p => {
+        p.classList.toggle('is-active', p.dataset.sec === secaoSalva);
+      });
+      if (secaoSalva === 'lote' && _relGerData) _renderLoteConteudo(_relGerData);
+      else if (_relGerData) {
+        _destroyChartsSecao(secaoSalva);
+        _renderChartsSecao(secaoSalva, _relGerData);
+      }
       await new Promise(r => setTimeout(r, 80));
 
-      const imgs = {
-        status: _canvasParaImg(document.getElementById('atRelGerChartStatus')),
-        moEstado: _canvasParaImg(document.getElementById('atRelGerChartMoEstado')),
-        estado: _canvasParaImg(document.getElementById('atRelGerChartEstado')),
-        estadoDonut: _canvasParaImg(document.getElementById('atRelGerChartEstadoDonut')),
-        modelo: _canvasParaImg(document.getElementById('atRelGerChartModelo')),
-        tag: _canvasParaImg(document.getElementById('atRelGerChartTag')),
-        semana: _canvasParaImg(document.getElementById('atRelGerChartSemana')),
-        pareto: _canvasParaImg(document.getElementById('atRelGerChartPareto')),
-      };
-
+      const multi = _isRelGerMultiMes(d);
       const kpiHtml = [
         ['Total O.S.', kpis.total_os], ['Concluídas', kpis.concluidas], ['Em andamento', kpis.em_andamento],
-        ['Estados', kpis.estados_atendidos], ['Modelos', kpis.modelos_atendidos],
+        ['Pendente de fechamento do tecnico', kpis.pendente_fechamento_tecnico || 0],
+        ['Modelos', kpis.modelos_atendidos],
         ['Total M.O.', MOEDA.format(kpis.total_mo || 0)], ['Custo médio', MOEDA.format(kpis.custo_medio || 0)],
-        ['O.S. no mês', kpis.abertas_mes],
+        ['Estados', kpis.estados_atendidos],
       ].map(([l, v]) => `<div class="kpi"><div class="lbl">${l}</div><div class="val">${v}</div></div>`).join('');
 
       const modTbl = (d.por_modelo || []).map(r => `<tr><td>${_esc(r.modelo)}</td><td class="r">${r.total}</td></tr>`).join('') || '<tr><td colspan="2">—</td></tr>';
@@ -19796,16 +20324,38 @@ ${pivotHtml('Menções (Pós abertura de OS)', '#4c1d95', data.mencoes)}
       const concHtml = _htmlConclusaoParaPdf(textosPdf);
       const planoHtml = _htmlPlanoParaPdf(textosPdf.plano_acao);
 
+      const lote = d.analise_lote || {};
+      const loteDefPdf = ((lote.defeitos_janela_3m || []).length
+        ? lote.defeitos_janela_3m
+        : (d.por_tag || []).map(r => {
+          const tot = (d.por_tag || []).reduce((s, x) => s + x.total, 0);
+          return { tag: r.tag, total: r.total, pct: tot ? Math.round((r.total / tot) * 1000) / 10 : 0 };
+        })).slice(0, 5);
+      const loteDefPdfHtml = loteDefPdf.map((r, i) => `
+        <div style="display:flex;gap:10px;align-items:center;margin-bottom:8px;border:1px solid #e2e8f0;padding:8px;border-radius:6px;">
+          <div style="flex:1;"><b>${_esc(r.tag)}</b><br><span style="font-size:9px;color:#64748b;">${r.total} ocorr. · ${r.pct}%</span></div>
+          ${imgs.loteDefPies?.[i] ? `<img src="${imgs.loteDefPies[i]}" style="width:88px;height:88px;object-fit:contain;">` : ''}
+        </div>
+      `).join('') || '<p>—</p>';
+      const loteJanela = lote.janela_3m || {};
+      const loteResumoPdf = multi
+        ? `Período ${periodo}: <strong>${loteJanela.total_maquinas || 0}</strong> máquina(s) com data de entrega entre ${_esc(loteJanela.inicio || '—')} e ${_esc(loteJanela.fim || '—')}.`
+        : `Janela de 3 meses (${_esc(loteJanela.inicio || '—')} a ${_esc(loteJanela.fim || '—')}): <strong>${loteJanela.total_maquinas || 0}</strong> máquina(s) com data de entrega no período.`;
+      const loteModeloResumo = (lote.por_modelo_janela_3m || []).slice(0, 8)
+        .map(r => `${_esc(r.modelo)} (${r.total})`).join(', ') || '—';
+
+      const pg = (n) => _pdfFooter(n);
       const pages = [
-        `<div class="pdf-page">${_pdfHeader(periodo)}<div class="sec">Dashboard Executivo</div><div class="kpis">${kpiHtml}</div><div class="row">${imgs.status ? `<div class="box"><h3>Status</h3><img src="${imgs.status}"></div>` : ''}${imgs.moEstado ? `<div class="box"><h3>M.O. por Estado</h3><img src="${imgs.moEstado}"></div>` : ''}</div>${_pdfFooter(1)}</div>`,
-        `<div class="pdf-page">${_pdfHeader(periodo)}<div class="sec">Distribuição Geográfica</div><div class="row">${imgs.estado ? `<div class="box"><h3>Por Estado</h3><img src="${imgs.estado}"></div>` : ''}${imgs.estadoDonut ? `<div class="box"><h3>% por Estado</h3><img src="${imgs.estadoDonut}"></div>` : ''}</div>${_pdfFooter(2)}</div>`,
-        `<div class="pdf-page">${_pdfHeader(periodo)}<div class="sec">Modelos com Maior Incidência</div><div class="row">${imgs.modelo ? `<div class="box"><h3>Gráfico</h3><img src="${imgs.modelo}"></div>` : ''}<div class="box"><h3>Tabela</h3><table><thead><tr><th>Modelo</th><th class="r">Qtd</th></tr></thead><tbody>${modTbl}</tbody></table></div></div>${_pdfFooter(3)}</div>`,
-        `<div class="pdf-page">${_pdfHeader(periodo)}<div class="sec">Análise por Tipo de Defeito</div><div class="row"><div class="box"><h3>Tabela</h3><table><thead><tr><th>Tag</th><th class="r">Qtd</th><th class="r">%</th></tr></thead><tbody>${tagTbl}</tbody></table></div>${imgs.tag ? `<div class="box"><h3>Gráfico</h3><img src="${imgs.tag}"></div>` : ''}</div>${_pdfFooter(4)}</div>`,
-        `<div class="pdf-page">${_pdfHeader(periodo)}<div class="sec">Evolução dos Chamados</div>${imgs.semana ? `<div class="box"><h3>Por semana</h3><img src="${imgs.semana}"></div>` : ''}${_pdfFooter(5)}</div>`,
-        `<div class="pdf-page">${_pdfHeader(periodo)}<div class="sec">Pareto (80/20)</div>${imgs.pareto ? `<div class="box"><img src="${imgs.pareto}"></div>` : ''}<table><thead><tr><th>Tag</th><th class="r">Qtd</th><th class="r">%</th><th class="r">Acum.</th></tr></thead><tbody>${paretoTbl}</tbody></table>${_pdfFooter(6)}</div>`,
-        `<div class="pdf-page">${_pdfHeader(periodo)}<div class="sec">Análise Financeira</div><ul>${obsHtml}</ul><table><thead><tr><th>O.S.</th><th>UF</th><th>Data</th><th class="r">M.O.</th></tr></thead><tbody>${finTbl}</tbody></table>${_pdfFooter(7)}</div>`,
-        `<div class="pdf-page">${_pdfHeader(periodo)}<div class="sec">Plano de Ação</div>${planoHtml}${_pdfFooter(8)}</div>`,
-        `<div class="pdf-page">${_pdfHeader(periodo)}<div class="sec">Conclusão Executiva</div>${concHtml}<div class="total-banner"><div class="lbl">Total de O.S. no mês</div><div class="val">${kpis.total_os || 0}</div></div>${_pdfFooter(9)}</div>`,
+        `<div class="pdf-page">${pdfHdr()}<div class="sec">Dashboard Executivo</div><div class="kpis">${kpiHtml}</div><div class="row">${imgs.status ? `<div class="box"><h3>Status</h3><img src="${imgs.status}"></div>` : ''}${imgs.moEstado ? `<div class="box"><h3>M.O. por Estado</h3><img src="${imgs.moEstado}"></div>` : ''}</div>${pg(1)}</div>`,
+        `<div class="pdf-page">${pdfHdr()}<div class="sec">Distribuição Geográfica</div><div class="row">${imgs.estado ? `<div class="box"><h3>Por Estado</h3><img src="${imgs.estado}"></div>` : ''}${imgs.estadoDonut ? `<div class="box"><h3>% por Estado</h3><img src="${imgs.estadoDonut}"></div>` : ''}</div>${pg(2)}</div>`,
+        `<div class="pdf-page">${pdfHdr()}<div class="sec">Modelos com Maior Incidência</div><div class="row">${imgs.modelo ? `<div class="box"><h3>Gráfico</h3><img src="${imgs.modelo}"></div>` : ''}<div class="box"><h3>Tabela</h3><table><thead><tr><th>Modelo</th><th class="r">Qtd</th></tr></thead><tbody>${modTbl}</tbody></table></div></div>${pg(3)}</div>`,
+        `<div class="pdf-page">${pdfHdr()}<div class="sec">Análise por Tipo de Defeito</div><div class="row"><div class="box"><h3>Tabela</h3><table><thead><tr><th>Tag</th><th class="r">Qtd</th><th class="r">%</th></tr></thead><tbody>${tagTbl}</tbody></table></div>${imgs.tag ? `<div class="box"><h3>Gráfico</h3><img src="${imgs.tag}"></div>` : ''}</div>${pg(4)}</div>`,
+        `<div class="pdf-page">${pdfHdr()}<div class="sec">Evolução dos Chamados</div><div class="row">${imgs.semana ? `<div class="box"><h3>Por semana</h3><img src="${imgs.semana}"></div>` : ''}${imgs.statusEvol ? `<div class="box"><h3>Status no mês</h3><img src="${imgs.statusEvol}"></div>` : ''}</div>${pg(5)}</div>`,
+        `<div class="pdf-page">${pdfHdr()}<div class="sec">Pareto (80/20)</div>${imgs.pareto ? `<div class="box"><img src="${imgs.pareto}"></div>` : ''}<table><thead><tr><th>Tag</th><th class="r">Qtd</th><th class="r">%</th><th class="r">Acum.</th></tr></thead><tbody>${paretoTbl}</tbody></table>${pg(6)}</div>`,
+        `<div class="pdf-page">${pdfHdr()}<div class="sec">Análise Financeira</div><ul>${obsHtml}</ul><table><thead><tr><th>O.S.</th><th>UF</th><th>Data</th><th class="r">M.O.</th></tr></thead><tbody>${finTbl}</tbody></table>${pg(7)}</div>`,
+        `<div class="pdf-page">${pdfHdr()}<div class="sec">Análise de Lote — por data de entrega e modelo</div><p style="margin-bottom:10px;font-size:10px;color:#475569;">${loteResumoPdf} Principais modelos: ${loteModeloResumo}.</p>${imgs.lote ? `<div class="box"><h3>Problemas por mês de entrega e modelo</h3><img src="${imgs.lote}"></div>` : ''}<div class="box"><h3>Top 5 defeitos — distribuição por modelo</h3>${loteDefPdfHtml}</div>${pg(8)}</div>`,
+        `<div class="pdf-page">${pdfHdr()}<div class="sec">Plano de Ação</div>${planoHtml}${pg(9)}</div>`,
+        `<div class="pdf-page">${pdfHdr()}<div class="sec">Conclusão Executiva</div>${concHtml}<div class="total-banner"><div class="lbl">${multi ? 'Total de O.S. no período' : 'Total de O.S. no mês'}</div><div class="val">${kpis.total_os || 0}</div></div>${pg(10)}</div>`,
       ].join('');
 
       const html = `<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8">
@@ -19865,12 +20415,10 @@ ${pivotHtml('Menções (Pós abertura de OS)', '#4c1d95', data.mencoes)}
   }
 
   window._iniciarRelatorioGerencialAt = function () {
-    const mesEl = document.getElementById('atRelGerMes');
-    if (mesEl && !mesEl.value) mesEl.value = _mesPadrao();
-
     if (!_relGerInit) {
       _relGerInit = true;
-      mesEl?.addEventListener('change', _carregarRelatorio);
+      document.getElementById('atRelGerModo')?.addEventListener('change', _carregarRelatorio);
+      document.getElementById('atRelGerTipo')?.addEventListener('change', _carregarRelatorio);
       document.getElementById('atRelGerAtualizarBtn')?.addEventListener('click', _carregarRelatorio);
       document.getElementById('atRelGerPdfBtn')?.addEventListener('click', _exportarPdf);
     }
@@ -20876,6 +21424,7 @@ function _atStatusOsAtualizarBadge(status) {
     'Aberto':           { bg: 'rgba(34,197,94,.12)',  border: 'rgba(34,197,94,.4)',  color: '#22c55e' },
     'Fechado':          { bg: 'rgba(239,68,68,.12)',  border: 'rgba(239,68,68,.4)',  color: '#ef4444' },
     'Aguardando NF AT': { bg: 'rgba(245,158,11,.12)', border: 'rgba(245,158,11,.4)', color: '#f59e0b' },
+    'Excluido':         { bg: 'rgba(239,68,68,.12)',  border: 'rgba(239,68,68,.4)',  color: '#ef4444' },
   };
   const st = map[s] || { bg: 'rgba(100,116,139,.12)', border: 'rgba(100,116,139,.4)', color: '#94a3b8' };
   btn.style.background  = st.bg;
@@ -20925,6 +21474,37 @@ if (_atStatusBtn && _atStatusDropdown) {
 }
 const _atEmCancelBtn    = document.getElementById('atEmCancelBtn');
 const _atEmSaveBtn      = document.getElementById('atEmSaveBtn');
+const _atExcluirOsBtn   = document.getElementById('atExcluirOsBtn');
+if (_atExcluirOsBtn) {
+  _atExcluirOsBtn.addEventListener('click', async () => {
+    const id = _atEditModalCurrentId;
+    if (!id) return;
+    const row = _atAllRows.find(r => String(r.id) === String(id));
+    if (row && _atIsExcluido(row)) return;
+    if (!confirm(`Excluir a OS #${id} da lista?\n\nEla deixará de aparecer na guia principal. Para ver novamente, use Filtros avançados → Tipo → Excluídos.`)) return;
+    _atExcluirOsBtn.disabled = true;
+    try {
+      const r = await fetch(`/api/sac/at/status/${id}`, {
+        method: 'PATCH',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'Excluido' }),
+      });
+      const d = await r.json();
+      if (!r.ok) { alert(d.error || 'Erro ao excluir OS.'); return; }
+      const rowIdx = _atAllRows.findIndex(x => String(x.id) === String(id));
+      if (rowIdx >= 0) _atAllRows[rowIdx].status = d.status;
+      if (_atEditModal) _atEditModal.style.display = 'none';
+      _atEditModalCurrentId = null;
+      _atRenderCurrent();
+    } catch (err) {
+      console.error('[AT] erro ao excluir OS', err);
+      alert('Erro de rede ao excluir OS.');
+    } finally {
+      _atExcluirOsBtn.disabled = false;
+    }
+  });
+}
 if (_atEditModalClose) _atEditModalClose.addEventListener('click', () => { if (_atEditModal) _atEditModal.style.display = 'none'; _atEditModalCurrentId = null; });
 if (_atEmCancelBtn)    _atEmCancelBtn.addEventListener('click',    () => { if (_atEditModal) _atEditModal.style.display = 'none'; _atEditModalCurrentId = null; });
 if (_atEmSaveBtn)      _atEmSaveBtn.addEventListener('click',      () => _salvarAtEditModal());
@@ -22355,7 +22935,7 @@ function setupEnvioPrintButtons(container) {
           body: JSON.stringify({ envio_id: envioId, n_solic: nSolic || undefined })
         });
         const d = await r.json().catch(() => ({}));
-        if (!r.ok || !d.ok) throw new Error(d.error || 'Falha ao gerar etiqueta');
+        if (!r.ok || !d.ok) throw new Error(_vippMsgErroUsuario(d.error || 'Falha ao gerar etiqueta', d));
         if (btnGerar.closest('#sacTabelaBody')) {
           if (typeof carregarSacSolicitacoes === 'function' && sacTabelaBody) {
             await carregarSacSolicitacoes(sacTabelaBody, { hideDone: false, filterByUser: true });
@@ -22364,7 +22944,7 @@ function setupEnvioPrintButtons(container) {
           carregarSacSolicitacoes(envioMercadoriaTabelaBodyPane, { filaLogistica: true });
         }
       } catch (err) {
-        alert('Erro ao gerar etiqueta: ' + (err.message || err));
+        alert(_vippMsgErroUsuario(err));
         btnGerar.disabled = false;
         btnGerar.innerHTML = origHtml;
       }
@@ -81420,14 +82000,14 @@ window.initOscilacaoEstoque = (function () {
             var msgs = data.erros && data.erros.length
               ? data.erros.join(' | ')
               : (data.error || 'Erro desconhecido na criação da postagem.');
-            setStatus('Erro VIPP: ' + msgs, true);
+            setStatus(_vippMsgErroUsuario(msgs, data), true);
             enviarBtn.disabled = false;
             enviarBtn.style.opacity = '1';
             atualizarMetodoEnvioUI();
           }
         })
         .catch(function (err) {
-          setStatus('Erro de comunicação: ' + err.message, true);
+          setStatus(_vippMsgErroUsuario(err), true);
           enviarBtn.disabled = false;
           enviarBtn.style.opacity = '1';
           atualizarMetodoEnvioUI();
@@ -81676,14 +82256,14 @@ window._vippGerarEtiquetaAuto = function (idConhecimento) {
           if (btnVerif) { btnVerif.disabled = false; btnVerif.style.opacity = '1'; btnVerif.innerHTML = '<i class="fa-solid fa-rotate" style="margin-right:5px;"></i>Verificar Etiqueta'; }
         });
       }
-      return r.json().then(function (d) { throw new Error(d.error || 'Erro ao gerar etiqueta'); });
+      return r.json().then(function (d) { throw new Error(_vippMsgErroUsuario(d.error || 'Erro ao gerar etiqueta', d)); });
     })
     .catch(function (e) {
       if (msgEl) {
         msgEl.style.background = 'rgba(239,68,68,.12)';
         msgEl.style.borderColor = '#ef444466';
         msgEl.style.color = '#ef4444';
-        msgEl.innerHTML = '<i class="fa-solid fa-triangle-exclamation" style="margin-right:5px;"></i>Erro ao gerar etiqueta: ' + e.message;
+        msgEl.innerHTML = '<i class="fa-solid fa-triangle-exclamation" style="margin-right:5px;"></i>' + _vippMsgErroUsuario(e);
       }
       if (btnPdf)  { btnPdf.disabled = false;  btnPdf.style.opacity = '1';  btnPdf.innerHTML = '<i class="fa-solid fa-file-pdf" style="margin-right:5px;"></i>Gerar Etiqueta PDF'; }
       if (btnVerif) { btnVerif.disabled = false; btnVerif.style.opacity = '1'; btnVerif.innerHTML = '<i class="fa-solid fa-rotate" style="margin-right:5px;"></i>Verificar Etiqueta'; }

@@ -615,6 +615,18 @@
       <i class="fa-solid fa-map-location-dot" style="margin-right:8px;"></i>
       Mapa
     </a>
+
+    <a href="#"
+       id="menu-vendas-relatorio"
+       class="menu-link"
+       data-nav-key="side:vendas:relatorio"
+       data-nav-parent="side:vendas"
+       data-nav-pos="side"
+       data-nav-label="Relatório Vendas"
+       data-nav-selector="#menu-vendas-relatorio">
+      <i class="fa-solid fa-file-lines" style="margin-right:8px;"></i>
+      Relatório Vendas
+    </a>
   </div>
 </div>
 
@@ -3978,6 +3990,7 @@
                           <option value="Extensão Garantia">Extensão Garantia</option>
                           <option value="Atendimento rápido">Atendimento rápido</option>
                           <option value="EXCLUIR_RAPIDO" selected>≠ Atendimento Rápido (padrão)</option>
+                          <option value="EXCLUIDOS">Excluídos</option>
                         </select>
                       </div>
 
@@ -4721,6 +4734,10 @@
                 <button id="atMencaoOpenBtn" type="button" title="Registrar menção"
                   style="background:rgba(168,85,247,.12);border:1px solid rgba(168,85,247,.4);color:#a855f7;border-radius:8px;padding:5px 10px;cursor:pointer;font-size:14px;display:flex;align-items:center;gap:5px;transition:background .2s;">
                   <i class="fa-solid fa-at"></i>
+                </button>
+                <button id="atExcluirOsBtn" type="button" title="Excluir OS da lista"
+                  style="background:rgba(239,68,68,.12);border:1px solid rgba(239,68,68,.4);color:#ef4444;border-radius:8px;padding:5px 10px;cursor:pointer;font-size:14px;display:flex;align-items:center;gap:5px;transition:background .2s;">
+                  <i class="fa-solid fa-trash-can"></i>
                 </button>
                 <button id="atEditModalClose" class="modal-close-btn" type="button">×</button>
               </div>
@@ -5767,9 +5784,24 @@
                 </div>
                 <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-left:auto;">
                   <div style="display:flex;align-items:center;gap:8px;">
-                    <label for="atRelGerMes" style="font-size:12px;font-weight:600;color:#94a3b8;white-space:nowrap;">Mês do relatório</label>
-                    <input id="atRelGerMes" type="month"
-                      style="padding:6px 10px;border-radius:8px;border:1px solid #374151;background:#111827;color:#e5e7eb;font-size:13px;">
+                    <label for="atRelGerModo" style="font-size:12px;font-weight:600;color:#94a3b8;white-space:nowrap;">Período</label>
+                    <select id="atRelGerModo"
+                      style="padding:6px 10px;border-radius:8px;border:1px solid #374151;background:#111827;color:#e5e7eb;font-size:13px;min-width:210px;">
+                      <option value="mes">Mês atual</option>
+                      <option value="3m">3 últimos meses (sem o atual)</option>
+                      <option value="6m">6 últimos meses (sem o atual)</option>
+                      <option value="anual">Anual (12 meses, sem o atual)</option>
+                    </select>
+                  </div>
+                  <div style="display:flex;align-items:center;gap:8px;">
+                    <label for="atRelGerTipo" style="font-size:12px;font-weight:600;color:#94a3b8;white-space:nowrap;">Tipo</label>
+                    <select id="atRelGerTipo"
+                      style="padding:6px 10px;border-radius:8px;border:1px solid #374151;background:#111827;color:#e5e7eb;font-size:13px;min-width:160px;">
+                      <option value="Qualidade" selected>Qualidade</option>
+                      <option value="Atendimento Rápido">Atend. Rápido</option>
+                      <option value="Comercial">Comercial</option>
+                      <option value="">Todos</option>
+                    </select>
                   </div>
                   <button id="atRelGerAtualizarBtn" type="button" title="Atualizar"
                     style="padding:6px 12px;border-radius:8px;border:1px solid #374151;background:rgba(255,255,255,.04);color:#9ca3af;cursor:pointer;display:flex;align-items:center;gap:6px;font-size:13px;">
@@ -5792,6 +5824,58 @@
                   </nav>
 
                   <div class="at-rel-ger-main" id="atRelGerPages"></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Painel Vendas: Relatório Gerencial -->
+        <div id="vendasRelatorioPane" class="tab-pane" style="display:none;">
+          <div class="content-wrapper">
+            <div class="content-section" style="margin-top:0;">
+              <div class="title-wrapper" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:0;">
+                <div class="content-section-title" style="display:flex;align-items:center;gap:8px;">
+                  <i class="fa-solid fa-file-lines" style="color:#38bdf8;"></i>
+                  Relatório Gerencial — Vendas
+                </div>
+                <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-left:auto;">
+                  <div style="display:flex;align-items:center;gap:8px;">
+                    <label for="vendRelGerModo" style="font-size:12px;font-weight:600;color:#94a3b8;white-space:nowrap;">Período</label>
+                    <select id="vendRelGerModo"
+                      style="padding:6px 10px;border-radius:8px;border:1px solid #374151;background:#111827;color:#e5e7eb;font-size:13px;min-width:210px;">
+                      <option value="mes">Mês atual</option>
+                      <option value="3m">3 últimos meses (sem o atual)</option>
+                      <option value="6m">6 últimos meses (sem o atual)</option>
+                      <option value="anual">Anual (12 meses, sem o atual)</option>
+                    </select>
+                  </div>
+                  <div style="display:flex;align-items:center;gap:8px;">
+                    <label for="vendRelGerEtapa" style="font-size:12px;font-weight:600;color:#94a3b8;white-space:nowrap;">Etapa</label>
+                    <select id="vendRelGerEtapa"
+                      style="padding:6px 10px;border-radius:8px;border:1px solid #374151;background:#111827;color:#e5e7eb;font-size:13px;min-width:160px;">
+                      <option value="entregue" selected>Entregues (NF)</option>
+                      <option value="todos">Todos os pedidos</option>
+                    </select>
+                  </div>
+                  <button id="vendRelGerAtualizarBtn" type="button" title="Atualizar"
+                    style="padding:6px 12px;border-radius:8px;border:1px solid #374151;background:rgba(255,255,255,.04);color:#9ca3af;cursor:pointer;display:flex;align-items:center;gap:6px;font-size:13px;">
+                    <i class="fa-solid fa-rotate"></i>
+                  </button>
+                  <button id="vendRelGerPdfBtn" type="button" title="Exportar PDF"
+                    style="padding:6px 14px;border-radius:8px;border:1px solid #38bdf8;background:rgba(56,189,248,.15);color:#7dd3fc;cursor:pointer;display:flex;align-items:center;gap:6px;font-size:13px;font-weight:600;">
+                    <i class="fa-solid fa-file-pdf"></i> Exportar PDF
+                  </button>
+                </div>
+              </div>
+
+              <div id="vendRelGerStatus" style="display:none;margin-top:14px;font-size:13px;color:#94a3b8;">Carregando...</div>
+              <div id="vendRelGerErro" style="display:none;margin-top:14px;font-size:13px;color:#f87171;"></div>
+
+              <div id="vendRelGerConteudo" style="display:none;margin-top:16px;">
+                <div class="at-rel-ger-layout">
+                  <nav class="at-rel-ger-nav" id="vendRelGerNav" aria-label="Seções do relatório de vendas"></nav>
+                  <div class="at-rel-ger-main" id="vendRelGerPages"></div>
                 </div>
               </div>
             </div>
@@ -11295,7 +11379,8 @@
   <!-- Interceptor de sessão: precisa carregar ANTES de qualquer módulo que faça fetch -->
   <script src="/public/js/sessao_resiliente.js?v=20260617b"></script>
   <script type="module" src="login/login.js"></script>
-<script type="module" src="menu_produto.js?v=20260708envio-status"></script>
+  <script src="/public/js/vendas-relatorio-gerencial.js?v=20260709a" defer></script>
+  <script type="module" src="menu_produto.js?v=20260708envio-status"></script>
   
   <script type="module" src="./requisicoes_omie/filtro_produto.js"></script>
   <script type="module" src="./requisicoes_omie/ListarProdutos.js?v=20260617b"></script>
@@ -12918,7 +13003,8 @@ function attachDropZone(ul) {
 }
 
 /* ── Relatório Gerencial AT (Fase 2) ── */
-#sacAtRelatorioPane .content-section { overflow: visible; }
+#sacAtRelatorioPane .content-section,
+#vendasRelatorioPane .content-section { overflow: visible; }
 .at-rel-ger-layout {
   display: flex;
   gap: 14px;
@@ -13073,6 +13159,20 @@ function attachDropZone(ul) {
 .at-rel-ger-chart { position: relative; height: 260px; }
 .at-rel-ger-chart.sm { height: 220px; }
 .at-rel-ger-chart.lg { height: 300px; }
+.at-rel-ger-def-list { display: flex; flex-direction: column; gap: 12px; }
+.at-rel-ger-def-row {
+  display: grid;
+  grid-template-columns: 1fr 150px;
+  gap: 12px;
+  align-items: center;
+  padding: 10px 12px;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #f8fafc;
+}
+.at-rel-ger-def-meta .tag { font-weight: 700; color: #1e3a5f; font-size: 13px; }
+.at-rel-ger-def-meta .sub { font-size: 12px; color: #64748b; margin-top: 4px; }
+.at-rel-ger-def-pie { position: relative; height: 120px; width: 150px; margin-left: auto; }
 .at-rel-ger-tbl {
   width: 100%;
   border-collapse: collapse;
@@ -17577,7 +17677,8 @@ function attachDropZone(ul) {
     sincronizacao: ['menu-sincronizar-produtos'],
     colaboradores: ['btn-colaboradores'],
     grafico_at: ['menu-sac-at-graficos'],
-    relatorio_at: ['menu-sac-at-relatorio']
+    relatorio_at: ['menu-sac-at-relatorio'],
+    relatorio_vendas: ['menu-vendas-relatorio']
   };
   const PURCHASE_MODE = {
     OMIE: 'omie',
@@ -18164,6 +18265,7 @@ function attachDropZone(ul) {
     if (t.includes('agenda') || t.includes('calendario')) return 'agenda';
     if (t.includes('sac') && t.includes('envio')) return 'sac_envio';
     if (t.includes('relatorio') && t.includes('at')) return 'relatorio_at';
+    if (t.includes('relatorio') && t.includes('venda')) return 'relatorio_vendas';
     if (t.includes('grafico') && t.includes('at')) return 'grafico_at';
     if (t.includes('sincron')) return 'sincronizacao';
     if (t.includes('colaborador')) return 'colaboradores';

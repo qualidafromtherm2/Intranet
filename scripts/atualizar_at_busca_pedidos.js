@@ -1,15 +1,16 @@
 /**
  * Atualiza sac.at_busca_selecionada com ordem_producao, nota_fiscal, data_entrega
- * a partir da planilha de Pedidos.
- *
- * Usa UPDATE com CASE para enviar todos os updates em um único batch por lote.
+ * a partir da planilha de Pedidos (Google Sheets ou CSV local).
  *
  * Uso:
- *   node scripts/atualizar_at_busca_pedidos.js            (executa atualização)
- *   node scripts/atualizar_at_busca_pedidos.js --dry-run  (só conta, não atualiza)
+ *   node scripts/atualizar_at_busca_pedidos.js            (match por pedido, planilha online)
+ *   node scripts/atualizar_at_busca_pedidos.js --dry-run
+ *   node scripts/atualizar_at_busca_pedidos.js --csv "csv/arquivo.csv" --match op
  */
 
 require('dotenv').config();
+const fs = require('fs');
+const path = require('path');
 const { Pool } = require('pg');
 const https = require('https');
 const { parse } = require('csv-parse/sync');
@@ -19,6 +20,13 @@ const PEDIDOS_URL =
 
 const BATCH_SIZE = 200;
 const DRY_RUN = process.argv.includes('--dry-run');
+const MATCH_BY = process.argv.includes('--match') && process.argv[process.argv.indexOf('--match') + 1] === 'op'
+  ? 'op'
+  : 'pedido';
+const CSV_LOCAL = (() => {
+  const i = process.argv.indexOf('--csv');
+  return i >= 0 ? process.argv[i + 1] : null;
+})();
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL || process.env.POSTGRES_URL,
@@ -57,16 +65,25 @@ function parseData(str) {
 }
 
 async function main() {
-  console.log('⬇  Baixando planilha de Pedidos…');
-  const csvText = await baixarCSV(PEDIDOS_URL);
+  let csvText;
+  if (CSV_LOCAL) {
+    const csvPath = path.isAbsolute(CSV_LOCAL) ? CSV_LOCAL : path.join(process.cwd(), CSV_LOCAL);
+    console.log(`📂 Lendo CSV local: ${csvPath}`);
+    csvText = fs.readFileSync(csvPath, 'utf-8');
+  } else {
+    console.log('⬇  Baixando planilha de Pedidos…');
+    csvText = await baixarCSV(PEDIDOS_URL);
+  }
 
-  const rowsPedidos = parse(csvText, { columns: true, skip_empty_lines: true, trim: true });
+  const rowsPedidos = parse(csvText, { columns: true, skip_empty_lines: true, trim: true, relax_column_count: true });
   console.log(`   ${rowsPedidos.length} linhas na planilha`);
+  console.log(`   Match por: ${MATCH_BY === 'op' ? 'ordem_producao' : 'pedido'}`);
 
-  // Monta mapa PEDIDO → { op, nf, data_entrega }
   const mapPedidos = new Map();
   for (const row of rowsPedidos) {
-    const key = (row['PEDIDO'] || '').trim();
+    const key = MATCH_BY === 'op'
+      ? limpar(row['ORDEM DE PRODUCAO'])
+      : (row['PEDIDO'] || '').trim();
     if (key && !mapPedidos.has(key)) {
       mapPedidos.set(key, {
         op: limpar(row['ORDEM DE PRODUCAO']),
@@ -75,23 +92,29 @@ async function main() {
       });
     }
   }
-  console.log(`   ${mapPedidos.size} pedidos únicos indexados`);
+  console.log(`   ${mapPedidos.size} chaves únicas indexadas`);
 
-  // Busca registros candidatos no banco
   console.log('\n🔍 Buscando registros a atualizar no banco…');
+  const whereMatch = MATCH_BY === 'op'
+    ? `ordem_producao IS NOT NULL AND TRIM(ordem_producao) <> ''`
+    : `pedido IS NOT NULL`;
   const { rows: candidatos } = await pool.query(`
-    SELECT id, pedido
+    SELECT id, pedido, ordem_producao
     FROM sac.at_busca_selecionada
-    WHERE pedido IS NOT NULL
-      AND (ordem_producao IS NULL OR nota_fiscal IS NULL OR data_entrega IS NULL)
+    WHERE ${whereMatch}
+      AND (nota_fiscal IS NULL OR TRIM(nota_fiscal) = '' OR data_entrega IS NULL OR TRIM(data_entrega::text) = '')
     ORDER BY id
   `);
   console.log(`   ${candidatos.length} registros candidatos`);
 
-  // Filtra apenas os que têm match na planilha
   const aAtualizar = candidatos
-    .map(r => ({ id: r.id, pedido: r.pedido, ...mapPedidos.get(r.pedido) }))
-    .filter(r => r.op !== undefined || r.nf !== undefined || r.de !== undefined);
+    .map(r => {
+      const key = MATCH_BY === 'op' ? String(r.ordem_producao || '').trim() : r.pedido;
+      const dados = mapPedidos.get(key);
+      return dados ? { id: r.id, pedido: r.pedido, ordem_producao: r.ordem_producao, ...dados } : null;
+    })
+    .filter(Boolean)
+    .filter(r => r.nf || r.de);
 
   const semMatch = candidatos.length - aAtualizar.length;
   console.log(`   ${aAtualizar.length} com match | ${semMatch} sem match na planilha`);
@@ -101,7 +124,7 @@ async function main() {
     if (aAtualizar.length > 0) {
       console.log('\nAmostra (primeiros 5):');
       aAtualizar.slice(0, 5).forEach(r =>
-        console.log(`  id=${r.id} pedido=${r.pedido} → op=${r.op} nf=${r.nf} de=${r.de}`)
+        console.log(`  id=${r.id} op=${r.ordem_producao || r.op} nf=${r.nf} de=${r.de}`)
       );
     }
     console.log('\n──────────────────────────────');
@@ -128,9 +151,9 @@ async function main() {
     await pool.query(`
       UPDATE sac.at_busca_selecionada AS t
       SET
-        ordem_producao = COALESCE(t.ordem_producao, v.op),
-        nota_fiscal    = COALESCE(t.nota_fiscal,    v.nf),
-        data_entrega   = COALESCE(t.data_entrega, v.de)
+        ordem_producao = COALESCE(NULLIF(TRIM(t.ordem_producao), ''), v.op),
+        nota_fiscal    = COALESCE(NULLIF(TRIM(t.nota_fiscal), ''), v.nf),
+        data_entrega   = COALESCE(NULLIF(TRIM(t.data_entrega::text), ''), v.de)
       FROM (
         SELECT
           unnest($1::BIGINT[])  AS id,
@@ -139,7 +162,7 @@ async function main() {
           unnest($4::TEXT[])    AS de
       ) AS v
       WHERE t.id = v.id
-        AND (v.op IS NOT NULL OR v.nf IS NOT NULL OR v.de IS NOT NULL)
+        AND (v.nf IS NOT NULL OR v.de IS NOT NULL)
     `, [ids, ops, nfs, des]);
 
     atualizados += lote.length;
