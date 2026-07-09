@@ -389,26 +389,18 @@ router.get('/status', async (req, res) => {
       return res.json({ ok: false, error: extrairTag(raw, 'Message') });
     }
 
-    // Persiste status no banco quando envio_id fornecido
-    // 'Invalida' = postagem não liberada no VIPP ainda (não é status real)
+    // Persiste só código ECT — rastreio_status fica sob controle manual (Pendente → Enviado).
     const STATUS_VIPP_INVALIDOS = ['Desconhecido', 'Invalida'];
-    if (envio_id) {
-      const statusParaSalvar = (nomeStatusEvento && !STATUS_VIPP_INVALIDOS.includes(nomeStatusEvento))
-        ? nomeStatusEvento
-        : (statusSolicitacao && !STATUS_VIPP_INVALIDOS.includes(statusSolicitacao) ? statusSolicitacao : null);
-      if (statusParaSalvar) {
-        try {
-          await dbQuery(
-            `UPDATE envios.solicitacoes
-                SET rastreio_status = $1,
-                    rastreio_quando = NOW(),
-                    identificacao   = COALESCE(NULLIF(identificacao, ''), $2)
-              WHERE id = $3`,
-            [statusParaSalvar, etiquetaPostagem || null, Number(envio_id)]
-          );
-        } catch (e) {
-          console.warn('[VIPP] falha ao persistir status:', e.message);
-        }
+    if (envio_id && etiquetaPostagem) {
+      try {
+        await dbQuery(
+          `UPDATE envios.solicitacoes
+              SET identificacao = COALESCE(NULLIF(identificacao, ''), $1)
+            WHERE id = $2`,
+          [etiquetaPostagem, Number(envio_id)]
+        );
+      } catch (e) {
+        console.warn('[VIPP] falha ao persistir identificacao:', e.message);
       }
     }
 
@@ -556,8 +548,7 @@ router.post('/gerar-etiqueta', async (req, res) => {
       try {
         await dbQuery(
           `UPDATE envios.solicitacoes
-              SET identificacao = $1,
-                  status        = 'Em separação'
+              SET identificacao = $1
             WHERE numero_sep = $2`,
           [ectCode, n_solic]
         );

@@ -35,17 +35,3 @@ services:
     startCommand: node cron/sync_agendamento.js
     envVarGroups:
       - name: intranet-cron-secrets
-
-  # ── Cron Job: Atualização diária de rastreio (07:00 Brasília = 10:00 UTC) ───
-  - type: cron
-    name: atualizar-rastreio-envios
-    runtime: node
-    region: oregon
-    schedule: "0 10 * * *"
-    buildCommand: npm ci --omit=dev
-    startCommand: node cron/atualizar_rastreio_envios.js
-    envVars:
-      - key: DATABASE_URL
-        sync: false
-      - key: NODE_ENV
-        value: production

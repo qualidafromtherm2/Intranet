@@ -53,12 +53,11 @@ async function persistStatus(codigo, { status, quando }) {
 
   await dbQuery(
     `UPDATE envios.solicitacoes
-        SET rastreio_status = $2,
+        SET rastreio_status = CASE
+                                WHEN $4 THEN 'Finalizado'
+                                ELSE $2
+                              END,
             rastreio_quando = COALESCE($3, rastreio_quando),
-            status = CASE
-                       WHEN $4 AND status <> 'Finalizado' THEN 'Finalizado'
-                       ELSE status
-                     END,
             finalizado_em = CASE
                               WHEN $4 THEN COALESCE($3, finalizado_em, NOW())
                               ELSE finalizado_em
@@ -162,51 +161,9 @@ async function atualizarStatusVipp(envioId, idVipp) {
   return { envioId, status: statusParaSalvar || '(sem mudança)', fonte: 'vipp' };
 }
 
-/**
- * Atualiza rastreio dos envios da fila logística (Valida / Processamento Vipp).
- */
 async function executarAtualizacaoRastreioEnvios() {
-  const { rows } = await dbQuery(
-    `SELECT id, identificacao, id_vipp, rastreio_status
-       FROM envios.solicitacoes
-      WHERE COALESCE(rastreio_status, '') = ANY($1::text[])
-      ORDER BY id ASC`,
-    [FILA_STATUS]
-  );
-
-  console.log(TAG, `Processando ${rows.length} envio(s) da fila...`);
-
-  let ok = 0;
-  let ignorados = 0;
-  const erros = [];
-
-  for (const row of rows) {
-    const envioId = row.id;
-    try {
-      if (row.id_vipp) {
-        await atualizarStatusVipp(envioId, row.id_vipp);
-        ok += 1;
-      } else {
-        const codigo = sanitizeCodigo(row.identificacao);
-        if (codigo && ECT_RE.test(codigo)) {
-          await consultarCorreios(codigo);
-          ok += 1;
-        } else {
-          ignorados += 1;
-          console.log(TAG, `Envio #${envioId}: sem id_vipp nem código ECT — ignorado.`);
-        }
-      }
-      await sleep(400);
-    } catch (err) {
-      const msg = err?.message || String(err);
-      erros.push({ envioId, msg });
-      console.warn(TAG, `Envio #${envioId}: ${msg}`);
-    }
-  }
-
-  const resumo = { total: rows.length, ok, ignorados, erros: erros.length, detalhesErros: erros };
-  console.log(TAG, 'Concluído:', JSON.stringify(resumo));
-  return resumo;
+  console.log(TAG, 'Atualização automática desativada — fluxo encerra em Enviado.');
+  return { total: 0, ok: 0, ignorados: 0, erros: 0, detalhesErros: [] };
 }
 
 async function jaRodouHoje(hoje) {
@@ -284,9 +241,7 @@ function verificarHorarioAtualizacaoRastreio() {
 }
 
 function iniciarCronAtualizacaoRastreio() {
-  console.log(TAG, `Timer iniciado — atualização diária às ${HORA_ALVO_RASTREIO}:00 (Brasília).`);
-  setInterval(verificarHorarioAtualizacaoRastreio, 60 * 1000);
-  verificarHorarioAtualizacaoRastreio();
+  console.log(TAG, 'Cron de rastreio desativado — fluxo encerra em Enviado.');
 }
 
 module.exports = {

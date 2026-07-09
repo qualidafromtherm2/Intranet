@@ -19,7 +19,7 @@ const {
 
 const router = express.Router();
 
-const STATUS_LIST = ['Pendente', 'Em separação', 'Aguardando identificação', 'Aguardando correios', 'Enviado', 'Finalizado'];
+const STATUS_LIST = ['Pendente', 'Enviado', 'Excluído'];
 
 const TRACK_USER = String(process.env.TRACK_USER || '').trim();
 const TRACK_TOKEN = String(process.env.TRACK_TOKEN || '').trim();
@@ -3259,31 +3259,8 @@ async function getStoredStatus(codigo) {
   }
 }
 
-async function persistStatus(codigo, { status, detalhe, local, cidade, uf, quando }) {
-  const statusVal = String(status || '').trim() || 'sem status';
-  const quandoVal = quando ? new Date(quando) : null;
-  const isDelivered = /entregue ao destinat[áa]rio/i.test(statusVal) || /\bentregue\b/i.test(statusVal);
-
-  try {
-    await pool.query(
-      `UPDATE envios.solicitacoes
-          SET rastreio_status = $2,
-              rastreio_quando = COALESCE($3, rastreio_quando),
-              status = CASE
-                         WHEN $4 AND status <> 'Finalizado' THEN 'Finalizado'
-                         ELSE status
-                       END,
-              finalizado_em = CASE
-                                WHEN $4 THEN COALESCE($3, finalizado_em, NOW())
-                                ELSE finalizado_em
-                              END
-        WHERE upper(regexp_replace(COALESCE(identificacao, ''), '\\s+', '', 'g')) = $1
-           OR upper(identificacao) = $1`,
-      [codigo, statusVal, quandoVal, isDelivered]
-    );
-  } catch (err) {
-    console.warn('[SAC] falha ao atualizar rastreio_status:', err?.message || err);
-  }
+async function persistStatus() {
+  // Rastreio automático (Correios/VIPP) desativado — fluxo encerra em Enviado.
 }
 
 const trackCache = new Map();
@@ -3668,7 +3645,6 @@ async function ensureSchema() {
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       usuario TEXT NOT NULL,
       observacao TEXT,
-      status TEXT NOT NULL DEFAULT 'Pendente',
       anexos TEXT[] NOT NULL DEFAULT '{}',
       conferido BOOLEAN NOT NULL DEFAULT false,
       etiqueta_url TEXT,
@@ -3716,8 +3692,29 @@ async function ensureSchema() {
     ALTER TABLE envios.solicitacoes
       ADD COLUMN IF NOT EXISTS metodo_envio TEXT;
 
+    DO $$
+    BEGIN
+      IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+         WHERE table_schema = 'envios'
+           AND table_name = 'solicitacoes'
+           AND column_name = 'status'
+      ) THEN
+        EXECUTE $migrate$
+          UPDATE envios.solicitacoes
+             SET rastreio_status = COALESCE(NULLIF(TRIM(rastreio_status), ''), status, 'Pendente')
+           WHERE rastreio_status IS NULL OR TRIM(rastreio_status) = ''
+        $migrate$;
+        EXECUTE 'ALTER TABLE envios.solicitacoes DROP COLUMN status';
+      END IF;
+    END $$;
+
+    UPDATE envios.solicitacoes
+       SET rastreio_status = 'Pendente'
+     WHERE rastreio_status IS NULL OR TRIM(rastreio_status) = '';
+
     ALTER TABLE envios.solicitacoes
-      ALTER COLUMN status SET DEFAULT 'Pendente';
+      ALTER COLUMN rastreio_status SET DEFAULT 'Pendente';
 
     CREATE SCHEMA IF NOT EXISTS sac;
 
@@ -4382,7 +4379,7 @@ router.get('/at/atendimentos', async (_req, res) => {
          ORDER BY a.id DESC, f.id DESC`
       ),
       // 2) Busca observacoes + status das solicitações em paralelo
-      pool.query(`SELECT observacao, status FROM envios.solicitacoes WHERE observacao IS NOT NULL ORDER BY id DESC`)
+      pool.query(`SELECT observacao, rastreio_status FROM envios.solicitacoes WHERE observacao IS NOT NULL ORDER BY id DESC`)
     ]);
 
     const tQuery = Date.now() - t0;
@@ -4395,7 +4392,7 @@ router.get('/at/atendimentos', async (_req, res) => {
       if (mId) {
         const atId = parseInt(mId[1], 10);
         if (!atStatusMap.has(atId)) { // ORDER BY id DESC → first = mais recente
-          atStatusMap.set(atId, row.status);
+          atStatusMap.set(atId, row.rastreio_status);
         }
       }
     }
@@ -4624,13 +4621,13 @@ router.post('/solicitacoes/vipp', async (req, res) => {
   try {
     const result = await pool.query(
       `INSERT INTO envios.solicitacoes
-         (usuario, observacao, numero_sep, status, anexos, conferido, id_vipp, conteudo, metodo_envio)
+         (usuario, observacao, numero_sep, rastreio_status, anexos, conferido, id_vipp, conteudo, metodo_envio)
        VALUES ($1, $2, $3, 'Pendente', '{}', false, $4, $5, $6)
-       RETURNING id, created_at, status, id_vipp, conteudo, observacao, metodo_envio`,
+       RETURNING id, created_at, rastreio_status, id_vipp, conteudo, observacao, metodo_envio`,
       [usuario, observacao || null, numeroSep, idVipp, conteudo ? String(conteudo) : null, metodoEnvio]
     );
     const row = result.rows[0];
-    return res.json({ ok: true, id: row.id, created_at: row.created_at, status: row.status, id_vipp: row.id_vipp });
+    return res.json({ ok: true, id: row.id, created_at: row.created_at, rastreio_status: row.rastreio_status, id_vipp: row.id_vipp });
   } catch (err) {
     console.error('[SAC] erro ao criar entrada via VIPP:', err);
     return res.status(500).json({ ok: false, error: 'Erro ao registrar solicitação VIPP.' });
@@ -4641,7 +4638,7 @@ router.post('/solicitacoes', upload.array('anexos', 2), async (req, res) => {
   const usuario = String(req.body?.usuario || '').trim();
   const observacao = String(req.body?.observacao || '').trim();
   const numeroSep = String(req.body?.numero_sep || req.body?.numeroSep || '').trim() || null;
-  const status = normalizeStatus(req.body?.status);
+  const rastreioStatus = 'Pendente';
 
   if (!usuario) {
     return res.status(400).json({ ok: false, error: 'Usuário é obrigatório.' });
@@ -4736,14 +4733,14 @@ router.post('/solicitacoes', upload.array('anexos', 2), async (req, res) => {
     const declaracaoUrl = urls[1] || null;
 
     const result = await pool.query(
-      `INSERT INTO envios.solicitacoes (usuario, observacao, numero_sep, status, anexos, conferido, etiqueta_url, declaracao_url, identificacao, conteudo, chave_dce)
+      `INSERT INTO envios.solicitacoes (usuario, observacao, numero_sep, rastreio_status, anexos, conferido, etiqueta_url, declaracao_url, identificacao, conteudo, chave_dce)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-       RETURNING id, created_at, status, anexos, conferido, etiqueta_url, declaracao_url, identificacao, numero_sep, conteudo, chave_dce`,
-      [usuario, observacao, numeroSep, status, urls, false, etiquetaUrl, declaracaoUrl, identificacao, conteudo, chaveDce]
+       RETURNING id, created_at, rastreio_status, anexos, conferido, etiqueta_url, declaracao_url, identificacao, numero_sep, conteudo, chave_dce`,
+      [usuario, observacao, numeroSep, rastreioStatus, urls, false, etiquetaUrl, declaracaoUrl, identificacao, conteudo, chaveDce]
     );
 
     const row = result.rows[0];
-    return res.json({ ok: true, id: row.id, created_at: row.created_at, status: row.status, anexos: row.anexos, conferido: row.conferido, etiqueta_url: row.etiqueta_url, declaracao_url: row.declaracao_url, identificacao: row.identificacao, numero_sep: row.numero_sep, conteudo: row.conteudo, chave_dce: row.chave_dce });
+    return res.json({ ok: true, id: row.id, created_at: row.created_at, rastreio_status: row.rastreio_status, anexos: row.anexos, conferido: row.conferido, etiqueta_url: row.etiqueta_url, declaracao_url: row.declaracao_url, identificacao: row.identificacao, numero_sep: row.numero_sep, conteudo: row.conteudo, chave_dce: row.chave_dce });
   } catch (err) {
     console.error('[SAC] erro ao inserir solicitação:', err);
     return res.status(500).json({ ok: false, error: 'Erro ao registrar solicitação.' });
@@ -4761,16 +4758,11 @@ router.get('/solicitacoes', async (req, res) => {
     const conditions = [];
     const params = [];
 
-    // Fila Envio de mercadoria: Correios (VIPP) ou envios manuais (Disktenha / transportadora)
+    // Fila Envio de mercadoria: tudo que ainda não foi marcado Enviado/Excluído (inclui legado Valida, ok, etc.)
     if (filaLogistica) {
-      conditions.push(`(
-        COALESCE(rastreio_status, '') IN ('Valida', 'Processamento Vipp')
-        OR COALESCE(metodo_envio, '') IN ('Envio via Disktenha', 'Envio via transportadora')
-      )`);
-      conditions.push("COALESCE(status, '') NOT IN ('Excluído', 'Enviado', 'Finalizado')");
+      conditions.push("COALESCE(rastreio_status, '') NOT IN ('Excluído', 'Enviado', 'Entregue', 'Finalizado')");
     } else if (hideDone) {
-      // Filtro por status (oculta Enviado, Finalizado e Excluído)
-      conditions.push("COALESCE(status, '') NOT IN ('Enviado', 'Finalizado', 'Excluído')");
+      conditions.push("COALESCE(rastreio_status, '') NOT IN ('Enviado', 'Excluído')");
     }
 
     // Filtro por usuário logado (apenas se filterByUser=true)
@@ -4791,7 +4783,7 @@ router.get('/solicitacoes', async (req, res) => {
     const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 
     const r = await pool.query(
-      `SELECT id, created_at, usuario, observacao, numero_sep, status, conferido, etiqueta_url, declaracao_url, identificacao, conteudo, rastreio_status, rastreio_quando, finalizado_em, id_vipp, metodo_envio
+      `SELECT id, created_at, usuario, observacao, numero_sep, conferido, etiqueta_url, declaracao_url, identificacao, conteudo, rastreio_status, rastreio_quando, finalizado_em, id_vipp, metodo_envio
          FROM envios.solicitacoes
         ${whereClause}
         ORDER BY id DESC
@@ -5044,9 +5036,10 @@ router.patch('/solicitacoes/:id/status', async (req, res) => {
   try {
     const r = await pool.query(
       `UPDATE envios.solicitacoes
-          SET status = $1
+          SET rastreio_status = $1,
+              rastreio_quando = CASE WHEN $1 = 'Enviado' THEN NOW() ELSE rastreio_quando END
         WHERE id = $2
-      RETURNING id, status`,
+      RETURNING id, rastreio_status`,
       [status, id]
     );
 
@@ -5054,7 +5047,7 @@ router.patch('/solicitacoes/:id/status', async (req, res) => {
       return res.status(404).json({ ok: false, error: 'Registro não encontrado.' });
     }
 
-    return res.json({ ok: true, status: r.rows[0].status });
+    return res.json({ ok: true, rastreio_status: r.rows[0].rastreio_status });
   } catch (err) {
     console.error('[SAC] erro ao atualizar status:', err);
     return res.status(500).json({ ok: false, error: 'Erro ao atualizar status.' });
@@ -5137,9 +5130,9 @@ router.patch('/solicitacoes/:id/status-livre', async (req, res) => {
   try {
     const r = await pool.query(
       `UPDATE envios.solicitacoes
-          SET status = $1
+          SET rastreio_status = $1
         WHERE id = $2
-      RETURNING id, status`,
+      RETURNING id, rastreio_status`,
       [status, id]
     );
 
@@ -5147,7 +5140,7 @@ router.patch('/solicitacoes/:id/status-livre', async (req, res) => {
       return res.status(404).json({ ok: false, error: 'Registro não encontrado.' });
     }
 
-    return res.json({ ok: true, status: r.rows[0].status });
+    return res.json({ ok: true, rastreio_status: r.rows[0].rastreio_status });
   } catch (err) {
     console.error('[SAC] erro ao atualizar status livre:', err);
     return res.status(500).json({ ok: false, error: 'Erro ao atualizar status.' });
@@ -5190,7 +5183,7 @@ router.patch('/solicitacoes/:id/quantidade', async (req, res) => {
   }
 });
 
-// Endpoint para excluir (marcar status como "Excluído")
+// Endpoint para excluir (marcar rastreio_status como "Excluído")
 router.delete('/solicitacoes/:id', async (req, res) => {
   const id = Number(req.params.id);
   if (!Number.isInteger(id) || id <= 0) {
@@ -5200,9 +5193,9 @@ router.delete('/solicitacoes/:id', async (req, res) => {
   try {
     const r = await pool.query(
       `UPDATE envios.solicitacoes
-          SET status = 'Excluído'
+          SET rastreio_status = 'Excluído'
         WHERE id = $1
-      RETURNING id, status`,
+      RETURNING id, rastreio_status`,
       [id]
     );
 
@@ -5210,7 +5203,7 @@ router.delete('/solicitacoes/:id', async (req, res) => {
       return res.status(404).json({ ok: false, error: 'Registro não encontrado.' });
     }
 
-    return res.json({ ok: true, status: r.rows[0].status });
+    return res.json({ ok: true, rastreio_status: r.rows[0].rastreio_status });
   } catch (err) {
     console.error('[SAC] erro ao excluir solicitação:', err);
     return res.status(500).json({ ok: false, error: 'Erro ao excluir solicitação.' });
@@ -8426,7 +8419,7 @@ router.get('/at/pecas-enviadas/:id', async (req, res) => {
     // Busca todos os registros onde algum padrão aparece após "O.S "
     const { rows } = await pool.query(
       `SELECT id, identificacao, observacao, conteudo, etiqueta_url, declaracao_url, anexos,
-              status, created_at, usuario, rastreio_status
+              rastreio_status, created_at, usuario
        FROM envios.solicitacoes
        WHERE ${ patterns.map((_, i) => `observacao ~* ('O\.S[[:space:]]+' || $${i + 1})`).join(' OR ') }
        ORDER BY id DESC`,
@@ -8439,7 +8432,6 @@ router.get('/at/pecas-enviadas/:id', async (req, res) => {
         id:              r.id,
         identificacao:   r.identificacao || '',
         observacao:      r.observacao || '',
-        status:          r.status || '',
         rastreio_status: r.rastreio_status || '',
         usuario:         r.usuario || '',
         created_at:      r.created_at ? new Date(r.created_at).toLocaleDateString('pt-BR') : '',

@@ -18019,7 +18019,6 @@ app.patch('/api/logistica/itens_solicitados/:id/separado', async (req, res) => {
       `UPDATE solicitacao_produto.itens_solicitados SET status = $2 WHERE id = $1`,
       [itemId, statusDestino]
     );
-    if (skipSet.has(itemId)) await _logisticaEnviosVippPosSeparacao(pool, [itemId]);
     console.log(`[logistica/separado] item #${itemId} marcado como ${statusDestino} por user ${id_user}`);
     res.json({ ok: true });
   } catch (err) {
@@ -18049,29 +18048,6 @@ async function _logisticaSolicIdsVippSet(db, solicIds) {
     [ids]
   );
   return new Set(rows.map(r => Number(r.id)));
-}
-
-async function _logisticaEnviosVippPosSeparacao(db, solicIds) {
-  const ids = (solicIds || []).map(id => parseInt(id, 10)).filter(id => !isNaN(id));
-  if (!ids.length) return;
-  try {
-    const { rows } = await db.query(
-      `SELECT DISTINCT i.n_solic
-         FROM solicitacao_produto.itens_solicitados i
-        WHERE i.id = ANY($1::bigint[]) AND i.n_solic IS NOT NULL`,
-      [ids]
-    );
-    for (const { n_solic } of rows) {
-      await db.query(
-        `UPDATE envios.solicitacoes
-            SET status = 'Aguardando identificação'
-          WHERE numero_sep = $1 AND NULLIF(TRIM(id_vipp), '') IS NOT NULL`,
-        [n_solic]
-      );
-    }
-  } catch (e) {
-    console.warn('[logistica/vipp-pos-separacao] envios.solicitacoes:', e.message);
-  }
 }
 
 /** VIPP → Concluído direto; demais fluxos → Separado (Aguardando retirada depois). */
@@ -18105,7 +18081,6 @@ async function _logisticaAplicarStatusPosSeparacao(client, solicIds, req) {
         WHERE id = ANY($1::bigint[])`,
       [idsVipp]
     );
-    await _logisticaEnviosVippPosSeparacao(client, idsVipp);
   }
 
   return { vipp: idsVipp.length, normal: idsNormal.length };
@@ -18983,30 +18958,11 @@ app.patch('/api/logistica/itens_solicitados/aguardando-retirada', async (req, re
         `UPDATE solicitacao_produto.itens_solicitados SET status = 'Concluído' WHERE id = ANY($1::bigint[])`,
         [idsSkip]
       );
-      await _logisticaEnviosVippPosSeparacao(pool, idsSkip);
     }
 
-    // Se a SEP tem origem VIPP, atualiza status em envios.solicitacoes
-    try {
-      const idsEnvio = idsNormal.length ? idsNormal : [];
-      if (!idsEnvio.length) {
-        res.json({ ok: true, concluido_direto: idsSkip.length });
-        return;
-      }
-      const { rows: sepRows } = await pool.query(
-        `SELECT DISTINCT n_solic FROM solicitacao_produto.itens_solicitados WHERE id = ANY($1::bigint[]) AND n_solic IS NOT NULL`,
-        [idsEnvio]
-      );
-      for (const { n_solic } of sepRows) {
-        await pool.query(
-          `UPDATE envios.solicitacoes
-              SET status = 'Aguardando identificação'
-            WHERE numero_sep = $1 AND id_vipp IS NOT NULL`,
-          [n_solic]
-        );
-      }
-    } catch (e) {
-      console.warn('[aguardando-retirada] Falha ao atualizar envios.solicitacoes:', e.message);
+    if (idsSkip.length && !idsNormal.length) {
+      res.json({ ok: true, concluido_direto: idsSkip.length });
+      return;
     }
 
     res.json({ ok: true });
@@ -19709,7 +19665,7 @@ app.post('/api/logistica/separacao/enviar', express.json(), async (req, res) => 
         await pool.query(`ALTER TABLE envios.solicitacoes ADD COLUMN IF NOT EXISTS id_vipp TEXT`);
         await pool.query(`ALTER TABLE envios.solicitacoes ADD COLUMN IF NOT EXISTS metodo_envio TEXT`);
         await pool.query(
-          `INSERT INTO envios.solicitacoes (usuario, observacao, status, numero_sep, id_vipp, anexos, conferido, conteudo, metodo_envio)
+          `INSERT INTO envios.solicitacoes (usuario, observacao, rastreio_status, numero_sep, id_vipp, anexos, conferido, conteudo, metodo_envio)
            VALUES ($1, $2, 'Pendente', $3, $4, '{}', false, $5, $6)`,
           [nome_user, os_num || observacao || null, nSolic, id_vipp ? String(id_vipp) : null, conteudo || null, metodoEnvio]
         );
@@ -37657,8 +37613,6 @@ async function startServer() {
       iniciarCronNotificacaoDiaria();
       const { iniciarCronTurnoDiaAutomatico } = require('./cron/turno_dia_automatico');
       iniciarCronTurnoDiaAutomatico();
-      const { iniciarCronAtualizacaoRastreio } = require('./utils/atualizarRastreioEnvios');
-      iniciarCronAtualizacaoRastreio();
     }, 15000);
   });
 }
