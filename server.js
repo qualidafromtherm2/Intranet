@@ -231,7 +231,7 @@ const API_PUBLIC_PREFIXES = [
   '/api/sac/at/tecnico/os-portal/',   // detalhes de uma OS
   '/api/sac/at/tecnico/fechamento/',  // fechamento + evidências + NFe
   '/api/sac/at/tecnico/material-apoio', // materiais públicos (portal técnico)
-  '/api/sac/at/tecnico/separacao/',     // solicitação de produtos (portal técnico — auth por token)
+  '/api/sac/at/tecnico/separacao',      // solicitação de produtos (portal técnico — auth por token; sem barra final p/ POST /separacao)
   '/api/ai/manual-chat',              // chatbot do portal AT
   '/api/sac/whatsapp/webhook',        // webhook Meta WhatsApp Cloud (verificação GET + POST de mensagens)
   // ── Agente de impressão (auth própria via x-agent-token) ──
