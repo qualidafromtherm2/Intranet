@@ -9924,7 +9924,11 @@ router.post('/at/tecnico/separacao', express.json(), async (req, res) => {
   try {
     await _atEnsureSepSchema();
     const omieRes = await pool.query(
-      `SELECT codigo_produto FROM public.produtos_omie WHERE codigo = $1 LIMIT 1`,
+      `SELECT codigo_produto FROM public.produtos_omie
+        WHERE TRIM(codigo_produto::text) = TRIM($1)
+           OR TRIM(codigo) = TRIM($1)
+        ORDER BY CASE WHEN TRIM(codigo_produto::text) = TRIM($1) THEN 0 ELSE 1 END
+        LIMIT 1`,
       [codigo]
     );
     const cod_omie = omieRes.rows[0]?.codigo_produto || null;

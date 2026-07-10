@@ -157,9 +157,13 @@ async function buscarCodigoProduto(codigo) {
     if (rows.length) return Number(rows[0].codigo_produto);
   }
 
-  // Busca por código textual
+  // Busca por ID Omie (codigo_produto) ou código textual (SKU)
   const { rows } = await dbQuery(
-    `SELECT codigo_produto FROM public.produtos_omie WHERE codigo = $1 LIMIT 1`,
+    `SELECT codigo_produto FROM public.produtos_omie
+      WHERE TRIM(codigo_produto::text) = TRIM($1)
+         OR TRIM(codigo) = TRIM($1)
+      ORDER BY CASE WHEN TRIM(codigo_produto::text) = TRIM($1) THEN 0 ELSE 1 END
+      LIMIT 1`,
     [raw]
   );
   if (!rows.length) {

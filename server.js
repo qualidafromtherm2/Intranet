@@ -2173,7 +2173,10 @@ app.get('/api/engenharia/produto-tarefas/:codigo', async (req, res) => {
     const { codigo } = req.params;
     
     // Busca produto para pegar a família
-    const produtoQuery = `SELECT codigo_familia FROM public.produtos_omie WHERE codigo = $1`;
+    const produtoQuery = `SELECT codigo_familia FROM public.produtos_omie
+      WHERE TRIM(codigo_produto::text) = TRIM($1) OR TRIM(codigo) = TRIM($1)
+      ORDER BY CASE WHEN TRIM(codigo_produto::text) = TRIM($1) THEN 0 ELSE 1 END
+      LIMIT 1`;
     const { rows: [produto] } = await pool.query(produtoQuery, [codigo]);
     
     if (!produto) {
@@ -2241,7 +2244,10 @@ app.get('/api/engenharia/produto-compras/:codigo', async (req, res) => {
     const { codigo } = req.params;
     
     // Busca produto para pegar a família
-    const produtoQuery = `SELECT codigo_familia FROM public.produtos_omie WHERE codigo = $1`;
+    const produtoQuery = `SELECT codigo_familia FROM public.produtos_omie
+      WHERE TRIM(codigo_produto::text) = TRIM($1) OR TRIM(codigo) = TRIM($1)
+      ORDER BY CASE WHEN TRIM(codigo_produto::text) = TRIM($1) THEN 0 ELSE 1 END
+      LIMIT 1`;
     const { rows: [produto] } = await pool.query(produtoQuery, [codigo]);
     
     if (!produto) {
@@ -10624,6 +10630,9 @@ app.use('/etiquetas', requireSessionOrAgentForStatic, express.static(etiquetasRo
     `);
     // Migração: adiciona coluna impressa (booleano) se ainda não existir
     await pool.query(`ALTER TABLE etiqueta."ETQ_recebimento" ADD COLUMN IF NOT EXISTS impressa BOOLEAN NOT NULL DEFAULT FALSE`);
+    // Migração: PIR — só libera etiqueta após registro de inspeção
+    await pool.query(`ALTER TABLE etiqueta."ETQ_recebimento" ADD COLUMN IF NOT EXISTS pir BOOLEAN NOT NULL DEFAULT FALSE`);
+    await pool.query(`ALTER TABLE etiqueta."ETQ_recebimento" ADD COLUMN IF NOT EXISTS oculto BOOLEAN NOT NULL DEFAULT FALSE`);
     // Migração: remove colunas antigas de timestamp de impressão
     await pool.query(`ALTER TABLE etiqueta."ETQ_recebimento" DROP COLUMN IF EXISTS impresso_em`).catch(() => {});
     await pool.query(`ALTER TABLE etiqueta."ETQ_recebimento" DROP COLUMN IF EXISTS impresso_modal_em`).catch(() => {});
@@ -11059,9 +11068,14 @@ async function _resolveProdutoOmieCodigoProduto(db, codigoOuId) {
   const { rows } = await (db || pool).query(
     `SELECT codigo_produto::text AS id_omie
        FROM public.produtos_omie
-      WHERE codigo = $1
-         OR codigo_produto::text = $1
-         OR codigo_produto_integracao = $1
+      WHERE TRIM(codigo_produto::text) = TRIM($1)
+         OR TRIM(codigo) = TRIM($1)
+         OR TRIM(COALESCE(codigo_produto_integracao, '')) = TRIM($1)
+      ORDER BY CASE
+        WHEN TRIM(codigo_produto::text) = TRIM($1) THEN 0
+        WHEN TRIM(codigo) = TRIM($1) THEN 1
+        ELSE 2
+      END
       LIMIT 1`,
     [raw]
   );
@@ -11075,9 +11089,14 @@ async function _resolveProdutoOmieCodigoTexto(db, codigoOuId) {
   const { rows } = await (db || pool).query(
     `SELECT codigo
        FROM public.produtos_omie
-      WHERE codigo = $1
-         OR codigo_produto::text = $1
-         OR codigo_produto_integracao = $1
+      WHERE TRIM(codigo_produto::text) = TRIM($1)
+         OR TRIM(codigo) = TRIM($1)
+         OR TRIM(COALESCE(codigo_produto_integracao, '')) = TRIM($1)
+      ORDER BY CASE
+        WHEN TRIM(codigo_produto::text) = TRIM($1) THEN 0
+        WHEN TRIM(codigo) = TRIM($1) THEN 1
+        ELSE 2
+      END
       LIMIT 1`,
     [raw]
   );
@@ -11409,16 +11428,39 @@ app.get('/api/etiquetas/recebimento/pendentes', async (req, res) => {
     const ocultoCond = mostrarOcultos
       ? `(er.oculto = true OR (er.codigo_produto IS NOT NULL AND er.codigo_produto IN (${_aoSub})))`
       : `(er.oculto = false OR er.oculto IS NULL) AND (er.codigo_produto IS NULL OR er.codigo_produto NOT IN (${_aoSub}))`;
+    // Só exibe no modal Etiquetas disponíveis após PIR aprovado
+    const pirCond = `COALESCE(er.pir, false) = true`;
+    const semMp = req.query.sem_mp === '1' || req.query.sem_mp === 'true';
+    // Padrão: só MP. Com sem_mp=1: itens que NÃO são família MP (ou sem cadastro)
+    const familiaMpCond = semMp
+      ? `NOT EXISTS (
+           SELECT 1 FROM public.produtos_omie po
+            WHERE UPPER(TRIM(COALESCE(po.codint_familia, ''))) = 'MP'
+              AND (
+                TRIM(COALESCE(po.codigo, '')) = TRIM(COALESCE(er.codigo_produto, ''))
+                OR TRIM(COALESCE(po.codigo_produto::text, '')) = TRIM(COALESCE(er.codigo_produto, ''))
+              )
+         )`
+      : `EXISTS (
+           SELECT 1 FROM public.produtos_omie po
+            WHERE UPPER(TRIM(COALESCE(po.codint_familia, ''))) = 'MP'
+              AND (
+                TRIM(COALESCE(po.codigo, '')) = TRIM(COALESCE(er.codigo_produto, ''))
+                OR TRIM(COALESCE(po.codigo_produto::text, '')) = TRIM(COALESCE(er.codigo_produto, ''))
+              )
+         )`;
     const idImpressoSub = `(SELECT id FROM etiqueta."ETQ_rec_impresso" ri WHERE ri.origem_id = er.id ORDER BY ri.id DESC LIMIT 1) AS id_impresso`;
     let rows;
     if (q) {
       const like = `%${q}%`;
       const result = await pool.query(
         `SELECT er.id, er.numero_nfe, er.numero_pedido, er.lote, er.codigo_produto,
-                er.descricao_produto, er.qtd, er.unidade, er.data_emissao, er.criado_em, er.oculto, er.impressa,
+                er.descricao_produto, er.qtd, er.unidade, er.data_emissao, er.criado_em, er.oculto, er.impressa, er.pir,
                 ${idImpressoSub}
            FROM etiqueta."ETQ_recebimento" er
           WHERE ${ocultoCond}
+            AND ${pirCond}
+            AND ${familiaMpCond}
             AND (er.lote ILIKE $1 OR er.codigo_produto ILIKE $1 OR er.descricao_produto ILIKE $1)
           ORDER BY er.impressa DESC, er.criado_em DESC
           LIMIT 200`,
@@ -11428,19 +11470,184 @@ app.get('/api/etiquetas/recebimento/pendentes', async (req, res) => {
     } else {
       const result = await pool.query(
         `SELECT er.id, er.numero_nfe, er.numero_pedido, er.lote, er.codigo_produto,
-                er.descricao_produto, er.qtd, er.unidade, er.data_emissao, er.criado_em, er.oculto, er.impressa,
+                er.descricao_produto, er.qtd, er.unidade, er.data_emissao, er.criado_em, er.oculto, er.impressa, er.pir,
                 ${idImpressoSub}
            FROM etiqueta."ETQ_recebimento" er
           WHERE ${ocultoCond}
+            AND ${pirCond}
+            AND ${familiaMpCond}
           ORDER BY er.impressa DESC, er.criado_em DESC
           LIMIT 200`
       );
       rows = result.rows;
     }
-    res.json({ etiquetas: rows });
+    res.json({ etiquetas: rows, filtro: semMp ? 'sem_mp' : 'mp' });
   } catch (err) {
     console.error('[etiquetas/pendentes]', err);
     res.status(500).json({ error: err?.message || 'Falha ao buscar etiquetas' });
+  }
+});
+
+// GET /api/etiquetas/recebimento/pendentes-pir — itens aguardando registro PIR (pir=false)
+// Inclui alertas: primeira_vez (novo em produtos_omie / 1º recebimento),
+// fornecedor_mudou e produto_customizado.
+app.get('/api/etiquetas/recebimento/pendentes-pir', async (req, res) => {
+  try {
+    // Garante coluna produto_customizado (idempotente)
+    await pool.query(`
+      ALTER TABLE public.produtos_omie
+      ADD COLUMN IF NOT EXISTS produto_customizado BOOLEAN NOT NULL DEFAULT FALSE
+    `).catch(() => {});
+
+    const q = String(req.query.q || '').trim();
+    const semMp = req.query.sem_mp === '1' || req.query.sem_mp === 'true';
+    const sql = `
+      WITH base AS (
+        SELECT er.id, er.numero_nfe, er.numero_pedido, er.lote, er.codigo_produto,
+               er.descricao_produto, er.qtd, er.unidade, er.data_emissao, er.criado_em, er.pir,
+               po.codigo AS po_codigo,
+               po.codigo_produto AS po_codigo_produto,
+               COALESCE(po.produto_customizado, FALSE) AS produto_customizado,
+               po.dinc AS po_dinc,
+               UPPER(TRIM(COALESCE(po.codint_familia, ''))) AS codint_familia,
+               (
+                 SELECT TRIM(COALESCE(r.c_nome_fornecedor, ''))
+                   FROM logistica.recebimentos_nfe_omie r
+                  WHERE TRIM(COALESCE(r.c_numero_nfe, '')) = TRIM(COALESCE(er.numero_nfe, ''))
+                  LIMIT 1
+               ) AS fornecedor_atual,
+               (
+                 SELECT TRIM(COALESCE(r.c_nome_fornecedor, ''))
+                   FROM logistica.recebimentos_nfe_itens i
+                   JOIN logistica.recebimentos_nfe_omie r ON r.n_id_receb = i.n_id_receb
+                  WHERE (
+                          (po.codigo_produto IS NOT NULL AND i.n_id_produto = po.codigo_produto)
+                          OR TRIM(i.n_id_produto::text) = TRIM(COALESCE(er.codigo_produto, ''))
+                        )
+                    AND TRIM(COALESCE(r.c_numero_nfe, '')) <> TRIM(COALESCE(er.numero_nfe, ''))
+                    AND TRIM(COALESCE(r.c_nome_fornecedor, '')) <> ''
+                  ORDER BY COALESCE(r.d_rec, r.created_at::date) DESC NULLS LAST, r.n_id_receb DESC
+                  LIMIT 1
+               ) AS fornecedor_anterior,
+               (
+                 SELECT COUNT(*)::int
+                   FROM logistica.recebimentos_nfe_itens i
+                   JOIN logistica.recebimentos_nfe_omie r ON r.n_id_receb = i.n_id_receb
+                  WHERE (
+                          (po.codigo_produto IS NOT NULL AND i.n_id_produto = po.codigo_produto)
+                          OR TRIM(i.n_id_produto::text) = TRIM(COALESCE(er.codigo_produto, ''))
+                        )
+                    AND TRIM(COALESCE(r.c_numero_nfe, '')) <> TRIM(COALESCE(er.numero_nfe, ''))
+               ) AS qtd_recebimentos_anteriores,
+               (
+                 SELECT COUNT(*)::int
+                   FROM engenharia.alteracoes_produto a
+                  WHERE a.codigo_omie = TRIM(COALESCE(po.codigo_produto::text, ''))
+                     OR a.codigo_omie = TRIM(COALESCE(po.codigo, ''))
+                     OR a.codigo_omie = TRIM(COALESCE(er.codigo_produto, ''))
+               ) AS qtd_alteracoes
+          FROM etiqueta."ETQ_recebimento" er
+          LEFT JOIN LATERAL (
+            SELECT p.codigo, p.codigo_produto, p.produto_customizado, p.dinc, p.codint_familia
+              FROM public.produtos_omie p
+             WHERE TRIM(COALESCE(p.codigo, '')) = TRIM(COALESCE(er.codigo_produto, ''))
+                OR TRIM(COALESCE(p.codigo_produto::text, '')) = TRIM(COALESCE(er.codigo_produto, ''))
+             LIMIT 1
+          ) po ON TRUE
+         WHERE COALESCE(er.pir, false) = false
+           AND (
+             ($2::boolean = false AND UPPER(TRIM(COALESCE(po.codint_familia, ''))) = 'MP')
+             OR
+             ($2::boolean = true AND (
+               po.codigo IS NULL
+               OR UPPER(TRIM(COALESCE(po.codint_familia, ''))) <> 'MP'
+             ))
+           )
+           AND (
+             $1::text IS NULL
+             OR er.lote ILIKE $1
+             OR er.codigo_produto ILIKE $1
+             OR er.descricao_produto ILIKE $1
+             OR er.numero_nfe ILIKE $1
+             OR er.numero_pedido ILIKE $1
+           )
+         ORDER BY er.criado_em DESC
+         LIMIT 300
+      )
+      SELECT
+        id, numero_nfe, numero_pedido, lote, codigo_produto, descricao_produto,
+        qtd, unidade, data_emissao, criado_em, pir,
+        produto_customizado,
+        fornecedor_atual,
+        fornecedor_anterior,
+        qtd_recebimentos_anteriores,
+        qtd_alteracoes,
+        po_codigo,
+        po_codigo_produto,
+        (COALESCE(qtd_alteracoes, 0) > 0) AS tem_alteracao,
+        (
+          qtd_recebimentos_anteriores = 0
+          OR (
+            po_dinc IS NOT NULL
+            AND criado_em IS NOT NULL
+            AND (
+              CASE
+                WHEN TRIM(po_dinc::text) ~ '^[0-9]{2}/[0-9]{2}/[0-9]{4}$'
+                  THEN to_date(TRIM(po_dinc::text), 'DD/MM/YYYY')
+                WHEN TRIM(po_dinc::text) ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}'
+                  THEN LEFT(TRIM(po_dinc::text), 10)::date
+                ELSE NULL
+              END
+            ) >= (criado_em::date - INTERVAL '30 days')
+          )
+        ) AS primeira_vez,
+        (
+          fornecedor_anterior IS NOT NULL
+          AND fornecedor_anterior <> ''
+          AND fornecedor_atual IS NOT NULL
+          AND fornecedor_atual <> ''
+          AND lower(fornecedor_anterior) <> lower(fornecedor_atual)
+        ) AS fornecedor_mudou
+      FROM base
+    `;
+    const like = q ? `%${q}%` : null;
+    const result = await pool.query(sql, [like, semMp]);
+    res.json({
+      etiquetas: (result.rows || []).map((r) => ({
+        ...r,
+        primeira_vez: r.primeira_vez === true,
+        fornecedor_mudou: r.fornecedor_mudou === true,
+        produto_customizado: r.produto_customizado === true,
+        tem_alteracao: r.tem_alteracao === true,
+        qtd_alteracoes: Number(r.qtd_alteracoes || 0)
+      })),
+      filtro: semMp ? 'sem_mp' : 'mp'
+    });
+  } catch (err) {
+    console.error('[etiquetas/pendentes-pir]', err);
+    res.status(500).json({ error: err?.message || 'Falha ao buscar pendentes PIR' });
+  }
+});
+
+// PATCH /api/etiquetas/recebimento/:id/pir — marca/desmarca PIR após registro de inspeção
+app.patch('/api/etiquetas/recebimento/:id/pir', express.json(), async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!id) return res.status(400).json({ error: 'ID inválido.' });
+    const pirRaw = req.body?.pir;
+    const pir = pirRaw === true || pirRaw === 1 || pirRaw === '1' || pirRaw === 'true';
+    const result = await pool.query(
+      `UPDATE etiqueta."ETQ_recebimento"
+          SET pir = $2
+        WHERE id = $1
+        RETURNING id, pir, codigo_produto, numero_nfe, lote`,
+      [id, pir]
+    );
+    if (result.rowCount === 0) return res.status(404).json({ error: 'Registro não encontrado.' });
+    res.json({ ok: true, ...result.rows[0] });
+  } catch (err) {
+    console.error('[etiquetas/pir]', err);
+    res.status(500).json({ error: err?.message || 'Falha ao atualizar PIR.' });
   }
 });
 
@@ -13697,7 +13904,14 @@ app.get('/api/produtos/:codigo/manuais', async (req, res) => {
   try {
     const codigo = String(req.params.codigo || '').trim();
     if (!codigo) return res.status(400).json({ error: 'Código do produto obrigatório' });
-    const { rows } = await pool.query('SELECT manuais FROM public.produtos_omie WHERE codigo = $1 LIMIT 1', [codigo]);
+    const { rows } = await pool.query(
+      `SELECT manuais FROM public.produtos_omie
+        WHERE TRIM(codigo_produto::text) = TRIM($1)
+           OR TRIM(codigo) = TRIM($1)
+        ORDER BY CASE WHEN TRIM(codigo_produto::text) = TRIM($1) THEN 0 ELSE 1 END
+        LIMIT 1`,
+      [codigo]
+    );
     const manuais = Array.isArray(rows[0]?.manuais) ? rows[0].manuais : [];
     res.json({ ok: true, manuais });
   } catch (err) {
@@ -13725,7 +13939,8 @@ app.post('/api/produtos/:codigo/manuais', uploadManual.single('arquivo'), async 
     await pool.query(
       `UPDATE public.produtos_omie
           SET manuais = COALESCE(manuais, '[]'::jsonb) || $1::jsonb
-        WHERE codigo = $2`,
+        WHERE TRIM(codigo_produto::text) = TRIM($2)
+           OR TRIM(codigo) = TRIM($2)`,
       [JSON.stringify([{ nome, url, path: filePath, anexado_em: new Date().toISOString() }]), codigo]
     );
 
@@ -13744,7 +13959,14 @@ app.delete('/api/produtos/:codigo/manuais/:index', async (req, res) => {
     const index = parseInt(req.params.index);
     if (!codigo || isNaN(index) || index < 0) return res.status(400).json({ error: 'Parâmetros inválidos' });
 
-    const { rows } = await pool.query('SELECT manuais FROM public.produtos_omie WHERE codigo = $1 LIMIT 1', [codigo]);
+    const { rows } = await pool.query(
+      `SELECT manuais FROM public.produtos_omie
+        WHERE TRIM(codigo_produto::text) = TRIM($1)
+           OR TRIM(codigo) = TRIM($1)
+        ORDER BY CASE WHEN TRIM(codigo_produto::text) = TRIM($1) THEN 0 ELSE 1 END
+        LIMIT 1`,
+      [codigo]
+    );
     const manuais = Array.isArray(rows[0]?.manuais) ? [...rows[0].manuais] : [];
     if (index >= manuais.length) return res.status(404).json({ error: 'Manual não encontrado' });
 
@@ -13759,7 +13981,12 @@ app.delete('/api/produtos/:codigo/manuais/:index', async (req, res) => {
       }
     }
 
-    await pool.query('UPDATE public.produtos_omie SET manuais = $1::jsonb WHERE codigo = $2', [JSON.stringify(manuais), codigo]);
+    await pool.query(
+      `UPDATE public.produtos_omie SET manuais = $1::jsonb
+        WHERE TRIM(codigo_produto::text) = TRIM($2)
+           OR TRIM(codigo) = TRIM($2)`,
+      [JSON.stringify(manuais), codigo]
+    );
     console.log('[Manuais] removido:', { codigo, index, nome: removido?.nome });
     res.json({ ok: true });
   } catch (err) {
@@ -14497,7 +14724,7 @@ async function obterDescricaoProduto(client, codigo) {
 
   const tryQueries = [
     ['SELECT descricao FROM produtos WHERE codigo = $1 LIMIT 1', [cod]],
-    ['SELECT descricao FROM produtos_omie WHERE codigo = $1 LIMIT 1', [cod]]
+    ['SELECT descricao FROM produtos_omie WHERE TRIM(codigo_produto::text) = TRIM($1) OR TRIM(codigo) = TRIM($1) ORDER BY CASE WHEN TRIM(codigo_produto::text) = TRIM($1) THEN 0 ELSE 1 END LIMIT 1', [cod]]
   ];
 
   for (const [sql, params] of tryQueries) {
@@ -15566,7 +15793,10 @@ function gerarEtiquetaPP({ codMP, op, descricao = '' }) {
         if (!descricao) {
           try {
             const q2 = await pool.query(`
-              SELECT descricao FROM produtos_omie WHERE codigo = $1 LIMIT 1
+              SELECT descricao FROM produtos_omie
+               WHERE TRIM(codigo_produto::text) = TRIM($1) OR TRIM(codigo) = TRIM($1)
+               ORDER BY CASE WHEN TRIM(codigo_produto::text) = TRIM($1) THEN 0 ELSE 1 END
+               LIMIT 1
             `, [codMP]);
             descricao = q2.rows?.[0]?.descricao || descricao;
           } catch {}
@@ -17651,7 +17881,10 @@ app.post('/api/logistica/separacao', express.json(), async (req, res) => {
     }
     // Busca codigo_produto (Omie) na tabela de produtos
     const omieRes = await pool.query(
-      `SELECT codigo_produto FROM public.produtos_omie WHERE codigo = $1 LIMIT 1`,
+      `SELECT codigo_produto FROM public.produtos_omie
+        WHERE TRIM(codigo_produto::text) = TRIM($1) OR TRIM(codigo) = TRIM($1)
+        ORDER BY CASE WHEN TRIM(codigo_produto::text) = TRIM($1) THEN 0 ELSE 1 END
+        LIMIT 1`,
       [codigo]
     );
     const cod_omie = omieRes.rows[0]?.codigo_produto || null;
@@ -21149,7 +21382,10 @@ app.get('/api/produtos/detalhes/:codigo', async (req, res) => {
       
       // Valida se o produto existe
       const checkResult = await pool.query(
-        'SELECT codigo FROM public.produtos_omie WHERE codigo = $1 LIMIT 1',
+        `SELECT codigo FROM public.produtos_omie
+          WHERE TRIM(codigo_produto::text) = TRIM($1) OR TRIM(codigo) = TRIM($1)
+          ORDER BY CASE WHEN TRIM(codigo_produto::text) = TRIM($1) THEN 0 ELSE 1 END
+          LIMIT 1`,
         [codigo]
       );
       
@@ -21245,7 +21481,12 @@ app.get('/api/produtos/detalhes/:codigo', async (req, res) => {
         if (codigoTxt) {
           try {
             const q = await pool.query(
-              `SELECT codigo_produto FROM public.produtos_omie WHERE codigo = $1 OR codigo_produto_integracao = $1 LIMIT 1`,
+              `SELECT codigo_produto FROM public.produtos_omie
+                WHERE TRIM(codigo_produto::text) = TRIM($1)
+                   OR TRIM(codigo) = TRIM($1)
+                   OR TRIM(COALESCE(codigo_produto_integracao, '')) = TRIM($1)
+                ORDER BY CASE WHEN TRIM(codigo_produto::text) = TRIM($1) THEN 0 ELSE 1 END
+                LIMIT 1`,
               [codigoTxt]
             );
             codigoId = q.rows?.[0]?.codigo_produto || null;
@@ -27259,7 +27500,10 @@ app.post('/api/compras/carrinho', express.json(), async (req, res) => {
     let codigoOmieValidado = item.codigo_omie || null;
     if (codigoOmieValidado) {
       const { rows: validacaoOmie } = await pool.query(
-        `SELECT codigo_produto FROM public.produtos_omie WHERE codigo = $1 LIMIT 1`,
+        `SELECT codigo_produto FROM public.produtos_omie
+        WHERE TRIM(codigo_produto::text) = TRIM($1) OR TRIM(codigo) = TRIM($1)
+        ORDER BY CASE WHEN TRIM(codigo_produto::text) = TRIM($1) THEN 0 ELSE 1 END
+        LIMIT 1`,
         [produtoCodigo]
       );
       const codigoOmieEsperado = validacaoOmie.length > 0 ? validacaoOmie[0].codigo_produto : null;
@@ -27269,7 +27513,10 @@ app.post('/api/compras/carrinho', express.json(), async (req, res) => {
       }
     } else if (produtoCodigo) {
       const { rows: buscaOmie } = await pool.query(
-        `SELECT codigo_produto FROM public.produtos_omie WHERE codigo = $1 LIMIT 1`,
+        `SELECT codigo_produto FROM public.produtos_omie
+        WHERE TRIM(codigo_produto::text) = TRIM($1) OR TRIM(codigo) = TRIM($1)
+        ORDER BY CASE WHEN TRIM(codigo_produto::text) = TRIM($1) THEN 0 ELSE 1 END
+        LIMIT 1`,
         [produtoCodigo]
       );
       if (buscaOmie.length > 0) codigoOmieValidado = buscaOmie[0].codigo_produto;
@@ -27382,7 +27629,10 @@ app.put('/api/compras/carrinho/:id', express.json(), async (req, res) => {
     let codigoOmieValidadoPUT = item.codigo_omie || null;
     if (produtoCodigoPUT) {
       const { rows: validacaoOmiePUT } = await pool.query(
-        `SELECT codigo_produto FROM public.produtos_omie WHERE codigo = $1 LIMIT 1`,
+        `SELECT codigo_produto FROM public.produtos_omie
+        WHERE TRIM(codigo_produto::text) = TRIM($1) OR TRIM(codigo) = TRIM($1)
+        ORDER BY CASE WHEN TRIM(codigo_produto::text) = TRIM($1) THEN 0 ELSE 1 END
+        LIMIT 1`,
         [produtoCodigoPUT]
       );
       const codigoOmieEsperadoPUT = validacaoOmiePUT.length > 0 ? validacaoOmiePUT[0].codigo_produto : null;
@@ -38498,7 +38748,10 @@ async function omieIncluirEstrutura(codProduto, mainItems) {
 
   // 1) Busca idProduto do produto pai
   const paiRes = await pool.query(
-    `SELECT codigo_produto FROM public.produtos_omie WHERE codigo = $1 LIMIT 1`,
+    `SELECT codigo_produto FROM public.produtos_omie
+      WHERE TRIM(codigo_produto::text) = TRIM($1) OR TRIM(codigo) = TRIM($1)
+      ORDER BY CASE WHEN TRIM(codigo_produto::text) = TRIM($1) THEN 0 ELSE 1 END
+      LIMIT 1`,
     [codProduto]
   );
   if (!paiRes.rowCount) {

@@ -280,13 +280,19 @@ async function registrarRiLiberacao(numeroOp, usuario, status) {
 async function resolverCodigoProdutoOmieId(codigoOuId) {
   const raw = String(codigoOuId || '').trim();
   if (!raw) return null;
-  if (/^\d+$/.test(raw)) return Number(raw);
+  // ID Omie típico (ex. 10409717177): usar direto se já for numérico longo
+  if (/^\d{8,}$/.test(raw)) return Number(raw);
   const { rows } = await dbQuery(
     `SELECT codigo_produto
        FROM public.produtos_omie
-      WHERE codigo = $1
-         OR codigo_produto::text = $1
-         OR codigo_produto_integracao = $1
+      WHERE TRIM(codigo_produto::text) = TRIM($1)
+         OR TRIM(codigo) = TRIM($1)
+         OR TRIM(COALESCE(codigo_produto_integracao, '')) = TRIM($1)
+      ORDER BY CASE
+        WHEN TRIM(codigo_produto::text) = TRIM($1) THEN 0
+        WHEN TRIM(codigo) = TRIM($1) THEN 1
+        ELSE 2
+      END
       LIMIT 1`,
     [raw]
   );
