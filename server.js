@@ -19706,7 +19706,6 @@ app.get('/api/logistica/estoque/batch', async (req, res) => {
 
     const dados = {};
     const minimos = {};
-    const PORTA_PALLET_CODE = '10717096386';
 
     // Passo 1: coleta todos os dados
     for (const row of rows) {
@@ -19718,23 +19717,19 @@ app.get('/api/logistica/estoque/batch', async (req, res) => {
         unidade: row.unidade || ''
       });
 
-      if (!minimos[row.codigo]) minimos[row.codigo] = { min: 0, saldoAlmox: null, abaixo: false };
+      if (!minimos[row.codigo]) minimos[row.codigo] = { min: 0, saldoTotal: 0, abaixo: false };
       const min = parseFloat(row.estoque_minimo) || 0;
-      // Guarda o maior estoque_minimo encontrado para o produto
+      // Exibe no card o maior estoque_minimo entre todos os armazéns
       if (min > minimos[row.codigo].min) minimos[row.codigo].min = min;
-      // Guarda saldo físico do PORTA PALLET (ALMOXARIFADO) — local 10717096386
-      if (String(row.local_codigo) === PORTA_PALLET_CODE) {
-        minimos[row.codigo].saldoAlmox = parseFloat(row.fisico) || 0;
-      }
+      // Soma o físico de todos os armazéns para comparar com o mínimo
+      minimos[row.codigo].saldoTotal += parseFloat(row.fisico) || 0;
     }
 
-    // Passo 2: calcula abaixo_minimo com o min correto
+    // Passo 2: abaixo do mínimo = soma de todos os armazéns < maior mínimo cadastrado
     for (const cod of Object.keys(minimos)) {
       const info = minimos[cod];
-      // Se produto NÃO está no PORTA PALLET, considera saldo 0 → abaixo do mínimo
       if (info.min > 0) {
-        const saldo = info.saldoAlmox === null ? 0 : info.saldoAlmox;
-        info.abaixo = saldo < info.min;
+        info.abaixo = info.saldoTotal < info.min;
       }
     }
 
@@ -29570,25 +29565,33 @@ app.get('/api/logistica/produtos-no-minimo', async (req, res) => {
         FROM logistica.estoque_atual
         WHERE COALESCE(estoque_minimo, 0) > 0
         GROUP BY omie_prod_id
+      ),
+      totais AS (
+        SELECT omie_prod_id,
+               SUM(COALESCE(fisico, 0)) AS fisico_total,
+               MAX(codigo) AS codigo,
+               MAX(descricao) AS descricao,
+               MAX(updated_at) AS updated_at
+        FROM logistica.estoque_atual
+        GROUP BY omie_prod_id
       )
       SELECT
         m.omie_prod_id                              AS codigo_produto,
-        COALESCE(pp.codigo, po.codigo)              AS codigo,
-        COALESCE(po.descricao, pp.descricao)        AS descricao,
-        '10717096386'                               AS local_codigo,
-        '2. PORTA PALLET (ALMOXARIFADO)'            AS local_nome,
-        COALESCE(pp.fisico, 0)                      AS fisico,
+        COALESCE(t.codigo, po.codigo)               AS codigo,
+        COALESCE(po.descricao, t.descricao)         AS descricao,
+        NULL                                        AS local_codigo,
+        'TODOS OS ARMAZÉNS'                         AS local_nome,
+        COALESCE(t.fisico_total, 0)                 AS fisico,
         m.minimo                                    AS estoque_minimo,
-        (m.minimo - COALESCE(pp.fisico, 0))         AS deficit,
-        COALESCE(pp.updated_at, NOW())              AS data_posicao
+        (m.minimo - COALESCE(t.fisico_total, 0))    AS deficit,
+        COALESCE(t.updated_at, NOW())               AS data_posicao
       FROM minimos m
       JOIN public.produtos_omie po
         ON po.codigo_produto = m.omie_prod_id
-      LEFT JOIN logistica.estoque_atual pp
-        ON pp.omie_prod_id = m.omie_prod_id
-       AND pp.local_codigo = '10717096386'
-      WHERE COALESCE(pp.fisico, 0) < m.minimo
-        AND COALESCE(po.descricao, pp.descricao, '') !~* '^\\s*(engenharia|obsoleto)'
+      LEFT JOIN totais t
+        ON t.omie_prod_id = m.omie_prod_id
+      WHERE COALESCE(t.fisico_total, 0) < m.minimo
+        AND COALESCE(po.descricao, t.descricao, '') !~* '^\\s*(engenharia|obsoleto)'
       ORDER BY deficit DESC, descricao ASC
       LIMIT 2000
     `);
