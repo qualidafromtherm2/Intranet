@@ -131,9 +131,13 @@ router.get('/buscar-por-codigo', requireAuth, async (req, res) => {
       return res.status(400).json({ error: 'codigo é obrigatório.' });
     }
 
-    // Localiza o produto pelo código texto para obter o codigo_produto (ID numérico Omie)
+    // Localiza o produto pelo ID Omie (codigo_produto) ou SKU (codigo)
     const { rows: prodRows } = await dbQuery(
-      `SELECT codigo_produto, descricao FROM public.produtos_omie WHERE codigo = $1 LIMIT 1`,
+      `SELECT codigo_produto, descricao FROM public.produtos_omie
+        WHERE TRIM(codigo_produto::text) = TRIM($1)
+           OR TRIM(codigo) = TRIM($1)
+        ORDER BY CASE WHEN TRIM(codigo_produto::text) = TRIM($1) THEN 0 ELSE 1 END
+        LIMIT 1`,
       [codigoTexto]
     );
     if (!prodRows.length) {

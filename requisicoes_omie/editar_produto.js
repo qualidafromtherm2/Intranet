@@ -492,6 +492,45 @@ export function attachTipoCompraEditor(li, f, currentValue) {
   });
 }
 
+// Editor checkbox para produto_customizado (salva no Postgres via omie_manual)
+export function attachProdutoCustomizadoEditor(li, f, currentValue) {
+  const checkbox = li.querySelector('.produto-customizado-check');
+  const label = li.querySelector('.produto-customizado-label');
+  if (!checkbox) return;
+
+  let salvando = false;
+  checkbox.addEventListener('change', async () => {
+    if (salvando) return;
+    const novoValor = checkbox.checked === true;
+    const anterior = !novoValor;
+    salvando = true;
+    checkbox.disabled = true;
+    if (label) label.textContent = 'Salvando...';
+
+    try {
+      const resp = await fetch(`/api/produtos/${encodeURIComponent(currentCodigo)}/produto-customizado`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ produto_customizado: novoValor })
+      });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok || data.ok === false) {
+        throw new Error(data.error || `HTTP ${resp.status}`);
+      }
+      if (label) label.textContent = novoValor ? 'Sim' : 'Não';
+    } catch (err) {
+      console.error('✖ Falha ao salvar produto_customizado:', err);
+      checkbox.checked = anterior;
+      if (label) label.textContent = anterior ? 'Sim' : 'Não';
+      alert(err?.message || 'Erro ao salvar Produto customizado.');
+    } finally {
+      salvando = false;
+      checkbox.disabled = false;
+    }
+  });
+}
+
 // Editor para campo preco_definido (salva apenas no Postgres)
 export function attachPrecoDefinidoEditor(li, f, currentValue) {
   const btn = li.querySelector('.edit-button');

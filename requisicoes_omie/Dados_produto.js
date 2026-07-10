@@ -8,6 +8,7 @@ import {
   attachVisivelPrincipalEditor,
   attachTipoCompraEditor,
   attachPrecoDefinidoEditor,
+  attachProdutoCustomizadoEditor,
   ensureSaveAllBtn
 } from './editar_produto.js';
 
@@ -640,7 +641,8 @@ camposCompras.forEach(f => {
     { key: 'obs_internas',      label: 'Obs internas'      },
     { key: 'visivel_principal', label: 'Visível como principal?' },
     { key: 'tipo_compra',       label: 'Tipo de compra' },
-    { key: 'preco_definido',    label: 'Preço definido' }
+    { key: 'preco_definido',    label: 'Preço definido' },
+    { key: 'produto_customizado', label: 'Produto customizado' }
   ];
 
   // === garante que o carrossel use SEMPRE o código numérico ===
@@ -668,6 +670,8 @@ try {
       const norm = String(raw).trim().toUpperCase();
       val = norm === 'S' || norm === 'SIM' || raw === true ? 'Sim'
         : (norm === 'N' || norm === 'NAO' || norm === 'NÃO' || raw === false ? 'Não' : '');
+    } else if (f.key === 'produto_customizado') {
+      val = raw === true || raw === 'true' || raw === 1 || raw === '1' ? 'Sim' : 'Não';
     } else if (f.key === 'tipo_compra') {
       const map = {
         'AUTOMATICA': 'Automática',
@@ -679,6 +683,27 @@ try {
     }
     const canEdit = hasPermissao('alterar_dados') && !nonEditableKeys.has(f.key);
     const isObrigatorioVazio = camposObrigatoriosVazios.includes(f.key);
+
+    // Produto customizado: checkbox direto (ativa/desativa na hora)
+    if (f.key === 'produto_customizado') {
+      const marcado = raw === true || raw === 'true' || raw === 1 || raw === '1';
+      const li = document.createElement('li');
+      li.innerHTML = `
+        <div class="products">Produto customizado</div>
+        <div class="status-text" style="display:flex;align-items:center;gap:10px;">
+          <label style="display:inline-flex;align-items:center;gap:8px;cursor:${canEdit ? 'pointer' : 'default'};font-weight:600;">
+            <input type="checkbox" class="produto-customizado-check" ${marcado ? 'checked' : ''} ${canEdit ? '' : 'disabled'}
+              style="width:16px;height:16px;cursor:${canEdit ? 'pointer' : 'not-allowed'};" />
+            <span class="produto-customizado-label">${marcado ? 'Sim' : 'Não'}</span>
+          </label>
+        </div>
+        <div class="button-wrapper"></div>
+      `;
+      ulDetalhes.appendChild(li);
+      if (canEdit) attachProdutoCustomizadoEditor(li, f, marcado);
+      return;
+    }
+
     const li = document.createElement('li');
     li.innerHTML = `
       <div class="products" style="${isObrigatorioVazio ? 'color: #ef4444; font-weight: 600;' : ''}">${f.label}${isObrigatorioVazio ? ' ⚠️' : ''}</div>

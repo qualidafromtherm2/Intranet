@@ -8446,6 +8446,7 @@ if (qualidadeFabricaMenuLink) {
     qualidadeFabricaMenuLink.classList.add('is-active');
     showMainTab('qualidadeFabricaPane');
     mostrarPainelQualidade('registro');
+    carregarQualidadePirPendentes();
     carregarStatusVerificacaoPirQualidade(obterCodigoProdutoQualidadeAtual());
   });
 }
@@ -8467,6 +8468,16 @@ const qualidadeRelatorioTabelaBtn = document.getElementById('qualidadeRelatorioT
 const qualidadeListaPirCodigosBtn = document.getElementById('qualidadeListaPirCodigosBtn');
 const qualidadeRegistroBtn = document.getElementById('qualidadeRegistroBtn');
 const qualidadeVoltarRegistroBtn = document.getElementById('qualidadeVoltarRegistroBtn');
+const qualidadeNovoRegistroBtn = document.getElementById('qualidadeNovoRegistroBtn');
+const qualidadePirRefreshBtn = document.getElementById('qualidadePirRefreshBtn');
+const qualidadePirSemMpBtn = document.getElementById('qualidadePirSemMpBtn');
+const qualidadePirPendentesWrap = document.getElementById('qualidadePirPendentesWrap');
+const qualidadePirPendentesBody = document.getElementById('qualidadePirPendentesBody');
+const qualidadePirPendentesBusca = document.getElementById('qualidadePirPendentesBusca');
+const qualidadePirPendentesCount = document.getElementById('qualidadePirPendentesCount');
+const qualidadeInspecaoModal = document.getElementById('qualidadeInspecaoModal');
+const qualidadeInspecaoModalFechar = document.getElementById('qualidadeInspecaoModalFechar');
+const qualidadeEtqRecebimentoId = document.getElementById('qualidadeEtqRecebimentoId');
 const qualidadeInspecaoForm = document.getElementById('qualidadeInspecaoForm');
 const qualidadeRelatorioTabelaWrap = document.getElementById('qualidadeRelatorioTabelaWrap');
 const qualidadeListaPirCodigosWrap = document.getElementById('qualidadeListaPirCodigosWrap');
@@ -8490,6 +8501,7 @@ const qualidadeNfe = document.getElementById('qualidadeNfe');
 const qualidadeNfeLista = document.getElementById('qualidadeNfeLista');
 const qualidadeQuantidadeOk = document.getElementById('qualidadeQuantidadeOk');
 const qualidadeQuantidadeNok = document.getElementById('qualidadeQuantidadeNok');
+const qualidadeProdutoCustomizadoCheck = document.getElementById('qualidadeProdutoCustomizadoCheck');
 const qualidadePirVerificacaoCheckbox = document.getElementById('qualidadePirVerificacaoCheckbox');
 const qualidadeManuaisPrincipaisBtn = document.getElementById('qualidadeManuaisPrincipaisBtn');
 const qualidadeManuaisRecarregarBtn = document.getElementById('qualidadeManuaisRecarregarBtn');
@@ -8499,6 +8511,9 @@ const qualidadeManuaisMeta = document.getElementById('qualidadeManuaisMeta');
 let qualidadePirVerificacaoSalvando = false;
 let qualidadeListaPirOrigem = 'pir';
 let qualidadeManuaisCarregando = false;
+let qualidadePirPendentesDebounce = null;
+let qualidadePirEtqAtualId = null;
+let qualidadePirMostrarSemMp = false;
 
 function qualidadeManuaisEscapeHtml(value) {
   return String(value ?? '').replace(/[&<>\"]/g, (ch) => ({
@@ -9428,7 +9443,9 @@ document.addEventListener('click', (e) => {
 });
 
 function obterCodigoProdutoQualidadeAtual() {
+  // Preferir ID Omie fixo (codigo_produto); SKU (codigo) só como fallback
   return String(
+    qualidadeCodigoProdutoReal?.value ||
     qualidadeCodProduto?.value ||
     window.codigoSelecionado ||
     ''
@@ -9583,8 +9600,8 @@ qualidadeListaPirAlternarOrigemBtn?.addEventListener('click', async (e) => {
 });
 
 function mostrarPainelQualidade(modo = 'registro') {
-  if (qualidadeInspecaoForm) {
-    qualidadeInspecaoForm.style.display = modo === 'registro' ? 'block' : 'none';
+  if (qualidadePirPendentesWrap) {
+    qualidadePirPendentesWrap.style.display = modo === 'registro' ? 'block' : 'none';
   }
   if (qualidadeRelatorioTabelaWrap) {
     qualidadeRelatorioTabelaWrap.style.display = modo === 'tabela' ? 'block' : 'none';
@@ -9595,6 +9612,317 @@ function mostrarPainelQualidade(modo = 'registro') {
   if (qualidadeRegistroBtn) {
     qualidadeRegistroBtn.style.display = modo === 'registro' ? 'none' : 'inline-flex';
   }
+}
+
+function qualidadePirEscapeHtml(value) {
+  return String(value ?? '').replace(/[&<>\"]/g, (ch) => ({
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;'
+  }[ch]));
+}
+
+function formatarDataPirPendente(valor) {
+  if (!valor) return '-';
+  const d = new Date(valor);
+  if (Number.isNaN(d.getTime())) return String(valor);
+  return d.toLocaleString('pt-BR');
+}
+
+function renderQualidadePirPendentes(itens = []) {
+  if (!qualidadePirPendentesBody) return;
+  const lista = Array.isArray(itens) ? itens : [];
+  if (qualidadePirPendentesCount) {
+    const sufixo = qualidadePirMostrarSemMp ? ' (sem MP)' : ' (MP)';
+    qualidadePirPendentesCount.textContent = `${lista.length} pendente${lista.length === 1 ? '' : 's'}${sufixo}`;
+  }
+  if (!lista.length) {
+    qualidadePirPendentesBody.innerHTML = `
+      <tr>
+        <td colspan="7" style="text-align:center;padding:36px;color:#94a3b8;">
+          Nenhum item aguardando inspeção PIR.
+        </td>
+      </tr>`;
+    return;
+  }
+  qualidadePirPendentesBody.innerHTML = lista.map((item) => {
+    const id = Number(item?.id) || 0;
+    const lote = qualidadePirEscapeHtml(item?.lote || '-');
+    const nfe = qualidadePirEscapeHtml(item?.numero_nfe || '-');
+    const codigo = qualidadePirEscapeHtml(item?.codigo_produto || '-');
+    const desc = qualidadePirEscapeHtml(item?.descricao_produto || '-');
+    const qtd = item?.qtd != null
+      ? qualidadePirEscapeHtml(formatarQuantidadeExibicao(item.qtd))
+      : '-';
+    const un = item?.unidade ? ` ${qualidadePirEscapeHtml(item.unidade)}` : '';
+    const criado = qualidadePirEscapeHtml(formatarDataPirPendente(item?.criado_em));
+
+    const icons = [];
+    if (item?.primeira_vez) {
+      icons.push(`<span title="Produto novo — primeira vez no cadastro / 1º recebimento" style="display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:8px;background:#dbeafe;color:#1d4ed8;" aria-label="Produto novo"><i class="fa-solid fa-seedling"></i></span>`);
+    }
+    if (item?.fornecedor_mudou) {
+      const ant = qualidadePirEscapeHtml(item?.fornecedor_anterior || '?');
+      const atu = qualidadePirEscapeHtml(item?.fornecedor_atual || '?');
+      icons.push(`<span title="Fornecedor mudou: ${ant} → ${atu}" style="display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:8px;background:#ffedd5;color:#c2410c;" aria-label="Fornecedor mudou"><i class="fa-solid fa-truck-arrow-right"></i></span>`);
+    }
+    if (item?.produto_customizado) {
+      icons.push(`<span title="Produto customizado" style="display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:8px;background:#f3e8ff;color:#7e22ce;" aria-label="Produto customizado"><i class="fa-solid fa-puzzle-piece"></i></span>`);
+    }
+    if (item?.tem_alteracao) {
+      const qtdAlt = Number(item?.qtd_alteracoes || 0);
+      const codBusca = qualidadePirEscapeHtml(
+        String(item?.po_codigo_produto || item?.po_codigo || item?.codigo_produto || '').trim()
+      );
+      icons.push(`<button type="button" class="qualidade-pir-btn-alteracao" data-codigo="${codBusca}" data-desc="${desc}"
+        title="Há alteração de engenharia${qtdAlt ? ` (${qtdAlt})` : ''} — clique para ver"
+        style="display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:8px;background:#fee2e2;color:#b91c1c;border:none;cursor:pointer;"
+        aria-label="Alteração de produto"><i class="fa-solid fa-screwdriver-wrench"></i></button>`);
+    }
+    const alertasHtml = icons.length
+      ? `<div style="display:flex;align-items:center;justify-content:center;gap:6px;flex-wrap:wrap;">${icons.join('')}</div>`
+      : `<span style="color:#94a3b8;font-size:12px;">—</span>`;
+
+    return `
+      <tr class="qualidade-pir-pendente-row" data-id="${id}"
+          style="cursor:pointer;border-bottom:1px solid var(--border-color);"
+          title="Abrir registro de inspeção">
+        <td style="padding:10px 12px;text-align:center;vertical-align:middle;">${alertasHtml}</td>
+        <td style="padding:12px 14px;white-space:nowrap;">${lote}</td>
+        <td style="padding:12px 14px;white-space:nowrap;">${nfe}</td>
+        <td style="padding:12px 14px;white-space:nowrap;color:#93c5fd;font-weight:600;">${codigo}</td>
+        <td style="padding:12px 14px;">${desc}</td>
+        <td style="padding:12px 14px;text-align:right;white-space:nowrap;">${qtd}${un}</td>
+        <td style="padding:12px 14px;white-space:nowrap;color:var(--inactive-color);font-size:12px;">${criado}</td>
+      </tr>`;
+  }).join('');
+
+  qualidadePirPendentesBody.querySelectorAll('.qualidade-pir-pendente-row').forEach((row) => {
+    row.addEventListener('click', () => {
+      const id = Number(row.getAttribute('data-id') || 0);
+      const item = lista.find((x) => Number(x.id) === id);
+      if (item) abrirModalInspecaoQualidade(item);
+    });
+    row.addEventListener('mouseenter', () => { row.style.background = 'rgba(20,184,166,0.08)'; });
+    row.addEventListener('mouseleave', () => { row.style.background = ''; });
+  });
+
+  qualidadePirPendentesBody.querySelectorAll('.qualidade-pir-btn-alteracao').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const codigo = String(btn.getAttribute('data-codigo') || '').trim();
+      const desc = String(btn.getAttribute('data-desc') || '').trim();
+      abrirModalAlteracoesProdutoPir(codigo, desc);
+    });
+  });
+}
+
+async function carregarQualidadePirPendentes(q = '') {
+  if (!qualidadePirPendentesBody) return;
+  qualidadePirPendentesBody.innerHTML = `
+    <tr>
+      <td colspan="7" style="text-align:center;padding:36px;color:#94a3b8;">
+        <i class="fa-solid fa-spinner fa-spin" style="font-size:22px;margin-bottom:8px;"></i>
+        <div>Carregando pendentes...</div>
+      </td>
+    </tr>`;
+  try {
+    const params = new URLSearchParams();
+    if (q) params.set('q', q);
+    if (qualidadePirMostrarSemMp) params.set('sem_mp', '1');
+    const url = '/api/etiquetas/recebimento/pendentes-pir' + (params.toString() ? `?${params}` : '');
+    const resp = await fetch(url, { credentials: 'include' });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const data = await resp.json();
+    renderQualidadePirPendentes(data.etiquetas || []);
+  } catch (err) {
+    console.error('[QUALIDADE] erro ao carregar pendentes PIR', err);
+    qualidadePirPendentesBody.innerHTML = `
+      <tr>
+        <td colspan="7" style="text-align:center;padding:36px;color:#f87171;">
+          Erro ao carregar: ${qualidadePirEscapeHtml(err?.message || 'falha')}
+        </td>
+      </tr>`;
+  }
+}
+
+function atualizarBotaoPirSemMp() {
+  if (!qualidadePirSemMpBtn) return;
+  if (qualidadePirMostrarSemMp) {
+    qualidadePirSemMpBtn.style.background = 'linear-gradient(135deg,#f59e0b 0%,#d97706 100%)';
+    qualidadePirSemMpBtn.innerHTML = '<i class="fa-solid fa-filter"></i><span>Ver só MP</span>';
+    qualidadePirSemMpBtn.title = 'Voltar a exibir apenas família MP';
+  } else {
+    qualidadePirSemMpBtn.style.background = '#64748b';
+    qualidadePirSemMpBtn.innerHTML = '<i class="fa-solid fa-filter"></i><span>Ver sem MP</span>';
+    qualidadePirSemMpBtn.title = 'Exibir itens que não são família MP';
+  }
+}
+
+async function salvarProdutoCustomizadoInspecao(codigoProduto, valor) {
+  const codigo = String(codigoProduto || '').trim();
+  if (!codigo) throw new Error('Informe o Cod_produto para marcar como customizado.');
+  const resp = await fetch(`/api/produtos/${encodeURIComponent(codigo)}/produto-customizado`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',
+    body: JSON.stringify({ produto_customizado: valor === true })
+  });
+  const data = await resp.json().catch(() => ({}));
+  if (!resp.ok || data.ok === false) {
+    throw new Error(data.error || `Falha ao salvar produto customizado (HTTP ${resp.status})`);
+  }
+  return data;
+}
+
+async function carregarStatusProdutoCustomizadoInspecao(codigoProduto) {
+  if (!qualidadeProdutoCustomizadoCheck) return;
+  const codigo = String(codigoProduto || '').trim();
+  if (!codigo) {
+    qualidadeProdutoCustomizadoCheck.checked = false;
+    qualidadeProdutoCustomizadoCheck.disabled = true;
+    return;
+  }
+  qualidadeProdutoCustomizadoCheck.disabled = true;
+  try {
+    const resp = await fetch(`/api/produtos/${encodeURIComponent(codigo)}/produto-customizado`, {
+      credentials: 'include'
+    });
+    if (resp.status === 404) {
+      qualidadeProdutoCustomizadoCheck.checked = false;
+      return;
+    }
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const data = await resp.json();
+    qualidadeProdutoCustomizadoCheck.checked = data?.produto_customizado === true;
+  } catch (err) {
+    console.warn('[QUALIDADE] falha ao carregar produto_customizado', err);
+  } finally {
+    qualidadeProdutoCustomizadoCheck.disabled = false;
+  }
+}
+
+// Salva na hora ao marcar/desmarcar no modal Registro de inspeção
+let qualidadeProdutoCustomizadoSalvando = false;
+qualidadeProdutoCustomizadoCheck?.addEventListener('change', async (event) => {
+  if (qualidadeProdutoCustomizadoSalvando) return;
+  const codigo = String(
+    qualidadeCodigoProdutoReal?.value ||
+    qualidadeCodProduto?.value ||
+    ''
+  ).trim();
+  const marcado = event.target.checked === true;
+  if (!codigo) {
+    alert('Informe o Cod_produto antes de marcar como customizado.');
+    event.target.checked = false;
+    return;
+  }
+
+  qualidadeProdutoCustomizadoSalvando = true;
+  event.target.disabled = true;
+  try {
+    await salvarProdutoCustomizadoInspecao(codigo, marcado);
+    // Atualiza a lista de pendentes para refletir o ícone
+    if (qualidadePirPendentesWrap?.style.display !== 'none') {
+      carregarQualidadePirPendentes(qualidadePirPendentesBusca?.value?.trim() || '');
+    }
+  } catch (err) {
+    console.error('[QUALIDADE] erro ao salvar produto customizado', err);
+    event.target.checked = !marcado;
+    alert(err?.message || 'Erro ao salvar Produto customizado.');
+  } finally {
+    qualidadeProdutoCustomizadoSalvando = false;
+    event.target.disabled = false;
+  }
+});
+
+function abrirModalInspecaoQualidade(item = null) {
+  resetFormularioInspecaoQualidade();
+  qualidadePirEtqAtualId = item?.id ? Number(item.id) : null;
+  if (qualidadeEtqRecebimentoId) {
+    qualidadeEtqRecebimentoId.value = qualidadePirEtqAtualId ? String(qualidadePirEtqAtualId) : '';
+  }
+
+  if (item) {
+    const codigo = String(item.codigo_produto || '').trim();
+    const desc = String(item.descricao_produto || '').trim();
+    const nfe = String(item.numero_nfe || '').trim();
+    const qtd = item.qtd != null ? formatarQuantidadeExibicao(item.qtd) : '';
+    const pareceIdOmie = /^\d{8,}$/.test(codigo);
+    if (qualidadeCodProduto) qualidadeCodProduto.value = pareceIdOmie ? '' : codigo;
+    if (qualidadeCodigoProdutoReal) qualidadeCodigoProdutoReal.value = pareceIdOmie ? codigo : '';
+    if (qualidadeDescricaoProduto) qualidadeDescricaoProduto.value = desc;
+    if (qualidadeProdutoBusca) qualidadeProdutoBusca.value = codigo || desc;
+    if (qualidadeNfe) qualidadeNfe.value = nfe;
+    if (qualidadeQuantidadeOk && qtd && qtd !== '-') qualidadeQuantidadeOk.value = qtd;
+    if (qualidadeProdutoCustomizadoCheck) {
+      qualidadeProdutoCustomizadoCheck.checked = item?.produto_customizado === true;
+      qualidadeProdutoCustomizadoCheck.disabled = !codigo;
+    }
+    if (codigo) {
+      carregarStatusVerificacaoPirQualidade(codigo);
+      carregarStatusProdutoCustomizadoInspecao(codigo);
+      // Resolve id Omie para carregar plano PIR / imagem / NFe
+      (async () => {
+        try {
+          const resp = await fetch('/api/produtos/busca', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
+            body: JSON.stringify({ q: codigo })
+          });
+          if (resp.ok) {
+            const data = await resp.json();
+            const itens = Array.isArray(data?.itens) ? data.itens : (Array.isArray(data) ? data : []);
+            const match = itens.find((it) => String(it.codigo || '').trim() === codigo)
+              || itens.find((it) => String(it.codigo_produto || '').trim() === codigo)
+              || itens[0];
+            if (match) {
+              if (qualidadeCodProduto && match.codigo) qualidadeCodProduto.value = match.codigo;
+              if (qualidadeDescricaoProduto && match.descricao) qualidadeDescricaoProduto.value = match.descricao;
+              if (qualidadeCodigoProdutoReal) qualidadeCodigoProdutoReal.value = match.codigo_produto || '';
+              const idOmie = match.codigo_produto || codigo;
+              carregarQualidadePirItens(idOmie);
+              carregarQualidadeImagemProduto(idOmie);
+              carregarQualidadeNfeList(idOmie);
+              if (match.codigo_produto || match.codigo) {
+                carregarStatusProdutoCustomizadoInspecao(match.codigo_produto || match.codigo);
+                carregarStatusVerificacaoPirQualidade(match.codigo_produto || match.codigo);
+              }
+              return;
+            }
+          }
+        } catch (_) { /* fallback abaixo */ }
+        carregarQualidadeImagemProduto(codigo);
+        carregarQualidadeNfeList(codigo);
+      })();
+    }
+  }
+
+  if (qualidadeInspecaoModal) qualidadeInspecaoModal.style.display = 'flex';
+}
+
+function fecharModalInspecaoQualidade() {
+  if (qualidadeInspecaoModal) qualidadeInspecaoModal.style.display = 'none';
+  qualidadePirEtqAtualId = null;
+  if (qualidadeEtqRecebimentoId) qualidadeEtqRecebimentoId.value = '';
+  resetFormularioInspecaoQualidade();
+}
+
+async function marcarEtqRecebimentoPir(id) {
+  const etqId = Number(id);
+  if (!etqId) return;
+  const resp = await fetch(`/api/etiquetas/recebimento/${etqId}/pir`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',
+    body: JSON.stringify({ pir: true })
+  });
+  const data = await resp.json().catch(() => ({}));
+  if (!resp.ok) throw new Error(data.error || `Falha ao marcar PIR (HTTP ${resp.status})`);
+  return data;
 }
 
 function formatarCampoTabelaRelatorio(chave, valor) {
@@ -9935,13 +10263,11 @@ async function carregarQualidadePirItens(idOmie) {
 }
 
 function abrirFormularioInspecaoQualidade() {
-  if (!qualidadeInspecaoForm) return;
-  qualidadeInspecaoForm.style.display = 'block';
+  abrirModalInspecaoQualidade(null);
 }
 
 function fecharFormularioInspecaoQualidade() {
-  if (!qualidadeInspecaoForm) return;
-  qualidadeInspecaoForm.style.display = 'block';
+  fecharModalInspecaoQualidade();
 }
 
 // Qualidade: limpa campos do registro de inspeção
@@ -9954,6 +10280,10 @@ function resetFormularioInspecaoQualidade() {
   if (qualidadeQuantidadeNok) qualidadeQuantidadeNok.value = '';
   if (qualidadeCodigoProdutoReal) qualidadeCodigoProdutoReal.value = '';
   if (qualidadeFrequencia) qualidadeFrequencia.value = '';
+  if (qualidadeProdutoCustomizadoCheck) {
+    qualidadeProdutoCustomizadoCheck.checked = false;
+    qualidadeProdutoCustomizadoCheck.disabled = false;
+  }
   renderQualidadeImagemProduto('');
   renderQualidadeCarretelPir([]);
   renderQualidadeNfeList([]);
@@ -9962,7 +10292,147 @@ function resetFormularioInspecaoQualidade() {
 
 qualidadeInspecaoCancelarBtn?.addEventListener('click', (e) => {
   e.preventDefault();
-  resetFormularioInspecaoQualidade();
+  fecharModalInspecaoQualidade();
+});
+
+qualidadeInspecaoModalFechar?.addEventListener('click', (e) => {
+  e.preventDefault();
+  fecharModalInspecaoQualidade();
+});
+
+qualidadeInspecaoModal?.addEventListener('click', (e) => {
+  if (e.target === qualidadeInspecaoModal) fecharModalInspecaoQualidade();
+});
+
+qualidadeNovoRegistroBtn?.addEventListener('click', (e) => {
+  e.preventDefault();
+  abrirModalInspecaoQualidade(null);
+});
+
+qualidadePirRefreshBtn?.addEventListener('click', (e) => {
+  e.preventDefault();
+  carregarQualidadePirPendentes(qualidadePirPendentesBusca?.value?.trim() || '');
+});
+
+qualidadePirSemMpBtn?.addEventListener('click', (e) => {
+  e.preventDefault();
+  qualidadePirMostrarSemMp = !qualidadePirMostrarSemMp;
+  atualizarBotaoPirSemMp();
+  carregarQualidadePirPendentes(qualidadePirPendentesBusca?.value?.trim() || '');
+});
+
+qualidadePirPendentesBusca?.addEventListener('input', () => {
+  clearTimeout(qualidadePirPendentesDebounce);
+  qualidadePirPendentesDebounce = setTimeout(() => {
+    carregarQualidadePirPendentes(qualidadePirPendentesBusca.value.trim());
+  }, 350);
+});
+
+atualizarBotaoPirSemMp();
+
+const qualidadeAlteracoesModal = document.getElementById('qualidadeAlteracoesModal');
+const qualidadeAlteracoesModalFechar = document.getElementById('qualidadeAlteracoesModalFechar');
+const qualidadeAlteracoesModalTitulo = document.getElementById('qualidadeAlteracoesModalTitulo');
+const qualidadeAlteracoesModalStatus = document.getElementById('qualidadeAlteracoesModalStatus');
+const qualidadeAlteracoesModalBody = document.getElementById('qualidadeAlteracoesModalBody');
+
+function fecharModalAlteracoesProdutoPir() {
+  if (qualidadeAlteracoesModal) qualidadeAlteracoesModal.style.display = 'none';
+}
+
+function montarAnexosAlteracaoPir(row) {
+  const links = [];
+  if (row?.foto_antes) links.push(`<a href="${qualidadePirEscapeHtml(row.foto_antes)}" target="_blank" rel="noopener">Foto antes</a>`);
+  if (row?.foto_depois) links.push(`<a href="${qualidadePirEscapeHtml(row.foto_depois)}" target="_blank" rel="noopener">Foto depois</a>`);
+  if (row?.video) links.push(`<a href="${qualidadePirEscapeHtml(row.video)}" target="_blank" rel="noopener">Vídeo</a>`);
+  if (row?.arquivo) links.push(`<a href="${qualidadePirEscapeHtml(row.arquivo)}" target="_blank" rel="noopener">Arquivo</a>`);
+  return links.length ? links.join(' · ') : '—';
+}
+
+async function abrirModalAlteracoesProdutoPir(codigoBruto, descricao = '') {
+  const codigo = String(codigoBruto || '').trim();
+  if (!codigo) {
+    alert('Código do produto não informado.');
+    return;
+  }
+  if (qualidadeAlteracoesModalTitulo) {
+    qualidadeAlteracoesModalTitulo.textContent = descricao
+      ? `Alterações — ${codigo} · ${descricao}`
+      : `Alterações — ${codigo}`;
+  }
+  if (qualidadeAlteracoesModalStatus) {
+    qualidadeAlteracoesModalStatus.textContent = 'Carregando alterações...';
+  }
+  if (qualidadeAlteracoesModalBody) {
+    qualidadeAlteracoesModalBody.innerHTML = `
+      <tr>
+        <td colspan="6" style="padding:24px;text-align:center;color:#94a3b8;">
+          <i class="fa-solid fa-spinner fa-spin"></i> Carregando...
+        </td>
+      </tr>`;
+  }
+  if (qualidadeAlteracoesModal) qualidadeAlteracoesModal.style.display = 'flex';
+
+  try {
+    const resp = await fetch(`/api/engenharia/alteracoes-produto/${encodeURIComponent(codigo)}`, {
+      credentials: 'include'
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
+    const rows = Array.isArray(data.alteracoes) ? data.alteracoes : [];
+    if (qualidadeAlteracoesModalStatus) {
+      qualidadeAlteracoesModalStatus.textContent = rows.length
+        ? `${rows.length} alteração(ões) em engenharia.alteracoes_produto`
+        : 'Nenhuma alteração encontrada.';
+    }
+    if (!qualidadeAlteracoesModalBody) return;
+    if (!rows.length) {
+      qualidadeAlteracoesModalBody.innerHTML = `
+        <tr>
+          <td colspan="6" style="padding:24px;text-align:center;color:#94a3b8;">
+            Nenhuma alteração registrada para este produto.
+          </td>
+        </tr>`;
+      return;
+    }
+    qualidadeAlteracoesModalBody.innerHTML = rows.map((row) => {
+      const dataTxt = qualidadePirEscapeHtml(formatarDataPirPendente(row.data));
+      const antes = qualidadePirEscapeHtml(row.antes || '—');
+      const depois = qualidadePirEscapeHtml(row.depois || '—');
+      const ref = qualidadePirEscapeHtml(row.referencia || '—');
+      const por = qualidadePirEscapeHtml(row.criado_por || '—');
+      return `
+        <tr style="border-bottom:1px solid var(--border-color);">
+          <td style="padding:10px 12px;white-space:nowrap;vertical-align:top;">${dataTxt}</td>
+          <td style="padding:10px 12px;vertical-align:top;max-width:220px;white-space:pre-wrap;">${antes}</td>
+          <td style="padding:10px 12px;vertical-align:top;max-width:220px;white-space:pre-wrap;">${depois}</td>
+          <td style="padding:10px 12px;vertical-align:top;white-space:nowrap;">${ref}</td>
+          <td style="padding:10px 12px;vertical-align:top;">${montarAnexosAlteracaoPir(row)}</td>
+          <td style="padding:10px 12px;vertical-align:top;white-space:nowrap;">${por}</td>
+        </tr>`;
+    }).join('');
+  } catch (err) {
+    console.error('[QUALIDADE] erro ao carregar alterações', err);
+    if (qualidadeAlteracoesModalStatus) {
+      qualidadeAlteracoesModalStatus.textContent = err?.message || 'Erro ao carregar alterações.';
+    }
+    if (qualidadeAlteracoesModalBody) {
+      qualidadeAlteracoesModalBody.innerHTML = `
+        <tr>
+          <td colspan="6" style="padding:24px;text-align:center;color:#f87171;">
+            ${qualidadePirEscapeHtml(err?.message || 'Falha ao carregar')}
+          </td>
+        </tr>`;
+    }
+  }
+}
+
+qualidadeAlteracoesModalFechar?.addEventListener('click', (e) => {
+  e.preventDefault();
+  fecharModalAlteracoesProdutoPir();
+});
+qualidadeAlteracoesModal?.addEventListener('click', (e) => {
+  if (e.target === qualidadeAlteracoesModal) fecharModalAlteracoesProdutoPir();
 });
 
 qualidadeInspecaoRegistrarBtn?.addEventListener('click', (e) => {
@@ -9971,6 +10441,7 @@ qualidadeInspecaoRegistrarBtn?.addEventListener('click', (e) => {
   const frequenciaRaw = qualidadeFrequencia?.value?.trim() || '';
   const frequenciaFormatada = frequenciaRaw && !frequenciaRaw.includes('%') ? `${frequenciaRaw}%` : frequenciaRaw;
   const quantidadeOkRaw = qualidadeQuantidadeOk?.value;
+  const etqId = Number(qualidadeEtqRecebimentoId?.value || qualidadePirEtqAtualId || 0) || null;
   const payload = {
     cod_produto: qualidadeCodProduto?.value?.trim() || '',
     nfe: qualidadeNfe?.value?.trim() || '',
@@ -10005,8 +10476,23 @@ qualidadeInspecaoRegistrarBtn?.addEventListener('click', (e) => {
       if (!resp.ok || data.ok === false) {
         throw new Error(data.error || 'Falha ao registrar inspeção');
       }
-      alert('Registro de inspeção salvo com sucesso.');
-      resetFormularioInspecaoQualidade();
+      // Ativa/desativa produto_customizado conforme o checkbox do modal (ID Omie preferido)
+      const customizado = qualidadeProdutoCustomizadoCheck?.checked === true;
+      const idParaCustomizado = String(
+        qualidadeCodigoProdutoReal?.value ||
+        payload.cod_produto ||
+        ''
+      ).trim();
+      await salvarProdutoCustomizadoInspecao(idParaCustomizado, customizado);
+      // Libera o item em Etiquetas disponíveis
+      if (etqId) {
+        await marcarEtqRecebimentoPir(etqId);
+      }
+      alert(etqId
+        ? 'Registro salvo. Item liberado em Etiquetas disponíveis.'
+        : 'Registro de inspeção salvo com sucesso.');
+      fecharModalInspecaoQualidade();
+      carregarQualidadePirPendentes(qualidadePirPendentesBusca?.value?.trim() || '');
     })
     .catch((err) => {
       console.error('[QUALIDADE] erro ao registrar inspeção', err);
@@ -10152,11 +10638,13 @@ qualidadeListaPirCodigosBtn?.addEventListener('click', async (e) => {
 qualidadeVoltarRegistroBtn?.addEventListener('click', (e) => {
   e.preventDefault();
   mostrarPainelQualidade('registro');
+  carregarQualidadePirPendentes(qualidadePirPendentesBusca?.value?.trim() || '');
 });
 
 qualidadeRegistroBtn?.addEventListener('click', (e) => {
   e.preventDefault();
   mostrarPainelQualidade('registro');
+  carregarQualidadePirPendentes(qualidadePirPendentesBusca?.value?.trim() || '');
 });
 
 qualidadePirVerificacaoCheckbox?.addEventListener('change', async (event) => {
@@ -10218,7 +10706,8 @@ function initQualidadeProdutoAutocomplete() {
         carregarQualidadePirItens(li.dataset.codigoProduto || '');
         carregarQualidadeImagemProduto(li.dataset.codigoProduto || '');
         carregarQualidadeNfeList(li.dataset.codigoProduto || '');
-        carregarStatusVerificacaoPirQualidade(li.dataset.codigo || '');
+        carregarStatusVerificacaoPirQualidade(li.dataset.codigoProduto || li.dataset.codigo || '');
+        carregarStatusProdutoCustomizadoInspecao(li.dataset.codigoProduto || li.dataset.codigo || '');
         limparLista();
       });
       li.addEventListener('mouseenter', () => { li.style.background = '#1f2937'; });
@@ -30644,6 +31133,7 @@ window.openRegistros = async function() {
   let _etqDebounce = null;
   let _etqViewMode = 'list'; // 'list' | 'grid'
   let _etqMostrarOcultos = false; // quando true, mostra apenas itens ocultos
+  let _etqMostrarSemMp = false; // quando true, mostra itens que NÃO são família MP
   let _etqPrinterPref = null; // impressora preferida salva no localStorage por usuário
   let _etqAgentAliasCache = {}; // cache de apelidos vindos dos agentes via heartbeat
 
@@ -30744,6 +31234,19 @@ window.openRegistros = async function() {
   // Aplicar modo padrão (lista) no carregamento
   _etqAplicarViewMode();
 
+  const etqBtnVerSemMp = document.getElementById('etqBtnVerSemMp');
+
+  function _etqAtualizarBotaoSemMp() {
+    if (!etqBtnVerSemMp) return;
+    etqBtnVerSemMp.classList.toggle('active', _etqMostrarSemMp);
+    etqBtnVerSemMp.innerHTML = _etqMostrarSemMp
+      ? '<i class="fa-solid fa-filter"></i><span>Ver só MP</span>'
+      : '<i class="fa-solid fa-filter"></i><span>Exibir sem MP</span>';
+    etqBtnVerSemMp.title = _etqMostrarSemMp
+      ? 'Voltar a exibir apenas família MP'
+      : 'Exibir itens que não são família MP';
+  }
+
   // Botão exibir ocultos
   etqBtnVerOcultos?.addEventListener('click', () => {
     _etqMostrarOcultos = !_etqMostrarOcultos;
@@ -30751,6 +31254,14 @@ window.openRegistros = async function() {
     etqBtnVerOcultos.title = _etqMostrarOcultos ? 'Exibir todos (não ocultos)' : 'Exibir ocultos';
     _etqCarregar(etqBusca?.value || '');
   });
+
+  // Botão exibir sem MP
+  etqBtnVerSemMp?.addEventListener('click', () => {
+    _etqMostrarSemMp = !_etqMostrarSemMp;
+    _etqAtualizarBotaoSemMp();
+    _etqCarregar(etqBusca?.value || '');
+  });
+  _etqAtualizarBotaoSemMp();
 
   // ── Dropdown de configurações da toolbar ─────────────────────────────────
   const _etqDropdownBtn  = document.getElementById('etqBtnConfig');
@@ -31119,6 +31630,7 @@ window.openRegistros = async function() {
       const params = new URLSearchParams();
       if (q) params.set('q', q);
       if (_etqMostrarOcultos) params.set('mostrar_ocultos', '1');
+      if (_etqMostrarSemMp) params.set('sem_mp', '1');
       const url = '/api/etiquetas/recebimento/pendentes' + (params.toString() ? '?' + params.toString() : '');
       const resp = await fetch(url, { credentials: 'include' });
       if (!resp.ok) throw new Error(`Erro ${resp.status}`);
@@ -57873,14 +58385,14 @@ async function imprimirEtiquetaRecebimentoPreview() {
   const preview = window.__associarNfePreviewAtual?.preview || {};
   const itensPreview = Array.isArray(preview.itens) ? preview.itens : [];
 
-  // Coleta todos os itens do pedido que possuem código de produto identificado
+  // Quantidade da etiqueta/PIR = sempre a da NF-e (recebimento parcial é normal)
   const itensParaImprimir = itensPreview
     .filter(it => it?.pedido_codigo_produto)
     .map(it => ({
       codigo_produto:    String(it.pedido_codigo_produto  || '').trim(),
       descricao_produto: String(it.pedido_descricao_produto || '').trim(),
-      qtd:     String(it.pedido_qtde  ?? it.nf_qtde  ?? ''),
-      unidade: String(it.pedido_unidade ?? it.nf_unidade ?? '').trim(),
+      qtd:     String(it.nf_qtde ?? it.pedido_qtde ?? ''),
+      unidade: String(it.nf_unidade ?? it.pedido_unidade ?? '').trim(),
     }));
 
   if (itensParaImprimir.length === 0) {
@@ -58089,8 +58601,9 @@ async function confirmarAssociacaoPedidoNfeOmie() {
         .map(it => ({
           codigo_produto:    String(it.pedido_codigo_produto  || '').trim(),
           descricao_produto: String(it.pedido_descricao_produto || '').trim(),
-          qtd:     String(it.pedido_qtde  ?? it.nf_qtde  ?? ''),
-          unidade: String(it.pedido_unidade ?? it.nf_unidade ?? '').trim(),
+          // Sempre quantidade da NF-e (pedido pode ser maior; outra NF completa depois)
+          qtd:     String(it.nf_qtde ?? it.pedido_qtde ?? ''),
+          unidade: String(it.nf_unidade ?? it.pedido_unidade ?? '').trim(),
         }));
       if (_itensParaEtq.length > 0) {
         fetch('/api/etiquetas/recebimento/preview', {

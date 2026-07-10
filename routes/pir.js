@@ -1,7 +1,11 @@
 // routes/pir.js
 const express = require('express');
 const router = express.Router();
-const { dbQuery } = require('../src/db');
+const { dbQuery, dbGetClient } = require('../src/db');
+const {
+  sqlWhereProdutosOmieIdentidade,
+  sqlOrderPreferCodigoProduto,
+} = require('../utils/produtosOmieIdentidade');
 
 let ensureProdutosOmiePirColumnPromise = null;
 
@@ -30,7 +34,8 @@ router.get('/produto/:codigo/verificacao', async (req, res) => {
     const result = await dbQuery(
       `SELECT codigo, COALESCE(pir, FALSE) AS pir
        FROM public.produtos_omie
-       WHERE codigo = $1
+       WHERE ${sqlWhereProdutosOmieIdentidade('', '$1')}
+       ORDER BY ${sqlOrderPreferCodigoProduto('', '$1')}
        LIMIT 1`,
       [codigo]
     );
@@ -61,13 +66,25 @@ router.put('/produto/:codigo/verificacao', async (req, res) => {
     const pirRaw = req.body?.pir;
     const pir = pirRaw === true || pirRaw === 1 || pirRaw === '1' || pirRaw === 'true';
 
-    const result = await dbQuery(
-      `UPDATE public.produtos_omie
-       SET pir = $2
-       WHERE codigo = $1
-       RETURNING codigo, pir`,
-      [codigo, pir]
-    );
+    const client = await dbGetClient();
+    let result;
+    try {
+      await client.query('BEGIN');
+      await client.query("SELECT set_config('app.produtos_omie_write_source', 'omie_manual', true)");
+      result = await client.query(
+        `UPDATE public.produtos_omie
+         SET pir = $2
+         WHERE ${sqlWhereProdutosOmieIdentidade('', '$1')}
+         RETURNING codigo, pir`,
+        [codigo, pir]
+      );
+      await client.query('COMMIT');
+    } catch (e) {
+      try { await client.query('ROLLBACK'); } catch (_) {}
+      throw e;
+    } finally {
+      client.release();
+    }
 
     if (!result.rows.length) {
       return res.status(404).json({ error: 'Produto não encontrado' });
@@ -102,8 +119,17 @@ router.get('/resumo/codigos', async (_req, res) => {
               COALESCE(po.descricao, '') AS descricao,
               COALESCE(po.pir, FALSE) AS pir
        FROM pir_unico pu
-       LEFT JOIN public.produtos_omie po
-         ON TRIM(COALESCE(po.codigo_produto::text, '')) = pu.id_omie
+       LEFT JOIN LATERAL (
+         SELECT descricao, pir
+           FROM public.produtos_omie
+          WHERE (pu.id_omie <> '' AND TRIM(codigo_produto::text) = pu.id_omie)
+             OR TRIM(codigo) = pu.codigo
+          ORDER BY CASE
+            WHEN pu.id_omie <> '' AND TRIM(codigo_produto::text) = pu.id_omie THEN 0
+            ELSE 1
+          END
+          LIMIT 1
+       ) po ON TRUE
        ORDER BY pu.codigo ASC`
     );
 

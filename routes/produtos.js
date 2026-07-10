@@ -2,6 +2,10 @@
 const express  = require('express');
 const router   = express.Router();
 const { dbQuery, dbGetClient } = require('../src/db');
+const {
+  sqlWhereProdutosOmieIdentidade,
+  sqlOrderPreferCodigoProduto,
+} = require('../utils/produtosOmieIdentidade');
 
 // === Config Omie (para fallback ConsultarProduto) ============================
 const OMIE_WEBHOOK_TOKEN = process.env.OMIE_WEBHOOK_TOKEN || '';
@@ -121,6 +125,7 @@ async function consultarProdutoOmie({ codigo_produto, codigo }) {
 // Fontes: public.produtos_omie + public.produtos_omie_imagens
 router.get('/detalhe', async (req, res) => {
   try {
+    await ensureProdutosOmieCustomizadoColumn();
     const codigo = String(req.query?.codigo || '').trim();
     if (!codigo) {
       return res.status(400).json({ error: 'Parâmetro ?codigo é obrigatório.' });
@@ -152,11 +157,13 @@ router.get('/detalhe', async (req, res) => {
         p.quantidade_estoque,
         p.valor_unitario,
         p.preco_definido,
+        COALESCE(p.produto_customizado, FALSE) AS produto_customizado,
         p.dalt, p.halt, p.dinc, p.hinc, p.ualt, p.uinc,
         p.codigo_familia,
         p.codint_familia
       FROM public.produtos_omie p
-      WHERE p.codigo = $1
+      WHERE ${sqlWhereProdutosOmieIdentidade('p', '$1')}
+      ORDER BY ${sqlOrderPreferCodigoProduto('p', '$1')}
       LIMIT 1;
     `;
     const { rows } = await dbQuery(sql, [codigo]);
@@ -213,6 +220,7 @@ router.get('/detalhe', async (req, res) => {
       quantidade_estoque: r.quantidade_estoque,
       valor_unitario:     r.valor_unitario,
       preco_definido:     r.preco_definido,
+      produto_customizado: r.produto_customizado === true,
       info: {
         uAlt: r.ualt, dAlt: r.dalt, hAlt: r.halt,
         uInc: r.uinc, dInc: r.dinc, hInc: r.hinc
@@ -851,6 +859,7 @@ router.post('/sincronizar-completo', async (req, res) => {
 
 // ── Múltiplo de separação (coluna manual em produtos_omie) ─────────────────
 let ensureProdutosOmieMultiploColumnPromise = null;
+let ensureProdutosOmieCustomizadoColumnPromise = null;
 
 async function ensureProdutosOmieMultiploColumn() {
   if (!ensureProdutosOmieMultiploColumnPromise) {
@@ -865,6 +874,24 @@ async function ensureProdutosOmieMultiploColumn() {
   await ensureProdutosOmieMultiploColumnPromise;
 }
 
+async function ensureProdutosOmieCustomizadoColumn() {
+  if (!ensureProdutosOmieCustomizadoColumnPromise) {
+    ensureProdutosOmieCustomizadoColumnPromise = dbQuery(`
+      ALTER TABLE public.produtos_omie
+      ADD COLUMN IF NOT EXISTS produto_customizado BOOLEAN NOT NULL DEFAULT FALSE
+    `).catch((err) => {
+      ensureProdutosOmieCustomizadoColumnPromise = null;
+      throw err;
+    });
+  }
+  await ensureProdutosOmieCustomizadoColumnPromise;
+}
+
+// Garante coluna ao subir o módulo
+ensureProdutosOmieCustomizadoColumn().catch((err) => {
+  console.warn('[produtos] ensure produto_customizado:', err?.message || err);
+});
+
 async function atualizarMultiploProdutoOmie(codigo, multiplo) {
   const client = await dbGetClient();
   try {
@@ -873,7 +900,7 @@ async function atualizarMultiploProdutoOmie(codigo, multiplo) {
     const result = await client.query(
       `UPDATE public.produtos_omie
           SET multiplo = $2
-        WHERE codigo = $1
+        WHERE ${sqlWhereProdutosOmieIdentidade('', '$1')}
         RETURNING codigo, multiplo`,
       [codigo, multiplo]
     );
@@ -894,7 +921,10 @@ router.get('/:codigo/multiplo', async (req, res) => {
     if (!codigo) return res.status(400).json({ ok: false, error: 'Código obrigatório' });
 
     const { rows } = await dbQuery(
-      `SELECT codigo, multiplo FROM public.produtos_omie WHERE codigo = $1 LIMIT 1`,
+      `SELECT codigo, multiplo FROM public.produtos_omie
+        WHERE ${sqlWhereProdutosOmieIdentidade('', '$1')}
+        ORDER BY ${sqlOrderPreferCodigoProduto('', '$1')}
+        LIMIT 1`,
       [codigo]
     );
     if (!rows.length) return res.status(404).json({ ok: false, error: 'Produto não encontrado' });
@@ -939,6 +969,83 @@ router.put('/:codigo/multiplo', express.json(), async (req, res) => {
     });
   } catch (err) {
     console.error('[PUT /api/produtos/:codigo/multiplo]', err);
+    res.status(500).json({ ok: false, error: String(err.message || err) });
+  }
+});
+
+async function atualizarProdutoCustomizadoOmie(codigo, valor) {
+  const client = await dbGetClient();
+  try {
+    await client.query('BEGIN');
+    await client.query("SELECT set_config('app.produtos_omie_write_source', 'omie_manual', true)");
+    const result = await client.query(
+      `UPDATE public.produtos_omie
+          SET produto_customizado = $2
+        WHERE ${sqlWhereProdutosOmieIdentidade('', '$1')}
+        RETURNING codigo, codigo_produto, produto_customizado`,
+      [codigo, valor === true]
+    );
+    await client.query('COMMIT');
+    return result;
+  } catch (e) {
+    try { await client.query('ROLLBACK'); } catch (_) {}
+    throw e;
+  } finally {
+    client.release();
+  }
+}
+
+router.get('/:codigo/produto-customizado', async (req, res) => {
+  try {
+    await ensureProdutosOmieCustomizadoColumn();
+    const codigo = String(req.params.codigo || '').trim();
+    if (!codigo) return res.status(400).json({ ok: false, error: 'Código obrigatório' });
+
+    const { rows } = await dbQuery(
+      `SELECT codigo, COALESCE(produto_customizado, FALSE) AS produto_customizado
+         FROM public.produtos_omie
+        WHERE ${sqlWhereProdutosOmieIdentidade('', '$1')}
+        ORDER BY ${sqlOrderPreferCodigoProduto('', '$1')}
+        LIMIT 1`,
+      [codigo]
+    );
+    if (!rows.length) return res.status(404).json({ ok: false, error: 'Produto não encontrado' });
+
+    res.json({
+      ok: true,
+      codigo: rows[0].codigo,
+      produto_customizado: rows[0].produto_customizado === true
+    });
+  } catch (err) {
+    console.error('[GET /api/produtos/:codigo/produto-customizado]', err);
+    res.status(500).json({ ok: false, error: String(err.message || err) });
+  }
+});
+
+router.put('/:codigo/produto-customizado', express.json(), async (req, res) => {
+  try {
+    await ensureProdutosOmieCustomizadoColumn();
+    const codigo = String(req.params.codigo || '').trim();
+    if (!codigo) return res.status(400).json({ ok: false, error: 'Código obrigatório' });
+
+    const raw = req.body?.produto_customizado;
+    const valor = raw === true || raw === 1 || raw === '1' || raw === 'true';
+
+    const result = await atualizarProdutoCustomizadoOmie(codigo, valor);
+    if (!result.rows.length) {
+      return res.status(404).json({
+        ok: false,
+        error: `Produto não encontrado para o código "${codigo}".`
+      });
+    }
+
+    res.json({
+      ok: true,
+      codigo: result.rows[0].codigo,
+      produto_customizado: result.rows[0].produto_customizado === true
+    });
+  } catch (err) {
+    console.error('[PUT /api/produtos/:codigo/produto-customizado]', err);
     res.status(500).json({ ok: false, error: String(err.message || err) });
   }
 });
