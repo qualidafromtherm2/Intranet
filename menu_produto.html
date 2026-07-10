@@ -19,7 +19,7 @@
   referrerpolicy="no-referrer"
 />
   <!-- Seu CSS principal -->
-  <link rel="stylesheet" href="menu_produto.css?v=20260708-tablet-fix"/>
+  <link rel="stylesheet" href="menu_produto.css?v=20260710-produtos-ux4"/>
   <!-- Anti-flicker: esconde menus até as permissões serem aplicadas -->
   <style id="boot-anti-flicker">
     /* Enquanto o app não está pronto, esconde elementos sujeitos a permissões */
@@ -1224,8 +1224,14 @@
               </div>
             </div>
             <div class="movim-field">
-              <label for="movimOmieMotivo">Motivo do ajuste (Omie)</label>
-              <select id="movimOmieMotivo">
+              <label>Tipo de movimentação</label>
+              <div id="movimMotivoBotoes" class="movim-motivo-botoes" role="group" aria-label="Tipo de movimentação">
+                <button type="button" class="movimMotivoBtn" data-value="ENT:INV"><i class="fa-solid fa-plus"></i><span>Entrada</span></button>
+                <button type="button" class="movimMotivoBtn" data-value="SAI:INV"><i class="fa-solid fa-minus"></i><span>Saída</span></button>
+                <button type="button" class="movimMotivoBtn" data-value="TRF:TRF"><i class="fa-solid fa-arrow-right-arrow-left"></i><span>Transferência</span></button>
+                <button type="button" class="movimMotivoBtn movimMotivoBtn--interno" data-value="INTERNO"><i class="fa-solid fa-warehouse"></i><span>Ajuste fora da Omie</span></button>
+              </div>
+              <select id="movimOmieMotivo" hidden aria-hidden="true" tabindex="-1">
                 <option value="">Selecione o motivo…</option>
               </select>
             </div>
@@ -1243,6 +1249,9 @@
               <select id="movimLocalSelect">
                 <option value="">Selecione o destino…</option>
               </select>
+              <button type="button" id="movimMostrarOutrosLocais" class="movim-outros-locais-btn" style="display:none;">
+                <i class="fa-solid fa-eye"></i> Desocultar outros armazéns
+              </button>
             </div>
             <div class="movim-field movim-qtd-field" id="movimQtdFieldWrap" style="display:none;">
               <div class="movim-qtd-label-row">
@@ -7119,6 +7128,14 @@
                       <select id="tipoItemSelect" style="width:100%;padding:8px 10px;border:1px solid #d1d5db;border-radius:8px;font-size:14px;color:#374151;background:#f9fafb;"><option value="">– todos –</option></select>
                     </div>
                     <div>
+                      <label for="filterOrigemProduto" style="display:block;font-size:13px;font-weight:600;color:#374151;margin-bottom:5px;">Origem do produto:</label>
+                      <select id="filterOrigemProduto" style="width:100%;padding:8px 10px;border:1px solid #d1d5db;border-radius:8px;font-size:14px;color:#374151;background:#f9fafb;">
+                        <option value="">– todos –</option>
+                        <option value="N">Nacional</option>
+                        <option value="I">Importado</option>
+                      </select>
+                    </div>
+                    <div>
                       <label for="filterLocalSelect" style="display:block;font-size:13px;font-weight:600;color:#374151;margin-bottom:5px;">Local de estoque:</label>
                       <select id="filterLocalSelect" style="width:100%;padding:8px 10px;border:1px solid #d1d5db;border-radius:8px;font-size:14px;color:#374151;background:#f9fafb;"><option value="">– todos –</option></select>
                     </div>
@@ -11380,11 +11397,11 @@
   <script src="/public/js/sessao_resiliente.js?v=20260617b"></script>
   <script type="module" src="login/login.js"></script>
   <script src="/public/js/vendas-relatorio-gerencial.js?v=20260709a" defer></script>
-  <script type="module" src="menu_produto.js?v=20260708envio-status"></script>
+  <script type="module" src="menu_produto.js?v=20260710-produtos-ux3"></script>
   
-  <script type="module" src="./requisicoes_omie/filtro_produto.js"></script>
-  <script type="module" src="./requisicoes_omie/ListarProdutos.js?v=20260617b"></script>
-  <script type="module" src="./requisicoes_omie/Dados_produto.js" defer></script>
+  <script type="module" src="./requisicoes_omie/filtro_produto.js?v=20260710a"></script>
+  <script type="module" src="./requisicoes_omie/ListarProdutos.js?v=20260710a"></script>
+  <script type="module" src="./requisicoes_omie/Dados_produto.js?v=20260710c" defer></script>
   <script type="module" src="./requisicoes_omie/dados_colaboradores.js"></script>
   <script src="produtos/produto_foto.js?v=20260430c" defer></script>
   <script src="produtos/produto_anexo.js" defer></script>

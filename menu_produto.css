@@ -11,6 +11,24 @@
   text-align: center;
   box-shadow: 0 2px 8px rgba(16,185,129,0.15);
 }
+
+/* Lista de produtos: cores operacionais consistentes com as ações. */
+#listaProdutos #listaProdutosAbrirCarrinhoBtn {
+  background: #16a34a !important;
+  border-color: #15803d !important;
+  color: #fff !important;
+}
+
+#listaProdutos #listaProdutosAbrirSeparacaoBtn {
+  background: #ea7b0c !important;
+  border-color: #c75f05 !important;
+  color: #fff !important;
+}
+
+#listaProdutos #listaProdutosAbrirCarrinhoBtn:hover,
+#listaProdutos #listaProdutosAbrirSeparacaoBtn:hover {
+  filter: brightness(1.08);
+}
 /* ====== CHAT WHATSAPP STYLE ====== */
 .chat-messages {
   padding: 24px 16px 12px 16px;
@@ -308,6 +326,149 @@ img {
 .shortcut-btn:hover {
   transform: scale(1.08);
   box-shadow: -1px 5px 12px -1px rgba(0, 0, 0, 0.35);
+}
+.shortcut-btn.shortcut-btn--compras {
+  background: linear-gradient(135deg, #16a34a, #15803d) !important;
+  color: #fff !important;
+}
+.shortcut-btn.shortcut-btn--separacao {
+  background: linear-gradient(135deg, #f59e0b, #d97706) !important;
+  color: #fff !important;
+}
+
+/* Produto: detalhes em modal sem perder o contexto da lista. */
+.produto-info-modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10040;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(3, 7, 18, .72);
+  backdrop-filter: blur(3px);
+}
+.produto-info-modal-overlay.aberto { display: flex; }
+.produto-info-modal {
+  width: min(1480px, 94vw);
+  height: min(860px, 90vh);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid #334155;
+  border-radius: 10px;
+  background: var(--content-bg, #171820);
+  box-shadow: 0 24px 70px rgba(0, 0, 0, .55);
+}
+.produto-info-modal-header {
+  min-height: 58px;
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 16px;
+  padding: 8px 16px;
+  border-bottom: 1px solid #334155;
+  background: #111827;
+  color: #f8fafc;
+}
+.produto-info-modal-header strong { text-align: center; font-size: 15px; }
+.produto-info-modal-voltar,
+.produto-info-modal-fechar {
+  min-height: 42px;
+  border: 1px solid #475569;
+  border-radius: 8px;
+  background: #1e293b;
+  color: #e2e8f0;
+  font-weight: 700;
+  cursor: pointer;
+}
+.produto-info-modal-voltar { padding: 0 14px; }
+.produto-info-modal-fechar { width: 42px; }
+.produto-info-modal-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  background: #171923;
+}
+.produto-info-modal-body #produtoTabs,
+.produto-info-modal-body #dadosProduto {
+  min-height: 100%;
+  background: #171923 !important;
+}
+.produto-info-modal-body #produtoTabs > .main-header { display: none !important; }
+.produto-info-modal-body #dadosProduto > .content-wrapper {
+  margin: 18px;
+  background: #171923 !important;
+  opacity: 1 !important;
+}
+.produto-info-modal-body #produtoTabs .tab-content,
+.produto-info-modal-body #dadosProduto .content-section-wrapper,
+.produto-info-modal-body #dadosProduto .product-details-container {
+  background-color: #171923 !important;
+  opacity: 1 !important;
+  backdrop-filter: none !important;
+}
+.produto-info-modal-body #dadosProduto .content-section,
+.produto-info-modal-body #dadosProduto .content-section-content,
+.produto-info-modal-body #dadosProduto .details-table,
+.produto-info-modal-body #dadosProduto .product-detail-row {
+  background-color: #232632 !important;
+  backdrop-filter: none !important;
+}
+
+/* Movimentação: motivos operacionais em botões, sem códigos técnicos. */
+.movim-motivo-botoes {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 7px;
+}
+.movimMotivoBtn {
+  min-height: 52px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 9px 10px;
+  border: 1px solid #475569;
+  border-radius: 8px;
+  background: #252936;
+  color: #e2e8f0;
+  font-weight: 800;
+  cursor: pointer;
+}
+.movimMotivoBtn--interno { grid-column: 1 / -1; }
+.movimMotivoBtn.ativo {
+  border-color: #3b82f6;
+  background: #1d4ed8;
+  color: #fff;
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, .2);
+}
+.movim-outros-locais-btn {
+  align-items: center;
+  gap: 7px;
+  margin-top: 8px;
+  padding: 8px 10px;
+  border: 1px dashed #64748b;
+  border-radius: 7px;
+  background: transparent;
+  color: #94a3b8;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+@media (max-width: 600px) {
+  .produto-info-modal-overlay { padding: 8px; align-items: flex-end; }
+  .produto-info-modal { width: 100%; height: calc(100dvh - 16px); border-radius: 10px; }
+  .produto-info-modal-header { grid-template-columns: 1fr auto; gap: 8px; }
+  .produto-info-modal-header strong { display: none; }
+  .produto-info-modal-voltar { justify-self: start; }
+  .produto-info-modal-body #dadosProduto > .content-wrapper { margin: 8px; }
+  .movim-motivo-botoes { grid-template-columns: 1fr 1fr; }
+  .movimMotivoBtn--interno { grid-column: 1 / -1; }
+  .movimModoBtn { white-space: normal; line-height: 1.2; }
 }
 .shortcut-btn i { font-size: 16px; color: inherit; }
 

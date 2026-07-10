@@ -4415,7 +4415,7 @@ modal?.addEventListener('click', (e) => { if (e.target === modal) closeColabModa
 
 let ultimoCodigo = null;      // <-- NOVO
 
-import { initListarProdutosUI } from './requisicoes_omie/ListarProdutos.js?v=20260617b';
+import { initListarProdutosUI } from './requisicoes_omie/ListarProdutos.js?v=20260710a';
 import { initDadosColaboradoresUI } from './requisicoes_omie/dados_colaboradores.js';
 import { initRhConfiguracaoCargosUI } from './requisicoes_omie/configuracao_cargos.js';
 import { initRhColaboradoresUI } from './requisicoes_omie/rh_colaboradores.js';
@@ -4425,7 +4425,7 @@ import { initKanban } from './kanban/kanban.js';
 let lastKanbanTab = 'comercial';   // lembra a sub-aba atual
 
 import { loadDadosProduto as loadDadosProdutoReal }
-  from './requisicoes_omie/Dados_produto.js';
+  from './requisicoes_omie/Dados_produto.js?v=20260710c';
 /* ——— IMPORT único do módulo Kanban ——— */
 import * as KanbanViews from './kanban/kanban.js';
 
@@ -36735,7 +36735,7 @@ function renderizarListaPermissoes() {
     const corBotao = p.tipo_botao === 'aprovacao' ? '#9333ea' : '#10b981';
     
     return `
-      <div style="
+      <div class="produto-catalogo-card" data-product-code="${escapeHtml(produto.codigo)}" style="
         background:white;
         padding:16px;
         border-radius:6px;
@@ -48147,11 +48147,10 @@ function renderizarCatalogoOmie(produtos, options = {}) {
         border-radius:8px;
         overflow:hidden;
         transition:all 0.2s;
-        cursor:pointer;
+        cursor:default;
         display:flex;
         flex-direction:column;
       " 
-      onclick="abrirModalEditarProduto('${escapeHtml(produto.codigo)}')"
       onmouseover="this.style.boxShadow='0 4px 12px rgba(0,0,0,0.1)';this.style.transform='translateY(-2px)'"
       onmouseout="this.style.boxShadow='none';this.style.transform='translateY(0)'">
         
@@ -48165,6 +48164,8 @@ function renderizarCatalogoOmie(produtos, options = {}) {
           justify-content:center;
           overflow:hidden;
           position:relative;
+          border-bottom:1px solid #111827;
+          box-shadow:inset 0 0 0 1px #111827;
         ">
           ${imgHtml}
         </div>
@@ -48174,18 +48175,13 @@ function renderizarCatalogoOmie(produtos, options = {}) {
           <div style="font-size:12px;font-weight:700;color:#1f2937;margin-bottom:3px;">
             ${escapeHtml(produto.codigo)}
           </div>
-          <div style="font-size:10px;font-weight:400;color:#4b5563;margin-bottom:6px;line-height:1.3;min-height:32px;">
+          <div class="produto-card-descricao" style="font-size:10px;font-weight:400;color:#4b5563;margin-bottom:6px;line-height:1.3;min-height:32px;">
             ${escapeHtml(produto.descricao)}
           </div>
           <div id="estoque-card-${escapeHtml(produto.codigo)}" data-codigo="${escapeHtml(produto.codigo)}" style="margin-bottom:6px;min-height:14px;"></div>
           
           <!-- Badges: Família e Estoque -->
           <div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:8px;">
-            ${produto.descricao_familia ? `
-            <span style="background:#dbeafe;color:#1e40af;padding:3px 6px;border-radius:4px;font-size:9px;font-weight:600;">
-              ${escapeHtml(produto.descricao_familia)}
-            </span>
-            ` : ''}
             <span id="min-badge-${escapeHtml(produto.codigo)}" data-codigo="${escapeHtml(produto.codigo)}"></span>
             ${produto.abaixo_minimo ? `
             <span style="background:#fef3c7;color:#92400e;padding:3px 6px;border-radius:4px;font-size:9px;font-weight:600;display:flex;align-items:center;gap:3px;" title="Estoque: ${produto.saldo_estoque} | Mínimo: ${produto.estoque_minimo}">
@@ -48271,18 +48267,25 @@ function renderHtmlEstoquePorLocal(locais, tema) {
     if (tema === 'modal') return '<span class="movim-estoque-vazio">Sem estoque registrado</span>';
     return '<span style="font-size:9px;color:#9ca3af;">Sem estoque</span>';
   }
-  return locais.map(l => {
+  const locaisOrdenados = [...locais].sort((a, b) => {
+    const aAlmox = String(a.local_codigo || '') === '10717096386' || /PORTA PALLET/i.test(a.local_nome || '');
+    const bAlmox = String(b.local_codigo || '') === '10717096386' || /PORTA PALLET/i.test(b.local_nome || '');
+    return Number(bAlmox) - Number(aAlmox);
+  });
+  return locaisOrdenados.map(l => {
+    const isAlmox = String(l.local_codigo || '') === '10717096386' || /PORTA PALLET/i.test(l.local_nome || '');
     const nome = escapeHtml(l.local_nome || l.local_codigo || '—');
+    const nomeExibicao = isAlmox ? 'ESTOQUE ALMOX.' : nome;
     const qtd = formatarQtdEstoque(l.saldo, l.unidade);
     if (tema === 'modal') {
       return `<div class="movim-est-linha" data-local-codigo="${escapeHtml(String(l.local_codigo || ''))}">
-        <span class="movim-est-nome">${nome}</span>
+        <span class="movim-est-nome">${nomeExibicao}</span>
         <span class="movim-est-qtd">${escapeHtml(qtd)}</span>
       </div>`;
     }
-    return `<div style="display:flex;justify-content:space-between;font-size:9px;color:#374151;line-height:1.4;">
-      <span style="color:#6b7280;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:70%;">${nome}</span>
-      <span style="font-weight:600;white-space:nowrap;">${escapeHtml(qtd)}</span>
+    return `<div style="display:flex;justify-content:space-between;font-size:${isAlmox ? '11px' : '9px'};color:#374151;line-height:1.5;${isAlmox ? 'padding:3px 5px;background:#f3f4f6;border-radius:4px;margin-bottom:3px;' : ''}">
+      <span style="color:${isAlmox ? '#111827' : '#6b7280'};font-weight:${isAlmox ? '800' : '400'};overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:70%;">${nomeExibicao}</span>
+      <span style="font-weight:${isAlmox ? '800' : '600'};white-space:nowrap;">${escapeHtml(qtd)}</span>
     </div>`;
   }).join('');
 }
@@ -48336,7 +48339,7 @@ async function carregarEstoqueCards() {
         if (!info || info.min <= 0) return;
         const cor = info.abaixo ? '#dc2626' : '#16a34a';
         const bg  = info.abaixo ? '#fee2e2'  : '#dcfce7';
-        badge.innerHTML = `<span style="background:${bg};color:${cor};padding:3px 6px;border-radius:4px;font-size:9px;font-weight:600;">Min. ${Number(info.min).toLocaleString('pt-BR', {minimumFractionDigits:0, maximumFractionDigits:2})}</span>`;
+        badge.innerHTML = `<span style="display:inline-flex;align-items:center;background:${bg};color:${cor};padding:5px 8px;border:1px solid ${cor};border-radius:5px;font-size:12px;font-weight:800;">Mínimo: ${Number(info.min).toLocaleString('pt-BR', {minimumFractionDigits:0, maximumFractionDigits:2})}</span>`;
       });
     }
   } catch (e) {
@@ -48478,6 +48481,16 @@ window.renderizarCatalogoOmie = renderizarCatalogoOmie;
             <span style="font-size:14px;font-weight:700;line-height:1.2;">Movimentação</span>
             <span style="font-size:11px;color:#4338ca;line-height:1.35;">Entradas, saídas, transferências e ajustes</span>
           </button>
+          <button id="modalAcoesBtnInformacoes" type="button" style="background:#f8fafc;color:#334155;border:1px solid #cbd5e1;padding:14px 12px;border-radius:12px;cursor:pointer;display:flex;flex-direction:column;align-items:flex-start;gap:8px;text-align:left;">
+            <span style="width:42px;height:42px;border-radius:12px;background:#475569;color:#fff;display:inline-flex;align-items:center;justify-content:center;font-size:18px;"><i class="fa-solid fa-circle-info"></i></span>
+            <span style="font-size:14px;font-weight:700;line-height:1.2;">Informações</span>
+            <span style="font-size:11px;color:#64748b;line-height:1.35;">Abrir cadastro completo do produto</span>
+          </button>
+          <button id="modalAcoesBtnEditarRapido" type="button" style="background:#f0fdf4;color:#166534;border:1px solid #86efac;padding:14px 12px;border-radius:12px;cursor:pointer;display:flex;flex-direction:column;align-items:flex-start;gap:8px;text-align:left;">
+            <span style="width:42px;height:42px;border-radius:12px;background:#16a34a;color:#fff;display:inline-flex;align-items:center;justify-content:center;font-size:18px;"><i class="fa-solid fa-pen-to-square"></i></span>
+            <span style="font-size:14px;font-weight:700;line-height:1.2;">Editar produto</span>
+            <span style="font-size:11px;color:#15803d;line-height:1.35;">Foto, mínimo, lead time e nome</span>
+          </button>
           <button id="modalAcoesBtnCompras" type="button" style="background:linear-gradient(135deg,#f5f3ff,#ede9fe);color:#6d28d9;border:1px solid #d8b4fe;padding:14px 12px;border-radius:12px;cursor:pointer;display:flex;flex-direction:column;align-items:flex-start;gap:8px;text-align:left;">
             <span style="width:42px;height:42px;border-radius:12px;background:#7c3aed;color:#fff;display:inline-flex;align-items:center;justify-content:center;font-size:18px;"><i class="fa-solid fa-receipt"></i></span>
             <span style="font-size:14px;font-weight:700;line-height:1.2;">Últimas compras</span>
@@ -48493,6 +48506,34 @@ window.renderizarCatalogoOmie = renderizarCatalogoOmie;
         </div>
       </div>
       <!-- Conteúdo: Tela de Manuais (oculta por padrão) -->
+      <div id="modalAcoesEditarRapido" style="display:none;padding:16px 20px 20px;">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px;">
+          <button id="modalEditarRapidoVoltar" type="button" aria-label="Voltar às ações" style="background:none;border:none;font-size:16px;color:#2563eb;cursor:pointer;padding:4px;"><i class="fa-solid fa-arrow-left"></i></button>
+          <strong style="font-size:14px;color:#1f2937;">Editar produto</strong>
+        </div>
+        <div id="modalEditarRapidoCarregando" style="display:none;padding:18px;text-align:center;color:#64748b;"><i class="fa-solid fa-spinner fa-spin"></i> Carregando...</div>
+        <div id="modalEditarRapidoForm" style="display:grid;gap:12px;">
+          <label style="display:grid;gap:5px;font-size:12px;font-weight:700;color:#475569;">Nome do produto
+            <input id="modalEditarRapidoDescricao" type="text" style="width:100%;box-sizing:border-box;padding:11px;border:1px solid #cbd5e1;border-radius:8px;font-size:14px;" />
+          </label>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+            <label style="display:grid;gap:5px;font-size:12px;font-weight:700;color:#475569;">Estoque mínimo
+              <input id="modalEditarRapidoMinimo" type="number" min="0" step="0.01" inputmode="decimal" style="width:100%;box-sizing:border-box;padding:11px;border:1px solid #cbd5e1;border-radius:8px;font-size:16px;" />
+            </label>
+            <label style="display:grid;gap:5px;font-size:12px;font-weight:700;color:#475569;">Lead time (dias)
+              <input id="modalEditarRapidoLeadTime" type="number" min="0" step="1" inputmode="numeric" style="width:100%;box-sizing:border-box;padding:11px;border:1px solid #cbd5e1;border-radius:8px;font-size:16px;" />
+            </label>
+          </div>
+          <button id="modalEditarRapidoFoto" type="button" style="min-height:44px;border:1px solid #93c5fd;border-radius:8px;background:#eff6ff;color:#1d4ed8;font-weight:700;cursor:pointer;"><i class="fa-solid fa-camera" style="margin-right:7px;"></i>Trocar foto</button>
+          <div style="font-size:12px;font-weight:700;color:#475569;">Marcação rápida</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+            <button id="modalEditarRapidoObsoleto" type="button" style="min-height:44px;border:1px solid #fca5a5;border-radius:8px;background:#fef2f2;color:#b91c1c;font-weight:700;cursor:pointer;">Tornar obsoleto</button>
+            <button id="modalEditarRapidoEngenharia" type="button" style="min-height:44px;border:1px solid #fcd34d;border-radius:8px;background:#fffbeb;color:#92400e;font-weight:700;cursor:pointer;">Item engenharia</button>
+          </div>
+          <div id="modalEditarRapidoStatus" role="status" style="display:none;font-size:12px;font-weight:600;"></div>
+          <button id="modalEditarRapidoSalvar" type="button" style="min-height:48px;border:none;border-radius:9px;background:#16a34a;color:#fff;font-size:14px;font-weight:800;cursor:pointer;"><i class="fa-solid fa-check" style="margin-right:7px;"></i>Salvar alterações</button>
+        </div>
+      </div>
       <div id="modalAcoesManuais" style="display:none;padding:16px 20px;">
         <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px;">
           <button id="modalManuaisVoltar" style="background:none;border:none;font-size:16px;color:#3b82f6;cursor:pointer;padding:4px;" title="Voltar"><i class="fa-solid fa-arrow-left"></i></button>
@@ -48597,12 +48638,144 @@ window.renderizarCatalogoOmie = renderizarCatalogoOmie;
   function mostrarBotoes() {
     document.getElementById('modalAcoesBotoes').style.display = 'flex';
     document.getElementById('modalAcoesManuais').style.display = 'none';
+    document.getElementById('modalAcoesEditarRapido').style.display = 'none';
   }
 
   function mostrarManuais() {
     document.getElementById('modalAcoesBotoes').style.display = 'none';
+    document.getElementById('modalAcoesEditarRapido').style.display = 'none';
     document.getElementById('modalAcoesManuais').style.display = 'block';
     carregarManuaisProduto(_ctx.codigo);
+  }
+
+  function setEditarRapidoStatus(mensagem, erro = false) {
+    const status = document.getElementById('modalEditarRapidoStatus');
+    if (!status) return;
+    status.textContent = mensagem || '';
+    status.style.display = mensagem ? 'block' : 'none';
+    status.style.color = erro ? '#dc2626' : '#15803d';
+  }
+
+  async function mostrarEditarRapido() {
+    document.getElementById('modalAcoesBotoes').style.display = 'none';
+    document.getElementById('modalAcoesManuais').style.display = 'none';
+    document.getElementById('modalAcoesEditarRapido').style.display = 'block';
+    const loading = document.getElementById('modalEditarRapidoCarregando');
+    const form = document.getElementById('modalEditarRapidoForm');
+    loading.style.display = 'block';
+    form.style.display = 'none';
+    setEditarRapidoStatus('');
+    try {
+      const resp = await fetch('/api/produtos/' + encodeURIComponent(_ctx.codigo), { credentials: 'include' });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data.error || 'Produto não encontrado.');
+      document.getElementById('modalEditarRapidoDescricao').value = data.descricao || _ctx.descricao || '';
+      document.getElementById('modalEditarRapidoMinimo').value = data.estoque_minimo ?? '';
+      document.getElementById('modalEditarRapidoLeadTime').value = data.lead_time ?? '';
+    } catch (err) {
+      setEditarRapidoStatus(err.message || 'Erro ao carregar produto.', true);
+    } finally {
+      loading.style.display = 'none';
+      form.style.display = 'grid';
+    }
+  }
+
+  function validarRespostaOmie(data) {
+    const mensagem = data?.faultstring || data?.error;
+    if (!mensagem) return;
+    if (typeof mensagem === 'string') {
+      try {
+        const parsed = JSON.parse(mensagem);
+        throw new Error(parsed.faultstring || parsed.message || mensagem);
+      } catch (err) {
+        if (err instanceof SyntaxError) throw new Error(mensagem);
+        throw err;
+      }
+    }
+    throw new Error(mensagem.message || 'A Omie recusou a alteração.');
+  }
+
+  async function salvarEdicaoRapida() {
+    const descricao = document.getElementById('modalEditarRapidoDescricao').value.trim();
+    const minimoRaw = document.getElementById('modalEditarRapidoMinimo').value.trim().replace(',', '.');
+    const leadRaw = document.getElementById('modalEditarRapidoLeadTime').value.trim().replace(',', '.');
+    const minimo = minimoRaw === '' ? 0 : Number(minimoRaw);
+    const leadTime = leadRaw === '' ? 0 : Number(leadRaw);
+    if (!descricao) return setEditarRapidoStatus('O nome do produto é obrigatório.', true);
+    if (!Number.isFinite(minimo) || minimo < 0) return setEditarRapidoStatus('Informe um estoque mínimo válido.', true);
+    if (!Number.isFinite(leadTime) || leadTime < 0) return setEditarRapidoStatus('Informe um lead time válido.', true);
+
+    const btn = document.getElementById('modalEditarRapidoSalvar');
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin" style="margin-right:7px;"></i>Salvando...';
+    setEditarRapidoStatus('');
+    try {
+      const [produtoResp, minimoResp] = await Promise.all([
+        fetch('/api/produtos/alterar', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ produto_servico_cadastro: { codigo: _ctx.codigo, descricao, lead_time: leadTime } })
+        }),
+        fetch('/api/omie/estoque/ajuste/', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ call: 'AlterarEstoqueMinimo', param: [{ cod_int: _ctx.codigo, quan_min: minimo }] })
+        })
+      ]);
+      const [produtoData, minimoData] = await Promise.all([produtoResp.json(), minimoResp.json()]);
+      if (!produtoResp.ok) throw new Error(produtoData.error || 'Falha ao alterar produto.');
+      if (!minimoResp.ok) throw new Error(minimoData.error || 'Falha ao alterar estoque mínimo.');
+      validarRespostaOmie(produtoData);
+      validarRespostaOmie(minimoData);
+
+      _ctx.descricao = descricao;
+      document.getElementById('modalAcoesDescricao').textContent = descricao;
+      const card = document.querySelector(`.produto-catalogo-card[data-product-code="${CSS.escape(_ctx.codigo)}"]`);
+      const descricaoCard = card?.querySelector('.produto-card-descricao');
+      if (descricaoCard) descricaoCard.textContent = descricao;
+      const itemCache = (window.produtosCatalogoOmie || []).find(p => p.codigo === _ctx.codigo);
+      if (itemCache) {
+        itemCache.descricao = descricao;
+        itemCache.estoque_minimo = minimo;
+        itemCache.lead_time = leadTime;
+      }
+      setEditarRapidoStatus('Alterações salvas com sucesso.');
+    } catch (err) {
+      setEditarRapidoStatus(err.message || 'Erro ao salvar alterações.', true);
+    } finally {
+      btn.disabled = false;
+      btn.innerHTML = '<i class="fa-solid fa-check" style="margin-right:7px;"></i>Salvar alterações';
+    }
+  }
+
+  async function aplicarMarcadorRapido(prefixo, rotulo) {
+    const input = document.getElementById('modalEditarRapidoDescricao');
+    const atual = input.value.trim();
+    const prefixoCompleto = `${prefixo} - `;
+    if (atual.toUpperCase().startsWith(prefixoCompleto)) {
+      setEditarRapidoStatus(`O produto já está marcado como ${rotulo}.`, true);
+      return;
+    }
+    if (!confirm(`Tornar este item ${rotulo}?`)) return;
+    input.value = prefixoCompleto + atual.replace(/^(OBSOLETO|ENGENHARIA)\s*-\s*/i, '');
+    await salvarEdicaoRapida();
+  }
+
+  async function abrirTrocaFotoRapida() {
+    const codigo = _ctx.codigo;
+    fechar();
+    mostrarSpinnerCarregamentoProduto(codigo);
+    try {
+      if (typeof window.openProdutoPorCodigo !== 'function') throw new Error('Tela do produto indisponível.');
+      await window.openProdutoPorCodigo(codigo);
+      document.querySelector('.nav-card[data-target="listaFotos"]')?.click();
+    } catch (err) {
+      alert(err.message || 'Erro ao abrir as fotos do produto.');
+    } finally {
+      setTimeout(esconderSpinnerCarregamentoProduto, 350);
+    }
   }
 
   function fecharQuantidade() {
@@ -48917,6 +49090,12 @@ window.renderizarCatalogoOmie = renderizarCatalogoOmie;
   document.getElementById('modalAcoesFechar').addEventListener('click', fechar);
   document.getElementById('modalAcoesBtnManual').addEventListener('click', mostrarManuais);
   document.getElementById('modalManuaisVoltar').addEventListener('click', mostrarBotoes);
+  document.getElementById('modalAcoesBtnEditarRapido').addEventListener('click', mostrarEditarRapido);
+  document.getElementById('modalEditarRapidoVoltar').addEventListener('click', mostrarBotoes);
+  document.getElementById('modalEditarRapidoSalvar').addEventListener('click', salvarEdicaoRapida);
+  document.getElementById('modalEditarRapidoFoto').addEventListener('click', abrirTrocaFotoRapida);
+  document.getElementById('modalEditarRapidoObsoleto').addEventListener('click', () => aplicarMarcadorRapido('OBSOLETO', 'obsoleto'));
+  document.getElementById('modalEditarRapidoEngenharia').addEventListener('click', () => aplicarMarcadorRapido('ENGENHARIA', 'de engenharia'));
   document.getElementById('modalManualBtnEnviar').addEventListener('click', enviarManual);
   document.getElementById('modalAcoesQtdFechar').addEventListener('click', fecharQuantidade);
   document.getElementById('modalAcoesQtdCancelar').addEventListener('click', fecharQuantidade);
@@ -48933,6 +49112,7 @@ window.renderizarCatalogoOmie = renderizarCatalogoOmie;
     if (event.key === 'Escape') fecharCadMultiplo();
   });
 
+  document.getElementById('modalAcoesBtnInformacoes').addEventListener('click', () => { const { codigo } = _ctx; fechar(); abrirModalEditarProduto(codigo); });
   document.getElementById('modalAcoesBtnCompras').addEventListener('click', () => { const {codigo_produto, codigo, descricao} = _ctx; fechar(); abrirModalUltimasCompras(codigo_produto, codigo, descricao); });
   document.getElementById('modalAcoesBtnSeparacao').addEventListener('click', () => abrirQuantidade('separacao'));
   document.getElementById('modalAcoesBtnMovimentar').addEventListener('click', () => {
@@ -50355,7 +50535,95 @@ function fecharImagemAmpliada() {
  * Abre a página de detalhes do produto ao clicar no ícone de lápis
  * Navega para: Menu Lateral > Produtos > Lista de produtos > Produto selecionado
  */
-function abrirModalEditarProduto(codigoProduto) {
+let _produtoInfoModal = null;
+let _produtoInfoPlaceholder = null;
+let _produtoInfoDisplayOriginal = '';
+let _produtoInfoListaState = null;
+
+function capturarEstadoListaProduto() {
+  const input = document.getElementById('codeFilter');
+  const grid = document.getElementById('listaProdutosGrid');
+  const list = document.getElementById('listaProdutosList');
+  const pane = document.getElementById('listaProdutos');
+  return {
+    pesquisa: input?.value || '',
+    gridScrollTop: grid?.scrollTop || 0,
+    listScrollTop: list?.scrollTop || 0,
+    windowScrollX: window.scrollX,
+    windowScrollY: window.scrollY,
+    paneDisplay: pane?.style.display || '',
+    hash: window.location.hash
+  };
+}
+
+function restaurarEstadoListaProduto(state) {
+  if (!state) return;
+  const input = document.getElementById('codeFilter');
+  const pane = document.getElementById('listaProdutos');
+  if (input && input.value !== state.pesquisa) {
+    input.value = state.pesquisa;
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  }
+  if (pane) pane.style.display = state.paneDisplay || 'block';
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    const grid = document.getElementById('listaProdutosGrid');
+    const list = document.getElementById('listaProdutosList');
+    if (grid) grid.scrollTop = state.gridScrollTop;
+    if (list) list.scrollTop = state.listScrollTop;
+    window.scrollTo(state.windowScrollX, state.windowScrollY);
+  }));
+}
+
+function garantirProdutoInfoModal() {
+  if (_produtoInfoModal) return _produtoInfoModal;
+  const overlay = document.createElement('div');
+  overlay.id = 'produtoInfoModalOverlay';
+  overlay.className = 'produto-info-modal-overlay';
+  overlay.innerHTML = `
+    <section class="produto-info-modal" role="dialog" aria-modal="true" aria-labelledby="produtoInfoModalTitulo">
+      <header class="produto-info-modal-header">
+        <button type="button" id="produtoInfoModalVoltar" class="produto-info-modal-voltar">
+          <i class="fa-solid fa-arrow-left"></i> Voltar para a lista
+        </button>
+        <strong id="produtoInfoModalTitulo">Informações do produto</strong>
+        <button type="button" id="produtoInfoModalFechar" class="produto-info-modal-fechar" aria-label="Fechar informações">
+          <i class="fa-solid fa-xmark"></i>
+        </button>
+      </header>
+      <div id="produtoInfoModalBody" class="produto-info-modal-body"></div>
+    </section>`;
+  document.body.appendChild(overlay);
+  overlay.addEventListener('click', event => {
+    if (event.target === overlay) fecharProdutoInfoModal();
+  });
+  overlay.querySelector('#produtoInfoModalVoltar').addEventListener('click', fecharProdutoInfoModal);
+  overlay.querySelector('#produtoInfoModalFechar').addEventListener('click', fecharProdutoInfoModal);
+  document.addEventListener('keydown', event => {
+    if (event.key === 'Escape' && overlay.classList.contains('aberto')) fecharProdutoInfoModal();
+  });
+  _produtoInfoModal = overlay;
+  return overlay;
+}
+
+function fecharProdutoInfoModal() {
+  if (!_produtoInfoModal) return;
+  const tabs = document.getElementById('produtoTabs');
+  const pane = document.getElementById('dadosProduto');
+  if (pane) pane.style.display = 'none';
+  if (tabs && _produtoInfoPlaceholder?.parentNode) {
+    tabs.style.display = _produtoInfoDisplayOriginal;
+    _produtoInfoPlaceholder.parentNode.insertBefore(tabs, _produtoInfoPlaceholder);
+    _produtoInfoPlaceholder.remove();
+  }
+  _produtoInfoPlaceholder = null;
+  _produtoInfoModal.classList.remove('aberto');
+  document.body.classList.remove('produto-info-modal-open');
+  restaurarEstadoListaProduto(_produtoInfoListaState);
+  _produtoInfoListaState = null;
+}
+window.fecharProdutoInfoModal = fecharProdutoInfoModal;
+
+async function abrirModalEditarProdutoLegacy(codigoProduto) {
   try {
     // Fecha o modal do catálogo
     fecharModalCatalogoOmie();
@@ -50374,6 +50642,38 @@ function abrirModalEditarProduto(codigoProduto) {
 }
 
 // ===== CONFIGURAÇÃO DE CATEGORIAS E DEPARTAMENTOS =====
+async function abrirModalEditarProduto(codigoProduto) {
+  try {
+    if (!_produtoInfoModal?.classList.contains('aberto')) {
+      _produtoInfoListaState = capturarEstadoListaProduto();
+    }
+    const overlay = garantirProdutoInfoModal();
+    const body = overlay.querySelector('#produtoInfoModalBody');
+    const tabs = document.getElementById('produtoTabs');
+    const pane = document.getElementById('dadosProduto');
+    if (!tabs || !pane || typeof window.loadDadosProduto !== 'function') throw new Error('Tela do produto indisponível.');
+    try { fecharModalCatalogoOmie(); } catch {}
+    if (!_produtoInfoPlaceholder) {
+      _produtoInfoPlaceholder = document.createComment('dadosProduto modal placeholder');
+      tabs.parentNode.insertBefore(_produtoInfoPlaceholder, tabs);
+      _produtoInfoDisplayOriginal = tabs.style.display;
+    }
+    body.appendChild(tabs);
+    tabs.style.display = 'block';
+    tabs.querySelectorAll('.tab-content > .tab-pane').forEach(item => { item.style.display = 'none'; });
+    pane.style.display = 'block';
+    overlay.classList.add('aberto');
+    document.body.classList.add('produto-info-modal-open');
+    overlay.querySelector('#produtoInfoModalTitulo').textContent = `Informações · ${codigoProduto}`;
+    window.codigoSelecionado = String(codigoProduto || '').trim();
+    await window.loadDadosProduto(codigoProduto);
+  } catch (error) {
+    window.__produtoInfoLastError = error?.stack || String(error);
+    console.error('[abrirModalEditarProduto]', error);
+    alert(error.message || 'Erro ao abrir produto. Tente novamente.');
+  }
+}
+
 function abrirPainelConfiguracaoCateg() {
   try {
     // Limpa tudo
@@ -70053,8 +70353,12 @@ document.addEventListener('DOMContentLoaded', () => {
   const scanOkBtn = document.getElementById('movimScanEnderecoOk');
   const scanFechar= document.getElementById('movimScanEnderecoFechar');
   const omieMotivoSel = document.getElementById('movimOmieMotivo');
+  const motivoBotoes = document.getElementById('movimMotivoBotoes');
+  const mostrarOutrosLocaisBtn = document.getElementById('movimMostrarOutrosLocais');
   const movimEstoqueLocaisEl = document.getElementById('movimEstoqueLocais');
   let _movimEstoqueLocais = [];
+  let _movimLocaisDisponiveis = [];
+  let _mostrarOutrosDestinos = false;
 
   function renderizarEstoqueModal() {
     if (!movimEstoqueLocaisEl) return;
@@ -70186,6 +70490,8 @@ document.addEventListener('DOMContentLoaded', () => {
     limparEnderecosReferencia();
     _movimEstoqueLocais = [];
     _processandoAcao = false;
+    _mostrarOutrosDestinos = false;
+    if (_movimLocaisDisponiveis.length) preencherDestinosMovim();
     resetMotivoOmie();
     _movimEtqImpressaoLista = [];
   }
@@ -70731,6 +71037,18 @@ document.addEventListener('DOMContentLoaded', () => {
     const tipoOmie = obterTipoExecutarOmie();
     const modo = _movimModoInterno;
 
+    document.querySelectorAll('.movimMotivoBtn').forEach(btn => {
+      btn.classList.toggle('ativo', btn.dataset.value === String(omieMotivoSel?.value || ''));
+    });
+    const rotulosInternos = {
+      ENTRADA: interno ? 'SOMA' : 'ENTRADA',
+      SAIDA: interno ? 'SUBTRAÇÃO' : 'SAÍDA',
+      TRANSFERENCIA: interno ? 'ALTERAR ENDEREÇO' : 'TRANSFERÊNCIA'
+    };
+    document.querySelectorAll('.movimModoBtn').forEach(btn => {
+      btn.textContent = rotulosInternos[btn.dataset.type] || btn.textContent;
+    });
+
     // Motivo sempre vis�vel
     if (omieMotivoSel?.closest('.movim-field')) {
       omieMotivoSel.closest('.movim-field').style.display = '';
@@ -70747,6 +71065,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const prontoInterno = interno && !!modo;
     const prontoOmie = !interno && !!tipoOmie;
+
+    if (prontoOmie && tipoOmie === 'ENTRADA' && !localSel?.value) {
+      aplicarDestinoPortaPallet();
+    }
 
     // Armaz�m origem/destino
     const showOrigemArm = prontoOmie && (tipoOmie === 'SAIDA' || tipoOmie === 'TRANSFERENCIA');
@@ -70822,6 +71144,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (omieMotivoSel) omieMotivoSel.value = '';
     _movimModoInterno = null;
     document.querySelectorAll('.movimModoBtn').forEach(b => b.classList.remove('ativo'));
+    document.querySelectorAll('.movimMotivoBtn').forEach(b => b.classList.remove('ativo'));
     limparEnderecosInternos();
     atualizarLayoutMovim();
   }
@@ -71248,6 +71571,15 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
+  if (motivoBotoes && omieMotivoSel) {
+    motivoBotoes.addEventListener('click', event => {
+      const btn = event.target.closest('.movimMotivoBtn');
+      if (!btn) return;
+      omieMotivoSel.value = btn.dataset.value || '';
+      omieMotivoSel.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+  }
+
   if (omieMotivoSel) {
     preencherMotivosOmieUnificados();
     omieMotivoSel.addEventListener('change', () => {
@@ -71371,12 +71703,52 @@ document.addEventListener('DOMContentLoaded', () => {
   if (qtdInput) qtdInput.addEventListener('input', avaliarExpressao);
 
   // Carrega os locais de estoque nos selects (Local de estoque e Origem)
+  const MOVIM_DESTINOS_PRINCIPAIS = new Set([
+    '10408201806',
+    '10717096386',
+    '10431538872',
+    '10408747829',
+    '10440426539'
+  ]);
+
+  function preencherDestinosMovim() {
+    if (!localSel) return;
+    const valorAtual = localSel.value;
+    const locaisVisiveis = _mostrarOutrosDestinos
+      ? _movimLocaisDisponiveis
+      : _movimLocaisDisponiveis.filter(l => MOVIM_DESTINOS_PRINCIPAIS.has(String(l.codigo_local_estoque)));
+    localSel.innerHTML = '<option value="">Selecione o destino...</option>';
+    locaisVisiveis.forEach(l => {
+      const opt = document.createElement('option');
+      opt.value = l.codigo_local_estoque;
+      opt.textContent = l.descricao || l.codigo_local_estoque;
+      localSel.appendChild(opt);
+    });
+    if (valorAtual && Array.from(localSel.options).some(o => o.value === valorAtual)) {
+      localSel.value = valorAtual;
+    }
+    if (mostrarOutrosLocaisBtn) {
+      const existemOutros = _movimLocaisDisponiveis.some(l => !MOVIM_DESTINOS_PRINCIPAIS.has(String(l.codigo_local_estoque)));
+      mostrarOutrosLocaisBtn.style.display = existemOutros ? 'inline-flex' : 'none';
+      mostrarOutrosLocaisBtn.innerHTML = _mostrarOutrosDestinos
+        ? '<i class="fa-solid fa-eye-slash"></i> Ocultar outros armazéns'
+        : '<i class="fa-solid fa-eye"></i> Desocultar outros armazéns';
+    }
+  }
+
+  mostrarOutrosLocaisBtn?.addEventListener('click', () => {
+    _mostrarOutrosDestinos = !_mostrarOutrosDestinos;
+    preencherDestinosMovim();
+    if (!_mostrarOutrosDestinos && !localSel.value) aplicarDestinoPortaPallet();
+  });
+
   async function carregarLocais() {
     if (!localSel && !origemSel) return;
     try {
       const r = await fetch('/api/armazem/locais?fonte=db');
       const d = await r.json();
       const locais = (d.locais || []).filter(l => !l.inativo);
+      _movimLocaisDisponiveis = locais;
 
       function preencherOrigem(sel) {
         if (!sel) return;
@@ -71411,7 +71783,8 @@ document.addEventListener('DOMContentLoaded', () => {
       }
 
       preencherOrigem(origemSel);
-      preencherDestino(localSel);
+      preencherDestinosMovim();
+      if (localSel) localSel.value = '';
       atualizarUiMesmoArmazem();
     } catch (e) {
       console.warn('[modalMovimentacao] erro ao carregar locais:', e);

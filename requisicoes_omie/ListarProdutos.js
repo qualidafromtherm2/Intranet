@@ -9,13 +9,13 @@
  *    também refaz o preload automaticamente.
  * ======================================================================= */
 
-import { loadDadosProduto } from './Dados_produto.js';
+import { loadDadosProduto } from './Dados_produto.js?v=20260710c';
 import {
   initFiltros,
   setCache,
   getFiltered,
   populateFilters
-} from './filtro_produto.js';
+} from './filtro_produto.js?v=20260710a';
 
 /* --------------------- SPINNER helpers -------------------------------- */
 let spinnerVisible  = false;

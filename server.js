@@ -19717,19 +19717,21 @@ app.get('/api/logistica/estoque/batch', async (req, res) => {
         unidade: row.unidade || ''
       });
 
-      if (!minimos[row.codigo]) minimos[row.codigo] = { min: 0, saldoTotal: 0, abaixo: false };
+      if (!minimos[row.codigo]) minimos[row.codigo] = { min: 0, saldoAlmox: 0, abaixo: false };
       const min = parseFloat(row.estoque_minimo) || 0;
       // Exibe no card o maior estoque_minimo entre todos os armazéns
       if (min > minimos[row.codigo].min) minimos[row.codigo].min = min;
       // Soma o físico de todos os armazéns para comparar com o mínimo
-      minimos[row.codigo].saldoTotal += parseFloat(row.fisico) || 0;
+      if (String(row.local_codigo) === '10717096386') {
+        minimos[row.codigo].saldoAlmox = parseFloat(row.fisico) || 0;
+      }
     }
 
     // Passo 2: abaixo do mínimo = soma de todos os armazéns < maior mínimo cadastrado
     for (const cod of Object.keys(minimos)) {
       const info = minimos[cod];
       if (info.min > 0) {
-        info.abaixo = info.saldoTotal < info.min;
+        info.abaixo = info.saldoAlmox < info.min;
       }
     }
 

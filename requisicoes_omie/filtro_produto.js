@@ -11,6 +11,7 @@ let activeSemEstoqueMin   = false;
 let activeHideObsolete    = false;
 let activeHideEngineering = false;
 let activeLocalValue      = '';
+let activeOrigemValue     = '';
 
 // Cache dos locais com saldo positivo: Map<local_codigo, Set<codigo_produto>>
 let _locaisCache = null;
@@ -37,7 +38,7 @@ async function getLocaisInventario() {
   return _locaisCachePromise;
 }
 
-let codeInput, familySelect, tipoItemSelect, filterBtn, filterOverlay, filterLocalSel;
+let codeInput, familySelect, tipoItemSelect, filterBtn, filterOverlay, filterLocalSel, filterOrigemSel;
 let filterShowInactiveCb, filterSemEstoqueMinCb, filterHideObsoleteCb, filterHideEngineeringCb;
 let _onFiltered;
 
@@ -53,6 +54,12 @@ function extractTipoFromCodigo(codigo) {
     return parts[1].toUpperCase();
   }
   return null;
+}
+
+function extractOrigemFromCodigo(codigo) {
+  const parts = String(codigo || '').split('.');
+  const origem = String(parts[2] || '').toUpperCase();
+  return origem === 'N' || origem === 'I' ? origem : null;
 }
 
 /**
@@ -79,6 +86,7 @@ export function initFiltros({
   filterHideObsoleteCb   = document.getElementById('filterHideObsolete');
   filterHideEngineeringCb = document.getElementById('filterHideEngineering');
   filterLocalSel           = document.getElementById('filterLocalSelect');
+  filterOrigemSel          = document.getElementById('filterOrigemProduto');
   _onFiltered    = onFiltered;
 
   if (!codeInput) {
@@ -128,7 +136,9 @@ export function initFiltros({
       if (filterHideObsoleteCb)    filterHideObsoleteCb.checked    = false;
       if (filterHideEngineeringCb) filterHideEngineeringCb.checked = false;
       if (filterLocalSel)          filterLocalSel.value            = '';
+      if (filterOrigemSel)         filterOrigemSel.value           = '';
       activeLocalValue = '';
+      activeOrigemValue = '';
       fecharModalFiltro(true);
     });
   }
@@ -144,6 +154,7 @@ export function initFiltros({
       activeHideObsolete    = filterHideObsoleteCb?.checked    || false;
       activeHideEngineering = filterHideEngineeringCb?.checked || false;
       activeLocalValue      = filterLocalSel?.value            || '';
+      activeOrigemValue     = filterOrigemSel?.value           || '';
       fecharModalFiltro(true);
     });
   }
@@ -159,6 +170,7 @@ function abrirModalFiltro() {
   if (filterHideObsoleteCb)    filterHideObsoleteCb.checked    = activeHideObsolete;
   if (filterHideEngineeringCb) filterHideEngineeringCb.checked = activeHideEngineering;
   if (filterLocalSel)          filterLocalSel.value            = activeLocalValue;
+  if (filterOrigemSel)         filterOrigemSel.value           = activeOrigemValue;
   // Carrega opcoes
   popularFamilias();
   popularTipoItem();
@@ -303,7 +315,7 @@ function applyFilters() {
     filtered = filtered.filter(i => {
       const codigo    = (i.codigo   || '').toLowerCase();
       const descricao = (i.descricao || '').toLowerCase();
-      return codigo.includes(searchTerm) || terms.every(t => descricao.includes(t));
+      return terms.every(t => `${codigo} ${descricao}`.includes(t));
     });
   }
 
@@ -323,6 +335,10 @@ function applyFilters() {
         extractTipoFromCodigo(i.codigo) === activeTipoValue
       );
     }
+  }
+
+  if (activeOrigemValue) {
+    filtered = filtered.filter(i => extractOrigemFromCodigo(i.codigo) === activeOrigemValue);
   }
 
   // Filtro por local de estoque (produto deve ter saldo > 0 naquele local)

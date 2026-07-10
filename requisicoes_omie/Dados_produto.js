@@ -791,6 +791,7 @@ try {
 /* ----------------- 4) Características ----------------------------- */
 // 1) Insere a ferramenta **dentro** do título, para ficar lado a lado
 const caractTitleEl = document.querySelector('#listaCaracteristica .content-section-title');
+if (caractTitleEl) {
 if (!caractTitleEl.querySelector('#caract-toggle')) {
   // torne o título um inline-flex para alinhar ícone e texto
   caractTitleEl.style.display    = 'inline-flex';
@@ -1279,6 +1280,8 @@ if (!caracUl._deleteListenerAttached) {
 
 
   
+
+}
 
 /* ----------------- 5) Estrutura de produto (malha) ---------------- */
 try {
@@ -1774,8 +1777,10 @@ const filtrados = malhaItens.filter(item => {
 
   // re-renderiza
   renderListaPecas(filtrados);
-  document.querySelector('#listaPecasTab .content-section-title')
-          .textContent = `Lista de peças (${filtrados.length})`;
+  const pecasTitleEl = document.querySelector('#listaPecasTab .content-section-title');
+  if (pecasTitleEl) {
+    pecasTitleEl.textContent = `Lista de peças (${filtrados.length})`;
+  }
 }
 
 
