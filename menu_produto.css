@@ -12,6 +12,59 @@
   box-shadow: 0 2px 8px rgba(16,185,129,0.15);
 }
 
+/* Override final da SEP: modal acompanha o conteúdo em telas estreitas. */
+@media (max-width: 768px) {
+  #modalSeparacaoLogistica,
+  #modalAguardandoRetiradaSep {
+    align-items: center !important;
+    justify-content: center !important;
+    padding: 10px !important;
+  }
+  #modalSeparacaoLogistica > div,
+  #modalAguardandoRetiradaSep > div {
+    width: min(100%, 560px) !important;
+    height: auto !important;
+    min-height: 0 !important;
+    max-height: calc(100dvh - 20px) !important;
+    border: 1px solid #2f3744 !important;
+    border-radius: 12px !important;
+  }
+  #modalSeparacaoLogistica .sep-row--work,
+  #modalAguardandoRetiradaSep .sep-row--work {
+    display: grid !important;
+    grid-template-columns: 36px minmax(0, 1fr) !important;
+    align-items: start !important;
+    column-gap: 9px !important;
+    row-gap: 7px !important;
+  }
+  #modalSeparacaoLogistica .sep-row--work .sep-main,
+  #modalAguardandoRetiradaSep .sep-row--work .sep-main { grid-column: 2 !important; }
+  #modalSeparacaoLogistica .sep-row--work .sep-qty,
+  #modalAguardandoRetiradaSep .sep-row--work .sep-qty,
+  #modalSeparacaoLogistica .sep-row--work > div:last-child,
+  #modalAguardandoRetiradaSep .sep-row--work > div:last-child { grid-column: 1 / -1 !important; }
+
+  #modalAguardandoRetiradaSep .sep-request-row {
+    display: grid !important;
+    grid-template-columns: 36px minmax(0, 1fr) !important;
+    gap: 8px !important;
+    padding: 10px !important;
+  }
+  #modalAguardandoRetiradaSep .sep-request-row .sep-thumb {
+    width: 36px !important;
+    height: 36px !important;
+    grid-column: 1 !important;
+  }
+  #modalAguardandoRetiradaSep .sep-request-main {
+    grid-column: 2 !important;
+    min-width: 0 !important;
+  }
+  #modalAguardandoRetiradaSep .sep-request-row > div:nth-last-child(-n+3):not(.sep-request-main) {
+    grid-column: 1 / -1 !important;
+    justify-self: start;
+  }
+}
+
 /* Lista de produtos: cores operacionais consistentes com as ações. */
 #listaProdutos #listaProdutosAbrirCarrinhoBtn {
   background: #16a34a !important;
@@ -471,6 +524,167 @@ img {
   .movimModoBtn { white-space: normal; line-height: 1.2; }
 }
 .shortcut-btn i { font-size: 16px; color: inherit; }
+
+/* SEP: contraste operacional e menor densidade visual. */
+.sep-kanban-column {
+  background: #10141c !important;
+  border-color: #303846 !important;
+}
+.sep-kanban-column-header {
+  background: #171d27 !important;
+  border-bottom-color: var(--sep-accent) !important;
+}
+.sep-kanban-card {
+  background: #1b212b !important;
+  border-color: #3a4453 !important;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, .22);
+}
+.sep-kanban-card .sep-kanban-meta,
+.sep-kanban-card .sep-kanban-meta span,
+.sep-kanban-card .sep-kanban-meta i {
+  color: #cbd5e1 !important;
+}
+.sep-kanban-item-count {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 7px;
+  padding: 3px 8px;
+  border: 1px solid #475569;
+  border-radius: 999px;
+  background: #0f172a;
+  color: #e2e8f0;
+  font-size: .7rem;
+  font-weight: 600;
+}
+.sep-kanban-item-count i { color: #60a5fa; font-size: .65rem; }
+.sep-kanban-item-count strong { color: #fff; font-size: .76rem; }
+.sep-destino-inline {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  padding: 3px 2px;
+  color: #c4b5fd;
+  font-size: .68rem;
+  font-weight: 700;
+}
+.sep-destino-inline > span:first-child {
+  color: #8b95a7;
+  font-size: .58rem;
+  letter-spacing: .05em;
+  text-transform: uppercase;
+}
+.sep-destino-inline > div {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sep-thumb img[src] { cursor: zoom-in; }
+.sep-endereco-legenda {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 5px;
+  color: #fbbf24;
+  line-height: 1.2;
+}
+.sep-endereco-legenda > div {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+  font-size: .6rem;
+}
+.sep-endereco-legenda > div span { color: #78716c; }
+.sep-endereco-legenda small {
+  color: #a8a29e;
+  font-size: .52rem;
+  font-weight: 700;
+  text-align: right;
+}
+@media (max-width: 480px) {
+  .sep-endereco-legenda { align-items: flex-start; flex-direction: column; gap: 2px; }
+  .sep-endereco-legenda small { text-align: left; }
+}
+.sep-origem-toggle {
+  width: 100%;
+  margin-top: 6px;
+  padding: 7px 9px;
+  border: 1px dashed #475569;
+  border-radius: 7px;
+  background: transparent;
+  color: #94a3b8;
+  font-size: .66rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+.sep-origem-toggle:hover { border-color: #60a5fa; color: #bfdbfe; }
+
+html.light-mode .sep-kanban-column {
+  background: #f1f5f9 !important;
+  border-color: #cbd5e1 !important;
+}
+html.light-mode .sep-kanban-column-header {
+  background: #e8edf4 !important;
+}
+html.light-mode .sep-kanban-card {
+  background: #fff !important;
+  border-color: #cbd5e1 !important;
+  box-shadow: 0 2px 7px rgba(15, 23, 42, .1);
+}
+html.light-mode .sep-kanban-card .sep-kanban-meta,
+html.light-mode .sep-kanban-card .sep-kanban-meta span,
+html.light-mode .sep-kanban-card .sep-kanban-meta i {
+  color: #334155 !important;
+}
+html.light-mode .sep-kanban-item-count {
+  border-color: #cbd5e1;
+  background: #e8eef7;
+  color: #334155;
+}
+html.light-mode .sep-kanban-item-count strong { color: #0f172a; }
+@media (max-width: 640px) {
+  .sep-destino-inline { align-items: flex-start; }
+}
+
+@media (max-width: 768px) {
+  #modalSeparacaoLogistica,
+  #modalAguardandoRetiradaSep {
+    align-items: center !important;
+    justify-content: center !important;
+    padding: 10px !important;
+  }
+  #modalSeparacaoLogistica > div,
+  #modalAguardandoRetiradaSep > div {
+    width: min(100%, 560px) !important;
+    height: auto !important;
+    min-height: 0 !important;
+    max-height: calc(100dvh - 20px) !important;
+    border: 1px solid #2f3744 !important;
+    border-radius: 12px !important;
+  }
+  #modalSeparacaoLogistica .sep-row--work,
+  #modalAguardandoRetiradaSep .sep-row--work {
+    display: grid !important;
+    grid-template-columns: 36px minmax(0, 1fr) !important;
+    align-items: start !important;
+    column-gap: 9px !important;
+    row-gap: 7px !important;
+  }
+  #modalSeparacaoLogistica .sep-row--work .sep-thumb,
+  #modalAguardandoRetiradaSep .sep-row--work .sep-thumb { grid-column: 1; }
+  #modalSeparacaoLogistica .sep-row--work .sep-main,
+  #modalAguardandoRetiradaSep .sep-row--work .sep-main { grid-column: 2; }
+  #modalSeparacaoLogistica .sep-row--work .sep-qty,
+  #modalAguardandoRetiradaSep .sep-row--work .sep-qty,
+  #modalSeparacaoLogistica .sep-row--work > div:last-child,
+  #modalAguardandoRetiradaSep .sep-row--work > div:last-child {
+    grid-column: 1 / -1 !important;
+  }
+}
 
 /* Tooltip customizado abaixo do �cone */
 .shortcut-btn-tooltip {
@@ -14412,4 +14626,37 @@ body.mobile-modal-open {
     justify-content: center;
   }
   .movim-scan-manual { flex-direction: column; }
+}
+
+/* Override final da SEP: modal acompanha o conteúdo em telas estreitas. */
+@media (max-width: 768px) {
+  #modalSeparacaoLogistica,
+  #modalAguardandoRetiradaSep {
+    align-items: center !important;
+    justify-content: center !important;
+    padding: 10px !important;
+  }
+  #modalSeparacaoLogistica > div,
+  #modalAguardandoRetiradaSep > div {
+    width: min(100%, 560px) !important;
+    height: auto !important;
+    min-height: 0 !important;
+    max-height: calc(100dvh - 20px) !important;
+    border: 1px solid #2f3744 !important;
+    border-radius: 12px !important;
+  }
+  #modalSeparacaoLogistica .sep-row--work,
+  #modalAguardandoRetiradaSep .sep-row--work {
+    display: grid !important;
+    grid-template-columns: 36px minmax(0, 1fr) !important;
+    align-items: start !important;
+    column-gap: 9px !important;
+    row-gap: 7px !important;
+  }
+  #modalSeparacaoLogistica .sep-row--work .sep-main,
+  #modalAguardandoRetiradaSep .sep-row--work .sep-main { grid-column: 2 !important; }
+  #modalSeparacaoLogistica .sep-row--work .sep-qty,
+  #modalAguardandoRetiradaSep .sep-row--work .sep-qty,
+  #modalSeparacaoLogistica .sep-row--work > div:last-child,
+  #modalAguardandoRetiradaSep .sep-row--work > div:last-child { grid-column: 1 / -1 !important; }
 }

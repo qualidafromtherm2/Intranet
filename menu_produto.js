@@ -324,6 +324,22 @@ function _solMergeEnderecoBatch(itens, batch) {
   }
   return map;
 }
+
+function _solEnderecoLegendaHtml(registros) {
+  const segmentos = Math.max(0, ...(registros || []).map(ep =>
+    String(ep.endereco || ep.completo || '').trim().split('-').filter(Boolean).length
+  ));
+  const campos = segmentos >= 4
+    ? [['R', 'Rua'], ['NV', 'Nível'], ['AP', 'Apartamento'], ['VÃO', 'Vão']]
+    : segmentos === 3
+      ? [['R', 'Rua'], ['NV', 'Nível'], ['AP', 'Apartamento']]
+      : [['R', 'Rua'], ['AP', 'Apartamento']];
+  return `<div class="sep-endereco-legenda">
+    <div>${campos.map(([sigla]) => `<strong>${sigla}</strong>`).join('<span>|</span>')}</div>
+    <small>${campos.map(([, nome]) => nome.toUpperCase()).join(' - ')}</small>
+  </div>`;
+}
+
 function _solEnderecamentoHtml(codigo, enderecoMap, itemFallback) {
   const cod = String(codigo || '').trim();
   let registros = cod ? enderecoMap?.[cod] : null;
@@ -336,29 +352,21 @@ function _solEnderecamentoHtml(codigo, enderecoMap, itemFallback) {
     if (Array.isArray(fromItem) && fromItem.length) registros = fromItem;
   }
   if (!Array.isArray(registros) || !registros.length) return '';
-  const gridCols = 'minmax(70px,1.2fr) repeat(3,minmax(32px,auto)) minmax(40px,.9fr)';
-  const head = `<div style="display:grid;grid-template-columns:${gridCols};gap:4px 8px;font-size:.58rem;color:#94a3b8;text-transform:uppercase;font-weight:700;padding-bottom:4px;border-bottom:1px solid #854d0e44;">
-    <span>Endereço</span><span>ID</span><span>Qtd</span><span>Un</span><span>Compl.</span>
-  </div>`;
+  const gridCols = 'minmax(120px,1fr) minmax(64px,auto)';
+  const head = '';
   const linhas = registros.map(ep => {
     const end = escapeHtml(String(ep.endereco || ep.completo || '').trim());
     if (!end) return '';
-    const id = escapeHtml(String(ep.id != null ? ep.id : '—'));
     const qtd = escapeHtml(String(ep.qtd != null ? ep.qtd : '0'));
     const un = escapeHtml(String(ep.unidade || 'UN'));
-    const comp = String(ep.complemento || '').trim();
-    const compEsc = comp ? escapeHtml(comp) : '—';
     return `<div style="display:grid;grid-template-columns:${gridCols};gap:4px 8px;padding:4px 0;border-top:1px solid #854d0e33;font-size:.68rem;line-height:1.35;align-items:center;">
       <span style="color:#fde68a;font-weight:700;word-break:break-word;">${end}</span>
-      <span style="color:#cbd5e1;font-weight:600;">${id}</span>
-      <span style="color:#cbd5e1;font-weight:600;">${qtd}</span>
-      <span style="color:#cbd5e1;font-weight:600;">${un}</span>
-      <span style="color:#94a3b8;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${comp ? escapeHtml(comp) : ''}">${compEsc}</span>
+      <span style="color:#cbd5e1;font-weight:700;text-align:right;">${qtd} ${un}</span>
     </div>`;
   }).filter(Boolean).join('');
   if (!linhas) return '';
   return `<div style="padding:6px 8px;background:#1a1508;border:1px solid #854d0e55;border-radius:8px;">
-    <div style="font-size:.60rem;color:#fbbf24;font-weight:700;text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px;">Endereçamento</div>
+    ${_solEnderecoLegendaHtml(registros)}
     ${head}${linhas}
   </div>`;
 }
@@ -380,31 +388,24 @@ function _solEnderecamentoSepInline(codigo, enderecoMap, itemFallback) {
       Nenhum endereço cadastrado no ETQ
     </div>`;
   }
-  const gridCols = 'minmax(60px,1.2fr) repeat(3,minmax(28px,auto)) minmax(36px,.9fr)';
-  const head = `<div style="display:grid;grid-template-columns:${gridCols};gap:3px 6px;font-size:.55rem;color:#94a3b8;text-transform:uppercase;font-weight:700;padding-bottom:3px;border-bottom:1px solid #854d0e44;">
-    <span>End.</span><span>ID</span><span>Qtd</span><span>Un</span><span>Compl.</span>
-  </div>`;
+  const gridCols = 'minmax(110px,1fr) minmax(64px,auto)';
+  const head = '';
   const linhas = registros.map(ep => {
     const end = escapeHtml(String(ep.endereco || ep.completo || '').trim());
     if (!end) return '';
     const id = String(ep.id != null ? ep.id : '');
     const qtd = Number(ep.qtd || 0);
     const un = escapeHtml(String(ep.unidade || 'UN'));
-    const comp = String(ep.complemento || '').trim();
-    const compEsc = comp ? escapeHtml(comp) : '—';
     const qtdColor = qtd > 0 ? '#cbd5e1' : '#fbbf24';
     return `<button type="button" class="sep-etq-endereco-row" data-etq-id="${escapeHtml(id)}" data-etq-endereco="${end}" data-etq-qtd="${qtd}"
       style="display:grid;grid-template-columns:${gridCols};gap:3px 6px;width:100%;padding:5px 4px;border:1px solid #854d0e33;border-radius:6px;background:#1a1508;color:inherit;font:inherit;cursor:pointer;text-align:left;align-items:center;">
       <span style="color:#fde68a;font-weight:700;word-break:break-word;font-size:.65rem;">${end}</span>
-      <span style="color:#cbd5e1;font-weight:600;font-size:.64rem;">${escapeHtml(id || '—')}</span>
-      <span style="color:${qtdColor};font-weight:600;font-size:.64rem;">${qtd}</span>
-      <span style="color:#cbd5e1;font-weight:600;font-size:.64rem;">${un}</span>
-      <span style="color:#94a3b8;font-size:.62rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${comp ? escapeHtml(comp) : ''}">${compEsc}</span>
+      <span style="color:${qtdColor};font-weight:700;font-size:.64rem;text-align:right;">${qtd} ${un}</span>
     </button>`;
   }).filter(Boolean).join('');
   if (!linhas) return '';
   return `<div class="sep-etq-endereco-list" style="padding:6px 8px;background:#141006;border:1px solid #854d0e55;border-radius:8px;">
-    <div style="font-size:.58rem;color:#fbbf24;font-weight:700;text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px;">Endereçamento</div>
+    ${_solEnderecoLegendaHtml(registros)}
     ${head}${linhas}
   </div>`;
 }
@@ -422,14 +423,16 @@ function _solRenderOrigemSepFase(locais, enderecoMap, codigoProd, princArmz) {
   if (!sorted.length) {
     return `<div style="font-size:.63rem;color:#6b7280;font-style:italic;">Sem origem com saldo</div>`;
   }
-  return sorted.map((l, idx) => {
+  const temAlmox = sorted.some(l => String(l.local_codigo) === princArmz);
+  const origensHtml = sorted.map((l, idx) => {
     const cod = String(l.local_codigo || '');
     const isAlmox = cod === princArmz;
     const nome = (l.local_nome || cod).replace(/"/g, '&quot;');
     const qty2 = Number(l.saldo).toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
     const endHtml = isAlmox ? _solEnderecamentoSepInline(codigoProd, enderecoMap) : '';
-    const isDefault = isAlmox || idx === 0;
-    return `<div class="sol-origem-sep-wrap" style="display:flex;flex-direction:column;gap:4px;width:100%;">
+    const isDefault = isAlmox || (!temAlmox && idx === 0);
+    const isExtra = temAlmox ? !isAlmox : idx > 0;
+    return `<div class="sol-origem-sep-wrap${isExtra ? ' sep-origem-extra' : ''}" style="display:${isExtra ? 'none' : 'flex'};flex-direction:column;gap:4px;width:100%;">
       <button type="button" class="sol-origem-sep-btn" data-cod="${cod}" data-nome="${nome}" data-is-almox="${isAlmox ? '1' : '0'}" data-selected="${isDefault ? '1' : '0'}"
         style="padding:5px 9px;border-radius:6px;font-size:.65rem;font-weight:700;cursor:pointer;white-space:normal;word-break:break-word;text-align:left;line-height:1.35;width:100%;
                border:2px solid ${isDefault ? '#16a34a' : '#374151'};
@@ -440,6 +443,11 @@ function _solRenderOrigemSepFase(locais, enderecoMap, codigoProd, princArmz) {
       ${isAlmox ? `<div class="sol-origem-sep-etq" style="display:${isDefault ? 'block' : 'none'};">${endHtml}</div>` : ''}
     </div>`;
   }).join('');
+  const extras = sorted.length - 1;
+  const toggle = extras > 0
+    ? `<button type="button" class="sep-origem-toggle" data-expanded="0"><i class="fa-solid fa-eye"></i> Desocultar outros armazéns (${extras})</button>`
+    : '';
+  return origensHtml + toggle;
 }
 
 function _solDestinoHtml(it, compact = false) {
@@ -529,10 +537,33 @@ function _solGetMiniImgHtml(codigoProduto, descricaoProduto) {
   }
 
   if (imgUrl && !urlExpirada) {
-    return `<img src="${imgUrl}" alt="${escapeHtml(descricao || codigo)}" style="width:100%;height:100%;object-fit:contain;background:#f8fafc;padding:2px;" onerror="this.onerror=null;this.src='/imagens_produtos/${codigo}.jpg';this.style.objectFit='cover';this.style.padding='0';">`;
+    return `<img data-sep-img-code="${escapeHtml(codigo)}" src="${imgUrl}" alt="${escapeHtml(descricao || codigo)}" style="width:100%;height:100%;object-fit:contain;background:#f8fafc;padding:2px;" onclick='event.stopPropagation();ampliarImagemProduto(${JSON.stringify(imgUrl)}, ${JSON.stringify(descricao || codigo)}, ${JSON.stringify(codigo)})'>`;
   }
 
-  return `<img src="/imagens_produtos/${codigo}.jpg" alt="${escapeHtml(descricao || codigo)}" style="width:100%;height:100%;object-fit:cover;" onerror="this.style.display='none'">`;
+  setTimeout(_solHidratarImagensPendentes, 0);
+  return `<img data-sep-img-code="${escapeHtml(codigo)}" alt="${escapeHtml(descricao || codigo)}" style="width:100%;height:100%;object-fit:contain;background:#f8fafc;padding:2px;">`;
+}
+
+async function _solHidratarImagensPendentes() {
+  const imagens = [...document.querySelectorAll('img[data-sep-img-code]:not([data-sep-img-loading])')];
+  await Promise.all(imagens.map(async img => {
+    img.dataset.sepImgLoading = '1';
+    const codigo = String(img.dataset.sepImgCode || '').trim();
+    if (!codigo || img.getAttribute('src')) return;
+    try {
+      const resp = await fetch(`/api/produtos/imagem/${encodeURIComponent(codigo)}`, { credentials: 'include' });
+      const data = resp.ok ? await resp.json() : null;
+      const url = String(data?.url_imagem || '').trim();
+      if (!url) return;
+      img.src = url;
+      img.closest('.sep-thumb')?.addEventListener('click', event => {
+        event.stopPropagation();
+        ampliarImagemProduto(url, img.alt || codigo, codigo);
+      }, { once: true });
+    } catch (_) {
+      // Produto sem foto permanece com o fundo neutro, sem imagem quebrada.
+    }
+  }));
 }
 
 function _solRenderItemRow(item, mode, enderecoMap) {
@@ -747,9 +778,6 @@ window._loadSolicitacoesTab = async function() {
       const cardsHtml = cards.length === 0
         ? `<div style="padding:14px;text-align:center;color:#374151;font-size:.73rem;">Nenhum</div>`
         : cards.map(sep => {
-            const dataPrev = _solFmtDataPrevista(sep.data_prevista);
-            const horario  = sep.horario || '';
-            const dataHora = [dataPrev, horario].filter(Boolean).join(' ');
             const criadoEm = _solFmtDataHora(sep.criado_em_min);
             const cursor   = col.acao ? 'cursor:pointer;' : 'cursor:default;';
             const hint     = col.acao === 'iniciar'
@@ -773,7 +801,7 @@ window._loadSolicitacoesTab = async function() {
                 </div>`
               : '';
             return `
-              <div class="solic-kanban-card"
+              <div class="solic-kanban-card sep-kanban-card"
                 data-n-solic="${sep.n_solic}"
                 data-col-acao="${col.acao || ''}"
                 data-col-status="${col.key}"
@@ -784,29 +812,27 @@ window._loadSolicitacoesTab = async function() {
                   <span style="font-weight:800;font-size:.85rem;color:#f59e0b;letter-spacing:.03em;">${sep.n_solic}</span>
                   ${urgenteHtml}
                 </div>
-                <div style="margin-top:5px;display:flex;align-items:center;gap:5px;">
+                <div class="sep-kanban-meta" style="margin-top:5px;display:flex;align-items:center;gap:5px;">
                   <i class="fa-solid fa-user-circle" style="color:#6b7280;font-size:.75rem;flex-shrink:0;"></i>
-                  <span style="font-size:.75rem;color:#d1d5db;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${sep.nome_user}</span>
+                  <span style="font-size:.75rem;color:#d1d5db;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"><strong>De:</strong> ${sep.nome_user}</span>
                 </div>
-                ${dataHora ? `
-                <div style="margin-top:4px;display:flex;align-items:center;gap:5px;">
-                  <i class="fa-regular fa-calendar" style="color:#6b7280;font-size:.72rem;flex-shrink:0;"></i>
-                  <span style="font-size:.72rem;color:#9ca3af;">${dataHora}</span>
-                </div>` : ''}
                 ${criadoEm ? `
-                <div style="margin-top:4px;display:flex;align-items:center;gap:5px;">
+                <div class="sep-kanban-meta" style="margin-top:4px;display:flex;align-items:center;gap:5px;">
                   <i class="fa-regular fa-clock" style="color:#6b7280;font-size:.72rem;flex-shrink:0;"></i>
-                  <span style="font-size:.70rem;color:#6b7280;">Solicitado em ${criadoEm}</span>
+                  <span style="font-size:.70rem;color:#6b7280;"><strong>Solicitado em:</strong> ${criadoEm}</span>
                 </div>` : ''}
                 ${separadorHtml}
-                <div style="margin-top:4px;font-size:.71rem;color:#4b5563;">${sep.total_itens} ${sep.total_itens === 1 ? 'item' : 'itens'}</div>
+                <div class="sep-kanban-item-count">
+                  <i class="fa-solid fa-box"></i>
+                  <strong>${sep.total_itens}</strong> ${sep.total_itens === 1 ? 'item' : 'itens'}
+                </div>
                 ${hint}
               </div>`;
           }).join('');
 
       colEl.innerHTML = `
-        <div style="border-radius:10px;overflow:hidden;background:#111;border:1px solid #2a2a2a;height:100%;">
-          <div style="display:flex;align-items:center;gap:7px;padding:10px 12px;background:${col.bg};border-bottom:2px solid ${col.color}33;">
+        <div class="sep-kanban-column" style="--sep-accent:${col.color};border-radius:10px;overflow:hidden;background:#111;border:1px solid #2a2a2a;height:100%;">
+          <div class="sep-kanban-column-header" style="display:flex;align-items:center;gap:7px;padding:10px 12px;background:${col.bg};border-bottom:2px solid ${col.color}33;">
             <i class="fa-solid ${col.icon}" style="color:${col.color};font-size:.88rem;"></i>
             <span style="font-weight:700;font-size:.80rem;color:${col.color};">${col.label}</span>
             <span style="margin-left:auto;font-size:.72rem;font-weight:700;color:${col.color};background:${col.color}22;padding:1px 7px;border-radius:20px;">${cards.length}</span>
@@ -1010,9 +1036,9 @@ function _solRenderOrigemResumoGlobal(locais, emptyText = 'Carregando origem...'
   return `<div style="display:flex;flex-direction:column;gap:3px;width:100%;position:relative;overflow:visible;">
     ${renderLinha(almox, true)}
     <button type="button" class="sol-origem-toggle" aria-expanded="false" aria-controls="${extraId}"
-      onclick="var d=document.getElementById('${extraId}'); if(d){ var abriu=d.style.display==='none' || d.hidden; d.hidden=false; d.style.display=abriu ? 'flex' : 'none'; this.setAttribute('aria-expanded', String(abriu)); this.textContent = abriu ? 'Ocultar ${totalOutros} outras origens' : 'Ver ${totalOutros} outras origens'; }"
+      onclick="var d=document.getElementById('${extraId}'); if(d){ var abriu=d.style.display==='none' || d.hidden; d.hidden=false; d.style.display=abriu ? 'flex' : 'none'; this.setAttribute('aria-expanded', String(abriu)); this.textContent = abriu ? 'Ocultar outros armazéns' : 'Desocultar outros armazéns'; }"
       style="align-self:flex-start;padding:2px 7px;border-radius:999px;border:1px solid rgba(148,163,184,.28);background:rgba(15,23,42,.72);color:#93c5fd;font-size:.58rem;font-weight:700;cursor:pointer;white-space:nowrap;line-height:1;">
-      Ver ${totalOutros} outras origens
+      Desocultar outros armazéns (${totalOutros})
     </button>
     <div id="${extraId}" hidden style="position:absolute;left:0;right:0;top:calc(100% + 4px);display:none;flex-direction:column;gap:5px;padding:8px 10px;border:1px solid rgba(148,163,184,.25);border-radius:10px;background:rgba(15,23,42,.98);box-shadow:0 12px 30px rgba(2,6,23,.38);z-index:20;max-height:140px;overflow:auto;">
       <div style="font-size:.58rem;color:#94a3b8;font-weight:700;text-transform:uppercase;letter-spacing:.04em;">Outras origens</div>
@@ -1401,14 +1427,14 @@ async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) 
     const localizacaoHtml = `
       <div class="sep-loc-stack" style="margin-top:6px;display:flex;flex-direction:column;gap:6px;">
         ${enderecamentoHtml}
-        <div style="display:${isCompact ? 'flex;flex-direction:column;gap:8px;align-items:stretch' : 'flex;gap:10px;flex-wrap:wrap;align-items:stretch'};">
-          <div style="min-width:${isCompact ? '0' : '220px'};flex:1 1 ${isCompact ? 'auto' : '240px'};padding:6px 8px;background:#101826;border:1px solid #253041;border-radius:8px;">
+        <div class="sep-destino-inline">
+          <span>Destino</span>
+          ${destinoHtml}
+        </div>
+        <div>
+          <div class="sep-loc-box sep-loc-box--origin" style="min-width:0;padding:6px 8px;background:#101826;border:1px solid #253041;border-radius:8px;">
             <div style="font-size:.60rem;color:#60a5fa;font-weight:700;text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px;">Origem</div>
             ${origemHtml}
-          </div>
-          <div style="min-width:${isCompact ? '0' : '170px'};flex:1;padding:6px 8px;background:#1b1730;border:1px solid #312e81;border-radius:8px;">
-            <div style="font-size:.60rem;color:#a78bfa;font-weight:700;text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px;">Destino</div>
-            ${destinoHtml}
           </div>
         </div>
       </div>`;
@@ -2225,6 +2251,19 @@ async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) 
 
   // Delegação de clique — ações do item
   modalInner.addEventListener('click', async (e) => {
+    const toggleOrigens = e.target.closest('.sep-origem-toggle');
+    if (toggleOrigens) {
+      const box = toggleOrigens.closest('.sep-loc-box--origin');
+      const expanded = toggleOrigens.dataset.expanded === '1';
+      box?.querySelectorAll('.sep-origem-extra').forEach(el => {
+        el.style.display = expanded ? 'none' : 'flex';
+      });
+      toggleOrigens.dataset.expanded = expanded ? '0' : '1';
+      toggleOrigens.innerHTML = expanded
+        ? '<i class="fa-solid fa-eye"></i> Desocultar outros armazéns'
+        : '<i class="fa-solid fa-eye-slash"></i> Ocultar outros armazéns';
+      return;
+    }
     const btnOrigemSep = e.target.closest('.sol-origem-sep-btn');
     if (btnOrigemSep) {
       const row = btnOrigemSep.closest('[data-item-row]');
@@ -2817,8 +2856,11 @@ async function _abrirModalAguardandoRetiradaSep(nSolic, opts = {}) {
 
     const isUrg = !!it.urgente;
     return `
-    <div data-solic-id="${it.solic_id || ''}" style="display:flex;align-items:flex-start;gap:10px;padding:10px 12px;border-top:1px solid #222;${isUrg ? 'border-left:3px solid #ef4444;' : ''}">
-      <div style="flex:1;min-width:0;">
+    <div class="sep-request-row" data-solic-id="${it.solic_id || ''}" style="display:flex;align-items:flex-start;gap:10px;padding:10px 12px;border-top:1px solid #222;${isUrg ? 'border-left:3px solid #ef4444;' : ''}">
+      <div class="sep-thumb" style="width:40px;height:40px;border-radius:8px;background:#0f0f0f;overflow:hidden;flex-shrink:0;cursor:zoom-in;">
+        ${_solGetMiniImgHtml(it.codigo_produto, it.descricao || '')}
+      </div>
+      <div class="sep-request-main" style="flex:1;min-width:0;">
         <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
           <span style="font-weight:700;font-size:.78rem;color:#f59e0b;">${it.codigo_produto || '—'}</span>
           <button class="btn-urg-solic" data-solic-id="${it.solic_id || ''}" data-urgente="${isUrg ? '1' : '0'}"
@@ -2830,16 +2872,16 @@ async function _abrirModalAguardandoRetiradaSep(nSolic, opts = {}) {
         <div style="font-size:.75rem;color:#d1d5db;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${it.descricao || '—'}</div>
         <div style="margin-top:6px;display:flex;flex-direction:column;gap:6px;">
           ${enderecamentoCard}
-          <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:stretch;">
-            <div style="min-width:170px;flex:1;padding:6px 8px;background:#101826;border:1px solid #253041;border-radius:8px;">
+          <div class="sep-destino-inline">
+            <span>Destino</span>
+            ${destinoCard}
+          </div>
+          <div>
+            <div style="min-width:0;padding:6px 8px;background:#101826;border:1px solid #253041;border-radius:8px;">
               <div style="font-size:.60rem;color:#60a5fa;font-weight:700;text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px;">Origem</div>
               <div style="display:flex;flex-direction:column;gap:3px;min-width:130px;">
                 ${origemColuna}
               </div>
-            </div>
-            <div style="min-width:170px;flex:1;padding:6px 8px;background:#1b1730;border:1px solid #312e81;border-radius:8px;">
-              <div style="font-size:.60rem;color:#a78bfa;font-weight:700;text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px;">Destino</div>
-              ${destinoCard}
             </div>
           </div>
         </div>
