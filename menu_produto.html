@@ -2790,6 +2790,21 @@
                         </div>
 
                         <div class="qualidade-inspecao-campos" style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;">
+                          <div class="qualidade-inspecao-acoes-produto" style="grid-column:1 / -1;display:flex;flex-wrap:wrap;align-items:stretch;gap:10px;">
+                            <button id="qualidadeAbrirDadosProdutoBtn" class="content-button" type="button" title="Abrir Dados do produto"
+                              style="display:inline-flex;align-items:center;gap:8px;background:linear-gradient(135deg,#3b82f6 0%,#2563eb 100%);color:#fff;padding:10px 14px;border:none;border-radius:10px;font-weight:600;cursor:pointer;">
+                              <i class="fa-solid fa-box-open"></i>
+                              <span>Dados do produto</span>
+                            </button>
+                            <label for="qualidadeProdutoCustomizadoCheck" style="display:inline-flex;align-items:center;gap:10px;cursor:pointer;font-weight:600;padding:10px 12px;border:1px solid var(--border-color);border-radius:10px;background:var(--content-bg);flex:1;min-width:200px;">
+                              <input id="qualidadeProdutoCustomizadoCheck" type="checkbox" style="width:16px;height:16px;cursor:pointer;" />
+                              <span><i class="fa-solid fa-puzzle-piece" style="color:#7e22ce;margin-right:6px;"></i>Produto customizado</span>
+                            </label>
+                          </div>
+                          <div style="grid-column:1 / -1;font-size:12px;color:var(--inactive-color);margin-top:-4px;">
+                            Ao marcar customizado, ativa a coluna no cadastro do produto. Use “Dados do produto” para ver o cadastro completo.
+                          </div>
+
                           <div class="form-field" style="position:relative;">
                             <label for="qualidadeProdutoBusca">Pesquisar produto</label>
                             <input id="qualidadeProdutoBusca" type="text" placeholder="Digite código ou descrição" autocomplete="off" style="width:100%;" />
@@ -2824,13 +2839,6 @@
                           <div class="form-field">
                             <label for="qualidadeQuantidadeNok">Quantidade nok</label>
                             <input id="qualidadeQuantidadeNok" type="number" min="0" placeholder="0" style="width:100%;" />
-                          </div>
-                          <div class="form-field" style="grid-column:1 / -1;">
-                            <label for="qualidadeProdutoCustomizadoCheck" style="display:inline-flex;align-items:center;gap:10px;cursor:pointer;font-weight:600;padding:10px 12px;border:1px solid var(--border-color);border-radius:10px;background:var(--content-bg);">
-                              <input id="qualidadeProdutoCustomizadoCheck" type="checkbox" style="width:16px;height:16px;cursor:pointer;" />
-                              <span><i class="fa-solid fa-puzzle-piece" style="color:#7e22ce;margin-right:6px;"></i>Produto customizado</span>
-                            </label>
-                            <div style="font-size:12px;color:var(--inactive-color);margin-top:6px;">Ao marcar, ativa a coluna produto_customizado no cadastro do produto.</div>
                           </div>
                         </div>
                       </div>
@@ -10865,7 +10873,7 @@
 
         <!-- Modal Gerar OP (Registrar produção) -->
         <div id="producaoGerarOpModal" class="modal-overlay" style="display:none;z-index:10060;">
-          <div class="modal-box" style="max-width:580px;width:95%;">
+          <div id="producaoGerarOpModalBox" class="modal-box" style="max-width:580px;width:95%;">
             <div class="modal-header" style="display:flex;align-items:center;justify-content:space-between;gap:12px;">
               <h3 style="margin:0;font-size:1rem;font-weight:700;color:#f1f5f9;display:flex;align-items:center;gap:8px;">
                 <i class="fa-solid fa-industry" style="color:#10b981;"></i> Gerar OP
@@ -10874,7 +10882,7 @@
                 <i class="fas fa-times"></i>
               </button>
             </div>
-            <div class="modal-body" style="padding-top:12px;">
+            <div class="modal-body" style="padding-top:12px;max-height:80vh;overflow-y:auto;">
               <label for="producaoGerarOpBusca" style="display:block;margin-bottom:6px;font-size:12px;color:var(--inactive-color);">
                 Pesquisar produto (mín. 3 caracteres)
               </label>
@@ -10899,6 +10907,12 @@
                     Trocar
                   </button>
                 </div>
+
+                <button type="button" id="producaoGerarOpVerEstoque"
+                  style="display:inline-flex;align-items:center;gap:8px;margin-bottom:14px;padding:8px 14px;background:rgba(99,102,241,.15);border:1px solid rgba(99,102,241,.45);border-radius:8px;color:#a5b4fc;font-size:12px;font-weight:600;cursor:pointer;">
+                  <i class="fa-solid fa-boxes-stacked"></i> Ver estoque
+                </button>
+                <div id="producaoGerarOpEstoqueBox" style="display:none;margin-bottom:14px;"></div>
 
                 <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:14px;padding:10px 12px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.1);border-radius:8px;">
                   <div style="font-size:12px;color:#94a3b8;">Quantidade de OPs</div>

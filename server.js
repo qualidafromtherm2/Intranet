@@ -11431,23 +11431,33 @@ app.get('/api/etiquetas/recebimento/pendentes', async (req, res) => {
     // Só exibe no modal Etiquetas disponíveis após PIR aprovado
     const pirCond = `COALESCE(er.pir, false) = true`;
     const semMp = req.query.sem_mp === '1' || req.query.sem_mp === 'true';
-    // Padrão: só MP. Com sem_mp=1: itens que NÃO são família MP (ou sem cadastro)
+    // MP = família Omie MP OU código no padrão xx.MP.x.xxxxx (2º segmento = MP)
+    const isMpSql = `(
+      UPPER(TRIM(COALESCE(po.codint_familia, ''))) = 'MP'
+      OR UPPER(SPLIT_PART(TRIM(COALESCE(po.codigo, '')), '.', 2)) = 'MP'
+      OR UPPER(SPLIT_PART(TRIM(COALESCE(er.codigo_produto, '')), '.', 2)) = 'MP'
+    )`;
+    // Padrão: só MP. Com sem_mp=1: itens que NÃO são MP (nem por família nem pelo código)
     const familiaMpCond = semMp
       ? `NOT EXISTS (
            SELECT 1 FROM public.produtos_omie po
-            WHERE UPPER(TRIM(COALESCE(po.codint_familia, ''))) = 'MP'
+            WHERE ${isMpSql}
               AND (
                 TRIM(COALESCE(po.codigo, '')) = TRIM(COALESCE(er.codigo_produto, ''))
                 OR TRIM(COALESCE(po.codigo_produto::text, '')) = TRIM(COALESCE(er.codigo_produto, ''))
               )
-         )`
-      : `EXISTS (
-           SELECT 1 FROM public.produtos_omie po
-            WHERE UPPER(TRIM(COALESCE(po.codint_familia, ''))) = 'MP'
-              AND (
-                TRIM(COALESCE(po.codigo, '')) = TRIM(COALESCE(er.codigo_produto, ''))
-                OR TRIM(COALESCE(po.codigo_produto::text, '')) = TRIM(COALESCE(er.codigo_produto, ''))
-              )
+         )
+         AND UPPER(SPLIT_PART(TRIM(COALESCE(er.codigo_produto, '')), '.', 2)) <> 'MP'`
+      : `(
+           EXISTS (
+             SELECT 1 FROM public.produtos_omie po
+              WHERE ${isMpSql}
+                AND (
+                  TRIM(COALESCE(po.codigo, '')) = TRIM(COALESCE(er.codigo_produto, ''))
+                  OR TRIM(COALESCE(po.codigo_produto::text, '')) = TRIM(COALESCE(er.codigo_produto, ''))
+                )
+           )
+           OR UPPER(SPLIT_PART(TRIM(COALESCE(er.codigo_produto, '')), '.', 2)) = 'MP'
          )`;
     const idImpressoSub = `(SELECT id FROM etiqueta."ETQ_rec_impresso" ri WHERE ri.origem_id = er.id ORDER BY ri.id DESC LIMIT 1) AS id_impresso`;
     let rows;
@@ -11556,11 +11566,16 @@ app.get('/api/etiquetas/recebimento/pendentes-pir', async (req, res) => {
           ) po ON TRUE
          WHERE COALESCE(er.pir, false) = false
            AND (
-             ($2::boolean = false AND UPPER(TRIM(COALESCE(po.codint_familia, ''))) = 'MP')
+             ($2::boolean = false AND (
+               UPPER(TRIM(COALESCE(po.codint_familia, ''))) = 'MP'
+               OR UPPER(SPLIT_PART(TRIM(COALESCE(po.codigo, '')), '.', 2)) = 'MP'
+               OR UPPER(SPLIT_PART(TRIM(COALESCE(er.codigo_produto, '')), '.', 2)) = 'MP'
+             ))
              OR
-             ($2::boolean = true AND (
-               po.codigo IS NULL
-               OR UPPER(TRIM(COALESCE(po.codint_familia, ''))) <> 'MP'
+             ($2::boolean = true AND NOT (
+               UPPER(TRIM(COALESCE(po.codint_familia, ''))) = 'MP'
+               OR UPPER(SPLIT_PART(TRIM(COALESCE(po.codigo, '')), '.', 2)) = 'MP'
+               OR UPPER(SPLIT_PART(TRIM(COALESCE(er.codigo_produto, '')), '.', 2)) = 'MP'
              ))
            )
            AND (
@@ -19952,15 +19967,15 @@ app.get('/api/logistica/estoque/batch', async (req, res) => {
 
       if (!minimos[row.codigo]) minimos[row.codigo] = { min: 0, saldoAlmox: 0, abaixo: false };
       const min = parseFloat(row.estoque_minimo) || 0;
-      // Exibe no card o maior estoque_minimo entre todos os armazéns
+      // Mínimo do card = maior estoque_minimo entre os armazéns
       if (min > minimos[row.codigo].min) minimos[row.codigo].min = min;
-      // Soma o físico de todos os armazéns para comparar com o mínimo
+      // Compara só com o físico do Porta Pallet / ALMOX (não soma armazéns)
       if (String(row.local_codigo) === '10717096386') {
         minimos[row.codigo].saldoAlmox = parseFloat(row.fisico) || 0;
       }
     }
 
-    // Passo 2: abaixo do mínimo = soma de todos os armazéns < maior mínimo cadastrado
+    // Abaixo do mínimo = saldo ALMOX < maior mínimo cadastrado
     for (const cod of Object.keys(minimos)) {
       const info = minimos[cod];
       if (info.min > 0) {

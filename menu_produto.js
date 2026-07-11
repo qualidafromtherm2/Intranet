@@ -8544,6 +8544,7 @@ const qualidadeNfeLista = document.getElementById('qualidadeNfeLista');
 const qualidadeQuantidadeOk = document.getElementById('qualidadeQuantidadeOk');
 const qualidadeQuantidadeNok = document.getElementById('qualidadeQuantidadeNok');
 const qualidadeProdutoCustomizadoCheck = document.getElementById('qualidadeProdutoCustomizadoCheck');
+const qualidadeAbrirDadosProdutoBtn = document.getElementById('qualidadeAbrirDadosProdutoBtn');
 const qualidadePirVerificacaoCheckbox = document.getElementById('qualidadePirVerificacaoCheckbox');
 const qualidadeManuaisPrincipaisBtn = document.getElementById('qualidadeManuaisPrincipaisBtn');
 const qualidadeManuaisRecarregarBtn = document.getElementById('qualidadeManuaisRecarregarBtn');
@@ -9795,11 +9796,11 @@ function atualizarBotaoPirSemMp() {
   if (qualidadePirMostrarSemMp) {
     qualidadePirSemMpBtn.style.background = 'linear-gradient(135deg,#f59e0b 0%,#d97706 100%)';
     qualidadePirSemMpBtn.innerHTML = '<i class="fa-solid fa-filter"></i><span>Ver só MP</span>';
-    qualidadePirSemMpBtn.title = 'Voltar a exibir apenas família MP';
+    qualidadePirSemMpBtn.title = 'Voltar a exibir apenas MP (família ou código xx.MP....)';
   } else {
     qualidadePirSemMpBtn.style.background = '#64748b';
     qualidadePirSemMpBtn.innerHTML = '<i class="fa-solid fa-filter"></i><span>Ver sem MP</span>';
-    qualidadePirSemMpBtn.title = 'Exibir itens que não são família MP';
+    qualidadePirSemMpBtn.title = 'Exibir itens que não são MP (nem família nem código xx.MP....)';
   }
 }
 
@@ -10344,6 +10345,32 @@ qualidadeInspecaoModalFechar?.addEventListener('click', (e) => {
 
 qualidadeInspecaoModal?.addEventListener('click', (e) => {
   if (e.target === qualidadeInspecaoModal) fecharModalInspecaoQualidade();
+});
+
+qualidadeAbrirDadosProdutoBtn?.addEventListener('click', async (e) => {
+  e.preventDefault();
+  const codigo = String(
+    qualidadeCodProduto?.value ||
+    qualidadeCodigoProdutoReal?.value ||
+    ''
+  ).trim();
+  if (!codigo) {
+    alert('Informe o produto antes de abrir Dados do produto.');
+    return;
+  }
+  fecharModalInspecaoQualidade();
+  const qf = document.getElementById('qualidadeFabricaPane');
+  if (qf) qf.style.display = 'none';
+  try {
+    if (typeof window.openProdutoPorCodigo === 'function') {
+      await window.openProdutoPorCodigo(codigo);
+    } else {
+      alert('Não foi possível abrir Dados do produto.');
+    }
+  } catch (err) {
+    console.warn('[QUALIDADE] abrir Dados do produto', err);
+    alert(err?.message || 'Falha ao abrir Dados do produto.');
+  }
 });
 
 qualidadeNovoRegistroBtn?.addEventListener('click', (e) => {
@@ -31175,7 +31202,7 @@ window.openRegistros = async function() {
   let _etqDebounce = null;
   let _etqViewMode = 'list'; // 'list' | 'grid'
   let _etqMostrarOcultos = false; // quando true, mostra apenas itens ocultos
-  let _etqMostrarSemMp = false; // quando true, mostra itens que NÃO são família MP
+  let _etqMostrarSemMp = false; // quando true, mostra itens que NÃO são MP (família ou xx.MP....)
   let _etqPrinterPref = null; // impressora preferida salva no localStorage por usuário
   let _etqAgentAliasCache = {}; // cache de apelidos vindos dos agentes via heartbeat
 
@@ -31285,8 +31312,8 @@ window.openRegistros = async function() {
       ? '<i class="fa-solid fa-filter"></i><span>Ver só MP</span>'
       : '<i class="fa-solid fa-filter"></i><span>Exibir sem MP</span>';
     etqBtnVerSemMp.title = _etqMostrarSemMp
-      ? 'Voltar a exibir apenas família MP'
-      : 'Exibir itens que não são família MP';
+      ? 'Voltar a exibir apenas MP (família ou código xx.MP....)'
+      : 'Exibir itens que não são MP (nem família nem código xx.MP....)';
   }
 
   // Botão exibir ocultos
@@ -76993,6 +77020,7 @@ window.verOperacao = function(osId) {
   // ── Modal Gerar OP ──────────────────────────────────────────
   const btnGerarOp          = document.getElementById('producaoGerarOpBtn');
   const modalGerarOp        = document.getElementById('producaoGerarOpModal');
+  const modalGerarOpBox     = document.getElementById('producaoGerarOpModalBox');
   const btnFecharGerarOp    = document.getElementById('producaoGerarOpModalFechar');
   const inputGerarOp        = document.getElementById('producaoGerarOpBusca');
   const statusGerarOp       = document.getElementById('producaoGerarOpStatus');
@@ -77001,6 +77029,8 @@ window.verOperacao = function(osId) {
   const selCodigoEl         = document.getElementById('producaoGerarOpSelCodigo');
   const selDescricaoEl      = document.getElementById('producaoGerarOpSelDescricao');
   const btnLimparSel        = document.getElementById('producaoGerarOpLimparSel');
+  const btnVerEstoqueGerarOp = document.getElementById('producaoGerarOpVerEstoque');
+  const boxEstoqueGerarOp   = document.getElementById('producaoGerarOpEstoqueBox');
   const inputQtdGerarOp     = document.getElementById('producaoGerarOpQtd');
   const btnMenosGerarOp     = document.getElementById('producaoGerarOpMenos');
   const btnMaisGerarOp      = document.getElementById('producaoGerarOpMais');
@@ -77015,6 +77045,170 @@ window.verOperacao = function(osId) {
   let gerarOpSalvando       = false;
   let gerarOpProdutoSel     = null;
   let gerarOpPostosSel      = [];
+  let gerarOpEstoqueCarregando = false;
+
+  function fmtQtdeGerarOpEstoque(v) {
+    if (v == null || v === '') return '—';
+    const n = Number(v);
+    if (!Number.isFinite(n)) return '—';
+    if (n === 0) return '0';
+    return n.toLocaleString('pt-BR', { maximumFractionDigits: 4 })
+      .replace(/,?0+$/, '')
+      .replace(/,$/, '') || String(n);
+  }
+
+  function setModalGerarOpLargo(largo) {
+    if (!modalGerarOpBox) return;
+    modalGerarOpBox.style.maxWidth = largo ? 'min(1200px, 96vw)' : '580px';
+  }
+
+  function limparEstoqueGerarOp() {
+    if (boxEstoqueGerarOp) {
+      boxEstoqueGerarOp.style.display = 'none';
+      boxEstoqueGerarOp.innerHTML = '';
+    }
+    setModalGerarOpLargo(false);
+    if (btnVerEstoqueGerarOp) {
+      btnVerEstoqueGerarOp.disabled = false;
+      btnVerEstoqueGerarOp.innerHTML = '<i class="fa-solid fa-boxes-stacked"></i> Ver estoque';
+    }
+  }
+
+  function renderTabelaEstoqueEstruturaGerarOp(itens, armazens, estoquePorCodigo) {
+    if (!boxEstoqueGerarOp) return;
+    const colsArm = (armazens || []).map((a) => {
+      const nome = String(a.descricao || a.nome || a.codigo || a.codigo_local_estoque || '—').trim();
+      const cod = String(a.codigo_local_estoque || a.codigo || '').trim();
+      return { codigo: cod, nome: nome || cod || '—' };
+    }).filter((a) => a.codigo);
+
+    const thArm = colsArm.map((a) =>
+      `<th style="padding:6px 8px;font-size:10px;color:#64748b;font-weight:600;text-align:right;white-space:nowrap;min-width:72px;" title="${escHtml(a.codigo)}">${escHtml(a.nome)}</th>`
+    ).join('');
+
+    const linhas = (itens || []).map((i) => {
+      const cod = String(i.identificacao || '').trim();
+      const desc = String(i.descricao || '—');
+      const qtde = i.qtde ?? '—';
+      const mapLocais = estoquePorCodigo[cod.toUpperCase()] || {};
+      const tdsArm = colsArm.map((a) => {
+        const q = mapLocais[a.codigo];
+        const tem = q != null && Number(q) !== 0;
+        return `<td style="padding:6px 8px;font-size:11px;text-align:right;font-weight:${tem ? '700' : '400'};color:${tem ? '#fcd34d' : '#64748b'};">${fmtQtdeGerarOpEstoque(q != null ? q : 0)}</td>`;
+      }).join('');
+      return `<tr style="border-bottom:1px solid rgba(255,255,255,.05);">
+        <td style="padding:6px 8px;font-size:10px;color:#94a3b8;white-space:nowrap;">${escHtml(cod || '—')}</td>
+        <td style="padding:6px 8px;font-size:11px;color:#e2e8f0;min-width:160px;">${escHtml(desc)}</td>
+        <td style="padding:6px 8px;font-size:11px;color:#f1f5f9;text-align:right;font-weight:600;">${escHtml(String(qtde))}</td>
+        ${tdsArm}
+      </tr>`;
+    }).join('');
+
+    boxEstoqueGerarOp.style.display = 'block';
+    setModalGerarOpLargo(true);
+    boxEstoqueGerarOp.innerHTML = `
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap;">
+        <span style="font-size:11px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:.4px;">
+          Estrutura · estoque por armazém
+        </span>
+        <span style="font-size:11px;color:#64748b;">${itens.length} peça(s) · ${colsArm.length} armazém(ns)</span>
+      </div>
+      <div style="max-height:320px;overflow:auto;border:1px solid rgba(255,255,255,.1);border-radius:8px;">
+        <table style="width:100%;border-collapse:collapse;min-width:480px;">
+          <thead>
+            <tr style="border-bottom:1px solid rgba(255,255,255,.1);background:rgba(15,23,42,.65);position:sticky;top:0;z-index:1;">
+              <th style="padding:6px 8px;font-size:10px;color:#64748b;font-weight:600;text-align:left;">Código</th>
+              <th style="padding:6px 8px;font-size:10px;color:#64748b;font-weight:600;text-align:left;">Descrição</th>
+              <th style="padding:6px 8px;font-size:10px;color:#64748b;font-weight:600;text-align:right;">Qtde</th>
+              ${thArm}
+            </tr>
+          </thead>
+          <tbody>${linhas}</tbody>
+        </table>
+      </div>`;
+  }
+
+  async function carregarEstoqueEstruturaGerarOp() {
+    if (gerarOpEstoqueCarregando || !gerarOpProdutoSel) return;
+    const codigo = String(gerarOpProdutoSel.codigo || '').trim();
+    if (!codigo) return;
+
+    gerarOpEstoqueCarregando = true;
+    if (btnVerEstoqueGerarOp) {
+      btnVerEstoqueGerarOp.disabled = true;
+      btnVerEstoqueGerarOp.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Carregando...';
+    }
+    if (boxEstoqueGerarOp) {
+      boxEstoqueGerarOp.style.display = 'block';
+      boxEstoqueGerarOp.innerHTML = '<div style="text-align:center;padding:16px;color:#94a3b8;font-size:12px;"><i class="fa-solid fa-spinner fa-spin" style="margin-right:6px;"></i>Carregando estrutura e estoque...</div>';
+    }
+
+    try {
+      const [respEst, respLoc] = await Promise.all([
+        fetch(`/api/producao/estrutura-ficha?codigo=${encodeURIComponent(codigo)}`),
+        fetch('/api/armazem/locais'),
+      ]);
+      const dataEst = await respEst.json();
+      const dataLoc = await respLoc.json();
+      if (!respEst.ok) throw new Error(dataEst.error || 'Erro ao carregar estrutura.');
+      if (!respLoc.ok || !dataLoc.ok) throw new Error(dataLoc.error || 'Erro ao carregar armazéns.');
+
+      const itens = Array.isArray(dataEst.response) ? dataEst.response : [];
+      if (!itens.length) {
+        boxEstoqueGerarOp.innerHTML = `<div style="text-align:center;padding:16px;color:#64748b;font-size:12px;">Nenhuma peça na estrutura de <b>${escHtml(codigo)}</b>.</div>`;
+        setModalGerarOpLargo(false);
+        return;
+      }
+
+      const armazens = (dataLoc.locais || []).filter((l) => !l.inativo);
+      const codigos = [...new Set(itens.map((i) => String(i.identificacao || '').trim()).filter(Boolean))];
+      const estoquePorCodigo = {};
+
+      if (codigos.length) {
+        const respBatch = await fetch(`/api/logistica/estoque/batch?codigos=${encodeURIComponent(codigos.join(','))}`);
+        const dataBatch = await respBatch.json();
+        if (!respBatch.ok || !dataBatch.ok) throw new Error(dataBatch.error || 'Erro ao carregar estoque.');
+        const dados = dataBatch.dados || {};
+        for (const [codKey, locais] of Object.entries(dados)) {
+          const norm = String(codKey || '').trim().toUpperCase();
+          if (!estoquePorCodigo[norm]) estoquePorCodigo[norm] = {};
+          for (const loc of (locais || [])) {
+            const locCod = String(loc.local_codigo || '').trim();
+            if (!locCod) continue;
+            estoquePorCodigo[norm][locCod] = Number(loc.saldo) || 0;
+          }
+        }
+        // Garante chave mesmo se o batch devolveu casing diferente
+        for (const c of codigos) {
+          const u = c.toUpperCase();
+          if (!estoquePorCodigo[u]) {
+            const hit = Object.keys(dados).find((k) => k.toUpperCase() === u);
+            if (hit) {
+              estoquePorCodigo[u] = {};
+              for (const loc of (dados[hit] || [])) {
+                const locCod = String(loc.local_codigo || '').trim();
+                if (locCod) estoquePorCodigo[u][locCod] = Number(loc.saldo) || 0;
+              }
+            }
+          }
+        }
+      }
+
+      renderTabelaEstoqueEstruturaGerarOp(itens, armazens, estoquePorCodigo);
+    } catch (err) {
+      if (boxEstoqueGerarOp) {
+        boxEstoqueGerarOp.style.display = 'block';
+        boxEstoqueGerarOp.innerHTML = `<div style="text-align:center;padding:16px;color:#f87171;font-size:12px;">${escHtml(err.message || 'Falha ao carregar estoque.')}</div>`;
+      }
+      setModalGerarOpLargo(false);
+    } finally {
+      gerarOpEstoqueCarregando = false;
+      if (btnVerEstoqueGerarOp) {
+        btnVerEstoqueGerarOp.disabled = false;
+        btnVerEstoqueGerarOp.innerHTML = '<i class="fa-solid fa-boxes-stacked"></i> Ver estoque';
+      }
+    }
+  }
 
   function lerQtdGerarOp() {
     const n = Math.floor(Number(inputQtdGerarOp?.value));
@@ -77063,6 +77257,7 @@ window.verOperacao = function(osId) {
     if (selectPostosGerarOp) selectPostosGerarOp.value = '';
     renderPostosGerarOpLista();
     sincronizarQtdObsGerarOp();
+    limparEstoqueGerarOp();
     if (listaGerarOp) listaGerarOp.style.display = 'none';
     if (statusGerarOp) statusGerarOp.style.display = 'none';
   }
@@ -77078,6 +77273,7 @@ window.verOperacao = function(osId) {
     if (inputObsGerarOp) inputObsGerarOp.value = '';
     if (selectPostosGerarOp) selectPostosGerarOp.value = '';
     renderPostosGerarOpLista();
+    limparEstoqueGerarOp();
   }
 
   function resetGerarOpModal() {
@@ -77209,6 +77405,8 @@ window.verOperacao = function(osId) {
     limparProdutoSelecionadoGerarOp();
     if (inputGerarOp) inputGerarOp.focus();
   });
+
+  btnVerEstoqueGerarOp?.addEventListener('click', carregarEstoqueEstruturaGerarOp);
 
   btnMenosGerarOp?.addEventListener('click', () => {
     if (inputQtdGerarOp) inputQtdGerarOp.value = String(Math.max(1, lerQtdGerarOp() - 1));
