@@ -19910,16 +19910,41 @@ app.post('/api/logistica/separacao/enviar', express.json(), async (req, res) => 
 
     // Se veio do fluxo de envio (VIPP ou manual), registra em envios.solicitacoes
     const metodoEnvio = String(metodo_envio || '').trim() || null;
+    const idAtEnvio = (() => {
+      const n = parseInt(String(req.body?.id_at ?? '').trim(), 10);
+      if (Number.isFinite(n) && n > 0) return n;
+      // os_num legado: "7534", "OS7534", "26-7534", "267534"
+      const raw = String(os_num || '').trim();
+      if (!raw) return null;
+      const bare = raw.replace(/^OS\s*/i, '').trim();
+      if (/^\d{3,6}$/.test(bare)) return parseInt(bare, 10);
+      const mDash = bare.match(/^(\d{2})-(\d{3,6})$/);
+      if (mDash) return parseInt(mDash[2], 10);
+      const mYy = bare.match(/^(\d{2})(\d{3,6})$/);
+      if (mYy) return parseInt(mYy[2], 10);
+      return null;
+    })();
     if (id_vipp || metodoEnvio) {
       try {
         await pool.query(`ALTER TABLE envios.solicitacoes ADD COLUMN IF NOT EXISTS id_vipp TEXT`);
         await pool.query(`ALTER TABLE envios.solicitacoes ADD COLUMN IF NOT EXISTS metodo_envio TEXT`);
-        await pool.query(
-          `INSERT INTO envios.solicitacoes (usuario, observacao, rastreio_status, numero_sep, id_vipp, anexos, conferido, conteudo, metodo_envio)
-           VALUES ($1, $2, 'Pendente', $3, $4, '{}', false, $5, $6)`,
-          [nome_user, os_num || observacao || null, nSolic, id_vipp ? String(id_vipp) : null, conteudo || null, metodoEnvio]
+        await pool.query(`ALTER TABLE envios.solicitacoes ADD COLUMN IF NOT EXISTS id_at BIGINT`);
+        const ins = await pool.query(
+          `INSERT INTO envios.solicitacoes (usuario, observacao, rastreio_status, numero_sep, id_vipp, anexos, conferido, conteudo, metodo_envio, id_at)
+           VALUES ($1, $2, 'Pendente', $3, $4, '{}', false, $5, $6, $7)
+           RETURNING id`,
+          [nome_user, os_num || observacao || null, nSolic, id_vipp ? String(id_vipp) : null, conteudo || null, metodoEnvio, idAtEnvio]
         );
-        console.log(`[Separação/Envio] Registro em envios.solicitacoes: SEP=${nSolic} VIPP=${id_vipp || '-'} metodo=${metodoEnvio || '-'}`);
+        const novoEnvioId = ins.rows[0]?.id;
+        if (novoEnvioId) {
+          try {
+            const { syncCustoPecasEnvio } = require('./utils/enviosCustoPecas');
+            await syncCustoPecasEnvio(pool, novoEnvioId);
+          } catch (eSync) {
+            console.warn('[Separação/Envio] sync custo_pecas:', eSync.message);
+          }
+        }
+        console.log(`[Separação/Envio] Registro em envios.solicitacoes: SEP=${nSolic} VIPP=${id_vipp || '-'} metodo=${metodoEnvio || '-'} id_at=${idAtEnvio || '-'} envio=${novoEnvioId || '-'}`);
       } catch (e) {
         console.warn('[Separação/Envio] Falha ao registrar em envios.solicitacoes:', e.message);
       }

@@ -16,6 +16,7 @@ const {
   normalizarEnderecoTecnicoRow,
   sanitizarCamposEnderecoTecnico,
 } = require('../utils/tecnicoEndereco');
+const { syncCustoPecasEnvio } = require('../utils/enviosCustoPecas');
 
 const router = express.Router();
 
@@ -3638,7 +3639,11 @@ const upload = multer({
 let _ensureSchemaPromise = null;
 
 async function ensureSchema() {
-  if (_ensureSchemaPromise) return _ensureSchemaPromise;
+  if (_ensureSchemaPromise) {
+    await _ensureSchemaPromise;
+    try { await backfillEnviosSolicitacoesIdAt(); } catch (_) {}
+    return;
+  }
   _ensureSchemaPromise = pool.query(`
     CREATE SCHEMA IF NOT EXISTS envios;
     CREATE TABLE IF NOT EXISTS envios.solicitacoes (
@@ -3692,6 +3697,16 @@ async function ensureSchema() {
 
     ALTER TABLE envios.solicitacoes
       ADD COLUMN IF NOT EXISTS metodo_envio TEXT;
+
+    ALTER TABLE envios.solicitacoes
+      ADD COLUMN IF NOT EXISTS id_at BIGINT;
+
+    ALTER TABLE envios.solicitacoes
+      ADD COLUMN IF NOT EXISTS valor_envio NUMERIC(12,2);
+
+    CREATE INDEX IF NOT EXISTS idx_envios_solicitacoes_id_at
+      ON envios.solicitacoes (id_at)
+      WHERE id_at IS NOT NULL;
 
     DO $$
     BEGIN
@@ -3998,11 +4013,128 @@ async function ensureSchema() {
     );
     CREATE INDEX IF NOT EXISTS at_relatorio_gerencial_mes_idx
       ON sac.at_relatorio_gerencial (mes);
-  `).then(() => undefined).catch((err) => {
+  `).then(async () => {
+    try {
+      const { ensureCustoPecasTable, backfillCustoPecas } = require('../utils/enviosCustoPecas');
+      await ensureCustoPecasTable(pool);
+      await backfillCustoPecas(pool, { onlyMissing: true, limit: 5000 });
+    } catch (e) {
+      console.warn('[SAC] custo_pecas schema/backfill:', e?.message || e);
+    }
+    try {
+      await backfillEnviosSolicitacoesIdAt();
+    } catch (_) { /* backfill não deve impedir o schema */ }
+  }).catch((err) => {
     _ensureSchemaPromise = null;
     throw err;
   });
   return _ensureSchemaPromise;
+}
+
+/** Resolve id_at a partir do texto legado em observacao (O.S 267054, 7534, OS7534…). */
+function resolveIdAtFromObservacao(observacao, maps) {
+  const obs = String(observacao || '').trim();
+  if (!obs) return null;
+  const { byId, byYyId, byYyDash, byAi } = maps;
+  const tryTok = (tok) => {
+    const t = String(tok || '').trim();
+    if (!t) return null;
+    if (byId.has(t)) return byId.get(t);
+    if (byYyDash.has(t)) return byYyDash.get(t);
+    const nd = t.replace(/-/g, '');
+    if (byYyId.has(nd)) return byYyId.get(nd);
+    if (byId.has(nd)) return byId.get(nd);
+    if (byAi.has(t)) return byAi.get(t);
+    if (byAi.has(nd)) return byAi.get(nd);
+    return null;
+  };
+  let idAt = tryTok(obs);
+  if (idAt) return idAt;
+  const m =
+    obs.match(/^OS\s*([0-9]{2}-?[0-9]{3,6})\b/i) ||
+    obs.match(/O\.?\s*S\s*([0-9]{2}-?[0-9]{3,6})\b/i) ||
+    obs.match(/O\.?\s*S\s*([0-9]{3,6})\b/i);
+  if (m) idAt = tryTok(m[1]);
+  return idAt || null;
+}
+
+function pareceRefOsNumero(s) {
+  const t = String(s || '').trim();
+  return /^[0-9]{3,8}$/.test(t) || /^[0-9]{2}-[0-9]+$/.test(t);
+}
+
+function parseIdAtParam(raw) {
+  const n = parseInt(String(raw ?? '').trim(), 10);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+let _enviosIdAtBackfillPromise = null;
+async function backfillEnviosSolicitacoesIdAt() {
+  if (_enviosIdAtBackfillPromise) return _enviosIdAtBackfillPromise;
+  _enviosIdAtBackfillPromise = (async () => {
+    const { rows: pending } = await pool.query(`
+      SELECT id, observacao
+      FROM envios.solicitacoes
+      WHERE id_at IS NULL
+        AND observacao IS NOT NULL
+        AND TRIM(observacao) <> ''
+    `);
+    if (!pending.length) return { updated: 0, pending: 0 };
+
+    const { rows: ats } = await pool.query(`
+      SELECT id, data, atendimento_inicial FROM sac.at
+    `);
+    const byId = new Map();
+    const byYyId = new Map();
+    const byYyDash = new Map();
+    const byAi = new Map();
+    for (const a of ats) {
+      const idStr = String(a.id);
+      byId.set(idStr, a.id);
+      const yr = a.data ? String(new Date(a.data).getFullYear()).slice(-2) : '';
+      if (yr) {
+        byYyId.set(`${yr}${a.id}`, a.id);
+        byYyDash.set(`${yr}-${a.id}`, a.id);
+      }
+      if (pareceRefOsNumero(a.atendimento_inicial)) {
+        byAi.set(String(a.atendimento_inicial).trim(), a.id);
+      }
+    }
+    const maps = { byId, byYyId, byYyDash, byAi };
+
+    let updated = 0;
+    const BATCH = 200;
+    const pairs = [];
+    for (const e of pending) {
+      const idAt = resolveIdAtFromObservacao(e.observacao, maps);
+      if (idAt) pairs.push({ envioId: e.id, idAt });
+    }
+    for (let i = 0; i < pairs.length; i += BATCH) {
+      const chunk = pairs.slice(i, i + BATCH);
+      const vals = [];
+      const params = [];
+      let p = 1;
+      for (const row of chunk) {
+        vals.push(`($${p++}::bigint, $${p++}::bigint)`);
+        params.push(row.envioId, row.idAt);
+      }
+      const r = await pool.query(
+        `UPDATE envios.solicitacoes e
+            SET id_at = v.id_at
+           FROM (VALUES ${vals.join(',')}) AS v(id, id_at)
+          WHERE e.id = v.id
+            AND e.id_at IS NULL`,
+        params
+      );
+      updated += r.rowCount || 0;
+    }
+    console.log(`[SAC] backfill envios.solicitacoes.id_at: ${updated}/${pending.length} preenchidos`);
+    return { updated, pending: pending.length };
+  })().catch((err) => {
+    _enviosIdAtBackfillPromise = null;
+    console.warn('[SAC] backfill id_at falhou:', err?.message || err);
+  });
+  return _enviosIdAtBackfillPromise;
 }
 
 let _sacAtalhosSchemaReady = false;
@@ -4318,6 +4450,7 @@ router.get('/at/nfe-pendentes-count', async (_req, res) => {
 
 router.get('/at/atendimentos', async (_req, res) => {
   try {
+    await ensureSchema();
     const t0 = Date.now();
 
     // 1) Query principal (sem has_pecas_enviadas — evita EXISTS com regex lento)
@@ -4379,47 +4512,31 @@ router.get('/at/atendimentos', async (_req, res) => {
          LEFT JOIN anexos_cnt              anx ON anx.id_at = a.id
          ORDER BY a.id DESC, f.id DESC`
       ),
-      // 2) Busca observacoes + status das solicitações em paralelo
-      pool.query(`SELECT observacao, rastreio_status FROM envios.solicitacoes WHERE observacao IS NOT NULL ORDER BY id DESC`)
+      // 2) Vínculo OS → envio via coluna id_at
+      pool.query(`
+        SELECT id_at, rastreio_status
+        FROM envios.solicitacoes
+        WHERE id_at IS NOT NULL
+        ORDER BY id DESC
+      `)
     ]);
 
     const tQuery = Date.now() - t0;
 
-    // 3a) Mapa atId → status via padrão OS{id} (match direto com id do AT)
-    const atStatusMap = new Map(); // atId (number) → status mais recente
+    // Mapa atId → status mais recente (ORDER BY id DESC)
+    const atStatusMap = new Map();
     for (const row of solResult.rows) {
-      if (!row.observacao) continue;
-      const mId = row.observacao.match(/^OS\s*(\d+)/i);
-      if (mId) {
-        const atId = parseInt(mId[1], 10);
-        if (!atStatusMap.has(atId)) { // ORDER BY id DESC → first = mais recente
-          atStatusMap.set(atId, row.rastreio_status);
-        }
-      }
-    }
-
-    // 3b) Computa has_pecas_enviadas em JS (~7ms em vez de ~38s no SQL)
-    const osPattern = /O\.S\s+(\S+)/gi;
-    const osTokens = new Set();
-    for (const row of solResult.rows) {
-      let m;
-      while ((m = osPattern.exec(row.observacao)) !== null) {
-        // Normaliza removendo hífens para match com "YYID" e "YY-ID"
-        const raw = m[1].replace(/-/g, '');
-        // Se tiver barra (ex: "260020/260021"), separa cada token
-        for (const part of raw.split('/')) {
-          if (part) osTokens.add(part);
-        }
+      const atId = Number(row.id_at);
+      if (!Number.isFinite(atId) || atId < 1) continue;
+      if (!atStatusMap.has(atId)) {
+        atStatusMap.set(atId, row.rastreio_status || null);
       }
     }
 
     const rows = mainResult.rows;
     for (const at of rows) {
-      const yr = at.data ? new Date(at.data).getFullYear().toString().slice(-2) : '';
-      const chaves = [at.atendimento_inicial, yr ? yr + at.id : ''].filter(Boolean);
-      const hasByChave = chaves.some(ch => osTokens.has(ch.replace(/-/g, '')));
-      const statusDireto = atStatusMap.get(at.id) || null;
-      at.has_pecas_enviadas = hasByChave || !!statusDireto;
+      const statusDireto = atStatusMap.get(Number(at.id)) || null;
+      at.has_pecas_enviadas = atStatusMap.has(Number(at.id));
       at.envios_status = statusDireto;
     }
 
@@ -4570,7 +4687,7 @@ router.patch('/at/fechamento/:id_at', async (req, res) => {
   const FECH_FIELDS = [
     'tag_problema', 'plataforma_atendimento', 'descricao_servico_realizado',
     'valor_total_mao_obra', 'valor_gasto_pecas', 'pecas_reposicao',
-    'data_conclusao_servico', 'observacoes', 'midias_servico'
+    'data_conclusao_servico', 'observacoes', 'midias_servico', 'observacao_tecnico'
   ];
   const cols = [];
   const vals = [];
@@ -4606,6 +4723,7 @@ router.patch('/at/fechamento/:id_at', async (req, res) => {
 
 // POST /solicitacoes/vipp — cria entrada de envio SAC a partir de postagem VIPP (sem upload de arquivo)
 router.post('/solicitacoes/vipp', async (req, res) => {
+  await ensureSchema();
   const usuario   = String(req.body?.usuario || '').trim()
     || String(req.session?.user?.username || req.session?.user?.fullName || req.session?.user?.nome || req.session?.user?.login || '').trim();
   const observacao = String(req.body?.observacao || '').trim();
@@ -4613,6 +4731,7 @@ router.post('/solicitacoes/vipp', async (req, res) => {
   const conteudo  = req.body?.conteudo || null; // JSON string de itens [{ conteudo, quantidade }]
   const numeroSep = String(req.body?.numero_sep || '').trim() || null;
   const metodoEnvio = String(req.body?.metodo_envio || '').trim() || null;
+  const idAt = parseIdAtParam(req.body?.id_at);
 
   if (!usuario) return res.status(400).json({ ok: false, error: 'Usuário é obrigatório.' });
   if (!idVipp && !observacao && !metodoEnvio) {
@@ -4622,13 +4741,16 @@ router.post('/solicitacoes/vipp', async (req, res) => {
   try {
     const result = await pool.query(
       `INSERT INTO envios.solicitacoes
-         (usuario, observacao, numero_sep, rastreio_status, anexos, conferido, id_vipp, conteudo, metodo_envio)
-       VALUES ($1, $2, $3, 'Pendente', '{}', false, $4, $5, $6)
-       RETURNING id, created_at, rastreio_status, id_vipp, conteudo, observacao, metodo_envio`,
-      [usuario, observacao || null, numeroSep, idVipp, conteudo ? String(conteudo) : null, metodoEnvio]
+         (usuario, observacao, numero_sep, rastreio_status, anexos, conferido, id_vipp, conteudo, metodo_envio, id_at)
+       VALUES ($1, $2, $3, 'Pendente', '{}', false, $4, $5, $6, $7)
+       RETURNING id, created_at, rastreio_status, id_vipp, conteudo, observacao, metodo_envio, id_at`,
+      [usuario, observacao || null, numeroSep, idVipp, conteudo ? String(conteudo) : null, metodoEnvio, idAt]
     );
     const row = result.rows[0];
-    return res.json({ ok: true, id: row.id, created_at: row.created_at, rastreio_status: row.rastreio_status, id_vipp: row.id_vipp });
+    try { await syncCustoPecasEnvio(pool, row.id); } catch (e) {
+      console.warn('[SAC] sync custo_pecas VIPP:', e?.message || e);
+    }
+    return res.json({ ok: true, id: row.id, created_at: row.created_at, rastreio_status: row.rastreio_status, id_vipp: row.id_vipp, id_at: row.id_at });
   } catch (err) {
     console.error('[SAC] erro ao criar entrada via VIPP:', err);
     return res.status(500).json({ ok: false, error: 'Erro ao registrar solicitação VIPP.' });
@@ -4636,9 +4758,11 @@ router.post('/solicitacoes/vipp', async (req, res) => {
 });
 
 router.post('/solicitacoes', upload.array('anexos', 2), async (req, res) => {
+  await ensureSchema();
   const usuario = String(req.body?.usuario || '').trim();
   const observacao = String(req.body?.observacao || '').trim();
   const numeroSep = String(req.body?.numero_sep || req.body?.numeroSep || '').trim() || null;
+  const idAt = parseIdAtParam(req.body?.id_at);
   const rastreioStatus = 'Pendente';
 
   if (!usuario) {
@@ -4734,14 +4858,17 @@ router.post('/solicitacoes', upload.array('anexos', 2), async (req, res) => {
     const declaracaoUrl = urls[1] || null;
 
     const result = await pool.query(
-      `INSERT INTO envios.solicitacoes (usuario, observacao, numero_sep, rastreio_status, anexos, conferido, etiqueta_url, declaracao_url, identificacao, conteudo, chave_dce)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-       RETURNING id, created_at, rastreio_status, anexos, conferido, etiqueta_url, declaracao_url, identificacao, numero_sep, conteudo, chave_dce`,
-      [usuario, observacao, numeroSep, rastreioStatus, urls, false, etiquetaUrl, declaracaoUrl, identificacao, conteudo, chaveDce]
+      `INSERT INTO envios.solicitacoes (usuario, observacao, numero_sep, rastreio_status, anexos, conferido, etiqueta_url, declaracao_url, identificacao, conteudo, chave_dce, id_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+       RETURNING id, created_at, rastreio_status, anexos, conferido, etiqueta_url, declaracao_url, identificacao, numero_sep, conteudo, chave_dce, id_at`,
+      [usuario, observacao, numeroSep, rastreioStatus, urls, false, etiquetaUrl, declaracaoUrl, identificacao, conteudo, chaveDce, idAt]
     );
 
     const row = result.rows[0];
-    return res.json({ ok: true, id: row.id, created_at: row.created_at, rastreio_status: row.rastreio_status, anexos: row.anexos, conferido: row.conferido, etiqueta_url: row.etiqueta_url, declaracao_url: row.declaracao_url, identificacao: row.identificacao, numero_sep: row.numero_sep, conteudo: row.conteudo, chave_dce: row.chave_dce });
+    try { await syncCustoPecasEnvio(pool, row.id); } catch (e) {
+      console.warn('[SAC] sync custo_pecas:', e?.message || e);
+    }
+    return res.json({ ok: true, id: row.id, created_at: row.created_at, rastreio_status: row.rastreio_status, anexos: row.anexos, conferido: row.conferido, etiqueta_url: row.etiqueta_url, declaracao_url: row.declaracao_url, identificacao: row.identificacao, numero_sep: row.numero_sep, conteudo: row.conteudo, chave_dce: row.chave_dce, id_at: row.id_at });
   } catch (err) {
     console.error('[SAC] erro ao inserir solicitação:', err);
     return res.status(500).json({ ok: false, error: 'Erro ao registrar solicitação.' });
@@ -4784,7 +4911,7 @@ router.get('/solicitacoes', async (req, res) => {
     const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 
     const r = await pool.query(
-      `SELECT id, created_at, usuario, observacao, numero_sep, conferido, etiqueta_url, declaracao_url, identificacao, conteudo, rastreio_status, rastreio_quando, finalizado_em, id_vipp, metodo_envio
+      `SELECT id, created_at, usuario, observacao, numero_sep, conferido, etiqueta_url, declaracao_url, identificacao, conteudo, rastreio_status, rastreio_quando, finalizado_em, id_vipp, metodo_envio, id_at, valor_envio
          FROM envios.solicitacoes
         ${whereClause}
         ORDER BY id DESC
@@ -6068,6 +6195,88 @@ function atSanitizeFileName(rawName, ext) {
   return safe.includes('.') ? safe : `${safe}.${ext}`;
 }
 
+function _brMoneyToNumber(s) {
+  const t = String(s || '').trim().replace(/\./g, '').replace(',', '.');
+  const n = Number(t);
+  return Number.isFinite(n) ? n : null;
+}
+
+function _brDateToIso(s) {
+  const m = String(s || '').match(/(\d{2})\/(\d{2})\/(\d{4})/);
+  if (!m) return null;
+  return `${m[3]}-${m[2]}-${m[1]}`;
+}
+
+function _cleanPdfText(s) {
+  return String(s || '').replace(/\s+/g, ' ').trim();
+}
+
+/** Extrai campos de fechamento do PDF padrão PJ Refrigeração (OS). */
+function parseFechamentoPjPdf(rawText) {
+  const norm = String(rawText || '').replace(/\r/g, '').replace(/\u00a0/g, ' ');
+
+  let valorMo = null;
+  const moBlock = norm.match(/TOTAL\s+OR[CÇ]AMENTO\s*:?\s*([\s\S]{0,100}?)(?:VALIDADE|FORMA\s+DE\s+PAGAMENTO|OBSERVA)/i);
+  if (moBlock) {
+    const nums = [...moBlock[1].matchAll(/(\d{1,3}(?:\.\d{3})*,\d{2}|\d+,\d{2})/g)].map((m) => m[1]);
+    if (nums.length) valorMo = _brMoneyToNumber(nums[nums.length - 1]);
+  }
+  if (valorMo == null) {
+    const m = norm.match(/TOTAL\s+OR[CÇ]AMENTO\s*:?\s*(\d{1,3}(?:\.\d{3})*,\d{2}|\d+,\d{2})/i);
+    if (m) valorMo = _brMoneyToNumber(m[1]);
+  }
+
+  // Preferir "DATA DE CONCLUSÃO"; fallback no "Data:" do cabeçalho da OS
+  let dataConclusao = null;
+  const mDc = norm.match(/DATA\s+DE\s+CONCLUS[AÃ]O\s*:?\s*(\d{2}\/\d{2}\/\d{4})/i);
+  if (mDc) dataConclusao = _brDateToIso(mDc[1]);
+  else {
+    const mD = norm.match(/Data\s*:?\s*(\d{2}\/\d{2}\/\d{4})/i);
+    if (mD) dataConclusao = _brDateToIso(mD[1]);
+  }
+
+  const extractAfter = (label, stops) => {
+    const esc = label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const stopRe = stops.map((l) => l.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
+    const re = new RegExp(`${esc}\\s*([\\s\\S]*?)(?=(?:${stopRe})|$)`, 'i');
+    const m = norm.match(re);
+    return m ? _cleanPdfText(m[1]) : '';
+  };
+
+  // pdf-parse às vezes joga o texto antes do rótulo — tratar os dois casos
+  let observacoes = extractAfter('MOTIVO DA SOLICITAÇÃO', [
+    'DESCRIÇÃO', 'RESOLUÇÃO', 'Quantidade', 'PEÇAS', 'ORÇAMENTO', 'HISTÓRICO', 'LOCALIZAÇÃO',
+  ]);
+  if (!observacoes || observacoes.length < 5 || /Quantidade|PEÇAS|ORÇAMENTO|V\.\s*Unit/i.test(observacoes)) {
+    const m = norm.match(/([^\n]{8,400})\s*\n\s*MOTIVO\s+DA\s+SOLICITA[CÇ][AÃ]O/i);
+    if (m) observacoes = _cleanPdfText(m[1]);
+  }
+
+  let servico = extractAfter('RESOLUÇÃO DO PROBLEMA', [
+    'DESCRIÇÃO', 'HISTÓRICO', 'LOCALIZAÇÃO', 'ASSINATURA', 'PROTOCOLO',
+  ]);
+  if (!servico || servico.length < 15) {
+    const m = norm.match(/HIST[OÓ]RICO\s+ATENDIMENTO\s*([\s\S]*?)RESOLU[CÇ][AÃ]O\s+DO\s+PROBLEMA/i);
+    if (m) servico = _cleanPdfText(m[1]);
+  }
+
+  let obsTecnico = extractAfter('DESCRIÇÃO DO PROBLEMA', [
+    'LOCALIZAÇÃO', 'RESOLUÇÃO', 'ASSINATURA', 'PROTOCOLO', 'HISTÓRICO', 'MOTIVO',
+  ]);
+  if (!obsTecnico || obsTecnico.length < 8) {
+    const m = norm.match(/([^\n]{8,500})\s*\n\s*DESCRI[CÇ][AÃ]O\s+DO\s+PROBLEMA/i);
+    if (m) obsTecnico = _cleanPdfText(m[1]);
+  }
+
+  return {
+    valor_total_mao_obra: valorMo,
+    data_conclusao_servico: dataConclusao,
+    descricao_servico_realizado: servico || null,
+    observacoes: observacoes || null,
+    observacao_tecnico: obsTecnico || null,
+  };
+}
+
 // GET /at/anexos/:id_at
 router.get('/at/anexos/:id_at', async (req, res) => {
   const idAt = parseInt(req.params.id_at, 10);
@@ -6122,6 +6331,113 @@ router.post('/at/anexos/:id_at', atUpload.array('arquivo', 20), async (req, res)
   } catch (err) {
     console.error('[SAC/AT] erro ao fazer upload de anexo:', err);
     res.status(500).json({ error: 'Falha no upload.', detail: String(err.message || err) });
+  }
+});
+
+// POST /at/fechamento-pj/:id_at — anexa PDF OS PJ e preenche campos de fechamento
+router.post('/at/fechamento-pj/:id_at', atUpload.single('arquivo'), async (req, res) => {
+  const idAt = parseInt(req.params.id_at, 10);
+  if (!Number.isFinite(idAt) || idAt <= 0) {
+    return res.status(400).json({ ok: false, error: 'id_at inválido.' });
+  }
+  const file = req.file;
+  if (!file || !file.buffer) {
+    return res.status(400).json({ ok: false, error: 'Selecione o PDF da OS PJ.' });
+  }
+  const mimeOk = String(file.mimetype || '').toLowerCase().includes('pdf')
+    || /\.pdf$/i.test(String(file.originalname || ''));
+  if (!mimeOk) {
+    return res.status(400).json({ ok: false, error: 'O arquivo precisa ser um PDF.' });
+  }
+
+  const usuario = req.session?.user?.fullName || req.session?.user?.username || 'sistema';
+
+  try {
+    let parsedText = '';
+    try {
+      const parsed = await pdfParse(file.buffer);
+      parsedText = String(parsed?.text || '');
+    } catch (e) {
+      return res.status(400).json({ ok: false, error: 'Não foi possível ler o PDF.' });
+    }
+
+    const campos = parseFechamentoPjPdf(parsedText);
+    if (
+      campos.valor_total_mao_obra == null
+      && !campos.data_conclusao_servico
+      && !campos.descricao_servico_realizado
+      && !campos.observacoes
+      && !campos.observacao_tecnico
+    ) {
+      return res.status(400).json({
+        ok: false,
+        error: 'PDF não parece ser uma OS PJ válida (não achei TOTAL ORÇAMENTO / campos de fechamento).',
+      });
+    }
+
+    const ext = 'pdf';
+    const safeName = atSanitizeFileName(file.originalname || `fechamento_pj_${idAt}.pdf`, ext);
+    const pathKey = `at/${idAt}/${uuidv4()}_${safeName}`;
+
+    const { error: upErr } = await supabase.storage.from(AT_BUCKET).upload(pathKey, file.buffer, {
+      contentType: file.mimetype || 'application/pdf',
+      upsert: false,
+    });
+    if (upErr) throw new Error(`Supabase upload: ${upErr.message}`);
+
+    const { data: pubData } = supabase.storage.from(AT_BUCKET).getPublicUrl(pathKey);
+    const urlPublica = pubData?.publicUrl || '';
+
+    const insAnexo = await pool.query(
+      `INSERT INTO sac.at_anexos (id_at, nome_arquivo, path_key, url_publica, content_type, tamanho_bytes, enviado_por)
+       VALUES ($1,$2,$3,$4,$5,$6,$7)
+       RETURNING id, nome_arquivo, url_publica, content_type, tamanho_bytes, criado_em`,
+      [idAt, safeName, pathKey, urlPublica, file.mimetype || 'application/pdf', file.size || null, usuario]
+    );
+
+    const cols = [];
+    const vals = [];
+    const put = (col, val) => {
+      if (val === null || val === undefined || val === '') return;
+      cols.push(col);
+      vals.push(val);
+    };
+    put('valor_total_mao_obra', campos.valor_total_mao_obra);
+    put('data_conclusao_servico', campos.data_conclusao_servico);
+    put('descricao_servico_realizado', campos.descricao_servico_realizado);
+    put('observacoes', campos.observacoes);
+    put('observacao_tecnico', campos.observacao_tecnico);
+
+    if (cols.length) {
+      const existing = await pool.query('SELECT id FROM sac.fechamento WHERE id_at = $1', [idAt]);
+      if (existing.rows.length) {
+        const setList = cols.map((c, i) => `${c} = $${i + 2}`).join(', ');
+        await pool.query(
+          `UPDATE sac.fechamento SET ${setList} WHERE id_at = $1`,
+          [idAt, ...vals]
+        );
+      } else {
+        await pool.query(
+          `INSERT INTO sac.fechamento (id_at, ${cols.join(', ')}) VALUES ($1, ${cols.map((_, i) => `$${i + 2}`).join(', ')})`,
+          [idAt, ...vals]
+        );
+      }
+    }
+
+    return res.json({
+      ok: true,
+      anexo: insAnexo.rows[0],
+      fechamento: {
+        valor_total_mao_obra: campos.valor_total_mao_obra,
+        data_conclusao_servico: campos.data_conclusao_servico,
+        descricao_servico_realizado: campos.descricao_servico_realizado,
+        observacoes: campos.observacoes,
+        observacao_tecnico: campos.observacao_tecnico,
+      },
+    });
+  } catch (err) {
+    console.error('[SAC/AT] erro fechamento-pj:', err);
+    return res.status(500).json({ ok: false, error: err.message || 'Falha ao processar PDF PJ.' });
   }
 });
 
@@ -6362,11 +6678,20 @@ router.get('/at/os-data/:id', async (req, res) => {
           valor_gasto_pecas:            fmt2(fc.valor_gasto_pecas),
           data_conclusao: (() => {
             if (!fc.data_conclusao_servico) return '';
-            const dt = new Date(fc.data_conclusao_servico);
-            if (isNaN(dt)) return String(fc.data_conclusao_servico);
-            // data_conclusao_servico é DATE (sem timezone) — lê como local
-            const [y, m, d2] = String(fc.data_conclusao_servico).substring(0, 10).split('-');
-            return `${d2}/${m}/${y}`;
+            // pg retorna DATE como Date JS — não usar String(...).split('-')
+            if (fc.data_conclusao_servico instanceof Date) {
+              const dt = fc.data_conclusao_servico;
+              const y = dt.getUTCFullYear();
+              const m = String(dt.getUTCMonth() + 1).padStart(2, '0');
+              const d = String(dt.getUTCDate()).padStart(2, '0');
+              return `${d}/${m}/${y}`;
+            }
+            const s = String(fc.data_conclusao_servico);
+            const iso = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+            if (iso) return `${iso[3]}/${iso[2]}/${iso[1]}`;
+            const dt = new Date(s);
+            if (!Number.isNaN(dt.getTime())) return dt.toLocaleDateString('pt-BR');
+            return '';
           })(),
           observacao_tecnico:           fc.observacao_tecnico || '',
           status_os:                    fc.status_os || '',
@@ -6713,6 +7038,212 @@ router.get('/at/vipp-destino-detalhe', async (req, res) => {
   }
 });
 
+// ── Nova OS: autocomplete telefone / nome (fornecedores Omie + sac.at) ───────
+
+function _formatTelNovaOs(dddRaw, numRaw) {
+  const ddd = String(dddRaw || '').replace(/\D/g, '');
+  const tel = String(numRaw || '').replace(/\D/g, '');
+  if (ddd && tel) {
+    return tel.length >= 8
+      ? `(${ddd}) ${tel.replace(/(\d{4,5})(\d{4})$/, '$1-$2')}`
+      : `(${ddd}) ${tel}`;
+  }
+  if (tel.length === 11) return `(${tel.slice(0, 2)}) ${tel.slice(2, 7)}-${tel.slice(7)}`;
+  if (tel.length === 10) return `(${tel.slice(0, 2)}) ${tel.slice(2, 6)}-${tel.slice(6)}`;
+  return tel || ddd || '';
+}
+
+function mapNovaOsFormAt(row) {
+  if (!row) return null;
+  return {
+    nome_revenda_cliente: String(row.nome_revenda_cliente || '').trim(),
+    numero_telefone: String(row.numero_telefone || '').trim(),
+    cpf_cnpj: String(row.cpf_cnpj || '').trim(),
+    cep: String(row.cep || '').trim(),
+    rua: String(row.rua || '').trim(),
+    numero: String(row.numero || '').trim(),
+    bairro: String(row.bairro || '').trim(),
+    cidade: String(row.cidade || '').trim(),
+    estado: String(row.estado || '').trim().toUpperCase(),
+    agendar_atendimento_com: String(row.agendar_atendimento_com || '').trim(),
+  };
+}
+
+function mapNovaOsFormFornecedor(row) {
+  if (!row) return null;
+  let cidade = String(row.cidade || '').trim();
+  const cidadeUf = cidade.match(/^(.+?)\s*\([A-Z]{2}\)\s*$/i);
+  if (cidadeUf) cidade = cidadeUf[1].trim();
+
+  let numero = String(row.endereco_numero || '').trim();
+  if (!numero || numero === '0' || numero === '00') numero = '';
+
+  const nome = String(row.nome_fantasia || row.razao_social || '').trim()
+    || String(row.razao_social || '').trim();
+
+  return {
+    nome_revenda_cliente: nome,
+    numero_telefone: _formatTelNovaOs(row.telefone1_ddd, row.telefone1_numero),
+    cpf_cnpj: String(row.cnpj_cpf || '').trim(),
+    cep: String(row.cep || '').trim(),
+    rua: String(row.endereco || '').trim(),
+    numero,
+    bairro: String(row.bairro || '').trim(),
+    cidade,
+    estado: String(row.estado || '').trim().toUpperCase(),
+    agendar_atendimento_com: '',
+  };
+}
+
+// GET /at/nova-os-sugerir-telefone?q= — mín. 4 dígitos (omie.fornecedores + sac.at)
+router.get('/at/nova-os-sugerir-telefone', async (req, res) => {
+  const digits = String(req.query?.q || '').replace(/\D/g, '');
+  if (digits.length < 4) return res.json({ ok: true, itens: [] });
+
+  try {
+    const like = `%${digits}%`;
+    const [fornRes, atRes] = await Promise.all([
+      pool.query(
+        `SELECT id, razao_social, nome_fantasia, cnpj_cpf, telefone1_ddd, telefone1_numero,
+                endereco, endereco_numero, bairro, cidade, estado, cep
+           FROM omie.fornecedores
+          WHERE COALESCE(inativo, false) = false
+            AND COALESCE(BTRIM(telefone1_numero), '') <> ''
+            AND (
+              regexp_replace(telefone1_numero, '\\D', '', 'g') LIKE $1
+              OR regexp_replace(
+                   COALESCE(telefone1_ddd, '') || COALESCE(telefone1_numero, ''),
+                   '\\D', '', 'g'
+                 ) LIKE $1
+            )
+          ORDER BY razao_social NULLS LAST
+          LIMIT 12`,
+        [like]
+      ),
+      pool.query(
+        `SELECT DISTINCT ON (regexp_replace(numero_telefone, '\\D', '', 'g'))
+                id, nome_revenda_cliente, numero_telefone, cpf_cnpj, cep, rua, numero,
+                bairro, cidade, estado, agendar_atendimento_com
+           FROM sac.at
+          WHERE COALESCE(BTRIM(numero_telefone), '') <> ''
+            AND regexp_replace(numero_telefone, '\\D', '', 'g') LIKE $1
+          ORDER BY regexp_replace(numero_telefone, '\\D', '', 'g'), id DESC
+          LIMIT 12`,
+        [like]
+      ),
+    ]);
+
+    const itens = [
+      ...fornRes.rows.map((r) => {
+        const dados = mapNovaOsFormFornecedor(r);
+        const tel = dados.numero_telefone || _formatTelNovaOs(r.telefone1_ddd, r.telefone1_numero);
+        const nome = r.nome_fantasia || r.razao_social || 'Fornecedor';
+        return {
+          fonte: 'fornecedor',
+          id: r.id,
+          label: tel,
+          sub: ['Omie', nome, r.cidade, r.estado].filter(Boolean).join(' · '),
+          dados,
+        };
+      }),
+      ...atRes.rows.map((r) => {
+        const dados = mapNovaOsFormAt(r);
+        return {
+          fonte: 'at',
+          id: r.id,
+          label: dados.numero_telefone || r.numero_telefone,
+          sub: ['OS AT', r.nome_revenda_cliente, `#${r.id}`].filter(Boolean).join(' · '),
+          dados,
+        };
+      }),
+    ].slice(0, 20);
+
+    return res.json({ ok: true, itens });
+  } catch (err) {
+    console.error('[SAC/AT] erro nova-os-sugerir-telefone:', err);
+    return res.status(500).json({ ok: false, error: err.message || 'Falha ao buscar telefone.' });
+  }
+});
+
+// GET /at/nova-os-sugerir-nome?q= — mín. 4 caracteres (AT + Omie)
+router.get('/at/nova-os-sugerir-nome', async (req, res) => {
+  const q = String(req.query?.q || '').trim();
+  if (q.length < 4) return res.json({ ok: true, itens: [] });
+
+  const like = `%${q}%`;
+  try {
+    const [fornRes, atRes] = await Promise.all([
+      pool.query(
+        `SELECT id, razao_social, nome_fantasia, cnpj_cpf, telefone1_ddd, telefone1_numero,
+                endereco, endereco_numero, bairro, cidade, estado, cep
+           FROM omie.fornecedores
+          WHERE COALESCE(inativo, false) = false
+            AND (razao_social ILIKE $1 OR nome_fantasia ILIKE $1)
+          ORDER BY
+            CASE
+              WHEN nome_fantasia ILIKE $1 THEN 0
+              WHEN razao_social ILIKE $1 THEN 1
+              ELSE 2
+            END,
+            razao_social NULLS LAST
+          LIMIT 12`,
+        [like]
+      ),
+      pool.query(
+        `SELECT id, nome_revenda_cliente, numero_telefone, cpf_cnpj, cep, rua, numero,
+                bairro, cidade, estado, agendar_atendimento_com
+           FROM sac.at
+          WHERE nome_revenda_cliente ILIKE $1
+             OR agendar_atendimento_com ILIKE $1
+          ORDER BY id DESC
+          LIMIT 12`,
+        [like]
+      ),
+    ]);
+
+    const itens = [
+      ...fornRes.rows.map((r) => {
+        const dados = mapNovaOsFormFornecedor(r);
+        const label = String(r.nome_fantasia || r.razao_social || '').trim()
+          || String(r.razao_social || '').trim();
+        return {
+          fonte: 'fornecedor',
+          id: r.id,
+          label,
+          sub: ['Omie', dados.numero_telefone, r.cidade, r.estado].filter(Boolean).join(' · '),
+          dados,
+        };
+      }),
+      ...atRes.rows.map((r) => {
+        const dados = mapNovaOsFormAt(r);
+        const matchAgendar = r.agendar_atendimento_com
+          && String(r.agendar_atendimento_com).toLowerCase().includes(q.toLowerCase())
+          && !(r.nome_revenda_cliente || '').toLowerCase().includes(q.toLowerCase());
+        const label = matchAgendar
+          ? String(r.agendar_atendimento_com).trim()
+          : String(r.nome_revenda_cliente || r.agendar_atendimento_com || '').trim();
+        return {
+          fonte: 'at',
+          id: r.id,
+          label,
+          sub: [
+            'OS AT',
+            `#${r.id}`,
+            matchAgendar ? (r.nome_revenda_cliente || null) : (r.agendar_atendimento_com || null),
+            r.numero_telefone,
+          ].filter(Boolean).join(' · '),
+          dados,
+        };
+      }),
+    ].slice(0, 20);
+
+    return res.json({ ok: true, itens });
+  } catch (err) {
+    console.error('[SAC/AT] erro nova-os-sugerir-nome:', err);
+    return res.status(500).json({ ok: false, error: err.message || 'Falha ao buscar nome.' });
+  }
+});
+
 // ── GRÁFICOS AT ──────────────────────────────────────────────────────────────
 // GET /at/graficos/mencoes-por-mes — menções agrupadas por mês, excluindo AT tipo Atendimento rápido
 router.get('/at/graficos/mencoes-por-mes', async (req, res) => {
@@ -7038,6 +7569,12 @@ router.get('/at/relatorio-gerencial', async (req, res) => {
       )
     `;
 
+    // Data de produção (não venda/entrega):
+    // 1) família FTI Inverter Piscina (10457646996): OP 8F00YYMMDD… → ano/mês/dia
+    // 2) historico_pedido_originalis.data_integracao pelo pedido
+    //    (pedido em at_busca_selecionada pode vir "ENTREGUE / 17693" — usa trecho após " / ")
+    // 3) fallback: at_busca_selecionada.ordem_producao = historico.ordem_de_producao
+    //    OU at_busca_selecionada.ordem_producao = historico.nota_fiscal
     const loteBaseCte = `
       WITH lote_base AS (
         SELECT DISTINCT ON (a.id)
@@ -7058,14 +7595,57 @@ router.get('/at/relatorio-gerencial', async (req, res) => {
             '(sem modelo)'
           ) AS modelo,
           CASE
-            WHEN s.data_entrega IS NULL OR TRIM(s.data_entrega) = '' THEN NULL
-            WHEN TRIM(s.data_entrega) ~ '^\\d{4}-\\d{2}-\\d{2}' THEN SUBSTRING(TRIM(s.data_entrega) FROM 1 FOR 10)::date
-            WHEN TRIM(s.data_entrega) ~ '^\\d{1,2}/\\d{1,2}/\\d{4}'
-              THEN to_date(regexp_replace(SUBSTRING(TRIM(s.data_entrega) FROM 1 FOR 10), ' .*', ''), 'DD/MM/YYYY')
+            WHEN po.codigo_familia = '10457646996'
+              AND TRIM(COALESCE(s.ordem_producao, '')) ~ '^[A-Za-z0-9]{4}[0-9]{6}'
+              AND SUBSTRING(TRIM(s.ordem_producao) FROM 7 FOR 2) BETWEEN '01' AND '12'
+              AND SUBSTRING(TRIM(s.ordem_producao) FROM 9 FOR 2) BETWEEN '01' AND '31'
+            THEN to_date(
+              '20' || SUBSTRING(TRIM(s.ordem_producao) FROM 5 FOR 6),
+              'YYYYMMDD'
+            )
+            WHEN h.data_integracao IS NOT NULL
+              AND TRIM(h.data_integracao) <> ''
+              AND TRIM(h.data_integracao) ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}'
+            THEN SUBSTRING(TRIM(h.data_integracao) FROM 1 FOR 10)::date
+            WHEN hop.data_integracao IS NOT NULL
+              AND TRIM(hop.data_integracao) <> ''
+              AND TRIM(hop.data_integracao) ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}'
+            THEN SUBSTRING(TRIM(hop.data_integracao) FROM 1 FOR 10)::date
             ELSE NULL
-          END AS data_entrega_dt
+          END AS data_producao_dt
         FROM sac.at a
         INNER JOIN sac.at_busca_selecionada s ON s.id_at = a.id
+        LEFT JOIN LATERAL (
+          SELECT po0.codigo_familia::text AS codigo_familia
+          FROM public.produtos_omie po0
+          WHERE UPPER(REPLACE(TRIM(po0.codigo), '-', ''))
+              = UPPER(REPLACE(TRIM(COALESCE(s.modelo, a.modelo, '')), '-', ''))
+          LIMIT 1
+        ) po ON TRUE
+        LEFT JOIN LATERAL (
+          SELECT h0.data_integracao
+          FROM public.historico_pedido_originalis h0
+          WHERE TRIM(h0.pedido) = TRIM(regexp_replace(TRIM(COALESCE(s.pedido, '')), '^.* /\\s*', ''))
+            AND h0.data_integracao IS NOT NULL
+            AND TRIM(h0.data_integracao) <> ''
+          ORDER BY h0.data_integracao ASC
+          LIMIT 1
+        ) h ON TRUE
+        LEFT JOIN LATERAL (
+          SELECT h0.data_integracao
+          FROM public.historico_pedido_originalis h0
+          WHERE TRIM(COALESCE(s.ordem_producao, '')) <> ''
+            AND (
+              TRIM(h0.ordem_de_producao) = TRIM(s.ordem_producao)
+              OR TRIM(h0.nota_fiscal) = TRIM(s.ordem_producao)
+            )
+            AND h0.data_integracao IS NOT NULL
+            AND TRIM(h0.data_integracao) <> ''
+          ORDER BY
+            CASE WHEN TRIM(h0.ordem_de_producao) = TRIM(s.ordem_producao) THEN 0 ELSE 1 END,
+            h0.data_integracao ASC
+          LIMIT 1
+        ) hop ON TRUE
         WHERE a.data >= $1::date
           AND a.data < $2::date${tipoSql}
         ORDER BY a.id, s.id DESC
@@ -7097,11 +7677,13 @@ router.get('/at/relatorio-gerencial', async (req, res) => {
       rStatus,
       rEvolucao,
       rFinanceiro,
+      rTopPecas,
       rLoteMes,
       rLoteMesModelo,
       rLoteModeloJanela,
       rLoteTagJanela,
       rLoteTagModeloJanela,
+      rLoteMesModeloTag,
       rLoteTotalJanela,
     ] = await Promise.all([
       pool.query(`${baseCte}
@@ -7152,60 +7734,101 @@ router.get('/at/relatorio-gerencial', async (req, res) => {
       pool.query(evolucaoSql, rangeParams),
       pool.query(`${baseCte}
         SELECT
-          id,
-          estado,
-          data,
-          valor_total_mao_obra
-        FROM base
-        WHERE status_grupo = 'concluida'
-          AND valor_total_mao_obra IS NOT NULL
-          AND valor_total_mao_obra > 0
-        ORDER BY data ASC, id ASC
+          b.id,
+          b.estado,
+          b.data,
+          b.valor_total_mao_obra,
+          b.status_grupo,
+          COALESCE(env.total_envio, 0)::float AS valor_envio,
+          COALESCE(env.qtd_envios, 0)::int AS qtd_envios,
+          COALESCE(cp.total_pecas, 0)::float AS valor_pecas,
+          COALESCE(cp.qtd_itens, 0)::int AS qtd_itens_pecas
+        FROM base b
+        LEFT JOIN (
+          SELECT id_at,
+                 SUM(COALESCE(valor_envio, 0))::float AS total_envio,
+                 COUNT(*)::int AS qtd_envios
+            FROM envios.solicitacoes
+           WHERE id_at IS NOT NULL
+           GROUP BY id_at
+        ) env ON env.id_at = b.id
+        LEFT JOIN (
+          SELECT id_at,
+                 SUM(COALESCE(valor_total, 0))::float AS total_pecas,
+                 COUNT(*)::int AS qtd_itens
+            FROM envios.custo_pecas
+           WHERE id_at IS NOT NULL
+           GROUP BY id_at
+        ) cp ON cp.id_at = b.id
+        WHERE COALESCE(b.valor_total_mao_obra, 0) > 0
+           OR COALESCE(env.total_envio, 0) > 0
+           OR COALESCE(cp.total_pecas, 0) > 0
+        ORDER BY b.data ASC, b.id ASC
+      `, rangeParams),
+      pool.query(`
+        SELECT
+          COALESCE(NULLIF(TRIM(cp.codigo_produto), ''), '(sem código)') AS codigo,
+          COALESCE(NULLIF(TRIM(cp.descricao), ''), '(sem descrição)') AS descricao,
+          SUM(COALESCE(cp.quantidade, 0))::float AS quantidade,
+          SUM(COALESCE(cp.valor_total, 0))::float AS valor_total,
+          COUNT(DISTINCT cp.id_at)::int AS qtd_os
+        FROM envios.custo_pecas cp
+        INNER JOIN sac.at a ON a.id = cp.id_at
+        WHERE a.data >= $1::date
+          AND a.data < $2::date${tipoSql}
+          AND COALESCE(cp.valor_total, 0) > 0
+        GROUP BY 1, 2
+        ORDER BY valor_total DESC, quantidade DESC
+        LIMIT 15
       `, rangeParams),
       pool.query(`${loteBaseCte}
         SELECT
-          to_char(data_entrega_dt, 'YYYY-MM') AS mes,
+          COALESCE(to_char(data_producao_dt, 'YYYY-MM'), '__sem_dt__') AS mes,
           COUNT(*)::int AS total
         FROM lote_base
-        WHERE data_entrega_dt IS NOT NULL
         GROUP BY 1
         ORDER BY 1
       `, rangeParams),
       pool.query(`${loteBaseCte}
         SELECT
-          to_char(data_entrega_dt, 'YYYY-MM') AS mes,
+          COALESCE(to_char(data_producao_dt, 'YYYY-MM'), '__sem_dt__') AS mes,
           modelo,
           COUNT(*)::int AS total
         FROM lote_base
-        WHERE data_entrega_dt IS NOT NULL
         GROUP BY 1, 2
         ORDER BY 1, 3 DESC, 2
       `, rangeParams),
       pool.query(`${loteBaseCte}
         SELECT modelo, COUNT(*)::int AS total
         FROM lote_base
-        WHERE data_entrega_dt IS NOT NULL
         GROUP BY modelo
         ORDER BY total DESC, modelo
       `, rangeParams),
       pool.query(`${loteBaseCte}
         SELECT tag, COUNT(*)::int AS total
         FROM lote_base
-        WHERE data_entrega_dt IS NOT NULL
         GROUP BY tag
         ORDER BY total DESC, tag
       `, rangeParams),
       pool.query(`${loteBaseCte}
         SELECT tag, modelo, COUNT(*)::int AS total
         FROM lote_base
-        WHERE data_entrega_dt IS NOT NULL
         GROUP BY tag, modelo
         ORDER BY tag, total DESC, modelo
       `, rangeParams),
       pool.query(`${loteBaseCte}
+        SELECT
+          COALESCE(to_char(data_producao_dt, 'YYYY-MM'), '__sem_dt__') AS mes,
+          modelo,
+          tag,
+          COUNT(*)::int AS total
+        FROM lote_base
+        GROUP BY 1, 2, 3
+        ORDER BY 1, 4 DESC, 2
+      `, rangeParams),
+      pool.query(`${loteBaseCte}
         SELECT COUNT(*)::int AS total
         FROM lote_base
-        WHERE data_entrega_dt IS NOT NULL
       `, rangeParams),
     ]);
 
@@ -7231,6 +7854,9 @@ router.get('/at/relatorio-gerencial', async (req, res) => {
     const janelaLoteInicioLabel = new Date(mesInicio).toLocaleDateString('pt-BR');
     const janelaLoteMeses = mesesPeriodo;
     const lotePorMes = (rLoteMes.rows || []).map((r) => {
+      if (r.mes === '__sem_dt__') {
+        return { mes: r.mes, label: 'S/ Dt produção', total: r.total };
+      }
       const [y, m] = String(r.mes || '').split('-');
       const mi = parseInt(m, 10);
       return {
@@ -7240,12 +7866,29 @@ router.get('/at/relatorio-gerencial', async (req, res) => {
       };
     });
     const lotePorMesModelo = (rLoteMesModelo.rows || []).map((r) => {
+      if (r.mes === '__sem_dt__') {
+        return { mes: r.mes, label: 'S/ Dt produção', modelo: r.modelo, total: r.total };
+      }
       const [y, m] = String(r.mes || '').split('-');
       const mi = parseInt(m, 10);
       return {
         mes: r.mes,
         label: mi >= 1 && mi <= 12 ? `${nomesMes[mi - 1]}/${y}` : r.mes,
         modelo: r.modelo,
+        total: r.total,
+      };
+    });
+    const lotePorMesModeloTag = (rLoteMesModeloTag.rows || []).map((r) => {
+      if (r.mes === '__sem_dt__') {
+        return { mes: r.mes, label: 'S/ Dt produção', modelo: r.modelo, tag: r.tag, total: r.total };
+      }
+      const [y, m] = String(r.mes || '').split('-');
+      const mi = parseInt(m, 10);
+      return {
+        mes: r.mes,
+        label: mi >= 1 && mi <= 12 ? `${nomesMes[mi - 1]}/${y}` : r.mes,
+        modelo: r.modelo,
+        tag: r.tag,
         total: r.total,
       };
     });
@@ -7279,6 +7922,37 @@ router.get('/at/relatorio-gerencial', async (req, res) => {
       salvo: false,
     };
 
+    const financeiroRows = (rFinanceiro.rows || []).map((r) => {
+      const valorMo = Math.round(Number(r.valor_total_mao_obra || 0) * 100) / 100;
+      const valorEnvio = Math.round(Number(r.valor_envio || 0) * 100) / 100;
+      const valorPecas = Math.round(Number(r.valor_pecas || 0) * 100) / 100;
+      return {
+        id: r.id,
+        os: `${String(new Date(r.data).getFullYear()).slice(-2)} - ${r.id}`,
+        estado: r.estado,
+        data: r.data,
+        status_grupo: r.status_grupo,
+        valor_mo: valorMo,
+        valor_envio: valorEnvio,
+        qtd_envios: r.qtd_envios || 0,
+        valor_pecas: valorPecas,
+        qtd_itens_pecas: r.qtd_itens_pecas || 0,
+        valor_total: Math.round((valorMo + valorEnvio + valorPecas) * 100) / 100,
+      };
+    });
+    const totalEnvioPeriodo = financeiroRows.reduce((s, r) => s + (r.valor_envio || 0), 0);
+    const totalPecasPeriodo = financeiroRows.reduce((s, r) => s + (r.valor_pecas || 0), 0);
+    const totalMoPeriodo = Math.round(Number(kpi.total_mo || 0) * 100) / 100;
+    const totalGeralPeriodo = Math.round((totalMoPeriodo + totalEnvioPeriodo + totalPecasPeriodo) * 100) / 100;
+    const osComCusto = financeiroRows.filter((r) => (r.valor_total || 0) > 0).length;
+    const topPecasCusto = (rTopPecas.rows || []).map((r) => ({
+      codigo: r.codigo,
+      descricao: r.descricao,
+      quantidade: Math.round(Number(r.quantidade || 0) * 1000) / 1000,
+      valor_total: Math.round(Number(r.valor_total || 0) * 100) / 100,
+      qtd_os: r.qtd_os || 0,
+    }));
+
     return res.json({
       ok: true,
       mes: mesRaw,
@@ -7296,6 +7970,13 @@ router.get('/at/relatorio-gerencial', async (req, res) => {
         custo_medio: Math.round((kpi.custo_medio || 0) * 100) / 100,
         abertas_mes: kpi.total_os || 0,
         pendente_fechamento_tecnico: kpi.pendente_fechamento_tecnico || 0,
+        total_envio: Math.round(totalEnvioPeriodo * 100) / 100,
+        total_pecas: Math.round(totalPecasPeriodo * 100) / 100,
+        total_custo_geral: totalGeralPeriodo,
+        os_com_custo: osComCusto,
+        custo_medio_geral: osComCusto
+          ? Math.round((totalGeralPeriodo / osComCusto) * 100) / 100
+          : 0,
       },
       por_estado: rEstado.rows,
       por_modelo: rModelo.rows,
@@ -7323,16 +8004,12 @@ router.get('/at/relatorio-gerencial', async (req, res) => {
         })
         : [],
       pareto,
-      financeiro: (rFinanceiro.rows || []).map((r) => ({
-        id: r.id,
-        os: `${String(new Date(r.data).getFullYear()).slice(-2)} - ${r.id}`,
-        estado: r.estado,
-        data: r.data,
-        valor_mo: Math.round(Number(r.valor_total_mao_obra || 0) * 100) / 100,
-      })),
+      financeiro: financeiroRows,
+      top_pecas_custo: topPecasCusto,
       analise_lote: {
         por_mes_entrega: lotePorMes,
         por_mes_modelo: lotePorMesModelo,
+        por_mes_modelo_tag: lotePorMesModeloTag,
         por_modelo_janela_3m: loteModelosJanela,
         janela_3m: {
           inicio: janelaLoteInicioLabel,
@@ -7351,6 +8028,173 @@ router.get('/at/relatorio-gerencial', async (req, res) => {
     });
   } catch (err) {
     console.error('[SAC/AT] erro relatorio-gerencial:', err);
+    return res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// GET /at/relatorio-gerencial/lote-detalhe — O.S. + máquina ao clicar no gráfico de lote
+router.get('/at/relatorio-gerencial/lote-detalhe', async (req, res) => {
+  try {
+    await ensureSchema();
+    const modoRaw = String(req.query.modo || 'mes').trim().toLowerCase();
+    const tipoParam = req.query.tipo;
+    const tipoFiltro = tipoParam === undefined || tipoParam === null
+      ? 'Qualidade'
+      : String(tipoParam).trim();
+    const mesProducao = String(req.query.mes_producao || '').trim();
+    const modeloFiltro = String(req.query.modelo || '').trim();
+    const tagFiltro = String(req.query.tag || '').trim();
+
+    if (mesProducao && mesProducao !== '__sem_dt__' && !/^\d{4}-\d{2}$/.test(mesProducao)) {
+      return res.status(400).json({ ok: false, error: 'Parâmetro mes_producao inválido (use YYYY-MM ou __sem_dt__).' });
+    }
+    if (!mesProducao && !tagFiltro && !modeloFiltro) {
+      return res.status(400).json({ ok: false, error: 'Informe mes_producao, tag ou modelo para filtrar.' });
+    }
+
+    const tipoSql = buildAtRelatorioGerencialTipoFilter(tipoFiltro);
+    const periodoCfg = calcAtRelatorioGerencialPeriodo(modoRaw);
+    const params = [periodoCfg.inicio, periodoCfg.fimExclusive];
+    const filtros = [];
+
+    if (mesProducao === '__sem_dt__') {
+      filtros.push('lb.data_producao_dt IS NULL');
+    } else if (mesProducao) {
+      params.push(mesProducao);
+      filtros.push(`to_char(lb.data_producao_dt, 'YYYY-MM') = $${params.length}`);
+    }
+    if (modeloFiltro) {
+      params.push(modeloFiltro);
+      filtros.push(`lb.modelo = $${params.length}`);
+    }
+    if (tagFiltro) {
+      params.push(tagFiltro);
+      filtros.push(`lb.tag = $${params.length}`);
+    }
+
+    const { rows } = await pool.query(`
+      WITH lote_base AS (
+        SELECT DISTINCT ON (a.id)
+          a.id,
+          a.data AS data_os,
+          COALESCE(NULLIF(TRIM(a.estado), ''), 'N/D') AS estado,
+          COALESCE(NULLIF(TRIM(a.cidade), ''), '') AS cidade,
+          COALESCE(NULLIF(TRIM(a.status), ''), '') AS status_os,
+          COALESCE(NULLIF(TRIM(a.tag_problema), ''), '(sem tag)') AS tag,
+          COALESCE(NULLIF(TRIM(a.descreva_reclamacao), ''), '') AS reclamacao,
+          COALESCE(NULLIF(TRIM(a.nome_revenda_cliente), ''), '') AS revenda_cliente,
+          COALESCE(
+            NULLIF(
+              CONCAT(
+                COALESCE(SUBSTRING(TRIM(COALESCE(s.modelo, a.modelo, '')) FROM '^[A-Za-z]+'), ''),
+                CASE
+                  WHEN UPPER(TRIM(COALESCE(s.modelo, a.modelo, ''))) ~ 'BR$' THEN 'BR'
+                  WHEN UPPER(TRIM(COALESCE(s.modelo, a.modelo, ''))) ~ 'W$'  THEN 'W'
+                  ELSE ''
+                END
+              ),
+              ''
+            ),
+            '(sem modelo)'
+          ) AS modelo,
+          TRIM(COALESCE(s.modelo, a.modelo, '')) AS modelo_completo,
+          TRIM(regexp_replace(TRIM(COALESCE(s.pedido, '')), '^.* /\\s*', '')) AS pedido,
+          TRIM(COALESCE(s.ordem_producao, '')) AS ordem_producao,
+          TRIM(COALESCE(s.cliente, '')) AS cliente,
+          TRIM(COALESCE(s.nota_fiscal, '')) AS nota_fiscal,
+          TRIM(COALESCE(s.data_entrega, '')) AS data_entrega,
+          CASE
+            WHEN po.codigo_familia = '10457646996'
+              AND TRIM(COALESCE(s.ordem_producao, '')) ~ '^[A-Za-z0-9]{4}[0-9]{6}'
+              AND SUBSTRING(TRIM(s.ordem_producao) FROM 7 FOR 2) BETWEEN '01' AND '12'
+              AND SUBSTRING(TRIM(s.ordem_producao) FROM 9 FOR 2) BETWEEN '01' AND '31'
+            THEN to_date(
+              '20' || SUBSTRING(TRIM(s.ordem_producao) FROM 5 FOR 6),
+              'YYYYMMDD'
+            )
+            WHEN h.data_integracao IS NOT NULL
+              AND TRIM(h.data_integracao) <> ''
+              AND TRIM(h.data_integracao) ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}'
+            THEN SUBSTRING(TRIM(h.data_integracao) FROM 1 FOR 10)::date
+            WHEN hop.data_integracao IS NOT NULL
+              AND TRIM(hop.data_integracao) <> ''
+              AND TRIM(hop.data_integracao) ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}'
+            THEN SUBSTRING(TRIM(hop.data_integracao) FROM 1 FOR 10)::date
+            ELSE NULL
+          END AS data_producao_dt
+        FROM sac.at a
+        INNER JOIN sac.at_busca_selecionada s ON s.id_at = a.id
+        LEFT JOIN LATERAL (
+          SELECT po0.codigo_familia::text AS codigo_familia
+          FROM public.produtos_omie po0
+          WHERE UPPER(REPLACE(TRIM(po0.codigo), '-', ''))
+              = UPPER(REPLACE(TRIM(COALESCE(s.modelo, a.modelo, '')), '-', ''))
+          LIMIT 1
+        ) po ON TRUE
+        LEFT JOIN LATERAL (
+          SELECT h0.data_integracao
+          FROM public.historico_pedido_originalis h0
+          WHERE TRIM(h0.pedido) = TRIM(regexp_replace(TRIM(COALESCE(s.pedido, '')), '^.* /\\s*', ''))
+            AND h0.data_integracao IS NOT NULL
+            AND TRIM(h0.data_integracao) <> ''
+          ORDER BY h0.data_integracao ASC
+          LIMIT 1
+        ) h ON TRUE
+        LEFT JOIN LATERAL (
+          SELECT h0.data_integracao
+          FROM public.historico_pedido_originalis h0
+          WHERE TRIM(COALESCE(s.ordem_producao, '')) <> ''
+            AND (
+              TRIM(h0.ordem_de_producao) = TRIM(s.ordem_producao)
+              OR TRIM(h0.nota_fiscal) = TRIM(s.ordem_producao)
+            )
+            AND h0.data_integracao IS NOT NULL
+            AND TRIM(h0.data_integracao) <> ''
+          ORDER BY
+            CASE WHEN TRIM(h0.ordem_de_producao) = TRIM(s.ordem_producao) THEN 0 ELSE 1 END,
+            h0.data_integracao ASC
+          LIMIT 1
+        ) hop ON TRUE
+        WHERE a.data >= $1::date
+          AND a.data < $2::date${tipoSql}
+        ORDER BY a.id, s.id DESC
+      )
+      SELECT
+        lb.id,
+        lb.data_os,
+        lb.estado,
+        lb.cidade,
+        lb.status_os,
+        lb.tag,
+        lb.reclamacao,
+        lb.revenda_cliente,
+        lb.modelo,
+        lb.modelo_completo,
+        lb.pedido,
+        lb.ordem_producao,
+        lb.cliente,
+        lb.nota_fiscal,
+        lb.data_entrega,
+        lb.data_producao_dt AS data_producao
+      FROM lote_base lb
+      ${filtros.length ? `WHERE ${filtros.join(' AND ')}` : ''}
+      ORDER BY lb.data_producao_dt ASC NULLS LAST, lb.data_os ASC, lb.id ASC
+    `, params);
+
+    return res.json({
+      ok: true,
+      periodo: periodoCfg.label,
+      filtros: {
+        mes_producao: mesProducao || null,
+        modelo: modeloFiltro || null,
+        tag: tagFiltro || null,
+        tipo: tipoFiltro || 'Todos',
+      },
+      total: rows.length,
+      rows,
+    });
+  } catch (err) {
+    console.error('[SAC/AT] erro relatorio-gerencial lote-detalhe:', err);
     return res.status(500).json({ ok: false, error: err.message });
   }
 });
@@ -8558,54 +9402,49 @@ router.get('/at/tecnicos/ufs', async (req, res) => {
   }
 });
 
-// GET /at/pecas-enviadas/:id — envios vinculados a esta OS via campo observacao
+// GET /at/pecas-enviadas/:id — envios vinculados a esta OS via coluna id_at
 router.get('/at/pecas-enviadas/:id', async (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (!id || id < 1) return res.status(400).json({ error: 'ID inválido.' });
   try {
-    // Busca atendimento_inicial e id da AT para montar os padrões de busca
-    const { rows: atRows } = await pool.query(
-      `SELECT a.id, a.atendimento_inicial, a.data
-       FROM sac.at a WHERE a.id = $1 LIMIT 1`,
-      [id]
-    );
-    if (!atRows.length) return res.json([]);
-    const at = atRows[0];
-    // Padrões de match no campo observacao:
-    // 1. atendimento_inicial exato (ex: "260093")
-    // 2. formato ano2digitos + id sem zeros (ex: "262177")
-    // 3. formato com traço (ex: "26-2177")
-    const anoAT = at.data ? String(new Date(at.data).getFullYear()).slice(-2) : '';
-    const patterns = [];
-    if (at.atendimento_inicial) patterns.push(at.atendimento_inicial.trim());
-    if (anoAT) {
-      patterns.push(`${anoAT}${at.id}`);
-      patterns.push(`${anoAT}-${at.id}`);
-    }
-    if (!patterns.length) return res.json([]);
-
-    // Busca todos os registros onde algum padrão aparece após "O.S "
+    await ensureSchema();
     const { rows } = await pool.query(
       `SELECT id, identificacao, observacao, conteudo, etiqueta_url, declaracao_url, anexos,
-              rastreio_status, created_at, usuario
+              rastreio_status, created_at, usuario, metodo_envio, id_vipp, id_at, valor_envio
        FROM envios.solicitacoes
-       WHERE ${ patterns.map((_, i) => `observacao ~* ('O\.S[[:space:]]+' || $${i + 1})`).join(' OR ') }
+       WHERE id_at = $1
        ORDER BY id DESC`,
-      patterns
+      [id]
     );
     res.json(rows.map(r => {
       let itens = [];
       try { itens = JSON.parse(r.conteudo || '[]'); } catch { itens = []; }
+      const etq = String(r.etiqueta_url || '').trim();
+      const dec = String(r.declaracao_url || '').trim();
+      const isZpl = (s) => s.startsWith('^XA') || s.startsWith('<?xml') || s.startsWith('<RECORDS');
+      const isHttp = (s) => /^https?:\/\//i.test(s);
+      const anexosHttp = (Array.isArray(r.anexos) ? r.anexos : [])
+        .map((a) => String(a || '').trim())
+        .filter((a) => isHttp(a));
+      const valorEnvio = r.valor_envio != null && r.valor_envio !== ''
+        ? Number(r.valor_envio)
+        : null;
       return {
         id:              r.id,
+        id_at:           r.id_at,
         identificacao:   r.identificacao || '',
         observacao:      r.observacao || '',
         rastreio_status: r.rastreio_status || '',
         usuario:         r.usuario || '',
         created_at:      r.created_at ? new Date(r.created_at).toLocaleDateString('pt-BR') : '',
-        etiqueta_url:    r.etiqueta_url || null,
-        declaracao_url:  r.declaracao_url || null,
-        anexos:          Array.isArray(r.anexos) ? r.anexos : [],
+        metodo_envio:    r.metodo_envio || '',
+        id_vipp:         r.id_vipp || null,
+        valor_envio:     Number.isFinite(valorEnvio) ? valorEnvio : null,
+        etiqueta_url:    isHttp(etq) ? etq : null,
+        etiqueta_zebra:  !!(r.identificacao || isZpl(etq)),
+        declaracao_url:  isHttp(dec) ? dec : null,
+        declaracao_zebra: !!(isZpl(dec) || r.id_vipp),
+        anexos:          anexosHttp,
         itens,
       };
     }));

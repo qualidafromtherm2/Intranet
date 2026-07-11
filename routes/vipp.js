@@ -444,6 +444,13 @@ router.get('/status', async (req, res) => {
       } catch (e) {
         console.warn('[VIPP] falha ao persistir identificacao:', e.message);
       }
+      // Preenche custo de envio se ainda estiver vazio
+      _persistirValorEnvio({
+        envioId: envio_id,
+        idVipp: id,
+        ect: etiquetaPostagem,
+        onlyIfEmpty: true,
+      }).catch(() => {});
     }
 
     return res.json({
@@ -586,21 +593,39 @@ router.post('/gerar-etiqueta', async (req, res) => {
     console.log(`[VIPP] ECT alocado: ${ectCode} → IdConhecimento=${idConhecimento}`);
 
     // 2. Registra código de rastreio + status na tabela envios.solicitacoes
-    if (n_solic) {
+    await dbQuery(`ALTER TABLE envios.solicitacoes ADD COLUMN IF NOT EXISTS valor_envio NUMERIC(12,2)`);
+    if (n_solic || envio_id) {
       try {
-        await dbQuery(
-          `UPDATE envios.solicitacoes
-              SET identificacao = $1
-            WHERE numero_sep = $2`,
-          [ectCode, n_solic]
-        );
-        console.log(`[VIPP] identificacao=${ectCode} registrado em envios.solicitacoes → SEP=${n_solic}`);
+        if (envio_id) {
+          await dbQuery(
+            `UPDATE envios.solicitacoes
+                SET identificacao = $1
+              WHERE id = $2`,
+            [ectCode, Number(envio_id)]
+          );
+        } else if (n_solic) {
+          await dbQuery(
+            `UPDATE envios.solicitacoes
+                SET identificacao = $1
+              WHERE numero_sep = $2`,
+            [ectCode, n_solic]
+          );
+        }
+        console.log(`[VIPP] identificacao=${ectCode} registrado em envios.solicitacoes → SEP=${n_solic || '-'} envio=${envio_id || '-'}`);
       } catch (e) {
         console.warn('[VIPP] Falha ao atualizar envios.solicitacoes:', e.message);
       }
     }
 
-    return res.json({ ok: true, ectCode });
+    // 3. Custo de envio (ValorDaPostagem) — disponível após ECT / PLP
+    const valorEnvio = await _persistirValorEnvio({
+      envioId: envio_id,
+      nSolic: n_solic,
+      idVipp: idConhecimento,
+      ect: ectCode,
+    });
+
+    return res.json({ ok: true, ectCode, valor_envio: valorEnvio });
 
   } catch (err) {
     console.error('[VIPP] gerar-etiqueta erro:', err.message);
@@ -631,6 +656,16 @@ router.post('/imprimir-envio', async (req, res) => {
       [Number(envio_id)]
     );
     if (!rows.length) return res.status(404).json({ ok: false, error: 'Envio não encontrado' });
+
+    // Preenche valor_envio se ainda vazio e já temos ECT
+    const ectExistente = (rows[0].identificacao || '').trim().replace(/\s+/g, '');
+    if (ectExistente) {
+      _persistirValorEnvio({
+        envioId: envio_id,
+        ect: ectExistente,
+        onlyIfEmpty: true,
+      }).catch(() => {});
+    }
 
     // 2. Obtém ZPL — usa cache se disponível, senão busca no VIPP e converte
     let zpl = null;
@@ -988,6 +1023,12 @@ async function _buscarSituacaoPostagem(etiqueta) {
       : d.toLocaleDateString('pt-BR') + ' ' + d.toLocaleTimeString('pt-BR');
   })();
 
+  const valorRaw = s.ValorDaPostagem ?? post.ValorPostagem ?? s.ValorPostagem ?? null;
+  const valorEnvio = (() => {
+    const n = Number(valorRaw);
+    return Number.isFinite(n) && n >= 0 ? Math.round(n * 100) / 100 : null;
+  })();
+
   return {
     remetente:   post.NomeRemetente   || post.NomeFantasiaRemetente || 'FROM THERM SISTEMAS TERMICOS LTDA ME',
     remDoc:      fmtCnpj(post.CNPJRemetente),
@@ -1004,7 +1045,71 @@ async function _buscarSituacaoPostagem(etiqueta) {
     nomeTransp:  post.NomeFantasiaPostadora || post.NomePostadora || 'EMPRESA BRASILEIRA DE CORREIOS E TELEGRAFOS',
     dataEmissao,
     protocolo:   '',
+    valor_envio: valorEnvio,
   };
+}
+
+/** Garante coluna valor_envio e grava custo VIPP (ValorDaPostagem) no envio. */
+async function _persistirValorEnvio({ envioId, nSolic, idVipp, ect, onlyIfEmpty = false }) {
+  const codigo = String(ect || '').trim().replace(/\s+/g, '');
+  if (!codigo) return null;
+  try {
+    await dbQuery(`ALTER TABLE envios.solicitacoes ADD COLUMN IF NOT EXISTS valor_envio NUMERIC(12,2)`);
+
+    if (onlyIfEmpty) {
+      let checkSql = `SELECT id FROM envios.solicitacoes WHERE valor_envio IS NULL`;
+      const checkParams = [];
+      if (envioId) {
+        checkParams.push(Number(envioId));
+        checkSql += ` AND id = $${checkParams.length}`;
+      } else if (nSolic) {
+        checkParams.push(String(nSolic));
+        checkSql += ` AND numero_sep = $${checkParams.length}`;
+      } else if (idVipp) {
+        checkParams.push(String(idVipp));
+        checkSql += ` AND id_vipp = $${checkParams.length}`;
+      } else {
+        checkParams.push(codigo);
+        checkSql += ` AND REPLACE(COALESCE(identificacao, ''), ' ', '') = $${checkParams.length}`;
+      }
+      checkSql += ' LIMIT 1';
+      const { rows: chk } = await dbQuery(checkSql, checkParams);
+      if (!chk.length) return null;
+    }
+
+    const dados = await _buscarSituacaoPostagem(codigo);
+    const valor = dados?.valor_envio;
+    if (valor == null) return null;
+
+    const sets = ['valor_envio = $1'];
+    const params = [valor];
+    params.push(codigo);
+    sets.push(`identificacao = COALESCE(NULLIF(TRIM(identificacao), ''), $${params.length})`);
+
+    let where = '';
+    if (envioId) {
+      params.push(Number(envioId));
+      where = `id = $${params.length}`;
+    } else if (nSolic) {
+      params.push(String(nSolic));
+      where = `numero_sep = $${params.length}`;
+    } else if (idVipp) {
+      params.push(String(idVipp));
+      where = `id_vipp = $${params.length}`;
+    } else {
+      params.push(codigo);
+      where = `REPLACE(COALESCE(identificacao, ''), ' ', '') = $${params.length}`;
+    }
+    await dbQuery(
+      `UPDATE envios.solicitacoes SET ${sets.join(', ')} WHERE ${where}`,
+      params
+    );
+    console.log(`[VIPP] valor_envio=${valor} gravado (ect=${codigo}, envio=${envioId || '-'}, sep=${nSolic || '-'})`);
+    return valor;
+  } catch (e) {
+    console.warn('[VIPP] falha ao gravar valor_envio:', e.message);
+    return null;
+  }
 }
 
 // ── POST /api/vipp/imprimir-declaracao ───────────────────────────────────────

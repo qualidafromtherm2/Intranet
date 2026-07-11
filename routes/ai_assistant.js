@@ -149,7 +149,7 @@ Você ajuda os colaboradores a navegar pelo sistema, tirar dúvidas sobre funcio
   4. Descrição da reclamação / motivo (obrigatório)
   5. Telefone de contato (opcional)
 - **SAC → Solicitação de envio**: Envio de peças ou produtos ao cliente.
-- **SAC → Gráfico AT**: Gráficos de acompanhamento dos atendimentos técnicos.
+- **SAC → Relatório AT**: Relatório gerencial dos atendimentos técnicos (gráficos, lote, plano de ação).
 - **Compras**: Produtos recebidos, configurações, Check-Compras.
   Fluxos de compras:
   - Produto cadastrado na Omie: carrinho/solicitação normalmente.
@@ -168,7 +168,7 @@ Quando for necessário acionar algo na tela, responda EXCLUSIVAMENTE em JSON (se
 1) Navegar para módulo:
 {"action":"navigate","data":{"target":"TARGET","note":"MENSAGEM_CURTA"}}
 
-TARGET aceitos: inicio, produto, engenharia, registros, agenda, estoque, recebimento, envio_mercadoria, os, sac_envio, compras, compras_config, produto_recebido, sincronizacao, colaboradores, grafico_at
+TARGET aceitos: inicio, produto, engenharia, registros, agenda, estoque, recebimento, envio_mercadoria, os, sac_envio, compras, compras_config, produto_recebido, sincronizacao, colaboradores, relatorio_at
 
 2) Abrir OS no SAC/AT:
 {"action":"open_os","data":{"tipo":"TIPO","cliente":"CLIENTE","serie":"SERIE","descricao":"DESCRICAO","telefone":"TELEFONE"}}

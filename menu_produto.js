@@ -10837,20 +10837,6 @@ if (sacAtMenuLink) {
   });
 }
 
-const sacAtGraficosMenuLink = document.getElementById('menu-sac-at-graficos');
-if (sacAtGraficosMenuLink) {
-  sacAtGraficosMenuLink.addEventListener('click', (e) => {
-    e.preventDefault();
-    document.querySelectorAll('.left-side .side-menu a').forEach(a => a.classList.remove('is-active'));
-    sacAtGraficosMenuLink.classList.add('is-active');
-
-    // O painel de gráficos está dentro do contêiner de AT, então o pai precisa permanecer visível.
-    showMainTab('sacAtPane');
-    setSacAtModoVisual('grafico');
-    window._iniciarGrafAtPagina?.();
-  });
-}
-
 const sacAtRelatorioMenuLink = document.getElementById('menu-sac-at-relatorio');
 if (sacAtRelatorioMenuLink) {
   sacAtRelatorioMenuLink.addEventListener('click', (e) => {
@@ -12371,6 +12357,9 @@ function _atRenderAnexoLista(container, anexos, idAt, onDelete) {
 function _atAbrirLightbox(url, nome) {
   const lb = document.getElementById('atLightbox');
   if (!lb) return;
+  // Garante que o lightbox fique acima do modal Solicitação de AT (z-index 10050)
+  if (lb.parentElement !== document.body) document.body.appendChild(lb);
+  lb.style.zIndex = '11000';
   document.getElementById('atLbImg').src = url;
   document.getElementById('atLbName').textContent = nome;
   document.getElementById('atLbDl').href = url;
@@ -12553,6 +12542,155 @@ if (atTelefoneInput) {
     }
   });
 }
+
+/** Preenche os campos do modal Nova OS a partir de uma sugestão (AT ou Omie). */
+function _atPreencherFormNovaOs(dados) {
+  if (!dados) return;
+  const set = (el, val) => {
+    if (!el || val == null || String(val).trim() === '') return;
+    el.value = String(val).trim();
+  };
+  set(atNomeRevendaClienteInput, dados.nome_revenda_cliente);
+  set(atTelefoneInput, dados.numero_telefone);
+  set(atCpfCnpjInput, dados.cpf_cnpj);
+  set(atCepInput, dados.cep);
+  set(atRuaInput, dados.rua);
+  set(atNumeroInput, dados.numero);
+  set(atBairroInput, dados.bairro);
+  set(atCidadeInput, dados.cidade);
+  set(atEstadoInput, dados.estado);
+  set(atAgendarComInput, dados.agendar_atendimento_com);
+
+  // UF pelo DDD se ainda vazio
+  if (atTelefoneInput && atEstadoInput && !atEstadoInput.value) {
+    const digits = String(atTelefoneInput.value || '').replace(/\D/g, '');
+    if (digits.length >= 2) {
+      const uf = _DDD_ESTADO[digits.slice(0, 2)];
+      if (uf) atEstadoInput.value = uf;
+    }
+  }
+}
+
+/**
+ * Autocomplete Nova OS (Telefone / Nome Revenda).
+ * Busca a partir de 4 caracteres/dígitos em Omie + sac.at e preenche o formulário ao clicar.
+ */
+function _atInitNovaOsAutocomplete(inputEl, dropdownEl, opts) {
+  if (!inputEl || !dropdownEl) return;
+
+  let timer = null;
+  let seq = 0;
+  let ignorar = false;
+
+  function esc(s) {
+    return String(s || '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/"/g, '&quot;');
+  }
+
+  function fechar() {
+    dropdownEl.classList.remove('aberto');
+    dropdownEl.innerHTML = '';
+  }
+
+  function renderItens(itens) {
+    if (!itens.length) {
+      dropdownEl.innerHTML = '<div class="at-combobox-item" style="cursor:default;color:#94a3b8;">Nenhum cadastro encontrado.</div>';
+      dropdownEl.classList.add('aberto');
+      return;
+    }
+
+    dropdownEl.innerHTML = itens.map((item, idx) => {
+      const icone = item.fonte === 'fornecedor' ? 'fa-building' : 'fa-clipboard-list';
+      const cor = item.fonte === 'fornecedor' ? '#38bdf8' : '#fbbf24';
+      return `
+        <div class="at-combobox-item" data-idx="${idx}" style="display:flex;align-items:flex-start;gap:8px;">
+          <i class="fa-solid ${icone}" style="color:${cor};margin-top:3px;font-size:12px;flex-shrink:0;"></i>
+          <div style="min-width:0;flex:1;">
+            <div style="font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(item.label)}</div>
+            <div style="font-size:11px;color:#94a3b8;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(item.sub || '')}</div>
+          </div>
+        </div>`;
+    }).join('');
+    dropdownEl.classList.add('aberto');
+
+    dropdownEl.querySelectorAll('.at-combobox-item[data-idx]').forEach((el) => {
+      el.addEventListener('mousedown', (e) => e.preventDefault());
+      el.addEventListener('click', () => {
+        const item = itens[Number(el.getAttribute('data-idx'))];
+        if (!item?.dados) return;
+        ignorar = true;
+        fechar();
+        _atPreencherFormNovaOs(item.dados);
+        if (opts.campoPrincipal === 'telefone' && item.dados.numero_telefone) {
+          inputEl.value = item.dados.numero_telefone;
+        } else if (opts.campoPrincipal === 'nome' && item.dados.nome_revenda_cliente) {
+          inputEl.value = item.dados.nome_revenda_cliente;
+        } else if (item.label) {
+          inputEl.value = item.label;
+        }
+        setTimeout(() => { ignorar = false; }, 350);
+      });
+    });
+  }
+
+  function buscar() {
+    if (ignorar) return;
+    const raw = String(inputEl.value || '').trim();
+    const q = opts.modo === 'telefone' ? raw.replace(/\D/g, '') : raw;
+    if (q.length < 4) {
+      fechar();
+      return;
+    }
+
+    const mySeq = ++seq;
+    dropdownEl.innerHTML = '<div class="at-combobox-item" style="cursor:default;color:#94a3b8;">Buscando...</div>';
+    dropdownEl.classList.add('aberto');
+
+    const url = opts.modo === 'telefone'
+      ? `/api/sac/at/nova-os-sugerir-telefone?q=${encodeURIComponent(q)}`
+      : `/api/sac/at/nova-os-sugerir-nome?q=${encodeURIComponent(q)}`;
+
+    fetch(url, { credentials: 'include' })
+      .then((r) => r.json().then((j) => ({ ok: r.ok, j })))
+      .then((res) => {
+        if (mySeq !== seq) return;
+        if (!res.ok || !res.j?.ok) {
+          fechar();
+          return;
+        }
+        renderItens(res.j.itens || []);
+      })
+      .catch(() => {
+        if (mySeq === seq) fechar();
+      });
+  }
+
+  inputEl.addEventListener('input', () => {
+    clearTimeout(timer);
+    timer = setTimeout(buscar, 280);
+  });
+
+  inputEl.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') fechar();
+  });
+
+  document.addEventListener('click', (e) => {
+    if (!inputEl.contains(e.target) && !dropdownEl.contains(e.target)) fechar();
+  });
+}
+
+_atInitNovaOsAutocomplete(
+  atTelefoneInput,
+  document.getElementById('atTelefoneDropdown'),
+  { modo: 'telefone', campoPrincipal: 'telefone' }
+);
+_atInitNovaOsAutocomplete(
+  atNomeRevendaClienteInput,
+  document.getElementById('atNomeRevendaDropdown'),
+  { modo: 'nome', campoPrincipal: 'nome' }
+);
 
 function normalizeAtWhatsappPhone(value) {
   return String(value || '').replace(/\D/g, '');
@@ -13842,6 +13980,20 @@ let _atFiltroTimer   = null;
 let _atGuiaAtiva     = 'principal'; // 'principal' | 'nf_at'
 let _atRowsVisiveis  = [];   // última lista renderizada (guia principal)
 
+/** Valores padrão do painel "Filtros" (aplicados ao abrir / limpar). */
+const AT_FILTRO_DEFAULT = Object.freeze({
+  tipo: 'EXCLUIR_RAPIDO',
+  status: 'EXCLUIR_FECHADO',
+  dataIni: '',
+  dataFim: '',
+  incluirNfAt: false,
+});
+/** Sem data inicial no painel, a lista começa nesta data. */
+const AT_DATA_MIN_PADRAO = '2026-01-01';
+
+/** Estado efetivo do filtro (só muda em Aplicar / Limpar). */
+let _atFiltrosAplicados = { ...AT_FILTRO_DEFAULT };
+
 const _atFormatDateBr = (value) => {
   if (!value) return '-';
   const d = new Date(value);
@@ -13894,93 +14046,127 @@ function _atIsExcluido(row) {
   return _atGetStatus(row) === 'excluido';
 }
 
-/** Lê os filtros avançados do painel; retorna objeto com os valores ativos */
-function _atLerFiltros() {
-  const tipoEl = document.getElementById('atFiltroTipo');
-  const statusEl = document.getElementById('atFiltroStatus');
+/** Lê o rascunho atual do painel (DOM) — ainda não aplicado. */
+function _atLerFiltrosPainel() {
   return {
-    tipo:     (tipoEl ? tipoEl.value : 'EXCLUIR_RAPIDO').trim(),
-    status:   (statusEl ? statusEl.value : 'EXCLUIR_FECHADO').trim(),
-    dataIni:  (document.getElementById('atFiltroDataIni')?.value || '').trim(),
-    dataFim:  (document.getElementById('atFiltroDataFim')?.value || '').trim(),
+    tipo: (document.getElementById('atFiltroTipo')?.value || AT_FILTRO_DEFAULT.tipo).trim(),
+    status: (document.getElementById('atFiltroStatus')?.value || AT_FILTRO_DEFAULT.status).trim(),
+    dataIni: (document.getElementById('atFiltroDataIni')?.value || '').trim(),
+    dataFim: (document.getElementById('atFiltroDataFim')?.value || '').trim(),
     incluirNfAt: !!document.getElementById('atFiltroIncluirNfAt')?.checked,
   };
 }
 
+/** Espelha o estado aplicado no painel (abrir / limpar). */
+function _atSyncPainelFiltros(f = _atFiltrosAplicados) {
+  const tipoEl = document.getElementById('atFiltroTipo');
+  const statusEl = document.getElementById('atFiltroStatus');
+  const iniEl = document.getElementById('atFiltroDataIni');
+  const fimEl = document.getElementById('atFiltroDataFim');
+  const incluirNfEl = document.getElementById('atFiltroIncluirNfAt');
+  if (tipoEl) tipoEl.value = f.tipo;
+  if (statusEl) statusEl.value = f.status;
+  if (iniEl) iniEl.value = f.dataIni || '';
+  if (fimEl) fimEl.value = f.dataFim || '';
+  if (incluirNfEl) incluirNfEl.checked = !!f.incluirNfAt;
+}
+
+/** Estado aplicado (compatível com chamadas antigas de _atLerFiltros). */
+function _atLerFiltros() {
+  return { ..._atFiltrosAplicados };
+}
+
+function _atFiltroDiferenteDoPadrao(f = _atFiltrosAplicados) {
+  return f.tipo !== AT_FILTRO_DEFAULT.tipo
+    || f.status !== AT_FILTRO_DEFAULT.status
+    || !!f.incluirNfAt
+    || !!f.dataIni
+    || !!f.dataFim;
+}
+
+function _atPassaPesquisa(row, q) {
+  if (!q) return true;
+  const hit = (v) => String(v ?? '').toLowerCase().includes(q);
+  return hit(row.id)
+    || hit(row.atendimento_inicial)
+    || hit(row.nome_revenda_cliente)
+    || hit(row.telefone)
+    || hit(row.cpf_cnpj)
+    || hit(row.estado)
+    || hit(row.descreva_reclamacao)
+    || hit(row.pedido)
+    || hit(row.ordem_producao)
+    || hit(row.modelo)
+    || hit(row.nota_fiscal)
+    || hit(row.data_entrega)
+    || hit(row.tecnico_nome)
+    || hit(row.cliente);
+}
+
+function _atPassaTipo(row, tipo) {
+  const excluido = _atIsExcluido(row);
+  if (tipo === 'EXCLUIDOS') return excluido;
+  if (excluido) return false;
+  if (tipo === 'EXCLUIR_RAPIDO') return _atNormText(row.tipo) !== 'atendimento rapido';
+  if (!tipo) return true;
+  return _atNormText(row.tipo) === _atNormText(tipo);
+}
+
+/**
+ * Status + guia: a guia "Aguardando NF AT" isola esse status;
+ * na guia principal ele só entra se Status=esse valor ou checkbox Incluir.
+ */
+function _atPassaStatusEGuia(row, f, guia) {
+  if (guia === 'nf_at') return _atIsAguardandoNfAt(row);
+
+  // Guia principal — tipo Excluídos já restringiu a lista
+  if (f.tipo === 'EXCLUIDOS') return true;
+
+  const status = _atGetStatus(row);
+  const isNfAt = status === 'aguardando nf at';
+
+  if (f.status === 'EXCLUIR_FECHADO') {
+    if (status === 'fechado') return false;
+  } else if (f.status) {
+    if (status !== _atNormText(f.status)) return false;
+  }
+
+  if (isNfAt && f.status !== 'Aguardando NF AT' && !f.incluirNfAt) return false;
+  return true;
+}
+
+function _atPassaData(row, f) {
+  if (!row?.data) return false;
+  const d = new Date(row.data);
+  if (Number.isNaN(d.getTime())) return false;
+
+  const iniStr = f.dataIni || AT_DATA_MIN_PADRAO;
+  const ini = new Date(iniStr + 'T00:00:00');
+  if (d < ini) return false;
+
+  if (f.dataFim) {
+    const fim = new Date(f.dataFim + 'T23:59:59');
+    if (d > fim) return false;
+  }
+  return true;
+}
+
+/**
+ * Pipeline normal: pesquisa ∩ tipo ∩ status/guia ∩ data.
+ * Pesquisa não desliga os outros filtros.
+ */
 function _atFiltrarRows(allRows, opts = {}) {
   const q = String(opts.q ?? document.getElementById('atAtendimentosFiltro')?.value ?? '').toLowerCase().trim();
-  const f = opts.f ?? _atLerFiltros();
+  const f = opts.f ?? _atFiltrosAplicados;
   const guia = opts.guia ?? _atGuiaAtiva;
-  let rows = Array.isArray(allRows) ? allRows : [];
+  const rows = Array.isArray(allRows) ? allRows : [];
 
-  if (q) {
-    const _at = v => String(v ?? '').toLowerCase().includes(q);
-    rows = rows.filter(r =>
-      _at(r.id)                   ||
-      _at(r.atendimento_inicial)  ||
-      _at(r.nome_revenda_cliente) ||
-      _at(r.telefone)             ||
-      _at(r.cpf_cnpj)             ||
-      _at(r.estado)               ||
-      _at(r.descreva_reclamacao)  ||
-      _at(r.pedido)               ||
-      _at(r.ordem_producao)       ||
-      _at(r.modelo)               ||
-      _at(r.nota_fiscal)          ||
-      _at(r.data_entrega)         ||
-      _at(r.tecnico_nome)
-    );
-  } else {
-    if (f.tipo === 'EXCLUIDOS') {
-      rows = rows.filter(_atIsExcluido);
-    } else {
-      rows = rows.filter(r => !_atIsExcluido(r));
-
-      if (f.tipo === 'EXCLUIR_RAPIDO') {
-        rows = rows.filter(r => _atNormText(r.tipo) !== 'atendimento rapido');
-      } else if (f.tipo) {
-        const tipoFiltroNorm = _atNormText(f.tipo);
-        rows = rows.filter(r => _atNormText(r.tipo) === tipoFiltroNorm);
-      }
-    }
-
-    if (guia === 'principal' && f.tipo !== 'EXCLUIDOS') {
-      if (f.status === 'EXCLUIR_FECHADO') {
-        rows = rows.filter(r => _atGetStatus(r) !== 'fechado');
-      } else if (f.status) {
-        const statusFiltroNorm = _atNormText(f.status);
-        rows = rows.filter(r => _atGetStatus(r) === statusFiltroNorm);
-      }
-      if (!f.incluirNfAt && f.status !== 'Aguardando NF AT') {
-        rows = rows.filter(r => !_atIsAguardandoNfAt(r));
-      }
-    }
-
-    const dataPadraoIni = new Date('2026-01-01T00:00:00');
-    if (f.dataIni) {
-      const ini = new Date(f.dataIni + 'T00:00:00');
-      rows = rows.filter(r => r.data && new Date(r.data) >= ini);
-    } else {
-      rows = rows.filter(r => r.data && new Date(r.data) >= dataPadraoIni);
-    }
-  }
-
-  if (f.dataFim && !q) {
-    const fim = new Date(f.dataFim + 'T23:59:59');
-    rows = rows.filter(r => r.data && new Date(r.data) <= fim);
-  }
-
-  if (guia === 'nf_at') {
-    rows = rows.filter(_atIsAguardandoNfAt);
-  } else if (q && f.tipo !== 'EXCLUIDOS' && !f.incluirNfAt && f.status !== 'Aguardando NF AT') {
-    rows = rows.filter(r => !_atIsAguardandoNfAt(r));
-  }
-
-  if (q && f.tipo !== 'EXCLUIDOS') {
-    rows = rows.filter(r => !_atIsExcluido(r));
-  }
-
-  return rows;
+  return rows.filter((row) =>
+    _atPassaPesquisa(row, q)
+    && _atPassaTipo(row, f.tipo)
+    && _atPassaStatusEGuia(row, f, guia)
+    && _atPassaData(row, f)
+  );
 }
 
 function _atAtualizarContadoresGuias() {
@@ -14102,12 +14288,11 @@ async function _atExportarExcelPrincipal() {
 }
 
 /** Atualiza o badge "!" no botão de filtro quando há filtros não-padrão */
-function _atAtualizarFiltroBadge(f) {
+function _atAtualizarFiltroBadge(f = _atFiltrosAplicados) {
   const badge = document.getElementById('atFiltroBadge');
   const btn   = document.getElementById('atFiltroBtn');
   if (!badge || !btn) return;
-  // dataIni preenchido conta como ativo apenas se diferente do padrão (vazio = 2026 automático não é considerado ativo)
-  const ativo = f.tipo !== 'EXCLUIR_RAPIDO' || f.status !== 'EXCLUIR_FECHADO' || f.incluirNfAt || f.dataIni || f.dataFim || f.tipo === 'EXCLUIDOS';
+  const ativo = _atFiltroDiferenteDoPadrao(f);
   badge.style.display = ativo ? 'inline-block' : 'none';
   btn.style.borderColor = ativo ? '#0ea5e9' : '';
   btn.style.color = ativo ? '#0ea5e9' : '';
@@ -14455,7 +14640,7 @@ function _abrirAtOsModal(id, navRows) {
   }
 
   let row = _atAllRows.find(r => String(r.id) === String(id));
-  // Se _atAllRows ainda não foi carregado (ex: acesso direto pelo Gráfico AT),
+  // Se _atAllRows ainda não foi carregado (ex: acesso direto pelo Relatório AT),
   // cria um row mínimo — a Fase 2 (os-data/:id) preencherá os campos do modal.
   if (!row) row = { id };
 
@@ -14590,66 +14775,195 @@ function _abrirAtOsModal(id, navRows) {
       _btnsAcao.forEach(b => { b.disabled = false; b.style.opacity = ''; b.style.cursor = ''; });
     });
 
-  // Busca peças enviadas vinculadas a esta OS (paralelo ao os-data)
+  // Busca evidências (sac.at_anexos) e peças enviadas (paralelo ao os-data)
+  const evidSection = document.getElementById('atOsEvidenciasSection');
+  const evidBody    = document.getElementById('atOsEvidenciasBody');
+  if (evidSection) evidSection.style.display = 'none';
+  if (evidBody)    evidBody.innerHTML = '';
+
   const pecasSection = document.getElementById('atOsPecasSection');
   const pecasBody    = document.getElementById('atOsPecasBody');
   if (pecasSection) pecasSection.style.display = 'none';
   if (pecasBody)    pecasBody.innerHTML = '';
+
+  fetch(`/api/sac/at/anexos/${row.id}`, { credentials: 'same-origin' })
+    .then(r => r.ok ? r.json() : Promise.reject(r.status))
+    .then(data => {
+      const anexos = Array.isArray(data?.anexos) ? data.anexos : [];
+      if (!anexos.length || !evidSection || !evidBody) return;
+      evidSection.style.display = '';
+      evidBody.innerHTML = _atOsRenderEvidenciasHtml(anexos);
+      evidBody.querySelectorAll('[data-at-os-lightbox]').forEach((el) => {
+        el.addEventListener('click', () => {
+          if (typeof _atAbrirLightbox === 'function') {
+            _atAbrirLightbox(el.getAttribute('data-at-os-lightbox'), el.getAttribute('data-at-os-nome') || '');
+          } else {
+            window.open(el.getAttribute('data-at-os-lightbox'), '_blank');
+          }
+        });
+      });
+    })
+    .catch(() => { /* sem evidências */ });
 
   fetch(`/api/sac/at/pecas-enviadas/${row.id}`, { credentials: 'same-origin' })
     .then(r => r.ok ? r.json() : Promise.reject(r.status))
     .then(lista => {
       if (!lista.length || !pecasSection || !pecasBody) return;
       pecasSection.style.display = '';
-      pecasBody.innerHTML = lista.map(env => {
-        // Links de arquivos
-        const linkLabel = url => {
-          try { const u = new URL(url); return u.pathname.split('/').pop() || 'arquivo'; } catch { return 'arquivo'; }
-        };
-        const linksHtml = [
-          ...(env.etiqueta_url    ? [`<a href="${escapeAtHtml(env.etiqueta_url)}"    target="_blank" style="color:#0ea5e9;text-decoration:underline;font-size:11px;">📦 Etiqueta</a>`]    : []),
-          ...(env.declaracao_url  ? [`<a href="${escapeAtHtml(env.declaracao_url)}"  target="_blank" style="color:#0ea5e9;text-decoration:underline;font-size:11px;">📄 Declaração</a>`]  : []),
-          ...(env.anexos.filter(a => a !== env.etiqueta_url && a !== env.declaracao_url).map((a, i) =>
-            `<a href="${escapeAtHtml(a)}" target="_blank" style="color:#0ea5e9;text-decoration:underline;font-size:11px;">🔗 Anexo ${i + 1}</a>`
-          )),
-        ].join(' &nbsp;');
-
-        // Tabela de itens
-        const itensHtml = env.itens.length
-          ? `<table style="width:100%;border-collapse:collapse;font-size:11px;margin-top:4px;">
-               <thead>
-                 <tr style="background:#1e3a5f;color:#fff;">
-                   <th style="padding:4px 8px;text-align:left;font-weight:700;">Conteúdo</th>
-                   <th style="padding:4px 8px;text-align:center;font-weight:700;white-space:nowrap;">Qtd</th>
-                 </tr>
-               </thead>
-               <tbody>
-                 ${env.itens.map((it, i) =>
-                   `<tr style="background:${i % 2 === 0 ? '#f8fafc' : '#fff'};">
-                      <td style="padding:4px 8px;border-bottom:1px solid #e5e7eb;">${escapeAtHtml(it.conteudo || '')}</td>
-                      <td style="padding:4px 8px;border-bottom:1px solid #e5e7eb;text-align:center;">${escapeAtHtml(String(it.quantidade || ''))}</td>
-                    </tr>`
-                 ).join('')}
-               </tbody>
-             </table>`
-          : '';
-
-        const statusBadge = env.rastreio_status
-          ? `<span style="display:inline-block;background:#e0f2fe;color:#0369a1;font-size:10px;font-weight:700;padding:1px 7px;border-radius:10px;margin-left:6px;">${escapeAtHtml(env.rastreio_status)}</span>`
-          : '';
-
-        return `<div style="padding:8px 10px;border-bottom:1px solid #d1d5db;">
-          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:4px;">
-            <span style="font-weight:700;font-size:11px;color:#111;">Rastreio: ${escapeAtHtml(env.identificacao)}</span>
-            ${statusBadge}
-            <span style="font-size:10px;color:#9ca3af;margin-left:auto;">${escapeAtHtml(env.created_at)}${env.usuario ? ' · ' + escapeAtHtml(env.usuario) : ''}</span>
-          </div>
-          ${linksHtml ? `<div style="margin-bottom:4px;">${linksHtml}</div>` : ''}
-          ${itensHtml}
-        </div>`;
-      }).join('');
+      pecasBody.innerHTML = lista.map(env => _atOsRenderPecaEnvioHtml(env)).join('');
+      pecasBody.querySelectorAll('.at-os-btn-etiqueta-zebra').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const ident = btn.getAttribute('data-identificacao') || '';
+          const envioId = btn.getAttribute('data-envio-id');
+          if (ident) {
+            window.open(`/api/vipp/etiqueta?id=${encodeURIComponent(ident)}&saida=1`, '_blank');
+            return;
+          }
+          if (envioId && typeof _envioImprimirEtiqueta === 'function') {
+            _envioImprimirEtiqueta(envioId, ident, btn);
+          } else {
+            alert('Etiqueta Zebra sem código de rastreio disponível.');
+          }
+        });
+      });
+      pecasBody.querySelectorAll('.at-os-btn-declaracao-zebra').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const envioId = btn.getAttribute('data-envio-id') || '';
+          if (envioId) {
+            window.open(`/api/vipp/declaracao?id=${encodeURIComponent(envioId)}`, '_blank');
+          } else {
+            alert('Declaração não disponível.');
+          }
+        });
+      });
     })
     .catch(() => { /* sem peças, seção fica oculta */ });
+}
+
+function _atOsLabelContentType(ct) {
+  const t = String(ct || 'outros').toLowerCase();
+  if (t.startsWith('image/')) return `Imagens (${ct})`;
+  if (t === 'application/pdf') return `PDFs (${ct})`;
+  if (t.startsWith('video/')) return `Vídeos (${ct})`;
+  if (t.startsWith('audio/')) return `Áudios (${ct})`;
+  return ct || 'Outros';
+}
+
+function _atOsRenderEvidenciasHtml(anexos) {
+  const grupos = {};
+  anexos.forEach((a) => {
+    const ct = String(a.content_type || 'application/octet-stream');
+    if (!grupos[ct]) grupos[ct] = [];
+    grupos[ct].push(a);
+  });
+  return Object.keys(grupos).sort().map((ct) => {
+    const items = grupos[ct];
+    const isImg = ct.startsWith('image/');
+    let corpo;
+    if (isImg) {
+      corpo = `<div class="at-os-evid-grid">
+        ${items.map((a) => `
+          <button type="button" class="at-os-evid-thumb" data-at-os-lightbox="${escapeAtHtml(a.url_publica || '')}" data-at-os-nome="${escapeAtHtml(a.nome_arquivo || '')}" title="${escapeAtHtml(a.nome_arquivo || '')}">
+            <img src="${escapeAtHtml(a.url_publica || '')}" alt="${escapeAtHtml(a.nome_arquivo || '')}" loading="lazy">
+            <span>${escapeAtHtml(a.nome_arquivo || 'imagem')}</span>
+          </button>
+        `).join('')}
+      </div>`;
+    } else {
+      corpo = `<div class="at-os-evid-list">
+        ${items.map((a) => {
+          const url = escapeAtHtml(a.url_publica || '');
+          const nome = escapeAtHtml(a.nome_arquivo || 'arquivo');
+          const meta = [
+            a.tamanho_bytes ? _atFormatBytes(a.tamanho_bytes) : '',
+            a.enviado_por || '',
+            a.criado_em ? new Date(a.criado_em).toLocaleString('pt-BR') : '',
+          ].filter(Boolean).join(' · ');
+          return `<div class="at-os-evid-file">
+            <div>
+              <div style="font-weight:700;font-size:11px;color:#111;">${nome}</div>
+              ${meta ? `<div style="font-size:10px;color:#6b7280;">${escapeAtHtml(meta)}</div>` : ''}
+            </div>
+            <a href="${url}" target="_blank" rel="noopener" style="color:#0369a1;font-size:11px;font-weight:700;text-decoration:none;">Abrir</a>
+          </div>`;
+        }).join('')}
+      </div>`;
+    }
+    return `<div class="at-os-evid-grupo">
+      <div class="at-os-evid-grupo-title">${escapeAtHtml(_atOsLabelContentType(ct))}</div>
+      ${corpo}
+    </div>`;
+  }).join('');
+}
+
+function _atOsRenderPecaEnvioHtml(env) {
+  const acoes = [];
+  if (env.etiqueta_zebra || env.identificacao) {
+    acoes.push(
+      `<button type="button" class="at-os-btn-etiqueta-zebra" data-envio-id="${escapeAtHtml(String(env.id || ''))}" data-identificacao="${escapeAtHtml(env.identificacao || '')}" title="Abrir etiqueta (modo Zebra / VIPP)">📦 Etiqueta Zebra</button>`
+    );
+  } else if (env.etiqueta_url) {
+    acoes.push(`<a href="${escapeAtHtml(env.etiqueta_url)}" target="_blank" rel="noopener" style="color:#0ea5e9;text-decoration:underline;font-size:11px;">📦 Etiqueta</a>`);
+  }
+
+  if (env.declaracao_zebra) {
+    acoes.push(
+      `<button type="button" class="at-os-btn-declaracao-zebra" data-envio-id="${escapeAtHtml(String(env.id || ''))}" title="Abrir declaração">📄 Declaração</button>`
+    );
+  } else if (env.declaracao_url) {
+    acoes.push(`<a href="${escapeAtHtml(env.declaracao_url)}" target="_blank" rel="noopener" style="color:#0ea5e9;text-decoration:underline;font-size:11px;">📄 Declaração</a>`);
+  }
+
+  (env.anexos || []).forEach((a, i) => {
+    acoes.push(`<a href="${escapeAtHtml(a)}" target="_blank" rel="noopener" style="color:#0ea5e9;text-decoration:underline;font-size:11px;">🔗 Anexo ${i + 1}</a>`);
+  });
+
+  const linksHtml = acoes.join(' &nbsp;');
+
+  // Marcador para o PDF incluir a etiqueta VIPP na impressão
+  const etiquetaPdfHint = env.identificacao
+    ? `<div class="at-os-etiqueta-pdf-src" data-etiqueta-src="/api/vipp/etiqueta?id=${encodeURIComponent(String(env.identificacao).trim())}&saida=1" style="display:none;"></div>`
+    : '';
+
+  const itensHtml = env.itens.length
+    ? `<table style="width:100%;border-collapse:collapse;font-size:11px;margin-top:4px;">
+         <thead>
+           <tr style="background:#1e3a5f;color:#fff;">
+             <th style="padding:4px 8px;text-align:left;font-weight:700;">Conteúdo</th>
+             <th style="padding:4px 8px;text-align:center;font-weight:700;white-space:nowrap;">Qtd</th>
+           </tr>
+         </thead>
+         <tbody>
+           ${env.itens.map((it, i) =>
+             `<tr style="background:${i % 2 === 0 ? '#f8fafc' : '#fff'};">
+                <td style="padding:4px 8px;border-bottom:1px solid #e5e7eb;">${escapeAtHtml(it.conteudo || '')}</td>
+                <td style="padding:4px 8px;border-bottom:1px solid #e5e7eb;text-align:center;">${escapeAtHtml(String(it.quantidade || ''))}</td>
+              </tr>`
+           ).join('')}
+         </tbody>
+       </table>`
+    : '';
+
+  const statusBadge = env.rastreio_status
+    ? `<span style="display:inline-block;background:#e0f2fe;color:#0369a1;font-size:10px;font-weight:700;padding:1px 7px;border-radius:10px;margin-left:6px;">${escapeAtHtml(env.rastreio_status)}</span>`
+    : '';
+
+  const valorEnvioNum = env.valor_envio != null ? Number(env.valor_envio) : NaN;
+  const valorEnvioBadge = Number.isFinite(valorEnvioNum)
+    ? `<span style="display:inline-block;background:#ecfdf5;color:#047857;font-size:10px;font-weight:700;padding:1px 7px;border-radius:10px;margin-left:6px;">Envio: R$ ${valorEnvioNum.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>`
+    : '';
+
+  return `<div style="padding:8px 10px;border-bottom:1px solid #d1d5db;">
+    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:4px;">
+      <span style="font-weight:700;font-size:11px;color:#111;">Rastreio: ${escapeAtHtml(env.identificacao || '-')}</span>
+      ${statusBadge}
+      ${valorEnvioBadge}
+      <span style="font-size:10px;color:#9ca3af;margin-left:auto;">${escapeAtHtml(env.created_at)}${env.usuario ? ' · ' + escapeAtHtml(env.usuario) : ''}</span>
+    </div>
+    ${linksHtml ? `<div style="margin-bottom:4px;display:flex;gap:8px;flex-wrap:wrap;align-items:center;">${linksHtml}</div>` : ''}
+    ${etiquetaPdfHint}
+    ${itensHtml}
+  </div>`;
 }
 
 // Listeners do modal OS
@@ -14665,6 +14979,12 @@ function _abrirAtOsModal(id, navRows) {
   modal.addEventListener('click', e => { if (e.target === modal) modal.style.display = 'none'; });
   document.addEventListener('keydown', e => {
     if (modal.style.display === 'none') return;
+    // Se o lightbox de evidência estiver aberto, Escape fecha só ele
+    const lb = document.getElementById('atLightbox');
+    if (e.key === 'Escape' && lb && lb.style.display === 'flex') {
+      lb.style.display = 'none';
+      return;
+    }
     if (e.key === 'Escape') { modal.style.display = 'none'; return; }
     if (e.key === 'ArrowLeft')  { document.getElementById('atOsNavPrev')?.click(); return; }
     if (e.key === 'ArrowRight') { document.getElementById('atOsNavNext')?.click(); return; }
@@ -14718,7 +15038,7 @@ function _abrirAtOsModal(id, navRows) {
       retirarBtn.style.opacity = '';
     });
   }
-  if (printBtn) printBtn.addEventListener('click', () => {
+  if (printBtn) printBtn.addEventListener('click', async () => {
     const docEl = document.querySelector('.at-os-doc');
     if (!docEl) return;
 
@@ -14730,6 +15050,36 @@ function _abrirAtOsModal(id, navRows) {
       // Remove blocos @media print ... { } do CSS copiado para não suprimir conteúdo na nova janela
       .map(css => css.replace(/@media\s+print\s*\{[^]*?\n\s*\}/g, ''))
       .join('\n');
+
+    // Clona o documento e só injeta etiqueta VIPP se a API realmente retornar PDF
+    const clone = docEl.cloneNode(true);
+    const hints = Array.from(clone.querySelectorAll('.at-os-etiqueta-pdf-src'));
+    await Promise.all(hints.map(async (hint) => {
+      const src = hint.getAttribute('data-etiqueta-src');
+      if (!src) { hint.remove(); return; }
+      try {
+        const resp = await fetch(src, { credentials: 'include' });
+        const ct = String(resp.headers.get('content-type') || '').toLowerCase();
+        const buf = await resp.arrayBuffer();
+        const head = String.fromCharCode(...new Uint8Array(buf.slice(0, 5)));
+        const isPdf = resp.ok && (ct.includes('application/pdf') || head.startsWith('%PDF'));
+        if (!isPdf) {
+          // VIPP devolve JSON de erro (ex.: etiqueta não liberada) — não mostra tela preta
+          hint.remove();
+          return;
+        }
+        const blobUrl = URL.createObjectURL(new Blob([buf], { type: 'application/pdf' }));
+        const wrap = document.createElement('div');
+        wrap.className = 'at-os-etiqueta-preview';
+        wrap.innerHTML = `<div style="font-size:10px;font-weight:700;color:#475569;margin:6px 0 4px;">Etiqueta Zebra</div>
+          <object data="${blobUrl}" type="application/pdf" class="at-os-etiqueta-embed">
+            <a href="${blobUrl}" target="_blank" rel="noopener">Abrir etiqueta PDF</a>
+          </object>`;
+        hint.replaceWith(wrap);
+      } catch (_) {
+        hint.remove();
+      }
+    }));
 
     const win = window.open('', '_blank', 'width=960,height=800');
     if (!win) { alert('Permita pop-ups para gerar o PDF.'); return; }
@@ -14754,29 +15104,36 @@ function _abrirAtOsModal(id, navRows) {
     /* Reset para a janela de impressão */
     html, body { margin:0; padding:10px; background:#fff; }
     .at-os-doc { display:block !important; margin:0 auto !important; border:1px solid #ccc; max-width:900px; }
+    .at-os-btn-etiqueta-zebra,
+    .at-os-btn-declaracao-zebra { display:none !important; }
+    .at-os-etiqueta-embed { height:340px !important; width:100%; border:1px solid #cbd5e1; border-radius:8px; }
+    .at-os-evid-thumb { border:1px solid #cbd5e1; page-break-inside:avoid; }
     @media print {
       html, body { padding:3mm; margin:0; box-sizing:border-box; }
       .at-os-doc { display:block !important; border:none !important; margin:0 !important; max-width:100% !important; }
+      .at-os-btn-etiqueta-zebra,
+      .at-os-btn-declaracao-zebra { display:none !important; }
     }
   </style>
 </head>
-<body>${docEl.outerHTML}</body>
+<body>${clone.outerHTML}</body>
 </html>`);
     win.document.close();
-    // Aguarda carregamento de imagens E do Font Awesome antes de imprimir
-    // Usa setTimeout de 800ms para garantir que o CSS externo (FA) foi carregado
+    // Aguarda imagens/evidências e embeds de etiqueta antes de imprimir
     const imgs = win.document.images;
     let loaded = 0;
     const total = imgs.length;
+    const hasEmbed = !!win.document.querySelector('.at-os-etiqueta-embed, object[type="application/pdf"]');
     const doPrint = () => { win.focus(); win.print(); };
+    const finishDelay = hasEmbed ? 2000 : 800;
     if (total > 0) {
-      const tryPrint = () => { loaded++; if (loaded >= total) { setTimeout(doPrint, 600); } };
+      const tryPrint = () => { loaded++; if (loaded >= total) { setTimeout(doPrint, finishDelay); } };
       Array.from(imgs).forEach(img => {
         if (img.complete) { tryPrint(); }
         else { img.onload = tryPrint; img.onerror = tryPrint; }
       });
     } else {
-      setTimeout(doPrint, 800);
+      setTimeout(doPrint, finishDelay);
     }
   });
 })();
@@ -17110,30 +17467,13 @@ function abrirTelaAtFormulario() {
 
 function setSacAtModoVisual(mode = 'at') {
   const sacAtPane = document.getElementById('sacAtPane');
-  const sacAtGraficosPane = document.getElementById('sacAtGraficosPane');
   const sacAtRelatorioPane = document.getElementById('sacAtRelatorioPane');
   const vendasGraficosPane = document.getElementById('vendasGraficosPane');
   const vendasControlePane = document.getElementById('vendasControlePane');
   const vendasMapaPane     = document.getElementById('vendasMapaPane');
   const vendasRelatorioPane = document.getElementById('vendasRelatorioPane');
-  const wrapper = sacAtGraficosPane?.parentElement;
-  if (!sacAtPane || !sacAtGraficosPane || !wrapper) return;
-
-  if (mode === 'grafico') {
-    sacAtPane.style.display = 'flex';
-    Array.from(wrapper.children).forEach((child) => {
-      if (!(child instanceof HTMLElement)) return;
-      if (child === sacAtGraficosPane) {
-        child.style.display = 'flex';
-        return;
-      }
-      if (child.classList.contains('modal-overlay') || child.id === 'atLightbox' || child.id === 'atWhatsappModal') {
-        return;
-      }
-      child.style.display = 'none';
-    });
-    return;
-  }
+  const wrapper = sacAtRelatorioPane?.parentElement || vendasGraficosPane?.parentElement || sacAtPane?.parentElement;
+  if (!sacAtPane || !wrapper) return;
 
   if (mode === 'relatorio') {
     sacAtPane.style.display = 'flex';
@@ -17217,7 +17557,7 @@ function setSacAtModoVisual(mode = 'at') {
 
   Array.from(wrapper.children).forEach((child) => {
     if (!(child instanceof HTMLElement)) return;
-    if (child === sacAtGraficosPane || child === sacAtRelatorioPane || child === vendasGraficosPane || child === vendasControlePane || child === vendasMapaPane || child === vendasRelatorioPane || child.id === 'atGraficosView') {
+    if (child === sacAtRelatorioPane || child === vendasGraficosPane || child === vendasControlePane || child === vendasMapaPane || child === vendasRelatorioPane || child.id === 'atGraficosView') {
       child.style.display = 'none';
       return;
     }
@@ -17972,42 +18312,39 @@ if (_atFiltroLimparBtn) {
   const limpar = document.getElementById('atFiltroLimpar');
   if (!btn || !panel) return;
 
+  _atSyncPainelFiltros();
+
   btn.addEventListener('click', (e) => {
     e.stopPropagation();
     if (panel.style.display !== 'none' && panel.style.display !== '') {
       panel.style.display = 'none';
-    } else {
-      const rect = btn.getBoundingClientRect();
-      panel.style.top   = (rect.bottom + 6) + 'px';
-      panel.style.right = (window.innerWidth - rect.right) + 'px';
-      panel.style.left  = 'auto';
-      panel.style.display = 'block';
+      return;
     }
+    // Ao abrir, mostra o que está realmente aplicado (evita rascunho perdido)
+    _atSyncPainelFiltros();
+    const rect = btn.getBoundingClientRect();
+    panel.style.top   = (rect.bottom + 6) + 'px';
+    panel.style.right = (window.innerWidth - rect.right) + 'px';
+    panel.style.left  = 'auto';
+    panel.style.display = 'block';
   });
 
-  // Fecha ao clicar fora
+  // Fecha ao clicar fora (não aplica — só fecha o rascunho)
   document.addEventListener('click', (e) => {
-    if (!panel.contains(e.target) && e.target !== btn) {
+    if (!panel.contains(e.target) && e.target !== btn && !btn.contains(e.target)) {
       panel.style.display = 'none';
     }
   });
 
   aplicar.addEventListener('click', () => {
+    _atFiltrosAplicados = _atLerFiltrosPainel();
     panel.style.display = 'none';
     _atRenderCurrent();
   });
 
   limpar.addEventListener('click', () => {
-    const tipoEl   = document.getElementById('atFiltroTipo');
-    const statusEl = document.getElementById('atFiltroStatus');
-    const iniEl    = document.getElementById('atFiltroDataIni');
-    const fimEl    = document.getElementById('atFiltroDataFim');
-    const incluirNfEl = document.getElementById('atFiltroIncluirNfAt');
-    if (tipoEl)   tipoEl.value   = 'EXCLUIR_RAPIDO';
-    if (statusEl) statusEl.value = 'EXCLUIR_FECHADO';
-    if (iniEl)    iniEl.value    = '';
-    if (fimEl)    fimEl.value    = '';
-    if (incluirNfEl) incluirNfEl.checked = false;
+    _atFiltrosAplicados = { ...AT_FILTRO_DEFAULT };
+    _atSyncPainelFiltros();
     panel.style.display = 'none';
     _atRenderCurrent();
   });
@@ -18017,7 +18354,6 @@ if (_atFiltroLimparBtn) {
 (function _initAtGuiasStatus() {
   const btnPrincipal = document.getElementById('atGuiaPrincipalBtn');
   const btnNfAt = document.getElementById('atGuiaNfAtBtn');
-  const incluirNfEl = document.getElementById('atFiltroIncluirNfAt');
 
   function trocarGuia(guia) {
     if (_atGuiaAtiva === guia) return;
@@ -18027,7 +18363,6 @@ if (_atFiltroLimparBtn) {
 
   if (btnPrincipal) btnPrincipal.addEventListener('click', () => trocarGuia('principal'));
   if (btnNfAt) btnNfAt.addEventListener('click', () => trocarGuia('nf_at'));
-  if (incluirNfEl) incluirNfEl.addEventListener('change', () => { if (_atGuiaAtiva === 'principal') _atRenderCurrent(); });
 })();
 
 // Ordenação por coluna (modo tabela)
@@ -18481,903 +18816,6 @@ document.querySelectorAll('#atTabelaWrapper thead th[data-col]').forEach(th => {
   window._abrirAtOsModalSoPdf = _abrirAtOsModalSoPdf;
 })();
 
-// ── Página standalone "Gráfico AT" ──────────────────────────────────────────
-// Espelha a lógica da IIFE acima mas usa os elementos "#atGrafPg*"
-(function () {
-  let _pg0Instance = null;
-  let _pg01Instance = null;
-  let _pg1Instance = null;
-  let _pg2Instance = null;
-  let _pgMesesSet  = [];
-  let _pgPeriodo   = 3;
-  let _pgTipo      = 'Qualidade';
-  let _pgInicializado = false;
-
-  // Helpers locais (réplica das funções da IIFE principal)
-  function _mesesRange(n) {
-    const hoje  = new Date();
-    const meses = [];
-    for (let i = 0; i < n; i++) {
-      const d = new Date(hoje.getFullYear(), hoje.getMonth() - i, 1);
-      const mm = String(d.getMonth() + 1).padStart(2, '0');
-      meses.push(`${d.getFullYear()}-${mm}`);
-    }
-    return meses.sort();
-  }
-
-  function _labelMes(yyyymm) {
-    if (!yyyymm) return '';
-    const [y, m] = yyyymm.split('-');
-    const nomes = ['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'];
-    return `${nomes[parseInt(m, 10) - 1]}/${String(y).slice(-2)}`;
-  }
-
-  function _fmtData(raw) {
-    if (!raw) return '-';
-    const d = new Date(raw);
-    if (isNaN(d)) return String(raw).slice(0, 10);
-    const dd = String(d.getUTCDate()).padStart(2, '0');
-    const mm = String(d.getUTCMonth() + 1).padStart(2, '0');
-    const aa = String(d.getUTCFullYear()).slice(-2);
-    return `${dd}/${mm}/${aa}`;
-  }
-
-  function _fmtOs(id) {
-    const aa = String(new Date().getFullYear()).slice(-2);
-    return `${aa} - ${id}`;
-  }
-
-  // ── Gráfico 0 — modelos com mais OS ────────────────────────────────────
-  async function _carregarPg0() {
-    const status = document.getElementById('atGrafPg0Status');
-    const canvas = document.getElementById('atGrafPg0Canvas');
-    if (!canvas) return;
-    if (status) { status.style.display = 'block'; status.textContent = 'Carregando...'; status.style.color = ''; }
-
-    try {
-      const resp = await fetch('/api/sac/at/graficos/por-modelo-mes?tipo=' + encodeURIComponent(_pgTipo), { credentials: 'include' });
-      const data = await resp.json().catch(() => ({}));
-      if (!resp.ok || data.ok === false) throw new Error(data.error || 'Erro ao carregar.');
-
-      let linhas = data.rows || [];
-      const CORES = ['#f59e0b','#ef4444','#14b8a6','#8b5cf6','#3b82f6','#22c55e','#f97316','#ec4899'];
-
-      if (_pgPeriodo > 0) {
-        const _hoje = new Date();
-        const _mesAtual = `${_hoje.getFullYear()}-${String(_hoje.getMonth()+1).padStart(2,'0')}`;
-        const _dLim = new Date(_hoje.getFullYear(), _hoje.getMonth() - _pgPeriodo, 1);
-        const _limite = `${_dLim.getFullYear()}-${String(_dLim.getMonth()+1).padStart(2,'0')}`;
-        linhas = linhas.filter(r => r.mes >= _limite && r.mes < _mesAtual);
-      }
-
-      const totaisPorModelo = {};
-      linhas.forEach(r => {
-        const chave = r.modelo || '(sem modelo)';
-        totaisPorModelo[chave] = (totaisPorModelo[chave] || 0) + r.total;
-      });
-      const topModelos = Object.keys(totaisPorModelo)
-        .sort((a, b) => totaisPorModelo[b] - totaisPorModelo[a])
-        .slice(0, 5);
-      linhas = linhas.filter(r => topModelos.includes(r.modelo || '(sem modelo)'));
-
-      const modelos = [...new Set(linhas.map(r => r.modelo || '(sem modelo)'))];
-      const meses   = [...new Set(linhas.map(r => r.mes))].sort();
-      const labels  = meses.map(_labelMes);
-
-      const datasets = modelos.map((modelo, idx) => ({
-        label: modelo,
-        data: meses.map(mes => {
-          const row = linhas.find(r => (r.modelo || '(sem modelo)') === modelo && r.mes === mes);
-          return row ? row.total : 0;
-        }),
-        backgroundColor: CORES[idx % CORES.length] + 'cc',
-        borderColor: CORES[idx % CORES.length],
-        borderWidth: 1,
-        borderRadius: 4,
-      }));
-
-      if (_pg0Instance) { _pg0Instance.destroy(); _pg0Instance = null; }
-      const ctx = canvas.getContext('2d');
-      _pg0Instance = new Chart(ctx, {
-        type: 'bar',
-        data: { labels, datasets },
-        options: {
-          responsive: true,
-          maintainAspectRatio: false,
-          plugins: {
-            legend: { display: true, labels: { color: '#94a3b8', font: { size: 11 }, boxWidth: 10, padding: 12 } },
-            tooltip: {
-              callbacks: {
-                title: (items) => items[0]?.label || '',
-                label: (item) => ` ${item.dataset.label}: ${item.raw} OS`,
-              },
-            },
-          },
-          scales: {
-            x: { ticks: { color: '#94a3b8', font: { size: 11 } }, grid: { color: 'rgba(255,255,255,.05)' } },
-            y: { beginAtZero: true, ticks: { color: '#94a3b8', stepSize: 1 }, grid: { color: 'rgba(255,255,255,.07)' } },
-          },
-        },
-      });
-      if (status) status.style.display = 'none';
-    } catch (err) {
-      if (status) { status.textContent = err.message || 'Erro.'; status.style.color = '#f87171'; }
-    }
-  }
-
-  // ── Gráfico 0.1 — tags de problema com mais OS ─────────────────────────
-  async function _carregarPg01() {
-    const status = document.getElementById('atGrafPg01Status');
-    const canvas = document.getElementById('atGrafPg01Canvas');
-    if (!canvas) return;
-    if (status) { status.style.display = 'block'; status.textContent = 'Carregando...'; status.style.color = ''; }
-
-    try {
-      const resp = await fetch('/api/sac/at/graficos/por-tag-problema-mes?tipo=' + encodeURIComponent(_pgTipo), { credentials: 'include' });
-      const data = await resp.json().catch(() => ({}));
-      if (!resp.ok || data.ok === false) throw new Error(data.error || 'Erro ao carregar.');
-
-      let linhas = data.rows || [];
-      const CORES = ['#f472b6','#ec4899','#d946ef','#8b5cf6','#fb7185','#e11d48','#a21caf','#c026d3'];
-
-      if (_pgPeriodo > 0) {
-        const _hoje = new Date();
-        const _mesAtual = `${_hoje.getFullYear()}-${String(_hoje.getMonth()+1).padStart(2,'0')}`;
-        const _dLim = new Date(_hoje.getFullYear(), _hoje.getMonth() - _pgPeriodo, 1);
-        const _limite = `${_dLim.getFullYear()}-${String(_dLim.getMonth()+1).padStart(2,'0')}`;
-        linhas = linhas.filter(r => r.mes >= _limite && r.mes < _mesAtual);
-      }
-
-      const totaisPorTag = {};
-      linhas.forEach(r => {
-        const chave = r.tag_problema || '(sem tag)';
-        totaisPorTag[chave] = (totaisPorTag[chave] || 0) + r.total;
-      });
-      const topTags = Object.keys(totaisPorTag)
-        .sort((a, b) => totaisPorTag[b] - totaisPorTag[a])
-        .slice(0, 5);
-      linhas = linhas.filter(r => topTags.includes(r.tag_problema || '(sem tag)'));
-
-      const tags = [...new Set(linhas.map(r => r.tag_problema || '(sem tag)'))];
-      const meses = [...new Set(linhas.map(r => r.mes))].sort();
-      const labels = meses.map(_labelMes);
-
-      const datasets = tags.map((tag, idx) => ({
-        label: tag,
-        data: meses.map(mes => {
-          const row = linhas.find(r => (r.tag_problema || '(sem tag)') === tag && r.mes === mes);
-          return row ? row.total : 0;
-        }),
-        backgroundColor: CORES[idx % CORES.length] + 'cc',
-        borderColor: CORES[idx % CORES.length],
-        borderWidth: 1,
-        borderRadius: 4,
-      }));
-
-      if (_pg01Instance) { _pg01Instance.destroy(); _pg01Instance = null; }
-      const ctx = canvas.getContext('2d');
-      _pg01Instance = new Chart(ctx, {
-        type: 'bar',
-        data: { labels, datasets },
-        options: {
-          responsive: true,
-          maintainAspectRatio: false,
-          plugins: {
-            legend: { display: true, labels: { color: '#94a3b8', font: { size: 11 }, boxWidth: 10, padding: 12 } },
-            tooltip: {
-              callbacks: {
-                title: (items) => items[0]?.label || '',
-                label: (item) => ` ${item.dataset.label}: ${item.raw} OS`,
-              },
-            },
-          },
-          scales: {
-            x: { ticks: { color: '#94a3b8', font: { size: 11 } }, grid: { color: 'rgba(255,255,255,.05)' } },
-            y: { beginAtZero: true, ticks: { color: '#94a3b8', stepSize: 1 }, grid: { color: 'rgba(255,255,255,.07)' } },
-          },
-        },
-      });
-      if (status) status.style.display = 'none';
-    } catch (err) {
-      if (status) { status.textContent = err.message || 'Erro.'; status.style.color = '#f87171'; }
-    }
-  }
-
-  // ── Gráfico 1 — barras por estado ──────────────────────────────────────
-  async function _carregarPg1() {
-    const status = document.getElementById('atGrafPg1Status');
-    const canvas = document.getElementById('atGrafPg1Canvas');
-    if (!canvas) return;
-    if (status) { status.style.display = 'block'; status.textContent = 'Carregando...'; status.style.color = ''; }
-
-    try {
-      const resp = await fetch('/api/sac/at/graficos/por-estado-mes?tipo=' + encodeURIComponent(_pgTipo), { credentials: 'include' });
-      const data = await resp.json().catch(() => ({}));
-      if (!resp.ok || data.ok === false) throw new Error(data.error || 'Erro ao carregar.');
-
-      let linhas = data.rows || [];
-      const CORES = ['#6366f1','#10b981','#f59e0b','#ef4444','#06b6d4','#a855f7','#f97316','#84cc16'];
-
-      if (_pgPeriodo > 0) {
-        const _hoje = new Date();
-        const _mesAtual = `${_hoje.getFullYear()}-${String(_hoje.getMonth()+1).padStart(2,'0')}`;
-        const _dLim = new Date(_hoje.getFullYear(), _hoje.getMonth() - _pgPeriodo, 1);
-        const _limite = `${_dLim.getFullYear()}-${String(_dLim.getMonth()+1).padStart(2,'0')}`;
-        linhas = linhas.filter(r => r.mes >= _limite && r.mes < _mesAtual);
-      }
-
-      // Top 5 estados por total acumulado no período
-      const _totEst = {};
-      linhas.forEach(r => { _totEst[r.estado||'N/D'] = (_totEst[r.estado||'N/D']||0) + r.total; });
-      const _top5 = Object.keys(_totEst).sort((a,b) => _totEst[b]-_totEst[a]).slice(0,5);
-      linhas = linhas.filter(r => _top5.includes(r.estado||'N/D'));
-
-      const estados = [...new Set(linhas.map(r => r.estado || 'N/D'))].sort();
-      const meses   = [...new Set(linhas.map(r => r.mes))].sort();
-      const labels  = meses.map(_labelMes);
-
-      const datasets = estados.map((est, idx) => ({
-        label: est,
-        data: meses.map(m => {
-          const r = linhas.find(x => (x.estado || 'N/D') === est && x.mes === m);
-          return r ? r.total : 0;
-        }),
-        backgroundColor: CORES[idx % CORES.length] + 'cc',
-        borderColor: CORES[idx % CORES.length],
-        borderWidth: 1,
-        borderRadius: 4,
-      }));
-
-      if (_pg1Instance) { _pg1Instance.destroy(); _pg1Instance = null; }
-      const ctx = canvas.getContext('2d');
-      _pg1Instance = new Chart(ctx, {
-        type: 'bar',
-        data: { labels, datasets },
-        options: {
-          responsive: true,
-          maintainAspectRatio: false,
-          plugins: {
-            legend: { display: true, labels: { color: '#94a3b8', font: { size: 11 }, boxWidth: 10, padding: 12 } },
-            tooltip: { callbacks: { label: (item) => ` ${item.dataset.label}: ${item.raw}` } },
-          },
-          scales: {
-            x: { ticks: { color: '#94a3b8', font: { size: 11 } }, grid: { color: 'rgba(255,255,255,.05)' } },
-            y: { beginAtZero: true, ticks: { color: '#94a3b8', stepSize: 1 }, grid: { color: 'rgba(255,255,255,.07)' } },
-          },
-        },
-      });
-      if (status) status.style.display = 'none';
-    } catch (err) {
-      if (status) { status.textContent = err.message || 'Erro.'; status.style.color = '#f87171'; }
-    }
-  }
-
-  // ── Gráfico 2 — linhas (3 séries) ──────────────────────────────────────
-  async function _carregarPg2() {
-    const status = document.getElementById('atGrafPg2Status');
-    const canvas = document.getElementById('atGrafPg2Canvas');
-    if (!canvas) return;
-    if (status) { status.style.display = 'block'; status.textContent = 'Carregando...'; status.style.color = ''; }
-
-    try {
-      const [rQ, rR, rM] = await Promise.all([
-        fetch('/api/sac/at/graficos/por-mes?tipo=Qualidade',            { credentials: 'include' }),
-        fetch('/api/sac/at/graficos/por-mes?tipo=Atendimento%20Rapido', { credentials: 'include' }),
-        fetch('/api/sac/at/graficos/mencoes-por-mes',                   { credentials: 'include' }),
-      ]);
-      const [dQ, dR, dM] = await Promise.all([rQ.json().catch(() => ({})), rR.json().catch(() => ({})), rM.json().catch(() => ({}))]);
-      if (!rQ.ok || dQ.ok === false) throw new Error(dQ.error || 'Erro.');
-      if (!rR.ok || dR.ok === false) throw new Error(dR.error || 'Erro.');
-      if (!rM.ok || dM.ok === false) throw new Error(dM.error || 'Erro.');
-
-      let linhasQ = dQ.rows || [];
-      let linhasR = dR.rows || [];
-      let linhasM = dM.rows || [];
-
-      if (_pgPeriodo > 0) {
-        const _hoje2 = new Date();
-        const _mesAtual2 = `${_hoje2.getFullYear()}-${String(_hoje2.getMonth()+1).padStart(2,'0')}`;
-        const _dLim2 = new Date(_hoje2.getFullYear(), _hoje2.getMonth() - _pgPeriodo, 1);
-        const _lim2 = `${_dLim2.getFullYear()}-${String(_dLim2.getMonth()+1).padStart(2,'0')}`;
-        linhasQ = linhasQ.filter(r => r.mes >= _lim2 && r.mes < _mesAtual2);
-        linhasR = linhasR.filter(r => r.mes >= _lim2 && r.mes < _mesAtual2);
-        linhasM = linhasM.filter(r => r.mes >= _lim2 && r.mes < _mesAtual2);
-      }
-
-      const mesesSet = [...new Set([...linhasQ, ...linhasR, ...linhasM].map(r => r.mes))].sort();
-      const labels   = mesesSet.map(_labelMes);
-      const valQ = mesesSet.map(m => { const r = linhasQ.find(x => x.mes === m); return r ? r.total : 0; });
-      const valR = mesesSet.map(m => { const r = linhasR.find(x => x.mes === m); return r ? r.total : 0; });
-      const valM = mesesSet.map(m => { const r = linhasM.find(x => x.mes === m); return r ? r.total : 0; });
-
-      _pgMesesSet = mesesSet;
-      if (_pg2Instance) { _pg2Instance.destroy(); _pg2Instance = null; }
-      const ctx = canvas.getContext('2d');
-
-      _pg2Instance = new Chart(ctx, {
-        type: 'line',
-        data: {
-          labels,
-          datasets: [
-            { label: 'Qualidade',              data: valQ, borderColor: '#34d399', backgroundColor: 'rgba(52,211,153,.10)', borderWidth: 2, pointRadius: 4, pointHoverRadius: 6, tension: 0.3, fill: true },
-            { label: 'Atend. Rápido',          data: valR, borderColor: '#fb923c', backgroundColor: 'rgba(251,146,60,.10)',  borderWidth: 2, pointRadius: 4, pointHoverRadius: 6, tension: 0.3, fill: false },
-            { label: 'Menções (OS não-rápido)', data: valM, borderColor: '#a855f7', backgroundColor: 'rgba(168,85,247,.10)',  borderWidth: 2, pointRadius: 4, pointHoverRadius: 6, tension: 0.3, fill: false, borderDash: [5,4] },
-          ],
-        },
-        options: {
-          responsive: true,
-          maintainAspectRatio: false,
-          interaction: { mode: 'nearest', intersect: false, axis: 'xy' },
-          onClick: (evt, elements) => {
-            if (!elements || !elements.length) return;
-            const el = elements[0];
-            const mes = _pgMesesSet[el.index];
-            if (!mes) return;
-            const nomes = ['Qualidade', 'Atend. Rápido', 'Menções (OS não-rápido)'];
-            _carregarPgDetalhe(mes, el.datasetIndex, nomes[el.datasetIndex] || '');
-          },
-          plugins: {
-            legend: { display: true, labels: { color: '#94a3b8', font: { size: 12 }, boxWidth: 12, padding: 16 } },
-            tooltip: {
-              mode: 'nearest',
-              intersect: false,
-              callbacks: {
-                title: (items) => items[0]?.label || '',
-                label: (item) => ` ${item.dataset.label}: ${item.raw} registro(s)`,
-              },
-            },
-          },
-          scales: {
-            x: { ticks: { color: '#94a3b8', font: { size: 11 } }, grid: { color: 'rgba(255,255,255,.05)' } },
-            y: { beginAtZero: true, ticks: { color: '#94a3b8', stepSize: 1 }, grid: { color: 'rgba(255,255,255,.07)' } },
-          },
-        },
-      });
-      if (status) status.style.display = 'none';
-    } catch (err) {
-      if (status) { status.textContent = err.message || 'Erro.'; status.style.color = '#f87171'; }
-    }
-  }
-
-  // ── Detalhe ao clicar em nó ─────────────────────────────────────────────
-  async function _carregarPgDetalhe(mes, datasetIdx, labelSerie) {
-    const panel  = document.getElementById('atGrafPgDetalhePanel');
-    const titulo = document.getElementById('atGrafPgDetalheTitulo');
-    const qtdEl  = document.getElementById('atGrafPgDetalheQtd');
-    const status = document.getElementById('atGrafPgDetalheStatus');
-    const tbody  = document.getElementById('atGrafPgDetalheTbody');
-    if (!panel || !tbody) return;
-
-    panel.style.display = 'block';
-    if (titulo) titulo.textContent = `${labelSerie} — ${_labelMes(mes)}`;
-    if (qtdEl)  qtdEl.textContent  = '';
-    if (status) { status.style.display = 'block'; status.textContent = 'Carregando...'; status.style.color = ''; }
-    tbody.innerHTML = '';
-
-    try {
-      let url;
-      if (datasetIdx === 2) {
-        url = `/api/sac/at/graficos/mencoes-detalhe-mes?mes=${encodeURIComponent(mes)}`;
-      } else {
-        const tipos = ['Qualidade', 'Atendimento Rapido'];
-        url = `/api/sac/at/graficos/detalhe-mes?mes=${encodeURIComponent(mes)}&tipo=${encodeURIComponent(tipos[datasetIdx])}`;
-      }
-
-      const resp = await fetch(url, { credentials: 'include' });
-      const data = await resp.json().catch(() => ({}));
-      if (!resp.ok || data.ok === false) throw new Error(data.error || 'Erro.');
-
-      const rows = data.rows || [];
-      if (status) status.style.display = 'none';
-      if (qtdEl)  qtdEl.textContent    = `(${rows.length} registro${rows.length !== 1 ? 's' : ''})`;
-
-      if (!rows.length) {
-        tbody.innerHTML = `<tr><td colspan="3" style="padding:14px;text-align:center;color:var(--inactive-color);">Nenhum registro encontrado.</td></tr>`;
-        return;
-      }
-
-      tbody.innerHTML = rows.map(r => `
-        <tr class="at-graf-detalhe-row" data-id="${r.id}" style="cursor:pointer;border-bottom:1px solid rgba(255,255,255,.04);transition:background .15s;">
-          <td style="padding:8px 10px;white-space:nowrap;color:#a5b4fc;font-weight:700;">${_fmtOs(r.id)}</td>
-          <td style="padding:8px 10px;white-space:nowrap;color:#cbd5e1;">${_fmtData(r.data)}</td>
-          <td style="padding:8px 10px;color:#e5e7eb;max-width:520px;">${r.descreva_reclamacao ? String(r.descreva_reclamacao).slice(0, 200) : '-'}</td>
-        </tr>
-      `).join('');
-
-      tbody.querySelectorAll('.at-graf-detalhe-row').forEach(tr => {
-        tr.addEventListener('mouseenter', () => { tr.style.background = 'rgba(255,255,255,.06)'; });
-        tr.addEventListener('mouseleave', () => { tr.style.background = ''; });
-        tr.addEventListener('click', () => {
-          if (typeof _abrirAtOsModalSoPdf === 'function') _abrirAtOsModalSoPdf(tr.dataset.id);
-        });
-      });
-
-      // Campo de pesquisa
-      const pesqEl = document.getElementById('atGrafPgDetalhePesquisa');
-      if (pesqEl) {
-        const novo = pesqEl.cloneNode(true);
-        pesqEl.parentNode.replaceChild(novo, pesqEl);
-        novo.value = '';
-        novo.addEventListener('input', () => {
-          const q = novo.value.toLowerCase();
-          tbody.querySelectorAll('.at-graf-detalhe-row').forEach(tr => {
-            tr.style.display = tr.textContent.toLowerCase().includes(q) ? '' : 'none';
-          });
-        });
-      }
-
-      panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-    } catch (err) {
-      if (status) { status.textContent = err.message || 'Erro.'; status.style.color = '#f87171'; }
-    }
-  }
-
-  // ── Relatório PDF ────────────────────────────────────────────────────────
-  async function _gerarRelatorioGrafAt() {
-    const btn = document.getElementById('atGrafPgRelatorioBtn');
-    if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Gerando...'; }
-
-    try {
-      // ── 1) Ativa gridlines visíveis + cores escuras para captura de impressão ──
-      const GRID_COR   = 'rgba(0,0,0,0.13)';
-      const TICK_COR   = '#333';
-      const LEGEND_COR = '#222';
-
-      function _salvarOpcoes(inst) {
-        if (!inst) return {};
-        const sx = inst.options.scales?.x || {};
-        const sy = inst.options.scales?.y || {};
-        const lbl = inst.options.plugins?.legend?.labels || {};
-        return {
-          xGrid:   sx.grid?.color,
-          yGrid:   sy.grid?.color,
-          xTick:   sx.ticks?.color,
-          yTick:   sy.ticks?.color,
-          xFont:   sx.ticks?.font?.size,
-          yFont:   sy.ticks?.font?.size,
-          legend:  lbl?.color,
-        };
-      }
-
-      function _aplicarOpcoesPrint(inst) {
-        if (!inst) return;
-        const sx = inst.options.scales?.x;
-        const sy = inst.options.scales?.y;
-        const lbl = inst.options.plugins?.legend?.labels;
-        if (sx?.grid)  sx.grid.color           = GRID_COR;
-        if (sy?.grid)  sy.grid.color           = GRID_COR;
-        if (sx?.ticks) { sx.ticks.color       = TICK_COR; if (sx.ticks.font) sx.ticks.font.size = 11; }
-        if (sy?.ticks) { sy.ticks.color       = TICK_COR; if (sy.ticks.font) sy.ticks.font.size = 11; }
-        if (lbl)       lbl.color              = LEGEND_COR;
-        inst.update('none');
-      }
-
-      function _restaurarOpcoes(inst, saved) {
-        if (!inst) return;
-        const sx = inst.options.scales?.x;
-        const sy = inst.options.scales?.y;
-        const lbl = inst.options.plugins?.legend?.labels;
-        if (sx?.grid)  sx.grid.color           = saved.xGrid;
-        if (sy?.grid)  sy.grid.color           = saved.yGrid;
-        if (sx?.ticks) { sx.ticks.color        = saved.xTick; if (sx.ticks.font) sx.ticks.font.size = saved.xFont; }
-        if (sy?.ticks) { sy.ticks.color        = saved.yTick; if (sy.ticks.font) sy.ticks.font.size = saved.yFont; }
-        if (lbl)       lbl.color              = saved.legend;
-        inst.update('none');
-      }
-
-      // Helper: captura canvas com fundo branco (garante impressão limpa)
-      function _canvasParaImg(canvas) {
-        if (!canvas) return '';
-        const tmp = document.createElement('canvas');
-        tmp.width  = canvas.width;
-        tmp.height = canvas.height;
-        const ctx = tmp.getContext('2d');
-        ctx.fillStyle = '#ffffff';
-        ctx.fillRect(0, 0, tmp.width, tmp.height);
-        ctx.drawImage(canvas, 0, 0);
-        return tmp.toDataURL('image/png');
-      }
-
-      const saved1 = _salvarOpcoes(_pg1Instance);
-      const saved2 = _salvarOpcoes(_pg2Instance);
-      _aplicarOpcoesPrint(_pg1Instance);
-      _aplicarOpcoesPrint(_pg2Instance);
-
-      const c1 = document.getElementById('atGrafPg1Canvas');
-      const c2 = document.getElementById('atGrafPg2Canvas');
-      const img1 = _canvasParaImg(c1);
-      const img2 = _canvasParaImg(c2);
-
-      _restaurarOpcoes(_pg1Instance, saved1);
-      _restaurarOpcoes(_pg2Instance, saved2);
-
-      // ── 2) Busca dados com breakdown por mês ──
-      const resp = await fetch('/api/sac/at/graficos/relatorio', { credentials: 'include' });
-      const data = await resp.json().catch(() => ({}));
-      if (!resp.ok || data.ok === false) throw new Error(data.error || 'Erro ao carregar dados.');
-
-      const meses   = data.meses  || [];
-      const periodo = data.periodo || '';
-
-      // ── 3) Pivot: tabela com colunas de mês lado a lado ──
-      function pivotHtml(titulo, cor, rows) {
-        if (!rows || !rows.length) {
-          return `<div class="rs">
-            <div class="rs-title" style="border-color:${cor};">${titulo}</div>
-            <p class="rs-empty">Nenhum registro no período.</p>
-          </div>`;
-        }
-        const totaisPorTag = {};
-        rows.forEach(r => { totaisPorTag[r.tag] = (totaisPorTag[r.tag] || 0) + r.total; });
-        const tags = Object.keys(totaisPorTag).sort((a, b) => totaisPorTag[b] - totaisPorTag[a]);
-
-        const thMeses = meses.map(m =>
-          `<th class="th-mes" style="background:${cor};">${m.label}</th>`
-        ).join('');
-
-        const linhas = tags.map((tag, idx) => {
-          const par = idx % 2 === 0;
-          const cells = meses.map(m => {
-            const found = rows.find(r => r.tag === tag && r.mes === m.yyyymm);
-            const v = found ? found.total : 0;
-            return `<td class="td-num${par ? ' par' : ''}">${v || '<span class="zero">—</span>'}</td>`;
-          }).join('');
-          const soma = totaisPorTag[tag];
-          return `<tr>
-            <td class="td-tag${par ? ' par' : ''}">${tag}</td>
-            ${cells}
-            <td class="td-total${par ? ' par' : ''}" style="color:${cor};">${soma}</td>
-          </tr>`;
-        }).join('');
-
-        const totCells = meses.map(m => {
-          const v = rows.filter(r => r.mes === m.yyyymm).reduce((s, r) => s + r.total, 0);
-          return `<td class="td-num footer">${v || '—'}</td>`;
-        }).join('');
-        const totalGeral = Object.values(totaisPorTag).reduce((s, v) => s + v, 0);
-
-        return `<div class="rs">
-          <div class="rs-title" style="border-color:${cor};">${titulo}</div>
-          <table class="rt">
-            <thead>
-              <tr>
-                <th class="th-tag" style="background:${cor};">Tag / Problema</th>
-                ${thMeses}
-                <th class="th-mes" style="background:${cor};">Total</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${linhas}
-              <tr>
-                <td class="td-tag footer">Total</td>
-                ${totCells}
-                <td class="td-total footer">${totalGeral}</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>`;
-      }
-
-      // ── 4) HTML do relatório ──
-      const html = `<!DOCTYPE html>
-<html lang="pt-BR">
-<head>
-<meta charset="UTF-8">
-<title>Relatório AT — ${periodo}</title>
-<style>
-  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-  body {
-    font-family: 'Segoe UI', Arial, sans-serif;
-    font-size: 12px;
-    color: #1a1a1a;
-    background: #fff;
-    padding: 28px 36px;
-    line-height: 1.4;
-  }
-
-  /* ── Cabeçalho ── */
-  .header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    border-bottom: 3px solid #1e3a5f;
-    padding-bottom: 12px;
-    margin-bottom: 22px;
-  }
-  .header h1 { font-size: 20px; color: #1e3a5f; font-weight: 700; margin-bottom: 3px; }
-  .header .sub { font-size: 11px; color: #666; }
-  .header .badge {
-    background: #1e3a5f;
-    color: #fff;
-    padding: 5px 14px;
-    border-radius: 20px;
-    font-size: 11px;
-    white-space: nowrap;
-  }
-
-  /* ── Gráficos lado a lado ── */
-  .graficos-row {
-    display: flex;
-    gap: 18px;
-    margin-bottom: 30px;
-    align-items: stretch;
-  }
-  .grafico-card {
-    flex: 1;
-    min-width: 0;
-    border: 1px solid #dde3ef;
-    border-radius: 8px;
-    padding: 14px 16px;
-    background: #fafbfd;
-  }
-  .grafico-card .gc-title {
-    font-size: 11px;
-    font-weight: 700;
-    color: #1e3a5f;
-    text-transform: uppercase;
-    letter-spacing: .04em;
-    margin-bottom: 10px;
-    padding-bottom: 6px;
-    border-bottom: 1px solid #dde3ef;
-  }
-  .grafico-card img {
-    width: 100%;
-    display: block;
-    border-radius: 4px;
-  }
-
-  /* ── Seções de tabela ── */
-  .rs { margin-bottom: 26px; page-break-inside: avoid; }
-  .rs-title {
-    font-size: 13px;
-    font-weight: 700;
-    color: #1a1a1a;
-    border-left: 4px solid #999;
-    padding-left: 10px;
-    margin-bottom: 10px;
-    line-height: 1.3;
-  }
-  .rs-empty { color: #888; font-size: 11px; padding-left: 14px; }
-
-  /* ── Tabela pivot ── */
-  .rt {
-    width: 100%;
-    border-collapse: collapse;
-    font-size: 12px;
-    border: 1px solid #d1d9e6;
-    border-radius: 6px;
-    overflow: hidden;
-  }
-  .rt thead tr { border-bottom: 2px solid rgba(0,0,0,.2); }
-  .th-tag {
-    text-align: left;
-    padding: 7px 12px;
-    color: #fff;
-    font-size: 11px;
-    font-weight: 700;
-    min-width: 180px;
-  }
-  .th-mes {
-    text-align: center;
-    padding: 7px 14px;
-    color: #fff;
-    font-size: 11px;
-    font-weight: 700;
-    min-width: 72px;
-    white-space: nowrap;
-  }
-  .td-tag {
-    padding: 6px 12px;
-    border-bottom: 1px solid #e8ecf4;
-    color: #2d3748;
-  }
-  .td-num {
-    text-align: center;
-    padding: 6px 14px;
-    border-bottom: 1px solid #e8ecf4;
-    font-weight: 600;
-    color: #2d3748;
-  }
-  .td-total {
-    text-align: center;
-    padding: 6px 14px;
-    border-bottom: 1px solid #e8ecf4;
-    font-weight: 800;
-    font-size: 13px;
-  }
-  .par { background: #f7f9fc; }
-  .zero { color: #bbb; font-weight: 400; }
-  .footer {
-    background: #eef2fb !important;
-    font-weight: 700 !important;
-    color: #1e3a5f !important;
-    border-top: 2px solid #c9d4eb;
-  }
-
-  /* ── Print ── */
-  @media print {
-    @page { margin: 12mm 14mm; size: A4 landscape; }
-    body { padding: 0; font-size: 11px; }
-    .no-print { display: none !important; }
-    .rt { font-size: 11px; }
-    .graficos-row { break-inside: avoid; }
-    .rs { break-inside: avoid; }
-  }
-</style>
-</head>
-<body>
-
-<div class="header">
-  <div>
-    <h1>Relatório — Gráfico AT</h1>
-    <div class="sub">Gerado em ${new Date().toLocaleString('pt-BR')}</div>
-  </div>
-  <div class="badge">Período: ${periodo}</div>
-</div>
-
-<div class="graficos-row">
-  <div class="grafico-card">
-    <div class="gc-title">Gráfico 1 — Atendimentos por Estado / Mês (Qualidade)</div>
-    ${img1 ? `<img src="${img1}" alt="Gráfico 1">` : '<p style="color:#aaa;font-size:11px;">Gráfico não disponível.</p>'}
-  </div>
-  <div class="grafico-card">
-    <div class="gc-title">Gráfico 2 — Picos de Atendimento por Mês</div>
-    ${img2 ? `<img src="${img2}" alt="Gráfico 2">` : '<p style="color:#aaa;font-size:11px;">Gráfico não disponível.</p>'}
-  </div>
-</div>
-
-${pivotHtml('OS aberta', '#1d6a2f', data.qualidade)}
-${pivotHtml('Atendimento Rápido', '#7c2d12', data.rapido)}
-${pivotHtml('Menções (Pós abertura de OS)', '#4c1d95', data.mencoes)}
-
-<div class="no-print" style="margin-top:24px;padding-top:16px;border-top:1px solid #e5e7eb;">
-  <button onclick="window.print()"
-    style="padding:9px 22px;background:#1e3a5f;color:#fff;border:none;border-radius:7px;cursor:pointer;font-size:13px;font-weight:600;">
-    &#128438; Imprimir / Salvar PDF
-  </button>
-</div>
-
-</body>
-</html>`;
-
-      // ── 5) Abre janela de impressão ──
-      const win = window.open('', '_blank', 'width=1150,height=780');
-      if (!win) { alert('Permita pop-ups para gerar o relatório.'); return; }
-      win.document.write(html);
-      win.document.close();
-      win.focus();
-
-    } catch (err) {
-      alert('Erro ao gerar relatório: ' + (err.message || err));
-    } finally {
-      if (btn) {
-        btn.disabled = false;
-        btn.innerHTML = '<i class="fa-solid fa-file-pdf"></i> Relatório';
-      }
-    }
-  }
-
-  // ── API pública chamada pelo listener do menu lateral ────────────────────
-  window._iniciarGrafAtPagina = function () {
-    if (!_pgInicializado) {
-      _pgInicializado = true;
-
-      // Botões de período
-      document.querySelectorAll('.at-graf-periodo-btn-pg').forEach(btn => {
-        btn.addEventListener('click', () => {
-          _pgPeriodo = parseInt(btn.dataset.per, 10);
-          document.querySelectorAll('.at-graf-periodo-btn-pg').forEach(b => {
-            const ativo = b === btn;
-            b.style.borderColor = ativo ? '#4f46e5' : '#374151';
-            b.style.background  = ativo ? 'rgba(79,70,229,.25)' : 'rgba(255,255,255,.04)';
-            b.style.color       = ativo ? '#a5b4fc' : '#9ca3af';
-          });
-          _carregarPg0();
-          _carregarPg01();
-          _carregarPg1();
-          _carregarPg2();
-        });
-      });
-
-      // Botões de tipo
-      document.querySelectorAll('.at-graf-tipo-btn-pg').forEach(btn => {
-        btn.addEventListener('click', () => {
-          _pgTipo = btn.dataset.tipo;
-          document.querySelectorAll('.at-graf-tipo-btn-pg').forEach(b => {
-            const ativo = b === btn;
-            b.style.borderColor = ativo ? '#10b981' : '#374151';
-            b.style.background  = ativo ? 'rgba(16,185,129,.22)' : 'rgba(255,255,255,.04)';
-            b.style.color       = ativo ? '#6ee7b7' : '#9ca3af';
-          });
-          _carregarPg0();
-          _carregarPg01();
-          _carregarPg1();
-        });
-      });
-
-      const refreshBtn = document.getElementById('atGrafPgRefreshBtn');
-      if (refreshBtn) refreshBtn.addEventListener('click', () => { _carregarPg0(); _carregarPg01(); _carregarPg1(); _carregarPg2(); });
-
-      const relatorioBtn = document.getElementById('atGrafPgRelatorioBtn');
-      if (relatorioBtn) relatorioBtn.addEventListener('click', _gerarRelatorioGrafAt);
-
-      // ── Botões pizza ───────────────────────────────────────────────────
-      let _pizzaInstance = null;
-      const _pizzaModal  = document.getElementById('atGrafPizzaModal');
-      const _pizzaFechar = document.getElementById('atGrafPizzaFechar');
-      function _fecharPizza() {
-        if (_pizzaModal) _pizzaModal.style.display = 'none';
-        if (_pizzaInstance) { _pizzaInstance.destroy(); _pizzaInstance = null; }
-      }
-      if (_pizzaFechar) _pizzaFechar.addEventListener('click', _fecharPizza);
-      if (_pizzaModal)  _pizzaModal.addEventListener('click', e => { if (e.target === _pizzaModal) _fecharPizza(); });
-      document.addEventListener('keydown', e => { if (e.key === 'Escape') _fecharPizza(); });
-
-      document.querySelectorAll('.at-graf-pizza-btn').forEach(btn => {
-        btn.addEventListener('click', () => {
-          const canvasId = btn.dataset.canvasid;
-          const titulo   = btn.dataset.titulo || 'Distribuição';
-          const srcCanvas = document.getElementById(canvasId);
-          if (!srcCanvas) return;
-          const chart = Chart.getChart(srcCanvas);
-          if (!chart) return;
-
-          // Agrega cada dataset somando todos os valores do período visível
-          const agg = chart.data.datasets.map(ds => {
-            const total = (ds.data || []).reduce((s, v) => s + (Number(v) || 0), 0);
-            const cor   = typeof ds.borderColor === 'string' ? ds.borderColor
-                        : (typeof ds.backgroundColor === 'string' ? ds.backgroundColor : '#94a3b8');
-            return { label: ds.label || '?', total, cor };
-          }).filter(x => x.total > 0).sort((a, b) => b.total - a.total);
-
-          if (!agg.length) return;
-
-          const pizzaTitulo = document.getElementById('atGrafPizzaTitulo');
-          if (pizzaTitulo) pizzaTitulo.textContent = titulo + ' — Período selecionado';
-
-          if (_pizzaInstance) { _pizzaInstance.destroy(); _pizzaInstance = null; }
-          const pizzaCanvas = document.getElementById('atGrafPizzaCanvas');
-          if (!pizzaCanvas) return;
-
-          _pizzaInstance = new Chart(pizzaCanvas.getContext('2d'), {
-            type: 'doughnut',
-            data: {
-              labels: agg.map(x => x.label),
-              datasets: [{
-                data: agg.map(x => x.total),
-                backgroundColor: agg.map(x => x.cor),
-                borderColor: '#1e293b',
-                borderWidth: 2,
-                hoverOffset: 10,
-              }],
-            },
-            options: {
-              responsive: true,
-              maintainAspectRatio: false,
-              plugins: {
-                legend: { display: true, position: 'right', labels: { color: '#94a3b8', font: { size: 11 }, boxWidth: 12, padding: 10 } },
-                tooltip: {
-                  callbacks: {
-                    label: (item) => {
-                      const tot = item.dataset.data.reduce((a, b) => a + b, 0);
-                      const pct = tot ? ((item.raw / tot) * 100).toFixed(1) : 0;
-                      return ` ${item.label}: ${item.raw} OS (${pct}%)`;
-                    },
-                  },
-                },
-              },
-            },
-          });
-          _pizzaModal.style.display = 'flex';
-        });
-      });
-    }
-    _carregarPg0();
-    _carregarPg01();
-    _carregarPg1();
-    _carregarPg2();
-  };
-})();
 
 // ── Relatório Gerencial AT (Fase 2 — layout Fromtherm + páginas) ─────────────
 (function () {
@@ -19386,6 +18824,7 @@ ${pivotHtml('Menções (Pós abertura de OS)', '#4c1d95', data.mencoes)}
   let _relGerTextos = null;
   let _relGerSecao = 'executivo';
   let _relGerLote3m = false;
+  let _relGerLoteFiltroTag = null;
   const _charts = {};
   const _chartsRendered = new Set();
 
@@ -19698,22 +19137,42 @@ ${pivotHtml('Menções (Pós abertura de OS)', '#4c1d95', data.mencoes)}
         ${hdr()}
         <div class="at-rel-ger-sec-title"><i class="fa-solid fa-coins"></i> Análise Técnica e Financeira</div>
         <div class="at-rel-ger-body">
+          <div id="atRelGerFinKpis" class="at-rel-ger-kpis" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-bottom:14px;"></div>
           <div class="at-rel-ger-grid-2" style="margin-bottom:14px;">
             <div class="at-rel-ger-card">
               <h4>Observações Técnicas — principais ocorrências</h4>
               <ul id="atRelGerObsTecnicas" class="at-rel-ger-obs-list"></ul>
             </div>
             <div class="at-rel-ger-card">
-              <h4>Resumo financeiro do mês</h4>
+              <h4>Composição de custos do período</h4>
               <div id="atRelGerResumoFin" style="font-size:12px;color:#475569;line-height:1.7;"></div>
             </div>
           </div>
-          <div class="at-rel-ger-card">
-            <h4>O.S. concluídas — Mão de Obra informada</h4>
-            <div style="overflow:auto;max-height:320px;">
+          <div class="at-rel-ger-card" style="margin-bottom:14px;">
+            <h4>Custos por O.S. — M.O. + Peças (CMC) + Envio</h4>
+            <p style="margin:0 0 8px;font-size:11px;color:#64748b;">Peças pelo CMC de estoque no momento do registro; frete pelo valor da postagem VIPP.</p>
+            <div style="overflow:auto;max-height:340px;">
               <table class="at-rel-ger-tbl">
-                <thead><tr><th>O.S.</th><th>UF</th><th>Data</th><th class="r">M.O. R$</th></tr></thead>
+                <thead>
+                  <tr>
+                    <th>O.S.</th><th>UF</th><th>Data</th>
+                    <th class="r">M.O.</th><th class="r">Peças</th><th class="r">Envio</th><th class="r">Total</th>
+                  </tr>
+                </thead>
                 <tbody id="atRelGerFinanceiroBody"></tbody>
+              </table>
+            </div>
+          </div>
+          <div class="at-rel-ger-card">
+            <h4>Top peças enviadas por custo (CMC)</h4>
+            <div style="overflow:auto;max-height:260px;">
+              <table class="at-rel-ger-tbl">
+                <thead>
+                  <tr>
+                    <th>Código</th><th>Descrição</th><th class="r">Qtd</th><th class="r">O.S.</th><th class="r">Custo</th>
+                  </tr>
+                </thead>
+                <tbody id="atRelGerTopPecasBody"></tbody>
               </table>
             </div>
           </div>
@@ -19723,7 +19182,7 @@ ${pivotHtml('Menções (Pós abertura de OS)', '#4c1d95', data.mencoes)}
 
       <div class="at-rel-ger-page${_relGerSecao === 'lote' ? ' is-active' : ''}" data-sec="lote">
         ${hdr()}
-        <div class="at-rel-ger-sec-title"><i class="fa-solid fa-layer-group"></i> Análise de Lote — por data de entrega</div>
+        <div class="at-rel-ger-sec-title"><i class="fa-solid fa-layer-group"></i> Análise de Lote — por data de produção</div>
         <div class="at-rel-ger-body">
           <div class="at-rel-ger-edit-toolbar" style="margin-bottom:12px;">
             <button type="button" id="atRelGerLote3mBtn" class="at-rel-ger-btn primary">
@@ -19732,7 +19191,12 @@ ${pivotHtml('Menções (Pós abertura de OS)', '#4c1d95', data.mencoes)}
             <span id="atRelGerLoteJanelaInfo" class="status-msg"></span>
           </div>
           <div class="at-rel-ger-card" style="margin-bottom:14px;">
-            <h4 id="atRelGerLoteChartTitle">Máquinas com problema — por mês de entrega e modelo</h4>
+            <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:8px;">
+              <h4 id="atRelGerLoteChartTitle" style="margin:0;flex:1;">Máquinas com problema — por mês de produção e modelo</h4>
+              <button type="button" id="atRelGerLoteVoltarBtn" class="at-rel-ger-btn" style="display:none;">
+                <i class="fa-solid fa-arrow-left"></i> Voltar
+              </button>
+            </div>
             <div class="at-rel-ger-chart lg"><canvas id="atRelGerChartLote"></canvas></div>
           </div>
           <div class="at-rel-ger-card">
@@ -19891,17 +19355,66 @@ ${pivotHtml('Menções (Pós abertura de OS)', '#4c1d95', data.mencoes)}
 
   function _tituloLoteEmpilhado(data) {
     const periodo = data?.periodo || 'período';
-    return `Máquinas com problema — O.S. abertas em ${periodo} (por mês de entrega e modelo)`;
+    if (_relGerLoteFiltroTag) {
+      return `Máquinas com problema — O.S. abertas em ${periodo} · defeito "${_relGerLoteFiltroTag}" (por mês de produção e modelo)`;
+    }
+    return `Máquinas com problema — O.S. abertas em ${periodo} (por mês de produção e modelo)`;
   }
 
   function _tituloLoteEmpilhadoJanela(data) {
     return _tituloLoteEmpilhado(data);
   }
 
+  function _atualizarLoteVoltarBtn() {
+    const btn = document.getElementById('atRelGerLoteVoltarBtn');
+    if (!btn) return;
+    btn.style.display = _relGerLoteFiltroTag ? '' : 'none';
+  }
+
+  function _aplicarFiltroLoteTag(tag) {
+    _relGerLoteFiltroTag = tag || null;
+    if (!_relGerData) return;
+    _atualizarLoteVoltarBtn();
+    const chartTitle = document.getElementById('atRelGerLoteChartTitle');
+    if (chartTitle) chartTitle.textContent = _tituloLoteEmpilhado(_relGerData);
+    _chartsRendered.delete('lote');
+    _destroyChart('lote');
+    const lotePage = document.querySelector('.at-rel-ger-page[data-sec="lote"]');
+    if (lotePage?.classList.contains('is-active')) {
+      _renderChartsSecao('lote', _relGerData);
+    }
+    // Atualiza resumo do gráfico filtrado
+    const resumo = document.getElementById('atRelGerLoteResumo');
+    const lote = _relGerData.analise_lote || {};
+    const janela = lote.janela_3m || {};
+    if (resumo) {
+      const stacked = _dadosLoteStacked(_relGerData);
+      const totalChart = stacked.rows.reduce((s, r) => s + (r.total || 0), 0);
+      const modelosAtivos = stacked.topModelos.length;
+      const mesesProducao = stacked.mesesOrd.length;
+      if (_relGerLoteFiltroTag) {
+        resumo.innerHTML = `Filtro ativo: defeito <strong>${_esc(_relGerLoteFiltroTag)}</strong>. No gráfico: <strong>${totalChart}</strong> registro(s) em <strong>${mesesProducao}</strong> coluna(s) (mês de produção ou S/ Dt) e <strong>${modelosAtivos}</strong> modelo(s).`;
+      } else {
+        const modeloJanela = (lote.por_modelo_janela_3m || []).slice(0, 5)
+          .map(r => `${r.modelo} (${r.total})`).join(', ') || '—';
+        resumo.innerHTML = `<strong>${janela.total_maquinas || 0}</strong> máquina(s) com O.S. abertas entre <strong>${_esc(janela.inicio || '—')}</strong> e <strong>${_esc(janela.fim || '—')}</strong> (inclui sem data de produção). No gráfico: <strong>${totalChart}</strong> registro(s) em <strong>${mesesProducao}</strong> coluna(s) e <strong>${modelosAtivos}</strong> modelo(s). Principais: ${modeloJanela}.`;
+      }
+    }
+  }
+
+  function _limparFiltroLoteTag() {
+    _aplicarFiltroLoteTag(null);
+  }
+
   function _buildLoteStackedFromRows(rows) {
-    const mesesOrd = [...new Set(rows.map(r => r.mes))].sort();
+    const mesesOrd = [...new Set(rows.map(r => r.mes))].sort((a, b) => {
+      if (a === '__sem_dt__') return 1;
+      if (b === '__sem_dt__') return -1;
+      return String(a).localeCompare(String(b));
+    });
     const mesLabels = mesesOrd.map((mes) => {
       const found = rows.find(r => r.mes === mes);
+      if (mes === '__sem_dt__') return found?.label || 'S/ Dt produção';
       return found?.label || mes;
     });
     const modeloTotals = {};
@@ -19934,10 +19447,160 @@ ${pivotHtml('Menções (Pós abertura de OS)', '#4c1d95', data.mencoes)}
     return map;
   }
 
+  function _fmtOsRelGer(id, dataOs) {
+    const ano = dataOs ? new Date(dataOs) : new Date();
+    const aa = Number.isNaN(ano.getTime())
+      ? String(new Date().getFullYear()).slice(-2)
+      : String(ano.getFullYear()).slice(-2);
+    return `${aa} - ${id}`;
+  }
+
+  function _fecharLoteDetalheModal() {
+    const modal = document.getElementById('atRelGerLoteDetalheModal');
+    if (!modal) return;
+    modal.classList.remove('is-open');
+    modal.style.display = 'none';
+  }
+
+  function _abrirLoteDetalheModalShell(titulo, subtitulo) {
+    const modal = document.getElementById('atRelGerLoteDetalheModal');
+    const tituloEl = document.getElementById('atRelGerLoteDetalheTitulo');
+    const subEl = document.getElementById('atRelGerLoteDetalheSub');
+    const statusEl = document.getElementById('atRelGerLoteDetalheStatus');
+    const qtdEl = document.getElementById('atRelGerLoteDetalheQtd');
+    const tbody = document.getElementById('atRelGerLoteDetalheTbody');
+    const pesq = document.getElementById('atRelGerLoteDetalhePesquisa');
+    if (!modal || !tbody) return null;
+
+    if (tituloEl) tituloEl.textContent = titulo || 'Detalhe';
+    if (subEl) subEl.textContent = subtitulo || '';
+    if (qtdEl) qtdEl.textContent = '';
+    if (pesq) pesq.value = '';
+    tbody.innerHTML = '';
+    if (statusEl) {
+      statusEl.style.display = 'block';
+      statusEl.style.color = '#64748b';
+      statusEl.textContent = 'Carregando...';
+    }
+    modal.style.display = 'flex';
+    modal.classList.add('is-open');
+    return { modal, statusEl, qtdEl, tbody, pesq };
+  }
+
+  function _bindLoteDetalhePesquisa(pesq, tbody) {
+    if (!pesq || !tbody) return;
+    const novo = pesq.cloneNode(true);
+    pesq.parentNode.replaceChild(novo, pesq);
+    novo.addEventListener('input', () => {
+      const q = novo.value.trim().toLowerCase();
+      tbody.querySelectorAll('tr[data-search]').forEach((tr) => {
+        tr.style.display = !q || tr.dataset.search.includes(q) ? '' : 'none';
+      });
+    });
+  }
+
+  function _renderLoteDetalheRows(rows, shell) {
+    const { statusEl, qtdEl, tbody, pesq } = shell;
+    if (statusEl) statusEl.style.display = 'none';
+    if (qtdEl) qtdEl.textContent = `${rows.length} registro${rows.length !== 1 ? 's' : ''}`;
+
+    if (!rows.length) {
+      tbody.innerHTML = `<tr><td colspan="12" style="padding:18px;text-align:center;color:#94a3b8;">Nenhum registro encontrado.</td></tr>`;
+      return;
+    }
+
+    tbody.innerHTML = rows.map((r) => {
+      const osLabel = _fmtOsRelGer(r.id, r.data_os);
+      const search = [
+        osLabel, r.id, r.modelo, r.modelo_completo, r.pedido, r.ordem_producao,
+        r.cliente, r.nota_fiscal, r.tag, r.estado, r.status_os, r.reclamacao,
+      ].join(' ').toLowerCase();
+      return `
+        <tr class="is-clickable" data-id="${_esc(r.id)}" data-search="${_esc(search)}">
+          <td class="os-id">${_esc(osLabel)}</td>
+          <td>${_esc(_fmtData(r.data_os))}</td>
+          <td>${_esc(r.modelo_completo || r.modelo || '-')}</td>
+          <td>${_esc(r.pedido || '-')}</td>
+          <td>${_esc(r.ordem_producao || '-')}</td>
+          <td>${_esc(_fmtData(r.data_producao))}</td>
+          <td>${_esc(r.cliente || r.revenda_cliente || '-')}</td>
+          <td>${_esc(r.nota_fiscal || '-')}</td>
+          <td>${_esc(r.tag || '-')}</td>
+          <td>${_esc(r.estado || '-')}</td>
+          <td>${_esc(r.status_os || '-')}</td>
+          <td class="recl">${_esc((r.reclamacao || '-').slice(0, 180))}</td>
+        </tr>
+      `;
+    }).join('');
+
+    tbody.querySelectorAll('tr.is-clickable').forEach((tr) => {
+      tr.addEventListener('click', () => {
+        if (typeof window._abrirAtOsModalSoPdf === 'function') {
+          window._abrirAtOsModalSoPdf(tr.dataset.id);
+        } else if (typeof window._abrirAtOsModal === 'function') {
+          window._abrirAtOsModal(tr.dataset.id);
+        }
+      });
+    });
+    _bindLoteDetalhePesquisa(pesq, tbody);
+  }
+
+  async function _abrirLoteDetalhe(filtros, titulo) {
+    const shell = _abrirLoteDetalheModalShell(
+      titulo,
+      `O.S. abertas em ${_relGerData?.periodo || '—'} · dados da máquina e da O.S.`
+    );
+    if (!shell) return;
+
+    try {
+      const modoEl = document.getElementById('atRelGerModo');
+      const tipoEl = document.getElementById('atRelGerTipo');
+      const qs = new URLSearchParams({
+        modo: modoEl?.value || 'mes',
+      });
+      if (tipoEl) qs.set('tipo', tipoEl.value);
+      if (filtros.mes_producao) qs.set('mes_producao', filtros.mes_producao);
+      if (filtros.modelo) qs.set('modelo', filtros.modelo);
+      if (filtros.tag) qs.set('tag', filtros.tag);
+
+      const resp = await fetch(`/api/sac/at/relatorio-gerencial/lote-detalhe?${qs.toString()}`, {
+        credentials: 'include',
+      });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok || data.ok === false) throw new Error(data.error || 'Erro ao carregar detalhe.');
+      _renderLoteDetalheRows(data.rows || [], shell);
+    } catch (err) {
+      if (shell.statusEl) {
+        shell.statusEl.style.display = 'block';
+        shell.statusEl.style.color = '#dc2626';
+        shell.statusEl.textContent = err.message || 'Erro ao carregar detalhe.';
+      }
+    }
+  }
+
+  function _wireLoteDetalheModal() {
+    const modal = document.getElementById('atRelGerLoteDetalheModal');
+    const fechar = document.getElementById('atRelGerLoteDetalheFechar');
+    if (fechar && !fechar.dataset.wired) {
+      fechar.dataset.wired = '1';
+      fechar.addEventListener('click', _fecharLoteDetalheModal);
+    }
+    if (modal && !modal.dataset.wired) {
+      modal.dataset.wired = '1';
+      modal.addEventListener('click', (ev) => {
+        if (ev.target === modal) _fecharLoteDetalheModal();
+      });
+      document.addEventListener('keydown', (ev) => {
+        if (ev.key === 'Escape' && modal.classList.contains('is-open')) _fecharLoteDetalheModal();
+      });
+    }
+  }
+
   function _renderChartLoteEmpilhado(canvasId, chartKey, stacked) {
     _destroyChart(chartKey);
     const canvas = document.getElementById(canvasId);
     if (!canvas || !stacked?.labels?.length) return;
+    const mesesOrd = stacked.mesesOrd || [];
     _charts[chartKey] = new Chart(canvas.getContext('2d'), {
       type: 'bar',
       data: {
@@ -19947,11 +19610,34 @@ ${pivotHtml('Menções (Pós abertura de OS)', '#4c1d95', data.mencoes)}
       options: {
         responsive: true,
         maintainAspectRatio: false,
+          onClick: (_evt, elements) => {
+            if (!elements || !elements.length) return;
+            const el = elements[0];
+            const mes = mesesOrd[el.index];
+            const modelo = stacked.datasets?.[el.datasetIndex]?.label;
+            const valor = Number(stacked.datasets?.[el.datasetIndex]?.data?.[el.index] || 0);
+            if (!mes || !modelo || valor <= 0) return;
+            const labelMes = stacked.labels?.[el.index] || mes;
+            const filtros = { mes_producao: mes, modelo };
+            let titulo = mes === '__sem_dt__'
+              ? `${labelMes} · modelo ${modelo}`
+              : `Produção ${labelMes} · modelo ${modelo}`;
+            if (_relGerLoteFiltroTag) {
+              filtros.tag = _relGerLoteFiltroTag;
+              titulo += ` · defeito "${_relGerLoteFiltroTag}"`;
+            }
+            _abrirLoteDetalhe(filtros, titulo);
+          },
         plugins: {
           legend: {
             display: true,
             position: 'bottom',
             labels: { color: '#475569', font: { size: 10 }, boxWidth: 10 },
+          },
+          tooltip: {
+            callbacks: {
+              footer: () => 'Clique para ver máquinas e O.S.',
+            },
           },
         },
         scales: {
@@ -19960,6 +19646,7 @@ ${pivotHtml('Menções (Pós abertura de OS)', '#4c1d95', data.mencoes)}
         },
       },
     });
+    canvas.style.cursor = 'pointer';
   }
 
   function _renderLoteDefPies(data, defRows) {
@@ -19983,21 +19670,40 @@ ${pivotHtml('Menções (Pós abertura de OS)', '#4c1d95', data.mencoes)}
         options: {
           responsive: true,
           maintainAspectRatio: false,
+          onClick: (_evt, elements) => {
+            // Clique na pizza = filtra o gráfico de barras só com dados deste defeito
+            if (!r.tag) return;
+            _aplicarFiltroLoteTag(r.tag);
+            const chartEl = document.getElementById('atRelGerChartLote');
+            if (chartEl) chartEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          },
           plugins: {
             legend: { display: false },
             tooltip: {
               callbacks: {
                 label: (ctx) => ` ${ctx.label}: ${ctx.raw}`,
+                footer: () => 'Clique para filtrar o gráfico de barras',
               },
             },
           },
         },
       });
+      canvas.style.cursor = 'pointer';
     });
   }
 
   function _dadosLoteMesModelo(data) {
     const lote = data?.analise_lote || {};
+    if (_relGerLoteFiltroTag) {
+      return (lote.por_mes_modelo_tag || [])
+        .filter((r) => r.tag === _relGerLoteFiltroTag)
+        .map((r) => ({
+          mes: r.mes,
+          label: r.label,
+          modelo: r.modelo,
+          total: r.total,
+        }));
+    }
     return lote.por_mes_modelo || [];
   }
 
@@ -20038,11 +19744,12 @@ ${pivotHtml('Menções (Pós abertura de OS)', '#4c1d95', data.mencoes)}
 
     if (btn) btn.style.display = 'none';
     if (info) {
-      info.textContent = `O.S. abertas em ${data.periodo || '—'} · ${janela.total_maquinas || 0} máquina(s) com data de entrega · gráfico por mês de entrega`;
+      info.textContent = `O.S. abertas em ${data.periodo || '—'} · ${janela.total_maquinas || 0} máquina(s) · gráfico por mês de produção (sem data → "S/ Dt produção")`;
     }
     if (chartTitle) {
       chartTitle.textContent = _tituloLoteEmpilhado(data);
     }
+    _atualizarLoteVoltarBtn();
     if (defTitle) {
       defTitle.textContent = `Defeitos nas O.S. abertas em ${data.periodo || '—'}`;
     }
@@ -20055,7 +19762,7 @@ ${pivotHtml('Menções (Pós abertura de OS)', '#4c1d95', data.mencoes)}
           <div class="at-rel-ger-def-row">
             <div class="at-rel-ger-def-meta">
               <div class="tag">${_esc(r.tag)}</div>
-              <div class="sub">${r.total} ocorrência(s) · ${r.pct}% do período</div>
+              <div class="sub">${r.total} ocorrência(s) · ${r.pct}% do período · clique na pizza para filtrar o gráfico</div>
             </div>
             <div class="at-rel-ger-def-pie"><canvas id="atRelGerLoteDefPie${i}"></canvas></div>
           </div>
@@ -20067,10 +19774,14 @@ ${pivotHtml('Menções (Pós abertura de OS)', '#4c1d95', data.mencoes)}
       const stacked = _dadosLoteStacked(data);
       const totalChart = stacked.rows.reduce((s, r) => s + (r.total || 0), 0);
       const modelosAtivos = stacked.topModelos.length;
-      const mesesEntrega = stacked.mesesOrd.length;
-      const modeloJanela = (lote.por_modelo_janela_3m || []).slice(0, 5)
-        .map(r => `${r.modelo} (${r.total})`).join(', ') || '—';
-      resumo.innerHTML = `<strong>${janela.total_maquinas || 0}</strong> máquina(s) com O.S. abertas entre <strong>${_esc(janela.inicio || '—')}</strong> e <strong>${_esc(janela.fim || '—')}</strong>. No gráfico: <strong>${totalChart}</strong> registro(s) em <strong>${mesesEntrega}</strong> mês(es) de entrega e <strong>${modelosAtivos}</strong> modelo(s). Principais: ${modeloJanela}.`;
+      const mesesProducao = stacked.mesesOrd.length;
+      if (_relGerLoteFiltroTag) {
+        resumo.innerHTML = `Filtro ativo: defeito <strong>${_esc(_relGerLoteFiltroTag)}</strong>. No gráfico: <strong>${totalChart}</strong> registro(s) em <strong>${mesesProducao}</strong> coluna(s) (mês de produção ou S/ Dt) e <strong>${modelosAtivos}</strong> modelo(s).`;
+      } else {
+        const modeloJanela = (lote.por_modelo_janela_3m || []).slice(0, 5)
+          .map(r => `${r.modelo} (${r.total})`).join(', ') || '—';
+        resumo.innerHTML = `<strong>${janela.total_maquinas || 0}</strong> máquina(s) com O.S. abertas entre <strong>${_esc(janela.inicio || '—')}</strong> e <strong>${_esc(janela.fim || '—')}</strong> (inclui sem data de produção). No gráfico: <strong>${totalChart}</strong> registro(s) em <strong>${mesesProducao}</strong> coluna(s) e <strong>${modelosAtivos}</strong> modelo(s). Principais: ${modeloJanela}.`;
+      }
     }
 
     _chartsRendered.delete('lote');
@@ -20082,13 +19793,20 @@ ${pivotHtml('Menções (Pós abertura de OS)', '#4c1d95', data.mencoes)}
 
   function _wireLoteBtn() {
     const btn = document.getElementById('atRelGerLote3mBtn');
-    if (!btn) return;
-    const novo = btn.cloneNode(true);
-    btn.parentNode.replaceChild(novo, btn);
-    novo.addEventListener('click', () => {
-      _relGerLote3m = !_relGerLote3m;
-      if (_relGerData) _renderLoteConteudo(_relGerData);
-    });
+    if (btn) {
+      const novo = btn.cloneNode(true);
+      btn.parentNode.replaceChild(novo, btn);
+      novo.addEventListener('click', () => {
+        _relGerLote3m = !_relGerLote3m;
+        if (_relGerData) _renderLoteConteudo(_relGerData);
+      });
+    }
+    const voltar = document.getElementById('atRelGerLoteVoltarBtn');
+    if (voltar) {
+      const novoV = voltar.cloneNode(true);
+      voltar.parentNode.replaceChild(novoV, voltar);
+      novoV.addEventListener('click', () => _limparFiltroLoteTag());
+    }
   }
 
   function _trocarSecao(sec) {
@@ -20373,8 +20091,30 @@ ${pivotHtml('Menções (Pós abertura de OS)', '#4c1d95', data.mencoes)}
     if (finBody) {
       const rows = data.financeiro || [];
       finBody.innerHTML = rows.length
-        ? rows.map(r => `<tr><td>${_esc(r.os)}</td><td>${_esc(r.estado || '-')}</td><td>${_fmtData(r.data)}</td><td class="r">${MOEDA.format(r.valor_mo || 0)}</td></tr>`).join('')
-        : '<tr><td colspan="4" style="text-align:center;color:#94a3b8;">Nenhuma M.O. informada no período.</td></tr>';
+        ? rows.map(r => `<tr>
+            <td>${_esc(r.os)}</td>
+            <td>${_esc(r.estado || '-')}</td>
+            <td>${_fmtData(r.data)}</td>
+            <td class="r">${MOEDA.format(r.valor_mo || 0)}</td>
+            <td class="r">${MOEDA.format(r.valor_pecas || 0)}</td>
+            <td class="r">${MOEDA.format(r.valor_envio || 0)}</td>
+            <td class="r"><strong>${MOEDA.format(r.valor_total || 0)}</strong></td>
+          </tr>`).join('')
+        : '<tr><td colspan="7" style="text-align:center;color:#94a3b8;">Nenhum custo (M.O., peças ou envio) no período.</td></tr>';
+    }
+
+    const topPecasBody = document.getElementById('atRelGerTopPecasBody');
+    if (topPecasBody) {
+      const rows = data.top_pecas_custo || [];
+      topPecasBody.innerHTML = rows.length
+        ? rows.map(r => `<tr>
+            <td style="white-space:nowrap;">${_esc(r.codigo || '-')}</td>
+            <td>${_esc(r.descricao || '-')}</td>
+            <td class="r">${r.quantidade || 0}</td>
+            <td class="r">${r.qtd_os || 0}</td>
+            <td class="r">${MOEDA.format(r.valor_total || 0)}</td>
+          </tr>`).join('')
+        : '<tr><td colspan="5" style="text-align:center;color:#94a3b8;">Nenhuma peça com CMC no período.</td></tr>';
     }
   }
 
@@ -20591,12 +20331,37 @@ ${pivotHtml('Menções (Pós abertura de OS)', '#4c1d95', data.mencoes)}
 
     const resFin = document.getElementById('atRelGerResumoFin');
     if (resFin) {
+      const totalMo = kpis.total_mo || 0;
+      const totalEnvio = kpis.total_envio || 0;
+      const totalPecas = kpis.total_pecas || 0;
+      const totalGeral = kpis.total_custo_geral || (totalMo + totalEnvio + totalPecas);
+      const pct = (v) => totalGeral > 0 ? Math.round((v / totalGeral) * 1000) / 10 : 0;
       resFin.innerHTML = `
-        <div><strong>Total M.O. informada:</strong> ${MOEDA.format(kpis.total_mo || 0)}</div>
-        <div><strong>Custo médio por O.S.:</strong> ${MOEDA.format(kpis.custo_medio || 0)}</div>
-        <div><strong>O.S. concluídas:</strong> ${kpis.concluidas || 0} de ${kpis.total_os || 0}</div>
-        <div><strong>Taxa de conclusão:</strong> ${kpis.total_os ? Math.round((kpis.concluidas / kpis.total_os) * 100) : 0}%</div>
+        <div><strong>Mão de obra:</strong> ${MOEDA.format(totalMo)} <span style="color:#94a3b8;">(${pct(totalMo)}%)</span></div>
+        <div><strong>Peças enviadas (CMC):</strong> ${MOEDA.format(totalPecas)} <span style="color:#94a3b8;">(${pct(totalPecas)}%)</span></div>
+        <div><strong>Frete / postagem:</strong> ${MOEDA.format(totalEnvio)} <span style="color:#94a3b8;">(${pct(totalEnvio)}%)</span></div>
+        <div style="margin-top:6px;padding-top:6px;border-top:1px solid #e2e8f0;"><strong>Custo total:</strong> ${MOEDA.format(totalGeral)}</div>
+        <div><strong>O.S. com custo:</strong> ${kpis.os_com_custo || 0}</div>
+        <div><strong>Custo médio / O.S. com custo:</strong> ${MOEDA.format(kpis.custo_medio_geral || 0)}</div>
+        <div style="margin-top:4px;color:#64748b;"><strong>O.S. concluídas:</strong> ${kpis.concluidas || 0} de ${kpis.total_os || 0}
+          (${kpis.total_os ? Math.round((kpis.concluidas / kpis.total_os) * 100) : 0}%)</div>
       `;
+    }
+
+    const finKpis = document.getElementById('atRelGerFinKpis');
+    if (finKpis) {
+      const cards = [
+        { label: 'Mão de obra', value: MOEDA.format(kpis.total_mo || 0), cor: '#0369a1' },
+        { label: 'Peças (CMC)', value: MOEDA.format(kpis.total_pecas || 0), cor: '#7c3aed' },
+        { label: 'Envios / frete', value: MOEDA.format(kpis.total_envio || 0), cor: '#047857' },
+        { label: 'Custo total', value: MOEDA.format(kpis.total_custo_geral || 0), cor: '#b45309' },
+      ];
+      finKpis.innerHTML = cards.map(c => `
+        <div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:10px 12px;">
+          <div style="font-size:10px;color:#64748b;text-transform:uppercase;letter-spacing:.03em;">${_esc(c.label)}</div>
+          <div style="font-size:18px;font-weight:800;color:${c.cor};margin-top:2px;">${c.value}</div>
+        </div>
+      `).join('');
     }
 
     const banner = document.getElementById('atRelGerTotalOsBanner');
@@ -20657,6 +20422,7 @@ ${pivotHtml('Menções (Pós abertura de OS)', '#4c1d95', data.mencoes)}
 
       _destroyAllCharts();
       if (modo !== 'mes') _relGerLote3m = false;
+      _relGerLoteFiltroTag = null;
       _relGerData = data;
       _relGerTextos = _resolverTextos(data);
       _montarEstruturaPaginas();
@@ -20684,9 +20450,71 @@ ${pivotHtml('Menções (Pós abertura de OS)', '#4c1d95', data.mencoes)}
     const chartInst = typeof Chart !== 'undefined' ? Chart.getChart(canvas) : null;
     if (chartInst) {
       try {
+        chartInst.options.animation = false;
         chartInst.resize();
         chartInst.update('none');
       } catch (_) { /* segue para captura */ }
+      // Render offscreen em tamanho fixo — evita pizza pela metade (canvas oculto/estreito)
+      try {
+        const isPie = chartInst.config?.type === 'pie' || chartInst.config?.type === 'doughnut';
+        const w = isPie ? 420 : 560;
+        const h = isPie ? 260 : 280;
+        const off = document.createElement('canvas');
+        off.width = w * 2;
+        off.height = h * 2;
+        off.style.cssText = `position:fixed;left:-99999px;top:0;width:${w}px;height:${h}px;visibility:hidden;pointer-events:none;`;
+        document.body.appendChild(off);
+        const dataClone = JSON.parse(JSON.stringify(chartInst.data));
+        const optsSrc = chartInst.options || {};
+        const indexAxis = optsSrc.indexAxis || undefined;
+        const stacked = !!(optsSrc.scales?.x?.stacked || optsSrc.scales?.y?.stacked);
+        const hasY1 = !!(optsSrc.scales?.y1);
+        const scalesPdf = isPie ? undefined : {
+          x: {
+            stacked,
+            ticks: { color: '#64748b', font: { size: 9 }, maxRotation: 40, autoSkip: true },
+            grid: { color: '#e8eef5' },
+          },
+          y: {
+            stacked,
+            beginAtZero: true,
+            ticks: { color: '#64748b', font: { size: 9 } },
+            grid: { color: '#e8eef5' },
+          },
+          ...(hasY1 ? {
+            y1: {
+              position: 'right',
+              beginAtZero: true,
+              grid: { drawOnChartArea: false },
+              ticks: { color: '#64748b', font: { size: 9 } },
+            },
+          } : {}),
+        };
+        const temp = new Chart(off.getContext('2d'), {
+          type: chartInst.config.type,
+          data: dataClone,
+          options: {
+            responsive: false,
+            maintainAspectRatio: false,
+            animation: false,
+            devicePixelRatio: 2,
+            indexAxis,
+            plugins: {
+              legend: {
+                display: true,
+                position: isPie ? 'right' : (optsSrc.plugins?.legend?.position || 'top'),
+                labels: { color: '#334155', font: { size: 10 }, boxWidth: 10 },
+              },
+              tooltip: { enabled: false },
+            },
+            scales: scalesPdf,
+          },
+        });
+        const dataUrl = temp.toBase64Image('image/png', 1);
+        temp.destroy();
+        off.remove();
+        if (dataUrl && dataUrl.length > 30) return dataUrl;
+      } catch (_) { /* fallback abaixo */ }
       if (typeof chartInst.toBase64Image === 'function') {
         try {
           const dataUrl = chartInst.toBase64Image('image/png', 1);
@@ -20769,14 +20597,16 @@ ${pivotHtml('Menções (Pós abertura de OS)', '#4c1d95', data.mencoes)}
       _renderChartsSecao(sec, data);
     }
     await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
-    await new Promise(r => setTimeout(r, 120));
+    await new Promise(r => setTimeout(r, 180));
     Object.values(_charts).forEach(ch => {
       try {
+        if (ch?.options) ch.options.animation = false;
         ch?.resize?.();
         ch?.update?.('none');
       } catch (_) { /* ignora */ }
     });
     await _aguardarChartsSecao(sec);
+    await new Promise(r => setTimeout(r, 60));
   }
 
   function _pdfHeader(periodo, tipoLabel) {
@@ -20790,8 +20620,8 @@ ${pivotHtml('Menções (Pós abertura de OS)', '#4c1d95', data.mencoes)}
       <div class="pdf-bar"></div>`;
   }
 
-  function _pdfFooter(pg) {
-    return `<div class="pdf-ftr"><div class="pdf-slogan">Qualidade que transforma. Conforto que dura.</div><div class="pdf-pg">Página ${pg} de ${SECOES.length}</div></div>`;
+  function _pdfFooter(pg, total) {
+    return `<div class="pdf-ftr"><div class="pdf-slogan">Qualidade que transforma. Conforto que dura.</div><div class="pdf-pg">Página ${pg} de ${total}</div></div>`;
   }
 
   async function _exportarPdf() {
@@ -20872,11 +20702,27 @@ ${pivotHtml('Menções (Pós abertura de OS)', '#4c1d95', data.mencoes)}
         return `<tr><td>${_esc(r.tag)}</td><td class="r">${r.total}</td><td class="r">${pct}%</td></tr>`;
       }).join('') || '<tr><td colspan="3">—</td></tr>';
       const paretoTbl = (d.pareto || []).map(r => `<tr><td>${_esc(r.tag)}</td><td class="r">${r.total}</td><td class="r">${r.pct}%</td><td class="r">${r.pct_acum}%</td></tr>`).join('') || '<tr><td colspan="4">—</td></tr>';
-      const finTbl = (d.financeiro || []).map(r => `<tr><td>${_esc(r.os)}</td><td>${_esc(r.estado || '-')}</td><td>${_fmtData(r.data)}</td><td class="r">${MOEDA.format(r.valor_mo || 0)}</td></tr>`).join('') || '<tr><td colspan="4">—</td></tr>';
+      const finTbl = (d.financeiro || []).map(r =>
+        `<tr><td>${_esc(r.os)}</td><td>${_esc(r.estado || '-')}</td><td>${_fmtData(r.data)}</td>` +
+        `<td class="r">${MOEDA.format(r.valor_mo || 0)}</td>` +
+        `<td class="r">${MOEDA.format(r.valor_pecas || 0)}</td>` +
+        `<td class="r">${MOEDA.format(r.valor_envio || 0)}</td>` +
+        `<td class="r">${MOEDA.format(r.valor_total || 0)}</td></tr>`
+      ).join('') || '<tr><td colspan="7">—</td></tr>';
+      const topPecasTbl = (d.top_pecas_custo || []).slice(0, 10).map(r =>
+        `<tr><td>${_esc(r.codigo)}</td><td>${_esc(r.descricao)}</td><td class="r">${r.quantidade || 0}</td><td class="r">${MOEDA.format(r.valor_total || 0)}</td></tr>`
+      ).join('') || '<tr><td colspan="4">—</td></tr>';
 
       const obsHtml = (d.pareto || []).slice(0, 5).map(r =>
         `<li><b>${_esc(r.tag)}</b> — ${r.total} ocorrência(s) (${r.pct}%)</li>`
       ).join('') || '<li>Nenhuma ocorrência.</li>';
+      const finResumoPdf = `
+        <p style="font-size:10px;color:#475569;margin-bottom:8px;">
+          M.O.: <b>${MOEDA.format(kpis.total_mo || 0)}</b> ·
+          Peças (CMC): <b>${MOEDA.format(kpis.total_pecas || 0)}</b> ·
+          Frete: <b>${MOEDA.format(kpis.total_envio || 0)}</b> ·
+          Total: <b>${MOEDA.format(kpis.total_custo_geral || 0)}</b>
+        </p>`;
 
       const textosPdf = _coletarTextosForm();
       const concHtml = _htmlConclusaoParaPdf(textosPdf);
@@ -20897,65 +20743,110 @@ ${pivotHtml('Menções (Pós abertura de OS)', '#4c1d95', data.mencoes)}
       `).join('') || '<p>—</p>';
       const loteJanela = lote.janela_3m || {};
       const loteResumoPdf = multi
-        ? `Período ${periodo}: <strong>${loteJanela.total_maquinas || 0}</strong> máquina(s) com data de entrega entre ${_esc(loteJanela.inicio || '—')} e ${_esc(loteJanela.fim || '—')}.`
-        : `Janela de 3 meses (${_esc(loteJanela.inicio || '—')} a ${_esc(loteJanela.fim || '—')}): <strong>${loteJanela.total_maquinas || 0}</strong> máquina(s) com data de entrega no período.`;
+        ? `Período ${periodo}: <strong>${loteJanela.total_maquinas || 0}</strong> máquina(s) com O.S. abertas entre ${_esc(loteJanela.inicio || '—')} e ${_esc(loteJanela.fim || '—')} (sem data de produção → "S/ Dt produção").`
+        : `Janela de 3 meses (${_esc(loteJanela.inicio || '—')} a ${_esc(loteJanela.fim || '—')}): <strong>${loteJanela.total_maquinas || 0}</strong> máquina(s) no período (sem data de produção → "S/ Dt produção").`;
       const loteModeloResumo = (lote.por_modelo_janela_3m || []).slice(0, 8)
         .map(r => `${_esc(r.modelo)} (${r.total})`).join(', ') || '—';
 
-      const pg = (n) => _pdfFooter(n);
+      const PDF_TOTAL = 5;
+      const pg = (n) => _pdfFooter(n, PDF_TOTAL);
       const pages = [
-        `<div class="pdf-page">${pdfHdr()}<div class="sec">Dashboard Executivo</div><div class="kpis">${kpiHtml}</div><div class="row">${imgs.status ? `<div class="box"><h3>Status</h3><img src="${imgs.status}"></div>` : ''}${imgs.moEstado ? `<div class="box"><h3>M.O. por Estado</h3><img src="${imgs.moEstado}"></div>` : ''}</div>${pg(1)}</div>`,
-        `<div class="pdf-page">${pdfHdr()}<div class="sec">Distribuição Geográfica</div><div class="row">${imgs.estado ? `<div class="box"><h3>Por Estado</h3><img src="${imgs.estado}"></div>` : ''}${imgs.estadoDonut ? `<div class="box"><h3>% por Estado</h3><img src="${imgs.estadoDonut}"></div>` : ''}</div>${pg(2)}</div>`,
-        `<div class="pdf-page">${pdfHdr()}<div class="sec">Modelos com Maior Incidência</div><div class="row">${imgs.modelo ? `<div class="box"><h3>Gráfico</h3><img src="${imgs.modelo}"></div>` : ''}<div class="box"><h3>Tabela</h3><table><thead><tr><th>Modelo</th><th class="r">Qtd</th></tr></thead><tbody>${modTbl}</tbody></table></div></div>${pg(3)}</div>`,
-        `<div class="pdf-page">${pdfHdr()}<div class="sec">Análise por Tipo de Defeito</div><div class="row"><div class="box"><h3>Tabela</h3><table><thead><tr><th>Tag</th><th class="r">Qtd</th><th class="r">%</th></tr></thead><tbody>${tagTbl}</tbody></table></div>${imgs.tag ? `<div class="box"><h3>Gráfico</h3><img src="${imgs.tag}"></div>` : ''}</div>${pg(4)}</div>`,
-        `<div class="pdf-page">${pdfHdr()}<div class="sec">Evolução dos Chamados</div><div class="row">${imgs.semana ? `<div class="box"><h3>Por semana</h3><img src="${imgs.semana}"></div>` : ''}${imgs.statusEvol ? `<div class="box"><h3>Status no mês</h3><img src="${imgs.statusEvol}"></div>` : ''}</div>${pg(5)}</div>`,
-        `<div class="pdf-page">${pdfHdr()}<div class="sec">Pareto (80/20)</div>${imgs.pareto ? `<div class="box"><img src="${imgs.pareto}"></div>` : ''}<table><thead><tr><th>Tag</th><th class="r">Qtd</th><th class="r">%</th><th class="r">Acum.</th></tr></thead><tbody>${paretoTbl}</tbody></table>${pg(6)}</div>`,
-        `<div class="pdf-page">${pdfHdr()}<div class="sec">Análise Financeira</div><ul>${obsHtml}</ul><table><thead><tr><th>O.S.</th><th>UF</th><th>Data</th><th class="r">M.O.</th></tr></thead><tbody>${finTbl}</tbody></table>${pg(7)}</div>`,
-        `<div class="pdf-page">${pdfHdr()}<div class="sec">Análise de Lote — por data de entrega e modelo</div><p style="margin-bottom:10px;font-size:10px;color:#475569;">${loteResumoPdf} Principais modelos: ${loteModeloResumo}.</p>${imgs.lote ? `<div class="box"><h3>Problemas por mês de entrega e modelo</h3><img src="${imgs.lote}"></div>` : ''}<div class="box"><h3>Top 5 defeitos — distribuição por modelo</h3>${loteDefPdfHtml}</div>${pg(8)}</div>`,
-        `<div class="pdf-page">${pdfHdr()}<div class="sec">Plano de Ação</div>${planoHtml}${pg(9)}</div>`,
-        `<div class="pdf-page">${pdfHdr()}<div class="sec">Conclusão Executiva</div>${concHtml}<div class="total-banner"><div class="lbl">${multi ? 'Total de O.S. no período' : 'Total de O.S. no mês'}</div><div class="val">${kpis.total_os || 0}</div></div>${pg(10)}</div>`,
+        // 1) Dashboard + Geográfico
+        `<div class="pdf-page">${pdfHdr()}
+          <div class="sec">Dashboard Executivo</div>
+          <div class="kpis">${kpiHtml}</div>
+          <div class="row">${imgs.status ? `<div class="box chart-box"><h3>Status</h3><img class="chart-img" src="${imgs.status}"></div>` : ''}${imgs.moEstado ? `<div class="box chart-box"><h3>M.O. por Estado</h3><img class="chart-img" src="${imgs.moEstado}"></div>` : ''}</div>
+          <div class="sec">Distribuição Geográfica</div>
+          <div class="row">${imgs.estado ? `<div class="box chart-box"><h3>Por Estado</h3><img class="chart-img" src="${imgs.estado}"></div>` : ''}${imgs.estadoDonut ? `<div class="box chart-box"><h3>% por Estado</h3><img class="chart-img" src="${imgs.estadoDonut}"></div>` : ''}</div>
+          ${pg(1)}</div>`,
+        // 2) Modelos + Defeitos + Evolução
+        `<div class="pdf-page">${pdfHdr()}
+          <div class="sec">Modelos com Maior Incidência</div>
+          <div class="row">${imgs.modelo ? `<div class="box chart-box"><h3>Gráfico</h3><img class="chart-img" src="${imgs.modelo}"></div>` : ''}<div class="box"><h3>Tabela</h3><table><thead><tr><th>Modelo</th><th class="r">Qtd</th></tr></thead><tbody>${modTbl}</tbody></table></div></div>
+          <div class="sec">Análise por Tipo de Defeito</div>
+          <div class="row"><div class="box"><h3>Tabela</h3><table><thead><tr><th>Tag</th><th class="r">Qtd</th><th class="r">%</th></tr></thead><tbody>${tagTbl}</tbody></table></div>${imgs.tag ? `<div class="box chart-box"><h3>Gráfico</h3><img class="chart-img" src="${imgs.tag}"></div>` : ''}</div>
+          <div class="sec">Evolução dos Chamados</div>
+          <div class="row">${imgs.semana ? `<div class="box chart-box"><h3>Por semana / mês</h3><img class="chart-img" src="${imgs.semana}"></div>` : ''}${imgs.statusEvol ? `<div class="box chart-box"><h3>Status no período</h3><img class="chart-img" src="${imgs.statusEvol}"></div>` : ''}</div>
+          ${pg(2)}</div>`,
+        // 3) Pareto + Financeiro
+        `<div class="pdf-page">${pdfHdr()}
+          <div class="sec">Pareto (80/20)</div>
+          ${imgs.pareto ? `<div class="box chart-box" style="margin-bottom:10px;"><img class="chart-img wide" src="${imgs.pareto}"></div>` : ''}
+          <table><thead><tr><th>Tag</th><th class="r">Qtd</th><th class="r">%</th><th class="r">Acum.</th></tr></thead><tbody>${paretoTbl}</tbody></table>
+          <div class="sec">Análise Técnica e Financeira</div>
+          ${finResumoPdf}
+          <ul>${obsHtml}</ul>
+          <table><thead><tr><th>O.S.</th><th>UF</th><th>Data</th><th class="r">M.O.</th><th class="r">Peças</th><th class="r">Envio</th><th class="r">Total</th></tr></thead><tbody>${finTbl}</tbody></table>
+          <div class="box" style="margin-top:8px;"><h3>Top peças por custo (CMC)</h3>
+            <table><thead><tr><th>Código</th><th>Descrição</th><th class="r">Qtd</th><th class="r">Custo</th></tr></thead><tbody>${topPecasTbl}</tbody></table>
+          </div>
+          ${pg(3)}</div>`,
+        // 4) Lote
+        `<div class="pdf-page">${pdfHdr()}
+          <div class="sec">Análise de Lote — por data de produção e modelo</div>
+          <p style="margin-bottom:8px;font-size:10px;color:#475569;">${loteResumoPdf} Principais modelos: ${loteModeloResumo}.</p>
+          ${imgs.lote ? `<div class="box chart-box"><h3>Problemas por mês de produção e modelo</h3><img class="chart-img wide" src="${imgs.lote}"></div>` : ''}
+          <div class="box" style="margin-top:8px;"><h3>Top 5 defeitos — distribuição por modelo</h3>${loteDefPdfHtml}</div>
+          ${pg(4)}</div>`,
+        // 5) Plano + Conclusão
+        `<div class="pdf-page">${pdfHdr()}
+          <div class="sec">Plano de Ação</div>
+          ${planoHtml}
+          <div class="sec">Conclusão Executiva</div>
+          ${concHtml}
+          <div class="total-banner"><div class="lbl">${multi ? 'Total de O.S. no período' : 'Total de O.S. no mês'}</div><div class="val">${kpis.total_os || 0}</div></div>
+          ${pg(5)}</div>`,
       ].join('');
 
       const html = `<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8">
 <title>Relatório Gerencial AT — ${periodo}</title>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { font-family: Segoe UI, Arial, sans-serif; font-size: 11px; color: #1e293b; background: #fff; }
-  .pdf-page { page-break-after: always; padding: 20px 28px 16px; min-height: 100vh; display: flex; flex-direction: column; }
+  body { font-family: Segoe UI, Arial, sans-serif; font-size: 10.5px; color: #1e293b; background: #fff; }
+  .pdf-page { page-break-after: always; padding: 14px 22px 12px; display: flex; flex-direction: column; }
   .pdf-page:last-child { page-break-after: auto; }
-  .pdf-hdr { display: grid; grid-template-columns: 1fr 2fr 1fr; gap: 12px; align-items: center; margin-bottom: 8px; }
+  .pdf-hdr { display: grid; grid-template-columns: 1fr 2fr 1fr; gap: 10px; align-items: center; margin-bottom: 6px; }
   .pdf-brand { display: flex; gap: 8px; align-items: center; }
-  .pdf-logo { width: 36px; height: 36px; border-radius: 8px; background: #1e3a5f; color: #fff; font-weight: 900; display: flex; align-items: center; justify-content: center; }
-  .pdf-name { font-size: 13px; font-weight: 800; color: #1e3a5f; }
-  .pdf-sub { font-size: 8px; color: #64748b; letter-spacing: .06em; }
+  .pdf-logo { width: 32px; height: 32px; border-radius: 8px; background: #1e3a5f; color: #fff; font-weight: 900; display: flex; align-items: center; justify-content: center; font-size: 12px; }
+  .pdf-name { font-size: 12px; font-weight: 800; color: #1e3a5f; }
+  .pdf-sub { font-size: 7px; color: #64748b; letter-spacing: .06em; }
   .pdf-title { text-align: center; }
-  .pdf-type { font-size: 10px; font-weight: 800; color: #1e3a5f; text-transform: uppercase; }
-  .pdf-per { font-size: 16px; font-weight: 900; color: #ea580c; }
-  .pdf-meta { font-size: 9px; color: #475569; text-align: right; line-height: 1.5; }
-  .pdf-bar { height: 3px; background: linear-gradient(90deg,#1e3a5f,#0ea5e9,#f59e0b); border-radius: 2px; margin-bottom: 12px; }
-  .sec { background: #1e3a5f; color: #fff; padding: 8px 12px; border-radius: 6px; font-weight: 800; font-size: 12px; margin-bottom: 12px; }
-  .kpis { display: grid; grid-template-columns: repeat(4,1fr); gap: 8px; margin-bottom: 12px; }
-  .kpi { border: 1px solid #e2e8f0; border-radius: 6px; padding: 8px; background: #f8fafc; }
-  .kpi .lbl { font-size: 8px; color: #64748b; text-transform: uppercase; font-weight: 700; }
-  .kpi .val { font-size: 15px; font-weight: 900; color: #1e3a5f; margin-top: 2px; }
-  .row { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
-  .box { flex: 1; min-width: 200px; border: 1px solid #e2e8f0; border-radius: 6px; padding: 8px; }
-  .box h3 { font-size: 11px; color: #1e3a5f; margin-bottom: 6px; }
+  .pdf-type { font-size: 9px; font-weight: 800; color: #1e3a5f; text-transform: uppercase; }
+  .pdf-per { font-size: 14px; font-weight: 900; color: #ea580c; }
+  .pdf-meta { font-size: 8px; color: #475569; text-align: right; line-height: 1.45; }
+  .pdf-bar { height: 3px; background: linear-gradient(90deg,#1e3a5f,#0ea5e9,#f59e0b); border-radius: 2px; margin-bottom: 8px; }
+  .sec { background: #1e3a5f; color: #fff; padding: 6px 10px; border-radius: 6px; font-weight: 800; font-size: 11px; margin: 8px 0 8px; page-break-after: avoid; }
+  .sec:first-of-type { margin-top: 0; }
+  .kpis { display: grid; grid-template-columns: repeat(4,1fr); gap: 6px; margin-bottom: 8px; }
+  .kpi { border: 1px solid #e2e8f0; border-radius: 6px; padding: 6px 8px; background: #f8fafc; }
+  .kpi .lbl { font-size: 7px; color: #64748b; text-transform: uppercase; font-weight: 700; }
+  .kpi .val { font-size: 13px; font-weight: 900; color: #1e3a5f; margin-top: 1px; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; align-items: stretch; }
+  .box { flex: 1; min-width: 180px; border: 1px solid #e2e8f0; border-radius: 6px; padding: 6px 8px; page-break-inside: avoid; }
+  .box h3 { font-size: 10px; color: #1e3a5f; margin-bottom: 4px; }
+  .chart-box { display: flex; flex-direction: column; align-items: center; }
+  .chart-img { max-width: 100%; max-height: 200px; width: auto; height: auto; object-fit: contain; display: block; margin: 0 auto; }
+  .chart-img.wide { max-height: 230px; }
   img { max-width: 100%; height: auto; }
-  table { width: 100%; border-collapse: collapse; font-size: 10px; margin-bottom: 10px; }
-  th { background: #1e3a5f; color: #fff; padding: 5px 8px; text-align: left; }
-  td { padding: 5px 8px; border-bottom: 1px solid #e2e8f0; }
+  table { width: 100%; border-collapse: collapse; font-size: 9px; margin-bottom: 6px; }
+  th { background: #1e3a5f; color: #fff; padding: 4px 6px; text-align: left; }
+  td { padding: 3px 6px; border-bottom: 1px solid #e2e8f0; }
   th.r, td.r { text-align: right; }
-  ul { padding-left: 16px; margin-bottom: 10px; line-height: 1.6; }
-  .pdf-ftr { margin-top: auto; padding-top: 10px; border-top: 2px solid #e2e8f0; display: flex; justify-content: space-between; font-size: 9px; color: #64748b; }
+  ul { padding-left: 14px; margin-bottom: 6px; line-height: 1.45; }
+  .pdf-ftr { margin-top: auto; padding-top: 8px; border-top: 2px solid #e2e8f0; display: flex; justify-content: space-between; font-size: 8px; color: #64748b; }
   .pdf-slogan { font-style: italic; color: #1e3a5f; font-weight: 600; }
   .pdf-pg { font-weight: 700; color: #ea580c; }
-  .total-banner { text-align: center; padding: 16px; background: #1e3a5f; color: #fff; border-radius: 8px; margin-top: 12px; }
-  .total-banner .lbl { font-size: 10px; opacity: .85; }
-  .total-banner .val { font-size: 28px; font-weight: 900; }
-  @media print { .pdf-page { min-height: auto; } }
+  .total-banner { text-align: center; padding: 12px; background: #1e3a5f; color: #fff; border-radius: 8px; margin-top: 10px; }
+  .total-banner .lbl { font-size: 9px; opacity: .85; }
+  .total-banner .val { font-size: 24px; font-weight: 900; }
+  @media print {
+    .pdf-page { min-height: auto; padding: 10px 16px 8px; }
+    .chart-img { max-height: 190px; }
+    .chart-img.wide { max-height: 210px; }
+  }
+  @page { size: A4; margin: 10mm 8mm; }
 </style></head><body>${pages}
-<script>window.onload=function(){setTimeout(function(){window.print();},500);};</script></body></html>`;
+<script>window.onload=function(){setTimeout(function(){window.print();},600);};</script></body></html>`;
 
       const w = window.open('', '_blank');
       if (!w) throw new Error('Pop-up bloqueado. Permita pop-ups para exportar o PDF.');
@@ -20979,6 +20870,7 @@ ${pivotHtml('Menções (Pós abertura de OS)', '#4c1d95', data.mencoes)}
       document.getElementById('atRelGerTipo')?.addEventListener('change', _carregarRelatorio);
       document.getElementById('atRelGerAtualizarBtn')?.addEventListener('click', _carregarRelatorio);
       document.getElementById('atRelGerPdfBtn')?.addEventListener('click', _exportarPdf);
+      _wireLoteDetalheModal();
     }
     _carregarRelatorio();
   };
@@ -22079,6 +21971,92 @@ if (_atEmAnexarBtn && _atEmAnexarInput) {
     _atEmRenderChips();
   });
 }
+
+// Botão Fechamento PJ — anexa PDF OS e preenche campos de fechamento
+(function () {
+  const btn = document.getElementById('atFechamentoPjBtn');
+  const input = document.getElementById('atFechamentoPjInput');
+  if (!btn || !input) return;
+
+  const setBtnBusy = (busy) => {
+    btn.disabled = !!busy;
+    btn.innerHTML = busy
+      ? '<i class="fa-solid fa-spinner fa-spin"></i><span style="font-size:11px;font-weight:600;">Lendo PDF...</span>'
+      : '<i class="fa-solid fa-file-pdf"></i><span style="font-size:11px;font-weight:600;">Fechamento PJ</span>';
+  };
+
+  btn.addEventListener('click', () => {
+    if (!_atEditModalCurrentId) {
+      alert('Abra uma OS antes de anexar o Fechamento PJ.');
+      return;
+    }
+    input.value = '';
+    input.click();
+  });
+
+  input.addEventListener('change', async () => {
+    const file = input.files && input.files[0];
+    input.value = '';
+    if (!file) return;
+    const id = _atEditModalCurrentId;
+    if (!id) return;
+    if (!/\.pdf$/i.test(file.name) && file.type !== 'application/pdf') {
+      alert('Selecione um arquivo PDF da OS PJ.');
+      return;
+    }
+
+    setBtnBusy(true);
+    try {
+      const fd = new FormData();
+      fd.append('arquivo', file);
+      const r = await fetch(`/api/sac/at/fechamento-pj/${id}`, {
+        method: 'POST',
+        credentials: 'include',
+        body: fd,
+      });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok || data.ok === false) {
+        throw new Error(data.error || 'Falha ao processar PDF PJ.');
+      }
+
+      const fc = data.fechamento || {};
+      const setV = (elId, val) => {
+        const el = document.getElementById(elId);
+        if (!el || val == null || val === '') return;
+        el.value = val;
+      };
+      if (fc.valor_total_mao_obra != null) setV('atEmFechMO', fc.valor_total_mao_obra);
+      if (fc.data_conclusao_servico) setV('atEmFechData', String(fc.data_conclusao_servico).slice(0, 10));
+      if (fc.descricao_servico_realizado) setV('atEmFechServico', fc.descricao_servico_realizado);
+      if (fc.observacoes) setV('atEmFechObs', fc.observacoes);
+      if (fc.observacao_tecnico) setV('atEmFechObsTecnico', fc.observacao_tecnico);
+
+      // Atualiza cache da lista
+      const row = (_atAllRows || []).find((x) => String(x.id) === String(id));
+      if (row) {
+        if (fc.valor_total_mao_obra != null) row.fech_valor_mo = fc.valor_total_mao_obra;
+        if (fc.data_conclusao_servico) row.fech_data_conclusao = fc.data_conclusao_servico;
+        if (fc.descricao_servico_realizado) row.fech_descricao = fc.descricao_servico_realizado;
+        if (fc.observacoes) row.fech_obs = fc.observacoes;
+        if (fc.observacao_tecnico) row.fech_observacao_tecnico = fc.observacao_tecnico;
+        row.qtd_anexos = (Number(row.qtd_anexos) || 0) + 1;
+      }
+
+      await _atEmCarregarAnexosExistentes(id);
+
+      const saved = document.getElementById('atEmSavedMsg');
+      if (saved) {
+        saved.style.display = '';
+        saved.textContent = 'Fechamento PJ anexado e campos preenchidos.';
+        setTimeout(() => { saved.style.display = 'none'; }, 4000);
+      }
+    } catch (err) {
+      alert(err.message || 'Erro ao anexar Fechamento PJ.');
+    } finally {
+      setBtnBusy(false);
+    }
+  });
+})();
 
 // ── Modal Menção AT ──────────────────────────────────────────────────────────
 (function () {
@@ -83144,7 +83122,8 @@ window.initOscilacaoEstoque = (function () {
   // ── Cria Sol. de Separação automaticamente após VIPP bem-sucedido ───────────
   async function criarSolicitacaoSeparacaoVipp(itensDecl, osNum, observacao, idVipp, origemVipp, metodoEnvio) {
     if (!itensDecl || !itensDecl.length) return false;
-    var comentario = osNum ? ('OS' + osNum) : '';
+    var idAt = _vippOsIdAtual() || '';
+    var comentario = idAt ? ('OS' + idAt) : (osNum ? ('OS' + osNum) : '');
     // Usuário logado
     var nomeUser = '';
     try {
@@ -83202,7 +83181,8 @@ window.initOscilacaoEstoque = (function () {
           observacao:      observacao || null,
           item_ids:        _adicionados,
           forcar_novo_sep: true,
-          os_num:          osNum   || null,
+          os_num:          idAt || osNum || null,
+          id_at:           idAt ? parseInt(idAt, 10) : null,
           id_vipp:         idVipp  || null,
           metodo_envio:    metodoEnvio || null,
           conteudo:        itensDecl.length ? JSON.stringify(itensDecl.map(function(it) {
@@ -83250,8 +83230,11 @@ window.initOscilacaoEstoque = (function () {
       return { conteudo: it.descricao || '', quantidade: String(parseInt(it.quantidade, 10) || 1) };
     });
     var conteudoJson = conteudoItems.length ? JSON.stringify(conteudoItems) : null;
+    var idAt = _vippOsIdAtual() || '';
     var obsEl = document.getElementById('vippObservacao');
-    var observacao = osNum ? ('OS' + osNum) : ((obsEl && obsEl.value) ? obsEl.value.trim() : '');
+    var observacao = idAt
+      ? ('OS' + idAt)
+      : (osNum ? ('OS' + osNum) : ((obsEl && obsEl.value) ? obsEl.value.trim() : ''));
 
     try {
       var _resp = await fetch('/api/sac/solicitacoes/vipp', {
@@ -83263,7 +83246,8 @@ window.initOscilacaoEstoque = (function () {
           observacao: observacao,
           id_vipp:    idVipp || null,
           conteudo:   conteudoJson,
-          metodo_envio: metodoEnvio || null
+          metodo_envio: metodoEnvio || null,
+          id_at:      idAt ? parseInt(idAt, 10) : null
         })
       });
       var _d = await _resp.json();

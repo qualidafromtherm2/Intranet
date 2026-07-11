@@ -547,18 +547,6 @@
     </a>
 
     <a href="#"
-       id="menu-sac-at-graficos"
-       class="menu-link"
-       data-nav-key="side:sac:at-graficos"
-       data-nav-parent="side:sac"
-       data-nav-pos="side"
-       data-nav-label="Gráfico AT"
-       data-nav-selector="#menu-sac-at-graficos">
-      <i class="fa-solid fa-chart-line" style="margin-right:8px;"></i>
-      Gráfico AT
-    </a>
-
-    <a href="#"
        id="menu-sac-at-relatorio"
        class="menu-link"
        data-nav-key="side:sac:at-relatorio"
@@ -3929,12 +3917,18 @@
 
                 <div class="form-field">
                   <label for="atTelefone">Telefone</label>
-                  <input id="atTelefone" type="text" placeholder="(00) 00000-0000" style="width:100%;" />
+                  <div class="at-combobox-wrapper">
+                    <input id="atTelefone" type="text" placeholder="(00) 00000-0000" autocomplete="off" style="width:100%;" />
+                    <div id="atTelefoneDropdown" class="at-combobox-dropdown" style="max-height:260px;"></div>
+                  </div>
                 </div>
 
                 <div class="form-field">
                   <label for="atNomeRevendaCliente">Nome Revenda/Cliente</label>
-                  <input id="atNomeRevendaCliente" type="text" placeholder="Nome da revenda ou cliente" style="width:100%;" />
+                  <div class="at-combobox-wrapper">
+                    <input id="atNomeRevendaCliente" type="text" placeholder="Nome da revenda ou cliente" autocomplete="off" style="width:100%;" />
+                    <div id="atNomeRevendaDropdown" class="at-combobox-dropdown" style="max-height:260px;"></div>
+                  </div>
                 </div>
 
                 <div class="form-field at-campo-fullonly">
@@ -4128,8 +4122,9 @@
                       </div>
 
                       <div id="atFiltroIncluirNfAtWrap" style="margin-bottom:12px;">
-                        <label style="display:flex;align-items:flex-start;gap:8px;font-size:12px;color:#cbd5e1;cursor:pointer;line-height:1.35;">
-                          <input id="atFiltroIncluirNfAt" type="checkbox" style="margin-top:2px;accent-color:#0ea5e9;">
+                        <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:#cbd5e1;cursor:pointer;line-height:1.3;">
+                          <input id="atFiltroIncluirNfAt" type="checkbox"
+                            style="width:14px;height:14px;margin:0;flex-shrink:0;accent-color:#0ea5e9;cursor:pointer;">
                           <span>Incluir <strong style="color:#f59e0b;">Aguardando NF AT</strong> na guia principal</span>
                         </label>
                       </div>
@@ -4832,6 +4827,13 @@
                   <img src="https://vipp.visualset.com.br/vipp/img/logo-visualset5.png" alt="VIPP" style="width:14px;height:14px;object-fit:contain;">
                   <span style="font-size:11px;font-weight:600;">Correios</span>
                 </button>
+                <!-- Botão Fechamento PJ (anexa PDF OS e preenche fechamento) -->
+                <button id="atFechamentoPjBtn" type="button" title="Anexar PDF da OS PJ e preencher fechamento"
+                  style="background:rgba(34,197,94,.12);border:1px solid rgba(34,197,94,.45);color:#4ade80;border-radius:8px;padding:5px 10px;cursor:pointer;font-size:13px;display:flex;align-items:center;gap:5px;transition:background .2s;">
+                  <i class="fa-solid fa-file-pdf"></i>
+                  <span style="font-size:11px;font-weight:600;">Fechamento PJ</span>
+                </button>
+                <input type="file" id="atFechamentoPjInput" accept="application/pdf,.pdf" style="display:none;">
                 <!-- Botão Status OS -->
                 <div style="position:relative;">
                   <button id="atStatusOsBtn" type="button" title="Alterar status da OS"
@@ -5274,6 +5276,12 @@
                   AS PEÇAS E A MÃO DE OBRA QUE NÃO CARACTERIZAM DEFEITO DE FABRICAÇÃO, CONFORME MANUAL DO EQUIPAMENTO,<br>
                   SERÃO COBRADAS DO CLIENTE/SOLICITANTE.
                 </p>
+              </div>
+
+              <!-- EVIDÊNCIAS -->
+              <div id="atOsEvidenciasSection" style="display:none;">
+                <div class="at-os-section-bar">EVIDÊNCIAS</div>
+                <div id="atOsEvidenciasBody"></div>
               </div>
 
               <!-- PEÇAS ENVIADAS -->
@@ -5793,107 +5801,6 @@
           </div>
         </div>
 
-        <!-- Painel Gráfico AT -->
-        <div id="sacAtGraficosPane" class="tab-pane" style="display:none;">
-          <div class="content-wrapper">
-            <div class="content-section" style="margin-top:0;">
-              <div class="title-wrapper" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:0;">
-                <div class="content-section-title" style="display:flex;align-items:center;gap:8px;">
-                  <i class="fa-solid fa-chart-line" style="color:#818cf8;"></i>
-                  Gráfico AT
-                </div>
-                <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-left:auto;">
-                  <!-- Filtro Período -->
-                  <div style="display:flex;gap:6px;">
-                    <button class="at-graf-periodo-btn-pg" data-per="3" style="padding:5px 12px;border-radius:8px;border:1px solid #4f46e5;background:rgba(79,70,229,.25);color:#a5b4fc;font-size:12px;cursor:pointer;">3 meses</button>
-                    <button class="at-graf-periodo-btn-pg" data-per="6" style="padding:5px 12px;border-radius:8px;border:1px solid #374151;background:rgba(255,255,255,.04);color:#9ca3af;font-size:12px;cursor:pointer;">6 meses</button>
-                    <button class="at-graf-periodo-btn-pg" data-per="12" style="padding:5px 12px;border-radius:8px;border:1px solid #374151;background:rgba(255,255,255,.04);color:#9ca3af;font-size:12px;cursor:pointer;">12 meses</button>
-                    <button class="at-graf-periodo-btn-pg" data-per="0" style="padding:5px 12px;border-radius:8px;border:1px solid #374151;background:rgba(255,255,255,.04);color:#9ca3af;font-size:12px;cursor:pointer;">Tudo</button>
-                  </div>
-                  <!-- Filtro Tipo -->
-                  <div style="display:flex;gap:6px;border-left:1px solid #1e293b;padding-left:8px;">
-                    <button class="at-graf-tipo-btn-pg" data-tipo="Qualidade" style="padding:5px 12px;border-radius:8px;border:1px solid #10b981;background:rgba(16,185,129,.22);color:#6ee7b7;font-size:12px;cursor:pointer;">Qualidade</button>
-                    <button class="at-graf-tipo-btn-pg" data-tipo="Atendimento Rápido" style="padding:5px 12px;border-radius:8px;border:1px solid #374151;background:rgba(255,255,255,.04);color:#9ca3af;font-size:12px;cursor:pointer;">Atend. Rápido</button>
-                    <button class="at-graf-tipo-btn-pg" data-tipo="" style="padding:5px 12px;border-radius:8px;border:1px solid #374151;background:rgba(255,255,255,.04);color:#9ca3af;font-size:12px;cursor:pointer;">Todos</button>
-                  </div>
-                  <button id="atGrafPgRefreshBtn" type="button" title="Atualizar"
-                    style="padding:6px 12px;border-radius:8px;border:1px solid #374151;background:rgba(255,255,255,.04);color:#9ca3af;cursor:pointer;display:flex;align-items:center;gap:6px;font-size:13px;">
-                    <i class="fa-solid fa-rotate"></i>
-                  </button>
-                  <button id="atGrafPgRelatorioBtn" type="button" title="Gerar relatório PDF"
-                    style="padding:6px 14px;border-radius:8px;border:1px solid #f59e0b;background:rgba(245,158,11,.15);color:#fbbf24;cursor:pointer;display:flex;align-items:center;gap:6px;font-size:13px;font-weight:600;">
-                    <i class="fa-solid fa-file-pdf"></i> Relatório
-                  </button>
-                </div>
-              </div>
-
-              <!-- Gráfico 1 — Top Modelos -->
-              <div style="background:rgba(255,255,255,.03);border:1px solid #1e293b;border-radius:12px;padding:16px;margin-top:16px;">
-                <div style="font-size:13px;font-weight:700;color:#f59e0b;margin-bottom:12px;display:flex;align-items:center;gap:6px;">
-                  <i class="fa-solid fa-award"></i>
-                  Gráfico 1 — Top Modelos por Mês
-                </div>
-                <div id="atGrafPg0Status" style="font-size:12px;color:var(--inactive-color);margin-bottom:8px;display:none;">Carregando...</div>
-                <div style="position:relative;height:300px;">
-                  <canvas id="atGrafPg0Canvas"></canvas>
-                </div>
-              </div>
-
-              <!-- Gráfico 2 — Picos -->
-              <div style="background:rgba(255,255,255,.03);border:1px solid #1e293b;border-radius:12px;padding:16px;margin-top:18px;">
-                <div style="font-size:13px;font-weight:700;color:#34d399;margin-bottom:12px;display:flex;align-items:center;gap:6px;">
-                  <i class="fa-solid fa-chart-line"></i>
-                  Gráfico 2 — Picos de Atendimento por Mês
-                </div>
-                <div id="atGrafPg2Status" style="font-size:12px;color:var(--inactive-color);margin-bottom:8px;display:none;">Carregando...</div>
-                <div style="position:relative;height:280px;">
-                  <canvas id="atGrafPg2Canvas"></canvas>
-                </div>
-              </div>
-
-              <!-- Gráfico 3 — Por Estado/Mês -->
-              <div style="background:rgba(255,255,255,.03);border:1px solid #1e293b;border-radius:12px;padding:16px;margin-top:18px;">
-                <div style="font-size:13px;font-weight:700;color:#a5b4fc;margin-bottom:12px;display:flex;align-items:center;gap:6px;">
-                  <i class="fa-solid fa-map-location-dot"></i>
-                  Gráfico 3 — Atendimentos por Estado / Mês
-                </div>
-                <div id="atGrafPg1Status" style="font-size:12px;color:var(--inactive-color);margin-bottom:8px;display:none;">Carregando...</div>
-                <div style="position:relative;height:340px;">
-                  <canvas id="atGrafPg1Canvas"></canvas>
-                </div>
-              </div>
-
-              <!-- Detalhes do nó clicado -->
-              <div id="atGrafPgDetalhePanel" style="display:none;margin-top:18px;background:rgba(255,255,255,.03);border:1px solid #1e293b;border-radius:12px;padding:16px;">
-                <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap;">
-                  <i class="fa-solid fa-list-ul" style="color:#94a3b8;"></i>
-                  <span id="atGrafPgDetalheTitulo" style="font-size:13px;font-weight:700;color:#e5e7eb;"></span>
-                  <span id="atGrafPgDetalheQtd" style="font-size:11px;color:#94a3b8;margin-left:4px;"></span>
-                  <div style="margin-left:auto;position:relative;">
-                    <i class="fa-solid fa-magnifying-glass" style="position:absolute;left:10px;top:50%;transform:translateY(-50%);color:#6b7280;pointer-events:none;font-size:12px;"></i>
-                    <input id="atGrafPgDetalhePesquisa" type="text" placeholder="Pesquisar OS..."
-                      style="padding:6px 10px 6px 30px;background:#111827;border:1px solid #374151;border-radius:8px;color:#e5e7eb;font-size:12px;width:200px;">
-                  </div>
-                </div>
-                <div id="atGrafPgDetalheStatus" style="font-size:12px;color:var(--inactive-color);display:none;">Carregando...</div>
-                <div style="overflow-x:auto;">
-                  <table style="width:100%;border-collapse:collapse;font-size:13px;">
-                    <thead>
-                      <tr>
-                        <th style="text-align:left;padding:6px 10px;border-bottom:1px solid #374151;color:#94a3b8;font-size:11px;text-transform:uppercase;letter-spacing:.04em;white-space:nowrap;">OS</th>
-                        <th style="text-align:left;padding:6px 10px;border-bottom:1px solid #374151;color:#94a3b8;font-size:11px;text-transform:uppercase;letter-spacing:.04em;white-space:nowrap;">Data</th>
-                        <th style="text-align:left;padding:6px 10px;border-bottom:1px solid #374151;color:#94a3b8;font-size:11px;text-transform:uppercase;letter-spacing:.04em;">Reclamação</th>
-                      </tr>
-                    </thead>
-                    <tbody id="atGrafPgDetalheTbody"></tbody>
-                  </table>
-                </div>
-              </div>
-
-            </div>
-          </div>
-        </div>
-
         <!-- Painel Relatório Gerencial AT -->
         <div id="sacAtRelatorioPane" class="tab-pane" style="display:none;">
           <div class="content-wrapper">
@@ -5945,6 +5852,48 @@
                   </nav>
 
                   <div class="at-rel-ger-main" id="atRelGerPages"></div>
+                </div>
+              </div>
+
+              <!-- Modal detalhe Análise de Lote (barra / pizza) -->
+              <div id="atRelGerLoteDetalheModal" class="at-rel-ger-lote-modal" style="display:none;" role="dialog" aria-modal="true" aria-labelledby="atRelGerLoteDetalheTitulo">
+                <div class="at-rel-ger-lote-modal-card">
+                  <div class="at-rel-ger-lote-modal-head">
+                    <div>
+                      <div class="at-rel-ger-lote-modal-kicker">Análise de Lote</div>
+                      <h3 id="atRelGerLoteDetalheTitulo">Detalhe</h3>
+                      <div id="atRelGerLoteDetalheSub" class="at-rel-ger-lote-modal-sub"></div>
+                    </div>
+                    <button type="button" id="atRelGerLoteDetalheFechar" class="at-rel-ger-lote-modal-close" title="Fechar" aria-label="Fechar">
+                      <i class="fa-solid fa-xmark"></i>
+                    </button>
+                  </div>
+                  <div id="atRelGerLoteDetalheStatus" class="at-rel-ger-lote-modal-status">Carregando...</div>
+                  <div class="at-rel-ger-lote-modal-toolbar">
+                    <input id="atRelGerLoteDetalhePesquisa" type="text" placeholder="Pesquisar OS, pedido, OP, cliente...">
+                    <span id="atRelGerLoteDetalheQtd" class="at-rel-ger-lote-modal-qtd"></span>
+                  </div>
+                  <div class="at-rel-ger-lote-modal-body">
+                    <table class="at-rel-ger-lote-modal-tbl">
+                      <thead>
+                        <tr>
+                          <th>O.S.</th>
+                          <th>Data O.S.</th>
+                          <th>Modelo</th>
+                          <th>Pedido</th>
+                          <th>O.P.</th>
+                          <th>Produção</th>
+                          <th>Cliente</th>
+                          <th>NF</th>
+                          <th>Tag</th>
+                          <th>UF</th>
+                          <th>Status</th>
+                          <th>Reclamação</th>
+                        </tr>
+                      </thead>
+                      <tbody id="atRelGerLoteDetalheTbody"></tbody>
+                    </table>
+                  </div>
                 </div>
               </div>
             </div>
@@ -7993,6 +7942,46 @@
                 justify-content:center;
                 gap:12px;
               }
+              .at-os-evid-grupo { padding:8px 10px; border-bottom:1px solid #d1d5db; }
+              .at-os-evid-grupo-title {
+                font-size:11px; font-weight:800; color:#1e3a5f;
+                text-transform:uppercase; letter-spacing:.04em; margin-bottom:8px;
+              }
+              .at-os-evid-grid {
+                display:grid; grid-template-columns:repeat(auto-fill,minmax(110px,1fr)); gap:8px;
+              }
+              .at-os-evid-thumb {
+                display:flex; flex-direction:column; gap:4px; padding:0; border:1px solid #e2e8f0;
+                border-radius:8px; background:#fff; cursor:pointer; overflow:hidden; text-align:left;
+              }
+              .at-os-evid-thumb img { width:100%; height:90px; object-fit:cover; display:block; }
+              .at-os-evid-thumb span {
+                font-size:10px; color:#475569; padding:0 6px 6px; white-space:nowrap;
+                overflow:hidden; text-overflow:ellipsis;
+              }
+              .at-os-evid-list { display:flex; flex-direction:column; gap:6px; }
+              .at-os-evid-file {
+                display:flex; align-items:center; justify-content:space-between; gap:10px;
+                padding:6px 8px; border:1px solid #e5e7eb; border-radius:8px; background:#f8fafc;
+              }
+              .at-os-btn-etiqueta-zebra,
+              .at-os-btn-declaracao-zebra {
+                display:inline-flex; align-items:center; gap:4px;
+                padding:3px 8px; border-radius:6px; border:1px solid #bfdbfe;
+                background:#eff6ff; color:#1d4ed8; font-size:11px; font-weight:700; cursor:pointer;
+              }
+              .at-os-btn-etiqueta-zebra:hover,
+              .at-os-btn-declaracao-zebra:hover { background:#dbeafe; }
+              .at-os-etiqueta-preview { margin:6px 0 8px; }
+              .at-os-etiqueta-embed {
+                width:100%; height:220px; border:1px solid #cbd5e1; border-radius:8px; background:#f8fafc;
+              }
+              @media print {
+                .at-os-btn-etiqueta-zebra,
+                .at-os-btn-declaracao-zebra { display:none !important; }
+                .at-os-etiqueta-embed { height:320px !important; }
+                .at-os-evid-thumb { break-inside:avoid; }
+              }
               @keyframes atLoadingSlide {
                 0%   { background-position: 200% 0; }
                 100% { background-position: -200% 0; }
@@ -8065,7 +8054,7 @@
               .at-os-doc .at-os-os-num   { background:#2c3e6b;color:#fff;font-size:22px;font-weight:900;text-align:center;padding:6px 4px;letter-spacing:1px;border-radius:0 0 2px 2px; }
 
               #atLightbox {
-                display:none;position:fixed;inset:0;z-index:10200;
+                display:none;position:fixed;inset:0;z-index:11000;
                 background:rgba(0,0,0,.92);align-items:center;justify-content:center;
                 flex-direction:column;gap:12px;
               }
@@ -13462,6 +13451,114 @@ function attachDropZone(ul) {
   cursor: pointer;
   font-size: 11px;
 }
+.at-rel-ger-lote-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 10050;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  padding: 18px;
+  background: rgba(15, 23, 42, .55);
+  backdrop-filter: blur(3px);
+}
+.at-rel-ger-lote-modal.is-open { display: flex; }
+.at-rel-ger-lote-modal-card {
+  width: min(1180px, calc(100vw - 28px));
+  max-height: calc(100vh - 36px);
+  background: #fff;
+  border-radius: 14px;
+  border: 1px solid #e2e8f0;
+  box-shadow: 0 24px 48px rgba(15, 23, 42, .28);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.at-rel-ger-lote-modal-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 18px;
+  border-bottom: 1px solid #e2e8f0;
+  background: linear-gradient(180deg, #f8fafc, #fff);
+}
+.at-rel-ger-lote-modal-kicker {
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: #ea580c;
+}
+.at-rel-ger-lote-modal-head h3 {
+  margin: 2px 0 4px;
+  font-size: 16px;
+  color: #1e3a5f;
+}
+.at-rel-ger-lote-modal-sub { font-size: 12px; color: #64748b; }
+.at-rel-ger-lote-modal-close {
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  border: 1px solid #cbd5e1;
+  background: #fff;
+  color: #475569;
+  cursor: pointer;
+}
+.at-rel-ger-lote-modal-close:hover { background: #f1f5f9; }
+.at-rel-ger-lote-modal-status {
+  display: none;
+  padding: 10px 18px;
+  font-size: 13px;
+  color: #64748b;
+  border-bottom: 1px solid #f1f5f9;
+}
+.at-rel-ger-lote-modal-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 18px;
+  border-bottom: 1px solid #f1f5f9;
+}
+.at-rel-ger-lote-modal-toolbar input {
+  flex: 1;
+  max-width: 360px;
+  padding: 7px 10px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  font-size: 12px;
+  color: #1e293b;
+}
+.at-rel-ger-lote-modal-qtd { font-size: 12px; color: #64748b; margin-left: auto; }
+.at-rel-ger-lote-modal-body { overflow: auto; padding: 0 0 12px; }
+.at-rel-ger-lote-modal-tbl {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.at-rel-ger-lote-modal-tbl th {
+  position: sticky;
+  top: 0;
+  background: #f8fafc;
+  color: #64748b;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  text-align: left;
+  padding: 8px 10px;
+  border-bottom: 1px solid #e2e8f0;
+  white-space: nowrap;
+}
+.at-rel-ger-lote-modal-tbl td {
+  padding: 8px 10px;
+  border-bottom: 1px solid #f1f5f9;
+  color: #334155;
+  vertical-align: top;
+}
+.at-rel-ger-lote-modal-tbl tr:hover td { background: #f8fafc; }
+.at-rel-ger-lote-modal-tbl tr.is-clickable { cursor: pointer; }
+.at-rel-ger-lote-modal-tbl .os-id { color: #1d4ed8; font-weight: 800; white-space: nowrap; }
+.at-rel-ger-lote-modal-tbl .recl { max-width: 280px; color: #475569; }
 @media (max-width: 1100px) {
   .at-rel-ger-layout { flex-direction: column; }
   .at-rel-ger-nav { width: 100%; position: static; max-height: none; display: flex; flex-wrap: wrap; gap: 6px; }
@@ -17815,7 +17912,6 @@ function attachDropZone(ul) {
     produto_recebido: ['menu-produto-recebido'],
     sincronizacao: ['menu-sincronizar-produtos'],
     colaboradores: ['btn-colaboradores'],
-    grafico_at: ['menu-sac-at-graficos'],
     relatorio_at: ['menu-sac-at-relatorio'],
     relatorio_vendas: ['menu-vendas-relatorio']
   };
@@ -18405,7 +18501,7 @@ function attachDropZone(ul) {
     if (t.includes('sac') && t.includes('envio')) return 'sac_envio';
     if (t.includes('relatorio') && t.includes('at')) return 'relatorio_at';
     if (t.includes('relatorio') && t.includes('venda')) return 'relatorio_vendas';
-    if (t.includes('grafico') && t.includes('at')) return 'grafico_at';
+    if ((t.includes('grafico') && t.includes('at')) || (t.includes('graf') && t.includes('at'))) return 'relatorio_at';
     if (t.includes('sincron')) return 'sincronizacao';
     if (t.includes('colaborador')) return 'colaboradores';
     if (t.includes('receb')) return 'recebimento';
