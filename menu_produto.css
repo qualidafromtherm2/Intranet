@@ -14946,18 +14946,12 @@ body.mobile-modal-open {
     cursor: pointer;
   }
 
-  /* Nova OS fica no topo (não fixed) — fixed descia/cortava atrás da barra do Android */
+  /* Nova OS: só o ícone + (sem texto, para não alargar o botão) */
   #sacAtPane.at-lista-ativa #atNewOsBtn {
     min-height: 44px !important;
-    min-width: 0 !important;
-    padding: 10px 14px !important;
+    min-width: 44px !important;
+    padding: 10px !important;
     border-radius: 10px !important;
-  }
-
-  #sacAtPane.at-lista-ativa #atNewOsBtn::after {
-    content: ' Nova OS';
-    font-weight: 800;
-    font-size: 14px;
   }
 
   /* Formulário Nova OS em tela quase cheia */
@@ -15026,5 +15020,428 @@ body.mobile-modal-open {
 
   #atOsModal .at-os-span2 {
     grid-column: 1 !important;
+  }
+}
+
+/* ============================================================
+   MOBILE GLOBAL — usabilidade em todas as páginas (≤640px)
+   ============================================================ */
+@media (max-width: 640px), (max-width: 900px) and (max-height: 500px) {
+  /* —— Base compartilhada —— */
+  .tab-pane > .content-wrapper,
+  .tab-pane .content-wrapper {
+    padding-left: 56px;
+    padding-right: 12px;
+    padding-bottom: calc(24px + env(safe-area-inset-bottom, 0px));
+    box-sizing: border-box;
+  }
+
+  .title-wrapper,
+  .tab-header,
+  .content-wrapper-header {
+    flex-wrap: wrap !important;
+    align-items: flex-start !important;
+    gap: 10px !important;
+  }
+
+  .title-wrapper .actions,
+  .title-wrapper > div:last-child {
+    margin-left: 0 !important;
+    width: 100%;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .content-button,
+  .tab-action-btn,
+  .btn-primary,
+  button.content-button {
+    min-height: 44px;
+  }
+
+  input[type="text"],
+  input[type="search"],
+  input[type="number"],
+  input[type="date"],
+  input[type="password"],
+  input[type="email"],
+  input[type="tel"],
+  select,
+  textarea {
+    font-size: 16px !important; /* evita zoom iOS */
+  }
+
+  .tabela-wrapper,
+  .solicitacao-transfer-table-wrapper,
+  .almox-wrapper,
+  #pirConteudo,
+  #riConteudo {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* —— PIR / RI (Produto → Estrutura) —— */
+  #listaPIR .tab-section-card,
+  #listaRI .tab-section-card {
+    padding: 12px !important;
+  }
+
+  #listaPIR .tab-header > div:last-child,
+  #listaRI .tab-header > div:last-child {
+    width: 100%;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  #listaPIR #btnAdicionarPIR,
+  #listaRI .tab-action-btn {
+    width: 100%;
+    justify-content: center;
+  }
+
+  #listaPIR #tabelaPIR thead,
+  #listaRI .ri-table thead,
+  #listaRI #tabelaRI thead {
+    display: none;
+  }
+
+  #listaPIR #tabelaPIR,
+  #listaPIR #tabelaPIR tbody,
+  #listaPIR #tabelaPIR tr,
+  #listaPIR #tabelaPIR td,
+  #listaRI .ri-table,
+  #listaRI .ri-table tbody,
+  #listaRI .ri-table tr,
+  #listaRI .ri-table td,
+  #listaRI #tabelaRI,
+  #listaRI #tabelaRI tbody,
+  #listaRI #tabelaRI tr,
+  #listaRI #tabelaRI td {
+    display: block;
+    width: 100%;
+    box-sizing: border-box;
+  }
+
+  #listaPIR #tabelaPIR tr,
+  #listaRI .ri-table tr,
+  #listaRI #tabelaRI tr {
+    border: 1px solid var(--border-color, #374151);
+    border-radius: 10px;
+    margin-bottom: 10px;
+    padding: 10px;
+    background: var(--content-bg, rgba(255,255,255,.03));
+  }
+
+  #listaPIR #tabelaPIR td,
+  #listaRI .ri-table td,
+  #listaRI #tabelaRI td {
+    border: none !important;
+    padding: 6px 4px !important;
+  }
+
+  #listaPIR #tabelaPIR td:nth-child(1)::before { content: "Código: "; font-weight: 700; color: #94a3b8; }
+  #listaPIR #tabelaPIR td:nth-child(2)::before { content: "Frequência: "; font-weight: 700; color: #94a3b8; }
+  #listaPIR #tabelaPIR td:nth-child(3)::before { content: "Verificar: "; font-weight: 700; color: #94a3b8; }
+
+  #listaPIR #tabelaPIR td:nth-child(4),
+  #listaPIR #tabelaPIR td:nth-child(5) {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+  }
+
+  #listaPIR #tabelaPIR img {
+    max-width: 100% !important;
+    max-height: 160px !important;
+    height: auto !important;
+  }
+
+  #listaPIR .linha-edicao-pir .btn,
+  #listaPIR .btn-salvar-edicao-pir,
+  #listaPIR .btn-cancelar-edicao-pir,
+  #listaPIR #btnAnexarFotoPIR,
+  #listaPIR #btnEditAnexarFotoPIR {
+    min-height: 44px;
+    width: 100%;
+    justify-content: center;
+    margin: 4px 0 !important;
+  }
+
+  /* —— Produção (OP's / kanban) —— */
+  #registrarProducaoPane .content-wrapper-header {
+    flex-direction: column !important;
+    align-items: stretch !important;
+  }
+
+  #registrarProducaoPane .content-wrapper-header button {
+    min-height: 44px;
+    flex: 1 1 calc(50% - 8px);
+  }
+
+  #producaoPesquisaInput,
+  #producaoFiltroCodigoBar input {
+    min-height: 44px;
+  }
+
+  #producaoKanban {
+    flex-direction: column !important;
+    overflow-x: visible !important;
+    gap: 12px !important;
+  }
+
+  #producaoKanban > div {
+    flex: 1 1 auto !important;
+    min-width: 0 !important;
+    width: 100% !important;
+    max-width: 100% !important;
+  }
+
+  /* —— Armazéns / estoque —— */
+  #armazemTabs .header-menu {
+    display: flex !important;
+    flex-wrap: nowrap !important;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    gap: 8px;
+  }
+
+  #armazemTabs .main-header-link {
+    flex: 0 0 auto;
+    min-height: 44px;
+    white-space: nowrap;
+  }
+
+  #conteudo-estoque .estoque-row,
+  #conteudo-transferencia .estoque-row,
+  #conteudo-ajuste-estoque .estoque-row {
+    flex-direction: column !important;
+    align-items: stretch !important;
+    gap: 8px !important;
+  }
+
+  #estoqueLocalSelect,
+  #almoxSearch {
+    min-width: 0 !important;
+    width: 100% !important;
+  }
+
+  #conteudo-estoque .estoque-actions {
+    margin-left: 0 !important;
+  }
+
+  #almoxFilterBtn,
+  #almoxRefreshBtn {
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  #tbl-almoxarifado {
+    min-width: 720px;
+  }
+
+  /* —— Solicitações ajuste / transferência —— */
+  #solicitacaoAjuste .title-wrapper,
+  #solicitacaoTransferencia .title-wrapper {
+    flex-wrap: wrap;
+  }
+
+  #solicitacaoAjuste .actions .btn,
+  #solicitacaoTransferencia .actions .btn,
+  #solicitacoesAjusteApproveAll,
+  #solicitacoesTransferApproveAll,
+  #solicitacoesAjusteRefresh,
+  #solicitacoesTransferRefresh {
+    min-height: 44px;
+  }
+
+  .solicitacao-transfer-table {
+    min-width: 900px;
+    font-size: 12px;
+  }
+
+  /* —— Recebimento —— */
+  #recebimentoPane .content-wrapper {
+    height: auto !important;
+    overflow: visible !important;
+  }
+
+  #recebimentoPane .title-wrapper {
+    flex-direction: column;
+    align-items: stretch !important;
+  }
+
+  #recebimentoRefreshBtn,
+  #recebimentoClearFiltersBtn,
+  #recebimentoLocalizarNfeBtn {
+    min-height: 44px;
+    width: 100%;
+    justify-content: center;
+  }
+
+  #recebimentoPane table {
+    width: max(100%, 900px) !important;
+  }
+
+  /* —— Envio mercadoria (polimento) —— */
+  #envioMercadoriaPane .content-button {
+    min-height: 44px;
+  }
+
+  #envioMercadoriaPane .envio-mercadoria-filters input,
+  #envioMercadoriaPane .envio-status-select,
+  #envioMercadoriaPane select {
+    min-height: 44px;
+  }
+
+  /* —— Engenharia —— */
+  #engenhariaPane .title-wrapper,
+  #engenhariaCodigosErroPane .title-wrapper,
+  #engenhariaAlteracoesPane .title-wrapper {
+    flex-wrap: wrap;
+  }
+
+  #engenhariaPane,
+  #engenhariaCodigosErroPane,
+  #engenhariaAlteracoesPane {
+    overflow-x: auto;
+  }
+
+  #engTable {
+    min-width: 640px;
+    font-size: 13px;
+  }
+
+  #codigosErroBusca,
+  #codigosErroBuscarBtn {
+    min-height: 44px;
+  }
+
+  /* —— Estrutura / malha —— */
+  #estruturaProduto .title-wrapper {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  #estruturaLocalProducao {
+    min-width: 0 !important;
+    width: 100% !important;
+  }
+
+  #estruturaVersaoWrap {
+    margin-left: 0 !important;
+    flex-wrap: wrap;
+  }
+
+  #estruturaProduto ul#malha {
+    max-height: none;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  #estruturaProduto #malha .button-wrapper button {
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  /* —— Produção 1ª peça / montagem —— */
+  #producaoPrimeiraPecaOkPane .title-wrapper,
+  #montaProducaoPane .title-wrapper,
+  #riRegistroInspecaoPane .title-wrapper {
+    flex-wrap: wrap;
+  }
+
+  #producaoPrimeiraPecaOkPane input,
+  #producaoPrimeiraPecaOkPane select,
+  #montaProducaoPane input,
+  #montaProducaoPane select {
+    min-height: 44px;
+  }
+
+  /* —— Qualidade (polimento) —— */
+  #qualidadeFabricaPane #qualidadeAcoesRapidas .content-button {
+    min-height: 44px;
+  }
+
+  #qualidadeFabricaPane #qualidadePirPendentesWrap {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* —— Compras: além do CTA, kanban em coluna se existir —— */
+  #comprasFormPane #comprasMobileAbrirSolicitacao {
+    min-height: 48px;
+  }
+
+  #comprasFormPane .kanban-board,
+  #comprasFormPane #minhasComprasKanban {
+    flex-direction: column !important;
+  }
+
+  /* —— RH (panes injetados via JS) —— */
+  #dadosColaboradores .title-wrapper,
+  #rhCadastroColaboradores .rh-colab-title-row,
+  #rhControleFerias .cf-header {
+    flex-direction: column !important;
+    align-items: stretch !important;
+    gap: 8px !important;
+  }
+
+  #colabFilter,
+  #cfSearch {
+    min-width: 0 !important;
+    width: 100% !important;
+  }
+
+  #dadosColaboradores .colab-grid {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  #rhControleFerias .cf-table-wrap {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  #rhControleFerias table {
+    min-width: 720px;
+  }
+
+  #rhCadastroColaboradores .rh-colab-actions-top .content-button,
+  #btnPermissoesPorBotao,
+  #btnRecarregarColab,
+  #rhColabReload,
+  #rhColabAddUser,
+  #cfFilterBtn,
+  #cfReload {
+    min-height: 44px;
+  }
+
+  /* —— Solicitação de envio SAC —— */
+  #sacSolicitacaoEnvioPane .title-wrapper {
+    flex-wrap: wrap;
+  }
+
+  #sacSolicitacaoEnvioPane input,
+  #sacSolicitacaoEnvioPane select,
+  #sacSolicitacaoEnvioPane textarea {
+    min-height: 44px;
+  }
+
+  /* —— Pedidos / kanban abas —— */
+  #kanbanTabs .header-menu {
+    display: flex !important;
+    flex-wrap: nowrap !important;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    gap: 8px;
+  }
+
+  #kanbanTabs .main-header-link {
+    flex: 0 0 auto;
+    min-height: 44px;
+    white-space: nowrap;
   }
 }
