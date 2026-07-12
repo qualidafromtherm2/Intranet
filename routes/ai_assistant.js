@@ -102,8 +102,15 @@ const UFS_BRASIL = new Set([
 ]);
 
 const { pool: dbPool } = require('../src/db');
+const {
+  isUsuarioQualidade,
+  detectarIntencaoTecnica,
+  executarAcaoTecnica,
+  TECH_QUALIDADE_PROMPT,
+  TECH_QUALIDADE_TABELAS_PRIORITARIAS,
+} = require('../utils/agenteTecnicoQualidade');
 
-let schemaCache = { expiresAt: 0, text: '' };
+let schemaCache = { expiresAt: 0, text: '', mode: '' };
 let chatbotLogTableReadyPromise = null;
 let chatbotManualTableReadyPromise = null;
 let chatbotKnowledgeTableReadyPromise = null;
@@ -3797,13 +3804,15 @@ function validarSqlSomenteLeitura(sql) {
   return null;
 }
 
-async function obterSchemaTexto() {
+async function obterSchemaTexto(opts = {}) {
   if (!dbPool) {
     throw new Error('Conexão com banco não configurada para relatórios SQL.');
   }
 
+  const modoQualidade = Boolean(opts.qualidade);
+  const cacheMode = modoQualidade ? 'qualidade' : 'padrao';
   const agora = Date.now();
-  if (schemaCache.text && schemaCache.expiresAt > agora) {
+  if (schemaCache.text && schemaCache.mode === cacheMode && schemaCache.expiresAt > agora) {
     return schemaCache.text;
   }
 
@@ -3832,7 +3841,8 @@ async function obterSchemaTexto() {
     'rh.lembretes_calendario',
     'rh.lembretes_destinatarios',
     'rh.notas_reuniao',
-    'public.auth_user'
+    'public.auth_user',
+    ...(modoQualidade ? TECH_QUALIDADE_TABELAS_PRIORITARIAS : [])
   ]);
 
   const entradas = Array.from(porTabela.entries()).sort(([tabelaA], [tabelaB]) => {
@@ -3856,13 +3866,14 @@ async function obterSchemaTexto() {
   const texto = linhas.join('\n');
   schemaCache = {
     text: texto,
+    mode: cacheMode,
     expiresAt: agora + SCHEMA_CACHE_TTL_MS
   };
   return texto;
 }
 
-async function gerarPlanoSql(apiKey, pergunta) {
-  const schemaTexto = await obterSchemaTexto();
+async function gerarPlanoSql(apiKey, pergunta, opts = {}) {
+  const schemaTexto = await obterSchemaTexto({ qualidade: Boolean(opts.qualidade) });
   const response = await chamarOpenAiComRetry(
     apiKey,
     {
@@ -4117,7 +4128,7 @@ async function tentarResponderComSqlAuto({ apiKey, pergunta, req }) {
   if (!perguntaPedeConsultaDados(pergunta)) return null;
 
   // 2) Geração SQL assistida por IA para perguntas gerais de dados
-  const plano = await gerarPlanoSql(apiKey, pergunta);
+  const plano = await gerarPlanoSql(apiKey, pergunta, { qualidade: isUsuarioQualidade(req) });
   let sql = normalizarSql(plano.sql);
   sql = aplicarLimiteSql(sql, REPORT_MAX_ROWS);
 
@@ -4872,6 +4883,94 @@ router.post('/manual-chat/finalize', express.json({ limit: '10kb' }), async (req
   }
 });
 
+async function tentarResponderComoTecnicoQualidade({ apiKey, pergunta, messages, memoriaPrompt, req }) {
+  if (!isUsuarioQualidade(req) || !dbPool || !pergunta) return null;
+
+  // 1) Intenção determinística (série / NF / análise)
+  const intencao = detectarIntencaoTecnica(pergunta);
+  if (intencao) {
+    const exec = await executarAcaoTecnica(dbPool, intencao);
+    if (exec?.content) {
+      return {
+        content: exec.content,
+        techMode: true,
+        tool: intencao.action,
+        ok: exec.ok !== false
+      };
+    }
+  }
+
+  // Só aciona o LLM técnico em perguntas claramente de AT/equipamento
+  const t = normalizarTextoBusca(pergunta);
+  const parecePerguntaTecnicaAt = (
+    /\b(serie|pedido|nfe?|nota\s*fiscal|modelo|maquina|equipamento|op\b|congel|gelo|degelo|os\b|at\b|analis|diagnost|ficha)\b/.test(t)
+    || /^\s*[0-9]{3,8}\s*$/.test(String(pergunta || ''))
+  );
+  if (!parecePerguntaTecnicaAt || !apiKey) return null;
+
+  // 2) LLM no modo técnico — pode devolver JSON de ferramenta
+  const response = await chamarOpenAiComRetry(
+    apiKey,
+    {
+      model: 'gpt-4o-mini',
+      messages: [
+        { role: 'developer', content: TECH_QUALIDADE_PROMPT },
+        ...(memoriaPrompt ? [{ role: 'developer', content: `Contexto de memória curta do usuário:\n${memoriaPrompt}` }] : []),
+        ...messages
+      ],
+      max_tokens: 1024,
+      temperature: 0.2,
+      frequency_penalty: 0.2,
+      presence_penalty: 0.05
+    },
+    { timeout: 30000, contexto: 'AI/Chat/TechQualidade' }
+  );
+
+  const content = String(response.data?.choices?.[0]?.message?.content || '').trim();
+  if (!content) return null;
+
+  const actionJson = extrairJsonObjeto(content);
+  const actionName = String(actionJson?.action || '').toLowerCase();
+
+  if (['lookup_serie', 'lookup_nf', 'analise_problema', 'lookup_os'].includes(actionName)) {
+    const exec = await executarAcaoTecnica(dbPool, actionJson);
+    if (exec?.content) {
+      return {
+        content: exec.content,
+        techMode: true,
+        tool: actionName,
+        ok: exec.ok !== false
+      };
+    }
+  }
+
+  // open_os / sql_report / navigate — devolve JSON para o front executar
+  if (['open_os', 'sql_report', 'navigate', 'open_meeting', 'open_purchase'].includes(actionName)) {
+    return {
+      content: JSON.stringify(actionJson),
+      techMode: true,
+      tool: actionName,
+      ok: true
+    };
+  }
+
+  return { content, techMode: true, tool: 'llm', ok: true };
+}
+
+// ─── GET /api/ai/tech-mode ────────────────────────────────────────────────────
+router.get('/tech-mode', (req, res) => {
+  if (!req.session?.user?.id) {
+    return res.status(401).json({ ok: false, error: 'Não autenticado.' });
+  }
+  const ativo = isUsuarioQualidade(req);
+  return res.json({
+    ok: true,
+    techMode: ativo,
+    setor: req.session.user.setor || null,
+    label: ativo ? 'Assistente Técnico Qualidade' : null
+  });
+});
+
 // ─── POST /api/ai/chat ────────────────────────────────────────────────────────
 router.post('/chat', express.json({ limit: '50kb' }), async (req, res) => {
   const { messages } = req.body || {};
@@ -4920,6 +5019,7 @@ router.post('/chat', express.json({ limit: '50kb' }), async (req, res) => {
   const priorizarManuaisPorContexto = devePriorizarManuaisPorContexto(perguntaAtual, memoriaUsuario);
   const priorizarManuaisQualidade = perguntaPedeManualQualidadeAtual || (priorizarManuaisPorContexto && String(memoriaUsuario?.ultimo_assunto?.assunto || '') === 'manuais_qualidade');
   const priorizarManuais = perguntaPedeManualAtual || priorizarManuaisPorContexto;
+  const modoTecnicoQualidade = isUsuarioQualidade(req);
   logAiChatInfo('inicio', {
     totalMessages: sanitizedMessages.length,
     lastUserChars: perguntaAtual.length,
@@ -4928,8 +5028,40 @@ router.post('/chat', express.json({ limit: '50kb' }), async (req, res) => {
     priorizarManuaisQualidade,
     priorizarManuaisPorContexto,
     perguntaPedeManualAtual,
-    priorizarManuais
+    priorizarManuais,
+    modoTecnicoQualidade
   });
+
+  // Modo Assistente Técnico Qualidade (série / NF / análise) — antes de FAQ/manuais genéricos
+  if (modoTecnicoQualidade && perguntaAtual && dbPool) {
+    try {
+      const respostaTech = await tentarResponderComoTecnicoQualidade({
+        apiKey,
+        pergunta: perguntaContextual || perguntaAtual,
+        messages: sanitizedMessages,
+        memoriaPrompt,
+        req
+      });
+      if (respostaTech?.content) {
+        await salvarMemoriaUsuarioChatbot(req, extrairMemoriaCurtaDaConversa({
+          pergunta: perguntaAtual,
+          resposta: respostaTech.content
+        }));
+        logAiChatInfo('sucesso-tech-qualidade', {
+          duracaoMs: Date.now() - startedAt,
+          respostaChars: respostaTech.content.length,
+          tool: respostaTech.tool || null
+        });
+        return res.json({
+          content: respostaTech.content,
+          techMode: true,
+          tool: respostaTech.tool || null
+        });
+      }
+    } catch (errTech) {
+      console.warn('[AI/Chat] Fallback modo técnico Qualidade:', errTech?.message || errTech);
+    }
+  }
 
   if (perguntaAtual && priorizarManuaisQualidade) {
     try {
@@ -5488,7 +5620,8 @@ router.post('/report', express.json({ limit: '30kb' }), async (req, res) => {
   logAiReportInfo('inicio', { questionChars: question.length });
 
   try {
-    const plano = await gerarPlanoSql(apiKey, question);
+    const modoQualidade = isUsuarioQualidade(req);
+    const plano = await gerarPlanoSql(apiKey, question, { qualidade: modoQualidade });
     let sql = normalizarSql(plano.sql);
     sql = aplicarLimiteSql(sql, REPORT_MAX_ROWS);
 

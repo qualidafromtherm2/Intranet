@@ -17534,6 +17534,29 @@ function attachDropZone(ul) {
   white-space: nowrap;
 }
 .sgf-ai-sugg:hover { background: rgba(99,102,241,.3); }
+.sgf-ai-sugg-tech {
+  background: rgba(16,185,129,.15);
+  border-color: rgba(16,185,129,.35);
+  color: #6ee7b7;
+}
+.sgf-ai-sugg-tech:hover { background: rgba(16,185,129,.28); }
+#sgf-ai-panel.tech-mode #sgf-ai-header .sgf-ai-title span {
+  color: #6ee7b7;
+}
+#sgf-ai-tech-badge {
+  display: none;
+  margin-left: 6px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .02em;
+  background: rgba(16,185,129,.2);
+  color: #6ee7b7;
+  border: 1px solid rgba(16,185,129,.35);
+  vertical-align: middle;
+}
+#sgf-ai-panel.tech-mode #sgf-ai-tech-badge { display: inline-block; }
 
 /* ── Input area ── */
 #sgf-ai-footer {
@@ -17772,8 +17795,8 @@ function attachDropZone(ul) {
   <div id="sgf-ai-header">
     <div class="sgf-ai-avatar"><img src="{{STORAGE_PUBLIC_BASE_URL}}/produtos/assets/Gif_chatbot2.gif" alt="Chatbot Fromtherm"></div>
     <div class="sgf-ai-title">
-      <strong>Assistente SGF</strong>
-      <span>Fromtherm</span>
+      <strong id="sgf-ai-title-strong">Assistente SGF</strong>
+      <span id="sgf-ai-title-span">Fromtherm <em id="sgf-ai-tech-badge">Modo Técnico Qualidade</em></span>
     </div>
     <button id="sgf-ai-panel-close" title="Fechar" aria-label="Fechar assistente">
       <i class="fa-solid fa-xmark"></i>
@@ -17789,6 +17812,9 @@ function attachDropZone(ul) {
     <button class="sgf-ai-sugg" data-msg="Como realizar uma compra?">Realizar uma compra</button>
     <button class="sgf-ai-sugg" data-msg="Como consultar estoque?">Consultar estoque</button>
     <button class="sgf-ai-sugg" data-msg="Finalizar atendimento">Finalizar atendimento</button>
+    <button class="sgf-ai-sugg sgf-ai-sugg-tech" data-msg="Buscar série " hidden>Buscar série</button>
+    <button class="sgf-ai-sugg sgf-ai-sugg-tech" data-msg="NF " hidden>Buscar NF</button>
+    <button class="sgf-ai-sugg sgf-ai-sugg-tech" data-msg="Analisar problema série " hidden>Analisar problema</button>
   </div>
 
   <!-- Input -->
@@ -17839,6 +17865,7 @@ function attachDropZone(ul) {
   const input    = document.getElementById('sgf-ai-input');
   const sendBtn  = document.getElementById('sgf-ai-send');
   const badge    = document.getElementById('sgf-ai-badge');
+  const titleStrong = document.getElementById('sgf-ai-title-strong');
   const participantsPanel = document.getElementById('sgf-ai-participants-panel');
   const participantsCloseBtn = document.getElementById('sgf-ai-participants-close');
   const participantsSearchInput = document.getElementById('sgf-ai-participant-search');
@@ -17850,6 +17877,7 @@ function attachDropZone(ul) {
 
   let history = [];   // [{role, content}]
   let loading = false;
+  let techModeQualidade = false;
   const wait = (ms) => new Promise(resolve => setTimeout(resolve, ms));
   const escapeHtml = (value) => String(value ?? '')
     .replace(/&/g, '&amp;')
@@ -19843,7 +19871,8 @@ function attachDropZone(ul) {
   }
 
   // ── Abrir/fechar painel ──────────────────────────────────────────────────
-  function openPanel() {
+  async function openPanel() {
+    await detectarTechModeQualidade();
     panel.classList.add('open');
     badge.style.display = 'none';
     if (messages.children.length === 0) addWelcome();
@@ -19852,7 +19881,7 @@ function attachDropZone(ul) {
       renderMeetingParticipantsPanel();
     }
     setTimeout(() => input.focus(), 80);
-    void reportAiClientLog('info', 'Painel do assistente aberto');
+    void reportAiClientLog('info', 'Painel do assistente aberto', { techModeQualidade });
   }
   function closePanel() {
     panel.classList.remove('open');
@@ -19920,18 +19949,65 @@ function attachDropZone(ul) {
 
   // ── Mensagem de boas-vindas ──────────────────────────────────────────────
   function addWelcome() {
-    const el = appendMsg('assistant',
+    if (techModeQualidade) {
+      appendMsg('assistant',
+        'Olá! Modo Técnico Qualidade ativo.\n\nPosso localizar máquina por série/pedido (inclui histórico pré-2024), buscar NF, listar OS e analisar sintomas (ex.: congelando).\n\nExemplos: “série 6902”, “NF 5559”, “6902 congelando por fora”.'
+      );
+      return;
+    }
+    appendMsg('assistant',
       'Olá! Sou o Assistente SGF 🤖\n\nPosso ajudá-lo a navegar pelo sistema, tirar dúvidas ou até abrir uma OS de assistência técnica.\n\nComo posso ajudar?'
     );
+  }
+
+  function applyTechModeQualidade(ativo) {
+    techModeQualidade = Boolean(ativo);
+    panel?.classList.toggle('tech-mode', techModeQualidade);
+    if (titleStrong) {
+      titleStrong.textContent = techModeQualidade ? 'Assistente Técnico' : 'Assistente SGF';
+    }
+    document.querySelectorAll('.sgf-ai-sugg-tech').forEach((el) => {
+      el.hidden = !techModeQualidade;
+    });
+    if (input) {
+      input.placeholder = techModeQualidade
+        ? 'Série, NF, sintoma… (ex.: 6902 congelando)'
+        : 'Pergunte algo sobre o sistema...';
+    }
+  }
+
+  async function detectarTechModeQualidade() {
+    try {
+      const setorLocal = String(window.__sessionUser?.setor || window.__sessionUser?.sector || '')
+        .toLowerCase()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '');
+      if (setorLocal === 'qualidade' || setorLocal.includes('qualidade')) {
+        applyTechModeQualidade(true);
+      }
+      const resp = await fetch('/api/ai/tech-mode', { credentials: 'include' });
+      if (!resp.ok) return;
+      const data = await resp.json().catch(() => ({}));
+      if (typeof data?.techMode === 'boolean') applyTechModeQualidade(data.techMode);
+    } catch (_) {}
   }
 
   // ── Sugestões rápidas ────────────────────────────────────────────────────
   document.querySelectorAll('.sgf-ai-sugg').forEach(b => {
     b.addEventListener('click', () => {
       if (loading) return;
-      sendMessage(b.dataset.msg);
+      const msg = String(b.dataset.msg || '');
+      // Atalhos técnicos: coloca o prefixo no input para o técnico completar o número
+      if (b.classList.contains('sgf-ai-sugg-tech') && /\s$/.test(msg)) {
+        input.value = msg;
+        input.focus();
+        return;
+      }
+      sendMessage(msg);
     });
   });
+
+  void detectarTechModeQualidade();
 
   // ── Input: Enter para enviar (Shift+Enter = nova linha) ──────────────────
   input.addEventListener('keydown', (e) => {
