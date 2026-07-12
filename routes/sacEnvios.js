@@ -3771,6 +3771,8 @@ async function ensureSchema() {
     ALTER TABLE sac.at ADD COLUMN IF NOT EXISTS editado_em TIMESTAMP;
     ALTER TABLE sac.at ADD COLUMN IF NOT EXISTS motivo_solicitacao TEXT;
     ALTER TABLE sac.at ADD COLUMN IF NOT EXISTS atendimento_inicial TEXT;
+    ALTER TABLE sac.at ADD COLUMN IF NOT EXISTS acao_tomada TEXT;
+    ALTER TABLE sac.at ADD COLUMN IF NOT EXISTS subtag TEXT;
 
     CREATE TABLE IF NOT EXISTS sac.alimentacao (
       id            BIGSERIAL PRIMARY KEY,
@@ -4251,14 +4253,17 @@ router.post('/at', async (req, res) => {
     agendarAtendimentoCom: String(body.agendar_atendimento_com || '').trim() || null,
     descrevaReclamacao: String(body.descreva_reclamacao || '').trim() || null,
     motivoSolicitacao: String(body.motivo_solicitacao || '').trim() || null,
+    acaoTomada: String(body.acao_tomada || '').trim() || null,
     atendimentoInicial: String(body.atendimento_inicial || '').trim() || null,
     modelo: String(body.modelo || '').trim() || null,
     tagProblema: String(body.tag_problema || '').trim() || null,
+    subtag: String(body.subtag || '').trim() || null,
     plataformaAtendimento: String(body.plataforma_atendimento || '').trim() || null,
   };
 
-  // Atendimento Rápido → sempre fechado automaticamente
-  const statusInicial = (payload.tipo || '').toLowerCase() === 'atendimento rapido' ? 'Fechado' : null;
+  // Atendimento Rápido → sempre fechado automaticamente (ignora acento)
+  const tipoNorm = (payload.tipo || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  const statusInicial = tipoNorm === 'atendimento rapido' ? 'Fechado' : null;
 
   // Se vier id_at_existente significa que é um novo registro de reclamação sobre um AT já existente
   const idAtExistente = body.id_at_existente && Number.isInteger(Number(body.id_at_existente))
@@ -4313,12 +4318,14 @@ router.post('/at', async (req, res) => {
            agendar_atendimento_com,
            descreva_reclamacao,
            motivo_solicitacao,
+           acao_tomada,
            atendimento_inicial,
            modelo,
            tag_problema,
+           subtag,
            plataforma_atendimento,
            status
-         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
+         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)
          RETURNING id, data`,
         [
           payload.tipo,
@@ -4335,9 +4342,11 @@ router.post('/at', async (req, res) => {
           payload.agendarAtendimentoCom,
           payload.descrevaReclamacao,
           payload.motivoSolicitacao,
+          payload.acaoTomada,
           payload.atendimentoInicial,
           payload.modelo,
           payload.tagProblema,
+          payload.subtag,
           payload.plataformaAtendimento,
           statusInicial,
         ]
@@ -4368,12 +4377,14 @@ router.post('/at', async (req, res) => {
            agendar_atendimento_com,
            descreva_reclamacao,
            motivo_solicitacao,
+           acao_tomada,
            atendimento_inicial,
            modelo,
            tag_problema,
+           subtag,
            plataforma_atendimento,
            status
-         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
+         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)
          RETURNING id, data`,
         [
           payload.tipo,
@@ -4390,9 +4401,11 @@ router.post('/at', async (req, res) => {
           payload.agendarAtendimentoCom,
           payload.descrevaReclamacao,
           payload.motivoSolicitacao,
+          payload.acaoTomada,
           payload.atendimentoInicial,
           payload.modelo,
           payload.tagProblema,
+          payload.subtag,
           payload.plataformaAtendimento,
           statusInicial,
         ]
@@ -4477,8 +4490,10 @@ router.get('/at/atendimentos', async (_req, res) => {
            a.descreva_reclamacao,
            a.atendimento_inicial,
            a.motivo_solicitacao,
+           a.acao_tomada,
            COALESCE(a.modelo, s.modelo) AS modelo,
            a.tag_problema,
+           a.subtag,
            a.plataforma_atendimento,
            a.editado_por,
            a.editado_em,
@@ -4562,10 +4577,13 @@ router.patch('/at/atendimentos/:id', async (req, res) => {
     cidade:                 'cidade',
     descreva_reclamacao:    'descreva_reclamacao',
     motivo_solicitacao:     'motivo_solicitacao',
+    acao_tomada:            'acao_tomada',
     modelo:                 'modelo',
     tag_problema:           'tag_problema',
+    subtag:                 'subtag',
     plataforma_atendimento: 'plataforma_atendimento',
     atendimento_inicial:    'atendimento_inicial',
+    tipo:                   'tipo',
   };
 
   const setClauses = [];
@@ -6533,8 +6551,10 @@ router.get('/at/os-data/:id', async (req, res) => {
          a.cep,
          a.agendar_atendimento_com,
          a.modelo                 AS at_modelo,
+         a.tipo,
          a.descreva_reclamacao,
          a.motivo_solicitacao,
+         a.acao_tomada,
          a.atendimento_inicial,
          s.cliente                AS revenda_cliente,
          s.ordem_producao,
@@ -6721,7 +6741,9 @@ router.get('/at/os-data/:id', async (req, res) => {
       degelo,
       descricao_problema:  r.descreva_reclamacao || '',
       motivo_solicitacao:  r.motivo_solicitacao  || '',
+      acao_tomada:         r.acao_tomada         || '',
       atendimento_inicial: r.atendimento_inicial || '',
+      tipo:                r.tipo || '',
       data_abertura: (() => {
         if (!r.data_abertura) return '';
         const dt = new Date(r.data_abertura);

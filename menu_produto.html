@@ -4013,6 +4013,11 @@
                   </div>
                 </div>
 
+                <div class="form-field at-campo-rapidoonly" style="display:none;">
+                  <label for="atSubtag">Subtag</label>
+                  <input id="atSubtag" type="text" placeholder="Ex: detalhe da tag" style="width:100%;" />
+                </div>
+
                 <!-- Motivo e Ação — exclusivos do Atendimento rápido -->
                 <div class="form-field at-campo-rapidoonly" style="display:none;grid-column:1/-1;">
                   <label for="atRapidoMotivo">Motivo da solicitação</label>
@@ -4938,6 +4943,10 @@
                       <div id="atEmTagDropdown" class="at-combobox-dropdown"></div>
                     </div>
                   </div>
+                  <div class="at-em-wrap at-em-rapidoonly" style="display:none;">
+                    <label class="at-em-lbl">Subtag</label>
+                    <input type="text" id="atEmSubtag" class="at-em-input" placeholder="Subtag">
+                  </div>
                   <div class="at-em-wrap" style="grid-column:1/-1;">
                     <label class="at-em-lbl">Plataforma do atendimento</label>
                     <input type="text" id="atEmPlataforma" class="at-em-input" placeholder="Plataforma">
@@ -4945,6 +4954,14 @@
                   <div class="at-em-wrap" style="grid-column:1/-1;">
                     <label class="at-em-lbl">Atendimento inicial realizado com o cliente:</label>
                     <textarea id="atEmAtendimentoInicial" class="at-em-input" rows="2" style="width:100%;box-sizing:border-box;" placeholder="Descreva o atendimento inicial com o cliente..."></textarea>
+                  </div>
+                  <div class="at-em-wrap" style="grid-column:1/-1;">
+                    <label class="at-em-lbl">Motivo da solicitação</label>
+                    <textarea id="atEmMotivoSolicitacao" class="at-em-input" rows="3" style="width:100%;box-sizing:border-box;" placeholder="Descreva o motivo da solicitação..."></textarea>
+                  </div>
+                  <div class="at-em-wrap" style="grid-column:1/-1;">
+                    <label class="at-em-lbl">Ação tomada</label>
+                    <textarea id="atEmAcaoTomada" class="at-em-input" rows="3" style="width:100%;box-sizing:border-box;" placeholder="Descreva a ação tomada..."></textarea>
                   </div>
                   <div class="at-em-wrap" style="grid-column:1/-1;">
                     <label class="at-em-lbl">Histórico de reclamações</label>
@@ -5278,7 +5295,7 @@
                   <span class="at-os-fv" id="atOsMotivoSolicitacao" style="display:block;min-height:36px;"></span>
                 </div>
                 <div style="padding:6px 10px;">
-                  <div style="font-weight:700;font-size:11px;color:#555;margin-bottom:4px;">DESCRIÇÃO DO PROBLEMA</div>
+                  <div style="font-weight:700;font-size:11px;color:#555;margin-bottom:4px;" id="atOsDescricaoProblemaLbl">DESCRIÇÃO DO PROBLEMA</div>
                   <span class="at-os-fv" id="atOsDescricaoProblema" style="display:block;min-height:36px;"></span>
                 </div>
               </div>

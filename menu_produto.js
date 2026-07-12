@@ -13764,6 +13764,7 @@ function resetAtFormulario() {
   const iniReset = document.getElementById('atAtendimentoInicial'); if (iniReset) iniReset.value = '';
   if (atModeloInput) atModeloInput.value = '';
   if (atTagProblemaInput) atTagProblemaInput.value = '';
+  const subtagReset = document.getElementById('atSubtag'); if (subtagReset) subtagReset.value = '';
   if (atPlataformaInput) atPlataformaInput.value = '';
   if (window._atFormResetPlataforma) window._atFormResetPlataforma();
   const rapidoMotivoReset = document.getElementById('atRapidoMotivo'); if (rapidoMotivoReset) rapidoMotivoReset.value = '';
@@ -14536,8 +14537,10 @@ function _renderAtCards(rows) {
         ${_atCiFieldRO('Modelo', primary.modelo)}
         ${_atCiFieldRO('Estado', primary.estado)}
         ${_atCiFieldRO('Tag', primary.tag_problema)}
+        ${primary.subtag ? _atCiFieldRO('Subtag', primary.subtag) : ''}
         ${primary.atendimento_inicial ? _atCiFieldRO('Atend. inicial', primary.atendimento_inicial) : ''}
         ${primary.motivo_solicitacao  ? _atCiFieldRO('Motivo', primary.motivo_solicitacao) : ''}
+        ${primary.acao_tomada         ? _atCiFieldRO('Ação tomada', primary.acao_tomada) : ''}
       </div>
       ${(primary.pedido || primary.ordem_producao || primary.nota_fiscal) ? `
       <div style="margin-top:6px;padding-top:6px;border-top:1px solid rgba(167,139,250,.2);">
@@ -14679,8 +14682,13 @@ function _abrirAtOsModal(id, navRows) {
   setEl('atOsModelo',             row.modelo || '');
   setEl('atOsNf',                 row.nota_fiscal || '');
   setEl('atOsAtendimentoInicial', row.atendimento_inicial || '');
-  setEl('atOsDescricaoProblema',  row.descreva_reclamacao || '');
   setEl('atOsMotivoSolicitacao',  row.motivo_solicitacao || '');
+  const isRapidoOs = String(row.tipo || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '') === 'atendimento rapido';
+  const descLbl = document.getElementById('atOsDescricaoProblemaLbl');
+  if (descLbl) descLbl.textContent = isRapidoOs ? 'AÇÃO TOMADA' : 'DESCRIÇÃO DO PROBLEMA';
+  setEl('atOsDescricaoProblema',  isRapidoOs
+    ? (row.acao_tomada || row.descreva_reclamacao || '')
+    : (row.descreva_reclamacao || ''));
   setEl('atOsFecTecnico',         row.tecnico_nome || '');
   setEl('atOsFecStatus',          row.status_os || '');
   setEl('atOsDataAbertura', (() => {
@@ -14704,6 +14712,19 @@ function _abrirAtOsModal(id, navRows) {
   if (modal.parentElement !== document.body) document.body.appendChild(modal);
 
   modal.style.display = 'flex';
+
+  // Fallback ATs rápidos antigos: motivo/ação só em sac.mencoes
+  if (isRapidoOs && (!row.motivo_solicitacao || !row.acao_tomada)) {
+    fetch(`/api/sac/at/mencoes/${row.id}`, { credentials: 'include' })
+      .then(r => r.json().catch(() => ({})))
+      .then(data => {
+        if (!data?.ok || !Array.isArray(data.mencoes) || !data.mencoes.length) return;
+        const m = data.mencoes[0];
+        if (!row.motivo_solicitacao && m.motivo_solicitacao) setEl('atOsMotivoSolicitacao', m.motivo_solicitacao);
+        if (!row.acao_tomada && m.acao_tomada) setEl('atOsDescricaoProblema', m.acao_tomada);
+      })
+      .catch(() => null);
+  }
 
   // Busca dados no backend
   fetch(`/api/sac/at/os-data/${row.id}`, { credentials: 'same-origin' })
@@ -14730,9 +14751,19 @@ function _abrirAtOsModal(id, navRows) {
       setEl('atOsQuadroExt', /ext/i.test(controlador) ? 'Sim' : (controlador ? 'Não' : ''));
       setEl('atOsAlimentacao',  d.alimentacao);
       setEl('atOsFluidoRefrig', d.fluido_refrig);
-      if (d.descricao_problema)  setEl('atOsDescricaoProblema',  d.descricao_problema);
       if (d.motivo_solicitacao)  setEl('atOsMotivoSolicitacao',  d.motivo_solicitacao);
       if (d.atendimento_inicial) setEl('atOsAtendimentoInicial', d.atendimento_inicial);
+      {
+        const tipoOs = String(d.tipo || row.tipo || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+        const isRapidoBackend = tipoOs === 'atendimento rapido';
+        const descLbl2 = document.getElementById('atOsDescricaoProblemaLbl');
+        if (descLbl2) descLbl2.textContent = isRapidoBackend ? 'AÇÃO TOMADA' : 'DESCRIÇÃO DO PROBLEMA';
+        if (isRapidoBackend) {
+          if (d.acao_tomada || d.descricao_problema) setEl('atOsDescricaoProblema', d.acao_tomada || d.descricao_problema);
+        } else if (d.descricao_problema) {
+          setEl('atOsDescricaoProblema', d.descricao_problema);
+        }
+      }
       if (d.data_abertura)       setEl('atOsDataAbertura',       d.data_abertura);
       setEl('atOsDataConclusao',      d.fechamento?.data_conclusao || '');
       // Seção FECHAMENTO
@@ -17103,6 +17134,18 @@ async function _atEmCarregarAnexosExistentes(idAt) {
   } catch { ct.innerHTML = ''; }
 }
 
+function _atEmAplicarVisibilidadeRapido(tipo) {
+  const tipoNorm = String(tipo || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  const isRapido = tipoNorm === 'atendimento rapido';
+  document.querySelectorAll('.at-em-rapidoonly').forEach(el => {
+    el.style.display = isRapido ? '' : 'none';
+  });
+  if (!isRapido) {
+    const sub = document.getElementById('atEmSubtag');
+    if (sub) sub.value = '';
+  }
+}
+
 function _abrirAtEditModal(id) {
   const row = _atAllRows.find(r => String(r.id) === String(id));
   if (!row) return;
@@ -17120,12 +17163,16 @@ function _abrirAtEditModal(id) {
   setV('atEmEstado',    row.estado);
   setV('atEmCidade',    row.cidade);
   setV('atEmTag',       row.tag_problema);
+  setV('atEmSubtag',    row.subtag);
   setV('atEmPlataforma',row.plataforma_atendimento);
   setV('atEmData',      row.data ? String(row.data).slice(0, 10) : '');
   setV('atEmAtendimentoInicial', row.atendimento_inicial);
+  setV('atEmMotivoSolicitacao', row.motivo_solicitacao);
+  setV('atEmAcaoTomada', row.acao_tomada);
 
   const tipoSel = document.getElementById('atEmTipo');
   if (tipoSel) tipoSel.value = row.tipo || '';
+  _atEmAplicarVisibilidadeRapido(row.tipo);
 
   // Histórico de reclamações editável (todas as entradas do grupo)
   const grpRows = _atAllRows.filter(r => r.ordem_producao && r.ordem_producao === row.ordem_producao && r.descreva_reclamacao);
@@ -17194,6 +17241,27 @@ function _abrirAtEditModal(id) {
   _atEmCarregarAnexosExistentes(id);
 
   modal.style.display = 'flex';
+
+  // Fallback: ATs rápidos antigos gravavam motivo/ação só em sac.mencoes
+  const tipoNorm = String(row.tipo || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  if (tipoNorm === 'atendimento rapido' && (!row.motivo_solicitacao || !row.acao_tomada)) {
+    fetch(`/api/sac/at/mencoes/${id}`, { credentials: 'include' })
+      .then(r => r.json().catch(() => ({})))
+      .then(data => {
+        if (!data?.ok || !Array.isArray(data.mencoes) || !data.mencoes.length) return;
+        if (String(_atEditModalCurrentId) !== String(id)) return;
+        const m = data.mencoes[0];
+        if (!row.motivo_solicitacao && m.motivo_solicitacao) {
+          setV('atEmMotivoSolicitacao', m.motivo_solicitacao);
+          row.motivo_solicitacao = m.motivo_solicitacao;
+        }
+        if (!row.acao_tomada && m.acao_tomada) {
+          setV('atEmAcaoTomada', m.acao_tomada);
+          row.acao_tomada = m.acao_tomada;
+        }
+      })
+      .catch(() => null);
+  }
 }
 
 async function _salvarAtEditModal() {
@@ -17211,9 +17279,12 @@ async function _salvarAtEditModal() {
     estado:                 gV('atEmEstado'),
     cidade:                 gV('atEmCidade'),
     tag_problema:           gV('atEmTag'),
+    subtag:                 gV('atEmSubtag'),
     plataforma_atendimento: gV('atEmPlataforma'),
     descreva_reclamacao:    gV('atEmReclamacao'),
     atendimento_inicial:    gV('atEmAtendimentoInicial'),
+    motivo_solicitacao:     gV('atEmMotivoSolicitacao'),
+    acao_tomada:            gV('atEmAcaoTomada'),
     data:                   gV('atEmData') || null,
   };
   const fechPayload = {
@@ -18027,10 +18098,18 @@ if (atEnviarBtn) {
         rua: atRuaInput?.value?.trim() || null,
         agendar_atendimento_com: atAgendarComInput?.value?.trim() || null,
         descreva_reclamacao: atDescricaoInput?.value?.trim() || null,
-        motivo_solicitacao: document.getElementById('atMotivoSolicitacao')?.value?.trim() || null,
+        motivo_solicitacao: (atTipoAtendimentoInput?.value === 'Atendimento rápido'
+          ? document.getElementById('atRapidoMotivo')?.value?.trim()
+          : document.getElementById('atMotivoSolicitacao')?.value?.trim()) || null,
+        acao_tomada: (atTipoAtendimentoInput?.value === 'Atendimento rápido'
+          ? document.getElementById('atRapidoAcao')?.value?.trim()
+          : null) || null,
         atendimento_inicial: document.getElementById('atAtendimentoInicial')?.value?.trim() || null,
         modelo: atModeloInput?.value?.trim() || null,
         tag_problema: atTagProblemaInput?.value?.trim() || null,
+        subtag: (atTipoAtendimentoInput?.value === 'Atendimento rápido'
+          ? document.getElementById('atSubtag')?.value?.trim()
+          : null) || null,
         plataforma_atendimento: atPlataformaInput?.value?.trim() || null,
         selected_item: atSerieSelectedRow || null,
         id_at_existente: atIdExistente || null,
@@ -18066,8 +18145,8 @@ if (atEnviarBtn) {
               telefone: payload.numero_telefone || null,
               nome_revenda_cliente: payload.nome_revenda_cliente || null,
               plataforma: payload.plataforma_atendimento || null,
-              motivo_solicitacao: document.getElementById('atRapidoMotivo')?.value?.trim() || null,
-              acao_tomada: document.getElementById('atRapidoAcao')?.value?.trim() || null,
+              motivo_solicitacao: payload.motivo_solicitacao || null,
+              acao_tomada: payload.acao_tomada || null,
             }),
           });
         } catch (mErr) {
@@ -21966,6 +22045,8 @@ if (_atExcluirOsBtn) {
 if (_atEditModalClose) _atEditModalClose.addEventListener('click', () => { if (_atEditModal) _atEditModal.style.display = 'none'; _atEditModalCurrentId = null; });
 if (_atEmCancelBtn)    _atEmCancelBtn.addEventListener('click',    () => { if (_atEditModal) _atEditModal.style.display = 'none'; _atEditModalCurrentId = null; });
 if (_atEmSaveBtn)      _atEmSaveBtn.addEventListener('click',      () => _salvarAtEditModal());
+const _atEmTipoSel = document.getElementById('atEmTipo');
+if (_atEmTipoSel) _atEmTipoSel.addEventListener('change', () => _atEmAplicarVisibilidadeRapido(_atEmTipoSel.value));
 if (_atEditModal)      _atEditModal.addEventListener('click', e => { if (e.target === _atEditModal) { _atEditModal.style.display = 'none'; _atEditModalCurrentId = null; } });
 
 // Botão Anexar arquivo no modal editar
