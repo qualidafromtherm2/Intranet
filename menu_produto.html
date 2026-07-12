@@ -84,7 +84,10 @@
         <span><i class="fa-solid fa-thumbtack" style="margin-right:8px;"></i>Gerenciar atalhos</span>
         <button type="button" id="btnFecharModalAtalhos" class="shortcut-modal-close" aria-label="Fechar">×</button>
       </div>
-      <p class="shortcut-modal-hint">Marque os itens que deseja fixar como atalho rápido.</p>
+      <p class="shortcut-modal-hint">
+        <strong>Atalho</strong> = bolinha flutuante ·
+        <strong>Início</strong> = card na página Início (celular)
+      </p>
       <div class="shortcut-modal-theme-row">
         <div class="dark-light dark-light-inline" title="Alternar modo claro/escuro" role="button" tabindex="0">
           <svg viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5" fill="none"
@@ -93,7 +96,24 @@
           </svg>
         </div>
       </div>
+      <div class="shortcut-modal-cols-header" aria-hidden="true">
+        <span class="item-label">Botão</span>
+        <span class="col-check" title="Bolinha flutuante">Atalho</span>
+        <span class="col-check" title="Card na página Início (celular)">Início</span>
+      </div>
       <div id="shortcutModalList" class="shortcut-modal-list"></div>
+    </div>
+  </div>
+
+  <!-- Modal Relatórios (cards Início no celular) -->
+  <div id="modalRelatoriosInicio" class="shortcut-modal-overlay" hidden>
+    <div class="shortcut-modal shortcut-modal--relatorios">
+      <div class="shortcut-modal-header">
+        <span><i class="fa-solid fa-chart-column" style="margin-right:8px;"></i>Relatórios</span>
+        <button type="button" id="btnFecharModalRelatoriosInicio" class="shortcut-modal-close" aria-label="Fechar">×</button>
+      </div>
+      <p class="shortcut-modal-hint">Escolha o relatório que deseja abrir.</p>
+      <div id="relatoriosInicioList" class="shortcut-modal-list"></div>
     </div>
   </div>
 
@@ -6436,35 +6456,14 @@
         <!-- Painel Início — aparece primeiro -->
   <div id="paginaInicio" class="tab-pane" style="display:none;">
           <div class="content-wrapper">
-            <section class="mobile-operations-home" aria-labelledby="mobileOperationsTitle">
+            <section class="mobile-operations-home is-empty" id="mobileOperationsHome" aria-labelledby="mobileOperationsTitle">
               <div class="mobile-operations-eyebrow">Operação móvel</div>
               <h1 id="mobileOperationsTitle">O que você precisa fazer?</h1>
-              <p>Atalhos preparados para uso rápido no celular.</p>
-              <div class="mobile-operations-grid">
-                <button type="button" class="mobile-operation-card mobile-operation-card-primary" data-mobile-operation="products">
-                  <span class="mobile-operation-icon"><i class="fa-solid fa-box-open"></i></span>
-                  <span class="mobile-operation-copy">
-                    <strong>Produtos e movimentações</strong>
-                    <small>Consulte o estoque e use Ações para entrada, saída ou endereçamento.</small>
-                  </span>
-                  <i class="fa-solid fa-chevron-right mobile-operation-chevron" aria-hidden="true"></i>
-                </button>
-                <button type="button" class="mobile-operation-card" data-mobile-operation="separation">
-                  <span class="mobile-operation-icon"><i class="fa-solid fa-clipboard-list"></i></span>
-                  <span class="mobile-operation-copy">
-                    <strong>Tela de separação</strong>
-                    <small>Acompanhe e execute separações já preparadas para o celular.</small>
-                  </span>
-                  <i class="fa-solid fa-chevron-right mobile-operation-chevron" aria-hidden="true"></i>
-                </button>
-                <button type="button" class="mobile-operation-card" data-mobile-operation="identification">
-                  <span class="mobile-operation-icon"><i class="fa-solid fa-barcode"></i></span>
-                  <span class="mobile-operation-copy">
-                    <strong>Identificação de produto</strong>
-                    <small>Localize e imprima a identificação necessária.</small>
-                  </span>
-                  <i class="fa-solid fa-chevron-right mobile-operation-chevron" aria-hidden="true"></i>
-                </button>
+              <p id="mobileOperationsSubtitle">Atalhos preparados para uso rápido no celular.</p>
+              <div class="mobile-operations-grid" id="mobileOperationsGrid"></div>
+              <div class="mobile-operations-empty" id="mobileOperationsEmpty">
+                Nenhum card configurado. Toque no botão de sliders para marcar a coluna <strong>Início</strong>.
+                Relatórios liberados para você aparecem automaticamente.
               </div>
               <div class="mobile-operations-note">
                 <i class="fa-solid fa-desktop" aria-hidden="true"></i>
@@ -7789,6 +7788,14 @@
                 border-radius: 5px;
                 color: var(--content-title-color);
                 font-size: 11px;
+                display: none;
+              }
+              .at-ci-editado {
+                font-size: 10px;
+                color: #fbbf24;
+                white-space: nowrap;
+              }
+              .at-card-actions {
                 display: none;
               }
               @media (max-width: 1200px) {

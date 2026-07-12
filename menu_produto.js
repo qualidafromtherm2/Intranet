@@ -131,29 +131,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 });
 
-// Central mobile: mantém o início simples e reutiliza os fluxos legados já validados.
-document.addEventListener('DOMContentLoaded', () => {
-  document.querySelectorAll('[data-mobile-operation]').forEach((button) => {
-    button.addEventListener('click', () => {
-      const operation = button.dataset.mobileOperation;
-
-      if (operation === 'identification') {
-        document.getElementById('menu-identificacao-produto')?.click();
-        return;
-      }
-
-      const productListButton = document.getElementById('btn-omie-list1');
-      if (!productListButton) return;
-      productListButton.click();
-
-      if (operation === 'separation' && typeof usuarioPodeVerGuiaSeparacao === 'function' && usuarioPodeVerGuiaSeparacao()) {
-        window.setTimeout(() => {
-          document.querySelector('.lp-tab-btn[data-lp-tab="solicitacoesConteudo"]')?.click();
-        }, 50);
-      }
-    });
-  });
-});
+// Central mobile: cards da Início são montados pelo sistema de preferências (flag_inicio).
 
 // ============================================================================
 // GUIAS: Lista de produtos / Solicitações
@@ -14579,6 +14557,14 @@ function _renderAtCards(rows) {
           : `<div class="at-ci-desc-val">${descPrimary || empty}</div>`}
       </div>
       ${fechInfo}
+      <div class="at-card-actions">
+        <button type="button" class="at-card-abrir-os-btn" data-id="${escapeAtHtml(String(id))}">
+          <i class="fa-solid fa-file-lines"></i> Abrir OS
+        </button>
+        <button type="button" class="at-card-editar-btn" data-id="${escapeAtHtml(String(id))}" title="Editar">
+          <i class="fa-solid fa-pen"></i>
+        </button>
+      </div>
     </div>`;
   };
 
@@ -14589,7 +14575,8 @@ function _renderAtCards(rows) {
   const _bindCardListeners = (node) => {
     node.querySelectorAll('.at-card-item').forEach(card => {
       card.addEventListener('click', e => {
-        if (e.target.closest('.at-card-anexo-btn') || e.target.closest('.at-card-os-btn')) return;
+        if (e.target.closest('.at-card-anexo-btn') || e.target.closest('.at-card-os-btn') ||
+            e.target.closest('.at-card-abrir-os-btn') || e.target.closest('.at-card-editar-btn')) return;
         _abrirAtEditModal(card.dataset.id);
       });
     });
@@ -14603,6 +14590,18 @@ function _renderAtCards(rows) {
       btn.addEventListener('click', e => {
         e.stopPropagation();
         _abrirAtOsModal(btn.dataset.id);
+      });
+    });
+    node.querySelectorAll('.at-card-abrir-os-btn').forEach(btn => {
+      btn.addEventListener('click', e => {
+        e.stopPropagation();
+        _abrirAtOsModal(btn.dataset.id);
+      });
+    });
+    node.querySelectorAll('.at-card-editar-btn').forEach(btn => {
+      btn.addEventListener('click', e => {
+        e.stopPropagation();
+        _abrirAtEditModal(btn.dataset.id);
       });
     });
   };
@@ -17436,6 +17435,11 @@ function abrirTelaAtAtendimentos() {
   setSacAtModoVisual('at');
   if (atAtendimentosView) atAtendimentosView.style.display = 'flex';
   if (atFormModal) atFormModal.style.display = 'none';
+
+  // Celular: sempre modo card (tabela não cabe)
+  const atMobile = window.matchMedia('(max-width: 640px), (max-width: 900px) and (max-height: 500px)').matches;
+  if (atMobile) _atViewMode = 'card';
+
   const pane = document.getElementById('sacAtPane');
   if (pane) {
     pane.classList.add('at-lista-ativa');
@@ -17449,6 +17453,10 @@ function abrirTelaAtAtendimentos() {
     if (_atViewMode === 'card') {
       _btnCard.style.background = '#0ea5e9'; _btnCard.style.color = '#fff';
       _btnTab.style.background  = 'var(--input-bg,#1e2535)'; _btnTab.style.color = 'var(--inactive-color)';
+      const tw = document.getElementById('atTabelaWrapper');
+      const cc = document.getElementById('atCardsContainer');
+      if (tw) tw.style.display = 'none';
+      if (cc) cc.style.display = 'grid';
     } else {
       _btnTab.style.background  = '#0ea5e9'; _btnTab.style.color = '#fff';
       _btnCard.style.background = 'var(--input-bg,#1e2535)'; _btnCard.style.color = 'var(--inactive-color)';
@@ -63950,6 +63958,13 @@ function _applyPermissionTreeToUI(data){
       }
     }
   }
+
+  // Atualiza card Relatórios da Início (depende de perm-hidden)
+  try {
+    if (typeof window.__renderCardsInicioAtalhos === 'function') {
+      window.__renderCardsInicioAtalhos();
+    }
+  } catch (_) {}
 }
 
 // Logado: revela só o que a ÁRVORE permitir.
@@ -81581,7 +81596,7 @@ window.initOscilacaoEstoque = (function () {
   };
 })();
 
-// ========== SISTEMA DE ATALHOS FLUTUANTES (DRAG & DROP) ==========
+// ========== SISTEMA DE ATALHOS FLUTUANTES + CARDS INÍCIO ==========
 (function () {
   'use strict';
 
@@ -81592,8 +81607,17 @@ window.initOscilacaoEstoque = (function () {
   const modal        = document.getElementById('modalGerenciarAtalhos');
   const btnFecharModal = document.getElementById('btnFecharModalAtalhos');
   const modalList    = document.getElementById('shortcutModalList');
+  const inicioHome   = document.getElementById('mobileOperationsHome');
+  const inicioGrid   = document.getElementById('mobileOperationsGrid');
+  const inicioEmpty  = document.getElementById('mobileOperationsEmpty');
+  const modalRelatorios = document.getElementById('modalRelatoriosInicio');
+  const relatoriosList  = document.getElementById('relatoriosInicioList');
+  const btnFecharRelatorios = document.getElementById('btnFecharModalRelatoriosInicio');
 
   if (!zone || !container || !dropTarget) return;
+
+  /** @type {Map<string, object>} */
+  const _prefsByKey = new Map();
 
   window.__atalhoAction = window.__atalhoAction || {};
   window.__atalhoAction['system-shortcut:compras-carrinho'] = () => {
@@ -81640,19 +81664,57 @@ window.initOscilacaoEstoque = (function () {
     } catch (_) {}
   }
 
+  function _isRelatorioLabel(label) {
+    return /^relat[oó]rio\b/i.test(String(label || '').trim());
+  }
+
+  /** Relatórios liberados na árvore de permissões (sem perm-hidden). */
+  function _relatoriosPermitidosDoMenu() {
+    const out = [];
+    const seen = new Set();
+    document.querySelectorAll('.sidebar-content .menu-link[data-nav-key], .side-menu > a.menu-link[data-nav-key]').forEach((link) => {
+      if (link.classList.contains('perm-hidden')) return;
+      const navLabel = link.dataset.navLabel || link.textContent.trim().replace(/\s+/g, ' ').split(/\s+\d+$/)[0].trim();
+      if (!_isRelatorioLabel(navLabel)) return;
+      const navKey = link.dataset.navKey;
+      if (!navKey || seen.has(navKey)) return;
+      seen.add(navKey);
+      const iconEl = link.querySelector('i');
+      out.push({
+        nav_key: navKey,
+        nav_label: navLabel,
+        nav_selector: link.dataset.navSelector || ('#' + link.id),
+        icon_class: iconEl ? iconEl.className : 'fa-solid fa-file-lines',
+        flag_inicio: true,
+        flag_atalho: false
+      });
+    });
+    return out;
+  }
+
+  function _executarNav(atalho) {
+    if (!atalho) return;
+    const action = window.__atalhoAction && window.__atalhoAction[atalho.nav_key];
+    if (typeof action === 'function') {
+      action();
+      return;
+    }
+    const selector = atalho.nav_selector;
+    if (!selector) return;
+    const el = document.querySelector(selector);
+    if (el) el.click();
+  }
+
   // ── Mapa de observers de badge: nav_key → MutationObserver ──
   const _badgeObservers = new Map();
 
-  // Busca o elemento de badge dentro do item de menu fonte
   function _sourceBadgeEl(navSelector) {
     if (!navSelector) return null;
     const menuEl = document.querySelector(navSelector);
     if (!menuEl) return null;
-    // Procura qualquer span/element com classe *badge* dentro do item
     return menuEl.querySelector('[class*="badge"]') || null;
   }
 
-  // Sincroniza ou cria badge no botão de atalho a partir do source
   function _sincBadge(btn, sourceBadge) {
     let shortcutBadge = btn.querySelector('.shortcut-item-badge');
 
@@ -81674,7 +81736,6 @@ window.initOscilacaoEstoque = (function () {
     shortcutBadge.hidden = isHidden || !texto || texto === '0';
   }
 
-  // Inicia MutationObserver no badge fonte para sincronizar em tempo real
   function _observarBadge(btn, navKey, navSelector) {
     if (_badgeObservers.has(navKey)) {
       _badgeObservers.get(navKey).disconnect();
@@ -81683,16 +81744,13 @@ window.initOscilacaoEstoque = (function () {
     const sourceBadge = _sourceBadgeEl(navSelector);
     if (!sourceBadge) return;
 
-    // Sincroniza imediatamente
     _sincBadge(btn, sourceBadge);
 
-    // Observa mudanças futuras no badge fonte (texto e atributo hidden)
     const obs = new MutationObserver(() => _sincBadge(btn, sourceBadge));
     obs.observe(sourceBadge, { childList: true, characterData: true, subtree: true, attributes: true, attributeFilter: ['hidden', 'style'] });
     _badgeObservers.set(navKey, obs);
   }
 
-  // ── Renderiza um botão de atalho ──
   function criarBotaoAtalho(atalho) {
     const btn = document.createElement('button');
     btn.type = 'button';
@@ -81704,32 +81762,31 @@ window.initOscilacaoEstoque = (function () {
     const iconClass = atalho.icon_class || 'fa-solid fa-star';
     btn.innerHTML = `<i class="${iconClass}"></i>${atalho.system_fixed ? '' : '<button class="shortcut-btn-remove" title="Remover atalho" aria-label="Remover atalho">×</button>'}<span class="shortcut-btn-tooltip">${atalho.nav_label}</span>`;
 
-    // Clique → executa ação
     btn.addEventListener('click', (e) => {
       if (e.target.classList.contains('shortcut-btn-remove')) return;
-      const selector = atalho.nav_selector;
-      const action = window.__atalhoAction && window.__atalhoAction[atalho.nav_key];
-      if (action) {
-        action();
-      } else if (selector) {
-        const el = document.querySelector(selector);
-        if (el) el.click();
-      }
+      _executarNav(atalho);
     });
 
-    // Botão remover
     if (!atalho.system_fixed) {
       btn.querySelector('.shortcut-btn-remove').addEventListener('click', async (e) => {
         e.stopPropagation();
         _badgeObservers.get(atalho.nav_key)?.disconnect();
         _badgeObservers.delete(atalho.nav_key);
-        await removerAtalho(atalho.id, btn);
+        const pref = _prefsByKey.get(atalho.nav_key) || atalho;
+        await salvarPreferencia({
+          nav_key: pref.nav_key,
+          nav_label: pref.nav_label,
+          nav_selector: pref.nav_selector,
+          icon_class: pref.icon_class,
+          flag_atalho: false,
+          flag_inicio: !!pref.flag_inicio
+        });
+        btn.remove();
+        renderizarCardsInicio();
       });
     }
 
-    // Iniciar sincronização de badge (fonte pode não existir ainda → aguarda um frame)
     setTimeout(() => _observarBadge(btn, atalho.nav_key, atalho.nav_selector), 0);
-
     return btn;
   }
 
@@ -81754,67 +81811,207 @@ window.initOscilacaoEstoque = (function () {
       });
   }
 
-  // ── Carrega atalhos do servidor ──
+  function renderizarAtalhosFlutuantes() {
+    container.querySelectorAll('.shortcut-btn:not([data-system-shortcut="1"])').forEach((btn) => {
+      const navKey = btn.dataset.navKey;
+      if (navKey) {
+        _badgeObservers.get(navKey)?.disconnect();
+        _badgeObservers.delete(navKey);
+      }
+      btn.remove();
+    });
+
+    for (const pref of _prefsByKey.values()) {
+      if (!pref.flag_atalho) continue;
+      container.appendChild(criarBotaoAtalho(pref));
+    }
+    renderizarAtalhosDoSistema();
+  }
+
+  function _criarCardInicio(opts) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'mobile-operation-card' + (opts.primary ? ' mobile-operation-card-primary' : '');
+    if (opts.navKey) btn.dataset.navKey = opts.navKey;
+    if (opts.kind) btn.dataset.inicioKind = opts.kind;
+    const iconClass = opts.iconClass || 'fa-solid fa-star';
+    const small = opts.small || 'Abrir tela correspondente.';
+    btn.innerHTML =
+      `<span class="mobile-operation-icon"><i class="${iconClass}"></i></span>` +
+      `<span class="mobile-operation-copy"><strong>${opts.title}</strong><small>${small}</small></span>` +
+      `<i class="fa-solid fa-chevron-right mobile-operation-chevron" aria-hidden="true"></i>`;
+    btn.addEventListener('click', () => {
+      if (typeof opts.onClick === 'function') opts.onClick();
+    });
+    return btn;
+  }
+
+  function abrirModalRelatorios(relatorios) {
+    if (!modalRelatorios || !relatoriosList) return;
+    relatoriosList.innerHTML = '';
+    relatorios.forEach((pref) => {
+      const item = document.createElement('button');
+      item.type = 'button';
+      item.className = 'relatorio-inicio-item';
+      item.innerHTML =
+        `<i class="${pref.icon_class || 'fa-solid fa-chart-column'}"></i>` +
+        `<span>${pref.nav_label}</span>` +
+        `<i class="fa-solid fa-chevron-right" aria-hidden="true"></i>`;
+      item.addEventListener('click', () => {
+        fecharModalRelatorios();
+        _executarNav(pref);
+      });
+      relatoriosList.appendChild(item);
+    });
+    modalRelatorios.hidden = false;
+  }
+
+  function fecharModalRelatorios() {
+    if (modalRelatorios) modalRelatorios.hidden = true;
+  }
+
+  function renderizarCardsInicio() {
+    if (!inicioGrid || !inicioHome) return;
+
+    const inicioPrefs = Array.from(_prefsByKey.values()).filter((p) => !!p.flag_inicio);
+    // Cards configurados pelo usuário (exceto relatórios — esses vão no card padrão)
+    const demais = inicioPrefs.filter((p) => !_isRelatorioLabel(p.nav_label));
+    // Relatórios: sempre por permissão do menu (não depende de marcar Início)
+    const relatorios = _relatoriosPermitidosDoMenu();
+
+    inicioGrid.innerHTML = '';
+
+    const temAlgumCard = demais.length > 0 || relatorios.length > 0;
+    if (!temAlgumCard) {
+      inicioHome.classList.add('is-empty');
+      if (inicioEmpty) inicioEmpty.hidden = false;
+      return;
+    }
+
+    inicioHome.classList.remove('is-empty');
+    if (inicioEmpty) inicioEmpty.hidden = true;
+
+    let first = true;
+
+    demais.forEach((pref) => {
+      inicioGrid.appendChild(_criarCardInicio({
+        title: pref.nav_label,
+        iconClass: pref.icon_class,
+        navKey: pref.nav_key,
+        primary: first,
+        small: 'Acesso rápido no celular.',
+        onClick: () => _executarNav(pref)
+      }));
+      first = false;
+    });
+
+    if (relatorios.length === 1) {
+      const pref = relatorios[0];
+      inicioGrid.appendChild(_criarCardInicio({
+        title: pref.nav_label,
+        iconClass: pref.icon_class || 'fa-solid fa-chart-column',
+        navKey: pref.nav_key,
+        primary: first,
+        small: 'Abrir relatório.',
+        onClick: () => _executarNav(pref)
+      }));
+    } else if (relatorios.length > 1) {
+      inicioGrid.appendChild(_criarCardInicio({
+        title: 'Relatórios',
+        iconClass: 'fa-solid fa-chart-column',
+        kind: 'relatorios',
+        primary: first,
+        small: `${relatorios.length} relatórios disponíveis.`,
+        onClick: () => abrirModalRelatorios(relatorios)
+      }));
+    }
+  }
+
+  window.__renderCardsInicioAtalhos = renderizarCardsInicio;
+
+  function _atualizarCache(atalho) {
+    if (!atalho || !atalho.nav_key) return;
+    if (!atalho.flag_atalho && !atalho.flag_inicio) {
+      _prefsByKey.delete(atalho.nav_key);
+      return;
+    }
+    _prefsByKey.set(atalho.nav_key, {
+      id: atalho.id,
+      nav_key: atalho.nav_key,
+      nav_label: atalho.nav_label,
+      nav_selector: atalho.nav_selector,
+      icon_class: atalho.icon_class,
+      sort_order: atalho.sort_order || 0,
+      flag_atalho: !!atalho.flag_atalho,
+      flag_inicio: !!atalho.flag_inicio
+    });
+  }
+
   async function carregarAtalhos() {
     if (!window.__sessionUser?.id) return;
     try {
       const resp = await fetch('/api/user/atalhos', { credentials: 'include' });
       if (!resp.ok) return;
       const data = await resp.json();
-      container.innerHTML = '';
-      // API retorna array direto
       const lista = Array.isArray(data) ? data : (data.atalhos || []);
-      lista.forEach(a => container.appendChild(criarBotaoAtalho(a)));
-      renderizarAtalhosDoSistema();
+      _prefsByKey.clear();
+      lista.forEach((a) => {
+        _atualizarCache({
+          ...a,
+          flag_atalho: a.flag_atalho === undefined ? true : !!a.flag_atalho,
+          flag_inicio: !!a.flag_inicio
+        });
+      });
+      renderizarAtalhosFlutuantes();
+      renderizarCardsInicio();
     } catch (e) {
       console.error('[atalhos] erro ao carregar:', e.message);
       renderizarAtalhosDoSistema();
+      renderizarCardsInicio();
     }
   }
 
-  // ── Salva atalho no servidor ──
-  async function salvarAtalho(navKey, navLabel, navSelector, iconClass) {
+  async function salvarPreferencia(payload) {
     try {
       const resp = await fetch('/api/user/atalhos', {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ nav_key: navKey, nav_label: navLabel, nav_selector: navSelector, icon_class: iconClass })
+        body: JSON.stringify(payload)
       });
       const data = await resp.json();
       if (!resp.ok) throw new Error(data.error || 'Erro ao salvar');
-      // API retorna o objeto do atalho diretamente (não { ok, atalho })
-      return data.id ? data : (data.atalho || null);
+
+      if (data.removed || !data.atalho) {
+        _prefsByKey.delete(payload.nav_key);
+        return null;
+      }
+
+      const atalho = data.atalho;
+      _atualizarCache(atalho);
+      return atalho;
     } catch (e) {
       console.error('[atalhos] erro ao salvar:', e.message);
       return null;
     }
   }
 
-  // ── Remove atalho do servidor ──
-  async function removerAtalho(id, btnEl) {
-    try {
-      const resp = await fetch(`/api/user/atalhos/${id}`, { method: 'DELETE', credentials: 'include' });
-      const data = await resp.json();
-      if (data.ok) btnEl.remove();
-    } catch (e) {
-      console.error('[atalhos] erro ao remover:', e.message);
-    }
-  }
-
-  // ── Modal de gerenciamento ──
-  function _navKeyAtual() {
-    const set = new Set();
-    container.querySelectorAll('[data-nav-key]').forEach(b => set.add(b.dataset.navKey));
-    return set;
+  // Compat: drag-and-drop e código antigo esperam “salvar atalho flutuante”
+  async function salvarAtalho(navKey, navLabel, navSelector, iconClass) {
+    const atual = _prefsByKey.get(navKey);
+    return salvarPreferencia({
+      nav_key: navKey,
+      nav_label: navLabel,
+      nav_selector: navSelector,
+      icon_class: iconClass,
+      flag_atalho: true,
+      flag_inicio: !!atual?.flag_inicio
+    });
   }
 
   function abrirModalGerenciar() {
-    if (!modal) return;
+    if (!modal || !modalList) return;
     modalList.innerHTML = '';
-
-    const pinados = _navKeyAtual();
-    let grupoAtual = '';
 
     const tituloFixos = document.createElement('div');
     tituloFixos.className = 'shortcut-modal-group-title';
@@ -81823,8 +82020,13 @@ window.initOscilacaoEstoque = (function () {
 
     _systemShortcuts.forEach((atalho) => {
       const item = document.createElement('div');
-      item.className = 'shortcut-modal-item' + (_isSystemShortcutEnabled(atalho.nav_key) ? ' is-pinned' : '');
-      item.innerHTML = `<i class="item-icon ${atalho.icon_class}"></i><span class="item-label">${atalho.nav_label}</span><span class="item-toggle">✓</span>`;
+      item.className = 'shortcut-modal-item shortcut-modal-item--system' +
+        (_isSystemShortcutEnabled(atalho.nav_key) ? ' is-pinned' : '');
+      item.innerHTML =
+        `<i class="item-icon ${atalho.icon_class}"></i>` +
+        `<span class="item-label">${atalho.nav_label}</span>` +
+        `<span class="col-check"><span class="item-toggle">✓</span></span>` +
+        `<span class="col-check" title="Só atalho flutuante">—</span>`;
       item.addEventListener('click', () => {
         const habilitado = item.classList.contains('is-pinned');
         _setSystemShortcutEnabled(atalho.nav_key, !habilitado);
@@ -81834,14 +82036,14 @@ window.initOscilacaoEstoque = (function () {
       modalList.appendChild(item);
     });
 
-    document.querySelectorAll('.sidebar-content .menu-link[data-nav-key]').forEach(link => {
-      const navKey   = link.dataset.navKey;
+    let grupoAtual = '';
+    document.querySelectorAll('.sidebar-content .menu-link[data-nav-key]').forEach((link) => {
+      const navKey = link.dataset.navKey;
       const navLabel = link.dataset.navLabel || link.textContent.trim().replace(/\s+/g, ' ').split(/\s+\d+$/)[0].trim();
-      const iconEl   = link.querySelector('i');
+      const iconEl = link.querySelector('i');
       const iconClass = iconEl ? iconEl.className : 'fa-solid fa-star';
       const navSelector = link.dataset.navSelector || ('#' + link.id);
 
-      // Título do grupo (parent)
       const parentKey = link.dataset.navParent || '';
       if (parentKey !== grupoAtual) {
         grupoAtual = parentKey;
@@ -81855,30 +82057,62 @@ window.initOscilacaoEstoque = (function () {
         }
       }
 
-      const item = document.createElement('div');
-      item.className = 'shortcut-modal-item' + (pinados.has(navKey) ? ' is-pinned' : '');
-      item.innerHTML = `<i class="item-icon ${iconClass}"></i><span class="item-label">${navLabel}</span><span class="item-toggle">✓</span>`;
+      const pref = _prefsByKey.get(navKey);
+      const isAtalho = !!pref?.flag_atalho;
+      const isInicio = !!pref?.flag_inicio;
 
-      item.addEventListener('click', async () => {
-        const isPinado = item.classList.contains('is-pinned');
-        if (isPinado) {
-          // Remover: encontra o botão no container
-          const btnExistente = container.querySelector(`[data-nav-key="${CSS.escape(navKey)}"]`);
-          if (btnExistente) {
-            const id = parseInt(btnExistente.dataset.id, 10);
-            _badgeObservers.get(navKey)?.disconnect();
-            _badgeObservers.delete(navKey);
-            await removerAtalho(id, btnExistente);
-          }
-          item.classList.remove('is-pinned');
+      const item = document.createElement('div');
+      item.className = 'shortcut-modal-item' +
+        (isAtalho ? ' is-atalho' : '') +
+        (isInicio ? ' is-inicio' : '');
+      item.dataset.navKey = navKey;
+      item.innerHTML =
+        `<i class="item-icon ${iconClass}"></i>` +
+        `<span class="item-label">${navLabel}</span>` +
+        `<span class="col-check"><button type="button" class="item-toggle-atalho" title="Atalho flutuante" aria-label="Atalho">✓</button></span>` +
+        `<span class="col-check"><button type="button" class="item-toggle-inicio" title="Card na Início (celular)" aria-label="Início">✓</button></span>`;
+
+      async function _toggleFlag(which) {
+        const atual = _prefsByKey.get(navKey) || {
+          nav_key: navKey,
+          nav_label: navLabel,
+          nav_selector: navSelector,
+          icon_class: iconClass,
+          flag_atalho: false,
+          flag_inicio: false
+        };
+        const nextAtalho = which === 'atalho' ? !atual.flag_atalho : !!atual.flag_atalho;
+        const nextInicio = which === 'inicio' ? !atual.flag_inicio : !!atual.flag_inicio;
+
+        const salvo = await salvarPreferencia({
+          nav_key: navKey,
+          nav_label: navLabel,
+          nav_selector: navSelector,
+          icon_class: iconClass,
+          flag_atalho: nextAtalho,
+          flag_inicio: nextInicio
+        });
+
+        if (!nextAtalho && !nextInicio) {
+          item.classList.remove('is-atalho', 'is-inicio');
+        } else if (salvo) {
+          item.classList.toggle('is-atalho', !!salvo.flag_atalho);
+          item.classList.toggle('is-inicio', !!salvo.flag_inicio);
         } else {
-          // Adicionar
-          const atalho = await salvarAtalho(navKey, navLabel, navSelector, iconClass);
-          if (atalho) {
-            container.appendChild(criarBotaoAtalho(atalho));
-            item.classList.add('is-pinned');
-          }
+          return;
         }
+
+        renderizarAtalhosFlutuantes();
+        renderizarCardsInicio();
+      }
+
+      item.querySelector('.item-toggle-atalho')?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        _toggleFlag('atalho');
+      });
+      item.querySelector('.item-toggle-inicio')?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        _toggleFlag('inicio');
       });
 
       modalList.appendChild(item);
@@ -81893,10 +82127,15 @@ window.initOscilacaoEstoque = (function () {
 
   if (btnGerenciar) btnGerenciar.addEventListener('click', abrirModalGerenciar);
   if (btnFecharModal) btnFecharModal.addEventListener('click', fecharModalGerenciar);
-  // Fechar ao clicar no overlay (fora do card)
   if (modal) {
     modal.addEventListener('click', (e) => {
       if (e.target === modal) fecharModalGerenciar();
+    });
+  }
+  if (btnFecharRelatorios) btnFecharRelatorios.addEventListener('click', fecharModalRelatorios);
+  if (modalRelatorios) {
+    modalRelatorios.addEventListener('click', (e) => {
+      if (e.target === modalRelatorios) fecharModalRelatorios();
     });
   }
 
@@ -81953,19 +82192,18 @@ window.initOscilacaoEstoque = (function () {
   }
 
   function habilitarDragNoMenu() {
-    // Seletor correto: .sidebar-content é o container real do menu lateral
-    document.querySelectorAll('.sidebar-content .menu-link[data-nav-key]').forEach(link => {
-      if (link.getAttribute('draggable') === 'true') return; // evita duplicar listeners
+    document.querySelectorAll('.sidebar-content .menu-link[data-nav-key]').forEach((link) => {
+      if (link.getAttribute('draggable') === 'true') return;
       link.setAttribute('draggable', 'true');
 
       link.addEventListener('dragstart', (e) => {
         const iconEl = link.querySelector('i');
         const iconClass = iconEl ? iconEl.className : 'fa-solid fa-star';
         _dragData = {
-          nav_key:      link.dataset.navKey,
-          nav_label:    link.dataset.navLabel || link.textContent.trim().replace(/\s+/g, ' '),
+          nav_key: link.dataset.navKey,
+          nav_label: link.dataset.navLabel || link.textContent.trim().replace(/\s+/g, ' '),
           nav_selector: link.dataset.navSelector || ('#' + link.id),
-          icon_class:   iconClass
+          icon_class: iconClass
         };
         e.dataTransfer.effectAllowed = 'copy';
         document.body.classList.add('dragging-menu-item');
@@ -82018,7 +82256,6 @@ window.initOscilacaoEstoque = (function () {
     });
   }
 
-  // ── Eventos no drop target ──
   dropTarget.addEventListener('dragover', (e) => {
     e.preventDefault();
     e.dataTransfer.dropEffect = 'copy';
@@ -82035,7 +82272,6 @@ window.initOscilacaoEstoque = (function () {
     document.body.classList.remove('dragging-menu-item');
     if (!_dragData) return;
 
-    // Verifica se atalho já existe
     const jaExiste = container.querySelector(`[data-nav-key="${CSS.escape(_dragData.nav_key)}"]`);
     if (jaExiste) {
       jaExiste.animate([{ transform: 'scale(1.2)' }, { transform: 'scale(1)' }], { duration: 300 });
@@ -82044,12 +82280,13 @@ window.initOscilacaoEstoque = (function () {
     }
 
     const atalho = await salvarAtalho(_dragData.nav_key, _dragData.nav_label, _dragData.nav_selector, _dragData.icon_class);
-    if (atalho) container.appendChild(criarBotaoAtalho(atalho));
+    if (atalho) {
+      renderizarAtalhosFlutuantes();
+      renderizarCardsInicio();
+    }
     _dragData = null;
   });
 
-  // ── Inicialização ──
-  // O script está no fim do arquivo, DOM já carregou — usa setTimeout curto como microtask fence
   function init() {
     carregarAtalhos();
     habilitarDragNoMenu();
@@ -82060,15 +82297,12 @@ window.initOscilacaoEstoque = (function () {
     if (window.__sessionUser?.id) {
       init();
     } else {
-      // Usuário ainda não logou: fica escutando o evento customizado que o sistema de auth dispara
       document.addEventListener('auth:loggedIn', () => init(), { once: true });
-      // Fallback: verifica após 2 s caso o evento não seja disparado
       setTimeout(() => { if (window.__sessionUser?.id && !zone.dataset.atalhoInited) init(); }, 2000);
     }
     zone.dataset.atalhoInited = '1';
   }
 
-  // DOM já disponível no fim do arquivo
   setTimeout(tentarInit, 0);
 })();
 

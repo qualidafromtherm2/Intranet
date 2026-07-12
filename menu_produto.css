@@ -944,13 +944,32 @@ body.dragging-menu-item .shortcut-drop-target { display: flex; }
   flex: 1;
 }
 
+.shortcut-modal-cols-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 18px 8px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  color: #64748b;
+  border-bottom: 1px solid rgba(148, 163, 184, .18);
+}
+.shortcut-modal-cols-header .item-label { flex: 1; }
+.shortcut-modal-cols-header .col-check {
+  width: 44px;
+  text-align: center;
+  flex-shrink: 0;
+}
+
 .shortcut-modal-item {
   display: flex;
   align-items: center;
   gap: 10px;
   padding: 8px 10px;
   border-radius: 8px;
-  cursor: pointer;
+  cursor: default;
   transition: background .15s;
   font-size: 13px;
   color: #cbd5e1;
@@ -960,8 +979,10 @@ body.dragging-menu-item .shortcut-drop-target { display: flex; }
 .shortcut-modal-item:hover { background: rgba(99,102,241,.12); }
 
 .shortcut-modal-item i.item-icon { width: 16px; text-align: center; color: #818cf8; flex-shrink: 0; }
-.shortcut-modal-item .item-label { flex: 1; }
-.shortcut-modal-item .item-toggle {
+.shortcut-modal-item .item-label { flex: 1; min-width: 0; }
+.shortcut-modal-item .item-toggle,
+.shortcut-modal-item .item-toggle-atalho,
+.shortcut-modal-item .item-toggle-inicio {
   width: 18px;
   height: 18px;
   border-radius: 5px;
@@ -974,15 +995,57 @@ body.dragging-menu-item .shortcut-drop-target { display: flex; }
   color: transparent;
   transition: border-color .15s, background .15s, color .15s;
   flex-shrink: 0;
+  cursor: pointer;
+  margin: 0 auto;
 }
-.shortcut-modal-item.is-pinned .item-toggle {
+.shortcut-modal-item .col-check {
+  width: 44px;
+  display: inline-flex;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.shortcut-modal-item.is-pinned .item-toggle,
+.shortcut-modal-item.is-atalho .item-toggle-atalho,
+.shortcut-modal-item.is-inicio .item-toggle-inicio {
   border-color: #6366f1;
   background: #6366f1;
   color: #fff;
 }
+.shortcut-modal-item.is-inicio .item-toggle-inicio {
+  border-color: #22c55e;
+  background: #22c55e;
+}
 .shortcut-modal-item .item-group {
   font-size: 10px;
   color: #475569;
+}
+.shortcut-modal-item.shortcut-modal-item--system {
+  cursor: pointer;
+}
+.shortcut-modal--relatorios {
+  max-width: 420px;
+}
+.relatorio-inicio-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 12px 10px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.relatorio-inicio-item:hover {
+  background: rgba(99,102,241,.12);
+}
+.relatorio-inicio-item .fa-chevron-right {
+  margin-left: auto;
+  color: #64748b;
+  font-size: 12px;
 }
 
 /* separador de grupo */
@@ -9224,6 +9287,8 @@ table.tabela td.num {
   #paginaInicio .content-wrapper {
     padding-left: 8px;
     padding-right: 8px;
+    /* Mantém folga superior para o hamburger fixo não cobrir "Operação móvel" */
+    padding-top: 56px;
   }
 
   /* Layout: sidebar vai para baixo do calend�rio */
@@ -13679,7 +13744,8 @@ body.mobile-modal-open {
   /* No celular, a home vira uma central das �reas j� preparadas. */
   #paginaInicio .content-wrapper {
     min-height: calc(100dvh - 58px);
-    padding: 18px var(--mobile-gutter) calc(28px + env(safe-area-inset-bottom));
+    /* Espaço para o hamburger fixo (left-side ~66px + botão 44px) não cobrir o título */
+    padding: 56px var(--mobile-gutter) calc(28px + env(safe-area-inset-bottom));
   }
 
   #paginaInicio .content-wrapper > :not(.mobile-operations-home) {
@@ -13691,6 +13757,8 @@ body.mobile-modal-open {
     width: 100%;
     max-width: 520px;
     margin: 0 auto;
+    position: relative;
+    z-index: 1;
   }
 
   .mobile-operations-eyebrow {
@@ -13719,6 +13787,34 @@ body.mobile-modal-open {
   .mobile-operations-grid {
     display: grid;
     gap: 12px;
+  }
+
+  .mobile-operations-empty {
+    display: none;
+    margin: 0 0 8px;
+    padding: 14px 16px;
+    border-radius: 8px;
+    border: 1px dashed rgba(148, 163, 184, .35);
+    color: var(--mobile-muted);
+    font-size: 14px;
+    line-height: 1.45;
+  }
+
+  .mobile-operations-home.is-empty .mobile-operations-grid {
+    display: none;
+  }
+
+  .mobile-operations-home.is-empty .mobile-operations-empty {
+    display: block;
+  }
+
+  .mobile-operations-home.is-empty #mobileOperationsSubtitle {
+    display: none;
+  }
+
+  /* Com Relatórios padrão (ou outros cards), esconde o aviso de vazio */
+  .mobile-operations-home:not(.is-empty) .mobile-operations-empty {
+    display: none !important;
   }
 
   .mobile-operation-card {
@@ -13805,25 +13901,25 @@ body.mobile-modal-open {
     margin-top: 2px;
   }
 
-  /* O drawer m�vel lista apenas rotas homologadas para telas pequenas. */
-  #sidebarContent .side-wrapper:not(.mobile-ready-group) {
-    display: none !important;
-  }
-
-  #sidebarContent .mobile-ready-group .side-menu > a:not([data-mobile-ready="true"]) {
-    display: none !important;
-  }
-
+  /* Menu lateral no celular: todos os botões liberados (perm-hidden continua valendo). */
   #sidebarContent {
-    width: min(272px, calc(100vw - 62px));
-    max-height: calc(100dvh - 92px);
+    width: min(300px, calc(100vw - 56px));
+    max-height: calc(100dvh - 88px);
+    overflow-y: auto;
     overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
   }
 
   #sidebarContent .side-menu a {
     min-height: var(--mobile-touch);
     display: flex;
     align-items: center;
+  }
+
+  #sidebarContent .side-title {
+    font-size: 12px;
+    letter-spacing: .04em;
+    padding-top: 10px;
   }
 
   .sidebar-hamburger {
@@ -14760,4 +14856,181 @@ body.mobile-modal-open {
   #modalAguardandoRetiradaSep .sep-row--work .sep-qty,
   #modalSeparacaoLogistica .sep-row--work > div:last-child,
   #modalAguardandoRetiradaSep .sep-row--work > div:last-child { grid-column: 1 / -1 !important; }
+}
+
+/* ── AT mobile: lista, Nova OS e modal da OS ── */
+@media (max-width: 640px), (max-width: 900px) and (max-height: 500px) {
+  #sacAtPane .content-wrapper {
+    padding: 52px 12px calc(88px + env(safe-area-inset-bottom)) !important;
+  }
+
+  #sacAtPane .title-wrapper {
+    gap: 8px !important;
+    margin-bottom: 4px;
+  }
+
+  #sacAtPane .title-wrapper > div:nth-child(2) {
+    display: none; /* "Abertura de OS" — redundante no celular */
+  }
+
+  #sacAtPane .title-wrapper > div:last-child {
+    width: 100%;
+    margin-left: 0 !important;
+    justify-content: flex-start;
+  }
+
+  #sacAtPane #atConfigAlimentacaoBtn span,
+  #sacAtPane #atConfigAlimentacaoBtn .fa-chevron-down {
+    display: none;
+  }
+
+  #sacAtPane #atAtendimentosView {
+    max-height: none !important;
+    overflow: visible !important;
+  }
+
+  #sacAtPane #atAtendimentosStatus {
+    width: 100%;
+    white-space: normal !important;
+    font-size: 12px !important;
+  }
+
+  /* No celular força cards; esconde toggle tabela/card */
+  #sacAtPane #atViewTabela,
+  #sacAtPane #atViewCard,
+  #sacAtPane #atTabelaWrapper {
+    display: none !important;
+  }
+
+  #sacAtPane #atCardsContainer {
+    display: grid !important;
+    grid-template-columns: 1fr !important;
+    gap: 10px !important;
+  }
+
+  #sacAtPane .at-card-item {
+    min-height: 0;
+  }
+
+  #sacAtPane .at-card-actions {
+    display: flex;
+    gap: 8px;
+    padding: 10px 12px 12px;
+    border-top: 1px solid var(--border-color, #374151);
+  }
+
+  #sacAtPane .at-card-abrir-os-btn {
+    flex: 1;
+    min-height: 44px;
+    border: none;
+    border-radius: 10px;
+    background: linear-gradient(135deg, #0284c7, #0369a1);
+    color: #fff;
+    font-size: 14px;
+    font-weight: 700;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+  }
+
+  #sacAtPane .at-card-editar-btn {
+    min-width: 48px;
+    min-height: 44px;
+    border-radius: 10px;
+    border: 1px solid var(--border-color, #374151);
+    background: var(--input-bg, #1e2535);
+    color: var(--content-title-color, #e5e7eb);
+    cursor: pointer;
+  }
+
+  /* Botão Nova OS fixo e fácil de tocar */
+  #sacAtPane.at-lista-ativa #atNewOsBtn {
+    position: fixed !important;
+    left: 14px;
+    right: 72px;
+    bottom: calc(14px + env(safe-area-inset-bottom, 0px));
+    z-index: 1150;
+    min-height: 48px !important;
+    min-width: 0 !important;
+    width: auto !important;
+    padding: 12px 16px !important;
+    border-radius: 14px !important;
+    box-shadow: 0 10px 28px rgba(2, 132, 199, .45);
+  }
+
+  #sacAtPane.at-lista-ativa #atNewOsBtn::after {
+    content: ' Nova OS';
+    font-weight: 800;
+    font-size: 15px;
+  }
+
+  /* Formulário Nova OS em tela quase cheia */
+  #atFormModalCard {
+    width: 100vw !important;
+    height: 100dvh !important;
+    max-width: 100vw !important;
+    max-height: 100dvh !important;
+    border-radius: 0 !important;
+  }
+
+  #atFormView {
+    padding-bottom: calc(24px + env(safe-area-inset-bottom)) !important;
+  }
+
+  #atFormView .form-field input,
+  #atFormView .form-field select,
+  #atFormView .form-field textarea {
+    font-size: 16px !important; /* evita zoom iOS */
+    min-height: 44px;
+  }
+
+  /* Modal OS: ações empilhadas e documento legível */
+  #atOsModal .modal-container {
+    width: 100% !important;
+    max-width: 100% !important;
+    max-height: 100dvh !important;
+    border-radius: 0 !important;
+    margin: 0 !important;
+  }
+
+  #atOsModal .modal-header {
+    flex-wrap: wrap !important;
+    gap: 8px !important;
+    align-items: flex-start !important;
+  }
+
+  #atOsModal .modal-header > div:last-child {
+    width: 100%;
+    flex-wrap: wrap;
+    gap: 6px !important;
+  }
+
+  #atOsModal .modal-header button {
+    min-height: 40px;
+    font-size: 12px !important;
+    padding: 8px 10px !important;
+  }
+
+  #atOsModal .at-os-doc {
+    margin: 0 8px 12px !important;
+  }
+
+  #atOsModal .at-os-header {
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 8px !important;
+    align-items: stretch !important;
+  }
+
+  #atOsModal .at-os-fields-grid,
+  #atOsModal .at-os-fields-row {
+    display: grid !important;
+    grid-template-columns: 1fr !important;
+  }
+
+  #atOsModal .at-os-span2 {
+    grid-column: 1 !important;
+  }
 }

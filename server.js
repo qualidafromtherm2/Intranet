@@ -20464,7 +20464,7 @@ app.post(
   app.use('/api/etiquetas', etiquetasRouter);   // ⬅️  NOVO
   app.use('/api/users', require('./routes/users'));
 
-// 3.2.1) Atalhos rápidos do usuário (zona drag-and-drop)
+// 3.2.1) Atalhos rápidos do usuário (zona drag-and-drop + cards Início)
   // ——————————————————————————————
   {
     function requireSession(req, res, next) {
@@ -20472,12 +20472,39 @@ app.post(
       return res.status(401).json({ ok: false, error: 'Não autenticado' });
     }
 
-    // GET /api/user/atalhos — lista atalhos do usuário logado
+    let _atalhosSchemaReady = false;
+    async function ensurePreferenciaAtalhoSchema() {
+      if (_atalhosSchemaReady) return;
+      await pool.query(`CREATE SCHEMA IF NOT EXISTS "User"`);
+      await pool.query(`
+        CREATE TABLE IF NOT EXISTS "User".preferencia_atalho (
+          id           SERIAL PRIMARY KEY,
+          user_id      INTEGER NOT NULL REFERENCES public.auth_user(id) ON DELETE CASCADE,
+          nav_key      TEXT NOT NULL,
+          nav_label    TEXT NOT NULL,
+          nav_selector TEXT,
+          icon_class   TEXT,
+          sort_order   INTEGER NOT NULL DEFAULT 0,
+          flag_atalho  BOOLEAN NOT NULL DEFAULT true,
+          flag_inicio  BOOLEAN NOT NULL DEFAULT false,
+          created_at   TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
+          CONSTRAINT uq_atalho_user_key UNIQUE (user_id, nav_key)
+        )`);
+      await pool.query(`ALTER TABLE "User".preferencia_atalho ADD COLUMN IF NOT EXISTS flag_atalho BOOLEAN NOT NULL DEFAULT true`);
+      await pool.query(`ALTER TABLE "User".preferencia_atalho ADD COLUMN IF NOT EXISTS flag_inicio BOOLEAN NOT NULL DEFAULT false`);
+      await pool.query(`CREATE INDEX IF NOT EXISTS idx_atalho_user_id ON "User".preferencia_atalho (user_id)`);
+      _atalhosSchemaReady = true;
+    }
+
+    // GET /api/user/atalhos — lista preferências do usuário logado
     app.get('/api/user/atalhos', requireSession, async (req, res) => {
       try {
+        await ensurePreferenciaAtalhoSchema();
         const userId = req.session.user.id;
         const { rows } = await pool.query(
-          `SELECT id, nav_key, nav_label, nav_selector, icon_class, sort_order
+          `SELECT id, nav_key, nav_label, nav_selector, icon_class, sort_order,
+                  COALESCE(flag_atalho, true)  AS flag_atalho,
+                  COALESCE(flag_inicio, false) AS flag_inicio
            FROM "User".preferencia_atalho
            WHERE user_id = $1
            ORDER BY sort_order, created_at`,
@@ -20490,24 +20517,49 @@ app.post(
       }
     });
 
-    // POST /api/user/atalhos — cria ou atualiza atalho
+    // POST /api/user/atalhos — cria/atualiza; se as duas flags forem false, remove
     app.post('/api/user/atalhos', requireSession, async (req, res) => {
       try {
+        await ensurePreferenciaAtalhoSchema();
         const userId = req.session.user.id;
-        const { nav_key, nav_label, nav_selector, icon_class, sort_order } = req.body;
+        const { nav_key, nav_label, nav_selector, icon_class, sort_order } = req.body || {};
         if (!nav_key || !nav_label) {
           return res.status(400).json({ ok: false, error: 'nav_key e nav_label são obrigatórios' });
         }
+
+        const flag_atalho = req.body.flag_atalho === undefined ? true : !!req.body.flag_atalho;
+        const flag_inicio = req.body.flag_inicio === undefined ? false : !!req.body.flag_inicio;
+
+        if (!flag_atalho && !flag_inicio) {
+          const del = await pool.query(
+            `DELETE FROM "User".preferencia_atalho WHERE user_id = $1 AND nav_key = $2`,
+            [userId, nav_key]
+          );
+          return res.json({ ok: true, removed: del.rowCount > 0, atalho: null });
+        }
+
         const { rows } = await pool.query(
-          `INSERT INTO "User".preferencia_atalho (user_id, nav_key, nav_label, nav_selector, icon_class, sort_order)
-           VALUES ($1, $2, $3, $4, $5, $6)
+          `INSERT INTO "User".preferencia_atalho
+             (user_id, nav_key, nav_label, nav_selector, icon_class, sort_order, flag_atalho, flag_inicio)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
            ON CONFLICT (user_id, nav_key) DO UPDATE SET
              nav_label    = EXCLUDED.nav_label,
              nav_selector = EXCLUDED.nav_selector,
              icon_class   = EXCLUDED.icon_class,
-             sort_order   = EXCLUDED.sort_order
-           RETURNING id, nav_key, nav_label, nav_selector, icon_class, sort_order`,
-          [userId, nav_key, nav_label, nav_selector || null, icon_class || null, sort_order || 0]
+             sort_order   = EXCLUDED.sort_order,
+             flag_atalho  = EXCLUDED.flag_atalho,
+             flag_inicio  = EXCLUDED.flag_inicio
+           RETURNING id, nav_key, nav_label, nav_selector, icon_class, sort_order, flag_atalho, flag_inicio`,
+          [
+            userId,
+            nav_key,
+            nav_label,
+            nav_selector || null,
+            icon_class || null,
+            sort_order || 0,
+            flag_atalho,
+            flag_inicio
+          ]
         );
         res.json({ ok: true, atalho: rows[0] });
       } catch (e) {
@@ -20516,9 +20568,10 @@ app.post(
       }
     });
 
-    // DELETE /api/user/atalhos/:id — remove atalho
+    // DELETE /api/user/atalhos/:id — remove preferência
     app.delete('/api/user/atalhos/:id', requireSession, async (req, res) => {
       try {
+        await ensurePreferenciaAtalhoSchema();
         const userId = req.session.user.id;
         const id = parseInt(req.params.id, 10);
         if (!id || isNaN(id)) return res.status(400).json({ ok: false, error: 'id inválido' });
