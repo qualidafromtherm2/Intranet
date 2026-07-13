@@ -26,12 +26,18 @@ function normPara(v, fallback) {
 
 async function proximoSepBase(client) {
   const { rows: [seq] } = await client.query(`
-    SELECT COALESCE(MAX(
-      CASE WHEN n_solic ~ '^SEP-[0-9]+$'
-           THEN SUBSTRING(n_solic FROM 5)::integer
-           ELSE NULL END
-    ), 999) + 1 AS next_num
-      FROM solicitacao_produto.itens_solicitados
+    SELECT GREATEST(
+      COALESCE((
+        SELECT MAX(SUBSTRING(n_solic FROM 5)::integer)
+          FROM solicitacao_produto.itens_solicitados
+         WHERE n_solic ~ '^SEP-[0-9]+$'
+      ), 999),
+      COALESCE((
+        SELECT MAX(SUBSTRING(numero_sep FROM 5)::integer)
+          FROM envios.solicitacoes
+         WHERE numero_sep ~ '^SEP-[0-9]+$'
+      ), 999)
+    ) + 1 AS next_num
   `);
   return `SEP-${Math.max(1000, seq.next_num)}`;
 }

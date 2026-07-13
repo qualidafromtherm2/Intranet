@@ -11196,13 +11196,20 @@ router.post('/at/tecnico/separacao/enviar', express.json(), async (req, res) => 
       [data_prevista || null, horario || null, solicitadoPara, nome_user, id_user]
     );
 
+    // Próximo SEP: max(itens_solicitados, envios.solicitacoes) — evita reuso após limpeza parcial
     const { rows: [seq] } = await client.query(`
-      SELECT COALESCE(MAX(
-        CASE WHEN n_solic ~ '^SEP-[0-9]+$'
-             THEN SUBSTRING(n_solic FROM 5)::integer
-             ELSE NULL END
-      ), 999) + 1 AS next_num
-        FROM solicitacao_produto.itens_solicitados
+      SELECT GREATEST(
+        COALESCE((
+          SELECT MAX(SUBSTRING(n_solic FROM 5)::integer)
+            FROM solicitacao_produto.itens_solicitados
+           WHERE n_solic ~ '^SEP-[0-9]+$'
+        ), 999),
+        COALESCE((
+          SELECT MAX(SUBSTRING(numero_sep FROM 5)::integer)
+            FROM envios.solicitacoes
+           WHERE numero_sep ~ '^SEP-[0-9]+$'
+        ), 999)
+      ) + 1 AS next_num
     `);
     const nSolic = `SEP-${Math.max(1000, seq.next_num)}`;
 
