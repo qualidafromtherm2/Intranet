@@ -12,6 +12,341 @@
   box-shadow: 0 2px 8px rgba(16,185,129,0.15);
 }
 
+/* Carrinho de compras: fluxo operacional limpo e responsivo. */
+#modalCarrinhoCompras {
+  padding: 18px;
+  background: rgba(2, 6, 15, .72);
+  backdrop-filter: blur(8px);
+}
+
+#modalCarrinhoCompras .carrinho-shell {
+  width: min(920px, 96vw) !important;
+  max-width: 920px !important;
+  max-height: min(920px, 94dvh) !important;
+  overflow: hidden !important;
+  border: 1px solid #314158;
+  border-radius: 14px !important;
+  background: #0d1522;
+  box-shadow: 0 28px 80px rgba(0, 0, 0, .48);
+}
+
+#modalCarrinhoCompras .carrinho-header {
+  min-height: 68px;
+  padding: 14px 20px !important;
+  border-bottom: 1px solid #2a384b;
+  background: #121d2d;
+}
+
+#modalCarrinhoCompras .carrinho-header h3 {
+  font-size: 18px;
+  letter-spacing: -.02em;
+}
+
+#modalCarrinhoCompras .carrinho-body {
+  padding: 18px 20px calc(18px + env(safe-area-inset-bottom, 0px)) !important;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+#modalCarrinhoCompras .carrinho-config-layout {
+  display: grid !important;
+  grid-template-columns: minmax(0, 1.45fr) minmax(260px, .75fr);
+  align-items: start;
+  gap: 14px !important;
+}
+
+#modalCarrinhoCompras .carrinho-form-card {
+  position: relative;
+  gap: 8px !important;
+  padding: 44px 14px 14px !important;
+  border: 1px solid #293a51 !important;
+  border-radius: 10px !important;
+  background: #121d2d !important;
+}
+
+#modalCarrinhoCompras .carrinho-form-card::before {
+  position: absolute;
+  top: 14px;
+  left: 14px;
+  color: #f8fafc;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: .05em;
+  text-transform: uppercase;
+}
+
+#modalCarrinhoCompras .carrinho-form-main::before { content: "Dados da solicitação"; }
+#modalCarrinhoCompras .carrinho-form-options::before { content: "Opções"; }
+
+#modalCarrinhoCompras .carrinho-form-card > label:not([id]) {
+  margin-top: 5px;
+  color: #aebdd0 !important;
+  font-size: 11px !important;
+  letter-spacing: .015em;
+}
+
+#modalCarrinhoCompras select,
+#modalCarrinhoCompras input[type="text"],
+#modalCarrinhoCompras input[type="date"],
+#modalCarrinhoCompras input[type="number"],
+#modalCarrinhoCompras input[type="file"],
+#modalCarrinhoCompras textarea,
+#modalCarrinhoCompras .carrinho-item-categoria-btn {
+  min-height: 42px;
+  border: 1px solid #344761 !important;
+  border-radius: 8px !important;
+  background: #0b1422 !important;
+  color: #eef4fb !important;
+  outline: none;
+}
+
+#modalCarrinhoCompras select:focus,
+#modalCarrinhoCompras input:focus,
+#modalCarrinhoCompras textarea:focus,
+#modalCarrinhoCompras .carrinho-item-categoria-btn:focus-visible {
+  border-color: #4d9cff !important;
+  box-shadow: 0 0 0 3px rgba(77, 156, 255, .16);
+}
+
+#modalCarrinhoCompras textarea { min-height: 82px !important; }
+
+#modalCarrinhoCompras .carrinho-category-link-hint {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: -2px;
+  padding: 8px 10px;
+  border: 1px solid #1e6d59;
+  border-radius: 7px;
+  background: #0c2d28;
+  color: #83e8c8;
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+#modalCarrinhoCompras .carrinho-category-link-hint.is-manual {
+  border-color: #665428;
+  background: #292312;
+  color: #e8cd80;
+}
+
+#modalCarrinhoCompras .carrinho-form-options > label[id],
+#modalCarrinhoCompras .carrinho-form-options > label:not([for]) {
+  min-height: 46px;
+  padding: 10px 12px !important;
+  border: 1px solid #2d4058 !important;
+  border-radius: 8px !important;
+  background: #0b1422 !important;
+}
+
+#modalCarrinhoCompras #btnColarListaCompra {
+  min-height: 44px;
+  margin-top: 2px;
+  border: 1px solid #287d68 !important;
+  border-radius: 8px !important;
+  background: #123d35 !important;
+  color: #7df0c9 !important;
+}
+
+#modalCarrinhoCompras .carrinho-count-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 44px;
+  margin: 2px 0 10px !important;
+  padding: 0 12px;
+  border: 1px solid #293a51;
+  border-radius: 8px;
+  background: #101a29;
+  color: #aebdd0 !important;
+}
+
+#modalCarrinhoCompras .carrinho-items {
+  max-height: min(48dvh, 520px) !important;
+  padding-right: 4px;
+  scrollbar-color: #405572 transparent;
+}
+
+#modalCarrinhoCompras .carrinho-np-group {
+  padding: 10px !important;
+  border: 1px solid #293a51 !important;
+  border-radius: 10px !important;
+  background: #0a121e !important;
+}
+
+#modalCarrinhoCompras .carrinho-np-group > div:first-child > div {
+  color: #aebdd0 !important;
+}
+
+#modalCarrinhoCompras .carrinho-product-card {
+  padding: 12px !important;
+  border: 1px solid #2c3c52 !important;
+  border-radius: 9px !important;
+  background: #121d2d !important;
+  box-shadow: none !important;
+}
+
+#modalCarrinhoCompras .carrinho-product-card:hover {
+  border-color: #45617f !important;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, .18) !important;
+}
+
+#modalCarrinhoCompras .carrinho-product-card [style*="color:#111827"] {
+  color: #edf4fc !important;
+}
+
+#modalCarrinhoCompras .carrinho-product-card [style*="color:#6b7280"] {
+  color: #9eb0c5 !important;
+}
+
+#modalCarrinhoCompras .carrinho-detalhes-expandiveis {
+  padding-top: 12px !important;
+  border-top-color: #2b3a4d !important;
+}
+
+#modalCarrinhoCompras .carrinho-footer {
+  position: sticky;
+  z-index: 4;
+  bottom: -18px;
+  margin: 14px -20px -18px !important;
+  padding: 12px 20px calc(12px + env(safe-area-inset-bottom, 0px));
+  border-top: 1px solid #2a384b;
+  background: rgba(13, 21, 34, .96);
+  backdrop-filter: blur(10px);
+}
+
+#modalCarrinhoCompras #modalCarrinhoFooterBotoes {
+  width: 100%;
+  justify-content: space-between;
+}
+
+#modalCarrinhoCompras #modalComprasLimparCarrinhoBtn,
+#modalCarrinhoCompras #modalComprasEnviarPedidoBtn {
+  min-height: 44px;
+  border-radius: 8px !important;
+}
+
+@media (max-width: 720px) {
+  #modalCarrinhoCompras {
+    align-items: flex-end;
+    padding: 0;
+  }
+
+  #modalCarrinhoCompras .carrinho-shell {
+    width: 100% !important;
+    max-width: none !important;
+    max-height: 96dvh !important;
+    border-right: 0;
+    border-bottom: 0;
+    border-left: 0;
+    border-radius: 14px 14px 0 0 !important;
+  }
+
+  #modalCarrinhoCompras .carrinho-header {
+    min-height: 60px;
+    padding: 12px 14px !important;
+  }
+
+  #modalCarrinhoCompras .carrinho-body {
+    padding: 12px 12px calc(12px + var(--mobile-browser-bottom, 96px)) !important;
+  }
+
+  #modalCarrinhoCompras .carrinho-config-layout {
+    grid-template-columns: 1fr;
+  }
+
+  #modalCarrinhoCompras .carrinho-form-card {
+    padding: 42px 12px 12px !important;
+  }
+
+  #modalCarrinhoCompras .carrinho-item-top-row {
+    flex-wrap: wrap;
+  }
+
+  #modalCarrinhoCompras .carrinho-item-controles {
+    width: 100%;
+    justify-content: flex-end;
+  }
+
+  #modalCarrinhoCompras .carrinho-item-qtd {
+    width: min(120px, 42vw) !important;
+  }
+
+  #modalCarrinhoCompras .carrinho-items {
+    max-height: none !important;
+    overflow: visible !important;
+  }
+
+  #modalCarrinhoCompras .carrinho-footer {
+    bottom: calc(-12px - var(--mobile-browser-bottom, 96px));
+    margin: 14px -12px calc(-12px - var(--mobile-browser-bottom, 96px)) !important;
+    padding: 12px 12px calc(12px + var(--mobile-browser-bottom, 96px));
+  }
+
+  #modalCarrinhoCompras #modalCarrinhoFooterBotoes {
+    display: grid !important;
+    grid-template-columns: auto 1fr;
+    gap: 8px !important;
+  }
+
+  #modalCarrinhoCompras #modalComprasEnviarPedidoBtn {
+    justify-content: center;
+  }
+}
+
+.logistica-success-toast {
+  position: fixed;
+  right: 22px;
+  bottom: calc(22px + env(safe-area-inset-bottom, 0px));
+  z-index: 120000;
+  width: min(390px, calc(100vw - 32px));
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr) 34px;
+  align-items: center;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid #b9dfcd;
+  border-radius: 14px;
+  background: #fff;
+  color: #172033;
+  box-shadow: 0 18px 48px rgba(15, 23, 42, .22);
+  opacity: 0;
+  transform: translateY(16px);
+  transition: opacity .2s ease, transform .2s ease;
+}
+
+.logistica-success-toast.is-visible { opacity: 1; transform: translateY(0); }
+.logistica-success-toast__icon {
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: #dcfce7;
+  color: #15803d;
+  font-size: 18px;
+}
+.logistica-success-toast__copy { display: grid; gap: 3px; min-width: 0; }
+.logistica-success-toast__copy strong { font-size: 14px; color: #152033; }
+.logistica-success-toast__copy small { font-size: 12px; color: #526176; overflow-wrap: anywhere; }
+.logistica-success-toast button {
+  width: 34px;
+  height: 34px;
+  border: 0;
+  border-radius: 9px;
+  background: #f1f5f9;
+  color: #64748b;
+  cursor: pointer;
+}
+
+@media (max-width: 600px) {
+  .logistica-success-toast {
+    right: 12px;
+    bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+    width: calc(100vw - 24px);
+  }
+}
+
 /* Override final da SEP: modal acompanha o conteúdo em telas estreitas. */
 @media (max-width: 768px) {
   #modalSeparacaoLogistica,
@@ -15539,4 +15874,219 @@ body.mobile-modal-open {
   .cad-prod-grid-two { grid-template-columns: 1fr; }
   .cad-prod-image-picker { flex-wrap: wrap; }
   .cad-prod-image-picker input { flex-basis: 100%; }
+}
+
+/* Carrinho v2: folha clara, hierarquia por espaco e rolagem interna correta. */
+#modalCarrinhoCompras .carrinho-shell {
+  display: flex !important;
+  flex-direction: column;
+  height: min(880px, 94dvh) !important;
+  max-height: 94dvh !important;
+  border: 1px solid rgba(148, 163, 184, .38) !important;
+  background: #f6f8fb !important;
+  box-shadow: 0 30px 90px rgba(2, 6, 23, .36) !important;
+}
+
+#modalCarrinhoCompras .carrinho-header {
+  flex: 0 0 auto;
+  border-bottom-color: #e5eaf1 !important;
+  background: rgba(255, 255, 255, .96) !important;
+  color: #172033;
+}
+
+#modalCarrinhoCompras .carrinho-header h3 { color: #172033 !important; }
+#modalCarrinhoCompras .carrinho-header h3 i { color: #f59e0b !important; }
+#modalCarrinhoCompras .carrinho-header .modal-close-btn { color: #64748b !important; }
+
+#modalCarrinhoCompras .carrinho-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto !important;
+  background: #f6f8fb !important;
+  scrollbar-color: #cbd5e1 transparent;
+}
+
+#modalCarrinhoCompras .carrinho-form-card {
+  border: 1px solid #e2e8f0 !important;
+  background: rgba(255, 255, 255, .82) !important;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, .03);
+}
+
+#modalCarrinhoCompras .carrinho-form-card::before,
+#modalCarrinhoCompras .carrinho-form-card > label:not([id]) {
+  color: #536176 !important;
+}
+
+#modalCarrinhoCompras select,
+#modalCarrinhoCompras input[type="text"],
+#modalCarrinhoCompras input[type="date"],
+#modalCarrinhoCompras input[type="number"],
+#modalCarrinhoCompras textarea,
+#modalCarrinhoCompras .carrinho-item-categoria-btn {
+  border-color: #d9e1eb !important;
+  background: #fff !important;
+  color: #182235 !important;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, .025);
+}
+
+#modalCarrinhoCompras select {
+  color: #182235 !important;
+  -webkit-text-fill-color: #182235 !important;
+  color-scheme: light !important;
+}
+
+#modalCarrinhoCompras select option,
+#modalCarrinhoCompras select optgroup {
+  background: #fff !important;
+  color: #182235 !important;
+  -webkit-text-fill-color: #182235 !important;
+}
+
+#modalCarrinhoCompras select option:checked {
+  background: #e8f1ff !important;
+  color: #174f9c !important;
+}
+
+#modalCarrinhoCompras #carrinhoRetornoCotacaoGlobal {
+  background-color: #fff !important;
+  color: #182235 !important;
+  -webkit-text-fill-color: #182235 !important;
+}
+
+#modalCarrinhoCompras input::placeholder,
+#modalCarrinhoCompras textarea::placeholder { color: #9aa8ba; }
+
+#modalCarrinhoCompras .carrinho-form-options > label[id],
+#modalCarrinhoCompras .carrinho-form-options > label:not([for]) {
+  border-color: #e2e8f0 !important;
+  background: #fff !important;
+}
+
+#modalCarrinhoCompras .carrinho-form-options label span { color: #253047 !important; }
+
+#modalCarrinhoCompras .carrinho-category-link-hint {
+  border-color: #b9e5d6;
+  background: #edf9f5;
+  color: #18745e;
+}
+
+#modalCarrinhoCompras .carrinho-category-link-hint.is-manual {
+  border-color: #f0ddb0;
+  background: #fff9e9;
+  color: #8a6418;
+}
+
+#modalCarrinhoCompras .carrinho-anexo-dropzone {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 11px;
+  min-height: 58px;
+  padding: 9px 10px;
+  border: 1px dashed #b8c5d5;
+  border-radius: 9px;
+  background: #f9fbfd;
+  color: #64748b;
+  cursor: pointer;
+  transition: border-color .16s, background .16s, transform .16s;
+}
+
+#modalCarrinhoCompras .carrinho-anexo-dropzone:hover,
+#modalCarrinhoCompras .carrinho-anexo-dropzone:focus-visible,
+#modalCarrinhoCompras .carrinho-anexo-dropzone.is-dragging {
+  border-color: #4d9cff;
+  background: #eef6ff;
+  outline: none;
+}
+
+#modalCarrinhoCompras .carrinho-anexo-dropzone.is-dragging { transform: scale(.995); }
+#modalCarrinhoCompras .carrinho-anexo-dropzone > i { color: #4388dc; font-size: 20px; }
+#modalCarrinhoCompras .carrinho-anexo-dropzone span { display: grid; gap: 2px; color: #344258; font-size: 11px; }
+#modalCarrinhoCompras .carrinho-anexo-dropzone small { color: #8795a8; font-weight: 500; }
+#modalCarrinhoCompras .carrinho-anexo-dropzone button {
+  min-height: 34px;
+  padding: 0 11px;
+  border: 1px solid #d5deea;
+  border-radius: 7px;
+  background: #fff;
+  color: #315f98;
+  font-size: 11px;
+  font-weight: 750;
+  cursor: pointer;
+}
+
+#modalCarrinhoCompras #carrinhoAnexosGlobalInfo {
+  padding: 7px 9px;
+  border-radius: 7px;
+  background: #edf9f5;
+  color: #18745e !important;
+}
+
+#modalCarrinhoCompras #btnColarListaCompra {
+  border-color: #b9e5d6 !important;
+  background: #edf9f5 !important;
+  color: #18745e !important;
+}
+
+#modalCarrinhoCompras .carrinho-count-bar {
+  position: sticky;
+  z-index: 3;
+  top: -18px;
+  border-color: #e1e7ef;
+  background: rgba(246, 248, 251, .94);
+  color: #64748b !important;
+  backdrop-filter: blur(8px);
+}
+
+#modalCarrinhoCompras .carrinho-count-bar strong { color: #2563eb !important; }
+
+#modalCarrinhoCompras .carrinho-np-group {
+  border-color: #e0e7f0 !important;
+  background: #eef2f7 !important;
+}
+
+#modalCarrinhoCompras .carrinho-np-group > div:first-child > div { color: #536176 !important; }
+
+#modalCarrinhoCompras .carrinho-product-card {
+  border-color: #dde5ef !important;
+  background: #fff !important;
+  box-shadow: 0 3px 14px rgba(15, 23, 42, .055) !important;
+}
+
+#modalCarrinhoCompras .carrinho-product-card [style*="color:#111827"] { color: #172033 !important; }
+#modalCarrinhoCompras .carrinho-product-card [style*="color:#6b7280"] { color: #718096 !important; }
+#modalCarrinhoCompras .carrinho-detalhes-expandiveis { border-top-color: #e7ecf2 !important; }
+
+#modalCarrinhoCompras .carrinho-footer {
+  border-top-color: #e1e7ef;
+  background: rgba(255, 255, 255, .96);
+  box-shadow: 0 -8px 22px rgba(15, 23, 42, .045);
+}
+
+#modalCarrinhoCompras #modalComprasLimparCarrinhoBtn {
+  border: 1px solid #e1e7ef;
+  background: #fff !important;
+  color: #66758a !important;
+}
+
+#modalCarrinhoCompras #modalComprasEnviarPedidoBtn {
+  border: 0;
+  background: #2563eb !important;
+  box-shadow: 0 7px 18px rgba(37, 99, 235, .22);
+}
+
+@media (max-width: 720px) {
+  #modalCarrinhoCompras .carrinho-shell {
+    height: 96dvh !important;
+    max-height: 96dvh !important;
+  }
+
+  #modalCarrinhoCompras .carrinho-anexo-dropzone {
+    grid-template-columns: auto 1fr;
+  }
+
+  #modalCarrinhoCompras .carrinho-anexo-dropzone button {
+    grid-column: 1 / -1;
+    width: 100%;
+  }
 }
