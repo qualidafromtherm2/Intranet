@@ -30109,7 +30109,222 @@ window.preloadLocaisEstoqueCache = async function preloadLocaisEstoqueCache(forc
 
 
 
-// ===== MODAL NOVO PRODUTO =====
+// ===== CADASTRO DE PRODUTO V2 =====
+(function initCadastroProdutoV2() {
+  const overlay = document.getElementById('cadProdutoV2');
+  if (!overlay) return;
+  const el = id => document.getElementById(id);
+  const state = { config: null, origem: 'N', codigo: '', sequencial: null, lote: [], foto: null, todasFamilias: false };
+
+  function status(texto = '', tipo = '') {
+    const node = el('cadProdStatus');
+    node.textContent = texto;
+    node.className = `cad-prod-status${tipo ? ` ${tipo}` : ''}`;
+  }
+  function normalizarDescricao(value) {
+    return String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase()
+      .replace(/[^A-Z0-9 .,/()\-]/g, ' ').replace(/\s+/g, ' ').trim();
+  }
+  function familiaAtual() {
+    const option = el('cadProdFamilia').selectedOptions[0];
+    return option?.value ? { codigo: option.value, tipo: option.dataset.tipo || 'MP', nome: option.textContent } : null;
+  }
+  function payloadBase() {
+    const familia = familiaAtual();
+    if (!familia) throw new Error('Selecione uma familia.');
+    return { familia_codigo: familia.codigo, familia_tipo: familia.tipo, origem: state.origem, filtro: el('cadProdFiltro').value.trim() };
+  }
+  function tipoPadraoFamilia(familia) {
+    const codigo = String(familia?.codigo || '').padStart(2, '0');
+    const nome = normalizarDescricao(familia?.nome || '');
+    if (['01', '02', '03', '04', '05', '06'].includes(codigo)) return '01';
+    if (codigo === '08') return '02';
+    if (codigo === '09' && /MOVEIS|MOBILIARIO/.test(nome)) return '08';
+    if (codigo === '09') return '07';
+    return '';
+  }
+  function renderFamilias() {
+    const principais = new Set(['01', '02', '03', '04', '05', '06', '08', '09']);
+    const lista = [...(state.config?.familias || [])].sort((a, b) => {
+      const aCod = String(a.codigo || '').padStart(2, '0');
+      const bCod = String(b.codigo || '').padStart(2, '0');
+      const aPrincipal = principais.has(aCod), bPrincipal = principais.has(bCod);
+      if (aPrincipal !== bPrincipal) return aPrincipal ? -1 : 1;
+      const ordem = ['01', '02', '03', '04', '05', '06', '08', '09'];
+      const ia = ordem.indexOf(aCod), ib = ordem.indexOf(bCod);
+      if (ia !== ib) return (ia < 0 ? 999 : ia) - (ib < 0 ? 999 : ib);
+      return String(a.nome_familia || '').localeCompare(String(b.nome_familia || ''), 'pt-BR');
+    }).filter(f => state.todasFamilias || principais.has(String(f.codigo || '').padStart(2, '0')));
+    const valorAtual = el('cadProdFamilia').value;
+    el('cadProdFamilia').innerHTML = '<option value="">-- Selecione uma familia --</option>' + lista.map((f, index) =>
+      `<option value="${escapeHtml(String(f.codigo || ''))}" data-tipo="${escapeHtml(String(f.tipo || 'MP'))}" data-nome="${escapeHtml(String(f.nome_familia || ''))}" data-key="${index}">${escapeHtml(`${f.codigo} - ${f.nome_familia}`)}</option>`).join('');
+    if (Array.from(el('cadProdFamilia').options).some(option => option.value === valorAtual)) el('cadProdFamilia').value = valorAtual;
+    el('cadProdMostrarFamilias').innerHTML = state.todasFamilias
+      ? '<i class="fa-regular fa-eye-slash"></i> Ocultar familias restantes'
+      : '<i class="fa-regular fa-eye"></i> Desocultar familias restantes';
+  }
+  function resetCodigo() {
+    state.codigo = '';
+    state.sequencial = null;
+    el('cadProdCodigoWrap').hidden = true;
+    el('cadProdCadastrar').disabled = true;
+  }
+  function selecionarOrigem(origem) {
+    state.origem = origem === 'I' ? 'I' : 'N';
+    overlay.querySelectorAll('.cad-prod-origin button').forEach(btn => btn.classList.toggle('active', btn.dataset.origin === state.origem));
+    resetCodigo();
+  }
+  function mostrarModo(lote) {
+    el('cadProdUnicoPane').hidden = lote;
+    el('cadProdLotePane').hidden = !lote;
+    el('cadProdModoUnico').classList.toggle('active', !lote);
+    el('cadProdModoLote').classList.toggle('active', lote);
+    status();
+  }
+  async function carregarConfig() {
+    if (state.config) return;
+    status('Carregando familias e unidades...');
+    const resp = await fetch('/api/produtos/cadastro/config', { credentials: 'include' });
+    const json = await resp.json();
+    if (!resp.ok || !json?.ok) throw new Error(json?.error || 'Falha ao carregar configuracao.');
+    state.config = json;
+    renderFamilias();
+    el('cadProdUnidade').innerHTML = '<option value="">-- Selecione --</option>' + json.unidades.map(u => `<option value="${escapeHtml(u.codigo)}">${escapeHtml(`${u.codigo} - ${u.descricao || ''}`)}</option>`).join('');
+    el('cadProdTipo').innerHTML = json.tipos.map(t => `<option value="${escapeHtml(t.value)}">${escapeHtml(`${t.value} - ${t.label}`)}</option>`).join('');
+    status();
+  }
+  window.abrirCadastroProduto = async function() {
+    overlay.hidden = false;
+    document.body.style.overflow = 'hidden';
+    try { await carregarConfig(); } catch (err) { status(err.message, 'error'); }
+  };
+  function fechar() { overlay.hidden = true; document.body.style.overflow = ''; }
+
+  async function gerarCodigo() {
+    const descricao = normalizarDescricao(el('cadProdDescricao').value);
+    const referencia = descricao || normalizarDescricao(el('cadProdFiltro').value) || 'NOVO PRODUTO';
+    if (descricao) el('cadProdDescricao').value = descricao;
+    const btn = el('cadProdGerar'); btn.disabled = true;
+    status('Procurando o sequencial mais proximo...');
+    try {
+      const resp = await fetch('/api/produtos/cadastro/preview', { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...payloadBase(), descricao: referencia }) });
+      const json = await resp.json();
+      if (!resp.ok || !json?.ok) throw new Error(json?.error || 'Falha ao gerar codigo.');
+      state.codigo = json.code; state.sequencial = json.sequence;
+      el('cadProdCodigo').textContent = state.codigo;
+      el('cadProdSequencial').textContent = `Sequencial ${String(state.sequencial).padStart(5, '0')} · ${state.origem === 'I' ? 'Importado' : 'Nacional'}`;
+      el('cadProdCodigoWrap').hidden = false;
+      el('cadProdCadastrar').disabled = false;
+      status('Codigo reservado. Revise a descricao e cadastre.', 'ok');
+    } catch (err) { status(err.message, 'error'); } finally { btn.disabled = false; }
+  }
+
+  function atualizarFoto(file) {
+    if (file && !String(file.type || '').startsWith('image/')) return status('O arquivo precisa ser uma imagem.', 'error');
+    state.foto = file || null;
+    const preview = el('cadProdFotoPreview');
+    if (!state.foto) { preview.hidden = true; preview.querySelector('img').removeAttribute('src'); return; }
+    preview.querySelector('img').src = URL.createObjectURL(state.foto);
+    preview.querySelector('span').textContent = `${state.foto.name || 'Imagem colada'} · ${Math.ceil(state.foto.size / 1024)} KB`;
+    preview.hidden = false;
+  }
+
+  async function cadastrarProduto() {
+    if (!state.codigo) return status('Gere o codigo antes de cadastrar.', 'error');
+    const descricao = normalizarDescricao(el('cadProdDescricao').value);
+    const unidade = el('cadProdUnidade').value;
+    const tipoItem = el('cadProdTipo').value;
+    if (!descricao || !unidade || !tipoItem) return status('Preencha descricao, unidade e tipo de item.', 'error');
+    const btn = el('cadProdCadastrar'); btn.disabled = true;
+    status('Cadastrando produto na Omie...');
+    try {
+      const resp = await fetch('/api/produtos/incluir-omie', { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ codigo_produto_integracao: state.codigo, codigo: state.codigo, descricao, unidade, tipoItem }) });
+      const json = await resp.json();
+      if (!resp.ok || json?.faultstring) throw new Error(json?.faultstring || json?.error || 'Falha ao cadastrar na Omie.');
+      const codigoOmie = json.codigo_produto;
+      if (codigoOmie) await fetch(`/api/produtos/consultar-omie/${encodeURIComponent(codigoOmie)}`, { credentials: 'include' }).catch(() => null);
+      if (state.foto && codigoOmie) {
+        status('Produto criado. Enviando foto...');
+        const form = new FormData(); form.append('foto', state.foto); form.append('nome_foto', state.foto.name || 'Foto do produto'); form.append('descricao_foto', descricao);
+        const fotoResp = await fetch(`/api/produtos/${encodeURIComponent(codigoOmie)}/fotos?pos=0`, { method: 'POST', credentials: 'include', body: form });
+        const fotoJson = await fotoResp.json();
+        if (!fotoResp.ok) throw new Error(`Produto criado, mas a foto falhou: ${fotoJson?.detail || fotoJson?.error || fotoResp.status}`);
+      }
+      status(`Produto ${state.codigo} cadastrado com sucesso.`, 'ok');
+      el('cadProdDescricao').value = ''; atualizarFoto(null); el('cadProdFoto').value = ''; resetCodigo();
+      window.dispatchEvent(new CustomEvent('produtos:atualizar'));
+    } catch (err) { status(err.message, 'error'); btn.disabled = false; }
+  }
+
+  function renderLote() {
+    const body = el('cadProdLoteBody');
+    if (!state.lote.length) { body.innerHTML = '<tr><td colspan="4">Gere um preview para visualizar o lote.</td></tr>'; return; }
+    body.innerHTML = state.lote.map(row => `<tr><td>${row.index}</td><td><strong>${escapeHtml(row.codigo)}</strong></td><td>${escapeHtml(row.descricao)}</td><td class="cad-lote-status">${escapeHtml(row.status || 'Reservado')}</td></tr>`).join('');
+  }
+  async function gerarLote() {
+    const descricoes = el('cadProdLoteDescricoes').value.split(/\r?\n/).map(normalizarDescricao).filter(Boolean);
+    if (!descricoes.length) return status('Informe ao menos uma descricao no lote.', 'error');
+    const btn = el('cadProdLotePreview'); btn.disabled = true; status('Reservando codigos do lote...');
+    try {
+      const resp = await fetch('/api/produtos/cadastro/preview', { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...payloadBase(), descricoes }) });
+      const json = await resp.json(); if (!resp.ok || !json?.ok) throw new Error(json?.error || 'Falha ao gerar lote.');
+      state.lote = json.rows.map(row => ({ ...row, status: 'Reservado' })); renderLote(); el('cadProdLoteCadastrar').disabled = false;
+      status(`${state.lote.length} codigo(s) reservados.`, 'ok');
+    } catch (err) { status(err.message, 'error'); } finally { btn.disabled = false; }
+  }
+  async function cadastrarLote() {
+    if (!state.lote.length) return status('Gere o preview antes de cadastrar.', 'error');
+    const unidade = el('cadProdUnidade').value, tipoItem = el('cadProdTipo').value;
+    if (!unidade || !tipoItem) return status('Selecione unidade e tipo de item.', 'error');
+    const btn = el('cadProdLoteCadastrar'); btn.disabled = true;
+    let sucessos = 0;
+    for (const row of state.lote) {
+      row.status = 'Enviando'; renderLote(); status(`Cadastrando ${row.index} de ${state.lote.length}...`);
+      try {
+        const resp = await fetch('/api/produtos/incluir-omie', { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ codigo_produto_integracao: row.codigo, codigo: row.codigo, descricao: row.descricao, unidade, tipoItem }) });
+        const json = await resp.json(); if (!resp.ok || json?.faultstring) throw new Error(json?.faultstring || json?.error || 'Erro Omie');
+        row.status = 'Criado'; sucessos++;
+      } catch (err) { row.status = `Erro: ${err.message}`; }
+      renderLote();
+    }
+    status(`Lote concluido: ${sucessos} criado(s), ${state.lote.length - sucessos} falha(s).`, sucessos === state.lote.length ? 'ok' : 'error');
+    btn.disabled = false;
+  }
+
+  el('cadProdFechar').addEventListener('click', fechar);
+  overlay.addEventListener('click', e => { if (e.target === overlay) fechar(); });
+  overlay.querySelectorAll('.cad-prod-origin button').forEach(btn => btn.addEventListener('click', () => selecionarOrigem(btn.dataset.origin)));
+  el('cadProdModoUnico').addEventListener('click', () => mostrarModo(false));
+  el('cadProdModoLote').addEventListener('click', () => mostrarModo(true));
+  el('cadProdFamilia').addEventListener('change', () => {
+    resetCodigo(); state.lote = []; renderLote();
+    const familia = familiaAtual();
+    const tipo = tipoPadraoFamilia(familia);
+    if (tipo && Array.from(el('cadProdTipo').options).some(option => option.value === tipo)) el('cadProdTipo').value = tipo;
+  });
+  el('cadProdMostrarFamilias').addEventListener('click', () => { state.todasFamilias = !state.todasFamilias; renderFamilias(); });
+  el('cadProdFiltro').addEventListener('input', resetCodigo);
+  el('cadProdGerar').addEventListener('click', gerarCodigo);
+  el('cadProdCopiar').addEventListener('click', () => navigator.clipboard?.writeText(state.codigo));
+  el('cadProdCadastrar').addEventListener('click', cadastrarProduto);
+  el('cadProdFoto').addEventListener('change', e => atualizarFoto(e.target.files?.[0]));
+  el('cadProdLimparFoto').addEventListener('click', () => { el('cadProdFoto').value = ''; atualizarFoto(null); });
+  el('cadProdColarFoto').addEventListener('click', async () => {
+    try { const items = await navigator.clipboard.read(); const item = items.find(i => i.types.some(t => t.startsWith('image/'))); if (!item) throw new Error('Nenhuma imagem encontrada na area de transferencia.'); const type = item.types.find(t => t.startsWith('image/')); const blob = await item.getType(type); atualizarFoto(new File([blob], `imagem-colada.${type.split('/')[1] || 'png'}`, { type })); } catch (err) { status(err.message, 'error'); }
+  });
+  el('cadProdLotePreview').addEventListener('click', gerarLote);
+  el('cadProdLoteCadastrar').addEventListener('click', cadastrarLote);
+  const fotoDrop = el('cadProdFotoDrop');
+  ['dragenter', 'dragover'].forEach(tipo => fotoDrop.addEventListener(tipo, e => { e.preventDefault(); fotoDrop.classList.add('is-dragging'); }));
+  ['dragleave', 'drop'].forEach(tipo => fotoDrop.addEventListener(tipo, e => { e.preventDefault(); fotoDrop.classList.remove('is-dragging'); }));
+  fotoDrop.addEventListener('drop', e => atualizarFoto(Array.from(e.dataTransfer?.files || []).find(file => file.type.startsWith('image/'))));
+  overlay.addEventListener('paste', e => {
+    const file = Array.from(e.clipboardData?.items || []).find(item => item.type.startsWith('image/'))?.getAsFile();
+    if (file) { e.preventDefault(); atualizarFoto(new File([file], `imagem-colada.${file.type.split('/')[1] || 'png'}`, { type: file.type })); }
+  });
+})();
+
+// ===== MODAL NOVO PRODUTO (LEGADO) =====
 (function initModalNovoProduto() {
   const modalOverlay = document.getElementById('modalNovoProduto');
   const btnNovoProduto = document.getElementById('btnNovoProduto');
@@ -30729,12 +30944,6 @@ window.preloadLocaisEstoqueCache = async function preloadLocaisEstoqueCache(forc
 })();
 
 
-  document.getElementById('menu-produto')
-  .addEventListener('click', e => {
-    e.preventDefault();
-    openDadosProdutoTab();
-  });
-
   // ——— Configura evento para todas as abas do header ———
 const headerLinks   = document.querySelectorAll('.header .header-menu > .menu-link');
 const leftSide      = document.querySelector('.left-side');
@@ -30744,6 +30953,10 @@ const panes         = mainContainer.querySelectorAll('.tab-pane');
 headerLinks.forEach(link => {
   link.addEventListener('click', async e => {
     e.preventDefault();
+    if (link.id === 'menu-produto') {
+      if (typeof window.abrirCadastroProduto === 'function') window.abrirCadastroProduto();
+      return;
+    }
     // Se estávamos no chat, restaura os panes guardados antes de navegar
     try { window.restoreStashedPanes?.(); } catch {}
     // 1) limpa destaque e esconde todos os panes
@@ -30757,10 +30970,7 @@ headerLinks.forEach(link => {
     // 2) destaca o clicado
     link.classList.add('is-active');
 
-    if (link.id === 'menu-produto') {
-      openDadosProdutoTab();
-    
-    } else if (link.id === 'menu-registros') {
+    if (link.id === 'menu-registros') {
       if (window.openRegistros) window.openRegistros();
       
     } else if (link.id === 'menu-inicio') {
@@ -34048,14 +34258,6 @@ async function initPreparacaoKanban() {
     renderPreparacaoKanbans();
   }
 }
-
-/* ======== Links diretos do cabeçalho ======== */
-document.getElementById('menu-produto')?.addEventListener('click', e => {
-  e.preventDefault();
-  hideKanban();
-  openDadosProdutoTab();
-});
-
 
 /* ------------------------------------------------------------ *
  *  Mostra uma sub-aba do Kanban                                *
@@ -49376,7 +49578,16 @@ window.renderizarCatalogoOmie = renderizarCatalogoOmie;
               <input id="modalEditarRapidoLeadTime" type="number" min="0" step="1" inputmode="numeric" style="width:100%;box-sizing:border-box;padding:11px;border:1px solid #cbd5e1;border-radius:8px;font-size:16px;" />
             </label>
           </div>
-          <button id="modalEditarRapidoFoto" type="button" style="min-height:44px;border:1px solid #93c5fd;border-radius:8px;background:#eff6ff;color:#1d4ed8;font-weight:700;cursor:pointer;"><i class="fa-solid fa-camera" style="margin-right:7px;"></i>Trocar foto</button>
+          <div id="modalEditarRapidoFotoDrop" tabindex="0" style="border:1px dashed #93c5fd;border-radius:10px;background:#eff6ff;padding:12px;display:grid;gap:8px;text-align:center;color:#1d4ed8;">
+            <div style="font-size:12px;font-weight:800;"><i class="fa-solid fa-camera" style="margin-right:6px;"></i>Foto do produto</div>
+            <div style="font-size:11px;color:#64748b;">Arraste uma imagem ou pressione Ctrl+V</div>
+            <img id="modalEditarRapidoFotoPreview" alt="Previa da nova foto" style="display:none;width:84px;height:84px;object-fit:contain;margin:auto;border:1px solid #cbd5e1;border-radius:8px;background:#fff;" />
+            <input id="modalEditarRapidoFotoInput" type="file" accept="image/*" style="display:none;" />
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+              <button id="modalEditarRapidoFoto" type="button" style="min-height:40px;border:1px solid #93c5fd;border-radius:8px;background:#fff;color:#1d4ed8;font-weight:700;cursor:pointer;">Selecionar / colar</button>
+              <button id="modalEditarRapidoFotoEnviar" type="button" disabled style="min-height:40px;border:0;border-radius:8px;background:#2563eb;color:#fff;font-weight:700;cursor:pointer;">Enviar foto</button>
+            </div>
+          </div>
           <div style="font-size:12px;font-weight:700;color:#475569;">Marcação rápida</div>
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
             <button id="modalEditarRapidoObsoleto" type="button" style="min-height:44px;border:1px solid #fca5a5;border-radius:8px;background:#fef2f2;color:#b91c1c;font-weight:700;cursor:pointer;">Tornar obsoleto</button>
@@ -49462,6 +49673,8 @@ window.renderizarCatalogoOmie = renderizarCatalogoOmie;
   let _ctx = {};
   let _returnFocus = null;
   let _qtyCtx = null;
+  let _fotoRapidaFile = null;
+  let _fotoRapidaPreviewUrl = null;
 
   function getSeparacaoTileHtml() {
     return `
@@ -49517,6 +49730,7 @@ window.renderizarCatalogoOmie = renderizarCatalogoOmie;
     loading.style.display = 'block';
     form.style.display = 'none';
     setEditarRapidoStatus('');
+    prepararFotoRapida(null);
     try {
       const resp = await fetch('/api/produtos/' + encodeURIComponent(_ctx.codigo), { credentials: 'include' });
       const data = await resp.json();
@@ -49615,19 +49829,48 @@ window.renderizarCatalogoOmie = renderizarCatalogoOmie;
     await salvarEdicaoRapida();
   }
 
-  async function abrirTrocaFotoRapida() {
-    const codigo = _ctx.codigo;
-    fechar();
-    mostrarSpinnerCarregamentoProduto(codigo);
-    try {
-      if (typeof window.openProdutoPorCodigo !== 'function') throw new Error('Tela do produto indisponível.');
-      await window.openProdutoPorCodigo(codigo);
-      document.querySelector('.nav-card[data-target="listaFotos"]')?.click();
-    } catch (err) {
-      alert(err.message || 'Erro ao abrir as fotos do produto.');
-    } finally {
-      setTimeout(esconderSpinnerCarregamentoProduto, 350);
+  function prepararFotoRapida(file) {
+    const preview = document.getElementById('modalEditarRapidoFotoPreview');
+    const enviar = document.getElementById('modalEditarRapidoFotoEnviar');
+    if (_fotoRapidaPreviewUrl) URL.revokeObjectURL(_fotoRapidaPreviewUrl);
+    _fotoRapidaPreviewUrl = null;
+    _fotoRapidaFile = file && String(file.type || '').startsWith('image/') ? file : null;
+    if (preview) {
+      preview.style.display = _fotoRapidaFile ? 'block' : 'none';
+      if (_fotoRapidaFile) { _fotoRapidaPreviewUrl = URL.createObjectURL(_fotoRapidaFile); preview.src = _fotoRapidaPreviewUrl; }
+      else preview.removeAttribute('src');
     }
+    if (enviar) enviar.disabled = !_fotoRapidaFile;
+    if (file && !_fotoRapidaFile) setEditarRapidoStatus('O arquivo precisa ser uma imagem.', true);
+  }
+
+  async function colarFotoRapida() {
+    try {
+      const items = await navigator.clipboard.read();
+      const item = items.find(entry => entry.types.some(type => type.startsWith('image/')));
+      if (!item) return document.getElementById('modalEditarRapidoFotoInput').click();
+      const type = item.types.find(value => value.startsWith('image/'));
+      const blob = await item.getType(type);
+      prepararFotoRapida(new File([blob], `imagem-colada.${type.split('/')[1] || 'png'}`, { type }));
+    } catch (_) {
+      document.getElementById('modalEditarRapidoFotoInput').click();
+    }
+  }
+
+  async function enviarFotoRapida() {
+    if (!_fotoRapidaFile || !_ctx.codigo) return;
+    const btn = document.getElementById('modalEditarRapidoFotoEnviar');
+    btn.disabled = true; btn.textContent = 'Enviando...'; setEditarRapidoStatus('Enviando foto...');
+    try {
+      const descricao = document.getElementById('modalEditarRapidoDescricao').value.trim() || _ctx.descricao || 'Foto do produto';
+      const form = new FormData(); form.append('foto', _fotoRapidaFile); form.append('nome_foto', _fotoRapidaFile.name || 'Foto principal'); form.append('descricao_foto', descricao);
+      const resp = await fetch(`/api/produtos/${encodeURIComponent(_ctx.codigo)}/fotos?pos=0`, { method: 'POST', credentials: 'include', body: form });
+      const json = await resp.json(); if (!resp.ok) throw new Error(json?.detail || json?.error || 'Falha no upload.');
+      const card = document.querySelector(`.produto-catalogo-card[data-product-code="${CSS.escape(_ctx.codigo)}"]`);
+      const img = card?.querySelector('img'); if (img && json.url) img.src = json.url;
+      prepararFotoRapida(null); setEditarRapidoStatus('Foto atualizada com sucesso.');
+    } catch (err) { setEditarRapidoStatus(err.message || 'Erro ao enviar foto.', true); }
+    finally { btn.textContent = 'Enviar foto'; btn.disabled = !_fotoRapidaFile; }
   }
 
   function fecharQuantidade() {
@@ -49945,7 +50188,19 @@ window.renderizarCatalogoOmie = renderizarCatalogoOmie;
   document.getElementById('modalAcoesBtnEditarRapido').addEventListener('click', mostrarEditarRapido);
   document.getElementById('modalEditarRapidoVoltar').addEventListener('click', mostrarBotoes);
   document.getElementById('modalEditarRapidoSalvar').addEventListener('click', salvarEdicaoRapida);
-  document.getElementById('modalEditarRapidoFoto').addEventListener('click', abrirTrocaFotoRapida);
+  document.getElementById('modalEditarRapidoFoto').addEventListener('click', colarFotoRapida);
+  document.getElementById('modalEditarRapidoFotoInput').addEventListener('change', e => prepararFotoRapida(e.target.files?.[0]));
+  document.getElementById('modalEditarRapidoFotoEnviar').addEventListener('click', enviarFotoRapida);
+  const fotoRapidaDrop = document.getElementById('modalEditarRapidoFotoDrop');
+  ['dragenter', 'dragover'].forEach(tipo => fotoRapidaDrop.addEventListener(tipo, e => { e.preventDefault(); fotoRapidaDrop.style.background = '#dbeafe'; }));
+  ['dragleave', 'drop'].forEach(tipo => fotoRapidaDrop.addEventListener(tipo, e => { e.preventDefault(); fotoRapidaDrop.style.background = '#eff6ff'; }));
+  fotoRapidaDrop.addEventListener('drop', e => prepararFotoRapida(Array.from(e.dataTransfer?.files || []).find(file => file.type.startsWith('image/'))));
+  fotoRapidaDrop.addEventListener('paste', e => { const file = Array.from(e.clipboardData?.items || []).find(item => item.type.startsWith('image/'))?.getAsFile(); if (file) { e.preventDefault(); prepararFotoRapida(file); } });
+  ov.addEventListener('paste', e => {
+    if (document.getElementById('modalAcoesEditarRapido').style.display === 'none') return;
+    const file = Array.from(e.clipboardData?.items || []).find(item => item.type.startsWith('image/'))?.getAsFile();
+    if (file) { e.preventDefault(); prepararFotoRapida(file); }
+  });
   document.getElementById('modalEditarRapidoObsoleto').addEventListener('click', () => aplicarMarcadorRapido('OBSOLETO', 'obsoleto'));
   document.getElementById('modalEditarRapidoEngenharia').addEventListener('click', () => aplicarMarcadorRapido('ENGENHARIA', 'de engenharia'));
   document.getElementById('modalManualBtnEnviar').addEventListener('click', enviarManual);
@@ -70322,10 +70577,7 @@ window.adicionarNovaLinhaPIR = adicionarNovaLinhaPIR;
         e.stopPropagation();
         
         // Dispara o evento do botão original
-        const btnNovoProduto = document.getElementById('btnNovoProduto');
-        if (btnNovoProduto) {
-          btnNovoProduto.click();
-        }
+        if (typeof window.abrirCadastroProduto === 'function') window.abrirCadastroProduto();
         
         // Fecha o menu
         navGrid.style.display = 'none';
@@ -84106,3 +84358,28 @@ window._vippAbrirEtiqueta = function (idConhecimento, saida) {
       if (btn) { btn.disabled = false; btn.style.opacity = '1'; }
     });
 };
+
+// Mantem os ultimos controles acessiveis acima das barras flutuantes dos navegadores moveis.
+(function configurarEspacoNavegadorMovel() {
+  function atualizarEspacoInferior() {
+    if (!window.matchMedia('(max-width: 900px)').matches) {
+      document.documentElement.style.removeProperty('--mobile-browser-bottom');
+      return;
+    }
+
+    var viewport = window.visualViewport;
+    var areaOculta = viewport
+      ? Math.max(0, window.innerHeight - viewport.height - viewport.offsetTop)
+      : 0;
+    var reserva = Math.max(120, Math.ceil(areaOculta + 24));
+    document.documentElement.style.setProperty('--mobile-browser-bottom', reserva + 'px');
+  }
+
+  atualizarEspacoInferior();
+  window.addEventListener('resize', atualizarEspacoInferior, { passive: true });
+  window.addEventListener('orientationchange', atualizarEspacoInferior, { passive: true });
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener('resize', atualizarEspacoInferior, { passive: true });
+    window.visualViewport.addEventListener('scroll', atualizarEspacoInferior, { passive: true });
+  }
+})();

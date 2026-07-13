@@ -19,7 +19,7 @@
   referrerpolicy="no-referrer"
 />
   <!-- Seu CSS principal -->
-  <link rel="stylesheet" href="menu_produto.css?v=20260713-impressao-rapida-3"/>
+  <link rel="stylesheet" href="menu_produto.css?v=20260713-ios-safe-bottom"/>
   <!-- Anti-flicker: esconde menus até as permissões serem aplicadas -->
   <style id="boot-anti-flicker">
     /* Enquanto o app não está pronto, esconde elementos sujeitos a permissões */
@@ -145,8 +145,8 @@
      class="menu-link" href="#"
      data-nav-key="top:produto"
      data-nav-pos="top"
-     data-nav-label="Produto"
-     data-nav-selector="#menu-produto">Produto</a>
+     data-nav-label="Cadastrar Produto"
+     data-nav-selector="#menu-produto">Cadastrar Produto</a>
 
   <a id="menu-engenharia"
     class="menu-link" href="#"
@@ -11391,7 +11391,7 @@
   <script type="module" src="login/login.js"></script>
   <script src="/public/js/vendas-relatorio-gerencial.js?v=20260709a" defer></script>
   <script src="/public/js/logistica-relatorio-gerencial.js?v=20260712a" defer></script>
-  <script type="module" src="menu_produto.js?v=20260713-impressao-rapida-3"></script>
+  <script type="module" src="menu_produto.js?v=20260713-ios-safe-bottom"></script>
   
   <script type="module" src="./requisicoes_omie/filtro_produto.js?v=20260710a"></script>
   <script type="module" src="./requisicoes_omie/ListarProdutos.js?v=20260710a"></script>
@@ -13536,7 +13536,48 @@ function attachDropZone(ul) {
 @media(max-width:900px){#chatPane #chatLayout{grid-template-columns:1fr}}
 </style>
 
-<!-- ===== MODAL NOVO PRODUTO ===== -->
+<!-- ===== CADASTRO DE PRODUTO V2 ===== -->
+<div id="cadProdutoV2" class="cad-prod-overlay" hidden>
+  <div class="cad-prod-dialog" role="dialog" aria-modal="true" aria-labelledby="cadProdTitulo">
+    <header class="cad-prod-header">
+      <div><span class="cad-prod-kicker">OMIE</span><h2 id="cadProdTitulo">Cadastrar produto</h2></div>
+      <button id="cadProdFechar" type="button" class="cad-prod-close" aria-label="Fechar">&times;</button>
+    </header>
+    <div class="cad-prod-body">
+      <section class="cad-prod-card cad-prod-config">
+        <div class="cad-prod-section-title"><span>1</span><div><h3>Defina o produto</h3><p>A fam&iacute;lia e a origem formam o prefixo do c&oacute;digo.</p></div></div>
+        <label class="cad-prod-field"><span>Fam&iacute;lia</span><select id="cadProdFamilia"><option value="">Carregando...</option></select><button id="cadProdMostrarFamilias" type="button" class="cad-prod-reveal"><i class="fa-regular fa-eye"></i> Desocultar fam&iacute;lias restantes</button></label>
+        <label class="cad-prod-field"><span>Filtro por descri&ccedil;&atilde;o <small>(opcional)</small></span><input id="cadProdFiltro" type="text" placeholder="Ex.: COMPRESSOR"></label>
+        <div class="cad-prod-field"><span>Origem</span><div class="cad-prod-origin" role="group" aria-label="Origem do produto"><button type="button" data-origin="N" class="active">Nacional</button><button type="button" data-origin="I">Importado</button></div></div>
+        <div class="cad-prod-mode" role="tablist"><button type="button" id="cadProdModoUnico" class="active">Produto &uacute;nico</button><button type="button" id="cadProdModoLote">Cadastro em lote</button></div>
+      </section>
+
+      <section id="cadProdUnicoPane" class="cad-prod-card">
+        <div class="cad-prod-section-title"><span>2</span><div><h3>Gere e revise</h3><p>Confira o sequencial e ajuste a descri&ccedil;&atilde;o antes de cadastrar.</p></div></div>
+        <label class="cad-prod-field"><span>Descri&ccedil;&atilde;o</span><input id="cadProdDescricao" type="text" maxlength="120" placeholder="Descri&ccedil;&atilde;o completa do produto"></label>
+        <button id="cadProdGerar" type="button" class="cad-prod-btn cad-prod-btn-primary"><i class="fa-solid fa-wand-magic-sparkles"></i> Gerar c&oacute;digo</button>
+        <div id="cadProdCodigoWrap" class="cad-prod-code" hidden><div><small>C&oacute;digo reservado</small><strong id="cadProdCodigo">-</strong><span id="cadProdSequencial"></span></div><button id="cadProdCopiar" type="button" title="Copiar c&oacute;digo"><i class="fa-regular fa-copy"></i></button></div>
+        <div class="cad-prod-grid-two">
+          <label class="cad-prod-field"><span>Unidade</span><select id="cadProdUnidade"></select></label>
+          <label class="cad-prod-field"><span>Tipo de item (Omie)</span><select id="cadProdTipo"></select></label>
+        </div>
+        <label class="cad-prod-field"><span>Foto <small>(opcional)</small></span><div id="cadProdFotoDrop" class="cad-prod-image-drop" tabindex="0"><i class="fa-solid fa-cloud-arrow-up"></i><strong>Arraste uma imagem aqui</strong><small>ou use Ctrl+V para colar</small><div class="cad-prod-image-picker"><input id="cadProdFoto" type="file" accept="image/*"><button id="cadProdColarFoto" type="button">Colar imagem</button><button id="cadProdLimparFoto" type="button">Limpar</button></div></div></label>
+        <div id="cadProdFotoPreview" class="cad-prod-image-preview" hidden><img alt="Pr&eacute;via da foto"><span></span></div>
+        <button id="cadProdCadastrar" type="button" class="cad-prod-btn cad-prod-btn-success" disabled><i class="fa-solid fa-check"></i> Cadastrar produto</button>
+      </section>
+
+      <section id="cadProdLotePane" class="cad-prod-card" hidden>
+        <div class="cad-prod-section-title"><span>2</span><div><h3>Prepare o lote</h3><p>Informe uma descri&ccedil;&atilde;o por linha. O sistema reservar&aacute; uma faixa de c&oacute;digos.</p></div></div>
+        <label class="cad-prod-field"><span>Descri&ccedil;&otilde;es do lote</span><textarea id="cadProdLoteDescricoes" rows="7" placeholder="CABO LIDES 6,00MM AZUL 130 GRAUS 750V&#10;CABO LIDES 4,00MM AZUL 130 GRAUS 750V"></textarea></label>
+        <div class="cad-prod-actions"><button id="cadProdLotePreview" type="button" class="cad-prod-btn cad-prod-btn-primary">Gerar preview</button><button id="cadProdLoteCadastrar" type="button" class="cad-prod-btn cad-prod-btn-success" disabled>Cadastrar lote</button></div>
+        <div class="cad-prod-table-wrap"><table><thead><tr><th>#</th><th>C&oacute;digo</th><th>Descri&ccedil;&atilde;o</th><th>Status</th></tr></thead><tbody id="cadProdLoteBody"><tr><td colspan="4">Gere um preview para visualizar o lote.</td></tr></tbody></table></div>
+      </section>
+      <div id="cadProdStatus" class="cad-prod-status" aria-live="polite"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== MODAL NOVO PRODUTO (LEGADO) ===== -->
 <div id="modalNovoProduto" class="modal-overlay">
   <div class="modal-dialog">
     <div class="modal-header">
