@@ -12755,7 +12755,7 @@ async function _logisticaObterQtyCodigoSeparacao(client, solicIds) {
   return { qtd: parseFloat(rows[0]?.total) || 0, codigo: rows[0]?.codigo || null };
 }
 
-async function _etqDebitarSeparacaoAlmox(client, { cod_local_origem, etq_id, endereco_origem, codigo_produto, qtd, ignorar_saldo_etq }) {
+async function _etqDebitarSeparacaoAlmox(client, { cod_local_origem, etq_id, endereco_origem, etq_enderecos, codigo_produto, qtd, ignorar_saldo_etq }) {
   if (String(cod_local_origem || '').trim() !== LOGISTICA_ALMOX_LOCAL_COD) return null;
   const qtdNum = parseFloat(qtd);
   if (!Number.isFinite(qtdNum) || qtdNum <= 0) return null;
@@ -12764,43 +12764,85 @@ async function _etqDebitarSeparacaoAlmox(client, { cod_local_origem, etq_id, end
   const codigoOmie = await _resolveProdutoOmieCodigoProduto(client, codigoTexto);
   if (!codigoOmie) throw new Error(`Produto "${codigoTexto}" não encontrado em produtos_omie.`);
 
-  let endereco = String(endereco_origem || '').trim();
-  if (etq_id) {
-    const { rows } = await client.query(
-      `SELECT TRIM(endereco) AS endereco, COALESCE(qtd, 0) AS qtd
-         FROM etiqueta."ETQ_rec_impresso"
-        WHERE id = $1`,
-      [parseInt(etq_id, 10)]
-    );
-    if (!rows[0]?.endereco) {
-      if (ignorar_saldo_etq) return null;
-      throw new Error('Endereço ETQ não encontrado.');
-    }
-    endereco = rows[0].endereco;
+  let lista = Array.isArray(etq_enderecos)
+    ? etq_enderecos.filter(x => x && (x.etq_id || x.endereco || x.endereco_origem))
+    : [];
+  if (!lista.length && (etq_id || endereco_origem)) {
+    lista = [{ etq_id, endereco: endereco_origem, qtd: qtdNum }];
   }
-  if (!endereco) {
+  if (!lista.length) {
     if (ignorar_saldo_etq) return null;
     const err = new Error('Selecione o endereço de origem no Almoxarifado (Porta Pallet).');
     err.code = 'ETQ_ENDERECO_OBRIGATORIO';
     throw err;
   }
 
-  const linhas = await _etqLinhasSaldoEndereco(client, codigoOmie, endereco);
-  const total = linhas.reduce((s, r) => s + Number(r.qtd || 0), 0);
-  if (total <= 0 || total + 1e-9 < qtdNum) {
+  const resolvidos = [];
+  for (const item of lista) {
+    let endereco = String(item.endereco || item.endereco_origem || '').trim();
+    if (item.etq_id) {
+      const { rows } = await client.query(
+        `SELECT TRIM(endereco) AS endereco, COALESCE(qtd, 0) AS qtd
+           FROM etiqueta."ETQ_rec_impresso"
+          WHERE id = $1`,
+        [parseInt(item.etq_id, 10)]
+      );
+      if (!rows[0]?.endereco) {
+        if (ignorar_saldo_etq) continue;
+        throw new Error('Endereço ETQ não encontrado.');
+      }
+      endereco = rows[0].endereco;
+    }
+    if (!endereco) continue;
+    resolvidos.push({
+      endereco,
+      qtdPref: parseFloat(item.qtd)
+    });
+  }
+
+  if (!resolvidos.length) {
     if (ignorar_saldo_etq) return null;
+    const err = new Error('Selecione o endereço de origem no Almoxarifado (Porta Pallet).');
+    err.code = 'ETQ_ENDERECO_OBRIGATORIO';
+    throw err;
+  }
+
+  let remaining = qtdNum;
+  const detalhes = [];
+  for (const r of resolvidos) {
+    if (remaining <= 1e-9) break;
+    const linhas = await _etqLinhasSaldoEndereco(client, codigoOmie, r.endereco);
+    const total = linhas.reduce((s, row) => s + Number(row.qtd || 0), 0);
+    let tirar = Number.isFinite(r.qtdPref) && r.qtdPref > 0
+      ? Math.min(r.qtdPref, remaining)
+      : remaining;
+    if (total <= 0 || total + 1e-9 < tirar) {
+      if (ignorar_saldo_etq) continue;
+      const err = new Error(`Item ${codigoTexto} não possui saldo, favor atualizar saldo no processo de movimentação.`);
+      err.code = 'ETQ_SALDO_SEPARACAO';
+      throw err;
+    }
+    tirar = Math.min(tirar, total);
+    if (tirar <= 0) continue;
+    await _etqDebitarEndereco(client, { codigo: codigoOmie, endereco: r.endereco, qtd: tirar, usuario: null });
+    detalhes.push({ endereco: r.endereco, qtd: tirar });
+    remaining = Math.max(0, remaining - tirar);
+  }
+
+  if (remaining > 1e-9 && !ignorar_saldo_etq) {
     const err = new Error(`Item ${codigoTexto} não possui saldo, favor atualizar saldo no processo de movimentação.`);
     err.code = 'ETQ_SALDO_SEPARACAO';
     throw err;
   }
+  if (!detalhes.length) return null;
 
-  const debitResult = await _etqDebitarEndereco(client, { codigo: codigoOmie, endereco, qtd: qtdNum, usuario: null });
+  const qtdDebitada = detalhes.reduce((s, d) => s + (Number(d.qtd) || 0), 0);
   return {
-    ...debitResult,
-    endereco,
+    endereco: detalhes[0].endereco,
     codigo_omie: codigoOmie,
     codigo_texto: codigoTexto,
-    qtd: qtdNum
+    qtd: qtdDebitada,
+    detalhes
   };
 }
 
@@ -12809,12 +12851,16 @@ async function _ensureEtqSepColumns(client) {
   await db.query(`ALTER TABLE solicitacao_produto.itens_solicitados ADD COLUMN IF NOT EXISTS etq_sep_endereco TEXT`);
   await db.query(`ALTER TABLE solicitacao_produto.itens_solicitados ADD COLUMN IF NOT EXISTS etq_sep_qtd NUMERIC(18,4)`);
   await db.query(`ALTER TABLE solicitacao_produto.itens_solicitados ADD COLUMN IF NOT EXISTS etq_sep_codigo TEXT`);
+  await db.query(`ALTER TABLE solicitacao_produto.itens_solicitados ADD COLUMN IF NOT EXISTS etq_sep_detalhes JSONB`);
 }
 
 /** Grava endereço/qtd debitados em ETQ_rec_impresso para estorno ao retificar. */
-async function _etqPersistirDebitoSeparacao(client, solicIds, { endereco, codigo_omie, qtd }) {
+async function _etqPersistirDebitoSeparacao(client, solicIds, { endereco, codigo_omie, qtd, detalhes }) {
   const qtdTotal = parseFloat(qtd);
-  if (!endereco || !codigo_omie || !Number.isFinite(qtdTotal) || qtdTotal <= 0) return;
+  const dets = Array.isArray(detalhes) && detalhes.length
+    ? detalhes.map(d => ({ endereco: String(d.endereco || '').trim(), qtd: parseFloat(d.qtd) || 0 })).filter(d => d.endereco && d.qtd > 0)
+    : (endereco && Number.isFinite(qtdTotal) && qtdTotal > 0 ? [{ endereco: String(endereco).trim(), qtd: qtdTotal }] : []);
+  if (!dets.length || !codigo_omie) return;
   const ids = (solicIds || []).map(id => parseInt(id, 10)).filter(id => !isNaN(id));
   if (!ids.length) return;
   await _ensureEtqSepColumns(client);
@@ -12829,18 +12875,22 @@ async function _etqPersistirDebitoSeparacao(client, solicIds, { endereco, codigo
   if (!rows.length) return;
 
   const sumCarr = rows.reduce((s, r) => s + (parseFloat(r.qty_carr) || 0), 0);
+  const endResumo = dets.map(d => d.endereco).join(' + ');
   for (const row of rows) {
-    let itemQtd = qtdTotal;
+    let fator = 1;
     if (rows.length > 1 && sumCarr > 0) {
-      itemQtd = ((parseFloat(row.qty_carr) || 0) / sumCarr) * qtdTotal;
+      fator = (parseFloat(row.qty_carr) || 0) / sumCarr;
     }
+    const itemQtd = qtdTotal * fator;
+    const itemDets = dets.map(d => ({ endereco: d.endereco, qtd: (Number(d.qtd) || 0) * fator }));
     await client.query(
       `UPDATE solicitacao_produto.itens_solicitados
           SET etq_sep_endereco = $2,
               etq_sep_codigo = $3,
-              etq_sep_qtd = $4
+              etq_sep_qtd = $4,
+              etq_sep_detalhes = $5::jsonb
         WHERE id = $1`,
-      [row.id, endereco, codigo_omie, itemQtd]
+      [row.id, endResumo, codigo_omie, itemQtd, JSON.stringify(itemDets)]
     );
   }
 }
@@ -12852,23 +12902,44 @@ async function _etqEstornarDebitoSeparacao(client, solicIds) {
   await _ensureEtqSepColumns(client);
 
   const { rows } = await client.query(
-    `SELECT id, etq_sep_endereco, etq_sep_codigo, etq_sep_qtd
+    `SELECT id, etq_sep_endereco, etq_sep_codigo, etq_sep_qtd, etq_sep_detalhes
        FROM solicitacao_produto.itens_solicitados
       WHERE id = ANY($1::bigint[])
-        AND etq_sep_endereco IS NOT NULL
-        AND COALESCE(etq_sep_qtd, 0) > 0`,
+        AND (
+          (etq_sep_endereco IS NOT NULL AND COALESCE(etq_sep_qtd, 0) > 0)
+          OR etq_sep_detalhes IS NOT NULL
+        )`,
     [ids]
   );
   if (!rows.length) return;
 
   const grupos = new Map();
   for (const r of rows) {
-    const end = String(r.etq_sep_endereco || '').trim();
     const cod = String(r.etq_sep_codigo || '').trim();
-    if (!end || !cod) continue;
-    const key = `${cod}|${end}`;
-    if (!grupos.has(key)) grupos.set(key, { codigo: cod, endereco: end, qtd: 0 });
-    grupos.get(key).qtd += parseFloat(r.etq_sep_qtd) || 0;
+    if (!cod) continue;
+    let parts = [];
+    if (r.etq_sep_detalhes) {
+      try {
+        const parsed = typeof r.etq_sep_detalhes === 'string'
+          ? JSON.parse(r.etq_sep_detalhes)
+          : r.etq_sep_detalhes;
+        if (Array.isArray(parsed)) parts = parsed;
+      } catch (_) { parts = []; }
+    }
+    if (!parts.length) {
+      const end = String(r.etq_sep_endereco || '').trim();
+      if (end && !end.includes(' + ')) {
+        parts = [{ endereco: end, qtd: parseFloat(r.etq_sep_qtd) || 0 }];
+      }
+    }
+    for (const p of parts) {
+      const end = String(p.endereco || '').trim();
+      const q = parseFloat(p.qtd) || 0;
+      if (!end || q <= 0) continue;
+      const key = `${cod}|${end}`;
+      if (!grupos.has(key)) grupos.set(key, { codigo: cod, endereco: end, qtd: 0 });
+      grupos.get(key).qtd += q;
+    }
   }
 
   for (const g of grupos.values()) {
@@ -12886,7 +12957,8 @@ async function _etqEstornarDebitoSeparacao(client, solicIds) {
     `UPDATE solicitacao_produto.itens_solicitados
         SET etq_sep_endereco = NULL,
             etq_sep_codigo = NULL,
-            etq_sep_qtd = NULL
+            etq_sep_qtd = NULL,
+            etq_sep_detalhes = NULL
       WHERE id = ANY($1::bigint[])`,
     [ids]
   );
@@ -18355,7 +18427,7 @@ app.patch('/api/logistica/itens_solicitados/separar', async (req, res) => {
     await ensureSchemaMigrated();
     const id_user = req.session?.user?.id;
     if (!id_user) return res.status(401).json({ ok: false, error: 'Não autenticado.' });
-    const { solic_ids, cod_local_origem, etq_id, endereco_origem, codigo_produto, ignorar_saldo_etq } = req.body;
+    const { solic_ids, cod_local_origem, etq_id, endereco_origem, etq_enderecos, codigo_produto, ignorar_saldo_etq } = req.body;
     if (!Array.isArray(solic_ids) || !solic_ids.length)
       return res.status(400).json({ ok: false, error: 'solic_ids inválido.' });
     const ids = solic_ids.map(id => parseInt(id, 10)).filter(id => !isNaN(id));
@@ -18377,6 +18449,7 @@ app.patch('/api/logistica/itens_solicitados/separar', async (req, res) => {
         cod_local_origem,
         etq_id,
         endereco_origem,
+        etq_enderecos,
         codigo_produto: codigo_produto || codigo,
         qtd,
         ignorar_saldo_etq: !!ignorar_saldo_etq
@@ -18388,7 +18461,7 @@ app.patch('/api/logistica/itens_solicitados/separar', async (req, res) => {
       nome_user: _logisticaNomeUsuarioReq(req)
     });
     const posSep = await _logisticaAplicarStatusPosSeparacao(client, ids, req);
-    if (etqDebit?.endereco) {
+    if (etqDebit?.endereco || (Array.isArray(etqDebit?.detalhes) && etqDebit.detalhes.length)) {
       await _etqPersistirDebitoSeparacao(client, ids, etqDebit);
     }
     await client.query('COMMIT');
@@ -18607,7 +18680,7 @@ app.post('/api/logistica/itens_solicitados/separar-parcial', async (req, res) =>
   try {
     const id_user = req.session?.user?.id;
     if (!id_user) return res.status(401).json({ ok: false, error: 'Não autenticado.' });
-    const { carr_ids, solic_ids, quantidade_separada, motivo, cod_local_origem, etq_id, endereco_origem, codigo_produto, ignorar_saldo_etq } = req.body;
+    const { carr_ids, solic_ids, quantidade_separada, motivo, cod_local_origem, etq_id, endereco_origem, etq_enderecos, codigo_produto, ignorar_saldo_etq } = req.body;
     const qtySep = parseFloat(quantidade_separada);
     if (!Array.isArray(carr_ids) || !carr_ids.length || isNaN(qtySep) || qtySep <= 0)
       return res.status(400).json({ ok: false, error: 'Dados inválidos.' });
@@ -18644,6 +18717,7 @@ app.post('/api/logistica/itens_solicitados/separar-parcial', async (req, res) =>
         cod_local_origem,
         etq_id,
         endereco_origem,
+        etq_enderecos,
         codigo_produto: codigoRef,
         qtd: qtySep,
         ignorar_saldo_etq: !!ignorar_saldo_etq
@@ -18692,7 +18766,7 @@ app.post('/api/logistica/itens_solicitados/separar-parcial', async (req, res) =>
           nome_user: _logisticaNomeUsuarioReq(req)
         });
         await _logisticaAplicarStatusPosSeparacao(client, sIds, req);
-        if (etqDebit?.endereco) await _etqPersistirDebitoSeparacao(client, sIds, etqDebit);
+        if (etqDebit?.endereco || (Array.isArray(etqDebit?.detalhes) && etqDebit.detalhes.length)) await _etqPersistirDebitoSeparacao(client, sIds, etqDebit);
       } else {
         const { rows: solRows } = await client.query(
           `SELECT id FROM solicitacao_produto.itens_solicitados WHERE id_carr = $1`,
@@ -18705,7 +18779,7 @@ app.post('/api/logistica/itens_solicitados/separar-parcial', async (req, res) =>
           nome_user: _logisticaNomeUsuarioReq(req)
         });
         await _logisticaAplicarStatusPosSeparacaoPorCarr(client, [primaryId], req);
-        if (etqDebit?.endereco) {
+        if (etqDebit?.endereco || (Array.isArray(etqDebit?.detalhes) && etqDebit.detalhes.length)) {
           await _etqPersistirDebitoSeparacao(client, idsSep, etqDebit);
         }
       }
@@ -18829,7 +18903,7 @@ app.post('/api/logistica/itens_solicitados/separar-parcial', async (req, res) =>
       });
 
       await _logisticaAplicarStatusPosSeparacaoPorCarr(client, [primaryKeptId], req);
-      if (etqDebit?.endereco) {
+      if (etqDebit?.endereco || (Array.isArray(etqDebit?.detalhes) && etqDebit.detalhes.length)) {
         await _etqPersistirDebitoSeparacao(client, idsKeptSep.length ? idsKeptSep : sIds, etqDebit);
       }
     }
@@ -19968,11 +20042,18 @@ app.get('/api/logistica/estoque/batch', async (req, res) => {
     const codigos = (req.query.codigos || '').split(',').map(s => s.trim()).filter(Boolean);
     if (!codigos.length) return res.json({ ok: true, dados: {} });
 
+    // LATERAL LIMIT 1: produtos_omie.codigo não é único — JOIN direto multiplica linhas de estoque
     const { rows } = await pool.query(
       `SELECT e.codigo, e.local_nome, e.local_codigo, e.saldo, e.fisico, e.estoque_minimo,
               p.unidade
        FROM logistica.estoque_atual e
-       LEFT JOIN public.produtos_omie p ON p.codigo = e.codigo
+       LEFT JOIN LATERAL (
+         SELECT unidade
+         FROM public.produtos_omie
+         WHERE codigo = e.codigo
+         ORDER BY codigo_produto DESC
+         LIMIT 1
+       ) p ON TRUE
        WHERE e.codigo = ANY($1::text[])
        ORDER BY e.codigo, e.local_nome NULLS LAST`,
       [codigos]
@@ -19980,9 +20061,14 @@ app.get('/api/logistica/estoque/batch', async (req, res) => {
 
     const dados = {};
     const minimos = {};
+    const vistoLocal = {}; // evita linha duplicada por (codigo, local) se houver lixo residual
 
     // Passo 1: coleta todos os dados
     for (const row of rows) {
+      const chaveLocal = String(row.codigo) + '|' + String(row.local_codigo || '');
+      if (vistoLocal[chaveLocal]) continue;
+      vistoLocal[chaveLocal] = true;
+
       if (!dados[row.codigo]) dados[row.codigo] = [];
       dados[row.codigo].push({
         local_codigo: row.local_codigo,

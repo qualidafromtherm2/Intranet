@@ -349,6 +349,80 @@ function _solEnderecamentoHtml(codigo, enderecoMap, itemFallback) {
   </div>`;
 }
 
+function _solEtqSelecaoKey(sel) {
+  return String((sel && (sel.id || sel.endereco)) || '');
+}
+
+function _solLerSelecoesEtq(row) {
+  try {
+    const arr = JSON.parse(row?.dataset?.etqSelecoes || '[]');
+    return Array.isArray(arr) ? arr : [];
+  } catch (_) {
+    return [];
+  }
+}
+
+/** Aloca a quantidade nos endereços na ordem de seleção (primeiro leva o máximo possível). */
+function _solCalcularAlocacaoEtq(selecoes, qtyNeeded) {
+  let remaining = Math.max(0, parseFloat(qtyNeeded) || 0);
+  const alocs = [];
+  for (const s of selecoes || []) {
+    const saldo = Math.max(0, parseFloat(s.saldo) || 0);
+    const tirar = remaining > 0 ? Math.min(saldo, remaining) : 0;
+    alocs.push({
+      id: s.id != null ? String(s.id) : '',
+      endereco: String(s.endereco || '').trim(),
+      saldo,
+      tirar
+    });
+    remaining = Math.max(0, remaining - tirar);
+  }
+  const totalTirar = alocs.reduce((s, a) => s + (Number(a.tirar) || 0), 0);
+  return { alocs, remaining, totalTirar };
+}
+
+function _solAplicarVisualAlocacaoEtq(row, qtyNeeded) {
+  if (!row) return null;
+  const selecoes = _solLerSelecoesEtq(row);
+  const calc = _solCalcularAlocacaoEtq(selecoes, qtyNeeded);
+  const byKey = new Map(calc.alocs.map(a => [_solEtqSelecaoKey(a), a]));
+  row.querySelectorAll('.sep-etq-endereco-row').forEach(el => {
+    const key = String(el.dataset.etqId || el.dataset.etqEndereco || '');
+    const aloc = byKey.get(key);
+    const active = !!aloc;
+    el.dataset.selected = active ? '1' : '0';
+    el.style.borderColor = active ? '#22c55e' : '#854d0e33';
+    el.style.background = active ? '#1a2e1a' : '#1a1508';
+    const badge = el.querySelector('.sep-etq-tirar');
+    if (badge) {
+      if (active && aloc.tirar > 0) {
+        badge.textContent = `Tirar ${_solFmtQty(aloc.tirar)}`;
+        badge.style.display = 'inline-block';
+      } else if (active) {
+        badge.textContent = 'Selecionado';
+        badge.style.display = 'inline-block';
+      } else {
+        badge.textContent = '';
+        badge.style.display = 'none';
+      }
+    }
+  });
+  const comTirar = calc.alocs.filter(a => a.tirar > 0);
+  row.dataset.etqAlocacoes = JSON.stringify(comTirar);
+  if (selecoes.length) {
+    const saldoTotal = selecoes.reduce((s, a) => s + (Number(a.saldo) || 0), 0);
+    row.dataset.etqId = String(selecoes[0].id || '');
+    row.dataset.etqEndereco = String(selecoes[0].endereco || '');
+    row.dataset.etqQtd = String(saldoTotal);
+  } else {
+    row.dataset.etqId = '';
+    row.dataset.etqEndereco = '';
+    row.dataset.etqQtd = '';
+    row.dataset.etqAlocacoes = '[]';
+  }
+  return calc;
+}
+
 function _solEnderecamentoSepInline(codigo, enderecoMap, itemFallback) {
   const cod = String(codigo || '').trim();
   let registros = cod ? enderecoMap?.[cod] : null;
@@ -366,7 +440,7 @@ function _solEnderecamentoSepInline(codigo, enderecoMap, itemFallback) {
       Nenhum endereço cadastrado no ETQ
     </div>`;
   }
-  const gridCols = 'minmax(110px,1fr) minmax(64px,auto)';
+  const gridCols = 'minmax(90px,1fr) minmax(52px,auto) minmax(58px,auto)';
   const head = '';
   const linhas = registros.map(ep => {
     const end = escapeHtml(String(ep.endereco || ep.completo || '').trim());
@@ -375,15 +449,17 @@ function _solEnderecamentoSepInline(codigo, enderecoMap, itemFallback) {
     const qtd = Number(ep.qtd || 0);
     const un = escapeHtml(String(ep.unidade || 'UN'));
     const qtdColor = qtd > 0 ? '#cbd5e1' : '#fbbf24';
-    return `<button type="button" class="sep-etq-endereco-row" data-etq-id="${escapeHtml(id)}" data-etq-endereco="${end}" data-etq-qtd="${qtd}"
+    return `<button type="button" class="sep-etq-endereco-row" data-etq-id="${escapeHtml(id)}" data-etq-endereco="${end}" data-etq-qtd="${qtd}" data-selected="0"
       style="display:grid;grid-template-columns:${gridCols};gap:3px 6px;width:100%;padding:5px 4px;border:1px solid #854d0e33;border-radius:6px;background:#1a1508;color:inherit;font:inherit;cursor:pointer;text-align:left;align-items:center;">
       <span style="color:#fde68a;font-weight:700;word-break:break-word;font-size:.65rem;">${end}</span>
       <span style="color:${qtdColor};font-weight:700;font-size:.64rem;text-align:right;">${qtd} ${un}</span>
+      <span class="sep-etq-tirar" style="display:none;font-size:.58rem;font-weight:800;color:#86efac;text-align:right;white-space:nowrap;"></span>
     </button>`;
   }).filter(Boolean).join('');
   if (!linhas) return '';
   return `<div class="sep-etq-endereco-list" style="padding:6px 8px;background:#141006;border:1px solid #854d0e55;border-radius:8px;">
     ${_solEnderecoLegendaHtml(registros)}
+    <div style="font-size:.58rem;color:#94a3b8;margin:2px 0 4px;line-height:1.3;">Toque em mais de um endereço se a qtd não couber em um só. O 1º selecionado tira o máximo.</div>
     ${head}${linhas}
   </div>`;
 }
@@ -732,8 +808,8 @@ window._loadSolicitacoesTab = async function() {
     { key: 'Stund-by',            label: 'Stund-by',            icon: 'fa-bag-shopping',   color: '#ec4899', bg: '#1f0d1a', acao: 'modal'    },
     { key: 'Em Separação',         label: 'Em Separação',         icon: 'fa-boxes-stacked',  color: '#f59e0b', bg: '#1c1500', acao: 'modal'    },
     { key: 'Separado',             label: 'Separado',             icon: 'fa-check-circle',   color: '#22c55e', bg: '#0a1f0f', acao: 'modal'    },
-    { key: 'Aguardando retirada',  label: 'Aguardando retirada',  icon: 'fa-hourglass-half', color: '#a78bfa', bg: '#140d2a', acao: null       },
-    { key: 'Concluído',            label: 'Concluído',            icon: 'fa-flag-checkered', color: '#9ca3af', bg: '#111',    acao: null       },
+    { key: 'Aguardando retirada',  label: 'Aguardando retirada',  icon: 'fa-hourglass-half', color: '#a78bfa', bg: '#140d2a', acao: 'visualizar' },
+    { key: 'Concluído',            label: 'Concluído',            icon: 'fa-flag-checkered', color: '#9ca3af', bg: '#111',    acao: 'visualizar' },
   ];
 
   try {
@@ -761,7 +837,7 @@ window._loadSolicitacoesTab = async function() {
             const hint     = col.acao === 'iniciar'
               ? `<span style="font-size:.65rem;color:#22c55e88;margin-top:3px;display:block;"><i class="fa-solid fa-eye" style="margin-right:2px;"></i>Clique para ver itens</span>
                  <button class="solic-sep-start-btn" data-n-solic="${sep.n_solic}" style="margin-top:6px;padding:4px 8px;border:none;border-radius:6px;background:#1d4ed8;color:#dbeafe;font-size:.68rem;font-weight:700;cursor:pointer;"><i class="fa-solid fa-play" style="margin-right:3px;"></i>Iniciar separação</button>`
-              : col.acao === 'modal'
+              : (col.acao === 'modal' || col.acao === 'visualizar')
                 ? `<span style="font-size:.65rem;color:#22c55e55;margin-top:3px;display:block;"><i class="fa-solid fa-eye" style="margin-right:2px;"></i>Ver itens</span>`
                 : '';
             const emProcessoSep = col.key === 'Em Separação' || col.key === 'Separado';
@@ -849,6 +925,15 @@ window._loadSolicitacoesTab = async function() {
           await _abrirModalAguardandoRetiradaSep(nSolic, {
             tituloColuna: 'Solicitado',
             permitirRecebido: false,
+            escopoItens: 'global'
+          });
+          return;
+        }
+        if (acao === 'visualizar') {
+          await _abrirModalAguardandoRetiradaSep(nSolic, {
+            tituloColuna: cardEl.dataset.colStatus || 'Aguardando retirada',
+            permitirRecebido: false,
+            somenteLeitura: true,
             escopoItens: 'global'
           });
           return;
@@ -1228,6 +1313,24 @@ async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) 
       codigo_produto: row.dataset.codigo || undefined
     };
     if (!row || row.dataset.requerEtq !== '1' || cod !== PRINC_ARMZ) return base;
+    let alocs = [];
+    try { alocs = JSON.parse(row.dataset.etqAlocacoes || '[]'); } catch (_) { alocs = []; }
+    if (!Array.isArray(alocs) || !alocs.length) {
+      const calc = _solAplicarVisualAlocacaoEtq(row, parseFloat(row.dataset.qtyTotal || '0') || 0);
+      alocs = (calc?.alocs || []).filter(a => a.tirar > 0);
+    }
+    if (alocs.length) {
+      return {
+        ...base,
+        etq_enderecos: alocs.map(a => ({
+          etq_id: a.id ? parseInt(a.id, 10) : undefined,
+          endereco: a.endereco || undefined,
+          qtd: Number(a.tirar) || 0
+        })),
+        etq_id: alocs[0].id ? parseInt(alocs[0].id, 10) : undefined,
+        endereco_origem: alocs[0].endereco || undefined
+      };
+    }
     return {
       ...base,
       etq_id: row.dataset.etqId ? parseInt(row.dataset.etqId, 10) : undefined,
@@ -1257,15 +1360,20 @@ async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) 
     if (!row || row.dataset.requerEtq !== '1') return true;
     const codOrigem = String(row.dataset.origemCod || '').trim();
     if (codOrigem !== PRINC_ARMZ) return true;
-    if (!row.dataset.etqId && !row.dataset.etqEndereco) {
-      alert('Selecione um endereço de origem no Almoxarifado (Porta Pallet).');
+    const qtd = parseFloat(qty);
+    const calc = _solAplicarVisualAlocacaoEtq(row, Number.isFinite(qtd) ? qtd : (parseFloat(row.dataset.qtyTotal || '0') || 0));
+    const selecoes = _solLerSelecoesEtq(row);
+    if (!selecoes.length) {
+      alert('Selecione um ou mais endereços de origem no Almoxarifado (Porta Pallet).');
       return false;
     }
-    const saldo = parseFloat(row.dataset.etqQtd || '0');
-    const qtd = parseFloat(qty);
-    if (!Number.isFinite(saldo) || saldo <= 0 || (Number.isFinite(qtd) && saldo + 1e-9 < qtd)) {
+    if (!Number.isFinite(qtd) || qtd <= 0) return true;
+    if (calc && calc.remaining > 1e-9) {
       const cod = row.dataset.codigo || 'item';
-      alert(`Item ${cod} não possui saldo, favor atualizar saldo no processo de movimentação.`);
+      alert(
+        `Item ${cod}: os endereços selecionados somam ${_solFmtQty(calc.totalTirar)}, ` +
+        `mas são necessários ${_solFmtQty(qtd)}. Selecione mais endereços para completar.`
+      );
       return false;
     }
     return true;
@@ -2267,9 +2375,14 @@ async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) 
         row.dataset.etqId = '';
         row.dataset.etqEndereco = '';
         row.dataset.etqQtd = '';
+        row.dataset.etqSelecoes = '[]';
+        row.dataset.etqAlocacoes = '[]';
         row.querySelectorAll('.sep-etq-endereco-row').forEach(el => {
           el.style.borderColor = '#854d0e33';
           el.style.background = '#1a1508';
+          el.dataset.selected = '0';
+          const badge = el.querySelector('.sep-etq-tirar');
+          if (badge) { badge.textContent = ''; badge.style.display = 'none'; }
         });
       }
       return;
@@ -2279,14 +2392,20 @@ async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) 
     if (btnEtq) {
       const row = btnEtq.closest('[data-item-row]');
       if (!row) return;
-      row.querySelectorAll('.sep-etq-endereco-row').forEach(el => {
-        const active = el === btnEtq;
-        el.style.borderColor = active ? '#22c55e' : '#854d0e33';
-        el.style.background = active ? '#1a2e1a' : '#1a1508';
-      });
-      row.dataset.etqId = btnEtq.dataset.etqId || '';
-      row.dataset.etqEndereco = btnEtq.dataset.etqEndereco || '';
-      row.dataset.etqQtd = btnEtq.dataset.etqQtd || '';
+      let selecoes = _solLerSelecoesEtq(row);
+      const id = btnEtq.dataset.etqId || '';
+      const endereco = btnEtq.dataset.etqEndereco || '';
+      const saldo = parseFloat(btnEtq.dataset.etqQtd || '0') || 0;
+      const key = String(id || endereco);
+      const idx = selecoes.findIndex(s => _solEtqSelecaoKey(s) === key);
+      if (idx >= 0) {
+        selecoes.splice(idx, 1);
+      } else {
+        selecoes.push({ id, endereco, saldo });
+      }
+      row.dataset.etqSelecoes = JSON.stringify(selecoes);
+      const qty = parseFloat(row.dataset.qtyTotal || '0') || 0;
+      _solAplicarVisualAlocacaoEtq(row, qty);
       return;
     }
 
@@ -2733,6 +2852,7 @@ async function _abrirModalAguardandoRetiradaSep(nSolic, opts = {}) {
 
   const tituloColuna = String(opts.tituloColuna || 'Aguardando retirada');
   const permitirRecebido = !!opts.permitirRecebido;
+  const somenteLeitura = !!opts.somenteLeitura || tituloColuna === 'Concluído';
   const escopoItens = String(opts.escopoItens || '');
 
   clearTimeout(window._kanbanTooltipTimer);
@@ -2841,11 +2961,13 @@ async function _abrirModalAguardandoRetiradaSep(nSolic, opts = {}) {
       <div class="sep-request-main" style="flex:1;min-width:0;">
         <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
           <span style="font-weight:700;font-size:.78rem;color:#f59e0b;">${it.codigo_produto || '—'}</span>
-          <button class="btn-urg-solic" data-solic-id="${it.solic_id || ''}" data-urgente="${isUrg ? '1' : '0'}"
+          ${somenteLeitura
+            ? (isUrg ? `<span style="display:inline-flex;align-items:center;gap:3px;padding:2px 7px;border-radius:20px;font-size:.67rem;font-weight:700;border:1px solid #ef4444;background:#450a0a;color:#fca5a5;"><i class="fa-solid fa-bolt" style="font-size:.63rem;"></i>Urgente</span>` : '')
+            : `<button class="btn-urg-solic" data-solic-id="${it.solic_id || ''}" data-urgente="${isUrg ? '1' : '0'}"
             title="Urgente, entregar o quanto antes este item"
             style="display:inline-flex;align-items:center;gap:3px;padding:2px 7px;border-radius:20px;font-size:.67rem;font-weight:700;cursor:pointer;border:1px solid ${isUrg ? '#ef4444' : '#374151'};background:${isUrg ? '#450a0a' : 'transparent'};color:${isUrg ? '#fca5a5' : '#6b7280'};">
             <i class="fa-solid fa-bolt" style="font-size:.63rem;"></i>${isUrg ? 'Urgente' : ''}
-          </button>
+          </button>`}
         </div>
         <div style="font-size:.75rem;color:#d1d5db;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${it.descricao || '—'}</div>
         <div style="margin-top:6px;display:flex;flex-direction:column;gap:6px;">
@@ -13633,16 +13755,24 @@ function isEnvioSacManualRastreio(r) {
 
 function renderSacAcoesRastreabilidadeHtml(r) {
   const temIdent = !!(r.identificacao && String(r.identificacao).trim().length > 0);
-  if (temIdent) return '';
+  const identRaw = temIdent ? String(r.identificacao).trim() : '';
   const btnStyle = 'padding:6px 8px;font-size:11px;display:inline-flex;align-items:center;gap:5px;justify-content:center;white-space:normal;line-height:1.25;text-align:center;';
   const parts = [];
   if (isEnvioSacCorreiosVipp(r)) {
-    parts.push(
-      `<button class="content-button btn-envio-gerar-etiqueta btn-sac-rastreabilidade" data-envio-id="${escapeAtHtml(String(r.id))}" data-n-solic="${escapeAtHtml(r.numero_sep || '')}"` +
-      ` style="${btnStyle}background:#1d4ed8;color:#dbeafe;border:none;border-radius:8px;cursor:pointer;font-weight:700;">` +
-      `<i class="fa-solid fa-barcode"></i><span>Rastreabilidade</span></button>`
-    );
-  } else if (isEnvioSacManualRastreio(r)) {
+    if (temIdent) {
+      parts.push(
+        `<button class="content-button btn-envio-ver-etiqueta" data-envio-id="${escapeAtHtml(String(r.id))}" data-identificacao="${escapeAtHtml(identRaw)}"` +
+        ` style="${btnStyle}background:#0f766e;color:#ccfbf1;border:none;border-radius:8px;cursor:pointer;font-weight:700;" title="Abrir etiqueta e declaração em PDF">` +
+        `<i class="fa-solid fa-file-pdf"></i><span>Ver etiqueta</span></button>`
+      );
+    } else {
+      parts.push(
+        `<button class="content-button btn-envio-gerar-etiqueta btn-sac-rastreabilidade" data-envio-id="${escapeAtHtml(String(r.id))}" data-n-solic="${escapeAtHtml(r.numero_sep || '')}"` +
+        ` style="${btnStyle}background:#1d4ed8;color:#dbeafe;border:none;border-radius:8px;cursor:pointer;font-weight:700;">` +
+        `<i class="fa-solid fa-barcode"></i><span>Gerar etiqueta</span></button>`
+      );
+    }
+  } else if (isEnvioSacManualRastreio(r) && !temIdent) {
     parts.push(
       `<button class="content-button btn-sac-inserir-rastreabilidade" data-envio-id="${escapeAtHtml(String(r.id))}"` +
       ` style="${btnStyle}background:linear-gradient(135deg,#0ea5e9 0%,#0284c7 100%);color:white;border:none;border-radius:8px;cursor:pointer;font-weight:700;">` +
@@ -13650,6 +13780,20 @@ function renderSacAcoesRastreabilidadeHtml(r) {
     );
   }
   return parts.join('');
+}
+
+/** Abre PDF da etiqueta postal + declaração de conteúdo (as duas etiquetas do envio). */
+function _envioAbrirEtiquetasPdf(envioId, identificacao) {
+  const ecLimpo = String(identificacao || '').trim().replace(/\s+/g, '');
+  if (ecLimpo) {
+    window.open(`/api/vipp/etiqueta?id=${encodeURIComponent(ecLimpo)}&saida=1`, '_blank');
+  }
+  if (envioId) {
+    window.open(`/api/vipp/declaracao?id=${encodeURIComponent(envioId)}`, '_blank');
+  }
+  if (!ecLimpo && !envioId) {
+    alert('Etiqueta ainda não disponível para este envio.');
+  }
 }
 
 function montarConteudoEnvioMercadoria(conteudoRaw) {
@@ -23652,6 +23796,15 @@ function setupEnvioPrintButtons(container) {
         btnMarcarEnviado.disabled = false;
         btnMarcarEnviado.innerHTML = origHtmlMarcar;
       }
+      return;
+    }
+
+    const btnVerEtiqueta = ev.target.closest('.btn-envio-ver-etiqueta');
+    if (btnVerEtiqueta) {
+      ev.preventDefault();
+      const envioId = btnVerEtiqueta.getAttribute('data-envio-id');
+      const identificacao = btnVerEtiqueta.getAttribute('data-identificacao') || '';
+      _envioAbrirEtiquetasPdf(envioId, identificacao);
       return;
     }
 
@@ -72948,10 +73101,17 @@ document.addEventListener('DOMContentLoaded', () => {
       if (db !== da) return db - da;
       return (Number(b?.id_ajuste) || 0) - (Number(a?.id_ajuste) || 0);
     });
-    const total = data?.total_de_registros ?? lista.length;
 
     if (histStatus) {
-      histStatus.textContent = `${total} registro(s) na Omie`;
+      const periodo = data?.periodo;
+      const ret = data?.registros_retornados ?? lista.length;
+      const tot = data?.total_de_registros ?? ret;
+      if (periodo?.de && periodo?.ate) {
+        histStatus.textContent = `${ret} registro(s) de ${periodo.de} a ${periodo.ate}` +
+          (tot && Number(tot) !== Number(ret) ? ` · ${tot} no período na Omie` : '');
+      } else {
+        histStatus.textContent = `${tot} registro(s) na Omie`;
+      }
       histStatus.className = 'movim-hist-status';
     }
 

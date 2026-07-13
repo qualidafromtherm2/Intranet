@@ -503,14 +503,18 @@ router.post('/reconciliar', express.json(), async (req, res) => {
 });
 
 // GET /api/ajustes/historico-omie — histórico de ajustes do produto na Omie (ListarAjusteEstoque)
+// Omie devolve páginas em ordem cronológica (antigas primeiro). Sem filtro de data,
+// a página 1 fica só com movimentos velhos — por isso filtramos o período recente e
+// paginamos até juntar os registros (ordenados do mais novo para o mais antigo).
 router.get('/historico-omie', async (req, res) => {
   try {
     if (!OMIE_APP_KEY || !OMIE_APP_SECRET) {
       return res.status(500).json({ error: 'Credenciais da Omie ausentes.' });
     }
 
-    const pagina = Math.max(1, Number(req.query.pagina) || 1);
     const registrosPorPagina = Math.min(100, Math.max(1, Number(req.query.registros_por_pagina) || 100));
+    const meses = Math.min(36, Math.max(1, Number(req.query.meses) || 12));
+    const maxPaginas = Math.min(20, Math.max(1, Number(req.query.max_paginas) || 12));
 
     let idProd = normalizaNumero(req.query.id_prod);
     if (!idProd) {
@@ -521,46 +525,74 @@ router.get('/historico-omie', async (req, res) => {
       idProd = await buscarCodigoProduto(codigo);
     }
 
-    const data = await omieCall(
-      'https://app.omie.com.br/api/v1/estoque/ajuste/',
-      {
-        call: 'ListarAjusteEstoque',
-        app_key: OMIE_APP_KEY,
-        app_secret: OMIE_APP_SECRET,
-        param: [{
-          pagina,
-          id_prod: idProd,
-          registros_por_pagina: registrosPorPagina,
-          apenas_importado_api: 'N'
-        }]
-      }
-    );
+    const fmtBr = (d) => {
+      const dd = String(d.getDate()).padStart(2, '0');
+      const mm = String(d.getMonth() + 1).padStart(2, '0');
+      return `${dd}/${mm}/${d.getFullYear()}`;
+    };
+    const ate = new Date();
+    const de = new Date();
+    de.setMonth(de.getMonth() - meses);
+    const dataDe = String(req.query.data_de || '').trim() || fmtBr(de);
+    const dataAte = String(req.query.data_ate || '').trim() || fmtBr(ate);
+
+    const parseData = (val) => {
+      const s = String(val || '').trim();
+      const m = s.match(/^(\d{2})\/(\d{2})\/(\d{4})/);
+      if (m) return new Date(Number(m[3]), Number(m[2]) - 1, Number(m[1])).getTime();
+      const t = Date.parse(s);
+      return Number.isFinite(t) ? t : 0;
+    };
+
+    const lista = [];
+    let totalDePaginas = 1;
+    let totalDeRegistros = null;
+    let pagina = 1;
+
+    while (pagina <= totalDePaginas && pagina <= maxPaginas) {
+      const data = await omieCall(
+        'https://app.omie.com.br/api/v1/estoque/ajuste/',
+        {
+          call: 'ListarAjusteEstoque',
+          app_key: OMIE_APP_KEY,
+          app_secret: OMIE_APP_SECRET,
+          param: [{
+            pagina,
+            id_prod: idProd,
+            registros_por_pagina: registrosPorPagina,
+            apenas_importado_api: 'N',
+            data_movimento_de: dataDe,
+            data_movimento_ate: dataAte
+          }]
+        }
+      );
+      const lote = Array.isArray(data.ajuste_estoque_lista) ? data.ajuste_estoque_lista : [];
+      lista.push(...lote);
+      totalDePaginas = Number(data.total_de_paginas) || 1;
+      totalDeRegistros = data.total_de_registros ?? totalDeRegistros;
+      if (!lote.length) break;
+      pagina += 1;
+    }
+
+    lista.sort((a, b) => {
+      const db = parseData(b?.data);
+      const da = parseData(a?.data);
+      if (db !== da) return db - da;
+      return (Number(b?.id_ajuste) || 0) - (Number(a?.id_ajuste) || 0);
+    });
 
     res.json({
       ok: true,
       id_prod: idProd,
-      pagina,
+      pagina: 1,
       registros_por_pagina: registrosPorPagina,
-      total_de_paginas: data.total_de_paginas ?? null,
-      total_de_registros: data.total_de_registros ?? null,
-      registros: data.registros ?? null,
-      ajuste_estoque_lista: (() => {
-        const lista = Array.isArray(data.ajuste_estoque_lista) ? [...data.ajuste_estoque_lista] : [];
-        const parseData = (val) => {
-          const s = String(val || '').trim();
-          const m = s.match(/^(\d{2})\/(\d{2})\/(\d{4})/);
-          if (m) return new Date(Number(m[3]), Number(m[2]) - 1, Number(m[1])).getTime();
-          const t = Date.parse(s);
-          return Number.isFinite(t) ? t : 0;
-        };
-        lista.sort((a, b) => {
-          const db = parseData(b?.data);
-          const da = parseData(a?.data);
-          if (db !== da) return db - da;
-          return (Number(b?.id_ajuste) || 0) - (Number(a?.id_ajuste) || 0);
-        });
-        return lista;
-      })()
+      total_de_paginas: totalDePaginas,
+      total_de_registros: totalDeRegistros,
+      registros_retornados: lista.length,
+      periodo: { de: dataDe, ate: dataAte, meses },
+      paginas_lidas: Math.min(pagina - 1, maxPaginas),
+      registros: lista.length,
+      ajuste_estoque_lista: lista
     });
   } catch (err) {
     console.error('[ajustes] historico-omie', err);
