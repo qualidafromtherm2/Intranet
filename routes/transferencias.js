@@ -3,6 +3,7 @@ const router = express.Router();
 
 const { dbQuery } = require('../src/db');
 const { OMIE_APP_KEY, OMIE_APP_SECRET } = require('../config.server');
+const { registrarEventoReq: monEventoReq } = require('../utils/monitoramento');
 
 const STATUS_AGUARDANDO = 'Aguardando aprovação';
 const STATUS_TRANSFERIDO = 'Transferido';
@@ -617,8 +618,33 @@ router.patch('/:id/aprovar', express.json(), async (req, res) => {
       descricao_status: respostaOmie?.descricao_status || null,
       omie: respostaOmie || null
     });
+    void monEventoReq(req, {
+      categoria: 'API',
+      acao: 'transferencia_omie_aprovada',
+      codigo_produto: registroAtual.codigo,
+      codigo_produto_omie: registroAtual.codigo_produto != null ? String(registroAtual.codigo_produto) : null,
+      sucesso: true,
+      detalhe: {
+        transferencia_id: id,
+        qtd: registroAtual.qtd,
+        armazem_origem: registroAtual.origem,
+        armazem_destino: registroAtual.destino,
+        omie: 'sim',
+        mexeu_omie: true,
+        solicitante: registroAtual.solicitante,
+        aprovado_por: aprovadoPor,
+        motivo: motivoOmie,
+        sessao_id: req.body?.sessao_id || null
+      }
+    });
   } catch (err) {
     console.error('[transferencias] falha ao aprovar transferência', err);
+    void monEventoReq(req, {
+      categoria: 'API',
+      acao: 'transferencia_omie_aprovada',
+      sucesso: false,
+      detalhe: { transferencia_id: Number(req.params.id), erro: err.message || String(err), sessao_id: req.body?.sessao_id || null }
+    });
     res.status(err.status || 500).json({
       error: err.message || 'Falha ao aprovar solicitação de transferência.'
     });
