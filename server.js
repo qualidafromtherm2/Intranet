@@ -2384,7 +2384,103 @@ app.get('/api/produtos/unidades', async (req, res) => {
 });
 
 // === Incluir produto na Omie =============================================
+const CADASTRO_PRODUTO_TIPOS = [
+  ['00', 'Mercadoria para Revenda'], ['01', 'Matéria Prima'], ['02', 'Embalagem'],
+  ['03', 'Produto em Processo'], ['04', 'Produto Acabado'], ['05', 'Subproduto'],
+  ['06', 'Produto Intermediário'], ['07', 'Material de Uso e Consumo'],
+  ['08', 'Ativo Imobilizado'], ['09', 'Serviços'], ['10', 'Outros Insumos'],
+  ['99', 'Outras'], ['KT', 'Kit']
+];
+
+function _cadastroNormalizarDescricao(value) {
+  return String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .toUpperCase().replace(/[^A-Z0-9 .,/()\-]/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+async function _cadastroGarantirReservas(client) {
+  await client.query(`CREATE TABLE IF NOT EXISTS public.produto_codigo_reserva (
+    codigo TEXT PRIMARY KEY, sequencial INT NOT NULL, prefixo TEXT NOT NULL,
+    descricao_referencia TEXT, usuario TEXT, criado_em TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    confirmada BOOLEAN NOT NULL DEFAULT FALSE
+  )`);
+  await client.query(`ALTER TABLE public.produto_codigo_reserva
+    ADD COLUMN IF NOT EXISTS confirmada BOOLEAN NOT NULL DEFAULT FALSE`);
+}
+
+app.get('/api/produtos/cadastro/config', async (_req, res) => {
+  try {
+    const [familias, unidades] = await Promise.all([
+      pool.query(`SELECT cod AS codigo, nome_familia, COALESCE(tipo, 'MP') AS tipo FROM configuracoes.familia ORDER BY nome_familia`),
+      pool.query(`SELECT unidade AS codigo, descricao FROM configuracoes.unidade ORDER BY unidade`)
+    ]);
+    res.json({ ok: true, familias: familias.rows, unidades: unidades.rows, tipos: CADASTRO_PRODUTO_TIPOS.map(([value, label]) => ({ value, label })) });
+  } catch (err) {
+    console.error('[produtos/cadastro/config]', err);
+    res.status(500).json({ error: err?.message || 'Falha ao carregar configuracao do cadastro.' });
+  }
+});
+
+app.post('/api/produtos/cadastro/preview', express.json(), async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const familiaCodigo = String(req.body?.familia_codigo || '').trim().toUpperCase();
+    const familiaTipo = String(req.body?.familia_tipo || '').trim().toUpperCase();
+    const origem = String(req.body?.origem || 'N').trim().toUpperCase() === 'I' ? 'I' : 'N';
+    const filtro = _cadastroNormalizarDescricao(req.body?.filtro);
+    const descricoes = (Array.isArray(req.body?.descricoes) ? req.body.descricoes : [req.body?.descricao])
+      .map(_cadastroNormalizarDescricao).filter(Boolean);
+    if (!familiaCodigo || !familiaTipo || !descricoes.length) return res.status(400).json({ error: 'Familia e descricao sao obrigatorias.' });
+    if (descricoes.length > 100) return res.status(400).json({ error: 'O lote aceita no maximo 100 produtos.' });
+    const prefixo = /^[A-Z]{1,3}$/.test(familiaCodigo)
+      ? familiaCodigo
+      : `${familiaCodigo.padStart(2, '0')}.${familiaTipo}.${origem}`;
+
+    await client.query('BEGIN');
+    await client.query(`SELECT pg_advisory_xact_lock(hashtext('produto_codigo_reserva'))`);
+    await _cadastroGarantirReservas(client);
+    const { rows: existentes } = await client.query(`
+      SELECT codigo, descricao FROM public.produtos_omie WHERE codigo IS NOT NULL
+      UNION ALL
+      SELECT codigo, descricao_referencia AS descricao FROM public.produto_codigo_reserva
+      WHERE confirmada = TRUE
+    `);
+    const usados = new Set();
+    const itens = [];
+    for (const item of existentes) {
+      const codigo = String(item.codigo || '').trim().toUpperCase();
+      const match = codigo.match(/(?:^|\.)(\d{1,5})$/);
+      if (!match) continue;
+      const sequencial = Number(match[1]);
+      usados.add(sequencial);
+      itens.push({ sequencial, descricao: _cadastroNormalizarDescricao(item.descricao), codigo });
+    }
+    const rows = [];
+    for (let index = 0; index < descricoes.length; index++) {
+      const referencia = filtro || descricoes[index];
+      const semelhantes = itens.filter(item => referencia && item.descricao.startsWith(referencia));
+      const prefixados = itens.filter(item => item.codigo.startsWith(prefixo + '.'));
+      let sequencial = semelhantes.length
+        ? Math.max(...semelhantes.map(item => item.sequencial)) + 1
+        : (prefixados.length ? Math.max(...prefixados.map(item => item.sequencial)) + 1 : 10000);
+      while (usados.has(sequencial)) sequencial++;
+      usados.add(sequencial);
+      const codigo = `${prefixo}.${String(sequencial).padStart(5, '0')}`;
+      itens.push({ sequencial, descricao: descricoes[index], codigo });
+      rows.push({ index: index + 1, codigo, code: codigo, sequencial, sequence: sequencial, descricao: descricoes[index], origem });
+    }
+    await client.query('COMMIT');
+    res.json({ ok: true, prefixo, origem, total: rows.length, rows, code: rows[0].codigo, sequence: rows[0].sequencial });
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    console.error('[produtos/cadastro/preview]', err);
+    res.status(500).json({ error: err?.message || 'Falha ao simular codigo.' });
+  } finally {
+    client.release();
+  }
+});
+
 app.post('/api/produtos/incluir-omie', async (req, res) => {
+  let codigoReservadoAgora = '';
   try {
     const OMIE_APP_KEY = process.env.OMIE_APP_KEY;
     const OMIE_APP_SECRET = process.env.OMIE_APP_SECRET;
@@ -2393,10 +2489,56 @@ app.post('/api/produtos/incluir-omie', async (req, res) => {
       return res.status(500).json({ error: 'Credenciais Omie não configuradas' });
     }
 
-    const { codigo_produto_integracao, codigo, descricao, unidade } = req.body;
+    const { codigo_produto_integracao, codigo, descricao, unidade, tipoItem } = req.body;
 
     if (!codigo_produto_integracao || !codigo || !descricao || !unidade) {
       return res.status(400).json({ error: 'Parâmetros obrigatórios faltando' });
+    }
+
+    const codigoNormalizado = String(codigo).trim().toUpperCase();
+    const matchCodigo = codigoNormalizado.match(/^(.*)\.(\d{1,5})$/);
+    if (!matchCodigo) {
+      return res.status(400).json({ error: 'Formato de codigo invalido.' });
+    }
+
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      await client.query(`SELECT pg_advisory_xact_lock(hashtext('produto_codigo_reserva'))`);
+      await _cadastroGarantirReservas(client);
+      const existente = await client.query(
+        `SELECT 1 FROM public.produtos_omie WHERE UPPER(codigo) = $1 LIMIT 1`,
+        [codigoNormalizado]
+      );
+      if (existente.rowCount) {
+        await client.query('ROLLBACK');
+        return res.status(409).json({ error: 'Este codigo ja foi cadastrado. Gere uma nova previa.' });
+      }
+
+      const usuario = String(req.session?.user?.username || req.session?.user?.login || '').trim();
+      const reserva = await client.query(`
+        INSERT INTO public.produto_codigo_reserva
+          (codigo, sequencial, prefixo, descricao_referencia, usuario, confirmada, criado_em)
+        VALUES ($1, $2, $3, $4, $5, TRUE, NOW())
+        ON CONFLICT (codigo) DO UPDATE SET
+          descricao_referencia = EXCLUDED.descricao_referencia,
+          usuario = EXCLUDED.usuario,
+          confirmada = TRUE,
+          criado_em = NOW()
+        WHERE public.produto_codigo_reserva.confirmada = FALSE
+        RETURNING codigo
+      `, [codigoNormalizado, Number(matchCodigo[2]), matchCodigo[1], descricao, usuario]);
+      if (!reserva.rowCount) {
+        await client.query('ROLLBACK');
+        return res.status(409).json({ error: 'Este codigo acabou de ser utilizado. Gere uma nova previa.' });
+      }
+      await client.query('COMMIT');
+      codigoReservadoAgora = codigoNormalizado;
+    } catch (reservaErr) {
+      await client.query('ROLLBACK').catch(() => {});
+      throw reservaErr;
+    } finally {
+      client.release();
     }
 
     console.log('[API] /api/produtos/incluir-omie recebido:', {
@@ -2418,7 +2560,8 @@ app.post('/api/produtos/incluir-omie', async (req, res) => {
           codigo,
           descricao,
           ncm: '0000.00.00',
-          unidade
+          unidade,
+          ...(tipoItem ? { tipoItem: String(tipoItem).padStart(2, '0') } : {})
         }]
       })
     });
@@ -2426,6 +2569,11 @@ app.post('/api/produtos/incluir-omie', async (req, res) => {
     if (!omieResp.ok) {
       const errText = await omieResp.text();
       console.error('[API] /api/produtos/incluir-omie erro Omie:', omieResp.status, errText);
+      await pool.query(
+        `DELETE FROM public.produto_codigo_reserva WHERE codigo = $1 AND confirmada = TRUE`,
+        [codigoReservadoAgora]
+      ).catch(() => {});
+      codigoReservadoAgora = '';
       return res.status(omieResp.status).json({ error: 'Erro ao incluir produto na Omie' });
     }
 
@@ -13149,6 +13297,113 @@ async function _processarMovimentacaoEtqInterna(client, opts) {
 
   return { registros, movimentacao };
 }
+
+function _impressaoRapidaSanitize(value, max = 180) {
+  return String(value || '').trim().slice(0, max).replace(/[\\^~]/g, ' ');
+}
+
+function _impressaoRapidaData() {
+  return new Intl.DateTimeFormat('pt-BR', {
+    timeZone: 'America/Sao_Paulo', day: '2-digit', month: '2-digit', year: 'numeric',
+    hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false
+  }).format(new Date()).replace(',', '');
+}
+
+function _gerarZplImpressaoRapidaProduto({ codigo, descricao, tipo, lote, copias }) {
+  const code = _impressaoRapidaSanitize(codigo, 40);
+  const desc = _impressaoRapidaSanitize(descricao, 180) || '(sem descricao)';
+  const lot = _impressaoRapidaSanitize(lote, 40) || '---';
+  const total = Math.max(1, Math.min(100, Number(copias) || 1));
+  if (tipo === 'pequena') {
+    const data = _impressaoRapidaData();
+    return Array.from({ length: total }, (_, index) => `^XA
+^CI28
+^PW400
+^LL240
+^LS0
+^LH0,0
+^FWB
+^FO7,10^BQN,2,4^FDQA,${code}-${lot}-${index + 1}^FS
+^FO135,10^A0B,40,35^FD ${code} ^FS
+^FO170,50^A0B,20,20^FD ${data} ^FS
+^FO180,0^A0B,23,23^FB320,1,0,L,0^FD --------------- ^FS
+^FO20,0^A0B,20,20^FB230,2,0,L,0^FD L: ${lot} ^FS
+^FO60,0^A0B,20,20^FB230,1,0,L,0^FD Seq: ${index + 1} ^FS
+^FO196,0^A0B,23,23^FB320,1,0,L,0^FD --------------- ^FS
+^FO210,10^A0B,23,23^FB220,8,0,L,0^FD ${desc} ^FS
+^FO110,10^A0B,20,20^FB225,1,0,L,0^FD FT-M00-ETQP - REV01 ^FS
+^XZ`).join('\n');
+  }
+  const bloco = `^XA
+^CI28
+^PW560
+^LL880
+^FO25,70^FB600,1,0,L,0^A0R,90,90^FD${code}^FS
+^FO20,700^BQN,2,5^FDMA,${code}^FS
+^FO150,650^FB600,1,0,L,0^A0R,40,40^FDL: ${lot === '---' ? '' : lot}^FS
+^FO180,50^FB800,5,0,C,0^A0R,70,70^FD${desc}^FS
+^XZ`;
+  return Array.from({ length: total }, () => bloco).join('\n');
+}
+
+function _gerarZplImpressaoRapidaContagem({ quantidade, unidade, copias, codigo = '' }) {
+  const qtd = Math.max(1, Number(quantidade) || 1);
+  const un = _impressaoRapidaSanitize(unidade, 3).toUpperCase() || 'UN';
+  const code = _impressaoRapidaSanitize(codigo, 40);
+  const total = Math.max(1, Math.min(100, Number(copias) || 1));
+  const codeLine = code ? `^FO450,200^FB1500,1,0,L,0^A0R,50,50^FD${code}^FS\n` : '';
+  const bloco = `^XA
+^CI28
+${codeLine}^FO20,200^FB1500,1,0,L,0^A0R,50,50^FD${_impressaoRapidaData()}^FS
+^FO0,${code ? 70 : 100}^FB1500,2,0,L,0^A0R,200,200^FD${qtd} ${un}^FS
+^XZ`;
+  return Array.from({ length: total }, () => bloco).join('\n');
+}
+
+// Etiquetas operacionais simples: nao cria ETQ_rec_impresso nem vinculo de endereco.
+app.post('/api/etiquetas/impressao-rapida', express.json(), async (req, res) => {
+  try {
+    const acao = String(req.body?.acao || '').trim().toLowerCase();
+    const codigo = _impressaoRapidaSanitize(req.body?.codigo, 40);
+    const copias = Math.floor(Number(req.body?.copias) || 0);
+    if (!['produto', 'contagem'].includes(acao)) return res.status(400).json({ error: 'Acao de impressao invalida.' });
+    if (copias < 1 || copias > 100) return res.status(400).json({ error: 'Informe de 1 a 100 copias.' });
+
+    let zpl = '';
+    let quantidade = copias;
+    if (acao === 'produto') {
+      const descricao = _impressaoRapidaSanitize(req.body?.descricao, 180);
+      const tipo = String(req.body?.tipo || 'grande').toLowerCase();
+      if (!codigo || !descricao) return res.status(400).json({ error: 'Codigo e descricao sao obrigatorios.' });
+      if (!['grande', 'pequena'].includes(tipo)) return res.status(400).json({ error: 'Tipo de etiqueta invalido.' });
+      zpl = _gerarZplImpressaoRapidaProduto({ codigo, descricao, tipo, lote: req.body?.lote, copias });
+      const quickQtd = Math.floor(Number(req.body?.quick_qtd) || 0);
+      if (quickQtd > 0) {
+        const quickCopias = Math.floor(Number(req.body?.quick_copias) || 1);
+        if (quickCopias < 1 || quickCopias > 100) return res.status(400).json({ error: 'Copias da contagem rapida invalidas.' });
+        zpl += '\n' + _gerarZplImpressaoRapidaContagem({ quantidade: quickQtd, unidade: req.body?.quick_unidade, copias: quickCopias, codigo });
+        quantidade += quickCopias;
+      }
+    } else {
+      const qtd = Math.floor(Number(req.body?.quantidade) || 0);
+      if (qtd < 1) return res.status(400).json({ error: 'Quantidade de contagem invalida.' });
+      zpl = _gerarZplImpressaoRapidaContagem({ quantidade: qtd, unidade: req.body?.unidade, copias });
+    }
+
+    const usuario = String(req.body?.usuario || req.session?.user?.login || req.session?.usuario || '').trim();
+    const destinoAgente = String(req.body?.destino_agente || '').trim() || null;
+    const impressora = String(req.body?.impressora || '').trim() || null;
+    const fila = await pool.query(
+      `INSERT INTO etiqueta."ETQ_fila_impressao" (etq_ids, multiplo, usuario, zpl, quantidade, destino_agente, impressora)
+       VALUES ($1, 0, $2, $3, $4, $5, $6) RETURNING id`,
+      [[], usuario, zpl, quantidade, destinoAgente, impressora]
+    );
+    res.json({ ok: true, fila_id: fila.rows[0].id, quantidade, via: 'fila' });
+  } catch (err) {
+    console.error('[etiquetas/impressao-rapida]', err);
+    res.status(500).json({ error: err?.message || 'Falha ao gerar impressao rapida.' });
+  }
+});
 
 // POST /api/etiquetas/rec-impresso/imprimir-ids
 // Body: { ids: [idImpresso,...], destino_agente?, impressora?, usuario? }

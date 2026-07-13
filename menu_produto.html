@@ -19,7 +19,7 @@
   referrerpolicy="no-referrer"
 />
   <!-- Seu CSS principal -->
-  <link rel="stylesheet" href="menu_produto.css?v=20260713-auditar-boot"/>
+  <link rel="stylesheet" href="menu_produto.css?v=20260713-merge-auditar-imp"/>
   <!-- Anti-flicker: esconde menus até as permissões serem aplicadas -->
   <style id="boot-anti-flicker">
     /* Enquanto o app não está pronto, esconde elementos sujeitos a permissões */
@@ -162,8 +162,8 @@
      class="menu-link" href="#"
      data-nav-key="top:produto"
      data-nav-pos="top"
-     data-nav-label="Produto"
-     data-nav-selector="#menu-produto">Produto</a>
+     data-nav-label="Cadastrar Produto"
+     data-nav-selector="#menu-produto">Cadastrar Produto</a>
 
   <a id="menu-engenharia"
     class="menu-link" href="#"
@@ -1252,7 +1252,7 @@
                 <button id="movimHistoricoBtn" type="button" class="movim-btn-hist">Ver historico</button>
                 <button id="movimComprasBtn" type="button" class="movim-btn-comp">Ultimas compras</button>
                 <button id="movimImpressaoBtn" type="button" class="movim-btn-print">
-                  <i class="fa-solid fa-angles-right"></i> Impressao
+                  <i class="fa-solid fa-bolt"></i> Impress&atilde;o r&aacute;pida
                 </button>
               </div>
               <div id="movimEstoqueLocais" class="movim-estoque-locais">
@@ -1432,7 +1432,7 @@
               <div class="movim-imp-title-wrap">
                 <i class="fa-solid fa-print"></i>
                 <div>
-                  <span id="movimImpressaoTitulo" class="movim-imp-titulo">Imprimir etiqueta</span>
+                  <span id="movimImpressaoTitulo" class="movim-imp-titulo">Impress&atilde;o r&aacute;pida</span>
                   <span id="movimImpressaoSubtitulo" class="movim-imp-subtitulo"></span>
                 </div>
               </div>
@@ -1454,22 +1454,56 @@
               </button>
             </div>
             <div id="movimImpressaoStatus" class="movim-imp-status"></div>
-            <div id="movimImpressaoEtqWrap" class="movim-imp-etq-wrap">
-              <label for="movimImpressaoEtqSelect">Etiqueta (ETQ_rec_impresso)</label>
-              <select id="movimImpressaoEtqSelect">
-                <option value="">Carregando…</option>
-              </select>
-            </div>
-            <div class="movim-imp-qtd-row">
-              <label for="movimImpressaoQtd">Quantidade de etiquetas</label>
-              <input id="movimImpressaoQtd" type="number" min="1" step="1" value="1" inputmode="numeric">
-            </div>
-            <div class="movim-imp-footer">
-              <button type="button" id="movimImpressaoConfirmar" class="movim-imp-btn-confirmar">
-                <i class="fa-solid fa-print"></i> Imprimir
+            <div class="movim-imp-legacy-toggle-wrap">
+              <button type="button" id="movimImpressaoMetodoAntigoToggle" class="movim-imp-legacy-toggle" aria-expanded="false">
+                <i class="fa-solid fa-clock-rotate-left"></i> M&eacute;todo antigo
               </button>
-              <button type="button" id="movimImpressaoCancelar" class="movim-imp-btn-cancelar">Cancelar</button>
             </div>
+            <div class="movim-imp-body">
+              <section class="movim-imp-section">
+                <h4>Etiqueta de produto</h4>
+                <label class="movim-imp-field movim-imp-field--full"><span>Descri&ccedil;&atilde;o</span><input id="movimImpressaoDescricao" type="text" maxlength="180" autocomplete="off"></label>
+                <div class="movim-imp-grid movim-imp-grid--two">
+                  <label class="movim-imp-field"><span>C&oacute;pias</span><input id="movimImpressaoCopias" type="number" min="1" max="100" step="1" value="1" inputmode="numeric"></label>
+                  <label class="movim-imp-field"><span>Tipo</span><select id="movimImpressaoTipo"><option value="grande">Grande</option><option value="pequena">Pequena</option></select></label>
+                </div>
+                <label class="movim-imp-field movim-imp-field--full"><span>N&uacute;mero do lote (opcional)</span><input id="movimImpressaoLote" type="text" maxlength="40" autocomplete="off"></label>
+                <div class="movim-imp-subsection">
+                  <h5>Contagem rapida (opcional)</h5>
+                  <div class="movim-imp-grid movim-imp-grid--three">
+                    <label class="movim-imp-field"><span>Quantidade</span><input id="movimImpressaoQuickQtd" type="number" min="0" step="1" value="0" inputmode="numeric"></label>
+                    <label class="movim-imp-field"><span>Unidade</span><input id="movimImpressaoQuickUn" type="text" maxlength="3" value="UN"></label>
+                    <label class="movim-imp-field"><span>C&oacute;pias</span><input id="movimImpressaoQuickCopias" type="number" min="1" max="100" step="1" value="1" inputmode="numeric"></label>
+                  </div>
+                </div>
+                <button type="button" id="movimImpressaoConfirmar" class="movim-imp-btn-confirmar movim-imp-btn-block"><i class="fa-solid fa-print"></i> Imprimir etiqueta</button>
+              </section>
+              <section class="movim-imp-section">
+                <h4>Etiqueta de contagem</h4>
+                <div class="movim-imp-grid movim-imp-grid--three">
+                  <label class="movim-imp-field"><span>Quantidade</span><input id="movimImpressaoContQtd" type="number" min="1" step="1" value="0" inputmode="numeric"></label>
+                  <label class="movim-imp-field"><span>Unidade</span><input id="movimImpressaoContUn" type="text" maxlength="3" value="UN"></label>
+                  <label class="movim-imp-field"><span>C&oacute;pias</span><input id="movimImpressaoContCopias" type="number" min="1" max="100" step="1" value="1" inputmode="numeric"></label>
+                </div>
+                <button type="button" id="movimImpressaoContagem" class="movim-imp-btn-contagem movim-imp-btn-block"><i class="fa-solid fa-tag"></i> Gerar contagem</button>
+              </section>
+              <section id="movimImpressaoMetodoAntigo" class="movim-imp-section movim-imp-section--legacy" hidden>
+                <h4>Impress&atilde;o vinculada ao endere&ccedil;o</h4>
+                <p>Use este m&eacute;todo para reimprimir uma etiqueta j&aacute; cadastrada no ETQ.</p>
+                <label class="movim-imp-field movim-imp-field--full">
+                  <span>Etiqueta (ETQ_rec_impresso)</span>
+                  <select id="movimImpressaoEtqSelect"><option value="">Carregando&hellip;</option></select>
+                </label>
+                <label class="movim-imp-field movim-imp-field--full">
+                  <span>Quantidade de etiquetas</span>
+                  <input id="movimImpressaoQtd" type="number" min="1" max="100" step="1" value="1" inputmode="numeric">
+                </label>
+                <button type="button" id="movimImpressaoMetodoAntigoConfirmar" class="movim-imp-btn-legacy movim-imp-btn-block">
+                  <i class="fa-solid fa-print"></i> Imprimir pelo m&eacute;todo antigo
+                </button>
+              </section>
+            </div>
+            <div class="movim-imp-footer"><button type="button" id="movimImpressaoCancelar" class="movim-imp-btn-cancelar">Fechar</button></div>
           </div>
         </div>
 
@@ -11457,7 +11491,7 @@
   <script type="module" src="login/login.js"></script>
   <script src="/public/js/vendas-relatorio-gerencial.js?v=20260709a" defer></script>
   <script src="/public/js/logistica-relatorio-gerencial.js?v=20260712a" defer></script>
-  <script type="module" src="menu_produto.js?v=20260713-auditar-boot"></script>
+  <script type="module" src="menu_produto.js?v=20260713-merge-auditar-imp"></script>
   
   <script type="module" src="./requisicoes_omie/filtro_produto.js?v=20260710a"></script>
   <script type="module" src="./requisicoes_omie/ListarProdutos.js?v=20260710a"></script>
@@ -13602,7 +13636,48 @@ function attachDropZone(ul) {
 @media(max-width:900px){#chatPane #chatLayout{grid-template-columns:1fr}}
 </style>
 
-<!-- ===== MODAL NOVO PRODUTO ===== -->
+<!-- ===== CADASTRO DE PRODUTO V2 ===== -->
+<div id="cadProdutoV2" class="cad-prod-overlay" hidden>
+  <div class="cad-prod-dialog" role="dialog" aria-modal="true" aria-labelledby="cadProdTitulo">
+    <header class="cad-prod-header">
+      <div><span class="cad-prod-kicker">OMIE</span><h2 id="cadProdTitulo">Cadastrar produto</h2></div>
+      <button id="cadProdFechar" type="button" class="cad-prod-close" aria-label="Fechar">&times;</button>
+    </header>
+    <div class="cad-prod-body">
+      <section class="cad-prod-card cad-prod-config">
+        <div class="cad-prod-section-title"><span>1</span><div><h3>Defina o produto</h3><p>A fam&iacute;lia e a origem formam o prefixo do c&oacute;digo.</p></div></div>
+        <label class="cad-prod-field"><span>Fam&iacute;lia</span><select id="cadProdFamilia"><option value="">Carregando...</option></select><button id="cadProdMostrarFamilias" type="button" class="cad-prod-reveal"><i class="fa-regular fa-eye"></i> Desocultar fam&iacute;lias restantes</button></label>
+        <label class="cad-prod-field"><span>Filtro por descri&ccedil;&atilde;o <small>(opcional)</small></span><input id="cadProdFiltro" type="text" placeholder="Ex.: COMPRESSOR"></label>
+        <div class="cad-prod-field"><span>Origem</span><div class="cad-prod-origin" role="group" aria-label="Origem do produto"><button type="button" data-origin="N" class="active">Nacional</button><button type="button" data-origin="I">Importado</button></div></div>
+        <div class="cad-prod-mode" role="tablist"><button type="button" id="cadProdModoUnico" class="active">Produto &uacute;nico</button><button type="button" id="cadProdModoLote">Cadastro em lote</button></div>
+      </section>
+
+      <section id="cadProdUnicoPane" class="cad-prod-card">
+        <div class="cad-prod-section-title"><span>2</span><div><h3>Gere e revise</h3><p>Confira o sequencial e ajuste a descri&ccedil;&atilde;o antes de cadastrar.</p></div></div>
+        <label class="cad-prod-field"><span>Descri&ccedil;&atilde;o</span><input id="cadProdDescricao" type="text" maxlength="120" placeholder="Descri&ccedil;&atilde;o completa do produto"></label>
+        <button id="cadProdGerar" type="button" class="cad-prod-btn cad-prod-btn-primary"><i class="fa-solid fa-wand-magic-sparkles"></i> Gerar c&oacute;digo</button>
+        <div id="cadProdCodigoWrap" class="cad-prod-code" hidden><div><small>C&oacute;digo reservado</small><strong id="cadProdCodigo">-</strong><span id="cadProdSequencial"></span></div><button id="cadProdCopiar" type="button" title="Copiar c&oacute;digo"><i class="fa-regular fa-copy"></i></button></div>
+        <div class="cad-prod-grid-two">
+          <label class="cad-prod-field"><span>Unidade</span><select id="cadProdUnidade"></select></label>
+          <label class="cad-prod-field"><span>Tipo de item (Omie)</span><select id="cadProdTipo"></select></label>
+        </div>
+        <label class="cad-prod-field"><span>Foto <small>(opcional)</small></span><div id="cadProdFotoDrop" class="cad-prod-image-drop" tabindex="0"><i class="fa-solid fa-cloud-arrow-up"></i><strong>Arraste uma imagem aqui</strong><small>ou use Ctrl+V para colar</small><div class="cad-prod-image-picker"><input id="cadProdFoto" type="file" accept="image/*"><button id="cadProdColarFoto" type="button">Colar imagem</button><button id="cadProdLimparFoto" type="button">Limpar</button></div></div></label>
+        <div id="cadProdFotoPreview" class="cad-prod-image-preview" hidden><img alt="Pr&eacute;via da foto"><span></span></div>
+        <button id="cadProdCadastrar" type="button" class="cad-prod-btn cad-prod-btn-success" disabled><i class="fa-solid fa-check"></i> Cadastrar produto</button>
+      </section>
+
+      <section id="cadProdLotePane" class="cad-prod-card" hidden>
+        <div class="cad-prod-section-title"><span>2</span><div><h3>Prepare o lote</h3><p>Informe uma descri&ccedil;&atilde;o por linha. O sistema reservar&aacute; uma faixa de c&oacute;digos.</p></div></div>
+        <label class="cad-prod-field"><span>Descri&ccedil;&otilde;es do lote</span><textarea id="cadProdLoteDescricoes" rows="7" placeholder="CABO LIDES 6,00MM AZUL 130 GRAUS 750V&#10;CABO LIDES 4,00MM AZUL 130 GRAUS 750V"></textarea></label>
+        <div class="cad-prod-actions"><button id="cadProdLotePreview" type="button" class="cad-prod-btn cad-prod-btn-primary">Gerar preview</button><button id="cadProdLoteCadastrar" type="button" class="cad-prod-btn cad-prod-btn-success" disabled>Cadastrar lote</button></div>
+        <div class="cad-prod-table-wrap"><table><thead><tr><th>#</th><th>C&oacute;digo</th><th>Descri&ccedil;&atilde;o</th><th>Status</th></tr></thead><tbody id="cadProdLoteBody"><tr><td colspan="4">Gere um preview para visualizar o lote.</td></tr></tbody></table></div>
+      </section>
+      <div id="cadProdStatus" class="cad-prod-status" aria-live="polite"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== MODAL NOVO PRODUTO (LEGADO) ===== -->
 <div id="modalNovoProduto" class="modal-overlay">
   <div class="modal-dialog">
     <div class="modal-header">
