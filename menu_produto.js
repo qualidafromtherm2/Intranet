@@ -80,6 +80,13 @@ window.showOnlyInMain = function(element) {
 
 window.forceShowInicio = function() {
   try {
+    // Garante que o overlay de boot não cubra o calendário
+    try {
+      document.body.classList.add('app-ready');
+      const ov = document.getElementById('app-boot-overlay');
+      if (ov) ov.remove();
+    } catch (_) {}
+
     const main = document.querySelector('.main-container');
     const inicio = document.getElementById('paginaInicio');
     if (!main || !inicio) return;
@@ -92,6 +99,7 @@ window.forceShowInicio = function() {
     // Use 'flex' se o elemento é tab-pane (CSS o define com display:flex)
     const displayValue = inicio.classList?.contains('tab-pane') ? 'flex' : 'block';
     inicio.style.display = displayValue;
+    inicio.style.visibility = 'visible';
 
     const produtoTabs = document.getElementById('produtoTabs');
     const kanbanTabs = document.getElementById('kanbanTabs');
@@ -71219,6 +71227,9 @@ document.addEventListener('DOMContentLoaded', () => {
   let _movimEstoqueLocais = [];
   let _movimLocaisDisponiveis = [];
   let _mostrarOutrosDestinos = false;
+  let _codigoProdutoAtual = null;
+  let _descricaoProdutoAtual = null;
+  let _codigoProdutoOmieAtual = null;
   let _monSessaoId = null;
   let _monSessaoIniciando = null;
 

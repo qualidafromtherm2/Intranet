@@ -19,7 +19,7 @@
   referrerpolicy="no-referrer"
 />
   <!-- Seu CSS principal -->
-  <link rel="stylesheet" href="menu_produto.css?v=20260712-mobile-global"/>
+  <link rel="stylesheet" href="menu_produto.css?v=20260713-auditar-boot"/>
   <!-- Anti-flicker: esconde menus até as permissões serem aplicadas -->
   <style id="boot-anti-flicker">
     /* Enquanto o app não está pronto, esconde elementos sujeitos a permissões */
@@ -60,6 +60,23 @@
     <div class="boot-spinner"></div>
     <div class="boot-msg">Carregando…</div>
   </div>
+  <script>
+    // Failsafe independente do menu_produto.js (arquivo grande):
+    // se o módulo demorar/falhar, libera a UI para o Início/calendário não ficar preto.
+    (function () {
+      function liberarBoot() {
+        try {
+          document.body.classList.add('app-ready');
+          var ov = document.getElementById('app-boot-overlay');
+          if (ov) ov.remove();
+        } catch (_) {}
+      }
+      setTimeout(liberarBoot, 6000);
+      window.addEventListener('load', function () {
+        setTimeout(liberarBoot, 1500);
+      });
+    })();
+  </script>
 
 
 
@@ -11440,7 +11457,7 @@
   <script type="module" src="login/login.js"></script>
   <script src="/public/js/vendas-relatorio-gerencial.js?v=20260709a" defer></script>
   <script src="/public/js/logistica-relatorio-gerencial.js?v=20260712a" defer></script>
-  <script type="module" src="menu_produto.js?v=20260712-mobile-global"></script>
+  <script type="module" src="menu_produto.js?v=20260713-auditar-boot"></script>
   
   <script type="module" src="./requisicoes_omie/filtro_produto.js?v=20260710a"></script>
   <script type="module" src="./requisicoes_omie/ListarProdutos.js?v=20260710a"></script>
