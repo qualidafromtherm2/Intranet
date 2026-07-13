@@ -7523,7 +7523,73 @@ function buildAtRelatorioGerencialTipoFilter(tipoRaw) {
   const tipo = String(tipoRaw || '').trim();
   if (!tipo) return '';
   const safe = tipo.replace(/'/g, "''");
-  return ` AND LOWER(TRIM(COALESCE(a.tipo, ''))) = LOWER('${safe}')`;
+  // Unifica aliases (Qualidade/QUALIDADE, Extensão de garantia/EXTENSÃO_GARANTIA, etc.)
+  return ` AND (${sqlNormalizaTipoAt('a.tipo')}) = (${sqlNormalizaTipoAt(`'${safe}'`)})`;
+}
+
+/** Normaliza tipo de AT para agrupar/filtrar aliases (maiúsculas, underscore, sinônimos). */
+function sqlNormalizaTipoAt(expr) {
+  return `
+    CASE
+      WHEN NULLIF(TRIM(${expr}), '') IS NULL THEN '(sem tipo)'
+      WHEN LOWER(TRIM(REGEXP_REPLACE(${expr}, '[_]+', ' ', 'g')))
+           ~ 'extens[aã]o[[:space:]]*(de[[:space:]]*)?garantia'
+        THEN 'Extensão de garantia'
+      WHEN LOWER(TRIM(REGEXP_REPLACE(${expr}, '[_]+', ' ', 'g')))
+           ~ 'instala[cç][aã]o[[:space:]]*equipamento'
+        THEN 'Instalação equipamento'
+      WHEN LOWER(TRIM(${expr})) IN ('qualidade') THEN 'Qualidade'
+      WHEN LOWER(TRIM(${expr})) IN ('atendimento rápido', 'atendimento rapido') THEN 'Atendimento rápido'
+      WHEN LOWER(TRIM(${expr})) = 'comercial' THEN 'Comercial'
+      WHEN LOWER(TRIM(${expr})) IN ('logistica', 'logística') THEN 'Logística'
+      WHEN LOWER(TRIM(${expr})) = 'engenharia' THEN 'Engenharia'
+      WHEN LOWER(TRIM(${expr})) IN ('devolução', 'devolucao') THEN 'Devolução'
+      ELSE INITCAP(LOWER(TRIM(REGEXP_REPLACE(${expr}, '[_]+', ' ', 'g'))))
+    END
+  `;
+}
+
+/**
+ * Família de modelo para gráficos/ranking.
+ * - UPPER no prefixo (fti/FTi → FTI)
+ * - typos só-letras (DTI/FTIO/FTIW → FTI)
+ * - texto inválido (ALEXANDRE/MODELO/SEM MODELO → sem modelo)
+ * - sufixo BR/W sem duplicar (FTIBR, FH160W → FHW)
+ */
+function sqlFamiliaModeloAt(modeloExpr) {
+  const m = `TRIM(COALESCE(${modeloExpr}, ''))`;
+  return `
+    COALESCE(
+      NULLIF(
+        (
+          CASE
+            WHEN ${m} = '' THEN NULL
+            WHEN UPPER(REGEXP_REPLACE(${m}, '[[:space:]_-]+', '', 'g'))
+                 ~ '^(ALEXANDRE|MODELO|SEMMODELO|NA|N/?A)$'
+              THEN NULL
+            WHEN UPPER(${m}) IN ('DTI', 'FTIO', 'FTIW', 'FTO', 'FIT', 'FT1') THEN 'FTI'
+            WHEN UPPER(${m}) IN ('FTWW') THEN 'FTW'
+            WHEN UPPER(${m}) IN ('FHWW') THEN 'FHW'
+            ELSE
+              CONCAT(
+                UPPER(COALESCE(SUBSTRING(${m} FROM '^[A-Za-z]+'), '')),
+                CASE
+                  WHEN UPPER(${m}) ~ 'BR$'
+                    AND UPPER(COALESCE(SUBSTRING(${m} FROM '^[A-Za-z]+'), '')) !~ 'BR$'
+                  THEN 'BR'
+                  WHEN UPPER(${m}) ~ 'W$'
+                    AND UPPER(COALESCE(SUBSTRING(${m} FROM '^[A-Za-z]+'), '')) !~ 'W$'
+                  THEN 'W'
+                  ELSE ''
+                END
+              )
+          END
+        ),
+        ''
+      ),
+      '(sem modelo)'
+    )
+  `;
 }
 
 // GET /at/relatorio-gerencial — dashboard executivo AT (período + tipo)
@@ -7560,20 +7626,7 @@ router.get('/at/relatorio-gerencial', async (req, res) => {
           a.data,
           COALESCE(NULLIF(TRIM(a.estado), ''), 'N/D') AS estado,
           COALESCE(NULLIF(TRIM(a.tag_problema), ''), '(sem tag)') AS tag,
-          COALESCE(
-            NULLIF(
-              CONCAT(
-                COALESCE(SUBSTRING(TRIM(COALESCE(s.modelo, a.modelo, '')) FROM '^[A-Za-z]+'), ''),
-                CASE
-                  WHEN UPPER(TRIM(COALESCE(s.modelo, a.modelo, ''))) ~ 'BR$' THEN 'BR'
-                  WHEN UPPER(TRIM(COALESCE(s.modelo, a.modelo, ''))) ~ 'W$'  THEN 'W'
-                  ELSE ''
-                END
-              ),
-              ''
-            ),
-            '(sem modelo)'
-          ) AS modelo,
+          ${sqlFamiliaModeloAt("COALESCE(s.modelo, a.modelo, '')")} AS modelo,
           TRIM(COALESCE(a.status, '')) AS status_os,
           f.valor_total_mao_obra,
           CASE
@@ -7602,20 +7655,7 @@ router.get('/at/relatorio-gerencial', async (req, res) => {
         SELECT DISTINCT ON (a.id)
           a.id,
           COALESCE(NULLIF(TRIM(a.tag_problema), ''), '(sem tag)') AS tag,
-          COALESCE(
-            NULLIF(
-              CONCAT(
-                COALESCE(SUBSTRING(TRIM(COALESCE(s.modelo, a.modelo, '')) FROM '^[A-Za-z]+'), ''),
-                CASE
-                  WHEN UPPER(TRIM(COALESCE(s.modelo, a.modelo, ''))) ~ 'BR$' THEN 'BR'
-                  WHEN UPPER(TRIM(COALESCE(s.modelo, a.modelo, ''))) ~ 'W$'  THEN 'W'
-                  ELSE ''
-                END
-              ),
-              ''
-            ),
-            '(sem modelo)'
-          ) AS modelo,
+          ${sqlFamiliaModeloAt("COALESCE(s.modelo, a.modelo, '')")} AS modelo,
           CASE
             WHEN po.codigo_familia = '10457646996'
               AND TRIM(COALESCE(s.ordem_producao, '')) ~ '^[A-Za-z0-9]{4}[0-9]{6}'
@@ -7690,6 +7730,88 @@ router.get('/at/relatorio-gerencial', async (req, res) => {
         GROUP BY 1
         ORDER BY 1`;
 
+    const ppmIdadeCte = `
+      WITH ppm_idade AS (
+        SELECT DISTINCT ON (a.id)
+          a.id,
+          a.data::date AS data_os,
+          ${sqlFamiliaModeloAt("COALESCE(s.modelo, a.modelo, '')")} AS modelo,
+          CASE
+            WHEN po.codigo_familia = '10457646996'
+              AND TRIM(COALESCE(s.ordem_producao, '')) ~ '^[A-Za-z0-9]{4}[0-9]{6}'
+              AND SUBSTRING(TRIM(s.ordem_producao) FROM 7 FOR 2) BETWEEN '01' AND '12'
+              AND SUBSTRING(TRIM(s.ordem_producao) FROM 9 FOR 2) BETWEEN '01' AND '31'
+            THEN to_date(
+              '20' || SUBSTRING(TRIM(s.ordem_producao) FROM 5 FOR 6),
+              'YYYYMMDD'
+            )
+            WHEN h.data_integracao IS NOT NULL
+              AND TRIM(h.data_integracao) <> ''
+              AND TRIM(h.data_integracao) ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}'
+            THEN SUBSTRING(TRIM(h.data_integracao) FROM 1 FOR 10)::date
+            WHEN hop.data_integracao IS NOT NULL
+              AND TRIM(hop.data_integracao) <> ''
+              AND TRIM(hop.data_integracao) ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}'
+            THEN SUBSTRING(TRIM(hop.data_integracao) FROM 1 FOR 10)::date
+            ELSE NULL
+          END AS data_producao_dt,
+          CASE
+            WHEN TRIM(COALESCE(s.data_entrega, '')) ~ '^[0-9]{1,2}[/-][0-9]{1,2}[/-][0-9]{2,4}'
+            THEN to_date(
+              lpad((regexp_match(TRIM(s.data_entrega), '^([0-9]{1,2})'))[1], 2, '0')
+              || '/' ||
+              lpad((regexp_match(TRIM(s.data_entrega), '^[0-9]{1,2}[/-]([0-9]{1,2})'))[1], 2, '0')
+              || '/' ||
+              CASE
+                WHEN length((regexp_match(TRIM(s.data_entrega), '^[0-9]{1,2}[/-][0-9]{1,2}[/-]([0-9]{2,4})'))[1]) = 2
+                THEN '20' || (regexp_match(TRIM(s.data_entrega), '^[0-9]{1,2}[/-][0-9]{1,2}[/-]([0-9]{2,4})'))[1]
+                ELSE (regexp_match(TRIM(s.data_entrega), '^[0-9]{1,2}[/-][0-9]{1,2}[/-]([0-9]{2,4})'))[1]
+              END,
+              'DD/MM/YYYY'
+            )
+            WHEN TRIM(COALESCE(s.data_entrega, '')) ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}'
+            THEN LEFT(TRIM(s.data_entrega), 10)::date
+            ELSE NULL
+          END AS data_venda_dt
+        FROM sac.at a
+        INNER JOIN sac.at_busca_selecionada s ON s.id_at = a.id
+        LEFT JOIN LATERAL (
+          SELECT po0.codigo_familia::text AS codigo_familia
+          FROM public.produtos_omie po0
+          WHERE UPPER(REPLACE(TRIM(po0.codigo), '-', ''))
+              = UPPER(REPLACE(TRIM(COALESCE(s.modelo, a.modelo, '')), '-', ''))
+          LIMIT 1
+        ) po ON TRUE
+        LEFT JOIN LATERAL (
+          SELECT h0.data_integracao
+          FROM public.historico_pedido_originalis h0
+          WHERE TRIM(h0.pedido) = TRIM(regexp_replace(TRIM(COALESCE(s.pedido, '')), '^.* /\\s*', ''))
+            AND h0.data_integracao IS NOT NULL
+            AND TRIM(h0.data_integracao) <> ''
+          ORDER BY h0.data_integracao ASC
+          LIMIT 1
+        ) h ON TRUE
+        LEFT JOIN LATERAL (
+          SELECT h0.data_integracao
+          FROM public.historico_pedido_originalis h0
+          WHERE TRIM(COALESCE(s.ordem_producao, '')) <> ''
+            AND (
+              TRIM(h0.ordem_de_producao) = TRIM(s.ordem_producao)
+              OR TRIM(h0.nota_fiscal) = TRIM(s.ordem_producao)
+            )
+            AND h0.data_integracao IS NOT NULL
+            AND TRIM(h0.data_integracao) <> ''
+          ORDER BY
+            CASE WHEN TRIM(h0.ordem_de_producao) = TRIM(s.ordem_producao) THEN 0 ELSE 1 END,
+            h0.data_integracao ASC
+          LIMIT 1
+        ) hop ON TRUE
+        WHERE a.data >= $1::date
+          AND a.data < $2::date${tipoSql}
+        ORDER BY a.id, s.id DESC
+      )
+    `;
+
     const [
       rKpi,
       rEstado,
@@ -7707,6 +7829,9 @@ router.get('/at/relatorio-gerencial', async (req, res) => {
       rLoteTagModeloJanela,
       rLoteMesModeloTag,
       rLoteTotalJanela,
+      rPpmProducao,
+      rPpmVenda,
+      rPpmIdade,
     ] = await Promise.all([
       pool.query(`${baseCte}
         SELECT
@@ -7852,6 +7977,59 @@ router.get('/at/relatorio-gerencial', async (req, res) => {
         SELECT COUNT(*)::int AS total
         FROM lote_base
       `, rangeParams),
+      pool.query(`
+        SELECT
+          ${sqlFamiliaModeloAt('h.modelo')} AS modelo,
+          COUNT(*)::int AS quantidade
+        FROM public.historico_pedido_originalis h
+        WHERE TRIM(COALESCE(h.data_integracao, '')) ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}'
+          AND LEFT(TRIM(h.data_integracao), 10)::date >= $1::date
+          AND LEFT(TRIM(h.data_integracao), 10)::date < $2::date
+        GROUP BY 1
+        ORDER BY quantidade DESC, modelo
+      `, rangeParams),
+      pool.query(`
+        WITH ${VENDAS_NF_POR_PEDIDO_CTE},
+        pedidos_cfop_ignorado AS (
+          SELECT DISTINCT codigo_pedido
+          FROM "Vendas".pedidos_venda_itens
+          WHERE REGEXP_REPLACE(TRIM(COALESCE(cfop, '')), '\\D', '', 'g') = '6905'
+        ),
+        base_vendas AS (
+          SELECT DISTINCT ON (p.codigo_pedido)
+            p.codigo_pedido
+          FROM "Vendas".pedidos_venda p
+          LEFT JOIN nf_por_pedido nf
+            ON ${vendasNfJoinPedidoSql('nf', 'p')}
+          WHERE p.codigo_pedido NOT IN (SELECT codigo_pedido FROM pedidos_cfop_ignorado)
+            AND TRIM(COALESCE(p.etapa::text, '')) = '70'
+            AND nf.data_emissao_dt IS NOT NULL
+            AND nf.data_emissao_dt >= $1::date
+            AND nf.data_emissao_dt < $2::date
+          ORDER BY p.codigo_pedido
+        )
+        SELECT
+          ${sqlFamiliaModeloAt('i.codigo')} AS modelo,
+          COALESCE(SUM(COALESCE(i.quantidade, 0)), 0)::float AS quantidade
+        FROM base_vendas b
+        JOIN "Vendas".pedidos_venda_itens i ON i.codigo_pedido = b.codigo_pedido
+        WHERE REGEXP_REPLACE(TRIM(COALESCE(i.cfop, '')), '\\D', '', 'g') <> '6905'
+        GROUP BY 1
+        ORDER BY quantidade DESC, modelo
+      `, rangeParams),
+      pool.query(`${ppmIdadeCte}
+        SELECT
+          modelo,
+          ROUND(AVG((data_os - data_producao_dt)) FILTER (
+            WHERE data_producao_dt IS NOT NULL AND data_os IS NOT NULL AND data_os >= data_producao_dt
+          ))::float AS idade_media_prod_dias,
+          ROUND(AVG((data_os - data_venda_dt)) FILTER (
+            WHERE data_venda_dt IS NOT NULL AND data_os IS NOT NULL AND data_os >= data_venda_dt
+          ))::float AS idade_media_venda_dias
+        FROM ppm_idade
+        GROUP BY modelo
+        ORDER BY modelo
+      `, rangeParams),
     ]);
 
     const kpi = rKpi.rows[0] || {};
@@ -7975,6 +8153,37 @@ router.get('/at/relatorio-gerencial', async (req, res) => {
       qtd_os: r.qtd_os || 0,
     }));
 
+    const prodMap = new Map(
+      (rPpmProducao.rows || []).map((r) => [r.modelo, Number(r.quantidade) || 0])
+    );
+    const vendMap = new Map(
+      (rPpmVenda.rows || []).map((r) => [r.modelo, Number(r.quantidade) || 0])
+    );
+    const idadeMap = new Map(
+      (rPpmIdade.rows || []).map((r) => [r.modelo, {
+        idade_media_prod_dias: r.idade_media_prod_dias != null ? Number(r.idade_media_prod_dias) : null,
+        idade_media_venda_dias: r.idade_media_venda_dias != null ? Number(r.idade_media_venda_dias) : null,
+      }])
+    );
+    const ppm_modelos = (rModelo.rows || []).map((r) => {
+      const os = r.total || 0;
+      const qtd_producao = prodMap.get(r.modelo) || 0;
+      const qtd_venda = vendMap.get(r.modelo) || 0;
+      const idade = idadeMap.get(r.modelo) || {};
+      return {
+        modelo: r.modelo,
+        os,
+        qtd_producao,
+        ppm_producao: qtd_producao > 0 ? Math.round((os / qtd_producao) * 1e6) : 0,
+        sem_denominador_producao: qtd_producao <= 0,
+        qtd_venda: Math.round(qtd_venda * 100) / 100,
+        ppm_venda: qtd_venda > 0 ? Math.round((os / qtd_venda) * 1e6) : 0,
+        sem_denominador_venda: qtd_venda <= 0,
+        idade_media_prod_dias: idade.idade_media_prod_dias ?? null,
+        idade_media_venda_dias: idade.idade_media_venda_dias ?? null,
+      };
+    });
+
     return res.json({
       ok: true,
       mes: mesRaw,
@@ -8002,6 +8211,7 @@ router.get('/at/relatorio-gerencial', async (req, res) => {
       },
       por_estado: rEstado.rows,
       por_modelo: rModelo.rows,
+      ppm_modelos,
       por_tag: tags,
       tag_por_modelo: rTagModelo.rows || [],
       por_status: (rStatus.rows || []).map((r) => ({
@@ -8105,20 +8315,7 @@ router.get('/at/relatorio-gerencial/lote-detalhe', async (req, res) => {
           COALESCE(NULLIF(TRIM(a.tag_problema), ''), '(sem tag)') AS tag,
           COALESCE(NULLIF(TRIM(a.descreva_reclamacao), ''), '') AS reclamacao,
           COALESCE(NULLIF(TRIM(a.nome_revenda_cliente), ''), '') AS revenda_cliente,
-          COALESCE(
-            NULLIF(
-              CONCAT(
-                COALESCE(SUBSTRING(TRIM(COALESCE(s.modelo, a.modelo, '')) FROM '^[A-Za-z]+'), ''),
-                CASE
-                  WHEN UPPER(TRIM(COALESCE(s.modelo, a.modelo, ''))) ~ 'BR$' THEN 'BR'
-                  WHEN UPPER(TRIM(COALESCE(s.modelo, a.modelo, ''))) ~ 'W$'  THEN 'W'
-                  ELSE ''
-                END
-              ),
-              ''
-            ),
-            '(sem modelo)'
-          ) AS modelo,
+          ${sqlFamiliaModeloAt("COALESCE(s.modelo, a.modelo, '')")} AS modelo,
           TRIM(COALESCE(s.modelo, a.modelo, '')) AS modelo_completo,
           TRIM(regexp_replace(TRIM(COALESCE(s.pedido, '')), '^.* /\\s*', '')) AS pedido,
           TRIM(COALESCE(s.ordem_producao, '')) AS ordem_producao,
@@ -8331,20 +8528,7 @@ router.get('/at/graficos/por-modelo-mes', async (req, res) => {
 
     const { rows } = await pool.query(`
       SELECT
-        COALESCE(
-          NULLIF(
-            CONCAT(
-              COALESCE(SUBSTRING(TRIM(s.modelo) FROM '^[A-Za-z]+'), ''),
-              CASE
-                WHEN UPPER(TRIM(s.modelo)) ~ 'BR$' THEN 'BR'
-                WHEN UPPER(TRIM(s.modelo)) ~ 'W$'  THEN 'W'
-                ELSE ''
-              END
-            ),
-            ''
-          ),
-          '(sem modelo)'
-        )                                                  AS modelo,
+        ${sqlFamiliaModeloAt('s.modelo')}                                                  AS modelo,
         TO_CHAR(DATE_TRUNC('month', a.data), 'YYYY-MM')    AS mes,
         COUNT(*)::int                                      AS total
       FROM sac.at a
@@ -10755,7 +10939,8 @@ router.get('/at/tecnico/separacao/produtos', async (req, res) => {
             ORDER BY i.pos ASC
             LIMIT 1
          ) img ON true
-        WHERE CAST(po.codigo_produto AS TEXT) ILIKE $1
+        WHERE po.codigo ILIKE $1
+           OR CAST(po.codigo_produto AS TEXT) ILIKE $1
            OR po.descricao ILIKE $1
         ORDER BY po.codigo ASC
         LIMIT 40`,

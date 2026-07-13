@@ -4441,16 +4441,11 @@ import { initRhConfiguracaoCargosUI } from './requisicoes_omie/configuracao_carg
 import { initRhColaboradoresUI } from './requisicoes_omie/rh_colaboradores.js';
 import { initRhControleFeriasUI } from './requisicoes_omie/rh_controle_ferias.js';
 import { initAnexosUI } from './requisicoes_omie/anexos.js';
-import { initKanban } from './kanban/kanban.js';
-let lastKanbanTab = 'comercial';   // lembra a sub-aba atual
+let lastKanbanTab = 'comercial';   // legado — Controle de OP's removido
 
 import { loadDadosProduto as loadDadosProdutoReal }
   from './requisicoes_omie/Dados_produto.js?v=20260710c';
-/* ——— IMPORT único do módulo Kanban ——— */
-import * as KanbanViews from './kanban/kanban.js';
-
-// REMOVIDO: import { initPreparacaoKanban } from './kanban/kanban_preparacao.js';
-// Agora a função initPreparacaoKanban está implementada diretamente neste arquivo
+/* Controle de OP's (kanban legado) removido — produção via Registrar produção / Montagem */
 
 let almoxCurrentPage = 1;
 
@@ -6977,12 +6972,9 @@ async function pcpDecorateEstruturaButtonsSub(subUl) {
 window.PCP = window.PCP || {};
 window.PCP.open = function(codigo) {
   if (!codigo) return;
-  // Limpa o contexto quando abrindo PCP sem contexto de OP
   window.pcpContext = undefined;
-  console.log('[PCP.open] Limpando pcpContext (aberto sem contexto de OP)');
-  setPCPProdutoCodigo(codigo);     // atualiza título
-  showKanbanTab('pcp');            // mostra a aba
-  ensurePCPEstruturaAutoLoad(codigo); // carrega a estrutura do MESMO código
+  setPCPProdutoCodigo(codigo);
+  ensurePCPEstruturaAutoLoad(codigo);
 };
 
 
@@ -7275,27 +7267,16 @@ const wrapper = document.querySelector('.wrapper');
 
 // Spinner de carregamento
 
-/* ======== Helpers – alternar Pedidos (Kanban) ======== */
+/* ======== Helpers – alternar Pedidos (Kanban legado removido) ======== */
 function showKanban () {
-    hideArmazem();                 // ← NOVA LINHA
-  /* esconde QUALQUER painel de produtos que ainda possa estar visível */
-  document.querySelectorAll('.tab-pane').forEach(p => p.style.display = 'none');
-
-  /* mostra somente a estrutura do Kanban */
-  document.getElementById('produtoTabs').style.display   = 'none';
-  document.getElementById('kanbanTabs').style.display    = 'flex';
-  document.getElementById('kanbanContent').style.display = 'block';
-
-  /* (re)carrega dados e abre a sub-aba que o usuário visitou por último */
-  initKanban();
-  showKanbanTab(lastKanbanTab || 'comercial');
+  /* Controle de OP's descontinuado */
 }
 
-
 function hideKanban () {
-  document.getElementById('kanbanTabs').style.display    = 'none';
-  document.getElementById('kanbanContent').style.display = 'none';
-  document.getElementById('produtoTabs').style.display   = 'block';
+  document.getElementById('kanbanTabs')?.style && (document.getElementById('kanbanTabs').style.display = 'none');
+  document.getElementById('kanbanContent')?.style && (document.getElementById('kanbanContent').style.display = 'none');
+  const prodTabs = document.getElementById('produtoTabs');
+  if (prodTabs) prodTabs.style.display = 'block';
 }
 
 
@@ -10874,6 +10855,19 @@ if (vendasRelatorioMenuLink) {
     showMainTab('sacAtPane');
     setSacAtModoVisual('vendas-relatorio');
     window._iniciarRelatorioGerencialVendas?.();
+  });
+}
+
+const logRelatorioMenuLink = document.getElementById('menu-log-relatorio');
+if (logRelatorioMenuLink) {
+  logRelatorioMenuLink.addEventListener('click', (e) => {
+    e.preventDefault();
+    document.querySelectorAll('.left-side .side-menu a').forEach(a => a.classList.remove('is-active'));
+    logRelatorioMenuLink.classList.add('is-active');
+    hideKanban?.();
+    hideArmazem?.();
+    showMainTab('logisticaRelatorioPane');
+    window._iniciarRelatorioGerencialLogistica?.();
   });
 }
 
@@ -19154,6 +19148,34 @@ document.querySelectorAll('#atTabelaWrapper thead th[data-col]').forEach(th => {
               </div>
             </div>
           </div>
+          <div class="at-rel-ger-card" style="margin-top:14px;">
+            <h4><i class="fa-solid fa-chart-simple"></i> PPM por Modelo</h4>
+            <p style="margin:0 0 10px;font-size:11px;color:#64748b;line-height:1.5;">
+              PPM = (O.S. do modelo ÷ unidades no período) × 1.000.000.
+              <strong>Produção</strong> usa máquinas integradas no período (data de produção);
+              <strong>Venda</strong> usa quantidade faturada/entregue no período (data da NF).
+            </p>
+            <div class="at-rel-ger-chart lg"><canvas id="atRelGerChartPpm"></canvas></div>
+          </div>
+          <div class="at-rel-ger-card" style="margin-top:14px;">
+            <h4>Tabela PPM — mensuração por produção e venda</h4>
+            <div style="overflow:auto;max-height:320px;">
+              <table class="at-rel-ger-tbl">
+                <thead>
+                  <tr>
+                    <th>Modelo</th>
+                    <th class="r">O.S.</th>
+                    <th class="r">Qtd prod.</th>
+                    <th class="r">PPM prod.</th>
+                    <th class="r">Qtd vend.</th>
+                    <th class="r">PPM vend.</th>
+                    <th class="r">Idade média (prod → O.S.)</th>
+                  </tr>
+                </thead>
+                <tbody id="atRelGerPpmBody"></tbody>
+              </table>
+            </div>
+          </div>
         </div>
         ${_footerHtml(3)}
       </div>
@@ -19987,6 +20009,64 @@ document.querySelectorAll('#atTabelaWrapper thead th[data-col]').forEach(th => {
           options: { ..._chartOptsBarH(), indexAxis: 'y' },
         });
       }
+      _destroyChart('ppm');
+      const cPpm = document.getElementById('atRelGerChartPpm');
+      const ppmRows = data.ppm_modelos || [];
+      if (cPpm && ppmRows.length) {
+        _charts.ppm = new Chart(cPpm.getContext('2d'), {
+          type: 'bar',
+          data: {
+            labels: ppmRows.map(r => r.modelo),
+            datasets: [
+              {
+                label: 'PPM Produção',
+                data: ppmRows.map(r => r.sem_denominador_producao ? null : (r.ppm_producao || 0)),
+                backgroundColor: '#1e3a5fcc',
+                borderColor: '#1e3a5f',
+                borderWidth: 1,
+                borderRadius: 4,
+              },
+              {
+                label: 'PPM Venda',
+                data: ppmRows.map(r => r.sem_denominador_venda ? null : (r.ppm_venda || 0)),
+                backgroundColor: '#10b981cc',
+                borderColor: '#059669',
+                borderWidth: 1,
+                borderRadius: 4,
+              },
+            ],
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+              legend: { position: 'top', labels: { color: '#475569', font: { size: 11 }, boxWidth: 12 } },
+              tooltip: {
+                callbacks: {
+                  label(ctx) {
+                    const v = ctx.parsed?.y;
+                    if (v == null || Number.isNaN(v)) return `${ctx.dataset.label}: sem volume no período`;
+                    return `${ctx.dataset.label}: ${Number(v).toLocaleString('pt-BR')}`;
+                  },
+                },
+              },
+            },
+            scales: {
+              x: { ticks: { color: '#64748b', font: { size: 10 } }, grid: { color: '#e2e8f0' } },
+              y: {
+                beginAtZero: true,
+                ticks: {
+                  color: '#64748b',
+                  font: { size: 10 },
+                  callback(v) { return Number(v).toLocaleString('pt-BR'); },
+                },
+                grid: { color: '#e2e8f0' },
+                title: { display: true, text: 'PPM', color: '#64748b', font: { size: 10 } },
+              },
+            },
+          },
+        });
+      }
     }
 
     if (sec === 'defeitos') {
@@ -20153,6 +20233,24 @@ document.querySelectorAll('#atTabelaWrapper thead th[data-col]').forEach(th => {
       modBody.innerHTML = rows.length
         ? rows.map(r => `<tr><td>${_esc(r.modelo)}</td><td class="r">${r.total}</td></tr>`).join('')
         : '<tr><td colspan="2" style="text-align:center;color:#94a3b8;">Nenhum modelo no período.</td></tr>';
+    }
+
+    const ppmBody = document.getElementById('atRelGerPpmBody');
+    if (ppmBody) {
+      const rows = data.ppm_modelos || [];
+      const fmtPpm = (v, sem) => (sem ? '—' : Number(v || 0).toLocaleString('pt-BR'));
+      const fmtIdade = (v) => (v == null || Number.isNaN(Number(v)) ? '—' : `${Math.round(Number(v))} d`);
+      ppmBody.innerHTML = rows.length
+        ? rows.map(r => `<tr>
+            <td>${_esc(r.modelo)}</td>
+            <td class="r">${r.os || 0}</td>
+            <td class="r">${r.qtd_producao || 0}</td>
+            <td class="r">${fmtPpm(r.ppm_producao, r.sem_denominador_producao)}</td>
+            <td class="r">${r.qtd_venda || 0}</td>
+            <td class="r">${fmtPpm(r.ppm_venda, r.sem_denominador_venda)}</td>
+            <td class="r">${fmtIdade(r.idade_media_prod_dias)}</td>
+          </tr>`).join('')
+        : '<tr><td colspan="7" style="text-align:center;color:#94a3b8;">Sem dados de PPM no período.</td></tr>';
     }
 
     const tagBody = document.getElementById('atRelGerTagBody');
@@ -20630,7 +20728,7 @@ document.querySelectorAll('#atTabelaWrapper thead th[data-col]').forEach(th => {
     const map = {
       executivo: ['status', 'moEstado'],
       geografico: ['estado', 'estadoDonut'],
-      modelos: ['modelo'],
+      modelos: ['modelo', 'ppm'],
       defeitos: ['tag'],
       evolucao: ['semana', 'statusEvol'],
       pareto: ['pareto'],
@@ -20645,7 +20743,7 @@ document.querySelectorAll('#atTabelaWrapper thead th[data-col]').forEach(th => {
     const map = {
       executivo: ['status', 'moEstado'],
       geografico: ['estado', 'estadoDonut'],
-      modelos: ['modelo'],
+      modelos: ['modelo', 'ppm'],
       defeitos: ['tag'],
       evolucao: ['semana', 'statusEvol'],
       pareto: ['pareto'],
@@ -20741,6 +20839,7 @@ document.querySelectorAll('#atTabelaWrapper thead th[data-col]').forEach(th => {
           imgs.estadoDonut = _canvasParaImg(document.getElementById('atRelGerChartEstadoDonut'));
         } else if (s.id === 'modelos') {
           imgs.modelo = _canvasParaImg(document.getElementById('atRelGerChartModelo'));
+          imgs.ppm = _canvasParaImg(document.getElementById('atRelGerChartPpm'));
         } else if (s.id === 'defeitos') {
           imgs.tag = _canvasParaImg(document.getElementById('atRelGerChartTag'));
         } else if (s.id === 'evolucao') {
@@ -20783,6 +20882,15 @@ document.querySelectorAll('#atTabelaWrapper thead th[data-col]').forEach(th => {
       ].map(([l, v]) => `<div class="kpi"><div class="lbl">${l}</div><div class="val">${v}</div></div>`).join('');
 
       const modTbl = (d.por_modelo || []).map(r => `<tr><td>${_esc(r.modelo)}</td><td class="r">${r.total}</td></tr>`).join('') || '<tr><td colspan="2">—</td></tr>';
+      const ppmTbl = (d.ppm_modelos || []).map(r => {
+        const ppmP = r.sem_denominador_producao ? '—' : Number(r.ppm_producao || 0).toLocaleString('pt-BR');
+        const ppmV = r.sem_denominador_venda ? '—' : Number(r.ppm_venda || 0).toLocaleString('pt-BR');
+        const idade = r.idade_media_prod_dias == null ? '—' : `${Math.round(Number(r.idade_media_prod_dias))} d`;
+        return `<tr><td>${_esc(r.modelo)}</td><td class="r">${r.os || 0}</td>` +
+          `<td class="r">${r.qtd_producao || 0}</td><td class="r">${ppmP}</td>` +
+          `<td class="r">${r.qtd_venda || 0}</td><td class="r">${ppmV}</td>` +
+          `<td class="r">${idade}</td></tr>`;
+      }).join('') || '<tr><td colspan="7">—</td></tr>';
       const tagTbl = (d.por_tag || []).map(r => {
         const tot = (d.por_tag || []).reduce((s, x) => s + x.total, 0);
         const pct = tot ? Math.round((r.total / tot) * 1000) / 10 : 0;
@@ -20850,6 +20958,9 @@ document.querySelectorAll('#atTabelaWrapper thead th[data-col]').forEach(th => {
         `<div class="pdf-page">${pdfHdr()}
           <div class="sec">Modelos com Maior Incidência</div>
           <div class="row">${imgs.modelo ? `<div class="box chart-box"><h3>Gráfico</h3><img class="chart-img" src="${imgs.modelo}"></div>` : ''}<div class="box"><h3>Tabela</h3><table><thead><tr><th>Modelo</th><th class="r">Qtd</th></tr></thead><tbody>${modTbl}</tbody></table></div></div>
+          <div class="sec">PPM por Modelo</div>
+          ${imgs.ppm ? `<div class="box chart-box" style="margin-bottom:8px;"><h3>PPM Produção × PPM Venda</h3><img class="chart-img wide" src="${imgs.ppm}"></div>` : ''}
+          <table><thead><tr><th>Modelo</th><th class="r">O.S.</th><th class="r">Qtd prod.</th><th class="r">PPM prod.</th><th class="r">Qtd vend.</th><th class="r">PPM vend.</th><th class="r">Idade méd.</th></tr></thead><tbody>${ppmTbl}</tbody></table>
           <div class="sec">Análise por Tipo de Defeito</div>
           <div class="row"><div class="box"><h3>Tabela</h3><table><thead><tr><th>Tag</th><th class="r">Qtd</th><th class="r">%</th></tr></thead><tbody>${tagTbl}</tbody></table></div>${imgs.tag ? `<div class="box chart-box"><h3>Gráfico</h3><img class="chart-img" src="${imgs.tag}"></div>` : ''}</div>
           <div class="sec">Evolução dos Chamados</div>
@@ -23800,12 +23911,12 @@ if (estoqueLocalSelect) {
 }
 
   /* ——— paginação ——— */
-document.getElementById('almoxPrev').addEventListener('click', () => {
+document.getElementById('almoxPrev')?.addEventListener('click', () => {
   if (almoxCurrentPage > 1) {
     carregarAlmoxarifado(almoxCurrentPage - 1);
   }
 });
-document.getElementById('almoxNext').addEventListener('click', () => {
+document.getElementById('almoxNext')?.addEventListener('click', () => {
   if (almoxCurrentPage < almoxTotalPages) {
     carregarAlmoxarifado(almoxCurrentPage + 1);
   }
@@ -33786,15 +33897,10 @@ async function initPreparacaoKanban() {
 }
 
 /* ======== Links diretos do cabeçalho ======== */
-document.getElementById('menu-produto') .addEventListener('click', e => {
+document.getElementById('menu-produto')?.addEventListener('click', e => {
   e.preventDefault();
-  hideKanban();            // <<<<< usa o helper novo
-  openDadosProdutoTab();   // já existia
-});
-
-document.getElementById('menu-pedidos').addEventListener('click', e => {
-  e.preventDefault();
-  showKanban();            // <<<<< usa o helper novo
+  hideKanban();
+  openDadosProdutoTab();
 });
 
 
@@ -33803,58 +33909,8 @@ document.getElementById('menu-pedidos').addEventListener('click', e => {
  *  nome = comercial | pcp | preparacao | producao | detalhes   *
  * ------------------------------------------------------------ */
 function showKanbanTab(nome) {
-
-  /* 1) destaca o link ativo na barra -------------------------- */
-  document.querySelectorAll('#kanbanTabs .main-header-link')
-    .forEach(a => a.classList.toggle('is-active',
-                                     a.dataset.kanbanTab === nome));
-
-  /* 2) exibe só o painel correspondente ----------------------- */
-  document.querySelectorAll('#kanbanContent .kanban-page')
-    .forEach(p =>
-      p.style.display = (p.id === `conteudo-${nome}` ? 'block' : 'none')
-    );
-
-  /* 3) carrega / atualiza as colunas da aba escolhida ---------- */
-if (nome === 'comercial')       KanbanViews.renderKanbanComercial?.();
-else if (nome === 'pcp') {
-  // Garante visibilidade do painel PCP
-  const pcpPane = document.getElementById('conteudo-pcp');
-  if (pcpPane) pcpPane.style.display = 'block';
-setTimeout(compactPCPFilters, 80);
-
-  // (opcional) Se existir um "render" da sua camada Kanban, deixamos rodar depois:
-  try { KanbanViews.renderKanbanPCP?.(); } catch (_) {}
+  /* Controle de OP's descontinuado */
 }
-
-else if (nome === 'preparacao') initPreparacaoKanban();
-else if (nome === 'producao')   KanbanViews.renderKanbanProducao?.();
-else if (nome === 'detalhes') {
-  // Inicializa o calendário de OPs de forma assíncrona para não bloquear a UI
-  setTimeout(() => {
-    try { initCalendarioUI(); } catch(e){ console.warn('[Calendario] init falhou', e); }
-  }, 0);
-  try { KanbanViews.renderKanbanDetalhes?.(); } catch(_) {}
-}
-
-
-
-  /* 4) guarda a última aba visitada --------------------------- */
-  lastKanbanTab = nome;
-}
-
-/* ------------------------------------------------------------ *
- *  Listeners da barra “Comercial | PCP | …”                    *
- * ------------------------------------------------------------ */
-document.querySelectorAll('#kanbanTabs .main-header-link')
-  .forEach(link => {
-    link.addEventListener('click', e => {
-      e.preventDefault();                    // cancela o href
-      hideArmazem();                         // oculta abas de estoque
-      const alvo = link.dataset.kanbanTab;   // comercial / pcp / …
-      showKanbanTab(alvo);                   // exibe sub-kanban
-    });
-  });
 
 /* ============================================================
    Calendário de OPs (aba "Calendario")
@@ -34184,16 +34240,11 @@ window.initCalendarioUI = initCalendarioUI;
 window.carregarCalendarioAtual = carregarCalendarioAtual;
 window.renderCalendario = renderCalendario;
 window.abrirModalDia = abrirModalDia;
-/* Autoabrir PCP se a URL já vier com #pcp */
+/* Autoabrir PCP via hash — Controle de OP's removido; ignora #pcp legado */
 (function autoOpenPCPFromHash(){
   try {
     if (String(location.hash).toLowerCase().includes('pcp')) {
-      // abre o quadro Kanban e ativa a sub-aba PCP
-      showKanban();
-      // vindo da COMERCIAL: define o código vencedor para a PCP
-window.setPCPProdutoCodigo?.(codigo);   // 'codigo' é o do item clicado na Comercial
-
-      showKanbanTab('pcp'); // isso já dispara ensurePCPEstruturaAutoLoad()
+      ensurePCPEstruturaAutoLoad?.();
     }
   } catch {}
 })();

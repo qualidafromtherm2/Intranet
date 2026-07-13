@@ -377,18 +377,6 @@
 
   <div class="side-menu">
     <a href="#"
-       id="menu-pedidos"
-       class="menu-link"
-       data-nav-key="side:log:pedidos"
-       data-nav-parent="side:log"
-       data-nav-pos="side"
-       data-nav-label="Controle de OP's"
-       data-nav-selector="#menu-pedidos">
-      <i class="fa-solid fa-list-check" style="margin-right:8px;"></i>
-      Controle de OP's
-    </a>
-
-    <a href="#"
        id="menu-armazens"
        class="menu-link"
        data-nav-key="side:log:armazens"
@@ -496,6 +484,18 @@
        data-nav-selector="#menu-identificacao-produto">
       <i class="fa-solid fa-print" style="margin-right:8px;"></i>
       Identificação do produto
+    </a>
+
+    <a href="#"
+       id="menu-log-relatorio"
+       class="menu-link"
+       data-nav-key="side:log:relatorio"
+       data-nav-parent="side:log"
+       data-nav-pos="side"
+       data-nav-label="Relatório Logística"
+       data-nav-selector="#menu-log-relatorio">
+      <i class="fa-solid fa-file-lines" style="margin-right:8px;"></i>
+      Relatório Logística
     </a>
   </div>
 </div>
@@ -6255,6 +6255,50 @@
         <!-- Painel Logística: Envio de mercadoria (tabela) -->
         </div>
       </div>
+        <!-- Painel Logística: Relatório Gerencial -->
+        <div id="logisticaRelatorioPane" class="tab-pane" style="display:none;">
+          <div class="content-wrapper">
+            <div class="content-section" style="margin-top:0;">
+              <div class="title-wrapper" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:0;">
+                <div class="content-section-title" style="display:flex;align-items:center;gap:8px;">
+                  <i class="fa-solid fa-file-lines" style="color:#10b981;"></i>
+                  Relatório Gerencial — Logística
+                </div>
+                <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-left:auto;">
+                  <div style="display:flex;align-items:center;gap:8px;">
+                    <label for="logRelGerModo" style="font-size:12px;font-weight:600;color:#94a3b8;white-space:nowrap;">Período</label>
+                    <select id="logRelGerModo"
+                      style="padding:6px 10px;border-radius:8px;border:1px solid #374151;background:#111827;color:#e5e7eb;font-size:13px;min-width:210px;">
+                      <option value="mes">Mês atual</option>
+                      <option value="3m">3 últimos meses (sem o atual)</option>
+                      <option value="6m">6 últimos meses (sem o atual)</option>
+                      <option value="anual">Anual (12 meses, sem o atual)</option>
+                    </select>
+                  </div>
+                  <button id="logRelGerAtualizarBtn" type="button" title="Atualizar"
+                    style="padding:6px 12px;border-radius:8px;border:1px solid #374151;background:rgba(255,255,255,.04);color:#9ca3af;cursor:pointer;display:flex;align-items:center;gap:6px;font-size:13px;">
+                    <i class="fa-solid fa-rotate"></i>
+                  </button>
+                  <button id="logRelGerPdfBtn" type="button" title="Exportar PDF"
+                    style="padding:6px 14px;border-radius:8px;border:1px solid #10b981;background:rgba(16,185,129,.15);color:#6ee7b7;cursor:pointer;display:flex;align-items:center;gap:6px;font-size:13px;font-weight:600;">
+                    <i class="fa-solid fa-file-pdf"></i> Exportar PDF
+                  </button>
+                </div>
+              </div>
+
+              <div id="logRelGerStatus" style="display:none;margin-top:14px;font-size:13px;color:#94a3b8;">Carregando...</div>
+              <div id="logRelGerErro" style="display:none;margin-top:14px;font-size:13px;color:#f87171;"></div>
+
+              <div id="logRelGerConteudo" style="display:none;margin-top:16px;">
+                <div class="at-rel-ger-layout">
+                  <nav class="at-rel-ger-nav" id="logRelGerNav" aria-label="Seções do relatório de logística"></nav>
+                  <div class="at-rel-ger-main" id="logRelGerPages"></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
         <div id="envioMercadoriaPane" class="tab-pane" style="display:none;">
           <style>
             .envio-mercadoria-shell{display:flex;flex-direction:column;gap:12px;}
@@ -9742,17 +9786,6 @@
 
 </div> <!-- /#produtoTabs -->
 
-<!-- Abas de Pedidos (inicialmente ocultas) -->
-<div id="kanbanTabs" class="main-header" style="display:none; margin-top:1rem;">
-  <div class="header-menu">
-  <a href="#" data-kanban-tab="comercial" class="main-header-link is-active">Programação</a>
-  <a href="#" data-kanban-tab="pcp"       class="main-header-link">Solicitação</a>
-  <a href="#" data-kanban-tab="preparacao" class="main-header-link">Postos</a>
-  <a href="#" data-kanban-tab="producao"  class="main-header-link">Produção</a>
-  <a href="#" data-kanban-tab="detalhes"  class="main-header-link">Calendario</a>
-  </div>
-</div>
-
 <!-- Abas de Armazéns (inicialmente ocultas) -->
 <div id="armazemTabs" class="main-header" style="display:none; margin-top:1rem;">
   <div class="header-menu">
@@ -10514,212 +10547,8 @@
 
 </div><!-- /#armazemContent -->
 
-  <!-- Comercial -->
-<div id="kanbanContent" style="display:none;">
-  <div id="conteudo-comercial" class="kanban-page">
-<div class="kanban-board">
-<div class="kanban-column">
-  <div class="kanban-header">
-    <div class="title-wrapper">
-      <span>Pedido aprovado</span>
-      <!-- [MOVE] Botão para abrir a busca de produtos (agora nesta coluna) -->
-      <i class="fas fa-plus add-btn" title="Adicionar filtro"></i>
-      <!-- Spinner escondido por CSS até ser exibido pelo JS -->
-      <i class="fas fa-spinner fa-spin kanban-spinner"></i>
-    </div>
-
-    <!-- [MOVE] Painel de busca que antes ficava em “Aguardando prazo” -->
-    <div class="add-container">
-      <input type="text" class="add-search" placeholder="Pesquisar…" />
-      <!-- >>> Lista de resultados da busca <<< -->
-      <ul class="add-results"></ul>
-    </div>
-  </div>
-  <ul id="coluna-comercial" class="kanban-list"></ul>
-
-</div>
 
 
-<div class="kanban-column">
-  <div class="kanban-header">
-    <div class="title-wrapper">
-      <span>Aguardando prazo</span>
-      <button type="button"
-              id="btn-listar-excluidos"
-              class="kanban-icon-btn"
-              title="Listar OPs excluídas"
-              aria-label="Listar OPs excluídas">
-        <i class="fas fa-ban" aria-hidden="true"></i>
-      </button>
-      <!-- [LIMPEZA] Removido o add-btn e o add-container desta coluna -->
-    </div>
-  </div>
-  <ul id="coluna-pcp-aprovado" class="kanban-list"></ul>
-
-</div>
-
-
-
-  <div class="kanban-column">
-    <div class="kanban-header">Fila de produção</div>
-    <ul id="coluna-pcp-op" class="kanban-list"></ul>
-  </div>
-</div>
-
-    <div class="kanban-board">…</div>
-  </div>
-
-
-<div id="conteudo-pcp" class="kanban-page" style="display:none;">
-  <div id="listaPecasPCP">
-    <div class="content-wrapper">
-      <div class="content-section">
-
-<!-- Barra: observações da PCP -->
-<div id="pcp-code-bar" class="code-bar" style="display:none; margin:6px 0 12px;">
-  <span id="pcp-code" class="prod-code" style="display:none;"></span>
-  <input id="pcp-obs" type="text" placeholder="Observações…" style="flex:1; min-width:220px;">
-</div>
-
-        <div class="title-wrapper" style="gap:12px; align-items:center;">
-          <div class="content-section-title">Lista de peças</div>
-          <span id="pcpListaVersaoWrap"
-                style="display:inline-flex; align-items:center; gap:6px; font-size:0.85rem;">
-            <span style="font-weight:600;">Versão:</span>
-                <span id="pcpListaVersaoValue"
-                      class="chip"
-                      style="padding:2px 8px; border-radius:12px; border:1px solid var(--border,#ccc);">
-              —
-            </span>
-            <span id="pcp-op-num" class="chip" style="padding:2px 8px; border-radius:12px; border:1px solid var(--border,#ccc); display:none; background:yellow; color:#333; font-weight:600; margin-left:6px;"> </span>
-          </span>
-
-          <!-- toolbar da lista (ações da PCP) -->
-          <div id="pcpToolbar" style="display:flex; gap:8px; align-items:center; margin-left:auto;">
-            <button id="pcpAddBtn" class="content-button" type="button" title="Incluir item na lista">
-              <i class="fa-solid fa-plus"></i>
-              <span style="margin-left:6px;">Incluir item</span>
-            </button>
-            <button id="pcpResetBtn" class="content-button danger" type="button" title="Remover todos os itens e manter apenas o pai">
-              <i class="fa-solid fa-rotate-left"></i>
-              <span style="margin-left:6px;">Resetar</span>
-            </button>
-          </div>
-
-          <!-- painel de inclusão (dropdown de busca) -->
-          <div id="pcpAddContainer" style="display:none; position:relative; width:100%; max-width:520px; margin-top:6px;">
-            <input id="pcpAddSearch" type="text" class="search-box" placeholder="Pesquisar por código ou descrição…" autocomplete="off" />
-            <div class="transfer-search-dropdown" style="position:absolute; top:36px; left:0; right:0; z-index:20;">
-              <ul id="pcpAddResults" class="transfer-search-results"></ul>
-            </div>
-          </div>
-        </div>
-
-
-
-        <!-- Lista de peças (cabeçalho fixo + linhas dinâmicas) -->
-<ul id="listaPecasPCPList" class="grid-pecas">
-<!-- Cabeçalho da Lista de peças (PCP) — rótulos ajustados para Arm Pro / Arm Alm -->
-<li class="header-row">
-  <div class="cod">Código</div>
-  <div class="desc">Descrição</div>
-  <div class="unid">Unid</div>
-  <div class="qtd">Qtd</div>
-  <div class="qtdprod">Qtd prod</div>
-  <div class="qtdpro">Arm Pro</div> <!-- só mudou o texto -->
-  <div class="qtdalm">Arm Alm</div> <!-- só mudou o texto -->
-  <div class="acao">Ação</div>
-</li>
-
-
-
-
-
-        </ul>
-      </div>
-    </div>
-  </div>
-</div>
-
-<!-- ============================================================ -->
-
-<!-- === bloco PREPARAÇÃO (Kanban) ============================ -->
-<div id="conteudo-preparacao" class="kanban-page" style="display:none;">
-  <!-- Cabeçalho com seletor de operação -->
-  <div class="preparacao-header" style="padding: 12px 20px; background: #1a1a1a; border-bottom: 1px solid #333; display: flex; align-items: center; gap: 12px;">
-    <label for="preparacaoOperacaoSelect" style="font-weight: 600; margin: 0;">Posto de Trabalho:</label>
-    <select id="preparacaoOperacaoSelect" class="transfer-select" style="min-width: 300px;">
-      <option value="">Carregando operações...</option>
-    </select>
-    <span id="preparacaoCount" style="margin-left: 12px; opacity: 0.7;">0 itens</span>
-  </div>
-
-  <div class="kanban-board">
-    <!-- Coluna 1: Aguardando prazo (igual Comercial - Pedido aprovado) -->
-    <div class="kanban-column">
-      <div class="kanban-header">
-        <div class="title-wrapper">
-          <span>Aguardando prazo</span>
-          <i class="fas fa-plus add-btn-prep" title="Adicionar filtro"></i>
-          <i class="fas fa-spinner fa-spin kanban-spinner-prep" style="display:none;"></i>
-        </div>
-        <div class="add-container-prep" style="display:none;">
-          <input type="text" class="add-search-prep" placeholder="Pesquisar…" />
-          <ul class="add-results-prep"></ul>
-        </div>
-      </div>
-      <ul id="coluna-prep-aguardando" class="kanban-list"></ul>
-    </div>
-
-    <!-- Coluna 2: Fila de produção (igual Comercial - Aguardando prazo com botão) -->
-    <div class="kanban-column">
-      <div class="kanban-header">
-        <div class="title-wrapper">
-          <span>Fila de produção</span>
-          <button type="button"
-                  id="btn-prep-listar-excluidos"
-                  class="kanban-icon-btn"
-                  title="Listar OPs excluídas"
-                  aria-label="Listar OPs excluídas">
-            <i class="fas fa-ban" aria-hidden="true"></i>
-          </button>
-        </div>
-      </div>
-      <ul id="coluna-prep-fila" class="kanban-list"></ul>
-    </div>
-  </div>
-</div>
-<!-- ========================================================= -->
-
-
-
-
-
-  <div id="conteudo-producao" class="kanban-page" style="display:none;"></div>
-  <div id="conteudo-detalhes" class="kanban-page" style="display:none;">
-  <div id="detalhesContainer" class="detalhes-container">
-    <div class="calendar-controls">
-      <button id="calPrev" class="icon-btn" title="Mês anterior"><i class="fa-solid fa-chevron-left"></i></button>
-      <select id="calMes"></select>
-      <input id="calAno" type="number" min="2000" max="2100" />
-      <select id="calLocal">
-        <option value="">Todos os locais</option>
-      </select>
-      <button id="calNext" class="icon-btn" title="Próximo mês"><i class="fa-solid fa-chevron-right"></i></button>
-    </div>
-    <div id="calGrid" class="calendar-grid"></div>
-  <div id="calSemData" class="cal-semdata" style="display:none;"></div>
-    <div id="calModal" class="cal-modal" style="display:none;">
-      <div class="cal-modal-content">
-        <button id="calModalClose" class="cal-modal-close" title="Fechar">×</button>
-        <h3 id="calModalTitulo">Detalhes do dia</h3>
-        <div id="calModalBody" class="cal-modal-body"></div>
-      </div>
-    </div>
-  </div>
-</div>
-
-</div>
 
 
 
@@ -11527,6 +11356,7 @@
   <script src="/public/js/sessao_resiliente.js?v=20260617b"></script>
   <script type="module" src="login/login.js"></script>
   <script src="/public/js/vendas-relatorio-gerencial.js?v=20260709a" defer></script>
+  <script src="/public/js/logistica-relatorio-gerencial.js?v=20260712a" defer></script>
   <script type="module" src="menu_produto.js?v=20260712-mobile-global"></script>
   
   <script type="module" src="./requisicoes_omie/filtro_produto.js?v=20260710a"></script>
@@ -11539,10 +11369,6 @@
   <script src="produtos/desenho_tecnico.js?v=20260630a" defer></script>
   <script src="produtos/engenharia_paineis.js?v=20260630a" defer></script>
   <script type="module" src="produtos/Enviar_estrutura.js" defer></script>
-  <script type="module" src="kanban/kanban_preparacao.js"></script>
-
-  <script type="module" src="./kanban/kanban.js" defer></script>
-
 <style>
   /* ── Modal Etiquetas Pendentes ──────────────────────────────────────────── */
   .etiquetas-modal-overlay {
@@ -13151,7 +12977,8 @@ function attachDropZone(ul) {
 
 /* ── Relatório Gerencial AT (Fase 2) ── */
 #sacAtRelatorioPane .content-section,
-#vendasRelatorioPane .content-section { overflow: visible; }
+#vendasRelatorioPane .content-section,
+#logisticaRelatorioPane .content-section { overflow: visible; }
 .at-rel-ger-layout {
   display: flex;
   gap: 14px;
@@ -17960,7 +17787,8 @@ function attachDropZone(ul) {
     sincronizacao: ['menu-sincronizar-produtos'],
     colaboradores: ['btn-colaboradores'],
     relatorio_at: ['menu-sac-at-relatorio'],
-    relatorio_vendas: ['menu-vendas-relatorio']
+    relatorio_vendas: ['menu-vendas-relatorio'],
+    relatorio_logistica: ['menu-log-relatorio']
   };
   const PURCHASE_MODE = {
     OMIE: 'omie',
@@ -18548,6 +18376,7 @@ function attachDropZone(ul) {
     if (t.includes('sac') && t.includes('envio')) return 'sac_envio';
     if (t.includes('relatorio') && t.includes('at')) return 'relatorio_at';
     if (t.includes('relatorio') && t.includes('venda')) return 'relatorio_vendas';
+    if (t.includes('relatorio') && (t.includes('logistica') || t.includes('logística'))) return 'relatorio_logistica';
     if ((t.includes('grafico') && t.includes('at')) || (t.includes('graf') && t.includes('at'))) return 'relatorio_at';
     if (t.includes('sincron')) return 'sincronizacao';
     if (t.includes('colaborador')) return 'colaboradores';

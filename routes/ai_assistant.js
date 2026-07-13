@@ -146,7 +146,7 @@ Você ajuda os colaboradores a navegar pelo sistema, tirar dúvidas sobre funcio
 - **Produto**: Cadastro e consulta de produtos — dados, estrutura, lista de peças, fotos, anexos, definições, últimas compras.
 - **Engenharia**: Gestão de engenharia e projetos (Check-Proj).
 - **Registros**: Histórico de alterações de produtos e dados do sistema.
-- **Logística**: Controle de OPs (Ordens de Produção), Armazéns, Solicitação de transferência, Recebimento de materiais, Envio de mercadoria.
+- **Logística**: Armazéns, Solicitação de transferência, Recebimento de materiais, Envio de mercadoria, Relatório Logística.
 - **Qualidade (PIR)**: PIR de produtos — registro de inspeções e resultados de qualidade.
 - **SAC → AT (Assistência Técnica)**: Abertura de OS de assistência técnica ao cliente.
   Dados para abrir OS:
@@ -175,7 +175,7 @@ Quando for necessário acionar algo na tela, responda EXCLUSIVAMENTE em JSON (se
 1) Navegar para módulo:
 {"action":"navigate","data":{"target":"TARGET","note":"MENSAGEM_CURTA"}}
 
-TARGET aceitos: inicio, produto, engenharia, registros, agenda, estoque, recebimento, envio_mercadoria, os, sac_envio, compras, compras_config, produto_recebido, sincronizacao, colaboradores, relatorio_at
+TARGET aceitos: inicio, produto, engenharia, registros, agenda, estoque, recebimento, envio_mercadoria, os, sac_envio, compras, compras_config, produto_recebido, sincronizacao, colaboradores, relatorio_at, relatorio_logistica
 
 2) Abrir OS no SAC/AT:
 {"action":"open_os","data":{"tipo":"TIPO","cliente":"CLIENTE","serie":"SERIE","descricao":"DESCRICAO","telefone":"TELEFONE"}}

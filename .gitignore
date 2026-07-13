@@ -147,3 +147,7 @@ API Omie/ProdutosEstruturaJsonClient (5).js
 
 # Exportações WhatsApp locais (não sobem pro GitHub)
 whatsapp_import/
+
+# PDFs/HTML de fechamento gerados localmente (não sobem pro GitHub)
+/Fechamento_*.html
+/Fechamento_*.pdf

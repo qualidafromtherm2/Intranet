@@ -268,6 +268,7 @@ app.use('/api/qualidade/ri-check', require('./routes/qualidadeRiCheck'));
 app.use('/api/registros', require('./routes/registros'));
 app.use('/api/sac', require('./routes/sacEnvios'));
 app.use('/api/sac', require('./routes/vendasRelatorio'));
+app.use('/api/sac', require('./routes/logisticaRelatorio'));
 app.use('/api/ai', require('./routes/ai_assistant'));
 app.use('/api/producao', require('./routes/producao'));
 app.use('/api/estrutura', require('./routes/estrutura'));
