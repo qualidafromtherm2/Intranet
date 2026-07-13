@@ -120,6 +120,7 @@ router.post('/evento', async (req, res) => {
 });
 
 // GET /api/monitoramento/cronologia?codigo=&n_solic=&usuario=&de=&ate=&limit=
+// Sem filtro: retorna os últimos N eventos (padrão 50).
 router.get('/cronologia', async (req, res) => {
   try {
     await ensureMonitoramentoSchema();
@@ -128,14 +129,8 @@ router.get('/cronologia', async (req, res) => {
     const usuario = String(req.query.usuario || '').trim();
     const de = String(req.query.de || '').trim();
     const ate = String(req.query.ate || '').trim();
-    const limit = parseLimit(req.query.limit, 250, 800);
-
-    if (!codigo && !nSolic && !usuario) {
-      return res.status(400).json({
-        ok: false,
-        error: 'Informe ao menos codigo, n_solic ou usuario.'
-      });
-    }
+    const temFiltro = !!(codigo || nSolic || usuario || de || ate);
+    const limit = parseLimit(req.query.limit, temFiltro ? 250 : 50, 800);
 
     const wh = [];
     const p = [];
@@ -177,7 +172,7 @@ router.get('/cronologia', async (req, res) => {
               s.descricao_produto AS sessao_descricao
          FROM monitoramento.eventos e
          LEFT JOIN monitoramento.sessoes s ON s.id = e.sessao_id
-        WHERE ${wh.join(' AND ')}
+        WHERE ${wh.length ? wh.join(' AND ') : 'TRUE'}
         ORDER BY e.ocorrido_em DESC, e.id DESC
         LIMIT $${idx}`,
       p
@@ -225,7 +220,7 @@ router.get('/cronologia', async (req, res) => {
 
     res.json({
       ok: true,
-      filtros: { codigo, n_solic: nSolic, usuario, de, ate, limit },
+      filtros: { codigo, n_solic: nSolic, usuario, de, ate, limit, recentes: !temFiltro },
       total_eventos: eventos.length,
       total_sessoes: sessoes.length,
       sessoes,

@@ -627,12 +627,13 @@ router.patch('/:id/aprovar', express.json(), async (req, res) => {
       detalhe: {
         transferencia_id: id,
         qtd: registroAtual.qtd,
-        origem: registroAtual.origem,
-        destino: registroAtual.destino,
+        armazem_origem: registroAtual.origem,
+        armazem_destino: registroAtual.destino,
+        omie: 'sim',
+        mexeu_omie: true,
         solicitante: registroAtual.solicitante,
         aprovado_por: aprovadoPor,
         motivo: motivoOmie,
-        omie: respostaOmie || null,
         sessao_id: req.body?.sessao_id || null
       }
     });

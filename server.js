@@ -12494,6 +12494,10 @@ app.post('/api/etiquetas/rec-impresso/registrar-movimentacao', express.json(), a
           qtd,
           endereco_origem: enderecoOrigem,
           endereco_destino: enderecoDestino,
+          omie: 'nao',
+          mexeu_omie: false,
+          mexeu_endereco: true,
+          sistema: 'intranet/ETQ',
           complemento: complementoRaw,
           sessao_id: req.body?.sessao_id || null,
           registros: (resultado?.registros || []).map(r => r.id).filter(Boolean),
@@ -12540,6 +12544,10 @@ app.post('/api/etiquetas/rec-impresso/registrar-movimentacao', express.json(), a
         tipo_movimentacao: tipoMov,
         qtd,
         enderecos,
+        omie: 'nao',
+        mexeu_omie: false,
+        mexeu_endereco: true,
+        sistema: 'intranet/ETQ',
         complemento: complementoRaw,
         sessao_id: req.body?.sessao_id || null,
         registros: registros.map(r => r.id).filter(Boolean),
@@ -18246,7 +18254,10 @@ async function registrarMovimentacaoKanbanItens(client, solicIds, statusDestino,
   try {
     const { rows: itensMon } = await client.query(
       `SELECT i.id, i.n_solic, i.status AS status_origem,
-              c.codigo_produto, c.cod_omie, c.descricao, c.quantidade
+              i.cod_local, i.nome_local,
+              i.omie_sep_origem, i.omie_sep_destino, i.omie_sep_qtd,
+              i.etq_sep_endereco, i.etq_sep_qtd,
+              c.codigo_produto, c.cod_omie, c.quantidade
          FROM solicitacao_produto.itens_solicitados i
          LEFT JOIN logistica.carrinho c ON c.id = i.id_carr
         WHERE i.id = ANY($1::bigint[])`,
@@ -18256,6 +18267,12 @@ async function registrarMovimentacaoKanbanItens(client, solicIds, statusDestino,
       .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
       .toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '');
     for (const row of itensMon) {
+      const omieOrig = row.omie_sep_origem != null ? String(row.omie_sep_origem).trim() : '';
+      const omieDest = row.omie_sep_destino != null ? String(row.omie_sep_destino).trim() : '';
+      const endEtq = row.etq_sep_endereco != null ? String(row.etq_sep_endereco).trim() : '';
+      const armazemDest = (row.nome_local && String(row.nome_local).trim())
+        || (row.cod_local != null ? String(row.cod_local).trim() : '')
+        || null;
       void monEventoReq(req, {
         categoria: 'API',
         acao: acao || 'sep_status',
@@ -18265,10 +18282,18 @@ async function registrarMovimentacaoKanbanItens(client, solicIds, statusDestino,
         sucesso: true,
         detalhe: {
           solic_id: row.id,
+          quantidade: row.quantidade,
           status_origem: row.status_origem,
           status_destino: statusDestino,
-          quantidade: row.quantidade,
-          descricao: row.descricao,
+          armazem_destino: armazemDest,
+          cod_local: row.cod_local != null ? String(row.cod_local).trim() || null : null,
+          omie_origem: omieOrig || null,
+          omie_destino: omieDest || null,
+          omie_qtd: row.omie_sep_qtd != null ? row.omie_sep_qtd : null,
+          endereco_etq: endEtq || null,
+          qtd_etq: row.etq_sep_qtd != null ? row.etq_sep_qtd : null,
+          mexeu_omie: !!(omieOrig || omieDest),
+          mexeu_endereco: !!endEtq,
           observacao: observacao || null
         }
       });
@@ -20371,10 +20396,11 @@ app.post('/api/logistica/separacao/enviar', express.json(), async (req, res) => 
           detalhe: {
             id_carr: item.id,
             quantidade: item.quantidade,
-            descricao: item.descricao,
+            armazem_destino: nomeLocalGravar || null,
             reutilizada: !!nSolicReutilizada,
             motivo: motivoSolicitacao || null,
-            local: nomeLocalGravar || null
+            mexeu_omie: false,
+            mexeu_endereco: false
           }
         });
       }

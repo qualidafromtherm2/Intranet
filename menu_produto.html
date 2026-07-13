@@ -19,7 +19,7 @@
   referrerpolicy="no-referrer"
 />
   <!-- Seu CSS principal -->
-  <link rel="stylesheet" href="menu_produto.css?v=20260713-auditar-mobile"/>
+  <link rel="stylesheet" href="menu_produto.css?v=20260713-auditar-busca"/>
   <!-- Anti-flicker: esconde menus até as permissões serem aplicadas -->
   <style id="boot-anti-flicker">
     /* Enquanto o app não está pronto, esconde elementos sujeitos a permissões */
@@ -8928,9 +8928,12 @@
             </div>
 
             <div class="auditar-filtros">
-              <label class="auditar-field">
-                <span>Código do produto</span>
-                <input id="auditarCodigo" type="text" placeholder="Ex.: 05.MP.N.71207" autocomplete="off" inputmode="text">
+              <label class="auditar-field auditar-field-produto">
+                <span>Pesquisar produto</span>
+                <div class="auditar-produto-wrap">
+                  <input id="auditarCodigo" type="text" placeholder="Código ou descrição (produtos Omie)" autocomplete="off" inputmode="search">
+                  <div id="auditarProdutoSugestoes" class="auditar-sugestoes" hidden></div>
+                </div>
               </label>
               <label class="auditar-field">
                 <span>Nº SEP</span>
@@ -11488,7 +11491,7 @@
   <script type="module" src="login/login.js"></script>
   <script src="/public/js/vendas-relatorio-gerencial.js?v=20260709a" defer></script>
   <script src="/public/js/logistica-relatorio-gerencial.js?v=20260712a" defer></script>
-  <script type="module" src="menu_produto.js?v=20260713-auditar-mobile"></script>
+  <script type="module" src="menu_produto.js?v=20260713-auditar-busca"></script>
   
   <script type="module" src="./requisicoes_omie/filtro_produto.js?v=20260710a"></script>
   <script type="module" src="./requisicoes_omie/ListarProdutos.js?v=20260710a"></script>
@@ -14391,6 +14394,27 @@ function attachDropZone(ul) {
   const eventosWrap = document.getElementById('auditarEventosWrap');
   const eventosBody = document.getElementById('auditarEventosBody');
   const eventosCards = document.getElementById('auditarEventosCards');
+  const inputCodigo = document.getElementById('auditarCodigo');
+  const sugestoesEl = document.getElementById('auditarProdutoSugestoes');
+  let buscaProdTimer = null;
+  let buscaProdSeq = 0;
+
+  const DETALHE_SKIP = new Set([
+    'descricao', 'sessao_id', 'registros', 'usuario_informado',
+    'omie', 'local_nome', 'local'
+  ]);
+  const DETALHE_ORDEM = [
+    'solic_id', 'ajuste_id', 'transferencia_id', 'id_carr',
+    'quantidade', 'qtd', 'tipo_movimentacao', 'tipo_operacao',
+    'status_origem', 'status_destino',
+    'armazem', 'armazem_origem', 'armazem_destino', 'cod_local',
+    'local_estoque', 'origem', 'destino',
+    'endereco_origem', 'endereco_destino', 'endereco_etq', 'enderecos',
+    'omie_origem', 'omie_destino', 'omie_qtd', 'qtd_etq',
+    'mexeu_omie', 'mexeu_endereco', 'sistema',
+    'observacao', 'motivo', 'complemento', 'solicitante', 'aprovado_por',
+    'reutilizada'
+  ];
 
   function esc(s) {
     return String(s ?? '')
@@ -14411,15 +14435,40 @@ function attachDropZone(ul) {
     }
   }
 
+  function fmtBoolPt(v) {
+    if (v === true || v === 'sim' || v === 's' || v === 1 || v === '1') return 'sim';
+    if (v === false || v === 'nao' || v === 'não' || v === 'n' || v === 0 || v === '0') return 'nao';
+    return String(v);
+  }
+
   function fmtDetalhe(det) {
     if (!det || typeof det !== 'object') return '—';
     const partes = [];
-    const keys = Object.keys(det);
-    for (const k of keys.slice(0, 8)) {
-      let val = det[k];
-      if (val == null || val === '') continue;
-      if (typeof val === 'object') val = JSON.stringify(val);
+    const usados = new Set();
+    const push = (k, raw) => {
+      if (usados.has(k) || DETALHE_SKIP.has(k)) return;
+      if (raw == null || raw === '') return;
+      let val = raw;
+      if (typeof val === 'boolean' || k.startsWith('mexeu_')) val = fmtBoolPt(val);
+      else if (Array.isArray(val)) val = val.filter(Boolean).join(', ');
+      else if (typeof val === 'object') return;
+      usados.add(k);
       partes.push(`${k}: ${val}`);
+    };
+    for (const k of DETALHE_ORDEM) push(k, det[k]);
+    for (const k of Object.keys(det)) {
+      if (partes.length >= 12) break;
+      push(k, det[k]);
+    }
+    // Destaca Omie/endereço mesmo em registros antigos
+    if (det.omie === true || det.omie === 'sim' || det.mexeu_omie === true) {
+      if (!partes.some(p => p.startsWith('mexeu_omie:') || p.startsWith('omie:'))) {
+        partes.push('omie: sim');
+      }
+    } else if (det.omie === false || det.omie === 'nao' || det.mexeu_omie === false) {
+      if (!partes.some(p => p.startsWith('mexeu_omie:') || p.startsWith('omie:'))) {
+        partes.push('omie: nao');
+      }
     }
     return partes.length ? partes.join(' · ') : '—';
   }
@@ -14428,6 +14477,13 @@ function attachDropZone(ul) {
     const cat = String(categoria || '').toUpperCase();
     const cls = cat === 'UI' ? 'ui' : 'api';
     return `<span class="auditar-badge ${cls}">${esc(cat || '—')}</span>`;
+  }
+
+  function fecharSugestoes() {
+    if (sugestoesEl) {
+      sugestoesEl.hidden = true;
+      sugestoesEl.innerHTML = '';
+    }
   }
 
   function abrirPainel(e) {
@@ -14439,6 +14495,40 @@ function attachDropZone(ul) {
     }
     document.querySelectorAll('.menu-link').forEach(link => link.classList.remove('is-active'));
     if (menuLink) menuLink.classList.add('is-active');
+    void buscar();
+  }
+
+  async function buscarProdutoSugestoes(termo) {
+    const q = String(termo || '').trim();
+    if (q.length < 2) {
+      fecharSugestoes();
+      return;
+    }
+    const seq = ++buscaProdSeq;
+    try {
+      const resp = await fetch(`/api/produtos/search?q=${encodeURIComponent(q)}&limit=12`, { credentials: 'include' });
+      const json = await resp.json().catch(() => ({}));
+      if (seq !== buscaProdSeq) return;
+      const lista = Array.isArray(json?.produtos) ? json.produtos
+        : (Array.isArray(json?.data) ? json.data : []);
+      if (!sugestoesEl) return;
+      if (!lista.length) {
+        sugestoesEl.innerHTML = '<div class="auditar-sugestao-vazia">Nenhum produto encontrado</div>';
+        sugestoesEl.hidden = false;
+        return;
+      }
+      sugestoesEl.innerHTML = lista.map(p => {
+        const cod = String(p.codigo || '').trim();
+        const desc = String(p.descricao || '').trim();
+        return `<button type="button" class="auditar-sugestao-item" data-codigo="${esc(cod)}">
+          <span class="cod">${esc(cod)}</span>
+          <span class="desc">${esc(desc)}</span>
+        </button>`;
+      }).join('');
+      sugestoesEl.hidden = false;
+    } catch (_) {
+      if (seq === buscaProdSeq) fecharSugestoes();
+    }
   }
 
   async function buscar() {
@@ -14447,13 +14537,10 @@ function attachDropZone(ul) {
     const usuario = String(document.getElementById('auditarUsuario')?.value || '').trim();
     const de = String(document.getElementById('auditarDe')?.value || '').trim();
     const ate = String(document.getElementById('auditarAte')?.value || '').trim();
+    const temFiltro = !!(codigo || nSolic || usuario || de || ate);
 
-    if (!codigo && !nSolic && !usuario) {
-      if (statusEl) statusEl.textContent = 'Informe o código do produto, o nº da SEP ou o usuário.';
-      return;
-    }
-
-    if (statusEl) statusEl.textContent = 'Consultando...';
+    fecharSugestoes();
+    if (statusEl) statusEl.textContent = temFiltro ? 'Consultando...' : 'Carregando últimos 50 registros...';
     if (sessoesWrap) sessoesWrap.style.display = 'none';
     if (eventosWrap) eventosWrap.style.display = 'none';
     if (sessoesEl) sessoesEl.innerHTML = '';
@@ -14466,7 +14553,7 @@ function attachDropZone(ul) {
     if (usuario) params.set('usuario', usuario);
     if (de) params.set('de', de);
     if (ate) params.set('ate', ate);
-    params.set('limit', '300');
+    params.set('limit', temFiltro ? '300' : '50');
 
     try {
       const resp = await fetch(`/api/monitoramento/cronologia?${params}`, { credentials: 'include' });
@@ -14479,7 +14566,10 @@ function attachDropZone(ul) {
       const eventos = Array.isArray(json.eventos) ? json.eventos : [];
 
       if (statusEl) {
-        statusEl.textContent = `${eventos.length} evento(s) · ${sessoes.length} sessão(ões). Só registros a partir da ativação deste sistema.`;
+        const prefixo = temFiltro
+          ? `${eventos.length} evento(s) · ${sessoes.length} sessão(ões)`
+          : `Últimos ${eventos.length} registro(s) · ${sessoes.length} sessão(ões)`;
+        statusEl.textContent = `${prefixo}. Só a partir da ativação deste monitoramento.`;
       }
 
       if (sessoes.length && sessoesEl && sessoesWrap) {
@@ -14499,11 +14589,14 @@ function attachDropZone(ul) {
       if (eventosWrap) {
         eventosWrap.style.display = 'block';
         if (!eventos.length) {
+          const msg = temFiltro
+            ? 'Nenhum evento encontrado para este filtro.'
+            : 'Ainda não há eventos de monitoramento.';
           if (eventosBody) {
-            eventosBody.innerHTML = `<tr><td colspan="6" style="padding:16px;color:#64748b;">Nenhum evento encontrado para este filtro.</td></tr>`;
+            eventosBody.innerHTML = `<tr><td colspan="6" style="padding:16px;color:#64748b;">${esc(msg)}</td></tr>`;
           }
           if (eventosCards) {
-            eventosCards.innerHTML = `<div class="auditar-card"><div class="auditar-card-row">Nenhum evento encontrado para este filtro.</div></div>`;
+            eventosCards.innerHTML = `<div class="auditar-card"><div class="auditar-card-row">${esc(msg)}</div></div>`;
           }
         } else {
           if (eventosBody) {
@@ -14547,9 +14640,35 @@ function attachDropZone(ul) {
   if (btnBuscar) btnBuscar.addEventListener('click', () => { void buscar(); });
   ['auditarCodigo', 'auditarNSolic', 'auditarUsuario'].forEach(id => {
     document.getElementById(id)?.addEventListener('keydown', e => {
-      if (e.key === 'Enter') { e.preventDefault(); void buscar(); }
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        fecharSugestoes();
+        void buscar();
+      }
     });
   });
+
+  if (inputCodigo) {
+    inputCodigo.addEventListener('input', () => {
+      clearTimeout(buscaProdTimer);
+      const v = inputCodigo.value;
+      buscaProdTimer = setTimeout(() => { void buscarProdutoSugestoes(v); }, 280);
+    });
+    inputCodigo.addEventListener('blur', () => {
+      setTimeout(fecharSugestoes, 180);
+    });
+  }
+  if (sugestoesEl) {
+    sugestoesEl.addEventListener('mousedown', e => {
+      const btn = e.target.closest('.auditar-sugestao-item');
+      if (!btn) return;
+      e.preventDefault();
+      const cod = btn.getAttribute('data-codigo') || '';
+      if (inputCodigo) inputCodigo.value = cod;
+      fecharSugestoes();
+      void buscar();
+    });
+  }
 })();
 </script>
 

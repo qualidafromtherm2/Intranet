@@ -838,12 +838,13 @@ router.patch('/:id/aprovar', express.json(), async (req, res) => {
         ajuste_id: id,
         tipo_operacao: registro.tipo_operacao,
         qtd: registro.qtd,
+        armazem: registro.local_nome || registro.local_estoque,
         local_estoque: registro.local_estoque,
-        local_nome: registro.local_nome,
+        omie: 'sim',
+        mexeu_omie: true,
         motivo: registro.motivo,
         solicitante: registro.solicitante,
         aprovado_por: aprovadoPor,
-        omie: respostaOmie || null,
         sessao_id: req.body?.sessao_id || null
       }
     });
