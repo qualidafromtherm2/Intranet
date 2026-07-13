@@ -64371,7 +64371,7 @@ async function ensureAuthVisibility(){
   }
 }
 
-// Fallback: se algo travar, libera a UI após 4s no máximo
+// Fallback: se algo travar, libera a UI após 2s no máximo
 document.addEventListener('DOMContentLoaded', () => {
   setTimeout(() => {
     if (!document.body.classList.contains('app-ready')) {
@@ -64379,7 +64379,7 @@ document.addEventListener('DOMContentLoaded', () => {
       const ov = document.getElementById('app-boot-overlay');
       if (ov) ov.remove();
     }
-  }, 4000);
+  }, 2000);
 });
 
 // ====== AUTODESCoberta de navegação + sync ======
@@ -72784,9 +72784,6 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   // Atualiza estoque ao trocar o local
-  let _codigoProdutoAtual = null;
-  let _descricaoProdutoAtual = null;
-  let _codigoProdutoOmieAtual = null;
 
   function obterQtdDaExpressao() {
     if (!qtdInput) return null;
