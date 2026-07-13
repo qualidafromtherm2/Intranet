@@ -19,7 +19,7 @@
   referrerpolicy="no-referrer"
 />
   <!-- Seu CSS principal -->
-  <link rel="stylesheet" href="menu_produto.css?v=20260713-merge-auditar-imp"/>
+  <link rel="stylesheet" href="menu_produto.css?v=20260713-auditar-mobile"/>
   <!-- Anti-flicker: esconde menus até as permissões serem aplicadas -->
   <style id="boot-anti-flicker">
     /* Enquanto o app não está pronto, esconde elementos sujeitos a permissões */
@@ -8913,66 +8913,63 @@
 
       <!-- Painel Auditar (monitoramento) -->
       <div id="auditarPane" class="tab-pane" style="display:none;">
-        <div class="content-wrapper">
-          <div class="content-section">
-            <div class="title-wrapper" style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:12px;">
-              <div class="content-section-title" style="display:flex;align-items:center;gap:12px;">
-                <i class="fa-solid fa-magnifying-glass-chart" style="color:#0f766e;"></i>
-                Auditar — cronologia de movimentação e SEP
+        <div class="content-wrapper auditar-page">
+          <div class="content-section auditar-section">
+            <div class="auditar-header">
+              <div class="content-section-title auditar-title">
+                <i class="fa-solid fa-magnifying-glass-chart"></i>
+                <span>Auditar</span>
               </div>
-              <button type="button" id="auditarBuscarBtn" class="content-button" style="background:linear-gradient(135deg,#0d9488 0%,#0f766e 100%);color:#fff;">
+              <p class="auditar-subtitle">Cronologia de movimentação e SEP — quem fez, quais botões e o efeito real.</p>
+              <button type="button" id="auditarBuscarBtn" class="content-button auditar-buscar-btn">
                 <i class="fa-solid fa-search"></i>
                 <span>Buscar</span>
               </button>
             </div>
 
-            <p style="margin:0 0 16px;color:#64748b;font-size:13px;line-height:1.5;">
-              Mostra o que foi feito <strong>daqui pra frente</strong>: quem abriu o modal, quais botões clicou,
-              quando iniciou/finalizou e o efeito real (Omie, ETQ interno, etapas da SEP).
-            </p>
-
-            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:16px;">
-              <label style="display:flex;flex-direction:column;gap:6px;font-size:12px;font-weight:600;color:#334155;">
-                Código do produto
-                <input id="auditarCodigo" type="text" placeholder="Ex.: 05.MP.N.71207" style="padding:10px 12px;border:1px solid #cbd5e1;border-radius:8px;font-size:14px;">
+            <div class="auditar-filtros">
+              <label class="auditar-field">
+                <span>Código do produto</span>
+                <input id="auditarCodigo" type="text" placeholder="Ex.: 05.MP.N.71207" autocomplete="off" inputmode="text">
               </label>
-              <label style="display:flex;flex-direction:column;gap:6px;font-size:12px;font-weight:600;color:#334155;">
-                Nº SEP
-                <input id="auditarNSolic" type="text" placeholder="Ex.: SEP-1691" style="padding:10px 12px;border:1px solid #cbd5e1;border-radius:8px;font-size:14px;">
+              <label class="auditar-field">
+                <span>Nº SEP</span>
+                <input id="auditarNSolic" type="text" placeholder="Ex.: SEP-1691" autocomplete="off">
               </label>
-              <label style="display:flex;flex-direction:column;gap:6px;font-size:12px;font-weight:600;color:#334155;">
-                Usuário
-                <input id="auditarUsuario" type="text" placeholder="Nome parcial" style="padding:10px 12px;border:1px solid #cbd5e1;border-radius:8px;font-size:14px;">
+              <label class="auditar-field">
+                <span>Usuário</span>
+                <input id="auditarUsuario" type="text" placeholder="Nome parcial" autocomplete="off">
               </label>
-              <label style="display:flex;flex-direction:column;gap:6px;font-size:12px;font-weight:600;color:#334155;">
-                De
-                <input id="auditarDe" type="date" style="padding:10px 12px;border:1px solid #cbd5e1;border-radius:8px;font-size:14px;">
+              <label class="auditar-field">
+                <span>De</span>
+                <input id="auditarDe" type="date">
               </label>
-              <label style="display:flex;flex-direction:column;gap:6px;font-size:12px;font-weight:600;color:#334155;">
-                Até
-                <input id="auditarAte" type="date" style="padding:10px 12px;border:1px solid #cbd5e1;border-radius:8px;font-size:14px;">
+              <label class="auditar-field">
+                <span>Até</span>
+                <input id="auditarAte" type="date">
               </label>
             </div>
 
-            <div id="auditarStatus" style="margin-bottom:12px;font-size:13px;color:#64748b;"></div>
+            <div id="auditarStatus" class="auditar-status"></div>
 
-            <div id="auditarSessoesWrap" style="margin-bottom:20px;display:none;">
-              <h3 style="margin:0 0 10px;font-size:14px;color:#0f766e;">Sessões (início → fim)</h3>
-              <div id="auditarSessoes" style="display:flex;flex-direction:column;gap:8px;"></div>
+            <div id="auditarSessoesWrap" class="auditar-block" style="display:none;">
+              <h3 class="auditar-block-title">Sessões (início → fim)</h3>
+              <div id="auditarSessoes" class="auditar-sessoes"></div>
             </div>
 
-            <div id="auditarEventosWrap" style="display:none;">
-              <h3 style="margin:0 0 10px;font-size:14px;color:#0f766e;">Linha do tempo</h3>
-              <div style="overflow:auto;border:1px solid #e2e8f0;border-radius:10px;">
-                <table style="width:100%;border-collapse:collapse;font-size:13px;">
+            <div id="auditarEventosWrap" class="auditar-block" style="display:none;">
+              <h3 class="auditar-block-title">Linha do tempo</h3>
+              <div id="auditarEventosCards" class="auditar-cards"></div>
+              <div class="auditar-table-wrap">
+                <table class="auditar-table">
                   <thead>
-                    <tr style="background:#f1f5f9;text-align:left;">
-                      <th style="padding:10px 12px;">Quando</th>
-                      <th style="padding:10px 12px;">Quem</th>
-                      <th style="padding:10px 12px;">Tipo</th>
-                      <th style="padding:10px 12px;">Ação</th>
-                      <th style="padding:10px 12px;">Produto / SEP</th>
-                      <th style="padding:10px 12px;">Detalhe</th>
+                    <tr>
+                      <th>Quando</th>
+                      <th>Quem</th>
+                      <th>Tipo</th>
+                      <th>Ação</th>
+                      <th>Produto / SEP</th>
+                      <th>Detalhe</th>
                     </tr>
                   </thead>
                   <tbody id="auditarEventosBody"></tbody>
@@ -11491,7 +11488,7 @@
   <script type="module" src="login/login.js"></script>
   <script src="/public/js/vendas-relatorio-gerencial.js?v=20260709a" defer></script>
   <script src="/public/js/logistica-relatorio-gerencial.js?v=20260712a" defer></script>
-  <script type="module" src="menu_produto.js?v=20260713-merge-auditar-imp"></script>
+  <script type="module" src="menu_produto.js?v=20260713-auditar-mobile"></script>
   
   <script type="module" src="./requisicoes_omie/filtro_produto.js?v=20260710a"></script>
   <script type="module" src="./requisicoes_omie/ListarProdutos.js?v=20260710a"></script>
@@ -14393,6 +14390,7 @@ function attachDropZone(ul) {
   const sessoesEl = document.getElementById('auditarSessoes');
   const eventosWrap = document.getElementById('auditarEventosWrap');
   const eventosBody = document.getElementById('auditarEventosBody');
+  const eventosCards = document.getElementById('auditarEventosCards');
 
   function esc(s) {
     return String(s ?? '')
@@ -14426,10 +14424,19 @@ function attachDropZone(ul) {
     return partes.length ? partes.join(' · ') : '—';
   }
 
+  function badgeCat(categoria) {
+    const cat = String(categoria || '').toUpperCase();
+    const cls = cat === 'UI' ? 'ui' : 'api';
+    return `<span class="auditar-badge ${cls}">${esc(cat || '—')}</span>`;
+  }
+
   function abrirPainel(e) {
     if (e) e.preventDefault();
     document.querySelectorAll('.tab-pane').forEach(p => { p.style.display = 'none'; });
-    if (painel) painel.style.display = 'block';
+    if (painel) {
+      painel.style.display = 'block';
+      try { window.scrollTo({ top: 0, behavior: 'smooth' }); } catch (_) {}
+    }
     document.querySelectorAll('.menu-link').forEach(link => link.classList.remove('is-active'));
     if (menuLink) menuLink.classList.add('is-active');
   }
@@ -14451,6 +14458,7 @@ function attachDropZone(ul) {
     if (eventosWrap) eventosWrap.style.display = 'none';
     if (sessoesEl) sessoesEl.innerHTML = '';
     if (eventosBody) eventosBody.innerHTML = '';
+    if (eventosCards) eventosCards.innerHTML = '';
 
     const params = new URLSearchParams();
     if (codigo) params.set('codigo', codigo);
@@ -14471,7 +14479,7 @@ function attachDropZone(ul) {
       const eventos = Array.isArray(json.eventos) ? json.eventos : [];
 
       if (statusEl) {
-        statusEl.textContent = `${eventos.length} evento(s) · ${sessoes.length} sessão(ões). Registros só a partir da ativação deste sistema.`;
+        statusEl.textContent = `${eventos.length} evento(s) · ${sessoes.length} sessão(ões). Só registros a partir da ativação deste sistema.`;
       }
 
       if (sessoes.length && sessoesEl && sessoesWrap) {
@@ -14480,33 +14488,54 @@ function attachDropZone(ul) {
           const dur = s.iniciado_em && s.finalizado_em
             ? Math.round((new Date(s.finalizado_em) - new Date(s.iniciado_em)) / 1000) + 's'
             : (s.finalizado_em ? '—' : 'aberta');
-          return `<div style="padding:12px 14px;border:1px solid #99f6e4;background:#f0fdfa;border-radius:10px;">
-            <div style="font-weight:700;color:#134e4a;">${esc(s.tipo)} · ${esc(s.codigo_produto || s.n_solic || '—')}</div>
-            <div style="font-size:12px;color:#0f766e;margin-top:4px;">
-              ${esc(s.usuario_nome || '—')} · início ${esc(fmtData(s.iniciado_em))} · fim ${esc(fmtData(s.finalizado_em))} · ${esc(dur)}
-            </div>
-            <div style="font-size:12px;color:#64748b;margin-top:2px;">${esc(s.descricao_produto || '')}</div>
-          </div>`;
+          return `<article class="auditar-sessao-card">
+            <div class="tit">${esc(s.tipo)} · ${esc(s.codigo_produto || s.n_solic || '—')}</div>
+            <div class="meta">${esc(s.usuario_nome || '—')} · início ${esc(fmtData(s.iniciado_em))} · fim ${esc(fmtData(s.finalizado_em))} · ${esc(dur)}</div>
+            <div class="desc">${esc(s.descricao_produto || '')}</div>
+          </article>`;
         }).join('');
       }
 
-      if (eventosBody && eventosWrap) {
+      if (eventosWrap) {
         eventosWrap.style.display = 'block';
         if (!eventos.length) {
-          eventosBody.innerHTML = `<tr><td colspan="6" style="padding:16px;color:#64748b;">Nenhum evento encontrado para este filtro.</td></tr>`;
+          if (eventosBody) {
+            eventosBody.innerHTML = `<tr><td colspan="6" style="padding:16px;color:#64748b;">Nenhum evento encontrado para este filtro.</td></tr>`;
+          }
+          if (eventosCards) {
+            eventosCards.innerHTML = `<div class="auditar-card"><div class="auditar-card-row">Nenhum evento encontrado para este filtro.</div></div>`;
+          }
         } else {
-          eventosBody.innerHTML = eventos.map(ev => {
-            const ok = ev.sucesso === true ? '✓' : (ev.sucesso === false ? '✗' : '');
-            const prod = [ev.codigo_produto, ev.n_solic].filter(Boolean).join(' · ') || '—';
-            return `<tr style="border-top:1px solid #e2e8f0;">
-              <td style="padding:10px 12px;white-space:nowrap;">${esc(fmtData(ev.ocorrido_em))}</td>
-              <td style="padding:10px 12px;">${esc(ev.usuario_nome || '—')}</td>
-              <td style="padding:10px 12px;"><span style="font-size:11px;font-weight:700;padding:2px 8px;border-radius:999px;background:${ev.categoria === 'UI' ? '#e0e7ff' : '#dcfce7'};color:${ev.categoria === 'UI' ? '#3730a3' : '#166534'};">${esc(ev.categoria || '')}</span></td>
-              <td style="padding:10px 12px;font-weight:600;">${esc(ok + ' ' + (ev.acao || ''))}</td>
-              <td style="padding:10px 12px;">${esc(prod)}</td>
-              <td style="padding:10px 12px;color:#475569;max-width:420px;">${esc(fmtDetalhe(ev.detalhe))}</td>
-            </tr>`;
-          }).join('');
+          if (eventosBody) {
+            eventosBody.innerHTML = eventos.map(ev => {
+              const ok = ev.sucesso === true ? '✓' : (ev.sucesso === false ? '✗' : '');
+              const prod = [ev.codigo_produto, ev.n_solic].filter(Boolean).join(' · ') || '—';
+              return `<tr>
+                <td style="white-space:nowrap;">${esc(fmtData(ev.ocorrido_em))}</td>
+                <td>${esc(ev.usuario_nome || '—')}</td>
+                <td>${badgeCat(ev.categoria)}</td>
+                <td style="font-weight:600;">${esc(ok + ' ' + (ev.acao || ''))}</td>
+                <td>${esc(prod)}</td>
+                <td class="detalhe">${esc(fmtDetalhe(ev.detalhe))}</td>
+              </tr>`;
+            }).join('');
+          }
+          if (eventosCards) {
+            eventosCards.innerHTML = eventos.map(ev => {
+              const ok = ev.sucesso === true ? '✓ ' : (ev.sucesso === false ? '✗ ' : '');
+              const prod = [ev.codigo_produto, ev.n_solic].filter(Boolean).join(' · ') || '—';
+              return `<article class="auditar-card">
+                <div class="auditar-card-top">
+                  <span class="auditar-card-quando">${esc(fmtData(ev.ocorrido_em))}</span>
+                  ${badgeCat(ev.categoria)}
+                </div>
+                <div class="auditar-card-acao">${esc(ok + (ev.acao || ''))}</div>
+                <div class="auditar-card-row"><strong>Quem</strong>${esc(ev.usuario_nome || '—')}</div>
+                <div class="auditar-card-row"><strong>Produto / SEP</strong>${esc(prod)}</div>
+                <div class="auditar-card-detalhe">${esc(fmtDetalhe(ev.detalhe))}</div>
+              </article>`;
+            }).join('');
+          }
         }
       }
     } catch (err) {
