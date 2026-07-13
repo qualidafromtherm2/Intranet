@@ -10421,6 +10421,8 @@ const produtosFotosRouter = require('./routes/produtosFotos'); // <-- ADICIONE E
 const produtosAnexosRouter = require('./routes/produtosAnexos');
 const transferenciasRouter = require('./routes/transferencias');
 const ajustesRouter = require('./routes/ajustes');
+const monitoramentoRouter = require('./routes/monitoramento');
+const { registrarEventoReq: monEventoReq } = require('./utils/monitoramento');
 
 //app.use(require('express').json({ limit: '5mb' }));
 
@@ -10431,6 +10433,7 @@ app.use('/api/produtos', produtosFotosRouter);
 app.use('/api/produtos', produtosAnexosRouter);
 app.use('/api/transferencias', transferenciasRouter);
 app.use('/api/ajustes', ajustesRouter);
+app.use('/api/monitoramento', monitoramentoRouter);
 app.use('/api/primeira-pc-ok', require('./routes/primeiraPcOk'));
 app.use('/api/engenharia', engenhariaRouter);
 app.use('/api/compras', comprasRouter);
@@ -12332,6 +12335,23 @@ app.post('/api/etiquetas/rec-impresso/registrar-movimentacao', express.json(), a
         sanitize
       });
       await client.query('COMMIT');
+      void monEventoReq(req, {
+        categoria: 'API',
+        acao: 'movim_interno_etq',
+        codigo_produto: codigoTexto,
+        codigo_produto_omie: codigoOmie,
+        sucesso: true,
+        detalhe: {
+          tipo_movimentacao: tipoMov,
+          qtd,
+          endereco_origem: enderecoOrigem,
+          endereco_destino: enderecoDestino,
+          complemento: complementoRaw,
+          sessao_id: req.body?.sessao_id || null,
+          registros: (resultado?.registros || []).map(r => r.id).filter(Boolean),
+          usuario_informado: usuario
+        }
+      });
       return res.json({ ok: true, ...resultado });
     }
 
@@ -12362,6 +12382,22 @@ app.post('/api/etiquetas/rec-impresso/registrar-movimentacao', express.json(), a
     }
 
     res.json({ ok: true, registros });
+    void monEventoReq(req, {
+      categoria: 'API',
+      acao: 'movim_etq_enderecos',
+      codigo_produto: codigoTexto,
+      codigo_produto_omie: codigoOmie,
+      sucesso: true,
+      detalhe: {
+        tipo_movimentacao: tipoMov,
+        qtd,
+        enderecos,
+        complemento: complementoRaw,
+        sessao_id: req.body?.sessao_id || null,
+        registros: registros.map(r => r.id).filter(Boolean),
+        usuario_informado: usuario
+      }
+    });
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {});
     console.error('[etiquetas/rec-impresso/registrar-movimentacao]', err);
@@ -17950,6 +17986,41 @@ async function registrarMovimentacaoKanbanItens(client, solicIds, statusDestino,
       WHERE i.id = ANY($1::bigint[])`,
     [ids, statusDestino, id_user, nome_user, observacao]
   );
+
+  // Auditoria unificada (monitoramento) — não bloqueia o fluxo SEP
+  try {
+    const { rows: itensMon } = await client.query(
+      `SELECT i.id, i.n_solic, i.status AS status_origem,
+              c.codigo_produto, c.cod_omie, c.descricao, c.quantidade
+         FROM solicitacao_produto.itens_solicitados i
+         LEFT JOIN logistica.carrinho c ON c.id = i.id_carr
+        WHERE i.id = ANY($1::bigint[])`,
+      [ids]
+    );
+    const acao = 'sep_' + String(statusDestino || '')
+      .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '');
+    for (const row of itensMon) {
+      void monEventoReq(req, {
+        categoria: 'API',
+        acao: acao || 'sep_status',
+        codigo_produto: row.codigo_produto,
+        codigo_produto_omie: row.cod_omie != null ? String(row.cod_omie) : null,
+        n_solic: row.n_solic,
+        sucesso: true,
+        detalhe: {
+          solic_id: row.id,
+          status_origem: row.status_origem,
+          status_destino: statusDestino,
+          quantidade: row.quantidade,
+          descricao: row.descricao,
+          observacao: observacao || null
+        }
+      });
+    }
+  } catch (eMon) {
+    console.warn('[monitoramento] sep kanban:', eMon?.message || eMon);
+  }
 }
 
 // POST /api/logistica/separacao - Adiciona produto ao carrinho de separação
@@ -20034,6 +20105,27 @@ app.post('/api/logistica/separacao/enviar', express.json(), async (req, res) => 
     }
 
     res.json({ ok: true, total: itens.length, n_solic: nSolic, reutilizada: nSolicReutilizada });
+    try {
+      for (const item of itens) {
+        void monEventoReq(req, {
+          categoria: 'API',
+          acao: 'sep_criada',
+          codigo_produto: item.codigo_produto,
+          n_solic: nSolic,
+          sucesso: true,
+          detalhe: {
+            id_carr: item.id,
+            quantidade: item.quantidade,
+            descricao: item.descricao,
+            reutilizada: !!nSolicReutilizada,
+            motivo: motivoSolicitacao || null,
+            local: nomeLocalGravar || null
+          }
+        });
+      }
+    } catch (eMon) {
+      console.warn('[monitoramento] sep_criada:', eMon?.message || eMon);
+    }
   } catch (err) {
     try { await client.query('ROLLBACK'); } catch (_) {}
     console.error('[logistica/separacao/enviar] erro:', err);

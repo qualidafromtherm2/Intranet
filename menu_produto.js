@@ -71219,6 +71219,88 @@ document.addEventListener('DOMContentLoaded', () => {
   let _movimEstoqueLocais = [];
   let _movimLocaisDisponiveis = [];
   let _mostrarOutrosDestinos = false;
+  let _monSessaoId = null;
+  let _monSessaoIniciando = null;
+
+  function monBasePayload() {
+    return {
+      sessao_id: _monSessaoId || null,
+      codigo_produto: _codigoProdutoAtual || null,
+      codigo_produto_omie: _codigoProdutoOmieAtual != null ? String(_codigoProdutoOmieAtual) : null,
+      usuario_nome: obterSolicitanteMovim()
+    };
+  }
+
+  function monEvento(acao, detalhe = {}, extras = {}) {
+    if (!acao) return;
+    const body = {
+      ...monBasePayload(),
+      categoria: extras.categoria || 'UI',
+      acao: String(acao),
+      sucesso: typeof extras.sucesso === 'boolean' ? extras.sucesso : null,
+      detalhe: detalhe || {}
+    };
+    // fire-and-forget — nunca atrasa a UI
+    void fetch('/api/monitoramento/evento', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify(body)
+    }).catch(() => {});
+  }
+
+  async function monIniciarSessao() {
+    try {
+      if (_monSessaoIniciando) await _monSessaoIniciando;
+      if (_monSessaoId) {
+        await monFinalizarSessao({ motivo: 'reabrir' });
+      }
+      _monSessaoIniciando = (async () => {
+        const resp = await fetch('/api/monitoramento/sessao', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({
+            tipo: 'MOVIMENTACAO',
+            codigo_produto: _codigoProdutoAtual,
+            codigo_produto_omie: _codigoProdutoOmieAtual != null ? String(_codigoProdutoOmieAtual) : null,
+            descricao_produto: _descricaoProdutoAtual || null,
+            usuario_nome: obterSolicitanteMovim(),
+            origem: 'modal_movimentacao'
+          })
+        });
+        const json = await resp.json().catch(() => ({}));
+        _monSessaoId = json?.sessao_id || null;
+      })();
+      await _monSessaoIniciando;
+    } catch (e) {
+      console.warn('[monitoramento] iniciar sessão movimentação', e);
+      _monSessaoId = null;
+    } finally {
+      _monSessaoIniciando = null;
+    }
+  }
+
+  async function monFinalizarSessao(detalhe = {}) {
+    const id = _monSessaoId;
+    _monSessaoId = null;
+    if (!id) return;
+    try {
+      await fetch(`/api/monitoramento/sessao/${encodeURIComponent(id)}/finalizar`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          codigo_produto: _codigoProdutoAtual,
+          codigo_produto_omie: _codigoProdutoOmieAtual != null ? String(_codigoProdutoOmieAtual) : null,
+          usuario_nome: obterSolicitanteMovim(),
+          detalhe
+        })
+      });
+    } catch (e) {
+      console.warn('[monitoramento] finalizar sessão', e);
+    }
+  }
 
   function renderizarEstoqueModal() {
     if (!movimEstoqueLocaisEl) return;
@@ -71333,6 +71415,7 @@ document.addEventListener('DOMContentLoaded', () => {
   let _enderecoDestinoInterno = '';
 
   function fechar() {
+    void monFinalizarSessao({ motivo: 'fechar_modal' });
     if (overlay) overlay.style.display = 'none';
     fecharScanEndereco();
     if (qtdInput)  qtdInput.value = '';
@@ -72098,7 +72181,8 @@ document.addEventListener('DOMContentLoaded', () => {
   async function registrarEnderecosEtq(payload) {
     const body = {
       ...payload,
-      codigo_produto_omie: payload.codigo_produto_omie || _codigoProdutoOmieAtual || null
+      codigo_produto_omie: payload.codigo_produto_omie || _codigoProdutoOmieAtual || null,
+      sessao_id: _monSessaoId || null
     };
     const resp = await fetch('/api/etiquetas/rec-impresso/registrar-movimentacao', {
       method: 'POST',
@@ -72107,8 +72191,15 @@ document.addEventListener('DOMContentLoaded', () => {
       body: JSON.stringify(body)
     });
     let json;
-    try { json = await resp.json(); } catch { throw new Error('Resposta inv�lida ao registrar endere�o.'); }
-    if (!resp.ok || !json?.ok) throw new Error(json?.error || `Falha ao registrar endere�o (HTTP ${resp.status}).`);
+    try { json = await resp.json(); } catch { throw new Error('Resposta invalida ao registrar endereco.'); }
+    if (!resp.ok || !json?.ok) throw new Error(json?.error || `Falha ao registrar endereco (HTTP ${resp.status}).`);
+    monEvento('api_etq_movimentacao', {
+      tipo_movimentacao: body.tipo_movimentacao,
+      qtd: body.qtd,
+      endereco_origem: body.endereco_origem,
+      endereco_destino: body.endereco_destino,
+      ids: (json.registros || []).map(r => r.id).filter(Boolean)
+    }, { categoria: 'UI', sucesso: true });
     return json;
   }
 
@@ -72435,8 +72526,13 @@ document.addEventListener('DOMContentLoaded', () => {
     motivoBotoes.addEventListener('click', event => {
       const btn = event.target.closest('.movimMotivoBtn');
       if (!btn) return;
-      omieMotivoSel.value = btn.dataset.value || '';
+      const valor = btn.dataset.value || '';
+      omieMotivoSel.value = valor;
       omieMotivoSel.dispatchEvent(new Event('change', { bubbles: true }));
+      monEvento('click_motivo', {
+        botao: String(btn.textContent || '').replace(/\s+/g, ' ').trim(),
+        valor
+      });
     });
   }
 
@@ -72460,11 +72556,23 @@ document.addEventListener('DOMContentLoaded', () => {
       });
       limparEnderecosInternos();
       atualizarLayoutMovim();
+      monEvento('click_modo_interno', { modo: _movimModoInterno });
     });
   }
 
   if (executarBtn) {
-    executarBtn.addEventListener('click', () => { void clicarExecutar(); });
+    executarBtn.addEventListener('click', () => {
+      monEvento('click_executar', {
+        motivo: String(omieMotivoSel?.value || ''),
+        modo_interno: _movimModoInterno,
+        qtd: String(qtdInput?.value || ''),
+        origem: String(origemSel?.value || ''),
+        destino: String(localSel?.value || ''),
+        endereco_origem: _enderecoOrigemInterno || null,
+        endereco_destino: _enderecoDestinoInterno || null
+      });
+      void clicarExecutar();
+    });
   }
 
   document.getElementById('movimRmEnderecoOrigemBtn')?.addEventListener('click', () => {
@@ -72775,7 +72883,7 @@ document.addEventListener('DOMContentLoaded', () => {
       const respAprovar = await fetch(`/api/ajustes/${idSolicitacao}/aprovar`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ aprovadoPor: solicitante })
+        body: JSON.stringify({ aprovadoPor: solicitante, sessao_id: _monSessaoId || null })
       });
       let jsonAprovar;
       try { jsonAprovar = await respAprovar.json(); } catch { throw new Error('Resposta inv�lida ao enviar para Omie.'); }
@@ -72938,7 +73046,7 @@ document.addEventListener('DOMContentLoaded', () => {
       const respAprovar = await fetch(`/api/transferencias/${idSolicitacao}/aprovar`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ aprovadoPor, motivo })
+        body: JSON.stringify({ aprovadoPor, motivo, sessao_id: _monSessaoId || null })
       });
 
       let jsonAprovar;
@@ -73209,7 +73317,10 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  if (histBtn) histBtn.addEventListener('click', abrirHistoricoAjustes);
+  if (histBtn) histBtn.addEventListener('click', () => {
+    monEvento('click_ver_historico_omie', {});
+    void abrirHistoricoAjustes();
+  });
   if (histFechar) histFechar.addEventListener('click', fecharHistoricoAjustes);
   if (histModal) {
     histModal.addEventListener('click', e => {
@@ -73246,7 +73357,10 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  if (comprasBtn) comprasBtn.addEventListener('click', abrirUltimasComprasMovim);
+  if (comprasBtn) comprasBtn.addEventListener('click', () => {
+    monEvento('click_ultimas_compras', {});
+    void abrirUltimasComprasMovim();
+  });
 
   // -- Impress�o ETQ_rec_impresso -------------------------------------------
   const impModal = document.getElementById('movimImpressaoModal');
@@ -73407,6 +73521,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (subtitulo) subtitulo.textContent = 'Codigo: ' + codigo;
     if (overlay)   overlay.style.display = 'flex';
 
+    await monIniciarSessao();
     void carregarEnderecosReferencia(codigo);
     await Promise.all([
       carregarLocais(),

@@ -13,6 +13,7 @@ const router = express.Router();
 const { dbQuery } = require('../src/db');
 const { OMIE_APP_KEY, OMIE_APP_SECRET } = require('../config.server');
 const omieCall = require('../utils/omieCall');
+const { registrarEventoReq: monEventoReq } = require('../utils/monitoramento');
 
 const STATUS_AGUARDANDO = 'Aguardando aprovação';
 const STATUS_EXECUTADO  = 'Executado';
@@ -827,8 +828,33 @@ router.patch('/:id/aprovar', express.json(), async (req, res) => {
       descricao_status: respostaOmie?.descricao_status || null,
       omie: respostaOmie || null
     });
+    void monEventoReq(req, {
+      categoria: 'API',
+      acao: 'ajuste_omie_aprovado',
+      codigo_produto: registro.codigo,
+      codigo_produto_omie: registro.codigo_produto != null ? String(registro.codigo_produto) : null,
+      sucesso: true,
+      detalhe: {
+        ajuste_id: id,
+        tipo_operacao: registro.tipo_operacao,
+        qtd: registro.qtd,
+        local_estoque: registro.local_estoque,
+        local_nome: registro.local_nome,
+        motivo: registro.motivo,
+        solicitante: registro.solicitante,
+        aprovado_por: aprovadoPor,
+        omie: respostaOmie || null,
+        sessao_id: req.body?.sessao_id || null
+      }
+    });
   } catch (err) {
     console.error('[ajustes] aprovar', err);
+    void monEventoReq(req, {
+      categoria: 'API',
+      acao: 'ajuste_omie_aprovado',
+      sucesso: false,
+      detalhe: { ajuste_id: Number(req.params.id), erro: err.message || String(err), sessao_id: req.body?.sessao_id || null }
+    });
     res.status(err.status || 500).json({
       error: err.message || 'Falha ao executar ajuste de estoque.'
     });
