@@ -19,7 +19,7 @@
   referrerpolicy="no-referrer"
 />
   <!-- Seu CSS principal -->
-  <link rel="stylesheet" href="menu_produto.css?v=20260712-mobile-global"/>
+  <link rel="stylesheet" href="menu_produto.css?v=20260713-impressao-rapida-3"/>
   <!-- Anti-flicker: esconde menus até as permissões serem aplicadas -->
   <style id="boot-anti-flicker">
     /* Enquanto o app não está pronto, esconde elementos sujeitos a permissões */
@@ -1224,7 +1224,7 @@
                 <button id="movimHistoricoBtn" type="button" class="movim-btn-hist">Ver historico</button>
                 <button id="movimComprasBtn" type="button" class="movim-btn-comp">Ultimas compras</button>
                 <button id="movimImpressaoBtn" type="button" class="movim-btn-print">
-                  <i class="fa-solid fa-angles-right"></i> Impressao
+                  <i class="fa-solid fa-bolt"></i> Impress&atilde;o r&aacute;pida
                 </button>
               </div>
               <div id="movimEstoqueLocais" class="movim-estoque-locais">
@@ -1404,7 +1404,7 @@
               <div class="movim-imp-title-wrap">
                 <i class="fa-solid fa-print"></i>
                 <div>
-                  <span id="movimImpressaoTitulo" class="movim-imp-titulo">Imprimir etiqueta</span>
+                  <span id="movimImpressaoTitulo" class="movim-imp-titulo">Impress&atilde;o r&aacute;pida</span>
                   <span id="movimImpressaoSubtitulo" class="movim-imp-subtitulo"></span>
                 </div>
               </div>
@@ -1426,22 +1426,56 @@
               </button>
             </div>
             <div id="movimImpressaoStatus" class="movim-imp-status"></div>
-            <div id="movimImpressaoEtqWrap" class="movim-imp-etq-wrap">
-              <label for="movimImpressaoEtqSelect">Etiqueta (ETQ_rec_impresso)</label>
-              <select id="movimImpressaoEtqSelect">
-                <option value="">Carregando…</option>
-              </select>
-            </div>
-            <div class="movim-imp-qtd-row">
-              <label for="movimImpressaoQtd">Quantidade de etiquetas</label>
-              <input id="movimImpressaoQtd" type="number" min="1" step="1" value="1" inputmode="numeric">
-            </div>
-            <div class="movim-imp-footer">
-              <button type="button" id="movimImpressaoConfirmar" class="movim-imp-btn-confirmar">
-                <i class="fa-solid fa-print"></i> Imprimir
+            <div class="movim-imp-legacy-toggle-wrap">
+              <button type="button" id="movimImpressaoMetodoAntigoToggle" class="movim-imp-legacy-toggle" aria-expanded="false">
+                <i class="fa-solid fa-clock-rotate-left"></i> M&eacute;todo antigo
               </button>
-              <button type="button" id="movimImpressaoCancelar" class="movim-imp-btn-cancelar">Cancelar</button>
             </div>
+            <div class="movim-imp-body">
+              <section class="movim-imp-section">
+                <h4>Etiqueta de produto</h4>
+                <label class="movim-imp-field movim-imp-field--full"><span>Descri&ccedil;&atilde;o</span><input id="movimImpressaoDescricao" type="text" maxlength="180" autocomplete="off"></label>
+                <div class="movim-imp-grid movim-imp-grid--two">
+                  <label class="movim-imp-field"><span>C&oacute;pias</span><input id="movimImpressaoCopias" type="number" min="1" max="100" step="1" value="1" inputmode="numeric"></label>
+                  <label class="movim-imp-field"><span>Tipo</span><select id="movimImpressaoTipo"><option value="grande">Grande</option><option value="pequena">Pequena</option></select></label>
+                </div>
+                <label class="movim-imp-field movim-imp-field--full"><span>N&uacute;mero do lote (opcional)</span><input id="movimImpressaoLote" type="text" maxlength="40" autocomplete="off"></label>
+                <div class="movim-imp-subsection">
+                  <h5>Contagem rapida (opcional)</h5>
+                  <div class="movim-imp-grid movim-imp-grid--three">
+                    <label class="movim-imp-field"><span>Quantidade</span><input id="movimImpressaoQuickQtd" type="number" min="0" step="1" value="0" inputmode="numeric"></label>
+                    <label class="movim-imp-field"><span>Unidade</span><input id="movimImpressaoQuickUn" type="text" maxlength="3" value="UN"></label>
+                    <label class="movim-imp-field"><span>C&oacute;pias</span><input id="movimImpressaoQuickCopias" type="number" min="1" max="100" step="1" value="1" inputmode="numeric"></label>
+                  </div>
+                </div>
+                <button type="button" id="movimImpressaoConfirmar" class="movim-imp-btn-confirmar movim-imp-btn-block"><i class="fa-solid fa-print"></i> Imprimir etiqueta</button>
+              </section>
+              <section class="movim-imp-section">
+                <h4>Etiqueta de contagem</h4>
+                <div class="movim-imp-grid movim-imp-grid--three">
+                  <label class="movim-imp-field"><span>Quantidade</span><input id="movimImpressaoContQtd" type="number" min="1" step="1" value="0" inputmode="numeric"></label>
+                  <label class="movim-imp-field"><span>Unidade</span><input id="movimImpressaoContUn" type="text" maxlength="3" value="UN"></label>
+                  <label class="movim-imp-field"><span>C&oacute;pias</span><input id="movimImpressaoContCopias" type="number" min="1" max="100" step="1" value="1" inputmode="numeric"></label>
+                </div>
+                <button type="button" id="movimImpressaoContagem" class="movim-imp-btn-contagem movim-imp-btn-block"><i class="fa-solid fa-tag"></i> Gerar contagem</button>
+              </section>
+              <section id="movimImpressaoMetodoAntigo" class="movim-imp-section movim-imp-section--legacy" hidden>
+                <h4>Impress&atilde;o vinculada ao endere&ccedil;o</h4>
+                <p>Use este m&eacute;todo para reimprimir uma etiqueta j&aacute; cadastrada no ETQ.</p>
+                <label class="movim-imp-field movim-imp-field--full">
+                  <span>Etiqueta (ETQ_rec_impresso)</span>
+                  <select id="movimImpressaoEtqSelect"><option value="">Carregando&hellip;</option></select>
+                </label>
+                <label class="movim-imp-field movim-imp-field--full">
+                  <span>Quantidade de etiquetas</span>
+                  <input id="movimImpressaoQtd" type="number" min="1" max="100" step="1" value="1" inputmode="numeric">
+                </label>
+                <button type="button" id="movimImpressaoMetodoAntigoConfirmar" class="movim-imp-btn-legacy movim-imp-btn-block">
+                  <i class="fa-solid fa-print"></i> Imprimir pelo m&eacute;todo antigo
+                </button>
+              </section>
+            </div>
+            <div class="movim-imp-footer"><button type="button" id="movimImpressaoCancelar" class="movim-imp-btn-cancelar">Fechar</button></div>
           </div>
         </div>
 
@@ -11357,7 +11391,7 @@
   <script type="module" src="login/login.js"></script>
   <script src="/public/js/vendas-relatorio-gerencial.js?v=20260709a" defer></script>
   <script src="/public/js/logistica-relatorio-gerencial.js?v=20260712a" defer></script>
-  <script type="module" src="menu_produto.js?v=20260712-mobile-global"></script>
+  <script type="module" src="menu_produto.js?v=20260713-impressao-rapida-3"></script>
   
   <script type="module" src="./requisicoes_omie/filtro_produto.js?v=20260710a"></script>
   <script type="module" src="./requisicoes_omie/ListarProdutos.js?v=20260710a"></script>

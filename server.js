@@ -13114,6 +13114,113 @@ async function _processarMovimentacaoEtqInterna(client, opts) {
   return { registros, movimentacao };
 }
 
+function _impressaoRapidaSanitize(value, max = 180) {
+  return String(value || '').trim().slice(0, max).replace(/[\\^~]/g, ' ');
+}
+
+function _impressaoRapidaData() {
+  return new Intl.DateTimeFormat('pt-BR', {
+    timeZone: 'America/Sao_Paulo', day: '2-digit', month: '2-digit', year: 'numeric',
+    hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false
+  }).format(new Date()).replace(',', '');
+}
+
+function _gerarZplImpressaoRapidaProduto({ codigo, descricao, tipo, lote, copias }) {
+  const code = _impressaoRapidaSanitize(codigo, 40);
+  const desc = _impressaoRapidaSanitize(descricao, 180) || '(sem descricao)';
+  const lot = _impressaoRapidaSanitize(lote, 40) || '---';
+  const total = Math.max(1, Math.min(100, Number(copias) || 1));
+  if (tipo === 'pequena') {
+    const data = _impressaoRapidaData();
+    return Array.from({ length: total }, (_, index) => `^XA
+^CI28
+^PW400
+^LL240
+^LS0
+^LH0,0
+^FWB
+^FO7,10^BQN,2,4^FDQA,${code}-${lot}-${index + 1}^FS
+^FO135,10^A0B,40,35^FD ${code} ^FS
+^FO170,50^A0B,20,20^FD ${data} ^FS
+^FO180,0^A0B,23,23^FB320,1,0,L,0^FD --------------- ^FS
+^FO20,0^A0B,20,20^FB230,2,0,L,0^FD L: ${lot} ^FS
+^FO60,0^A0B,20,20^FB230,1,0,L,0^FD Seq: ${index + 1} ^FS
+^FO196,0^A0B,23,23^FB320,1,0,L,0^FD --------------- ^FS
+^FO210,10^A0B,23,23^FB220,8,0,L,0^FD ${desc} ^FS
+^FO110,10^A0B,20,20^FB225,1,0,L,0^FD FT-M00-ETQP - REV01 ^FS
+^XZ`).join('\n');
+  }
+  const bloco = `^XA
+^CI28
+^PW560
+^LL880
+^FO25,70^FB600,1,0,L,0^A0R,90,90^FD${code}^FS
+^FO20,700^BQN,2,5^FDMA,${code}^FS
+^FO150,650^FB600,1,0,L,0^A0R,40,40^FDL: ${lot === '---' ? '' : lot}^FS
+^FO180,50^FB800,5,0,C,0^A0R,70,70^FD${desc}^FS
+^XZ`;
+  return Array.from({ length: total }, () => bloco).join('\n');
+}
+
+function _gerarZplImpressaoRapidaContagem({ quantidade, unidade, copias, codigo = '' }) {
+  const qtd = Math.max(1, Number(quantidade) || 1);
+  const un = _impressaoRapidaSanitize(unidade, 3).toUpperCase() || 'UN';
+  const code = _impressaoRapidaSanitize(codigo, 40);
+  const total = Math.max(1, Math.min(100, Number(copias) || 1));
+  const codeLine = code ? `^FO450,200^FB1500,1,0,L,0^A0R,50,50^FD${code}^FS\n` : '';
+  const bloco = `^XA
+^CI28
+${codeLine}^FO20,200^FB1500,1,0,L,0^A0R,50,50^FD${_impressaoRapidaData()}^FS
+^FO0,${code ? 70 : 100}^FB1500,2,0,L,0^A0R,200,200^FD${qtd} ${un}^FS
+^XZ`;
+  return Array.from({ length: total }, () => bloco).join('\n');
+}
+
+// Etiquetas operacionais simples: nao cria ETQ_rec_impresso nem vinculo de endereco.
+app.post('/api/etiquetas/impressao-rapida', express.json(), async (req, res) => {
+  try {
+    const acao = String(req.body?.acao || '').trim().toLowerCase();
+    const codigo = _impressaoRapidaSanitize(req.body?.codigo, 40);
+    const copias = Math.floor(Number(req.body?.copias) || 0);
+    if (!['produto', 'contagem'].includes(acao)) return res.status(400).json({ error: 'Acao de impressao invalida.' });
+    if (copias < 1 || copias > 100) return res.status(400).json({ error: 'Informe de 1 a 100 copias.' });
+
+    let zpl = '';
+    let quantidade = copias;
+    if (acao === 'produto') {
+      const descricao = _impressaoRapidaSanitize(req.body?.descricao, 180);
+      const tipo = String(req.body?.tipo || 'grande').toLowerCase();
+      if (!codigo || !descricao) return res.status(400).json({ error: 'Codigo e descricao sao obrigatorios.' });
+      if (!['grande', 'pequena'].includes(tipo)) return res.status(400).json({ error: 'Tipo de etiqueta invalido.' });
+      zpl = _gerarZplImpressaoRapidaProduto({ codigo, descricao, tipo, lote: req.body?.lote, copias });
+      const quickQtd = Math.floor(Number(req.body?.quick_qtd) || 0);
+      if (quickQtd > 0) {
+        const quickCopias = Math.floor(Number(req.body?.quick_copias) || 1);
+        if (quickCopias < 1 || quickCopias > 100) return res.status(400).json({ error: 'Copias da contagem rapida invalidas.' });
+        zpl += '\n' + _gerarZplImpressaoRapidaContagem({ quantidade: quickQtd, unidade: req.body?.quick_unidade, copias: quickCopias, codigo });
+        quantidade += quickCopias;
+      }
+    } else {
+      const qtd = Math.floor(Number(req.body?.quantidade) || 0);
+      if (qtd < 1) return res.status(400).json({ error: 'Quantidade de contagem invalida.' });
+      zpl = _gerarZplImpressaoRapidaContagem({ quantidade: qtd, unidade: req.body?.unidade, copias });
+    }
+
+    const usuario = String(req.body?.usuario || req.session?.user?.login || req.session?.usuario || '').trim();
+    const destinoAgente = String(req.body?.destino_agente || '').trim() || null;
+    const impressora = String(req.body?.impressora || '').trim() || null;
+    const fila = await pool.query(
+      `INSERT INTO etiqueta."ETQ_fila_impressao" (etq_ids, multiplo, usuario, zpl, quantidade, destino_agente, impressora)
+       VALUES ($1, 0, $2, $3, $4, $5, $6) RETURNING id`,
+      [[], usuario, zpl, quantidade, destinoAgente, impressora]
+    );
+    res.json({ ok: true, fila_id: fila.rows[0].id, quantidade, via: 'fila' });
+  } catch (err) {
+    console.error('[etiquetas/impressao-rapida]', err);
+    res.status(500).json({ error: err?.message || 'Falha ao gerar impressao rapida.' });
+  }
+});
+
 // POST /api/etiquetas/rec-impresso/imprimir-ids
 // Body: { ids: [idImpresso,...], destino_agente?, impressora?, usuario? }
 // Enfileira ZPL já gravado em ETQ_rec_impresso (fonte movimentacao / armazenamento).

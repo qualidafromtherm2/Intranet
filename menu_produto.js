@@ -73257,6 +73257,68 @@ document.addEventListener('DOMContentLoaded', () => {
   const impQtdInput = document.getElementById('movimImpressaoQtd');
   const impStatus = document.getElementById('movimImpressaoStatus');
   const impBtn = document.getElementById('movimImpressaoBtn');
+  const impContagem = document.getElementById('movimImpressaoContagem');
+  const impMetodoAntigoToggle = document.getElementById('movimImpressaoMetodoAntigoToggle');
+  const impMetodoAntigoPane = document.getElementById('movimImpressaoMetodoAntigo');
+  const impMetodoAntigoConfirmar = document.getElementById('movimImpressaoMetodoAntigoConfirmar');
+  const impCampo = id => document.getElementById(id);
+  const impInteiro = (id, fallback = 0) => Math.floor(Number(impCampo(id)?.value) || fallback);
+  const impUnidade = id => String(impCampo(id)?.value || 'UN').trim().toUpperCase().slice(0, 3) || 'UN';
+
+  function selecionarImpressoraPorTipoRapido() {
+    const select = impCampo('movimImpListboxImpressora');
+    if (!select) return false;
+    const pequena = impCampo('movimImpressaoTipo')?.value === 'pequena';
+    const opcao = Array.from(select.options).find(option => {
+      const texto = String(option.textContent || '').toLowerCase();
+      const ehDenis = texto.includes('pc do denis');
+      const ehZpl2 = texto.includes('zpl 2');
+      const ehZpl = texto.includes('zdesigner zd220-203dpi zpl');
+      return ehDenis && ehZpl && (pequena ? ehZpl2 : !ehZpl2);
+    });
+    if (!opcao) {
+      definirStatusImpressao(`Impressora ZPL${pequena ? ' 2' : ''} do Denis nao encontrada. Selecione manualmente.`, 'erro');
+      return false;
+    }
+    select.value = opcao.value;
+    movimSyncImpressoraSelects(opcao.value);
+    return true;
+  }
+
+  function definirStatusImpressao(texto = '', tipo = '') {
+    if (!impStatus) return;
+    impStatus.textContent = texto;
+    impStatus.className = `movim-imp-status${tipo ? ` ${tipo}` : ''}`;
+  }
+
+  async function enviarImpressaoRapida(payload, botao) {
+    if (botao) botao.disabled = true;
+    definirStatusImpressao('Enviando para impressao...');
+    try {
+      const usuario = window.usuarioLogado || localStorage.getItem('usuarioLogado') || '';
+      const resp = await fetch('/api/etiquetas/impressao-rapida', {
+        method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...payload, codigo: _codigoProdutoAtual, usuario, ...movimObterPrefsImpressora() })
+      });
+      const json = await resp.json().catch(() => ({}));
+      if (!resp.ok || !json?.ok) throw new Error(json?.error || `HTTP ${resp.status}`);
+      definirStatusImpressao(`${json.quantidade || 1} etiqueta(s) enviada(s) para impressao.`, 'ok');
+      _movimPrinterPrefTemp = null;
+      movimAtualizarListboxImpressora();
+    } catch (err) {
+      definirStatusImpressao(String(err?.message || err), 'erro');
+    } finally {
+      if (botao) botao.disabled = false;
+    }
+  }
+
+  async function confirmarContagemMovim() {
+    const quantidade = impInteiro('movimImpressaoContQtd');
+    const copias = impInteiro('movimImpressaoContCopias');
+    if (quantidade < 1) return definirStatusImpressao('Informe uma quantidade valida para contagem.', 'erro');
+    if (copias < 1 || copias > 100) return definirStatusImpressao('Informe de 1 a 100 copias.', 'erro');
+    await enviarImpressaoRapida({ acao: 'contagem', quantidade, unidade: impUnidade('movimImpressaoContUn'), copias }, impContagem);
+  }
 
   function fecharImpressaoMovim() {
     if (impModal) impModal.style.display = 'none';
@@ -73277,7 +73339,72 @@ document.addEventListener('DOMContentLoaded', () => {
     }).join('');
   }
 
+  async function carregarMetodoAntigoImpressao() {
+    if (!impEtqSel) return;
+    impEtqSel.innerHTML = '<option value="">Carregando...</option>';
+    definirStatusImpressao('Carregando etiquetas vinculadas...');
+    try {
+      const resp = await fetch('/api/etiquetas/rec-impresso/etiquetas-por-produto?codigo=' + encodeURIComponent(_codigoProdutoAtual), { credentials: 'include' });
+      const json = await resp.json();
+      if (!resp.ok || !json?.ok) throw new Error(json?.error || `HTTP ${resp.status}`);
+      _movimEtqImpressaoLista = Array.isArray(json.etiquetas) ? json.etiquetas : [];
+      renderOpcoesEtqImpressao(_movimEtqImpressaoLista);
+      definirStatusImpressao(_movimEtqImpressaoLista.length
+        ? `${_movimEtqImpressaoLista.length} etiqueta(s) vinculada(s) disponivel(is).`
+        : 'Nenhuma etiqueta vinculada com endereco para este produto.', _movimEtqImpressaoLista.length ? '' : 'erro');
+    } catch (err) {
+      impEtqSel.innerHTML = '<option value="">Erro ao carregar</option>';
+      definirStatusImpressao(String(err?.message || err), 'erro');
+    }
+  }
+
+  async function alternarMetodoAntigoImpressao() {
+    if (!impMetodoAntigoPane || !impMetodoAntigoToggle) return;
+    const abrir = impMetodoAntigoPane.hidden;
+    impMetodoAntigoPane.hidden = !abrir;
+    impMetodoAntigoToggle.setAttribute('aria-expanded', String(abrir));
+    if (abrir) await carregarMetodoAntigoImpressao();
+  }
+
+  async function confirmarMetodoAntigoImpressao() {
+    const idEtq = Number(impEtqSel?.value);
+    const qtd = Math.floor(Number(impQtdInput?.value) || 0);
+    if (!idEtq) return definirStatusImpressao('Selecione uma etiqueta vinculada.', 'erro');
+    if (qtd < 1 || qtd > 100) return definirStatusImpressao('Informe de 1 a 100 etiquetas.', 'erro');
+    impMetodoAntigoConfirmar.disabled = true;
+    definirStatusImpressao('Enviando pelo metodo antigo...');
+    try {
+      const imp = await imprimirEtiquetasMovim(Array.from({ length: qtd }, () => idEtq));
+      if (!imp?.ok) throw new Error(imp?.error || 'Falha ao imprimir.');
+      definirStatusImpressao(`${imp.quantidade || qtd} etiqueta(s) enviada(s) pelo metodo antigo.`, 'ok');
+    } catch (err) {
+      definirStatusImpressao(String(err?.message || err), 'erro');
+    } finally {
+      impMetodoAntigoConfirmar.disabled = false;
+    }
+  }
+
   async function abrirImpressaoMovim() {
+    const codigoRapido = _codigoProdutoAtual;
+    if (!codigoRapido) return definirStatusImpressao('Produto nao identificado para impressao.', 'erro');
+    const tituloRapido = document.getElementById('movimImpressaoTitulo');
+    const subtituloRapido = document.getElementById('movimImpressaoSubtitulo');
+    if (tituloRapido) tituloRapido.textContent = 'Impress\u00e3o r\u00e1pida';
+    if (subtituloRapido) subtituloRapido.textContent = `Codigo: ${codigoRapido}`;
+    impCampo('movimImpressaoDescricao').value = _descricaoProdutoAtual || codigoRapido;
+    for (const id of ['movimImpressaoCopias', 'movimImpressaoQuickCopias', 'movimImpressaoContCopias']) impCampo(id).value = '1';
+    for (const id of ['movimImpressaoQuickQtd', 'movimImpressaoContQtd']) impCampo(id).value = '0';
+    for (const id of ['movimImpressaoQuickUn', 'movimImpressaoContUn']) impCampo(id).value = 'UN';
+    impCampo('movimImpressaoLote').value = '';
+    impCampo('movimImpressaoTipo').value = 'grande';
+    if (impMetodoAntigoPane) impMetodoAntigoPane.hidden = true;
+    if (impMetodoAntigoToggle) impMetodoAntigoToggle.setAttribute('aria-expanded', 'false');
+    if (impQtdInput) impQtdInput.value = '1';
+    definirStatusImpressao('Etiqueta simples, sem vinculo com endereco.');
+    if (impModal) impModal.style.display = 'flex';
+    await movimAtualizarListboxImpressora();
+    selecionarImpressoraPorTipoRapido();
+    return;
     const codigo = _codigoProdutoAtual;
     if (!codigo) {
       const msg = document.getElementById('movimMensagem');
@@ -73327,6 +73454,20 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   async function confirmarImpressaoMovim() {
+    const descricao = String(impCampo('movimImpressaoDescricao')?.value || '').trim();
+    const copias = impInteiro('movimImpressaoCopias');
+    const quickQtd = impInteiro('movimImpressaoQuickQtd');
+    const quickCopias = impInteiro('movimImpressaoQuickCopias');
+    if (!descricao) return definirStatusImpressao('Informe a descricao.', 'erro');
+    if (copias < 1 || copias > 100) return definirStatusImpressao('Informe de 1 a 100 copias.', 'erro');
+    if (quickQtd < 0 || (quickQtd > 0 && (quickCopias < 1 || quickCopias > 100))) return definirStatusImpressao('Confira os dados da contagem rapida.', 'erro');
+    await enviarImpressaoRapida({
+      acao: 'produto', descricao, copias,
+      tipo: impCampo('movimImpressaoTipo')?.value || 'grande',
+      lote: String(impCampo('movimImpressaoLote')?.value || '').trim(),
+      quick_qtd: quickQtd, quick_unidade: impUnidade('movimImpressaoQuickUn'), quick_copias: quickCopias
+    }, impConfirmar);
+    return;
     const idEtq = Number(impEtqSel?.value);
     const qtd = Math.max(1, Math.floor(Number(impQtdInput?.value) || 1));
     if (!idEtq) {
@@ -73363,6 +73504,10 @@ document.addEventListener('DOMContentLoaded', () => {
   if (impFechar) impFechar.addEventListener('click', fecharImpressaoMovim);
   if (impCancelar) impCancelar.addEventListener('click', fecharImpressaoMovim);
   if (impConfirmar) impConfirmar.addEventListener('click', confirmarImpressaoMovim);
+  if (impContagem) impContagem.addEventListener('click', confirmarContagemMovim);
+  impCampo('movimImpressaoTipo')?.addEventListener('change', selecionarImpressoraPorTipoRapido);
+  if (impMetodoAntigoToggle) impMetodoAntigoToggle.addEventListener('click', alternarMetodoAntigoImpressao);
+  if (impMetodoAntigoConfirmar) impMetodoAntigoConfirmar.addEventListener('click', confirmarMetodoAntigoImpressao);
   if (impModal) impModal.addEventListener('click', e => { if (e.target === impModal) fecharImpressaoMovim(); });
 
   for (const id of MOVIM_IMPRESSORA_SELECT_IDS) {
