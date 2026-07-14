@@ -23,19 +23,37 @@
 
   if (!modal || !form) return;
 
+  /** Códigos da sessão de alteração em massa (não depende de form.reset). */
+  let _codigosMassaSessao = [];
+
+  function isCodigoPlaceholder(valor) {
+    const raw = String(valor ?? '').trim();
+    if (!raw) return true;
+    const low = raw.toLowerCase();
+    if (raw === 'N/A' || raw === '-' || raw === '—') return true;
+    if (low === 'null' || low === 'undefined' || low === 'na') return true;
+    if (/^c[oó]digo(\s+do)?\s+produto$/i.test(raw)) return true;
+    if (/^c[oó]digo\s+omie$/i.test(raw)) return true;
+    return false;
+  }
+
   function normalizarCodigoOmie(valor) {
     const raw = String(valor ?? '').trim();
-    if (!raw || raw === 'N/A') return '';
+    if (isCodigoPlaceholder(raw)) return '';
     return raw.replace(/(?<=\d)\.(?=\d{3}(?:\D|$))/g, '');
   }
 
   function obterCodigoInternoAtual() {
-    return String(
-      document.getElementById('productTitle')?.textContent
-      || document.getElementById('headerCodigo')?.textContent
-      || window.codigoSelecionado
-      || ''
-    ).trim();
+    const candidatos = [
+      window.codigoSelecionado,
+      document.getElementById('headerCodigo')?.textContent,
+      document.getElementById('productTitle')?.textContent,
+    ];
+    for (const item of candidatos) {
+      const codigo = String(item ?? '').trim();
+      if (codigo && !isCodigoPlaceholder(codigo)) return codigo;
+    }
+    return '';
   }
 
   function obterCodigoOmieAtual() {
@@ -51,6 +69,31 @@
       if (codigo) return codigo;
     }
     return obterCodigoInternoAtual();
+  }
+
+  function obterCodigosMassaAtivos() {
+    const fromSession = Array.isArray(_codigosMassaSessao) ? _codigosMassaSessao : [];
+    const fromWindow = Array.isArray(window.__alteracaoEmMassaCodigos)
+      ? window.__alteracaoEmMassaCodigos
+      : [];
+    const merged = [...fromSession, ...fromWindow]
+      .map((c) => String(c || '').trim())
+      .filter((c) => c && !isCodigoPlaceholder(c));
+    return [...new Set(merged)];
+  }
+
+  function setCodigosMassaSessao(lista) {
+    const limpos = (Array.isArray(lista) ? lista : [])
+      .map((c) => String(c || '').trim())
+      .filter((c) => c && !isCodigoPlaceholder(c));
+    _codigosMassaSessao = [...new Set(limpos)];
+    window.__alteracaoEmMassaCodigos = _codigosMassaSessao.slice();
+    return _codigosMassaSessao;
+  }
+
+  function limparCodigosMassaSessao() {
+    _codigosMassaSessao = [];
+    window.__alteracaoEmMassaCodigos = null;
   }
 
   function parseReferencia(ref) {
@@ -183,6 +226,14 @@
     }
     if (wrapAnexosAtuais) wrapAnexosAtuais.style.display = 'none';
     if (listaAnexosAtuais) listaAnexosAtuais.innerHTML = '';
+    const modoMassa = document.getElementById('apModoMassa');
+    const avisoMassa = document.getElementById('apMassaAviso');
+    if (modoMassa) modoMassa.value = '';
+    if (avisoMassa) {
+      avisoMassa.style.display = 'none';
+      avisoMassa.textContent = '';
+    }
+    limparCodigosMassaSessao();
     form.reset();
     limparStatusArquivos();
     atualizarCampoReferencia();
@@ -194,14 +245,46 @@
     resetModalCriacao();
   }
 
-  function abrirModal() {
-    const codigo = obterCodigoOmieAtual();
-    if (!codigo || codigo === 'N/A') {
-      alert('Selecione um produto na lista antes de registrar uma alteração.');
+  function abrirModal(opts = {}) {
+    const emMassa = !!(opts && opts.emMassa);
+    const codigosEntrada = Array.isArray(opts?.codigos)
+      ? opts.codigos
+      : (Array.isArray(window.__alteracaoEmMassaCodigos) ? window.__alteracaoEmMassaCodigos : []);
+    const codigosMassa = (Array.isArray(codigosEntrada) ? codigosEntrada : [])
+      .map((c) => String(c || '').trim())
+      .filter((c) => c && !isCodigoPlaceholder(c));
+
+    if (!emMassa) {
+      const codigo = obterCodigoOmieAtual();
+      if (!codigo) {
+        alert('Abra um produto na lista (botão Ações) antes de registrar uma alteração.\nNão use o menu do produto sem um item aberto — o sistema bloqueia o texto "Código do produto".');
+        return;
+      }
+    } else if (!codigosMassa.length) {
+      alert('Nenhum produto válido no filtro para alteração em massa.\nFiltre a Lista de produtos e use o botão laranja "Registrar alteração em massa".');
       return;
     }
 
+    // Guarda códigos antes do reset (reset limpa a sessão)
+    const codigosParaRestaurar = codigosMassa.slice();
     resetModalCriacao();
+
+    if (emMassa) {
+      setCodigosMassaSessao(codigosParaRestaurar);
+      const modoMassa = document.getElementById('apModoMassa');
+      const avisoMassa = document.getElementById('apMassaAviso');
+      const n = _codigosMassaSessao.length;
+      if (modoMassa) modoMassa.value = '1';
+      if (avisoMassa) {
+        avisoMassa.style.display = 'block';
+        avisoMassa.textContent = `Esta alteração será replicada em ${n} produto(s) do filtro. Cada um recebe um registro no Histórico de Alterações com Produto e Código OMIE.`;
+      }
+      if (modalTitulo) modalTitulo.textContent = `Alteração em massa (${n})`;
+      if (btnRegistrar) {
+        btnRegistrar.innerHTML = `<i class="fa-solid fa-floppy-disk"></i> Registrar em ${n} produtos`;
+      }
+    }
+
     modal.classList.add('active');
     document.body.style.overflow = 'hidden';
   }
@@ -353,10 +436,19 @@
 
     const editId = String(inputId?.value || '').trim();
     const isEdicao = !!editId;
+    const modoMassaFlag = String(document.getElementById('apModoMassa')?.value || '').trim() === '1';
+    const codigosMassa = obterCodigosMassaAtivos();
+    const modoMassa = modoMassaFlag || codigosMassa.length > 1
+      || (modoMassaFlag && codigosMassa.length >= 1);
     const codigoOmie = obterCodigoOmieAtual();
 
-    if (!isEdicao && (!codigoOmie || codigoOmie === 'N/A')) {
-      alert('Código OMIE do produto não encontrado.');
+    if (!isEdicao && modoMassa && !codigosMassa.length) {
+      alert('Nenhum produto válido selecionado para alteração em massa.');
+      return;
+    }
+
+    if (!isEdicao && !modoMassa && (!codigoOmie || isCodigoPlaceholder(codigoOmie))) {
+      alert('Código OMIE do produto não encontrado. Abra o produto na lista (Ações) antes de registrar.');
       return;
     }
 
@@ -377,7 +469,16 @@
     }
 
     const fd = new FormData();
-    if (!isEdicao) fd.append('codigo_omie', codigoOmie);
+    if (!isEdicao && !modoMassa) {
+      if (isCodigoPlaceholder(codigoOmie)) {
+        alert('Código OMIE inválido. Abra o produto na lista antes de registrar.');
+        return;
+      }
+      fd.append('codigo_omie', codigoOmie);
+    }
+    if (!isEdicao && modoMassa) {
+      fd.append('codigos_omie', JSON.stringify(codigosMassa));
+    }
     fd.append('antes', document.getElementById('apAntes')?.value || '');
     fd.append('depois', document.getElementById('apDepois')?.value || '');
     if (referenciaTipo) {
@@ -401,11 +502,21 @@
     }
 
     try {
-      const url = isEdicao
-        ? `/api/engenharia/alteracoes-produto/${encodeURIComponent(editId)}`
-        : '/api/engenharia/alteracoes-produto';
+      let url;
+      let method;
+      if (isEdicao) {
+        url = `/api/engenharia/alteracoes-produto/${encodeURIComponent(editId)}`;
+        method = 'PUT';
+      } else if (modoMassa) {
+        url = '/api/engenharia/alteracoes-produto/em-massa';
+        method = 'POST';
+      } else {
+        url = '/api/engenharia/alteracoes-produto';
+        method = 'POST';
+      }
+
       const resp = await fetch(url, {
-        method: isEdicao ? 'PUT' : 'POST',
+        method,
         body: fd,
         credentials: 'same-origin',
       });
@@ -413,7 +524,13 @@
       if (!resp.ok) {
         throw new Error(data.error || 'Falha ao salvar alteração.');
       }
-      alert(isEdicao ? 'Alteração atualizada com sucesso!' : 'Alteração registrada com sucesso!');
+
+      if (modoMassa) {
+        const ok = Number(data.criados || codigosMassa.length) || codigosMassa.length;
+        alert(`Alteração registrada em ${ok} produto(s). Veja em Histórico de Alterações de cada um.`);
+      } else {
+        alert(isEdicao ? 'Alteração atualizada com sucesso!' : 'Alteração registrada com sucesso!');
+      }
       fecharModal();
       await carregarHistoricoAlteracoes();
       if (typeof window.recarregarEngAlteracoesGlobal === 'function') {

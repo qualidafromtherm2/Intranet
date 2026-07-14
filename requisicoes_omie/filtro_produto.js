@@ -287,7 +287,8 @@ async function popularLocais() {
 }
 
 /**
- * Define o cache completo
+ * Define o cache completo e reaplica os filtros ativos (família, busca, etc.).
+ * Antes só fazia `lastFiltered = items`, o que apagava o filtro aplicado na tela.
  */
 export function setCache(items) {
   if (!Array.isArray(items)) {
@@ -296,8 +297,14 @@ export function setCache(items) {
     lastFiltered = [];
     return;
   }
-  allItems     = items;
-  lastFiltered = items.slice();
+  allItems = items;
+  applyFilters();
+}
+
+/** Reaplica filtros ativos e devolve a lista filtrada atual. */
+export function reapplyFilters() {
+  applyFilters();
+  return lastFiltered;
 }
 
 /** Retorna lista filtrada */

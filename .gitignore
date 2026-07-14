@@ -151,3 +151,4 @@ whatsapp_import/
 # PDFs/HTML de fechamento gerados localmente (não sobem pro GitHub)
 /Fechamento_*.html
 /Fechamento_*.pdf
+relatorios/

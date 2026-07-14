@@ -5941,7 +5941,13 @@
                 </div>
               </div>
 
-              <div id="atRelGerStatus" style="display:none;margin-top:14px;font-size:13px;color:#94a3b8;">Carregando...</div>
+              <div id="atRelGerStatus" class="at-rel-ger-loading" style="display:none;" role="status" aria-live="polite">
+                <div class="at-rel-ger-loading-inner">
+                  <i class="fa-solid fa-spinner fa-spin" aria-hidden="true"></i>
+                  <span>Gerando relatório...</span>
+                  <small>Aguarde enquanto os dados e gráficos são montados.</small>
+                </div>
+              </div>
               <div id="atRelGerErro" style="display:none;margin-top:14px;font-size:13px;color:#f87171;"></div>
 
               <div id="atRelGerConteudo" style="display:none;margin-top:16px;">
@@ -7254,6 +7260,10 @@
                     <polyline points="22 3 21 12 12 11"/>
                   </svg>
                   <span id="refreshCacheIndicator" style="display:none;margin-left:6px;width:8px;height:8px;background:#f59e0b;border-radius:999px;box-shadow:0 0 0 2px rgba(245,158,11,0.25);"></span>
+                </button>
+                <button id="editarEmMassaBtn" type="button" class="filter-icon" title="Editar em massa" aria-label="Editar em massa">
+                  <i class="fa-solid fa-pen-to-square" style="font-size:14px;"></i>
+                  <span class="mobile-filter-label">Em massa</span>
                 </button>
                 <button id="viewToggleBtn" type="button" class="filter-icon" title="Alternar visualização" aria-label="Alternar visualização">
                   <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="1.5" fill="none"
@@ -11493,13 +11503,14 @@
   <script src="/public/js/logistica-relatorio-gerencial.js?v=20260712a" defer></script>
   <script type="module" src="menu_produto.js?v=20260713-auditar-busca"></script>
   
-  <script type="module" src="./requisicoes_omie/filtro_produto.js?v=20260710a"></script>
-  <script type="module" src="./requisicoes_omie/ListarProdutos.js?v=20260710a"></script>
+  <script type="module" src="./requisicoes_omie/filtro_produto.js?v=20260713b"></script>
+  <script type="module" src="./requisicoes_omie/ListarProdutos.js?v=20260713b"></script>
   <script type="module" src="./requisicoes_omie/Dados_produto.js?v=20260710c" defer></script>
   <script type="module" src="./requisicoes_omie/dados_colaboradores.js"></script>
   <script src="produtos/produto_foto.js?v=20260430c" defer></script>
   <script src="produtos/produto_anexo.js" defer></script>
-  <script src="produtos/alteracao_produto.js?v=20260630c" defer></script>
+  <script src="produtos/alteracao_produto.js?v=20260713b" defer></script>
+  <script src="produtos/editar_em_massa.js?v=20260713b" defer></script>
   <script src="produtos/desenho_tecnico.js?v=20260630a" defer></script>
   <script src="produtos/engenharia_paineis.js?v=20260630a" defer></script>
   <script type="module" src="produtos/Enviar_estrutura.js" defer></script>
@@ -13300,6 +13311,64 @@ function attachDropZone(ul) {
   color: #334155;
 }
 .at-rel-ger-tbl tr:nth-child(even) td { background: #f8fafc; }
+.at-rel-ger-tbl tr.at-rel-ger-ppm-off td { opacity: .45; }
+.at-rel-ger-tbl .at-rel-ger-ppm-check {
+  width: 28px;
+  text-align: center;
+  vertical-align: middle;
+}
+.at-rel-ger-tbl .at-rel-ger-ppm-cb {
+  width: 15px;
+  height: 15px;
+  cursor: pointer;
+  accent-color: #1e3a5f;
+}
+.at-rel-ger-ppm-cell {
+  min-width: 140px;
+  vertical-align: top;
+}
+.at-rel-ger-ppm-val {
+  font-weight: 700;
+  color: #1e3a5f;
+  font-size: 13px;
+  line-height: 1.2;
+}
+.at-rel-ger-ppm-desc {
+  margin-top: 3px;
+  font-size: 10px;
+  font-weight: 500;
+  color: #64748b;
+  line-height: 1.35;
+  white-space: normal;
+  max-width: 180px;
+  margin-left: auto;
+}
+.at-rel-ger-loading {
+  margin-top: 24px;
+  padding: 48px 20px;
+  text-align: center;
+  background: rgba(255,255,255,.03);
+  border: 1px dashed #334155;
+  border-radius: 12px;
+}
+.at-rel-ger-loading-inner {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  color: #94a3b8;
+  font-size: 14px;
+  font-weight: 600;
+}
+.at-rel-ger-loading-inner i {
+  font-size: 36px;
+  color: #f59e0b;
+}
+.at-rel-ger-loading-inner small {
+  font-size: 12px;
+  font-weight: 500;
+  color: #64748b;
+}
 .at-rel-ger-footer {
   padding: 12px 22px 16px;
   border-top: 2px solid #e2e8f0;
@@ -20814,6 +20883,66 @@ function attachDropZone(ul) {
 })();
 </script>
 
+<!-- ===== MODAL EDITAR EM MASSA (Lista de produtos) ===== -->
+<div id="modalEditarEmMassa" class="modal-overlay">
+  <div class="modal-dialog" style="max-width:560px;">
+    <div class="modal-header">
+      <h2>Editar em massa</h2>
+      <button type="button" class="modal-close" id="modalEditarEmMassaFechar" aria-label="Fechar">&times;</button>
+    </div>
+    <div class="modal-body" style="display:flex;flex-direction:column;gap:16px;">
+      <div style="padding:12px 14px;background:#374151;border-radius:10px;font-size:13px;color:#e5e7eb;line-height:1.45;">
+        <div style="font-weight:700;margin-bottom:4px;">Produtos no filtro atual</div>
+        <div id="emMassaContadorResumo">0 produtos prontos para edição em massa.</div>
+        <div id="emMassaContadorExtra" style="margin-top:4px;color:#9ca3af;font-size:12px;"></div>
+      </div>
+
+      <button type="button" id="emMassaBtnSelecionar" class="content-button" style="width:100%;padding:14px;background:linear-gradient(135deg,#3b82f6 0%,#2563eb 100%);color:#fff;font-weight:600;display:flex;align-items:center;gap:10px;justify-content:center;">
+        <i class="fa-solid fa-xmark"></i>
+        <span id="emMassaBtnSelecionarTexto">Selecionar produtos (mostrar X)</span>
+      </button>
+      <p style="margin:0;font-size:12px;color:#9ca3af;line-height:1.4;">
+        Fecha este modal e coloca um <strong>X</strong> em cada card. Clique no X para tirar o produto do filtro. Clique de novo em “Editar em massa” para sair do modo X e registrar a alteração.
+      </p>
+
+      <button type="button" id="emMassaBtnRegistrar" class="content-button" style="width:100%;padding:14px;background:linear-gradient(135deg,#f97316 0%,#ea580c 100%);color:#fff;font-weight:600;display:flex;align-items:center;gap:10px;justify-content:center;">
+        <i class="fa-solid fa-arrows-rotate"></i>
+        Registrar alteração em massa
+      </button>
+      <p style="margin:0;font-size:12px;color:#9ca3af;line-height:1.4;">
+        Grava o mesmo registro de alteração para <strong>cada</strong> produto que restou no filtro. O histórico aparece na aba <strong>Histórico de Alterações</strong> de cada produto.
+      </p>
+
+      <div style="border-top:1px solid #4b5563;padding-top:14px;">
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:10px;">
+          <div style="font-weight:700;font-size:14px;color:#e5e7eb;">
+            <i class="fa-solid fa-table-cells-large" style="margin-right:6px;"></i>
+            Menu do produto (hambúrguer)
+          </div>
+          <button type="button" id="emMassaBtnRecuperarHamburguer" class="content-button" style="padding:6px 10px;font-size:12px;background:#1f2937;color:#e5e7eb;">
+            Recuperar
+          </button>
+        </div>
+        <p style="margin:0 0 10px;font-size:12px;color:#9ca3af;line-height:1.4;">
+          O menu interno fica oculto na lista. Use abaixo para ações pontuais (Alteração, Desenho etc.) no produto selecionado.
+        </p>
+        <div id="emMassaNavGridClone" style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;"></div>
+      </div>
+
+      <button type="button" id="emMassaBtnLimparExclusoes" class="content-button" style="width:100%;padding:10px;background:#374151;color:#e5e7eb;font-weight:600;">
+        <i class="fa-solid fa-rotate-left"></i> Restaurar produtos removidos pelo X
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- Barra flutuante do modo seleção em massa -->
+<div id="emMassaSelectBar" style="display:none;position:fixed;left:50%;bottom:24px;transform:translateX(-50%);z-index:10050;background:#111827;color:#fff;border:1px solid #374151;border-radius:999px;padding:10px 16px;box-shadow:0 10px 30px rgba(0,0,0,0.35);align-items:center;gap:12px;font-size:13px;font-weight:600;max-width:92vw;">
+  <i class="fa-solid fa-xmark" style="color:#f87171;"></i>
+  <span id="emMassaSelectBarTexto">Modo seleção: clique no X para remover</span>
+  <button type="button" id="emMassaSelectBarConcluir" style="background:#2563eb;color:#fff;border:none;border-radius:999px;padding:6px 12px;cursor:pointer;font-weight:700;">Concluir</button>
+</div>
+
 <!-- ===== MODAL ALTERAÇÃO DE PRODUTO ===== -->
 <div id="modalAlteracaoProduto" class="modal-overlay">
   <div class="modal-dialog" style="max-width:640px;">
@@ -20824,6 +20953,8 @@ function attachDropZone(ul) {
     <div class="modal-body">
       <form id="formAlteracaoProduto">
         <input type="hidden" id="apAlteracaoId" name="alteracao_id" value="">
+        <input type="hidden" id="apModoMassa" name="modo_massa" value="">
+        <div id="apMassaAviso" style="display:none;margin-bottom:12px;padding:10px 12px;background:rgba(249,115,22,0.15);border:1px solid rgba(249,115,22,0.4);border-radius:8px;font-size:13px;color:#fdba74;"></div>
         <div class="form-row full-width">
           <div class="form-group">
             <label for="apAntes">Antes</label>
@@ -20910,6 +21041,59 @@ function attachDropZone(ul) {
   background: rgba(52, 211, 153, 0.12);
   border: 1px solid rgba(52, 211, 153, 0.35);
   border-radius: 999px;
+}
+.lp-bulk-x-btn {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 5;
+  width: 28px;
+  height: 28px;
+  border: none;
+  border-radius: 999px;
+  background: #ef4444;
+  color: #fff;
+  cursor: pointer;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.25);
+  font-size: 14px;
+  line-height: 1;
+  padding: 0;
+}
+#listaProdutos.lp-bulk-select-mode .lp-bulk-x-btn { display: inline-flex; }
+#listaProdutos.lp-bulk-select-mode #listaProdutosList .product-list-item {
+  position: relative;
+  padding-right: 36px;
+}
+.em-massa-nav-card {
+  background: var(--modal-bg-color, #1f2937);
+  border: 1px solid var(--card-border-color, #374151);
+  border-radius: 10px;
+  padding: 12px 8px;
+  text-align: center;
+  cursor: pointer;
+  transition: transform .15s, box-shadow .15s;
+}
+.em-massa-nav-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 16px rgba(0,0,0,0.25);
+}
+.em-massa-nav-card .nav-card-icon {
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  margin-bottom: 6px;
+}
+.em-massa-nav-card .nav-card-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: #e5e7eb;
 }
 .dt-file-status {
   margin-top: 6px;

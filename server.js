@@ -18425,10 +18425,24 @@ app.patch('/api/logistica/itens_solicitados/separacao', async (req, res) => {
     if (!ids.length) return res.status(400).json({ ok: false, error: 'Nenhum ID válido.' });
     const nome_user = String(req.session?.user?.username || req.session?.user?.nome || '').trim();
     if (!nome_user) return res.status(400).json({ ok: false, error: 'Usuário sem nome na sessão.' });
+    // Inclui também irmãos da mesma SEP em Solicitado/Stund-by — evita que
+    // itens adicionados com o modal aberto (lista antiga no front) fiquem de fora.
     const { rows: elegiveis } = await pool.query(
-      `SELECT id FROM solicitacao_produto.itens_solicitados
-        WHERE id = ANY($1::bigint[])
-          AND status IN ('pendente', 'Stund-by')`,
+      `WITH bases AS (
+         SELECT DISTINCT n_solic
+           FROM solicitacao_produto.itens_solicitados
+          WHERE id = ANY($1::bigint[])
+       )
+       SELECT DISTINCT i.id
+         FROM solicitacao_produto.itens_solicitados i
+        WHERE i.status IN ('pendente', 'Stund-by')
+          AND (
+            i.id = ANY($1::bigint[])
+            OR (
+              i.n_solic IS NOT NULL
+              AND i.n_solic IN (SELECT n_solic FROM bases WHERE n_solic IS NOT NULL)
+            )
+          )`,
       [ids]
     );
     if (!elegiveis.length) {
@@ -19169,14 +19183,29 @@ app.post('/api/logistica/itens_solicitados/separar-parcial', async (req, res) =>
     let codLocalOrig = null;
     let nomeLocalOrig = null;
     let motivoOrig = null;
-    if (sIds.length > 0) {
-      const { rows: [origItem] } = await client.query(
-        `SELECT cod_local, nome_local, motivo FROM solicitacao_produto.itens_solicitados WHERE id = $1`,
-        [sIds[0]]
+    {
+      const { rows: origRows } = await client.query(
+        `SELECT cod_local, nome_local, motivo
+           FROM solicitacao_produto.itens_solicitados
+          WHERE ($1::bigint[] <> '{}'::bigint[] AND id = ANY($1::bigint[]))
+             OR id_carr = ANY($2::bigint[])
+          ORDER BY
+            CASE WHEN cod_local IS NOT NULL AND TRIM(cod_local) <> '' THEN 0 ELSE 1 END,
+            id ASC
+          LIMIT 1`,
+        [sIds, cIds]
       );
+      const origItem = origRows[0];
       codLocalOrig = origItem?.cod_local || null;
       nomeLocalOrig = origItem?.nome_local || null;
       motivoOrig = origItem?.motivo || null;
+    }
+
+    // Portal AT (at-link): se ainda sem destino, aplica o armazém padrão do técnico
+    if ((!codLocalOrig || !String(codLocalOrig).trim()) && String(base.id_user || '').startsWith('at:')) {
+      codLocalOrig = '10445659161';
+      nomeLocalOrig = '10. SAC ASSISTENCIA E GARANTIAS';
+      if (!motivoOrig) motivoOrig = 'AT';
     }
 
     // Cria novo carrinho com o restante (qtyRemainder) → volta para a fila como pendente
