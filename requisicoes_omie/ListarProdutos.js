@@ -14,8 +14,9 @@ import {
   initFiltros,
   setCache,
   getFiltered,
+  reapplyFilters,
   populateFilters
-} from './filtro_produto.js?v=20260710a';
+} from './filtro_produto.js?v=20260713b';
 
 /* --------------------- SPINNER helpers -------------------------------- */
 let spinnerVisible  = false;
@@ -113,6 +114,15 @@ async function preloadFromDB() {
         page++;
       }
 
+      // Remove duplicatas (mesmo codigo_produto) que inflam contagens de família
+      const seen = new Set();
+      window.__omieFullCache = window.__omieFullCache.filter((p) => {
+        const key = String(p.codigo_produto ?? '') + '|' + String(p.codigo ?? '');
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+
       return true;
     } finally {
       hideProductSpinner();
@@ -156,6 +166,28 @@ function renderList(ul, produtos) {
   attachOpenHandlers(ul);
 }
 
+const __gridState = {
+  items: [],
+  rendered: 0,
+  batchSize: 50,
+  loading: false,
+  generation: 0
+};
+
+let __listaViewMode = 'grid';
+const __listaRefs = {
+  ul: null,
+  grid: null,
+  toggleBtn: null,
+  pagination: null
+};
+
+function getListaGridEl() {
+  const live = document.getElementById('listaProdutosGrid');
+  if (live) __listaRefs.grid = live;
+  return live || __listaRefs.grid;
+}
+
 function normalizeCatalogoProdutos(produtos = []) {
   return produtos.map(p => ({
     codigo: p.codigo ?? '',
@@ -170,67 +202,66 @@ function normalizeCatalogoProdutos(produtos = []) {
 }
 
 function renderGrid(grid, produtos) {
-  if (!grid) return;
+  const gridEl = grid || getListaGridEl();
+  if (!gridEl) return;
   const normalizados = normalizeCatalogoProdutos(produtos);
-  window.produtosCatalogoOmie = normalizados;
+  // Não sobrescreve o catálogo completo de compras — só a lista filtrada da aba
+  window.__listaProdutosGridItems = normalizados;
 
+  __gridState.generation += 1;
+  const generation = __gridState.generation;
   __gridState.items = normalizados;
   __gridState.rendered = 0;
   __gridState.loading = false;
-  grid.innerHTML = '';
+  gridEl.innerHTML = '';
 
   if (typeof window.renderizarCatalogoOmie !== 'function') {
-    grid.innerHTML = '<div style="text-align:center;padding:40px;color:#9ca3af;grid-column:1/-1;">Visualização em grade indisponível</div>';
+    gridEl.innerHTML = '<div style="text-align:center;padding:40px;color:#9ca3af;grid-column:1/-1;">Visualização em grade indisponível</div>';
     return;
   }
 
-  renderNextGridBatch(grid);
-  bindGridLazyLoad(grid);
+  renderNextGridBatch(gridEl, generation);
+  bindGridLazyLoad(gridEl);
 }
 
-function renderNextGridBatch(grid) {
+function renderNextGridBatch(grid, generation = __gridState.generation) {
   if (__gridState.loading) return;
+  if (generation !== __gridState.generation) return;
+  const gridEl = grid || getListaGridEl();
+  if (!gridEl) return;
+
   const start = __gridState.rendered;
   const end = start + __gridState.batchSize;
   const slice = __gridState.items.slice(start, end);
   if (!slice.length) return;
 
   __gridState.loading = true;
-  window.renderizarCatalogoOmie(slice, {
-    containerId: grid.id,
-    atualizarContador: false,
-    append: start > 0
-  });
-  __gridState.rendered += slice.length;
-  __gridState.loading = false;
+  try {
+    if (generation !== __gridState.generation) return;
+    window.renderizarCatalogoOmie(slice, {
+      containerId: 'listaProdutosGrid',
+      atualizarContador: false,
+      append: start > 0
+    });
+    if (generation === __gridState.generation) {
+      __gridState.rendered += slice.length;
+    }
+  } finally {
+    __gridState.loading = false;
+  }
 }
 
 function bindGridLazyLoad(grid) {
-  if (grid.__lazyBound) return;
+  if (!grid || grid.__lazyBound) return;
   grid.__lazyBound = true;
 
   grid.addEventListener('scroll', () => {
     const nearBottom = grid.scrollTop + grid.clientHeight >= grid.scrollHeight - 400;
     if (nearBottom) {
-      renderNextGridBatch(grid);
+      renderNextGridBatch(grid, __gridState.generation);
     }
   });
 }
-
-let __listaViewMode = 'grid';
-const __listaRefs = {
-  ul: null,
-  grid: null,
-  toggleBtn: null,
-  pagination: null
-};
-
-const __gridState = {
-  items: [],
-  rendered: 0,
-  batchSize: 50,
-  loading: false
-};
 
 const __paginationState = {
   currentPage: 1,
@@ -246,10 +277,10 @@ function applyExternalFilter(itens) {
 }
 
 function ensureListaRefs() {
-  if (!__listaRefs.ul) __listaRefs.ul = document.getElementById('listaProdutosList');
-  if (!__listaRefs.grid) __listaRefs.grid = document.getElementById('listaProdutosGrid');
-  if (!__listaRefs.toggleBtn) __listaRefs.toggleBtn = document.getElementById('viewToggleBtn');
-  if (!__listaRefs.pagination) __listaRefs.pagination = document.getElementById('pagination');
+  __listaRefs.ul = document.getElementById('listaProdutosList') || __listaRefs.ul;
+  __listaRefs.grid = document.getElementById('listaProdutosGrid') || __listaRefs.grid;
+  __listaRefs.toggleBtn = document.getElementById('viewToggleBtn') || __listaRefs.toggleBtn;
+  __listaRefs.pagination = document.getElementById('pagination') || __listaRefs.pagination;
   return __listaRefs;
 }
 
@@ -345,6 +376,7 @@ function renderListaFiltradaComTitulo(pane, itens, options = {}) {
   if (resetPage) resetListaPagination();
   const itensFiltrados = applyExternalFilter(itens);
   renderListaView(itensFiltrados);
+  try { window.__lpBulkOnListaRendered?.(); } catch (_) {}
 
   const suffix = __externalFilterLabel ? ` - ${__externalFilterLabel}` : '';
   const title = pane?.querySelector('.content-section-title');
@@ -389,7 +421,8 @@ function updateListaViewUI() {
 }
 
 function renderListaView(itens) {
-  const { ul, grid } = ensureListaRefs();
+  const { ul } = ensureListaRefs();
+  const grid = getListaGridEl();
   if (__listaViewMode === 'grid') {
     renderGrid(grid, itens);
   } else if (ul) {
@@ -692,7 +725,7 @@ window.__setListaProdutosExternalFilter = function (fn, label = '') {
   __externalFilterLabel = (__externalFilterFn && label) ? String(label) : '';
 
   const pane = document.getElementById(__listaPaneId);
-  setCache(window.__omieFullCache || []);
+  setCache(window.__omieFullCache || []); // reaplica família/busca/etc.
   const itens = getFiltered();
   renderListaFiltradaComTitulo(pane, itens, { resetPage: true });
 };
@@ -704,6 +737,11 @@ window.__clearListaProdutosExternalFilter = function () {
   setCache(window.__omieFullCache || []);
   const itens = getFiltered();
   renderListaFiltradaComTitulo(pane, itens, { resetPage: true });
+};
+
+/** Produtos visíveis na lista (filtros da tela + filtro externo / exclusões em massa). */
+window.__getListaProdutosVisiveis = function () {
+  return applyExternalFilter(getFiltered());
 };
 
 // Handler do menu: mostra a aba e força refresh SEM F5

@@ -43,7 +43,9 @@ function parseArgs() {
     const stamp = opts.inicio && opts.fim
       ? `${opts.inicio}_${opts.fim}`.replace(/-/g, '')
       : new Date().toISOString().slice(0, 10);
-    opts.output = path.join(process.cwd(), `Fechamento_AT_${stamp}.pdf`);
+    const outDir = path.join(process.cwd(), 'relatorios');
+    fs.mkdirSync(outDir, { recursive: true });
+    opts.output = path.join(outDir, `Fechamento_AT_${stamp}.pdf`);
   }
   return opts;
 }

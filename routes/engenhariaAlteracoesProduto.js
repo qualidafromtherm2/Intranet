@@ -40,17 +40,39 @@ async function ensureAlteracoesProdutoSchema(pool) {
   schemaReady = true;
 }
 
+const CODIGO_OMIE_PLACEHOLDERS = new Set([
+  'código do produto',
+  'codigo do produto',
+  'código omie',
+  'codigo omie',
+  'n/a',
+  'na',
+  'null',
+  'undefined',
+  '-',
+  '—',
+]);
+
 function sanitizeCodigo(raw) {
   return String(raw || '').trim().replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 80);
 }
 
+function isCodigoOmieInvalido(raw) {
+  const entrada = String(raw || '').trim();
+  if (!entrada) return true;
+  if (CODIGO_OMIE_PLACEHOLDERS.has(entrada.toLowerCase())) return true;
+  // Texto de UI / título de placeholder (ex.: span#productTitle)
+  if (/^c[oó]digo(\s+do)?\s+produto$/i.test(entrada)) return true;
+  return false;
+}
+
 async function resolverCodigosBusca(pool, raw) {
   const entrada = String(raw || '').trim();
-  if (!entrada) return [];
+  if (isCodigoOmieInvalido(entrada)) return [];
 
   const codigos = new Set([entrada]);
   const sanitizado = sanitizeCodigo(entrada);
-  if (sanitizado) codigos.add(sanitizado);
+  if (sanitizado && !isCodigoOmieInvalido(sanitizado)) codigos.add(sanitizado);
 
   try {
     const { rows } = await pool.query(
@@ -70,13 +92,31 @@ async function resolverCodigosBusca(pool, raw) {
     console.warn('[alteracoes-produto] Falha ao resolver código do produto:', err.message);
   }
 
-  return [...codigos].filter(Boolean);
+  return [...codigos].filter((c) => c && !isCodigoOmieInvalido(c));
 }
 
+/** Resolve para o codigo_produto numérico OMIE; null se não existir no cadastro. */
 async function resolverCodigoOmiePrincipal(pool, raw) {
-  const codigos = await resolverCodigosBusca(pool, raw);
-  const numerico = codigos.find((c) => /^\d+$/.test(c));
-  return numerico || codigos[0] || String(raw || '').trim();
+  if (isCodigoOmieInvalido(raw)) return null;
+
+  try {
+    const { rows } = await pool.query(
+      `SELECT codigo_produto::text AS codigo_produto
+         FROM public.produtos_omie
+        WHERE codigo_produto::text = $1 OR codigo = $1
+        ORDER BY CASE WHEN codigo_produto::text = $1 THEN 0 ELSE 1 END
+        LIMIT 1`,
+      [String(raw || '').trim()]
+    );
+    const omie = String(rows[0]?.codigo_produto || '').trim();
+    if (omie && !isCodigoOmieInvalido(omie)) return omie;
+  } catch (err) {
+    console.warn('[alteracoes-produto] Falha ao resolver código OMIE principal:', err.message);
+  }
+
+  // Só aceita número puro se já existir como codigo_produto (validado acima).
+  // Não grava texto livre (evita "Código do produto", modelo sem cadastro, etc.).
+  return null;
 }
 
 function montarReferencia(tipo, valor) {
@@ -121,10 +161,12 @@ module.exports = (pool) => {
       const { rows } = await pool.query(
         `SELECT a.id, a.data::text AS data, a.codigo_omie, a.antes, a.depois, a.referencia,
                 a.foto_antes, a.foto_depois, a.video, a.arquivo, a.criado_por,
-                p.codigo AS codigo_interno
+                COALESCE(p.codigo, p2.codigo) AS codigo_interno
            FROM engenharia.alteracoes_produto a
            LEFT JOIN public.produtos_omie p
              ON p.codigo_produto::text = a.codigo_omie
+           LEFT JOIN public.produtos_omie p2
+             ON p2.codigo = a.codigo_omie
           ORDER BY a.data DESC, a.id DESC`
       );
       res.json({ ok: true, alteracoes: rows });
@@ -171,7 +213,9 @@ module.exports = (pool) => {
 
         const codigoOmie = await resolverCodigoOmiePrincipal(pool, req.body?.codigo_omie);
         if (!codigoOmie) {
-          return res.status(400).json({ error: 'Informe o código OMIE do produto.' });
+          return res.status(400).json({
+            error: 'Código OMIE inválido ou produto não encontrado no cadastro. Abra o produto na lista (Ações) ou use Registrar alteração em massa com filtro.',
+          });
         }
 
         const antes = String(req.body?.antes || '').trim() || null;
@@ -200,6 +244,122 @@ module.exports = (pool) => {
         res.json({ ok: true, alteracao: rows[0] });
       } catch (e) {
         console.error('[POST /api/engenharia/alteracoes-produto] erro:', e);
+        res.status(500).json({ error: e.message || String(e) });
+      }
+    }
+  );
+
+  // Registra a mesma alteração em vários produtos (1 linha por código)
+  router.post(
+    '/em-massa',
+    upload.fields([
+      { name: 'foto_antes', maxCount: 1 },
+      { name: 'foto_depois', maxCount: 1 },
+      { name: 'video', maxCount: 1 },
+      { name: 'arquivo', maxCount: 1 },
+    ]),
+    async (req, res) => {
+      try {
+        await ensureAlteracoesProdutoSchema(pool);
+
+        let codigosRaw = req.body?.codigos_omie;
+        if (typeof codigosRaw === 'string') {
+          try {
+            const parsed = JSON.parse(codigosRaw);
+            codigosRaw = Array.isArray(parsed) ? parsed : [codigosRaw];
+          } catch (_) {
+            codigosRaw = String(codigosRaw)
+              .split(/[\n,;]+/)
+              .map((s) => s.trim())
+              .filter(Boolean);
+          }
+        }
+        if (!Array.isArray(codigosRaw)) codigosRaw = [];
+
+        const codigosUnicos = [...new Set(
+          codigosRaw.map((c) => String(c || '').trim()).filter(Boolean)
+        )];
+        if (!codigosUnicos.length) {
+          return res.status(400).json({ error: 'Informe ao menos um código OMIE.' });
+        }
+        if (codigosUnicos.length > 500) {
+          return res.status(400).json({ error: 'Limite de 500 produtos por alteração em massa.' });
+        }
+
+        const antes = String(req.body?.antes || '').trim() || null;
+        const depois = String(req.body?.depois || '').trim() || null;
+        const referencia = montarReferencia(req.body?.referencia_tipo, req.body?.referencia_valor);
+        const criadoPor = req.session?.usuario?.username
+          || req.session?.usuario?.nome
+          || 'sistema';
+
+        const files = req.files || {};
+
+        // Resolve todos os códigos antes de anexar/inserir — rejeita placeholder e códigos inexistentes
+        const resolvidos = [];
+        const erros = [];
+        for (const raw of codigosUnicos) {
+          if (isCodigoOmieInvalido(raw)) {
+            erros.push({ codigo: raw, error: 'Código inválido (placeholder/vazio)' });
+            continue;
+          }
+          const codigoOmie = await resolverCodigoOmiePrincipal(pool, raw);
+          if (!codigoOmie) {
+            erros.push({ codigo: raw, error: 'Produto não encontrado no cadastro' });
+            continue;
+          }
+          resolvidos.push({ raw, codigoOmie });
+        }
+
+        if (!resolvidos.length) {
+          return res.status(400).json({
+            error: 'Nenhum código OMIE válido nos produtos filtrados. Use o filtro da Lista de produtos e o botão "Registrar alteração em massa".',
+            erros,
+          });
+        }
+
+        const templateCodigo = resolvidos[0].codigoOmie;
+
+        // Anexa uma vez e reutiliza as URLs em todos os registros
+        const [fotoAntes, fotoDepois, video, arquivo] = await Promise.all([
+          uploadArquivo(templateCodigo, 'foto', files.foto_antes?.[0]),
+          uploadArquivo(templateCodigo, 'foto', files.foto_depois?.[0]),
+          uploadArquivo(templateCodigo, 'video', files.video?.[0]),
+          uploadArquivo(templateCodigo, 'arquivo', files.arquivo?.[0]),
+        ]);
+
+        const criados = [];
+        for (const item of resolvidos) {
+          try {
+            const codigoOmie = item.codigoOmie;
+            const { rows } = await pool.query(
+              `INSERT INTO engenharia.alteracoes_produto
+                 (codigo_omie, antes, depois, referencia, foto_antes, foto_depois, video, arquivo, criado_por)
+               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+               RETURNING id, data::text AS data, codigo_omie`,
+              [codigoOmie, antes, depois, referencia, fotoAntes, fotoDepois, video, arquivo, criadoPor]
+            );
+            if (rows[0]) criados.push(rows[0]);
+          } catch (err) {
+            erros.push({ codigo: item.raw, error: err.message || String(err) });
+          }
+        }
+
+        if (!criados.length) {
+          return res.status(500).json({
+            error: 'Nenhuma alteração foi criada.',
+            erros,
+          });
+        }
+
+        res.json({
+          ok: true,
+          criados: criados.length,
+          alteracoes: criados,
+          erros,
+        });
+      } catch (e) {
+        console.error('[POST /api/engenharia/alteracoes-produto/em-massa] erro:', e);
         res.status(500).json({ error: e.message || String(e) });
       }
     }

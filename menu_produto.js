@@ -949,16 +949,7 @@ window._loadSolicitacoesTab = async function() {
         cardEl._loading = true;
         _solKanbanLoading(true, 'Carregando itens...');
         try {
-          const cachedModal = _solGetSepModalCache(nSolic, 'global');
-          if (acao === 'modal' && cachedModal?.grupoAtual?.itens?.length && !document.getElementById('modalSeparacaoLogistica')) {
-            void _abrirModalSeparacao(
-              cachedModal.grupoAtual,
-              cachedModal.gruposConflito || [],
-              cachedModal.preloaded || {}
-            ).catch(err => console.warn('[SEP] abrir modal cache:', err));
-            return;
-          }
-
+          // Sempre busca do servidor (cache só acelerava abertura e escondia itens novos).
           const ri = await fetch(_solBuildKanbanItensUrl(nSolic, { escopoItens: 'global' }), { credentials: 'include' });
           const di = await ri.json();
           if (!di.ok) throw new Error(di.error || 'Erro ao buscar itens');
@@ -2871,7 +2862,9 @@ async function _abrirModalAguardandoRetiradaSep(nSolic, opts = {}) {
   let itensDerivados = [];
   let estoqueBatch = {};
   let enderecoBatch = {};
-  const cacheHit = _solGetAguardRetCache(nSolic, tituloColuna, escopoItens);
+  // Solicitado: nunca usar cache — itens podem ser adicionados enquanto o modal fica aberto.
+  const isSolicitadoEarly = tituloColuna === 'Solicitado';
+  const cacheHit = isSolicitadoEarly ? null : _solGetAguardRetCache(nSolic, tituloColuna, escopoItens);
   if (cacheHit) {
     itens = Array.isArray(cacheHit.itens) ? cacheHit.itens : [];
     itensDerivados = Array.isArray(cacheHit.itensDerivados) ? cacheHit.itensDerivados : [];
@@ -3035,10 +3028,10 @@ async function _abrirModalAguardandoRetiradaSep(nSolic, opts = {}) {
 
       <div style="overflow-y:auto;flex:1;">
         <div style="font-size:.75rem;color:#6b7280;font-weight:700;padding:12px 12px 4px;letter-spacing:.05em;text-transform:uppercase;">Itens desta solicitação</div>
-        <div>${itens.map(renderLinha).join('')}</div>
+        <div id="modalAguardRetItensLista">${itens.map(renderLinha).join('')}</div>
 
         <div style="margin-top:10px;font-size:.75rem;color:#6b7280;font-weight:700;padding:10px 12px 4px;letter-spacing:.05em;text-transform:uppercase;border-top:1px solid #2a2a2a;">Itens que saíram desta solicitação (SEP.x)</div>
-        <div style="padding-bottom:6px;">
+        <div id="modalAguardRetDerivLista" style="padding-bottom:6px;">
           ${itensDerivados.length
             ? itensDerivados.map(renderLinhaDerivado).join('')
             : '<div style="padding:10px 12px;color:#9ca3af;font-size:.74rem;">Nenhum item derivado encontrado.</div>'}
@@ -3067,6 +3060,28 @@ async function _abrirModalAguardandoRetiradaSep(nSolic, opts = {}) {
     </div>`;
 
   document.body.appendChild(modal);
+
+  /** Busca a lista atual da SEP no servidor (usada ao Iniciar separação). */
+  async function _recarregarItensAguardRetAntesIniciar() {
+    const r = await fetch(_solBuildKanbanItensUrl(nSolic, { includeDerivados: true, escopoItens }), { credentials: 'include' });
+    const d = await r.json();
+    if (!d.ok) throw new Error(d.error || 'Erro ao atualizar itens da SEP.');
+    const idsAntes = new Set(itens.map(it => String(it.solic_id)));
+    itens = Array.isArray(d.itens) ? d.itens : [];
+    itensDerivados = Array.isArray(d.itens_derivados) ? d.itens_derivados : [];
+    const qtdNovos = itens.filter(it => !idsAntes.has(String(it.solic_id))).length;
+
+    const listaEl = document.getElementById('modalAguardRetItensLista');
+    if (listaEl) listaEl.innerHTML = itens.map(renderLinha).join('');
+    const derivEl = document.getElementById('modalAguardRetDerivLista');
+    if (derivEl) {
+      derivEl.innerHTML = itensDerivados.length
+        ? itensDerivados.map(renderLinhaDerivado).join('')
+        : '<div style="padding:10px 12px;color:#9ca3af;font-size:.74rem;">Nenhum item derivado encontrado.</div>';
+    }
+    _solInvalidateAguardRetCache(nSolic, tituloColuna, escopoItens);
+    return { novos: qtdNovos, total: itens.length };
+  }
 
   const closeModal = () => modal.remove();
   document.getElementById('btnModalAguardRetFechar')?.addEventListener('click', closeModal);
@@ -3161,19 +3176,33 @@ async function _abrirModalAguardandoRetiradaSep(nSolic, opts = {}) {
   });
 
   document.getElementById('btnAguardRetIniciarSep')?.addEventListener('click', async () => {
-    const solicIds = _solSolicIdsParaIniciarSep(itens);
-    if (!solicIds.length) {
-      alert('Esta SEP não tem itens em Solicitado. Se já foi separada, veja a coluna "Aguardando retirada" no kanban (role para a direita).');
-      return;
-    }
     const btn = document.getElementById('btnAguardRetIniciarSep');
+    if (!btn || btn.disabled) return;
     btn.disabled = true;
-    btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin" style="margin-right:4px;"></i>Iniciando...';
+    btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin" style="margin-right:4px;"></i>Atualizando...';
     try {
+      // Carrega TODOS os itens atuais desta SEP (antes do bloqueio de entrada)
+      const refresh = await _recarregarItensAguardRetAntesIniciar();
+      const solicIds = _solSolicIdsParaIniciarSep(itens);
+      if (!solicIds.length) {
+        alert('Esta SEP não tem itens em Solicitado. Se já foi separada, veja a coluna "Aguardando retirada" no kanban (role para a direita).');
+        btn.disabled = false;
+        btn.innerHTML = '<i class="fa-solid fa-play" style="margin-right:4px;"></i>Iniciar separação';
+        return;
+      }
+      if (refresh.novos > 0) {
+        alert(
+          `${refresh.novos} item(ns) entraram nesta SEP antes do início.\n` +
+          `Total atualizado: ${refresh.total} item(ns).\n\n` +
+          `Todos serão incluídos. Depois disso, novos pedidos geram SEP nova.`
+        );
+      }
+      btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin" style="margin-right:4px;"></i>Iniciando...';
+
       // ── Gera código ECT (libera Imprimir em Envio de mercadoria) ──────────
       await _solDispararVippGerarEtiqueta(nSolic, { alertarErro: true, recarregarEnvio: true });
 
-      // ── Avança itens para "Em Separação" ──────────────────────────────────
+      // ── Avança itens para "Em Separação" (servidor também leva irmãos da SEP) ──
       const r = await fetch('/api/logistica/itens_solicitados/separacao', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
@@ -19058,6 +19087,8 @@ document.querySelectorAll('#atTabelaWrapper thead th[data-col]').forEach(th => {
   let _relGerSecao = 'executivo';
   let _relGerLote3m = false;
   let _relGerLoteFiltroTag = null;
+  let _relGerAbort = null;
+  let _relGerLoadSeq = 0;
   const _charts = {};
   const _chartsRendered = new Set();
 
@@ -19073,8 +19104,9 @@ document.querySelectorAll('#atTabelaWrapper thead th[data-col]').forEach(th => {
     { id: 'pareto',     label: 'Pareto 80/20',              icon: 'fa-chart-line',       pg: 6 },
     { id: 'financeiro', label: 'Análise Financeira',        icon: 'fa-coins',            pg: 7 },
     { id: 'lote',       label: 'Análise de Lote',           icon: 'fa-layer-group',      pg: 8 },
-    { id: 'plano',      label: 'Plano de Ação',             icon: 'fa-list-check',       pg: 9 },
-    { id: 'conclusao',  label: 'Conclusão Executiva',       icon: 'fa-flag-checkered',   pg: 10 },
+    { id: 'ppm-tx',     label: 'Análise PPM e Tx',          icon: 'fa-percent',          pg: 9 },
+    { id: 'plano',      label: 'Plano de Ação',             icon: 'fa-list-check',       pg: 10 },
+    { id: 'conclusao',  label: 'Conclusão Executiva',       icon: 'fa-flag-checkered',   pg: 11 },
   ];
 
   function _fmtData(raw) {
@@ -19300,34 +19332,6 @@ document.querySelectorAll('#atTabelaWrapper thead th[data-col]').forEach(th => {
               </div>
             </div>
           </div>
-          <div class="at-rel-ger-card" style="margin-top:14px;">
-            <h4><i class="fa-solid fa-chart-simple"></i> PPM por Modelo</h4>
-            <p style="margin:0 0 10px;font-size:11px;color:#64748b;line-height:1.5;">
-              PPM = (O.S. do modelo ÷ unidades no período) × 1.000.000.
-              <strong>Produção</strong> usa máquinas integradas no período (data de produção);
-              <strong>Venda</strong> usa quantidade faturada/entregue no período (data da NF).
-            </p>
-            <div class="at-rel-ger-chart lg"><canvas id="atRelGerChartPpm"></canvas></div>
-          </div>
-          <div class="at-rel-ger-card" style="margin-top:14px;">
-            <h4>Tabela PPM — mensuração por produção e venda</h4>
-            <div style="overflow:auto;max-height:320px;">
-              <table class="at-rel-ger-tbl">
-                <thead>
-                  <tr>
-                    <th>Modelo</th>
-                    <th class="r">O.S.</th>
-                    <th class="r">Qtd prod.</th>
-                    <th class="r">PPM prod.</th>
-                    <th class="r">Qtd vend.</th>
-                    <th class="r">PPM vend.</th>
-                    <th class="r">Idade média (prod → O.S.)</th>
-                  </tr>
-                </thead>
-                <tbody id="atRelGerPpmBody"></tbody>
-              </table>
-            </div>
-          </div>
         </div>
         ${_footerHtml(3)}
       </div>
@@ -19458,6 +19462,9 @@ document.querySelectorAll('#atTabelaWrapper thead th[data-col]').forEach(th => {
                 <i class="fa-solid fa-arrow-left"></i> Voltar
               </button>
             </div>
+            <p id="atRelGerLoteAltHint" style="margin:0 0 8px;font-size:11px;color:#64748b;line-height:1.45;">
+              Balão laranja = alteração/melhoria de engenharia no mês (referência ou data do registro). Passe o mouse na barra para ver Antes → Depois.
+            </p>
             <div class="at-rel-ger-chart lg"><canvas id="atRelGerChartLote"></canvas></div>
           </div>
           <div class="at-rel-ger-card">
@@ -19467,6 +19474,43 @@ document.querySelectorAll('#atTabelaWrapper thead th[data-col]').forEach(th => {
           <div id="atRelGerLoteResumo" style="margin-top:10px;font-size:12px;color:#64748b;line-height:1.6;"></div>
         </div>
         ${_footerHtml(8)}
+      </div>
+
+      <div class="at-rel-ger-page${_relGerSecao === 'ppm-tx' ? ' is-active' : ''}" data-sec="ppm-tx">
+        ${hdr()}
+        <div class="at-rel-ger-sec-title"><i class="fa-solid fa-percent"></i> Análise PPM e Tx</div>
+        <div class="at-rel-ger-body">
+          <div class="at-rel-ger-card">
+            <h4><i class="fa-solid fa-chart-column"></i> Taxa de problema por modelo (coorte de produção)</h4>
+            <p style="margin:0 0 10px;font-size:11px;color:#64748b;line-height:1.5;">
+              Usa os meses de produção do gráfico <strong>Análise de Lote</strong>:
+              soma O.S. e produção por modelo → <strong>Taxa %</strong> = (Σ O.S. ÷ Σ produção) × 100.
+              Também mostra <strong>1 em X</strong> e <strong>PPM</strong> (complementar).
+              Ex.: FTI 2 O.S. / 133 produzidas → 1,5% · 1 em 67 · ~15k PPM.
+            </p>
+            <div class="at-rel-ger-chart lg"><canvas id="atRelGerChartPpmTx"></canvas></div>
+          </div>
+          <div class="at-rel-ger-card" style="margin-top:14px;">
+            <h4>Tabela — Taxa %, 1 em X e PPM por modelo</h4>
+            <div style="overflow:auto;max-height:400px;">
+              <table class="at-rel-ger-tbl">
+                <thead>
+                  <tr>
+                    <th>Modelo</th>
+                    <th class="r">O.S.</th>
+                    <th class="r">Qtd prod. (soma meses)</th>
+                    <th class="r">Taxa %</th>
+                    <th class="r">1 em X</th>
+                    <th class="r">PPM</th>
+                    <th class="r">Meses</th>
+                  </tr>
+                </thead>
+                <tbody id="atRelGerPpmTxBody"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+        ${_footerHtml(9)}
       </div>
 
       <div class="at-rel-ger-page${_relGerSecao === 'plano' ? ' is-active' : ''}" data-sec="plano">
@@ -19494,7 +19538,7 @@ document.querySelectorAll('#atTabelaWrapper thead th[data-col]').forEach(th => {
             </table>
           </div>
         </div>
-        ${_footerHtml(9)}
+        ${_footerHtml(10)}
       </div>
 
       <div class="at-rel-ger-page${_relGerSecao === 'conclusao' ? ' is-active' : ''}" data-sec="conclusao">
@@ -19527,7 +19571,7 @@ document.querySelectorAll('#atTabelaWrapper thead th[data-col]').forEach(th => {
           </div>
           <div id="atRelGerEditadoEm" style="margin-top:10px;font-size:11px;color:#94a3b8;text-align:right;"></div>
         </div>
-        ${_footerHtml(10)}
+        ${_footerHtml(11)}
       </div>
     `;
 
@@ -19661,6 +19705,11 @@ document.querySelectorAll('#atTabelaWrapper thead th[data-col]').forEach(th => {
         resumo.innerHTML = `<strong>${janela.total_maquinas || 0}</strong> máquina(s) com O.S. abertas entre <strong>${_esc(janela.inicio || '—')}</strong> e <strong>${_esc(janela.fim || '—')}</strong> (inclui sem data de produção). No gráfico: <strong>${totalChart}</strong> registro(s) em <strong>${mesesProducao}</strong> coluna(s) e <strong>${modelosAtivos}</strong> modelo(s). Principais: ${modeloJanela}.`;
       }
     }
+    _chartsRendered.delete('ppm-tx');
+    _destroyChart('ppmTx');
+    _renderTabelaPpmTx(_relGerData);
+    const ppmPage = document.querySelector('.at-rel-ger-page[data-sec="ppm-tx"]');
+    if (ppmPage?.classList.contains('is-active')) _renderChartsSecao('ppm-tx', _relGerData);
   }
 
   function _limparFiltroLoteTag() {
@@ -19821,6 +19870,12 @@ document.querySelectorAll('#atTabelaWrapper thead th[data-col]').forEach(th => {
       });
       if (tipoEl) qs.set('tipo', tipoEl.value);
       if (filtros.mes_producao) qs.set('mes_producao', filtros.mes_producao);
+      if (filtros.meses_producao) {
+        const meses = Array.isArray(filtros.meses_producao)
+          ? filtros.meses_producao
+          : String(filtros.meses_producao).split(',');
+        qs.set('meses_producao', meses.map((m) => String(m).trim()).filter(Boolean).join(','));
+      }
       if (filtros.modelo) qs.set('modelo', filtros.modelo);
       if (filtros.tag) qs.set('tag', filtros.tag);
 
@@ -19857,17 +19912,114 @@ document.querySelectorAll('#atTabelaWrapper thead th[data-col]').forEach(th => {
     }
   }
 
-  function _renderChartLoteEmpilhado(canvasId, chartKey, stacked) {
+  function _dadosLoteAlteracoes(data) {
+    const rows = data?.analise_lote?.alteracoes_por_mes_modelo || [];
+    return Array.isArray(rows) ? rows : [];
+  }
+
+  function _mapAlteracoesPorMesModelo(data) {
+    const map = new Map();
+    _dadosLoteAlteracoes(data).forEach((r) => {
+      if (!r?.mes || !r?.modelo) return;
+      const key = `${r.mes}||${r.modelo}`;
+      if (!map.has(key)) map.set(key, []);
+      map.get(key).push(r);
+    });
+    return map;
+  }
+
+  function _fmtAlteracaoTooltipLinha(r) {
+    const prod = r.codigo_interno || r.codigo_omie || 'produto';
+    const antes = String(r.antes || '').trim().slice(0, 80);
+    const depois = String(r.depois || '').trim().slice(0, 80);
+    const ref = String(r.referencia || '').replace(/^Data:\s*/i, '').trim();
+    const partes = [`🔧 ${prod}`];
+    if (antes || depois) partes.push(`${antes || '—'} → ${depois || '—'}`);
+    if (ref) partes.push(`ref. ${ref}`);
+    return partes.join(' · ');
+  }
+
+  function _pluginBaloesAlteracaoLote(stacked, altMap) {
+    return {
+      id: 'atRelGerLoteAltBaloes',
+      afterDatasetsDraw(chart) {
+        if (!altMap || !altMap.size) return;
+        const { ctx, chartArea, scales } = chart;
+        if (!chartArea || !scales?.x || !scales?.y) return;
+        const mesesOrd = stacked.mesesOrd || [];
+        const datasets = chart.data.datasets || [];
+
+        mesesOrd.forEach((mes, index) => {
+          if (!mes || mes === '__sem_dt__') return;
+          let totalAlt = 0;
+          let somaY = 0;
+          datasets.forEach((ds) => {
+            const modelo = ds.label;
+            const alts = altMap.get(`${mes}||${modelo}`) || [];
+            if (!alts.length) return;
+            totalAlt += alts.length;
+            const meta = chart.getDatasetMeta(datasets.indexOf(ds));
+            const el = meta?.data?.[index];
+            if (el) {
+              const base = typeof el.base === 'number' ? el.base : el.y;
+              const top = typeof el.y === 'number' ? el.y : base;
+              somaY = Math.min(somaY || top, top);
+            }
+          });
+          if (!totalAlt) return;
+
+          // Altura total da pilha no índice
+          let stackTop = null;
+          datasets.forEach((_ds, di) => {
+            const meta = chart.getDatasetMeta(di);
+            const el = meta?.data?.[index];
+            if (!el || typeof el.y !== 'number') return;
+            if (stackTop == null || el.y < stackTop) stackTop = el.y;
+          });
+          if (stackTop == null) return;
+
+          const x = scales.x.getPixelForValue(index);
+          const y = Math.max(chartArea.top + 12, stackTop - 14);
+          ctx.save();
+          ctx.beginPath();
+          ctx.fillStyle = '#f59e0b';
+          ctx.strokeStyle = '#fff';
+          ctx.lineWidth = 2;
+          ctx.arc(x, y, 10, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.stroke();
+          ctx.fillStyle = '#1e293b';
+          ctx.font = 'bold 11px sans-serif';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(String(totalAlt), x, y + 0.5);
+          // rabinho do balão
+          ctx.beginPath();
+          ctx.fillStyle = '#f59e0b';
+          ctx.moveTo(x - 4, y + 8);
+          ctx.lineTo(x + 4, y + 8);
+          ctx.lineTo(x, y + 14);
+          ctx.closePath();
+          ctx.fill();
+          ctx.restore();
+        });
+      },
+    };
+  }
+
+  function _renderChartLoteEmpilhado(canvasId, chartKey, stacked, data) {
     _destroyChart(chartKey);
     const canvas = document.getElementById(canvasId);
     if (!canvas || !stacked?.labels?.length) return;
     const mesesOrd = stacked.mesesOrd || [];
+    const altMap = _mapAlteracoesPorMesModelo(data);
     _charts[chartKey] = new Chart(canvas.getContext('2d'), {
       type: 'bar',
       data: {
         labels: stacked.labels,
         datasets: stacked.datasets,
       },
+      plugins: [_pluginBaloesAlteracaoLote(stacked, altMap)],
       options: {
         responsive: true,
         maintainAspectRatio: false,
@@ -19897,7 +20049,24 @@ document.querySelectorAll('#atTabelaWrapper thead th[data-col]').forEach(th => {
           },
           tooltip: {
             callbacks: {
-              footer: () => 'Clique para ver máquinas e O.S.',
+              afterBody: (items) => {
+                if (!items?.length) return [];
+                const item = items[0];
+                const mes = mesesOrd[item.dataIndex];
+                const modelo = item.dataset?.label;
+                if (!mes || !modelo) return [];
+                const alts = altMap.get(`${mes}||${modelo}`) || [];
+                if (!alts.length) {
+                  // Também mostra outras alterações do mês (outros modelos) se passar no topo
+                  const doMes = [...altMap.entries()]
+                    .filter(([k]) => k.startsWith(`${mes}||`))
+                    .flatMap(([, v]) => v);
+                  if (!doMes.length) return [];
+                  return ['', 'Alterações no mês (outros modelos):', ...doMes.slice(0, 4).map(_fmtAlteracaoTooltipLinha)];
+                }
+                return ['', 'Alteração / melhoria de engenharia:', ...alts.slice(0, 5).map(_fmtAlteracaoTooltipLinha)];
+              },
+              footer: () => 'Clique para ver máquinas e O.S. · balão 🔧 = alteração no mês',
             },
           },
         },
@@ -19994,6 +20163,205 @@ document.querySelectorAll('#atTabelaWrapper thead th[data-col]').forEach(th => {
     });
   }
 
+  /** Linhas mês×modelo (base da coorte) */
+  function _dadosLotePpmMes(data) {
+    const lote = data?.analise_lote || {};
+    const prodMap = new Map(
+      (lote.producao_por_mes_modelo || []).map((r) => [`${r.mes}||${r.modelo}`, Number(r.quantidade) || 0])
+    );
+
+    let defectRows;
+    if (_relGerLoteFiltroTag) {
+      const agg = new Map();
+      (lote.por_mes_modelo_tag || []).forEach((r) => {
+        if (r.tag !== _relGerLoteFiltroTag || !r.mes || r.mes === '__sem_dt__') return;
+        const key = `${r.mes}||${r.modelo}`;
+        const cur = agg.get(key) || { mes: r.mes, label: r.label, modelo: r.modelo, os: 0 };
+        cur.os += r.total || 0;
+        agg.set(key, cur);
+      });
+      defectRows = [...agg.values()];
+    } else if (Array.isArray(lote.ppm_por_mes_modelo) && lote.ppm_por_mes_modelo.length) {
+      defectRows = lote.ppm_por_mes_modelo.map((r) => ({
+        mes: r.mes,
+        label: r.label,
+        modelo: r.modelo,
+        os: r.os || 0,
+        qtd_producao: r.qtd_producao || 0,
+      }));
+      return defectRows;
+    } else {
+      defectRows = (lote.por_mes_modelo || [])
+        .filter((r) => r.mes && r.mes !== '__sem_dt__')
+        .map((r) => ({ mes: r.mes, label: r.label, modelo: r.modelo, os: r.total || 0 }));
+    }
+
+    return defectRows.map((r) => {
+      const qtd_producao = r.qtd_producao != null
+        ? Number(r.qtd_producao) || 0
+        : (prodMap.get(`${r.mes}||${r.modelo}`) || 0);
+      return {
+        mes: r.mes,
+        label: r.label,
+        modelo: r.modelo,
+        os: r.os || 0,
+        qtd_producao,
+      };
+    });
+  }
+
+  /**
+   * PPM coorte agregado por modelo:
+   * (Σ O.S. nos meses de produção ÷ Σ qtd produzida nesses meses) × 1e6
+   */
+  function _dadosLotePpm(data) {
+    const byModelo = new Map();
+    _dadosLotePpmMes(data).forEach((r) => {
+      if (!r.modelo) return;
+      const cur = byModelo.get(r.modelo) || {
+        modelo: r.modelo,
+        os: 0,
+        qtd_producao: 0,
+        meses: [],
+        meses_keys: [],
+      };
+      cur.os += r.os || 0;
+      cur.qtd_producao += r.qtd_producao || 0;
+      const lab = r.label || r.mes;
+      if (lab && !cur.meses.includes(lab)) cur.meses.push(lab);
+      if (r.mes && !cur.meses_keys.includes(r.mes)) cur.meses_keys.push(r.mes);
+      byModelo.set(r.modelo, cur);
+    });
+
+    return [...byModelo.values()]
+      .map((r) => {
+        const os = r.os;
+        const qtd = r.qtd_producao;
+        const sem = qtd <= 0;
+        const taxa_pct = !sem ? Math.round((os / qtd) * 10000) / 100 : null;
+        const um_em_x = (!sem && os > 0) ? Math.max(1, Math.round(qtd / os)) : null;
+        return {
+          modelo: r.modelo,
+          os,
+          qtd_producao: qtd,
+          n_meses: r.meses.length,
+          meses_label: r.meses.join(', '),
+          meses_keys: r.meses_keys || [],
+          taxa_pct,
+          um_em_x,
+          ppm_producao: !sem ? Math.round((os / qtd) * 1e6) : 0,
+          sem_denominador: sem,
+        };
+      })
+      .sort((a, b) => (b.os - a.os) || ((b.taxa_pct || 0) - (a.taxa_pct || 0)));
+  }
+
+  function _fmtTaxaPct(r) {
+    if (r.sem_denominador || r.taxa_pct == null) return '—';
+    return `${Number(r.taxa_pct).toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 2 })}%`;
+  }
+
+  function _fmtUmEmX(r) {
+    if (r.sem_denominador || r.um_em_x == null) return '—';
+    return `1 em ${Number(r.um_em_x).toLocaleString('pt-BR')}`;
+  }
+
+  function _renderTabelaPpmTx(data) {
+    const body = document.getElementById('atRelGerPpmTxBody');
+    if (!body) return;
+    const rows = _dadosLotePpm(data);
+    body.innerHTML = rows.length
+      ? rows.map((r) => {
+        const ppmHtml = r.sem_denominador
+          ? '—'
+          : `<div class="at-rel-ger-ppm-val">${_esc(_fmtPpmK(r.ppm_producao, false))}</div>
+             <div class="at-rel-ger-ppm-desc">${_esc(_descPpm(r.ppm_producao, false, 'produzidas'))}</div>`;
+        return `<tr>
+          <td>${_esc(r.modelo)}</td>
+          <td class="r">${r.os || 0}</td>
+          <td class="r">${r.qtd_producao || 0}</td>
+          <td class="r" style="font-weight:700;color:#1e3a5f;">${_esc(_fmtTaxaPct(r))}</td>
+          <td class="r">${_esc(_fmtUmEmX(r))}</td>
+          <td class="r at-rel-ger-ppm-cell">${ppmHtml}</td>
+          <td class="r" title="${_esc(r.meses_label || '')}">${r.n_meses || 0}</td>
+        </tr>`;
+      }).join('')
+      : '<tr><td colspan="7" style="text-align:center;color:#94a3b8;">Sem dados (é preciso data de produção na O.S. — veja Análise de Lote).</td></tr>';
+  }
+
+  function _renderChartPpmTx(data) {
+    _destroyChart('ppmTx');
+    const canvas = document.getElementById('atRelGerChartPpmTx');
+    if (!canvas) return;
+    const rows = _dadosLotePpm(data).filter((r) => !r.sem_denominador && r.taxa_pct != null);
+    if (!rows.length) return;
+
+    _charts.ppmTx = new Chart(canvas.getContext('2d'), {
+      type: 'bar',
+      data: {
+        labels: rows.map((r) => r.modelo),
+        datasets: [{
+          label: 'Taxa %',
+          data: rows.map((r) => r.taxa_pct || 0),
+          backgroundColor: rows.map((_, i) => `${CORES[i % CORES.length]}cc`),
+          borderColor: rows.map((_, i) => CORES[i % CORES.length]),
+          borderWidth: 1,
+          borderRadius: 4,
+        }],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        animation: { duration: 280 },
+        onClick: (_evt, elements) => {
+          if (!elements || !elements.length) return;
+          const row = rows[elements[0].index];
+          if (!row?.modelo || !(row.os > 0)) return;
+          const filtros = { modelo: row.modelo };
+          if (Array.isArray(row.meses_keys) && row.meses_keys.length) {
+            filtros.meses_producao = row.meses_keys;
+          }
+          let titulo = `Modelo ${row.modelo} · ${_fmtTaxaPct(row)} · ${_fmtUmEmX(row)}`;
+          if (_relGerLoteFiltroTag) {
+            filtros.tag = _relGerLoteFiltroTag;
+            titulo += ` · defeito "${_relGerLoteFiltroTag}"`;
+          }
+          _abrirLoteDetalhe(filtros, titulo);
+        },
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            callbacks: {
+              label(ctx) {
+                const row = rows[ctx.dataIndex];
+                if (!row) return '';
+                return `Taxa: ${_fmtTaxaPct(row)} · ${_fmtUmEmX(row)} · PPM ${_fmtPpmK(row.ppm_producao, false)} · ${row.os || 0} O.S. / ${row.qtd_producao || 0} prod.`;
+              },
+              footer: () => 'Clique para ver O.S. do modelo',
+            },
+          },
+        },
+        scales: {
+          x: {
+            ticks: { color: '#334155', font: { size: 11 } },
+            grid: { display: false },
+          },
+          y: {
+            beginAtZero: true,
+            ticks: {
+              color: '#64748b',
+              font: { size: 10 },
+              callback(v) { return `${Number(v).toLocaleString('pt-BR')}%`; },
+            },
+            grid: { color: '#e2e8f0' },
+            title: { display: true, text: 'Taxa de problema (%)', color: '#64748b', font: { size: 10 } },
+          },
+        },
+      },
+    });
+    canvas.style.cursor = 'pointer';
+  }
+
   function _renderLoteConteudo(data) {
     const lote = data?.analise_lote || {};
     const janela = lote.janela_3m || {};
@@ -20080,6 +20448,10 @@ document.querySelectorAll('#atTabelaWrapper thead th[data-col]').forEach(th => {
       p.classList.toggle('is-active', p.dataset.sec === sec);
     });
     if (_relGerData && sec === 'lote') _renderLoteConteudo(_relGerData);
+    else if (_relGerData && sec === 'ppm-tx') {
+      _renderTabelaPpmTx(_relGerData);
+      if (!_chartsRendered.has(sec)) _renderChartsSecao(sec, _relGerData);
+    }
     else if (_relGerData && !_chartsRendered.has(sec)) _renderChartsSecao(sec, _relGerData);
     requestAnimationFrame(() => {
       Object.values(_charts).forEach(ch => ch?.resize?.());
@@ -20159,64 +20531,6 @@ document.querySelectorAll('#atTabelaWrapper thead th[data-col]').forEach(th => {
           type: 'bar',
           data: { labels: modRows.map(r => r.modelo), datasets: [{ label: 'O.S.', data: modRows.map(r => r.total), backgroundColor: '#f59e0bcc', borderColor: '#ea580c', borderWidth: 1, borderRadius: 4 }] },
           options: { ..._chartOptsBarH(), indexAxis: 'y' },
-        });
-      }
-      _destroyChart('ppm');
-      const cPpm = document.getElementById('atRelGerChartPpm');
-      const ppmRows = data.ppm_modelos || [];
-      if (cPpm && ppmRows.length) {
-        _charts.ppm = new Chart(cPpm.getContext('2d'), {
-          type: 'bar',
-          data: {
-            labels: ppmRows.map(r => r.modelo),
-            datasets: [
-              {
-                label: 'PPM Produção',
-                data: ppmRows.map(r => r.sem_denominador_producao ? null : (r.ppm_producao || 0)),
-                backgroundColor: '#1e3a5fcc',
-                borderColor: '#1e3a5f',
-                borderWidth: 1,
-                borderRadius: 4,
-              },
-              {
-                label: 'PPM Venda',
-                data: ppmRows.map(r => r.sem_denominador_venda ? null : (r.ppm_venda || 0)),
-                backgroundColor: '#10b981cc',
-                borderColor: '#059669',
-                borderWidth: 1,
-                borderRadius: 4,
-              },
-            ],
-          },
-          options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            plugins: {
-              legend: { position: 'top', labels: { color: '#475569', font: { size: 11 }, boxWidth: 12 } },
-              tooltip: {
-                callbacks: {
-                  label(ctx) {
-                    const v = ctx.parsed?.y;
-                    if (v == null || Number.isNaN(v)) return `${ctx.dataset.label}: sem volume no período`;
-                    return `${ctx.dataset.label}: ${Number(v).toLocaleString('pt-BR')}`;
-                  },
-                },
-              },
-            },
-            scales: {
-              x: { ticks: { color: '#64748b', font: { size: 10 } }, grid: { color: '#e2e8f0' } },
-              y: {
-                beginAtZero: true,
-                ticks: {
-                  color: '#64748b',
-                  font: { size: 10 },
-                  callback(v) { return Number(v).toLocaleString('pt-BR'); },
-                },
-                grid: { color: '#e2e8f0' },
-                title: { display: true, text: 'PPM', color: '#64748b', font: { size: 10 } },
-              },
-            },
-          },
         });
       }
     }
@@ -20322,8 +20636,13 @@ document.querySelectorAll('#atTabelaWrapper thead th[data-col]').forEach(th => {
 
     if (sec === 'lote') {
       const defRows = _dadosLoteDefeitos(data).slice(0, 5);
-      _renderChartLoteEmpilhado('atRelGerChartLote', 'lote', _dadosLoteStacked(data));
+      _renderChartLoteEmpilhado('atRelGerChartLote', 'lote', _dadosLoteStacked(data), data);
       _renderLoteDefPies(data, defRows);
+    }
+
+    if (sec === 'ppm-tx') {
+      _renderChartPpmTx(data);
+      _renderTabelaPpmTx(data);
     }
   }
 
@@ -20376,6 +20695,31 @@ document.querySelectorAll('#atTabelaWrapper thead th[data-col]').forEach(th => {
     _renderChartsSecao(_relGerSecao, data);
   }
 
+  /** PPM em milhares: 40492 → 40k */
+  function _fmtPpmK(v, sem) {
+    if (sem || v == null || Number.isNaN(Number(v))) return '—';
+    const k = Math.round(Number(v) / 1000);
+    return `${k.toLocaleString('pt-BR')}k`;
+  }
+
+  /**
+   * Interpretação do PPM: a cada X máquinas (produzidas|vendidas), Y com problema.
+   * PPM = defeitos por 1.000.000 → intervalo ≈ 1.000.000 / PPM.
+   */
+  function _descPpm(v, sem, contexto) {
+    if (sem || v == null || !(Number(v) > 0)) return '';
+    const ppm = Number(v);
+    const plural = contexto === 'vendidas' ? 'vendidas' : 'produzidas';
+    const singular = contexto === 'vendidas' ? 'vendida' : 'produzida';
+    if (ppm >= 1_000_000) {
+      const comProblema = Math.max(1, Math.round(ppm / 1_000_000));
+      return `a cada 1 máquina ${singular}, ${comProblema} com problema`;
+    }
+    const cada = Math.max(1, Math.round(1_000_000 / ppm));
+    if (cada === 1) return `a cada 1 máquina ${singular}, 1 com problema`;
+    return `a cada ${cada.toLocaleString('pt-BR')} máquinas ${plural}, 1 com problema`;
+  }
+
   function _renderTabelas(data) {
     const tagTotal = (data.por_tag || []).reduce((s, r) => s + r.total, 0);
 
@@ -20387,23 +20731,7 @@ document.querySelectorAll('#atTabelaWrapper thead th[data-col]').forEach(th => {
         : '<tr><td colspan="2" style="text-align:center;color:#94a3b8;">Nenhum modelo no período.</td></tr>';
     }
 
-    const ppmBody = document.getElementById('atRelGerPpmBody');
-    if (ppmBody) {
-      const rows = data.ppm_modelos || [];
-      const fmtPpm = (v, sem) => (sem ? '—' : Number(v || 0).toLocaleString('pt-BR'));
-      const fmtIdade = (v) => (v == null || Number.isNaN(Number(v)) ? '—' : `${Math.round(Number(v))} d`);
-      ppmBody.innerHTML = rows.length
-        ? rows.map(r => `<tr>
-            <td>${_esc(r.modelo)}</td>
-            <td class="r">${r.os || 0}</td>
-            <td class="r">${r.qtd_producao || 0}</td>
-            <td class="r">${fmtPpm(r.ppm_producao, r.sem_denominador_producao)}</td>
-            <td class="r">${r.qtd_venda || 0}</td>
-            <td class="r">${fmtPpm(r.ppm_venda, r.sem_denominador_venda)}</td>
-            <td class="r">${fmtIdade(r.idade_media_prod_dias)}</td>
-          </tr>`).join('')
-        : '<tr><td colspan="7" style="text-align:center;color:#94a3b8;">Sem dados de PPM no período.</td></tr>';
-    }
+    _renderTabelaPpmTx(data);
 
     const tagBody = document.getElementById('atRelGerTagBody');
     if (tagBody) {
@@ -20746,15 +21074,30 @@ document.querySelectorAll('#atTabelaWrapper thead th[data-col]').forEach(th => {
     const modo = modoEl?.value || 'mes';
     const tipo = tipoEl ? tipoEl.value : 'Qualidade';
 
-    if (statusEl) { statusEl.style.display = 'block'; statusEl.textContent = 'Carregando relatório...'; }
+    if (_relGerAbort) {
+      try { _relGerAbort.abort(); } catch (_) { /* ignore */ }
+    }
+    _relGerAbort = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    const loadSeq = ++_relGerLoadSeq;
+    const signal = _relGerAbort?.signal;
+
+    if (statusEl) {
+      statusEl.style.display = 'block';
+      const label = statusEl.querySelector('span');
+      if (label) label.textContent = 'Gerando relatório...';
+    }
     if (erroEl) erroEl.style.display = 'none';
     if (conteudoEl) conteudoEl.style.display = 'none';
 
     try {
       const qs = new URLSearchParams({ modo });
       if (tipo !== undefined && tipo !== null) qs.set('tipo', tipo);
-      const resp = await fetch(`/api/sac/at/relatorio-gerencial?${qs.toString()}`, { credentials: 'include' });
+      const fetchOpts = { credentials: 'include' };
+      if (signal) fetchOpts.signal = signal;
+      const resp = await fetch(`/api/sac/at/relatorio-gerencial?${qs.toString()}`, fetchOpts);
+      if (loadSeq !== _relGerLoadSeq) return;
       const data = await resp.json().catch(() => ({}));
+      if (loadSeq !== _relGerLoadSeq) return;
       if (!resp.ok || data.ok === false) throw new Error(data.error || 'Erro ao carregar relatório.');
 
       _destroyAllCharts();
@@ -20771,9 +21114,11 @@ document.querySelectorAll('#atTabelaWrapper thead th[data-col]').forEach(th => {
       _renderLoteConteudo(data);
       _renderEditaveis();
 
+      if (loadSeq !== _relGerLoadSeq) return;
       if (statusEl) statusEl.style.display = 'none';
       if (conteudoEl) conteudoEl.style.display = 'block';
     } catch (err) {
+      if (err?.name === 'AbortError' || loadSeq !== _relGerLoadSeq) return;
       if (statusEl) statusEl.style.display = 'none';
       if (erroEl) {
         erroEl.style.display = 'block';
@@ -20880,11 +21225,12 @@ document.querySelectorAll('#atTabelaWrapper thead th[data-col]').forEach(th => {
     const map = {
       executivo: ['status', 'moEstado'],
       geografico: ['estado', 'estadoDonut'],
-      modelos: ['modelo', 'ppm'],
+      modelos: ['modelo'],
       defeitos: ['tag'],
       evolucao: ['semana', 'statusEvol'],
       pareto: ['pareto'],
       lote: ['lote'],
+      'ppm-tx': ['ppmTx'],
     };
     (map[sec] || []).forEach(_destroyChart);
     if (sec === 'lote') _destroyLoteDefPies();
@@ -20895,11 +21241,12 @@ document.querySelectorAll('#atTabelaWrapper thead th[data-col]').forEach(th => {
     const map = {
       executivo: ['status', 'moEstado'],
       geografico: ['estado', 'estadoDonut'],
-      modelos: ['modelo', 'ppm'],
+      modelos: ['modelo'],
       defeitos: ['tag'],
       evolucao: ['semana', 'statusEvol'],
       pareto: ['pareto'],
       lote: ['lote'],
+      'ppm-tx': ['ppmTx'],
     };
     const keys = map[sec] || [];
     for (let i = 0; i < 12; i++) {
@@ -20930,6 +21277,9 @@ document.querySelectorAll('#atTabelaWrapper thead th[data-col]').forEach(th => {
     if (sec === 'lote') {
       if (!_isRelGerMultiMes(data)) _relGerLote3m = true;
       _renderLoteConteudo(data);
+    } else if (sec === 'ppm-tx') {
+      _renderTabelaPpmTx(data);
+      _renderChartsSecao(sec, data);
     } else {
       _renderChartsSecao(sec, data);
     }
@@ -20991,7 +21341,6 @@ document.querySelectorAll('#atTabelaWrapper thead th[data-col]').forEach(th => {
           imgs.estadoDonut = _canvasParaImg(document.getElementById('atRelGerChartEstadoDonut'));
         } else if (s.id === 'modelos') {
           imgs.modelo = _canvasParaImg(document.getElementById('atRelGerChartModelo'));
-          imgs.ppm = _canvasParaImg(document.getElementById('atRelGerChartPpm'));
         } else if (s.id === 'defeitos') {
           imgs.tag = _canvasParaImg(document.getElementById('atRelGerChartTag'));
         } else if (s.id === 'evolucao') {
@@ -21006,6 +21355,8 @@ document.querySelectorAll('#atTabelaWrapper thead th[data-col]').forEach(th => {
             const pieImg = _canvasParaImg(document.getElementById(`atRelGerLoteDefPie${i}`));
             if (pieImg) imgs.loteDefPies.push(pieImg);
           }
+        } else if (s.id === 'ppm-tx') {
+          imgs.ppmTx = _canvasParaImg(document.getElementById('atRelGerChartPpmTx'));
         }
       }
 
@@ -21018,6 +21369,11 @@ document.querySelectorAll('#atTabelaWrapper thead th[data-col]').forEach(th => {
         p.classList.toggle('is-active', p.dataset.sec === secaoSalva);
       });
       if (secaoSalva === 'lote' && _relGerData) _renderLoteConteudo(_relGerData);
+      else if (secaoSalva === 'ppm-tx' && _relGerData) {
+        _renderTabelaPpmTx(_relGerData);
+        _destroyChartsSecao(secaoSalva);
+        _renderChartsSecao(secaoSalva, _relGerData);
+      }
       else if (_relGerData) {
         _destroyChartsSecao(secaoSalva);
         _renderChartsSecao(secaoSalva, _relGerData);
@@ -21034,15 +21390,12 @@ document.querySelectorAll('#atTabelaWrapper thead th[data-col]').forEach(th => {
       ].map(([l, v]) => `<div class="kpi"><div class="lbl">${l}</div><div class="val">${v}</div></div>`).join('');
 
       const modTbl = (d.por_modelo || []).map(r => `<tr><td>${_esc(r.modelo)}</td><td class="r">${r.total}</td></tr>`).join('') || '<tr><td colspan="2">—</td></tr>';
-      const ppmTbl = (d.ppm_modelos || []).map(r => {
-        const ppmP = r.sem_denominador_producao ? '—' : Number(r.ppm_producao || 0).toLocaleString('pt-BR');
-        const ppmV = r.sem_denominador_venda ? '—' : Number(r.ppm_venda || 0).toLocaleString('pt-BR');
-        const idade = r.idade_media_prod_dias == null ? '—' : `${Math.round(Number(r.idade_media_prod_dias))} d`;
-        return `<tr><td>${_esc(r.modelo)}</td><td class="r">${r.os || 0}</td>` +
-          `<td class="r">${r.qtd_producao || 0}</td><td class="r">${ppmP}</td>` +
-          `<td class="r">${r.qtd_venda || 0}</td><td class="r">${ppmV}</td>` +
-          `<td class="r">${idade}</td></tr>`;
-      }).join('') || '<tr><td colspan="7">—</td></tr>';
+      const ppmTxTbl = _dadosLotePpm(d).map((r) =>
+        `<tr><td>${_esc(r.modelo)}</td><td class="r">${r.os || 0}</td><td class="r">${r.qtd_producao || 0}</td>` +
+        `<td class="r">${_esc(_fmtTaxaPct(r))}</td><td class="r">${_esc(_fmtUmEmX(r))}</td>` +
+        `<td class="r">${r.sem_denominador ? '—' : _esc(_fmtPpmK(r.ppm_producao, false))}</td>` +
+        `<td class="r">${r.n_meses || 0}</td></tr>`
+      ).join('') || '<tr><td colspan="7">—</td></tr>';
       const tagTbl = (d.por_tag || []).map(r => {
         const tot = (d.por_tag || []).reduce((s, x) => s + x.total, 0);
         const pct = tot ? Math.round((r.total / tot) * 1000) / 10 : 0;
@@ -21095,7 +21448,7 @@ document.querySelectorAll('#atTabelaWrapper thead th[data-col]').forEach(th => {
       const loteModeloResumo = (lote.por_modelo_janela_3m || []).slice(0, 8)
         .map(r => `${_esc(r.modelo)} (${r.total})`).join(', ') || '—';
 
-      const PDF_TOTAL = 5;
+      const PDF_TOTAL = 6;
       const pg = (n) => _pdfFooter(n, PDF_TOTAL);
       const pages = [
         // 1) Dashboard + Geográfico
@@ -21110,9 +21463,6 @@ document.querySelectorAll('#atTabelaWrapper thead th[data-col]').forEach(th => {
         `<div class="pdf-page">${pdfHdr()}
           <div class="sec">Modelos com Maior Incidência</div>
           <div class="row">${imgs.modelo ? `<div class="box chart-box"><h3>Gráfico</h3><img class="chart-img" src="${imgs.modelo}"></div>` : ''}<div class="box"><h3>Tabela</h3><table><thead><tr><th>Modelo</th><th class="r">Qtd</th></tr></thead><tbody>${modTbl}</tbody></table></div></div>
-          <div class="sec">PPM por Modelo</div>
-          ${imgs.ppm ? `<div class="box chart-box" style="margin-bottom:8px;"><h3>PPM Produção × PPM Venda</h3><img class="chart-img wide" src="${imgs.ppm}"></div>` : ''}
-          <table><thead><tr><th>Modelo</th><th class="r">O.S.</th><th class="r">Qtd prod.</th><th class="r">PPM prod.</th><th class="r">Qtd vend.</th><th class="r">PPM vend.</th><th class="r">Idade méd.</th></tr></thead><tbody>${ppmTbl}</tbody></table>
           <div class="sec">Análise por Tipo de Defeito</div>
           <div class="row"><div class="box"><h3>Tabela</h3><table><thead><tr><th>Tag</th><th class="r">Qtd</th><th class="r">%</th></tr></thead><tbody>${tagTbl}</tbody></table></div>${imgs.tag ? `<div class="box chart-box"><h3>Gráfico</h3><img class="chart-img" src="${imgs.tag}"></div>` : ''}</div>
           <div class="sec">Evolução dos Chamados</div>
@@ -21138,14 +21488,21 @@ document.querySelectorAll('#atTabelaWrapper thead th[data-col]').forEach(th => {
           ${imgs.lote ? `<div class="box chart-box"><h3>Problemas por mês de produção e modelo</h3><img class="chart-img wide" src="${imgs.lote}"></div>` : ''}
           <div class="box" style="margin-top:8px;"><h3>Top 5 defeitos — distribuição por modelo</h3>${loteDefPdfHtml}</div>
           ${pg(4)}</div>`,
-        // 5) Plano + Conclusão
+        // 5) PPM e Tx
+        `<div class="pdf-page">${pdfHdr()}
+          <div class="sec">Análise PPM e Tx — coorte de produção</div>
+          <p style="margin-bottom:8px;font-size:10px;color:#475569;">Taxa % = (Σ O.S. ÷ Σ produção nos meses do lote) × 100. PPM e “1 em X” complementares.</p>
+          ${imgs.ppmTx ? `<div class="box chart-box" style="margin-bottom:8px;"><h3>Taxa % por modelo</h3><img class="chart-img wide" src="${imgs.ppmTx}"></div>` : ''}
+          <table><thead><tr><th>Modelo</th><th class="r">O.S.</th><th class="r">Qtd prod.</th><th class="r">Taxa %</th><th class="r">1 em X</th><th class="r">PPM</th><th class="r">Meses</th></tr></thead><tbody>${ppmTxTbl}</tbody></table>
+          ${pg(5)}</div>`,
+        // 6) Plano + Conclusão
         `<div class="pdf-page">${pdfHdr()}
           <div class="sec">Plano de Ação</div>
           ${planoHtml}
           <div class="sec">Conclusão Executiva</div>
           ${concHtml}
           <div class="total-banner"><div class="lbl">${multi ? 'Total de O.S. no período' : 'Total de O.S. no mês'}</div><div class="val">${kpis.total_os || 0}</div></div>
-          ${pg(5)}</div>`,
+          ${pg(6)}</div>`,
       ].join('');
 
       const html = `<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8">

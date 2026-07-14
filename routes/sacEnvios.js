@@ -7820,18 +7820,6 @@ router.get('/at/relatorio-gerencial', async (req, res) => {
       rTagModelo,
       rStatus,
       rEvolucao,
-      rFinanceiro,
-      rTopPecas,
-      rLoteMes,
-      rLoteMesModelo,
-      rLoteModeloJanela,
-      rLoteTagJanela,
-      rLoteTagModeloJanela,
-      rLoteMesModeloTag,
-      rLoteTotalJanela,
-      rPpmProducao,
-      rPpmVenda,
-      rPpmIdade,
     ] = await Promise.all([
       pool.query(`${baseCte}
         SELECT
@@ -7879,6 +7867,18 @@ router.get('/at/relatorio-gerencial', async (req, res) => {
         ORDER BY status_grupo
       `, rangeParams),
       pool.query(evolucaoSql, rangeParams),
+    ]);
+
+    // Lotes em paralelo limitados (pool max ~10) — evita "timeout exceeded when trying to connect"
+    const [
+      rFinanceiro,
+      rTopPecas,
+      rLoteMes,
+      rLoteMesModelo,
+      rLoteModeloJanela,
+      rLoteTagJanela,
+      rLoteTagModeloJanela,
+    ] = await Promise.all([
       pool.query(`${baseCte}
         SELECT
           b.id,
@@ -7963,6 +7963,15 @@ router.get('/at/relatorio-gerencial', async (req, res) => {
         GROUP BY tag, modelo
         ORDER BY tag, total DESC, modelo
       `, rangeParams),
+    ]);
+
+    const [
+      rLoteMesModeloTag,
+      rLoteTotalJanela,
+      rPpmProducao,
+      rPpmVenda,
+      rPpmIdade,
+    ] = await Promise.all([
       pool.query(`${loteBaseCte}
         SELECT
           COALESCE(to_char(data_producao_dt, 'YYYY-MM'), '__sem_dt__') AS mes,
@@ -8021,7 +8030,8 @@ router.get('/at/relatorio-gerencial', async (req, res) => {
         SELECT
           modelo,
           ROUND(AVG((data_os - data_producao_dt)) FILTER (
-            WHERE data_producao_dt IS NOT NULL AND data_os IS NOT NULL AND data_os >= data_producao_dt
+            WHERE data_os IS NOT NULL AND data_os >= data_producao_dt
+              AND data_producao_dt IS NOT NULL
           ))::float AS idade_media_prod_dias,
           ROUND(AVG((data_os - data_venda_dt)) FILTER (
             WHERE data_venda_dt IS NOT NULL AND data_os IS NOT NULL AND data_os >= data_venda_dt
@@ -8184,6 +8194,153 @@ router.get('/at/relatorio-gerencial', async (req, res) => {
       };
     });
 
+    const labelMesProd = (mesKey) => {
+      if (mesKey === '__sem_dt__') return 'S/ Dt produção';
+      const [y, m] = String(mesKey || '').split('-');
+      const mi = parseInt(m, 10);
+      return mi >= 1 && mi <= 12 ? `${nomesMes[mi - 1]}/${y}` : mesKey;
+    };
+
+    // Produção por mês×modelo — query leve e sequencial (fora do Promise.all para não saturar o pool).
+    // Só nos YYYY-MM que aparecem no gráfico de lote.
+    const mesesProdLote = [...new Set(
+      lotePorMesModelo
+        .map((r) => r.mes)
+        .filter((m) => m && m !== '__sem_dt__' && /^\d{4}-\d{2}$/.test(String(m)))
+    )].sort();
+    let producaoPorMesModelo = [];
+    if (mesesProdLote.length) {
+      try {
+        const mesIni = `${mesesProdLote[0]}-01`;
+        const [yMax, mMax] = mesesProdLote[mesesProdLote.length - 1].split('-').map(Number);
+        const mesFimExcl = new Date(Date.UTC(yMax, mMax, 1)); // mês seguinte ao último
+        const mesFimExclStr = mesFimExcl.toISOString().slice(0, 10);
+        const rLoteProducaoMes = await pool.query(`
+          SELECT
+            LEFT(TRIM(h.data_integracao), 7) AS mes,
+            ${sqlFamiliaModeloAt('h.modelo')} AS modelo,
+            COUNT(*)::int AS quantidade
+          FROM public.historico_pedido_originalis h
+          WHERE TRIM(COALESCE(h.data_integracao, '')) ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}'
+            AND LEFT(TRIM(h.data_integracao), 10) >= $1
+            AND LEFT(TRIM(h.data_integracao), 10) < $2
+            AND LEFT(TRIM(h.data_integracao), 7) = ANY($3::text[])
+          GROUP BY 1, 2
+          ORDER BY 1, quantidade DESC, modelo
+        `, [mesIni, mesFimExclStr, mesesProdLote]);
+        producaoPorMesModelo = (rLoteProducaoMes.rows || []).map((r) => ({
+          mes: r.mes,
+          label: labelMesProd(r.mes),
+          modelo: r.modelo,
+          quantidade: Number(r.quantidade) || 0,
+        }));
+      } catch (eProd) {
+        console.warn('[SAC/AT] ppm lote produção (coorte):', eProd.message || eProd);
+        producaoPorMesModelo = [];
+      }
+    }
+    const prodMesModeloMap = new Map(
+      producaoPorMesModelo.map((r) => [`${r.mes}||${r.modelo}`, r.quantidade])
+    );
+    const ppmPorMesModelo = lotePorMesModelo
+      .filter((r) => r.mes && r.mes !== '__sem_dt__')
+      .map((r) => {
+        const qtd_producao = prodMesModeloMap.get(`${r.mes}||${r.modelo}`) || 0;
+        const os = r.total || 0;
+        return {
+          mes: r.mes,
+          label: r.label,
+          modelo: r.modelo,
+          os,
+          qtd_producao,
+          ppm_producao: qtd_producao > 0 ? Math.round((os / qtd_producao) * 1e6) : 0,
+          sem_denominador: qtd_producao <= 0,
+        };
+      })
+      .sort((a, b) => String(a.mes).localeCompare(String(b.mes)) || (b.os - a.os));
+
+    // Alterações de engenharia × mês (referência Data ou data do registro) × família do modelo
+    let alteracoesPorMesModelo = [];
+    try {
+      const mesesParaAlt = [...new Set([
+        ...mesesProdLote,
+        ...lotePorMesModelo
+          .map((r) => r.mes)
+          .filter((m) => m && m !== '__sem_dt__' && /^\d{4}-\d{2}$/.test(String(m))),
+      ])].sort();
+
+      if (mesesParaAlt.length) {
+        const rAlt = await pool.query(`
+          WITH base AS (
+            SELECT
+              a.id,
+              a.data,
+              a.codigo_omie,
+              a.antes,
+              a.depois,
+              a.referencia,
+              a.criado_por,
+              COALESCE(p.codigo, p2.codigo) AS codigo_interno,
+              ${sqlFamiliaModeloAt("COALESCE(p.codigo, p2.codigo, '')")} AS modelo,
+              CASE
+                WHEN a.referencia ~* '^Data:\\s*\\d{4}-\\d{2}-\\d{2}'
+                  THEN SUBSTRING(a.referencia FROM '(\\d{4}-\\d{2})')
+                WHEN a.referencia ~* '^Data:\\s*\\d{2}/\\d{2}/\\d{4}'
+                  THEN (
+                    SUBSTRING(a.referencia FROM '(\\d{4})$')
+                    || '-'
+                    || SUBSTRING(a.referencia FROM '/(\\d{2})/')
+                  )
+                ELSE to_char((a.data AT TIME ZONE 'America/Sao_Paulo'), 'YYYY-MM')
+              END AS mes
+            FROM engenharia.alteracoes_produto a
+            LEFT JOIN public.produtos_omie p
+              ON p.codigo_produto::text = a.codigo_omie
+            LEFT JOIN public.produtos_omie p2
+              ON p2.codigo = a.codigo_omie
+            WHERE a.codigo_omie IS NOT NULL
+              AND TRIM(a.codigo_omie) <> ''
+              AND a.codigo_omie !~* '^c[oó]digo(\\s+do)?\\s+produto$'
+              AND a.codigo_omie !~* '^c[oó]digo\\s+omie$'
+              AND COALESCE(p.codigo, p2.codigo) IS NOT NULL
+          )
+          SELECT
+            id,
+            data::text AS data,
+            codigo_omie,
+            codigo_interno,
+            modelo,
+            mes,
+            antes,
+            depois,
+            referencia,
+            criado_por
+          FROM base
+          WHERE mes = ANY($1::text[])
+            AND modelo IS NOT NULL
+            AND modelo <> '(sem modelo)'
+          ORDER BY mes, modelo, data DESC, id DESC
+        `, [mesesParaAlt]);
+
+        alteracoesPorMesModelo = (rAlt.rows || []).map((r) => ({
+          id: r.id,
+          mes: r.mes,
+          label: labelMesProd(r.mes),
+          modelo: r.modelo,
+          codigo_omie: r.codigo_omie,
+          codigo_interno: r.codigo_interno || null,
+          antes: r.antes || '',
+          depois: r.depois || '',
+          referencia: r.referencia || null,
+          criado_por: r.criado_por || null,
+          data: r.data,
+        }));
+      }
+    } catch (eAlt) {
+      console.warn('[SAC/AT] alteracoes produto no lote:', eAlt.message || eAlt);
+      alteracoesPorMesModelo = [];
+    }
+
     return res.json({
       ok: true,
       mes: mesRaw,
@@ -8243,6 +8400,9 @@ router.get('/at/relatorio-gerencial', async (req, res) => {
         por_mes_modelo: lotePorMesModelo,
         por_mes_modelo_tag: lotePorMesModeloTag,
         por_modelo_janela_3m: loteModelosJanela,
+        producao_por_mes_modelo: producaoPorMesModelo,
+        ppm_por_mes_modelo: ppmPorMesModelo,
+        alteracoes_por_mes_modelo: alteracoesPorMesModelo,
         janela_3m: {
           inicio: janelaLoteInicioLabel,
           fim: janelaLoteFimLabel,
@@ -8274,14 +8434,21 @@ router.get('/at/relatorio-gerencial/lote-detalhe', async (req, res) => {
       ? 'Qualidade'
       : String(tipoParam).trim();
     const mesProducao = String(req.query.mes_producao || '').trim();
+    const mesesProducaoRaw = String(req.query.meses_producao || '').trim();
+    const mesesProducaoLista = mesesProducaoRaw
+      ? [...new Set(mesesProducaoRaw.split(',').map((s) => s.trim()).filter(Boolean))]
+      : [];
     const modeloFiltro = String(req.query.modelo || '').trim();
     const tagFiltro = String(req.query.tag || '').trim();
 
     if (mesProducao && mesProducao !== '__sem_dt__' && !/^\d{4}-\d{2}$/.test(mesProducao)) {
       return res.status(400).json({ ok: false, error: 'Parâmetro mes_producao inválido (use YYYY-MM ou __sem_dt__).' });
     }
-    if (!mesProducao && !tagFiltro && !modeloFiltro) {
-      return res.status(400).json({ ok: false, error: 'Informe mes_producao, tag ou modelo para filtrar.' });
+    if (mesesProducaoLista.some((m) => m !== '__sem_dt__' && !/^\d{4}-\d{2}$/.test(m))) {
+      return res.status(400).json({ ok: false, error: 'Parâmetro meses_producao inválido (use YYYY-MM separados por vírgula).' });
+    }
+    if (!mesProducao && !mesesProducaoLista.length && !tagFiltro && !modeloFiltro) {
+      return res.status(400).json({ ok: false, error: 'Informe mes_producao, meses_producao, tag ou modelo para filtrar.' });
     }
 
     const tipoSql = buildAtRelatorioGerencialTipoFilter(tipoFiltro);
@@ -8289,7 +8456,18 @@ router.get('/at/relatorio-gerencial/lote-detalhe', async (req, res) => {
     const params = [periodoCfg.inicio, periodoCfg.fimExclusive];
     const filtros = [];
 
-    if (mesProducao === '__sem_dt__') {
+    if (mesesProducaoLista.length) {
+      const comDt = mesesProducaoLista.filter((m) => m !== '__sem_dt__');
+      const partes = [];
+      if (comDt.length) {
+        params.push(comDt);
+        partes.push(`to_char(lb.data_producao_dt, 'YYYY-MM') = ANY($${params.length}::text[])`);
+      }
+      if (mesesProducaoLista.includes('__sem_dt__')) {
+        partes.push('lb.data_producao_dt IS NULL');
+      }
+      if (partes.length) filtros.push(`(${partes.join(' OR ')})`);
+    } else if (mesProducao === '__sem_dt__') {
       filtros.push('lb.data_producao_dt IS NULL');
     } else if (mesProducao) {
       params.push(mesProducao);
@@ -8405,6 +8583,7 @@ router.get('/at/relatorio-gerencial/lote-detalhe', async (req, res) => {
       periodo: periodoCfg.label,
       filtros: {
         mes_producao: mesProducao || null,
+        meses_producao: mesesProducaoLista.length ? mesesProducaoLista : null,
         modelo: modeloFiltro || null,
         tag: tagFiltro || null,
         tipo: tipoFiltro || 'Todos',
@@ -9842,7 +10021,9 @@ const AT_SESSION_SECRET = String(process.env.AT_SESSION_SECRET || '').trim();
 
 // ── Portal AT: solicitação de produtos / separação (CNPJs autorizados) ────────
 const AT_SEP_CNPJS_PERMITIDOS = new Set(['05240837000121', '48407161000120']);
-const AT_SEP_LOCAL_ESTOQUE = '10408747792';
+// Destino padrão Omie das SEPs criadas pelo portal at-link.html
+const AT_SEP_LOCAL_ESTOQUE = '10445659161'; // 10. SAC ASSISTENCIA E GARANTIAS
+const AT_SEP_LOCAL_NOME_PADRAO = '10. SAC ASSISTENCIA E GARANTIAS';
 
 function _atNormCnpj(v) {
   return String(v || '').replace(/\D/g, '');
@@ -11056,7 +11237,7 @@ router.get('/at/tecnico/separacao/carrinho', async (req, res) => {
       itens: rows,
       nome_user: auth.tecnico.nome,
       local_estoque: AT_SEP_LOCAL_ESTOQUE,
-      local_nome: localRows[0]?.nome || '7. area vermelha'
+      local_nome: localRows[0]?.nome || AT_SEP_LOCAL_NOME_PADRAO
     });
   } catch (err) {
     console.error('[AT/separacao/carrinho GET] erro:', err);
@@ -11168,7 +11349,7 @@ router.post('/at/tecnico/separacao/enviar', express.json(), async (req, res) => 
       [AT_SEP_LOCAL_ESTOQUE]
     );
     const codLocalGravar = AT_SEP_LOCAL_ESTOQUE;
-    const nomeLocalGravar = localRows[0]?.nome || '7. area vermelha';
+    const nomeLocalGravar = localRows[0]?.nome || AT_SEP_LOCAL_NOME_PADRAO;
 
     const { rows: itens } = await client.query(
       `SELECT id, codigo_produto, descricao, unidade, quantidade, comentario,
