@@ -75025,8 +75025,6 @@ document.addEventListener('DOMContentLoaded', () => {
       const json = await resp.json().catch(() => ({}));
       if (!resp.ok || !json?.ok) throw new Error(json?.error || `HTTP ${resp.status}`);
       definirStatusImpressao(`${json.quantidade || 1} etiqueta(s) enviada(s) para impressao.`, 'ok');
-      _movimPrinterPrefTemp = null;
-      movimAtualizarListboxImpressora();
     } catch (err) {
       definirStatusImpressao(String(err?.message || err), 'erro');
     } finally {
@@ -75210,8 +75208,6 @@ document.addEventListener('DOMContentLoaded', () => {
         impStatus.className = 'movim-imp-status ok';
       }
       setTimeout(fecharImpressaoMovim, 1200);
-      _movimPrinterPrefTemp = null;
-      movimAtualizarListboxImpressora();
     } catch (err) {
       if (impStatus) {
         impStatus.textContent = String(err?.message || err);
