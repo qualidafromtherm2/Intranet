@@ -80,7 +80,7 @@ const locaisEstoqueCache = { at: 0, data: [], fonte: 'omie' };
 // Data (YYYY-MM-DD) do último sync de omie_locais_estoque — reseta a cada restart
 let locaisSyncDate = null;
 app.set('trust proxy', 1); // necessário no Render (proxy) para cookie Secure funcionar
-app.use(express.json({ limit: '5mb' })); // precisa vir ANTES de app.use('/api/auth', ...)
+app.use(express.json({ limit: '12mb' })); // precisa vir ANTES de app.use('/api/auth', ...) — 12mb p/ PDF devolução AT
 
 // server.js (antes das rotas HTML)
 // === DEBUG BOOT / VIDA ======================================================
@@ -6800,6 +6800,7 @@ app.post(['/webhooks/omie/recebimentos-nfe', '/api/webhooks/omie/recebimentos-nf
         let erroProcessamento = null;
         let statusFinal = statusPorTopic;
         let eventoJaRegistrado = false;
+        let recebimentoApiAlerta = null;
         try {
           // Para eventos finais (cancelamento/exclusao), marca como cancelado localmente
           if (statusPorTopic === 'Cancelada' || statusPorTopic === 'Excluida') {
@@ -6848,6 +6849,7 @@ app.post(['/webhooks/omie/recebimentos-nfe', '/api/webhooks/omie/recebimentos-nf
             const statusPorSnapshot = inferNotaEntradaStatusFromSnapshot(cabec, infoCadastro);
             statusFinal = statusPorTopic !== 'Desconhecida' ? statusPorTopic : statusPorSnapshot;
             processadoComSucesso = true;
+            recebimentoApiAlerta = recebimento;
 
             console.log(`[webhooks/omie/recebimentos-nfe] ✓ Recebimento ${nIdReceb || cChaveNfe} processado com sucesso (${statusFinal})`);
           }
@@ -6868,7 +6870,30 @@ app.post(['/webhooks/omie/recebimentos-nfe', '/api/webhooks/omie/recebimentos-nf
           } catch (fallbackErr) {
             console.error('[webhooks/omie/recebimentos-nfe] Falha no fallback por payload:', fallbackErr);
           }
-        } finally {
+        }
+
+        // Alerta WhatsApp AT: NF-e de devolução/retorno emitida contra a Fromtherm
+        if (
+          processadoComSucesso
+          && statusFinal !== 'Cancelada'
+          && statusFinal !== 'Excluida'
+        ) {
+          try {
+            const { avaliarENotificarDevolucaoPorRecebimento } = require('./utils/alertaDevolucaoNfeWhatsapp');
+            await avaliarENotificarDevolucaoPorRecebimento({
+              nIdReceb: nIdReceb || null,
+              cChaveNfe: cChaveNfe || null,
+              recebimentoApi: recebimentoApiAlerta,
+            });
+          } catch (alertaErr) {
+            console.error(
+              '[webhooks/omie/recebimentos-nfe] Alerta devolução WhatsApp:',
+              alertaErr?.message || alertaErr
+            );
+          }
+        }
+
+        {
           const client = await pool.connect();
           try {
             const statusEvento = sanitizeNotaEntradaStatus(statusFinal || statusPorTopic || 'Desconhecida');

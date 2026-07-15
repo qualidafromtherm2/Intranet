@@ -14169,6 +14169,21 @@ function _atStatusOsBadge(status) {
   return `<span style="display:inline-block;font-size:10px;font-weight:700;padding:2px 9px;border-radius:20px;text-transform:uppercase;letter-spacing:.4px;white-space:nowrap;${style}">${label}</span>`;
 }
 
+/** Chave de status para a pontinha colorida do card */
+function _atStatusCornerKey(row) {
+  const s = _atGetStatus(row);
+  if (s === 'fechado') return 'fechado';
+  if (s === 'aberto') return 'aberto';
+  if (s === 'aguardando nf at') return 'aguardando nf at';
+  if (s === 'excluido') return 'excluido';
+  return 'indefinido';
+}
+
+function _atStatusCornerTitle(row) {
+  const s = String(row?.status || '').trim();
+  return s ? `Status: ${s}` : 'Status: Indefinido';
+}
+
 /** Compara dois valores para ordenação */
 function _atCompare(a, b, col, dir) {
   let va = a[col] ?? '';
@@ -14202,9 +14217,13 @@ function _atIsExcluido(row) {
 
 /** Lê o rascunho atual do painel (DOM) — ainda não aplicado. */
 function _atLerFiltrosPainel() {
+  // "" = "Todos" — NÃO usar || aqui: string vazia é falsa e voltava ao padrão
+  // (EXCLUIR_RAPIDO / EXCLUIR_FECHADO), descartando a escolha do usuário.
+  const tipoEl = document.getElementById('atFiltroTipo');
+  const statusEl = document.getElementById('atFiltroStatus');
   return {
-    tipo: (document.getElementById('atFiltroTipo')?.value || AT_FILTRO_DEFAULT.tipo).trim(),
-    status: (document.getElementById('atFiltroStatus')?.value || AT_FILTRO_DEFAULT.status).trim(),
+    tipo: tipoEl ? String(tipoEl.value).trim() : AT_FILTRO_DEFAULT.tipo,
+    status: statusEl ? String(statusEl.value).trim() : AT_FILTRO_DEFAULT.status,
     dataIni: (document.getElementById('atFiltroDataIni')?.value || '').trim(),
     dataFim: (document.getElementById('atFiltroDataFim')?.value || '').trim(),
     incluirNfAt: !!document.getElementById('atFiltroIncluirNfAt')?.checked,
@@ -14631,168 +14650,221 @@ function _atCiFieldRO(label, val) {
 function _renderAtCards(rows) {
   const container = document.getElementById('atCardsContainer');
   if (!container) return;
+  if (_atCardsObserver) {
+    try { _atCardsObserver.disconnect(); } catch (_) {}
+    _atCardsObserver = null;
+  }
   if (!rows.length) {
+    _atCardsGroupsFull = [];
+    _atCardsShown = 0;
     container.innerHTML = '<div style="text-align:center;padding:32px;color:var(--inactive-color);">Nenhum atendimento encontrado.</div>';
     return;
   }
 
-  const groups = _atAgruparRows(rows);
-  const empty  = `<em style="opacity:.4">—</em>`;
-
-  const buildCard = group => {
-    const primary = group.rows[0];
-    const id      = primary.id;
-    const allIds  = [...new Set(group.rows.map(r => r.id))];
-
-    const idBadges = allIds.map(aid =>
-      `<span class="at-ci-badge">#${escapeAtHtml(String(aid))}</span>`
-    ).join('');
-
-    const editInfo = primary.editado_por
-      ? `<span class="at-ci-editado" title="Editado em ${escapeAtHtml(_atFormatDateBr(primary.editado_em))}">✎ ${escapeAtHtml(primary.editado_por)}</span>`
-      : '';
-
-    const hasAnexos = group.rows.some(r => Number(r.qtd_anexos) > 0);
-    const hasPecas  = group.rows.some(r => r.has_pecas_enviadas);
-    const enviosStatusCard = group.rows.find(r => r.envios_status)?.envios_status || '';
-    const pecasBtnCard = hasPecas
-      ? `<span title="Peças enviadas para esta OS" style="display:inline-flex;align-items:center;gap:4px;color:#a78bfa;font-size:13px;padding:2px 4px;flex-shrink:0;">
-           ${enviosStatusCard ? `<span style="font-size:10px;font-weight:600;background:rgba(167,139,250,.15);border:1px solid rgba(167,139,250,.35);border-radius:10px;padding:1px 6px;color:#a78bfa;">${escapeAtHtml(enviosStatusCard)}</span>` : ''}
-           <i class="fa-solid fa-box"></i>
-         </span>`
-      : '';
-    const anexoBtnCard = hasAnexos
-      ? `<button class="at-card-anexo-btn" data-id="${escapeAtHtml(String(id))}" data-nome="${escapeAtHtml(primary.nome_revenda_cliente || '')}"
-           type="button" title="Ver/enviar anexos" style="background:none;border:none;cursor:pointer;color:#f59e0b;padding:2px 4px;font-size:13px;flex-shrink:0;">
-           <i class="fa-solid fa-paperclip"></i>
-         </button>`
-      : '';
-
-    const pdfBtnCard = `<button class="at-card-os-btn at-os-pdf-btn" data-id="${escapeAtHtml(String(id))}"
-         type="button" title="Solicitação de AT (PDF)" style="background:none;border:none;cursor:pointer;color:#ef4444;padding:2px 4px;font-size:13px;flex-shrink:0;">
-         <i class="fa-solid fa-file-pdf"></i>
-       </button>`;
-
-    const reclamacoes = group.rows
-      .filter(r => r.descreva_reclamacao)
-      .map(r => `<div class="at-ci-reclam-item"><span class="at-ci-reclam-id">#${escapeAtHtml(String(r.id))}</span>${escapeAtHtml(r.descreva_reclamacao)}</div>`)
-      .join('');
-    const descPrimary = escapeAtHtml(primary.descreva_reclamacao || '');
-
-    const fRow = group.rows.find(r =>
-      r.fech_tag || r.fech_descricao || r.fech_obs || r.fech_valor_mo || r.fech_data_conclusao || r.fech_valor_pecas);
-
-    const fechInfo = fRow ? `
-      <div style="margin-top:6px;padding-top:6px;border-top:1px solid rgba(74,222,128,.2);">
-        <div style="font-size:9px;text-transform:uppercase;color:#4ade80;font-weight:700;letter-spacing:.06em;margin-bottom:3px;">
-          <i class="fa-solid fa-circle-check"></i> Fechamento
-        </div>
-        ${fRow.fech_data_conclusao ? `<div style="font-size:11px;color:var(--inactive-color);">Conclusão: ${escapeAtHtml(String(fRow.fech_data_conclusao).slice(0,10))}</div>` : ''}
-        ${fRow.fech_valor_mo ? `<div style="font-size:11px;color:var(--inactive-color);">M.O.: R$ ${escapeAtHtml(String(fRow.fech_valor_mo))}</div>` : ''}
-      </div>` : '';
-
-    return `
-    <div class="at-card-item" data-id="${id}" style="cursor:pointer;" title="Clique para editar">
-      <div class="at-ci-header">
-        <div style="display:flex;gap:4px;flex-wrap:wrap;align-items:center;flex:1;min-width:0;">
-          ${idBadges}
-          <span class="at-ci-date">${escapeAtHtml(_atFormatDateBr(primary.data))}</span>
-          <span class="at-ci-tipo">${escapeAtHtml(primary.tipo || '-')}</span>
-          ${editInfo}
-        </div>
-        <div style="display:flex;gap:2px;align-items:center;flex-shrink:0;">
-          ${pecasBtnCard}
-          ${anexoBtnCard}
-          ${pdfBtnCard}
-        </div>
-      </div>
-      <div class="at-ci-fields">
-        ${_atCiFieldRO('Cliente', primary.nome_revenda_cliente)}
-        ${_atCiFieldRO('Telefone', primary.telefone)}
-        ${_atCiFieldRO('Modelo', primary.modelo)}
-        ${_atCiFieldRO('Estado', primary.estado)}
-        ${_atCiFieldRO('Tag', primary.tag_problema)}
-        ${primary.subtag ? _atCiFieldRO('Subtag', primary.subtag) : ''}
-        ${primary.atendimento_inicial ? _atCiFieldRO('Atend. inicial', primary.atendimento_inicial) : ''}
-        ${primary.motivo_solicitacao  ? _atCiFieldRO('Motivo', primary.motivo_solicitacao) : ''}
-        ${primary.acao_tomada         ? _atCiFieldRO('Ação tomada', primary.acao_tomada) : ''}
-      </div>
-      ${(primary.pedido || primary.ordem_producao || primary.nota_fiscal) ? `
-      <div style="margin-top:6px;padding-top:6px;border-top:1px solid rgba(167,139,250,.2);">
-        <div style="font-size:9px;text-transform:uppercase;color:#a78bfa;font-weight:700;letter-spacing:.06em;margin-bottom:4px;">
-          <i class="fa-solid fa-barcode"></i> Dados da Busca
-        </div>
-        <div class="at-ci-fields">
-          ${primary.pedido          ? _atCiFieldRO('Pedido', primary.pedido) : ''}
-          ${primary.ordem_producao  ? _atCiFieldRO('Ordem Prod.', primary.ordem_producao) : ''}
-          ${primary.nota_fiscal     ? _atCiFieldRO('Nota Fiscal', primary.nota_fiscal) : ''}
-        </div>
-      </div>` : ''}
-      <div class="at-ci-desc-area">
-        <div class="at-ci-desc-lbl">Reclamação</div>
-        ${group.rows.length > 1 && reclamacoes
-          ? `<div class="at-ci-reclam-list">${reclamacoes}</div>`
-          : `<div class="at-ci-desc-val">${descPrimary || empty}</div>`}
-      </div>
-      ${fechInfo}
-      <div class="at-card-actions">
-        <button type="button" class="at-card-abrir-os-btn" data-id="${escapeAtHtml(String(id))}">
-          <i class="fa-solid fa-file-lines"></i> Abrir OS
-        </button>
-        <button type="button" class="at-card-editar-btn" data-id="${escapeAtHtml(String(id))}" title="Editar">
-          <i class="fa-solid fa-pen"></i>
-        </button>
-      </div>
-    </div>`;
-  };
-
-  // Render em lotes para não travar a UI
-  const LOTE = 20;
-  let idx = 0;
+  _atCardsGroupsFull = _atAgruparRows(rows);
+  _atCardsShown = 0;
   container.innerHTML = '';
-  const _bindCardListeners = (node) => {
-    node.querySelectorAll('.at-card-item').forEach(card => {
-      card.addEventListener('click', e => {
-        if (e.target.closest('.at-card-anexo-btn') || e.target.closest('.at-card-os-btn') ||
-            e.target.closest('.at-card-abrir-os-btn') || e.target.closest('.at-card-editar-btn')) return;
-        _abrirAtEditModal(card.dataset.id);
-      });
+
+  const hint = document.createElement('div');
+  hint.id = 'atCardsLoadMoreHint';
+  hint.style.display = 'none';
+  container.appendChild(hint);
+
+  const sentinel = document.createElement('div');
+  sentinel.id = 'atCardsSentinel';
+  container.appendChild(sentinel);
+
+  _atAppendMoreCards();
+  _atBindCardsInfiniteScroll(sentinel);
+}
+
+const AT_CARDS_PAGE_SIZE = 30;
+let _atCardsGroupsFull = [];
+let _atCardsShown = 0;
+let _atCardsObserver = null;
+let _atCardsLoadingMore = false;
+
+function _atBindCardListeners(node) {
+  node.querySelectorAll('.at-card-item').forEach(card => {
+    card.addEventListener('click', e => {
+      if (e.target.closest('.at-card-anexo-btn') || e.target.closest('.at-card-os-btn') ||
+          e.target.closest('.at-card-abrir-os-btn') || e.target.closest('.at-card-editar-btn')) return;
+      _abrirAtEditModal(card.dataset.id);
     });
-    node.querySelectorAll('.at-card-anexo-btn').forEach(btn => {
-      btn.addEventListener('click', e => {
-        e.stopPropagation();
-        _atVerAnexos(btn.dataset.id, btn.dataset.nome);
-      });
+  });
+  node.querySelectorAll('.at-card-anexo-btn').forEach(btn => {
+    btn.addEventListener('click', e => {
+      e.stopPropagation();
+      _atVerAnexos(btn.dataset.id, btn.dataset.nome);
     });
-    node.querySelectorAll('.at-card-os-btn').forEach(btn => {
-      btn.addEventListener('click', e => {
-        e.stopPropagation();
-        _abrirAtOsModal(btn.dataset.id);
-      });
+  });
+  node.querySelectorAll('.at-card-os-btn').forEach(btn => {
+    btn.addEventListener('click', e => {
+      e.stopPropagation();
+      _abrirAtOsModal(btn.dataset.id);
     });
-    node.querySelectorAll('.at-card-abrir-os-btn').forEach(btn => {
-      btn.addEventListener('click', e => {
-        e.stopPropagation();
-        _abrirAtOsModal(btn.dataset.id);
-      });
+  });
+  node.querySelectorAll('.at-card-abrir-os-btn').forEach(btn => {
+    btn.addEventListener('click', e => {
+      e.stopPropagation();
+      _abrirAtOsModal(btn.dataset.id);
     });
-    node.querySelectorAll('.at-card-editar-btn').forEach(btn => {
-      btn.addEventListener('click', e => {
-        e.stopPropagation();
-        _abrirAtEditModal(btn.dataset.id);
-      });
+  });
+  node.querySelectorAll('.at-card-editar-btn').forEach(btn => {
+    btn.addEventListener('click', e => {
+      e.stopPropagation();
+      _abrirAtEditModal(btn.dataset.id);
     });
-  };
-  const renderLoteCards = () => {
-    const fim  = Math.min(idx + LOTE, groups.length);
-    const frag = document.createElement('div');
-    frag.innerHTML = groups.slice(idx, fim).map(buildCard).join('');
-    _bindCardListeners(frag);
-    while (frag.firstChild) container.appendChild(frag.firstChild);
-    idx = fim;
-    if (idx < groups.length) setTimeout(renderLoteCards, 0);
-  };
-  renderLoteCards();
+  });
+}
+
+function _atBuildCardHtml(group) {
+  const empty  = `<em style="opacity:.4">—</em>`;
+  const primary = group.rows[0];
+  const id      = primary.id;
+  const allIds  = [...new Set(group.rows.map(r => r.id))];
+  const statusKey = _atStatusCornerKey(primary);
+  const statusTitle = escapeAtHtml(_atStatusCornerTitle(primary));
+
+  const idBadges = allIds.map(aid =>
+    `<span class="at-ci-badge">#${escapeAtHtml(String(aid))}</span>`
+  ).join('');
+
+  const editInfo = primary.editado_por
+    ? `<span class="at-ci-editado" title="Editado em ${escapeAtHtml(_atFormatDateBr(primary.editado_em))}">✎ ${escapeAtHtml(primary.editado_por)}</span>`
+    : '';
+
+  const hasAnexos = group.rows.some(r => Number(r.qtd_anexos) > 0);
+  const hasPecas  = group.rows.some(r => r.has_pecas_enviadas);
+  const enviosStatusCard = group.rows.find(r => r.envios_status)?.envios_status || '';
+  const pecasBtnCard = hasPecas
+    ? `<span title="Peças enviadas para esta OS" style="display:inline-flex;align-items:center;gap:4px;color:#a78bfa;font-size:13px;padding:2px 4px;flex-shrink:0;">
+         ${enviosStatusCard ? `<span style="font-size:10px;font-weight:600;background:rgba(167,139,250,.15);border:1px solid rgba(167,139,250,.35);border-radius:10px;padding:1px 6px;color:#a78bfa;">${escapeAtHtml(enviosStatusCard)}</span>` : ''}
+         <i class="fa-solid fa-box"></i>
+       </span>`
+    : '';
+  const anexoBtnCard = hasAnexos
+    ? `<button class="at-card-anexo-btn" data-id="${escapeAtHtml(String(id))}" data-nome="${escapeAtHtml(primary.nome_revenda_cliente || '')}"
+         type="button" title="Ver/enviar anexos" style="background:none;border:none;cursor:pointer;color:#f59e0b;padding:2px 4px;font-size:13px;flex-shrink:0;">
+         <i class="fa-solid fa-paperclip"></i>
+       </button>`
+    : '';
+
+  const pdfBtnCard = `<button class="at-card-os-btn at-os-pdf-btn" data-id="${escapeAtHtml(String(id))}"
+       type="button" title="Solicitação de AT (PDF)" style="background:none;border:none;cursor:pointer;color:#ef4444;padding:2px 4px;font-size:13px;flex-shrink:0;">
+       <i class="fa-solid fa-file-pdf"></i>
+     </button>`;
+
+  const reclamacoes = group.rows
+    .filter(r => r.descreva_reclamacao)
+    .map(r => `<div class="at-ci-reclam-item"><span class="at-ci-reclam-id">#${escapeAtHtml(String(r.id))}</span>${escapeAtHtml(r.descreva_reclamacao)}</div>`)
+    .join('');
+  const descPrimary = escapeAtHtml(primary.descreva_reclamacao || '');
+
+  return `
+  <div class="at-card-item" data-id="${id}" style="cursor:pointer;" title="Clique para editar">
+    <span class="at-ci-status-corner" data-status="${escapeAtHtml(statusKey)}" title="${statusTitle}"></span>
+    <div class="at-ci-header">
+      <div style="display:flex;gap:4px;flex-wrap:wrap;align-items:center;flex:1;min-width:0;">
+        ${idBadges}
+        <span class="at-ci-date">${escapeAtHtml(_atFormatDateBr(primary.data))}</span>
+        <span class="at-ci-tipo">${escapeAtHtml(primary.tipo || '-')}</span>
+        ${editInfo}
+      </div>
+      <div style="display:flex;gap:2px;align-items:center;flex-shrink:0;padding-right:18px;">
+        ${pecasBtnCard}
+        ${anexoBtnCard}
+        ${pdfBtnCard}
+      </div>
+    </div>
+    <div class="at-ci-fields">
+      ${_atCiFieldRO('Cliente', primary.nome_revenda_cliente)}
+      ${_atCiFieldRO('Modelo', primary.modelo)}
+      ${_atCiFieldRO('Pedido', primary.pedido)}
+      ${_atCiFieldRO('Ordem Prod.', primary.ordem_producao)}
+      <div class="at-ci-field at-ci-field-full">
+        <div class="at-ci-field-lbl">Nota Fiscal</div>
+        <div class="at-ci-field-val">${escapeAtHtml(primary.nota_fiscal || '') || empty}</div>
+      </div>
+    </div>
+    <div class="at-ci-desc-area">
+      <div class="at-ci-desc-lbl">Reclamação</div>
+      ${group.rows.length > 1 && reclamacoes
+        ? `<div class="at-ci-reclam-list at-ci-desc-val">${reclamacoes}</div>`
+        : `<div class="at-ci-desc-val">${descPrimary || empty}</div>`}
+    </div>
+    <div class="at-card-actions">
+      <button type="button" class="at-card-abrir-os-btn" data-id="${escapeAtHtml(String(id))}">
+        <i class="fa-solid fa-file-lines"></i> Abrir OS
+      </button>
+      <button type="button" class="at-card-editar-btn" data-id="${escapeAtHtml(String(id))}" title="Editar">
+        <i class="fa-solid fa-pen"></i>
+      </button>
+    </div>
+  </div>`;
+}
+
+function _atUpdateCardsLoadHint() {
+  const hint = document.getElementById('atCardsLoadMoreHint');
+  if (!hint) return;
+  const total = _atCardsGroupsFull.length;
+  const shown = _atCardsShown;
+  if (shown < total) {
+    hint.style.display = '';
+    hint.textContent = `Mostrando ${shown} de ${total} — role para carregar mais`;
+  } else {
+    hint.style.display = total > AT_CARDS_PAGE_SIZE ? '' : 'none';
+    hint.textContent = total > AT_CARDS_PAGE_SIZE ? `Mostrando todos (${total})` : '';
+  }
+}
+
+function _atAppendMoreCards() {
+  const container = document.getElementById('atCardsContainer');
+  const sentinel = document.getElementById('atCardsSentinel');
+  if (!container || !sentinel || _atCardsLoadingMore) return;
+  if (_atCardsShown >= _atCardsGroupsFull.length) {
+    _atUpdateCardsLoadHint();
+    return;
+  }
+
+  _atCardsLoadingMore = true;
+  const fim = Math.min(_atCardsShown + AT_CARDS_PAGE_SIZE, _atCardsGroupsFull.length);
+  const slice = _atCardsGroupsFull.slice(_atCardsShown, fim);
+  const frag = document.createElement('div');
+  frag.innerHTML = slice.map(_atBuildCardHtml).join('');
+  _atBindCardListeners(frag);
+  while (frag.firstChild) container.insertBefore(frag.firstChild, sentinel);
+  _atCardsShown = fim;
+  _atCardsLoadingMore = false;
+  _atUpdateCardsLoadHint();
+
+  // Se a tela ainda não preencheu (sentinel visível), carrega mais um lote
+  requestAnimationFrame(() => {
+    if (_atCardsShown >= _atCardsGroupsFull.length) return;
+    const s = document.getElementById('atCardsSentinel');
+    if (!s) return;
+    const rect = s.getBoundingClientRect();
+    if (rect.top < (window.innerHeight + 420)) _atAppendMoreCards();
+  });
+}
+
+function _atBindCardsInfiniteScroll(sentinel) {
+  if (!sentinel || typeof IntersectionObserver === 'undefined') {
+    // Fallback: window scroll
+    const onScroll = () => {
+      if (_atCardsShown >= _atCardsGroupsFull.length) return;
+      const nearBottom = (window.innerHeight + window.scrollY) >= (document.body.offsetHeight - 400);
+      if (nearBottom) _atAppendMoreCards();
+    };
+    window.removeEventListener('scroll', window._atCardsScrollFallback);
+    window._atCardsScrollFallback = onScroll;
+    window.addEventListener('scroll', onScroll, { passive: true });
+    return;
+  }
+  _atCardsObserver = new IntersectionObserver((entries) => {
+    if (entries.some(e => e.isIntersecting)) _atAppendMoreCards();
+  }, { root: null, rootMargin: '400px 0px', threshold: 0 });
+  _atCardsObserver.observe(sentinel);
 }
 
 function _atCardToggleEdit()  { /* substituído por modal */ }
@@ -15343,6 +15415,169 @@ function _atOsRenderPecaEnvioHtml(env) {
   });
 })();
 
+/** Carrega html2pdf.js sob demanda (CDN) para anexar PDF na devolução. */
+function _atLoadHtml2Pdf() {
+  return new Promise((resolve, reject) => {
+    if (window.html2pdf) { resolve(window.html2pdf); return; }
+    const existing = document.querySelector('script[data-at-html2pdf]');
+    if (existing) {
+      existing.addEventListener('load', () => resolve(window.html2pdf));
+      existing.addEventListener('error', () => reject(new Error('Falha ao carregar html2pdf.')));
+      return;
+    }
+    const s = document.createElement('script');
+    s.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js';
+    s.async = true;
+    s.dataset.atHtml2pdf = '1';
+    s.onload = () => resolve(window.html2pdf);
+    s.onerror = () => reject(new Error('Falha ao carregar biblioteca de PDF.'));
+    document.head.appendChild(s);
+  });
+}
+
+/** Prepara clone do .at-os-doc (mesmo fluxo do Salvar PDF) e gera Blob PDF. */
+async function _atGerarOsPdfBlob() {
+  const docEl = document.querySelector('#atOsModal .at-os-doc') || document.querySelector('.at-os-doc');
+  if (!docEl) throw new Error('Documento da OS não encontrado para gerar o PDF.');
+
+  const clone = docEl.cloneNode(true);
+  clone.querySelectorAll('.at-os-btn-etiqueta-zebra, .at-os-btn-declaracao-zebra').forEach((el) => el.remove());
+  const hints = Array.from(clone.querySelectorAll('.at-os-etiqueta-pdf-src'));
+  await Promise.all(hints.map(async (hint) => {
+    const src = hint.getAttribute('data-etiqueta-src');
+    if (!src) { hint.remove(); return; }
+    try {
+      const resp = await fetch(src, { credentials: 'include' });
+      const ct = String(resp.headers.get('content-type') || '').toLowerCase();
+      const buf = await resp.arrayBuffer();
+      const head = String.fromCharCode(...new Uint8Array(buf.slice(0, 5)));
+      const isPdf = resp.ok && (ct.includes('application/pdf') || head.startsWith('%PDF'));
+      if (!isPdf) { hint.remove(); return; }
+      const blobUrl = URL.createObjectURL(new Blob([buf], { type: 'application/pdf' }));
+      const wrap = document.createElement('div');
+      wrap.className = 'at-os-etiqueta-preview';
+      wrap.innerHTML = `<div style="font-size:10px;font-weight:700;color:#475569;margin:6px 0 4px;">Etiqueta Zebra</div>
+        <img src="${blobUrl}" alt="Etiqueta" style="max-width:100%;height:auto;border:1px solid #cbd5e1;border-radius:8px;">`;
+      hint.replaceWith(wrap);
+    } catch (_) { hint.remove(); }
+  }));
+
+  const wrap = document.createElement('div');
+  wrap.style.cssText = 'position:fixed;left:-12000px;top:0;width:900px;background:#fff;padding:10px;z-index:-1;';
+  wrap.appendChild(clone);
+  document.body.appendChild(wrap);
+
+  try {
+    await _atLoadHtml2Pdf();
+    const opt = {
+      margin: [8, 8, 8, 8],
+      filename: 'os.pdf',
+      image: { type: 'jpeg', quality: 0.95 },
+      html2canvas: { scale: 2, useCORS: true, logging: false, backgroundColor: '#ffffff' },
+      jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
+      pagebreak: { mode: ['css', 'legacy'] },
+    };
+    const worker = window.html2pdf().set(opt).from(clone);
+    const blob = await worker.outputPdf('blob');
+    if (!blob || !blob.size) throw new Error('PDF gerado vazio.');
+    return blob;
+  } finally {
+    wrap.remove();
+  }
+}
+
+function _atBlobToBase64(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const s = String(reader.result || '');
+      resolve(s.includes(',') ? s.split(',')[1] : s);
+    };
+    reader.onerror = () => reject(new Error('Falha ao ler PDF.'));
+    reader.readAsDataURL(blob);
+  });
+}
+
+async function _atAguardarOsCarregada(idAt, timeoutMs = 25000) {
+  const t0 = Date.now();
+  return new Promise((resolve, reject) => {
+    const tick = () => {
+      const modal = document.getElementById('atOsModal');
+      const bar = document.getElementById('atOsLoadingBar');
+      const num = (document.getElementById('atOsNumero')?.textContent || '').trim();
+      const okModal = modal && modal.style.display !== 'none' && String(modal.dataset.osId) === String(idAt);
+      const okBar = !bar || bar.style.display === 'none';
+      const okNum = num && num !== '—';
+      if (okModal && okBar && okNum) { resolve(); return; }
+      if (Date.now() - t0 > timeoutMs) {
+        reject(new Error('Timeout ao carregar a Solicitação de AT para gerar o PDF.'));
+        return;
+      }
+      setTimeout(tick, 250);
+    };
+    tick();
+  });
+}
+
+/**
+ * Devolução: gera o PDF da OS (igual Salvar PDF) e envia e-mail automático.
+ */
+async function _atEnviarDevolucao(idAt) {
+  const id = idAt || _atEditModalCurrentId;
+  if (!id) throw new Error('Abra uma OS antes de enviar a devolução.');
+
+  const osModal = document.getElementById('atOsModal');
+  const editModal = document.getElementById('atEditModal');
+  const prevOsDisplay = osModal ? osModal.style.display : '';
+  const prevOsOpacity = osModal ? osModal.style.opacity : '';
+  const prevOsPointer = osModal ? osModal.style.pointerEvents : '';
+  const abriuOs = !(osModal && osModal.style.display !== 'none' && String(osModal.dataset.osId) === String(id));
+
+  try {
+    if (typeof _abrirAtOsModal !== 'function') {
+      throw new Error('Modal Solicitação de AT indisponível.');
+    }
+    if (osModal) {
+      // Mantém o modal OS "escondido" enquanto gera o PDF (evita atrapalhar o usuário)
+      osModal.style.opacity = '0';
+      osModal.style.pointerEvents = 'none';
+    }
+    _abrirAtOsModal(id);
+    await _atAguardarOsCarregada(id);
+
+    const pdfBlob = await _atGerarOsPdfBlob();
+    const pdfBase64 = await _atBlobToBase64(pdfBlob);
+
+    const r = await fetch(`/api/sac/at/devolucao/${id}`, {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        pdf_base64: pdfBase64,
+        pdf_filename: `OS_${id}_devolucao.pdf`,
+      }),
+    });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok || data.ok === false) {
+      throw new Error(data.error || `Falha ao enviar devolução (${r.status}).`);
+    }
+    return data;
+  } finally {
+    if (osModal) {
+      if (abriuOs) {
+        osModal.style.display = 'none';
+      } else {
+        osModal.style.display = prevOsDisplay || 'flex';
+      }
+      osModal.style.opacity = prevOsOpacity || '';
+      osModal.style.pointerEvents = prevOsPointer || '';
+    }
+    if (editModal && editModal.style.display === 'none') {
+      // não reabre se o usuário já tinha fechado
+    }
+  }
+}
+
 // ============================================================================
 // ENGENHARIA: Download Fromthest
 // ============================================================================
@@ -15605,16 +15840,28 @@ function _atOsRenderPecaEnvioHtml(env) {
 
   if (openBtn) {
     openBtn.addEventListener('click', () => {
+      window._atAbrirEnviarLinkModal({ origem: 'os' });
+    });
+  }
+
+  window._atAbrirEnviarLinkModal = function(opts = {}) {
+    let uf = '';
+    if (opts.uf) {
+      uf = String(opts.uf).toUpperCase().trim();
+    } else if (opts.origem === 'edit') {
+      uf = String(document.getElementById('atEmEstado')?.value || '').toUpperCase().trim();
+    } else {
       const cidadeUfEl = document.getElementById('atOsCidadeUf');
       const cidadeUfTxt = cidadeUfEl ? cidadeUfEl.textContent.trim() : '';
       const ufMatch = cidadeUfTxt.match(/\/\s*([A-Z]{2})\s*$/i);
-      ufAtual = ufMatch ? ufMatch[1].toUpperCase() : '';
-      if (buscaInput) buscaInput.value = '';
-      fecharDropdown();
-      modal.style.display = 'flex';
-      carregarUfs(ufAtual);
-    });
-  }
+      uf = ufMatch ? ufMatch[1].toUpperCase() : '';
+    }
+    ufAtual = /^[A-Z]{2}$/.test(uf) ? uf : '';
+    if (buscaInput) buscaInput.value = '';
+    fecharDropdown();
+    modal.style.display = 'flex';
+    carregarUfs(ufAtual);
+  };
 })();
 
 // ── Modal Mapa (Leaflet + geocoding via backend com cache no banco) ────────────
@@ -15668,7 +15915,9 @@ function _atOsRenderPecaEnvioHtml(env) {
     var tecNome = btn.getAttribute('data-tec') || '';
     if (!tecNome) { alert('Nome do técnico não encontrado.'); return; }
     var osModal = document.getElementById('atOsModal');
-    var osId    = (osModal && osModal.dataset.osId) || '';
+    var osId    = (osModal && osModal.dataset.osId)
+      || (typeof _atEditModalCurrentId !== 'undefined' && _atEditModalCurrentId)
+      || '';
     var orig = btn.innerHTML;
     var iconBtn = btn.classList.contains('at-tec-icon-btn');
     btn.disabled = true;
@@ -15691,6 +15940,18 @@ function _atOsRenderPecaEnvioHtml(env) {
         // Habilita o botão Retirar imediatamente (modal da OS ainda pode estar aberto)
         const retirarBtn = document.getElementById('atOsRetirarBtn');
         if (retirarBtn) { retirarBtn.disabled = false; retirarBtn.style.opacity = ''; retirarBtn.style.cursor = ''; }
+        // Atualiza campo Técnico no modal Editar OS
+        const fechTec = document.getElementById('atEmFechTecnico');
+        if (fechTec) fechTec.value = tecNome;
+        if (typeof _atEmAtualizarFechamentoIcon === 'function') {
+          const row = (window._atAllRows || []).find(rr => String(rr.id) === String(osId)) || {};
+          _atEmAtualizarFechamentoIcon({
+            ...row,
+            tecnico_nome: tecNome,
+          });
+        }
+        const osFecTec = document.getElementById('atOsFecTecnico');
+        if (osFecTec) osFecTec.textContent = tecNome;
         setTimeout(function() { btn.innerHTML = orig; btn.disabled = false; }, 2500);
       } else {
         prompt('Copie o link do técnico:', url);
@@ -16010,6 +16271,14 @@ function _atOsRenderPecaEnvioHtml(env) {
     });
   }
 
+  const devolucaoDestBtn = document.getElementById('atDevolucaoDestMenuBtn');
+  if (devolucaoDestBtn) {
+    devolucaoDestBtn.addEventListener('click', () => {
+      fecharDrop();
+      document.dispatchEvent(new CustomEvent('atDevolucaoDestOpen'));
+    });
+  }
+
   if (matApoioBtn) {
     matApoioBtn.addEventListener('click', () => {
       fecharDrop();
@@ -16259,6 +16528,250 @@ function _atOsRenderPecaEnvioHtml(env) {
         } else { showMsg(d.error || 'Erro ao salvar.', false); }
       } catch(e) { showMsg('Erro de rede.', false); }
       finally { addBtn.disabled = false; }
+    });
+  }
+})();
+
+// ── Modal Destinatários de devolução (auth_user.email_devolucao) ──────────────
+(function() {
+  const modal = document.getElementById('atDevolucaoDestModal');
+  if (!modal) return;
+  const closeBtn = document.getElementById('atDevolucaoDestModalClose');
+  const buscaInp = document.getElementById('atDevolucaoDestBusca');
+  const resultsEl = document.getElementById('atDevolucaoDestBuscaResults');
+  const listEl = document.getElementById('atDevolucaoDestList');
+  const emptyEl = document.getElementById('atDevolucaoDestEmpty');
+  const msgEl = document.getElementById('atDevolucaoDestMsg');
+  const emailBox = document.getElementById('atDevolucaoDestEmailBox');
+  const emailInp = document.getElementById('atDevolucaoDestEmailInp');
+  const emailSalvar = document.getElementById('atDevolucaoDestEmailSalvar');
+  const emailCancel = document.getElementById('atDevolucaoDestEmailCancel');
+
+  let buscaTimer = null;
+  let pendingUserId = null;
+
+  function esc(s) {
+    return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+  function showMsg(text, ok) {
+    if (!msgEl) return;
+    msgEl.style.display = text ? 'block' : 'none';
+    msgEl.style.color = ok ? '#4ade80' : '#f87171';
+    msgEl.textContent = text || '';
+  }
+  function hideEmailBox() {
+    pendingUserId = null;
+    if (emailBox) emailBox.style.display = 'none';
+    if (emailInp) emailInp.value = '';
+  }
+  function showEmailBox(user) {
+    pendingUserId = user.id;
+    if (emailBox) emailBox.style.display = 'block';
+    if (emailInp) {
+      emailInp.value = '';
+      emailInp.focus();
+    }
+    showMsg(`Cadastrar e-mail de ${user.nome || user.username}`, true);
+  }
+
+  async function loadLista() {
+    if (!listEl) return;
+    listEl.innerHTML = '<div style="padding:16px;text-align:center;color:#94a3b8;font-size:13px;"><i class="fas fa-circle-notch fa-spin"></i> Carregando...</div>';
+    try {
+      const r = await fetch('/api/sac/at/devolucao-destinatarios', { credentials: 'same-origin' });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok || !d.ok) throw new Error(d.error || 'Falha ao carregar');
+      const itens = Array.isArray(d.itens) ? d.itens : [];
+      if (!itens.length) {
+        listEl.innerHTML = '';
+        if (emptyEl) emptyEl.style.display = 'block';
+        return;
+      }
+      if (emptyEl) emptyEl.style.display = 'none';
+      listEl.innerHTML = itens.map((it) => {
+        const status = it.ativo
+          ? '<span style="color:#4ade80;font-size:11px;font-weight:600;">Recebe e-mail</span>'
+          : '<span style="color:#fbbf24;font-size:11px;font-weight:600;">Aguardando confirmação</span>';
+        return `<div data-id="${it.id}" style="display:flex;align-items:center;gap:10px;padding:10px 8px;border-bottom:1px solid rgba(255,255,255,.06);">
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer;flex:1;min-width:0;">
+            <input type="checkbox" class="at-dev-dest-ativo" ${it.ativo ? 'checked' : ''} title="Confirmar recebimento" style="width:16px;height:16px;min-width:16px;min-height:16px;max-width:16px;max-height:16px;flex-shrink:0;accent-color:#22c55e;cursor:pointer;margin:0;">
+            <span style="min-width:0;">
+              <div style="font-size:13px;font-weight:600;color:#e5e7eb;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(it.nome)}</div>
+              <div style="font-size:11px;color:#94a3b8;">${esc(it.email || '(sem e-mail)')} · @${esc(it.username)}</div>
+              <div style="margin-top:2px;">${status}</div>
+            </span>
+          </label>
+          <button type="button" class="at-dev-dest-rm" title="Remover da lista" style="background:transparent;border:none;color:#f87171;cursor:pointer;padding:6px;"><i class="fa-solid fa-trash"></i></button>
+        </div>`;
+      }).join('');
+    } catch (e) {
+      listEl.innerHTML = `<div style="color:#f87171;font-size:13px;padding:12px;">${esc(e.message || 'Erro')}</div>`;
+    }
+  }
+
+  async function incluirUsuario(userId, email) {
+    const body = { user_id: userId };
+    if (email) body.email = email;
+    const r = await fetch('/api/sac/at/devolucao-destinatarios', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const d = await r.json().catch(() => ({}));
+    if (r.status === 400 && d.code === 'EMAIL_REQUIRED') {
+      showEmailBox(d.usuario || { id: userId, nome: 'Usuário' });
+      return false;
+    }
+    if (!r.ok || !d.ok) throw new Error(d.error || 'Falha ao incluir');
+    hideEmailBox();
+    showMsg(d.ja_na_lista ? 'Usuário já estava na lista.' : 'Incluído. Marque o checkbox para ativar.', true);
+    await loadLista();
+    return true;
+  }
+
+  async function buscar(q) {
+    if (!resultsEl) return;
+    if (q.length < 2) {
+      resultsEl.style.display = 'none';
+      resultsEl.innerHTML = '';
+      return;
+    }
+    try {
+      const r = await fetch(`/api/sac/at/devolucao-destinatarios/buscar?q=${encodeURIComponent(q)}`, { credentials: 'same-origin' });
+      const d = await r.json().catch(() => ({}));
+      const itens = (d.ok && Array.isArray(d.itens)) ? d.itens : [];
+      if (!itens.length) {
+        resultsEl.innerHTML = '<div style="padding:10px 12px;font-size:12px;color:#94a3b8;">Nenhum usuário encontrado</div>';
+        resultsEl.style.display = 'block';
+        return;
+      }
+      resultsEl.innerHTML = itens.map((it) => {
+        const badge = it.na_lista
+          ? (it.ativo ? ' <span style="color:#4ade80;font-size:10px;">(ativo)</span>' : ' <span style="color:#fbbf24;font-size:10px;">(na lista)</span>')
+          : '';
+        return `<button type="button" class="at-dev-dest-pick" data-id="${it.id}" data-email="${esc(it.email || '')}" data-nome="${esc(it.nome)}"
+          style="width:100%;text-align:left;padding:9px 12px;background:transparent;border:none;border-bottom:1px solid rgba(255,255,255,.06);color:#e5e7eb;cursor:pointer;font-size:13px;">
+          <div style="font-weight:600;">${esc(it.nome)}${badge}</div>
+          <div style="font-size:11px;color:#94a3b8;">@${esc(it.username)}${it.email ? ' · ' + esc(it.email) : ' · <em>sem e-mail</em>'}</div>
+        </button>`;
+      }).join('');
+      resultsEl.style.display = 'block';
+    } catch (_) {
+      resultsEl.style.display = 'none';
+    }
+  }
+
+  document.addEventListener('atDevolucaoDestOpen', () => {
+    modal.style.display = 'flex';
+    hideEmailBox();
+    showMsg('');
+    if (buscaInp) buscaInp.value = '';
+    if (resultsEl) { resultsEl.style.display = 'none'; resultsEl.innerHTML = ''; }
+    loadLista();
+  });
+
+  if (closeBtn) closeBtn.addEventListener('click', () => { modal.style.display = 'none'; });
+  modal.addEventListener('click', (e) => { if (e.target === modal) modal.style.display = 'none'; });
+
+  if (buscaInp) {
+    buscaInp.addEventListener('input', () => {
+      clearTimeout(buscaTimer);
+      buscaTimer = setTimeout(() => buscar(buscaInp.value.trim()), 280);
+    });
+  }
+
+  if (resultsEl) {
+    resultsEl.addEventListener('click', async (e) => {
+      const btn = e.target.closest('.at-dev-dest-pick');
+      if (!btn) return;
+      const id = Number(btn.dataset.id);
+      const email = String(btn.dataset.email || '').trim();
+      resultsEl.style.display = 'none';
+      if (buscaInp) buscaInp.value = '';
+      try {
+        if (!email) {
+          showEmailBox({ id, nome: btn.dataset.nome || 'Usuário' });
+          return;
+        }
+        await incluirUsuario(id);
+      } catch (err) {
+        showMsg(err.message || 'Erro', false);
+      }
+    });
+  }
+
+  document.addEventListener('click', (e) => {
+    if (resultsEl && resultsEl.style.display === 'block' && !resultsEl.contains(e.target) && e.target !== buscaInp) {
+      resultsEl.style.display = 'none';
+    }
+  });
+
+  if (emailSalvar) {
+    emailSalvar.addEventListener('click', async () => {
+      if (!pendingUserId) return;
+      const email = String(emailInp?.value || '').trim();
+      if (!email) { showMsg('Informe o e-mail.', false); return; }
+      emailSalvar.disabled = true;
+      try {
+        await incluirUsuario(pendingUserId, email);
+      } catch (err) {
+        showMsg(err.message || 'Erro ao salvar', false);
+      } finally {
+        emailSalvar.disabled = false;
+      }
+    });
+  }
+  if (emailCancel) emailCancel.addEventListener('click', hideEmailBox);
+
+  if (listEl) {
+    listEl.addEventListener('change', async (e) => {
+      const cb = e.target.closest('.at-dev-dest-ativo');
+      if (!cb) return;
+      const row = cb.closest('[data-id]');
+      const id = Number(row?.dataset?.id);
+      if (!id) return;
+      cb.disabled = true;
+      try {
+        const r = await fetch(`/api/sac/at/devolucao-destinatarios/${id}`, {
+          method: 'PUT',
+          credentials: 'same-origin',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ativo: !!cb.checked }),
+        });
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok || !d.ok) {
+          cb.checked = !cb.checked;
+          throw new Error(d.error || 'Falha ao atualizar');
+        }
+        showMsg(cb.checked ? 'Ativado: passará a receber o e-mail.' : 'Desativado.', true);
+        await loadLista();
+      } catch (err) {
+        showMsg(err.message || 'Erro', false);
+      } finally {
+        cb.disabled = false;
+      }
+    });
+
+    listEl.addEventListener('click', async (e) => {
+      const btn = e.target.closest('.at-dev-dest-rm');
+      if (!btn) return;
+      const row = btn.closest('[data-id]');
+      const id = Number(row?.dataset?.id);
+      if (!id) return;
+      if (!confirm('Remover este usuário da lista de devolução?')) return;
+      try {
+        const r = await fetch(`/api/sac/at/devolucao-destinatarios/${id}`, {
+          method: 'DELETE',
+          credentials: 'same-origin',
+        });
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok || !d.ok) throw new Error(d.error || 'Falha ao remover');
+        showMsg('Removido da lista.', true);
+        await loadLista();
+      } catch (err) {
+        showMsg(err.message || 'Erro', false);
+      }
     });
   }
 })();
@@ -17298,15 +17811,204 @@ async function _atEmCarregarAnexosExistentes(idAt) {
     const r = await fetch(`/api/sac/at/anexos/${idAt}`, { credentials: 'include' });
     const data = await r.json().catch(() => ({ anexos: [] }));
     const lista = data.anexos || [];
+    _atEmAtualizarAnexosCount(lista.length);
     ct.innerHTML = '';
-    if (!lista.length) return;
+    if (!lista.length) {
+      ct.innerHTML = '<span style="font-size:12px;color:var(--inactive-color);">Nenhum anexo.</span>';
+      return;
+    }
     _atRenderAnexoLista(ct, lista, idAt, () => {
-      // Atualiza contagem no cache após exclusão
       const row = _atAllRows.find(row => String(row.id) === String(idAt));
       if (row && row.qtd_anexos > 0) row.qtd_anexos = String(Number(row.qtd_anexos) - 1);
+      const badge = document.getElementById('atEmAnexosCount');
+      const atual = Math.max(0, (Number(badge?.textContent) || 0) - 1);
+      _atEmAtualizarAnexosCount(atual);
       _atRenderCurrent();
     });
-  } catch { ct.innerHTML = ''; }
+  } catch {
+    ct.innerHTML = '';
+    _atEmAtualizarAnexosCount(0);
+  }
+}
+
+function _atEmAtualizarAnexosCount(n) {
+  const badge = document.getElementById('atEmAnexosCount');
+  if (!badge) return;
+  const qtd = Math.max(0, Number(n) || 0);
+  badge.textContent = String(qtd);
+  badge.style.display = '';
+}
+
+function _atEmAtualizarFechamentoIcon(row) {
+  const ico = document.getElementById('atEmFechTabIco');
+  if (!ico) return;
+  const fechado = !!(
+    row?.tecnico_nome
+    || row?.fech_data_conclusao
+    || (row?.fech_observacao_tecnico && String(row.fech_observacao_tecnico).trim())
+  );
+  ico.className = fechado
+    ? 'fa-solid fa-circle-check at-em-tab-fech-ico is-ok'
+    : 'fa-solid fa-clock at-em-tab-fech-ico is-pendente';
+  ico.title = fechado
+    ? 'Fechado pelo técnico'
+    : 'Pendente fechamento do técnico';
+}
+
+function _atEmParseDataRef(val) {
+  const raw = String(val || '').trim();
+  if (!raw) return '';
+  if (/^\d{4}-\d{2}-\d{2}/.test(raw)) return raw.slice(0, 10);
+  const m = raw.match(/^(\d{2})\/(\d{2})\/(\d{4})/);
+  if (m) return `${m[3]}-${m[2]}-${m[1]}`;
+  const d = new Date(raw);
+  if (!Number.isNaN(d.getTime())) return d.toISOString().slice(0, 10);
+  return '';
+}
+
+/** Cache em memória: chave = id da OS (ou combinação modelo/op/data) */
+const _atEmPecasCache = new Map();
+
+function _atEmPecasCacheKey() {
+  const idAt = _atEditModalCurrentId;
+  if (idAt) return `at:${idAt}`;
+  const modelo = document.getElementById('atEmModelo')?.value?.trim() || '';
+  const op = document.getElementById('atEmOrdemProducao')?.value?.trim() || '';
+  const dataEntrega = _atEmParseDataRef(document.getElementById('atEmDataEntrega')?.value);
+  const dataAt = _atEmParseDataRef(document.getElementById('atEmData')?.value);
+  return `m:${modelo}|op:${op}|d:${dataEntrega || dataAt}`;
+}
+
+function _atEmRenderPecasUI(data) {
+  const statusEl = document.getElementById('atEmPecasStatus');
+  const wrapEl = document.getElementById('atEmPecasTableWrap');
+  const tbody = document.getElementById('atEmPecasTbody');
+  const metaEl = document.getElementById('atEmPecasMeta');
+  if (!statusEl || !wrapEl || !tbody) return;
+
+  if (!data) {
+    statusEl.style.display = '';
+    statusEl.textContent = 'Clique em “Buscar estrutura IAPP” quando quiser listar as peças.';
+    wrapEl.style.display = 'none';
+    tbody.innerHTML = '';
+    if (metaEl) metaEl.textContent = '';
+    return;
+  }
+
+  const pecas = Array.isArray(data.pecas) ? data.pecas : [];
+  const h = data.historico;
+  const partesMeta = [];
+  if (h?.ordem_producao) partesMeta.push(`OP ${h.ordem_producao}`);
+  if (h?.data_final) partesMeta.push(`produção ${h.data_final}`);
+  if (data.ficha?.id || data.ficha?.identificacao) {
+    partesMeta.push(`ficha ${data.ficha.identificacao || data.ficha.id}`);
+  }
+  if (data.fonte) partesMeta.push(`fonte: ${data.fonte}`);
+  if (data._fromCache) partesMeta.push('em cache');
+  if (metaEl) metaEl.textContent = partesMeta.join(' · ');
+
+  if (!pecas.length) {
+    statusEl.style.display = '';
+    statusEl.textContent = h
+      ? 'Nenhuma peça encontrada para a ficha desta produção.'
+      : 'Não achei OP/ficha no histórico IAPP para este modelo/data.';
+    wrapEl.style.display = 'none';
+    tbody.innerHTML = '';
+    return;
+  }
+
+  statusEl.style.display = 'none';
+  wrapEl.style.display = '';
+  tbody.innerHTML = pecas.map((p) => `
+    <tr>
+      <td>${escapeAtHtml(p.codigo || '—')}</td>
+      <td>${escapeAtHtml(p.descricao || '—')}</td>
+      <td>${escapeAtHtml(String(p.qtde ?? '—'))}</td>
+      <td>${escapeAtHtml(p.tipo || '—')}</td>
+    </tr>
+  `).join('');
+}
+
+function _atEmMostrarPecasDoCache() {
+  const cached = _atEmPecasCache.get(_atEmPecasCacheKey());
+  if (cached) _atEmRenderPecasUI({ ...cached, _fromCache: true });
+  else _atEmRenderPecasUI(null);
+}
+
+async function _atEmCarregarPecasIapp(force = false) {
+  const statusEl = document.getElementById('atEmPecasStatus');
+  const wrapEl = document.getElementById('atEmPecasTableWrap');
+  const tbody = document.getElementById('atEmPecasTbody');
+  const metaEl = document.getElementById('atEmPecasMeta');
+  const btn = document.getElementById('atEmPecasGerarBtn');
+  if (!statusEl || !wrapEl || !tbody) return;
+
+  const cacheKey = _atEmPecasCacheKey();
+  if (!force) {
+    const cached = _atEmPecasCache.get(cacheKey);
+    if (cached) {
+      _atEmRenderPecasUI({ ...cached, _fromCache: true });
+      return;
+    }
+    _atEmRenderPecasUI(null);
+    return;
+  }
+
+  const modelo = document.getElementById('atEmModelo')?.value?.trim() || '';
+  const op = document.getElementById('atEmOrdemProducao')?.value?.trim() || '';
+  const dataEntrega = _atEmParseDataRef(document.getElementById('atEmDataEntrega')?.value);
+  const dataAt = _atEmParseDataRef(document.getElementById('atEmData')?.value);
+  const dataRef = dataEntrega || dataAt;
+  const idAt = _atEditModalCurrentId;
+
+  if (!modelo && !op && !idAt) {
+    statusEl.style.display = '';
+    statusEl.textContent = 'Informe modelo ou ordem de produção antes de buscar a estrutura.';
+    wrapEl.style.display = 'none';
+    tbody.innerHTML = '';
+    if (metaEl) metaEl.textContent = '';
+    return;
+  }
+
+  if (btn) {
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Buscando...';
+  }
+  statusEl.style.display = '';
+  statusEl.textContent = 'Buscando estrutura IAPP...';
+  wrapEl.style.display = 'none';
+  tbody.innerHTML = '';
+  if (metaEl) metaEl.textContent = '';
+
+  try {
+    const qs = new URLSearchParams();
+    if (modelo) qs.set('modelo', modelo);
+    if (op) qs.set('ordem_producao', op);
+    if (dataRef) qs.set('data_ref', dataRef);
+    if (idAt) qs.set('id_at', String(idAt));
+    const r = await fetch(`/api/sac/at/lista-pecas-iapp?${qs}`, { credentials: 'include' });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok || data.ok === false) throw new Error(data.error || 'Falha ao carregar peças.');
+
+    const payload = {
+      pecas: Array.isArray(data.pecas) ? data.pecas : [],
+      historico: data.historico || null,
+      ficha: data.ficha || null,
+      fonte: data.fonte || null,
+      gerado_em: new Date().toISOString(),
+    };
+    _atEmPecasCache.set(cacheKey, payload);
+    _atEmRenderPecasUI(payload);
+  } catch (err) {
+    statusEl.style.display = '';
+    statusEl.textContent = err.message || 'Erro ao carregar peças.';
+    wrapEl.style.display = 'none';
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = '<i class="fa-solid fa-diagram-project"></i> Buscar estrutura IAPP';
+    }
+  }
 }
 
 function _atEmAplicarVisibilidadeRapido(tipo) {
@@ -17321,6 +18023,89 @@ function _atEmAplicarVisibilidadeRapido(tipo) {
   }
 }
 
+function _atEmSetTab(tab) {
+  const key = String(tab || 'atendimento');
+  document.querySelectorAll('#atEmTabs .at-em-tab').forEach(btn => {
+    const on = btn.dataset.atEmTab === key;
+    btn.classList.toggle('at-em-tab-active', on);
+    btn.setAttribute('aria-selected', on ? 'true' : 'false');
+  });
+  document.querySelectorAll('#atEditModal .at-em-pane').forEach(pane => {
+    const on = pane.dataset.atEmPane === key;
+    if (on) pane.removeAttribute('hidden');
+    else pane.setAttribute('hidden', '');
+  });
+  const body = document.querySelector('#atEditModal .at-em-body');
+  if (body) body.scrollTop = 0;
+  if (key === 'busca') _atEmMostrarPecasDoCache();
+  if (key === 'envios') _atEmCarregarPecasEnviadas();
+}
+
+function _atEmBindPecasEnviadasActions(root) {
+  if (!root) return;
+  root.querySelectorAll('.at-os-btn-etiqueta-zebra').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const ident = btn.getAttribute('data-identificacao') || '';
+      const envioId = btn.getAttribute('data-envio-id');
+      if (ident) {
+        window.open(`/api/vipp/etiqueta?id=${encodeURIComponent(ident)}&saida=1`, '_blank');
+        return;
+      }
+      if (envioId && typeof _envioImprimirEtiqueta === 'function') {
+        _envioImprimirEtiqueta(envioId, ident, btn);
+      } else {
+        alert('Etiqueta Zebra sem código de rastreio disponível.');
+      }
+    });
+  });
+  root.querySelectorAll('.at-os-btn-declaracao-zebra').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const envioId = btn.getAttribute('data-envio-id') || '';
+      if (envioId) {
+        window.open(`/api/vipp/declaracao?id=${encodeURIComponent(envioId)}`, '_blank');
+      } else {
+        alert('Declaração não disponível.');
+      }
+    });
+  });
+}
+
+async function _atEmCarregarPecasEnviadas() {
+  const statusEl = document.getElementById('atEmPecasEnviadasStatus');
+  const bodyEl = document.getElementById('atEmPecasEnviadasBody');
+  if (!statusEl || !bodyEl) return;
+  const id = _atEditModalCurrentId;
+  if (!id) {
+    statusEl.style.display = '';
+    statusEl.textContent = 'Abra uma OS para ver os envios de peças.';
+    bodyEl.style.display = 'none';
+    bodyEl.innerHTML = '';
+    return;
+  }
+
+  statusEl.style.display = '';
+  statusEl.textContent = 'Carregando peças enviadas...';
+  bodyEl.style.display = 'none';
+  bodyEl.innerHTML = '';
+
+  try {
+    const r = await fetch(`/api/sac/at/pecas-enviadas/${id}`, { credentials: 'same-origin' });
+    if (!r.ok) throw new Error('Falha ao carregar envios.');
+    const lista = await r.json().catch(() => []);
+    if (!Array.isArray(lista) || !lista.length) {
+      statusEl.textContent = 'Nenhuma peça enviada vinculada a esta OS.';
+      return;
+    }
+    statusEl.style.display = 'none';
+    bodyEl.style.display = '';
+    bodyEl.innerHTML = lista.map((env) => _atOsRenderPecaEnvioHtml(env)).join('');
+    _atEmBindPecasEnviadasActions(bodyEl);
+  } catch (err) {
+    statusEl.style.display = '';
+    statusEl.textContent = err.message || 'Erro ao carregar peças enviadas.';
+  }
+}
+
 function _abrirAtEditModal(id) {
   const row = _atAllRows.find(r => String(r.id) === String(id));
   if (!row) return;
@@ -17329,6 +18114,9 @@ function _abrirAtEditModal(id) {
   if (!modal) return;
 
   document.getElementById('atEditModalTitle').textContent = `Editar OS #${id}`;
+  _atEmSetTab('atendimento');
+  _atEmAtualizarFechamentoIcon(row);
+  _atEmAtualizarAnexosCount(Number(row.qtd_anexos) || 0);
 
   const setV = (elId, val) => { const el = document.getElementById(elId); if (el) el.value = val ?? ''; };
   setV('atEmTelefone',  row.telefone);
@@ -22669,6 +23457,68 @@ const _atEmTipoSel = document.getElementById('atEmTipo');
 if (_atEmTipoSel) _atEmTipoSel.addEventListener('change', () => _atEmAplicarVisibilidadeRapido(_atEmTipoSel.value));
 if (_atEditModal)      _atEditModal.addEventListener('click', e => { if (e.target === _atEditModal) { _atEditModal.style.display = 'none'; _atEditModalCurrentId = null; } });
 
+const _atEmTabsBar = document.getElementById('atEmTabs');
+if (_atEmTabsBar) {
+  _atEmTabsBar.addEventListener('click', e => {
+    const btn = e.target.closest('.at-em-tab');
+    if (!btn || !btn.dataset.atEmTab) return;
+    _atEmSetTab(btn.dataset.atEmTab);
+  });
+}
+
+const _atEmPecasGerarBtn = document.getElementById('atEmPecasGerarBtn');
+if (_atEmPecasGerarBtn) {
+  _atEmPecasGerarBtn.addEventListener('click', () => _atEmCarregarPecasIapp(true));
+}
+
+const _atEmAdicionarTecnicoBtn = document.getElementById('atEmAdicionarTecnicoBtn');
+if (_atEmAdicionarTecnicoBtn) {
+  _atEmAdicionarTecnicoBtn.addEventListener('click', () => {
+    if (!_atEditModalCurrentId) {
+      alert('Abra uma OS antes de vincular o técnico.');
+      return;
+    }
+    if (typeof window._atAbrirEnviarLinkModal === 'function') {
+      window._atAbrirEnviarLinkModal({ origem: 'edit' });
+    } else {
+      alert('Modal de técnicos não disponível.');
+    }
+  });
+}
+
+const _atDevolucaoBtn = document.getElementById('atDevolucaoBtn');
+if (_atDevolucaoBtn) {
+  _atDevolucaoBtn.addEventListener('click', async () => {
+    const id = _atEditModalCurrentId;
+    if (!id) {
+      alert('Abra uma OS antes de enviar a devolução.');
+      return;
+    }
+    if (!confirm(`Enviar e-mail de devolução da OS #${id}?\n\nSerá anexado o PDF da Solicitação de AT e os dados serão enviados aos destinatários configurados.`)) {
+      return;
+    }
+    const orig = _atDevolucaoBtn.innerHTML;
+    _atDevolucaoBtn.disabled = true;
+    _atDevolucaoBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i><span style="font-size:11px;font-weight:600;">Enviando...</span>';
+    try {
+      const data = await _atEnviarDevolucao(id);
+      const para = Array.isArray(data.enviados) ? data.enviados.join(', ') : '';
+      alert(`Devolução enviada com sucesso.${para ? `\n\nPara: ${para}` : ''}`);
+      const saved = document.getElementById('atEmSavedMsg');
+      if (saved) {
+        saved.style.display = '';
+        saved.textContent = 'E-mail de devolução enviado.';
+        setTimeout(() => { saved.style.display = 'none'; }, 4000);
+      }
+    } catch (err) {
+      alert(err.message || 'Erro ao enviar devolução.');
+    } finally {
+      _atDevolucaoBtn.disabled = false;
+      _atDevolucaoBtn.innerHTML = orig;
+    }
+  });
+}
+
 // Botão Anexar arquivo no modal editar
 const _atEmAnexarBtn   = document.getElementById('atEmAnexarBtn');
 const _atEmAnexarInput = document.getElementById('atEmAnexarInput');
@@ -22678,6 +23528,12 @@ if (_atEmAnexarBtn && _atEmAnexarInput) {
     Array.from(_atEmAnexarInput.files).forEach(f => _atEmAnexosPendentes.push(f));
     _atEmAnexarInput.value = '';
     _atEmRenderChips();
+    const badge = document.getElementById('atEmAnexosCount');
+    const base = Number(badge?.textContent) || 0;
+    // mostra existentes + pendentes só visualmente enquanto não salva
+    const row = (_atAllRows || []).find(x => String(x.id) === String(_atEditModalCurrentId));
+    const existentes = Number(row?.qtd_anexos) || base;
+    _atEmAtualizarAnexosCount(existentes + _atEmAnexosPendentes.length);
   });
 }
 
@@ -22752,6 +23608,13 @@ if (_atEmAnexarBtn && _atEmAnexarInput) {
       }
 
       await _atEmCarregarAnexosExistentes(id);
+      _atEmSetTab('fechamento');
+      const rowAtual = (_atAllRows || []).find((x) => String(x.id) === String(id));
+      _atEmAtualizarFechamentoIcon(rowAtual || {
+        tecnico_nome: document.getElementById('atEmFechTecnico')?.value,
+        fech_data_conclusao: document.getElementById('atEmFechData')?.value,
+        fech_observacao_tecnico: document.getElementById('atEmFechObsTecnico')?.value,
+      });
 
       const saved = document.getElementById('atEmSavedMsg');
       if (saved) {

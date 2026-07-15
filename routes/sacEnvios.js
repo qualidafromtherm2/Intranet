@@ -17,6 +17,7 @@ const {
   sanitizarCamposEnderecoTecnico,
 } = require('../utils/tecnicoEndereco');
 const { syncCustoPecasEnvio } = require('../utils/enviosCustoPecas');
+const { smtpConfigurado, parseListaEmails, enviarEmail } = require('../utils/mailer');
 
 const router = express.Router();
 
@@ -3773,6 +3774,18 @@ async function ensureSchema() {
     ALTER TABLE sac.at ADD COLUMN IF NOT EXISTS atendimento_inicial TEXT;
     ALTER TABLE sac.at ADD COLUMN IF NOT EXISTS acao_tomada TEXT;
     ALTER TABLE sac.at ADD COLUMN IF NOT EXISTS subtag TEXT;
+    ALTER TABLE sac.at ADD COLUMN IF NOT EXISTS status TEXT;
+    ALTER TABLE sac.at ADD COLUMN IF NOT EXISTS devolucao_enviada_em TIMESTAMP;
+    ALTER TABLE sac.at ADD COLUMN IF NOT EXISTS devolucao_enviada_para TEXT;
+
+    -- Destinatários de e-mail de devolução AT (NULL=fora da lista, false=pendente, true=ativo)
+    ALTER TABLE public.auth_user ADD COLUMN IF NOT EXISTS email_devolucao BOOLEAN;
+
+    -- Atendimento rápido deve permanecer Fechado (não fica aberto na guia)
+    UPDATE sac.at
+       SET status = 'Fechado'
+     WHERE LOWER(TRIM(tipo)) IN ('atendimento rápido', 'atendimento rapido')
+       AND COALESCE(NULLIF(TRIM(status), ''), '') NOT IN ('Fechado', 'Excluido');
 
     CREATE TABLE IF NOT EXISTS sac.alimentacao (
       id            BIGSERIAL PRIMARY KEY,
@@ -4517,7 +4530,11 @@ router.get('/at/atendimentos', async (_req, res) => {
            f.data_envio_nfe           AS fech_data_envio_nfe,
            f.observacao_tecnico       AS fech_observacao_tecnico,
            f.status_os                AS status_os,
-           a.status                   AS status,
+           CASE
+             WHEN LOWER(TRIM(a.tipo)) IN ('atendimento rápido', 'atendimento rapido')
+               THEN 'Fechado'
+             ELSE a.status
+           END                        AS status,
            ct.nome                    AS tecnico_nome,
            COALESCE(anx.qtd, 0)       AS qtd_anexos
          FROM sac.at a
@@ -6309,6 +6326,313 @@ router.get('/at/anexos/:id_at', async (req, res) => {
   } catch (err) {
     console.error('[SAC/AT] erro ao listar anexos:', err);
     res.status(500).json({ error: 'Falha ao listar anexos.' });
+  }
+});
+
+/**
+ * Lista peças da máquina via historico IAPP (data_final mais próxima) + ficha técnica.
+ * Query: modelo?, ordem_producao?, data_ref? (YYYY-MM-DD), id_at?
+ */
+router.get('/at/lista-pecas-iapp', async (req, res) => {
+  const https = require('https');
+  const modelo = String(req.query.modelo || '').trim();
+  const ordemProducao = String(req.query.ordem_producao || '').trim();
+  let dataRef = String(req.query.data_ref || '').trim().slice(0, 10);
+  const idAt = parseInt(req.query.id_at, 10);
+
+  const iappGetLocal = (path, params = {}) => new Promise((resolve, reject) => {
+    const token = process.env.IAPP_TOKEN;
+    const secret = process.env.IAPP_SECRET;
+    if (!token || !secret) return reject(new Error('IAPP_TOKEN e IAPP_SECRET não configurados.'));
+    const qs = new URLSearchParams(params).toString();
+    const url = new URL(`https://api.iniciativaaplicativos.com.br/api${path}${qs ? '?' + qs : ''}`);
+    const options = {
+      hostname: url.hostname,
+      path: url.pathname + url.search,
+      method: 'GET',
+      headers: { token, secret, 'Content-Type': 'application/json' },
+    };
+    const r = https.request(options, (resp) => {
+      let body = '';
+      resp.on('data', (c) => { body += c; });
+      resp.on('end', () => {
+        try { resolve(JSON.parse(body || '{}')); }
+        catch (e) { reject(new Error(`Resposta inválida IAPP: ${body.slice(0, 160)}`)); }
+      });
+    });
+    r.on('error', reject);
+    r.setTimeout(25000, () => { r.destroy(new Error('Timeout IAPP')); });
+    r.end();
+  });
+
+  const normalizarOp = (v) => String(v || '').trim().replace(/^0+/, '') || '';
+
+  try {
+    // Se faltarem dados, tenta puxar da AT
+    let modeloFinal = modelo;
+    let opFinal = ordemProducao;
+    if ((!modeloFinal || !dataRef || !opFinal) && Number.isFinite(idAt) && idAt > 0) {
+      const { rows: atRows } = await pool.query(
+        `SELECT a.modelo, a.data,
+                b.modelo AS busca_modelo, b.ordem_producao, b.data_entrega
+           FROM sac.at a
+           LEFT JOIN sac.at_busca_selecionada b ON b.id_at = a.id
+          WHERE a.id = $1
+          LIMIT 1`,
+        [idAt]
+      );
+      const at = atRows[0] || {};
+      if (!modeloFinal) modeloFinal = String(at.busca_modelo || at.modelo || '').trim();
+      if (!opFinal) opFinal = String(at.ordem_producao || '').trim();
+      if (!dataRef) {
+        const rawDt = at.data_entrega || at.data;
+        if (rawDt) {
+          const d = rawDt instanceof Date ? rawDt : new Date(rawDt);
+          if (!Number.isNaN(d.getTime())) dataRef = d.toISOString().slice(0, 10);
+        }
+      }
+    }
+
+    if (!modeloFinal && !opFinal) {
+      return res.status(400).json({ ok: false, error: 'Informe modelo ou ordem de produção.' });
+    }
+    if (!dataRef) dataRef = new Date().toISOString().slice(0, 10);
+
+    let historico = null;
+
+    // 1) Preferência: casar OP
+    if (opFinal) {
+      const opNorm = normalizarOp(opFinal);
+      const { rows } = await pool.query(
+        `SELECT h.identificacao, h.produto_identificacao, h.produto_descricao,
+                h.data_final, h.data_abertura, h.status,
+                NULLIF(BTRIM(h.raw->>'ficha_tecnica'), '') AS ficha_tecnica
+           FROM iapp.historico_op_iapp h
+          WHERE UPPER(BTRIM(h.identificacao)) = UPPER(BTRIM($1))
+             OR regexp_replace(BTRIM(h.identificacao), '^0+', '') = $2
+          ORDER BY h.data_final DESC NULLS LAST
+          LIMIT 1`,
+        [opFinal, opNorm]
+      );
+      historico = rows[0] || null;
+    }
+
+    // 2) Modelo + data_final mais próxima da data de produção/entrega
+    if (!historico && modeloFinal) {
+      const { rows } = await pool.query(
+        `SELECT h.identificacao, h.produto_identificacao, h.produto_descricao,
+                h.data_final, h.data_abertura, h.status,
+                NULLIF(BTRIM(h.raw->>'ficha_tecnica'), '') AS ficha_tecnica,
+                ABS(h.data_final::date - $2::date) AS dias_diff
+           FROM iapp.historico_op_iapp h
+          WHERE UPPER(BTRIM(h.produto_identificacao)) = UPPER(BTRIM($1))
+            AND h.data_final IS NOT NULL
+          ORDER BY ABS(h.data_final::date - $2::date) ASC, h.data_final DESC
+          LIMIT 1`,
+        [modeloFinal, dataRef]
+      );
+      historico = rows[0] || null;
+    }
+
+    let fichaId = Number(historico?.ficha_tecnica) || 0;
+    let fichaLocal = null;
+
+    if (!fichaId && modeloFinal) {
+      const { rows: fRows } = await pool.query(
+        `SELECT id, identificacao, descricao, produto, status
+           FROM engenharia.iapp_fichas
+          WHERE UPPER(BTRIM(COALESCE(produto, ''))) = UPPER(BTRIM($1))
+             OR UPPER(BTRIM(COALESCE(descricao, ''))) = UPPER(BTRIM($1))
+          ORDER BY data_ultima_atualizacao DESC NULLS LAST
+          LIMIT 1`,
+        [modeloFinal]
+      );
+      fichaLocal = fRows[0] || null;
+      fichaId = Number(fichaLocal?.id) || 0;
+    } else if (fichaId) {
+      const { rows: fRows } = await pool.query(
+        `SELECT id, identificacao, descricao, produto, status
+           FROM engenharia.iapp_fichas WHERE id = $1 LIMIT 1`,
+        [fichaId]
+      );
+      fichaLocal = fRows[0] || null;
+    }
+
+    const mapItem = (row) => ({
+      codigo: row.codigo || row.identificacao || '—',
+      descricao: row.descricao || row.codigo || '—',
+      qtde: row.qtde ?? 0,
+      tipo: row.tipo || row.status || 'Material',
+      etapa: row.etapa || '',
+    });
+
+    let itens = [];
+    let fonte = 'nenhuma';
+
+    // Materiais locais (cache engenharia)
+    if (fichaId > 0) {
+      try {
+        const { rows: matRows } = await pool.query(
+          `SELECT
+              COALESCE(
+                NULLIF(BTRIM(m.raw_payload #>> '{produto,identificacao}'), ''),
+                NULLIF(BTRIM(m.raw_payload ->> 'identificacao'), ''),
+                NULLIF(BTRIM(po.codigo), ''),
+                m.produto_id::text
+              ) AS codigo,
+              COALESCE(
+                NULLIF(BTRIM(m.raw_payload #>> '{produto,descricao}'), ''),
+                NULLIF(BTRIM(m.raw_payload ->> 'descricao'), ''),
+                NULLIF(BTRIM(po.descricao), ''),
+                m.produto_id::text
+              ) AS descricao,
+              m.qtde,
+              'Material' AS tipo
+             FROM engenharia.iapp_fichas_operacao_materiais m
+             LEFT JOIN LATERAL (
+               SELECT p.codigo, p.descricao
+                 FROM public.produtos_omie p
+                WHERE p.codigo_produto::text = m.produto_id::text
+                   OR UPPER(BTRIM(p.codigo)) = UPPER(BTRIM(COALESCE(
+                        m.raw_payload #>> '{produto,identificacao}',
+                        m.raw_payload ->> 'identificacao', ''
+                      )))
+                LIMIT 1
+             ) po ON TRUE
+            WHERE m.ficha_id = $1
+            ORDER BY m.operacao_item_index, m.item_index`,
+          [fichaId]
+        );
+        if (matRows.length) {
+          itens = matRows.map(mapItem);
+          fonte = 'engenharia.iapp_fichas';
+        }
+      } catch (e) {
+        console.warn('[SAC/AT] lista-pecas locais:', e.message);
+      }
+    }
+
+    // IAPP ao vivo (ficha histórica ou atual pelo código)
+    if (!itens.length) {
+      try {
+        let fichaIapp = null;
+        if (fichaId > 0) {
+          const data = await iappGetLocal(`/engenharia/fichas/busca/${fichaId}`);
+          if (data?.success !== false) fichaIapp = data.response || null;
+        }
+        if (!fichaIapp && modeloFinal) {
+          // reusa endpoint de produção já consolidado
+          const base = `http://127.0.0.1:${process.env.PORT || 3001}`;
+          const qs = new URLSearchParams({
+            codigo: modeloFinal,
+            ...(fichaId ? { ficha_id: String(fichaId) } : {}),
+          });
+          const cookie = req.headers.cookie || '';
+          const pr = await fetch(`${base}/api/producao/estrutura-ficha?${qs}`, {
+            headers: cookie ? { Cookie: cookie } : {},
+          });
+          const pdata = await pr.json().catch(() => ({}));
+          if (pr.ok && Array.isArray(pdata.response) && pdata.response.length) {
+            itens = pdata.response.map((it) => mapItem({
+              codigo: it.identificacao,
+              descricao: it.descricao,
+              qtde: it.qtde,
+              tipo: it.status,
+              etapa: it.etapa,
+            }));
+            fonte = pdata.fonte || 'iapp';
+            if (!fichaLocal && pdata.ficha) fichaLocal = pdata.ficha;
+          }
+        } else if (fichaIapp) {
+          const flat = [];
+          for (const op of (fichaIapp.operacoes || [])) {
+            for (const item of (op.materiais || [])) {
+              flat.push({
+                codigo: String(item?.produto ?? ''),
+                descricao: String(item?.produto ?? ''),
+                qtde: item?.qtde ?? 0,
+                tipo: 'Material',
+                etapa: op?.operacao ?? '',
+              });
+            }
+            for (const item of (op.subprodutos || [])) {
+              flat.push({
+                codigo: String(item?.produto ?? ''),
+                descricao: String(item?.produto ?? ''),
+                qtde: item?.qtde ?? 0,
+                tipo: 'Subproduto',
+                etapa: op?.operacao ?? '',
+              });
+            }
+          }
+          // Resolve códigos Omie quando possível
+          const refs = [...new Set(flat.map((x) => x.codigo).filter((c) => c && /^\d+$/.test(c)))];
+          const nomePorRef = {};
+          for (const ref of refs.slice(0, 40)) {
+            try {
+              const pd = await iappGetLocal(`/engenharia/produtos/busca/${ref}`);
+              if (pd?.response) {
+                nomePorRef[ref] = {
+                  codigo: pd.response.identificacao || ref,
+                  descricao: pd.response.descricao || pd.response.identificacao || ref,
+                };
+              }
+            } catch (_) { /* ignora */ }
+          }
+          itens = flat.map((it) => {
+            const hit = nomePorRef[it.codigo];
+            return mapItem({
+              codigo: hit?.codigo || it.codigo,
+              descricao: hit?.descricao || it.descricao,
+              qtde: it.qtde,
+              tipo: it.tipo,
+              etapa: it.etapa,
+            });
+          });
+          fonte = 'iapp';
+          if (!fichaLocal) {
+            fichaLocal = {
+              id: fichaIapp.id,
+              identificacao: fichaIapp.identificacao,
+              descricao: fichaIapp.descricao,
+              produto: fichaIapp.produto,
+              status: fichaIapp.status,
+            };
+          }
+        }
+      } catch (e) {
+        console.warn('[SAC/AT] lista-pecas IAPP:', e.message);
+      }
+    }
+
+    const fmtData = (v) => {
+      if (!v) return null;
+      const d = v instanceof Date ? v : new Date(v);
+      if (Number.isNaN(d.getTime())) return String(v).slice(0, 10);
+      return d.toISOString().slice(0, 10);
+    };
+
+    return res.json({
+      ok: true,
+      modelo: modeloFinal || historico?.produto_identificacao || null,
+      data_ref: dataRef,
+      historico: historico ? {
+        ordem_producao: historico.identificacao,
+        modelo: historico.produto_identificacao,
+        descricao: historico.produto_descricao,
+        data_final: fmtData(historico.data_final),
+        status: historico.status,
+        ficha_tecnica: fichaId || null,
+        dias_diff: historico.dias_diff != null ? Number(historico.dias_diff) : null,
+      } : null,
+      ficha: fichaLocal || (fichaId ? { id: fichaId } : null),
+      fonte,
+      total: itens.length,
+      pecas: itens,
+    });
+  } catch (err) {
+    console.error('[SAC/AT] lista-pecas-iapp:', err);
+    return res.status(500).json({ ok: false, error: err.message || 'Falha ao listar peças IAPP.' });
   }
 });
 
@@ -9839,6 +10163,481 @@ router.get('/at/pecas-enviadas/:id', async (req, res) => {
   }
 });
 
+function _emailValidoDevolucao(raw) {
+  const e = String(raw || '').trim().toLowerCase();
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e) ? e : null;
+}
+
+async function _obterEmailRemetenteDevolucao(req) {
+  // Brevo só entrega confiável se o From for remetente/domínio verificado.
+  // Usamos sempre SMTP_FROM (ex.: calidadefromtherm2@gmail.com) e o e-mail
+  // do usuário logado como Reply-To (quando existir).
+  const uid = req.session?.user?.id || null;
+  const uname = String(req.session?.user?.username || '').trim();
+  let email = null;
+  let nome = req.session?.user?.fullName || uname || 'Intranet';
+  try {
+    if (uid) {
+      const { rows } = await pool.query(
+        `SELECT email, nome_completo, username FROM public.auth_user WHERE id = $1 LIMIT 1`,
+        [uid]
+      );
+      if (rows[0]) {
+        email = _emailValidoDevolucao(rows[0].email);
+        nome = String(rows[0].nome_completo || rows[0].username || nome).trim() || nome;
+      }
+    } else if (uname) {
+      const { rows } = await pool.query(
+        `SELECT email, nome_completo, username FROM public.auth_user WHERE LOWER(username) = LOWER($1) LIMIT 1`,
+        [uname]
+      );
+      if (rows[0]) {
+        email = _emailValidoDevolucao(rows[0].email);
+        nome = String(rows[0].nome_completo || rows[0].username || nome).trim() || nome;
+      }
+    }
+  } catch (_) { /* ignora */ }
+
+  const smtpFrom = String(process.env.SMTP_FROM || '').trim();
+  if (!smtpFrom) {
+    return { from: null, email, nome, usadoFallback: true };
+  }
+  // Mantém o nome amigável do usuário no From, mas o endereço deve ser o verificado no Brevo
+  const matchAddr = smtpFrom.match(/<([^>]+)>/);
+  const addrFixo = matchAddr ? matchAddr[1].trim() : smtpFrom.replace(/^.*<|>$/g, '').trim() || smtpFrom;
+  const from = `${nome} <${addrFixo}>`;
+  return { from, email, nome, usadoFallback: true, replyTo: email || undefined };
+}
+
+/**
+ * GET /at/devolucao-destinatarios
+ * Lista usuários com email_devolucao IS NOT NULL (pendentes + ativos).
+ */
+router.get('/at/devolucao-destinatarios', async (req, res) => {
+  try {
+    await ensureSchema();
+    const { rows } = await pool.query(
+      `SELECT id, username, nome_completo, email, email_devolucao, is_active
+         FROM public.auth_user
+        WHERE email_devolucao IS NOT NULL
+        ORDER BY
+          CASE WHEN email_devolucao = true THEN 0 ELSE 1 END,
+          COALESCE(NULLIF(TRIM(nome_completo), ''), username) ASC`
+    );
+    return res.json({
+      ok: true,
+      itens: rows.map((r) => ({
+        id: Number(r.id),
+        username: r.username,
+        nome: r.nome_completo || r.username,
+        email: r.email || null,
+        ativo: r.email_devolucao === true,
+        pendente: r.email_devolucao === false,
+        is_active: r.is_active !== false,
+      })),
+    });
+  } catch (err) {
+    console.error('[AT/devolucao-destinatarios] listar:', err);
+    return res.status(500).json({ ok: false, error: err.message || 'Falha ao listar destinatários.' });
+  }
+});
+
+/**
+ * GET /at/devolucao-destinatarios/buscar?q=
+ * Pesquisa usuários ativos para incluir na lista.
+ */
+router.get('/at/devolucao-destinatarios/buscar', async (req, res) => {
+  const q = String(req.query.q || '').trim();
+  if (q.length < 2) return res.json({ ok: true, itens: [] });
+  try {
+    await ensureSchema();
+    const like = `%${q.replace(/%/g, '')}%`;
+    const { rows } = await pool.query(
+      `SELECT id, username, nome_completo, email, email_devolucao, is_active
+         FROM public.auth_user
+        WHERE COALESCE(is_active, true) = true
+          AND (
+            username ILIKE $1
+            OR COALESCE(nome_completo, '') ILIKE $1
+            OR COALESCE(email, '') ILIKE $1
+          )
+        ORDER BY
+          CASE WHEN email_devolucao IS NOT NULL THEN 1 ELSE 0 END,
+          COALESCE(NULLIF(TRIM(nome_completo), ''), username) ASC
+        LIMIT 20`,
+      [like]
+    );
+    return res.json({
+      ok: true,
+      itens: rows.map((r) => ({
+        id: Number(r.id),
+        username: r.username,
+        nome: r.nome_completo || r.username,
+        email: r.email || null,
+        na_lista: r.email_devolucao !== null && r.email_devolucao !== undefined,
+        ativo: r.email_devolucao === true,
+      })),
+    });
+  } catch (err) {
+    console.error('[AT/devolucao-destinatarios] buscar:', err);
+    return res.status(500).json({ ok: false, error: err.message || 'Falha na pesquisa.' });
+  }
+});
+
+/**
+ * POST /at/devolucao-destinatarios
+ * Inclui usuário na lista (email_devolucao = false = aguardando confirmação).
+ * Body: { user_id, email? }
+ */
+router.post('/at/devolucao-destinatarios', async (req, res) => {
+  const userId = parseInt(req.body?.user_id, 10);
+  if (!userId || userId < 1) return res.status(400).json({ ok: false, error: 'Usuário inválido.' });
+  const emailBody = req.body?.email != null ? _emailValidoDevolucao(req.body.email) : null;
+  if (req.body?.email != null && String(req.body.email).trim() && !emailBody) {
+    return res.status(400).json({ ok: false, error: 'E-mail inválido.' });
+  }
+  try {
+    await ensureSchema();
+    const { rows: cur } = await pool.query(
+      `SELECT id, username, nome_completo, email, email_devolucao
+         FROM public.auth_user WHERE id = $1 LIMIT 1`,
+      [userId]
+    );
+    if (!cur[0]) return res.status(404).json({ ok: false, error: 'Usuário não encontrado.' });
+
+    let email = _emailValidoDevolucao(cur[0].email) || emailBody;
+    if (!email) {
+      return res.status(400).json({
+        ok: false,
+        code: 'EMAIL_REQUIRED',
+        error: 'Este usuário não tem e-mail cadastrado. Informe o e-mail para continuar.',
+        usuario: {
+          id: Number(cur[0].id),
+          username: cur[0].username,
+          nome: cur[0].nome_completo || cur[0].username,
+        },
+      });
+    }
+
+    // Já na lista → só atualiza e-mail se veio no body
+    if (cur[0].email_devolucao !== null && cur[0].email_devolucao !== undefined) {
+      if (emailBody) {
+        await pool.query(`UPDATE public.auth_user SET email = $1, updated_at = NOW() WHERE id = $2`, [emailBody, userId]);
+        email = emailBody;
+      }
+      return res.json({
+        ok: true,
+        ja_na_lista: true,
+        item: {
+          id: Number(cur[0].id),
+          username: cur[0].username,
+          nome: cur[0].nome_completo || cur[0].username,
+          email,
+          ativo: cur[0].email_devolucao === true,
+          pendente: cur[0].email_devolucao === false,
+        },
+      });
+    }
+
+    await pool.query(
+      `UPDATE public.auth_user
+          SET email = COALESCE($1, email),
+              email_devolucao = false,
+              updated_at = NOW()
+        WHERE id = $2`,
+      [emailBody || email, userId]
+    );
+
+    return res.json({
+      ok: true,
+      item: {
+        id: Number(cur[0].id),
+        username: cur[0].username,
+        nome: cur[0].nome_completo || cur[0].username,
+        email: emailBody || email,
+        ativo: false,
+        pendente: true,
+      },
+    });
+  } catch (err) {
+    console.error('[AT/devolucao-destinatarios] incluir:', err);
+    return res.status(500).json({ ok: false, error: err.message || 'Falha ao incluir destinatário.' });
+  }
+});
+
+/**
+ * PUT /at/devolucao-destinatarios/:id/email
+ * Grava e-mail em auth_user.email
+ */
+router.put('/at/devolucao-destinatarios/:id/email', async (req, res) => {
+  const userId = parseInt(req.params.id, 10);
+  if (!userId || userId < 1) return res.status(400).json({ ok: false, error: 'ID inválido.' });
+  const email = _emailValidoDevolucao(req.body?.email);
+  if (!email) return res.status(400).json({ ok: false, error: 'E-mail inválido.' });
+  try {
+    await ensureSchema();
+    const { rows } = await pool.query(
+      `UPDATE public.auth_user
+          SET email = $1, updated_at = NOW()
+        WHERE id = $2
+        RETURNING id, username, nome_completo, email, email_devolucao`,
+      [email, userId]
+    );
+    if (!rows[0]) return res.status(404).json({ ok: false, error: 'Usuário não encontrado.' });
+    return res.json({
+      ok: true,
+      item: {
+        id: Number(rows[0].id),
+        username: rows[0].username,
+        nome: rows[0].nome_completo || rows[0].username,
+        email: rows[0].email,
+        ativo: rows[0].email_devolucao === true,
+        pendente: rows[0].email_devolucao === false,
+      },
+    });
+  } catch (err) {
+    console.error('[AT/devolucao-destinatarios] email:', err);
+    return res.status(500).json({ ok: false, error: err.message || 'Falha ao salvar e-mail.' });
+  }
+});
+
+/**
+ * PUT /at/devolucao-destinatarios/:id
+ * Body: { ativo: true|false } — confirma/desativa recebimento (email_devolucao)
+ */
+router.put('/at/devolucao-destinatarios/:id', async (req, res) => {
+  const userId = parseInt(req.params.id, 10);
+  if (!userId || userId < 1) return res.status(400).json({ ok: false, error: 'ID inválido.' });
+  const ativo = !!req.body?.ativo;
+  try {
+    await ensureSchema();
+    const { rows: cur } = await pool.query(
+      `SELECT id, email, email_devolucao FROM public.auth_user WHERE id = $1 LIMIT 1`,
+      [userId]
+    );
+    if (!cur[0]) return res.status(404).json({ ok: false, error: 'Usuário não encontrado.' });
+    if (cur[0].email_devolucao === null || cur[0].email_devolucao === undefined) {
+      return res.status(400).json({ ok: false, error: 'Usuário não está na lista de devolução. Inclua antes.' });
+    }
+    if (ativo && !_emailValidoDevolucao(cur[0].email)) {
+      return res.status(400).json({ ok: false, error: 'Cadastre um e-mail válido antes de ativar.' });
+    }
+    const { rows } = await pool.query(
+      `UPDATE public.auth_user
+          SET email_devolucao = $1, updated_at = NOW()
+        WHERE id = $2
+        RETURNING id, username, nome_completo, email, email_devolucao`,
+      [ativo, userId]
+    );
+    return res.json({
+      ok: true,
+      item: {
+        id: Number(rows[0].id),
+        username: rows[0].username,
+        nome: rows[0].nome_completo || rows[0].username,
+        email: rows[0].email,
+        ativo: rows[0].email_devolucao === true,
+        pendente: rows[0].email_devolucao === false,
+      },
+    });
+  } catch (err) {
+    console.error('[AT/devolucao-destinatarios] ativar:', err);
+    return res.status(500).json({ ok: false, error: err.message || 'Falha ao atualizar.' });
+  }
+});
+
+/**
+ * DELETE /at/devolucao-destinatarios/:id
+ * Remove da lista (email_devolucao = NULL). Não apaga o e-mail do usuário.
+ */
+router.delete('/at/devolucao-destinatarios/:id', async (req, res) => {
+  const userId = parseInt(req.params.id, 10);
+  if (!userId || userId < 1) return res.status(400).json({ ok: false, error: 'ID inválido.' });
+  try {
+    await ensureSchema();
+    await pool.query(
+      `UPDATE public.auth_user SET email_devolucao = NULL, updated_at = NOW() WHERE id = $1`,
+      [userId]
+    );
+    return res.json({ ok: true });
+  } catch (err) {
+    console.error('[AT/devolucao-destinatarios] remover:', err);
+    return res.status(500).json({ ok: false, error: err.message || 'Falha ao remover.' });
+  }
+});
+
+/**
+ * POST /at/devolucao/:id
+ * Envia e-mail de devolução com dados da OS + PDF anexado (base64).
+ * Body: { pdf_base64: string, pdf_filename?: string }
+ * Destinatários: auth_user com email_devolucao = true (+ fallback AT_DEVOLUCAO_EMAILS)
+ * Remetente: e-mail do usuário logado (+ fallback SMTP_FROM)
+ */
+router.post('/at/devolucao/:id', async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (!id || id < 1) return res.status(400).json({ ok: false, error: 'ID inválido.' });
+
+  if (!smtpConfigurado()) {
+    return res.status(503).json({
+      ok: false,
+      error: 'SMTP não configurado. Defina SMTP_HOST, SMTP_USER, SMTP_PASS e SMTP_FROM no .env (Brevo gratuito recomendado).',
+    });
+  }
+
+  let pdfBase64 = String(req.body?.pdf_base64 || '').trim();
+  if (pdfBase64.includes(',')) pdfBase64 = pdfBase64.split(',').pop() || '';
+  pdfBase64 = pdfBase64.replace(/\s+/g, '');
+  if (!pdfBase64 || pdfBase64.length < 100) {
+    return res.status(400).json({ ok: false, error: 'PDF da OS não recebido. Gere o PDF e tente novamente.' });
+  }
+  if (pdfBase64.length > 11_000_000) {
+    return res.status(413).json({ ok: false, error: 'PDF muito grande para envio por e-mail.' });
+  }
+
+  const pdfFilename = String(req.body?.pdf_filename || `OS_${id}_devolucao.pdf`)
+    .replace(/[^\w.\-]+/g, '_')
+    .slice(0, 120);
+
+  try {
+    await ensureSchema();
+
+    const { rows: destRows } = await pool.query(
+      `SELECT email
+         FROM public.auth_user
+        WHERE email_devolucao = true
+          AND COALESCE(is_active, true) = true
+          AND email IS NOT NULL
+          AND TRIM(email) <> ''`
+    );
+    let destinatarios = destRows
+      .map((r) => _emailValidoDevolucao(r.email))
+      .filter(Boolean);
+    // Fallback opcional do .env enquanto a lista ainda não foi configurada na tela
+    if (!destinatarios.length) {
+      destinatarios = parseListaEmails(process.env.AT_DEVOLUCAO_EMAILS || '');
+    }
+    if (!destinatarios.length) {
+      return res.status(400).json({
+        ok: false,
+        error: 'Nenhum destinatário ativo. Em AT → Configuração → Destinatários de devolução, marque quem deve receber.',
+      });
+    }
+
+    const remetente = await _obterEmailRemetenteDevolucao(req);
+    if (!remetente.from) {
+      return res.status(503).json({
+        ok: false,
+        error: 'Seu usuário não tem e-mail cadastrado e SMTP_FROM não está definido. Cadastre o e-mail em RH ou defina SMTP_FROM no .env.',
+      });
+    }
+
+    const { rows } = await pool.query(
+      `SELECT a.id, a.data, a.tipo, a.status, a.nome_revenda_cliente, a.numero_telefone,
+              a.cpf_cnpj, a.modelo, a.cidade, a.estado, a.descreva_reclamacao,
+              a.atendimento_inicial, a.motivo_solicitacao, a.acao_tomada, a.tag_problema,
+              s.pedido, s.ordem_producao, s.nota_fiscal, s.data_entrega,
+              ct.nome AS tecnico_nome
+         FROM sac.at a
+         LEFT JOIN sac.at_busca_selecionada s ON s.id_at = a.id
+         LEFT JOIN sac.fechamento f ON f.id_at = a.id
+         LEFT JOIN sac.controle_tecnicos ct ON ct.id = f.id_tecnico
+        WHERE a.id = $1
+        ORDER BY f.id DESC NULLS LAST
+        LIMIT 1`,
+      [id]
+    );
+    const at = rows[0];
+    if (!at) return res.status(404).json({ ok: false, error: 'OS não encontrada.' });
+
+    const linha = (lbl, val) => {
+      const v = String(val ?? '').trim();
+      return v ? `<tr><td style="padding:4px 8px;font-weight:700;color:#334155;white-space:nowrap;">${lbl}</td><td style="padding:4px 8px;color:#0f172a;">${String(v).replace(/</g, '&lt;')}</td></tr>` : '';
+    };
+    const dataBr = at.data ? new Date(at.data).toLocaleString('pt-BR') : '';
+
+    const html = `
+      <div style="font-family:Arial,sans-serif;font-size:14px;color:#0f172a;">
+        <h2 style="margin:0 0 8px;color:#0ea5e9;">Devolução — OS #${id}</h2>
+        <p style="margin:0 0 14px;color:#475569;">Solicitação automática pela Intranet (modal Editar OS).</p>
+        <table style="border-collapse:collapse;width:100%;max-width:720px;border:1px solid #e2e8f0;">
+          ${linha('OS', `#${id}`)}
+          ${linha('Data', dataBr)}
+          ${linha('Tipo', at.tipo)}
+          ${linha('Status', at.status)}
+          ${linha('Cliente / Revenda', at.nome_revenda_cliente)}
+          ${linha('Telefone', at.numero_telefone)}
+          ${linha('CPF/CNPJ', at.cpf_cnpj)}
+          ${linha('Modelo', at.modelo)}
+          ${linha('Cidade/UF', [at.cidade, at.estado].filter(Boolean).join(' / '))}
+          ${linha('Pedido', at.pedido)}
+          ${linha('Ordem de Produção', at.ordem_producao)}
+          ${linha('Nota Fiscal', at.nota_fiscal)}
+          ${linha('Data Entrega', at.data_entrega)}
+          ${linha('Tag', at.tag_problema)}
+          ${linha('Técnico', at.tecnico_nome)}
+          ${linha('Atendimento inicial', at.atendimento_inicial)}
+          ${linha('Motivo', at.motivo_solicitacao)}
+          ${linha('Ação tomada', at.acao_tomada)}
+          ${linha('Reclamação', at.descreva_reclamacao)}
+        </table>
+        <p style="margin:14px 0 0;color:#64748b;font-size:12px;">PDF da Solicitação de AT anexado a este e-mail.</p>
+      </div>`;
+
+    const text = [
+      `Devolução — OS #${id}`,
+      `Cliente: ${at.nome_revenda_cliente || '-'}`,
+      `Modelo: ${at.modelo || '-'}`,
+      `NF: ${at.nota_fiscal || '-'}`,
+      `OP: ${at.ordem_producao || '-'}`,
+      `Pedido: ${at.pedido || '-'}`,
+      `Reclamação: ${at.descreva_reclamacao || '-'}`,
+      '',
+      'PDF da OS anexado.',
+    ].join('\n');
+
+    const usuario = req.session?.user?.fullName || req.session?.user?.username || 'sistema';
+    const result = await enviarEmail({
+      to: destinatarios,
+      from: remetente.from,
+      replyTo: remetente.replyTo || remetente.email || undefined,
+      subject: `Devolução — OS #${id} — ${at.nome_revenda_cliente || at.modelo || 'Fromtherm'}`,
+      text,
+      html,
+      attachments: [{
+        filename: pdfFilename,
+        content: pdfBase64,
+        encoding: 'base64',
+        contentType: 'application/pdf',
+      }],
+    });
+
+    await pool.query(
+      `UPDATE sac.at
+          SET devolucao_enviada_em = NOW(),
+              devolucao_enviada_para = $2
+        WHERE id = $1`,
+      [id, result.to.join(', ')]
+    );
+
+    console.log(`[AT/devolucao] OS #${id} enviada por ${usuario} (from=${result.from}) → ${result.to.join(', ')}`);
+    return res.json({
+      ok: true,
+      enviados: result.to,
+      from: result.from,
+      remetente_fallback: remetente.usadoFallback,
+      messageId: result.messageId,
+      enviada_em: new Date().toISOString(),
+    });
+  } catch (err) {
+    console.error('[AT/devolucao] erro:', err);
+    return res.status(500).json({
+      ok: false,
+      error: err.message || 'Falha ao enviar e-mail de devolução.',
+      code: err.code || null,
+    });
+  }
+});
+
 // GET /at/geocode-cidade?municipio=X&uf=Y&cep=XXXXXXXX — geocoding de cidade: BrasilAPI CEP → Nominatim (proxy, sem CORS)
 router.get('/at/geocode-cidade', async (req, res) => {
   const municipio = String(req.query.municipio || '').trim();
@@ -10503,7 +11302,118 @@ router.patch('/at/tecnico/fechamento/:id_at', async (req, res) => {
   }
 });
 
-// POST /at/tecnico/fechamento/:id_at/nfe?token=TOKEN — upload da NFe do serviço pelo técnico
+/** Resolve técnico pelo token; retorna id ou null. */
+async function _atTecnicoIdPorToken(token) {
+  const { rows } = await pool.query(
+    `SELECT id FROM sac.controle_tecnicos WHERE token = $1 LIMIT 1`,
+    [token]
+  );
+  return rows[0]?.id || null;
+}
+
+/**
+ * Aplica NFe já enviada ao storage em um conjunto de OS do técnico.
+ * Reutiliza o mesmo path/url (1 arquivo → N OS).
+ */
+async function _atAplicarNfeEmOs(tecId, idsAt, nfeUrl, pathKey) {
+  const ids = [...new Set(
+    (Array.isArray(idsAt) ? idsAt : [])
+      .map((v) => parseInt(v, 10))
+      .filter((n) => Number.isFinite(n) && n > 0)
+  )];
+  if (!ids.length) return { atualizados: [], rejeitados: [{ motivo: 'Nenhuma OS informada.' }] };
+
+  const { rows: okRows } = await pool.query(
+    `SELECT f.id_at, f.nfe_path_key, f.status_os
+     FROM sac.fechamento f
+     WHERE f.id_tecnico = $1 AND f.id_at = ANY($2::int[])`,
+    [tecId, ids]
+  );
+  const porId = new Map(okRows.map((r) => [Number(r.id_at), r]));
+  const atualizados = [];
+  const rejeitados = [];
+  const oldKeys = new Set();
+
+  for (const idAt of ids) {
+    const row = porId.get(idAt);
+    if (!row) {
+      rejeitados.push({ id_at: idAt, motivo: 'OS não vinculada a este técnico.' });
+      continue;
+    }
+    if (row.nfe_path_key && row.nfe_path_key !== pathKey) oldKeys.add(row.nfe_path_key);
+    await pool.query(
+      `UPDATE sac.fechamento
+       SET nfe_url = $2, nfe_path_key = $3, status_os = 'finalizado', data_envio_nfe = NOW()
+       WHERE id_at = $1 AND id_tecnico = $4`,
+      [idAt, nfeUrl, pathKey, tecId]
+    );
+    atualizados.push(idAt);
+  }
+
+  for (const old of oldKeys) {
+    // Só remove se nenhuma outra OS do técnico ainda usa o path antigo
+    const { rows: still } = await pool.query(
+      `SELECT 1 FROM sac.fechamento WHERE nfe_path_key = $1 LIMIT 1`,
+      [old]
+    );
+    if (!still.length) {
+      supabase.storage.from(AT_BUCKET).remove([old]).catch(() => {});
+    }
+  }
+  return { atualizados, rejeitados };
+}
+
+// POST /at/tecnico/fechamento/nfe-lote?token=TOKEN
+// FormData: nfe (arquivo) + ids_at (JSON array ou lista separada por vírgula)
+router.post('/at/tecnico/fechamento/nfe-lote', atUpload.single('nfe'), async (req, res) => {
+  const token = String(req.query.token || '').trim();
+  if (!token || token.length < 32) return res.status(401).json({ error: 'token inválido' });
+  if (!req.file) return res.status(400).json({ error: 'Nenhum arquivo enviado.' });
+
+  let idsRaw = req.body?.ids_at;
+  let idsAt = [];
+  if (typeof idsRaw === 'string' && idsRaw.trim().startsWith('[')) {
+    try { idsAt = JSON.parse(idsRaw); } catch { idsAt = []; }
+  } else if (typeof idsRaw === 'string') {
+    idsAt = idsRaw.split(/[,;\s]+/).filter(Boolean);
+  } else if (Array.isArray(idsRaw)) {
+    idsAt = idsRaw;
+  }
+
+  try {
+    const tecId = await _atTecnicoIdPorToken(token);
+    if (!tecId) return res.status(404).json({ error: 'Link inválido' });
+
+    const file = req.file;
+    const mimeExt = mime.extension(file.mimetype);
+    const originalExt = (file.originalname || '').split('.').pop();
+    const ext = (mimeExt || originalExt || 'bin').replace(/[^a-zA-Z0-9]/g, '').toLowerCase().slice(0, 8) || 'bin';
+    const safeName = atSanitizeFileName(file.originalname, ext);
+    const pathKey = `at-nfe/lote/${uuidv4()}_${safeName}`;
+    const { error: upErr } = await supabase.storage.from(AT_BUCKET).upload(pathKey, file.buffer, {
+      contentType: file.mimetype || 'application/octet-stream',
+      upsert: false
+    });
+    if (upErr) throw new Error(`Storage upload: ${upErr.message}`);
+    const { data: pubData } = supabase.storage.from(AT_BUCKET).getPublicUrl(pathKey);
+    const nfeUrl = pubData?.publicUrl || '';
+
+    const { atualizados, rejeitados } = await _atAplicarNfeEmOs(tecId, idsAt, nfeUrl, pathKey);
+    if (!atualizados.length) {
+      supabase.storage.from(AT_BUCKET).remove([pathKey]).catch(() => {});
+      return res.status(400).json({
+        error: 'Nenhuma OS pôde receber a NFe.',
+        rejeitados
+      });
+    }
+    res.json({ ok: true, nfe_url: nfeUrl, atualizados, rejeitados });
+  } catch (err) {
+    console.error('[AT/nfe-lote] upload erro:', err);
+    res.status(500).json({ error: 'Falha no upload da NFe.', detail: String(err.message || err) });
+  }
+});
+
+// POST /at/tecnico/fechamento/:id_at/nfe?token=TOKEN — upload da NFe (1 OS; mantido p/ compat)
 router.post('/at/tecnico/fechamento/:id_at/nfe', atUpload.single('nfe'), async (req, res) => {
   const token = String(req.query.token || '').trim();
   const id_at = parseInt(req.params.id_at, 10);
@@ -10511,38 +11421,31 @@ router.post('/at/tecnico/fechamento/:id_at/nfe', atUpload.single('nfe'), async (
   if (!id_at) return res.status(400).json({ error: 'id_at inválido' });
   if (!req.file) return res.status(400).json({ error: 'Nenhum arquivo enviado.' });
   try {
+    const tecId = await _atTecnicoIdPorToken(token);
+    if (!tecId) return res.status(404).json({ error: 'Link inválido' });
     const { rows: tRows } = await pool.query(
-      `SELECT ct.id FROM sac.controle_tecnicos ct
-       JOIN sac.fechamento f ON f.id_tecnico = ct.id
-       WHERE ct.token = $1 AND f.id_at = $2 LIMIT 1`,
-      [token, id_at]
+      `SELECT 1 FROM sac.fechamento WHERE id_tecnico = $1 AND id_at = $2 LIMIT 1`,
+      [tecId, id_at]
     );
     if (!tRows.length) return res.status(403).json({ error: 'Acesso negado.' });
-    const { rows: fRows } = await pool.query(
-      'SELECT nfe_path_key FROM sac.fechamento WHERE id_at = $1 LIMIT 1', [id_at]
-    );
-    const oldPathKey = fRows[0]?.nfe_path_key || null;
+
     const file = req.file;
     const mimeExt = mime.extension(file.mimetype);
     const originalExt = (file.originalname || '').split('.').pop();
     const ext = (mimeExt || originalExt || 'bin').replace(/[^a-zA-Z0-9]/g, '').toLowerCase().slice(0, 8) || 'bin';
     const safeName = atSanitizeFileName(file.originalname, ext);
-    const pathKey  = `at-nfe/${id_at}/${uuidv4()}_${safeName}`;
+    const pathKey = `at-nfe/${id_at}/${uuidv4()}_${safeName}`;
     const { error: upErr } = await supabase.storage.from(AT_BUCKET).upload(pathKey, file.buffer, {
       contentType: file.mimetype || 'application/octet-stream',
       upsert: false
     });
-    if (upErr) throw new Error(`Supabase upload: ${upErr.message}`);
+    if (upErr) throw new Error(`Storage upload: ${upErr.message}`);
     const { data: pubData } = supabase.storage.from(AT_BUCKET).getPublicUrl(pathKey);
     const nfeUrl = pubData?.publicUrl || '';
-    const { rows: ex } = await pool.query('SELECT id FROM sac.fechamento WHERE id_at = $1', [id_at]);
-    if (ex.length) {
-      await pool.query("UPDATE sac.fechamento SET nfe_url=$2, nfe_path_key=$3, status_os='finalizado', data_envio_nfe=NOW() WHERE id_at=$1", [id_at, nfeUrl, pathKey]);
-    } else {
-      await pool.query("INSERT INTO sac.fechamento (id_at, nfe_url, nfe_path_key, status_os, data_envio_nfe) VALUES ($1,$2,$3,'finalizado',NOW())", [id_at, nfeUrl, pathKey]);
-    }
-    if (oldPathKey && oldPathKey !== pathKey) {
-      supabase.storage.from(AT_BUCKET).remove([oldPathKey]).catch(() => {});
+
+    const { atualizados, rejeitados } = await _atAplicarNfeEmOs(tecId, [id_at], nfeUrl, pathKey);
+    if (!atualizados.length) {
+      return res.status(400).json({ error: rejeitados[0]?.motivo || 'Não foi possível aplicar a NFe.' });
     }
     res.json({ ok: true, nfe_url: nfeUrl });
   } catch (err) {

@@ -3453,6 +3453,9 @@
                       <button id="atSacAtalhosMenuBtn" type="button" style="width:100%;text-align:left;padding:10px 14px;background:transparent;border:none;color:#e5e7eb;font-size:13px;cursor:pointer;display:flex;align-items:center;gap:8px;" onmouseover="this.style.background='rgba(255,255,255,.07)'" onmouseout="this.style.background='transparent'">
                         <i class="fa-solid fa-bookmark" style="color:#a78bfa;"></i> Meus Atalhos
                       </button>
+                      <button id="atDevolucaoDestMenuBtn" type="button" style="width:100%;text-align:left;padding:10px 14px;background:transparent;border:none;color:#e5e7eb;font-size:13px;cursor:pointer;display:flex;align-items:center;gap:8px;" onmouseover="this.style.background='rgba(255,255,255,.07)'" onmouseout="this.style.background='transparent'">
+                        <i class="fa-solid fa-envelope-open-text" style="color:#fbbf24;"></i> Destinatários de devolução
+                      </button>
                       <button id="atMaterialApoioMenuBtn" type="button" style="width:100%;text-align:left;padding:10px 14px;background:transparent;border:none;color:#e5e7eb;font-size:13px;cursor:pointer;display:flex;align-items:center;gap:8px;" onmouseover="this.style.background='rgba(255,255,255,.07)'" onmouseout="this.style.background='transparent'">
                         <i class="fa-solid fa-folder-open" style="color:#34d399;"></i> Material de apoio
                       </button>
@@ -4901,7 +4904,7 @@
 
         <!-- Modal de edição de OS -->
         <div id="atEditModal" class="modal-overlay" style="display:none;z-index:10042;">
-          <div class="modal-container" style="max-width:800px;width:96%;max-height:90vh;overflow-y:auto;">
+          <div class="modal-container at-edit-modal-container" style="max-width:800px;width:96%;max-height:90vh;overflow:hidden;display:flex;flex-direction:column;">
             <div class="modal-header">
               <h3 style="margin:0;display:flex;align-items:center;gap:8px;">
                 <i class="fa-solid fa-pen-to-square" style="color:#0ea5e9;"></i>
@@ -4921,6 +4924,11 @@
                   <span style="font-size:11px;font-weight:600;">Fechamento PJ</span>
                 </button>
                 <input type="file" id="atFechamentoPjInput" accept="application/pdf,.pdf" style="display:none;">
+                <button id="atDevolucaoBtn" type="button" title="Enviar e-mail de devolução com dados e PDF da OS"
+                  style="background:rgba(249,115,22,.12);border:1px solid rgba(249,115,22,.45);color:#fb923c;border-radius:8px;padding:5px 10px;cursor:pointer;font-size:13px;display:flex;align-items:center;gap:5px;transition:background .2s;">
+                  <i class="fa-solid fa-rotate-left"></i>
+                  <span style="font-size:11px;font-weight:600;">Devolução</span>
+                </button>
                 <!-- Botão Status OS -->
                 <div style="position:relative;">
                   <button id="atStatusOsBtn" type="button" title="Alterar status da OS"
@@ -4952,12 +4960,30 @@
                 <button id="atEditModalClose" class="modal-close-btn" type="button">×</button>
               </div>
             </div>
-            <div style="padding:18px 20px;display:flex;flex-direction:column;gap:18px;">
-              <!-- Seção AT -->
-              <div>
-                <div class="at-em-section-title" style="color:#0ea5e9;">
-                  <i class="fa-solid fa-ticket"></i> Atendimento
-                </div>
+            <div class="at-em-tabs" id="atEmTabs" role="tablist">
+              <button type="button" class="at-em-tab at-em-tab-active" data-at-em-tab="atendimento" role="tab" aria-selected="true">
+                <i class="fa-solid fa-ticket"></i> Atendimento
+              </button>
+              <button type="button" class="at-em-tab" data-at-em-tab="busca" role="tab" aria-selected="false">
+                <i class="fa-solid fa-barcode"></i> Dados da Busca
+                <span id="atEmBuscaSpinner" style="display:none;width:12px;height:12px;border:2px solid rgba(167,139,250,.3);border-top-color:#a78bfa;border-radius:50%;animation:atSpinAnim .7s linear infinite;flex-shrink:0;"></span>
+                <span id="atEmBuscaSpinnerTxt" style="display:none;font-size:10px;font-weight:400;color:#a78bfa;opacity:.85;">Pesquisando...</span>
+              </button>
+              <button type="button" class="at-em-tab" data-at-em-tab="envios" role="tab" aria-selected="false">
+                <i class="fa-solid fa-box"></i> Envios de peças
+              </button>
+              <button type="button" class="at-em-tab" data-at-em-tab="fechamento" role="tab" aria-selected="false">
+                <i class="fa-solid fa-circle-check"></i> Fechamento
+                <i id="atEmFechTabIco" class="fa-solid fa-clock at-em-tab-fech-ico is-pendente" title="Pendente fechamento do técnico"></i>
+              </button>
+              <button type="button" class="at-em-tab" data-at-em-tab="anexos" role="tab" aria-selected="false">
+                <i class="fa-solid fa-paperclip"></i> Anexos
+                <span id="atEmAnexosCount" class="at-em-tab-badge" title="Quantidade de anexos">0</span>
+              </button>
+            </div>
+            <div class="at-em-body" style="padding:18px 20px;display:flex;flex-direction:column;gap:18px;overflow-y:auto;flex:1;min-height:0;">
+              <!-- Guia Atendimento -->
+              <div id="atEmPaneAtendimento" class="at-em-pane" data-at-em-pane="atendimento">
                 <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
                   <div class="at-em-wrap">
                     <label class="at-em-lbl">Data</label>
@@ -5033,13 +5059,8 @@
                   </div>
                 </div>
               </div>
-              <!-- Seção Dados da Busca (at_busca_selecionada) -->
-              <div>
-                <div class="at-em-section-title" style="color:#a78bfa;display:flex;align-items:center;gap:8px;">
-                  <i class="fa-solid fa-barcode"></i> Dados da Busca
-                  <span id="atEmBuscaSpinner" style="display:none;width:13px;height:13px;border:2px solid rgba(167,139,250,.3);border-top-color:#a78bfa;border-radius:50%;animation:atSpinAnim .7s linear infinite;flex-shrink:0;"></span>
-                  <span id="atEmBuscaSpinnerTxt" style="display:none;font-size:11px;font-weight:400;color:#a78bfa;opacity:.85;">Pesquisando...</span>
-                </div>
+              <!-- Guia Dados da Busca -->
+              <div id="atEmPaneBusca" class="at-em-pane" data-at-em-pane="busca" hidden>
                 <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
                   <div class="at-em-wrap">
                     <label class="at-em-lbl">Pedido <small style="color:#6b7280;font-weight:400;">(Enter para buscar)</small></label>
@@ -5058,12 +5079,42 @@
                     <input type="text" id="atEmDataEntrega" class="at-em-input" placeholder="—" readonly style="opacity:.8;cursor:default;">
                   </div>
                 </div>
-              </div>
-              <!-- Seção Fechamento -->
-              <div>
-                <div class="at-em-section-title" style="color:#4ade80;">
-                  <i class="fa-solid fa-circle-check"></i> Fechamento
+                <div class="at-em-pecas-box">
+                  <div class="at-em-pecas-head">
+                    <div class="at-em-pecas-title">
+                      <i class="fa-solid fa-gears"></i> Peças da máquina (IAPP)
+                    </div>
+                    <button type="button" id="atEmPecasGerarBtn" class="at-em-pecas-btn" title="Buscar estrutura IAPP desta máquina">
+                      <i class="fa-solid fa-diagram-project"></i> Buscar estrutura IAPP
+                    </button>
+                  </div>
+                  <div id="atEmPecasMeta" class="at-em-pecas-meta"></div>
+                  <div id="atEmPecasStatus" class="at-em-pecas-empty">Clique em “Buscar estrutura IAPP” quando quiser listar as peças.</div>
+                  <div id="atEmPecasTableWrap" class="at-em-pecas-table-wrap" style="display:none;">
+                    <table class="at-em-pecas-table">
+                      <thead>
+                        <tr>
+                          <th>Código</th>
+                          <th>Descrição</th>
+                          <th>Qtd</th>
+                          <th>Tipo</th>
+                        </tr>
+                      </thead>
+                      <tbody id="atEmPecasTbody"></tbody>
+                    </table>
+                  </div>
                 </div>
+              </div>
+              <!-- Guia Envios de peças -->
+              <div id="atEmPaneEnvios" class="at-em-pane" data-at-em-pane="envios" hidden>
+                <div class="at-em-section-title" style="color:#a78bfa;margin-bottom:10px;">
+                  <i class="fa-solid fa-box"></i> Peças enviadas
+                </div>
+                <div id="atEmPecasEnviadasStatus" class="at-em-pecas-empty">Carregando envios...</div>
+                <div id="atEmPecasEnviadasBody" class="at-em-envios-box" style="display:none;"></div>
+              </div>
+              <!-- Guia Fechamento -->
+              <div id="atEmPaneFechamento" class="at-em-pane" data-at-em-pane="fechamento" hidden>
                 <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
                   <div class="at-em-wrap">
                     <label class="at-em-lbl">Tag</label>
@@ -5121,28 +5172,28 @@
                   </div>
                   <div class="at-em-wrap" style="grid-column:1/-1;">
                     <label class="at-em-lbl">Técnico</label>
-                    <input type="text" id="atEmFechTecnico" class="at-em-input" placeholder="—" readonly style="opacity:.8;cursor:default;">
+                    <div style="display:flex;align-items:center;gap:8px;">
+                      <input type="text" id="atEmFechTecnico" class="at-em-input" placeholder="—" readonly style="opacity:.8;cursor:default;flex:1;">
+                      <button type="button" id="atEmAdicionarTecnicoBtn" title="Enviar link e vincular técnico a esta OS"
+                        style="display:inline-flex;align-items:center;gap:6px;padding:7px 12px;border-radius:8px;border:1px solid rgba(14,165,233,.45);background:rgba(14,165,233,.12);color:#38bdf8;cursor:pointer;font-size:12px;font-weight:600;white-space:nowrap;flex-shrink:0;">
+                        <i class="fa-solid fa-user-plus"></i> Adicionar técnico
+                      </button>
+                    </div>
                   </div>
                 </div>
               </div>
-            </div>
-              <!-- Seção Anexos -->
-              <div id="atEmAnexosSection">
-                <div class="at-em-section-title" style="color:#f59e0b;">
-                  <i class="fa-solid fa-paperclip"></i> Anexos
-                </div>
-                <!-- Anexos já existentes -->
+              <!-- Guia Anexos -->
+              <div id="atEmAnexosSection" class="at-em-pane" data-at-em-pane="anexos" hidden>
                 <div id="atEmAnexosExistentes" style="display:flex;flex-direction:column;gap:6px;margin-bottom:8px;"></div>
-                <!-- Chips de arquivos pendentes -->
                 <div id="atEmAnexosChips" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px;"></div>
-                <!-- Botão -->
                 <button id="atEmAnexarBtn" type="button" style="padding:6px 14px;border-radius:8px;border:1px dashed #f59e0b;background:rgba(245,158,11,.08);color:#f59e0b;cursor:pointer;font-size:13px;display:inline-flex;align-items:center;gap:6px;">
                   <i class="fa-solid fa-paperclip"></i> Anexar arquivo
                 </button>
                 <input type="file" id="atEmAnexarInput" multiple style="display:none;">
               </div>
+            </div>
 
-            <div style="display:flex;align-items:center;gap:10px;justify-content:flex-end;padding:12px 20px;border-top:1px solid #374151;">
+            <div style="display:flex;align-items:center;gap:10px;justify-content:flex-end;padding:12px 20px;border-top:1px solid #374151;flex-shrink:0;">
               <span id="atEmSavedMsg" style="font-size:12px;color:#4ade80;display:none;">Salvo!</span>
               <span id="atEmErrMsg" style="font-size:12px;color:#f87171;display:none;max-width:300px;text-align:right;"></span>
               <button id="atEmCancelBtn" type="button" style="padding:7px 16px;border-radius:8px;border:1px solid #374151;background:transparent;color:var(--content-title-color);cursor:pointer;">Cancelar</button>
@@ -5783,6 +5834,64 @@
             </div>
           </div>
         </div>
+
+        <!-- Modal Destinatários de devolução (auth_user.email_devolucao) -->
+        <div id="atDevolucaoDestModal" class="modal-overlay" style="display:none;z-index:10064;">
+          <div class="modal-container" style="max-width:620px;width:96%;max-height:88vh;display:flex;flex-direction:column;">
+            <div class="modal-header" style="display:flex;justify-content:space-between;align-items:center;padding:12px 16px;border-bottom:1px solid rgba(255,255,255,.1);flex-shrink:0;">
+              <h3 style="margin:0;font-size:15px;display:flex;align-items:center;gap:8px;">
+                <i class="fa-solid fa-envelope-open-text" style="color:#fbbf24;"></i>
+                Destinatários de devolução
+              </h3>
+              <button id="atDevolucaoDestModalClose" class="modal-close-btn" type="button"><i class="fas fa-times"></i></button>
+            </div>
+            <div style="padding:12px 16px;border-bottom:1px solid rgba(255,255,255,.08);flex-shrink:0;">
+              <p style="margin:0 0 10px;font-size:12px;color:var(--inactive-color);line-height:1.45;">
+                Inclua quem deve receber o e-mail ao clicar em <strong style="color:#e5e7eb;">Devolução</strong> no Editar OS.
+                Depois marque o checkbox para confirmar o recebimento.
+              </p>
+              <label style="font-size:11px;color:var(--inactive-color);display:block;margin-bottom:3px;">PESQUISAR USUÁRIO</label>
+              <div style="position:relative;">
+                <input id="atDevolucaoDestBusca" class="input-padrao" type="text" placeholder="Nome ou usuário..." autocomplete="off" style="width:100%;box-sizing:border-box;padding-right:36px;">
+                <i class="fa-solid fa-magnifying-glass" style="position:absolute;right:12px;top:50%;transform:translateY(-50%);color:#64748b;pointer-events:none;"></i>
+                <div id="atDevolucaoDestBuscaResults" style="display:none;position:absolute;left:0;right:0;top:calc(100% + 4px);max-height:220px;overflow:auto;background:#1f2937;border:1px solid rgba(255,255,255,.15);border-radius:8px;z-index:20;box-shadow:0 8px 20px rgba(0,0,0,.45);"></div>
+              </div>
+              <div id="atDevolucaoDestEmailBox" style="display:none;margin-top:10px;padding:10px;border-radius:8px;background:rgba(251,191,36,.08);border:1px solid rgba(251,191,36,.35);">
+                <div style="font-size:12px;color:#fbbf24;margin-bottom:6px;">Este usuário não tem e-mail. Informe para cadastrar:</div>
+                <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+                  <input id="atDevolucaoDestEmailInp" class="input-padrao" type="email" placeholder="email@fromtherm.com.br" style="flex:1;min-width:180px;box-sizing:border-box;">
+                  <button id="atDevolucaoDestEmailSalvar" type="button" style="padding:7px 14px;border-radius:8px;border:none;background:#d97706;color:#fff;font-size:12px;font-weight:600;cursor:pointer;">Salvar e incluir</button>
+                  <button id="atDevolucaoDestEmailCancel" type="button" style="padding:7px 12px;border-radius:8px;border:1px solid rgba(255,255,255,.2);background:transparent;color:#cbd5e1;font-size:12px;cursor:pointer;">Cancelar</button>
+                </div>
+              </div>
+              <div id="atDevolucaoDestMsg" style="display:none;margin-top:8px;font-size:12px;"></div>
+            </div>
+            <div style="flex:1;min-height:0;overflow:auto;padding:10px 16px 16px;">
+              <div style="font-size:11px;color:var(--inactive-color);margin-bottom:8px;text-transform:uppercase;letter-spacing:.04em;">Lista (ativos recebem o e-mail)</div>
+              <div id="atDevolucaoDestList"></div>
+              <div id="atDevolucaoDestEmpty" style="display:none;text-align:center;padding:28px 12px;color:var(--inactive-color);font-size:13px;">
+                Ninguém na lista ainda. Pesquise um usuário acima.
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <style>
+          #atDevolucaoDestModal input.at-dev-dest-ativo,
+          #atDevolucaoDestList input[type="checkbox"] {
+            width: 16px !important;
+            height: 16px !important;
+            min-width: 16px !important;
+            min-height: 16px !important;
+            max-width: 16px !important;
+            max-height: 16px !important;
+            flex-shrink: 0 !important;
+            margin: 0 !important;
+            transform: none !important;
+            accent-color: #22c55e;
+            cursor: pointer;
+          }
+        </style>
 
         <!-- Modal Material de apoio (R2: AT/material de apoio/) -->
         <div id="atMaterialApoioModal" class="modal-overlay" style="display:none;z-index:10063;">
@@ -7687,7 +7796,7 @@
                 grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
                 gap: 14px;
                 padding: 6px 0;
-                align-items: start;
+                align-items: stretch;
               }
               .at-card-item {
                 background: var(--card-bg, #1e2535);
@@ -7697,7 +7806,37 @@
                 display: flex;
                 flex-direction: column;
                 transition: box-shadow .2s, transform .2s;
-                min-height: 240px;
+                height: 100%;
+                position: relative;
+              }
+              .at-ci-status-corner {
+                position: absolute;
+                top: 0;
+                right: 0;
+                width: 0;
+                height: 0;
+                border-style: solid;
+                border-width: 0 26px 26px 0;
+                border-color: transparent #64748b transparent transparent;
+                z-index: 3;
+                pointer-events: none;
+              }
+              .at-ci-status-corner[data-status="fechado"] { border-right-color: #22c55e; }
+              .at-ci-status-corner[data-status="aberto"] { border-right-color: #ef4444; }
+              .at-ci-status-corner[data-status="aguardando nf at"] { border-right-color: #f59e0b; }
+              .at-ci-status-corner[data-status="excluido"] { border-right-color: #94a3b8; }
+              .at-ci-status-corner[data-status="indefinido"] { border-right-color: #64748b; }
+              #atCardsSentinel {
+                grid-column: 1 / -1;
+                height: 8px;
+                pointer-events: none;
+              }
+              #atCardsLoadMoreHint {
+                grid-column: 1 / -1;
+                text-align: center;
+                font-size: 12px;
+                color: var(--inactive-color);
+                padding: 6px 0 2px;
               }
               .at-card-item:hover {
                 box-shadow: 0 8px 24px rgba(0,0,0,.32);
@@ -7768,8 +7907,12 @@
                 border-bottom: 1px solid var(--border-color, #374151);
               }
               html.light-mode .at-ci-field { border-bottom-color: #dbe3ee; }
-              .at-ci-field:nth-child(odd) { border-right: 1px solid var(--border-color, #374151); }
-              html.light-mode .at-ci-field:nth-child(odd) { border-right-color: #dbe3ee; }
+              .at-ci-field:nth-child(odd):not(.at-ci-field-full) { border-right: 1px solid var(--border-color, #374151); }
+              html.light-mode .at-ci-field:nth-child(odd):not(.at-ci-field-full) { border-right-color: #dbe3ee; }
+              .at-ci-field-full {
+                grid-column: 1 / -1;
+                border-right: none !important;
+              }
               .at-ci-field-lbl {
                 font-size: 9px;
                 color: var(--inactive-color);
@@ -7809,6 +7952,7 @@
               .at-ci-desc-area {
                 padding: 9px 11px 10px;
                 flex: 1;
+                min-height: 0;
               }
               .at-ci-desc-lbl {
                 font-size: 9px;
@@ -7821,9 +7965,19 @@
                 font-size: 11px;
                 color: var(--content-title-color);
                 line-height: 1.45;
-                max-height: 74px;
+                max-height: calc(1.45em * 2);
                 overflow: hidden;
                 overflow-wrap: anywhere;
+                display: -webkit-box;
+                -webkit-box-orient: vertical;
+                -webkit-line-clamp: 2;
+                line-clamp: 2;
+              }
+              .at-ci-reclam-list.at-ci-desc-val {
+                display: -webkit-box;
+              }
+              .at-ci-reclam-list .at-ci-reclam-item {
+                display: inline;
               }
               .at-ci-desc-input {
                 width: 100%;
@@ -7933,6 +8087,7 @@
                 #atCardsContainer { grid-template-columns: 1fr; }
                 .at-ci-fields { grid-template-columns: 1fr; }
                 .at-ci-field:nth-child(odd) { border-right: none; }
+                .at-ci-field-full { border-right: none !important; }
               }
 
               /* AT: preview de anexos no formulário */
@@ -8213,6 +8368,173 @@
                 to { transform: rotate(360deg); }
               }
               /* ── Modal edição AT ──────────────────────── */
+              .at-em-tabs {
+                display: flex;
+                gap: 2px;
+                padding: 0 16px;
+                border-bottom: 1px solid var(--border-color, #374151);
+                flex-shrink: 0;
+                overflow-x: auto;
+                background: rgba(0,0,0,.12);
+              }
+              html.light-mode .at-em-tabs {
+                background: #f1f5f9;
+                border-bottom-color: #dbe3ee;
+              }
+              .at-em-tab {
+                background: none;
+                border: none;
+                border-bottom: 2px solid transparent;
+                margin-bottom: -1px;
+                padding: 11px 14px;
+                font-size: 12px;
+                font-weight: 600;
+                color: var(--inactive-color, #9ca3af);
+                cursor: pointer;
+                display: inline-flex;
+                align-items: center;
+                gap: 6px;
+                white-space: nowrap;
+                font-family: inherit;
+                transition: color .15s, border-color .15s;
+              }
+              .at-em-tab:hover { color: var(--content-title-color, #e5e7eb); }
+              .at-em-tab.at-em-tab-active {
+                color: #38bdf8;
+                border-bottom-color: #0ea5e9;
+              }
+              .at-em-tab[data-at-em-tab="busca"].at-em-tab-active { color: #c4b5fd; border-bottom-color: #a78bfa; }
+              .at-em-tab[data-at-em-tab="envios"].at-em-tab-active { color: #c4b5fd; border-bottom-color: #8b5cf6; }
+              .at-em-tab[data-at-em-tab="fechamento"].at-em-tab-active { color: #4ade80; border-bottom-color: #22c55e; }
+              .at-em-tab[data-at-em-tab="anexos"].at-em-tab-active { color: #fbbf24; border-bottom-color: #f59e0b; }
+              .at-em-envios-box {
+                background: #ffffff;
+                border: 1px solid #dbe3ee;
+                border-radius: 10px;
+                overflow: hidden;
+                color: #111;
+              }
+              html.light-mode .at-em-envios-box {
+                box-shadow: 0 4px 14px rgba(15,23,42,.06);
+              }
+              html.light-mode .at-em-tab.at-em-tab-active { color: #0284c7; }
+              .at-em-tab-badge {
+                display: inline-flex;
+                align-items: center;
+                justify-content: center;
+                min-width: 18px;
+                height: 18px;
+                padding: 0 5px;
+                border-radius: 999px;
+                font-size: 10px;
+                font-weight: 700;
+                background: rgba(245,158,11,.2);
+                color: #fbbf24;
+                border: 1px solid rgba(245,158,11,.35);
+              }
+              .at-em-tab-fech-ico {
+                font-size: 11px;
+                margin-left: 2px;
+              }
+              .at-em-tab-fech-ico.is-ok { color: #4ade80; }
+              .at-em-tab-fech-ico.is-pendente { color: #f59e0b; }
+              #atEditModal.modal-overlay {
+                align-items: flex-start !important;
+                justify-content: center;
+                padding: 4vh 12px 4vh;
+                overflow-y: auto;
+              }
+              #atEditModal .at-edit-modal-container {
+                margin: 0 auto;
+                width: 96%;
+                max-width: 800px;
+                max-height: 92vh;
+              }
+              #atEditModal .at-em-body {
+                min-height: 340px;
+              }
+              .at-em-pecas-box {
+                margin-top: 16px;
+                border-top: 1px solid rgba(167,139,250,.25);
+                padding-top: 12px;
+              }
+              .at-em-pecas-head {
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                gap: 8px;
+                margin-bottom: 6px;
+                flex-wrap: wrap;
+              }
+              .at-em-pecas-title {
+                font-size: 11px;
+                text-transform: uppercase;
+                letter-spacing: .06em;
+                font-weight: 700;
+                color: #a78bfa;
+                display: flex;
+                align-items: center;
+                gap: 6px;
+              }
+              .at-em-pecas-btn {
+                display: inline-flex;
+                align-items: center;
+                gap: 6px;
+                padding: 6px 12px;
+                border-radius: 8px;
+                border: 1px solid rgba(167,139,250,.45);
+                background: rgba(167,139,250,.12);
+                color: #c4b5fd;
+                font-size: 12px;
+                font-weight: 600;
+                cursor: pointer;
+                font-family: inherit;
+                white-space: nowrap;
+              }
+              .at-em-pecas-btn:hover { background: rgba(167,139,250,.2); }
+              .at-em-pecas-btn:disabled {
+                opacity: .55;
+                cursor: wait;
+              }
+              .at-em-pecas-meta {
+                font-size: 11px;
+                color: var(--inactive-color);
+                margin-bottom: 8px;
+                min-height: 14px;
+              }
+              .at-em-pecas-table-wrap {
+                max-height: 280px;
+                overflow: auto;
+                border: 1px solid var(--border-color, #374151);
+                border-radius: 8px;
+              }
+              .at-em-pecas-table {
+                width: 100%;
+                border-collapse: collapse;
+                font-size: 12px;
+              }
+              .at-em-pecas-table th,
+              .at-em-pecas-table td {
+                padding: 6px 8px;
+                text-align: left;
+                border-bottom: 1px solid var(--border-color, #374151);
+              }
+              .at-em-pecas-table th {
+                position: sticky;
+                top: 0;
+                background: rgba(0,0,0,.25);
+                font-size: 10px;
+                text-transform: uppercase;
+                letter-spacing: .04em;
+                color: var(--inactive-color);
+                z-index: 1;
+              }
+              .at-em-pecas-empty {
+                font-size: 12px;
+                color: var(--inactive-color);
+                padding: 10px 2px;
+              }
+              .at-em-pane[hidden] { display: none !important; }
               .at-em-section-title {
                 font-size: 11px;
                 text-transform: uppercase;

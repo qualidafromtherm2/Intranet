@@ -931,6 +931,33 @@
     .tbl-icon-btn:hover { background:rgba(255,255,255,.15); }
     .tbl-fechar-btn { font-size:12px; font-weight:700; border:1.5px solid #4ade80; border-radius:6px; padding:2px 8px; color:#4ade80; }
     .tbl-fechar-btn.is-fechada { color:#6b7280; border-color:#4b5563; }
+    .tbl-nfe-ver-btn {
+      display:inline-flex; align-items:center; justify-content:center;
+      font-size:11px; font-weight:700; padding:3px 9px; border-radius:6px;
+      border:1.5px solid #60a5fa; color:#93c5fd; text-decoration:none; white-space:nowrap;
+      background:rgba(59,130,246,.12); line-height:1.2;
+    }
+    .tbl-nfe-ver-btn:hover { background:rgba(59,130,246,.22); }
+    .tbl-nfe-pendente { font-size:10px; color:#94a3b8; white-space:nowrap; }
+    .tbl-nfe-check { width:16px; height:16px; accent-color:#3b82f6; cursor:pointer; }
+    .nfe-lote-bar {
+      display:none; align-items:center; gap:10px; flex-wrap:wrap;
+      margin:-4px 0 12px; padding:10px 12px; border-radius:10px;
+      background:rgba(30,58,95,.45); border:1px solid rgba(59,130,246,.45);
+      color:#e2e8f0; font-size:13px;
+    }
+    .nfe-lote-bar.is-open { display:flex; }
+    .nfe-lote-bar strong { color:#93c5fd; }
+    .nfe-lote-bar .nfe-lote-actions { display:flex; gap:8px; flex-wrap:wrap; margin-left:auto; }
+    .nfe-lote-bar button {
+      padding:6px 12px; border-radius:8px; font-size:12px; font-weight:700; cursor:pointer; border:1px solid transparent;
+    }
+    .nfe-lote-bar .btn-nfe-enviar { background:#2563eb; color:#fff; border-color:#2563eb; }
+    .nfe-lote-bar .btn-nfe-enviar:disabled { opacity:.5; cursor:not-allowed; }
+    .nfe-lote-bar .btn-nfe-cancelar { background:transparent; color:#94a3b8; border-color:#4b5563; }
+    #btnAnexarNfe.is-active {
+      border-color:#60a5fa !important; background:rgba(59,130,246,.25) !important; color:#93c5fd !important;
+    }
 
     /* ── Modal de fechamento ── */
     .fech-label { display:block; font-size:11px; font-weight:700; color:#94a3b8; margin-bottom:4px; letter-spacing:.3px; text-transform:uppercase; }
@@ -1045,15 +1072,29 @@
 	        <button id="btnSolicitarProdutos" type="button" onclick="abrirModalSolicitarProdutos()" style="display:none;padding:6px 14px;border-radius:20px;border:1px solid #d97706;background:rgba(245,158,11,.15);color:#fbbf24;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap;">
 	          <i class="fa-solid fa-boxes-stacked" style="margin-right:5px;"></i>Solicitar produtos
 	        </button>
+	        <button id="btnAnexarNfe" type="button" onclick="iniciarAnexarNfeLote()"
+	          style="padding:6px 14px;border-radius:20px;border:1px solid #2563eb;background:rgba(37,99,235,.18);color:#93c5fd;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap;"
+	          title="Anexar a mesma NFe em uma ou várias OS aguardando NFe">
+	          <i class="fa-solid fa-file-invoice" style="margin-right:5px;"></i>Anexar NFe
+	        </button>
 	        <button id="btnToggleFinaliz" onclick="_toggleFinaliz()"
 	          style="padding:6px 14px;border-radius:20px;border:1px solid #d97706;background:rgba(217,119,6,.12);color:#f59e0b;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap;">
 	          Exibir finalizados
 	        </button>
 	      </div>
 	    </div>
+	    <div id="nfeLoteBar" class="nfe-lote-bar" role="region" aria-label="Anexar NFe em lote">
+	      <span>Selecione as OS <strong>Aguardando NFe</strong> e envie <strong>um</strong> arquivo para todas.</span>
+	      <span id="nfeLoteContador">0 selecionada(s)</span>
+	      <div class="nfe-lote-actions">
+	        <button type="button" class="btn-nfe-enviar" id="btnNfeLoteEnviar" onclick="confirmarAnexarNfeLote()" disabled>Escolher arquivo e anexar</button>
+	        <button type="button" class="btn-nfe-cancelar" onclick="cancelarAnexarNfeLote()">Cancelar</button>
+	      </div>
+	    </div>
     <div class="tbl-wrap">
       <table>
         <thead><tr>
+          <th id="thNfeCheck" style="display:none;width:36px;"></th>
           <th>OS</th>
           <th>Data</th>
           <th>Cliente</th>
@@ -2274,6 +2315,8 @@
     // ── Tabela de atendimentos ──
     let _listaAtend = [];
     let _exibirFinaliz = false;
+    let _nfeLoteMode = false;
+    const _nfeLoteSelecionados = new Set();
 
     function _toggleFinaliz() {
       _exibirFinaliz = !_exibirFinaliz;
@@ -2292,26 +2335,157 @@
       return s === 'finalizado' || s === 'fechado';
     }
 
+    function _aguardaNfe(a) {
+      const st = String(a?.status_os || '').toLowerCase().trim();
+      return !a?.nfe_url && st === 'aguardando_nfe';
+    }
+
+    function _htmlVerNfe(nfeUrl) {
+      return '<a href="' + esc(nfeUrl) + '" target="_blank" rel="noopener noreferrer" onclick="event.stopPropagation()" class="tbl-nfe-ver-btn" title="Abrir NFe">Ver NFe</a>';
+    }
+
+    function _htmlCelulaNfe(a) {
+      if (a.nfe_url) return _htmlVerNfe(a.nfe_url);
+      if (_aguardaNfe(a)) {
+        return '<span class="tbl-nfe-pendente" title="Use o botão Anexar NFe no topo">Aguardando</span>';
+      }
+      return '<span class="tbl-nfe-pendente" title="Finalize o atendimento primeiro">—</span>';
+    }
+
+    function _atualizarContadorNfeLote() {
+      const n = _nfeLoteSelecionados.size;
+      const el = document.getElementById('nfeLoteContador');
+      if (el) el.textContent = n + ' selecionada(s)';
+      const btn = document.getElementById('btnNfeLoteEnviar');
+      if (btn) btn.disabled = n < 1;
+    }
+
+    function _toggleNfeLoteCheck(idAt, checked) {
+      const id = Number(idAt);
+      if (checked) _nfeLoteSelecionados.add(id);
+      else _nfeLoteSelecionados.delete(id);
+      _atualizarContadorNfeLote();
+    }
+
+    function iniciarAnexarNfeLote() {
+      const pendentes = _listaAtend.filter(_aguardaNfe);
+      if (!pendentes.length) {
+        alert('Nenhuma OS com status Aguardando NFe.\nFinalize o atendimento primeiro; depois anexe a nota aqui.');
+        return;
+      }
+      _nfeLoteMode = true;
+      _nfeLoteSelecionados.clear();
+      // pré-marca todas as pendentes (técnico desmarca as que não forem da mesma NFe)
+      pendentes.forEach((a) => _nfeLoteSelecionados.add(Number(a.id_at)));
+      document.getElementById('nfeLoteBar')?.classList.add('is-open');
+      document.getElementById('btnAnexarNfe')?.classList.add('is-active');
+      const th = document.getElementById('thNfeCheck');
+      if (th) th.style.display = '';
+      _atualizarContadorNfeLote();
+      _renderAtendimentos();
+    }
+
+    function cancelarAnexarNfeLote() {
+      _nfeLoteMode = false;
+      _nfeLoteSelecionados.clear();
+      document.getElementById('nfeLoteBar')?.classList.remove('is-open');
+      document.getElementById('btnAnexarNfe')?.classList.remove('is-active');
+      const th = document.getElementById('thNfeCheck');
+      if (th) th.style.display = 'none';
+      _atualizarContadorNfeLote();
+      _renderAtendimentos();
+    }
+
+    function confirmarAnexarNfeLote() {
+      if (!_nfeLoteSelecionados.size) {
+        alert('Selecione ao menos uma OS.');
+        return;
+      }
+      const inp = document.getElementById('inlineNfeInput');
+      if (!inp) return;
+      inp.value = '';
+      inp.click();
+    }
+
+    async function uploadNfeLote() {
+      const fileInput = document.getElementById('inlineNfeInput');
+      const file = fileInput?.files?.[0];
+      const ids = [..._nfeLoteSelecionados];
+      if (!file || !ids.length) return;
+
+      const btn = document.getElementById('btnNfeLoteEnviar');
+      const contador = document.getElementById('nfeLoteContador');
+      if (btn) { btn.disabled = true; btn.textContent = 'Enviando…'; }
+      if (contador) contador.textContent = 'Enviando NFe para ' + ids.length + ' OS…';
+
+      const form = new FormData();
+      form.append('nfe', file);
+      form.append('ids_at', JSON.stringify(ids));
+      const ac = new AbortController();
+      const to = setTimeout(() => ac.abort(), 90000);
+      try {
+        const r = await fetch(
+          `${BASE}/api/sac/at/tecnico/fechamento/nfe-lote?token=${encodeURIComponent(TOKEN)}`,
+          { method: 'POST', body: form, signal: ac.signal }
+        );
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) {
+          alert(d.error || d.detail || 'Erro no upload da NFe.');
+          return;
+        }
+        const url = d.nfe_url || '';
+        (d.atualizados || ids).forEach((idAt) => {
+          _atualizarNfeLinha(idAt, url);
+          _atualizarBadgeLinha(idAt, 'finalizado');
+        });
+        cancelarAnexarNfeLote();
+        const qtd = (d.atualizados || ids).length;
+        alert('NFe anexada em ' + qtd + ' OS.');
+      } catch (err) {
+        const timedOut = err?.name === 'AbortError';
+        alert(timedOut
+          ? 'Tempo esgotado no envio. No PC local use a porta 5001.'
+          : 'Erro de conexão ao enviar a NFe.');
+      } finally {
+        clearTimeout(to);
+        if (fileInput) fileInput.value = '';
+        if (btn) { btn.textContent = 'Escolher arquivo e anexar'; btn.disabled = _nfeLoteSelecionados.size < 1; }
+        _atualizarContadorNfeLote();
+      }
+    }
+
     function _renderAtendimentos() {
       const tbody = document.getElementById('atendTbody');
-      const lista = _exibirFinaliz ? _listaAtend : _listaAtend.filter(a => !_isFinalizado(a.status_os));
+      let lista;
+      if (_nfeLoteMode) {
+        lista = _listaAtend.filter(_aguardaNfe);
+      } else if (_exibirFinaliz) {
+        lista = _listaAtend;
+      } else {
+        lista = _listaAtend.filter(a => !_isFinalizado(a.status_os));
+      }
+      const colSpan = _nfeLoteMode ? 10 : 9;
       if (!lista.length) {
-        tbody.innerHTML = '<tr><td colspan="9" class="tbl-empty">' +
-          (_exibirFinaliz ? 'Nenhum atendimento vinculado.' : 'Nenhum atendimento em aberto.') +
+        tbody.innerHTML = '<tr><td colspan="' + colSpan + '" class="tbl-empty">' +
+          (_nfeLoteMode
+            ? 'Nenhuma OS aguardando NFe.'
+            : (_exibirFinaliz ? 'Nenhum atendimento vinculado.' : 'Nenhum atendimento em aberto.')) +
           '</td></tr>';
         return;
       }
       tbody.innerHTML = lista.map(a => {
         const st = a.status_os || 'aberta';
         const m  = _statusMeta(st);
-        const nfeCell = a.nfe_url
-          ? '<a href="' + esc(a.nfe_url) + '" target="_blank" onclick="event.stopPropagation()" title="Ver NFe" class="tbl-icon-btn">📄</a>'
-          : _isFinalizado(st)
-            ? '<button class="tbl-icon-btn" onclick="event.stopPropagation();abrirNfeUpload(' + a.id_at + ')" title="Anexar NFe">📎</button>'
-            : '<span class="tbl-icon-btn tbl-nfe-disabled" title="Finalize o atendimento primeiro">📎</span>';
+        const nfeCell = _htmlCelulaNfe(a);
         const fechCls = _isFinalizado(st) ? ' is-fechada' : '';
+        const checkTd = _nfeLoteMode
+          ? ('<td><input type="checkbox" class="tbl-nfe-check" data-id-at="' + a.id_at + '"' +
+             (_nfeLoteSelecionados.has(Number(a.id_at)) ? ' checked' : '') +
+             ' onchange="_toggleNfeLoteCheck(' + a.id_at + ', this.checked)" onclick="event.stopPropagation()"></td>')
+          : '';
         return `
         <tr data-id-at="${a.id_at}">
+          ${checkTd}
           <td class="tbl-os" onclick="abrirOsModal(${a.id_at})" style="cursor:pointer;" title="Ver OS">${esc(a.os_num)}</td>
           <td style="white-space:nowrap;">${esc(a.data)}</td>
           <td>${esc(a.cliente)}</td>
@@ -2412,7 +2586,6 @@
     // ── Estado do modal fechamento ──────────────────────────────────────────
     let _fechIdAt      = null;
     let _fechStatusOs  = 'aberta';
-    let _inlineNfeIdAt = null;
 
     function _checkFechForm() {
       const descricao = (document.getElementById('fechDescricao').value || '').trim();
@@ -2513,17 +2686,26 @@
       statusEl.innerHTML = '<span class="evid-spinner"></span>Enviando ' + files.length + ' arquivo(s)…';
       const form = new FormData();
       for (const f of files) form.append('evidencias', f);
+      const ac = new AbortController();
+      const to = setTimeout(() => ac.abort(), 90000);
       try {
         const r = await fetch(
           `${BASE}/api/sac/at/tecnico/fechamento/${_fechIdAt}/evidencias?token=${encodeURIComponent(TOKEN)}`,
-          { method: 'POST', body: form }
+          { method: 'POST', body: form, signal: ac.signal }
         );
-        const d = await r.json();
-        if (!r.ok) { statusEl.textContent = d.error || 'Erro no upload.'; btn.disabled = false; return; }
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) { statusEl.textContent = d.error || d.detail || 'Erro no upload.'; btn.disabled = false; return; }
         statusEl.textContent = '✓ ' + d.evidencias.length + ' arquivo(s) enviado(s)!';
         _renderEvidencias(d.evidencias, true);
         fileInput.value = '';
-      } catch { statusEl.textContent = 'Erro de conexão.'; }
+      } catch (err) {
+        const timedOut = err?.name === 'AbortError';
+        statusEl.textContent = timedOut
+          ? 'Tempo esgotado. No PC local use a porta 5001 (não 3001).'
+          : 'Erro de conexão. Confira se abriu em localhost:5001.';
+      } finally {
+        clearTimeout(to);
+      }
       btn.disabled = false;
     }
 
@@ -2593,50 +2775,26 @@
       }
     }
 
-    // Upload NFe direto da tabela (sem abrir modal)
+    // Upload NFe — mantido p/ compat; fluxo principal é o lote no topo
     function abrirNfeUpload(idAt) {
-      _inlineNfeIdAt = idAt;
-      const inp = document.getElementById('inlineNfeInput');
-      inp.value = '';
-      inp.click();
+      _nfeLoteSelecionados.clear();
+      _nfeLoteSelecionados.add(Number(idAt));
+      _nfeLoteMode = true;
+      confirmarAnexarNfeLote();
     }
 
     async function uploadNfeInline() {
-      const fileInput = document.getElementById('inlineNfeInput');
-      const file = fileInput.files[0];
-      if (!file || !_inlineNfeIdAt) return;
-      const idAt  = _inlineNfeIdAt;
-      const row   = document.querySelector('#atendTbody tr[data-id-at="' + idAt + '"]');
-      const nfeTd = row ? row.querySelector('.tbl-nfe-cell') : null;
-      if (nfeTd) nfeTd.innerHTML = '<span class="spinner" style="width:12px;height:12px;border-width:2px;display:inline-block;"></span>';
-      const form = new FormData();
-      form.append('nfe', file);
-      try {
-        const r = await fetch(
-          `${BASE}/api/sac/at/tecnico/fechamento/${idAt}/nfe?token=${encodeURIComponent(TOKEN)}`,
-          { method: 'POST', body: form }
-        );
-        const d = await r.json();
-        if (!r.ok) {
-          if (nfeTd) nfeTd.innerHTML = '<button class="tbl-icon-btn" onclick="event.stopPropagation();abrirNfeUpload(' + idAt + ')" title="Anexar NFe">📎</button>';
-          alert(d.error || 'Erro no upload.');
-          return;
-        }
-        _atualizarNfeLinha(idAt, d.nfe_url);
-        _atualizarBadgeLinha(idAt, 'finalizado');
-      } catch {
-        if (nfeTd) nfeTd.innerHTML = '<button class="tbl-icon-btn" onclick="event.stopPropagation();abrirNfeUpload(' + idAt + ')" title="Anexar NFe">📎</button>';
-        alert('Erro de conexão.');
-      }
-      fileInput.value = '';
+      // legado: redireciona ao fluxo de lote (1 OS)
+      return uploadNfeLote();
     }
 
     function _atualizarBadgeLinha(idAt, novoStatus) {
+      const idNum = Number(idAt);
       // Atualiza cache
-      const cached = _listaAtend.find(a => a.id_at === idAt);
+      const cached = _listaAtend.find(a => Number(a.id_at) === idNum);
       if (cached) cached.status_os = novoStatus;
       // Se filtro ativo e a linha ficou finalizada, remove da tabela
-      if (!_exibirFinaliz && _isFinalizado(novoStatus)) {
+      if (!_exibirFinaliz && _isFinalizado(novoStatus) && !_nfeLoteMode) {
         const row = document.querySelector('#atendTbody tr[data-id-at="' + idAt + '"]');
         if (row) row.remove();
         return;
@@ -2648,22 +2806,22 @@
       if (badge) { badge.textContent = m.label; badge.className = 'status-badge status-' + m.cls; }
       const fbtn = row.querySelector('.tbl-fechar-btn');
       if (fbtn) fbtn.className = 'tbl-icon-btn tbl-fechar-btn' + (_isFinalizado(novoStatus) ? ' is-fechada' : '');
-      // Ativa botão NFe quando sai de 'aberta'
-      if (novoStatus !== 'aberta') {
-        const nfeTd = row.querySelector('.tbl-nfe-cell');
-        if (nfeTd && nfeTd.querySelector('.tbl-nfe-disabled')) {
-          nfeTd.innerHTML = '<button class="tbl-icon-btn" onclick="event.stopPropagation();abrirNfeUpload(' + idAt + ')" title="Anexar NFe">📎</button>';
-        }
-      }
+      // Atualiza rótulo NFe (sem paperclip) conforme cache
+      const nfeTd = row.querySelector('.tbl-nfe-cell');
+      if (nfeTd && cached) nfeTd.innerHTML = _htmlCelulaNfe(cached);
     }
 
     function _atualizarNfeLinha(idAt, nfeUrl) {
+      const idNum = Number(idAt);
+      const cached = _listaAtend.find(a => Number(a.id_at) === idNum);
+      if (cached) {
+        cached.nfe_url = nfeUrl || cached.nfe_url || null;
+        if (nfeUrl) cached.status_os = 'finalizado';
+      }
       const row = document.querySelector('#atendTbody tr[data-id-at="' + idAt + '"]');
       if (!row) return;
       const nfeTd = row.querySelector('.tbl-nfe-cell');
-      if (nfeTd) {
-        nfeTd.innerHTML = '<a href="' + esc(nfeUrl) + '" target="_blank" onclick="event.stopPropagation()" title="Ver NFe" class="tbl-icon-btn">📄</a>';
-      }
+      if (nfeTd && nfeUrl) nfeTd.innerHTML = _htmlVerNfe(nfeUrl);
     }
 
     // ── Modal de visualização de evidências da tabela ──────────────────────

@@ -1046,14 +1046,22 @@ async function resolverReferenciasProdutoIapp(refs) {
   return cache;
 }
 
-async function montarEstruturaFichaPorCodigo(codigoProduto) {
+async function montarEstruturaFichaPorCodigo(codigoProduto, fichaIdPreferido = 0) {
   const codigo = String(codigoProduto || '').trim();
-  const fichaResumo = await buscarFichaTecnicaPorCodigoProduto(codigo);
-  if (!fichaResumo) {
-    return { ficha: null, itens: [] };
+  let ficha = null;
+  const fichaId = Number(fichaIdPreferido) || 0;
+  if (fichaId > 0) {
+    try {
+      ficha = await consultarFichaTecnicaPorId(fichaId);
+    } catch (_) { /* fallback abaixo */ }
   }
-
-  const ficha = await consultarFichaTecnicaPorId(fichaResumo.id) || fichaResumo;
+  if (!ficha) {
+    const fichaResumo = await buscarFichaTecnicaPorCodigoProduto(codigo);
+    if (!fichaResumo) {
+      return { ficha: null, itens: [] };
+    }
+    ficha = await consultarFichaTecnicaPorId(fichaResumo.id) || fichaResumo;
+  }
   const achatado = achatarEstruturaFicha(ficha);
   const cache = await resolverReferenciasProdutoIapp(achatado.map((i) => i.produto_ref));
 
@@ -1151,7 +1159,7 @@ async function carregarEstruturaFichaPayload(query = {}) {
     };
   }
 
-  const { ficha, itens } = await montarEstruturaFichaPorCodigo(codigo);
+  const { ficha, itens } = await montarEstruturaFichaPorCodigo(codigo, Number(query?.ficha_id) || 0);
   return {
     success: true,
     codigo,
