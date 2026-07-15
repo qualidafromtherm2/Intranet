@@ -13374,7 +13374,7 @@ function _gerarZplImpressaoRapidaProduto({ codigo, descricao, tipo, lote, copias
 ^FO25,70^FB600,1,0,L,0^A0R,90,90^FD${code}^FS
 ^FO20,700^BQN,2,5^FDMA,${code}^FS
 ^FO150,650^FB600,1,0,L,0^A0R,40,40^FDL: ${lot === '---' ? '' : lot}^FS
-^FO180,50^FB800,5,0,C,0^A0R,70,70^FD${desc}^FS
+^FO180,50^A0R,58,58^FB800,5,6,C,0^FD${desc}^FS
 ^XZ`;
   return Array.from({ length: total }, () => bloco).join('\n');
 }
