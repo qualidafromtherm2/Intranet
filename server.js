@@ -13342,6 +13342,26 @@ function _impressaoRapidaData() {
   }).format(new Date()).replace(',', '');
 }
 
+function _impressaoRapidaQuebrarDescricao(descricao, limite = 25, maxLinhas = 8) {
+  const partes = String(descricao || '').split(/\s+/).filter(Boolean);
+  const linhas = [];
+  let atual = '';
+
+  for (const parteOriginal of partes) {
+    let parte = parteOriginal;
+    while (parte.length > limite) {
+      if (atual) { linhas.push(atual); atual = ''; }
+      linhas.push(parte.slice(0, limite));
+      parte = parte.slice(limite);
+    }
+    const candidata = atual ? `${atual} ${parte}` : parte;
+    if (candidata.length <= limite) atual = candidata;
+    else { linhas.push(atual); atual = parte; }
+  }
+  if (atual) linhas.push(atual);
+  return linhas.slice(0, maxLinhas);
+}
+
 function _gerarZplImpressaoRapidaProduto({ codigo, descricao, tipo, lote, copias }) {
   const code = _impressaoRapidaSanitize(codigo, 40);
   const desc = _impressaoRapidaSanitize(descricao, 180) || '(sem descricao)';
@@ -13367,6 +13387,9 @@ function _gerarZplImpressaoRapidaProduto({ codigo, descricao, tipo, lote, copias
 ^FO110,10^A0B,20,20^FB225,1,0,L,0^FD FT-M00-ETQP - REV01 ^FS
 ^XZ`).join('\n');
   }
+  const descricaoZpl = _impressaoRapidaQuebrarDescricao(desc)
+    .map((linha, index) => `^FO${190 + (index * 44)},60^A0R,40,40^FD${linha}^FS`)
+    .join('\n');
   const bloco = `^XA
 ^CI28
 ^PW560
@@ -13374,7 +13397,7 @@ function _gerarZplImpressaoRapidaProduto({ codigo, descricao, tipo, lote, copias
 ^FO25,70^FB600,1,0,L,0^A0R,90,90^FD${code}^FS
 ^FO20,700^BQN,2,5^FDMA,${code}^FS
 ^FO150,650^FB600,1,0,L,0^A0R,40,40^FDL: ${lot === '---' ? '' : lot}^FS
-^FO180,50^A0R,46,46^FB800,7,2,C,0^FD${desc}^FS
+${descricaoZpl}
 ^XZ`;
   return Array.from({ length: total }, () => bloco).join('\n');
 }

@@ -74991,7 +74991,10 @@ document.addEventListener('DOMContentLoaded', () => {
     const select = impCampo('movimImpListboxImpressora');
     if (!select) return false;
     const pequena = impCampo('movimImpressaoTipo')?.value === 'pequena';
-    const opcao = Array.from(select.options).find(option => {
+    const chavePreferencia = `movim_impressora_rapida_${pequena ? 'pequena' : 'grande'}`;
+    const preferida = sessionStorage.getItem(chavePreferencia) || '';
+    const opcoes = Array.from(select.options);
+    const opcao = opcoes.find(option => preferida && option.value === preferida) || opcoes.find(option => {
       const texto = String(option.textContent || '').toLowerCase();
       const ehDenis = texto.includes('pc do denis');
       const ehZpl2 = texto.includes('zpl 2');
@@ -75004,6 +75007,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     select.value = opcao.value;
     movimSyncImpressoraSelects(opcao.value);
+    sessionStorage.setItem(chavePreferencia, opcao.value);
     return true;
   }
 
@@ -75025,6 +75029,9 @@ document.addEventListener('DOMContentLoaded', () => {
       const json = await resp.json().catch(() => ({}));
       if (!resp.ok || !json?.ok) throw new Error(json?.error || `HTTP ${resp.status}`);
       definirStatusImpressao(`${json.quantidade || 1} etiqueta(s) enviada(s) para impressao.`, 'ok');
+      const pequena = impCampo('movimImpressaoTipo')?.value === 'pequena';
+      const impressoraAtual = impCampo('movimImpListboxImpressora')?.value || '';
+      if (impressoraAtual) sessionStorage.setItem(`movim_impressora_rapida_${pequena ? 'pequena' : 'grande'}`, impressoraAtual);
     } catch (err) {
       definirStatusImpressao(String(err?.message || err), 'erro');
     } finally {
