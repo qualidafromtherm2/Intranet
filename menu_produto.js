@@ -36070,6 +36070,55 @@ if (typeof linkifyText === 'undefined') {
 // Array global do carrinho
 window.carrinhoCompras = window.carrinhoCompras || [];
 
+function mostrarConfirmacaoLogistica(titulo, mensagem = '') {
+  document.querySelector('.logistica-success-toast')?.remove();
+  const toast = document.createElement('div');
+  toast.className = 'logistica-success-toast';
+  toast.setAttribute('role', 'status');
+  toast.setAttribute('aria-live', 'polite');
+  toast.innerHTML = `
+    <span class="logistica-success-toast__icon"><i class="fa-solid fa-check"></i></span>
+    <span class="logistica-success-toast__copy">
+      <strong>${window.escapeHtml ? window.escapeHtml(titulo) : titulo}</strong>
+      ${mensagem ? `<small>${window.escapeHtml ? window.escapeHtml(mensagem) : mensagem}</small>` : ''}
+    </span>
+    <button type="button" aria-label="Fechar aviso"><i class="fa-solid fa-xmark"></i></button>`;
+  document.body.appendChild(toast);
+  const fechar = () => {
+    toast.classList.remove('is-visible');
+    setTimeout(() => toast.remove(), 220);
+  };
+  toast.querySelector('button')?.addEventListener('click', fechar);
+  requestAnimationFrame(() => toast.classList.add('is-visible'));
+  setTimeout(fechar, 7000);
+}
+
+function voltarParaListaProdutosAposCompra() {
+  fecharModalCarrinhoCompras();
+  document.getElementById('menu-lista-produtos')?.click();
+  document.querySelector('.lp-tab-btn[data-lp-tab="listaProdutosConteudo"]')?.click();
+}
+
+function normalizarCategoriaCarrinho(valor) {
+  return String(valor || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .trim().toLowerCase();
+}
+
+const CATEGORIAS_COMPRA_AUTOMATICAS_CARRINHO = Object.freeze({
+  'materia prima': ['2.01.03', 'MATERIA PRIMA NACIONAL'],
+  'embalagem': ['2.01.93', 'Embalagem Dos Produtos'],
+  'embalagem dos produtos': ['2.01.93', 'Embalagem Dos Produtos'],
+  'ferramentas': ['2.07.02', 'Ferramentas'],
+  'maquinas e equipamentos': ['2.07.01', 'Maquinas e Equipamentos'],
+  'investimento na producao': ['2.07.01', 'Maquinas e Equipamentos'],
+  'moveis e utensilios': ['2.07.05', 'Moveis e Utensilios'],
+  'tecnologia da informacao': ['2.04.77', 'INFORMATICA PERIFERICOS'],
+  'suprimentos administrativos': ['2.04.06', 'MATERIAL ESCRITORIO'],
+  'eventos comerciais': ['2.02.94', 'Feiras e Eventos'],
+  'manutencao': ['2.14.95', 'Manutencao Geral'],
+  'outros': ['2.14.94', 'Outros Materiais']
+});
+
 // Registra item do carrinho no banco com status "carrinho"
 async function registrarItemCarrinhoNoBanco(item) {
   try {
@@ -36421,8 +36470,12 @@ async function carregarDepartamentosCarrinho() {
     select.innerHTML = '<option value="">Selecione...</option>' +
       nomes.map(nome => `<option value="${window.escapeHtml(nome)}">${window.escapeHtml(nome)}</option>`).join('');
 
-    const padrao = nomes.find(n => n.toLowerCase() === 'produção');
-    if (padrao) select.value = padrao;
+    const itemBase = (window.carrinhoCompras || []).find(item => item?.departamento || item?.centro_custo);
+    const departamentoSalvo = nomes.find(nome =>
+      normalizarCategoriaCarrinho(nome) === normalizarCategoriaCarrinho(itemBase?.departamento)
+    );
+    const padrao = nomes.find(nome => normalizarCategoriaCarrinho(nome) === 'producao');
+    select.value = departamentoSalvo || padrao || '';
 
     // Atualiza categorias do carrinho ao selecionar departamento
     select.onchange = async () => {
@@ -36432,6 +36485,11 @@ async function carregarDepartamentosCarrinho() {
 
     // Inicializa categorias com o departamento atual (se houver)
     atualizarCategoriasPorDepartamento(select.value, 'carrinhoCentroCustoGlobal');
+    const categoriaGlobal = document.getElementById('carrinhoCentroCustoGlobal');
+    const categoriaSalva = Array.from(categoriaGlobal?.options || []).find(option =>
+      normalizarCategoriaCarrinho(option.value) === normalizarCategoriaCarrinho(itemBase?.centro_custo)
+    );
+    if (categoriaSalva && categoriaGlobal) categoriaGlobal.value = categoriaSalva.value;
     await aplicarCategoriaPadraoCarrinho({ render: false });
   } catch (err) {
     console.error('[CARRINHO] Erro ao carregar departamentos:', err);
@@ -36458,6 +36516,7 @@ async function aplicarCategoriaPadraoCarrinho(options = {}) {
   }
 
   const centroCusto = (select.value || '').trim();
+  atualizarResumoCategoriaVinculadaCarrinho(centroCusto);
   if (!centroCusto) return;
 
   const carrinho = window.carrinhoCompras || [];
@@ -36477,28 +36536,20 @@ async function aplicarCategoriaPadraoCarrinho(options = {}) {
   }
 }
 
+function atualizarResumoCategoriaVinculadaCarrinho(centroCusto) {
+  const hint = document.getElementById('carrinhoCategoriaVinculadaHint');
+  if (!hint) return;
+  const categoria = obterCategoriaCompraOmieOperacionalCarrinho(centroCusto);
+  hint.classList.toggle('is-manual', !categoria);
+  hint.innerHTML = categoria
+    ? `<i class="fa-solid fa-link"></i><span>Categoria da Compra: <strong>${window.escapeHtml(categoria.nome)}</strong></span>`
+    : '<i class="fa-solid fa-circle-info"></i><span>Sem vínculo automático. Escolha a Categoria da Compra nos itens.</span>';
+}
+
 function obterCategoriaCompraOmieOperacionalCarrinho(centroCusto) {
-  const categoria = String(centroCusto || '')
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .trim()
-    .toLowerCase();
-
-  if (categoria === 'materia prima') {
-    return {
-      codigo: '2.01.03',
-      nome: '2.01.03 - Materia Prima Nacional'
-    };
-  }
-
-  if (categoria === 'embalagem dos produtos') {
-    return {
-      codigo: '2.01.93',
-      nome: '2.01.93 - Embalagem Dos Produtos'
-    };
-  }
-
-  return null;
+  const mapeada = CATEGORIAS_COMPRA_AUTOMATICAS_CARRINHO[normalizarCategoriaCarrinho(centroCusto)];
+  if (!mapeada) return null;
+  return { codigo: mapeada[0], descricao: mapeada[1], nome: `${mapeada[0]} - ${mapeada[1]}` };
 }
 
 function aplicarCategoriaCompraOmieOperacionalNoItem(item, centroCusto) {
@@ -36634,28 +36685,66 @@ function configurarAnexoUrlGlobalCarrinho() {
 
 function configurarAnexoArquivoGlobalCarrinho() {
   const input = document.getElementById('carrinhoAnexosGlobal');
+  const dropzone = document.getElementById('carrinhoAnexoDropzone');
+  const selecionarBtn = document.getElementById('carrinhoAnexoSelecionarBtn');
   if (!input) return;
+
+  const processarArquivo = async (file) => {
+    if (!file) return;
+    window.__carrinhoAnexoArquivoGlobal = file;
+    atualizarInfoAnexoGlobalCarrinho(file.name || 'Arquivo colado');
+
+    const anexoMeta = { nome: file.name || 'anexo', tipo: file.type, tamanho: file.size };
+    const carrinho = window.carrinhoCompras || [];
+    await Promise.all(carrinho.map(async (item) => {
+      item.anexo = anexoMeta;
+      item.anexos = [anexoMeta];
+      await atualizarItemCarrinhoNoBanco(item);
+    }));
+  };
 
   if (!input.dataset.bound) {
     input.addEventListener('change', async () => {
       const file = input.files && input.files.length > 0 ? input.files[0] : null;
-      atualizarInfoAnexoGlobalCarrinho(file?.name || '');
-      if (!file) return;
-
-      const anexoMeta = {
-        nome: file.name,
-        tipo: file.type,
-        tamanho: file.size
-      };
-
-      const carrinho = window.carrinhoCompras || [];
-      await Promise.all(carrinho.map(async (item) => {
-        item.anexo = anexoMeta;
-        item.anexos = [anexoMeta];
-        await atualizarItemCarrinhoNoBanco(item);
-      }));
+      window.__carrinhoAnexoArquivoGlobal = file || null;
+      if (!file) atualizarInfoAnexoGlobalCarrinho('');
+      await processarArquivo(file);
     });
     input.dataset.bound = '1';
+  }
+
+  if (dropzone && !dropzone.dataset.bound) {
+    selecionarBtn?.addEventListener('click', (event) => {
+      event.stopPropagation();
+      input.click();
+    });
+    dropzone.addEventListener('click', () => input.click());
+    dropzone.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        input.click();
+      }
+    });
+    ['dragenter', 'dragover'].forEach(type => dropzone.addEventListener(type, (event) => {
+      event.preventDefault();
+      dropzone.classList.add('is-dragging');
+    }));
+    ['dragleave', 'drop'].forEach(type => dropzone.addEventListener(type, (event) => {
+      event.preventDefault();
+      dropzone.classList.remove('is-dragging');
+    }));
+    dropzone.addEventListener('drop', async (event) => {
+      await processarArquivo(event.dataTransfer?.files?.[0] || null);
+    });
+    dropzone.addEventListener('paste', async (event) => {
+      const file = Array.from(event.clipboardData?.items || [])
+        .find(item => item.kind === 'file')?.getAsFile();
+      if (file) {
+        event.preventDefault();
+        await processarArquivo(file);
+      }
+    });
+    dropzone.dataset.bound = '1';
   }
 
   const carrinho = window.carrinhoCompras || [];
@@ -36889,10 +36978,12 @@ window.abrirModalCarrinhoCompras = async function() {
   renderModalCarrinhoCompras();
   renderModalCarrinhoLista();
 
+  const cargaCarrinho = carregarCarrinhoComprasDoBanco();
   const cargas = [
     window.usuariosAtivos.length === 0 ? carregarUsuariosAtivos() : Promise.resolve(),
-    carregarCarrinhoComprasDoBanco(),
+    cargaCarrinho,
     (async () => {
+      await cargaCarrinho;
       await carregarCategoriasPorDepartamento();
       await carregarDepartamentosCarrinho();
       configurarCategoriaGlobalCarrinho();
@@ -37080,7 +37171,7 @@ async function renderModalCarrinhoCompras() {
       })
     ].join('');
     return `
-      <div style="background:white;border:1px solid #e5e7eb;border-radius:8px;padding:12px;box-shadow:0 1px 2px rgba(0,0,0,0.05);transition:all 0.2s;display:flex;flex-direction:column;gap:12px;" 
+      <div class="carrinho-product-card" style="background:white;border:1px solid #e5e7eb;border-radius:8px;padding:12px;box-shadow:0 1px 2px rgba(0,0,0,0.05);transition:all 0.2s;display:flex;flex-direction:column;gap:12px;"
            onmouseover="this.style.boxShadow='0 2px 8px rgba(0,0,0,0.1)';" 
            onmouseout="this.style.boxShadow='0 1px 2px rgba(0,0,0,0.05)';">
         
@@ -37222,7 +37313,7 @@ async function renderModalCarrinhoCompras() {
     const itensGrupo = gruposNP[np] || [];
     const cardsHtml = itensGrupo.map(({ item, idx }) => renderItemCarrinhoCard(item, idx)).join('');
     return `
-      <div style="grid-column:1/-1;border:1px solid #e5e7eb;border-radius:10px;padding:12px;background:#f9fafb;">
+      <div class="carrinho-np-group" style="grid-column:1/-1;border:1px solid #e5e7eb;border-radius:10px;padding:12px;background:#f9fafb;">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
           <div style="font-size:12px;font-weight:700;color:#111827;">Grupo NP: ${window.escapeHtml(np)}</div>
           <div style="font-size:11px;color:#6b7280;">${itensGrupo.length} item(ns)</div>
@@ -37527,7 +37618,7 @@ async function popularDropdownCategoriaCompraCarrinho(container) {
           // Atualiza no carrinho
           if (window.carrinhoCompras[itemIdx]) {
             window.carrinhoCompras[itemIdx].categoria_compra_codigo = codigo;
-            window.carrinhoCompras[itemIdx].categoria_compra = descricao;
+            window.carrinhoCompras[itemIdx].categoria_compra = codigo;
             window.carrinhoCompras[itemIdx].categoria_compra_nome = `${codigo} - ${descricao}`;
             
             // Salva no banco
@@ -37877,7 +37968,9 @@ async function enviarPedidoModal() {
   const objetivoCompraGlobal = document.getElementById('carrinhoObjetivoCompraGlobal')?.value?.trim() || null;
   const anexoUrlGlobal = document.getElementById('carrinhoAnexoUrlGlobal')?.value?.trim() || null;
   const retornoCotacaoGlobalBruto = document.getElementById('carrinhoRetornoCotacaoGlobal')?.value?.trim() || 'Não';
-  const anexoArquivoGlobal = document.getElementById('carrinhoAnexosGlobal')?.files?.[0] || null;
+  const anexoArquivoGlobal = document.getElementById('carrinhoAnexosGlobal')?.files?.[0]
+    || window.__carrinhoAnexoArquivoGlobal
+    || null;
   const compraRealizada = document.getElementById('carrinhoCompraRealizada')?.checked === true;
   const compraAutorizada = (document.getElementById('carrinhoCompraAutorizada')?.checked === true) && !compraRealizada;
   const prazoSolicitadoGlobal = compraRealizada ? null : prazoSolicitadoGlobalBruto;
@@ -38111,35 +38204,20 @@ async function enviarPedidoModal() {
       btnEnviar.innerHTML = originalBtnHtml;
     }
     
-    // Comentário: sucesso total segue o mesmo padrão do modal Cotado (alerta + fechar)
+    // Sucesso total retorna ao catalogo sem interromper o fluxo com alert nativo.
     if (respostasErro === 0) {
       window.carrinhoCompras = [];
 
       const numerosUnicos = Array.from(new Set(numerosCompraOmieGerados));
-      if (numerosUnicos.length > 0) {
-        const orientacoesAlerta = numerosUnicos
-          .map((numeroPedidoOmie) => `Registro realizado com sucesso. Informe o cNumero "${numeroPedidoOmie}" na NFe e encaminhe ao setor de Compras para identificação e vínculo do pedido.`)
-          .join('\n');
-        alert(`Solicitação(ões) enviada(s) com sucesso.\n${orientacoesAlerta}`);
-      } else {
-        alert('Solicitação(ões) enviada(s) com sucesso.');
-      }
-
-      if (numerosUnicos.length > 0) {
-        renderModalCarrinhoCompras();
-        renderCarrinhoCompras();
-        if (typeof recarregarKanbanMinhasCompras === 'function') {
-          recarregarKanbanMinhasCompras();
-        }
-      } else {
-        setTimeout(() => {
-          renderModalCarrinhoCompras();
-          renderCarrinhoCompras();
-          fecharModalCarrinhoCompras();
-          if (typeof recarregarKanbanMinhasCompras === 'function') {
-            recarregarKanbanMinhasCompras();
-          }
-        }, 1500);
+      renderModalCarrinhoCompras();
+      renderCarrinhoCompras();
+      voltarParaListaProdutosAposCompra();
+      mostrarConfirmacaoLogistica(
+        'Solicitacao enviada com sucesso',
+        numerosUnicos.length > 0 ? `Pedido Omie: ${numerosUnicos.join(', ')}` : ''
+      );
+      if (typeof recarregarKanbanMinhasCompras === 'function') {
+        recarregarKanbanMinhasCompras();
       }
     }
   } catch (err) {
@@ -38468,24 +38546,27 @@ function normalizarCategoriaOperacionalCompra(valor) {
     .toLowerCase();
 }
 
+const CATEGORIAS_COMPRA_POR_CATEGORIA_OPERACIONAL = Object.freeze({
+  'materia prima': { codigo: '2.01.03', descricao: 'MATERIA PRIMA NACIONAL' },
+  'embalagem': { codigo: '2.01.93', descricao: 'Embalagem Dos Produtos' },
+  'embalagem dos produtos': { codigo: '2.01.93', descricao: 'Embalagem Dos Produtos' },
+  'ferramentas': { codigo: '2.07.02', descricao: 'Ferramentas' },
+  'maquinas e equipamentos': { codigo: '2.07.01', descricao: 'Maquinas e Equipamentos' },
+  'investimento na producao': { codigo: '2.07.01', descricao: 'Maquinas e Equipamentos' },
+  'moveis e utensilios': { codigo: '2.07.05', descricao: 'Moveis e Utensilios' },
+  'tecnologia da informacao': { codigo: '2.04.77', descricao: 'INFORMATICA PERIFERICOS' },
+  'suprimentos administrativos': { codigo: '2.04.06', descricao: 'MATERIAL ESCRITORIO' },
+  'eventos comerciais': { codigo: '2.02.94', descricao: 'Feiras e Eventos' },
+  'manutencao': { codigo: '2.14.95', descricao: 'Manutencao Geral' },
+  'outros': { codigo: '2.14.94', descricao: 'Outros Materiais' }
+});
+
 function obterCategoriaCompraOmiePorCentroCusto(centroCusto) {
   const categoria = normalizarCategoriaOperacionalCompra(centroCusto);
-
-  if (categoria === 'materia prima') {
-    return {
-      codigo: '2.01.03',
-      nome: '2.01.03 - Materia Prima Nacional'
-    };
-  }
-
-  if (categoria === 'embalagem dos produtos') {
-    return {
-      codigo: '2.01.93',
-      nome: '2.01.93 - Embalagem Dos Produtos'
-    };
-  }
-
-  return null;
+  const mapeada = CATEGORIAS_COMPRA_POR_CATEGORIA_OPERACIONAL[categoria];
+  return mapeada
+    ? { ...mapeada, nome: `${mapeada.codigo} - ${mapeada.descricao}` }
+    : null;
 }
 
 // Carrega opções de departamentos, centros de custo e usuários
@@ -39913,6 +39994,38 @@ document.getElementById('modalCarrinhoCompras')?.addEventListener('click', (e) =
     fecharModalCarrinhoCompras();
   }
 });
+
+// Nos fluxos logisticos, cliques no fundo e Escape nao devem descartar o trabalho.
+(function protegerFechamentoModaisLogisticos() {
+  const idsProtegidos = new Set([
+    'modalCarrinhoCompras', 'modalColarListaCompra', 'modalCatalogoOmie',
+    'modalRecebimentoProdutos', 'modalAcoesProdutoOverlay', 'modalAcoesQtdOverlay',
+    'modalCadMultiploOverlay', 'modalSeparacaoQtd', 'modalSeparacaoLogistica',
+    'modalAguardandoRetiradaSep', 'modalAcaoItemSep', 'modalNaoSeparar',
+    'modalEdicaoSep', 'modalCarrinhoSepOverlay', 'modalMovimentacao',
+    'movimScanEnderecoModal', 'movimImpressaoModal', 'movimHistoricoModal'
+  ]);
+  const seletorProtegido = [...idsProtegidos].map(id => `#${id}`).join(',') + ', .produto-info-modal-overlay';
+
+  document.addEventListener('click', (event) => {
+    const alvo = event.target;
+    if (!(alvo instanceof HTMLElement)) return;
+    if (!idsProtegidos.has(alvo.id) && !alvo.classList.contains('produto-info-modal-overlay')) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+  }, true);
+
+  document.addEventListener('keydown', (event) => {
+    if (event.key !== 'Escape') return;
+    const modalVisivel = [...document.querySelectorAll(seletorProtegido)].some((el) => {
+      const style = getComputedStyle(el);
+      return style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0';
+    });
+    if (!modalVisivel) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+  }, true);
+})();
 
 // Bind para auto-preencher responsável quando categoria é selecionada
 document.getElementById('modalComprasCategoriaCompra')?.addEventListener('change', aplicarResponsavelPadrao);
