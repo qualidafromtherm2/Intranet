@@ -80956,11 +80956,27 @@ window.verOperacao = function(osId) {
   }
 
   function producaoListaPostosInspecaoEstrutura() {
-    const cols = PRODUCAO_KANBAN_COLUNAS.filter((c) => c.key !== 'pedidos' && c.nome);
+    // PRODUCAO_KANBAN_COLUNAS vive no IIFE de Registrar produção — aqui usamos o helper em window.
+    let cols = [];
+    if (typeof window._producaoGetColunasPosProgramado === 'function') {
+      cols = window._producaoGetColunasPosProgramado() || [];
+    } else if (typeof window._producaoKanbanColunas === 'function') {
+      cols = (window._producaoKanbanColunas() || []).filter((c) => c.key !== 'pedidos');
+    }
+    if (!cols.length) {
+      cols = [
+        { key: 'solicitado', nome: 'Montagem hermetica' },
+        { key: 'produzindo', nome: 'Montagem eletrica' },
+        { key: 'teste', nome: 'Teste' },
+        { key: 'inspecao_final', nome: 'Inspeção final' },
+      ];
+    }
     const idx = cols.findIndex((c) =>
-      c.key === 'solicitado' || /montagem\s*hermetic/i.test(String(c.nome || ''))
+      c.key === 'solicitado' || /montagem\s*hermetic/i.test(String(c?.nome || ''))
     );
-    return (idx >= 0 ? cols.slice(idx) : cols).map((c) => String(c.nome).trim()).filter(Boolean);
+    return (idx >= 0 ? cols.slice(idx) : cols)
+      .map((c) => String(c?.nome || '').trim())
+      .filter(Boolean);
   }
 
   function openProducaoEstruturaItemEditarModal(item, opts) {
