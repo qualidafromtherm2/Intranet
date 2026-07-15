@@ -12,6 +12,7 @@ const {
   atualizarFichaCompletaPorId,
   obterItemCompletoPorId,
   atualizarItemCompletoPorId,
+  atualizarPostoItemPorId,
   trocarProdutoItemPorOmie,
   adicionarItemFichaPorOmie,
   excluirItemFicha,
@@ -258,9 +259,39 @@ async function upsertProdutoIapp(prod) {
   );
 }
 
+async function lerPostosFichaAntesSync(fichaId) {
+  const id = Number(fichaId) || 0;
+  if (!id) return new Map();
+  const { rows } = await dbQuery(
+    `SELECT operacao, tipo, produto_iapp_id, posto
+       FROM estrutura.ficha_item
+      WHERE ficha_id = $1
+        AND posto IS NOT NULL
+        AND BTRIM(posto) <> ''
+      ORDER BY id ASC`,
+    [id]
+  );
+  const mapa = new Map();
+  for (const row of rows || []) {
+    const key = `${row.operacao}|${row.tipo}|${row.produto_iapp_id}`;
+    if (!mapa.has(key)) mapa.set(key, []);
+    mapa.get(key).push(String(row.posto).trim());
+  }
+  return mapa;
+}
+
+function consumirPostoPreservado(mapaPostos, operacaoId, tipo, produtoIappId) {
+  const key = `${operacaoId}|${tipo}|${produtoIappId}`;
+  const fila = mapaPostos.get(key);
+  if (!fila || !fila.length) return null;
+  return fila.shift() || null;
+}
+
 async function gravarFichaCompleta(ficha, codigoProduto) {
   const fichaId = Number(ficha.id);
   const codigo = String(codigoProduto || ficha.produto || '').trim();
+  await ensureSchemaEstrutura();
+  const mapaPostos = await lerPostosFichaAntesSync(fichaId);
 
   await dbQuery(`DELETE FROM estrutura.ficha WHERE id = $1`, [fichaId]);
 
@@ -330,15 +361,17 @@ async function gravarFichaCompleta(ficha, codigoProduto) {
     for (const item of (op.materiais || [])) {
       ordem += 1;
       totalItens += 1;
+      const produtoIappId = Number(item.produto);
+      const postoPreservado = consumirPostoPreservado(mapaPostos, operacaoId, 'Material', produtoIappId);
       await dbQuery(
         `INSERT INTO estrutura.ficha_item (
            ficha_id, operacao, tipo, produto_iapp_id, qtde, porcentagem,
-           qtde_custo_perdas, observacoes, comportamento, ordem, raw
-         ) VALUES ($1,$2,'Material',$3,$4,$5,$6,$7,$8,$9,$10)`,
+           qtde_custo_perdas, observacoes, comportamento, ordem, raw, posto
+         ) VALUES ($1,$2,'Material',$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
         [
           fichaId,
           operacaoId,
-          Number(item.produto),
+          produtoIappId,
           num(item.qtde),
           num(item.porcentagem),
           num(item.qtde_custo_perdas),
@@ -346,6 +379,7 @@ async function gravarFichaCompleta(ficha, codigoProduto) {
           null,
           ordem,
           JSON.stringify(item),
+          postoPreservado,
         ]
       );
     }
@@ -353,15 +387,17 @@ async function gravarFichaCompleta(ficha, codigoProduto) {
     for (const item of (op.subprodutos || [])) {
       ordem += 1;
       totalItens += 1;
+      const produtoIappId = Number(item.produto);
+      const postoPreservado = consumirPostoPreservado(mapaPostos, operacaoId, 'Subproduto', produtoIappId);
       await dbQuery(
         `INSERT INTO estrutura.ficha_item (
            ficha_id, operacao, tipo, produto_iapp_id, qtde, porcentagem,
-           qtde_custo_perdas, observacoes, comportamento, ordem, raw
-         ) VALUES ($1,$2,'Subproduto',$3,$4,$5,$6,$7,$8,$9,$10)`,
+           qtde_custo_perdas, observacoes, comportamento, ordem, raw, posto
+         ) VALUES ($1,$2,'Subproduto',$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
         [
           fichaId,
           operacaoId,
-          Number(item.produto),
+          produtoIappId,
           num(item.qtde),
           null,
           null,
@@ -369,6 +405,7 @@ async function gravarFichaCompleta(ficha, codigoProduto) {
           item.comportamento || null,
           ordem,
           JSON.stringify(item),
+          postoPreservado,
         ]
       );
     }
@@ -645,6 +682,29 @@ router.put('/item/:id/completo', async (req, res) => {
     if (!itemId) return res.status(400).json({ error: 'ID do item inválido.' });
     const dados = await atualizarItemCompletoPorId(itemId, req.body || {});
     return res.json({ success: true, fonte: 'sql', message: 'Item atualizado.', ...dados });
+  } catch (err) {
+    return res.status(err.status || 500).json({ error: err.message });
+  }
+});
+
+/**
+ * PUT /api/estrutura/item/:id/posto
+ * Body: { posto } — nome do kanban (ex.: "Montagem hermetica") ou vazio para limpar.
+ */
+router.put('/item/:id/posto', express.json(), async (req, res) => {
+  try {
+    const itemId = Number(req.params.id) || 0;
+    if (!itemId) return res.status(400).json({ error: 'ID do item inválido.' });
+    const posto = Object.prototype.hasOwnProperty.call(req.body || {}, 'posto')
+      ? req.body.posto
+      : null;
+    const dados = await atualizarPostoItemPorId(itemId, posto);
+    return res.json({
+      success: true,
+      fonte: 'sql',
+      message: 'Posto do item atualizado.',
+      ...dados,
+    });
   } catch (err) {
     return res.status(err.status || 500).json({ error: err.message });
   }

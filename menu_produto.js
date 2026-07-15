@@ -73849,9 +73849,24 @@ document.addEventListener('DOMContentLoaded', () => {
     return val;
   }
 
-  const MOVIM_IMPRESSORA_SELECT_IDS = ['movimListboxImpressora', 'movimImpListboxImpressora', 'producaoImpListboxImpressora'];
-  const MOVIM_IMPRESSORA_REFRESH_BTN_IDS = ['movimBtnRefreshImpressoras', 'movimImpBtnRefreshImpressoras', 'producaoImpBtnRefreshImpressoras'];
-  const MOVIM_IMPRESSORA_CONFIG_BTN_IDS = ['movimBtnConfigImpressoras', 'movimImpBtnConfigImpressoras', 'producaoImpBtnConfigImpressoras'];
+  const MOVIM_IMPRESSORA_SELECT_IDS = [
+    'movimListboxImpressora',
+    'movimImpListboxImpressora',
+    'producaoImpListboxImpressora',
+    'producaoFichaImpListboxImpressora',
+  ];
+  const MOVIM_IMPRESSORA_REFRESH_BTN_IDS = [
+    'movimBtnRefreshImpressoras',
+    'movimImpBtnRefreshImpressoras',
+    'producaoImpBtnRefreshImpressoras',
+    'producaoFichaImpBtnRefreshImpressoras',
+  ];
+  const MOVIM_IMPRESSORA_CONFIG_BTN_IDS = [
+    'movimBtnConfigImpressoras',
+    'movimImpBtnConfigImpressoras',
+    'producaoImpBtnConfigImpressoras',
+    'producaoFichaImpBtnConfigImpressoras',
+  ];
 
   async function movimAtualizarListboxImpressora() {
     const selects = MOVIM_IMPRESSORA_SELECT_IDS.map(id => document.getElementById(id)).filter(Boolean);
@@ -80940,6 +80955,156 @@ window.verOperacao = function(osId) {
     });
   }
 
+  function producaoListaPostosInspecaoEstrutura() {
+    const cols = PRODUCAO_KANBAN_COLUNAS.filter((c) => c.key !== 'pedidos' && c.nome);
+    const idx = cols.findIndex((c) =>
+      c.key === 'solicitado' || /montagem\s*hermetic/i.test(String(c.nome || ''))
+    );
+    return (idx >= 0 ? cols.slice(idx) : cols).map((c) => String(c.nome).trim()).filter(Boolean);
+  }
+
+  function openProducaoEstruturaItemEditarModal(item, opts) {
+    const {
+      fonteSql = false,
+      onSaved = null,
+    } = opts || {};
+    const codigo = String(item?.identificacao || '').trim();
+    const descricao = String(item?.descricao || '').trim();
+    const qtde = item?.qtde ?? '—';
+    const itemId = Number(item?.item_id) || 0;
+    const postoAtual = String(item?.posto || '').trim();
+    const postos = producaoListaPostosInspecaoEstrutura();
+
+    const overlay = document.createElement('div');
+    overlay.className = 'kanban-modal-overlay';
+    overlay.style.zIndex = '10050';
+    overlay.addEventListener('click', (ev) => { if (ev.target === overlay) overlay.remove(); });
+
+    const postoOptions = [
+      '<option value="">— sem posto —</option>',
+      ...postos.map((p) =>
+        `<option value="${escapeHtml(p)}"${p === postoAtual ? ' selected' : ''}>${escapeHtml(p)}</option>`
+      ),
+    ].join('');
+
+    const postoBloco = fonteSql && itemId
+      ? `<div style="margin-top:14px;">
+          <label for="estr-item-posto" style="display:block;font-size:11px;color:#94a3b8;margin-bottom:4px;">
+            Posto de trabalho (inspeção)
+          </label>
+          <select id="estr-item-posto"
+            style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid rgba(255,255,255,.14);background:rgba(15,23,42,.55);color:#e2e8f0;font-size:13px;box-sizing:border-box;">
+            ${postoOptions}
+          </select>
+          <p style="margin:6px 0 0;font-size:11px;color:#64748b;">Disponível apenas quando a estrutura vem do SQL (cache local).</p>
+        </div>`
+      : `<div style="margin-top:14px;padding:10px 12px;border-radius:8px;background:rgba(96,165,250,.08);border:1px solid rgba(96,165,250,.2);font-size:11px;color:#93c5fd;">
+          Posto de trabalho só fica disponível depois de salvar a estrutura no banco (fonte SQL).
+        </div>`;
+
+    const modal = document.createElement('div');
+    modal.className = 'kanban-modal';
+    modal.style.maxWidth = '480px';
+    modal.innerHTML = `
+      <header>
+        <div>
+          <h2>Editar item da estrutura</h2>
+          <span>${escapeHtml(codigo || '—')}</span>
+        </div>
+        <button class="close-btn" aria-label="Fechar">&times;</button>
+      </header>
+      <div class="kanban-modal-body">
+        <div style="display:grid;gap:6px;font-size:13px;color:#e2e8f0;">
+          <div><span style="color:#94a3b8;font-size:11px;">Código</span><div style="font-weight:600;">${escapeHtml(codigo || '—')}</div></div>
+          <div><span style="color:#94a3b8;font-size:11px;">Descrição</span><div>${escapeHtml(descricao || '—')}</div></div>
+          <div><span style="color:#94a3b8;font-size:11px;">Quantidade</span><div>${escapeHtml(String(qtde))}</div></div>
+        </div>
+        <label style="display:flex;align-items:center;gap:10px;margin-top:16px;padding:10px 12px;border-radius:8px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);cursor:pointer;">
+          <input type="checkbox" id="estr-item-visivel-principal" style="width:16px;height:16px;accent-color:#34d399;">
+          <span style="font-size:13px;color:#e2e8f0;">Produto primário <span style="font-size:11px;color:#94a3b8;">(visivel_principal)</span></span>
+        </label>
+        ${postoBloco}
+        <p id="estr-item-edit-status" style="margin:12px 0 0;font-size:12px;color:#94a3b8;min-height:18px;"></p>
+      </div>
+      <footer style="display:flex;justify-content:flex-end;gap:8px;">
+        <button type="button" class="modal-secondary" id="estr-item-edit-cancel">Cancelar</button>
+        <button type="button" class="modal-primary" id="estr-item-edit-save">Salvar</button>
+      </footer>
+    `;
+
+    overlay.appendChild(modal);
+    document.body.appendChild(overlay);
+
+    const close = () => overlay.remove();
+    modal.querySelector('.close-btn')?.addEventListener('click', close);
+    modal.querySelector('#estr-item-edit-cancel')?.addEventListener('click', close);
+
+    const chk = modal.querySelector('#estr-item-visivel-principal');
+    const statusEl = modal.querySelector('#estr-item-edit-status');
+    const saveBtn = modal.querySelector('#estr-item-edit-save');
+    const showSt = (msg, cor = '#94a3b8') => {
+      if (!statusEl) return;
+      statusEl.textContent = msg || '';
+      statusEl.style.color = cor;
+    };
+
+    (async () => {
+      if (!codigo || !chk) return;
+      try {
+        const r = await fetch(`/api/produtos/${encodeURIComponent(codigo)}/visivel-principal`, {
+          credentials: 'include',
+        });
+        const d = await r.json().catch(() => ({}));
+        if (r.ok && d.ok) chk.checked = d.visivel_principal === true;
+      } catch (_) { /* ignora */ }
+    })();
+
+    saveBtn?.addEventListener('click', async () => {
+      if (!codigo) {
+        showSt('Código do produto ausente.', '#f87171');
+        return;
+      }
+      const orig = saveBtn.innerHTML;
+      saveBtn.disabled = true;
+      saveBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Salvando...';
+      showSt('Salvando...', '#facc15');
+      try {
+        const rVis = await fetch(`/api/produtos/${encodeURIComponent(codigo)}/visivel-principal`, {
+          method: 'PUT',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ visivel_principal: !!chk?.checked }),
+        });
+        const dVis = await rVis.json().catch(() => ({}));
+        if (!rVis.ok || dVis.ok === false) {
+          throw new Error(dVis.error || `Erro ao salvar produto primário (${rVis.status})`);
+        }
+
+        if (fonteSql && itemId) {
+          const postoSel = String(modal.querySelector('#estr-item-posto')?.value || '').trim();
+          const rPosto = await fetch(`/api/estrutura/item/${itemId}/posto`, {
+            method: 'PUT',
+            credentials: 'include',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ posto: postoSel }),
+          });
+          const dPosto = await rPosto.json().catch(() => ({}));
+          if (!rPosto.ok || dPosto.success === false) {
+            throw new Error(dPosto.error || `Erro ao salvar posto (${rPosto.status})`);
+          }
+        }
+
+        showSt('Salvo.', '#34d399');
+        if (typeof onSaved === 'function') await onSaved();
+        setTimeout(close, 350);
+      } catch (err) {
+        showSt(err.message || 'Erro ao salvar.', '#f87171');
+        saveBtn.disabled = false;
+        saveBtn.innerHTML = orig;
+      }
+    });
+  }
+
   async function openProducaoEstruturaPorIappId(_iappId, produtoCodigo, opts) {
     const opProducaoId = Number(opts?.opProducaoId) || 0;
     const numeroOp = String(opts?.numeroOp || '').trim();
@@ -80971,8 +81136,9 @@ window.verOperacao = function(osId) {
       </div>
       <footer style="display:flex;justify-content:flex-end;gap:8px;flex-wrap:wrap;">
         <span id="estrutura-sync-status" style="flex:1;font-size:11px;color:#64748b;align-self:center;min-width:120px;"></span>
+        <button type="button" class="modal-secondary" id="estrutura-editar-btn">Editar</button>
         <button type="button" class="modal-primary" id="estrutura-sync-btn">Salvar no banco</button>
-        <button type="button" class="modal-secondary">Fechar</button>
+        <button type="button" class="modal-secondary" id="estrutura-fechar-btn">Fechar</button>
       </footer>
     `;
 
@@ -80980,10 +81146,49 @@ window.verOperacao = function(osId) {
     document.body.appendChild(overlay);
 
     const syncBtn = modal.querySelector('#estrutura-sync-btn');
+    const editarBtn = modal.querySelector('#estrutura-editar-btn');
     const syncStatus = modal.querySelector('#estrutura-sync-status');
     let syncPollTimer = null;
     let fichaInfoLoaded = null;
     let codigoUsadoLoaded = codigo;
+    let modoEdicaoEstrutura = false;
+    let ultimaListaItens = [];
+    let ultimaFonteSql = false;
+
+    const atualizarBotaoEditar = () => {
+      if (!editarBtn) return;
+      if (modoEdicaoEstrutura) {
+        editarBtn.textContent = 'Concluir edição';
+        editarBtn.classList.remove('modal-secondary');
+        editarBtn.classList.add('modal-primary');
+        if (syncStatus && !syncStatus.textContent) {
+          syncStatus.textContent = 'Modo edição: clique em um item para editar.';
+        }
+      } else {
+        editarBtn.textContent = 'Editar';
+        editarBtn.classList.remove('modal-primary');
+        editarBtn.classList.add('modal-secondary');
+      }
+    };
+
+    editarBtn?.addEventListener('click', () => {
+      modoEdicaoEstrutura = !modoEdicaoEstrutura;
+      atualizarBotaoEditar();
+      if (typeof renderEstruturaData === 'function' && ultimaListaItens.length) {
+        renderEstruturaData({
+          response: ultimaListaItens,
+          codigo: codigoUsadoLoaded,
+          fonte: ultimaFonteSql ? 'sql' : 'iapp',
+          ficha: fichaInfoLoaded,
+          sincronizado_em: fichaInfoLoaded?.sincronizado_em || null,
+        });
+      }
+      if (modoEdicaoEstrutura && syncStatus) {
+        syncStatus.textContent = 'Modo edição: clique em um item para editar.';
+      } else if (syncStatus && /Modo edição/i.test(syncStatus.textContent || '')) {
+        syncStatus.textContent = '';
+      }
+    });
 
     const pararPollSync = () => {
       if (syncPollTimer) {
@@ -80997,7 +81202,7 @@ window.verOperacao = function(osId) {
       overlay.remove();
     };
     modal.querySelector('.close-btn')?.addEventListener('click', close);
-    modal.querySelector('footer .modal-secondary')?.addEventListener('click', close);
+    modal.querySelector('#estrutura-fechar-btn')?.addEventListener('click', close);
 
     const pollSyncStatus = (syncId) => {
       pararPollSync();
@@ -81078,6 +81283,7 @@ window.verOperacao = function(osId) {
       const codigoUsado = data.codigo || codigo;
       codigoUsadoLoaded = codigoUsado;
       fichaInfoLoaded = data.ficha || null;
+      ultimaListaItens = itens;
       if (!itens.length) {
         body.innerHTML = `<div style="text-align:center;padding:32px 0;color:#475569;font-size:12px;">Nenhuma peça encontrada na ficha técnica para <b>${escapeHtml(codigoUsado)}</b>.</div>`;
         return;
@@ -81085,6 +81291,7 @@ window.verOperacao = function(osId) {
       const fonte = String(data.fonte || '').toLowerCase() === 'sql' || data.sincronizado_em
         ? 'sql'
         : 'iapp';
+      ultimaFonteSql = fonte === 'sql';
       const fonteLabel = fonte === 'sql' ? 'SQL (cache local)' : 'IAPP';
       const fonteCor = fonte === 'sql' ? '#34d399' : '#60a5fa';
       const syncEm = data.sincronizado_em
@@ -81093,6 +81300,9 @@ window.verOperacao = function(osId) {
       const syncLabel = fonte === 'sql' && syncEm ? ` · atualizado ${escapeHtml(syncEm)}` : '';
       const fichaInfo = data.ficha;
       const isSql = fonte === 'sql';
+      const colCount = isSql ? 6 : 5;
+      const temPostoGravado = isSql && itens.some((i) => String(i?.posto || '').trim());
+      const ordemPostos = producaoListaPostosInspecaoEstrutura();
       const btnFichaHtml = isSql && fichaInfo?.id
         ? `<button type="button" class="modal-secondary" id="estrutura-ver-ficha-btn" style="font-size:10px;padding:4px 10px;margin-left:8px;">Ver dados completos do produto</button>`
         : '';
@@ -81102,12 +81312,14 @@ window.verOperacao = function(osId) {
       const colAcoes = isSql
         ? `<th style="padding:6px 8px;font-size:10px;color:#475569;font-weight:600;text-align:center;min-width:150px;">Ações</th>`
         : '';
-      const linhas = itens.map(i => {
+
+      const renderLinhaItem = (i, idx) => {
         const ident = i.identificacao || '—';
         const desc = i.descricao || '—';
         const qtde = i.qtde ?? '—';
         const vlrUn = _producaoFmtVlrFicha(i.cmc ?? i.preco ?? _producaoPrecoItemFicha(i));
         const vlrTotal = _producaoFmtVlrFicha(i.valor_total ?? _producaoValorTotalItemFicha(i));
+        const postoLabel = String(i.posto || '').trim();
         const btnItem = isSql && i.item_id
           ? `<button type="button" class="estrutura-ver-item-btn modal-secondary" data-item-id="${escapeHtml(String(i.item_id))}" style="font-size:9px;padding:3px 6px;margin:1px;" title="Ver dados completos">Dados</button>`
           : '';
@@ -81121,29 +81333,71 @@ window.verOperacao = function(osId) {
           ? `<td style="padding:6px 4px;text-align:center;white-space:nowrap;">${btnItem}${btnTrocar}${btnExcluir}</td>`
           : '';
         const codDrill = String(ident).trim();
-        const podeDrill = codDrill && codDrill !== '—';
-        return `<tr class="estrutura-item-row${podeDrill ? ' estrutura-item-row--drill' : ''}" data-codigo="${escapeHtml(codDrill)}" style="border-bottom:1px solid rgba(255,255,255,.05);${podeDrill ? 'cursor:pointer;' : ''}" title="${podeDrill ? 'Clique para abrir a estrutura deste item (se houver)' : ''}">
-          <td style="padding:6px 8px;font-size:10px;color:#94a3b8;white-space:nowrap;">${escapeHtml(String(ident))}</td>
+        const podeDrill = !modoEdicaoEstrutura && codDrill && codDrill !== '—';
+        const rowClass = modoEdicaoEstrutura
+          ? 'estrutura-item-row estrutura-item-row--edit'
+          : `estrutura-item-row${podeDrill ? ' estrutura-item-row--drill' : ''}`;
+        const rowTitle = modoEdicaoEstrutura
+          ? 'Clique para editar este item'
+          : (podeDrill ? 'Clique para abrir a estrutura deste item (se houver)' : '');
+        const postoBadge = postoLabel && !temPostoGravado
+          ? `<div style="font-size:9px;color:#a78bfa;margin-top:2px;">${escapeHtml(postoLabel)}</div>`
+          : '';
+        return `<tr class="${rowClass}" data-item-idx="${idx}" data-codigo="${escapeHtml(codDrill)}" style="border-bottom:1px solid rgba(255,255,255,.05);cursor:pointer;" title="${escapeHtml(rowTitle)}">
+          <td style="padding:6px 8px;font-size:10px;color:#94a3b8;white-space:nowrap;">${escapeHtml(String(ident))}${postoBadge}</td>
           <td style="padding:6px 8px;font-size:11px;color:#e2e8f0;">${escapeHtml(String(desc))}</td>
           <td style="padding:6px 8px;font-size:11px;color:#f1f5f9;text-align:right;font-weight:600;">${escapeHtml(String(qtde))}</td>
           <td style="padding:6px 8px;font-size:10px;color:#cbd5e1;text-align:right;white-space:nowrap;">${escapeHtml(vlrUn)}</td>
           <td style="padding:6px 8px;font-size:10px;color:#e2e8f0;text-align:right;font-weight:600;white-space:nowrap;">${escapeHtml(vlrTotal)}</td>
           ${tdAcoes}
         </tr>`;
-      }).join('');
+      };
+
+      let linhas = '';
+      if (temPostoGravado) {
+        const grupos = new Map();
+        for (let idx = 0; idx < itens.length; idx++) {
+          const postoKey = String(itens[idx]?.posto || '').trim() || 'Sem posto';
+          if (!grupos.has(postoKey)) grupos.set(postoKey, []);
+          grupos.get(postoKey).push({ item: itens[idx], idx });
+        }
+        const chaves = [
+          ...ordemPostos.filter((p) => grupos.has(p)),
+          ...[...grupos.keys()].filter((k) => k !== 'Sem posto' && !ordemPostos.includes(k)),
+          ...(grupos.has('Sem posto') ? ['Sem posto'] : []),
+        ];
+        for (const chave of chaves) {
+          const grupo = grupos.get(chave) || [];
+          linhas += `<tr class="estrutura-posto-group">
+            <td colspan="${colCount}" style="padding:10px 8px 6px;font-size:11px;font-weight:700;color:#c4b5fd;background:rgba(139,92,246,.12);border-bottom:1px solid rgba(167,139,250,.25);">
+              <i class="fa-solid fa-industry" style="margin-right:6px;opacity:.8;"></i>${escapeHtml(chave)}
+              <span style="font-weight:500;color:#94a3b8;margin-left:6px;">(${grupo.length})</span>
+            </td>
+          </tr>`;
+          linhas += grupo.map(({ item, idx }) => renderLinhaItem(item, idx)).join('');
+        }
+      } else {
+        linhas = itens.map((i, idx) => renderLinhaItem(i, idx)).join('');
+      }
+
       const fichaLabel = fichaInfo?.identificacao
         ? ` · ficha ${escapeHtml(String(fichaInfo.identificacao))}`
+        : '';
+      const modoLabel = modoEdicaoEstrutura
+        ? ` · <span style="color:#fbbf24;font-weight:600;">modo edição</span>`
         : '';
       body.innerHTML = `
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px;">
           <span style="font-size:11px;color:#94a3b8;">
             ${itens.length} peça(s)
-            · <span style="color:${fonteCor};font-weight:600;">${escapeHtml(fonteLabel)}</span>${syncLabel}${fichaLabel}
+            · <span style="color:${fonteCor};font-weight:600;">${escapeHtml(fonteLabel)}</span>${syncLabel}${fichaLabel}${modoLabel}
             · produto <b style="color:#e2e8f0;">${escapeHtml(codigoUsado)}</b>
             ${btnFichaHtml}${btnAddHtml}
           </span>
         </div>
-        <p id="estrutura-drill-hint" style="margin:0 0 8px;font-size:11px;color:#94a3b8;min-height:16px;"></p>
+        <p id="estrutura-drill-hint" style="margin:0 0 8px;font-size:11px;color:#94a3b8;min-height:16px;">${
+          modoEdicaoEstrutura ? 'Clique em um item para editar produto primário e posto.' : ''
+        }</p>
         <table style="width:100%;border-collapse:collapse;">
           <thead>
             <tr style="border-bottom:1px solid rgba(255,255,255,.1);">
@@ -81196,39 +81450,54 @@ window.verOperacao = function(osId) {
       });
 
       const drillHint = body.querySelector('#estrutura-drill-hint');
-      body.querySelectorAll('.estrutura-item-row--drill').forEach((tr) => {
-        tr.addEventListener('click', async (ev) => {
-          if (ev.target.closest('button')) return;
-          const codItem = String(tr.dataset.codigo || '').trim();
-          if (!codItem || codItem === '—') return;
-          if (drillHint) {
-            drillHint.style.color = '#facc15';
-            drillHint.textContent = `Consultando estrutura de ${codItem}...`;
-          }
-          try {
-            const subParams = new URLSearchParams({ codigo: codItem });
-            const subResp = await fetch(`/api/producao/estrutura-ficha?${subParams.toString()}`);
-            const subData = await subResp.json();
-            if (!subResp.ok) throw new Error(subData.error || `Erro ${subResp.status}`);
-            const subItens = subData.response || [];
-            if (!subItens.length) {
-              if (drillHint) {
-                drillHint.style.color = '#94a3b8';
-                drillHint.textContent = `${codItem} não possui estrutura cadastrada.`;
-                setTimeout(() => { if (drillHint) drillHint.textContent = ''; }, 2800);
-              }
-              return;
-            }
-            if (drillHint) drillHint.textContent = '';
-            openProducaoEstruturaPorIappId(null, codItem, {});
-          } catch (err) {
-            if (drillHint) {
-              drillHint.style.color = '#f87171';
-              drillHint.textContent = err.message || 'Erro ao abrir estrutura do item.';
-            }
-          }
+      if (modoEdicaoEstrutura) {
+        body.querySelectorAll('.estrutura-item-row--edit').forEach((tr) => {
+          tr.addEventListener('click', (ev) => {
+            if (ev.target.closest('button')) return;
+            const idx = Number(tr.dataset.itemIdx);
+            const item = ultimaListaItens[idx];
+            if (!item) return;
+            openProducaoEstruturaItemEditarModal(item, {
+              fonteSql: isSql,
+              onSaved: recarregarLista,
+            });
+          });
         });
-      });
+      } else {
+        body.querySelectorAll('.estrutura-item-row--drill').forEach((tr) => {
+          tr.addEventListener('click', async (ev) => {
+            if (ev.target.closest('button')) return;
+            const codItem = String(tr.dataset.codigo || '').trim();
+            if (!codItem || codItem === '—') return;
+            if (drillHint) {
+              drillHint.style.color = '#facc15';
+              drillHint.textContent = `Consultando estrutura de ${codItem}...`;
+            }
+            try {
+              const subParams = new URLSearchParams({ codigo: codItem });
+              const subResp = await fetch(`/api/producao/estrutura-ficha?${subParams.toString()}`);
+              const subData = await subResp.json();
+              if (!subResp.ok) throw new Error(subData.error || `Erro ${subResp.status}`);
+              const subItens = subData.response || [];
+              if (!subItens.length) {
+                if (drillHint) {
+                  drillHint.style.color = '#94a3b8';
+                  drillHint.textContent = `${codItem} não possui estrutura cadastrada.`;
+                  setTimeout(() => { if (drillHint) drillHint.textContent = ''; }, 2800);
+                }
+                return;
+              }
+              if (drillHint) drillHint.textContent = '';
+              openProducaoEstruturaPorIappId(null, codItem, {});
+            } catch (err) {
+              if (drillHint) {
+                drillHint.style.color = '#f87171';
+                drillHint.textContent = err.message || 'Erro ao abrir estrutura do item.';
+              }
+            }
+          });
+        });
+      }
     };
 
     try {

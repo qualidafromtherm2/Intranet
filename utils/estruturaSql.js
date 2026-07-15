@@ -82,6 +82,11 @@ async function ensureSchemaEstruturaImpl() {
   `);
 
   await dbQuery(`
+    ALTER TABLE estrutura.ficha_item
+      ADD COLUMN IF NOT EXISTS posto TEXT
+  `);
+
+  await dbQuery(`
     CREATE INDEX IF NOT EXISTS idx_estrutura_ficha_item_ficha
       ON estrutura.ficha_item (ficha_id)
   `);
@@ -189,6 +194,7 @@ function mapItensSqlParaResposta(rows) {
     modelo: '—',
     qtde: row.qtde ?? 0,
     etapa: row.operacao ?? '—',
+    posto: row.posto ? String(row.posto).trim() : null,
     unidade_medida: row.unidade_medida || null,
     produto_tipo: row.produto_tipo || null,
     ncm: row.ncm || null,
@@ -457,6 +463,36 @@ async function obterItemCompletoPorId(itemId) {
       operacao: row.operacao,
       produto_iapp_id: row.produto_iapp_id,
     },
+  };
+}
+
+async function atualizarPostoItemPorId(itemId, posto) {
+  await ensureSchemaEstrutura();
+  const id = Number(itemId) || 0;
+  if (!id) throw new Error('ID do item inválido.');
+
+  const postoVal = String(posto || '').trim() || null;
+  const { rows } = await dbQuery(
+    `UPDATE estrutura.ficha_item
+        SET posto = $2
+      WHERE id = $1
+      RETURNING id, ficha_id, posto, produto_iapp_id`,
+    [id, postoVal]
+  );
+  if (!rows[0]) throw Object.assign(new Error('Item não encontrado no cache SQL.'), { status: 404 });
+
+  if (rows[0].ficha_id) {
+    await dbQuery(
+      `UPDATE estrutura.ficha SET sincronizado_em = NOW() WHERE id = $1`,
+      [rows[0].ficha_id]
+    );
+  }
+
+  return {
+    item_id: rows[0].id,
+    ficha_id: rows[0].ficha_id,
+    posto: rows[0].posto,
+    produto_iapp_id: rows[0].produto_iapp_id,
   };
 }
 
@@ -791,6 +827,7 @@ module.exports = {
   atualizarFichaCompletaPorId,
   obterItemCompletoPorId,
   atualizarItemCompletoPorId,
+  atualizarPostoItemPorId,
   trocarProdutoItemPorOmie,
   adicionarItemFichaPorOmie,
   excluirItemFicha,

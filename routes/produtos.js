@@ -276,16 +276,65 @@ router.get('/ultimas-compras', async (req, res) => {
   }
 });
 
+function parseVisivelPrincipalFlag(raw) {
+  if (raw === true || raw === 1 || raw === '1') return true;
+  if (raw === false || raw === 0 || raw === '0') return false;
+  const s = String(raw ?? '').trim().toUpperCase();
+  if (s === 'S' || s === 'SIM' || s === 'TRUE') return true;
+  if (s === 'N' || s === 'NAO' || s === 'NÃO' || s === 'FALSE') return false;
+  return null;
+}
+
+async function atualizarVisivelPrincipalProdutoOmie(codigo, valor) {
+  const client = await dbGetClient();
+  try {
+    await client.query('BEGIN');
+    await client.query("SELECT set_config('app.produtos_omie_write_source', 'omie_manual', true)");
+    const result = await client.query(
+      `UPDATE public.produtos_omie
+          SET visivel_principal = $2
+        WHERE ${sqlWhereProdutosOmieIdentidade('', '$1')}
+        RETURNING codigo, codigo_produto, visivel_principal`,
+      [codigo, valor === true]
+    );
+    await client.query('COMMIT');
+    return result;
+  } catch (e) {
+    try { await client.query('ROLLBACK'); } catch (_) {}
+    throw e;
+  } finally {
+    client.release();
+  }
+}
+
 // ============================================================================
 // POST /api/produtos/locais
-// Atualiza campos que existem só no Postgres (não enviados à Omie).
-// Espera body: { codigo, visivel_principal, tipo_compra }
+// Atualiza campos locais no Postgres (não sobem à Omie).
+// Espera body: { codigo, visivel_principal }
 // ============================================================================
 router.post('/locais', async (req, res) => {
   try {
-    return res.status(403).json({
-      ok: false,
-      error: 'Atualização local desabilitada: public.produtos_omie é mantida exclusivamente pelo webhook da Omie.'
+    const codigo = String(req.body?.codigo || '').trim();
+    if (!codigo) return res.status(400).json({ ok: false, error: 'Código obrigatório.' });
+
+    if (!Object.prototype.hasOwnProperty.call(req.body || {}, 'visivel_principal')) {
+      return res.status(400).json({ ok: false, error: 'Informe visivel_principal.' });
+    }
+
+    const flag = parseVisivelPrincipalFlag(req.body.visivel_principal);
+    if (flag === null) {
+      return res.status(400).json({ ok: false, error: 'visivel_principal inválido (use S/N ou true/false).' });
+    }
+
+    const result = await atualizarVisivelPrincipalProdutoOmie(codigo, flag);
+    if (!result.rows.length) {
+      return res.status(404).json({ ok: false, error: 'Produto não encontrado.' });
+    }
+
+    res.json({
+      ok: true,
+      codigo: result.rows[0].codigo,
+      visivel_principal: result.rows[0].visivel_principal === true,
     });
   } catch (err) {
     console.error('[produtos/locais] erro →', err);
@@ -1046,6 +1095,58 @@ router.put('/:codigo/produto-customizado', express.json(), async (req, res) => {
     });
   } catch (err) {
     console.error('[PUT /api/produtos/:codigo/produto-customizado]', err);
+    res.status(500).json({ ok: false, error: String(err.message || err) });
+  }
+});
+
+router.get('/:codigo/visivel-principal', async (req, res) => {
+  try {
+    const codigo = String(req.params.codigo || '').trim();
+    if (!codigo) return res.status(400).json({ ok: false, error: 'Código obrigatório' });
+
+    const { rows } = await dbQuery(
+      `SELECT codigo, COALESCE(visivel_principal, FALSE) AS visivel_principal
+         FROM public.produtos_omie
+        WHERE ${sqlWhereProdutosOmieIdentidade('', '$1')}
+        ORDER BY ${sqlOrderPreferCodigoProduto('', '$1')}
+        LIMIT 1`,
+      [codigo]
+    );
+    if (!rows.length) return res.status(404).json({ ok: false, error: 'Produto não encontrado' });
+
+    res.json({
+      ok: true,
+      codigo: rows[0].codigo,
+      visivel_principal: rows[0].visivel_principal === true,
+    });
+  } catch (err) {
+    console.error('[GET /api/produtos/:codigo/visivel-principal]', err);
+    res.status(500).json({ ok: false, error: String(err.message || err) });
+  }
+});
+
+router.put('/:codigo/visivel-principal', express.json(), async (req, res) => {
+  try {
+    const codigo = String(req.params.codigo || '').trim();
+    if (!codigo) return res.status(400).json({ ok: false, error: 'Código obrigatório' });
+
+    const flag = parseVisivelPrincipalFlag(req.body?.visivel_principal);
+    if (flag === null) {
+      return res.status(400).json({ ok: false, error: 'visivel_principal inválido (use S/N ou true/false).' });
+    }
+
+    const result = await atualizarVisivelPrincipalProdutoOmie(codigo, flag);
+    if (!result.rows.length) {
+      return res.status(404).json({ ok: false, error: 'Produto não encontrado' });
+    }
+
+    res.json({
+      ok: true,
+      codigo: result.rows[0].codigo,
+      visivel_principal: result.rows[0].visivel_principal === true,
+    });
+  } catch (err) {
+    console.error('[PUT /api/produtos/:codigo/visivel-principal]', err);
     res.status(500).json({ ok: false, error: String(err.message || err) });
   }
 });
