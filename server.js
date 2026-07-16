@@ -22430,7 +22430,19 @@ app.get('/api/produtos/detalhes/:codigo', async (req, res) => {
       params.push(codigo);
       sql += ` WHERE codigo = $${params.length} RETURNING *`;
 
-      const updateResult = await pool.query(sql, params);
+      const client = await pool.connect();
+      let updateResult;
+      try {
+        await client.query('BEGIN');
+        await client.query("SELECT set_config('app.produtos_omie_write_source', 'omie_manual', true)");
+        updateResult = await client.query(sql, params);
+        await client.query('COMMIT');
+      } catch (err) {
+        try { await client.query('ROLLBACK'); } catch (_) {}
+        throw err;
+      } finally {
+        client.release();
+      }
       
       // Auditoria
       try {

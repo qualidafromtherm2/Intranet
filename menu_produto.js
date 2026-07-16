@@ -51754,7 +51754,7 @@ function renderizarCatalogoOmie(produtos, options = {}) {
       </div>`;
     
     return `
-      <div style="
+      <div class="produto-catalogo-card" data-product-code="${escapeHtml(produto.codigo)}" style="
         background:white;
         border:1px solid #e5e7eb;
         border-radius:8px;
@@ -52326,9 +52326,11 @@ window.renderizarCatalogoOmie = renderizarCatalogoOmie;
     const leadRaw = document.getElementById('modalEditarRapidoLeadTime').value.trim().replace(',', '.');
     const minimo = minimoRaw === '' ? 0 : Number(minimoRaw);
     const leadTime = leadRaw === '' ? 0 : Number(leadRaw);
+    const codigoProdutoOmie = Number(_ctx.codigo_produto);
     if (!descricao) return setEditarRapidoStatus('O nome do produto é obrigatório.', true);
     if (!Number.isFinite(minimo) || minimo < 0) return setEditarRapidoStatus('Informe um estoque mínimo válido.', true);
     if (!Number.isFinite(leadTime) || leadTime < 0) return setEditarRapidoStatus('Informe um lead time válido.', true);
+    if (!Number.isFinite(codigoProdutoOmie) || codigoProdutoOmie <= 0) return setEditarRapidoStatus('Produto sem ID numérico da Omie.', true);
 
     const btn = document.getElementById('modalEditarRapidoSalvar');
     btn.disabled = true;
@@ -52340,13 +52342,13 @@ window.renderizarCatalogoOmie = renderizarCatalogoOmie;
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           credentials: 'include',
-          body: JSON.stringify({ produto_servico_cadastro: { codigo: _ctx.codigo, descricao, lead_time: leadTime } })
+          body: JSON.stringify({ produto_servico_cadastro: { codigo_produto: codigoProdutoOmie, codigo: _ctx.codigo, descricao, lead_time: leadTime } })
         }),
         fetch('/api/omie/estoque/ajuste/', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           credentials: 'include',
-          body: JSON.stringify({ call: 'AlterarEstoqueMinimo', param: [{ cod_int: _ctx.codigo, quan_min: minimo }] })
+          body: JSON.stringify({ call: 'AlterarEstoqueMinimo', param: [{ cod_prod: codigoProdutoOmie, quan_min: minimo }] })
         })
       ]);
       const [produtoData, minimoData] = await Promise.all([produtoResp.json(), minimoResp.json()]);
@@ -52355,17 +52357,26 @@ window.renderizarCatalogoOmie = renderizarCatalogoOmie;
       validarRespostaOmie(produtoData);
       validarRespostaOmie(minimoData);
 
+      const localResp = await fetch('/api/produtos/' + encodeURIComponent(_ctx.codigo), {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ descricao, lead_time: leadTime, estoque_minimo: minimo })
+      });
+      const localData = await localResp.json();
+      if (!localResp.ok || !localData.success) throw new Error(localData.error || 'Alterado na Omie, mas falhou ao atualizar o banco local.');
+
       _ctx.descricao = descricao;
       document.getElementById('modalAcoesDescricao').textContent = descricao;
-      const card = document.querySelector(`.produto-catalogo-card[data-product-code="${CSS.escape(_ctx.codigo)}"]`);
-      const descricaoCard = card?.querySelector('.produto-card-descricao');
-      if (descricaoCard) descricaoCard.textContent = descricao;
+      document.querySelectorAll(`.produto-catalogo-card[data-product-code="${CSS.escape(_ctx.codigo)}"] .produto-card-descricao`)
+        .forEach(el => { el.textContent = descricao; });
       const itemCache = (window.produtosCatalogoOmie || []).find(p => p.codigo === _ctx.codigo);
       if (itemCache) {
         itemCache.descricao = descricao;
         itemCache.estoque_minimo = minimo;
         itemCache.lead_time = leadTime;
       }
+      await carregarEstoqueCards();
       setEditarRapidoStatus('Alterações salvas com sucesso.');
     } catch (err) {
       setEditarRapidoStatus(err.message || 'Erro ao salvar alterações.', true);
