@@ -16,7 +16,7 @@ import {
   getFiltered,
   reapplyFilters,
   populateFilters
-} from './filtro_produto.js?v=20260716-minimo';
+} from './filtro_produto.js?v=20260716-negativo';
 
 /* --------------------- SPINNER helpers -------------------------------- */
 let spinnerVisible  = false;

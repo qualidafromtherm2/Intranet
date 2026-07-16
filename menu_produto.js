@@ -5086,7 +5086,7 @@ modal?.addEventListener('click', (e) => { if (e.target === modal) closeColabModa
 
 let ultimoCodigo = null;      // <-- NOVO
 
-import { initListarProdutosUI } from './requisicoes_omie/ListarProdutos.js?v=20260716-minimo';
+import { initListarProdutosUI } from './requisicoes_omie/ListarProdutos.js?v=20260716-negativo';
 import { initDadosColaboradoresUI } from './requisicoes_omie/dados_colaboradores.js';
 import { initRhConfiguracaoCargosUI } from './requisicoes_omie/configuracao_cargos.js';
 import { initRhColaboradoresUI } from './requisicoes_omie/rh_colaboradores.js';

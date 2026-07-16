@@ -361,17 +361,25 @@ router.get('/lista', async (req, res) => {
     const offset   = (page - 1) * limit;
 
     const sql = `
-      WITH minimos AS (
-        SELECT codigo, MAX(estoque_minimo) AS estoque_minimo
+      WITH estoque_resumo AS (
+        SELECT
+          codigo,
+          MAX(estoque_minimo) FILTER (
+            WHERE local_codigo::text = '10717096386'
+               OR local_nome ILIKE '%PORTA PALLET%'
+          ) AS estoque_minimo,
+          BOOL_OR(COALESCE(saldo, 0) < 0) AS estoque_negativo
         FROM logistica.estoque_atual
-        WHERE local_codigo::text = '10717096386'
-           OR local_nome ILIKE '%PORTA PALLET%'
         GROUP BY codigo
       ), base AS (
-        SELECT v.*, p.descricao_familia, COALESCE(em.estoque_minimo, 0) AS estoque_minimo_local
+        SELECT
+          v.*,
+          p.descricao_familia,
+          COALESCE(er.estoque_minimo, 0) AS estoque_minimo_local,
+          COALESCE(er.estoque_negativo, false) AS estoque_negativo_local
         FROM vw_lista_produtos v
         LEFT JOIN public.produtos_omie p ON p.codigo_produto = v.codigo_produto
-        LEFT JOIN minimos em ON em.codigo = v.codigo
+        LEFT JOIN estoque_resumo er ON er.codigo = v.codigo
         WHERE
           ($1::text IS NULL
             OR v.descricao ILIKE '%' || $1 || '%'
@@ -396,6 +404,7 @@ router.get('/lista', async (req, res) => {
           valor_unitario,
           quantidade_estoque,
           estoque_minimo_local AS estoque_minimo,
+          estoque_negativo_local AS estoque_negativo,
           inativo,
           bloqueado,
           marca,
