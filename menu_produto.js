@@ -1013,7 +1013,7 @@ function _solRenderItemRow(item, mode, enderecoMap) {
 // Atualiza os contadores das guias "Tela de separação" e "Kanban solicitações"
 window._updateTabCounters = async function() {
   try {
-    // Contador para "Tela de separação": Solicitado + Em Separação + Separado
+    // O badge da aba representa somente a quantidade de SEPs em Solicitado.
     const solicitacoesCountEl = document.getElementById('solicitacoesCount');
     if (solicitacoesCountEl) {
       try {
@@ -1021,7 +1021,7 @@ window._updateTabCounters = async function() {
         if (respSol.ok) {
           const dataSol = await respSol.json();
           const colunas = dataSol.colunas || {};
-          solicitacoesCountEl.textContent = _solSomarItensKanbanSep(colunas);
+          solicitacoesCountEl.textContent = _solContarSepsSolicitadas(colunas);
         }
       } catch (err) {
         console.warn('[UPDATE-COUNTERS] Erro ao atualizar contador solicitações:', err);
@@ -1048,12 +1048,8 @@ window._updateTabCounters = async function() {
   }
 };
 
-function _solSomarItensKanbanSep(colunas) {
-  const cols = ['Solicitado', 'Stund-by', 'Em Separação', 'Separado', 'Aguardando retirada'];
-  return cols.reduce((acc, key) => {
-    const cards = colunas?.[key] || [];
-    return acc + cards.reduce((s, sep) => s + (parseInt(sep.total_itens, 10) || 0), 0);
-  }, 0);
+function _solContarSepsSolicitadas(colunas) {
+  return Array.isArray(colunas?.Solicitado) ? colunas.Solicitado.length : 0;
 }
 
 function _solSolicIdsParaIniciarSep(itens) {
@@ -1238,7 +1234,7 @@ window._loadSolicitacoesTab = async function() {
       board.appendChild(colEl);
     });
 
-    if (countEl) countEl.textContent = _solSomarItensKanbanSep(colunas);
+    if (countEl) countEl.textContent = _solContarSepsSolicitadas(colunas);
     if (statusEl) {
       const agora = new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
       statusEl.textContent = `Atualizado às ${agora} · ${totalCards} SEP(s)`;
@@ -3116,8 +3112,7 @@ async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) 
           const mainCard = document.querySelector(`[data-user-card="${CSS.escape(nomeUser)}"]`);
           mainCard?.remove();
           if (window._solicitacoesGruposData) delete window._solicitacoesGruposData[nomeUser];
-          const countEl = document.getElementById('solicitacoesCount');
-          if (countEl) countEl.textContent = String(Math.max(0, parseInt(countEl.textContent || '0') - ids.length));
+          await window._updateTabCounters?.();
         } else {
           alert('Erro: ' + res.error);
           _solBtnRestore(conflBtn, '<i class="fa-solid fa-boxes-stacked" style="margin-right:3px;"></i>Iniciar separação');
