@@ -20901,16 +20901,14 @@ app.get('/api/logistica/estoque/batch', async (req, res) => {
       });
 
       if (!minimos[row.codigo]) minimos[row.codigo] = { min: 0, saldoAlmox: 0, abaixo: false };
-      const min = parseFloat(row.estoque_minimo) || 0;
-      // Mínimo do card = maior estoque_minimo entre os armazéns
-      if (min > minimos[row.codigo].min) minimos[row.codigo].min = min;
-      // Compara só com o físico do Porta Pallet / ALMOX (não soma armazéns)
-      if (String(row.local_codigo) === '10717096386') {
-        minimos[row.codigo].saldoAlmox = parseFloat(row.fisico) || 0;
+      // Usa exatamente o saldo exibido no card do Porta Pallet / ALMOX.
+      if (String(row.local_codigo) === '10717096386' || /PORTA PALLET/i.test(String(row.local_nome || ''))) {
+        minimos[row.codigo].min = parseFloat(row.estoque_minimo) || 0;
+        minimos[row.codigo].saldoAlmox = parseFloat(row.saldo) || 0;
       }
     }
 
-    // Abaixo do mínimo = saldo ALMOX < maior mínimo cadastrado
+    // Abaixo do mínimo = saldo ALMOX < mínimo configurado no próprio ALMOX.
     for (const cod of Object.keys(minimos)) {
       const info = minimos[cod];
       if (info.min > 0) {

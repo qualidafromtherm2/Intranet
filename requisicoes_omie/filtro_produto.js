@@ -361,7 +361,10 @@ function applyFilters() {
 
   // Apenas produtos sem estoque mínimo definido
   if (activeSemEstoqueMin) {
-    filtered = filtered.filter(i => !i.estoque_minimo || Number(i.estoque_minimo) === 0);
+    filtered = filtered.filter(i => {
+      const minimo = Number(String(i.estoque_minimo ?? '').trim().replace(',', '.'));
+      return !Number.isFinite(minimo) || minimo <= 0;
+    });
   }
 
   // Ocultar produtos com prefixo OBSOLETO

@@ -361,10 +361,17 @@ router.get('/lista', async (req, res) => {
     const offset   = (page - 1) * limit;
 
     const sql = `
-      WITH base AS (
-        SELECT v.*, p.descricao_familia
+      WITH minimos AS (
+        SELECT codigo, MAX(estoque_minimo) AS estoque_minimo
+        FROM logistica.estoque_atual
+        WHERE local_codigo::text = '10717096386'
+           OR local_nome ILIKE '%PORTA PALLET%'
+        GROUP BY codigo
+      ), base AS (
+        SELECT v.*, p.descricao_familia, COALESCE(em.estoque_minimo, 0) AS estoque_minimo_local
         FROM vw_lista_produtos v
         LEFT JOIN public.produtos_omie p ON p.codigo_produto = v.codigo_produto
+        LEFT JOIN minimos em ON em.codigo = v.codigo
         WHERE
           ($1::text IS NULL
             OR v.descricao ILIKE '%' || $1 || '%'
@@ -388,6 +395,7 @@ router.get('/lista', async (req, res) => {
           ncm,
           valor_unitario,
           quantidade_estoque,
+          estoque_minimo_local AS estoque_minimo,
           inativo,
           bloqueado,
           marca,
