@@ -22367,6 +22367,7 @@ app.get('/api/produtos/detalhes/:codigo', async (req, res) => {
           descricao,
           lead_time,
           estoque_minimo,
+          COALESCE((to_jsonb(produtos_omie)->>'item_limitado')::boolean, FALSE) AS item_limitado,
           COALESCE(
             to_jsonb(produtos_omie)->>'primeira_imagem',
             to_jsonb(produtos_omie)->>'url_imagem',

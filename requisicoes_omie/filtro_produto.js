@@ -369,7 +369,8 @@ function applyFilters() {
   if (activeSemEstoqueMin) {
     filtered = filtered.filter(i => {
       const minimo = Number(String(i.estoque_minimo ?? '').trim().replace(',', '.'));
-      return !Number.isFinite(minimo) || minimo <= 0;
+      const limitado = i.item_limitado === true || i.item_limitado === 'true';
+      return (!Number.isFinite(minimo) || minimo <= 0) && !limitado;
     });
   }
 

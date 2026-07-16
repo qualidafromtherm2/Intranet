@@ -5081,7 +5081,7 @@ modal?.addEventListener('click', (e) => { if (e.target === modal) closeColabModa
 
 let ultimoCodigo = null;      // <-- NOVO
 
-import { initListarProdutosUI } from './requisicoes_omie/ListarProdutos.js?v=20260716-negativo';
+import { initListarProdutosUI } from './requisicoes_omie/ListarProdutos.js?v=20260716-limitado';
 import { initDadosColaboradoresUI } from './requisicoes_omie/dados_colaboradores.js';
 import { initRhConfiguracaoCargosUI } from './requisicoes_omie/configuracao_cargos.js';
 import { initRhColaboradoresUI } from './requisicoes_omie/rh_colaboradores.js';
@@ -52164,7 +52164,9 @@ window.renderizarCatalogoOmie = renderizarCatalogoOmie;
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
             <button id="modalEditarRapidoObsoleto" type="button" style="min-height:44px;border:1px solid #fca5a5;border-radius:8px;background:#fef2f2;color:#b91c1c;font-weight:700;cursor:pointer;">Tornar obsoleto</button>
             <button id="modalEditarRapidoEngenharia" type="button" style="min-height:44px;border:1px solid #fcd34d;border-radius:8px;background:#fffbeb;color:#92400e;font-weight:700;cursor:pointer;">Item engenharia</button>
+            <button id="modalEditarRapidoLimitado" type="button" style="grid-column:1 / -1;min-height:44px;border:1px solid #94a3b8;border-radius:8px;background:#f8fafc;color:#334155;font-weight:700;cursor:pointer;"><i class="fa-solid fa-eye-slash" style="margin-right:7px;"></i>Tornar item limitado</button>
           </div>
+          <div style="margin-top:-6px;font-size:11px;line-height:1.35;color:#64748b;">Itens limitados mantêm mínimo 0, mas não aparecem no filtro "Sem estoque mínimo".</div>
           <div id="modalEditarRapidoStatus" role="status" style="display:none;font-size:12px;font-weight:600;"></div>
           <button id="modalEditarRapidoSalvar" type="button" style="min-height:48px;border:none;border-radius:9px;background:#16a34a;color:#fff;font-size:14px;font-weight:800;cursor:pointer;"><i class="fa-solid fa-check" style="margin-right:7px;"></i>Salvar alterações</button>
         </div>
@@ -52247,6 +52249,8 @@ window.renderizarCatalogoOmie = renderizarCatalogoOmie;
   let _qtyCtx = null;
   let _fotoRapidaFile = null;
   let _fotoRapidaPreviewUrl = null;
+  let _itemLimitadoRapido = false;
+  let _itemLimitadoListaDirty = false;
 
   function getSeparacaoTileHtml() {
     return `
@@ -52270,6 +52274,10 @@ window.renderizarCatalogoOmie = renderizarCatalogoOmie;
     resetBotaoSeparacao();
     _returnFocus?.focus?.({ preventScroll: true });
     _returnFocus = null;
+    if (_itemLimitadoListaDirty) {
+      _itemLimitadoListaDirty = false;
+      void window.__forceListaRefresh?.();
+    }
   }
 
   function mostrarBotoes() {
@@ -52293,6 +52301,17 @@ window.renderizarCatalogoOmie = renderizarCatalogoOmie;
     status.style.color = erro ? '#dc2626' : '#15803d';
   }
 
+  function atualizarBotaoItemLimitado() {
+    const btn = document.getElementById('modalEditarRapidoLimitado');
+    if (!btn) return;
+    btn.innerHTML = _itemLimitadoRapido
+      ? '<i class="fa-solid fa-eye" style="margin-right:7px;"></i>Remover item limitado'
+      : '<i class="fa-solid fa-eye-slash" style="margin-right:7px;"></i>Tornar item limitado';
+    btn.style.borderColor = _itemLimitadoRapido ? '#38bdf8' : '#94a3b8';
+    btn.style.background = _itemLimitadoRapido ? '#e0f2fe' : '#f8fafc';
+    btn.style.color = _itemLimitadoRapido ? '#075985' : '#334155';
+  }
+
   async function mostrarEditarRapido() {
     document.getElementById('modalAcoesBotoes').style.display = 'none';
     document.getElementById('modalAcoesManuais').style.display = 'none';
@@ -52303,6 +52322,8 @@ window.renderizarCatalogoOmie = renderizarCatalogoOmie;
     form.style.display = 'none';
     setEditarRapidoStatus('');
     prepararFotoRapida(null);
+    _itemLimitadoRapido = false;
+    atualizarBotaoItemLimitado();
     try {
       const resp = await fetch('/api/produtos/' + encodeURIComponent(_ctx.codigo), { credentials: 'include' });
       const data = await resp.json();
@@ -52310,6 +52331,8 @@ window.renderizarCatalogoOmie = renderizarCatalogoOmie;
       document.getElementById('modalEditarRapidoDescricao').value = data.descricao || _ctx.descricao || '';
       document.getElementById('modalEditarRapidoMinimo').value = data.estoque_minimo ?? '';
       document.getElementById('modalEditarRapidoLeadTime').value = data.lead_time ?? '';
+      _itemLimitadoRapido = data.item_limitado === true || data.item_limitado === 'true';
+      atualizarBotaoItemLimitado();
     } catch (err) {
       setEditarRapidoStatus(err.message || 'Erro ao carregar produto.', true);
     } finally {
@@ -52410,6 +52433,41 @@ window.renderizarCatalogoOmie = renderizarCatalogoOmie;
     if (!confirm(`Tornar este item ${rotulo}?`)) return;
     input.value = prefixoCompleto + atual.replace(/^(OBSOLETO|ENGENHARIA)\s*-\s*/i, '');
     await salvarEdicaoRapida();
+  }
+
+  async function alternarItemLimitado() {
+    const novoValor = !_itemLimitadoRapido;
+    const pergunta = novoValor
+      ? 'Tornar este item limitado? Ele deixará de aparecer no filtro "Sem estoque mínimo", mantendo o mínimo em 0.'
+      : 'Remover a marcação de item limitado? Se o mínimo estiver em 0, ele voltará ao filtro "Sem estoque mínimo".';
+    if (!confirm(pergunta)) return;
+
+    const btn = document.getElementById('modalEditarRapidoLimitado');
+    btn.disabled = true;
+    setEditarRapidoStatus('Salvando marcação...');
+    try {
+      const resp = await fetch(`/api/produtos/${encodeURIComponent(_ctx.codigo)}/item-limitado`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ item_limitado: novoValor })
+      });
+      const data = await resp.json();
+      if (!resp.ok || !data.ok) throw new Error(data.error || 'Falha ao atualizar item limitado.');
+
+      _itemLimitadoRapido = data.item_limitado === true;
+      [window.__omieFullCache, window.produtosCatalogoOmie].forEach(lista => {
+        const item = Array.isArray(lista) ? lista.find(p => p.codigo === _ctx.codigo) : null;
+        if (item) item.item_limitado = _itemLimitadoRapido;
+      });
+      _itemLimitadoListaDirty = true;
+      atualizarBotaoItemLimitado();
+      setEditarRapidoStatus(_itemLimitadoRapido ? 'Item marcado como limitado.' : 'Marcação de item limitado removida.');
+    } catch (err) {
+      setEditarRapidoStatus(err.message || 'Erro ao atualizar item limitado.', true);
+    } finally {
+      btn.disabled = false;
+    }
   }
 
   function prepararFotoRapida(file) {
@@ -52786,6 +52844,7 @@ window.renderizarCatalogoOmie = renderizarCatalogoOmie;
   });
   document.getElementById('modalEditarRapidoObsoleto').addEventListener('click', () => aplicarMarcadorRapido('OBSOLETO', 'obsoleto'));
   document.getElementById('modalEditarRapidoEngenharia').addEventListener('click', () => aplicarMarcadorRapido('ENGENHARIA', 'de engenharia'));
+  document.getElementById('modalEditarRapidoLimitado').addEventListener('click', alternarItemLimitado);
   document.getElementById('modalManualBtnEnviar').addEventListener('click', enviarManual);
   document.getElementById('modalAcoesQtdFechar').addEventListener('click', fecharQuantidade);
   document.getElementById('modalAcoesQtdCancelar').addEventListener('click', fecharQuantidade);
