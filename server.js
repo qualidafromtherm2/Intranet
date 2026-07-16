@@ -20,6 +20,8 @@ const etqRecImpressoBackfill = require('./utils/etqRecImpressoBackfill');
 const {
   MSG_FORMATO: ETQ_ENDERECO_MSG_FORMATO,
   assertEnderecoEtq,
+  resolverEnderecoEtq,
+  enderecoEtqParaMovimentacao,
   atribuirFifoCores,
 } = require('./utils/etqEndereco');
 const OMIE_WEBHOOK_TOKEN = process.env.OMIE_WEBHOOK_TOKEN || null; // se NULL, não exige token
@@ -12575,19 +12577,22 @@ app.post('/api/etiquetas/rec-impresso/registrar-movimentacao', express.json(), a
     if (!codigoTexto) return res.status(400).json({ error: 'codigo é obrigatório.' });
     if (!Number.isFinite(qtd) || qtd <= 0) return res.status(400).json({ error: 'Informe uma quantidade válida (> 0).' });
 
-    try {
-      if (enderecoOrigem) enderecoOrigem = assertEnderecoEtq(enderecoOrigem);
-      if (enderecoDestino) enderecoDestino = assertEnderecoEtq(enderecoDestino);
-      enderecos = enderecos.map((e) => assertEnderecoEtq(e));
-    } catch (e) {
-      return res.status(400).json({ error: e?.message || ETQ_ENDERECO_MSG_FORMATO });
-    }
-
     const codigoOmie = await _resolveProdutoOmieCodigoProduto(client, codigoTexto)
       || String(req.body?.codigo_produto_omie || req.body?.codigo_produto || '').trim()
       || null;
     if (!codigoOmie) {
       return res.status(400).json({ error: `Produto "${codigoTexto}" não encontrado em produtos_omie.` });
+    }
+
+    const enderecosConhecidos = await _etqEnderecosConhecidosProduto(client, codigoOmie, codigoTexto);
+    const resolverOpts = { conhecidos: enderecosConhecidos };
+
+    try {
+      if (enderecoOrigem) enderecoOrigem = resolverEnderecoEtq(enderecoOrigem, resolverOpts);
+      if (enderecoDestino) enderecoDestino = resolverEnderecoEtq(enderecoDestino, resolverOpts);
+      enderecos = enderecos.map((e) => resolverEnderecoEtq(e, resolverOpts));
+    } catch (e) {
+      return res.status(400).json({ error: e?.message || ETQ_ENDERECO_MSG_FORMATO });
     }
 
     let descricao = descricaoRaw;
@@ -12731,6 +12736,20 @@ app.post('/api/etiquetas/rec-impresso/registrar-movimentacao', express.json(), a
     client.release();
   }
 });
+
+async function _etqEnderecosConhecidosProduto(client, codigoOmie, codigoTexto) {
+  const { rows } = await client.query(
+    `SELECT DISTINCT TRIM(i.endereco) AS endereco
+       FROM etiqueta."ETQ_rec_impresso" i
+       JOIN public.produtos_omie p
+         ON TRIM(i.codigo_produto) IN (p.codigo_produto::text, TRIM(p.codigo))
+      WHERE (p.codigo = $1 OR p.codigo_produto::text = $1 OR p.codigo_produto_integracao = $1
+             OR p.codigo_produto::text = $2 OR TRIM(p.codigo) = $2)
+        AND i.endereco IS NOT NULL AND TRIM(i.endereco) <> ''`,
+    [codigoTexto, String(codigoOmie || '').trim()]
+  );
+  return rows.map((r) => r.endereco).filter(Boolean);
+}
 
 async function _etqLinhasSaldoEndereco(client, codigoOmie, endereco) {
   const { rows } = await client.query(
@@ -13421,7 +13440,7 @@ async function _insertEtqMovimentacaoEndereco(client, {
   codProd, descProd, sanitize, linhaReferencia
 }) {
   const db = client || pool;
-  const enderecoOk = assertEnderecoEtq(endereco);
+  const enderecoOk = enderecoEtqParaMovimentacao(endereco);
   const ref = linhaReferencia || null;
   const campos = await _etqResolveProdutoCampos(db, {
     codigoTexto: codigoTexto || codProd,
@@ -13471,7 +13490,7 @@ async function _etqCreditarEndereco(client, {
   codigo, descricao, endereco, qtd, usuario, complemento, dataEmissao, codigoTexto,
   codProd, descProd, sanitize, linhaReferencia
 }) {
-  const enderecoOk = assertEnderecoEtq(endereco);
+  const enderecoOk = enderecoEtqParaMovimentacao(endereco);
   const campos = await _etqResolveProdutoCampos(client, {
     codigoTexto: codigoTexto || codProd,
     codigoOmie: codigo,

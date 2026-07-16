@@ -8363,6 +8363,24 @@ function _etqAssertEndereco(valor) {
   return end;
 }
 
+function _etqEnderecosConhecidosLista() {
+  const lista = document.getElementById('movimEnderecoEtqLista');
+  if (!lista) return [];
+  return Array.from(lista.querySelectorAll('.movim-etq-linha[data-endereco]'))
+    .map((el) => String(el.dataset.endereco || '').trim())
+    .filter(Boolean);
+}
+
+function _etqResolverEndereco(valor, conhecidosExtras = []) {
+  const raw = _etqNormalizarEndereco(valor);
+  if (!raw) throw new Error(ETQ_ENDERECO_MSG);
+  if (ETQ_ENDERECO_RE.test(raw)) return raw;
+  const conhecidos = [...new Set([..._etqEnderecosConhecidosLista(), ...(conhecidosExtras || [])])];
+  const mapa = new Map(conhecidos.map((e) => [_etqNormalizarEndereco(e), e]));
+  if (mapa.has(raw)) return mapa.get(raw);
+  throw new Error(ETQ_ENDERECO_MSG);
+}
+
 function _arm3dFecharDetalheModal() {
   const modal = document.getElementById('arm3dDetalheModal');
   if (modal) {
@@ -75017,10 +75035,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
   async function registrarEnderecosEtq(payload) {
     try {
-      if (payload.endereco_origem) payload.endereco_origem = _etqAssertEndereco(payload.endereco_origem);
-      if (payload.endereco_destino) payload.endereco_destino = _etqAssertEndereco(payload.endereco_destino);
+      if (payload.endereco_origem) payload.endereco_origem = _etqResolverEndereco(payload.endereco_origem);
+      if (payload.endereco_destino) payload.endereco_destino = _etqResolverEndereco(payload.endereco_destino);
       if (Array.isArray(payload.enderecos)) {
-        payload.enderecos = payload.enderecos.map((e) => _etqAssertEndereco(e));
+        payload.enderecos = payload.enderecos.map((e) => _etqResolverEndereco(e));
       }
     } catch (e) {
       throw new Error(e?.message || ETQ_ENDERECO_MSG);

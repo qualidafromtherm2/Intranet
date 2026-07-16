@@ -152,3 +152,8 @@ whatsapp_import/
 /Fechamento_*.html
 /Fechamento_*.pdf
 relatorios/
+
+# modelo 3D exportado localmente (arquivo grande)
+prateleiras-3d/modelo/
+prateleiras-3d/exportar-modelo.mjs
+

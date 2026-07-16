@@ -30,6 +30,47 @@ function assertEnderecoEtq(valor) {
 }
 
 /**
+ * Movimentação de saldo: aceita formato padrão OU endereço já cadastrado (legado, ex. 04-03).
+ * conhecidos: lista de endereços exatos do ETQ_rec_impresso para o produto.
+ */
+function resolverEnderecoEtq(valor, { conhecidos = [] } = {}) {
+  const raw = normalizarEnderecoEtqRaw(valor);
+  if (!raw) {
+    const err = new Error(MSG_FORMATO);
+    err.code = 'ETQ_ENDERECO_INVALIDO';
+    throw err;
+  }
+  if (ETQ_ENDERECO_RE.test(raw)) return raw;
+
+  const mapaConhecidos = new Map();
+  for (const item of conhecidos || []) {
+    const chave = normalizarEnderecoEtqRaw(item);
+    if (chave) mapaConhecidos.set(chave, String(item).trim());
+  }
+  if (mapaConhecidos.has(raw)) return mapaConhecidos.get(raw);
+
+  const decomp = decomporEnderecoInvalido(raw);
+  if (decomp?.endereco && ETQ_ENDERECO_RE.test(decomp.endereco)) {
+    return decomp.endereco;
+  }
+
+  const err = new Error(MSG_FORMATO);
+  err.code = 'ETQ_ENDERECO_INVALIDO';
+  throw err;
+}
+
+/** Normaliza endereço já validado/resolvido para uso em débito/crédito ETQ. */
+function enderecoEtqParaMovimentacao(valor) {
+  const end = normalizarEnderecoEtqRaw(valor);
+  if (!end) {
+    const err = new Error(MSG_FORMATO);
+    err.code = 'ETQ_ENDERECO_INVALIDO';
+    throw err;
+  }
+  return end;
+}
+
+/**
  * Converte endereço inválido do tipo 01-02-19-B5 →
  * { endereco: '01-02-19-001', complementoExtra: 'B5' }
  * Retorna null se não for possível migrar (formato totalmente diferente).
@@ -108,6 +149,8 @@ module.exports = {
   normalizarEnderecoEtqRaw,
   isEnderecoEtqValido,
   assertEnderecoEtq,
+  resolverEnderecoEtq,
+  enderecoEtqParaMovimentacao,
   decomporEnderecoInvalido,
   mesclarComplemento,
   parseDataEmissaoEtq,
