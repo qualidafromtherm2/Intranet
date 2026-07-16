@@ -122,6 +122,17 @@ body {
   background: #79b8ff;
 }
 
+.btn-alt {
+  margin-bottom: 10px;
+  color: #fde68a;
+  background: #92400e;
+  border: 1px solid #fbbf24;
+}
+
+.btn-alt:hover {
+  background: #b45309;
+}
+
 .btn:active {
   transform: translateY(1px);
 }
@@ -244,6 +255,299 @@ kbd {
 .btn-exit-touch:active {
   background: rgba(248, 81, 73, 0.35);
 }
+
+.vert-pad {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  pointer-events: auto;
+  align-items: stretch;
+}
+
+.vert-pad .wasd-btn {
+  width: 64px;
+  height: 56px;
+  align-self: flex-end;
+}
+
+/* Mira fina vermelha no centro */
+.crosshair {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  z-index: 12;
+  width: 18px;
+  height: 18px;
+  margin: -9px 0 0 -9px;
+  pointer-events: none;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+  background: transparent;
+}
+
+.crosshair::before,
+.crosshair::after {
+  content: '';
+  position: absolute;
+  background: #ef4444;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.45);
+}
+
+/* Traço vertical */
+.crosshair::before {
+  left: 50%;
+  top: 0;
+  width: 1.5px;
+  height: 100%;
+  margin-left: -0.75px;
+}
+
+/* Traço horizontal */
+.crosshair::after {
+  left: 0;
+  top: 50%;
+  width: 100%;
+  height: 1.5px;
+  margin-top: -0.75px;
+}
+
+.crosshair[hidden] {
+  display: none;
+}
+
+/* Balão ao mirar um endereço */
+.look-balloon {
+  position: absolute;
+  left: 50%;
+  top: calc(50% + 28px);
+  transform: translateX(-50%);
+  z-index: 8;
+  min-width: 200px;
+  max-width: min(360px, calc(100vw - 24px));
+  max-height: 55vh;
+  overflow: auto;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: rgba(13, 17, 23, 0.92);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.4);
+  color: #e6edf3;
+  pointer-events: none;
+}
+
+.look-balloon::before {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: -7px;
+  width: 12px;
+  height: 12px;
+  margin-left: -6px;
+  background: rgba(13, 17, 23, 0.92);
+  border-left: 1px solid rgba(255, 255, 255, 0.16);
+  border-top: 1px solid rgba(255, 255, 255, 0.16);
+  transform: rotate(45deg);
+}
+
+.look-balloon[hidden] {
+  display: none;
+}
+
+.look-balloon-end {
+  font-family: ui-monospace, monospace;
+  font-weight: 700;
+  font-size: 0.95rem;
+  color: #58a6ff;
+  margin-bottom: 6px;
+}
+
+.look-balloon-body {
+  font-size: 0.82rem;
+}
+
+.look-balloon-empty {
+  color: #8b949e;
+}
+
+.look-balloon-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 5px 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.look-balloon-row:first-child {
+  border-top: none;
+}
+
+.look-balloon-row img {
+  width: 36px;
+  height: 36px;
+  object-fit: contain;
+  border-radius: 4px;
+  background: #0d1117;
+  flex-shrink: 0;
+}
+
+.look-balloon-row .cod {
+  color: #3fb950;
+  font-weight: 700;
+}
+
+.look-balloon-row .qtd {
+  color: #79c0ff;
+}
+
+.look-balloon-row .desc {
+  color: #8b949e;
+  font-size: 0.75rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 220px;
+}
+
+.look-balloon-overflow-end {
+  font-family: ui-monospace, monospace;
+  font-weight: 700;
+  font-size: 0.82rem;
+  color: #fbbf24;
+  margin-top: 8px;
+  padding-top: 6px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.look-balloon-overflow-end:first-child {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: none;
+}
+
+/* Painel HTML Fora do mapa — centrado sob a mira (rola com a roda) */
+.fora-panel {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -12%);
+  z-index: 9;
+  width: min(340px, calc(100vw - 24px));
+  max-height: min(52vh, 420px);
+  display: flex;
+  flex-direction: column;
+  border-radius: 10px;
+  border: 1px solid rgba(251, 191, 36, 0.35);
+  background: rgba(28, 25, 23, 0.94);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+  overflow: hidden;
+  pointer-events: auto;
+}
+
+.fora-panel[hidden] {
+  display: none;
+}
+
+.fora-panel-head {
+  padding: 10px 12px 8px;
+  background: #92400e;
+  flex-shrink: 0;
+}
+
+.fora-panel-title {
+  font-weight: 800;
+  font-size: 0.95rem;
+  letter-spacing: 0.04em;
+  color: #fbbf24;
+}
+
+.fora-panel-sub {
+  margin-top: 2px;
+  font-size: 0.75rem;
+  color: #fde68a;
+}
+
+.fora-panel-list {
+  overflow: auto;
+  padding: 8px;
+  max-height: 40vh;
+}
+
+.fora-empty {
+  color: #a8a29e;
+  font-size: 0.85rem;
+  padding: 12px 6px;
+  text-align: center;
+}
+
+.fora-item {
+  background: #292524;
+  border: 1px solid #44403c;
+  border-radius: 8px;
+  padding: 8px;
+  margin-bottom: 8px;
+}
+
+.fora-end {
+  font-family: ui-monospace, monospace;
+  font-weight: 700;
+  font-size: 0.85rem;
+  color: #38bdf8;
+  margin-bottom: 6px;
+}
+
+.fora-prod {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  border: none;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  padding: 6px 4px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.fora-prod:hover,
+.fora-prod:focus {
+  background: rgba(251, 191, 36, 0.12);
+  outline: 1px solid rgba(251, 191, 36, 0.35);
+}
+
+.fora-prod img,
+.fora-prod-ph {
+  width: 32px;
+  height: 32px;
+  border-radius: 4px;
+  object-fit: contain;
+  background: #0d1117;
+  flex-shrink: 0;
+}
+
+.fora-prod-ph {
+  display: inline-block;
+}
+
+.fora-prod-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.fora-prod-meta .cod {
+  color: #86efac;
+  font-weight: 700;
+  font-size: 0.82rem;
+}
+
+.fora-prod-meta .qtd {
+  color: #79c0ff;
+  font-size: 0.75rem;
+}
+
 
 body.is-touch .hud-pc { display: none; }
 body:not(.is-touch) .hud-touch { display: none; }

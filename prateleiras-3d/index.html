@@ -18,10 +18,25 @@
   <div id="app">
     <canvas id="c"></canvas>
 
+    <div id="crosshair" class="crosshair" hidden aria-hidden="true"></div>
+
+    <div id="lookBalloon" class="look-balloon" hidden>
+      <div class="look-balloon-end" id="lookBalloonEnd">—</div>
+      <div class="look-balloon-body" id="lookBalloonBody"></div>
+    </div>
+
+    <div id="foraPanel" class="fora-panel" hidden>
+      <div class="fora-panel-head">
+        <div class="fora-panel-title">FORA DO MAPA</div>
+        <div class="fora-panel-sub" id="foraPanelSub">—</div>
+      </div>
+      <div class="fora-panel-list" id="foraPanelList"></div>
+    </div>
+
     <div id="hud" class="hud" hidden>
-      <p class="hud-pc"><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> ou setas — andar</p>
-      <p class="hud-pc">Mouse — olhar &nbsp;·&nbsp; <kbd>Esc</kbd> — sair</p>
-      <p class="hud-touch">WASD na tela — andar &nbsp;·&nbsp; Arraste o dedo — olhar</p>
+      <p class="hud-pc"><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> — andar &nbsp;·&nbsp; <kbd>Espaço</kbd>/<kbd>E</kbd> — subir &nbsp;·&nbsp; <kbd>C</kbd>/<kbd>Q</kbd> — descer</p>
+      <p class="hud-pc">Mouse — olhar · Mira na caixa — produtos · Mira no banner — lista (roda = rolar) · Mira no código — detalhe · <kbd>Esc</kbd></p>
+      <p class="hud-touch">WASD + ↑↓ · Banner = lista · Clique no código = detalhe</p>
     </div>
 
     <div id="touchPad" class="touch-pad" hidden>
@@ -31,7 +46,11 @@
         <button type="button" class="wasd-btn" data-key="KeyS" aria-label="Trás">S</button>
         <button type="button" class="wasd-btn" data-key="KeyD" aria-label="Direita">D</button>
       </div>
-      <button type="button" id="btnExitTouch" class="btn-exit-touch">Sair</button>
+      <div class="vert-pad">
+        <button type="button" class="wasd-btn" data-key="Space" aria-label="Subir">↑</button>
+        <button type="button" class="wasd-btn" data-key="KeyC" aria-label="Descer">↓</button>
+        <button type="button" id="btnExitTouch" class="btn-exit-touch">Sair</button>
+      </div>
     </div>
 
     <div id="blocker" class="blocker">
@@ -39,12 +58,14 @@
         <h1>Porta-pallet 3D</h1>
         <p class="lead">Mesmas ruas do Armazém 3D (R1–R4) — ande pelos corredores.</p>
         <ul class="controls">
-          <li><strong>PC:</strong> <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> + mouse</li>
-          <li><strong>Tablet:</strong> botões WASD + arrastar o dedo para olhar</li>
+          <li><strong>PC:</strong> <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> andar · mouse olhar</li>
+          <li><strong>Altura:</strong> <kbd>Espaço</kbd>/<kbd>E</kbd> sobe · <kbd>C</kbd>/<kbd>Q</kbd> desce</li>
+          <li><strong>Tablet:</strong> WASD + ↑↓ na tela + arrastar para olhar</li>
           <li><kbd>Esc</kbd> (PC) ou Sair (tablet) — pausar</li>
         </ul>
-        <p class="hint">Porta-pallets laranja com caixas placeholder (como na foto).</p>
+        <p class="hint">Produtos aparecem como chapas verdes (mais leve que caixa 3D). Só endereços com item.</p>
         <p id="webglError" class="error" hidden></p>
+        <button type="button" id="btnOpenNewTab" class="btn btn-alt" hidden>Abrir em nova aba (recomendado no PC)</button>
         <button type="button" id="btnEnter" class="btn">Toque / clique para entrar</button>
         <p class="back" id="backLinkWrap">
           <a href="/menu_produto.html">← Voltar à intranet</a>

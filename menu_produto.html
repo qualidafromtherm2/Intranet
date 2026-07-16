@@ -10639,6 +10639,12 @@
 
 <!-- ===================== PAINEL EXPLORAR 3D (porta-pallet navegável) ===================== -->
 <div id="conteudo-porta-pallet-3d" class="armazem-page" style="display:none;">
+  <div class="pp3d-open-bar">
+    <a href="/prateleiras-3d/" target="_blank" rel="noopener" class="pp3d-open-link">
+      Abrir Explorar 3D em nova aba (recomendado no PC)
+    </a>
+    <span class="pp3d-open-hint">Se o 3D não carregar aqui dentro, use o link acima.</span>
+  </div>
   <div class="pp3d-frame-wrap">
     <iframe
       id="portaPallet3dFrame"
@@ -10651,6 +10657,29 @@
   </div>
 </div>
 <style>
+  .pp3d-open-bar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 10px;
+    padding: 10px 12px;
+    border-radius: 8px;
+    background: rgba(146, 64, 14, 0.25);
+    border: 1px solid rgba(251, 191, 36, 0.35);
+  }
+  .pp3d-open-link {
+    font-weight: 700;
+    color: #fbbf24;
+    text-decoration: none;
+  }
+  .pp3d-open-link:hover {
+    text-decoration: underline;
+  }
+  .pp3d-open-hint {
+    font-size: 0.85rem;
+    color: #a8a29e;
+  }
   .pp3d-frame-wrap {
     position: relative;
     width: 100%;
