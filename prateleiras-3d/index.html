@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>Explorar 3D — Porta-pallet</title>
+  <link rel="stylesheet" href="style.css" />
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+    }
+  }
+  </script>
+</head>
+<body>
+  <div id="app">
+    <canvas id="c"></canvas>
+
+    <div id="hud" class="hud" hidden>
+      <p class="hud-pc"><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> ou setas — andar</p>
+      <p class="hud-pc">Mouse — olhar &nbsp;·&nbsp; <kbd>Esc</kbd> — sair</p>
+      <p class="hud-touch">WASD na tela — andar &nbsp;·&nbsp; Arraste o dedo — olhar</p>
+    </div>
+
+    <div id="touchPad" class="touch-pad" hidden>
+      <div class="wasd">
+        <button type="button" class="wasd-btn" data-key="KeyW" aria-label="Frente">W</button>
+        <button type="button" class="wasd-btn" data-key="KeyA" aria-label="Esquerda">A</button>
+        <button type="button" class="wasd-btn" data-key="KeyS" aria-label="Trás">S</button>
+        <button type="button" class="wasd-btn" data-key="KeyD" aria-label="Direita">D</button>
+      </div>
+      <button type="button" id="btnExitTouch" class="btn-exit-touch">Sair</button>
+    </div>
+
+    <div id="blocker" class="blocker">
+      <div class="panel">
+        <h1>Porta-pallet 3D</h1>
+        <p class="lead">Mesmas ruas do Armazém 3D (R1–R4) — ande pelos corredores.</p>
+        <ul class="controls">
+          <li><strong>PC:</strong> <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> + mouse</li>
+          <li><strong>Tablet:</strong> botões WASD + arrastar o dedo para olhar</li>
+          <li><kbd>Esc</kbd> (PC) ou Sair (tablet) — pausar</li>
+        </ul>
+        <p class="hint">Porta-pallets laranja com caixas placeholder (como na foto).</p>
+        <p id="webglError" class="error" hidden></p>
+        <button type="button" id="btnEnter" class="btn">Toque / clique para entrar</button>
+        <p class="back" id="backLinkWrap">
+          <a href="/menu_produto.html">← Voltar à intranet</a>
+        </p>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="main.js"></script>
+</body>
+</html>

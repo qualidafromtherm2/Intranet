@@ -1850,24 +1850,38 @@ router.get('/kanban-programacao', async (req, res) => {
 router.get('/op-producao/buscar-produtos', async (req, res) => {
   try {
     const raw = String(req.query?.q || '').trim();
-    if (raw.length < 3) {
+    if (raw.length < 2) {
       return res.json({ success: true, itens: [] });
     }
 
-    const likeContains = `%${escapeLikePattern(raw)}%`;
-    const likePrefix = `${escapeLikePattern(raw)}%`;
+    // Contém: cada palavra precisa aparecer (ordem irrelevante) em codigo ou descricao.
+    const tokens = raw
+      .split(/\s+/)
+      .map((t) => t.trim())
+      .filter((t) => t.length >= 1)
+      .slice(0, 8);
+    if (!tokens.length) return res.json({ success: true, itens: [] });
+
+    const params = [];
+    const condsAnd = [];
+    for (const tok of tokens) {
+      params.push(`%${escapeLikePattern(tok)}%`);
+      const i = params.length;
+      condsAnd.push(`(codigo ILIKE $${i} ESCAPE '\\' OR descricao ILIKE $${i} ESCAPE '\\')`);
+    }
+    params.push(`${escapeLikePattern(raw)}%`);
+    const iPrefix = params.length;
 
     const { rows } = await dbQuery(`
       SELECT codigo_produto, codigo, descricao
       FROM public.produtos_omie
-      WHERE codigo ILIKE $1 ESCAPE '\\'
-         OR descricao ILIKE $1 ESCAPE '\\'
+      WHERE ${condsAnd.join(' AND ')}
       ORDER BY
-        CASE WHEN codigo ILIKE $2 ESCAPE '\\' THEN 0 ELSE 1 END,
-        CASE WHEN descricao ILIKE $2 ESCAPE '\\' THEN 0 ELSE 1 END,
+        CASE WHEN codigo ILIKE $${iPrefix} ESCAPE '\\' THEN 0 ELSE 1 END,
+        CASE WHEN descricao ILIKE $${iPrefix} ESCAPE '\\' THEN 0 ELSE 1 END,
         codigo
       LIMIT 40
-    `, [likeContains, likePrefix]);
+    `, params);
 
     return res.json({ success: true, itens: rows });
   } catch (err) {

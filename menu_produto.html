@@ -10266,6 +10266,9 @@
     <a href="#" data-arm-tab="armazem3d" class="main-header-link">
       <i class="fa-solid fa-warehouse" style="margin-right:5px;"></i>Armazém 3D
     </a>
+    <a href="#" data-arm-tab="porta-pallet-3d" class="main-header-link">
+      <i class="fa-solid fa-person-walking" style="margin-right:5px;"></i>Explorar 3D
+    </a>
     <a href="#" data-arm-tab="posicao-estoque" class="main-header-link">
       <i class="fa-solid fa-calendar-days" style="margin-right:5px;"></i>Posição de Estoque
     </a>
@@ -10555,6 +10558,19 @@
 
     <!-- Vista lateral com botões de Rua divididos em Esquerda/Direita -->
     <div class="arm3d-photo-wrap a3-visible" id="arm3dPhotoWrap">
+      <!-- Busca só na vista 3D (não sobrepõe o botão Voltar do painel da rua) -->
+      <div class="arm3d-busca-wrap" id="arm3dBuscaWrap">
+        <div class="arm3d-busca-box">
+          <i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i>
+          <input type="text" id="arm3dBuscaInput"
+                 placeholder="Buscar produto (código ou descrição)…"
+                 autocomplete="off" spellcheck="false" />
+          <button type="button" class="arm3d-busca-limpar" id="arm3dBuscaLimpar"
+                  title="Limpar filtro" aria-label="Limpar" style="display:none;">&times;</button>
+        </div>
+        <div class="arm3d-busca-sugestoes" id="arm3dBuscaSugestoes" hidden></div>
+        <div class="arm3d-busca-filtro" id="arm3dBuscaFiltro" style="display:none;"></div>
+      </div>
       <img src="img/armazem3d_side.png" alt="Vista lateral do armazém"
            class="arm3d-side-img" id="arm3dSideImg">
       <div class="arm3d-ruas">
@@ -10603,7 +10619,56 @@
     </div><!-- /arm3d-rua-panel -->
 
   </div><!-- /arm3d-outer -->
+
+  <!-- Modal detalhe do endereço (clique na célula da prateleira) -->
+  <div id="arm3dDetalheModal" class="arm3d-detalhe-modal" style="display:none;" aria-hidden="true">
+    <div class="arm3d-detalhe-dialog" role="dialog" aria-modal="true">
+      <div class="arm3d-detalhe-header">
+        <div>
+          <div class="arm3d-detalhe-title">Endereço</div>
+          <div class="arm3d-detalhe-end" id="arm3dDetalheEndereco">—</div>
+        </div>
+        <button type="button" class="arm3d-detalhe-fechar" id="arm3dDetalheFechar" title="Fechar">&times;</button>
+      </div>
+      <div class="arm3d-detalhe-body" id="arm3dDetalheBody">
+        <div class="arm3d-detalhe-loading">Carregando…</div>
+      </div>
+    </div>
+  </div>
 </div><!-- /conteudo-armazem3d -->
+
+<!-- ===================== PAINEL EXPLORAR 3D (porta-pallet navegável) ===================== -->
+<div id="conteudo-porta-pallet-3d" class="armazem-page" style="display:none;">
+  <div class="pp3d-frame-wrap">
+    <iframe
+      id="portaPallet3dFrame"
+      class="pp3d-frame"
+      title="Porta-pallet 3D — navegar"
+      src="about:blank"
+      allow="fullscreen"
+      loading="lazy"
+    ></iframe>
+  </div>
+</div>
+<style>
+  .pp3d-frame-wrap {
+    position: relative;
+    width: 100%;
+    height: calc(100vh - 160px);
+    min-height: 480px;
+    border-radius: 10px;
+    overflow: hidden;
+    border: 1px solid rgba(255,255,255,0.08);
+    background: #0d1117;
+  }
+  .pp3d-frame {
+    display: block;
+    width: 100%;
+    height: 100%;
+    border: 0;
+    background: #0d1117;
+  }
+</style>
 
 <!-- ===================== PAINEL POSIÇÃO DE ESTOQUE ===================== -->
 <div id="conteudo-posicao-estoque" class="armazem-page" style="display:none;">
@@ -10709,6 +10774,288 @@
   overflow: visible;
   border-radius: 8px;
 }
+#arm3dPlanejarSepHost #conteudo-armazem3d {
+  height: 100%;
+}
+#arm3dPlanejarSepHost .arm3d-outer {
+  height: calc(100vh - 64px);
+  min-height: 420px;
+  border-radius: 0;
+}
+
+/* Busca de produto — só na vista 3D (some junto com a foto ao abrir a rua) */
+.arm3d-busca-wrap {
+  position: absolute;
+  top: 0;
+  left: 0;
+  transform: translate(-6px, -6px);
+  z-index: 8;
+  width: min(320px, 72%);
+  pointer-events: auto;
+}
+.arm3d-busca-box {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(10, 20, 45, 0.92);
+  border: 1px solid rgba(56, 189, 248, 0.45);
+  border-radius: 8px;
+  padding: 8px 10px;
+  backdrop-filter: blur(6px);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+}
+.arm3d-busca-box > i {
+  color: #7dd3fc;
+  font-size: 0.85rem;
+  flex-shrink: 0;
+}
+.arm3d-busca-box input {
+  flex: 1;
+  min-width: 0;
+  background: transparent;
+  border: 0;
+  outline: none;
+  color: #e2e8f0;
+  font-size: 0.85rem;
+}
+.arm3d-busca-box input::placeholder { color: #64748b; }
+.arm3d-busca-limpar {
+  background: transparent;
+  border: 0;
+  color: #94a3b8;
+  font-size: 1.2rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 2px;
+}
+.arm3d-busca-limpar:hover { color: #f87171; }
+.arm3d-busca-sugestoes {
+  margin-top: 4px;
+  max-height: 260px;
+  overflow-y: auto;
+  background: rgba(8, 14, 28, 0.96);
+  border: 1px solid rgba(56, 189, 248, 0.35);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+}
+.arm3d-busca-sugestoes[hidden] { display: none !important; }
+.arm3d-busca-item {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  width: 100%;
+  padding: 9px 12px;
+  border: 0;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.12);
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  color: #e2e8f0;
+}
+.arm3d-busca-item:last-child { border-bottom: 0; }
+.arm3d-busca-item:hover,
+.arm3d-busca-item:focus {
+  background: rgba(56, 189, 248, 0.12);
+  outline: none;
+}
+.arm3d-busca-item .cod {
+  font-weight: 700;
+  color: #fde68a;
+  font-size: 12px;
+}
+.arm3d-busca-item .desc {
+  font-size: 11px;
+  color: #94a3b8;
+  line-height: 1.3;
+  word-break: break-word;
+}
+.arm3d-busca-vazia {
+  padding: 12px;
+  font-size: 12px;
+  color: #64748b;
+}
+.arm3d-busca-filtro {
+  margin-top: 6px;
+  padding: 5px 10px;
+  font-size: 11px;
+  color: #86efac;
+  background: rgba(22, 101, 52, 0.35);
+  border: 1px solid rgba(74, 222, 128, 0.35);
+  border-radius: 6px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* FIFO bolinhas (verde=mais antigo, amarelo=meio, vermelho=mais novo) */
+.arm3d-fifo {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  vertical-align: middle;
+}
+.arm3d-fifo--verde { background: #22c55e; box-shadow: 0 0 6px rgba(34,197,94,.6); }
+.arm3d-fifo--amarelo { background: #eab308; box-shadow: 0 0 6px rgba(234,179,8,.55); }
+.arm3d-fifo--vermelho { background: #ef4444; box-shadow: 0 0 6px rgba(239,68,68,.55); }
+
+.arm3d-rua-badge-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  white-space: nowrap;
+}
+.arm3d-rua-badge-left {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+/* Tooltip com foto */
+.arm3d-tip-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.arm3d-tip-foto {
+  width: 36px;
+  height: 36px;
+  object-fit: cover;
+  border-radius: 4px;
+  background: #0f172a;
+  border: 1px solid rgba(148,163,184,.25);
+  flex-shrink: 0;
+}
+.arm3d-tip-meta { min-width: 0; flex: 1; }
+.arm3d-tip-cod { display: block; color: #fde68a; font-weight: 600; font-size: 11px; }
+.arm3d-tip-qtd { display: block; color: #86efac; font-size: 11px; }
+.arm3d-tip-desc {
+  display: block;
+  color: #94a3b8;
+  font-size: 10px;
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Modal detalhe endereço */
+.arm3d-detalhe-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  background: rgba(2, 6, 16, 0.72);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+.arm3d-detalhe-dialog {
+  width: min(560px, 100%);
+  max-height: min(80vh, 720px);
+  background: #0f172a;
+  border: 1px solid rgba(56, 189, 248, 0.35);
+  border-radius: 12px;
+  box-shadow: 0 20px 50px rgba(0,0,0,.5);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.arm3d-detalhe-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px;
+  border-bottom: 1px solid rgba(148,163,184,.15);
+  background: rgba(15, 23, 42, 0.95);
+}
+.arm3d-detalhe-title {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #94a3b8;
+}
+.arm3d-detalhe-end {
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: #e2e8f0;
+  margin-top: 2px;
+}
+.arm3d-detalhe-fechar {
+  background: transparent;
+  border: 0;
+  color: #94a3b8;
+  font-size: 1.5rem;
+  line-height: 1;
+  cursor: pointer;
+}
+.arm3d-detalhe-fechar:hover { color: #f87171; }
+.arm3d-detalhe-body {
+  padding: 12px 14px 16px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.arm3d-detalhe-loading,
+.arm3d-detalhe-vazio {
+  color: #94a3b8;
+  font-size: 13px;
+  padding: 18px 8px;
+  text-align: center;
+}
+.arm3d-detalhe-item {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 10px;
+  background: rgba(30, 41, 59, 0.65);
+  border: 1px solid rgba(148,163,184,.15);
+  border-radius: 8px;
+}
+.arm3d-detalhe-item img {
+  width: 56px;
+  height: 56px;
+  object-fit: cover;
+  border-radius: 6px;
+  background: #020617;
+  border: 1px solid rgba(148,163,184,.2);
+  flex-shrink: 0;
+}
+.arm3d-detalhe-item-main { min-width: 0; flex: 1; }
+.arm3d-detalhe-item-top {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.arm3d-detalhe-id {
+  font-size: 11px;
+  color: #7dd3fc;
+  font-weight: 700;
+}
+.arm3d-detalhe-cod {
+  font-size: 12px;
+  color: #fde68a;
+  font-weight: 700;
+}
+.arm3d-detalhe-desc {
+  margin-top: 3px;
+  font-size: 12px;
+  color: #cbd5e1;
+  line-height: 1.35;
+}
+.arm3d-detalhe-meta {
+  margin-top: 4px;
+  font-size: 11px;
+  color: #94a3b8;
+}
+
 
 /* Wrapper da foto + botões de Rua */
 .arm3d-photo-wrap {
@@ -10721,6 +11068,7 @@
   aspect-ratio: 1316 / 886;
   max-height: 82%;
   z-index: 5;
+  overflow: visible;
 }
 .arm3d-photo-wrap.a3-visible {
   display: block;
@@ -10783,12 +11131,6 @@
 }
 .arm3d-rua-badge::-webkit-scrollbar { width: 3px; }
 .arm3d-rua-badge::-webkit-scrollbar-thumb { background: #334155; border-radius: 2px; }
-.arm3d-rua-badge-row {
-  display: flex;
-  justify-content: space-between;
-  gap: 6px;
-  white-space: nowrap;
-}
 .arm3d-rua-badge-cod { color: #fde68a; font-weight: 600; overflow: hidden; text-overflow: ellipsis; max-width: 60px; }
 .arm3d-rua-badge-qtd { color: #86efac; font-variant-numeric: tabular-nums; flex-shrink: 0; }
 
@@ -10878,20 +11220,129 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 16px;
-  overflow: hidden;
+  padding: 12px 10px;
+  overflow: auto;
+  gap: 0;
 }
+.arm3d-shelf-layout {
+  display: flex;
+  align-items: stretch;
+  justify-content: center;
+  gap: 10px;
+  max-width: 100%;
+  max-height: 100%;
+  min-height: 0;
+}
+.arm3d-shelf-layout--e .arm3d-overflow { order: 2; }
+.arm3d-shelf-layout--d .arm3d-overflow { order: 0; }
+
+/* Lista de endereços fora do desenho (ao lado do maior edifício) */
+.arm3d-overflow {
+  width: min(220px, 28vw);
+  min-width: 160px;
+  max-height: min(100%, calc(100vh - 260px));
+  display: flex;
+  flex-direction: column;
+  background: rgba(8, 14, 28, 0.92);
+  border: 1px solid rgba(251, 191, 36, 0.45);
+  border-radius: 10px;
+  overflow: hidden;
+  flex-shrink: 0;
+  box-shadow: 0 8px 24px rgba(0,0,0,.35);
+}
+.arm3d-overflow-head {
+  padding: 10px 12px 8px;
+  border-bottom: 1px solid rgba(251, 191, 36, 0.25);
+  background: rgba(120, 53, 15, 0.35);
+}
+.arm3d-overflow-title {
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #fbbf24;
+}
+.arm3d-overflow-sub {
+  margin-top: 3px;
+  font-size: 10px;
+  color: #cbd5e1;
+  line-height: 1.3;
+}
+.arm3d-overflow-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  scrollbar-width: thin;
+}
+.arm3d-overflow-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: rgba(30, 41, 59, 0.75);
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  border-radius: 8px;
+  padding: 8px;
+  cursor: pointer;
+  color: #e2e8f0;
+}
+.arm3d-overflow-item:hover {
+  border-color: rgba(251, 191, 36, 0.55);
+  background: rgba(51, 65, 85, 0.9);
+}
+.arm3d-overflow-end {
+  font-size: 11px;
+  font-weight: 700;
+  color: #fde68a;
+  margin-bottom: 6px;
+  word-break: break-all;
+}
+.arm3d-overflow-prod {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+}
+.arm3d-overflow-foto {
+  width: 28px;
+  height: 28px;
+  object-fit: cover;
+  border-radius: 4px;
+  background: #020617;
+  border: 1px solid rgba(148,163,184,.2);
+  flex-shrink: 0;
+}
+.arm3d-overflow-prod-meta {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.arm3d-overflow-prod-meta .cod {
+  font-size: 10px;
+  color: #fde68a;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.arm3d-overflow-prod-meta .qtd {
+  font-size: 10px;
+  color: #86efac;
+}
+
 /* Wrapper da estante: mantém proporção 3:2 e ocupa o máximo possível */
 .arm3d-shelf-wrap {
   position: relative;
   aspect-ratio: 3 / 2;
-  max-width: calc(100% - 32px);
-  max-height: calc(100% - 32px);
-  /* mantém a proporção dentro da caixa disponível */
+  max-width: min(720px, calc(100% - 200px));
+  max-height: calc(100% - 8px);
   height: auto;
   width: auto;
-  /* ajuste fino: se largura limitar antes */
-  flex-shrink: 0;
+  flex-shrink: 1;
+  min-width: 0;
 }
 .arm3d-estante-img {
   width: 100%;
@@ -10999,15 +11450,6 @@
   padding-bottom: 4px;
   letter-spacing: 0.05em;
 }
-.arm3d-tip-row {
-  display: flex;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 2px 0;
-}
-.arm3d-tip-cod  { color: #fde68a; }
-.arm3d-tip-qtd  { color: #86efac; font-variant-numeric: tabular-nums; }
-
 .arm3d-empty-msg {
   font-size: 0.9rem;
   text-align: center;
@@ -11017,10 +11459,6 @@
 </style>
 
 </div><!-- /#armazemContent -->
-
-
-
-
 
 
 
@@ -21497,6 +21935,46 @@ function attachDropZone(ul) {
     </button>
     <div id="ceModalConteudo"></div>
   </div>
+</div>
+
+<!-- Modal Planejar separação: no body (fora de .app) — position:fixed não funciona dentro de .app por causa do backdrop-filter -->
+<style>
+  #arm3dPlanejarSepModal.arm3d-planejar-modal {
+    display: none;
+    position: fixed !important;
+    top: 0 !important;
+    left: 0 !important;
+    right: 0 !important;
+    bottom: 0 !important;
+    width: 100vw !important;
+    height: 100vh !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    z-index: 20000 !important;
+    background: #020617 !important;
+    flex-direction: column;
+    box-sizing: border-box;
+    overflow: hidden;
+    transform: none !important;
+    filter: none !important;
+  }
+  #arm3dPlanejarSepModal.arm3d-planejar-open {
+    display: flex !important;
+  }
+</style>
+<div id="arm3dPlanejarSepModal" class="arm3d-planejar-modal" style="display:none;" aria-hidden="true">
+  <div style="display:flex;align-items:center;gap:12px;padding:12px 16px;background:#0f172a;border-bottom:1px solid #1e293b;flex-shrink:0;">
+    <i class="fa-solid fa-warehouse" style="color:#38bdf8;font-size:1.1rem;"></i>
+    <div style="flex:1;min-width:0;">
+      <div style="font-weight:800;color:#f1f5f9;font-size:1rem;">Planejar separação</div>
+      <div id="arm3dPlanejarSepSub" style="font-size:.75rem;color:#94a3b8;">Somente itens desta SEP no Porta Pallet</div>
+    </div>
+    <button type="button" id="arm3dPlanejarSepFechar" title="Fechar"
+      style="background:none;border:1px solid #334155;border-radius:8px;color:#e2e8f0;padding:6px 12px;font-weight:700;cursor:pointer;font-size:.85rem;">
+      <i class="fa-solid fa-xmark" style="margin-right:4px;"></i>Fechar
+    </button>
+  </div>
+  <div id="arm3dPlanejarSepHost" style="flex:1;min-height:0;overflow:auto;position:relative;background:#080c12;"></div>
 </div>
 
 </body>

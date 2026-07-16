@@ -818,6 +818,197 @@ async function lerEstruturaCachePorCodigos(codigos, opts = {}) {
   return null;
 }
 
+async function resolverProdutoOmiePorCodigo(codigo) {
+  const cod = String(codigo || '').trim();
+  if (!cod) return null;
+  const { rows } = await dbQuery(
+    `SELECT codigo_produto, codigo, descricao
+       FROM public.produtos_omie
+      WHERE UPPER(BTRIM(codigo)) = UPPER(BTRIM($1))
+      ORDER BY codigo_produto DESC
+      LIMIT 1`,
+    [cod]
+  );
+  return rows[0] || null;
+}
+
+async function alocarNovoFichaId() {
+  const { rows } = await dbQuery(
+    `SELECT GREATEST(COALESCE(MAX(id), 0) + 1, 900000001) AS nid
+       FROM estrutura.ficha`
+  );
+  return Number(rows[0]?.nid) || (900000001 + Date.now() % 100000);
+}
+
+/**
+ * Cria/substitui estrutura local (SQL) a partir de peças escolhidas + dados do formulário.
+ * Body tipico: { codigo_produto, identificacao, descricao, status, modelo, qtde...,
+ *   operacao: { operacao, unidade, tempo_* }, itens: [{ codigo, codigo_produto, qtde, tipo, posto }] }
+ */
+async function montarEstruturaLocal(payload = {}) {
+  await ensureSchemaEstrutura();
+
+  const codigoProduto = String(payload.codigo_produto || payload.codigo || '').trim();
+  if (!codigoProduto) throw Object.assign(new Error('Código do produto (pai) é obrigatório.'), { status: 400 });
+
+  const itensIn = Array.isArray(payload.itens) ? payload.itens : [];
+  if (!itensIn.length) {
+    throw Object.assign(new Error('Informe ao menos uma peça para montar a estrutura.'), { status: 400 });
+  }
+
+  const identificacao = String(payload.identificacao || codigoProduto).trim() || codigoProduto;
+  const descricao = String(payload.descricao || '').trim() || null;
+  const status = String(payload.status || 'Ativa').trim() || 'Ativa';
+  const modelo = String(payload.modelo || '').trim() || null;
+  const qtde = parseValorCampo('qtde', payload.qtde == null || payload.qtde === '' ? 1 : payload.qtde);
+  const qtdeBatelada = parseValorCampo('qtde_batelada', payload.qtde_batelada);
+  const qtdeReferencia = parseValorCampo('qtde_referencia', payload.qtde_referencia);
+
+  const opBody = payload.operacao || {};
+  const operacaoId = Number(opBody.operacao) > 0 ? Number(opBody.operacao) : 1;
+  const opUnidade = String(opBody.unidade || 'UN').trim() || 'UN';
+  const tempoOperacao = parseValorCampo('tempo_operacao', opBody.tempo_operacao);
+  const tempoPreparacao = parseValorCampo('tempo_preparacao', opBody.tempo_preparacao);
+  const tempoEspera = parseValorCampo('tempo_espera', opBody.tempo_espera);
+  const tempoTransporte = parseValorCampo('tempo_transporte', opBody.tempo_transporte);
+  const tempoFila = parseValorCampo('tempo_fila', opBody.tempo_fila);
+
+  let fichaId = Number(payload.ficha_id) || 0;
+  if (!fichaId) {
+    const { rows } = await dbQuery(
+      `SELECT id FROM estrutura.ficha
+        WHERE UPPER(BTRIM(codigo_produto)) = UPPER(BTRIM($1))
+        ORDER BY sincronizado_em DESC NULLS LAST
+        LIMIT 1`,
+      [codigoProduto]
+    );
+    fichaId = Number(rows[0]?.id) || 0;
+  }
+
+  if (fichaId > 0) {
+    await dbQuery(
+      `UPDATE estrutura.ficha SET
+         codigo_produto = $2,
+         identificacao = $3,
+         descricao = $4,
+         status = $5,
+         modelo = $6,
+         qtde = $7,
+         qtde_batelada = $8,
+         qtde_referencia = $9,
+         data_ultima_atualizacao = NOW(),
+         sincronizado_em = NOW(),
+         raw = COALESCE(raw, '{}'::jsonb) || $10::jsonb
+       WHERE id = $1`,
+      [
+        fichaId,
+        codigoProduto,
+        identificacao,
+        descricao,
+        status,
+        modelo,
+        qtde,
+        qtdeBatelada,
+        qtdeReferencia,
+        JSON.stringify({ origem: 'montar_manual', montado_em: new Date().toISOString() }),
+      ]
+    );
+    await dbQuery(`DELETE FROM estrutura.ficha_item WHERE ficha_id = $1`, [fichaId]);
+    await dbQuery(`DELETE FROM estrutura.ficha_operacao WHERE ficha_id = $1`, [fichaId]);
+  } else {
+    fichaId = await alocarNovoFichaId();
+    await dbQuery(
+      `INSERT INTO estrutura.ficha (
+         id, codigo_produto, identificacao, descricao, status, modelo,
+         qtde, qtde_batelada, qtde_referencia, data_criacao, data_ultima_atualizacao,
+         raw, sincronizado_em
+       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,NOW(),NOW(),$10,NOW())`,
+      [
+        fichaId,
+        codigoProduto,
+        identificacao,
+        descricao,
+        status,
+        modelo,
+        qtde,
+        qtdeBatelada,
+        qtdeReferencia,
+        JSON.stringify({ origem: 'montar_manual', montado_em: new Date().toISOString() }),
+      ]
+    );
+  }
+
+  await dbQuery(
+    `INSERT INTO estrutura.ficha_operacao (
+       ficha_id, operacao, unidade, tempo_operacao, tempo_preparacao,
+       tempo_espera, tempo_transporte, tempo_fila, raw
+     ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+    [
+      fichaId,
+      operacaoId,
+      opUnidade,
+      tempoOperacao,
+      tempoPreparacao,
+      tempoEspera,
+      tempoTransporte,
+      tempoFila,
+      JSON.stringify({ origem: 'montar_manual' }),
+    ]
+  );
+
+  let ordem = 0;
+  for (const item of itensIn) {
+    let codigo = String(item?.codigo || item?.identificacao || '').trim();
+    let codigoProdutoOmie = Number(item?.codigo_produto) || 0;
+    if ((!codigo || !codigoProdutoOmie) && codigo) {
+      const omie = await resolverProdutoOmiePorCodigo(codigo);
+      if (omie) {
+        codigo = omie.codigo;
+        codigoProdutoOmie = Number(omie.codigo_produto) || 0;
+      }
+    }
+    if (!codigo || !codigoProdutoOmie) {
+      throw Object.assign(
+        new Error(`Peça inválida na lista: informe codigo e codigo_produto (${codigo || '?'}).`),
+        { status: 400 }
+      );
+    }
+
+    const produtoIappId = await ensureProdutoIappFromOmie(codigo, codigoProdutoOmie);
+    const tipoRaw = String(item?.tipo || 'Material').trim();
+    const tipo = /^subproduto$/i.test(tipoRaw) ? 'Subproduto' : 'Material';
+    const qtdeItem = item?.qtde == null || item?.qtde === ''
+      ? 1
+      : parseValorCampo('qtde', item.qtde);
+    const posto = String(item?.posto || '').trim() || null;
+    const observacoes = String(item?.observacoes || '').trim() || null;
+    ordem += 1;
+
+    await dbQuery(
+      `INSERT INTO estrutura.ficha_item (
+         ficha_id, operacao, tipo, produto_iapp_id, qtde, observacoes, ordem, posto, raw
+       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+      [
+        fichaId,
+        operacaoId,
+        tipo,
+        produtoIappId,
+        qtdeItem,
+        observacoes,
+        ordem,
+        posto,
+        JSON.stringify({ origem: 'montar_manual', omie_codigo: codigo }),
+      ]
+    );
+  }
+
+  const resultado = await lerEstruturaDoSql(codigoProduto, { fichaId });
+  if (!resultado) {
+    throw new Error('Estrutura montada, mas não foi possível reler o cache SQL.');
+  }
+  return resultado;
+}
+
 module.exports = {
   ensureSchemaEstrutura,
   lerEstruturaDoSql,
@@ -831,4 +1022,5 @@ module.exports = {
   trocarProdutoItemPorOmie,
   adicionarItemFichaPorOmie,
   excluirItemFicha,
+  montarEstruturaLocal,
 };

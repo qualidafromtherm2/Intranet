@@ -17,6 +17,11 @@ const { iniciarCicloPosto } = require('./utils/tempoProducao');
 const { registrarRiCheckImpressaoOp } = require('./routes/qualidadeRiCheck');
 const { injectStoragePublicUrls, getStoragePublicBaseUrl, ASSETS, agenteExeUrl } = require('./utils/storageUrls');
 const etqRecImpressoBackfill = require('./utils/etqRecImpressoBackfill');
+const {
+  MSG_FORMATO: ETQ_ENDERECO_MSG_FORMATO,
+  assertEnderecoEtq,
+  atribuirFifoCores,
+} = require('./utils/etqEndereco');
 const OMIE_WEBHOOK_TOKEN = process.env.OMIE_WEBHOOK_TOKEN || null; // se NULL, não exige token
 // Em server.js (topo do arquivo)
 // chave: id da etiqueta (p.ex. número da OP), valor: { fileName, printed: boolean }
@@ -1900,12 +1905,23 @@ app.get('/api/produtos/imagem/:codigo_produto', async (req, res) => {
     if (!codigoProduto) {
       return res.json({ ok: true, url_imagem: null });
     }
+    // codigo_produto na tabela de imagens costuma ser o ID Omie (numérico);
+    // a tela passa o código legível (ex.: 04.MP.N.90908) → resolve via produtos_omie.
     const { rows } = await pool.query(
-      `SELECT TRIM(url_imagem) AS url_imagem
-       FROM public.produtos_omie_imagens
-       WHERE codigo_produto = $1
-       ORDER BY pos NULLS LAST, id ASC
-       LIMIT 1`,
+      `SELECT TRIM(img.url_imagem) AS url_imagem
+         FROM public.produtos_omie_imagens img
+         LEFT JOIN public.produtos_omie p
+           ON img.codigo_produto::text IN (
+                p.codigo_produto::text,
+                TRIM(p.codigo),
+                COALESCE(p.codigo_produto_integracao, '')
+              )
+        WHERE img.codigo_produto::text = $1
+           OR TRIM(p.codigo) = $1
+           OR p.codigo_produto::text = $1
+           OR COALESCE(p.codigo_produto_integracao, '') = $1
+        ORDER BY img.pos NULLS LAST, img.id ASC
+        LIMIT 1`,
       [codigoProduto]
     );
     const url = rows[0]?.url_imagem || null;
@@ -9852,25 +9868,37 @@ app.get('/api/produtos/search', async (req, res) => {
       return res.status(400).json({ ok: false, error: 'Informe ?q= com pelo menos 2 caracteres' });
     }
 
-    // Busca por código OU pela descrição (case/accent-insensitive)
-    // Busca na tabela produtos_omie (coluna codigo, descricao, descricao_familia e codigo_produto)
+    // Tokens AND: cada palavra precisa aparecer em codigo OU descricao (ordem indiferente)
+    const tokens = q.split(/\s+/).map((t) => t.trim()).filter((t) => t.length > 0);
+    if (!tokens.length) {
+      return res.status(400).json({ ok: false, error: 'Informe ?q= com pelo menos 2 caracteres' });
+    }
+
+    const whereSql = tokens
+      .map((_, i) => {
+        const p = i + 1;
+        return `(codigo ILIKE $${p} OR unaccent(COALESCE(descricao, '')) ILIKE unaccent($${p}))`;
+      })
+      .join(' AND ');
+    const likeParams = tokens.map((t) => `%${t}%`);
+    const prefixIdx = tokens.length + 1;
+    const limitIdx = tokens.length + 2;
+
     const { rows } = await pool.query(
       `
-      SELECT 
+      SELECT
         codigo,
         descricao,
         descricao_familia,
         codigo_produto
       FROM public.produtos_omie
-      WHERE 
-        codigo ILIKE $1
-        OR unaccent(descricao) ILIKE unaccent($2)
+      WHERE ${whereSql}
       ORDER BY
-        (CASE WHEN codigo ILIKE $3 THEN 0 ELSE 1 END),
+        (CASE WHEN codigo ILIKE $${prefixIdx} THEN 0 ELSE 1 END),
         codigo
-      LIMIT $4
+      LIMIT $${limitIdx}
       `,
-      [`%${q}%`, `%${q}%`, `${q}%`, limit]
+      [...likeParams, `${q}%`, limit]
     );
 
     res.json({ ok: true, total: rows.length, produtos: rows });
@@ -10837,6 +10865,34 @@ app.use('/etiquetas', requireSessionOrAgentForStatic, express.static(etiquetasRo
     await pool.query(`ALTER TABLE etiqueta."ETQ_rec_impresso" ADD COLUMN IF NOT EXISTS codigo_produto TEXT`);
     await pool.query(`ALTER TABLE etiqueta."ETQ_rec_impresso" ADD COLUMN IF NOT EXISTS descricao_produto TEXT`);
     await pool.query(`ALTER TABLE etiqueta."ETQ_rec_impresso" ADD COLUMN IF NOT EXISTS fonte TEXT DEFAULT 'recebimento'`);
+
+    // Corrige endereços digitados fora do formato XX-XX-XX-XXX (ex.: 01-02-19-B5 → 01-02-19-001 + complemento B5)
+    try {
+      const fixEnd = await pool.query(`
+        UPDATE etiqueta."ETQ_rec_impresso"
+           SET complemento = CASE
+                 WHEN NULLIF(TRIM(COALESCE(complemento, '')), '') IS NULL
+                   THEN split_part(TRIM(endereco), '-', 4)
+                 WHEN POSITION(split_part(TRIM(endereco), '-', 4) IN COALESCE(complemento, '')) > 0
+                   THEN complemento
+                 ELSE TRIM(complemento) || ' | ' || split_part(TRIM(endereco), '-', 4)
+               END,
+               endereco =
+                 split_part(TRIM(endereco), '-', 1) || '-' ||
+                 split_part(TRIM(endereco), '-', 2) || '-' ||
+                 split_part(TRIM(endereco), '-', 3) || '-001'
+         WHERE endereco IS NOT NULL
+           AND TRIM(endereco) <> ''
+           AND TRIM(endereco) !~ '^[0-9]{2}-[0-9]{2}-[0-9]{2}-[0-9]{3}$'
+           AND TRIM(endereco) ~ '^[0-9]{2}-[0-9]{2}-[0-9]{2}-.+$'
+           AND array_length(string_to_array(TRIM(endereco), '-'), 1) >= 4
+      `);
+      if (fixEnd.rowCount > 0) {
+        console.log(`[etiqueta] Migrados ${fixEnd.rowCount} endereço(s) inválido(s) → …-001 + complemento`);
+      }
+    } catch (migEndErr) {
+      console.warn('[etiqueta] migração formato endereço:', migEndErr?.message || migEndErr);
+    }
     // Tabela de fila de impressão (para agente polling)
     await pool.query(`
       CREATE TABLE IF NOT EXISTS etiqueta."ETQ_fila_impressao" (
@@ -12210,25 +12266,25 @@ app.get('/api/etiquetas/rec-impresso/enderecos-por-produto', async (req, res) =>
 });
 
 // GET /api/etiquetas/rec-impresso/enderecos-referencia-por-produto?codigo=XXX
-// Todos os endereços distintos em ETQ_rec_impresso (referência + saldo), para o modal de movimentação
+// 1 linha por endereço em ETQ_rec_impresso, com soma das qtds (modal de movimentação)
 app.get('/api/etiquetas/rec-impresso/enderecos-referencia-por-produto', async (req, res) => {
   try {
     const codigo = String(req.query.codigo || '').trim();
     if (!codigo) return res.status(400).json({ ok: false, error: 'codigo é obrigatório.' });
 
     const { rows } = await pool.query(
-      `SELECT DISTINCT ON (TRIM(i.endereco))
-              i.id,
+      `SELECT MAX(i.id) AS id,
               TRIM(i.endereco) AS endereco,
-              COALESCE(i.qtd, 0) AS qtd,
-              COALESCE(NULLIF(TRIM(i.unidade), ''), 'UN') AS unidade,
-              i.complemento
+              SUM(COALESCE(i.qtd, 0)) AS qtd,
+              COALESCE(NULLIF(TRIM(MAX(i.unidade)), ''), 'UN') AS unidade,
+              MAX(i.complemento) AS complemento
          FROM etiqueta."ETQ_rec_impresso" i
          JOIN public.produtos_omie p
            ON TRIM(i.codigo_produto) IN (p.codigo_produto::text, TRIM(p.codigo))
         WHERE (p.codigo = $1 OR p.codigo_produto::text = $1 OR p.codigo_produto_integracao = $1)
           AND i.endereco IS NOT NULL AND TRIM(i.endereco) <> ''
-        ORDER BY TRIM(i.endereco), COALESCE(i.qtd, 0) DESC, i.id DESC`,
+        GROUP BY TRIM(i.endereco)
+        ORDER BY TRIM(i.endereco)`,
       [codigo]
     );
 
@@ -12273,6 +12329,52 @@ app.get('/api/etiquetas/rec-impresso/etiquetas-por-produto', async (req, res) =>
   }
 });
 
+// GET /api/etiquetas/rec-impresso/ids-fifo-batch?codigos=A,B
+// IDs com saldo > 0 por produto, ordenados do menor ID → maior (FIFO de coleta)
+app.get('/api/etiquetas/rec-impresso/ids-fifo-batch', async (req, res) => {
+  try {
+    const codigos = String(req.query.codigos || '')
+      .split(',')
+      .map(s => String(s || '').trim())
+      .filter(Boolean);
+    const uniq = [...new Set(codigos)];
+    if (!uniq.length) return res.json({ ok: true, dados: {} });
+
+    const { rows } = await pool.query(
+      `SELECT p.codigo,
+              i.id,
+              COALESCE(i.qtd, 0) AS qtd,
+              COALESCE(NULLIF(TRIM(i.unidade), ''), 'UN') AS unidade,
+              TRIM(i.endereco) AS endereco
+         FROM etiqueta."ETQ_rec_impresso" i
+         JOIN public.produtos_omie p
+           ON TRIM(i.codigo_produto) IN (p.codigo_produto::text, TRIM(p.codigo))
+        WHERE p.codigo = ANY($1::text[])
+          AND COALESCE(i.qtd, 0) > 0
+          AND i.endereco IS NOT NULL AND TRIM(i.endereco) <> ''
+        ORDER BY p.codigo ASC, i.id ASC`,
+      [uniq]
+    );
+
+    const dados = {};
+    for (const row of rows) {
+      const cod = String(row.codigo || '').trim();
+      if (!cod) continue;
+      if (!dados[cod]) dados[cod] = [];
+      dados[cod].push({
+        id: Number(row.id),
+        qtd: Number(row.qtd) || 0,
+        unidade: row.unidade || 'UN',
+        endereco: row.endereco || null
+      });
+    }
+    res.json({ ok: true, dados });
+  } catch (err) {
+    console.error('[etiquetas/rec-impresso/ids-fifo-batch]', err);
+    res.status(500).json({ ok: false, error: err?.message || 'Falha ao buscar IDs FIFO.' });
+  }
+});
+
 // GET /api/etiquetas/rec-impresso?q=texto
 // Retorna registros já impressos de ETQ_rec_impresso, com filtro opcional
 app.get('/api/etiquetas/rec-impresso', async (req, res) => {
@@ -12312,15 +12414,49 @@ app.get('/api/etiquetas/rec-impresso', async (req, res) => {
   }
 });
 
+// GET /api/etiquetas/rec-impresso/:id — detalhe de uma etiqueta (leitura QR na separação)
+app.get('/api/etiquetas/rec-impresso/:id', async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (!id) return res.status(400).json({ ok: false, error: 'id inválido.' });
+    const { rows } = await pool.query(
+      `SELECT i.id,
+              COALESCE(i.qtd, 0) AS qtd,
+              COALESCE(NULLIF(TRIM(i.unidade), ''), 'UN') AS unidade,
+              TRIM(i.endereco) AS endereco,
+              i.complemento,
+              TRIM(COALESCE(i.codigo_produto, '')) AS codigo_omie,
+              TRIM(COALESCE(i.descricao_produto, '')) AS descricao,
+              COALESCE(p.codigo, '') AS codigo
+         FROM etiqueta."ETQ_rec_impresso" i
+         LEFT JOIN public.produtos_omie p
+           ON TRIM(i.codigo_produto) IN (p.codigo_produto::text, TRIM(p.codigo))
+        WHERE i.id = $1
+        LIMIT 1`,
+      [id]
+    );
+    if (!rows[0]) return res.status(404).json({ ok: false, error: 'Etiqueta não encontrada.' });
+    res.json({ ok: true, etiqueta: rows[0] });
+  } catch (err) {
+    console.error('[etiquetas/rec-impresso/:id]', err);
+    res.status(500).json({ ok: false, error: err?.message || 'Falha ao buscar etiqueta.' });
+  }
+});
+
 // PATCH /api/etiquetas/rec-impresso/:id/endereco
-// Body: { endereco: "A1-B2" } — registra o local de armazenamento e faz TRF Omie
+// Body: { endereco: "01-02-19-002", complemento? } — registra o local de armazenamento e faz TRF Omie
 app.patch('/api/etiquetas/rec-impresso/:id/endereco', express.json(), async (req, res) => {
   const _sep = '─'.repeat(60);
   try {
     const id = Number(req.params.id);
-    const endereco    = String(req.body?.endereco    || '').trim();
+    let endereco;
+    try {
+      endereco = assertEnderecoEtq(req.body?.endereco);
+    } catch (e) {
+      return res.status(400).json({ error: e?.message || ETQ_ENDERECO_MSG_FORMATO });
+    }
     const complemento = String(req.body?.complemento || '').trim();
-    if (!id || !endereco) return res.status(400).json({ error: 'id e endereco são obrigatórios.' });
+    if (!id) return res.status(400).json({ error: 'id e endereco são obrigatórios.' });
 
     // 1. Salva endereço (e complemento opcional) e preenche codigo/descricao se vazios
     const result = await pool.query(
@@ -12434,10 +12570,18 @@ app.post('/api/etiquetas/rec-impresso/registrar-movimentacao', express.json(), a
     let enderecoOrigem  = String(req.body?.endereco_origem  || '').trim() || null;
     let enderecoDestino = String(req.body?.endereco_destino || '').trim() || null;
     const enderecosRaw = Array.isArray(req.body?.enderecos) ? req.body.enderecos : [];
-    const enderecos = [...new Set(enderecosRaw.map(e => String(e || '').trim()).filter(Boolean))];
+    let enderecos = [...new Set(enderecosRaw.map(e => String(e || '').trim()).filter(Boolean))];
 
     if (!codigoTexto) return res.status(400).json({ error: 'codigo é obrigatório.' });
     if (!Number.isFinite(qtd) || qtd <= 0) return res.status(400).json({ error: 'Informe uma quantidade válida (> 0).' });
+
+    try {
+      if (enderecoOrigem) enderecoOrigem = assertEnderecoEtq(enderecoOrigem);
+      if (enderecoDestino) enderecoDestino = assertEnderecoEtq(enderecoDestino);
+      enderecos = enderecos.map((e) => assertEnderecoEtq(e));
+    } catch (e) {
+      return res.status(400).json({ error: e?.message || ETQ_ENDERECO_MSG_FORMATO });
+    }
 
     const codigoOmie = await _resolveProdutoOmieCodigoProduto(client, codigoTexto)
       || String(req.body?.codigo_produto_omie || req.body?.codigo_produto || '').trim()
@@ -12972,6 +13116,49 @@ async function _logisticaObterQtyCodigoSeparacao(client, solicIds) {
   return { qtd: parseFloat(rows[0]?.total) || 0, codigo: rows[0]?.codigo || null };
 }
 
+/** Debita quantidade exatamente do ID lido no QR (não FIFO do endereço). */
+async function _etqDebitarPorId(client, { id, qtd, codigoOmie }) {
+  const etqId = parseInt(id, 10);
+  const qtdNum = parseFloat(qtd);
+  if (!etqId || !Number.isFinite(qtdNum) || qtdNum <= 0) return null;
+  const { rows } = await client.query(
+    `SELECT id, COALESCE(qtd, 0) AS qtd, TRIM(endereco) AS endereco, TRIM(COALESCE(codigo_produto, '')) AS codigo_produto
+       FROM etiqueta."ETQ_rec_impresso"
+      WHERE id = $1
+      FOR UPDATE`,
+    [etqId]
+  );
+  const row = rows[0];
+  if (!row) {
+    const err = new Error(`Etiqueta ID ${etqId} não encontrada.`);
+    err.code = 'ETQ_ID_NAO_ENCONTRADO';
+    throw err;
+  }
+  if (codigoOmie && String(row.codigo_produto || '').trim() !== String(codigoOmie).trim()) {
+    const err = new Error(`Etiqueta ID ${etqId} não pertence a este produto.`);
+    err.code = 'ETQ_ID_PRODUTO';
+    throw err;
+  }
+  const atual = Number(row.qtd || 0);
+  if (atual + 1e-9 < qtdNum) {
+    const err = new Error(`Etiqueta ID ${etqId} tem saldo ${atual}, insuficiente para ${qtdNum}.`);
+    err.code = 'ETQ_SALDO_SEPARACAO';
+    throw err;
+  }
+  const novaQtd = Math.max(0, atual - qtdNum);
+  await client.query(
+    `UPDATE etiqueta."ETQ_rec_impresso" SET qtd = $1 WHERE id = $2`,
+    [novaQtd, etqId]
+  );
+  return {
+    id: etqId,
+    endereco: row.endereco || null,
+    qtd: qtdNum,
+    qtd_anterior: atual,
+    qtd_nova: novaQtd
+  };
+}
+
 async function _etqDebitarSeparacaoAlmox(client, { cod_local_origem, etq_id, endereco_origem, etq_enderecos, codigo_produto, qtd, ignorar_saldo_etq }) {
   if (String(cod_local_origem || '').trim() !== LOGISTICA_ALMOX_LOCAL_COD) return null;
   const qtdNum = parseFloat(qtd);
@@ -12994,6 +13181,53 @@ async function _etqDebitarSeparacaoAlmox(client, { cod_local_origem, etq_id, end
     throw err;
   }
 
+  // Preferência: debitar exatamente os IDs lidos no QR.
+  const comId = lista.filter(x => x.etq_id && Number.isFinite(parseFloat(x.qtd)) && parseFloat(x.qtd) > 0);
+  if (comId.length) {
+    let remaining = qtdNum;
+    const detalhes = [];
+    const alterados = [];
+    for (const item of comId) {
+      if (remaining <= 1e-9) break;
+      const tirar = Math.min(parseFloat(item.qtd), remaining);
+      try {
+        const deb = await _etqDebitarPorId(client, {
+          id: item.etq_id,
+          qtd: tirar,
+          codigoOmie
+        });
+        if (!deb) continue;
+        detalhes.push({ endereco: deb.endereco, qtd: deb.qtd, etq_id: deb.id });
+        alterados.push(deb);
+        remaining = Math.max(0, remaining - deb.qtd);
+      } catch (e) {
+        if (ignorar_saldo_etq) continue;
+        throw e;
+      }
+    }
+    if (remaining > 1e-9 && !ignorar_saldo_etq) {
+      const err = new Error(`Item ${codigoTexto}: os IDs lidos não cobrem a quantidade (${qtdNum - remaining} de ${qtdNum}).`);
+      err.code = 'ETQ_SALDO_SEPARACAO';
+      throw err;
+    }
+    if (!detalhes.length) {
+      if (ignorar_saldo_etq) return null;
+      const err = new Error('Leia o QR das etiquetas (ID) no endereço selecionado.');
+      err.code = 'ETQ_ENDERECO_OBRIGATORIO';
+      throw err;
+    }
+    const qtdDebitada = detalhes.reduce((s, d) => s + (Number(d.qtd) || 0), 0);
+    return {
+      endereco: detalhes[0].endereco,
+      codigo_omie: codigoOmie,
+      codigo_texto: codigoTexto,
+      qtd: qtdDebitada,
+      detalhes,
+      alterados
+    };
+  }
+
+  // Fallback legado: só endereço → FIFO no endereço.
   const resolvidos = [];
   for (const item of lista) {
     let endereco = String(item.endereco || item.endereco_origem || '').trim();
@@ -13187,6 +13421,7 @@ async function _insertEtqMovimentacaoEndereco(client, {
   codProd, descProd, sanitize, linhaReferencia
 }) {
   const db = client || pool;
+  const enderecoOk = assertEnderecoEtq(endereco);
   const ref = linhaReferencia || null;
   const campos = await _etqResolveProdutoCampos(db, {
     codigoTexto: codigoTexto || codProd,
@@ -13206,7 +13441,7 @@ async function _insertEtqMovimentacaoEndereco(client, {
       ref?.unidade || 'UN',
       ref?.data_emissao || dataEmissao,
       usuario,
-      endereco,
+      enderecoOk,
       complemento || ref?.complemento || null,
       campos.codigo_produto,
       campos.descricao_produto,
@@ -13215,7 +13450,7 @@ async function _insertEtqMovimentacaoEndereco(client, {
   );
   const row = rows[0];
   const idImpresso = row.id;
-  const loteTxt = sanitize(endereco, 40);
+  const loteTxt = sanitize(enderecoOk, 40);
   const zplCodProd = sanitize(codProd || codigoTexto || campos.codigo_produto, 30);
   const zplDescProd = sanitize(descProd || campos.descricao_produto, 70);
   const zpl = _gerarZplParaImpressao({
@@ -13236,6 +13471,7 @@ async function _etqCreditarEndereco(client, {
   codigo, descricao, endereco, qtd, usuario, complemento, dataEmissao, codigoTexto,
   codProd, descProd, sanitize, linhaReferencia
 }) {
+  const enderecoOk = assertEnderecoEtq(endereco);
   const campos = await _etqResolveProdutoCampos(client, {
     codigoTexto: codigoTexto || codProd,
     codigoOmie: codigo,
@@ -13253,7 +13489,7 @@ async function _etqCreditarEndereco(client, {
         )
       ORDER BY COALESCE(i.qtd, 0) DESC, i.id DESC
       LIMIT 1`,
-    [campos.codigo_produto, endereco]
+    [campos.codigo_produto, enderecoOk]
   );
 
   if (existentes.length) {
@@ -13266,11 +13502,11 @@ async function _etqCreditarEndereco(client, {
         WHERE id = $2`,
       [novaQtd, existentes[0].id, campos.codigo_produto, campos.descricao_produto]
     );
-    return { id: existentes[0].id, endereco, qtd: novaQtd, acao: 'update', delta: qtd };
+    return { id: existentes[0].id, endereco: enderecoOk, qtd: novaQtd, acao: 'update', delta: qtd };
   }
 
   const inserido = await _insertEtqMovimentacaoEndereco(client, {
-    endereco,
+    endereco: enderecoOk,
     qtd,
     dataEmissao,
     usuario,
@@ -13986,32 +14222,106 @@ app.get('/api/etiquetas/ocupacao', async (req, res) => {
   try {
     const { rows } = await pool.query(`
       SELECT
-        i.endereco,
+        i.id,
+        TRIM(i.endereco) AS endereco,
+        i.complemento,
         COALESCE(p.codigo, i.codigo_produto) AS codigo_produto,
-        SUM(i.qtd)     AS qtd_total,
-        MAX(i.unidade) AS unidade
+        COALESCE(NULLIF(TRIM(i.descricao_produto), ''), p.descricao, '') AS descricao,
+        COALESCE(i.qtd, 0) AS qtd,
+        COALESCE(NULLIF(TRIM(i.unidade), ''), 'UN') AS unidade,
+        i.data_emissao,
+        fot.url_imagem AS foto_url
       FROM etiqueta."ETQ_rec_impresso" i
       LEFT JOIN public.produtos_omie p ON p.codigo_produto::text = TRIM(i.codigo_produto)
-      WHERE i.endereco IS NOT NULL AND i.endereco <> ''
-      GROUP BY i.endereco, COALESCE(p.codigo, i.codigo_produto)
-      ORDER BY i.endereco, COALESCE(p.codigo, i.codigo_produto)
+      LEFT JOIN LATERAL (
+        SELECT img.url_imagem
+          FROM public.produtos_omie_imagens img
+         WHERE img.codigo_produto::text = TRIM(COALESCE(p.codigo_produto::text, i.codigo_produto))
+           AND COALESCE(img.ativo, true) = true
+         ORDER BY img.pos ASC NULLS LAST, img.id ASC
+         LIMIT 1
+      ) fot ON true
+      WHERE i.endereco IS NOT NULL AND TRIM(i.endereco) <> ''
+        AND COALESCE(i.qtd, 0) > 0
+      ORDER BY TRIM(i.endereco), i.id
     `);
 
-    /* Agrupa por endereço: { "01-04-01-001": [{codigo_produto, qtd_total, unidade}, ...] } */
     const mapa = {};
     for (const row of rows) {
       const key = row.endereco;
       if (!mapa[key]) mapa[key] = [];
       mapa[key].push({
+        id:             row.id,
         codigo_produto: row.codigo_produto,
-        qtd:            Number(row.qtd_total),
-        unidade:        row.unidade || ''
+        descricao:      row.descricao || '',
+        qtd:            Number(row.qtd) || 0,
+        unidade:        row.unidade || 'UN',
+        data_emissao:   row.data_emissao || null,
+        complemento:    row.complemento || null,
+        foto_url:       row.foto_url || null,
       });
     }
     res.json({ ok: true, ocupacao: mapa });
   } catch (err) {
     console.error('[etiquetas/ocupacao]', err);
     res.status(500).json({ ok: false, error: err?.message || 'Falha ao buscar ocupação' });
+  }
+});
+
+// GET /api/etiquetas/ocupacao/detalhe?endereco=01-02-19-001
+// Lista registros (IDs) neste endereço com descrição e foto
+app.get('/api/etiquetas/ocupacao/detalhe', async (req, res) => {
+  try {
+    const endereco = String(req.query?.endereco || '').trim();
+    if (!endereco) {
+      return res.status(400).json({ ok: false, error: 'endereco é obrigatório.' });
+    }
+
+    const { rows } = await pool.query(
+      `
+      SELECT
+        i.id,
+        TRIM(i.endereco) AS endereco,
+        i.complemento,
+        COALESCE(p.codigo, i.codigo_produto) AS codigo_produto,
+        COALESCE(NULLIF(TRIM(i.descricao_produto), ''), p.descricao, '') AS descricao,
+        COALESCE(i.qtd, 0) AS qtd,
+        COALESCE(NULLIF(TRIM(i.unidade), ''), 'UN') AS unidade,
+        i.data_emissao,
+        fot.url_imagem AS foto_url
+      FROM etiqueta."ETQ_rec_impresso" i
+      LEFT JOIN public.produtos_omie p ON p.codigo_produto::text = TRIM(i.codigo_produto)
+      LEFT JOIN LATERAL (
+        SELECT img.url_imagem
+          FROM public.produtos_omie_imagens img
+         WHERE img.codigo_produto::text = TRIM(COALESCE(p.codigo_produto::text, i.codigo_produto))
+           AND COALESCE(img.ativo, true) = true
+         ORDER BY img.pos ASC NULLS LAST, img.id ASC
+         LIMIT 1
+      ) fot ON true
+      WHERE TRIM(i.endereco) = $1
+        AND COALESCE(i.qtd, 0) > 0
+      ORDER BY i.id ASC
+      `,
+      [endereco]
+    );
+
+    const itens = atribuirFifoCores(rows.map((row) => ({
+      id: row.id,
+      endereco: row.endereco,
+      complemento: row.complemento || null,
+      codigo_produto: row.codigo_produto,
+      descricao: row.descricao || '',
+      qtd: Number(row.qtd) || 0,
+      unidade: row.unidade || 'UN',
+      data_emissao: row.data_emissao || null,
+      foto_url: row.foto_url || null,
+    })));
+
+    res.json({ ok: true, endereco, itens });
+  } catch (err) {
+    console.error('[etiquetas/ocupacao/detalhe]', err);
+    res.status(500).json({ ok: false, error: err?.message || 'Falha ao buscar detalhe do endereço' });
   }
 });
 
@@ -18859,6 +19169,7 @@ app.patch('/api/logistica/itens_solicitados/separar', async (req, res) => {
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {});
     if (err?.code === 'ETQ_SALDO_SEPARACAO' || err?.code === 'ETQ_ENDERECO_OBRIGATORIO'
+      || err?.code === 'ETQ_ID_NAO_ENCONTRADO' || err?.code === 'ETQ_ID_PRODUTO'
       || err?.code === 'OMIE_ORIGEM_OBRIGATORIA' || err?.code === 'OMIE_DESTINO_OBRIGATORIO'
       || err?.code === 'OMIE_TRF_SEPARACAO' || err?.code === 'OMIE_CREDENCIAIS') {
       return res.status(400).json({ ok: false, error: err.message });
@@ -19319,6 +19630,7 @@ app.post('/api/logistica/itens_solicitados/separar-parcial', async (req, res) =>
   } catch (err) {
     try { await client.query('ROLLBACK'); } catch (_) {}
     if (err?.code === 'ETQ_SALDO_SEPARACAO' || err?.code === 'ETQ_ENDERECO_OBRIGATORIO'
+      || err?.code === 'ETQ_ID_NAO_ENCONTRADO' || err?.code === 'ETQ_ID_PRODUTO'
       || err?.code === 'OMIE_ORIGEM_OBRIGATORIA' || err?.code === 'OMIE_DESTINO_OBRIGATORIO'
       || err?.code === 'OMIE_TRF_SEPARACAO' || err?.code === 'OMIE_CREDENCIAIS') {
       return res.status(400).json({ ok: false, error: err.message });
@@ -19372,6 +19684,7 @@ app.get('/api/logistica/kanban', async (req, res) => {
       FROM solicitacao_produto.itens_solicitados i
       JOIN logistica.carrinho c ON c.id = i.id_carr
       WHERE i.n_solic IS NOT NULL
+        AND LOWER(TRIM(COALESCE(i.status, ''))) NOT IN ('excluido', 'excluído')
         AND (c.id_user = $1 OR c.retirada_por = $2)
       GROUP BY i.n_solic, COALESCE(c.retirada_por, c.nome_user)
       ORDER BY MAX(c.criado_em) ASC
@@ -19400,20 +19713,22 @@ app.get('/api/logistica/kanban', async (req, res) => {
 async function _logisticaFetchEnderecoEtqMap(codigos) {
   const list = [...new Set((codigos || []).map(s => String(s || '').trim()).filter(Boolean))];
   if (!list.length) return {};
+  // Soma todas as qtds do produto no mesmo endereço (não só o 1º registro).
   const { rows } = await pool.query(
-    `SELECT DISTINCT ON (p.codigo, TRIM(i.endereco))
-            p.codigo,
-            i.id,
+    `SELECT p.codigo,
+            MAX(i.id) AS id,
             TRIM(i.endereco) AS endereco,
-            COALESCE(i.qtd, 0) AS qtd,
-            COALESCE(NULLIF(TRIM(i.unidade), ''), 'UN') AS unidade,
-            i.complemento
+            SUM(COALESCE(i.qtd, 0)) AS qtd,
+            COALESCE(NULLIF(TRIM(MAX(i.unidade)), ''), 'UN') AS unidade,
+            MAX(i.complemento) AS complemento
        FROM etiqueta."ETQ_rec_impresso" i
        JOIN public.produtos_omie p
          ON TRIM(i.codigo_produto) IN (p.codigo_produto::text, TRIM(p.codigo))
       WHERE p.codigo = ANY($1::text[])
         AND i.endereco IS NOT NULL AND TRIM(i.endereco) <> ''
-      ORDER BY p.codigo, TRIM(i.endereco), COALESCE(i.qtd, 0) DESC, i.id DESC`,
+        AND COALESCE(i.qtd, 0) > 0
+      GROUP BY p.codigo, TRIM(i.endereco)
+      ORDER BY p.codigo, TRIM(i.endereco)`,
     [list]
   );
   const dados = {};
@@ -19425,7 +19740,7 @@ async function _logisticaFetchEnderecoEtqMap(codigos) {
       id: row.id,
       endereco: row.endereco || null,
       completo: row.endereco || null,
-      qtd: row.qtd,
+      qtd: Number(row.qtd) || 0,
       unidade: row.unidade || 'UN',
       complemento: row.complemento || null
     });
@@ -19600,6 +19915,7 @@ app.get('/api/logistica/solicitacoes-kanban', async (req, res) => {
       FROM solicitacao_produto.itens_solicitados i
       JOIN logistica.carrinho c ON c.id = i.id_carr
       WHERE i.n_solic IS NOT NULL
+        AND LOWER(TRIM(COALESCE(i.status, ''))) NOT IN ('excluido', 'excluído')
       GROUP BY i.n_solic, COALESCE(c.retirada_por, c.nome_user)
       ORDER BY MIN(c.criado_em) ASC
     `);
@@ -19618,6 +19934,47 @@ app.get('/api/logistica/solicitacoes-kanban', async (req, res) => {
     res.json({ ok: true, colunas });
   } catch (err) {
     console.error('[logistica/solicitacoes-kanban] erro:', err);
+    res.status(500).json({ ok: false, error: String(err?.message || err) });
+  }
+});
+
+// GET /api/logistica/planejar-sep/codigos — códigos de produto nas SEPs (?n_solic= opcional)
+app.get('/api/logistica/planejar-sep/codigos', async (req, res) => {
+  try {
+    const id_user = req.session?.user?.id;
+    if (!id_user) return res.status(401).json({ ok: false, error: 'Não autenticado.' });
+
+    const nSolic = String(req.query.n_solic || '').trim();
+    const params = [];
+    let whereSep = `
+         WHERE i.n_solic IS NOT NULL
+           AND i.status IN ('pendente', 'Stund-by', 'Separação', 'Separado')
+           AND TRIM(COALESCE(c.codigo_produto, '')) <> ''`;
+    if (nSolic) {
+      params.push(nSolic);
+      whereSep += ` AND i.n_solic = $${params.length}`;
+    }
+
+    const { rows } = await pool.query(`
+      SELECT TRIM(c.codigo_produto) AS codigo,
+             MAX(NULLIF(TRIM(c.descricao), '')) AS descricao,
+             COUNT(DISTINCT i.n_solic)::int AS seps,
+             SUM(COALESCE(i.quantidade_solicitada, c.quantidade, 0))::numeric AS quantidade
+        FROM solicitacao_produto.itens_solicitados i
+        JOIN logistica.carrinho c ON c.id = i.id_carr
+       ${whereSep}
+       GROUP BY TRIM(c.codigo_produto)
+       ORDER BY TRIM(c.codigo_produto)
+    `, params);
+
+    res.json({
+      ok: true,
+      n_solic: nSolic || null,
+      codigos: rows.map(r => String(r.codigo || '').trim()).filter(Boolean),
+      itens: rows
+    });
+  } catch (err) {
+    console.error('[logistica/planejar-sep/codigos] erro:', err);
     res.status(500).json({ ok: false, error: String(err?.message || err) });
   }
 });
@@ -19888,6 +20245,37 @@ app.delete('/api/logistica/sep/:n_solic', async (req, res) => {
     res.status(500).json({ ok: false, error: String(err?.message || err) });
   } finally {
     client.release();
+  }
+});
+
+// PATCH /api/logistica/sep/:n_solic/excluido — Stand-by → excluido (some das telas de kanban)
+app.patch('/api/logistica/sep/:n_solic/excluido', express.json(), async (req, res) => {
+  try {
+    await ensureSchemaMigrated();
+    const id_user = req.session?.user?.id;
+    if (!id_user) return res.status(401).json({ ok: false, error: 'Não autenticado.' });
+    const n_solic = String(req.params.n_solic || '').trim();
+    if (!n_solic) return res.status(400).json({ ok: false, error: 'n_solic inválido.' });
+
+    const { rows } = await pool.query(
+      `UPDATE solicitacao_produto.itens_solicitados
+          SET status = 'excluido'
+        WHERE n_solic = $1
+          AND status = 'Stund-by'
+      RETURNING id`,
+      [n_solic]
+    );
+    if (!rows.length) {
+      return res.status(400).json({
+        ok: false,
+        error: 'Nenhum item em Stund-by para excluir nesta SEP.'
+      });
+    }
+    console.log(`[logistica/sep/excluido] ${n_solic}: ${rows.length} item(ns) → excluido por user ${id_user}`);
+    res.json({ ok: true, atualizados: rows.length });
+  } catch (err) {
+    console.error('[logistica/sep/excluido] erro:', err);
+    res.status(500).json({ ok: false, error: String(err?.message || err) });
   }
 });
 

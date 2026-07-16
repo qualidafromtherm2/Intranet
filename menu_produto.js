@@ -193,6 +193,17 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
+  document.getElementById('arm3dPlanejarSepFechar')?.addEventListener('click', () => {
+    if (typeof window._arm3dFecharPlanejarSeparacao === 'function') {
+      window._arm3dFecharPlanejarSeparacao();
+    }
+  });
+  document.getElementById('arm3dPlanejarSepModal')?.addEventListener('click', (e) => {
+    if (e.target?.id === 'arm3dPlanejarSepModal' && typeof window._arm3dFecharPlanejarSeparacao === 'function') {
+      window._arm3dFecharPlanejarSeparacao();
+    }
+  });
+
   // Botão de refresh do kanban de solicitações
   const refreshKanbanBtn = document.getElementById('kanbanSolicRefreshBtn');
   if (refreshKanbanBtn) {
@@ -370,13 +381,324 @@ function _solLerSelecoesEtq(row) {
   }
 }
 
-/** Aloca a quantidade nos endereços na ordem de seleção (primeiro leva o máximo possível). */
+/** Extrai o ID numérico do QR da etiqueta (formato COD|DESC|LOTE|ID123 ou só número). */
+function _solParseEtqIdFromQr(valor) {
+  const raw = String(valor || '').trim();
+  if (!raw) return null;
+  const parts = raw.split('|');
+  const last = parts[parts.length - 1];
+  const m = String(last).match(/^ID(\d+)$/i);
+  if (m) return parseInt(m[1], 10);
+  const only = raw.match(/ID(\d+)/i);
+  if (only) return parseInt(only[1], 10);
+  const n = parseInt(raw, 10);
+  return Number.isFinite(n) && n > 0 && String(n) === raw.replace(/\s+/g, '') ? n : null;
+}
+
+/** Seleciona IDs do menor → maior até cobrir a qtd necessária. */
+function _solPickIdsFifoAteQty(etiquetas, qtyNeeded) {
+  const need = Math.max(0, parseFloat(qtyNeeded) || 0);
+  const sorted = (Array.isArray(etiquetas) ? etiquetas.slice() : [])
+    .filter(e => (Number(e.qtd) || 0) > 0 && e.id != null)
+    .sort((a, b) => Number(a.id) - Number(b.id));
+  let remaining = need;
+  const out = [];
+  for (const e of sorted) {
+    if (remaining <= 1e-9) break;
+    const saldo = Math.max(0, parseFloat(e.qtd) || 0);
+    if (saldo <= 0) continue;
+    const tirar = Math.min(saldo, remaining);
+    out.push({
+      id: Number(e.id),
+      qtd: saldo,
+      tirar,
+      unidade: e.unidade || 'UN',
+      endereco: String(e.endereco || '').trim()
+    });
+    remaining = Math.max(0, remaining - tirar);
+  }
+  return { ids: out, remaining };
+}
+
+function _solRenderIdsFifoHtml(idsFifo, unidade) {
+  const lista = Array.isArray(idsFifo) ? idsFifo : [];
+  if (!lista.length) {
+    return `<div class="sep-etq-ids-fifo" style="margin-top:6px;width:100%;max-width:220px;padding:6px 8px;border-radius:8px;background:#0f172a;border:1px solid #334155;font-size:.62rem;color:#94a3b8;">
+      Nenhum ID com saldo no Porta Pallet para esta qtd.
+    </div>`;
+  }
+  const rows = lista.map((e, idx) => {
+    const next = idx === 0 ? '1' : '0';
+    return `<div class="sep-etq-id-row" data-etq-id="${e.id}" data-next="${next}"
+      style="display:flex;justify-content:space-between;gap:6px;padding:3px 0;border-top:1px solid #1e293b;${idx === 0 ? 'color:#86efac;font-weight:700;' : 'color:#cbd5e1;'}">
+      <span>ID ${e.id}${idx === 0 ? ' ← ler' : ''}</span>
+      <span style="white-space:nowrap;">${_solFmtQty(e.tirar)} ${escapeHtml(unidade || e.unidade || 'UN')}</span>
+    </div>`;
+  }).join('');
+  return `<div class="sep-etq-ids-fifo" style="margin-top:6px;width:100%;max-width:220px;padding:6px 8px;border-radius:8px;background:#0f172a;border:1px solid #334155;">
+    <div style="font-size:.58rem;color:#94a3b8;font-weight:700;margin-bottom:2px;letter-spacing:.03em;text-transform:uppercase;">IDs a coletar (menor → maior)</div>
+    ${rows}
+    <button type="button" class="btn-ler-etq-fifo"
+      style="margin-top:6px;width:100%;padding:5px 8px;border:none;border-radius:6px;background:#059669;color:#ecfdf5;font-size:.68rem;font-weight:700;cursor:pointer;">
+      <i class="fa-solid fa-qrcode" style="margin-right:4px;"></i>Ler próxima etiqueta
+    </button>
+  </div>`;
+}
+
+/**
+ * Modal câmera para ler QR das etiquetas (sem digitar).
+ * Exige FIFO: sempre o menor ID pendente; outro ID → pedir permissão ao suporte
+ * (bypass só com "Permitir sem saldo no endereço").
+ */
+function _solAbrirLeitorQrIdsSep({ codigoProduto, qtyNeeded, unidade, idsEsperados, permitirForaOrdem }) {
+  const cod = String(codigoProduto || '').trim();
+  const need = Math.max(0, parseFloat(qtyNeeded) || 0);
+  const un = String(unidade || 'UN');
+  const fila = (Array.isArray(idsEsperados) ? idsEsperados : [])
+    .map(e => ({
+      id: Number(e.id),
+      saldo: Math.max(0, parseFloat(e.qtd != null ? e.qtd : e.saldo) || 0),
+      tirar: Math.max(0, parseFloat(e.tirar) || 0),
+      endereco: String(e.endereco || '').trim()
+    }))
+    .filter(e => e.id && e.tirar > 0)
+    .sort((a, b) => a.id - b.id);
+
+  return new Promise((resolve) => {
+    const overlay = document.createElement('div');
+    overlay.id = 'sepEtqQrOverlay';
+    overlay.style.cssText = 'position:fixed;inset:0;z-index:12000;background:rgba(0,0,0,.88);display:flex;align-items:center;justify-content:center;padding:12px;';
+    const proximoTxt = fila[0] ? `Próximo: ID <strong style="color:#86efac;">${fila[0].id}</strong>` : 'Nenhum ID na fila';
+    overlay.innerHTML = `
+      <div style="background:#1e293b;border:1px solid #334155;border-radius:14px;width:min(460px,96vw);overflow:hidden;box-shadow:0 24px 64px rgba(0,0,0,.6);position:relative;">
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 18px;background:#0f172a;border-bottom:1px solid #334155;">
+          <div style="display:flex;align-items:center;gap:8px;">
+            <i class="fa-solid fa-qrcode" style="color:#34d399;font-size:1.1rem;"></i>
+            <span style="font-weight:700;color:#f1f5f9;font-size:.95rem;">Ler QR da etiqueta</span>
+          </div>
+          <button type="button" id="sepEtqQrFechar" style="background:none;border:none;color:#94a3b8;font-size:1.4rem;cursor:pointer;line-height:1;">&times;</button>
+        </div>
+        <div style="padding:10px 16px 0;font-size:.78rem;color:#94a3b8;line-height:1.4;">
+          Produto <strong style="color:#fbbf24;">${escapeHtml(cod)}</strong> · ${_solFmtQty(need)} ${escapeHtml(un)}<br>
+          ${proximoTxt} · só leitura (sem digitar)
+        </div>
+        <div style="position:relative;background:#000;width:100%;aspect-ratio:4/3;overflow:hidden;margin-top:10px;">
+          <video id="sepEtqQrVideo" autoplay playsinline muted style="width:100%;height:100%;object-fit:contain;display:block;background:#000;"></video>
+          <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none;">
+            <div id="sepEtqQrMira" style="width:200px;height:200px;border:3px solid rgba(52,211,153,.85);border-radius:12px;box-shadow:0 0 0 3000px rgba(0,0,0,.38);"></div>
+          </div>
+        </div>
+        <div id="sepEtqQrStatus" style="padding:12px 16px 16px;font-size:.85rem;color:#94a3b8;text-align:center;min-height:44px;"></div>
+        <div id="sepEtqQrLidos" style="padding:0 16px 14px;font-size:.72rem;color:#cbd5e1;max-height:100px;overflow-y:auto;"></div>
+        <!-- Campo oculto só para leitor USB (wedge); usuário não digita. -->
+        <input id="sepEtqQrInput" type="text" autocomplete="off" tabindex="-1"
+          style="position:absolute;left:-9999px;width:1px;height:1px;opacity:0;" aria-hidden="true" />
+      </div>`;
+    document.body.appendChild(overlay);
+
+    const statusEl = overlay.querySelector('#sepEtqQrStatus');
+    const lidosEl = overlay.querySelector('#sepEtqQrLidos');
+    const inputEl = overlay.querySelector('#sepEtqQrInput');
+    const video = overlay.querySelector('#sepEtqQrVideo');
+    const mira = overlay.querySelector('#sepEtqQrMira');
+    let stream = null;
+    let interval = null;
+    let busy = false;
+    const leituras = [];
+    let remaining = need;
+    let filaRestante = fila.slice();
+
+    function _atualizarLidos() {
+      const total = leituras.reduce((s, l) => s + (Number(l.tirar) || 0), 0);
+      const prox = filaRestante[0];
+      if (!leituras.length && !prox) {
+        lidosEl.innerHTML = '';
+        return;
+      }
+      lidosEl.innerHTML = leituras.map(l =>
+        `<div>✓ ID <strong style="color:#86efac;">${l.id}</strong> → ${_solFmtQty(l.tirar)} ${escapeHtml(un)}</div>`
+      ).join('') +
+        (prox
+          ? `<div style="margin-top:4px;color:#fde68a;">Próximo a ler: <strong>ID ${prox.id}</strong> (${_solFmtQty(prox.tirar)} ${escapeHtml(un)})</div>`
+          : '') +
+        `<div style="margin-top:2px;color:#94a3b8;">Lido ${_solFmtQty(total)} / ${_solFmtQty(need)} · falta ${_solFmtQty(remaining)}</div>`;
+    }
+
+    function _setStatus(msg, cor) {
+      if (statusEl) {
+        statusEl.textContent = msg;
+        statusEl.style.color = cor || '#94a3b8';
+      }
+    }
+
+    async function _pararCamera() {
+      if (interval) { clearInterval(interval); interval = null; }
+      if (stream) {
+        stream.getTracks().forEach(t => t.stop());
+        stream = null;
+      }
+      if (video) video.srcObject = null;
+    }
+
+    function _fechar(ok) {
+      _pararCamera();
+      overlay.remove();
+      resolve(ok ? { ok: true, leituras: leituras.slice() } : { ok: false });
+    }
+
+    async function _processarValor(valor) {
+      if (busy || remaining <= 1e-9) return;
+      const etqId = _solParseEtqIdFromQr(valor);
+      if (inputEl) inputEl.value = '';
+      if (!etqId) {
+        _setStatus('QR não reconhecido. Aponte para a etiqueta.', '#f87171');
+        return;
+      }
+      if (leituras.some(l => Number(l.id) === etqId)) {
+        _setStatus(`ID ${etqId} já foi lido.`, '#fbbf24');
+        return;
+      }
+
+      const proximo = filaRestante[0];
+      if (proximo && Number(proximo.id) !== etqId) {
+        if (!permitirForaOrdem) {
+          _setStatus(
+            `ID ${etqId} não é o menor pendente (próximo: ${proximo.id}). Peça permissão ao suporte para liberar fora da ordem.`,
+            '#f87171'
+          );
+          return;
+        }
+      }
+
+      busy = true;
+      _setStatus(`Validando ID ${etqId}...`, '#94a3b8');
+      try {
+        const r = await fetch(`/api/etiquetas/rec-impresso/${etqId}`, { credentials: 'include' });
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok || !d.ok || !d.etiqueta) throw new Error(d.error || 'Etiqueta não encontrada.');
+        const etq = d.etiqueta;
+        const codOk = String(etq.codigo || '').trim();
+        const omieOk = String(etq.codigo_omie || '').trim();
+        if (cod && codOk && codOk !== cod && omieOk !== cod) {
+          throw new Error(`ID ${etqId} é de outro produto (${codOk || omieOk}).`);
+        }
+        const saldo = Math.max(0, parseFloat(etq.qtd) || 0);
+        if (saldo <= 0) throw new Error(`ID ${etqId} sem saldo.`);
+
+        let esperado = filaRestante.find(f => Number(f.id) === etqId);
+        if (!esperado && !permitirForaOrdem) {
+          throw new Error(`ID ${etqId} não está na lista desta SEP. Peça permissão ao suporte.`);
+        }
+        const tirarPref = esperado ? Number(esperado.tirar) || 0 : remaining;
+        const tirar = Math.min(saldo, remaining, tirarPref > 0 ? tirarPref : remaining);
+        if (tirar <= 0) throw new Error(`ID ${etqId} não cobre quantidade.`);
+
+        leituras.push({
+          id: String(etqId),
+          endereco: String(etq.endereco || esperado?.endereco || '').trim(),
+          saldo,
+          tirar
+        });
+        remaining = Math.max(0, remaining - tirar);
+        filaRestante = filaRestante.filter(f => Number(f.id) !== etqId);
+
+        if (mira) {
+          mira.style.borderColor = '#4ade80';
+          setTimeout(() => { if (mira) mira.style.borderColor = 'rgba(52,211,153,.85)'; }, 500);
+        }
+        _atualizarLidos();
+        if (remaining <= 1e-9) {
+          _setStatus('Quantidade completa.', '#4ade80');
+          setTimeout(() => _fechar(true), 400);
+          return;
+        }
+        const prox = filaRestante[0];
+        _setStatus(
+          prox ? `OK. Agora leia o ID ${prox.id}.` : `Falta ${_solFmtQty(remaining)} ${un}.`,
+          '#fbbf24'
+        );
+      } catch (e) {
+        _setStatus(e.message || 'Erro ao validar etiqueta.', '#f87171');
+      } finally {
+        busy = false;
+        setTimeout(() => inputEl?.focus(), 50);
+      }
+    }
+
+    async function _iniciarCamera() {
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: { ideal: 'environment' } },
+          audio: false
+        });
+        if (video) {
+          video.srcObject = stream;
+          await video.play().catch(() => {});
+        }
+        _setStatus(
+          fila[0] ? `Aponte para o QR do ID ${fila[0].id} (menor da fila).` : 'Aponte para o QR da etiqueta.',
+          '#94a3b8'
+        );
+      } catch (_) {
+        _setStatus('Câmera indisponível. Use o leitor de código de barras USB.', '#f59e0b');
+      }
+      if ('BarcodeDetector' in window) {
+        const detector = new BarcodeDetector({ formats: ['qr_code', 'data_matrix'] });
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+        interval = setInterval(async () => {
+          if (!video || video.readyState < 2 || busy || remaining <= 1e-9) return;
+          canvas.width = video.videoWidth;
+          canvas.height = video.videoHeight;
+          ctx.drawImage(video, 0, 0);
+          try {
+            const barcodes = await detector.detect(canvas);
+            if (barcodes.length > 0) await _processarValor(barcodes[0].rawValue);
+          } catch (_) { /* frame */ }
+        }, 350);
+      }
+    }
+
+    // Acumula leitura rápida do wedge USB no input oculto
+    let wedgeBuf = '';
+    let wedgeTimer = null;
+    overlay.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Escape') { _fechar(false); return; }
+      if (busy) return;
+      if (ev.key === 'Enter') {
+        ev.preventDefault();
+        const v = (inputEl?.value || wedgeBuf || '').trim();
+        wedgeBuf = '';
+        if (inputEl) inputEl.value = '';
+        if (v) void _processarValor(v);
+        return;
+      }
+      if (ev.key.length === 1 && !ev.ctrlKey && !ev.metaKey && !ev.altKey) {
+        wedgeBuf += ev.key;
+        clearTimeout(wedgeTimer);
+        wedgeTimer = setTimeout(() => { wedgeBuf = ''; }, 120);
+      }
+    });
+
+    overlay.querySelector('#sepEtqQrFechar')?.addEventListener('click', () => _fechar(false));
+    overlay.addEventListener('click', (ev) => { if (ev.target === overlay) _fechar(false); });
+
+    _atualizarLidos();
+    _iniciarCamera();
+    setTimeout(() => inputEl?.focus(), 200);
+  });
+}
+
+/** Aloca a quantidade nos endereços/IDs na ordem de seleção (primeiro leva o máximo possível). */
 function _solCalcularAlocacaoEtq(selecoes, qtyNeeded) {
   let remaining = Math.max(0, parseFloat(qtyNeeded) || 0);
   const alocs = [];
   for (const s of selecoes || []) {
     const saldo = Math.max(0, parseFloat(s.saldo) || 0);
-    const tirar = remaining > 0 ? Math.min(saldo, remaining) : 0;
+    const tirarPref = parseFloat(s.tirar);
+    const tirar = remaining > 0
+      ? Math.min(saldo, remaining, Number.isFinite(tirarPref) && tirarPref > 0 ? tirarPref : saldo)
+      : 0;
     alocs.push({
       id: s.id != null ? String(s.id) : '',
       endereco: String(s.endereco || '').trim(),
@@ -393,21 +715,27 @@ function _solAplicarVisualAlocacaoEtq(row, qtyNeeded) {
   if (!row) return null;
   const selecoes = _solLerSelecoesEtq(row);
   const calc = _solCalcularAlocacaoEtq(selecoes, qtyNeeded);
-  const byKey = new Map(calc.alocs.map(a => [_solEtqSelecaoKey(a), a]));
+  const byEndereco = new Map();
+  for (const a of calc.alocs) {
+    const end = String(a.endereco || '').trim();
+    if (!end || !(a.tirar > 0)) continue;
+    const prev = byEndereco.get(end) || { tirar: 0, ids: [] };
+    prev.tirar += Number(a.tirar) || 0;
+    if (a.id) prev.ids.push(a.id);
+    byEndereco.set(end, prev);
+  }
   row.querySelectorAll('.sep-etq-endereco-row').forEach(el => {
-    const key = String(el.dataset.etqId || el.dataset.etqEndereco || '');
-    const aloc = byKey.get(key);
-    const active = !!aloc;
+    const end = String(el.dataset.etqEndereco || '').trim();
+    const info = byEndereco.get(end);
+    const active = !!info;
     el.dataset.selected = active ? '1' : '0';
     el.style.borderColor = active ? '#22c55e' : '#854d0e33';
     el.style.background = active ? '#1a2e1a' : '#1a1508';
     const badge = el.querySelector('.sep-etq-tirar');
     if (badge) {
-      if (active && aloc.tirar > 0) {
-        badge.textContent = `Tirar ${_solFmtQty(aloc.tirar)}`;
-        badge.style.display = 'inline-block';
-      } else if (active) {
-        badge.textContent = 'Selecionado';
+      if (active && info.tirar > 0) {
+        const idsTxt = info.ids.length ? ` · ID ${info.ids.join(',')}` : '';
+        badge.textContent = `Tirar ${_solFmtQty(info.tirar)}${idsTxt}`;
         badge.style.display = 'inline-block';
       } else {
         badge.textContent = '';
@@ -417,10 +745,10 @@ function _solAplicarVisualAlocacaoEtq(row, qtyNeeded) {
   });
   const comTirar = calc.alocs.filter(a => a.tirar > 0);
   row.dataset.etqAlocacoes = JSON.stringify(comTirar);
-  if (selecoes.length) {
-    const saldoTotal = selecoes.reduce((s, a) => s + (Number(a.saldo) || 0), 0);
-    row.dataset.etqId = String(selecoes[0].id || '');
-    row.dataset.etqEndereco = String(selecoes[0].endereco || '');
+  if (comTirar.length) {
+    const saldoTotal = comTirar.reduce((s, a) => s + (Number(a.saldo) || 0), 0);
+    row.dataset.etqId = String(comTirar[0].id || '');
+    row.dataset.etqEndereco = String(comTirar[0].endereco || '');
     row.dataset.etqQtd = String(saldoTotal);
   } else {
     row.dataset.etqId = '';
@@ -467,7 +795,7 @@ function _solEnderecamentoSepInline(codigo, enderecoMap, itemFallback) {
   if (!linhas) return '';
   return `<div class="sep-etq-endereco-list" style="padding:6px 8px;background:#141006;border:1px solid #854d0e55;border-radius:8px;">
     ${_solEnderecoLegendaHtml(registros)}
-    <div style="font-size:.58rem;color:#94a3b8;margin:2px 0 4px;line-height:1.3;">Toque em mais de um endereço se a qtd não couber em um só. O 1º selecionado tira o máximo.</div>
+    <div style="font-size:.58rem;color:#94a3b8;margin:2px 0 4px;line-height:1.3;">Toque no endereço ou use "Ler próxima etiqueta". Sempre o ID menor primeiro. A qtd do endereço é a soma de todos os registros.</div>
     ${head}${linhas}
   </div>`;
 }
@@ -845,6 +1173,9 @@ window._loadSolicitacoesTab = async function() {
             const hint     = col.acao === 'iniciar'
               ? `<span style="font-size:.65rem;color:#22c55e88;margin-top:3px;display:block;"><i class="fa-solid fa-eye" style="margin-right:2px;"></i>Clique para ver itens</span>
                  <button class="solic-sep-start-btn" data-n-solic="${sep.n_solic}" style="margin-top:6px;padding:4px 8px;border:none;border-radius:6px;background:#1d4ed8;color:#dbeafe;font-size:.68rem;font-weight:700;cursor:pointer;"><i class="fa-solid fa-play" style="margin-right:3px;"></i>Iniciar separação</button>`
+              : (col.key === 'Stund-by')
+                ? `<span style="font-size:.65rem;color:#22c55e55;margin-top:3px;display:block;"><i class="fa-solid fa-eye" style="margin-right:2px;"></i>Ver itens</span>
+                   <button type="button" class="solic-sep-excluir-btn" data-n-solic="${sep.n_solic}" style="margin-top:6px;padding:4px 8px;border:1px solid #7f1d1d;border-radius:6px;background:transparent;color:#f87171;font-size:.68rem;font-weight:700;cursor:pointer;width:100%;"><i class="fa-solid fa-trash-can" style="margin-right:3px;"></i>Excluir</button>`
               : (col.acao === 'modal' || col.acao === 'visualizar')
                 ? `<span style="font-size:.65rem;color:#22c55e55;margin-top:3px;display:block;"><i class="fa-solid fa-eye" style="margin-right:2px;"></i>Ver itens</span>`
                 : '';
@@ -922,6 +1253,35 @@ window._loadSolicitacoesTab = async function() {
     });
 
     // Delegação de clique nos cards
+    board.querySelectorAll('.solic-sep-excluir-btn').forEach(btn => {
+      btn.addEventListener('click', async (ev) => {
+        ev.preventDefault();
+        ev.stopPropagation();
+        const nSolic = btn.dataset.nSolic;
+        if (!nSolic || btn.disabled) return;
+        if (!confirm(`Excluir a SEP ${nSolic} do Stand-by?\n\nEla sai da Tela de separação e do Kanban solicitações.`)) return;
+        btn.disabled = true;
+        const htmlAntes = btn.innerHTML;
+        btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
+        try {
+          const r = await fetch(`/api/logistica/sep/${encodeURIComponent(nSolic)}/excluido`, {
+            method: 'PATCH',
+            credentials: 'include',
+            headers: { 'Content-Type': 'application/json' },
+            body: '{}'
+          });
+          const d = await r.json().catch(() => ({}));
+          if (!r.ok || !d.ok) throw new Error(d.error || 'Erro ao excluir.');
+          window._loadSolicitacoesTab && (window._loadSolicitacoesTab.force = true, window._loadSolicitacoesTab());
+          window._loadKanbanSolicitacoesTab && (window._loadKanbanSolicitacoesTab.force = true, window._loadKanbanSolicitacoesTab());
+        } catch (e) {
+          alert('Erro: ' + (e.message || e));
+          btn.disabled = false;
+          btn.innerHTML = htmlAntes;
+        }
+      });
+    });
+
     board.querySelectorAll('.solic-kanban-card').forEach(cardEl => {
       const acao   = cardEl.dataset.colAcao;
       const nSolic = cardEl.dataset.nSolic;
@@ -961,14 +1321,17 @@ window._loadSolicitacoesTab = async function() {
             let preloaded = {};
             if (codigos.length) {
               try {
-                const [re, endMap] = await Promise.all([
+                const [re, endMap, rid] = await Promise.all([
                   fetch('/api/logistica/estoque/batch?codigos=' + encodeURIComponent(codigos.join(',')), { credentials: 'include' }),
-                  _solCarregarEnderecoBatch(codigos)
+                  _solCarregarEnderecoBatch(codigos),
+                  fetch('/api/etiquetas/rec-impresso/ids-fifo-batch?codigos=' + encodeURIComponent(codigos.join(',')), { credentials: 'include' })
                 ]);
                 const de = await re.json();
+                const did = await rid.json().catch(() => ({}));
                 preloaded = {
                   estoqueBatch: de.ok ? (de.dados || {}) : {},
-                  enderecoBatch: _solMergeEnderecoBatch(itens, endMap || {})
+                  enderecoBatch: _solMergeEnderecoBatch(itens, endMap || {}),
+                  etqIdsBatch: did.ok ? (did.dados || {}) : {}
                 };
               } catch (_) {}
             }
@@ -1242,7 +1605,9 @@ async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) 
     const host = document.getElementById('modalSepLockBanner');
     if (host) host.innerHTML = _htmlBannerSepLock();
     const footCancel = document.getElementById('modalSepFooterCancel');
-    if (footCancel) footCancel.style.display = podeCancelarSep ? '' : 'none';
+    if (footCancel) footCancel.style.display = 'flex';
+    const btnCancel = document.getElementById('btnCancelarSeparacao');
+    if (btnCancel) btnCancel.style.display = podeCancelarSep ? 'inline-flex' : 'none';
     _renderLista();
   }
 
@@ -1363,15 +1728,20 @@ async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) 
     const calc = _solAplicarVisualAlocacaoEtq(row, Number.isFinite(qtd) ? qtd : (parseFloat(row.dataset.qtyTotal || '0') || 0));
     const selecoes = _solLerSelecoesEtq(row);
     if (!selecoes.length) {
-      alert('Selecione um ou mais endereços de origem no Almoxarifado (Porta Pallet).');
+      alert('Leia o QR das etiquetas (IDs) na ordem do menor para o maior antes de separar.');
+      return false;
+    }
+    const semId = selecoes.filter(s => !String(s.id || '').trim());
+    if (semId.length) {
+      alert('Leia o QR Code da etiqueta (ID) antes de separar.');
       return false;
     }
     if (!Number.isFinite(qtd) || qtd <= 0) return true;
     if (calc && calc.remaining > 1e-9) {
       const cod = row.dataset.codigo || 'item';
       alert(
-        `Item ${cod}: os endereços selecionados somam ${_solFmtQty(calc.totalTirar)}, ` +
-        `mas são necessários ${_solFmtQty(qtd)}. Selecione mais endereços para completar.`
+        `Item ${cod}: os IDs lidos somam ${_solFmtQty(calc.totalTirar)}, ` +
+        `mas são necessários ${_solFmtQty(qtd)}. Use "Ler próxima etiqueta".`
       );
       return false;
     }
@@ -1662,6 +2032,7 @@ async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) 
                      <i class="fa-solid fa-arrows-rotate" style="margin-right:2px;"></i>Trocar
                    </button>` : ''}
                  </div>
+                 ${usarOrigemSepFase ? _solRenderIdsFifoHtml(_idsFifoDoItem(it, qty), unidade) : ''}
                  ${obsText ? `<div style="font-size:.63rem;color:#93c5fd;text-align:${isCompact ? 'left' : 'right'};max-width:${isCompact ? '100%' : '200px'};word-break:break-word;"><i class="fa-solid fa-comment" style="margin-right:3px;color:#6b7280;"></i>${obsText}</div>` : ''}
                </div>`}
       </div>`;
@@ -1673,6 +2044,13 @@ async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) 
     [...(grupoAtual.itens || []), ...aggItens],
     preloaded.enderecoBatch || {}
   );
+  let etqIdsBatch = preloaded.etqIdsBatch || {};
+
+  function _idsFifoDoItem(it, qty) {
+    const cod = String(it?.codigo_produto || '').trim();
+    const lista = (cod && etqIdsBatch[cod]) ? etqIdsBatch[cod] : [];
+    return _solPickIdsFifoAteQty(lista, qty).ids;
+  }
 
   function _renderLista() {
     const lista = document.getElementById('modalSepItemsList');
@@ -1692,17 +2070,77 @@ async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) 
     const codigos = [...new Set([...codigosAgg, ...codigosConfl].filter(Boolean))];
     if (!codigos.length) return;
     try {
-      const [re, rep] = await Promise.all([
+      const [re, rep, rid] = await Promise.all([
         fetch('/api/logistica/estoque/batch?codigos=' + encodeURIComponent(codigos.join(',')), { credentials: 'include' }),
-        fetch('/api/logistica/endereco-pp/batch?codigos=' + encodeURIComponent(codigos.join(',')), { credentials: 'include' })
+        fetch('/api/logistica/endereco-pp/batch?codigos=' + encodeURIComponent(codigos.join(',')), { credentials: 'include' }),
+        fetch('/api/etiquetas/rec-impresso/ids-fifo-batch?codigos=' + encodeURIComponent(codigos.join(',')), { credentials: 'include' })
       ]);
       const de = await re.json();
       const dep = await rep.json();
+      const did = await rid.json().catch(() => ({}));
       if (de.ok) estoqueBatch = { ...estoqueBatch, ...(de.dados || {}) };
       if (dep.ok) enderecoBatch = _solMergeEnderecoBatch(aggItens, { ...enderecoBatch, ...(dep.dados || {}) });
       else enderecoBatch = _solMergeEnderecoBatch(aggItens, enderecoBatch);
+      if (did.ok) etqIdsBatch = { ...etqIdsBatch, ...(did.dados || {}) };
     } catch (_) {}
     if (document.getElementById('modalSeparacaoLogistica')) _renderLista();
+  }
+
+  async function _abrirLeituraFifoDoRow(row) {
+    if (!row) return;
+    const qty = parseFloat(row.dataset.qtyTotal || '0') || 0;
+    const codigo = row.dataset.codigo || '';
+    const unidade = row.dataset.unidade || 'UN';
+    const idsEsperados = _idsFifoDoItem({ codigo_produto: codigo }, qty);
+    if (!idsEsperados.length) {
+      alert('Não há IDs com saldo no Porta Pallet para este produto.');
+      return;
+    }
+    // Já lidos: mantém; falta o restante da fila
+    let selecoes = _solLerSelecoesEtq(row);
+    const lidos = new Set(selecoes.map(s => Number(s.id)).filter(Boolean));
+    const pendentes = idsEsperados.filter(e => !lidos.has(Number(e.id)));
+    if (!pendentes.length) {
+      alert('Todos os IDs necessários já foram lidos.');
+      return;
+    }
+    const falta = Math.max(0, qty - selecoes.reduce((s, a) => s + (Number(a.tirar) || 0), 0));
+    if (falta <= 1e-9) {
+      alert('Quantidade já completa com os IDs lidos.');
+      return;
+    }
+    const result = await _solAbrirLeitorQrIdsSep({
+      codigoProduto: codigo,
+      qtyNeeded: falta,
+      unidade,
+      idsEsperados: pendentes,
+      permitirForaOrdem: _modalSepIgnorarSaldoEtq()
+    });
+    if (!result?.ok || !Array.isArray(result.leituras) || !result.leituras.length) return;
+    selecoes = _solLerSelecoesEtq(row);
+    for (const l of result.leituras) {
+      const idNum = Number(l.id);
+      if (selecoes.some(s => Number(s.id) === idNum)) continue;
+      selecoes.push({
+        id: String(l.id),
+        endereco: String(l.endereco || ''),
+        saldo: Number(l.saldo) || 0,
+        tirar: Number(l.tirar) || 0
+      });
+    }
+    row.dataset.etqSelecoes = JSON.stringify(selecoes);
+    _solAplicarVisualAlocacaoEtq(row, qty);
+    // Marca visualmente IDs já lidos na lista
+    const lidosAgora = new Set(selecoes.map(s => Number(s.id)).filter(Boolean));
+    row.querySelectorAll('.sep-etq-id-row').forEach(el => {
+      const id = Number(el.dataset.etqId);
+      if (lidosAgora.has(id)) {
+        el.style.color = '#86efac';
+        el.style.opacity = '0.85';
+        const span = el.querySelector('span');
+        if (span && !span.textContent.includes('✓')) span.textContent = span.textContent.replace(' ← ler', '') + ' ✓';
+      }
+    });
   }
 
   // Recarrega o SEP original do servidor e re-renderiza lista (sem sub-SEPs — .1 vai para fila pendente)
@@ -1946,18 +2384,28 @@ async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) 
         ${conflitosHtml}
       </div>
       ${isStandby ? `
-      <div style="padding:12px 16px;border-top:1px solid #2a2a2a;display:flex;justify-content:flex-end;align-items:center;gap:8px;background:#171717;flex-wrap:wrap;">
-        <button id="btnStandbySolicitarCompra" style="padding:7px 14px;border:1px solid #4b5563;border-radius:8px;background:transparent;color:#d1d5db;font-weight:700;font-size:.82rem;cursor:pointer;">
-          <i class="fa-solid fa-cart-shopping" style="margin-right:4px;"></i>Solicitar compra
+      <div style="padding:12px 16px;border-top:1px solid #2a2a2a;display:flex;justify-content:space-between;align-items:center;gap:8px;background:#171717;flex-wrap:wrap;">
+        <button type="button" id="btnPlanejarSeparacaoModal" title="Ver no Armazém 3D onde estão os itens desta SEP"
+          style="padding:7px 14px;border:none;border-radius:8px;background:#0ea5e9;color:#e0f2fe;font-weight:700;font-size:.82rem;cursor:pointer;">
+          <i class="fa-solid fa-warehouse" style="margin-right:4px;"></i>Planejar separação
         </button>
-        <button id="btnStandbyIniciarSep" style="padding:7px 14px;border:none;border-radius:8px;background:#1d4ed8;color:#dbeafe;font-weight:700;font-size:.82rem;cursor:pointer;">
-          <i class="fa-solid fa-play" style="margin-right:4px;"></i>Iniciar separação
-        </button>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+          <button id="btnStandbySolicitarCompra" style="padding:7px 14px;border:1px solid #4b5563;border-radius:8px;background:transparent;color:#d1d5db;font-weight:700;font-size:.82rem;cursor:pointer;">
+            <i class="fa-solid fa-cart-shopping" style="margin-right:4px;"></i>Solicitar compra
+          </button>
+          <button id="btnStandbyIniciarSep" style="padding:7px 14px;border:none;border-radius:8px;background:#1d4ed8;color:#dbeafe;font-weight:700;font-size:.82rem;cursor:pointer;">
+            <i class="fa-solid fa-play" style="margin-right:4px;"></i>Iniciar separação
+          </button>
+        </div>
       </div>` : ''}
       ${!isStandby ? `
-      <div id="modalSepFooterCancel" style="padding:12px 16px;border-top:1px solid #2a2a2a;display:${podeCancelarSep ? 'flex' : 'none'};justify-content:flex-start;align-items:center;gap:8px;background:#171717;flex-wrap:wrap;">
-        <button id="btnCancelarSeparacao" style="padding:7px 14px;border:1px solid #7f1d1d;border-radius:8px;background:transparent;color:#f87171;font-weight:700;font-size:.82rem;cursor:pointer;">
+      <div id="modalSepFooterCancel" style="padding:12px 16px;border-top:1px solid #2a2a2a;display:flex;justify-content:space-between;align-items:center;gap:8px;background:#171717;flex-wrap:wrap;">
+        <button id="btnCancelarSeparacao" style="padding:7px 14px;border:1px solid #7f1d1d;border-radius:8px;background:transparent;color:#f87171;font-weight:700;font-size:.82rem;cursor:pointer;display:${podeCancelarSep ? 'inline-flex' : 'none'};align-items:center;">
           <i class="fa-solid fa-ban" style="margin-right:4px;"></i>Cancelar separação
+        </button>
+        <button type="button" id="btnPlanejarSeparacaoModal" title="Ver no Armazém 3D onde estão os itens desta SEP"
+          style="padding:7px 14px;border:none;border-radius:8px;background:#0ea5e9;color:#e0f2fe;font-weight:700;font-size:.82rem;cursor:pointer;margin-left:auto;">
+          <i class="fa-solid fa-warehouse" style="margin-right:4px;"></i>Planejar separação
         </button>
       </div>` : ''}
     </div>`;
@@ -1966,6 +2414,33 @@ async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) 
 
   document.getElementById('btnModalSepFechar')?.addEventListener('click', () => fecharModal());
   modal.addEventListener('click', e => { if (e.target === modal) fecharModal(); });
+
+  document.getElementById('btnPlanejarSeparacaoModal')?.addEventListener('click', (ev) => {
+    ev.preventDefault();
+    ev.stopPropagation();
+    const codigos = [...new Set(
+      (aggItens || [])
+        .map(it => String(it.codigo_produto || '').trim())
+        .filter(Boolean)
+    )];
+    const btnEl = ev.currentTarget;
+    if (typeof window._arm3dAbrirPlanejarSeparacao !== 'function') {
+      alert('Função de planejamento não carregada. Dê F5 e tente de novo.');
+      return;
+    }
+    void window._arm3dAbrirPlanejarSeparacao({
+      codigos,
+      nSolic: grupoAtual.n_solic,
+      btn: btnEl
+    }).catch((err) => {
+      console.error('[planejar-sep click]', err);
+      alert('Erro ao planejar: ' + (err?.message || err));
+      if (btnEl) {
+        btnEl.disabled = false;
+        if (btnEl.dataset._html) btnEl.innerHTML = btnEl.dataset._html;
+      }
+    });
+  });
 
   document.getElementById('btnCancelarSeparacao')?.addEventListener('click', async () => {
     const btn = document.getElementById('btnCancelarSeparacao');
@@ -2391,20 +2866,37 @@ async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) 
     if (btnEtq) {
       const row = btnEtq.closest('[data-item-row]');
       if (!row) return;
+      const endereco = String(btnEtq.dataset.etqEndereco || '').trim();
+      if (!endereco) return;
+
       let selecoes = _solLerSelecoesEtq(row);
-      const id = btnEtq.dataset.etqId || '';
-      const endereco = btnEtq.dataset.etqEndereco || '';
-      const saldo = parseFloat(btnEtq.dataset.etqQtd || '0') || 0;
-      const key = String(id || endereco);
-      const idx = selecoes.findIndex(s => _solEtqSelecaoKey(s) === key);
-      if (idx >= 0) {
-        selecoes.splice(idx, 1);
-      } else {
-        selecoes.push({ id, endereco, saldo });
+      const jaNoEndereco = selecoes.filter(s => String(s.endereco || '').trim() === endereco);
+      if (jaNoEndereco.length) {
+        selecoes = selecoes.filter(s => String(s.endereco || '').trim() !== endereco);
+        row.dataset.etqSelecoes = JSON.stringify(selecoes);
+        const qty = parseFloat(row.dataset.qtyTotal || '0') || 0;
+        _solAplicarVisualAlocacaoEtq(row, qty);
+        return;
       }
-      row.dataset.etqSelecoes = JSON.stringify(selecoes);
-      const qty = parseFloat(row.dataset.qtyTotal || '0') || 0;
-      _solAplicarVisualAlocacaoEtq(row, qty);
+
+      // Seleciona o endereço visualmente e abre leitura FIFO (menor ID → maior)
+      btnEtq.dataset.selected = '1';
+      btnEtq.style.borderColor = '#22c55e';
+      btnEtq.style.background = '#1a2e1a';
+      await _abrirLeituraFifoDoRow(row);
+      return;
+    }
+
+    const btnLerFifo = e.target.closest('.btn-ler-etq-fifo');
+    if (btnLerFifo) {
+      const row = btnLerFifo.closest('[data-item-row]');
+      if (!row) return;
+      btnLerFifo.disabled = true;
+      try {
+        await _abrirLeituraFifoDoRow(row);
+      } finally {
+        btnLerFifo.disabled = false;
+      }
       return;
     }
 
@@ -7744,6 +8236,13 @@ else if (nome === 'ajuste-estoque') {
 else if (nome === 'armazem3d') {
   initArmazem3D();
 }
+else if (nome === 'porta-pallet-3d') {
+  const frame = document.getElementById('portaPallet3dFrame');
+  if (frame && !frame.dataset.loaded) {
+    frame.src = '/prateleiras-3d/?embed=1';
+    frame.dataset.loaded = '1';
+  }
+}
 else if (nome === 'posicao-estoque') {
   initPosicaoEstoque();
 }
@@ -7758,17 +8257,232 @@ else if (nome === 'oscilacao-estoque') {
 /* ====================================================== */
 let _arm3dInited = false;
 let _arm3dOcupacao = null; // cache { "01-04-01-001": [{codigo_produto, qtd, unidade}, ...] }
+let _arm3dFiltroCodigo = null; // codigo (produtos_omie.codigo) selecionado na busca
+let _arm3dFiltroCodigosSet = null; // Set uppercase — modo Planejar separação (vários códigos SEP)
+let _arm3dPainelAtual = null; // { rua, lado } quando painel 2D aberto
+let _arm3dBuscaTimer = null;
+let _arm3dBuscaSeq = 0;
+let _arm3dPlanejarPlaceholder = null;
+let _arm3dPlanejarParent = null;
 
-async function _arm3dCarregarOcupacao() {
+function _arm3dEscHtml(s) {
+  return String(s ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+/** Filtra itens do endereço pelo produto selecionado na busca (se houver). */
+function _arm3dItensVisiveis(itens) {
+  let lista = Array.isArray(itens) ? itens : [];
+  if (_arm3dFiltroCodigosSet && _arm3dFiltroCodigosSet.size) {
+    lista = lista.filter((i) =>
+      _arm3dFiltroCodigosSet.has(String(i.codigo_produto || '').trim().toUpperCase())
+    );
+  }
+  if (_arm3dFiltroCodigo) {
+    const cod = String(_arm3dFiltroCodigo).trim().toUpperCase();
+    lista = lista.filter((i) => String(i.codigo_produto || '').trim().toUpperCase() === cod);
+  }
+  return lista;
+}
+
+/** Soma qtd por código (mantém foto/descrição/data do primeiro). */
+function _arm3dAgregarPorCodigo(itens) {
+  const map = {};
+  for (const i of (itens || [])) {
+    const cod = String(i.codigo_produto || '').trim();
+    if (!cod) continue;
+    if (!map[cod]) {
+      map[cod] = {
+        codigo_produto: cod,
+        qtd: 0,
+        unidade: i.unidade || 'UN',
+        descricao: i.descricao || '',
+        data_emissao: i.data_emissao || null,
+        foto_url: i.foto_url || null,
+        id: i.id || null,
+      };
+    }
+    map[cod].qtd += Number(i.qtd) || 0;
+    if (i.unidade) map[cod].unidade = i.unidade;
+    if (!map[cod].foto_url && i.foto_url) map[cod].foto_url = i.foto_url;
+    if (!map[cod].descricao && i.descricao) map[cod].descricao = i.descricao;
+  }
+  return Object.values(map).filter((i) => i.qtd > 0);
+}
+
+function _arm3dParseDataEmissao(valor) {
+  const m = String(valor || '').trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (!m) return null;
+  const t = new Date(Number(m[3]), Number(m[2]) - 1, Number(m[1])).getTime();
+  return Number.isFinite(t) ? t : null;
+}
+
+/** FIFO: verde=mais antigo, amarelo=meio, vermelho=mais novo. Só se >1 item. */
+function _arm3dAtribuirFifo(itens) {
+  const lista = Array.isArray(itens) ? [...itens] : [];
+  if (lista.length <= 1) return lista.map((i) => ({ ...i, fifo: null }));
+  const ranked = lista
+    .map((i, idx) => ({
+      i, idx,
+      ts: _arm3dParseDataEmissao(i.data_emissao) ?? Number.POSITIVE_INFINITY,
+      id: Number(i.id) || 0,
+    }))
+    .sort((a, b) => a.ts - b.ts || a.id - b.id || a.idx - b.idx);
+  const n = ranked.length;
+  const byIdx = new Map();
+  ranked.forEach((row, pos) => {
+    let fifo = 'amarelo';
+    if (pos === 0) fifo = 'verde';
+    else if (pos === n - 1) fifo = 'vermelho';
+    byIdx.set(row.idx, fifo);
+  });
+  return lista.map((i, idx) => ({ ...i, fifo: byIdx.get(idx) || null }));
+}
+
+function _arm3dFifoHtml(fifo) {
+  if (!fifo) return '';
+  return `<span class="arm3d-fifo arm3d-fifo--${_arm3dEscHtml(fifo)}" title="FIFO: ${fifo}"></span>`;
+}
+
+const ETQ_ENDERECO_RE = /^(\d{2})-(\d{2})-(\d{2})-(\d{3})$/;
+const ETQ_ENDERECO_MSG = 'Inserir no formato correto.';
+
+function _etqNormalizarEndereco(valor) {
+  return String(valor || '').trim().toUpperCase().replace(/\s+/g, '').replace(/_/g, '-');
+}
+
+function _etqAssertEndereco(valor) {
+  const end = _etqNormalizarEndereco(valor);
+  if (!ETQ_ENDERECO_RE.test(end)) {
+    const err = new Error(ETQ_ENDERECO_MSG);
+    throw err;
+  }
+  return end;
+}
+
+function _arm3dFecharDetalheModal() {
+  const modal = document.getElementById('arm3dDetalheModal');
+  if (modal) {
+    modal.style.display = 'none';
+    modal.setAttribute('aria-hidden', 'true');
+  }
+}
+
+async function _arm3dAbrirDetalheEndereco(endereco) {
+  const modal = document.getElementById('arm3dDetalheModal');
+  const endEl = document.getElementById('arm3dDetalheEndereco');
+  const body = document.getElementById('arm3dDetalheBody');
+  if (!modal || !body) return;
+
+  const endOk = String(endereco || '').trim();
+  if (!endOk) return;
+
+  if (endEl) endEl.textContent = endOk;
+  body.innerHTML = '<div class="arm3d-detalhe-loading">Carregando…</div>';
+  modal.style.display = 'flex';
+  modal.setAttribute('aria-hidden', 'false');
+
   try {
-    const resp = await fetch('/api/etiquetas/ocupacao');
-    const json = await resp.json();
-    if (json.ok) _arm3dOcupacao = json.ocupacao;
+    const resp = await fetch(
+      `/api/etiquetas/ocupacao/detalhe?endereco=${encodeURIComponent(endOk)}`,
+      { credentials: 'include', cache: 'no-store' }
+    );
+    const json = await resp.json().catch(() => ({}));
+    if (!resp.ok || !json?.ok) throw new Error(json?.error || `HTTP ${resp.status}`);
+
+    let itens = Array.isArray(json.itens) ? json.itens : [];
+    itens = _arm3dItensVisiveis(itens);
+    if (_arm3dFiltroCodigo) {
+      itens = _arm3dAtribuirFifo(itens);
+    }
+
+    if (!itens.length) {
+      body.innerHTML = '<div class="arm3d-detalhe-vazio">Nenhum item com saldo neste endereço.</div>';
+      return;
+    }
+
+    body.innerHTML = itens.map((i) => {
+      const foto = i.foto_url
+        ? `<img src="${_arm3dEscHtml(i.foto_url)}" alt="">`
+        : `<img src="img/Produto/Foto_carrocel.png" alt="">`;
+      const comp = i.complemento
+        ? ` · Comp.: ${_arm3dEscHtml(i.complemento)}`
+        : '';
+      const emis = i.data_emissao ? ` · Emissão: ${_arm3dEscHtml(i.data_emissao)}` : '';
+      return `<div class="arm3d-detalhe-item">
+        ${foto}
+        <div class="arm3d-detalhe-item-main">
+          <div class="arm3d-detalhe-item-top">
+            ${_arm3dFifoHtml(i.fifo)}
+            <span class="arm3d-detalhe-id">ID ${ _arm3dEscHtml(i.id)}</span>
+            <span class="arm3d-detalhe-cod">${_arm3dEscHtml(i.codigo_produto)}</span>
+          </div>
+          <div class="arm3d-detalhe-desc">${_arm3dEscHtml(i.descricao || '—')}</div>
+          <div class="arm3d-detalhe-meta">${_arm3dEscHtml(i.qtd)} ${_arm3dEscHtml(i.unidade || 'UN')}${emis}${comp}</div>
+        </div>
+      </div>`;
+    }).join('');
+  } catch (err) {
+    body.innerHTML = `<div class="arm3d-detalhe-vazio" style="color:#f87171;">${_arm3dEscHtml(err?.message || 'Falha ao carregar')}</div>`;
+  }
+}
+
+/**
+ * Itens para uma célula 001/002 da prateleira:
+ * - saldo do endereço exato +
+ * - complementos do mesmo rua-nível-edifício (ex.: 01-02-19-B5) que não são 001/002.
+ * Assim o badge da vista 3D e a prateleira batem (mesmo estoque).
+ */
+function _arm3dItensParaEndereco(endereco) {
+  if (!_arm3dOcupacao) return [];
+  const end = String(endereco || '').trim();
+  const partes = end.split('-').filter(Boolean);
+  if (partes.length < 4) return Array.isArray(_arm3dOcupacao[end]) ? _arm3dOcupacao[end] : [];
+
+  const prefix = `${partes[0]}-${partes[1]}-${partes[2]}`;
+  const pos = partes.slice(3).join('-');
+  const out = [];
+
+  for (const [key, lista] of Object.entries(_arm3dOcupacao)) {
+    if (!Array.isArray(lista) || !lista.length) continue;
+    const kp = String(key || '').trim().split('-').filter(Boolean);
+    if (kp.length < 4) continue;
+    if (`${kp[0]}-${kp[1]}-${kp[2]}` !== prefix) continue;
+    const kpos = kp.slice(3).join('-');
+    // Exato (001 ou 002) OU complemento (B5, M01, P02…) do mesmo edifício/nível
+    if (kpos === pos || (kpos !== '001' && kpos !== '002')) {
+      out.push(...lista);
+    }
+  }
+  return out;
+}
+
+async function _arm3dCarregarOcupacao(opts = {}) {
+  const force = !!opts.force;
+  if (!force && _arm3dOcupacao && typeof _arm3dOcupacao === 'object') {
+    _arm3dPopularBadges();
+    return _arm3dOcupacao;
+  }
+  try {
+    const ctrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    const timer = ctrl ? setTimeout(() => ctrl.abort(), 25000) : null;
+    const resp = await fetch('/api/etiquetas/ocupacao', {
+      credentials: 'include',
+      signal: ctrl?.signal
+    });
+    if (timer) clearTimeout(timer);
+    const json = await resp.json().catch(() => ({}));
+    if (json.ok) _arm3dOcupacao = json.ocupacao || {};
+    else if (!_arm3dOcupacao) _arm3dOcupacao = {};
   } catch (e) {
     console.warn('[arm3d] Não foi possível carregar ocupação:', e);
-    _arm3dOcupacao = {};
+    if (!_arm3dOcupacao) _arm3dOcupacao = {};
   }
   _arm3dPopularBadges();
+  return _arm3dOcupacao;
 }
 
 /* Agrega itens de todos os endereços de uma rua+lado e popula o badge */
@@ -7784,9 +8498,8 @@ function _arm3dPopularBadges() {
     const ruaStr = String(rua).padStart(2, '0');
     const prefix  = `${ruaStr}-`;
 
-    /* Soma por código de produto */
     /* E → CC ímpar; D → CC par */
-    const totais = {};
+    const itensRua = [];
     for (const [end, itens] of Object.entries(_arm3dOcupacao)) {
       if (!end.startsWith(prefix)) continue;
       const partes = end.split('-');
@@ -7795,23 +8508,328 @@ function _arm3dPopularBadges() {
       const isImpar = ccNum % 2 === 1;
       if (lado === 'E' && !isImpar) continue;
       if (lado === 'D' &&  isImpar) continue;
-      for (const item of itens) {
-        if (!totais[item.codigo_produto]) totais[item.codigo_produto] = { qtd: 0, unidade: item.unidade };
-        totais[item.codigo_produto].qtd += item.qtd;
+      for (const item of _arm3dItensVisiveis(itens)) {
+        const qtd = Number(item.qtd) || 0;
+        if (qtd <= 0) continue;
+        itensRua.push({ ...item, _end: end });
       }
     }
 
-    const linhas = Object.entries(totais);
-    if (linhas.length === 0) { badge.style.display = 'none'; return; }
+    let linhasHtml = '';
+    if (_arm3dFiltroCodigo) {
+      // Filtrado: uma linha por ID (FIFO por data_emissao); se só 1, sem bolinha
+      const comFifo = _arm3dAtribuirFifo(itensRua);
+      if (!comFifo.length) { badge.style.display = 'none'; badge.innerHTML = ''; return; }
+      linhasHtml = comFifo.map((v) =>
+        `<div class="arm3d-rua-badge-row">
+           <span class="arm3d-rua-badge-left">${_arm3dFifoHtml(v.fifo)}
+             <span class="arm3d-rua-badge-cod" title="${_arm3dEscHtml(v.codigo_produto)}">${_arm3dEscHtml(v.codigo_produto)}</span>
+           </span>
+           <span class="arm3d-rua-badge-qtd">${_arm3dEscHtml(v.qtd)} ${_arm3dEscHtml(v.unidade || 'UN')}</span>
+         </div>`
+      ).join('');
+    } else {
+      const totais = {};
+      for (const item of itensRua) {
+        if (!totais[item.codigo_produto]) {
+          totais[item.codigo_produto] = { qtd: 0, unidade: item.unidade || 'UN' };
+        }
+        totais[item.codigo_produto].qtd += Number(item.qtd) || 0;
+      }
+      const linhas = Object.entries(totais);
+      if (!linhas.length) { badge.style.display = 'none'; badge.innerHTML = ''; return; }
+      linhasHtml = linhas.map(([cod, v]) =>
+        `<div class="arm3d-rua-badge-row">
+           <span class="arm3d-rua-badge-left">
+             <span class="arm3d-rua-badge-cod" title="${_arm3dEscHtml(cod)}">${_arm3dEscHtml(cod)}</span>
+           </span>
+           <span class="arm3d-rua-badge-qtd">${_arm3dEscHtml(v.qtd)} ${_arm3dEscHtml(v.unidade)}</span>
+         </div>`
+      ).join('');
+    }
 
-    badge.innerHTML = linhas.map(([cod, v]) =>
-      `<div class="arm3d-rua-badge-row">
-         <span class="arm3d-rua-badge-cod" title="${cod}">${cod}</span>
-         <span class="arm3d-rua-badge-qtd">${v.qtd} ${v.unidade}</span>
-       </div>`
-    ).join('');
+    badge.innerHTML = linhasHtml;
     badge.style.display = 'block';
   });
+}
+
+function _arm3dFecharSugestoes() {
+  const el = document.getElementById('arm3dBuscaSugestoes');
+  if (el) { el.innerHTML = ''; el.hidden = true; }
+}
+
+function _arm3dAtualizarFiltroUi() {
+  const limpar = document.getElementById('arm3dBuscaLimpar');
+  const chip = document.getElementById('arm3dBuscaFiltro');
+  const input = document.getElementById('arm3dBuscaInput');
+  const ativoSingle = !!_arm3dFiltroCodigo;
+  const ativoSep = !!( _arm3dFiltroCodigosSet && _arm3dFiltroCodigosSet.size);
+  if (limpar) limpar.style.display = (ativoSingle || (input && input.value.trim())) ? 'inline-block' : 'none';
+  if (chip) {
+    if (ativoSingle) {
+      chip.textContent = `Filtro: ${_arm3dFiltroCodigo}`;
+      chip.style.display = 'block';
+    } else if (ativoSep) {
+      chip.textContent = `Planejar SEP · ${_arm3dFiltroCodigosSet.size} produto(s) nas solicitações`;
+      chip.style.display = 'block';
+    } else {
+      chip.textContent = '';
+      chip.style.display = 'none';
+    }
+  }
+}
+
+function _arm3dAplicarFiltroProduto(codigo, descricao) {
+  _arm3dFiltroCodigo = String(codigo || '').trim() || null;
+  const input = document.getElementById('arm3dBuscaInput');
+  if (input && _arm3dFiltroCodigo) {
+    input.value = descricao
+      ? `${_arm3dFiltroCodigo} — ${String(descricao).slice(0, 48)}`
+      : _arm3dFiltroCodigo;
+  }
+  _arm3dFecharSugestoes();
+  _arm3dAtualizarFiltroUi();
+  _arm3dPopularBadges();
+  if (_arm3dPainelAtual && typeof window.__arm3dRefreshPainel === 'function') {
+    window.__arm3dRefreshPainel();
+  }
+}
+
+function _arm3dLimparFiltroProduto() {
+  _arm3dFiltroCodigo = null;
+  const input = document.getElementById('arm3dBuscaInput');
+  if (input) input.value = '';
+  _arm3dFecharSugestoes();
+  _arm3dAtualizarFiltroUi();
+  _arm3dPopularBadges();
+  if (_arm3dPainelAtual && typeof window.__arm3dRefreshPainel === 'function') {
+    window.__arm3dRefreshPainel();
+  }
+}
+
+function _arm3dEstiloModalPlanejar(modal, aberto) {
+  if (!modal) return;
+  if (!aberto) {
+    modal.style.setProperty('display', 'none', 'important');
+    modal.setAttribute('aria-hidden', 'true');
+    modal.classList.remove('arm3d-planejar-open');
+    return;
+  }
+  // Sempre no body — fora de .app (backdrop-filter quebra position:fixed)
+  if (modal.parentElement !== document.body) {
+    document.body.appendChild(modal);
+  }
+  modal.classList.add('arm3d-planejar-open');
+  const st = modal.style;
+  st.setProperty('display', 'flex', 'important');
+  st.setProperty('flex-direction', 'column', 'important');
+  st.setProperty('position', 'fixed', 'important');
+  st.setProperty('top', '0', 'important');
+  st.setProperty('left', '0', 'important');
+  st.setProperty('right', '0', 'important');
+  st.setProperty('bottom', '0', 'important');
+  st.setProperty('inset', '0', 'important');
+  st.setProperty('width', '100vw', 'important');
+  st.setProperty('height', '100vh', 'important');
+  st.setProperty('max-width', '100vw', 'important');
+  st.setProperty('max-height', '100vh', 'important');
+  st.setProperty('margin', '0', 'important');
+  st.setProperty('padding', '0', 'important');
+  st.setProperty('z-index', '20000', 'important');
+  st.setProperty('background', '#020617', 'important');
+  st.setProperty('box-sizing', 'border-box', 'important');
+  st.setProperty('overflow', 'hidden', 'important');
+  st.setProperty('transform', 'none', 'important');
+  st.setProperty('filter', 'none', 'important');
+  modal.setAttribute('aria-hidden', 'false');
+}
+
+function _arm3dFecharPlanejarSeparacao() {
+  const modal = document.getElementById('arm3dPlanejarSepModal');
+  const conteudo = document.getElementById('conteudo-armazem3d');
+  const photoWrap = document.getElementById('arm3dPhotoWrap');
+  const panel = document.getElementById('arm3dRuaPanel');
+
+  _arm3dFiltroCodigosSet = null;
+  _arm3dFiltroCodigo = null;
+  const input = document.getElementById('arm3dBuscaInput');
+  if (input) input.value = '';
+  _arm3dFecharSugestoes();
+  _arm3dFecharDetalheModal();
+
+  if (panel) panel.style.display = 'none';
+  if (photoWrap) {
+    photoWrap.style.display = '';
+    photoWrap.classList.add('a3-visible');
+  }
+  _arm3dPainelAtual = null;
+
+  if (conteudo && _arm3dPlanejarPlaceholder && _arm3dPlanejarPlaceholder.parentNode) {
+    _arm3dPlanejarPlaceholder.parentNode.insertBefore(conteudo, _arm3dPlanejarPlaceholder);
+    _arm3dPlanejarPlaceholder.remove();
+  } else if (conteudo && _arm3dPlanejarParent) {
+    _arm3dPlanejarParent.appendChild(conteudo);
+  }
+  _arm3dPlanejarPlaceholder = null;
+  _arm3dPlanejarParent = null;
+
+  if (conteudo) {
+    conteudo.style.display = 'none';
+    conteudo.style.visibility = '';
+    conteudo.style.opacity = '';
+    conteudo.style.height = '';
+    conteudo.style.minHeight = '';
+  }
+  _arm3dEstiloModalPlanejar(modal, false);
+  document.body.style.removeProperty('overflow');
+  const sepModal = document.getElementById('modalSeparacaoLogistica');
+  if (sepModal) sepModal.style.visibility = '';
+  _arm3dAtualizarFiltroUi();
+  _arm3dPopularBadges();
+}
+
+async function _arm3dAbrirPlanejarSeparacao(opts = {}) {
+  const btn = opts.btn || null;
+  const nSolic = String(opts.nSolic || '').trim();
+  const modal = document.getElementById('arm3dPlanejarSepModal');
+  const host = document.getElementById('arm3dPlanejarSepHost');
+  const conteudo = document.getElementById('conteudo-armazem3d');
+  const sub = document.getElementById('arm3dPlanejarSepSub');
+  if (!modal || !host || !conteudo) {
+    alert('Armazém 3D não encontrado na página.');
+    return;
+  }
+
+  if (btn) {
+    btn.disabled = true;
+    btn.dataset._html = btn.innerHTML;
+    btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Carregando...';
+  }
+
+  try {
+    let codigos = (opts.codigos || [])
+      .map(c => String(c || '').trim().toUpperCase())
+      .filter(Boolean);
+    codigos = [...new Set(codigos)];
+
+    if (!codigos.length && nSolic) {
+      const resp = await fetch(
+        `/api/logistica/planejar-sep/codigos?n_solic=${encodeURIComponent(nSolic)}`,
+        { credentials: 'include' }
+      );
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok || !data.ok) throw new Error(data.error || `HTTP ${resp.status}`);
+      codigos = (data.codigos || []).map(c => String(c || '').trim().toUpperCase()).filter(Boolean);
+    }
+
+    if (!codigos.length) {
+      alert(nSolic
+        ? `Não há produtos com código nesta SEP (${nSolic}) para planejar.`
+        : 'Informe os itens da SEP para planejar a separação.');
+      return;
+    }
+
+    _arm3dFiltroCodigo = null;
+    _arm3dFiltroCodigosSet = new Set(codigos);
+    if (sub) {
+      const sepTxt = nSolic ? `${nSolic} · ` : '';
+      sub.textContent = `${sepTxt}${codigos.length} produto(s) desta SEP · carregando mapa…`;
+    }
+
+    // 1) Modal em tela cheia no <body>, na frente da SEP
+    _arm3dEstiloModalPlanejar(modal, true);
+    document.body.style.setProperty('overflow', 'hidden', 'important');
+
+    // 2) Move o mapa 3D para dentro do modal
+    if (!_arm3dPlanejarPlaceholder) {
+      _arm3dPlanejarParent = conteudo.parentNode;
+      _arm3dPlanejarPlaceholder = document.createComment('arm3d-planejar-placeholder');
+      if (_arm3dPlanejarParent) {
+        _arm3dPlanejarParent.insertBefore(_arm3dPlanejarPlaceholder, conteudo);
+      }
+      host.appendChild(conteudo);
+    }
+    conteudo.style.display = 'block';
+    conteudo.style.height = '100%';
+    conteudo.style.minHeight = '0';
+    conteudo.style.visibility = 'visible';
+    conteudo.style.opacity = '1';
+
+    const photoWrap = document.getElementById('arm3dPhotoWrap');
+    const panel = document.getElementById('arm3dRuaPanel');
+    if (panel) panel.style.display = 'none';
+    if (photoWrap) {
+      photoWrap.style.display = '';
+      photoWrap.classList.add('a3-visible');
+    }
+    _arm3dPainelAtual = null;
+
+    const sepModal = document.getElementById('modalSeparacaoLogistica');
+    if (sepModal) sepModal.style.visibility = 'hidden';
+
+    if (btn) {
+      btn.disabled = false;
+      if (btn.dataset._html) btn.innerHTML = btn.dataset._html;
+    }
+
+    initArmazem3D();
+    _arm3dAtualizarFiltroUi();
+
+    await _arm3dCarregarOcupacao({ force: !_arm3dOcupacao });
+    if (sub) {
+      const sepTxt = nSolic ? `${nSolic} · ` : '';
+      sub.textContent = `${sepTxt}${codigos.length} produto(s) desta SEP · clique numa rua (R1–R4) para ver só esses itens`;
+    }
+    _arm3dAtualizarFiltroUi();
+  } catch (e) {
+    console.error('[planejar-sep]', e);
+    alert('Erro ao abrir planejamento: ' + (e.message || e));
+    _arm3dFecharPlanejarSeparacao();
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      if (btn.dataset._html) btn.innerHTML = btn.dataset._html;
+    }
+  }
+}
+
+window._arm3dAbrirPlanejarSeparacao = _arm3dAbrirPlanejarSeparacao;
+window._arm3dFecharPlanejarSeparacao = _arm3dFecharPlanejarSeparacao;
+
+async function _arm3dBuscarProdutos(termo) {
+  const q = String(termo || '').trim();
+  const sug = document.getElementById('arm3dBuscaSugestoes');
+  if (!sug) return;
+  if (q.length < 2) {
+    _arm3dFecharSugestoes();
+    return;
+  }
+  const seq = ++_arm3dBuscaSeq;
+  try {
+    const resp = await fetch(`/api/produtos/search?q=${encodeURIComponent(q)}&limit=15`, { credentials: 'include' });
+    const json = await resp.json().catch(() => ({}));
+    if (seq !== _arm3dBuscaSeq) return;
+    const lista = Array.isArray(json?.produtos) ? json.produtos : [];
+    if (!lista.length) {
+      sug.innerHTML = '<div class="arm3d-busca-vazia">Nenhum produto encontrado</div>';
+      sug.hidden = false;
+      return;
+    }
+    sug.innerHTML = lista.map((p) => {
+      const cod = String(p.codigo || '').trim();
+      const desc = String(p.descricao || '').trim();
+      return `<button type="button" class="arm3d-busca-item" data-codigo="${_arm3dEscHtml(cod)}" data-desc="${_arm3dEscHtml(desc)}">
+        <span class="cod">${_arm3dEscHtml(cod)}</span>
+        <span class="desc">${_arm3dEscHtml(desc)}</span>
+      </button>`;
+    }).join('');
+    sug.hidden = false;
+  } catch (err) {
+    if (seq === _arm3dBuscaSeq) {
+      sug.innerHTML = `<div class="arm3d-busca-vazia">Erro ao buscar: ${_arm3dEscHtml(err?.message || 'falha')}</div>`;
+      sug.hidden = false;
+    }
+  }
 }
 
 function initArmazem3D() {
@@ -7825,11 +8843,47 @@ function initArmazem3D() {
   const panel     = document.getElementById('arm3dRuaPanel');
   const panelTitle = document.getElementById('arm3dRuaPanelTitle');
   const btnBack   = document.getElementById('arm3dBtnBack');
+  const buscaInput = document.getElementById('arm3dBuscaInput');
+  const buscaLimpar = document.getElementById('arm3dBuscaLimpar');
+  const buscaSug = document.getElementById('arm3dBuscaSugestoes');
 
   const COLS = 10; // colunas da estante (esquerda → direita no DOM, E1 = direita)
   const ROWS = 6;  // níveis (cima → baixo no DOM, nível 1 = baixo)
 
   const ladoNome = { E: 'Esquerda', D: 'Direita' };
+
+  /* ── Busca produto ── */
+  buscaInput?.addEventListener('input', () => {
+    // Ao digitar de novo após escolher, remove o filtro e volta a listar todos
+    if (_arm3dFiltroCodigo) {
+      _arm3dFiltroCodigo = null;
+      const chip = document.getElementById('arm3dBuscaFiltro');
+      if (chip) { chip.textContent = ''; chip.style.display = 'none'; }
+      _arm3dPopularBadges();
+      if (_arm3dPainelAtual && typeof window.__arm3dRefreshPainel === 'function') {
+        window.__arm3dRefreshPainel();
+      }
+    }
+    _arm3dAtualizarFiltroUi();
+    clearTimeout(_arm3dBuscaTimer);
+    _arm3dBuscaTimer = setTimeout(() => { void _arm3dBuscarProdutos(buscaInput.value); }, 280);
+  });
+  buscaInput?.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      _arm3dFecharSugestoes();
+      if (_arm3dFiltroCodigo) _arm3dLimparFiltroProduto();
+    }
+  });
+  buscaLimpar?.addEventListener('click', () => _arm3dLimparFiltroProduto());
+  buscaSug?.addEventListener('click', (e) => {
+    const btn = e.target.closest('.arm3d-busca-item');
+    if (!btn) return;
+    _arm3dAplicarFiltroProduto(btn.dataset.codigo, btn.dataset.desc);
+  });
+  document.addEventListener('click', (e) => {
+    const wrap = document.getElementById('arm3dBuscaWrap');
+    if (wrap && !wrap.contains(e.target)) _arm3dFecharSugestoes();
+  });
 
   /* ── Tooltip flutuante ── */
   const tooltip = document.createElement('div');
@@ -7838,10 +8892,34 @@ function initArmazem3D() {
   document.body.appendChild(tooltip);
 
   function mostrarTooltip(card, itens) {
-    const linhas = itens.map(i =>
-      `<div class="arm3d-tip-row"><span class="arm3d-tip-cod">${i.codigo_produto}</span><span class="arm3d-tip-qtd">${i.qtd} ${i.unidade}</span></div>`
-    ).join('');
-    tooltip.innerHTML = `<div class="arm3d-tip-title">${card.dataset.endereco}</div>${linhas}`;
+    const vis = _arm3dItensVisiveis(itens || []);
+    let linhasItens;
+    if (_arm3dFiltroCodigo && vis.length > 1) {
+      linhasItens = _arm3dAtribuirFifo(vis);
+    } else {
+      linhasItens = _arm3dAgregarPorCodigo(vis);
+    }
+    if (!linhasItens.length) { esconderTooltip(); return; }
+
+    const linhas = linhasItens.map((i) => {
+      const foto = i.foto_url
+        ? `<img class="arm3d-tip-foto" src="${_arm3dEscHtml(i.foto_url)}" alt="">`
+        : `<div class="arm3d-tip-foto" aria-hidden="true"></div>`;
+      const desc = i.descricao
+        ? `<span class="arm3d-tip-desc" title="${_arm3dEscHtml(i.descricao)}">${_arm3dEscHtml(i.descricao)}</span>`
+        : '';
+      const idTxt = i.id ? ` · ID ${ _arm3dEscHtml(i.id)}` : '';
+      return `<div class="arm3d-tip-row">
+        ${_arm3dFifoHtml(i.fifo)}
+        ${foto}
+        <div class="arm3d-tip-meta">
+          <span class="arm3d-tip-cod">${_arm3dEscHtml(i.codigo_produto)}${idTxt}</span>
+          ${desc}
+          <span class="arm3d-tip-qtd">${_arm3dEscHtml(i.qtd)} ${_arm3dEscHtml(i.unidade || 'UN')}</span>
+        </div>
+      </div>`;
+    }).join('');
+    tooltip.innerHTML = `<div class="arm3d-tip-title">${_arm3dEscHtml(card.dataset.endereco)}</div>${linhas}`;
     tooltip.style.display = 'block';
   }
 
@@ -7866,6 +8944,9 @@ function initArmazem3D() {
     if (!body) return;
     body.innerHTML = '';
 
+    const layout = document.createElement('div');
+    layout.className = 'arm3d-shelf-layout' + (lado === 'E' ? ' arm3d-shelf-layout--e' : ' arm3d-shelf-layout--d');
+
     const wrap = document.createElement('div');
     wrap.className = 'arm3d-shelf-wrap';
 
@@ -7878,30 +8959,32 @@ function initArmazem3D() {
     const grid = document.createElement('div');
     grid.className = 'arm3d-shelf-grid';
 
-    // DOM: linha 0 = topo (nível+alto), coluna 0 = esquerda (coluna+alta em E)
-    // Lógica: E1 = coluna mais à DIREITA → coluna DOM = COLS-1
-    //         nível 1 = BAIXO → linha DOM = ROWS-1
+    const gridSet = new Set();
+
+    // Lado D: esquerda→direita = edifício alto→baixo (20…02)
+    // Lado E (espelho): esquerda→direita = edifício baixo→alto (01…19)
     for (let r = 0; r < ROWS; r++) {
       for (let c = 0; c < COLS; c++) {
-        const colNum = COLS - c;      // c=0 → E7, c=6 → E1
-        const rowNum = ROWS - r;      // r=0 → nível 5 (topo), r=4 → nível 1 (base)
+        const colNum = lado === 'E' ? (c + 1) : (COLS - c);
+        const rowNum = ROWS - r;
 
         const cell = document.createElement('div');
         cell.className = 'arm3d-cell';
 
-        ['e', 'd'].forEach(sub => {
+        const subs = lado === 'E' ? ['d', 'e'] : ['e', 'd'];
+        subs.forEach(sub => {
           const ruaStr    = String(rua).padStart(2, '0');
           const nivelStr  = String(rowNum).padStart(2, '0');
-          // Edifício: rack E → número ímpar (2*col-1), rack D → número par (2*col)
           const edificioNum = lado === 'E' ? (2 * colNum - 1) : (2 * colNum);
           const colunaStr   = String(edificioNum).padStart(2, '0');
           const ladoStr     = sub === 'e' ? '001' : '002';
           const endereco    = `${ruaStr}-${nivelStr}-${colunaStr}-${ladoStr}`;
+          gridSet.add(endereco);
 
           const card = document.createElement('button');
           card.className = 'arm3d-cell-card';
           card.innerHTML = `<span class="arm3d-card-label"><span>${ruaStr}-${nivelStr}</span><span>${colunaStr}-${ladoStr}</span></span>`;
-          card.title = `Endereço: ${endereco} | Rua ${rua} | Nível ${rowNum} | Edifício ${colunaStr} | ${sub === 'e' ? 'Esquerda' : 'Direita'}`;
+          card.title = `Endereço: ${endereco} | Rua ${rua} | Nível ${rowNum} | Edifício ${colunaStr} | ${sub === 'e' ? 'Pos 001' : 'Pos 002'}`;
           card.dataset.rua = rua;
           card.dataset.lado = lado;
           card.dataset.coluna = colNum;
@@ -7909,14 +8992,20 @@ function initArmazem3D() {
           card.dataset.sub = sub;
           card.dataset.endereco = endereco;
 
-          /* ── Ocupação ── */
-          const itens = _arm3dOcupacao ? (_arm3dOcupacao[endereco] || null) : null;
-          if (itens && itens.length > 0) {
+          const itensBrutos = _arm3dItensParaEndereco(endereco);
+          const itens = _arm3dAgregarPorCodigo(_arm3dItensVisiveis(itensBrutos));
+          if (itens.length > 0) {
             card.classList.add('arm3d-card-ocupado');
-            card.addEventListener('mouseenter', e => { mostrarTooltip(card, itens); moverTooltip(e); });
+            card.addEventListener('mouseenter', e => { mostrarTooltip(card, itensBrutos); moverTooltip(e); });
             card.addEventListener('mousemove',  moverTooltip);
             card.addEventListener('mouseleave', esconderTooltip);
           }
+          card.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            esconderTooltip();
+            void _arm3dAbrirDetalheEndereco(endereco);
+          });
 
           cell.appendChild(card);
         });
@@ -7926,25 +9015,144 @@ function initArmazem3D() {
     }
 
     wrap.appendChild(grid);
-    body.appendChild(wrap);
+
+    // Grid do outro lado — não listar no "fora" o que já aparece na visão oposta
+    const otherLado = lado === 'E' ? 'D' : 'E';
+    const otherSet = new Set();
+    for (let r = 0; r < ROWS; r++) {
+      for (let c = 0; c < COLS; c++) {
+        const colNum = otherLado === 'E' ? (c + 1) : (COLS - c);
+        const rowNum = ROWS - r;
+        const edificioNum = otherLado === 'E' ? (2 * colNum - 1) : (2 * colNum);
+        const ruaStr = String(rua).padStart(2, '0');
+        const nivelStr = String(rowNum).padStart(2, '0');
+        const colunaStr = String(edificioNum).padStart(2, '0');
+        otherSet.add(`${ruaStr}-${nivelStr}-${colunaStr}-001`);
+        otherSet.add(`${ruaStr}-${nivelStr}-${colunaStr}-002`);
+      }
+    }
+
+    const overflowEl = montarPainelForaDoMapa(rua, lado, gridSet, otherSet);
+
+    // E: maior edifício (19) à direita → lista fora à DIREITA
+    // D: maior edifício (20) à esquerda → lista fora à ESQUERDA (espelho)
+    if (lado === 'D') {
+      if (overflowEl) layout.appendChild(overflowEl);
+      layout.appendChild(wrap);
+    } else {
+      layout.appendChild(wrap);
+      if (overflowEl) layout.appendChild(overflowEl);
+    }
+
+    body.appendChild(layout);
+  }
+
+  function montarPainelForaDoMapa(rua, lado, gridSet, otherSet) {
+    if (!_arm3dOcupacao) return null;
+    const ruaStr = String(rua).padStart(2, '0');
+    const prefix = `${ruaStr}-`;
+    const fora = [];
+
+    for (const [end, itens] of Object.entries(_arm3dOcupacao)) {
+      if (!String(end).startsWith(prefix)) continue;
+      if (gridSet.has(end) || otherSet.has(end)) continue;
+
+      const partes = String(end).split('-');
+      let pertenceLado = false;
+      if (partes.length >= 3 && /^\d+$/.test(partes[2])) {
+        const edif = parseInt(partes[2], 10);
+        const isImpar = edif % 2 === 1;
+        pertenceLado = (lado === 'E') ? isImpar : !isImpar;
+      } else {
+        // formato inválido/incompleto desta rua → entra na lista "fora"
+        pertenceLado = true;
+      }
+      if (!pertenceLado) continue;
+
+      const vis = _arm3dAgregarPorCodigo(_arm3dItensVisiveis(itens));
+      if (!vis.length) continue;
+      fora.push({ endereco: end, itens: vis, itensBrutos: itens });
+    }
+
+    if (!fora.length) return null;
+    fora.sort((a, b) => String(a.endereco).localeCompare(String(b.endereco), 'pt-BR'));
+
+    const panel = document.createElement('div');
+    panel.className = 'arm3d-overflow';
+    const refMaior = lado === 'E' ? `${ruaStr}-xx-19` : `${ruaStr}-xx-20`;
+    panel.innerHTML = `
+      <div class="arm3d-overflow-head">
+        <div class="arm3d-overflow-title">Fora do mapa</div>
+        <div class="arm3d-overflow-sub">Ao lado de ${_arm3dEscHtml(refMaior)} · ${fora.length} endereço(s)</div>
+      </div>
+      <div class="arm3d-overflow-list"></div>
+    `;
+    const list = panel.querySelector('.arm3d-overflow-list');
+
+    fora.forEach((row) => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'arm3d-overflow-item';
+      btn.dataset.endereco = row.endereco;
+
+      const linhasProd = row.itens.map((i) => {
+        const foto = i.foto_url
+          ? `<img class="arm3d-overflow-foto" src="${_arm3dEscHtml(i.foto_url)}" alt="">`
+          : `<div class="arm3d-overflow-foto" aria-hidden="true"></div>`;
+        return `<div class="arm3d-overflow-prod">
+          ${foto}
+          <div class="arm3d-overflow-prod-meta">
+            <span class="cod">${_arm3dEscHtml(i.codigo_produto)}</span>
+            <span class="qtd">${_arm3dEscHtml(i.qtd)} ${_arm3dEscHtml(i.unidade || 'UN')}</span>
+          </div>
+        </div>`;
+      }).join('');
+
+      btn.innerHTML = `
+        <div class="arm3d-overflow-end">${_arm3dEscHtml(row.endereco)}</div>
+        ${linhasProd}
+      `;
+      btn.title = `Endereço fora do desenho: ${row.endereco}`;
+      // Sem tooltip no hover — a lista já mostra o conteúdo (evita lista duplicada).
+      btn.addEventListener('click', (e) => {
+        e.preventDefault();
+        esconderTooltip();
+        void _arm3dAbrirDetalheEndereco(row.endereco);
+      });
+      list.appendChild(btn);
+    });
+
+    return panel;
   }
 
   async function abrirPainel(rua, lado) {
+    _arm3dFecharSugestoes();
     if (photoWrap) photoWrap.classList.remove('a3-visible');
     if (panelTitle) panelTitle.textContent = `Rua ${rua} — ${ladoNome[lado] || lado}`;
     /* Garante que ocupação está carregada (uma só vez) */
     if (_arm3dOcupacao === null) await _arm3dCarregarOcupacao();
+    _arm3dPainelAtual = { rua, lado };
     gerarGridEstante(rua, lado);
     if (panel) panel.style.display = 'flex';
   }
 
   function fecharPainel() {
     esconderTooltip();
+    _arm3dPainelAtual = null;
     if (panel) panel.style.display = 'none';
     if (photoWrap) photoWrap.classList.add('a3-visible');
   }
 
+  window.__arm3dRefreshPainel = () => {
+    if (_arm3dPainelAtual) gerarGridEstante(_arm3dPainelAtual.rua, _arm3dPainelAtual.lado);
+  };
+
   btnBack?.addEventListener('click', fecharPainel);
+
+  document.getElementById('arm3dDetalheFechar')?.addEventListener('click', _arm3dFecharDetalheModal);
+  document.getElementById('arm3dDetalheModal')?.addEventListener('click', (e) => {
+    if (e.target?.id === 'arm3dDetalheModal') _arm3dFecharDetalheModal();
+  });
 
   document.querySelectorAll('.arm3d-rua-btn').forEach(btn => {
     btn.addEventListener('click', e => {
@@ -34482,10 +35690,20 @@ window.openRegistros = async function() {
 
   async function _armRegistrarEndereco(endereco) {
     await _armPararCamera();
+    let enderecoOk;
+    try {
+      enderecoOk = _etqAssertEndereco(endereco);
+    } catch (e) {
+      if (etqArmazenarStatus) {
+        etqArmazenarStatus.textContent = e?.message || ETQ_ENDERECO_MSG;
+        etqArmazenarStatus.style.color = '#f87171';
+      }
+      return;
+    }
     const complemento = etqArmazenarComplemento?.value?.trim() || '';
     if (etqArmazenarStatus) { etqArmazenarStatus.textContent = 'Registrando...'; etqArmazenarStatus.style.color = '#94a3b8'; }
     try {
-      const body = { endereco };
+      const body = { endereco: enderecoOk };
       if (complemento) body.complemento = complemento;
       const resp = await fetch(`/api/etiquetas/rec-impresso/${_armIdImpresso}/endereco`, {
         method: 'PATCH',
@@ -34498,8 +35716,8 @@ window.openRegistros = async function() {
         throw new Error(err.error || `Erro ${resp.status}`);
       }
       const msg = complemento
-        ? `✓ Armazenado em: ${escapeHtml(endereco)} · ${escapeHtml(complemento)}`
-        : `✓ Armazenado em: ${escapeHtml(endereco)}`;
+        ? `✓ Armazenado em: ${escapeHtml(enderecoOk)} · ${escapeHtml(complemento)}`
+        : `✓ Armazenado em: ${escapeHtml(enderecoOk)}`;
       if (etqArmazenarStatus) {
         etqArmazenarStatus.textContent = msg;
         etqArmazenarStatus.style.color = '#4ade80';
@@ -73058,8 +74276,14 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function definirEnderecoInterno(modo, valor) {
-    const endereco = String(valor || '').trim();
-    if (!endereco) return;
+    let endereco;
+    try {
+      endereco = _etqAssertEndereco(valor);
+    } catch (e) {
+      const msg = document.getElementById('movimMensagem');
+      if (msg) { msg.textContent = e?.message || ETQ_ENDERECO_MSG; msg.className = 'movim-mensagem erro'; }
+      return;
+    }
     if (modo === 'origem') _enderecoOrigemInterno = endereco;
     else if (modo === 'destino') _enderecoDestinoInterno = endereco;
     renderEnderecoInternoValores();
@@ -73156,8 +74380,14 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function aplicarEnderecoInternoModo(modo, endereco) {
-    const end = String(endereco || '').trim();
-    if (!end) return;
+    let end;
+    try {
+      end = _etqAssertEndereco(endereco);
+    } catch (e) {
+      const msg = document.getElementById('movimMensagem');
+      if (msg) { msg.textContent = e?.message || ETQ_ENDERECO_MSG; msg.className = 'movim-mensagem erro'; }
+      return;
+    }
     if (modo === 'origem') {
       _enderecoOrigemInterno = end;
       if (_enderecoDestinoInterno === end) _enderecoDestinoInterno = '';
@@ -73775,6 +75005,15 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   async function registrarEnderecosEtq(payload) {
+    try {
+      if (payload.endereco_origem) payload.endereco_origem = _etqAssertEndereco(payload.endereco_origem);
+      if (payload.endereco_destino) payload.endereco_destino = _etqAssertEndereco(payload.endereco_destino);
+      if (Array.isArray(payload.enderecos)) {
+        payload.enderecos = payload.enderecos.map((e) => _etqAssertEndereco(e));
+      }
+    } catch (e) {
+      throw new Error(e?.message || ETQ_ENDERECO_MSG);
+    }
     const body = {
       ...payload,
       codigo_produto_omie: payload.codigo_produto_omie || _codigoProdutoOmieAtual || null,
@@ -81121,6 +82360,437 @@ window.verOperacao = function(osId) {
     });
   }
 
+  function _montarEstruturaNormalizarPeca(p) {
+    const codigo = String(p?.codigo || p?.identificacao || '').trim();
+    return {
+      codigo,
+      identificacao: codigo,
+      codigo_produto: Number(p?.codigo_produto || p?.produto_iapp_id) || 0,
+      descricao: String(p?.descricao || '').trim(),
+      qtde: p?.qtde == null || p?.qtde === '' ? 1 : Number(p.qtde) || 1,
+      tipo: /^subproduto$/i.test(String(p?.tipo || p?.status || '')) ? 'Subproduto' : 'Material',
+      posto: String(p?.posto || '').trim(),
+      observacoes: String(p?.observacoes || '').trim(),
+    };
+  }
+
+  function openMontarEstruturaPerguntaModal(onSim, onNao) {
+    const overlay = document.createElement('div');
+    overlay.className = 'kanban-modal-overlay';
+    overlay.style.zIndex = '10055';
+    overlay.addEventListener('click', (ev) => { if (ev.target === overlay) overlay.remove(); });
+    const modal = document.createElement('div');
+    modal.className = 'kanban-modal';
+    modal.style.maxWidth = '420px';
+    modal.innerHTML = `
+      <header>
+        <div><h2>Montar estrutura</h2><span>Passo 1 de 3</span></div>
+        <button class="close-btn" aria-label="Fechar">&times;</button>
+      </header>
+      <div class="kanban-modal-body">
+        <p style="margin:0;font-size:13px;color:#e2e8f0;line-height:1.5;">
+          Escolher peças da lista atual?
+        </p>
+        <p style="margin:10px 0 0;font-size:11px;color:#94a3b8;">
+          Se sim, você marca as peças desta lista e depois pode complementar com a busca.
+        </p>
+      </div>
+      <footer style="display:flex;justify-content:flex-end;gap:8px;">
+        <button type="button" class="modal-secondary" id="montar-estr-nao">Não</button>
+        <button type="button" class="modal-primary" id="montar-estr-sim">Sim</button>
+      </footer>`;
+    overlay.appendChild(modal);
+    document.body.appendChild(overlay);
+    const close = () => overlay.remove();
+    modal.querySelector('.close-btn')?.addEventListener('click', close);
+    modal.querySelector('#montar-estr-nao')?.addEventListener('click', () => { close(); onNao?.(); });
+    modal.querySelector('#montar-estr-sim')?.addEventListener('click', () => { close(); onSim?.(); });
+  }
+
+  function openMontarEstruturaBuscaModal(opts) {
+    const {
+      pecasIniciais = [],
+      onConfirm = null,
+    } = opts || {};
+    let selecionadas = (pecasIniciais || []).map(_montarEstruturaNormalizarPeca)
+      .filter((p) => p.codigo);
+
+    const overlay = document.createElement('div');
+    overlay.className = 'kanban-modal-overlay';
+    overlay.style.zIndex = '10056';
+    overlay.addEventListener('click', (ev) => { if (ev.target === overlay) overlay.remove(); });
+
+    const modal = document.createElement('div');
+    modal.className = 'kanban-modal';
+    modal.style.maxWidth = '720px';
+    modal.innerHTML = `
+      <header>
+        <div>
+          <h2>Montar estrutura — escolher peças</h2>
+          <span>Busca em produtos_omie (contém o texto)</span>
+        </div>
+        <button class="close-btn" aria-label="Fechar">&times;</button>
+      </header>
+      <div class="kanban-modal-body" style="max-height:520px;overflow:auto;">
+        <div style="margin-bottom:12px;">
+          <div style="font-size:11px;color:#94a3b8;margin-bottom:6px;">Peças selecionadas (<span id="montar-sel-count">0</span>)</div>
+          <div id="montar-sel-lista" style="border:1px solid rgba(255,255,255,.1);border-radius:8px;max-height:160px;overflow:auto;"></div>
+        </div>
+        <label style="display:block;margin-bottom:6px;font-size:11px;color:#94a3b8;">Pesquisar (código ou descrição)</label>
+        <div style="position:relative;">
+          <i class="fa-solid fa-magnifying-glass" style="position:absolute;left:12px;top:50%;transform:translateY(-50%);color:#64748b;font-size:13px;pointer-events:none;"></i>
+          <input type="search" id="montar-busca-input" autocomplete="off" placeholder="Ex.: capacitor 450  ou  FT..."
+            style="width:100%;padding:9px 12px 9px 36px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.12);border-radius:8px;color:#e2e8f0;font-size:13px;outline:none;box-sizing:border-box;">
+        </div>
+        <div id="montar-busca-status" style="margin-top:8px;font-size:11px;color:#64748b;min-height:16px;"></div>
+        <div id="montar-busca-lista" style="margin-top:8px;border:1px solid rgba(255,255,255,.1);border-radius:8px;max-height:220px;overflow:auto;display:none;"></div>
+      </div>
+      <footer style="display:flex;justify-content:flex-end;gap:8px;">
+        <button type="button" class="modal-secondary" id="montar-busca-cancel">Cancelar</button>
+        <button type="button" class="modal-primary" id="montar-busca-ok">Confirmar peças</button>
+      </footer>`;
+    overlay.appendChild(modal);
+    document.body.appendChild(overlay);
+
+    const close = () => overlay.remove();
+    modal.querySelector('.close-btn')?.addEventListener('click', close);
+    modal.querySelector('#montar-busca-cancel')?.addEventListener('click', close);
+
+    const listaSel = modal.querySelector('#montar-sel-lista');
+    const countEl = modal.querySelector('#montar-sel-count');
+    const statusEl = modal.querySelector('#montar-busca-status');
+    const listaEl = modal.querySelector('#montar-busca-lista');
+    const input = modal.querySelector('#montar-busca-input');
+    let debounce = null;
+
+    const renderSelecionadas = () => {
+      if (countEl) countEl.textContent = String(selecionadas.length);
+      if (!listaSel) return;
+      if (!selecionadas.length) {
+        listaSel.innerHTML = '<div style="padding:12px;font-size:12px;color:#64748b;text-align:center;">Nenhuma peça ainda. Busque abaixo ou volte e escolha da lista.</div>';
+        return;
+      }
+      listaSel.innerHTML = selecionadas.map((p, idx) => `
+        <div style="display:flex;align-items:center;gap:8px;padding:8px 10px;border-bottom:1px solid rgba(255,255,255,.06);">
+          <div style="flex:1;min-width:0;">
+            <div style="font-size:12px;font-weight:600;color:#e2e8f0;">${escapeHtml(p.codigo)}</div>
+            <div style="font-size:11px;color:#94a3b8;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(p.descricao || '')}</div>
+          </div>
+          <button type="button" class="montar-sel-rem" data-idx="${idx}" title="Remover"
+            style="background:transparent;border:1px solid #7f1d1d;color:#fca5a5;border-radius:6px;padding:3px 8px;font-size:10px;cursor:pointer;">Remover</button>
+        </div>`).join('');
+    };
+
+    listaSel?.addEventListener('click', (ev) => {
+      const btn = ev.target.closest('.montar-sel-rem');
+      if (!btn) return;
+      const idx = Number(btn.dataset.idx);
+      if (!Number.isFinite(idx)) return;
+      selecionadas.splice(idx, 1);
+      renderSelecionadas();
+    });
+
+    const addPeca = (prod) => {
+      const peca = _montarEstruturaNormalizarPeca(prod);
+      if (!peca.codigo) return;
+      if (selecionadas.some((p) => p.codigo.toUpperCase() === peca.codigo.toUpperCase())) {
+        if (statusEl) {
+          statusEl.style.color = '#fbbf24';
+          statusEl.textContent = `${peca.codigo} já está na lista.`;
+        }
+        return;
+      }
+      selecionadas.push(peca);
+      renderSelecionadas();
+      if (statusEl) {
+        statusEl.style.color = '#34d399';
+        statusEl.textContent = `Adicionado: ${peca.codigo}`;
+      }
+    };
+
+    const buscar = async (termo) => {
+      if (!statusEl) return;
+      statusEl.style.color = '#64748b';
+      statusEl.textContent = 'Buscando...';
+      try {
+        const resp = await fetch(`/api/producao/op-producao/buscar-produtos?q=${encodeURIComponent(termo)}`, {
+          credentials: 'include',
+        });
+        const data = await resp.json().catch(() => ({}));
+        if (!resp.ok || data.success === false) throw new Error(data.error || 'Falha na busca.');
+        const itens = data.itens || [];
+        statusEl.textContent = itens.length ? `${itens.length} encontrado(s). Clique para adicionar.` : 'Nenhum produto encontrado.';
+        if (!listaEl) return;
+        if (!itens.length) {
+          listaEl.style.display = 'block';
+          listaEl.innerHTML = '<div style="padding:12px;text-align:center;color:#64748b;font-size:12px;">Nenhum resultado.</div>';
+          return;
+        }
+        listaEl.style.display = 'block';
+        listaEl.innerHTML = itens.map((it) => `
+          <button type="button" class="montar-busca-item"
+            data-codigo="${escapeHtml(String(it.codigo || ''))}"
+            data-codigo-produto="${Number(it.codigo_produto) || 0}"
+            data-descricao="${escapeHtml(String(it.descricao || ''))}"
+            style="display:block;width:100%;text-align:left;padding:9px 12px;background:transparent;border:none;border-bottom:1px solid rgba(255,255,255,.06);color:#e2e8f0;cursor:pointer;">
+            <div style="font-size:12px;font-weight:600;">${escapeHtml(String(it.codigo || ''))}</div>
+            <div style="font-size:11px;color:#94a3b8;margin-top:2px;">${escapeHtml(String(it.descricao || ''))}</div>
+          </button>`).join('');
+      } catch (err) {
+        statusEl.style.color = '#f87171';
+        statusEl.textContent = err.message || 'Erro na busca.';
+      }
+    };
+
+    input?.addEventListener('input', () => {
+      const termo = String(input.value || '').trim();
+      if (debounce) clearTimeout(debounce);
+      if (termo.length < 2) {
+        if (statusEl) {
+          statusEl.style.color = '#64748b';
+          statusEl.textContent = termo.length ? 'Digite pelo menos 2 caracteres.' : '';
+        }
+        if (listaEl) { listaEl.style.display = 'none'; listaEl.innerHTML = ''; }
+        return;
+      }
+      debounce = setTimeout(() => buscar(termo), 280);
+    });
+
+    listaEl?.addEventListener('click', (ev) => {
+      const btn = ev.target.closest('.montar-busca-item');
+      if (!btn) return;
+      addPeca({
+        codigo: btn.dataset.codigo,
+        codigo_produto: btn.dataset.codigoProduto,
+        descricao: btn.dataset.descricao,
+        qtde: 1,
+      });
+    });
+
+    modal.querySelector('#montar-busca-ok')?.addEventListener('click', () => {
+      if (!selecionadas.length) {
+        if (statusEl) {
+          statusEl.style.color = '#f87171';
+          statusEl.textContent = 'Selecione ao menos uma peça.';
+        }
+        return;
+      }
+      close();
+      onConfirm?.(selecionadas.map(_montarEstruturaNormalizarPeca));
+    });
+
+    renderSelecionadas();
+    setTimeout(() => input?.focus(), 80);
+  }
+
+  function openMontarEstruturaDadosModal(opts) {
+    const {
+      codigoPai = '',
+      ficha = null,
+      pecas = [],
+      onSaved = null,
+    } = opts || {};
+    const postos = producaoListaPostosInspecaoEstrutura();
+    const postoOpts = ['<option value="">— sem posto —</option>']
+      .concat(postos.map((p) => `<option value="${escapeHtml(p)}">${escapeHtml(p)}</option>`))
+      .join('');
+
+    const overlay = document.createElement('div');
+    overlay.className = 'kanban-modal-overlay';
+    overlay.style.zIndex = '10057';
+    overlay.addEventListener('click', (ev) => { if (ev.target === overlay) overlay.remove(); });
+
+    const itensHtml = (pecas || []).map((p, idx) => `
+      <div class="montar-item-row" data-idx="${idx}" style="padding:10px;border:1px solid rgba(255,255,255,.08);border-radius:8px;margin-bottom:8px;">
+        <div style="display:flex;justify-content:space-between;gap:8px;margin-bottom:8px;">
+          <div>
+            <div style="font-size:12px;font-weight:600;color:#e2e8f0;">${escapeHtml(p.codigo)}</div>
+            <div style="font-size:11px;color:#94a3b8;">${escapeHtml(p.descricao || '')}</div>
+          </div>
+          <span style="font-size:10px;color:#64748b;">#${idx + 1}</span>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;">
+          <label style="font-size:10px;color:#94a3b8;">Qtde
+            <input type="number" class="montar-item-qtde" min="0" step="any" value="${escapeHtml(String(p.qtde ?? 1))}"
+              style="width:100%;margin-top:3px;padding:6px 8px;border-radius:6px;border:1px solid rgba(255,255,255,.12);background:rgba(15,23,42,.55);color:#e2e8f0;font-size:12px;box-sizing:border-box;">
+          </label>
+          <label style="font-size:10px;color:#94a3b8;">Tipo
+            <select class="montar-item-tipo"
+              style="width:100%;margin-top:3px;padding:6px 8px;border-radius:6px;border:1px solid rgba(255,255,255,.12);background:rgba(15,23,42,.55);color:#e2e8f0;font-size:12px;box-sizing:border-box;">
+              <option value="Material"${p.tipo !== 'Subproduto' ? ' selected' : ''}>Material</option>
+              <option value="Subproduto"${p.tipo === 'Subproduto' ? ' selected' : ''}>Subproduto</option>
+            </select>
+          </label>
+          <label style="font-size:10px;color:#94a3b8;">Posto
+            <select class="montar-item-posto"
+              style="width:100%;margin-top:3px;padding:6px 8px;border-radius:6px;border:1px solid rgba(255,255,255,.12);background:rgba(15,23,42,.55);color:#e2e8f0;font-size:12px;box-sizing:border-box;">
+              ${postoOpts.replace(`value="${escapeHtml(p.posto)}"`, `value="${escapeHtml(p.posto)}" selected`)}
+            </select>
+          </label>
+        </div>
+        <label style="display:block;margin-top:8px;font-size:10px;color:#94a3b8;">Observações
+          <input type="text" class="montar-item-obs" value="${escapeHtml(p.observacoes || '')}"
+            style="width:100%;margin-top:3px;padding:6px 8px;border-radius:6px;border:1px solid rgba(255,255,255,.12);background:rgba(15,23,42,.55);color:#e2e8f0;font-size:12px;box-sizing:border-box;">
+        </label>
+      </div>`).join('');
+
+    const modal = document.createElement('div');
+    modal.className = 'kanban-modal';
+    modal.style.maxWidth = '760px';
+    modal.innerHTML = `
+      <header>
+        <div>
+          <h2>Montar estrutura — dados da ficha</h2>
+          <span>Campos do schema estrutura.*</span>
+        </div>
+        <button class="close-btn" aria-label="Fechar">&times;</button>
+      </header>
+      <div class="kanban-modal-body" style="max-height:560px;overflow:auto;">
+        <div style="font-size:11px;color:#a78bfa;font-weight:600;margin-bottom:8px;">Ficha (estrutura.ficha)</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px;">
+          <label style="font-size:10px;color:#94a3b8;">Código produto
+            <input id="montar-ficha-codigo" value="${escapeHtml(codigoPai)}" readonly
+              style="width:100%;margin-top:3px;padding:7px 8px;border-radius:6px;border:1px solid rgba(255,255,255,.12);background:rgba(15,23,42,.35);color:#94a3b8;font-size:12px;box-sizing:border-box;">
+          </label>
+          <label style="font-size:10px;color:#94a3b8;">Identificação
+            <input id="montar-ficha-ident" value="${escapeHtml(String(ficha?.identificacao || codigoPai || ''))}"
+              style="width:100%;margin-top:3px;padding:7px 8px;border-radius:6px;border:1px solid rgba(255,255,255,.12);background:rgba(15,23,42,.55);color:#e2e8f0;font-size:12px;box-sizing:border-box;">
+          </label>
+          <label style="font-size:10px;color:#94a3b8;grid-column:1/-1;">Descrição
+            <input id="montar-ficha-desc" value="${escapeHtml(String(ficha?.descricao || ''))}"
+              style="width:100%;margin-top:3px;padding:7px 8px;border-radius:6px;border:1px solid rgba(255,255,255,.12);background:rgba(15,23,42,.55);color:#e2e8f0;font-size:12px;box-sizing:border-box;">
+          </label>
+          <label style="font-size:10px;color:#94a3b8;">Status
+            <select id="montar-ficha-status"
+              style="width:100%;margin-top:3px;padding:7px 8px;border-radius:6px;border:1px solid rgba(255,255,255,.12);background:rgba(15,23,42,.55);color:#e2e8f0;font-size:12px;box-sizing:border-box;">
+              <option value="Ativa">Ativa</option>
+              <option value="Inativa">Inativa</option>
+            </select>
+          </label>
+          <label style="font-size:10px;color:#94a3b8;">Modelo
+            <input id="montar-ficha-modelo" value="${escapeHtml(String(ficha?.modelo || ''))}"
+              style="width:100%;margin-top:3px;padding:7px 8px;border-radius:6px;border:1px solid rgba(255,255,255,.12);background:rgba(15,23,42,.55);color:#e2e8f0;font-size:12px;box-sizing:border-box;">
+          </label>
+          <label style="font-size:10px;color:#94a3b8;">Qtde
+            <input type="number" id="montar-ficha-qtde" min="0" step="any" value="1"
+              style="width:100%;margin-top:3px;padding:7px 8px;border-radius:6px;border:1px solid rgba(255,255,255,.12);background:rgba(15,23,42,.55);color:#e2e8f0;font-size:12px;box-sizing:border-box;">
+          </label>
+          <label style="font-size:10px;color:#94a3b8;">Qtde batelada
+            <input type="number" id="montar-ficha-batelada" min="0" step="any"
+              style="width:100%;margin-top:3px;padding:7px 8px;border-radius:6px;border:1px solid rgba(255,255,255,.12);background:rgba(15,23,42,.55);color:#e2e8f0;font-size:12px;box-sizing:border-box;">
+          </label>
+          <label style="font-size:10px;color:#94a3b8;">Qtde referência
+            <input type="number" id="montar-ficha-ref" min="0" step="any"
+              style="width:100%;margin-top:3px;padding:7px 8px;border-radius:6px;border:1px solid rgba(255,255,255,.12);background:rgba(15,23,42,.55);color:#e2e8f0;font-size:12px;box-sizing:border-box;">
+          </label>
+        </div>
+
+        <div style="font-size:11px;color:#a78bfa;font-weight:600;margin:14px 0 8px;">Operação (estrutura.ficha_operacao)</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:8px;margin-bottom:12px;">
+          <label style="font-size:10px;color:#94a3b8;">Nº operação
+            <input type="number" id="montar-op-id" min="1" step="1" value="1"
+              style="width:100%;margin-top:3px;padding:7px 8px;border-radius:6px;border:1px solid rgba(255,255,255,.12);background:rgba(15,23,42,.55);color:#e2e8f0;font-size:12px;box-sizing:border-box;">
+          </label>
+          <label style="font-size:10px;color:#94a3b8;">Unidade
+            <input id="montar-op-un" value="UN"
+              style="width:100%;margin-top:3px;padding:7px 8px;border-radius:6px;border:1px solid rgba(255,255,255,.12);background:rgba(15,23,42,.55);color:#e2e8f0;font-size:12px;box-sizing:border-box;">
+          </label>
+          <label style="font-size:10px;color:#94a3b8;">Tempo operação
+            <input type="number" id="montar-op-tempo" min="0" step="any"
+              style="width:100%;margin-top:3px;padding:7px 8px;border-radius:6px;border:1px solid rgba(255,255,255,.12);background:rgba(15,23,42,.55);color:#e2e8f0;font-size:12px;box-sizing:border-box;">
+          </label>
+          <label style="font-size:10px;color:#94a3b8;">Tempo preparação
+            <input type="number" id="montar-op-prep" min="0" step="any"
+              style="width:100%;margin-top:3px;padding:7px 8px;border-radius:6px;border:1px solid rgba(255,255,255,.12);background:rgba(15,23,42,.55);color:#e2e8f0;font-size:12px;box-sizing:border-box;">
+          </label>
+        </div>
+
+        <div style="font-size:11px;color:#a78bfa;font-weight:600;margin:14px 0 8px;">Itens (${pecas.length}) — estrutura.ficha_item</div>
+        <div id="montar-itens-wrap">${itensHtml}</div>
+        <p id="montar-dados-status" style="margin:10px 0 0;font-size:12px;color:#94a3b8;min-height:18px;"></p>
+      </div>
+      <footer style="display:flex;justify-content:flex-end;gap:8px;">
+        <button type="button" class="modal-secondary" id="montar-dados-cancel">Cancelar</button>
+        <button type="button" class="modal-primary" id="montar-dados-save">Salvar estrutura</button>
+      </footer>`;
+
+    overlay.appendChild(modal);
+    document.body.appendChild(overlay);
+
+    const close = () => overlay.remove();
+    modal.querySelector('.close-btn')?.addEventListener('click', close);
+    modal.querySelector('#montar-dados-cancel')?.addEventListener('click', close);
+    const statusEl = modal.querySelector('#montar-dados-status');
+    const saveBtn = modal.querySelector('#montar-dados-save');
+
+    // Ajusta posto selecionado (selected no replace pode falhar se posto vazio)
+    modal.querySelectorAll('.montar-item-row').forEach((row, idx) => {
+      const posto = String(pecas[idx]?.posto || '').trim();
+      const sel = row.querySelector('.montar-item-posto');
+      if (sel && posto) sel.value = posto;
+    });
+
+    saveBtn?.addEventListener('click', async () => {
+      const orig = saveBtn.innerHTML;
+      saveBtn.disabled = true;
+      saveBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Salvando...';
+      if (statusEl) { statusEl.style.color = '#facc15'; statusEl.textContent = 'Gravando no SQL...'; }
+
+      const itensPayload = [];
+      modal.querySelectorAll('.montar-item-row').forEach((row) => {
+        const idx = Number(row.dataset.idx);
+        const base = pecas[idx] || {};
+        itensPayload.push({
+          codigo: base.codigo,
+          codigo_produto: base.codigo_produto,
+          identificacao: base.codigo,
+          descricao: base.descricao,
+          qtde: row.querySelector('.montar-item-qtde')?.value,
+          tipo: row.querySelector('.montar-item-tipo')?.value,
+          posto: row.querySelector('.montar-item-posto')?.value,
+          observacoes: row.querySelector('.montar-item-obs')?.value,
+        });
+      });
+
+      const body = {
+        codigo_produto: String(modal.querySelector('#montar-ficha-codigo')?.value || codigoPai).trim(),
+        ficha_id: Number(ficha?.id) || null,
+        identificacao: String(modal.querySelector('#montar-ficha-ident')?.value || '').trim(),
+        descricao: String(modal.querySelector('#montar-ficha-desc')?.value || '').trim(),
+        status: String(modal.querySelector('#montar-ficha-status')?.value || 'Ativa').trim(),
+        modelo: String(modal.querySelector('#montar-ficha-modelo')?.value || '').trim(),
+        qtde: modal.querySelector('#montar-ficha-qtde')?.value,
+        qtde_batelada: modal.querySelector('#montar-ficha-batelada')?.value,
+        qtde_referencia: modal.querySelector('#montar-ficha-ref')?.value,
+        operacao: {
+          operacao: modal.querySelector('#montar-op-id')?.value,
+          unidade: modal.querySelector('#montar-op-un')?.value,
+          tempo_operacao: modal.querySelector('#montar-op-tempo')?.value,
+          tempo_preparacao: modal.querySelector('#montar-op-prep')?.value,
+        },
+        itens: itensPayload,
+      };
+
+      try {
+        const resp = await fetch('/api/estrutura/montar', {
+          method: 'POST',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        const data = await resp.json().catch(() => ({}));
+        if (!resp.ok || data.success === false) throw new Error(data.error || `Erro ${resp.status}`);
+        if (statusEl) { statusEl.style.color = '#34d399'; statusEl.textContent = 'Estrutura salva.'; }
+        if (typeof onSaved === 'function') await onSaved(data);
+        setTimeout(close, 400);
+      } catch (err) {
+        if (statusEl) { statusEl.style.color = '#f87171'; statusEl.textContent = err.message || 'Erro ao salvar.'; }
+        saveBtn.disabled = false;
+        saveBtn.innerHTML = orig;
+      }
+    });
+  }
+
   async function openProducaoEstruturaPorIappId(_iappId, produtoCodigo, opts) {
     const opProducaoId = Number(opts?.opProducaoId) || 0;
     const numeroOp = String(opts?.numeroOp || '').trim();
@@ -81152,6 +82822,7 @@ window.verOperacao = function(osId) {
       </div>
       <footer style="display:flex;justify-content:flex-end;gap:8px;flex-wrap:wrap;">
         <span id="estrutura-sync-status" style="flex:1;font-size:11px;color:#64748b;align-self:center;min-width:120px;"></span>
+        <button type="button" class="modal-secondary" id="estrutura-montar-btn">Montar estrutura</button>
         <button type="button" class="modal-secondary" id="estrutura-editar-btn">Editar</button>
         <button type="button" class="modal-primary" id="estrutura-sync-btn">Salvar no banco</button>
         <button type="button" class="modal-secondary" id="estrutura-fechar-btn">Fechar</button>
@@ -81163,13 +82834,100 @@ window.verOperacao = function(osId) {
 
     const syncBtn = modal.querySelector('#estrutura-sync-btn');
     const editarBtn = modal.querySelector('#estrutura-editar-btn');
+    const montarBtn = modal.querySelector('#estrutura-montar-btn');
     const syncStatus = modal.querySelector('#estrutura-sync-status');
     let syncPollTimer = null;
     let fichaInfoLoaded = null;
     let codigoUsadoLoaded = codigo;
     let modoEdicaoEstrutura = false;
+    let modoSelecaoMontar = false;
     let ultimaListaItens = [];
     let ultimaFonteSql = false;
+    let ultimaDescricaoPai = '';
+
+    const irParaBuscaMontar = (pecasIniciais) => {
+      openMontarEstruturaBuscaModal({
+        pecasIniciais: pecasIniciais || [],
+        onConfirm: (pecas) => {
+          openMontarEstruturaDadosModal({
+            codigoPai: codigoUsadoLoaded,
+            ficha: fichaInfoLoaded,
+            pecas,
+            onSaved: async () => {
+              try {
+                const r = await fetch(fetchUrl);
+                const d = await r.json();
+                if (r.ok) renderEstruturaData(d);
+              } catch (_) {}
+            },
+          });
+        },
+      });
+    };
+
+    const atualizarBotoesMontar = () => {
+      if (!montarBtn) return;
+      if (modoSelecaoMontar) {
+        montarBtn.textContent = 'Continuar com selecionadas';
+        montarBtn.classList.remove('modal-secondary');
+        montarBtn.classList.add('modal-primary');
+      } else {
+        montarBtn.textContent = 'Montar estrutura';
+        montarBtn.classList.remove('modal-primary');
+        montarBtn.classList.add('modal-secondary');
+      }
+    };
+
+    montarBtn?.addEventListener('click', () => {
+      if (modoSelecaoMontar) {
+        const idxs = [...modal.querySelectorAll('.estrutura-montar-chk:checked')]
+          .map((el) => Number(el.dataset.itemIdx))
+          .filter((n) => Number.isFinite(n));
+        const pecas = idxs.map((i) => ultimaListaItens[i]).filter(Boolean);
+        if (!pecas.length) {
+          alert('Selecione ao menos uma peça da lista, ou feche e use Montar estrutura → Não para ir direto à busca.');
+          return;
+        }
+        modoSelecaoMontar = false;
+        atualizarBotoesMontar();
+        if (typeof renderEstruturaData === 'function' && ultimaListaItens.length) {
+          renderEstruturaData({
+            response: ultimaListaItens,
+            codigo: codigoUsadoLoaded,
+            fonte: ultimaFonteSql ? 'sql' : 'iapp',
+            ficha: fichaInfoLoaded,
+            sincronizado_em: fichaInfoLoaded?.sincronizado_em || null,
+            descricao: ultimaDescricaoPai,
+          });
+        }
+        irParaBuscaMontar(pecas);
+        return;
+      }
+
+      openMontarEstruturaPerguntaModal(
+        () => {
+          if (!ultimaListaItens.length) {
+            alert('A lista atual está vazia. Vamos direto para a busca de peças.');
+            irParaBuscaMontar([]);
+            return;
+          }
+          modoSelecaoMontar = true;
+          modoEdicaoEstrutura = false;
+          atualizarBotaoEditar();
+          atualizarBotoesMontar();
+          if (syncStatus) syncStatus.textContent = 'Marque as peças e clique em Continuar com selecionadas.';
+          renderEstruturaData({
+            response: ultimaListaItens,
+            codigo: codigoUsadoLoaded,
+            fonte: ultimaFonteSql ? 'sql' : 'iapp',
+            ficha: fichaInfoLoaded,
+            sincronizado_em: fichaInfoLoaded?.sincronizado_em || null,
+            descricao: ultimaDescricaoPai,
+          });
+        },
+        () => irParaBuscaMontar([])
+      );
+    });
 
     const atualizarBotaoEditar = () => {
       if (!editarBtn) return;
@@ -81300,8 +83058,9 @@ window.verOperacao = function(osId) {
       codigoUsadoLoaded = codigoUsado;
       fichaInfoLoaded = data.ficha || null;
       ultimaListaItens = itens;
+      ultimaDescricaoPai = String(data.descricao || data.ficha?.descricao || ultimaDescricaoPai || '').trim();
       if (!itens.length) {
-        body.innerHTML = `<div style="text-align:center;padding:32px 0;color:#475569;font-size:12px;">Nenhuma peça encontrada na ficha técnica para <b>${escapeHtml(codigoUsado)}</b>.</div>`;
+        body.innerHTML = `<div style="text-align:center;padding:32px 0;color:#475569;font-size:12px;">Nenhuma peça encontrada na ficha técnica para <b>${escapeHtml(codigoUsado)}</b>.<br><span style="font-size:11px;color:#94a3b8;">Use <b>Montar estrutura</b> para criar a lista no SQL.</span></div>`;
         return;
       }
       const fonte = String(data.fonte || '').toLowerCase() === 'sql' || data.sincronizado_em
@@ -81316,7 +83075,7 @@ window.verOperacao = function(osId) {
       const syncLabel = fonte === 'sql' && syncEm ? ` · atualizado ${escapeHtml(syncEm)}` : '';
       const fichaInfo = data.ficha;
       const isSql = fonte === 'sql';
-      const colCount = isSql ? 6 : 5;
+      const colCount = (isSql ? 6 : 5) + (modoSelecaoMontar ? 1 : 0);
       const temPostoGravado = isSql && itens.some((i) => String(i?.posto || '').trim());
       const ordemPostos = producaoListaPostosInspecaoEstrutura();
       const btnFichaHtml = isSql && fichaInfo?.id
@@ -81325,7 +83084,10 @@ window.verOperacao = function(osId) {
       const btnAddHtml = isSql && fichaInfo?.id
         ? `<button type="button" class="modal-primary" id="estrutura-add-item-btn" style="font-size:10px;padding:4px 10px;margin-left:8px;">Adicionar item</button>`
         : '';
-      const colAcoes = isSql
+      const colChk = modoSelecaoMontar
+        ? `<th style="padding:6px 4px;font-size:10px;color:#475569;font-weight:600;text-align:center;width:28px;"></th>`
+        : '';
+      const colAcoes = isSql && !modoSelecaoMontar
         ? `<th style="padding:6px 8px;font-size:10px;color:#475569;font-weight:600;text-align:center;min-width:150px;">Ações</th>`
         : '';
 
@@ -81336,30 +83098,40 @@ window.verOperacao = function(osId) {
         const vlrUn = _producaoFmtVlrFicha(i.cmc ?? i.preco ?? _producaoPrecoItemFicha(i));
         const vlrTotal = _producaoFmtVlrFicha(i.valor_total ?? _producaoValorTotalItemFicha(i));
         const postoLabel = String(i.posto || '').trim();
-        const btnItem = isSql && i.item_id
+        const btnItem = isSql && i.item_id && !modoSelecaoMontar
           ? `<button type="button" class="estrutura-ver-item-btn modal-secondary" data-item-id="${escapeHtml(String(i.item_id))}" style="font-size:9px;padding:3px 6px;margin:1px;" title="Ver dados completos">Dados</button>`
           : '';
-        const btnTrocar = isSql && i.item_id
+        const btnTrocar = isSql && i.item_id && !modoSelecaoMontar
           ? `<button type="button" class="estrutura-trocar-item-btn modal-secondary" data-item-id="${escapeHtml(String(i.item_id))}" style="font-size:9px;padding:3px 6px;margin:1px;" title="Trocar produto">Trocar</button>`
           : '';
-        const btnExcluir = isSql && i.item_id
+        const btnExcluir = isSql && i.item_id && !modoSelecaoMontar
           ? `<button type="button" class="estrutura-excluir-item-btn" data-item-id="${escapeHtml(String(i.item_id))}" style="font-size:9px;padding:3px 6px;margin:1px;background:#450a0a;color:#fca5a5;border:1px solid #7f1d1d;border-radius:6px;cursor:pointer;" title="Excluir item">Excluir</button>`
           : '';
-        const tdAcoes = isSql
+        const tdAcoes = isSql && !modoSelecaoMontar
           ? `<td style="padding:6px 4px;text-align:center;white-space:nowrap;">${btnItem}${btnTrocar}${btnExcluir}</td>`
           : '';
+        const tdChk = modoSelecaoMontar
+          ? `<td style="padding:6px 4px;text-align:center;">
+              <input type="checkbox" class="estrutura-montar-chk" data-item-idx="${idx}" style="width:15px;height:15px;accent-color:#34d399;cursor:pointer;">
+            </td>`
+          : '';
         const codDrill = String(ident).trim();
-        const podeDrill = !modoEdicaoEstrutura && codDrill && codDrill !== '—';
-        const rowClass = modoEdicaoEstrutura
-          ? 'estrutura-item-row estrutura-item-row--edit'
-          : `estrutura-item-row${podeDrill ? ' estrutura-item-row--drill' : ''}`;
-        const rowTitle = modoEdicaoEstrutura
-          ? 'Clique para editar este item'
-          : (podeDrill ? 'Clique para abrir a estrutura deste item (se houver)' : '');
+        const podeDrill = !modoEdicaoEstrutura && !modoSelecaoMontar && codDrill && codDrill !== '—';
+        const rowClass = modoSelecaoMontar
+          ? 'estrutura-item-row estrutura-item-row--montar'
+          : (modoEdicaoEstrutura
+            ? 'estrutura-item-row estrutura-item-row--edit'
+            : `estrutura-item-row${podeDrill ? ' estrutura-item-row--drill' : ''}`);
+        const rowTitle = modoSelecaoMontar
+          ? 'Marque para incluir na montagem'
+          : (modoEdicaoEstrutura
+            ? 'Clique para editar este item'
+            : (podeDrill ? 'Clique para abrir a estrutura deste item (se houver)' : ''));
         const postoBadge = postoLabel && !temPostoGravado
           ? `<div style="font-size:9px;color:#a78bfa;margin-top:2px;">${escapeHtml(postoLabel)}</div>`
           : '';
         return `<tr class="${rowClass}" data-item-idx="${idx}" data-codigo="${escapeHtml(codDrill)}" style="border-bottom:1px solid rgba(255,255,255,.05);cursor:pointer;" title="${escapeHtml(rowTitle)}">
+          ${tdChk}
           <td style="padding:6px 8px;font-size:10px;color:#94a3b8;white-space:nowrap;">${escapeHtml(String(ident))}${postoBadge}</td>
           <td style="padding:6px 8px;font-size:11px;color:#e2e8f0;">${escapeHtml(String(desc))}</td>
           <td style="padding:6px 8px;font-size:11px;color:#f1f5f9;text-align:right;font-weight:600;">${escapeHtml(String(qtde))}</td>
@@ -81399,9 +83171,14 @@ window.verOperacao = function(osId) {
       const fichaLabel = fichaInfo?.identificacao
         ? ` · ficha ${escapeHtml(String(fichaInfo.identificacao))}`
         : '';
-      const modoLabel = modoEdicaoEstrutura
-        ? ` · <span style="color:#fbbf24;font-weight:600;">modo edição</span>`
-        : '';
+      const modoLabel = modoSelecaoMontar
+        ? ` · <span style="color:#34d399;font-weight:600;">selecionando peças</span>`
+        : (modoEdicaoEstrutura
+          ? ` · <span style="color:#fbbf24;font-weight:600;">modo edição</span>`
+          : '');
+      const hintTxt = modoSelecaoMontar
+        ? 'Marque as peças desejadas e clique em Continuar com selecionadas.'
+        : (modoEdicaoEstrutura ? 'Clique em um item para editar produto primário e posto.' : '');
       body.innerHTML = `
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px;">
           <span style="font-size:11px;color:#94a3b8;">
@@ -81411,12 +83188,11 @@ window.verOperacao = function(osId) {
             ${btnFichaHtml}${btnAddHtml}
           </span>
         </div>
-        <p id="estrutura-drill-hint" style="margin:0 0 8px;font-size:11px;color:#94a3b8;min-height:16px;">${
-          modoEdicaoEstrutura ? 'Clique em um item para editar produto primário e posto.' : ''
-        }</p>
+        <p id="estrutura-drill-hint" style="margin:0 0 8px;font-size:11px;color:#94a3b8;min-height:16px;">${hintTxt}</p>
         <table style="width:100%;border-collapse:collapse;">
           <thead>
             <tr style="border-bottom:1px solid rgba(255,255,255,.1);">
+              ${colChk}
               <th style="padding:6px 8px;font-size:10px;color:#475569;font-weight:600;text-align:left;">Código</th>
               <th style="padding:6px 8px;font-size:10px;color:#475569;font-weight:600;text-align:left;">Descrição</th>
               <th style="padding:6px 8px;font-size:10px;color:#475569;font-weight:600;text-align:right;">Qtde</th>
@@ -81466,7 +83242,15 @@ window.verOperacao = function(osId) {
       });
 
       const drillHint = body.querySelector('#estrutura-drill-hint');
-      if (modoEdicaoEstrutura) {
+      if (modoSelecaoMontar) {
+        body.querySelectorAll('.estrutura-item-row--montar').forEach((tr) => {
+          tr.addEventListener('click', (ev) => {
+            if (ev.target.closest('input,button')) return;
+            const chk = tr.querySelector('.estrutura-montar-chk');
+            if (chk) chk.checked = !chk.checked;
+          });
+        });
+      } else if (modoEdicaoEstrutura) {
         body.querySelectorAll('.estrutura-item-row--edit').forEach((tr) => {
           tr.addEventListener('click', (ev) => {
             if (ev.target.closest('button')) return;
@@ -81986,14 +83770,33 @@ window.verOperacao = function(osId) {
       ? minNum.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
       : '0,00';
 
-    const linhas = itens.map((i) => `
+    const renderLinhaFicha = (i) => `
       <tr>
         <td>${escapeHtml(String(i.identificacao || '—'))}</td>
         <td>${escapeHtml(String(i.descricao || '—'))}</td>
         <td style="text-align:right;">${escapeHtml(String(i.qtde ?? '—'))}</td>
         <td style="text-align:right;white-space:nowrap;">${escapeHtml(_producaoFmtVlrFicha(i.cmc ?? i.preco ?? _producaoPrecoItemFicha(i)))}</td>
         <td style="text-align:right;white-space:nowrap;font-weight:600;">${escapeHtml(_producaoFmtVlrFicha(i.valor_total ?? _producaoValorTotalItemFicha(i)))}</td>
-      </tr>`).join('');
+      </tr>`;
+
+    const mid = Math.ceil(itens.length / 2);
+    const colA = itens.slice(0, mid);
+    const colB = itens.slice(mid);
+    const theadFicha = `
+      <thead>
+        <tr>
+          <th>Código</th>
+          <th>Descrição</th>
+          <th style="text-align:right;">Qtde</th>
+          <th style="text-align:right;">Vlr un.</th>
+          <th style="text-align:right;">Vlr Total</th>
+        </tr>
+      </thead>`;
+    const tabelaCol = (lista) => `
+      <table>
+        ${theadFicha}
+        <tbody>${lista.map(renderLinhaFicha).join('')}</tbody>
+      </table>`;
 
     const blocosDiagrama = diagramas.map((d) => {
       const titulo = `${d.codigo || ''}${d.descricao ? ` — ${d.descricao}` : ''}`.trim();
@@ -82018,21 +83821,24 @@ window.verOperacao = function(osId) {
   <title>Ficha técnica — ${escapeHtml(codigo)}</title>
   <style>
     * { box-sizing: border-box; }
-    body { font-family: Arial, Helvetica, sans-serif; color: #0f172a; margin: 24px; font-size: 12px; }
-    h1 { font-size: 18px; margin: 0 0 4px; }
-    .meta { color: #475569; margin-bottom: 16px; line-height: 1.5; }
+    body { font-family: Arial, Helvetica, sans-serif; color: #0f172a; margin: 14px; font-size: 10px; }
+    h1 { font-size: 13px; margin: 0 0 2px; }
+    .meta { color: #475569; margin-bottom: 8px; line-height: 1.35; font-size: 10px; }
     .meta b { color: #0f172a; }
-    table { width: 100%; border-collapse: collapse; margin-top: 8px; }
-    th, td { border: 1px solid #cbd5e1; padding: 6px 8px; vertical-align: top; }
-    th { background: #f1f5f9; text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: .02em; }
-    .sec-title { margin: 20px 0 8px; font-size: 14px; font-weight: 700; border-bottom: 2px solid #0f172a; padding-bottom: 4px; }
-    .diagrama-bloco { margin-top: 12px; page-break-inside: avoid; }
-    .diagrama-titulo { font-weight: 600; margin-bottom: 8px; }
-    .diagrama-bloco img { max-width: 100%; max-height: 420px; border: 1px solid #cbd5e1; display: block; }
+    .cols { display: flex; gap: 8px; align-items: flex-start; }
+    .cols > table { width: 50%; margin: 0; }
+    table { width: 100%; border-collapse: collapse; margin-top: 4px; }
+    th, td { border: 1px solid #cbd5e1; padding: 2px 4px; vertical-align: top; font-size: 9px; line-height: 1.25; }
+    th { background: #f1f5f9; text-align: left; font-size: 8px; text-transform: uppercase; letter-spacing: .02em; font-weight: 700; }
+    .sec-title { margin: 10px 0 4px; font-size: 11px; font-weight: 700; border-bottom: 1px solid #0f172a; padding-bottom: 2px; }
+    .diagrama-bloco { margin-top: 8px; page-break-inside: avoid; }
+    .diagrama-titulo { font-weight: 600; margin-bottom: 4px; font-size: 10px; }
+    .diagrama-bloco img { max-width: 100%; max-height: 360px; border: 1px solid #cbd5e1; display: block; }
     .diagrama-sem-img { color: #64748b; font-style: italic; }
-    .vazio { color: #64748b; padding: 16px 0; }
+    .vazio { color: #64748b; padding: 10px 0; }
     @media print {
-      body { margin: 12mm; }
+      body { margin: 8mm; font-size: 9px; }
+      th, td { padding: 1px 3px; font-size: 8px; }
       .no-print { display: none !important; }
     }
   </style>
@@ -82048,18 +83854,10 @@ window.verOperacao = function(osId) {
 
   <div class="sec-title">Estrutura do produto</div>
   ${itens.length ? `
-  <table>
-    <thead>
-      <tr>
-        <th>Código</th>
-        <th>Descrição</th>
-        <th style="text-align:right;">Qtde</th>
-        <th style="text-align:right;">Vlr un.</th>
-        <th style="text-align:right;">Vlr Total</th>
-      </tr>
-    </thead>
-    <tbody>${linhas}</tbody>
-  </table>` : '<p class="vazio">Nenhum item com Vlr Total acima do mínimo informado.</p>'}
+  <div class="cols">
+    ${tabelaCol(colA)}
+    ${colB.length ? tabelaCol(colB) : '<div></div>'}
+  </div>` : '<p class="vazio">Nenhum item com Vlr Total acima do mínimo informado.</p>'}
 
   ${diagramas.length ? `
   <div class="sec-title">Diagrama</div>

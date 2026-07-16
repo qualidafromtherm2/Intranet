@@ -16,6 +16,7 @@ const {
   trocarProdutoItemPorOmie,
   adicionarItemFichaPorOmie,
   excluirItemFicha,
+  montarEstruturaLocal,
 } = require('../utils/estruturaSql');
 
 const router = express.Router();
@@ -763,6 +764,28 @@ router.delete('/item/:id', async (req, res) => {
       fonte: 'sql',
       message: 'Item removido da estrutura.',
       ...dados,
+    });
+  } catch (err) {
+    return res.status(err.status || 500).json({ error: err.message });
+  }
+});
+
+/**
+ * POST /api/estrutura/montar
+ * Cria/substitui estrutura local (SQL) com peças escolhidas + dados do formulário.
+ */
+router.post('/montar', express.json(), async (req, res) => {
+  try {
+    const resultado = await montarEstruturaLocal(req.body || {});
+    return res.json({
+      success: true,
+      fonte: 'sql',
+      message: 'Estrutura montada e salva no banco.',
+      codigo: resultado.codigo,
+      sincronizado_em: resultado.sincronizado_em,
+      ficha: resultado.ficha,
+      total: resultado.itens?.length || 0,
+      response: resultado.itens || [],
     });
   } catch (err) {
     return res.status(err.status || 500).json({ error: err.message });
