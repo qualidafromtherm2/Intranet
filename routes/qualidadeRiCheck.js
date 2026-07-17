@@ -1346,7 +1346,12 @@ router.post('/:id/liberar', requireAuth, express.json(), async (req, res) => {
   }
 });
 
-/** Registra RI_Check no posto Montagem hermetica ao imprimir OP (Programado → Montagem hermetica). */
+/**
+ * Cria/garante RI_Check ao imprimir OP (Programado → Montagem hermetica).
+ * O registro nasce como 'Em andamento' — o status do posto só é gravado
+ * quando o usuário clica em "Registrar RI" no modal (rota /:id/liberar).
+ * Se já existir RI registrada no posto (statusRi), apenas atualiza os campos.
+ */
 async function registrarRiCheckImpressaoOp({
   opProducaoId = 0,
   opIappId = 0,
@@ -1415,21 +1420,20 @@ async function registrarRiCheckImpressaoOp({
   );
 
   if (emAndamento.length) {
+    // Mantém o status atual (ex.: 'Em andamento') — registrar no posto é ação manual do usuário.
     await dbQuery(
       `UPDATE qualidade."RI_Check"
-          SET status = $2,
-              codigo_produto = COALESCE($3, codigo_produto),
-              codigo = COALESCE(NULLIF($4, ''), codigo),
-              descricao = COALESCE(NULLIF($5, ''), descricao),
-              id_kanban_programacao = COALESCE($6, id_kanban_programacao),
-              op_producao_id = COALESCE($7, op_producao_id),
-              op_iapp_id = COALESCE($8, op_iapp_id),
-              usuario = $9,
+          SET codigo_produto = COALESCE($2, codigo_produto),
+              codigo = COALESCE(NULLIF($3, ''), codigo),
+              descricao = COALESCE(NULLIF($4, ''), descricao),
+              id_kanban_programacao = COALESCE($5, id_kanban_programacao),
+              op_producao_id = COALESCE($6, op_producao_id),
+              op_iapp_id = COALESCE($7, op_iapp_id),
+              usuario = $8,
               updated_at = NOW()
         WHERE id = $1`,
       [
         emAndamento[0].id,
-        statusFinal,
         codigoProdutoGravar,
         codigo || null,
         descricao || null,
@@ -1443,10 +1447,11 @@ async function registrarRiCheckImpressaoOp({
     return { id: emAndamento[0].id, updated: true };
   }
 
+  // Nasce 'Em andamento': o botão "Registrar RI" do modal é quem grava o posto.
   const ins = await dbQuery(
     `INSERT INTO qualidade."RI_Check"
        (id_kanban_programacao, codigo_produto, codigo, descricao, op_iapp_id, op_producao_id, usuario, status)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, 'Em andamento')
      RETURNING id`,
     [
       kanbanProgId,
@@ -1456,7 +1461,6 @@ async function registrarRiCheckImpressaoOp({
       opIappIdGravar,
       opProducaoIdGravar,
       usuario,
-      statusFinal,
     ]
   );
   dispararNotificacaoRiCheck(ins.rows[0]?.id);

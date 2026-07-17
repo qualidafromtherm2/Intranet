@@ -6,8 +6,13 @@ WRAP="${HOME}/.local/bin/google-chrome-webgl"
 if [[ -x "$WRAP" ]]; then
   exec "$WRAP" --new-window "$URL"
 fi
-# Fallback se o wrapper ainda não existir
-exec env -u __NV_PRIME_RENDER_OFFLOAD -u __GLX_VENDOR_LIBRARY_NAME \
+# Fallback se o wrapper ainda não existir (perfil próprio = processo novo garantido)
+PROFILE="${HOME}/.config/google-chrome-webgl"
+mkdir -p "$PROFILE"
+exec env -u __NV_PRIME_RENDER_OFFLOAD -u __GLX_VENDOR_LIBRARY_NAME -u __VK_LAYER_NV_optimus \
   /usr/bin/google-chrome-stable \
-  --ignore-gpu-blocklist --use-gl=angle --use-angle=gl \
+  --user-data-dir="$PROFILE" \
+  --no-first-run --no-default-browser-check \
+  --ignore-gpu-blocklist --enable-unsafe-swiftshader \
+  --use-gl=angle --use-angle=gl \
   --new-window "$URL"

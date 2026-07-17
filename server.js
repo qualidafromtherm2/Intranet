@@ -14237,11 +14237,32 @@ app.post('/api/etiquetas/recebimento/imprimir-multiplo', express.json(), async (
 });
 
 // Ocupação do armazém 3D — retorna estoque por endereço para colorir o mapa
+// GET /api/prateleiras3d/foto?url=… — proxy de foto p/ textura WebGL do 3D
+// (o bucket R2 não envia CORS; sem proxy o canvas fica "tainted" e a textura falha)
+app.get('/api/prateleiras3d/foto', async (req, res) => {
+  try {
+    let u;
+    try { u = new URL(String(req.query?.url || '')); } catch { return res.status(400).end(); }
+    if (u.protocol !== 'https:' || !u.hostname.endsWith('.r2.dev')) {
+      return res.status(403).end();
+    }
+    const r = await fetch(u.toString());
+    if (!r.ok) return res.status(502).end();
+    res.set('Content-Type', r.headers.get('content-type') || 'image/jpeg');
+    res.set('Cache-Control', 'public, max-age=86400');
+    res.end(Buffer.from(await r.arrayBuffer()));
+  } catch (err) {
+    console.error('[prateleiras3d/foto]', err?.message || err);
+    res.status(500).end();
+  }
+});
+
 app.get('/api/etiquetas/ocupacao', async (req, res) => {
   try {
     const { rows } = await pool.query(`
       SELECT
         i.id,
+        i.origem_id,
         TRIM(i.endereco) AS endereco,
         i.complemento,
         COALESCE(p.codigo, i.codigo_produto) AS codigo_produto,
@@ -14271,6 +14292,8 @@ app.get('/api/etiquetas/ocupacao', async (req, res) => {
       if (!mapa[key]) mapa[key] = [];
       mapa[key].push({
         id:             row.id,
+        // ID da etiqueta de recebimento (ETQ_recebimento) — o que está impresso na etiqueta física
+        etiqueta_id:    row.origem_id ?? row.id,
         codigo_produto: row.codigo_produto,
         descricao:      row.descricao || '',
         qtd:            Number(row.qtd) || 0,

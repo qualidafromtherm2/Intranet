@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
   <title>Explorar 3D — Porta-pallet</title>
-  <link rel="stylesheet" href="style.css" />
+  <link rel="stylesheet" href="style.css?v=3" />
   <script type="importmap">
   {
     "imports": {
@@ -63,7 +63,16 @@
           <li><strong>Tablet:</strong> WASD + ↑↓ na tela + arrastar para olhar</li>
           <li><kbd>Esc</kbd> (PC) ou Sair (tablet) — pausar</li>
         </ul>
-        <p class="hint">Produtos aparecem como chapas verdes (mais leve que caixa 3D). Só endereços com item.</p>
+        <p class="hint">Cada posição ocupada mostra a foto dos produtos. Segure o clique e arraste para rolar as fotos. <strong>Clique</strong> numa foto para fixar o painel e mexer nele — <strong>botão direito</strong> volta ao normal.</p>
+        <div id="gpuHelp" class="gpu-help" hidden>
+          <p><strong>Neste PC o 3D só abre pelo atalho WebGL</strong> (menu do Chrome ligado não basta).</p>
+          <ol>
+            <li>Feche <strong>todas</strong> as janelas do Chrome</li>
+            <li>No terminal, na pasta do projeto:</li>
+          </ol>
+          <code class="gpu-cmd">./prateleiras-3d/abrir-com-gpu.sh</code>
+          <p class="gpu-alt">Ou: <code>~/.local/bin/google-chrome-webgl</code> e abra a intranet de novo.</p>
+        </div>
         <p id="webglError" class="error" hidden></p>
         <button type="button" id="btnOpenNewTab" class="btn btn-alt" hidden>Abrir em nova aba (recomendado no PC)</button>
         <button type="button" id="btnEnter" class="btn">Toque / clique para entrar</button>
@@ -74,6 +83,6 @@
     </div>
   </div>
 
-  <script type="module" src="main.js"></script>
+  <script type="module" src="main.js?v=6"></script>
 </body>
 </html>

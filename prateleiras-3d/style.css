@@ -91,13 +91,50 @@ body {
   border: 1px solid rgba(248, 81, 73, 0.45);
   background: rgba(248, 81, 73, 0.12);
   color: #ffb4b0;
-  font-size: 0.85rem;
+  font-size: 0.82rem;
   text-align: left;
   line-height: 1.45;
+  white-space: pre-wrap;
 }
 
 .error[hidden] {
   display: none;
+}
+
+.gpu-help {
+  margin: 0.75rem 0;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid rgba(251, 191, 36, 0.45);
+  background: rgba(146, 64, 14, 0.25);
+  color: #fde68a;
+  font-size: 0.85rem;
+  text-align: left;
+}
+
+.gpu-help ol {
+  margin: 0.35rem 0 0.35rem 1.1rem;
+  padding: 0;
+}
+
+.gpu-cmd,
+.gpu-help code,
+.gpu-alt code {
+  display: block;
+  margin: 6px 0;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: #0d1117;
+  color: #86efac;
+  font-family: ui-monospace, monospace;
+  font-size: 0.8rem;
+  word-break: break-all;
+}
+
+.gpu-alt {
+  margin: 0.35rem 0 0;
+  font-size: 0.78rem;
+  color: #d6d3d1;
 }
 
 .btn:disabled {
@@ -323,9 +360,9 @@ kbd {
   top: calc(50% + 28px);
   transform: translateX(-50%);
   z-index: 8;
-  min-width: 200px;
-  max-width: min(360px, calc(100vw - 24px));
-  max-height: 55vh;
+  min-width: 320px;
+  max-width: min(600px, calc(100vw - 24px));
+  max-height: 60vh;
   overflow: auto;
   padding: 10px 12px;
   border-radius: 10px;
@@ -383,12 +420,17 @@ kbd {
 }
 
 .look-balloon-row img {
-  width: 36px;
-  height: 36px;
+  width: 52px;
+  height: 52px;
   object-fit: contain;
-  border-radius: 4px;
+  border-radius: 6px;
   background: #0d1117;
   flex-shrink: 0;
+}
+
+.look-balloon-info {
+  min-width: 0;
+  flex: 1;
 }
 
 .look-balloon-row .cod {
@@ -406,7 +448,105 @@ kbd {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  max-width: 220px;
+  max-width: 460px;
+}
+
+.look-balloon-row .ids {
+  font-family: ui-monospace, monospace;
+  font-size: 0.75rem;
+  color: #fbbf24;
+  margin-top: 3px;
+  word-break: break-word;
+  white-space: normal;
+}
+
+/* Painel FIXADO (clique numa foto ou num card do kanban): interativo */
+.look-balloon.is-locked {
+  pointer-events: auto;
+  border-color: #58a6ff;
+  box-shadow: 0 0 0 2px rgba(88, 166, 255, 0.35), 0 10px 28px rgba(0, 0, 0, 0.45);
+  max-width: min(760px, calc(100vw - 24px));
+}
+
+.sep-urgente {
+  color: #fca5a5;
+  background: #450a0a;
+  border: 1px solid #ef4444;
+  border-radius: 10px;
+  padding: 0 6px;
+  font-size: 0.65rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.look-balloon.is-locked .look-balloon-row {
+  cursor: pointer;
+  border-radius: 8px;
+  padding-left: 6px;
+  padding-right: 6px;
+}
+
+.look-balloon.is-locked .look-balloon-row:hover {
+  background: rgba(88, 166, 255, 0.12);
+}
+
+/* Detalhe de um produto dentro do painel fixado */
+.det-back {
+  color: #58a6ff;
+  cursor: pointer;
+  font-size: 0.78rem;
+  margin-bottom: 8px;
+  user-select: none;
+}
+
+.det-back:hover {
+  text-decoration: underline;
+}
+
+.det-head {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.det-foto {
+  width: 96px;
+  height: 96px;
+  object-fit: contain;
+  background: #0d1117;
+  border-radius: 8px;
+  flex-shrink: 0;
+}
+
+.det-desc {
+  color: #c9d1d9;
+  font-size: 0.8rem;
+  margin: 2px 0;
+}
+
+.det-tab {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.78rem;
+}
+
+.det-tab th {
+  text-align: left;
+  color: #8b949e;
+  font-weight: 600;
+  padding: 4px 6px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.det-tab td {
+  padding: 4px 6px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.det-id {
+  font-family: ui-monospace, monospace;
+  color: #fbbf24;
 }
 
 .look-balloon-overflow-end {
