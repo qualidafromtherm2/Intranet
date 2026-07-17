@@ -442,6 +442,10 @@ function _solRenderIdsFifoHtml(idsFifo, unidade) {
       style="margin-top:6px;width:100%;padding:5px 8px;border:none;border-radius:6px;background:#059669;color:#ecfdf5;font-size:.68rem;font-weight:700;cursor:pointer;">
       <i class="fa-solid fa-qrcode" style="margin-right:4px;"></i>Ler próxima etiqueta
     </button>
+    <button type="button" class="btn-sem-leitura-etq" title="Consome automaticamente os menores IDs, sem escanear"
+      style="margin-top:5px;width:100%;padding:5px 8px;border:1px solid #475569;border-radius:6px;background:#1e293b;color:#cbd5e1;font-size:.66rem;font-weight:700;cursor:pointer;">
+      <i class="fa-solid fa-forward" style="margin-right:4px;"></i>Sem leitura
+    </button>
   </div>`;
 }
 
@@ -2284,8 +2288,11 @@ async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) 
     }
     row.dataset.etqSelecoes = JSON.stringify(selecoes);
     _solAplicarVisualAlocacaoEtq(row, qty);
-    // Marca visualmente IDs já lidos na lista
-    const lidosAgora = new Set(selecoes.map(s => Number(s.id)).filter(Boolean));
+    _marcarIdsLidosNaLista(row, selecoes);
+  }
+
+  function _marcarIdsLidosNaLista(row, selecoes) {
+    const lidosAgora = new Set((selecoes || []).map(s => Number(s.id)).filter(Boolean));
     row.querySelectorAll('.sep-etq-id-row').forEach(el => {
       const id = Number(el.dataset.etqId);
       if (lidosAgora.has(id)) {
@@ -2295,6 +2302,55 @@ async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) 
         if (span && !span.textContent.includes('✓')) span.textContent = span.textContent.replace(' ← ler', '') + ' ✓';
       }
     });
+  }
+
+  /* "Sem leitura": consome automaticamente os menores IDs (FIFO), sem escanear.
+     Paliativo até os IDs físicos estarem organizados nos produtos. */
+  function _aplicarSemLeituraDoRow(row) {
+    if (!row) return;
+    const qty = parseFloat(row.dataset.qtyTotal || '0') || 0;
+    const codigo = row.dataset.codigo || '';
+    const idsEsperados = _idsFifoDoItem({ codigo_produto: codigo }, qty);
+    if (!idsEsperados.length) {
+      alert('Não há IDs com saldo no Porta Pallet para este produto.');
+      return;
+    }
+    let selecoes = _solLerSelecoesEtq(row);
+    const lidos = new Set(selecoes.map(s => Number(s.id)).filter(Boolean));
+    const pendentes = idsEsperados.filter(e => !lidos.has(Number(e.id)));
+    const falta = Math.max(0, qty - selecoes.reduce((s, a) => s + (Number(a.tirar) || 0), 0));
+    if (!pendentes.length || falta <= 1e-9) {
+      alert('Quantidade já completa com os IDs lidos.');
+      return;
+    }
+    if (!confirm(
+      `Dar baixa SEM leitura?\n\nO sistema vai consumir automaticamente os menores IDs:\n` +
+      pendentes.map(p => `• ID ${p.id} → ${_solFmtQty(p.tirar)} ${p.unidade || 'UN'}`).join('\n')
+    )) return;
+    for (const p of pendentes) {
+      selecoes.push({
+        id: String(p.id),
+        endereco: String(p.endereco || ''),
+        saldo: Number(p.qtd) || 0,
+        tirar: Number(p.tirar) || 0
+      });
+    }
+    row.dataset.etqSelecoes = JSON.stringify(selecoes);
+    _solAplicarVisualAlocacaoEtq(row, qty);
+    _marcarIdsLidosNaLista(row, selecoes);
+    // Marca o endereço do Porta Pallet como selecionado visualmente
+    row.querySelectorAll('.sep-etq-endereco-row').forEach(el => {
+      el.dataset.selected = '1';
+      el.style.borderColor = '#22c55e';
+      el.style.background = '#1a2e1a';
+    });
+    const btnSem = row.querySelector('.btn-sem-leitura-etq');
+    if (btnSem) {
+      btnSem.style.background = '#14532d';
+      btnSem.style.borderColor = '#16a34a';
+      btnSem.style.color = '#86efac';
+      btnSem.innerHTML = '<i class="fa-solid fa-check" style="margin-right:4px;"></i>Baixa sem leitura aplicada';
+    }
   }
 
   // Recarrega o SEP original do servidor e re-renderiza lista (sem sub-SEPs — .1 vai para fila pendente)
@@ -3051,6 +3107,14 @@ async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) 
       } finally {
         btnLerFifo.disabled = false;
       }
+      return;
+    }
+
+    const btnSemLeitura = e.target.closest('.btn-sem-leitura-etq');
+    if (btnSemLeitura) {
+      const row = btnSemLeitura.closest('[data-item-row]');
+      if (!row) return;
+      _aplicarSemLeituraDoRow(row);
       return;
     }
 
