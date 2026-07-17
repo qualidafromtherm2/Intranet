@@ -7419,6 +7419,9 @@
                       <input type="checkbox" id="filterSemEstoqueMin" style="width:15px;height:15px;cursor:pointer;accent-color:#3b82f6;">Sem estoque mínimo
                     </label>
                     <label style="display:flex;align-items:center;gap:8px;font-size:13px;font-weight:500;color:#374151;cursor:pointer;">
+                      <input type="checkbox" id="filterEstoqueNegativo" style="width:15px;height:15px;cursor:pointer;accent-color:#dc2626;">Estoque negativo
+                    </label>
+                    <label style="display:flex;align-items:center;gap:8px;font-size:13px;font-weight:500;color:#374151;cursor:pointer;">
                       <input type="checkbox" id="filterHideObsolete" style="width:15px;height:15px;cursor:pointer;accent-color:#3b82f6;">Ocultar obsoletos
                     </label>
                     <label style="display:flex;align-items:center;gap:8px;font-size:13px;font-weight:500;color:#374151;cursor:pointer;">
@@ -7443,8 +7446,9 @@
                       </select>
                     </div>
                     <div>
-                      <label for="filterLocalSelect" style="display:block;font-size:13px;font-weight:600;color:#374151;margin-bottom:5px;">Local de estoque:</label>
+                      <label for="filterLocalSelect" style="display:block;font-size:13px;font-weight:600;color:#374151;margin-bottom:5px;">Com saldo positivo no estoque:</label>
                       <select id="filterLocalSelect" style="width:100%;padding:8px 10px;border:1px solid #d1d5db;border-radius:8px;font-size:14px;color:#374151;background:#f9fafb;"><option value="">– todos –</option></select>
+                      <small style="display:block;margin-top:5px;color:#6b7280;font-size:11px;line-height:1.35;">Selecione um local para ver somente produtos com saldo maior que zero nele.</small>
                     </div>
                   </div>
                   <div style="display:flex;gap:8px;margin-top:22px;justify-content:flex-end;">
@@ -12295,10 +12299,10 @@
   <script type="module" src="login/login.js"></script>
   <script src="/public/js/vendas-relatorio-gerencial.js?v=20260709a" defer></script>
   <script src="/public/js/logistica-relatorio-gerencial.js?v=20260712a" defer></script>
-  <script type="module" src="menu_produto.js?v=20260715-etiqueta-impressora-v2"></script>
+  <script type="module" src="menu_produto.js?v=20260716-merge-pr66-67"></script>
   
-  <script type="module" src="./requisicoes_omie/filtro_produto.js?v=20260713b"></script>
-  <script type="module" src="./requisicoes_omie/ListarProdutos.js?v=20260713b"></script>
+  <script type="module" src="./requisicoes_omie/filtro_produto.js?v=20260716-limitado"></script>
+  <script type="module" src="./requisicoes_omie/ListarProdutos.js?v=20260716-limitado"></script>
   <script type="module" src="./requisicoes_omie/Dados_produto.js?v=20260710c" defer></script>
   <script type="module" src="./requisicoes_omie/dados_colaboradores.js"></script>
   <script src="produtos/produto_foto.js?v=20260430c" defer></script>

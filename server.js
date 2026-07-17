@@ -20966,16 +20966,14 @@ app.get('/api/logistica/estoque/batch', async (req, res) => {
       });
 
       if (!minimos[row.codigo]) minimos[row.codigo] = { min: 0, saldoAlmox: 0, abaixo: false };
-      const min = parseFloat(row.estoque_minimo) || 0;
-      // Mínimo do card = maior estoque_minimo entre os armazéns
-      if (min > minimos[row.codigo].min) minimos[row.codigo].min = min;
-      // Compara só com o físico do Porta Pallet / ALMOX (não soma armazéns)
-      if (String(row.local_codigo) === '10717096386') {
-        minimos[row.codigo].saldoAlmox = parseFloat(row.fisico) || 0;
+      // Usa exatamente o saldo exibido no card do Porta Pallet / ALMOX.
+      if (String(row.local_codigo) === '10717096386' || /PORTA PALLET/i.test(String(row.local_nome || ''))) {
+        minimos[row.codigo].min = parseFloat(row.estoque_minimo) || 0;
+        minimos[row.codigo].saldoAlmox = parseFloat(row.saldo) || 0;
       }
     }
 
-    // Abaixo do mínimo = saldo ALMOX < maior mínimo cadastrado
+    // Abaixo do mínimo = saldo ALMOX < mínimo configurado no próprio ALMOX.
     for (const cod of Object.keys(minimos)) {
       const info = minimos[cod];
       if (info.min > 0) {
@@ -22415,6 +22413,7 @@ app.get('/api/produtos/detalhes/:codigo', async (req, res) => {
           descricao,
           lead_time,
           estoque_minimo,
+          COALESCE((to_jsonb(produtos_omie)->>'item_limitado')::boolean, FALSE) AS item_limitado,
           COALESCE(
             to_jsonb(produtos_omie)->>'primeira_imagem',
             to_jsonb(produtos_omie)->>'url_imagem',
@@ -22495,7 +22494,19 @@ app.get('/api/produtos/detalhes/:codigo', async (req, res) => {
       params.push(codigo);
       sql += ` WHERE codigo = $${params.length} RETURNING *`;
 
-      const updateResult = await pool.query(sql, params);
+      const client = await pool.connect();
+      let updateResult;
+      try {
+        await client.query('BEGIN');
+        await client.query("SELECT set_config('app.produtos_omie_write_source', 'omie_manual', true)");
+        updateResult = await client.query(sql, params);
+        await client.query('COMMIT');
+      } catch (err) {
+        try { await client.query('ROLLBACK'); } catch (_) {}
+        throw err;
+      } finally {
+        client.release();
+      }
       
       // Auditoria
       try {

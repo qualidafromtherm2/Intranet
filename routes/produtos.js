@@ -353,6 +353,7 @@ router.post('/locais', async (req, res) => {
 // ============================================================================
 router.get('/lista', async (req, res) => {
   try {
+    await ensureProdutosOmieItemLimitadoColumn();
     const q        = (req.query.q || '').trim() || null;
     const tipoitem = (req.query.tipoitem || '').trim() || null;
     const inativo  = (req.query.inativo  || '').trim() || null;
@@ -361,10 +362,26 @@ router.get('/lista', async (req, res) => {
     const offset   = (page - 1) * limit;
 
     const sql = `
-      WITH base AS (
-        SELECT v.*, p.descricao_familia
+      WITH estoque_resumo AS (
+        SELECT
+          codigo,
+          MAX(estoque_minimo) FILTER (
+            WHERE local_codigo::text = '10717096386'
+               OR local_nome ILIKE '%PORTA PALLET%'
+          ) AS estoque_minimo,
+          BOOL_OR(COALESCE(saldo, 0) < 0) AS estoque_negativo
+        FROM logistica.estoque_atual
+        GROUP BY codigo
+      ), base AS (
+        SELECT
+          v.*,
+          p.descricao_familia,
+          COALESCE(p.item_limitado, false) AS item_limitado_local,
+          COALESCE(er.estoque_minimo, 0) AS estoque_minimo_local,
+          COALESCE(er.estoque_negativo, false) AS estoque_negativo_local
         FROM vw_lista_produtos v
         LEFT JOIN public.produtos_omie p ON p.codigo_produto = v.codigo_produto
+        LEFT JOIN estoque_resumo er ON er.codigo = v.codigo
         WHERE
           ($1::text IS NULL
             OR v.descricao ILIKE '%' || $1 || '%'
@@ -388,6 +405,9 @@ router.get('/lista', async (req, res) => {
           ncm,
           valor_unitario,
           quantidade_estoque,
+          estoque_minimo_local AS estoque_minimo,
+          estoque_negativo_local AS estoque_negativo,
+          item_limitado_local AS item_limitado,
           inativo,
           bloqueado,
           marca,
@@ -909,6 +929,7 @@ router.post('/sincronizar-completo', async (req, res) => {
 // ── Múltiplo de separação (coluna manual em produtos_omie) ─────────────────
 let ensureProdutosOmieMultiploColumnPromise = null;
 let ensureProdutosOmieCustomizadoColumnPromise = null;
+let ensureProdutosOmieItemLimitadoColumnPromise = null;
 
 async function ensureProdutosOmieMultiploColumn() {
   if (!ensureProdutosOmieMultiploColumnPromise) {
@@ -936,9 +957,25 @@ async function ensureProdutosOmieCustomizadoColumn() {
   await ensureProdutosOmieCustomizadoColumnPromise;
 }
 
+async function ensureProdutosOmieItemLimitadoColumn() {
+  if (!ensureProdutosOmieItemLimitadoColumnPromise) {
+    ensureProdutosOmieItemLimitadoColumnPromise = dbQuery(`
+      ALTER TABLE public.produtos_omie
+      ADD COLUMN IF NOT EXISTS item_limitado BOOLEAN NOT NULL DEFAULT FALSE
+    `).catch((err) => {
+      ensureProdutosOmieItemLimitadoColumnPromise = null;
+      throw err;
+    });
+  }
+  await ensureProdutosOmieItemLimitadoColumnPromise;
+}
+
 // Garante coluna ao subir o módulo
 ensureProdutosOmieCustomizadoColumn().catch((err) => {
   console.warn('[produtos] ensure produto_customizado:', err?.message || err);
+});
+ensureProdutosOmieItemLimitadoColumn().catch((err) => {
+  console.warn('[produtos] ensure item_limitado:', err?.message || err);
 });
 
 async function atualizarMultiploProdutoOmie(codigo, multiplo) {
@@ -1095,6 +1132,42 @@ router.put('/:codigo/produto-customizado', express.json(), async (req, res) => {
     });
   } catch (err) {
     console.error('[PUT /api/produtos/:codigo/produto-customizado]', err);
+    res.status(500).json({ ok: false, error: String(err.message || err) });
+  }
+});
+
+router.put('/:codigo/item-limitado', express.json(), async (req, res) => {
+  try {
+    await ensureProdutosOmieItemLimitadoColumn();
+    const codigo = String(req.params.codigo || '').trim();
+    if (!codigo) return res.status(400).json({ ok: false, error: 'Código obrigatório' });
+
+    const raw = req.body?.item_limitado;
+    const valor = raw === true || raw === 1 || raw === '1' || raw === 'true';
+    const client = await dbGetClient();
+    let result;
+    try {
+      await client.query('BEGIN');
+      await client.query("SELECT set_config('app.produtos_omie_write_source', 'omie_manual', true)");
+      result = await client.query(
+        `UPDATE public.produtos_omie
+            SET item_limitado = $2
+          WHERE ${sqlWhereProdutosOmieIdentidade('', '$1')}
+          RETURNING codigo, item_limitado`,
+        [codigo, valor]
+      );
+      await client.query('COMMIT');
+    } catch (err) {
+      try { await client.query('ROLLBACK'); } catch (_) {}
+      throw err;
+    } finally {
+      client.release();
+    }
+
+    if (!result.rows.length) return res.status(404).json({ ok: false, error: 'Produto não encontrado' });
+    res.json({ ok: true, codigo: result.rows[0].codigo, item_limitado: result.rows[0].item_limitado === true });
+  } catch (err) {
+    console.error('[PUT /api/produtos/:codigo/item-limitado]', err);
     res.status(500).json({ ok: false, error: String(err.message || err) });
   }
 });
