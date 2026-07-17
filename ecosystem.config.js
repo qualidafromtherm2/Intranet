@@ -12,6 +12,16 @@ module.exports = {
 
 
 {
+  name: 'proxy_3001',
+  script: './scripts/proxy-3001.js',
+  watch: false,
+  env: {
+    PROXY_PORT: 3001,
+    PROXY_TARGET_PORT: 5001
+  }
+},
+
+{
   name: 'intranet_api',
   script: './server.js',
   watch: false,
