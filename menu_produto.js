@@ -446,6 +446,49 @@ function _solRenderIdsFifoHtml(idsFifo, unidade) {
 }
 
 /**
+ * Garante que o leitor use a câmera traseira PRINCIPAL (1.0x), não a
+ * ultra-wide (0.5x) que alguns celulares entregam com facingMode:environment.
+ * 1) Se a lente atual for grande-angular, troca para outra traseira.
+ * 2) Se o navegador expõe zoom < 1 na lente lógica, força zoom = 1.
+ */
+async function _sepEtqGarantirCameraPrincipal(streamAtual) {
+  const ehUltraWide = (lbl) => /ultra|wide|angular|0[.,]5/i.test(String(lbl || ''));
+  try {
+    const track = streamAtual?.getVideoTracks?.()[0];
+    if (!track) return streamAtual;
+
+    if (ehUltraWide(track.label)) {
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const traseiras = devices.filter(d =>
+        d.kind === 'videoinput' && /back|rear|tras|environment/i.test(d.label || '')
+      );
+      const principal =
+        traseiras.find(d => !ehUltraWide(d.label)) ||
+        devices.find(d => d.kind === 'videoinput' && !ehUltraWide(d.label) && !/front|frontal|user/i.test(d.label || ''));
+      if (principal && principal.deviceId !== track.getSettings?.().deviceId) {
+        streamAtual.getTracks().forEach(t => t.stop());
+        streamAtual = await navigator.mediaDevices.getUserMedia({
+          video: { deviceId: { exact: principal.deviceId } },
+          audio: false
+        });
+      }
+    }
+
+    // Câmera lógica (Android) pode iniciar com zoom 0.5 — normaliza para 1.0
+    const t2 = streamAtual?.getVideoTracks?.()[0];
+    const caps = t2?.getCapabilities?.();
+    if (caps && 'zoom' in caps) {
+      const zoomAtual = t2.getSettings?.().zoom;
+      if (!(zoomAtual >= 1)) {
+        const alvo = Math.min(Math.max(1, caps.zoom.min || 1), caps.zoom.max || 1);
+        await t2.applyConstraints({ advanced: [{ zoom: alvo }] }).catch(() => {});
+      }
+    }
+  } catch (_) { /* mantém o stream que conseguiu */ }
+  return streamAtual;
+}
+
+/**
  * Modal câmera para ler QR das etiquetas (sem digitar).
  * Exige FIFO: sempre o menor ID pendente; outro ID → pedir permissão ao suporte
  * (bypass só com "Permitir sem saldo no endereço").
@@ -631,6 +674,7 @@ function _solAbrirLeitorQrIdsSep({ codigoProduto, qtyNeeded, unidade, idsEsperad
           video: { facingMode: { ideal: 'environment' } },
           audio: false
         });
+        stream = await _sepEtqGarantirCameraPrincipal(stream);
         if (video) {
           video.srcObject = stream;
           await video.play().catch(() => {});
