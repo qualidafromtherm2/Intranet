@@ -119,7 +119,7 @@ router.post('/ajuste', async (req, res) => {
       call:      'AlterarEstoqueMinimo',
       app_key:   OMIE_APP_KEY,
       app_secret: OMIE_APP_SECRET,
-      param:     req.body.param   // espera [{ cod_int, quan_min }]
+      param:     req.body.param   // espera [{ id_prod, quan_min }] ou [{ cod_int, quan_min }]
     };
 
     const resp = await safeFetch(

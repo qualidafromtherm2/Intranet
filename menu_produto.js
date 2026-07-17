@@ -52473,6 +52473,7 @@ window.renderizarCatalogoOmie = renderizarCatalogoOmie;
   let _fotoRapidaPreviewUrl = null;
   let _itemLimitadoRapido = false;
   let _itemLimitadoListaDirty = false;
+  let _editarRapidoOriginal = null;
 
   function getSeparacaoTileHtml() {
     return `
@@ -52493,6 +52494,7 @@ window.renderizarCatalogoOmie = renderizarCatalogoOmie;
     ov.style.display = 'none';
     document.body.classList.remove('mobile-modal-open');
     _ctx = {};
+    _editarRapidoOriginal = null;
     resetBotaoSeparacao();
     _returnFocus?.focus?.({ preventScroll: true });
     _returnFocus = null;
@@ -52544,15 +52546,24 @@ window.renderizarCatalogoOmie = renderizarCatalogoOmie;
     form.style.display = 'none';
     setEditarRapidoStatus('');
     prepararFotoRapida(null);
+    _editarRapidoOriginal = null;
     _itemLimitadoRapido = false;
     atualizarBotaoItemLimitado();
     try {
       const resp = await fetch('/api/produtos/' + encodeURIComponent(_ctx.codigo), { credentials: 'include' });
       const data = await resp.json();
       if (!resp.ok) throw new Error(data.error || 'Produto não encontrado.');
-      document.getElementById('modalEditarRapidoDescricao').value = data.descricao || _ctx.descricao || '';
+      const descricaoAtual = data.descricao || _ctx.descricao || '';
+      const minimoAtual = Number(data.estoque_minimo ?? 0);
+      const leadTimeAtual = Number(data.lead_time ?? 0);
+      document.getElementById('modalEditarRapidoDescricao').value = descricaoAtual;
       document.getElementById('modalEditarRapidoMinimo').value = data.estoque_minimo ?? '';
       document.getElementById('modalEditarRapidoLeadTime').value = data.lead_time ?? '';
+      _editarRapidoOriginal = {
+        descricao: descricaoAtual.trim(),
+        minimo: Number.isFinite(minimoAtual) ? minimoAtual : 0,
+        leadTime: Number.isFinite(leadTimeAtual) ? leadTimeAtual : 0
+      };
       _itemLimitadoRapido = data.item_limitado === true || data.item_limitado === 'true';
       atualizarBotaoItemLimitado();
     } catch (err) {
@@ -52589,31 +52600,40 @@ window.renderizarCatalogoOmie = renderizarCatalogoOmie;
     if (!Number.isFinite(minimo) || minimo < 0) return setEditarRapidoStatus('Informe um estoque mínimo válido.', true);
     if (!Number.isFinite(leadTime) || leadTime < 0) return setEditarRapidoStatus('Informe um lead time válido.', true);
     if (!Number.isFinite(codigoProdutoOmie) || codigoProdutoOmie <= 0) return setEditarRapidoStatus('Produto sem ID numérico da Omie.', true);
+    if (!_editarRapidoOriginal) return setEditarRapidoStatus('Reabra a edição para carregar os valores atuais.', true);
+
+    const alterouProduto = descricao !== _editarRapidoOriginal.descricao || leadTime !== _editarRapidoOriginal.leadTime;
+    const alterouMinimo = minimo !== _editarRapidoOriginal.minimo;
+    if (!alterouProduto && !alterouMinimo) return setEditarRapidoStatus('Nenhuma alteração para salvar.');
 
     const btn = document.getElementById('modalEditarRapidoSalvar');
     btn.disabled = true;
     btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin" style="margin-right:7px;"></i>Salvando...';
     setEditarRapidoStatus('');
     try {
-      const [produtoResp, minimoResp] = await Promise.all([
-        fetch('/api/produtos/alterar', {
+      if (alterouProduto) {
+        const produtoResp = await fetch('/api/produtos/alterar', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           credentials: 'include',
           body: JSON.stringify({ produto_servico_cadastro: { codigo_produto: codigoProdutoOmie, codigo: _ctx.codigo, descricao, lead_time: leadTime } })
-        }),
-        fetch('/api/omie/estoque/ajuste/', {
+        });
+        const produtoData = await produtoResp.json();
+        if (!produtoResp.ok) throw new Error(produtoData.error || 'Falha ao alterar produto.');
+        validarRespostaOmie(produtoData);
+      }
+
+      if (alterouMinimo) {
+        const minimoResp = await fetch('/api/omie/estoque/ajuste/', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           credentials: 'include',
-          body: JSON.stringify({ call: 'AlterarEstoqueMinimo', param: [{ cod_int: _ctx.codigo, quan_min: minimo }] })
-        })
-      ]);
-      const [produtoData, minimoData] = await Promise.all([produtoResp.json(), minimoResp.json()]);
-      if (!produtoResp.ok) throw new Error(produtoData.error || 'Falha ao alterar produto.');
-      if (!minimoResp.ok) throw new Error(minimoData.error || 'Falha ao alterar estoque mínimo.');
-      validarRespostaOmie(produtoData);
-      validarRespostaOmie(minimoData);
+          body: JSON.stringify({ call: 'AlterarEstoqueMinimo', param: [{ id_prod: codigoProdutoOmie, quan_min: minimo }] })
+        });
+        const minimoData = await minimoResp.json();
+        if (!minimoResp.ok) throw new Error(minimoData.error || 'Falha ao alterar estoque mínimo.');
+        validarRespostaOmie(minimoData);
+      }
 
       const localResp = await fetch('/api/produtos/' + encodeURIComponent(_ctx.codigo), {
         method: 'PUT',
@@ -52634,6 +52654,7 @@ window.renderizarCatalogoOmie = renderizarCatalogoOmie;
         itemCache.estoque_minimo = minimo;
         itemCache.lead_time = leadTime;
       }
+      _editarRapidoOriginal = { descricao, minimo, leadTime };
       await carregarEstoqueCards();
       setEditarRapidoStatus('Alterações salvas com sucesso.');
     } catch (err) {
