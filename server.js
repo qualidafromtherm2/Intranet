@@ -97,12 +97,16 @@ app.get('/__ping', (req, res) => {
 
 // === VERSÃO EM PRODUÇÃO (PR# / commit) — exibida no modal de login ==========
 let _versionInfoCache = null;
-app.get('/api/version', (_req, res) => {
+app.get('/api/version', async (_req, res) => {
   if (_versionInfoCache) return res.json(_versionInfoCache);
   let sha = String(process.env.RENDER_GIT_COMMIT || '').slice(0, 8) || null;
   let pr = null;
   let mensagem = null;
   let data = null;
+  const acharPr = (msg) => {
+    const m = /PR\s*#(\d+)/i.exec(String(msg || ''));
+    return m ? Number(m[1]) : null;
+  };
   try {
     const { execFileSync } = require('child_process');
     const linhas = execFileSync('git', ['log', '-30', '--format=%h|%cI|%s'], { cwd: __dirname, timeout: 4000 })
@@ -115,11 +119,33 @@ app.get('/api/version', (_req, res) => {
     }
     // Procura o merge de PR mais recente (padrão "PR #NN" na mensagem)
     for (const linha of linhas) {
-      const msg = linha.split('|').slice(2).join('|');
-      const m = /PR\s*#(\d+)/i.exec(msg);
-      if (m) { pr = Number(m[1]); break; }
+      pr = acharPr(linha.split('|').slice(2).join('|'));
+      if (pr) break;
     }
   } catch (_) { /* sem git no ambiente — usa env do Render */ }
+
+  // No Render o clone é raso (só o último commit); busca a PR no GitHub
+  if (!pr) {
+    try {
+      const gh = await fetch('https://api.github.com/repos/qualidafromtherm2/Intranet/commits?sha=main&per_page=30', {
+        headers: { 'User-Agent': 'intranet-version', 'Accept': 'application/vnd.github+json' },
+        signal: AbortSignal.timeout(5000)
+      });
+      if (gh.ok) {
+        const commits = await gh.json();
+        for (const c of commits) {
+          pr = acharPr(c?.commit?.message);
+          if (pr) break;
+        }
+        if (!mensagem && commits[0]?.commit?.message) {
+          mensagem = String(commits[0].commit.message).split('\n')[0];
+          sha = sha || String(commits[0].sha || '').slice(0, 8) || null;
+          data = data || commits[0].commit?.committer?.date || null;
+        }
+      }
+    } catch (_) { /* GitHub indisponível — segue só com sha */ }
+  }
+
   _versionInfoCache = { ok: true, pr, sha, mensagem, data };
   res.json(_versionInfoCache);
 });
