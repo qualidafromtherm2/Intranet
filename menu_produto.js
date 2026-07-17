@@ -573,6 +573,10 @@ function _solAbrirLeitorQrIdsSep({ codigoProduto, qtyNeeded, unidade, idsEsperad
           <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none;">
             <div id="sepEtqQrMira" style="width:200px;height:200px;border:3px solid rgba(52,211,153,.85);border-radius:12px;box-shadow:0 0 0 3000px rgba(0,0,0,.38);"></div>
           </div>
+          <button type="button" id="sepEtqQrTrocarCam" title="Trocar câmera"
+            style="position:absolute;right:10px;bottom:10px;z-index:5;width:44px;height:44px;border:none;border-radius:50%;background:rgba(15,23,42,.85);color:#e2e8f0;font-size:1.1rem;cursor:pointer;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 8px rgba(0,0,0,.5);">
+            <i class="fa-solid fa-camera-rotate"></i>
+          </button>
         </div>
         <div id="sepEtqQrStatus" style="padding:12px 16px 16px;font-size:.85rem;color:#94a3b8;text-align:center;min-height:44px;"></div>
         <div id="sepEtqQrLidos" style="padding:0 16px 14px;font-size:.72rem;color:#cbd5e1;max-height:100px;overflow-y:auto;"></div>
@@ -711,25 +715,83 @@ function _solAbrirLeitorQrIdsSep({ codigoProduto, qtyNeeded, unidade, idsEsperad
       }
     }
 
-    async function _iniciarCamera() {
+    function _lerCamSalva() {
+      try { return localStorage.getItem('sepEtqCamId') || null; } catch (_) { return null; }
+    }
+
+    function _salvarCam(deviceId) {
+      try { localStorage.setItem('sepEtqCamId', deviceId || ''); } catch (_) {}
+    }
+
+    function _aplicarStreamNoVideo() {
       try {
+        const tCam = stream?.getVideoTracks?.()[0];
+        console.log('[sepEtq] câmera em uso:', tCam?.label, '| zoom:', tCam?.getSettings?.().zoom);
+      } catch (_) {}
+      if (video && stream) {
+        video.srcObject = stream;
+        video.play().catch(() => {});
+      }
+    }
+
+    /* Alterna entre as câmeras do aparelho e memoriza a escolha */
+    let camLista = [];
+    let camIdxAtual = -1;
+    async function _trocarCamera() {
+      try {
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        camLista = devices.filter(d => d.kind === 'videoinput');
+        if (camLista.length < 2) {
+          _setStatus('Este aparelho só expõe uma câmera.', '#fbbf24');
+          return;
+        }
+        const atualId = stream?.getVideoTracks?.()[0]?.getSettings?.().deviceId || null;
+        if (camIdxAtual < 0) {
+          camIdxAtual = Math.max(0, camLista.findIndex(d => d.deviceId === atualId));
+        }
+        camIdxAtual = (camIdxAtual + 1) % camLista.length;
+        const alvo = camLista[camIdxAtual];
+        if (stream) stream.getTracks().forEach(t => t.stop());
         stream = await navigator.mediaDevices.getUserMedia({
-          video: {
-            facingMode: { ideal: 'environment' },
-            width: { ideal: 1920 },
-            height: { ideal: 1080 }
-          },
+          video: { deviceId: { exact: alvo.deviceId }, width: { ideal: 1920 }, height: { ideal: 1080 } },
           audio: false
         });
-        stream = await _sepEtqGarantirCameraPrincipal(stream);
-        try {
-          const tCam = stream?.getVideoTracks?.()[0];
-          console.log('[sepEtq] câmera em uso:', tCam?.label, '| zoom:', tCam?.getSettings?.().zoom);
-        } catch (_) {}
-        if (video) {
-          video.srcObject = stream;
-          await video.play().catch(() => {});
+        await _sepEtqNormalizarZoom(stream);
+        _aplicarStreamNoVideo();
+        _salvarCam(alvo.deviceId);
+        const nome = alvo.label || `câmera ${camIdxAtual + 1} de ${camLista.length}`;
+        _setStatus(`Usando: ${nome}`, '#94a3b8');
+      } catch (_) {
+        _setStatus('Não foi possível trocar a câmera. Tente de novo.', '#f87171');
+      }
+    }
+
+    async function _iniciarCamera() {
+      try {
+        // 1) Se o usuário já escolheu uma câmera antes, usa a mesma
+        const camSalva = _lerCamSalva();
+        if (camSalva) {
+          try {
+            stream = await navigator.mediaDevices.getUserMedia({
+              video: { deviceId: { exact: camSalva }, width: { ideal: 1920 }, height: { ideal: 1080 } },
+              audio: false
+            });
+            await _sepEtqNormalizarZoom(stream);
+          } catch (_) { stream = null; /* câmera salva não existe mais */ }
         }
+        // 2) Senão, abre a traseira e corrige para a lente principal
+        if (!stream) {
+          stream = await navigator.mediaDevices.getUserMedia({
+            video: {
+              facingMode: { ideal: 'environment' },
+              width: { ideal: 1920 },
+              height: { ideal: 1080 }
+            },
+            audio: false
+          });
+          stream = await _sepEtqGarantirCameraPrincipal(stream);
+        }
+        _aplicarStreamNoVideo();
         _setStatus(
           fila[0] ? `Aponte para o QR do ID ${fila[0].id} (menor da fila).` : 'Aponte para o QR da etiqueta.',
           '#94a3b8'
@@ -776,6 +838,7 @@ function _solAbrirLeitorQrIdsSep({ codigoProduto, qtyNeeded, unidade, idsEsperad
     });
 
     overlay.querySelector('#sepEtqQrFechar')?.addEventListener('click', () => _fechar(false));
+    overlay.querySelector('#sepEtqQrTrocarCam')?.addEventListener('click', () => { void _trocarCamera(); });
     overlay.addEventListener('click', (ev) => { if (ev.target === overlay) _fechar(false); });
 
     _atualizarLidos();

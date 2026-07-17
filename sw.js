@@ -1,4 +1,4 @@
-const SW_VERSION = 'pe-005';
+const SW_VERSION = 'pe-006';
 
 self.addEventListener('install', e => self.skipWaiting());
 self.addEventListener('activate', (event) => {
