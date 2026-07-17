@@ -245,18 +245,34 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   }
 
-  // placeholders (p/ quando migrarmos o perfil pro SQL)
+  // campos do card de perfil (lado direito quando logado)
   const uiCargo        = overlay.querySelector('#uiCargo');
-  const uiEndereco     = overlay.querySelector('#uiEndereco');
-  const uiCel          = overlay.querySelector('#uiCel');
+  const uiSetor        = overlay.querySelector('#uiSetor');
   const uiNomeCompleto = overlay.querySelector('#uiNomeCompleto');
-  const uiDtNasc       = overlay.querySelector('#uiDtNasc');
+  const uiUsername     = overlay.querySelector('#uiUsername');
   const uiEmail        = overlay.querySelector('#uiEmail');
   const uiContaGoogle  = overlay.querySelector('#uiContaGoogle');
-  const uiObs          = overlay.querySelector('#uiObs');
-  const uiNCod         = overlay.querySelector('#uiNCod');
-  const uiNCodConta    = overlay.querySelector('#uiNCodConta');
-  const uiNCodVend     = overlay.querySelector('#uiNCodVend');
+  const uiVersaoApp    = overlay.querySelector('#uiVersaoApp');
+
+  /* Mostra a versão em produção (PR# + commit) para conferir atualização */
+  async function carregarVersaoApp() {
+    if (!uiVersaoApp) return;
+    try {
+      const r = await fetch(`${BASE}/api/version`, { credentials: 'include' });
+      const v = await r.json();
+      const partes = [];
+      if (v.pr) partes.push(`PR #${v.pr}`);
+      if (v.sha) partes.push(v.sha);
+      if (v.data) {
+        const d = new Date(v.data);
+        if (!isNaN(d)) partes.push(d.toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }));
+      }
+      uiVersaoApp.textContent = partes.length ? `Versão: ${partes.join(' · ')}` : 'Versão: indisponível';
+      if (v.mensagem) uiVersaoApp.title = v.mensagem;
+    } catch {
+      uiVersaoApp.textContent = 'Versão: indisponível';
+    }
+  }
   
   // Elementos da foto de perfil
   const profilePhotoContainer = overlay.querySelector('#profilePhotoContainer');
@@ -394,11 +410,18 @@ document.addEventListener('DOMContentLoaded', async () => {
       
       // Carrega foto de perfil se disponível
       if (js.loggedIn && js.user) {
-        loadProfilePhoto(js.user.id);
+        const u = js.user;
+        if (uiNomeCompleto) uiNomeCompleto.textContent = u.nome || u.username || '';
+        if (uiUsername)     uiUsername.textContent = u.username ? `@${u.username}` : '';
+        if (uiCargo)        uiCargo.textContent = u.funcao_nome || '—';
+        if (uiSetor)        uiSetor.textContent = u.setor || '—';
+        if (uiEmail)        uiEmail.textContent = u.email || '—';
+        loadProfilePhoto(u.id);
         // Atualiza também o profile-icon do header usando o foto_perfil_url do objeto
-        updateHeaderProfileIconFromUser(js.user);
+        updateHeaderProfileIconFromUser(u);
         profileGoogleCalendarState.carregado = false;
         await carregarStatusGoogleCalendarPerfil(true);
+        carregarVersaoApp();
       }
 
     } catch (err) {

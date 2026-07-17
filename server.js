@@ -95,6 +95,35 @@ app.get('/__ping', (req, res) => {
   res.type('text/plain').send(`[OK] ${new Date().toISOString()}`);
 });
 
+// === VERSÃO EM PRODUÇÃO (PR# / commit) — exibida no modal de login ==========
+let _versionInfoCache = null;
+app.get('/api/version', (_req, res) => {
+  if (_versionInfoCache) return res.json(_versionInfoCache);
+  let sha = String(process.env.RENDER_GIT_COMMIT || '').slice(0, 8) || null;
+  let pr = null;
+  let mensagem = null;
+  let data = null;
+  try {
+    const { execFileSync } = require('child_process');
+    const linhas = execFileSync('git', ['log', '-30', '--format=%h|%cI|%s'], { cwd: __dirname, timeout: 4000 })
+      .toString().trim().split('\n').filter(Boolean);
+    if (linhas[0]) {
+      const [h, iso, ...resto] = linhas[0].split('|');
+      sha = h || sha;
+      data = iso || null;
+      mensagem = resto.join('|') || null;
+    }
+    // Procura o merge de PR mais recente (padrão "PR #NN" na mensagem)
+    for (const linha of linhas) {
+      const msg = linha.split('|').slice(2).join('|');
+      const m = /PR\s*#(\d+)/i.exec(msg);
+      if (m) { pr = Number(m[1]); break; }
+    }
+  } catch (_) { /* sem git no ambiente — usa env do Render */ }
+  _versionInfoCache = { ok: true, pr, sha, mensagem, data };
+  res.json(_versionInfoCache);
+});
+
 app.post('/api/client-log', express.json({ limit: '200kb' }), (req, res) => {
   try {
     const payload = req.body || {};

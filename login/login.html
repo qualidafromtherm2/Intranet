@@ -208,22 +208,27 @@ label:has(#rememberMe) {
 
       <!-- bloco mostrado quando já logado (preenchido pelo JS) -->
       <div id="loggedInContainer" style="display:none;">
-        <h3 id="uiNomeCompleto"></h3>
-        <p id="uiDtNasc"></p>
-        <p><strong>Cargo:</strong> <span id="uiCargo"></span></p>
-        <p><strong>Celular:</strong> <span id="uiCel"></span></p>
-        <p><strong>Email:</strong> <span id="uiEmail"></span></p>
-        <p><strong>Conta Google:</strong> <span id="uiContaGoogle">Não conectada</span></p>
-        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:6px 0 10px;">
+        <h3 id="uiNomeCompleto" style="text-align:center;margin-bottom:2px;"></h3>
+        <p id="uiUsername" style="text-align:center;opacity:.8;font-size:.85rem;margin-top:0;"></p>
+
+        <div class="perfil-dados" style="text-align:left;margin:12px auto 0;max-width:280px;">
+          <p><strong>Cargo:</strong> <span id="uiCargo">—</span></p>
+          <p><strong>Setor:</strong> <span id="uiSetor">—</span></p>
+          <p><strong>Email:</strong> <span id="uiEmail">—</span></p>
+          <p><strong>Conta Google:</strong> <span id="uiContaGoogle">Não conectada</span></p>
+        </div>
+
+        <div style="display:flex;align-items:center;justify-content:center;gap:8px;flex-wrap:wrap;margin:10px 0 4px;">
           <button id="profileGoogleCalendarConectarBtn" type="button" class="ghost" style="padding:6px 10px;font-size:12px;">Conectar Google</button>
           <button id="profileGoogleCalendarDesconectarBtn" type="button" class="ghost" style="display:none;padding:6px 10px;font-size:12px;">Desconectar Google</button>
         </div>
-        <p id="profileGoogleCalendarStatus" style="font-size:12px;opacity:.85;margin-top:-2px;">Verificando conexão com Google...</p>
-        <p><strong>Endereço:</strong> <span id="uiEndereco"></span></p>
-        <p><strong>Obs.:</strong> <span id="uiObs"></span></p>
-        <p><strong>Cód. Omie:</strong> <span id="uiNCod"></span></p>
-        <p><strong>Cód. Conta:</strong> <span id="uiNCodConta"></span></p>
-        <p><strong>Cód. Vendedor:</strong> <span id="uiNCodVend"></span></p>
+        <p id="profileGoogleCalendarStatus" style="font-size:12px;opacity:.85;margin-top:0;text-align:center;">Verificando conexão com Google...</p>
+
+        <!-- Versão em produção (PR#) — para conferir se está na última atualização -->
+        <p id="uiVersaoApp" title="Versão do sistema em produção"
+           style="margin-top:14px;padding-top:8px;border-top:1px solid rgba(255,255,255,.25);font-size:12px;opacity:.9;text-align:center;">
+          Versão: verificando...
+        </p>
       </div>
 
       <button id="btnLogout" style="display:none;margin-top:12px;">Deslogar</button>

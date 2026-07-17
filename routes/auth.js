@@ -8,7 +8,7 @@ router.use(express.json()); // garante req.body em /login
 async function carregarExtrasDoUsuario(userId) {
   try {
     const { rows } = await pool.query(
-      `SELECT s.name AS setor_nome, up.sector_id, u.foto_perfil_url, u.conta_google, f.name AS funcao_nome
+      `SELECT s.name AS setor_nome, up.sector_id, u.foto_perfil_url, u.conta_google, u.email, f.name AS funcao_nome
          FROM public.auth_user u
          LEFT JOIN public.auth_user_profile up ON up.user_id = u.id
          LEFT JOIN public.auth_sector s ON s.id = up.sector_id
@@ -22,6 +22,7 @@ async function carregarExtrasDoUsuario(userId) {
       sector_id: rows[0]?.sector_id != null ? Number(rows[0].sector_id) : null,
       foto_perfil_url: rows[0]?.foto_perfil_url || null,
       conta_google: rows[0]?.conta_google || null,
+      email: rows[0]?.email || null,
       funcao_nome: rows[0]?.funcao_nome || null
     };
   } catch (e) {
