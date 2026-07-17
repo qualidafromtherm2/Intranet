@@ -52606,7 +52606,7 @@ window.renderizarCatalogoOmie = renderizarCatalogoOmie;
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           credentials: 'include',
-          body: JSON.stringify({ call: 'AlterarEstoqueMinimo', param: [{ cod_prod: codigoProdutoOmie, quan_min: minimo }] })
+          body: JSON.stringify({ call: 'AlterarEstoqueMinimo', param: [{ cod_int: _ctx.codigo, quan_min: minimo }] })
         })
       ]);
       const [produtoData, minimoData] = await Promise.all([produtoResp.json(), minimoResp.json()]);
