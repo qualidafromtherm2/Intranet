@@ -146,8 +146,9 @@ app.get('/api/version', async (_req, res) => {
     } catch (_) { /* GitHub indisponível — segue só com sha */ }
   }
 
-  _versionInfoCache = { ok: true, pr, sha, mensagem, data };
-  res.json(_versionInfoCache);
+  const payload = { ok: true, pr, sha, mensagem, data };
+  if (pr) _versionInfoCache = payload; // sem PR: tenta de novo na próxima chamada
+  res.json(payload);
 });
 
 app.post('/api/client-log', express.json({ limit: '200kb' }), (req, res) => {
