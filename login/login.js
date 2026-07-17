@@ -254,20 +254,44 @@ document.addEventListener('DOMContentLoaded', async () => {
   const uiContaGoogle  = overlay.querySelector('#uiContaGoogle');
   const uiVersaoApp    = overlay.querySelector('#uiVersaoApp');
 
-  /* Mostra a versão em produção (PR# + commit) para conferir atualização */
+  /* Mostra a versão em produção (PR# + commit) para conferir atualização.
+     O PR# vem do GitHub direto do navegador (o servidor no Render usa clone
+     raso, sem histórico, e o IP compartilhado sofre rate-limit no GitHub). */
   async function carregarVersaoApp() {
     if (!uiVersaoApp) return;
     try {
       const r = await fetch(`${BASE}/api/version`, { credentials: 'include' });
       const v = await r.json();
+
+      let pr = v.pr || null;
+      let atualizado = null; // true/false/null (não sabe)
+      try {
+        const gh = await fetch('https://api.github.com/repos/qualidafromtherm2/Intranet/commits?sha=main&per_page=30');
+        if (gh.ok) {
+          const commits = await gh.json();
+          const shaMain = String(commits[0]?.sha || '');
+          if (v.sha && shaMain) atualizado = shaMain.startsWith(String(v.sha));
+          if (!pr) {
+            for (const c of commits) {
+              const m = /PR\s*#(\d+)/i.exec(c?.commit?.message || '');
+              if (m) { pr = Number(m[1]); break; }
+            }
+          }
+        }
+      } catch { /* GitHub fora do ar — mostra só o commit */ }
+
       const partes = [];
-      if (v.pr) partes.push(`PR #${v.pr}`);
+      if (pr) partes.push(`PR #${pr}`);
       if (v.sha) partes.push(v.sha);
       if (v.data) {
         const d = new Date(v.data);
         if (!isNaN(d)) partes.push(d.toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }));
       }
-      uiVersaoApp.textContent = partes.length ? `Versão: ${partes.join(' · ')}` : 'Versão: indisponível';
+      let statusHtml = '';
+      if (atualizado === true)  statusHtml = ' <span style="color:#86efac;">✓ atualizado</span>';
+      if (atualizado === false) statusHtml = ' <span style="color:#fde68a;">• há versão mais nova (F5)</span>';
+
+      uiVersaoApp.innerHTML = (partes.length ? `Versão: ${partes.join(' · ')}` : 'Versão: indisponível') + statusHtml;
       if (v.mensagem) uiVersaoApp.title = v.mensagem;
     } catch {
       uiVersaoApp.textContent = 'Versão: indisponível';
