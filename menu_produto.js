@@ -52074,16 +52074,23 @@ function renderizarCatalogoOmie(produtos, options = {}) {
   } else {
     lista.innerHTML = html;
   }
+
+  // A busca recria os cards; restaura os dados já carregados sem aguardar nova rede.
+  aplicarCacheEstoqueCards();
   
   // Atualiza automaticamente todas as imagens expiradas em lote
   setTimeout(() => atualizarImagensExpiradasEmLote(), 100);
 
-  // Carrega estoque por local para os cards
-  setTimeout(() => carregarEstoqueCards(), 200);
+  // Agrupa renderizações sucessivas da pesquisa em uma única consulta.
+  clearTimeout(window.__estoqueCardsLoadTimer);
+  window.__estoqueCardsLoadTimer = setTimeout(() => carregarEstoqueCards(), 200);
 }
 
 // Carrega estoque por local para todos os cards visíveis
 window.__estoqueCardCache = window.__estoqueCardCache || {};
+window.__estoqueMinimoCache = window.__estoqueMinimoCache || {};
+window.__estoqueCardCacheMeta = window.__estoqueCardCacheMeta || {};
+const ESTOQUE_CARD_CACHE_TTL_MS = 60_000;
 
 function formatarQtdEstoque(saldo, unidade) {
   const qtd = Number(saldo).toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
@@ -52145,21 +52152,64 @@ function atualizarCardEstoqueVisual(codigo) {
   el.innerHTML = renderHtmlEstoquePorLocal(locais, 'card');
 }
 
+function renderizarBadgeMinimo(badge, info) {
+  if (!badge) return;
+  badge.innerHTML = '';
+  if (!info || Number(info.min) <= 0) return;
+  const cor = info.abaixo ? '#dc2626' : '#16a34a';
+  const bg = info.abaixo ? '#fee2e2' : '#dcfce7';
+  badge.innerHTML = `<span style="display:inline-flex;align-items:center;background:${bg};color:${cor};padding:5px 8px;border:1px solid ${cor};border-radius:5px;font-size:12px;font-weight:800;">Mínimo: ${Number(info.min).toLocaleString('pt-BR', {minimumFractionDigits:0, maximumFractionDigits:2})}</span>`;
+}
+
+function aplicarCacheEstoqueCards(codigos = null) {
+  const filtro = Array.isArray(codigos) && codigos.length ? new Set(codigos) : null;
+  document.querySelectorAll('[id^="estoque-card-"]').forEach(el => {
+    const cod = el.dataset.codigo;
+    if (!cod || (filtro && !filtro.has(cod))) return;
+    if (Object.prototype.hasOwnProperty.call(window.__estoqueCardCache, cod)) {
+      el.innerHTML = renderHtmlEstoquePorLocal(window.__estoqueCardCache[cod], 'card');
+    }
+  });
+  document.querySelectorAll('[id^="min-badge-"]').forEach(badge => {
+    const cod = badge.dataset.codigo;
+    if (!cod || (filtro && !filtro.has(cod))) return;
+    if (Object.prototype.hasOwnProperty.call(window.__estoqueMinimoCache, cod)) {
+      renderizarBadgeMinimo(badge, window.__estoqueMinimoCache[cod]);
+    }
+  });
+}
+
 window.aplicarDeltaEstoqueOtimista = function aplicarDeltaEstoqueOtimista(codigo, deltas) {
   if (!codigo || !Array.isArray(deltas) || !deltas.length) return;
   const atual = window.__estoqueCardCache[codigo] || [];
   window.__estoqueCardCache[codigo] = aplicarDeltaListaLocais(atual, deltas);
+  window.__estoqueCardCacheMeta[codigo] = Date.now();
   atualizarCardEstoqueVisual(codigo);
   if (typeof window.__atualizarMovimEstoqueLocais === 'function') {
     window.__atualizarMovimEstoqueLocais(codigo, deltas);
   }
 };
 
-async function carregarEstoqueCards() {
+async function carregarEstoqueCards(options = {}) {
+  const { force = false, codigos: codigosForcados = null } = options;
   const placeholders = document.querySelectorAll('[id^="estoque-card-"]');
   if (!placeholders.length) return;
 
-  const codigos = Array.from(placeholders).map(el => el.dataset.codigo).filter(Boolean);
+  const codigosVisiveis = [...new Set(Array.from(placeholders).map(el => el.dataset.codigo).filter(Boolean))];
+  const codigosAlvo = Array.isArray(codigosForcados) && codigosForcados.length
+    ? [...new Set(codigosForcados.filter(Boolean))]
+    : codigosVisiveis;
+  aplicarCacheEstoqueCards(codigosVisiveis);
+
+  const codigos = force
+    ? codigosAlvo
+    : codigosAlvo.filter(cod => {
+        const atualizadoEm = Number(window.__estoqueCardCacheMeta[cod]) || 0;
+        const cacheExpirou = Date.now() - atualizadoEm >= ESTOQUE_CARD_CACHE_TTL_MS;
+        return cacheExpirou ||
+          !Object.prototype.hasOwnProperty.call(window.__estoqueCardCache, cod) ||
+          !Object.prototype.hasOwnProperty.call(window.__estoqueMinimoCache, cod);
+      });
   if (!codigos.length) return;
 
   try {
@@ -52167,29 +52217,17 @@ async function carregarEstoqueCards() {
     if (!resp.ok) return;
     const { dados, minimos } = await resp.json();
 
-    placeholders.forEach(el => {
-      const cod = el.dataset.codigo;
-      const locais = dados[cod];
+    codigos.forEach(cod => {
+      const locais = dados?.[cod];
       if (!locais || locais.length === 0) {
         window.__estoqueCardCache[cod] = [];
-        el.innerHTML = renderHtmlEstoquePorLocal([], 'card');
-        return;
+      } else {
+        window.__estoqueCardCache[cod] = locais.map(l => ({ ...l }));
       }
-      window.__estoqueCardCache[cod] = locais.map(l => ({ ...l }));
-      el.innerHTML = renderHtmlEstoquePorLocal(locais, 'card');
+      window.__estoqueMinimoCache[cod] = minimos?.[cod] || { min: 0, saldoAlmox: 0, abaixo: false };
+      window.__estoqueCardCacheMeta[cod] = Date.now();
     });
-
-    // Preenche badges de mínimo
-    if (minimos) {
-      document.querySelectorAll('[id^="min-badge-"]').forEach(badge => {
-        const cod = badge.dataset.codigo;
-        const info = minimos[cod];
-        if (!info || info.min <= 0) return;
-        const cor = info.abaixo ? '#dc2626' : '#16a34a';
-        const bg  = info.abaixo ? '#fee2e2'  : '#dcfce7';
-        badge.innerHTML = `<span style="display:inline-flex;align-items:center;background:${bg};color:${cor};padding:5px 8px;border:1px solid ${cor};border-radius:5px;font-size:12px;font-weight:800;">Mínimo: ${Number(info.min).toLocaleString('pt-BR', {minimumFractionDigits:0, maximumFractionDigits:2})}</span>`;
-      });
-    }
+    aplicarCacheEstoqueCards(codigos);
   } catch (e) {
     // silencia erros de rede
   }
@@ -52655,7 +52693,7 @@ window.renderizarCatalogoOmie = renderizarCatalogoOmie;
         itemCache.lead_time = leadTime;
       }
       _editarRapidoOriginal = { descricao, minimo, leadTime };
-      await carregarEstoqueCards();
+      await carregarEstoqueCards({ force: true, codigos: [_ctx.codigo] });
       setEditarRapidoStatus('Alterações salvas com sucesso.');
     } catch (err) {
       setEditarRapidoStatus(err.message || 'Erro ao salvar alterações.', true);
