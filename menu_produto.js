@@ -445,46 +445,89 @@ function _solRenderIdsFifoHtml(idsFifo, unidade) {
   </div>`;
 }
 
+/* ===== Câmera do leitor de etiquetas: helpers para evitar a lente 0.5x ===== */
+
+function _sepEtqEhLenteAuxiliar(lbl) {
+  return /ultra|wide|angular|tele|macro|depth|profundidade|0[.,]5/i.test(String(lbl || ''));
+}
+
+/* Android costuma expor "camera2 0, facing back" — o índice 0 é quase sempre a principal */
+function _sepEtqIdxCamera(lbl) {
+  const m = /camera2?\s+(\d+)/i.exec(String(lbl || ''));
+  return m ? Number(m[1]) : null;
+}
+
+async function _sepEtqListarTraseiras() {
+  try {
+    const devices = await navigator.mediaDevices.enumerateDevices();
+    const cams = devices.filter(d => d.kind === 'videoinput');
+    const traseiras = cams.filter(d => /back|rear|tras|environment/i.test(d.label || ''));
+    const lista = traseiras.length ? traseiras : cams.filter(d => !/front|frontal|user|selfie/i.test(d.label || ''));
+    return lista.slice().sort((a, b) => {
+      const ia = _sepEtqIdxCamera(a.label);
+      const ib = _sepEtqIdxCamera(b.label);
+      if (ia != null && ib != null) return ia - ib;
+      return 0;
+    });
+  } catch (_) { return []; }
+}
+
+/* Se o navegador expõe controle de zoom (câmera lógica), garante pelo menos 1.0x */
+async function _sepEtqNormalizarZoom(streamAtual) {
+  try {
+    const t = streamAtual?.getVideoTracks?.()[0];
+    const caps = t?.getCapabilities?.() || {};
+    if (!caps.zoom || typeof caps.zoom.min !== 'number') return;
+    const alvo = Math.min(Math.max(1, caps.zoom.min), caps.zoom.max || 1);
+    const atual = Number(t.getSettings?.().zoom);
+    if (atual >= alvo) return;
+    try { await t.applyConstraints({ advanced: [{ zoom: alvo }] }); }
+    catch (_) { await t.applyConstraints({ zoom: alvo }).catch(() => {}); }
+  } catch (_) { /* aparelho sem suporte a zoom via browser */ }
+}
+
 /**
  * Garante que o leitor use a câmera traseira PRINCIPAL (1.0x), não a
  * ultra-wide (0.5x) que alguns celulares entregam com facingMode:environment.
- * 1) Se a lente atual for grande-angular, troca para outra traseira.
- * 2) Se o navegador expõe zoom < 1 na lente lógica, força zoom = 1.
+ * 1) Se a lente atual parece auxiliar (ou tem índice maior que a "camera 0"),
+ *    troca para a traseira principal.
+ * 2) Normaliza o zoom para pelo menos 1.0 quando o browser expõe o controle.
  */
 async function _sepEtqGarantirCameraPrincipal(streamAtual) {
-  const ehUltraWide = (lbl) => /ultra|wide|angular|0[.,]5/i.test(String(lbl || ''));
   try {
     const track = streamAtual?.getVideoTracks?.()[0];
     if (!track) return streamAtual;
+    const atualId = track.getSettings?.().deviceId || null;
+    const traseiras = await _sepEtqListarTraseiras();
 
-    if (ehUltraWide(track.label)) {
-      const devices = await navigator.mediaDevices.enumerateDevices();
-      const traseiras = devices.filter(d =>
-        d.kind === 'videoinput' && /back|rear|tras|environment/i.test(d.label || '')
-      );
-      const principal =
-        traseiras.find(d => !ehUltraWide(d.label)) ||
-        devices.find(d => d.kind === 'videoinput' && !ehUltraWide(d.label) && !/front|frontal|user/i.test(d.label || ''));
-      if (principal && principal.deviceId !== track.getSettings?.().deviceId) {
-        streamAtual.getTracks().forEach(t => t.stop());
+    let principal = null;
+    if (traseiras.length > 1) {
+      const normais = traseiras.filter(d => !_sepEtqEhLenteAuxiliar(d.label));
+      principal = (normais.length ? normais : traseiras)[0] || null;
+    }
+
+    const idxAtual = _sepEtqIdxCamera(track.label);
+    const idxPrincipal = principal ? _sepEtqIdxCamera(principal.label) : null;
+    const trocar = principal && principal.deviceId && principal.deviceId !== atualId &&
+      (_sepEtqEhLenteAuxiliar(track.label) ||
+        (idxAtual != null && idxPrincipal != null && idxPrincipal < idxAtual));
+
+    if (trocar) {
+      streamAtual.getTracks().forEach(t => t.stop());
+      try {
         streamAtual = await navigator.mediaDevices.getUserMedia({
           video: { deviceId: { exact: principal.deviceId } },
           audio: false
         });
-      }
-    }
-
-    // Câmera lógica (Android) pode iniciar com zoom 0.5 — normaliza para 1.0
-    const t2 = streamAtual?.getVideoTracks?.()[0];
-    const caps = t2?.getCapabilities?.();
-    if (caps && 'zoom' in caps) {
-      const zoomAtual = t2.getSettings?.().zoom;
-      if (!(zoomAtual >= 1)) {
-        const alvo = Math.min(Math.max(1, caps.zoom.min || 1), caps.zoom.max || 1);
-        await t2.applyConstraints({ advanced: [{ zoom: alvo }] }).catch(() => {});
+      } catch (_) {
+        streamAtual = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: { ideal: 'environment' } },
+          audio: false
+        });
       }
     }
   } catch (_) { /* mantém o stream que conseguiu */ }
+  await _sepEtqNormalizarZoom(streamAtual);
   return streamAtual;
 }
 
@@ -671,10 +714,18 @@ function _solAbrirLeitorQrIdsSep({ codigoProduto, qtyNeeded, unidade, idsEsperad
     async function _iniciarCamera() {
       try {
         stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: { ideal: 'environment' } },
+          video: {
+            facingMode: { ideal: 'environment' },
+            width: { ideal: 1920 },
+            height: { ideal: 1080 }
+          },
           audio: false
         });
         stream = await _sepEtqGarantirCameraPrincipal(stream);
+        try {
+          const tCam = stream?.getVideoTracks?.()[0];
+          console.log('[sepEtq] câmera em uso:', tCam?.label, '| zoom:', tCam?.getSettings?.().zoom);
+        } catch (_) {}
         if (video) {
           video.srcObject = stream;
           await video.play().catch(() => {});
