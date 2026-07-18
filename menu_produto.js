@@ -52155,12 +52155,6 @@ function renderizarCatalogoOmie(produtos, options = {}) {
           <div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:8px;">
             <span id="min-badge-${escapeHtml(produto.codigo)}" data-codigo="${escapeHtml(produto.codigo)}"></span>
             <span id="compra-badge-${escapeHtml(produto.codigo)}" data-codigo="${escapeHtml(produto.codigo)}"></span>
-            ${produto.abaixo_minimo ? `
-            <span style="background:#fef3c7;color:#92400e;padding:3px 6px;border-radius:4px;font-size:9px;font-weight:600;display:flex;align-items:center;gap:3px;" title="Estoque: ${produto.saldo_estoque} | Mínimo: ${produto.estoque_minimo}">
-              <i class="fa-solid fa-triangle-exclamation" style="font-size:8px;"></i>
-              Est. ${Math.round(produto.saldo_estoque)}/${Math.round(produto.estoque_minimo)}
-            </span>
-            ` : ''}
           </div>
           
           <!-- Botão Ações -->
