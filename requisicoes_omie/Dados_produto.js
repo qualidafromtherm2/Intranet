@@ -13,10 +13,8 @@ import {
 } from './editar_produto.js';
 
 // --- base para as chamadas ao backend --------------------------
-const API_BASE =
-  (location.hostname === 'localhost' || location.hostname === '127.0.0.1')
-    ? 'http://localhost:5001'
-    : window.location.origin;         // produção (Render)
+// Sempre a mesma origem da página (evita CORS localhost vs 127.0.0.1)
+const API_BASE = window.location.origin;
 
 // --- Controle de permissões de produto ---
 let userPermissoes = [];

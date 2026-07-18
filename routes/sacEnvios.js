@@ -3777,6 +3777,20 @@ async function ensureSchema() {
     ALTER TABLE sac.at ADD COLUMN IF NOT EXISTS status TEXT;
     ALTER TABLE sac.at ADD COLUMN IF NOT EXISTS devolucao_enviada_em TIMESTAMP;
     ALTER TABLE sac.at ADD COLUMN IF NOT EXISTS devolucao_enviada_para TEXT;
+    ALTER TABLE sac.at ADD COLUMN IF NOT EXISTS tipo_falha TEXT;
+    ALTER TABLE sac.at ADD COLUMN IF NOT EXISTS validado BOOLEAN DEFAULT TRUE;
+    ALTER TABLE sac.at ADD COLUMN IF NOT EXISTS comentario_tecnico TEXT;
+    ALTER TABLE sac.at ADD COLUMN IF NOT EXISTS fechamento_at TEXT;
+    ALTER TABLE sac.at ALTER COLUMN validado SET DEFAULT TRUE;
+
+    CREATE TABLE IF NOT EXISTS sac.tipo_falha (
+      id         BIGSERIAL PRIMARY KEY,
+      nome       TEXT NOT NULL UNIQUE,
+      criado_em  TIMESTAMP NOT NULL DEFAULT NOW()
+    );
+    INSERT INTO sac.tipo_falha (nome)
+    SELECT v FROM (VALUES ('Produção'), ('Engenharia'), ('Cliente'), ('Comercial')) AS t(v)
+    WHERE NOT EXISTS (SELECT 1 FROM sac.tipo_falha LIMIT 1);
 
     -- Destinatários de e-mail de devolução AT (NULL=fora da lista, false=pendente, true=ativo)
     ALTER TABLE public.auth_user ADD COLUMN IF NOT EXISTS email_devolucao BOOLEAN;
@@ -4508,6 +4522,8 @@ router.get('/at/atendimentos', async (_req, res) => {
            a.tag_problema,
            a.subtag,
            a.plataforma_atendimento,
+           a.tipo_falha,
+           a.fechamento_at,
            a.editado_por,
            a.editado_em,
            s.pedido,
@@ -4601,6 +4617,8 @@ router.patch('/at/atendimentos/:id', async (req, res) => {
     plataforma_atendimento: 'plataforma_atendimento',
     atendimento_inicial:    'atendimento_inicial',
     tipo:                   'tipo',
+    tipo_falha:             'tipo_falha',
+    fechamento_at:          'fechamento_at',
   };
 
   const setClauses = [];
@@ -6161,6 +6179,52 @@ router.post('/at/tags', async (req, res) => {
     return res.json({ ok: true });
   } catch (err) {
     console.error('[SAC/AT] erro ao salvar tag:', err);
+    return res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// Catálogo de tipos de falha (MASP D2 + Fechamento OS)
+router.get('/at/tipos-falha', async (req, res) => {
+  try {
+    await ensureSchema();
+    const { rows } = await pool.query(
+      `SELECT id, nome FROM sac.tipo_falha ORDER BY nome ASC`
+    );
+    return res.json({ ok: true, tipos: rows });
+  } catch (err) {
+    console.error('[SAC/AT] listar tipos-falha:', err);
+    return res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+router.post('/at/tipos-falha', async (req, res) => {
+  const nome = String(req.body?.nome || '').trim().slice(0, 120);
+  if (!nome) return res.status(400).json({ ok: false, error: 'Nome obrigatório.' });
+  try {
+    await ensureSchema();
+    const { rows } = await pool.query(
+      `INSERT INTO sac.tipo_falha (nome) VALUES ($1)
+       ON CONFLICT (nome) DO UPDATE SET nome = EXCLUDED.nome
+       RETURNING id, nome`,
+      [nome]
+    );
+    return res.json({ ok: true, tipo: rows[0] });
+  } catch (err) {
+    console.error('[SAC/AT] criar tipo-falha:', err);
+    return res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+router.delete('/at/tipos-falha/:id', async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (!id || id <= 0) return res.status(400).json({ ok: false, error: 'ID inválido.' });
+  try {
+    await ensureSchema();
+    const { rowCount } = await pool.query(`DELETE FROM sac.tipo_falha WHERE id = $1`, [id]);
+    if (!rowCount) return res.status(404).json({ ok: false, error: 'Tipo não encontrado.' });
+    return res.json({ ok: true });
+  } catch (err) {
+    console.error('[SAC/AT] excluir tipo-falha:', err);
     return res.status(500).json({ ok: false, error: err.message });
   }
 });
@@ -7800,7 +7864,7 @@ function mesAtualReferencia(refDate = new Date()) {
 }
 
 function calcAtRelatorioGerencialPeriodo(modoRaw, refDate = new Date()) {
-  const modosValidos = new Set(['mes', '3m', '6m', 'anual']);
+  const modosValidos = new Set(['mes', 'mes_anterior', '3m', '6m', 'anual']);
   const modo = modosValidos.has(modoRaw) ? modoRaw : 'mes';
   const nomesMes = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
   const { ano, mesNum, mesRaw } = mesAtualReferencia(refDate);
@@ -7808,16 +7872,19 @@ function calcAtRelatorioGerencialPeriodo(modoRaw, refDate = new Date()) {
   const fmtYmd = (y, m, d = 1) => `${y}-${pad(m)}-${pad(d)}`;
   const mesLabel = (y, m) => (m >= 1 && m <= 12 ? `${nomesMes[m - 1]}/${y}` : `${y}-${pad(m)}`);
 
-  if (modo === 'mes') {
-    const nextM = mesNum === 12 ? 1 : mesNum + 1;
-    const nextY = mesNum === 12 ? ano + 1 : ano;
+  if (modo === 'mes' || modo === 'mes_anterior') {
+    const y = modo === 'mes_anterior' ? (mesNum === 1 ? ano - 1 : ano) : ano;
+    const m = modo === 'mes_anterior' ? (mesNum === 1 ? 12 : mesNum - 1) : mesNum;
+    const nextM = m === 12 ? 1 : m + 1;
+    const nextY = m === 12 ? y + 1 : y;
+    const mesRef = `${y}-${pad(m)}`;
     return {
       modo,
-      mesRef: mesRaw,
-      inicio: fmtYmd(ano, mesNum),
+      mesRef,
+      inicio: fmtYmd(y, m),
       fimExclusive: fmtYmd(nextY, nextM),
-      label: mesLabel(ano, mesNum),
-      meses: [mesRaw],
+      label: mesLabel(y, m),
+      meses: [mesRef],
       evolucaoTipo: 'semana',
     };
   }

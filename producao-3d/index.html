@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>Produção 3D — Esteira</title>
+  <link rel="stylesheet" href="style.css?v=1" />
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+    }
+  }
+  </script>
+</head>
+<body>
+  <div id="app">
+    <canvas id="c"></canvas>
+
+    <div id="crosshair" class="crosshair" hidden aria-hidden="true"></div>
+
+    <div id="lookBalloon" class="look-balloon" hidden>
+      <div class="look-balloon-end" id="lookBalloonEnd">—</div>
+      <div class="look-balloon-body" id="lookBalloonBody"></div>
+    </div>
+
+    <div id="hud" class="hud" hidden>
+      <p class="hud-pc"><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> — andar &nbsp;·&nbsp; <kbd>Espaço</kbd>/<kbd>E</kbd> — subir &nbsp;·&nbsp; <kbd>C</kbd>/<kbd>Q</kbd> — descer</p>
+      <p class="hud-pc">Mouse — olhar · Mira no produto — detalhes · <kbd>Esc</kbd> — pausar</p>
+      <p class="hud-touch">Joystick = andar · direita = olhar · 2× chão = ir</p>
+    </div>
+
+    <div id="touchPad" class="touch-pad" hidden>
+      <div class="touch-left-stack">
+        <div class="touch-vert-btns">
+          <button type="button" class="wasd-btn" data-key="Space" aria-label="Subir">↑</button>
+          <button type="button" class="wasd-btn" data-key="KeyC" aria-label="Descer">↓</button>
+        </div>
+        <div id="joyMove" class="joy-zone joy-move" aria-label="Andar">
+          <div class="joy-base">
+            <div class="joy-stick" id="joyMoveStick"></div>
+          </div>
+          <span class="joy-label">Andar</span>
+        </div>
+      </div>
+      <div class="touch-action-btns">
+        <button type="button" id="btnTouchClick" class="touch-act-btn touch-act-x" aria-label="Selecionar">✕</button>
+        <button type="button" id="btnTouchBack" class="touch-act-btn touch-act-o" aria-label="Voltar">○</button>
+      </div>
+    </div>
+
+    <div id="blocker" class="blocker">
+      <div class="panel">
+        <h1>Produção 3D</h1>
+        <p class="lead">Mesmo barracão do Explorar 3D — esteira de produção com as OPs ativas.</p>
+        <ul class="controls">
+          <li><strong>PC:</strong> <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> andar · mouse olhar</li>
+          <li><strong>Altura:</strong> <kbd>Espaço</kbd>/<kbd>E</kbd> sobe · <kbd>C</kbd>/<kbd>Q</kbd> desce</li>
+          <li><strong>Celular/Tablet:</strong> joystick = andar · direita = olhar · 2× no chão = teleporte</li>
+          <li><kbd>Esc</kbd> (PC) — pausar · no celular: volte pela intranet</li>
+        </ul>
+        <p class="hint">As fotos na esteira vêm de <strong>Producao.OP_producao</strong> (Registrar produção). Aponte a mira num produto para ver OP, código e status.</p>
+        <div id="gpuHelp" class="gpu-help" hidden>
+          <p><strong>Neste PC o 3D só abre pelo atalho WebGL</strong> (menu do Chrome ligado não basta).</p>
+          <ol>
+            <li>Feche <strong>todas</strong> as janelas do Chrome</li>
+            <li>No terminal, na pasta do projeto:</li>
+          </ol>
+          <code class="gpu-cmd">./producao-3d/abrir-com-gpu.sh</code>
+          <p class="gpu-alt">Ou: <code>~/.local/bin/google-chrome-webgl</code> e abra a intranet de novo.</p>
+        </div>
+        <p id="webglError" class="error" hidden></p>
+        <button type="button" id="btnOpenNewTab" class="btn btn-alt" hidden>Abrir em nova aba (recomendado no PC)</button>
+        <button type="button" id="btnEnter" class="btn">Toque / clique para entrar</button>
+        <p class="back" id="backLinkWrap">
+          <a href="/menu_produto.html">← Voltar à intranet</a>
+        </p>
+      </div>
+    </div>
+
+    <div id="enterLoading" class="enter-loading" hidden>
+      <div class="enter-loading-box">
+        <div class="enter-spinner" aria-hidden="true"></div>
+        <p class="enter-loading-title">Preparando a produção 3D…</p>
+        <p class="enter-loading-sub">Carregando esteira e OPs. Aguarde um instante.</p>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="main.js?v=9"></script>
+</body>
+</html>

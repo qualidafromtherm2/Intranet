@@ -330,6 +330,7 @@ app.use('/api/qualidade', require('./routes/listaMestra'));
 app.use('/api/qualidade/ri-check', require('./routes/qualidadeRiCheck'));
 app.use('/api/registros', require('./routes/registros'));
 app.use('/api/sac', require('./routes/sacEnvios'));
+app.use('/api/sac', require('./routes/masp'));
 app.use('/api/sac', require('./routes/vendasRelatorio'));
 app.use('/api/sac', require('./routes/logisticaRelatorio'));
 app.use('/api/ai', require('./routes/ai_assistant'));
@@ -14402,11 +14403,14 @@ app.get('/api/prateleiras3d/foto', async (req, res) => {
         if (baseHost && host === baseHost) allowed = true;
       } catch (_) { /* ignore */ }
     }
-    // Domínios legados de foto de produto (Supabase storage / CDN internos)
+    // Domínios legados de foto de produto (Supabase storage / CDN internos / Omie)
     if (!allowed && (
       host.endsWith('.supabase.co') ||
       host.endsWith('fromtherm.com.br') ||
-      host.endsWith('qualidafromtherm.com.br')
+      host.endsWith('qualidafromtherm.com.br') ||
+      host.endsWith('omie.com.br') ||
+      host.endsWith('.amazonaws.com') ||
+      host.endsWith('.cloudfront.net')
     )) {
       allowed = true;
     }
@@ -14423,6 +14427,7 @@ app.get('/api/prateleiras3d/foto', async (req, res) => {
     const buf = Buffer.from(await r.arrayBuffer());
     res.set('Content-Type', r.headers.get('content-type') || 'image/jpeg');
     res.set('Cache-Control', 'public, max-age=86400');
+    res.set('Access-Control-Allow-Origin', '*');
     res.end(buf);
   } catch (err) {
     console.error('[prateleiras3d/foto]', err?.message || err);
@@ -23436,6 +23441,13 @@ const STATIC_BLOCKLIST_PREFIXES = [
   '/Site_AT/', '/site_at/', '/routes/', '/src/', '/utils/', '/workers/',
   '/agente_impressao/', '/_nfe_omie/', '/api omie/', '/api%20omie/',
 ];
+/** CSVs de referência usados pelo front (Tipo item, BOM, etiquetas). */
+const STATIC_CSV_ALLOWLIST = new Set([
+  '/csv/tipo.csv',
+  '/csv/bom.csv',
+  '/csv/configuração_etq_caracteristicas.csv',
+  '/csv/configuracao_etq_caracteristicas.csv',
+]);
 const STATIC_BLOCKLIST_EXT = /\.(bak|bak\d*|backup|sql|sqlite|db|dump|env|pem|key|pfx|p12|log|sh|ps1|psql|tsv|txt|csv|tar|gz|tgz|zip|7z|rar)$/i;
 app.use((req, res, next) => {
   if (req.method !== 'GET' && req.method !== 'HEAD') return next();
@@ -23445,6 +23457,8 @@ app.use((req, res, next) => {
   if (/\/\.[^/]+/.test(p)) return res.status(404).end();
   if (STATIC_BLOCKLIST_FILES.has(p)) return res.status(404).end();
   const lower = p.toLowerCase();
+  // Exceção: CSVs públicos necessários na tela de produto
+  if (STATIC_CSV_ALLOWLIST.has(lower)) return next();
   if (STATIC_BLOCKLIST_PREFIXES.some(pref => lower.startsWith(pref.toLowerCase()))) {
     return res.status(404).end();
   }

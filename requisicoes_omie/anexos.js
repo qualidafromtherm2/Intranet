@@ -3,10 +3,7 @@
 // Injeção de controles de anexo no painel de detalhes de colaborador.
 // -----------------------------------------------------------------------------
 
-const API_BASE =
-  (location.hostname === 'localhost' || location.hostname === '127.0.0.1')
-    ? 'http://localhost:5001'
-    : window.location.origin;      // Render ou outro domínio
+const API_BASE = window.location.origin;
 // ────────────────────────────────────────────────────────────────
 // 1) listaAnexos via proxy /api/omie/anexo-listar
 // ────────────────────────────────────────────────────────────────

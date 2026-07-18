@@ -36,11 +36,7 @@ let kanbanCache = [];      // mantém os itens atuais em memória
 const COD_LOCAL_ESTOQUE = 10520299822;
 const COD_LOCAL_PCP = 10564345392;   // depósito onde ficam as peças separadas
 
-const API_BASE =
-  (location.hostname === 'localhost' || location.hostname === '127.0.0.1')
-    ? 'http://localhost:5001'
-    : window.location.origin;
-
+const API_BASE = window.location.origin;
 
 
 /* ───────────────── helpers ───────────────── */

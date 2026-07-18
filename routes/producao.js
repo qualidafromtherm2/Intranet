@@ -5,6 +5,7 @@
 const express = require('express');
 const https   = require('https');
 const { dbQuery } = require('../src/db');
+const omieCall = require('../utils/omieCall');
 const { lerEstruturaCachePorCodigos } = require('../utils/estruturaSql');
 const { registrarControleOperacaoImpressaoOp } = require('../utils/controleOperacoes');
 const {
@@ -756,6 +757,164 @@ router.get('/ordens', async (req, res) => {
   }
 });
 
+/* ---------------------------------------------------------------
+ * GET /api/producao/cena-3d
+ * OPs de Producao.OP_producao + foto_url p/ esteira Produção 3D.
+ * --------------------------------------------------------------- */
+router.get('/cena-3d', async (req, res) => {
+  try {
+    await garantirSchemaOpProducao();
+    await garantirSchemaKanbanProgramacao();
+    // Foto: 1) por codigo_produto  2) fallback URL contendo o código textual
+    const { rows } = await dbQuery(`
+      SELECT
+        op.id,
+        op.n_op,
+        op.codigo,
+        op.codigo_produto,
+        COALESCE(po.descricao, '') AS descricao,
+        op.created_at,
+        TRIM(fot.url_imagem) AS foto_url,
+        kp.status AS kanban_status,
+        kp.postos AS kanban_postos
+      FROM "Producao"."OP_producao" op
+      LEFT JOIN public.produtos_omie po
+        ON po.codigo_produto = op.codigo_produto
+      LEFT JOIN LATERAL (
+        SELECT img.url_imagem
+          FROM public.produtos_omie_imagens img
+         WHERE COALESCE(img.ativo, true) = true
+           AND NULLIF(TRIM(img.url_imagem), '') IS NOT NULL
+           AND (
+             (COALESCE(po.codigo_produto, op.codigo_produto) IS NOT NULL
+               AND img.codigo_produto = COALESCE(po.codigo_produto, op.codigo_produto))
+             OR (
+               NULLIF(TRIM(op.codigo), '') IS NOT NULL
+               AND img.url_imagem ILIKE '%' || TRIM(op.codigo) || '%'
+             )
+           )
+         ORDER BY
+           CASE
+             WHEN img.codigo_produto = COALESCE(po.codigo_produto, op.codigo_produto) THEN 0
+             ELSE 1
+           END,
+           img.pos ASC NULLS LAST,
+           img.id ASC
+         LIMIT 1
+      ) fot ON true
+      LEFT JOIN LATERAL (
+        SELECT k.status, k.postos
+          FROM "Producao"."Kanban_programacao" k
+         WHERE k.op_producao_id = op.id
+         ORDER BY k.id DESC
+         LIMIT 1
+      ) kp ON true
+      ORDER BY op.created_at ASC, op.id ASC
+    `);
+    const itens = rows.map((r) => ({
+      id: Number(r.id) || 0,
+      n_op: r.n_op || '',
+      codigo: r.codigo || '',
+      codigo_produto: r.codigo_produto != null ? Number(r.codigo_produto) : null,
+      descricao: r.descricao || '',
+      foto_url: r.foto_url || null,
+      // status vazio/null = Programado (NÃO forçar 'A PRODUZIR')
+      status: r.kanban_status != null ? String(r.kanban_status) : '',
+      postos: r.kanban_postos || null,
+      created_at: r.created_at,
+    }));
+
+    // Completa fotos faltantes via Omie ConsultarProduto (cache em memória + máx. 6 por request)
+    await enriquecerFotosOmieCena3d(itens);
+
+    return res.json({
+      ok: true,
+      total: itens.length,
+      itens,
+      sincronizado_em: new Date().toISOString(),
+    });
+  } catch (err) {
+    console.error('[producao] Erro cena-3d:', err.message);
+    return res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+/** Cache curto de URL de foto Omie (evita ConsultarProduto repetido). */
+const _fotoOmieCache = new Map(); // codigo_produto → { url, at }
+const FOTO_OMIE_TTL_MS = 30 * 60 * 1000;
+
+async function buscarFotoOmiePorCodigoProduto(codigoProduto) {
+  const id = Number(codigoProduto);
+  if (!Number.isFinite(id) || id <= 0) return null;
+  const hit = _fotoOmieCache.get(id);
+  if (hit && (Date.now() - hit.at) < FOTO_OMIE_TTL_MS) return hit.url || null;
+
+  const appKey = process.env.OMIE_APP_KEY;
+  const appSecret = process.env.OMIE_APP_SECRET;
+  if (!appKey || !appSecret) {
+    _fotoOmieCache.set(id, { url: null, at: Date.now() });
+    return null;
+  }
+
+  try {
+    const data = await omieCall(
+      'https://app.omie.com.br/api/v1/geral/produtos/',
+      {
+        call: 'ConsultarProduto',
+        app_key: appKey,
+        app_secret: appSecret,
+        param: [{ codigo_produto: id }],
+      },
+      { retryRedundant: false }
+    );
+    let url = '';
+    if (Array.isArray(data?.imagens) && data.imagens.length) {
+      url = String(data.imagens[0]?.url_imagem || data.imagens[0]?.url || '').trim();
+    }
+    if (!url) url = String(data?.url_imagem || '').trim();
+    if (!url && data?.produto_servico) {
+      const ps = data.produto_servico;
+      if (Array.isArray(ps.imagens) && ps.imagens[0]) {
+        url = String(ps.imagens[0].url_imagem || ps.imagens[0].url || '').trim();
+      }
+      if (!url) url = String(ps.url_imagem || '').trim();
+    }
+    _fotoOmieCache.set(id, { url: url || null, at: Date.now() });
+    return url || null;
+  } catch (err) {
+    console.warn('[producao/cena-3d] Omie foto', id, err?.message || err);
+    _fotoOmieCache.set(id, { url: null, at: Date.now() });
+    return null;
+  }
+}
+
+async function enriquecerFotosOmieCena3d(itens) {
+  const lista = Array.isArray(itens) ? itens : [];
+  const faltantes = [];
+  const seen = new Set();
+  for (const it of lista) {
+    if (it.foto_url) continue;
+    const id = Number(it.codigo_produto);
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    faltantes.push(id);
+  }
+  const max = 6;
+  const ids = faltantes.slice(0, max);
+  if (!ids.length) return;
+
+  const urlPorId = new Map();
+  // Sequencial p/ não estourar rate Omie
+  for (const id of ids) {
+    const url = await buscarFotoOmiePorCodigoProduto(id);
+    if (url) urlPorId.set(id, url);
+  }
+  for (const it of lista) {
+    if (it.foto_url) continue;
+    const u = urlPorId.get(Number(it.codigo_produto));
+    if (u) it.foto_url = u;
+  }
+}
 /* ---------------------------------------------------------------
  * GET /api/producao/ordens-montagem
  * Carga rápida do cache DB (produto.tipo='04 - Produto Acabado').

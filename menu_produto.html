@@ -288,6 +288,17 @@
       Registrar produção
     </a>
     <a href="#"
+       id="menu-producao-3d"
+       class="menu-link"
+       data-nav-key="side:producao:producao-3d"
+       data-nav-parent="side:producao"
+       data-nav-pos="side"
+       data-nav-label="Produção 3D"
+       data-nav-selector="#menu-producao-3d">
+      <i class="fa-solid fa-person-walking" style="margin-right:8px;"></i>
+      Produção 3D
+    </a>
+    <a href="#"
        id="menu-monta-producao"
        class="menu-link"
        data-nav-key="side:producao:montagem"
@@ -5063,8 +5074,8 @@
                   <div class="at-em-wrap" style="grid-column:1/-1;">
                     <label class="at-em-lbl">Histórico de reclamações</label>
                     <div id="atEmReclamHistorico" style="display:none;max-height:220px;overflow-y:auto;border:1px solid #374151;border-radius:8px;padding:8px;font-size:12px;margin-bottom:6px;"></div>
-                    <label class="at-em-lbl" style="margin-top:2px;">Descreva a reclamação (nova entrada)</label>
-                    <textarea id="atEmReclamacao" class="at-em-input" rows="3" style="width:100%;box-sizing:border-box;" placeholder="Texto da reclamação..."></textarea>
+                    <label class="at-em-lbl" style="margin-top:2px;">Descreva a reclamação</label>
+                    <textarea id="atEmReclamacao" class="at-em-input" rows="3" style="width:100%;box-sizing:border-box;" placeholder="Texto da reclamação desta O.S...."></textarea>
                   </div>
                 </div>
               </div>
@@ -5125,6 +5136,14 @@
               <!-- Guia Fechamento -->
               <div id="atEmPaneFechamento" class="at-em-pane" data-at-em-pane="fechamento" hidden>
                 <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+                  <div class="at-em-wrap" style="grid-column:1/-1;">
+                    <label class="at-em-lbl">Relatório de fechamento pelo AT</label>
+                    <textarea id="atEmFechamentoAt" class="at-em-input" rows="3" style="width:100%;box-sizing:border-box;" placeholder="Relatório de fechamento pelo AT..."></textarea>
+                  </div>
+                  <div class="at-em-wrap" style="grid-column:1/-1;">
+                    <label class="at-em-lbl">Tipo de falha</label>
+                    <div id="atEmFechTipoFalha" class="at-tipo-falha-combo"></div>
+                  </div>
                   <div class="at-em-wrap">
                     <label class="at-em-lbl">Tag</label>
                     <div class="at-combobox-wrapper">
@@ -6033,6 +6052,7 @@
                     <select id="atRelGerModo"
                       style="padding:6px 10px;border-radius:8px;border:1px solid #374151;background:#111827;color:#e5e7eb;font-size:13px;min-width:210px;">
                       <option value="mes">Mês atual</option>
+                      <option value="mes_anterior">Mês anterior</option>
                       <option value="3m">3 últimos meses (sem o atual)</option>
                       <option value="6m">6 últimos meses (sem o atual)</option>
                       <option value="anual">Anual (12 meses, sem o atual)</option>
@@ -11488,6 +11508,31 @@
 
 
 
+        <!-- Painel Produção 3D (abre em nova guia) -->
+        <div id="producao3dPane" class="tab-pane" style="display:none;">
+          <div class="content-wrapper">
+            <div class="content-wrapper-header">
+              <div class="content-wrapper-context">
+                <h3 class="img-content" style="display:flex;align-items:center;gap:8px;">
+                  <i class="fa-solid fa-person-walking" style="color:#f97316;"></i>
+                  <span>Produção 3D</span>
+                </h3>
+                <div class="content-text">Esteira no barracão 3D com as fotos das OPs de <strong>OP_producao</strong>.</div>
+              </div>
+            </div>
+            <div class="pp3d-open-bar" style="margin:12px 16px;">
+              <p style="margin:0; color:#e7e5e4;">
+                O <strong>Produção 3D</strong> abre em <strong>nova guia</strong>.
+                Se a aba não abriu, permita pop-ups ou clique no botão:
+              </p>
+              <a href="/producao-3d/" target="_blank" rel="noopener" class="pp3d-open-link">
+                Abrir Produção 3D em nova aba
+              </a>
+              <span class="pp3d-open-hint">Neste PC: feche o Chrome e rode <code>./producao-3d/abrir-com-gpu.sh</code> no terminal (atalho WebGL).</span>
+            </div>
+          </div>
+        </div>
+
         <!-- Painel Produção: Registrar produção (Ordens de Produção IAPP) -->
         <div id="registrarProducaoPane" class="tab-pane" style="display:none;">
           <div class="content-wrapper">
@@ -12286,6 +12331,8 @@
   <!-- Interceptor de sessão: precisa carregar ANTES de qualquer módulo que faça fetch -->
   <script src="/public/js/sessao_resiliente.js?v=20260617b"></script>
   <script type="module" src="login/login.js"></script>
+  <script src="/public/js/at-tipo-falha.js?v=20260718f" defer></script>
+  <script src="/public/js/at-masp-relatorio.js?v=20260718g" defer></script>
   <script src="/public/js/vendas-relatorio-gerencial.js?v=20260709a" defer></script>
   <script src="/public/js/logistica-relatorio-gerencial.js?v=20260712a" defer></script>
   <script type="module" src="menu_produto.js?v=20260717-explorar3d-uma-guia"></script>
@@ -14250,6 +14297,498 @@ function attachDropZone(ul) {
 .at-rel-ger-btn.primary { background: #1e3a5f; border-color: #1e3a5f; color: #fff; }
 .at-rel-ger-btn.primary:hover { background: #16304f; }
 .at-rel-ger-btn.warn { background: #fff7ed; border-color: #fdba74; color: #c2410c; }
+.at-masp-header { margin-bottom: 12px; }
+.at-masp-tag-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 12px;
+}
+.at-masp-tag-row label {
+  font-size: 11px;
+  font-weight: 700;
+  color: #1e3a5f;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+}
+.at-masp-tag-row select {
+  min-width: 280px;
+  padding: 8px 10px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  font-size: 13px;
+  background: #fff;
+  color: #1e293b;
+}
+.at-masp-kpis {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 10px;
+  margin-bottom: 8px;
+}
+.at-masp-kpi {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 10px 12px;
+}
+.at-masp-kpi .lbl {
+  font-size: 10px;
+  font-weight: 700;
+  color: #64748b;
+  text-transform: uppercase;
+}
+.at-masp-kpi .val {
+  font-size: 16px;
+  font-weight: 900;
+  color: #1e3a5f;
+  margin-top: 4px;
+}
+.at-masp-meta {
+  font-size: 12px;
+  color: #475569;
+  line-height: 1.5;
+  margin-bottom: 4px;
+}
+.at-masp-guias {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 12px 0 14px;
+}
+.at-masp-guia {
+  border: 1px solid #cbd5e1;
+  background: #fff;
+  color: #475569;
+  border-radius: 999px;
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.at-masp-guia.is-active {
+  background: #1e3a5f;
+  border-color: #1e3a5f;
+  color: #fff;
+}
+.at-masp-desconsideradas {
+  margin-top: 12px;
+  border: 1px dashed #cbd5e1;
+  border-radius: 8px;
+  padding: 8px 10px;
+  background: #f8fafc;
+}
+.at-masp-desconsideradas summary {
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 700;
+  color: #64748b;
+}
+.at-masp-os-desconsiderada {
+  opacity: 0.72;
+  background: #f1f5f9;
+}
+.at-masp-hint {
+
+  font-size: 12px;
+  color: #64748b;
+  margin: 0 0 10px;
+}
+.at-masp-sub {
+  margin: 0 0 8px;
+  font-size: 13px;
+  color: #1e3a5f;
+}
+.at-masp-picker {
+  border: 1px solid #fdba74;
+  background: #fff7ed;
+  border-radius: 10px;
+  padding: 12px;
+  margin-bottom: 12px;
+}
+.at-masp-picker-title {
+  font-size: 12px;
+  font-weight: 800;
+  color: #c2410c;
+  margin-bottom: 8px;
+}
+.at-masp-picker-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+.at-masp-picker-row label { font-size: 11px; font-weight: 700; color: #9a3412; }
+.at-masp-picker-row select {
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid #fdba74;
+  background: #fff;
+}
+.at-masp-picker-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.at-masp-os-tbl .os-id { white-space: nowrap; }
+.at-masp-os-link {
+  background: none;
+  border: none;
+  color: #1d4ed8;
+  font-weight: 700;
+  cursor: pointer;
+  text-decoration: underline;
+  padding: 0;
+  font-size: inherit;
+}
+.at-tipo-falha-combo {
+  position: relative;
+  display: inline-block;
+  min-width: 160px;
+  max-width: 280px;
+  width: 100%;
+  vertical-align: middle;
+}
+.at-tipo-falha-trigger {
+  width: 100%;
+  text-align: left;
+  padding: 6px 10px;
+  border-radius: 8px;
+  border: 1px solid #374151;
+  background: rgba(255,255,255,.04);
+  color: var(--content-title-color, #e2e8f0);
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.at-masp-os-tbl .at-tipo-falha-trigger {
+  border-color: #cbd5e1;
+  background: #fff;
+  color: #0f172a;
+  padding: 4px 8px;
+}
+.at-tipo-falha-trigger.is-empty { color: #94a3b8; }
+.at-tipo-falha-menu {
+  position: absolute;
+  z-index: 80;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  min-width: 180px;
+  max-height: 240px;
+  overflow: auto;
+  background: #1e293b;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  box-shadow: 0 12px 28px rgba(0,0,0,.35);
+  padding: 4px;
+}
+.at-masp-os-tbl .at-tipo-falha-menu {
+  background: #fff;
+  border-color: #cbd5e1;
+  box-shadow: 0 8px 20px rgba(15,23,42,.15);
+}
+.at-tipo-falha-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  font-size: 12px;
+  color: #e2e8f0;
+  cursor: pointer;
+}
+.at-masp-os-tbl .at-tipo-falha-item { color: #0f172a; }
+.at-tipo-falha-item:hover { background: rgba(56,189,248,.12); }
+.at-tipo-falha-item.is-selected { background: rgba(14,165,233,.2); font-weight: 700; }
+.at-tipo-falha-item.disabled { cursor: default; color: #94a3b8; }
+.at-tipo-falha-item.disabled:hover { background: transparent; }
+.at-tipo-falha-nome { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.at-tipo-falha-del {
+  flex-shrink: 0;
+  width: 22px;
+  height: 22px;
+  border: 1px solid #475569;
+  border-radius: 6px;
+  background: transparent;
+  color: #94a3b8;
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0;
+}
+.at-masp-os-tbl .at-tipo-falha-del { border-color: #cbd5e1; color: #64748b; }
+.at-tipo-falha-del:hover { background: #fee2e2; color: #b91c1c; border-color: #fca5a5; }
+.at-tipo-falha-inserir {
+  border-top: 1px solid #334155;
+  margin-top: 2px;
+  padding-top: 8px;
+  color: #38bdf8;
+  font-weight: 700;
+}
+.at-masp-os-tbl .at-tipo-falha-inserir { border-top-color: #e2e8f0; color: #0369a1; }
+.at-tipo-falha-livre-wrap {
+  display: none;
+  align-items: center;
+  gap: 4px;
+}
+.at-tipo-falha-combo.is-inserindo .at-tipo-falha-livre-wrap {
+  display: flex;
+}
+.at-tipo-falha-combo.is-inserindo .at-tipo-falha-trigger {
+  display: none !important;
+}
+.at-tipo-falha-cancelar {
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  border: 1px solid #475569;
+  border-radius: 6px;
+  background: transparent;
+  color: #94a3b8;
+  cursor: pointer;
+  font-size: 13px;
+}
+.at-tipo-falha-cancelar:hover {
+  background: #fee2e2;
+  color: #b91c1c;
+  border-color: #fca5a5;
+}
+.at-tipo-falha-livre {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 8px;
+  border-radius: 8px;
+  border: 1px solid #374151;
+  background: rgba(255,255,255,.04);
+  color: var(--content-title-color, #e2e8f0);
+  font-size: 12px;
+  font-family: inherit;
+}
+.at-masp-os-tbl .at-tipo-falha-livre {
+  border-color: #cbd5e1;
+  background: #fff;
+  color: #0f172a;
+  padding: 4px 8px;
+}
+.at-tipo-falha-voltar {
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  border: 1px solid #475569;
+  border-radius: 6px;
+  background: transparent;
+  color: #94a3b8;
+  cursor: pointer;
+}
+.at-masp-comentario {
+  width: 100%;
+  min-width: 160px;
+  max-width: 260px;
+  padding: 4px 8px;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  font-size: 12px;
+  font-family: inherit;
+  color: #1e293b;
+  background: #fff;
+}
+.at-masp-validado-td {
+  text-align: center;
+  vertical-align: middle;
+  width: 70px;
+}
+.at-masp-os-tbl .at-masp-validado,
+.at-masp-os-tbl .at-masp-desconsiderar {
+  width: 16px !important;
+  height: 16px !important;
+  min-width: 16px !important;
+  min-height: 16px !important;
+  max-width: 16px !important;
+  max-height: 16px !important;
+  margin: 0 auto;
+  padding: 0;
+  accent-color: #1e3a5f;
+  cursor: pointer;
+  transform: none !important;
+  scale: 1 !important;
+}
+.at-masp-ishi-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 10px;
+}
+.at-masp-fishbone {
+  display: grid;
+  grid-template-columns: 1fr 90px 1fr;
+  gap: 8px;
+  align-items: stretch;
+  min-height: 320px;
+  margin: 12px 0 8px;
+  background: linear-gradient(180deg, #f8fafc, #fff);
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 12px;
+}
+.at-masp-fish-col { display: flex; flex-direction: column; gap: 10px; }
+.at-masp-fish-spine {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+.at-masp-fish-line {
+  position: absolute;
+  top: 12px;
+  bottom: 56px;
+  width: 4px;
+  background: #1e3a5f;
+  border-radius: 2px;
+}
+.at-masp-fish-head {
+  margin-top: auto;
+  background: #f59e0b;
+  color: #1e3a5f;
+  font-weight: 900;
+  font-size: 12px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  text-align: center;
+  max-width: 88px;
+  word-break: break-word;
+  z-index: 1;
+}
+.at-masp-bone {
+  border: 1px solid #cbd5e1;
+  border-radius: 10px;
+  background: #fff;
+  padding: 8px;
+}
+.at-masp-bone-label {
+  font-size: 11px;
+  font-weight: 800;
+  color: #1e3a5f;
+  text-transform: uppercase;
+  margin-bottom: 6px;
+}
+.at-masp-bone-empty { font-size: 11px; color: #94a3b8; margin-bottom: 6px; }
+.at-masp-causa {
+  border: 1px dashed #cbd5e1;
+  border-radius: 8px;
+  padding: 6px;
+  margin-bottom: 6px;
+  background: #f8fafc;
+  display: grid;
+  gap: 4px;
+}
+.at-masp-causa-texto,
+.at-masp-causa-comentario {
+  width: 100%;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  padding: 4px 6px;
+  font-size: 12px;
+  font-family: inherit;
+}
+.at-masp-causa-valid {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #334155;
+}
+.at-masp-causa-valid input {
+  width: 14px !important;
+  height: 14px !important;
+  min-width: 14px !important;
+  min-height: 14px !important;
+}
+.at-masp-pq-block {
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 12px;
+  margin-bottom: 12px;
+  background: #fff;
+}
+.at-masp-pq-head {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+  font-size: 13px;
+  color: #1e3a5f;
+}
+.at-masp-pq-head .cat {
+  font-size: 10px;
+  font-weight: 800;
+  background: #e0f2fe;
+  color: #075985;
+  border-radius: 999px;
+  padding: 2px 8px;
+}
+.at-masp-acao-causa {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 8px 10px;
+  margin-bottom: 8px;
+  font-size: 12px;
+  color: #334155;
+  line-height: 1.45;
+}
+@media (max-width: 900px) {
+  .at-masp-fishbone { grid-template-columns: 1fr; }
+  .at-masp-fish-spine { min-height: 60px; }
+  .at-masp-fish-line { display: none; }
+}
+.at-masp-5p-item {
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 10px;
+  margin-bottom: 8px;
+}
+.at-masp-5p-item .n {
+  font-size: 11px;
+  font-weight: 800;
+  color: #ea580c;
+  margin-bottom: 6px;
+}
+.at-masp-5p-item input,
+.at-masp-5p-item textarea {
+  width: 100%;
+  margin-bottom: 6px;
+  padding: 8px 10px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  font-size: 12px;
+  font-family: inherit;
+}
+.at-masp-acao {
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 12px;
+  margin-bottom: 10px;
+  background: #fff;
+}
+.at-masp-acao-row {
+  display: flex;
+  gap: 10px;
+  align-items: flex-end;
+  flex-wrap: wrap;
+}
+.at-masp-resp {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+  font-size: 13px;
+  color: #1e293b;
+  font-weight: 600;
+}
 .at-rel-ger-field { margin-bottom: 14px; }
 .at-rel-ger-field label {
   display: block;

@@ -31,11 +31,7 @@ function hojeDDMMYYYY() {
 const PAGE_SIZE = 50;
 const PAUSE_MS  = 1200;            // 1,2 s entre páginas
 
-const API_BASE =
-  (location.hostname === 'localhost' || location.hostname === '127.0.0.1')
-    ? 'http://localhost:5001'
-    : 'https://intranet-30av.onrender.com';
-
+const API_BASE = window.location.origin;
 /* ----------------------- SPINNER ------------------------------------ */
 const $ = id => document.getElementById(id);
 function updatePct(p) {

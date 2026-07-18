@@ -1,9 +1,5 @@
 // requisicoes_omie/editar_produto.js
-const API_BASE =
-  (location.hostname === 'localhost' || location.hostname === '127.0.0.1')
-    ? 'http://localhost:5001'
-    : window.location.origin;      // Render ou outro domínio
-    
+const API_BASE = window.location.origin;
 // guarda o código atual do produto
 export let currentCodigo = null;
 

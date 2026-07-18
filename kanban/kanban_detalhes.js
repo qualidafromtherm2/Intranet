@@ -1,10 +1,7 @@
 // kanban_detalhes.js  – responsável por abrir a aba Detalhes
 // Sempre consulta a OMIE e mostra TODOS os itens do pedido.
 
-const API_BASE =
-  (location.hostname === 'localhost' || location.hostname === '127.0.0.1')
-    ? 'http://localhost:5001'
-    : window.location.origin;      // Render ou outro domínio
+const API_BASE = window.location.origin;
 /**
  * Registra duplo‑clique na coluna "Pedido aprovado".
  * Quando acionado:

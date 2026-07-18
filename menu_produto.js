@@ -5434,7 +5434,7 @@ import { initAnexosUI } from './requisicoes_omie/anexos.js';
 let lastKanbanTab = 'comercial';   // legado — Controle de OP's removido
 
 import { loadDadosProduto as loadDadosProdutoReal }
-  from './requisicoes_omie/Dados_produto.js?v=20260710c';
+  from './requisicoes_omie/Dados_produto.js?v=20260718-api-base';
 /* Controle de OP's (kanban legado) removido — produção via Registrar produção / Montagem */
 
 let almoxCurrentPage = 1;
@@ -19699,19 +19699,30 @@ function _abrirAtEditModal(id) {
   if (tipoSel) tipoSel.value = row.tipo || '';
   _atEmAplicarVisibilidadeRapido(row.tipo);
 
-  // Histórico de reclamações editável (todas as entradas do grupo)
-  const grpRows = _atAllRows.filter(r => r.ordem_producao && r.ordem_producao === row.ordem_producao && r.descreva_reclamacao);
+  // Histórico: só OUTRAS O.S. da mesma OP (não inclui a atual). Clique abre essa O.S.
+  const grpRows = _atAllRows.filter((r) =>
+    r.ordem_producao
+    && r.ordem_producao === row.ordem_producao
+    && r.descreva_reclamacao
+    && String(r.id) !== String(id)
+  );
   const histDiv = document.getElementById('atEmReclamHistorico');
   if (grpRows.length && histDiv) {
     histDiv.style.display = 'block';
-    histDiv.innerHTML = grpRows.map(r =>
-      `<div style="margin-bottom:8px;" data-hist-id="${escapeAtHtml(String(r.id))}">
-        <div style="font-size:10px;color:#0ea5e9;font-weight:700;margin-bottom:2px;">#${escapeAtHtml(String(r.id))}</div>
-        <textarea data-hist-textarea="${escapeAtHtml(String(r.id))}"
-          style="width:100%;box-sizing:border-box;background:rgba(255,255,255,.04);border:1px solid #374151;border-radius:6px;padding:5px 8px;font-size:12px;color:var(--content-title-color);resize:vertical;"
-          rows="2">${escapeAtHtml(r.descreva_reclamacao)}</textarea>
-      </div>`
+    histDiv.innerHTML = grpRows.map((r) =>
+      `<button type="button" class="at-em-hist-os" data-open-hist-os="${escapeAtHtml(String(r.id))}"
+        title="Abrir O.S. #${escapeAtHtml(String(r.id))}"
+        style="display:block;width:100%;text-align:left;margin-bottom:8px;padding:8px 10px;box-sizing:border-box;background:rgba(255,255,255,.04);border:1px solid #374151;border-radius:8px;cursor:pointer;color:inherit;font:inherit;">
+        <div style="font-size:10px;color:#0ea5e9;font-weight:700;margin-bottom:4px;">#${escapeAtHtml(String(r.id))}</div>
+        <div style="font-size:12px;color:var(--content-title-color);line-height:1.4;white-space:pre-wrap;">${escapeAtHtml(r.descreva_reclamacao)}</div>
+      </button>`
     ).join('');
+    histDiv.querySelectorAll('[data-open-hist-os]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const otherId = btn.dataset.openHistOs;
+        if (otherId && typeof _abrirAtEditModal === 'function') _abrirAtEditModal(otherId);
+      });
+    });
   } else if (histDiv) {
     histDiv.style.display = 'none';
     histDiv.innerHTML = '';
@@ -19719,6 +19730,7 @@ function _abrirAtEditModal(id) {
   setV('atEmReclamacao', row.descreva_reclamacao);
 
   // Fechamento
+  setV('atEmFechamentoAt',   row.fechamento_at);
   setV('atEmFechTag',        row.fech_tag);
   setV('atEmFechPlataforma', row.fech_plataforma);
   setV('atEmFechData',       row.fech_data_conclusao ? String(row.fech_data_conclusao).slice(0,10) : '');
@@ -19739,6 +19751,16 @@ function _abrirAtEditModal(id) {
   setV('atEmFechDataEnvioNfe', row.fech_data_envio_nfe
     ? new Date(row.fech_data_envio_nfe).toLocaleString('pt-BR') : '');
   setV('atEmFechTecnico',    row.tecnico_nome);
+
+  // Tipo de falha (mesmo combobox do Relatório AT / MASP)
+  const tipoFalhaEl = document.getElementById('atEmFechTipoFalha');
+  if (tipoFalhaEl && window.__AtTipoFalha?.mount) {
+    window.__atEmTipoFalhaCtrl = window.__AtTipoFalha.mount(tipoFalhaEl, {
+      value: row.tipo_falha || '',
+    });
+  } else if (tipoFalhaEl) {
+    tipoFalhaEl.textContent = row.tipo_falha || '';
+  }
 
   // Dados da Busca (at_busca_selecionada)
   _atSetEditBuscaFieldValue('atEmPedido', row.pedido);
@@ -19811,6 +19833,8 @@ async function _salvarAtEditModal() {
     motivo_solicitacao:     gV('atEmMotivoSolicitacao'),
     acao_tomada:            gV('atEmAcaoTomada'),
     data:                   gV('atEmData') || null,
+    fechamento_at:          gV('atEmFechamentoAt'),
+    tipo_falha:             (window.__atEmTipoFalhaCtrl?.getValue?.() ?? '') || '',
   };
   const fechPayload = {
     tag_problema:                gV('atEmFechTag'),
@@ -19851,31 +19875,14 @@ async function _salvarAtEditModal() {
       if (!fr.ok || fd.ok === false) throw new Error(fd.error || 'Falha ao salvar fechamento.');
     }
 
-    // Salva entradas editadas no histórico de reclamações
-    const histDiv2 = document.getElementById('atEmReclamHistorico');
-    if (histDiv2) {
-      const histTextareas = histDiv2.querySelectorAll('[data-hist-textarea]');
-      for (const ta of histTextareas) {
-        const hId  = ta.dataset.histTextarea;
-        const hVal = ta.value.trim();
-        const hRow = _atAllRows.find(r => String(r.id) === String(hId));
-        if (hRow && hVal !== (hRow.descreva_reclamacao || '').trim()) {
-          await fetch(`/api/sac/at/atendimentos/${hId}`, {
-            method: 'PATCH', credentials: 'include',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ descreva_reclamacao: hVal })
-          }).catch(() => null);
-          hRow.descreva_reclamacao = hVal;
-        }
-      }
-    }
-
     // Atualiza cache local
     const idx = _atAllRows.findIndex(r => String(r.id) === idStr);
     if (idx !== -1) {
       _atAllRows[idx] = {
         ..._atAllRows[idx], ...payload,
         atendimento_inicial: payload.atendimento_inicial,
+        tipo_falha: payload.tipo_falha,
+        fechamento_at: payload.fechamento_at,
         editado_por: data.editado_por,
         editado_em:  data.editado_em,
         ...(hasFechData ? {
@@ -21455,9 +21462,12 @@ document.querySelectorAll('#atTabelaWrapper thead th[data-col]').forEach(th => {
     { id: 'financeiro', label: 'Análise Financeira',        icon: 'fa-coins',            pg: 7 },
     { id: 'lote',       label: 'Análise de Lote',           icon: 'fa-layer-group',      pg: 8 },
     { id: 'ppm-tx',     label: 'Análise PPM e Tx',          icon: 'fa-percent',          pg: 9 },
-    { id: 'plano',      label: 'Plano de Ação',             icon: 'fa-list-check',       pg: 10 },
-    { id: 'conclusao',  label: 'Conclusão Executiva',       icon: 'fa-flag-checkered',   pg: 11 },
+    { id: 'masp',       label: 'MASP',                      icon: 'fa-diagram-project',  pg: 10 },
+    { id: 'plano',      label: 'Plano de Ação',             icon: 'fa-list-check',       pg: 11 },
+    { id: 'conclusao',  label: 'Conclusão Executiva',       icon: 'fa-flag-checkered',   pg: 12 },
   ];
+
+  let _atMaspCtrl = null;
 
   function _fmtData(raw) {
     if (!raw) return '-';
@@ -21505,7 +21515,7 @@ document.querySelectorAll('#atTabelaWrapper thead th[data-col]').forEach(th => {
 
     return {
       plano_acao,
-      conclusao_resumo: `${data.modo && data.modo !== 'mes' ? 'No período analisado' : 'No mês analisado'} foram registradas ${kpis.total_os || 0} ordens de serviço, com ${kpis.concluidas || 0} concluídas (${pctConc}%) e ${kpis.em_andamento || 0} em andamento. O valor total de mão de obra informada foi de ${MOEDA.format(kpis.total_mo || 0)}.`,
+      conclusao_resumo: `${data.modo && data.modo !== 'mes' && data.modo !== 'mes_anterior' ? 'No período analisado' : 'No mês analisado'} foram registradas ${kpis.total_os || 0} ordens de serviço, com ${kpis.concluidas || 0} concluídas (${pctConc}%) e ${kpis.em_andamento || 0} em andamento. O valor total de mão de obra informada foi de ${MOEDA.format(kpis.total_mo || 0)}.`,
       conclusao_pontos_criticos: [
         `Tags mais frequentes: ${tagsCrit}`,
         `Estados com maior volume: ${estTop}`,
@@ -21863,6 +21873,9 @@ document.querySelectorAll('#atTabelaWrapper thead th[data-col]').forEach(th => {
         ${_footerHtml(9)}
       </div>
 
+      <div class="at-rel-ger-page${_relGerSecao === 'masp' ? ' is-active' : ''}" data-sec="masp" id="atMaspPageHost">
+      </div>
+
       <div class="at-rel-ger-page${_relGerSecao === 'plano' ? ' is-active' : ''}" data-sec="plano">
         ${hdr()}
         <div class="at-rel-ger-sec-title"><i class="fa-solid fa-list-check"></i> Plano de Ação</div>
@@ -21888,7 +21901,7 @@ document.querySelectorAll('#atTabelaWrapper thead th[data-col]').forEach(th => {
             </table>
           </div>
         </div>
-        ${_footerHtml(10)}
+        ${_footerHtml(11)}
       </div>
 
       <div class="at-rel-ger-page${_relGerSecao === 'conclusao' ? ' is-active' : ''}" data-sec="conclusao">
@@ -21921,7 +21934,7 @@ document.querySelectorAll('#atTabelaWrapper thead th[data-col]').forEach(th => {
           </div>
           <div id="atRelGerEditadoEm" style="margin-top:10px;font-size:11px;color:#94a3b8;text-align:right;"></div>
         </div>
-        ${_footerHtml(11)}
+        ${_footerHtml(12)}
       </div>
     `;
 
@@ -21930,10 +21943,11 @@ document.querySelectorAll('#atTabelaWrapper thead th[data-col]').forEach(th => {
     });
     _wireEditaveis();
     _wireLoteBtn();
+    _wireMaspPagina();
   }
 
   function _isRelGerMultiMes(data) {
-    return !!(data?.modo && data.modo !== 'mes');
+    return !!(data?.modo && data.modo !== 'mes' && data.modo !== 'mes_anterior');
   }
 
   function _atualizarLabelsPeriodo(data) {
@@ -22194,11 +22208,17 @@ document.querySelectorAll('#atTabelaWrapper thead th[data-col]').forEach(th => {
     }).join('');
 
     tbody.querySelectorAll('tr.is-clickable').forEach((tr) => {
-      tr.addEventListener('click', () => {
-        if (typeof window._abrirAtOsModalSoPdf === 'function') {
-          window._abrirAtOsModalSoPdf(tr.dataset.id);
-        } else if (typeof window._abrirAtOsModal === 'function') {
-          window._abrirAtOsModal(tr.dataset.id);
+      tr.addEventListener('click', async () => {
+        try {
+          const id = tr.dataset.id;
+          const tem = (_atAllRows || []).some((r) => String(r.id) === String(id));
+          if (!tem && typeof carregarAtAtendimentos === 'function') {
+            await carregarAtAtendimentos();
+          }
+          if (typeof _abrirAtEditModal === 'function') _abrirAtEditModal(id);
+          else if (typeof window._abrirAtEditModal === 'function') window._abrirAtEditModal(id);
+        } catch (err) {
+          alert(err?.message || err || 'Não foi possível abrir a O.S.');
         }
       });
     });
@@ -22802,11 +22822,79 @@ document.querySelectorAll('#atTabelaWrapper thead th[data-col]').forEach(th => {
       _renderTabelaPpmTx(_relGerData);
       if (!_chartsRendered.has(sec)) _renderChartsSecao(sec, _relGerData);
     }
+    else if (sec === 'masp') {
+      _ativarMasp();
+    }
     else if (_relGerData && !_chartsRendered.has(sec)) _renderChartsSecao(sec, _relGerData);
     requestAnimationFrame(() => {
       Object.values(_charts).forEach(ch => ch?.resize?.());
     });
   }
+
+
+  function _modoParaMasp() {
+    const modo = String(document.getElementById('atRelGerModo')?.value || '3m').trim().toLowerCase();
+    return ['mes', 'mes_anterior', '3m', '6m', 'anual'].includes(modo) ? modo : '3m';
+  }
+
+  function _ensureAtMaspCtrl() {
+    if (_atMaspCtrl) return _atMaspCtrl;
+    if (!window.__AtMaspRelatorio?.createController) {
+      console.warn('[MASP] script at-masp-relatorio.js não carregado');
+      return null;
+    }
+    _atMaspCtrl = window.__AtMaspRelatorio.createController({
+      getRelData: () => _relGerData,
+      getDefeitosLote: () => _dadosLoteDefeitos(_relGerData || {}),
+      getModo: () => _modoParaMasp(),
+      getTipo: () => {
+        const tipoEl = document.getElementById('atRelGerTipo');
+        return tipoEl ? String(tipoEl.value) : 'Qualidade';
+      },
+      abrirOsModal: async (id) => {
+        try {
+          const tem = (_atAllRows || []).some((r) => String(r.id) === String(id));
+          if (!tem && typeof carregarAtAtendimentos === 'function') {
+            await carregarAtAtendimentos();
+          }
+          if (typeof _abrirAtEditModal === 'function') _abrirAtEditModal(id);
+          else if (typeof window._abrirAtEditModal === 'function') window._abrirAtEditModal(id);
+        } catch (err) {
+          alert(err?.message || err || 'Não foi possível abrir a O.S.');
+        }
+      },
+    });
+    return _atMaspCtrl;
+  }
+
+  function _wireMaspPagina() {
+    const host = document.querySelector('.at-rel-ger-page[data-sec="masp"]');
+    if (!host) return;
+    const ctrl = _ensureAtMaspCtrl();
+    if (!ctrl) {
+      host.innerHTML = '<div class="at-rel-ger-body"><div class="status-msg">Módulo MASP não carregado. Atualize a página (F5).</div></div>';
+      return;
+    }
+    const periodo = _relGerData?.periodo || '—';
+    const tipoLabel = _tipoRelGerLabel(_relGerData?.tipo);
+    const hdr = (pgPeriodo) => _headerHtml(pgPeriodo || periodo, tipoLabel);
+    const wrap = document.createElement('div');
+    wrap.innerHTML = String(ctrl.montarPaginaHtml(hdr, _footerHtml(10)) || '').trim();
+    const page = wrap.firstElementChild;
+    if (!page) return;
+    page.classList.toggle('is-active', _relGerSecao === 'masp');
+    host.replaceWith(page);
+  }
+
+  async function _ativarMasp() {
+    const ctrl = _ensureAtMaspCtrl();
+    if (!ctrl) return;
+    if (!document.getElementById('atMaspTagSelect')) {
+      _wireMaspPagina();
+    }
+    await ctrl.ativar();
+  }
+
 
   function _renderChartsSecao(sec, data) {
     if (_chartsRendered.has(sec)) return;
@@ -23451,8 +23539,10 @@ document.querySelectorAll('#atTabelaWrapper thead th[data-col]').forEach(th => {
       if (!resp.ok || data.ok === false) throw new Error(data.error || 'Erro ao carregar relatório.');
 
       _destroyAllCharts();
-      if (modo !== 'mes') _relGerLote3m = false;
+      if (modo !== 'mes' && modo !== 'mes_anterior') _relGerLote3m = false;
       _relGerLoteFiltroTag = null;
+      _atMaspCtrl?.reset?.();
+      _atMaspCtrl = null;
       _relGerData = data;
       _relGerTextos = _resolverTextos(data);
       _montarEstruturaPaginas();
@@ -23681,7 +23771,7 @@ document.querySelectorAll('#atTabelaWrapper thead th[data-col]').forEach(th => {
 
       // Renderiza e captura cada página com gráfico enquanto ela está visível
       for (const s of SECOES) {
-        if (s.id === 'conclusao' || s.id === 'financeiro' || s.id === 'plano') continue;
+        if (s.id === 'conclusao' || s.id === 'financeiro' || s.id === 'plano' || s.id === 'masp') continue;
         await _prepararSecaoPdf(s.id, d);
         if (s.id === 'executivo') {
           imgs.status = _canvasParaImg(document.getElementById('atRelGerChartStatus'));
@@ -23928,6 +24018,17 @@ document.querySelectorAll('#atTabelaWrapper thead th[data-col]').forEach(th => {
       document.getElementById('atRelGerAtualizarBtn')?.addEventListener('click', _carregarRelatorio);
       document.getElementById('atRelGerPdfBtn')?.addEventListener('click', _exportarPdf);
       _wireLoteDetalheModal();
+    }
+    // Já carregou uma vez: mantém a página (filtros/MASP) sem buscar de novo.
+    // Período/Tipo/Atualizar continuam forçando reload via _carregarRelatorio.
+    if (_relGerData) {
+      const statusEl = document.getElementById('atRelGerStatus');
+      const erroEl = document.getElementById('atRelGerErro');
+      const conteudoEl = document.getElementById('atRelGerConteudo');
+      if (statusEl) statusEl.style.display = 'none';
+      if (erroEl) erroEl.style.display = 'none';
+      if (conteudoEl) conteudoEl.style.display = '';
+      return;
     }
     _carregarRelatorio();
   };
@@ -79957,6 +80058,16 @@ window.verOperacao = function(osId) {
  * PRODUÇÃO — Ordens de Produção IAPP (Kanban)
  * ============================================================ */
 (function () {
+  const menuBtn3d = document.getElementById('menu-producao-3d');
+  if (menuBtn3d) {
+    menuBtn3d.addEventListener('click', (e) => {
+      e.preventDefault();
+      showMainTab('producao3dPane');
+      // Mesma guia nomeada — evita várias abas WebGL
+      window.open('/producao-3d/', 'intranet-producao-3d', 'noopener,noreferrer');
+    });
+  }
+
   const menuBtn = document.getElementById('menu-registrar-producao');
   if (!menuBtn) return;
 
