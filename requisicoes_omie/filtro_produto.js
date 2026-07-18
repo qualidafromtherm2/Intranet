@@ -8,11 +8,16 @@ let activeFamilyValue     = '';
 let activeTipoValue       = '';
 let activeShowInactive    = false;
 let activeSemEstoqueMin   = false;
+let activeAbaixoEstoqueMin = false;
+let activeAcimaEstoqueMin = false;
+let activeProximoEstoqueMin = false;
+let activeProximoEstoqueMinPercent = 10;
 let activeEstoqueNegativo = false;
 let activeHideObsolete    = false;
 let activeHideEngineering = false;
 let activeLocalValue      = '';
 let activeOrigemValue     = '';
+let activeCompraValue     = '';
 
 // Cache dos locais com saldo positivo: Map<local_codigo, Set<codigo_produto>>
 let _locaisCache = null;
@@ -39,8 +44,9 @@ async function getLocaisInventario() {
   return _locaisCachePromise;
 }
 
-let codeInput, familySelect, tipoItemSelect, filterBtn, filterOverlay, filterLocalSel, filterOrigemSel;
-let filterShowInactiveCb, filterSemEstoqueMinCb, filterEstoqueNegativoCb, filterHideObsoleteCb, filterHideEngineeringCb;
+let codeInput, familySelect, tipoItemSelect, filterBtn, filterOverlay, filterLocalSel, filterOrigemSel, filterCompraSel;
+let filterShowInactiveCb, filterSemEstoqueMinCb, filterAbaixoEstoqueMinCb, filterAcimaEstoqueMinCb;
+let filterProximoEstoqueMinCb, filterProximoEstoqueMinPercentInput, filterEstoqueNegativoCb, filterHideObsoleteCb, filterHideEngineeringCb;
 let _onFiltered;
 
 /**
@@ -84,12 +90,25 @@ export function initFiltros({
   filterOverlay         = document.getElementById('filterPanelOverlay');
   filterShowInactiveCb   = document.getElementById('filterShowInactive');
   filterSemEstoqueMinCb  = document.getElementById('filterSemEstoqueMin');
+  filterAbaixoEstoqueMinCb = document.getElementById('filterAbaixoEstoqueMin');
+  filterAcimaEstoqueMinCb = document.getElementById('filterAcimaEstoqueMin');
+  filterProximoEstoqueMinCb = document.getElementById('filterProximoEstoqueMin');
+  filterProximoEstoqueMinPercentInput = document.getElementById('filterProximoEstoqueMinPercent');
   filterEstoqueNegativoCb = document.getElementById('filterEstoqueNegativo');
   filterHideObsoleteCb   = document.getElementById('filterHideObsolete');
   filterHideEngineeringCb = document.getElementById('filterHideEngineering');
   filterLocalSel           = document.getElementById('filterLocalSelect');
   filterOrigemSel          = document.getElementById('filterOrigemProduto');
+  filterCompraSel          = document.getElementById('filterSituacaoCompra');
   _onFiltered    = onFiltered;
+
+  const syncProximoPercentState = () => {
+    if (!filterProximoEstoqueMinPercentInput) return;
+    filterProximoEstoqueMinPercentInput.disabled = !filterProximoEstoqueMinCb?.checked;
+    filterProximoEstoqueMinPercentInput.style.opacity = filterProximoEstoqueMinCb?.checked ? '1' : '.55';
+  };
+  filterProximoEstoqueMinCb?.addEventListener('change', syncProximoPercentState);
+  syncProximoPercentState();
 
   if (!codeInput) {
     console.error('[filtro_produto] codeInput nao encontrado!');
@@ -131,18 +150,32 @@ export function initFiltros({
       activeTipoValue       = '';
       activeShowInactive    = false;
       activeSemEstoqueMin   = false;
+      activeAbaixoEstoqueMin = false;
+      activeAcimaEstoqueMin = false;
+      activeProximoEstoqueMin = false;
+      activeProximoEstoqueMinPercent = 10;
       activeEstoqueNegativo = false;
       activeHideObsolete    = false;
       activeHideEngineering = false;
       if (filterShowInactiveCb)    filterShowInactiveCb.checked    = false;
       if (filterSemEstoqueMinCb)   filterSemEstoqueMinCb.checked   = false;
+      if (filterAbaixoEstoqueMinCb) filterAbaixoEstoqueMinCb.checked = false;
+      if (filterAcimaEstoqueMinCb) filterAcimaEstoqueMinCb.checked = false;
+      if (filterProximoEstoqueMinCb) filterProximoEstoqueMinCb.checked = false;
+      if (filterProximoEstoqueMinPercentInput) {
+        filterProximoEstoqueMinPercentInput.value = '10';
+        filterProximoEstoqueMinPercentInput.disabled = true;
+        filterProximoEstoqueMinPercentInput.style.opacity = '.55';
+      }
       if (filterEstoqueNegativoCb) filterEstoqueNegativoCb.checked = false;
       if (filterHideObsoleteCb)    filterHideObsoleteCb.checked    = false;
       if (filterHideEngineeringCb) filterHideEngineeringCb.checked = false;
       if (filterLocalSel)          filterLocalSel.value            = '';
       if (filterOrigemSel)         filterOrigemSel.value           = '';
+      if (filterCompraSel)         filterCompraSel.value           = '';
       activeLocalValue = '';
       activeOrigemValue = '';
+      activeCompraValue = '';
       fecharModalFiltro(true);
     });
   }
@@ -155,11 +188,22 @@ export function initFiltros({
       activeTipoValue       = tipoItemSelect?.value || '';
       activeShowInactive    = filterShowInactiveCb?.checked    || false;
       activeSemEstoqueMin   = filterSemEstoqueMinCb?.checked   || false;
+      activeAbaixoEstoqueMin = filterAbaixoEstoqueMinCb?.checked || false;
+      activeAcimaEstoqueMin = filterAcimaEstoqueMinCb?.checked || false;
+      activeProximoEstoqueMin = filterProximoEstoqueMinCb?.checked || false;
+      activeProximoEstoqueMinPercent = Math.min(
+        100,
+        Math.max(1, Number(filterProximoEstoqueMinPercentInput?.value) || 10)
+      );
+      if (filterProximoEstoqueMinPercentInput) {
+        filterProximoEstoqueMinPercentInput.value = String(activeProximoEstoqueMinPercent);
+      }
       activeEstoqueNegativo = filterEstoqueNegativoCb?.checked || false;
       activeHideObsolete    = filterHideObsoleteCb?.checked    || false;
       activeHideEngineering = filterHideEngineeringCb?.checked || false;
       activeLocalValue      = filterLocalSel?.value            || '';
       activeOrigemValue     = filterOrigemSel?.value           || '';
+      activeCompraValue     = filterCompraSel?.value           || '';
       fecharModalFiltro(true);
     });
   }
@@ -172,11 +216,20 @@ function abrirModalFiltro() {
   if (tipoItemSelect) tipoItemSelect.value = activeTipoValue;
   if (filterShowInactiveCb)    filterShowInactiveCb.checked    = activeShowInactive;
   if (filterSemEstoqueMinCb)   filterSemEstoqueMinCb.checked   = activeSemEstoqueMin;
+  if (filterAbaixoEstoqueMinCb) filterAbaixoEstoqueMinCb.checked = activeAbaixoEstoqueMin;
+  if (filterAcimaEstoqueMinCb) filterAcimaEstoqueMinCb.checked = activeAcimaEstoqueMin;
+  if (filterProximoEstoqueMinCb) filterProximoEstoqueMinCb.checked = activeProximoEstoqueMin;
+  if (filterProximoEstoqueMinPercentInput) {
+    filterProximoEstoqueMinPercentInput.value = String(activeProximoEstoqueMinPercent);
+    filterProximoEstoqueMinPercentInput.disabled = !activeProximoEstoqueMin;
+    filterProximoEstoqueMinPercentInput.style.opacity = activeProximoEstoqueMin ? '1' : '.55';
+  }
   if (filterEstoqueNegativoCb) filterEstoqueNegativoCb.checked = activeEstoqueNegativo;
   if (filterHideObsoleteCb)    filterHideObsoleteCb.checked    = activeHideObsolete;
   if (filterHideEngineeringCb) filterHideEngineeringCb.checked = activeHideEngineering;
   if (filterLocalSel)          filterLocalSel.value            = activeLocalValue;
   if (filterOrigemSel)         filterOrigemSel.value           = activeOrigemValue;
+  if (filterCompraSel)         filterCompraSel.value           = activeCompraValue;
   // Carrega opcoes
   popularFamilias();
   popularTipoItem();
@@ -372,6 +425,29 @@ function applyFilters() {
       const limitado = i.item_limitado === true || i.item_limitado === 'true';
       return (!Number.isFinite(minimo) || minimo <= 0) && !limitado;
     });
+  }
+
+  if (activeAbaixoEstoqueMin || activeAcimaEstoqueMin || activeProximoEstoqueMin) {
+    filtered = filtered.filter(i => {
+      const minimo = Number(String(i.estoque_minimo ?? '').trim().replace(',', '.'));
+      const saldoAlmox = Number(String(i.saldo_almox ?? '').trim().replace(',', '.'));
+      if (!Number.isFinite(minimo) || minimo <= 0 || !Number.isFinite(saldoAlmox)) return false;
+
+      const abaixo = saldoAlmox < minimo;
+      const acima = saldoAlmox >= minimo;
+      const limiteProximo = minimo * (1 + activeProximoEstoqueMinPercent / 100);
+      const proximo = saldoAlmox >= minimo && saldoAlmox <= limiteProximo;
+
+      return (activeAbaixoEstoqueMin && abaixo)
+        || (activeAcimaEstoqueMin && acima)
+        || (activeProximoEstoqueMin && proximo);
+    });
+  }
+
+  if (activeCompraValue === 'em_compra') {
+    filtered = filtered.filter(i => i.em_compra === true || i.em_compra === 'true');
+  } else if (activeCompraValue === 'sem_compra') {
+    filtered = filtered.filter(i => !(i.em_compra === true || i.em_compra === 'true'));
   }
 
   if (activeEstoqueNegativo) {
