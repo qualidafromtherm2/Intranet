@@ -300,16 +300,36 @@ kbd {
   user-select: none;
 }
 
-.joy-move {
+.touch-left-stack {
   position: absolute;
   left: max(12px, env(safe-area-inset-left));
-  bottom: max(20px, env(safe-area-inset-bottom));
+  bottom: max(16px, env(safe-area-inset-bottom));
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  pointer-events: none;
+  z-index: 8;
+}
+
+.touch-vert-btns {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  pointer-events: auto;
+}
+
+.joy-move {
+  position: relative;
+  left: auto;
+  bottom: auto;
   width: 148px;
-  height: 148px;
+  height: auto;
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 6px;
+  pointer-events: auto;
 }
 
 .joy-base {
@@ -345,25 +365,14 @@ kbd {
   text-shadow: 0 1px 3px rgba(0, 0, 0, 0.8);
 }
 
-.joy-look-hint {
-  position: absolute;
-  right: max(16px, env(safe-area-inset-right));
-  bottom: max(28px, env(safe-area-inset-bottom));
-  pointer-events: none;
-  font-size: 0.72rem;
-  font-weight: 700;
-  color: rgba(230, 237, 243, 0.55);
-  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.8);
-  letter-spacing: 0.03em;
-}
-
+/* Barra de rolagem: à direita, acima dos botões ✕/○ */
 .touch-scroll-bar {
   position: absolute;
-  right: max(10px, env(safe-area-inset-right));
-  top: 28%;
-  bottom: 28%;
+  right: max(8px, env(safe-area-inset-right));
+  top: 14%;
+  bottom: 150px;
   width: 28px;
-  z-index: 8;
+  z-index: 7;
   pointer-events: auto;
   touch-action: none;
 }
@@ -389,15 +398,16 @@ kbd {
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
 }
 
+/* ✕ e ○ lado a lado no canto inferior direito */
 .touch-action-btns {
   position: absolute;
-  right: max(18px, env(safe-area-inset-right));
-  bottom: max(110px, calc(env(safe-area-inset-bottom) + 100px));
+  right: max(14px, env(safe-area-inset-right));
+  bottom: max(20px, env(safe-area-inset-bottom));
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
   gap: 14px;
   pointer-events: auto;
-  z-index: 8;
+  z-index: 9;
 }
 .touch-act-btn {
   appearance: none;
@@ -426,17 +436,6 @@ kbd {
   border-color: rgba(187, 247, 208, 0.55);
 }
 
-.touch-side-btns {
-  position: absolute;
-  right: max(12px, env(safe-area-inset-right));
-  top: max(12px, env(safe-area-inset-top));
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  pointer-events: auto;
-  align-items: stretch;
-}
-
 .wasd-btn {
   appearance: none;
   border: 1px solid rgba(255, 255, 255, 0.22);
@@ -457,26 +456,10 @@ kbd {
   border-color: #58a6ff;
 }
 
-.btn-exit-touch {
-  appearance: none;
-  pointer-events: auto;
-  border: 1px solid rgba(255, 255, 255, 0.2);
-  border-radius: 10px;
-  padding: 0.65rem 1rem;
-  background: rgba(22, 27, 34, 0.75);
-  color: #c9d1d9;
-  font-size: 0.9rem;
-  font-weight: 600;
-  touch-action: manipulation;
-}
-
-.btn-exit-touch:active {
-  background: rgba(248, 81, 73, 0.35);
-}
-
 /* legado (removido do HTML) */
 .wasd { display: none; }
 .vert-pad { display: none; }
+.btn-exit-touch { display: none; }
 
 .vert-pad .wasd-btn {
   width: 64px;

@@ -290,7 +290,7 @@ function boot(renderer) {
   // PUBG-like: yaw+pitch sem roll (ordem YXZ)
   camera.rotation.order = 'YXZ';
   const touchPad = document.getElementById('touchPad');
-  const btnExitTouch = document.getElementById('btnExitTouch');
+  const btnExitTouch = document.getElementById('btnExitTouch'); // opcional (removido no layout touch)
 
   const forceTouch = new URLSearchParams(location.search).has('touch');
   const isTouchUI =
@@ -478,10 +478,12 @@ function boot(renderer) {
     hud.hidden = true;
   }
 
-  btnExitTouch.addEventListener('click', (e) => {
-    e.stopPropagation();
-    exitPlay();
-  });
+  if (btnExitTouch) {
+    btnExitTouch.addEventListener('click', (e) => {
+      e.stopPropagation();
+      exitPlay();
+    });
+  }
 
   controls.addEventListener('lock', () => {
     blocker.hidden = true;
@@ -543,8 +545,8 @@ function boot(renderer) {
     const obj = controls.getObject();
     obj.rotation.order = 'YXZ';
     obj.rotation.y -= dx * LOOK_SENS;
-    // Dedo para cima (dy < 0) → olhar para cima (PUBG)
-    obj.rotation.x += dy * LOOK_SENS;
+    // Dedo para cima (dy < 0) → olhar para cima
+    obj.rotation.x -= dy * LOOK_SENS;
     obj.rotation.z = 0; // nunca inclina/deita a câmera
     obj.rotation.x = Math.max(-PI_2 + 0.05, Math.min(PI_2 - 0.05, obj.rotation.x));
   }
@@ -553,10 +555,10 @@ function boot(renderer) {
     if (!playing || controls.isLocked) return;
     if (e.target.closest && (
       e.target.closest('#joyMove') ||
-      e.target.closest('.touch-side-btns') ||
+      e.target.closest('.touch-vert-btns') ||
+      e.target.closest('.touch-left-stack') ||
       e.target.closest('.touch-action-btns') ||
-      e.target.closest('#touchScrollBar') ||
-      e.target.closest('#btnExitTouch')
+      e.target.closest('#touchScrollBar')
     )) return;
     // Só o lado direito da tela olha (estilo PUBG)
     if (e.clientX < window.innerWidth * 0.42) return;
