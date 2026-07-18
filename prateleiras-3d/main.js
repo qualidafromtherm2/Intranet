@@ -823,6 +823,7 @@ function boot(renderer) {
   let hallLeftX = -floorW / 2;
   const floor = new THREE.Mesh(new THREE.PlaneGeometry(floorW, floorD), floorMat);
   floor.rotation.x = -Math.PI / 2;
+  floor.userData.tipo = 'chao';
   scene.add(floor);
 
   const wallH = (RACK_H + 1.5) * HALL_HEIGHT_MUL;
@@ -2213,6 +2214,7 @@ function boot(renderer) {
       texW: W,
       texH: H,
       btnRects: [],
+      itemRects: [],
       pintar: null,
       toggleFiltroCompra: null,
     };
@@ -2300,6 +2302,7 @@ function boot(renderer) {
         ctx.fillStyle = '#94a3b8';
         ctx.font = `32px ${KFONT}`;
         ctx.fillText(msgStatus, 40, H / 2);
+        board.userData.itemRects = [];
         tex.needsUpdate = true;
         return;
       }
@@ -2310,6 +2313,7 @@ function boot(renderer) {
         ctx.font = `30px ${KFONT}`;
         ctx.fillText('Todos os itens abaixo do mínimo já estão em compra.', 40, H / 2);
         board.userData.maxScroll = 0;
+        board.userData.itemRects = [];
         tex.needsUpdate = true;
         return;
       }
@@ -2332,11 +2336,13 @@ function boot(renderer) {
       const top = 120;
       const cellW = (W - 48) / COLS;
       const cellH = (H - top - 36) / ROWS;
+      const itemRects = [];
 
       vis.forEach((p, i) => {
         const x = 24 + (i % COLS) * cellW;
         const y = top + Math.floor(i / COLS) * cellH;
         const fotoH = cellH - 56;
+        itemRects.push({ x, y, w: cellW, h: cellH, item: p });
         ctx.fillStyle = '#1e293b';
         ctx.beginPath();
         ctx.roundRect(x + 4, y + 4, cellW - 8, cellH - 8, 10);
@@ -2395,6 +2401,7 @@ function boot(renderer) {
         ctx.fillText(`${fis} / mín ${min}`, x + cellW / 2, y + fotoH + 42);
         ctx.textAlign = 'left';
       });
+      board.userData.itemRects = itemRects;
 
       if (maxScroll > 0) {
         const barX = W - 22;
@@ -2532,6 +2539,9 @@ function boot(renderer) {
       maxScroll: 0,
       cols: COLS,
       rows: ROWS,
+      texW: W,
+      texH: H,
+      itemRects: [],
       pintar: null,
     };
     scene.add(board);
@@ -2570,6 +2580,7 @@ function boot(renderer) {
         ctx.fillStyle = '#94a3b8';
         ctx.font = `32px ${KFONT}`;
         ctx.fillText(msgStatus, 40, H / 2);
+        board.userData.itemRects = [];
         tex.needsUpdate = true;
         return;
       }
@@ -2592,11 +2603,13 @@ function boot(renderer) {
       const top = 120;
       const cellW = (W - 48) / COLS;
       const cellH = (H - top - 36) / ROWS;
+      const itemRects = [];
 
       vis.forEach((p, i) => {
         const x = 24 + (i % COLS) * cellW;
         const y = top + Math.floor(i / COLS) * cellH;
         const fotoH = cellH - 72;
+        itemRects.push({ x, y, w: cellW, h: cellH, item: p });
         ctx.fillStyle = p.impressa ? '#1e293b' : '#1e1b4b';
         ctx.beginPath();
         ctx.roundRect(x + 4, y + 4, cellW - 8, cellH - 8, 10);
@@ -2648,6 +2661,7 @@ function boot(renderer) {
         ctx.fillText(`${qtd} ${un}`.trim(), x + cellW / 2, y + fotoH + 54);
         ctx.textAlign = 'left';
       });
+      board.userData.itemRects = itemRects;
 
       if (maxScroll > 0) {
         const barX = W - 22;
@@ -2862,31 +2876,111 @@ function boot(renderer) {
     return [...grupos.values()];
   }
 
+  function htmlLinhaProduto(g) {
+    const foto = g.foto_url
+      ? `<img src="${escHtml(g.foto_url)}" alt="">`
+      : '<div style="width:52px;height:52px;border-radius:6px;background:#21262d;flex-shrink:0;"></div>';
+    const comp = g.comps && g.comps.length
+      ? `<div class="desc">Compl.: ${escHtml(g.comps.join(', '))}</div>`
+      : (g.complemento ? `<div class="desc">Compl.: ${escHtml(g.complemento)}</div>` : '');
+    const ids = g.ids && g.ids.length
+      ? `<div class="ids">IDs (${g.ids.length}): ${g.ids.map((v) => escHtml(v)).join(', ')}</div>`
+      : '';
+    const qtd = g.qtdTotal != null ? g.qtdTotal : g.qtd;
+    const un = g.unidade || 'UN';
+    const nEtq = g.ids ? g.ids.length : null;
+    const qtdLinha = nEtq != null
+      ? `${escHtml(qtd)} ${escHtml(un)} · ${nEtq} etiqueta${nEtq === 1 ? '' : 's'}`
+      : `${escHtml(qtd)} ${escHtml(un)}`;
+    return `<div class="look-balloon-row" data-cod="${escHtml(g.codigo || g.codigo_produto || '')}">
+      ${foto}
+      <div class="look-balloon-info">
+        <div class="cod">${escHtml(g.codigo || g.codigo_produto || '')}</div>
+        <div class="desc">${escHtml(g.descricao || '')}</div>
+        ${comp}
+        <div class="qtd">${qtdLinha}</div>
+        ${ids}
+      </div>
+    </div>`;
+  }
+
   function htmlProdutos(itens) {
     if (!itens.length) {
       return '<div class="look-balloon-empty">Sem produto neste endereço.</div>';
     }
-    return agruparProdutos(itens).map((g) => {
-      const foto = g.foto_url
-        ? `<img src="${escHtml(g.foto_url)}" alt="">`
-        : '<div style="width:52px;height:52px;border-radius:6px;background:#21262d;flex-shrink:0;"></div>';
-      const comp = g.comps.length
-        ? `<div class="desc">Compl.: ${escHtml(g.comps.join(', '))}</div>`
-        : '';
-      const ids = g.ids.length
-        ? `<div class="ids">IDs (${g.ids.length}): ${g.ids.map((v) => escHtml(v)).join(', ')}</div>`
-        : '';
-      return `<div class="look-balloon-row" data-cod="${escHtml(g.codigo)}">
-        ${foto}
-        <div class="look-balloon-info">
-          <div class="cod">${escHtml(g.codigo)}</div>
-          <div class="desc">${escHtml(g.descricao)}</div>
-          ${comp}
-          <div class="qtd">${escHtml(g.qtdTotal)} ${escHtml(g.unidade)} · ${g.ids.length} etiqueta${g.ids.length === 1 ? '' : 's'}</div>
-          ${ids}
-        </div>
-      </div>`;
-    }).join('');
+    return agruparProdutos(itens).map((g) => htmlLinhaProduto(g)).join('');
+  }
+
+  function htmlItemEstoqueMin(p) {
+    const foto = p.foto_url
+      ? `<img src="${escHtml(p.foto_url)}" alt="">`
+      : '<div style="width:52px;height:52px;border-radius:6px;background:#21262d;flex-shrink:0;"></div>';
+    const fis = Number(p.fisico) || 0;
+    const min = Number(p.estoque_minimo) || 0;
+    return `<div class="look-balloon-row">
+      ${foto}
+      <div class="look-balloon-info">
+        <div class="cod">${escHtml(p.codigo || '')}</div>
+        <div class="desc">${escHtml(p.descricao || '')}</div>
+        <div class="qtd">Físico: ${escHtml(fis)} · Mínimo: ${escHtml(min)}</div>
+      </div>
+    </div>`;
+  }
+
+  function htmlItemIdentificacao(p) {
+    const foto = p.foto_url
+      ? `<img src="${escHtml(p.foto_url)}" alt="">`
+      : '<div style="width:52px;height:52px;border-radius:6px;background:#21262d;flex-shrink:0;"></div>';
+    const qtd = p.qtd != null ? p.qtd : '';
+    const un = p.unidade || '';
+    return `<div class="look-balloon-row">
+      ${foto}
+      <div class="look-balloon-info">
+        <div class="cod">${escHtml(p.codigo_produto || '')}</div>
+        <div class="desc">${escHtml(p.descricao || '')}</div>
+        <div class="qtd">${escHtml(qtd)} ${escHtml(un)} · Lote: ${escHtml(p.lote || '—')}</div>
+        <div class="desc">${p.impressa ? 'Já impresso' : 'Pendente de impressão'}</div>
+      </div>
+    </div>`;
+  }
+
+  /** Qual foto da posição está sob a mira (UV do raycast). */
+  function itemSlotSobMira(mesh, uv) {
+    if (!uv || !mesh?.userData?.hasLabelTex) return null;
+    const itens = mesh.userData.itens || [];
+    if (!itens.length) return null;
+    const { cols, visRows, maxScroll } = slotGridInfo(itens.length);
+    const scroll = Math.max(0, Math.min(Number(mesh.userData.photoScroll) || 0, maxScroll));
+    const W = SLOT_TEX_W;
+    const H = SLOT_TEX_H;
+    const pad = 5;
+    const temBarra = maxScroll > 0;
+    const barW = temBarra ? 8 : 0;
+    const areaW = W - pad * 2 - barW;
+    const areaH = H - pad * 2;
+    const cellW = areaW / cols;
+    const cellH = areaH / visRows;
+    const cx = uv.x * W;
+    const cy = (1 - uv.y) * H;
+    if (cx < pad || cy < pad || cx > pad + areaW || cy > pad + areaH) return null;
+    const col = Math.floor((cx - pad) / cellW);
+    const row = Math.floor((cy - pad) / cellH);
+    if (col < 0 || col >= cols || row < 0 || row >= visRows) return null;
+    const idx = scroll * cols + row * cols + col;
+    if (idx < 0 || idx >= itens.length) return null;
+    return { item: itens[idx], idx };
+  }
+
+  function itemPainelSobMira(mesh, uv) {
+    if (!uv || !mesh?.userData?.itemRects?.length) return null;
+    const tw = mesh.userData.texW || 2048;
+    const th = mesh.userData.texH || 1024;
+    const cx = uv.x * tw;
+    const cy = (1 - uv.y) * th;
+    for (const r of mesh.userData.itemRects) {
+      if (cx >= r.x && cx <= r.x + r.w && cy >= r.y && cy <= r.y + r.h) return r.item;
+    }
+    return null;
   }
 
   // Detalhe de UM produto (modo fixado, após clicar num item)
@@ -2928,14 +3022,49 @@ function boot(renderer) {
       </div>`;
   }
 
-  function mostrarBalaoEndereco(endereco) {
+  function mostrarBalaoEndereco(endereco, hitUv, mesh) {
+    const hit = mesh ? itemSlotSobMira(mesh, hitUv) : null;
+    if (hit && hit.item) {
+      const cod = hit.item.codigo_produto || hit.item.codigo || hit.idx;
+      const key = `slotfoto:${endereco}:${cod}:${hit.idx}`;
+      if (lookAlvoAtual === key) return;
+      lookAlvoAtual = key;
+      lookBalloonEnd.textContent = endereco;
+      // Um card por vez — a foto sob a mira
+      const g = agruparProdutos(ocupacao[endereco] || []).find(
+        (x) => String(x.codigo) === String(hit.item.codigo_produto || hit.item.codigo)
+      );
+      lookBalloonBody.innerHTML = g
+        ? htmlLinhaProduto(g)
+        : htmlLinhaProduto({
+          ...hit.item,
+          codigo: hit.item.codigo_produto || hit.item.codigo,
+          qtdTotal: hit.item.qtd,
+          comps: hit.item.complemento ? [hit.item.complemento] : [],
+          ids: [],
+        });
+      lookBalloon.hidden = false;
+      lookBalloonBody.scrollTop = 0;
+      return;
+    }
     const key = `slot:${endereco}`;
     if (lookAlvoAtual === key) return;
     lookAlvoAtual = key;
     lookBalloonEnd.textContent = endereco;
-    // Sem agregação: cada etiqueta (ID) aparece como uma linha, com seu ID
     lookBalloonBody.innerHTML = htmlProdutos(ocupacao[endereco] || []);
     lookBalloon.hidden = false;
+    lookBalloonBody.scrollTop = 0;
+  }
+
+  function mostrarBalaoPainelItem(origem, item, html) {
+    const cod = item.codigo_produto || item.codigo || '';
+    const key = `${origem}:${cod}`;
+    if (lookAlvoAtual === key) return;
+    lookAlvoAtual = key;
+    lookBalloonEnd.textContent = origem === 'emin' ? 'Estoque mínimo' : 'Identificação';
+    lookBalloonBody.innerHTML = html;
+    lookBalloon.hidden = false;
+    lookBalloonBody.scrollTop = 0;
   }
 
   function esconderBalao() {
@@ -3655,9 +3784,57 @@ function boot(renderer) {
     }
   });
 
+  function teleportToAimFloor() {
+    raycaster.setFromCamera(centerNdc, camera);
+    const hits = raycaster.intersectObject(floor, false);
+    if (!hits.length) return false;
+    let x = hits[0].point.x;
+    let z = hits[0].point.z;
+    if (collidesAt(x, z)) {
+      let found = false;
+      for (let r = 0.4; r <= 5 && !found; r += 0.4) {
+        for (let a = 0; a < 12; a++) {
+          const ang = (a / 12) * Math.PI * 2;
+          const nx = x + Math.cos(ang) * r;
+          const nz = z + Math.sin(ang) * r;
+          if (!collidesAt(nx, nz)) {
+            x = nx;
+            z = nz;
+            found = true;
+            break;
+          }
+        }
+      }
+      if (!found) return false;
+    }
+    const pos = controls.getObject().position;
+    pos.x = x;
+    pos.z = z;
+    return true;
+  }
+
+  let lastSelectAt = 0;
   function acaoToqueSelecionar() {
     if (inspectMode) return;
     if (!playing && !controls.isLocked) return;
+    const now = performance.now();
+    const isDouble = now - lastSelectAt < 380;
+    lastSelectAt = now;
+
+    // Duplo clique/toque no chão (sem alvo interativo) → teleporta para onde o + aponta
+    const semAlvo =
+      !lookSlotAtual &&
+      !lookKanbanCard &&
+      !lookRelTab &&
+      !lookEstoqueMinBtn &&
+      !lookEstoqueMinimoAtual &&
+      !lookIdentificacaoAtual &&
+      !lookBannerAtual;
+    if (semAlvo) {
+      if (isDouble) teleportToAimFloor();
+      return;
+    }
+
     if (lookSlotAtual) enterInspect(lookSlotAtual.userData.endereco);
     else if (lookKanbanCard) enterInspectKanban(lookKanbanCard);
     else if (lookRelTab && relatorioBoardMesh?.userData.setPage) {
@@ -3675,6 +3852,19 @@ function boot(renderer) {
     // Igual ao botão direito no PC: sai do painel fixado
     if (inspectMode) exitInspect();
   }
+
+  // Duplo clique no PC: teleporta para o chão sob a mira (+)
+  document.addEventListener('dblclick', (e) => {
+    if (inspectMode) return;
+    if (!playing && !controls.isLocked) return;
+    if (e.target.closest && (
+      e.target.closest('.look-balloon') ||
+      e.target.closest('.touch-pad') ||
+      e.target.closest('#blocker')
+    )) return;
+    e.preventDefault();
+    teleportToAimFloor();
+  });
 
   controls.addEventListener('unlock', () => {
     slotDrag = null;
@@ -3773,7 +3963,7 @@ function boot(renderer) {
       lookEstoqueMinimoAtual = null;
       lookIdentificacaoAtual = null;
       lookEstoqueMinBtn = null;
-      mostrarBalaoEndereco(obj.userData.endereco);
+      mostrarBalaoEndereco(obj.userData.endereco, hits[0].uv, obj);
     } else if (obj.userData.tipo === 'kanban') {
       lookBannerAtual = null;
       lookSlotAtual = null;
@@ -3812,7 +4002,9 @@ function boot(renderer) {
           lookBalloon.hidden = false;
         }
       } else {
-        esconderBalao();
+        const item = itemPainelSobMira(obj, hits[0].uv);
+        if (item) mostrarBalaoPainelItem('emin', item, htmlItemEstoqueMin(item));
+        else esconderBalao();
       }
     } else if (obj.userData.tipo === 'identificacao') {
       lookBannerAtual = null;
@@ -3822,7 +4014,9 @@ function boot(renderer) {
       lookEstoqueMinimoAtual = null;
       lookEstoqueMinBtn = null;
       lookIdentificacaoAtual = obj;
-      esconderBalao();
+      const item = itemPainelSobMira(obj, hits[0].uv);
+      if (item) mostrarBalaoPainelItem('ident', item, htmlItemIdentificacao(item));
+      else esconderBalao();
     } else {
       lookBannerAtual = null;
       lookSlotAtual = null;

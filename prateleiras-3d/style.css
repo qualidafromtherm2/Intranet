@@ -428,12 +428,12 @@ kbd {
   transform: scale(0.94);
 }
 .touch-act-x {
-  background: rgba(239, 68, 68, 0.82);
-  border-color: rgba(254, 202, 202, 0.55);
-}
-.touch-act-o {
   background: rgba(34, 197, 94, 0.82);
   border-color: rgba(187, 247, 208, 0.55);
+}
+.touch-act-o {
+  background: rgba(239, 68, 68, 0.82);
+  border-color: rgba(254, 202, 202, 0.55);
 }
 
 .wasd-btn {
@@ -513,17 +513,21 @@ kbd {
   display: none;
 }
 
-/* Balão ao mirar um endereço */
+/* Balão ao mirar um endereço / foto — acima da mira p/ não cortar na base */
 .look-balloon {
   position: absolute;
   left: 50%;
-  top: calc(50% + 28px);
+  top: auto;
+  bottom: calc(50% + 36px);
   transform: translateX(-50%);
   z-index: 8;
-  min-width: 320px;
-  max-width: min(600px, calc(100vw - 24px));
-  max-height: 60vh;
-  overflow: auto;
+  min-width: 280px;
+  max-width: min(520px, calc(100vw - 24px));
+  max-height: min(38vh, calc(50vh - 56px));
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scroll-snap-type: y mandatory;
   padding: 10px 12px;
   border-radius: 10px;
   border: 1px solid rgba(255, 255, 255, 0.16);
@@ -537,13 +541,16 @@ kbd {
   content: '';
   position: absolute;
   left: 50%;
-  top: -7px;
+  top: auto;
+  bottom: -7px;
   width: 12px;
   height: 12px;
   margin-left: -6px;
   background: rgba(13, 17, 23, 0.92);
-  border-left: 1px solid rgba(255, 255, 255, 0.16);
-  border-top: 1px solid rgba(255, 255, 255, 0.16);
+  border-right: 1px solid rgba(255, 255, 255, 0.16);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.16);
+  border-left: none;
+  border-top: none;
   transform: rotate(45deg);
 }
 
@@ -573,6 +580,8 @@ kbd {
   align-items: center;
   padding: 5px 0;
   border-top: 1px solid rgba(255, 255, 255, 0.06);
+  scroll-snap-align: start;
+  min-height: 64px;
 }
 
 .look-balloon-row:first-child {
@@ -626,6 +635,7 @@ kbd {
   border-color: #58a6ff;
   box-shadow: 0 0 0 2px rgba(88, 166, 255, 0.35), 0 10px 28px rgba(0, 0, 0, 0.45);
   max-width: min(760px, calc(100vw - 24px));
+  max-height: min(52vh, calc(50vh - 24px));
 }
 
 /* ——— Painel do destino (modo Iniciar separação) ——— */
