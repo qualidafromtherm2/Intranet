@@ -2865,6 +2865,26 @@ app.get('/api/compras/produtos-em-compra', async (_req, res) => {
           1 AS prioridade
         FROM compras.solicitacao_compras sc
         WHERE TRIM(COALESCE(sc.produto_codigo, '')) <> ''
+          AND (
+            LOWER(TRIM(COALESCE(sc.status, ''))) NOT LIKE 'requisi%'
+            OR EXISTS (
+              SELECT 1 FROM compras.requisicoes_omie r_ativa
+              WHERE COALESCE(r_ativa.inativo, FALSE) = FALSE
+                AND TRIM(COALESCE(r_ativa.numero, '')) <> ''
+                AND (r_ativa.cod_req_compra::text = TRIM(sc.ncodped::text)
+                  OR TRIM(r_ativa.cod_int_req_compra) = TRIM(sc.numero_pedido)
+                  OR TRIM(r_ativa.numero) = TRIM(sc.cnumero::text))
+            )
+            OR EXISTS (
+              SELECT 1 FROM compras.pedidos_omie po_requisicao_ativa
+              WHERE COALESCE(po_requisicao_ativa.inativo, FALSE) = FALSE
+                AND COALESCE(po_requisicao_ativa."Pedido recebido", FALSE) = FALSE
+                AND po_requisicao_ativa.pendente_omie IS TRUE
+                AND (po_requisicao_ativa.n_cod_ped::text = TRIM(sc.ncodped::text)
+                  OR TRIM(po_requisicao_ativa.c_cod_int_ped) = TRIM(sc.numero_pedido)
+                  OR TRIM(po_requisicao_ativa.c_numero) = TRIM(sc.cnumero::text))
+            )
+          )
           AND LOWER(TRIM(COALESCE(sc.status, ''))) NOT IN
               ('carrinho', 'recebido', 'concluído', 'concluido', 'cancelado', 'reprovado', 'excluido', 'excluído')
           AND (
@@ -2990,6 +3010,26 @@ app.get('/api/compras/produtos-em-compra/:codigo', async (req, res) => {
         )
       WHERE UPPER(TRIM(sc.produto_codigo)) = UPPER($1)
         AND TRIM(COALESCE(sc.produto_codigo, '')) <> ''
+        AND (
+          LOWER(TRIM(COALESCE(sc.status, ''))) NOT LIKE 'requisi%'
+          OR EXISTS (
+            SELECT 1 FROM compras.requisicoes_omie r_ativa
+            WHERE COALESCE(r_ativa.inativo, FALSE) = FALSE
+              AND TRIM(COALESCE(r_ativa.numero, '')) <> ''
+              AND (r_ativa.cod_req_compra::text = TRIM(sc.ncodped::text)
+                OR TRIM(r_ativa.cod_int_req_compra) = TRIM(sc.numero_pedido)
+                OR TRIM(r_ativa.numero) = TRIM(sc.cnumero::text))
+          )
+          OR EXISTS (
+            SELECT 1 FROM compras.pedidos_omie po_requisicao_ativa
+            WHERE COALESCE(po_requisicao_ativa.inativo, FALSE) = FALSE
+              AND COALESCE(po_requisicao_ativa."Pedido recebido", FALSE) = FALSE
+              AND po_requisicao_ativa.pendente_omie IS TRUE
+              AND (po_requisicao_ativa.n_cod_ped::text = TRIM(sc.ncodped::text)
+                OR TRIM(po_requisicao_ativa.c_cod_int_ped) = TRIM(sc.numero_pedido)
+                OR TRIM(po_requisicao_ativa.c_numero) = TRIM(sc.cnumero::text))
+          )
+        )
         AND LOWER(TRIM(COALESCE(sc.status, ''))) NOT IN
             ('carrinho', 'recebido', 'concluído', 'concluido', 'cancelado', 'reprovado', 'excluido', 'excluído')
         AND (
