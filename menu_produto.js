@@ -193,6 +193,27 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
+  const solicitacoesPesquisa = document.getElementById('solicitacoesPesquisa');
+  const solicitacoesPesquisaLimpar = document.getElementById('solicitacoesPesquisaLimpar');
+  let solicitacoesPesquisaTimer = null;
+  const pesquisarSolicitacoes = () => {
+    if (solicitacoesPesquisaLimpar) {
+      solicitacoesPesquisaLimpar.style.display = solicitacoesPesquisa?.value.trim() ? '' : 'none';
+    }
+    window._loadSolicitacoesTab.force = true;
+    window._loadSolicitacoesTab();
+  };
+  solicitacoesPesquisa?.addEventListener('input', () => {
+    clearTimeout(solicitacoesPesquisaTimer);
+    solicitacoesPesquisaTimer = setTimeout(pesquisarSolicitacoes, 300);
+  });
+  solicitacoesPesquisaLimpar?.addEventListener('click', () => {
+    if (solicitacoesPesquisa) solicitacoesPesquisa.value = '';
+    clearTimeout(solicitacoesPesquisaTimer);
+    pesquisarSolicitacoes();
+    solicitacoesPesquisa?.focus();
+  });
+
   document.getElementById('arm3dPlanejarSepFechar')?.addEventListener('click', () => {
     if (typeof window._arm3dFecharPlanejarSeparacao === 'function') {
       window._arm3dFecharPlanejarSeparacao();
@@ -1278,11 +1299,14 @@ async function _solDispararVippGerarEtiqueta(nSolic, opts = {}) {
   }
 }
 
+let _solicitacoesLoadSeq = 0;
+
 // Carrega e renderiza a aba de solicitações como kanban do separador
 window._loadSolicitacoesTab = async function() {
   const board    = document.getElementById('solicitacoesKanbanBoard');
   const statusEl = document.getElementById('solicitacoesKanbanStatus');
   const countEl  = document.getElementById('solicitacoesCount');
+  const searchTerm = String(document.getElementById('solicitacoesPesquisa')?.value || '').trim();
   if (!board) return;
 
   const isMobileBoard = window.matchMedia('(max-width: 640px), (max-width: 900px) and (max-height: 500px)').matches;
@@ -1293,6 +1317,7 @@ window._loadSolicitacoesTab = async function() {
 
   if (board.dataset.loaded === '1' && !window._loadSolicitacoesTab.force) return;
   window._loadSolicitacoesTab.force = false;
+  const loadSeq = ++_solicitacoesLoadSeq;
 
   board.innerHTML = '<p style="color:#9ca3af;padding:16px;font-size:.85rem;">Carregando...</p>';
   if (statusEl) statusEl.textContent = '';
@@ -1307,9 +1332,13 @@ window._loadSolicitacoesTab = async function() {
   ];
 
   try {
-    const resp = await fetch('/api/logistica/solicitacoes-kanban', { credentials: 'include' });
+    const searchParams = new URLSearchParams();
+    if (searchTerm) searchParams.set('q', searchTerm);
+    const searchQuery = searchParams.toString();
+    const resp = await fetch(`/api/logistica/solicitacoes-kanban${searchQuery ? `?${searchQuery}` : ''}`, { credentials: 'include' });
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     const data = await resp.json();
+    if (loadSeq !== _solicitacoesLoadSeq) return;
     const colunas = data.colunas || {};
 
     board.innerHTML = '';
@@ -1396,10 +1425,12 @@ window._loadSolicitacoesTab = async function() {
       board.appendChild(colEl);
     });
 
-    if (countEl) countEl.textContent = _solContarSepsSolicitadas(colunas);
+    if (countEl && !searchTerm) countEl.textContent = _solContarSepsSolicitadas(colunas);
     if (statusEl) {
       const agora = new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
-      statusEl.textContent = `Atualizado às ${agora} · ${totalCards} SEP(s)`;
+      statusEl.textContent = searchTerm
+        ? `${totalCards} SEP(s) encontrada(s) para "${searchTerm}"`
+        : `Atualizado às ${agora} · ${totalCards} SEP(s)`;
     }
     board.dataset.loaded = '1';
 
@@ -1556,6 +1587,7 @@ window._loadSolicitacoesTab = async function() {
       });
     });
   } catch (err) {
+    if (loadSeq !== _solicitacoesLoadSeq) return;
     console.warn('[SOLIC-KANBAN] Erro:', err.message);
     board.innerHTML = '<p style="color:#ef4444;padding:16px;font-size:.85rem;">Erro ao carregar kanban</p>';
     if (statusEl) statusEl.textContent = 'Erro ao carregar';
@@ -5303,7 +5335,7 @@ modal?.addEventListener('click', (e) => { if (e.target === modal) closeColabModa
 
 let ultimoCodigo = null;      // <-- NOVO
 
-import { initListarProdutosUI } from './requisicoes_omie/ListarProdutos.js?v=20260716-limitado';
+import { initListarProdutosUI } from './requisicoes_omie/ListarProdutos.js?v=20260717-paginacao-busca-sep';
 import { initDadosColaboradoresUI } from './requisicoes_omie/dados_colaboradores.js';
 import { initRhConfiguracaoCargosUI } from './requisicoes_omie/configuracao_cargos.js';
 import { initRhColaboradoresUI } from './requisicoes_omie/rh_colaboradores.js';

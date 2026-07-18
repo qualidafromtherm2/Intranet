@@ -7464,14 +7464,19 @@
 
               <!-- Conteúdo: Solicitações (Kanban do separador) -->
               <div id="solicitacoesConteudo" style="display:none;">
-                <div class="filter-bar" style="padding:10px 0;">
+                <div class="filter-bar" style="padding:10px 0;flex-wrap:wrap;">
+                  <div style="position:relative;flex:1 1 320px;max-width:560px;min-width:min(100%,240px);">
+                    <i class="fa-solid fa-magnifying-glass" aria-hidden="true" style="position:absolute;left:13px;top:50%;transform:translateY(-50%);color:#64748b;font-size:13px;pointer-events:none;"></i>
+                    <input id="solicitacoesPesquisa" type="text" inputmode="search" autocomplete="off" placeholder="Pesquisar SEP, solicitante ou item..." aria-label="Pesquisar separações" style="width:100%;box-sizing:border-box;padding:0 38px 0 36px;" />
+                    <button id="solicitacoesPesquisaLimpar" type="button" aria-label="Limpar pesquisa" title="Limpar pesquisa" style="display:none;position:absolute;right:6px;top:50%;transform:translateY(-50%);width:30px;height:30px;border:0;border-radius:7px;background:transparent;color:#64748b;cursor:pointer;font-size:18px;">&times;</button>
+                  </div>
                   <button id="solicitacoesRefreshBtn" class="filter-icon" title="Atualizar">
                     <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round">
                       <path d="M21 12a9 9 0 1 1-2.64-6.36"/>
                       <polyline points="22 3 21 12 12 11"/>
                     </svg>
                   </button>
-                  <span id="solicitacoesKanbanStatus" style="font-size:.78rem;color:#6b7280;margin-left:8px;"></span>
+                  <span id="solicitacoesKanbanStatus" style="font-size:.78rem;color:#6b7280;margin-left:8px;flex:1 1 180px;"></span>
                 </div>
                 <div id="solicitacoesKanbanBoard" style="display:flex;gap:14px;overflow-x:auto;padding:0 0 16px;min-height:400px;align-items:flex-start;"></div>
               </div><!-- /solicitacoesConteudo -->
@@ -12299,10 +12304,10 @@
   <script type="module" src="login/login.js"></script>
   <script src="/public/js/vendas-relatorio-gerencial.js?v=20260709a" defer></script>
   <script src="/public/js/logistica-relatorio-gerencial.js?v=20260712a" defer></script>
-  <script type="module" src="menu_produto.js?v=20260716-merge-pr66-67"></script>
+  <script type="module" src="menu_produto.js?v=20260717-paginacao-busca-sep"></script>
   
   <script type="module" src="./requisicoes_omie/filtro_produto.js?v=20260716-limitado"></script>
-  <script type="module" src="./requisicoes_omie/ListarProdutos.js?v=20260716-limitado"></script>
+  <script type="module" src="./requisicoes_omie/ListarProdutos.js?v=20260717-paginacao-busca-sep"></script>
   <script type="module" src="./requisicoes_omie/Dados_produto.js?v=20260710c" defer></script>
   <script type="module" src="./requisicoes_omie/dados_colaboradores.js"></script>
   <script src="produtos/produto_foto.js?v=20260430c" defer></script>

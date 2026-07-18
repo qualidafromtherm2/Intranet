@@ -265,7 +265,8 @@ function bindGridLazyLoad(grid) {
 
 const __paginationState = {
   currentPage: 1,
-  pageSize: 25
+  pageSize: 50,
+  showAll: false
 };
 
 let __externalFilterFn = null;
@@ -298,6 +299,9 @@ function clampListaPage(totalPages) {
 function getListaPagedItems(itens) {
   const source = Array.isArray(itens) ? itens : [];
   const totalItems = source.length;
+  if (__paginationState.showAll) {
+    return { totalItems, totalPages: 1, currentPage: 1, pageItems: source };
+  }
   const totalPages = Math.max(1, Math.ceil(totalItems / __paginationState.pageSize));
   const currentPage = clampListaPage(totalPages);
   const start = (currentPage - 1) * __paginationState.pageSize;
@@ -314,8 +318,20 @@ function renderListaPagination(totalItems) {
   const { pagination } = ensureListaRefs();
   if (!pagination) return;
 
-  if (__listaViewMode !== 'list') {
-    pagination.innerHTML = '';
+  pagination.style.display = 'flex';
+
+  if (__paginationState.showAll) {
+    pagination.innerHTML = `
+      <span>Exibindo todos os ${Number(totalItems) || 0} produtos</span>
+      <button type="button" class="content-button active" data-list-mode="paged">
+        Usar páginas de 50
+      </button>
+    `;
+    pagination.querySelector('[data-list-mode="paged"]')?.addEventListener('click', () => {
+      __paginationState.showAll = false;
+      resetListaPagination();
+      renderListaFiltradaComTitulo(document.getElementById(__listaPaneId), getFiltered(), { resetPage: false });
+    });
     return;
   }
 
@@ -326,8 +342,10 @@ function renderListaPagination(totalItems) {
   const prevDisabled = currentPage <= 1;
   const nextDisabled = currentPage >= totalPages;
 
-  pagination.style.display = 'flex';
   pagination.innerHTML = `
+    <button type="button" class="content-button" data-page-action="first" ${prevDisabled ? 'disabled' : ''}>
+      Primeira
+    </button>
     <button type="button" class="content-button" data-page-action="prev" ${prevDisabled ? 'disabled' : ''}>
       Anterior
     </button>
@@ -335,39 +353,40 @@ function renderListaPagination(totalItems) {
     <button type="button" class="content-button" data-page-action="next" ${nextDisabled ? 'disabled' : ''}>
       Próxima
     </button>
-    <span>Página ${currentPage}/${totalPages}</span>
-    <button type="button" class="content-button ${__paginationState.pageSize === 25 ? 'active' : ''}" data-page-size="25">
-      25
+    <button type="button" class="content-button" data-page-action="last" ${nextDisabled ? 'disabled' : ''}>
+      Última
     </button>
-    <button type="button" class="content-button ${__paginationState.pageSize === 50 ? 'active' : ''}" data-page-size="50">
-      50
+    <span>Página ${currentPage}/${totalPages}</span>
+    <span>50 por página</span>
+    <button type="button" class="content-button" data-list-mode="all">
+      Lista completa
     </button>
   `;
 
   pagination.querySelectorAll('[data-page-action]').forEach(btn => {
     btn.addEventListener('click', () => {
       const action = btn.getAttribute('data-page-action');
-      const delta = action === 'next' ? 1 : -1;
-      __paginationState.currentPage = Math.min(
-        Math.max(1, __paginationState.currentPage + delta),
-        totalPages
-      );
+      if (action === 'first') __paginationState.currentPage = 1;
+      else if (action === 'last') __paginationState.currentPage = totalPages;
+      else {
+        const delta = action === 'next' ? 1 : -1;
+        __paginationState.currentPage = Math.min(
+          Math.max(1, __paginationState.currentPage + delta),
+          totalPages
+        );
+      }
       renderListaFiltradaComTitulo(document.getElementById(__listaPaneId), getFiltered(), { resetPage: false });
-      const ul = __listaRefs.ul;
-      if (ul) ul.scrollTop = 0;
+      const scrollTarget = __listaViewMode === 'grid' ? __listaRefs.grid : __listaRefs.ul;
+      if (scrollTarget) scrollTarget.scrollTop = 0;
     });
   });
 
-  pagination.querySelectorAll('[data-page-size]').forEach(btn => {
-    btn.addEventListener('click', () => {
-      const nextSize = Number(btn.getAttribute('data-page-size'));
-      if (!Number.isFinite(nextSize) || nextSize === __paginationState.pageSize) return;
-      __paginationState.pageSize = nextSize;
-      resetListaPagination();
-      renderListaFiltradaComTitulo(document.getElementById(__listaPaneId), getFiltered(), { resetPage: false });
-      const ul = __listaRefs.ul;
-      if (ul) ul.scrollTop = 0;
-    });
+  pagination.querySelector('[data-list-mode="all"]')?.addEventListener('click', () => {
+    __paginationState.showAll = true;
+    resetListaPagination();
+    renderListaFiltradaComTitulo(document.getElementById(__listaPaneId), getFiltered(), { resetPage: false });
+    const scrollTarget = __listaViewMode === 'grid' ? __listaRefs.grid : __listaRefs.ul;
+    if (scrollTarget) scrollTarget.scrollTop = 0;
   });
 }
 
@@ -393,7 +412,7 @@ function updateListaViewUI() {
   const isGrid = __listaViewMode === 'grid';
   ul.style.display = isGrid ? 'none' : '';
   grid.style.display = isGrid ? 'grid' : 'none';
-  if (pagination) pagination.style.display = isGrid ? 'none' : '';
+  if (pagination) pagination.style.display = '';
 
   toggleBtn.title = isGrid ? 'Alternar para lista' : 'Alternar para grade';
   toggleBtn.classList.toggle('active', isGrid);
@@ -423,14 +442,14 @@ function updateListaViewUI() {
 function renderListaView(itens) {
   const { ul } = ensureListaRefs();
   const grid = getListaGridEl();
+  const { totalItems, pageItems } = getListaPagedItems(itens);
   if (__listaViewMode === 'grid') {
-    renderGrid(grid, itens);
+    renderGrid(grid, pageItems);
   } else if (ul) {
-    const { totalItems, pageItems } = getListaPagedItems(itens);
     renderList(ul, pageItems);
-    renderListaPagination(totalItems);
     ul.scrollTop = 0;
   }
+  renderListaPagination(totalItems);
 }
 
 /* --------------------- “Hard refresh” da lista ----------------------- */

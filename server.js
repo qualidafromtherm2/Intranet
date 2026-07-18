@@ -20009,9 +20009,11 @@ app.get('/api/logistica/solicitacoes-kanban', async (req, res) => {
   try {
     const id_user = req.session?.user?.id;
     if (!id_user) return res.status(401).json({ ok: false, error: 'Não autenticado.' });
+    const q = String(req.query?.q || '').trim().slice(0, 200);
 
     const { rows } = await pool.query(`
-      SELECT
+      WITH seps AS (
+        SELECT
         i.n_solic,
         COALESCE(c.retirada_por, c.nome_user) AS nome_user,
         MIN(c.data_prevista)::text             AS data_prevista,
@@ -20020,6 +20022,10 @@ app.get('/api/logistica/solicitacoes-kanban', async (req, res) => {
         MIN(c.criado_em)                       AS criado_em_min,
         MIN(i.criado_em)                       AS item_criado_em,
         MAX(NULLIF(TRIM(i.usuario_separando), '')) AS usuario_separando,
+        STRING_AGG(
+          DISTINCT CONCAT_WS(' ', COALESCE(c.codigo_produto, ''), COALESCE(c.descricao, '')),
+          ' '
+        ) AS itens_busca,
         bool_or(COALESCE(i.urgente, false))    AS tem_urgente,
         bool_or(
           i.status = 'pendente'
@@ -20033,13 +20039,28 @@ app.get('/api/logistica/solicitacoes-kanban', async (req, res) => {
           WHEN bool_or(i.status = 'Aguardando retirada') THEN 'Aguardando retirada'
           ELSE 'Concluído'
         END AS coluna
-      FROM solicitacao_produto.itens_solicitados i
-      JOIN logistica.carrinho c ON c.id = i.id_carr
-      WHERE i.n_solic IS NOT NULL
-        AND LOWER(TRIM(COALESCE(i.status, ''))) NOT IN ('excluido', 'excluído')
-      GROUP BY i.n_solic, COALESCE(c.retirada_por, c.nome_user)
-      ORDER BY MIN(c.criado_em) ASC
-    `);
+        FROM solicitacao_produto.itens_solicitados i
+        JOIN logistica.carrinho c ON c.id = i.id_carr
+        WHERE i.n_solic IS NOT NULL
+          AND LOWER(TRIM(COALESCE(i.status, ''))) NOT IN ('excluido', 'excluído')
+        GROUP BY i.n_solic, COALESCE(c.retirada_por, c.nome_user)
+      )
+      SELECT *
+        FROM seps
+       WHERE $1::text = ''
+          OR NOT EXISTS (
+            SELECT 1
+              FROM UNNEST(REGEXP_SPLIT_TO_ARRAY(TRIM($1::text), '\\s+')) AS termo
+             WHERE CONCAT_WS(
+                     ' ',
+                     COALESCE(seps.n_solic, ''),
+                     COALESCE(seps.nome_user, ''),
+                     COALESCE(seps.usuario_separando, ''),
+                     COALESCE(seps.itens_busca, '')
+                   ) NOT ILIKE '%' || termo || '%'
+          )
+       ORDER BY criado_em_min ASC
+    `, [q]);
 
     const colunas = { 'Solicitado': [], 'Stund-by': [], 'Em Separação': [], 'Separado': [], 'Aguardando retirada': [], 'Concluído': [] };
     rows.forEach(r => {
