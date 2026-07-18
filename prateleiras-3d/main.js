@@ -287,6 +287,8 @@ function boot(renderer) {
   camera.position.set(0, PLAYER.eye, RACK_LEN / 2 + 2);
 
   const controls = new PointerLockControls(camera, document.body);
+  // PUBG-like: yaw+pitch sem roll (ordem YXZ)
+  camera.rotation.order = 'YXZ';
   const touchPad = document.getElementById('touchPad');
   const btnExitTouch = document.getElementById('btnExitTouch');
 
@@ -537,11 +539,23 @@ function boot(renderer) {
   let lookLastY = 0;
   const joyMove = { x: 0, y: 0, active: false }; // -1..1 (x=strafe, y=frente/trás)
 
+  function applyLookDelta(dx, dy) {
+    const obj = controls.getObject();
+    obj.rotation.order = 'YXZ';
+    obj.rotation.y -= dx * LOOK_SENS;
+    // Dedo para cima (dy < 0) → olhar para cima (PUBG)
+    obj.rotation.x += dy * LOOK_SENS;
+    obj.rotation.z = 0; // nunca inclina/deita a câmera
+    obj.rotation.x = Math.max(-PI_2 + 0.05, Math.min(PI_2 - 0.05, obj.rotation.x));
+  }
+
   function onLookStart(e) {
     if (!playing || controls.isLocked) return;
     if (e.target.closest && (
       e.target.closest('#joyMove') ||
       e.target.closest('.touch-side-btns') ||
+      e.target.closest('.touch-action-btns') ||
+      e.target.closest('#touchScrollBar') ||
       e.target.closest('#btnExitTouch')
     )) return;
     // Só o lado direito da tela olha (estilo PUBG)
@@ -558,9 +572,7 @@ function boot(renderer) {
     const dy = e.clientY - lookLastY;
     lookLastX = e.clientX;
     lookLastY = e.clientY;
-    controls.getObject().rotation.y -= dx * LOOK_SENS;
-    camera.rotation.x -= dy * LOOK_SENS;
-    camera.rotation.x = Math.max(-PI_2 + 0.05, Math.min(PI_2 - 0.05, camera.rotation.x));
+    applyLookDelta(dx, dy);
   }
   function onLookEnd(e) {
     if (lookPointerId !== e.pointerId) return;
@@ -648,6 +660,141 @@ function boot(renderer) {
     btn.addEventListener('pointercancel', (e) => setDown(false, e));
     btn.addEventListener('lostpointercapture', () => setDown(false));
   });
+
+  // ✕ = clique esquerdo · ○ = botão direito (voltar)
+  const btnTouchClick = document.getElementById('btnTouchClick');
+  const btnTouchBack = document.getElementById('btnTouchBack');
+  if (btnTouchClick) {
+    btnTouchClick.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (typeof acaoToqueSelecionar === 'function') acaoToqueSelecionar();
+    });
+  }
+  if (btnTouchBack) {
+    btnTouchBack.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (typeof acaoToqueVoltar === 'function') acaoToqueVoltar();
+    });
+  }
+
+  // Barra de rolagem touch (aparece quando a mira está em painel/slot com scroll)
+  const touchScrollBar = document.getElementById('touchScrollBar');
+  const touchScrollThumb = document.getElementById('touchScrollThumb');
+  let touchScrollDrag = null;
+
+  function getMiraScrollState() {
+    if (lookEstoqueMinimoAtual && estoqueMinimoBoardMesh) {
+      const ud = estoqueMinimoBoardMesh.userData;
+      const max = Number(ud.maxScroll) || 0;
+      if (max > 0) {
+        return {
+          max,
+          get: () => Number(ud.scroll) || 0,
+          set: (v) => {
+            ud.scroll = Math.max(0, Math.min(v, max));
+            if (typeof ud.pintar === 'function') ud.pintar();
+          },
+        };
+      }
+    }
+    if (lookIdentificacaoAtual && identificacaoBoardMesh) {
+      const ud = identificacaoBoardMesh.userData;
+      const max = Number(ud.maxScroll) || 0;
+      if (max > 0) {
+        return {
+          max,
+          get: () => Number(ud.scroll) || 0,
+          set: (v) => {
+            ud.scroll = Math.max(0, Math.min(v, max));
+            if (typeof ud.pintar === 'function') ud.pintar();
+          },
+        };
+      }
+    }
+    if (lookSlotAtual && lookSlotAtual.userData.hasLabelTex) {
+      const ud = lookSlotAtual.userData;
+      const { maxScroll } = slotGridInfo((ud.itens || []).length);
+      if (maxScroll > 0) {
+        return {
+          max: maxScroll,
+          get: () => Number(ud.photoScroll) || 0,
+          set: (v) => {
+            ud.photoScroll = Math.max(0, Math.min(v, maxScroll));
+            paintSlotPhotos(lookSlotAtual);
+          },
+        };
+      }
+    }
+    if (lookBannerAtual) {
+      const m = lookBannerAtual;
+      // maxScroll aproximado pelo paint — usa userData se existir
+      const max = Number(m.userData.maxScroll) || 20;
+      if (max > 0) {
+        return {
+          max,
+          get: () => Number(m.userData.scroll) || 0,
+          set: (v) => {
+            m.userData.scroll = Math.max(0, Math.min(v, max));
+            paintOverflowBanner(m);
+          },
+        };
+      }
+    }
+    return null;
+  }
+
+  function updateTouchScrollBar() {
+    if (!touchScrollBar || !isTouchUI) return;
+    if (!playing && !controls.isLocked) {
+      touchScrollBar.hidden = true;
+      return;
+    }
+    const st = getMiraScrollState();
+    if (!st || st.max <= 0) {
+      touchScrollBar.hidden = true;
+      return;
+    }
+    touchScrollBar.hidden = false;
+    const track = touchScrollBar.querySelector('.touch-scroll-track');
+    if (!track || !touchScrollThumb) return;
+    const th = touchScrollThumb.offsetHeight || 48;
+    const trackH = track.clientHeight || 1;
+    const ratio = st.get() / st.max;
+    const top = Math.max(0, Math.min(ratio * (trackH - th), trackH - th));
+    touchScrollThumb.style.top = `${top}px`;
+  }
+
+  if (touchScrollThumb && touchScrollBar) {
+    touchScrollThumb.addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const st = getMiraScrollState();
+      if (!st) return;
+      touchScrollDrag = { pointerId: e.pointerId, st };
+      try { touchScrollThumb.setPointerCapture(e.pointerId); } catch (_) {}
+    });
+    touchScrollThumb.addEventListener('pointermove', (e) => {
+      if (!touchScrollDrag || touchScrollDrag.pointerId !== e.pointerId) return;
+      const track = touchScrollBar.querySelector('.touch-scroll-track');
+      if (!track) return;
+      const rect = track.getBoundingClientRect();
+      const th = touchScrollThumb.offsetHeight || 48;
+      const y = e.clientY - rect.top - th / 2;
+      const maxY = Math.max(1, rect.height - th);
+      const ratio = Math.max(0, Math.min(y / maxY, 1));
+      const st = touchScrollDrag.st;
+      st.set(Math.round(ratio * st.max));
+      updateTouchScrollBar();
+    });
+    const endScrollDrag = (e) => {
+      if (!touchScrollDrag || touchScrollDrag.pointerId !== e.pointerId) return;
+      touchScrollDrag = null;
+    };
+    touchScrollThumb.addEventListener('pointerup', endScrollDrag);
+    touchScrollThumb.addEventListener('pointercancel', endScrollDrag);
+  }
 
   // ——— Materiais Basic (leve) ———
   const orangeMat = new THREE.MeshBasicMaterial({ color: ORANGE });
@@ -3368,6 +3515,7 @@ function boot(renderer) {
     const maxScroll = Math.max(0, lines.length - maxLines);
     const start = Math.max(0, Math.min(Number(mesh.userData.scroll) || 0, maxScroll));
     mesh.userData.scroll = start;
+    mesh.userData.maxScroll = maxScroll;
 
     if (!lines.length) {
       ctx.fillStyle = '#a8a29e';
@@ -3501,20 +3649,31 @@ function boot(renderer) {
     }
     // Clique rápido (sem arrastar) → fixa o painel p/ interação
     if (cliqueRapido && (playing || controls.isLocked)) {
-      if (lookSlotAtual) enterInspect(lookSlotAtual.userData.endereco);
-      else if (lookKanbanCard) enterInspectKanban(lookKanbanCard);
-      else if (lookRelTab && relatorioBoardMesh?.userData.setPage) {
-        // Troca a página do relatório na hora, sem travar o painel
-        relatorioBoardMesh.userData.setPage(lookRelTab.idx);
-        lookAlvoAtual = null;
-        esconderBalao();
-      } else if (lookEstoqueMinBtn && estoqueMinimoBoardMesh?.userData.toggleFiltroCompra) {
-        estoqueMinimoBoardMesh.userData.toggleFiltroCompra();
-        lookAlvoAtual = null;
-        esconderBalao();
-      }
+      acaoToqueSelecionar();
     }
   });
+
+  function acaoToqueSelecionar() {
+    if (inspectMode) return;
+    if (!playing && !controls.isLocked) return;
+    if (lookSlotAtual) enterInspect(lookSlotAtual.userData.endereco);
+    else if (lookKanbanCard) enterInspectKanban(lookKanbanCard);
+    else if (lookRelTab && relatorioBoardMesh?.userData.setPage) {
+      relatorioBoardMesh.userData.setPage(lookRelTab.idx);
+      lookAlvoAtual = null;
+      esconderBalao();
+    } else if (lookEstoqueMinBtn && estoqueMinimoBoardMesh?.userData.toggleFiltroCompra) {
+      estoqueMinimoBoardMesh.userData.toggleFiltroCompra();
+      lookAlvoAtual = null;
+      esconderBalao();
+    }
+  }
+
+  function acaoToqueVoltar() {
+    // Igual ao botão direito no PC: sai do painel fixado
+    if (inspectMode) exitInspect();
+  }
+
   controls.addEventListener('unlock', () => {
     slotDrag = null;
     bannerDrag = null;
@@ -3560,7 +3719,10 @@ function boot(renderer) {
   }
 
   function updateLookTarget(dt) {
-    if (inspectMode) return; // painel fixado: não re-mira nem esconde
+    if (inspectMode) {
+      if (typeof updateTouchScrollBar === 'function') updateTouchScrollBar();
+      return; // painel fixado: não re-mira nem esconde
+    }
     if (!playing && !controls.isLocked) {
       esconderBalao();
       lookBannerAtual = null;
@@ -3568,6 +3730,7 @@ function boot(renderer) {
       lookEstoqueMinimoAtual = null;
       lookIdentificacaoAtual = null;
       lookEstoqueMinBtn = null;
+      if (typeof updateTouchScrollBar === 'function') updateTouchScrollBar();
       return;
     }
     lookAcc += dt;
@@ -3587,6 +3750,7 @@ function boot(renderer) {
       lookEstoqueMinimoAtual = null;
       lookIdentificacaoAtual = null;
       lookEstoqueMinBtn = null;
+      if (typeof updateTouchScrollBar === 'function') updateTouchScrollBar();
       return;
     }
     const obj = hits[0].object;
@@ -3667,6 +3831,7 @@ function boot(renderer) {
       lookEstoqueMinBtn = null;
       esconderBalao();
     }
+    if (typeof updateTouchScrollBar === 'function') updateTouchScrollBar();
   }
 
   void carregarOcupacao();

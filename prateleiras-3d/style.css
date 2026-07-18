@@ -357,6 +357,75 @@ kbd {
   letter-spacing: 0.03em;
 }
 
+.touch-scroll-bar {
+  position: absolute;
+  right: max(10px, env(safe-area-inset-right));
+  top: 28%;
+  bottom: 28%;
+  width: 28px;
+  z-index: 8;
+  pointer-events: auto;
+  touch-action: none;
+}
+.touch-scroll-bar[hidden] {
+  display: none;
+}
+.touch-scroll-track {
+  position: absolute;
+  inset: 0;
+  border-radius: 14px;
+  background: rgba(15, 23, 42, 0.45);
+  border: 1px solid rgba(255, 255, 255, 0.25);
+}
+.touch-scroll-thumb {
+  position: absolute;
+  left: 3px;
+  right: 3px;
+  height: 48px;
+  top: 0;
+  border-radius: 12px;
+  background: rgba(88, 166, 255, 0.9);
+  border: 1px solid rgba(255, 255, 255, 0.45);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+}
+
+.touch-action-btns {
+  position: absolute;
+  right: max(18px, env(safe-area-inset-right));
+  bottom: max(110px, calc(env(safe-area-inset-bottom) + 100px));
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  pointer-events: auto;
+  z-index: 8;
+}
+.touch-act-btn {
+  appearance: none;
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.35);
+  background: rgba(22, 27, 34, 0.78);
+  color: #e6edf3;
+  font-size: 1.55rem;
+  font-weight: 800;
+  line-height: 1;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
+}
+.touch-act-btn:active {
+  transform: scale(0.94);
+}
+.touch-act-x {
+  background: rgba(239, 68, 68, 0.82);
+  border-color: rgba(254, 202, 202, 0.55);
+}
+.touch-act-o {
+  background: rgba(34, 197, 94, 0.82);
+  border-color: rgba(187, 247, 208, 0.55);
+}
+
 .touch-side-btns {
   position: absolute;
   right: max(12px, env(safe-area-inset-right));

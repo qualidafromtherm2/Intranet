@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
   <title>Explorar 3D — Porta-pallet</title>
-  <link rel="stylesheet" href="style.css?v=5" />
+  <link rel="stylesheet" href="style.css?v=6" />
   <script type="importmap">
   {
     "imports": {
@@ -36,7 +36,7 @@
     <div id="hud" class="hud" hidden>
       <p class="hud-pc"><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> — andar &nbsp;·&nbsp; <kbd>Espaço</kbd>/<kbd>E</kbd> — subir &nbsp;·&nbsp; <kbd>C</kbd>/<kbd>Q</kbd> — descer</p>
       <p class="hud-pc">Mouse — olhar · Mira na caixa — produtos · Mira no banner — lista (roda = rolar) · Mira no código — detalhe · <kbd>Esc</kbd></p>
-      <p class="hud-touch">Joystick esquerdo = andar · lado direito = olhar · ↑↓ altura</p>
+      <p class="hud-touch">Joystick = andar · direita = olhar · ✕ seleciona · ○ volta · barra = rolar</p>
     </div>
 
     <div id="touchPad" class="touch-pad" hidden>
@@ -51,7 +51,16 @@
         <button type="button" class="wasd-btn" data-key="KeyC" aria-label="Descer">↓</button>
         <button type="button" id="btnExitTouch" class="btn-exit-touch">Sair</button>
       </div>
-      <div id="joyLookHint" class="joy-look-hint">Arraste aqui → olhar</div>
+      <div id="touchScrollBar" class="touch-scroll-bar" hidden>
+        <div class="touch-scroll-track">
+          <div id="touchScrollThumb" class="touch-scroll-thumb"></div>
+        </div>
+      </div>
+      <div class="touch-action-btns">
+        <button type="button" id="btnTouchClick" class="touch-act-btn touch-act-x" aria-label="Selecionar (clique)">✕</button>
+        <button type="button" id="btnTouchBack" class="touch-act-btn touch-act-o" aria-label="Voltar (botão direito)">○</button>
+      </div>
+      <div id="joyLookHint" class="joy-look-hint">Arraste à direita → olhar</div>
     </div>
 
     <div id="blocker" class="blocker">
@@ -92,6 +101,6 @@
     </div>
   </div>
 
-  <script type="module" src="main.js?v=19"></script>
+  <script type="module" src="main.js?v=20"></script>
 </body>
 </html>
