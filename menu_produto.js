@@ -1380,6 +1380,11 @@ window._loadSolicitacoesTab = async function() {
                   <i class="fa-solid fa-bolt" style="font-size:.62rem;"></i>Urgente
                 </div>`
               : '';
+            const emCompraHtml = (col.key === 'Stund-by' && sep.tem_em_compra)
+              ? `<div style="margin-top:4px;display:inline-flex;align-items:center;gap:4px;padding:2px 7px;border-radius:20px;font-size:.65rem;font-weight:700;color:#93c5fd;background:#1e3a5f;border:1px solid #3b82f6;" title="Há produto desta SEP com compra em andamento">
+                  <i class="fa-solid fa-cart-shopping" style="font-size:.62rem;"></i>Em compra
+                </div>`
+              : '';
             return `
               <div class="solic-kanban-card sep-kanban-card"
                 data-n-solic="${sep.n_solic}"
@@ -1391,6 +1396,7 @@ window._loadSolicitacoesTab = async function() {
                 <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
                   <span style="font-weight:800;font-size:.85rem;color:#f59e0b;letter-spacing:.03em;">${sep.n_solic}</span>
                   ${urgenteHtml}
+                  ${emCompraHtml}
                 </div>
                 <div class="sep-kanban-meta" style="margin-top:5px;display:flex;align-items:center;gap:5px;">
                   <i class="fa-solid fa-user-circle" style="color:#6b7280;font-size:.75rem;flex-shrink:0;"></i>
@@ -1946,6 +1952,9 @@ async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) 
     });
   }
 
+  // Códigos com compra ativa — preenchido abaixo quando isStandby
+  let emCompraCodigos = new Set();
+
   // Agrega itens por cod_omie (fallback: codigo_produto), somando quantidades
   function _aggItens(itens) {
     const map = new Map();
@@ -2169,6 +2178,14 @@ async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) 
                  <span style="font-size:.65rem;color:#6ee7b7;font-style:italic;">aguardando demais itens</span>`
               : _solStatusBadge(it.status || 'Separação')}
             ${hasObs ? `<span title="Item com observação" style="display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:999px;background:#f97316;color:#111;font-weight:800;font-size:.70rem;line-height:1;">!</span>` : ''}
+            ${isStandby && emCompraCodigos.has(String(it.codigo_produto || '').trim().toUpperCase())
+              ? `<button type="button" class="btn-item-em-compra"
+                   onclick="event.stopPropagation();abrirModalEmCompra('${String(it.codigo_produto || '').replace(/'/g, "\\'")}')"
+                   title="Ver dados da compra"
+                   style="display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:20px;font-size:.67rem;font-weight:700;cursor:pointer;border:1px solid #3b82f6;background:#1e3a5f;color:#93c5fd;">
+                   <i class="fa-solid fa-cart-shopping" style="font-size:.62rem;"></i>Em compra
+                 </button>`
+              : ''}
             ${readonlySep ? '' : `<button class="btn-item-urgente" title="Urgente, entregar o quanto antes este item"
               style="display:inline-flex;align-items:center;gap:3px;padding:2px 7px;border-radius:20px;font-size:.67rem;font-weight:700;cursor:pointer;border:1px solid ${isUrgente ? '#ef4444' : '#374151'};background:${isUrgente ? '#450a0a' : 'transparent'};color:${isUrgente ? '#fca5a5' : '#6b7280'};transition:all .15s;">
               <i class="fa-solid fa-bolt" style="font-size:.63rem;"></i>${isUrgente ? 'Urgente' : ''}
@@ -2235,6 +2252,15 @@ async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) 
     preloaded.enderecoBatch || {}
   );
   let etqIdsBatch = preloaded.etqIdsBatch || {};
+
+  if (isStandby) {
+    try {
+      const mapa = await getProdutosEmCompra();
+      emCompraCodigos = new Set([...(mapa || new Map()).keys()]);
+    } catch (_) {
+      emCompraCodigos = new Set();
+    }
+  }
 
   function _idsFifoDoItem(it, qty) {
     const cod = String(it?.codigo_produto || '').trim();
@@ -3460,6 +3486,11 @@ window._loadKanbanSolicitacoesTab = async function() {
                 : (col.acao === 'visualizar'
                   ? `<span style="font-size:.65rem;color:${hintColor};margin-top:3px;display:block;">clique para ver itens</span>`
                   : ''));
+            const emCompraHtml = (col.key === 'Stund-by' && card.tem_em_compra)
+              ? `<div style="margin-top:4px;display:inline-flex;align-items:center;gap:4px;padding:2px 7px;border-radius:20px;font-size:.65rem;font-weight:700;color:${isLight ? '#1e40af' : '#93c5fd'};background:${isLight ? '#dbeafe' : '#1e3a5f'};border:1px solid #3b82f6;" title="Há produto desta SEP com compra em andamento">
+                  <i class="fa-solid fa-cart-shopping" style="font-size:.62rem;"></i>Em compra
+                </div>`
+              : '';
             return `
               <div class="kanban-sep-card"
                 data-n-solic="${card.n_solic || ''}"
@@ -3467,7 +3498,10 @@ window._loadKanbanSolicitacoesTab = async function() {
                 style="background:${cardBg};border:1px solid ${cardBorder};border-radius:9px;padding:10px 12px;${cursor}transition:border-color .15s;"
                 onmouseenter="this.style.borderColor='${cardHoverBorder}'"
                 onmouseleave="this.style.borderColor='${cardHoverLeave}'">
-                ${sepLabel}
+                <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+                  ${sepLabel}
+                  ${emCompraHtml}
+                </div>
                 <div style="margin-top:5px;display:flex;align-items:center;gap:5px;">
                   <i class="fa-solid fa-user-circle" style="color:${iconColor};font-size:.75rem;flex-shrink:0;"></i>
                   <span style="font-size:.75rem;color:${userColor};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${card.nome_user}</span>
@@ -3577,6 +3611,62 @@ window._loadKanbanSolicitacoesTab = async function() {
             tituloColuna: 'Concluído',
             permitirRecebido: false
           });
+        });
+      }
+
+      // Clique — coluna Stund-by abre modal de itens (mesmo da Tela de separação)
+      if (cardEl.dataset.col === 'Stund-by') {
+        cardEl.style.cursor = 'pointer';
+        cardEl.addEventListener('click', async () => {
+          if (cardEl._loading) return;
+          const nSolic = cardEl.dataset.nSolic;
+          if (!nSolic) return;
+          cardEl._loading = true;
+          _solKanbanLoading(true, 'Carregando itens...');
+          clearTimeout(window._kanbanTooltipTimer);
+          window._kanbanTooltipEl?.remove();
+          window._kanbanTooltipEl = null;
+          try {
+            const ri = await fetch(_solBuildKanbanItensUrl(nSolic, { escopoItens: 'global' }), { credentials: 'include' });
+            const di = await ri.json();
+            if (!di.ok) throw new Error(di.error || 'Erro ao buscar itens');
+            const itens = (di.itens || []).map(it => ({ ...it, solic_ids: [it.solic_id], carr_ids: [it.carr_id] }));
+            if (!itens.length) throw new Error('Nenhum item encontrado');
+
+            const codigos = [...new Set(itens.map(it => it.codigo_produto).filter(Boolean))];
+            let preloaded = {};
+            if (codigos.length) {
+              try {
+                const [re, endMap, rid] = await Promise.all([
+                  fetch('/api/logistica/estoque/batch?codigos=' + encodeURIComponent(codigos.join(',')), { credentials: 'include' }),
+                  _solCarregarEnderecoBatch(codigos),
+                  fetch('/api/etiquetas/rec-impresso/ids-fifo-batch?codigos=' + encodeURIComponent(codigos.join(',')), { credentials: 'include' })
+                ]);
+                const de = await re.json();
+                const did = await rid.json().catch(() => ({}));
+                preloaded = {
+                  estoqueBatch: de.ok ? (de.dados || {}) : {},
+                  enderecoBatch: _solMergeEnderecoBatch(itens, endMap || {}),
+                  etqIdsBatch: did.ok ? (did.dados || {}) : {}
+                };
+              } catch (_) {}
+            }
+
+            const grupoAtual = {
+              nome_user: itens[0]?.nome_user || nSolic,
+              n_solic: nSolic,
+              itens,
+              origem_status: 'Stund-by',
+              escopoItens: 'global'
+            };
+            void _abrirModalSeparacao(grupoAtual, [], preloaded)
+              .catch(err => console.warn('[KANBAN-SOLIC] abrir modal Stand-by:', err));
+          } catch (err) {
+            alert('Erro: ' + (err.message || err));
+          } finally {
+            cardEl._loading = false;
+            _solKanbanLoading(false);
+          }
         });
       }
     });
@@ -41635,6 +41725,10 @@ document.getElementById('comprasFiltroKanbanBtn')?.addEventListener('click', () 
   fecharModalComprasAcoes();
   abrirModalFiltroKanbans();
 });
+document.getElementById('comprasVarrerFaturadasBtn')?.addEventListener('click', () => {
+  fecharModalComprasAcoes();
+  varrerFaturadasOmieKanban();
+});
 document.getElementById('modalFiltroKanbansFecharBtn')?.addEventListener('click', salvarPreferenciasKanbans);
 document.getElementById('filtroKanbanSelecionarTodos')?.addEventListener('click', toggleSelecionarTodosKanbans);
 document.getElementById('filtroKanbanSelecionarTodosVazio')?.addEventListener('click', toggleSelecionarTodosKanbansVazios);
@@ -52063,6 +52157,7 @@ function renderizarCatalogoOmie(produtos, options = {}) {
           <!-- Badges: Família e Estoque -->
           <div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:8px;">
             <span id="min-badge-${escapeHtml(produto.codigo)}" data-codigo="${escapeHtml(produto.codigo)}"></span>
+            <span id="compra-badge-${escapeHtml(produto.codigo)}" data-codigo="${escapeHtml(produto.codigo)}"></span>
             ${produto.abaixo_minimo ? `
             <span style="background:#fef3c7;color:#92400e;padding:3px 6px;border-radius:4px;font-size:9px;font-weight:600;display:flex;align-items:center;gap:3px;" title="Estoque: ${produto.saldo_estoque} | Mínimo: ${produto.estoque_minimo}">
               <i class="fa-solid fa-triangle-exclamation" style="font-size:8px;"></i>
@@ -52116,7 +52211,159 @@ function renderizarCatalogoOmie(produtos, options = {}) {
   // Agrupa renderizações sucessivas da pesquisa em uma única consulta.
   clearTimeout(window.__estoqueCardsLoadTimer);
   window.__estoqueCardsLoadTimer = setTimeout(() => carregarEstoqueCards(), 200);
+
+  // Marca produtos com compra em andamento (badge "Em compra")
+  setTimeout(() => carregarComprasBadges(), 250);
 }
+
+// ----- Badge "Em compra" nos cards (produtos com solicitação de compra ativa) -----
+let __produtosEmCompraCache = null;
+let __produtosEmCompraCacheTs = 0;
+
+async function getProdutosEmCompra() {
+  const agora = Date.now();
+  if (__produtosEmCompraCache && (agora - __produtosEmCompraCacheTs) < 2 * 60 * 1000) {
+    return __produtosEmCompraCache;
+  }
+  try {
+    const resp = await fetch('/api/compras/produtos-em-compra', { credentials: 'include' });
+    if (resp.ok) {
+      const data = await resp.json();
+      const mapa = new Map();
+      (Array.isArray(data.itens) ? data.itens : []).forEach(it => {
+        const cod = String(it.codigo || '').trim().toUpperCase();
+        if (cod) mapa.set(cod, String(it.status || '').trim());
+      });
+      __produtosEmCompraCache = mapa;
+      __produtosEmCompraCacheTs = agora;
+    }
+  } catch (_) {
+    // silencia erros de rede — badge é informativo
+  }
+  return __produtosEmCompraCache || new Map();
+}
+
+async function carregarComprasBadges() {
+  const badges = document.querySelectorAll('[id^="compra-badge-"]');
+  if (!badges.length) return;
+
+  const emCompra = await getProdutosEmCompra();
+  badges.forEach(badge => {
+    const cod = String(badge.dataset.codigo || '').trim().toUpperCase();
+    const status = emCompra.get(cod);
+    if (!status) {
+      badge.innerHTML = '';
+      return;
+    }
+    badge.innerHTML = `<button type="button"
+      onclick="event.stopPropagation();abrirModalEmCompra('${escapeHtml(cod)}')"
+      style="display:inline-flex;align-items:center;gap:4px;background:#dbeafe;color:#1e40af;padding:5px 8px;border:1px solid #1e40af;border-radius:5px;font-size:11px;font-weight:800;cursor:pointer;"
+      title="Clique para ver os dados da compra — status: ${escapeHtml(status)}"
+      onmouseover="this.style.background='#bfdbfe'"
+      onmouseout="this.style.background='#dbeafe'">
+      <i class="fa-solid fa-cart-shopping" style="font-size:10px;"></i>
+      Em compra
+    </button>`;
+  });
+}
+
+function _fmtDataEmCompra(iso) {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '—';
+  return d.toLocaleDateString('pt-BR');
+}
+
+function _fmtQtdEmCompra(v) {
+  if (v === null || v === undefined || v === '') return '—';
+  const n = Number(String(v).replace(',', '.'));
+  if (!Number.isFinite(n)) return String(v);
+  return Math.abs(n - Math.round(n)) < 1e-9
+    ? String(Math.round(n))
+    : n.toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 4 });
+}
+
+window.abrirModalEmCompra = async function abrirModalEmCompra(codigo) {
+  const cod = String(codigo || '').trim();
+  if (!cod) return;
+
+  document.getElementById('modalEmCompraProduto')?.remove();
+
+  const modal = document.createElement('div');
+  modal.id = 'modalEmCompraProduto';
+  modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:10050;display:flex;align-items:center;justify-content:center;padding:16px;';
+  modal.innerHTML = `
+    <div style="background:#fff;border-radius:12px;width:min(560px,100%);max-height:85vh;display:flex;flex-direction:column;box-shadow:0 20px 50px rgba(0,0,0,.35);">
+      <div style="padding:14px 16px;border-bottom:1px solid #e5e7eb;display:flex;align-items:center;gap:10px;">
+        <i class="fa-solid fa-cart-shopping" style="color:#1e40af;font-size:16px;"></i>
+        <div style="flex:1;min-width:0;">
+          <div style="font-weight:800;font-size:15px;color:#111827;">Compras em andamento</div>
+          <div style="font-size:12px;color:#6b7280;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(cod)}</div>
+        </div>
+        <button type="button" id="modalEmCompraFechar" style="border:none;background:#f3f4f6;width:32px;height:32px;border-radius:8px;cursor:pointer;color:#374151;">
+          <i class="fa-solid fa-xmark"></i>
+        </button>
+      </div>
+      <div id="modalEmCompraBody" style="padding:16px;overflow:auto;flex:1;">
+        <div style="text-align:center;padding:28px;color:#6b7280;">
+          <i class="fa-solid fa-spinner fa-spin" style="font-size:28px;color:#3b82f6;"></i>
+          <div style="margin-top:10px;font-size:13px;">Carregando...</div>
+        </div>
+      </div>
+    </div>`;
+  document.body.appendChild(modal);
+
+  const fechar = () => modal.remove();
+  document.getElementById('modalEmCompraFechar')?.addEventListener('click', fechar);
+  modal.addEventListener('click', (e) => { if (e.target === modal) fechar(); });
+
+  const body = document.getElementById('modalEmCompraBody');
+  try {
+    const resp = await fetch('/api/compras/produtos-em-compra/' + encodeURIComponent(cod), { credentials: 'include' });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok || !data.ok) throw new Error(data.error || `HTTP ${resp.status}`);
+
+    const compras = Array.isArray(data.compras) ? data.compras : [];
+    if (!compras.length) {
+      body.innerHTML = '<div style="text-align:center;padding:28px;color:#6b7280;font-size:13px;">Nenhuma compra em andamento para este produto.</div>';
+      return;
+    }
+
+    const descricao = compras[0].produto_descricao || '';
+    body.innerHTML = `
+      ${descricao ? `<div style="font-size:12px;color:#4b5563;margin-bottom:14px;line-height:1.4;">${escapeHtml(descricao)}</div>` : ''}
+      <div style="display:flex;flex-direction:column;gap:12px;">
+        ${compras.map((c, idx) => `
+          <div style="border:1px solid #e5e7eb;border-radius:10px;padding:12px 14px;background:#f8fafc;">
+            ${compras.length > 1 ? `<div style="font-size:11px;font-weight:700;color:#6b7280;margin-bottom:8px;">Compra ${idx + 1} de ${compras.length}</div>` : ''}
+            <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px;">
+              <span style="display:inline-flex;align-items:center;gap:4px;background:#dbeafe;color:#1e40af;padding:3px 8px;border-radius:999px;font-size:11px;font-weight:700;">
+                <i class="fa-solid fa-tag" style="font-size:9px;"></i>${escapeHtml(c.status || '—')}
+              </span>
+              <span style="display:inline-flex;align-items:center;gap:4px;background:#ecfdf5;color:#065f46;padding:3px 8px;border-radius:999px;font-size:11px;font-weight:700;">
+                Qtd: ${_fmtQtdEmCompra(c.quantidade)}
+              </span>
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px 12px;font-size:12px;">
+              <div><div style="color:#9ca3af;font-size:10px;font-weight:700;text-transform:uppercase;">Solicitante</div><div style="color:#111827;font-weight:600;">${escapeHtml(c.solicitante || '—')}</div></div>
+              <div><div style="color:#9ca3af;font-size:10px;font-weight:700;text-transform:uppercase;">Responsável compra</div><div style="color:#111827;font-weight:600;">${escapeHtml(c.responsavel_pela_compra || '—')}</div></div>
+              <div style="grid-column:1/-1;"><div style="color:#9ca3af;font-size:10px;font-weight:700;text-transform:uppercase;">Fornecedor</div><div style="color:#111827;font-weight:600;">${escapeHtml(c.fornecedor_nome || '—')}</div></div>
+              <div><div style="color:#9ca3af;font-size:10px;font-weight:700;text-transform:uppercase;">Pedido Omie</div><div style="color:#111827;font-weight:600;">${escapeHtml(c.c_numero || '—')}</div></div>
+              <div><div style="color:#9ca3af;font-size:10px;font-weight:700;text-transform:uppercase;">Nº pedido interno</div><div style="color:#111827;font-weight:600;word-break:break-all;">${escapeHtml(c.numero_pedido || '—')}</div></div>
+              <div><div style="color:#9ca3af;font-size:10px;font-weight:700;text-transform:uppercase;">Departamento</div><div style="color:#111827;font-weight:600;">${escapeHtml(c.departamento || '—')}</div></div>
+              <div><div style="color:#9ca3af;font-size:10px;font-weight:700;text-transform:uppercase;">Prazo solicitado</div><div style="color:#111827;font-weight:600;">${_fmtDataEmCompra(c.prazo_solicitado)}</div></div>
+              <div><div style="color:#9ca3af;font-size:10px;font-weight:700;text-transform:uppercase;">Previsão chegada</div><div style="color:#111827;font-weight:600;">${_fmtDataEmCompra(c.previsao_chegada)}</div></div>
+              <div><div style="color:#9ca3af;font-size:10px;font-weight:700;text-transform:uppercase;">Criado em</div><div style="color:#111827;font-weight:600;">${_fmtDataEmCompra(c.created_at)}</div></div>
+              ${c.objetivo_compra ? `<div style="grid-column:1/-1;"><div style="color:#9ca3af;font-size:10px;font-weight:700;text-transform:uppercase;">Objetivo</div><div style="color:#111827;">${escapeHtml(c.objetivo_compra)}</div></div>` : ''}
+              ${c.observacao ? `<div style="grid-column:1/-1;"><div style="color:#9ca3af;font-size:10px;font-weight:700;text-transform:uppercase;">Observação</div><div style="color:#111827;">${escapeHtml(c.observacao)}</div></div>` : ''}
+            </div>
+          </div>
+        `).join('')}
+      </div>`;
+  } catch (err) {
+    body.innerHTML = `<div style="text-align:center;padding:28px;color:#ef4444;font-size:13px;">Erro ao carregar: ${escapeHtml(err.message || String(err))}</div>`;
+  }
+};
 
 // Carrega estoque por local para todos os cards visíveis
 window.__estoqueCardCache = window.__estoqueCardCache || {};
@@ -56403,6 +56650,69 @@ function fecharModalComprasAcoes() {
     modal.style.display = 'none';
   }
 }
+
+/**
+ * Varredura leve da coluna Faturada: atualiza SQL com o que está na Omie
+ * (etapa 40 + órfãos locais), sem varrer os milhares de NF-e históricas.
+ */
+async function varrerFaturadasOmieKanban() {
+  const btn = document.getElementById('comprasVarrerFaturadasBtn');
+  if (btn?.disabled) return;
+
+  const okConfirm = window.confirm(
+    'Varrer a coluna "Faturada pelo fornecedor" com a Omie?\n\n' +
+    'Isso atualiza só essa coluna (leve, sem sobrecarregar a Omie) e remove NF-e que já não existem lá.'
+  );
+  if (!okConfirm) return;
+
+  const textoOriginal = btn ? btn.innerHTML : '';
+  if (btn) {
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i><span class="compras-acao-text">Varrendo…</span>';
+  }
+
+  try {
+    const resp = await fetch('/api/compras/kanban/varrer-faturadas', {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: '{}'
+    });
+    const data = await resp.json().catch(() => ({}));
+
+    if (resp.status === 409) {
+      alert(data.error || 'Já existe uma varredura em andamento.');
+      return;
+    }
+    if (!resp.ok || !data.ok) {
+      throw new Error(data.error || data.erro || `Falha HTTP ${resp.status}`);
+    }
+
+    const tempo = data.tempo_formatado || `${Math.round((data.duracao_ms || 0) / 1000)}s`;
+    alert(
+      'Varredura concluída (' + tempo + ').\n\n' +
+      'Atualizados na lista Omie: ' + (data.upsertados || 0) + '\n' +
+      'Órfãos atualizados: ' + (data.atualizados_orfaos || 0) + '\n' +
+      'Removidos (excluídos na Omie): ' + (data.removidos || 0) + '\n' +
+      'Erros: ' + (data.erros || 0) + '\n\n' +
+      'O kanban será recarregado.'
+    );
+
+    if (typeof loadMinhasSolicitacoes === 'function') {
+      loadMinhasSolicitacoes();
+    }
+  } catch (err) {
+    console.error('[Compras] Varredura Faturadas:', err);
+    alert('Erro na varredura: ' + (err.message || err));
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = textoOriginal ||
+        '<i class="fa-solid fa-magnifying-glass-chart"></i><span class="compras-acao-text">Varrer Faturadas (Omie)</span>';
+    }
+  }
+}
+window.varrerFaturadasOmieKanban = varrerFaturadasOmieKanban;
 
 // ========== Funções de Filtro de Kanbans ==========
 
@@ -64553,6 +64863,16 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
       if (comprasRealizadas.length > 0) {
         console.log('[DEBUG] Primeira compra realizada:', comprasRealizadas[0]);
       }
+      // Evita card duplicado: se o pedido Omie já veio do endpoint, remove a
+      // solicitação local com status "Compra realizada" do mesmo código interno.
+      const codIntComPedidoOmie = new Set(
+        comprasRealizadas.map(c => String(c.c_cod_int_ped || '').trim()).filter(Boolean)
+      );
+      lista = lista.filter(item => {
+        const st = String(item.status || '').toLowerCase().trim();
+        if (st !== 'compra realizada') return true;
+        return !codIntComPedidoOmie.has(String(item.numero_pedido || '').trim());
+      });
       lista = [...lista, ...comprasRealizadas];
     }
 
@@ -64665,8 +64985,16 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
       'cotado aguardando escolha': filtrarItensPorDataLimite('cotado aguardando escolha', itensComStatusNormalizado.filter(i => i.statusNormalizado === 'cotado')),
       'analise de cadastro': filtrarItensPorDataLimite('analise de cadastro', itensComStatusNormalizado.filter(i => i.statusNormalizado === 'analise de cadastro')),
       'aguardando compra preparação': filtrarItensPorDataLimite('aguardando compra preparação', itensComStatusNormalizado.filter(i => i.statusNormalizado === 'aguardando compra preparação')),
-      'compra realizada': filtrarItensPorDataLimite('compra realizada', itensComStatusNormalizado.filter(i => i.statusNormalizado === 'compra realizada')),
-      'faturada pelo fornecedor': filtrarItensPorDataLimite('faturada pelo fornecedor', itensComStatusNormalizado.filter(i => i.statusNormalizado === 'faturada pelo fornecedor' && String(i.compras || '').trim().toLowerCase() !== 'nao')),
+      'compra realizada': (() => {
+        const cards = itensComStatusNormalizado.filter(i => i.statusNormalizado === 'compra realizada');
+        // Pedidos vindos da Omie ignoram a data limite do kanban: se está aberto na
+        // Omie (ex.: recebido parcialmente em janeiro), tem que aparecer igual lá.
+        const daOmie = cards.filter(i => i.isCompraRealizada);
+        const internos = filtrarItensPorDataLimite('compra realizada', cards.filter(i => !i.isCompraRealizada));
+        return [...daOmie, ...internos];
+      })(),
+      // Igual Omie: lista todas as NF-e faturadas (sem esconder as marcadas compras=nao)
+      'faturada pelo fornecedor': filtrarItensPorDataLimite('faturada pelo fornecedor', itensComStatusNormalizado.filter(i => i.statusNormalizado === 'faturada pelo fornecedor')),
       'recebido': filtrarItensPorDataLimite('recebido', itensComStatusNormalizado.filter(i => i.statusNormalizado === 'recebido')),
       'concluído': filtrarItensPorDataLimite('concluído', itensComStatusNormalizado.filter(i => i.statusNormalizado === 'concluído' || i.statusNormalizado === 'concluido'))
     };

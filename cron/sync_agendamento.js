@@ -214,7 +214,262 @@ async function syncRecebimentosNFe(cfg) {
     pagina++;
   }
   log(`── [recebimentos_nfe] Concluído: ${sincronizados} sincronizados, ${erros} erros`);
-  return { sincronizados, erros };
+
+  // Reconcilia coluna Faturada (leve): lista Omie etapa 40 com detalhes + trata órfãos locais
+  const recon = await reconciliarFaturadasAbertas();
+  // Reconcilia coluna Compra realizada: inativa pedidos excluídos na Omie e corrige etapa
+  const reconPed = await reconciliarPedidosCompraAbertos();
+  return { sincronizados, erros, ...recon, ...reconPed };
+}
+
+/**
+ * Mantém a coluna "Compra realizada" (compras.pedidos_omie) alinhada à Omie.
+ * PesquisarPedCompra paginado (todos os status, >= 01/01/2026) → pedido local aberto
+ * que não aparece foi excluído na Omie → inativo=true; etapa diferente → atualiza.
+ */
+async function reconciliarPedidosCompraAbertos() {
+  log('── [pedidos_omie] Reconciliando pedidos abertos...');
+  let inativados = 0;
+  let etapaAjustada = 0;
+  let faturadosMarcados = 0;
+
+  const pesquisar = async (filtrosStatus) => {
+    const mapa = new Map();
+    let pagina = 1;
+    let totalPaginas = 1;
+    while (pagina <= totalPaginas) {
+      let data;
+      try {
+        data = await omiePost('produtos/pedidocompra', 'PesquisarPedCompra', {
+          nPagina: pagina,
+          nRegsPorPagina: 50,
+          dDataInicial: '01/01/2026',
+          ...filtrosStatus
+        });
+      } catch (e) {
+        // "Não existem registros" não é erro — lista vazia para esse status
+        if (/n[aã]o existem registros/i.test(String(e.message || ''))) break;
+        throw e;
+      }
+      if (data?.faultstring) {
+        if (/n[aã]o existem registros/i.test(data.faultstring)) break;
+        throw new Error(data.faultstring);
+      }
+      totalPaginas = data.nTotalPaginas || 1;
+      for (const item of (data.pedidos_pesquisa || [])) {
+        const cab = item?.cabecalho_consulta || {};
+        if (cab.nCodPed) mapa.set(String(cab.nCodPed), String(cab.cEtapa || '').trim());
+      }
+      pagina++;
+    }
+    return mapa;
+  };
+
+  // Todos os status → detectar excluídos | só pendentes → detectar faturados
+  const etapasOmie = await pesquisar({
+    lExibirPedidosPendentes: true,
+    lExibirPedidosFaturados: true,
+    lExibirPedidosRecebidos: true,
+    lExibirPedidosCancelados: true,
+    lExibirPedidosEncerrados: true,
+    lExibirPedidosRecParciais: true,
+    lExibirPedidosFatParciais: true
+  });
+  // "Abertos" = mesma regra da tela da Omie: pendentes + faturados sem recebimento +
+  // parcialmente faturados/recebidos. Só sai quando recebido total/cancelado/encerrado.
+  const pendentesOmie = await pesquisar({
+    lExibirPedidosPendentes: true,
+    lExibirPedidosFaturados: true,
+    lExibirPedidosFatParciais: true,
+    lExibirPedidosRecParciais: true
+  });
+  log(`  [pedidos_omie] ${etapasOmie.size} pedidos mapeados na Omie (${pendentesOmie.size} abertos)`);
+
+  await pool.query(`
+    ALTER TABLE compras.pedidos_omie
+    ADD COLUMN IF NOT EXISTS pendente_omie BOOLEAN
+  `);
+
+  const { rows: abertos } = await pool.query(`
+    SELECT DISTINCT po.n_cod_ped, po.c_numero, po.c_etapa, po.pendente_omie
+    FROM compras.pedidos_omie po
+    WHERE COALESCE(po.inativo, FALSE) = FALSE
+      AND po.d_inc_data >= '2026-01-01'
+  `);
+
+  for (const ped of abertos) {
+    const idPed = String(ped.n_cod_ped);
+    const etapaOmie = etapasOmie.get(idPed);
+    if (etapaOmie === undefined) {
+      await pool.query(
+        `UPDATE compras.pedidos_omie SET inativo = TRUE, updated_at = NOW() WHERE n_cod_ped = $1`,
+        [ped.n_cod_ped]
+      );
+      inativados++;
+      log(`  ✓ [pedidos_omie] Pedido ${ped.c_numero} inativado (excluído na Omie)`);
+      continue;
+    }
+
+    if (etapaOmie && etapaOmie !== String(ped.c_etapa || '').trim()) {
+      await pool.query(
+        `UPDATE compras.pedidos_omie SET c_etapa = $2, updated_at = NOW() WHERE n_cod_ped = $1`,
+        [ped.n_cod_ped, etapaOmie]
+      );
+      etapaAjustada++;
+      log(`  ✓ [pedidos_omie] Pedido ${ped.c_numero}: etapa ${ped.c_etapa} → ${etapaOmie}`);
+    }
+
+    const pendenteAgora = pendentesOmie.has(idPed);
+    if (ped.pendente_omie !== pendenteAgora) {
+      await pool.query(
+        `UPDATE compras.pedidos_omie SET pendente_omie = $2, updated_at = NOW() WHERE n_cod_ped = $1`,
+        [ped.n_cod_ped, pendenteAgora]
+      );
+      if (!pendenteAgora) {
+        faturadosMarcados++;
+        log(`  ✓ [pedidos_omie] Pedido ${ped.c_numero} fechado na Omie (sai de Compra realizada)`);
+      }
+    }
+  }
+
+  // Pedidos abertos na Omie que ainda não existem localmente → importa
+  // (cobre webhook atrasado/perdido: sem isso o pedido novo some do kanban).
+  let importados = 0;
+  const { rows: idsLocais } = await pool.query(`SELECT n_cod_ped FROM compras.pedidos_omie`);
+  const setIdsLocais = new Set(idsLocais.map(r => String(r.n_cod_ped)));
+  for (const idPed of pendentesOmie.keys()) {
+    if (setIdsLocais.has(idPed)) continue;
+    try {
+      const det = await omiePost('produtos/pedidocompra', 'ConsultarPedCompra', { nCodPed: Number(idPed) });
+      const ped = det?.pedido_compra_produto || det || {};
+      const cab = ped.cabecalho_consulta || ped.cabecalho || {};
+      const produtos = ped.produtos_consulta || ped.produtos || [];
+      if (!cab.nCodPed) throw new Error('resposta sem cabeçalho');
+
+      const dataInc = String(cab.dIncData || '').split('/').reverse().join('-') || null;
+      const dataPrev = String(cab.dDtPrevisao || '').split('/').reverse().join('-') || null;
+      await pool.query(`
+        INSERT INTO compras.pedidos_omie (
+          n_cod_ped, c_cod_int_ped, c_numero, d_inc_data, c_inc_hora, d_dt_previsao,
+          c_etapa, n_cod_for, c_cod_parc, n_qtde_parc, c_obs, c_obs_int,
+          pendente_omie, inativo, evento_webhook, updated_at
+        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,TRUE,FALSE,'cron-import',NOW())
+        ON CONFLICT (n_cod_ped) DO UPDATE SET
+          c_etapa = EXCLUDED.c_etapa, pendente_omie = TRUE, updated_at = NOW()
+      `, [
+        cab.nCodPed, cab.cCodIntPed || null, cab.cNumero || null,
+        dataInc, cab.cIncHora || null, dataPrev,
+        String(cab.cEtapa || '').trim() || null, cab.nCodFor || null,
+        cab.cCodParc || null, cab.nQtdeParc || null,
+        cab.cObs || null, cab.cObsInt || null
+      ]);
+
+      await pool.query('DELETE FROM compras.pedidos_omie_produtos WHERE n_cod_ped = $1', [cab.nCodPed]);
+      for (const prod of produtos) {
+        await pool.query(`
+          INSERT INTO compras.pedidos_omie_produtos (
+            n_cod_ped, n_cod_item, c_produto, c_descricao, c_unidade,
+            n_qtde, n_val_unit, n_val_tot
+          ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+        `, [
+          cab.nCodPed, prod.nCodItem || null, prod.cProduto || null,
+          prod.cDescricao || null, prod.cUnidade || null,
+          prod.nQtde || null, prod.nValUnit || null, prod.nValTot || null
+        ]);
+      }
+      importados++;
+      log(`  ✓ [pedidos_omie] Pedido ${cab.cNumero || idPed} importado da Omie (não existia localmente)`);
+    } catch (e) {
+      log(`  ✗ [pedidos_omie] Falha ao importar pedido ${idPed}: ${e.message}`);
+    }
+  }
+
+  log(`── [pedidos_omie] Concluído: inativados=${inativados} etapaAjustada=${etapaAjustada} faturados=${faturadosMarcados} importados=${importados}`);
+  return { pedidos_inativados: inativados, pedidos_etapa_ajustada: etapaAjustada, pedidos_faturados: faturadosMarcados, pedidos_importados: importados };
+}
+
+/**
+ * Mantém a coluna "Faturada pelo fornecedor" alinhada à Omie sem varrer o histórico inteiro.
+ * - ListarRecebimentos cEtapa=40 + cExibirDetalhes=S (~4 páginas)
+ * - Upsert status real (cancelada/recebida/etc.)
+ * - Locais abertos fora da lista: Consultar; se sumiu na Omie, DELETE
+ */
+async function reconciliarFaturadasAbertas() {
+  log('── [recebimentos_nfe] Reconciliando Faturadas abertas...');
+  const idsOmie = new Set();
+  let upsertados = 0;
+  let removidos = 0;
+  let orfaos = 0;
+  let errosRec = 0;
+  let pagina = 1;
+  let totalPaginas = 1;
+
+  while (pagina <= totalPaginas) {
+    const lista = await omiePost('produtos/recebimentonfe', 'ListarRecebimentos', {
+      nPagina: pagina,
+      nRegistrosPorPagina: 100,
+      cEtapa: '40',
+      cExibirDetalhes: 'S'
+    });
+    if (lista?.faultstring) throw new Error(lista.faultstring);
+    totalPaginas = lista.nTotalPaginas || 1;
+    const recs = lista.recebimentos || [];
+    log(`  [faturadas] Página ${pagina}/${totalPaginas} — ${recs.length} registros`);
+
+    for (const rec of recs) {
+      const nIdReceb = rec?.cabec?.nIdReceb;
+      if (!nIdReceb) continue;
+      idsOmie.add(String(nIdReceb));
+      try {
+        await upsertRecebimentoNFe(rec);
+        upsertados++;
+      } catch (e) {
+        errosRec++;
+        log(`  ✗ [faturadas] upsert ${nIdReceb}: ${e.message}`);
+      }
+    }
+    pagina++;
+  }
+
+  const { rows: locais } = await pool.query(`
+    SELECT r.n_id_receb
+    FROM logistica.recebimentos_nfe_omie r
+    WHERE UPPER(BTRIM(COALESCE(r.c_cancelada, 'N'))) NOT IN ('S', 'SIM')
+      AND UPPER(BTRIM(COALESCE(r.c_bloqueado, 'N'))) NOT IN ('S', 'SIM')
+      AND UPPER(BTRIM(COALESCE(r.c_recebido, 'N'))) NOT IN ('S', 'SIM')
+      AND BTRIM(COALESCE(r.c_modelo_nfe, '55')) <> '57'
+  `);
+
+  for (const row of locais) {
+    const idStr = String(row.n_id_receb);
+    if (idsOmie.has(idStr)) continue;
+    try {
+      const det = await omiePost('produtos/recebimentonfe', 'ConsultarRecebimento', {
+        nIdReceb: parseInt(idStr, 10)
+      });
+      if (det?.faultstring) throw new Error(det.faultstring);
+      await upsertRecebimentoNFe(det);
+      orfaos++;
+    } catch (e) {
+      const msg = String(e.message || e || '');
+      if (/n[aã]o foi poss[ií]vel encontrar|n[aã]o existe|not found/i.test(msg)) {
+        await pool.query('DELETE FROM logistica.recebimentos_nfe_omie WHERE n_id_receb = $1', [row.n_id_receb]);
+        removidos++;
+        log(`  ✓ [faturadas] removido órfão ${idStr}`);
+      } else {
+        errosRec++;
+        log(`  ✗ [faturadas] órfão ${idStr}: ${msg}`);
+      }
+    }
+  }
+
+  log(`── [recebimentos_nfe] Faturadas: upsert=${upsertados} orfaos=${orfaos} removidos=${removidos} erros=${errosRec}`);
+  return {
+    faturadas_upsertados: upsertados,
+    faturadas_orfaos: orfaos,
+    faturadas_removidos: removidos,
+    faturadas_erros: errosRec
+  };
 }
 
 async function upsertRecebimentoNFe(rec) {

@@ -171,6 +171,7 @@ const keys = Object.create(null);
 let appRenderer = null;
 let sceneBooted = false;
 let enterPlayFn = null;
+let waitSceneReadyFn = async () => {};
 
 function tryBootScene() {
   if (sceneBooted) return true;
@@ -298,9 +299,70 @@ function boot(renderer) {
   if (isTouchUI) document.body.classList.add('is-touch');
 
   let playing = false;
+  let awaitingAssets = false; // true = spinner ativo; movimento bloqueado mesmo com pointer lock
+  const enterLoadingEl = document.getElementById('enterLoading');
+  const enterLoadingSub = enterLoadingEl?.querySelector('.enter-loading-sub');
+  const imgCache = new Map(); // url → { img, ok, loading } — cedo p/ o spinner
+  const loadGate = {
+    ocupacao: false,
+    ocupacaoFotos: false,
+    estoque: false,
+    ident: false,
+  };
+  let warmFrames = 0;
+  const readyWaiters = [];
 
-  function enterPlay() {
-    if (btnEnter.disabled) return;
+  function fotosAindaCarregando() {
+    for (const rec of imgCache.values()) {
+      if (rec && rec.loading) return true;
+    }
+    return false;
+  }
+
+  function atualizarTextoSpinner() {
+    if (!enterLoadingSub) return;
+    let pend = 0;
+    for (const rec of imgCache.values()) {
+      if (rec && rec.loading) pend += 1;
+    }
+    if (pend > 0) {
+      enterLoadingSub.textContent = `Carregando fotos… ${pend} restante${pend === 1 ? '' : 's'}.`;
+    } else if (!loadGate.ocupacao || !loadGate.estoque || !loadGate.ident) {
+      enterLoadingSub.textContent = 'Carregando dados dos painéis e prateleiras…';
+    } else {
+      enterLoadingSub.textContent = 'Finalizando a cena…';
+    }
+  }
+
+  function notifySceneReady() {
+    atualizarTextoSpinner();
+    if (!loadGate.ocupacao || !loadGate.ocupacaoFotos || !loadGate.estoque || !loadGate.ident) return;
+    if (warmFrames < 2) return;
+    if (fotosAindaCarregando()) return;
+    while (readyWaiters.length) {
+      try { readyWaiters.shift()(); } catch (_) {}
+    }
+  }
+
+  waitSceneReadyFn = () => new Promise((resolve) => {
+    const tryResolve = () => {
+      if (
+        loadGate.ocupacao && loadGate.ocupacaoFotos &&
+        loadGate.estoque && loadGate.ident &&
+        warmFrames >= 2 && !fotosAindaCarregando()
+      ) {
+        resolve();
+        return true;
+      }
+      return false;
+    };
+    if (tryResolve()) return;
+    readyWaiters.push(resolve);
+  });
+
+  function liberarControlesAposCarga() {
+    awaitingAssets = false;
+    if (enterLoadingEl) enterLoadingEl.hidden = true;
     if (isTouchUI) {
       playing = true;
       blocker.hidden = true;
@@ -309,17 +371,78 @@ function boot(renderer) {
       document.getElementById('crosshair').hidden = false;
       return;
     }
-    try {
-      controls.lock();
-    } catch (err) {
-      console.error(err);
-      showWebglError('Pointer Lock bloqueado: ' + (err.message || err));
+    if (controls.isLocked) {
+      // Pointer lock já foi pedido no clique — só libera o movimento agora
+      playing = true;
+      blocker.hidden = true;
+      hud.hidden = false;
+      touchPad.hidden = true;
+      document.getElementById('crosshair').hidden = false;
+      return;
     }
+    // Lock falhou (gesto “expirou”): pede um novo clique
+    blocker.hidden = false;
+    const lead = blocker.querySelector('.lead');
+    if (lead) lead.textContent = 'Cena pronta. Clique de novo em “Toque / clique para entrar” para caminhar.';
+    btnEnter.textContent = 'Toque / clique para caminhar';
+  }
+
+  async function enterPlay() {
+    if (btnEnter.disabled) return;
+
+    // Se a cena já carregou e só falta o pointer lock, trava agora (ainda no gesto do clique)
+    if (!awaitingAssets && loadGate.ocupacao && loadGate.ocupacaoFotos && loadGate.estoque && loadGate.ident && !fotosAindaCarregando()) {
+      if (isTouchUI) {
+        liberarControlesAposCarga();
+        return;
+      }
+      try {
+        controls.lock();
+      } catch (err) {
+        console.error(err);
+        showWebglError('Pointer Lock bloqueado: ' + (err.message || err));
+      }
+      return;
+    }
+
+    awaitingAssets = true;
+    playing = false;
+    if (enterLoadingEl) enterLoadingEl.hidden = false;
+    blocker.hidden = true;
+    atualizarTextoSpinner();
+
+    // IMPORTANTE: pedir pointer lock AINDA no clique do usuário.
+    // Se esperar o fim do spinner, o Chrome bloqueia (NotAllowedError).
+    if (!isTouchUI) {
+      try {
+        controls.lock();
+      } catch (err) {
+        console.warn('[prateleiras-3d] lock antecipado:', err?.message || err);
+      }
+    }
+
+    const maxWaitMs = 25000;
+    try {
+      await Promise.race([
+        Promise.all([
+          waitSceneReadyFn(),
+          new Promise((r) => setTimeout(r, 400)),
+        ]),
+        new Promise((r) => setTimeout(r, maxWaitMs)),
+      ]);
+    } catch (_) { /* segue */ }
+
+    if (fotosAindaCarregando() || !loadGate.estoque || !loadGate.ident || !loadGate.ocupacaoFotos) {
+      forcarLiberarSpinner();
+    }
+    liberarControlesAposCarga();
   }
   enterPlayFn = enterPlay;
 
   function exitPlay() {
     playing = false;
+    awaitingAssets = false;
+    if (enterLoadingEl) enterLoadingEl.hidden = true;
     touchPad.hidden = true;
     document.getElementById('crosshair').hidden = true;
     document.getElementById('lookBalloon').hidden = true;
@@ -336,14 +459,27 @@ function boot(renderer) {
   });
 
   controls.addEventListener('lock', () => {
-    playing = true;
     blocker.hidden = true;
+    // Durante o spinner, trava o mouse mas NÃO libera o andar ainda
+    if (awaitingAssets) {
+      playing = false;
+      hud.hidden = true;
+      touchPad.hidden = true;
+      document.getElementById('crosshair').hidden = true;
+      return;
+    }
+    playing = true;
     hud.hidden = false;
     touchPad.hidden = true;
     document.getElementById('crosshair').hidden = false;
   });
   controls.addEventListener('unlock', () => {
     if (inspectMode) return; // painel fixado: mantém a cena e o balão na tela
+    if (awaitingAssets) {
+      // Esc durante o carregamento — mantém spinner; usuário clica de novo depois
+      playing = false;
+      return;
+    }
     if (!isTouchUI) {
       playing = false;
       blocker.hidden = false;
@@ -424,10 +560,12 @@ function boot(renderer) {
   // Uma luz só
   scene.add(new THREE.AmbientLight(0xffffff, 1.2));
 
-  // ——— Chão / paredes claras (barracão 2× área, +50% altura) ———
+  // ——— Chão / paredes claras (barracão; vão vazio à esquerda é reduzido depois das prateleiras) ———
   const floorW = 42 * HALL_SIZE_MUL;
   const floorD = (RACK_LEN + 16) * HALL_SIZE_MUL;
   const wallT = 0.4;
+  const hallRightX = floorW / 2;
+  let hallLeftX = -floorW / 2;
   const floor = new THREE.Mesh(new THREE.PlaneGeometry(floorW, floorD), floorMat);
   floor.rotation.x = -Math.PI / 2;
   scene.add(floor);
@@ -438,19 +576,53 @@ function boot(renderer) {
     const mesh = new THREE.Mesh(new THREE.BoxGeometry(sx, wallH, sz), wallMat);
     mesh.position.set(cx, wallH / 2, cz);
     scene.add(mesh);
-    colliders.push({
+    const col = {
       minX: cx - sx / 2, maxX: cx + sx / 2,
       minZ: cz - sz / 2, maxZ: cz + sz / 2,
-    });
+    };
+    colliders.push(col);
+    return { mesh, col, cx, cz, sx, sz };
   }
-  addWall(0, -floorD / 2, floorW, wallT);
-  addWall(0, floorD / 2, floorW, wallT);
-  addWall(-floorW / 2, 0, wallT, floorD);
-  addWall(floorW / 2, 0, wallT, floorD);
+  const wallFar = addWall(0, -floorD / 2, floorW, wallT);   // −Z (fundo / kanban)
+  const wallNear = addWall(0, floorD / 2, floorW, wallT);  // +Z (entrada / spawn)
+  const wallLeft = addWall(-floorW / 2, 0, wallT, floorD); // −X (vão vazio)
+  const wallRight = addWall(floorW / 2, 0, wallT, floorD); // +X (prateleiras + relatório)
   const ceiling = new THREE.Mesh(new THREE.PlaneGeometry(floorW - 0.2, floorD - 0.2), ceilMat);
   ceiling.rotation.x = Math.PI / 2;
   ceiling.position.y = wallH - 0.05;
   scene.add(ceiling);
+
+  /** Encolhe só o vão vazio à esquerda (−X) pela metade; lado das prateleiras não mexe. */
+  function encolherVaoVazioEsquerdo(lastRackX) {
+    const margin = 1.2;
+    const contentLeft = lastRackX - RACK_T / 2 - margin;
+    const empty = contentLeft - hallLeftX;
+    if (empty <= 2) return;
+    hallLeftX = contentLeft - empty * 0.5;
+    const newW = hallRightX - hallLeftX;
+    const cx = (hallLeftX + hallRightX) / 2;
+
+    floor.geometry.dispose();
+    floor.geometry = new THREE.PlaneGeometry(newW, floorD);
+    floor.position.x = cx;
+
+    ceiling.geometry.dispose();
+    ceiling.geometry = new THREE.PlaneGeometry(newW - 0.2, floorD - 0.2);
+    ceiling.position.x = cx;
+
+    // Paredes N/S: mesma largura nova, centradas
+    for (const w of [wallFar, wallNear]) {
+      w.mesh.geometry.dispose();
+      w.mesh.geometry = new THREE.BoxGeometry(newW, wallH, wallT);
+      w.mesh.position.x = cx;
+      w.col.minX = cx - newW / 2;
+      w.col.maxX = cx + newW / 2;
+    }
+    // Parede esquerda: só anda para a direita
+    wallLeft.mesh.position.x = hallLeftX;
+    wallLeft.col.minX = hallLeftX - wallT / 2;
+    wallLeft.col.maxX = hallLeftX + wallT / 2;
+  }
 
   /**
    * Endereço igual ao Armazém 3D:
@@ -480,8 +652,6 @@ function boot(renderer) {
   }
 
   // ——— Fotos dos produtos desenhadas na posição (só perto da câmera) ———
-  const imgCache = new Map(); // url → { img, ok, loading }
-
   function fotoProxyUrl(url) {
     return `/api/prateleiras3d/foto?url=${encodeURIComponent(url)}`;
   }
@@ -495,20 +665,57 @@ function boot(renderer) {
     }
     rec = { img: new Image(), ok: false, loading: true, cbs: [onReady] };
     imgCache.set(url, rec);
-    rec.img.onload = () => {
-      rec.ok = true;
+    atualizarTextoSpinner();
+
+    const finalizar = (ok) => {
+      if (!rec.loading) return;
+      clearTimeout(rec._timer);
+      rec.ok = !!ok;
       rec.loading = false;
-      rec.cbs.forEach((cb) => cb());
-      rec.cbs = [];
+      const cbs = rec.cbs.splice(0);
+      cbs.forEach((cb) => { try { cb(); } catch (_) {} });
+      notifySceneReady();
     };
-    rec.img.onerror = () => {
-      rec.ok = false;
-      rec.loading = false;
-      rec.cbs.forEach((cb) => cb());
-      rec.cbs = [];
-    };
+
+    // Sem isso, foto que trava no proxy deixa o spinner eterno
+    rec._timer = setTimeout(() => finalizar(false), 9000);
+    rec.img.onload = () => finalizar(true);
+    rec.img.onerror = () => finalizar(false);
     rec.img.src = fotoProxyUrl(url);
     return rec;
+  }
+
+  /** Pré-carrega URLs com concorrência limitada (evita derrubar o proxy). */
+  async function preloadUrls(urls) {
+    const list = [...new Set((urls || []).filter(Boolean))];
+    if (!list.length) return;
+    const CONC = 6;
+    let idx = 0;
+    async function worker() {
+      while (idx < list.length) {
+        const url = list[idx++];
+        await new Promise((resolve) => loadFoto(url, resolve));
+      }
+    }
+    const n = Math.min(CONC, list.length);
+    await Promise.all(Array.from({ length: n }, () => worker()));
+  }
+
+  function forcarLiberarSpinner() {
+    for (const rec of imgCache.values()) {
+      if (rec && rec.loading) {
+        clearTimeout(rec._timer);
+        rec.loading = false;
+        rec.ok = false;
+        const cbs = rec.cbs.splice(0);
+        cbs.forEach((cb) => { try { cb(); } catch (_) {} });
+      }
+    }
+    loadGate.ocupacao = true;
+    loadGate.ocupacaoFotos = true;
+    loadGate.estoque = true;
+    loadGate.ident = true;
+    notifySceneReady();
   }
 
   const SLOT_TEX_W = 128;
@@ -1048,9 +1255,12 @@ function boot(renderer) {
   blk.rows.push(placeRow(x, +1, 4, 'D', BAYS_LAST));
   blk.slabs.push(addRackSlab(x - 0.06, 0.12, BAYS_LAST));
   const lastRackX = x;
+  encolherVaoVazioEsquerdo(lastRackX);
 
-  // ——— Etiqueta de rua PINTADA NO CHÃO, na entrada de cada corredor ———
-  function makeRuaFloorTag(ruaNum) {
+  // ——— Etiqueta de rua PINTADA NO CHÃO (entrada spawn + ponta fundo) ———
+  // faceTowardSpawn=true → legível vindo do spawn (+Z); false → legível entrando pelo fundo (−Z)
+  const farRackZ = RACK_LEN / 2 - BAYS_WALL * BAY_W; // ponta mais longa (R1 na parede)
+  function makeRuaFloorTag(ruaNum, faceTowardSpawn) {
     const c = document.createElement('canvas');
     c.width = 256;
     c.height = 128;
@@ -1076,16 +1286,22 @@ function boot(renderer) {
       new THREE.PlaneGeometry(1.3, 0.65),
       new THREE.MeshBasicMaterial({ map: tex, toneMapped: false })
     );
-    // Colada no chão, com o texto legível para quem chega do spawn (+Z)
     tag.rotation.x = -Math.PI / 2;
-    tag.position.set(aisles[ruaNum], 0.02, RACK_LEN / 2 + 0.9);
+    if (!faceTowardSpawn) tag.rotation.z = Math.PI; // vira o texto p/ quem entra pelo fundo
+    const z = faceTowardSpawn ? (RACK_LEN / 2 + 0.9) : (farRackZ - 0.9);
+    tag.position.set(aisles[ruaNum], 0.02, z);
     scene.add(tag);
   }
-  for (const n of [1, 2, 3, 4]) makeRuaFloorTag(n);
+  for (const n of [1, 2, 3, 4]) {
+    makeRuaFloorTag(n, true);
+    makeRuaFloorTag(n, false);
+  }
 
   // ——— Quadros nas paredes: KANBAN (parede do fundo) + RELATÓRIO (parede lateral) ———
   let kanbanBoardMesh = null;
   let relatorioBoardMesh = null;
+  let estoqueMinimoBoardMesh = null;
+  let identificacaoBoardMesh = null;
 
   function addKanbanWallBoard() {
     const KFONT = 'ui-sans-serif, system-ui, sans-serif';
@@ -1118,25 +1334,50 @@ function boot(renderer) {
       { key: 'Stund-by',            nome: 'Stund-by',            cor: '#ec4899' },
       { key: 'Em Separação',        nome: 'Em Separação',        cor: '#f59e0b' },
       { key: 'Separado',            nome: 'Separado',            cor: '#22c55e' },
-      { key: 'Aguardando retirada', nome: 'Aguard. retirada',    cor: '#a78bfa' },
-      { key: 'Concluído',           nome: 'Concluído',           cor: '#9ca3af' },
     ];
 
-    function base(sub) {
+    // Modo do quadro: 'kanban' (colunas por status) ou 'destino' (um card por local destino)
+    let modo = 'kanban';
+
+    // Botão "Iniciar separação" pintado no topo direito do quadro
+    const BTN = { w: 470, h: 64, x: W - 470 - 32, y: 24 };
+
+    function desenharBotaoModo(rects) {
+      const label = modo === 'kanban' ? '▶  Iniciar separação' : '←  Voltar ao kanban';
+      ctx.fillStyle = modo === 'kanban' ? '#16a34a' : '#334155';
+      ctx.beginPath();
+      ctx.roundRect(BTN.x, BTN.y, BTN.w, BTN.h, 12);
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(255,255,255,0.25)';
+      ctx.lineWidth = 3;
+      ctx.stroke();
+      ctx.fillStyle = '#ffffff';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.font = `bold 30px ${KFONT}`;
+      ctx.fillText(label, BTN.x + BTN.w / 2, BTN.y + BTN.h / 2);
+      ctx.textAlign = 'left';
+      rects.push({ x: BTN.x, y: BTN.y, w: BTN.w, h: BTN.h, card: { btnModo: true } });
+    }
+
+    function base(sub, titulo) {
       ctx.fillStyle = '#0f172a';
       ctx.fillRect(0, 0, W, H);
       ctx.fillStyle = '#ffffff';
       ctx.textAlign = 'left';
       ctx.textBaseline = 'middle';
       ctx.font = `bold 52px ${KFONT}`;
-      ctx.fillText('TELA DE SEPARAÇÃO', 32, 52);
+      ctx.fillText(titulo || 'TELA DE SEPARAÇÃO', 32, 52);
       if (sub) {
         ctx.fillStyle = '#94a3b8';
         ctx.font = `28px ${KFONT}`;
         ctx.fillText(sub, 32, 110);
       }
-      board.userData.cardRects = [];
+      const rects = [];
+      desenharBotaoModo(rects);
+      board.userData.cardRects = rects;
       tex.needsUpdate = true;
+      return rects;
     }
 
     function fmtDataHora(d) {
@@ -1145,8 +1386,7 @@ function boot(renderer) {
     }
 
     function pintar(colunas) {
-      base('Mire num card e clique para abrir os itens · botão direito sai');
-      const rects = [];
+      const rects = base('Mire num card e clique para abrir os itens · botão direito sai');
       const mTop = 140;
       const mSide = 24;
       const gap = 16;
@@ -1225,15 +1465,122 @@ function boot(renderer) {
       tex.needsUpdate = true;
     }
 
-    base('Carregando kanban…');
-    fetch('/api/logistica/solicitacoes-kanban', { credentials: 'include' })
-      .then((r) => r.json().then((j) => ({ status: r.status, j })))
-      .then(({ status, j }) => {
-        if (j && j.ok) pintar(j.colunas || {});
-        else if (status === 401) base('Faça login na intranet para ver o kanban.');
-        else base(String(j?.error || 'Sem dados.'));
-      })
-      .catch(() => base('Falha ao carregar o kanban.'));
+    // ——— Visão POR LOCAL DESTINO: um card por destino (modo "Iniciar separação") ———
+    const CORES_DEST = ['#3b82f6', '#f59e0b', '#22c55e', '#a78bfa', '#ec4899', '#38bdf8', '#f97316', '#10b981'];
+
+    function pintarDestinos(destinos) {
+      const rects = base(
+        'Itens abertos agrupados por local destino · mire num card e clique para ver as SEPs',
+        'SEPARAÇÃO POR DESTINO'
+      );
+      if (!destinos.length) {
+        ctx.fillStyle = '#94a3b8';
+        ctx.textAlign = 'center';
+        ctx.font = `bold 34px ${KFONT}`;
+        ctx.fillText('Nenhum item aberto para separar.', W / 2, H / 2);
+        ctx.textAlign = 'left';
+        tex.needsUpdate = true;
+        return;
+      }
+      const mTop = 140;
+      const mSide = 24;
+      const gap = 20;
+      const porLinha = 4;
+      const cardW = (W - mSide * 2 - gap * (porLinha - 1)) / porLinha;
+      const cardH = 210;
+      const maxLinhas = Math.floor((H - mTop - 24 + gap) / (cardH + gap));
+      const visiveis = destinos.slice(0, porLinha * maxLinhas);
+
+      visiveis.forEach((d, i) => {
+        const x = mSide + (i % porLinha) * (cardW + gap);
+        const y = mTop + Math.floor(i / porLinha) * (cardH + gap);
+        const cor = CORES_DEST[i % CORES_DEST.length];
+
+        ctx.fillStyle = '#1e293b';
+        ctx.strokeStyle = d.tem_urgente ? '#ef4444' : '#2a3a52';
+        ctx.lineWidth = d.tem_urgente ? 5 : 2;
+        ctx.beginPath();
+        ctx.roundRect(x, y, cardW, cardH, 14);
+        ctx.fill();
+        ctx.stroke();
+
+        ctx.fillStyle = cor;
+        ctx.beginPath();
+        ctx.roundRect(x, y, cardW, 56, [14, 14, 0, 0]);
+        ctx.fill();
+        ctx.fillStyle = '#ffffff';
+        ctx.textAlign = 'left';
+        ctx.font = `bold 26px ${KFONT}`;
+        ctx.fillText(String(d.destino || '').slice(0, 26), x + 16, y + 28);
+
+        ctx.fillStyle = '#e2e8f0';
+        ctx.font = `bold 30px ${KFONT}`;
+        ctx.fillText(`${d.total_itens} ite${Number(d.total_itens) === 1 ? 'm' : 'ns'}`, x + 16, y + 92);
+        ctx.fillStyle = '#94a3b8';
+        ctx.font = `24px ${KFONT}`;
+        ctx.fillText(`${d.total_seps} SEP${Number(d.total_seps) === 1 ? '' : 's'}`, x + 16, y + 128);
+        const seps = (d.seps || []).slice(0, 3).join(', ');
+        ctx.fillStyle = '#6b7280';
+        ctx.font = `21px ${KFONT}`;
+        ctx.fillText(seps + ((d.seps || []).length > 3 ? '…' : ''), x + 16, y + 160);
+        if (d.tem_urgente) {
+          ctx.fillStyle = '#ef4444';
+          ctx.font = `bold 22px ${KFONT}`;
+          ctx.fillText('URGENTE', x + 16, y + 190);
+        }
+
+        rects.push({
+          x, y, w: cardW, h: cardH,
+          card: { destino: d.destino, cod_local: d.cod_local, seps: d.seps || [], total_itens: d.total_itens, total_seps: d.total_seps },
+        });
+      });
+      if (destinos.length > visiveis.length) {
+        ctx.fillStyle = '#94a3b8';
+        ctx.textAlign = 'center';
+        ctx.font = `bold 24px ${KFONT}`;
+        ctx.fillText(`+${destinos.length - visiveis.length} destinos`, W / 2, H - 16);
+        ctx.textAlign = 'left';
+      }
+      board.userData.cardRects = rects;
+      tex.needsUpdate = true;
+    }
+
+    function carregarKanban() {
+      base('Carregando kanban…');
+      fetch('/api/logistica/solicitacoes-kanban', { credentials: 'include' })
+        .then((r) => r.json().then((j) => ({ status: r.status, j })))
+        .then(({ status, j }) => {
+          if (j && j.ok) pintar(j.colunas || {});
+          else if (status === 401) base('Faça login na intranet para ver o kanban.');
+          else base(String(j?.error || 'Sem dados.'));
+        })
+        .catch(() => base('Falha ao carregar o kanban.'));
+    }
+
+    function carregarDestinos() {
+      base('Carregando destinos…', 'SEPARAÇÃO POR DESTINO');
+      fetch('/api/logistica/solicitacoes-kanban-destinos', { credentials: 'include' })
+        .then((r) => r.json().then((j) => ({ status: r.status, j })))
+        .then(({ status, j }) => {
+          if (j && j.ok) pintarDestinos(j.destinos || []);
+          else if (status === 401) base('Faça login na intranet para ver os destinos.', 'SEPARAÇÃO POR DESTINO');
+          else base(String(j?.error || 'Sem dados.'), 'SEPARAÇÃO POR DESTINO');
+        })
+        .catch(() => base('Falha ao carregar os destinos.', 'SEPARAÇÃO POR DESTINO'));
+    }
+
+    // Clique no botão do quadro alterna kanban ⇄ destinos
+    board.userData.toggleModo = () => {
+      modo = modo === 'kanban' ? 'destino' : 'kanban';
+      if (modo === 'destino') {
+        carregarDestinos();
+      } else {
+        sairModoSeparacao(); // voltar ao kanban desfaz o filtro e esconde a mesa
+        carregarKanban();
+      }
+    };
+
+    carregarKanban();
   }
   addKanbanWallBoard();
 
@@ -1255,12 +1602,12 @@ function boot(renderer) {
     tex.magFilter = THREE.LinearFilter;
 
     const board = new THREE.Mesh(
-      new THREE.PlaneGeometry(7, 3.5),
-      new THREE.MeshBasicMaterial({ map: tex, toneMapped: false })
+      new THREE.PlaneGeometry(5.0, 3.0),
+      new THREE.MeshBasicMaterial({ map: tex, toneMapped: false, side: THREE.DoubleSide })
     );
     // Parede direita (+X), no vão livre entre a ponta da prateleira e o spawn
     board.rotation.y = -Math.PI / 2;
-    board.position.set(floorW / 2 - wallT / 2 - 0.06, 2.15, RACK_LEN / 2 + 5.4);
+    board.position.set(floorW / 2 - wallT / 2 - 0.06, 2.15, RACK_LEN / 2 + 4.2);
     board.userData = { tipo: 'relatorio', tabRects: [], texW: W, texH: H, setPage: null, pagAtual: 0 };
     scene.add(board);
     relatorioBoardMesh = board;
@@ -1554,6 +1901,544 @@ function boot(renderer) {
   }
   addRelatorioWallBoard();
 
+  // Posição dos painéis na parede da entrada (+Z): Identificação (esq.) + Estoque mínimo (dir.)
+  // Centralizados na largura útil do barracão, com folga das paredes laterais (evita cortar o "E").
+  const ENTRY_PANEL_W = 4.6;
+  const ENTRY_PANEL_H = 3.0;
+  const ENTRY_PANEL_GAP = 0.5;
+  const ENTRY_WALL_MARGIN = 2.6;
+  const entryWallZ = floorD / 2 - wallT / 2 - 0.06;
+  const usableLeft = hallLeftX + ENTRY_WALL_MARGIN;
+  const usableRight = hallRightX - ENTRY_WALL_MARGIN;
+  const usableCenter = (usableLeft + usableRight) / 2;
+  const identBoardX = usableCenter - (ENTRY_PANEL_W + ENTRY_PANEL_GAP) / 2;
+  const estoqueBoardX = usableCenter + (ENTRY_PANEL_W + ENTRY_PANEL_GAP) / 2;
+
+  // ——— Quadro ESTOQUE MÍNIMO (parede da entrada, à direita da Identificação) ———
+  function addEstoqueMinimoWallBoard() {
+    const KFONT = 'ui-sans-serif, system-ui, sans-serif';
+    const W = 2048;
+    const H = 1024;
+    const COLS = 6;
+    const ROWS = 3;
+    const c = document.createElement('canvas');
+    c.width = W;
+    c.height = H;
+    const ctx = c.getContext('2d');
+    const tex = new THREE.CanvasTexture(c);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    tex.generateMipmaps = false;
+    tex.minFilter = THREE.LinearFilter;
+    tex.magFilter = THREE.LinearFilter;
+
+    const board = new THREE.Mesh(
+      new THREE.PlaneGeometry(ENTRY_PANEL_W, ENTRY_PANEL_H),
+      new THREE.MeshBasicMaterial({ map: tex, toneMapped: false, side: THREE.DoubleSide })
+    );
+    board.rotation.y = Math.PI;
+    board.position.set(estoqueBoardX, 2.15, entryWallZ);
+    board.userData = {
+      tipo: 'estoque-minimo',
+      scroll: 0,
+      maxScroll: 0,
+      cols: COLS,
+      rows: ROWS,
+      texW: W,
+      texH: H,
+      btnRects: [],
+      pintar: null,
+      toggleFiltroCompra: null,
+    };
+    scene.add(board);
+    estoqueMinimoBoardMesh = board;
+
+    let itens = [];
+    let emCompraMap = new Map();
+    let soNecessarioComprar = false; // true = esconde os que já têm "Em compra"
+    let msgStatus = 'Carregando estoque mínimo…';
+
+    function resolverFoto(it) {
+      if (it.foto_url) return it.foto_url;
+      const cod = String(it.codigo || '').trim();
+      if (!cod) return null;
+      for (const lista of Object.values(ocupacao)) {
+        for (const o of lista || []) {
+          if (String(o.codigo_produto || '').trim() === cod && o.foto_url) return o.foto_url;
+        }
+      }
+      return null;
+    }
+
+    function desenharIconeCarrinho(cx, cy, s, cor) {
+      ctx.strokeStyle = cor;
+      ctx.fillStyle = cor;
+      ctx.lineWidth = Math.max(2, s * 0.12);
+      ctx.lineJoin = 'round';
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(cx - s * 0.45, cy - s * 0.35);
+      ctx.lineTo(cx - s * 0.3, cy - s * 0.35);
+      ctx.lineTo(cx - s * 0.15, cy + s * 0.15);
+      ctx.lineTo(cx + s * 0.35, cy + s * 0.15);
+      ctx.lineTo(cx + s * 0.42, cy - s * 0.15);
+      ctx.lineTo(cx - s * 0.05, cy - s * 0.15);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(cx - s * 0.05, cy + s * 0.35, s * 0.1, 0, Math.PI * 2);
+      ctx.arc(cx + s * 0.25, cy + s * 0.35, s * 0.1, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    function itensVisiveis() {
+      if (!soNecessarioComprar) return itens;
+      return itens.filter((p) => !emCompraMap.has(String(p.codigo || '').trim().toUpperCase()));
+    }
+
+    function pintar() {
+      const lista = itensVisiveis();
+      ctx.fillStyle = '#0f172a';
+      ctx.fillRect(0, 0, W, H);
+      ctx.fillStyle = '#7f1d1d';
+      ctx.fillRect(0, 0, W, 96);
+      ctx.fillStyle = '#ffffff';
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'middle';
+      ctx.font = `bold 40px ${KFONT}`;
+      ctx.fillText('ESTOQUE MÍNIMO', 32, 40);
+
+      // Botão "Necessário comprar"
+      const btn = { x: W - 520, y: 18, w: 480, h: 60, acao: 'filtro-compra' };
+      ctx.fillStyle = soNecessarioComprar ? '#16a34a' : '#1e3a8a';
+      ctx.beginPath();
+      ctx.roundRect(btn.x, btn.y, btn.w, btn.h, 12);
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(255,255,255,0.3)';
+      ctx.lineWidth = 3;
+      ctx.stroke();
+      ctx.fillStyle = '#ffffff';
+      ctx.textAlign = 'center';
+      ctx.font = `bold 26px ${KFONT}`;
+      ctx.fillText(
+        soNecessarioComprar ? '✓ Necessário comprar (ativo)' : 'Necessário comprar',
+        btn.x + btn.w / 2, btn.y + btn.h / 2
+      );
+      board.userData.btnRects = [btn];
+      ctx.textAlign = 'left';
+
+      ctx.fillStyle = '#fca5a5';
+      ctx.font = `24px ${KFONT}`;
+
+      if (!itens.length) {
+        ctx.fillText(msgStatus, 32, 74);
+        ctx.fillStyle = '#94a3b8';
+        ctx.font = `32px ${KFONT}`;
+        ctx.fillText(msgStatus, 40, H / 2);
+        tex.needsUpdate = true;
+        return;
+      }
+
+      if (!lista.length) {
+        ctx.fillText('Filtro ativo: nenhum item sem compra registrada.', 32, 74);
+        ctx.fillStyle = '#94a3b8';
+        ctx.font = `30px ${KFONT}`;
+        ctx.fillText('Todos os itens abaixo do mínimo já estão em compra.', 40, H / 2);
+        board.userData.maxScroll = 0;
+        tex.needsUpdate = true;
+        return;
+      }
+
+      const maxScroll = Math.max(0, Math.ceil(lista.length / COLS) - ROWS);
+      let scroll = Math.max(0, Math.min(Number(board.userData.scroll) || 0, maxScroll));
+      board.userData.scroll = scroll;
+      board.userData.maxScroll = maxScroll;
+
+      const startIdx = scroll * COLS;
+      const vis = lista.slice(startIdx, startIdx + COLS * ROWS);
+      const fim = Math.min(lista.length, startIdx + vis.length);
+      const filtroTxt = soNecessarioComprar ? ' · só sem compra' : '';
+      ctx.fillText(
+        `${lista.length} peça${lista.length === 1 ? '' : 's'}${filtroTxt} · ${startIdx + 1}–${fim}` +
+          (maxScroll > 0 ? ' · roda do mouse para rolar' : ''),
+        32, 74
+      );
+
+      const top = 120;
+      const cellW = (W - 48) / COLS;
+      const cellH = (H - top - 36) / ROWS;
+
+      vis.forEach((p, i) => {
+        const x = 24 + (i % COLS) * cellW;
+        const y = top + Math.floor(i / COLS) * cellH;
+        const fotoH = cellH - 56;
+        ctx.fillStyle = '#1e293b';
+        ctx.beginPath();
+        ctx.roundRect(x + 4, y + 4, cellW - 8, cellH - 8, 10);
+        ctx.fill();
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(x + 10, y + 10, cellW - 20, fotoH);
+
+        const url = resolverFoto(p);
+        const rec = url ? imgCache.get(url) : null;
+        if (url && rec && rec.ok) {
+          const iw = rec.img.naturalWidth || 1;
+          const ih = rec.img.naturalHeight || 1;
+          const s = Math.min((cellW - 28) / iw, (fotoH - 8) / ih);
+          const dw = iw * s;
+          const dh = ih * s;
+          ctx.drawImage(rec.img, x + 10 + (cellW - 20 - dw) / 2, y + 10 + (fotoH - dh) / 2, dw, dh);
+        } else {
+          ctx.fillStyle = '#64748b';
+          ctx.textAlign = 'center';
+          ctx.font = `bold 22px ${KFONT}`;
+          ctx.fillText(String(p.codigo || '').slice(0, 12), x + cellW / 2, y + 10 + fotoH / 2);
+          if (url && (!rec || rec.loading)) loadFoto(url, pintar);
+        }
+
+        const codKey = String(p.codigo || '').trim().toUpperCase();
+        if (codKey && emCompraMap.has(codKey)) {
+          const bx = x + 14;
+          const by = y + 14;
+          const bw = 148;
+          const bh = 36;
+          ctx.fillStyle = '#dbeafe';
+          ctx.strokeStyle = '#1e40af';
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.roundRect(bx, by, bw, bh, 6);
+          ctx.fill();
+          ctx.stroke();
+          desenharIconeCarrinho(bx + 18, by + bh / 2, 22, '#1e40af');
+          ctx.fillStyle = '#1e40af';
+          ctx.textAlign = 'left';
+          ctx.textBaseline = 'middle';
+          ctx.font = `bold 18px ${KFONT}`;
+          ctx.fillText('Em compra', bx + 36, by + bh / 2);
+        }
+
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillStyle = '#fbbf24';
+        ctx.font = `bold 20px ${KFONT}`;
+        ctx.fillText(String(p.codigo || '').slice(0, 14), x + cellW / 2, y + fotoH + 22);
+        ctx.fillStyle = '#fca5a5';
+        ctx.font = `18px ${KFONT}`;
+        const fis = Number(p.fisico) || 0;
+        const min = Number(p.estoque_minimo) || 0;
+        ctx.fillText(`${fis} / mín ${min}`, x + cellW / 2, y + fotoH + 42);
+        ctx.textAlign = 'left';
+      });
+
+      if (maxScroll > 0) {
+        const barX = W - 22;
+        const barY = top;
+        const barH = H - top - 36;
+        ctx.fillStyle = '#334155';
+        ctx.beginPath();
+        ctx.roundRect(barX, barY, 12, barH, 6);
+        ctx.fill();
+        const thumbH = Math.max(40, barH * (ROWS / (ROWS + maxScroll)));
+        const thumbY = barY + (barH - thumbH) * (scroll / maxScroll);
+        ctx.fillStyle = '#f87171';
+        ctx.beginPath();
+        ctx.roundRect(barX, thumbY, 12, thumbH, 6);
+        ctx.fill();
+      }
+
+      tex.needsUpdate = true;
+    }
+
+    board.userData.pintar = pintar;
+    board.userData.toggleFiltroCompra = () => {
+      soNecessarioComprar = !soNecessarioComprar;
+      board.userData.scroll = 0;
+      pintar();
+    };
+
+    function carregarFotosFaltantes(lista) {
+      const semFoto = (lista || []).filter((it) => !it.foto_url && (it.codigo_produto || it.codigo));
+      return Promise.all(semFoto.map((it) => {
+        const key = it.codigo_produto || it.codigo;
+        return fetch(`/api/produtos/imagem/${encodeURIComponent(key)}`, { credentials: 'include' })
+          .then((r) => r.json())
+          .then((j) => {
+            if (j && j.ok && j.url_imagem) it.foto_url = j.url_imagem;
+          })
+          .catch(() => {});
+      })).then(() => {
+        const urls = (lista || []).map((it) => it.foto_url).filter(Boolean);
+        return preloadUrls(urls);
+      }).then(() => pintar());
+    }
+
+    pintar();
+    Promise.all([
+      fetch('/api/logistica/produtos-no-minimo', { credentials: 'include' })
+        .then((r) => r.json().then((j) => ({ status: r.status, j }))),
+      fetch('/api/compras/produtos-em-compra', { credentials: 'include' })
+        .then((r) => r.json().then((j) => ({ status: r.status, j })))
+        .catch(() => ({ status: 0, j: null })),
+    ]).then(async ([minRes, compraRes]) => {
+      if (compraRes.j && compraRes.j.ok) {
+        emCompraMap = new Map();
+        (compraRes.j.itens || []).forEach((it) => {
+          const cod = String(it.codigo || '').trim().toUpperCase();
+          if (cod) emCompraMap.set(cod, String(it.status || '').trim());
+        });
+      }
+      const { status, j } = minRes;
+      if (j && j.ok) {
+        itens = (j.itens || []).map((it) => ({
+          codigo: it.codigo,
+          codigo_produto: it.codigo_produto,
+          descricao: it.descricao,
+          fisico: it.fisico,
+          estoque_minimo: it.estoque_minimo,
+          foto_url: resolverFoto(it),
+        }));
+        if (!itens.length) msgStatus = 'Nenhuma peça abaixo do estoque mínimo.';
+      } else if (status === 401) {
+        msgStatus = 'Faça login na intranet para ver o estoque mínimo.';
+      } else {
+        msgStatus = String(j?.error || 'Sem dados.');
+      }
+      pintar();
+      try {
+        if (itens.length) await carregarFotosFaltantes(itens);
+      } finally {
+        loadGate.estoque = true;
+        notifySceneReady();
+      }
+    }).catch(() => {
+      msgStatus = 'Falha ao carregar estoque mínimo.';
+      pintar();
+      loadGate.estoque = true;
+      notifySceneReady();
+    });
+  }
+  addEstoqueMinimoWallBoard();
+
+  // ——— Quadro IDENTIFICAÇÃO DO PRODUTO (parede da entrada — onde estava o estoque mínimo) ———
+  // Mesma lista do botão "Identificação do produto" (GET /api/etiquetas/recebimento/pendentes), em grade.
+  function addIdentificacaoWallBoard() {
+    const KFONT = 'ui-sans-serif, system-ui, sans-serif';
+    const W = 2048;
+    const H = 1024;
+    const COLS = 6;
+    const ROWS = 3;
+    const c = document.createElement('canvas');
+    c.width = W;
+    c.height = H;
+    const ctx = c.getContext('2d');
+    const tex = new THREE.CanvasTexture(c);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    tex.generateMipmaps = false;
+    tex.minFilter = THREE.LinearFilter;
+    tex.magFilter = THREE.LinearFilter;
+
+    const board = new THREE.Mesh(
+      new THREE.PlaneGeometry(ENTRY_PANEL_W, ENTRY_PANEL_H),
+      new THREE.MeshBasicMaterial({ map: tex, toneMapped: false, side: THREE.DoubleSide })
+    );
+    // Parede da entrada (+Z), à ESQUERDA do Estoque mínimo
+    board.rotation.y = Math.PI;
+    board.position.set(identBoardX, 2.15, entryWallZ);
+    board.userData = {
+      tipo: 'identificacao',
+      scroll: 0,
+      maxScroll: 0,
+      cols: COLS,
+      rows: ROWS,
+      pintar: null,
+    };
+    scene.add(board);
+    identificacaoBoardMesh = board;
+
+    let itens = [];
+    let msgStatus = 'Carregando identificação do produto…';
+
+    function resolverFoto(it) {
+      if (it.foto_url) return it.foto_url;
+      const cod = String(it.codigo_produto || '').trim();
+      if (!cod) return null;
+      for (const lista of Object.values(ocupacao)) {
+        for (const o of lista || []) {
+          if (String(o.codigo_produto || '').trim() === cod && o.foto_url) return o.foto_url;
+        }
+      }
+      return null;
+    }
+
+    function pintar() {
+      ctx.fillStyle = '#0f172a';
+      ctx.fillRect(0, 0, W, H);
+      ctx.fillStyle = '#4c1d95';
+      ctx.fillRect(0, 0, W, 96);
+      ctx.fillStyle = '#ffffff';
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'middle';
+      ctx.font = `bold 40px ${KFONT}`;
+      ctx.fillText('IDENTIFICAÇÃO DO PRODUTO', 32, 40);
+      ctx.fillStyle = '#c4b5fd';
+      ctx.font = `24px ${KFONT}`;
+
+      if (!itens.length) {
+        ctx.fillText(msgStatus, 32, 74);
+        ctx.fillStyle = '#94a3b8';
+        ctx.font = `32px ${KFONT}`;
+        ctx.fillText(msgStatus, 40, H / 2);
+        tex.needsUpdate = true;
+        return;
+      }
+
+      const maxScroll = Math.max(0, Math.ceil(itens.length / COLS) - ROWS);
+      let scroll = Math.max(0, Math.min(Number(board.userData.scroll) || 0, maxScroll));
+      board.userData.scroll = scroll;
+      board.userData.maxScroll = maxScroll;
+
+      const startIdx = scroll * COLS;
+      const vis = itens.slice(startIdx, startIdx + COLS * ROWS);
+      const fim = Math.min(itens.length, startIdx + vis.length);
+      const pend = itens.filter((e) => !e.impressa).length;
+      ctx.fillText(
+        `${itens.length} etiqueta(s) · ${pend} pendente(s) · ${startIdx + 1}–${fim}` +
+          (maxScroll > 0 ? ' · roda do mouse para rolar' : ''),
+        32, 74
+      );
+
+      const top = 120;
+      const cellW = (W - 48) / COLS;
+      const cellH = (H - top - 36) / ROWS;
+
+      vis.forEach((p, i) => {
+        const x = 24 + (i % COLS) * cellW;
+        const y = top + Math.floor(i / COLS) * cellH;
+        const fotoH = cellH - 72;
+        ctx.fillStyle = p.impressa ? '#1e293b' : '#1e1b4b';
+        ctx.beginPath();
+        ctx.roundRect(x + 4, y + 4, cellW - 8, cellH - 8, 10);
+        ctx.fill();
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(x + 10, y + 10, cellW - 20, fotoH);
+
+        const url = resolverFoto(p);
+        const rec = url ? imgCache.get(url) : null;
+        if (url && rec && rec.ok) {
+          const iw = rec.img.naturalWidth || 1;
+          const ih = rec.img.naturalHeight || 1;
+          const s = Math.min((cellW - 28) / iw, (fotoH - 8) / ih);
+          const dw = iw * s;
+          const dh = ih * s;
+          ctx.drawImage(rec.img, x + 10 + (cellW - 20 - dw) / 2, y + 10 + (fotoH - dh) / 2, dw, dh);
+        } else {
+          ctx.fillStyle = '#64748b';
+          ctx.textAlign = 'center';
+          ctx.font = `bold 20px ${KFONT}`;
+          ctx.fillText(String(p.codigo_produto || '').slice(0, 12), x + cellW / 2, y + 10 + fotoH / 2);
+          if (url && (!rec || rec.loading)) loadFoto(url, pintar);
+        }
+
+        if (p.impressa) {
+          ctx.fillStyle = '#166534';
+          ctx.beginPath();
+          ctx.roundRect(x + 14, y + 14, 110, 32, 6);
+          ctx.fill();
+          ctx.fillStyle = '#bbf7d0';
+          ctx.textAlign = 'center';
+          ctx.font = `bold 16px ${KFONT}`;
+          ctx.fillText('Impresso', x + 69, y + 30);
+        }
+
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillStyle = '#e9d5ff';
+        ctx.font = `bold 18px ${KFONT}`;
+        ctx.fillText(String(p.codigo_produto || '').slice(0, 14), x + cellW / 2, y + fotoH + 18);
+        ctx.fillStyle = '#a5b4fc';
+        ctx.font = `15px ${KFONT}`;
+        ctx.fillText(`Lote: ${String(p.lote || '—').slice(0, 12)}`, x + cellW / 2, y + fotoH + 36);
+        ctx.fillStyle = '#fde68a';
+        ctx.font = `bold 16px ${KFONT}`;
+        const qtd = p.qtd != null ? p.qtd : '';
+        const un = p.unidade || '';
+        ctx.fillText(`${qtd} ${un}`.trim(), x + cellW / 2, y + fotoH + 54);
+        ctx.textAlign = 'left';
+      });
+
+      if (maxScroll > 0) {
+        const barX = W - 22;
+        const barY = top;
+        const barH = H - top - 36;
+        ctx.fillStyle = '#334155';
+        ctx.beginPath();
+        ctx.roundRect(barX, barY, 12, barH, 6);
+        ctx.fill();
+        const thumbH = Math.max(40, barH * (ROWS / (ROWS + maxScroll)));
+        const thumbY = barY + (barH - thumbH) * (scroll / maxScroll);
+        ctx.fillStyle = '#a78bfa';
+        ctx.beginPath();
+        ctx.roundRect(barX, thumbY, 12, thumbH, 6);
+        ctx.fill();
+      }
+
+      tex.needsUpdate = true;
+    }
+
+    board.userData.pintar = pintar;
+
+    function carregarFotosFaltantes(lista) {
+      const semFoto = (lista || []).filter((it) => !it.foto_url && it.codigo_produto);
+      return Promise.all(semFoto.map((it) =>
+        fetch(`/api/produtos/imagem/${encodeURIComponent(it.codigo_produto)}`, { credentials: 'include' })
+          .then((r) => r.json())
+          .then((j) => {
+            if (j && j.ok && j.url_imagem) it.foto_url = j.url_imagem;
+          })
+          .catch(() => {})
+      )).then(() => {
+        const urls = (lista || []).map((it) => it.foto_url).filter(Boolean);
+        return preloadUrls(urls);
+      }).then(() => pintar());
+    }
+
+    pintar();
+    fetch('/api/etiquetas/recebimento/pendentes', { credentials: 'include' })
+      .then((r) => r.json().then((j) => ({ status: r.status, j })))
+      .then(async ({ status, j }) => {
+        if (j && Array.isArray(j.etiquetas)) {
+          itens = j.etiquetas.map((it) => ({
+            id: it.id,
+            codigo_produto: it.codigo_produto,
+            descricao_produto: it.descricao_produto,
+            lote: it.lote,
+            qtd: it.qtd,
+            unidade: it.unidade,
+            impressa: !!it.impressa,
+            foto_url: resolverFoto(it),
+          }));
+          if (!itens.length) msgStatus = 'Nenhuma etiqueta disponível.';
+        } else if (status === 401) {
+          msgStatus = 'Faça login na intranet para ver as etiquetas.';
+        } else {
+          msgStatus = String(j?.error || 'Sem dados.');
+        }
+        pintar();
+        try {
+          if (itens.length) await carregarFotosFaltantes(itens);
+        } finally {
+          loadGate.ident = true;
+          notifySceneReady();
+        }
+      })
+      .catch(() => {
+        msgStatus = 'Falha ao carregar identificação.';
+        pintar();
+        loadGate.ident = true;
+        notifySceneReady();
+      });
+  }
+  addIdentificacaoWallBoard();
+
+
   // Spawn na PONTA das prateleiras (lado dos banners), vendo todas as ruas:
   // rua 01 (parede) à DIREITA, rua 04 à ESQUERDA.
   function collidesAt(px, pz) {
@@ -1593,6 +2478,9 @@ function boot(renderer) {
   let lookAlvoAtual = null;
   let lookBannerAtual = null;
   let lookSlotAtual = null;
+  let lookEstoqueMinimoAtual = null;
+  let lookIdentificacaoAtual = null;
+  let lookEstoqueMinBtn = null; // botão "Necessário comprar" sob a mira
 
   function escHtml(s) {
     return String(s ?? '')
@@ -1639,6 +2527,22 @@ function boot(renderer) {
       ocupacao = {};
     }
     applyOcupacaoToSlots();
+    loadGate.ocupacao = true;
+    notifySceneReady();
+
+    // Pré-carrega TODAS as fotos das prateleiras antes de liberar o spinner
+    const urls = new Set();
+    for (const itens of Object.values(ocupacao)) {
+      for (const it of itens || []) {
+        if (it.foto_url) urls.add(it.foto_url);
+      }
+    }
+    try {
+      await preloadUrls([...urls]);
+    } finally {
+      loadGate.ocupacaoFotos = true;
+      notifySceneReady();
+    }
   }
 
   // Agrupa por produto: 1 grupo por código, com TODOS os IDs de etiqueta
@@ -1766,6 +2670,16 @@ function boot(renderer) {
     return null;
   }
 
+  function btnEstoqueMinSobMira(mesh, uv) {
+    if (!uv || !mesh.userData.btnRects?.length) return null;
+    const cx = uv.x * (mesh.userData.texW || 2048);
+    const cy = (1 - uv.y) * (mesh.userData.texH || 1024);
+    for (const r of mesh.userData.btnRects) {
+      if (cx >= r.x && cx <= r.x + r.w && cy >= r.y && cy <= r.y + r.h) return r;
+    }
+    return null;
+  }
+
   function mostrarBalaoRelHint(tab) {
     const key = `rel:${tab.idx}`;
     if (lookAlvoAtual === key) return;
@@ -1787,6 +2701,26 @@ function boot(renderer) {
   }
 
   function mostrarBalaoKanbanHint(card) {
+    if (card.btnModo) {
+      const key = 'kanban:btn-modo';
+      if (lookAlvoAtual === key) return;
+      lookAlvoAtual = key;
+      lookBalloonEnd.textContent = 'Iniciar separação';
+      lookBalloonBody.innerHTML =
+        '<div class="look-balloon-empty">Clique para alternar entre o kanban por status e a visão por local destino.</div>';
+      lookBalloon.hidden = false;
+      return;
+    }
+    if (card.destino !== undefined) {
+      const key = `kanban:dest:${card.destino}`;
+      if (lookAlvoAtual === key) return;
+      lookAlvoAtual = key;
+      lookBalloonEnd.textContent = `Destino: ${card.destino}`;
+      lookBalloonBody.innerHTML =
+        `<div class="look-balloon-empty">${escHtml(card.total_itens)} ite${Number(card.total_itens) === 1 ? 'm' : 'ns'} em ${escHtml(card.total_seps)} SEP${Number(card.total_seps) === 1 ? '' : 's'}<br>Clique para ver as SEPs deste destino.</div>`;
+      lookBalloon.hidden = false;
+      return;
+    }
     const key = `kanban:${card.n_solic}`;
     if (lookAlvoAtual === key) return;
     lookAlvoAtual = key;
@@ -1825,7 +2759,55 @@ function boot(renderer) {
       </div>`;
   }
 
+  // Painel fixado com as SEPs de um LOCAL DESTINO (visão "Iniciar separação")
+  // Cada SEP é um botão: clique seleciona/deseleciona. "Separar tudo" seleciona todas.
+  // "Iniciar separação" monta a mesa com as fotos e filtra as prateleiras.
+  let destinoAtual = null; // { destino, seps, selecionadas:Set }
+
+  function renderPainelDestino() {
+    const d = destinoAtual;
+    if (!d) return;
+    const btns = d.seps.map((s) => {
+      const sel = d.selecionadas.has(s);
+      return `<button type="button" class="sep-toggle${sel ? ' is-sel' : ''}" data-sep="${escHtml(s)}">${sel ? '✓ ' : ''}${escHtml(s)}</button>`;
+    }).join('');
+    const nSel = d.selecionadas.size;
+    lookBalloonBody.innerHTML = `
+      <div class="look-balloon-detail">
+        <div class="det-back">Botão direito p/ voltar ao 3D</div>
+        <div class="look-balloon-empty">Clique nas SEPs para escolher quais separar:</div>
+        <div class="sep-btn-list">${btns}</div>
+        <div class="sep-actions">
+          <button type="button" class="sep-select-all">${nSel === d.seps.length ? 'Desmarcar todas' : 'Separar tudo'}</button>
+          <button type="button" class="sep-start" ${nSel ? '' : 'disabled'}>▶ Iniciar separação (${nSel})</button>
+        </div>
+      </div>`;
+  }
+
+  function enterInspectDestino(card) {
+    inspectMode = true;
+    inspectEndereco = null;
+    playing = false;
+    lookBalloon.classList.add('is-locked');
+    lookAlvoAtual = `kanban-dest-fix:${card.destino}`;
+    lookBalloonEnd.textContent = `Destino: ${card.destino} · ${card.total_itens} ite${Number(card.total_itens) === 1 ? 'm' : 'ns'}`;
+    destinoAtual = { destino: card.destino, seps: (card.seps || []).slice(), selecionadas: new Set() };
+    renderPainelDestino();
+    lookBalloon.hidden = false;
+    if (controls.isLocked) controls.unlock();
+  }
+
   function enterInspectKanban(card) {
+    if (card.btnModo) {
+      if (kanbanBoardMesh?.userData.toggleModo) kanbanBoardMesh.userData.toggleModo();
+      lookAlvoAtual = null;
+      esconderBalao();
+      return;
+    }
+    if (card.destino !== undefined) {
+      enterInspectDestino(card);
+      return;
+    }
     inspectMode = true;
     inspectEndereco = null;
     playing = false;
@@ -1866,6 +2848,7 @@ function boot(renderer) {
     if (!inspectMode) return;
     inspectMode = false;
     inspectEndereco = null;
+    destinoAtual = null;
     lookBalloon.classList.remove('is-locked');
     esconderBalao();
     if (!isTouchUI) {
@@ -1875,15 +2858,306 @@ function boot(renderer) {
     }
   }
 
+  // ——— MODO SEPARAÇÃO: filtra prateleiras e monta a mesa com as fotos ———
+  // Prateleiras sem produto das SEPs escolhidas somem inteiras; nas que têm,
+  // só ficam visíveis os cards das posições com esses produtos.
+  let sepModeAtivo = false;
+  let mesaGroup = null;
+  let mesaCollider = null;
+  let mesaCanvas = null;
+  let mesaTex = null;
+  let mesaInfo = null; // { destino, seps, produtos }
+
+  function buildMesa() {
+    if (mesaGroup) return;
+    mesaGroup = new THREE.Group();
+    const madeira = new THREE.MeshBasicMaterial({ color: 0x8b5a2b });
+    const topo = new THREE.Mesh(new THREE.BoxGeometry(1.3, 0.08, 2.7), madeira);
+    topo.position.y = 0.9;
+    mesaGroup.add(topo);
+    const pernaGeo = new THREE.BoxGeometry(0.08, 0.9, 0.08);
+    const pernaMat = new THREE.MeshBasicMaterial({ color: 0x5c3a1a });
+    for (const [lx, lz] of [[-0.55, -1.25], [-0.55, 1.25], [0.55, -1.25], [0.55, 1.25]]) {
+      const p = new THREE.Mesh(pernaGeo, pernaMat);
+      p.position.set(lx, 0.45, lz);
+      mesaGroup.add(p);
+    }
+    // Painel inclinado em cima da mesa com as fotos (encara o armazém, lado −X)
+    mesaCanvas = document.createElement('canvas');
+    mesaCanvas.width = 1024;
+    mesaCanvas.height = 512;
+    mesaTex = new THREE.CanvasTexture(mesaCanvas);
+    mesaTex.colorSpace = THREE.SRGBColorSpace;
+    mesaTex.generateMipmaps = false;
+    mesaTex.minFilter = THREE.LinearFilter;
+    mesaTex.magFilter = THREE.LinearFilter;
+    const painel = new THREE.Mesh(
+      new THREE.PlaneGeometry(2.6, 1.3),
+      new THREE.MeshBasicMaterial({ map: mesaTex, toneMapped: false })
+    );
+    painel.rotation.order = 'YXZ';
+    painel.rotation.y = -Math.PI / 2; // encara −X (quem vem das prateleiras)
+    painel.rotation.x = -0.22;        // leve inclinação de leitura (topo p/ trás)
+    painel.position.set(-0.28, 1.62, 0);
+    mesaGroup.add(painel);
+
+    // Mesa no FUNDO das prateleiras (longe do relatório), perto da entrada das ruas / Estoque Produção
+    const mesaX = floorW / 2 - wallT - 0.85;
+    const mesaZ = farRackZ - 2.4;
+    mesaGroup.position.set(mesaX, 0, mesaZ);
+    mesaGroup.visible = false;
+    scene.add(mesaGroup);
+    mesaCollider = addColliderAt(mesaX, mesaZ, 1.5, 2.9);
+    mesaCollider.disabled = true;
+  }
+
+  function pintarMesa() {
+    if (!mesaCanvas || !mesaInfo) return;
+    const ctx = mesaCanvas.getContext('2d');
+    const W = mesaCanvas.width;
+    const H = mesaCanvas.height;
+    const MFONT = 'ui-sans-serif, system-ui, sans-serif';
+    ctx.fillStyle = '#0f172a';
+    ctx.fillRect(0, 0, W, H);
+    ctx.strokeStyle = '#16a34a';
+    ctx.lineWidth = 6;
+    ctx.strokeRect(3, 3, W - 6, H - 6);
+    ctx.fillStyle = '#ffffff';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    ctx.font = `bold 34px ${MFONT}`;
+    ctx.fillText(`SEPARAÇÃO — ${String(mesaInfo.destino).slice(0, 34)}`, 20, 34);
+    ctx.fillStyle = '#94a3b8';
+    ctx.font = `22px ${MFONT}`;
+    ctx.fillText(mesaInfo.seps.join(', ').slice(0, 80), 20, 68);
+
+    const produtos = mesaInfo.produtos;
+    if (!produtos.length) {
+      ctx.fillStyle = '#94a3b8';
+      ctx.font = `26px ${MFONT}`;
+      ctx.fillText('Nenhum item.', 20, H / 2);
+      mesaTex.needsUpdate = true;
+      return;
+    }
+    const top = 92;
+    const cols = Math.min(5, Math.max(3, Math.ceil(Math.sqrt(produtos.length * 1.6))));
+    const rows = Math.ceil(produtos.length / cols);
+    const cellW = (W - 24) / cols;
+    const cellH = (H - top - 12) / rows;
+    produtos.forEach((p, i) => {
+      const x = 12 + (i % cols) * cellW;
+      const y = top + Math.floor(i / cols) * cellH;
+      const textoH = 72;
+      const fotoH = Math.max(28, cellH - textoH);
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(x + 3, y + 3, cellW - 6, fotoH);
+      const rec = p.foto_url ? imgCache.get(p.foto_url) : null;
+      if (p.foto_url && rec && rec.ok) {
+        const iw = rec.img.naturalWidth || 1;
+        const ih = rec.img.naturalHeight || 1;
+        const s = Math.min((cellW - 12) / iw, (fotoH - 6) / ih);
+        const dw = iw * s;
+        const dh = ih * s;
+        ctx.drawImage(rec.img, x + 3 + (cellW - 6 - dw) / 2, y + 3 + (fotoH - dh) / 2, dw, dh);
+      } else {
+        ctx.fillStyle = '#374151';
+        ctx.textAlign = 'center';
+        ctx.font = `bold 18px ${MFONT}`;
+        ctx.fillText(String(p.codigo).slice(0, 12), x + cellW / 2, y + 3 + fotoH / 2);
+        if (p.foto_url && (!rec || rec.loading)) loadFoto(p.foto_url, pintarMesa);
+      }
+      const ty = y + fotoH + 12;
+      ctx.textAlign = 'center';
+      ctx.fillStyle = '#fbbf24';
+      ctx.font = `bold 16px ${MFONT}`;
+      ctx.fillText(String(p.codigo).slice(0, 14), x + cellW / 2, ty);
+      ctx.fillStyle = '#38bdf8';
+      ctx.font = `bold 15px ${MFONT}`;
+      ctx.fillText(String(p.sep || '—').slice(0, 16), x + cellW / 2, ty + 17);
+      ctx.fillStyle = '#d1d5db';
+      ctx.font = `14px ${MFONT}`;
+      ctx.fillText(`Ped: ${p.qtd} ${p.unidade || 'UN'}`, x + cellW / 2, ty + 34);
+      ctx.fillStyle = '#86efac';
+      ctx.fillText(`Est: ${p.estoque} ${p.unidade || 'UN'}`, x + cellW / 2, ty + 50);
+      ctx.textAlign = 'left';
+    });
+    mesaTex.needsUpdate = true;
+  }
+
+  /** Aplica o filtro: só ficam prateleiras/cards com os produtos das SEPs. */
+  function aplicarFiltroSeparacao(codigos) {
+    const codSet = new Set(codigos);
+    const endsRelevantes = new Set();
+    for (const [end, itens] of Object.entries(ocupacao)) {
+      if ((itens || []).some((i) => codSet.has(String(i.codigo_produto || '').trim()) && (Number(i.qtd) || 0) > 0)) {
+        endsRelevantes.add(end);
+      }
+    }
+    // Ruas/lados que têm pelo menos um endereço relevante
+    const ruaLadoOk = new Set();
+    for (const end of endsRelevantes) {
+      const rec = slotRegistry.get(end);
+      if (rec) ruaLadoOk.add(`R${rec.rua}_${rec.lado}`);
+    }
+    // Esconde blocos inteiros sem produto; nos visíveis, só cards relevantes
+    for (const b of blocks) {
+      const temProduto = b.rows.some((r) => ruaLadoOk.has(r.group.name));
+      b.sepHidden = !temProduto;
+      setBlockHidden(b, !temProduto);
+    }
+    for (const [end, rec] of slotRegistry) {
+      if (rec.mesh) rec.mesh.visible = endsRelevantes.has(end);
+    }
+    for (const mesh of overflowMeshes) mesh.visible = false;
+    return endsRelevantes.size;
+  }
+
+  function sairModoSeparacao() {
+    if (!sepModeAtivo) return;
+    sepModeAtivo = false;
+    mesaInfo = null;
+    esconderSepToast();
+    for (const b of blocks) {
+      b.sepHidden = false;
+      setBlockHidden(b, false);
+    }
+    for (const [, rec] of slotRegistry) {
+      if (rec.mesh) rec.mesh.visible = true;
+    }
+    for (const mesh of overflowMeshes) mesh.visible = true;
+    if (mesaGroup) mesaGroup.visible = false;
+    if (mesaCollider) mesaCollider.disabled = true;
+  }
+
+  // Aviso fixo do modo separação (não some com a mira)
+  let sepToast = null;
+  let sepToastTimer = null;
+  function mostrarSepToast(html, autoHideMs) {
+    if (!sepToast) {
+      sepToast = document.createElement('div');
+      sepToast.className = 'sep-toast';
+      document.body.appendChild(sepToast);
+    }
+    sepToast.innerHTML = html;
+    sepToast.hidden = false;
+    if (sepToastTimer) clearTimeout(sepToastTimer);
+    if (autoHideMs) sepToastTimer = setTimeout(() => { sepToast.hidden = true; }, autoHideMs);
+  }
+  function esconderSepToast() {
+    if (sepToastTimer) clearTimeout(sepToastTimer);
+    if (sepToast) sepToast.hidden = true;
+  }
+
+  async function iniciarModoSeparacao(destino, seps) {
+    sairModoSeparacao();
+    mostrarSepToast(`<b>Separação — ${escHtml(destino)}</b><br>Montando a separação…`);
+
+    // Busca os itens de cada SEP escolhida
+    const listas = await Promise.all(seps.map((s) =>
+      fetch(`/api/logistica/kanban/itens?n_solic=${encodeURIComponent(s)}&escopo=global`, { credentials: 'include' })
+        .then((r) => r.json())
+        .then((j) => (j && j.ok ? (j.itens || []) : []))
+        .catch(() => [])
+    ));
+
+    // Estoque físico nas prateleiras (soma das posições com aquele código)
+    function estoqueNasPrateleiras(cod) {
+      let total = 0;
+      for (const itens of Object.values(ocupacao)) {
+        for (const it of itens || []) {
+          if (String(it.codigo_produto || '').trim() === cod) total += Number(it.qtd) || 0;
+        }
+      }
+      return total;
+    }
+
+    // Um card por SEP + código (não junta SEPs diferentes no mesmo item)
+    const map = new Map();
+    listas.forEach((itens, idx) => {
+      const sep = seps[idx];
+      (itens || []).forEach((it) => {
+        const cod = String(it.codigo_produto || '').trim();
+        if (!cod) return;
+        const key = `${sep}|${cod}`;
+        if (!map.has(key)) {
+          map.set(key, {
+            codigo: cod,
+            sep,
+            descricao: it.descricao || '',
+            unidade: it.unidade || 'UN',
+            qtd: 0,
+            estoque: estoqueNasPrateleiras(cod),
+            foto_url: null,
+          });
+        }
+        const g = map.get(key);
+        g.qtd += Number(it.quantidade_solicitada ?? it.quantidade) || 0;
+      });
+    });
+    // Foto: aproveita as fotos já conhecidas da ocupação das prateleiras
+    for (const itens of Object.values(ocupacao)) {
+      for (const it of itens || []) {
+        const cod = String(it.codigo_produto || '').trim();
+        for (const g of map.values()) {
+          if (g.codigo === cod && !g.foto_url && it.foto_url) g.foto_url = it.foto_url;
+        }
+      }
+    }
+    const produtos = [...map.values()];
+
+    sepModeAtivo = true;
+    const nEnds = aplicarFiltroSeparacao(produtos.map((p) => p.codigo));
+
+    buildMesa();
+    mesaInfo = { destino, seps, produtos };
+    mesaGroup.visible = true;
+    mesaCollider.disabled = false;
+    pintarMesa();
+
+    mostrarSepToast(
+      `<b>Separação — ${escHtml(destino)}</b><br>` +
+      `${produtos.length} produto${produtos.length === 1 ? '' : 's'} em ${nEnds} endereço${nEnds === 1 ? '' : 's'}. ` +
+      'Só as prateleiras com esses produtos ficaram visíveis. As fotos estão na <b>mesa no final das prateleiras</b> (lado Estoque Produção).<br>' +
+      'Para sair, clique em <b>Voltar ao kanban</b> no quadro da parede.',
+      12000
+    );
+  }
+
   // Clique num produto do painel fixado → só ele, com mais dados
   lookBalloonBody.addEventListener('click', (e) => {
     if (!inspectMode) return;
     const back = e.target.closest('.det-back');
     if (back) {
-      if (!inspectEndereco) { exitInspect(); return; } // painel do kanban: volta ao 3D
+      if (!inspectEndereco) { destinoAtual = null; exitInspect(); return; } // painel do kanban: volta ao 3D
       lookAlvoAtual = null;
       mostrarBalaoEndereco(inspectEndereco);
       return;
+    }
+    // Painel do destino: SEPs viram botões de seleção
+    if (destinoAtual) {
+      const tg = e.target.closest('.sep-toggle');
+      if (tg) {
+        const s = tg.getAttribute('data-sep');
+        if (destinoAtual.selecionadas.has(s)) destinoAtual.selecionadas.delete(s);
+        else destinoAtual.selecionadas.add(s);
+        renderPainelDestino();
+        return;
+      }
+      if (e.target.closest('.sep-select-all')) {
+        if (destinoAtual.selecionadas.size === destinoAtual.seps.length) destinoAtual.selecionadas.clear();
+        else destinoAtual.seps.forEach((s) => destinoAtual.selecionadas.add(s));
+        renderPainelDestino();
+        return;
+      }
+      if (e.target.closest('.sep-start')) {
+        const seps = [...destinoAtual.selecionadas];
+        if (!seps.length) return;
+        const destino = destinoAtual.destino;
+        destinoAtual = null;
+        exitInspect();
+        iniciarModoSeparacao(destino, seps);
+        return;
+      }
     }
     const row = e.target.closest('.look-balloon-row[data-cod]');
     if (!row) return;
@@ -1984,9 +3258,16 @@ function boot(renderer) {
     tex.needsUpdate = true;
   }
 
-  // Roda do mouse: rola o banner OU as fotos da posição que está na mira
-  canvas.addEventListener('wheel', (e) => {
+  // Roda do mouse: rola o banner OU as fotos da posição OU os painéis de parede
+  // document+capture: com pointer lock o wheel às vezes não chega só no canvas
+  function onWheel3d(e) {
     if (!playing && !controls.isLocked) return;
+    if (inspectMode) return;
+    // Painéis estoque mínimo / identificação: raycast direto
+    if (typeof rolarPainelSobMira === 'function' && rolarPainelSobMira(e.deltaY)) {
+      e.preventDefault();
+      return;
+    }
     if (lookBannerAtual) {
       e.preventDefault();
       const m = lookBannerAtual;
@@ -2003,7 +3284,8 @@ function boot(renderer) {
         paintSlotPhotos(lookSlotAtual);
       }
     }
-  }, { passive: false });
+  }
+  document.addEventListener('wheel', onWheel3d, { passive: false, capture: true });
 
   // Segurar o botão esquerdo + arrastar = rolagem (posição OU banner na mira)
   let slotDrag = null;    // mesh de posição sendo arrastada
@@ -2088,6 +3370,10 @@ function boot(renderer) {
         relatorioBoardMesh.userData.setPage(lookRelTab.idx);
         lookAlvoAtual = null;
         esconderBalao();
+      } else if (lookEstoqueMinBtn && estoqueMinimoBoardMesh?.userData.toggleFiltroCompra) {
+        estoqueMinimoBoardMesh.userData.toggleFiltroCompra();
+        lookAlvoAtual = null;
+        esconderBalao();
       }
     }
   });
@@ -2103,20 +3389,36 @@ function boot(renderer) {
 
   function raycastCenter() {
     raycaster.setFromCamera(centerNdc, camera);
-    // Blocos pretos entram para BLOQUEAR a mira (não atravessar para o outro lado)
-    const alvos = [...slotMeshes, ...overflowMeshes, ...slabMeshes];
-    if (kanbanBoardMesh) alvos.push(kanbanBoardMesh);
-    if (relatorioBoardMesh) alvos.push(relatorioBoardMesh);
-    const hits = raycaster.intersectObjects(alvos, false);
-    // Ignora o que estiver escondido (bloco "afastado" ao andar de ré)
-    return hits.filter((h) => {
+    const visivel = (h) => {
       let o = h.object;
       while (o) {
         if (o.visible === false) return false;
         o = o.parent;
       }
       return true;
-    });
+    };
+    // Painéis de parede primeiro (prioridade sobre prateleiras que possam estar na frente)
+    const paineis = [kanbanBoardMesh, relatorioBoardMesh, estoqueMinimoBoardMesh, identificacaoBoardMesh]
+      .filter(Boolean);
+    const hitsPainel = raycaster.intersectObjects(paineis, false).filter(visivel);
+    if (hitsPainel.length && hitsPainel[0].distance <= 45) {
+      return hitsPainel;
+    }
+    const alvos = [...slotMeshes, ...overflowMeshes, ...slabMeshes];
+    return raycaster.intersectObjects(alvos, false).filter(visivel);
+  }
+
+  function rolarPainelSobMira(deltaY) {
+    raycaster.setFromCamera(centerNdc, camera);
+    const paineis = [estoqueMinimoBoardMesh, identificacaoBoardMesh].filter(Boolean);
+    const hits = raycaster.intersectObjects(paineis, false);
+    if (!hits.length || hits[0].distance > 45) return false;
+    const ud = hits[0].object.userData;
+    const maxScroll = Number(ud.maxScroll) || 0;
+    if (maxScroll <= 0) return false;
+    ud.scroll = Math.max(0, Math.min((Number(ud.scroll) || 0) + (deltaY > 0 ? 1 : -1), maxScroll));
+    if (typeof ud.pintar === 'function') ud.pintar();
+    return true;
   }
 
   function updateLookTarget(dt) {
@@ -2125,6 +3427,9 @@ function boot(renderer) {
       esconderBalao();
       lookBannerAtual = null;
       lookSlotAtual = null;
+      lookEstoqueMinimoAtual = null;
+      lookIdentificacaoAtual = null;
+      lookEstoqueMinBtn = null;
       return;
     }
     lookAcc += dt;
@@ -2132,32 +3437,46 @@ function boot(renderer) {
     lookAcc = 0;
     if (slotDrag || bannerDrag) return; // segurando para rolar — mantém o alvo
     const hits = raycastCenter();
-    if (!hits.length || hits[0].distance > 16) {
+    const distMax = hits[0] && ['estoque-minimo', 'identificacao', 'relatorio', 'kanban'].includes(hits[0].object.userData.tipo)
+      ? 45
+      : 16;
+    if (!hits.length || hits[0].distance > distMax) {
       esconderBalao();
       lookBannerAtual = null;
       lookSlotAtual = null;
       lookKanbanCard = null;
       lookRelTab = null;
+      lookEstoqueMinimoAtual = null;
+      lookIdentificacaoAtual = null;
+      lookEstoqueMinBtn = null;
       return;
     }
     const obj = hits[0].object;
     if (obj.userData.tipo === 'overflow') {
-      // A lista já está desenhada no próprio banner — nada abre na tela
       lookBannerAtual = obj;
       lookSlotAtual = null;
       lookKanbanCard = null;
       lookRelTab = null;
+      lookEstoqueMinimoAtual = null;
+      lookIdentificacaoAtual = null;
+      lookEstoqueMinBtn = null;
       esconderBalao();
     } else if (obj.userData.tipo === 'slot') {
       lookBannerAtual = null;
       lookSlotAtual = obj;
       lookKanbanCard = null;
       lookRelTab = null;
+      lookEstoqueMinimoAtual = null;
+      lookIdentificacaoAtual = null;
+      lookEstoqueMinBtn = null;
       mostrarBalaoEndereco(obj.userData.endereco);
     } else if (obj.userData.tipo === 'kanban') {
       lookBannerAtual = null;
       lookSlotAtual = null;
       lookRelTab = null;
+      lookEstoqueMinimoAtual = null;
+      lookIdentificacaoAtual = null;
+      lookEstoqueMinBtn = null;
       lookKanbanCard = cardKanbanSobMira(obj, hits[0].uv);
       if (lookKanbanCard) mostrarBalaoKanbanHint(lookKanbanCard);
       else esconderBalao();
@@ -2165,15 +3484,49 @@ function boot(renderer) {
       lookBannerAtual = null;
       lookSlotAtual = null;
       lookKanbanCard = null;
+      lookEstoqueMinimoAtual = null;
+      lookIdentificacaoAtual = null;
+      lookEstoqueMinBtn = null;
       lookRelTab = tabRelatorioSobMira(obj, hits[0].uv);
       if (lookRelTab && lookRelTab.idx !== obj.userData.pagAtual) mostrarBalaoRelHint(lookRelTab);
       else esconderBalao();
-    } else {
-      // Bloco preto (fundo) — nada a mostrar
+    } else if (obj.userData.tipo === 'estoque-minimo') {
       lookBannerAtual = null;
       lookSlotAtual = null;
       lookKanbanCard = null;
       lookRelTab = null;
+      lookIdentificacaoAtual = null;
+      lookEstoqueMinimoAtual = obj;
+      lookEstoqueMinBtn = btnEstoqueMinSobMira(obj, hits[0].uv);
+      if (lookEstoqueMinBtn) {
+        const key = 'emin:filtro';
+        if (lookAlvoAtual !== key) {
+          lookAlvoAtual = key;
+          lookBalloonEnd.textContent = 'Filtro';
+          lookBalloonBody.innerHTML =
+            '<div class="look-balloon-empty">Necessário comprar — clique para mostrar só itens sem compra registrada.</div>';
+          lookBalloon.hidden = false;
+        }
+      } else {
+        esconderBalao();
+      }
+    } else if (obj.userData.tipo === 'identificacao') {
+      lookBannerAtual = null;
+      lookSlotAtual = null;
+      lookKanbanCard = null;
+      lookRelTab = null;
+      lookEstoqueMinimoAtual = null;
+      lookEstoqueMinBtn = null;
+      lookIdentificacaoAtual = obj;
+      esconderBalao();
+    } else {
+      lookBannerAtual = null;
+      lookSlotAtual = null;
+      lookKanbanCard = null;
+      lookRelTab = null;
+      lookEstoqueMinimoAtual = null;
+      lookIdentificacaoAtual = null;
+      lookEstoqueMinBtn = null;
       esconderBalao();
     }
   }
@@ -2234,6 +3587,7 @@ function boot(renderer) {
     }
     const r = PLAYER.radius;
     for (const b of blocks) {
+      if (b.sepHidden) continue; // modo separação: prateleira sem produto fica escondida
       if (b === behind) {
         setBlockHidden(b, true);
       } else if (b.hidden) {
@@ -2291,6 +3645,10 @@ function boot(renderer) {
     updateLookTarget(dt);
     updateNearbySlotLabels(dt);
     appRenderer.render(scene, camera);
+    if (warmFrames < 4) {
+      warmFrames += 1;
+      notifySceneReady();
+    }
   }
 
   window.addEventListener('resize', () => {

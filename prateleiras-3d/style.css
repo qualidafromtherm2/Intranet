@@ -221,6 +221,57 @@ kbd {
   display: none;
 }
 
+/* ——— Spinner ao entrar no 3D ——— */
+.enter-loading {
+  position: absolute;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(10, 12, 16, 0.88);
+  backdrop-filter: blur(4px);
+}
+.enter-loading[hidden] {
+  display: none !important;
+}
+.enter-loading-box {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  padding: 28px 36px;
+  border-radius: 16px;
+  background: rgba(22, 27, 34, 0.95);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
+  max-width: min(420px, 92vw);
+  text-align: center;
+}
+.enter-spinner {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  border: 4px solid rgba(148, 163, 184, 0.25);
+  border-top-color: #58a6ff;
+  animation: enter-spin 0.8s linear infinite;
+}
+@keyframes enter-spin {
+  to { transform: rotate(360deg); }
+}
+.enter-loading-title {
+  margin: 0;
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: #e6edf3;
+}
+.enter-loading-sub {
+  margin: 0;
+  font-size: 0.9rem;
+  color: #8b949e;
+  line-height: 1.4;
+}
+
 .hud p {
   margin: 0.15rem 0;
 }
@@ -466,6 +517,92 @@ kbd {
   border-color: #58a6ff;
   box-shadow: 0 0 0 2px rgba(88, 166, 255, 0.35), 0 10px 28px rgba(0, 0, 0, 0.45);
   max-width: min(760px, calc(100vw - 24px));
+}
+
+/* ——— Painel do destino (modo Iniciar separação) ——— */
+.sep-btn-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 10px 0;
+}
+
+.sep-toggle {
+  background: #21262d;
+  color: #e6edf3;
+  border: 1px solid #3d444d;
+  border-radius: 8px;
+  padding: 8px 14px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.sep-toggle:hover {
+  border-color: #58a6ff;
+}
+
+.sep-toggle.is-sel {
+  background: #14532d;
+  border-color: #22c55e;
+  color: #bbf7d0;
+}
+
+.sep-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.sep-select-all,
+.sep-start {
+  border: none;
+  border-radius: 8px;
+  padding: 10px 16px;
+  font-size: 0.85rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.sep-select-all {
+  background: #30363d;
+  color: #e6edf3;
+}
+
+.sep-select-all:hover {
+  background: #3d444d;
+}
+
+.sep-start {
+  background: #16a34a;
+  color: #fff;
+}
+
+.sep-start:hover:not(:disabled) {
+  background: #15803d;
+}
+
+.sep-start:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* Aviso fixo do modo separação */
+.sep-toast {
+  position: fixed;
+  top: 14px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 60;
+  max-width: min(640px, 92vw);
+  background: rgba(13, 17, 23, 0.94);
+  border: 1px solid #16a34a;
+  border-radius: 10px;
+  color: #e6edf3;
+  font-size: 0.85rem;
+  line-height: 1.45;
+  padding: 10px 16px;
+  pointer-events: none;
 }
 
 .sep-urgente {

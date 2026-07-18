@@ -2850,6 +2850,76 @@ app.get('/api/compras/solicitacoes', async (_req, res) => {
   }
 });
 
+// Códigos de produto com compra em andamento — usado pela badge "Em compra"
+// na Lista de produtos / Estoque mínimo. Considera "em andamento" qualquer
+// solicitação cujo status ainda não é final (recebido/concluído) nem negativo
+// (cancelado/reprovado/excluído). Itens só no carrinho ainda não contam.
+app.get('/api/compras/produtos-em-compra', async (_req, res) => {
+  try {
+    const { rows } = await pool.query(`
+      SELECT DISTINCT ON (UPPER(TRIM(produto_codigo)))
+             TRIM(produto_codigo) AS codigo,
+             COALESCE(status, '') AS status
+      FROM compras.solicitacao_compras
+      WHERE TRIM(COALESCE(produto_codigo, '')) <> ''
+        AND LOWER(TRIM(COALESCE(status, ''))) NOT IN
+            ('carrinho', 'recebido', 'concluído', 'concluido', 'cancelado', 'reprovado', 'excluido', 'excluído')
+      ORDER BY UPPER(TRIM(produto_codigo)), id DESC
+    `);
+    res.json({ ok: true, total: rows.length, itens: rows });
+  } catch (err) {
+    console.error('[API] /api/compras/produtos-em-compra erro:', err);
+    res.status(500).json({ ok: false, error: 'Falha ao listar produtos em compra' });
+  }
+});
+
+// Detalhes das compras em andamento de um produto (modal "Em compra")
+app.get('/api/compras/produtos-em-compra/:codigo', async (req, res) => {
+  try {
+    const codigo = String(req.params.codigo || '').trim();
+    if (!codigo) {
+      return res.status(400).json({ ok: false, error: 'Código do produto obrigatório' });
+    }
+
+    const { rows } = await pool.query(`
+      SELECT
+        sc.id,
+        TRIM(sc.produto_codigo) AS produto_codigo,
+        sc.produto_descricao,
+        sc.quantidade,
+        sc.status,
+        sc.solicitante,
+        sc.responsavel_pela_compra,
+        sc.fornecedor_nome,
+        sc.numero_pedido,
+        sc.cnumero AS c_numero,
+        sc.grupo_requisicao,
+        sc.prazo_solicitado,
+        COALESCE(sc.previsao_chegada, po.d_dt_previsao) AS previsao_chegada,
+        sc.departamento,
+        sc.objetivo_compra,
+        sc.observacao,
+        sc.created_at
+      FROM compras.solicitacao_compras sc
+      LEFT JOIN compras.pedidos_omie po
+        ON (
+          (NULLIF(TRIM(sc.ncodped::text), '') IS NOT NULL AND po.n_cod_ped::text = TRIM(sc.ncodped::text))
+          OR (NULLIF(TRIM(sc.cnumero::text), '') IS NOT NULL AND po.c_numero::text = TRIM(sc.cnumero::text))
+        )
+      WHERE UPPER(TRIM(sc.produto_codigo)) = UPPER($1)
+        AND TRIM(COALESCE(sc.produto_codigo, '')) <> ''
+        AND LOWER(TRIM(COALESCE(sc.status, ''))) NOT IN
+            ('carrinho', 'recebido', 'concluído', 'concluido', 'cancelado', 'reprovado', 'excluido', 'excluído')
+      ORDER BY sc.id DESC
+    `, [codigo]);
+
+    res.json({ ok: true, codigo, total: rows.length, compras: rows });
+  } catch (err) {
+    console.error('[API] /api/compras/produtos-em-compra/:codigo erro:', err);
+    res.status(500).json({ ok: false, error: 'Falha ao buscar compras do produto' });
+  }
+});
+
 // Atualiza retorno_cotacao em lote para itens do mesmo grupo de requisição
 app.put('/api/compras/solicitacoes/retorno-cotacao/lote', express.json(), async (req, res) => {
   try {
@@ -14325,11 +14395,19 @@ app.get('/api/prateleiras3d/foto', async (req, res) => {
     if (u.protocol !== 'https:' || !u.hostname.endsWith('.r2.dev')) {
       return res.status(403).end();
     }
-    const r = await fetch(u.toString());
+    const ac = new AbortController();
+    const timer = setTimeout(() => ac.abort(), 8000);
+    let r;
+    try {
+      r = await fetch(u.toString(), { signal: ac.signal });
+    } finally {
+      clearTimeout(timer);
+    }
     if (!r.ok) return res.status(502).end();
+    const buf = Buffer.from(await r.arrayBuffer());
     res.set('Content-Type', r.headers.get('content-type') || 'image/jpeg');
     res.set('Cache-Control', 'public, max-age=86400');
-    res.end(Buffer.from(await r.arrayBuffer()));
+    res.end(buf);
   } catch (err) {
     console.error('[prateleiras3d/foto]', err?.message || err);
     res.status(500).end();
@@ -19794,6 +19872,16 @@ app.get('/api/logistica/kanban', async (req, res) => {
         COALESCE(c.retirada_por, c.nome_user) AS nome_user,
         MIN(c.data_prevista)::text            AS data_prevista,
         COUNT(*)                              AS total_itens,
+        bool_or(
+          EXISTS (
+            SELECT 1
+            FROM compras.solicitacao_compras sc
+            WHERE UPPER(TRIM(sc.produto_codigo)) = UPPER(TRIM(c.codigo_produto))
+              AND TRIM(COALESCE(sc.produto_codigo, '')) <> ''
+              AND LOWER(TRIM(COALESCE(sc.status, ''))) NOT IN
+                  ('carrinho', 'recebido', 'concluído', 'concluido', 'cancelado', 'reprovado', 'excluido', 'excluído')
+          )
+        ) AS tem_em_compra,
         CASE
           WHEN bool_or(i.status = 'pendente')            THEN 'pendente'
           WHEN bool_or(i.status = 'Stund-by')           THEN 'Stund-by'
@@ -20028,6 +20116,16 @@ app.get('/api/logistica/solicitacoes-kanban', async (req, res) => {
         ) AS itens_busca,
         bool_or(COALESCE(i.urgente, false))    AS tem_urgente,
         bool_or(
+          EXISTS (
+            SELECT 1
+            FROM compras.solicitacao_compras sc
+            WHERE UPPER(TRIM(sc.produto_codigo)) = UPPER(TRIM(c.codigo_produto))
+              AND TRIM(COALESCE(sc.produto_codigo, '')) <> ''
+              AND LOWER(TRIM(COALESCE(sc.status, ''))) NOT IN
+                  ('carrinho', 'recebido', 'concluído', 'concluido', 'cancelado', 'reprovado', 'excluido', 'excluído')
+          )
+        ) AS tem_em_compra,
+        bool_or(
           i.status = 'pendente'
           AND (i.cod_local IS NULL OR TRIM(i.cod_local) = '')
         ) AS tem_pendente_sem_local,
@@ -20076,6 +20174,39 @@ app.get('/api/logistica/solicitacoes-kanban', async (req, res) => {
     res.json({ ok: true, colunas });
   } catch (err) {
     console.error('[logistica/solicitacoes-kanban] erro:', err);
+    res.status(500).json({ ok: false, error: String(err?.message || err) });
+  }
+});
+
+// GET /api/logistica/solicitacoes-kanban-destinos — SEPs abertas agrupadas por LOCAL DESTINO (um card por destino)
+// Usado pelo quadro 3D (prateleiras-3d) no modo "Iniciar separação".
+app.get('/api/logistica/solicitacoes-kanban-destinos', async (req, res) => {
+  try {
+    const id_user = req.session?.user?.id;
+    if (!id_user) return res.status(401).json({ ok: false, error: 'Não autenticado.' });
+
+    const { rows } = await pool.query(`
+      SELECT
+        COALESCE(NULLIF(TRIM(i.nome_local), ''), NULLIF(TRIM(i.cod_local), ''), 'Sem destino') AS destino,
+        MAX(NULLIF(TRIM(i.cod_local), ''))              AS cod_local,
+        COUNT(*)::int                                   AS total_itens,
+        COUNT(DISTINCT i.n_solic)::int                  AS total_seps,
+        ARRAY_AGG(DISTINCT i.n_solic)                   AS seps,
+        bool_or(COALESCE(i.urgente, false))             AS tem_urgente,
+        MIN(c.criado_em)                                AS criado_em_min
+      FROM solicitacao_produto.itens_solicitados i
+      JOIN logistica.carrinho c ON c.id = i.id_carr
+      WHERE i.n_solic IS NOT NULL
+        AND i.status IN ('pendente', 'Stund-by', 'Separação')
+        -- Mesma regra do kanban 2D: pendente sem local ainda não está pronto p/ separar
+        AND NOT (i.status = 'pendente' AND (i.cod_local IS NULL OR TRIM(i.cod_local) = ''))
+      GROUP BY COALESCE(NULLIF(TRIM(i.nome_local), ''), NULLIF(TRIM(i.cod_local), ''), 'Sem destino')
+      ORDER BY MIN(c.criado_em) ASC
+    `);
+
+    res.json({ ok: true, destinos: rows });
+  } catch (err) {
+    console.error('[logistica/solicitacoes-kanban-destinos] erro:', err);
     res.status(500).json({ ok: false, error: String(err?.message || err) });
   }
 });
@@ -32449,133 +32580,114 @@ app.get('/api/compras/requisicoes/debug/:id', async (req, res) => {
   }
 });
 
-// GET /api/compras/requisicoes - Lista requisições válidas para o kanban "Requisições"
+// GET /api/compras/requisicoes - Lista requisições para o kanban "Requisições"
+// Na Omie a coluna "Requisição" = pedidos na etapa 20 (ainda não viraram Pedido/Aprovação).
+// Aqui espelhamos: pedidos_omie c_etapa='20', pendentes, não faturados.
 app.get('/api/compras/requisicoes', async (req, res) => {
   try {
-    // Regras:
-    // 1) Base: compras.solicitacao_compras (status Requisição)
-    // 2) Só entra se existir correspondência em compras.requisicoes_omie por cod_int_req_compra = numero_pedido
-    // 3) Só entra se requisicoes_omie.inativo = false
-    // 4) Não entra se já existir em compras.pedidos_omie por c_cod_int_ped = numero_pedido
-    console.log('[Compras/Requisições] Iniciando busca de requisições...');
-    
-    // Busca somente solicitações válidas da tabela solicitacao_compras
-    const { rows: solicitacoes } = await pool.query(`
-      SELECT 
-        sc.*,
-        COALESCE(hc.status, sc.status) AS status,
-        po.codigo AS produto_codigo,
-        po.descricao AS produto_descricao,
-        ro.numero AS cnumero,
-        ro.cod_req_compra AS cod_req_compra_omie,
-        ro.cod_int_req_compra AS cod_int_req_compra_omie,
-        'solicitacao_compras' AS table_source
-      FROM compras.solicitacao_compras sc
-      LEFT JOIN public.produtos_omie po ON po.codigo_produto = sc.codigo_omie
-      INNER JOIN compras.requisicoes_omie ro
-        ON TRIM(COALESCE(ro.cod_int_req_compra, '')) = TRIM(COALESCE(sc.numero_pedido, ''))
-      LEFT JOIN compras.historico_compras hc
-        ON LOWER(TRIM(COALESCE(hc.grupo_requisicao, ''))) = LOWER(TRIM(COALESCE(sc.grupo_requisicao, '')))
-      WHERE TRIM(COALESCE(sc.numero_pedido, '')) <> ''
-        AND TRIM(LOWER(COALESCE(hc.status, sc.status, ''))) IN (
-          TRIM(LOWER('Requisição')),
-          TRIM(LOWER('Requisicao'))
-        )
-        AND COALESCE(ro.inativo, false) = false
-        AND NOT EXISTS (
-          SELECT 1
-          FROM compras.pedidos_omie ped
-          WHERE TRIM(COALESCE(ped.c_cod_int_ped, '')) = TRIM(COALESCE(sc.numero_pedido, ''))
-        )
-      ORDER BY ro.numero DESC NULLS LAST, sc.created_at DESC
+    console.log('[Compras/Requisições] Listando requisições (pedidos Omie etapa 20)...');
+
+    await pool.query(`
+      ALTER TABLE compras.pedidos_omie
+      ADD COLUMN IF NOT EXISTS pendente_omie BOOLEAN
     `);
-    
-    // Busca também itens válidos da tabela compras_sem_cadastro
-    const { rows: semCadastro } = await pool.query(`
+
+    const { rows } = await pool.query(`
       SELECT
-        sc.*,
-        COALESCE(hc.status, sc.status) AS status,
-        sc.produto_codigo AS produto_codigo,
-        sc.produto_descricao AS produto_descricao,
-        ro.numero AS cnumero,
-        ro.cod_req_compra AS cod_req_compra_omie,
-        ro.cod_int_req_compra AS cod_int_req_compra_omie,
-        'compras_sem_cadastro' AS table_source
-      FROM compras.compras_sem_cadastro sc
-      INNER JOIN compras.requisicoes_omie ro
-        ON TRIM(COALESCE(ro.cod_int_req_compra, '')) = TRIM(COALESCE(sc.numero_pedido, ''))
-      LEFT JOIN compras.historico_compras hc
-        ON LOWER(TRIM(COALESCE(hc.grupo_requisicao, ''))) = LOWER(TRIM(COALESCE(sc.grupo_requisicao, '')))
-      WHERE TRIM(COALESCE(sc.numero_pedido, '')) <> ''
-        AND TRIM(LOWER(COALESCE(hc.status, sc.status, ''))) IN (
-          TRIM(LOWER('Requisição')),
-          TRIM(LOWER('Requisicao'))
-        )
-        AND COALESCE(ro.inativo, false) = false
-        AND NOT EXISTS (
-          SELECT 1
-          FROM compras.pedidos_omie ped
-          WHERE TRIM(COALESCE(ped.c_cod_int_ped, '')) = TRIM(COALESCE(sc.numero_pedido, ''))
-        )
-      ORDER BY ro.numero DESC NULLS LAST, sc.created_at DESC
+        po.n_cod_ped,
+        po.c_numero,
+        po.c_cod_int_ped,
+        po.c_obs,
+        po.c_etapa,
+        po.n_cod_for,
+        po.d_inc_data,
+        po.d_dt_previsao,
+        po.n_valor,
+        cc.nome_fantasia AS fornecedor_nome,
+        pop.c_produto,
+        pop.c_descricao,
+        pop.c_unidade,
+        pop.n_qtde,
+        pop.n_val_tot,
+        origem.solicitante,
+        origem.grupo_requisicao,
+        po.created_at,
+        po.updated_at
+      FROM compras.pedidos_omie po
+      LEFT JOIN omie.fornecedores cc
+        ON cc.codigo_cliente_omie = po.n_cod_for
+      LEFT JOIN compras.pedidos_omie_produtos pop
+        ON pop.n_cod_ped = po.n_cod_ped
+      LEFT JOIN LATERAL (
+        SELECT src.solicitante, src.grupo_requisicao
+        FROM (
+          SELECT sc.solicitante, sc.grupo_requisicao, sc.created_at
+          FROM compras.solicitacao_compras sc
+          WHERE TRIM(COALESCE(po.c_cod_int_ped, '')) <> ''
+            AND TRIM(COALESCE(sc.numero_pedido, '')) = TRIM(COALESCE(po.c_cod_int_ped, ''))
+          UNION ALL
+          SELECT csc.solicitante, csc.grupo_requisicao, csc.created_at
+          FROM compras.compras_sem_cadastro csc
+          WHERE TRIM(COALESCE(po.c_cod_int_ped, '')) <> ''
+            AND TRIM(COALESCE(csc.numero_pedido, '')) = TRIM(COALESCE(po.c_cod_int_ped, ''))
+        ) src
+        ORDER BY src.created_at DESC NULLS LAST
+        LIMIT 1
+      ) origem ON TRUE
+      WHERE COALESCE(po.inativo, FALSE) = FALSE
+        AND (po."Etapa_NF" IS NULL OR BTRIM(po."Etapa_NF") = '')
+        AND COALESCE(po.pendente_omie, TRUE) = TRUE
+        AND BTRIM(COALESCE(po.c_etapa, '')) = '20'
+      ORDER BY
+        CASE WHEN po.c_numero ~ '^\\d+$' THEN po.c_numero::INT ELSE NULL END DESC,
+        po.c_numero DESC
     `);
 
-    const solicitacoesTodas = [...solicitacoes, ...semCadastro];
-    console.log(
-      `[Compras/Requisições] Encontradas ${solicitacoesTodas.length} solicitações válidas para o kanban Requisições ` +
-      `(solicitacao_compras=${solicitacoes.length}, compras_sem_cadastro=${semCadastro.length})`
-    );
+    const porNumero = new Map();
+    const requisicoes = [];
 
-    // Agrupa os itens por grupo_requisicao (campo que agrupa requisições no kanban)
-    const requisicoesPorGrupo = {};
-    
-    solicitacoesTodas.forEach(item => {
-      const grupoRequisicao = item.grupo_requisicao || item.cnumero || item.numero_pedido || 'SEM_GRUPO';
-      
-      if (!requisicoesPorGrupo[grupoRequisicao]) {
-        requisicoesPorGrupo[grupoRequisicao] = {
-          numero: item.cnumero || grupoRequisicao,
-          grupo_requisicao: grupoRequisicao,
-          numero_requisicao_omie: item.cnumero || null,
-          cod_req_compra: item.cod_req_compra_omie || item.cod_req_compra || item.ncodped,
-          cod_int_req_compra: item.cod_int_req_compra_omie || item.numero_pedido,
-          created_at: item.created_at,
-          updated_at: item.updated_at,
+    for (const row of rows) {
+      const numero = row.c_numero || 'SEM_NUMERO';
+      if (!porNumero.has(numero)) {
+        const nova = {
+          numero,
+          grupo_requisicao: row.grupo_requisicao || row.c_cod_int_ped || numero,
+          numero_requisicao_omie: numero,
+          cod_req_compra: row.n_cod_ped,
+          cod_int_req_compra: row.c_cod_int_ped || null,
+          n_cod_ped: row.n_cod_ped,
+          c_cod_int_ped: row.c_cod_int_ped,
+          n_valor: row.n_valor,
+          c_obs: row.c_obs || null,
+          c_etapa: row.c_etapa,
+          d_inc_data: row.d_inc_data,
+          d_dt_previsao: row.d_dt_previsao,
+          solicitante: row.solicitante || null,
+          fornecedor_nome: row.fornecedor_nome || 'Sem fornecedor',
+          created_at: row.created_at,
+          updated_at: row.updated_at,
           itens: []
         };
+        porNumero.set(numero, nova);
+        requisicoes.push(nova);
       }
-      
-      requisicoesPorGrupo[grupoRequisicao].itens.push({
-        id: item.id,
-        produto_codigo: item.produto_codigo || item.codigo_omie || '-',
-        produto_descricao: item.produto_descricao || item.produto_descricao_manual || 'Sem descrição',
-        quantidade: item.quantidade,
-        prazo_solicitado: item.prazo_solicitado,
-        observacao: item.observacao || item.observacao_recebimento,
-        solicitante: item.solicitante,
-        departamento: item.departamento,
-        centro_custo: item.centro_custo,
-        objetivo_compra: item.objetivo_compra,
-        created_at: item.created_at,
-        codigo_omie: item.codigo_omie,
-        ncodped: item.ncodped,
-        numero_pedido: item.numero_pedido,
-        status: item.status,
-        link: item.table_source === 'compras_sem_cadastro' ? item.link : null,
-        c_unidade: item.c_unidade || '-',
-        n_qtde: item.n_qtde || item.quantidade || 0,
-        n_val_tot: item.n_val_tot || 0,
-        table_source: item.table_source || null
-      });
-    });
-    
-    // Converte objeto em array
-    const requisicoes = Object.values(requisicoesPorGrupo);
-    
-    console.log(`[Compras/Requisições] Retornando ${requisicoes.length} requisições agrupadas`);
-    console.log('[Compras/Requisições] Primeira requisição:', JSON.stringify(requisicoes[0], null, 2));
+      if (row.c_produto) {
+        porNumero.get(numero).itens.push({
+          id: `${row.n_cod_ped}_${row.c_produto}`,
+          produto_codigo: row.c_produto,
+          produto_descricao: row.c_descricao || 'Sem descrição',
+          solicitante: row.solicitante || null,
+          status: 'Requisição',
+          c_unidade: row.c_unidade || '-',
+          n_qtde: row.n_qtde || 0,
+          n_val_tot: row.n_val_tot || 0,
+          table_source: 'pedidos_omie'
+        });
+      }
+    }
 
-    res.json({ ok: true, requisicoes: requisicoes });
+    console.log(`[Compras/Requisições] Retornando ${requisicoes.length} requisições (etapa 20 Omie)`);
+    res.json({ ok: true, requisicoes });
   } catch (err) {
     console.error('[Compras/Requisições] Erro ao listar requisições:', err);
     res.status(500).json({ ok: false, error: 'Erro ao listar requisições' });
@@ -32725,7 +32837,17 @@ app.get('/api/compras/pedidos-compra', async (req, res) => {
  */
 app.get('/api/compras/compras-realizadas', async (req, res) => {
   try {
-    console.log('[Compras/ComprasRealizadas] Listando compras realizadas (inativo=false, Etapa_NF IS NULL)...');
+    console.log('[Compras/ComprasRealizadas] Listando compras realizadas (etapas 10+15 Omie = Pedido de Compra + Aprovação)...');
+
+    // Compra realizada = colunas Omie "Pedido de Compra" (etapa 10) + "Aprovação" (etapa 15).
+    // pendente_omie: true = pedido ainda "aberto" na Omie (pendente, faturado sem recebimento
+    // ou parcialmente recebido/faturado) — mesma regra da tela da Omie, onde o pedido só sai
+    // da coluna quando é recebido por completo, cancelado ou encerrado.
+    // false = já saiu da coluna na Omie. NULL = ainda não verificado pela varredura.
+    await pool.query(`
+      ALTER TABLE compras.pedidos_omie
+      ADD COLUMN IF NOT EXISTS pendente_omie BOOLEAN
+    `);
 
     // Filtro de data opcional via query params (dataInicio / dataFim) — filtra por d_inc_data
     const { dataInicio: diCR, dataFim: dfCR } = req.query;
@@ -32779,7 +32901,11 @@ app.get('/api/compras/compras-realizadas', async (req, res) => {
         LIMIT 1
       ) origem ON TRUE
       WHERE COALESCE(po.inativo, FALSE) = FALSE
-        AND (po."Etapa_NF" IS NULL OR BTRIM(po."Etapa_NF") = '')
+        AND (
+          po.pendente_omie IS TRUE
+          OR (po.pendente_omie IS NULL AND (po."Etapa_NF" IS NULL OR BTRIM(po."Etapa_NF") = ''))
+        )
+        AND BTRIM(COALESCE(po.c_etapa, '')) IN ('10', '15')
         AND po.d_inc_data >= '2026-01-01'${whereDataCR}
       ORDER BY
         CASE WHEN po.c_numero ~ '^\d+$' THEN po.c_numero::INT ELSE NULL END DESC,
@@ -33322,6 +33448,8 @@ Retorne SOMENTE um array JSON válido (sem texto adicional), ordenado do MAIS ao
  * - Faturada pelo fornecedor: c_recebido <> S, c_cancelada <> S, c_bloqueado <> S
  * - Recebido: c_recebido = S, c_etapa IN (50,60), c_cancelada <> S, c_bloqueado <> S
  * - Concluído: c_recebido = S, c_etapa = 80, c_cancelada <> S, c_bloqueado <> S
+ * Igual ao filtro da Omie: exclui CT-e (modelo 57) — só NF-e (modelo 55).
+ * Faturada não tem trava de data (Omie usa "Todos os períodos").
  * Filtro de calendário: Faturada usa d_emissao_nfe; Recebido/Concluído usam d_rec
  */
 app.get('/api/compras/pedidos-etapa-nf', async (req, res) => {
@@ -33385,13 +33513,14 @@ app.get('/api/compras/pedidos-etapa-nf', async (req, res) => {
     `;
 
     // 1) Faturada pelo fornecedor: não cancelada, não bloqueada, NÃO recebida
+    //    Sem trava de data fixa (na Omie o período é "Todos") e sem CT-e (modelo 57)
     const queryFaturada = `
       SELECT ${selectBase}
       FROM logistica.recebimentos_nfe_omie r
       WHERE UPPER(BTRIM(COALESCE(r.c_cancelada, 'N'))) NOT IN ('S', 'SIM')
         AND UPPER(BTRIM(COALESCE(r.c_bloqueado, 'N'))) NOT IN ('S', 'SIM')
         AND UPPER(BTRIM(COALESCE(r.c_recebido, 'N'))) NOT IN ('S', 'SIM')
-        AND r.d_emissao_nfe >= '2026-01-01'${whereDataFaturada}
+        AND BTRIM(COALESCE(r.c_modelo_nfe, '55')) <> '57'${whereDataFaturada}
       ${orderBase}
     `;
 
@@ -33403,6 +33532,7 @@ app.get('/api/compras/pedidos-etapa-nf', async (req, res) => {
         AND UPPER(BTRIM(COALESCE(r.c_bloqueado, 'N'))) NOT IN ('S', 'SIM')
         AND UPPER(BTRIM(COALESCE(r.c_recebido, 'N'))) IN ('S', 'SIM')
         AND COALESCE(BTRIM(r.c_etapa), '') IN ('50', '60')
+        AND BTRIM(COALESCE(r.c_modelo_nfe, '55')) <> '57'
         AND r.d_emissao_nfe >= '2026-01-01'${whereDataRecebConc}
       ${orderBase}
     `;
@@ -33415,6 +33545,7 @@ app.get('/api/compras/pedidos-etapa-nf', async (req, res) => {
         AND UPPER(BTRIM(COALESCE(r.c_bloqueado, 'N'))) NOT IN ('S', 'SIM')
         AND UPPER(BTRIM(COALESCE(r.c_recebido, 'N'))) IN ('S', 'SIM')
         AND COALESCE(BTRIM(r.c_etapa), '') = '80'
+        AND BTRIM(COALESCE(r.c_modelo_nfe, '55')) <> '57'
         AND r.d_emissao_nfe >= '2026-01-01'${whereDataRecebConc}
       ${orderBase}
     `;
@@ -33500,6 +33631,319 @@ app.get('/api/compras/pedidos-etapa-nf', async (req, res) => {
   } catch (err) {
     console.error('[Compras/PedidosEtapaNF] Erro ao listar recebimentos NF-e:', err);
     res.status(500).json({ ok: false, error: 'Erro ao listar recebimentos NF-e' });
+  }
+});
+
+// ============================================================================
+// Varredura leve da coluna "Faturada pelo fornecedor"
+// - Lista só etapa 40 na Omie (com detalhes) → ~4 páginas, sem Consultar um a um
+// - Atualiza SQL com o status real (cancelada, recebida, etc.)
+// - Para IDs locais abertos que sumiram da lista: Consultar; se sumiu na Omie, apaga
+// ============================================================================
+let _varrerFaturadasOmieEmAndamento = false;
+
+async function varrerFaturadasOmieKanban() {
+  const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+  const inicio = Date.now();
+  const idsOmieEtapa40 = new Set();
+  let listados = 0;
+  let upsertados = 0;
+  let removidos = 0;
+  let atualizadosOrfaos = 0;
+  let erros = 0;
+  let paginas = 0;
+
+  let pagina = 1;
+  let totalPaginas = 1;
+
+  while (pagina <= totalPaginas) {
+    const lista = await chamarApiRecebimentoNfeOmie('ListarRecebimentos', {
+      nPagina: pagina,
+      nRegistrosPorPagina: 100,
+      cEtapa: '40',
+      cExibirDetalhes: 'S'
+    });
+    await sleep(OMIE_REQUEST_DELAY_MS);
+
+    totalPaginas = Number(lista.nTotalPaginas) || 1;
+    paginas += 1;
+    const recebimentos = Array.isArray(lista.recebimentos) ? lista.recebimentos : [];
+    console.log(`[VarrerFaturadas] Página ${pagina}/${totalPaginas} — ${recebimentos.length} registros`);
+
+    for (const rec of recebimentos) {
+      const nIdReceb = rec?.cabec?.nIdReceb;
+      if (!nIdReceb) continue;
+      idsOmieEtapa40.add(String(nIdReceb));
+      listados += 1;
+      try {
+        await upsertRecebimentoNFe(rec, 'varrer.faturadas');
+        upsertados += 1;
+      } catch (errUpsert) {
+        erros += 1;
+        console.error(`[VarrerFaturadas] Erro upsert ${nIdReceb}:`, errUpsert.message || errUpsert);
+      }
+    }
+
+    pagina += 1;
+  }
+
+  // Locais ainda "abertos" na coluna Faturada que não vieram na lista Omie etapa 40
+  const { rows: locaisAbertos } = await pool.query(`
+    SELECT r.n_id_receb
+    FROM logistica.recebimentos_nfe_omie r
+    WHERE UPPER(BTRIM(COALESCE(r.c_cancelada, 'N'))) NOT IN ('S', 'SIM')
+      AND UPPER(BTRIM(COALESCE(r.c_bloqueado, 'N'))) NOT IN ('S', 'SIM')
+      AND UPPER(BTRIM(COALESCE(r.c_recebido, 'N'))) NOT IN ('S', 'SIM')
+      AND BTRIM(COALESCE(r.c_modelo_nfe, '55')) <> '57'
+  `);
+
+  for (const row of locaisAbertos) {
+    const idStr = String(row.n_id_receb);
+    if (idsOmieEtapa40.has(idStr)) continue;
+
+    try {
+      const detalhe = await chamarApiRecebimentoNfeOmie('ConsultarRecebimento', {
+        nIdReceb: Number(idStr)
+      });
+      await sleep(OMIE_REQUEST_DELAY_MS);
+      await upsertRecebimentoNFe(detalhe, 'varrer.faturadas.orfao');
+      atualizadosOrfaos += 1;
+    } catch (errOrfao) {
+      await sleep(OMIE_REQUEST_DELAY_MS);
+      const msg = String(errOrfao?.message || errOrfao || '');
+      if (/n[aã]o foi poss[ií]vel encontrar|n[aã]o existe|not found/i.test(msg)) {
+        await pool.query(
+          'DELETE FROM logistica.recebimentos_nfe_omie WHERE n_id_receb = $1',
+          [row.n_id_receb]
+        );
+        removidos += 1;
+        console.log(`[VarrerFaturadas] Removido órfão (excluído na Omie): ${idStr}`);
+      } else {
+        erros += 1;
+        console.error(`[VarrerFaturadas] Erro órfão ${idStr}:`, msg);
+      }
+    }
+  }
+
+  // ── Pedidos da coluna "Compra realizada": reconcilia com PesquisarPedCompra ──
+  // Uma pesquisa paginada (todos os status, desde 01/01/2026) em vez de consultar
+  // pedido por pedido — ~15 chamadas em vez de 80+ (evita bloqueio da Omie).
+  // Pedido local aberto que não aparece na pesquisa foi excluído na Omie → inativa.
+  // Pedido presente com etapa diferente → atualiza c_etapa.
+  let pedidosVerificados = 0;
+  let pedidosInativados = 0;
+  let pedidosEtapaAtualizada = 0;
+
+  let pedidosFaturadosMarcados = 0;
+
+  const pesquisarPedCompraOmie = async (filtrosStatus) => {
+    const resultado = new Map();
+    let paginaPed = 1;
+    let totalPaginasPed = 1;
+    while (paginaPed <= totalPaginasPed) {
+      const resposta = await fetch('https://app.omie.com.br/api/v1/produtos/pedidocompra/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          call: 'PesquisarPedCompra',
+          app_key: OMIE_APP_KEY,
+          app_secret: OMIE_APP_SECRET,
+          param: [{
+            nPagina: paginaPed,
+            nRegsPorPagina: 50,
+            dDataInicial: '01/01/2026',
+            ...filtrosStatus
+          }]
+        })
+      });
+      await sleep(OMIE_REQUEST_DELAY_MS);
+      const dataPed = await resposta.json().catch(() => ({}));
+      const fault = String(dataPed.faultstring || '');
+      // "Não existem registros" não é erro — só significa lista vazia para esse status
+      if (/n[aã]o existem registros/i.test(fault)) break;
+      if (fault) throw new Error(`PesquisarPedCompra: ${fault}`);
+
+      totalPaginasPed = Number(dataPed.nTotalPaginas) || 1;
+      for (const item of (Array.isArray(dataPed.pedidos_pesquisa) ? dataPed.pedidos_pesquisa : [])) {
+        const cab = item?.cabecalho_consulta || {};
+        if (cab.nCodPed) {
+          resultado.set(String(cab.nCodPed), String(cab.cEtapa || '').trim());
+        }
+      }
+      paginaPed += 1;
+    }
+    return resultado;
+  };
+
+  // Todos os status → detectar pedidos excluídos na Omie
+  const etapasOmiePedidos = await pesquisarPedCompraOmie({
+    lExibirPedidosPendentes: true,
+    lExibirPedidosFaturados: true,
+    lExibirPedidosRecebidos: true,
+    lExibirPedidosCancelados: true,
+    lExibirPedidosEncerrados: true,
+    lExibirPedidosRecParciais: true,
+    lExibirPedidosFatParciais: true
+  });
+  // "Abertos" = mesma regra das colunas da tela da Omie: pendentes + faturados sem
+  // recebimento + parcialmente faturados/recebidos. Só sai da coluna quando é
+  // recebido por completo, cancelado ou encerrado.
+  const pedidosPendentesOmie = await pesquisarPedCompraOmie({
+    lExibirPedidosPendentes: true,
+    lExibirPedidosFaturados: true,
+    lExibirPedidosFatParciais: true,
+    lExibirPedidosRecParciais: true
+  });
+  console.log(`[VarrerFaturadas] PesquisarPedCompra: ${etapasOmiePedidos.size} pedidos na Omie (${pedidosPendentesOmie.size} abertos)`);
+
+  await pool.query(`
+    ALTER TABLE compras.pedidos_omie
+    ADD COLUMN IF NOT EXISTS pendente_omie BOOLEAN
+  `);
+
+  // Varre TODOS os pedidos ativos de 2026 (mesmo os com Etapa_NF preenchida),
+  // para que pendente_omie reflita a Omie também nos parcialmente recebidos.
+  const { rows: pedidosAbertos } = await pool.query(`
+    SELECT DISTINCT po.n_cod_ped, po.c_numero, po.c_etapa, po.pendente_omie
+    FROM compras.pedidos_omie po
+    WHERE COALESCE(po.inativo, FALSE) = FALSE
+      AND po.d_inc_data >= '2026-01-01'
+  `);
+
+  for (const ped of pedidosAbertos) {
+    pedidosVerificados += 1;
+    const idPed = String(ped.n_cod_ped);
+    const etapaOmie = etapasOmiePedidos.get(idPed);
+
+    if (etapaOmie === undefined) {
+      await pool.query(
+        `UPDATE compras.pedidos_omie
+            SET inativo = TRUE, updated_at = NOW()
+          WHERE n_cod_ped = $1`,
+        [ped.n_cod_ped]
+      );
+      pedidosInativados += 1;
+      console.log(`[VarrerFaturadas] Pedido ${ped.c_numero} inativado (excluído na Omie)`);
+      continue;
+    }
+
+    if (etapaOmie && etapaOmie !== String(ped.c_etapa || '').trim()) {
+      await pool.query(
+        `UPDATE compras.pedidos_omie
+            SET c_etapa = $2, updated_at = NOW()
+          WHERE n_cod_ped = $1`,
+        [ped.n_cod_ped, etapaOmie]
+      );
+      pedidosEtapaAtualizada += 1;
+      console.log(`[VarrerFaturadas] Pedido ${ped.c_numero}: etapa ${ped.c_etapa} → ${etapaOmie}`);
+    }
+
+    const pendenteAgora = pedidosPendentesOmie.has(idPed);
+    if (ped.pendente_omie !== pendenteAgora) {
+      await pool.query(
+        `UPDATE compras.pedidos_omie
+            SET pendente_omie = $2, updated_at = NOW()
+          WHERE n_cod_ped = $1`,
+        [ped.n_cod_ped, pendenteAgora]
+      );
+      if (!pendenteAgora) {
+        pedidosFaturadosMarcados += 1;
+        console.log(`[VarrerFaturadas] Pedido ${ped.c_numero} fechado na Omie (recebido/cancelado/encerrado — sai de Compra realizada)`);
+      }
+    }
+  }
+
+  // ── Pedidos abertos na Omie que ainda NÃO existem localmente → importa ──
+  // Cobre o caso do webhook atrasar/falhar: pedido novo criado na Omie aparece
+  // na pesquisa mas não está em compras.pedidos_omie. Consulta e insere.
+  let pedidosImportados = 0;
+  const { rows: idsLocais } = await pool.query(
+    `SELECT n_cod_ped FROM compras.pedidos_omie`
+  );
+  const setIdsLocais = new Set(idsLocais.map(r => String(r.n_cod_ped)));
+  for (const idPed of pedidosPendentesOmie.keys()) {
+    if (setIdsLocais.has(idPed)) continue;
+    try {
+      const respostaPed = await fetch('https://app.omie.com.br/api/v1/produtos/pedidocompra/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          call: 'ConsultarPedCompra',
+          app_key: OMIE_APP_KEY,
+          app_secret: OMIE_APP_SECRET,
+          param: [{ nCodPed: Number(idPed) }]
+        })
+      });
+      await sleep(OMIE_REQUEST_DELAY_MS);
+      const dadosPed = await respostaPed.json().catch(() => ({}));
+      if (dadosPed.faultstring) throw new Error(dadosPed.faultstring);
+
+      await upsertPedidoCompra(dadosPed.pedido_compra_produto || dadosPed, 'varredura-import');
+      await pool.query(
+        `UPDATE compras.pedidos_omie
+            SET pendente_omie = TRUE, updated_at = NOW()
+          WHERE n_cod_ped = $1`,
+        [idPed]
+      );
+      pedidosImportados += 1;
+      const numImp = dadosPed?.cabecalho_consulta?.cNumero || idPed;
+      console.log(`[VarrerFaturadas] Pedido ${numImp} importado da Omie (não existia localmente)`);
+    } catch (e) {
+      erros += 1;
+      console.error(`[VarrerFaturadas] Falha ao importar pedido ${idPed}:`, e.message);
+    }
+  }
+
+  const duracaoMs = Date.now() - inicio;
+  console.log(
+    `[VarrerFaturadas] Concluído em ${Math.round(duracaoMs / 1000)}s — ` +
+    `listados=${listados} upsertados=${upsertados} orfaos=${atualizadosOrfaos} removidos=${removidos} ` +
+    `pedidos=${pedidosVerificados} inativados=${pedidosInativados} etapaAjustada=${pedidosEtapaAtualizada} importados=${pedidosImportados} erros=${erros}`
+  );
+
+  return {
+    ok: true,
+    listados,
+    upsertados,
+    atualizados_orfaos: atualizadosOrfaos,
+    removidos,
+    pedidos_verificados: pedidosVerificados,
+    pedidos_inativados: pedidosInativados,
+    pedidos_etapa_atualizada: pedidosEtapaAtualizada,
+    pedidos_faturados_marcados: pedidosFaturadosMarcados,
+    pedidos_importados: pedidosImportados,
+    erros,
+    paginas,
+    duracao_ms: duracaoMs
+  };
+}
+
+app.post('/api/compras/kanban/varrer-faturadas', express.json(), async (req, res) => {
+  if (_varrerFaturadasOmieEmAndamento) {
+    return res.status(409).json({
+      ok: false,
+      error: 'Já existe uma varredura em andamento. Aguarde terminar.'
+    });
+  }
+
+  _varrerFaturadasOmieEmAndamento = true;
+  const startTime = Date.now();
+
+  try {
+    console.log('[API] Iniciando varredura leve Faturadas (Omie etapa 40)...');
+    const resultado = await varrerFaturadasOmieKanban();
+    res.json({
+      ...resultado,
+      tempo_formatado: `${Math.floor((Date.now() - startTime) / 1000)}s`
+    });
+  } catch (err) {
+    console.error('[API] Erro na varredura Faturadas:', err);
+    res.status(500).json({
+      ok: false,
+      error: err.message || 'Erro ao varrer Faturadas na Omie'
+    });
+  } finally {
+    _varrerFaturadasOmieEmAndamento = false;
   }
 });
 
