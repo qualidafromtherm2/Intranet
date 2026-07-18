@@ -16,7 +16,7 @@ import {
   getFiltered,
   reapplyFilters,
   populateFilters
-} from './filtro_produto.js?v=20260718-minimos-compras';
+} from './filtro_produto.js?v=20260718-faixa-minimo';
 
 /* --------------------- SPINNER helpers -------------------------------- */
 let spinnerVisible  = false;

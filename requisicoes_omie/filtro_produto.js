@@ -9,6 +9,9 @@ let activeTipoValue       = '';
 let activeShowInactive    = false;
 let activeSemEstoqueMin   = false;
 let activeAbaixoEstoqueMin = false;
+let activeAcimaEstoqueMin = false;
+let activeProximoEstoqueMin = false;
+let activeProximoEstoqueMinPercent = 10;
 let activeEstoqueNegativo = false;
 let activeHideObsolete    = false;
 let activeHideEngineering = false;
@@ -42,7 +45,8 @@ async function getLocaisInventario() {
 }
 
 let codeInput, familySelect, tipoItemSelect, filterBtn, filterOverlay, filterLocalSel, filterOrigemSel, filterCompraSel;
-let filterShowInactiveCb, filterSemEstoqueMinCb, filterAbaixoEstoqueMinCb, filterEstoqueNegativoCb, filterHideObsoleteCb, filterHideEngineeringCb;
+let filterShowInactiveCb, filterSemEstoqueMinCb, filterAbaixoEstoqueMinCb, filterAcimaEstoqueMinCb;
+let filterProximoEstoqueMinCb, filterProximoEstoqueMinPercentInput, filterEstoqueNegativoCb, filterHideObsoleteCb, filterHideEngineeringCb;
 let _onFiltered;
 
 /**
@@ -87,6 +91,9 @@ export function initFiltros({
   filterShowInactiveCb   = document.getElementById('filterShowInactive');
   filterSemEstoqueMinCb  = document.getElementById('filterSemEstoqueMin');
   filterAbaixoEstoqueMinCb = document.getElementById('filterAbaixoEstoqueMin');
+  filterAcimaEstoqueMinCb = document.getElementById('filterAcimaEstoqueMin');
+  filterProximoEstoqueMinCb = document.getElementById('filterProximoEstoqueMin');
+  filterProximoEstoqueMinPercentInput = document.getElementById('filterProximoEstoqueMinPercent');
   filterEstoqueNegativoCb = document.getElementById('filterEstoqueNegativo');
   filterHideObsoleteCb   = document.getElementById('filterHideObsolete');
   filterHideEngineeringCb = document.getElementById('filterHideEngineering');
@@ -94,6 +101,14 @@ export function initFiltros({
   filterOrigemSel          = document.getElementById('filterOrigemProduto');
   filterCompraSel          = document.getElementById('filterSituacaoCompra');
   _onFiltered    = onFiltered;
+
+  const syncProximoPercentState = () => {
+    if (!filterProximoEstoqueMinPercentInput) return;
+    filterProximoEstoqueMinPercentInput.disabled = !filterProximoEstoqueMinCb?.checked;
+    filterProximoEstoqueMinPercentInput.style.opacity = filterProximoEstoqueMinCb?.checked ? '1' : '.55';
+  };
+  filterProximoEstoqueMinCb?.addEventListener('change', syncProximoPercentState);
+  syncProximoPercentState();
 
   if (!codeInput) {
     console.error('[filtro_produto] codeInput nao encontrado!');
@@ -136,12 +151,22 @@ export function initFiltros({
       activeShowInactive    = false;
       activeSemEstoqueMin   = false;
       activeAbaixoEstoqueMin = false;
+      activeAcimaEstoqueMin = false;
+      activeProximoEstoqueMin = false;
+      activeProximoEstoqueMinPercent = 10;
       activeEstoqueNegativo = false;
       activeHideObsolete    = false;
       activeHideEngineering = false;
       if (filterShowInactiveCb)    filterShowInactiveCb.checked    = false;
       if (filterSemEstoqueMinCb)   filterSemEstoqueMinCb.checked   = false;
       if (filterAbaixoEstoqueMinCb) filterAbaixoEstoqueMinCb.checked = false;
+      if (filterAcimaEstoqueMinCb) filterAcimaEstoqueMinCb.checked = false;
+      if (filterProximoEstoqueMinCb) filterProximoEstoqueMinCb.checked = false;
+      if (filterProximoEstoqueMinPercentInput) {
+        filterProximoEstoqueMinPercentInput.value = '10';
+        filterProximoEstoqueMinPercentInput.disabled = true;
+        filterProximoEstoqueMinPercentInput.style.opacity = '.55';
+      }
       if (filterEstoqueNegativoCb) filterEstoqueNegativoCb.checked = false;
       if (filterHideObsoleteCb)    filterHideObsoleteCb.checked    = false;
       if (filterHideEngineeringCb) filterHideEngineeringCb.checked = false;
@@ -164,6 +189,15 @@ export function initFiltros({
       activeShowInactive    = filterShowInactiveCb?.checked    || false;
       activeSemEstoqueMin   = filterSemEstoqueMinCb?.checked   || false;
       activeAbaixoEstoqueMin = filterAbaixoEstoqueMinCb?.checked || false;
+      activeAcimaEstoqueMin = filterAcimaEstoqueMinCb?.checked || false;
+      activeProximoEstoqueMin = filterProximoEstoqueMinCb?.checked || false;
+      activeProximoEstoqueMinPercent = Math.min(
+        100,
+        Math.max(1, Number(filterProximoEstoqueMinPercentInput?.value) || 10)
+      );
+      if (filterProximoEstoqueMinPercentInput) {
+        filterProximoEstoqueMinPercentInput.value = String(activeProximoEstoqueMinPercent);
+      }
       activeEstoqueNegativo = filterEstoqueNegativoCb?.checked || false;
       activeHideObsolete    = filterHideObsoleteCb?.checked    || false;
       activeHideEngineering = filterHideEngineeringCb?.checked || false;
@@ -183,6 +217,13 @@ function abrirModalFiltro() {
   if (filterShowInactiveCb)    filterShowInactiveCb.checked    = activeShowInactive;
   if (filterSemEstoqueMinCb)   filterSemEstoqueMinCb.checked   = activeSemEstoqueMin;
   if (filterAbaixoEstoqueMinCb) filterAbaixoEstoqueMinCb.checked = activeAbaixoEstoqueMin;
+  if (filterAcimaEstoqueMinCb) filterAcimaEstoqueMinCb.checked = activeAcimaEstoqueMin;
+  if (filterProximoEstoqueMinCb) filterProximoEstoqueMinCb.checked = activeProximoEstoqueMin;
+  if (filterProximoEstoqueMinPercentInput) {
+    filterProximoEstoqueMinPercentInput.value = String(activeProximoEstoqueMinPercent);
+    filterProximoEstoqueMinPercentInput.disabled = !activeProximoEstoqueMin;
+    filterProximoEstoqueMinPercentInput.style.opacity = activeProximoEstoqueMin ? '1' : '.55';
+  }
   if (filterEstoqueNegativoCb) filterEstoqueNegativoCb.checked = activeEstoqueNegativo;
   if (filterHideObsoleteCb)    filterHideObsoleteCb.checked    = activeHideObsolete;
   if (filterHideEngineeringCb) filterHideEngineeringCb.checked = activeHideEngineering;
@@ -386,8 +427,21 @@ function applyFilters() {
     });
   }
 
-  if (activeAbaixoEstoqueMin) {
-    filtered = filtered.filter(i => i.abaixo_minimo === true || i.abaixo_minimo === 'true');
+  if (activeAbaixoEstoqueMin || activeAcimaEstoqueMin || activeProximoEstoqueMin) {
+    filtered = filtered.filter(i => {
+      const minimo = Number(String(i.estoque_minimo ?? '').trim().replace(',', '.'));
+      const saldoAlmox = Number(String(i.saldo_almox ?? '').trim().replace(',', '.'));
+      if (!Number.isFinite(minimo) || minimo <= 0 || !Number.isFinite(saldoAlmox)) return false;
+
+      const abaixo = saldoAlmox < minimo;
+      const acima = saldoAlmox >= minimo;
+      const limiteProximo = minimo * (1 + activeProximoEstoqueMinPercent / 100);
+      const proximo = saldoAlmox >= minimo && saldoAlmox <= limiteProximo;
+
+      return (activeAbaixoEstoqueMin && abaixo)
+        || (activeAcimaEstoqueMin && acima)
+        || (activeProximoEstoqueMin && proximo);
+    });
   }
 
   if (activeCompraValue === 'em_compra') {
