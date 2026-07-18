@@ -14392,9 +14392,25 @@ app.get('/api/prateleiras3d/foto', async (req, res) => {
   try {
     let u;
     try { u = new URL(String(req.query?.url || '')); } catch { return res.status(400).end(); }
-    if (u.protocol !== 'https:' || !u.hostname.endsWith('.r2.dev')) {
-      return res.status(403).end();
+    if (u.protocol !== 'https:') return res.status(403).end();
+    const host = u.hostname.toLowerCase();
+    const r2Public = String(process.env.R2_PUBLIC_BASE_URL || '').trim();
+    let allowed = host.endsWith('.r2.dev') || host.endsWith('.r2.cloudflarestorage.com');
+    if (!allowed && r2Public) {
+      try {
+        const baseHost = new URL(r2Public).hostname.toLowerCase();
+        if (baseHost && host === baseHost) allowed = true;
+      } catch (_) { /* ignore */ }
     }
+    // Domínios legados de foto de produto (Supabase storage / CDN internos)
+    if (!allowed && (
+      host.endsWith('.supabase.co') ||
+      host.endsWith('fromtherm.com.br') ||
+      host.endsWith('qualidafromtherm.com.br')
+    )) {
+      allowed = true;
+    }
+    if (!allowed) return res.status(403).end();
     const ac = new AbortController();
     const timer = setTimeout(() => ac.abort(), 8000);
     let r;

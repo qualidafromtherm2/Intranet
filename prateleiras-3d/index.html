@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
   <title>Explorar 3D — Porta-pallet</title>
-  <link rel="stylesheet" href="style.css?v=4" />
+  <link rel="stylesheet" href="style.css?v=5" />
   <script type="importmap">
   {
     "imports": {
@@ -36,21 +36,22 @@
     <div id="hud" class="hud" hidden>
       <p class="hud-pc"><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> — andar &nbsp;·&nbsp; <kbd>Espaço</kbd>/<kbd>E</kbd> — subir &nbsp;·&nbsp; <kbd>C</kbd>/<kbd>Q</kbd> — descer</p>
       <p class="hud-pc">Mouse — olhar · Mira na caixa — produtos · Mira no banner — lista (roda = rolar) · Mira no código — detalhe · <kbd>Esc</kbd></p>
-      <p class="hud-touch">WASD + ↑↓ · Banner = lista · Clique no código = detalhe</p>
+      <p class="hud-touch">Joystick esquerdo = andar · lado direito = olhar · ↑↓ altura</p>
     </div>
 
     <div id="touchPad" class="touch-pad" hidden>
-      <div class="wasd">
-        <button type="button" class="wasd-btn" data-key="KeyW" aria-label="Frente">W</button>
-        <button type="button" class="wasd-btn" data-key="KeyA" aria-label="Esquerda">A</button>
-        <button type="button" class="wasd-btn" data-key="KeyS" aria-label="Trás">S</button>
-        <button type="button" class="wasd-btn" data-key="KeyD" aria-label="Direita">D</button>
+      <div id="joyMove" class="joy-zone joy-move" aria-label="Andar">
+        <div class="joy-base">
+          <div class="joy-stick" id="joyMoveStick"></div>
+        </div>
+        <span class="joy-label">Andar</span>
       </div>
-      <div class="vert-pad">
+      <div class="touch-side-btns">
         <button type="button" class="wasd-btn" data-key="Space" aria-label="Subir">↑</button>
         <button type="button" class="wasd-btn" data-key="KeyC" aria-label="Descer">↓</button>
         <button type="button" id="btnExitTouch" class="btn-exit-touch">Sair</button>
       </div>
+      <div id="joyLookHint" class="joy-look-hint">Arraste aqui → olhar</div>
     </div>
 
     <div id="blocker" class="blocker">
@@ -60,7 +61,7 @@
         <ul class="controls">
           <li><strong>PC:</strong> <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> andar · mouse olhar</li>
           <li><strong>Altura:</strong> <kbd>Espaço</kbd>/<kbd>E</kbd> sobe · <kbd>C</kbd>/<kbd>Q</kbd> desce</li>
-          <li><strong>Tablet:</strong> WASD + ↑↓ na tela + arrastar para olhar</li>
+          <li><strong>Celular/Tablet:</strong> joystick esquerdo = andar · lado direito arrastar = olhar</li>
           <li><kbd>Esc</kbd> (PC) ou Sair (tablet) — pausar</li>
         </ul>
         <p class="hint">Cada posição ocupada mostra a foto dos produtos. Segure o clique e arraste para rolar as fotos. <strong>Clique</strong> numa foto para fixar o painel e mexer nele — <strong>botão direito</strong> volta ao normal.</p>
@@ -91,6 +92,6 @@
     </div>
   </div>
 
-  <script type="module" src="main.js?v=12"></script>
+  <script type="module" src="main.js?v=18"></script>
 </body>
 </html>

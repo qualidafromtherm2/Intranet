@@ -305,15 +305,19 @@ function boot(renderer) {
   const imgCache = new Map(); // url → { img, ok, loading } — cedo p/ o spinner
   const loadGate = {
     ocupacao: false,
-    ocupacaoFotos: false,
-    estoque: false,
-    ident: false,
+    estoque: false, // dados + fotos do painel Estoque mínimo
+    ident: false,   // dados + fotos do painel Identificação
   };
+  /** URLs das fotos das placas (spinner só espera estas — prateleiras carregam depois). */
+  const placaFotoUrls = new Set();
   let warmFrames = 0;
   const readyWaiters = [];
+  let preloadPrateleirasIniciado = false;
+  let usuarioLiberado = false;
 
-  function fotosAindaCarregando() {
-    for (const rec of imgCache.values()) {
+  function fotosPlacasAindaCarregando() {
+    for (const url of placaFotoUrls) {
+      const rec = imgCache.get(url);
       if (rec && rec.loading) return true;
     }
     return false;
@@ -322,23 +326,41 @@ function boot(renderer) {
   function atualizarTextoSpinner() {
     if (!enterLoadingSub) return;
     let pend = 0;
-    for (const rec of imgCache.values()) {
+    for (const url of placaFotoUrls) {
+      const rec = imgCache.get(url);
       if (rec && rec.loading) pend += 1;
     }
     if (pend > 0) {
-      enterLoadingSub.textContent = `Carregando fotos… ${pend} restante${pend === 1 ? '' : 's'}.`;
+      enterLoadingSub.textContent = `Carregando fotos das placas… ${pend} restante${pend === 1 ? '' : 's'}.`;
     } else if (!loadGate.ocupacao || !loadGate.estoque || !loadGate.ident) {
-      enterLoadingSub.textContent = 'Carregando dados dos painéis e prateleiras…';
+      enterLoadingSub.textContent = 'Carregando dados das placas…';
     } else {
       enterLoadingSub.textContent = 'Finalizando a cena…';
     }
   }
 
+  function cenasPlacasProntas() {
+    // Dados dos painéis prontos (fotos continuam carregando e redesenham sozinhas)
+    return loadGate.ocupacao && loadGate.estoque && loadGate.ident && warmFrames >= 2;
+  }
+
+  function syncHudJogo() {
+    const ativo = !!(playing || controls.isLocked) && !awaitingAssets;
+    const ch = document.getElementById('crosshair');
+    if (ch) ch.hidden = !ativo;
+    if (ativo) {
+      blocker.hidden = true;
+      hud.hidden = false;
+      if (enterLoadingEl) {
+        enterLoadingEl.hidden = true;
+        enterLoadingEl.style.display = 'none';
+      }
+    }
+  }
+
   function notifySceneReady() {
     atualizarTextoSpinner();
-    if (!loadGate.ocupacao || !loadGate.ocupacaoFotos || !loadGate.estoque || !loadGate.ident) return;
-    if (warmFrames < 2) return;
-    if (fotosAindaCarregando()) return;
+    if (!cenasPlacasProntas()) return;
     while (readyWaiters.length) {
       try { readyWaiters.shift()(); } catch (_) {}
     }
@@ -346,11 +368,7 @@ function boot(renderer) {
 
   waitSceneReadyFn = () => new Promise((resolve) => {
     const tryResolve = () => {
-      if (
-        loadGate.ocupacao && loadGate.ocupacaoFotos &&
-        loadGate.estoque && loadGate.ident &&
-        warmFrames >= 2 && !fotosAindaCarregando()
-      ) {
+      if (cenasPlacasProntas()) {
         resolve();
         return true;
       }
@@ -360,45 +378,46 @@ function boot(renderer) {
     readyWaiters.push(resolve);
   });
 
+  let ignoreUnlockUntil = 0;
+
   function liberarControlesAposCarga() {
     awaitingAssets = false;
-    if (enterLoadingEl) enterLoadingEl.hidden = true;
-    if (isTouchUI) {
-      playing = true;
-      blocker.hidden = true;
-      hud.hidden = false;
-      touchPad.hidden = false;
-      document.getElementById('crosshair').hidden = false;
-      return;
+    usuarioLiberado = true;
+    ignoreUnlockUntil = Date.now() + 800;
+    if (enterLoadingEl) {
+      enterLoadingEl.hidden = true;
+      enterLoadingEl.style.display = 'none';
     }
-    if (controls.isLocked) {
-      // Pointer lock já foi pedido no clique — só libera o movimento agora
-      playing = true;
-      blocker.hidden = true;
-      hud.hidden = false;
-      touchPad.hidden = true;
-      document.getElementById('crosshair').hidden = false;
-      return;
+    // Só depois de liberar o usuário: fotos das prateleiras em segundo plano
+    iniciarPreloadFotosPrateleiras();
+
+    playing = true;
+    blocker.hidden = true;
+    hud.hidden = false;
+    touchPad.hidden = !isTouchUI;
+    syncHudJogo();
+
+    if (!isTouchUI && !controls.isLocked) {
+      try { controls.lock(); } catch (_) { /* clique no canvas */ }
     }
-    // Lock falhou (gesto “expirou”): pede um novo clique
-    blocker.hidden = false;
     const lead = blocker.querySelector('.lead');
-    if (lead) lead.textContent = 'Cena pronta. Clique de novo em “Toque / clique para entrar” para caminhar.';
-    btnEnter.textContent = 'Toque / clique para caminhar';
+    if (lead) lead.textContent = 'Mesmas ruas do Armazém 3D (R1–R4) — ande pelos corredores.';
+    btnEnter.textContent = 'Toque / clique para entrar';
   }
 
   async function enterPlay() {
     if (btnEnter.disabled) return;
 
-    // Se a cena já carregou e só falta o pointer lock, trava agora (ainda no gesto do clique)
-    if (!awaitingAssets && loadGate.ocupacao && loadGate.ocupacaoFotos && loadGate.estoque && loadGate.ident && !fotosAindaCarregando()) {
+    // Já liberado: só (re)trava o mouse e garante modal fechado
+    if (!awaitingAssets && usuarioLiberado) {
+      playing = true;
+      ignoreUnlockUntil = Date.now() + 800;
+      syncHudJogo();
       if (isTouchUI) {
-        liberarControlesAposCarga();
+        touchPad.hidden = false;
         return;
       }
-      try {
-        controls.lock();
-      } catch (err) {
+      try { controls.lock(); } catch (err) {
         console.error(err);
         showWebglError('Pointer Lock bloqueado: ' + (err.message || err));
       }
@@ -407,12 +426,16 @@ function boot(renderer) {
 
     awaitingAssets = true;
     playing = false;
-    if (enterLoadingEl) enterLoadingEl.hidden = false;
+    if (enterLoadingEl) {
+      enterLoadingEl.hidden = false;
+      enterLoadingEl.style.display = '';
+    }
     blocker.hidden = true;
+    const ch0 = document.getElementById('crosshair');
+    if (ch0) ch0.hidden = true;
     atualizarTextoSpinner();
 
     // IMPORTANTE: pedir pointer lock AINDA no clique do usuário.
-    // Se esperar o fim do spinner, o Chrome bloqueia (NotAllowedError).
     if (!isTouchUI) {
       try {
         controls.lock();
@@ -421,7 +444,7 @@ function boot(renderer) {
       }
     }
 
-    const maxWaitMs = 25000;
+    const maxWaitMs = 20000;
     try {
       await Promise.race([
         Promise.all([
@@ -432,7 +455,7 @@ function boot(renderer) {
       ]);
     } catch (_) { /* segue */ }
 
-    if (fotosAindaCarregando() || !loadGate.estoque || !loadGate.ident || !loadGate.ocupacaoFotos) {
+    if (!cenasPlacasProntas()) {
       forcarLiberarSpinner();
     }
     liberarControlesAposCarga();
@@ -460,47 +483,69 @@ function boot(renderer) {
 
   controls.addEventListener('lock', () => {
     blocker.hidden = true;
+    if (enterLoadingEl) {
+      enterLoadingEl.hidden = true;
+      enterLoadingEl.style.display = 'none';
+    }
     // Durante o spinner, trava o mouse mas NÃO libera o andar ainda
     if (awaitingAssets) {
       playing = false;
       hud.hidden = true;
       touchPad.hidden = true;
-      document.getElementById('crosshair').hidden = true;
+      const ch = document.getElementById('crosshair');
+      if (ch) ch.hidden = true;
       return;
     }
     playing = true;
-    hud.hidden = false;
-    touchPad.hidden = true;
-    document.getElementById('crosshair').hidden = false;
+    syncHudJogo();
   });
   controls.addEventListener('unlock', () => {
     if (inspectMode) return; // painel fixado: mantém a cena e o balão na tela
     if (awaitingAssets) {
-      // Esc durante o carregamento — mantém spinner; usuário clica de novo depois
       playing = false;
+      return;
+    }
+    // Evita “piscar” pause quando o lock é reconquistado logo após liberar
+    if (Date.now() < ignoreUnlockUntil) {
+      playing = true;
+      syncHudJogo();
+      if (!isTouchUI) {
+        try { controls.lock(); } catch (_) {}
+      }
       return;
     }
     if (!isTouchUI) {
       playing = false;
       blocker.hidden = false;
       hud.hidden = true;
-      document.getElementById('crosshair').hidden = true;
+      const ch = document.getElementById('crosshair');
+      if (ch) ch.hidden = true;
       document.getElementById('lookBalloon').hidden = true;
       const fp = document.getElementById('foraPanel');
       if (fp) fp.hidden = true;
+      const lead = blocker.querySelector('.lead');
+      if (lead) lead.textContent = 'Mesmas ruas do Armazém 3D (R1–R4) — ande pelos corredores.';
+      btnEnter.textContent = 'Toque / clique para entrar';
     }
   });
 
-  // ——— Olhar por arraste (tablet / embed sem pointer lock) ———
+  // ——— Controles touch estilo PUBG: joystick esquerdo (andar) + lado direito (olhar) ———
   const LOOK_SENS = 0.0045;
   const PI_2 = Math.PI / 2;
   let lookPointerId = null;
   let lookLastX = 0;
   let lookLastY = 0;
+  const joyMove = { x: 0, y: 0, active: false }; // -1..1 (x=strafe, y=frente/trás)
 
   function onLookStart(e) {
     if (!playing || controls.isLocked) return;
-    if (e.target.closest && e.target.closest('#touchPad')) return;
+    if (e.target.closest && (
+      e.target.closest('#joyMove') ||
+      e.target.closest('.touch-side-btns') ||
+      e.target.closest('#btnExitTouch')
+    )) return;
+    // Só o lado direito da tela olha (estilo PUBG)
+    if (e.clientX < window.innerWidth * 0.42) return;
     lookPointerId = e.pointerId;
     lookLastX = e.clientX;
     lookLastY = e.clientY;
@@ -527,8 +572,69 @@ function boot(renderer) {
   canvas.addEventListener('pointerup', onLookEnd);
   canvas.addEventListener('pointercancel', onLookEnd);
 
+  // Joystick de movimento (esquerda)
+  const joyMoveEl = document.getElementById('joyMove');
+  const joyMoveStick = document.getElementById('joyMoveStick');
+  let joyPointerId = null;
+  const JOY_MAX = 48;
+
+  function setJoyVisual(nx, ny) {
+    if (!joyMoveStick) return;
+    joyMoveStick.style.transform = `translate(${nx * JOY_MAX}px, ${ny * JOY_MAX}px)`;
+  }
+  function joyFromEvent(e) {
+    if (!joyMoveEl) return { x: 0, y: 0 };
+    const base = joyMoveEl.querySelector('.joy-base') || joyMoveEl;
+    const r = base.getBoundingClientRect();
+    const cx = r.left + r.width / 2;
+    const cy = r.top + r.height / 2;
+    let dx = e.clientX - cx;
+    let dy = e.clientY - cy;
+    const max = Math.min(r.width, r.height) * 0.42;
+    const len = Math.hypot(dx, dy) || 1;
+    if (len > max) { dx = (dx / len) * max; dy = (dy / len) * max; }
+    return { x: dx / max, y: dy / max };
+  }
+  function onJoyStart(e) {
+    if (!playing) return;
+    e.preventDefault();
+    e.stopPropagation();
+    joyPointerId = e.pointerId;
+    joyMove.active = true;
+    try { joyMoveEl.setPointerCapture(e.pointerId); } catch (_) {}
+    const v = joyFromEvent(e);
+    joyMove.x = v.x;
+    joyMove.y = v.y;
+    setJoyVisual(v.x, v.y);
+  }
+  function onJoyMove(e) {
+    if (joyPointerId !== e.pointerId || !joyMove.active) return;
+    e.preventDefault();
+    const v = joyFromEvent(e);
+    joyMove.x = v.x;
+    joyMove.y = v.y;
+    setJoyVisual(v.x, v.y);
+  }
+  function onJoyEnd(e) {
+    if (joyPointerId !== e.pointerId) return;
+    joyPointerId = null;
+    joyMove.active = false;
+    joyMove.x = 0;
+    joyMove.y = 0;
+    setJoyVisual(0, 0);
+    try { joyMoveEl.releasePointerCapture(e.pointerId); } catch (_) {}
+  }
+  if (joyMoveEl) {
+    joyMoveEl.addEventListener('pointerdown', onJoyStart);
+    joyMoveEl.addEventListener('pointermove', onJoyMove);
+    joyMoveEl.addEventListener('pointerup', onJoyEnd);
+    joyMoveEl.addEventListener('pointercancel', onJoyEnd);
+  }
+
+  // Botões subir / descer / sair
   touchPad.querySelectorAll('.wasd-btn').forEach((btn) => {
     const code = btn.getAttribute('data-key');
+    if (!code) return;
     const setDown = (down, ev) => {
       if (ev) { ev.preventDefault(); ev.stopPropagation(); }
       keys[code] = down;
@@ -656,14 +762,16 @@ function boot(renderer) {
     return `/api/prateleiras3d/foto?url=${encodeURIComponent(url)}`;
   }
 
-  function loadFoto(url, onReady) {
+  function loadFoto(url, onReady, opts) {
+    const isPlaca = !!(opts && opts.placa);
+    if (isPlaca) placaFotoUrls.add(url);
     let rec = imgCache.get(url);
     if (rec) {
       if (!rec.loading) onReady();
       else rec.cbs.push(onReady);
       return rec;
     }
-    rec = { img: new Image(), ok: false, loading: true, cbs: [onReady] };
+    rec = { img: new Image(), ok: false, loading: true, cbs: [onReady], placa: isPlaca };
     imgCache.set(url, rec);
     atualizarTextoSpinner();
 
@@ -674,11 +782,13 @@ function boot(renderer) {
       rec.loading = false;
       const cbs = rec.cbs.splice(0);
       cbs.forEach((cb) => { try { cb(); } catch (_) {} });
+      if (ok) refreshSlotsComFoto(url);
       notifySceneReady();
     };
 
     // Sem isso, foto que trava no proxy deixa o spinner eterno
-    rec._timer = setTimeout(() => finalizar(false), 9000);
+    rec._timer = setTimeout(() => finalizar(false), 12000);
+    rec.img.crossOrigin = 'anonymous';
     rec.img.onload = () => finalizar(true);
     rec.img.onerror = () => finalizar(false);
     rec.img.src = fotoProxyUrl(url);
@@ -686,15 +796,15 @@ function boot(renderer) {
   }
 
   /** Pré-carrega URLs com concorrência limitada (evita derrubar o proxy). */
-  async function preloadUrls(urls) {
+  async function preloadUrls(urls, opts) {
     const list = [...new Set((urls || []).filter(Boolean))];
     if (!list.length) return;
-    const CONC = 6;
+    const CONC = (opts && opts.placa) ? 6 : ((opts && opts.conc) || 3);
     let idx = 0;
     async function worker() {
       while (idx < list.length) {
         const url = list[idx++];
-        await new Promise((resolve) => loadFoto(url, resolve));
+        await new Promise((resolve) => loadFoto(url, resolve, opts));
       }
     }
     const n = Math.min(CONC, list.length);
@@ -702,20 +812,87 @@ function boot(renderer) {
   }
 
   function forcarLiberarSpinner() {
-    for (const rec of imgCache.values()) {
-      if (rec && rec.loading) {
-        clearTimeout(rec._timer);
-        rec.loading = false;
-        rec.ok = false;
-        const cbs = rec.cbs.splice(0);
-        cbs.forEach((cb) => { try { cb(); } catch (_) {} });
-      }
-    }
+    // NÃO mata downloads de foto (senão as placas ficam sem imagem).
+    // Só libera os gates de dados para o usuário poder entrar.
     loadGate.ocupacao = true;
-    loadGate.ocupacaoFotos = true;
     loadGate.estoque = true;
     loadGate.ident = true;
     notifySceneReady();
+  }
+
+  function refreshSlotsComFoto(url) {
+    if (!url) return;
+    // Agrupa redesenhos: várias fotos chegando no mesmo frame não varrem tudo N vezes
+    if (!refreshSlotsPendentes) refreshSlotsPendentes = new Set();
+    refreshSlotsPendentes.add(url);
+    if (refreshSlotsTimer) return;
+    refreshSlotsTimer = setTimeout(() => {
+      refreshSlotsTimer = null;
+      const urls = refreshSlotsPendentes;
+      refreshSlotsPendentes = null;
+      for (const mesh of slotMeshes) {
+        if (!mesh.userData?.hasLabelTex) continue;
+        const itens = mesh.userData.itens || [];
+        let hit = false;
+        for (const it of itens) {
+          if (it.foto_url && urls.has(it.foto_url)) { hit = true; break; }
+        }
+        if (hit) paintSlotPhotos(mesh);
+      }
+    }, 120);
+  }
+  let refreshSlotsPendentes = null;
+  let refreshSlotsTimer = null;
+
+  async function ensureFotoUrlItem(it) {
+    if (it?.foto_url) return it.foto_url;
+    const cod = String(it?.codigo_produto || '').trim();
+    if (!cod) return null;
+    const codU = cod.toUpperCase();
+    for (const lista of Object.values(ocupacao)) {
+      for (const x of lista || []) {
+        if (String(x.codigo_produto || '').trim().toUpperCase() === codU && x.foto_url) {
+          it.foto_url = x.foto_url;
+          return it.foto_url;
+        }
+      }
+    }
+    try {
+      const r = await fetch(`/api/produtos/imagem/${encodeURIComponent(cod)}`, { credentials: 'include' });
+      const j = await r.json();
+      if (j && j.ok && j.url_imagem) {
+        it.foto_url = j.url_imagem;
+        for (const lista of Object.values(ocupacao)) {
+          for (const x of lista || []) {
+            if (String(x.codigo_produto || '').trim().toUpperCase() === codU) x.foto_url = j.url_imagem;
+          }
+        }
+        return it.foto_url;
+      }
+    } catch (_) { /* ignore */ }
+    return null;
+  }
+
+  /** Carrega fotos SÓ deste slot (quando a câmera chega perto). */
+  function carregarFotosDoSlot(mesh) {
+    const ud = mesh.userData;
+    if (!ud || ud._fotosJob) return;
+    const itens = ud.itens || [];
+    if (!itens.length) return;
+    ud._fotosJob = (async () => {
+      for (const it of itens) {
+        if (!it.foto_url) await ensureFotoUrlItem(it);
+        if (it.foto_url) {
+          await new Promise((resolve) => loadFoto(it.foto_url, resolve));
+        }
+      }
+      if (ud.hasLabelTex) paintSlotPhotos(mesh);
+    })().finally(() => { ud._fotosJob = null; });
+  }
+
+  // Prateleiras: só carrega o que a câmera vê (updateNearbySlotLabels)
+  function iniciarPreloadFotosPrateleiras() {
+    // no-op — fotos sob demanda no raio da câmera
   }
 
   const SLOT_TEX_W = 128;
@@ -792,6 +969,8 @@ function boot(renderer) {
         ctx.fillText(cod, cx + cellW / 2, cy + cellH / 2);
         if (url && (!rec || rec.loading)) {
           loadFoto(url, () => { if (ud.hasLabelTex) paintSlotPhotos(mesh); });
+        } else if (!url && it.codigo_produto && !ud._fotosJob) {
+          carregarFotosDoSlot(mesh);
         }
       }
       ctx.restore();
@@ -963,25 +1142,28 @@ function boot(renderer) {
     ud.slotTex = tex;
     ud.hasLabelTex = true;
     paintSlotPhotos(mesh);
+    // Busca URL + baixa foto só deste endereço (câmera perto)
+    carregarFotosDoSlot(mesh);
   }
 
-  // Cria as texturas de foto de TODAS as posições ocupadas, mas aos poucos
-  // (poucas por quadro) — evita o pico que derruba o WebGL nesta máquina.
-  // Uma vez criada, a foto NUNCA some (não volta a ficar branca de longe).
+  // Só monta textura/foto no raio da câmera (leve e sob demanda)
   const BUILD_PER_TICK = 4;
+  const BUILD_NEAR_DIST = 18;
   function updateNearbySlotLabels(dt) {
     labelTexAcc += dt;
     if (labelTexAcc < 0.12) return;
     labelTexAcc = 0;
+    if (!usuarioLiberado && !playing && !controls.isLocked) return;
     const cam = controls.getObject().position;
     const pendentes = [];
     for (const mesh of slotMeshes) {
       if (!mesh.visible || mesh.userData.hasLabelTex) continue;
       mesh.getWorldPosition(_wp);
-      pendentes.push({ mesh, d: _wp.distanceTo(cam) });
+      const d = _wp.distanceTo(cam);
+      if (d > BUILD_NEAR_DIST) continue;
+      pendentes.push({ mesh, d });
     }
     if (!pendentes.length) return;
-    // Prioriza as mais próximas da câmera (aparecem primeiro onde o usuário olha)
     pendentes.sort((a, b) => a.d - b.d);
     for (let i = 0; i < Math.min(BUILD_PER_TICK, pendentes.length); i++) {
       setSlotLabeled(pendentes[i].mesh);
@@ -1901,18 +2083,16 @@ function boot(renderer) {
   }
   addRelatorioWallBoard();
 
-  // Posição dos painéis na parede da entrada (+Z): Identificação (esq.) + Estoque mínimo (dir.)
-  // Centralizados na largura útil do barracão, com folga das paredes laterais (evita cortar o "E").
+  // Posição dos painéis na parede da entrada (+Z).
+  // Ao OLHAR essa parede (virado 180°), a esquerda da tela = world +X (parede das prateleiras).
+  // Por isso “10 cm da parede esquerda” (visual) = encostar em hallRightX.
   const ENTRY_PANEL_W = 4.6;
   const ENTRY_PANEL_H = 3.0;
-  const ENTRY_PANEL_GAP = 0.5;
-  const ENTRY_WALL_MARGIN = 2.6;
+  const ENTRY_PANEL_GAP = 0.45;
+  const ENTRY_LEFT_GAP = 0.10; // 10 cm da quina esquerda visual
   const entryWallZ = floorD / 2 - wallT / 2 - 0.06;
-  const usableLeft = hallLeftX + ENTRY_WALL_MARGIN;
-  const usableRight = hallRightX - ENTRY_WALL_MARGIN;
-  const usableCenter = (usableLeft + usableRight) / 2;
-  const identBoardX = usableCenter - (ENTRY_PANEL_W + ENTRY_PANEL_GAP) / 2;
-  const estoqueBoardX = usableCenter + (ENTRY_PANEL_W + ENTRY_PANEL_GAP) / 2;
+  const identBoardX = hallRightX - ENTRY_LEFT_GAP - ENTRY_PANEL_W / 2;
+  const estoqueBoardX = identBoardX - ENTRY_PANEL_W - ENTRY_PANEL_GAP;
 
   // ——— Quadro ESTOQUE MÍNIMO (parede da entrada, à direita da Identificação) ———
   function addEstoqueMinimoWallBoard() {
@@ -2077,7 +2257,8 @@ function boot(renderer) {
         ctx.fillStyle = '#ffffff';
         ctx.fillRect(x + 10, y + 10, cellW - 20, fotoH);
 
-        const url = resolverFoto(p);
+        const url = p.foto_url || resolverFoto(p);
+        if (url && !p.foto_url) p.foto_url = url;
         const rec = url ? imgCache.get(url) : null;
         if (url && rec && rec.ok) {
           const iw = rec.img.naturalWidth || 1;
@@ -2091,7 +2272,7 @@ function boot(renderer) {
           ctx.textAlign = 'center';
           ctx.font = `bold 22px ${KFONT}`;
           ctx.fillText(String(p.codigo || '').slice(0, 12), x + cellW / 2, y + 10 + fotoH / 2);
-          if (url && (!rec || rec.loading)) loadFoto(url, pintar);
+          if (url && (!rec || rec.loading)) loadFoto(url, pintar, { placa: true });
         }
 
         const codKey = String(p.codigo || '').trim().toUpperCase();
@@ -2155,18 +2336,36 @@ function boot(renderer) {
     };
 
     function carregarFotosFaltantes(lista) {
-      const semFoto = (lista || []).filter((it) => !it.foto_url && (it.codigo_produto || it.codigo));
-      return Promise.all(semFoto.map((it) => {
-        const key = it.codigo_produto || it.codigo;
-        return fetch(`/api/produtos/imagem/${encodeURIComponent(key)}`, { credentials: 'include' })
-          .then((r) => r.json())
-          .then((j) => {
-            if (j && j.ok && j.url_imagem) it.foto_url = j.url_imagem;
-          })
-          .catch(() => {});
-      })).then(() => {
+      // Enriquecer URLs (ocupação se já chegou) e pré-carregar — sem travar a entrada
+      const enriquecer = () => {
+        for (const it of lista || []) {
+          if (!it.foto_url) it.foto_url = resolverFoto(it);
+        }
+        const semFoto = (lista || []).filter((it) => !it.foto_url && (it.codigo_produto || it.codigo));
+        return Promise.all(semFoto.map((it) => {
+          const key = it.codigo_produto || it.codigo;
+          return fetch(`/api/produtos/imagem/${encodeURIComponent(key)}`, { credentials: 'include' })
+            .then((r) => r.json())
+            .then((j) => {
+              if (j && j.ok && j.url_imagem) it.foto_url = j.url_imagem;
+            })
+            .catch(() => {});
+        }));
+      };
+      const esperarOcup = loadGate.ocupacao
+        ? Promise.resolve()
+        : new Promise((r) => {
+            const t = setTimeout(r, 2500);
+            const iv = setInterval(() => {
+              if (loadGate.ocupacao) { clearInterval(iv); clearTimeout(t); r(); }
+            }, 80);
+          });
+      return esperarOcup.then(enriquecer).then(() => {
+        for (const it of lista || []) {
+          if (!it.foto_url) it.foto_url = resolverFoto(it);
+        }
         const urls = (lista || []).map((it) => it.foto_url).filter(Boolean);
-        return preloadUrls(urls);
+        return preloadUrls(urls, { placa: true });
       }).then(() => pintar());
     }
 
@@ -2202,12 +2401,10 @@ function boot(renderer) {
         msgStatus = String(j?.error || 'Sem dados.');
       }
       pintar();
-      try {
-        if (itens.length) await carregarFotosFaltantes(itens);
-      } finally {
-        loadGate.estoque = true;
-        notifySceneReady();
-      }
+      // Libera a entrada assim que os dados chegam; fotos pintam quando forem chegando
+      loadGate.estoque = true;
+      notifySceneReady();
+      if (itens.length) carregarFotosFaltantes(itens).catch(() => {});
     }).catch(() => {
       msgStatus = 'Falha ao carregar estoque mínimo.';
       pintar();
@@ -2320,7 +2517,8 @@ function boot(renderer) {
         ctx.fillStyle = '#ffffff';
         ctx.fillRect(x + 10, y + 10, cellW - 20, fotoH);
 
-        const url = resolverFoto(p);
+        const url = p.foto_url || resolverFoto(p);
+        if (url && !p.foto_url) p.foto_url = url;
         const rec = url ? imgCache.get(url) : null;
         if (url && rec && rec.ok) {
           const iw = rec.img.naturalWidth || 1;
@@ -2334,7 +2532,7 @@ function boot(renderer) {
           ctx.textAlign = 'center';
           ctx.font = `bold 20px ${KFONT}`;
           ctx.fillText(String(p.codigo_produto || '').slice(0, 12), x + cellW / 2, y + 10 + fotoH / 2);
-          if (url && (!rec || rec.loading)) loadFoto(url, pintar);
+          if (url && (!rec || rec.loading)) loadFoto(url, pintar, { placa: true });
         }
 
         if (p.impressa) {
@@ -2386,24 +2584,41 @@ function boot(renderer) {
     board.userData.pintar = pintar;
 
     function carregarFotosFaltantes(lista) {
-      const semFoto = (lista || []).filter((it) => !it.foto_url && it.codigo_produto);
-      return Promise.all(semFoto.map((it) =>
-        fetch(`/api/produtos/imagem/${encodeURIComponent(it.codigo_produto)}`, { credentials: 'include' })
-          .then((r) => r.json())
-          .then((j) => {
-            if (j && j.ok && j.url_imagem) it.foto_url = j.url_imagem;
-          })
-          .catch(() => {})
-      )).then(() => {
+      const enriquecer = () => {
+        for (const it of lista || []) {
+          if (!it.foto_url) it.foto_url = resolverFoto(it);
+        }
+        const semFoto = (lista || []).filter((it) => !it.foto_url && it.codigo_produto);
+        return Promise.all(semFoto.map((it) =>
+          fetch(`/api/produtos/imagem/${encodeURIComponent(it.codigo_produto)}`, { credentials: 'include' })
+            .then((r) => r.json())
+            .then((j) => {
+              if (j && j.ok && j.url_imagem) it.foto_url = j.url_imagem;
+            })
+            .catch(() => {})
+        ));
+      };
+      const esperarOcup = loadGate.ocupacao
+        ? Promise.resolve()
+        : new Promise((r) => {
+            const t = setTimeout(r, 2500);
+            const iv = setInterval(() => {
+              if (loadGate.ocupacao) { clearInterval(iv); clearTimeout(t); r(); }
+            }, 80);
+          });
+      return esperarOcup.then(enriquecer).then(() => {
+        for (const it of lista || []) {
+          if (!it.foto_url) it.foto_url = resolverFoto(it);
+        }
         const urls = (lista || []).map((it) => it.foto_url).filter(Boolean);
-        return preloadUrls(urls);
+        return preloadUrls(urls, { placa: true });
       }).then(() => pintar());
     }
 
     pintar();
     fetch('/api/etiquetas/recebimento/pendentes', { credentials: 'include' })
       .then((r) => r.json().then((j) => ({ status: r.status, j })))
-      .then(async ({ status, j }) => {
+      .then(({ status, j }) => {
         if (j && Array.isArray(j.etiquetas)) {
           itens = j.etiquetas.map((it) => ({
             id: it.id,
@@ -2422,12 +2637,9 @@ function boot(renderer) {
           msgStatus = String(j?.error || 'Sem dados.');
         }
         pintar();
-        try {
-          if (itens.length) await carregarFotosFaltantes(itens);
-        } finally {
-          loadGate.ident = true;
-          notifySceneReady();
-        }
+        loadGate.ident = true;
+        notifySceneReady();
+        if (itens.length) carregarFotosFaltantes(itens).catch(() => {});
       })
       .catch(() => {
         msgStatus = 'Falha ao carregar identificação.';
@@ -2529,20 +2741,8 @@ function boot(renderer) {
     applyOcupacaoToSlots();
     loadGate.ocupacao = true;
     notifySceneReady();
-
-    // Pré-carrega TODAS as fotos das prateleiras antes de liberar o spinner
-    const urls = new Set();
-    for (const itens of Object.values(ocupacao)) {
-      for (const it of itens || []) {
-        if (it.foto_url) urls.add(it.foto_url);
-      }
-    }
-    try {
-      await preloadUrls([...urls]);
-    } finally {
-      loadGate.ocupacaoFotos = true;
-      notifySceneReady();
-    }
+    // Se o usuário já entrou, inicia o preload das prateleiras agora
+    if (usuarioLiberado) iniciarPreloadFotosPrateleiras();
   }
 
   // Agrupa por produto: 1 grupo por código, com TODOS os IDs de etiqueta
@@ -3605,6 +3805,13 @@ function boot(renderer) {
     if (ctxLost) return; // contexto perdido: não desenha até restaurar
     const dt = Math.min(clock.getDelta(), 0.05);
 
+    // Mantém o + visível enquanto o jogo está ativo
+    if (!awaitingAssets && (playing || controls.isLocked)) {
+      const ch = document.getElementById('crosshair');
+      if (ch && ch.hidden) ch.hidden = false;
+      if (blocker && !blocker.hidden && controls.isLocked) blocker.hidden = true;
+    }
+
     if (playing || controls.isLocked) {
       const speed = (keys.ShiftLeft || keys.ShiftRight ? PLAYER.speed * 1.55 : PLAYER.speed) * dt;
       forward.set(0, 0, 0);
@@ -3614,7 +3821,7 @@ function boot(renderer) {
       if (keys.KeyA || keys.ArrowLeft) right.x -= 1;
       if (keys.KeyD || keys.ArrowRight) right.x += 1;
 
-      if (forward.z !== 0 || right.x !== 0) {
+      if (forward.z !== 0 || right.x !== 0 || (joyMove.active && (joyMove.x || joyMove.y))) {
         const dir = new THREE.Vector3();
         camera.getWorldDirection(dir);
         dir.y = 0;
@@ -3629,6 +3836,13 @@ function boot(renderer) {
         if (right.x !== 0) {
           mx += side.x * right.x * speed;
           mz += side.z * right.x * speed;
+        }
+        // Joystick PUBG: y positivo = dedo para baixo = andar para trás; y negativo = frente
+        if (joyMove.active && (joyMove.x || joyMove.y)) {
+          const jy = -joyMove.y; // frente
+          const jx = joyMove.x;
+          mx += (dir.x * jy + side.x * jx) * speed;
+          mz += (dir.z * jy + side.z * jx) * speed;
         }
         tryMove(mx, mz);
       }

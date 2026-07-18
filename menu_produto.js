@@ -8576,11 +8576,8 @@ else if (nome === 'armazem3d') {
   initArmazem3D();
 }
 else if (nome === 'porta-pallet-3d') {
-  const frame = document.getElementById('portaPallet3dFrame');
-  if (frame && !frame.dataset.loaded) {
-    frame.src = '/prateleiras-3d/?embed=1';
-    frame.dataset.loaded = '1';
-  }
+  // Sempre a MESMA guia nomeada — evita abrir várias e gerar lag de GPU
+  window.open('/prateleiras-3d/', 'intranet-explorar-3d', 'noopener,noreferrer');
 }
 else if (nome === 'posicao-estoque') {
   initPosicaoEstoque();

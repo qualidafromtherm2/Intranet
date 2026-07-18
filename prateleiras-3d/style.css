@@ -276,32 +276,96 @@ kbd {
   margin: 0.15rem 0;
 }
 
-/* ——— Controles tablet (WASD na tela) ——— */
+/* ——— Controles touch estilo PUBG (joystick esquerdo + olhar à direita) ——— */
 .touch-pad {
   position: absolute;
   left: 0;
   right: 0;
   bottom: 0;
+  top: 0;
   z-index: 6;
   pointer-events: none;
-  padding: max(12px, env(safe-area-inset-bottom)) 16px 16px;
-  display: flex;
-  align-items: flex-end;
-  justify-content: space-between;
+  padding: 0;
+  display: block;
 }
 
 .touch-pad[hidden] {
   display: none;
 }
 
-.wasd {
-  display: grid;
-  grid-template-columns: 64px 64px 64px;
-  grid-template-rows: 64px 64px;
+.joy-zone {
+  pointer-events: auto;
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.joy-move {
+  position: absolute;
+  left: max(12px, env(safe-area-inset-left));
+  bottom: max(20px, env(safe-area-inset-bottom));
+  width: 148px;
+  height: 148px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+
+.joy-base {
+  width: 128px;
+  height: 128px;
+  border-radius: 50%;
+  background: rgba(15, 23, 42, 0.45);
+  border: 2px solid rgba(255, 255, 255, 0.28);
+  position: relative;
+  box-shadow: inset 0 0 24px rgba(0, 0, 0, 0.35);
+}
+
+.joy-stick {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 54px;
+  height: 54px;
+  margin: -27px 0 0 -27px;
+  border-radius: 50%;
+  background: rgba(88, 166, 255, 0.85);
+  border: 2px solid rgba(255, 255, 255, 0.55);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+  will-change: transform;
+}
+
+.joy-label {
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: rgba(230, 237, 243, 0.85);
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.8);
+}
+
+.joy-look-hint {
+  position: absolute;
+  right: max(16px, env(safe-area-inset-right));
+  bottom: max(28px, env(safe-area-inset-bottom));
+  pointer-events: none;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: rgba(230, 237, 243, 0.55);
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.8);
+  letter-spacing: 0.03em;
+}
+
+.touch-side-btns {
+  position: absolute;
+  right: max(12px, env(safe-area-inset-right));
+  top: max(12px, env(safe-area-inset-top));
+  display: flex;
+  flex-direction: column;
   gap: 8px;
   pointer-events: auto;
-  user-select: none;
-  -webkit-user-select: none;
+  align-items: stretch;
 }
 
 .wasd-btn {
@@ -314,6 +378,8 @@ kbd {
   font-weight: 700;
   touch-action: none;
   -webkit-tap-highlight-color: transparent;
+  min-width: 52px;
+  min-height: 48px;
 }
 
 .wasd-btn:active,
@@ -321,11 +387,6 @@ kbd {
   background: rgba(88, 166, 255, 0.55);
   border-color: #58a6ff;
 }
-
-.wasd-btn[data-key="KeyW"] { grid-column: 2; grid-row: 1; }
-.wasd-btn[data-key="KeyA"] { grid-column: 1; grid-row: 2; }
-.wasd-btn[data-key="KeyS"] { grid-column: 2; grid-row: 2; }
-.wasd-btn[data-key="KeyD"] { grid-column: 3; grid-row: 2; }
 
 .btn-exit-touch {
   appearance: none;
@@ -344,13 +405,9 @@ kbd {
   background: rgba(248, 81, 73, 0.35);
 }
 
-.vert-pad {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  pointer-events: auto;
-  align-items: stretch;
-}
+/* legado (removido do HTML) */
+.wasd { display: none; }
+.vert-pad { display: none; }
 
 .vert-pad .wasd-btn {
   width: 64px;
