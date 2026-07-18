@@ -2890,7 +2890,11 @@ app.get('/api/compras/produtos-em-compra', async (_req, res) => {
 
         SELECT
           TRIM(pi.c_produto) AS codigo,
-          'Compra realizada' AS status,
+          CASE TRIM(COALESCE(po.c_etapa, ''))
+            WHEN '10' THEN 'Pedido aguardando aprovação'
+            WHEN '20' THEN 'Requisição em andamento'
+            ELSE 'Compra realizada'
+          END AS status,
           pi.id::bigint AS ordem,
           2 AS prioridade
         FROM compras.pedidos_omie_produtos pi
@@ -3012,7 +3016,11 @@ app.get('/api/compras/produtos-em-compra/:codigo', async (req, res) => {
           TRIM(pi.c_produto) AS produto_codigo,
           pi.c_descricao AS produto_descricao,
           pi.n_qtde AS quantidade,
-          'Compra realizada'::text AS status,
+          CASE TRIM(COALESCE(po.c_etapa, ''))
+            WHEN '10' THEN 'Pedido aguardando aprovação'
+            WHEN '20' THEN 'Requisição em andamento'
+            ELSE 'Compra realizada'
+          END::text AS status,
           'Omie'::text AS solicitante,
           NULL::text AS responsavel_pela_compra,
           COALESCE(f.nome_fantasia, f.razao_social)::text AS fornecedor_nome,
