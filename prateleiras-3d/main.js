@@ -757,142 +757,84 @@ function boot(renderer) {
     return comps.join(', ');
   }
 
-  // ——— Fotos dos produtos desenhadas na posição (só perto da câmera) ———
+  // ——— Fotos: 1 caminho só (nearby → paint → loadFoto) + fila global ———
   function fotoProxyUrl(url) {
     return `/api/prateleiras3d/foto?url=${encodeURIComponent(url)}`;
   }
 
-  function loadFoto(url, onReady, opts) {
-    const isPlaca = !!(opts && opts.placa);
-    if (isPlaca) placaFotoUrls.add(url);
-    let rec = imgCache.get(url);
-    if (rec) {
-      if (!rec.loading) onReady();
-      else rec.cbs.push(onReady);
-      return rec;
-    }
-    rec = { img: new Image(), ok: false, loading: true, cbs: [onReady], placa: isPlaca };
-    imgCache.set(url, rec);
-    atualizarTextoSpinner();
+  const FOTO_MAX_INFLIGHT = 4;
+  let fotoInflight = 0;
+  const fotoQueue = []; // { url, rec }
 
+  function pumpFotoQueue() {
+    while (fotoInflight < FOTO_MAX_INFLIGHT && fotoQueue.length) {
+      const job = fotoQueue.shift();
+      if (!job || !job.rec.loading || job.rec._started) continue;
+      startFotoDownload(job.url, job.rec);
+    }
+  }
+
+  function startFotoDownload(url, rec) {
+    rec._started = true;
+    fotoInflight += 1;
     const finalizar = (ok) => {
       if (!rec.loading) return;
       clearTimeout(rec._timer);
       rec.ok = !!ok;
       rec.loading = false;
+      if (!ok) rec.failedAt = Date.now();
+      fotoInflight = Math.max(0, fotoInflight - 1);
       const cbs = rec.cbs.splice(0);
       cbs.forEach((cb) => { try { cb(); } catch (_) {} });
-      if (ok) refreshSlotsComFoto(url);
       notifySceneReady();
+      pumpFotoQueue();
     };
-
-    // Sem isso, foto que trava no proxy deixa o spinner eterno
-    rec._timer = setTimeout(() => finalizar(false), 12000);
-    rec.img.crossOrigin = 'anonymous';
+    rec._timer = setTimeout(() => finalizar(false), 10000);
     rec.img.onload = () => finalizar(true);
     rec.img.onerror = () => finalizar(false);
     rec.img.src = fotoProxyUrl(url);
+  }
+
+  function loadFoto(url, onReady, opts) {
+    if (!url) { try { onReady(); } catch (_) {} return null; }
+    const isPlaca = !!(opts && opts.placa);
+    if (isPlaca) placaFotoUrls.add(url);
+    let rec = imgCache.get(url);
+    if (rec) {
+      // Retry único se falhou há mais de 8s (pico do proxy)
+      if (!rec.loading && !rec.ok && (Date.now() - (rec.failedAt || 0)) > 8000) {
+        imgCache.delete(url);
+        rec = null;
+      } else {
+        if (!rec.loading) onReady();
+        else rec.cbs.push(onReady);
+        return rec;
+      }
+    }
+    rec = { img: new Image(), ok: false, loading: true, cbs: [onReady], placa: isPlaca, _started: false };
+    imgCache.set(url, rec);
+    atualizarTextoSpinner();
+    fotoQueue.push({ url, rec });
+    pumpFotoQueue();
     return rec;
   }
 
-  /** Pré-carrega URLs com concorrência limitada (evita derrubar o proxy). */
+  /** Pré-carrega URLs (painéis de parede) — mesma fila do loadFoto. */
   async function preloadUrls(urls, opts) {
     const list = [...new Set((urls || []).filter(Boolean))];
     if (!list.length) return;
-    const CONC = (opts && opts.placa) ? 6 : ((opts && opts.conc) || 3);
-    let idx = 0;
-    async function worker() {
-      while (idx < list.length) {
-        const url = list[idx++];
-        await new Promise((resolve) => loadFoto(url, resolve, opts));
-      }
-    }
-    const n = Math.min(CONC, list.length);
-    await Promise.all(Array.from({ length: n }, () => worker()));
+    await Promise.all(list.map((url) => new Promise((resolve) => loadFoto(url, resolve, opts))));
   }
 
   function forcarLiberarSpinner() {
-    // NÃO mata downloads de foto (senão as placas ficam sem imagem).
-    // Só libera os gates de dados para o usuário poder entrar.
     loadGate.ocupacao = true;
     loadGate.estoque = true;
     loadGate.ident = true;
     notifySceneReady();
   }
 
-  function refreshSlotsComFoto(url) {
-    if (!url) return;
-    // Agrupa redesenhos: várias fotos chegando no mesmo frame não varrem tudo N vezes
-    if (!refreshSlotsPendentes) refreshSlotsPendentes = new Set();
-    refreshSlotsPendentes.add(url);
-    if (refreshSlotsTimer) return;
-    refreshSlotsTimer = setTimeout(() => {
-      refreshSlotsTimer = null;
-      const urls = refreshSlotsPendentes;
-      refreshSlotsPendentes = null;
-      for (const mesh of slotMeshes) {
-        if (!mesh.userData?.hasLabelTex) continue;
-        const itens = mesh.userData.itens || [];
-        let hit = false;
-        for (const it of itens) {
-          if (it.foto_url && urls.has(it.foto_url)) { hit = true; break; }
-        }
-        if (hit) paintSlotPhotos(mesh);
-      }
-    }, 120);
-  }
-  let refreshSlotsPendentes = null;
-  let refreshSlotsTimer = null;
-
-  async function ensureFotoUrlItem(it) {
-    if (it?.foto_url) return it.foto_url;
-    const cod = String(it?.codigo_produto || '').trim();
-    if (!cod) return null;
-    const codU = cod.toUpperCase();
-    for (const lista of Object.values(ocupacao)) {
-      for (const x of lista || []) {
-        if (String(x.codigo_produto || '').trim().toUpperCase() === codU && x.foto_url) {
-          it.foto_url = x.foto_url;
-          return it.foto_url;
-        }
-      }
-    }
-    try {
-      const r = await fetch(`/api/produtos/imagem/${encodeURIComponent(cod)}`, { credentials: 'include' });
-      const j = await r.json();
-      if (j && j.ok && j.url_imagem) {
-        it.foto_url = j.url_imagem;
-        for (const lista of Object.values(ocupacao)) {
-          for (const x of lista || []) {
-            if (String(x.codigo_produto || '').trim().toUpperCase() === codU) x.foto_url = j.url_imagem;
-          }
-        }
-        return it.foto_url;
-      }
-    } catch (_) { /* ignore */ }
-    return null;
-  }
-
-  /** Carrega fotos SÓ deste slot (quando a câmera chega perto). */
-  function carregarFotosDoSlot(mesh) {
-    const ud = mesh.userData;
-    if (!ud || ud._fotosJob) return;
-    const itens = ud.itens || [];
-    if (!itens.length) return;
-    ud._fotosJob = (async () => {
-      for (const it of itens) {
-        if (!it.foto_url) await ensureFotoUrlItem(it);
-        if (it.foto_url) {
-          await new Promise((resolve) => loadFoto(it.foto_url, resolve));
-        }
-      }
-      if (ud.hasLabelTex) paintSlotPhotos(mesh);
-    })().finally(() => { ud._fotosJob = null; });
-  }
-
-  // Prateleiras: só carrega o que a câmera vê (updateNearbySlotLabels)
   function iniciarPreloadFotosPrateleiras() {
-    // no-op — fotos sob demanda no raio da câmera
+    // Fotos das prateleiras = sob demanda perto da câmera (não pré-carrega tudo)
   }
 
   const SLOT_TEX_W = 128;
@@ -969,8 +911,6 @@ function boot(renderer) {
         ctx.fillText(cod, cx + cellW / 2, cy + cellH / 2);
         if (url && (!rec || rec.loading)) {
           loadFoto(url, () => { if (ud.hasLabelTex) paintSlotPhotos(mesh); });
-        } else if (!url && it.codigo_produto && !ud._fotosJob) {
-          carregarFotosDoSlot(mesh);
         }
       }
       ctx.restore();
@@ -1142,16 +1082,14 @@ function boot(renderer) {
     ud.slotTex = tex;
     ud.hasLabelTex = true;
     paintSlotPhotos(mesh);
-    // Busca URL + baixa foto só deste endereço (câmera perto)
-    carregarFotosDoSlot(mesh);
   }
 
-  // Só monta textura/foto no raio da câmera (leve e sob demanda)
-  const BUILD_PER_TICK = 4;
-  const BUILD_NEAR_DIST = 18;
+  // Só monta textura no raio da câmera; loadFoto é chamado dentro do paint
+  const BUILD_PER_TICK = 3;
+  const BUILD_NEAR_DIST = 22;
   function updateNearbySlotLabels(dt) {
     labelTexAcc += dt;
-    if (labelTexAcc < 0.12) return;
+    if (labelTexAcc < 0.15) return;
     labelTexAcc = 0;
     if (!usuarioLiberado && !playing && !controls.isLocked) return;
     const cam = controls.getObject().position;
