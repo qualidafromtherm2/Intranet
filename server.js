@@ -2857,35 +2857,83 @@ app.get('/api/compras/solicitacoes', async (_req, res) => {
 app.get('/api/compras/produtos-em-compra', async (_req, res) => {
   try {
     const { rows } = await pool.query(`
-      SELECT DISTINCT ON (UPPER(TRIM(produto_codigo)))
-             TRIM(produto_codigo) AS codigo,
-             COALESCE(status, '') AS status
-      FROM compras.solicitacao_compras sc
-      WHERE TRIM(COALESCE(sc.produto_codigo, '')) <> ''
-        AND LOWER(TRIM(COALESCE(sc.status, ''))) NOT IN
-            ('carrinho', 'recebido', 'concluído', 'concluido', 'cancelado', 'reprovado', 'excluido', 'excluído')
-        AND (
-          LOWER(TRIM(COALESCE(sc.status, ''))) NOT IN ('compra realizada', 'faturada pelo fornecedor')
-          OR NOT EXISTS (
-            SELECT 1
-            FROM compras.pedidos_omie po_existente
-            WHERE (po_existente.n_cod_ped::text = TRIM(sc.ncodped::text)
-                OR po_existente.c_numero::text = TRIM(sc.cnumero::text))
+      WITH compras_ativas AS (
+        SELECT
+          TRIM(sc.produto_codigo) AS codigo,
+          COALESCE(sc.status, '') AS status,
+          sc.id::bigint AS ordem,
+          1 AS prioridade
+        FROM compras.solicitacao_compras sc
+        WHERE TRIM(COALESCE(sc.produto_codigo, '')) <> ''
+          AND LOWER(TRIM(COALESCE(sc.status, ''))) NOT IN
+              ('carrinho', 'recebido', 'concluído', 'concluido', 'cancelado', 'reprovado', 'excluido', 'excluído')
+          AND (
+            LOWER(TRIM(COALESCE(sc.status, ''))) NOT IN ('compra realizada', 'faturada pelo fornecedor')
+            OR NOT EXISTS (
+              SELECT 1
+              FROM compras.pedidos_omie po_existente
+              WHERE (po_existente.n_cod_ped::text = TRIM(sc.ncodped::text)
+                  OR po_existente.c_numero::text = TRIM(sc.cnumero::text))
+            )
+            OR EXISTS (
+              SELECT 1
+              FROM compras.pedidos_omie po_ativo
+              WHERE (po_ativo.n_cod_ped::text = TRIM(sc.ncodped::text)
+                  OR po_ativo.c_numero::text = TRIM(sc.cnumero::text))
+                AND COALESCE(po_ativo.inativo, FALSE) = FALSE
+                AND COALESCE(po_ativo."Pedido recebido", FALSE) = FALSE
+                AND po_ativo.pendente_omie IS TRUE
+            )
           )
-          OR EXISTS (
+
+        UNION ALL
+
+        SELECT
+          TRIM(pi.c_produto) AS codigo,
+          'Compra realizada' AS status,
+          pi.id::bigint AS ordem,
+          2 AS prioridade
+        FROM compras.pedidos_omie_produtos pi
+        JOIN compras.pedidos_omie po ON po.n_cod_ped = pi.n_cod_ped
+        WHERE TRIM(COALESCE(pi.c_produto, '')) <> ''
+          AND COALESCE(po.inativo, FALSE) = FALSE
+          AND COALESCE(po."Pedido recebido", FALSE) = FALSE
+          AND po.pendente_omie IS TRUE
+          AND COALESCE(pi.n_qtde, 0) > COALESCE(pi.n_qtde_rec, 0)
+
+        UNION ALL
+
+        SELECT
+          TRIM(p.codigo) AS codigo,
+          'Requisição em andamento' AS status,
+          ri.id::bigint AS ordem,
+          3 AS prioridade
+        FROM compras.requisicoes_omie_itens ri
+        JOIN compras.requisicoes_omie r ON r.cod_req_compra = ri.cod_req_compra
+        JOIN public.produtos_omie p ON p.codigo_produto = ri.cod_prod
+        WHERE TRIM(COALESCE(p.codigo, '')) <> ''
+          AND COALESCE(r.inativo, FALSE) = FALSE
+          AND TRIM(COALESCE(r.numero, '')) <> ''
+          AND NOT EXISTS (
             SELECT 1
-            FROM compras.pedidos_omie po_ativo
-            WHERE (po_ativo.n_cod_ped::text = TRIM(sc.ncodped::text)
-                OR po_ativo.c_numero::text = TRIM(sc.cnumero::text))
-              AND COALESCE(po_ativo.inativo, FALSE) = FALSE
-              AND (
-                po_ativo.pendente_omie IS TRUE
-                OR (po_ativo.pendente_omie IS NULL
-                    AND COALESCE(BTRIM(po_ativo."Etapa_NF"), '') = '')
-              )
+            FROM compras.pedidos_omie po_convertido
+            WHERE po_convertido.n_cod_ped = r.cod_req_compra
+               OR TRIM(po_convertido.c_numero) = TRIM(r.numero)
           )
-        )
-      ORDER BY UPPER(TRIM(produto_codigo)), sc.id DESC
+          AND NOT EXISTS (
+            SELECT 1
+            FROM compras.solicitacao_compras sc_vinculada
+            WHERE UPPER(TRIM(sc_vinculada.produto_codigo)) = UPPER(TRIM(p.codigo))
+              AND (TRIM(sc_vinculada.numero_pedido) = TRIM(r.cod_int_req_compra)
+                   OR TRIM(sc_vinculada.ncodped::text) = r.cod_req_compra::text
+                   OR TRIM(sc_vinculada.cnumero::text) = TRIM(r.numero))
+          )
+      )
+      SELECT DISTINCT ON (UPPER(TRIM(codigo)))
+             codigo,
+             status
+      FROM compras_ativas
+      ORDER BY UPPER(TRIM(codigo)), prioridade, ordem DESC
     `);
     res.json({ ok: true, total: rows.length, itens: rows });
   } catch (err) {
@@ -2945,10 +2993,8 @@ app.get('/api/compras/produtos-em-compra/:codigo', async (req, res) => {
           OR po.n_cod_ped IS NULL
           OR (
             COALESCE(po.inativo, FALSE) = FALSE
-            AND (
-              po.pendente_omie IS TRUE
-              OR (po.pendente_omie IS NULL AND COALESCE(BTRIM(po."Etapa_NF"), '') = '')
-            )
+            AND COALESCE(po."Pedido recebido", FALSE) = FALSE
+            AND po.pendente_omie IS TRUE
           )
         )
       ORDER BY
@@ -2960,8 +3006,86 @@ app.get('/api/compras/produtos-em-compra/:codigo', async (req, res) => {
         COALESCE(sc.quantidade, 0),
         LOWER(TRIM(COALESCE(sc.status, ''))),
         sc.id DESC
+      ), compras_omie_diretas AS (
+        SELECT
+          (-pi.id)::integer AS id,
+          TRIM(pi.c_produto) AS produto_codigo,
+          pi.c_descricao AS produto_descricao,
+          pi.n_qtde AS quantidade,
+          'Compra realizada'::text AS status,
+          'Omie'::text AS solicitante,
+          NULL::text AS responsavel_pela_compra,
+          COALESCE(f.nome_fantasia, f.razao_social)::text AS fornecedor_nome,
+          po.c_cod_int_ped::text AS numero_pedido,
+          po.c_numero::text AS c_numero,
+          po.c_obs_int::text AS grupo_requisicao,
+          NULL::date AS prazo_solicitado,
+          po.d_dt_previsao AS previsao_chegada,
+          NULL::text AS departamento,
+          'Pedido cadastrado diretamente na Omie'::text AS objetivo_compra,
+          po.c_obs::text AS observacao,
+          COALESCE(po.d_inc_data::timestamp, po.created_at) AS created_at
+        FROM compras.pedidos_omie_produtos pi
+        JOIN compras.pedidos_omie po ON po.n_cod_ped = pi.n_cod_ped
+        LEFT JOIN omie.fornecedores f ON f.codigo_cliente_omie = po.n_cod_for
+        WHERE UPPER(TRIM(pi.c_produto)) = UPPER($1)
+          AND COALESCE(po.inativo, FALSE) = FALSE
+          AND COALESCE(po."Pedido recebido", FALSE) = FALSE
+          AND po.pendente_omie IS TRUE
+          AND COALESCE(pi.n_qtde, 0) > COALESCE(pi.n_qtde_rec, 0)
+          AND NOT EXISTS (
+            SELECT 1
+            FROM compras.solicitacao_compras sc_vinculada
+            WHERE UPPER(TRIM(sc_vinculada.produto_codigo)) = UPPER(TRIM(pi.c_produto))
+              AND (TRIM(sc_vinculada.ncodped::text) = po.n_cod_ped::text
+                   OR TRIM(sc_vinculada.cnumero::text) = po.c_numero::text)
+          )
+      ), requisicoes_omie_diretas AS (
+        SELECT
+          (-(1000000000 + ri.id))::integer AS id,
+          TRIM(p.codigo) AS produto_codigo,
+          p.descricao AS produto_descricao,
+          ri.qtde AS quantidade,
+          'Requisição em andamento'::text AS status,
+          'Omie'::text AS solicitante,
+          NULL::text AS responsavel_pela_compra,
+          NULL::text AS fornecedor_nome,
+          r.cod_int_req_compra::text AS numero_pedido,
+          r.numero::text AS c_numero,
+          r.cod_req_compra::text AS grupo_requisicao,
+          r.dt_sugestao AS prazo_solicitado,
+          r.dt_sugestao AS previsao_chegada,
+          NULL::text AS departamento,
+          'Requisição de compra em andamento na Omie'::text AS objetivo_compra,
+          COALESCE(ri.obs_item, r.obs_req_compra)::text AS observacao,
+          COALESCE(r.created_at, ri.created_at) AS created_at
+        FROM compras.requisicoes_omie_itens ri
+        JOIN compras.requisicoes_omie r ON r.cod_req_compra = ri.cod_req_compra
+        JOIN public.produtos_omie p ON p.codigo_produto = ri.cod_prod
+        WHERE UPPER(TRIM(p.codigo)) = UPPER($1)
+          AND COALESCE(r.inativo, FALSE) = FALSE
+          AND TRIM(COALESCE(r.numero, '')) <> ''
+          AND NOT EXISTS (
+            SELECT 1
+            FROM compras.pedidos_omie po_convertido
+            WHERE po_convertido.n_cod_ped = r.cod_req_compra
+               OR TRIM(po_convertido.c_numero) = TRIM(r.numero)
+          )
+          AND NOT EXISTS (
+            SELECT 1
+            FROM compras.solicitacao_compras sc_vinculada
+            WHERE UPPER(TRIM(sc_vinculada.produto_codigo)) = UPPER(TRIM(p.codigo))
+              AND (TRIM(sc_vinculada.numero_pedido) = TRIM(r.cod_int_req_compra)
+                   OR TRIM(sc_vinculada.ncodped::text) = r.cod_req_compra::text
+                   OR TRIM(sc_vinculada.cnumero::text) = TRIM(r.numero))
+          )
       )
-      SELECT * FROM compras_unicas ORDER BY id DESC
+      SELECT * FROM compras_unicas
+      UNION ALL
+      SELECT * FROM compras_omie_diretas
+      UNION ALL
+      SELECT * FROM requisicoes_omie_diretas
+      ORDER BY id DESC
     `, [codigo]);
 
     res.json({ ok: true, codigo, total: rows.length, compras: rows });
