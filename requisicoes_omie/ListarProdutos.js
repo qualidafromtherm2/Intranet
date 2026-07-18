@@ -16,7 +16,7 @@ import {
   getFiltered,
   reapplyFilters,
   populateFilters
-} from './filtro_produto.js?v=20260716-limitado';
+} from './filtro_produto.js?v=20260718-minimos-compras';
 
 /* --------------------- SPINNER helpers -------------------------------- */
 let spinnerVisible  = false;
@@ -77,6 +77,35 @@ async function fetchLista(params) {
   return resp.json();
 }
 
+async function enriquecerSituacaoCompra(produtos) {
+  const lista = Array.isArray(produtos) ? produtos : [];
+  try {
+    const resp = await fetch('/api/compras/produtos-em-compra', {
+      cache: 'no-store',
+      credentials: 'include'
+    });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const data = await resp.json();
+    const mapa = new Map(
+      (Array.isArray(data.itens) ? data.itens : []).map(item => [
+        String(item.codigo || '').trim().toUpperCase(),
+        String(item.status || '').trim()
+      ])
+    );
+    lista.forEach(item => {
+      const status = mapa.get(String(item.codigo || '').trim().toUpperCase()) || '';
+      item.em_compra = Boolean(status);
+      item.compra_status = status;
+    });
+  } catch (err) {
+    console.warn('[ListarProdutos] Falha ao carregar situação de compra:', err.message || err);
+    lista.forEach(item => {
+      item.em_compra = false;
+      item.compra_status = '';
+    });
+  }
+}
+
 /* --------------------- PRELOAD do banco (paginado) -------------------- */
 async function preloadFromDB() {
   if (__preloadPromise) return __preloadPromise;
@@ -122,6 +151,8 @@ async function preloadFromDB() {
         seen.add(key);
         return true;
       });
+
+      await enriquecerSituacaoCompra(window.__omieFullCache);
 
       return true;
     } finally {
@@ -196,7 +227,10 @@ function normalizeCatalogoProdutos(produtos = []) {
     url_imagem: p.primeira_imagem || p.url_imagem || '',
     descricao_familia: p.descricao_familia || p.familia || '',
     abaixo_minimo: p.abaixo_minimo || false,
+    em_compra: p.em_compra || false,
+    compra_status: p.compra_status || '',
     saldo_estoque: p.saldo_estoque ?? p.quantidade_estoque,
+    saldo_almox: p.saldo_almox ?? 0,
     estoque_minimo: p.estoque_minimo
   }));
 }

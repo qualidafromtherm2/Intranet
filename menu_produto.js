@@ -52686,6 +52686,9 @@ window.renderizarCatalogoOmie = renderizarCatalogoOmie;
               <input id="modalEditarRapidoLeadTime" type="number" min="0" step="1" inputmode="numeric" style="width:100%;box-sizing:border-box;padding:11px;border:1px solid #cbd5e1;border-radius:8px;font-size:16px;" />
             </label>
           </div>
+          <button id="modalEditarRapidoZerarMinimos" type="button" style="min-height:38px;border:1px solid #fca5a5;border-radius:8px;background:#fff;color:#b91c1c;font-size:12px;font-weight:700;cursor:pointer;">
+            <i class="fa-solid fa-ban" style="margin-right:6px;"></i>Zerar mínimos em todos os armazéns
+          </button>
           <div id="modalEditarRapidoFotoDrop" tabindex="0" style="border:1px dashed #93c5fd;border-radius:10px;background:#eff6ff;padding:12px;display:grid;gap:8px;text-align:center;color:#1d4ed8;">
             <div style="font-size:12px;font-weight:800;"><i class="fa-solid fa-camera" style="margin-right:6px;"></i>Foto do produto</div>
             <div style="font-size:11px;color:#64748b;">Arraste uma imagem ou pressione Ctrl+V</div>
@@ -52903,7 +52906,7 @@ window.renderizarCatalogoOmie = renderizarCatalogoOmie;
     throw new Error(mensagem.message || 'A Omie recusou a alteração.');
   }
 
-  async function salvarEdicaoRapida() {
+  async function salvarEdicaoRapida({ forcarMinimo = false } = {}) {
     const descricao = document.getElementById('modalEditarRapidoDescricao').value.trim();
     const minimoRaw = document.getElementById('modalEditarRapidoMinimo').value.trim().replace(',', '.');
     const leadRaw = document.getElementById('modalEditarRapidoLeadTime').value.trim().replace(',', '.');
@@ -52917,7 +52920,7 @@ window.renderizarCatalogoOmie = renderizarCatalogoOmie;
     if (!_editarRapidoOriginal) return setEditarRapidoStatus('Reabra a edição para carregar os valores atuais.', true);
 
     const alterouProduto = descricao !== _editarRapidoOriginal.descricao || leadTime !== _editarRapidoOriginal.leadTime;
-    const alterouMinimo = minimo !== _editarRapidoOriginal.minimo;
+    const alterouMinimo = forcarMinimo || minimo !== _editarRapidoOriginal.minimo;
     if (!alterouProduto && !alterouMinimo) return setEditarRapidoStatus('Nenhuma alteração para salvar.');
 
     const btn = document.getElementById('modalEditarRapidoSalvar');
@@ -52938,15 +52941,14 @@ window.renderizarCatalogoOmie = renderizarCatalogoOmie;
       }
 
       if (alterouMinimo) {
-        const minimoResp = await fetch('/api/omie/estoque/ajuste/', {
+        const minimoResp = await fetch('/api/omie/estoque/minimo-produto', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           credentials: 'include',
-          body: JSON.stringify({ call: 'AlterarEstoqueMinimo', param: [{ id_prod: codigoProdutoOmie, quan_min: minimo }] })
+          body: JSON.stringify({ id_prod: codigoProdutoOmie, codigo: _ctx.codigo, quan_min: minimo })
         });
         const minimoData = await minimoResp.json();
-        if (!minimoResp.ok) throw new Error(minimoData.error || 'Falha ao alterar estoque mínimo.');
-        validarRespostaOmie(minimoData);
+        if (!minimoResp.ok || !minimoData.ok) throw new Error(minimoData.error || 'Falha ao alterar estoques mínimos.');
       }
 
       const localResp = await fetch('/api/produtos/' + encodeURIComponent(_ctx.codigo), {
@@ -52968,6 +52970,13 @@ window.renderizarCatalogoOmie = renderizarCatalogoOmie;
         itemCache.estoque_minimo = minimo;
         itemCache.lead_time = leadTime;
       }
+      const itemLista = (window.__omieFullCache || []).find(p => p.codigo === _ctx.codigo);
+      if (itemLista) {
+        itemLista.descricao = descricao;
+        itemLista.estoque_minimo = minimo;
+        itemLista.lead_time = leadTime;
+        itemLista.abaixo_minimo = minimo > 0 && Number(itemLista.saldo_almox || 0) < minimo;
+      }
       _editarRapidoOriginal = { descricao, minimo, leadTime };
       await carregarEstoqueCards({ force: true, codigos: [_ctx.codigo] });
       setEditarRapidoStatus('Alterações salvas com sucesso.');
@@ -52977,6 +52986,12 @@ window.renderizarCatalogoOmie = renderizarCatalogoOmie;
       btn.disabled = false;
       btn.innerHTML = '<i class="fa-solid fa-check" style="margin-right:7px;"></i>Salvar alterações';
     }
+  }
+
+  async function zerarMinimosProduto() {
+    if (!confirm('Zerar o estoque mínimo deste produto em todos os armazéns?')) return;
+    document.getElementById('modalEditarRapidoMinimo').value = '0';
+    await salvarEdicaoRapida({ forcarMinimo: true });
   }
 
   async function aplicarMarcadorRapido(prefixo, rotulo) {
@@ -53385,7 +53400,8 @@ window.renderizarCatalogoOmie = renderizarCatalogoOmie;
   document.getElementById('modalManuaisVoltar').addEventListener('click', mostrarBotoes);
   document.getElementById('modalAcoesBtnEditarRapido').addEventListener('click', mostrarEditarRapido);
   document.getElementById('modalEditarRapidoVoltar').addEventListener('click', mostrarBotoes);
-  document.getElementById('modalEditarRapidoSalvar').addEventListener('click', salvarEdicaoRapida);
+  document.getElementById('modalEditarRapidoSalvar').addEventListener('click', () => salvarEdicaoRapida());
+  document.getElementById('modalEditarRapidoZerarMinimos').addEventListener('click', zerarMinimosProduto);
   document.getElementById('modalEditarRapidoFoto').addEventListener('click', colarFotoRapida);
   document.getElementById('modalEditarRapidoFotoInput').addEventListener('change', e => prepararFotoRapida(e.target.files?.[0]));
   document.getElementById('modalEditarRapidoFotoEnviar').addEventListener('click', enviarFotoRapida);

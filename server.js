@@ -2860,11 +2860,32 @@ app.get('/api/compras/produtos-em-compra', async (_req, res) => {
       SELECT DISTINCT ON (UPPER(TRIM(produto_codigo)))
              TRIM(produto_codigo) AS codigo,
              COALESCE(status, '') AS status
-      FROM compras.solicitacao_compras
-      WHERE TRIM(COALESCE(produto_codigo, '')) <> ''
-        AND LOWER(TRIM(COALESCE(status, ''))) NOT IN
+      FROM compras.solicitacao_compras sc
+      WHERE TRIM(COALESCE(sc.produto_codigo, '')) <> ''
+        AND LOWER(TRIM(COALESCE(sc.status, ''))) NOT IN
             ('carrinho', 'recebido', 'concluído', 'concluido', 'cancelado', 'reprovado', 'excluido', 'excluído')
-      ORDER BY UPPER(TRIM(produto_codigo)), id DESC
+        AND (
+          LOWER(TRIM(COALESCE(sc.status, ''))) NOT IN ('compra realizada', 'faturada pelo fornecedor')
+          OR NOT EXISTS (
+            SELECT 1
+            FROM compras.pedidos_omie po_existente
+            WHERE (po_existente.n_cod_ped::text = TRIM(sc.ncodped::text)
+                OR po_existente.c_numero::text = TRIM(sc.cnumero::text))
+          )
+          OR EXISTS (
+            SELECT 1
+            FROM compras.pedidos_omie po_ativo
+            WHERE (po_ativo.n_cod_ped::text = TRIM(sc.ncodped::text)
+                OR po_ativo.c_numero::text = TRIM(sc.cnumero::text))
+              AND COALESCE(po_ativo.inativo, FALSE) = FALSE
+              AND (
+                po_ativo.pendente_omie IS TRUE
+                OR (po_ativo.pendente_omie IS NULL
+                    AND COALESCE(BTRIM(po_ativo."Etapa_NF"), '') = '')
+              )
+          )
+        )
+      ORDER BY UPPER(TRIM(produto_codigo)), sc.id DESC
     `);
     res.json({ ok: true, total: rows.length, itens: rows });
   } catch (err) {
@@ -2910,6 +2931,17 @@ app.get('/api/compras/produtos-em-compra/:codigo', async (req, res) => {
         AND TRIM(COALESCE(sc.produto_codigo, '')) <> ''
         AND LOWER(TRIM(COALESCE(sc.status, ''))) NOT IN
             ('carrinho', 'recebido', 'concluído', 'concluido', 'cancelado', 'reprovado', 'excluido', 'excluído')
+        AND (
+          LOWER(TRIM(COALESCE(sc.status, ''))) NOT IN ('compra realizada', 'faturada pelo fornecedor')
+          OR po.n_cod_ped IS NULL
+          OR (
+            COALESCE(po.inativo, FALSE) = FALSE
+            AND (
+              po.pendente_omie IS TRUE
+              OR (po.pendente_omie IS NULL AND COALESCE(BTRIM(po."Etapa_NF"), '') = '')
+            )
+          )
+        )
       ORDER BY sc.id DESC
     `, [codigo]);
 
@@ -22638,25 +22670,30 @@ app.get('/api/produtos/detalhes/:codigo', async (req, res) => {
       // Busca no banco local primeiro
       const result = await pool.query(
         `SELECT 
-          codigo,
-          descricao,
-          lead_time,
-          estoque_minimo,
-          COALESCE((to_jsonb(produtos_omie)->>'item_limitado')::boolean, FALSE) AS item_limitado,
+          p.codigo,
+          p.descricao,
+          p.lead_time,
+          COALESCE(e.minimo, p.estoque_minimo, 0) AS estoque_minimo,
+          COALESCE((to_jsonb(p)->>'item_limitado')::boolean, FALSE) AS item_limitado,
           COALESCE(
-            to_jsonb(produtos_omie)->>'primeira_imagem',
-            to_jsonb(produtos_omie)->>'url_imagem',
+            to_jsonb(p)->>'primeira_imagem',
+            to_jsonb(p)->>'url_imagem',
             ''
           ) AS url_imagem,
-          descricao_familia,
-          codigo_familia,
+          p.descricao_familia,
+          p.codigo_familia,
           COALESCE(
-            NULLIF(to_jsonb(produtos_omie)->>'saldo_estoque', ''),
-            NULLIF(to_jsonb(produtos_omie)->>'quantidade_estoque', ''),
+            NULLIF(to_jsonb(p)->>'saldo_estoque', ''),
+            NULLIF(to_jsonb(p)->>'quantidade_estoque', ''),
             '0'
           ) AS saldo_estoque
-        FROM public.produtos_omie 
-        WHERE codigo = $1 
+        FROM public.produtos_omie p
+        LEFT JOIN LATERAL (
+          SELECT MAX(COALESCE(ea.estoque_minimo, 0)) AS minimo
+          FROM logistica.estoque_atual ea
+          WHERE UPPER(TRIM(ea.codigo)) = UPPER(TRIM(p.codigo))
+        ) e ON TRUE
+        WHERE p.codigo = $1
         LIMIT 1`,
         [codigo]
       );
@@ -31120,38 +31157,37 @@ app.get('/api/logistica/produtos-no-minimo', async (req, res) => {
     // Limita o tempo da query no servidor para evitar locks longos em produtos_omie
     await client.query("SET LOCAL statement_timeout = '20000'");
     const { rows } = await client.query(`
-      WITH minimos AS (
-        SELECT omie_prod_id, MAX(estoque_minimo) AS minimo
-        FROM logistica.estoque_atual
-        WHERE COALESCE(estoque_minimo, 0) > 0
-        GROUP BY omie_prod_id
-      ),
-      totais AS (
-        SELECT omie_prod_id,
-               SUM(COALESCE(fisico, 0)) AS fisico_total,
+      WITH estoque_produto AS (
+        SELECT UPPER(TRIM(codigo)) AS codigo_chave,
                MAX(codigo) AS codigo,
                MAX(descricao) AS descricao,
+               MAX(omie_prod_id) AS omie_prod_id,
+               MAX(COALESCE(estoque_minimo, 0)) AS minimo,
+               MAX(COALESCE(saldo, fisico, 0)) FILTER (
+                 WHERE local_codigo::text = '10717096386'
+                    OR local_nome ILIKE '%PORTA PALLET%'
+               ) AS saldo_almox,
                MAX(updated_at) AS updated_at
         FROM logistica.estoque_atual
-        GROUP BY omie_prod_id
+        GROUP BY UPPER(TRIM(codigo))
       )
       SELECT
-        m.omie_prod_id                              AS codigo_produto,
-        COALESCE(t.codigo, po.codigo)               AS codigo,
-        COALESCE(po.descricao, t.descricao)         AS descricao,
+        COALESCE(ep.omie_prod_id, po.codigo_produto) AS codigo_produto,
+        COALESCE(ep.codigo, po.codigo)               AS codigo,
+        COALESCE(po.descricao, ep.descricao)         AS descricao,
         NULL                                        AS local_codigo,
         'TODOS OS ARMAZÉNS'                         AS local_nome,
-        COALESCE(t.fisico_total, 0)                 AS fisico,
-        m.minimo                                    AS estoque_minimo,
-        (m.minimo - COALESCE(t.fisico_total, 0))    AS deficit,
-        COALESCE(t.updated_at, NOW())               AS data_posicao
-      FROM minimos m
+        COALESCE(ep.saldo_almox, 0)                 AS fisico,
+        ep.minimo                                   AS estoque_minimo,
+        (ep.minimo - COALESCE(ep.saldo_almox, 0))   AS deficit,
+        COALESCE(ep.updated_at, NOW())               AS data_posicao
+      FROM estoque_produto ep
       JOIN public.produtos_omie po
-        ON po.codigo_produto = m.omie_prod_id
-      LEFT JOIN totais t
-        ON t.omie_prod_id = m.omie_prod_id
-      WHERE COALESCE(t.fisico_total, 0) < m.minimo
-        AND COALESCE(po.descricao, t.descricao, '') !~* '^\\s*(engenharia|obsoleto)'
+        ON UPPER(TRIM(po.codigo)) = ep.codigo_chave
+      WHERE ep.minimo > 0
+        AND COALESCE(ep.saldo_almox, 0) < ep.minimo
+        AND COALESCE(po.inativo, 'N') = 'N'
+        AND COALESCE(po.bloqueado, 'N') = 'N'
       ORDER BY deficit DESC, descricao ASC
       LIMIT 2000
     `);

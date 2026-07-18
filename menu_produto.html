@@ -7423,6 +7423,9 @@
                       <input type="checkbox" id="filterSemEstoqueMin" style="width:15px;height:15px;cursor:pointer;accent-color:#3b82f6;">Sem estoque mínimo
                     </label>
                     <label style="display:flex;align-items:center;gap:8px;font-size:13px;font-weight:500;color:#374151;cursor:pointer;">
+                      <input type="checkbox" id="filterAbaixoEstoqueMin" style="width:15px;height:15px;cursor:pointer;accent-color:#dc2626;">Abaixo do estoque mínimo
+                    </label>
+                    <label style="display:flex;align-items:center;gap:8px;font-size:13px;font-weight:500;color:#374151;cursor:pointer;">
                       <input type="checkbox" id="filterEstoqueNegativo" style="width:15px;height:15px;cursor:pointer;accent-color:#dc2626;">Estoque negativo
                     </label>
                     <label style="display:flex;align-items:center;gap:8px;font-size:13px;font-weight:500;color:#374151;cursor:pointer;">
@@ -7447,6 +7450,14 @@
                         <option value="">– todos –</option>
                         <option value="N">Nacional</option>
                         <option value="I">Importado</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label for="filterSituacaoCompra" style="display:block;font-size:13px;font-weight:600;color:#374151;margin-bottom:5px;">Situação de compra:</label>
+                      <select id="filterSituacaoCompra" style="width:100%;padding:8px 10px;border:1px solid #d1d5db;border-radius:8px;font-size:14px;color:#374151;background:#f9fafb;">
+                        <option value="">– todas –</option>
+                        <option value="sem_compra">Não comprado ainda</option>
+                        <option value="em_compra">Em compra</option>
                       </select>
                     </div>
                     <div>
@@ -12288,10 +12299,10 @@
   <script type="module" src="login/login.js"></script>
   <script src="/public/js/vendas-relatorio-gerencial.js?v=20260709a" defer></script>
   <script src="/public/js/logistica-relatorio-gerencial.js?v=20260712a" defer></script>
-  <script type="module" src="menu_produto.js?v=20260717-explorar3d-uma-guia"></script>
+  <script type="module" src="menu_produto.js?v=20260718-minimos-compras"></script>
   
-  <script type="module" src="./requisicoes_omie/filtro_produto.js?v=20260716-limitado"></script>
-  <script type="module" src="./requisicoes_omie/ListarProdutos.js?v=20260717-paginacao-busca-sep"></script>
+  <script type="module" src="./requisicoes_omie/filtro_produto.js?v=20260718-minimos-compras"></script>
+  <script type="module" src="./requisicoes_omie/ListarProdutos.js?v=20260718-minimos-compras"></script>
   <script type="module" src="./requisicoes_omie/Dados_produto.js?v=20260710c" defer></script>
   <script type="module" src="./requisicoes_omie/dados_colaboradores.js"></script>
   <script src="produtos/produto_foto.js?v=20260430c" defer></script>

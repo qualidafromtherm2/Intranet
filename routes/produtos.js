@@ -365,10 +365,11 @@ router.get('/lista', async (req, res) => {
       WITH estoque_resumo AS (
         SELECT
           codigo,
-          MAX(estoque_minimo) FILTER (
+          MAX(COALESCE(estoque_minimo, 0)) AS estoque_minimo,
+          MAX(COALESCE(saldo, 0)) FILTER (
             WHERE local_codigo::text = '10717096386'
                OR local_nome ILIKE '%PORTA PALLET%'
-          ) AS estoque_minimo,
+          ) AS saldo_almox,
           BOOL_OR(COALESCE(saldo, 0) < 0) AS estoque_negativo
         FROM logistica.estoque_atual
         GROUP BY codigo
@@ -378,6 +379,9 @@ router.get('/lista', async (req, res) => {
           p.descricao_familia,
           COALESCE(p.item_limitado, false) AS item_limitado_local,
           COALESCE(er.estoque_minimo, 0) AS estoque_minimo_local,
+          COALESCE(er.saldo_almox, 0) AS saldo_almox_local,
+          COALESCE(er.estoque_minimo, 0) > 0
+            AND COALESCE(er.saldo_almox, 0) < COALESCE(er.estoque_minimo, 0) AS abaixo_minimo_local,
           COALESCE(er.estoque_negativo, false) AS estoque_negativo_local
         FROM vw_lista_produtos v
         LEFT JOIN public.produtos_omie p ON p.codigo_produto = v.codigo_produto
@@ -406,6 +410,8 @@ router.get('/lista', async (req, res) => {
           valor_unitario,
           quantidade_estoque,
           estoque_minimo_local AS estoque_minimo,
+          saldo_almox_local AS saldo_almox,
+          abaixo_minimo_local AS abaixo_minimo,
           estoque_negativo_local AS estoque_negativo,
           item_limitado_local AS item_limitado,
           inativo,

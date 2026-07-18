@@ -35,14 +35,22 @@ function isR2Configured() {
 
 function assertStorageConfigured() {
   if (!isR2Configured()) {
-    console.error('[storage] Configure R2: R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_BUCKET, R2_PUBLIC_BASE_URL');
-    process.exit(1);
+    const message = 'Configure R2: R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_BUCKET, R2_PUBLIC_BASE_URL';
+    if (String(process.env.NODE_ENV || '').toLowerCase() === 'production') {
+      console.error(`[storage] ${message}`);
+      process.exit(1);
+    }
+    console.warn(`[storage] ${message}. Uploads ficam indisponíveis no ambiente local.`);
+    return 'unavailable-local';
   }
   return 'r2';
 }
 
 let _s3 = null;
 function getS3Client() {
+  if (!isR2Configured()) {
+    throw new Error('Armazenamento R2 não configurado neste ambiente.');
+  }
   if (!_s3) {
     _s3 = new S3Client({
       region: 'auto',
@@ -235,8 +243,10 @@ async function removePublicFiles(legacyBucket, paths) {
 }
 
 function createStorageFacade() {
-  assertStorageConfigured();
-  console.log(`[storage] Backend: Cloudflare R2 (bucket=${R2_BUCKET})`);
+  const backend = assertStorageConfigured();
+  if (backend === 'r2') {
+    console.log(`[storage] Backend: Cloudflare R2 (bucket=${R2_BUCKET})`);
+  }
 
   return {
     storage: {
