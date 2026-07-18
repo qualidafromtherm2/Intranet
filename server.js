@@ -21043,14 +21043,19 @@ app.get('/api/logistica/estoque/batch', async (req, res) => {
       });
 
       if (!minimos[row.codigo]) minimos[row.codigo] = { min: 0, saldoAlmox: 0, abaixo: false };
-      // Usa exatamente o saldo exibido no card do Porta Pallet / ALMOX.
+      // O mínimo válido é o maior configurado entre todos os locais.
+      minimos[row.codigo].min = Math.max(
+        minimos[row.codigo].min,
+        parseFloat(row.estoque_minimo) || 0
+      );
+
+      // A disponibilidade comparada usa somente o saldo do Porta Pallet / ALMOX.
       if (String(row.local_codigo) === '10717096386' || /PORTA PALLET/i.test(String(row.local_nome || ''))) {
-        minimos[row.codigo].min = parseFloat(row.estoque_minimo) || 0;
         minimos[row.codigo].saldoAlmox = parseFloat(row.saldo) || 0;
       }
     }
 
-    // Abaixo do mínimo = saldo ALMOX < mínimo configurado no próprio ALMOX.
+    // Abaixo do mínimo = saldo ALMOX < maior mínimo configurado no produto.
     for (const cod of Object.keys(minimos)) {
       const info = minimos[cod];
       if (info.min > 0) {
