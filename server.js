@@ -2903,7 +2903,16 @@ app.get('/api/compras/produtos-em-compra/:codigo', async (req, res) => {
     }
 
     const { rows } = await pool.query(`
-      SELECT
+      WITH compras_unicas AS (
+      SELECT DISTINCT ON (
+        UPPER(TRIM(sc.produto_codigo)),
+        COALESCE(TRIM(sc.numero_pedido), ''),
+        COALESCE(TRIM(sc.cnumero::text), ''),
+        COALESCE(TRIM(sc.ncodped::text), ''),
+        COALESCE(TRIM(sc.grupo_requisicao), ''),
+        COALESCE(sc.quantidade, 0),
+        LOWER(TRIM(COALESCE(sc.status, '')))
+      )
         sc.id,
         TRIM(sc.produto_codigo) AS produto_codigo,
         sc.produto_descricao,
@@ -2942,7 +2951,17 @@ app.get('/api/compras/produtos-em-compra/:codigo', async (req, res) => {
             )
           )
         )
-      ORDER BY sc.id DESC
+      ORDER BY
+        UPPER(TRIM(sc.produto_codigo)),
+        COALESCE(TRIM(sc.numero_pedido), ''),
+        COALESCE(TRIM(sc.cnumero::text), ''),
+        COALESCE(TRIM(sc.ncodped::text), ''),
+        COALESCE(TRIM(sc.grupo_requisicao), ''),
+        COALESCE(sc.quantidade, 0),
+        LOWER(TRIM(COALESCE(sc.status, ''))),
+        sc.id DESC
+      )
+      SELECT * FROM compras_unicas ORDER BY id DESC
     `, [codigo]);
 
     res.json({ ok: true, codigo, total: rows.length, compras: rows });
