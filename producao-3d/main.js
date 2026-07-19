@@ -4,6 +4,7 @@
  */
 import * as THREE from 'three';
 import { PointerLockControls } from 'three/addons/controls/PointerLockControls.js';
+import { openProducao3dRiModal } from './ri-modal.js';
 
 let canvas = document.getElementById('c');
 const blocker = document.getElementById('blocker');
@@ -301,6 +302,9 @@ function boot(renderer) {
   });
 
   let ignoreUnlockUntil = 0;
+  let inspectMode = false;
+  let inspectMesh = null;
+  let riModalAberto = false;
 
   function liberarControlesAposCarga() {
     awaitingAssets = false;
@@ -368,10 +372,17 @@ function boot(renderer) {
   function exitPlay() {
     playing = false;
     awaitingAssets = false;
+    inspectMode = false;
+    inspectMesh = null;
+    riModalAberto = false;
     if (enterLoadingEl) enterLoadingEl.hidden = true;
     touchPad.hidden = true;
     document.getElementById('crosshair').hidden = true;
-    document.getElementById('lookBalloon').hidden = true;
+    const lb = document.getElementById('lookBalloon');
+    if (lb) {
+      lb.hidden = true;
+      lb.classList.remove('is-locked');
+    }
     if (controls.isLocked) controls.unlock();
     blocker.hidden = false;
     hud.hidden = true;
@@ -398,6 +409,19 @@ function boot(renderer) {
   controls.addEventListener('unlock', () => {
     if (awaitingAssets) {
       playing = false;
+      return;
+    }
+    // Painel da placa fixado OU modal RI: mantém a cena (mouse livre)
+    if (inspectMode || riModalAberto) {
+      playing = true;
+      blocker.hidden = true;
+      hud.hidden = false;
+      const ch = document.getElementById('crosshair');
+      if (ch) ch.hidden = true;
+      if (inspectMode && lookBalloon) {
+        lookBalloon.hidden = false;
+        lookBalloon.classList.add('is-locked');
+      }
       return;
     }
     if (Date.now() < ignoreUnlockUntil) {
@@ -437,6 +461,7 @@ function boot(renderer) {
   }
 
   function onLookStart(e) {
+    if (inspectMode || riModalAberto) return;
     if (!playing || controls.isLocked) return;
     if (e.target.closest && (
       e.target.closest('#joyMove') ||
@@ -531,12 +556,21 @@ function boot(renderer) {
   });
 
   window.addEventListener('keydown', (e) => {
+    if (e.code === 'Escape' && inspectMode) {
+      e.preventDefault();
+      exitInspect();
+      return;
+    }
+    if (e.target && (e.target.tagName === 'TEXTAREA' || e.target.tagName === 'INPUT')) return;
     keys[e.code] = true;
     if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code)) {
       e.preventDefault();
     }
   });
-  window.addEventListener('keyup', (e) => { keys[e.code] = false; });
+  window.addEventListener('keyup', (e) => {
+    if (e.target && (e.target.tagName === 'TEXTAREA' || e.target.tagName === 'INPUT')) return;
+    keys[e.code] = false;
+  });
 
   // ——— Materiais ———
   const floorMat = new THREE.MeshBasicMaterial({ color: FLOOR_COL });
@@ -835,6 +869,9 @@ function boot(renderer) {
   // ——— Fotos das OPs na esteira ———
   const productMeshes = [];
   const productCards = []; // só os cards (billboard)
+  const riBalloonLayer = document.getElementById('riBalloons');
+  const riAnchors = []; // { el, mesh }
+  const _riProj = new THREE.Vector3();
   const CARD_W = 0.62;
   const CARD_H = 0.78;
   const CARD_GAP = 1.2;
@@ -1018,7 +1055,14 @@ function boot(renderer) {
     ud.tex.needsUpdate = true;
   }
 
+  function clearRiBalloons() {
+    for (const a of riAnchors) a.el?.remove();
+    riAnchors.length = 0;
+    if (riBalloonLayer) riBalloonLayer.innerHTML = '';
+  }
+
   function clearProductMeshes() {
+    clearRiBalloons();
     for (const m of productMeshes) {
       m.parent?.remove(m);
       if (m.material?.map) m.material.map.dispose();
@@ -1027,6 +1071,67 @@ function boot(renderer) {
     }
     productMeshes.length = 0;
     productCards.length = 0;
+  }
+
+  /** Marca OPs iguais às do kanban RI — Registro de inspeção. */
+  function aplicarRiPendentes(itens, pendentes) {
+    const ids = new Set();
+    const nOps = new Set();
+    for (const p of pendentes || []) {
+      const id = Number(p.op_producao_id || 0);
+      if (id > 0) ids.add(id);
+      const n = String(p.numero_op || '').trim();
+      if (n) nOps.add(n);
+    }
+    for (const it of itens || []) {
+      const id = Number(it.id || 0);
+      const n = String(it.n_op || '').trim();
+      it.ri_pendente = (id > 0 && ids.has(id)) || (n && nOps.has(n));
+    }
+  }
+
+  function attachRiBalloon(mesh, ops) {
+    if (!riBalloonLayer || !mesh) return;
+    const pending = (ops || []).filter((o) => o && o.ri_pendente);
+    if (!pending.length) return;
+    const el = document.createElement('div');
+    el.className = 'ri-world-balloon';
+    el.hidden = true;
+    if (pending.length > 1) {
+      el.innerHTML = `<strong>RI</strong><span>${pending.length} OPs</span>`;
+    } else {
+      const op = pending[0];
+      el.innerHTML = `<strong>RI</strong><span>${escHtml(op.n_op || op.codigo || 'Registrar')}</span>`;
+    }
+    el.title = pending.length > 1
+      ? `${pending.length} OPs aguardando RI`
+      : `Aguardando RI — OP ${pending[0].n_op || '—'}`;
+    riBalloonLayer.appendChild(el);
+    riAnchors.push({ el, mesh });
+  }
+
+  function updateRiBalloons() {
+    if (!riAnchors.length) return;
+    const w = window.innerWidth;
+    const h = window.innerHeight;
+    for (const a of riAnchors) {
+      const mesh = a.mesh;
+      if (!mesh || !a.el) continue;
+      mesh.getWorldPosition(_riProj);
+      const ch = mesh.geometry?.parameters?.height || CARD_H;
+      _riProj.y += ch * 0.5 + 0.28;
+      _riProj.project(camera);
+      const behind = _riProj.z > 1;
+      const x = (_riProj.x * 0.5 + 0.5) * w;
+      const y = (-_riProj.y * 0.5 + 0.5) * h;
+      if (behind || x < -60 || x > w + 60 || y < -60 || y > h + 60) {
+        a.el.hidden = true;
+      } else {
+        a.el.hidden = false;
+        a.el.style.left = `${Math.round(x)}px`;
+        a.el.style.top = `${Math.round(y)}px`;
+      }
+    }
   }
 
   /** Status do kanban → esteira 3D */
@@ -1233,6 +1338,7 @@ function boot(renderer) {
       productMeshes.push(mesh);
       productCards.push(mesh);
       paintProductCard(mesh);
+      attachRiBalloon(mesh, ops);
 
       void (async () => {
         for (const op of ops) {
@@ -1252,13 +1358,16 @@ function boot(renderer) {
   async function carregarOps() {
     try {
       if (enterLoadingSub) enterLoadingSub.textContent = 'Carregando OPs da produção…';
-      const resp = await fetch('/api/producao/cena-3d', { credentials: 'include' });
-      const json = await resp.json().catch(() => ({}));
-      if (json.ok && Array.isArray(json.itens)) {
-        placeOpsOnBelt(json.itens);
-      } else {
-        placeOpsOnBelt([]);
-      }
+      const [cenaResp, riResp] = await Promise.all([
+        fetch('/api/producao/cena-3d', { credentials: 'include' }),
+        fetch('/api/qualidade/ri-check/pendentes', { credentials: 'include' }),
+      ]);
+      const json = await cenaResp.json().catch(() => ({}));
+      const riJson = await riResp.json().catch(() => ({}));
+      const itens = json.ok && Array.isArray(json.itens) ? json.itens : [];
+      const pendentes = riJson.ok && Array.isArray(riJson.pendentes) ? riJson.pendentes : [];
+      aplicarRiPendentes(itens, pendentes);
+      placeOpsOnBelt(itens);
     } catch (e) {
       console.warn('[producao-3d] OPs:', e);
       placeOpsOnBelt([]);
@@ -1313,7 +1422,9 @@ function boot(renderer) {
   const centerNDC = new THREE.Vector2(0, 0);
   let lookOpAtual = null;
 
-  function htmlOp(op, posto) {
+  const RI_CHECK_SVG = `<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="currentColor" d="M9.55 18.2 3.8 12.45l1.9-1.9 3.85 3.85 8.75-8.75 1.9 1.9z"/></svg>`;
+
+  function htmlOp(op, posto, { withRiBtn = false } = {}) {
     const foto = op.foto_url
       ? `<img src="${escHtml(op.foto_url)}" alt="">`
       : '<div style="width:52px;height:52px;border-radius:6px;background:#21262d;flex-shrink:0;"></div>';
@@ -1324,7 +1435,10 @@ function boot(renderer) {
       teste: 'Teste',
       espera: 'Espera',
     }[posto] || posto || '';
-    return `<div class="look-balloon-row">
+    const riBtn = withRiBtn
+      ? `<button type="button" class="look-ri-btn" data-op-id="${escHtml(String(op.id || ''))}" title="RI — Registro de inspeção" aria-label="Abrir RI">${RI_CHECK_SVG}</button>`
+      : '';
+    return `<div class="look-balloon-row" data-op-id="${escHtml(String(op.id || ''))}">
       ${foto}
       <div class="look-balloon-info">
         <div class="cod">${escHtml(op.n_op || '—')}</div>
@@ -1332,22 +1446,117 @@ function boot(renderer) {
         <div class="desc">${escHtml(op.descricao || '')}</div>
         ${postoLbl ? `<div class="ids">Esteira: ${escHtml(postoLbl)}</div>` : ''}
         <div class="ids">Status: ${escHtml(op.status || '—')}</div>
+        ${op.ri_pendente ? '<div class="ids" style="color:#fda4af;font-weight:700;">Aguardando RI</div>' : ''}
       </div>
+      ${riBtn}
     </div>`;
   }
 
+  function renderInspectBalloon() {
+    if (!inspectMesh) return;
+    const ops = inspectMesh.userData.ops || [inspectMesh.userData.op];
+    const posto = inspectMesh.userData.posto || '';
+    const first = ops[0] || {};
+    lookBalloonEnd.innerHTML = `<span class="look-balloon-end-label">${escHtml(ops.length > 1 ? `${ops.length} OPs` : (first.n_op || 'OP'))}</span>
+      <button type="button" class="look-balloon-close" title="Fechar e voltar ao explorador" aria-label="Fechar">&times;</button>`;
+    lookBalloonBody.innerHTML = ops.map((op) => htmlOp(op, posto, { withRiBtn: true })).join('')
+      + '<div class="look-balloon-hint">✓ = abrir RI · ✕ / Esc = voltar ao explorador</div>';
+    lookBalloon.hidden = false;
+    lookBalloon.classList.add('is-locked');
+  }
+
+  function enterInspect(mesh) {
+    if (!mesh || mesh.userData?.tipo !== 'op') return;
+    inspectMode = true;
+    inspectMesh = mesh;
+    lookOpAtual = mesh;
+    renderInspectBalloon();
+    // Impede o unlock de “pausar” o jogo; libera o mouse p/ clicar no ✓
+    ignoreUnlockUntil = Date.now() + 2000;
+    playing = true;
+    blocker.hidden = true;
+    hud.hidden = false;
+    const ch = document.getElementById('crosshair');
+    if (ch) ch.hidden = true;
+    if (controls.isLocked) {
+      try { controls.unlock(); } catch (_) { /* ok */ }
+    }
+    // Garante estado após o evento unlock
+    requestAnimationFrame(() => {
+      if (!inspectMode) return;
+      playing = true;
+      blocker.hidden = true;
+      hud.hidden = false;
+      lookBalloon.hidden = false;
+      lookBalloon.classList.add('is-locked');
+      renderInspectBalloon();
+    });
+  }
+
+  function exitInspect({ relock = true } = {}) {
+    if (!inspectMode) return;
+    inspectMode = false;
+    inspectMesh = null;
+    lookBalloon.classList.remove('is-locked');
+    if (!lookOpAtual) lookBalloon.hidden = true;
+    if (relock && !isTouchUI && !riModalAberto) {
+      ignoreUnlockUntil = Date.now() + 600;
+      playing = true;
+      try { controls.lock(); } catch (_) { /* clique */ }
+    }
+  }
+
+  function abrirRiDaOp(opId) {
+    if (!inspectMesh) return;
+    const ops = inspectMesh.userData.ops || [inspectMesh.userData.op];
+    const op = ops.find((o) => String(o.id) === String(opId)) || ops[0];
+    if (!op) return;
+    const posto = inspectMesh.userData.posto || '';
+    riModalAberto = true;
+    openProducao3dRiModal(op, {
+      posto,
+      onRegistered: () => { void carregarOps(); },
+      onDone: () => {
+        riModalAberto = false;
+        if (inspectMode) renderInspectBalloon();
+        else if (!isTouchUI) {
+          ignoreUnlockUntil = Date.now() + 600;
+          try { controls.lock(); } catch (_) {}
+        }
+      },
+    });
+  }
+
+  lookBalloon.addEventListener('click', (e) => {
+    const closeBtn = e.target.closest?.('.look-balloon-close');
+    if (closeBtn && inspectMode) {
+      e.preventDefault();
+      e.stopPropagation();
+      exitInspect({ relock: true });
+      return;
+    }
+    const btn = e.target.closest?.('.look-ri-btn');
+    if (!btn || !inspectMode) return;
+    e.preventDefault();
+    e.stopPropagation();
+    abrirRiDaOp(btn.getAttribute('data-op-id'));
+  });
+
   function updateLookTarget() {
+    if (inspectMode || riModalAberto) return;
     if (!playing && !controls.isLocked) {
       lookBalloon.hidden = true;
       return;
     }
     raycaster.setFromCamera(centerNDC, camera);
-    const hits = raycaster.intersectObjects(productMeshes, false);
-    const hit = hits.find((h) => h.object.userData?.tipo === 'op');
-    if (hit) {
+    // Só as placas (não o pedestal) — mira mais confiável
+    const hits = raycaster.intersectObjects(productCards, false);
+    const hit = hits[0];
+    if (hit && hit.object.userData?.tipo === 'op') {
       const ops = hit.object.userData.ops || [hit.object.userData.op];
       lookOpAtual = hit.object;
       lookBalloon.hidden = false;
+      lookBalloon.classList.remove('is-locked');
       const first = ops[0] || {};
       lookBalloonEnd.textContent = ops.length > 1
         ? `${ops.length} OPs`
@@ -1359,11 +1568,55 @@ function boot(renderer) {
     }
   }
 
-  // Teleporte 2× no chão
+  // Clique rápido (com mira no produto) → fixa balão + ícone RI
+  // Com Pointer Lock o evento precisa ser no document (igual Explorar 3D).
   let lastFloorTap = 0;
-  canvas.addEventListener('pointerdown', (e) => {
-    if (!playing && !controls.isLocked) return;
+  let clickDownAt = 0;
+  let clickMoved = 0;
+
+  document.addEventListener('mousedown', (e) => {
     if (e.button !== 0) return;
+    if (inspectMode || riModalAberto) return;
+    if (!playing && !controls.isLocked) return;
+    if (e.target?.closest?.(
+      '.look-balloon, .p3d-modal-overlay, #blocker, .touch-pad, .hud, button, a, input, textarea'
+    )) return;
+    clickDownAt = performance.now();
+    clickMoved = 0;
+  });
+
+  document.addEventListener('mousemove', (e) => {
+    if (clickDownAt > 0) {
+      clickMoved += Math.abs(e.movementX || 0) + Math.abs(e.movementY || 0);
+    }
+  });
+
+  document.addEventListener('mouseup', (e) => {
+    if (e.button !== 0) return;
+    const cliqueRapido =
+      !inspectMode &&
+      !riModalAberto &&
+      clickDownAt > 0 &&
+      performance.now() - clickDownAt < 450 &&
+      clickMoved < 12;
+    clickDownAt = 0;
+    if (!cliqueRapido) return;
+    if (!playing && !controls.isLocked) return;
+
+    // Preferência: produto já na mira (updateLookTarget)
+    let mesh = lookOpAtual;
+    if (!mesh || mesh.userData?.tipo !== 'op') {
+      raycaster.setFromCamera(centerNDC, camera);
+      const prodHits = raycaster.intersectObjects(productCards, false);
+      mesh = prodHits[0]?.object || null;
+    }
+    if (mesh && mesh.userData?.tipo === 'op') {
+      enterInspect(mesh);
+      lastFloorTap = 0;
+      return;
+    }
+
+    // Duplo clique no chão → teleporte
     raycaster.setFromCamera(centerNDC, camera);
     const hits = raycaster.intersectObject(floor);
     if (!hits.length) return;
@@ -1380,6 +1633,22 @@ function boot(renderer) {
     }
   });
 
+  const btnTouchClick = document.getElementById('btnTouchClick');
+  const btnTouchBack = document.getElementById('btnTouchBack');
+  btnTouchClick?.addEventListener('click', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (riModalAberto) return;
+    if (inspectMode) return;
+    if (lookOpAtual) enterInspect(lookOpAtual);
+  });
+  btnTouchBack?.addEventListener('click', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (riModalAberto) return;
+    if (inspectMode) exitInspect({ relock: false });
+  });
+
   // ——— Loop ———
   const clock = new THREE.Clock();
   const forward = new THREE.Vector3();
@@ -1391,13 +1660,13 @@ function boot(renderer) {
     if (ctxLost) return;
     const dt = Math.min(clock.getDelta(), 0.05);
 
-    if (!awaitingAssets && (playing || controls.isLocked)) {
+    if (!awaitingAssets && (playing || controls.isLocked) && !inspectMode) {
       const ch = document.getElementById('crosshair');
       if (ch && ch.hidden) ch.hidden = false;
       if (blocker && !blocker.hidden && controls.isLocked) blocker.hidden = true;
     }
 
-    if (playing || controls.isLocked) {
+    if ((playing || controls.isLocked) && !inspectMode && !riModalAberto) {
       const speed = (keys.ShiftLeft || keys.ShiftRight ? PLAYER.speed * 1.55 : PLAYER.speed) * dt;
       forward.set(0, 0, 0);
       right.set(0, 0, 0);
@@ -1452,6 +1721,7 @@ function boot(renderer) {
     }
 
     updateLookTarget();
+    updateRiBalloons();
     appRenderer.render(scene, camera);
     if (warmFrames < 4) {
       warmFrames += 1;

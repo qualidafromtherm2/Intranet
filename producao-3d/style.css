@@ -513,6 +513,79 @@ kbd {
   display: none;
 }
 
+/* Balões flutuantes: OPs aguardando RI (kanban Registro de inspeção) */
+.ri-balloons {
+  position: absolute;
+  inset: 0;
+  z-index: 7;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.ri-world-balloon {
+  position: absolute;
+  left: 0;
+  top: 0;
+  transform: translate(-50%, -100%);
+  min-width: 72px;
+  padding: 6px 10px 8px;
+  border-radius: 12px;
+  border: 1px solid rgba(244, 63, 94, 0.55);
+  background: linear-gradient(160deg, rgba(127, 29, 29, 0.94), rgba(69, 10, 10, 0.92));
+  box-shadow:
+    0 8px 22px rgba(0, 0, 0, 0.45),
+    0 0 0 1px rgba(255, 255, 255, 0.06) inset;
+  color: #fecdd3;
+  text-align: center;
+  line-height: 1.15;
+  animation: ri-balloon-bob 2.4s ease-in-out infinite;
+  will-change: transform;
+}
+
+.ri-world-balloon[hidden] {
+  display: none;
+}
+
+.ri-world-balloon strong {
+  display: block;
+  font-size: 0.95rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  color: #fda4af;
+}
+
+.ri-world-balloon span {
+  display: block;
+  margin-top: 2px;
+  font-size: 0.68rem;
+  font-weight: 600;
+  color: #ffe4e6;
+  opacity: 0.95;
+  max-width: 110px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ri-world-balloon::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  bottom: -7px;
+  width: 12px;
+  height: 12px;
+  margin-left: -6px;
+  background: rgba(69, 10, 10, 0.92);
+  border-right: 1px solid rgba(244, 63, 94, 0.55);
+  border-bottom: 1px solid rgba(244, 63, 94, 0.55);
+  transform: rotate(45deg);
+}
+
+@keyframes ri-balloon-bob {
+  0%, 100% { transform: translate(-50%, -100%) translateY(0); }
+  50% { transform: translate(-50%, -100%) translateY(-6px); }
+}
+
 /* Balão ao mirar um endereço / foto — acima da mira p/ não cortar na base */
 .look-balloon {
   position: absolute;
@@ -564,6 +637,41 @@ kbd {
   font-size: 0.95rem;
   color: #58a6ff;
   margin-bottom: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.look-balloon-end-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.look-balloon-close {
+  appearance: none;
+  flex-shrink: 0;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: rgba(148, 163, 184, 0.12);
+  color: #e2e8f0;
+  font-size: 1.35rem;
+  line-height: 1;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+
+.look-balloon-close:hover {
+  background: rgba(248, 113, 113, 0.25);
+  border-color: rgba(248, 113, 113, 0.55);
+  color: #fecaca;
 }
 
 .look-balloon-body {
@@ -629,13 +737,370 @@ kbd {
   white-space: normal;
 }
 
-/* Painel FIXADO (clique numa foto ou num card do kanban): interativo */
+/* Painel FIXADO (clique numa placa): interativo + botão RI */
 .look-balloon.is-locked {
   pointer-events: auto;
   border-color: #58a6ff;
   box-shadow: 0 0 0 2px rgba(88, 166, 255, 0.35), 0 10px 28px rgba(0, 0, 0, 0.45);
-  max-width: min(760px, calc(100vw - 24px));
+  max-width: min(520px, calc(100vw - 24px));
   max-height: min(52vh, calc(50vh - 24px));
+}
+
+.look-balloon.is-locked .look-balloon-row {
+  align-items: flex-start;
+}
+
+.look-ri-btn {
+  flex-shrink: 0;
+  width: 40px;
+  height: 40px;
+  margin-top: 6px;
+  border-radius: 10px;
+  border: 1px solid rgba(74, 222, 128, 0.55);
+  background: linear-gradient(160deg, #166534, #14532d);
+  color: #bbf7d0;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
+  transition: transform 0.12s ease, border-color 0.12s ease;
+}
+
+.look-ri-btn:hover {
+  transform: scale(1.06);
+  border-color: #86efac;
+  color: #ecfdf5;
+}
+
+.look-ri-btn:active {
+  transform: scale(0.96);
+}
+
+.look-balloon-hint {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  font-size: 0.72rem;
+  color: #8b949e;
+  text-align: center;
+}
+
+/* ——— Modal RI (Produção 3D) ——— */
+.p3d-modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.25rem;
+  background: rgba(15, 23, 42, 0.72);
+  backdrop-filter: blur(6px);
+}
+
+.p3d-modal-overlay--sub {
+  z-index: 50;
+}
+
+.p3d-modal {
+  width: min(860px, 94vw);
+  max-height: min(88vh, 720px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border-radius: 16px;
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  background: #0f172a;
+  box-shadow: 0 25px 60px rgba(0, 0, 0, 0.55);
+  color: #e2e8f0;
+}
+
+.p3d-modal--sm {
+  width: min(520px, 94vw);
+}
+
+.p3d-modal header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 18px 20px;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.2);
+  flex-shrink: 0;
+}
+
+.p3d-modal header h2 {
+  margin: 0;
+  font-size: 1.05rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #e2e8f0;
+}
+
+.p3d-modal header span {
+  display: block;
+  margin-top: 4px;
+  font-size: 0.85rem;
+  color: #38bdf8;
+}
+
+.p3d-modal-close {
+  appearance: none;
+  background: none;
+  border: none;
+  color: #94a3b8;
+  font-size: 1.6rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.p3d-modal-close:hover {
+  color: #f1f5f9;
+}
+
+.p3d-modal-body {
+  padding: 18px 20px;
+  overflow-y: auto;
+  flex: 1;
+  min-height: 0;
+}
+
+.p3d-modal-footer {
+  position: relative;
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 14px 20px;
+  border-top: 1px solid rgba(148, 163, 184, 0.2);
+  flex-shrink: 0;
+}
+
+.p3d-btn {
+  appearance: none;
+  border-radius: 10px;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  padding: 8px 14px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  color: #e2e8f0;
+  background: #1e293b;
+}
+
+.p3d-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.p3d-btn-secondary {
+  background: #1e293b;
+}
+
+.p3d-btn-primary {
+  background: #166534;
+  border-color: rgba(74, 222, 128, 0.45);
+  color: #dcfce7;
+}
+
+.p3d-btn-warn {
+  border-color: rgba(248, 113, 113, 0.45);
+  color: #fecaca;
+  background: rgba(127, 29, 29, 0.35);
+}
+
+.p3d-btn-danger {
+  background: #b91c1c;
+  border-color: rgba(248, 113, 113, 0.5);
+  color: #fee2e2;
+}
+
+.p3d-ri-status {
+  font-size: 12px;
+  color: #94a3b8;
+  margin-bottom: 10px;
+  min-height: 16px;
+}
+
+.p3d-ri-status.ok { color: #4ade80; }
+.p3d-ri-status.err { color: #f87171; }
+
+.p3d-ri-info {
+  margin-bottom: 12px;
+  padding: 14px;
+  border-radius: 12px;
+  border: 1px solid rgba(45, 212, 191, 0.25);
+  background: rgba(15, 118, 110, 0.12);
+  font-size: 12px;
+}
+
+.p3d-ri-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 8px;
+}
+
+.p3d-ri-desc { margin-top: 8px; color: #cbd5e1; }
+.p3d-ri-hint { margin: 8px 0; font-size: 11px; color: #64748b; }
+.p3d-ri-hint b { color: #93c5fd; }
+.p3d-ri-accent { color: #93c5fd; }
+.p3d-ri-warn { color: #facc15; }
+.p3d-ri-muted { color: #64748b; font-size: 10px; }
+.p3d-ri-empty {
+  text-align: center;
+  padding: 20px;
+  color: #64748b;
+  font-size: 12px;
+}
+
+.p3d-ri-sec-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+
+.p3d-ri-sec-head > span {
+  font-size: 11px;
+  font-weight: 700;
+  color: #94a3b8;
+  text-transform: uppercase;
+}
+
+.p3d-ri-ocorrencias {
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.p3d-ri-card {
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
+  padding: 12px;
+  margin-bottom: 10px;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.p3d-ri-card-warn {
+  border-color: rgba(248, 113, 113, 0.25);
+  background: rgba(127, 29, 29, 0.12);
+}
+
+.p3d-ri-card-top {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 6px;
+}
+
+.p3d-ri-card-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: #e2e8f0;
+}
+
+.p3d-ri-card-title.warn { color: #fecaca; font-size: 12px; }
+
+.p3d-ri-card-desc {
+  font-size: 12px;
+  color: #94a3b8;
+  margin-bottom: 8px;
+}
+
+.p3d-ri-badge {
+  font-size: 10px;
+  color: #818cf8;
+  background: rgba(99, 102, 241, 0.15);
+  padding: 2px 8px;
+  border-radius: 8px;
+}
+
+.p3d-ri-media {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+
+.p3d-ri-thumb {
+  max-width: 120px;
+  max-height: 80px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+}
+
+.p3d-ri-link {
+  font-size: 11px;
+  color: #93c5fd;
+}
+
+.p3d-ri-spinner {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  background: rgba(15, 23, 42, 0.88);
+  z-index: 2;
+  border-radius: 0 0 16px 16px;
+  font-size: 12px;
+  color: #94a3b8;
+}
+
+.p3d-ri-spinner[hidden] { display: none; }
+
+.p3d-ri-spinner-inner {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 3px solid rgba(99, 102, 241, 0.25);
+  border-top-color: #6366f1;
+  animation: p3d-spin 0.8s linear infinite;
+}
+
+@keyframes p3d-spin {
+  to { transform: rotate(360deg); }
+}
+
+.p3d-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 12px;
+  font-size: 12px;
+  color: #94a3b8;
+}
+
+.p3d-field textarea {
+  width: 100%;
+  min-height: 96px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: #1e293b;
+  color: #e2e8f0;
+  font-size: 16px; /* ajuda teclado mobile */
+  line-height: 1.4;
+  resize: vertical;
+  box-sizing: border-box;
+}
+
+.p3d-field textarea:focus {
+  outline: none;
+  border-color: #58a6ff;
+  box-shadow: 0 0 0 2px rgba(88, 166, 255, 0.25);
+}
+
+.p3d-evidencia-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
 }
 
 /* ——— Painel do destino (modo Iniciar separação) ——— */
@@ -736,14 +1201,14 @@ kbd {
 }
 
 .look-balloon.is-locked .look-balloon-row {
-  cursor: pointer;
+  cursor: default;
   border-radius: 8px;
   padding-left: 6px;
   padding-right: 6px;
 }
 
 .look-balloon.is-locked .look-balloon-row:hover {
-  background: rgba(88, 166, 255, 0.12);
+  background: rgba(88, 166, 255, 0.08);
 }
 
 /* Detalhe de um produto dentro do painel fixado */
