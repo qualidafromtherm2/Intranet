@@ -11953,6 +11953,11 @@ app.post('/api/etiquetas/recebimento/preview', express.json(), async (req, res) 
     const ignorados   = [];
     const gerados     = [];
 
+    await pool.query(`
+      ALTER TABLE public.produtos_omie
+      ADD COLUMN IF NOT EXISTS pir_vai_direto_identificacao BOOLEAN NOT NULL DEFAULT FALSE
+    `).catch(() => {});
+
     for (const item of itens) {
       const codProdRaw = String(item?.codigo_produto  || '').trim();
       const descProdRaw = String(item?.descricao_produto || '').trim();
@@ -11978,24 +11983,38 @@ app.post('/api/etiquetas/recebimento/preview', express.json(), async (req, res) 
       const qtdTxt   = sanitize(qtdRaw,  15);
       const unidTxt  = sanitize(unidRaw, 10);
 
+      // Produto marcado para pular PIR → já nasce liberado em Identificação
+      let pirInicial = false;
+      try {
+        const flag = await pool.query(
+          `SELECT COALESCE(pir_vai_direto_identificacao, FALSE) AS vai_direto
+             FROM public.produtos_omie
+            WHERE TRIM(COALESCE(codigo, '')) = TRIM($1)
+               OR TRIM(COALESCE(codigo_produto::text, '')) = TRIM($1)
+            LIMIT 1`,
+          [codProdRaw]
+        );
+        pirInicial = flag.rows[0]?.vai_direto === true;
+      } catch (_) { /* segue com pir=false */ }
+
       // ── Salva no banco primeiro para obter o ID ───────────────────────────
       let idEtq = null;
       try {
         const ins = await pool.query(
           `INSERT INTO etiqueta."ETQ_recebimento"
              (numero_nfe, numero_pedido, lote, codigo_produto, descricao_produto,
-              qtd, unidade, data_emissao, conteudo_zpl, usuario_criacao)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+              qtd, unidade, data_emissao, conteudo_zpl, usuario_criacao, pir)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
            RETURNING id`,
           [
             String(nfe), String(pedido), lote,
             codProdRaw, descProdRaw,
             qtdRaw !== '' ? Number(String(qtdRaw).replace(',', '.')) || null : null,
-            unidRaw, dataExibir, '', usuario,
+            unidRaw, dataExibir, '', usuario, pirInicial,
           ]
         );
         idEtq = ins.rows[0]?.id;
-        gerados.push({ cod: codProdRaw, id: idEtq });
+        gerados.push({ cod: codProdRaw, id: idEtq, pir: pirInicial });
       } catch (dbErr) {
         console.error('[etiquetas/recebimento/preview] falha ao salvar item:', codProdRaw, dbErr?.message || dbErr);
         continue;
@@ -12070,6 +12089,8 @@ app.get('/api/etiquetas/recebimento/pendentes', async (req, res) => {
       : `(er.oculto = false OR er.oculto IS NULL) AND (er.codigo_produto IS NULL OR er.codigo_produto NOT IN (${_aoSub}))`;
     // Só exibe no modal Etiquetas disponíveis após PIR aprovado
     const pirCond = `COALESCE(er.pir, false) = true`;
+    // qtd=0 = todas as etiquetas já impressas — não listar
+    const saldoCond = `COALESCE(er.qtd, 0) > 0`;
     const semMp = req.query.sem_mp === '1' || req.query.sem_mp === 'true';
     // MP = família Omie MP OU código no padrão xx.MP.x.xxxxx (2º segmento = MP)
     const isMpSql = `(
@@ -12110,6 +12131,7 @@ app.get('/api/etiquetas/recebimento/pendentes', async (req, res) => {
            FROM etiqueta."ETQ_recebimento" er
           WHERE ${ocultoCond}
             AND ${pirCond}
+            AND ${saldoCond}
             AND ${familiaMpCond}
             AND (er.lote ILIKE $1 OR er.codigo_produto ILIKE $1 OR er.descricao_produto ILIKE $1)
           ORDER BY er.impressa DESC, er.criado_em DESC
@@ -12125,6 +12147,7 @@ app.get('/api/etiquetas/recebimento/pendentes', async (req, res) => {
            FROM etiqueta."ETQ_recebimento" er
           WHERE ${ocultoCond}
             AND ${pirCond}
+            AND ${saldoCond}
             AND ${familiaMpCond}
           ORDER BY er.impressa DESC, er.criado_em DESC
           LIMIT 200`
@@ -12148,6 +12171,10 @@ app.get('/api/etiquetas/recebimento/pendentes-pir', async (req, res) => {
       ALTER TABLE public.produtos_omie
       ADD COLUMN IF NOT EXISTS produto_customizado BOOLEAN NOT NULL DEFAULT FALSE
     `).catch(() => {});
+    await pool.query(`
+      ALTER TABLE public.produtos_omie
+      ADD COLUMN IF NOT EXISTS pir_vai_direto_identificacao BOOLEAN NOT NULL DEFAULT FALSE
+    `).catch(() => {});
 
     const q = String(req.query.q || '').trim();
     const semMp = req.query.sem_mp === '1' || req.query.sem_mp === 'true';
@@ -12158,6 +12185,7 @@ app.get('/api/etiquetas/recebimento/pendentes-pir', async (req, res) => {
                po.codigo AS po_codigo,
                po.codigo_produto AS po_codigo_produto,
                COALESCE(po.produto_customizado, FALSE) AS produto_customizado,
+               COALESCE(po.pir_vai_direto_identificacao, FALSE) AS pir_vai_direto_identificacao,
                po.dinc AS po_dinc,
                UPPER(TRIM(COALESCE(po.codint_familia, ''))) AS codint_familia,
                (
@@ -12198,13 +12226,14 @@ app.get('/api/etiquetas/recebimento/pendentes-pir', async (req, res) => {
                ) AS qtd_alteracoes
           FROM etiqueta."ETQ_recebimento" er
           LEFT JOIN LATERAL (
-            SELECT p.codigo, p.codigo_produto, p.produto_customizado, p.dinc, p.codint_familia
+            SELECT p.codigo, p.codigo_produto, p.produto_customizado, p.pir_vai_direto_identificacao, p.dinc, p.codint_familia
               FROM public.produtos_omie p
              WHERE TRIM(COALESCE(p.codigo, '')) = TRIM(COALESCE(er.codigo_produto, ''))
                 OR TRIM(COALESCE(p.codigo_produto::text, '')) = TRIM(COALESCE(er.codigo_produto, ''))
              LIMIT 1
           ) po ON TRUE
          WHERE COALESCE(er.pir, false) = false
+           AND COALESCE(po.pir_vai_direto_identificacao, FALSE) = FALSE
            AND (
              ($2::boolean = false AND (
                UPPER(TRIM(COALESCE(po.codint_familia, ''))) = 'MP'
@@ -12233,6 +12262,7 @@ app.get('/api/etiquetas/recebimento/pendentes-pir', async (req, res) => {
         id, numero_nfe, numero_pedido, lote, codigo_produto, descricao_produto,
         qtd, unidade, data_emissao, criado_em, pir,
         produto_customizado,
+        pir_vai_direto_identificacao,
         fornecedor_atual,
         fornecedor_anterior,
         qtd_recebimentos_anteriores,
@@ -12273,6 +12303,7 @@ app.get('/api/etiquetas/recebimento/pendentes-pir', async (req, res) => {
         primeira_vez: r.primeira_vez === true,
         fornecedor_mudou: r.fornecedor_mudou === true,
         produto_customizado: r.produto_customizado === true,
+        pir_vai_direto_identificacao: r.pir_vai_direto_identificacao === true,
         tem_alteracao: r.tem_alteracao === true,
         qtd_alteracoes: Number(r.qtd_alteracoes || 0)
       })),
@@ -12799,6 +12830,7 @@ app.get('/api/etiquetas/rec-impresso', async (req, res) => {
       const result = await pool.query(
         `${baseSql}
          WHERE (i.endereco IS NULL OR i.endereco = '')
+           AND COALESCE(i.qtd, 0) > 0
            AND (r.lote ILIKE $1 OR r.codigo_produto ILIKE $1 OR r.descricao_produto ILIKE $1)
          ORDER BY i.impresso_em DESC
          LIMIT 200`,
@@ -12809,6 +12841,7 @@ app.get('/api/etiquetas/rec-impresso', async (req, res) => {
       const result = await pool.query(
         `${baseSql}
          WHERE (i.endereco IS NULL OR i.endereco = '')
+           AND COALESCE(i.qtd, 0) > 0
          ORDER BY i.impresso_em DESC
          LIMIT 200`
       );
@@ -12818,6 +12851,142 @@ app.get('/api/etiquetas/rec-impresso', async (req, res) => {
   } catch (err) {
     console.error('[etiquetas/rec-impresso]', err);
     res.status(500).json({ error: err?.message || 'Falha ao buscar etiquetas impressas' });
+  }
+});
+
+// POST /api/etiquetas/rec-impresso/:id/retornar
+// Body: { modo: 'uma' | 'todas' }
+// Devolve o saldo para ETQ_recebimento (Etiquetas disponíveis) e remove o(s) impresso(s).
+// modo=todas: consolida no menor origem_id e remove os IDs maiores sem impressão restante.
+app.post('/api/etiquetas/rec-impresso/:id/retornar', express.json(), async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const id = Number(req.params.id);
+    const modo = String(req.body?.modo || 'uma').trim().toLowerCase() === 'todas' ? 'todas' : 'uma';
+    if (!id) return res.status(400).json({ error: 'ID inválido.' });
+
+    await client.query('BEGIN');
+
+    const { rows: baseRows } = await client.query(
+      `SELECT i.id, i.qtd, i.origem_id, i.unidade,
+              TRIM(COALESCE(NULLIF(TRIM(i.codigo_produto), ''), r.codigo_produto, '')) AS codigo_produto,
+              TRIM(COALESCE(r.lote, '')) AS lote,
+              TRIM(COALESCE(i.endereco, '')) AS endereco
+         FROM etiqueta."ETQ_rec_impresso" i
+         LEFT JOIN etiqueta."ETQ_recebimento" r ON r.id = i.origem_id
+        WHERE i.id = $1
+        FOR UPDATE OF i`,
+      [id]
+    );
+    if (!baseRows.length) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Etiqueta impressa não encontrada.' });
+    }
+    const base = baseRows[0];
+    if (base.endereco) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'Etiqueta já armazenada em local. Não é possível retornar.' });
+    }
+    if (!base.origem_id) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'Etiqueta sem origem de recebimento.' });
+    }
+
+    let impressos = [base];
+    if (modo === 'todas') {
+      const codigo = String(base.codigo_produto || '').trim();
+      const lote = String(base.lote || '').trim();
+      if (!codigo) {
+        await client.query('ROLLBACK');
+        return res.status(400).json({ error: 'Código do produto não encontrado para retornar todas.' });
+      }
+      // Mesmo produto + mesmo lote (evita misturar NF/lotes diferentes)
+      const { rows: todas } = await client.query(
+        `SELECT i.id, i.qtd, i.origem_id, i.unidade,
+                TRIM(COALESCE(NULLIF(TRIM(i.codigo_produto), ''), r.codigo_produto, '')) AS codigo_produto,
+                TRIM(COALESCE(r.lote, '')) AS lote
+           FROM etiqueta."ETQ_rec_impresso" i
+           LEFT JOIN etiqueta."ETQ_recebimento" r ON r.id = i.origem_id
+          WHERE (i.endereco IS NULL OR TRIM(i.endereco) = '')
+            AND COALESCE(i.qtd, 0) > 0
+            AND TRIM(COALESCE(NULLIF(TRIM(i.codigo_produto), ''), r.codigo_produto, '')) = $1
+            AND TRIM(COALESCE(r.lote, '')) = $2
+          ORDER BY i.id ASC
+          FOR UPDATE OF i`,
+        [codigo, lote]
+      );
+      impressos = todas.length ? todas : [base];
+    }
+
+    const idsImpresso = impressos.map((r) => Number(r.id)).filter((n) => n > 0);
+    const origemIds = [...new Set(impressos.map((r) => Number(r.origem_id)).filter((n) => n > 0))];
+    const saldoTotal = impressos.reduce((acc, r) => acc + (parseFloat(r.qtd) || 0), 0);
+    const origemMin = Math.min(...origemIds);
+    const unidade = impressos.find((r) => r.unidade)?.unidade || null;
+
+    if (!(saldoTotal > 0) || !origemMin) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'Sem saldo para retornar.' });
+    }
+
+    // Saldo já devolvido em retornos parciais (nas origens envolvidas)
+    const { rows: saldoOrigemRows } = await client.query(
+      `SELECT COALESCE(SUM(COALESCE(qtd, 0)), 0)::float AS saldo
+         FROM etiqueta."ETQ_recebimento"
+        WHERE id = ANY($1::int[])`,
+      [origemIds]
+    );
+    const saldoJaNasOrigens = parseFloat(saldoOrigemRows[0]?.saldo) || 0;
+    const saldoFinal = saldoTotal + saldoJaNasOrigens;
+
+    // Remove impressos retornados
+    await client.query(
+      `DELETE FROM etiqueta."ETQ_rec_impresso" WHERE id = ANY($1::int[])`,
+      [idsImpresso]
+    );
+
+    // Consolida saldo no menor origem_id e libera para reimpressão / múltiplo
+    await client.query(
+      `UPDATE etiqueta."ETQ_recebimento"
+          SET qtd = $1,
+              impressa = false,
+              unidade = COALESCE(NULLIF(TRIM(unidade), ''), $2, unidade)
+        WHERE id = $3`,
+      [saldoFinal, unidade, origemMin]
+    );
+
+    // Zera origens maiores antes de apagar (evita perder saldo no consolidate)
+    const origensMaiores = origemIds.filter((oid) => oid !== origemMin);
+    if (origensMaiores.length) {
+      await client.query(
+        `UPDATE etiqueta."ETQ_recebimento" SET qtd = 0 WHERE id = ANY($1::int[])`,
+        [origensMaiores]
+      );
+      await client.query(
+        `DELETE FROM etiqueta."ETQ_recebimento" r
+          WHERE r.id = ANY($1::int[])
+            AND NOT EXISTS (
+              SELECT 1 FROM etiqueta."ETQ_rec_impresso" i WHERE i.origem_id = r.id
+            )`,
+        [origensMaiores]
+      );
+    }
+
+    await client.query('COMMIT');
+    res.json({
+      ok: true,
+      modo,
+      saldo_retornado: saldoFinal,
+      origem_id: origemMin,
+      impressos_removidos: idsImpresso.length,
+      origens_consolidadas: origemIds.length,
+    });
+  } catch (err) {
+    try { await client.query('ROLLBACK'); } catch (_) {}
+    console.error('[etiquetas/rec-impresso/retornar]', err);
+    res.status(500).json({ error: err?.message || 'Falha ao retornar etiqueta.' });
+  } finally {
+    client.release();
   }
 });
 

@@ -1015,6 +1015,20 @@ async function ensureProdutosOmieCustomizadoColumn() {
   await ensureProdutosOmieCustomizadoColumnPromise;
 }
 
+let ensureProdutosOmiePirVaiDiretoColumnPromise = null;
+async function ensureProdutosOmiePirVaiDiretoColumn() {
+  if (!ensureProdutosOmiePirVaiDiretoColumnPromise) {
+    ensureProdutosOmiePirVaiDiretoColumnPromise = dbQuery(`
+      ALTER TABLE public.produtos_omie
+      ADD COLUMN IF NOT EXISTS pir_vai_direto_identificacao BOOLEAN NOT NULL DEFAULT FALSE
+    `).catch((err) => {
+      ensureProdutosOmiePirVaiDiretoColumnPromise = null;
+      throw err;
+    });
+  }
+  await ensureProdutosOmiePirVaiDiretoColumnPromise;
+}
+
 async function ensureProdutosOmieItemLimitadoColumn() {
   if (!ensureProdutosOmieItemLimitadoColumnPromise) {
     ensureProdutosOmieItemLimitadoColumnPromise = dbQuery(`
@@ -1031,6 +1045,9 @@ async function ensureProdutosOmieItemLimitadoColumn() {
 // Garante coluna ao subir o módulo
 ensureProdutosOmieCustomizadoColumn().catch((err) => {
   console.warn('[produtos] ensure produto_customizado:', err?.message || err);
+});
+ensureProdutosOmiePirVaiDiretoColumn().catch((err) => {
+  console.warn('[produtos] ensure pir_vai_direto_identificacao:', err?.message || err);
 });
 ensureProdutosOmieItemLimitadoColumn().catch((err) => {
   console.warn('[produtos] ensure item_limitado:', err?.message || err);
@@ -1190,6 +1207,102 @@ router.put('/:codigo/produto-customizado', express.json(), async (req, res) => {
     });
   } catch (err) {
     console.error('[PUT /api/produtos/:codigo/produto-customizado]', err);
+    res.status(500).json({ ok: false, error: String(err.message || err) });
+  }
+});
+
+async function atualizarPirVaiDiretoIdentificacaoOmie(codigo, valor) {
+  const client = await dbGetClient();
+  try {
+    await client.query('BEGIN');
+    await client.query("SELECT set_config('app.produtos_omie_write_source', 'omie_manual', true)");
+    const result = await client.query(
+      `UPDATE public.produtos_omie
+          SET pir_vai_direto_identificacao = $2
+        WHERE ${sqlWhereProdutosOmieIdentidade('', '$1')}
+        RETURNING codigo, codigo_produto, pir_vai_direto_identificacao`,
+      [codigo, valor === true]
+    );
+    // Se marcado: libera pendentes PIR deste produto → Identificação do produto
+    if (valor === true && result.rows.length) {
+      const codigos = [
+        ...new Set(
+          result.rows
+            .flatMap((r) => [String(r.codigo || '').trim(), String(r.codigo_produto || '').trim()])
+            .filter(Boolean)
+        )
+      ];
+      if (codigos.length) {
+        await client.query(
+          `UPDATE etiqueta."ETQ_recebimento" er
+              SET pir = true
+            WHERE COALESCE(er.pir, false) = false
+              AND TRIM(COALESCE(er.codigo_produto, '')) = ANY($1::text[])`,
+          [codigos]
+        );
+      }
+    }
+    await client.query('COMMIT');
+    return result;
+  } catch (e) {
+    try { await client.query('ROLLBACK'); } catch (_) {}
+    throw e;
+  } finally {
+    client.release();
+  }
+}
+
+router.get('/:codigo/pir-vai-direto-identificacao', async (req, res) => {
+  try {
+    await ensureProdutosOmiePirVaiDiretoColumn();
+    const codigo = String(req.params.codigo || '').trim();
+    if (!codigo) return res.status(400).json({ ok: false, error: 'Código obrigatório' });
+
+    const { rows } = await dbQuery(
+      `SELECT codigo, COALESCE(pir_vai_direto_identificacao, FALSE) AS pir_vai_direto_identificacao
+         FROM public.produtos_omie
+        WHERE ${sqlWhereProdutosOmieIdentidade('', '$1')}
+        ORDER BY ${sqlOrderPreferCodigoProduto('', '$1')}
+        LIMIT 1`,
+      [codigo]
+    );
+    if (!rows.length) return res.status(404).json({ ok: false, error: 'Produto não encontrado' });
+
+    res.json({
+      ok: true,
+      codigo: rows[0].codigo,
+      pir_vai_direto_identificacao: rows[0].pir_vai_direto_identificacao === true
+    });
+  } catch (err) {
+    console.error('[GET /api/produtos/:codigo/pir-vai-direto-identificacao]', err);
+    res.status(500).json({ ok: false, error: String(err.message || err) });
+  }
+});
+
+router.put('/:codigo/pir-vai-direto-identificacao', express.json(), async (req, res) => {
+  try {
+    await ensureProdutosOmiePirVaiDiretoColumn();
+    const codigo = String(req.params.codigo || '').trim();
+    if (!codigo) return res.status(400).json({ ok: false, error: 'Código obrigatório' });
+
+    const raw = req.body?.pir_vai_direto_identificacao;
+    const valor = raw === true || raw === 1 || raw === '1' || raw === 'true';
+
+    const result = await atualizarPirVaiDiretoIdentificacaoOmie(codigo, valor);
+    if (!result.rows.length) {
+      return res.status(404).json({
+        ok: false,
+        error: `Produto não encontrado para o código "${codigo}".`
+      });
+    }
+
+    res.json({
+      ok: true,
+      codigo: result.rows[0].codigo,
+      pir_vai_direto_identificacao: result.rows[0].pir_vai_direto_identificacao === true
+    });
+  } catch (err) {
+    console.error('[PUT /api/produtos/:codigo/pir-vai-direto-identificacao]', err);
     res.status(500).json({ ok: false, error: String(err.message || err) });
   }
 });

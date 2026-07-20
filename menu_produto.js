@@ -10273,6 +10273,7 @@ const qualidadeNfeLista = document.getElementById('qualidadeNfeLista');
 const qualidadeQuantidadeOk = document.getElementById('qualidadeQuantidadeOk');
 const qualidadeQuantidadeNok = document.getElementById('qualidadeQuantidadeNok');
 const qualidadeProdutoCustomizadoCheck = document.getElementById('qualidadeProdutoCustomizadoCheck');
+const qualidadeVaiDiretoIdentificacaoCheck = document.getElementById('qualidadeVaiDiretoIdentificacaoCheck');
 const qualidadeAbrirDadosProdutoBtn = document.getElementById('qualidadeAbrirDadosProdutoBtn');
 const qualidadePirVerificacaoCheckbox = document.getElementById('qualidadePirVerificacaoCheckbox');
 const qualidadeManuaisPrincipaisBtn = document.getElementById('qualidadeManuaisPrincipaisBtn');
@@ -11576,6 +11577,49 @@ async function carregarStatusProdutoCustomizadoInspecao(codigoProduto) {
   }
 }
 
+async function salvarPirVaiDiretoIdentificacao(codigoProduto, valor) {
+  const codigo = String(codigoProduto || '').trim();
+  if (!codigo) throw new Error('Informe o Cod_produto para marcar o destino.');
+  const resp = await fetch(`/api/produtos/${encodeURIComponent(codigo)}/pir-vai-direto-identificacao`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',
+    body: JSON.stringify({ pir_vai_direto_identificacao: valor === true })
+  });
+  const data = await resp.json().catch(() => ({}));
+  if (!resp.ok || data.ok === false) {
+    throw new Error(data.error || `Falha ao salvar destino PIR (HTTP ${resp.status})`);
+  }
+  return data;
+}
+
+async function carregarStatusPirVaiDiretoIdentificacao(codigoProduto) {
+  if (!qualidadeVaiDiretoIdentificacaoCheck) return;
+  const codigo = String(codigoProduto || '').trim();
+  if (!codigo) {
+    qualidadeVaiDiretoIdentificacaoCheck.checked = false;
+    qualidadeVaiDiretoIdentificacaoCheck.disabled = true;
+    return;
+  }
+  qualidadeVaiDiretoIdentificacaoCheck.disabled = true;
+  try {
+    const resp = await fetch(`/api/produtos/${encodeURIComponent(codigo)}/pir-vai-direto-identificacao`, {
+      credentials: 'include'
+    });
+    if (resp.status === 404) {
+      qualidadeVaiDiretoIdentificacaoCheck.checked = false;
+      return;
+    }
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const data = await resp.json();
+    qualidadeVaiDiretoIdentificacaoCheck.checked = data?.pir_vai_direto_identificacao === true;
+  } catch (err) {
+    console.warn('[QUALIDADE] falha ao carregar pir_vai_direto_identificacao', err);
+  } finally {
+    qualidadeVaiDiretoIdentificacaoCheck.disabled = false;
+  }
+}
+
 // Salva na hora ao marcar/desmarcar no modal Registro de inspeção
 let qualidadeProdutoCustomizadoSalvando = false;
 qualidadeProdutoCustomizadoCheck?.addEventListener('change', async (event) => {
@@ -11610,11 +11654,69 @@ qualidadeProdutoCustomizadoCheck?.addEventListener('change', async (event) => {
   }
 });
 
+// Vai direto para Identificação — salva no cadastro do produto (próximas NF-e também)
+let qualidadeVaiDiretoIdentificacaoSalvando = false;
+qualidadeVaiDiretoIdentificacaoCheck?.addEventListener('change', async (event) => {
+  if (qualidadeVaiDiretoIdentificacaoSalvando) return;
+  const marcado = event.target.checked === true;
+  const codigo = String(
+    qualidadeCodigoProdutoReal?.value ||
+    qualidadeCodProduto?.value ||
+    ''
+  ).trim();
+  const etqId = Number(qualidadeEtqRecebimentoId?.value || qualidadePirEtqAtualId || 0) || 0;
+
+  if (!codigo) {
+    alert('Informe o Cod_produto antes de marcar o destino.');
+    event.target.checked = false;
+    return;
+  }
+
+  if (marcado) {
+    const ok = window.confirm(
+      'Marcar este produto para ir direto para Identificação do produto?\n\n' +
+      '• Este item sai da lista PIR agora\n' +
+      '• Nas próximas compras, ele também não aparece no PIR — vai direto para Identificação'
+    );
+    if (!ok) {
+      event.target.checked = false;
+      return;
+    }
+  }
+
+  qualidadeVaiDiretoIdentificacaoSalvando = true;
+  event.target.disabled = true;
+  try {
+    await salvarPirVaiDiretoIdentificacao(codigo, marcado);
+    // Libera o item atual da lista (se aberto a partir de um pendente)
+    if (marcado && etqId) {
+      await marcarEtqRecebimentoPir(etqId, true);
+      fecharModalInspecaoQualidade();
+      carregarQualidadePirPendentes(qualidadePirPendentesBusca?.value?.trim() || '');
+    } else if (!marcado && qualidadePirPendentesWrap?.style.display !== 'none') {
+      carregarQualidadePirPendentes(qualidadePirPendentesBusca?.value?.trim() || '');
+    }
+  } catch (err) {
+    console.error('[QUALIDADE] erro ao salvar pir_vai_direto_identificacao', err);
+    event.target.checked = !marcado;
+    alert(err?.message || 'Erro ao salvar destino do produto.');
+  } finally {
+    qualidadeVaiDiretoIdentificacaoSalvando = false;
+    if (qualidadeVaiDiretoIdentificacaoCheck) {
+      qualidadeVaiDiretoIdentificacaoCheck.disabled = false;
+    }
+  }
+});
+
 function abrirModalInspecaoQualidade(item = null) {
   resetFormularioInspecaoQualidade();
   qualidadePirEtqAtualId = item?.id ? Number(item.id) : null;
   if (qualidadeEtqRecebimentoId) {
     qualidadeEtqRecebimentoId.value = qualidadePirEtqAtualId ? String(qualidadePirEtqAtualId) : '';
+  }
+  if (qualidadeVaiDiretoIdentificacaoCheck) {
+    qualidadeVaiDiretoIdentificacaoCheck.checked = item?.pir_vai_direto_identificacao === true;
+    qualidadeVaiDiretoIdentificacaoCheck.disabled = true;
   }
 
   if (item) {
@@ -11636,6 +11738,7 @@ function abrirModalInspecaoQualidade(item = null) {
     if (codigo) {
       carregarStatusVerificacaoPirQualidade(codigo);
       carregarStatusProdutoCustomizadoInspecao(codigo);
+      carregarStatusPirVaiDiretoIdentificacao(codigo);
       // Resolve id Omie para carregar plano PIR / imagem / NFe
       (async () => {
         try {
@@ -11662,6 +11765,7 @@ function abrirModalInspecaoQualidade(item = null) {
               if (match.codigo_produto || match.codigo) {
                 carregarStatusProdutoCustomizadoInspecao(match.codigo_produto || match.codigo);
                 carregarStatusVerificacaoPirQualidade(match.codigo_produto || match.codigo);
+                carregarStatusPirVaiDiretoIdentificacao(match.codigo_produto || match.codigo);
               }
               return;
             }
@@ -11683,14 +11787,14 @@ function fecharModalInspecaoQualidade() {
   resetFormularioInspecaoQualidade();
 }
 
-async function marcarEtqRecebimentoPir(id) {
+async function marcarEtqRecebimentoPir(id, pir = true) {
   const etqId = Number(id);
   if (!etqId) return;
   const resp = await fetch(`/api/etiquetas/recebimento/${etqId}/pir`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     credentials: 'include',
-    body: JSON.stringify({ pir: true })
+    body: JSON.stringify({ pir: pir === true })
   });
   const data = await resp.json().catch(() => ({}));
   if (!resp.ok) throw new Error(data.error || `Falha ao marcar PIR (HTTP ${resp.status})`);
@@ -12055,6 +12159,10 @@ function resetFormularioInspecaoQualidade() {
   if (qualidadeProdutoCustomizadoCheck) {
     qualidadeProdutoCustomizadoCheck.checked = false;
     qualidadeProdutoCustomizadoCheck.disabled = false;
+  }
+  if (qualidadeVaiDiretoIdentificacaoCheck) {
+    qualidadeVaiDiretoIdentificacaoCheck.checked = false;
+    qualidadeVaiDiretoIdentificacaoCheck.disabled = false;
   }
   renderQualidadeImagemProduto('');
   renderQualidadeCarretelPir([]);
@@ -34971,23 +35079,24 @@ window.openRegistros = async function() {
 
   function _etqRenderCards(etiquetas) {
     if (!etqGrid) return;
-    if (!etiquetas || etiquetas.length === 0) {
+    const lista = (etiquetas || []).filter(e => (Number(e.qtd) || 0) > 0);
+    if (!lista.length) {
       etqGrid.innerHTML = '<div class="etiquetas-loading">Nenhuma etiqueta pendente encontrada.</div>';
       if (etqStatus) etqStatus.textContent = '';
       return;
     }
 
-    const pendentes = etiquetas.filter(e => !e.impressa).length;
-    const impressas = etiquetas.filter(e => e.impressa).length;
+    const pendentes = lista.filter(e => !e.impressa).length;
+    const impressas = lista.filter(e => e.impressa).length;
     if (etqStatus) {
-      let txt = `${etiquetas.length} etiqueta(s)`;
+      let txt = `${lista.length} etiqueta(s)`;
       if (pendentes && impressas) txt += ` · ${pendentes} pendente(s), ${impressas} impressa(s)`;
       else if (impressas) txt += ` impressa(s)`;
       else txt += ` pendente(s)`;
       etqStatus.textContent = txt;
     }
 
-    etqGrid.innerHTML = etiquetas.map(e => {
+    etqGrid.innerHTML = lista.map(e => {
       const cod     = escapeHtml(String(e.codigo_produto  || '—'));
       const desc    = escapeHtml(String(e.descricao_produto || '—'));
       const lote    = escapeHtml(String(e.lote || '—'));
@@ -34997,15 +35106,11 @@ window.openRegistros = async function() {
       const id      = Number(e.id);
       const qtdRaw  = e.qtd != null ? Number(e.qtd) || 0 : 0;
       const impressa    = !!e.impressa;
-      const idImpresso  = e.id_impresso ? Number(e.id_impresso) : 0;
 
       const acoes = impressa
         ? `<div class="etq-card-actions">
             <button class="etq-btn-reimprimir" data-id="${id}" title="Marcar como não impresso e reabrir para impressão">
               <i class="fa-solid fa-rotate-left"></i> Reimprimir
-            </button>
-            <button class="etq-btn-armazenar" data-id="${id}" data-id-impresso="${idImpresso}" title="Armazenar produto">
-              <i class="fa-solid fa-box-archive"></i> Armazenar
             </button>
           </div>`
         : `<div class="etq-card-actions">
@@ -35050,8 +35155,8 @@ window.openRegistros = async function() {
     // Clique no card seleciona
     etqGrid.querySelectorAll('.etq-card').forEach(card => {
       card.addEventListener('click', e => {
-        if (e.target.matches('.etq-check-sel') || e.target.matches('.etq-btn-imprimir-unit') || e.target.closest('.etq-btn-imprimir-unit') || e.target.matches('.etq-btn-multiplo') || e.target.closest('.etq-btn-multiplo') || e.target.matches('.etq-btn-ocultar') || e.target.closest('.etq-btn-ocultar') || e.target.matches('.etq-btn-reimprimir') || e.target.closest('.etq-btn-reimprimir') || e.target.matches('.etq-btn-armazenar') || e.target.closest('.etq-btn-armazenar')) return;
-        // Não selecionar cards impressos (só têm reimprimir/armazenar)
+        if (e.target.matches('.etq-check-sel') || e.target.matches('.etq-btn-imprimir-unit') || e.target.closest('.etq-btn-imprimir-unit') || e.target.matches('.etq-btn-multiplo') || e.target.closest('.etq-btn-multiplo') || e.target.matches('.etq-btn-ocultar') || e.target.closest('.etq-btn-ocultar') || e.target.matches('.etq-btn-reimprimir') || e.target.closest('.etq-btn-reimprimir')) return;
+        // Não selecionar cards impressos (só têm reimprimir)
         if (card.dataset.impressa === 'true') return;
         const id = Number(card.dataset.id);
         const cb = card.querySelector('.etq-check-sel');
@@ -35154,19 +35259,6 @@ window.openRegistros = async function() {
           if (etqStatus) { etqStatus.textContent = err.message; etqStatus.style.color = '#f87171'; setTimeout(() => { if (etqStatus) { etqStatus.textContent = ''; etqStatus.style.color = ''; } }, 4000); }
           btn.disabled = false;
         }
-      });
-    });
-
-    // Botão Armazenar (abre modal de câmera/local direto no passo 2)
-    etqGrid.querySelectorAll('.etq-btn-armazenar').forEach(btn => {
-      btn.addEventListener('click', async e => {
-        e.stopPropagation();
-        const idImpresso = Number(btn.dataset.idImpresso);
-        if (!idImpresso) {
-          if (etqStatus) { etqStatus.textContent = 'Nenhum registro de impressão encontrado para este item.'; etqStatus.style.color = '#f87171'; setTimeout(() => { if (etqStatus) { etqStatus.textContent = ''; etqStatus.style.color = ''; } }, 4000); }
-          return;
-        }
-        _armAbrirComId(idImpresso);
       });
     });
   }
@@ -35962,14 +36054,15 @@ window.openRegistros = async function() {
 
   function _etqImpressoRenderCards(etiquetas) {
     if (!etqImpressoGrid) return;
-    if (!etiquetas || etiquetas.length === 0) {
+    const lista = (etiquetas || []).filter(e => (Number(e.qtd) || 0) > 0);
+    if (!lista.length) {
       etqImpressoGrid.innerHTML = '<div class="etiquetas-loading">Nenhuma etiqueta impressa encontrada.</div>';
       if (etqImpressoStatus) etqImpressoStatus.textContent = '';
       return;
     }
-    if (etqImpressoStatus) etqImpressoStatus.textContent = `${etiquetas.length} etiqueta(s) impressa(s)`;
+    if (etqImpressoStatus) etqImpressoStatus.textContent = `${lista.length} etiqueta(s) impressa(s)`;
 
-    etqImpressoGrid.innerHTML = etiquetas.map(e => {
+    etqImpressoGrid.innerHTML = lista.map(e => {
       const cod      = escapeHtml(String(e.codigo_produto   || '—'));
       const desc     = escapeHtml(String(e.descricao_produto || '—'));
       const lote     = escapeHtml(String(e.lote             || '—'));
@@ -35979,16 +36072,20 @@ window.openRegistros = async function() {
       const nfe      = escapeHtml(String(e.numero_nfe       || ''));
       const pedido   = escapeHtml(String(e.numero_pedido    || ''));
       const dataEmis = escapeHtml(String(e.data_emissao     || ''));
+      const idEtq    = Number(e.id) || 0;
       const impresso = e.impresso_em
         ? new Date(e.impresso_em).toLocaleString('pt-BR', { day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit' })
         : '';
       const usuario  = escapeHtml(String(e.usuario_criacao  || ''));
 
       return `
-      <div class="etq-card" data-id="${e.id}" style="cursor:pointer;" title="Clique para armazenar">
+      <div class="etq-card" data-id="${idEtq}" style="cursor:pointer;" title="Clique para armazenar">
         <div class="etq-card-thumbnail">
           <div class="etq-thumb-row">
-            <div class="etq-thumb-qr"><i class="fa-solid fa-qrcode" style="font-size:18px;color:#888;"></i></div>
+            <div class="etq-thumb-qr" title="ID desta ETQ" style="display:flex;flex-direction:column;align-items:center;justify-content:center;min-width:52px;padding:4px 2px;text-align:center;line-height:1.15;">
+              <span style="font-size:9px;font-weight:700;color:#94a3b8;letter-spacing:.02em;">ID desta ETQ</span>
+              <span style="font-size:15px;font-weight:800;color:#a78bfa;">${idEtq || '—'}</span>
+            </div>
             <div class="etq-thumb-dados">
               <div class="etq-thumb-line label">Cod. Produto:</div>
               <div class="etq-thumb-line value">${cod}</div>
@@ -36059,12 +36156,82 @@ window.openRegistros = async function() {
   const etqArmazenarInput       = document.getElementById('etqArmazenarInput');
   const etqArmazenarComplemento = document.getElementById('etqArmazenarComplemento');
   const etqArmazenarOk          = document.getElementById('etqArmazenarOk');
-  const btnArmazenarProduto     = document.getElementById('btnArmazenarProduto');
+  const etqArmazenarRetornarWrap = document.getElementById('etqArmazenarRetornarWrap');
+  const etqBtnRetornarEtiqueta  = document.getElementById('etqBtnRetornarEtiqueta');
+  const etqRetornarEscolha      = document.getElementById('etqRetornarEscolha');
+  const etqRetornarUma          = document.getElementById('etqRetornarUma');
+  const etqRetornarTodas        = document.getElementById('etqRetornarTodas');
+  const etqRetornarCancelar     = document.getElementById('etqRetornarCancelar');
 
   let _armStep = 1;          // 1 = ler QR do produto, 2 = ler barcode do local
   let _armIdImpresso = null; // id de ETQ_rec_impresso
   let _armStream = null;
   let _armScanInterval = null;
+  let _armRetornando = false;
+
+  function _armMostrarRetornar(show) {
+    if (etqArmazenarRetornarWrap) etqArmazenarRetornarWrap.style.display = show ? 'block' : 'none';
+    if (etqRetornarEscolha) etqRetornarEscolha.style.display = 'none';
+  }
+
+  function _armEscolhaRetornar(show) {
+    if (etqRetornarEscolha) etqRetornarEscolha.style.display = show ? 'block' : 'none';
+  }
+
+  async function _armExecutarRetornar(modo) {
+    if (_armRetornando) return;
+    const id = Number(_armIdImpresso) || 0;
+    if (!id) {
+      if (etqArmazenarStatus) {
+        etqArmazenarStatus.textContent = 'Nenhuma etiqueta selecionada para retornar.';
+        etqArmazenarStatus.style.color = '#f87171';
+      }
+      return;
+    }
+    _armRetornando = true;
+    await _armPararCamera();
+    if (etqArmazenarStatus) {
+      etqArmazenarStatus.textContent = modo === 'todas'
+        ? 'Retornando todas as etiquetas deste produto...'
+        : 'Retornando esta etiqueta...';
+      etqArmazenarStatus.style.color = '#94a3b8';
+    }
+    try {
+      const resp = await fetch(`/api/etiquetas/rec-impresso/${id}/retornar`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ modo }),
+      });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok) throw new Error(data.error || `Erro ${resp.status}`);
+      const saldo = data.saldo_retornado != null ? data.saldo_retornado : '';
+      if (etqArmazenarStatus) {
+        etqArmazenarStatus.textContent = saldo !== ''
+          ? `✓ Saldo ${saldo} devolvido para Etiquetas disponíveis.`
+          : '✓ Etiqueta(s) retornada(s) para Etiquetas disponíveis.';
+        etqArmazenarStatus.style.color = '#4ade80';
+      }
+      _armMostrarRetornar(false);
+      setTimeout(() => {
+        _armFechar();
+        _etqImpressoCarregar(etqImpressoBusca?.value || '');
+        if (etqModal && etqModal.style.display !== 'none') {
+          _etqCarregar(etqBusca?.value || '');
+        }
+      }, 1200);
+    } catch (err) {
+      if (etqArmazenarStatus) {
+        etqArmazenarStatus.textContent = `Erro: ${escapeHtml(err.message || 'Falha ao retornar')}`;
+        etqArmazenarStatus.style.color = '#f87171';
+      }
+      _armEscolhaRetornar(false);
+      const ok = await _armIniciarCamera();
+      if (ok) _armIniciarScan(_armProcessarCodigo);
+    } finally {
+      _armRetornando = false;
+    }
+  }
 
   async function _armPararCamera() {
     clearInterval(_armScanInterval);
@@ -36185,6 +36352,7 @@ window.openRegistros = async function() {
       if (etqArmazenarIcone)  { etqArmazenarIcone.className = 'fa-solid fa-barcode'; etqArmazenarIcone.style.color = '#a78bfa'; }
       if (etqArmazenarStatus) { etqArmazenarStatus.textContent = `Produto ID ${id} lido. Alinhe o código de barras na faixa horizontal.`; etqArmazenarStatus.style.color = '#4ade80'; }
       if (etqArmazenarInput)  { etqArmazenarInput.placeholder = 'Ou digite o local manualmente...'; etqArmazenarInput.value = ''; etqArmazenarInput.focus(); }
+      _armMostrarRetornar(true);
       _armIniciarScan(_armProcessarCodigo);
     } else {
       // Passo 2: valor lido é o endereço
@@ -36245,6 +36413,7 @@ window.openRegistros = async function() {
   async function _armAbrir() {
     _armStep = 1;
     _armIdImpresso = null;
+    _armMostrarRetornar(false);
     if (etqArmazenarTitle)  etqArmazenarTitle.textContent  = 'Leia o QR Code do produto';
     if (etqArmazenarIcone)  { etqArmazenarIcone.className = 'fa-solid fa-qrcode'; etqArmazenarIcone.style.color = '#34d399'; }
     if (etqArmazenarStatus) { etqArmazenarStatus.textContent = ''; etqArmazenarStatus.style.color = '#94a3b8'; }
@@ -36267,6 +36436,7 @@ window.openRegistros = async function() {
     if (etqArmazenarInput)       { etqArmazenarInput.placeholder = 'Ou digite o local manualmente...'; etqArmazenarInput.value = ''; etqArmazenarInput.focus(); }
     if (etqArmazenarComplemento) etqArmazenarComplemento.value = '';
     if (etqArmazenarMira)        etqArmazenarMira.style.borderColor = 'rgba(52,211,153,.85)';
+    _armMostrarRetornar(true);
     if (etqArmazenarModal)       etqArmazenarModal.style.display = 'flex';
     const ok = await _armIniciarCamera();
     if (ok) _armIniciarScan(_armProcessarCodigo);
@@ -36274,13 +36444,19 @@ window.openRegistros = async function() {
 
   function _armFechar() {
     _armPararCamera();
+    _armMostrarRetornar(false);
     if (etqArmazenarModal) etqArmazenarModal.style.display = 'none';
   }
 
-  btnArmazenarProduto?.addEventListener('click', _armAbrir);
-  document.getElementById('etqBtnArmazenarToolbar')?.addEventListener('click', _armAbrir);
   etqArmazenarFechar?.addEventListener('click', _armFechar);
   etqArmazenarModal?.addEventListener('click', e => { if (e.target === etqArmazenarModal) _armFechar(); });
+
+  etqBtnRetornarEtiqueta?.addEventListener('click', () => {
+    _armEscolhaRetornar(true);
+  });
+  etqRetornarUma?.addEventListener('click', () => { _armExecutarRetornar('uma'); });
+  etqRetornarTodas?.addEventListener('click', () => { _armExecutarRetornar('todas'); });
+  etqRetornarCancelar?.addEventListener('click', () => { _armEscolhaRetornar(false); });
 
   // Clique em card da lista → abre modal já no passo 2 (pula leitura de QR)
   etqImpressoGrid?.addEventListener('click', e => {
