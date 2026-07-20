@@ -8384,6 +8384,34 @@ app.delete('/api/compras/config-responsavel-categoria/:id', async (req, res) => 
 // ======== CONFIGURAÇÃO DE ACESSO AOS BOTÕES ========
 
 // GET /api/compras/config-acesso-botoes - Lista permissões de acesso aos botões
+async function usuarioPodeGerenciarSolicitacaoNoServidor(req, departamento) {
+  const username = String(req.session?.user?.username || '').trim();
+  const dept = String(departamento || '').trim();
+  if (!username || !dept) return false;
+  const { rows } = await pool.query(`
+    SELECT 1 FROM compras.config_acesso_botoes
+    WHERE tipo_botao = 'gestao_solicitacao'
+      AND LOWER(responsavel_username) = LOWER($1)
+      AND LOWER(departamento_nome) = LOWER($2)
+    LIMIT 1
+  `, [username, dept]);
+  return rows.length > 0;
+}
+
+// Mantem a configuracao de acesso extensivel sem exigir intervencao manual no banco a cada novo tipo.
+(async () => {
+  try {
+    await pool.query(`ALTER TABLE compras.config_acesso_botoes DROP CONSTRAINT IF EXISTS config_acesso_botoes_tipo_botao_check`);
+    await pool.query(`
+      ALTER TABLE compras.config_acesso_botoes
+      ADD CONSTRAINT config_acesso_botoes_tipo_botao_check
+      CHECK (tipo_botao IN ('aprovacao', 'pedido_compra', 'gestao_solicitacao'))
+    `);
+  } catch (err) {
+    console.error('[Compras] Erro ao atualizar tipos de permissao:', err.message);
+  }
+})();
+
 app.get('/api/compras/config-acesso-botoes', async (req, res) => {
   try {
     const { rows } = await pool.query(`
@@ -8408,7 +8436,7 @@ app.post('/api/compras/config-acesso-botoes', express.json(), async (req, res) =
       return res.status(400).json({ ok: false, error: 'Dados incompletos' });
     }
     
-    if (!['aprovacao', 'pedido_compra'].includes(tipo_botao)) {
+    if (!['aprovacao', 'pedido_compra', 'gestao_solicitacao'].includes(tipo_botao)) {
       return res.status(400).json({ ok: false, error: 'Tipo de botão inválido' });
     }
     
@@ -30273,6 +30301,19 @@ app.put('/api/compras/sem-cadastro/:id', express.json(), async (req, res) => {
     if (!status && typeof produto_descricao === 'undefined' && typeof produto_codigo === 'undefined' && typeof quantidade === 'undefined' && !observacao_reprovacao) {
       return res.status(400).json({ ok: false, error: 'Informe status, produto_descricao, quantidade ou observacao_reprovacao' });
     }
+    if (status === 'Carrinho') {
+      const { rows: atuais } = await pool.query(
+        `SELECT status, departamento FROM compras.compras_sem_cadastro WHERE id = $1 LIMIT 1`,
+        [id]
+      );
+      const statusAtual = String(atuais[0]?.status || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+      if (
+        ['aguardando aprovacao da requisicao', 'analise de cadastro'].includes(statusAtual) &&
+        !(await usuarioPodeGerenciarSolicitacaoNoServidor(req, atuais[0]?.departamento))
+      ) {
+        return res.status(403).json({ ok: false, error: 'Voce nao possui permissao para cancelar esta solicitacao' });
+      }
+    }
     
     const sets = [];
     const values = [];
@@ -38343,7 +38384,7 @@ app.put('/api/compras/itens/:id/status', async (req, res) => {
 
     const tableName = tableSource === 'solicitacao_compras' ? 'compras.solicitacao_compras' : 'compras.compras_sem_cadastro';
     const { rows: grupoRows } = await pool.query(
-      `SELECT grupo_requisicao FROM ${tableName} WHERE id = $1 LIMIT 1`,
+      `SELECT grupo_requisicao, departamento FROM ${tableName} WHERE id = $1 LIMIT 1`,
       [id]
     );
 
@@ -38358,6 +38399,13 @@ app.put('/api/compras/itens/:id/status', async (req, res) => {
 
     if (status === 'carrinho' || status === 'Carrinho') {
       const statusAtual = await obterStatusHistoricoPorGrupo({ grupoRequisicao });
+      const statusGestao = String(statusAtual || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+      if (
+        ['aguardando aprovacao da requisicao', 'analise de cadastro'].includes(statusGestao) &&
+        !(await usuarioPodeGerenciarSolicitacaoNoServidor(req, grupoRows[0]?.departamento))
+      ) {
+        return res.status(403).json({ ok: false, error: 'Voce nao possui permissao para cancelar esta solicitacao' });
+      }
       if (statusAtual === 'aguardando aprovação da requisição' && (!observacao_reprovacao || observacao_reprovacao.trim() === '')) {
         return res.status(400).json({
           ok: false,

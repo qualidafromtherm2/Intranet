@@ -2124,6 +2124,7 @@ max-width: 480px;          /* 260 ? 480 px; ajuste se quiser */
 }
 .content-wrapper-header {
   width: 100%;
+  font-family: "Poppins", sans-serif;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -14811,6 +14812,330 @@ body.mobile-modal-open {
   }
 }
 
+/* Compras workspace v3: separates daily work from archival volume. */
+.compras-board-overview {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  margin: 0 0 16px;
+  padding: 6px 0 14px;
+  border-bottom: 1px solid var(--cp-border-soft);
+}
+
+.compras-board-tabs {
+  display: inline-flex;
+  gap: 4px;
+  padding: 4px;
+  background: var(--cp-panel);
+  border: 1px solid var(--cp-border);
+  border-radius: 9px;
+}
+
+.compras-board-tab {
+  min-height: 36px;
+  padding: 0 13px;
+  color: var(--cp-muted);
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  font-family: "Poppins", sans-serif;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.compras-board-tab i { margin-right: 6px; }
+.compras-board-tab:hover { color: var(--cp-text); }
+.compras-board-tab.is-active {
+  color: #fff;
+  background: var(--cp-accent);
+  box-shadow: 0 3px 10px rgba(0, 0, 0, .14);
+}
+
+.compras-board-metrics {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--cp-muted);
+  font-size: 11px;
+}
+
+.compras-board-metrics span {
+  padding: 6px 9px;
+  background: var(--cp-panel);
+  border: 1px solid var(--cp-border-soft);
+  border-radius: 6px;
+  white-space: nowrap;
+}
+
+.compras-board-metrics strong {
+  color: var(--cp-text);
+  font-family: "Montserrat", sans-serif;
+  font-size: 12px;
+}
+
+#minhasComprasWrapper[data-board-view="ativas"] .kanban-column-minhas[data-status="concluído"],
+#minhasComprasWrapper[data-board-view="ativas"] .kanban-column-minhas[data-status="concluido"] {
+  display: none !important;
+}
+
+#minhasComprasWrapper[data-board-view="historico"] .kanban-column-minhas:not([data-status="concluído"]):not([data-status="concluido"]) {
+  display: none !important;
+}
+
+#kanbanMinhasSolicitacoes.kanban-container {
+  gap: 18px !important;
+  background: transparent;
+}
+
+#kanbanMinhasSolicitacoes .kanban-column-minhas {
+  flex-basis: 336px !important;
+  min-width: 336px !important;
+  padding: 0 2px 10px !important;
+  background: transparent !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  overflow: hidden;
+}
+
+#kanbanMinhasSolicitacoes .kanban-column-minhas::before { display: none; }
+
+#kanbanMinhasSolicitacoes .kanban-column-minhas > div:first-child {
+  position: relative;
+  min-height: 42px;
+  padding: 10px 10px 11px !important;
+  background: color-mix(in srgb, var(--cp-stage) 9%, var(--cp-panel));
+  border: 1px solid color-mix(in srgb, var(--cp-stage) 30%, var(--cp-border));
+  border-radius: 8px 8px 0 0;
+}
+
+#kanbanMinhasSolicitacoes .kanban-column-minhas > div:first-child::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 9px;
+  bottom: 9px;
+  width: 3px;
+  background: var(--cp-stage);
+  border-radius: 0 3px 3px 0;
+}
+
+#kanbanMinhasSolicitacoes .kanban-column-minhas > div:nth-last-child(2) {
+  min-height: 0;
+  margin: 0 !important;
+  padding: 7px 8px !important;
+  background: var(--cp-column);
+  border: 0 !important;
+}
+
+#kanbanMinhasSolicitacoes .kanban-cards-minhas {
+  padding: 10px 8px 16px !important;
+  background: var(--cp-column);
+  border-radius: 0 0 8px 8px;
+}
+
+#kanbanMinhasSolicitacoes .kanban-card {
+  padding: 15px !important;
+  border: 1px solid var(--cp-border-soft) !important;
+  border-left: 1px solid var(--cp-border-soft) !important;
+  border-radius: 8px !important;
+  box-shadow: 0 2px 5px rgba(0, 0, 0, .09) !important;
+}
+
+#kanbanMinhasSolicitacoes .kanban-card::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 13px;
+  bottom: 13px;
+  width: 3px;
+  background: var(--cp-stage);
+  border-radius: 0 3px 3px 0;
+}
+
+#kanbanMinhasSolicitacoes .cp-card-number {
+  padding-left: 3px;
+  font-size: 10px !important;
+  text-transform: uppercase;
+}
+
+#kanbanMinhasSolicitacoes .cp-card-supplier {
+  margin-top: 2px !important;
+  font-size: 13px !important;
+  letter-spacing: -.015em;
+}
+
+#kanbanMinhasSolicitacoes .cp-card-summary { font-size: 13px !important; }
+
+#minhasComprasWrapper[data-board-view="historico"] #kanbanMinhasSolicitacoes {
+  overflow-x: hidden !important;
+}
+
+#minhasComprasWrapper[data-board-view="historico"] .kanban-column-minhas {
+  flex: 1 1 100% !important;
+  min-width: 100% !important;
+}
+
+#minhasComprasWrapper[data-board-view="historico"] .kanban-cards-minhas {
+  display: grid !important;
+  grid-template-columns: repeat(4, minmax(230px, 1fr));
+  align-content: start;
+  gap: 10px !important;
+}
+
+@media (max-width: 1200px) {
+  #minhasComprasWrapper[data-board-view="historico"] .kanban-cards-minhas {
+    grid-template-columns: repeat(3, minmax(220px, 1fr));
+  }
+}
+
+@media (max-width: 900px) {
+  .compras-board-overview { align-items: flex-start; flex-direction: column; }
+  .compras-board-metrics { width: 100%; overflow-x: auto; }
+  #kanbanMinhasSolicitacoes .kanban-column-minhas {
+    flex-basis: min(88vw, 350px) !important;
+    min-width: min(88vw, 350px) !important;
+  }
+  #minhasComprasWrapper[data-board-view="historico"] .kanban-cards-minhas {
+    grid-template-columns: repeat(2, minmax(210px, 1fr));
+  }
+}
+
+@media (max-width: 560px) {
+  .compras-board-tabs { width: 100%; }
+  .compras-board-tab { flex: 1; }
+  #minhasComprasWrapper[data-board-view="historico"] .kanban-cards-minhas {
+    display: flex !important;
+  }
+}
+
+/* Compras workspace v4: adaptive lanes instead of equal spreadsheet columns. */
+#minhasComprasWrapper[data-board-view="ativas"] #kanbanMinhasSolicitacoes {
+  align-items: flex-start;
+  padding-top: 6px !important;
+}
+
+#minhasComprasWrapper[data-board-view="ativas"] .kanban-column-minhas {
+  flex: 0 0 260px !important;
+  min-width: 260px !important;
+  height: auto;
+  max-height: 100%;
+  align-self: flex-start;
+}
+
+#minhasComprasWrapper[data-board-view="ativas"] .kanban-column-minhas[data-status="aguardando aprovação da requisição"],
+#minhasComprasWrapper[data-board-view="ativas"] .kanban-column-minhas[data-status="analise de cadastro"] {
+  flex-basis: 250px !important;
+  min-width: 250px !important;
+}
+
+#minhasComprasWrapper[data-board-view="ativas"] .kanban-column-minhas[data-status="aguardando compra preparação"] {
+  flex-basis: 300px !important;
+  min-width: 300px !important;
+}
+
+#minhasComprasWrapper[data-board-view="ativas"] .kanban-column-minhas[data-status="compra realizada"],
+#minhasComprasWrapper[data-board-view="ativas"] .kanban-column-minhas[data-status="faturada pelo fornecedor"],
+#minhasComprasWrapper[data-board-view="ativas"] .kanban-column-minhas[data-status="recebido"] {
+  flex-basis: 370px !important;
+  min-width: 370px !important;
+  height: 100%;
+  align-self: stretch;
+}
+
+#minhasComprasWrapper[data-board-view="ativas"] .kanban-column-minhas:has(.kanban-card:nth-child(4)) {
+  height: 100%;
+  align-self: stretch;
+}
+
+#kanbanMinhasSolicitacoes .kanban-column-minhas > div:first-child {
+  min-height: 48px;
+  padding: 13px 13px 12px !important;
+}
+
+#kanbanMinhasSolicitacoes .kanban-column-minhas h3 {
+  font-size: 13px !important;
+}
+
+#kanbanMinhasSolicitacoes .kanban-count-minhas {
+  min-width: 27px;
+  padding: 4px 8px !important;
+  font-size: 11px !important;
+}
+
+#kanbanMinhasSolicitacoes .kanban-cards-minhas {
+  gap: 11px !important;
+  padding: 12px 10px 18px !important;
+}
+
+#kanbanMinhasSolicitacoes .kanban-card {
+  min-height: 88px;
+  padding: 17px 17px 15px !important;
+}
+
+#kanbanMinhasSolicitacoes .cp-card-number {
+  margin-bottom: 7px !important;
+  color: var(--cp-muted) !important;
+  font-size: 12px !important;
+  font-weight: 700 !important;
+}
+
+#kanbanMinhasSolicitacoes .cp-card-supplier {
+  margin-bottom: 12px !important;
+  padding: 0 !important;
+  color: var(--cp-text) !important;
+  background: transparent !important;
+  font-size: 14px !important;
+  line-height: 1.4 !important;
+}
+
+#kanbanMinhasSolicitacoes .cp-card-dates {
+  margin-bottom: 11px !important;
+  padding-top: 9px !important;
+  font-size: 11px !important;
+}
+
+#kanbanMinhasSolicitacoes .cp-card-requester {
+  font-size: 11px !important;
+}
+
+#kanbanMinhasSolicitacoes .cp-card-summary {
+  padding-top: 10px !important;
+  font-size: 14px !important;
+}
+
+#kanbanMinhasSolicitacoes .kanban-card button[aria-label="Expandir"] {
+  width: 34px;
+  height: 34px;
+}
+
+.compras-board-overview {
+  padding: 9px 0 17px;
+}
+
+.compras-board-metrics {
+  gap: 10px;
+}
+
+.compras-board-metrics span {
+  padding: 8px 11px;
+  font-size: 12px;
+}
+
+.compras-board-metrics strong {
+  margin-right: 3px;
+  font-size: 14px;
+}
+
+@media (max-width: 900px) {
+  #minhasComprasWrapper[data-board-view="ativas"] .kanban-column-minhas,
+  #minhasComprasWrapper[data-board-view="ativas"] .kanban-column-minhas[data-status] {
+    flex-basis: min(88vw, 360px) !important;
+    min-width: min(88vw, 360px) !important;
+  }
+}
+
 /* ===================== MOVIMENTA��O RESTAURADA DO ORIGIN/MAIN ===================== */
 .movim-endereco-campo-acoes { display: flex; align-items: center; gap: 6px; }
 .movim-endereco-rm {
@@ -16373,5 +16698,405 @@ body.mobile-modal-open {
   }
   .auditar-title {
     font-size: 1.05rem;
+  }
+}
+/* Compras workspace: operational, calm and intentionally dense. */
+#minhasComprasWrapper {
+  --cp-bg: #101318;
+  --cp-panel: #171b22;
+  --cp-column: #1d222a;
+  --cp-card: #242a33;
+  --cp-card-hover: #29313b;
+  --cp-border: #343c47;
+  --cp-border-soft: #2a313a;
+  --cp-text: #f4f6f8;
+  --cp-muted: #9da7b4;
+  --cp-subtle: #737f8e;
+  --cp-accent: #55b7a5;
+  --cp-accent-soft: rgba(85, 183, 165, .14);
+  --cp-warning: #e6ad58;
+  --cp-danger: #e27474;
+  --cp-shadow: 0 10px 28px rgba(0, 0, 0, .18);
+  background: var(--cp-bg) !important;
+  color: var(--cp-text);
+  border-radius: 10px;
+  padding: 20px !important;
+  box-sizing: border-box;
+  flex-direction: column;
+  width: 100%;
+}
+
+html.light-mode #minhasComprasWrapper {
+  --cp-bg: #f3f5f7;
+  --cp-panel: #ffffff;
+  --cp-column: #e9edf1;
+  --cp-card: #ffffff;
+  --cp-card-hover: #fbfcfd;
+  --cp-border: #d8dee5;
+  --cp-border-soft: #e5e9ee;
+  --cp-text: #18212b;
+  --cp-muted: #637080;
+  --cp-subtle: #8792a0;
+  --cp-accent: #187c6d;
+  --cp-accent-soft: #dcefe9;
+  --cp-warning: #a96714;
+  --cp-danger: #bd4141;
+  --cp-shadow: 0 8px 24px rgba(32, 45, 58, .08);
+}
+
+#comprasListaToolbar.compras-workspace-toolbar {
+  position: relative;
+  display: flex !important;
+  align-items: flex-end !important;
+  gap: 20px !important;
+  margin: 0 0 18px !important;
+  padding: 0 0 18px !important;
+  border-bottom: 1px solid var(--cp-border-soft);
+}
+
+.compras-toolbar-main {
+  align-items: flex-end !important;
+  flex-wrap: wrap;
+  min-width: 280px;
+}
+
+.compras-workspace-title {
+  min-width: 270px;
+  color: var(--cp-text) !important;
+}
+
+.compras-workspace-title > span:last-child {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.compras-workspace-title strong {
+  font-size: 19px;
+  line-height: 1.2;
+  letter-spacing: -.02em;
+}
+
+.compras-workspace-title small {
+  color: var(--cp-muted);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.compras-title-icon {
+  display: grid;
+  width: 38px;
+  height: 38px;
+  place-items: center;
+  color: var(--cp-accent);
+  background: var(--cp-accent-soft);
+  border-radius: 8px;
+}
+
+.compras-global-search {
+  position: relative;
+  width: min(360px, 100%);
+  max-width: none !important;
+  gap: 0 !important;
+}
+
+.compras-global-search > i {
+  position: absolute;
+  left: 13px;
+  z-index: 1;
+  color: var(--cp-muted) !important;
+}
+
+#kanbanFiltroGlobal {
+  width: 100%;
+  height: 40px;
+  padding: 0 38px !important;
+  color: var(--cp-text) !important;
+  background: var(--cp-panel) !important;
+  border: 1px solid var(--cp-border) !important;
+  border-radius: 8px !important;
+  font-size: 13px !important;
+  outline: none;
+}
+
+#kanbanFiltroGlobal:focus {
+  border-color: var(--cp-accent) !important;
+  box-shadow: 0 0 0 3px var(--cp-accent-soft);
+}
+
+.compras-toolbar-actions {
+  gap: 7px !important;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.compras-toolbar-actions > .content-button {
+  width: 40px !important;
+  height: 40px !important;
+  min-width: 40px;
+  padding: 0 !important;
+  color: var(--cp-muted) !important;
+  background: var(--cp-panel) !important;
+  border: 1px solid var(--cp-border) !important;
+  border-radius: 8px !important;
+  box-shadow: none !important;
+}
+
+.compras-toolbar-actions > .content-button:hover {
+  color: var(--cp-text) !important;
+  border-color: var(--cp-accent) !important;
+  transform: translateY(-1px);
+}
+
+#comprasCatalogoOmieBtn {
+  color: #fff !important;
+  background: var(--cp-accent) !important;
+  border-color: var(--cp-accent) !important;
+}
+
+#comprasToggleSolicitanteBtn {
+  width: auto !important;
+  padding: 0 13px !important;
+  color: var(--cp-text) !important;
+}
+
+#kanbanMinhasSolicitacoes.kanban-container {
+  align-items: stretch;
+  gap: 12px !important;
+  margin: 0 !important;
+  padding: 2px 2px 14px !important;
+  scroll-snap-type: x proximity;
+  scrollbar-color: var(--cp-border) transparent;
+}
+
+#kanbanMinhasSolicitacoes .kanban-column-minhas {
+  --cp-stage: var(--cp-accent);
+  position: relative;
+  flex: 0 0 304px !important;
+  min-width: 304px !important;
+  height: 100%;
+  padding: 12px !important;
+  background: var(--cp-column) !important;
+  border: 1px solid var(--cp-border) !important;
+  border-radius: 8px !important;
+  box-shadow: none !important;
+  scroll-snap-align: start;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+}
+
+#kanbanMinhasSolicitacoes .kanban-column-minhas::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto;
+  height: 3px;
+  background: var(--cp-stage);
+}
+
+#kanbanMinhasSolicitacoes .kanban-column-minhas[data-status="aguardando aprovação da requisição"] { --cp-stage: #d6a24f; }
+#kanbanMinhasSolicitacoes .kanban-column-minhas[data-status="analise de cadastro"] { --cp-stage: #8d85d8; }
+#kanbanMinhasSolicitacoes .kanban-column-minhas[data-status="aguardando compra preparação"] { --cp-stage: #5b8fc8; }
+#kanbanMinhasSolicitacoes .kanban-column-minhas[data-status="compra realizada"] { --cp-stage: #55b7a5; }
+#kanbanMinhasSolicitacoes .kanban-column-minhas[data-status="faturada pelo fornecedor"] { --cp-stage: #d69b4a; }
+#kanbanMinhasSolicitacoes .kanban-column-minhas[data-status="recebido"] { --cp-stage: #69a7b4; }
+#kanbanMinhasSolicitacoes .kanban-column-minhas[data-status="concluído"] { --cp-stage: #7d8996; }
+
+#kanbanMinhasSolicitacoes .kanban-column-minhas > div:first-child {
+  min-height: 34px;
+  margin: 0 !important;
+  padding: 0 2px 10px !important;
+  border: 0 !important;
+}
+
+#kanbanMinhasSolicitacoes .kanban-column-minhas h3 {
+  color: var(--cp-text) !important;
+  font-family: "Montserrat", sans-serif;
+  font-size: 12px !important;
+  font-weight: 700 !important;
+  letter-spacing: .015em;
+}
+
+#kanbanMinhasSolicitacoes .kanban-column-minhas h3 i {
+  color: var(--cp-muted) !important;
+}
+
+#kanbanMinhasSolicitacoes .kanban-count-minhas {
+  min-width: 24px;
+  padding: 3px 7px !important;
+  color: var(--cp-muted) !important;
+  background: var(--cp-panel) !important;
+  border: 1px solid var(--cp-border-soft);
+  border-radius: 999px !important;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+#kanbanMinhasSolicitacoes .kanban-column-minhas > div:nth-last-child(2) {
+  border-top: 1px solid var(--cp-border-soft) !important;
+}
+
+#kanbanMinhasSolicitacoes .kanban-cards-minhas {
+  max-height: none !important;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto !important;
+  gap: 9px !important;
+  padding: 1px 3px 10px 1px !important;
+  scrollbar-width: thin;
+  scrollbar-color: var(--cp-border) transparent;
+}
+
+#kanbanMinhasSolicitacoes .kanban-cards-minhas::-webkit-scrollbar { width: 7px; }
+#kanbanMinhasSolicitacoes .kanban-cards-minhas::-webkit-scrollbar-track { background: transparent; }
+#kanbanMinhasSolicitacoes .kanban-cards-minhas::-webkit-scrollbar-thumb {
+  background: var(--cp-border);
+  border-radius: 999px;
+}
+
+#kanbanMinhasSolicitacoes .kanban-card {
+  padding: 12px !important;
+  color: var(--cp-text) !important;
+  background: var(--cp-card) !important;
+  border: 1px solid var(--cp-border-soft) !important;
+  border-left: 3px solid var(--cp-accent) !important;
+  border-radius: 7px !important;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, .08) !important;
+  cursor: pointer;
+}
+
+#kanbanMinhasSolicitacoes .kanban-card:hover {
+  background: var(--cp-card-hover) !important;
+  border-color: var(--cp-border) !important;
+  border-left-color: var(--cp-accent) !important;
+  box-shadow: var(--cp-shadow) !important;
+}
+
+#kanbanMinhasSolicitacoes .kanban-card > div {
+  color: var(--cp-muted) !important;
+  line-height: 1.35;
+}
+
+#kanbanMinhasSolicitacoes .cp-card-number {
+  margin-bottom: 5px !important;
+  color: var(--cp-subtle) !important;
+  font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
+  font-size: 11px !important;
+  font-weight: 650 !important;
+  letter-spacing: .02em;
+}
+
+#kanbanMinhasSolicitacoes .cp-card-supplier {
+  margin-bottom: 10px !important;
+  color: var(--cp-text) !important;
+  font-family: "Montserrat", sans-serif;
+  font-size: 12px !important;
+  font-weight: 700 !important;
+  line-height: 1.35 !important;
+  text-transform: none;
+}
+
+#kanbanMinhasSolicitacoes .cp-card-supplier i {
+  color: var(--cp-subtle) !important;
+}
+
+#kanbanMinhasSolicitacoes .cp-card-dates {
+  display: grid !important;
+  grid-template-columns: 1fr 1fr;
+  gap: 5px 10px !important;
+  margin-bottom: 9px !important;
+  padding: 7px 0 0 !important;
+  color: var(--cp-muted) !important;
+  background: transparent !important;
+  border-top: 1px solid var(--cp-border-soft);
+  font-size: 10px !important;
+  font-variant-numeric: tabular-nums;
+}
+
+#kanbanMinhasSolicitacoes .cp-card-requester {
+  margin-bottom: 8px !important;
+  padding: 0 !important;
+  color: var(--cp-muted) !important;
+  background: transparent !important;
+  font-size: 10px !important;
+}
+
+#kanbanMinhasSolicitacoes .cp-card-summary {
+  margin: 0 !important;
+  padding: 8px 0 0 !important;
+  color: var(--cp-text) !important;
+  background: transparent !important;
+  border-top: 1px solid var(--cp-border-soft);
+  font-size: 12px !important;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+#kanbanMinhasSolicitacoes .kanban-card > div[style*="background"]:not(.cp-card-supplier):not(.cp-card-dates):not(.cp-card-requester):not(.cp-card-summary) {
+  margin-bottom: 7px !important;
+  padding: 0 !important;
+  color: var(--cp-muted) !important;
+  background: transparent !important;
+  border-radius: 0 !important;
+}
+
+#kanbanMinhasSolicitacoes .kanban-card span[style*="color:#374151"],
+#kanbanMinhasSolicitacoes .kanban-card div[style*="color:#374151"] {
+  color: var(--cp-text) !important;
+}
+
+#kanbanMinhasSolicitacoes .kanban-card div[style*="background:#fef3c7"]:not(.cp-card-dates) {
+  padding: 7px 8px !important;
+  color: var(--cp-warning) !important;
+  background: color-mix(in srgb, var(--cp-warning) 10%, transparent) !important;
+  border-radius: 5px !important;
+}
+
+#kanbanMinhasSolicitacoes .kanban-card button[aria-label="Expandir"] {
+  width: 28px;
+  height: 28px;
+  padding: 0 !important;
+  color: var(--cp-muted) !important;
+  background: transparent !important;
+  border: 1px solid var(--cp-border) !important;
+}
+
+#kanbanMinhasSolicitacoes .kanban-card button[aria-label="Expandir"]:hover {
+  color: var(--cp-text) !important;
+  background: var(--cp-panel) !important;
+}
+
+#kanbanMinhasSolicitacoes .kanban-column-minhas[data-status="faturada pelo fornecedor"] .kanban-card {
+  border-left-color: var(--cp-warning) !important;
+}
+
+#kanbanMinhasSolicitacoes .kanban-column-minhas[data-status="recebido"] .kanban-card,
+#kanbanMinhasSolicitacoes .kanban-column-minhas[data-status="concluído"] .kanban-card {
+  border-left-color: var(--cp-subtle) !important;
+}
+
+@media (max-width: 900px) {
+  #minhasComprasWrapper { padding: 14px !important; }
+  #comprasListaToolbar.compras-workspace-toolbar { align-items: stretch !important; }
+  .compras-toolbar-actions { justify-content: flex-start; }
+  #kanbanMinhasSolicitacoes .kanban-column-minhas {
+    flex-basis: min(86vw, 320px) !important;
+    min-width: min(86vw, 320px) !important;
+  }
+}
+
+@media (max-width: 560px) {
+  #minhasComprasWrapper { padding: 12px 10px !important; }
+  #comprasListaToolbar.compras-workspace-toolbar { flex-direction: column; }
+  .compras-workspace-title { min-width: 0; }
+  .compras-global-search { width: 100%; }
+  .compras-toolbar-actions { width: 100%; overflow-x: auto; flex-wrap: nowrap; padding-bottom: 4px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #minhasComprasWrapper *, #minhasComprasWrapper *::before, #minhasComprasWrapper *::after {
+    scroll-behavior: auto !important;
+    transition-duration: .01ms !important;
   }
 }

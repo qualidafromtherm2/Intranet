@@ -40768,7 +40768,11 @@ function renderizarListaPermissoes() {
   
   lista.innerHTML = permissoes.map(p => {
     const tipoBotaoLabel = p.tipo_botao === 'aprovacao' ? 'Aprovação' : 'Pedido de Compra';
-    const corBotao = p.tipo_botao === 'aprovacao' ? '#9333ea' : '#10b981';
+    const corBotao = p.tipo_botao === 'aprovacao'
+      ? '#9333ea'
+      : p.tipo_botao === 'gestao_solicitacao'
+        ? '#b45309'
+        : '#10b981';
     
     return `
       <div class="produto-catalogo-card" data-product-code="${escapeHtml(produto.codigo)}" style="
@@ -45291,6 +45295,7 @@ async function abrirModalDetalhesPedidoMinhas(numeroPedido, statusColuna, itemId
   });
   
   const currentUser = (document.getElementById('userNameDisplay')?.textContent || '').trim();
+  await carregarPermissoesAcessoParaAprovacao();
   
   try {
     const fmtQtdModal = (v) => {
@@ -45397,6 +45402,8 @@ async function abrirModalDetalhesPedidoMinhas(numeroPedido, statusColuna, itemId
     };
 
     const statusColunaLower = (statusColuna || '').toLowerCase().trim();
+    const statusColunaNormalizado = String(statusColuna || '')
+      .normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
     if (
       statusColunaLower === 'aguardando aprovação da requisição' ||
       statusColunaLower === 'aguardando compra preparação' ||
@@ -45878,6 +45885,19 @@ async function abrirModalDetalhesPedidoMinhas(numeroPedido, statusColuna, itemId
             </button>
           </div>
           ` : ''}
+
+          ${statusColunaNormalizado === 'aguardando aprovacao da requisicao' && usuarioPodeGerenciarSolicitacao(item.departamento) ? `
+          <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap;">
+            <button onclick="cancelarSolicitacaoGerenciada('${item.id}', '${item.table_source || 'solicitacao_compras'}', 'modalDetalhesPedidoCompras')"
+              style="display:flex;align-items:center;gap:6px;background:#b45309;color:#fff;border:none;padding:8px 14px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:700;">
+              <i class="fa-solid fa-rotate-left"></i> Cancelar
+            </button>
+            <button onclick="excluirSolicitacaoGerenciada('${item.id}', '${item.table_source || 'solicitacao_compras'}', 'modalDetalhesPedidoCompras')"
+              style="display:flex;align-items:center;gap:6px;background:#dc2626;color:#fff;border:none;padding:8px 14px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:700;">
+              <i class="fa-solid fa-trash"></i> Excluir
+            </button>
+          </div>
+          ` : ''}
         </div>
       `;
     });
@@ -45908,6 +45928,7 @@ async function abrirModalAnaliseCadastro(itemId) {
   });
 
   const currentUser = (document.getElementById('userNameDisplay')?.textContent || '').trim();
+  await carregarPermissoesAcessoParaAprovacao();
 
   try {
     const alvoId = String(itemId || '').trim();
@@ -45984,6 +46005,7 @@ async function abrirModalAnaliseCadastro(itemId) {
     };
 
     const tableSourceAnalise = String(item.table_source || 'solicitacao_compras').trim() || 'solicitacao_compras';
+    const podeGerenciarAnalise = usuarioPodeGerenciarSolicitacao(item.departamento);
     const grupoRequisicaoAnalise = String(item.grupo_requisicao || '').trim();
     let itensGrupoAnalise = [];
 
@@ -46090,6 +46112,15 @@ async function abrirModalAnaliseCadastro(itemId) {
             Salvar alterações
           </button>
         </div>
+        ${podeGerenciarAnalise ? `
+        <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:10px;flex-wrap:wrap;">
+          <button onclick="cancelarSolicitacaoGerenciada('${item.id}', '${tableSourceAnalise}', 'modalAnaliseCadastro')" style="background:#b45309;color:#fff;border:none;padding:8px 14px;border-radius:6px;font-size:12px;font-weight:700;cursor:pointer;">
+            <i class="fa-solid fa-rotate-left"></i> Cancelar solicitação
+          </button>
+          <button onclick="excluirSolicitacaoGerenciada('${item.id}', '${tableSourceAnalise}', 'modalAnaliseCadastro')" style="background:#dc2626;color:#fff;border:none;padding:8px 14px;border-radius:6px;font-size:12px;font-weight:700;cursor:pointer;">
+            <i class="fa-solid fa-trash"></i> Excluir solicitação
+          </button>
+        </div>` : ''}
       </div>
     `;
 
@@ -49502,6 +49533,51 @@ async function excluirItemMinhas(itemId, tableSource = 'solicitacao_compras') {
   }
 }
 
+async function cancelarSolicitacaoGerenciada(itemId, tableSource = 'solicitacao_compras', modalId = '') {
+  const motivo = prompt('Informe o motivo do cancelamento:');
+  if (!motivo || !motivo.trim()) return;
+
+  try {
+    const endpoint = tableSource === 'compras_sem_cadastro'
+      ? `/api/compras/sem-cadastro/${itemId}`
+      : `/api/compras/itens/${itemId}/status`;
+    const resp = await fetch(endpoint, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({
+        status: tableSource === 'compras_sem_cadastro' ? 'Carrinho' : 'carrinho',
+        observacao_reprovacao: motivo.trim(),
+        usuario_comentario: window.__sessionUser?.username || ''
+      })
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) throw new Error(data.error || 'Erro ao cancelar solicitação');
+    document.getElementById(modalId)?.style && (document.getElementById(modalId).style.display = 'none');
+    loadMinhasSolicitacoes();
+  } catch (err) {
+    alert('Erro ao cancelar solicitação: ' + err.message);
+  }
+}
+
+async function excluirSolicitacaoGerenciada(itemId, tableSource = 'solicitacao_compras', modalId = '') {
+  if (!confirm('Excluir esta solicitação permanentemente?')) return;
+  try {
+    const resp = await fetch(`/api/compras/itens/${itemId}`, {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ table_source: tableSource })
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) throw new Error(data.error || 'Erro ao excluir solicitação');
+    document.getElementById(modalId)?.style && (document.getElementById(modalId).style.display = 'none');
+    loadMinhasSolicitacoes();
+  } catch (err) {
+    alert('Erro ao excluir solicitação: ' + err.message);
+  }
+}
+
 // Função para retificar item de "solicitado revisão" para "aguardando aprovação da requisição"
 // Objetivo: Receber o parâmetro table_source para saber qual tabela atualizar (solicitacao_compras ou compras_sem_cadastro)
 async function voltarParaAguardandoCompra(itemId, tableSource = 'solicitacao_compras') {
@@ -49574,6 +49650,8 @@ window.excluirCotacaoKanban = excluirCotacaoKanban;
 window.enviarEscolhaMinhas = enviarEscolhaMinhas;
 window.editarItemMinhas = editarItemMinhas;
 window.excluirItemMinhas = excluirItemMinhas;
+window.cancelarSolicitacaoGerenciada = cancelarSolicitacaoGerenciada;
+window.excluirSolicitacaoGerenciada = excluirSolicitacaoGerenciada;
 window.voltarParaAguardandoCompra = voltarParaAguardandoCompra;
 window.toggleAprovacaoItensMinhas = toggleAprovacaoItensMinhas;
 window.toggleRequisicoesItensMinhas = toggleRequisicoesItensMinhas;
@@ -57369,6 +57447,18 @@ function usuarioPodeAprovarDepartamento(departamento) {
   return temPermissao;
 }
 
+function usuarioPodeGerenciarSolicitacao(departamento) {
+  const username = window.__sessionUser?.username ||
+    document.getElementById('userNameDisplay')?.textContent?.trim() || '';
+  const departamentoNormalizado = String(departamento || '').trim().toLowerCase();
+
+  return permissoesAcessoCache.some(p =>
+    p.tipo_botao === 'gestao_solicitacao' &&
+    String(p.responsavel_username || '').trim().toLowerCase() === String(username).trim().toLowerCase() &&
+    String(p.departamento_nome || '').trim().toLowerCase() === departamentoNormalizado
+  );
+}
+
 // Carrega permissões de acesso do servidor
 async function carregarPermissoesAcessoParaAprovacao() {
   try {
@@ -64069,6 +64159,51 @@ function ajustarAlturaKanban() {
   }
 }
 
+function atualizarResumoComprasKanban() {
+  const wrapper = document.getElementById('minhasComprasWrapper');
+  if (!wrapper) return;
+
+  const colunas = Array.from(wrapper.querySelectorAll('.kanban-column-minhas'));
+  const totalPorStatus = new Map(colunas.map(coluna => {
+    const status = String(coluna.dataset.status || '').trim().toLowerCase();
+    const total = Number(coluna.querySelector('.kanban-count-minhas')?.textContent || 0);
+    return [status, Number.isFinite(total) ? total : 0];
+  }));
+
+  const concluidas = totalPorStatus.get('concluído') || totalPorStatus.get('concluido') || 0;
+  const aguardando = [...totalPorStatus.entries()]
+    .filter(([status]) => status.includes('aprova') || status.includes('analise') || status.includes('prepara'))
+    .reduce((soma, [, total]) => soma + total, 0);
+  const ativas = [...totalPorStatus.entries()]
+    .filter(([status]) => status !== 'concluído' && status !== 'concluido')
+    .reduce((soma, [, total]) => soma + total, 0);
+
+  const ativasEl = document.getElementById('comprasMetricaAtivas');
+  const aguardandoEl = document.getElementById('comprasMetricaAguardando');
+  const historicoEl = document.getElementById('comprasMetricaHistorico');
+  if (ativasEl) ativasEl.textContent = ativas.toLocaleString('pt-BR');
+  if (aguardandoEl) aguardandoEl.textContent = aguardando.toLocaleString('pt-BR');
+  if (historicoEl) historicoEl.textContent = concluidas.toLocaleString('pt-BR');
+}
+
+function alterarVisaoComprasKanban(visao = 'ativas') {
+  const modo = visao === 'historico' ? 'historico' : 'ativas';
+  const wrapper = document.getElementById('minhasComprasWrapper');
+  if (!wrapper) return;
+
+  wrapper.dataset.boardView = modo;
+  const btnAtivas = document.getElementById('comprasBoardAtivasBtn');
+  const btnHistorico = document.getElementById('comprasBoardHistoricoBtn');
+  btnAtivas?.classList.toggle('is-active', modo === 'ativas');
+  btnHistorico?.classList.toggle('is-active', modo === 'historico');
+  btnAtivas?.setAttribute('aria-selected', String(modo === 'ativas'));
+  btnHistorico?.setAttribute('aria-selected', String(modo === 'historico'));
+  localStorage.setItem('comprasBoardView', modo);
+  requestAnimationFrame(ajustarAlturaKanban);
+}
+
+window.alterarVisaoComprasKanban = alterarVisaoComprasKanban;
+
 // Reajusta ao redimensionar a janela (apenas no modo kanban)
 window.addEventListener('resize', () => {
   atualizarOffsetCabecalhoListaCompras();
@@ -64282,6 +64417,8 @@ function renderizarKanbanPrimeiraFaseRapida(kanbanContainer, lista, filtroStatus
 
   kanbanContainer.innerHTML = htmlPrimeiraFase + htmlSegundaFase;
 
+  alterarVisaoComprasKanban(localStorage.getItem('comprasBoardView') || 'ativas');
+  atualizarResumoComprasKanban();
   aplicarFiltroKanbans();
 
   if (!modoVisualizacaoKanban) {
@@ -65547,7 +65684,7 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
               
               <!-- Objetivo: Não exibir esse div para os 5 kanbans especiais que usam apenas chaveGrupo -->
               ${!(status === 'aguardando aprovação da requisição' || status === 'solicitado revisão' || status === 'aguardando cotação' || status === 'cotado aguardando escolha' || status === 'analise de cadastro' || status === 'aguardando compra preparação') ? `
-              <div style="font-size:12px;color:#374151;margin-bottom:8px;font-weight:600;">
+              <div class="cp-card-number" style="font-size:12px;color:#374151;margin-bottom:8px;font-weight:600;">
                 <span style="display:inline-flex;align-items:center;gap:6px;">
                   <span>${escapeHtml(
                     primeiroItem.isPedidoCompra ? (primeiroItem.numero || primeiroItem.n_cod_ped || '-') :
@@ -65563,14 +65700,14 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
               ` : ''}
               
               ${(primeiroItem.isPedidoCompra || primeiroItem.isCompraRealizada) && primeiroItem.fornecedor_nome ? `
-                <div style="font-size:11px;color:#6b7280;margin-bottom:8px;padding:4px 8px;background:#f3f4f6;border-radius:4px;">
+                <div class="cp-card-supplier" style="font-size:11px;color:#6b7280;margin-bottom:8px;padding:4px 8px;background:#f3f4f6;border-radius:4px;">
                   <i class="fa-solid fa-building" style="margin-right:4px;color:#9ca3af;"></i>
                   ${escapeHtml(primeiroItem.fornecedor_nome)}
                 </div>
               ` : ''}
               
               ${(primeiroItem.isPedidoCompra || primeiroItem.isCompraRealizada) && primeiroItem.d_inc_data ? `
-                <div style="font-size:11px;color:#6b7280;margin-bottom:8px;padding:4px 8px;background:#fef3c7;border-radius:4px;display:flex;flex-direction:column;gap:4px;">
+                <div class="cp-card-dates" style="font-size:11px;color:#6b7280;margin-bottom:8px;padding:4px 8px;background:#fef3c7;border-radius:4px;display:flex;flex-direction:column;gap:4px;">
                   <span style="display:flex;align-items:center;gap:4px;">
                     <i class="fa-solid fa-calendar" style="color:#f59e0b;"></i>
                     <span>${new Date(primeiroItem.d_inc_data).toLocaleDateString('pt-BR')}</span>
@@ -65585,7 +65722,7 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
               ` : ''}
               
               ${(primeiroItem.isPedidoCompra || primeiroItem.isCompraRealizada) && primeiroItem.solicitante ? `
-                <div style="font-size:11px;color:#6b7280;margin-bottom:8px;padding:4px 8px;background:#e0f2fe;border-radius:4px;display:flex;align-items:center;">
+                <div class="cp-card-requester" style="font-size:11px;color:#6b7280;margin-bottom:8px;padding:4px 8px;background:#e0f2fe;border-radius:4px;display:flex;align-items:center;">
                   <i class="fa-solid fa-user" style="margin-right:4px;color:#0284c7;"></i>
                   <span style="font-weight:600;">Solicitante:</span>
                   <span style="margin-left:4px;color:#0284c7;">${escapeHtml(primeiroItem.solicitante)}</span>
@@ -65594,7 +65731,7 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
               
               <!-- Objetivo: Exibir o valor de agrupamento (grupo_requisicao ou nCodPed) nos 5 kanbans específicos + Requisições + Pedido de Compra + Compra Realizada -->
               ${(status === 'aguardando aprovação da requisição' || status === 'solicitado revisão' || status === 'aguardando cotação' || status === 'cotado aguardando escolha' || status === 'analise de cadastro' || status === 'aguardando compra preparação' || status === 'aguardando compra' || status === 'compra realizada' || status === 'faturada pelo fornecedor' || status === 'recebido' || status === 'concluído') && chaveGrupo && chaveGrupo !== '-' ? `
-                <div style="font-size:11px;color:#6b7280;margin-bottom:8px;padding:4px 8px;background:#f3f4f6;border-radius:4px;word-break:break-all;display:flex;align-items:center;justify-content:space-between;gap:8px;">
+                <div class="cp-card-summary" style="font-size:11px;color:#6b7280;margin-bottom:8px;padding:4px 8px;background:#f3f4f6;border-radius:4px;word-break:break-all;display:flex;align-items:center;justify-content:space-between;gap:8px;">
                   ${status === 'aguardando compra preparação'
                     ? `
                       ${(() => {
@@ -65839,6 +65976,9 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
     aplicarFiltroKanbans();
 
     // Objetivo: Após carregar os dados, exibe a visualização correta (lista ou kanban)
+    alterarVisaoComprasKanban(localStorage.getItem('comprasBoardView') || 'ativas');
+    atualizarResumoComprasKanban();
+
     if (!modoVisualizacaoKanban) {
       mostrarVisualizacaoLista();
     } else {
