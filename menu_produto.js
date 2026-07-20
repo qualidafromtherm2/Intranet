@@ -997,15 +997,17 @@ function _solRenderOrigemSepFase(locais, enderecoMap, codigoProd, princArmz) {
     return `<div style="font-size:.63rem;color:#6b7280;font-style:italic;">Sem origem com saldo</div>`;
   }
   const temAlmox = sorted.some(l => String(l.local_codigo) === princArmz);
-  const origensHtml = sorted.map((l, idx) => {
+  // Padrão só Porta Pallet — sem saldo nele, origem fica em branco (não escolhe outro sozinho).
+  const primaryParts = [];
+  const extraParts = [];
+  sorted.forEach((l) => {
     const cod = String(l.local_codigo || '');
     const isAlmox = cod === princArmz;
     const nome = (l.local_nome || cod).replace(/"/g, '&quot;');
     const qty2 = Number(l.saldo).toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
     const endHtml = isAlmox ? _solEnderecamentoSepInline(codigoProd, enderecoMap) : '';
-    const isDefault = isAlmox || (!temAlmox && idx === 0);
-    const isExtra = temAlmox ? !isAlmox : idx > 0;
-    return `<div class="sol-origem-sep-wrap${isExtra ? ' sep-origem-extra' : ''}" style="display:${isExtra ? 'none' : 'flex'};flex-direction:column;gap:4px;width:100%;">
+    const isDefault = isAlmox;
+    const html = `<div class="sol-origem-sep-wrap${isAlmox ? '' : ' sep-origem-extra'}" style="display:flex;flex-direction:column;gap:4px;width:100%;">
       <button type="button" class="sol-origem-sep-btn" data-cod="${cod}" data-nome="${nome}" data-is-almox="${isAlmox ? '1' : '0'}" data-selected="${isDefault ? '1' : '0'}"
         style="padding:5px 9px;border-radius:6px;font-size:.65rem;font-weight:700;cursor:pointer;white-space:normal;word-break:break-word;text-align:left;line-height:1.35;width:100%;
                border:2px solid ${isDefault ? '#16a34a' : '#374151'};
@@ -1015,12 +1017,23 @@ function _solRenderOrigemSepFase(locais, enderecoMap, codigoProd, princArmz) {
       </button>
       ${isAlmox ? `<div class="sol-origem-sep-etq" style="display:${isDefault ? 'block' : 'none'};">${endHtml}</div>` : ''}
     </div>`;
-  }).join('');
-  const extras = sorted.length - 1;
-  const toggle = extras > 0
-    ? `<button type="button" class="sep-origem-toggle" data-expanded="0"><i class="fa-solid fa-eye"></i> Desocultar outros armazéns (${extras})</button>`
+    if (isAlmox) primaryParts.push(html);
+    else extraParts.push(html);
+  });
+  const blankHtml = !temAlmox
+    ? `<div class="sep-origem-vazio" style="font-size:.63rem;color:#fbbf24;font-style:italic;padding:2px 0;">
+         Selecione o armazém de origem
+       </div>`
     : '';
-  return origensHtml + toggle;
+  const extrasCount = extraParts.length;
+  const toggleBlock = extrasCount > 0
+    ? `<button type="button" class="sep-origem-toggle" data-expanded="0"><i class="fa-solid fa-eye"></i> Desocultar outros armazéns (${extrasCount})</button>
+       <div class="sep-origem-extras-panel" style="display:none;flex-direction:column;gap:5px;padding:8px 10px;margin-top:4px;border:1px solid rgba(148,163,184,.25);border-radius:10px;background:rgba(15,23,42,.98);box-shadow:0 8px 24px rgba(2,6,23,.35);max-height:180px;overflow:auto;">
+         <div style="font-size:.58rem;color:#94a3b8;font-weight:700;text-transform:uppercase;letter-spacing:.04em;">Outras origens</div>
+         ${extraParts.join('')}
+       </div>`
+    : '';
+  return blankHtml + primaryParts.join('') + toggleBlock;
 }
 
 function _solDestinoHtml(it, compact = false) {
@@ -2031,7 +2044,8 @@ async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) 
       .slice()
       .sort((a, b) => String(a.local_codigo) === PRINC_ARMZ ? -1 : String(b.local_codigo) === PRINC_ARMZ ? 1 : 0);
     const temAlmoxOrigem = locais.some(l => String(l.local_codigo) === PRINC_ARMZ);
-    const usarOrigemSepFase = isFaseSeparacao && temAlmoxOrigem;
+    // Em fase de separação: sempre seletor interativo (padrão Porta Pallet; sem ele, em branco).
+    const usarOrigemSepFase = isFaseSeparacao;
     const enderecamentoHtml = isFaseSeparacao
       ? ''
       : _solEnderecamentoHtml(it.codigo_produto, enderecoBatch, it);
@@ -2157,8 +2171,8 @@ async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) 
            data-descricao="${encodeURIComponent(it.descricao || '')}"
            data-observacao="${encodeURIComponent(obsText)}"
            data-unidade="${String(it.unidade || 'UN').replace(/"/g, '&quot;')}"
-           data-requer-etq="${usarOrigemSepFase ? '1' : '0'}"
-           data-origem-cod="${usarOrigemSepFase ? PRINC_ARMZ : ''}"
+           data-requer-etq="${(usarOrigemSepFase && temAlmoxOrigem) ? '1' : '0'}"
+           data-origem-cod="${(usarOrigemSepFase && temAlmoxOrigem) ? PRINC_ARMZ : ''}"
            data-etq-id=""
            data-etq-endereco=""
            data-etq-qtd=""
@@ -3083,12 +3097,18 @@ async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) 
     if (toggleOrigens) {
       const box = toggleOrigens.closest('.sep-loc-box--origin');
       const expanded = toggleOrigens.dataset.expanded === '1';
-      box?.querySelectorAll('.sep-origem-extra').forEach(el => {
-        el.style.display = expanded ? 'none' : 'flex';
-      });
+      const panel = box?.querySelector('.sep-origem-extras-panel');
+      if (panel) {
+        panel.style.display = expanded ? 'none' : 'flex';
+      } else {
+        box?.querySelectorAll('.sep-origem-extra').forEach(el => {
+          el.style.display = expanded ? 'none' : 'flex';
+        });
+      }
       toggleOrigens.dataset.expanded = expanded ? '0' : '1';
+      const nExtras = box?.querySelectorAll('.sep-origem-extra').length || 0;
       toggleOrigens.innerHTML = expanded
-        ? '<i class="fa-solid fa-eye"></i> Desocultar outros armazéns'
+        ? `<i class="fa-solid fa-eye"></i> Desocultar outros armazéns${nExtras ? ` (${nExtras})` : ''}`
         : '<i class="fa-solid fa-eye-slash"></i> Ocultar outros armazéns';
       return;
     }
@@ -3097,6 +3117,9 @@ async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) 
       const row = btnOrigemSep.closest('[data-item-row]');
       if (!row) return;
       const wrap = btnOrigemSep.closest('.sep-loc-box--origin') || btnOrigemSep.closest('.sep-loc-box');
+      const selectedWrap = btnOrigemSep.closest('.sol-origem-sep-wrap');
+      const panel = wrap?.querySelector('.sep-origem-extras-panel');
+      const toggleBtn = wrap?.querySelector('.sep-origem-toggle');
       if (wrap) {
         wrap.querySelectorAll('.sol-origem-sep-btn').forEach(b => {
           const active = b === btnOrigemSep;
@@ -3108,11 +3131,37 @@ async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) 
         wrap.querySelectorAll('.sol-origem-sep-etq').forEach(p => {
           p.style.display = 'none';
         });
+        // Origem escolhida fica visível; demais voltam para "Outras origens".
+        const vazio = wrap.querySelector('.sep-origem-vazio');
+        if (vazio) vazio.style.display = 'none';
+        wrap.querySelectorAll('.sol-origem-sep-wrap').forEach(w => {
+          if (w === selectedWrap) {
+            w.classList.remove('sep-origem-extra');
+            w.style.display = 'flex';
+            if (panel && w.parentElement === panel && toggleBtn) {
+              toggleBtn.before(w);
+            }
+          } else if (panel) {
+            w.classList.add('sep-origem-extra');
+            panel.appendChild(w);
+          } else {
+            w.classList.add('sep-origem-extra');
+            w.style.display = 'none';
+          }
+        });
+        if (panel && toggleBtn) {
+          panel.style.display = 'none';
+          toggleBtn.dataset.expanded = '0';
+          const nExtras = wrap.querySelectorAll('.sep-origem-extra').length || 0;
+          toggleBtn.innerHTML = `<i class="fa-solid fa-eye"></i> Desocultar outros armazéns${nExtras ? ` (${nExtras})` : ''}`;
+          toggleBtn.style.display = nExtras > 0 ? '' : 'none';
+        }
       }
       const etqPanel = btnOrigemSep.parentElement?.querySelector('.sol-origem-sep-etq');
       if (etqPanel) etqPanel.style.display = 'block';
       const cod = btnOrigemSep.dataset.cod || '';
       row.dataset.origemCod = cod;
+      row.dataset.requerEtq = cod === PRINC_ARMZ ? '1' : '0';
       if (cod !== PRINC_ARMZ) {
         row.dataset.etqId = '';
         row.dataset.etqEndereco = '';
@@ -80337,6 +80386,7 @@ window.verOperacao = function(osId) {
     const ops = (ordens || []).map(op => ({ op_producao_id: op.id }));
     if (!ops.length) {
       window._montaRiStatusPorOp = {};
+      window._montaRiPorOp = {};
       window._producaoKanbanRiHabilitado = false;
       return;
     }
@@ -80348,12 +80398,16 @@ window.verOperacao = function(osId) {
         body: JSON.stringify({ ops }),
       });
       const data = await resp.json();
+      window._montaRiPorOp = (resp.ok && data.ok && data.ri_por_op)
+        ? data.ri_por_op
+        : {};
       window._montaRiStatusPorOp = (resp.ok && data.ok && data.status_por_op)
         ? data.status_por_op
         : {};
       window._producaoKanbanRiHabilitado = true;
     } catch (_) {
       window._montaRiStatusPorOp = {};
+      window._montaRiPorOp = {};
       window._producaoKanbanRiHabilitado = false;
     }
   }
@@ -80473,11 +80527,17 @@ window.verOperacao = function(osId) {
   function opMontagemRiLiberada(op, colKey) {
     if (!window._producaoVerificarRiKanban) return true;
     if (colKey === 'programado') return true;
+    // Liberada quando checkbox RI em Kanban_programacao está desativado
+    const riMap = window._montaRiPorOp || {};
+    if (Object.prototype.hasOwnProperty.call(riMap, String(op.id))) {
+      return !riMap[String(op.id)];
+    }
+    // Fallback legado: compara status RI com posto do kanban
     const nomeKanban = producaoNomeKanbanPorKey(colKey);
     if (!nomeKanban) return true;
     const map = window._montaRiStatusPorOp || {};
     const riStatus = map[String(op.id)] || '';
-    if (!riStatus) return false;
+    if (!riStatus || riStatus === 'pendente') return riStatus !== 'pendente';
     return normStatusKanban(riStatus) === normStatusKanban(nomeKanban);
   }
 
@@ -85012,12 +85072,14 @@ window.verOperacao = function(osId) {
     let riCheckData = null;
     let riDadosProntos = false;
     let riJaRegistrado = false;
+    let riAtivo = false;
     let riProdutoMeta = null;
 
     function atualizarBtnRegistrarVisivel() {
       if (!btnRegistrar || !isRiAvancar) return;
       if (spinnerRegistrarEl?.style.display === 'flex') return;
-      if (riJaRegistrado) {
+      // Botão Registrar RI só aparece com checkbox RI ativo no Kanban_programacao
+      if (!riAtivo || riJaRegistrado) {
         btnRegistrar.style.display = 'none';
         return;
       }
@@ -85146,15 +85208,11 @@ window.verOperacao = function(osId) {
           <div><span style="color:#64748b;">Código:</span> <b>${escapeHtml(check.codigo || codigo)}</b></div>
           ${check.codigo_produto ? `<div><span style="color:#64748b;">ID produto:</span> <b>${escapeHtml(String(check.codigo_produto))}</b></div>` : ''}
           <div><span style="color:#64748b;">Status:</span> <b style="color:${stCor};">${escapeHtml(st)}</b></div>
-          <div><span style="color:#64748b;">Usuário:</span> <b>${escapeHtml(check.usuario || '—')}</b></div>
         </div>
         ${check.descricao ? `<div style="margin-top:8px;color:#cbd5e1;">${escapeHtml(check.descricao)}</div>` : ''}`;
       if (btnRegistrar && isRiAvancar) {
-        const bloqueado = kanbanLocal
-          && normStKanban(st) === normStKanban(kanbanLocal);
-        riJaRegistrado = bloqueado;
-        btnRegistrar.disabled = bloqueado;
-        btnRegistrar.style.opacity = bloqueado ? '0.5' : '1';
+        btnRegistrar.disabled = !riAtivo || riJaRegistrado;
+        btnRegistrar.style.opacity = (!riAtivo || riJaRegistrado) ? '0.5' : '1';
       }
       atualizarBtnRegistrarVisivel();
     };
@@ -85173,6 +85231,7 @@ window.verOperacao = function(osId) {
     const carregar = async () => {
       riDadosProntos = false;
       riJaRegistrado = false;
+      riAtivo = false;
       riCheckId = null;
       riCheckData = null;
       atualizarBtnRegistrarVisivel();
@@ -85196,14 +85255,17 @@ window.verOperacao = function(osId) {
         const data = await resp.json();
         if (!resp.ok || !data.ok) throw new Error(data.error || `Erro ${resp.status}`);
         riProdutoMeta = data.produto || null;
-        riJaRegistrado = !!data.ja_registrado;
+        riAtivo = data.ri_ativo === true;
+        riJaRegistrado = !riAtivo || !!data.ja_registrado;
         renderInfo(data.check || null);
         renderLista(data.verificacoes);
         renderListaNiq(data.ocorrencias || []);
-        statusEl.textContent = data.template_apenas
-          ? 'Verificações carregadas — clique em Registrar RI para gravar.'
-          : (riJaRegistrado ? 'RI já registrado neste posto.' : '');
-        if (riJaRegistrado) statusEl.style.color = '#4ade80';
+        statusEl.textContent = !riAtivo
+          ? 'RI já liberada (checkbox desativado).'
+          : (data.template_apenas
+            ? 'Verificações carregadas — clique em Registrar RI para gravar.'
+            : (riJaRegistrado ? 'RI já registrado neste posto.' : ''));
+        if (!riAtivo || riJaRegistrado) statusEl.style.color = '#4ade80';
         else statusEl.style.color = '#94a3b8';
       } catch (err) {
         statusEl.textContent = err.message || 'Falha ao carregar RI.';
@@ -85396,7 +85458,7 @@ window.verOperacao = function(osId) {
     btnOcorrencia?.addEventListener('click', abrirModalRegistrarOcorrencia);
 
     btnRegistrar?.addEventListener('click', async () => {
-      if (!riDadosProntos || riJaRegistrado) return;
+      if (!riDadosProntos || riJaRegistrado || !riAtivo) return;
       if (isRiAvancar) {
         const postoLabel = kanbanLocal || 'atual';
         if (!confirm(`Confirmar registro do RI no posto ${postoLabel}?`)) return;
@@ -85448,6 +85510,8 @@ window.verOperacao = function(osId) {
           });
           const dataLib = await respLib.json();
           if (!respLib.ok || !dataLib.ok) throw new Error(dataLib.error || `Erro ${respLib.status}`);
+          riAtivo = false;
+          riJaRegistrado = true;
           renderInfo(dataLib.check);
           renderLista(dataLib.verificacoes);
           const postoRegistrado = dataLib.kanban_status || kanbanLocal || 'atual';
@@ -86041,7 +86105,19 @@ window.verOperacao = function(osId) {
       && !modoRiRegistro
       && !somenteEstrutura
       && colsFichaTecnica.includes(colKeyMonta);
-    const mostrarRi = modoRiRegistro || (!modoMontagem && (colKeyMonta === 'solicitado' || colKeyMonta === 'produzindo' || colKeyMonta === 'teste' || colKeyMonta === 'inspecao_final') && ops.length === 1);
+    const programacaoAcoes = (typeof window._montaProgramacaoCarregada === 'function')
+      ? window._montaProgramacaoCarregada()
+      : (typeof window._producaoProgramacaoCarregada === 'function'
+        ? window._producaoProgramacaoCarregada()
+        : []);
+    const op0Acoes = ops && ops[0];
+    const regRiAcoes = op0Acoes && (programacaoAcoes || []).find((r) =>
+      Number(r.op_producao_id) === Number(op0Acoes.id)
+      || String(r.numero_op || '').trim().toUpperCase() === String(op0Acoes.identificacao || '').trim().toUpperCase()
+    );
+    const riCheckboxAtivo = !!(regRiAcoes && (regRiAcoes.ri === true || regRiAcoes.ri === 't' || regRiAcoes.ri === 1 || regRiAcoes.ri === 'true'));
+    const mostrarRi = modoRiRegistro
+      || (!modoMontagem && riCheckboxAtivo && ops.length === 1);
     const tituloModal = options.titulo || 'Ações do grupo';
     const overlay = document.createElement('div');
     overlay.className = 'kanban-modal-overlay';

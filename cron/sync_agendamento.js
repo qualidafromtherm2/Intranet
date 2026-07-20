@@ -302,7 +302,9 @@ async function reconciliarPedidosCompraAbertos() {
     const etapaOmie = etapasOmie.get(idPed);
     if (etapaOmie === undefined) {
       await pool.query(
-        `UPDATE compras.pedidos_omie SET inativo = TRUE, updated_at = NOW() WHERE n_cod_ped = $1`,
+        `UPDATE compras.pedidos_omie
+            SET inativo = TRUE, pendente_omie = FALSE, updated_at = NOW()
+          WHERE n_cod_ped = $1`,
         [ped.n_cod_ped]
       );
       inativados++;
@@ -785,7 +787,8 @@ async function syncProdutosOmie() {
   log('── [produtos_omie] Iniciando...');
   await garantirGuardProdutosOmie();
 
-  let pagina = 1, totalPaginas = 1, sincronizados = 0, erros = 0;
+  let pagina = 1, totalPaginas = 1, sincronizados = 0, erros = 0, fantasmas = 0;
+  const idsVistosNaOmie = new Set();
 
   while (pagina <= totalPaginas) {
     const data = await omiePost('geral/produtos', 'ListarProdutos', {
@@ -808,6 +811,7 @@ async function syncProdutosOmie() {
             obj.codigo_produto_integracao = obj.codigo || String(obj.codigo_produto || '');
           }
           await client.query('SELECT omie_upsert_produto($1::jsonb)', [obj]);
+          if (p.codigo_produto) idsVistosNaOmie.add(String(p.codigo_produto));
           sincronizados++;
         } catch (e) {
           erros++;
@@ -817,8 +821,24 @@ async function syncProdutosOmie() {
     } finally { client.release(); }
     pagina++;
   }
-  log(`── [produtos_omie] Concluído: ${sincronizados} sincronizados, ${erros} erros`);
-  return { sincronizados, erros };
+
+  if (idsVistosNaOmie.size > 0) {
+    const { reconciliarProdutosOmieAusentes } = require('../utils/produtosOmieFantasmas');
+    const client = await pool.connect();
+    try {
+      const rec = await reconciliarProdutosOmieAusentes(client, idsVistosNaOmie, 'omie_cron');
+      fantasmas = rec.marcados;
+      if (fantasmas > 0) {
+        log(`  Fantasmas inativados: ${fantasmas}`);
+        rec.detalhes.slice(0, 10).forEach((d) => {
+          log(`    - ${d.codigo} (${d.codigo_produto}) ${d.descricao || ''}`);
+        });
+      }
+    } finally { client.release(); }
+  }
+
+  log(`── [produtos_omie] Concluído: ${sincronizados} sincronizados, ${erros} erros, ${fantasmas} fantasmas inativos`);
+  return { sincronizados, erros, fantasmas };
 }
 
 // ════════════════════════════════════════════════════════════════════════════

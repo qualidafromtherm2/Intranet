@@ -6,6 +6,10 @@ const {
   sqlWhereProdutosOmieIdentidade,
   sqlOrderPreferCodigoProduto,
 } = require('../utils/produtosOmieIdentidade');
+const {
+  marcarProdutosOmieInativos,
+  reconciliarProdutosOmieAusentes,
+} = require('../utils/produtosOmieFantasmas');
 
 // === Config Omie (para fallback ConsultarProduto) ============================
 const OMIE_WEBHOOK_TOKEN = process.env.OMIE_WEBHOOK_TOKEN || '';
@@ -613,7 +617,24 @@ async function processWebhookInBackground(app, body, messageId) {
     }
   }
 
-  // B) Omie Connect 2.0
+  // B) Omie Connect 2.0 — exclusão
+  if (body.topic === 'Produto.Excluido') {
+    const ev = body.event || body;
+    const idExcluido = ev.codigo_produto || ev.nCodProd || body.codigo_produto;
+    console.log('[webhook/produtos] Produto.Excluido:', { messageId, codigo_produto: idExcluido });
+    if (idExcluido) {
+      const client = await dbGetClient();
+      try {
+        const r = await marcarProdutosOmieInativos(client, [idExcluido], 'omie_webhook');
+        processed += r.marcados;
+        console.log('[webhook/produtos] Fantasma marcado inativo:', { messageId, ...r });
+      } finally {
+        client.release();
+      }
+    }
+  }
+
+  // C) Omie Connect 2.0 — alteração
   if (body.topic === 'Produto.Alterado' && body.event) {
     const ev = body.event;
     console.log('[webhook/produtos] Processando Omie Connect 2.0:', {
@@ -751,8 +772,10 @@ router.post('/sincronizar-completo', async (req, res) => {
     processados: 0,
     sucesso: 0,
     erros: 0,
+    fantasmas_inativos: 0,
     inicio: Date.now()
   };
+  const idsVistosNaOmie = new Set();
 
   // Função para enviar eventos SSE
   function enviarEvento(tipo, dados) {
@@ -814,6 +837,7 @@ router.post('/sincronizar-completo', async (req, res) => {
       }
 
       await upsertProdutoOmieComSource(produto, 'omie_sync');
+      if (codigoProduto) idsVistosNaOmie.add(String(codigoProduto));
 
       stats.sucesso++;
       stats.processados++;
@@ -907,15 +931,43 @@ router.post('/sincronizar-completo', async (req, res) => {
       await sleep(DELAY_ENTRE_PAGINAS_MS);
     }
 
+    // Fantasmas: ativos locais que não vieram na lista Omie → inativo='S'
+    if (idsVistosNaOmie.size > 0) {
+      enviarEvento('log', {
+        mensagem: `🧹 Removendo fantasmas (produtos locais ausentes na Omie)...`,
+        nivel: 'info'
+      });
+      const client = await dbGetClient();
+      try {
+        const rec = await reconciliarProdutosOmieAusentes(client, idsVistosNaOmie, 'omie_sync');
+        stats.fantasmas_inativos = rec.marcados;
+        if (rec.marcados > 0) {
+          enviarEvento('log', {
+            mensagem: `✓ ${rec.marcados} fantasma(s) marcado(s) como inativo`,
+            nivel: 'success'
+          });
+        } else {
+          enviarEvento('log', {
+            mensagem: '✓ Nenhum fantasma encontrado',
+            nivel: 'success'
+          });
+        }
+      } finally {
+        client.release();
+      }
+    }
+
     // Finaliza
     const duracao = ((Date.now() - stats.inicio) / 1000 / 60).toFixed(1);
 
     enviarEvento('concluido', {
-      mensagem: `Sincronização concluída! ${stats.sucesso} produtos sincronizados em ${duracao} minutos.`,
+      mensagem: `Sincronização concluída! ${stats.sucesso} produtos sincronizados em ${duracao} minutos.` +
+        (stats.fantasmas_inativos ? ` ${stats.fantasmas_inativos} fantasma(s) inativado(s).` : ''),
       total: stats.total,
       processados: stats.processados,
       sucesso: stats.sucesso,
       erros: stats.erros,
+      fantasmas_inativos: stats.fantasmas_inativos,
       duracao_minutos: duracao
     });
 

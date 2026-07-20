@@ -11,7 +11,8 @@
 //   node scripts/sync_produtos_omie_rapido.js
 // ============================================================================
 
-const { dbQuery } = require('../src/db');
+const { dbQuery, dbGetClient } = require('../src/db');
+const { reconciliarProdutosOmieAusentes } = require('../utils/produtosOmieFantasmas');
 
 // Configurações
 const OMIE_APP_KEY = process.env.OMIE_APP_KEY || '';
@@ -29,8 +30,10 @@ const stats = {
   processados: 0,
   sucesso: 0,
   erros: 0,
+  fantasmas: 0,
   inicio: Date.now()
 };
+const idsVistosNaOmie = new Set();
 
 // ============================================================================
 // Helpers
@@ -137,7 +140,9 @@ async function main() {
       for (const produto of produtos) {
         try {
           const obj = ensureIntegrationKey({ ...produto });
+          await dbQuery("SELECT set_config('app.produtos_omie_write_source', 'omie_manual', true)");
           await dbQuery('SELECT omie_upsert_produto($1::jsonb)', [obj]);
+          if (produto.codigo_produto) idsVistosNaOmie.add(String(produto.codigo_produto));
           stats.sucesso++;
           stats.processados++;
         } catch (error) {
@@ -155,6 +160,18 @@ async function main() {
         await sleep(DELAY_MS);
       }
     }
+
+    if (idsVistosNaOmie.size > 0) {
+      console.log('\n🧹 Removendo fantasmas (ativos locais ausentes na Omie)...');
+      const client = await dbGetClient();
+      try {
+        const rec = await reconciliarProdutosOmieAusentes(client, idsVistosNaOmie, 'omie_manual');
+        stats.fantasmas = rec.marcados;
+        console.log(`   ✓ ${rec.marcados} fantasma(s) marcado(s) como inativo`);
+      } finally {
+        client.release();
+      }
+    }
     
     // 3. Relatório final
     const duracao = formatDuration(Date.now() - stats.inicio);
@@ -166,6 +183,7 @@ async function main() {
     console.log(`   Total: ${stats.total_produtos}`);
     console.log(`   ✅ Sucesso: ${stats.sucesso} (${((stats.sucesso/stats.total_produtos)*100).toFixed(1)}%)`);
     console.log(`   ❌ Erros: ${stats.erros} (${((stats.erros/stats.total_produtos)*100).toFixed(1)}%)`);
+    console.log(`   🧹 Fantasmas inativos: ${stats.fantasmas}`);
     console.log(`   ⏱️  Duração: ${duracao}\n`);
     
     console.log('✅ Tabela public.produtos_omie atualizada!\n');

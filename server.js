@@ -6402,11 +6402,23 @@ app.post(['/webhooks/omie/produtos', '/api/webhooks/omie/produtos'],
       
       console.log(`[webhooks/omie/produtos] Processando evento "${topic}" para produto ${codigoProduto}`);
       
-      // Mesmo se o produto foi excluído/inativado na Omie, NÃO mexemos nas imagens locais
-      // (o Supabase é a fonte oficial; remoções devem ser feitas via UI de fotos).
-      if (topic === 'Produto.Excluido' || body.inativo === 'S' || body.bloqueado === 'S') {
-        console.log(`[webhooks/omie/produtos] Produto ${codigoProduto} excluído/inativo na Omie — imagens locais preservadas`);
-        return res.json({ ok: true, codigo_produto: codigoProduto, acao: 'inativo_sem_remover_imagens' });
+      // Excluído no Omie → marca fantasma local como inativo (não apaga imagens/anexos).
+      // bloqueado='S' ainda existe no Omie — segue o fluxo normal de consulta/upsert.
+      if (topic === 'Produto.Excluido' || body.inativo === 'S') {
+        const { marcarProdutosOmieInativos } = require('./utils/produtosOmieFantasmas');
+        const client = await pool.connect();
+        try {
+          const r = await marcarProdutosOmieInativos(client, [codigoProduto], 'omie_webhook');
+          console.log(`[webhooks/omie/produtos] Produto ${codigoProduto} marcado inativo (fantasma). marcados=${r.marcados}`);
+        } finally {
+          client.release();
+        }
+        return res.json({
+          ok: true,
+          codigo_produto: codigoProduto,
+          acao: 'marcado_inativo',
+          imagens: 'preservadas (Supabase)'
+        });
       }
       
       // Consulta produto na Omie para pegar imagens atualizadas
@@ -6911,7 +6923,8 @@ app.post(['/webhooks/omie/pedidos-compra', '/api/webhooks/omie/pedidos-compra'],
       if (topic.includes('Excluida') || topic.includes('Cancelada') || event.excluido || body.excluido) {
         await pool.query(`
           UPDATE compras.pedidos_omie 
-          SET inativo = true, 
+          SET inativo = true,
+              pendente_omie = FALSE,
               evento_webhook = $1,
               evento_webhook_message_id = $2,
               data_webhook = NOW(),
@@ -6977,7 +6990,9 @@ app.post(['/webhooks/omie/pedidos-compra', '/api/webhooks/omie/pedidos-compra'],
           });
 
           let pedido = null;
+          let pedidoAusenteNaOmie = false;
           const maxTentativas = 4;
+          const ehPedidoAusenteOmie = (txt) => /n[aã]o cadastrad/i.test(String(txt || ''));
 
           for (let tentativa = 1; tentativa <= maxTentativas; tentativa++) {
             if (!nCodPed) {
@@ -7001,6 +7016,11 @@ app.post(['/webhooks/omie/pedidos-compra', '/api/webhooks/omie/pedidos-compra'],
               const ehConsumoRedundante = /Consumo redundante|Client-[68]/i.test(errorText || '');
               console.error(`[webhooks/omie/pedidos-compra] Erro na API Omie: ${response.status} - ${errorText}`);
 
+              if (ehPedidoAusenteOmie(errorText)) {
+                pedidoAusenteNaOmie = true;
+                break;
+              }
+
               if (ehConsumoRedundante && tentativa < maxTentativas) {
                 const matchSegundos = errorText.match(/Aguarde (\d+) segundos/i);
                 const esperaMs = matchSegundos ? (parseInt(matchSegundos[1], 10) * 1000 + 1000) : (tentativa * 3000);
@@ -7019,6 +7039,11 @@ app.post(['/webhooks/omie/pedidos-compra', '/api/webhooks/omie/pedidos-compra'],
               const ehConsumoRedundante = /Consumo redundante|Client-[68]/i.test(`${faultstring} ${faultcode}`);
               console.error(`[webhooks/omie/pedidos-compra] Falha ConsultarPedCompra: ${faultstring}${faultcode ? ` (${faultcode})` : ''}`);
 
+              if (ehPedidoAusenteOmie(faultstring)) {
+                pedidoAusenteNaOmie = true;
+                break;
+              }
+
               if (ehConsumoRedundante && tentativa < maxTentativas) {
                 const matchSegundos = faultstring.match(/Aguarde (\d+) segundos/i);
                 const esperaMs = matchSegundos ? (parseInt(matchSegundos[1], 10) * 1000 + 1000) : (tentativa * 3000);
@@ -7033,9 +7058,39 @@ app.post(['/webhooks/omie/pedidos-compra', '/api/webhooks/omie/pedidos-compra'],
             break;
           }
 
+          // Omie confirmou que o pedido não existe mais — NÃO usar fallback do webhook
+          // (isso recriava "fantasma" e mantinha a badge Em compra sem pedido real).
+          if (pedidoAusenteNaOmie) {
+            await pool.query(`
+              UPDATE compras.pedidos_omie
+                 SET inativo = TRUE,
+                     pendente_omie = FALSE,
+                     evento_webhook = $1,
+                     evento_webhook_message_id = $2,
+                     data_webhook = NOW(),
+                     updated_at = NOW()
+               WHERE (n_cod_ped = $3)
+                  OR (TRIM(COALESCE(c_numero, '')) = TRIM($4))
+            `, [
+              `${topic || 'webhook'}:omie-ausente`,
+              messageId || null,
+              nCodPed || null,
+              cNumero || null
+            ]);
+            console.warn(`[webhooks/omie/pedidos-compra] Pedido ${identificadorPedido} inativado (Omie: não cadastrado)`);
+            return;
+          }
+
           if (!pedido || typeof pedido !== 'object') {
             console.warn(`[webhooks/omie/pedidos-compra] ConsultarPedCompra sem payload válido para ${identificadorPedido}. Usando fallback do webhook.`);
             pedido = montarPedidoFallbackDoWebhook();
+            // Fallback não confirma existência na Omie — evita reativar fantasma já inativado.
+            await upsertPedidoCompra(pedido, topic, messageId, { confirmadoOmie: false });
+            if (nCodPed) {
+              await sincronizarPedidoComSolicitacao(nCodPed);
+            }
+            console.log(`[webhooks/omie/pedidos-compra] Pedido ${nCodPed} ${acao} com fallback (sem confirmação Omie)`);
+            return;
           }
 
           // Webhook tem prioridade para etapa/numero quando vier preenchido,
@@ -7059,8 +7114,8 @@ app.post(['/webhooks/omie/pedidos-compra', '/api/webhooks/omie/pedidos-compra'],
             pedido.cabecalho.cNumero = numeroWebhook;
           }
           
-          // Atualiza no banco com messageId
-          await upsertPedidoCompra(pedido, topic, messageId);
+          // Atualiza no banco com messageId (pedido confirmado via ConsultarPedCompra)
+          await upsertPedidoCompra(pedido, topic, messageId, { confirmadoOmie: true });
           
           // Sincroniza com solicitacao_compras
           if (nCodPed) {
@@ -14352,6 +14407,10 @@ app.post('/api/etiquetas/iapp-op/imprimir', express.json(), async (req, res) => 
                   status = CASE
                     WHEN COALESCE(TRIM(status), '') IN ('', 'Montagem hermetica') THEN 'Montagem hermetica'
                     ELSE status
+                  END,
+                  ri = CASE
+                    WHEN COALESCE(TRIM(status), '') IN ('', 'Montagem hermetica') THEN TRUE
+                    ELSE ri
                   END
             WHERE op_producao_id = $1`,
           [opProducaoId, codigoProdutoNum, codigo, descricao, numeroOpTxt]
@@ -14359,8 +14418,8 @@ app.post('/api/etiquetas/iapp-op/imprimir', express.json(), async (req, res) => 
         if (!updKanban.rowCount) {
           await pool.query(
             `INSERT INTO "Producao"."Kanban_programacao"
-               (codigo_produto, codigo, descricao, codigo_pedido, quantidade, numero_op, op_producao_id, status)
-             VALUES ($1, $2, $3, 0, 1, $4, $5, 'Montagem hermetica')`,
+               (codigo_produto, codigo, descricao, codigo_pedido, quantidade, numero_op, op_producao_id, status, ri)
+             VALUES ($1, $2, $3, 0, 1, $4, $5, 'Montagem hermetica', TRUE)`,
             [codigoProdutoNum, codigo, descricao, numeroOpTxt, opProducaoId]
           );
         }
@@ -14385,6 +14444,10 @@ app.post('/api/etiquetas/iapp-op/imprimir', express.json(), async (req, res) => 
                   status = CASE
                     WHEN COALESCE(TRIM(status), '') IN ('', 'Montagem hermetica') THEN 'Montagem hermetica'
                     ELSE status
+                  END,
+                  ri = CASE
+                    WHEN COALESCE(TRIM(status), '') IN ('', 'Montagem hermetica') THEN TRUE
+                    ELSE ri
                   END
             WHERE op_iapp_id = $1`,
           [opIappId, codigoProdutoNum, codigo, descricao, numeroOpTxt]
@@ -14392,8 +14455,8 @@ app.post('/api/etiquetas/iapp-op/imprimir', express.json(), async (req, res) => 
         if (!updKanban.rowCount) {
           await pool.query(
             `INSERT INTO "Producao"."Kanban_programacao"
-               (codigo_produto, codigo, descricao, codigo_pedido, quantidade, numero_op, op_iapp_id, status)
-             VALUES ($1, $2, $3, 0, 1, $4, $5, 'Montagem hermetica')`,
+               (codigo_produto, codigo, descricao, codigo_pedido, quantidade, numero_op, op_iapp_id, status, ri)
+             VALUES ($1, $2, $3, 0, 1, $4, $5, 'Montagem hermetica', TRUE)`,
             [codigoProdutoNum, codigo, descricao, numeroOpTxt, opIappId]
           );
         }
@@ -14428,7 +14491,6 @@ app.post('/api/etiquetas/iapp-op/imprimir', express.json(), async (req, res) => 
             codigo,
             codigoProduto: idOmie ? Number(idOmie) : null,
             descricao,
-            usuario,
             statusRi: 'Montagem hermetica',
           });
         } catch (riErr) {
@@ -26633,7 +26695,9 @@ function convertOmieDate(omieDate) {
   return null;
 }
 
-async function upsertPedidoCompra(pedido, eventoWebhook = '', messageId = null) {
+async function upsertPedidoCompra(pedido, eventoWebhook = '', messageId = null, opcoes = {}) {
+  // confirmadoOmie=false: fallback de webhook sem ConsultarPedCompra — não reativa fantasma.
+  const confirmadoOmie = opcoes.confirmadoOmie !== false;
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -26678,7 +26742,8 @@ async function upsertPedidoCompra(pedido, eventoWebhook = '', messageId = null) 
         c_cod_categ, n_cod_compr, c_contato, c_contrato,
         n_cod_cc, n_cod_int_cc, n_cod_proj,
         c_num_pedido, c_obs, c_obs_int, c_email_aprovador,
-        evento_webhook, evento_webhook_message_id, data_webhook, updated_at
+        evento_webhook, evento_webhook_message_id, data_webhook, updated_at,
+        inativo, pendente_omie
       )
       VALUES (
         $1, $2, $3,
@@ -26689,7 +26754,8 @@ async function upsertPedidoCompra(pedido, eventoWebhook = '', messageId = null) 
         $15, $16, $17, $18,
         $19, $20, $21,
         $22, $23, $24, $25,
-        $26, $27, NOW(), NOW()
+        $26, $27, NOW(), NOW(),
+        FALSE, TRUE
       )
       ON CONFLICT (n_cod_ped) DO UPDATE SET
         c_cod_int_ped = EXCLUDED.c_cod_int_ped,
@@ -26719,7 +26785,12 @@ async function upsertPedidoCompra(pedido, eventoWebhook = '', messageId = null) 
         evento_webhook = EXCLUDED.evento_webhook,
         evento_webhook_message_id = EXCLUDED.evento_webhook_message_id,
         data_webhook = NOW(),
-        updated_at = NOW()
+        updated_at = NOW(),
+        inativo = CASE WHEN $28::boolean THEN FALSE ELSE compras.pedidos_omie.inativo END,
+        pendente_omie = CASE
+          WHEN $28::boolean THEN COALESCE(compras.pedidos_omie.pendente_omie, TRUE)
+          ELSE compras.pedidos_omie.pendente_omie
+        END
     `, [
       nCodPed,
       cabecalho.cCodIntPed || cabecalho.c_cod_int_ped || null,
@@ -26747,7 +26818,8 @@ async function upsertPedidoCompra(pedido, eventoWebhook = '', messageId = null) 
       cabecalho.cObsInt || cabecalho.c_obs_int || null,
       cabecalho.cEmailAprovador || cabecalho.c_email_aprovador || null,
       eventoWebhook,
-      messageId
+      messageId,
+      confirmadoOmie
     ]);
     
     // 2. Atualiza itens do pedido somente quando o payload traz produtos.
@@ -32842,108 +32914,178 @@ app.get('/api/compras/requisicoes/debug/:id', async (req, res) => {
 // Aqui espelhamos: pedidos_omie c_etapa='20', pendentes, não faturados.
 app.get('/api/compras/requisicoes', async (req, res) => {
   try {
-    console.log('[Compras/Requisições] Listando requisições (pedidos Omie etapa 20)...');
+    // Coluna "Requisições" = mesma lista da Omie (PesquisarReq):
+    // requisições abertas em compras.requisicoes_omie + pedidos etapa 20 sem registro de requisição.
+    // Não usar só pedidos_omie etapa 20 — isso omitia requisições ainda sem pedido (ex.: 2996–3001).
+    console.log('[Compras/Requisições] Listando requisições abertas (alinhado à Omie)...');
 
     await pool.query(`
       ALTER TABLE compras.pedidos_omie
       ADD COLUMN IF NOT EXISTS pendente_omie BOOLEAN
     `);
 
-    const { rows } = await pool.query(`
+    const { rows: cabecalhos } = await pool.query(`
+      WITH abertas AS (
+        SELECT
+          r.cod_req_compra::text AS cod_req_compra,
+          COALESCE(NULLIF(BTRIM(r.numero), ''), NULLIF(BTRIM(p.c_numero), '')) AS numero,
+          COALESCE(NULLIF(BTRIM(r.cod_int_req_compra), ''), NULLIF(BTRIM(p.c_cod_int_ped), '')) AS cod_int_req_compra,
+          r.obs_req_compra AS c_obs,
+          r.dt_sugestao AS d_dt_previsao,
+          r.created_at,
+          r.updated_at,
+          p.n_valor,
+          p.n_cod_for,
+          COALESCE(NULLIF(BTRIM(p.c_etapa), ''), NULLIF(BTRIM(r.etapa), ''), '20') AS c_etapa
+        FROM compras.requisicoes_omie r
+        LEFT JOIN compras.pedidos_omie p
+          ON p.n_cod_ped::text = r.cod_req_compra::text
+         AND COALESCE(p.inativo, FALSE) = FALSE
+        WHERE COALESCE(r.inativo, FALSE) = FALSE
+          AND NOT EXISTS (
+            SELECT 1
+            FROM compras.pedidos_omie po
+            WHERE COALESCE(po.inativo, FALSE) = FALSE
+              AND po.n_cod_ped::text = r.cod_req_compra::text
+              AND BTRIM(COALESCE(po.c_etapa, '')) IN ('10', '15')
+          )
+          AND (
+            NULLIF(BTRIM(r.numero), '') IS NOT NULL
+            OR BTRIM(COALESCE(p.c_etapa, '')) = '20'
+          )
+
+        UNION ALL
+
+        SELECT
+          p.n_cod_ped::text,
+          NULLIF(BTRIM(p.c_numero), ''),
+          NULLIF(BTRIM(p.c_cod_int_ped), ''),
+          p.c_obs,
+          p.d_dt_previsao,
+          p.created_at,
+          p.updated_at,
+          p.n_valor,
+          p.n_cod_for,
+          p.c_etapa
+        FROM compras.pedidos_omie p
+        WHERE COALESCE(p.inativo, FALSE) = FALSE
+          AND BTRIM(COALESCE(p.c_etapa, '')) = '20'
+          AND NOT EXISTS (
+            SELECT 1
+            FROM compras.requisicoes_omie r
+            WHERE r.cod_req_compra::text = p.n_cod_ped::text
+          )
+      )
       SELECT
-        po.n_cod_ped,
-        po.c_numero,
-        po.c_cod_int_ped,
-        po.c_obs,
-        po.c_etapa,
-        po.n_cod_for,
-        po.d_inc_data,
-        po.d_dt_previsao,
-        po.n_valor,
+        a.*,
         cc.nome_fantasia AS fornecedor_nome,
-        pop.c_produto,
-        pop.c_descricao,
-        pop.c_unidade,
-        pop.n_qtde,
-        pop.n_val_tot,
         origem.solicitante,
-        origem.grupo_requisicao,
-        po.created_at,
-        po.updated_at
-      FROM compras.pedidos_omie po
+        origem.grupo_requisicao
+      FROM abertas a
       LEFT JOIN omie.fornecedores cc
-        ON cc.codigo_cliente_omie = po.n_cod_for
-      LEFT JOIN compras.pedidos_omie_produtos pop
-        ON pop.n_cod_ped = po.n_cod_ped
+        ON cc.codigo_cliente_omie = a.n_cod_for
       LEFT JOIN LATERAL (
         SELECT src.solicitante, src.grupo_requisicao
         FROM (
           SELECT sc.solicitante, sc.grupo_requisicao, sc.created_at
           FROM compras.solicitacao_compras sc
-          WHERE TRIM(COALESCE(po.c_cod_int_ped, '')) <> ''
-            AND TRIM(COALESCE(sc.numero_pedido, '')) = TRIM(COALESCE(po.c_cod_int_ped, ''))
+          WHERE TRIM(COALESCE(a.cod_int_req_compra, '')) <> ''
+            AND TRIM(COALESCE(sc.numero_pedido, '')) = TRIM(COALESCE(a.cod_int_req_compra, ''))
           UNION ALL
           SELECT csc.solicitante, csc.grupo_requisicao, csc.created_at
           FROM compras.compras_sem_cadastro csc
-          WHERE TRIM(COALESCE(po.c_cod_int_ped, '')) <> ''
-            AND TRIM(COALESCE(csc.numero_pedido, '')) = TRIM(COALESCE(po.c_cod_int_ped, ''))
+          WHERE TRIM(COALESCE(a.cod_int_req_compra, '')) <> ''
+            AND TRIM(COALESCE(csc.numero_pedido, '')) = TRIM(COALESCE(a.cod_int_req_compra, ''))
         ) src
         ORDER BY src.created_at DESC NULLS LAST
         LIMIT 1
       ) origem ON TRUE
-      WHERE COALESCE(po.inativo, FALSE) = FALSE
-        AND (po."Etapa_NF" IS NULL OR BTRIM(po."Etapa_NF") = '')
-        AND COALESCE(po.pendente_omie, TRUE) = TRUE
-        AND BTRIM(COALESCE(po.c_etapa, '')) = '20'
       ORDER BY
-        CASE WHEN po.c_numero ~ '^\\d+$' THEN po.c_numero::INT ELSE NULL END DESC,
-        po.c_numero DESC
+        CASE WHEN a.numero ~ '^\\d+$' THEN a.numero::INT ELSE NULL END DESC NULLS LAST,
+        a.numero DESC NULLS LAST
     `);
 
-    const porNumero = new Map();
-    const requisicoes = [];
+    const codigos = cabecalhos.map(r => r.cod_req_compra).filter(Boolean);
+    const itensPorCod = new Map();
 
-    for (const row of rows) {
-      const numero = row.c_numero || 'SEM_NUMERO';
-      if (!porNumero.has(numero)) {
-        const nova = {
-          numero,
-          grupo_requisicao: row.grupo_requisicao || row.c_cod_int_ped || numero,
-          numero_requisicao_omie: numero,
-          cod_req_compra: row.n_cod_ped,
-          cod_int_req_compra: row.c_cod_int_ped || null,
-          n_cod_ped: row.n_cod_ped,
-          c_cod_int_ped: row.c_cod_int_ped,
-          n_valor: row.n_valor,
-          c_obs: row.c_obs || null,
-          c_etapa: row.c_etapa,
-          d_inc_data: row.d_inc_data,
-          d_dt_previsao: row.d_dt_previsao,
-          solicitante: row.solicitante || null,
-          fornecedor_nome: row.fornecedor_nome || 'Sem fornecedor',
-          created_at: row.created_at,
-          updated_at: row.updated_at,
-          itens: []
-        };
-        porNumero.set(numero, nova);
-        requisicoes.push(nova);
+    if (codigos.length) {
+      const { rows: itensReq } = await pool.query(`
+        SELECT
+          ri.cod_req_compra::text AS cod_req_compra,
+          ri.id,
+          COALESCE(NULLIF(BTRIM(p.codigo), ''), ri.cod_prod::text) AS produto_codigo,
+          COALESCE(NULLIF(BTRIM(p.descricao), ''), 'Sem descrição') AS produto_descricao,
+          ri.qtde AS n_qtde,
+          ri.preco_unit,
+          (COALESCE(ri.qtde, 0) * COALESCE(ri.preco_unit, 0)) AS n_val_tot,
+          ri.obs_item
+        FROM compras.requisicoes_omie_itens ri
+        LEFT JOIN public.produtos_omie p ON p.codigo_produto::text = ri.cod_prod::text
+        WHERE ri.cod_req_compra::text = ANY($1::text[])
+        ORDER BY ri.id
+      `, [codigos]);
+
+      for (const item of itensReq) {
+        if (!itensPorCod.has(item.cod_req_compra)) itensPorCod.set(item.cod_req_compra, []);
+        itensPorCod.get(item.cod_req_compra).push(item);
       }
-      if (row.c_produto) {
-        porNumero.get(numero).itens.push({
-          id: `${row.n_cod_ped}_${row.c_produto}`,
-          produto_codigo: row.c_produto,
-          produto_descricao: row.c_descricao || 'Sem descrição',
-          solicitante: row.solicitante || null,
-          status: 'Requisição',
-          c_unidade: row.c_unidade || '-',
-          n_qtde: row.n_qtde || 0,
-          n_val_tot: row.n_val_tot || 0,
-          table_source: 'pedidos_omie'
-        });
+
+      // Fallback: se a requisição não tem itens locais, usa produtos do pedido etapa 20
+      const semItens = codigos.filter(c => !itensPorCod.has(c) || itensPorCod.get(c).length === 0);
+      if (semItens.length) {
+        const { rows: itensPed } = await pool.query(`
+          SELECT
+            pop.n_cod_ped::text AS cod_req_compra,
+            pop.c_produto AS produto_codigo,
+            pop.c_descricao AS produto_descricao,
+            pop.c_unidade,
+            pop.n_qtde,
+            pop.n_val_tot
+          FROM compras.pedidos_omie_produtos pop
+          WHERE pop.n_cod_ped::text = ANY($1::text[])
+        `, [semItens]);
+        for (const item of itensPed) {
+          if (!itensPorCod.has(item.cod_req_compra)) itensPorCod.set(item.cod_req_compra, []);
+          itensPorCod.get(item.cod_req_compra).push(item);
+        }
       }
     }
 
-    console.log(`[Compras/Requisições] Retornando ${requisicoes.length} requisições (etapa 20 Omie)`);
+    const requisicoes = cabecalhos.map(row => {
+      const numero = row.numero || 'SEM_NUMERO';
+      const cod = row.cod_req_compra;
+      const itensRaw = itensPorCod.get(cod) || [];
+      return {
+        numero,
+        grupo_requisicao: row.grupo_requisicao || row.cod_int_req_compra || numero,
+        numero_requisicao_omie: numero,
+        cod_req_compra: cod,
+        cod_int_req_compra: row.cod_int_req_compra || null,
+        n_cod_ped: cod,
+        c_cod_int_ped: row.cod_int_req_compra || null,
+        n_valor: row.n_valor,
+        c_obs: row.c_obs || null,
+        c_etapa: row.c_etapa || '20',
+        d_dt_previsao: row.d_dt_previsao,
+        solicitante: row.solicitante || null,
+        fornecedor_nome: row.fornecedor_nome || 'Sem fornecedor',
+        created_at: row.created_at,
+        updated_at: row.updated_at,
+        itens: itensRaw.map((item, idx) => ({
+          id: item.id != null ? `reqitem_${item.id}` : `${cod}_${item.produto_codigo || idx}`,
+          produto_codigo: item.produto_codigo || '-',
+          produto_descricao: item.produto_descricao || 'Sem descrição',
+          solicitante: row.solicitante || null,
+          status: 'Requisição',
+          c_unidade: item.c_unidade || '-',
+          n_qtde: item.n_qtde || 0,
+          n_val_tot: item.n_val_tot || 0,
+          table_source: 'requisicoes_omie'
+        }))
+      };
+    });
+
+    console.log(`[Compras/Requisições] Retornando ${requisicoes.length} requisições abertas`);
     res.json({ ok: true, requisicoes });
   } catch (err) {
     console.error('[Compras/Requisições] Erro ao listar requisições:', err);
@@ -34075,7 +34217,7 @@ async function varrerFaturadasOmieKanban() {
     if (etapaOmie === undefined) {
       await pool.query(
         `UPDATE compras.pedidos_omie
-            SET inativo = TRUE, updated_at = NOW()
+            SET inativo = TRUE, pendente_omie = FALSE, updated_at = NOW()
           WHERE n_cod_ped = $1`,
         [ped.n_cod_ped]
       );

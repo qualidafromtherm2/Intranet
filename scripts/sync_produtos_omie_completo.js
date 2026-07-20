@@ -15,7 +15,8 @@
 //   - DATABASE_URL ou (PGHOST, PGDATABASE, PGUSER, PGPASSWORD, PGPORT)
 // ============================================================================
 
-const { dbQuery } = require('../src/db');
+const { dbQuery, dbGetClient } = require('../src/db');
+const { reconciliarProdutosOmieAusentes } = require('../utils/produtosOmieFantasmas');
 
 // Configurações
 const OMIE_APP_KEY = process.env.OMIE_APP_KEY || '';
@@ -35,9 +36,11 @@ const stats = {
   sucesso: 0,
   erros: 0,
   pulados: 0,
+  fantasmas: 0,
   inicio: Date.now(),
   erros_detalhados: []
 };
+const idsVistosNaOmie = new Set();
 
 // ============================================================================
 // Helpers
@@ -148,7 +151,19 @@ async function consultarProdutoOmie(codigoProduto, codigo, tentativa = 1) {
 
 async function upsertProdutoNoBanco(produto) {
   const obj = ensureIntegrationKey({ ...produto });
-  await dbQuery('SELECT omie_upsert_produto($1::jsonb)', [obj]);
+  const client = await dbGetClient();
+  try {
+    await client.query('BEGIN');
+    await client.query("SELECT set_config('app.produtos_omie_write_source', 'omie_manual', true)");
+    await client.query('SELECT omie_upsert_produto($1::jsonb)', [obj]);
+    await client.query('COMMIT');
+    if (obj.codigo_produto) idsVistosNaOmie.add(String(obj.codigo_produto));
+  } catch (e) {
+    try { await client.query('ROLLBACK'); } catch (_) {}
+    throw e;
+  } finally {
+    client.release();
+  }
 }
 
 // ============================================================================
@@ -267,6 +282,18 @@ async function main() {
         console.log(`   ✅ Sucesso: ${stats.sucesso} | ❌ Erros: ${stats.erros} | ⏭️  Pulados: ${stats.pulados}\n`);
       }
     }
+
+    if (idsVistosNaOmie.size > 0) {
+      console.log('\n🧹 Removendo fantasmas (ativos locais ausentes na Omie)...');
+      const client = await dbGetClient();
+      try {
+        const rec = await reconciliarProdutosOmieAusentes(client, idsVistosNaOmie, 'omie_manual');
+        stats.fantasmas = rec.marcados;
+        console.log(`   ✓ ${rec.marcados} fantasma(s) marcado(s) como inativo`);
+      } finally {
+        client.release();
+      }
+    }
     
     // 3. Relatório final
     const duracaoTotal = formatDuration(Date.now() - stats.inicio);
@@ -280,6 +307,7 @@ async function main() {
     console.log(`   ✅ Sucesso: ${stats.sucesso} (${((stats.sucesso/stats.total_produtos)*100).toFixed(1)}%)`);
     console.log(`   ❌ Erros: ${stats.erros} (${((stats.erros/stats.total_produtos)*100).toFixed(1)}%)`);
     console.log(`   ⏭️  Pulados: ${stats.pulados}`);
+    console.log(`   🧹 Fantasmas inativos: ${stats.fantasmas}`);
     console.log(`   ⏱️  Duração total: ${duracaoTotal}\n`);
     
     if (stats.erros_detalhados.length > 0) {

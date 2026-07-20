@@ -1110,6 +1110,41 @@ function boot(renderer) {
     riAnchors.push({ el, mesh });
   }
 
+  /** Atualiza só o balão RI de uma placa (sem recarregar a cena). */
+  function refreshRiBalloonForMesh(mesh) {
+    if (!mesh) return;
+    for (let i = riAnchors.length - 1; i >= 0; i--) {
+      if (riAnchors[i].mesh === mesh) {
+        riAnchors[i].el?.remove();
+        riAnchors.splice(i, 1);
+      }
+    }
+    attachRiBalloon(mesh, mesh.userData?.ops || []);
+  }
+
+  /**
+   * Após Registrar RI: limpa flag só da OP mexida (sem GET cena-3d / pendentes).
+   */
+  function marcarRiLiberadaNaCena(opRef) {
+    const id = Number(opRef?.id || opRef?.op_producao_id || 0) || 0;
+    const n = String(opRef?.n_op || opRef?.numero_op || '').trim();
+    if (!id && !n) return;
+    for (const mesh of productCards) {
+      const ops = mesh.userData?.ops || [];
+      let changed = false;
+      for (const op of ops) {
+        const match = (id > 0 && Number(op.id) === id)
+          || (n && String(op.n_op || '').trim() === n);
+        if (match && op.ri_pendente) {
+          op.ri_pendente = false;
+          changed = true;
+        }
+      }
+      if (changed) refreshRiBalloonForMesh(mesh);
+    }
+    if (inspectMode && inspectMesh) renderInspectBalloon();
+  }
+
   function updateRiBalloons() {
     if (!riAnchors.length) return;
     const w = window.innerWidth;
@@ -1355,9 +1390,14 @@ function boot(renderer) {
     });
   }
 
-  async function carregarOps() {
+  async function carregarOps({ silent = false } = {}) {
+    const btnRefresh = document.getElementById('btnRefreshOps');
+    if (btnRefresh) {
+      btnRefresh.disabled = true;
+      btnRefresh.textContent = '↻ Atualizando…';
+    }
     try {
-      if (enterLoadingSub) enterLoadingSub.textContent = 'Carregando OPs da produção…';
+      if (!silent && enterLoadingSub) enterLoadingSub.textContent = 'Carregando OPs da produção…';
       const [cenaResp, riResp] = await Promise.all([
         fetch('/api/producao/cena-3d', { credentials: 'include' }),
         fetch('/api/qualidade/ri-check/pendentes', { credentials: 'include' }),
@@ -1368,9 +1408,15 @@ function boot(renderer) {
       const pendentes = riJson.ok && Array.isArray(riJson.pendentes) ? riJson.pendentes : [];
       aplicarRiPendentes(itens, pendentes);
       placeOpsOnBelt(itens);
+      if (inspectMode && inspectMesh) renderInspectBalloon();
     } catch (e) {
       console.warn('[producao-3d] OPs:', e);
-      placeOpsOnBelt([]);
+      if (!silent) placeOpsOnBelt([]);
+    } finally {
+      if (btnRefresh) {
+        btnRefresh.disabled = false;
+        btnRefresh.textContent = '↻ Atualizar';
+      }
     }
     loadGate.ops = true;
     notifySceneReady();
@@ -1515,7 +1561,10 @@ function boot(renderer) {
     riModalAberto = true;
     openProducao3dRiModal(op, {
       posto,
-      onRegistered: () => { void carregarOps(); },
+      onRegistered: () => {
+        // Só a OP liberada — sem recarregar a esteira inteira
+        marcarRiLiberadaNaCena(op);
+      },
       onDone: () => {
         riModalAberto = false;
         if (inspectMode) renderInspectBalloon();
@@ -1737,10 +1786,18 @@ function boot(renderer) {
     appRenderer.setSize(w, h);
   });
 
-  window.__prod3d = { scene, camera, productMeshes, carregarOps };
+  window.__prod3d = { scene, camera, productMeshes, carregarOps, marcarRiLiberadaNaCena };
   void carregarOps();
-  // Atualiza OPs a cada 60s
-  setInterval(() => { void carregarOps(); }, 60000);
+
+  const btnRefreshOps = document.getElementById('btnRefreshOps');
+  if (btnRefreshOps) {
+    btnRefreshOps.hidden = false;
+    btnRefreshOps.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      void carregarOps({ silent: true });
+    });
+  }
 
   animate();
 }

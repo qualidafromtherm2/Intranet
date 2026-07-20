@@ -65,12 +65,12 @@ async function garantirSchemaRi() {
       codigo                  TEXT,
       descricao               TEXT,
       op_iapp_id              BIGINT NOT NULL,
-      usuario                 TEXT,
       status                  TEXT NOT NULL DEFAULT 'Em andamento',
       created_at              TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       updated_at              TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
   `);
+  await dbQuery(`ALTER TABLE qualidade."RI_Check" DROP COLUMN IF EXISTS usuario`);
   await dbQuery(`
     CREATE INDEX IF NOT EXISTS idx_ri_check_op
       ON qualidade."RI_Check" (op_iapp_id)
@@ -178,6 +178,45 @@ async function garantirSchemaRi() {
       ON qualidade."RI_Liberacao" (created_at DESC)
   `);
 
+  // Migração única: OPs que estavam pendentes de RI (lógica antiga) → checkbox ri=true
+  await dbQuery(`
+    CREATE TABLE IF NOT EXISTS qualidade."_schema_migrations" (
+      name TEXT PRIMARY KEY,
+      applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+  const { rows: migRows } = await dbQuery(
+    `SELECT 1 FROM qualidade."_schema_migrations" WHERE name = 'kanban_ri_checkbox_v1' LIMIT 1`
+  );
+  if (!migRows.length) {
+    await garantirSchemaKanbanProgramacao();
+    await dbQuery(`
+      UPDATE "Producao"."Kanban_programacao" kp
+         SET ri = TRUE
+        WHERE COALESCE(kp.ri, FALSE) = FALSE
+          AND COALESCE(NULLIF(TRIM(kp.status), ''), '') <> ''
+          AND LOWER(TRIM(kp.status)) NOT IN ('programado', 'pedidos', 'finalizado')
+          AND NOT EXISTS (
+            SELECT 1
+              FROM (
+                SELECT status,
+                       COALESCE(NULLIF(op_producao_id, 0), op_iapp_id) AS op_id,
+                       ROW_NUMBER() OVER (
+                         PARTITION BY COALESCE(NULLIF(op_producao_id, 0), op_iapp_id)
+                         ORDER BY id DESC
+                       ) AS rn
+                  FROM qualidade."RI_Check"
+              ) c
+             WHERE c.rn = 1
+               AND c.op_id = COALESCE(NULLIF(kp.op_producao_id, 0), kp.op_iapp_id)
+               AND LOWER(TRIM(COALESCE(c.status, ''))) = LOWER(TRIM(COALESCE(kp.status, '')))
+          )
+    `).catch((e) => console.warn('[ri] migração kanban_ri_checkbox:', e.message));
+    await dbQuery(
+      `INSERT INTO qualidade."_schema_migrations" (name) VALUES ('kanban_ri_checkbox_v1') ON CONFLICT DO NOTHING`
+    );
+  }
+
   schemaOk = true;
 }
 
@@ -204,6 +243,7 @@ async function garantirSchemaKanbanProgramacao() {
   await dbQuery(`ALTER TABLE "Producao"."Kanban_programacao" ADD COLUMN IF NOT EXISTS status TEXT`);
   await dbQuery(`ALTER TABLE "Producao"."Kanban_programacao" ADD COLUMN IF NOT EXISTS observacao TEXT`);
   await dbQuery(`ALTER TABLE "Producao"."Kanban_programacao" ADD COLUMN IF NOT EXISTS postos TEXT`);
+  await dbQuery(`ALTER TABLE "Producao"."Kanban_programacao" ADD COLUMN IF NOT EXISTS ri BOOLEAN NOT NULL DEFAULT FALSE`);
   await dbQuery(`
     CREATE INDEX IF NOT EXISTS idx_kanban_prog_op_iapp
       ON "Producao"."Kanban_programacao" (op_iapp_id)
@@ -215,6 +255,11 @@ async function garantirSchemaKanbanProgramacao() {
   await dbQuery(`
     CREATE INDEX IF NOT EXISTS idx_kanban_prog_numero_op
       ON "Producao"."Kanban_programacao" (numero_op)
+  `);
+  await dbQuery(`
+    CREATE INDEX IF NOT EXISTS idx_kanban_prog_ri
+      ON "Producao"."Kanban_programacao" (ri)
+      WHERE ri = TRUE
   `);
   kanbanProgSchemaOk = true;
 }
@@ -674,47 +719,48 @@ async function listarNiqPorOp(opIappId) {
   return rows;
 }
 
-// POST /api/qualidade/ri-check/status-por-ops — status RI mais recente por OP (montagem)
+// POST /api/qualidade/ri-check/status-por-ops — flag RI (checkbox) por OP (montagem)
 router.post('/status-por-ops', requireAuth, express.json(), async (req, res) => {
   try {
     await garantirSchemaRi();
+    await garantirSchemaKanbanProgramacao();
     const ops = Array.isArray(req.body?.ops) ? req.body.ops : [];
     const ids = [...new Set(
       ops.map(o => Number(o.op_producao_id || o.op_id || 0)).filter(n => n > 0)
     )];
     if (!ids.length) {
-      return res.json({ ok: true, status_por_op: {} });
+      return res.json({ ok: true, status_por_op: {}, ri_por_op: {} });
     }
 
     const { rows } = await dbQuery(
-      `SELECT op_producao_id, op_iapp_id, status
-         FROM (
-           SELECT op_producao_id, op_iapp_id, status,
-                  ROW_NUMBER() OVER (
-                    PARTITION BY COALESCE(NULLIF(op_producao_id, 0), op_iapp_id)
-                    ORDER BY id DESC
-                  ) AS rn
-             FROM qualidade."RI_Check"
-            WHERE op_producao_id = ANY($1::bigint[])
-               OR op_iapp_id = ANY($1::bigint[])
-         ) t
-        WHERE rn = 1`,
+      `SELECT COALESCE(NULLIF(op_producao_id, 0), op_iapp_id) AS op_id,
+              BOOL_OR(COALESCE(ri, FALSE)) AS ri
+         FROM "Producao"."Kanban_programacao"
+        WHERE op_producao_id = ANY($1::bigint[])
+           OR op_iapp_id = ANY($1::bigint[])
+        GROUP BY COALESCE(NULLIF(op_producao_id, 0), op_iapp_id)`,
       [ids]
     );
 
+    const riPorOp = {};
     const statusPorOp = {};
     for (const row of rows) {
-      const key = Number(row.op_producao_id) || Number(row.op_iapp_id);
-      if (key > 0) statusPorOp[String(key)] = String(row.status || '').trim();
+      const key = Number(row.op_id);
+      if (key > 0) {
+        const riAtivo = !!row.ri;
+        riPorOp[String(key)] = riAtivo;
+        // Compat: status_por_op true/pendente quando checkbox ativo
+        statusPorOp[String(key)] = riAtivo ? 'pendente' : '';
+      }
     }
-    return res.json({ ok: true, status_por_op: statusPorOp });
+    return res.json({ ok: true, status_por_op: statusPorOp, ri_por_op: riPorOp });
   } catch (err) {
     console.error('[qualidade/ri-check/status-por-ops]', err);
     return res.status(500).json({ ok: false, error: err.message || 'Falha ao consultar status RI.' });
   }
 });
 
-// GET /api/qualidade/ri-check/pendentes — OPs no posto atual sem RI registrada nesse posto
+// GET /api/qualidade/ri-check/pendentes — OPs com checkbox RI ativo em Kanban_programacao
 router.get('/pendentes', requireAuth, async (_req, res) => {
   try {
     await garantirSchemaRi();
@@ -722,9 +768,10 @@ router.get('/pendentes', requireAuth, async (_req, res) => {
 
     const [kpResult, riResult] = await Promise.all([
       dbQuery(
-        `SELECT id, op_producao_id, op_iapp_id, numero_op, status, codigo, observacao, postos
+        `SELECT id, op_producao_id, op_iapp_id, numero_op, status, codigo, observacao, postos, COALESCE(ri, FALSE) AS ri
            FROM "Producao"."Kanban_programacao"
-          WHERE COALESCE(NULLIF(TRIM(status), ''), '') <> ''
+          WHERE COALESCE(ri, FALSE) = TRUE
+            AND COALESCE(NULLIF(TRIM(status), ''), '') <> ''
             AND LOWER(TRIM(status)) NOT IN ('programado', 'pedidos')`
       ),
       dbQuery(
@@ -780,20 +827,19 @@ router.get('/pendentes', requireAuth, async (_req, res) => {
       const postoAtual = postoAtualKanbanFromStatuses(regs.map(r => r.status));
       if (!postoAtual) continue;
 
-      const riStatus = riByOp.get(opId) || '';
-      if (riRegistradoNoPosto(riStatus, postoAtual)) continue;
-
       const op = opMap.get(Number(opId));
       if (!op) continue;
 
       const colKey = colKeyFromPostoKanban(postoAtual);
       if (!colKey) continue;
 
+      const riStatus = riByOp.get(opId) || '';
       pendentes.push({
         op_producao_id: opId,
         numero_op: op.n_op,
         posto: postoAtual,
         col_key: colKey,
+        ri: true,
         ri_status: riStatus || null,
         qtde: op.qtde,
         obs: null,
@@ -922,13 +968,31 @@ router.post('/preparar', requireAuth, express.json(), async (req, res) => {
       ? await buscarCheckRiOpNoPosto(opRefId, kanbanLocal)
       : null;
 
+    let riAtivo = false;
+    if (kanbanProgId) {
+      const { rows: riRows } = await dbQuery(
+        `SELECT COALESCE(ri, FALSE) AS ri FROM "Producao"."Kanban_programacao" WHERE id = $1`,
+        [kanbanProgId]
+      );
+      riAtivo = !!riRows[0]?.ri;
+    } else {
+      const { rows: riRows } = await dbQuery(
+        `SELECT BOOL_OR(COALESCE(ri, FALSE)) AS ri
+           FROM "Producao"."Kanban_programacao"
+          WHERE op_producao_id = $1 OR op_iapp_id = $1`,
+        [opRefId]
+      );
+      riAtivo = !!riRows[0]?.ri;
+    }
+
     if (checkExistente) {
       const dados = await carregarCheckCompleto(checkExistente.id, kanbanLocal || null, { incluirNiq: true });
       return res.json({
         ok: true,
         kanban_local: kanbanLocal || null,
         template_apenas: false,
-        ja_registrado: true,
+        ja_registrado: !riAtivo,
+        ri_ativo: riAtivo,
         ...dados,
       });
     }
@@ -944,7 +1008,8 @@ router.post('/preparar', requireAuth, express.json(), async (req, res) => {
       ok: true,
       kanban_local: kanbanLocal || null,
       template_apenas: true,
-      ja_registrado: false,
+      ja_registrado: !riAtivo,
+      ri_ativo: riAtivo,
       check: null,
       verificacoes,
       ocorrencias,
@@ -972,7 +1037,6 @@ router.post('/abrir', requireAuth, express.json(), async (req, res) => {
 
     const codigo = String(req.body?.codigo || '').trim();
     const descricao = String(req.body?.descricao || '').trim();
-    const usuario = getUsuario(req);
     const codigoProdutoBody = Number(req.body?.codigo_produto) || null;
 
     const [opProdResult, kanbanProgIdFromBody] = await Promise.all([
@@ -1063,19 +1127,18 @@ router.post('/abrir', requireAuth, express.json(), async (req, res) => {
                 descricao = COALESCE(NULLIF($4, ''), descricao),
                 id_kanban_programacao = COALESCE($5, id_kanban_programacao),
                 op_producao_id = COALESCE($6, op_producao_id),
-                usuario = $7,
                 updated_at = NOW()
           WHERE id = $1`,
-        [checkId, codigoProdutoGravar, codigoGravar, descricaoGravar, kanbanProgId, opProducaoId, usuario]
+        [checkId, codigoProdutoGravar, codigoGravar, descricaoGravar, kanbanProgId, opProducaoId]
       );
       dispararNotificacaoRiCheck(checkId);
     } else {
       const ins = await dbQuery(
         `INSERT INTO qualidade."RI_Check"
-           (id_kanban_programacao, codigo_produto, codigo, descricao, op_iapp_id, op_producao_id, usuario, status)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, 'Em andamento')
+           (id_kanban_programacao, codigo_produto, codigo, descricao, op_iapp_id, op_producao_id, status)
+         VALUES ($1, $2, $3, $4, $5, $6, 'Em andamento')
          RETURNING id`,
-        [kanbanProgId, codigoProdutoGravar, codigoGravar, descricaoGravar, opRefId, opProducaoId, usuario]
+        [kanbanProgId, codigoProdutoGravar, codigoGravar, descricaoGravar, opRefId, opProducaoId]
       );
       checkId = ins.rows[0].id;
       dispararNotificacaoRiCheck(checkId);
@@ -1245,7 +1308,6 @@ router.post('/:id/salvar', requireAuth, express.json(), async (req, res) => {
   try {
     await garantirSchemaRi();
     const checkId = Number(req.params.id) || 0;
-    const usuario = getUsuario(req);
     const avancarTeste = req.body?.avancar_teste === true;
     const localFiltro = String(req.body?.kanban_local || '').trim() || null;
 
@@ -1254,9 +1316,9 @@ router.post('/:id/salvar', requireAuth, express.json(), async (req, res) => {
 
     const { rowCount } = await dbQuery(
       `UPDATE qualidade."RI_Check"
-          SET usuario = $2, updated_at = NOW()
+          SET updated_at = NOW()
         WHERE id = $1`,
-      [checkId, usuario]
+      [checkId]
     );
     if (!rowCount) return res.status(404).json({ ok: false, error: 'RI não encontrado.' });
     dispararNotificacaoRiCheck(checkId);
@@ -1281,11 +1343,12 @@ router.post('/:id/salvar', requireAuth, express.json(), async (req, res) => {
 });
 
 // POST /api/qualidade/ri-check/:id/liberar
-// Registra RI: grava status = nome do kanban/posto atual (sem mover a OP).
+// Registra RI: grava status = nome do kanban/posto atual e desativa checkbox RI no Kanban_programacao.
 // Body opcional: { kanban_origem: 'Montagem hermetica' | ... }
 router.post('/:id/liberar', requireAuth, express.json(), async (req, res) => {
   try {
     await garantirSchemaRi();
+    await garantirSchemaKanbanProgramacao();
     const checkId = Number(req.params.id) || 0;
     const dados = await carregarCheckCompleto(checkId);
     if (!dados) return res.status(404).json({ ok: false, error: 'RI não encontrado.' });
@@ -1307,14 +1370,25 @@ router.post('/:id/liberar', requireAuth, express.json(), async (req, res) => {
 
     await dbQuery(
       `UPDATE qualidade."RI_Check"
-          SET status = $2, usuario = $3, updated_at = NOW()
+          SET status = $2, updated_at = NOW()
         WHERE id = $1`,
-      [checkId, statusRi, usuario]
+      [checkId, statusRi]
     );
     dispararNotificacaoRiCheck(checkId);
 
+    // Desativa checkbox RI em todos os registros do kanban desta OP
+    const kanbanProgId = Number(check.id_kanban_programacao) || null;
+    await dbQuery(
+      `UPDATE "Producao"."Kanban_programacao"
+          SET ri = FALSE
+        WHERE ($1::bigint IS NOT NULL AND id = $1)
+           OR op_producao_id = $2
+           OR op_iapp_id = $2
+           OR ($3 <> '' AND UPPER(TRIM(COALESCE(numero_op, ''))) = UPPER(TRIM($3)))`,
+      [kanbanProgId, opRefId, numeroOp || '']
+    );
+
     try {
-      const kanbanProgId = Number(check.id_kanban_programacao) || null;
       const opProdId = Number(check.op_producao_id) || Number(check.op_iapp_id) || opRefId;
       await registrarRiConcluida({
         kanbanProgramacaoId: kanbanProgId,
@@ -1336,6 +1410,7 @@ router.post('/:id/liberar', requireAuth, express.json(), async (req, res) => {
       ok: true,
       ...atualizado,
       kanban_status: statusRi,
+      ri_ativo: false,
       somente_ri: true,
       numero_op: numeroOp || null,
       op_producao_id: opProducaoId || opRefId,
@@ -1359,7 +1434,6 @@ async function registrarRiCheckImpressaoOp({
   codigo = '',
   codigoProduto = null,
   descricao = '',
-  usuario = '',
   statusRi = 'Montagem hermetica',
 }) {
   await garantirSchemaRi();
@@ -1390,7 +1464,6 @@ async function registrarRiCheckImpressaoOp({
               id_kanban_programacao = COALESCE($5, id_kanban_programacao),
               op_producao_id = COALESCE($6, op_producao_id),
               op_iapp_id = COALESCE($7, op_iapp_id),
-              usuario = $8,
               updated_at = NOW()
         WHERE id = $1`,
       [
@@ -1401,7 +1474,6 @@ async function registrarRiCheckImpressaoOp({
         kanbanProgId,
         opProducaoIdGravar,
         opIappIdGravar,
-        usuario,
       ]
     );
     dispararNotificacaoRiCheck(existentes[0].id);
@@ -1429,7 +1501,6 @@ async function registrarRiCheckImpressaoOp({
               id_kanban_programacao = COALESCE($5, id_kanban_programacao),
               op_producao_id = COALESCE($6, op_producao_id),
               op_iapp_id = COALESCE($7, op_iapp_id),
-              usuario = $8,
               updated_at = NOW()
         WHERE id = $1`,
       [
@@ -1440,7 +1511,6 @@ async function registrarRiCheckImpressaoOp({
         kanbanProgId,
         opProducaoIdGravar,
         opIappIdGravar,
-        usuario,
       ]
     );
     dispararNotificacaoRiCheck(emAndamento[0].id);
@@ -1450,8 +1520,8 @@ async function registrarRiCheckImpressaoOp({
   // Nasce 'Em andamento': o botão "Registrar RI" do modal é quem grava o posto.
   const ins = await dbQuery(
     `INSERT INTO qualidade."RI_Check"
-       (id_kanban_programacao, codigo_produto, codigo, descricao, op_iapp_id, op_producao_id, usuario, status)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, 'Em andamento')
+       (id_kanban_programacao, codigo_produto, codigo, descricao, op_iapp_id, op_producao_id, status)
+     VALUES ($1, $2, $3, $4, $5, $6, 'Em andamento')
      RETURNING id`,
     [
       kanbanProgId,
@@ -1460,7 +1530,6 @@ async function registrarRiCheckImpressaoOp({
       descricao || null,
       opIappIdGravar,
       opProducaoIdGravar,
-      usuario,
     ]
   );
   dispararNotificacaoRiCheck(ins.rows[0]?.id);

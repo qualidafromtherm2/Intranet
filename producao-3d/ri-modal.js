@@ -130,6 +130,7 @@ export function openProducao3dRiModal(op, opts = {}) {
   let riCheckData = null;
   let riDadosProntos = false;
   let riJaRegistrado = false;
+  let riAtivo = false;
   let riProdutoMeta = null;
   let closed = false;
 
@@ -146,7 +147,7 @@ export function openProducao3dRiModal(op, opts = {}) {
   function atualizarBtnRegistrarVisivel() {
     if (!btnRegistrar || !isRiAvancar) return;
     if (!spinnerEl?.hidden) return;
-    if (riJaRegistrado) {
+    if (!riAtivo || riJaRegistrado) {
       btnRegistrar.hidden = true;
       return;
     }
@@ -274,15 +275,11 @@ export function openProducao3dRiModal(op, opts = {}) {
         <div><span class="p3d-ri-muted">Código:</span> <b>${esc(check.codigo || codigo)}</b></div>
         ${check.codigo_produto ? `<div><span class="p3d-ri-muted">ID produto:</span> <b>${esc(String(check.codigo_produto))}</b></div>` : ''}
         <div><span class="p3d-ri-muted">Status:</span> <b style="color:${stCor}">${esc(st)}</b></div>
-        <div><span class="p3d-ri-muted">Usuário:</span> <b>${esc(check.usuario || '—')}</b></div>
       </div>
       ${check.descricao ? `<div class="p3d-ri-desc">${esc(check.descricao)}</div>` : ''}`;
     if (btnRegistrar && isRiAvancar) {
-      const bloqueado = kanbanLocal
-        && normStKanban(st) === normStKanban(kanbanLocal);
-      riJaRegistrado = bloqueado;
-      btnRegistrar.disabled = bloqueado;
-      btnRegistrar.style.opacity = bloqueado ? '0.5' : '1';
+      btnRegistrar.disabled = !riAtivo || riJaRegistrado;
+      btnRegistrar.style.opacity = (!riAtivo || riJaRegistrado) ? '0.5' : '1';
     }
     atualizarBtnRegistrarVisivel();
   }
@@ -290,6 +287,7 @@ export function openProducao3dRiModal(op, opts = {}) {
   async function carregar() {
     riDadosProntos = false;
     riJaRegistrado = false;
+    riAtivo = false;
     riCheckId = null;
     riCheckData = null;
     atualizarBtnRegistrarVisivel();
@@ -313,14 +311,17 @@ export function openProducao3dRiModal(op, opts = {}) {
       const data = await resp.json();
       if (!resp.ok || !data.ok) throw new Error(data.error || `Erro ${resp.status}`);
       riProdutoMeta = data.produto || null;
-      riJaRegistrado = !!data.ja_registrado;
+      riAtivo = data.ri_ativo === true;
+      riJaRegistrado = !riAtivo || !!data.ja_registrado;
       renderInfo(data.check || null);
       renderLista(data.verificacoes);
       renderListaNiq(data.ocorrencias || []);
-      statusEl.textContent = data.template_apenas
-        ? 'Verificações carregadas — clique em Registrar RI para gravar.'
-        : (riJaRegistrado ? 'RI já registrado neste posto.' : '');
-      if (riJaRegistrado) statusEl.classList.add('ok');
+      statusEl.textContent = !riAtivo
+        ? 'RI já liberada (checkbox desativado).'
+        : (data.template_apenas
+          ? 'Verificações carregadas — clique em Registrar RI para gravar.'
+          : (riJaRegistrado ? 'RI já registrado neste posto.' : ''));
+      if (!riAtivo || riJaRegistrado) statusEl.classList.add('ok');
     } catch (err) {
       statusEl.textContent = err.message || 'Falha ao carregar RI.';
       statusEl.classList.add('err');
@@ -453,7 +454,7 @@ export function openProducao3dRiModal(op, opts = {}) {
   btnOcorrencia?.addEventListener('click', abrirModalOcorrencia);
 
   btnRegistrar?.addEventListener('click', async () => {
-    if (!riDadosProntos || riJaRegistrado) return;
+    if (!riDadosProntos || riJaRegistrado || !riAtivo) return;
     if (isRiAvancar) {
       const postoLabel = kanbanLocal || 'atual';
       if (!confirm(`Confirmar registro do RI no posto ${postoLabel}?`)) return;
@@ -505,6 +506,8 @@ export function openProducao3dRiModal(op, opts = {}) {
         });
         const dataLib = await respLib.json();
         if (!respLib.ok || !dataLib.ok) throw new Error(dataLib.error || `Erro ${respLib.status}`);
+        riAtivo = false;
+        riJaRegistrado = true;
         renderInfo(dataLib.check);
         renderLista(dataLib.verificacoes);
         const postoRegistrado = dataLib.kanban_status || kanbanLocal || 'atual';

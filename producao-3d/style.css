@@ -221,6 +221,36 @@ kbd {
   display: none;
 }
 
+/* Botão Atualizar (canto superior direito) */
+.btn-refresh-3d {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 25;
+  pointer-events: auto;
+  padding: 0.45rem 0.85rem;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(13, 17, 23, 0.82);
+  color: #e6edf3;
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+}
+.btn-refresh-3d:hover {
+  background: rgba(33, 38, 45, 0.95);
+  border-color: rgba(251, 191, 36, 0.45);
+  color: #fbbf24;
+}
+.btn-refresh-3d:disabled {
+  opacity: 0.55;
+  cursor: wait;
+}
+.btn-refresh-3d[hidden] {
+  display: none !important;
+}
+
 /* ——— Spinner ao entrar no 3D ——— */
 .enter-loading {
   position: absolute;

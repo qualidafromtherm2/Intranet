@@ -2829,7 +2829,12 @@ function boot(renderer) {
     lookSlotAtual = null;
   }
 
-  async function carregarOcupacao() {
+  async function carregarOcupacao({ silent = false } = {}) {
+    const btnRefresh = document.getElementById('btnRefreshOcupacao');
+    if (btnRefresh) {
+      btnRefresh.disabled = true;
+      btnRefresh.textContent = '↻ Atualizando…';
+    }
     try {
       const resp = await fetch('/api/etiquetas/ocupacao', { credentials: 'include' });
       const json = await resp.json().catch(() => ({}));
@@ -2837,7 +2842,12 @@ function boot(renderer) {
       else ocupacao = {};
     } catch (e) {
       console.warn('[prateleiras-3d] ocupação:', e);
-      ocupacao = {};
+      if (!silent) ocupacao = {};
+    } finally {
+      if (btnRefresh) {
+        btnRefresh.disabled = false;
+        btnRefresh.textContent = '↻ Atualizar';
+      }
     }
     applyOcupacaoToSlots();
     loadGate.ocupacao = true;
@@ -4031,6 +4041,16 @@ function boot(renderer) {
   }
 
   void carregarOcupacao();
+
+  const btnRefreshOcupacao = document.getElementById('btnRefreshOcupacao');
+  if (btnRefreshOcupacao) {
+    btnRefreshOcupacao.hidden = false;
+    btnRefreshOcupacao.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      void carregarOcupacao({ silent: true });
+    });
+  }
 
   // ——— Movimento ———
   const onKey = (e, down) => {
