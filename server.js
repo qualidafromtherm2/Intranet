@@ -11,6 +11,7 @@ if (IS_CHAT_SERVICE) {
 // utils/supabase.js — carrega R2 na subida (log do backend)
 require('./utils/supabase');
 const { resolveNumeroPedidoFromWebhook } = require('./utils/vendasNfJoin');
+const { obterPermissaoMovimentacao } = require('./utils/movimentacaoPermissoes');
 const { uploadPublicFile, removePublicFiles } = require('./utils/storage');
 const { registrarControleOperacaoImpressaoOp } = require('./utils/controleOperacoes');
 const { iniciarCicloPosto } = require('./utils/tempoProducao');
@@ -17307,6 +17308,16 @@ app.get('/api/armazem/locais', async (req, res) => {
   } catch (err) {
     console.error('[api/armazem/locais][omie] erro →', err?.faultstring || err?.message || err);
     return servirDoBanco();
+  }
+});
+
+app.get('/api/movimentacoes/permissao-atual', async (req, res) => {
+  try {
+    const username = String(req.session?.user?.username || '').trim();
+    const regra = username ? await obterPermissaoMovimentacao(username) : null;
+    res.json({ ok: true, regra });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: 'Falha ao carregar permissao de movimentacao.' });
   }
 });
 

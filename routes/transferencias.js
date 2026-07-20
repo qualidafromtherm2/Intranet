@@ -4,6 +4,7 @@ const router = express.Router();
 const { dbQuery } = require('../src/db');
 const { OMIE_APP_KEY, OMIE_APP_SECRET } = require('../config.server');
 const { registrarEventoReq: monEventoReq } = require('../utils/monitoramento');
+const { validarPermissaoMovimentacao } = require('../utils/movimentacaoPermissoes');
 
 const STATUS_AGUARDANDO = 'Aguardando aprovação';
 const STATUS_TRANSFERIDO = 'Transferido';
@@ -443,6 +444,14 @@ router.post('/', express.json(), async (req, res) => {
     if (!origem || !destino) {
       return res.status(400).json({ error: 'Informe origem e destino da transferência.' });
     }
+    const usuarioSessao = String(req.session?.user?.username || solicitante || '').trim();
+    const permissao = await validarPermissaoMovimentacao({
+      username: usuarioSessao,
+      tipo: 'TRF',
+      origem,
+      destino
+    });
+    if (!permissao.ok) return res.status(403).json({ error: permissao.error });
     if (!itens.length) {
       return res.status(400).json({ error: 'Nenhum item selecionado para transferência.' });
     }

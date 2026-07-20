@@ -75001,6 +75001,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const movimEstoqueLocaisEl = document.getElementById('movimEstoqueLocais');
   let _movimEstoqueLocais = [];
   let _movimLocaisDisponiveis = [];
+  let _movimRegraUsuario = null;
   let _mostrarOutrosDestinos = false;
   let _codigoProdutoAtual = null;
   let _descricaoProdutoAtual = null;
@@ -76365,6 +76366,7 @@ document.addEventListener('DOMContentLoaded', () => {
       document.querySelectorAll('.movimModoBtn').forEach(b => b.classList.remove('ativo'));
       limparEnderecosInternos();
       atualizarLayoutMovim();
+      preencherDestinosMovim();
     });
   }
 
@@ -76378,6 +76380,7 @@ document.addEventListener('DOMContentLoaded', () => {
       });
       limparEnderecosInternos();
       atualizarLayoutMovim();
+      preencherDestinosMovim();
       monEvento('click_modo_interno', { modo: _movimModoInterno });
     });
   }
@@ -76504,9 +76507,17 @@ document.addEventListener('DOMContentLoaded', () => {
   function preencherDestinosMovim() {
     if (!localSel) return;
     const valorAtual = localSel.value;
-    const locaisVisiveis = _mostrarOutrosDestinos
-      ? _movimLocaisDisponiveis
-      : _movimLocaisDisponiveis.filter(l => MOVIM_DESTINOS_PRINCIPAIS.has(String(l.codigo_local_estoque)));
+    const tipoAtivo = isMotivoInterno() ? _movimModoInterno : obterTipoExecutarOmie();
+    const localRestrito = _movimRegraUsuario?.origem_local_codigo
+      ? String(tipoAtivo === 'TRANSFERENCIA'
+        ? _movimRegraUsuario.destino_transferencia_codigo
+        : _movimRegraUsuario.origem_local_codigo)
+      : '';
+    const locaisVisiveis = localRestrito
+      ? _movimLocaisDisponiveis.filter(l => String(l.codigo_local_estoque) === localRestrito)
+      : (_mostrarOutrosDestinos
+        ? _movimLocaisDisponiveis
+        : _movimLocaisDisponiveis.filter(l => MOVIM_DESTINOS_PRINCIPAIS.has(String(l.codigo_local_estoque))));
     localSel.innerHTML = '<option value="">Selecione o destino...</option>';
     locaisVisiveis.forEach(l => {
       const opt = document.createElement('option');
@@ -76519,7 +76530,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     if (mostrarOutrosLocaisBtn) {
       const existemOutros = _movimLocaisDisponiveis.some(l => !MOVIM_DESTINOS_PRINCIPAIS.has(String(l.codigo_local_estoque)));
-      mostrarOutrosLocaisBtn.style.display = existemOutros ? 'inline-flex' : 'none';
+      mostrarOutrosLocaisBtn.style.display = !_movimRegraUsuario?.origem_local_codigo && existemOutros ? 'inline-flex' : 'none';
       mostrarOutrosLocaisBtn.innerHTML = _mostrarOutrosDestinos
         ? '<i class="fa-solid fa-eye-slash"></i> Ocultar outros armazéns'
         : '<i class="fa-solid fa-eye"></i> Desocultar outros armazéns';
@@ -76535,15 +76546,23 @@ document.addEventListener('DOMContentLoaded', () => {
   async function carregarLocais() {
     if (!localSel && !origemSel) return;
     try {
-      const r = await fetch('/api/armazem/locais?fonte=db');
+      const [r, permissaoResp] = await Promise.all([
+        fetch('/api/armazem/locais?fonte=db'),
+        fetch('/api/movimentacoes/permissao-atual', { credentials: 'include' })
+      ]);
       const d = await r.json();
+      const permissaoJson = await permissaoResp.json().catch(() => ({}));
+      _movimRegraUsuario = permissaoJson?.regra || null;
       const locais = (d.locais || []).filter(l => !l.inativo);
       _movimLocaisDisponiveis = locais;
 
       function preencherOrigem(sel) {
         if (!sel) return;
         sel.innerHTML = '';
-        locais.forEach(l => {
+        const origens = _movimRegraUsuario?.origem_local_codigo
+          ? locais.filter(l => String(l.codigo_local_estoque) === String(_movimRegraUsuario.origem_local_codigo))
+          : locais;
+        origens.forEach(l => {
           const opt = document.createElement('option');
           opt.value = l.codigo_local_estoque;
           opt.textContent = l.descricao || l.codigo_local_estoque;
