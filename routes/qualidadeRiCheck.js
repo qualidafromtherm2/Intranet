@@ -504,7 +504,12 @@ function isKanbanTesteOk(s) {
 }
 
 function isKanbanInspecaoFinal(s) {
-  return normKanbanStatusLabel(s) === 'inspecao final';
+  const n = normKanbanStatusLabel(s);
+  return n === 'inspecao final' || n === 'teste final' || n === 'teste ok';
+}
+
+function isKanbanEmbalagem(s) {
+  return normKanbanStatusLabel(s) === 'embalagem';
 }
 
 function colKeyFromPostoKanban(posto) {
@@ -512,14 +517,18 @@ function colKeyFromPostoKanban(posto) {
   if (n === 'montagem hermetica') return 'solicitado';
   if (n === 'montagem eletrica') return 'produzindo';
   if (n === 'teste') return 'teste';
-  if (n === 'inspecao final' || n === 'teste ok') return 'inspecao_final';
+  if (n === 'inspecao final' || n === 'teste ok' || n === 'teste final') return 'inspecao_final';
+  if (n === 'embalagem') return 'embalagem';
   return '';
 }
 
 function postoAtualKanbanFromStatuses(statuses) {
   const norms = (statuses || []).map(s => normKanbanStatusLabel(s)).filter(Boolean);
   if (norms.includes('finalizado')) return null;
-  if (norms.includes('inspecao final') || norms.includes('teste ok')) return 'Inspeção final';
+  if (norms.includes('embalagem')) return 'Embalagem';
+  if (norms.includes('inspecao final') || norms.includes('teste ok') || norms.includes('teste final')) {
+    return 'Inspeção final';
+  }
   if (norms.includes('teste')) return 'Teste';
   if (norms.includes('montagem eletrica')) return 'Montagem eletrica';
   if (norms.includes('montagem hermetica')) return 'Montagem hermetica';
@@ -918,6 +927,7 @@ router.get('/kanbans', requireAuth, (_req, res) => {
       'Montagem eletrica',
       'Teste',
       'Inspeção final',
+      'Embalagem',
     ],
   });
 });
@@ -1101,7 +1111,7 @@ router.post('/abrir', requireAuth, express.json(), async (req, res) => {
     } else if (kanbanLocal === 'Inspeção final') {
       existente = await dbQuery(
         `SELECT id FROM qualidade."RI_Check"
-          WHERE ${opWhere} AND status IN ('Inspeção final', 'Teste OK')
+          WHERE ${opWhere} AND status IN ('Inspeção final', 'Teste OK', 'Teste final')
           ORDER BY id DESC LIMIT 1`,
         [opRefId]
       );
@@ -1110,7 +1120,7 @@ router.post('/abrir', requireAuth, express.json(), async (req, res) => {
         `SELECT id FROM qualidade."RI_Check"
           WHERE ${opWhere}
             AND COALESCE(status, '') NOT IN (
-              'Montagem eletrica', 'Liberado', 'Teste', 'Inspeção final', 'Teste OK', 'Finalizado'
+              'Montagem eletrica', 'Liberado', 'Teste', 'Inspeção final', 'Teste OK', 'Teste final', 'Embalagem', 'Finalizado'
             )
           ORDER BY id DESC LIMIT 1`,
         [opRefId]
@@ -1378,14 +1388,16 @@ router.post('/:id/liberar', requireAuth, express.json(), async (req, res) => {
 
     // Desativa checkbox RI em todos os registros do kanban desta OP
     const kanbanProgId = Number(check.id_kanban_programacao) || null;
+    const avancarParaEmbalagem = isKanbanInspecaoFinal(statusRi);
     await dbQuery(
       `UPDATE "Producao"."Kanban_programacao"
-          SET ri = FALSE
+          SET ri = FALSE,
+              status = CASE WHEN $4::boolean THEN 'Embalagem' ELSE status END
         WHERE ($1::bigint IS NOT NULL AND id = $1)
            OR op_producao_id = $2
            OR op_iapp_id = $2
            OR ($3 <> '' AND UPPER(TRIM(COALESCE(numero_op, ''))) = UPPER(TRIM($3)))`,
-      [kanbanProgId, opRefId, numeroOp || '']
+      [kanbanProgId, opRefId, numeroOp || '', avancarParaEmbalagem]
     );
 
     try {
@@ -1409,7 +1421,7 @@ router.post('/:id/liberar', requireAuth, express.json(), async (req, res) => {
     return res.json({
       ok: true,
       ...atualizado,
-      kanban_status: statusRi,
+      kanban_status: avancarParaEmbalagem ? 'Embalagem' : statusRi,
       ri_ativo: false,
       somente_ri: true,
       numero_op: numeroOp || null,
@@ -1485,7 +1497,7 @@ async function registrarRiCheckImpressaoOp({
       WHERE ${opWhere}
         AND COALESCE(status, '') NOT IN (
           'Montagem hermetica', 'Montagem eletrica', 'Liberado',
-          'Teste', 'Inspeção final', 'Teste OK', 'Finalizado'
+          'Teste', 'Inspeção final', 'Teste OK', 'Teste final', 'Embalagem', 'Finalizado'
         )
       ORDER BY id DESC LIMIT 1`,
     [opRefId]

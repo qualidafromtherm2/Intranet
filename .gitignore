@@ -25,6 +25,7 @@ diagrama.puml
 .continue/
 .agents/
 .superpowers/
+docs/superpowers/
 AGENTS.md
 ORIENTACAO-RAPIDA.md
 iniciar-ia.sh

@@ -14596,7 +14596,7 @@ app.post('/api/etiquetas/iapp-op/imprimir', express.json(), async (req, res) => 
                     ELSE status
                   END,
                   ri = CASE
-                    WHEN COALESCE(TRIM(status), '') IN ('', 'Montagem hermetica') THEN TRUE
+                    WHEN COALESCE(TRIM(status), '') IN ('', 'Montagem hermetica') THEN FALSE
                     ELSE ri
                   END
             WHERE op_producao_id = $1`,
@@ -14606,7 +14606,7 @@ app.post('/api/etiquetas/iapp-op/imprimir', express.json(), async (req, res) => 
           await pool.query(
             `INSERT INTO "Producao"."Kanban_programacao"
                (codigo_produto, codigo, descricao, codigo_pedido, quantidade, numero_op, op_producao_id, status, ri)
-             VALUES ($1, $2, $3, 0, 1, $4, $5, 'Montagem hermetica', TRUE)`,
+             VALUES ($1, $2, $3, 0, 1, $4, $5, 'Montagem hermetica', FALSE)`,
             [codigoProdutoNum, codigo, descricao, numeroOpTxt, opProducaoId]
           );
         }
@@ -14633,7 +14633,7 @@ app.post('/api/etiquetas/iapp-op/imprimir', express.json(), async (req, res) => 
                     ELSE status
                   END,
                   ri = CASE
-                    WHEN COALESCE(TRIM(status), '') IN ('', 'Montagem hermetica') THEN TRUE
+                    WHEN COALESCE(TRIM(status), '') IN ('', 'Montagem hermetica') THEN FALSE
                     ELSE ri
                   END
             WHERE op_iapp_id = $1`,
@@ -14643,7 +14643,7 @@ app.post('/api/etiquetas/iapp-op/imprimir', express.json(), async (req, res) => 
           await pool.query(
             `INSERT INTO "Producao"."Kanban_programacao"
                (codigo_produto, codigo, descricao, codigo_pedido, quantidade, numero_op, op_iapp_id, status, ri)
-             VALUES ($1, $2, $3, 0, 1, $4, $5, 'Montagem hermetica', TRUE)`,
+             VALUES ($1, $2, $3, 0, 1, $4, $5, 'Montagem hermetica', FALSE)`,
             [codigoProdutoNum, codigo, descricao, numeroOpTxt, opIappId]
           );
         }

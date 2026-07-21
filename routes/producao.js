@@ -2613,13 +2613,19 @@ router.post('/finalizar-operacao', express.json(), async (req, res) => {
       const ativarRi = postoNorm
         && postoNorm !== 'finalizado'
         && postoNorm !== 'programado'
-        && postoNorm !== 'pedidos';
+        && postoNorm !== 'pedidos'
+        && postoNorm !== 'embalagem';
+      const forcarRiOff = postoNorm === 'embalagem' || postoNorm === 'finalizado';
       await dbQuery(
         `UPDATE "Producao"."Kanban_programacao"
             SET status = $1,
-                ri = CASE WHEN $3::boolean THEN TRUE ELSE ri END
+                ri = CASE
+                  WHEN $4::boolean THEN FALSE
+                  WHEN $3::boolean THEN TRUE
+                  ELSE ri
+                END
           WHERE id = $2`,
-        [proximoStatus, kanbanProgramacaoId, ativarRi]
+        [proximoStatus, kanbanProgramacaoId, ativarRi, forcarRiOff]
       );
     }
 
@@ -2684,7 +2690,12 @@ const RETROCEDER_KANBAN_POR_COL_KEY = {
   inspecao_final: {
     status_destino: 'Teste',
     posto_desfeito: 'Teste',
-    operacoes_desfeitas: ['Inspeção final', 'Teste OK'],
+    operacoes_desfeitas: ['Inspeção final', 'Teste OK', 'Teste final'],
+  },
+  embalagem: {
+    status_destino: 'Inspeção final',
+    posto_desfeito: 'Inspeção final',
+    operacoes_desfeitas: ['Embalagem', 'Inspeção final', 'Teste OK', 'Teste final'],
   },
 };
 
@@ -2708,7 +2719,7 @@ router.post('/retroceder-op', express.json(), async (req, res) => {
     if (!cfg) {
       return res.status(400).json({
         success: false,
-        error: 'Retroceder OP só está disponível em Montagem hermetica, Montagem eletrica, Teste ou Inspeção final.',
+        error: 'Retroceder OP só está disponível em Montagem hermetica, Montagem eletrica, Teste, Inspeção final ou Embalagem.',
       });
     }
 

@@ -11783,6 +11783,18 @@
                 </div>
               </div>
 
+              <!-- Coluna: Embalagem -->
+              <div style="flex:0 0 340px;min-width:300px;">
+                <div style="display:flex;align-items:center;gap:8px;padding:10px 14px;background:#064e3b;border-radius:10px 10px 0 0;border:1px solid #059669;border-bottom:none;">
+                  <span style="width:10px;height:10px;border-radius:50%;background:#34d399;display:inline-block;flex-shrink:0;"></span>
+                  <span style="font-size:12px;font-weight:700;color:#6ee7b7;text-transform:uppercase;letter-spacing:.5px;">Embalagem</span>
+                  <span id="kanbanEmbalagemCount" style="margin-left:auto;font-size:11px;background:#065f46;color:#a7f3d0;padding:2px 9px;border-radius:10px;font-weight:600;">0</span>
+                </div>
+                <div id="kanbanEmbalagem" style="min-height:220px;background:rgba(52,211,153,.04);border:1px solid #059669;border-top:none;border-radius:0 0 10px 10px;padding:10px;display:flex;flex-direction:column;gap:10px;">
+                  <div style="text-align:center;padding:24px 0;color:var(--inactive-color);font-size:12px;">Nenhuma OP em Embalagem.</div>
+                </div>
+              </div>
+
             </div>
 
           </div>
@@ -11851,6 +11863,7 @@
                   <option value="Montagem eletrica">Montagem eletrica</option>
                   <option value="Teste">Teste</option>
                   <option value="Inspeção final">Inspeção final</option>
+                  <option value="Embalagem">Embalagem</option>
                 </select>
                 <div id="producaoGerarOpPostosLista" style="display:flex;flex-direction:column;gap:6px;margin-top:8px;"></div>
 

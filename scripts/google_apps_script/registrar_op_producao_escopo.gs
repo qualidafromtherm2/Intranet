@@ -1,7 +1,8 @@
 /**
  * Google Apps Script — registrar OPs na aba "PRODUÇÃO 2 - F/ ESCOPO"
  *
- * Grava C, E, F, H. A coluna D (PEDIDO) NÃO é montada como texto.
+ * Grava C, E, G, H. A coluna D (PEDIDO) NÃO é montada como texto.
+ * O número da OP vai na coluna G (CONTROLADOR).
  * Em seguida faz autoFill da fórmula da linha de cima (igual arrastar no Sheets).
  *
  * Implantar: Gerenciar implantações → EDITAR (lápis) → Nova versão → Implantar
@@ -63,7 +64,8 @@ function registrarLinhasOpEscopo(sheet, linhas) {
     sheet.getRange(rowNum, 3).setValue(hoje);
     sheet.getRange(rowNum, 3).setNumberFormat('dd/MM/yyyy');
     sheet.getRange(rowNum, 5).setValue(modelo);
-    sheet.getRange(rowNum, 6).setValue(numeroOp);
+    // G (coluna 7) = CONTROLADOR — número da OP (antes ia na F / ORDEM DE PRODUÇÃO)
+    sheet.getRange(rowNum, 7).setValue(numeroOp);
     sheet.getRange(rowNum, 8).setValue(Number.isFinite(etapa) && etapa > 0 ? etapa : 5);
 
     // D = arrasta fórmula da linha modelo (igual você faz na tela)
@@ -95,10 +97,13 @@ function proximaLinhaVaziaColunaF(sheet) {
   var last = sheet.getLastRow();
   if (last < 1) return 1;
 
+  // Considera a linha "usada" se F (histórico) OU G (novo — CONTROLADOR) tiver dado.
   var valores = sheet.getRange(1, 6, last, 6).getValues();
   var ultimaComDado = 0;
   for (var i = 0; i < valores.length; i++) {
-    if (String(valores[i][0] || '').trim() !== '') {
+    var colF = String(valores[i][0] || '').trim();
+    var colG = String(valores[i][1] || '').trim();
+    if (colF !== '' || colG !== '') {
       ultimaComDado = i + 1;
     }
   }
@@ -142,7 +147,7 @@ function testarFormulaPedido() {
 
   sheet.getRange(rowNum, 3).setValue(new Date());
   sheet.getRange(rowNum, 5).setValue('MODELO-TESTE-SGF');
-  sheet.getRange(rowNum, 6).setValue('TESTE-AUTOFILL');
+  sheet.getRange(rowNum, 7).setValue('TESTE-AUTOFILL');
   sheet.getRange(rowNum, 8).setValue(5);
 
   var tpl = buscarLinhaModeloFormula(sheet, rowNum);

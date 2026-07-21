@@ -814,15 +814,16 @@ function boot(renderer) {
   // Layout tipo "F" + Programado no início do hermético (−Z):
   //      eletrica              hermetica              programado
   // |---------|--------------------------------|------|
-  // |espera   |teste
-  // |         |
+  // |inspecao |teste
+  // |         |   →  [retângulo Embalagem no chão]
   // Divisor elétrica|hermético = entrada TESTE
   // Divisor hermético|programado = um pouco antes do hermético
   const branchCenterX = BELT_W / 2 + BRANCH_LEN / 2;
   const BRANCH_GAP = 3.6;
   const PROG_LEN = 7.5; // trecho Programado (cabe várias placas)
   const zPonta = BELT_LEN / 2 - 0.9;
-  const zEspera = zPonta;
+  const zInspecao = zPonta;
+  const zEspera = zInspecao; // alias legado
   const zTeste = zPonta - BRANCH_GAP;
 
   const zEleIni = zTeste;
@@ -841,8 +842,14 @@ function boot(renderer) {
   const czHerm = (zHermIni + zHermFim) / 2;
 
   // aliases legados
-  const zAntesFaixa = zEspera;
+  const zAntesFaixa = zInspecao;
   const zFinal = zTeste;
+
+  // Zona Embalagem: retângulo no chão na frente das esteiras de ramal (+X)
+  const EMB_W = 5.2;
+  const EMB_D = 4.4;
+  const embCenterX = branchCenterX + BRANCH_LEN / 2 + 0.9 + EMB_W / 2;
+  const embCenterZ = (zTeste + zInspecao) / 2;
 
   createBeltSegment({
     axis: 'z', length: lenProg, cx: 0, cz: czProg,
@@ -858,13 +865,72 @@ function boot(renderer) {
   });
 
   createBeltSegment({
-    axis: 'x', length: BRANCH_LEN, cx: branchCenterX, cz: zEspera,
-    nome: 'Espera', labelSide: 'right',
+    axis: 'x', length: BRANCH_LEN, cx: branchCenterX, cz: zInspecao,
+    nome: 'Inspeção final', labelSide: 'right',
   });
   createBeltSegment({
     axis: 'x', length: BRANCH_LEN, cx: branchCenterX, cz: zTeste,
     nome: 'Teste', labelSide: 'right',
   });
+
+  // Demarcação no chão — Embalagem (retângulo)
+  (function createEmbalagemZone() {
+    const borderMat = new THREE.MeshBasicMaterial({
+      color: 0x34d399,
+      transparent: true,
+      opacity: 0.85,
+      side: THREE.DoubleSide,
+    });
+    const fillMat = new THREE.MeshBasicMaterial({
+      color: 0x064e3b,
+      transparent: true,
+      opacity: 0.35,
+      side: THREE.DoubleSide,
+    });
+    const fill = new THREE.Mesh(new THREE.PlaneGeometry(EMB_W, EMB_D), fillMat);
+    fill.rotation.x = -Math.PI / 2;
+    fill.position.set(embCenterX, 0.025, embCenterZ);
+    scene.add(fill);
+
+    const tw = 0.12;
+    const edges = [
+      { w: EMB_W + tw, d: tw, x: 0, z: EMB_D / 2 },
+      { w: EMB_W + tw, d: tw, x: 0, z: -EMB_D / 2 },
+      { w: tw, d: EMB_D + tw, x: EMB_W / 2, z: 0 },
+      { w: tw, d: EMB_D + tw, x: -EMB_W / 2, z: 0 },
+    ];
+    for (const e of edges) {
+      const edge = new THREE.Mesh(new THREE.PlaneGeometry(e.w, e.d), borderMat);
+      edge.rotation.x = -Math.PI / 2;
+      edge.position.set(embCenterX + e.x, 0.03, embCenterZ + e.z);
+      scene.add(edge);
+    }
+
+    const c = document.createElement('canvas');
+    c.width = 512;
+    c.height = 96;
+    const ctx = c.getContext('2d');
+    ctx.clearRect(0, 0, 512, 96);
+    ctx.fillStyle = 'rgba(6,78,59,0.85)';
+    ctx.fillRect(0, 0, 512, 96);
+    ctx.strokeStyle = '#34d399';
+    ctx.lineWidth = 4;
+    ctx.strokeRect(4, 4, 504, 88);
+    ctx.fillStyle = '#a7f3d0';
+    ctx.font = 'bold 42px ui-sans-serif, system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('EMBALAGEM', 256, 48);
+    const tex = new THREE.CanvasTexture(c);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    const label = new THREE.Mesh(
+      new THREE.PlaneGeometry(3.6, 0.68),
+      new THREE.MeshBasicMaterial({ map: tex, transparent: true, side: THREE.DoubleSide })
+    );
+    label.rotation.x = -Math.PI / 2;
+    label.position.set(embCenterX, 0.04, embCenterZ + EMB_D / 2 + 0.55);
+    scene.add(label);
+  })();
 
   // ——— Fotos das OPs na esteira ———
   const productMeshes = [];
@@ -1182,10 +1248,11 @@ function boot(renderer) {
     if (s === 'a produzir' || s === 'programado') return 'programado';
     if (s.includes('hermetic')) return 'hermetico';
     if (s.includes('eletric')) return 'eletrica';
-    if (s === 'teste' || s.startsWith('teste')) return 'teste';
+    if (s === 'embalagem') return 'embalagem';
+    // Teste final / Inspeção final / Teste OK → esteira Inspeção (antes do match genérico "teste")
+    if (s === 'teste final' || s === 'teste ok' || s.includes('inspec')) return 'inspecao';
+    if (s === 'teste') return 'teste';
     if (s === 'espera' || s.includes('espera')) return 'espera';
-    // Inspeção final e outros → espera (fila pós-teste), se fizer sentido; senão programado
-    if (s.includes('inspec')) return 'espera';
     return 'programado';
   }
 
@@ -1213,6 +1280,7 @@ function boot(renderer) {
 
     let usable;
     let alongX = false;
+    let onFloorGrid = false;
     let zIni = 0;
     let zFim = 0;
     let zFixed = 0;
@@ -1223,9 +1291,14 @@ function boot(renderer) {
       zFim = posto === 'programado' ? zProgFim : posto === 'hermetico' ? zHermFim : zEleFim;
       const len = Math.max(0.5, zFim - zIni);
       usable = Math.max(0.8, len - 0.6);
+    } else if (posto === 'embalagem') {
+      onFloorGrid = true;
+      xCenter = embCenterX;
+      zFixed = embCenterZ;
+      usable = Math.max(0.8, Math.min(EMB_W, EMB_D) - 0.5);
     } else {
       alongX = true;
-      zFixed = posto === 'teste' ? zTeste : zEspera;
+      zFixed = posto === 'teste' ? zTeste : zInspecao;
       xCenter = branchCenterX;
       usable = Math.max(0.8, BRANCH_LEN - 0.6);
     }
@@ -1238,7 +1311,28 @@ function boot(renderer) {
     const scale = Math.max(0.45, Math.min(1, gap / CARD_GAP));
 
     const out = [];
-    if (alongX) {
+    if (onFloorGrid) {
+      const cols = Math.max(1, Math.ceil(Math.sqrt(groups.length)));
+      const rows = Math.max(1, Math.ceil(groups.length / cols));
+      const gapX = Math.min(1.15, (EMB_W - 0.6) / Math.max(1, cols));
+      const gapZ = Math.min(1.15, (EMB_D - 0.6) / Math.max(1, rows));
+      const spanX = (cols - 1) * gapX;
+      const spanZ = (rows - 1) * gapZ;
+      const x0 = xCenter - spanX / 2;
+      const z0 = zFixed - spanZ / 2;
+      groups.forEach((ops, i) => {
+        const col = i % cols;
+        const row = Math.floor(i / cols);
+        out.push({
+          x: x0 + col * gapX,
+          z: z0 + row * gapZ,
+          y: 0.42,
+          posto,
+          ops,
+          scale: Math.max(0.5, Math.min(1, Math.min(gapX, gapZ) / CARD_GAP)),
+        });
+      });
+    } else if (alongX) {
       const span = (groups.length - 1) * gap;
       const x0 = xCenter - span / 2;
       groups.forEach((ops, i) => {
@@ -1270,14 +1364,14 @@ function boot(renderer) {
   /** Posiciona OPs conforme Kanban_programacao.status (sempre inclui todas). */
   function slotPositionsByStatus(itens) {
     const buckets = {
-      programado: [], hermetico: [], eletrica: [], teste: [], espera: [],
+      programado: [], hermetico: [], eletrica: [], teste: [], inspecao: [], embalagem: [], espera: [],
     };
     for (const op of itens || []) {
       const posto = statusToPosto(op.status);
       (buckets[posto] || buckets.programado).push(op);
     }
     const pairs = [];
-    for (const posto of ['programado', 'hermetico', 'eletrica', 'teste', 'espera']) {
+    for (const posto of ['programado', 'hermetico', 'eletrica', 'teste', 'inspecao', 'embalagem', 'espera']) {
       for (const slot of packPosto(posto, buckets[posto])) {
         pairs.push(slot);
       }
@@ -1351,7 +1445,10 @@ function boot(renderer) {
         transparent: false,
       });
       const mesh = new THREE.Mesh(new THREE.PlaneGeometry(cw, ch), mat);
-      mesh.position.set(slot.x, BELT_Y + ch / 2 + 0.12, slot.z);
+      const cardY = Number.isFinite(slot.y)
+        ? slot.y
+        : (BELT_Y + ch / 2 + 0.12);
+      mesh.position.set(slot.x, cardY, slot.z);
       mesh.userData = {
         tipo: 'op',
         op: ops[0],
@@ -1365,7 +1462,8 @@ function boot(renderer) {
         new THREE.BoxGeometry(0.14 * scale, 0.04, 0.14 * scale),
         steelDarkMat
       );
-      stand.position.set(slot.x, BELT_Y + 0.02, slot.z);
+      const standY = Number.isFinite(slot.y) ? 0.04 : (BELT_Y + 0.02);
+      stand.position.set(slot.x, standY, slot.z);
       beltGroup.add(stand);
       productMeshes.push(stand);
 
@@ -1479,6 +1577,8 @@ function boot(renderer) {
       hermetico: 'Hermético',
       eletrica: 'Elétrica',
       teste: 'Teste',
+      inspecao: 'Inspeção final',
+      embalagem: 'Embalagem',
       espera: 'Espera',
     }[posto] || posto || '';
     const riBtn = withRiBtn

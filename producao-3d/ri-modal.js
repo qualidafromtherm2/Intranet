@@ -28,6 +28,8 @@ export function postoToKanbanLocal(posto, status) {
     hermetico: 'Montagem hermetica',
     eletrica: 'Montagem eletrica',
     teste: 'Teste',
+    inspecao: 'Inspeção final',
+    embalagem: 'Embalagem',
     espera: 'Inspeção final',
     programado: 'Programado',
   };
@@ -36,12 +38,12 @@ export function postoToKanbanLocal(posto, status) {
 
 function isPostoRiAvancar(kanbanLocal) {
   const s = normStKanban(kanbanLocal);
-  if (!s || s === 'programado' || s === 'pedidos') return false;
+  if (!s || s === 'programado' || s === 'pedidos' || s === 'embalagem') return false;
   return (
     s.includes('hermetic') ||
     s.includes('eletric') ||
     s === 'teste' ||
-    s.startsWith('teste') ||
+    s === 'teste final' ||
     s.includes('inspec')
   );
 }

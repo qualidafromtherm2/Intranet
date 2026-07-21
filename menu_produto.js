@@ -80768,6 +80768,8 @@ window.verOperacao = function(osId) {
   const cntAguardando = document.getElementById('kanbanAguardandoCount');
   const colInspecaoFinal = document.getElementById('kanbanInspecaoFinal');
   const cntInspecaoFinal = document.getElementById('kanbanInspecaoFinalCount');
+  const colEmbalagem = document.getElementById('kanbanEmbalagem');
+  const cntEmbalagem = document.getElementById('kanbanEmbalagemCount');
 
   // Nomes exibidos no kanban Registrar produção — ao criar coluna nova, incluir aqui
   const PRODUCAO_KANBAN_COLUNAS = [
@@ -80777,6 +80779,7 @@ window.verOperacao = function(osId) {
     { key: 'produzindo', nome: 'Montagem eletrica' },
     { key: 'teste', nome: 'Teste' },
     { key: 'inspecao_final', nome: 'Inspeção final' },
+    { key: 'embalagem', nome: 'Embalagem' },
   ];
 
   function producaoNomeKanbanPorKey(colKey) {
@@ -80984,7 +80987,13 @@ window.verOperacao = function(osId) {
 
     const statuses = regs.map(r => normStatusKanban(r.status)).filter(Boolean);
     if (statuses.includes('finalizado')) return 'finalizado';
-    if (statuses.includes('inspecao final') || statuses.includes('teste ok')) return 'inspecao_final';
+    if (statuses.includes('embalagem')) return 'embalagem';
+    // Teste final / Inspeção final / Teste OK → mesma coluna Inspeção final
+    if (
+      statuses.includes('inspecao final')
+      || statuses.includes('teste ok')
+      || statuses.includes('teste final')
+    ) return 'inspecao_final';
     if (statuses.includes('teste')) return 'teste';
     if (statuses.includes('montagem eletrica')) return 'produzindo';
     if (statuses.includes('montagem hermetica')) return 'solicitado';
@@ -81064,7 +81073,7 @@ window.verOperacao = function(osId) {
 
   async function carregarTemposPostoPorOps(ordens, progOverride) {
     const prog = Array.isArray(progOverride) ? progOverride : programacaoCarregada;
-    const postoCols = ['solicitado', 'produzindo', 'teste', 'inspecao_final'];
+    const postoCols = ['solicitado', 'produzindo', 'teste', 'inspecao_final', 'embalagem'];
     const ops = (ordens || []).filter(op => postoCols.includes(opColunaAtual(op))).map((op) => {
       const reg = (prog || []).find((r) =>
         Number(r.op_producao_id) === Number(op.id)
@@ -81546,6 +81555,8 @@ window.verOperacao = function(osId) {
       'Nenhuma OP em Teste.', false, filtroCodigoProduto);
     renderKanbanCol(colInspecaoFinal, cntInspecaoFinal, ordens, 'inspecao_final',
       'Nenhuma OP em Inspeção final.', false, filtroCodigoProduto);
+    renderKanbanCol(colEmbalagem, cntEmbalagem, ordens, 'embalagem',
+      'Nenhuma OP em Embalagem.', false, filtroCodigoProduto);
 
     attachProducaoKanbanActionButtons('#registrarProducaoPane', ordens);
     attachOpCardClickHandlers('#registrarProducaoPane', ordens);
@@ -82439,6 +82450,10 @@ window.verOperacao = function(osId) {
         renderKanbanCol(colInspecaoFinal, cntInspecaoFinal, ordensCarregadas, 'inspecao_final',
           'Nenhuma OP em Inspeção final.', false, filtroCodigoProduto);
       }
+      if (keys.includes('embalagem')) {
+        renderKanbanCol(colEmbalagem, cntEmbalagem, ordensCarregadas, 'embalagem',
+          'Nenhuma OP em Embalagem.', false, filtroCodigoProduto);
+      }
       attachProducaoKanbanActionButtons('#registrarProducaoPane', ordensCarregadas);
       attachOpCardClickHandlers('#registrarProducaoPane', ordensCarregadas);
       return true;
@@ -82533,7 +82548,7 @@ window.verOperacao = function(osId) {
     }
     let op = encontrarOpPorEtiqueta(dados.lote, dados.codigo);
     if (!op) {
-      await recarregarColunasKanban(['programado', 'solicitado', 'produzindo', 'teste', 'inspecao_final']);
+      await recarregarColunasKanban(['programado', 'solicitado', 'produzindo', 'teste', 'inspecao_final', 'embalagem']);
       op = encontrarOpPorEtiqueta(dados.lote, dados.codigo);
     }
     if (!op) {
@@ -82675,7 +82690,7 @@ window.verOperacao = function(osId) {
     return cols[idx - 1];
   };
   window._producaoColunasRetrocederOp = function () {
-    return ['solicitado', 'produzindo', 'teste', 'inspecao_final'];
+    return ['solicitado', 'produzindo', 'teste', 'inspecao_final', 'embalagem'];
   };
   window._producaoMsgVaziaColuna = function (colKey) {
     const msgs = {
@@ -82684,6 +82699,7 @@ window.verOperacao = function(osId) {
       produzindo: 'Nenhuma OP em Montagem eletrica.',
       teste: 'Nenhuma OP em Teste.',
       inspecao_final: 'Nenhuma OP em Inspeção final.',
+      embalagem: 'Nenhuma OP em Embalagem.',
     };
     return msgs[colKey] || `Nenhuma OP em ${producaoNomeKanbanPorKey(colKey) || colKey}.`;
   };
@@ -82712,6 +82728,7 @@ window.verOperacao = function(osId) {
     produzindo:     { bg: '#052e16', border: '#166534', dot: '#22c55e', title: '#86efac', badgeBg: '#14532d', badgeTxt: '#bbf7d0', bodyBg: 'rgba(34,197,94,.04)' },
     teste:          { bg: '#431407', border: '#9a3412', dot: '#f97316', title: '#fdba74', badgeBg: '#7c2d12', badgeTxt: '#fed7aa', bodyBg: 'rgba(249,115,22,.04)' },
     inspecao_final: { bg: '#1e1b4b', border: '#6d28d9', dot: '#a855f7', title: '#d8b4fe', badgeBg: '#4c1d95', badgeTxt: '#e9d5ff', bodyBg: 'rgba(168,85,247,.04)' },
+    embalagem:      { bg: '#064e3b', border: '#059669', dot: '#34d399', title: '#6ee7b7', badgeBg: '#065f46', badgeTxt: '#a7f3d0', bodyBg: 'rgba(52,211,153,.04)' },
   };
   const MONTA_COL_DEFAULT = { bg: '#1c1917', border: '#44403c', dot: '#78716c', title: '#d6d3d1', badgeBg: '#292524', badgeTxt: '#d6d3d1', bodyBg: 'rgba(120,113,108,.04)' };
 
@@ -82731,6 +82748,7 @@ window.verOperacao = function(osId) {
       { key: 'produzindo', nome: 'Montagem eletrica' },
       { key: 'teste', nome: 'Teste' },
       { key: 'inspecao_final', nome: 'Inspeção final' },
+      { key: 'embalagem', nome: 'Embalagem' },
     ];
   }
 
@@ -82943,6 +82961,7 @@ window.verOperacao = function(osId) {
     produzindo:     { bg: '#052e16', border: '#166534', dot: '#22c55e', title: '#86efac', badgeBg: '#14532d', badgeTxt: '#bbf7d0', bodyBg: 'rgba(34,197,94,.04)' },
     teste:          { bg: '#431407', border: '#9a3412', dot: '#f97316', title: '#fdba74', badgeBg: '#7c2d12', badgeTxt: '#fed7aa', bodyBg: 'rgba(249,115,22,.04)' },
     inspecao_final: { bg: '#1e1b4b', border: '#6d28d9', dot: '#a855f7', title: '#d8b4fe', badgeBg: '#4c1d95', badgeTxt: '#e9d5ff', bodyBg: 'rgba(168,85,247,.04)' },
+    embalagem:      { bg: '#064e3b', border: '#059669', dot: '#34d399', title: '#6ee7b7', badgeBg: '#065f46', badgeTxt: '#a7f3d0', bodyBg: 'rgba(52,211,153,.04)' },
   };
   const RI_COL_DEFAULT = { bg: '#1c1917', border: '#44403c', dot: '#78716c', title: '#d6d3d1', badgeBg: '#292524', badgeTxt: '#d6d3d1', bodyBg: 'rgba(120,113,108,.04)' };
 
@@ -82962,6 +82981,7 @@ window.verOperacao = function(osId) {
       { key: 'produzindo', nome: 'Montagem eletrica' },
       { key: 'teste', nome: 'Teste' },
       { key: 'inspecao_final', nome: 'Inspeção final' },
+      { key: 'embalagem', nome: 'Embalagem' },
     ];
   }
 
@@ -83728,6 +83748,7 @@ window.verOperacao = function(osId) {
         { key: 'produzindo', nome: 'Montagem eletrica' },
         { key: 'teste', nome: 'Teste' },
         { key: 'inspecao_final', nome: 'Inspeção final' },
+        { key: 'embalagem', nome: 'Embalagem' },
       ];
     }
     const idx = cols.findIndex((c) =>
@@ -86406,7 +86427,7 @@ window.verOperacao = function(osId) {
     if (!lista.length) throw new Error('Nenhuma OP selecionada.');
     const retrocedeCols = (typeof window._producaoColunasRetrocederOp === 'function')
       ? window._producaoColunasRetrocederOp()
-      : ['solicitado', 'produzindo', 'teste', 'inspecao_final'];
+      : ['solicitado', 'produzindo', 'teste', 'inspecao_final', 'embalagem'];
     if (!retrocedeCols.includes(colKey)) {
       throw new Error('Retroceder OP não está disponível neste kanban.');
     }
@@ -86701,7 +86722,7 @@ window.verOperacao = function(osId) {
     const colKeyMonta = options.colKey || '';
     const retrocedeCols = (typeof window._producaoColunasRetrocederOp === 'function')
       ? window._producaoColunasRetrocederOp()
-      : ['solicitado', 'produzindo', 'teste', 'inspecao_final'];
+      : ['solicitado', 'produzindo', 'teste', 'inspecao_final', 'embalagem'];
     const mostrarRetrocederOp = modoRegistrarProducao
       && !modoMontagem
       && !modoRiRegistro
@@ -86711,10 +86732,13 @@ window.verOperacao = function(osId) {
       ? (window._producaoAnteriorKanbanPorKey(colKeyMonta)?.nome || 'Programado')
       : '';
     const mostrarImprimirOpMonta = modoMontagem && colKeyMonta === 'programado';
-    const mostrarFinalizarMonta = modoMontagem && colKeyMonta !== 'programado' && colKeyMonta !== 'finalizado';
+    const mostrarFinalizarMonta = modoMontagem
+      && colKeyMonta !== 'programado'
+      && colKeyMonta !== 'finalizado'
+      && colKeyMonta !== 'embalagem';
     const mostrarParadaMonta = mostrarFinalizarMonta;
     const mostrarImprimirOp = !modoMontagem && !modoRiRegistro && colKeyMonta === 'programado';
-    const colsFichaTecnica = ['programado', 'solicitado', 'produzindo', 'teste', 'inspecao_final'];
+    const colsFichaTecnica = ['programado', 'solicitado', 'produzindo', 'teste', 'inspecao_final', 'embalagem'];
     const mostrarImprimirFicha = modoRegistrarProducao
       && !modoMontagem
       && !modoRiRegistro
