@@ -5779,7 +5779,20 @@ async function sincronizarProdutoParaPostgres(produto) {
     produto.codInt_familia || null
   ];
   
-  await pool.query(sql, valores);
+  // set_config com is_local=true só vale dentro de transação — sem BEGIN o
+  // gatilho trg_guard_produtos_omie_webhook_only rejeita a escrita.
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query("SELECT set_config('app.produtos_omie_write_source', 'omie_sync', true)");
+    await client.query(sql, valores);
+    await client.query('COMMIT');
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw err;
+  } finally {
+    client.release();
+  }
 
   // Imagens NÃO são mais sincronizadas a partir da Omie.
   // O storage oficial das fotos é o Supabase (bucket produtos/Fotos_produto/<codigo_produto>),
@@ -6452,8 +6465,13 @@ app.post(['/webhooks/omie/produtos', '/api/webhooks/omie/produtos'],
 
         const client = await pool.connect();
         try {
+          await client.query('BEGIN');
           await client.query("SELECT set_config('app.produtos_omie_write_source', 'omie_webhook', true)");
           await client.query('SELECT omie_upsert_produto($1::jsonb)', [upsertObj]);
+          await client.query('COMMIT');
+        } catch (txErr) {
+          await client.query('ROLLBACK').catch(() => {});
+          throw txErr;
         } finally {
           client.release();
         }
@@ -29891,6 +29909,36 @@ app.post('/api/compras/sem-cadastro', express.json(), async (req, res) => {
     const retornoSemValores = 'apenas realizar compra sem retorno de valores ou caracteristica';
     const compraJaRealizadaSelecionada = retornoTexto === retornoCompraJaRealizada;
     const registroRapidoSelecionado = retornoTexto === retornoRegistroRapido;
+    const preCadastroCompleto = item.pre_cadastro_completo === true
+      || String(item.pre_cadastro_completo || '').trim().toLowerCase() === 'true'
+      || String(item.pre_cadastro_completo || '').trim() === '1';
+
+    const familiaCodigo = String(item.familia_codigo || '').trim();
+    const familiaTipo = String(item.familia_tipo || 'MP').trim() || 'MP';
+    const familiaNome = String(item.familia_nome || '').trim();
+    const origemPreCad = String(item.origem || 'N').trim().toUpperCase() === 'I' ? 'I' : 'N';
+    const unidadePreCad = String(item.unidade || '').trim();
+    const tipoItemOmie = String(item.tipo_item_omie || '').trim();
+    const fotoUrlPreCad = String(item.foto_url || '').trim() || null;
+    let codigoPrefixo = String(item.codigo_prefixo || '').trim();
+    if (preCadastroCompleto && !codigoPrefixo && familiaCodigo) {
+      codigoPrefixo = /^[A-Z]{1,3}$/i.test(familiaCodigo)
+        ? familiaCodigo.toUpperCase()
+        : `${familiaCodigo.padStart(2, '0')}.${familiaTipo.toUpperCase()}.${origemPreCad}`;
+    }
+
+    if (preCadastroCompleto) {
+      if (!familiaCodigo) {
+        return res.status(400).json({ ok: false, error: 'familia_codigo é obrigatório no pré-cadastro' });
+      }
+      if (!unidadePreCad) {
+        return res.status(400).json({ ok: false, error: 'unidade é obrigatória no pré-cadastro' });
+      }
+      if (!tipoItemOmie) {
+        return res.status(400).json({ ok: false, error: 'tipo_item_omie é obrigatório no pré-cadastro' });
+      }
+    }
+
     let statusInicial = 'pendente';
     let historicoCompraIdSemCadastro = null;
 
@@ -29900,9 +29948,14 @@ app.post('/api/compras/sem-cadastro', express.json(), async (req, res) => {
       statusInicial = 'Concluido';
     } else if (retornoTexto) {
       if (isDiretor) {
-        statusInicial = (retornoTexto === retornoSemValores)
-          ? 'Analise de cadastro'
-          : 'aguardando cotação';
+        if (retornoTexto === retornoSemValores) {
+          // Pré-cadastro completo: não passa por Análise de cadastro
+          statusInicial = preCadastroCompleto
+            ? 'aguardando compra preparação'
+            : 'Analise de cadastro';
+        } else {
+          statusInicial = 'aguardando cotação';
+        }
       } else {
         statusInicial = 'aguardando aprovação da requisição';
       }
@@ -30003,6 +30056,12 @@ app.post('/api/compras/sem-cadastro', express.json(), async (req, res) => {
         ...it,
         produto_codigo: `CMPR${String(sequencialInicial + idx).padStart(5, '0')}`
       }));
+    } else if (preCadastroCompleto) {
+      // Sem CODPROV: placeholder até gerar código definitivo antes da Requisição Omie
+      itensComCodigo = itensSemCadastro.map((it, idx) => ({
+        ...it,
+        produto_codigo: itensSemCadastro.length > 1 ? `PRECAD.${idx + 1}` : 'PRECAD'
+      }));
     } else {
       const baseCodigo = (!produtoCodigoPayload || /^codprov\s*-?/i.test(produtoCodigoPayload))
         ? await obterBaseCodprovDisponivel()
@@ -30015,6 +30074,18 @@ app.post('/api/compras/sem-cadastro', express.json(), async (req, res) => {
     }
 
     log('Itens com código provisório:', itensComCodigo.map((it, idx) => ({ index: idx, codigo: it.produto_codigo, descricao: it.descricao, quantidade: it.quantidade })));
+
+    // Colunas do pré-cadastro (ADD COLUMN IF NOT EXISTS)
+    await pool.query(`ALTER TABLE compras.compras_sem_cadastro ADD COLUMN IF NOT EXISTS pre_cadastro_completo BOOLEAN DEFAULT FALSE`);
+    await pool.query(`ALTER TABLE compras.compras_sem_cadastro ADD COLUMN IF NOT EXISTS familia_codigo TEXT`);
+    await pool.query(`ALTER TABLE compras.compras_sem_cadastro ADD COLUMN IF NOT EXISTS familia_tipo TEXT`);
+    await pool.query(`ALTER TABLE compras.compras_sem_cadastro ADD COLUMN IF NOT EXISTS familia_nome TEXT`);
+    await pool.query(`ALTER TABLE compras.compras_sem_cadastro ADD COLUMN IF NOT EXISTS origem TEXT`);
+    await pool.query(`ALTER TABLE compras.compras_sem_cadastro ADD COLUMN IF NOT EXISTS unidade TEXT`);
+    await pool.query(`ALTER TABLE compras.compras_sem_cadastro ADD COLUMN IF NOT EXISTS tipo_item_omie TEXT`);
+    await pool.query(`ALTER TABLE compras.compras_sem_cadastro ADD COLUMN IF NOT EXISTS codigo_prefixo TEXT`);
+    await pool.query(`ALTER TABLE compras.compras_sem_cadastro ADD COLUMN IF NOT EXISTS foto_url TEXT`);
+    await pool.query(`ALTER TABLE compras.compras_sem_cadastro ADD COLUMN IF NOT EXISTS codigo_omie TEXT`);
 
     const inserirItensNoBanco = async ({ statusParaInsercao, numeroPedido = null, ncodped = null, codReqCompra = null }) => {
       const ids = [];
@@ -30042,10 +30113,20 @@ app.post('/api/compras/sem-cadastro', express.json(), async (req, res) => {
             numero_pedido,
             ncodped,
             cod_req_compra,
+            pre_cadastro_completo,
+            familia_codigo,
+            familia_tipo,
+            familia_nome,
+            origem,
+            unidade,
+            tipo_item_omie,
+            codigo_prefixo,
+            foto_url,
             created_at,
             updated_at
           ) VALUES (
-            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, NOW(), NOW()
+            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19,
+            $20, $21, $22, $23, $24, $25, $26, $27, $28, NOW(), NOW()
           )
           RETURNING id, grupo_requisicao
         `, [
@@ -30067,7 +30148,16 @@ app.post('/api/compras/sem-cadastro', express.json(), async (req, res) => {
           grupoRequisicao,
           numeroPedido,
           ncodped,
-          codReqCompra
+          codReqCompra,
+          preCadastroCompleto,
+          preCadastroCompleto ? familiaCodigo : null,
+          preCadastroCompleto ? familiaTipo : null,
+          preCadastroCompleto ? (familiaNome || null) : null,
+          preCadastroCompleto ? origemPreCad : null,
+          preCadastroCompleto ? unidadePreCad : null,
+          preCadastroCompleto ? tipoItemOmie : null,
+          preCadastroCompleto ? (codigoPrefixo || null) : null,
+          preCadastroCompleto ? fotoUrlPreCad : null
         ]);
 
         const novoIdLinha = result.rows[0]?.id;
@@ -30438,6 +30528,48 @@ app.post('/api/compras/sem-cadastro', express.json(), async (req, res) => {
           WHERE grupo_requisicao = $2`,
         [valorGastoInformado, grupoFinal]
       );
+    }
+
+    // Diretor + sem retorno + pré-cadastro: gera código definitivo e cria requisição Omie já nesta etapa
+    if (
+      preCadastroCompleto
+      && statusInicial === 'aguardando compra preparação'
+      && idsInseridos.length > 0
+    ) {
+      try {
+        const cookie = String(req.headers.cookie || '');
+        const port = process.env.PORT || 5001;
+        const respReqOmie = await fetch(
+          `http://127.0.0.1:${port}/api/compras/sem-cadastro/${idsInseridos[0]}/criar-requisicao-omie`,
+          {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              ...(cookie ? { Cookie: cookie } : {})
+            },
+            body: JSON.stringify({ itens: [] })
+          }
+        );
+        const dataReqOmie = await respReqOmie.json().catch(() => ({}));
+        if (respReqOmie.ok && dataReqOmie.ok) {
+          omieNumeroPedido = dataReqOmie.codIntReqCompra || dataReqOmie.numero_pedido || omieNumeroPedido;
+          omieCodPed = dataReqOmie.codReqCompra || dataReqOmie.ncodped || omieCodPed;
+          omieCodIntPed = dataReqOmie.codReqCompra || omieCodIntPed;
+          await upsertStatusHistoricoCompras({
+            grupoRequisicao: grupoFinal,
+            status: 'Requisição',
+            tableSource: 'compras_sem_cadastro'
+          });
+          log('Pré-cadastro: requisição Omie criada na solicitação', {
+            ids: idsInseridos,
+            numero: omieNumeroPedido
+          });
+        } else {
+          console.warn('[Pré-cadastro] Não foi possível criar requisição Omie agora:', dataReqOmie.error || respReqOmie.status);
+        }
+      } catch (errPreCadReq) {
+        console.warn('[Pré-cadastro] Omie adiado (item permanece em preparação):', errPreCadReq.message || errPreCadReq);
+      }
     }
     
     log(`🏁 Finalizado em ${Date.now() - t0}ms`, { idsInseridos, grupoFinal, solicitante });
@@ -30839,6 +30971,128 @@ app.post('/api/compras/sem-cadastro/:id/cadastrar-omie', express.json(), async (
   }
 });
 
+// Gera código definitivo (família.tipo.origem.#####) + cadastra na Omie para itens PRECAD
+async function finalizarPreCadastroSemCadastro(itemId) {
+  await pool.query(`ALTER TABLE compras.compras_sem_cadastro ADD COLUMN IF NOT EXISTS codigo_omie TEXT`);
+  const { rows } = await pool.query(
+    `SELECT id, produto_codigo, produto_descricao, pre_cadastro_completo,
+            familia_codigo, familia_tipo, origem, unidade, tipo_item_omie, codigo_prefixo, codigo_omie
+     FROM compras.compras_sem_cadastro WHERE id = $1`,
+    [itemId]
+  );
+  if (!rows.length) throw new Error(`Item ${itemId} não encontrado`);
+  const item = rows[0];
+  if (item.codigo_omie && item.produto_codigo && !/^PRECAD/i.test(String(item.produto_codigo))) {
+    return { codigo: item.produto_codigo, codigo_omie: String(item.codigo_omie) };
+  }
+  if (!item.pre_cadastro_completo) {
+    throw new Error(`Item ${itemId} não possui pré-cadastro completo para gerar código definitivo`);
+  }
+
+  const familiaCodigo = String(item.familia_codigo || '').trim().toUpperCase();
+  const familiaTipo = String(item.familia_tipo || 'MP').trim().toUpperCase() || 'MP';
+  const origem = String(item.origem || 'N').trim().toUpperCase() === 'I' ? 'I' : 'N';
+  const unidade = String(item.unidade || 'UN').trim() || 'UN';
+  const tipoItem = String(item.tipo_item_omie || '00').trim() || '00';
+  const descricao = _cadastroNormalizarDescricao(item.produto_descricao);
+  if (!familiaCodigo || !descricao) {
+    throw new Error(`Pré-cadastro incompleto no item ${itemId} (família/descrição)`);
+  }
+
+  const prefixo = /^[A-Z]{1,3}$/.test(familiaCodigo)
+    ? familiaCodigo
+    : `${familiaCodigo.padStart(2, '0')}.${familiaTipo}.${origem}`;
+
+  // Mesma lógica de sequencial do /api/produtos/cadastro/preview
+  const client = await pool.connect();
+  let codigoFinal;
+  try {
+    await client.query('BEGIN');
+    await client.query(`SELECT pg_advisory_xact_lock(hashtext('produto_codigo_reserva'))`);
+    await _cadastroGarantirReservas(client);
+    const { rows: existentes } = await client.query(`
+      SELECT codigo, descricao FROM public.produtos_omie WHERE codigo IS NOT NULL
+      UNION ALL
+      SELECT codigo, descricao_referencia AS descricao FROM public.produto_codigo_reserva
+      WHERE confirmada = TRUE
+    `);
+    const usados = new Set();
+    const itens = [];
+    for (const ex of existentes) {
+      const codigo = String(ex.codigo || '').trim().toUpperCase();
+      const match = codigo.match(/(?:^|\.)(\d{1,5})$/);
+      if (!match) continue;
+      const sequencial = Number(match[1]);
+      usados.add(sequencial);
+      itens.push({ sequencial, descricao: _cadastroNormalizarDescricao(ex.descricao), codigo });
+    }
+    const semelhantes = itens.filter(i => descricao && i.descricao.startsWith(descricao));
+    const prefixados = itens.filter(i => i.codigo.startsWith(prefixo + '.'));
+    let sequencial = semelhantes.length
+      ? Math.max(...semelhantes.map(i => i.sequencial)) + 1
+      : (prefixados.length ? Math.max(...prefixados.map(i => i.sequencial)) + 1 : 10000);
+    while (usados.has(sequencial)) sequencial++;
+    codigoFinal = `${prefixo}.${String(sequencial).padStart(5, '0')}`;
+    await client.query(
+      `INSERT INTO public.produto_codigo_reserva (codigo, sequencial, prefixo, descricao_referencia, confirmada)
+       VALUES ($1, $2, $3, $4, TRUE)
+       ON CONFLICT (codigo) DO UPDATE SET confirmada = TRUE, descricao_referencia = EXCLUDED.descricao_referencia`,
+      [codigoFinal, sequencial, prefixo, descricao]
+    );
+    await client.query('COMMIT');
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw err;
+  } finally {
+    client.release();
+  }
+
+  // Cadastra na Omie com unidade/tipo do pré-cadastro
+  const OMIE_APP_KEY = process.env.OMIE_APP_KEY;
+  const OMIE_APP_SECRET = process.env.OMIE_APP_SECRET;
+  if (!OMIE_APP_KEY || !OMIE_APP_SECRET) {
+    throw new Error('Credenciais Omie não configuradas');
+  }
+  const omieResp = await fetch('https://app.omie.com.br/api/v1/geral/produtos/', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      call: 'IncluirProduto',
+      app_key: OMIE_APP_KEY,
+      app_secret: OMIE_APP_SECRET,
+      param: [{
+        codigo_produto_integracao: codigoFinal,
+        codigo: codigoFinal,
+        descricao,
+        unidade,
+        tipoItem,
+        ncm: '0000.00.00'
+      }]
+    })
+  });
+  const omieJson = await omieResp.json();
+  if (!omieResp.ok || omieJson?.faultstring) {
+    throw new Error(omieJson?.faultstring || omieJson?.error || 'Falha ao cadastrar produto na Omie');
+  }
+  const codigoOmie = String(omieJson.codigo_produto || '').trim();
+  if (!codigoOmie) {
+    throw new Error('Omie não retornou codigo_produto ao cadastrar o pré-cadastro');
+  }
+
+  await pool.query(
+    `UPDATE compras.compras_sem_cadastro
+        SET produto_codigo = $1,
+            codigo_omie = $2,
+            codigo_prefixo = $3,
+            updated_at = NOW()
+      WHERE id = $4`,
+    [codigoFinal, codigoOmie, prefixo, itemId]
+  );
+
+  console.log(`[Pré-cadastro] Item ${itemId}: ${codigoFinal} → Omie ${codigoOmie}`);
+  return { codigo: codigoFinal, codigo_omie: codigoOmie };
+}
+
 // POST /api/compras/sem-cadastro/:id/criar-requisicao-omie - Cria requisição de compra na Omie
 app.post('/api/compras/sem-cadastro/:id/criar-requisicao-omie', express.json(), async (req, res) => {
   try {
@@ -30857,8 +31111,13 @@ app.post('/api/compras/sem-cadastro/:id/criar-requisicao-omie', express.json(), 
     const { itens: itensRequest } = req.body || {};
     const itensPayload = Array.isArray(itensRequest) ? itensRequest : [];
 
+    await pool.query(`ALTER TABLE compras.compras_sem_cadastro ADD COLUMN IF NOT EXISTS codigo_omie TEXT`);
+    await pool.query(`ALTER TABLE compras.compras_sem_cadastro ADD COLUMN IF NOT EXISTS pre_cadastro_completo BOOLEAN DEFAULT FALSE`);
+
     const { rows } = await pool.query(
-      `SELECT id, grupo_requisicao, categoria_compra_codigo, objetivo_compra, solicitante, resp_inspecao_recebimento, observacao_recebimento
+      `SELECT id, grupo_requisicao, categoria_compra_codigo, objetivo_compra, solicitante,
+              resp_inspecao_recebimento, observacao_recebimento, produto_codigo, produto_descricao,
+              quantidade, codigo_omie, pre_cadastro_completo
        FROM compras.compras_sem_cadastro
        WHERE id = $1`,
       [id]
@@ -30869,6 +31128,21 @@ app.post('/api/compras/sem-cadastro/:id/criar-requisicao-omie', express.json(), 
     }
 
     const itemDb = rows[0];
+
+    // Carrega o grupo inteiro (quando houver) para finalizar PRECAD e montar a requisição
+    let itensGrupo = [itemDb];
+    if (itemDb.grupo_requisicao) {
+      const { rows: rowsGrupo } = await pool.query(
+        `SELECT id, grupo_requisicao, categoria_compra_codigo, objetivo_compra, solicitante,
+                resp_inspecao_recebimento, observacao_recebimento, produto_codigo, produto_descricao,
+                quantidade, codigo_omie, pre_cadastro_completo
+         FROM compras.compras_sem_cadastro
+         WHERE grupo_requisicao = $1
+         ORDER BY id`,
+        [itemDb.grupo_requisicao]
+      );
+      if (rowsGrupo.length) itensGrupo = rowsGrupo;
+    }
 
     const historicoCompraId = await obterIdHistoricoComprasParaOmie({
       db: pool,
@@ -30888,12 +31162,47 @@ app.post('/api/compras/sem-cadastro/:id/criar-requisicao-omie', express.json(), 
       return res.status(400).json({ ok: false, error: 'Item sem categoria da compra. Por favor, edite o item e adicione a categoria antes de criar a requisição.' });
     }
 
-    if (!itensPayload.length) {
+    // Finaliza pré-cadastro (PRECAD → código definitivo + Omie) antes de IncluirReq
+    const codigoOmiePorId = new Map();
+    for (const itemG of itensGrupo) {
+      const jaTemOmie = String(itemG.codigo_omie || '').trim();
+      const codigoTxt = String(itemG.produto_codigo || '').trim();
+      const precisaFinalizar = itemG.pre_cadastro_completo && (!jaTemOmie || /^PRECAD/i.test(codigoTxt));
+      if (precisaFinalizar) {
+        const finalizado = await finalizarPreCadastroSemCadastro(itemG.id);
+        codigoOmiePorId.set(itemG.id, finalizado.codigo_omie);
+        itemG.codigo_omie = finalizado.codigo_omie;
+        itemG.produto_codigo = finalizado.codigo;
+      } else if (jaTemOmie) {
+        codigoOmiePorId.set(itemG.id, jaTemOmie);
+      }
+    }
+
+    // Preferência: payload do front; senão monta a partir do banco
+    const fontesItens = itensPayload.length
+      ? itensPayload.map((i) => {
+          const itemIdPayload = Number(i?.id || i?.item_origem_id || id);
+          const doGrupo = itensGrupo.find((g) => g.id === itemIdPayload) || itemDb;
+          return {
+            id: doGrupo.id,
+            codigo_omie: String(i?.codigo_omie || codigoOmiePorId.get(doGrupo.id) || doGrupo.codigo_omie || '').trim(),
+            descricao: String(i?.descricao || doGrupo.produto_descricao || '').trim(),
+            quantidade: i?.quantidade != null ? i.quantidade : doGrupo.quantidade
+          };
+        })
+      : itensGrupo.map((g) => ({
+          id: g.id,
+          codigo_omie: String(codigoOmiePorId.get(g.id) || g.codigo_omie || '').trim(),
+          descricao: String(g.produto_descricao || '').trim(),
+          quantidade: g.quantidade
+        }));
+
+    if (!fontesItens.length) {
       return res.status(400).json({ ok: false, error: 'Nenhum item informado para criar requisição' });
     }
 
     const itensReqCompra = [];
-    for (const i of itensPayload) {
+    for (const i of fontesItens) {
       const codigoOmie = String(i?.codigo_omie || '').trim();
       if (!codigoOmie) {
         return res.status(400).json({ ok: false, error: 'Todos os itens precisam ter código Omie antes de criar a requisição.' });
@@ -30974,12 +31283,7 @@ app.post('/api/compras/sem-cadastro/:id/criar-requisicao-omie', express.json(), 
     const codReqCompraOmie = omieResult.codReqCompra || null;
     const novoNumeroPedido = omieResult.codIntReqCompra || numeroPedido;
 
-    // Captura valores atuais antes de alterar
-    const { rows: antesUpdateSemCad } = await pool.query(
-      `SELECT id, status, numero_pedido, ncodped, cod_req_compra FROM compras.compras_sem_cadastro WHERE id = $1`,
-      [id]
-    );
-
+    const idsGrupo = itensGrupo.map((g) => g.id);
     await pool.query(
       `UPDATE compras.compras_sem_cadastro
        SET status = 'Requisição',
@@ -30987,9 +31291,17 @@ app.post('/api/compras/sem-cadastro/:id/criar-requisicao-omie', express.json(), 
            ncodped = $2,
            cod_req_compra = $3,
            updated_at = NOW()
-       WHERE id = $4`,
-      [novoNumeroPedido, omieResult.codReqCompra || null, codReqCompraOmie, id]
+       WHERE id = ANY($4::int[])`,
+      [novoNumeroPedido, omieResult.codReqCompra || null, codReqCompraOmie, idsGrupo]
     );
+
+    if (itemDb.grupo_requisicao) {
+      await upsertStatusHistoricoCompras({
+        grupoRequisicao: itemDb.grupo_requisicao,
+        status: 'Requisição',
+        tableSource: 'compras_sem_cadastro'
+      });
+    }
 
     // Consulta a Omie para obter o cNumero (numero sequencial visivel na plataforma, ex: "2500")
     let numeroRequisicaoOmie = null;
@@ -31701,6 +32013,9 @@ app.post('/api/admin/sync/imagens-omie', express.json(), (_req, res) => {
 // GET /api/compras/minhas - Lista solicitações do usuário logado
 app.get('/api/compras/minhas', async (req, res) => {
   try {
+    await pool.query(`ALTER TABLE compras.compras_sem_cadastro ADD COLUMN IF NOT EXISTS codigo_omie TEXT`);
+    await pool.query(`ALTER TABLE compras.compras_sem_cadastro ADD COLUMN IF NOT EXISTS pre_cadastro_completo BOOLEAN DEFAULT FALSE`);
+
     const solicitante = req.query.solicitante;
     
     if (!solicitante) {
@@ -31721,6 +32036,7 @@ app.get('/api/compras/minhas', async (req, res) => {
         FROM compras.historico_compras hc
         WHERE hc.tabela_origem IN ('solicitacao_compras', 'compras_sem_cadastro')
           AND TRIM(COALESCE(hc.grupo_requisicao, '')) <> ''
+          AND LOWER(TRIM(COALESCE(hc.status, ''))) NOT IN ('excluido', 'excluído')
         ORDER BY
           hc.tabela_origem,
           LOWER(TRIM(COALESCE(hc.grupo_requisicao, ''))),
@@ -31763,7 +32079,8 @@ app.get('/api/compras/minhas', async (req, res) => {
           sc.created_at,
           sc.updated_at,
           'solicitacao_compras'::text AS table_source,
-          LOWER(TRIM(COALESCE(sc.grupo_requisicao, ''))) AS grupo_key
+          LOWER(TRIM(COALESCE(sc.grupo_requisicao, ''))) AS grupo_key,
+          FALSE AS pre_cadastro_completo
         FROM compras.solicitacao_compras sc
         LEFT JOIN LATERAL (
           SELECT po.unidade
@@ -31813,7 +32130,7 @@ app.get('/api/compras/minhas', async (req, res) => {
           csc.retorno_cotacao::text AS retorno_cotacao,
           csc.categoria_compra_codigo::text AS categoria_compra_codigo,
           csc.categoria_compra_nome,
-          NULL::text AS codigo_omie,
+          csc.codigo_omie::text AS codigo_omie,
           NULL::text AS codigo_produto_omie,
           NULL::boolean AS requisicao_direta,
           csc.anexos::text AS anexos,
@@ -31823,7 +32140,8 @@ app.get('/api/compras/minhas', async (req, res) => {
           csc.created_at,
           csc.updated_at,
           'compras_sem_cadastro'::text AS table_source,
-          LOWER(TRIM(COALESCE(csc.grupo_requisicao, ''))) AS grupo_key
+          LOWER(TRIM(COALESCE(csc.grupo_requisicao, ''))) AS grupo_key,
+          COALESCE(csc.pre_cadastro_completo, FALSE) AS pre_cadastro_completo
         FROM compras.compras_sem_cadastro csc
         WHERE TRIM(LOWER(COALESCE(csc.solicitante, ''))) = TRIM(LOWER($1))
           AND TRIM(COALESCE(csc.grupo_requisicao, '')) <> ''
@@ -31871,7 +32189,8 @@ app.get('/api/compras/minhas', async (req, res) => {
         COALESCE(opi.updated_at, hr.created_at) AS updated_at,
         hr.table_source,
         hr.historico_id,
-        hr.historico_id::text AS id_solicitante
+        hr.historico_id::text AS id_solicitante,
+        COALESCE(opi.pre_cadastro_completo, FALSE) AS pre_cadastro_completo
       FROM historico_recente hr
       LEFT JOIN origem_primeiro_item opi
         ON opi.table_source = hr.table_source
@@ -32524,6 +32843,9 @@ app.post('/api/compras/aprovar-grupo', express.json(), async (req, res) => {
 // GET /api/compras/todas - Lista todas as solicitações (para gestores)
 app.get('/api/compras/todas', async (req, res) => {
   try {
+    await pool.query(`ALTER TABLE compras.compras_sem_cadastro ADD COLUMN IF NOT EXISTS codigo_omie TEXT`);
+    await pool.query(`ALTER TABLE compras.compras_sem_cadastro ADD COLUMN IF NOT EXISTS pre_cadastro_completo BOOLEAN DEFAULT FALSE`);
+
     const { rows: solicitacoesHistorico } = await pool.query(`
       WITH historico_recente AS (
         SELECT DISTINCT ON (
@@ -32538,6 +32860,7 @@ app.get('/api/compras/todas', async (req, res) => {
         FROM compras.historico_compras hc
         WHERE hc.tabela_origem IN ('solicitacao_compras', 'compras_sem_cadastro')
           AND TRIM(COALESCE(hc.grupo_requisicao, '')) <> ''
+          AND LOWER(TRIM(COALESCE(hc.status, ''))) NOT IN ('excluido', 'excluído')
         ORDER BY
           hc.tabela_origem,
           LOWER(TRIM(COALESCE(hc.grupo_requisicao, ''))),
@@ -32580,7 +32903,8 @@ app.get('/api/compras/todas', async (req, res) => {
           sc.created_at,
           sc.updated_at,
           'solicitacao_compras'::text AS table_source,
-          LOWER(TRIM(COALESCE(sc.grupo_requisicao, ''))) AS grupo_key
+          LOWER(TRIM(COALESCE(sc.grupo_requisicao, ''))) AS grupo_key,
+          FALSE AS pre_cadastro_completo
         FROM compras.solicitacao_compras sc
         LEFT JOIN LATERAL (
           SELECT po.unidade
@@ -32629,7 +32953,7 @@ app.get('/api/compras/todas', async (req, res) => {
           csc.retorno_cotacao::text AS retorno_cotacao,
           csc.categoria_compra_codigo::text AS categoria_compra_codigo,
           csc.categoria_compra_nome,
-          NULL::text AS codigo_omie,
+          csc.codigo_omie::text AS codigo_omie,
           NULL::text AS codigo_produto_omie,
           NULL::boolean AS requisicao_direta,
           csc.anexos::text AS anexos,
@@ -32639,7 +32963,8 @@ app.get('/api/compras/todas', async (req, res) => {
           csc.created_at,
           csc.updated_at,
           'compras_sem_cadastro'::text AS table_source,
-          LOWER(TRIM(COALESCE(csc.grupo_requisicao, ''))) AS grupo_key
+          LOWER(TRIM(COALESCE(csc.grupo_requisicao, ''))) AS grupo_key,
+          COALESCE(csc.pre_cadastro_completo, FALSE) AS pre_cadastro_completo
         FROM compras.compras_sem_cadastro csc
         WHERE TRIM(COALESCE(csc.grupo_requisicao, '')) <> ''
       )
@@ -32680,7 +33005,8 @@ app.get('/api/compras/todas', async (req, res) => {
         COALESCE(o.updated_at, hr.created_at) AS updated_at,
         hr.table_source,
         hr.historico_id,
-        hr.historico_id::text AS id_solicitante
+        hr.historico_id::text AS id_solicitante,
+        COALESCE(o.pre_cadastro_completo, FALSE) AS pre_cadastro_completo
       FROM historico_recente hr
       LEFT JOIN origem o
         ON o.table_source = hr.table_source
@@ -32701,6 +33027,151 @@ app.get('/api/compras/todas', async (req, res) => {
   } catch (err) {
     console.error('[Compras] Erro ao listar todas solicitações:', err);
     res.status(500).json({ ok: false, error: 'Erro ao listar solicitações' });
+  }
+});
+
+// POST /api/compras/pedido/excluir - Exclusão lógica do pedido inteiro (colunas antes de Requisições)
+// Permissão: solicitante do pedido, setor 5 ou 9 (auth_sector.id), ou role admin.
+// Marca status='excluído' + excluido_por + excluido_em; o card some de todos os kanbans de compra.
+const STATUSES_EXCLUIVEIS_COMPRAS = new Set([
+  'aguardando aprovacao da requisicao',
+  'solicitado revisao',
+  'retificar',
+  'aguardando cotacao',
+  'cotado aguardando escolha',
+  'cotado',
+  'analise de cadastro',
+  'carrinho'
+]);
+
+function normalizarStatusComprasExclusao(valor) {
+  return String(valor || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim();
+}
+
+app.post('/api/compras/pedido/excluir', express.json(), async (req, res) => {
+  const sessUser = req.session?.user;
+  if (!sessUser?.username) {
+    return res.status(401).json({ ok: false, error: 'Usuário não autenticado' });
+  }
+
+  const grupoRequisicao = String(req.body?.grupo_requisicao || '').trim();
+  const tableSource = String(req.body?.table_source || 'solicitacao_compras').trim();
+  const itemIds = (Array.isArray(req.body?.item_ids) ? req.body.item_ids : [])
+    .map(v => parseInt(String(v).trim(), 10))
+    .filter(Number.isInteger);
+
+  if (!grupoRequisicao && itemIds.length === 0) {
+    return res.status(400).json({ ok: false, error: 'Informe grupo_requisicao ou item_ids' });
+  }
+  if (!['solicitacao_compras', 'compras_sem_cadastro'].includes(tableSource)) {
+    return res.status(400).json({ ok: false, error: 'table_source inválido' });
+  }
+
+  const client = await pool.connect();
+  try {
+    // Migração: colunas de auditoria da exclusão
+    await client.query(`ALTER TABLE compras.solicitacao_compras ADD COLUMN IF NOT EXISTS excluido_por TEXT`);
+    await client.query(`ALTER TABLE compras.solicitacao_compras ADD COLUMN IF NOT EXISTS excluido_em TIMESTAMPTZ`);
+    await client.query(`ALTER TABLE compras.compras_sem_cadastro ADD COLUMN IF NOT EXISTS excluido_por TEXT`);
+    await client.query(`ALTER TABLE compras.compras_sem_cadastro ADD COLUMN IF NOT EXISTS excluido_em TIMESTAMPTZ`);
+
+    // Carrega itens do pedido nas duas tabelas (o grupo pode ter itens em ambas)
+    const buscarItens = async (tabela) => {
+      const where = grupoRequisicao
+        ? `TRIM(COALESCE(grupo_requisicao, '')) = $1`
+        : `id = ANY($1::int[])`;
+      const param = grupoRequisicao ? [grupoRequisicao] : [itemIds];
+      const { rows } = await client.query(
+        `SELECT id, status, solicitante, grupo_requisicao FROM ${tabela} WHERE ${where}`,
+        param
+      );
+      return rows;
+    };
+
+    const itensSol = await buscarItens('compras.solicitacao_compras');
+    const itensSem = await buscarItens('compras.compras_sem_cadastro');
+    const todosItens = [...itensSol, ...itensSem];
+
+    if (todosItens.length === 0) {
+      return res.status(404).json({ ok: false, error: 'Itens do pedido não encontrados' });
+    }
+
+    // Permissão: admin, setor 5/9 ou solicitante
+    const roles = Array.isArray(sessUser.roles)
+      ? sessUser.roles
+      : String(sessUser.roles || '').split(',');
+    const isAdmin = roles.some(r => String(r || '').trim().toLowerCase() === 'admin');
+    const sectorId = Number(sessUser.sector_id);
+    const isSetorPermitido = sectorId === 5 || sectorId === 9;
+    const usernameNorm = String(sessUser.username || '').trim().toLowerCase();
+    const isSolicitante = todosItens.every(item =>
+      String(item.solicitante || '').trim().toLowerCase() === usernameNorm
+    );
+
+    if (!isAdmin && !isSetorPermitido && !isSolicitante) {
+      return res.status(403).json({ ok: false, error: 'Sem permissão para excluir este pedido' });
+    }
+
+    // Só permite excluir em etapas antes de Requisições
+    const statusBloqueado = todosItens.find(item =>
+      !STATUSES_EXCLUIVEIS_COMPRAS.has(normalizarStatusComprasExclusao(item.status))
+    );
+    if (statusBloqueado) {
+      return res.status(409).json({
+        ok: false,
+        error: `Pedido não pode ser excluído: item ${statusBloqueado.id} está em "${statusBloqueado.status}" (etapa Requisições ou posterior)`
+      });
+    }
+
+    await client.query('BEGIN');
+    await client.query(`SELECT set_config('app.current_user', $1, true)`, [sessUser.username]);
+
+    const excluirEm = async (tabela, ids) => {
+      if (!ids.length) return 0;
+      const { rowCount } = await client.query(
+        `UPDATE ${tabela}
+            SET status = 'excluído',
+                excluido_por = $1,
+                excluido_em = NOW()
+          WHERE id = ANY($2::int[])`,
+        [sessUser.username, ids]
+      );
+      return rowCount;
+    };
+
+    const totalSol = await excluirEm('compras.solicitacao_compras', itensSol.map(i => i.id));
+    const totalSem = await excluirEm('compras.compras_sem_cadastro', itensSem.map(i => i.id));
+
+    // Atualiza o status consolidado (kanban lê o status daqui)
+    const gruposAfetados = [...new Set(
+      todosItens.map(i => String(i.grupo_requisicao || '').trim()).filter(Boolean)
+    )];
+    for (const grupo of gruposAfetados) {
+      await client.query(
+        `UPDATE compras.historico_compras SET status = 'excluído' WHERE grupo_requisicao = $1`,
+        [grupo]
+      );
+    }
+
+    await client.query('COMMIT');
+
+    console.log(`[Compras/Excluir] Pedido excluído por ${sessUser.username}: grupo=${grupoRequisicao || '-'} ids=${todosItens.map(i => i.id).join(',')} (${totalSol + totalSem} itens)`);
+    res.json({
+      ok: true,
+      excluidos: totalSol + totalSem,
+      excluido_por: sessUser.username,
+      excluido_em: new Date().toISOString()
+    });
+  } catch (err) {
+    try { await client.query('ROLLBACK'); } catch (_) {}
+    console.error('[Compras/Excluir] Erro:', err);
+    res.status(500).json({ ok: false, error: 'Erro ao excluir pedido' });
+  } finally {
+    client.release();
   }
 });
 
@@ -39671,7 +40142,9 @@ async function syncProdutosOmieIncremental(paginasPorExecucao = 1) {
 
     const client = await pool.connect();
     try {
-      await client.query("SELECT set_config('app.produtos_omie_write_source', 'omie_webhook', true)");
+      // is_local=false: setting de sessão — set_config(..., true) fora de
+      // transação não tem efeito e o gatilho guard bloqueava os upserts.
+      await client.query("SELECT set_config('app.produtos_omie_write_source', 'omie_sync', false)");
 
       for (const produto of produtos) {
         processados++;
@@ -39688,6 +40161,7 @@ async function syncProdutosOmieIncremental(paginasPorExecucao = 1) {
         }
       }
     } finally {
+      try { await client.query("SELECT set_config('app.produtos_omie_write_source', '', false)"); } catch (_) {}
       try { client.release(); } catch (_) {}
     }
 

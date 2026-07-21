@@ -137,6 +137,23 @@ document.addEventListener('DOMContentLoaded', () => {
       window.forceShowInicio?.();
     }, true);
   }
+
+  // Logo da Fromtherm leva para o Início (substitui o botão "Início" do topo).
+  // Delegação no document: sobrevive mesmo se o cabeçalho for recriado/clonado.
+  if (!document.body.dataset.logoInicioBound) {
+    document.body.dataset.logoInicioBound = '1';
+    const menuLogo = document.querySelector('.header .menu-logo');
+    if (menuLogo) menuLogo.style.cursor = 'pointer';
+    document.addEventListener('click', (ev) => {
+      const logo = ev.target?.closest?.('.header .menu-logo');
+      if (!logo) return;
+      ev.preventDefault();
+      try { window.restoreStashedPanes?.(); } catch (_) {}
+      try { window.showMainTab?.('paginaInicio'); } catch (_) {}
+      // forceShowInicio por último: esconde abas de produto/kanban e destaca o Início
+      window.forceShowInicio?.();
+    });
+  }
 });
 
 // Central mobile: cards da Início são montados pelo sistema de preferências (flag_inicio).
@@ -45493,6 +45510,85 @@ window.adicionarCotacaoComSpinner = adicionarCotacaoComSpinner;
 window.aprovarGrupoRequisicao = aprovarGrupoRequisicao;
 window.atualizarGrupoRequisicaoItem = atualizarGrupoRequisicaoItem;
 
+// ===== Exclusão lógica de pedido (colunas antes de Requisições) =====
+const STATUS_EXCLUIVEL_PEDIDO_COMPRAS = [
+  'aguardando aprovação da requisição',
+  'solicitado revisão',
+  'retificar',
+  'aguardando cotação',
+  'cotado aguardando escolha',
+  'cotado',
+  'analise de cadastro'
+];
+
+function podeExcluirPedidoComprasKanban(solicitante) {
+  if (usuarioEhAdminSistema()) return true;
+  const sectorId = Number(window.__sessionUser?.sector_id);
+  if (sectorId === 5 || sectorId === 9) return true;
+  const norm = (v) => String(v || '').trim().toLowerCase();
+  const solicitanteNorm = norm(solicitante);
+  if (!solicitanteNorm) return false;
+  return [
+    window.__sessionUser?.username,
+    document.getElementById('userNameDisplay')?.textContent
+  ].some(c => norm(c) === solicitanteNorm);
+}
+
+// Mostra o botão Excluir no cabeçalho do modal quando o status/permissão permitem
+function configurarBotaoExcluirPedidoCompras(btnId, ctx) {
+  const btn = document.getElementById(btnId);
+  if (!btn) return;
+  const statusNorm = String(ctx?.status || '').toLowerCase().trim();
+  const permitido = STATUS_EXCLUIVEL_PEDIDO_COMPRAS.includes(statusNorm)
+    && podeExcluirPedidoComprasKanban(ctx?.solicitante);
+  if (!permitido) {
+    btn.style.display = 'none';
+    window.__excluirPedidoComprasCtx = null;
+    return;
+  }
+  window.__excluirPedidoComprasCtx = ctx;
+  btn.disabled = false;
+  btn.innerHTML = '<i class="fa-solid fa-trash"></i> Excluir';
+  btn.style.display = 'inline-flex';
+}
+
+async function excluirPedidoComprasKanban(btnId) {
+  const ctx = window.__excluirPedidoComprasCtx;
+  if (!ctx) return;
+  const btn = btnId ? document.getElementById(btnId) : null;
+  if (btn) {
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Excluindo...';
+  }
+  try {
+    const resp = await fetch('/api/compras/pedido/excluir', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({
+        grupo_requisicao: ctx.grupoRequisicao || '',
+        table_source: ctx.tableSource || 'solicitacao_compras',
+        item_ids: Array.isArray(ctx.itemIds) ? ctx.itemIds : []
+      })
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok || !data.ok) throw new Error(data.error || 'Erro ao excluir pedido');
+
+    window.__excluirPedidoComprasCtx = null;
+    if (typeof fecharModalDetalhesPedidoCompras === 'function') fecharModalDetalhesPedidoCompras();
+    if (typeof fecharModalAnaliseCadastro === 'function') fecharModalAnaliseCadastro();
+    if (typeof loadMinhasSolicitacoes === 'function') loadMinhasSolicitacoes();
+    alert(`Pedido excluído (${data.excluidos} item(ns)). Registrado por ${data.excluido_por}.`);
+  } catch (err) {
+    alert('Não foi possível excluir: ' + (err?.message || 'erro desconhecido'));
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = '<i class="fa-solid fa-trash"></i> Excluir';
+    }
+  }
+}
+window.excluirPedidoComprasKanban = excluirPedidoComprasKanban;
+
 // Modal específico para "Kanban de compras" (visualização do usuário solicitante)
 async function abrirModalDetalhesPedidoMinhas(numeroPedido, statusColuna, itemIds = null) {
   const modal = document.getElementById('modalDetalhesPedidoCompras');
@@ -45503,6 +45599,9 @@ async function abrirModalDetalhesPedidoMinhas(numeroPedido, statusColuna, itemId
   
   modalBody.innerHTML = '<div style="text-align:center;padding:40px;"><i class="fa-solid fa-spinner fa-spin" style="font-size:32px;color:#3b82f6;"></i><br><br>Carregando...</div>';
   modal.style.display = 'flex';
+
+  const btnExcluirDetalhes = document.getElementById('btnExcluirPedidoComprasDetalhes');
+  if (btnExcluirDetalhes) btnExcluirDetalhes.style.display = 'none';
 
   const itemIdAtualNavegacao = String(itemIds || '')
     .split(',')
@@ -45589,6 +45688,15 @@ async function abrirModalDetalhesPedidoMinhas(numeroPedido, statusColuna, itemId
     const primeiroItemPedido = itensPedido[0] || null;
     const grupoRequisicaoModal = String(primeiroItemPedido?.grupo_requisicao || '').trim();
     const tableSourceModal = String(primeiroItemPedido?.table_source || 'solicitacao_compras').trim() || 'solicitacao_compras';
+
+    configurarBotaoExcluirPedidoCompras('btnExcluirPedidoComprasDetalhes', {
+      status: statusColuna,
+      solicitante: primeiroItemPedido?.solicitante,
+      grupoRequisicao: grupoRequisicaoModal,
+      tableSource: tableSourceModal,
+      itemIds: itensPedido.map(i => i.id)
+    });
+
     if (grupoRequisicaoModal && ['solicitacao_compras', 'compras_sem_cadastro'].includes(tableSourceModal)) {
       try {
         const respGrupo = await fetch(
@@ -46125,6 +46233,8 @@ async function abrirModalAnaliseCadastro(itemId) {
 
   modalBody.innerHTML = '<div style="text-align:center;padding:40px;"><i class="fa-solid fa-spinner fa-spin" style="font-size:32px;color:#3b82f6;"></i><br><br>Carregando...</div>';
   modal.style.display = 'flex';
+  const btnExcluirAnalise = document.getElementById('btnExcluirPedidoComprasAnalise');
+  if (btnExcluirAnalise) btnExcluirAnalise.style.display = 'none';
   renderizarNavegacaoModalKanban({
     modalId: 'modalAnaliseCadastro',
     status: 'analise de cadastro',
@@ -46210,6 +46320,15 @@ async function abrirModalAnaliseCadastro(itemId) {
 
     const tableSourceAnalise = String(item.table_source || 'solicitacao_compras').trim() || 'solicitacao_compras';
     const grupoRequisicaoAnalise = String(item.grupo_requisicao || '').trim();
+
+    configurarBotaoExcluirPedidoCompras('btnExcluirPedidoComprasAnalise', {
+      status: 'analise de cadastro',
+      solicitante: item.solicitante,
+      grupoRequisicao: grupoRequisicaoAnalise,
+      tableSource: tableSourceAnalise,
+      itemIds: [item.id]
+    });
+
     let itensGrupoAnalise = [];
 
     if (grupoRequisicaoAnalise) {
@@ -46661,8 +46780,13 @@ window.criarRequisicaoCompraAnaliseCadastro = async function() {
   }
 
   // Para sem-cadastro: varredura automática — resolve codigo_omie para itens que ainda não têm
+  // Itens PRECAD / pré-cadastro completo são finalizados no backend ao criar a requisição
   if (tableSource === 'compras_sem_cadastro') {
-    const itensSemOmie = itens.filter((i) => !i.codigo_omie && i.produto_codigo);
+    const ehPreCadastro = (i) =>
+      i?.pre_cadastro_completo === true
+      || /^PRECAD/i.test(String(i?.produto_codigo || '').trim());
+
+    const itensSemOmie = itens.filter((i) => !i.codigo_omie && i.produto_codigo && !ehPreCadastro(i));
     if (itensSemOmie.length) {
       try {
         const respResolver = await fetch('/api/compras/resolver-codigos-omie', {
@@ -46686,8 +46810,8 @@ window.criarRequisicaoCompraAnaliseCadastro = async function() {
       }
     }
 
-    // Após varredura, verifica se ainda há itens sem codigo_omie
-    const aindaSemOmie = itens.filter((i) => !i.codigo_omie);
+    // Após varredura, verifica se ainda há itens sem codigo_omie (exceto pré-cadastro)
+    const aindaSemOmie = itens.filter((i) => !i.codigo_omie && !ehPreCadastro(i));
     if (aindaSemOmie.length) {
       const nomes = aindaSemOmie.map((i) => `"${i.descricao || i.produto_codigo || '?'}"`).join(', ');
       alert(`Os seguintes itens não foram encontrados na Omie e precisam ser cadastrados antes:\n${nomes}`);
@@ -51524,7 +51648,13 @@ function atualizarLayoutModeloCompraCatalogo() {
   const retornoTexto = String(selectRetorno.value || '').trim().toLowerCase();
   const ocultarColuna3 = retornoTexto === 'compra ja realizada' || retornoTexto === 'registro rapido de compra';
 
-  coluna3.style.display = ocultarColuna3 ? 'none' : 'flex';
+  // Esconde só os campos da coluna 3 (o botão Realizar solicitação fica sempre visível)
+  ['catalogoCampoObservacaoRecebimento', 'catalogoCampoRespInspecao', 'catalogoCampoLink'].forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) el.style.display = ocultarColuna3 ? 'none' : 'flex';
+  });
+  coluna3.style.display = 'flex';
+  coluna3.style.gridColumn = ocultarColuna3 ? '1 / -1' : '';
   gridConfig.style.gridTemplateColumns = ocultarColuna3 ? 'repeat(2, 1fr)' : 'repeat(3, 1fr)';
   modalContent.style.maxWidth = ocultarColuna3 ? '1400px' : '1800px';
 }
@@ -51643,11 +51773,12 @@ async function abrirModalCatalogoOmie() {
   }
   
   try {
-    // Carrega departamentos e categorias de compra
+    // Carrega departamentos, categorias e config do pré-cadastro
     await Promise.all([
       carregarDepartamentosCatalogo(),
       loadModalComprasCategoriasCompra(),
-      carregarResponsaveisCatalogoInspecao()
+      carregarResponsaveisCatalogoInspecao(),
+      carregarConfigCatalogoPreCadastro()
     ]);
     
     // Define "Produção" como padrão após carregar departamentos
@@ -51677,6 +51808,200 @@ async function abrirModalCatalogoOmie() {
   
   // Inicializa sistema de keywords/tags para descrição
   inicializarDescricaoKeywords();
+}
+
+// Abre Solicitação de compra (produto sem cadastro) a partir do modal Compras
+async function abrirModalProdutoSemCadastroCompras() {
+  try { fecharModalCarrinhoCompras(); } catch (_) {}
+  await abrirModalCatalogoOmie();
+}
+window.abrirModalProdutoSemCadastroCompras = abrirModalProdutoSemCadastroCompras;
+
+// ===== Pré-cadastro no modal Solicitação (sem gerar 5 dígitos agora) =====
+window.__catalogoPreCad = window.__catalogoPreCad || {
+  config: null,
+  origem: 'N',
+  todasFamilias: false
+};
+
+function tipoPadraoFamiliaCatalogo(familia) {
+  const codigo = String(familia?.codigo || '').padStart(2, '0');
+  const nome = String(familia?.nome || familia?.nome_familia || '')
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase();
+  if (['01', '02', '03', '04', '05', '06'].includes(codigo)) return '01';
+  if (codigo === '08') return '02';
+  if (codigo === '09' && /MOVEIS|MOBILIARIO/.test(nome)) return '08';
+  if (codigo === '09') return '07';
+  return '';
+}
+
+function montarPrefixoCatalogoPreCad(familiaCodigo, familiaTipo, origem) {
+  const fam = String(familiaCodigo || '').trim().toUpperCase();
+  const tipo = String(familiaTipo || 'MP').trim().toUpperCase() || 'MP';
+  const ori = String(origem || 'N').trim().toUpperCase() === 'I' ? 'I' : 'N';
+  if (!fam) return '—';
+  if (/^[A-Z]{1,3}$/.test(fam)) return fam;
+  return `${fam.padStart(2, '0')}.${tipo}.${ori}`;
+}
+
+function renderCatalogoPreCadFamilias() {
+  const select = document.getElementById('catalogoPreCadFamilia');
+  const btn = document.getElementById('catalogoPreCadMostrarFamilias');
+  const cfg = window.__catalogoPreCad?.config;
+  if (!select || !cfg) return;
+  const principais = new Set(['01', '02', '03', '04', '05', '06', '08', '09']);
+  const lista = [...(cfg.familias || [])].sort((a, b) => {
+    const aCod = String(a.codigo || '').padStart(2, '0');
+    const bCod = String(b.codigo || '').padStart(2, '0');
+    const aP = principais.has(aCod), bP = principais.has(bCod);
+    if (aP !== bP) return aP ? -1 : 1;
+    return String(a.nome_familia || '').localeCompare(String(b.nome_familia || ''), 'pt-BR');
+  }).filter(f => window.__catalogoPreCad.todasFamilias || principais.has(String(f.codigo || '').padStart(2, '0')));
+  const atual = select.value;
+  select.innerHTML = '<option value="">-- Selecione uma família --</option>' + lista.map(f =>
+    `<option value="${escapeHtml(String(f.codigo || ''))}" data-tipo="${escapeHtml(String(f.tipo || 'MP'))}" data-nome="${escapeHtml(String(f.nome_familia || ''))}">${escapeHtml(`${f.codigo} - ${f.nome_familia}`)}</option>`
+  ).join('');
+  if ([...select.options].some(o => o.value === atual)) select.value = atual;
+  if (btn) {
+    btn.innerHTML = window.__catalogoPreCad.todasFamilias
+      ? '<i class="fa-regular fa-eye-slash"></i> Ocultar famílias restantes'
+      : '<i class="fa-regular fa-eye"></i> Desocultar famílias restantes';
+  }
+  atualizarPrefixoCatalogoPreCad();
+}
+
+function atualizarPrefixoCatalogoPreCad() {
+  const select = document.getElementById('catalogoPreCadFamilia');
+  const hint = document.getElementById('catalogoPreCadPrefixo');
+  if (!select || !hint) return;
+  const opt = select.selectedOptions[0];
+  const prefixo = montarPrefixoCatalogoPreCad(
+    opt?.value,
+    opt?.dataset?.tipo || 'MP',
+    window.__catalogoPreCad?.origem || 'N'
+  );
+  hint.textContent = prefixo;
+}
+
+function selecionarCatalogoPreCadOrigem(origem) {
+  window.__catalogoPreCad.origem = origem === 'I' ? 'I' : 'N';
+  document.querySelectorAll('.catalogo-pre-cad-origem').forEach(btn => {
+    const ativo = btn.dataset.origin === window.__catalogoPreCad.origem;
+    btn.classList.toggle('active', ativo);
+    btn.style.background = ativo ? '#3b82f6' : '#fff';
+    btn.style.color = ativo ? '#fff' : '#334155';
+    btn.style.borderColor = ativo ? '#3b82f6' : '#cbd5e1';
+  });
+  atualizarPrefixoCatalogoPreCad();
+}
+window.selecionarCatalogoPreCadOrigem = selecionarCatalogoPreCadOrigem;
+
+function toggleCatalogoPreCadFamilias() {
+  window.__catalogoPreCad.todasFamilias = !window.__catalogoPreCad.todasFamilias;
+  renderCatalogoPreCadFamilias();
+}
+window.toggleCatalogoPreCadFamilias = toggleCatalogoPreCadFamilias;
+
+async function carregarConfigCatalogoPreCadastro() {
+  const selectFam = document.getElementById('catalogoPreCadFamilia');
+  const selectUn = document.getElementById('catalogoPreCadUnidade');
+  const selectTipo = document.getElementById('catalogoPreCadTipo');
+  if (!selectFam) return;
+  try {
+    if (!window.__catalogoPreCad.config) {
+      const resp = await fetch('/api/produtos/cadastro/config', { credentials: 'include' });
+      const json = await resp.json();
+      if (!resp.ok || !json?.ok) throw new Error(json?.error || 'Falha ao carregar config');
+      window.__catalogoPreCad.config = json;
+    }
+    const cfg = window.__catalogoPreCad.config;
+    renderCatalogoPreCadFamilias();
+    if (selectUn) {
+      selectUn.innerHTML = '<option value="">Selecione...</option>' +
+        (cfg.unidades || []).map(u => `<option value="${escapeHtml(u.codigo)}">${escapeHtml(`${u.codigo} - ${u.descricao || ''}`)}</option>`).join('');
+    }
+    if (selectTipo) {
+      selectTipo.innerHTML = (cfg.tipos || []).map(t =>
+        `<option value="${escapeHtml(t.value)}">${escapeHtml(`${t.value} - ${t.label}`)}</option>`
+      ).join('');
+      if ([...selectTipo.options].some(o => o.value === '00')) selectTipo.value = '00';
+    }
+    if (!selectFam.dataset.bound) {
+      selectFam.dataset.bound = '1';
+      selectFam.addEventListener('change', () => {
+        const opt = selectFam.selectedOptions[0];
+        const tipo = tipoPadraoFamiliaCatalogo({
+          codigo: opt?.value,
+          nome: opt?.dataset?.nome
+        });
+        if (tipo && selectTipo && [...selectTipo.options].some(o => o.value === tipo)) {
+          selectTipo.value = tipo;
+        }
+        atualizarPrefixoCatalogoPreCad();
+      });
+    }
+    const fotoInput = document.getElementById('catalogoPreCadFoto');
+    if (fotoInput && !fotoInput.dataset.bound) {
+      fotoInput.dataset.bound = '1';
+      fotoInput.addEventListener('change', () => {
+        const nomeEl = document.getElementById('catalogoPreCadFotoNome');
+        const file = fotoInput.files?.[0];
+        if (nomeEl) nomeEl.textContent = file ? `${file.name} · ${Math.ceil(file.size / 1024)} KB` : '';
+      });
+    }
+    selecionarCatalogoPreCadOrigem(window.__catalogoPreCad.origem || 'N');
+  } catch (err) {
+    console.error('[Pré-cadastro] Erro ao carregar config:', err);
+    selectFam.innerHTML = '<option value="">Erro ao carregar famílias</option>';
+  }
+}
+
+function obterDadosCatalogoPreCadastro() {
+  const selectFam = document.getElementById('catalogoPreCadFamilia');
+  const opt = selectFam?.selectedOptions?.[0];
+  const unidade = (document.getElementById('catalogoPreCadUnidade')?.value || '').trim();
+  const tipoItem = (document.getElementById('catalogoPreCadTipo')?.value || '').trim();
+  const familiaCodigo = String(opt?.value || '').trim();
+  const familiaTipo = String(opt?.dataset?.tipo || 'MP').trim() || 'MP';
+  const familiaNome = String(opt?.dataset?.nome || opt?.textContent || '').trim();
+  const origem = window.__catalogoPreCad?.origem === 'I' ? 'I' : 'N';
+  const codigoPrefixo = montarPrefixoCatalogoPreCad(familiaCodigo, familiaTipo, origem);
+  const fotoFile = document.getElementById('catalogoPreCadFoto')?.files?.[0] || null;
+  return {
+    familia_codigo: familiaCodigo,
+    familia_tipo: familiaTipo,
+    familia_nome: familiaNome,
+    origem,
+    unidade,
+    tipo_item_omie: tipoItem,
+    codigo_prefixo: codigoPrefixo === '—' ? '' : codigoPrefixo,
+    fotoFile,
+    pre_cadastro_completo: true
+  };
+}
+
+function limparCatalogoPreCadastro() {
+  const selectFam = document.getElementById('catalogoPreCadFamilia');
+  if (selectFam) selectFam.value = '';
+  const selectUn = document.getElementById('catalogoPreCadUnidade');
+  if (selectUn) selectUn.value = '';
+  const selectTipo = document.getElementById('catalogoPreCadTipo');
+  if (selectTipo) selectTipo.value = '';
+  const fotoInput = document.getElementById('catalogoPreCadFoto');
+  if (fotoInput) fotoInput.value = '';
+  const fotoNome = document.getElementById('catalogoPreCadFotoNome');
+  if (fotoNome) fotoNome.textContent = '';
+  if (window.__catalogoPreCad) window.__catalogoPreCad.origem = 'N';
+  if (typeof selecionarCatalogoPreCadOrigem === 'function') selecionarCatalogoPreCadOrigem('N');
+  if (typeof atualizarPrefixoCatalogoPreCad === 'function') atualizarPrefixoCatalogoPreCad();
+}
+
+function validarCatalogoPreCadastro() {
+  const d = obterDadosCatalogoPreCadastro();
+  if (!d.familia_codigo) return 'Selecione a família do pré-cadastro.';
+  if (!d.unidade) return 'Selecione a unidade do pré-cadastro.';
+  if (!d.tipo_item_omie) return 'Selecione o tipo de item (Omie).';
+  return null;
 }
 
 // ========== FUNÇÕES PARA GERENCIAR KEYWORDS/TAGS DE DESCRIÇÃO ==========
@@ -54753,6 +55078,13 @@ async function adicionarProdutoNaoCadastradoAoCarrinho(event) {
     selectCCGlobal?.focus();
     return;
   }
+
+  const erroPreCad = validarCatalogoPreCadastro();
+  if (erroPreCad) {
+    alert(erroPreCad);
+    return;
+  }
+  const preCad = obterDadosCatalogoPreCadastro();
   
   // Feedback visual no botão durante processamento
   const btn = event?.target?.closest('button');
@@ -54852,6 +55184,17 @@ async function adicionarProdutoNaoCadastradoAoCarrinho(event) {
         }
       }
     }
+
+    // Foto do pré-cadastro (opcional)
+    let fotoUrlPreCad = null;
+    if (preCad.fotoFile) {
+      try {
+        fotoUrlPreCad = await uploadCatalogoAnexo(preCad.fotoFile, `PRECAD-${Date.now()}`);
+      } catch (errFoto) {
+        console.error('[Catálogo] Erro ao enviar foto do pré-cadastro:', errFoto);
+        alert(`Erro ao enviar a foto do produto. Continuando sem a foto.`);
+      }
+    }
     
     const linksCatalogo = Array.isArray(window.catalogoLinksAcumulados)
       ? window.catalogoLinksAcumulados.filter(l => l && String(l).trim().length > 0)
@@ -54873,7 +55216,16 @@ async function adicionarProdutoNaoCadastradoAoCarrinho(event) {
       observacao_recebimento: observacaoRecebimento,
       valor_gasto: valorGastoRegistroRapido,
       anexos: anexosUrls,
-      link: linksCatalogo
+      link: linksCatalogo,
+      pre_cadastro_completo: true,
+      familia_codigo: preCad.familia_codigo,
+      familia_tipo: preCad.familia_tipo,
+      familia_nome: preCad.familia_nome,
+      origem: preCad.origem,
+      unidade: preCad.unidade,
+      tipo_item_omie: preCad.tipo_item_omie,
+      codigo_prefixo: preCad.codigo_prefixo,
+      foto_url: fotoUrlPreCad
     };
     
     console.log('[Catálogo] Enviando para /api/compras/sem-cadastro:', payload);
@@ -54915,6 +55267,7 @@ async function adicionarProdutoNaoCadastradoAoCarrinho(event) {
     
     // Limpa os campos após adicionar
     limparDescricaoKeywords();
+    limparCatalogoPreCadastro();
     const objetivoGlobal = document.getElementById('catalogoObservacaoGlobal');
     const obsRecebimentoInput = document.getElementById('catalogoObservacaoRecebimento');
     if (objetivoGlobal) objetivoGlobal.value = '';
@@ -57705,6 +58058,8 @@ async function abrirModalAprovacaoRequisicao() {
       alert('Nenhuma solicitação aguardando aprovação');
       return;
     }
+
+    window._itensAprovacaoModal = itensAprovacao;
     
     // Debug: verifica estrutura dos dados
     console.log('[Modal Aprovação] Exemplo de item:', itensAprovacao[0]);
@@ -57999,19 +58354,58 @@ async function aprovarItemRequisicao(itemId, tableSource, retornoCotacaoRawOrigi
   const novoStatusSolicitacao = retornoCotacaoEhSimSolicitacao ? 'aguardando cotação' : 'Requisição';
 
   const mensagemConfirmacao = isSemCadastro
-    ? `Deseja aprovar este item? O status será atualizado para ${retornoCotacaoEhSim ? 'aguardando cotação' : 'Organizando requisição'}.`
+    ? `Deseja aprovar este item? O status será atualizado para ${retornoCotacaoEhSim ? 'aguardando cotação' : 'Requisição Omie'}.`
     : 'Deseja aprovar este item? Será criada uma requisição na Omie e o item será movido para "Pedido de compra".';
 
   if (!confirm(mensagemConfirmacao)) return;
   
   try {
     if (isSemCadastro) {
-      const novoStatus = retornoCotacaoEhSim ? 'aguardando cotação' : 'Analise de cadastro';
+      if (retornoCotacaoEhSim) {
+        const resp = await fetch(`/api/compras/sem-cadastro/${itemId}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ status: 'aguardando cotação' })
+        });
+        if (!resp.ok) {
+          const error = await resp.json();
+          throw new Error(error.error || 'Falha ao atualizar status');
+        }
+        alert('Item aprovado e status atualizado para aguardando cotação.');
+        removerItemModalAprovacao(itemId);
+        atualizarKanbanMinhasAposMudanca(itemId, 'aguardando cotação');
+        return;
+      }
+
+      // Sem cotação: pré-cadastro gera código + Omie e cria requisição; legado vai para Análise
+      const itemLocal = (window._itensAprovacaoModal || []).find((i) => Number(i?.id) === Number(itemId))
+        || null;
+      const ehPreCadastro = itemLocal?.pre_cadastro_completo === true
+        || /^PRECAD/i.test(String(itemLocal?.produto_codigo || '').trim());
+
+      if (ehPreCadastro) {
+        const respReq = await fetch(`/api/compras/sem-cadastro/${itemId}/criar-requisicao-omie`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ itens: [] })
+        });
+        const dataReq = await respReq.json().catch(() => ({}));
+        if (!respReq.ok || !dataReq.ok) {
+          throw new Error(dataReq.error || 'Falha ao criar requisição Omie do pré-cadastro');
+        }
+        alert(`Item aprovado!\nRequisição Omie: ${dataReq.codIntReqCompra || dataReq.numero_pedido || '-'}`);
+        removerItemModalAprovacao(itemId);
+        atualizarKanbanMinhasAposMudanca(itemId, 'Requisição');
+        return;
+      }
+
       const resp = await fetch(`/api/compras/sem-cadastro/${itemId}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
-        body: JSON.stringify({ status: novoStatus })
+        body: JSON.stringify({ status: 'Analise de cadastro' })
       });
 
       if (!resp.ok) {
@@ -58019,9 +58413,9 @@ async function aprovarItemRequisicao(itemId, tableSource, retornoCotacaoRawOrigi
         throw new Error(error.error || 'Falha ao atualizar status');
       }
 
-      alert(`Item aprovado e status atualizado para ${novoStatus}.`);
+      alert('Item aprovado e status atualizado para Análise de cadastro.');
       removerItemModalAprovacao(itemId);
-      atualizarKanbanMinhasAposMudanca(itemId, novoStatus);
+      atualizarKanbanMinhasAposMudanca(itemId, 'Analise de cadastro');
       return;
     }
 
@@ -58260,25 +58654,67 @@ async function aprovarGrupoRequisicao(itemIdsCsv, grupoRequisicaoEncoded = '', t
 
     let totalSemCadastroCotacao = 0;
     let totalSemCadastroAnalise = 0;
+    let totalSemCadastroRequisicao = 0;
+    const idsPreCadastroJaProcessados = new Set();
+
     for (const item of itensSemCadastro) {
+      const itemIdNum = Number(item.id);
+      if (idsPreCadastroJaProcessados.has(itemIdNum)) continue;
+
       const retornoCotacaoRaw = String(item?.retorno_cotacao || '').trim();
       const vaiCotacao = retornoCotacaoIndicaCotacao(retornoCotacaoRaw, 'compras_sem_cadastro');
-      const novoStatus = vaiCotacao ? 'aguardando cotação' : 'Analise de cadastro';
+      const ehPreCadastro = item?.pre_cadastro_completo === true
+        || /^PRECAD/i.test(String(item?.produto_codigo || '').trim());
+
+      if (vaiCotacao) {
+        const respSemCadastro = await fetch(`/api/compras/sem-cadastro/${item.id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ status: 'aguardando cotação' })
+        });
+        if (!respSemCadastro.ok) {
+          const errorSemCadastro = await respSemCadastro.json().catch(() => ({}));
+          throw new Error(errorSemCadastro.error || `Falha ao aprovar item sem cadastro ${item.id}`);
+        }
+        totalSemCadastroCotacao += 1;
+        continue;
+      }
+
+      if (ehPreCadastro) {
+        // Uma chamada por grupo: o backend finaliza todos os PRECAD do grupo e cria 1 requisição Omie
+        const respReq = await fetch(`/api/compras/sem-cadastro/${item.id}/criar-requisicao-omie`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ itens: [] })
+        });
+        const dataReq = await respReq.json().catch(() => ({}));
+        if (!respReq.ok || !dataReq.ok) {
+          throw new Error(dataReq.error || `Falha ao criar requisição Omie do pré-cadastro ${item.id}`);
+        }
+        const grupo = String(item.grupo_requisicao || '').trim();
+        itensSemCadastro.forEach((outro) => {
+          if (String(outro.grupo_requisicao || '').trim() === grupo) {
+            idsPreCadastroJaProcessados.add(Number(outro.id));
+            totalSemCadastroRequisicao += 1;
+          }
+        });
+        continue;
+      }
 
       const respSemCadastro = await fetch(`/api/compras/sem-cadastro/${item.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
-        body: JSON.stringify({ status: novoStatus })
+        body: JSON.stringify({ status: 'Analise de cadastro' })
       });
 
       if (!respSemCadastro.ok) {
         const errorSemCadastro = await respSemCadastro.json().catch(() => ({}));
         throw new Error(errorSemCadastro.error || `Falha ao aprovar item sem cadastro ${item.id}`);
       }
-
-      if (vaiCotacao) totalSemCadastroCotacao += 1;
-      else totalSemCadastroAnalise += 1;
+      totalSemCadastroAnalise += 1;
     }
 
     const itensRequisicao = resultadoSolicitacao.itens_requisicao || [];
@@ -58292,10 +58728,11 @@ async function aprovarGrupoRequisicao(itemIdsCsv, grupoRequisicaoEncoded = '', t
     if (itensCotacao.length > 0) {
       mensagem += `\nItens aguardando cotação: ${itensCotacao.length}`;
     }
-    if (totalSemCadastroCotacao > 0 || totalSemCadastroAnalise > 0) {
+    if (totalSemCadastroCotacao > 0 || totalSemCadastroAnalise > 0 || totalSemCadastroRequisicao > 0) {
       mensagem += `\n\nItens sem cadastro aprovados via grupo:`;
       if (totalSemCadastroCotacao > 0) mensagem += `\n- Aguardando cotação: ${totalSemCadastroCotacao}`;
-      if (totalSemCadastroAnalise > 0) mensagem += `\n- Organizando requisição: ${totalSemCadastroAnalise}`;
+      if (totalSemCadastroRequisicao > 0) mensagem += `\n- Requisição Omie (pré-cadastro): ${totalSemCadastroRequisicao}`;
+      if (totalSemCadastroAnalise > 0) mensagem += `\n- Análise de cadastro (legado): ${totalSemCadastroAnalise}`;
     }
     
     alert(mensagem);
@@ -59047,12 +59484,14 @@ function montarCardsKanbanMinhas(status, itens) {
     const todosIds = itensGrupo.map(i => i.id).join(',');
 
     const listaProdutos = itensGrupo.map((item, itemIdx) => {
-      const codigo = item.produto_codigo || '-';
+      const codigoBruto = String(item.produto_codigo || '').trim();
+      const ehPreCad = item.pre_cadastro_completo === true || /^PRECAD/i.test(codigoBruto);
+      const codigo = ehPreCad ? 'Pré-cadastro' : (codigoBruto || '-');
       const desc = item.produto_descricao || item.descricao || '-';
       const tooltipId = `tooltip-${status.replace(/\s+/g, '-')}-${chaveGrupo}-${itemIdx}`;
       return `
         <div style="margin-bottom:4px;padding-bottom:4px;${itensGrupo.length > 1 ? 'border-bottom:1px solid #f3f4f6;' : ''}">
-          <div style="font-size:12px;color:#374151;font-weight:600;">${escapeHtml(codigo)}</div>
+          <div style="font-size:12px;color:${ehPreCad ? '#1d4ed8' : '#374151'};font-weight:600;">${escapeHtml(codigo)}</div>
           <div>
             <div 
               class="desc-truncada"

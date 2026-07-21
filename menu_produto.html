@@ -138,13 +138,15 @@
     <!-- Cabeçalho principal -->
 <!-- ===== CABEÇALHO PRINCIPAL ===== -->
 <div class="header" id="appHeader">
-  <img class="menu-logo" src="../img/logo.png" alt="Logo da empresa" />
+  <img class="menu-logo" src="../img/logo.png" alt="Logo da empresa" title="Início" />
 
   <!-- Links que podem “sobrar” -->
 <nav id="mainMenu" class="header-menu">
 
+  <!-- Botão oculto: o Início agora é acessado clicando na logo (mantido no DOM porque outras partes do código dependem dele) -->
   <a id="menu-inicio"
      class="menu-link is-active"
+     style="display:none !important;"
      data-target="paginaInicio"
      data-nav-key="top:inicio"
      data-nav-pos="top"
@@ -1615,7 +1617,7 @@
             <div class="modal-header carrinho-header">
               <h3 style="margin:0;display:flex;align-items:center;gap:8px;">
                 <i class="fa-solid fa-cart-shopping" style="color:#f59e0b;"></i>
-                Meu Carrinho de Compras
+                Compras
               </h3>
               <div style="display:flex;align-items:center;gap:8px;">
                 <button id="modalCarrinhoFecharBtn" class="modal-close-btn" type="button">
@@ -1707,6 +1709,15 @@
                            style="width:100%;padding:10px;border:1px solid #334155;border-radius:6px;font-size:13px;background:#020617;font-weight:600;color:#e5e7eb;">
                   </div>
                   
+                  <!-- Produto sem cadastro → abre Solicitação mesclada com pré-cadastro -->
+                  <button id="btnProdutoSemCadastroCarrinho" type="button" onclick="abrirModalProdutoSemCadastroCompras()"
+                          style="width:100%;padding:10px;background:#f59e0b;color:#111827;border:none;border-radius:6px;cursor:pointer;font-weight:700;font-size:12px;display:flex;align-items:center;justify-content:center;gap:8px;transition:all 0.2s;"
+                          onmouseover="this.style.background='#d97706'"
+                          onmouseout="this.style.background='#f59e0b'">
+                    <i class="fa-solid fa-box-open"></i>
+                    Produto sem cadastro
+                  </button>
+
                   <!-- Botão Colar Lista de Compra -->
                   <button id="btnColarListaCompra" onclick="abrirModalColarLista()" 
                           style="width:100%;padding:10px;background:#10b981;color:white;border:none;border-radius:6px;cursor:pointer;font-weight:700;font-size:12px;display:flex;align-items:center;justify-content:center;gap:8px;transition:all 0.2s;"
@@ -1911,7 +1922,13 @@
                 <i class="fa-solid fa-file-invoice" style="color:#3b82f6;"></i>
                 <span id="modalPedidoTitulo">Detalhes do Pedido</span>
               </h3>
-              <button class="modal-close" onclick="fecharModalDetalhesPedidoCompras()">&times;</button>
+              <div style="display:flex;align-items:center;gap:10px;">
+                <button id="btnExcluirPedidoComprasDetalhes" type="button" onclick="excluirPedidoComprasKanban('btnExcluirPedidoComprasDetalhes')"
+                  style="display:none;background:#dc2626;color:#fff;border:none;border-radius:8px;padding:6px 12px;font-size:12px;font-weight:700;cursor:pointer;align-items:center;gap:6px;">
+                  <i class="fa-solid fa-trash"></i> Excluir
+                </button>
+                <button class="modal-close" onclick="fecharModalDetalhesPedidoCompras()">&times;</button>
+              </div>
             </div>
             <div class="modal-body" id="modalPedidoBody" style="padding:20px;">
               <!-- Conteúdo será inserido dinamicamente -->
@@ -1949,7 +1966,13 @@
                 <i class="fa-solid fa-clipboard-list" style="color:#3b82f6;"></i>
                 <span id="modalAnaliseCadastroTitulo">Análise de Cadastro</span>
               </h3>
-              <button class="modal-close" onclick="fecharModalAnaliseCadastro()">&times;</button>
+              <div style="display:flex;align-items:center;gap:10px;">
+                <button id="btnExcluirPedidoComprasAnalise" type="button" onclick="excluirPedidoComprasKanban('btnExcluirPedidoComprasAnalise')"
+                  style="display:none;background:#dc2626;color:#fff;border:none;border-radius:8px;padding:6px 12px;font-size:12px;font-weight:700;cursor:pointer;align-items:center;gap:6px;">
+                  <i class="fa-solid fa-trash"></i> Excluir
+                </button>
+                <button class="modal-close" onclick="fecharModalAnaliseCadastro()">&times;</button>
+              </div>
             </div>
             <div class="modal-body" id="modalAnaliseCadastroBody" style="padding:20px;">
               <!-- Conteúdo será inserido dinamicamente -->
@@ -2199,8 +2222,65 @@
               <!-- Configurações Globais em 2 Colunas -->
               <div id="catalogoGridConfiguracoes" style="display:grid;grid-template-columns:repeat(3, 1fr);gap:16px;margin-bottom:20px;padding:16px;background:#f9fafb;border:2px solid #3b82f6;border-radius:8px;align-items:flex-start;">
                 
-                <!-- COLUNA ESQUERDA -->
+                <!-- COLUNA 1 — Pré-cadastro -->
                 <div style="display:flex;flex-direction:column;gap:12px;">
+                  <!-- Pré-cadastro (família + origem = prefixo; 5 dígitos só na Requisição Omie) -->
+                  <div id="catalogoPreCadastroBloco" style="display:flex;flex-direction:column;gap:10px;padding:12px;background:#eff6ff;border:1px solid #93c5fd;border-radius:8px;">
+                    <div style="font-size:12px;font-weight:700;color:#1e40af;">
+                      <i class="fa-solid fa-tags" style="margin-right:4px;"></i>
+                      Pré-cadastro do produto
+                    </div>
+                    <div style="display:flex;flex-direction:column;gap:6px;">
+                      <label style="font-size:11px;color:#1f2937;font-weight:700;">Família *</label>
+                      <select id="catalogoPreCadFamilia" style="width:100%;padding:10px;border:2px solid #3b82f6;border-radius:6px;font-size:13px;background:white;font-weight:600;">
+                        <option value="">Carregando...</option>
+                      </select>
+                      <button type="button" id="catalogoPreCadMostrarFamilias" onclick="toggleCatalogoPreCadFamilias()"
+                        style="align-self:flex-start;background:none;border:none;color:#2563eb;font-size:11px;cursor:pointer;padding:0;">
+                        <i class="fa-regular fa-eye"></i> Desocultar famílias restantes
+                      </button>
+                    </div>
+                    <div style="display:flex;flex-direction:column;gap:6px;">
+                      <label style="font-size:11px;color:#1f2937;font-weight:700;">Origem *</label>
+                      <div id="catalogoPreCadOrigem" style="display:flex;gap:8px;">
+                        <button type="button" data-origin="N" class="catalogo-pre-cad-origem active"
+                          onclick="selecionarCatalogoPreCadOrigem('N')"
+                          style="flex:1;padding:8px;border:2px solid #3b82f6;border-radius:6px;background:#3b82f6;color:#fff;font-weight:700;font-size:12px;cursor:pointer;">Nacional</button>
+                        <button type="button" data-origin="I" class="catalogo-pre-cad-origem"
+                          onclick="selecionarCatalogoPreCadOrigem('I')"
+                          style="flex:1;padding:8px;border:2px solid #cbd5e1;border-radius:6px;background:#fff;color:#334155;font-weight:700;font-size:12px;cursor:pointer;">Importado</button>
+                      </div>
+                    </div>
+                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+                      <div style="display:flex;flex-direction:column;gap:6px;">
+                        <label style="font-size:11px;color:#1f2937;font-weight:700;">Unidade *</label>
+                        <select id="catalogoPreCadUnidade" style="width:100%;padding:10px;border:2px solid #3b82f6;border-radius:6px;font-size:13px;background:white;font-weight:600;">
+                          <option value="">Selecione...</option>
+                        </select>
+                      </div>
+                      <div style="display:flex;flex-direction:column;gap:6px;">
+                        <label style="font-size:11px;color:#1f2937;font-weight:700;">Tipo de item *</label>
+                        <select id="catalogoPreCadTipo" style="width:100%;padding:10px;border:2px solid #3b82f6;border-radius:6px;font-size:13px;background:white;font-weight:600;">
+                          <option value="">Selecione...</option>
+                        </select>
+                      </div>
+                    </div>
+                    <div style="display:flex;flex-direction:column;gap:6px;">
+                      <label style="font-size:11px;color:#1f2937;font-weight:700;">Foto (opcional)</label>
+                      <input type="file" id="catalogoPreCadFoto" accept="image/*" style="font-size:12px;" />
+                      <div id="catalogoPreCadFotoNome" style="font-size:11px;color:#64748b;"></div>
+                    </div>
+                    <div id="catalogoPreCadPrefixoHint" style="font-size:11px;line-height:1.45;color:#1e40af;background:#fff;border:1px dashed #93c5fd;border-radius:6px;padding:8px;">
+                      Prefixo: <strong id="catalogoPreCadPrefixo">—</strong><br>
+                      Código definitivo (5 dígitos) será gerado na hora da Requisição Omie.
+                    </div>
+                  </div>
+
+                </div>
+
+                <!-- COLUNA 2 — Modelo de compra + Objetivo -->
+                <div style="display:flex;flex-direction:column;gap:12px;">
+
                   <div style="display:flex;flex-direction:column;gap:6px;">
                     <label style="display:flex;align-items:center;gap:6px;font-size:11px;color:#1f2937;font-weight:700;">
                       <i class="fa-solid fa-clipboard-question" style="color:#3b82f6;"></i>
@@ -2246,11 +2326,6 @@
                       <option value="">Selecione...</option>
                     </select>
                   </div>
-
-                </div>
-
-                <!-- COLUNA 2 -->
-                <div style="display:flex;flex-direction:column;gap:12px;">
 
                   <div style="display:flex;flex-direction:column;gap:6px;">
                     <label style="display:block;font-size:11px;color:#1f2937;font-weight:700;">
@@ -2363,20 +2438,20 @@
                       style="width:100%;padding:10px;border:2px solid #3b82f6;border-radius:6px;font-size:13px;background:white;font-weight:500;" />
                     <div id="catalogoLinkPreview" style="display:none;margin-top:8px;"></div>
                   </div>
+
+                  <!-- Botão Realizar solicitação (aparece apenas quando Possui cadastro na Omie? = Não) -->
+                  <div id="catalogoBotaoAdicionarNaoCadastrado" style="display:none;margin-top:4px;text-align:center;">
+                    <button 
+                      type="button"
+                      onclick="adicionarProdutoNaoCadastradoAoCarrinho(event)"
+                      style="width:100%;padding:14px 32px;background:linear-gradient(135deg,#10b981 0%,#059669 100%);color:white;border:none;border-radius:8px;cursor:pointer;font-size:15px;font-weight:700;display:inline-flex;align-items:center;justify-content:center;gap:10px;box-shadow:0 4px 12px rgba(16,185,129,0.3);transition:all 0.2s;"
+                      onmouseover="this.style.transform='translateY(-2px)';this.style.boxShadow='0 6px 16px rgba(16,185,129,0.4)'"
+                      onmouseout="this.style.transform='translateY(0)';this.style.boxShadow='0 4px 12px rgba(16,185,129,0.3)'">
+                      <i class="fa-solid fa-cart-plus" style="font-size:18px;"></i>
+                      <span>Realizar solicitação de compra</span>
+                    </button>
+                  </div>
                 </div>
-              </div>
-              
-              <!-- Botão Adicionar ao Carrinho (aparece apenas quando Possui cadastro na Omie? = Não) -->
-              <div id="catalogoBotaoAdicionarNaoCadastrado" style="display:none;margin-bottom:16px;text-align:center;">
-                <button 
-                  type="button"
-                  onclick="adicionarProdutoNaoCadastradoAoCarrinho(event)"
-                  style="padding:14px 32px;background:linear-gradient(135deg,#10b981 0%,#059669 100%);color:white;border:none;border-radius:8px;cursor:pointer;font-size:15px;font-weight:700;display:inline-flex;align-items:center;gap:10px;box-shadow:0 4px 12px rgba(16,185,129,0.3);transition:all 0.2s;"
-                  onmouseover="this.style.transform='translateY(-2px)';this.style.boxShadow='0 6px 16px rgba(16,185,129,0.4)'"
-                  onmouseout="this.style.transform='translateY(0)';this.style.boxShadow='0 4px 12px rgba(16,185,129,0.3)'">
-                  <i class="fa-solid fa-cart-plus" style="font-size:18px;"></i>
-                  <span>Realizar solicitação de compra</span>
-                </button>
               </div>
               
               <!-- Seção de Filtros (aparece apenas quando Possui cadastro na Omie? = Sim) -->
@@ -7417,7 +7492,7 @@
                     <rect x="14" y="14" width="7" height="7" rx="1"></rect>
                   </svg>
                 </button>
-                <button id="listaProdutosAbrirCarrinhoBtn" type="button" class="filter-icon carrinho-btn" title="Meu Carrinho de Compras" aria-label="Abrir carrinho de compras">
+                <button id="listaProdutosAbrirCarrinhoBtn" type="button" class="filter-icon carrinho-btn" title="Compras" aria-label="Abrir Compras">
                   <i class="fa-solid fa-cart-shopping"></i>
                   <span class="mobile-filter-label">Carrinho</span>
                   <span id="listaProdutosCarrinhoCount" class="carrinho-badge">0</span>
@@ -12381,7 +12456,7 @@
   <script src="/public/js/at-masp-relatorio.js?v=20260718g" defer></script>
   <script src="/public/js/vendas-relatorio-gerencial.js?v=20260709a" defer></script>
   <script src="/public/js/logistica-relatorio-gerencial.js?v=20260712a" defer></script>
-  <script type="module" src="menu_produto.js?v=20260718-minimos-compras-2"></script>
+  <script type="module" src="menu_produto.js?v=20260721-pre-cadastro-3"></script>
   
   <script type="module" src="./requisicoes_omie/filtro_produto.js?v=20260718-faixa-minimo"></script>
   <script type="module" src="./requisicoes_omie/ListarProdutos.js?v=20260718-faixa-minimo"></script>

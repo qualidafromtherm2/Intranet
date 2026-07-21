@@ -136,20 +136,28 @@ async function main() {
       
       console.log(`📄 Página ${pagina}/${stats.total_paginas} - ${produtos.length} produtos`);
       
-      // Processa produtos em batch
-      for (const produto of produtos) {
-        try {
-          const obj = ensureIntegrationKey({ ...produto });
-          await dbQuery("SELECT set_config('app.produtos_omie_write_source', 'omie_manual', true)");
-          await dbQuery('SELECT omie_upsert_produto($1::jsonb)', [obj]);
-          if (produto.codigo_produto) idsVistosNaOmie.add(String(produto.codigo_produto));
-          stats.sucesso++;
-          stats.processados++;
-        } catch (error) {
-          stats.erros++;
-          stats.processados++;
-          console.error(`   ❌ Erro: ${produto.codigo} - ${error.message}`);
+      // Processa produtos em batch — cliente dedicado com source de sessão,
+      // pois set_config(..., true) fora de transação não tem efeito e o
+      // gatilho guard bloqueia a escrita.
+      const client = await dbGetClient();
+      try {
+        await client.query("SELECT set_config('app.produtos_omie_write_source', 'omie_manual', false)");
+        for (const produto of produtos) {
+          try {
+            const obj = ensureIntegrationKey({ ...produto });
+            await client.query('SELECT omie_upsert_produto($1::jsonb)', [obj]);
+            if (produto.codigo_produto) idsVistosNaOmie.add(String(produto.codigo_produto));
+            stats.sucesso++;
+            stats.processados++;
+          } catch (error) {
+            stats.erros++;
+            stats.processados++;
+            console.error(`   ❌ Erro: ${produto.codigo} - ${error.message}`);
+          }
         }
+      } finally {
+        try { await client.query("SELECT set_config('app.produtos_omie_write_source', '', false)"); } catch (_) {}
+        client.release();
       }
       
       const progresso = ((stats.processados / stats.total_produtos) * 100).toFixed(1);
