@@ -67729,7 +67729,6 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
                       </span>
                     `
                   }
-                  <span class="cp-card-state ${cardStatusOperacional.classe}">${cardStatusOperacional.texto}</span>
                   ${isAprovacao ? `
                     <button
                       onclick="toggleAprovacaoItensMinhas('${cardKey}', event)"

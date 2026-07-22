@@ -18285,12 +18285,26 @@ html.light-mode #minhasComprasWrapper {
 }
 
 #minhasComprasWrapper #kanbanMinhasSolicitacoes .cp-card-dates {
+  flex-direction: column !important;
+  align-items: flex-start;
   flex-wrap: nowrap !important;
-  gap: 1px 4px !important;
+  gap: 2px !important;
   margin: 1px 0 !important;
-  font-size: 8px !important;
+  padding: 3px 4px !important;
+  font-size: 9px !important;
   overflow: hidden;
   white-space: nowrap;
+}
+
+#minhasComprasWrapper #kanbanMinhasSolicitacoes .cp-card-dates > span {
+  width: 100%;
+  min-width: 0;
+  gap: 3px !important;
+}
+
+#minhasComprasWrapper #kanbanMinhasSolicitacoes .cp-card-date-label {
+  color: #475569;
+  font-weight: 700;
 }
 
 #minhasComprasWrapper #kanbanMinhasSolicitacoes .cp-card-summary {
@@ -18446,6 +18460,12 @@ html.light-mode #minhasComprasWrapper {
 #minhasComprasWrapper #kanbanMinhasSolicitacoes .cp-card-summary {
   flex-wrap: nowrap !important;
   white-space: nowrap;
+}
+
+#minhasComprasWrapper #kanbanMinhasSolicitacoes .cp-card-dates {
+  flex-direction: column !important;
+  align-items: flex-start !important;
+  gap: 2px !important;
 }
 
 #modalDetalhesPedidoCompras.cp-detail-modal {
