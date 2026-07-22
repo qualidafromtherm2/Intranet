@@ -65985,9 +65985,11 @@ function ajustarAlturaKanban() {
   // Só ajusta quando o kanban está visível (não interfere no modo lista)
   if (kanbanContainer.style.display === 'none') return;
 
-  // Calcula altura: viewport menos o topo do kanban menos folga (48 px garante barra horizontal visível)
+  // Calcula altura: viewport menos o topo do kanban e uma pequena margem inferior.
+  // A própria coluna contém o scroll vertical; uma folga grande desperdiçava
+  // espaço equivalente a quase um card no zoom normal.
   const containerRect = kanbanContainer.getBoundingClientRect();
-  const alturaDisponivel = Math.floor(window.innerHeight - containerRect.top - 48);
+  const alturaDisponivel = Math.floor(window.innerHeight - containerRect.top - 12);
 
   if (alturaDisponivel > 200) {
     kanbanContainer.style.height = `${alturaDisponivel}px`;
