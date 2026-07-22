@@ -45596,13 +45596,20 @@ window.excluirPedidoComprasKanban = excluirPedidoComprasKanban;
 // Modal específico para "Kanban de compras" (visualização do usuário solicitante)
 function renderizarAcoesOperacionaisCompra(tipo = 'pedido', opcoes = {}) {
   const ehNfe = String(tipo).toLowerCase() === 'nfe';
+  const ehRequisicao = String(tipo).toLowerCase() === 'requisicao';
   const statusNormalizado = String(opcoes.status || '')
     .trim()
     .toLowerCase()
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '');
   const ehNfeRecebidaOuConferida = ehNfe && ['recebido', 'concluido', 'conferido'].includes(statusNormalizado);
-  const acoes = ehNfe
+  const acoes = ehRequisicao
+    ? [
+        ['Salvar', 'fa-cloud-arrow-up'], ['Incluir', 'fa-circle-plus'], ['Imprimir', 'fa-print'],
+        ['Duplicar', 'fa-copy'], ['Anexos', 'fa-paperclip'], ['E-mails enviados', 'fa-envelope'],
+        ['Histórico de alterações', 'fa-clock-rotate-left'], ['Excluir', 'fa-trash-can', '', 'header']
+      ]
+    : ehNfe
     ? (ehNfeRecebidaOuConferida ? [
         ['Salvar', 'fa-cloud-arrow-up'], ['Novo recebimento', 'fa-circle-plus'], ['Devolver', 'fa-rotate-left'],
         ['Histórico de processamento', 'fa-list'], ['Anexos', 'fa-paperclip'],
@@ -45661,11 +45668,13 @@ function renderizarFichaCompraOmie({ tipo = 'pedido', numero = '', status = '', 
     return valorSeguro(valor);
   };
   const tipoNormalizado = String(tipo || 'pedido').toLowerCase();
+  const ehRequisicao = tipoNormalizado === 'requisicao';
   const rotuloDocumento = tipoNormalizado === 'nfe' ? 'NF-e' : (tipoNormalizado === 'requisicao' ? 'Requisição' : 'Pedido de Compra');
   const fornecedor = dados.fornecedorNome || dados.fornecedor_nome || dados.fornecedor || '-';
   const solicitante = dados.solicitante || '-';
   const comprador = dados.comprador || dados.responsavel || solicitante;
   const categoria = dados.categoria || dados.departamento || '-';
+  const projeto = dados.projeto || dados.projeto_nome || dados.nome_projeto || '-';
   const previsao = dados.d_dt_previsao || dados.previsao_chegada || dados.prazo_solicitado || dados.previsao;
   const inclusao = dados.d_inc_data || dados.created_at || dados.createdAt || dados.data_criacao;
   const centroCusto = dados.centroCusto || dados.centro_custo || '-';
@@ -45687,13 +45696,20 @@ function renderizarFichaCompraOmie({ tipo = 'pedido', numero = '', status = '', 
   return `
     <div class="cp-sheet-layout"><main class="cp-sheet-main">
       <section class="cp-sheet-summary" aria-label="Resumo do documento">
-        <div class="cp-sheet-avatar" aria-hidden="true">${valorSeguro(String(fornecedor).slice(0, 2).toUpperCase(), 'PC')}</div>
+        <div class="cp-sheet-avatar" aria-hidden="true">${ehRequisicao ? 'RQ' : valorSeguro(String(fornecedor).slice(0, 2).toUpperCase(), 'PC')}</div>
         <div class="cp-sheet-fields">
-          <div class="cp-sheet-field cp-sheet-field--wide"><span>Fornecedor</span><strong title="${valorSeguro(fornecedor)}">${valorSeguro(fornecedor)}</strong></div>
-          <div class="cp-sheet-field"><span>Previsão de entrega</span><strong>${formatarDataFicha(previsao)}</strong></div>
-          ${possuiValor(categoria) ? `<div class="cp-sheet-field"><span>Categoria da compra</span><strong>${valorSeguro(categoria)}</strong></div>` : ''}
-          <div class="cp-sheet-field"><span>Comprador</span><strong>${valorSeguro(comprador)}</strong></div>
-          ${possuiValor(parcelas) ? `<div class="cp-sheet-field"><span>Condição de pagamento</span><strong>${valorSeguro(parcelas)}</strong></div>` : ''}
+          ${ehRequisicao ? `
+            <div class="cp-sheet-field cp-sheet-field--wide"><span>Categoria da compra</span><strong title="${valorSeguro(categoria)}">${valorSeguro(categoria)}</strong></div>
+            <div class="cp-sheet-field"><span>Projeto</span><strong>${valorSeguro(projeto)}</strong></div>
+            <div class="cp-sheet-field"><span>Sugestão de entrega</span><strong>${formatarDataFicha(previsao)}</strong></div>
+            <div class="cp-sheet-field"><span>Solicitante</span><strong>${valorSeguro(solicitante)}</strong></div>
+          ` : `
+            <div class="cp-sheet-field cp-sheet-field--wide"><span>Fornecedor</span><strong title="${valorSeguro(fornecedor)}">${valorSeguro(fornecedor)}</strong></div>
+            <div class="cp-sheet-field"><span>Previsão de entrega</span><strong>${formatarDataFicha(previsao)}</strong></div>
+            ${possuiValor(categoria) ? `<div class="cp-sheet-field"><span>Categoria da compra</span><strong>${valorSeguro(categoria)}</strong></div>` : ''}
+            <div class="cp-sheet-field"><span>Comprador</span><strong>${valorSeguro(comprador)}</strong></div>
+            ${possuiValor(parcelas) ? `<div class="cp-sheet-field"><span>Condição de pagamento</span><strong>${valorSeguro(parcelas)}</strong></div>` : ''}
+          `}
           <div class="cp-sheet-status-inline"><span>Status</span><strong>${valorSeguro(statusTexto)}</strong></div>
         </div>
       </section>
@@ -45702,21 +45718,21 @@ function renderizarFichaCompraOmie({ tipo = 'pedido', numero = '', status = '', 
         <div><span>Itens</span><strong>${itens.length}</strong></div>
         <div><span>Data de inclusão</span><strong>${formatarDataFicha(inclusao)}</strong></div>
         <div><span>Centro de custo</span><strong>${valorSeguro(centroCusto)}</strong></div>
-        <div class="cp-sheet-total-primary"><span>Valor total da compra</span><strong>${valorTotal !== '' ? formatarMoedaFicha(valorTotal) : 'Não informado'}</strong></div>
+        <div class="cp-sheet-total-primary"><span>${ehRequisicao ? 'Valor total sugerido' : 'Valor total da compra'}</span><strong>${valorTotal !== '' ? formatarMoedaFicha(valorTotal) : (ehRequisicao ? 'R$ 0,00' : 'Não informado')}</strong></div>
       </section>
-      <nav class="cp-nfe-tabs cp-order-tabs" aria-label="Seções do pedido">
-        <button type="button" class="is-active">Itens da compra</button>
-        ${['Transporte','Totais','Parcelas','Departamentos','Informações adicionais','Observações'].map(label => `<button type="button" disabled title="Aguardando implementação do backend">${label}<small>A construir</small></button>`).join('')}
+      <nav class="cp-nfe-tabs cp-order-tabs" aria-label="Seções do documento">
+        <button type="button" class="is-active">${ehRequisicao ? 'Itens da requisição' : 'Itens da compra'}</button>
+        ${(ehRequisicao ? ['Observações'] : ['Transporte','Totais','Parcelas','Departamentos','Informações adicionais','Observações']).map(label => `<button type="button" disabled title="Aguardando implementação do backend">${label}<small>A construir</small></button>`).join('')}
       </nav>
       <section class="cp-sheet-items">
-        <h4 class="cp-sheet-section-title">Itens da compra</h4>
+        <h4 class="cp-sheet-section-title">${ehRequisicao ? 'Itens da requisição' : 'Itens da compra'}</h4>
         <div class="cp-sheet-table-wrap"><table>
-          <thead><tr><th>Item</th><th>Código</th><th>Descrição do produto</th><th>Quantidade</th><th>Preço unitário</th><th>Total do item</th></tr></thead>
+          <thead><tr><th>Item</th><th>Código</th><th>Descrição do produto</th><th>Quantidade</th><th>${ehRequisicao ? 'Preço unit. sugerido' : 'Preço unitário'}</th><th>${ehRequisicao ? 'Valor total do item' : 'Total do item'}</th></tr></thead>
           <tbody>${linhas || '<tr><td colspan="6" class="cp-sheet-empty">Nenhum item encontrado</td></tr>'}</tbody>
         </table></div>
         <div class="cp-sheet-record-count">${itens.length} ${itens.length === 1 ? 'registro' : 'registros'}</div>
       </section>
-      <section class="cp-sheet-note"><i class="fa-regular fa-note-sticky"></i><div><span>Objetivo da compra</span><strong>${valorSeguro(objetivo)}</strong></div></section>
+      <section class="cp-sheet-note"><i class="fa-regular fa-note-sticky"></i><div><span>${ehRequisicao ? 'Observações' : 'Objetivo da compra'}</span><strong>${valorSeguro(objetivo)}</strong></div></section>
       ${linksHtml ? `<section class="cp-sheet-links"><span>Anexos e links</span><div>${linksHtml}</div></section>` : ''}
     </main>${acoesHtml || renderizarAcoesOperacionaisCompra(tipo)}</div>
   `;
