@@ -2501,6 +2501,7 @@ app.post('/api/produtos/cadastro/preview', express.json(), async (req, res) => {
   try {
     const familiaCodigo = String(req.body?.familia_codigo || '').trim().toUpperCase();
     const familiaTipo = String(req.body?.familia_tipo || '').trim().toUpperCase();
+    const familiaNome = _cadastroNormalizarDescricao(req.body?.familia_nome);
     const origem = String(req.body?.origem || 'N').trim().toUpperCase() === 'I' ? 'I' : 'N';
     const filtro = _cadastroNormalizarDescricao(req.body?.filtro);
     const descricoes = (Array.isArray(req.body?.descricoes) ? req.body.descricoes : [req.body?.descricao])
@@ -2510,6 +2511,11 @@ app.post('/api/produtos/cadastro/preview', express.json(), async (req, res) => {
     const prefixo = /^[A-Z]{1,3}$/.test(familiaCodigo)
       ? familiaCodigo
       : `${familiaCodigo.padStart(2, '0')}.${familiaTipo}.${origem}`;
+    const faixaPadraoSemFiltro = !filtro && familiaCodigo === '09'
+      ? ((familiaTipo === 'MC' && familiaNome === 'MATERIAIS DE USO E CONSUMO INDUSTRIAL')
+          ? { inicio: 11000, fim: 11999 }
+          : ((familiaTipo === 'AI' && familiaNome === 'MOVEIS') ? { inicio: 20000, fim: 20999 } : null))
+      : null;
 
     await client.query('BEGIN');
     await client.query(`SELECT pg_advisory_xact_lock(hashtext('produto_codigo_reserva'))`);
@@ -2533,11 +2539,16 @@ app.post('/api/produtos/cadastro/preview', express.json(), async (req, res) => {
     const rows = [];
     for (let index = 0; index < descricoes.length; index++) {
       const referencia = filtro || descricoes[index];
-      const semelhantes = itens.filter(item => referencia && item.descricao.startsWith(referencia));
+      const semelhantes = faixaPadraoSemFiltro ? [] : itens.filter(item => referencia && item.descricao.startsWith(referencia));
       const prefixados = itens.filter(item => item.codigo.startsWith(prefixo + '.'));
+      const itensNaFaixaPadrao = faixaPadraoSemFiltro
+        ? prefixados.filter(item => item.sequencial >= faixaPadraoSemFiltro.inicio && item.sequencial <= faixaPadraoSemFiltro.fim)
+        : [];
       let sequencial = semelhantes.length
         ? Math.max(...semelhantes.map(item => item.sequencial)) + 1
-        : (prefixados.length ? Math.max(...prefixados.map(item => item.sequencial)) + 1 : 10000);
+        : (faixaPadraoSemFiltro
+          ? (itensNaFaixaPadrao.length ? Math.max(...itensNaFaixaPadrao.map(item => item.sequencial)) + 1 : faixaPadraoSemFiltro.inicio)
+          : (prefixados.length ? Math.max(...prefixados.map(item => item.sequencial)) + 1 : 10000));
       while (usados.has(sequencial)) sequencial++;
       usados.add(sequencial);
       const codigo = `${prefixo}.${String(sequencial).padStart(5, '0')}`;

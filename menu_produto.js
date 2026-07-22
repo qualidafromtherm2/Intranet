@@ -33303,14 +33303,41 @@ window.preloadLocaisEstoqueCache = async function preloadLocaisEstoqueCache(forc
     return String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase()
       .replace(/[^A-Z0-9 .,/()\-]/g, ' ').replace(/\s+/g, ' ').trim();
   }
+  function normalizarCampoDescricao(input) {
+    const valorOriginal = input.value;
+    const inicioOriginal = input.selectionStart ?? valorOriginal.length;
+    const fimOriginal = input.selectionEnd ?? inicioOriginal;
+    const valorNormalizado = normalizarDescricao(valorOriginal);
+    if (valorNormalizado === valorOriginal) return;
+    input.value = valorNormalizado;
+    input.setSelectionRange(
+      normalizarDescricao(valorOriginal.slice(0, inicioOriginal)).length,
+      normalizarDescricao(valorOriginal.slice(0, fimOriginal)).length
+    );
+  }
   function familiaAtual() {
     const option = el('cadProdFamilia').selectedOptions[0];
-    return option?.value ? { codigo: option.value, tipo: option.dataset.tipo || 'MP', nome: option.textContent } : null;
+    const nome = option?.dataset.nome || option?.textContent || '';
+    const tipo = normalizarDescricao(nome) === 'MOVEIS' ? 'AI' : (option?.dataset.tipo || 'MP');
+    return option?.value ? { codigo: option.value, tipo, nome } : null;
+  }
+  function familiaUsaFaixaPadrao(familia) {
+    const codigo = String(familia?.codigo || '').padStart(2, '0');
+    const tipo = String(familia?.tipo || '').toUpperCase();
+    const nome = normalizarDescricao(familia?.nome || '');
+    return (codigo === '09' && tipo === 'MC' && nome === 'MATERIAIS DE USO E CONSUMO INDUSTRIAL')
+      || (codigo === '09' && tipo === 'AI' && nome === 'MOVEIS');
+  }
+  function atualizarFiltroPorFamilia() {
+    const campoFiltro = el('cadProdFiltro').closest('.cad-prod-field');
+    const ocultar = familiaUsaFaixaPadrao(familiaAtual());
+    campoFiltro.hidden = ocultar;
+    if (ocultar) el('cadProdFiltro').value = '';
   }
   function payloadBase() {
     const familia = familiaAtual();
     if (!familia) throw new Error('Selecione uma familia.');
-    return { familia_codigo: familia.codigo, familia_tipo: familia.tipo, origem: state.origem, filtro: el('cadProdFiltro').value.trim() };
+    return { familia_codigo: familia.codigo, familia_tipo: familia.tipo, familia_nome: familia.nome, origem: state.origem, filtro: el('cadProdFiltro').value.trim() };
   }
   function tipoPadraoFamilia(familia) {
     const codigo = String(familia?.codigo || '').padStart(2, '0');
@@ -33477,6 +33504,7 @@ window.preloadLocaisEstoqueCache = async function preloadLocaisEstoqueCache(forc
   el('cadProdFamilia').addEventListener('change', () => {
     resetCodigo(); state.lote = []; renderLote();
     const familia = familiaAtual();
+    atualizarFiltroPorFamilia();
     const tipo = tipoPadraoFamilia(familia);
     if (tipo && Array.from(el('cadProdTipo').options).some(option => option.value === tipo)) el('cadProdTipo').value = tipo;
   });
@@ -33492,6 +33520,10 @@ window.preloadLocaisEstoqueCache = async function preloadLocaisEstoqueCache(forc
   });
   el('cadProdLotePreview').addEventListener('click', gerarLote);
   el('cadProdLoteCadastrar').addEventListener('click', cadastrarLote);
+  el('cadProdDescricao').addEventListener('input', event => {
+    normalizarCampoDescricao(event.currentTarget);
+    resetCodigo();
+  });
   const fotoDrop = el('cadProdFotoDrop');
   ['dragenter', 'dragover'].forEach(tipo => fotoDrop.addEventListener(tipo, e => { e.preventDefault(); fotoDrop.classList.add('is-dragging'); }));
   ['dragleave', 'drop'].forEach(tipo => fotoDrop.addEventListener(tipo, e => { e.preventDefault(); fotoDrop.classList.remove('is-dragging'); }));
