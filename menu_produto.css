@@ -17220,9 +17220,21 @@ html.light-mode #minhasComprasWrapper {
 .cp-detail-next { min-height:34px; padding:0 11px; display:inline-flex; align-items:center; gap:6px; color:#334155; background:#fff; border:1px solid #cbd5e1; border-radius:5px; font-size:12px; }
 .cp-nfe-layout { min-height:0; display:grid; grid-template-columns:minmax(0,1fr) 250px; }
 .cp-nfe-main { min-width:0; min-height:0; padding:12px 14px; display:flex; flex-direction:column; overflow:hidden; }
-.cp-nfe-info { display:grid !important; grid-template-columns:repeat(6,minmax(0,1fr)) !important; gap:7px !important; }
-.cp-nfe-info > div { min-height:55px; padding:7px 8px !important; background:#fff !important; border:0 !important; border-bottom:1px solid #cbd5e1 !important; border-radius:0 !important; }
-.cp-nfe-info > div:last-child { min-height:40px; }
+.cp-nfe-info { display:block !important; }
+.cp-nfe-summary { max-width:none; }
+.cp-nfe-totals { width:min(900px,100%); grid-template-columns:1.15fr .55fr .9fr 1.4fr; }
+.cp-nfe-purchase-control { display:grid; grid-template-columns:auto 110px; align-items:center; gap:3px 8px; text-align:left !important; }
+.cp-nfe-purchase-control label { color:#667085; font-size:11px; }
+.cp-nfe-purchase-control select { min-height:28px; padding:3px 7px; color:#273142; background:#fff; border:1px solid #cbd5e1; border-radius:4px; font-size:11px; }
+.cp-nfe-purchase-control small { grid-column:1/-1; min-height:12px; font-size:9px; }
+.cp-sheet-field--planned strong, .cp-nfe-document-meta .is-planned strong { display:inline-flex; width:max-content; padding:2px 6px; color:#8a4d16; background:#fff3d6; border-radius:999px; font-size:10px; }
+.cp-sheet-field--planned small, .cp-nfe-document-meta small { display:block; margin-top:3px; color:#667085; font-size:9px; }
+.cp-nfe-document-meta { margin:7px 0 0 64px; display:grid; grid-template-columns:2fr 1fr 1.3fr 1fr 1fr; gap:6px 12px; }
+.cp-nfe-document-meta > div { min-width:0; padding-bottom:5px; border-bottom:1px solid #d8dee8; }
+.cp-nfe-document-meta span { display:block; margin-bottom:3px; color:#667085; font-size:10px; }
+.cp-nfe-document-meta strong, .cp-nfe-document-meta a { display:block; overflow:hidden; color:#273142 !important; font-size:11px !important; font-weight:600; text-overflow:ellipsis; white-space:nowrap; }
+.cp-nfe-note { width:min(900px,100%); margin:7px 0 0 64px; }
+.cp-order-tabs { width:min(1180px,100%); margin-top:2px; }
 .cp-nfe-tabs { margin-top:10px; display:flex; overflow-x:auto; border-bottom:1px solid #cbd5e1; }
 .cp-nfe-tabs button { min-height:38px; padding:6px 10px; display:flex; align-items:center; gap:5px; color:#667085; background:transparent; border:0; border-bottom:2px solid transparent; font-size:11px; white-space:nowrap; }
 .cp-nfe-tabs button.is-active { color:#a53c36; border-bottom-color:#d04f45; font-weight:700; }
@@ -17235,9 +17247,28 @@ html.light-mode #minhasComprasWrapper {
 .cp-nfe-import-guidance span { color:#667085; }
 #modalNfePedidosItens { min-height:0; flex:1 1 auto; }
 #modalNfePedidosItens > div { height:100%; max-height:none !important; border-radius:0 0 5px 5px !important; }
+.cp-nfe-table-wrap { background:#fff; }
+.cp-nfe-items-table thead tr { background:#f4f6f8 !important; }
+.cp-nfe-items-table th { height:34px; padding:7px 9px !important; color:#52606d !important; background:#f4f6f8 !important; border-right:1px solid #d8dee8; font-size:11px !important; font-weight:600; white-space:nowrap; }
+.cp-nfe-items-table td { height:34px; padding:7px 9px !important; color:#26323d !important; background:#fff; border-right:1px solid #e1e6ed; border-bottom:1px solid #e1e6ed; font-size:12px !important; }
+.cp-nfe-items-table tbody tr:first-child td { background:#fff0ee; }
 .cp-nfe-planned-cell { min-width:120px; padding:7px 8px; color:#64748b; }
 .cp-nfe-planned-cell span { display:inline-block; padding:2px 5px; color:#8a4d16; background:#fff3d6; border-radius:999px; font-size:9px; }
 .cp-nfe-planned-cell small { display:block; margin-top:3px; font-size:9px; }
+
+/* A ficha operacional é sempre clara, inclusive quando o shell está em modo escuro. */
+:root:not(.light-mode) #modalDetalhesPedidoCompras .cp-sheet-field span,
+:root:not(.light-mode) #modalDetalhesPedidoCompras .cp-sheet-totals span,
+:root:not(.light-mode) #modalDetalhesPedidoCompras .cp-sheet-note span,
+:root:not(.light-mode) #modalDetalhesPedidoCompras .cp-sheet-status-inline span,
+:root:not(.light-mode) #modalNfePedidos .cp-sheet-field span,
+:root:not(.light-mode) #modalNfePedidos .cp-sheet-totals span,
+:root:not(.light-mode) #modalNfePedidos .cp-sheet-note span,
+:root:not(.light-mode) #modalNfePedidos .cp-nfe-document-meta span { color:#667085 !important; }
+:root:not(.light-mode) #modalDetalhesPedidoCompras .cp-sheet-actions-title span,
+:root:not(.light-mode) #modalNfePedidos .cp-sheet-actions-title span { color:#334155 !important; }
+:root:not(.light-mode) #modalDetalhesPedidoCompras .cp-sheet-actions-title small,
+:root:not(.light-mode) #modalNfePedidos .cp-sheet-actions-title small { color:#64748b !important; }
 
 @media (max-width: 900px) {
   #modalDetalhesPedidoCompras.cp-detail-modal { left: 0 !important; padding: 0 !important; }
@@ -17255,5 +17286,7 @@ html.light-mode #minhasComprasWrapper {
   .cp-detail-modal--nfe { left:0 !important; padding:0 !important; }
   .cp-detail-modal--nfe .cp-nfe-sheet { width:100vw !important; height:100dvh !important; border-radius:0 !important; }
   .cp-nfe-main { overflow:auto; }
-  .cp-nfe-info { grid-template-columns:1fr 1fr !important; }
+  .cp-nfe-totals { grid-template-columns:1fr 1fr; }
+  .cp-nfe-document-meta { margin:10px 0 0; grid-template-columns:1fr 1fr; }
+  .cp-nfe-note { margin-left:0; }
 }

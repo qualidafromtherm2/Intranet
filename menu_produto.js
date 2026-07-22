@@ -45693,6 +45693,10 @@ function renderizarFichaCompraOmie({ tipo = 'pedido', numero = '', status = '', 
         <div><span>Centro de custo</span><strong>${valorSeguro(centroCusto)}</strong></div>
         <div class="cp-sheet-total-primary"><span>Valor total da compra</span><strong>${valorTotal !== '' ? formatarMoedaFicha(valorTotal) : 'Não informado'}</strong></div>
       </section>
+      <nav class="cp-nfe-tabs cp-order-tabs" aria-label="Seções do pedido">
+        <button type="button" class="is-active">Itens da compra</button>
+        ${['Transporte','Totais','Parcelas','Departamentos','Informações adicionais','Observações'].map(label => `<button type="button" disabled title="Aguardando implementação do backend">${label}<small>A construir</small></button>`).join('')}
+      </nav>
       <section class="cp-sheet-items">
         <h4 class="cp-sheet-section-title">Itens da compra</h4>
         <div class="cp-sheet-table-wrap"><table>
@@ -65347,8 +65351,8 @@ function renderTabelaItensModalNfePedidos(itens = []) {
   `).join('');
 
   return `
-    <div style="border:1px solid #e2e8f0;border-radius:8px;overflow:auto;max-height:320px;">
-      <table style="width:100%;border-collapse:collapse;min-width:980px;">
+    <div class="cp-nfe-table-wrap" style="border:1px solid #e2e8f0;border-radius:8px;overflow:auto;max-height:320px;">
+      <table class="cp-nfe-items-table" style="width:100%;border-collapse:collapse;min-width:1480px;">
         <thead>
           <tr style="position:sticky;top:0;background:#f8fafc;border-bottom:1px solid #e2e8f0;">
             <th style="padding:8px;text-align:left;font-size:12px;color:#334155;">Código</th>
@@ -65627,6 +65631,47 @@ async function abrirModalNfePedidos(nIdReceb, numeroNfeRef = '') {
         <div style="font-size:11px;color:#64748b;">cObs</div>
         <div style="font-size:12px;color:#0f172a;font-weight:700;line-height:1.5;white-space:pre-wrap;">${escapeHtml(String(dados?.cObs || '-'))}</div>
       </div>
+    `;
+
+    // A NF-e usa o mesmo esqueleto operacional dos pedidos; os dados fiscais ficam
+    // em uma faixa compacta para preservar a maior área possível para os itens.
+    const iniciaisFornecedorNfe = String(dados?.cNome || 'NF').trim().slice(0, 2).toUpperCase();
+    const possiveisComprasNfe = Array.isArray(dados?.possiveisComprasMesmoValor)
+      ? dados.possiveisComprasMesmoValor
+      : [];
+    infoEl.innerHTML = `
+      <section class="cp-sheet-summary cp-nfe-summary" aria-label="Resumo da nota fiscal">
+        <div class="cp-sheet-avatar" aria-hidden="true">${escapeHtml(iniciaisFornecedorNfe)}</div>
+        <div class="cp-sheet-fields">
+          <div class="cp-sheet-field cp-sheet-field--wide"><span>Fornecedor</span><strong title="${escapeHtml(String(dados?.cNome || '-'))}">${escapeHtml(String(dados?.cNome || '-'))}</strong></div>
+          <div class="cp-sheet-field cp-sheet-field--planned"><span>CNPJ</span><strong>A construir</strong><small>Backend: documento do fornecedor</small></div>
+          <div class="cp-sheet-field"><span>Emissão</span><strong>${escapeHtml(String(dados?.dEmissaoNFe || '-'))}</strong></div>
+          <div class="cp-sheet-field"><span>Categoria da compra</span><strong title="${escapeHtml(String(dados?.categoriaCompra?.descricao || '-'))}">${escapeHtml(String(dados?.categoriaCompra?.descricao || '-'))}</strong></div>
+          <div class="cp-sheet-status-inline"><span>Status</span><strong>Faturada pelo fornecedor</strong></div>
+        </div>
+      </section>
+      <section class="cp-sheet-totals cp-nfe-totals" aria-label="Totais da nota fiscal">
+        <div><span>Documento</span><strong>NF-e Nº ${escapeHtml(String(dados?.cNumeroNFe || '-'))}</strong></div>
+        <div><span>Itens</span><strong>${Array.isArray(dados?.itens) ? dados.itens.length : 0}</strong></div>
+        <div><span>Valor da NF-e</span><strong>${escapeHtml(formatarValorMoedaNfePedidos(dados?.nValorNFe))}</strong></div>
+        <div class="cp-nfe-purchase-control">
+          <label for="modalNfePedidosComprasSelect">Documento de compras?</label>
+          <select id="modalNfePedidosComprasSelect">
+            <option value="" ${normalizarComprasNfe(dados?.compras) === '' ? 'selected' : ''}>Selecione</option>
+            <option value="sim" ${normalizarComprasNfe(dados?.compras) === 'sim' ? 'selected' : ''}>Sim</option>
+            <option value="nao" ${normalizarComprasNfe(dados?.compras) === 'nao' ? 'selected' : ''}>Não</option>
+          </select>
+          <small id="modalNfePedidosComprasMsg"></small>
+        </div>
+      </section>
+      <section class="cp-nfe-document-meta">
+        <div><span>Chave da NF-e</span>${chaveNfeHtml}</div>
+        <div><span>Natureza da categoria</span><strong>${escapeHtml(String(dados?.categoriaCompra?.natureza || '-'))}</strong></div>
+        <div><span>Possíveis compras do mesmo valor</span><strong>${possiveisComprasNfe.length ? escapeHtml(possiveisComprasNfe.join(', ')) : '-'}</strong></div>
+        <div class="is-planned"><span>Série, modelo, IE e UF</span><strong>A construir</strong><small>Backend: ampliar retorno do recebimento Omie</small></div>
+        <div class="is-planned"><span>Reforma tributária</span><strong>A construir</strong><small>Backend: IS, IBS e CBS</small></div>
+      </section>
+      <section class="cp-sheet-note cp-nfe-note"><i class="fa-regular fa-note-sticky"></i><div><span>Observações da NF-e</span><strong>${escapeHtml(String(dados?.cObs || '-'))}</strong></div></section>
     `;
 
     const comprasSelectEl = document.getElementById('modalNfePedidosComprasSelect');
