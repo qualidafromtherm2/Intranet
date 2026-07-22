@@ -997,16 +997,12 @@ formSignIn?.addEventListener('submit', async (e) => {
 
     window.__sessionUser = data.user;
 
-    try {
-      if (typeof window.syncNavNodes === 'function') {
-        await window.syncNavNodes();
-      }
-    } catch (e) {
-      console.warn('[login] syncNavNodes falhou', e);
-    }
-
     window.dispatchEvent(new Event('auth:changed'));
-    try { await window.syncNavNodes?.(); } catch (e) { console.warn('[nav-sync pós-login]', e); }
+    // A sincronização da árvore de navegação pode envolver muitas operações no banco.
+    // Ela não pode bloquear a conclusão do login nem manter o usuário no spinner.
+    Promise.resolve(window.syncNavNodes?.()).catch((e) => {
+      console.warn('[nav-sync pós-login]', e);
+    });
 
     // fecha modal + ajusta painéis
     overlay.classList.remove('is-active');

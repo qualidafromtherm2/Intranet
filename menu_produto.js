@@ -33,7 +33,7 @@ window.clearMainContainer = function() {
   try {
     const main = document.querySelector('.main-container');
     if (!main) return;
-    
+
     // Força TODOS os filhos a ficarem invisíveis
     Array.from(main.children).forEach(el => {
       if (!el) return;
@@ -45,7 +45,7 @@ window.clearMainContainer = function() {
       el.style.position = '';
       el.style.left = '';
     });
-    
+
     console.log('[NAV] Container principal limpo - todos os filhos ocultos');
   } catch(e) {
     console.error('[NAV] Erro ao limpar container:', e);
@@ -58,10 +58,10 @@ window.showOnlyInMain = function(element) {
       console.warn('[NAV] showOnlyInMain: elemento inválido');
       return;
     }
-    
+
     // Limpa TUDO primeiro
     window.clearMainContainer();
-    
+
     // Mostra SOMENTE o elemento especificado
     // Use 'flex' se o elemento é tab-pane (CSS o define com display:flex), caso contrário use 'block'
     const displayValue = element.classList?.contains('tab-pane') ? 'flex' : 'block';
@@ -71,7 +71,7 @@ window.showOnlyInMain = function(element) {
     element.style.opacity = '';
     element.style.position = '';
     element.style.left = '';
-    
+
     console.log('[NAV] Mostrando apenas:', element.id || element.className, '(display:', displayValue + ')');
   } catch(e) {
     console.error('[NAV] Erro ao mostrar elemento:', e);
@@ -100,6 +100,7 @@ window.forceShowInicio = function() {
     const displayValue = inicio.classList?.contains('tab-pane') ? 'flex' : 'block';
     inicio.style.display = displayValue;
     inicio.style.visibility = 'visible';
+    window.showHomeModuleRoot?.();
 
     const produtoTabs = document.getElementById('produtoTabs');
     const kanbanTabs = document.getElementById('kanbanTabs');
@@ -116,6 +117,9 @@ window.forceShowInicio = function() {
     const menuInicio = document.getElementById('menu-inicio');
     document.querySelectorAll('.header .header-menu > .menu-link').forEach((a) => a.classList.remove('is-active'));
     if (menuInicio) menuInicio.classList.add('is-active');
+    if (typeof renderAgendaCalendarioMensal === 'function') {
+      renderAgendaCalendarioMensal();
+    }
   } catch (_) {}
 };
 
@@ -2021,7 +2025,7 @@ async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) 
     const hasObs = !!String(it.observacao || '').trim();
     const obsText = (it.observacao || '').trim();
     // Renderizar histórico de troca se existir
-    const swapHistory = it.codigo_produto_ant && it.codigo_produto_novo 
+    const swapHistory = it.codigo_produto_ant && it.codigo_produto_novo
       ? `<div style="font-size:.70rem;color:#a78bfa;margin-top:2px;display:flex;align-items:center;gap:4px;"><i class="fa-solid fa-arrows-rotate" style="color:#a78bfa;"></i><span>${it.codigo_produto_ant} → ${it.codigo_produto_novo}</span></div>`
       : '';
     const destinoHtml = _solDestinoHtml(it, isCompact);
@@ -4119,7 +4123,7 @@ async function _abrirModalNaoSeparar(solicId, callback) {
       </div>
       <div style="padding:16px;flex:1;">
         <label style="display:block;font-size:.85rem;font-weight:700;color:#f0f0f0;margin-bottom:8px;">Por que não separar este item?</label>
-        <textarea id="txtJustificativa" 
+        <textarea id="txtJustificativa"
           placeholder="Ex: Produto fora de estoque, item danificado, etc."
           style="width:100%;height:120px;padding:10px 12px;border-radius:8px;border:1px solid #4b5563;background:#111;color:#f0f0f0;font-size:.85rem;font-family:inherit;resize:vertical;"></textarea>
         <div style="font-size:.72rem;color:#6b7280;margin-top:6px;">Esta observação será registrada no sistema.</div>
@@ -4349,7 +4353,7 @@ async function _abrirModalEdicaoSep(nSolic) {
 window.openChat = async function() {
   console.log('[CHAT] openChat chamado - VERSÃO COM LOGS v1.1');
   console.log('[CHAT] Verificando __chatLoadUsers:', typeof window.__chatLoadUsers);
-  
+
   // Aguarda o DOM estar pronto
   if (!document.getElementById('chatPane')) {
     console.warn('[CHAT] chatPane ainda não existe no DOM, aguardando...');
@@ -4361,13 +4365,13 @@ window.openChat = async function() {
       }
     });
   }
-  
+
   const chatPane = document.getElementById('chatPane');
   if (!chatPane) {
     console.error('[CHAT] chatPane não encontrado no DOM');
     return;
   }
-  
+
   // precisa estar logado
   if (!window.__sessionUser?.id) {
     console.warn('[CHAT] Usuário não autenticado');
@@ -4375,19 +4379,19 @@ window.openChat = async function() {
     document.getElementById('profile-icon')?.click();
     return;
   }
-  
+
   console.log('[CHAT] Abrindo chat...');
-  
+
   // Limpa TUDO antes
   window.clearMainContainer();
-  
+
   // Garante que módulos especiais também sejam escondidos
   try { if (typeof hideArmazem === 'function') hideArmazem(); } catch {}
   try { if (typeof hideKanban === 'function') hideKanban(); } catch {}
   document.getElementById('produtoTabs')?.setAttribute('style','display:none');
   document.getElementById('kanbanTabs')?.setAttribute('style','display:none');
   document.getElementById('armazemTabs')?.setAttribute('style','display:none');
-  
+
   // Remove destaque de qualquer link de topo
   try {
     document.querySelectorAll('.header .header-menu > .menu-link, a[id^="menu-"]').forEach(a => a.classList.remove('is-active'));
@@ -4432,7 +4436,7 @@ window.__chatLoadUsers = async function() {
     if (bellNumber) { bellNumber.textContent = ''; bellNumber.style.display = 'none'; }
     return;
   }
-  
+
   console.log('[CHAT] __chatLoadUsers chamado');
   try {
     const r = await fetch('/api/chat/users', { credentials:'include' });
@@ -4446,13 +4450,13 @@ window.__chatLoadUsers = async function() {
     }
     const data = await r.json();
     console.log('[CHAT] Usuários recebidos:', data);
-    
+
     const currentUserId = window.__sessionUser?.id;
     console.log('[CHAT] ID do usuário logado:', currentUserId);
-    
+
     const users = (data.users||[]).filter(u => !currentUserId || String(u.id) !== String(currentUserId));
     console.log('[CHAT] Total de usuários após filtro:', users.length);
-    
+
     // 1) Atualiza badge do sino independente do DOM do chat
     let usersWithUnread = 0;
     users.forEach(u => { if (u.unreadCount && u.unreadCount > 0) usersWithUnread++; });
@@ -4461,13 +4465,13 @@ window.__chatLoadUsers = async function() {
       bellNumber.textContent = usersWithUnread > 0 ? String(usersWithUnread) : '';
       bellNumber.style.display = usersWithUnread > 0 ? 'inline-flex' : 'none';
     }
-    
+
     // 2) Renderiza a lista somente se o chat estiver no DOM
     const chatUserList = document.getElementById('chatUserList');
     if (!chatUserList) {
       return; // nada mais a fazer quando não está na tela
     }
-    
+
     chatUserList.innerHTML = '';
     if (!users || users.length === 0) {
       console.warn('[CHAT] Nenhum usuário para renderizar');
@@ -4517,14 +4521,14 @@ window.__chatState = {
 // ============================================================================
 function selectChatUser(user) {
   console.log('[CHAT] Usuário selecionado:', user.username, 'ID:', user.id);
-  
+
   window.__chatState.selectedUserId = user.id;
   window.__chatState.selectedUsername = user.username;
-  
+
   // Atualiza o nome do usuário selecionado
   const chatWith = document.getElementById('chatWith');
   if (chatWith) chatWith.textContent = user.username;
-  
+
   // Habilita o campo de mensagem e botão enviar
   const chatText = document.getElementById('chatText');
   const chatSend = document.getElementById('chatSend');
@@ -4534,7 +4538,7 @@ function selectChatUser(user) {
     chatText.focus();
   }
   if (chatSend) chatSend.disabled = false;
-  
+
   // Marca o usuário como ativo na lista
   document.querySelectorAll('.chat-user-item').forEach(li => {
     li.classList.toggle('is-active', li.dataset.userId === user.id);
@@ -4552,7 +4556,7 @@ function selectChatUser(user) {
     bellNumber.textContent = remainingUnread > 0 ? String(remainingUnread) : '';
     bellNumber.style.display = remainingUnread > 0 ? 'inline-flex' : 'none';
   }
-  
+
   // Carrega o histórico de mensagens
   loadChatConversation(user.id);
 }
@@ -4566,7 +4570,7 @@ async function loadChatConversation(userId) {
     console.warn('[CHAT] Usuário não logado - impossível carregar conversa');
     return;
   }
-  
+
   console.log('[CHAT] Carregando conversa com usuário ID:', userId);
   try {
     const r = await fetch(`/api/chat/conversation?userId=${userId}`, { credentials:'include' });
@@ -4578,7 +4582,7 @@ async function loadChatConversation(userId) {
     }
     const data = await r.json();
     console.log('[CHAT] Mensagens recebidas:', data.messages?.length || 0);
-    
+
     renderChatMessages(data.messages || []);
   } catch (err) {
     console.error('[CHAT] Erro ao carregar conversa:', err);
@@ -4594,10 +4598,10 @@ function renderChatMessages(messages) {
     console.error('[CHAT] Elemento chatMessages não encontrado');
     return;
   }
-  
+
   chatMessages.innerHTML = '';
   const currentUserId = window.__sessionUser?.id;
-  
+
   messages.forEach(msg => {
     const div = document.createElement('div');
     const isMine = String(msg.from) === String(currentUserId);
@@ -4623,7 +4627,7 @@ function renderChatMessages(messages) {
     div.appendChild(time);
     chatMessages.appendChild(div);
   });
-  
+
   // Scroll para o final
   chatMessages.scrollTop = chatMessages.scrollHeight;
   console.log('[CHAT] Mensagens renderizadas:', messages.length);
@@ -4638,20 +4642,20 @@ async function sendChatMessage() {
     console.warn('[CHAT] Usuário não logado - impossível enviar mensagem');
     return;
   }
-  
+
   const chatText = document.getElementById('chatText');
   if (!chatText || !chatText.value.trim()) return;
-  
+
   const text = chatText.value.trim();
   const to = window.__chatState.selectedUserId;
-  
+
   if (!to) {
     console.warn('[CHAT] Nenhum usuário selecionado');
     return;
   }
-  
+
   console.log('[CHAT] Enviando mensagem para usuário ID:', to);
-  
+
   try {
     const r = await fetch('/api/chat/send', {
       method: 'POST',
@@ -4659,20 +4663,20 @@ async function sendChatMessage() {
       credentials: 'include',
       body: JSON.stringify({ to, text })
     });
-    
+
     if (!r.ok) {
       console.error('[CHAT] Erro ao enviar mensagem, status:', r.status);
       const errorData = await r.json().catch(() => ({}));
       console.error('[CHAT] Erro do backend:', errorData);
       return;
     }
-    
+
     const data = await r.json();
     console.log('[CHAT] Mensagem enviada com sucesso:', data);
-    
+
     // Limpa o campo
     chatText.value = '';
-    
+
     // Recarrega a conversa para mostrar a nova mensagem
     loadChatConversation(to);
   } catch (err) {
@@ -4686,11 +4690,11 @@ async function sendChatMessage() {
 document.addEventListener('DOMContentLoaded', () => {
   const chatSend = document.getElementById('chatSend');
   const chatText = document.getElementById('chatText');
-  
+
   if (chatSend) {
     chatSend.addEventListener('click', sendChatMessage);
   }
-  
+
   if (chatText) {
     chatText.addEventListener('keypress', (e) => {
       if (e.key === 'Enter' && !e.shiftKey) {
@@ -4758,6 +4762,8 @@ const rolesBox  = document.getElementById('colab-roles');
 const blocoPerm = document.getElementById('colab-permissoes');
 const operListEl = document.getElementById('colab-operacao-list');
 const prodPermListEl = document.getElementById('colab-produto-permissao-list');
+const chkSeparacaoRestringir = document.getElementById('colab-separacao-restringir');
+const selSeparacaoDestinos = document.getElementById('colab-separacao-destinos');
 
 let colabModalMode = 'create';   // 'create' | 'edit'
 let colabEditSnapshot = null;    // guarda o estado original p/ "salvar só o que mudou"
@@ -5018,6 +5024,8 @@ function openColabModalCreate() {
   if (selProdPerm) selProdPerm.selectedIndex = 0;
   setOperacoesSelecionadas([]);
   setProdPermSelecionadas([]);
+  if (chkSeparacaoRestringir) chkSeparacaoRestringir.checked = false;
+  void loadSeparacaoDestinos([]);
 
   // no modo criar, ocultamos o bloco de permissões (permanece como está)
   if (blocoPerm) blocoPerm.style.display = 'none';
@@ -5031,7 +5039,11 @@ function openColabModalCreate() {
 
 async function openColabModalEdit(userObj) {
   // garante listas carregadas
-  await Promise.all([loadFuncoes(), loadSetores(), loadOperacoes(), loadProdutoPermissoes()]);
+  const [, , , , regraSeparacao] = await Promise.all([
+    loadFuncoes(), loadSetores(), loadOperacoes(), loadProdutoPermissoes(), loadSeparacaoPermissao(userObj.id)
+  ]);
+  await loadSeparacaoDestinos(regraSeparacao.destinos_chaves || []);
+  if (chkSeparacaoRestringir) chkSeparacaoRestringir.checked = regraSeparacao.restringir_destinos === true;
 
   colabModalMode = 'edit';
   document.getElementById('colabModalTitle').textContent = 'Editar colaborador';
@@ -5039,7 +5051,7 @@ async function openColabModalEdit(userObj) {
   // snapshot original (por texto) — para compararmos depois
   const operacoesRaw = normalizeOperacoes(userObj.operacoes);
   const prodPermRaw = Array.isArray(userObj.produto_permissoes) ? userObj.produto_permissoes : [];
-  
+
   colabEditSnapshot = {
     id:        String(userObj.id || '').trim(),
     username:  String(userObj.username || '').trim(),
@@ -5058,7 +5070,8 @@ async function openColabModalEdit(userObj) {
       codigo: perm?.codigo || perm?.permissao_codigo || '',
       nome: perm?.nome || perm?.permissao_nome || ''
     })).filter(perm => perm.codigo),
-    roles:     Array.isArray(userObj.roles) ? userObj.roles.slice() : []
+    roles:     Array.isArray(userObj.roles) ? userObj.roles.slice() : [],
+    separacao_permissao: regraSeparacao
   };
   colabEditSnapshot.operacao_ids = (colabEditSnapshot.operacoes || [])
     .map(op => op?.id ? String(op.id) : '')
@@ -5167,6 +5180,38 @@ async function loadProdutoPermissoes() {
   selProdPerm.innerHTML = options;
 }
 
+async function loadSeparacaoPermissao(userId) {
+  try {
+    const r = await fetch(`${BASE}/api/colaboradores/${encodeURIComponent(userId)}/separacao-permissao`, { credentials: 'include' });
+    if (r.ok) return await r.json();
+  } catch (e) {
+    console.warn('[colab] Falha ao carregar escopo de separação', e);
+  }
+  return { restringir_destinos: false, destinos_codigos: [], destinos_chaves: [] };
+}
+
+async function loadSeparacaoDestinos(selecionados = []) {
+  if (!selSeparacaoDestinos) return;
+  const selecionadosSet = new Set((selecionados || []).map(String));
+  try {
+    const r = await fetch(`${BASE}/api/colaboradores/separacao-destinos`, { credentials: 'include' });
+    const destinos = r.ok ? await r.json() : [];
+    selSeparacaoDestinos.innerHTML = destinos.map(d =>
+      `<option value="${d.chave}"${selecionadosSet.has(String(d.chave)) ? ' selected' : ''}>${d.nome || d.codigo} (${d.codigo})</option>`
+    ).join('');
+  } catch (e) {
+    console.warn('[colab] Falha ao carregar destinos de separação', e);
+  }
+}
+
+function getSeparacaoPermissaoForm() {
+  return {
+    restringir_destinos: chkSeparacaoRestringir?.checked === true,
+    destinos_codigos: Array.from(selSeparacaoDestinos?.selectedOptions || []).map(option => option.value.split('|', 1)[0]),
+    destinos_chaves: Array.from(selSeparacaoDestinos?.selectedOptions || []).map(option => option.value)
+  };
+}
+
 async function createFuncao() {
   const name = prompt('Nome da nova função:');
   if (!name) return;
@@ -5205,7 +5250,7 @@ async function salvarNovoColaborador() {
     .map(op => (op?.id ?? '').toString().trim())
     .filter(id => id.length > 0);
   const operacao_id = operacao_ids.length ? operacao_ids[0] : null;
- 
+
   // Pegar códigos das permissões de produto selecionadas
   const produto_permissao_codigos = colabProdPermSelecionadas
     .map(perm => (perm?.codigo ?? '').toString().trim())
@@ -5218,16 +5263,17 @@ async function salvarNovoColaborador() {
     method: 'POST',
     headers: { 'Content-Type':'application/json' },
     credentials: 'include',
-    body: JSON.stringify({ 
-      username, 
+    body: JSON.stringify({
+      username,
       email: email || null,
-      senha: senha_inicial, 
-      roles, 
-      funcao_id, 
-      setor_id, 
-      operacao_id, 
+      senha: senha_inicial,
+      roles,
+      funcao_id,
+      setor_id,
+      operacao_id,
       operacao_ids,
-      produto_permissao_codigos
+      produto_permissao_codigos,
+      separacao_permissao: getSeparacaoPermissaoForm()
     })
   });
 
@@ -5309,6 +5355,14 @@ async function salvarEdicaoColaborador() {
     snapshotProdPermCodigos.every((codigo, idx) => codigo === currentProdPermCodigos[idx]);
   if (!sameProdPerms) {
     body.produto_permissao_codigos = currentProdPermCodigos;
+  }
+
+  const separacaoAtual = getSeparacaoPermissaoForm();
+  const separacaoAnterior = colabEditSnapshot.separacao_permissao || { restringir_destinos: false, destinos_codigos: [] };
+  const destinosAntes = (separacaoAnterior.destinos_chaves || []).map(String).sort().join('||');
+  const destinosAgora = (separacaoAtual.destinos_chaves || []).map(String).sort().join('||');
+  if (separacaoAtual.restringir_destinos !== (separacaoAnterior.restringir_destinos === true) || destinosAgora !== destinosAntes) {
+    body.separacao_permissao = separacaoAtual;
   }
 
   if (!Object.keys(body).length) {
@@ -5563,7 +5617,7 @@ function toggleHeaderIcons(isLoggedIn) {
 
 function setAuthGroupState(isLoggedIn) {
   const group = document.querySelector('[data-auth-guard]');
-  
+
   if (!group) {
     // Mesmo sem o grupo, controla os ícones do header
     toggleHeaderIcons(isLoggedIn);
@@ -5586,7 +5640,7 @@ function setAuthGroupState(isLoggedIn) {
       btn.title = 'Faça login para usar esta função';
     }
   });
-  
+
   // Controla os ícones do header baseado no login
   toggleHeaderIcons(isLoggedIn);
 }
@@ -5635,13 +5689,13 @@ function aplicarFiltroAlmox() {
     const buscaOk    = termoVazio || codigoOk || descricaoOk;
     return familiaOk && buscaOk;
   });
-  
+
   // Aplica ordenação se houver campo selecionado
   if (almoxSortField) {
     filtrados.sort((a, b) => {
       let valA = a[almoxSortField];
       let valB = b[almoxSortField];
-      
+
       // Converte para número se o campo for numérico
       if (['min', 'fisico', 'saldo', 'cmc', 'preco_definido'].includes(almoxSortField)) {
         valA = parseFloat(valA) || 0;
@@ -5651,13 +5705,13 @@ function aplicarFiltroAlmox() {
         valA = String(valA || '').toLowerCase();
         valB = String(valB || '').toLowerCase();
       }
-      
+
       if (valA < valB) return almoxSortOrder === 'asc' ? -1 : 1;
       if (valA > valB) return almoxSortOrder === 'asc' ? 1 : -1;
       return 0;
     });
   }
-  
+
   renderAlmoxTable(filtrados);
 }
 
@@ -6548,7 +6602,7 @@ async function renderPCPListaEstrutura(payload, codigo) {
 
       if (isParent) {
         ev.preventDefault();
-        
+
         // Se houver contexto de OP, chama a função de atualização da OP
         const opInfo = (window.pcpContext && window.pcpContext.op) ? String(window.pcpContext.op) : '';
         if (opInfo) {
@@ -6963,7 +7017,7 @@ async function pcpToggleSubEstrutura(rowLi, codProduto) {
   `;
   rowLi.after(wrap);
 
-  
+
   // Preenche Qtd Pro / Qtd Alm e injeta "Estrutura" condicional nos itens PP que têm filhos
   try {
     const filler = window.pcpPreencherSaldosDuplos || pcpPreencherSaldosDuplosLocal;
@@ -7494,9 +7548,9 @@ async function pcpToggleTrocaProduto(rowLi, codAtual) {
   input.focus();
 }
 
- 
-/* [PCP] Aplica a troca de UM item na UI (sem persistir). 
-   ATENÇÃO: se a linha trocada for o **ITEM PAI**, 
+
+/* [PCP] Aplica a troca de UM item na UI (sem persistir).
+   ATENÇÃO: se a linha trocada for o **ITEM PAI**,
    atualiza o código canônico (#pcp-code) e RECONSTRÓI toda a PCP,
    assim como na navegação pela Comercial. */
 async function pcpAplicarTrocaProduto(rowLi, novo) {
@@ -7844,18 +7898,18 @@ async function pcpAtualizarOP(parentLi, btn) {
   for (const li of rows) {
     const codigo = String(li.dataset.codigo || '').trim();
     if (!codigo) continue;
-    
+
     const descEl = li.querySelector('.desc');
     const descricao = descEl ? descEl.textContent.trim() : '';
-    
+
     // Verifica se é item trocado (não original)
     const isTrocado = li.classList.contains('pcp-trocado') || descEl?.classList.contains('desc-trocado');
-    
+
     // Determina tipo e grupo
     const isPP = li.classList.contains('pp-row') || li.classList.contains('pp-subitem-row');
     const tipo = isPP ? 'pp' : 'peca';
     const grupo = isPP ? 'pp' : 'pecas';
-    
+
     // Busca quantidade
     let quantidade = null;
     const qtdInput = li.querySelector('.pp-qtd-input, .pcp-qtd-input');
@@ -7879,7 +7933,7 @@ async function pcpAtualizarOP(parentLi, btn) {
       const t = unidCell ? String(unidCell.textContent || '').trim().toUpperCase() : '';
       unidade = t || null;
     }
-    
+
     itensAtuais.push({
       codigo,
       descricao,
@@ -8078,7 +8132,7 @@ function pcpInitToolbar() {
           if (!itens.length) {
             results.innerHTML = '<li class="no-results">Nenhum resultado</li>';
           } else {
-            results.innerHTML = itens.map(it => 
+            results.innerHTML = itens.map(it =>
               `<li style="cursor:pointer;" data-codigo="${it.codigo}" data-desc="${(it.descricao||'').replace(/\"/g,'&quot;')}">
                  <strong>${it.codigo}</strong> — ${(it.descricao||'')}</li>`
             ).join('');
@@ -8516,7 +8570,7 @@ function openDadosProdutoTab() {
 function showArmazem () {
   // Limpa todo o container principal
   window.clearMainContainer?.();
-  
+
   // esconde Kanban e Produto
   hideKanban();
   document.getElementById('produtoTabs').style.display = 'none';
@@ -8549,7 +8603,7 @@ async function showArmazemTab(nome) {
 if (nome === 'estoque') {
   // Carregar locais de estoque no listbox
   await carregarLocaisEstoqueListbox();
-  
+
   // 1) busca dados caso ainda não exista nada carregado
   if (!almoxAllDados.length) {
     await carregarAlmoxarifado();      // primeira vez
@@ -9682,7 +9736,7 @@ async function carregarLocaisEstoqueListbox() {
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     const json = await resp.json();
     if (!json.ok) throw new Error(json.error || 'Falha ao listar locais');
-    
+
     transferLocais = Array.isArray(json.locais) ? json.locais.map(loc => ({
       codigo: loc.codigo || '',
       descricao: loc.descricao || '',
@@ -9690,7 +9744,7 @@ async function carregarLocaisEstoqueListbox() {
       inativo: !!loc.inativo,
       padrao: !!loc.padrao
     })) : [];
-    
+
     transferLocais.sort((a, b) => (a.descricao || '').localeCompare(b.descricao || '', 'pt-BR'));
     preencherEstoqueListbox(select);
   } catch (err) {
@@ -9702,10 +9756,10 @@ async function carregarLocaisEstoqueListbox() {
 // Preenche o select com locais ativos
 function preencherEstoqueListbox(select) {
   if (!select) return;
-  
+
   // Filtrar apenas estoques ativos
   const ativos = transferLocais.filter(loc => !loc.inativo);
-  
+
   select.innerHTML = '';
   ativos.forEach(loc => {
     const opt = document.createElement('option');
@@ -14643,10 +14697,10 @@ function getAtWhatsappConversationMeta(phone) {
 function isAtWhatsappConversationSeen(row) {
   const phoneDigits = normalizeAtWhatsappPhone(row?.from_phone_digits || row?.from_phone);
   if (!phoneDigits) return false;
-  
+
   const lastReadAt = new Date(row?.last_read_at || 0).getTime();
   const lastReceivedAt = new Date(row?.last_received_at || 0).getTime();
-  
+
   if (!Number.isFinite(lastReceivedAt) || lastReceivedAt <= 0) return lastReadAt > 0;
   return lastReadAt >= lastReceivedAt;
 }
@@ -14825,7 +14879,7 @@ async function selecionarAtWhatsappConversation(phone, { syncField = true, silen
   const meta = getAtWhatsappConversationMeta(phoneDigits);
   atWhatsappSelectedPhone = phoneDigits;
   atWhatsappMessagesLastPhone = phoneDigits;
-  
+
   try {
     await fetch('/api/sac/whatsapp/mark-read', {
       method: 'POST',
@@ -14836,7 +14890,7 @@ async function selecionarAtWhatsappConversation(phone, { syncField = true, silen
   } catch (err) {
     console.warn('[SAC/WhatsApp] erro ao marcar como lido:', err);
   }
-  
+
   atWhatsappConversationState.set(phoneDigits, { last_read_at: new Date().toISOString() });
 
   if (syncField && atTelefoneInput) {
@@ -14912,7 +14966,7 @@ async function carregarAtWhatsappConversations({ silent = false } = {}) {
         });
       }
     });
-    
+
     renderAtWhatsappConversationRows(rows);
 
     if (!rows.length) {
@@ -25418,7 +25472,7 @@ async function carregarSacSolicitacoes(targetBody, { hideDone = false, filaLogis
   // Detecta se é o painel "Envio de mercadoria" (cards ou tabela legada)
   const isEnvioMercadoriaPane = isEnvioMercadoriaBodyEl(bodyEl);
   const numCols = isEnvioMercadoriaPane ? 8 : 9;
-  
+
   if (!titleOnly) {
     bodyEl.innerHTML = isEnvioMercadoriaPane
       ? '<div class="envio-empty-state">Carregando envios...</div>'
@@ -25457,7 +25511,7 @@ async function carregarSacSolicitacoes(targetBody, { hideDone = false, filaLogis
       bodyEl.innerHTML = `<tr><td colspan="${numCols}" style="text-align:center;padding:16px;color:var(--inactive-color);">Nenhum registro.</td></tr>`;
       return;
     }
-    
+
     const filteredRows = isEnvioMercadoriaPane
       ? rows.filter(filtrarEnvioMercadoria)
       : rows;
@@ -25477,7 +25531,7 @@ async function carregarSacSolicitacoes(targetBody, { hideDone = false, filaLogis
       bodyEl.innerHTML = filteredRows.map(renderEnvioMercadoriaCard).join('');
       return;
     }
-    
+
     bodyEl.innerHTML = filteredRows.map(r => {
       const dataFmt = r.created_at ? new Date(r.created_at).toLocaleString('pt-BR') : '—';
       const usuario = r.usuario || '—'; // Campo requisitante (usuário que criou o registro)
@@ -25489,11 +25543,11 @@ async function carregarSacSolicitacoes(targetBody, { hideDone = false, filaLogis
       const declaracao = r.declaracao_url || r.declaracao || '';
       const declaracaoHref = declaracao || (r.id_vipp ? '/api/vipp/declaracao?id=' + r.id : '');
       const identRaw = r.identificacao ? String(r.identificacao).trim() : '—';
-      
+
       // Formata o conteúdo como tabela interna com colunas para Conteúdo e Quantidade
       const conteudoRaw = r.conteudo || '—';
       let conteudo = '—';
-      
+
       if (conteudoRaw !== '—') {
         try {
           // Tenta parsear como JSON (novo formato)
@@ -25509,7 +25563,7 @@ async function carregarSacSolicitacoes(targetBody, { hideDone = false, filaLogis
                     // Se começa com um número, adiciona "- " depois do primeiro dígito
                     conteudoFormatado = `${match[1]}- ${match[2]}`;
                   }
-                  
+
                   return `
                     <div style="display:table-row;${idx > 0 ? 'border-top:1px solid var(--border-color);' : ''}">
                       <div style="display:table-cell;padding:8px 12px 8px 0;vertical-align:top;width:85%;">${conteudoFormatado}</div>
@@ -25528,7 +25582,7 @@ async function carregarSacSolicitacoes(targetBody, { hideDone = false, filaLogis
           conteudo = conteudoRaw.replace(/\n/g, '<br>');
         }
       }
-      
+
       // Botões envio mercadoria: usam classe btn-envio-* + data-envio-id (agente de impressão)
       const temIdentRaw = r.identificacao && String(r.identificacao).trim().length > 0;
       const buttonsEnvio = [
@@ -25540,14 +25594,14 @@ async function carregarSacSolicitacoes(targetBody, { hideDone = false, filaLogis
         etiqueta ? `<button class="content-button btn-print-etiqueta" data-print-url="${etiqueta}" style="padding:4px 8px;font-size:12px;display:inline-flex;align-items:center;gap:6px;"><i class="fa-solid fa-print"></i><span>Etiqueta</span></button>` : '',
         declaracaoHref ? `<button class="content-button btn-print-declaracao" data-print-url="${declaracaoHref}" style="padding:4px 8px;font-size:12px;display:inline-flex;align-items:center;gap:6px;"><i class="fa-solid fa-print"></i><span>Declaração</span></button>` : ''
       ].filter(Boolean).join(' ');
-      
-      
+
+
       // Select de status para Tabela "Registro de envios" (SAC) (COM status real do banco)
       const statusSelectSac = `
         <select class="sac-status-select" data-id="${r.id}" style="padding:6px 8px;border:1px solid var(--border-color);border-radius:8px;background:var(--content-bg);color:var(--content-title-color);">
           ${sacStatusOptions.map(opt => `<option value="${opt}" ${opt === status ? 'selected' : ''}>${opt}</option>`).join('')}
         </select>`;
-      
+
       // Renderiza com ou sem a coluna Requisitante, dependendo da tabela
       if (isEnvioMercadoriaPane) {
         // Tabela "Envios registrados" (menu lateral) - COM coluna Requisitante
@@ -25577,7 +25631,7 @@ async function carregarSacSolicitacoes(targetBody, { hideDone = false, filaLogis
             </button>
           </div>
         `;
-        
+
         return `
           <tr>
             <td>${r.id}</td>
@@ -25981,7 +26035,7 @@ function _renderizarRelatorioSacPorUsuario() {
     const itens = _sacExtrairItensDoConteudo(r?.conteudo || '');
     if (!agrupadoConteudo.has(periodo)) agrupadoConteudo.set(periodo, new Map());
     itens.forEach((it) => {
-      const nome = String(it?.nome || '').trim(); 
+      const nome = String(it?.nome || '').trim();
       const qtd = Number(it?.quantidade || 0) || 1;
       if (!nome) return;
       const chaveAgrupamento = _sacNormalizarNomeItem(nome) || nome;
@@ -26077,14 +26131,14 @@ function _renderizarRelatorioSacPorUsuario() {
           const ds = chart.data.datasets?.[el.datasetIndex];
           const itemLabel = String(ds?._fullLabel || ds?.label || '');
           const topSet = new Set(_sacRelatorioConteudoTopItens || []);
-          const rowsBarra = rowsConteudo.filter((r) => { 
-            if (_sacPeriodoMesAno(r?.created_at) !== periodo) return false; 
-            const itensRow = _sacExtrairItensDoConteudo(r?.conteudo || ''); 
-            if (itemLabel === 'Outros itens') return itensRow.some((it) => !topSet.has(_sacNormalizarNomeItem(String(it?.nome || '').trim()) || String(it?.nome || '').trim())); 
-            return itensRow.some((it) => { 
+          const rowsBarra = rowsConteudo.filter((r) => {
+            if (_sacPeriodoMesAno(r?.created_at) !== periodo) return false;
+            const itensRow = _sacExtrairItensDoConteudo(r?.conteudo || '');
+            if (itemLabel === 'Outros itens') return itensRow.some((it) => !topSet.has(_sacNormalizarNomeItem(String(it?.nome || '').trim()) || String(it?.nome || '').trim()));
+            return itensRow.some((it) => {
               const chaveNorm = _sacNormalizarNomeItem(String(it?.nome || '').trim()) || String(it?.nome || '').trim();
               return chaveNorm === itemLabel;
-            }); 
+            });
           });
           const itensBarra = _sacExpandirConteudoDosRegistros(rowsBarra, (nome) => { if (itemLabel === 'Outros itens') return !topSet.has(String(nome || '').trim()); return String(nome || '').trim() === itemLabel; });
           _sacRenderDrilldown(`Registros - Conteúdo: ${itemLabel} | Período: ${periodo}`, itensBarra);
@@ -26332,18 +26386,18 @@ async function _atualizarTituloCompras() {
     if (!resp.ok) return;
     const data = await resp.json();
     const listaCompleta = Array.isArray(data.solicitacoes) ? data.solicitacoes : [];
-    
+
     // Conta itens por status
-    const aguardandoCompra = listaCompleta.filter(item => 
+    const aguardandoCompra = listaCompleta.filter(item =>
       (item.status || '').toLowerCase() === 'aguardando compra'
     ).length;
-    
-    const aguardandoCotacao = listaCompleta.filter(item => 
+
+    const aguardandoCotacao = listaCompleta.filter(item =>
       (item.status || '').toLowerCase() === 'aguardando cotação'
     ).length;
-    
+
     const baseTitle = 'SGF';
-    
+
     // Atualiza título apenas se houver itens pendentes
     if (aguardandoCompra > 0 || aguardandoCotacao > 0) {
       document.title = `${baseTitle} (${aguardandoCompra}) - (${aguardandoCotacao})`;
@@ -26876,25 +26930,25 @@ document.addEventListener('click', async (e) => {
   if (btnExcluir) {
     e.preventDefault();
     const id = btnExcluir.dataset.id;
-    
+
     if (!confirm('Tem certeza que deseja excluir este registro? O status será alterado para "Excluído".')) {
       return;
     }
-    
+
     btnExcluir.disabled = true;
-    
+
     try {
       const resp = await fetch(`/api/sac/solicitacoes/${id}`, {
         method: 'DELETE'
       });
       const data = await resp.json().catch(() => ({}));
-      
+
       if (!resp.ok || data.ok === false) {
         throw new Error(data.error || 'Falha ao excluir');
       }
-      
+
       alert('Registro excluído com sucesso!');
-      
+
       // Remove a linha da tabela
       const row = btnExcluir.closest('tr');
       if (row) row.remove();
@@ -26979,7 +27033,7 @@ if (btnFiltro) {
     e.stopPropagation(); // impede propagação para o document
     const panel = document.getElementById('almoxFilterPanel');
     if (!panel) return;
-    
+
     const isOpen = panel.classList.contains('is-open');
     if (isOpen) {
       panel.classList.remove('is-open');
@@ -26996,7 +27050,7 @@ if (btnFiltro) {
     panel.style.top = '50%';
     panel.style.transform = 'translate(-50%, -50%)';
     panel.style.zIndex = '9999';
-    
+
     // carrega famílias se ainda não carregou
     loadAlmoxFamilias();
   });
@@ -27021,7 +27075,7 @@ if (btnAlmoxRefresh) {
 document.querySelectorAll('#tbl-almoxarifado th.sortable').forEach(th => {
   th.addEventListener('click', () => {
     const field = th.dataset.sort;
-    
+
     // Se clicar na mesma coluna, inverte a ordem
     if (almoxSortField === field) {
       almoxSortOrder = almoxSortOrder === 'asc' ? 'desc' : 'asc';
@@ -27030,15 +27084,15 @@ document.querySelectorAll('#tbl-almoxarifado th.sortable').forEach(th => {
       almoxSortField = field;
       almoxSortOrder = 'asc';
     }
-    
+
     // Remove classes de todos os cabeçalhos
     document.querySelectorAll('#tbl-almoxarifado th.sortable').forEach(h => {
       h.classList.remove('sort-asc', 'sort-desc');
     });
-    
+
     // Adiciona classe ao cabeçalho ativo
     th.classList.add(almoxSortOrder === 'asc' ? 'sort-asc' : 'sort-desc');
-    
+
     // Reaplica o filtro (que agora inclui ordenação)
     aplicarFiltroAlmox();
   });
@@ -28784,7 +28838,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Coleta quais tabelas estão marcadas
     const checkboxes = document.querySelectorAll('#qualidade-sources-checkboxes input[type="checkbox"]:checked');
     const selectedSources = Array.from(checkboxes).map(cb => cb.value);
-    
+
     if (selectedSources.length === 0) {
       feedbackEl.textContent = 'Selecione pelo menos uma tabela para pesquisar.';
       resultsEl.innerHTML = '';
@@ -28945,11 +28999,11 @@ document.addEventListener('DOMContentLoaded', async () => {
     try {
       const r = await fetch(`/api/iapp/ordens-producao/busca/${encodeURIComponent(id)}`);
       const j = await r.json().catch(() => ({ raw: '<resposta não-JSON>' }));
-      
+
       if (iappConsultaOutput) {
         iappConsultaOutput.textContent = JSON.stringify(j, null, 2);
       }
-      
+
       if (j.ok && j.data?.success) {
         if (iappConsultaFeedback) iappConsultaFeedback.textContent = `✓ Ordem encontrada: ${j.data.response?.identificacao || id}`;
       } else {
@@ -28988,11 +29042,11 @@ document.addEventListener('DOMContentLoaded', async () => {
       // Chama endpoint /lista com offset=0 (obrigatório pela API IAPP)
       const r = await fetch('/api/iapp/ordens-producao/lista?offset=0');
       const j = await r.json().catch(() => ({ raw: '<resposta não-JSON>' }));
-      
+
       if (iappConsultaOutput) {
         iappConsultaOutput.textContent = JSON.stringify(j, null, 2);
       }
-      
+
       if (j.ok && j.data?.success) {
         const total = j.data.response?.length || 0;
         if (iappConsultaFeedback) iappConsultaFeedback.textContent = `✓ ${total} ordens listadas`;
@@ -29107,7 +29161,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Handlers para o formulário de Abertura de OS
   const aberturaOsLimparBtn = document.getElementById('abertura-os-limpar');
   const aberturaOsSalvarBtn = document.getElementById('abertura-os-salvar');
-  
+
   aberturaOsLimparBtn?.addEventListener('click', (ev) => {
     ev.preventDefault();
     // Limpa todos os campos do formulário
@@ -29121,7 +29175,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   aberturaOsSalvarBtn?.addEventListener('click', async (ev) => {
     ev.preventDefault();
-    
+
     const cliente = document.getElementById('abertura-os-cliente').value.trim();
     const produto = document.getElementById('abertura-os-produto').value.trim();
     const descricao = document.getElementById('abertura-os-descricao').value.trim();
@@ -29147,10 +29201,10 @@ document.addEventListener('DOMContentLoaded', async () => {
 
       console.log('Nova OS criada:', novaOS);
       alert(`OS criada com sucesso!\nCliente: ${cliente}\nProduto: ${produto}\nPrioridade: ${prioridade}`);
-      
+
       // Limpa o formulário após salvar
       aberturaOsLimparBtn.click();
-      
+
     } catch (error) {
       console.error('Erro ao criar OS:', error);
       alert('Erro ao criar a OS. Tente novamente.');
@@ -29513,17 +29567,17 @@ const ulList     = document.getElementById('listaProdutosList');
   // FILTRO LOCAL (SEM RE-RENDER) - Campo unificado
   function applyResumoFilters() {
     const searchTerm = codeFilter.value.trim().toLowerCase();
-  
+
     ulList.querySelectorAll('li').forEach(li => {
       const code = (li.dataset.codigo    || '').toLowerCase();
       const desc = (li.dataset.descricao || '').toLowerCase();
-  
+
       // Mostra se encontrar no código OU na descrição
       const show = !searchTerm || code.includes(searchTerm) || desc.includes(searchTerm);
       li.style.display = show ? '' : 'none';
     });
   }
-  
+
   codeFilter.addEventListener('input', applyResumoFilters);
 
 
@@ -31004,16 +31058,16 @@ window.preloadLocaisEstoqueCache = async function preloadLocaisEstoqueCache(forc
       const res = await fetch(`${API_BASE}/api/familia/list`);
       const json = await res.json();
       const list = Array.isArray(json?.familias)
-        ? json.familias.map(f => ({ 
-            codigo: f.cod || f.codigo, 
+        ? json.familias.map(f => ({
+            codigo: f.cod || f.codigo,
             nomeFamilia: f.nome_familia || f.nomeFamilia || '',
             tipo: f.tipo || ''
           }))
         : [];
       renderFamilias(list);
     } catch(e){
-      if (errBox()) { 
-        errBox().style.display='flex'; 
+      if (errBox()) {
+        errBox().style.display='flex';
         const textDiv = document.getElementById('familiaErrorText');
         if (textDiv) {
           textDiv.textContent = 'Erro ao carregar famílias: '+ (e?.message||e);
@@ -31040,30 +31094,30 @@ window.preloadLocaisEstoqueCache = async function preloadLocaisEstoqueCache(forc
       const codigo = f?.codigo != null ? String(f.codigo) : '';
       const nome   = f?.nomeFamilia || '';
       const tipo   = f?.tipo || '';
-      
+
       const tdCodigo = document.createElement('td');
       tdCodigo.textContent = codigo;
       tdCodigo.style.cursor = 'pointer';
       tdCodigo.dataset.originalCod = codigo;
       tdCodigo.classList.add('familia-cod-cell');
-      
+
       const tdNome = document.createElement('td');
       tdNome.textContent = nome;
-      
+
       const tdTipo = document.createElement('td');
       tdTipo.textContent = tipo;
       tdTipo.style.cursor = 'pointer';
       tdTipo.dataset.originalCod = codigo;
       tdTipo.dataset.originalTipo = tipo;
       tdTipo.classList.add('familia-tipo-cell');
-      
+
       tr.appendChild(tdCodigo);
       tr.appendChild(tdNome);
       tr.appendChild(tdTipo);
       frag.appendChild(tr);
     });
     tb.appendChild(frag);
-    
+
     // Delega clique nas células editáveis
     tb.removeEventListener('click', handleCellClick);
     tb.addEventListener('click', handleCellClick);
@@ -31072,7 +31126,7 @@ window.preloadLocaisEstoqueCache = async function preloadLocaisEstoqueCache(forc
   function handleCellClick(ev){
     const codCell = ev.target.closest('.familia-cod-cell');
     const tipoCell = ev.target.closest('.familia-tipo-cell');
-    
+
     if (codCell && !codCell.querySelector('input')) {
       makeEditable(codCell, 'cod');
     } else if (tipoCell && !tipoCell.querySelector('input')) {
@@ -31083,7 +31137,7 @@ window.preloadLocaisEstoqueCache = async function preloadLocaisEstoqueCache(forc
   function makeEditable(cell, fieldType){
     const originalValue = cell.textContent.trim();
     const originalCod = cell.dataset.originalCod || '';
-    
+
     const input = document.createElement('input');
     input.type = 'text';
     input.value = originalValue;
@@ -31093,24 +31147,24 @@ window.preloadLocaisEstoqueCache = async function preloadLocaisEstoqueCache(forc
     input.style.borderRadius = '3px';
     input.style.background = '#1f2937';
     input.style.color = '#fff';
-    
+
     cell.textContent = '';
     cell.appendChild(input);
     cell.style.cursor = 'default';
     input.focus();
     input.select();
-    
+
     // Salva ao pressionar Enter ou perder foco
     const saveEdit = () => {
       const newValue = input.value.trim();
       cell.textContent = newValue;
       cell.style.cursor = 'pointer';
-      
+
       // Registra a mudança
       if (!pendingChanges[originalCod]) {
         pendingChanges[originalCod] = { originalCod };
       }
-      
+
       if (fieldType === 'cod') {
         pendingChanges[originalCod].newCod = newValue;
         cell.dataset.originalCod = newValue; // atualiza para próximas edições
@@ -31129,7 +31183,7 @@ window.preloadLocaisEstoqueCache = async function preloadLocaisEstoqueCache(forc
         }
       }
     };
-    
+
     input.addEventListener('blur', saveEdit);
     input.addEventListener('keydown', (e) => {
       if (e.key === 'Enter') {
@@ -31152,15 +31206,15 @@ window.preloadLocaisEstoqueCache = async function preloadLocaisEstoqueCache(forc
 
     const btn = saveBtn();
     if (!btn) return;
-    
+
     btn.disabled = true;
     btn.textContent = 'Salvando...';
-    
+
     try {
       // Processa cada alteração
       for (const change of changes) {
         const { originalCod, newCod, newTipo } = change;
-        
+
         // Se o código foi alterado, precisa atualizar o registro
         if (newCod && newCod !== originalCod) {
           const res = await fetch(`${API_BASE}/api/familia/${encodeURIComponent(originalCod)}/cod`, {
@@ -31173,7 +31227,7 @@ window.preloadLocaisEstoqueCache = async function preloadLocaisEstoqueCache(forc
             throw new Error(json.error || `Erro ao atualizar código de ${originalCod}`);
           }
         }
-        
+
         // Se o tipo foi alterado
         if (newTipo !== undefined) {
           const codToUse = newCod || originalCod;
@@ -31188,19 +31242,19 @@ window.preloadLocaisEstoqueCache = async function preloadLocaisEstoqueCache(forc
           }
         }
       }
-      
+
       // Limpa as alterações pendentes
       Object.keys(pendingChanges).forEach(key => delete pendingChanges[key]);
-      
+
       // Remove destaque visual
       tbody().querySelectorAll('td[style*="background"]').forEach(td => {
         td.style.background = '';
         td.style.color = '';
       });
-      
+
       alert('Alterações salvas com sucesso!');
       await fetchFamilias();
-      
+
     } catch(e){
       alert('Erro ao salvar: ' + (e.message || e));
     } finally {
@@ -31208,14 +31262,14 @@ window.preloadLocaisEstoqueCache = async function preloadLocaisEstoqueCache(forc
       btn.textContent = 'Salvar';
     }
   }
-  
+
 
   btn.addEventListener('click', async ev => {
     ev.preventDefault();
-    
+
     // esconde kanban
     if (typeof hideKanban === 'function') hideKanban();
-    
+
     // esconde armazem
     if (typeof hideArmazem === 'function') hideArmazem();
     const armTabsEl = document.getElementById('armazemTabs');
@@ -31225,26 +31279,26 @@ window.preloadLocaisEstoqueCache = async function preloadLocaisEstoqueCache(forc
     document
       .querySelectorAll('#armazemContent .armazem-page')
       .forEach(p => (p.style.display = 'none'));
-    
+
     // esconde todos os painéis principais
     document.querySelectorAll('.tab-pane').forEach(p => p.style.display='none');
-    
+
     // esconde abas de produto
     const mainHeader = document.querySelector('.main-header');
     if (mainHeader) mainHeader.style.display = 'none';
-    
+
     // mostra painel Definições
     const pane = document.getElementById(paneId);
     if (pane) pane.style.display='block';
-    
+
     // atualiza menu lateral
     document.querySelectorAll('.side-menu a').forEach(a => a.classList.remove('is-active'));
     btn.classList.add('is-active');
-    
+
     // carrega famílias
     await fetchFamilias();
     await carregarSetorLocaisConfig();
-    
+
     // Não carrega campos automaticamente - só quando selecionar uma família
     // loadCamposConfig();
   });
@@ -31357,23 +31411,23 @@ window.preloadLocaisEstoqueCache = async function preloadLocaisEstoqueCache(forc
   });
 
   // === Configuração de Campos Obrigatórios ===
-  
+
   // Escaneia todos os campos editáveis da página Produto
   function escanearCamposProduto() {
     const campos = [];
-    
+
     // Busca todos os inputs, selects e textareas dentro de #produtoTabs
     const selectors = [
       '#produtoTabs input[id]:not([type="hidden"]):not([type="button"]):not([type="submit"])',
       '#produtoTabs select[id]',
       '#produtoTabs textarea[id]'
     ];
-    
+
     selectors.forEach(sel => {
       document.querySelectorAll(sel).forEach(el => {
         const id = el.id;
         if (!id) return;
-        
+
         // Tenta encontrar o label associado
         let rotulo = '';
         const label = document.querySelector(`label[for="${id}"]`);
@@ -31383,14 +31437,14 @@ window.preloadLocaisEstoqueCache = async function preloadLocaisEstoqueCache(forc
           // Tenta pegar de placeholder ou name
           rotulo = el.placeholder || el.name || el.getAttribute('aria-label') || id;
         }
-        
+
         // Determina a guia (aba) onde o campo está
         let guia = 'desconhecida';
         let parent = el.closest('[id][style*="display"]');
         if (parent && parent.id) {
           guia = parent.id;
         }
-        
+
         campos.push({
           chave: id,
           rotulo: rotulo,
@@ -31400,31 +31454,31 @@ window.preloadLocaisEstoqueCache = async function preloadLocaisEstoqueCache(forc
         });
       });
     });
-    
+
     return campos;
   }
-  
+
   // Carrega campos salvos no servidor
   async function loadCamposConfig() {
     const spinner = document.getElementById('camposConfigSpinner');
     const container = document.getElementById('camposConfigContainer');
     if (!container) return;
-    
+
     try {
       if (spinner) spinner.style.display = 'block';
       container.innerHTML = '';
-      
+
       const res = await fetch(`${API_BASE}/api/config/campos-produto`);
       if (!res.ok) throw new Error('Erro ao carregar campos');
-      
+
       const json = await res.json();
       const campos = json.campos || [];
-      
+
       if (!campos.length) {
         container.innerHTML = '<div style="padding:20px; text-align:center; color:var(--inactive-color);">Nenhum campo cadastrado. Clique em "Escanear Campos" para detectar os campos da página Produto.</div>';
         return;
       }
-      
+
       // Agrupa por guia
       const porGuia = {};
       campos.forEach(c => {
@@ -31432,13 +31486,13 @@ window.preloadLocaisEstoqueCache = async function preloadLocaisEstoqueCache(forc
         if (!porGuia[g]) porGuia[g] = [];
         porGuia[g].push(c);
       });
-      
+
       // Renderiza por guia
       Object.keys(porGuia).sort().forEach(guia => {
         const section = document.createElement('div');
         section.style.gridColumn = '1 / -1';
         section.style.marginTop = '16px';
-        
+
         const title = document.createElement('h4');
         title.textContent = guia.replace(/([A-Z])/g, ' $1').trim();
         title.style.color = 'var(--content-title-color)';
@@ -31447,12 +31501,12 @@ window.preloadLocaisEstoqueCache = async function preloadLocaisEstoqueCache(forc
         title.style.marginBottom = '8px';
         title.style.textTransform = 'capitalize';
         section.appendChild(title);
-        
+
         const grid = document.createElement('div');
         grid.style.display = 'grid';
         grid.style.gridTemplateColumns = 'repeat(auto-fill, minmax(280px, 1fr))';
         grid.style.gap = '12px';
-        
+
         porGuia[guia].forEach(campo => {
           const label = document.createElement('label');
           label.style.display = 'flex';
@@ -31463,7 +31517,7 @@ window.preloadLocaisEstoqueCache = async function preloadLocaisEstoqueCache(forc
           label.style.border = '1px solid var(--border-color)';
           label.style.borderRadius = '6px';
           label.style.transition = 'background 0.2s, border-color 0.2s';
-          
+
           const checkbox = document.createElement('input');
           checkbox.type = 'checkbox';
           checkbox.checked = campo.habilitado !== false;
@@ -31473,31 +31527,31 @@ window.preloadLocaisEstoqueCache = async function preloadLocaisEstoqueCache(forc
           checkbox.style.height = '18px';
           checkbox.style.cursor = 'pointer';
           checkbox.style.accentColor = '#3a6df0';
-          
+
           const textWrapper = document.createElement('div');
           textWrapper.style.flex = '1';
           textWrapper.style.display = 'flex';
           textWrapper.style.flexDirection = 'column';
           textWrapper.style.gap = '2px';
-          
+
           const spanRotulo = document.createElement('span');
           spanRotulo.textContent = campo.rotulo || campo.chave;
           spanRotulo.style.fontWeight = '500';
           spanRotulo.style.fontSize = '13px';
-          
+
           const spanChave = document.createElement('span');
           spanChave.textContent = campo.chave;
           spanChave.style.fontSize = '11px';
           spanChave.style.color = 'var(--inactive-color)';
           spanChave.style.fontFamily = 'monospace';
-          
+
           textWrapper.appendChild(spanRotulo);
           textWrapper.appendChild(spanChave);
-          
+
           label.appendChild(checkbox);
           label.appendChild(textWrapper);
           grid.appendChild(label);
-          
+
           // Efeitos visuais
           checkbox.addEventListener('change', () => {
             if (checkbox.checked) {
@@ -31508,12 +31562,12 @@ window.preloadLocaisEstoqueCache = async function preloadLocaisEstoqueCache(forc
               label.style.background = 'transparent';
             }
           });
-          
+
           if (checkbox.checked) {
             label.style.borderColor = '#3a6df0';
             label.style.background = 'rgba(58, 109, 240, 0.05)';
           }
-          
+
           label.addEventListener('mouseenter', () => {
             if (!checkbox.checked) {
               label.style.background = 'var(--hover-menu-bg)';
@@ -31525,11 +31579,11 @@ window.preloadLocaisEstoqueCache = async function preloadLocaisEstoqueCache(forc
             }
           });
         });
-        
+
         section.appendChild(grid);
         container.appendChild(section);
       });
-      
+
     } catch (e) {
       console.error('Erro ao carregar campos:', e);
       container.innerHTML = `<div style="padding:20px; text-align:center; color:#f00;">Erro: ${e.message}</div>`;
@@ -31537,21 +31591,21 @@ window.preloadLocaisEstoqueCache = async function preloadLocaisEstoqueCache(forc
       if (spinner) spinner.style.display = 'none';
     }
   }
-  
+
   // Carregar famílias no combobox
   async function loadFamiliasConfig() {
     const select = document.getElementById('familiaConfigSelect');
     if (!select) return;
-    
+
     try {
       const res = await fetch(`${API_BASE}/api/produtos/familias`);
       if (!res.ok) throw new Error('Erro ao buscar famílias');
-      
+
       const familias = await res.json();
-      
+
       // Limpa opções existentes (exceto a primeira "Selecione...")
       select.innerHTML = '<option value="">Selecione uma família...</option>';
-      
+
       // Adiciona famílias (usa 'codigo' como value)
       familias.forEach(f => {
         const opt = document.createElement('option');
@@ -31560,43 +31614,43 @@ window.preloadLocaisEstoqueCache = async function preloadLocaisEstoqueCache(forc
         opt.dataset.familiaId = f.id;
         select.appendChild(opt);
       });
-      
+
       console.log(`[Config] ${familias.length} famílias carregadas`);
-      
+
       // Mensagem inicial no container
       const container = document.getElementById('camposConfigContainer');
       if (container) {
         container.innerHTML = '<div style="padding:40px 20px; text-align:center; color:var(--inactive-color); font-size:14px;"><p style="margin:0;">📋 Selecione uma família acima para configurar os campos obrigatórios.</p></div>';
       }
-      
+
     } catch (e) {
       console.error('[Config] Erro ao carregar famílias:', e);
     }
   }
-  
+
   // Carrega campos obrigatórios de uma família
   async function loadCamposConfigFamilia(familiaCodigo) {
     const container = document.getElementById('camposConfigContainer');
     const spinner = document.getElementById('camposConfigSpinner');
     const infoDiv = document.getElementById('camposConfigInfo');
-    
+
     if (!container) return;
-    
+
     try {
       if (spinner) spinner.style.display = 'block';
       if (infoDiv) infoDiv.style.display = 'none';
       container.innerHTML = '';
-      
+
       const res = await fetch(`${API_BASE}/api/config/familia-campos/${encodeURIComponent(familiaCodigo)}`);
       if (!res.ok) throw new Error('Erro ao buscar configuração');
-      
+
       const campos = await res.json();
-      
+
       if (!campos.length) {
         container.innerHTML = '<div style="padding:20px; text-align:center; color:var(--inactive-color);">Nenhum campo disponível. Execute "Escanear Campos" primeiro.</div>';
         return;
       }
-      
+
       // Agrupa por guia
       const porGuia = {};
       campos.forEach(c => {
@@ -31604,13 +31658,13 @@ window.preloadLocaisEstoqueCache = async function preloadLocaisEstoqueCache(forc
         if (!porGuia[g]) porGuia[g] = [];
         porGuia[g].push(c);
       });
-      
+
       // Renderiza por guia (mesmo formato do loadCamposConfig)
       Object.keys(porGuia).sort().forEach(guia => {
         const section = document.createElement('div');
         section.style.gridColumn = '1 / -1';
         section.style.marginTop = '20px';
-        
+
         const title = document.createElement('h4');
         title.innerHTML = `<i class="fa-solid fa-folder-open" style="color: #3b82f6; margin-right: 8px;"></i>${guia.replace(/([A-Z])/g, ' $1').trim()}`;
         title.style.color = 'var(--content-title-color)';
@@ -31622,12 +31676,12 @@ window.preloadLocaisEstoqueCache = async function preloadLocaisEstoqueCache(forc
         title.style.paddingBottom = '8px';
         title.style.display = 'inline-block';
         section.appendChild(title);
-        
+
         const grid = document.createElement('div');
         grid.style.display = 'grid';
         grid.style.gridTemplateColumns = 'repeat(auto-fill, minmax(300px, 1fr))';
         grid.style.gap = '12px';
-        
+
         porGuia[guia].forEach(campo => {
           const label = document.createElement('label');
           label.style.display = 'flex';
@@ -31640,7 +31694,7 @@ window.preloadLocaisEstoqueCache = async function preloadLocaisEstoqueCache(forc
           label.style.transition = 'all 0.2s';
           label.style.background = 'var(--content-bg)';
           label.style.boxShadow = '0 1px 3px rgba(0,0,0,0.05)';
-          
+
           const checkbox = document.createElement('input');
           checkbox.type = 'checkbox';
           checkbox.checked = campo.obrigatorio;
@@ -31650,20 +31704,20 @@ window.preloadLocaisEstoqueCache = async function preloadLocaisEstoqueCache(forc
           checkbox.style.cursor = 'pointer';
           checkbox.style.accentColor = '#3b82f6';
           checkbox.style.flexShrink = '0';
-          
+
           const textWrapper = document.createElement('div');
           textWrapper.style.flex = '1';
           textWrapper.style.display = 'flex';
           textWrapper.style.flexDirection = 'column';
           textWrapper.style.gap = '4px';
           textWrapper.style.minWidth = '0';
-          
+
           const spanRotulo = document.createElement('span');
           spanRotulo.textContent = campo.rotulo || campo.chave;
           spanRotulo.style.fontWeight = '600';
           spanRotulo.style.fontSize = '14px';
           spanRotulo.style.color = 'var(--content-title-color)';
-          
+
           const spanChave = document.createElement('span');
           spanChave.textContent = campo.chave;
           spanChave.style.fontSize = '11px';
@@ -31673,14 +31727,14 @@ window.preloadLocaisEstoqueCache = async function preloadLocaisEstoqueCache(forc
           spanChave.style.padding = '2px 6px';
           spanChave.style.borderRadius = '4px';
           spanChave.style.display = 'inline-block';
-          
+
           textWrapper.appendChild(spanRotulo);
           textWrapper.appendChild(spanChave);
-          
+
           label.appendChild(checkbox);
           label.appendChild(textWrapper);
           grid.appendChild(label);
-          
+
           // Efeitos visuais
           checkbox.addEventListener('change', () => {
             if (checkbox.checked) {
@@ -31695,13 +31749,13 @@ window.preloadLocaisEstoqueCache = async function preloadLocaisEstoqueCache(forc
               spanRotulo.style.color = 'var(--content-title-color)';
             }
           });
-          
+
           // Hover effect
           label.addEventListener('mouseenter', () => {
             label.style.transform = 'translateY(-2px)';
             label.style.boxShadow = '0 4px 12px rgba(0,0,0,0.1)';
           });
-          
+
           label.addEventListener('mouseleave', () => {
             label.style.transform = 'translateY(0)';
             if (checkbox.checked) {
@@ -31710,14 +31764,14 @@ window.preloadLocaisEstoqueCache = async function preloadLocaisEstoqueCache(forc
               label.style.boxShadow = '0 1px 3px rgba(0,0,0,0.05)';
             }
           });
-          
+
           if (checkbox.checked) {
             label.style.borderColor = '#3b82f6';
             label.style.background = 'linear-gradient(135deg, rgba(59, 130, 246, 0.08) 0%, rgba(37, 99, 235, 0.05) 100%)';
             label.style.boxShadow = '0 2px 8px rgba(59, 130, 246, 0.2)';
             spanRotulo.style.color = '#3b82f6';
           }
-          
+
           label.addEventListener('mouseenter', () => {
             if (!checkbox.checked) {
               label.style.background = 'var(--hover-menu-bg)';
@@ -31729,11 +31783,11 @@ window.preloadLocaisEstoqueCache = async function preloadLocaisEstoqueCache(forc
             }
           });
         });
-        
+
         section.appendChild(grid);
         container.appendChild(section);
       });
-      
+
       if (infoDiv) {
         infoDiv.style.display = 'flex';
         infoDiv.innerHTML = `
@@ -31743,9 +31797,9 @@ window.preloadLocaisEstoqueCache = async function preloadLocaisEstoqueCache(forc
           </div>
         `;
       }
-      
+
       console.log(`[Config] ${campos.length} campos carregados para família ${familiaCodigo}`);
-      
+
     } catch (e) {
       console.error('[Config] Erro ao carregar campos da família:', e);
       container.innerHTML = `<div style="padding:20px; text-align:center; color:#f00;">Erro: ${e.message}</div>`;
@@ -31753,7 +31807,7 @@ window.preloadLocaisEstoqueCache = async function preloadLocaisEstoqueCache(forc
       if (spinner) spinner.style.display = 'none';
     }
   }
-  
+
   // Listener para mudança de família no select
   const familiaSelect = document.getElementById('familiaConfigSelect');
   if (familiaSelect) {
@@ -31777,10 +31831,10 @@ window.preloadLocaisEstoqueCache = async function preloadLocaisEstoqueCache(forc
       }
     });
   }
-  
+
   // Carrega famílias ao inicializar
   loadFamiliasConfig();
-  
+
   // Botão: Escanear Campos
   const scanBtn = document.getElementById('scanCamposBtn');
   if (scanBtn) {
@@ -31788,31 +31842,31 @@ window.preloadLocaisEstoqueCache = async function preloadLocaisEstoqueCache(forc
       if (!confirm('Escanear campos irá detectar todos os campos editáveis da página Produto e salvá-los no banco. Continuar?')) {
         return;
       }
-      
+
       try {
         scanBtn.disabled = true;
         scanBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Escaneando...';
-        
+
         const campos = escanearCamposProduto();
-        
+
         if (!campos.length) {
           alert('Nenhum campo detectado. Certifique-se de que a página Produto está carregada.');
           return;
         }
-        
+
         const res = await fetch(`${API_BASE}/api/config/campos-produto/scan`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ campos })
         });
-        
+
         if (!res.ok) throw new Error('Erro ao salvar campos');
-        
+
         const json = await res.json();
         alert(`${json.novos || 0} campo(s) novo(s) detectado(s) e salvo(s)!`);
-        
+
         await loadCamposConfig();
-        
+
       } catch (e) {
         alert('Erro ao escanear: ' + (e.message || e));
       } finally {
@@ -31821,49 +31875,49 @@ window.preloadLocaisEstoqueCache = async function preloadLocaisEstoqueCache(forc
       }
     });
   }
-  
+
   // Botão: Salvar Configuração
   const saveCamposBtn = document.getElementById('saveCamposConfigBtn');
   if (saveCamposBtn) {
     saveCamposBtn.addEventListener('click', async () => {
       const select = document.getElementById('familiaConfigSelect');
       const container = document.getElementById('camposConfigContainer');
-      
+
       if (!select || !container) return;
-      
+
       const familiaCodigo = select.value;
       if (!familiaCodigo) {
         alert('Selecione uma família antes de salvar.');
         return;
       }
-      
+
       const checkboxes = container.querySelectorAll('input[type="checkbox"][data-chave]');
       const camposObrigatorios = [];
-      
+
       checkboxes.forEach(cb => {
         if (cb.checked) {
           camposObrigatorios.push(cb.dataset.chave);
         }
       });
-      
+
       try {
         saveCamposBtn.disabled = true;
         saveCamposBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Salvando...';
-        
+
         const res = await fetch(`${API_BASE}/api/config/familia-campos`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ 
+          body: JSON.stringify({
             familiaCodigo,
             camposObrigatorios
           })
         });
-        
+
         if (!res.ok) throw new Error('Erro ao salvar configuração');
-        
+
         const json = await res.json();
         alert(`Configuração salva com sucesso! ${json.campos} campo(s) obrigatório(s) definido(s) para a família.`);
-        
+
       } catch (e) {
         alert('Erro ao salvar: ' + (e.message || e));
       } finally {
@@ -31878,49 +31932,49 @@ window.preloadLocaisEstoqueCache = async function preloadLocaisEstoqueCache(forc
 // ===== ATIVIDADES DE ENGENHARIA =====
 (function initAtividadesEngenharia() {
   let familiaAtualAtividades = '';
-  
+
   // Carrega atividades de uma família
   async function loadAtividades(familiaCodigo) {
     familiaAtualAtividades = familiaCodigo;
     const container = document.getElementById('atividadesContainer');
     const spinner = document.getElementById('atividadesSpinner');
     const infoDiv = document.getElementById('atividadesInfo');
-    
+
     if (!container) return;
-    
+
     if (!familiaCodigo) {
       container.innerHTML = '<div style="padding:40px 20px; text-align:center; color:var(--inactive-color); font-size:14px;"><p style="margin:0;">📋 Selecione uma família para gerenciar as atividades de engenharia.</p></div>';
       return;
     }
-    
+
     try {
       if (spinner) spinner.style.display = 'block';
       if (infoDiv) infoDiv.style.display = 'none';
       container.innerHTML = '';
-      
+
       const res = await fetch(`${API_BASE}/api/engenharia/atividades/${encodeURIComponent(familiaCodigo)}`);
       if (!res.ok) throw new Error('Erro ao buscar atividades');
-      
+
       const atividades = await res.json();
-      
+
       if (!atividades.length) {
         container.innerHTML = '<div style="padding:20px; text-align:center; color:var(--inactive-color);">Nenhuma atividade cadastrada. Clique em "Adicionar Atividade" para criar.</div>';
         return;
       }
-      
+
       // Renderiza cada atividade
       atividades.forEach((ativ, idx) => {
         const card = document.createElement('div');
         card.style.cssText = 'position: relative; padding: 20px; border: 2px solid var(--border-color); border-radius: 12px; background: linear-gradient(135deg, var(--content-bg) 0%, rgba(16, 185, 129, 0.02) 100%); display: flex; justify-content: space-between; align-items: start; gap: 16px; transition: all 0.3s; box-shadow: 0 2px 4px rgba(0,0,0,0.05);';
-        
+
         card.innerHTML = `
           <div style="flex: 1; min-width: 0;">
             <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 10px;">
               <span style="background: linear-gradient(135deg, #10b981 0%, #059669 100%); color: white; padding: 4px 12px; border-radius: 8px; font-size: 13px; font-weight: 600; box-shadow: 0 2px 6px rgba(16, 185, 129, 0.3);">#${idx + 1}</span>
               <strong style="font-size: 16px; color: var(--content-title-color); font-weight: 600;">${ativ.nome_atividade}</strong>
             </div>
-            ${ativ.descricao_atividade 
-              ? `<p style="margin: 0; color: var(--inactive-color); font-size: 14px; line-height: 1.6; padding-left: 4px;">${ativ.descricao_atividade}</p>` 
+            ${ativ.descricao_atividade
+              ? `<p style="margin: 0; color: var(--inactive-color); font-size: 14px; line-height: 1.6; padding-left: 4px;">${ativ.descricao_atividade}</p>`
               : '<p style="margin: 0; color: var(--inactive-color); font-size: 14px; font-style: italic; padding-left: 4px;">Sem descrição</p>'
             }
           </div>
@@ -31928,7 +31982,7 @@ window.preloadLocaisEstoqueCache = async function preloadLocaisEstoqueCache(forc
             <i class="fa-solid fa-trash"></i>
           </button>
         `;
-        
+
         // Hover effects no card
         card.addEventListener('mouseenter', () => {
           card.style.borderColor = '#10b981';
@@ -31940,7 +31994,7 @@ window.preloadLocaisEstoqueCache = async function preloadLocaisEstoqueCache(forc
           card.style.boxShadow = '0 2px 4px rgba(0,0,0,0.05)';
           card.style.transform = 'translateY(0)';
         });
-        
+
         // Hover effect no botão delete
         const deleteBtn = card.querySelector('.btn-delete-atividade');
         deleteBtn.addEventListener('mouseenter', () => {
@@ -31951,31 +32005,31 @@ window.preloadLocaisEstoqueCache = async function preloadLocaisEstoqueCache(forc
           deleteBtn.style.transform = 'scale(1)';
           deleteBtn.style.boxShadow = '0 2px 6px rgba(239, 68, 68, 0.3)';
         });
-        
+
         container.appendChild(card);
       });
-      
+
       // Event listeners para botões de deletar
       container.querySelectorAll('.btn-delete-atividade').forEach(btn => {
         btn.addEventListener('click', async () => {
           const id = btn.dataset.id;
           if (!confirm('Tem certeza que deseja remover esta atividade?')) return;
-          
+
           try {
             const res = await fetch(`${API_BASE}/api/engenharia/atividades/${id}`, {
               method: 'DELETE'
             });
-            
+
             if (!res.ok) throw new Error('Erro ao deletar');
-            
+
             await loadAtividades(familiaAtualAtividades);
-            
+
           } catch (e) {
             alert('Erro ao remover: ' + (e.message || e));
           }
         });
       });
-      
+
       if (infoDiv) {
         infoDiv.style.display = 'flex';
         infoDiv.innerHTML = `
@@ -31985,9 +32039,9 @@ window.preloadLocaisEstoqueCache = async function preloadLocaisEstoqueCache(forc
           </div>
         `;
       }
-      
+
       console.log(`[Atividades] ${atividades.length} atividade(s) carregada(s) para família ${familiaCodigo}`);
-      
+
     } catch (e) {
       console.error('[Atividades] Erro ao carregar:', e);
       container.innerHTML = `<div style="padding:20px; text-align:center; color:red;">Erro: ${e.message}</div>`;
@@ -31995,7 +32049,7 @@ window.preloadLocaisEstoqueCache = async function preloadLocaisEstoqueCache(forc
       if (spinner) spinner.style.display = 'none';
     }
   }
-  
+
   // Modal de adicionar atividade
   const modal = document.getElementById('modalAtividade');
   const btnAdd = document.getElementById('addAtividadeBtn');
@@ -32004,43 +32058,43 @@ window.preloadLocaisEstoqueCache = async function preloadLocaisEstoqueCache(forc
   const btnSave = document.getElementById('saveModalAtividade');
   const inputNome = document.getElementById('inputNomeAtividade');
   const inputDesc = document.getElementById('inputDescricaoAtividade');
-  
+
   function abrirModal() {
     if (!familiaAtualAtividades) {
       alert('Selecione uma família primeiro!');
       return;
     }
-    
+
     inputNome.value = '';
     inputDesc.value = '';
     modal.style.display = 'block';
     inputNome.focus();
   }
-  
+
   function fecharModal() {
     modal.style.display = 'none';
   }
-  
+
   async function salvarAtividade() {
     const nome = inputNome.value.trim();
     const descricao = inputDesc.value.trim();
-    
+
     if (!nome) {
       alert('O nome da atividade é obrigatório!');
       inputNome.focus();
       return;
     }
-    
+
     if (!familiaAtualAtividades) {
       alert('Nenhuma família selecionada!');
       fecharModal();
       return;
     }
-    
+
     try {
       btnSave.disabled = true;
       btnSave.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Salvando...';
-      
+
       const res = await fetch(`${API_BASE}/api/engenharia/atividades`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -32051,15 +32105,15 @@ window.preloadLocaisEstoqueCache = async function preloadLocaisEstoqueCache(forc
           ordem: 0
         })
       });
-      
+
       if (!res.ok) throw new Error('Erro ao salvar atividade');
-      
+
       const json = await res.json();
       console.log('[Atividades] Atividade criada:', json.atividade);
-      
+
       fecharModal();
       await loadAtividades(familiaAtualAtividades);
-      
+
     } catch (e) {
       alert('Erro ao salvar: ' + (e.message || e));
     } finally {
@@ -32067,20 +32121,20 @@ window.preloadLocaisEstoqueCache = async function preloadLocaisEstoqueCache(forc
       btnSave.innerHTML = '<i class="fa-solid fa-save"></i> Salvar';
     }
   }
-  
+
   // Event listeners
   if (btnAdd) btnAdd.addEventListener('click', abrirModal);
   if (btnClose) btnClose.addEventListener('click', fecharModal);
   if (btnCancel) btnCancel.addEventListener('click', fecharModal);
   if (btnSave) btnSave.addEventListener('click', salvarAtividade);
-  
+
   // Fecha modal ao clicar fora
   if (modal) {
     modal.addEventListener('click', (e) => {
       if (e.target === modal) fecharModal();
     });
   }
-  
+
   // Enter no input nome salva
   if (inputNome) {
     inputNome.addEventListener('keypress', (e) => {
@@ -32090,7 +32144,7 @@ window.preloadLocaisEstoqueCache = async function preloadLocaisEstoqueCache(forc
       }
     });
   }
-  
+
   // Listener para mudança de família (reutiliza o select de campos obrigatórios)
   const familiaSelect = document.getElementById('familiaConfigSelect');
   if (familiaSelect) {
@@ -32099,10 +32153,10 @@ window.preloadLocaisEstoqueCache = async function preloadLocaisEstoqueCache(forc
       loadAtividades(familiaCodigo);
     });
   }
-  
+
   // Inicializa com mensagem padrão
   loadAtividades('');
-  
+
 })();
 
 // ===== ATIVIDADES DE COMPRAS =====
@@ -32144,8 +32198,8 @@ window.preloadLocaisEstoqueCache = async function preloadLocaisEstoqueCache(forc
               <span style=\"background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%); color: white; padding: 4px 12px; border-radius: 8px; font-size: 13px; font-weight: 600; box-shadow: 0 2px 6px rgba(245, 158, 11, 0.3);\">#${idx + 1}</span>
               <strong style=\"font-size: 16px; color: var(--content-title-color); font-weight: 600;\">${ativ.nome_atividade}</strong>
             </div>
-            ${ativ.descricao_atividade 
-              ? `<p style=\"margin: 0; color: var(--inactive-color); font-size: 14px; line-height: 1.6; padding-left: 4px;\">${ativ.descricao_atividade}</p>` 
+            ${ativ.descricao_atividade
+              ? `<p style=\"margin: 0; color: var(--inactive-color); font-size: 14px; line-height: 1.6; padding-left: 4px;\">${ativ.descricao_atividade}</p>`
               : '<p style="margin: 0; color: var(--inactive-color); font-size: 14px; font-style: italic; padding-left: 4px;">Sem descrição</p>'
             }
           </div>
@@ -32344,7 +32398,7 @@ window.preloadLocaisEstoqueCache = async function preloadLocaisEstoqueCache(forc
     atividades.forEach((a, idx) => {
       const card = document.createElement('div');
       card.className = 'check-proj-item';
-      
+
       // Define cor da borda: azul para atividades específicas, cinza para da família
       const borderColor = a.origem === 'produto' ? '#3b82f6' : 'var(--border-color)';
       card.style.cssText = `border:2px solid ${borderColor}; border-radius:10px; padding:12px; background:var(--content-bg); display:flex; gap:12px; align-items:flex-start;`;
@@ -32355,9 +32409,9 @@ window.preloadLocaisEstoqueCache = async function preloadLocaisEstoqueCache(forc
       const prazoDisplay = formatDateInput(a.prazo);
       const autorDisplay = a.autor || '-';
       const respDisplay = a.responsavel || '-';
-      
+
       // Badge "ESPECÍFICA" para atividades do produto
-      const badgeEspecifica = a.origem === 'produto' 
+      const badgeEspecifica = a.origem === 'produto'
         ? '<span style="background:#3b82f6; color:#fff; padding:2px 8px; border-radius:6px; font-size:11px; font-weight:600; margin-left:8px;">ESPECÍFICA</span>'
         : '';
 
@@ -32454,7 +32508,7 @@ window.preloadLocaisEstoqueCache = async function preloadLocaisEstoqueCache(forc
       const resFamilia = await fetch(urlFamilia);
       if (!resFamilia.ok) throw new Error('Falha ao carregar checklist da família');
       const atividadesFamilia = await resFamilia.json();
-      
+
       // Busca atividades específicas do produto
       const urlProduto = `${API_BASE}/api/engenharia/atividades-produto/${encodeURIComponent(codigo)}`;
       const resProduto = await fetch(urlProduto);
@@ -32463,16 +32517,16 @@ window.preloadLocaisEstoqueCache = async function preloadLocaisEstoqueCache(forc
         const data = await resProduto.json();
         atividadesProduto = data.atividades || [];
       }
-      
+
       // Mescla as atividades: da família + específicas do produto
       // Marca as atividades específicas com um flag para diferenciar visualmente
       const atividadesMescladas = [
         ...atividadesFamilia.map(a => ({ ...a, origem: 'familia' })),
         ...atividadesProduto.map(a => ({ ...a, atividade_id: null, atividade_produto_id: a.id, origem: 'produto' }))
       ];
-      
+
       await renderLista(atividadesMescladas);
-      
+
       if (infoEl()) {
         const totalFamilia = atividadesFamilia.length;
         const totalProduto = atividadesProduto.length;
@@ -32497,7 +32551,7 @@ window.preloadLocaisEstoqueCache = async function preloadLocaisEstoqueCache(forc
     // Separar atividades da família e específicas do produto
     const atividadesFamilia = [];
     const atividadesProduto = [];
-    
+
     items.forEach(card => {
       const origem = card.dataset.origem;
       const data = {
@@ -32508,7 +32562,7 @@ window.preloadLocaisEstoqueCache = async function preloadLocaisEstoqueCache(forc
         autor: card.querySelector('.sel-autor')?.value || null,
         prazo: card.querySelector('.inp-prazo')?.value || null
       };
-      
+
       if (origem === 'produto') {
         atividadesProduto.push({
           atividade_produto_id: Number(card.dataset.atividadeId),
@@ -32532,7 +32586,7 @@ window.preloadLocaisEstoqueCache = async function preloadLocaisEstoqueCache(forc
         });
         if (!res.ok) throw new Error('Falha ao salvar atividades da família');
       }
-      
+
       // Salvar atividades específicas do produto
       if (atividadesProduto.length > 0) {
         const res = await fetch(`${API_BASE}/api/engenharia/atividade-produto-status/bulk`, {
@@ -32542,7 +32596,7 @@ window.preloadLocaisEstoqueCache = async function preloadLocaisEstoqueCache(forc
         });
         if (!res.ok) throw new Error('Falha ao salvar atividades específicas');
       }
-      
+
       // reload to reflect timestamps
       await loadCheckProj();
       alert('Checklist salvo com sucesso.');
@@ -32561,7 +32615,7 @@ window.preloadLocaisEstoqueCache = async function preloadLocaisEstoqueCache(forc
     const active = document.querySelector('#produtoTabs .main-header .nav-card.active[data-target="checkProjTab"]');
     if (active) loadCheckProj();
   });
-  
+
   // === MODAL: Nova Tarefa do Produto ===
   const modal = document.getElementById('modalNovaTarefaProduto');
   const btnNovaTarefa = document.getElementById('checkProjNovaTarefaBtn');
@@ -32570,7 +32624,7 @@ window.preloadLocaisEstoqueCache = async function preloadLocaisEstoqueCache(forc
   const btnSalvar = document.getElementById('modalNovaTarefaSalvar');
   const inputDescricao = document.getElementById('novaTarefaDescricao');
   const inputObs = document.getElementById('novaTarefaObs');
-  
+
   function abrirModal() {
     if (!window.currentProdutoCodigo) {
       alert('Nenhum produto selecionado');
@@ -32580,29 +32634,29 @@ window.preloadLocaisEstoqueCache = async function preloadLocaisEstoqueCache(forc
     if (inputObs) inputObs.value = '';
     if (modal) modal.style.display = 'flex';
   }
-  
+
   function fecharModal() {
     if (modal) modal.style.display = 'none';
   }
-  
+
   async function salvarNovaTarefa() {
     const descricao = inputDescricao?.value.trim();
     const observacoes = inputObs?.value.trim();
-    
+
     if (!descricao) {
       alert('Por favor, informe a descrição da tarefa');
       return;
     }
-    
+
     if (!window.currentProdutoCodigo) {
       alert('Nenhum produto selecionado');
       return;
     }
-    
+
     try {
       btnSalvar.disabled = true;
       btnSalvar.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Salvando...';
-      
+
       const resp = await fetch('/api/engenharia/atividade-produto', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -32613,17 +32667,17 @@ window.preloadLocaisEstoqueCache = async function preloadLocaisEstoqueCache(forc
           observacoes
         })
       });
-      
+
       if (!resp.ok) throw new Error('Erro ao criar atividade');
-      
+
       const data = await resp.json();
       console.log('[CheckProj] Nova atividade criada:', data);
-      
+
       fecharModal();
-      
+
       // Recarrega a lista para mostrar a nova atividade
       loadCheckProj();
-      
+
       alert('Tarefa criada com sucesso!');
     } catch (err) {
       console.error('[CheckProj] Erro ao salvar tarefa:', err);
@@ -32633,19 +32687,19 @@ window.preloadLocaisEstoqueCache = async function preloadLocaisEstoqueCache(forc
       btnSalvar.innerHTML = '<i class="fa-solid fa-check"></i> Adicionar';
     }
   }
-  
+
   if (btnNovaTarefa) btnNovaTarefa.addEventListener('click', abrirModal);
   if (btnFechar) btnFechar.addEventListener('click', fecharModal);
   if (btnCancelar) btnCancelar.addEventListener('click', fecharModal);
   if (btnSalvar) btnSalvar.addEventListener('click', salvarNovaTarefa);
-  
+
   // Fechar modal ao clicar fora
   if (modal) {
     modal.addEventListener('click', (e) => {
       if (e.target === modal) fecharModal();
     });
   }
-  
+
   // Fechar modal com ESC
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape' && modal && modal.style.display === 'flex') {
@@ -32687,27 +32741,27 @@ window.preloadLocaisEstoqueCache = async function preloadLocaisEstoqueCache(forc
       computeAndRenderProgress([]);
       return;
     }
-    
+
     atividades.forEach((a, idx) => {
       const card = document.createElement('div');
       card.className = 'check-compras-item';
-      
+
       // Define cor da borda: laranja para atividades específicas, cinza para da família
       const borderColor = a.origem === 'produto' ? '#f59e0b' : 'var(--border-color)';
       card.style.cssText = `border:2px solid ${borderColor}; border-radius:10px; padding:12px; background:var(--content-bg); display:flex; gap:12px; align-items:flex-start;`;
-      
+
       // Nome da atividade (usa nome_atividade para família, nome para produto)
       const nomeAtividade = a.nome_atividade || a.nome || 'Sem nome';
       const descricaoAtividade = a.descricao_atividade || a.observacoes || '';
       const prazoDisplay = formatDateInput(a.prazo);
       const autorDisplay = a.autor || '-';
       const respDisplay = a.responsavel || '-';
-      
+
       // Badge "ESPECÍFICA" para atividades do produto
-      const badgeEspecifica = a.origem === 'produto' 
+      const badgeEspecifica = a.origem === 'produto'
         ? '<span style="background:#f59e0b; color:#fff; padding:2px 8px; border-radius:6px; font-size:11px; font-weight:600; margin-left:8px;">ESPECÍFICA</span>'
         : '';
-      
+
       card.innerHTML = `
         <input type="checkbox" class="chk-concluido" ${a.concluido ? 'checked' : ''} style="width:18px; height:18px; margin-top:3px; accent-color:#f59e0b;"/>
         <div style="flex:1; min-width:0;">
@@ -32754,7 +32808,7 @@ window.preloadLocaisEstoqueCache = async function preloadLocaisEstoqueCache(forc
 
       if (selResp) selResp.value = a.responsavel || '';
       if (selAutor) selAutor.value = a.autor || '';
-      
+
       const updateLocal = () => {
         a.concluido = chk.checked;
         a.nao_aplicavel = chkNa.checked;
@@ -32767,19 +32821,19 @@ window.preloadLocaisEstoqueCache = async function preloadLocaisEstoqueCache(forc
         statusData.textContent = a.concluido && a.data_conclusao ? new Date(a.data_conclusao).toLocaleString('pt-BR') : '';
         computeAndRenderProgress(atividades);
       };
-      
+
       chk.addEventListener('change', updateLocal);
       chkNa.addEventListener('change', updateLocal);
       inpObs.addEventListener('change', updateLocal);
       selResp?.addEventListener('change', updateLocal);
       selAutor?.addEventListener('change', updateLocal);
       inpPrazo?.addEventListener('change', updateLocal);
-      
+
       card.dataset.atividadeId = a.atividade_id || a.id;
       card.dataset.origem = a.origem;
       root.appendChild(card);
     });
-    
+
     computeAndRenderProgress(atividades);
   }
 
@@ -32800,7 +32854,7 @@ window.preloadLocaisEstoqueCache = async function preloadLocaisEstoqueCache(forc
       const resFamilia = await fetch(urlFamilia);
       if (!resFamilia.ok) throw new Error('Falha ao carregar checklist da família');
       const atividadesFamilia = await resFamilia.json();
-      
+
       // Busca atividades específicas do produto
       const urlProduto = `${API_BASE}/api/compras/atividades-produto/${encodeURIComponent(codigo)}`;
       const resProduto = await fetch(urlProduto);
@@ -32809,16 +32863,16 @@ window.preloadLocaisEstoqueCache = async function preloadLocaisEstoqueCache(forc
         const data = await resProduto.json();
         atividadesProduto = data.atividades || [];
       }
-      
+
       // Mescla as atividades: da família + específicas do produto
       // Marca as atividades específicas com um flag para diferenciar visualmente
       const atividadesMescladas = [
         ...atividadesFamilia.map(a => ({ ...a, origem: 'familia' })),
         ...atividadesProduto.map(a => ({ ...a, atividade_id: null, atividade_produto_id: a.id, origem: 'produto' }))
       ];
-      
+
       await renderLista(atividadesMescladas);
-      
+
       if (infoEl()) {
         const totalFamilia = atividadesFamilia.length;
         const totalProduto = atividadesProduto.length;
@@ -32843,7 +32897,7 @@ window.preloadLocaisEstoqueCache = async function preloadLocaisEstoqueCache(forc
     // Separar atividades da família e específicas do produto
     const atividadesFamilia = [];
     const atividadesProduto = [];
-    
+
     items.forEach(card => {
       const origem = card.dataset.origem;
       const data = {
@@ -32854,7 +32908,7 @@ window.preloadLocaisEstoqueCache = async function preloadLocaisEstoqueCache(forc
         autor: card.querySelector('.sel-autor')?.value || null,
         prazo: card.querySelector('.inp-prazo')?.value || null
       };
-      
+
       if (origem === 'produto') {
         atividadesProduto.push({
           atividade_produto_id: Number(card.dataset.atividadeId),
@@ -32878,7 +32932,7 @@ window.preloadLocaisEstoqueCache = async function preloadLocaisEstoqueCache(forc
         });
         if (!res.ok) throw new Error('Falha ao salvar atividades da família');
       }
-      
+
       // Salvar atividades específicas do produto
       if (atividadesProduto.length > 0) {
         const res = await fetch(`${API_BASE}/api/compras/atividade-produto-status/bulk`, {
@@ -32888,7 +32942,7 @@ window.preloadLocaisEstoqueCache = async function preloadLocaisEstoqueCache(forc
         });
         if (!res.ok) throw new Error('Falha ao salvar atividades específicas');
       }
-      
+
       // reload to reflect timestamps
       await loadCheckCompras();
       alert('Checklist de compras salvo com sucesso.');
@@ -32905,7 +32959,7 @@ window.preloadLocaisEstoqueCache = async function preloadLocaisEstoqueCache(forc
     const active = document.querySelector('#produtoTabs .main-header .nav-card.active[data-target="checkComprasTab"]');
     if (active) loadCheckCompras();
   });
-  
+
   // === MODAL: Nova Tarefa de Compras do Produto ===
   const modal = document.getElementById('modalNovaTarefaCompras');
   const btnNovaTarefa = document.getElementById('checkComprasNovaTarefaBtn');
@@ -32914,7 +32968,7 @@ window.preloadLocaisEstoqueCache = async function preloadLocaisEstoqueCache(forc
   const btnSalvar = document.getElementById('modalNovaTarefaComprasSalvar');
   const inputDescricao = document.getElementById('novaTarefaComprasDescricao');
   const inputObs = document.getElementById('novaTarefaComprasObs');
-  
+
   function abrirModal() {
     if (!window.currentProdutoCodigo) {
       alert('Nenhum produto selecionado');
@@ -32924,29 +32978,29 @@ window.preloadLocaisEstoqueCache = async function preloadLocaisEstoqueCache(forc
     if (inputObs) inputObs.value = '';
     if (modal) modal.style.display = 'flex';
   }
-  
+
   function fecharModal() {
     if (modal) modal.style.display = 'none';
   }
-  
+
   async function salvarNovaTarefa() {
     const descricao = inputDescricao?.value.trim();
     const observacoes = inputObs?.value.trim();
-    
+
     if (!descricao) {
       alert('Por favor, informe a descrição da tarefa');
       return;
     }
-    
+
     if (!window.currentProdutoCodigo) {
       alert('Nenhum produto selecionado');
       return;
     }
-    
+
     try {
       btnSalvar.disabled = true;
       btnSalvar.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Salvando...';
-      
+
       const resp = await fetch('/api/compras/atividade-produto', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -32957,17 +33011,17 @@ window.preloadLocaisEstoqueCache = async function preloadLocaisEstoqueCache(forc
           observacoes
         })
       });
-      
+
       if (!resp.ok) throw new Error('Erro ao criar atividade');
-      
+
       const data = await resp.json();
       console.log('[CheckCompras] Nova atividade criada:', data);
-      
+
       fecharModal();
-      
+
       // Recarrega a lista para mostrar a nova atividade
       loadCheckCompras();
-      
+
       alert('Tarefa criada com sucesso!');
     } catch (err) {
       console.error('[CheckCompras] Erro ao salvar tarefa:', err);
@@ -32977,19 +33031,19 @@ window.preloadLocaisEstoqueCache = async function preloadLocaisEstoqueCache(forc
       btnSalvar.innerHTML = '<i class="fa-solid fa-check"></i> Adicionar';
     }
   }
-  
+
   if (btnNovaTarefa) btnNovaTarefa.addEventListener('click', abrirModal);
   if (btnFechar) btnFechar.addEventListener('click', fecharModal);
   if (btnCancelar) btnCancelar.addEventListener('click', fecharModal);
   if (btnSalvar) btnSalvar.addEventListener('click', salvarNovaTarefa);
-  
+
   // Fechar modal ao clicar fora
   if (modal) {
     modal.addEventListener('click', (e) => {
       if (e.target === modal) fecharModal();
     });
   }
-  
+
   // Fechar modal com ESC
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape' && modal && modal.style.display === 'flex') {
@@ -33016,14 +33070,51 @@ window.preloadLocaisEstoqueCache = async function preloadLocaisEstoqueCache(forc
     return String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase()
       .replace(/[^A-Z0-9 .,/()\-]/g, ' ').replace(/\s+/g, ' ').trim();
   }
+  function normalizarCampoDescricao(input) {
+    const valorOriginal = input.value;
+    const inicioOriginal = input.selectionStart ?? valorOriginal.length;
+    const fimOriginal = input.selectionEnd ?? inicioOriginal;
+    const valorNormalizado = normalizarDescricao(valorOriginal);
+    if (valorNormalizado === valorOriginal) return;
+    input.value = valorNormalizado;
+    input.setSelectionRange(
+      normalizarDescricao(valorOriginal.slice(0, inicioOriginal)).length,
+      normalizarDescricao(valorOriginal.slice(0, fimOriginal)).length
+    );
+  }
   function familiaAtual() {
     const option = el('cadProdFamilia').selectedOptions[0];
-    return option?.value ? { codigo: option.value, tipo: option.dataset.tipo || 'MP', nome: option.textContent } : null;
+    const nome = option?.dataset.nome || option?.textContent || '';
+    const tipo = normalizarDescricao(nome) === 'MOVEIS' ? 'AI' : (option?.dataset.tipo || 'MP');
+    return option?.value ? {
+      codigo: option.value,
+      tipo,
+      nome
+    } : null;
+  }
+  function familiaUsaFaixaPadrao(familia) {
+    const codigo = String(familia?.codigo || '').padStart(2, '0');
+    const tipo = String(familia?.tipo || '').toUpperCase();
+    const nome = normalizarDescricao(familia?.nome || '');
+    return (codigo === '09' && tipo === 'MC' && nome === 'MATERIAIS DE USO E CONSUMO INDUSTRIAL')
+      || (codigo === '09' && tipo === 'AI' && nome === 'MOVEIS');
+  }
+  function atualizarFiltroPorFamilia() {
+    const campoFiltro = el('cadProdFiltro').closest('.cad-prod-field');
+    const ocultar = familiaUsaFaixaPadrao(familiaAtual());
+    campoFiltro.hidden = ocultar;
+    if (ocultar) el('cadProdFiltro').value = '';
   }
   function payloadBase() {
     const familia = familiaAtual();
     if (!familia) throw new Error('Selecione uma familia.');
-    return { familia_codigo: familia.codigo, familia_tipo: familia.tipo, origem: state.origem, filtro: el('cadProdFiltro').value.trim() };
+    return {
+      familia_codigo: familia.codigo,
+      familia_tipo: familia.tipo,
+      familia_nome: familia.nome,
+      origem: state.origem,
+      filtro: el('cadProdFiltro').value.trim()
+    };
   }
   function tipoPadraoFamilia(familia) {
     const codigo = String(familia?.codigo || '').padStart(2, '0');
@@ -33190,6 +33281,7 @@ window.preloadLocaisEstoqueCache = async function preloadLocaisEstoqueCache(forc
   el('cadProdFamilia').addEventListener('change', () => {
     resetCodigo(); state.lote = []; renderLote();
     const familia = familiaAtual();
+    atualizarFiltroPorFamilia();
     const tipo = tipoPadraoFamilia(familia);
     if (tipo && Array.from(el('cadProdTipo').options).some(option => option.value === tipo)) el('cadProdTipo').value = tipo;
   });
@@ -33205,6 +33297,10 @@ window.preloadLocaisEstoqueCache = async function preloadLocaisEstoqueCache(forc
   });
   el('cadProdLotePreview').addEventListener('click', gerarLote);
   el('cadProdLoteCadastrar').addEventListener('click', cadastrarLote);
+  el('cadProdDescricao').addEventListener('input', event => {
+    normalizarCampoDescricao(event.currentTarget);
+    resetCodigo();
+  });
   const fotoDrop = el('cadProdFotoDrop');
   ['dragenter', 'dragover'].forEach(tipo => fotoDrop.addEventListener(tipo, e => { e.preventDefault(); fotoDrop.classList.add('is-dragging'); }));
   ['dragleave', 'drop'].forEach(tipo => fotoDrop.addEventListener(tipo, e => { e.preventDefault(); fotoDrop.classList.remove('is-dragging'); }));
@@ -33277,12 +33373,12 @@ window.preloadLocaisEstoqueCache = async function preloadLocaisEstoqueCache(forc
   btnNovoProduto.addEventListener('click', async (e) => {
     e.preventDefault();
     e.stopPropagation();
-    
+
     // Adiciona spinner no botão
     const originalHTML = btnNovoProduto.innerHTML;
     btnNovoProduto.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Carregando...';
     btnNovoProduto.disabled = true;
-    
+
     try {
       await Promise.all([loadFamilias(), loadUnidades()]);
       updateCodigoPreview();
@@ -33307,18 +33403,18 @@ window.preloadLocaisEstoqueCache = async function preloadLocaisEstoqueCache(forc
   if (selectOrigem) { selectOrigem.style.display = ''; selectOrigem.required = true; selectOrigem.value=''; }
   if (inputResto) { inputResto.style.display = 'none'; inputResto.required = false; inputResto.value=''; }
   if (restoHelp) restoHelp.style.display = 'none';
-    
+
     // Limpa status
     const statusDiv = document.getElementById('statusCriacaoProduto');
     const statusSpinner = document.getElementById('statusSpinner');
     const statusTexto = document.getElementById('statusTexto');
     const statusDetalhes = document.getElementById('statusDetalhes');
-    
+
     if (statusDiv) statusDiv.style.display = 'none';
     if (statusSpinner) statusSpinner.style.display = 'none';
     if (statusTexto) statusTexto.textContent = '';
     if (statusDetalhes) statusDetalhes.textContent = '';
-    
+
     // Reabilita botões
     const btnCancelar = document.getElementById('btnCancelarModal');
     const btnCriar = document.getElementById('btnCriarProduto');
@@ -33342,22 +33438,22 @@ window.preloadLocaisEstoqueCache = async function preloadLocaisEstoqueCache(forc
         const errorText = await resp.text();
         throw new Error(`Status ${resp.status}: ${errorText}`);
       }
-      
+
       const result = await resp.json();
       const data = result.familias || result;
-      
+
       if (!Array.isArray(data)) {
         throw new Error('Resposta da API não contém um array de famílias');
       }
-      
+
       selectFamilia.innerHTML = '';
-      
+
       // Adiciona opção em branco
       const optBlank = document.createElement('option');
       optBlank.value = '';
       optBlank.textContent = '-- Selecione uma família --';
       selectFamilia.appendChild(optBlank);
-      
+
       data.forEach(fam => {
         const opt = document.createElement('option');
         opt.value = fam.cod || fam.codigo;
@@ -33365,7 +33461,7 @@ window.preloadLocaisEstoqueCache = async function preloadLocaisEstoqueCache(forc
         opt.dataset.tipo = fam.tipo || '';
         selectFamilia.appendChild(opt);
       });
-      
+
       console.log(`${data.length} famílias carregadas com sucesso`);
     } catch (err) {
       console.error('Erro ao carregar famílias:', err);
@@ -33377,35 +33473,35 @@ window.preloadLocaisEstoqueCache = async function preloadLocaisEstoqueCache(forc
   async function loadUnidades() {
     const selectUnidade = document.getElementById('novoProd_unidade');
     if (!selectUnidade) return;
-    
+
     try {
       const resp = await fetch(`${API_BASE}/api/produtos/unidades`, {
         method: 'GET',
         credentials: 'include'
       });
-      
+
       if (!resp.ok) {
         throw new Error(`Erro ao buscar unidades: ${resp.status}`);
       }
-      
+
       const result = await resp.json();
       const unidades = result.unidade_cadastro || [];
-      
+
       selectUnidade.innerHTML = '';
-      
+
       // Adiciona opção em branco
       const optBlank = document.createElement('option');
       optBlank.value = '';
       optBlank.textContent = '-- Selecione uma unidade --';
       selectUnidade.appendChild(optBlank);
-      
+
       unidades.forEach(un => {
         const opt = document.createElement('option');
         opt.value = un.codigo;
         opt.textContent = `${un.codigo} - ${un.descricao}`;
         selectUnidade.appendChild(opt);
       });
-      
+
       console.log(`${unidades.length} unidades carregadas com sucesso`);
     } catch (err) {
       console.error('Erro ao carregar unidades:', err);
@@ -33416,7 +33512,7 @@ window.preloadLocaisEstoqueCache = async function preloadLocaisEstoqueCache(forc
   // Ao selecionar família, atualiza dados e preview
   selectFamilia?.addEventListener('change', () => {
     const selectedOpt = selectFamilia.options[selectFamilia.selectedIndex];
-    
+
     if (!selectedOpt || !selectedOpt.value) {
       familiaAtual = { tipo: '', codigo: '', nome: '' };
       spanFamiliaTipo.textContent = '-';
@@ -33465,7 +33561,7 @@ window.preloadLocaisEstoqueCache = async function preloadLocaisEstoqueCache(forc
         // Pega apenas a primeira palavra
         value = value.split(/\s+/)[0];
         e.target.value = value;
-        
+
         // Mostra aviso visual temporário
         e.target.style.borderColor = '#f87171';
         setTimeout(() => {
@@ -33477,19 +33573,19 @@ window.preloadLocaisEstoqueCache = async function preloadLocaisEstoqueCache(forc
 
   formNovoProduto.addEventListener('submit', async (e) => {
     e.preventDefault();
-    
+
     if (!familiaAtual.codigo || !familiaAtual.tipo) {
       alert('Selecione uma família antes de salvar!');
       return;
     }
-    
+
     const formData = new FormData(formNovoProduto);
     const payload = {};
-    
+
     for (let [key, value] of formData.entries()) {
       payload[key] = value;
     }
-    
+
     // Valida descrição principal (apenas uma palavra)
     if (payload.descricao_principal) {
       const palavras = payload.descricao_principal.trim().split(/\s+/);
@@ -33498,13 +33594,13 @@ window.preloadLocaisEstoqueCache = async function preloadLocaisEstoqueCache(forc
         return;
       }
     }
-    
+
     // Valida unidade
     if (!payload.unidade) {
       alert('Selecione uma unidade!');
       return;
     }
-    
+
   // Monta código base (dois fluxos)
   const prefixoEhLetra = familiaPrefixoAlfabetico();
   let codigoCompleto = '';
@@ -33512,7 +33608,7 @@ window.preloadLocaisEstoqueCache = async function preloadLocaisEstoqueCache(forc
   let cod = '';
   let tipo = '';
   let origemChar = '';
-    
+
     const statusDiv = document.getElementById('statusCriacaoProduto');
     const statusSpinner = document.getElementById('statusSpinner');
     const statusTexto = document.getElementById('statusTexto');
@@ -33531,7 +33627,7 @@ window.preloadLocaisEstoqueCache = async function preloadLocaisEstoqueCache(forc
     if (statusDetalhes) {
       statusDetalhes.textContent = 'Enviando dados iniciais';
     }
-    
+
     try {
   let sequencial = '';
   let totalRegistros = null; // usado apenas no fluxo sequencial numérico
@@ -33568,7 +33664,7 @@ window.preloadLocaisEstoqueCache = async function preloadLocaisEstoqueCache(forc
         sequencial = String(totalRegistros + 1).padStart(5, '0');
         codigoCompleto = `${cod}.${tipo}.${origemChar}.${sequencial}`;
       }
-      
+
       // Debug após definição de todas variáveis
       console.log('=== DEBUG CÓDIGO ===');
       console.log('familiaAtual:', familiaAtual);
@@ -33584,7 +33680,7 @@ window.preloadLocaisEstoqueCache = async function preloadLocaisEstoqueCache(forc
       // Monta descrição única para Omie: "Em criação - PALAVRA - 02622"
   const descricaoPalavra = payload.descricao_principal.trim().toUpperCase();
   const descricaoOmie = `Em criação - ${descricaoPalavra}` + (codigoCompleto ? ` - ${codigoCompleto.slice(-5)}` : '');
-      
+
       if (!prefixoEhLetra) {
         console.log('=== DEBUG SEQUENCIAL ===');
         console.log('totalRegistros:', totalRegistros);
@@ -33596,7 +33692,7 @@ window.preloadLocaisEstoqueCache = async function preloadLocaisEstoqueCache(forc
         console.log('codigoCompleto:', codigoCompleto);
         console.log('descricaoOmie:', descricaoOmie);
       }
-      
+
       // Envia produto para a Omie
       const incluirResp = await fetch(`${API_BASE}/api/produtos/incluir-omie`, {
         method: 'POST',
@@ -33609,7 +33705,7 @@ window.preloadLocaisEstoqueCache = async function preloadLocaisEstoqueCache(forc
           unidade: payload.unidade
         })
       });
-      
+
       console.log('=== DEBUG PAYLOAD OMIE ===');
       console.log('Enviando para Omie:', {
         codigo_produto_integracao: codigoCompleto,
@@ -33617,34 +33713,34 @@ window.preloadLocaisEstoqueCache = async function preloadLocaisEstoqueCache(forc
         descricao: descricaoOmie,
         unidade: payload.unidade
       });
-      
+
       if (!incluirResp.ok) {
         const errorData = await incluirResp.json();
         throw new Error(errorData.error || 'Erro ao incluir produto na Omie');
       }
-      
+
       const incluirData = await incluirResp.json();
-      
+
       console.log('Produto criado na Omie:', incluirData);
-      
+
       // Obtém o codigo_produto retornado pela Omie
       const codigoProdutoOmie = incluirData.codigo_produto;
-      
+
       if (!codigoProdutoOmie) {
         throw new Error('Omie não retornou o codigo_produto');
       }
-      
+
       // Desabilita botões durante o processo
       const btnCancelar = document.getElementById('btnCancelarModal');
       const btnCriar = document.getElementById('btnCriarProduto');
       if (btnCancelar) btnCancelar.disabled = true;
       if (btnCriar) btnCriar.disabled = true;
-      
+
       // Exibe status com spinner (MANTÉM VISÍVEL durante todo o processo)
       const statusSpinner = document.getElementById('statusSpinner');
       const statusTexto = document.getElementById('statusTexto');
       const statusDetalhes = document.getElementById('statusDetalhes');
-      
+
       if (statusDiv) {
         statusDiv.style.display = 'block';
         statusDiv.style.backgroundColor = '#dbeafe';
@@ -33658,29 +33754,29 @@ window.preloadLocaisEstoqueCache = async function preloadLocaisEstoqueCache(forc
       if (statusDetalhes) {
         statusDetalhes.textContent = 'Aguardando sincronização com Omie... (30s)';
       }
-      
+
       // Aguarda 30 segundos antes da primeira tentativa
       await new Promise(resolve => setTimeout(resolve, 30000));
-      
+
       // Tenta consultar o produto até 10 vezes com intervalo de 10s
       let tentativa = 1;
       let produtoEncontrado = null;
       const maxTentativas = 10;
-      
+
       while (tentativa <= maxTentativas && !produtoEncontrado) {
         if (statusDetalhes) {
           statusDetalhes.textContent = `🔄 Consultando produto na Omie... (tentativa ${tentativa}/${maxTentativas})`;
         }
-        
+
         try {
           const consultaResp = await fetch(`${API_BASE}/api/produtos/consultar-omie/${codigoProdutoOmie}`, {
             method: 'GET',
             credentials: 'include'
           });
-          
+
           if (consultaResp.ok) {
             const consultaData = await consultaResp.json();
-            
+
             if (consultaData.encontrado) {
               produtoEncontrado = consultaData;
               console.log('Produto encontrado na Omie:', consultaData);
@@ -33690,22 +33786,22 @@ window.preloadLocaisEstoqueCache = async function preloadLocaisEstoqueCache(forc
         } catch (err) {
           console.error(`Tentativa ${tentativa} falhou:`, err);
         }
-        
+
         // Aguarda 10 segundos antes da próxima tentativa
         if (tentativa < maxTentativas) {
           await new Promise(resolve => setTimeout(resolve, 10000));
         }
-        
+
         tentativa++;
       }
-      
+
       // Remove spinner SOMENTE após terminar todas as tentativas
       if (statusSpinner) statusSpinner.style.display = 'none';
-      
+
       // Reabilita botões
       if (btnCancelar) btnCancelar.disabled = false;
       if (btnCriar) btnCriar.disabled = false;
-      
+
       if (produtoEncontrado) {
         // Produto encontrado com sucesso
         if (statusDiv) {
@@ -33719,19 +33815,19 @@ window.preloadLocaisEstoqueCache = async function preloadLocaisEstoqueCache(forc
         if (statusDetalhes) {
           statusDetalhes.textContent = `Abrindo produto ${codigoCompleto}...`;
         }
-        
+
         // Aguarda 2 segundos para usuário ver a mensagem
         await new Promise(resolve => setTimeout(resolve, 2000));
-        
+
         // Fecha o modal
         closeModal();
-        
+
         // Aguarda modal fechar completamente
         await new Promise(resolve => setTimeout(resolve, 300));
-        
+
         // === USAR O MESMO FLUXO DO BOTÃO "ABRIR" ===
         console.log('[DEBUG] Abrindo produto:', codigoCompleto);
-        
+
         try {
           // 1) Mostra o bloco de produto e esconde outras páginas
           const prodTabs   = document.getElementById('produtoTabs');
@@ -33761,12 +33857,12 @@ window.preloadLocaisEstoqueCache = async function preloadLocaisEstoqueCache(forc
           } else {
             console.error('[DEBUG] window.loadDadosProduto não está disponível');
           }
-          
+
           // Alert de sucesso após carregar
           setTimeout(() => {
             alert(`✓ Produto criado e sincronizado com sucesso!\n\nCódigo: ${codigoCompleto}\nDescrição: ${descricaoPalavra}\nUnidade: ${payload.unidade}\nFamília: ${familiaAtual.nome}\nOrigem: ${payload.origem === '0' ? 'Nacional' : 'Importado'}`);
           }, 500);
-          
+
         } catch (err) {
           console.error('[DEBUG] Erro ao abrir produto:', err);
           const paneDadosOk = document.getElementById('dadosProduto');
@@ -33777,7 +33873,7 @@ window.preloadLocaisEstoqueCache = async function preloadLocaisEstoqueCache(forc
             alert('Produto criado com sucesso, mas houve um erro ao abrir os detalhes.\n\nCódigo: ' + codigoCompleto);
           }
         }
-        
+
       } else {
         // Não conseguiu encontrar após 10 tentativas
         if (statusDiv) {
@@ -33791,31 +33887,31 @@ window.preloadLocaisEstoqueCache = async function preloadLocaisEstoqueCache(forc
         if (statusDetalhes) {
           statusDetalhes.innerHTML = `Código: ${codigoCompleto}<br>Por favor, verifique manualmente na guia <strong>Lista de produtos</strong>`;
         }
-        
+
         // Aguarda 5 segundos e fecha o modal
         setTimeout(() => {
           closeModal();
           alert(`Produto criado, mas a sincronização está demorando.\n\nCódigo: ${codigoCompleto}\n\nPor favor, verifique manualmente na guia "Lista de produtos" em alguns minutos.`);
         }, 5000);
       }
-      
+
     } catch (err) {
       console.error('Erro ao criar produto:', err);
-      
+
       // Remove spinner
       const statusSpinner = document.getElementById('statusSpinner');
       if (statusSpinner) statusSpinner.style.display = 'none';
-      
+
       // Reabilita botões
       const btnCancelar = document.getElementById('btnCancelarModal');
       const btnCriar = document.getElementById('btnCriarProduto');
       if (btnCancelar) btnCancelar.disabled = false;
       if (btnCriar) btnCriar.disabled = false;
-      
+
       // Exibe erro no status
       const statusTexto = document.getElementById('statusTexto');
       const statusDetalhes = document.getElementById('statusDetalhes');
-      
+
       if (statusDiv) {
         statusDiv.style.display = 'block';
         statusDiv.style.backgroundColor = '#fee2e2';
@@ -33828,7 +33924,7 @@ window.preloadLocaisEstoqueCache = async function preloadLocaisEstoqueCache(forc
       if (statusDetalhes) {
         statusDetalhes.textContent = err.message;
       }
-      
+
       alert('Erro ao criar produto: ' + err.message);
     }
   });
@@ -33863,7 +33959,7 @@ headerLinks.forEach(link => {
 
     if (link.id === 'menu-registros') {
       if (window.openRegistros) window.openRegistros();
-      
+
     } else if (link.id === 'menu-inicio') {
 
   /* 1) fecha Kanban e Armazéns, se abertos */
@@ -33895,7 +33991,7 @@ if (mh) mh.style.display = 'none';
 
 
 
-    
+
   });
 });
 
@@ -33913,9 +34009,9 @@ function initComprasAnexo() {
   const preview = document.getElementById('modalComprasAnexoPreview');
   const nomeArquivo = document.getElementById('modalComprasAnexoNome');
   const btnRemover = document.getElementById('modalComprasAnexoRemover');
-  
+
   if (!inputFile || !btnAnexo) return;
-  
+
   // Clique no botão abre seletor de arquivo
   btnAnexo.addEventListener('click', () => inputFile.click());
 
@@ -33925,7 +34021,7 @@ function initComprasAnexo() {
     e.stopPropagation();
     inputFile.click();
   });
-  
+
   // Quando arquivo é selecionado
   inputFile.addEventListener('change', (e) => {
     const file = e.target.files[0];
@@ -33938,7 +34034,7 @@ function initComprasAnexo() {
       btnAnexo.style.borderColor = '#22c55e';
     }
   });
-  
+
   // Remover anexo
   btnRemover?.addEventListener('click', () => {
     comprasAnexoAtual = null;
@@ -33952,23 +34048,23 @@ function initComprasAnexo() {
 
 async function uploadComprasAnexo(file, numeroPedido, produtoCodigo) {
   if (!file) return null;
-  
+
   try {
     const formData = new FormData();
     const timestamp = Date.now();
     const fileName = `compras/${numeroPedido}/${produtoCodigo}_${timestamp}_${file.name}`;
-    
+
     formData.append('file', file);
     formData.append('path', fileName);
-    
+
     const response = await fetch('/api/upload/supabase', {
       method: 'POST',
       credentials: 'include',
       body: formData
     });
-    
+
     if (!response.ok) throw new Error('Erro ao fazer upload');
-    
+
     const data = await response.json();
     return data.url || data.path;
   } catch (err) {
@@ -34003,7 +34099,7 @@ function initComprasUI() {
       loadMinhasSolicitacoes();
     })
     .catch(err => console.warn('[COMPRAS] Falha ao carregar usuários ativos', err));
-  
+
   // Carrega status disponíveis para o select de etapas
   carregarStatusCompras();
 }
@@ -34013,30 +34109,30 @@ async function carregarStatusCompras() {
   try {
     const resp = await fetch('/api/compras/status', { credentials: 'include' });
     if (!resp.ok) throw new Error('Erro ao carregar status');
-    
+
     const data = await resp.json();
     const status = data.status || [];
-    
+
     const select = document.getElementById('modalComprasStatus');
     if (!select) return;
-    
+
     // Limpa opções existentes
     select.innerHTML = '';
-    
+
     // Adiciona todos os status
     status.forEach(s => {
       const option = document.createElement('option');
       option.value = s.nome;
       option.textContent = s.nome;
-      
+
       // Marca como selecionado se for o padrão
       if (s.nome === 'aguardando aprovação da requisição') {
         option.selected = true;
       }
-      
+
       select.appendChild(option);
     });
-    
+
     console.log('[COMPRAS] Status carregados:', status.length);
   } catch (err) {
     console.error('[COMPRAS] Erro ao carregar status:', err);
@@ -34049,21 +34145,21 @@ function initMinhasSolicitacoesFiltro() {
   const filtroOpcoes = document.getElementById('minhasComprasFiltroOpcoes');
   const filtroAplicar = document.getElementById('minhasComprasFiltroAplicar');
   const filtroLimpar = document.getElementById('minhasComprasFiltroLimpar');
-  
+
   if (!filtroBtn || !filtroDropdown || !filtroOpcoes || !filtroAplicar || !filtroLimpar) return;
-  
+
   // Estado do filtro
   let statusSelecionados = [];
-  
+
   // Carrega opções de status do banco
   fetch('/api/compras/status')
     .then(r => r.json())
     .then(data => {
       if (!data.ok || !data.status) return;
-      
+
       const statusList = data.status.map(s => s.nome);
       statusSelecionados = [...statusList]; // Inicializa com todos selecionados
-      
+
       // Renderiza checkboxes
       filtroOpcoes.innerHTML = statusList.map(status => `
         <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;color:#374151;">
@@ -34073,13 +34169,13 @@ function initMinhasSolicitacoesFiltro() {
       `).join('');
     })
     .catch(err => console.error('[COMPRAS] Erro ao carregar status para filtro:', err));
-  
+
   // Toggle dropdown
   filtroBtn.addEventListener('click', (e) => {
     e.stopPropagation();
     const isVisible = filtroDropdown.style.display !== 'none';
     filtroDropdown.style.display = isVisible ? 'none' : 'block';
-    
+
     // Posiciona dropdown abaixo do botão
     if (!isVisible) {
       const rect = filtroBtn.getBoundingClientRect();
@@ -34088,30 +34184,30 @@ function initMinhasSolicitacoesFiltro() {
       filtroDropdown.style.left = `${rect.left}px`;
     }
   });
-  
+
   // Fecha dropdown ao clicar fora
   document.addEventListener('click', (e) => {
     if (!filtroBtn.contains(e.target) && !filtroDropdown.contains(e.target)) {
       filtroDropdown.style.display = 'none';
     }
   });
-  
+
   // Aplicar filtro
   filtroAplicar.addEventListener('click', () => {
     const checkboxes = filtroOpcoes.querySelectorAll('.status-checkbox');
     const statusSelecionados = Array.from(checkboxes)
       .filter(cb => cb.checked)
       .map(cb => cb.value.toLowerCase());
-    
+
     loadMinhasSolicitacoes(statusSelecionados.length > 0 ? statusSelecionados : null);
     filtroDropdown.style.display = 'none';
   });
-  
+
   // Botão para ativar/desativar todos
   filtroLimpar.addEventListener('click', () => {
     const checkboxes = filtroOpcoes.querySelectorAll('.status-checkbox');
     const todosAtivos = Array.from(checkboxes).every(cb => cb.checked);
-    
+
     if (todosAtivos) {
       // Desativa todos
       checkboxes.forEach(cb => cb.checked = false);
@@ -34130,17 +34226,17 @@ function initMinhasSolicitacoesFiltro() {
   const filtroOpcoes = document.getElementById('minhasComprasFiltroOpcoes');
   const filtroAplicar = document.getElementById('minhasComprasFiltroAplicar');
   const filtroLimpar = document.getElementById('minhasComprasFiltroLimpar');
-  
+
   if (!filtroBtn || !filtroDropdown || !filtroOpcoes || !filtroAplicar || !filtroLimpar) return;
-  
+
   // Carrega opções de status do banco
   fetch('/api/compras/status')
     .then(r => r.json())
     .then(data => {
       if (!data.ok || !data.status) return;
-      
+
       const statusList = data.status.map(s => s.nome);
-      
+
       // Renderiza checkboxes
       filtroOpcoes.innerHTML = statusList.map(status => `
         <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;color:#374151;">
@@ -34150,13 +34246,13 @@ function initMinhasSolicitacoesFiltro() {
       `).join('');
     })
     .catch(err => console.error('[COMPRAS] Erro ao carregar status para filtro:', err));
-  
+
   // Toggle dropdown
   filtroBtn.addEventListener('click', (e) => {
     e.stopPropagation();
     const isVisible = filtroDropdown.style.display !== 'none';
     filtroDropdown.style.display = isVisible ? 'none' : 'block';
-    
+
     // Posiciona dropdown abaixo do botão
     if (!isVisible) {
       const rect = filtroBtn.getBoundingClientRect();
@@ -34165,30 +34261,30 @@ function initMinhasSolicitacoesFiltro() {
       filtroDropdown.style.left = `${rect.left}px`;
     }
   });
-  
+
   // Fecha dropdown ao clicar fora
   document.addEventListener('click', (e) => {
     if (!filtroBtn.contains(e.target) && !filtroDropdown.contains(e.target)) {
       filtroDropdown.style.display = 'none';
     }
   });
-  
+
   // Aplicar filtro
   filtroAplicar.addEventListener('click', () => {
     const checkboxes = filtroOpcoes.querySelectorAll('.status-checkbox');
     const statusSelecionados = Array.from(checkboxes)
       .filter(cb => cb.checked)
       .map(cb => cb.value.toLowerCase());
-    
+
     loadMinhasSolicitacoes(statusSelecionados.length > 0 ? statusSelecionados : null);
     filtroDropdown.style.display = 'none';
   });
-  
+
   // Botão para ativar/desativar todos
   filtroLimpar.addEventListener('click', () => {
     const checkboxes = filtroOpcoes.querySelectorAll('.status-checkbox');
     const todosAtivos = Array.from(checkboxes).every(cb => cb.checked);
-    
+
     if (todosAtivos) {
       // Desativa todos
       checkboxes.forEach(cb => cb.checked = false);
@@ -34383,9 +34479,9 @@ async function salvarLinkRapido() {
     updateIcon.addEventListener('click', async e => {
       e.preventDefault();
       e.stopPropagation();
-      
+
       console.log('[UPDATE-CHECK] Clique no ícone de atualização detectado');
-      
+
       // Mostra confirmação ao usuário
       const confirmed = confirm(
         '🔄 Uma atualização está disponível!\n\n' +
@@ -34393,7 +34489,7 @@ async function salvarLinkRapido() {
         'Isso aplicará a nova versão do sistema.\n\n' +
         'Deseja continuar?'
       );
-      
+
       if (confirmed) {
         console.log('[UPDATE-CHECK] Usuário confirmou atualização');
         await clearCacheAndReload();
@@ -34476,7 +34572,7 @@ window.openRegistros = async function() {
       </div>
     `;
     container.prepend(filtros);
-    
+
     // Hover effects
     const btnBuscar = filtros.querySelector('#reg-buscar');
     const btnLimpar = filtros.querySelector('#reg-limpar');
@@ -34504,27 +34600,27 @@ window.openRegistros = async function() {
   async function buscar() {
     const timeline = document.getElementById('listaRegistros');
     timeline.innerHTML = '<div style="text-align:center; padding:40px; color:#6c757d;"><div style="font-size:24px;">⏳</div><div style="margin-top:12px;">Carregando histórico...</div></div>';
-    
+
     const params = new URLSearchParams();
     const tipo = document.getElementById('reg-tipo').value.trim();
     const codigo = document.getElementById('reg-codigo').value.trim();
     const usuario = document.getElementById('reg-usuario').value.trim();
     const de = document.getElementById('reg-de').value.trim();
     const ate = document.getElementById('reg-ate').value.trim();
-    
+
     if (tipo) params.set('tipo', tipo);
     if (codigo) params.set('codigo', codigo);
     if (usuario) params.set('usuario', usuario);
     if (de) params.set('data_inicio', de);
     if (ate) params.set('data_fim', ate);
-    
+
     const url = '/api/registros' + (params.toString() ? ('?' + params.toString()) : '');
-    
+
     try {
       const resp = await fetch(url);
       if (!resp.ok) throw new Error('HTTP ' + resp.status);
       const lista = await resp.json();
-      
+
       if (!Array.isArray(lista) || lista.length === 0) {
         timeline.innerHTML = `
           <div style="text-align:center; padding:60px; color:#6c757d;">
@@ -34535,7 +34631,7 @@ window.openRegistros = async function() {
         `;
         return;
       }
-      
+
       // Renderiza timeline
       timeline.innerHTML = `
         <div style="position:relative; padding:20px 0;">
@@ -34550,29 +34646,29 @@ window.openRegistros = async function() {
               hour: '2-digit',
               minute: '2-digit'
             });
-            
+
             // Monta códigos (texto + id OMIE se disponível)
             let codigoDisplay = r.codigo_texto || r.codigo_omie || '';
             if (r.codigo_produto && r.codigo_produto != codigoDisplay) {
               codigoDisplay += ` <span style="color:#6c757d; font-size:0.85em;">(ID: ${r.codigo_produto})</span>`;
             }
-            
+
             return `
               <div style="position:relative; margin-bottom:50px; display:flex; align-items:center; ${isLeft ? 'justify-content:flex-end;' : 'justify-content:flex-start;'}">
                 <!-- Círculo do ícone -->
                 <div style="position:absolute; left:50%; transform:translateX(-50%); z-index:2; width:56px; height:56px; border-radius:50%; background:${config.bg}; border:3px solid ${config.color}; display:flex; align-items:center; justify-content:center; font-size:24px; box-shadow:0 4px 8px rgba(0,0,0,0.15);">
                   ${config.icon}
                 </div>
-                
+
                 <!-- Card do registro -->
                 <div style="width:45%; ${isLeft ? 'margin-right:60px; text-align:right;' : 'margin-left:60px; text-align:left;'}">
                   <div style="background:white; border-radius:12px; padding:20px; box-shadow:0 4px 12px rgba(0,0,0,0.1); border-left:4px solid ${config.color}; transition:transform 0.2s, box-shadow 0.2s;" onmouseenter="this.style.transform='translateY(-4px)'; this.style.boxShadow='0 8px 20px rgba(0,0,0,0.15)';" onmouseleave="this.style.transform='translateY(0)'; this.style.boxShadow='0 4px 12px rgba(0,0,0,0.1)';">
                     <div style="display:flex; align-items:center; gap:8px; margin-bottom:12px; ${isLeft ? 'justify-content:flex-end;' : ''}">
                       <span style="display:inline-block; padding:4px 12px; background:${config.bg}; color:${config.color}; border-radius:20px; font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:0.5px;">${config.label}</span>
                     </div>
-                    
+
                     <div style="font-size:16px; font-weight:700; color:#212529; margin-bottom:8px;">${codigoDisplay}</div>
-                    
+
                     <div style="display:flex; gap:16px; margin-bottom:12px; font-size:13px; color:#6c757d; flex-wrap:wrap; ${isLeft ? 'justify-content:flex-end;' : ''}">
                       <span style="display:flex; align-items:center; gap:4px;">
                         <span style="font-size:14px;">👤</span>
@@ -34584,7 +34680,7 @@ window.openRegistros = async function() {
                       </span>
                       ${r.origem ? `<span style="display:flex; align-items:center; gap:4px;"><span style="font-size:14px;">🔖</span>${r.origem}</span>` : ''}
                     </div>
-                    
+
                     ${r.detalhes ? `
                       <div style="margin-top:12px; padding:12px; background:#f8f9fa; border-radius:6px; font-size:13px; color:#495057; line-height:1.6; white-space:pre-wrap; ${isLeft ? 'text-align:left;' : ''}">${r.detalhes}</div>
                     ` : ''}
@@ -36324,11 +36420,11 @@ async function carregarPreparacaoOperacoes() {
     const resp = await fetch('/api/colaboradores/operacoes');
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     const arr = await resp.json();
-    
+
     preparacaoOperacoes = (Array.isArray(arr) ? arr : [])
       .map(x => ({ id: String(x.id || ''), operacao: String(x.operacao || '').trim() }))
       .filter(x => x.operacao);
-    
+
     select.innerHTML = '<option value="">Selecione uma operação...</option>';
     preparacaoOperacoes.forEach(op => {
       const opt = document.createElement('option');
@@ -36336,7 +36432,7 @@ async function carregarPreparacaoOperacoes() {
       opt.textContent = op.operacao;
       select.appendChild(opt);
     });
-    
+
     // Seleciona a primeira operação por padrão
     if (preparacaoOperacoes.length > 0) {
       select.value = preparacaoOperacoes[0].operacao;
@@ -36357,10 +36453,10 @@ async function carregarPreparacaoDados() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({})
     });
-    
+
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     const data = await resp.json();
-    
+
     preparacaoDados = Array.isArray(data.ops) ? data.ops : [];
     // Logs de diagnóstico: quantos códigos e por operação
     try {
@@ -36396,14 +36492,14 @@ function filtrarPreparacaoPorOperacao() {
   } else {
     preparacaoDadosFiltrados = preparacaoDados.filter(op => norm(op.local_impressao) === operacaoAlvo);
   }
-  
+
   console.log('[Preparação] Operação atual:', preparacaoOperacaoAtual, '→', operacaoAlvo);
   console.log('[Preparação] Total de OPs no sistema:', preparacaoDados.length);
   console.log('[Preparação] OPs filtradas:', preparacaoDadosFiltrados.length);
   console.log('[Preparação] Amostra filtrada:', preparacaoDadosFiltrados.slice(0, 5));
-  
+
   renderPreparacaoKanbans();
-  
+
   // Atualiza contador
   const countEl = document.getElementById('preparacaoCount');
   if (countEl) {
@@ -36415,38 +36511,38 @@ function filtrarPreparacaoPorOperacao() {
 function renderPreparacaoKanbans() {
   const aguardandoList = document.getElementById('coluna-prep-aguardando');
   const filaList = document.getElementById('coluna-prep-fila');
-  
+
   if (!aguardandoList || !filaList) return;
-  
+
   aguardandoList.innerHTML = '';
   filaList.innerHTML = '';
-  
+
   console.log('[Preparação] Dados filtrados para renderizar:', preparacaoDadosFiltrados);
-  
+
   // Agrupa OPs por codigo_produto
   const aguardandoGrupos = agruparPorCodigoProduto(
     preparacaoDadosFiltrados.filter(op => op.status === 'aguardando')
   );
-  
+
   const filaGrupos = agruparPorCodigoProduto(
     preparacaoDadosFiltrados.filter(op => op.status === 'fila' || op.status === 'em_producao')
   );
-  
+
   console.log('[Preparação] Grupos aguardando:', aguardandoGrupos);
   console.log('[Preparação] Grupos fila:', filaGrupos);
-  
+
   // Renderiza cards agrupados - Aguardando prazo
   aguardandoGrupos.forEach(grupo => {
     const card = criarCardPreparacaoAgrupado(grupo, 'aguardando');
     aguardandoList.appendChild(card);
   });
-  
+
   // Renderiza cards agrupados - Fila de produção
   filaGrupos.forEach(grupo => {
     const card = criarCardPreparacaoAgrupado(grupo, 'fila');
     filaList.appendChild(card);
   });
-  
+
   // Se nenhum item, mostra mensagem
   if (aguardandoList.children.length === 0) {
     aguardandoList.innerHTML = '<li style="padding:12px; opacity:0.5; text-align:center;">Nenhum item aguardando</li>';
@@ -36454,7 +36550,7 @@ function renderPreparacaoKanbans() {
   if (filaList.children.length === 0) {
     filaList.innerHTML = '<li style="padding:12px; opacity:0.5; text-align:center;">Fila vazia</li>';
   }
-  
+
   // Ativa os event listeners dos botões específicos para Preparação
   attachPreparacaoModalTriggers();
 }
@@ -36463,14 +36559,14 @@ function renderPreparacaoKanbans() {
 function agruparPorCodigoProduto(ops) {
   console.log('[agruparPorCodigoProduto] Recebeu OPs:', ops);
   console.log('[agruparPorCodigoProduto] Total de OPs:', ops.length);
-  
+
   const grupos = {};
-  
+
   ops.forEach(op => {
     const codigo = op.codigo_produto || 'SEM_CODIGO';
-    
+
     console.log(`[agruparPorCodigoProduto] Processando OP - codigo: ${codigo}, numero_op: ${op.numero_op}, id: ${op.id}`);
-    
+
     if (!grupos[codigo]) {
       grupos[codigo] = {
         codigo: codigo,
@@ -36480,16 +36576,16 @@ function agruparPorCodigoProduto(ops) {
       };
       console.log(`[agruparPorCodigoProduto] Criou novo grupo para: ${codigo}`);
     }
-    
+
     grupos[codigo].ops.push(op);
     grupos[codigo].quantidade += 1;
-    
+
     console.log(`[agruparPorCodigoProduto] Grupo ${codigo} agora tem ${grupos[codigo].ops.length} OPs`);
   });
-  
+
   const resultado = Object.values(grupos);
   console.log('[agruparPorCodigoProduto] Grupos finais:', resultado);
-  
+
   return resultado;
 }
 
@@ -36499,17 +36595,17 @@ function criarCardPreparacaoAgrupado(grupo, coluna) {
   li.className = 'kanban-card kanban-card-local kanban-card-collapsed';
   li.dataset.codigo = grupo.codigo;
   li.dataset.localImpressao = grupo.local_impressao;
-  
+
   const codigo = grupo.codigo || 'Sem código';
   const quantidade = grupo.quantidade || 0;
   const local = grupo.local_impressao || '—';
-  
+
   // Monta lista de OPs
   const opsHtml = grupo.ops.map(op => {
-    const dataFormatada = op.data_impressao 
-      ? new Date(op.data_impressao).toLocaleString('pt-BR', { 
-          day: '2-digit', 
-          month: '2-digit', 
+    const dataFormatada = op.data_impressao
+      ? new Date(op.data_impressao).toLocaleString('pt-BR', {
+          day: '2-digit',
+          month: '2-digit',
           year: 'numeric',
           hour: '2-digit',
           minute: '2-digit'
@@ -36522,7 +36618,7 @@ function criarCardPreparacaoAgrupado(grupo, coluna) {
       </div>
     `;
   }).join('');
-  
+
   // Botões baseados na coluna
   let botoesHtml = '';
   if (coluna === 'aguardando') {
@@ -36542,7 +36638,7 @@ function criarCardPreparacaoAgrupado(grupo, coluna) {
       </div>
     `;
   }
-  
+
   li.innerHTML = `
     <div class="kanban-code-block">
       <div class="kanban-code-header" style="cursor:pointer;">
@@ -36556,15 +36652,15 @@ function criarCardPreparacaoAgrupado(grupo, coluna) {
       </div>
     </div>
   `;
-  
+
   // Adiciona evento de clique no header para expandir/recolher
   const header = li.querySelector('.kanban-code-header');
   header.addEventListener('click', (ev) => {
     // Não expande se clicar em um botão
     if (ev.target.closest('.btn-kanban')) return;
-    
+
     const wasCollapsed = li.classList.contains('kanban-card-collapsed');
-    
+
     // Recolhe todos os outros cards
     const allCards = li.closest('ul').querySelectorAll('.kanban-card');
     allCards.forEach(card => {
@@ -36577,7 +36673,7 @@ function criarCardPreparacaoAgrupado(grupo, coluna) {
       if (icon) icon.classList.remove('fa-chevron-up');
       if (icon) icon.classList.add('fa-chevron-down');
     });
-    
+
     // Expande o card clicado se estava recolhido
     if (wasCollapsed) {
       li.classList.remove('kanban-card-collapsed');
@@ -36590,7 +36686,7 @@ function criarCardPreparacaoAgrupado(grupo, coluna) {
       if (icon) icon.classList.add('fa-chevron-up');
     }
   });
-  
+
   return li;
 }
 
@@ -36600,14 +36696,14 @@ function attachPreparacaoModalTriggers() {
   document.querySelectorAll('#conteudo-preparacao .kanban-modal-trigger').forEach(btn => {
     if (btn.dataset.prepBound === '1') return;
     btn.dataset.prepBound = '1';
-    
+
     btn.addEventListener('click', (ev) => {
       ev.preventDefault();
       ev.stopPropagation();
-      
+
       const codigo = btn.dataset.codigo || '';
       const coluna = btn.dataset.coluna || 'Aguardando prazo';
-      
+
       // Pega o grupo do data-attribute
       let grupo;
       try {
@@ -36616,12 +36712,12 @@ function attachPreparacaoModalTriggers() {
         console.error('[Preparação] Erro ao parsear grupo:', e);
         return;
       }
-      
+
       if (!grupo || !grupo.ops || grupo.ops.length === 0) {
         console.warn('[Preparação] Grupo inválido ou sem OPs');
         return;
       }
-      
+
       openPreparacaoOpsModal({ grupo, coluna });
     });
   });
@@ -36680,16 +36776,16 @@ function attachPreparacaoModalTriggers() {
       }
       const data = await r.json();
       console.log('[CHAT] Usuários recebidos:', data);
-      
+
       // Remove o próprio usuário se existir
       const currentUserId = window.__sessionUser?.id;
       console.log('[CHAT] ID do usuário logado:', currentUserId);
-      
+
       ChatState.users = (data.users||[]).filter(u => !currentUserId || String(u.id) !== String(currentUserId));
       ChatState.filtered = ChatState.users;
-      
+
       console.log('[CHAT] Total de usuários após filtro:', ChatState.users.length);
-      
+
       renderUsers(ChatState.filtered);
     } catch (err) {
       console.error('[CHAT] Erro ao carregar usuários:', err);
@@ -36778,7 +36874,7 @@ function attachPreparacaoModalTriggers() {
   // Expõe funções para uso externo
   window.__chatLoadUsers = loadUsers;
   window.__chatSelectUser = selectUser;
-  
+
   console.log('[CHAT] Módulo de chat inicializado');
 })();
 
@@ -36786,17 +36882,17 @@ function attachPreparacaoModalTriggers() {
   document.querySelectorAll('#conteudo-preparacao .kanban-stock-trigger').forEach(btn => {
     if (btn.dataset.prepStockBound === '1') return;
     btn.dataset.prepStockBound = '1';
-    
+
     btn.addEventListener('click', async (ev) => {
       ev.preventDefault();
       ev.stopPropagation();
-      
+
       const codigo = btn.dataset.codigo || '';
       if (!codigo) return;
-      
+
       // Abre a guia Armazém/Estoque e filtra pelo código do produto
       showArmazemTab('estoque');
-      
+
       setTimeout(() => {
         const filtroInput = document.querySelector('#conteudo-almoxarifado input[placeholder*="Pesquisar"]');
         if (filtroInput) {
@@ -36811,7 +36907,7 @@ function attachPreparacaoModalTriggers() {
 // Abre modal de prazo para GRUPO de OPs da guia Preparação
 function openPreparacaoOpsModal({ grupo, coluna }) {
   closePreparacaoOpsModal();
-  
+
   const esc = (val) => String(val ?? '').replace(/[&<>"']/g, ch => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
   }[ch] || ch));
@@ -36825,9 +36921,9 @@ function openPreparacaoOpsModal({ grupo, coluna }) {
 
   const modal = document.createElement('div');
   modal.className = 'kanban-modal';
-  
+
   const tituloModal = 'Configurar ordem de produção';
-  
+
   modal.innerHTML = `
     <header>
       <div>
@@ -36856,7 +36952,7 @@ function openPreparacaoOpsModal({ grupo, coluna }) {
   // Adiciona os campos de data/hora para cada OP
   const body = modal.querySelector('.kanban-modal-body .modal-code-block');
   const form = document.createElement('div');
-  
+
   grupo.ops.forEach(op => {
     const row = document.createElement('div');
     row.className = 'op-row';
@@ -36864,7 +36960,7 @@ function openPreparacaoOpsModal({ grupo, coluna }) {
     const timeId = `prep-op-time-${op.id}`;
     const dateValue = formatDateInput(op.data_impressao);
     const timeValue = formatTimeInput(op.data_impressao);
-    
+
     row.innerHTML = `
       <strong>${esc(op.numero_op || op.id)}</strong>
       <div class="op-inputs">
@@ -36882,12 +36978,12 @@ function openPreparacaoOpsModal({ grupo, coluna }) {
     `;
     form.appendChild(row);
   });
-  
+
   body.appendChild(form);
 
   modal.querySelector('.close-btn').addEventListener('click', closePreparacaoOpsModal);
   modal.querySelector('.modal-secondary').addEventListener('click', closePreparacaoOpsModal);
-  
+
   // Função auxiliar: marca OP como Excluída via endpoint
   async function preparacaoSetOpExcluida(numeroOp, produtoCodigo) {
     const base = (window.API_BASE || '');
@@ -37013,12 +37109,12 @@ function openPreparacaoOpsModal({ grupo, coluna }) {
   modal.querySelector('.modal-primary').addEventListener('click', async () => {
     try {
       const updates = [];
-      
+
       for (const op of grupo.ops) {
         const dateInput = modal.querySelector(`#prep-op-date-${op.id}`);
         const timeInput = modal.querySelector(`#prep-op-time-${op.id}`);
         const novoPrazo = combineDateTime(dateInput?.value || '', timeInput?.value || '00:00');
-        
+
         if (novoPrazo) {
           updates.push({
             id: op.id,
@@ -37027,12 +37123,12 @@ function openPreparacaoOpsModal({ grupo, coluna }) {
           });
         }
       }
-      
+
       if (updates.length === 0) {
         alert('Defina pelo menos uma data/hora válida.');
         return;
       }
-      
+
       // Atualiza todas as OPs
       const promises = updates.map(update =>
         fetch('/api/ops/atualizar-data-impressao', {
@@ -37041,20 +37137,20 @@ function openPreparacaoOpsModal({ grupo, coluna }) {
           body: JSON.stringify(update)
         }).then(res => res.json())
       );
-      
+
       const results = await Promise.all(promises);
       const erros = results.filter(r => !r.success);
-      
+
       if (erros.length > 0) {
         alert(`${erros.length} erro(s) ao atualizar. Verifique o console.`);
         console.error('Erros:', erros);
       } else {
         alert('Prazos atualizados com sucesso!');
       }
-      
+
       closePreparacaoOpsModal();
       await carregarPreparacaoDados(); // Recarrega os dados
-      
+
     } catch (err) {
       console.error('[Preparação] Erro ao salvar prazos:', err);
       alert('Falha ao salvar os prazos das OPs.');
@@ -37100,12 +37196,12 @@ function criarCardPreparacao(op, coluna) {
   li.dataset.opId = op.id || '';
   li.dataset.codigo = op.codigo || '';
   li.dataset.opsCount = op.quantidade || 0;
-  
+
   const descricao = op.produto || 'Produto';
   const codigo = op.codigo || 'Sem código';
   const quantidade = op.quantidade || 0;
   const prazo = op.prazo_entrega || op.prazo || '';
-  
+
   // Monta lista de pedidos/OPs se houver
   const pedidosHtml = (op.pedidos || []).map(p => `
     <div class="kanban-op-line">
@@ -37113,7 +37209,7 @@ function criarCardPreparacao(op, coluna) {
       <span class="kanban-op-date">Qtd ${p.quantidade || 0}</span>
     </div>
   `).join('');
-  
+
   // Botões baseados na coluna
   let botoesHtml = '';
   if (coluna === 'aguardando') {
@@ -37135,7 +37231,7 @@ function criarCardPreparacao(op, coluna) {
       </div>
     `;
   }
-  
+
   li.innerHTML = `
     <div class="kanban-card-meta">${descricao}</div>
     <div class="kanban-code-header">
@@ -37146,7 +37242,7 @@ function criarCardPreparacao(op, coluna) {
     ${prazo ? `<div class="kanban-prazo" style="font-size:0.85em; opacity:0.7; margin-top:4px;">Prazo: ${prazo}</div>` : ''}
     ${botoesHtml}
   `;
-  
+
   return li;
 }
 
@@ -37214,44 +37310,44 @@ function initCalendarioUI() {
   // tooltip simples com detecção de bordas
   let tipEl = null;
   function showTip(ev, text){
-    if (!text) return; 
-    if (!tipEl){ 
-      tipEl=document.createElement('div'); 
-      tipEl.className='cal-tip'; 
+    if (!text) return;
+    if (!tipEl){
+      tipEl=document.createElement('div');
+      tipEl.className='cal-tip';
       document.body.appendChild(tipEl);
-    } 
+    }
     tipEl.textContent = text;
-    
+
     // Posição inicial
     let x = ev.pageX + 12;
     let y = ev.pageY - 12;
-    
+
     // Aplica posição para calcular dimensões
     tipEl.style.left = x + 'px';
     tipEl.style.top = y + 'px';
     tipEl.classList.add('show');
-    
+
     // Ajusta se estourar pela direita
     const tipRect = tipEl.getBoundingClientRect();
     if (tipRect.right > window.innerWidth) {
       x = ev.pageX - tipRect.width - 12;
     }
-    
+
     // Ajusta se estourar por cima
     if (tipRect.top < 0) {
       y = ev.pageY + 12;
     }
-    
+
     // Ajusta se estourar por baixo
     if (tipRect.bottom > window.innerHeight) {
       y = ev.pageY - tipRect.height - 12;
     }
-    
+
     // Ajusta se estourar pela esquerda
     if (x < 0) {
       x = 12;
     }
-    
+
     tipEl.style.left = x + 'px';
     tipEl.style.top = y + 'px';
   }
@@ -37260,8 +37356,8 @@ function initCalendarioUI() {
     const tgt = ev.target.closest('.code');
     if (tgt && tgt.dataset.full) showTip(ev, tgt.dataset.full);
   });
-  grid.addEventListener('mousemove', ev => { 
-    if (tipEl?.classList.contains('show')) { 
+  grid.addEventListener('mousemove', ev => {
+    if (tipEl?.classList.contains('show')) {
       const tgt = ev.target.closest('.code');
       if (tgt && tgt.dataset.full) showTip(ev, tgt.dataset.full);
     }
@@ -37288,7 +37384,7 @@ async function carregarCalendarioAtual(){
   const selLocal = document.getElementById('calLocal');
   const grid = document.getElementById('calGrid');
   if (!selMes || !inpAno || !selLocal || !grid) return;
-  const mes = parseInt(selMes.value,10); 
+  const mes = parseInt(selMes.value,10);
   const ano = parseInt(inpAno.value,10);
   const local = selLocal.value || '';
   grid.innerHTML = '<div class="loading-cal" style="grid-column:1 / -1;">Carregando…</div>';
@@ -37298,21 +37394,21 @@ async function carregarCalendarioAtual(){
     if (!resp.ok) throw new Error('HTTP '+resp.status);
     const data = await resp.json();
     if (!data.ok) throw new Error(data.error || 'Falha');
-    
+
     // Processar dados retornados e agrupar por dia
     const dias = {};
     if (data.data && Array.isArray(data.data)) {
       data.data.forEach(item => {
         const dataKey = item.data_previsao?.split('T')[0]; // Pega apenas a data (YYYY-MM-DD)
         if (!dataKey) return;
-        
+
         if (!dias[dataKey]) {
           dias[dataKey] = {
             porLocal: {},
             locais: []
           };
         }
-        
+
         // Adiciona o produto ao dia
         const produtoInfo = {
           nome: item.codigo_produto || 'Sem código',
@@ -37320,11 +37416,11 @@ async function carregarCalendarioAtual(){
           quantidade: item.quantidade || 0,
           descricao: item.produto_descricao || ''
         };
-        
+
         dias[dataKey].locais.push(produtoInfo);
       });
     }
-    
+
     renderCalendario(ano, mes, dias);
   } catch(e){
     grid.innerHTML = `<div class="loading-cal" style="grid-column:1 / -1;">Erro: ${e.message}</div>`;
@@ -37383,7 +37479,7 @@ function renderCalendario(ano, mes, dias){
     if (key === hojeKey) classes.push('hoje');
     const muitos = locais.length > 6; if (muitos) classes.push('muitos');
     let codesHtml = '';
-    
+
     // Função para obter o ícone baseado no status/etapa
     const getIcone = (st) => {
       const status = (st || '').toLowerCase().trim();
@@ -37393,7 +37489,7 @@ function renderCalendario(ano, mes, dias){
       if (status === '' || status === 'aguardando') return '<i class="fa-solid fa-clock status-aguardando"></i>';
       return '<i class="fa-solid fa-calendar-plus status-novo"></i>'; // Sem data definida
     };
-    
+
     if (muitos) {
       codesHtml = locais.slice(0,6).map(o=>{
         const nome = typeof o === 'string' ? o : (o?.nome || '');
@@ -37426,7 +37522,7 @@ async function abrirModalDia(dayKey, info){
   const titulo= document.getElementById('calModalTitulo');
   const btnClose = document.getElementById('calModalClose');
   if (!modal || !body || !titulo || !btnClose) return;
-  
+
   // Formata a data para DD/MM/AAAA no título do modal
   const fmtDataBr = (dStr) => {
     if (!dStr || typeof dStr !== 'string') return dStr;
@@ -37437,7 +37533,7 @@ async function abrirModalDia(dayKey, info){
   };
   titulo.textContent = `Detalhes de ${fmtDataBr(dayKey)}`;
   body.innerHTML = '<div style="text-align:center;padding:20px;">Carregando...</div>';
-  
+
   try {
   const selLocal = document.getElementById('calLocal');
   const localSel = selLocal ? (selLocal.value || '') : '';
@@ -37445,7 +37541,7 @@ async function abrirModalDia(dayKey, info){
     const resp = await fetch(url, { credentials: 'include' });
     const data = await resp.json();
     if (!resp.ok || !data.ok) throw new Error(data.error || 'Falha ao carregar detalhes');
-    
+
     if (!data.data || data.data.length === 0) {
       body.innerHTML = '<div style="padding:20px;">Nenhuma OP encontrada para este dia.</div>';
     } else {
@@ -37457,7 +37553,7 @@ async function abrirModalDia(dayKey, info){
         arr.push(op);
         porProduto.set(key, arr);
       }
-      
+
       const blocos = Array.from(porProduto.entries()).map(([codigo, ops]) => {
         const descricao = ops[0]?.produto_descricao || 'Sem descrição';
         const opsHtml = ops.map(op => {
@@ -37470,20 +37566,20 @@ async function abrirModalDia(dayKey, info){
             ${op.observacoes ? `<br><small>${op.observacoes}</small>` : ''}
           </li>`;
         }).join('');
-        
+
         return `<div class="mod-local">
           <h4>${codigo} — ${descricao}</h4>
           <ul class="mod-prod-ops">${opsHtml}</ul>
         </div>`;
       }).join('');
-      
+
       body.innerHTML = blocos;
     }
-    
+
   } catch (e) {
     body.innerHTML = `<div style="color:#ef4444; padding:20px;">${e.message}</div>`;
   }
-  
+
   modal.style.display = 'flex';
 
   // Filtros iniciam recolhidos
@@ -37539,18 +37635,18 @@ function openComprasTab() {
     document.getElementById('menu-compras')?.classList.add('is-active');
 
     window.showOnlyInMain?.(comprasPane);
-    
+
     // Carrega fornecedores se ainda não foram carregados
     if (!window.fornecedoresCache || window.fornecedoresCache.length === 0) {
       loadFornecedores();
     }
-    
+
     // Configura sub-abas se ainda não foi configurado
     setupComprasSubTabs();
-    
+
     // Mostra a primeira aba por padrão
     showComprasSubTab('comprasPedidos');
-    
+
     loadComprasSolicitacoes();
     loadMinhasSolicitacoes();
     loadComprasCotadas(); // Carrega itens cotados
@@ -37565,13 +37661,13 @@ function openComprasTab() {
 function setupComprasSubTabs() {
   const btns = document.querySelectorAll('.sub-tab-btn[data-subtab]');
   if (!btns.length) return;
-  
+
   // Remove listeners antigos para evitar duplicação
   btns.forEach(btn => {
     const newBtn = btn.cloneNode(true);
     btn.parentNode.replaceChild(newBtn, btn);
   });
-  
+
   // Adiciona novos listeners
   document.querySelectorAll('.sub-tab-btn[data-subtab]').forEach(btn => {
     btn.addEventListener('click', function() {
@@ -37597,16 +37693,16 @@ function showComprasSubTab(subtabId) {
       btn.style.fontWeight = '500';
     }
   });
-  
+
   // Atualiza conteúdo
   document.querySelectorAll('.sub-tab-content').forEach(content => {
     content.style.display = 'none';
   });
-  
+
   const activeContent = document.getElementById(subtabId);
   if (activeContent) {
     activeContent.style.display = 'block';
-    
+
     // Carrega dados da aba se necessário
     if (subtabId === 'comprasCotacoes') {
       loadComprasCotadas();
@@ -37865,12 +37961,12 @@ async function carregarCarrinhoComprasDoBanco() {
       // Comentário: Busca url_imagem do cache de produtos usando produto_codigo
       let urlImagem = '';
       if (item.produto_codigo && window.produtosCatalogoOmie) {
-        const produtoComImagem = window.produtosCatalogoOmie.find(p => 
+        const produtoComImagem = window.produtosCatalogoOmie.find(p =>
           String(p.codigo).trim() === String(item.produto_codigo).trim()
         );
         urlImagem = produtoComImagem?.url_imagem || '';
       }
-      
+
       return {
         id_db: item.id,
         produto_codigo: item.produto_codigo,
@@ -37916,19 +38012,19 @@ function setupComprasExpandListeners() {
     // Remove listener antigo se existir
     const newHeader = header.cloneNode(true);
     header.parentNode.replaceChild(newHeader, header);
-    
+
     // Adiciona novo listener
     newHeader.addEventListener('click', () => {
       const expandId = newHeader.getAttribute('data-expand-id');
       const icon = newHeader.querySelector('.compras-expand-icon');
       const itens = document.querySelectorAll(`.compras-pedido-item[data-pedido="${expandId}"]`);
-      
+
       const isExpanded = itens[0]?.style.display !== 'none';
-      
+
       itens.forEach(item => {
         item.style.display = isExpanded ? 'none' : 'table-row';
       });
-      
+
       if (icon) {
         icon.style.transform = isExpanded ? 'rotate(0deg)' : 'rotate(90deg)';
       }
@@ -37945,31 +38041,31 @@ function renderCarrinhoCompras() {
   const btnEnviar = document.getElementById('comprasEnviarPedidoBtn');
   const tituloCarrinho = document.getElementById('comprasTituloCarrinho');
   const containerCarrinho = document.getElementById('comprasCarrinhoContainer');
-  
+
   if (!tbody) return;
-  
+
   const carrinho = window.carrinhoCompras || [];
-  
+
   if (countEl) countEl.textContent = carrinho.length;
-  
+
   // Atualiza o badge do botão Abrir Carrinho
   if (badgeEl) {
     badgeEl.textContent = carrinho.length;
     badgeEl.style.display = carrinho.length > 0 ? 'flex' : 'none';
   }
-  
+
   // Atualiza também o badge da Lista de Produtos (página Compras)
   const badgeListaProdutos = document.getElementById('listaProdutosCarrinhoCount');
   if (badgeListaProdutos) {
     badgeListaProdutos.textContent = carrinho.length;
     badgeListaProdutos.style.display = carrinho.length > 0 ? 'flex' : 'none';
   }
-  
+
   // Atualiza também o contador do catálogo Omie se existir
   if (typeof atualizarContadorCatalogo === 'function') {
     atualizarContadorCatalogo();
   }
-  
+
   if (carrinho.length === 0) {
     // Oculta título e container quando vazio
     if (tituloCarrinho) tituloCarrinho.style.display = 'none';
@@ -37978,7 +38074,7 @@ function renderCarrinhoCompras() {
     if (btnEnviar) btnEnviar.style.display = 'none';
     return;
   }
-  
+
   // Mostra título e container quando tem itens
   if (tituloCarrinho) tituloCarrinho.style.display = 'flex';
   if (containerCarrinho) containerCarrinho.style.display = 'block';
@@ -38002,15 +38098,15 @@ function renderCarrinhoCompras() {
     }
     return numero.toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 4 });
   };
-  
+
   tbody.innerHTML = carrinho.map((item, idx) => {
     const prazoFmt = item.prazo_solicitado || '—';
-    const badgeRequisicaoDireta = item.requisicao_direta 
+    const badgeRequisicaoDireta = item.requisicao_direta
       ? `<span style="display:inline-block;background:#0ea5e9;color:white;padding:2px 6px;border-radius:4px;font-size:11px;font-weight:600;margin-left:6px;" title="Este item será aprovado automaticamente após o envio">
           <i class="fa-solid fa-bolt"></i> REQUISIÇÃO DIRETA
          </span>`
       : '';
-    
+
     return `
       <tr>
         <td>${window.escapeHtml(item.produto_codigo)}</td>
@@ -38028,10 +38124,10 @@ function renderCarrinhoCompras() {
         </td>
       </tr>`;
   }).join('');
-  
+
   if (btnLimpar) btnLimpar.style.display = 'inline-flex';
   if (btnEnviar) btnEnviar.style.display = 'inline-flex';
-  
+
   // Bind botões de remover
   tbody.querySelectorAll('[data-idx]').forEach(btn => {
     btn.addEventListener('click', async () => {
@@ -38054,8 +38150,8 @@ window.usuariosAtivos = [];
 
 // Obtém o nome do usuário logado
 function obterUsuarioLogado() {
-  return (document.getElementById('userNameDisplay')?.textContent || '').trim() || 
-         window.__sessionUser?.username || 
+  return (document.getElementById('userNameDisplay')?.textContent || '').trim() ||
+         window.__sessionUser?.username ||
          '';
 }
 
@@ -38604,12 +38700,12 @@ function atualizarBlocoCompraOmieModal(numeros = []) {
 async function abrirModalCarrinhoComprasLegado() {
   const modal = document.getElementById('modalCarrinhoCompras');
   if (!modal) return;
-  
+
   // Carrega usuários ativos se ainda não foram carregados
   if (window.usuariosAtivos.length === 0) {
     await carregarUsuariosAtivos();
   }
-  
+
   // Sincroniza os dados do carrinho no modal
   await carregarCarrinhoComprasDoBanco();
   configurarPrazoSolicitadoGlobal();
@@ -38625,7 +38721,7 @@ async function abrirModalCarrinhoComprasLegado() {
   await carregarGruposRequisicaoDisponiveis();
   atualizarBlocoCompraOmieModal();
   renderModalCarrinhoCompras();
-  
+
   // Exibe o modal
   modal.style.display = 'flex';
   setTimeout(() => modal.classList.add('active'), 10);
@@ -38683,7 +38779,7 @@ window.abrirModalCarrinhoCompras = async function() {
 function fecharModalCarrinhoCompras() {
   const modal = document.getElementById('modalCarrinhoCompras');
   if (!modal) return;
-  
+
   modal.classList.remove('active');
   setTimeout(() => {
     modal.style.display = 'none';
@@ -38730,13 +38826,13 @@ function filtrarCarrinhoPorNP(npSelecionado) {
 function atualizarSelectFiltroNP() {
   const selectFiltro = document.getElementById('filtroCarrinhoNP');
   if (!selectFiltro) return;
-  
+
   const grupos = obterGruposNP();
   const valorAtual = selectFiltro.value;
-  
-  selectFiltro.innerHTML = '<option value="">Todos</option>' + 
+
+  selectFiltro.innerHTML = '<option value="">Todos</option>' +
     grupos.map(np => `<option value="${np}">${np}</option>`).join('');
-  
+
   // Mantém seleção anterior se ainda existir
   if (valorAtual && grupos.includes(valorAtual)) {
     selectFiltro.value = valorAtual;
@@ -38751,21 +38847,21 @@ async function renderModalCarrinhoCompras() {
   const countEl = document.getElementById('modalCarrinhoCount');
   const btnLimpar = document.getElementById('modalComprasLimparCarrinhoBtn');
   const btnEnviar = document.getElementById('modalComprasEnviarPedidoBtn');
-  
+
   if (!cardsContainer) return;
-  
+
   const carrinho = window.carrinhoCompras || [];
   const selectFiltro = document.getElementById('filtroCarrinhoNP');
   const npSelecionado = selectFiltro ? selectFiltro.value : '';
   const carrinhoFiltrado = filtrarCarrinhoPorNP(npSelecionado);
-  const solicitante = (document.getElementById('userNameDisplay')?.textContent || '').trim() 
+  const solicitante = (document.getElementById('userNameDisplay')?.textContent || '').trim()
     || window.__sessionUser?.username || 'Usuário';
-  
+
   if (countEl) countEl.textContent = carrinho.length;
-  
+
   // Atualiza select de NP
   atualizarSelectFiltroNP();
-  
+
   if (carrinhoFiltrado.length === 0) {
     cardsContainer.innerHTML = `
       <div style="grid-column:1/-1;text-align:center;padding:40px 20px;color:var(--inactive-color);">
@@ -38777,23 +38873,23 @@ async function renderModalCarrinhoCompras() {
     if (btnEnviar) btnEnviar.style.display = 'none';
     return;
   }
-  
+
   // Agrupa por NP e renderiza em grupos separados
   const obterIdxCarrinho = (item, fallbackIdx) => {
     const idxGlobal = (window.carrinhoCompras || []).indexOf(item);
     return idxGlobal >= 0 ? idxGlobal : fallbackIdx;
   };
-  
+
   const renderItemCarrinhoCard = (item, fallbackIdx) => {
     const idx = obterIdxCarrinho(item, fallbackIdx);
     const itemSolicitante = item.solicitante || solicitante;
     const temAnexo = item.anexo ? true : false;
-    
+
     // Verifica se tem imagem do produto
-    const temImagem = item.url_imagem && 
-                      item.url_imagem.trim() && 
+    const temImagem = item.url_imagem &&
+                      item.url_imagem.trim() &&
                       (item.url_imagem.startsWith('http://') || item.url_imagem.startsWith('https://'));
-    
+
     // Verifica se URL está expirada (parâmetro Expires)
     let urlExpirada = false;
     if (temImagem && item.url_imagem.includes('Expires=')) {
@@ -38804,14 +38900,14 @@ async function renderModalCarrinhoCompras() {
         urlExpirada = expiresTimestamp < agora;
       }
     }
-    
+
     // Prepara strings para onclick ANTES de stringify
     const infoProdutoTexto = `${window.escapeHtml(item.produto_codigo)} - ${window.escapeHtml(item.produto_descricao)}`;
-    
+
     // HTML da imagem do produto
-    const imgHtml = temImagem && !urlExpirada ? 
-      `<img 
-        src="${item.url_imagem}" 
+    const imgHtml = temImagem && !urlExpirada ?
+      `<img
+        src="${item.url_imagem}"
         alt="${window.escapeHtml(item.produto_descricao)}"
         style="width:100%;height:100%;object-fit:cover;border-radius:6px;cursor:zoom-in;"
         onclick='if(typeof ampliarImagemProduto === "function") ampliarImagemProduto(${JSON.stringify(item.url_imagem)}, ${JSON.stringify(infoProdutoTexto)});event.stopPropagation();'
@@ -38823,7 +38919,7 @@ async function renderModalCarrinhoCompras() {
       `<div style="display:flex;width:100%;height:100%;align-items:center;justify-content:center;color:#d1d5db;border-radius:6px;background:#f9fafb;">
         <i class="fa-solid fa-image" style="font-size:24px;"></i>
       </div>`;
-    
+
     const npExibicao = item.grupo_requisicao || item.np || '';
     const gruposDisponiveis = Array.isArray(window.gruposRequisicaoDisponiveis)
       ? window.gruposRequisicaoDisponiveis
@@ -38845,23 +38941,23 @@ async function renderModalCarrinhoCompras() {
     ].join('');
     return `
       <div class="carrinho-product-card" style="background:white;border:1px solid #e5e7eb;border-radius:8px;padding:12px;box-shadow:0 1px 2px rgba(0,0,0,0.05);transition:all 0.2s;display:flex;flex-direction:column;gap:12px;"
-           onmouseover="this.style.boxShadow='0 2px 8px rgba(0,0,0,0.1)';" 
+           onmouseover="this.style.boxShadow='0 2px 8px rgba(0,0,0,0.1)';"
            onmouseout="this.style.boxShadow='0 1px 2px rgba(0,0,0,0.05)';">
-        
+
         <!-- Linha superior: informações e controles -->
         <div class="carrinho-item-top-row" style="display:flex;gap:12px;align-items:flex-start;">
-          
+
           <!-- Lado Esquerdo: Foto e Info -->
           <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:8px;">
-          
+
           <!-- Cabeçalho com Foto e Descrição -->
           <div style="display:flex;gap:10px;">
-            
+
             <!-- Foto do Produto -->
             <div style="width:60px;height:60px;flex-shrink:0;border:1px solid #e5e7eb;border-radius:6px;overflow:hidden;background:#f9fafb;">
               ${imgHtml}
             </div>
-            
+
             <!-- Informações do Produto -->
             <div style="flex:1;min-width:0;">
               <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;flex-wrap:wrap;">
@@ -38879,25 +38975,25 @@ async function renderModalCarrinhoCompras() {
               </div>
             </div>
           </div>
-          
+
           </div><!-- fim lado esquerdo -->
-          
+
           <!-- Lado Direito: Quantidade e Botões na MESMA LINHA -->
           <div class="carrinho-item-controles" style="display:flex;gap:6px;align-items:flex-end;">
-          
+
           <!-- Campo Quantidade -->
           <div class="carrinho-item-qtd" style="width:90px;">
             <label style="color:#6b7280;font-weight:500;display:block;margin-bottom:2px;font-size:11px;">
               <i class="fa-solid fa-boxes-stacked" style="margin-right:3px;font-size:10px;"></i>Qtd
             </label>
-            <input type="number" class="carrinho-input-quantidade" data-idx="${idx}" 
+            <input type="number" class="carrinho-input-quantidade" data-idx="${idx}"
                    value="${item.quantidade}" min="1"
                    style="width:100%;padding:4px 6px;border:1px solid #d1d5db;border-radius:4px;font-size:11px;font-weight:600;text-align:center;">
           </div>
-          
+
           <!-- Botões de Ação na MESMA LINHA -->
           <div class="carrinho-item-botoes" style="display:flex;gap:6px;align-items:flex-end;">
-          <button class="modal-remover-item-btn carrinho-item-acao-remover" data-idx="${idx}" 
+          <button class="modal-remover-item-btn carrinho-item-acao-remover" data-idx="${idx}"
                   style="background:#ef4444;color:white;border:none;width:32px;height:32px;border-radius:6px;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:all 0.2s;"
                   onmouseover="this.style.background='#dc2626';" onmouseout="this.style.background='#ef4444';"
                   title="Remover item">
@@ -38921,13 +39017,13 @@ async function renderModalCarrinhoCompras() {
             </button>
           </div>
           </div>
-          
+
           </div><!-- fim lado direito -->
         </div><!-- fim linha superior -->
-        
+
         <!-- Campos Expandíveis (sempre em coluna única) -->
         <div class="carrinho-detalhes-expandiveis" data-idx="${idx}" style="display:none;flex-direction:column;gap:4px;font-size:11px;padding-top:8px;border-top:1px solid #f3f4f6;">
-        
+
         <div>
           <label style="color:#6b7280;font-weight:500;display:flex;align-items:center;gap:6px;margin-bottom:2px;">
             <i class="fa-solid fa-tags" style="color:#ec4899;width:12px;font-size:10px;"></i>Categoria da Compra *
@@ -38943,7 +39039,7 @@ async function renderModalCarrinhoCompras() {
                  style="display:none;position:absolute;top:100%;left:0;right:0;background:white;border:1px solid #d1d5db;border-top:none;border-radius:0 0 6px 6px;max-height:260px;overflow-y:auto;z-index:1200;box-shadow:0 6px 12px rgba(0,0,0,0.12);padding:8px;"></div>
           </div>
         </div>
-        
+
         <div>
           <label style="color:#6b7280;font-weight:500;display:flex;align-items:center;gap:6px;margin-bottom:2px;">
             <i class="fa-solid fa-sort-alpha-down" style="color:#8b5cf6;width:12px;font-size:10px;"></i>NP
@@ -38953,8 +39049,8 @@ async function renderModalCarrinhoCompras() {
               ${opcoesGrupoHtml}
             </select>
         </div>
-        
-        
+
+
         ${temAnexo ? `
         <div style="background:#dbeafe;padding:4px 8px;border-radius:4px;margin-top:2px;">
           <i class="fa-solid fa-paperclip" style="color:#2563eb;font-size:10px;margin-right:4px;"></i>
@@ -38963,25 +39059,25 @@ async function renderModalCarrinhoCompras() {
           </span>
         </div>
         ` : ''}
-        
+
         </div><!-- fim carrinho-detalhes-expandiveis -->
-      
+
       </div>`;
   };
-  
+
   const gruposNP = carrinhoFiltrado.reduce((acc, item, idx) => {
     const chave = item.grupo_requisicao || item.np || 'Sem NP';
     if (!acc[chave]) acc[chave] = [];
     acc[chave].push({ item, idx });
     return acc;
   }, {});
-  
+
   const ordemGrupos = Object.keys(gruposNP).sort((a, b) => {
     if (a === 'Sem NP') return 1;
     if (b === 'Sem NP') return -1;
     return a.localeCompare(b);
   });
-  
+
   cardsContainer.innerHTML = ordemGrupos.map((np) => {
     const itensGrupo = gruposNP[np] || [];
     const cardsHtml = itensGrupo.map(({ item, idx }) => renderItemCarrinhoCard(item, idx)).join('');
@@ -38996,41 +39092,41 @@ async function renderModalCarrinhoCompras() {
         </div>
       </div>`;
   }).join('');
-  
+
   if (btnLimpar) btnLimpar.style.display = 'inline-flex';
   if (btnEnviar) btnEnviar.style.display = 'inline-flex';
-  
+
   // Bind botões de expandir/recolher
   cardsContainer.querySelectorAll('.carrinho-toggle-detalhes-btn').forEach(btn => {
     btn.addEventListener('click', async () => {
       const idx = btn.getAttribute('data-idx');
       const detalhesDiv = cardsContainer.querySelector(`.carrinho-detalhes-expandiveis[data-idx="${idx}"]`);
       const icon = btn.querySelector('i');
-      
-      console.log('[DEBUG CATEGORIA] Botão expandir clicado', { 
-        idx, 
-        detalhesDiv_existe: !!detalhesDiv 
+
+      console.log('[DEBUG CATEGORIA] Botão expandir clicado', {
+        idx,
+        detalhesDiv_existe: !!detalhesDiv
       });
-      
+
       if (detalhesDiv) {
         if (detalhesDiv.style.display === 'none' || !detalhesDiv.style.display) {
           detalhesDiv.style.display = 'flex';
           icon.className = 'fa-solid fa-chevron-up';
           btn.style.background = '#10b981';
-          
+
           // Busca e aplica categoria da última compra deste produto
           const itemIdx = parseInt(idx, 10);
           const item = window.carrinhoCompras[itemIdx];
-          
-          console.log('[DEBUG CATEGORIA] Item do carrinho:', { 
-            itemIdx, 
+
+          console.log('[DEBUG CATEGORIA] Item do carrinho:', {
+            itemIdx,
             item_existe: !!item,
             produto_codigo: item?.produto_codigo,
             codigo_omie: item?.codigo_omie,
             categoria_atual: item?.categoria_compra,
             item_completo: item
           });
-          
+
           if (item && item.produto_codigo) {
             console.log('[DEBUG CATEGORIA] Chamando aplicarCategoriaCompraPorProdutoCarrinho');
             await aplicarCategoriaCompraPorProdutoCarrinho(item.produto_codigo, itemIdx);
@@ -39045,7 +39141,7 @@ async function renderModalCarrinhoCompras() {
       }
     });
   });
-  
+
   // Bind botões de remover no modal
   cardsContainer.querySelectorAll('.modal-remover-item-btn').forEach(btn => {
     btn.addEventListener('click', async () => {
@@ -39059,7 +39155,7 @@ async function renderModalCarrinhoCompras() {
       }
     });
   });
-  
+
   // Bind inputs editáveis - atualiza carrinho em tempo real
   cardsContainer.querySelectorAll('.carrinho-input-quantidade').forEach(input => {
     input.addEventListener('change', async (e) => {
@@ -39072,7 +39168,7 @@ async function renderModalCarrinhoCompras() {
       }
     });
   });
-  
+
   cardsContainer.querySelectorAll('.carrinho-input-prazo').forEach(input => {
     input.addEventListener('change', async (e) => {
       const idx = parseInt(e.target.getAttribute('data-idx'), 10);
@@ -39083,7 +39179,7 @@ async function renderModalCarrinhoCompras() {
       }
     });
   });
-  
+
   cardsContainer.querySelectorAll('.carrinho-input-departamento').forEach(input => {
     input.addEventListener('change', async (e) => {
       const idx = parseInt(e.target.getAttribute('data-idx'), 10);
@@ -39094,7 +39190,7 @@ async function renderModalCarrinhoCompras() {
       }
     });
   });
-  
+
   cardsContainer.querySelectorAll('.carrinho-input-objetivo').forEach(input => {
     input.addEventListener('blur', async (e) => {
       const idx = parseInt(e.target.getAttribute('data-idx'), 10);
@@ -39105,7 +39201,7 @@ async function renderModalCarrinhoCompras() {
       }
     });
   });
-  
+
   cardsContainer.querySelectorAll('.carrinho-input-categoria').forEach(input => {
     input.addEventListener('change', async (e) => {
       const idx = parseInt(e.target.getAttribute('data-idx'), 10);
@@ -39116,12 +39212,12 @@ async function renderModalCarrinhoCompras() {
       }
     });
   });
-  
+
   cardsContainer.querySelectorAll('.carrinho-input-np').forEach(input => {
     input.addEventListener('change', async (e) => {
       const idx = parseInt(e.target.getAttribute('data-idx'), 10);
       const valorSelecionado = e.target.value;
-      
+
       if (window.carrinhoCompras[idx]) {
         // Se selecionou "Criar Novo NP", gera um novo grupo_requisicao
         if (valorSelecionado === '__NOVO__') {
@@ -39132,16 +39228,16 @@ async function renderModalCarrinhoCompras() {
               headers: { 'Content-Type': 'application/json' },
               credentials: 'include'
             });
-            
+
             if (!resp.ok) {
               throw new Error('Erro ao gerar novo grupo');
             }
-            
+
             const data = await resp.json();
             const novoGrupo = data.grupo_requisicao;
-            
+
             console.log(`[Carrinho] Novo grupo_requisicao criado: ${novoGrupo}`);
-            
+
             // Atualiza o item com o novo grupo
             window.carrinhoCompras[idx].grupo_requisicao = novoGrupo;
             window.carrinhoCompras[idx].np = novoGrupo;
@@ -39167,7 +39263,7 @@ async function renderModalCarrinhoCompras() {
       }
     });
   });
-  
+
   cardsContainer.querySelectorAll('.carrinho-input-responsavel').forEach(input => {
     input.addEventListener('change', async (e) => {
       const idx = parseInt(e.target.getAttribute('data-idx'), 10);
@@ -39178,7 +39274,7 @@ async function renderModalCarrinhoCompras() {
       }
     });
   });
-  
+
   cardsContainer.querySelectorAll('.carrinho-input-retorno').forEach(input => {
     input.addEventListener('change', async (e) => {
       const idx = parseInt(e.target.getAttribute('data-idx'), 10);
@@ -39189,7 +39285,7 @@ async function renderModalCarrinhoCompras() {
       }
     });
   });
-  
+
   cardsContainer.querySelectorAll('.carrinho-input-requisicao').forEach(input => {
     input.addEventListener('change', async (e) => {
       const idx = parseInt(e.target.getAttribute('data-idx'), 10);
@@ -39201,7 +39297,7 @@ async function renderModalCarrinhoCompras() {
       }
     });
   });
-  
+
   // Popula e bind dropdown de Categoria da Compra
   await popularDropdownCategoriaCompraCarrinho(cardsContainer);
 }
@@ -39215,22 +39311,22 @@ async function popularDropdownCategoriaCompraCarrinho(container) {
       console.error('[CARRINHO] Erro ao buscar categorias:', resp.status);
       return;
     }
-    
+
     const data = await resp.json();
     const categorias = data.categorias || [];
-    
+
     // Filtra apenas categorias com formato x.xx.xx (3 níveis)
     const categoriasFiltradas = categorias.filter(cat => {
       const codigo = String(cat.codigo || '').trim();
       const partes = codigo.split('.');
       return partes.length === 3 && partes.every(p => p.length > 0);
     });
-    
+
     console.log('[CARRINHO] Categorias carregadas:', {
       total: categorias.length,
       filtradas: categoriasFiltradas.length
     });
-    
+
     // Popula todos os dropdowns
     container.querySelectorAll('.carrinho-item-categoria-wrapper').forEach(wrapper => {
       const idx = wrapper.getAttribute('data-idx');
@@ -39238,18 +39334,18 @@ async function popularDropdownCategoriaCompraCarrinho(container) {
       const btnText = document.getElementById(`carrinhoItemCategoriaCompraBtnText-${idx}`);
       const hiddenInput = document.getElementById(`carrinhoItemCategoriaCompra-${idx}`);
       const btn = wrapper.querySelector('.carrinho-item-categoria-btn');
-      
+
       if (!dropdown || !btn) return;
-      
+
       // Popula dropdown com opções
       dropdown.innerHTML = categoriasFiltradas.map(cat => `
-        <div class="carrinho-categoria-option" data-codigo="${window.escapeHtml(cat.codigo)}" 
+        <div class="carrinho-categoria-option" data-codigo="${window.escapeHtml(cat.codigo)}"
              data-descricao="${window.escapeHtml(cat.descricao)}" data-idx="${idx}"
              style="padding:6px 10px;cursor:pointer;font-size:11px;border-radius:4px;transition:background 0.15s;color:#111827;">
           <strong style="color:var(--active-color);">${window.escapeHtml(cat.codigo)}</strong> - <span style="color:#111827;">${window.escapeHtml(cat.descricao)}</span>
         </div>
       `).join('');
-      
+
       // Atualiza texto do botão se já tiver valor
       const item = window.carrinhoCompras[parseInt(idx, 10)];
       if (item && item.categoria_compra_nome) {
@@ -39262,53 +39358,53 @@ async function popularDropdownCategoriaCompraCarrinho(container) {
           btnText.style.color = 'var(--active-color)';
         }
       }
-      
+
       // Toggle dropdown ao clicar no botão
       btn.addEventListener('click', (e) => {
         e.stopPropagation();
         const isVisible = dropdown.style.display === 'block';
-        
+
         // Fecha todos os outros dropdowns
         document.querySelectorAll('.carrinho-item-categoria-dropdown').forEach(d => {
           d.style.display = 'none';
         });
-        
+
         // Toggle este dropdown
         dropdown.style.display = isVisible ? 'none' : 'block';
       });
-      
+
       // Selecionar opção
       dropdown.querySelectorAll('.carrinho-categoria-option').forEach(option => {
         option.addEventListener('click', async (e) => {
           e.stopPropagation();
-          
+
           const codigo = option.getAttribute('data-codigo');
           const descricao = option.getAttribute('data-descricao');
           const itemIdx = parseInt(option.getAttribute('data-idx'), 10);
-          
+
           console.log('[CARRINHO] Categoria selecionada:', { codigo, descricao, itemIdx });
-          
+
           // Atualiza no carrinho
           if (window.carrinhoCompras[itemIdx]) {
             window.carrinhoCompras[itemIdx].categoria_compra_codigo = codigo;
             window.carrinhoCompras[itemIdx].categoria_compra = codigo;
             window.carrinhoCompras[itemIdx].categoria_compra_nome = `${codigo} - ${descricao}`;
-            
+
             // Salva no banco
             await atualizarItemCarrinhoNoBanco(window.carrinhoCompras[itemIdx]);
-            
+
             // Atualiza UI
             btnText.textContent = `${codigo} - ${descricao}`;
             btnText.style.color = 'var(--active-color)';
             if (hiddenInput) hiddenInput.value = codigo;
-            
+
             console.log('[CARRINHO] Categoria atualizada no item', itemIdx);
           }
-          
+
           // Fecha dropdown
           dropdown.style.display = 'none';
         });
-        
+
         // Hover effect
         option.addEventListener('mouseenter', () => {
           option.style.background = 'var(--bg-hover)';
@@ -39318,7 +39414,7 @@ async function popularDropdownCategoriaCompraCarrinho(container) {
         });
       });
     });
-    
+
     // Fecha dropdown ao clicar fora
     document.addEventListener('click', (e) => {
       if (!e.target.closest('.carrinho-item-categoria-wrapper')) {
@@ -39327,7 +39423,7 @@ async function popularDropdownCategoriaCompraCarrinho(container) {
         });
       }
     });
-    
+
   } catch (err) {
     console.error('[CARRINHO] Erro ao popular dropdown de categorias:', err);
   }
@@ -39348,15 +39444,15 @@ function limparCarrinhoModal() {
 function renderModalCarrinhoLista() {
   const tbody = document.getElementById('modalCarrinhoListaTbody');
   if (!tbody) return;
-  
+
   const carrinho = window.carrinhoCompras || [];
   const selectFiltro = document.getElementById('filtroCarrinhoNP');
   const npSelecionado = selectFiltro ? selectFiltro.value : '';
   const carrinhoFiltrado = filtrarCarrinhoPorNP(npSelecionado);
-  
+
   // Atualiza select de NP
   atualizarSelectFiltroNP();
-  
+
   if (carrinho.length === 0) {
     tbody.innerHTML = `
       <tr>
@@ -39367,7 +39463,7 @@ function renderModalCarrinhoLista() {
       </tr>`;
     return;
   }
-  
+
   if (carrinhoFiltrado.length === 0) {
     tbody.innerHTML = `
       <tr>
@@ -39378,27 +39474,27 @@ function renderModalCarrinhoLista() {
       </tr>`;
     return;
   }
-  
+
   tbody.innerHTML = carrinhoFiltrado.map((item, filterIdx) => {
     // Encontra o índice real do item no carrinho completo
     const idx = window.carrinhoCompras.indexOf(item);
     // Verifica se tem imagem
-    const temImagem = item.url_imagem && 
-                      item.url_imagem.trim() && 
+    const temImagem = item.url_imagem &&
+                      item.url_imagem.trim() &&
                       (item.url_imagem.startsWith('http://') || item.url_imagem.startsWith('https://'));
-    
+
     // Prepara string para onclick ANTES de stringify
     const infoProdutoTexto = window.escapeHtml(item.produto_codigo);
-    
-    const imgHtml = temImagem ? 
-      `<img src="${item.url_imagem}" alt="${window.escapeHtml(item.produto_descricao)}" 
+
+    const imgHtml = temImagem ?
+      `<img src="${item.url_imagem}" alt="${window.escapeHtml(item.produto_descricao)}"
             style="width:40px;height:40px;object-fit:cover;border-radius:4px;cursor:zoom-in;"
             onclick='if(typeof ampliarImagemProduto === "function") ampliarImagemProduto(${JSON.stringify(item.url_imagem)}, ${JSON.stringify(infoProdutoTexto)});event.stopPropagation();'
             onerror="this.style.display='none';">` :
       `<div style="width:40px;height:40px;display:flex;align-items:center;justify-content:center;background:#f3f4f6;border-radius:4px;">
         <i class="fa-solid fa-image" style="color:#d1d5db;font-size:16px;"></i>
       </div>`;
-    
+
     return `
       <tr>
         <td style="position:sticky;left:0;z-index:9;background:#1f2937;text-align:center;padding:8px;">${imgHtml}</td>
@@ -39429,7 +39525,7 @@ function renderModalCarrinhoLista() {
           </select>
         </td>
         <td>
-          <input type="text" class="lista-input-objetivo" data-idx="${idx}" 
+          <input type="text" class="lista-input-objetivo" data-idx="${idx}"
                  value="${window.escapeHtml(item.objetivo_compra || '')}" placeholder="Objetivo"
                  style="width:100%;padding:4px;border:1px solid #d1d5db;border-radius:4px;font-size:11px;">
         </td>
@@ -39437,7 +39533,7 @@ function renderModalCarrinhoLista() {
           <select class="lista-input-categoria" data-idx="${idx}"
                   style="width:100%;padding:4px;border:1px solid #d1d5db;border-radius:4px;font-size:11px;">
             <option value="">Selecione...</option>
-            ${(window.categoriasCompra || []).map(cat => 
+            ${(window.categoriasCompra || []).map(cat =>
               `<option value="${cat.codigo}" ${item.categoria_compra === cat.codigo ? 'selected' : ''}>${window.escapeHtml(cat.descricao)}</option>`
             ).join('')}
           </select>
@@ -39477,7 +39573,7 @@ function renderModalCarrinhoLista() {
           </select>
         </td>
         <td style="text-align:center;">
-          <button class="lista-remover-item-btn" data-idx="${idx}" 
+          <button class="lista-remover-item-btn" data-idx="${idx}"
                   style="background:#ef4444;color:white;border:none;padding:6px 8px;border-radius:4px;cursor:pointer;"
                   title="Remover">
             <i class="fa-solid fa-trash" style="font-size:11px;"></i>
@@ -39485,7 +39581,7 @@ function renderModalCarrinhoLista() {
         </td>
       </tr>`;
   }).join('');
-  
+
   // Event listeners para os inputs da lista
   tbody.querySelectorAll('.lista-input-quantidade').forEach(input => {
     input.addEventListener('change', async (e) => {
@@ -39498,7 +39594,7 @@ function renderModalCarrinhoLista() {
       }
     });
   });
-  
+
   tbody.querySelectorAll('.lista-input-prazo').forEach(input => {
     input.addEventListener('change', async (e) => {
       const idx = parseInt(e.target.getAttribute('data-idx'), 10);
@@ -39509,7 +39605,7 @@ function renderModalCarrinhoLista() {
       }
     });
   });
-  
+
   tbody.querySelectorAll('.lista-input-departamento').forEach(input => {
     input.addEventListener('change', async (e) => {
       const idx = parseInt(e.target.getAttribute('data-idx'), 10);
@@ -39528,7 +39624,7 @@ function renderModalCarrinhoLista() {
     input.addEventListener('focus', selecionarTextoObjetivoItem);
     input.addEventListener('click', selecionarTextoObjetivoItem);
   });
-  
+
   tbody.querySelectorAll('.lista-input-objetivo').forEach(input => {
     input.addEventListener('change', async (e) => {
       const idx = parseInt(e.target.getAttribute('data-idx'), 10);
@@ -39539,7 +39635,7 @@ function renderModalCarrinhoLista() {
       }
     });
   });
-  
+
   tbody.querySelectorAll('.lista-input-objetivo').forEach(input => {
     input.addEventListener('change', async (e) => {
       const idx = parseInt(e.target.getAttribute('data-idx'), 10);
@@ -39550,7 +39646,7 @@ function renderModalCarrinhoLista() {
       }
     });
   });
-  
+
   tbody.querySelectorAll('.lista-input-categoria').forEach(input => {
     input.addEventListener('change', async (e) => {
       const idx = parseInt(e.target.getAttribute('data-idx'), 10);
@@ -39561,7 +39657,7 @@ function renderModalCarrinhoLista() {
       }
     });
   });
-  
+
   tbody.querySelectorAll('.lista-input-np').forEach(input => {
     input.addEventListener('change', async (e) => {
       const idx = parseInt(e.target.getAttribute('data-idx'), 10);
@@ -39573,7 +39669,7 @@ function renderModalCarrinhoLista() {
       }
     });
   });
-  
+
   tbody.querySelectorAll('.lista-input-retorno').forEach(input => {
     input.addEventListener('change', async (e) => {
       const idx = parseInt(e.target.getAttribute('data-idx'), 10);
@@ -39584,7 +39680,7 @@ function renderModalCarrinhoLista() {
       }
     });
   });
-  
+
   tbody.querySelectorAll('.lista-input-requisicao').forEach(input => {
     input.addEventListener('change', async (e) => {
       const idx = parseInt(e.target.getAttribute('data-idx'), 10);
@@ -39595,7 +39691,7 @@ function renderModalCarrinhoLista() {
       }
     });
   });
-  
+
   tbody.querySelectorAll('.lista-input-responsavel').forEach(input => {
     input.addEventListener('change', async (e) => {
       const idx = parseInt(e.target.getAttribute('data-idx'), 10);
@@ -39606,7 +39702,7 @@ function renderModalCarrinhoLista() {
       }
     });
   });
-  
+
   tbody.querySelectorAll('.lista-remover-item-btn').forEach(btn => {
     btn.addEventListener('click', async () => {
       const idx = parseInt(btn.getAttribute('data-idx'), 10);
@@ -39633,7 +39729,7 @@ async function enviarPedidoModal() {
   const solicitanteAtual = (document.getElementById('userNameDisplay')?.textContent || '').trim()
     || window.__sessionUser?.username
     || 'Usuário';
-  
+
   // Captura valores dos campos globais do modal
   const departamentoGlobal = document.getElementById('carrinhoDepartamentoGlobal')?.value?.trim() || null;
   const centroCustoGlobal = document.getElementById('carrinhoCentroCustoGlobal')?.value?.trim() || null;
@@ -39672,7 +39768,7 @@ async function enviarPedidoModal() {
       throw errAnexo;
     }
   }
-  
+
   console.log('[Enviar Pedido] Valores globais capturados:', {
     departamento: departamentoGlobal,
     centro_custo: centroCustoGlobal,
@@ -39683,7 +39779,7 @@ async function enviarPedidoModal() {
     compra_realizada: compraRealizada,
     n_nota_fiscal: notaFiscalGlobal
   });
-  
+
   // Aplica os valores globais a TODOS os itens do carrinho
   carrinho.forEach((item, idx) => {
     if (departamentoGlobal) {
@@ -39728,12 +39824,12 @@ async function enviarPedidoModal() {
       item.requisicao_direta = true;
     }
   });
-  
+
   const statusEl = document.getElementById('modalComprasFormStatus');
   const btnEnviar = document.getElementById('modalComprasEnviarPedidoBtn');
   const originalBtnHtml = btnEnviar ? btnEnviar.innerHTML : '';
   let respostasErro = 0;
-  
+
   try {
     // Comentário: segue o mesmo fluxo do botão "Enviar requisição" do modal Cotado
     if (btnEnviar) {
@@ -39748,11 +39844,11 @@ async function enviarPedidoModal() {
       statusEl.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Enviando solicitação...';
     }
     atualizarBlocoCompraOmieModal();
-    
+
     // Separar itens: com requisição direta e sem requisição direta
     const itensComRequisicao = carrinho.filter(item => item.requisicao_direta === true);
     const itensSemRequisicao = carrinho.filter(item => item.requisicao_direta !== true);
-    
+
     // Se há itens com requisição direta, agrupá-los por NP
     const gruposNP = {};
     itensComRequisicao.forEach(item => {
@@ -39762,45 +39858,45 @@ async function enviarPedidoModal() {
       }
       gruposNP[np].push(item);
     });
-    
+
     // Criar lista de solicitações: uma por grupo de NP (requisição direta) + uma para os demais
     const solicitacoes = [];
-    
+
     // Adicionar grupos de NP com requisição direta
     Object.entries(gruposNP).forEach(([np, itens]) => {
       solicitacoes.push({ itens, np, requisicaoDireta: true });
     });
-    
+
     // Adicionar itens sem requisição direta como uma solicitação única
     if (itensSemRequisicao.length > 0) {
       solicitacoes.push({ itens: itensSemRequisicao, np: null, requisicaoDireta: false });
     }
-    
+
     console.log(`[Compras] Enviando ${solicitacoes.length} solicitação(ões):`, solicitacoes);
-    
+
     // Enviar todas as solicitações
     let respostasOk = 0;
     respostasErro = 0;
     const erros = [];
     const numerosCompraOmieGerados = [];
-    
+
     for (let i = 0; i < solicitacoes.length; i++) {
       const sol = solicitacoes[i];
-      const descricao = sol.requisicaoDireta 
+      const descricao = sol.requisicaoDireta
         ? `Solicitação ${i+1} (NP: ${sol.np}, ${sol.itens.length} itens com Requisição Direta)`
         : `Solicitação ${i+1} (${sol.itens.length} itens sem Requisição Direta)`;
-      
+
       try {
         const itensPayload = (sol.itens || []).map((item) => {
           const itemSolicitante = String(item.solicitante || solicitanteAtual || '').trim();
           const objetivoBase = String(item.objetivo_compra || '').trim();
           const respBase = String(item.resp_inspecao_recebimento || '').trim();
-          
+
           // Objetivo: usa o que foi digitado, ou padrão
           const objetivoFinal = objetivoBase || 'Compra via catálogo Omie';
           // Inspeção: usa o que foi digitado, ou padrão
           const respFinal = respBase || `a pedido de: ${itemSolicitante}`;
-          
+
           // obsItem: formatação limpa com os dados
           const obsItem = `Solicitante: ${itemSolicitante}\nObjetivo: ${objetivoFinal}\nA pedido de: ${respFinal}`;
 
@@ -39822,9 +39918,9 @@ async function enviarPedidoModal() {
             n_nota_fiscal: notaFiscalGlobal
           })
         });
-        
+
         const result = await response.json();
-        
+
         if (result.ok) {
           respostasOk++;
           const numerosRetornados = Array.isArray(result.numeros_compra_omie) ? result.numeros_compra_omie : [];
@@ -39845,7 +39941,7 @@ async function enviarPedidoModal() {
         console.error(`[Compras] ✗ ${descricao}:`, err);
       }
     }
-    
+
     // Atualizar status
     if (statusEl) {
       if (respostasErro === 0) {
@@ -39876,7 +39972,7 @@ async function enviarPedidoModal() {
       btnEnviar.style.cursor = 'pointer';
       btnEnviar.innerHTML = originalBtnHtml;
     }
-    
+
     // Sucesso total retorna ao catalogo sem interromper o fluxo com alert nativo.
     if (respostasErro === 0) {
       window.carrinhoCompras = [];
@@ -39920,13 +40016,13 @@ async function loadFornecedores() {
   try {
     const response = await fetch('/api/fornecedores?limit=5000');
     const data = await response.json();
-    
+
     if (data.ok && Array.isArray(data.fornecedores)) {
       // Filtrar apenas fornecedores ativos (que têm a tag "Fornecedor" e inativo = false)
       window.fornecedoresCache = data.fornecedores.filter(f => {
         // Verifica se está ativo
         if (f.inativo === true) return false;
-        
+
         // Verifica se tem tag Fornecedor
         if (!f.tags || !Array.isArray(f.tags)) return false;
         return f.tags.some(tag => {
@@ -39938,7 +40034,7 @@ async function loadFornecedores() {
           }
         });
       });
-      
+
       console.log(`[Compras] ${window.fornecedoresCache.length} fornecedores carregados`);
     }
   } catch (err) {
@@ -39951,35 +40047,35 @@ function setupFornecedorAutocomplete() {
   const input = document.getElementById('modalComprasFornecedor');
   const hiddenId = document.getElementById('modalComprasFornecedorId');
   const list = document.getElementById('modalComprasFornecedorList');
-  
+
   if (!input || !list) return;
-  
+
   // Evento de digitação - filtra em tempo real
   input.addEventListener('input', function() {
     const query = this.value.trim().toLowerCase();
     hiddenId.value = ''; // Limpa ID ao digitar
-    
+
     if (query.length < 2) {
       list.style.display = 'none';
       return;
     }
-    
+
     // Filtra fornecedores pelo nome_fantasia
     const filtered = window.fornecedoresCache.filter(f => {
       const nome = (f.nome_fantasia || '').toLowerCase();
       return nome.includes(query);
     });
-    
+
     if (filtered.length === 0) {
       list.innerHTML = '<div style="padding:12px;color:#666;text-align:center;font-size:13px;">Nenhum fornecedor encontrado</div>';
       list.style.display = 'block';
       return;
     }
-    
+
     // Renderiza lista filtrada (máximo 10 resultados)
     list.innerHTML = filtered.slice(0, 10).map(f => `
-      <div 
-        class="fornecedor-item" 
+      <div
+        class="fornecedor-item"
         data-id="${f.codigo_cliente_omie}"
         data-nome="${(f.nome_fantasia || '').replace(/"/g, '&quot;')}"
         style="
@@ -39997,9 +40093,9 @@ function setupFornecedorAutocomplete() {
         </div>
       </div>
     `).join('');
-    
+
     list.style.display = 'block';
-    
+
     // Adiciona evento de clique nos itens
     list.querySelectorAll('.fornecedor-item').forEach(item => {
       item.addEventListener('click', function() {
@@ -40011,7 +40107,7 @@ function setupFornecedorAutocomplete() {
       });
     });
   });
-  
+
   // Fecha lista ao clicar fora
   document.addEventListener('click', function(e) {
     if (!input.contains(e.target) && !list.contains(e.target)) {
@@ -40023,51 +40119,51 @@ function setupFornecedorAutocomplete() {
 // Configura autocomplete de fornecedores para campos na tabela de solicitações
 function setupFornecedorAutocompleteTabela() {
   const inputs = document.querySelectorAll('.compras-fornecedor-input');
-  
+
   console.log('[Fornecedores] Configurando autocomplete para', inputs.length, 'campos');
   console.log('[Fornecedores] Cache contém', window.fornecedoresCache?.length || 0, 'fornecedores');
-  
+
   inputs.forEach(input => {
     const itemId = input.getAttribute('data-id');
     const hiddenId = document.querySelector(`.compras-fornecedor-id[data-id="${itemId}"]`);
     const list = document.querySelector(`.compras-fornecedor-list[data-item-id="${itemId}"]`);
-    
+
     if (!list) return;
-    
+
     // Evento de digitação - filtra em tempo real
     input.addEventListener('input', function() {
       const query = this.value.trim().toLowerCase();
       if (hiddenId) hiddenId.value = ''; // Limpa ID ao digitar
-      
+
       console.log('[Fornecedor] Digitado:', query, '| Cache:', window.fornecedoresCache?.length || 0);
-      
+
       // Mostra botão salvar
       const saveBtn = document.getElementById(`compras-save-btn-${itemId}`);
       if (saveBtn) saveBtn.style.display = 'block';
-      
+
       if (query.length < 2) {
         list.style.display = 'none';
         return;
       }
-      
+
       // Filtra fornecedores pelo nome_fantasia
       const filtered = window.fornecedoresCache.filter(f => {
         const nome = (f.nome_fantasia || '').toLowerCase();
         return nome.includes(query);
       });
-      
+
       console.log('[Fornecedor] Filtrados:', filtered.length, 'resultados');
-      
+
       if (filtered.length === 0) {
         list.innerHTML = '<div style="padding:8px;color:#666;text-align:center;font-size:12px;">Nenhum fornecedor encontrado</div>';
         list.style.display = 'block';
         return;
       }
-      
+
       // Renderiza lista filtrada (máximo 10 resultados)
       list.innerHTML = filtered.slice(0, 10).map(f => `
-        <div 
-          class="fornecedor-item-tabela" 
+        <div
+          class="fornecedor-item-tabela"
           data-id="${f.codigo_cliente_omie}"
           data-nome="${(f.nome_fantasia || '').replace(/"/g, '&quot;')}"
           style="
@@ -40085,9 +40181,9 @@ function setupFornecedorAutocompleteTabela() {
           </div>
         </div>
       `).join('');
-      
+
       list.style.display = 'block';
-      
+
       // Adiciona evento de clique nos itens
       list.querySelectorAll('.fornecedor-item-tabela').forEach(item => {
         item.addEventListener('click', function(e) {
@@ -40100,7 +40196,7 @@ function setupFornecedorAutocompleteTabela() {
         });
       });
     });
-    
+
     // Fecha lista ao clicar fora
     document.addEventListener('click', function(e) {
       if (!input.contains(e.target) && !list.contains(e.target)) {
@@ -40120,12 +40216,12 @@ async function abrirModalCompras() {
   const spinner = document.getElementById('comprasModalSpinner');
   const form = document.getElementById('comprasModalForm');
   if (!modal) return;
-  
+
   // MELHORIA PERFORMANCE: Mostra modal e formulário imediatamente (sem aguardar carregamento)
   modal.style.display = 'flex';
   if (spinner) spinner.style.display = 'none';  // Não mostra spinner
   if (form) form.style.display = 'block';       // Mostra formulário de imediato
-  
+
   // Limpa campos com segurança (verifica se existem antes de limpar)
   const codigo = document.getElementById('modalComprasCodigo');
   const descSelecionada = document.getElementById('modalComprasDescricaoSelecionada');
@@ -40138,7 +40234,7 @@ async function abrirModalCompras() {
   const observacao = document.getElementById('modalComprasObservacao');
   const departamento = document.getElementById('modalComprasDepartamento');
   const centroCusto = document.getElementById('modalComprasCentroCusto');
-  
+
   if (codigo) codigo.value = '';
   if (descSelecionada) descSelecionada.value = '';
   if (codigoProdutoOmie) codigoProdutoOmie.value = '';
@@ -40150,11 +40246,11 @@ async function abrirModalCompras() {
   if (observacao) observacao.value = '';
   if (departamento) departamento.value = '';
   if (centroCusto) centroCusto.value = '';
-  
+
   // Define "Não" como padrão em "Necessário retorno das cotações realizadas?"
   const retornoCotacao = document.getElementById('modalComprasRetornoCotacao');
   if (retornoCotacao) retornoCotacao.value = 'Não';
-  
+
   // Limpa anexo
   const inputAnexo = document.getElementById('modalComprasAnexo');
   const anexoPreview = document.getElementById('modalComprasAnexoPreview');
@@ -40162,13 +40258,13 @@ async function abrirModalCompras() {
   if (inputAnexo) inputAnexo.value = '';
   if (anexoPreview) anexoPreview.style.display = 'none';
   if (anexoLabel) anexoLabel.textContent = 'Clique para selecionar arquivo';
-  
+
   // Garante que todos os campos estejam visíveis ao abrir o modal
   ocultarCamposComprasProdutoExistente(false);
-  
+
   // Foca no primeiro campo
   setTimeout(() => document.getElementById('modalComprasCodigo')?.focus(), 100);
-  
+
   // CARREGA DADOS DE FORMA ASSÍNCRONA (em background, não bloqueia a abertura do modal)
   Promise.all([
     carregarDepartamentosECentros(),
@@ -40249,41 +40345,41 @@ async function carregarDepartamentosECentros() {
     const respDept = await fetch('/api/compras/departamentos');
     const dataDept = await respDept.json();
     const selectDept = document.getElementById('modalComprasDepartamento');
-    
+
     if (selectDept && dataDept.ok) {
       selectDept.innerHTML = '<option value="">Selecione o departamento</option>' +
-        (dataDept.departamentos || []).map(d => 
+        (dataDept.departamentos || []).map(d =>
           `<option value="${window.escapeHtml(d.nome)}">${window.escapeHtml(d.nome)}</option>`
         ).join('');
-      
+
       // Adiciona evento de mudança para filtrar categorias
       selectDept.addEventListener('change', function() {
         atualizarCategoriasPorDepartamento(this.value);
         verificarFamiliaObrigatoria(); // Verifica se família é obrigatória
       });
     }
-    
+
     // Inicializa o select de categorias vazio
     const selectCentros = document.getElementById('modalComprasCentroCusto');
     if (selectCentros) {
       selectCentros.innerHTML = '<option value="">Selecione departamento</option>';
-      
+
       // Adiciona evento de mudança para verificar se família é obrigatória
       selectCentros.addEventListener('change', verificarFamiliaObrigatoria);
     }
-    
+
     // Carrega famílias de produtos
     const respFamilias = await fetch('/api/compras/familias');
     const dataFamilias = await respFamilias.json();
     const selectFamilias = document.getElementById('modalComprasFamilia');
-    
+
     if (selectFamilias && dataFamilias.ok) {
       selectFamilias.innerHTML = '<option value="">Selecione a família...</option>' +
-        (dataFamilias.familias || []).map(f => 
+        (dataFamilias.familias || []).map(f =>
           `<option value="${f.codigo}">${window.escapeHtml(f.nome_familia)}</option>`
         ).join('');
     }
-    
+
     // Carrega status de compras (armazena globalmente)
     const respStatus = await fetch('/api/compras/status');
     const dataStatus = await respStatus.json();
@@ -40292,16 +40388,16 @@ async function carregarDepartamentosECentros() {
     } else {
       window.comprasStatusList = [];
     }
-    
+
     // Carrega usuários
     const respUsers = await fetch('/api/compras/usuarios');
     const dataUsers = await respUsers.json();
     const selectResp = document.getElementById('modalComprasResponsavel');
-    
+
     if (selectResp && dataUsers.ok) {
       const usuarioLogado = window.__sessionUser?.username || '';
       selectResp.innerHTML = '<option value="">Selecione o responsável</option>' +
-        (dataUsers.usuarios || []).map(u => 
+        (dataUsers.usuarios || []).map(u =>
           `<option value="${window.escapeHtml(u.username)}">${window.escapeHtml(u.username)}</option>`
         ).join('');
       // Define usuário logado como padrão
@@ -40309,10 +40405,10 @@ async function carregarDepartamentosECentros() {
         selectResp.value = usuarioLogado;
       }
     }
-    
+
     // Carrega fornecedores para usar na tabela de solicitações
     await loadFornecedores();
-    
+
   } catch (err) {
     console.error('[COMPRAS] Erro ao carregar departamentos/centros/usuários:', err);
   }
@@ -40323,12 +40419,12 @@ function atualizarCategoriasPorDepartamento(departamento, selectId = 'modalCompr
   const selectCategorias = document.getElementById(selectId);
   if (!selectCategorias) return;
   garantirCategoriasPadraoProducao();
-  
+
   if (!departamento || !window.categoriasPorDepartamento[departamento]) {
     selectCategorias.innerHTML = '<option value="">Selecione departamento</option>';
     return;
   }
-  
+
   const categorias = window.categoriasPorDepartamento[departamento];
   selectCategorias.innerHTML = '<option value="">Selecione a categoria</option>' +
     categorias.map(c => `<option value="${window.escapeHtml(c)}">${window.escapeHtml(c)}</option>`).join('');
@@ -40340,7 +40436,7 @@ function verificarFamiliaObrigatoria() {
   const departamento = document.getElementById('modalComprasDepartamento')?.value || '';
   const categoria = document.getElementById('modalComprasCentroCusto')?.value || '';
   const indicador = document.getElementById('familiaObrigatorioIndicador');
-  
+
   // Mostra asterisco vermelho se for Produção + Materia prima
   if (indicador) {
     if (departamento === 'Produção' && categoria === 'Materia prima') {
@@ -40356,10 +40452,10 @@ async function loadModalComprasDepartamentos() {
   const respDept = await fetch('/api/compras/departamentos');
   const dataDept = await respDept.json();
   const selectDept = document.getElementById('modalComprasDepartamento');
-  
+
   if (selectDept && dataDept.ok) {
     selectDept.innerHTML = '<option value="">Selecione o departamento</option>' +
-      (dataDept.departamentos || []).map(d => 
+      (dataDept.departamentos || []).map(d =>
         `<option value="${window.escapeHtml(d.nome)}">${window.escapeHtml(d.nome)}</option>`
       ).join('');
   }
@@ -40378,10 +40474,10 @@ async function loadModalComprasResponsaveis() {
   const respUsers = await fetch('/api/compras/usuarios');
   const dataUsers = await respUsers.json();
   const selectResp = document.getElementById('modalComprasResponsavel');
-  
+
   if (selectResp && dataUsers.ok) {
     selectResp.innerHTML = '<option value="">Selecione o responsável</option>' +
-      (dataUsers.usuarios || []).map(u => 
+      (dataUsers.usuarios || []).map(u =>
         `<option value="${window.escapeHtml(u.username)}">${window.escapeHtml(u.username)}</option>`
       ).join('');
   }
@@ -40391,7 +40487,7 @@ async function loadModalComprasResponsaveis() {
 async function loadModalComprasCategoriasCompra() {
   const selectCategoria = document.getElementById('modalComprasCategoriaCompra');
   const hiddenCatalogoCategoria = document.getElementById('catalogoCategoriaCompraGlobal');
-  
+
   try {
     const resp = await fetch('/api/compras/categorias', { credentials: 'include' });
     if (!resp.ok) {
@@ -40399,26 +40495,26 @@ async function loadModalComprasCategoriasCompra() {
       console.error('[Categorias Compra] Erro HTTP:', resp.status, errorText);
       throw new Error(`Erro ao buscar categorias: ${resp.status}`);
     }
-    
+
     const data = await resp.json();
-    
+
     if (data.ok && Array.isArray(data.categorias)) {
       // Armazena categorias em variável global para usar no carrinho
       window.categoriasCompra = data.categorias;
-      
+
       // Preenche select do modal de adicionar ao carrinho
       if (selectCategoria) {
         selectCategoria.innerHTML = '<option value="">Selecione a categoria...</option>' +
-          data.categorias.map(cat => 
+          data.categorias.map(cat =>
             `<option value="${cat.codigo}">${window.escapeHtml(cat.descricao)}</option>`
           ).join('');
       }
-      
+
       // Preenche select do modal de catálogo Omie (Categoria da Compra)
       if (selectCatalogoCategoria) {
         await carregarCategoriaCompraDropdown();
       }
-      
+
       console.log('[Categorias Compra] Carregadas:', data.categorias.length);
     }
   } catch (err) {
@@ -40434,23 +40530,23 @@ async function loadModalComprasCategoriasCompra() {
 // Carrega usuários ativos para o campo "Responsável pela compra"
 async function loadModalComprasResponsavelCompra() {
   const selectResponsavelCompra = document.getElementById('modalComprasResponsavelCompra');
-  
+
   try {
     const resp = await fetch('/api/compras/usuarios');
     const data = await resp.json();
-    
+
     if (selectResponsavelCompra && data.ok) {
       const usuarioLogado = window.__sessionUser?.username || '';
       selectResponsavelCompra.innerHTML = '<option value="">Selecione o responsável...</option>' +
-        (data.usuarios || []).map(u => 
+        (data.usuarios || []).map(u =>
           `<option value="${window.escapeHtml(u.username)}">${window.escapeHtml(u.username)}</option>`
         ).join('');
-      
+
       // Define usuário logado como padrão
       if (usuarioLogado) {
         selectResponsavelCompra.value = usuarioLogado;
       }
-      
+
       console.log('[Responsável Compra] Usuários carregados:', data.usuarios?.length || 0);
     }
   } catch (err) {
@@ -40476,9 +40572,9 @@ window.configResponsavelCategoria = [];
 async function abrirModalConfigResponsavel() {
   const modal = document.getElementById('modalConfigResponsavelCategoria');
   if (!modal) return;
-  
+
   modal.style.display = 'flex';
-  
+
   // Carrega dropdowns em paralelo
   await Promise.all([
     carregarCategoriasConfig(),
@@ -40487,7 +40583,7 @@ async function abrirModalConfigResponsavel() {
     carregarDepartamentos(),
     carregarPermissoesAcesso()
   ]);
-  
+
   // Popula também o segundo select de responsáveis (para permissões)
   await carregarResponsaveisConfigBotao();
 }
@@ -40502,14 +40598,14 @@ function fecharModalConfigResponsavel() {
 async function carregarCategoriasConfig() {
   const select = document.getElementById('configCategoriaCompra');
   if (!select) return;
-  
+
   try {
     const resp = await fetch('/api/compras/categorias');
     const data = await resp.json();
-    
+
     if (data.ok && Array.isArray(data.categorias)) {
       select.innerHTML = '<option value="">Selecione a categoria...</option>' +
-        data.categorias.map(cat => 
+        data.categorias.map(cat =>
           `<option value="${cat.codigo}" data-nome="${window.escapeHtml(cat.descricao)}">${window.escapeHtml(cat.descricao)}</option>`
         ).join('');
     }
@@ -40522,14 +40618,14 @@ async function carregarCategoriasConfig() {
 async function carregarResponsaveisConfig() {
   const select = document.getElementById('configResponsavel');
   if (!select) return;
-  
+
   try {
     const resp = await fetch('/api/compras/usuarios');
     const data = await resp.json();
-    
+
     if (data.ok && Array.isArray(data.usuarios)) {
       select.innerHTML = '<option value="">Selecione o responsável...</option>' +
-        data.usuarios.map(u => 
+        data.usuarios.map(u =>
           `<option value="${window.escapeHtml(u.username)}">${window.escapeHtml(u.username)}</option>`
         ).join('');
     }
@@ -40542,14 +40638,14 @@ async function carregarResponsaveisConfig() {
 async function carregarResponsaveisConfigBotao() {
   const select = document.getElementById('configResponsavelBotao');
   if (!select) return;
-  
+
   try {
     const resp = await fetch('/api/compras/usuarios');
     const data = await resp.json();
-    
+
     if (data.ok && Array.isArray(data.usuarios)) {
       select.innerHTML = '<option value="">Selecione...</option>' +
-        data.usuarios.map(u => 
+        data.usuarios.map(u =>
           `<option value="${window.escapeHtml(u.username)}">${window.escapeHtml(u.username)}</option>`
         ).join('');
     }
@@ -40562,14 +40658,14 @@ async function carregarResponsaveisConfigBotao() {
 async function carregarConfiguracoes() {
   const container = document.getElementById('listaConfigsResponsavel');
   if (!container) return;
-  
+
   try {
     const resp = await fetch('/api/compras/config-responsavel-categoria');
     const data = await resp.json();
-    
+
     if (data.ok && Array.isArray(data.configuracoes)) {
       window.configResponsavelCategoria = data.configuracoes;
-      
+
       if (data.configuracoes.length === 0) {
         container.innerHTML = `
           <div style="text-align:center;padding:40px;color:#9ca3af;">
@@ -40595,7 +40691,7 @@ async function carregarConfiguracoes() {
             </button>
           </div>
         `).join('');
-        
+
         // Adiciona event listeners aos botões de remover usando delegação de eventos
         container.querySelectorAll('.btn-remover-config').forEach(btn => {
           btn.addEventListener('click', () => {
@@ -40614,18 +40710,18 @@ async function carregarConfiguracoes() {
 async function adicionarConfigResponsavel() {
   const selectCategoria = document.getElementById('configCategoriaCompra');
   const selectResponsavel = document.getElementById('configResponsavel');
-  
+
   if (!selectCategoria || !selectResponsavel) return;
-  
+
   const categoriaCodigo = selectCategoria.value;
   const categoriaNome = selectCategoria.selectedOptions[0]?.dataset.nome || selectCategoria.selectedOptions[0]?.text || '';
   const responsavelUsername = selectResponsavel.value;
-  
+
   if (!categoriaCodigo || !responsavelUsername) {
     alert('Selecione a categoria e o responsável');
     return;
   }
-  
+
   try {
     const resp = await fetch('/api/compras/config-responsavel-categoria', {
       method: 'POST',
@@ -40636,17 +40732,17 @@ async function adicionarConfigResponsavel() {
         responsavel_username: responsavelUsername
       })
     });
-    
+
     const data = await resp.json();
-    
+
     if (data.ok) {
       // Recarrega lista
       await carregarConfiguracoes();
-      
+
       // Limpa campos
       selectCategoria.value = '';
       selectResponsavel.value = '';
-      
+
       // Feedback visual
       const btn = document.getElementById('btnAdicionarConfig');
       if (btn) {
@@ -40670,14 +40766,14 @@ async function adicionarConfigResponsavel() {
 // Remove configuração
 async function removerConfigResponsavel(id) {
   if (!confirm('Deseja remover esta configuração?')) return;
-  
+
   try {
     const resp = await fetch(`/api/compras/config-responsavel-categoria/${id}`, {
       method: 'DELETE'
     });
-    
+
     const data = await resp.json();
-    
+
     if (data.ok) {
       await carregarConfiguracoes();
     } else {
@@ -40693,16 +40789,16 @@ async function removerConfigResponsavel(id) {
 function aplicarResponsavelPadrao() {
   const selectCategoria = document.getElementById('modalComprasCategoriaCompra');
   const selectResponsavel = document.getElementById('modalComprasResponsavelCompra');
-  
+
   if (!selectCategoria || !selectResponsavel) return;
-  
+
   const categoriaSelecionada = selectCategoria.value;
-  
+
   if (!categoriaSelecionada) return;
-  
+
   // Busca configuração para esta categoria
   const config = window.configResponsavelCategoria.find(c => c.categoria_compra_codigo === categoriaSelecionada);
-  
+
   if (config) {
     // Aplica responsável padrão
     selectResponsavel.value = config.responsavel_username;
@@ -40721,7 +40817,7 @@ async function carregarDepartamentos() {
   try {
     const resp = await fetch('/api/compras/departamentos', { credentials: 'include' });
     const data = await resp.json();
-    
+
     if (data.ok) {
       const select = document.getElementById('configDepartamento');
       if (select) {
@@ -40740,7 +40836,7 @@ async function carregarPermissoesAcesso() {
   try {
     const resp = await fetch('/api/compras/config-acesso-botoes', { credentials: 'include' });
     const data = await resp.json();
-    
+
     if (data.ok) {
       window.permissoesAcessoBotoes = data.permissoes || [];
       renderizarListaPermissoes();
@@ -40754,9 +40850,9 @@ async function carregarPermissoesAcesso() {
 function renderizarListaPermissoes() {
   const lista = document.getElementById('listaPermissoesAcesso');
   if (!lista) return;
-  
+
   const permissoes = window.permissoesAcessoBotoes || [];
-  
+
   if (permissoes.length === 0) {
     lista.innerHTML = `
       <div style="text-align:center;padding:40px;color:#9ca3af;">
@@ -40765,7 +40861,7 @@ function renderizarListaPermissoes() {
       </div>`;
     return;
   }
-  
+
   lista.innerHTML = permissoes.map(p => {
     const tipoBotaoLabel = p.tipo_botao === 'aprovacao' ? 'Aprovação' : 'Pedido de Compra';
     const corBotao = p.tipo_botao === 'aprovacao'
@@ -40773,7 +40869,7 @@ function renderizarListaPermissoes() {
       : p.tipo_botao === 'gestao_solicitacao'
         ? '#b45309'
         : '#10b981';
-    
+
     return `
       <div class="produto-catalogo-card" data-product-code="${escapeHtml(produto.codigo)}" style="
         background:white;
@@ -40800,7 +40896,7 @@ function renderizarListaPermissoes() {
           <div style="font-size:11px;color:#6b7280;margin-bottom:2px;">Departamento</div>
           <div style="font-size:13px;color:#1f2937;font-weight:600;">${escapeHtml(p.departamento_nome)}</div>
         </div>
-        <button 
+        <button
           onclick="removerPermissaoAcesso(${p.id})"
           style="
             background:#ef4444;
@@ -40826,16 +40922,16 @@ async function adicionarPermissaoAcesso() {
   const selectTipo = document.getElementById('configTipoBotao');
   const selectResponsavel = document.getElementById('configResponsavelBotao');
   const selectDepartamento = document.getElementById('configDepartamento');
-  
+
   const tipo = selectTipo?.value;
   const responsavel = selectResponsavel?.value;
   const departamento = selectDepartamento?.value;
-  
+
   if (!tipo || !responsavel || !departamento) {
     alert('Preencha todos os campos');
     return;
   }
-  
+
   try {
     const resp = await fetch('/api/compras/config-acesso-botoes', {
       method: 'POST',
@@ -40846,17 +40942,17 @@ async function adicionarPermissaoAcesso() {
         departamento_nome: departamento
       })
     });
-    
+
     const data = await resp.json();
-    
+
     if (data.ok) {
       await carregarPermissoesAcesso();
-      
+
       // Limpa campos
       selectTipo.value = '';
       selectResponsavel.value = '';
       selectDepartamento.value = '';
-      
+
       // Feedback
       const btn = document.getElementById('btnAdicionarPermissao');
       if (btn) {
@@ -40880,14 +40976,14 @@ async function adicionarPermissaoAcesso() {
 // Remove permissão
 async function removerPermissaoAcesso(id) {
   if (!confirm('Deseja remover esta permissão?')) return;
-  
+
   try {
     const resp = await fetch(`/api/compras/config-acesso-botoes/${id}`, {
       method: 'DELETE'
     });
-    
+
     const data = await resp.json();
-    
+
     if (data.ok) {
       await carregarPermissoesAcesso();
     } else {
@@ -40912,18 +41008,18 @@ window.removerConfigResponsavel = removerConfigResponsavel;
 async function gerarCodigoProvisorio() {
   const codigoInput = document.getElementById('modalComprasCodigo');
   const descricaoInput = document.getElementById('modalComprasDescricao');
-  
+
   if (!codigoInput || !descricaoInput) return null;
-  
+
   const codigo = codigoInput.value.trim();
   const descricao = descricaoInput.value.trim();
-  
+
   // Se código está vazio e descrição está preenchida, gera código provisório
   if (!codigo && descricao) {
     try {
       const resp = await fetch('/api/compras/proximo-codigo-provisorio');
       const data = await resp.json();
-      
+
       if (data.ok && data.codigo) {
         codigoInput.value = data.codigo;
         codigoInput.style.background = '#fef3c7'; // Amarelo claro para indicar provisório
@@ -40936,7 +41032,7 @@ async function gerarCodigoProvisorio() {
       return null;
     }
   }
-  
+
   return codigo; // Retorna código existente
 }
 
@@ -40945,55 +41041,55 @@ async function gerarCodigoProvisorio() {
 async function validarCodigoOmie() {
   const codigoInput = document.getElementById('modalComprasCodigo');
   const descricaoInput = document.getElementById('modalComprasDescricao');
-  
+
   if (!codigoInput) return false;
-  
+
   const codigo = codigoInput.value.trim();
-  
+
   // Se está vazio, é válido (será gerado provisório depois)
   if (!codigo) {
     codigoInput.style.background = 'white';
     codigoInput.title = '';
     return true;
   }
-  
+
   // Se é código provisório, é válido
   if (codigo.startsWith('CODPROV - ')) {
     codigoInput.style.background = '#fef3c7';
     codigoInput.title = 'Código provisório';
     return true;
   }
-  
+
   // Valida código digitado na Omie
   try {
     const resp = await fetch(`/api/compras/validar-codigo-omie?codigo=${encodeURIComponent(codigo)}`);
     const data = await resp.json();
-    
+
     if (data.ok && data.existe) {
       // Código existe na Omie - OK
       codigoInput.style.background = '#d1fae5'; // Verde claro
       codigoInput.title = 'Código válido na Omie';
-      
+
       // Se encontrou produto, preenche descrição automaticamente (se estiver vazia)
       if (data.produto && data.produto.descricao && descricaoInput && !descricaoInput.value.trim()) {
         descricaoInput.value = data.produto.descricao;
       }
-      
+
       console.log('[COMPRAS] Código válido:', codigo);
       return true;
     } else {
       // Código NÃO existe na Omie - BLOQUEIA
       codigoInput.style.background = '#fee2e2'; // Vermelho claro
       codigoInput.title = 'Código não cadastrado na Omie';
-      
+
       alert(`ATENÇÃO: O código "${codigo}" não está cadastrado na Omie!\n\nO campo será limpo. Deixe em branco para gerar código provisório automaticamente.`);
-      
+
       // LIMPA o campo automaticamente
       codigoInput.value = '';
       codigoInput.style.background = 'white';
       codigoInput.title = '';
       codigoInput.focus();
-      
+
       console.warn('[COMPRAS] Código inválido removido:', codigo);
       return false;
     }
@@ -41008,16 +41104,16 @@ async function validarCodigoOmie() {
 // Adiciona item ao carrinho
 async function adicionarItemCarrinho(ev) {
   if (ev) ev.preventDefault();
-  
+
   let codigo = (document.getElementById('modalComprasCodigo')?.value || '').trim();
   const descricao = (document.getElementById('modalComprasDescricao')?.value || '').trim();
-  
+
   // PRIMEIRA VALIDAÇÃO: Descrição obrigatória
   if (!descricao) {
     alert('Digite a descrição do produto');
     return;
   }
-  
+
   // SEGUNDA VALIDAÇÃO: Se código foi digitado, valida na Omie
   if (codigo && !codigo.startsWith('CODPROV - ')) {
     const codigoValido = await validarCodigoOmie();
@@ -41028,7 +41124,7 @@ async function adicionarItemCarrinho(ev) {
     // Recarrega código após validação (pode ter sido limpo)
     codigo = (document.getElementById('modalComprasCodigo')?.value || '').trim();
   }
-  
+
   // TERCEIRA AÇÃO: Se código está vazio, gera código provisório AGORA
   if (!codigo) {
     const codigoGerado = await gerarCodigoProvisorio();
@@ -41038,7 +41134,7 @@ async function adicionarItemCarrinho(ev) {
     }
     codigo = codigoGerado;
   }
-  
+
   // Continua com as outras validações
   const quantidade = parseFloat(document.getElementById('modalComprasQuantidade')?.value || 0);
   const prazo = document.getElementById('modalComprasPrazo')?.value || '';
@@ -41056,62 +41152,62 @@ async function adicionarItemCarrinho(ev) {
   const codigoProdutoOmie = document.getElementById('modalComprasCodigoProdutoOmie')?.value || null;
   const requisicaoDireta = document.getElementById('modalComprasRequisicaoDireta')?.checked || false;
   const statusPedido = (document.getElementById('modalComprasStatus')?.value || 'aguardando aprovação da requisição').trim();
-  
+
   // Verifica se o campo família está visível (produto novo) ou oculto (produto existente)
   const familiaField = document.getElementById('modalComprasFamilia')?.closest('.form-field');
   const familiaVisivel = familiaField && familiaField.style.display !== 'none';
-  
+
   if (quantidade <= 0) {
     alert('Quantidade deve ser maior que zero');
     return;
   }
-  
+
   // Valida família apenas se: campo visível E (Departamento = "Produção" E Categoria = "Materia prima")
   const familiaObrigatoria = departamento === 'Produção' && centroCusto === 'Materia prima';
   if (familiaVisivel && familiaObrigatoria && !familia) {
     alert('Selecione a família do produto (obrigatório para Produção - Materia prima)');
     return;
   }
-  
+
   if (!departamento) {
     alert('Selecione o departamento');
     return;
   }
-  
+
   if (!centroCusto) {
     alert('Selecione a categoria');
     return;
   }
-  
+
   // Só valida objetivo se o campo estiver visível (produto novo)
   const objetivoField = document.getElementById('modalComprasObjetivo')?.closest('.form-field');
   const objetivoVisivel = objetivoField && objetivoField.style.display !== 'none';
-  
+
   if (objetivoVisivel && !objetivoCompra) {
     alert('Informe o objetivo da compra');
     return;
   }
-  
+
   // Só valida responsável se o campo estiver visível (produto novo)
   const responsavelField = document.getElementById('modalComprasResponsavel')?.closest('.form-field');
   const responsavelVisivel = responsavelField && responsavelField.style.display !== 'none';
-  
+
   if (responsavelVisivel && !responsavel) {
     alert('Selecione o responsável pela inspeção de recebimento');
     return;
   }
-  
+
   // Valida responsável pela compra (sempre obrigatório)
   if (!responsavelCompra) {
     alert('Selecione o responsável pela compra');
     return;
   }
-  
+
   if (!retornoCotacao) {
     alert('Selecione se é necessário retorno das cotações realizadas');
     return;
   }
-  
+
   // Aplica categoria padrão se não selecionada (campo removido)
   const categoriaPadraoCodigo = '2.14.94';
   if (!categoriaCompra) {
@@ -41132,7 +41228,7 @@ async function adicionarItemCarrinho(ev) {
     categoriaCompra = categoriaOperacionalOmie.codigo;
     categoriaCompraTexto = categoriaOperacionalOmie.nome;
   }
-  
+
   // Busca codigo_produto da tabela produtos_omie usando o codigo do produto
   let codigoOmie = null;
   try {
@@ -41144,7 +41240,7 @@ async function adicionarItemCarrinho(ev) {
   } catch (err) {
     console.warn('Erro ao buscar codigo_produto da Omie:', err);
   }
-  
+
   // Captura anexo se houver
   let anexoData = null;
   const inputAnexo = document.getElementById('modalComprasAnexo');
@@ -41158,14 +41254,14 @@ async function adicionarItemCarrinho(ev) {
         reader.onerror = reject;
         reader.readAsDataURL(file);
       });
-      
+
       anexoData = {
         nome: file.name,
         tipo: file.type,
         tamanho: file.size,
         base64: base64
       };
-      
+
       console.log('[Compras] Anexo capturado:', file.name, file.type);
     } catch (err) {
       console.error('[Compras] Erro ao processar anexo:', err);
@@ -41173,17 +41269,17 @@ async function adicionarItemCarrinho(ev) {
       return;
     }
   }
-  
+
   // Comentário: Busca url_imagem do cache de produtos usando produto_codigo
   let urlImagem = '';
   if (codigo && window.produtosCatalogoOmie) {
-    const produtoComImagem = window.produtosCatalogoOmie.find(p => 
+    const produtoComImagem = window.produtosCatalogoOmie.find(p =>
       String(p.codigo).trim() === String(codigo).trim()
     );
     urlImagem = produtoComImagem?.url_imagem || '';
     console.log('[Compras] URL da imagem encontrada:', urlImagem ? 'SIM' : 'NÃO');
   }
-  
+
   const novoItemCarrinho = {
     produto_codigo: codigo,
     produto_descricao: descricao,
@@ -41220,14 +41316,14 @@ async function adicionarItemCarrinho(ev) {
     novoItemCarrinho.np = registro.grupo_requisicao;
   }
   window.carrinhoCompras.push(novoItemCarrinho);
-  
+
   console.log('[Compras] Item adicionado ao carrinho:', {
     produto_codigo: codigo,
     tem_anexo: anexoData ? 'SIM' : 'NÃO',
     anexo_nome: anexoData ? anexoData.nome : null,
     id_db: registro.id
   });
-  
+
   renderCarrinhoCompras();
   renderModalCarrinhoCompras(); // Atualiza também o modal se estiver aberto
   fecharModalCompras();
@@ -41245,22 +41341,22 @@ function limparCarrinhoCompras() {
 // Envia pedido completo
 async function enviarPedidoCompras() {
   const carrinho = window.carrinhoCompras || [];
-  
+
   if (carrinho.length === 0) {
     alert('Carrinho vazio');
     return;
   }
-  
-  const solicitante = (document.getElementById('userNameDisplay')?.textContent || '').trim() 
+
+  const solicitante = (document.getElementById('userNameDisplay')?.textContent || '').trim()
     || window.__sessionUser?.username || '';
-  
+
   if (!solicitante) {
     alert('Usuário não identificado');
     return;
   }
-  
+
   if (!confirm(`Enviar ${carrinho.length} item(ns) para solicitação?`)) return;
-  
+
   // Debug: Mostra quais itens tem anexo
   const itensComAnexo = carrinho.filter(item => item.anexo);
   console.log('[Compras] Enviando pedido:', {
@@ -41268,12 +41364,12 @@ async function enviarPedidoCompras() {
     itens_com_anexo: itensComAnexo.length,
     anexos: itensComAnexo.map(item => ({ codigo: item.produto_codigo, anexo: item.anexo.nome }))
   });
-  
+
   const statusEl = document.getElementById('comprasFormStatus');
   const btnEnviar = document.getElementById('comprasEnviarPedidoBtn');
-  
+
   if (btnEnviar) btnEnviar.disabled = true;
-  
+
   try {
     if (statusEl) {
       statusEl.style.display = 'block';
@@ -41281,17 +41377,17 @@ async function enviarPedidoCompras() {
       statusEl.style.color = 'white';
       statusEl.textContent = 'Enviando solicitações...';
     }
-    
+
     const itensPayload = carrinho.map((item) => {
       const itemSolicitante = String(item.solicitante || solicitante || '').trim();
       const objetivoBase = String(item.objetivo_compra || '').trim();
       const respBase = String(item.resp_inspecao_recebimento || '').trim();
-      
+
       // Objetivo: usa o que foi digitado, ou padrão
       const objetivoFinal = objetivoBase || 'Compra via catálogo Omie';
       // Inspeção: usa o que foi digitado, ou padrão
       const respFinal = respBase || `a pedido de: ${itemSolicitante}`;
-      
+
       // obsItem: formatação limpa com os dados
       const obsItem = `Solicitante: ${itemSolicitante}\nObjetivo: ${objetivoFinal}\nA pedido de: ${respFinal}`;
 
@@ -41308,37 +41404,37 @@ async function enviarPedidoCompras() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ itens: itensPayload, solicitante })
     });
-    
+
     const data = await resp.json();
-    
+
     if (!resp.ok || !data.ok) {
       throw new Error(data.error || 'Erro ao enviar solicitações');
     }
-    
+
     // Verifica se há itens com requisição direta (já criados com status "aguardando compra")
     const idsRequisicaoDireta = data.ids_requisicao_direta || [];
-    
+
     if (idsRequisicaoDireta.length > 0) {
       console.log(`[COMPRAS] Processando ${idsRequisicaoDireta.length} item(ns) com requisição direta...`);
-        
+
         if (statusEl) {
           statusEl.style.background = '#3b82f6';
           statusEl.textContent = `Processando ${idsRequisicaoDireta.length} requisição(ões) direta(s)...`;
         }
-        
+
         // Aprova cada item com requisição direta
         let aprovadosSucesso = 0;
         let aprovadosErro = 0;
-        
+
         for (const itemId of idsRequisicaoDireta) {
           try {
             const respAprov = await fetch(`/api/compras/aprovar-item/${itemId}`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' }
             });
-            
+
             const dataAprov = await respAprov.json();
-            
+
             if (respAprov.ok && dataAprov.ok) {
               aprovadosSucesso++;
               console.log(`[COMPRAS] Item ${itemId} aprovado automaticamente (requisição direta)`);
@@ -41351,7 +41447,7 @@ async function enviarPedidoCompras() {
             console.error(`[COMPRAS] Erro ao aprovar item ${itemId}:`, errAprov);
           }
         }
-        
+
         // Atualiza mensagem final
         let mensagemFinal = `✓ ${data.total_itens} solicitação(ões) enviada(s)`;
         if (aprovadosSucesso > 0) {
@@ -41360,7 +41456,7 @@ async function enviarPedidoCompras() {
         if (aprovadosErro > 0) {
           mensagemFinal += ` | ${aprovadosErro} erro(s) na aprovação automática`;
         }
-        
+
         if (statusEl) {
           statusEl.style.background = aprovadosErro > 0 ? '#f59e0b' : '#22c55e';
           statusEl.textContent = mensagemFinal;
@@ -41372,15 +41468,15 @@ async function enviarPedidoCompras() {
         statusEl.textContent = `✓ ${data.total_itens} solicitação(ões) enviada(s) com sucesso!`;
       }
     }
-    
+
     window.carrinhoCompras = [];
     renderCarrinhoCompras();
-    
+
     setTimeout(() => {
       if (statusEl) statusEl.style.display = 'none';
       loadMinhasSolicitacoes();
     }, 5000);
-    
+
   } catch (err) {
     console.error('[COMPRAS] Erro ao enviar solicitações:', err);
     if (statusEl) {
@@ -41413,7 +41509,7 @@ window.abrirModalColarLista = function() {
   const textarea = document.getElementById('colarListaCompraTexto');
   const errorDiv = document.getElementById('colarListaCompraError');
   const infoDiv = document.getElementById('colarListaCompraInfo');
-  
+
   if (modal) {
     modal.style.display = 'flex';
     if (textarea) textarea.value = '';
@@ -41436,11 +41532,11 @@ window.processarListaCompra = async function() {
   const infoDiv = document.getElementById('colarListaCompraInfo');
   const infoMsg = document.getElementById('colarListaCompraInfoMsg');
   const btn = document.getElementById('btnProcessarListaCompra');
-  
+
   if (!textarea) return;
-  
+
   const textoColado = textarea.value.trim();
-  
+
   // Valida se há conteúdo
   if (!textoColado) {
     if (errorDiv && errorMsg) {
@@ -41449,47 +41545,47 @@ window.processarListaCompra = async function() {
     }
     return;
   }
-  
+
   // Esconde mensagens anteriores
   if (errorDiv) errorDiv.style.display = 'none';
   if (infoDiv) infoDiv.style.display = 'none';
-  
+
   // Desabilita botão
   if (btn) {
     btn.disabled = true;
     btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Processando...';
   }
-  
+
   try {
     // Parse das linhas: codigo<TAB>quantidade
     const linhas = textoColado.split('\n').filter(l => l.trim());
     const itensParaAdicionar = [];
     const erros = [];
-    
+
     for (let i = 0; i < linhas.length; i++) {
       const linha = linhas[i].trim();
       if (!linha) continue;
-      
+
       // Divide por TAB ou múltiplos espaços
       const partes = linha.split(/\t+|\s{2,}/).filter(p => p.trim());
-      
+
       if (partes.length < 2) {
         erros.push(`Linha ${i + 1}: formato inválido (esperado: CODIGO<TAB>QUANTIDADE)`);
         continue;
       }
-      
+
       const codigo = partes[0].trim();
       const qtdStr = partes[1].trim();
       const quantidade = parseInt(qtdStr, 10);
-      
+
       if (isNaN(quantidade) || quantidade <= 0) {
         erros.push(`Linha ${i + 1}: quantidade inválida "${qtdStr}"`);
         continue;
       }
-      
+
       itensParaAdicionar.push({ codigo, quantidade, linha: i + 1 });
     }
-    
+
     // Se houver erros, exibe
     if (erros.length > 0) {
       if (errorDiv && errorMsg) {
@@ -41502,7 +41598,7 @@ window.processarListaCompra = async function() {
       }
       return;
     }
-    
+
     // Busca produtos no cache
     if (!window.produtosCatalogoOmie || window.produtosCatalogoOmie.length === 0) {
       if (errorDiv && errorMsg) {
@@ -41515,26 +41611,26 @@ window.processarListaCompra = async function() {
       }
       return;
     }
-    
+
     // Captura valores globais do carrinho
     const departamentoGlobal = document.getElementById('carrinhoDepartamentoGlobal')?.value || '';
     const centroCustoGlobal = document.getElementById('carrinhoCentroCustoGlobal')?.value || '';
     const prazoGlobal = document.getElementById('carrinhoPrazoSolicitadoGlobal')?.value || '';
-    
+
     let adicionados = 0;
     let naoEncontrados = [];
-    
+
     // Adiciona cada item ao carrinho
     for (const item of itensParaAdicionar) {
-      const produto = window.produtosCatalogoOmie.find(p => 
+      const produto = window.produtosCatalogoOmie.find(p =>
         String(p.codigo).trim().toLowerCase() === item.codigo.toLowerCase()
       );
-      
+
       if (!produto) {
         naoEncontrados.push(`${item.codigo} (linha ${item.linha})`);
         continue;
       }
-      
+
       // Busca categoria da compra baseada na última compra
       let categoriaCompra = '2.14.94'; // Default
       let categoriaCompraTexto = '';
@@ -41552,7 +41648,7 @@ window.processarListaCompra = async function() {
       } catch (err) {
         console.warn('[COLAR_LISTA] Erro ao buscar categoria:', err);
       }
-      
+
       // Busca codigo_produto da tabela produtos_omie
       let codigoOmie = null;
       try {
@@ -41564,7 +41660,7 @@ window.processarListaCompra = async function() {
       } catch (err) {
         console.warn('[COLAR_LISTA] Erro ao buscar codigo_produto:', err);
       }
-      
+
       // Cria item do carrinho
       const novoItemCarrinho = {
         produto_codigo: produto.codigo,
@@ -41589,47 +41685,47 @@ window.processarListaCompra = async function() {
         anexo: null,
         url_imagem: produto.url_imagem || ''
       };
-      
+
       // Registra no banco
       const registro = await registrarItemCarrinhoNoBanco(novoItemCarrinho);
       if (!registro?.id) {
         naoEncontrados.push(`${item.codigo} (erro ao registrar)`);
         continue;
       }
-      
+
       novoItemCarrinho.id_db = registro.id;
       if (registro.grupo_requisicao) {
         novoItemCarrinho.grupo_requisicao = registro.grupo_requisicao;
         novoItemCarrinho.np = registro.grupo_requisicao;
       }
-      
+
       window.carrinhoCompras.push(novoItemCarrinho);
       adicionados++;
     }
-    
+
     // Atualiza carrinho
     renderCarrinhoCompras();
     renderModalCarrinhoCompras();
     await carregarGruposRequisicaoDisponiveis();
-    
+
     // Exibe resultado
     let mensagem = `${adicionados} produto(s) adicionado(s) ao carrinho`;
     if (naoEncontrados.length > 0) {
       mensagem += `<br><span style="color:#ef4444;">Não encontrados: ${naoEncontrados.join(', ')}</span>`;
     }
-    
+
     if (infoDiv && infoMsg) {
       infoDiv.style.display = 'block';
       infoMsg.innerHTML = mensagem;
     }
-    
+
     // Fecha modal após 2 segundos se todos foram adicionados
     if (naoEncontrados.length === 0) {
       setTimeout(() => {
         fecharModalColarLista();
       }, 2000);
     }
-    
+
   } catch (err) {
     console.error('[COLAR_LISTA] Erro ao processar:', err);
     if (errorDiv && errorMsg) {
@@ -41727,17 +41823,17 @@ document.getElementById('comprasToggleSolicitanteBtn')?.addEventListener('click'
   const btn = document.getElementById('comprasToggleSolicitanteBtn');
   const textElement = document.getElementById('comprasToggleSolicitanteText');
   const iconElement = btn?.querySelector('i');
-  
+
   if (!btn || !textElement) return;
-  
+
   try {
     // Alterna o filtro entre 'minhas' e 'todas'
     const filtroAtual = window.kanbanFiltroSolicitante || 'minhas';
     const novoFiltro = filtroAtual === 'minhas' ? 'todas' : 'minhas';
-    
+
     // Salva a preferência
     window.kanbanFiltroSolicitante = novoFiltro;
-    
+
     // Atualiza o texto e ícone do botão
     if (novoFiltro === 'todas') {
       textElement.textContent = 'Todas';
@@ -41748,20 +41844,20 @@ document.getElementById('comprasToggleSolicitanteBtn')?.addEventListener('click'
       if (iconElement) iconElement.className = 'fa-solid fa-user';
       btn.style.background = 'linear-gradient(135deg,#8b5cf6 0%,#7c3aed 100%)';
     }
-    
+
     // Feedback visual durante carregamento
     const originalText = textElement.textContent;
     textElement.textContent = '...';
     btn.disabled = true;
-    
+
     // Recarrega os dados com o novo filtro (loadMinhasSolicitacoes já exibe a view correta)
     await loadMinhasSolicitacoes();
-    
+
     // Restaura o botão com o texto atualizado (minhas ou todas)
     const filtroFinal = window.kanbanFiltroSolicitante || 'minhas';
     textElement.textContent = filtroFinal === 'todas' ? 'Todas' : 'Minhas';
     btn.disabled = false;
-    
+
   } catch (err) {
     console.error('[Kanban] Erro ao alternar filtro de solicitante:', err);
     alert('Erro ao alternar filtro. Tente novamente.');
@@ -41772,7 +41868,7 @@ document.getElementById('comprasToggleSolicitanteBtn')?.addEventListener('click'
 document.getElementById('comprasAtualizarKanbansBtn')?.addEventListener('click', async () => {
   const btn = document.getElementById('comprasAtualizarKanbansBtn');
   if (!btn) return;
-  
+
   try {
     // Mostra feedback visual
     const icon = btn.querySelector('i');
@@ -41781,40 +41877,40 @@ document.getElementById('comprasAtualizarKanbansBtn')?.addEventListener('click',
       icon.className = 'fa-solid fa-spinner fa-spin';
     }
     btn.disabled = true;
-    
+
     // Fecha o modal de ações
     fecharModalComprasAcoes();
-    
+
     console.log('[Kanbans] Atualizando todos os kanbans...');
-    
+
     // Recarrega os kanbans
     await loadMinhasSolicitacoes();
-    
+
     console.log('[Kanbans] Todos os kanbans atualizados com sucesso!');
-    
+
     // Restaura ícone original
     if (icon) {
       icon.className = originalIcon;
     }
     btn.disabled = false;
-    
+
     // Feedback visual de sucesso
     if (icon) {
       icon.className = 'fa-solid fa-check';
       btn.style.backgroundColor = '#10b981';
       btn.style.color = '#fff';
-      
+
       setTimeout(() => {
         if (icon) icon.className = originalIcon;
         btn.style.backgroundColor = '';
         btn.style.color = '';
       }, 1500);
     }
-    
+
   } catch (err) {
     console.error('[Kanbans] Erro ao atualizar kanbans:', err);
     alert('Erro ao atualizar kanbans. Tente novamente.');
-    
+
     const icon = btn.querySelector('i');
     if (icon) {
       icon.className = 'fa-solid fa-rotate';
@@ -41948,45 +42044,45 @@ document.getElementById('modalGoogleSheetsStatus')?.addEventListener('click', (e
   const sugestoesEl = document.getElementById('modalComprasCodigoSugestoes');
   const descHiddenEl = document.getElementById('modalComprasDescricaoSelecionada');
   const statusEl = document.getElementById('modalComprasBuscaStatus');
-  
+
   if (!inputEl || !sugestoesEl) return;
-  
+
   let timeoutBusca = null;
-  
+
   inputEl.addEventListener('input', () => {
     clearTimeout(timeoutBusca);
     const termo = (inputEl.value || '').trim();
-    
+
     // Quando o usuário digita manualmente (não selecionou da lista ainda), mostra os campos
     if (descHiddenEl) descHiddenEl.value = '';
     ocultarCamposComprasProdutoExistente(false);
-    
+
     if (termo.length < 2) {
       sugestoesEl.style.display = 'none';
       sugestoesEl.innerHTML = '';
       if (statusEl) statusEl.textContent = '';
       return;
     }
-    
+
     if (statusEl) statusEl.textContent = 'Buscando...';
-    
+
     timeoutBusca = setTimeout(async () => {
       try {
         const resp = await fetch(`/api/produtos/search?q=${encodeURIComponent(termo)}`);
         const data = await resp.json();
-        
+
         if (!resp.ok) throw new Error('Erro na busca');
-        
+
         const prods = data.produtos || [];
-        
+
         if (statusEl) statusEl.textContent = prods.length ? `${prods.length} resultado(s)` : 'Nenhum produto encontrado';
-        
+
         if (prods.length === 0) {
           sugestoesEl.style.display = 'none';
           sugestoesEl.innerHTML = '';
           return;
         }
-        
+
         sugestoesEl.innerHTML = prods.slice(0, 20).map(p => `
           <li style="padding:8px 12px;cursor:pointer;border-bottom:1px solid var(--border-color);transition:background 0.2s;"
               data-codigo="${window.escapeHtml(p.codigo)}"
@@ -41998,9 +42094,9 @@ document.getElementById('modalGoogleSheetsStatus')?.addEventListener('click', (e
             <strong>${window.escapeHtml(p.codigo)}</strong> — ${window.escapeHtml(p.descricao)}
           </li>
         `).join('');
-        
+
         sugestoesEl.style.display = 'block';
-        
+
         sugestoesEl.querySelectorAll('li').forEach(li => {
           li.addEventListener('click', () => {
             inputEl.value = li.getAttribute('data-codigo') || '';
@@ -42008,36 +42104,36 @@ document.getElementById('modalGoogleSheetsStatus')?.addEventListener('click', (e
             const familia = li.getAttribute('data-familia') || '';
             const codigoProdutoOmie = li.getAttribute('data-codigo-produto') || null;
             descHiddenEl.value = desc;
-            
+
             // Armazena codigo_produto_omie em um campo hidden ou data attribute
             const codigoOmieHidden = document.getElementById('modalComprasCodigoProdutoOmie');
             if (codigoOmieHidden) {
               codigoOmieHidden.value = codigoProdutoOmie;
             }
-            
+
             // Preenche o campo descrição visível
             const descInput = document.getElementById('modalComprasDescricao');
             if (descInput) descInput.value = desc;
-            
+
             // Preenche o campo família automaticamente
             const familiaInput = document.getElementById('modalComprasFamilia');
             if (familiaInput && familia) {
               // Busca a opção no select que corresponde ao nome da família
               const options = Array.from(familiaInput.options);
-              const matchingOption = options.find(opt => 
+              const matchingOption = options.find(opt =>
                 opt.text.toLowerCase() === familia.toLowerCase()
               );
               if (matchingOption) {
                 familiaInput.value = matchingOption.value;
               }
             }
-            
+
             sugestoesEl.style.display = 'none';
             if (statusEl) statusEl.textContent = '';
-            
+
             // Quando seleciona um produto existente da lista, oculta campos específicos
             ocultarCamposComprasProdutoExistente(true);
-            
+
             // Define "Não" como padrão em "Necessário retorno das cotações realizadas?"
             const retornoCotacao = document.getElementById('modalComprasRetornoCotacao');
             if (retornoCotacao && !retornoCotacao.value) {
@@ -42045,14 +42141,14 @@ document.getElementById('modalGoogleSheetsStatus')?.addEventListener('click', (e
             }
           });
         });
-        
+
       } catch (err) {
         console.error('[Modal Compras] Erro ao buscar:', err);
         if (statusEl) statusEl.textContent = 'Erro na busca';
       }
     }, 400);
   });
-  
+
   // Fecha ao clicar fora
   document.addEventListener('click', (ev) => {
     if (!inputEl.contains(ev.target) && !sugestoesEl.contains(ev.target)) {
@@ -42129,20 +42225,20 @@ function setupComprasAnexosTabela() {
       if (fileInput) fileInput.click();
     });
   });
-  
+
   // Listeners para inputs de arquivo
   document.querySelectorAll('.compras-anexo-input').forEach(input => {
     input.addEventListener('change', async function() {
       const itemId = this.getAttribute('data-item-id');
       const files = Array.from(this.files || []);
-      
+
       if (files.length === 0) return;
-      
+
       // Inicializa array de anexos para este item se n\u00e3o existir
       if (!window.comprasAnexosTabela[itemId]) {
         window.comprasAnexosTabela[itemId] = [];
       }
-      
+
       // Adiciona novos arquivos
       for (const file of files) {
         try {
@@ -42153,7 +42249,7 @@ function setupComprasAnexosTabela() {
             reader.onerror = reject;
             reader.readAsDataURL(file);
           });
-          
+
           window.comprasAnexosTabela[itemId].push({
             nome: file.name,
             tipo: file.type,
@@ -42164,14 +42260,14 @@ function setupComprasAnexosTabela() {
           console.error('[Anexos] Erro ao processar arquivo:', err);
         }
       }
-      
+
       // Renderiza lista de anexos
       renderComprasAnexosTabela(itemId);
-      
+
       // Mostra bot\u00e3o salvar
       const saveBtn = document.getElementById(`compras-save-btn-${itemId}`);
       if (saveBtn) saveBtn.style.display = 'block';
-      
+
       // Limpa input
       this.value = '';
     });
@@ -42182,22 +42278,22 @@ function setupComprasAnexosTabela() {
 function renderComprasAnexosTabela(itemId) {
   const container = document.querySelector(`.compras-anexos-list[data-item-id="${itemId}"]`);
   if (!container) return;
-  
+
   const anexos = window.comprasAnexosTabela[itemId] || [];
-  
+
   if (anexos.length === 0) {
     container.innerHTML = '';
     return;
   }
-  
+
   container.innerHTML = anexos.map((anexo, idx) => `
     <div style=\"display:flex;align-items:center;gap:4px;background:#f3f4f6;padding:4px 8px;border-radius:4px;font-size:11px;\">
       <i class=\"fa-solid fa-file\" style=\"color:#6b7280;\"></i>
       <span style=\"color:#374151;max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;\" title=\"${escapeHtml(anexo.nome)}\">${escapeHtml(anexo.nome)}</span>
-      <button 
-        type=\"button\" 
-        class=\"compras-remover-anexo\" 
-        data-item-id=\"${itemId}\" 
+      <button
+        type=\"button\"
+        class=\"compras-remover-anexo\"
+        data-item-id=\"${itemId}\"
         data-anexo-idx=\"${idx}\"
         style=\"background:none;border:none;color:#ef4444;cursor:pointer;padding:2px;font-size:10px;\"
         title=\"Remover\"
@@ -42206,18 +42302,18 @@ function renderComprasAnexosTabela(itemId) {
       </button>
     </div>
   `).join('');
-  
+
   // Adiciona listeners para remover
   container.querySelectorAll('.compras-remover-anexo').forEach(btn => {
     btn.addEventListener('click', function(e) {
       e.stopPropagation();
       const itemId = this.getAttribute('data-item-id');
       const anexoIdx = parseInt(this.getAttribute('data-anexo-idx'));
-      
+
       if (window.comprasAnexosTabela[itemId]) {
         window.comprasAnexosTabela[itemId].splice(anexoIdx, 1);
         renderComprasAnexosTabela(itemId);
-        
+
         // Mostra bot\u00e3o salvar
         const saveBtn = document.getElementById(`compras-save-btn-${itemId}`);
         if (saveBtn) saveBtn.style.display = 'block';
@@ -42238,14 +42334,14 @@ async function loadCotacoesItem(solicitacaoId) {
     const response = await fetch(`/api/compras/cotacoes/${solicitacaoId}`);
     if (!response.ok) throw new Error('Erro ao carregar cotações');
     const cotacoes = await response.json();
-    
+
     // Valida se é array
     if (!Array.isArray(cotacoes)) {
       console.error('[COTACOES] Resposta não é array:', cotacoes);
       renderCotacoesList(solicitacaoId, []);
       return;
     }
-    
+
     console.log(`[COTACOES] Carregadas ${cotacoes.length} cotações para item ${solicitacaoId}`);
     renderCotacoesList(solicitacaoId, cotacoes);
   } catch (err) {
@@ -42257,12 +42353,12 @@ async function loadCotacoesItem(solicitacaoId) {
 function renderCotacoesList(solicitacaoId, cotacoes = []) {
   const container = document.querySelector(`.compras-cotacoes-list[data-item-id="${solicitacaoId}"]`);
   if (!container) return;
-  
+
   if (cotacoes.length === 0) {
     container.innerHTML = '<div style="color:#6b7280;font-size:12px;font-style:italic;">Nenhuma cotação adicionada</div>';
     return;
   }
-  
+
   container.innerHTML = cotacoes.map(cotacao => {
     // Parse anexos se for string JSON
     let anexosArray = [];
@@ -42275,7 +42371,7 @@ function renderCotacoesList(solicitacaoId, cotacoes = []) {
         anexosArray = [];
       }
     }
-    
+
     return `
     <div class="compras-cotacao-row" data-cotacao-id="${cotacao.id}" style="background:#f9fafb;padding:12px;border:1px solid #e5e7eb;border-radius:6px;display:grid;grid-template-columns:1fr auto auto auto;gap:8px;align-items:center;">
       <!-- Fornecedor -->
@@ -42283,13 +42379,13 @@ function renderCotacoesList(solicitacaoId, cotacoes = []) {
         <div style="font-size:10px;color:#6b7280;text-transform:uppercase;margin-bottom:2px;">Fornecedor</div>
         <div style="font-weight:600;color:#1f2937;font-size:13px;">${escapeHtml(cotacao.fornecedor_nome)}</div>
       </div>
-      
+
       <!-- Valor -->
       <div>
         <div style="font-size:10px;color:#6b7280;text-transform:uppercase;margin-bottom:2px;">Valor</div>
         <div style="font-weight:600;color:#059669;font-size:13px;">R$ ${(parseFloat(cotacao.valor_cotado) || 0).toFixed(2)}</div>
       </div>
-      
+
       <!-- Anexos -->
       <div>
         ${anexosArray.length > 0 ? `
@@ -42303,12 +42399,12 @@ function renderCotacoesList(solicitacaoId, cotacoes = []) {
           </div>
         ` : '<span style="color:#9ca3af;font-size:11px;">Sem anexos</span>'}
       </div>
-      
+
       <!-- Ações -->
       <div style="display:flex;gap:4px;">
-        <button 
-          type="button" 
-          class="compras-editar-cotacao-btn" 
+        <button
+          type="button"
+          class="compras-editar-cotacao-btn"
           data-cotacao-id="${cotacao.id}"
           data-solicitacao-id="${solicitacaoId}"
           style="padding:6px 10px;background:#6366f1;color:white;border:none;border-radius:4px;cursor:pointer;font-size:11px;"
@@ -42316,9 +42412,9 @@ function renderCotacoesList(solicitacaoId, cotacoes = []) {
         >
           <i class="fa-solid fa-edit"></i>
         </button>
-        <button 
-          type="button" 
-          class="compras-remover-cotacao-btn" 
+        <button
+          type="button"
+          class="compras-remover-cotacao-btn"
           data-cotacao-id="${cotacao.id}"
           data-solicitacao-id="${solicitacaoId}"
           style="padding:6px 10px;background:#ef4444;color:white;border:none;border-radius:4px;cursor:pointer;font-size:11px;"
@@ -42330,7 +42426,7 @@ function renderCotacoesList(solicitacaoId, cotacoes = []) {
     </div>
     `;
   }).join('');
-  
+
   // Adiciona event listeners para editar/remover
   container.querySelectorAll('.compras-editar-cotacao-btn').forEach(btn => {
     btn.addEventListener('click', () => {
@@ -42339,18 +42435,18 @@ function renderCotacoesList(solicitacaoId, cotacoes = []) {
       editarCotacao(cotacaoId, solicitacaoId);
     });
   });
-  
+
   container.querySelectorAll('.compras-remover-cotacao-btn').forEach(btn => {
     btn.addEventListener('click', async () => {
       if (!confirm('Deseja remover esta cotação?')) return;
-      
+
       const cotacaoId = btn.getAttribute('data-cotacao-id');
       const solicitacaoId = btn.getAttribute('data-solicitacao-id');
-      
+
       try {
         const response = await fetch(`/api/compras/cotacoes/${cotacaoId}`, { method: 'DELETE' });
         if (!response.ok) throw new Error('Erro ao remover cotação');
-        
+
         // Recarrega a lista
         await loadCotacoesItem(solicitacaoId);
       } catch (err) {
@@ -42367,67 +42463,67 @@ async function abrirModalNovaCotacao(solicitacaoId) {
     console.log('[COTACOES] Carregando fornecedores...');
     await loadFornecedores();
   }
-  
+
   // Remove modal antigo se existir
   const modalAntigo = document.getElementById('modal-cotacao');
   if (modalAntigo) modalAntigo.remove();
-  
+
   const modal = document.createElement('div');
   modal.id = 'modal-cotacao';
   modal.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;z-index:10000;';
-  
+
   modal.innerHTML = `
     <div style="background:white;padding:24px;border-radius:8px;max-width:500px;width:90%;box-shadow:0 4px 12px rgba(0,0,0,0.15);">
       <h3 style="margin:0 0 20px 0;font-size:18px;color:#1f2937;">
         <i class="fa-solid fa-plus-circle" style="color:#3b82f6;margin-right:8px;"></i>
         Nova Cotação
       </h3>
-      
+
       <div style="display:flex;flex-direction:column;gap:12px;">
         <!-- Fornecedor -->
         <div>
           <label style="font-size:12px;color:#6b7280;text-transform:uppercase;margin-bottom:4px;display:block;">Fornecedor *</label>
           <div style="position:relative;">
-            <input 
-              type="text" 
-              id="cotacao-fornecedor-nome" 
-              placeholder="Digite para buscar..." 
+            <input
+              type="text"
+              id="cotacao-fornecedor-nome"
+              placeholder="Digite para buscar..."
               autocomplete="off"
-              style="padding:8px 12px;border:1px solid #d1d5db;border-radius:6px;font-size:14px;width:100%;" 
+              style="padding:8px 12px;border:1px solid #d1d5db;border-radius:6px;font-size:14px;width:100%;"
             />
             <input type="hidden" id="cotacao-fornecedor-id" />
             <div id="cotacao-fornecedor-list" style="display:none;position:absolute;top:100%;left:0;right:0;max-height:200px;overflow-y:auto;background:white;border:1px solid #ddd;border-radius:4px;box-shadow:0 4px 6px rgba(0,0,0,0.1);z-index:1000;margin-top:2px;"></div>
           </div>
         </div>
-        
+
         <!-- Valor -->
         <div>
           <label style="font-size:12px;color:#6b7280;text-transform:uppercase;margin-bottom:4px;display:block;">Valor Cotado</label>
-          <input 
-            type="number" 
-            id="cotacao-valor" 
-            placeholder="0.00" 
+          <input
+            type="number"
+            id="cotacao-valor"
+            placeholder="0.00"
             step="0.01"
-            style="padding:8px 12px;border:1px solid #d1d5db;border-radius:6px;font-size:14px;width:100%;" 
+            style="padding:8px 12px;border:1px solid #d1d5db;border-radius:6px;font-size:14px;width:100%;"
           />
         </div>
-        
+
         <!-- Observação -->
         <div>
           <label style="font-size:12px;color:#6b7280;text-transform:uppercase;margin-bottom:4px;display:block;">Observação</label>
-          <textarea 
-            id="cotacao-observacao" 
+          <textarea
+            id="cotacao-observacao"
             rows="2"
             placeholder="Observações adicionais..."
-            style="padding:8px 12px;border:1px solid #d1d5db;border-radius:6px;font-size:14px;width:100%;resize:vertical;" 
+            style="padding:8px 12px;border:1px solid #d1d5db;border-radius:6px;font-size:14px;width:100%;resize:vertical;"
           ></textarea>
         </div>
-        
+
         <!-- Anexos -->
         <div>
           <label style="font-size:12px;color:#6b7280;text-transform:uppercase;margin-bottom:4px;display:block;">Anexos</label>
-          <button 
-            type="button" 
+          <button
+            type="button"
             id="cotacao-adicionar-anexo-btn"
             style="padding:8px 12px;background:#3b82f6;color:white;border:none;border-radius:6px;cursor:pointer;font-size:12px;display:flex;align-items:center;gap:6px;"
           >
@@ -42438,17 +42534,17 @@ async function abrirModalNovaCotacao(solicitacaoId) {
           <div id="cotacao-anexos-list" style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px;"></div>
         </div>
       </div>
-      
+
       <div style="display:flex;gap:12px;margin-top:24px;justify-content:flex-end;">
-        <button 
-          type="button" 
+        <button
+          type="button"
           id="cotacao-cancelar-btn"
           style="padding:8px 16px;background:#6b7280;color:white;border:none;border-radius:6px;cursor:pointer;font-size:14px;"
         >
           Cancelar
         </button>
-        <button 
-          type="button" 
+        <button
+          type="button"
           id="cotacao-salvar-btn"
           style="padding:8px 16px;background:#10b981;color:white;border:none;border-radius:6px;cursor:pointer;font-size:14px;font-weight:600;"
         >
@@ -42458,48 +42554,48 @@ async function abrirModalNovaCotacao(solicitacaoId) {
       </div>
     </div>
   `;
-  
+
   document.body.appendChild(modal);
-  
+
   // Configurar autocomplete de fornecedor no modal
   const fornecedorInput = document.getElementById('cotacao-fornecedor-nome');
   const fornecedorIdInput = document.getElementById('cotacao-fornecedor-id');
   const fornecedorList = document.getElementById('cotacao-fornecedor-list');
-  
+
   fornecedorInput.addEventListener('input', function() {
     const busca = this.value.toLowerCase();
     if (busca.length < 2) {
       fornecedorList.style.display = 'none';
       return;
     }
-    
+
     if (!window.comprasFornecedores || !Array.isArray(window.comprasFornecedores)) {
       // Mostra mensagem de carregamento ao invés de warning
       fornecedorList.innerHTML = '<div style="padding:12px;color:#6b7280;text-align:center;font-size:12px;"><i class="fa-solid fa-spinner fa-spin"></i> Carregando fornecedores...</div>';
       fornecedorList.style.display = 'block';
       return;
     }
-    
+
     const fornecedoresFiltrados = window.comprasFornecedores.filter(f => {
       const nome = (f.nome_fantasia || '').toLowerCase();
       const razao = (f.razao_social || '').toLowerCase();
       return nome.includes(busca) || razao.includes(busca);
     }).slice(0, 10);
-    
+
     if (fornecedoresFiltrados.length === 0) {
       fornecedorList.style.display = 'none';
       return;
     }
-    
+
     fornecedorList.innerHTML = fornecedoresFiltrados.map(f => `
       <div class="fornecedor-option" data-id="${f.codigo_cliente_fornecedor}" data-nome="${escapeHtml(f.nome_fantasia)}" style="padding:8px 12px;cursor:pointer;border-bottom:1px solid #f3f4f6;">
         <div style="font-weight:600;color:#1f2937;font-size:13px;">${escapeHtml(f.nome_fantasia)}</div>
         <div style="font-size:11px;color:#6b7280;">${escapeHtml(f.razao_social)}</div>
       </div>
     `).join('');
-    
+
     fornecedorList.style.display = 'block';
-    
+
     // Event listeners para seleção
     fornecedorList.querySelectorAll('.fornecedor-option').forEach(opt => {
       opt.addEventListener('click', function() {
@@ -42509,27 +42605,27 @@ async function abrirModalNovaCotacao(solicitacaoId) {
       });
     });
   });
-  
+
   // Fechar lista ao clicar fora
   document.addEventListener('click', function(e) {
     if (!fornecedorInput.contains(e.target) && !fornecedorList.contains(e.target)) {
       fornecedorList.style.display = 'none';
     }
   });
-  
+
   // Sistema de anexos do modal
   const anexoBtn = document.getElementById('cotacao-adicionar-anexo-btn');
   const anexoInput = document.getElementById('cotacao-anexo-input');
   const anexosList = document.getElementById('cotacao-anexos-list');
-  
+
   const tempKey = `modal_${solicitacaoId}`;
   window.comprasCotacoesAnexos[tempKey] = [];
-  
+
   anexoBtn.addEventListener('click', () => anexoInput.click());
-  
+
   anexoInput.addEventListener('change', function() {
     const arquivos = Array.from(this.files);
-    
+
     arquivos.forEach(arquivo => {
       const reader = new FileReader();
       reader.onload = (e) => {
@@ -42543,20 +42639,20 @@ async function abrirModalNovaCotacao(solicitacaoId) {
       };
       reader.readAsDataURL(arquivo);
     });
-    
+
     this.value = '';
   });
-  
+
   function renderCotacaoAnexosModal(key) {
     const anexos = window.comprasCotacoesAnexos[key] || [];
-    
+
     anexosList.innerHTML = anexos.map((anexo, idx) => `
       <div style="display:flex;align-items:center;gap:4px;background:#f3f4f6;padding:4px 8px;border-radius:4px;font-size:11px;">
         <i class="fa-solid fa-file" style="color:#6b7280;"></i>
         <span style="color:#374151;max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${escapeHtml(anexo.nome)}">${escapeHtml(anexo.nome)}</span>
-        <button 
-          type="button" 
-          class="remover-anexo-cotacao" 
+        <button
+          type="button"
+          class="remover-anexo-cotacao"
           data-idx="${idx}"
           style="background:none;border:none;color:#ef4444;cursor:pointer;padding:2px;font-size:10px;"
         >
@@ -42564,7 +42660,7 @@ async function abrirModalNovaCotacao(solicitacaoId) {
         </button>
       </div>
     `).join('');
-    
+
     anexosList.querySelectorAll('.remover-anexo-cotacao').forEach(btn => {
       btn.addEventListener('click', function() {
         const idx = parseInt(this.getAttribute('data-idx'));
@@ -42573,29 +42669,29 @@ async function abrirModalNovaCotacao(solicitacaoId) {
       });
     });
   }
-  
+
   // Botão cancelar
   document.getElementById('cotacao-cancelar-btn').addEventListener('click', () => {
     delete window.comprasCotacoesAnexos[tempKey];
     modal.remove();
   });
-  
+
   // Botão salvar
   document.getElementById('cotacao-salvar-btn').addEventListener('click', async () => {
     const fornecedorNome = fornecedorInput.value.trim();
     const fornecedorId = fornecedorIdInput.value.trim();
     const valor = parseFloat(document.getElementById('cotacao-valor').value) || 0;
     const observacao = document.getElementById('cotacao-observacao').value.trim();
-    
+
     if (!fornecedorNome) {
       alert('Selecione um fornecedor');
       return;
     }
-    
+
     const btn = document.getElementById('cotacao-salvar-btn');
     btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Salvando...';
     btn.disabled = true;
-    
+
     try {
       const dados = {
         solicitacao_id: solicitacaoId,
@@ -42606,30 +42702,30 @@ async function abrirModalNovaCotacao(solicitacaoId) {
         anexos: window.comprasCotacoesAnexos[tempKey] || [],
         criado_por: window.nomeUsuario || 'Sistema'
       };
-      
+
       const response = await fetch('/api/compras/cotacoes', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(dados)
       });
-      
+
       if (!response.ok) throw new Error('Erro ao salvar cotação');
-      
+
       // Limpa anexos temporários
       delete window.comprasCotacoesAnexos[tempKey];
-      
+
       // Fecha modal
       modal.remove();
-      
+
       // Recarrega lista de cotações na tabela
       await loadCotacoesItem(solicitacaoId);
-      
+
       // Recarrega lista de cotações no modal se estiver aberto
       const modalDetalhesPedido = document.getElementById('modalDetalhesPedidoCompras');
       if (modalDetalhesPedido && modalDetalhesPedido.style.display === 'flex') {
         await loadCotacoesItemModal(solicitacaoId);
       }
-      
+
     } catch (err) {
       console.error('[COTACOES] Erro ao salvar:', err);
       alert('Erro ao salvar cotação');
@@ -42637,7 +42733,7 @@ async function abrirModalNovaCotacao(solicitacaoId) {
       btn.disabled = false;
     }
   });
-  
+
   // Fechar ao clicar fora
   modal.addEventListener('click', (e) => {
     if (e.target === modal) {
@@ -42694,21 +42790,21 @@ async function loadComprasSolicitacoes() {
   const tbody = document.getElementById('comprasTbody');
   if (!tbody) return;
   tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:16px;color:var(--inactive-color);">Carregando...</td></tr>';
-  
+
   // Garante que os fornecedores estão carregados antes de renderizar
   if (!window.fornecedoresCache || window.fornecedoresCache.length === 0) {
     await loadFornecedores();
   }
-  
+
   try {
     const resp = await fetch('/api/compras/todas', { credentials: 'include' });
     if (!resp.ok) throw new Error('Não foi possível carregar as solicitações');
     const data = await resp.json();
     const listaCompleta = Array.isArray(data.solicitacoes) ? data.solicitacoes : [];
-    
+
     // Mostra TODAS as solicitações (removido o filtro anterior)
     const lista = listaCompleta;
-    
+
     if (!lista.length) {
       tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:16px;color:var(--inactive-color);">Nenhuma solicitação registrada.</td></tr>';
       return;
@@ -42765,7 +42861,7 @@ async function loadComprasSolicitacoes() {
     // Busca todas as cotações aprovadas de uma vez para melhor performance
     const cotacoesMap = new Map();
     const idsItens = Array.from(pedidosMap.values()).flat().map(item => item.id);
-    
+
     try {
       await Promise.all(idsItens.map(async (itemId) => {
         try {
@@ -42810,11 +42906,11 @@ async function loadComprasSolicitacoes() {
       itens.forEach((item) => {
         const previsaoValue = fmtInputDate(item.previsao_chegada);
         const obs = item.observacao ? escapeHtml(item.observacao) : '-';
-        
+
         // Busca cotações aprovadas para este item do Map previamente carregado
         let cotacoesAprovadasHtml = '';
         const aprovadas = cotacoesMap.get(item.id) || [];
-        
+
         if (aprovadas.length > 0) {
           cotacoesAprovadasHtml = `
             <div style="margin-bottom:12px;padding:10px;background:#ecfdf5;border:1px solid #10b981;border-radius:6px;">
@@ -42850,9 +42946,9 @@ async function loadComprasSolicitacoes() {
                   } catch (e) {
                     console.error('[Cotações] Erro ao processar anexos:', e);
                   }
-                  
+
                   const obsCot = cot.observacao ? escapeHtml(cot.observacao) : '';
-                  
+
                   return `
                     <div style="background:white;padding:10px;border-radius:6px;border:1px solid #d1fae5;">
                       <div style="display:flex;align-items:center;gap:12px;margin-bottom:6px;">
@@ -42879,7 +42975,7 @@ async function loadComprasSolicitacoes() {
             </div>
           `;
         }
-        
+
         // Processa anexos existentes
         let anexosExistentesHtml = '';
         try {
@@ -42902,7 +42998,7 @@ async function loadComprasSolicitacoes() {
         } catch (e) {
           console.error('[Anexos] Erro ao processar anexos:', e);
         }
-        
+
         html += `
           <tr class="compras-pedido-item" data-pedido="${expandId}" style="display:none;background:#fefefe;">
             <td></td>
@@ -42923,7 +43019,7 @@ async function loadComprasSolicitacoes() {
                     <div style="font-size:11px;color:#6b7280;text-transform:uppercase;margin-bottom:4px;">Descrição</div>
                     <div style="color:#374151;">${escapeHtml(item.produto_descricao || '-')}</div>
                   </div>
-                  
+
                   <!-- Segunda linha: Quantidade - Observação (2 colunas, Observação ocupa 2 cols) -->
                   <div>
                     <div style="font-size:11px;color:#6b7280;text-transform:uppercase;margin-bottom:4px;">Quantidade</div>
@@ -42931,16 +43027,16 @@ async function loadComprasSolicitacoes() {
                   </div>
                   <div style="grid-column:span 2;">
                     <div style="font-size:11px;color:#6b7280;text-transform:uppercase;margin-bottom:4px;">Observação</div>
-                    <textarea 
-                      data-id="${item.id}" 
-                      data-field="observacao" 
-                      data-original="${escapeHtml(item.observacao || '')}" 
-                      class="compras-editable-field" 
+                    <textarea
+                      data-id="${item.id}"
+                      data-field="observacao"
+                      data-original="${escapeHtml(item.observacao || '')}"
+                      class="compras-editable-field"
                       style="padding:8px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;background:white;color:#1f2937;width:100%;min-height:60px;resize:vertical;font-family:inherit;"
                       placeholder="Digite a observação..."
                     >${escapeHtml(item.observacao || '')}</textarea>
                   </div>
-                  
+
                   <!-- Terceira linha: Prazo solicitado - Previsão chegada - Fornecedor (2 ou 3 colunas) -->
                   <div>
                     <div style="font-size:11px;color:#6b7280;text-transform:uppercase;margin-bottom:4px;">Prazo solicitado</div>
@@ -42962,9 +43058,9 @@ async function loadComprasSolicitacoes() {
                         <div class="compras-cotacoes-list" data-item-id="${item.id}">
                           <!-- Será preenchido via JS com cotações existentes -->
                         </div>
-                        <button 
-                          type="button" 
-                          class="compras-adicionar-cotacao-btn" 
+                        <button
+                          type="button"
+                          class="compras-adicionar-cotacao-btn"
                           data-item-id="${item.id}"
                           style="padding:8px 12px;background:#3b82f6;color:white;border:none;border-radius:6px;cursor:pointer;font-size:12px;display:flex;align-items:center;gap:6px;transition:background 0.2s;align-self:flex-start;"
                           onmouseover="this.style.background='#2563eb'"
@@ -42977,23 +43073,23 @@ async function loadComprasSolicitacoes() {
                     ` : `
                       <!-- Campo fornecedor simples (para outros status) -->
                       <div style="position:relative;">
-                        <input 
-                          type="text" 
-                          data-id="${item.id}" 
-                          data-field="fornecedor_nome" 
-                          data-original="${escapeHtml(item.fornecedor_nome || '')}" 
-                          class="compras-editable-field compras-fornecedor-input" 
-                          value="${escapeHtml(item.fornecedor_nome || '')}" 
-                          placeholder="Digite para buscar..." 
+                        <input
+                          type="text"
+                          data-id="${item.id}"
+                          data-field="fornecedor_nome"
+                          data-original="${escapeHtml(item.fornecedor_nome || '')}"
+                          class="compras-editable-field compras-fornecedor-input"
+                          value="${escapeHtml(item.fornecedor_nome || '')}"
+                          placeholder="Digite para buscar..."
                           autocomplete="off"
-                          style="padding:6px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;background:white;color:#1f2937;width:100%;" 
+                          style="padding:6px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;background:white;color:#1f2937;width:100%;"
                         />
                         <input type="hidden" data-id="${item.id}" data-field="fornecedor_id" class="compras-fornecedor-id" value="${item.fornecedor_id || ''}" />
                         <div class="compras-fornecedor-list" data-item-id="${item.id}" style="display:none;position:absolute;top:100%;left:0;right:0;max-height:200px;overflow-y:auto;background:white;border:1px solid #ddd;border-radius:4px;box-shadow:0 4px 6px rgba(0,0,0,0.1);z-index:1000;margin-top:2px;"></div>
                       </div>
                     `}
                   </div>
-                  
+
                   <!-- Quarta linha: Status (3 colunas) -->
                   <div style="grid-column:span 3;">
                     <div style="font-size:11px;color:#6b7280;text-transform:uppercase;margin-bottom:4px;">Status</div>
@@ -43012,12 +43108,12 @@ async function loadComprasSolicitacoes() {
                       ">
                         ${item.status || 'pendente'}
                       </span>
-                      
+
                       <!-- Botão Cotado (só aparece se status = aguardando_cotacao ou aguardando cotação) -->
                       ${(item.status === 'aguardando_cotacao' || item.status === 'aguardando cotação') ? `
-                        <button 
-                          type="button" 
-                          class="compras-marcar-cotado-btn" 
+                        <button
+                          type="button"
+                          class="compras-marcar-cotado-btn"
                           data-item-id="${item.id}"
                           style="padding:6px 12px;background:#10b981;color:white;border:none;border-radius:6px;cursor:pointer;font-size:12px;display:flex;align-items:center;gap:6px;transition:background 0.2s;"
                           onmouseover="this.style.background='#059669'"
@@ -43031,15 +43127,15 @@ async function loadComprasSolicitacoes() {
                     <!-- Hidden input para manter o status -->
                     <input type="hidden" data-id="${item.id}" data-field="status" data-original="${escapeHtml(item.status || 'pendente')}" class="compras-status-hidden" value="${item.status || 'pendente'}" />
                   </div>
-                  
+
                   <!-- Quinta linha: Anexos (ocupa toda a largura) -->
                   <div style="grid-column:span 3;">
                     <div style="font-size:11px;color:#6b7280;text-transform:uppercase;margin-bottom:4px;">Anexos</div>
                     <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
                       <!-- Botão Enviar E-mail -->
-                      <button 
-                        type="button" 
-                        class="compras-enviar-email-btn" 
+                      <button
+                        type="button"
+                        class="compras-enviar-email-btn"
                         data-item-id="${item.id}"
                         style="padding:6px 12px;background:#6366f1;color:white;border:none;border-radius:6px;cursor:pointer;font-size:12px;display:flex;align-items:center;gap:6px;transition:background 0.2s;"
                         onmouseover="this.style.background='#4f46e5'"
@@ -43048,11 +43144,11 @@ async function loadComprasSolicitacoes() {
                         <i class="fa-solid fa-envelope"></i>
                         Enviar E-mail
                       </button>
-                      
+
                       <!-- Botão Enviar WhatsApp -->
-                      <button 
-                        type="button" 
-                        class="compras-enviar-whatsapp-btn" 
+                      <button
+                        type="button"
+                        class="compras-enviar-whatsapp-btn"
                         data-item-id="${item.id}"
                         style="padding:6px 12px;background:#25d366;color:white;border:none;border-radius:6px;cursor:pointer;font-size:12px;display:flex;align-items:center;gap:6px;transition:background 0.2s;"
                         onmouseover="this.style.background='#1da851'"
@@ -43061,11 +43157,11 @@ async function loadComprasSolicitacoes() {
                         <i class="fa-brands fa-whatsapp"></i>
                         Enviar WhatsApp
                       </button>
-                      
+
                       ${anexosExistentesHtml}
-                      <button 
-                        type="button" 
-                        class="compras-adicionar-anexo-btn" 
+                      <button
+                        type="button"
+                        class="compras-adicionar-anexo-btn"
                         data-item-id="${item.id}"
                         style="padding:6px 12px;background:#3b82f6;color:white;border:none;border-radius:6px;cursor:pointer;font-size:12px;display:flex;align-items:center;gap:6px;transition:background 0.2s;"
                         onmouseover="this.style.background='#2563eb'"
@@ -43074,11 +43170,11 @@ async function loadComprasSolicitacoes() {
                         <i class="fa-solid fa-paperclip"></i>
                         Adicionar anexo
                       </button>
-                      <input 
-                        type="file" 
-                        class="compras-anexo-input" 
-                        data-item-id="${item.id}" 
-                        style="display:none;" 
+                      <input
+                        type="file"
+                        class="compras-anexo-input"
+                        data-item-id="${item.id}"
+                        style="display:none;"
                         multiple
                       />
                       <div class="compras-anexos-list" data-item-id="${item.id}" style="display:flex;gap:6px;flex-wrap:wrap;"></div>
@@ -43115,13 +43211,13 @@ async function loadComprasSolicitacoes() {
         }
       });
     });
-    
+
     // Setup autocomplete para campos de fornecedor na tabela
     setupFornecedorAutocompleteTabela();
-    
+
     // Setup listeners para anexos em cada item
     setupComprasAnexosTabela();
-    
+
     // Setup listeners para cotações (múltiplos fornecedores)
     const adicionarCotacaoBtns = tbody.querySelectorAll('.compras-adicionar-cotacao-btn');
     adicionarCotacaoBtns.forEach(btn => {
@@ -43131,7 +43227,7 @@ async function loadComprasSolicitacoes() {
         await abrirModalNovaCotacao(itemId);
       });
     });
-    
+
     // Carrega cotações existentes para itens em "aguardando cotação"
     const cotacoesContainers = tbody.querySelectorAll('.compras-cotacoes-container');
     cotacoesContainers.forEach(container => {
@@ -43145,74 +43241,74 @@ async function loadComprasSolicitacoes() {
       btn.addEventListener('click', async (e) => {
         e.stopPropagation();
         const itemId = btn.getAttribute('data-id');
-        
+
         // Coleta os valores dos campos editáveis deste item
         const previsaoField = tbody.querySelector(`input[data-id="${itemId}"][data-field="previsao_chegada"]`);
         const fornecedorNomeField = tbody.querySelector(`input[data-id="${itemId}"][data-field="fornecedor_nome"]`);
         const fornecedorIdField = tbody.querySelector(`input[data-id="${itemId}"][data-field="fornecedor_id"]`);
         const observacaoField = tbody.querySelector(`textarea[data-id="${itemId}"][data-field="observacao"]`);
-        
+
         const payload = {};
-        
+
         if (previsaoField && previsaoField.value !== previsaoField.getAttribute('data-original')) {
           payload.previsao_chegada = previsaoField.value || null;
         }
-        
+
         if (fornecedorNomeField && fornecedorNomeField.value !== fornecedorNomeField.getAttribute('data-original')) {
           payload.fornecedor_nome = fornecedorNomeField.value || null;
           payload.fornecedor_id = fornecedorIdField?.value || null;
         }
-        
+
         if (observacaoField && observacaoField.value !== observacaoField.getAttribute('data-original')) {
           payload.observacao = observacaoField.value || null;
         }
-        
+
         // Adiciona anexos se houver
         if (window.comprasAnexosTabela[itemId] && window.comprasAnexosTabela[itemId].length > 0) {
           payload.anexos = window.comprasAnexosTabela[itemId];
         }
-        
+
         if (Object.keys(payload).length === 0) {
           // Nenhuma mudança
           const saveBtn = document.getElementById(`compras-save-btn-${itemId}`);
           if (saveBtn) saveBtn.style.display = 'none';
           return;
         }
-        
+
         // Salva as mudanças
         try {
           btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin" style="margin-right:6px;"></i>Salvando...';
           btn.disabled = true;
-          
+
           await updateSolicitacaoCompras(itemId, payload);
-          
+
           // Atualiza os valores originais
           if (previsaoField) previsaoField.setAttribute('data-original', previsaoField.value);
           if (fornecedorNomeField) fornecedorNomeField.setAttribute('data-original', fornecedorNomeField.value);
           if (observacaoField) observacaoField.setAttribute('data-original', observacaoField.value);
-          
+
           // Limpa anexos temporários após salvar
           if (window.comprasAnexosTabela[itemId]) {
             delete window.comprasAnexosTabela[itemId];
           }
-          
+
           // Feedback visual
           btn.style.background = '#10b981';
           btn.innerHTML = '<i class="fa-solid fa-check" style="margin-right:6px;"></i>Salvo!';
-          
+
           setTimeout(() => {
             const saveBtn = document.getElementById(`compras-save-btn-${itemId}`);
             if (saveBtn) saveBtn.style.display = 'none';
             btn.innerHTML = '<i class="fa-solid fa-check" style="margin-right:6px;"></i>Salvar';
             btn.disabled = false;
           }, 1500);
-          
+
         } catch (err) {
           console.error('[COMPRAS] Erro ao salvar:', err);
           btn.style.background = '#ef4444';
           btn.innerHTML = '<i class="fa-solid fa-xmark" style="margin-right:6px;"></i>Erro';
           btn.disabled = false;
-          
+
           setTimeout(() => {
             btn.style.background = '#10b981';
             btn.innerHTML = '<i class="fa-solid fa-check" style="margin-right:6px;"></i>Salvar';
@@ -43227,28 +43323,28 @@ async function loadComprasSolicitacoes() {
       btn.addEventListener('click', async (e) => {
         e.stopPropagation();
         const itemId = btn.getAttribute('data-item-id');
-        
+
         if (!confirm('Deseja marcar este item como cotado?')) {
           return;
         }
-        
+
         try {
           btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Processando...';
           btn.disabled = true;
-          
+
           // Atualiza o status para "cotado"
           await updateSolicitacaoCompras(itemId, { status: 'cotado' });
-          
+
           // Feedback visual
           btn.style.background = '#10b981';
           btn.innerHTML = '<i class="fa-solid fa-check"></i> Cotado!';
-          
+
           // Recarrega a tabela após 1 segundo para atualizar o status
           setTimeout(() => {
             loadComprasSolicitacoes();
             loadComprasCotadas(); // Recarrega também a tabela de cotados
           }, 1000);
-          
+
         } catch (err) {
           console.error('[COMPRAS] Erro ao marcar como cotado:', err);
           alert('Erro ao marcar como cotado. Tente novamente.');
@@ -43258,26 +43354,26 @@ async function loadComprasSolicitacoes() {
         }
       });
     });
-    
+
     // Event listener para o botão "Enviar E-mail"
     const emailBtns = tbody.querySelectorAll('.compras-enviar-email-btn');
     emailBtns.forEach(btn => {
       btn.addEventListener('click', async (e) => {
         e.stopPropagation();
         const itemId = btn.getAttribute('data-item-id');
-        
+
         // TODO: Implementar funcionalidade de envio de e-mail
         alert('Funcionalidade de envio de e-mail será implementada em breve.\nItem ID: ' + itemId);
       });
     });
-    
+
     // Event listener para o botão "Enviar WhatsApp"
     const whatsappBtns = tbody.querySelectorAll('.compras-enviar-whatsapp-btn');
     whatsappBtns.forEach(btn => {
       btn.addEventListener('click', async (e) => {
         e.stopPropagation();
         const itemId = btn.getAttribute('data-item-id');
-        
+
         // TODO: Implementar funcionalidade de envio de WhatsApp
         alert('Funcionalidade de envio de WhatsApp será implementada em breve.\nItem ID: ' + itemId);
       });
@@ -43398,14 +43494,16 @@ async function abrirModalDetalhesPedidoCompras(numeroPedido) {
   const modal = document.getElementById('modalDetalhesPedidoCompras');
   const modalBody = document.getElementById('modalPedidoBody');
   const modalTitulo = document.getElementById('modalPedidoTitulo');
-  
+
   if (!modal || !modalBody || !modalTitulo) return;
 
+  modal.classList.add('cp-purchase-preparation-modal');
+
   renderizarNavegacaoModalKanban({ modalId: 'modalDetalhesPedidoCompras', status: '', currentItemId: '', openType: '' });
-  
+
   modalBody.innerHTML = '<div style="text-align:center;padding:40px;"><i class="fa-solid fa-spinner fa-spin" style="font-size:32px;color:#3b82f6;"></i><br><br>Carregando...</div>';
   modal.style.display = 'flex';
-  
+
   try {
     const fmtQtdModal = (v) => {
       try {
@@ -43424,23 +43522,23 @@ async function abrirModalDetalhesPedidoCompras(numeroPedido) {
     if (!resp.ok) throw new Error('Não foi possível carregar as solicitações');
     const data = await resp.json();
     const listaCompleta = Array.isArray(data.solicitacoes) ? data.solicitacoes : [];
-    
+
     const itensPedido = listaCompleta.filter(item => item.numero_pedido === numeroPedido);
-    
+
     if (itensPedido.length === 0) {
       modalBody.innerHTML = '<div style="text-align:center;padding:40px;color:#ef4444;">Pedido não encontrado.</div>';
       return;
     }
-    
+
     // Armazena itens em cache global para acesso nas funções de cálculo
     window.itensPedidoCache = window.itensPedidoCache || {};
     itensPedido.forEach(item => {
       window.itensPedidoCache[item.id] = item;
     });
-    
+
     const primeiroItem = itensPedido[0];
     modalTitulo.textContent = `Pedido ${numeroPedido}`;
-    
+
     // Busca cotações para cada item
     const cotacoesMap = new Map();
     await Promise.all(itensPedido.map(async (item) => {
@@ -43454,7 +43552,7 @@ async function abrirModalDetalhesPedidoCompras(numeroPedido) {
         console.error(`Erro ao buscar cotações do item ${item.id}:`, e);
       }
     }));
-    
+
     // Renderiza o modal
     const fmtDate = (iso) => {
       if (!iso) return '-';
@@ -43467,10 +43565,18 @@ async function abrirModalDetalhesPedidoCompras(numeroPedido) {
       const d = new Date(iso);
       return Number.isNaN(d.getTime()) ? '-' : d.toLocaleString('pt-BR');
     };
-    
+
     // Verifica se pelo menos um item está em "aguardando compra" para mostrar dados da compra
-    const temItemAguardandoCompra = itensPedido.some(item => item.status === 'aguardando compra');
-    
+    const ehStatusPreparacaoPedido = (status) => {
+      const normalizado = String(status || '')
+        .trim()
+        .toLowerCase()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '');
+      return ['aguardando compra', 'aguardando compra preparacao', 'requisicao'].includes(normalizado);
+    };
+    const temItemAguardandoCompra = itensPedido.some(item => ehStatusPreparacaoPedido(item.status));
+
     let html = `
       <!-- Informações do Pedido -->
       <div style="background:#f8fafc;padding:16px;border-radius:8px;margin-bottom:20px;">
@@ -43489,14 +43595,14 @@ async function abrirModalDetalhesPedidoCompras(numeroPedido) {
           </div>
         </div>
       </div>
-      
+
       ${temItemAguardandoCompra ? `
       <!-- Dados da Compra (Únicos para todo o pedido) -->
       <div style="padding:16px;background:#f0fdf4;border:2px solid #10b981;border-radius:8px;margin-bottom:20px;">
         <div style="font-size:14px;color:#047857;text-transform:uppercase;font-weight:700;margin-bottom:16px;display:flex;align-items:center;gap:8px;">
           <i class="fa-solid fa-shopping-cart"></i> Dados da Compra (Pedido: ${numeroPedido})
         </div>
-        
+
         <!-- Campos em Grid (4 colunas) -->
         <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:14px;">
           <!-- Fornecedor -->
@@ -43505,8 +43611,8 @@ async function abrirModalDetalhesPedidoCompras(numeroPedido) {
               <i class="fa-solid fa-building"></i> Fornecedor *
             </label>
             <div style="position:relative;">
-              <input 
-                type="text" 
+              <input
+                type="text"
                 id="compras-fornecedor-input-${numeroPedido}"
                 class="compras-fornecedor-input-modal"
                 placeholder="Digite o nome do fornecedor..."
@@ -43514,46 +43620,46 @@ async function abrirModalDetalhesPedidoCompras(numeroPedido) {
                 style="width:100%;padding:10px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;"
               />
               <input type="hidden" id="compras-fornecedor-id-${numeroPedido}" value="${primeiroItem.fornecedor_id || ''}" />
-              <div 
-                id="compras-fornecedor-list-${numeroPedido}" 
+              <div
+                id="compras-fornecedor-list-${numeroPedido}"
                 class="compras-fornecedor-list-modal"
                 style="display:none;position:absolute;top:100%;left:0;right:0;background:white;border:1px solid #d1d5db;border-top:none;border-radius:0 0 6px 6px;max-height:200px;overflow-y:auto;z-index:1000;box-shadow:0 4px 6px rgba(0,0,0,0.1);">
               </div>
             </div>
           </div>
-          
+
           <!-- Previsão de Entrega -->
           <div>
             <label style="display:block;font-size:11px;color:#047857;font-weight:600;margin-bottom:6px;">
               <i class="fa-solid fa-calendar"></i> Previsão de Entrega
             </label>
-            <input 
-              type="date" 
+            <input
+              type="date"
               id="compras-previsao-entrega-${numeroPedido}"
               value="${primeiroItem.previsao_entrega ? new Date(primeiroItem.previsao_entrega).toISOString().split('T')[0] : ''}"
               style="width:100%;padding:10px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;"
             />
           </div>
-          
+
           <!-- Categoria da Compra -->
           <div>
             <label style="display:block;font-size:11px;color:#047857;font-weight:600;margin-bottom:6px;">
               <i class="fa-solid fa-tags"></i> Categoria da Compra
             </label>
-            <select 
+            <select
               id="compras-categoria-${numeroPedido}"
               style="width:100%;padding:10px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;background:white;">
               <option value="">Selecione...</option>
               <!-- Será preenchido dinamicamente -->
             </select>
           </div>
-          
+
           <!-- Condição de Pagamento -->
           <div>
             <label style="display:block;font-size:11px;color:#047857;font-weight:600;margin-bottom:6px;">
               <i class="fa-solid fa-credit-card"></i> Condição de Pagamento
             </label>
-            <select 
+            <select
               id="compras-parcela-${numeroPedido}"
               style="width:100%;padding:10px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;background:white;">
               <option value="">Carregando...</option>
@@ -43563,28 +43669,31 @@ async function abrirModalDetalhesPedidoCompras(numeroPedido) {
         </div>
       </div>
       ` : ''}
-      
+
       <!-- Lista de Itens -->
       <div style="display:flex;flex-direction:column;gap:16px;">
     `;
-    
+
     itensPedido.forEach((item, index) => {
       const aprovadas = (cotacoesMap.get(item.id) || []).filter(c => c.status_aprovacao === 'aprovado');
-      
+
       html += `
         <div style="background:white;border:1px solid #e5e7eb;border-radius:8px;padding:16px;">
           <!-- Cabeçalho do Item -->
-          <div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:12px;">
-            <div>
+          <div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:12px;gap:12px;">
+            <div style="display:flex;align-items:flex-start;gap:10px;min-width:0;">
+              ${renderizarMiniaturaProdutoCompra(item)}
+              <div style="min-width:0;">
               <div style="font-size:12px;color:#6b7280;margin-bottom:4px;">Item ${index + 1}</div>
               <div style="font-size:16px;font-weight:700;color:#1f2937;">${escapeHtml(item.produto_codigo || '-')}</div>
               <div style="font-size:13px;color:#6b7280;margin-top:4px;">${escapeHtml(item.descricao || item.produto_descricao || '-')}</div>
+              </div>
             </div>
             <div style="background:${item.status === 'aguardando cotação' ? '#fef3c7' : item.status === 'aguardando compra' ? '#d1fae5' : '#dbeafe'};color:${item.status === 'aguardando cotação' ? '#92400e' : item.status === 'aguardando compra' ? '#065f46' : '#1e40af'};padding:6px 12px;border-radius:12px;font-size:11px;font-weight:700;text-transform:uppercase;white-space:nowrap;">
               ${escapeHtml(item.status || '-')}
             </div>
           </div>
-          
+
           <!-- Informações do Item -->
           <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:12px;padding:12px;background:#f9fafb;border-radius:6px;">
             <div>
@@ -43606,14 +43715,14 @@ async function abrirModalDetalhesPedidoCompras(numeroPedido) {
             </div>
             ` : ''}
           </div>
-          
+
           ${item.observacao ? `
           <div style="margin-bottom:12px;padding:10px;background:#fef3c7;border-left:3px solid #fbbf24;border-radius:4px;">
             <div style="font-size:10px;color:#92400e;text-transform:uppercase;font-weight:700;margin-bottom:4px;">Observação</div>
             <div style="font-size:12px;color:#1f2937;">${escapeHtml(item.observacao)}</div>
           </div>
           ` : ''}
-          
+
           ${aprovadas.length > 0 ? `
           <div style="padding:12px;background:#ecfdf5;border:1px solid #10b981;border-radius:6px;margin-bottom:12px;">
             <div style="font-size:11px;color:#047857;text-transform:uppercase;font-weight:700;margin-bottom:10px;display:flex;align-items:center;gap:6px;">
@@ -43639,7 +43748,7 @@ async function abrirModalDetalhesPedidoCompras(numeroPedido) {
             </div>
           </div>
           ` : ''}
-          
+
           ${item.status === 'aguardando compra' ? `
           <!-- Campos do Item em Grid (4 colunas) -->
           <div style="padding:12px;background:#f0fdf4;border:1px solid #10b981;border-radius:6px;margin-bottom:12px;">
@@ -43649,8 +43758,8 @@ async function abrirModalDetalhesPedidoCompras(numeroPedido) {
                 <label style="display:block;font-size:10px;color:#047857;font-weight:600;margin-bottom:6px;">
                   <i class="fa-solid fa-dollar-sign"></i> Valor Unitário (R$)
                 </label>
-                <input 
-                  type="number" 
+                <input
+                  type="number"
                   id="compras-valor-unitario-${item.id}"
                   value="${item.valor_unitario || ''}"
                   step="0.01"
@@ -43660,13 +43769,13 @@ async function abrirModalDetalhesPedidoCompras(numeroPedido) {
                   style="width:100%;padding:8px;border:1px solid #d1d5db;border-radius:6px;font-size:12px;"
                 />
               </div>
-              
+
               <!-- Local de Estoque -->
               <div>
                 <label style="display:block;font-size:10px;color:#047857;font-weight:600;margin-bottom:6px;">
                   <i class="fa-solid fa-warehouse"></i> Local de Estoque
                 </label>
-                <select 
+                <select
                   id="compras-local-estoque-${item.id}"
                   style="width:100%;padding:8px;border:1px solid #d1d5db;border-radius:6px;font-size:12px;background:white;">
                   <option value="">Selecione...</option>
@@ -43675,14 +43784,14 @@ async function abrirModalDetalhesPedidoCompras(numeroPedido) {
                   <option value="03">03 - Terceiro</option>
                 </select>
               </div>
-              
+
               <!-- Valor da Mercadoria -->
               <div>
                 <label style="display:block;font-size:10px;color:#047857;font-weight:600;margin-bottom:6px;">
                   <i class="fa-solid fa-calculator"></i> Valor da Mercadoria
                 </label>
-                <input 
-                  type="text" 
+                <input
+                  type="text"
                   id="compras-valor-mercadoria-${item.id}"
                   value=""
                   readonly
@@ -43690,14 +43799,14 @@ async function abrirModalDetalhesPedidoCompras(numeroPedido) {
                   title="Calculado automaticamente: Valor Unitário × Quantidade"
                 />
               </div>
-              
+
               <!-- % de Desconto -->
               <div>
                 <label style="display:block;font-size:10px;color:#047857;font-weight:600;margin-bottom:6px;">
                   <i class="fa-solid fa-percent"></i> % de Desconto
                 </label>
-                <input 
-                  type="number" 
+                <input
+                  type="number"
                   id="compras-desconto-${item.id}"
                   value="0"
                   step="0.01"
@@ -43709,20 +43818,20 @@ async function abrirModalDetalhesPedidoCompras(numeroPedido) {
                 />
               </div>
             </div>
-            
+
             <!-- Valor Total do Item (abaixo, destacado) -->
             <div style="margin-top:12px;padding:10px;background:#d1fae5;border-radius:6px;">
               <label style="display:block;font-size:10px;color:#047857;font-weight:600;margin-bottom:4px;">
                 <i class="fa-solid fa-coins"></i> Valor Total do Item
               </label>
-              <div 
+              <div
                 id="compras-valor-total-${item.id}"
                 style="font-size:18px;font-weight:700;color:#047857;">
                 R$ 0,00
               </div>
             </div>
           </div>
-          
+
           <!-- Sistema de Guias/Tabs -->
           <div style="background:#f8fafc;border:1px solid #e5e7eb;border-radius:6px;padding:12px;margin-bottom:12px;">
             <!-- Cabeçalho das Guias -->
@@ -43736,7 +43845,7 @@ async function abrirModalDetalhesPedidoCompras(numeroPedido) {
               <button class="tab-btn-item-${item.id}" data-tab="preco-venda" onclick="abrirTabItem(${item.id}, 'preco-venda')" style="padding:8px 14px;background:#f3f4f6;color:#6b7280;border:none;border-radius:6px 6px 0 0;cursor:pointer;font-size:11px;font-weight:600;transition:all 0.2s;">Preço Venda</button>
               <button class="tab-btn-item-${item.id}" data-tab="custo-estoque" onclick="abrirTabItem(${item.id}, 'custo-estoque')" style="padding:8px 14px;background:#f3f4f6;color:#6b7280;border:none;border-radius:6px 6px 0 0;cursor:pointer;font-size:11px;font-weight:600;transition:all 0.2s;">Custo Estoque</button>
             </div>
-            
+
             <!-- Conteúdo das Guias -->
             <div id="tab-content-item-${item.id}">
               <!-- Guia ICMS -->
@@ -43802,7 +43911,7 @@ async function abrirModalDetalhesPedidoCompras(numeroPedido) {
                   </div>
                 </div>
               </div>
-              
+
               <!-- Guia ICMS ST -->
               <div class="tab-panel-item-${item.id}" data-tab="icms-st" style="display:none;">
                 <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;">
@@ -43852,7 +43961,7 @@ async function abrirModalDetalhesPedidoCompras(numeroPedido) {
                   </div>
                 </div>
               </div>
-              
+
               <!-- Guia IPI -->
               <div class="tab-panel-item-${item.id}" data-tab="ipi" style="display:none;">
                 <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;">
@@ -43910,7 +44019,7 @@ async function abrirModalDetalhesPedidoCompras(numeroPedido) {
                   </div>
                 </div>
               </div>
-              
+
               <!-- Guia PIS -->
               <div class="tab-panel-item-${item.id}" data-tab="pis" style="display:none;">
                 <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;">
@@ -43964,7 +44073,7 @@ async function abrirModalDetalhesPedidoCompras(numeroPedido) {
                   </div>
                 </div>
               </div>
-              
+
               <!-- Guia COFINS -->
               <div class="tab-panel-item-${item.id}" data-tab="cofins" style="display:none;">
                 <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;">
@@ -44018,7 +44127,7 @@ async function abrirModalDetalhesPedidoCompras(numeroPedido) {
                   </div>
                 </div>
               </div>
-              
+
               <!-- Guia Informações Adicionais -->
               <div class="tab-panel-item-${item.id}" data-tab="info-adicionais" style="display:none;">
                 <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin-bottom:12px;">
@@ -44040,7 +44149,7 @@ async function abrirModalDetalhesPedidoCompras(numeroPedido) {
                   <textarea id="info-observacoes-${item.id}" rows="4" placeholder="Digite as observações..." style="width:100%;padding:8px;border:1px solid #d1d5db;border-radius:4px;font-size:11px;resize:vertical;"></textarea>
                 </div>
               </div>
-              
+
               <!-- Guia Atualização do Preço de Venda -->
               <div class="tab-panel-item-${item.id}" data-tab="preco-venda" style="display:none;">
                 <div style="padding:10px;background:#fef3c7;border:1px solid #fbbf24;border-radius:6px;margin-bottom:12px;">
@@ -44049,20 +44158,20 @@ async function abrirModalDetalhesPedidoCompras(numeroPedido) {
                     <span style="font-size:12px;font-weight:600;color:#92400e;">Quero atualizar automaticamente o preço de venda deste produto no recebimento da compra</span>
                   </label>
                 </div>
-                
+
                 <div id="preco-campos-${item.id}" style="display:none;">
                   <div style="margin-bottom:12px;">
                     <label style="display:block;font-size:10px;color:#374151;font-weight:600;margin-bottom:4px;">Percentual utilizado para a atualização (%)</label>
                     <input type="number" id="preco-percentual-${item.id}" step="0.01" min="0" placeholder="0.00" style="width:100%;padding:8px;border:1px solid #d1d5db;border-radius:4px;font-size:12px;" />
                   </div>
-                  
+
                   <div style="padding:10px;background:#fef3c7;border:1px solid #fbbf24;border-radius:6px;margin-bottom:12px;">
                     <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
                       <input type="checkbox" id="preco-apenas-maior-${item.id}" style="width:18px;height:18px;cursor:pointer;" />
                       <span style="font-size:11px;color:#92400e;">Atualizar apenas se o novo preço for maior que o preço de venda atual do produto</span>
                     </label>
                   </div>
-                  
+
                   <div style="padding:12px;background:#f3f4f6;border-radius:6px;">
                     <div style="font-size:10px;color:#6b7280;margin-bottom:6px;">Fórmula de Cálculo:</div>
                     <div style="font-size:11px;color:#374151;font-family:monospace;">
@@ -44072,13 +44181,13 @@ async function abrirModalDetalhesPedidoCompras(numeroPedido) {
                   </div>
                 </div>
               </div>
-              
+
               <!-- Guia Custo de Estoque -->
               <div class="tab-panel-item-${item.id}" data-tab="custo-estoque" style="display:none;">
                 <div style="font-size:11px;color:#6b7280;margin-bottom:12px;">
                   Selecione os impostos que fazem parte do custo de estoque desta compra:
                 </div>
-                
+
                 <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-bottom:16px;">
                   <label style="display:flex;align-items:center;gap:8px;padding:8px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:4px;cursor:pointer;">
                     <input type="checkbox" id="custo-icms-${item.id}" style="width:16px;height:16px;cursor:pointer;" />
@@ -44113,13 +44222,13 @@ async function abrirModalDetalhesPedidoCompras(numeroPedido) {
                     <span style="font-size:11px;color:#374151;">Outras Desp. é custo de estoque</span>
                   </label>
                 </div>
-                
+
                 <div style="padding:10px;background:#fef3c7;border:1px solid #fbbf24;border-radius:6px;margin-bottom:12px;">
                   <div style="font-size:10px;color:#92400e;margin-bottom:4px;">
                     <i class="fa-solid fa-info-circle"></i> Estas informações serão sempre sugeridas nas próximas Compras de Mercadorias para Revenda
                   </div>
                 </div>
-                
+
                 <div style="padding:12px;background:#f3f4f6;border-radius:6px;">
                   <div style="font-size:10px;color:#6b7280;margin-bottom:6px;">Dessa forma, o valor de entrada deste item será de:</div>
                   <div style="font-size:13px;color:#374151;font-weight:600;font-family:monospace;">
@@ -44131,15 +44240,15 @@ async function abrirModalDetalhesPedidoCompras(numeroPedido) {
             </div>
           </div>
           ` : ''}
-          
+
           ${(item.status === 'aguardando cotação' || item.status === 'cotado' || item.status === 'aguardando_cotacao') ? `
           <!-- Seção de Cotações (para status aguardando cotação) -->
           <div style="padding:12px;background:#f8fafc;border:1px solid #e5e7eb;border-radius:6px;margin-bottom:12px;">
             <div style="font-size:11px;color:#6b7280;text-transform:uppercase;font-weight:700;margin-bottom:10px;display:flex;align-items:center;justify-content:space-between;">
               <span><i class="fa-solid fa-list"></i> Cotações Registradas</span>
-              <button 
+              <button
                 id="btn-adicionar-cotacao-${item.id}"
-                onclick="adicionarCotacaoComSpinner('${item.id}')" 
+                onclick="adicionarCotacaoComSpinner('${item.id}')"
                 style="display:flex;align-items:center;gap:6px;background:#3b82f6;color:white;border:none;padding:6px 12px;border-radius:6px;cursor:pointer;font-size:11px;font-weight:600;"
                 title="Adicionar nova cotação">
                 <i class="fa-solid fa-plus"></i>
@@ -44154,13 +44263,13 @@ async function abrirModalDetalhesPedidoCompras(numeroPedido) {
             </div>
           </div>
           ` : ''}
-          
+
           <!-- Botões de Ação por Item (apenas para cotações) -->
           ${(item.status === 'aguardando cotação' || item.status === 'aguardando_cotacao') ? `
           <div style="margin-top:12px;">
-            <button 
-              onclick="marcarComoCotadoModal('${item.id}')" 
-              style="display:flex;align-items:center;gap:6px;background:#10b981;color:white;border:none;padding:8px 14px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:700;" 
+            <button
+              onclick="marcarComoCotadoModal('${item.id}')"
+              style="display:flex;align-items:center;gap:6px;background:#10b981;color:white;border:none;padding:8px 14px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:700;"
               title="Marcar como cotado">
               <i class="fa-solid fa-check-double"></i>
               Marcar como Cotado
@@ -44170,21 +44279,22 @@ async function abrirModalDetalhesPedidoCompras(numeroPedido) {
         </div>
       `;
     });
-    
+
     html += '</div>'; // Fecha lista de itens
-    
+
     // Adiciona botões globais e frete apenas se houver itens em "aguardando compra"
     if (temItemAguardandoCompra) {
       html += `
         <!-- Seção de Frete e Ações Globais -->
-        <div style="padding:16px;background:#eff6ff;border:2px solid #3b82f6;border-radius:8px;margin-top:20px;">
-          <div style="font-size:14px;color:#1e40af;text-transform:uppercase;font-weight:700;margin-bottom:16px;display:flex;align-items:center;gap:8px;">
+        <div class="cp-prep-actions" style="padding:16px;background:#eff6ff;border:2px solid #3b82f6;border-radius:8px;margin-top:20px;">
+          <div class="cp-prep-actions-title" style="font-size:14px;color:#1e40af;text-transform:uppercase;font-weight:700;margin-bottom:16px;display:flex;align-items:center;gap:8px;">
             <i class="fa-solid fa-truck"></i> Frete e Ações
           </div>
-          
+
           <!-- Botão Incluir Frete -->
-          <div style="margin-bottom:16px;">
-            <button 
+          <div class="cp-prep-freight-toggle" style="margin-bottom:16px;">
+            <button
+              class="cp-prep-action cp-prep-action--secondary"
               id="btn-incluir-frete-${numeroPedido}"
               onclick="toggleFreteFields('${numeroPedido}')"
               style="width:100%;display:flex;align-items:center;justify-content:center;gap:8px;background:#3b82f6;color:white;border:none;padding:12px 16px;border-radius:6px;cursor:pointer;font-size:13px;font-weight:600;">
@@ -44192,41 +44302,41 @@ async function abrirModalDetalhesPedidoCompras(numeroPedido) {
               <span id="frete-btn-text-${numeroPedido}">Incluir Frete</span>
             </button>
           </div>
-          
+
           <!-- Campos de Frete (inicialmente ocultos) -->
           <div id="frete-fields-${numeroPedido}" style="display:none;padding:14px;background:white;border:1px solid #bfdbfe;border-radius:6px;margin-bottom:16px;">
             <div style="font-size:11px;color:#1e40af;text-transform:uppercase;font-weight:700;margin-bottom:12px;">
               <i class="fa-solid fa-truck"></i> Dados do Frete
             </div>
-            
+
             <!-- Transportadora -->
             <div style="margin-bottom:12px;">
               <label style="display:block;font-size:11px;color:#1e40af;font-weight:600;margin-bottom:6px;">
                 Transportadora
               </label>
               <div style="position:relative;">
-                <input 
-                  type="text" 
+                <input
+                  type="text"
                   id="compras-transportadora-input-${numeroPedido}"
                   class="compras-transportadora-input-modal"
                   placeholder="Digite o nome da transportadora..."
                   style="width:100%;padding:10px;border:1px solid #bfdbfe;border-radius:6px;font-size:13px;"
                 />
                 <input type="hidden" id="compras-transportadora-id-${numeroPedido}" />
-                <div 
-                  id="compras-transportadora-list-${numeroPedido}" 
+                <div
+                  id="compras-transportadora-list-${numeroPedido}"
                   class="compras-transportadora-list-modal"
                   style="display:none;position:absolute;top:100%;left:0;right:0;background:white;border:1px solid #bfdbfe;border-top:none;border-radius:0 0 6px 6px;max-height:150px;overflow-y:auto;z-index:1000;box-shadow:0 4px 6px rgba(0,0,0,0.1);">
                 </div>
               </div>
             </div>
-            
+
             <!-- Tipo do Frete -->
             <div style="margin-bottom:12px;">
               <label style="display:block;font-size:11px;color:#1e40af;font-weight:600;margin-bottom:6px;">
                 Tipo do Frete
               </label>
-              <select 
+              <select
                 id="compras-tipo-frete-${numeroPedido}"
                 style="width:100%;padding:10px;border:1px solid #bfdbfe;border-radius:6px;font-size:13px;background:white;">
                 <option value="">Selecione...</option>
@@ -44238,28 +44348,28 @@ async function abrirModalDetalhesPedidoCompras(numeroPedido) {
                 <option value="9">9 - Sem Ocorrência de Transporte</option>
               </select>
             </div>
-            
+
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px;">
               <!-- Placa do Veículo -->
               <div>
                 <label style="display:block;font-size:11px;color:#1e40af;font-weight:600;margin-bottom:6px;">
                   Placa do Veículo
                 </label>
-                <input 
-                  type="text" 
+                <input
+                  type="text"
                   id="compras-placa-${numeroPedido}"
                   placeholder="ABC-1234"
                   style="width:100%;padding:10px;border:1px solid #bfdbfe;border-radius:6px;font-size:13px;"
                 />
               </div>
-              
+
               <!-- UF -->
               <div>
                 <label style="display:block;font-size:11px;color:#1e40af;font-weight:600;margin-bottom:6px;">
                   UF
                 </label>
-                <input 
-                  type="text" 
+                <input
+                  type="text"
                   id="compras-uf-${numeroPedido}"
                   placeholder="SP"
                   maxlength="2"
@@ -44267,70 +44377,70 @@ async function abrirModalDetalhesPedidoCompras(numeroPedido) {
                 />
               </div>
             </div>
-            
+
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px;">
               <!-- Quantidade de Volumes -->
               <div>
                 <label style="display:block;font-size:11px;color:#1e40af;font-weight:600;margin-bottom:6px;">
                   Quantidade de Volumes
                 </label>
-                <input 
-                  type="number" 
+                <input
+                  type="number"
                   id="compras-qtd-volumes-${numeroPedido}"
                   placeholder="0"
                   min="0"
                   style="width:100%;padding:10px;border:1px solid #bfdbfe;border-radius:6px;font-size:13px;"
                 />
               </div>
-              
+
               <!-- Espécie dos Volumes -->
               <div>
                 <label style="display:block;font-size:11px;color:#1e40af;font-weight:600;margin-bottom:6px;">
                   Espécie dos Volumes
                 </label>
-                <input 
-                  type="text" 
+                <input
+                  type="text"
                   id="compras-especie-volumes-${numeroPedido}"
                   placeholder="Caixa, Pallet, etc"
                   style="width:100%;padding:10px;border:1px solid #bfdbfe;border-radius:6px;font-size:13px;"
                 />
               </div>
             </div>
-            
+
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px;">
               <!-- Marca dos Volumes -->
               <div>
                 <label style="display:block;font-size:11px;color:#1e40af;font-weight:600;margin-bottom:6px;">
                   Marca dos Volumes
                 </label>
-                <input 
-                  type="text" 
+                <input
+                  type="text"
                   id="compras-marca-volumes-${numeroPedido}"
                   style="width:100%;padding:10px;border:1px solid #bfdbfe;border-radius:6px;font-size:13px;"
                 />
               </div>
-              
+
               <!-- Numeração dos Volumes -->
               <div>
                 <label style="display:block;font-size:11px;color:#1e40af;font-weight:600;margin-bottom:6px;">
                   Numeração dos Volumes
                 </label>
-                <input 
-                  type="text" 
+                <input
+                  type="text"
                   id="compras-numero-volumes-${numeroPedido}"
                   style="width:100%;padding:10px;border:1px solid #bfdbfe;border-radius:6px;font-size:13px;"
                 />
               </div>
             </div>
-            
+
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px;">
               <!-- Peso Líquido (Kg) -->
               <div>
                 <label style="display:block;font-size:11px;color:#1e40af;font-weight:600;margin-bottom:6px;">
                   Peso Líquido (Kg)
                 </label>
-                <input 
-                  type="number" 
+                <input
+                  type="number"
                   id="compras-peso-liquido-${numeroPedido}"
                   placeholder="0,000"
                   step="0.001"
@@ -44338,14 +44448,14 @@ async function abrirModalDetalhesPedidoCompras(numeroPedido) {
                   style="width:100%;padding:10px;border:1px solid #bfdbfe;border-radius:6px;font-size:13px;"
                 />
               </div>
-              
+
               <!-- Peso Bruto (Kg) -->
               <div>
                 <label style="display:block;font-size:11px;color:#1e40af;font-weight:600;margin-bottom:6px;">
                   Peso Bruto (Kg)
                 </label>
-                <input 
-                  type="number" 
+                <input
+                  type="number"
                   id="compras-peso-bruto-${numeroPedido}"
                   placeholder="0,000"
                   step="0.001"
@@ -44354,15 +44464,15 @@ async function abrirModalDetalhesPedidoCompras(numeroPedido) {
                 />
               </div>
             </div>
-            
+
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px;">
               <!-- Valor do Frete -->
               <div>
                 <label style="display:block;font-size:11px;color:#1e40af;font-weight:600;margin-bottom:6px;">
                   Valor do Frete
                 </label>
-                <input 
-                  type="number" 
+                <input
+                  type="number"
                   id="compras-valor-frete-${numeroPedido}"
                   placeholder="0,00"
                   step="0.01"
@@ -44370,14 +44480,14 @@ async function abrirModalDetalhesPedidoCompras(numeroPedido) {
                   style="width:100%;padding:10px;border:1px solid #bfdbfe;border-radius:6px;font-size:13px;"
                 />
               </div>
-              
+
               <!-- Valor do Seguro -->
               <div>
                 <label style="display:block;font-size:11px;color:#1e40af;font-weight:600;margin-bottom:6px;">
                   Valor do Seguro
                 </label>
-                <input 
-                  type="number" 
+                <input
+                  type="number"
                   id="compras-valor-seguro-${numeroPedido}"
                   placeholder="0,00"
                   step="0.01"
@@ -44386,27 +44496,27 @@ async function abrirModalDetalhesPedidoCompras(numeroPedido) {
                 />
               </div>
             </div>
-            
+
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
               <!-- Número do Lacre -->
               <div>
                 <label style="display:block;font-size:11px;color:#1e40af;font-weight:600;margin-bottom:6px;">
                   Número do Lacre
                 </label>
-                <input 
-                  type="text" 
+                <input
+                  type="text"
                   id="compras-lacre-${numeroPedido}"
                   style="width:100%;padding:10px;border:1px solid #bfdbfe;border-radius:6px;font-size:13px;"
                 />
               </div>
-              
+
               <!-- Outras Despesas Acessórias -->
               <div>
                 <label style="display:block;font-size:11px;color:#1e40af;font-weight:600;margin-bottom:6px;">
                   Outras Despesas Acessórias
                 </label>
-                <input 
-                  type="number" 
+                <input
+                  type="number"
                   id="compras-outras-despesas-${numeroPedido}"
                   placeholder="0,00"
                   step="0.01"
@@ -44416,10 +44526,11 @@ async function abrirModalDetalhesPedidoCompras(numeroPedido) {
               </div>
             </div>
           </div>
-          
+
           <!-- Botões Globais de Ação -->
-          <div style="display:grid;gap:10px;">
-            <button 
+          <div class="cp-prep-actions-grid" style="display:grid;gap:10px;">
+            <button
+              class="cp-prep-action cp-prep-action--save"
               id="btn-salvar-dados-compra-${numeroPedido}"
               onclick="salvarDadosCompraModal('${numeroPedido}')"
               style="width:100%;display:flex;align-items:center;justify-content:center;gap:8px;background:#10b981;color:white;border:none;padding:12px 16px;border-radius:6px;cursor:pointer;font-size:13px;font-weight:600;"
@@ -44427,8 +44538,9 @@ async function abrirModalDetalhesPedidoCompras(numeroPedido) {
               <i class="fa-solid fa-save"></i>
               Salvar Dados da Compra
             </button>
-            
-            <button 
+
+            <button
+              class="cp-prep-action cp-prep-action--primary"
               id="btn-gerar-compra-${numeroPedido}"
               onclick="gerarPedidoCompraOmie('${numeroPedido}')"
               style="width:100%;display:flex;align-items:center;justify-content:center;gap:8px;background:#6366f1;color:white;border:none;padding:12px 16px;border-radius:6px;cursor:pointer;font-size:13px;font-weight:600;"
@@ -44436,17 +44548,17 @@ async function abrirModalDetalhesPedidoCompras(numeroPedido) {
               <i class="fa-solid fa-paper-plane"></i>
               Gerar Compra na Omie
             </button>
-            
-            <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;">
-              <button onclick="enviarEmailCompra(null, '${numeroPedido}')" style="display:flex;align-items:center;justify-content:center;gap:6px;background:#3b82f6;color:white;border:none;padding:10px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600;" title="Enviar por e-mail">
+
+            <div class="cp-prep-actions-aux" style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;">
+              <button class="cp-prep-action cp-prep-action--quiet" onclick="enviarEmailCompra(null, '${numeroPedido}')" style="display:flex;align-items:center;justify-content:center;gap:6px;background:#3b82f6;color:white;border:none;padding:10px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600;" title="Enviar por e-mail">
                 <i class="fa-solid fa-envelope"></i>
                 E-mail
               </button>
-              <button onclick="enviarWhatsAppCompra(null, '${numeroPedido}')" style="display:flex;align-items:center;justify-content:center;gap:6px;background:#10b981;color:white;border:none;padding:10px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600;" title="Enviar por WhatsApp">
+              <button class="cp-prep-action cp-prep-action--quiet" onclick="enviarWhatsAppCompra(null, '${numeroPedido}')" style="display:flex;align-items:center;justify-content:center;gap:6px;background:#10b981;color:white;border:none;padding:10px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600;" title="Enviar por WhatsApp">
                 <i class="fa-brands fa-whatsapp"></i>
                 WhatsApp
               </button>
-              <button onclick="anexarArquivoCompra(null, '${numeroPedido}')" style="display:flex;align-items:center;justify-content:center;gap:6px;background:#8b5cf6;color:white;border:none;padding:10px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600;" title="Anexar arquivo">
+              <button class="cp-prep-action cp-prep-action--quiet" onclick="anexarArquivoCompra(null, '${numeroPedido}')" style="display:flex;align-items:center;justify-content:center;gap:6px;background:#8b5cf6;color:white;border:none;padding:10px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600;" title="Anexar arquivo">
                 <i class="fa-solid fa-paperclip"></i>
                 Anexar
               </button>
@@ -44455,9 +44567,10 @@ async function abrirModalDetalhesPedidoCompras(numeroPedido) {
         </div>
       `;
     }
-    
+
     modalBody.innerHTML = html;
-    
+    hidratarMiniaturasProdutosCompra(modalBody);
+
     // Aguarda o DOM ser atualizado antes de configurar autocomplete
     setTimeout(() => {
       // Carrega cotações para itens em "aguardando cotação"
@@ -44465,22 +44578,22 @@ async function abrirModalDetalhesPedidoCompras(numeroPedido) {
         if (item.status === 'aguardando cotação' || item.status === 'aguardando_cotacao' || item.status === 'cotado') {
           loadCotacoesItemModal(item.id);
         }
-        
+
         // Configura autocomplete e campos para itens em "aguardando compra"
-        if (item.status === 'aguardando compra') {
+        if (ehStatusPreparacaoPedido(item.status)) {
           console.log('[MODAL] Configurando campos para pedido:', item.numero_pedido);
           console.log('[MODAL] Fornecedores disponíveis:', window.fornecedoresCache?.length || 0);
           setupFornecedorAutocompleteModal(item.numero_pedido);
           loadCategoriasCompraModal(item.numero_pedido, item.categoria_compra_codigo);
           loadParcelasCompraModal(item.numero_pedido, item.cod_parcela);
           loadDadosPedidoCompra(item.numero_pedido);
-          
+
           // Inicializa cálculos de valores para o item
           calcularValoresItem(item.id);
         }
       });
     }, 100);
-    
+
   } catch (err) {
     console.error('[MODAL PEDIDO] Erro:', err);
     modalBody.innerHTML = '<div style="text-align:center;padding:40px;color:#ef4444;">Erro ao carregar detalhes do pedido.</div>';
@@ -44491,24 +44604,24 @@ async function abrirModalDetalhesPedidoCompras(numeroPedido) {
 async function loadCotacoesItemModal(solicitacaoId) {
   const container = document.querySelector(`.compras-cotacoes-list-modal[data-item-id="${solicitacaoId}"]`);
   if (!container) return;
-  
+
   try {
     const resp = await fetch(`/api/compras/cotacoes/${solicitacaoId}`);
     if (!resp.ok) throw new Error('Erro ao carregar cotações');
-    
+
     const cotacoes = await resp.json();
-    
+
     if (!Array.isArray(cotacoes) || cotacoes.length === 0) {
       container.innerHTML = '<div style="text-align:center;padding:12px;color:#9ca3af;font-size:12px;">Nenhuma cotação registrada</div>';
       return;
     }
-    
+
     const html = cotacoes.map(cot => {
-      const statusColor = cot.status_aprovacao === 'aprovado' ? '#10b981' : 
+      const statusColor = cot.status_aprovacao === 'aprovado' ? '#10b981' :
                          cot.status_aprovacao === 'rejeitado' ? '#ef4444' : '#6b7280';
-      const statusBg = cot.status_aprovacao === 'aprovado' ? '#d1fae5' : 
+      const statusBg = cot.status_aprovacao === 'aprovado' ? '#d1fae5' :
                       cot.status_aprovacao === 'rejeitado' ? '#fee2e2' : '#f3f4f6';
-      
+
       return `
         <div style="background:white;border:1px solid #e5e7eb;border-radius:6px;padding:10px;">
           <div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:8px;">
@@ -44532,9 +44645,9 @@ async function loadCotacoesItemModal(solicitacaoId) {
         </div>
       `;
     }).join('');
-    
+
     container.innerHTML = html;
-    
+
   } catch (err) {
     console.error('[COTAÇÕES MODAL] Erro:', err);
     container.innerHTML = '<div style="text-align:center;padding:12px;color:#ef4444;font-size:12px;">Erro ao carregar cotações</div>';
@@ -44544,7 +44657,7 @@ async function loadCotacoesItemModal(solicitacaoId) {
 // Marca item como cotado no modal
 async function marcarComoCotadoModal(itemId) {
   if (!confirm('Marcar este item como COTADO? Isso significa que as cotações foram concluídas.')) return;
-  
+
   try {
     const resp = await fetch(`/api/compras/item/${itemId}`, {
       method: 'PUT',
@@ -44552,15 +44665,15 @@ async function marcarComoCotadoModal(itemId) {
       credentials: 'include',
       body: JSON.stringify({ status: 'cotado' })
     });
-    
+
     if (!resp.ok) throw new Error('Erro ao atualizar status');
-    
+
     alert('Item marcado como COTADO com sucesso!');
-    
+
     // Fecha o modal e recarrega o kanban
     fecharModalDetalhesPedidoCompras();
     // renderComprasKanban(); // REMOVIDO - Página não existe mais
-    
+
   } catch (err) {
     console.error('[MARCAR COTADO] Erro:', err);
     alert('Erro ao marcar como cotado: ' + err.message);
@@ -44585,7 +44698,7 @@ function abrirTabItem(itemId, tabName) {
       btn.style.color = '#6b7280';
     }
   });
-  
+
   // Atualiza painéis
   const paineis = document.querySelectorAll(`.tab-panel-item-${itemId}`);
   paineis.forEach(panel => {
@@ -44601,29 +44714,29 @@ function abrirTabItem(itemId, tabName) {
 function calcularValoresItem(itemId) {
   const valorUnitario = parseFloat(document.getElementById(`compras-valor-unitario-${itemId}`)?.value || 0);
   const desconto = parseFloat(document.getElementById(`compras-desconto-${itemId}`)?.value || 0);
-  
+
   // Tenta buscar quantidade do item dos dados armazenados globalmente ou do DOM
   let quantidade = 1;
-  
+
   // Se houver dados de itens do pedido em cache, busca de lá
   if (window.itensPedidoCache && window.itensPedidoCache[itemId]) {
     quantidade = parseFloat(window.itensPedidoCache[itemId].quantidade || 1);
   }
-  
+
   // Calcula valor da mercadoria (valor unitário × quantidade)
   const valorMercadoria = valorUnitario * quantidade;
-  
+
   // Calcula valor total (valor mercadoria - desconto %)
   const valorTotal = valorMercadoria * (1 - (desconto / 100));
-  
+
   // Atualiza campos
   const campoValorMercadoria = document.getElementById(`compras-valor-mercadoria-${itemId}`);
   const campoValorTotal = document.getElementById(`compras-valor-total-${itemId}`);
-  
+
   if (campoValorMercadoria) {
     campoValorMercadoria.value = `R$ ${valorMercadoria.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   }
-  
+
   if (campoValorTotal) {
     campoValorTotal.textContent = `R$ ${valorTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   }
@@ -44633,7 +44746,7 @@ function calcularValoresItem(itemId) {
 function toggleAtualizacaoPreco(itemId) {
   const checkbox = document.getElementById(`preco-atualizar-${itemId}`);
   const campos = document.getElementById(`preco-campos-${itemId}`);
-  
+
   if (checkbox && campos) {
     campos.style.display = checkbox.checked ? 'block' : 'none';
   }
@@ -44649,47 +44762,47 @@ function setupFornecedorAutocompleteModal(itemId) {
   const input = document.getElementById(`compras-fornecedor-input-${itemId}`);
   const hiddenId = document.getElementById(`compras-fornecedor-id-${itemId}`);
   const list = document.getElementById(`compras-fornecedor-list-${itemId}`);
-  
+
   console.log('[AUTOCOMPLETE MODAL] Configurando para item:', itemId);
   console.log('[AUTOCOMPLETE MODAL] Input encontrado:', !!input);
   console.log('[AUTOCOMPLETE MODAL] List encontrado:', !!list);
   console.log('[AUTOCOMPLETE MODAL] Cache de fornecedores:', window.fornecedoresCache?.length || 0);
-  
+
   if (!input || !list) {
     console.error('[AUTOCOMPLETE MODAL] Elementos não encontrados!');
     return;
   }
-  
+
   // Evento de digitação - filtra em tempo real
   input.addEventListener('input', function() {
     const query = this.value.trim().toLowerCase();
     if (hiddenId) hiddenId.value = ''; // Limpa ID ao digitar
-    
+
     console.log('[AUTOCOMPLETE MODAL] Digitado:', query);
-    
+
     if (query.length < 2) {
       list.style.display = 'none';
       return;
     }
-    
+
     // Filtra fornecedores pelo nome_fantasia
     const filtered = window.fornecedoresCache.filter(f => {
       const nome = (f.nome_fantasia || '').toLowerCase();
       return nome.includes(query);
     });
-    
+
     console.log('[AUTOCOMPLETE MODAL] Fornecedores filtrados:', filtered.length);
-    
+
     if (filtered.length === 0) {
       list.innerHTML = '<div style="padding:12px;color:#666;text-align:center;font-size:13px;">Nenhum fornecedor encontrado</div>';
       list.style.display = 'block';
       return;
     }
-    
+
     // Renderiza lista filtrada (máximo 10 resultados)
     list.innerHTML = filtered.slice(0, 10).map(f => `
-      <div 
-        class="fornecedor-item-modal" 
+      <div
+        class="fornecedor-item-modal"
         data-id="${f.codigo_cliente_omie}"
         data-nome="${(f.nome_fantasia || '').replace(/"/g, '&quot;')}"
         style="
@@ -44707,9 +44820,9 @@ function setupFornecedorAutocompleteModal(itemId) {
         </div>
       </div>
     `).join('');
-    
+
     list.style.display = 'block';
-    
+
     // Adiciona evento de clique nos itens
     list.querySelectorAll('.fornecedor-item-modal').forEach(item => {
       item.addEventListener('click', function() {
@@ -44722,7 +44835,7 @@ function setupFornecedorAutocompleteModal(itemId) {
       });
     });
   });
-  
+
   // Fecha lista ao clicar fora
   document.addEventListener('click', function(e) {
     if (!input.contains(e.target) && !list.contains(e.target)) {
@@ -44735,39 +44848,39 @@ function setupFornecedorAutocompleteModal(itemId) {
 async function salvarFornecedorModal(itemId) {
   const inputNome = document.getElementById(`compras-fornecedor-input-${itemId}`);
   const inputId = document.getElementById(`compras-fornecedor-id-${itemId}`);
-  
+
   if (!inputNome || !inputId) {
     alert('Erro: campos não encontrados');
     return;
   }
-  
+
   const fornecedorNome = inputNome.value.trim();
   const fornecedorId = inputId.value.trim();
-  
+
   if (!fornecedorNome || !fornecedorId) {
     alert('Por favor, selecione um fornecedor da lista');
     return;
   }
-  
+
   try {
     const resp = await fetch(`/api/compras/item/${itemId}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
-      body: JSON.stringify({ 
+      body: JSON.stringify({
         fornecedor_nome: fornecedorNome,
         fornecedor_id: fornecedorId
       })
     });
-    
+
     if (!resp.ok) throw new Error('Erro ao salvar fornecedor');
-    
+
     alert('Fornecedor salvo com sucesso!');
-    
+
     // Recarrega o kanban e fecha o modal
     // renderComprasKanban(); // REMOVIDO - Página não existe mais
     fecharModalDetalhesPedidoCompras();
-    
+
   } catch (err) {
     console.error('[SALVAR FORNECEDOR] Erro:', err);
     alert('Erro ao salvar fornecedor: ' + err.message);
@@ -44784,36 +44897,36 @@ async function salvarDadosCompraModal(numeroPedido) {
     const inputPrevisaoEntrega = document.getElementById(`compras-previsao-entrega-${numeroPedido}`);
     const selectCategoria = document.getElementById(`compras-categoria-${numeroPedido}`);
     const selectParcela = document.getElementById(`compras-parcela-${numeroPedido}`);
-    
+
     if (!inputFornecedorNome || !inputFornecedorId) {
       alert('Erro: campos não encontrados');
       return;
     }
-    
+
     const fornecedorNome = inputFornecedorNome.value.trim();
     const fornecedorId = inputFornecedorId.value.trim();
     const previsaoEntrega = inputPrevisaoEntrega?.value || null;
     const categoriaSelect = selectCategoria?.selectedOptions[0];
     const categoriaDescricao = categoriaSelect?.text || null;
     const categoriaCodigo = categoriaSelect?.value || null;
-    
+
     // Captura a condição de pagamento selecionada
     const parcelaSelect = selectParcela?.selectedOptions[0];
     const parcelaCodigo = parcelaSelect?.value || 'A15'; // Padrão A15
     const parcelaDescricao = parcelaSelect?.text || 'Para 15 dias';
-    
+
     if (!fornecedorNome || !fornecedorId) {
       alert('Por favor, selecione um fornecedor da lista');
       return;
     }
-    
+
     // Busca todos os itens do pedido para coletar valores unitários
     const resp = await fetch('/api/compras/todas', { credentials: 'include' });
     if (!resp.ok) throw new Error('Não foi possível carregar as solicitações');
     const data = await resp.json();
     const listaCompleta = Array.isArray(data.solicitacoes) ? data.solicitacoes : [];
     const itensPedido = listaCompleta.filter(item => item.numero_pedido === numeroPedido);
-    
+
     // Coleta valores unitários de cada item
     const valoresUnitarios = {};
     itensPedido.forEach(item => {
@@ -44822,13 +44935,13 @@ async function salvarDadosCompraModal(numeroPedido) {
         valoresUnitarios[item.id] = parseFloat(inputValorItem.value) || null;
       }
     });
-    
+
     console.log('[SALVAR DADOS] Valores Unitários por item:', valoresUnitarios);
-    
+
     // Coleta dados de frete se estiver incluído
     const freteFields = document.getElementById(`frete-fields-${numeroPedido}`);
     const incluirFrete = freteFields && freteFields.style.display !== 'none';
-    
+
     const body = {
       numero_pedido: numeroPedido,
       fornecedor_nome: fornecedorNome,
@@ -44841,9 +44954,9 @@ async function salvarDadosCompraModal(numeroPedido) {
       descricao_parcela: parcelaDescricao,
       incluir_frete: incluirFrete
     };
-    
+
     console.log('[SALVAR DADOS] Body completo:', body);
-    
+
     if (incluirFrete) {
       body.transportadora_nome = document.getElementById(`compras-transportadora-input-${numeroPedido}`)?.value.trim() || null;
       body.transportadora_id = document.getElementById(`compras-transportadora-id-${numeroPedido}`)?.value || null;
@@ -44860,22 +44973,22 @@ async function salvarDadosCompraModal(numeroPedido) {
       body.valor_seguro = document.getElementById(`compras-valor-seguro-${numeroPedido}`)?.value ? parseFloat(document.getElementById(`compras-valor-seguro-${numeroPedido}`).value) : null;
       body.outras_despesas = document.getElementById(`compras-outras-despesas-${numeroPedido}`)?.value ? parseFloat(document.getElementById(`compras-outras-despesas-${numeroPedido}`).value) : null;
     }
-    
+
     const respSalvar = await fetch('/api/compras/pedido/dados', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
       body: JSON.stringify(body)
     });
-    
+
     if (!respSalvar.ok) throw new Error('Erro ao salvar dados da compra');
-    
+
     alert('Dados da compra salvos com sucesso!');
-    
+
     // Recarrega o kanban e fecha o modal
     // renderComprasKanban(); // REMOVIDO - Página não existe mais
     fecharModalDetalhesPedidoCompras();
-    
+
   } catch (err) {
     console.error('[SALVAR DADOS COMPRA] Erro:', err);
     alert('Erro ao salvar dados da compra: ' + err.message);
@@ -44886,7 +44999,7 @@ async function salvarDadosCompraModal(numeroPedido) {
 function toggleFreteFields(numeroPedido) {
   const freteFields = document.getElementById(`frete-fields-${numeroPedido}`);
   const btnText = document.getElementById(`frete-btn-text-${numeroPedido}`);
-  
+
   if (freteFields && btnText) {
     const isHidden = freteFields.style.display === 'none' || !freteFields.style.display;
     freteFields.style.display = isHidden ? 'block' : 'none';
@@ -44899,12 +45012,12 @@ async function loadDadosPedidoCompra(numeroPedido) {
   try {
     const resp = await fetch(`/api/compras/pedido/${numeroPedido}`);
     if (!resp.ok) return;
-    
+
     const data = await resp.json();
     if (!data.ok || !data.pedido) return;
-    
+
     const pedido = data.pedido;
-    
+
     // Preenche campos principais
     if (pedido.fornecedor_nome) {
       const inputNome = document.getElementById(`compras-fornecedor-input-${numeroPedido}`);
@@ -44912,23 +45025,23 @@ async function loadDadosPedidoCompra(numeroPedido) {
       if (inputNome) inputNome.value = pedido.fornecedor_nome;
       if (inputId) inputId.value = pedido.fornecedor_id || '';
     }
-    
+
     if (pedido.previsao_entrega) {
       const inputPrevisao = document.getElementById(`compras-previsao-entrega-${numeroPedido}`);
       if (inputPrevisao) inputPrevisao.value = new Date(pedido.previsao_entrega).toISOString().split('T')[0];
     }
-    
+
     // Preenche frete se incluído
     if (pedido.incluir_frete) {
       toggleFreteFields(numeroPedido);
-      
+
       if (pedido.transportadora_nome) {
         const inputTransp = document.getElementById(`compras-transportadora-input-${numeroPedido}`);
         const inputTranspId = document.getElementById(`compras-transportadora-id-${numeroPedido}`);
         if (inputTransp) inputTransp.value = pedido.transportadora_nome;
         if (inputTranspId) inputTranspId.value = pedido.transportadora_id || '';
       }
-      
+
       const campos = {
         'tipo-frete': pedido.tipo_frete,
         'placa': pedido.placa_veiculo,
@@ -44944,7 +45057,7 @@ async function loadDadosPedidoCompra(numeroPedido) {
         'lacre': pedido.lacre,
         'outras-despesas': pedido.outras_despesas
       };
-      
+
       Object.keys(campos).forEach(campo => {
         const elem = document.getElementById(`compras-${campo}-${numeroPedido}`);
         if (elem && campos[campo] !== null && campos[campo] !== undefined) {
@@ -44971,43 +45084,43 @@ async function gerarPedidoCompraOmie(numeroPedido) {
       btn.disabled = true;
       btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Salvando Dados...';
     }
-    
+
     // Primeiro, salva os dados do pedido (auto-save)
     console.log('[GERAR COMPRA] Salvando dados do pedido antes de enviar...');
-    
+
     const inputFornecedorNome = document.getElementById(`compras-fornecedor-input-${numeroPedido}`);
     const inputFornecedorId = document.getElementById(`compras-fornecedor-id-${numeroPedido}`);
     const inputPrevisaoEntrega = document.getElementById(`compras-previsao-entrega-${numeroPedido}`);
     const selectCategoria = document.getElementById(`compras-categoria-${numeroPedido}`);
     const selectParcela = document.getElementById(`compras-parcela-${numeroPedido}`);
-    
+
     if (!inputFornecedorNome || !inputFornecedorId) {
       throw new Error('Campos não encontrados. Verifique se o modal está aberto corretamente.');
     }
-    
+
     const fornecedorNome = inputFornecedorNome.value.trim();
     const fornecedorId = inputFornecedorId.value.trim();
     const previsaoEntrega = inputPrevisaoEntrega?.value || null;
     const categoriaSelect = selectCategoria?.selectedOptions[0];
     const categoriaDescricao = categoriaSelect?.text || null;
     const categoriaCodigo = categoriaSelect?.value || null;
-    
+
     // Captura a condição de pagamento selecionada
     const parcelaSelect = selectParcela?.selectedOptions[0];
     const parcelaCodigo = parcelaSelect?.value || 'A15'; // Padrão A15
     const parcelaDescricao = parcelaSelect?.text || 'Para 15 dias';
-    
+
     if (!fornecedorNome || !fornecedorId) {
       throw new Error('Por favor, selecione um fornecedor da lista');
     }
-    
+
     // Busca todos os itens do pedido para coletar valores unitários
     const respItens = await fetch('/api/compras/todas', { credentials: 'include' });
     if (!respItens.ok) throw new Error('Não foi possível carregar as solicitações');
     const dataItens = await respItens.json();
     const listaCompleta = Array.isArray(dataItens.solicitacoes) ? dataItens.solicitacoes : [];
     const itensPedido = listaCompleta.filter(item => item.numero_pedido === numeroPedido);
-    
+
     // Coleta valores unitários de cada item
     const valoresUnitarios = {};
     let temValorVazio = false;
@@ -45023,17 +45136,17 @@ async function gerarPedidoCompraOmie(numeroPedido) {
         temValorVazio = true;
       }
     });
-    
+
     if (temValorVazio) {
       throw new Error('Por favor, informe o valor unitário do produto');
     }
-    
+
     console.log('[GERAR COMPRA] Valores Unitários:', valoresUnitarios);
-    
+
     // Coleta dados de frete se estiver incluído
     const freteFields = document.getElementById(`frete-fields-${numeroPedido}`);
     const incluirFrete = freteFields && freteFields.style.display !== 'none';
-    
+
     const body = {
       numero_pedido: numeroPedido,
       fornecedor_nome: fornecedorNome,
@@ -45046,7 +45159,7 @@ async function gerarPedidoCompraOmie(numeroPedido) {
       descricao_parcela: parcelaDescricao,
       incluir_frete: incluirFrete
     };
-    
+
     if (incluirFrete) {
       body.transportadora_nome = document.getElementById(`compras-transportadora-input-${numeroPedido}`)?.value.trim() || null;
       body.transportadora_id = document.getElementById(`compras-transportadora-id-${numeroPedido}`)?.value || null;
@@ -45064,7 +45177,7 @@ async function gerarPedidoCompraOmie(numeroPedido) {
       body.lacre = document.getElementById(`compras-lacre-${numeroPedido}`)?.value.trim() || null;
       body.outras_despesas = document.getElementById(`compras-outras-despesas-${numeroPedido}`)?.value ? parseFloat(document.getElementById(`compras-outras-despesas-${numeroPedido}`).value) : null;
     }
-    
+
     // Salva os dados primeiro
     const saveResp = await fetch('/api/compras/pedido/dados', {
       method: 'POST',
@@ -45072,41 +45185,41 @@ async function gerarPedidoCompraOmie(numeroPedido) {
       credentials: 'include',
       body: JSON.stringify(body)
     });
-    
+
     if (!saveResp.ok) {
       throw new Error('Erro ao salvar dados do pedido');
     }
-    
+
     console.log('[GERAR COMPRA] Dados salvos com sucesso. Gerando pedido na Omie...');
-    
+
     // Atualiza o botão
     if (btn) {
       btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Gerando na Omie...';
     }
-    
+
     // Agora gera o pedido na Omie
     const resp = await fetch(`/api/compras/pedido/gerar-omie/${numeroPedido}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include'
     });
-    
+
     const data = await resp.json();
-    
+
     if (!resp.ok || !data.ok) {
       throw new Error(data.error || 'Erro ao gerar pedido na Omie');
     }
-    
+
     alert(`✅ Pedido de compra gerado com sucesso na Omie!\n\nNúmero: ${data.numero}\nCódigo: ${data.codigo}`);
-    
+
     // Recarrega o kanban e fecha o modal
     // renderComprasKanban(); // REMOVIDO - Página não existe mais
     fecharModalDetalhesPedidoCompras();
-    
+
   } catch (err) {
     console.error('[GERAR COMPRA OMIE] Erro:', err);
     alert('❌ Erro ao gerar pedido na Omie:\n\n' + err.message);
-    
+
     const btn = document.getElementById(`btn-gerar-compra-${numeroPedido}`);
     if (btn) {
       btn.disabled = false;
@@ -45124,41 +45237,41 @@ async function loadCategoriasCompraModal(numeroPedido, categoriaSelecionada = nu
     console.error('[CATEGORIAS] Select não encontrado para pedido:', numeroPedido);
     return;
   }
-  
+
   try {
     select.innerHTML = '<option value="">Carregando categorias...</option>';
-    
+
     const resp = await fetch('/api/compras/categorias');
     if (!resp.ok) throw new Error('Erro ao buscar categorias');
-    
+
     const data = await resp.json();
-    
+
     if (!data.ok || !Array.isArray(data.categorias)) {
       throw new Error('Resposta inválida do servidor');
     }
-    
+
     // Preenche o select com as categorias (ordem alfabética)
     select.innerHTML = '';
-    
+
     const categoriasOrdenadas = [...data.categorias].sort((a, b) => {
       const da = (a.descricao || '').toString();
       const db = (b.descricao || '').toString();
       return da.localeCompare(db, 'pt-BR', { sensitivity: 'base' });
     });
-    
+
     const categoriaPadraoCodigo = '2.14.94';
     categoriasOrdenadas.forEach(cat => {
       const option = document.createElement('option');
       option.value = cat.codigo;
       option.textContent = cat.descricao;
-      
+
       // Seleciona a categoria atual se houver
       if (categoriaSelecionada && cat.codigo == categoriaSelecionada) {
         option.selected = true;
       } else if (!categoriaSelecionada && cat.codigo === categoriaPadraoCodigo) {
         option.selected = true;
       }
-      
+
       select.appendChild(option);
     });
 
@@ -45170,9 +45283,9 @@ async function loadCategoriasCompraModal(numeroPedido, categoriaSelecionada = nu
         select.selectedIndex = 0;
       }
     }
-    
+
     console.log('[CATEGORIAS] Carregadas:', data.categorias.length, 'categorias');
-    
+
   } catch (err) {
     console.error('[CATEGORIAS] Erro ao carregar:', err);
     select.innerHTML = '<option value="">Erro ao carregar categorias</option>';
@@ -45188,44 +45301,44 @@ async function loadParcelasCompraModal(numeroPedido, parcelaSelecionada = null) 
     console.error('[PARCELAS] Select não encontrado para pedido:', numeroPedido);
     return;
   }
-  
+
   try {
     select.innerHTML = '<option value="">Carregando parcelas...</option>';
-    
+
     console.log('[PARCELAS] Buscando do endpoint /api/compras/parcelas');
     const resp = await fetch('/api/compras/parcelas');
     console.log('[PARCELAS] Resposta recebida, status:', resp.status);
-    
+
     if (!resp.ok) throw new Error('Erro ao buscar parcelas');
-    
+
     const data = await resp.json();
     console.log('[PARCELAS] Dados recebidos:', data);
-    
+
     if (!data.ok || !Array.isArray(data.parcelas)) {
       throw new Error('Resposta inválida do servidor');
     }
-    
+
     // Preenche o select com as parcelas
     select.innerHTML = '<option value="">Selecione uma condição...</option>';
-    
+
     data.parcelas.forEach(parc => {
       const option = document.createElement('option');
       option.value = parc.nCodigo;
       option.textContent = parc.cDescricao;
       option.setAttribute('data-parcelas', parc.nParcelas);
-      
+
       // Seleciona a parcela salva OU "A15" como padrão
       if (parcelaSelecionada && parc.nCodigo == parcelaSelecionada) {
         option.selected = true;
       } else if (!parcelaSelecionada && parc.nCodigo === 'A15') {
         option.selected = true;
       }
-      
+
       select.appendChild(option);
     });
-    
+
     console.log('[PARCELAS] Carregadas:', data.parcelas.length, 'parcelas');
-    
+
   } catch (err) {
     console.error('[PARCELAS] Erro ao carregar:', err);
     select.innerHTML = '<option value="">Erro ao carregar parcelas</option>';
@@ -45237,24 +45350,24 @@ async function loadParcelasCompraModal(numeroPedido, parcelaSelecionada = null) 
 async function adicionarCotacaoComSpinner(itemId) {
   const btn = document.getElementById(`btn-adicionar-cotacao-${itemId}`);
   if (!btn) return;
-  
+
   // Salva HTML original
   const originalHtml = btn.innerHTML;
-  
+
   // Mostra spinner
   btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Carregando...';
   btn.disabled = true;
-  
+
   try {
     // Abre o modal de nova cotação
     await abrirModalNovaCotacao(itemId);
-    
+
     // Restaura botão após um pequeno delay (o modal já está aberto)
     setTimeout(() => {
       btn.innerHTML = originalHtml;
       btn.disabled = false;
     }, 500);
-    
+
   } catch (err) {
     console.error('[ADICIONAR COTAÇÃO] Erro:', err);
     btn.innerHTML = originalHtml;
@@ -45272,15 +45385,244 @@ window.adicionarCotacaoComSpinner = adicionarCotacaoComSpinner;
 window.aprovarGrupoRequisicao = aprovarGrupoRequisicao;
 window.atualizarGrupoRequisicaoItem = atualizarGrupoRequisicaoItem;
 
+// Ações da Omie expostas como roteiro de integração: só ficam ativas quando já existe suporte real.
+function renderizarAcoesOperacionaisCompra(tipo = 'pedido', opcoes = {}) {
+  const ehNfe = String(tipo).toLowerCase() === 'nfe';
+  const ehRequisicao = String(tipo).toLowerCase() === 'requisicao';
+  const statusNormalizado = String(opcoes.status || '')
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+  const ehNfeRecebidaOuConferida = ehNfe && ['recebido', 'concluido', 'conferido'].includes(statusNormalizado);
+  const numeroPreparacao = String(opcoes.prepararPedidoNumero || '').trim();
+  const acaoPrepararPedido = numeroPreparacao
+    ? [[
+        'Preparar pedido de compra',
+        'fa-cart-shopping',
+        encodeURIComponent(numeroPreparacao),
+        opcoes.podePrepararPedido ? 'preparar-pedido' : 'sem-permissao'
+      ]]
+    : [];
+  const acoes = ehRequisicao
+    ? [
+        ...acaoPrepararPedido,
+        ['Salvar', 'fa-cloud-arrow-up'], ['Incluir', 'fa-circle-plus'], ['Imprimir', 'fa-print'],
+        ['Duplicar', 'fa-copy'], ['Anexos', 'fa-paperclip'], ['E-mails enviados', 'fa-envelope'],
+        ['Histórico de alterações', 'fa-clock-rotate-left'], ['Excluir', 'fa-trash-can', '', 'header']
+      ]
+    : ehNfe
+    ? (ehNfeRecebidaOuConferida ? [
+        ['Salvar', 'fa-cloud-arrow-up'], ['Novo recebimento', 'fa-circle-plus'], ['Devolver', 'fa-rotate-left'],
+        ['Histórico de processamento', 'fa-list'], ['Anexos', 'fa-paperclip'],
+        ['Histórico de alterações', 'fa-clock-rotate-left'], ['Eventos da reforma tributária', 'fa-pen-to-square'],
+        ['Excluir', 'fa-trash-can'], ['Reverter recebimento', 'fa-arrow-rotate-left']
+      ] : [
+        ['Salvar', 'fa-cloud-arrow-up'], ['Novo recebimento', 'fa-circle-plus'], ['Concluir', 'fa-bolt'],
+        ['Exibir DANFE do fornecedor', 'fa-barcode', opcoes.danfeUrl], ['Exibir XML da NF-e', 'fa-file-code'],
+        ['Manifestação da NF-e', 'fa-paper-plane'], ['Acessar no Portal Omie', 'fa-arrow-up-right-from-square'],
+        ['Histórico de processamento', 'fa-list'], ['Anexos', 'fa-paperclip'],
+        ['Histórico de alterações', 'fa-clock-rotate-left'], ['Excluir', 'fa-trash-can']
+      ])
+    : [
+        ['Salvar', 'fa-cloud-arrow-up'], ['Novo pedido de compra', 'fa-circle-plus'], ['Concluir', 'fa-bolt'],
+        ['Exibir pedido na Omie', 'fa-arrow-up-right-from-square'], ['Histórico de processamento', 'fa-list'],
+        ['Anexos', 'fa-paperclip'], ['Histórico de alterações', 'fa-clock-rotate-left'], ['Excluir', 'fa-trash-can', '', 'header']
+      ];
+
+  return `<aside class="cp-sheet-actions" aria-label="Ações do documento">
+    <div class="cp-sheet-actions-title"><span>Ações</span><small>Integrações previstas</small></div>
+    ${acoes.map(([rotulo, icone, href, modo]) => modo === 'preparar-pedido'
+      ? `<button class="cp-sheet-action is-ready" type="button" onclick="abrirModalDetalhesPedidoCompras(decodeURIComponent('${href}'))"><i class="fa-solid ${icone}"></i><span>${rotulo}</span><small>Disponível</small></button>`
+      : modo === 'sem-permissao'
+        ? `<button class="cp-sheet-action is-planned" type="button" disabled title="Permissão pedido_compra necessária"><i class="fa-solid ${icone}"></i><span>${rotulo}</span><small>Sem permissão</small></button>`
+        : href
+          ? `<a class="cp-sheet-action is-ready" href="${escapeHtml(href)}" target="_blank" rel="noopener"><i class="fa-solid ${icone}"></i><span>${rotulo}</span><small>Disponível</small></a>`
+      : modo === 'header'
+        ? `<div class="cp-sheet-action is-ready"><i class="fa-solid ${icone}"></i><span>${rotulo}</span><small>No cabeçalho</small></div>`
+        : `<button class="cp-sheet-action is-planned" type="button" disabled title="Aguardando implementação do backend"><i class="fa-solid ${icone}"></i><span>${rotulo}</span><small>A construir</small></button>`
+    ).join('')}
+  </aside>`;
+}
+
 // Modal específico para "Kanban de compras" (visualização do usuário solicitante)
+function renderizarMiniaturaProdutoCompra(item = {}) {
+  const codigo = String(item.produto_codigo || item.c_produto || item.cCodigoProduto || item.codigo || '').trim();
+  const descricao = String(item.produto_descricao || item.c_descricao || item.cDescricaoProduto || item.descricao || 'Produto').trim();
+  if (!codigo) return '<span class="cp-product-thumb cp-product-thumb--empty" title="Produto sem código"><i class="fa-regular fa-image"></i></span>';
+  return `<button type="button" class="cp-product-thumb" data-product-code="${escapeHtml(codigo)}" data-product-description="${escapeHtml(descricao)}" aria-label="Ver foto do produto ${escapeHtml(codigo)}" title="Ver e ampliar foto"><i class="fa-regular fa-image"></i><img alt="Foto de ${escapeHtml(descricao)}" hidden></button>`;
+}
+
+async function hidratarMiniaturasProdutosCompra(container = document) {
+  const botoes = Array.from(container.querySelectorAll('.cp-product-thumb[data-product-code]:not([data-image-loaded])'));
+  await Promise.all(botoes.map(async (botao) => {
+    botao.dataset.imageLoaded = 'loading';
+    const codigo = String(botao.dataset.productCode || '').trim();
+    try {
+      const resposta = await fetch(`/api/produtos/imagem/${encodeURIComponent(codigo)}`, { credentials: 'include' });
+      const dadosImagem = resposta.ok ? await resposta.json() : null;
+      const url = String(dadosImagem?.url_imagem || '').trim();
+      if (!url) throw new Error('Imagem indisponível');
+      const img = botao.querySelector('img');
+      const icone = botao.querySelector('i');
+      if (!img) return;
+      img.src = url;
+      img.hidden = false;
+      if (icone) icone.hidden = true;
+      botao.dataset.imageLoaded = 'true';
+      botao.addEventListener('click', (event) => {
+        event.stopPropagation();
+        ampliarImagemProduto(url, `${codigo} - ${botao.dataset.productDescription || ''}`, codigo);
+      });
+    } catch (_) {
+      botao.dataset.imageLoaded = 'false';
+      botao.classList.add('cp-product-thumb--empty');
+      botao.title = 'Produto sem foto cadastrada';
+    }
+  }));
+}
+
+function renderizarFichaCompraOmie({ tipo = 'pedido', numero = '', status = '', dados = {}, itens = [], linksHtml = '', acoesHtml = '' } = {}) {
+  const valorSeguro = (valor, fallback = '-') => {
+    const texto = String(valor ?? '').trim();
+    return escapeHtml(texto && texto.toLowerCase() !== 'null' ? texto : fallback);
+  };
+  const possuiValor = (valor) => {
+    const texto = String(valor ?? '').trim().toLowerCase();
+    return Boolean(texto && texto !== '-' && texto !== 'null' && texto !== 'undefined');
+  };
+  const formatarDataFicha = (valor) => {
+    if (!valor) return '-';
+    const data = new Date(valor);
+    return Number.isNaN(data.getTime()) ? valorSeguro(valor) : data.toLocaleDateString('pt-BR');
+  };
+  const formatarMoedaFicha = (valor) => {
+    if (valor === null || valor === undefined || valor === '') return '-';
+    const texto = String(valor).trim();
+    if (/^R\$/i.test(texto)) return valorSeguro(texto);
+    const normalizado = texto.includes(',')
+      ? texto.replace(/\./g, '').replace(',', '.')
+      : texto;
+    const numero = Number(normalizado);
+    return Number.isFinite(numero)
+      ? numero.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
+      : valorSeguro(texto);
+  };
+  const formatarQuantidadeFicha = (valor) => {
+    try {
+      if (typeof formatarQuantidadeExibicao === 'function') return escapeHtml(formatarQuantidadeExibicao(valor));
+    } catch (_) {}
+    return valorSeguro(valor);
+  };
+  const tipoNormalizado = String(tipo || 'pedido').toLowerCase();
+  const ehRequisicao = tipoNormalizado === 'requisicao';
+  const rotuloDocumento = tipoNormalizado === 'nfe' ? 'NF-e' : (tipoNormalizado === 'requisicao' ? 'Requisição' : 'Pedido de Compra');
+  const fornecedor = dados.fornecedorNome || dados.fornecedor_nome || dados.fornecedor || '-';
+  const solicitante = dados.solicitante || '-';
+  const comprador = dados.comprador || dados.responsavel || solicitante;
+  const categoria = dados.categoria || dados.departamento || '-';
+  const projeto = dados.projeto || dados.projeto_nome || dados.nome_projeto || '-';
+  const previsao = dados.d_dt_previsao || dados.previsao_chegada || dados.prazo_solicitado || dados.previsao;
+  const inclusao = dados.d_inc_data || dados.created_at || dados.createdAt || dados.data_criacao;
+  const centroCusto = dados.centroCusto || dados.centro_custo || '-';
+  const objetivo = dados.objetivoCompra || dados.objetivo_compra || '-';
+  const valorTotal = dados.valorTotalPedido || dados.valor_total || dados.valor_total_pedido || dados.n_valor || dados.total || dados.valor || '';
+  const parcelas = dados.numero_parcelas || dados.parcelas || dados.condicao_pagamento || '-';
+  const statusTexto = status || dados.status || 'Em andamento';
+  setTimeout(() => hidratarMiniaturasProdutosCompra(document), 0);
+  const linhas = (Array.isArray(itens) ? itens : []).map((item, indice) => `
+    <tr>
+      <td class="cp-sheet-item-index">${indice + 1}</td>
+      <td class="cp-sheet-image-cell">${renderizarMiniaturaProdutoCompra(item)}</td>
+      <td>${valorSeguro(item.produto_codigo || item.c_produto)}</td>
+      <td class="cp-sheet-product">${valorSeguro(item.produto_descricao || item.c_descricao || item.descricao)}</td>
+      <td class="cp-sheet-quantity">${formatarQuantidadeFicha(item.quantidade ?? item.n_qtde)}</td>
+      <td class="cp-sheet-money">${formatarMoedaFicha(item.preco_unitario ?? item.n_val_unit ?? item.valor_unitario)}</td>
+      <td class="cp-sheet-money cp-sheet-money--total">${formatarMoedaFicha(item.valor_total_item ?? item.n_val_tot ?? item.valor_total)}</td>
+    </tr>
+  `).join('');
+
+  return `
+    <div class="cp-sheet-layout">
+      <main class="cp-sheet-main">
+        <section class="cp-sheet-summary" aria-label="Resumo do documento">
+          <div class="cp-sheet-avatar" aria-hidden="true">${ehRequisicao ? 'RQ' : valorSeguro(String(fornecedor).slice(0, 2).toUpperCase(), 'PC')}</div>
+          <div class="cp-sheet-fields">
+            ${ehRequisicao ? `
+              <div class="cp-sheet-field cp-sheet-field--wide"><span>Categoria da compra</span><strong title="${valorSeguro(categoria)}">${valorSeguro(categoria)}</strong></div>
+              <div class="cp-sheet-field"><span>Projeto</span><strong>${valorSeguro(projeto)}</strong></div>
+              <div class="cp-sheet-field"><span>Sugestão de entrega</span><strong>${formatarDataFicha(previsao)}</strong></div>
+              <div class="cp-sheet-field"><span>Solicitante</span><strong>${valorSeguro(solicitante)}</strong></div>
+            ` : `
+              <div class="cp-sheet-field cp-sheet-field--wide"><span>Fornecedor</span><strong title="${valorSeguro(fornecedor)}">${valorSeguro(fornecedor)}</strong></div>
+              <div class="cp-sheet-field"><span>Previsão de entrega</span><strong>${formatarDataFicha(previsao)}</strong></div>
+              ${possuiValor(categoria) ? `<div class="cp-sheet-field"><span>Categoria da compra</span><strong>${valorSeguro(categoria)}</strong></div>` : ''}
+              <div class="cp-sheet-field"><span>Comprador</span><strong>${valorSeguro(comprador)}</strong></div>
+              ${possuiValor(parcelas) ? `<div class="cp-sheet-field"><span>Condição de pagamento</span><strong>${valorSeguro(parcelas)}</strong></div>` : ''}
+            `}
+            <div class="cp-sheet-status-inline"><span>Status</span><strong>${valorSeguro(statusTexto)}</strong></div>
+          </div>
+        </section>
+
+        <section class="cp-sheet-totals" aria-label="Totais do documento">
+          <div><span>Documento</span><strong>${valorSeguro(rotuloDocumento)} Nº ${valorSeguro(numero)}</strong></div>
+          <div><span>Itens</span><strong>${itens.length}</strong></div>
+          <div><span>Data de inclusão</span><strong>${formatarDataFicha(inclusao)}</strong></div>
+          <div><span>Centro de custo</span><strong>${valorSeguro(centroCusto)}</strong></div>
+          <div class="cp-sheet-total-primary"><span>${ehRequisicao ? 'Valor total sugerido' : 'Valor total da compra'}</span><strong>${valorTotal !== '' ? formatarMoedaFicha(valorTotal) : (ehRequisicao ? 'R$ 0,00' : 'Não informado')}</strong></div>
+        </section>
+
+        <nav class="cp-nfe-tabs cp-order-tabs" aria-label="Seções do documento">
+          <button type="button" class="is-active">${ehRequisicao ? 'Itens da requisição' : 'Itens da compra'}</button>
+          ${(ehRequisicao ? ['Observações'] : ['Transporte','Totais','Parcelas','Departamentos','Informações adicionais','Observações']).map(label => `<button type="button" disabled title="Aguardando implementação do backend">${label}<small>A construir</small></button>`).join('')}
+        </nav>
+
+        <section class="cp-sheet-items">
+          <h4 class="cp-sheet-section-title">${ehRequisicao ? 'Itens da requisição' : 'Itens da compra'}</h4>
+          <div class="cp-sheet-table-wrap">
+            <table>
+              <thead><tr><th>Item</th><th aria-label="Foto">Foto</th><th>Código</th><th>Descrição do produto</th><th>Quantidade</th><th>${ehRequisicao ? 'Preço unit. sugerido' : 'Preço unitário'}</th><th>${ehRequisicao ? 'Valor total do item' : 'Total do item'}</th></tr></thead>
+              <tbody>${linhas || '<tr><td colspan="7" class="cp-sheet-empty">Nenhum item encontrado</td></tr>'}</tbody>
+            </table>
+          </div>
+          <div class="cp-sheet-record-count">${itens.length} ${itens.length === 1 ? 'registro' : 'registros'}</div>
+        </section>
+
+        <section class="cp-sheet-note">
+          <i class="fa-regular fa-note-sticky"></i>
+          <div><span>${ehRequisicao ? 'Observações' : 'Objetivo da compra'}</span><strong>${valorSeguro(objetivo)}</strong></div>
+        </section>
+        ${linksHtml ? `<section class="cp-sheet-links"><span>Anexos e links</span><div>${linksHtml}</div></section>` : ''}
+      </main>
+      ${acoesHtml || renderizarAcoesOperacionaisCompra(tipo)}
+    </div>
+  `;
+}
+
 async function abrirModalDetalhesPedidoMinhas(numeroPedido, statusColuna, itemIds = null) {
   const modal = document.getElementById('modalDetalhesPedidoCompras');
   const modalBody = document.getElementById('modalPedidoBody');
   const modalTitulo = document.getElementById('modalPedidoTitulo');
-  
+
   if (!modal || !modalBody || !modalTitulo) return;
-  
-  modalBody.innerHTML = '<div style="text-align:center;padding:40px;"><i class="fa-solid fa-spinner fa-spin" style="font-size:32px;color:#3b82f6;"></i><br><br>Carregando...</div>';
+  modal.classList.remove('cp-purchase-preparation-modal');
+
+  const sidebar = document.querySelector('.left-side');
+  const sidebarContent = document.getElementById('sidebarContent');
+  const sidebarRect = sidebar?.getBoundingClientRect();
+  const sidebarContentRect = sidebarContent?.getBoundingClientRect();
+  const limiteMenu = Math.max(
+    Number(sidebarRect?.right) || 0,
+    Number(sidebarContentRect?.right) || 0
+  );
+  modal.style.setProperty('--cp-detail-nav-offset', `${Math.max(0, Math.round(limiteMenu))}px`);
+  modalBody.innerHTML = `
+    <div class="cp-sheet-loading" role="status" aria-live="polite">
+      <i class="fa-solid fa-spinner fa-spin" aria-hidden="true"></i>
+      <strong>Carregando pedido</strong>
+      <span>Aguarde enquanto buscamos os dados e itens da compra.</span>
+    </div>
+  `;
   modal.style.display = 'flex';
 
   const itemIdAtualNavegacao = String(itemIds || '')
@@ -45293,10 +45635,10 @@ async function abrirModalDetalhesPedidoMinhas(numeroPedido, statusColuna, itemId
     currentItemId: itemIdAtualNavegacao,
     openType: 'detalhes-pedido'
   });
-  
+
   const currentUser = (document.getElementById('userNameDisplay')?.textContent || '').trim();
   await carregarPermissoesAcessoParaAprovacao();
-  
+
   try {
     const fmtQtdModal = (v) => {
       try {
@@ -45320,10 +45662,10 @@ async function abrirModalDetalhesPedidoMinhas(numeroPedido, statusColuna, itemId
       const data = await resp.json();
       listaCompleta = Array.isArray(data.solicitacoes) ? data.solicitacoes : [];
     }
-    
+
     // Busca itens por diferentes critérios
     let itensPedido;
-    
+
     // Se tiver itemIds específicos, busca por todos eles
     if (itemIds) {
       // Converte para array de IDs (mantém strings como "req_"/"ped_" e números)
@@ -45333,9 +45675,9 @@ async function abrirModalDetalhesPedidoMinhas(numeroPedido, statusColuna, itemId
       )
         .map(id => String(id).trim())
         .filter(id => id && id !== 'undefined' && id !== 'null');
-      
+
       itensPedido = listaCompleta.filter(item => idsArray.includes(String(item.id)));
-      
+
       // Fallback: se não encontrou no cache/minhas, busca em /api/compras/todas
       if (itensPedido.length === 0) {
         const respAll = await fetch('/api/compras/todas', { credentials: 'include' });
@@ -45355,12 +45697,12 @@ async function abrirModalDetalhesPedidoMinhas(numeroPedido, statusColuna, itemId
       itensPedido = listaCompleta.filter(item => {
         const itemStatus = (item.status || '').toLowerCase().trim();
         const colunaStatus = statusColuna.toLowerCase().trim();
-        return itemStatus === colunaStatus || 
+        return itemStatus === colunaStatus ||
                (colunaStatus === 'cotado aguardando escolha' && itemStatus === 'cotado') ||
                (colunaStatus === 'solicitado revisão' && itemStatus === 'retificar');
       });
     }
-    
+
     if (itensPedido.length === 0) {
       modalBody.innerHTML = '<div style="text-align:center;padding:40px;color:#ef4444;">Nenhum item encontrado.</div>';
       return;
@@ -45390,9 +45732,9 @@ async function abrirModalDetalhesPedidoMinhas(numeroPedido, statusColuna, itemId
         console.error('[MODAL MINHAS] Erro ao carregar itens do grupo:', erroGrupo);
       }
     }
-    
-    modalTitulo.textContent = numeroPedido && numeroPedido !== 'undefined' && numeroPedido !== 'null' 
-      ? `Meu Pedido ${numeroPedido}` 
+
+    modalTitulo.textContent = numeroPedido && numeroPedido !== 'undefined' && numeroPedido !== 'null'
+      ? `Meu Pedido ${numeroPedido}`
       : `Meus Itens - ${statusColuna}`;
 
     const fmtDate = (iso) => {
@@ -45414,7 +45756,7 @@ async function abrirModalDetalhesPedidoMinhas(numeroPedido, statusColuna, itemId
       statusColunaLower === 'concluído' ||
       statusColunaLower === 'concluido'
     ) {
-      
+
       // Comentário: Para etapas Omie, busca dados especiais do backend
       if (
         statusColunaLower === 'aguardando compra' ||
@@ -45431,12 +45773,12 @@ async function abrirModalDetalhesPedidoMinhas(numeroPedido, statusColuna, itemId
             const respDetalhes = await fetch(`/api/compras/pedido-detalhes/${primeiroItemPedido.n_cod_ped || primeiroItemPedido.id}`, { credentials: 'include' });
             if (respDetalhes.ok) {
               const detalhes = await respDetalhes.json();
-              
+
               // Usa os itens do backend se disponível, caso contrário usa os do frontend
-              const itensParaMostrar = detalhes.itens && Array.isArray(detalhes.itens) && detalhes.itens.length > 0 
-                ? detalhes.itens 
+              const itensParaMostrar = detalhes.itens && Array.isArray(detalhes.itens) && detalhes.itens.length > 0
+                ? detalhes.itens
                 : (primeiroItemPedido.itens || []);
-              
+
               const linhasItens = itensParaMostrar.map(item => {
                 const codigo = escapeHtml(item.produto_codigo || '-');
                 const descricao = escapeHtml(item.produto_descricao || 'Sem descrição');
@@ -45509,6 +45851,14 @@ async function abrirModalDetalhesPedidoMinhas(numeroPedido, statusColuna, itemId
                   </div>
                 </div>
               `;
+              modalBody.innerHTML = renderizarFichaCompraOmie({
+                tipo: 'pedido',
+                numero: numeroPedido,
+                status: statusColuna,
+                dados: { ...primeiroItemPedido, ...detalhes },
+                itens: itensParaMostrar
+              });
+              modalTitulo.textContent = `Pedido de Compra Nº ${numeroPedido}`;
               return;
             }
           } catch (err) {
@@ -45516,7 +45866,7 @@ async function abrirModalDetalhesPedidoMinhas(numeroPedido, statusColuna, itemId
           }
         }
       }
-      
+
       // Comentário: suporta itens agrupados (com array itens) e prioriza dados de compras_sem_cadastro
       const itensDetalhe = itensPedido.flatMap((item) => {
         if (Array.isArray(item.itens) && item.itens.length > 0) {
@@ -45670,6 +46020,26 @@ async function abrirModalDetalhesPedidoMinhas(numeroPedido, statusColuna, itemId
           </div>
         </div>
       `;
+      const tipoFicha = numeroPedido && numeroPedido !== 'undefined' && numeroPedido !== 'null' ? 'pedido' : 'requisicao';
+      const ehPreparacaoPedido = statusColunaLower === 'aguardando compra preparação';
+      const acoesPreparacaoPedido = ehPreparacaoPedido
+        ? renderizarAcoesOperacionaisCompra('requisicao', {
+            prepararPedidoNumero: numeroPedido,
+            podePrepararPedido: usuarioPodeGerarPedidoCompra(primeiro.departamento || '')
+          })
+        : '';
+      modalBody.innerHTML = renderizarFichaCompraOmie({
+        tipo: tipoFicha,
+        numero: tipoFicha === 'pedido' ? numeroPedido : (primeiro.grupo_requisicao || primeiro.id || ''),
+        status: statusColuna,
+        dados: primeiro,
+        itens: itensTabela,
+        linksHtml: itemSemCadastro ? montarHtmlLinks(linksSemCadastro) : '',
+        acoesHtml: acoesPreparacaoPedido
+      });
+      modalTitulo.textContent = tipoFicha === 'pedido'
+        ? `Pedido de Compra Nº ${numeroPedido}`
+        : `${statusColunaLower === 'aguardando aprovação da requisição' ? 'Aguardando aprovação' : 'Requisição'} Nº ${primeiro.grupo_requisicao || primeiro.id || ''}`;
       return;
     }
 
@@ -45698,18 +46068,18 @@ async function abrirModalDetalhesPedidoMinhas(numeroPedido, statusColuna, itemId
     const taxaUsdBrlParaAprovacao = possuiCotacaoUsdParaAprovacao
       ? await obterTaxaUsdBrlCotacaoKanban()
       : null;
-    
+
     let html = '<div style="display:flex;flex-direction:column;gap:20px;">';
-    
+
     itensPedido.forEach((item, idx) => {
       const prazo = fmtDate(item.prazo_solicitado);
       const cotacoes = cotacoesMap.get(item.id) || [];
-      
+
       // Escapar strings antes de usar no template
       const codigoEscaped = escapeHtml(item.produto_codigo || '-');
       const statusEscaped = escapeHtml(item.status || 'pendente');
       const descricaoEscaped = escapeHtml(item.produto_descricao || item.descricao || '-');
-      
+
       html += `
         <div style="padding:16px;background:#f9fafb;border-radius:8px;border-left:4px solid #3b82f6;">
           <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin-bottom:12px;">
@@ -45738,7 +46108,7 @@ async function abrirModalDetalhesPedidoMinhas(numeroPedido, statusColuna, itemId
             <div style="font-size:11px;color:#6b7280;text-transform:uppercase;margin-bottom:4px;">Descrição</div>
             <div style="color:#374151;">${descricaoEscaped}</div>
           </div>
-          
+
           ${statusColuna === 'solicitado revisão' ? `
           <!-- Histórico de comentários (read-only) -->
           ${item.observacao_retificacao ? `
@@ -45751,20 +46121,20 @@ async function abrirModalDetalhesPedidoMinhas(numeroPedido, statusColuna, itemId
             </div>
           </div>
           ` : ''}
-          
+
           <!-- Campo para adicionar novo comentário -->
           <div style="margin-top:12px;padding:12px;background:#e0f2fe;border:1px solid #0ea5e9;border-radius:6px;">
             <div style="font-weight:600;color:#075985;margin-bottom:6px;display:flex;align-items:center;gap:6px;">
               <i class="fa-solid fa-plus-circle"></i> Adicionar Novo Comentário (Obrigatório)
             </div>
-            <textarea 
-              id="novo-comentario-retificacao-${item.id}" 
+            <textarea
+              id="novo-comentario-retificacao-${item.id}"
               placeholder="Digite seu comentário para voltar este item para Aguardando Compra..."
               style="width:100%;min-height:80px;padding:10px;border:1px solid #0ea5e9;border-radius:6px;font-size:13px;resize:vertical;font-family:inherit;"
             ></textarea>
           </div>
           ` : ''}
-          
+
           ${(statusColuna === 'cotado aguardando escolha' && cotacoes.length > 0) ? `
           <div style="margin-top:16px;padding-top:16px;border-top:2px solid #e5e7eb;">
             <div style="font-weight:600;color:#1f2937;margin-bottom:12px;display:flex;align-items:center;gap:8px;">
@@ -45778,7 +46148,7 @@ async function abrirModalDetalhesPedidoMinhas(numeroPedido, statusColuna, itemId
                 const valorCotado = Number(cotacao.valor_cotado) || 0;
                 const moedaCotada = String(cotacao.moeda || 'BRL').toUpperCase() === 'USD' ? 'USD' : 'BRL';
                 const valorCotadoHtml = `${formatarValorCotacaoKanban(valorCotado, moedaCotada)}${formatarConversaoUsdParaBrlCotacaoKanban(valorCotado, moedaCotada, taxaUsdBrlParaAprovacao)}`;
-                
+
                 return `
                 <div style="background:white;padding:12px;border-radius:6px;border:1px solid #e5e7eb;">
                   <div style="display:grid;grid-template-columns:2fr 1fr auto;gap:12px;align-items:center;">
@@ -45790,7 +46160,7 @@ async function abrirModalDetalhesPedidoMinhas(numeroPedido, statusColuna, itemId
                       <div style="font-size:11px;color:#6b7280;">Valor Cotado</div>
                       <div style="font-weight:600;color:#059669;">${valorCotadoHtml}</div>
                     </div>
-                    <button 
+                    <button
                       id="btn-aprovar-cotacao-${item.id}-${cotacao.id}"
                       onclick="toggleAprovarCotacaoMinhas('${item.id}', ${cotacao.id})"
                       data-aprovado="false"
@@ -45813,8 +46183,8 @@ async function abrirModalDetalhesPedidoMinhas(numeroPedido, statusColuna, itemId
                         ${cotacao.anexos.map((anexo, anexoIdx) => {
                           const nomeAnexo = anexo.nome || `Anexo ${anexoIdx + 1}`;
                           return `
-                          <a 
-                            href="${anexo.url || anexo.path || '#'}" 
+                          <a
+                            href="${anexo.url || anexo.path || '#'}"
                             target="_blank"
                             style="display:flex;align-items:center;gap:6px;background:#f3f4f6;padding:6px 10px;border-radius:6px;text-decoration:none;color:#1f2937;font-size:11px;transition:background 0.2s;"
                             onmouseover="this.style.background='#e5e7eb'"
@@ -45834,18 +46204,18 @@ async function abrirModalDetalhesPedidoMinhas(numeroPedido, statusColuna, itemId
             </div>
           </div>
           ` : ''}
-          
+
           <!-- Botões de Ação conforme status -->
           ${statusColuna === 'aguardando cotação' ? `
           <div style="margin-top:12px;display:flex;gap:8px;">
-            <button 
+            <button
               onclick="editarItemMinhas('${item.id}')"
               style="display:flex;align-items:center;gap:6px;background:#f59e0b;color:white;border:none;padding:8px 14px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600;"
               title="Editar este item">
               <i class="fa-solid fa-edit"></i>
               Editar
             </button>
-            <button 
+            <button
               onclick="excluirItemMinhas('${item.id}')"
               style="display:flex;align-items:center;gap:6px;background:#ef4444;color:white;border:none;padding:8px 14px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600;"
               title="Excluir este item">
@@ -45854,17 +46224,17 @@ async function abrirModalDetalhesPedidoMinhas(numeroPedido, statusColuna, itemId
             </button>
           </div>
           ` : ''}
-          
+
           ${statusColuna === 'solicitado revisão' ? `
           <div style="margin-top:12px;display:flex;flex-direction:column;gap:8px;">
-            <button 
+            <button
               onclick="voltarParaAguardandoCompra('${item.id}', '${item.table_source || 'solicitacao_compras'}')"
               style="display:flex;align-items:center;justify-content:center;gap:8px;background:linear-gradient(135deg,#10b981 0%,#059669 100%);color:white;border:none;padding:10px 16px;border-radius:6px;cursor:pointer;font-size:13px;font-weight:600;"
               title="Retificar">
               <i class="fa-solid fa-check-circle"></i>
               Retificar
             </button>
-            <button 
+            <button
               onclick="excluirItemMinhas('${item.id}', '${item.table_source || 'solicitacao_compras'}')"
               style="width:100%;display:flex;align-items:center;justify-content:center;gap:6px;background:#ef4444;color:white;border:none;padding:8px 14px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600;"
               title="Excluir este item">
@@ -45873,10 +46243,10 @@ async function abrirModalDetalhesPedidoMinhas(numeroPedido, statusColuna, itemId
             </button>
           </div>
           ` : ''}
-          
+
           ${statusColuna === 'cotado aguardando escolha' ? `
           <div style="margin-top:12px;">
-            <button 
+            <button
               onclick="enviarEscolhaMinhas('${item.id}')"
               style="width:100%;display:flex;align-items:center;justify-content:center;gap:8px;background:linear-gradient(135deg,#0ea5e9 0%,#0284c7 100%);color:white;border:none;padding:12px;border-radius:6px;cursor:pointer;font-size:13px;font-weight:700;"
               title="Aprovar cotação e criar requisição na Omie">
@@ -45901,10 +46271,10 @@ async function abrirModalDetalhesPedidoMinhas(numeroPedido, statusColuna, itemId
         </div>
       `;
     });
-    
+
     html += '</div>';
     modalBody.innerHTML = html;
-    
+
   } catch (err) {
     console.error('[MODAL MINHAS] Erro:', err);
     modalBody.innerHTML = '<div style="text-align:center;padding:40px;color:#ef4444;">Erro ao carregar detalhes do pedido.</div>';
@@ -46049,7 +46419,7 @@ async function abrirModalAnaliseCadastro(itemId) {
       }
     }
     if (!Array.isArray(anexosItem)) anexosItem = [];
-    
+
     const anexosItemHtml = anexosItem.length > 0 ? `
       <div style="margin-top:12px;">
         <div style="font-size:12px;color:#6b7280;font-weight:600;margin-bottom:8px;">
@@ -46060,9 +46430,9 @@ async function abrirModalAnaliseCadastro(itemId) {
             const nome = anexo?.nome || `Anexo ${idx + 1}`;
             const url = anexo?.url || anexo?.path || '#';
             return `
-              <a 
-                href="${url}" 
-                target="_blank" 
+              <a
+                href="${url}"
+                target="_blank"
                 style="display:flex;align-items:center;gap:6px;background:#f3f4f6;padding:8px 12px;border-radius:6px;text-decoration:none;color:#1f2937;font-size:12px;border:1px solid #d1d5db;">
                 <i class="fa-solid fa-file" style="color:#3b82f6;"></i>
                 <span>${escapeHtml(nome)}</span>
@@ -46774,9 +47144,9 @@ async function abrirModalCotadoEscolhaItem(itemId) {
             }
             if (!nome) nome = `Anexo ${idx + 1}`;
             return `
-              <a 
-                href="${escapeHtml(url || 'javascript:void(0)')}" 
-                target="_blank" 
+              <a
+                href="${escapeHtml(url || 'javascript:void(0)')}"
+                target="_blank"
                 rel="noopener"
                 style="display:flex;align-items:center;gap:6px;background:#f3f4f6;padding:6px 10px;border-radius:6px;text-decoration:none;color:#1f2937;font-size:11px;border:1px solid #d1d5db;">
                 <i class=\"fa-solid fa-paperclip\" style=\"color:#3b82f6;\"></i>
@@ -46830,13 +47200,13 @@ async function abrirModalCotadoEscolhaItem(itemId) {
           Fechar
         </button>
         <div style="display:flex;gap:8px;flex-wrap:wrap;">
-          <button 
+          <button
             onclick="retificarCotadoEscolha()"
             style="background:linear-gradient(135deg,#fbbf24 0%,#f59e0b 100%);color:#000;padding:12px 20px;border:none;border-radius:6px;font-size:13px;font-weight:700;cursor:pointer;display:flex;align-items:center;gap:8px;">
             <i class="fa-solid fa-rotate-left"></i>
             <span>Retificar</span>
           </button>
-          <button 
+          <button
             onclick="cancelarCotadoEscolha()"
             style="background:linear-gradient(135deg,#ef4444 0%,#dc2626 100%);color:white;padding:12px 20px;border:none;border-radius:6px;font-size:13px;font-weight:700;cursor:pointer;display:flex;align-items:center;gap:8px;">
             <i class="fa-solid fa-ban"></i>
@@ -46949,7 +47319,7 @@ async function abrirModalCotacaoKanban(itemId, grupoRequisicaoEncoded = '', tabl
     console.log('[DEBUG Modal Cotação] itemId recebido:', itemId);
     console.log('[DEBUG Modal Cotação] Total de itens no cache:', cacheItens.length);
     console.log('[DEBUG Modal Cotação] IDs no cache:', cacheItens.map(i => i.id).slice(0, 20));
-    
+
     let item = cacheItens.find(i => String(i.id) === String(itemId));
     if (!item && grupoRequisicao && tableSourceRecebido) {
       item = cacheItens.find(i =>
@@ -47078,7 +47448,7 @@ async function abrirModalCotacaoKanban(itemId, grupoRequisicaoEncoded = '', tabl
     console.log('[DEBUG Modal Cotação] item.link:', itemExibicao.link);
     console.log('[DEBUG Modal Cotação] item.links:', itemExibicao.links);
     console.log('[DEBUG Modal Cotação] item.isSemCadastro:', itemExibicao.isSemCadastro);
-    
+
     const origemParaAgregacao = (Array.isArray(itensGrupo) && itensGrupo.length > 0)
       ? itensGrupo
       : [itemExibicao];
@@ -47091,7 +47461,7 @@ async function abrirModalCotacaoKanban(itemId, grupoRequisicaoEncoded = '', tabl
       )
     ));
     console.log('[DEBUG Modal Cotação] linksCotacao normalizado:', linksCotacao);
-    
+
     const linksCotacaoHtml = linksCotacao.length
       ? linksCotacao.map((link) => {
           const href = /^https?:\/\//i.test(link) ? link : `https://${link}`;
@@ -47196,8 +47566,8 @@ async function abrirModalCotacaoKanban(itemId, grupoRequisicaoEncoded = '', tabl
         </h4>
         <div style="margin-bottom:12px;">
           <label style="display:block;font-size:12px;color:#6b7280;font-weight:600;margin-bottom:6px;">Fornecedor *</label>
-          <input 
-            type="text" 
+          <input
+            type="text"
             id="cotacaoKanbanFornecedor"
             placeholder="Nome do fornecedor..."
             style="width:100%;padding:10px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;"
@@ -47214,8 +47584,8 @@ async function abrirModalCotacaoKanban(itemId, grupoRequisicaoEncoded = '', tabl
               R$
             </button>
           </label>
-          <input 
-            type="text" 
+          <input
+            type="text"
             id="cotacaoKanbanValor"
             placeholder="0,00"
             inputmode="decimal"
@@ -47237,8 +47607,8 @@ async function abrirModalCotacaoKanban(itemId, grupoRequisicaoEncoded = '', tabl
         </div>
         <div style="margin-bottom:16px;">
           <label style="display:block;font-size:12px;color:#6b7280;font-weight:600;margin-bottom:6px;">Anexos (opcional)</label>
-          <input 
-            type="file" 
+          <input
+            type="file"
             id="cotacaoKanbanAnexo"
             accept=".pdf,.jpg,.jpeg,.png,.xlsx,.xls,.doc,.docx"
             onchange="adicionarAnexoCotacaoKanban()"
@@ -47285,7 +47655,7 @@ async function abrirModalCotacaoKanban(itemId, grupoRequisicaoEncoded = '', tabl
       </div>
 
       <div style="display:flex;justify-content:flex-end;align-items:center;padding-top:16px;border-top:1px solid #e5e7eb;">
-        <button 
+        <button
           onclick="enviarCotacoesKanban()"
           style="background:linear-gradient(135deg,#fbbf24 0%,#f59e0b 100%);color:#000;padding:12px 28px;border:none;border-radius:6px;font-size:14px;font-weight:700;cursor:pointer;display:flex;align-items:center;gap:8px;">
           <i class="fa-solid fa-paper-plane"></i>
@@ -47874,7 +48244,7 @@ function renderizarListaAnexosCotacaoKanban() {
           ${escapeHtml(anexo.nome)}
         </span>
         <span style="font-size:11px;color:#0369a1;">${tamanhoKB} KB</span>
-        <button 
+        <button
           onclick="removerAnexoCotacaoKanban('${anexo.id}')"
           style="background:transparent;color:#ef4444;border:none;padding:4px;border-radius:4px;font-size:14px;cursor:pointer;line-height:1;width:20px;height:20px;display:flex;align-items:center;justify-content:center;"
           title="Remover anexo"
@@ -48716,7 +49086,7 @@ async function carregarCotacoesKanban() {
     // Comentário: determina table_source a partir do item (compras_sem_cadastro ou solicitacao_compras)
     const item = window.cotacaoKanbanItem || {};
     const tableSource = window.cotacaoKanbanTableSource || item.table_source || 'solicitacao_compras';
-    
+
     const resp = await fetch(`/api/compras/cotacoes/${window.cotacaoKanbanItemId}?table_source=${encodeURIComponent(tableSource)}`, { credentials: 'include' });
     if (!resp.ok) throw new Error('Erro ao carregar cotações');
     const data = await resp.json();
@@ -49254,7 +49624,7 @@ async function renderizarCotacoesRegistradasCotadoEscolha() {
             </button>
           </div>
         </div>
-        <button 
+        <button
           id="btn-aprovar-cotacao-${cotacao.id}"
           onclick="realizarRequisicaoCotadoEscolha(${cotacao.id})"
           title="${aprovado ? 'Requisição já realizada para esta cotação' : 'Realizar requisição desta cotação'}"
@@ -49358,7 +49728,7 @@ async function retificarCotadoEscolha() {
     } else {
       endpoint = `/api/compras/solicitacoes/${window.cotadoEscolhaItemId}`;
     }
-    
+
     const resp = await fetch(endpoint, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
@@ -49391,7 +49761,7 @@ async function cancelarCotadoEscolha() {
     } else {
       endpoint = `/api/compras/solicitacoes/${window.cotadoEscolhaItemId}`;
     }
-    
+
     const resp = await fetch(endpoint, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
@@ -49420,16 +49790,16 @@ const cotacoesAprovadas = new Map(); // Map<itemId, Set<cotacaoId>>
 function toggleAprovarCotacaoMinhas(itemId, cotacaoId) {
   const btn = document.getElementById(`btn-aprovar-cotacao-${itemId}-${cotacaoId}`);
   if (!btn) return;
-  
+
   const aprovado = btn.getAttribute('data-aprovado') === 'true';
-  
+
   // Garante que o Set existe para este item
   if (!cotacoesAprovadas.has(itemId)) {
     cotacoesAprovadas.set(itemId, new Set());
   }
-  
+
   const cotacoesDoItem = cotacoesAprovadas.get(itemId);
-  
+
   if (aprovado) {
     // Cancelar aprovação (visual apenas)
     btn.setAttribute('data-aprovado', 'false');
@@ -49447,10 +49817,10 @@ function toggleAprovarCotacaoMinhas(itemId, cotacaoId) {
       b.innerHTML = '<i class="fa-solid fa-check"></i> Aprovar';
       b.title = 'Aprovar esta cotação';
     });
-    
+
     // Limpa o Set
     cotacoesDoItem.clear();
-    
+
     // Aprovar apenas esta cotação
     btn.setAttribute('data-aprovado', 'true');
     btn.style.background = '#ef4444';
@@ -49462,22 +49832,22 @@ function toggleAprovarCotacaoMinhas(itemId, cotacaoId) {
 
 async function enviarEscolhaMinhas(itemId) {
   const cotacoesDoItem = cotacoesAprovadas.get(itemId);
-  
+
   if (!cotacoesDoItem || cotacoesDoItem.size === 0) {
     alert('Por favor, aprove uma cotação antes de enviar.');
     return;
   }
-  
+
   // Deve ter exatamente UMA cotação aprovada
   if (cotacoesDoItem.size !== 1) {
     alert('Selecione apenas uma cotação para aprovar.');
     return;
   }
-  
+
   const cotacaoId = Array.from(cotacoesDoItem)[0];
-  
+
   if (!confirm('Deseja confirmar a cotação selecionada e criar a requisição na Omie?')) return;
-  
+
   try {
     // Chama o endpoint de aprovação que cria requisição na Omie
     // (mesmo processo usado no kanban "Aprovação de Requisições de Compra" quando Retorno Cotação = Não)
@@ -49485,18 +49855,18 @@ async function enviarEscolhaMinhas(itemId) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
-      body: JSON.stringify({ 
+      body: JSON.stringify({
         cotacao_aprovada_id: cotacaoId
       })
     });
-    
+
     if (!resp.ok) {
       const errData = await resp.json();
       throw new Error(errData.error || 'Erro ao criar requisição');
     }
-    
+
     const result = await resp.json();
-    
+
     alert('Cotação aprovada e requisição criada na Omie com sucesso!');
     cotacoesAprovadas.delete(itemId);
     fecharModalDetalhesPedidoCompras();
@@ -49513,7 +49883,7 @@ async function editarItemMinhas(itemId) {
 
 async function excluirItemMinhas(itemId, tableSource = 'solicitacao_compras') {
   if (!confirm('Tem certeza que deseja excluir este item?')) return;
-  
+
   try {
     const resp = await fetch(`/api/compras/itens/${itemId}`, {
       method: 'DELETE',
@@ -49521,9 +49891,9 @@ async function excluirItemMinhas(itemId, tableSource = 'solicitacao_compras') {
       credentials: 'include',
       body: JSON.stringify({ table_source: tableSource })
     });
-    
+
     if (!resp.ok) throw new Error('Erro ao excluir item');
-    
+
     alert('Item excluído com sucesso!');
     fecharModalDetalhesPedidoCompras();
     loadMinhasSolicitacoes();
@@ -49584,36 +49954,36 @@ async function voltarParaAguardandoCompra(itemId, tableSource = 'solicitacao_com
   // Pega o valor do textarea de comentário
   const textarea = document.getElementById(`novo-comentario-retificacao-${itemId}`);
   const novoComentario = textarea ? textarea.value.trim() : '';
-  
+
   // Valida se o comentário foi preenchido
   if (!novoComentario) {
     alert('Por favor, adicione um comentário antes de retificar o item.');
     if (textarea) textarea.focus();
     return;
   }
-  
+
   if (!confirm('Deseja realmente retificar este item?')) return;
-  
+
   // Pega o nome do usuário logado
   const currentUser = (document.getElementById('userNameDisplay')?.textContent || 'User').trim();
-  
+
   try {
     const resp = await fetch(`/api/compras/itens/${itemId}/status`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
-      body: JSON.stringify({ 
+      body: JSON.stringify({
         status: 'aguardando aprovação da requisição',
         observacao_retificacao: novoComentario,
         usuario_comentario: currentUser
       })
     });
-    
+
     if (!resp.ok) {
       const error = await resp.json();
       throw new Error(error.error || 'Erro ao atualizar status');
     }
-    
+
     alert('Item retificado com sucesso!');
     fecharModalDetalhesPedidoCompras();
     loadMinhasSolicitacoes();
@@ -49675,13 +50045,13 @@ async function renderComprasKanban() {
     if (!resp.ok) throw new Error('Não foi possível carregar as solicitações');
     const data = await resp.json();
     const listaCompleta = Array.isArray(data.solicitacoes) ? data.solicitacoes : [];
-    
+
     // Normaliza status para lowercase
     const itensComStatusNormalizado = listaCompleta.map(item => ({
       ...item,
       statusNormalizado: (item.status || '').toLowerCase().trim()
     }));
-    
+
     // Agrupa por status (exclui itens com status "cotado")
     const statusColunas = {
       'aguardando cotação': itensComStatusNormalizado.filter(i => i.statusNormalizado === 'aguardando cotação'),
@@ -49691,23 +50061,23 @@ async function renderComprasKanban() {
       'recebido': itensComStatusNormalizado.filter(i => i.statusNormalizado === 'recebido'),
       'concluído': itensComStatusNormalizado.filter(i => i.statusNormalizado === 'concluído' || i.statusNormalizado === 'concluido')
     };
-    
+
     // Renderiza cada coluna
     Object.keys(statusColunas).forEach(status => {
       const coluna = document.querySelector(`.kanban-column[data-status="${status}"]`);
       if (!coluna) return;
-      
+
       const cardsContainer = coluna.querySelector('.kanban-cards');
       const countBadge = coluna.querySelector('.kanban-count');
       const itens = statusColunas[status];
-      
+
       // Atualiza contador
       if (countBadge) countBadge.textContent = itens.length;
-      
+
       // Status que devem ser agrupados por número do pedido Omie (cNumero)
       const statusAgrupados = ['compra realizada', 'faturada pelo fornecedor', 'recebido', 'concluído'];
       const deveAgrupar = statusAgrupados.includes(status);
-      
+
       // Renderiza cards
       if (cardsContainer) {
         if (itens.length === 0) {
@@ -49717,9 +50087,9 @@ async function renderComprasKanban() {
           if (!cardsContainer.style.overflowY) {
             cardsContainer.style.overflowY = 'auto';
           }
-          
+
           let htmlContent = '';
-          
+
           if (deveAgrupar) {
             // Agrupa itens por cNumero (número do pedido Omie)
             const grupos = {};
@@ -49728,13 +50098,13 @@ async function renderComprasKanban() {
               if (!grupos[chave]) grupos[chave] = [];
               grupos[chave].push(item);
             });
-            
+
             // Renderiza cada grupo
             Object.keys(grupos).forEach(cNumero => {
               const itensGrupo = grupos[cNumero];
-              
+
               htmlContent += `
-                <div 
+                <div
                   onclick="abrirModalPedidoAgrupado('${cNumero}', ${JSON.stringify(itensGrupo.map(i => i.id)).replace(/"/g, '&quot;')})"
                   style="
                     margin-bottom:12px;
@@ -49760,17 +50130,17 @@ async function renderComprasKanban() {
                 </div>
               `;
             });
-            
+
           } else {
             // Renderização normal (sem agrupamento)
             htmlContent = itens.map(item => {
               const prazo = item.prazo_solicitado ? new Date(item.prazo_solicitado).toLocaleDateString('pt-BR') : '-';
               const previsao = item.previsao_chegada ? new Date(item.previsao_chegada).toLocaleDateString('pt-BR') : '-';
-              
+
               // Para "Aguardando Compra", não exibe numero_pedido
               const mostrarNumeroPedido = status !== 'aguardando compra' && (item.cNumero || item.numero_pedido);
               const numeroPedidoExibir = item.cNumero || item.numero_pedido;
-              
+
               return `
               <div class="kanban-card" data-item-id="${item.id}" style="
                 background:#ffffff;
@@ -49817,7 +50187,7 @@ async function renderComprasKanban() {
             `;
             }).join('');
           }
-          
+
           cardsContainer.innerHTML = htmlContent;
         }
       }
@@ -49833,20 +50203,20 @@ async function abrirModalPedidoAgrupado(cNumero, idsItens) {
     // Busca detalhes de todos os itens do grupo
     const resp = await fetch('/api/compras/todas', { credentials: 'include' });
     if (!resp.ok) throw new Error('Erro ao carregar detalhes');
-    
+
     const data = await resp.json();
     const todosItens = Array.isArray(data.solicitacoes) ? data.solicitacoes : [];
-    
+
     // Filtra apenas os itens deste pedido
-    const itensPedido = todosItens.filter(item => 
+    const itensPedido = todosItens.filter(item =>
       item.cNumero === cNumero || (cNumero === 'sem_pedido' && !item.cNumero)
     );
-    
+
     if (itensPedido.length === 0) {
       alert('Nenhum item encontrado para este pedido');
       return;
     }
-    
+
     // Monta HTML da tabela
     const tabelaHtml = `
       <div style="overflow-x:auto;">
@@ -49881,7 +50251,7 @@ async function abrirModalPedidoAgrupado(cNumero, idsItens) {
           </tbody>
         </table>
       </div>
-      
+
       <div style="margin-top:20px;padding:16px;background:#f0f9ff;border:2px solid #3b82f6;border-radius:8px;">
         <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;">
           <div>
@@ -49899,11 +50269,11 @@ async function abrirModalPedidoAgrupado(cNumero, idsItens) {
         </div>
       </div>
     `;
-    
+
     // Cria e abre modal
     const modalId = 'modalPedidoAgrupado';
     let modal = document.getElementById(modalId);
-    
+
     if (!modal) {
       modal = document.createElement('div');
       modal.id = modalId;
@@ -49912,7 +50282,7 @@ async function abrirModalPedidoAgrupado(cNumero, idsItens) {
       modal.style.zIndex = '10002';
       document.body.appendChild(modal);
     }
-    
+
     modal.innerHTML = `
       <div class="modal-content" style="max-width:1200px;width:90%;max-height:80vh;overflow-y:auto;">
         <div class="modal-header">
@@ -49927,9 +50297,9 @@ async function abrirModalPedidoAgrupado(cNumero, idsItens) {
         </div>
       </div>
     `;
-    
+
     modal.style.display = 'flex';
-    
+
   } catch (err) {
     console.error('[Modal Pedido Agrupado] Erro:', err);
     alert('Erro ao carregar detalhes do pedido: ' + err.message);
@@ -49953,14 +50323,14 @@ async function abrirModalSelecaoItensCompra() {
   spinner.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:10003;background:rgba(0,0,0,0.8);padding:30px 40px;border-radius:12px;color:white;font-size:16px;font-weight:600;display:flex;align-items:center;gap:12px;';
   spinner.innerHTML = '<i class="fa-solid fa-spinner fa-spin" style="font-size:24px;"></i> Carregando itens...';
   document.body.appendChild(spinner);
-  
+
   try {
     const modal = document.getElementById('modalSelecaoItensCompra');
     if (!modal) {
       document.body.removeChild(spinner);
       return;
     }
-    
+
     // Carrega catálogo se ainda não foi carregado (para ter as imagens)
     if (!window.produtosCatalogoOmie || window.produtosCatalogoOmie.length === 0) {
       try {
@@ -49973,22 +50343,22 @@ async function abrirModalSelecaoItensCompra() {
         console.warn('[COMPRAS] Não foi possível carregar catálogo para imagens:', errCatalogo);
       }
     }
-    
+
     // Busca itens com status "aguardando compra"
     const resp = await fetch('/api/compras/todas', { credentials: 'include' });
     if (!resp.ok) throw new Error('Não foi possível carregar as solicitações');
     const data = await resp.json();
     const todosItens = Array.isArray(data.solicitacoes) ? data.solicitacoes : [];
-    
-    const itensAguardandoCompra = todosItens.filter(item => 
+
+    const itensAguardandoCompra = todosItens.filter(item =>
       (item.status || '').toLowerCase().trim() === 'aguardando compra'
     );
-    
+
     if (itensAguardandoCompra.length === 0) {
       alert('Não há itens aguardando compra no momento.');
       return;
     }
-    
+
     // Busca cotações aprovadas para cada item
     const cotacoesMap = new Map();
     await Promise.all(itensAguardandoCompra.map(async (item) => {
@@ -50006,26 +50376,26 @@ async function abrirModalSelecaoItensCompra() {
         console.warn(`Erro ao buscar cotações do item ${item.id}:`, e);
       }
     }));
-    
+
     // Armazena cotações globalmente para uso na renderização
     window.cotacoesItensCompra = cotacoesMap;
-    
+
     // Limpa carrinho ao abrir o modal
     window.carrinhoSelecaoCompra = [];
     atualizarContadorSelecao();
-    
+
     // Renderiza lista de itens
     renderizarListaSelecaoItens(itensAguardandoCompra);
-    
+
     modal.style.display = 'flex';
-    
+
     // Remove spinner
     const spinnerEl = document.getElementById('spinnerCompra');
     if (spinnerEl) document.body.removeChild(spinnerEl);
   } catch (err) {
     console.error('[COMPRAS] Erro ao abrir modal de seleção:', err);
     alert('Erro ao carregar itens: ' + err.message);
-    
+
     // Remove spinner em caso de erro
     const spinnerEl = document.getElementById('spinnerCompra');
     if (spinnerEl) document.body.removeChild(spinnerEl);
@@ -50036,7 +50406,7 @@ async function abrirModalSelecaoItensCompra() {
 function renderizarListaSelecaoItens(itens) {
   const container = document.getElementById('listaItensSelecaoCompra');
   if (!container) return;
-  
+
   // Agrupa itens por cnumero (número do pedido)
   const itensPorPedido = {};
   itens.forEach(item => {
@@ -50046,25 +50416,25 @@ function renderizarListaSelecaoItens(itens) {
     }
     itensPorPedido[cnumero].push(item);
   });
-  
+
   // Renderiza cada grupo de pedido
   const html = Object.keys(itensPorPedido).sort().map(cnumero => {
     const itensGrupo = itensPorPedido[cnumero];
-    
+
     const itensHtml = itensGrupo.map(item => {
       const prazo = item.prazo_solicitado ? new Date(item.prazo_solicitado).toLocaleDateString('pt-BR') : '-';
       const jaAdicionado = window.carrinhoSelecaoCompra.some(i => i.id === item.id);
-      
+
       // Busca imagem do produto (mesmo sistema do catálogo)
       const codigoProduto = item.produto_codigo || item.codigo;
       let imgUrl = '';
       if (codigoProduto && window.produtosCatalogoOmie) {
-        const produtoComImagem = window.produtosCatalogoOmie.find(p => 
+        const produtoComImagem = window.produtosCatalogoOmie.find(p =>
           p.codigo === codigoProduto || p.codigo_produto === codigoProduto
         );
         imgUrl = produtoComImagem?.url_imagem || '';
       }
-      
+
       // Verifica se URL está expirada
       let urlExpirada = false;
       if (imgUrl && imgUrl.includes('Expires=')) {
@@ -50075,13 +50445,13 @@ function renderizarListaSelecaoItens(itens) {
           urlExpirada = expiresTimestamp < agora;
         }
       }
-      
+
       // Prepara strings para onclick ANTES de stringify
       const infoProdutoTexto = `${escapeHtml(codigoProduto || '')} - ${escapeHtml(item.descricao || item.produto_descricao || '')}`;
-      
-      const imgHtml = imgUrl && !urlExpirada ? 
-        `<img 
-          src="${imgUrl}" 
+
+      const imgHtml = imgUrl && !urlExpirada ?
+        `<img
+          src="${imgUrl}"
           alt="${escapeHtml(item.descricao || item.produto_descricao || '')}"
           style="width:50px;height:50px;object-fit:contain;border-radius:6px;background:#f9fafb;padding:4px;cursor:zoom-in;"
           onclick='ampliarImagemProduto(${JSON.stringify(imgUrl)}, ${JSON.stringify(infoProdutoTexto)});event.stopPropagation();'
@@ -50094,7 +50464,7 @@ function renderizarListaSelecaoItens(itens) {
         `<div style="width:50px;height:50px;background:#f3f4f6;border-radius:6px;display:flex;align-items:center;justify-content:center;">
           <i class="fa-solid fa-image" style="color:#9ca3af;font-size:16px;"></i>
         </div>`;
-      
+
       return `
         <div id="item-selecao-${item.id}" style="
           background:${jaAdicionado ? '#f0fdf4' : '#ffffff'};
@@ -50109,7 +50479,7 @@ function renderizarListaSelecaoItens(itens) {
         ">
           <!-- Mini Foto -->
           ${imgHtml}
-          
+
           <!-- Informações do Produto -->
           <div>
             <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
@@ -50136,7 +50506,7 @@ function renderizarListaSelecaoItens(itens) {
                 <span style="font-size:12px;color:#374151;">${escapeHtml(item.solicitante || '-')}</span>
               </div>
             </div>
-            
+
             ${(() => {
               // Mostra observação de retificação se existir
               if (item.observacao_retificacao) {
@@ -50154,18 +50524,18 @@ function renderizarListaSelecaoItens(itens) {
               }
               return '';
             })()}
-            
+
             ${(() => {
               // Busca cotações aprovadas do item
               const cotacoes = window.cotacoesItensCompra?.get(item.id) || [];
               if (cotacoes.length === 0) return '';
-              
+
               // Se houver múltiplas cotações aprovadas, mostra todas
               if (cotacoes.length === 1) {
                 const cotacao = cotacoes[0];
                 const fornecedor = escapeHtml(cotacao.fornecedor_nome || '-');
                 const valor = Number(cotacao.valor_cotado) || 0;
-                
+
                 return `
                   <div style="margin-top:12px;padding-top:12px;border-top:1px solid #e5e7eb;">
                     <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;">
@@ -50209,11 +50579,11 @@ function renderizarListaSelecaoItens(itens) {
               }
             })()}
           </div>
-          
+
           <!-- Botões de Ação (Retificar e Adicionar/Remover) -->
           <div style="display:flex;flex-direction:column;gap:8px;">
             <!-- Botão Retificar -->
-            <button 
+            <button
               onclick="retificarItemCompra(${item.id}, event)"
               title="Retificar item - Enviar para correção"
               style="
@@ -50235,9 +50605,9 @@ function renderizarListaSelecaoItens(itens) {
               onmouseout="this.style.transform='scale(1)'">
               <i class="fa-solid fa-wrench"></i>
             </button>
-            
+
             <!-- Botão Adicionar/Remover -->
-            <button 
+            <button
               id="btn-adicionar-${item.id}"
               onclick="toggleItemSelecaoCompra(${item.id})"
               title="${jaAdicionado ? 'Remover item' : 'Adicionar item'}"
@@ -50264,7 +50634,7 @@ function renderizarListaSelecaoItens(itens) {
         </div>
       `;
     }).join('');
-    
+
     return `
       <div style="margin-bottom:24px;">
         <div style="
@@ -50297,7 +50667,7 @@ function renderizarListaSelecaoItens(itens) {
       </div>
     `;
   }).join('');
-  
+
   container.innerHTML = html || '<div style="text-align:center;color:#9ca3af;padding:40px;">Nenhum item disponível</div>';
 }
 
@@ -50309,14 +50679,14 @@ function toggleItemSelecaoCompra(itemId) {
     .then(data => {
       const todosItens = Array.isArray(data.solicitacoes) ? data.solicitacoes : [];
       const item = todosItens.find(i => i.id == itemId);
-      
+
       if (!item) {
         alert('Item não encontrado');
         return;
       }
-      
+
       const index = window.carrinhoSelecaoCompra.findIndex(i => i.id === itemId);
-      
+
       if (index >= 0) {
         // Remove do carrinho
         window.carrinhoSelecaoCompra.splice(index, 1);
@@ -50324,10 +50694,10 @@ function toggleItemSelecaoCompra(itemId) {
         // Adiciona ao carrinho
         window.carrinhoSelecaoCompra.push(item);
       }
-      
+
       // Atualiza visual
       atualizarContadorSelecao();
-      const itensAguardandoCompra = todosItens.filter(i => 
+      const itensAguardandoCompra = todosItens.filter(i =>
         (i.status || '').toLowerCase().trim() === 'aguardando compra'
       );
       renderizarListaSelecaoItens(itensAguardandoCompra);
@@ -50344,7 +50714,7 @@ function atualizarContadorSelecao() {
   if (contador) {
     contador.textContent = window.carrinhoSelecaoCompra.length;
   }
-  
+
   const btnConcluir = document.getElementById('btnConcluirSelecaoCompra');
   if (btnConcluir) {
     btnConcluir.disabled = window.carrinhoSelecaoCompra.length === 0;
@@ -50357,35 +50727,35 @@ function atualizarContadorSelecao() {
 async function retificarItemCompra(itemId, event) {
   // Evita propagação do evento para não acionar o toggle
   if (event) event.stopPropagation();
-  
+
   // Busca informações do item
   try {
     const resp = await fetch('/api/compras/todas', { credentials: 'include' });
     if (!resp.ok) throw new Error('Erro ao buscar item');
-    
+
     const data = await resp.json();
     const todosItens = Array.isArray(data.solicitacoes) ? data.solicitacoes : [];
     const item = todosItens.find(i => i.id == itemId);
-    
+
     if (!item) {
       alert('Item não encontrado');
       return;
     }
-    
+
     // Armazena ID do item e histórico existente para usar na confirmação
     window.itemRetificacaoId = itemId;
     window.itemRetificacaoHistorico = item.observacao_retificacao || '';
-    
+
     // Atualiza informação do item no modal
     const itemInfo = document.getElementById('observacaoRetificacaoItem');
     if (itemInfo) {
       itemInfo.textContent = `${item.produto_codigo || '-'} - ${item.descricao || item.produto_descricao || '-'}`;
     }
-    
+
     // Busca ou cria div para mostrar histórico
     const modalBody = document.querySelector('#modalObservacaoRetificacao .modal-body');
     let historicoDiv = document.getElementById('observacaoRetificacaoHistorico');
-    
+
     // Se já existe histórico, mostra antes do campo de novo comentário
     if (item.observacao_retificacao && modalBody) {
       if (!historicoDiv) {
@@ -50398,7 +50768,7 @@ async function retificarItemCompra(itemId, event) {
           labelMotivo.parentElement.insertBefore(historicoDiv, labelMotivo.parentElement.firstChild);
         }
       }
-      
+
       historicoDiv.innerHTML = `
         <div style="margin-bottom:16px;padding:12px;background:#f0fdf4;border:1px solid #86efac;border-radius:8px;">
           <div style="font-weight:600;color:#065f46;margin-bottom:6px;display:flex;align-items:center;gap:6px;">
@@ -50413,13 +50783,13 @@ async function retificarItemCompra(itemId, event) {
       // Remove histórico se não houver
       historicoDiv.remove();
     }
-    
+
     // Limpa campo de novo comentário
     const textarea = document.getElementById('observacaoRetificacaoTexto');
     const errorDiv = document.getElementById('observacaoRetificacaoError');
     if (textarea) textarea.value = '';
     if (errorDiv) errorDiv.style.display = 'none';
-    
+
     // Abre modal
     const modal = document.getElementById('modalObservacaoRetificacao');
     if (modal) {
@@ -50427,12 +50797,12 @@ async function retificarItemCompra(itemId, event) {
       modal.style.setProperty('position', 'fixed', 'important');
       modal.style.setProperty('z-index', '10005', 'important'); // Garante prioridade máxima sobre o modal de aprovação
     }
-    
+
     // Foca no textarea
     setTimeout(() => {
       if (textarea) textarea.focus();
     }, 100);
-    
+
   } catch (err) {
     console.error('[COMPRAS] Erro ao abrir modal de retificação:', err);
     alert('Erro ao processar item: ' + err.message);
@@ -50451,52 +50821,52 @@ async function confirmarRetificacao() {
   const textarea = document.getElementById('observacaoRetificacaoTexto');
   const errorDiv = document.getElementById('observacaoRetificacaoError');
   const itemId = window.itemRetificacaoId;
-  
+
   if (!textarea || !itemId) return;
-  
+
   const observacao = textarea.value.trim();
-  
+
   // Valida observação
   if (!observacao) {
     if (errorDiv) errorDiv.style.display = 'block';
     textarea.focus();
     return;
   }
-  
+
   try {
     // Chama o endpoint para atualizar o status com observação
     const resp = await fetch(`/api/compras/itens/${itemId}/status`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
-      body: JSON.stringify({ 
+      body: JSON.stringify({
         status: 'retificar',
         observacao_retificacao: observacao
       })
     });
-    
+
     if (!resp.ok) {
       const error = await resp.json();
       throw new Error(error.error || 'Erro ao retificar item');
     }
-    
+
     const resultado = await resp.json();
-    
+
     // Mostra mensagem de sucesso
     alert('Item enviado para retificação com sucesso!');
-    
+
     // Fecha o modal de retificação
     fecharModalObservacaoRetificacao();
-    
+
     // Recarrega o modal de aprovação se ele estiver aberto
     const modalAprovacao = document.getElementById('modalAprovacaoRequisicao');
     if (modalAprovacao && modalAprovacao.style.display === 'flex') {
       await abrirModalAprovacaoRequisicao();
     }
-    
+
     // Fecha modal de seleção se estiver aberto
     fecharModalSelecaoItensCompra();
-    
+
   } catch (err) {
     console.error('[COMPRAS] Erro ao retificar item:', err);
     alert('Erro ao retificar item: ' + err.message);
@@ -50518,7 +50888,7 @@ async function concluirSelecaoItensCompra() {
     alert('Selecione pelo menos um item');
     return;
   }
-  
+
   try {
     // Gera um numero_pedido no formato YYYYMMDD-HHMMSS-mmm
     const agora = new Date();
@@ -50530,31 +50900,31 @@ async function concluirSelecaoItensCompra() {
     const segundo = String(agora.getSeconds()).padStart(2, '0');
     const milisegundo = String(agora.getMilliseconds()).padStart(3, '0');
     const numeroPedidoTemp = `${ano}${mes}${dia}-${hora}${minuto}${segundo}-${milisegundo}`;
-    
+
     // Atualiza os itens selecionados com o numero_pedido
     const idsItens = window.carrinhoSelecaoCompra.map(i => i.id);
-    
+
     const resp = await fetch('/api/compras/agrupar-itens', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
       body: JSON.stringify({ ids: idsItens, numero_pedido: numeroPedidoTemp })
     });
-    
+
     if (!resp.ok) {
       const error = await resp.json();
       throw new Error(error.error || 'Erro ao agrupar itens');
     }
-    
+
     // Fecha o modal de seleção
     fecharModalSelecaoItensCompra();
-    
+
     // Abre o modal de detalhes do pedido
     await abrirModalDetalhesPedidoCompras(numeroPedidoTemp);
-    
+
     // Atualiza o kanban
     // renderComprasKanban(); // REMOVIDO - Página não existe mais
-    
+
   } catch (err) {
     console.error('[COMPRAS] Erro ao concluir seleção:', err);
     alert('Erro ao processar itens: ' + err.message);
@@ -50591,14 +50961,14 @@ async function abrirModalSelecaoItensCotacao() {
     const spinnerEl = document.getElementById('spinnerCotacao');
     if (spinnerEl) document.body.removeChild(spinnerEl);
   };
-  
+
   try {
     const modal = document.getElementById('modalSelecaoItensCotacao');
     if (!modal) {
       document.body.removeChild(spinner);
       return;
     }
-    
+
     // Carrega catálogo se ainda não foi carregado (para ter as imagens)
     if (!window.produtosCatalogoOmie || window.produtosCatalogoOmie.length === 0) {
       try {
@@ -50611,7 +50981,7 @@ async function abrirModalSelecaoItensCotacao() {
         console.warn('[COTAÇÃO] Não foi possível carregar catálogo para imagens:', errCatalogo);
       }
     }
-    
+
     // Busca itens com status "aguardando cotação" (usa cache do kanban quando disponível)
     let todosItens = Array.isArray(window.kanbanMinhasItens) ? window.kanbanMinhasItens : [];
     if (!todosItens.length) {
@@ -50620,32 +50990,32 @@ async function abrirModalSelecaoItensCotacao() {
       const data = await resp.json();
       todosItens = Array.isArray(data.solicitacoes) ? data.solicitacoes : [];
     }
-    
-    const itensAguardandoCotacao = todosItens.filter(item => 
+
+    const itensAguardandoCotacao = todosItens.filter(item =>
       (item.status || '').toLowerCase().trim() === 'aguardando cotação'
     );
-    
+
     if (itensAguardandoCotacao.length === 0) {
       alert('Não há itens aguardando cotação no momento.');
       removerSpinner();
       return;
     }
-    
+
     // Limpa carrinho ao abrir o modal
     window.carrinhoSelecaoCotacao = [];
     atualizarContadorSelecaoCotacao();
-    
+
     // Renderiza lista de itens
     renderizarListaSelecaoCotacao(itensAguardandoCotacao);
-    
+
     modal.style.display = 'flex';
-    
+
     // Remove spinner
     removerSpinner();
   } catch (err) {
     console.error('[COTAÇÃO] Erro ao abrir modal de seleção:', err);
     alert('Erro ao carregar itens: ' + err.message);
-    
+
     // Remove spinner em caso de erro
     removerSpinner();
   }
@@ -50655,7 +51025,7 @@ async function abrirModalSelecaoItensCotacao() {
 function renderizarListaSelecaoCotacao(itens) {
   const container = document.getElementById('listaItensSelecaoCotacao');
   if (!container) return;
-  
+
   // Usa a mesma função de renderização dos itens de compra
   // Mas com IDs diferentes e callbacks diferentes
   const itensPorFamilia = {};
@@ -50666,24 +51036,24 @@ function renderizarListaSelecaoCotacao(itens) {
     }
     itensPorFamilia[familia].push(item);
   });
-  
+
   const html = Object.keys(itensPorFamilia).sort().map(familia => {
     const itensGrupo = itensPorFamilia[familia];
-    
+
     const itensHtml = itensGrupo.map(item => {
       const prazo = item.prazo_solicitado ? new Date(item.prazo_solicitado).toLocaleDateString('pt-BR') : '-';
       const jaAdicionado = window.carrinhoSelecaoCotacao.some(i => i.id === item.id);
-      
+
       // Busca imagem do produto
       const codigoProduto = item.produto_codigo || item.codigo;
       let imgUrl = '';
       if (codigoProduto && window.produtosCatalogoOmie) {
-        const produtoComImagem = window.produtosCatalogoOmie.find(p => 
+        const produtoComImagem = window.produtosCatalogoOmie.find(p =>
           p.codigo === codigoProduto || p.codigo_produto === codigoProduto
         );
         imgUrl = produtoComImagem?.url_imagem || '';
       }
-      
+
       // Verifica se URL está expirada
       let urlExpirada = false;
       if (imgUrl && imgUrl.includes('Expires=')) {
@@ -50694,13 +51064,13 @@ function renderizarListaSelecaoCotacao(itens) {
           urlExpirada = expiresTimestamp < agora;
         }
       }
-      
+
       // Prepara strings para onclick ANTES de stringify
       const infoProdutoTexto = `${escapeHtml(codigoProduto || '')} - ${escapeHtml(item.descricao || item.produto_descricao || '')}`;
-      
-      const imgHtml = imgUrl && !urlExpirada ? 
-        `<img 
-          src="${imgUrl}" 
+
+      const imgHtml = imgUrl && !urlExpirada ?
+        `<img
+          src="${imgUrl}"
           alt="${escapeHtml(item.descricao || item.produto_descricao || '')}"
           style="width:50px;height:50px;object-fit:contain;border-radius:6px;background:#f9fafb;padding:4px;cursor:zoom-in;"
           onclick='ampliarImagemProduto(${JSON.stringify(imgUrl)}, ${JSON.stringify(infoProdutoTexto)});event.stopPropagation();'
@@ -50713,7 +51083,7 @@ function renderizarListaSelecaoCotacao(itens) {
         `<div style="width:50px;height:50px;background:#f3f4f6;border-radius:6px;display:flex;align-items:center;justify-content:center;">
           <i class="fa-solid fa-image" style="color:#9ca3af;font-size:16px;"></i>
         </div>`;
-      
+
       return `
         <div id="item-selecao-cotacao-${item.id}" style="
           background:${jaAdicionado ? '#fef3c7' : '#ffffff'};
@@ -50728,7 +51098,7 @@ function renderizarListaSelecaoCotacao(itens) {
         ">
           <!-- Mini Foto -->
           ${imgHtml}
-          
+
           <!-- Informações do Produto -->
           <div>
             <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
@@ -50756,10 +51126,10 @@ function renderizarListaSelecaoCotacao(itens) {
               </div>
             </div>
           </div>
-          
+
           <!-- Botão Adicionar/Remover -->
           <div>
-            <button 
+            <button
               id="btn-adicionar-cotacao-${item.id}"
               onclick="toggleItemSelecaoCotacao(${item.id})"
               title="${jaAdicionado ? 'Remover item' : 'Adicionar item'}"
@@ -50786,7 +51156,7 @@ function renderizarListaSelecaoCotacao(itens) {
         </div>
       `;
     }).join('');
-    
+
     return `
       <div style="margin-bottom:20px;">
         <h4 style="margin:0 0 12px 0;color:#6b7280;font-size:13px;font-weight:700;text-transform:uppercase;display:flex;align-items:center;gap:8px;">
@@ -50800,14 +51170,14 @@ function renderizarListaSelecaoCotacao(itens) {
       </div>
     `;
   }).join('');
-  
+
   container.innerHTML = html;
 }
 
 // Toggle item no carrinho de cotação
 function toggleItemSelecaoCotacao(itemId) {
   const itemIndex = window.carrinhoSelecaoCotacao.findIndex(i => i.id === itemId);
-  
+
   if (itemIndex === -1) {
     // Adiciona
     window.carrinhoSelecaoCotacao.push({ id: itemId });
@@ -50815,12 +51185,12 @@ function toggleItemSelecaoCotacao(itemId) {
     // Remove
     window.carrinhoSelecaoCotacao.splice(itemIndex, 1);
   }
-  
+
   // Atualiza visual
   const cacheItens = Array.isArray(window.kanbanMinhasItens) ? window.kanbanMinhasItens : [];
   if (cacheItens.length) {
     atualizarContadorSelecaoCotacao();
-    const itensAguardandoCotacao = cacheItens.filter(i => 
+    const itensAguardandoCotacao = cacheItens.filter(i =>
       (i.status || '').toLowerCase().trim() === 'aguardando cotação'
     );
     renderizarListaSelecaoCotacao(itensAguardandoCotacao);
@@ -50832,7 +51202,7 @@ function toggleItemSelecaoCotacao(itemId) {
     .then(data => {
       const todosItens = Array.isArray(data.solicitacoes) ? data.solicitacoes : [];
       atualizarContadorSelecaoCotacao();
-      const itensAguardandoCotacao = todosItens.filter(i => 
+      const itensAguardandoCotacao = todosItens.filter(i =>
         (i.status || '').toLowerCase().trim() === 'aguardando cotação'
       );
       renderizarListaSelecaoCotacao(itensAguardandoCotacao);
@@ -50849,7 +51219,7 @@ function atualizarContadorSelecaoCotacao() {
   if (contador) {
     contador.textContent = window.carrinhoSelecaoCotacao.length;
   }
-  
+
   const btnConcluir = document.getElementById('btnConcluirSelecaoCotacao');
   if (btnConcluir) {
     btnConcluir.disabled = window.carrinhoSelecaoCotacao.length === 0;
@@ -50873,24 +51243,24 @@ async function concluirSelecaoItensCotacao() {
     alert('Selecione pelo menos um item');
     return;
   }
-  
+
   try {
     // Busca os itens completos
     const resp = await fetch('/api/compras/todas', { credentials: 'include' });
     if (!resp.ok) throw new Error('Não foi possível carregar as solicitações');
     const data = await resp.json();
     const todosItens = Array.isArray(data.solicitacoes) ? data.solicitacoes : [];
-    
-    const itensSelecionados = todosItens.filter(item => 
+
+    const itensSelecionados = todosItens.filter(item =>
       window.carrinhoSelecaoCotacao.some(c => c.id === item.id)
     );
-    
+
     // Fecha modal de seleção
     fecharModalSelecaoItensCotacao();
-    
+
     // Abre modal de inserção de cotações
     abrirModalInserirCotacoes(itensSelecionados);
-    
+
   } catch (err) {
     console.error('[COTAÇÃO] Erro ao concluir seleção:', err);
     alert('Erro ao processar itens: ' + err.message);
@@ -50902,25 +51272,25 @@ function abrirModalInserirCotacoes(itens) {
   const modal = document.getElementById('modalInserirCotacoes');
   const listbox = document.getElementById('listboxItensCotacao');
   if (!modal || !listbox) return;
-  
+
   // Armazena itens globalmente
   window.itensCotacao = itens;
   window.cotacoesRegistradas = [];
   window.itemSelecionadoCotacao = null;
   window.anexosCotacao = []; // Array para armazenar múltiplos anexos
-  
+
   // Renderiza listbox de itens
   const listboxHtml = itens.map((item, index) => {
     // Busca imagem do produto no catálogo
     const codigoProduto = item.produto_codigo || item.codigo;
     let imgUrl = '';
     if (codigoProduto && window.produtosCatalogoOmie) {
-      const produtoComImagem = window.produtosCatalogoOmie.find(p => 
+      const produtoComImagem = window.produtosCatalogoOmie.find(p =>
         p.codigo === codigoProduto || p.codigo_produto === codigoProduto
       );
       imgUrl = produtoComImagem?.url_imagem || '';
     }
-    
+
     // Verifica se URL está expirada
     let urlExpirada = false;
     if (imgUrl && imgUrl.includes('Expires=')) {
@@ -50931,14 +51301,14 @@ function abrirModalInserirCotacoes(itens) {
         urlExpirada = expiresTimestamp < agora;
       }
     }
-    
+
     // Prepara strings para onclick ANTES de stringify
     const infoProdutoTexto = `${escapeHtml(codigoProduto || '')} - ${escapeHtml(item.descricao || item.produto_descricao || '')}`;
-    
+
     // HTML da imagem ou ícone fallback
-    const imgHtml = imgUrl && !urlExpirada ? 
-      `<img 
-        src="${imgUrl}" 
+    const imgHtml = imgUrl && !urlExpirada ?
+      `<img
+        src="${imgUrl}"
         alt="${escapeHtml(item.descricao || item.produto_descricao || '')}"
         style="width:50px;height:50px;object-fit:contain;border-radius:6px;background:#f9fafb;padding:4px;cursor:zoom-in;"
         onclick='ampliarImagemProduto(${JSON.stringify(imgUrl)}, ${JSON.stringify(infoProdutoTexto)});event.stopPropagation();'
@@ -50951,9 +51321,9 @@ function abrirModalInserirCotacoes(itens) {
       `<div style="width:50px;height:50px;background:#f3f4f6;border-radius:6px;display:flex;align-items:center;justify-content:center;">
         <i class="fa-solid fa-image" style="color:#9ca3af;font-size:16px;"></i>
       </div>`;
-    
+
     return `
-      <div 
+      <div
         id="item-cotacao-${item.id}"
         onclick="selecionarItemCotacao(${item.id})"
         style="
@@ -50969,12 +51339,12 @@ function abrirModalInserirCotacoes(itens) {
         "
         onmouseover="this.style.borderColor='#fbbf24'"
         onmouseout="if(!this.classList.contains('item-selecionado')) this.style.borderColor='#e5e7eb'">
-        
+
         <!-- Coluna da Foto -->
         <div style="display:flex;align-items:flex-start;justify-content:center;padding:4px;background:#fafafa;border-radius:6px;">
           ${imgHtml}
         </div>
-        
+
         <!-- Coluna dos Dados -->
         <div style="min-width:0;">
           <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
@@ -50991,43 +51361,43 @@ function abrirModalInserirCotacoes(itens) {
       </div>
     `;
   }).join('');
-  
+
   listbox.innerHTML = listboxHtml;
-  
+
   // Limpa formulário
   document.getElementById('cotacaoFornecedor').value = '';
   document.getElementById('cotacaoValor').value = '';
   document.getElementById('cotacaoAnexo').value = '';
   document.getElementById('cotacaoObservacoesGerais').value = '';
-  
+
   // Limpa lista de anexos
   window.anexosCotacao = [];
   renderizarListaAnexosCotacao();
-  
+
   // Limpa lista de cotações registradas
   document.getElementById('listaCotacoesRegistradas').innerHTML = '';
-  
+
   // Seleciona primeiro item automaticamente
   if (itens.length > 0) {
     selecionarItemCotacao(itens[0].id);
   }
-  
+
   modal.style.display = 'flex';
 }
 
 // Adiciona um anexo à lista de anexos
 window.adicionarAnexoCotacao = function() {
   const anexoInput = document.getElementById('cotacaoAnexo');
-  
+
   if (!anexoInput || !anexoInput.files[0]) {
     return;
   }
-  
+
   const file = anexoInput.files[0];
-  
+
   // Gera ID único para o anexo
   const anexoId = Date.now() + '_' + Math.random().toString(36).substr(2, 9);
-  
+
   // Armazena o arquivo
   if (!window.anexosCotacao) window.anexosCotacao = [];
   window.anexosCotacao.push({
@@ -51037,10 +51407,10 @@ window.adicionarAnexoCotacao = function() {
     tipo: file.type,
     tamanho: file.size
   });
-  
+
   // Renderiza a lista de anexos
   renderizarListaAnexosCotacao();
-  
+
   // Limpa o input
   anexoInput.value = '';
 };
@@ -51049,12 +51419,12 @@ window.adicionarAnexoCotacao = function() {
 function renderizarListaAnexosCotacao() {
   const listaContainer = document.getElementById('listaAnexosCotacao');
   if (!listaContainer) return;
-  
+
   if (!window.anexosCotacao || window.anexosCotacao.length === 0) {
     listaContainer.innerHTML = '';
     return;
   }
-  
+
   const html = window.anexosCotacao.map(anexo => {
     const tamanhoKB = (anexo.tamanho / 1024).toFixed(1);
     return `
@@ -51064,7 +51434,7 @@ function renderizarListaAnexosCotacao() {
           ${escapeHtml(anexo.nome)}
         </span>
         <span style="font-size:11px;color:#0369a1;">${tamanhoKB} KB</span>
-        <button 
+        <button
           onclick="removerAnexoCotacao('${anexo.id}')"
           style="background:transparent;color:#ef4444;border:none;padding:4px;border-radius:4px;font-size:14px;cursor:pointer;line-height:1;width:20px;height:20px;display:flex;align-items:center;justify-content:center;"
           title="Remover anexo"
@@ -51075,7 +51445,7 @@ function renderizarListaAnexosCotacao() {
       </div>
     `;
   }).join('');
-  
+
   listaContainer.innerHTML = html;
 }
 
@@ -51083,7 +51453,7 @@ function renderizarListaAnexosCotacao() {
 // Remove um anexo específico da lista
 window.removerAnexoCotacao = function(anexoId) {
   if (!window.anexosCotacao) return;
-  
+
   window.anexosCotacao = window.anexosCotacao.filter(a => a.id !== anexoId);
   renderizarListaAnexosCotacao();
 };
@@ -51098,7 +51468,7 @@ function selecionarItemCotacao(itemId) {
     el.style.animation = '';
     el.style.boxShadow = '';
   });
-  
+
   // Adiciona seleção ao item clicado com animação
   const itemEl = document.getElementById(`item-cotacao-${itemId}`);
   if (itemEl) {
@@ -51108,7 +51478,7 @@ function selecionarItemCotacao(itemId) {
     itemEl.style.animation = 'rotatingBorder 1.5s linear infinite';
     itemEl.style.boxShadow = '';
   }
-  
+
   window.itemSelecionadoCotacao = itemId;
 }
 
@@ -51118,20 +51488,20 @@ async function registrarCotacao() {
     alert('Selecione um item da lista à direita');
     return;
   }
-  
+
   const fornecedor = document.getElementById('cotacaoFornecedor').value.trim();
   const valor = parseFloat(document.getElementById('cotacaoValor').value || '0');
-  
+
   if (!fornecedor) {
     alert('Preencha o fornecedor');
     return;
   }
-  
+
   if (!valor || valor <= 0) {
     alert('Preencha um valor válido');
     return;
   }
-  
+
   try {
     // Converte anexos para base64 se houver
     let anexosArray = null;
@@ -51144,7 +51514,7 @@ async function registrarCotacao() {
           reader.onerror = reject;
           reader.readAsDataURL(anexo.file);
         });
-        
+
         anexosArray.push({
           nome: anexo.nome,
           tipo: anexo.tipo,
@@ -51153,7 +51523,7 @@ async function registrarCotacao() {
         });
       }
     }
-    
+
     // Salva cotação no backend (usando JSON, não FormData)
     const resp = await fetch('/api/compras/cotacoes', {
       method: 'POST',
@@ -51166,14 +51536,14 @@ async function registrarCotacao() {
         anexos: anexosArray
       })
     });
-    
+
     if (!resp.ok) {
       const errorData = await resp.json();
       throw new Error(errorData.error || 'Erro ao salvar cotação');
     }
-    
+
     const data = await resp.json();
-    
+
     // Adiciona à lista de cotações registradas
     window.cotacoesRegistradas.push({
       id: data.cotacao?.id || Date.now(),
@@ -51182,7 +51552,7 @@ async function registrarCotacao() {
       valor_unitario: valor,
       anexos: window.anexosCotacao ? window.anexosCotacao.map(a => a.nome).join(', ') : null
     });
-    
+
     // Atualiza indicador visual no listbox
     const statusIcon = document.getElementById(`status-${window.itemSelecionadoCotacao}`);
     if (statusIcon) {
@@ -51190,13 +51560,13 @@ async function registrarCotacao() {
       statusIcon.classList.add('fa-check');
       statusIcon.classList.remove('fa-circle');
     }
-    
+
     // Renderiza lista de cotações registradas
     renderizarCotacoesRegistradas();
-    
+
     // Limpa apenas o campo de valor (mantém fornecedor e anexos)
     document.getElementById('cotacaoValor').value = '';
-    
+
   } catch (err) {
     console.error('[COTAÇÃO] Erro ao registrar:', err);
     alert('Erro ao registrar cotação: ' + err.message);
@@ -51207,15 +51577,15 @@ async function registrarCotacao() {
 function renderizarCotacoesRegistradas() {
   const container = document.getElementById('listaCotacoesRegistradas');
   if (!container) return;
-  
+
   if (window.cotacoesRegistradas.length === 0) {
     container.innerHTML = '<div style="text-align:center;padding:20px;color:#9ca3af;font-size:13px;">Nenhuma cotação registrada ainda</div>';
     return;
   }
-  
+
   const html = window.cotacoesRegistradas.map((cotacao, index) => {
     const item = window.itensCotacao.find(i => i.id === cotacao.item_id);
-    
+
     // Gera HTML para os anexos
     let anexosHtml = '';
     if (cotacao.anexos) {
@@ -51231,7 +51601,7 @@ function renderizarCotacoesRegistradas() {
         `;
       }
     }
-    
+
     return `
       <div style="background:white;border:2px solid #10b981;border-radius:8px;padding:12px;display:grid;grid-template-columns:1fr auto;gap:12px;align-items:center;">
         <div>
@@ -51247,7 +51617,7 @@ function renderizarCotacoesRegistradas() {
           </div>
           ${anexosHtml}
         </div>
-        <button 
+        <button
           onclick="removerCotacaoRegistrada(${index})"
           title="Remover cotação"
           style="background:#ef4444;color:white;border:none;padding:8px;border-radius:6px;cursor:pointer;width:36px;height:36px;">
@@ -51256,16 +51626,16 @@ function renderizarCotacoesRegistradas() {
       </div>
     `;
   }).join('');
-  
+
   container.innerHTML = html;
 }
 
 // Remove uma cotação registrada
 async function removerCotacaoRegistrada(index) {
   if (!confirm('Remover esta cotação?')) return;
-  
+
   const cotacao = window.cotacoesRegistradas[index];
-  
+
   try {
     // Remove do backend se tiver ID
     if (cotacao.id) {
@@ -51275,10 +51645,10 @@ async function removerCotacaoRegistrada(index) {
       });
       if (!resp.ok) console.warn('Erro ao remover cotação do backend');
     }
-    
+
     // Remove da lista local
     window.cotacoesRegistradas.splice(index, 1);
-    
+
     // Verifica se ainda há cotações para este item
     const temOutrasCotacoes = window.cotacoesRegistradas.some(c => c.item_id === cotacao.item_id);
     if (!temOutrasCotacoes) {
@@ -51289,9 +51659,9 @@ async function removerCotacaoRegistrada(index) {
         statusIcon.classList.add('fa-circle');
       }
     }
-    
+
     renderizarCotacoesRegistradas();
-    
+
   } catch (err) {
     console.error('[COTAÇÃO] Erro ao remover:', err);
     alert('Erro ao remover cotação');
@@ -51313,35 +51683,35 @@ async function enviarCotacoes() {
     alert('Registre pelo menos uma cotação antes de enviar');
     return;
   }
-  
+
   const observacoesGerais = document.getElementById('cotacaoObservacoesGerais').value.trim();
-  
+
   try {
     // Atualiza status de todos os itens para "cotado"
     const idsItens = [...new Set(window.cotacoesRegistradas.map(c => c.item_id))];
-    
+
     for (const itemId of idsItens) {
       const resp = await fetch(`/api/compras/solicitacoes/${itemId}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
-        body: JSON.stringify({ 
+        body: JSON.stringify({
           status: 'cotado',
           observacoes: observacoesGerais || undefined
         })
       });
-      
+
       if (!resp.ok) console.warn(`Erro ao atualizar status do item ${itemId}`);
     }
-    
+
     alert('Cotações enviadas com sucesso! Status atualizado para "cotado".');
     fecharModalInserirCotacoes();
-    
+
     // Atualiza o kanban
     if (typeof renderKanbanCompras === 'function') {
       renderKanbanCompras();
     }
-    
+
   } catch (err) {
     console.error('[COTAÇÃO] Erro ao enviar:', err);
     alert('Erro ao enviar cotações: ' + err.message);
@@ -51444,57 +51814,57 @@ async function abrirModalCatalogoOmie() {
   if (!modal) return;
 
   inicializarTooltipModeloCompraCatalogo();
-  
+
   const lista = document.getElementById('listaProdutosCatalogo');
   if (lista) {
     lista.innerHTML = '';
   }
-  
+
   modal.style.display = 'flex';
-  
+
   // Inicializa contador de carrinho
   atualizarContadorCatalogo();
-  
+
   // Atualiza opções de NP baseado no carrinho
   await carregarGruposRequisicaoDisponiveis();
   atualizarOpcoesNP();
-  
+
   // Define valor padrão como "Não"
   const selectCadastro = document.getElementById('catalogoPossuiCadastroOmie');
   if (selectCadastro) {
     selectCadastro.value = 'nao';
   }
-  
+
   // Garante que campo descrição está visível
   const campoDescricao = document.getElementById('catalogoCampoDescricao');
   if (campoDescricao) {
     campoDescricao.style.display = 'block';
   }
-  
+
   // Garante que campo quantidade está visível (padrão "Não")
   const campoQuantidade = document.getElementById('catalogoCampoQuantidade');
   if (campoQuantidade) {
     campoQuantidade.style.display = 'block';
   }
-  
+
   // Garante que botão adicionar está visível (padrão "Não")
   const botaoAdicionar = document.getElementById('catalogoBotaoAdicionarNaoCadastrado');
   if (botaoAdicionar) {
     botaoAdicionar.style.display = 'block';
   }
-  
+
   // Define valor padrão de Etapas do Pedido
   const selectEtapas = document.getElementById('catalogoEtapasPedido');
   if (selectEtapas) {
     selectEtapas.value = 'aguardando aprovação da requisição';
   }
-  
+
   // Oculta seção de filtros inicialmente (só aparece quando Sim)
   const secaoFiltros = document.getElementById('catalogoSecaoFiltros');
   if (secaoFiltros) {
     secaoFiltros.style.display = 'none';
   }
-  
+
   try {
     // Carrega departamentos e categorias de compra
     await Promise.all([
@@ -51502,11 +51872,11 @@ async function abrirModalCatalogoOmie() {
       loadModalComprasCategoriasCompra(),
       carregarResponsaveisCatalogoInspecao()
     ]);
-    
+
     // Define "Produção" como padrão após carregar departamentos
     const selectDept = document.getElementById('catalogoDepartamentoGlobal');
     if (selectDept) {
-      const opcaoProd = Array.from(selectDept.options).find(o => 
+      const opcaoProd = Array.from(selectDept.options).find(o =>
         (o.value || '').toLowerCase() === 'produção' || (o.value || '').toLowerCase() === 'producao'
       );
       if (opcaoProd) {
@@ -51515,19 +51885,19 @@ async function abrirModalCatalogoOmie() {
         selectDept.dispatchEvent(new Event('change'));
       }
     }
-    
+
     console.log('[Catálogo] Modal aberto. Produtos não carregados (aguardando seleção Sim).');
-    
+
   } catch (err) {
     console.error('[CATÁLOGO OMIE] Erro:', err);
     if (lista) {
       lista.innerHTML = '<div style="text-align:center;padding:40px;color:#ef4444;">Erro ao carregar configurações</div>';
     }
   }
-  
+
   // Adiciona event listeners para validar interação entre Requisição Direta e Não incluir quantidade
   inicializarValidacaoCatalogoCheckboxes();
-  
+
   // Inicializa sistema de keywords/tags para descrição
   inicializarDescricaoKeywords();
 }
@@ -51799,44 +52169,44 @@ window.catalogoAnexosAcumulados = window.catalogoAnexosAcumulados || [];
 // Controla exibição dos campos condicionais baseado em "Possui cadastro na Omie?"
 function toggleCamposCatalogoOmie() {
   console.log('[Catálogo] toggleCamposCatalogoOmie() CHAMADA');
-  
+
   const selectCadastro = document.getElementById('catalogoPossuiCadastroOmie');
   const campoDescricao = document.getElementById('catalogoCampoDescricao');
   const campoQuantidade = document.getElementById('catalogoCampoQuantidade');
   const secaoFiltros = document.getElementById('catalogoSecaoFiltros');
   const botaoAdicionar = document.getElementById('catalogoBotaoAdicionarNaoCadastrado');
-  
+
   console.log('[Catálogo] selectCadastro:', selectCadastro);
   console.log('[Catálogo] selectCadastro.value:', selectCadastro?.value);
   console.log('[Catálogo] campoDescricao:', campoDescricao);
   console.log('[Catálogo] campoQuantidade:', campoQuantidade);
   console.log('[Catálogo] secaoFiltros:', secaoFiltros);
   console.log('[Catálogo] botaoAdicionar:', botaoAdicionar);
-  
+
   if (!selectCadastro || !campoDescricao) {
     console.log('[Catálogo] ERRO: Elementos não encontrados!');
     return;
   }
-  
+
   if (selectCadastro.value === 'nao') {
     // Mostra campo de descrição
     campoDescricao.style.display = 'block';
-    
+
     // Mostra campo de quantidade
     if (campoQuantidade) {
       campoQuantidade.style.display = 'block';
     }
-    
+
     // Mostra botão de adicionar ao carrinho
     if (botaoAdicionar) {
       botaoAdicionar.style.display = 'block';
     }
-    
+
     // Oculta seção de filtros
     if (secaoFiltros) {
       secaoFiltros.style.display = 'none';
     }
-    
+
     // Adiciona foco no campo de descrição
     const descricao = document.getElementById('catalogoDescricaoNaoCadastrado');
     if (descricao) {
@@ -51844,40 +52214,40 @@ function toggleCamposCatalogoOmie() {
         descricao.focus();
       }, 100);
     }
-    
+
     // Limpa lista de produtos (não precisa carregar para produtos não cadastrados)
     const lista = document.getElementById('listaProdutosCatalogo');
     if (lista) {
       lista.innerHTML = '';
     }
-    
+
     console.log('[Catálogo] Campo descrição: VISÍVEL + Quantidade: VISÍVEL + Botão: VISÍVEL + Filtros: OCULTOS + Lista produtos: OCULTA');
   } else {
     // Oculta campo de descrição
     campoDescricao.style.display = 'none';
-    
+
     // Oculta campo de quantidade
     if (campoQuantidade) {
       campoQuantidade.style.display = 'none';
     }
-    
+
     // Oculta botão de adicionar ao carrinho
     if (botaoAdicionar) {
       botaoAdicionar.style.display = 'none';
     }
-    
+
     // Mostra seção de filtros
     if (secaoFiltros) {
       secaoFiltros.style.display = 'block';
     }
-    
+
     // Limpa campo ao ocultar
     const descricao = document.getElementById('catalogoDescricaoNaoCadastrado');
     if (descricao) descricao.value = '';
-    
+
     // Carrega produtos do catálogo Omie
     carregarProdutosCatalogoOmie();
-    
+
     console.log('[Catálogo] Campo descrição: OCULTO + Quantidade: OCULTO + Botão: OCULTO + Filtros: VISÍVEIS + Carregando produtos...');
   }
 }
@@ -51886,30 +52256,30 @@ function toggleCamposCatalogoOmie() {
 async function carregarProdutosCatalogoOmie() {
   const lista = document.getElementById('listaProdutosCatalogo');
   if (!lista) return;
-  
+
   lista.innerHTML = '<div style="text-align:center;padding:40px;"><i class="fa-solid fa-spinner fa-spin" style="font-size:32px;color:#3b82f6;"></i><br><br>Carregando catálogo...</div>';
-  
+
   try {
     const respProdutos = await fetch('/api/compras/catalogo-omie', { credentials: 'include' });
-    
+
     if (!respProdutos.ok) throw new Error('Erro ao carregar catálogo');
-    
+
     const data = await respProdutos.json();
     window.produtosCatalogoOmie = data.produtos || [];
-    
+
     // Popula select de famílias
     const selectFamilia = document.getElementById('catalogoFamilia');
     if (selectFamilia) {
       const familias = [...new Set(window.produtosCatalogoOmie.map(p => p.descricao_familia).filter(f => f))].sort();
-      selectFamilia.innerHTML = '<option value="">Todas as Famílias</option>' + 
+      selectFamilia.innerHTML = '<option value="">Todas as Famílias</option>' +
         familias.map(f => `<option value="${escapeHtml(f)}">${escapeHtml(f)}</option>`).join('');
     }
-    
+
     // Renderiza produtos
     renderizarCatalogoOmie(window.produtosCatalogoOmie);
-    
+
     console.log('[Catálogo] Produtos carregados:', window.produtosCatalogoOmie.length);
-    
+
   } catch (err) {
     console.error('[Catálogo] Erro ao carregar produtos:', err);
     lista.innerHTML = '<div style="text-align:center;padding:40px;color:#ef4444;">Erro ao carregar catálogo de produtos</div>';
@@ -51919,50 +52289,50 @@ async function carregarProdutosCatalogoOmie() {
 // Gerencia mudança de anexo no catálogo (acumula múltiplos arquivos)
 function handleCatalogoAnexoChange(input) {
   if (!input || !input.files || input.files.length === 0) return;
-  
+
   const preview = document.getElementById('catalogoAnexoPreview');
   const label = document.getElementById('catalogoAnexoLabel');
-  
+
   if (!preview || !label) return;
-  
+
   // Inicializa array se não existir
   if (!window.catalogoAnexosAcumulados) {
     window.catalogoAnexosAcumulados = [];
   }
-  
+
   // Valida e ACUMULA cada arquivo novo
   let novosAdicionados = 0;
   for (let i = 0; i < input.files.length; i++) {
     const file = input.files[i];
-    
+
     // Valida tamanho (máximo 5MB por arquivo)
     if (file.size > 5 * 1024 * 1024) {
       alert(`Arquivo "${file.name}" muito grande! Tamanho máximo: 5MB por arquivo.`);
       continue;
     }
-    
+
     // Verifica se arquivo já existe na lista (por nome e tamanho)
     const jaExiste = window.catalogoAnexosAcumulados.some(
       f => f.name === file.name && f.size === file.size
     );
-    
+
     if (jaExiste) {
       console.log(`[Catálogo] Arquivo "${file.name}" já está na lista, ignorando...`);
       continue;
     }
-    
+
     // ACUMULA o arquivo
     window.catalogoAnexosAcumulados.push(file);
     novosAdicionados++;
   }
-  
+
   // Limpa o input (para permitir selecionar o mesmo arquivo novamente se necessário)
   input.value = '';
-  
+
   if (novosAdicionados === 0 && window.catalogoAnexosAcumulados.length === 0) {
     return;
   }
-  
+
   // Monta HTML da lista de arquivos ACUMULADOS
   const listaHTML = window.catalogoAnexosAcumulados.map((file, index) => {
     // Define ícone baseado no tipo
@@ -51978,9 +52348,9 @@ function handleCatalogoAnexoChange(input) {
       iconClass = 'fa-file-excel';
       iconColor = '#10b981';
     }
-    
+
     const tamanhoMB = (file.size / 1024 / 1024).toFixed(2);
-    
+
     return `
       <div style="display:flex;align-items:center;justify-content:space-between;padding:8px;background:white;border:2px solid ${iconColor};border-radius:6px;margin-bottom:6px;">
         <div style="display:flex;align-items:center;gap:8px;flex:1;">
@@ -51990,7 +52360,7 @@ function handleCatalogoAnexoChange(input) {
             <div style="font-size:10px;color:#6b7280;">${tamanhoMB} MB</div>
           </div>
         </div>
-        <button 
+        <button
           type="button"
           onclick="removerCatalogoAnexoIndividual(${index})"
           style="background:#ef4444;color:white;border:none;padding:4px 8px;border-radius:4px;cursor:pointer;font-size:11px;">
@@ -51999,19 +52369,19 @@ function handleCatalogoAnexoChange(input) {
       </div>
     `;
   }).join('');
-  
+
   preview.innerHTML = listaHTML + `
-    <button 
+    <button
       type="button"
       onclick="removerCatalogoAnexo()"
       style="width:100%;padding:8px;background:#ef4444;color:white;border:none;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600;margin-top:4px;">
       <i class="fa-solid fa-trash"></i> Remover Todos
     </button>
   `;
-  
+
   preview.style.display = 'block';
   label.textContent = `${window.catalogoAnexosAcumulados.length} arquivo(s) selecionado(s)`;
-  
+
   if (novosAdicionados > 0) {
     console.log(`[Catálogo] ${novosAdicionados} novo(s) arquivo(s) adicionado(s). Total: ${window.catalogoAnexosAcumulados.length}`);
   }
@@ -52070,7 +52440,7 @@ function renderizarCatalogoLinks() {
             <div style="font-size:12px;font-weight:600;color:#1e3a8a;word-break:break-all;">${linkSeguro}</div>
           </div>
         </div>
-        <button 
+        <button
           type="button"
           onclick="removerCatalogoLink(${index})"
           style="background:#ef4444;color:white;border:none;padding:4px 8px;border-radius:4px;cursor:pointer;font-size:11px;">
@@ -52089,17 +52459,17 @@ function removerCatalogoAnexo() {
   const input = document.getElementById('catalogoAnexo');
   const preview = document.getElementById('catalogoAnexoPreview');
   const label = document.getElementById('catalogoAnexoLabel');
-  
+
   // Limpa array acumulado
   window.catalogoAnexosAcumulados = [];
-  
+
   if (input) input.value = '';
   if (preview) {
     preview.style.display = 'none';
     preview.innerHTML = '';
   }
   if (label) label.textContent = 'Clique para selecionar arquivos';
-  
+
   console.log('[Catálogo] Todos os anexos removidos');
 }
 
@@ -52108,14 +52478,14 @@ function removerCatalogoAnexoIndividual(index) {
   if (!window.catalogoAnexosAcumulados || index < 0 || index >= window.catalogoAnexosAcumulados.length) {
     return;
   }
-  
+
   const arquivoRemovido = window.catalogoAnexosAcumulados[index].name;
-  
+
   // Remove do array
   window.catalogoAnexosAcumulados.splice(index, 1);
-  
+
   console.log(`[Catálogo] Anexo "${arquivoRemovido}" removido. Restam: ${window.catalogoAnexosAcumulados.length}`);
-  
+
   // Atualiza preview
   if (window.catalogoAnexosAcumulados.length > 0) {
     // Re-renderiza a lista
@@ -52124,7 +52494,7 @@ function removerCatalogoAnexoIndividual(index) {
       // Força atualização do preview sem adicionar novos arquivos
       const preview = document.getElementById('catalogoAnexoPreview');
       const label = document.getElementById('catalogoAnexoLabel');
-      
+
       if (preview && label) {
         const listaHTML = window.catalogoAnexosAcumulados.map((file, idx) => {
           let iconClass = 'fa-file';
@@ -52139,9 +52509,9 @@ function removerCatalogoAnexoIndividual(index) {
             iconClass = 'fa-file-excel';
             iconColor = '#10b981';
           }
-          
+
           const tamanhoMB = (file.size / 1024 / 1024).toFixed(2);
-          
+
           return `
             <div style="display:flex;align-items:center;justify-content:space-between;padding:8px;background:white;border:2px solid ${iconColor};border-radius:6px;margin-bottom:6px;">
               <div style="display:flex;align-items:center;gap:8px;flex:1;">
@@ -52151,7 +52521,7 @@ function removerCatalogoAnexoIndividual(index) {
                   <div style="font-size:10px;color:#6b7280;">${tamanhoMB} MB</div>
                 </div>
               </div>
-              <button 
+              <button
                 type="button"
                 onclick="removerCatalogoAnexoIndividual(${idx})"
                 style="background:#ef4444;color:white;border:none;padding:4px 8px;border-radius:4px;cursor:pointer;font-size:11px;">
@@ -52160,16 +52530,16 @@ function removerCatalogoAnexoIndividual(index) {
             </div>
           `;
         }).join('');
-        
+
         preview.innerHTML = listaHTML + `
-          <button 
+          <button
             type="button"
             onclick="removerCatalogoAnexo()"
             style="width:100%;padding:8px;background:#ef4444;color:white;border:none;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600;margin-top:4px;">
             <i class="fa-solid fa-trash"></i> Remover Todos
           </button>
         `;
-        
+
         label.textContent = `${window.catalogoAnexosAcumulados.length} arquivo(s) selecionado(s)`;
       }
     }
@@ -52183,9 +52553,9 @@ function inicializarValidacaoCatalogoCheckboxes() {
   const checkboxRequisicaoDireta = document.getElementById('catalogoRequisicaoDiretaGlobal');
   const checkboxNaoIncluirQuantidade = document.getElementById('catalogoNaoIncluirQuantidade');
   const labelNaoIncluirQuantidade = document.getElementById('labelNaoIncluirQuantidade');
-  
+
   if (!checkboxRequisicaoDireta || !checkboxNaoIncluirQuantidade) return;
-  
+
   // Event listener para Requisição Direta
   checkboxRequisicaoDireta.addEventListener('change', function() {
     if (this.checked) {
@@ -52205,7 +52575,7 @@ function inicializarValidacaoCatalogoCheckboxes() {
       console.log('[Catálogo] Requisição Direta desativada - Não incluir quantidade habilitada');
     }
   });
-  
+
   // Inicializa estado inicial baseado em Requisição Direta
   if (checkboxRequisicaoDireta.checked) {
     checkboxNaoIncluirQuantidade.disabled = true;
@@ -52226,7 +52596,7 @@ function renderizarCatalogoOmie(produtos, options = {}) {
 
   const lista = document.getElementById(containerId);
   if (!lista) return;
-  
+
   // Atualiza contador de produtos exibidos (apenas no modal)
   if (atualizarContador) {
     const contadorProdutos = document.getElementById('catalogoTotalProdutos');
@@ -52234,20 +52604,20 @@ function renderizarCatalogoOmie(produtos, options = {}) {
       contadorProdutos.textContent = produtos.length;
     }
   }
-  
+
   if (produtos.length === 0) {
     if (!append) {
       lista.innerHTML = '<div style="text-align:center;padding:40px;color:#9ca3af;grid-column:1/-1;">Nenhum produto encontrado</div>';
     }
     return;
   }
-  
+
   const html = produtos.map(produto => {
     // Valida se a URL da imagem é válida
-    const temImagem = produto.url_imagem && 
-                      produto.url_imagem.trim() && 
+    const temImagem = produto.url_imagem &&
+                      produto.url_imagem.trim() &&
                       (produto.url_imagem.startsWith('http://') || produto.url_imagem.startsWith('https://'));
-    
+
     // Verifica se URL está expirada (parâmetro Expires)
     let urlExpirada = false;
     if (temImagem && produto.url_imagem.includes('Expires=')) {
@@ -52258,13 +52628,13 @@ function renderizarCatalogoOmie(produtos, options = {}) {
         urlExpirada = expiresTimestamp < agora;
       }
     }
-    
+
     // Prepara string para onclick ANTES de stringify
     const infoProdutoTexto = `${produto.codigo} - ${produto.descricao || ''}`;
-    
-    const imgHtml = temImagem && !urlExpirada ? 
-      `<img 
-        src="${produto.url_imagem}" 
+
+    const imgHtml = temImagem && !urlExpirada ?
+      `<img
+        src="${produto.url_imagem}"
         alt="${escapeHtml(produto.descricao)}"
         style="max-width:100%;max-height:100%;object-fit:contain;cursor:zoom-in;transition:transform 0.2s;"
         onclick='ampliarImagemProduto(${JSON.stringify(produto.url_imagem || '')}, ${JSON.stringify(infoProdutoTexto)}, ${JSON.stringify(produto.codigo || '')});event.stopPropagation();'
@@ -52275,13 +52645,13 @@ function renderizarCatalogoOmie(produtos, options = {}) {
       <div style="display:none;width:100%;height:100%;align-items:center;justify-content:center;color:#9ca3af;">
         <i class="fa-solid fa-image" style="font-size:48px;"></i>
       </div>` :
-      urlExpirada ? 
-      `<div 
-        id="img-expirada-${produto.codigo_produto}" 
+      urlExpirada ?
+      `<div
+        id="img-expirada-${produto.codigo_produto}"
         data-codigo-produto="${produto.codigo_produto}"
         data-codigo="${escapeHtml(produto.codigo)}"
         data-descricao="${escapeHtml(produto.descricao)}"
-        style="display:flex;width:100%;height:100%;align-items:center;justify-content:center;color:#f59e0b;flex-direction:column;gap:8px;" 
+        style="display:flex;width:100%;height:100%;align-items:center;justify-content:center;color:#f59e0b;flex-direction:column;gap:8px;"
         title="Atualizando imagem...">
         <i class="fa-solid fa-rotate fa-spin" style="font-size:32px;"></i>
         <span style="font-size:10px;text-align:center;">Atualizando...</span>
@@ -52289,7 +52659,7 @@ function renderizarCatalogoOmie(produtos, options = {}) {
       `<div style="display:flex;width:100%;height:100%;align-items:center;justify-content:center;color:#9ca3af;">
         <i class="fa-solid fa-image" style="font-size:48px;"></i>
       </div>`;
-    
+
     return `
       <div class="produto-catalogo-card" data-product-code="${escapeHtml(produto.codigo)}" style="
         background:white;
@@ -52300,10 +52670,10 @@ function renderizarCatalogoOmie(produtos, options = {}) {
         cursor:default;
         display:flex;
         flex-direction:column;
-      " 
+      "
       onmouseover="this.style.boxShadow='0 4px 12px rgba(0,0,0,0.1)';this.style.transform='translateY(-2px)'"
       onmouseout="this.style.boxShadow='none';this.style.transform='translateY(0)'">
-        
+
         <!-- Imagem -->
         <div style="
           width:100%;
@@ -52319,7 +52689,7 @@ function renderizarCatalogoOmie(produtos, options = {}) {
         ">
           ${imgHtml}
         </div>
-        
+
         <!-- Informações -->
         <div style="padding:10px;flex:1;display:flex;flex-direction:column;">
           <div style="font-size:12px;font-weight:700;color:#1f2937;margin-bottom:3px;">
@@ -52329,16 +52699,16 @@ function renderizarCatalogoOmie(produtos, options = {}) {
             ${escapeHtml(produto.descricao)}
           </div>
           <div id="estoque-card-${escapeHtml(produto.codigo)}" data-codigo="${escapeHtml(produto.codigo)}" style="margin-bottom:6px;min-height:14px;"></div>
-          
+
           <!-- Badges: Família e Estoque -->
           <div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:8px;">
             <span id="min-badge-${escapeHtml(produto.codigo)}" data-codigo="${escapeHtml(produto.codigo)}"></span>
             <span id="compra-badge-${escapeHtml(produto.codigo)}" data-codigo="${escapeHtml(produto.codigo)}"></span>
           </div>
-          
+
           <!-- Botão Ações -->
           <div style="margin-top:auto;display:flex;gap:6px;align-items:stretch;">
-            <button 
+            <button
               onclick="event.stopPropagation();abrirModalAcoesProduto('${produto.codigo}', '${produto.codigo_produto}', '${escapeHtml(produto.descricao.replace(/'/g, "\\'"))}', '${escapeHtml((produto.unidade || 'UN').replace(/'/g, "\\'"))}')"
               title="Ações do produto"
               style="
@@ -52374,7 +52744,7 @@ function renderizarCatalogoOmie(produtos, options = {}) {
 
   // A busca recria os cards; restaura os dados já carregados sem aguardar nova rede.
   aplicarCacheEstoqueCards();
-  
+
   // Atualiza automaticamente todas as imagens expiradas em lote
   setTimeout(() => atualizarImagensExpiradasEmLote(), 100);
 
@@ -52815,6 +53185,11 @@ window.renderizarCatalogoOmie = renderizarCatalogoOmie;
             <span style="width:42px;height:42px;border-radius:12px;background:#4f46e5;color:#fff;display:inline-flex;align-items:center;justify-content:center;font-size:18px;"><i class="fa-solid fa-arrows-rotate"></i></span>
             <span style="font-size:14px;font-weight:700;line-height:1.2;">Movimentação</span>
             <span style="font-size:11px;color:#4338ca;line-height:1.35;">Entradas, saídas, transferências e ajustes</span>
+          </button>
+          <button id="modalAcoesBtnExpedicao" type="button" style="background:linear-gradient(135deg,#ecfeff,#cffafe);color:#155e75;border:1px solid #67e8f9;padding:14px 12px;border-radius:12px;cursor:pointer;display:flex;flex-direction:column;align-items:flex-start;gap:8px;text-align:left;">
+            <span style="width:42px;height:42px;border-radius:12px;background:#0891b2;color:#fff;display:inline-flex;align-items:center;justify-content:center;font-size:18px;"><i class="fa-solid fa-truck-ramp-box"></i></span>
+            <span style="font-size:14px;font-weight:700;line-height:1.2;">Expedição</span>
+            <span style="font-size:11px;color:#0e7490;line-height:1.35;">Transferir de Estoque Máquinas para Expedição</span>
           </button>
           <button id="modalAcoesBtnInformacoes" type="button" style="background:#f8fafc;color:#334155;border:1px solid #cbd5e1;padding:14px 12px;border-radius:12px;cursor:pointer;display:flex;flex-direction:column;align-items:flex-start;gap:8px;text-align:left;">
             <span style="width:42px;height:42px;border-radius:12px;background:#475569;color:#fff;display:inline-flex;align-items:center;justify-content:center;font-size:18px;"><i class="fa-solid fa-circle-info"></i></span>
@@ -53615,6 +53990,11 @@ window.renderizarCatalogoOmie = renderizarCatalogoOmie;
     fechar();
     abrirModalMovimentacao(codigo, descricao, codigo_produto);
   });
+  document.getElementById('modalAcoesBtnExpedicao').addEventListener('click', () => {
+    const {codigo, descricao, codigo_produto} = _ctx;
+    fechar();
+    abrirModalMovimentacao(codigo, descricao, codigo_produto, { fluxo: 'expedicao' });
+  });
   document.getElementById('modalAcoesBtnCarrinho').addEventListener('click', () => abrirQuantidade('carrinho'));
 
   window.abrirModalAcoesProduto = function(codigo, codigoProduto, descricao, unidade) {
@@ -53635,58 +54015,58 @@ window.renderizarCatalogoOmie = renderizarCatalogoOmie;
 async function atualizarImagensExpiradasEmLote() {
   // Busca todos os containers de imagens expiradas
   const containersExpirados = document.querySelectorAll('[id^="img-expirada-"]');
-  
+
   if (containersExpirados.length === 0) {
     console.log('[Catálogo] Nenhuma imagem expirada encontrada');
     return;
   }
-  
+
   console.log(`[Catálogo] Iniciando atualização de ${containersExpirados.length} imagens expiradas em lotes...`);
-  
+
   // Converte para array com dados necessários
   const imagensParaAtualizar = Array.from(containersExpirados).map(container => ({
     codigoProduto: container.dataset.codigoProduto,
     codigo: container.dataset.codigo,
     descricao: container.dataset.descricao
   }));
-  
+
   // Configuração de processamento em lotes
   const TAMANHO_LOTE = 10; // Processa 10 imagens por vez
   const DELAY_ENTRE_LOTES = 500; // 500ms entre cada lote
-  
+
   let totalSucesso = 0;
   let totalFalhas = 0;
-  
+
   // Processa em lotes
   for (let i = 0; i < imagensParaAtualizar.length; i += TAMANHO_LOTE) {
     const lote = imagensParaAtualizar.slice(i, i + TAMANHO_LOTE);
     const numeroLote = Math.floor(i / TAMANHO_LOTE) + 1;
     const totalLotes = Math.ceil(imagensParaAtualizar.length / TAMANHO_LOTE);
-    
+
     console.log(`[Catálogo] Processando lote ${numeroLote}/${totalLotes} (${lote.length} imagens)...`);
-    
+
     // Processa o lote atual em paralelo
-    const promessasLote = lote.map(img => 
+    const promessasLote = lote.map(img =>
       atualizarImagemExpirada(img.codigoProduto, img.codigo, img.descricao)
     );
-    
+
     const resultadosLote = await Promise.allSettled(promessasLote);
-    
+
     // Contabiliza resultados do lote
     const sucessoLote = resultadosLote.filter(r => r.status === 'fulfilled').length;
     const falhasLote = resultadosLote.filter(r => r.status === 'rejected').length;
-    
+
     totalSucesso += sucessoLote;
     totalFalhas += falhasLote;
-    
+
     console.log(`[Catálogo] Lote ${numeroLote}/${totalLotes}: ${sucessoLote} sucesso, ${falhasLote} falhas`);
-    
+
     // Aguarda antes do próximo lote (exceto no último)
     if (i + TAMANHO_LOTE < imagensParaAtualizar.length) {
       await new Promise(resolve => setTimeout(resolve, DELAY_ENTRE_LOTES));
     }
   }
-  
+
   console.log(`[Catálogo] Atualização concluída: ${totalSucesso} sucesso, ${totalFalhas} falhas de ${imagensParaAtualizar.length} total`);
 }
 
@@ -53694,10 +54074,10 @@ async function atualizarImagensExpiradasEmLote() {
 async function atualizarImagemExpirada(codigoProduto, codigo, descricao) {
   const container = document.getElementById(`img-expirada-${codigoProduto}`);
   if (!container) return;
-  
+
   try {
     const resp = await fetch(`/api/compras/imagem-fresca/${codigoProduto}`);
-    
+
     if (!resp.ok) {
       // Se erro 500, não joga exceção - apenas registra
       if (resp.status === 500) {
@@ -53710,15 +54090,15 @@ async function atualizarImagemExpirada(codigoProduto, codigo, descricao) {
       }
       throw new Error(`HTTP ${resp.status}`);
     }
-    
+
     const data = await resp.json();
-    
+
     if (data.url_imagem) {
       // Substitui o container pela imagem
       const infoTexto = `${codigo} - ${descricao}`;
       container.outerHTML = `
-        <img 
-          src="${data.url_imagem}" 
+        <img
+          src="${data.url_imagem}"
           alt="${escapeHtml(descricao)}"
           style="max-width:100%;max-height:100%;object-fit:contain;cursor:zoom-in;transition:transform 0.2s;"
           onclick='ampliarImagemProduto(${JSON.stringify(data.url_imagem)}, ${JSON.stringify(infoTexto)});event.stopPropagation();'
@@ -53727,7 +54107,7 @@ async function atualizarImagemExpirada(codigoProduto, codigo, descricao) {
           onerror="this.style.display='none'"
         />
       `;
-      
+
       // Atualiza o produto no cache
       const produtoIndex = window.produtosCatalogoOmie?.findIndex(p => p.codigo_produto === codigoProduto);
       if (produtoIndex >= 0 && window.produtosCatalogoOmie) {
@@ -53755,27 +54135,27 @@ async function carregarDepartamentosCatalogo() {
   try {
     const resp = await fetch('/api/compras/departamentos');
     const data = await resp.json();
-    
+
     if (data.ok && data.departamentos) {
       window.catalogoDepartamentos = data.departamentos;
-      
+
       let valorAtual = ''; // Declarar no início da função
-      
+
       // Atualiza o select global de departamento
       const selectGlobal = document.getElementById('catalogoDepartamentoGlobal');
       if (selectGlobal) {
         valorAtual = selectGlobal.value;
         selectGlobal.innerHTML = '<option value="">Selecione...</option>' +
-          data.departamentos.map(d => 
+          data.departamentos.map(d =>
             `<option value="${escapeHtml(d.nome)}">${escapeHtml(d.nome)}</option>`
           ).join('');
         if (valorAtual) selectGlobal.value = valorAtual;
-        
+
         // Adiciona evento para atualizar categorias quando departamento mudar
         selectGlobal.removeEventListener('change', handleCatalogoDepartamentoChange);
         selectGlobal.addEventListener('change', handleCatalogoDepartamentoChange);
       }
-      
+
       // Inicializa o select de categorias vazio
       const selectCategorias = document.getElementById('catalogoCentroCustoGlobal');
       if (selectCategorias && !valorAtual) {
@@ -53823,7 +54203,7 @@ window.categoriasPorDepartamento = {
 async function loadModalComprasCategoriasCompra() {
   const selectCategoria = document.getElementById('modalComprasCategoriaCompra');
   const hiddenCatalogoCategoria = document.getElementById('catalogoCategoriaCompraGlobal');
-  
+
   try {
     const resp = await fetch('/api/compras/categorias', { credentials: 'include' });
     if (!resp.ok) {
@@ -53831,26 +54211,26 @@ async function loadModalComprasCategoriasCompra() {
       console.error('[Categorias Compra] Erro HTTP:', resp.status, errorText);
       throw new Error(`Erro ao buscar categorias: ${resp.status}`);
     }
-    
+
     const data = await resp.json();
-    
+
     if (data.ok && Array.isArray(data.categorias)) {
       // Armazena categorias em variável global para usar no carrinho
       window.categoriasCompra = data.categorias;
-      
+
       // Preenche select do modal de adicionar ao carrinho
       if (selectCategoria) {
         selectCategoria.innerHTML = '<option value="">Selecione a categoria...</option>' +
-          data.categorias.map(cat => 
+          data.categorias.map(cat =>
             `<option value="${cat.codigo}">${window.escapeHtml(cat.descricao)}</option>`
           ).join('');
       }
-      
+
       // Preenche dropdown do catálogo Omie (Categoria da Compra)
       if (hiddenCatalogoCategoria) {
         await carregarCategoriaCompraDropdown();
       }
-      
+
       console.log('[Categorias Compra] Carregadas:', data.categorias.length);
     }
   } catch (err) {
@@ -53868,12 +54248,12 @@ function atualizarCategoriasPorDepartamento(departamento, selectId = 'modalCompr
   const selectCategorias = document.getElementById(selectId);
   if (!selectCategorias) return;
   garantirCategoriasPadraoProducao();
-  
+
   if (!departamento || !window.categoriasPorDepartamento[departamento]) {
     selectCategorias.innerHTML = '<option value="">Selecione departamento</option>';
     return;
   }
-  
+
   const categorias = window.categoriasPorDepartamento[departamento];
   selectCategorias.innerHTML = '<option value="">Selecione a categoria</option>' +
     categorias.map(c => `<option value="${window.escapeHtml(c)}">${window.escapeHtml(c)}</option>`).join('');
@@ -54026,14 +54406,14 @@ async function carregarCategoriaCompraDropdown(options = {}) {
 // Aplica categoria da compra baseada no último pedido do produto
 async function aplicarCategoriaCompraPorProdutoCarrinho(codigoProdutoOmie, itemIdx) {
   console.log('[DEBUG CATEGORIA] Função chamada com:', { codigoProdutoOmie, itemIdx });
-  
+
   const codigo = String(codigoProdutoOmie || '').trim();
   console.log('[DEBUG CATEGORIA] Código após trim:', codigo);
-  
+
   if (!codigo || !Number.isFinite(itemIdx)) {
-    console.warn('[DEBUG CATEGORIA] Validação falhou:', { 
-      codigo_valido: !!codigo, 
-      idx_valido: Number.isFinite(itemIdx) 
+    console.warn('[DEBUG CATEGORIA] Validação falhou:', {
+      codigo_valido: !!codigo,
+      idx_valido: Number.isFinite(itemIdx)
     });
     return null;
   }
@@ -54050,11 +54430,11 @@ async function aplicarCategoriaCompraPorProdutoCarrinho(codigoProdutoOmie, itemI
     console.log('[DEBUG CATEGORIA] Fazendo fetch para:', url);
 
     const resp = await fetch(url, { credentials: 'include' });
-    console.log('[DEBUG CATEGORIA] Resposta recebida:', { 
-      status: resp.status, 
-      ok: resp.ok 
+    console.log('[DEBUG CATEGORIA] Resposta recebida:', {
+      status: resp.status,
+      ok: resp.ok
     });
-    
+
     if (!resp.ok) {
       console.warn('[DEBUG CATEGORIA] Resposta não OK:', resp.status);
       return null;
@@ -54062,17 +54442,17 @@ async function aplicarCategoriaCompraPorProdutoCarrinho(codigoProdutoOmie, itemI
 
     const data = await resp.json();
     console.log('[DEBUG CATEGORIA] Dados da API:', data);
-    
+
     const categoriaCodigo = String(data?.categoria_codigo || data?.categoria || '').trim();
     const categoriaDescricao = String(data?.categoria_descricao || '').trim();
     const categoriaNome = String(data?.categoria_nome || '').trim();
-    
+
     console.log('[DEBUG CATEGORIA] Categoria extraída:', {
       codigo: categoriaCodigo,
       descricao: categoriaDescricao,
       nome: categoriaNome
     });
-    
+
     if (!categoriaCodigo) {
       console.warn('[DEBUG CATEGORIA] Nenhuma categoria na resposta');
       return null;
@@ -54088,7 +54468,7 @@ async function aplicarCategoriaCompraPorProdutoCarrinho(codigoProdutoOmie, itemI
 
       // Atualiza o item do carrinho
       console.log('[DEBUG CATEGORIA] Atualizando item no índice:', itemIdx);
-      
+
       itemAtual.categoria_compra_codigo = categoriaCodigo;
       itemAtual.categoria_compra = categoriaDescricao;
       itemAtual.categoria_compra_nome = categoriaNome;
@@ -54097,43 +54477,43 @@ async function aplicarCategoriaCompraPorProdutoCarrinho(codigoProdutoOmie, itemI
       console.log('[DEBUG CATEGORIA] Salvando no banco...');
       await atualizarItemCarrinhoNoBanco(itemAtual);
       console.log('[DEBUG CATEGORIA] Salvo no banco!');
-      
+
       // Atualiza a UI
       const btnText = document.getElementById(`carrinhoItemCategoriaCompraBtnText-${itemIdx}`);
       const hiddenInput = document.getElementById(`carrinhoItemCategoriaCompra-${itemIdx}`);
-      
-      console.log('[DEBUG CATEGORIA] Elementos DOM:', { 
-        btnText_existe: !!btnText, 
+
+      console.log('[DEBUG CATEGORIA] Elementos DOM:', {
+        btnText_existe: !!btnText,
         hiddenInput_existe: !!hiddenInput,
         btnText_id: `carrinhoItemCategoriaCompraBtnText-${itemIdx}`,
         hiddenInput_id: `carrinhoItemCategoriaCompra-${itemIdx}`
       });
-      
+
       if (btnText && categoriaNome) {
         console.log('[DEBUG CATEGORIA] Atualizando btnText para:', categoriaNome);
         btnText.textContent = categoriaNome;
         btnText.style.color = 'var(--active-color)';
       }
-      
+
       if (hiddenInput) {
         console.log('[DEBUG CATEGORIA] Atualizando hiddenInput.value para:', categoriaCodigo);
         hiddenInput.value = categoriaCodigo;
       }
 
-      console.log('[DEBUG CATEGORIA] ✅ Categoria aplicada com sucesso!', { 
+      console.log('[DEBUG CATEGORIA] ✅ Categoria aplicada com sucesso!', {
         codigo: categoriaCodigo,
         descricao: categoriaDescricao,
         nome: categoriaNome,
-        item_idx: itemIdx 
+        item_idx: itemIdx
       });
-      
-      return { 
-        codigo: categoriaCodigo, 
+
+      return {
+        codigo: categoriaCodigo,
         descricao: categoriaDescricao,
         nome: categoriaNome
       };
     }
-    
+
     return null;
   } catch (err) {
     console.warn('[CARRINHO] Falha ao aplicar categoria por produto:', err);
@@ -54162,7 +54542,7 @@ document.getElementById('catalogoCategoriaCompraBtn')?.addEventListener('click',
 function togglePrazoCatalogo(codigo) {
   const container = document.getElementById(`catalogo-prazo-container-${codigo}`);
   const btn = document.getElementById(`catalogo-btn-prazo-${codigo}`);
-  
+
   if (container && btn) {
     if (container.style.display === 'none') {
       // Ativa prazo
@@ -54192,19 +54572,19 @@ function filtrarCatalogoOmie() {
   const busca = document.getElementById('catalogoBuscaProduto')?.value.toLowerCase() || '';
   const familia = document.getElementById('catalogoFamilia')?.value || '';
   const abaixoMinimo = document.getElementById('catalogoAbaixoMinimo')?.checked || false;
-  
+
   const produtosFiltrados = window.produtosCatalogoOmie.filter(p => {
-    const matchBusca = !busca || 
-      p.codigo.toLowerCase().includes(busca) || 
+    const matchBusca = !busca ||
+      p.codigo.toLowerCase().includes(busca) ||
       p.descricao.toLowerCase().includes(busca);
-    
+
     const matchFamilia = !familia || p.descricao_familia === familia;
-    
+
     const matchEstoque = !abaixoMinimo || p.abaixo_minimo === true;
-    
+
     return matchBusca && matchFamilia && matchEstoque;
   });
-  
+
   renderizarCatalogoOmie(produtosFiltrados);
 }
 
@@ -54213,11 +54593,11 @@ function limparFiltrosCatalogo() {
   const inputBusca = document.getElementById('catalogoBuscaProduto');
   const selectFamilia = document.getElementById('catalogoFamilia');
   const checkboxAbaixoMin = document.getElementById('catalogoAbaixoMinimo');
-  
+
   if (inputBusca) inputBusca.value = '';
   if (selectFamilia) selectFamilia.value = '';
   if (checkboxAbaixoMin) checkboxAbaixoMin.checked = false;
-  
+
   renderizarCatalogoOmie(window.produtosCatalogoOmie);
 }
 
@@ -54232,20 +54612,20 @@ async function selecionarProdutoCatalogo(codigo, descricao, event = null) {
   const textareaObservacaoGlobal = document.getElementById('catalogoObservacaoGlobal');
   const checkboxRequisicaoDiretaGlobal = document.getElementById('catalogoRequisicaoDiretaGlobal');
   const checkboxNaoIncluirQuantidade = document.getElementById('catalogoNaoIncluirQuantidade');
-  
+
   // Novos campos: Possui cadastro na Omie
   const selectPossuiCadastro = document.getElementById('catalogoPossuiCadastroOmie');
   const possuiCadastroOmie = selectPossuiCadastro ? selectPossuiCadastro.value === 'sim' : true;
-  
+
   const departamento = selectDeptGlobal ? selectDeptGlobal.value.trim() : '';
   const centroCusto = selectCCGlobal ? selectCCGlobal.value.trim() : '';
   const retornoCotacoes = selectRetornoGlobal ? selectRetornoGlobal.value : 'nao';
-  const retornoCotacoesTexto = (selectRetornoGlobal && selectRetornoGlobal.selectedOptions && selectRetornoGlobal.selectedOptions[0]) 
-    ? (selectRetornoGlobal.selectedOptions[0].text || '') 
+  const retornoCotacoesTexto = (selectRetornoGlobal && selectRetornoGlobal.selectedOptions && selectRetornoGlobal.selectedOptions[0])
+    ? (selectRetornoGlobal.selectedOptions[0].text || '')
     : '';
   let categoriaCompra = selectCategoriaGlobal ? selectCategoriaGlobal.value.trim() : '';
-  let categoriaCompraTexto = (selectCategoriaGlobal && selectCategoriaGlobal.selectedOptions && selectCategoriaGlobal.selectedOptions[0]) 
-    ? (selectCategoriaGlobal.selectedOptions[0].text || '') 
+  let categoriaCompraTexto = (selectCategoriaGlobal && selectCategoriaGlobal.selectedOptions && selectCategoriaGlobal.selectedOptions[0])
+    ? (selectCategoriaGlobal.selectedOptions[0].text || '')
     : (selectCategoriaGlobal?.getAttribute('data-label') || '');
   const grupoPedidoValor = selectNPGlobal ? selectNPGlobal.value : 'unica';
   const grupoRequisicaoSelecionado = (!grupoPedidoValor || grupoPedidoValor === 'unica')
@@ -54254,7 +54634,7 @@ async function selecionarProdutoCatalogo(codigo, descricao, event = null) {
   const objetivoCompraGlobal = textareaObservacaoGlobal ? textareaObservacaoGlobal.value.trim() : '';
   const requisicaoDiretaGlobal = checkboxRequisicaoDiretaGlobal ? checkboxRequisicaoDiretaGlobal.checked : false;
   const naoIncluirQuantidade = checkboxNaoIncluirQuantidade ? checkboxNaoIncluirQuantidade.checked : false;
-  
+
   // Aplica categoria padrão se não selecionada (campo removido)
   const categoriaPadraoCodigo = '2.14.94';
   if (!categoriaCompra) {
@@ -54280,21 +54660,21 @@ async function selecionarProdutoCatalogo(codigo, descricao, event = null) {
     categoriaCompra = categoriaOperacionalOmie.codigo;
     categoriaCompraTexto = categoriaOperacionalOmie.nome;
   }
-  
+
   console.log('[Catálogo] Categoria selecionada - Código:', categoriaCompra, 'Descrição:', categoriaCompraTexto);
   console.log('[Catálogo] Possui cadastro na Omie:', possuiCadastroOmie);
-  
+
   // Processa anexos do array acumulado (para itens com ou sem cadastro na Omie)
   let anexoData = null;
   console.log('[Catálogo] window.catalogoAnexosAcumulados:', window.catalogoAnexosAcumulados);
   if (window.catalogoAnexosAcumulados && window.catalogoAnexosAcumulados.length > 0) {
     const anexosArray = [];
-    
+
     try {
       // Processa cada arquivo do array acumulado
       for (let i = 0; i < window.catalogoAnexosAcumulados.length; i++) {
         const file = window.catalogoAnexosAcumulados[i];
-        
+
         // Converte arquivo para base64
         const base64 = await new Promise((resolve, reject) => {
           const reader = new FileReader();
@@ -54302,7 +54682,7 @@ async function selecionarProdutoCatalogo(codigo, descricao, event = null) {
           reader.onerror = reject;
           reader.readAsDataURL(file);
         });
-        
+
         anexosArray.push({
           nome: file.name,
           tipo: file.type,
@@ -54310,10 +54690,10 @@ async function selecionarProdutoCatalogo(codigo, descricao, event = null) {
           base64: base64
         });
       }
-      
+
       anexoData = anexosArray;
       console.log(`[Catálogo] ${anexosArray.length} anexo(s) capturado(s):`, anexosArray.map(a => a.nome));
-      
+
     } catch (err) {
       console.error('[Catálogo] Erro ao processar anexos:', err);
       alert('Erro ao processar os arquivos anexados. Tente novamente.');
@@ -54327,35 +54707,35 @@ async function selecionarProdutoCatalogo(codigo, descricao, event = null) {
   let descricaoNaoCadastrado = '';
   let etapasPedido = '';
   let observacaoRecebimento = '';
-  
+
   if (!possuiCadastroOmie) {
     const inputDescricao = document.getElementById('catalogoDescricaoNaoCadastrado');
     const selectEtapas = document.getElementById('catalogoEtapasPedido');
     const textareaObs = document.getElementById('catalogoObservacaoRecebimento');
-    
+
     descricaoNaoCadastrado = inputDescricao ? inputDescricao.value.trim() : '';
     etapasPedido = selectEtapas ? selectEtapas.value : '';
     observacaoRecebimento = textareaObs ? textareaObs.value.trim() : '';
-    
+
     // Validações para produtos não cadastrados
     if (!descricaoNaoCadastrado) {
       alert('Para produtos não cadastrados na Omie, informe a descrição!');
       inputDescricao?.focus();
       return;
     }
-    
+
     // Sobrescreve descrição com os valores informados
     // O código já vem como parâmetro (gerado como CODPROV via API ou TEMP como fallback)
     descricao = descricaoNaoCadastrado;
   }
-  
+
   // Captura dados específicos do produto
   const inputQtd = document.getElementById(`catalogo-qtd-${codigo}`);
-  
+
   // Comentário: para produto não cadastrado, quantidade sempre será 1 (a quantidade real vem no formato palavra-quantidade nas keywords)
   let quantidade = !possuiCadastroOmie ? 1 : (inputQtd ? parseInt(inputQtd.value) || 1 : 1);
   const prazo = '';
-  
+
   // Validações
   if (naoIncluirQuantidade) {
     quantidade = '';
@@ -54365,13 +54745,13 @@ async function selecionarProdutoCatalogo(codigo, descricao, event = null) {
       return;
     }
   }
-  
+
   // Busca o produto completo no catálogo para pegar a família e o codigo_produto
   const produtoCatalogo = (window.produtosCatalogoOmie || []).find(p => p.codigo === codigo);
   const familiaDescricao = produtoCatalogo ? produtoCatalogo.descricao_familia : null;
   const codigoOmie = produtoCatalogo ? produtoCatalogo.codigo_produto : null;
   const urlImagem = produtoCatalogo ? produtoCatalogo.url_imagem : null;
-  
+
   // Se o item já existe no carrinho com as mesmas configurações, soma a quantidade
   const retornoCotacaoFinal = retornoCotacoesTexto || (retornoCotacoes === 'sim' ? 'Sim' : 'Não');
   const solicitanteCatalogo = (document.getElementById('userNameDisplay')?.textContent || '').trim()
@@ -54439,24 +54819,24 @@ async function selecionarProdutoCatalogo(codigo, descricao, event = null) {
     }
     window.carrinhoCompras.push(novoItemCarrinho);
   }
-  
+
   // Renderiza carrinho atualizado
   renderCarrinhoCompras();
   renderModalCarrinhoCompras(); // Atualiza também o modal se estiver aberto
-  
+
   // Atualiza contador no modal do catálogo
   atualizarContadorCatalogo();
-  
+
   // Atualiza opções do grupo de pedido para refletir novo item adicionado
   await carregarGruposRequisicaoDisponiveis();
   atualizarOpcoesNP();
-  
+
   // Limpa anexos acumulados se houver anexos
   if (anexoData) {
     removerCatalogoAnexo();
     console.log('[Catálogo] Anexos limpos após adicionar produto ao carrinho');
   }
-  
+
   // Feedback visual: mostra checkmark por 3 segundos
   const btn = event?.target?.closest('button');
   if (btn) {
@@ -54470,10 +54850,10 @@ async function selecionarProdutoCatalogo(codigo, descricao, event = null) {
       btn.style.background = originalBackground || 'linear-gradient(135deg,#10b981 0%,#059669 100%)';
     }, 3000);
   }
-  
+
   // Reseta campos do card
   if (inputQtd) inputQtd.value = naoIncluirQuantidade ? '' : 1;
-  
+
   // NÃO fecha o catálogo para permitir adicionar mais produtos
   // fecharModalCatalogoOmie();
 }
@@ -54484,7 +54864,7 @@ function atualizarContadorCatalogo() {
   if (contador) {
     const total = (window.carrinhoCompras || []).length;
     contador.textContent = total;
-    
+
     // Adiciona animação de pulso
     const container = document.getElementById('catalogoContadorCarrinho');
     if (container && total > 0) {
@@ -54499,26 +54879,26 @@ function atualizarContadorCatalogo() {
 // Função para fazer upload de anexo para Supabase
 async function uploadCatalogoAnexo(file, codigoTemp) {
   if (!file) return null;
-  
+
   try {
     const formData = new FormData();
     const timestamp = Date.now();
     const fileName = `compras_sem_cadastro/${codigoTemp}/${timestamp}_${file.name}`;
-    
+
     formData.append('file', file);
     formData.append('path', fileName);
-    
+
     const response = await fetch('/api/upload/supabase', {
       method: 'POST',
       credentials: 'include',
       body: formData
     });
-    
+
     if (!response.ok) {
       const errData = await response.json().catch(() => ({}));
       throw new Error(errData.error || `Erro HTTP ${response.status}`);
     }
-    
+
     const data = await response.json();
     return data.url || data.path;
   } catch (err) {
@@ -54530,7 +54910,7 @@ async function uploadCatalogoAnexo(file, codigoTemp) {
 // Função para adicionar produto não cadastrado ao carrinho
 async function adicionarProdutoNaoCadastradoAoCarrinho(event) {
   console.log('[Catálogo] adicionarProdutoNaoCadastradoAoCarrinho() CHAMADA');
-  
+
   // Valida campos obrigatórios
   const inputDescricao = document.getElementById('catalogoDescricaoNaoCadastrado');
   const hiddenKeywords = document.getElementById('catalogoDescricaoKeywords');
@@ -54538,7 +54918,7 @@ async function adicionarProdutoNaoCadastradoAoCarrinho(event) {
   const selectCCGlobal = document.getElementById('catalogoCentroCustoGlobal');
   const selectCategoriaGlobal = document.getElementById('catalogoCategoriaCompraGlobal');
   const selectEtapas = document.getElementById('catalogoEtapasPedido');
-  
+
   // Lê itens direto do DOM (descrição + quantidade separados)
   const itensSemCadastro = obterItensSemCadastroDoDom();
   const descricao = itensSemCadastro.map(it => it.descricao).join(';');
@@ -54548,7 +54928,7 @@ async function adicionarProdutoNaoCadastradoAoCarrinho(event) {
   const etapas = selectEtapas ? selectEtapas.value : '';
 
   const quantidade = itensSemCadastro[0]?.quantidade || 1;
-  
+
   // Aplica categoria padrão se não selecionada (campo removido)
   const categoriaPadraoCodigo = '2.14.94';
   if (!categoriaCompra) {
@@ -54568,14 +54948,14 @@ async function adicionarProdutoNaoCadastradoAoCarrinho(event) {
   if (categoriaOperacionalOmie) {
     categoriaCompra = categoriaOperacionalOmie.codigo;
   }
-  
+
   console.log('[Catálogo] Descrição (keywords):', descricao);
   console.log('[Catálogo] Itens (keywords):', itensSemCadastro);
   console.log('[Catálogo] Departamento:', departamento);
   console.log('[Catálogo] Categoria:', centroCusto);
   console.log('[Catálogo] Categoria Compra:', categoriaCompra);
   console.log('[Catálogo] Etapas:', etapas);
-  
+
   // Validações
   if (!descricao) {
     alert('Adicione pelo menos uma palavra-chave! Digite e pressione Enter.');
@@ -54594,19 +54974,19 @@ async function adicionarProdutoNaoCadastradoAoCarrinho(event) {
     alert(`Quantidade inválida para o item "${itemInvalido.descricao}".`);
     return;
   }
-  
+
   if (!departamento) {
     alert('Selecione o departamento!');
     selectDeptGlobal?.focus();
     return;
   }
-  
+
   if (!centroCusto) {
     alert('Selecione a categoria!');
     selectCCGlobal?.focus();
     return;
   }
-  
+
   // Feedback visual no botão durante processamento
   const btn = event?.target?.closest('button');
   if (btn) {
@@ -54615,16 +54995,16 @@ async function adicionarProdutoNaoCadastradoAoCarrinho(event) {
     btn.disabled = true;
     btn.style.opacity = '0.7';
   }
-  
+
   try {
     const codigoLoteUpload = `LOTE-${Date.now()}`;
-    
+
     // Prepara dados para envio
     const selectRetornoGlobal = document.getElementById('catalogoRetornoCotacoesGlobal');
     const selectRespInspecao = document.getElementById('catalogoRespInspecaoRecebimento');
     const textareaObsRecebimento = document.getElementById('catalogoObservacaoRecebimento');
     const textareaObjetivo = document.getElementById('catalogoObservacaoGlobal');
-    
+
     const retornoCotacao = selectRetornoGlobal ? selectRetornoGlobal.value : null;
     const respInspecao = selectRespInspecao ? selectRespInspecao.value.trim() : '';
     const observacaoRecebimento = textareaObsRecebimento ? textareaObsRecebimento.value.trim() : '';
@@ -54687,7 +55067,7 @@ async function adicionarProdutoNaoCadastradoAoCarrinho(event) {
 
       valorGastoRegistroRapido = Number(valorNumero.toFixed(2));
     }
-    
+
     // Processa anexos - UPLOAD via Supabase
     let anexosUrls = [];
     if (window.catalogoAnexosAcumulados && window.catalogoAnexosAcumulados.length > 0) {
@@ -54705,7 +55085,7 @@ async function adicionarProdutoNaoCadastradoAoCarrinho(event) {
         }
       }
     }
-    
+
     const linksCatalogo = Array.isArray(window.catalogoLinksAcumulados)
       ? window.catalogoLinksAcumulados.filter(l => l && String(l).trim().length > 0)
       : [];
@@ -54728,9 +55108,9 @@ async function adicionarProdutoNaoCadastradoAoCarrinho(event) {
       anexos: anexosUrls,
       link: linksCatalogo
     };
-    
+
     console.log('[Catálogo] Enviando para /api/compras/sem-cadastro:', payload);
-    
+
     // Envia para a nova API de produtos sem cadastro
     const response = await fetch('/api/compras/sem-cadastro', {
       method: 'POST',
@@ -54738,13 +55118,13 @@ async function adicionarProdutoNaoCadastradoAoCarrinho(event) {
       credentials: 'include',
       body: JSON.stringify(payload)
     });
-    
+
     const result = await response.json();
-    
+
     if (!response.ok || !result.ok) {
       throw new Error(result.error || `Erro ao salvar (${response.status})`);
     }
-    
+
     console.log('[Catálogo] Itens sem cadastro salvos com sucesso! IDs:', result.ids || [result.id]);
     const totalItensCriados = Array.isArray(result.ids) ? result.ids.length : itensSemCadastro.length;
     const numeroPedidoOmie = String(result?.numero_pedido || '').trim();
@@ -54752,27 +55132,27 @@ async function adicionarProdutoNaoCadastradoAoCarrinho(event) {
       ? `Registro realizado com sucesso. Informe o cNumero "${numeroPedidoOmie}" na NFe e encaminhe ao setor de Compras para identificação e vínculo do pedido.`
       : `Registro realizado com sucesso.`;
     alert(mensagemSucesso);
-    
+
     // Feedback visual de sucesso
     if (btn) {
       btn.innerHTML = '<i class="fa-solid fa-check"></i> Adicionado!';
       btn.style.background = 'linear-gradient(135deg,#059669 0%,#047857 100%)';
       btn.style.opacity = '1';
-      
+
       setTimeout(() => {
         btn.innerHTML = '<i class="fa-solid fa-cart-plus" style="font-size:18px;"></i><span>Realizar solicitação de compra</span>';
         btn.style.background = 'linear-gradient(135deg,#10b981 0%,#059669 100%)';
         btn.disabled = false;
       }, 1000);
     }
-    
+
     // Limpa os campos após adicionar
     limparDescricaoKeywords();
     const objetivoGlobal = document.getElementById('catalogoObservacaoGlobal');
     const obsRecebimentoInput = document.getElementById('catalogoObservacaoRecebimento');
     if (objetivoGlobal) objetivoGlobal.value = '';
     if (obsRecebimentoInput) obsRecebimentoInput.value = '';
-    
+
     // Limpa anexos acumulados
     window.catalogoAnexosAcumulados = [];
     const preview = document.getElementById('catalogoAnexoPreview');
@@ -54787,16 +55167,16 @@ async function adicionarProdutoNaoCadastradoAoCarrinho(event) {
     if (linkPreview) linkPreview.innerHTML = '';
     const linkInput = document.getElementById('catalogoLinkInput');
     if (linkInput) linkInput.value = '';
-    
+
     // Foca no campo de descrição para próxima entrada
     setTimeout(() => {
       inputDescricao?.focus();
     }, 100);
-    
+
   } catch (err) {
     console.error('[Catálogo] Erro ao adicionar produto não cadastrado:', err);
     alert('Erro ao adicionar produto ao carrinho. Tente novamente.');
-    
+
     // Restaura botão em caso de erro
     if (btn) {
       btn.innerHTML = '<i class="fa-solid fa-cart-plus" style="font-size:18px;"></i><span>Realizar solicitação de compra</span>';
@@ -54882,7 +55262,7 @@ function ampliarImagemProduto(urlImagem, infoProduto, codigoProduto) {
     console.warn('[Catálogo] Imagem indisponível para ampliar:', infoProduto || 'sem info');
     return;
   }
-  
+
   img.src = urlImagem;
 
   // Resolve código do produto: usa o argumento ou tenta extrair do "CODIGO - DESCRIÇÃO"
@@ -54903,7 +55283,7 @@ function ampliarImagemProduto(urlImagem, infoProduto, codigoProduto) {
   }
 
   modal.style.display = 'flex';
-  
+
   // Fechar com ESC
   const handleEsc = (e) => {
     if (e.key === 'Escape') {
@@ -55122,7 +55502,7 @@ async function abrirModalEditarProdutoLegacy(codigoProduto) {
   try {
     // Fecha o modal do catálogo
     fecharModalCatalogoOmie();
-    
+
     // Navega para a página do produto usando a função global
     if (typeof window.openProdutoPorCodigo === 'function') {
       window.openProdutoPorCodigo(codigoProduto);
@@ -55628,11 +56008,11 @@ async function abrirModalEditarCompra(item) {
     if (btnSalvar) {
       btnSalvar.textContent = 'Atualizar';
       btnSalvar.style.background = '#f59e0b';
-      
+
       // Remove listeners antigos e adiciona novo para edição
       const novoBtnSalvar = btnSalvar.cloneNode(true);
       btnSalvar.parentNode.replaceChild(novoBtnSalvar, btnSalvar);
-      
+
       novoBtnSalvar.addEventListener('click', async (e) => {
         e.preventDefault();
         await salvarEdicaoCompra(item.id);
@@ -55747,7 +56127,7 @@ async function salvarEdicaoCompra(itemId) {
   } catch (err) {
     console.error('[COMPRAS] Erro ao salvar edição:', err);
     alert('Erro ao salvar: ' + err.message);
-    
+
     if (btnSalvar) {
       btnSalvar.disabled = false;
       btnSalvar.innerHTML = '<i class="fa-solid fa-edit"></i> Atualizar';
@@ -55760,36 +56140,36 @@ async function salvarEdicaoCompra(itemId) {
 async function loadComprasCotadas() {
   const tbody = document.getElementById('comprasCotadasTbody');
   if (!tbody) return;
-  
+
   tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:16px;color:var(--inactive-color);">Carregando...</td></tr>';
-  
+
   // Garante que os fornecedores estão carregados antes de renderizar
   if (!window.fornecedoresCache || window.fornecedoresCache.length === 0) {
     await loadFornecedores();
   }
-  
+
   try {
     const resp = await fetch('/api/compras/todas', { credentials: 'include' });
     if (!resp.ok) throw new Error('Não foi possível carregar as solicitações');
     const data = await resp.json();
     const listaCompleta = Array.isArray(data.solicitacoes) ? data.solicitacoes : [];
-    
+
     // Pega usuário logado
     const usuario = window.__sessionUser?.username || document.getElementById('userNameDisplay')?.textContent?.trim() || '';
-    
+
     // Filtra apenas itens com status "cotado" do usuário logado
     const lista = listaCompleta.filter(item => {
       const status = (item.status || '').toLowerCase();
       const solicitante = (item.solicitante || '').toLowerCase();
       return (status === 'cotado') && (solicitante === usuario.toLowerCase());
     });
-    
+
     // Atualiza contador da aba de Cotações
     const contadorCotacoes = document.getElementById('contadorMinhasCotacoes');
     if (contadorCotacoes) {
       contadorCotacoes.textContent = lista.length;
     }
-    
+
     if (!lista.length) {
       tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:16px;color:var(--inactive-color);">Nenhum item cotado.</td></tr>';
       return;
@@ -55856,7 +56236,7 @@ async function loadComprasCotadas() {
       itens.forEach((item) => {
         const previsaoValue = fmtInputDate(item.previsao_chegada);
         const obs = item.observacao ? escapeHtml(item.observacao) : '-';
-        
+
         // Processa anexos existentes
         let anexosExistentesHtml = '';
         try {
@@ -55879,7 +56259,7 @@ async function loadComprasCotadas() {
         } catch (e) {
           console.error('[Anexos] Erro ao processar anexos:', e);
         }
-        
+
         html += `
           <tr class="compras-pedido-item" data-pedido="${expandId}" style="display:none;background:#fefefe;">
             <td></td>
@@ -55899,7 +56279,7 @@ async function loadComprasCotadas() {
                     <div style="font-size:11px;color:#6b7280;text-transform:uppercase;margin-bottom:4px;">Descrição</div>
                     <div style="color:#374151;">${escapeHtml(item.produto_descricao || '-')}</div>
                   </div>
-                  
+
                   <!-- Segunda linha: Quantidade - Observação -->
                   <div>
                     <div style="font-size:11px;color:#6b7280;text-transform:uppercase;margin-bottom:4px;">Quantidade</div>
@@ -55909,7 +56289,7 @@ async function loadComprasCotadas() {
                     <div style="font-size:11px;color:#6b7280;text-transform:uppercase;margin-bottom:4px;">Observação</div>
                     <div style="color:#374151;">${obs}</div>
                   </div>
-                  
+
                   <!-- Terceira linha: Prazo - Previsão - Fornecedor -->
                   <div>
                     <div style="font-size:11px;color:#6b7280;text-transform:uppercase;margin-bottom:4px;">Prazo solicitado</div>
@@ -55923,7 +56303,7 @@ async function loadComprasCotadas() {
                     <div style="font-size:11px;color:#6b7280;text-transform:uppercase;margin-bottom:4px;">Fornecedor</div>
                     <div style="color:#374151;">${escapeHtml(item.fornecedor_nome || '-')}</div>
                   </div>
-                  
+
                   <!-- Quarta linha: Status -->
                   <div style="grid-column:span 3;">
                     <div style="font-size:11px;color:#6b7280;text-transform:uppercase;margin-bottom:4px;">Status</div>
@@ -55933,7 +56313,7 @@ async function loadComprasCotadas() {
                       </span>
                     </div>
                   </div>
-                  
+
                   <!-- Quinta linha: Anexos -->
                   ${anexosExistentesHtml ? `
                     <div style="grid-column:span 3;">
@@ -55943,7 +56323,7 @@ async function loadComprasCotadas() {
                       </div>
                     </div>
                   ` : ''}
-                  
+
                   <!-- Sexta linha: Cotações recebidas -->
                   <div style="grid-column:span 3;margin-top:12px;">
                     <div style="font-size:11px;color:#6b7280;text-transform:uppercase;margin-bottom:8px;display:flex;align-items:center;gap:6px;">
@@ -55969,7 +56349,7 @@ async function loadComprasCotadas() {
 
     // Adiciona event listeners para expandir/colapsar usando função global
     setupComprasExpandListeners();
-    
+
     // Carrega cotações de cada item
     const cotacoesContainers = tbody.querySelectorAll('.compras-cotacoes-list-cotados');
     cotacoesContainers.forEach(container => {
@@ -55987,22 +56367,22 @@ async function loadComprasCotadas() {
 async function loadCotacoesItemCotados(solicitacaoId) {
   const container = document.querySelector(`.compras-cotacoes-list-cotados[data-item-id="${solicitacaoId}"]`);
   if (!container) return;
-  
+
   try {
     const response = await fetch(`/api/compras/cotacoes/${solicitacaoId}`);
     if (!response.ok) throw new Error('Erro ao carregar cotações');
     const cotacoes = await response.json();
-    
+
     if (!Array.isArray(cotacoes)) {
       container.innerHTML = '<div style="color:#9ca3af;font-size:12px;font-style:italic;">Nenhuma cotação encontrada</div>';
       return;
     }
-    
+
     if (cotacoes.length === 0) {
       container.innerHTML = '<div style="color:#9ca3af;font-size:12px;font-style:italic;">Nenhuma cotação adicionada</div>';
       return;
     }
-    
+
     container.innerHTML = cotacoes.map(cotacao => {
       // Parse anexos
       let anexosArray = [];
@@ -56014,11 +56394,11 @@ async function loadCotacoesItemCotados(solicitacaoId) {
           anexosArray = [];
         }
       }
-      
+
       // Define cor e texto baseado no status
       const statusAprovacao = cotacao.status_aprovacao || 'pendente';
       let statusColor, statusBg, statusText;
-      
+
       if (statusAprovacao === 'aprovado') {
         statusColor = '#059669';
         statusBg = '#d1fae5';
@@ -56032,15 +56412,15 @@ async function loadCotacoesItemCotados(solicitacaoId) {
         statusBg = '#f3f4f6';
         statusText = 'Pendente';
       }
-      
+
       return `
         <div class="cotacao-card" data-cotacao-id="${cotacao.id}" data-status="${statusAprovacao}" style="background:#f9fafb;padding:12px;border:2px solid ${statusAprovacao === 'aprovado' ? '#10b981' : statusAprovacao === 'reprovado' ? '#ef4444' : '#e5e7eb'};border-radius:8px;position:relative;">
-          
+
           <!-- Badge de Status -->
           <div style="position:absolute;top:8px;right:8px;background:${statusBg};color:${statusColor};padding:4px 10px;border-radius:12px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;">
             ${statusText}
           </div>
-          
+
           <!-- Grid de informações -->
           <div style="display:grid;grid-template-columns:2fr 1fr auto;gap:12px;align-items:center;margin-bottom:${cotacao.observacao ? '8px' : '0'};padding-right:90px;">
             <!-- Fornecedor -->
@@ -56048,13 +56428,13 @@ async function loadCotacoesItemCotados(solicitacaoId) {
               <div style="font-size:10px;color:#6b7280;text-transform:uppercase;margin-bottom:2px;">Fornecedor</div>
               <div style="font-weight:600;color:#1f2937;font-size:13px;">${escapeHtml(cotacao.fornecedor_nome)}</div>
             </div>
-            
+
             <!-- Valor -->
             <div>
               <div style="font-size:10px;color:#6b7280;text-transform:uppercase;margin-bottom:2px;">Valor</div>
               <div style="font-weight:600;color:#059669;font-size:14px;">R$ ${(parseFloat(cotacao.valor_cotado) || 0).toFixed(2)}</div>
             </div>
-            
+
             <!-- Anexos -->
             <div>
               ${anexosArray.length > 0 ? `
@@ -56069,7 +56449,7 @@ async function loadCotacoesItemCotados(solicitacaoId) {
               ` : '<div style="font-size:11px;color:#9ca3af;font-style:italic;">Sem anexos</div>'}
             </div>
           </div>
-          
+
           <!-- Observação (se existir) -->
           ${cotacao.observacao ? `
             <div style="padding-top:8px;border-top:1px solid #e5e7eb;margin-bottom:10px;">
@@ -56077,11 +56457,11 @@ async function loadCotacoesItemCotados(solicitacaoId) {
               <div style="font-size:12px;color:#374151;line-height:1.4;">${escapeHtml(cotacao.observacao)}</div>
             </div>
           ` : ''}
-          
+
           <!-- Botões de Ação -->
           <div style="display:flex;gap:8px;margin-top:10px;">
-            <button 
-              class="btn-aprovar-cotacao" 
+            <button
+              class="btn-aprovar-cotacao"
               data-cotacao-id="${cotacao.id}"
               style="flex:1;padding:8px 16px;background:${statusAprovacao === 'aprovado' ? '#10b981' : '#fff'};color:${statusAprovacao === 'aprovado' ? '#fff' : '#10b981'};border:2px solid #10b981;border-radius:6px;font-weight:600;font-size:12px;cursor:pointer;transition:all 0.2s;display:flex;align-items:center;justify-content:center;gap:6px;"
               ${statusAprovacao === 'aprovado' ? 'disabled' : ''}
@@ -56089,8 +56469,8 @@ async function loadCotacoesItemCotados(solicitacaoId) {
               <i class="fa-solid fa-check-circle"></i>
               <span>Aprovar</span>
             </button>
-            <button 
-              class="btn-reprovar-cotacao" 
+            <button
+              class="btn-reprovar-cotacao"
               data-cotacao-id="${cotacao.id}"
               style="flex:1;padding:8px 16px;background:${statusAprovacao === 'reprovado' ? '#ef4444' : '#fff'};color:${statusAprovacao === 'reprovado' ? '#fff' : '#ef4444'};border:2px solid #ef4444;border-radius:6px;font-weight:600;font-size:12px;cursor:pointer;transition:all 0.2s;display:flex;align-items:center;justify-content:center;gap:6px;"
               ${statusAprovacao === 'reprovado' ? 'disabled' : ''}
@@ -56102,18 +56482,18 @@ async function loadCotacoesItemCotados(solicitacaoId) {
         </div>
       `;
     }).join('');
-    
+
     // Adiciona event listeners para os botões de aprovar/reprovar
     setTimeout(() => {
       container.querySelectorAll('.btn-aprovar-cotacao').forEach(btn => {
         btn.addEventListener('click', () => atualizarStatusCotacao(btn.dataset.cotacaoId, 'aprovado', solicitacaoId));
       });
-      
+
       container.querySelectorAll('.btn-reprovar-cotacao').forEach(btn => {
         btn.addEventListener('click', () => atualizarStatusCotacao(btn.dataset.cotacaoId, 'reprovado', solicitacaoId));
       });
     }, 100);
-    
+
   } catch (err) {
     console.error('[COTACOES] Erro ao carregar para item cotado:', err);
     container.innerHTML = '<div style="color:#ef4444;font-size:12px;">Erro ao carregar cotações</div>';
@@ -56129,15 +56509,15 @@ async function atualizarStatusCotacao(cotacaoId, status, solicitacaoId) {
       credentials: 'include',
       body: JSON.stringify({ status })
     });
-    
+
     if (!response.ok) throw new Error('Erro ao atualizar status');
-    
+
     // Recarrega as cotações para atualizar a UI
     await loadCotacoesItemCotados(solicitacaoId);
-    
+
     // Verifica se todas as cotações foram marcadas
     verificarCotacoesCompletas(solicitacaoId);
-    
+
   } catch (err) {
     console.error('[COTACOES] Erro ao atualizar status:', err);
     alert('Erro ao atualizar status da cotação');
@@ -56148,51 +56528,51 @@ async function atualizarStatusCotacao(cotacaoId, status, solicitacaoId) {
 async function verificarCotacoesCompletas(solicitacaoId) {
   try {
     console.log('[VERIFICACAO] Verificando cotações para item:', solicitacaoId);
-    
+
     const response = await fetch(`/api/compras/cotacoes/${solicitacaoId}`);
     if (!response.ok) return;
-    
+
     const cotacoes = await response.json();
     console.log('[VERIFICACAO] Cotações recebidas:', cotacoes);
-    
+
     if (!Array.isArray(cotacoes) || cotacoes.length === 0) {
       console.log('[VERIFICACAO] Nenhuma cotação encontrada');
       return;
     }
-    
+
     // Verifica se todas as cotações foram marcadas (aprovado ou reprovado)
     const todasMarcadas = cotacoes.every(c => c.status_aprovacao === 'aprovado' || c.status_aprovacao === 'reprovado');
     console.log('[VERIFICACAO] Todas marcadas?', todasMarcadas);
-    
+
     // Verifica se tem pelo menos uma cotação aprovada
     const temAprovada = cotacoes.some(c => c.status_aprovacao === 'aprovado');
     console.log('[VERIFICACAO] Tem aprovada?', temAprovada);
-    
+
     // Busca o container de cotações deste item
     const cotacoesContainer = document.querySelector(`.compras-cotacoes-list-cotados[data-item-id="${solicitacaoId}"]`);
     if (!cotacoesContainer) {
       console.log('[VERIFICACAO] Container de cotações não encontrado');
       return;
     }
-    
+
     console.log('[VERIFICACAO] Container encontrado:', cotacoesContainer);
-    
+
     // Remove QUALQUER container de ações anterior (pode haver múltiplos se houver bug)
     const oldContainers = document.querySelectorAll(`.cotacoes-actions-container[data-solicitacao="${solicitacaoId}"]`);
     oldContainers.forEach(old => old.remove());
-    
+
     if (todasMarcadas) {
       console.log('[VERIFICACAO] Mostrando botões de ação');
-      
+
       // Cria NOVO container de ações
       const actionsContainer = document.createElement('div');
       actionsContainer.className = 'cotacoes-actions-container';
       actionsContainer.dataset.solicitacao = solicitacaoId; // Identificador único
       actionsContainer.style.cssText = 'margin-top:16px;padding:16px;background:#f0fdf4;border:2px solid #10b981;border-radius:8px;display:flex;gap:12px;align-items:center;';
-      
+
       // Verifica se tem pelo menos uma cotação aprovada
       const temAprovada = cotacoes.some(c => c.status_aprovacao === 'aprovado');
-      
+
       actionsContainer.innerHTML = `
         <div style="flex:1;">
           <div style="font-weight:600;color:#059669;margin-bottom:4px;display:flex;align-items:center;gap:8px;">
@@ -56204,8 +56584,8 @@ async function verificarCotacoesCompletas(solicitacaoId) {
           </div>
         </div>
         ${temAprovada ? `
-          <button 
-            class="btn-enviar-compra" 
+          <button
+            class="btn-enviar-compra"
             data-item-id="${solicitacaoId}"
             style="padding:10px 20px;background:#10b981;color:white;border:none;border-radius:6px;font-weight:600;font-size:13px;cursor:pointer;display:flex;align-items:center;gap:8px;box-shadow:0 2px 4px rgba(16,185,129,0.3);"
           >
@@ -56213,8 +56593,8 @@ async function verificarCotacoesCompletas(solicitacaoId) {
             <span>Enviar para Compra</span>
           </button>
         ` : ''}
-        <button 
-          class="btn-excluir-item" 
+        <button
+          class="btn-excluir-item"
           data-item-id="${solicitacaoId}"
           style="padding:10px 20px;background:#ef4444;color:white;border:none;border-radius:6px;font-weight:600;font-size:13px;cursor:pointer;display:flex;align-items:center;gap:8px;box-shadow:0 2px 4px rgba(239,68,68,0.3);"
         >
@@ -56222,24 +56602,24 @@ async function verificarCotacoesCompletas(solicitacaoId) {
           <span>Excluir Item</span>
         </button>
       `;
-      
+
       // Adiciona após o container de cotações
       cotacoesContainer.parentElement.appendChild(actionsContainer);
-      
+
       // Event listeners para os novos botões
       const btnEnviar = actionsContainer.querySelector('.btn-enviar-compra');
       if (btnEnviar) {
         btnEnviar.addEventListener('click', () => enviarParaCompra(solicitacaoId));
       }
-      
+
       const btnExcluir = actionsContainer.querySelector('.btn-excluir-item');
       if (btnExcluir) {
         btnExcluir.addEventListener('click', () => excluirItemCompra(solicitacaoId));
       }
-      
+
       console.log('[VERIFICACAO] Container de ações criado e inserido');
     }
-    
+
   } catch (err) {
     console.error('[COTACOES] Erro ao verificar completude:', err);
   }
@@ -56248,7 +56628,7 @@ async function verificarCotacoesCompletas(solicitacaoId) {
 // Envia item para compra (muda status para "aguardando compra")
 async function enviarParaCompra(itemId) {
   if (!confirm('Deseja enviar este item para compra?')) return;
-  
+
   try {
     const response = await fetch(`/api/compras/itens/${itemId}/status`, {
       method: 'PUT',
@@ -56256,14 +56636,14 @@ async function enviarParaCompra(itemId) {
       credentials: 'include',
       body: JSON.stringify({ status: 'aguardando compra' })
     });
-    
+
     if (!response.ok) throw new Error('Erro ao enviar para compra');
-    
+
     alert('Item enviado para compra com sucesso!');
-    
+
     // Recarrega a lista de itens cotados
     loadComprasCotadas();
-    
+
   } catch (err) {
     console.error('[COMPRAS] Erro ao enviar para compra:', err);
     alert('Erro ao enviar item para compra');
@@ -56273,20 +56653,20 @@ async function enviarParaCompra(itemId) {
 // Exclui um item da solicitação de compra
 async function excluirItemCompra(itemId) {
   if (!confirm('Deseja realmente excluir este item? Esta ação não pode ser desfeita.')) return;
-  
+
   try {
     const response = await fetch(`/api/compras/itens/${itemId}`, {
       method: 'DELETE',
       credentials: 'include'
     });
-    
+
     if (!response.ok) throw new Error('Erro ao excluir item');
-    
+
     alert('Item excluído com sucesso!');
-    
+
     // Recarrega a lista de itens cotados
     loadComprasCotadas();
-    
+
   } catch (err) {
     console.error('[COMPRAS] Erro ao excluir item:', err);
     alert('Erro ao excluir item');
@@ -57038,26 +57418,26 @@ function coletarEstadoFiltroKanbansModal() {
 async function abrirModalFiltroKanbans() {
   const modal = document.getElementById('modalFiltroKanbans');
   if (!modal) return;
-  
+
   // Carrega preferências do usuário
   await carregarPreferenciasKanbans();
-  
+
   // Carrega preferência de kanbans que podem aparecer vazios
   const kanbansVaziosVisiveis = obterKanbansVaziosVisiveis();
-  
+
   // Popula checkboxes
   const checkboxContainer = document.getElementById('listaFiltroKanbans');
   if (!checkboxContainer) return;
 
   const datasLimite = obterDatasLimiteKanban();
-  
+
   // Títulos personalizados
   const titulosPersonalizados = {
     'aguardando cotação': 'Cotação com compras',
     'aguardando compra preparação': 'Requisições',
     'analise de cadastro': 'Organizando requisição'
   };
-  
+
   // Badges identificadores para cada kanban
   const badgesKanban = {
     'aguardando aprovação da requisição': { texto: 'Operação Aprovador', cor: '#2563eb' },
@@ -57071,7 +57451,7 @@ async function abrirModalFiltroKanbans() {
     'recebido': { texto: 'Setores de Liberação', cor: '#7c3aed' },
     'concluído': { texto: '', cor: '' }
   };
-  
+
   checkboxContainer.innerHTML = todosKanbans.map(kanban => {
     const tituloExibir = titulosPersonalizados[kanban] || (kanban.charAt(0).toUpperCase() + kanban.slice(1));
     const checkedVazio = kanbansVaziosVisiveis.includes(kanban) ? 'checked' : '';
@@ -57082,8 +57462,8 @@ async function abrirModalFiltroKanbans() {
     const dataLimiteExibir = formatarDataLimite(dataLimite);
 
     return `
-      <div data-kanban="${kanban}" style="display:grid;grid-template-columns:1fr 110px 160px 120px;gap:10px;align-items:center;padding:10px;border-radius:6px;transition:all 0.2s;border:1px solid transparent;background:transparent;" 
-           onmouseover="this.style.borderColor='#3b82f6';this.style.background='transparent'" 
+      <div data-kanban="${kanban}" style="display:grid;grid-template-columns:1fr 110px 160px 120px;gap:10px;align-items:center;padding:10px;border-radius:6px;transition:all 0.2s;border:1px solid transparent;background:transparent;"
+           onmouseover="this.style.borderColor='#3b82f6';this.style.background='transparent'"
            onmouseout="this.style.borderColor='transparent';this.style.background='transparent'">
         <div style="display:flex;flex-direction:column;gap:4px;">
           <span style="font-size:14px;color:#ffffff;font-weight:500;">${tituloExibir}</span>
@@ -57230,16 +57610,16 @@ async function carregarPreferenciasKanbans() {
     const resp = await fetch('/api/compras/filtro-kanbans', {
       credentials: 'include'
     });
-    
+
     if (!resp.ok) {
       console.warn('[FILTRO] Erro ao carregar preferências, usando padrão');
       kanbansVisiveis = [...todosKanbans]; // Todos visíveis por padrão
       return;
     }
-    
+
     const data = await resp.json();
     kanbansVisiveis = data.kanbans_visiveis || [...todosKanbans];
-    
+
   } catch (err) {
     console.error('[FILTRO] Erro ao carregar preferências:', err);
     kanbansVisiveis = [...todosKanbans]; // Fallback: todos visíveis
@@ -57303,7 +57683,7 @@ async function salvarPreferenciasKanbans() {
 
     // Fecha modal
     fecharModalFiltroKanbans();
-    
+
     // Feedback visual
     const btn = document.querySelector('[onclick="abrirModalFiltroKanbans()"]');
     if (btn) {
@@ -57315,7 +57695,7 @@ async function salvarPreferenciasKanbans() {
         btn.style.color = '';
       }, 800);
     }
-    
+
   } catch (err) {
     console.error('[FILTRO] Erro ao salvar preferências:', err);
     alert('Erro ao salvar preferências de filtro. Tente novamente.');
@@ -57341,16 +57721,16 @@ function aplicarFiltroKanbans() {
 
   // Pega todas as colunas do kanban
   const colunas = kanbanContainer.querySelectorAll('.kanban-column-minhas');
-  
+
   colunas.forEach(coluna => {
     // Pega o status normalizado diretamente do atributo data-status
     const statusNormalizado = coluna.getAttribute('data-status');
     if (!statusNormalizado) return;
-    
+
     // Pega a quantidade de itens no kanban
     const countElement = coluna.querySelector('.kanban-count-minhas');
     const count = countElement ? parseInt(countElement.textContent) || 0 : 0;
-    
+
     // Lógica de exibição:
     // 1. Se o kanban não está na lista de visíveis: oculta
     // 2. Se está na lista de visíveis mas tem 0 itens e "mostrarVazios" está desativado: oculta
@@ -57392,7 +57772,7 @@ function toggleSelecionarTodosKanbans() {
   const checkboxesVisivel = document.querySelectorAll('#listaFiltroKanbans .kanban-visivel-checkbox');
   const checkboxesVazio = document.querySelectorAll('#listaFiltroKanbans .kanban-vazio-checkbox');
   const todosMarcados = Array.from(checkboxesVisivel).every(cb => cb.checked);
-  
+
   checkboxesVisivel.forEach(cb => {
     cb.checked = !todosMarcados;
   });
@@ -57428,21 +57808,21 @@ let permissoesAcessoCache = [];
 // Função para verificar se o usuário tem permissão para aprovar itens de um departamento
 function usuarioPodeAprovarDepartamento(departamento) {
   // Pega username do usuário logado
-  const username = window.__sessionUser?.username || 
+  const username = window.__sessionUser?.username ||
                    document.getElementById('userNameDisplay')?.textContent?.trim() || '';
-  
+
   if (!username) {
     console.warn('[Permissões] Usuário não identificado');
     return false;
   }
-  
+
   // Verifica se existe permissão para tipo_botao='aprovacao', username e departamento
-  const temPermissao = permissoesAcessoCache.some(p => 
-    p.tipo_botao === 'aprovacao' && 
-    p.responsavel_username === username && 
+  const temPermissao = permissoesAcessoCache.some(p =>
+    p.tipo_botao === 'aprovacao' &&
+    p.responsavel_username === username &&
     p.departamento_nome === departamento
   );
-  
+
   console.log(`[Permissões] User: ${username}, Depto: ${departamento}, Permissão: ${temPermissao}`);
   return temPermissao;
 }
@@ -57459,12 +57839,24 @@ function usuarioPodeGerenciarSolicitacao(departamento) {
   );
 }
 
+function usuarioPodeGerarPedidoCompra(departamento) {
+  const username = window.__sessionUser?.username ||
+    document.getElementById('userNameDisplay')?.textContent?.trim() || '';
+  const departamentoNormalizado = String(departamento || '').trim().toLowerCase();
+
+  return permissoesAcessoCache.some(p =>
+    p.tipo_botao === 'pedido_compra' &&
+    String(p.responsavel_username || '').trim().toLowerCase() === String(username).trim().toLowerCase() &&
+    String(p.departamento_nome || '').trim().toLowerCase() === departamentoNormalizado
+  );
+}
+
 // Carrega permissões de acesso do servidor
 async function carregarPermissoesAcessoParaAprovacao() {
   try {
     const resp = await fetch('/api/compras/config-acesso-botoes', { credentials: 'include' });
     if (!resp.ok) throw new Error('Erro ao carregar permissões');
-    
+
     const data = await resp.json();
     permissoesAcessoCache = data.permissoes || [];
     console.log('[Permissões] Permissões carregadas:', permissoesAcessoCache.length);
@@ -57479,11 +57871,11 @@ async function abrirModalAprovacaoRequisicao() {
   try {
     // Carrega permissões de acesso antes de renderizar o modal
     await carregarPermissoesAcessoParaAprovacao();
-    
+
     // Busca todas as solicitações aguardando aprovação (não apenas do usuário logado)
     const resp = await fetch(`/api/compras/todas`, { credentials: 'include' });
     if (!resp.ok) throw new Error('Erro ao carregar solicitações');
-    
+
     const data = await resp.json();
     const todasSolicitacoes = data.solicitacoes || [];
 
@@ -57507,9 +57899,9 @@ async function abrirModalAprovacaoRequisicao() {
       if (Math.abs(n - Math.round(n)) < 1e-9) return String(Math.round(n));
       return n.toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 4 });
     };
-    
+
     // Filtra apenas as que estão aguardando aprovação
-    const itensAprovacaoResumo = todasSolicitacoes.filter(item => 
+    const itensAprovacaoResumo = todasSolicitacoes.filter(item =>
       (item.status || '').toLowerCase().trim() === 'aguardando aprovação da requisição'
     );
 
@@ -57565,17 +57957,17 @@ async function abrirModalAprovacaoRequisicao() {
         const chave = `${String(item?.table_source || '').trim()}::${String(item?.id || '').trim()}`;
         return arr.findIndex((cand) => `${String(cand?.table_source || '').trim()}::${String(cand?.id || '').trim()}` === chave) === idx;
       });
-    
+
     if (itensAprovacao.length === 0) {
       alert('Nenhuma solicitação aguardando aprovação');
       return;
     }
-    
+
     // Debug: verifica estrutura dos dados
     console.log('[Modal Aprovação] Exemplo de item:', itensAprovacao[0]);
     console.log('[Modal Aprovação] Total de itens:', itensAprovacao.length);
     console.log('[Modal Aprovação] Itens com anexos:', itensAprovacao.filter(i => i.anexos && i.anexos.length > 0).length);
-    
+
     // Lista de grupos disponíveis (aguardando aprovação)
     const gruposDisponiveis = Array.from(new Set(
       itensAprovacao
@@ -57593,7 +57985,7 @@ async function abrirModalAprovacaoRequisicao() {
       }
       itensPorGrupoRequisicao[grupoRequisicao].push(item);
     });
-    
+
     // Monta HTML da tabela agrupada por grupo_requisicao
     let tabelaHtml = '';
     Object.keys(itensPorGrupoRequisicao).sort().forEach((grupoRequisicao, grupoIdx) => {
@@ -57618,7 +58010,7 @@ async function abrirModalAprovacaoRequisicao() {
       const grupoRequisicaoEncoded = encodeURIComponent(grupoRequisicao);
       const itensGrupoParaRecusa = itensGrupo.map(i => ({ id: i.id, ts: String(i.table_source || 'solicitacao_compras') }));
       const itensGrupoJsonEncoded = encodeURIComponent(JSON.stringify(itensGrupoParaRecusa));
-      
+
       tabelaHtml += `
         <div data-grupo-aprovacao="${escapeHtml(grupoRequisicao)}" style="margin-bottom:24px;border:2px solid #3b82f6;border-radius:8px;overflow:hidden;">
           <div style="background:linear-gradient(135deg,#3b82f6 0%,#2563eb 100%);color:white;padding:12px 16px;display:flex;justify-content:space-between;align-items:center;">
@@ -57693,14 +58085,14 @@ async function abrirModalAprovacaoRequisicao() {
                   const retornoTexto = retornoCotacaoEhSim ? 'SIM' : 'NÃO';
                   const retornoCor = retornoCotacaoEhSim ? '#10b981' : '#ef4444';
                   const grupoAtual = item.grupo_requisicao || 'Sem grupo';
-	                  
+
 	                  // Processa anexos
                   let anexosHtml = '-';
                   if (item.anexos && Array.isArray(item.anexos) && item.anexos.length > 0) {
                     const anexosJson = JSON.stringify(item.anexos).replace(/"/g, '&quot;');
                     anexosHtml = `
-                      <button 
-                        onclick="exibirAnexosAprovacao(${item.id}, '${anexosJson}')" 
+                      <button
+                        onclick="exibirAnexosAprovacao(${item.id}, '${anexosJson}')"
                         title="Ver anexos (${item.anexos.length})"
                         style="background:#3b82f6;color:white;border:none;padding:6px 10px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600;display:flex;align-items:center;gap:4px;transition:all 0.2s;"
                         onmouseover="this.style.background='#2563eb';this.style.transform='scale(1.05)'"
@@ -57710,7 +58102,7 @@ async function abrirModalAprovacaoRequisicao() {
                       </button>
                     `;
                   }
-                  
+
                   const grupoAtualValor = String(item.grupo_requisicao || '').trim();
                   const grupoAtualLabel = grupoAtualValor || 'Sem grupo';
                   const gruposAlternativos = gruposDisponiveis.filter(g => g !== grupoAtualValor);
@@ -57801,11 +58193,11 @@ async function abrirModalAprovacaoRequisicao() {
         </div>
       `;
     });
-    
+
     // Cria e abre modal
     const modalId = 'modalAprovacaoRequisicao';
     let modal = document.getElementById(modalId);
-    
+
     if (!modal) {
       modal = document.createElement('div');
       modal.id = modalId;
@@ -57814,7 +58206,7 @@ async function abrirModalAprovacaoRequisicao() {
       modal.style.setProperty('z-index', '10002', 'important');
       document.body.appendChild(modal);
     }
-    
+
     modal.innerHTML = `
       <div class="modal-content" style="max-width:1400px;width:95%;max-height:90vh;overflow-y:auto;">
         <div class="modal-header" style="background:linear-gradient(135deg,#3b82f6 0%,#2563eb 100%);color:white;padding:20px;border-radius:8px 8px 0 0;">
@@ -57825,7 +58217,7 @@ async function abrirModalAprovacaoRequisicao() {
           <button class="modal-close" onclick="document.getElementById('${modalId}').style.display='none'" style="color:white;opacity:0.9;">&times;</button>
         </div>
         <div class="modal-body" style="padding:24px;background:#f9fafb;">
-          
+
           <div style="background:#eff6ff;border:2px solid #3b82f6;border-radius:8px;padding:16px;margin-bottom:24px;">
             <div style="display:flex;align-items:start;gap:12px;">
               <i class="fa-solid fa-info-circle" style="color:#3b82f6;font-size:20px;margin-top:2px;"></i>
@@ -57838,16 +58230,16 @@ async function abrirModalAprovacaoRequisicao() {
               </div>
             </div>
           </div>
-          
+
           ${tabelaHtml}
-          
+
         </div>
       </div>
     `;
-    
+
     modal.style.display = 'flex';
     modal.style.setProperty('z-index', '10002', 'important');
-    
+
   } catch (err) {
     console.error('[Modal Aprovação] Erro:', err);
     alert('Erro ao carregar solicitações para aprovação: ' + err.message);
@@ -57868,7 +58260,7 @@ async function aprovarItemRequisicao(itemId, tableSource, retornoCotacaoRawOrigi
     : 'Deseja aprovar este item? Será criada uma requisição na Omie e o item será movido para "Pedido de compra".';
 
   if (!confirm(mensagemConfirmacao)) return;
-  
+
   try {
     if (isSemCadastro) {
       const novoStatus = retornoCotacaoEhSim ? 'aguardando cotação' : 'Analise de cadastro';
@@ -57896,21 +58288,21 @@ async function aprovarItemRequisicao(itemId, tableSource, retornoCotacaoRawOrigi
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include'
     });
-    
+
     if (!resp.ok) {
       const error = await resp.json();
       throw new Error(error.error || 'Falha ao aprovar item');
     }
-    
+
     const resultado = await resp.json();
     console.log('[Aprovação] Resultado:', resultado);
-    
+
     // Feedback visual
     alert(`Item aprovado com sucesso!\nNúmero do Pedido: ${resultado.numero_pedido}\nRequisição criada na Omie.`);
 
     removerItemModalAprovacao(itemId);
     atualizarKanbanMinhasAposMudanca(itemId, novoStatusSolicitacao);
-    
+
   } catch (err) {
     console.error('[Aprovação] Erro ao aprovar item:', err);
     alert('Erro ao aprovar item: ' + err.message);
@@ -58068,23 +58460,23 @@ async function aprovarGrupoRequisicao(itemIdsCsv, grupoRequisicaoEncoded = '', t
     .split(',')
     .map(id => String(id).trim())
     .filter(id => id && id !== 'undefined' && id !== 'null');
-  
+
   if (!ids.length) {
     alert('Nenhum item com permissão para aprovação neste grupo.');
     return;
   }
-  
+
   const avisoSemPermissao = totalSemPermissao > 0
     ? `\n\n${totalSemPermissao} item(ns) sem permissão não serão aprovados.`
     : '';
-  
+
   const confirma = confirm(
     `Deseja aprovar todos os itens do grupo "${grupoRequisicao}"?` +
     '\nIsso criará requisições na Omie e moverá os itens para "Pedido de compra".' +
     avisoSemPermissao
   );
   if (!confirma) return;
-  
+
   try {
     const respBase = await fetch('/api/compras/todas', { credentials: 'include' });
     if (!respBase.ok) throw new Error('Falha ao carregar itens do grupo para aprovação');
@@ -58148,7 +58540,7 @@ async function aprovarGrupoRequisicao(itemIdsCsv, grupoRequisicaoEncoded = '', t
 
     const itensRequisicao = resultadoSolicitacao.itens_requisicao || [];
     const itensCotacao = resultadoSolicitacao.itens_aguardando_cotacao || [];
-    
+
     let mensagem = `Aprovação do grupo "${grupoRequisicao}" concluída.`;
     if (resultadoSolicitacao.numero_pedido) {
       mensagem += `\n\nRequisição criada: ${resultadoSolicitacao.numero_pedido}`;
@@ -58162,7 +58554,7 @@ async function aprovarGrupoRequisicao(itemIdsCsv, grupoRequisicaoEncoded = '', t
       if (totalSemCadastroCotacao > 0) mensagem += `\n- Aguardando cotação: ${totalSemCadastroCotacao}`;
       if (totalSemCadastroAnalise > 0) mensagem += `\n- Organizando requisição: ${totalSemCadastroAnalise}`;
     }
-    
+
     alert(mensagem);
   } catch (err) {
     console.error('[Aprovar Grupo] Erro:', err);
@@ -58324,19 +58716,19 @@ async function atualizarQuantidadeItemAprovacao(itemId, input) {
       await abrirModalAprovacaoRequisicao();
       return;
     }
-    
+
     const resp = await fetch(`/api/compras/solicitacoes/${itemId}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
       body: JSON.stringify({ quantidade })
     });
-    
+
     if (!resp.ok) {
       const error = await resp.json().catch(() => ({}));
       throw new Error(error.error || 'Falha ao atualizar quantidade');
     }
-    
+
     // Recarrega o modal para atualizar totais e agrupamentos
     await abrirModalAprovacaoRequisicao();
   } catch (err) {
@@ -58357,15 +58749,15 @@ async function abrirModalHistoricoGeral() {
     // Busca histórico geral dos últimos 30 dias
     const resp = await fetch('/api/compras/historico?dias=30&limit=200', { credentials: 'include' });
     if (!resp.ok) throw new Error('Erro ao carregar histórico');
-    
+
     const data = await resp.json();
     const historico = data.historico || [];
-    
+
     if (historico.length === 0) {
       alert('Nenhum histórico encontrado.');
       return;
     }
-    
+
     // Função para formatar data/hora
     const formatarDataHora = (dataStr) => {
       const data = new Date(dataStr);
@@ -58377,7 +58769,7 @@ async function abrirModalHistoricoGeral() {
         minute: '2-digit'
       });
     };
-    
+
     // Função para definir cor e ícone por tipo de operação
     const getOperacaoStyle = (operacao) => {
       switch(operacao) {
@@ -58387,7 +58779,7 @@ async function abrirModalHistoricoGeral() {
         default: return { cor: '#6b7280', icone: 'fa-circle', label: operacao };
       }
     };
-    
+
     // Agrupa histórico por origem + solicitacao_id
     const historicoPorItem = {};
     historico.forEach(h => {
@@ -58398,7 +58790,7 @@ async function abrirModalHistoricoGeral() {
       }
       historicoPorItem[chaveGrupo].push(h);
     });
-    
+
     // Monta HTML do histórico agrupado por item
     let historicoHtml = Object.keys(historicoPorItem).sort((a, b) => {
       const ultimaA = historicoPorItem[a][0].created_at;
@@ -58411,12 +58803,12 @@ async function abrirModalHistoricoGeral() {
       const solicitacaoId = primeiroRegistro.solicitacao_id;
       const fonteLabel = tableSource === 'compras_sem_cadastro' ? 'Sem Cadastro' : 'Solicitação';
       const descricaoItem = primeiroRegistro.descricao_item || `Item #${solicitacaoId}`;
-      
+
       const registrosHtml = registros.map(h => {
         const style = getOperacaoStyle(h.operacao);
         const campoLabel = h.campo_alterado || 'Item completo';
         const usuarioLabel = String(h.usuario || 'sistema').trim() || 'sistema';
-        
+
         return `
           <div style="border-left:3px solid ${style.cor};padding:8px 12px;margin-bottom:8px;background:#f9fafb;border-radius:4px;">
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
@@ -58433,7 +58825,7 @@ async function abrirModalHistoricoGeral() {
                 <div style="color:#9ca3af;font-size:10px;margin-top:2px;">${formatarDataHora(h.created_at)}</div>
               </div>
             </div>
-            
+
             ${h.valor_anterior && h.valor_novo ? `
               <div style="margin-left:30px;display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:10px;">
                 <div style="color:#6b7280;">
@@ -58451,7 +58843,7 @@ async function abrirModalHistoricoGeral() {
           </div>
         `;
       }).join('');
-      
+
       return `
         <div style="margin-bottom:20px;border:2px solid #e5e7eb;border-radius:8px;overflow:hidden;">
           <div style="background:linear-gradient(135deg,#6366f1 0%,#4f46e5 100%);color:white;padding:12px 16px;display:flex;justify-content:space-between;align-items:center;">
@@ -58474,7 +58866,7 @@ async function abrirModalHistoricoGeral() {
         </div>
       `;
     }).join('');
-    
+
     // Monta conteúdo do modal
     const modalContent = `
       <div style="padding:24px;">
@@ -58487,11 +58879,11 @@ async function abrirModalHistoricoGeral() {
             <p style="margin:4px 0 0 0;color:#6b7280;font-size:13px;">Últimas alterações nos itens de compra (30 dias)</p>
           </div>
         </div>
-        
+
         <div style="max-height:600px;overflow-y:auto;padding-right:8px;">
           ${historicoHtml}
         </div>
-        
+
         <div style="margin-top:20px;padding-top:16px;border-top:2px solid #e5e7eb;display:flex;justify-content:space-between;align-items:center;">
           <span style="color:#6b7280;font-size:12px;">
             <i class="fa-solid fa-info-circle"></i> ${historico.length} registro(s) | ${Object.keys(historicoPorItem).length} item(ns)
@@ -58502,15 +58894,15 @@ async function abrirModalHistoricoGeral() {
         </div>
       </div>
     `;
-    
+
     // Cria e abre modal
     const modalId = 'modalHistoricoGeralCompras';
     let modal = document.getElementById(modalId);
-    
+
     if (modal) {
       modal.remove();
     }
-    
+
     modal = document.createElement('div');
     modal.id = modalId;
     modal.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;z-index:10000;';
@@ -58519,14 +58911,14 @@ async function abrirModalHistoricoGeral() {
         ${modalContent}
       </div>
     `;
-    
+
     document.body.appendChild(modal);
-    
+
     // Fecha ao clicar fora
     modal.addEventListener('click', (e) => {
       if (e.target === modal) fecharModalHistoricoGeral();
     });
-    
+
   } catch (err) {
     console.error('[Histórico] Erro ao abrir histórico geral:', err);
     alert('Erro ao carregar histórico: ' + err.message);
@@ -58544,15 +58936,15 @@ async function abrirHistoricoItem(itemId, descricaoItem) {
     // Busca histórico do item
     const resp = await fetch(`/api/compras/historico/${itemId}`, { credentials: 'include' });
     if (!resp.ok) throw new Error('Erro ao carregar histórico');
-    
+
     const data = await resp.json();
     const historico = data.historico || [];
-    
+
     if (historico.length === 0) {
       alert('Nenhum histórico encontrado para este item.');
       return;
     }
-    
+
     // Função para formatar data/hora
     const formatarDataHora = (dataStr) => {
       const data = new Date(dataStr);
@@ -58564,7 +58956,7 @@ async function abrirHistoricoItem(itemId, descricaoItem) {
         minute: '2-digit'
       });
     };
-    
+
     // Função para definir cor e ícone por tipo de operação
     const getOperacaoStyle = (operacao) => {
       switch(operacao) {
@@ -58574,12 +58966,12 @@ async function abrirHistoricoItem(itemId, descricaoItem) {
         default: return { cor: '#6b7280', icone: 'fa-circle', label: operacao };
       }
     };
-    
+
     // Monta HTML do histórico
     let historicoHtml = historico.map(h => {
       const style = getOperacaoStyle(h.operacao);
       const campoLabel = h.campo_alterado || 'Item completo';
-      
+
       return `
         <div style="border-left:4px solid ${style.cor};padding:12px 16px;margin-bottom:12px;background:#f9fafb;border-radius:6px;">
           <div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:8px;">
@@ -58594,24 +58986,24 @@ async function abrirHistoricoItem(itemId, descricaoItem) {
             </div>
             ${h.usuario ? `<span style="background:#e0e7ff;color:#4f46e5;padding:4px 8px;border-radius:4px;font-size:11px;font-weight:600;">${escapeHtml(h.usuario)}</span>` : ''}
           </div>
-          
+
           <div style="margin-left:40px;">
             <div style="color:#374151;font-size:12px;margin-bottom:4px;">
               <strong>Campo:</strong> <span style="color:#6366f1;font-weight:600;">${escapeHtml(campoLabel)}</span>
             </div>
-            
+
             ${h.valor_anterior ? `
               <div style="color:#6b7280;font-size:11px;margin-bottom:2px;">
                 <strong>Antes:</strong> ${escapeHtml(h.valor_anterior)}
               </div>
             ` : ''}
-            
+
             ${h.valor_novo ? `
               <div style="color:#059669;font-size:11px;font-weight:600;">
                 <strong>Depois:</strong> ${escapeHtml(h.valor_novo)}
               </div>
             ` : ''}
-            
+
             ${h.status_item ? `
               <div style="color:#9ca3af;font-size:10px;margin-top:4px;">
                 Status: <span style="background:#f3f4f6;padding:2px 6px;border-radius:4px;">${escapeHtml(h.status_item)}</span>
@@ -58622,7 +59014,7 @@ async function abrirHistoricoItem(itemId, descricaoItem) {
         </div>
       `;
     }).join('');
-    
+
     // Monta conteúdo do modal
     const modalContent = `
       <div style="padding:24px;">
@@ -58635,11 +59027,11 @@ async function abrirHistoricoItem(itemId, descricaoItem) {
             <p style="margin:4px 0 0 0;color:#6b7280;font-size:13px;">${escapeHtml(descricaoItem)}</p>
           </div>
         </div>
-        
+
         <div style="max-height:500px;overflow-y:auto;padding-right:8px;">
           ${historicoHtml}
         </div>
-        
+
         <div style="margin-top:20px;padding-top:16px;border-top:2px solid #e5e7eb;display:flex;justify-content:space-between;align-items:center;">
           <span style="color:#6b7280;font-size:12px;">
             <i class="fa-solid fa-info-circle"></i> Total de ${historico.length} registro(s)
@@ -58650,15 +59042,15 @@ async function abrirHistoricoItem(itemId, descricaoItem) {
         </div>
       </div>
     `;
-    
+
     // Cria e abre modal
     const modalId = 'modalHistoricoItem';
     let modal = document.getElementById(modalId);
-    
+
     if (modal) {
       modal.remove();
     }
-    
+
     modal = document.createElement('div');
     modal.id = modalId;
     modal.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;z-index:10000;';
@@ -58667,14 +59059,14 @@ async function abrirHistoricoItem(itemId, descricaoItem) {
         ${modalContent}
       </div>
     `;
-    
+
     document.body.appendChild(modal);
-    
+
     // Fecha ao clicar fora
     modal.addEventListener('click', (e) => {
       if (e.target === modal) fecharModalHistoricoItem();
     });
-    
+
   } catch (err) {
     console.error('[Histórico] Erro ao abrir histórico:', err);
     alert('Erro ao carregar histórico do item: ' + err.message);
@@ -58761,17 +59153,17 @@ async function reprovarItemAprovacao(itemId, motivo, tableSource) {
   try {
     const usuario = window.__sessionUser?.username || window.__sessionUser?.id || '';
     const novoStatusCache = tableSource === 'compras_sem_cadastro' ? 'Carrinho' : 'carrinho';
-    
+
     // Se for de compras_sem_cadastro, usa endpoint e status específico
     if (tableSource === 'compras_sem_cadastro') {
       const resp = await fetch(`/api/compras/sem-cadastro/${itemId}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
-        body: JSON.stringify({ 
+        body: JSON.stringify({
           status: 'Carrinho',
           observacao_reprovacao: motivo,
-          usuario_comentario: usuario 
+          usuario_comentario: usuario
         })
       });
       if (!resp.ok) {
@@ -58784,10 +59176,10 @@ async function reprovarItemAprovacao(itemId, motivo, tableSource) {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
-        body: JSON.stringify({ 
-          status: 'carrinho', 
-          observacao_reprovacao: motivo, 
-          usuario_comentario: usuario 
+        body: JSON.stringify({
+          status: 'carrinho',
+          observacao_reprovacao: motivo,
+          usuario_comentario: usuario
         })
       });
       if (!resp.ok) {
@@ -58795,7 +59187,7 @@ async function reprovarItemAprovacao(itemId, motivo, tableSource) {
         throw new Error(error.error || 'Erro ao reprovar item');
       }
     }
-    
+
     removerItemModalAprovacao(itemId);
     atualizarKanbanMinhasAposMudanca(itemId, novoStatusCache);
   } catch (err) {
@@ -58919,7 +59311,7 @@ function montarCardsKanbanMinhas(status, itens) {
         <div style="margin-bottom:4px;padding-bottom:4px;${itensGrupo.length > 1 ? 'border-bottom:1px solid #f3f4f6;' : ''}">
           <div style="font-size:12px;color:#374151;font-weight:600;">${escapeHtml(codigo)}</div>
           <div>
-            <div 
+            <div
               class="desc-truncada"
               data-tooltip-id="${tooltipId}"
               style="font-size:11px;color:#6b7280;cursor:help;line-height:1.3;max-height:28px;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;"
@@ -58992,7 +59384,7 @@ function montarCardsKanbanMinhas(status, itens) {
     const cardAprovacaoKey = `aprovacao-${String(chaveGrupo).replace(/[^a-zA-Z0-9_-]/g, '_')}-${primeiroItem.id}`;
 
     return `
-      <div class="kanban-card" 
+      <div class="kanban-card"
         data-item-id="${primeiroItem.id}"
         data-todos-ids="${todosIds}"
         data-fornecedor="${escapeHtml(primeiroItem.fornecedor_nome || '')}"
@@ -59059,6 +59451,32 @@ function toggleAprovacaoCardItens(cardKey, event) {
 }
 
 // Comentário: alterna exibição dos itens no kanban Aprovação (Minhas Solicitações)
+function fecharMenusAcoesCardCompras() {
+  document.querySelectorAll('.cp-card-menu.is-open').forEach(menu => menu.classList.remove('is-open'));
+  document.querySelectorAll('.cp-card-menu-trigger[aria-expanded="true"]').forEach(button => {
+    button.setAttribute('aria-expanded', 'false');
+  });
+}
+
+function toggleMenuAcoesCardCompras(button, event) {
+  event?.stopPropagation();
+  const menu = button?.nextElementSibling;
+  if (!menu?.classList.contains('cp-card-menu')) return;
+  const abrir = !menu.classList.contains('is-open');
+  fecharMenusAcoesCardCompras();
+  if (abrir) {
+    menu.classList.add('is-open');
+    button.setAttribute('aria-expanded', 'true');
+  }
+}
+
+document.addEventListener('click', (event) => {
+  if (!event.target.closest('.cp-card-context')) fecharMenusAcoesCardCompras();
+});
+
+window.fecharMenusAcoesCardCompras = fecharMenusAcoesCardCompras;
+window.toggleMenuAcoesCardCompras = toggleMenuAcoesCardCompras;
+
 function toggleAprovacaoItensMinhas(cardKey, event) {
   if (event && typeof event.stopPropagation === 'function') event.stopPropagation();
   const container = document.getElementById(`aprovacao-itens-${cardKey}`);
@@ -59327,48 +59745,80 @@ async function toggleSolicitacaoCompraItens(cardKey, event) {
   }
 }
 
+const COMPRAS_CARDS_POR_PAGINA = 50;
+window.__comprasKanbanCardsCache = window.__comprasKanbanCardsCache || {};
+window.__comprasKanbanLimites = window.__comprasKanbanLimites || {};
+window.__comprasKanbanFiltroAtual = '';
+
+function normalizarTextoBuscaCompras(valor) {
+  return String(valor || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function renderizarPaginaColunaCompras(status, textoFiltro = '') {
+  const cache = window.__comprasKanbanCardsCache?.[status] || [];
+  const coluna = Array.from(document.querySelectorAll('.kanban-column-minhas'))
+    .find(item => item.dataset.status === status);
+  const container = coluna?.querySelector('.kanban-cards-minhas');
+  if (!container) return;
+
+  const filtro = normalizarTextoBuscaCompras(textoFiltro);
+  const cardsFiltrados = filtro.length >= 3
+    ? cache.filter(card => card.texto.includes(filtro))
+    : cache;
+  const limite = Math.max(
+    COMPRAS_CARDS_POR_PAGINA,
+    Number(window.__comprasKanbanLimites?.[status]) || COMPRAS_CARDS_POR_PAGINA
+  );
+  const cardsVisiveis = cardsFiltrados.slice(0, limite);
+  const restantes = Math.max(0, cardsFiltrados.length - cardsVisiveis.length);
+
+  if (!cardsVisiveis.length) {
+    container.innerHTML = `<div class="cp-kanban-empty">${filtro.length >= 3 ? 'Nenhum resultado' : 'Nenhum item'}</div>`;
+    return;
+  }
+
+  container.innerHTML = cardsVisiveis.map(card => card.html).join('') + (restantes > 0 ? `
+    <button type="button" class="cp-load-more" onclick="mostrarMais50CardsCompras('${String(status).replace(/'/g, "\\'")}')">
+      <strong>+${Math.min(COMPRAS_CARDS_POR_PAGINA, restantes)}</strong>
+      <span>Exibindo ${cardsVisiveis.length} de ${cardsFiltrados.length}</span>
+    </button>
+  ` : '');
+}
+
+function mostrarMais50CardsCompras(status) {
+  window.__comprasKanbanLimites[status] = (Number(window.__comprasKanbanLimites?.[status]) || COMPRAS_CARDS_POR_PAGINA) + COMPRAS_CARDS_POR_PAGINA;
+  renderizarPaginaColunaCompras(status, window.__comprasKanbanFiltroAtual);
+}
+
+window.mostrarMais50CardsCompras = mostrarMais50CardsCompras;
+
 // Objetivo: Filtrar TODOS os kanbans simultaneamente pela palavra inserida no campo de busca
 function filtrarTodosKanbans(textoFiltro) {
-  const textoNormalizado = (textoFiltro || '').toLowerCase().trim();
+  const textoNormalizado = normalizarTextoBuscaCompras(textoFiltro);
   const botaoLimpar = document.getElementById('kanbanLimparFiltroGlobal');
-  
+
   // Mostra/esconde botão de limpar conforme necessário
   if (botaoLimpar) {
     botaoLimpar.style.display = textoNormalizado.length >= 3 ? 'block' : 'none';
   }
-  
-  // Procura TODOS os cards em TODOS os kanbans
-  const todasAsColunas = document.querySelectorAll('.kanban-column-minhas');
-  
-  todasAsColunas.forEach(coluna => {
-    const container = coluna.querySelector('.kanban-cards-minhas');
-    if (!container) return;
-    
-    const cards = container.querySelectorAll('.kanban-card');
-    
-    // Se digitou menos de 3 caracteres, mostra todos os cards
-    if (textoNormalizado.length < 3) {
-      cards.forEach(card => {
-        card.style.display = '';
-      });
-      return;
-    }
-    
-    // Filtra os cards em todos os kanbans
-    cards.forEach(card => {
-      const textoCard = card.textContent
-        .toLowerCase()
-        .replace(/\s+/g, ' ')
-        .trim();
-      
-      if (textoCard.includes(textoNormalizado)) {
-        card.style.display = '';
-      } else {
-        card.style.display = 'none';
-      }
+
+  // Ao mudar a pesquisa, cada coluna volta à primeira página. A busca é feita
+  // no cache completo, inclusive nos cards ainda não inseridos no DOM.
+  if (window.__comprasKanbanFiltroAtual !== textoNormalizado) {
+    Object.keys(window.__comprasKanbanLimites || {}).forEach(status => {
+      window.__comprasKanbanLimites[status] = COMPRAS_CARDS_POR_PAGINA;
     });
+  }
+  window.__comprasKanbanFiltroAtual = textoNormalizado;
+  Object.keys(window.__comprasKanbanCardsCache || {}).forEach(status => {
+    renderizarPaginaColunaCompras(status, textoNormalizado);
   });
-  
+
   // Aplica o mesmo filtro à lista (sempre, independente de qual view está visível)
   aplicarFiltrosModoLista(textoNormalizado);
 }
@@ -59725,7 +60175,7 @@ function atualizarOffsetCabecalhoListaCompras() {
 // Objetivo: Alternar entre visualização Kanban e Lista
 function toggleVisualizacao() {
   modoVisualizacaoKanban = !modoVisualizacaoKanban;
-  
+
   if (modoVisualizacaoKanban) {
     mostrarVisualizacaoKanban();
   } else {
@@ -60867,7 +61317,7 @@ function mostrarVisualizacaoKanban() {
   const kanbanContainer = document.getElementById('kanbanMinhasSolicitacoes');
   const listaContainer = document.getElementById('listaMinhasSolicitacoes');
   const botaoAlternar = document.getElementById('comprasAlternarVisualizacaoBtn');
-  
+
   if (kanbanContainer) kanbanContainer.style.display = 'flex';
   if (listaContainer) listaContainer.style.display = 'none';
   if (botaoAlternar) {
@@ -60888,7 +61338,7 @@ function mostrarVisualizacaoLista() {
   const kanbanContainer = document.getElementById('kanbanMinhasSolicitacoes');
   const listaContainer = document.getElementById('listaMinhasSolicitacoes');
   const botaoAlternar = document.getElementById('comprasAlternarVisualizacaoBtn');
-  
+
   if (kanbanContainer) {
     kanbanContainer.style.display = 'none';
     // Remove height fixo para não reservar espaço quando o kanban estiver oculto
@@ -60902,7 +61352,7 @@ function mostrarVisualizacaoLista() {
     const icone = botaoAlternar.querySelector('i');
     if (icone) icone.className = 'fa-solid fa-table';
   }
-  
+
   // Renderiza a lista com dados dos kanbans
   renderizarLista();
   inicializarFiltroStatusColunaLista();
@@ -63441,29 +63891,29 @@ function renderizarLista() {
       numeroPedido: numeroPedido || '-'
     };
   };
-  
+
   corpoTabela.innerHTML = '';
-  
+
   // Procura todos os cards nos kanbans
   const todasAsColunas = document.querySelectorAll('.kanban-column-minhas');
   const linhas = [];
   let rowIndex = 0;
-  
+
   todasAsColunas.forEach(coluna => {
     const status = coluna.getAttribute('data-status');
     const container = coluna.querySelector('.kanban-cards-minhas');
     if (!container) return;
-    
+
     const cards = container.querySelectorAll('.kanban-card');
     const statusNormalizado = (status || '').toLowerCase().trim();
 
     // Mantém o modo tabela alinhado ao mesmo filtro de etapas aplicado no modo kanban.
     if (!deveExibirKanbanPorFiltro(statusNormalizado, cards.length)) return;
-    
+
     cards.forEach(card => {
       // Ignora cards ocultos pelo filtro
       if (card.style.display === 'none') return;
-      
+
       // Extrai dados dos atributos data-*
       const fornecedorData = card.getAttribute('data-fornecedor') || '';
       const solicitanteData = card.getAttribute('data-solicitante') || '';
@@ -63479,7 +63929,7 @@ function renderizarLista() {
       const numerosTabela = resolverNumerosTabela(statusNormalizado, card, itensCard);
       const requisicao = numerosTabela.requisicao;
       const numeroPedido = numerosTabela.numeroPedido;
-      
+
       // Formata datas
       const dataFormatada = createdAt ? new Date(createdAt).toLocaleDateString('pt-BR') : '-';
       const dataPrevisaoFormatada = dtPrevisao ? new Date(dtPrevisao).toLocaleDateString('pt-BR') : '-';
@@ -63567,7 +64017,7 @@ function renderizarLista() {
            </table>`
         : '<div style="font-size:11px;color:#9ca3af;">Sem produtos cadastrados</div>';
       const rowId = `linha-${rowIndex++}`;
-      
+
       // Texto pesquisável: inclui dados principais + códigos e descrições de produtos
       const produtosTexto = Array.isArray(produtosLista)
         ? produtosLista.map(p => `${p.produto_codigo || p.cod_prod || ''} ${p.produto_descricao || p.descricao || ''}`).join(' ')
@@ -63591,7 +64041,7 @@ function renderizarLista() {
               .filter((link) => /^(https?:\/\/|\/)/i.test(link))
           )]
         : [];
-      
+
       const linhaMontada = {
         rowId,
         requisicao,
@@ -63616,7 +64066,7 @@ function renderizarLista() {
       linhas.push(linhaMontada);
     });
   });
-  
+
   // Renderiza as linhas da tabela
   linhas.forEach((linha, indiceLinha) => {
     const tr = document.createElement('tr');
@@ -63625,7 +64075,7 @@ function renderizarLista() {
     tr.style.cssText = `border-top:${bordaSeparadora};border-bottom:0;transition:background 0.2s;cursor:pointer;`;
     tr.onmouseover = () => tr.style.background = '#f9fafb';
     tr.onmouseout = () => tr.style.background = 'transparent';
-    
+
     // Armazena texto pesquisável completo (inclui produtos) para o filtro funcionar
     const textoSearch = [
       linha.requisicao,
@@ -63639,14 +64089,14 @@ function renderizarLista() {
       linha.produtosTexto
     ].join(' ').toLowerCase().replace(/\s+/g, ' ').trim();
     tr.setAttribute('data-search', textoSearch);
-    
+
     const itensRelacionados = obterItensRelacionadosLinhaLista(linha);
     const fluxoStatusHtml = renderizarFluxoStatusCompras(linha.status, itensRelacionados);
     const statusArg = JSON.stringify(String(linha.status || ''));
     const itemIdArg = JSON.stringify(String(linha.itemId || ''));
     const todosIdsArg = JSON.stringify(String(linha.todosIds || ''));
     const numeroPedidoArg = JSON.stringify(String(linha.numeroPedido || ''));
-    
+
     const statusNormalizadoLinha = normalizarTextoFluxoCompras(linha.status);
 
     // Define se o fornecedor deve ser exibido baseado no status
@@ -63662,7 +64112,7 @@ function renderizarLista() {
     ];
     const exibeFornecedor = !statusSemFornecedor.includes(statusNormalizadoLinha);
     const fornecedorExibido = exibeFornecedor ? linha.fornecedor : '-';
-    
+
     // Data de previsão só existe para Pedido de compra e Compra realizada
     const statusComPrevisao = ['aguardando compra', 'compra realizada'];
     const exibeDataPrevisao = statusComPrevisao.includes(statusNormalizadoLinha);
@@ -63695,7 +64145,7 @@ function renderizarLista() {
       concluido: { bg: '#f1f5f9', color: '#334155', border: '#cbd5e1' }
     };
     const estiloStatusBadge = statusBadgeEstilos[statusNormalizadoLinha] || { bg: '#f8fafc', color: '#475569', border: '#d7dee8' };
-    
+
     tr.innerHTML = `
       <td style="padding:12px 10px;font-size:12px;color:#111827;font-weight:700;text-align:center;white-space:nowrap;">${escapeHtml(linha.idSolicitante || '-')}</td>
       <td style="padding:12px 16px;font-size:12px;color:#111827;font-weight:500;">
@@ -63724,7 +64174,7 @@ function renderizarLista() {
     tr.setAttribute('data-status-label', String(linha.status || '-'));
     tr.setAttribute('data-solicitante-filter', normalizarTextoFluxoCompras(linha.solicitante || '-'));
     tr.setAttribute('data-solicitante-label', String(linha.solicitante || '-'));
-    
+
     corpoTabela.appendChild(tr);
 
     const trFluxo = document.createElement('tr');
@@ -63764,7 +64214,7 @@ function renderizarLista() {
     `;
     corpoTabela.appendChild(trDetalhe);
   });
-  
+
   // Se não houver linhas, mostra mensagem
   if (linhas.length === 0) {
     const tr = document.createElement('tr');
@@ -63928,7 +64378,7 @@ window.abrirModalPorStatusLista = abrirModalPorStatusLista;
 // Função para exibir anexos de um item de aprovação
 function exibirAnexosAprovacao(itemId, anexosStr) {
   console.log('[Anexos] Chamada da função com itemId:', itemId, 'anexosStr type:', typeof anexosStr);
-  
+
   // Faz o parse da string JSON
   let anexos;
   try {
@@ -63945,15 +64395,15 @@ function exibirAnexosAprovacao(itemId, anexosStr) {
     alert('Erro ao carregar anexos: ' + err.message);
     return;
   }
-  
+
   if (!anexos || !Array.isArray(anexos) || anexos.length === 0) {
     console.log('[Anexos] Nenhum anexo válido encontrado');
     alert('Este item não possui anexos');
     return;
   }
-  
+
   console.log('[Anexos] Total de anexos:', anexos.length);
-  
+
   // Função helper para escapar HTML
   const escapeHtml = (text) => {
     if (!text) return '';
@@ -63963,7 +64413,7 @@ function exibirAnexosAprovacao(itemId, anexosStr) {
                .replace(/"/g, '&quot;')
                .replace(/'/g, '&#039;');
   };
-  
+
   // Helper para normalizar anexo: suporta string URL simples (Supabase) ou objeto {nome, url, tipo}
   const normalizarAnexoExibicao = (raw) => {
     if (typeof raw === 'string') {
@@ -63980,21 +64430,21 @@ function exibirAnexosAprovacao(itemId, anexosStr) {
   // Cria HTML dos anexos
   const anexosHtml = anexos.map((anexoRaw, idx) => {
     const anexo = normalizarAnexoExibicao(anexoRaw);
-    const icone = anexo.tipo?.includes('pdf') ? 'fa-file-pdf' : 
-                  anexo.tipo?.includes('image') ? 'fa-file-image' : 
-                  anexo.tipo?.includes('word') ? 'fa-file-word' : 
-                  anexo.tipo?.includes('excel') || anexo.tipo?.includes('spreadsheet') ? 'fa-file-excel' : 
+    const icone = anexo.tipo?.includes('pdf') ? 'fa-file-pdf' :
+                  anexo.tipo?.includes('image') ? 'fa-file-image' :
+                  anexo.tipo?.includes('word') ? 'fa-file-word' :
+                  anexo.tipo?.includes('excel') || anexo.tipo?.includes('spreadsheet') ? 'fa-file-excel' :
                   'fa-file';
-    
-    const cor = anexo.tipo?.includes('pdf') ? '#ef4444' : 
-                anexo.tipo?.includes('image') ? '#10b981' : 
-                anexo.tipo?.includes('word') ? '#3b82f6' : 
-                anexo.tipo?.includes('excel') ? '#059669' : 
+
+    const cor = anexo.tipo?.includes('pdf') ? '#ef4444' :
+                anexo.tipo?.includes('image') ? '#10b981' :
+                anexo.tipo?.includes('word') ? '#3b82f6' :
+                anexo.tipo?.includes('excel') ? '#059669' :
                 '#6b7280';
-    
+
     return `
-      <div style="background:white;border:2px solid #e5e7eb;border-radius:8px;padding:16px;display:flex;align-items:center;gap:12px;transition:all 0.2s;cursor:pointer;" 
-           onmouseover="this.style.borderColor='#3b82f6';this.style.transform='translateY(-2px)';this.style.boxShadow='0 4px 12px rgba(59,130,246,0.2)'" 
+      <div style="background:white;border:2px solid #e5e7eb;border-radius:8px;padding:16px;display:flex;align-items:center;gap:12px;transition:all 0.2s;cursor:pointer;"
+           onmouseover="this.style.borderColor='#3b82f6';this.style.transform='translateY(-2px)';this.style.boxShadow='0 4px 12px rgba(59,130,246,0.2)'"
            onmouseout="this.style.borderColor='#e5e7eb';this.style.transform='translateY(0)';this.style.boxShadow='none'"
            onclick="window.open('${anexo.url}', '_blank')">
         <div style="width:48px;height:48px;background:${cor}15;border-radius:8px;display:flex;align-items:center;justify-content:center;">
@@ -64011,11 +64461,11 @@ function exibirAnexosAprovacao(itemId, anexosStr) {
       </div>
     `;
   }).join('');
-  
+
   // Cria modal
   const modalId = 'modalAnexosAprovacao';
   let modal = document.getElementById(modalId);
-  
+
   if (!modal) {
     modal = document.createElement('div');
     modal.id = modalId;
@@ -64024,7 +64474,7 @@ function exibirAnexosAprovacao(itemId, anexosStr) {
     modal.style.setProperty('z-index', '10003', 'important');
     document.body.appendChild(modal);
   }
-  
+
   modal.innerHTML = `
     <div class="modal-content" style="max-width:700px;width:90%;max-height:80vh;overflow-y:auto;">
       <div class="modal-header" style="background:linear-gradient(135deg,#3b82f6 0%,#2563eb 100%);color:white;padding:20px;border-radius:8px 8px 0 0;">
@@ -64043,18 +64493,18 @@ function exibirAnexosAprovacao(itemId, anexosStr) {
             </div>
           </div>
         </div>
-        
+
         <div style="display:flex;flex-direction:column;gap:12px;">
           ${anexosHtml}
         </div>
-        
+
         <div style="margin-top:20px;padding-top:20px;border-top:2px solid #e5e7eb;text-align:center;color:#6b7280;font-size:12px;">
           Total de ${anexos.length} anexo(s)
         </div>
       </div>
     </div>
   `;
-  
+
   console.log('[Anexos] Modal criado, exibindo...');
   modal.style.display = 'flex';
   modal.style.setProperty('z-index', '10003', 'important');
@@ -64070,26 +64520,26 @@ async function aprovarTodasRequisicoes() {
     // Busca todas as solicitações aguardando aprovação (não apenas do usuário logado)
     const resp = await fetch(`/api/compras/todas`, { credentials: 'include' });
     if (!resp.ok) throw new Error('Erro ao carregar solicitações');
-    
+
     const data = await resp.json();
     const todasSolicitacoes = data.solicitacoes || [];
-    
+
     // Filtra apenas as que estão aguardando aprovação
-    const itensAprovacao = todasSolicitacoes.filter(item => 
+    const itensAprovacao = todasSolicitacoes.filter(item =>
       (item.status || '').toLowerCase().trim() === 'aguardando aprovação da requisição'
     );
-    
+
     if (itensAprovacao.length === 0) {
       alert('Nenhuma solicitação aguardando aprovação');
       return;
     }
-    
+
     if (!confirm(`Deseja aprovar ${itensAprovacao.length} item(ns)? Todos serão movidos para "Aguardando Compra".`)) return;
-    
+
     // Atualiza status de todos os itens
     let aprovados = 0;
     let erros = 0;
-    
+
     for (const item of itensAprovacao) {
       try {
         const respUpdate = await fetch(`/api/compras/item/${item.id}`, {
@@ -64098,7 +64548,7 @@ async function aprovarTodasRequisicoes() {
           credentials: 'include',
           body: JSON.stringify({ status: 'aguardando compra' })
         });
-        
+
         if (respUpdate.ok) {
           aprovados++;
         } else {
@@ -64109,18 +64559,18 @@ async function aprovarTodasRequisicoes() {
         erros++;
       }
     }
-    
+
     // Feedback
     if (erros === 0) {
       alert(`✓ ${aprovados} item(ns) aprovado(s) com sucesso!`);
     } else {
       alert(`${aprovados} item(ns) aprovado(s), ${erros} erro(s).`);
     }
-    
+
     // Fecha o modal e recarrega os kanbans
     document.getElementById('modalAprovacaoRequisicao').style.display = 'none';
     await loadMinhasSolicitacoes();
-    
+
   } catch (err) {
     console.error('[Aprovação] Erro ao aprovar requisições:', err);
     alert('Erro ao aprovar requisições: ' + err.message);
@@ -64187,18 +64637,16 @@ function atualizarResumoComprasKanban() {
 }
 
 function alterarVisaoComprasKanban(visao = 'ativas') {
-  const modo = visao === 'historico' ? 'historico' : 'ativas';
   const wrapper = document.getElementById('minhasComprasWrapper');
   if (!wrapper) return;
 
-  wrapper.dataset.boardView = modo;
+  // O fluxo completo permanece em uma única visão. A paginação de 50 cards
+  // mantém a coluna Concluído leve sem precisar separá-la em Histórico.
+  wrapper.dataset.boardView = 'todos';
   const btnAtivas = document.getElementById('comprasBoardAtivasBtn');
-  const btnHistorico = document.getElementById('comprasBoardHistoricoBtn');
-  btnAtivas?.classList.toggle('is-active', modo === 'ativas');
-  btnHistorico?.classList.toggle('is-active', modo === 'historico');
-  btnAtivas?.setAttribute('aria-selected', String(modo === 'ativas'));
-  btnHistorico?.setAttribute('aria-selected', String(modo === 'historico'));
-  localStorage.setItem('comprasBoardView', modo);
+  btnAtivas?.classList.add('is-active');
+  btnAtivas?.setAttribute('aria-selected', 'true');
+  localStorage.removeItem('comprasBoardView');
   requestAnimationFrame(ajustarAlturaKanban);
 }
 
@@ -64303,11 +64751,11 @@ function renderizarKanbanPrimeiraFaseRapida(kanbanContainer, lista, filtroStatus
   }));
 
   const statusPrimeiraFase = [
+    'analise de cadastro',
     'aguardando aprovação da requisição',
     'solicitado revisão',
     'aguardando cotação',
     'cotado aguardando escolha',
-    'analise de cadastro',
     'aguardando compra preparação'
   ];
 
@@ -64449,7 +64897,8 @@ function obterListaNavegacaoModalNfePedidos() {
     .map((card) => {
       const nIdReceb = String(card.getAttribute('data-n-id-receb') || '').trim();
       const numero = String(card.getAttribute('data-numero-pedido') || '').trim();
-      return { nIdReceb, numero };
+      const status = String(card.closest('.kanban-column-minhas')?.getAttribute('data-status') || '').trim();
+      return { nIdReceb, numero, status };
     })
     .filter((item) => {
       if (!item.nIdReceb || vistos.has(item.nIdReceb)) return false;
@@ -64477,13 +64926,13 @@ function atualizarControlesNavegacaoModalNfePedidos() {
   }
 }
 
-function configurarNavegacaoModalNfePedidos(nIdRecebAtual, numeroAtual = '') {
+function configurarNavegacaoModalNfePedidos(nIdRecebAtual, numeroAtual = '', statusAtual = '') {
   const atual = String(nIdRecebAtual || '').trim();
   const lista = obterListaNavegacaoModalNfePedidos();
 
   let index = lista.findIndex((item) => item.nIdReceb === atual);
   if (atual && index === -1) {
-    lista.push({ nIdReceb: atual, numero: String(numeroAtual || '').trim() });
+    lista.push({ nIdReceb: atual, numero: String(numeroAtual || '').trim(), status: String(statusAtual || '').trim() });
     index = lista.length - 1;
   }
 
@@ -64505,7 +64954,7 @@ async function abrirProximoModalNfePedidos() {
   const proximo = lista[idx + 1];
   if (!proximo?.nIdReceb) return;
 
-  await abrirModalNfePedidos(proximo.nIdReceb, proximo.numero || '');
+  await abrirModalNfePedidos(proximo.nIdReceb, proximo.numero || '', proximo.status || '');
 }
 
 function formatarValorMoedaNfePedidos(valor) {
@@ -64521,33 +64970,43 @@ function renderTabelaItensModalNfePedidos(itens = []) {
 
   const linhas = itens.map((item) => `
     <tr style="border-bottom:1px solid #e2e8f0;">
+      <td class="cp-sheet-image-cell">${renderizarMiniaturaProdutoCompra(item)}</td>
       <td style="padding:8px;font-size:12px;color:#0f172a;">${escapeHtml(String(item?.cCodigoProduto || '-'))}</td>
       <td style="padding:8px;font-size:12px;color:#0f172a;">${escapeHtml(String(item?.cDescricaoProduto || '-'))}</td>
       <td style="padding:8px;font-size:12px;color:#334155;">${escapeHtml(String(item?.cNCM || '-'))}</td>
       <td style="padding:8px;font-size:12px;color:#334155;text-align:center;">${escapeHtml(String(item?.cUnidadeNfe || '-'))}</td>
       <td style="padding:8px;font-size:12px;color:#334155;text-align:right;">${Number.isFinite(Number(item?.nPrecoUnit)) ? Number(item.nPrecoUnit).toLocaleString('pt-BR', { minimumFractionDigits: 4, maximumFractionDigits: 6 }) : '-'}</td>
       <td style="padding:8px;font-size:12px;color:#334155;text-align:right;">${Number.isFinite(Number(item?.nQtdeNFe)) ? Number(item.nQtdeNFe).toLocaleString('pt-BR') : '-'}</td>
+      <td class="cp-nfe-planned-cell"><span>A construir</span><small>Associação do produto</small></td>
       <td style="padding:8px;font-size:12px;color:#334155;">${escapeHtml(String(item?.cCFOPEntrada || '-'))}</td>
       <td style="padding:8px;font-size:12px;color:#334155;line-height:1.4;">
         ${escapeHtml(String(item?.cCFOPDescricao || '-'))}
         ${item?.cCFOP ? `<div style="font-size:11px;color:#64748b;margin-top:2px;">CFOP item: ${escapeHtml(String(item.cCFOP))}</div>` : ''}
       </td>
+      <td class="cp-nfe-planned-cell"><span>A construir</span><small>Categoria</small></td>
+      <td class="cp-nfe-planned-cell"><span>A construir</span><small>Estoque</small></td>
+      <td class="cp-nfe-planned-cell"><span>A construir</span><small>Conta a pagar</small></td>
     </tr>
   `).join('');
 
   return `
-    <div style="border:1px solid #e2e8f0;border-radius:8px;overflow:auto;max-height:320px;">
-      <table style="width:100%;border-collapse:collapse;min-width:980px;">
+    <div class="cp-nfe-table-wrap" style="border:1px solid #e2e8f0;border-radius:8px;overflow:auto;max-height:320px;">
+      <table class="cp-nfe-items-table" style="width:100%;border-collapse:collapse;min-width:1520px;">
         <thead>
           <tr style="position:sticky;top:0;background:#f8fafc;border-bottom:1px solid #e2e8f0;">
+            <th style="padding:8px;text-align:center;font-size:12px;color:#334155;">Foto</th>
             <th style="padding:8px;text-align:left;font-size:12px;color:#334155;">Código</th>
             <th style="padding:8px;text-align:left;font-size:12px;color:#334155;">Descrição</th>
             <th style="padding:8px;text-align:left;font-size:12px;color:#334155;">NCM</th>
             <th style="padding:8px;text-align:center;font-size:12px;color:#334155;">Unid.</th>
             <th style="padding:8px;text-align:right;font-size:12px;color:#334155;">Preço Unit.</th>
             <th style="padding:8px;text-align:right;font-size:12px;color:#334155;">Qtd NF-e</th>
+            <th style="padding:8px;text-align:left;font-size:12px;color:#334155;">Situação</th>
             <th style="padding:8px;text-align:left;font-size:12px;color:#334155;">CFOP Entrada</th>
             <th style="padding:8px;text-align:left;font-size:12px;color:#334155;">Descrição CFOP (item)</th>
+            <th style="padding:8px;text-align:left;font-size:12px;color:#334155;">Categoria</th>
+            <th style="padding:8px;text-align:left;font-size:12px;color:#334155;">Movimenta estoque</th>
+            <th style="padding:8px;text-align:left;font-size:12px;color:#334155;">Gera conta a pagar</th>
           </tr>
         </thead>
         <tbody>${linhas}</tbody>
@@ -64561,6 +65020,7 @@ function criarModalNfePedidosSeNecessario() {
 
   const modal = document.createElement('div');
   modal.id = 'modalNfePedidos';
+  modal.className = 'cp-detail-modal cp-detail-modal--nfe';
   modal.style.display = 'none';
   modal.style.position = 'fixed';
   modal.style.inset = '0';
@@ -64568,32 +65028,40 @@ function criarModalNfePedidosSeNecessario() {
   modal.style.zIndex = '10045';
   modal.style.alignItems = 'center';
   modal.style.justifyContent = 'center';
-  modal.style.padding = '18px';
 
   modal.innerHTML = `
-    <div style="width:min(1020px,100%);max-height:92vh;overflow:auto;background:#ffffff;border-radius:12px;box-shadow:0 20px 50px rgba(2,6,23,.35);border:1px solid #d1d5db;overflow:hidden;">
-      <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 16px;border-bottom:1px solid #e5e7eb;background:#f8fafc;">
-        <strong style="font-size:15px;color:#0f172a;display:flex;align-items:center;gap:8px;">
-          <i class="fa-solid fa-file-invoice-dollar" style="color:#92400e;"></i>
-          <span>NFe dos pedidos</span>
+    <div class="cp-detail-shell cp-purchase-sheet cp-nfe-sheet">
+      <div class="cp-detail-header">
+        <strong>
+          <i class="fa-solid fa-file-invoice-dollar"></i>
+          <span>Recebimento NF-e Nº</span>
           <span id="modalNfePedidosNumero" style="color:#92400e;"></span>
         </strong>
-        <div style="display:flex;align-items:center;gap:8px;">
+        <div class="cp-detail-header-actions">
           <span id="modalNfePedidosNavInfo" style="font-size:12px;color:#64748b;min-width:36px;text-align:center;">0/0</span>
-          <button type="button" id="modalNfePedidosProximo" style="border:1px solid #cbd5e1;background:#ffffff;color:#334155;font-size:12px;cursor:pointer;border-radius:6px;padding:6px 10px;display:inline-flex;align-items:center;gap:6px;">
+          <button type="button" id="modalNfePedidosProximo" class="cp-detail-next">
             Próximo
             <i class="fa-solid fa-arrow-right"></i>
           </button>
-          <button type="button" id="modalNfePedidosFechar" style="border:none;background:transparent;color:#475569;font-size:18px;cursor:pointer;">
+          <button type="button" id="modalNfePedidosFechar" class="modal-close" aria-label="Fechar recebimento da NF-e">
             <i class="fa-solid fa-xmark"></i>
           </button>
         </div>
       </div>
-
-      <div style="padding:16px;display:flex;flex-direction:column;gap:12px;">
-        <div id="modalNfePedidosInfo" style="display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px;"></div>
-        <div id="modalNfePedidosCfopInfo"></div>
-        <div id="modalNfePedidosItens"></div>
+      <div class="cp-nfe-layout">
+        <main class="cp-nfe-main">
+          <div id="modalNfePedidosInfo" class="cp-nfe-info"></div>
+          <nav class="cp-nfe-tabs" aria-label="Seções do recebimento">
+            <button type="button" class="is-active">Itens da NF-e</button>
+            ${['Transporte','Totais','Parcelas','Departamentos','Informações adicionais','Observações'].map(label => `<button type="button" disabled title="Aguardando implementação do backend">${label}<small>A construir</small></button>`).join('')}
+          </nav>
+          <div id="modalNfePedidosCfopInfo" class="cp-nfe-cfop"></div>
+          <section class="cp-nfe-items-section">
+            <div class="cp-nfe-import-guidance"><strong>Itens recebidos do fornecedor</strong><span>Associação de produtos, situação fiscal e movimentações serão integradas pelo backend.</span></div>
+            <div id="modalNfePedidosItens"></div>
+          </section>
+        </main>
+        <div id="modalNfePedidosAcoes"></div>
       </div>
     </div>
   `;
@@ -64681,7 +65149,7 @@ async function atualizarComprasRecebimentoNfe(nIdReceb, compras) {
   return data;
 }
 
-async function abrirModalNfePedidos(nIdReceb, numeroNfeRef = '') {
+async function abrirModalNfePedidos(nIdReceb, numeroNfeRef = '', statusRef = '') {
   criarModalNfePedidosSeNecessario();
   const modal = obterModalNfePedidosEl();
   if (!modal) return;
@@ -64690,14 +65158,21 @@ async function abrirModalNfePedidos(nIdReceb, numeroNfeRef = '') {
   const infoEl = document.getElementById('modalNfePedidosInfo');
   const cfopInfoEl = document.getElementById('modalNfePedidosCfopInfo');
   const itensEl = document.getElementById('modalNfePedidosItens');
-  if (!numeroEl || !infoEl || !cfopInfoEl || !itensEl) return;
+  const acoesEl = document.getElementById('modalNfePedidosAcoes');
+  if (!numeroEl || !infoEl || !cfopInfoEl || !itensEl || !acoesEl) return;
 
+  const limiteMenu = Math.max(
+    Number(document.querySelector('.left-side')?.getBoundingClientRect()?.right) || 0,
+    Number(document.getElementById('sidebarContent')?.getBoundingClientRect()?.right) || 0
+  );
+  modal.style.setProperty('--cp-detail-nav-offset', `${Math.max(0, Math.round(limiteMenu))}px`);
   modal.style.display = 'flex';
-  numeroEl.textContent = numeroNfeRef ? `• ${numeroNfeRef}` : '';
-  configurarNavegacaoModalNfePedidos(nIdReceb, numeroNfeRef);
+  numeroEl.textContent = numeroNfeRef || '';
+  configurarNavegacaoModalNfePedidos(nIdReceb, numeroNfeRef, statusRef);
   infoEl.innerHTML = '<div style="grid-column:1/-1;font-size:13px;color:#64748b;">Carregando dados da NF-e na Omie...</div>';
   cfopInfoEl.innerHTML = '';
   itensEl.innerHTML = '';
+  acoesEl.innerHTML = renderizarAcoesOperacionaisCompra('nfe', { status: statusRef });
 
   try {
     const resp = await fetch(`/api/compras/recebimentos-nfe/detalhes/${encodeURIComponent(String(nIdReceb || ''))}`, {
@@ -64717,19 +65192,20 @@ async function abrirModalNfePedidos(nIdReceb, numeroNfeRef = '') {
       : '';
     if (cNumeroNFe) {
       const numeroLimpo = cNumeroNFe.replace(/^0+/, '') || cNumeroNFe;
-      numeroEl.textContent = `• ${numeroLimpo}`;
+      numeroEl.textContent = numeroLimpo;
     }
+    acoesEl.innerHTML = renderizarAcoesOperacionaisCompra('nfe', { danfeUrl: linkPdfPorNumeroNfe, status: statusRef });
 
     const chaveNfeTexto = String(dados?.cChaveNFe || '-');
     const chaveNfeHtml = (linkPdfPorNumeroNfe && chaveNfeTexto !== '-')
       ? `
-        <div style="display:inline-flex;align-items:center;gap:6px;word-break:break-all;">
+        <div class="cp-nfe-key-value">
           <a
             href="${linkPdfPorNumeroNfe}"
             target="_blank"
             rel="noopener"
             title="Abrir PDF da NF-e"
-            style="color:#0f172a;font-weight:700;text-decoration:underline;word-break:break-all;">
+            class="cp-nfe-key-link">
             ${escapeHtml(chaveNfeTexto)}
           </a>
           <a
@@ -64742,7 +65218,7 @@ async function abrirModalNfePedidos(nIdReceb, numeroNfeRef = '') {
           </a>
         </div>
       `
-      : `<div style="font-size:12px;color:#0f172a;font-weight:700;word-break:break-all;">${escapeHtml(chaveNfeTexto)}</div>`;
+      : `<div class="cp-nfe-key-value cp-nfe-key-value--plain">${escapeHtml(chaveNfeTexto)}</div>`;
 
     infoEl.innerHTML = `
       <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:8px;">
@@ -64795,6 +65271,37 @@ async function abrirModalNfePedidos(nIdReceb, numeroNfeRef = '') {
         <div style="font-size:11px;color:#64748b;">cObs</div>
         <div style="font-size:12px;color:#0f172a;font-weight:700;line-height:1.5;white-space:pre-wrap;">${escapeHtml(String(dados?.cObs || '-'))}</div>
       </div>
+    `;
+
+    const iniciaisFornecedorNfe = String(dados?.cNome || 'NF').trim().slice(0, 2).toUpperCase();
+    const possiveisComprasNfe = Array.isArray(dados?.possiveisComprasMesmoValor) ? dados.possiveisComprasMesmoValor : [];
+    infoEl.innerHTML = `
+      <section class="cp-sheet-summary cp-nfe-summary" aria-label="Resumo da nota fiscal">
+        <div class="cp-sheet-avatar" aria-hidden="true">${escapeHtml(iniciaisFornecedorNfe)}</div>
+        <div class="cp-sheet-fields">
+          <div class="cp-sheet-field cp-sheet-field--wide"><span>Fornecedor</span><strong title="${escapeHtml(String(dados?.cNome || '-'))}">${escapeHtml(String(dados?.cNome || '-'))}</strong></div>
+          <div class="cp-sheet-field cp-sheet-field--planned"><span>CNPJ</span><strong>A construir</strong><small>Backend: documento do fornecedor</small></div>
+          <div class="cp-sheet-field"><span>Emissão</span><strong>${escapeHtml(String(dados?.dEmissaoNFe || '-'))}</strong></div>
+          <div class="cp-sheet-field"><span>Categoria da compra</span><strong title="${escapeHtml(String(dados?.categoriaCompra?.descricao || '-'))}">${escapeHtml(String(dados?.categoriaCompra?.descricao || '-'))}</strong></div>
+          <div class="cp-sheet-status-inline"><span>Status</span><strong>Faturada pelo fornecedor</strong></div>
+        </div>
+      </section>
+      <section class="cp-sheet-totals cp-nfe-totals" aria-label="Totais da nota fiscal">
+        <div><span>Documento</span><strong>NF-e Nº ${escapeHtml(String(dados?.cNumeroNFe || '-'))}</strong></div>
+        <div><span>Itens</span><strong>${Array.isArray(dados?.itens) ? dados.itens.length : 0}</strong></div>
+        <div><span>Valor da NF-e</span><strong>${escapeHtml(formatarValorMoedaNfePedidos(dados?.nValorNFe))}</strong></div>
+        <div class="cp-nfe-purchase-control"><label for="modalNfePedidosComprasSelect">Documento de compras?</label><select id="modalNfePedidosComprasSelect"><option value="" ${normalizarComprasNfe(dados?.compras) === '' ? 'selected' : ''}>Selecione</option><option value="sim" ${normalizarComprasNfe(dados?.compras) === 'sim' ? 'selected' : ''}>Sim</option><option value="nao" ${normalizarComprasNfe(dados?.compras) === 'nao' ? 'selected' : ''}>Não</option></select><small id="modalNfePedidosComprasMsg"></small></div>
+      </section>
+      <section class="cp-nfe-document-meta">
+        <div><span>Chave da NF-e</span>${chaveNfeHtml}</div>
+        <div class="cp-nfe-meta-natureza"><span>Natureza da categoria</span><strong title="${escapeHtml(String(dados?.categoriaCompra?.natureza || '-'))}">${escapeHtml(String(dados?.categoriaCompra?.natureza || '-'))}</strong></div>
+        <div><span>Possíveis compras do mesmo valor</span><strong>${possiveisComprasNfe.length ? escapeHtml(possiveisComprasNfe.join(', ')) : '-'}</strong></div>
+        <div class="is-planned"><span>Série, modelo, IE e UF</span><strong>A construir</strong><small>Backend: ampliar retorno do recebimento Omie</small></div>
+        <div class="is-planned"><span>Reforma tributária</span><strong>A construir</strong><small>Backend: IS, IBS e CBS</small></div>
+      </section>
+      ${String(dados?.cObs || '').trim() && String(dados?.cObs || '').trim() !== '-'
+        ? `<section class="cp-sheet-note cp-nfe-note"><i class="fa-regular fa-note-sticky"></i><div><span>Observações da NF-e</span><strong>${escapeHtml(String(dados.cObs))}</strong></div></section>`
+        : ''}
     `;
 
     const comprasSelectEl = document.getElementById('modalNfePedidosComprasSelect');
@@ -64892,6 +65399,7 @@ async function abrirModalNfePedidos(nIdReceb, numeroNfeRef = '') {
     }
 
     itensEl.innerHTML = renderTabelaItensModalNfePedidos(dados?.itens || []);
+    hidratarMiniaturasProdutosCompra(itensEl);
   } catch (err) {
     infoEl.innerHTML = `<div style="grid-column:1/-1;font-size:13px;color:#b91c1c;background:#fef2f2;border:1px solid #fecaca;border-radius:8px;padding:10px;">${escapeHtml(String(err?.message || 'Erro ao carregar dados da NF-e'))}</div>`;
     cfopInfoEl.innerHTML = '';
@@ -64905,23 +65413,29 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
   const kanbanContainer = document.getElementById('kanbanMinhasSolicitacoes');
   const wrapper = document.getElementById('minhasComprasWrapper');
   const currentUser = (document.getElementById('userNameDisplay')?.textContent || '').trim();
-  
+
   if (!kanbanContainer || !wrapper) return;
   if (!currentUser) {
     wrapper.style.display = 'none';
     return;
   }
-  
+
   wrapper.style.display = 'flex';
   requestAnimationFrame(() => atualizarOffsetCabecalhoListaCompras());
+  // Ao reabrir/recarregar o fluxo, começa sempre pela primeira etapa.
+  // Evita que uma rolagem feita em outro zoom deixe as colunas iniciais ocultas.
+  kanbanContainer.scrollLeft = 0;
+  window.__comprasKanbanCardsCache = {};
+  window.__comprasKanbanLimites = {};
+  window.__comprasKanbanFiltroAtual = '';
   kanbanContainer.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:40px;color:#9ca3af;font-size:14px;">Carregando...</div>';
-  
+
   // Ajusta a altura do kanban para ocupar todo o espaço disponível
   ajustarAlturaKanban();
-  
+
   // Carrega preferências de filtro do usuário antes de renderizar
   await carregarPreferenciasKanbans();
-  
+
   try {
     // Busca todas as solicitações (não apenas as do usuário)
     const resp = await fetch(`/api/compras/todas`, { credentials: 'include' });
@@ -64938,11 +65452,11 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
       const status = (item.status || '').toLowerCase();
       return status !== 'aguardando compra' && status !== 'compra realizada';
     });
-    
+
     // Aplica filtro por solicitante se filtroSolicitante não for 'todas'
     // Variável global controla se mostra apenas do usuário logado ou todas
     const filtroSolicitante = window.kanbanFiltroSolicitante || 'minhas';
-    
+
     if (filtroSolicitante === 'minhas') {
       // Filtra apenas itens onde o solicitante é o usuário logado
       lista = lista.filter(item => {
@@ -64952,7 +65466,7 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
       });
     }
     // Se filtroSolicitante === 'todas', não aplica filtro (mostra tudo)
-    
+
     // Busca requisições sem pedidos de compra
     const respReq = await fetch(`/api/compras/requisicoes`, { credentials: 'include' });
     let requisicoes = [];
@@ -64973,7 +65487,7 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
         isRequisicao: true,
         ...req
       }));
-      
+
       // Aplica filtro por solicitante nas requisições se modo 'minhas'
       if (filtroSolicitante === 'minhas') {
         // Para requisições, valida se algum item do grupo pertence ao usuário
@@ -64987,7 +65501,7 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
 
           // Fallback apenas se tiver cod_req_compra ou cod_int_req_compra
           if (req.cod_req_compra || req.cod_int_req_compra) {
-            const existeNaSolicitacao = lista.some(item => 
+            const existeNaSolicitacao = lista.some(item =>
               (item.cod_req_compra === req.cod_req_compra || item.numero_pedido === req.cod_int_req_compra) &&
               (item.solicitante || '').trim().toLowerCase() === currentUser.toLowerCase()
             );
@@ -64997,13 +65511,13 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
           return false;
         });
       }
-      
+
       // DEBUG: Log para verificar requisição específica
       const req2337 = requisicoes.find(r => r.cod_req_compra === '10816583034');
       if (req2337) {
         console.log('[DEBUG] Requisição 10816583034 encontrada:', req2337);
       }
-      
+
       lista = [...lista, ...requisicoes];
     }
 
@@ -65019,7 +65533,7 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
     });
 
     renderizarKanbanPrimeiraFaseRapida(kanbanContainer, listaPrimeiraFase, filtroStatus);
-    
+
     // Monta query string de filtro de data se houver filtro ativo
     const _filtroDataParams = (() => {
       if (!window._comprasFiltroDatas) return '';
@@ -65035,7 +65549,7 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
       fetch(`/api/compras/compras-realizadas${_filtroDataParams}`, { credentials: 'include' }),
       fetch(`/api/compras/pedidos-etapa-nf${_filtroDataParams}`, { credentials: 'include' })
     ]);
-    
+
     // Busca compras realizadas da tabela pedidos_omie (c_etapa = '15' e Etapa_NF vazia)
     console.log('[DEBUG] Buscando compras realizadas...');
     console.log('[DEBUG] Resposta do fetch compras realizadas:', respCompra.status, respCompra.ok);
@@ -65079,7 +65593,7 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
           itens: comp.itens || [] // Garante que itens estão presentes
         };
       });
-      
+
       // Aplica filtro por solicitante nas compras realizadas se modo 'minhas'
       if (filtroSolicitante === 'minhas') {
         const usuarioNormalizado = normalizarSolicitanteParaId(currentUser);
@@ -65102,7 +65616,7 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
           });
         });
       }
-      
+
       console.log('[DEBUG] Compras realizadas mapeadas:', comprasRealizadas);
       console.log('[DEBUG] Total de compras realizadas:', comprasRealizadas.length);
       if (comprasRealizadas.length > 0) {
@@ -65193,14 +65707,14 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
       console.log('[DEBUG] Total de pedidos Etapa_NF:', pedidosEtapaNf.length);
       lista = [...lista, ...pedidosEtapaNf];
     }
-    
+
     console.log('[DEBUG] Lista total após adicionar compras/Etapa_NF:', lista.length);
-    
+
     // Aplica filtro de status se fornecido
     if (filtroStatus && filtroStatus.length > 0) {
       lista = lista.filter(item => filtroStatus.includes((item.status || 'pendente').toLowerCase()));
     }
-    
+
     if (!lista.length) {
       kanbanContainer.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:40px;color:#9ca3af;font-size:14px;">Nenhuma solicitação encontrada.</div>';
       return;
@@ -65215,20 +65729,20 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
     // Comentário: mantém cache dos itens para uso em modais do kanban
     window.kanbanMinhasItens = itensComStatusNormalizado;
 
-    
+
     // DEBUG: Verificar requisição 10816583034
     const item2337 = itensComStatusNormalizado.find(i => i.cod_req_compra === '10816583034');
     if (item2337) {
       console.log('[DEBUG] Status normalizado da requisição 10816583034:', item2337.status, '->', item2337.statusNormalizado);
     }
-    
+
     // Agrupa por status (apenas os que o usuário solicitou)
     const statusColunas = {
+      'analise de cadastro': filtrarItensPorDataLimite('analise de cadastro', itensComStatusNormalizado.filter(i => i.statusNormalizado === 'analise de cadastro')),
       'aguardando aprovação da requisição': filtrarItensPorDataLimite('aguardando aprovação da requisição', itensComStatusNormalizado.filter(i => i.statusNormalizado === 'aguardando aprovação da requisição')),
       'solicitado revisão': filtrarItensPorDataLimite('solicitado revisão', itensComStatusNormalizado.filter(i => i.statusNormalizado === 'retificar' || (i.table_source === 'compras_sem_cadastro' && i.statusNormalizado === 'carrinho'))),
       'aguardando cotação': filtrarItensPorDataLimite('aguardando cotação', itensComStatusNormalizado.filter(i => i.statusNormalizado === 'aguardando cotação')),
       'cotado aguardando escolha': filtrarItensPorDataLimite('cotado aguardando escolha', itensComStatusNormalizado.filter(i => i.statusNormalizado === 'cotado')),
-      'analise de cadastro': filtrarItensPorDataLimite('analise de cadastro', itensComStatusNormalizado.filter(i => i.statusNormalizado === 'analise de cadastro')),
       'aguardando compra preparação': filtrarItensPorDataLimite('aguardando compra preparação', itensComStatusNormalizado.filter(i => i.statusNormalizado === 'aguardando compra preparação')),
       'compra realizada': (() => {
         const cards = itensComStatusNormalizado.filter(i => i.statusNormalizado === 'compra realizada');
@@ -65243,7 +65757,7 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
       'recebido': filtrarItensPorDataLimite('recebido', itensComStatusNormalizado.filter(i => i.statusNormalizado === 'recebido')),
       'concluído': filtrarItensPorDataLimite('concluído', itensComStatusNormalizado.filter(i => i.statusNormalizado === 'concluído' || i.statusNormalizado === 'concluido'))
     };
-    
+
     console.log('[DEBUG] Compras realizadas no statusColunas:', statusColunas['compra realizada'].length);
 
     // Renderiza colunas do kanban
@@ -65263,7 +65777,7 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
         'concluído': { ...paletaKanbanAzul, icon: 'fa-circle-check' }
       };
       const cor = cores[status] || { ...paletaKanbanAzul, icon: 'fa-circle' };
-      
+
       // Define título personalizado para colunas específicas
       const titulosPersonalizados = {
         'aguardando aprovação da requisição': 'Aprovação',
@@ -65274,23 +65788,23 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
         'aguardando compra preparação': 'Requisições'
       };
       const tituloExibir = titulosPersonalizados[status] || (status.charAt(0).toUpperCase() + status.slice(1));
-      
+
       // Mantém o visual azul padrão que aparece na abertura da tela, sem trocar
       // para bordas diferentes depois que o carregamento completo termina.
       const badgeIdentificacao = '';
       const estilosExtras = 'background:linear-gradient(135deg,#f8fafc 0%,#ffffff 100%);';
       const bordaEspecial = `border:2px solid ${cor.bg};border-top:4px solid ${cor.bg};`;
-      
+
       // Status que devem ser agrupados por número do pedido Omie (cNumero)
       const statusAgrupados = ['compra realizada', 'faturada pelo fornecedor', 'recebido', 'concluído'];
       const deveAgrupar = statusAgrupados.includes(status);
-      
+
       // Define se a coluna deve ter interação de clique (para abrir modal)
       // "cotado aguardando escolha" será aberto pelo clique no item (sem botão Abrir Tudo)
       const statusComClique = ['aguardando aprovação da requisição', 'aguardando cotação', 'aguardando compra preparação'];
       const temItens = itens.length > 0;
       const ehClicavel = statusComClique.includes(status) && temItens; // Só permite clique se houver itens
-      
+
       // Define qual função onclick chamar para cada status clicável
       const funcoesOnclick = {
         'aguardando aprovação da requisição': 'abrirModalAprovacaoRequisicao()',
@@ -65298,7 +65812,7 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
         'aguardando compra preparação': 'abrirModalSelecaoItensCompra()'
       };
       const funcaoOnclick = funcoesOnclick[status] || '';
-      
+
       // Define a cor do hover para cada status
       const coresHover = {
         'aguardando aprovação da requisição': 'rgba(37,99,235,0.3)', // Azul
@@ -65307,11 +65821,14 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
         'aguardando compra preparação': 'rgba(16,185,129,0.3)'   // Verde
       };
       const corHover = coresHover[status] || 'rgba(0,0,0,0.1)';
-      
+
       let cardsHtml = '';
-      
+      let totalCardsColuna = 0;
+
       if (itens.length === 0) {
         cardsHtml = '<div style="text-align:center;padding:24px;color:#9ca3af;font-size:13px;">Nenhum item</div>';
+        window.__comprasKanbanCardsCache[status] = [];
+        window.__comprasKanbanLimites[status] = COMPRAS_CARDS_POR_PAGINA;
       } else {
         // Para requisições e pedidos Omie, agrupa diferente
         const isRequisicao = status === 'aguardando compra preparação' && itens.length > 0 && itens[0].isRequisicao;
@@ -65319,11 +65836,11 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
         const isCompraRealizada = ['compra realizada', 'faturada pelo fornecedor', 'recebido', 'concluído', 'concluido'].includes(status)
           && itens.length > 0
           && itens[0].isCompraRealizada;
-        
+
         let grupos = {};
         let usarArrayDireto = false;
         let gruposArrayOrdenado = [];
-        
+
         if (isRequisicao) {
           // Para requisições: cada requisição é um grupo
           itens.forEach(item => {
@@ -65336,7 +65853,7 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
           // MANTÉM A ORDEM DO ARRAY ORIGINAL (já vem ordenado do backend)
           const gruposArray = [];
           const gruposVistos = new Set();
-          
+
           itens.forEach(item => {
             // Objetivo: somente no kanban "Compra realizada" considerar c_numero numérico
             let chave;
@@ -65346,7 +65863,7 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
             } else {
               chave = item.numero || item.n_cod_ped || 'sem_numero';
             }
-            
+
             if (!gruposVistos.has(chave)) {
               gruposVistos.add(chave);
               gruposArray.push({ chave, itens: [item] });
@@ -65356,7 +65873,7 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
               if (grupo) grupo.itens.push(item);
             }
           });
-          
+
           // MANTÉM COMO ARRAY ao invés de converter para objeto
           // Isso preserva a ordem garantida pelo backend
           usarArrayDireto = true;
@@ -65365,10 +65882,10 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
           // Para solicitações: agrupa usando critérios específicos por status
           // Objetivo: agrupar por grupo_requisicao para compras_sem_cadastro e solicitacao_compras
           const statusComAgrupamentoPorGrupo = ['aguardando aprovação da requisição', 'solicitado revisão', 'aguardando cotação', 'cotado aguardando escolha', 'analise de cadastro'];
-          
+
           itens.forEach(item => {
             let chave;
-            
+
             if (statusComAgrupamentoPorGrupo.includes(status)) {
               // Para esses status, agrupa por grupo_requisicao (compras_sem_cadastro e solicitacao_compras)
               chave = item.grupo_requisicao || `sem_grupo_${item.id}`;
@@ -65378,20 +65895,23 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
                 ? (item.numero_pedido || 'sem_pedido')
                 : (item.cNumero || item.cnumero || 'sem_pedido');
             }
-            
+
             if (!grupos[chave]) grupos[chave] = [];
             grupos[chave].push(item);
           });
         }
-        
+
         // Renderiza cada grupo (card único por cnumero ou requisição)
-        cardsHtml = (usarArrayDireto ? gruposArrayOrdenado.map(g => ({ chave: g.chave, itens: g.itens })) : Object.keys(grupos).map(chave => ({ chave, itens: grupos[chave] }))).map(({ chave: chaveGrupo, itens: itensGrupo }) => {
+        const gruposParaRenderizar = usarArrayDireto
+          ? gruposArrayOrdenado.map(g => ({ chave: g.chave, itens: g.itens }))
+          : Object.keys(grupos).map(chave => ({ chave, itens: grupos[chave] }));
+        const cardsRenderizados = gruposParaRenderizar.map(({ chave: chaveGrupo, itens: itensGrupo }) => {
           const primeiroItem = itensGrupo[0];
           const totalItens = itensGrupo.length;
-          
+
           // Lista de todos os IDs do grupo para passar ao modal
           const todosIds = itensGrupo.map(i => i.id).join(',');
-          
+
           // Para requisições, renderiza os itens da requisição com produtos
           let listaProdutos = '';
           if (primeiroItem.isRequisicao) {
@@ -65405,7 +65925,7 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
                   <div style="margin-bottom:4px;padding-bottom:4px;${primeiroItem.itens.length > 1 ? 'border-bottom:1px solid #f3f4f6;' : ''}">
                     <div style="font-size:12px;color:#374151;font-weight:600;">${escapeHtml(codigo)}</div>
                     <div>
-                      <div 
+                      <div
                         class="desc-truncada"
                         data-tooltip-id="${tooltipId}"
                         style="font-size:11px;color:#6b7280;cursor:help;line-height:1.3;max-height:28px;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;"
@@ -65459,7 +65979,7 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
                   <div style="margin-bottom:4px;padding-bottom:4px;${primeiroItem.itens.length > 1 ? 'border-bottom:1px solid #f3f4f6;' : ''}">
                     <div style="font-size:12px;color:#374151;font-weight:600;">${escapeHtml(codigo)}</div>
                     <div>
-                      <div 
+                      <div
                         class="desc-truncada"
                         data-tooltip-id="${tooltipId}"
                         style="font-size:11px;color:#6b7280;cursor:help;line-height:1.3;max-height:28px;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;"
@@ -65512,7 +66032,7 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
                 <div style="margin-bottom:4px;padding-bottom:4px;${itensGrupo.length > 1 ? 'border-bottom:1px solid #f3f4f6;' : ''}">
                   <div style="font-size:12px;color:#374151;font-weight:600;">${escapeHtml(codigo)}</div>
                   <div>
-                    <div 
+                    <div
                       class="desc-truncada"
                       data-tooltip-id="${tooltipId}"
                       style="font-size:11px;color:#6b7280;cursor:help;line-height:1.3;max-height:28px;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;"
@@ -65552,7 +66072,7 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
               `;
             }).join('');
           }
-          
+
           // Função para determinar cor da borda baseado no padrão de c_cod_int_ped
           const determinCorBorda = (codIntPed) => {
             if (!codIntPed || codIntPed.trim() === '') {
@@ -65568,7 +66088,7 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
             // Outros padrões = amarelo
             return '#eab308';
           };
-          
+
           const comprasCard = String(primeiroItem.compras || '').trim().toLowerCase();
           const statusesNfeOrigem = ['faturada pelo fornecedor', 'recebido', 'concluído', 'concluido'];
           const ehCardOrigemReceb = statusesNfeOrigem.includes(String(status || '').trim().toLowerCase())
@@ -65582,6 +66102,16 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
 
           const statusLower = String(status || '').toLowerCase();
           const statusNormalizado = statusLower.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+          const rotuloIdentificacaoCard = ehCardOrigemReceb ? 'NF-e Nº' : 'Pedido Nº';
+          const numeroIdentificacaoCard = ehCardOrigemReceb
+            ? (primeiroItem.numero || primeiroItem.c_numero || primeiroItem.n_id_receb || '-')
+            : (primeiroItem.isPedidoCompra
+              ? (primeiroItem.numero || primeiroItem.n_cod_ped || '-')
+              : (primeiroItem.isCompraRealizada
+                ? ((/^\d+$/.test(String(primeiroItem.c_numero || '').trim())) ? primeiroItem.c_numero : '-')
+                : (primeiroItem.isRequisicao
+                  ? (primeiroItem.cnumero || primeiroItem.numero_pedido || '-')
+                  : (primeiroItem.numero_pedido || primeiroItem.cNumero || '-'))));
           const isAprovacao = statusNormalizado.includes('aguardando aprovacao') || statusNormalizado.includes('aprovacao');
           const isRequisicoes = statusNormalizado.includes('aguardando compra preparacao');
           const isPedidoCompraCard = statusNormalizado.includes('aguardando compra') && primeiroItem.isPedidoCompra;
@@ -65621,7 +66151,7 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
           const statusesRecebimentoNfe = ['faturada pelo fornecedor', 'recebido', 'concluído', 'concluido'];
           const onclickCard = (
             (statusesRecebimentoNfe.includes(status) && primeiroItem.origem_recebimento_nfe && primeiroItem.n_id_receb)
-              ? `abrirModalNfePedidos('${String(primeiroItem.n_id_receb)}', '${String(primeiroItem.numero || '').replace(/'/g, "\\'")}')`
+              ? `abrirModalNfePedidos('${String(primeiroItem.n_id_receb)}', '${String(primeiroItem.numero || '').replace(/'/g, "\\'")}', '${String(status || '').replace(/'/g, "\\'")}')`
               :
             status === 'analise de cadastro'
               ? `abrirModalAnaliseCadastro('${primeiroItem.id}')`
@@ -65632,7 +66162,21 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
                   : `abrirModalDetalhesPedidoMinhas('${primeiroItem.numero_pedido}', '${status}', '${todosIds}')`))
           );
           const cursorCard = 'pointer';
-          
+          const expandirCardAction = isAprovacao
+            ? `toggleAprovacaoItensMinhas('${cardKey}', event)`
+            : (isPedidoCompraCard
+              ? `togglePedidoCompraItens('${cardPedKey}', event)`
+              : (isCompraRealizadaCard
+                ? `toggleCompraRealizadaItens('${cardCompKey}', event)`
+                : (isSolicitacaoCompra
+                  ? `toggleSolicitacaoCompraItens('${cardSolKey}', event)`
+                  : (isRequisicoes ? `toggleRequisicoesItensMinhas('${cardReqKey}', event)` : ''))));
+          const cardStatusOperacional = ['recebido', 'concluido'].includes(statusNormalizado)
+            ? { texto: 'Concluído', classe: 'is-done' }
+            : (['compra realizada', 'faturada pelo fornecedor'].includes(statusNormalizado)
+              ? { texto: 'Pendente', classe: 'is-pending' }
+              : { texto: 'Em andamento', classe: 'is-progress' });
+
           // Objetivo: se primeiroItem.itens vier vazio (solicitacao_compras / compras_sem_cadastro),
           // monta array sintético com os campos de produto diretos de cada item do grupo
           const itensProdutos = (primeiroItem.itens && primeiroItem.itens.length > 0)
@@ -65651,8 +66195,8 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
                 .filter(i => i.produto_codigo || i.produto_descricao);
 
           const produtosData = encodeURIComponent(JSON.stringify(itensProdutos));
-          return `
-            <div class="kanban-card" 
+          const htmlCard = `
+            <div class="kanban-card"
               data-item-id="${primeiroItem.id}"
               data-n-id-receb="${escapeHtml(String(primeiroItem.n_id_receb || ''))}"
               data-grupo-requisicao="${escapeHtml(grupoRequisicaoCard)}"
@@ -65680,47 +66224,59 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
             onmouseover="this.style.transform='translateY(-2px)';this.style.boxShadow='0 4px 8px rgba(0,0,0,0.15)'"
             onmouseout="this.style.transform='translateY(0)';this.style.boxShadow='0 1px 3px rgba(0,0,0,0.1)'">
 
+              <div class="cp-card-context" onclick="event.stopPropagation();">
+                <button type="button" class="cp-card-menu-trigger" aria-label="Ações do pedido" aria-expanded="false" onclick="toggleMenuAcoesCardCompras(this, event)">
+                  <i class="fa-solid fa-ellipsis-vertical"></i>
+                </button>
+                <div class="cp-card-menu" role="menu">
+                  <button type="button" role="menuitem" onclick="event.stopPropagation();fecharMenusAcoesCardCompras();${onclickCard}">
+                    <i class="fa-solid fa-arrow-up-right-from-square"></i>
+                    Abrir detalhes
+                  </button>
+                  ${expandirCardAction ? `
+                    <button type="button" role="menuitem" onclick="event.stopPropagation();fecharMenusAcoesCardCompras();${expandirCardAction}">
+                      <i class="fa-solid fa-chevron-down"></i>
+                      Expandir itens
+                    </button>
+                  ` : ''}
+                </div>
+              </div>
+
               ${(!isAprovacao && totalItens > 1) ? `<div style="position:absolute;top:8px;right:8px;background:#10b981;color:white;padding:2px 8px;border-radius:12px;font-size:10px;font-weight:700;">${totalItens} itens</div>` : ''}
-              
+
               <!-- Objetivo: Não exibir esse div para os 5 kanbans especiais que usam apenas chaveGrupo -->
               ${!(status === 'aguardando aprovação da requisição' || status === 'solicitado revisão' || status === 'aguardando cotação' || status === 'cotado aguardando escolha' || status === 'analise de cadastro' || status === 'aguardando compra preparação') ? `
               <div class="cp-card-number" style="font-size:12px;color:#374151;margin-bottom:8px;font-weight:600;">
                 <span style="display:inline-flex;align-items:center;gap:6px;">
-                  <span>${escapeHtml(
-                    primeiroItem.isPedidoCompra ? (primeiroItem.numero || primeiroItem.n_cod_ped || '-') :
-                    primeiroItem.isCompraRealizada ? ((/^\d+$/.test(String(primeiroItem.c_numero || '').trim()))
-                      ? primeiroItem.c_numero
-                      : '-') :
-                    primeiroItem.isRequisicao ? (primeiroItem.cnumero || primeiroItem.numero_pedido || '-') :
-                    (primeiroItem.numero_pedido || primeiroItem.cNumero || '-')
-                  )}</span>
+                  <span class="cp-card-number-label">${rotuloIdentificacaoCard}</span>
+                  <span class="cp-card-number-value">${escapeHtml(numeroIdentificacaoCard)}</span>
                   ${isCompraRealizadaComNfeNoPedido ? `<i class="fa-solid fa-triangle-exclamation" title="Compra realizada com observação iniciando por NFe:" style="color:#f59e0b;font-size:13px;"></i>` : ''}
                 </span>
               </div>
               ` : ''}
-              
+
               ${(primeiroItem.isPedidoCompra || primeiroItem.isCompraRealizada) && primeiroItem.fornecedor_nome ? `
-                <div class="cp-card-supplier" style="font-size:11px;color:#6b7280;margin-bottom:8px;padding:4px 8px;background:#f3f4f6;border-radius:4px;">
+                <div class="cp-card-supplier" title="${escapeHtml(primeiroItem.fornecedor_nome)}" style="font-size:11px;color:#6b7280;margin-bottom:8px;padding:4px 8px;background:#f3f4f6;border-radius:4px;">
                   <i class="fa-solid fa-building" style="margin-right:4px;color:#9ca3af;"></i>
                   ${escapeHtml(primeiroItem.fornecedor_nome)}
                 </div>
               ` : ''}
-              
+
               ${(primeiroItem.isPedidoCompra || primeiroItem.isCompraRealizada) && primeiroItem.d_inc_data ? `
                 <div class="cp-card-dates" style="font-size:11px;color:#6b7280;margin-bottom:8px;padding:4px 8px;background:#fef3c7;border-radius:4px;display:flex;flex-direction:column;gap:4px;">
                   <span style="display:flex;align-items:center;gap:4px;">
                     <i class="fa-solid fa-calendar" style="color:#f59e0b;"></i>
-                    <span>${new Date(primeiroItem.d_inc_data).toLocaleDateString('pt-BR')}</span>
+                    <span><span class="cp-card-date-label">Pedido:</span> ${new Date(primeiroItem.d_inc_data).toLocaleDateString('pt-BR')}</span>
                   </span>
                   ${primeiroItem.d_dt_previsao ? `
                     <span style="display:flex;align-items:center;gap:4px;color:#059669;">
                       <i class="fa-solid fa-clock" style="color:#059669;"></i>
-                      <span>${new Date(primeiroItem.d_dt_previsao).toLocaleDateString('pt-BR')}</span>
+                      <span><span class="cp-card-date-label">Previsão:</span> ${new Date(primeiroItem.d_dt_previsao).toLocaleDateString('pt-BR')}</span>
                     </span>
                   ` : ''}
                 </div>
               ` : ''}
-              
+
               ${(primeiroItem.isPedidoCompra || primeiroItem.isCompraRealizada) && primeiroItem.solicitante ? `
                 <div class="cp-card-requester" style="font-size:11px;color:#6b7280;margin-bottom:8px;padding:4px 8px;background:#e0f2fe;border-radius:4px;display:flex;align-items:center;">
                   <i class="fa-solid fa-user" style="margin-right:4px;color:#0284c7;"></i>
@@ -65728,7 +66284,7 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
                   <span style="margin-left:4px;color:#0284c7;">${escapeHtml(primeiroItem.solicitante)}</span>
                 </div>
               ` : ''}
-              
+
               <!-- Objetivo: Exibir o valor de agrupamento (grupo_requisicao ou nCodPed) nos 5 kanbans específicos + Requisições + Pedido de Compra + Compra Realizada -->
               ${(status === 'aguardando aprovação da requisição' || status === 'solicitado revisão' || status === 'aguardando cotação' || status === 'cotado aguardando escolha' || status === 'analise de cadastro' || status === 'aguardando compra preparação' || status === 'aguardando compra' || status === 'compra realizada' || status === 'faturada pelo fornecedor' || status === 'recebido' || status === 'concluído') && chaveGrupo && chaveGrupo !== '-' ? `
                 <div class="cp-card-summary" style="font-size:11px;color:#6b7280;margin-bottom:8px;padding:4px 8px;background:#f3f4f6;border-radius:4px;word-break:break-all;display:flex;align-items:center;justify-content:space-between;gap:8px;">
@@ -65774,6 +66330,7 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
                       </span>
                     `
                   }
+                  <span class="cp-card-state ${cardStatusOperacional.classe}">${cardStatusOperacional.texto}</span>
                   ${isAprovacao ? `
                     <button
                       onclick="toggleAprovacaoItensMinhas('${cardKey}', event)"
@@ -65824,22 +66381,24 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
                   </button>
                 </div>
               ` : ''}
-              
+
               ${isAprovacao ? `
-                <div id="aprovacao-itens-${cardKey}" style="display:none;">
+                <div id="aprovacao-itens-${cardKey}" class="cp-card-expanded" data-expanded-title="Itens vinculados" style="display:none;">
                   ${listaProdutos}
                 </div>
               ` : (isRequisicoes ? `
-                <div id="requisicoes-itens-${cardReqKey}" style="display:none;">
+                <div id="requisicoes-itens-${cardReqKey}" class="cp-card-expanded" data-expanded-title="Itens vinculados" style="display:none;">
                   ${listaProdutos}
                 </div>
               ` : (isPedidoCompraCard ? `
-                <div id="pedido-itens-${cardPedKey}" style="display:none;">
+                <div id="pedido-itens-${cardPedKey}" class="cp-card-expanded" data-expanded-title="Itens do pedido" style="display:none;">
                   ${listaProdutos}
                 </div>
               ` : (isCompraRealizadaCard ? `
                 <div
                   id="compra-itens-${cardCompKey}"
+                  class="cp-card-expanded"
+                  data-expanded-title="Itens do documento"
                   data-status="${escapeHtml(statusNormalizado)}"
                   data-origem-recebimento-nfe="${primeiroItem.origem_recebimento_nfe ? '1' : '0'}"
                   data-n-id-receb="${escapeHtml(String(primeiroItem.n_id_receb || ''))}"
@@ -65850,6 +66409,8 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
               ` : (isSolicitacaoCompra ? `
                 <div
                   id="solicitacao-itens-${cardSolKey}"
+                  class="cp-card-expanded"
+                  data-expanded-title="Itens vinculados"
                   data-status="${escapeHtml(status)}"
                   data-grupo-requisicao="${escapeHtml(grupoRequisicaoCard)}"
                   data-table-source="${escapeHtml(tableSourceCard)}"
@@ -65860,19 +66421,34 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
               ` : listaProdutos))))}
             </div>
           `;
-        }).join('');
+          return {
+            html: htmlCard,
+            texto: normalizarTextoBuscaCompras(`${chaveGrupo} ${JSON.stringify(itensGrupo)}`)
+          };
+        });
+        window.__comprasKanbanCardsCache[status] = cardsRenderizados;
+        window.__comprasKanbanLimites[status] = COMPRAS_CARDS_POR_PAGINA;
+        totalCardsColuna = cardsRenderizados.length;
+        const cardsIniciais = cardsRenderizados.slice(0, COMPRAS_CARDS_POR_PAGINA);
+        const restantesIniciais = Math.max(0, totalCardsColuna - cardsIniciais.length);
+        cardsHtml = cardsIniciais.map(card => card.html).join('') + (restantesIniciais > 0 ? `
+          <button type="button" class="cp-load-more" onclick="mostrarMais50CardsCompras('${String(status).replace(/'/g, "\\'")}')">
+            <strong>+${Math.min(COMPRAS_CARDS_POR_PAGINA, restantesIniciais)}</strong>
+            <span>Exibindo ${cardsIniciais.length} de ${totalCardsColuna}</span>
+          </button>
+        ` : '');
       }
-      
+
       // Em modo claro, nao reduzir opacidade das colunas vazias para evitar efeito "lavado".
       const podeSerClicavel = statusComClique.includes(status);
       const temaClaroAtivo = document.documentElement.classList.contains('light-mode');
       const estiloDesabilitado = (podeSerClicavel && !temItens)
         ? (temaClaroAtivo ? '' : 'opacity:0.75;')
         : '';
-      
+
       // Botão "Abrir Tudo" para kanbans clicáveis (exceto Requisições)
       const botaoAbrirTudo = (ehClicavel && status !== 'aguardando compra preparação' && status !== 'aguardando cotação') ? `
-        <button 
+        <button
           onclick="${funcaoOnclick}"
           style="
             background:linear-gradient(135deg,${cor.bg} 0%,${cor.bg}dd 100%);
@@ -65948,10 +66524,10 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
           badgeSomaTotal = `<span style="background:${corBgConc};color:${corTxtConc};padding:3px 9px;border-radius:8px;font-size:10px;font-weight:700;">${soma.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span>`;
         }
       }
-      
+
       return `
-        <div class="kanban-column-minhas" 
-          data-status="${status}" 
+        <div class="kanban-column-minhas"
+          data-status="${status}"
           style="flex:1;min-width:200px;${estilosExtras}${bordaEspecial}border-radius:8px;padding:16px;box-shadow:0 2px 8px rgba(0,0,0,0.08);transition:all 0.2s;${estiloDesabilitado}">
           <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:${badgeSomaTotal ? '6px' : '16px'};padding-bottom:12px;padding-top:0px;">
             <h3 style="margin:0;font-size:15px;font-weight:700;color:${cor.text};">
@@ -65960,7 +66536,7 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
             </h3>
             <span class="kanban-count-minhas" style="background:${cor.bgLight};color:${cor.text};padding:4px 10px;border-radius:12px;font-size:12px;font-weight:700;">${itens.length}</span>
           </div>
-          ${badgeSomaTotal ? `<div style="text-align:right;margin-bottom:10px;">${badgeSomaTotal}</div>` : ''}
+          ${badgeSomaTotal ? `<div class="cp-column-total" style="text-align:right;margin-bottom:10px;">${badgeSomaTotal}</div>` : ''}
           <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;padding-bottom:0px;border-top:3px solid ${cor.bg};padding-top:12px;">
             ${badgeIdentificacao}
             ${botaoAbrirTudo}
@@ -65976,8 +66552,12 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
     aplicarFiltroKanbans();
 
     // Objetivo: Após carregar os dados, exibe a visualização correta (lista ou kanban)
-    alterarVisaoComprasKanban(localStorage.getItem('comprasBoardView') || 'ativas');
+    alterarVisaoComprasKanban('todos');
     atualizarResumoComprasKanban();
+    const filtroGlobalAtual = document.getElementById('kanbanFiltroGlobal')?.value || '';
+    if (normalizarTextoBuscaCompras(filtroGlobalAtual).length >= 3) {
+      filtrarTodosKanbans(filtroGlobalAtual);
+    }
 
     if (!modoVisualizacaoKanban) {
       mostrarVisualizacaoLista();
@@ -66005,7 +66585,7 @@ async function carregarUsuariosParaSelects(lista, seletor = '.resp-select') {
       const item = lista.find(i => i.id == itemId);
       const respAtual = item?.resp_inspecao_recebimento || '';
 
-      select.innerHTML = usuarios.map(u => 
+      select.innerHTML = usuarios.map(u =>
         `<option value="${escapeHtml(u.username)}" ${u.username === respAtual ? 'selected' : ''}>${escapeHtml(u.username)}</option>`
       ).join('');
 
@@ -66013,7 +66593,7 @@ async function carregarUsuariosParaSelects(lista, seletor = '.resp-select') {
       select.addEventListener('change', async (e) => {
         const novoResp = e.target.value;
         if (!novoResp) return;
-        
+
         try {
           const resp = await fetch(`/api/compras/item/${itemId}`, {
             method: 'PUT',
@@ -66021,15 +66601,15 @@ async function carregarUsuariosParaSelects(lista, seletor = '.resp-select') {
             credentials: 'include',
             body: JSON.stringify({ resp_inspecao_recebimento: novoResp })
           });
-          
+
           if (!resp.ok) throw new Error('Falha ao atualizar');
-          
+
           // Feedback visual
           e.target.style.background = '#d1fae5';
           setTimeout(() => {
             e.target.style.background = 'white';
           }, 1000);
-          
+
         } catch (err) {
           console.error('[COMPRAS] Erro ao atualizar responsável:', err);
           alert('Erro ao atualizar responsável. Tente novamente.');
@@ -66447,10 +67027,10 @@ window.openProdutoPorCodigo = async function openProdutoPorCodigo(codigo) {
 function closeAllExpandRows() {
   const tbody = document.querySelector('#engTbody');
   if (!tbody) return;
-  
+
   const allExpandRows = tbody.querySelectorAll('.expand-row');
   allExpandRows.forEach(row => row.remove());
-  
+
   const allChevrons = tbody.querySelectorAll('.fa-chevron-up');
   allChevrons.forEach(icon => {
     icon.classList.remove('fa-chevron-up');
@@ -66464,7 +67044,7 @@ async function toggleExpandCadastro(btn) {
   const tr = btn.closest('tr');
   const existingRow = tr.nextElementSibling;
   const icon = btn.querySelector('i');
-  
+
   // Se já existe uma linha expandida, remove
   if (existingRow && existingRow.classList.contains('expand-row-cadastro')) {
     existingRow.remove();
@@ -66472,19 +67052,19 @@ async function toggleExpandCadastro(btn) {
     icon.classList.add('fa-chevron-down');
     return;
   }
-  
+
   // Fecha todas as outras expansões
   closeAllExpandRows();
-  
+
   // Busca dados
   try {
     btn.disabled = true;
     icon.classList.add('fa-spin');
-    
+
     const resp = await fetch(`/api/engenharia/produto-cadastro/${encodeURIComponent(codigo)}`, { credentials: 'include' });
     if (!resp.ok) throw new Error('Falha ao buscar detalhes');
     const data = await resp.json();
-    
+
     // Cria linha expandida
     const expandRow = document.createElement('tr');
     expandRow.classList.add('expand-row', 'expand-row-cadastro');
@@ -66514,7 +67094,7 @@ async function toggleExpandCadastro(btn) {
         </div>
       </td>
     `;
-    
+
     tr.parentNode.insertBefore(expandRow, tr.nextSibling);
     icon.classList.remove('fa-chevron-down', 'fa-spin');
     icon.classList.add('fa-chevron-up');
@@ -66532,25 +67112,25 @@ async function toggleExpandEngenharia(btn) {
   const tr = btn.closest('tr');
   const existingRow = tr.nextElementSibling;
   const icon = btn.querySelector('i');
-  
+
   if (existingRow && existingRow.classList.contains('expand-row-engenharia')) {
     existingRow.remove();
     icon.classList.remove('fa-chevron-up');
     icon.classList.add('fa-chevron-down');
     return;
   }
-  
+
   // Fecha todas as outras expansões
   closeAllExpandRows();
-  
+
   try {
     btn.disabled = true;
     icon.classList.add('fa-spin');
-    
+
     const resp = await fetch(`/api/engenharia/produto-tarefas/${encodeURIComponent(codigo)}`, { credentials: 'include' });
     if (!resp.ok) throw new Error('Falha ao buscar detalhes');
     const data = await resp.json();
-    
+
     const expandRow = document.createElement('tr');
     expandRow.classList.add('expand-row', 'expand-row-engenharia');
     expandRow.innerHTML = `
@@ -66603,7 +67183,7 @@ async function toggleExpandEngenharia(btn) {
         </div>
       </td>
     `;
-    
+
     tr.parentNode.insertBefore(expandRow, tr.nextSibling);
     icon.classList.remove('fa-chevron-down', 'fa-spin');
     icon.classList.add('fa-chevron-up');
@@ -66621,27 +67201,27 @@ async function toggleExpandCompras(btn) {
   const tr = btn.closest('tr');
   const existingRow = tr.nextElementSibling;
   const icon = btn.querySelector('i');
-  
+
   if (existingRow && existingRow.classList.contains('expand-row-compras')) {
     existingRow.remove();
     icon.classList.remove('fa-chevron-up');
     icon.classList.add('fa-chevron-down');
     return;
   }
-  
+
   // Fecha todas as outras expansões
   closeAllExpandRows();
-  
+
   try {
     btn.disabled = true;
     icon.classList.add('fa-spin');
-    
+
     const resp = await fetch(`/api/engenharia/produto-compras/${encodeURIComponent(codigo)}`, { credentials: 'include' });
     if (!resp.ok) throw new Error('Falha ao buscar detalhes');
     const data = await resp.json();
-    
+
     console.log('[Compras Debug]', data);
-    
+
     const expandRow = document.createElement('tr');
     expandRow.classList.add('expand-row', 'expand-row-compras');
     expandRow.innerHTML = `
@@ -66694,7 +67274,7 @@ async function toggleExpandCompras(btn) {
         </div>
       </td>
     `;
-    
+
     tr.parentNode.insertBefore(expandRow, tr.nextSibling);
     icon.classList.remove('fa-chevron-down', 'fa-spin');
     icon.classList.add('fa-chevron-up');
@@ -66726,22 +67306,22 @@ async function loadEngenhariaLista() {
     itens.forEach(p => {
       const tr = document.createElement('tr');
       tr.dataset.codigo = p.codigo;
-      
+
       // GRÁFICO CIRCULAR (CADASTRO): Usa dados de COMPLETUDE (campos obrigatórios)
       const pctCompletude = Number(p.completude_percentual) || 0;
       const totalCompletude = Number(p.completude_total) || 0;
       const concluidasCompletude = Number(p.completude_concluidas) || 0;
-      
+
       // BARRA DE PROGRESSO (TAREFAS): Usa dados de ENGENHARIA (atividades Check-Proj)
       const pctEng = Number(p.eng_percentual) || 0;
       const totalEng = Number(p.eng_total) || 0;
       const concluidasEng = Number(p.eng_concluidas) || 0;
-      
+
       // BARRA DE PROGRESSO (COMPRAS): Usa dados de COMPRAS (atividades Check-Compras)
       const pctCompras = Number(p.compras_percentual) || 0;
       const totalCompras = Number(p.compras_total) || 0;
       const concluidasCompras = Number(p.compras_concluidas) || 0;
-      
+
       // Cor do círculo baseada na completude
       let corCirculo = '#dc2626'; // vermelho
       let corTextoCirculo = '#dc2626';
@@ -66755,7 +67335,7 @@ async function loadEngenhariaLista() {
         corCirculo = '#f59e0b'; // amarelo
         corTextoCirculo = '#d97706';
       }
-      
+
       // Cor da barra baseada nas atividades de engenharia
       let corBarra = '#dc2626'; // vermelho
       let corTextoBarra = '#dc2626';
@@ -66769,7 +67349,7 @@ async function loadEngenhariaLista() {
         corBarra = '#f59e0b'; // amarelo
         corTextoBarra = '#d97706';
       }
-      
+
       // Cor da barra de compras
       let corBarraCompras = '#dc2626'; // vermelho
       let corTextoBarraCompras = '#dc2626';
@@ -66783,22 +67363,22 @@ async function loadEngenhariaLista() {
         corBarraCompras = '#f59e0b'; // amarelo
         corTextoBarraCompras = '#d97706';
       }
-      
+
       // Cálculo do stroke-dashoffset para o círculo (circunferência = 2πr = 125.6 para r=20)
       const circumference = 125.6;
       const offset = circumference - (pctCompletude / 100) * circumference;
-      
+
       // HTML da coluna CADASTRO (gráfico circular + botão expandir)
       const cadastroHtml = totalCompletude > 0 ? `
         <div style="display:flex;justify-content:center;align-items:center;gap:8px;">
           <svg width="50" height="50" viewBox="0 0 50 50" title="Completude: ${concluidasCompletude}/${totalCompletude} campos (${pctCompletude}%)">
             <circle cx="25" cy="25" r="20" fill="none" stroke="#e5e7eb" stroke-width="4"/>
-            <circle cx="25" cy="25" r="20" fill="none" 
+            <circle cx="25" cy="25" r="20" fill="none"
                     stroke="${corCirculo}" stroke-width="4" stroke-linecap="round"
                     stroke-dasharray="125.6" stroke-dashoffset="${offset}"
                     transform="rotate(-90 25 25)"
                     style="transition: stroke-dashoffset 0.5s ease;"/>
-            <text x="25" y="29" text-anchor="middle" 
+            <text x="25" y="29" text-anchor="middle"
                   font-size="11" font-weight="bold" fill="${corTextoCirculo}">${pctCompletude}%</text>
           </svg>
           <button class="btn-expand-cadastro" data-codigo="${p.codigo}" style="background:none;border:none;cursor:pointer;padding:4px;color:#6b7280;font-size:16px;" title="Expandir detalhes">
@@ -66806,7 +67386,7 @@ async function loadEngenhariaLista() {
           </button>
         </div>
       ` : '<span style="font-size:12px;color:#9ca3af;">-</span>';
-      
+
       // HTML da coluna ENGENHARIA (barra de progresso + botão expandir)
       const tarefasHtml = totalEng > 0 ? `
         <div style="display:flex;align-items:center;gap:8px;">
@@ -66819,7 +67399,7 @@ async function loadEngenhariaLista() {
           </button>
         </div>
       ` : '<span style="font-size:12px;color:#9ca3af;">Sem atividades</span>';
-      
+
       // HTML da coluna COMPRAS (barra de progresso + botão expandir)
       const comprasHtml = totalCompras > 0 ? `
         <div style="display:flex;align-items:center;gap:8px;">
@@ -66832,7 +67412,7 @@ async function loadEngenhariaLista() {
           </button>
         </div>
       ` : '<span style="font-size:12px;color:#9ca3af;">Sem atividades</span>';
-      
+
       tr.innerHTML = `
         <td class="td-clickable" data-codigo="${p.codigo}" style="padding:8px 12px;border-bottom:1px solid var(--border-color);font-size:13px;white-space:nowrap;cursor:pointer;">${p.codigo}</td>
         <td class="td-clickable" data-codigo="${p.codigo}" style="padding:8px 12px;border-bottom:1px solid var(--border-color);font-size:13px;cursor:pointer;">${p.descricao}</td>
@@ -66843,7 +67423,7 @@ async function loadEngenhariaLista() {
       tr.dataset.codigo = p.codigo;
       tbody.appendChild(tr);
     });
-    
+
     // Event handlers para células clicáveis (código e descrição)
     tbody.querySelectorAll('.td-clickable').forEach(td => {
       td.addEventListener('click', (e) => {
@@ -66852,7 +67432,7 @@ async function loadEngenhariaLista() {
         if (codigo) window.openProdutoPorCodigo(codigo);
       });
     });
-    
+
     // Event handlers para botões de expandir
     tbody.querySelectorAll('.btn-expand-cadastro').forEach(btn => {
       btn.addEventListener('click', async (e) => {
@@ -66860,21 +67440,21 @@ async function loadEngenhariaLista() {
         await toggleExpandCadastro(btn);
       });
     });
-    
+
     tbody.querySelectorAll('.btn-expand-engenharia').forEach(btn => {
       btn.addEventListener('click', async (e) => {
         e.stopPropagation();
         await toggleExpandEngenharia(btn);
       });
     });
-    
+
     tbody.querySelectorAll('.btn-expand-compras').forEach(btn => {
       btn.addEventListener('click', async (e) => {
         e.stopPropagation();
         await toggleExpandCompras(btn);
       });
     });
-    
+
   } catch (err) {
     console.error('[Engenharia] Erro ao carregar lista:', err);
     tbody.innerHTML = '<tr><td colspan="5" style="padding:28px 12px;text-align:center;color:#dc2626;">Erro ao carregar lista.</td></tr>';
@@ -68102,17 +68682,17 @@ async function ensureAuthVisibility(){
 
     const r  = await fetch('/api/auth/status', { credentials:'include' });
     const st = r.ok ? await r.json() : { loggedIn:false };
-    
+
     // Compara com o estado anterior (não com o estado atual que pode ter mudado)
     const wasLoggedBefore = window.__wasLoggedInBefore;
     const isLoggedNow = st.loggedIn;
-    
+
     console.log('[AUTH] Estado anterior:', wasLoggedBefore, '| Estado atual:', isLoggedNow);
     console.log('[AUTH] Mudança detectada?', wasLoggedBefore !== isLoggedNow);
-    
+
     // Atualiza o estado para a próxima comparação
     window.__wasLoggedInBefore = isLoggedNow;
-    
+
     window.__sessionUser = st.loggedIn ? st.user : null;
     console.log('[AUTH] window.__sessionUser atualizado:', window.__sessionUser);
 
@@ -68120,7 +68700,7 @@ async function ensureAuthVisibility(){
       await applyCurrentUserPermissionsToUI();
       // Notifica módulos que dependem do login (ex: atalhos flutuantes)
       document.dispatchEvent(new CustomEvent('auth:loggedIn', { detail: window.__sessionUser }));
-      
+
       // Se estava deslogado E agora está logado, inicia monitoramento
       if (!wasLoggedBefore && isLoggedNow && typeof startVersionCheckLoop === 'function') {
         console.log('[UPDATE-CHECK] ✓✓✓ USUÁRIO FEZ LOGIN! Iniciando monitoramento de atualização...');
@@ -68129,7 +68709,7 @@ async function ensureAuthVisibility(){
     }
     else {
       applyLoggedOutUI();
-      
+
       // Se estava logado E agora está deslogado, para o monitoramento
       if (wasLoggedBefore && !isLoggedNow && typeof stopVersionCheckLoop === 'function') {
         console.log('[UPDATE-CHECK] Usuário fez logout. Parando monitoramento de atualização...');
@@ -68938,7 +69518,7 @@ fileInput.addEventListener('change', async () => {
 
     if (isExcel) {
       console.log('[Importar BOM] Arquivo Excel detectado, convertendo...');
-      
+
       // Carregar biblioteca XLSX (local primeiro, CDN como fallback)
       if (typeof XLSX === 'undefined') {
         await new Promise((resolve, reject) => {
@@ -68960,14 +69540,14 @@ fileInput.addEventListener('change', async () => {
       // Ler arquivo Excel
       const arrayBuffer = await file.arrayBuffer();
       const workbook = XLSX.read(arrayBuffer, { type: 'array' });
-      
+
       // Pegar primeira planilha
       const sheetName = workbook.SheetNames[0];
       const worksheet = workbook.Sheets[sheetName];
-      
+
       // Converter para array de arrays
       rows = XLSX.utils.sheet_to_json(worksheet, { header: 1, raw: false, defval: '' });
-      
+
       console.log('[Importar BOM] Excel convertido com sucesso:', rows.length, 'linhas');
     } else {
       // Processar CSV normalmente
@@ -69330,7 +69910,7 @@ let operacoesCache = null;
 // Carregar operações disponíveis
 async function carregarOperacoes() {
   if (operacoesCache) return operacoesCache;
-  
+
   try {
     const response = await fetch(`${API_BASE}/api/ri/operacoes`);
     if (!response.ok) throw new Error('Erro ao carregar operações');
@@ -69367,19 +69947,19 @@ async function carregarItensRI(idOmie) {
 function renderizarTabelaRI(itens) {
   const tbody = document.getElementById('tabelaRIBody');
   if (!tbody) return;
-  
+
   tbody.innerHTML = '';
-  
+
   if (!itens || itens.length === 0) {
     tbody.innerHTML = '<tr><td colspan="7" style="text-align:center; padding:20px; color: var(--content-color);">Nenhum item de verificação cadastrado</td></tr>';
     return;
   }
-  
+
   itens.forEach(item => {
     const tr = document.createElement('tr');
     tr.style.borderBottom = '1px solid var(--border-color)';
-    
-    const fotoHtml = item.foto_url 
+
+    const fotoHtml = item.foto_url
       ? `<img src="${item.foto_url}" style="max-width:80px; max-height:60px; cursor:pointer;" onclick="window.open('${item.foto_url}', '_blank')" />`
       : '<span style="color:#999;">Sem foto</span>';    tr.innerHTML = `
       <td style="padding: 10px; border: 1px solid var(--border-color);">${item.codigo || ''}</td>
@@ -69399,12 +69979,12 @@ function renderizarTabelaRI(itens) {
     `;
     tbody.appendChild(tr);
   });
-  
+
   // Adicionar eventos aos botões
   document.querySelectorAll('.btn-editar-ri').forEach(btn => {
     btn.addEventListener('click', () => editarItemRI(btn.dataset.id));
   });
-  
+
   document.querySelectorAll('.btn-excluir-ri').forEach(btn => {
     btn.addEventListener('click', () => excluirItemRI(btn.dataset.id));
   });
@@ -69414,33 +69994,33 @@ function renderizarTabelaRI(itens) {
 async function adicionarNovaLinhaRI() {
   const tbody = document.getElementById('tabelaRIBody');
   if (!tbody) return;
-  
+
   // Verificar se já existe uma linha de edição
   if (tbody.querySelector('.linha-edicao-ri')) {
     alert('Finalize a edição atual antes de adicionar um novo item');
     return;
   }
-  
+
   // Usar Código OMIE global (armazenado ao carregar produto)
   const codigoOmie = window.codigoOmieSelecionado;
   const codigo = window.codigoSelecionado;
-  
+
   if (!codigoOmie) {
     alert('Selecione um produto primeiro ou aguarde o carregamento do Código OMIE');
     return;
   }
-  
+
   // Atualiza produtoRIAtual com Código OMIE
   window.produtoRIAtual = {
     codigo: codigo,
     id_omie: codigoOmie
   };
-  
+
   const { id_omie } = window.produtoRIAtual;
-  
+
   // Carregar operações
   const operacoes = await carregarOperacoes();
-  
+
   const tr = document.createElement('tr');
   tr.className = 'linha-edicao-ri';
   tr.style.borderBottom = '1px solid var(--border-color)';
@@ -69481,14 +70061,14 @@ async function adicionarNovaLinhaRI() {
       </button>
     </td>
   `;
-  
+
   tbody.insertBefore(tr, tbody.firstChild);
-  
+
   // Eventos do upload de foto
   const fotoInput = document.getElementById('riFotoInput');
   const btnAnexarFoto = document.getElementById('btnAnexarFotoRI');
   const fotoPreview = document.getElementById('riFotoPreview');
-  
+
   btnAnexarFoto.addEventListener('click', () => fotoInput.click());
   fotoInput.addEventListener('change', (e) => {
     if (e.target.files[0]) {
@@ -69499,7 +70079,7 @@ async function adicionarNovaLinhaRI() {
       reader.readAsDataURL(e.target.files[0]);
     }
   });
-  
+
   // Eventos dos botões
   document.getElementById('btnSalvarRI').addEventListener('click', salvarNovoItemRI);
   document.getElementById('btnCancelarRI').addEventListener('click', () => {
@@ -69509,7 +70089,7 @@ async function adicionarNovaLinhaRI() {
       renderizarTabelaRI([]);
     }
   });
-  
+
   // Focar no primeiro campo
   document.getElementById('riItemVerificado').focus();
 }
@@ -69520,14 +70100,14 @@ async function salvarNovoItemRI() {
   const oQueVerificar = document.getElementById('riOQueVerificar').value.trim();
   const localVerificacao = document.getElementById('riLocalVerificacao').value;
   const prioridade = document.getElementById('riPrioridade').value;
-  
+
   if (!itemVerificado || !oQueVerificar || !localVerificacao || !prioridade) {
     alert('Preencha todos os campos');
     return;
   }
-  
+
   const { codigo, id_omie } = window.produtoRIAtual;
-  
+
   try {
     // Primeiro salva o item
     const dados = {
@@ -69538,33 +70118,33 @@ async function salvarNovoItemRI() {
       local_verificacao: localVerificacao,
       prioridade
     };
-    
+
     const response = await fetch(`${API_BASE}/api/ri`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(dados)
     });
-    
+
     if (!response.ok) throw new Error('Erro ao salvar item RI');
-    
+
     const itemSalvo = await response.json();
-    
+
     // Se houver foto, faz upload
     const fotoInput = document.getElementById('riFotoInput');
     if (fotoInput && fotoInput.files[0]) {
       const formData = new FormData();
       formData.append('foto', fotoInput.files[0]);
-      
+
       const uploadResponse = await fetch(`${API_BASE}/api/qualidade/ri/${itemSalvo.id}/foto`, {
         method: 'POST',
         body: formData
       });
-      
+
       if (!uploadResponse.ok) {
         console.error('Erro ao fazer upload da foto');
       }
     }
-    
+
     alert('Item salvo com sucesso!');
     await carregarItensRI(id_omie);
   } catch (error) {
@@ -69580,14 +70160,14 @@ async function editarItemRI(id) {
     const response = await fetch(`${API_BASE}/api/ri/item/${id}`);
     if (!response.ok) throw new Error('Erro ao buscar item');
     const item = await response.json();
-    
+
     // Carregar operações
     const operacoes = await carregarOperacoes();
-    
+
     // Encontrar a linha e substituir por formulário de edição
     const tbody = document.getElementById('tabelaRIBody');
     const linhas = tbody.querySelectorAll('tr');
-    
+
     linhas.forEach(tr => {
       const btnEditar = tr.querySelector(`[data-id="${id}"]`);
       if (btnEditar && btnEditar.classList.contains('btn-editar-ri')) {
@@ -69662,34 +70242,34 @@ async function salvarEdicaoRI(id) {
   const oQueVerificar = document.getElementById('editRiOQueVerificar').value.trim();
   const localVerificacao = document.getElementById('editRiLocalVerificacao').value;
   const prioridade = document.getElementById('editRiPrioridade').value;
-  
+
   if (!itemVerificado || !oQueVerificar || !localVerificacao || !prioridade) {
     alert('Preencha todos os campos');
     return;
   }
-  
+
   const dados = {
     item_verificado: itemVerificado,
     o_que_verificar: oQueVerificar,
     local_verificacao: localVerificacao,
     prioridade
   };
-  
+
   try {
     const response = await fetch(`${API_BASE}/api/ri/${id}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(dados)
     });
-    
+
     if (!response.ok) throw new Error('Erro ao atualizar item');
-    
+
     // Se houver nova foto, faz upload
     const fotoInput = document.getElementById('editRiFotoInput');
     if (fotoInput && fotoInput.files[0]) {
       const formData = new FormData();
       formData.append('foto', fotoInput.files[0]);
-      
+
       const uploadResponse = await fetch(`${API_BASE}/api/qualidade/ri/${id}/foto`, {
         method: 'POST',
         body: formData
@@ -69698,7 +70278,7 @@ async function salvarEdicaoRI(id) {
         console.error('Erro ao fazer upload da foto');
       }
     }
-    
+
     alert('Item atualizado com sucesso!');
     await carregarItensRI(window.produtoRIAtual.id_omie);
   } catch (error) {
@@ -69710,14 +70290,14 @@ async function salvarEdicaoRI(id) {
 // Excluir item RI
 async function excluirItemRI(id) {
   if (!confirm('Deseja realmente excluir este item?')) return;
-  
+
   try {
     const response = await fetch(`${API_BASE}/api/ri/${id}`, {
       method: 'DELETE'
     });
-    
+
     if (!response.ok) throw new Error('Erro ao excluir item');
-    
+
     alert('Item excluído com sucesso!');
     await carregarItensRI(window.produtoRIAtual.id_omie);
   } catch (error) {
@@ -69732,7 +70312,7 @@ document.addEventListener('DOMContentLoaded', () => {
   if (btnAdicionarRI) {
     btnAdicionarRI.addEventListener('click', adicionarNovaLinhaRI);
   }
-  
+
   const btnAdicionarPIR = document.getElementById('btnAdicionarPIR');
   if (btnAdicionarPIR) {
     btnAdicionarPIR.addEventListener('click', adicionarNovaLinhaPIR);
@@ -69870,22 +70450,22 @@ async function carregarItensPIR(idOmie) {
 function renderizarTabelaPIR(itens) {
   const tbody = document.getElementById('tabelaPIRBody');
   if (!tbody) return;
-  
+
   tbody.innerHTML = '';
-  
+
   if (!itens || itens.length === 0) {
     tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; padding:20px; color: var(--content-color);">Nenhum item cadastrado</td></tr>';
     return;
   }
-  
+
   itens.forEach(item => {
     const tr = document.createElement('tr');
     tr.style.borderBottom = '1px solid var(--border-color)';
-    
-    const fotoHtml = item.foto_url 
+
+    const fotoHtml = item.foto_url
       ? `<img src="${item.foto_url}" style="max-width:80px; max-height:60px; cursor:pointer;" onclick="window.open('${item.foto_url}', '_blank')" />`
       : '<span style="color:#999;">Sem foto</span>';
-    
+
     tr.innerHTML = `
       <td style="padding: 10px; border: 1px solid var(--border-color);">${item.codigo || ''}</td>
       <td style="padding: 10px; border: 1px solid var(--border-color);">${item.frequencia != null ? `${item.frequencia}%` : ''}</td>
@@ -69902,12 +70482,12 @@ function renderizarTabelaPIR(itens) {
     `;
     tbody.appendChild(tr);
   });
-  
+
   // Adicionar eventos aos botões
   document.querySelectorAll('.btn-editar-pir').forEach(btn => {
     btn.addEventListener('click', () => editarItemPIR(btn.dataset.id));
   });
-  
+
   document.querySelectorAll('.btn-excluir-pir').forEach(btn => {
     btn.addEventListener('click', () => excluirItemPIR(btn.dataset.id));
   });
@@ -69917,29 +70497,29 @@ function renderizarTabelaPIR(itens) {
 async function adicionarNovaLinhaPIR() {
   const tbody = document.getElementById('tabelaPIRBody');
   if (!tbody) return;
-  
+
   if (tbody.querySelector('.linha-edicao-pir')) {
     alert('Finalize a edição atual antes de adicionar um novo item');
     return;
   }
-  
+
   // Usar Código OMIE global (armazenado ao carregar produto)
   const codigoOmie = window.codigoOmieSelecionado;
   const codigo = window.codigoSelecionado;
-  
+
   if (!codigoOmie) {
     alert('Selecione um produto primeiro ou aguarde o carregamento do Código OMIE');
     return;
   }
-  
+
   // Atualiza produtoPIRAtual com Código OMIE
   window.produtoPIRAtual = {
     codigo: codigo,
     id_omie: codigoOmie
   };
-  
+
   const { id_omie } = window.produtoPIRAtual;
-  
+
   const tr = document.createElement('tr');
   tr.className = 'linha-edicao-pir';
   tr.style.borderBottom = '1px solid var(--border-color)';
@@ -69973,14 +70553,14 @@ async function adicionarNovaLinhaPIR() {
       </button>
     </td>
   `;
-  
+
   tbody.insertBefore(tr, tbody.firstChild);
-  
+
   // Eventos do upload de foto
   const fotoInput = document.getElementById('pirFotoInput');
   const btnAnexarFoto = document.getElementById('btnAnexarFotoPIR');
   const fotoPreview = document.getElementById('pirFotoPreview');
-  
+
   btnAnexarFoto.addEventListener('click', () => fotoInput.click());
   fotoInput.addEventListener('change', (e) => {
     if (e.target.files[0]) {
@@ -69991,7 +70571,7 @@ async function adicionarNovaLinhaPIR() {
       reader.readAsDataURL(e.target.files[0]);
     }
   });
-  
+
   // Eventos dos botões
   document.getElementById('btnSalvarPIR').addEventListener('click', salvarNovoItemPIR);
   document.getElementById('btnCancelarPIR').addEventListener('click', () => {
@@ -70000,7 +70580,7 @@ async function adicionarNovaLinhaPIR() {
       renderizarTabelaPIR([]);
     }
   });
-  
+
   document.getElementById('pirFrequencia').focus();
 }
 
@@ -70008,14 +70588,14 @@ async function adicionarNovaLinhaPIR() {
 async function salvarNovoItemPIR() {
   const frequencia = Number(document.getElementById('pirFrequencia').value);
   const oQueVerificar = document.getElementById('pirOQueVerificar').value.trim();
-  
+
   if (!frequencia || !oQueVerificar) {
     alert('Preencha todos os campos obrigatórios');
     return;
   }
-  
+
   const { codigo, id_omie } = window.produtoPIRAtual;
-  
+
   try {
     // Primeiro salva o item
     const dados = {
@@ -70024,33 +70604,33 @@ async function salvarNovoItemPIR() {
       frequencia: frequencia,
       o_que_verificar: oQueVerificar
     };
-    
+
     const response = await fetch(`${API_BASE}/api/pir`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(dados)
     });
-    
+
     if (!response.ok) throw new Error('Erro ao salvar item PIR');
-    
+
     const itemSalvo = await response.json();
-    
+
     // Se houver foto, faz upload
     const fotoInput = document.getElementById('pirFotoInput');
     if (fotoInput && fotoInput.files[0]) {
       const formData = new FormData();
       formData.append('foto', fotoInput.files[0]);
-      
+
       const uploadResponse = await fetch(`${API_BASE}/api/qualidade/pir/${itemSalvo.id}/foto`, {
         method: 'POST',
         body: formData
       });
-      
+
       if (!uploadResponse.ok) {
         console.error('Erro ao fazer upload da foto');
       }
     }
-    
+
     alert('Item salvo com sucesso!');
     await carregarItensPIR(id_omie);
   } catch (error) {
@@ -70065,17 +70645,17 @@ async function editarItemPIR(id) {
     const response = await fetch(`${API_BASE}/api/pir/item/${id}`);
     if (!response.ok) throw new Error('Erro ao buscar item');
     const item = await response.json();
-    
+
     const tbody = document.getElementById('tabelaPIRBody');
     const linhas = tbody.querySelectorAll('tr');
-    
+
     linhas.forEach(tr => {
       const btnEditar = tr.querySelector(`[data-id="${id}"]`);
       if (btnEditar && btnEditar.classList.contains('btn-editar-pir')) {
         const fotoPreviewHtml = item.foto_url
           ? `<img src="${item.foto_url}" style="max-width:80px; max-height:60px; margin-bottom:8px;" />`
           : '';
-        
+
         tr.innerHTML = `
           <td style="padding: 10px; border: 1px solid var(--border-color);">${item.codigo}</td>
           <td style="padding: 10px; border: 1px solid var(--border-color);">
@@ -70105,12 +70685,12 @@ async function editarItemPIR(id) {
             </button>
           </td>
         `;
-        
+
         // Eventos foto
         const fotoInput = document.getElementById('editPirFotoInput');
         const btnAnexarFoto = document.getElementById('btnEditAnexarFotoPIR');
         const fotoPreview = document.getElementById('editPirFotoPreview');
-        
+
         btnAnexarFoto.addEventListener('click', () => fotoInput.click());
         fotoInput.addEventListener('change', (e) => {
           if (e.target.files[0]) {
@@ -70121,7 +70701,7 @@ async function editarItemPIR(id) {
             reader.readAsDataURL(e.target.files[0]);
           }
         });
-        
+
         tr.querySelector('.btn-salvar-edicao-pir').addEventListener('click', () => salvarEdicaoPIR(id));
         tr.querySelector('.btn-cancelar-edicao-pir').addEventListener('click', () => carregarItensPIR(window.produtoPIRAtual.id_omie));
       }
@@ -70136,42 +70716,42 @@ async function editarItemPIR(id) {
 async function salvarEdicaoPIR(id) {
   const frequencia = Number(document.getElementById('editPirFrequencia').value);
   const oQueVerificar = document.getElementById('editPirOQueVerificar').value.trim();
-  
+
   if (!frequencia || !oQueVerificar) {
     alert('Preencha todos os campos');
     return;
   }
-  
+
   const dados = {
     frequencia: frequencia,
     o_que_verificar: oQueVerificar
   };
-  
+
   try {
     const response = await fetch(`${API_BASE}/api/pir/${id}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(dados)
     });
-    
+
     if (!response.ok) throw new Error('Erro ao atualizar item');
-    
+
     // Se houver nova foto, faz upload
     const fotoInput = document.getElementById('editPirFotoInput');
     if (fotoInput && fotoInput.files[0]) {
       const formData = new FormData();
       formData.append('foto', fotoInput.files[0]);
-      
+
       const uploadResponse = await fetch(`${API_BASE}/api/qualidade/pir/${id}/foto`, {
         method: 'POST',
         body: formData
       });
-      
+
       if (!uploadResponse.ok) {
         console.error('Erro ao fazer upload da foto');
       }
     }
-    
+
     alert('Item atualizado com sucesso!');
     await carregarItensPIR(window.produtoPIRAtual.id_omie);
   } catch (error) {
@@ -70201,18 +70781,18 @@ function formatDateKey(date) {
 async function initCarrosselSemanal() {
   currentCenterDate = new Date();
   currentCenterDate.setHours(0, 0, 0, 0);
-  
+
   console.log('[CARROSSEL] Iniciando com data central:', currentCenterDate);
-  
+
   await carregarSemanaCompleta();
   renderCarrossel();
-  
+
   // AGUARDA o DOM atualizar antes de calcular posição
   await new Promise(resolve => setTimeout(resolve, 50));
-  
+
   centralizarNoHoje();
   setupDragScroll();
-  
+
   // Botão para voltar ao dia atual
   const btnHoje = document.getElementById('btnVoltarHoje');
   if (btnHoje) {
@@ -70230,16 +70810,16 @@ async function initCarrosselSemanal() {
 function centralizarNoHoje() {
   const cardWidth = CARD_WIDTH;
   const viewportContainer = document.querySelector('.semana-carousel-container');
-  
+
   if (!viewportContainer) {
     console.error('[CARROSSEL] Container viewport não encontrado!');
     return;
   }
-  
+
   const viewportWidth = viewportContainer.clientWidth;
-  
+
   console.log('[CARROSSEL] Viewport width:', viewportWidth);
-  
+
   // índice do "hoje" no conjunto de 15 dias (0..14)
   const hojeIndex = CAROUSEL_WINDOW_DAYS; // 7º índice (meio)
   const step = STEP_WIDTH;
@@ -70250,7 +70830,7 @@ function centralizarNoHoje() {
   const centroHoje = posicaoInicioHoje + (cardWidth / 2);
   const centroViewport = viewportWidth / 2;
   let centerOffset = centroViewport - centroHoje;
-  
+
   console.log('[CARROSSEL] Cálculo de centralização:', {
     viewportWidth,
     posicaoInicioHoje,
@@ -70258,7 +70838,7 @@ function centralizarNoHoje() {
     centroViewport,
     centerOffset
   });
-  
+
   // clamp para não mostrar espaços vazios além das bordas
   let minTranslate = Math.min(0, viewportWidth - totalWidth);
   let maxTranslate = 0;
@@ -70270,7 +70850,7 @@ function centralizarNoHoje() {
   }
   centerOffset = Math.max(minTranslate, Math.min(maxTranslate, centerOffset));
   currentCarouselTranslate = centerOffset;
-  
+
   const carouselEl = document.getElementById('semanaCarousel');
   if (carouselEl) {
     carouselEl.style.transform = `translateX(${centerOffset}px)`;
@@ -70284,13 +70864,13 @@ function setupDragScroll() {
     console.log('[DRAG] Carousel não encontrado!');
     return;
   }
-  
+
   console.log('[DRAG] Configurando drag com transform...');
-  
+
   const newCarousel = carousel.cloneNode(true);
   carousel.parentNode.replaceChild(newCarousel, carousel);
   const carouselEl = document.getElementById('semanaCarousel');
-  
+
   let isDown = false;
   let startX = 0;
   let currentX = 0;
@@ -70306,96 +70886,96 @@ function setupDragScroll() {
   const totalWidth = (totalCards * STEP_WIDTH) - CARD_GAP;
   const MIN_X = Math.min(0, viewportWidth - totalWidth);
   const MAX_X = 0;
-  
+
   carouselEl.style.transform = `translateX(${translateX}px)`;
-  
+
   const lerp = (start, end, factor) => start + (end - start) * factor;
-  
+
   const animate = () => {
     if (!isDown && Math.abs(velocity) > 0.5) {
       velocity *= 0.95;
       targetX += velocity;
     }
-    
+
     translateX = lerp(translateX, targetX, 0.15);
     // aplica limites
     if (translateX < MIN_X) { translateX = MIN_X; targetX = MIN_X; velocity = 0; }
     if (translateX > MAX_X) { translateX = MAX_X; targetX = MAX_X; velocity = 0; }
     carouselEl.style.transform = `translateX(${translateX}px)`;
     currentCarouselTranslate = translateX;
-    
+
     if (isDown || Math.abs(velocity) > 0.5 || Math.abs(targetX - translateX) > 0.5) {
       rafId = requestAnimationFrame(animate);
     } else {
       rafId = null;
     }
   };
-  
+
   carouselEl.addEventListener('mousedown', (e) => {
     isDown = true;
     startX = e.pageX;
     currentX = e.pageX;
     velocity = 0;
-    
+
     carouselEl.style.cursor = 'grabbing';
-    
+
     if (rafId) cancelAnimationFrame(rafId);
     if (!rafId) {
       rafId = requestAnimationFrame(animate);
     }
   });
-  
+
   carouselEl.addEventListener('mousemove', (e) => {
     if (!isDown) return;
-    
+
     const prevX = currentX;
     currentX = e.pageX;
     const delta = currentX - prevX;
     velocity = delta;
     targetX += delta;
   });
-  
+
   carouselEl.addEventListener('mouseup', () => {
     if (!isDown) return;
     isDown = false;
     carouselEl.style.cursor = 'grab';
   });
-  
+
   carouselEl.addEventListener('mouseleave', () => {
     if (!isDown) return;
     isDown = false;
     carouselEl.style.cursor = 'grab';
   });
-  
+
   carouselEl.addEventListener('touchstart', (e) => {
     isDown = true;
     startX = e.touches[0].pageX;
     currentX = e.touches[0].pageX;
     velocity = 0;
-    
+
     if (rafId) cancelAnimationFrame(rafId);
     if (!rafId) {
       rafId = requestAnimationFrame(animate);
     }
   });
-  
+
   carouselEl.addEventListener('touchmove', (e) => {
     if (!isDown) return;
-    
+
     const prevX = currentX;
     currentX = e.touches[0].pageX;
     const delta = currentX - prevX;
     velocity = delta;
     targetX += delta;
   });
-  
+
   carouselEl.addEventListener('touchend', () => {
     if (!isDown) return;
     isDown = false;
   });
-  
+
   carouselEl.style.cursor = 'grab';
-  
+
   console.log('[DRAG] Setup completo com posição inicial:', currentCarouselTranslate);
 }
 
@@ -70410,12 +70990,12 @@ async function carregarSemanaCompleta() {
     const date = new Date(currentCenterDate);
     date.setDate(date.getDate() + offset);
     const key = formatDateKey(date);
-    
+
     if (!carouselDataCache[key]) {
       promises.push(carregarDadosDia(date));
     }
   }
-  
+
   await Promise.all(promises);
 }
 
@@ -70469,11 +71049,11 @@ async function carregarDadosDia(date) {
 function renderCarrossel() {
   const container = document.getElementById('semanaCarousel');
   if (!container) return;
-  
+
   const hoje = new Date();
   hoje.setHours(0, 0, 0, 0);
   const hojeKey = formatDateKey(hoje);
-  
+
   let html = '';
   const start = -CAROUSEL_WINDOW_DAYS;
   const end = CAROUSEL_WINDOW_DAYS;
@@ -70482,19 +71062,19 @@ function renderCarrossel() {
     date.setDate(date.getDate() + offset);
     const key = formatDateKey(date);
     const produtos = carouselDataCache[key] || [];
-    
+
     const isCenter = offset === 0;
     const isToday = key === hojeKey;
-    
+
     const classes = ['semana-day-card'];
     if (isCenter) classes.push('center');
     if (isToday) classes.push('hoje');
-    
+
     const dayNames = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
     const dayName = dayNames[date.getDay()];
     const dia = date.getDate();
     const mes = date.getMonth() + 1;
-    
+
     let produtosHtml = '';
     if (produtos.length === 0) {
       produtosHtml = '<div class="semana-empty">Nenhuma produção agendada</div>';
@@ -70507,7 +71087,7 @@ function renderCarrossel() {
         else if (status === 'produzido') icon = '<i class="fa-solid fa-circle-check status-produzido"></i>';
         else if (status === '' || status === 'aguardando') icon = '<i class="fa-solid fa-clock status-aguardando"></i>';
         else icon = '<i class="fa-solid fa-calendar-plus status-novo"></i>';
-        
+
         const tooltipText = `${prod.descricao || 'Sem descrição'}\nStatus: ${prod.status || 'Novo'}`;
         return `<div class="semana-produto-item" title="${tooltipText}">
                   ${icon}
@@ -70516,7 +71096,7 @@ function renderCarrossel() {
                 </div>`;
       }).join('');
     }
-    
+
     html += `
       <div class="${classes.join(' ')}" data-date="${key}" data-offset="${offset}">
         <div class="semana-day-header">
@@ -70532,7 +71112,7 @@ function renderCarrossel() {
       </div>
     `;
   }
-  
+
   container.innerHTML = html;
 }
 
@@ -70944,8 +71524,6 @@ function renderAgendaCalendarioMensal() {
   const hojeDiaSemana = hoje.getDay();
   const inicioSemanaAtual = new Date(hoje);
   inicioSemanaAtual.setDate(hoje.getDate() - hojeDiaSemana);
-  const fimSemanaAtual = new Date(inicioSemanaAtual);
-  fimSemanaAtual.setDate(inicioSemanaAtual.getDate() + 6);
 
   const nomesDia = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
   const htmlCabecalho = nomesDia
@@ -70975,7 +71553,8 @@ function renderAgendaCalendarioMensal() {
     }
 
     const dataIso = formatarDataIso(dataCelula);
-    if (isMobileView && (dataCelula < inicioSemanaAtual || dataCelula > fimSemanaAtual)) {
+    // No celular, preserva a semana atual e todos os dias futuros do mês.
+    if (isMobileView && dataCelula < inicioSemanaAtual) {
       continue;
     }
     const isHoje = formatarDataIso(dataCelula) === formatarDataIso(hoje);
@@ -73481,6 +74060,15 @@ function initAgendaReservasUI() {
   const participantesSelect = document.getElementById('agendaParticipantesSelect');
   const participantesSelecionadosEl = document.getElementById('agendaParticipantesSelecionados');
 
+  // Alternar entre a agenda compacta e o mês completo exige uma nova renderização.
+  const agendaMobileMedia = window.matchMedia('(max-width: 640px)');
+  const redesenharAgendaAoMudarViewport = () => renderAgendaCalendarioMensal();
+  if (typeof agendaMobileMedia.addEventListener === 'function') {
+    agendaMobileMedia.addEventListener('change', redesenharAgendaAoMudarViewport);
+  } else if (typeof agendaMobileMedia.addListener === 'function') {
+    agendaMobileMedia.addListener(redesenharAgendaAoMudarViewport);
+  }
+
   carregarStatusGoogleCalendarAgenda().catch(() => {});
 
   if (btnMesAnterior) {
@@ -73920,14 +74508,14 @@ function initAgendaReservasUI() {
 // Excluir item PIR
 async function excluirItemPIR(id) {
   if (!confirm('Deseja realmente excluir este item?')) return;
-  
+
   try {
     const response = await fetch(`${API_BASE}/api/pir/${id}`, {
       method: 'DELETE'
     });
-    
+
     if (!response.ok) throw new Error('Erro ao excluir item');
-    
+
     alert('Item excluído com sucesso!');
     await carregarItensPIR(window.produtoPIRAtual.id_omie);
   } catch (error) {
@@ -73951,7 +74539,7 @@ window.adicionarNovaLinhaPIR = adicionarNovaLinhaPIR;
     const btnAlteracaoCard = document.getElementById('btnAlteracaoProdutoCard');
     const btnDesenhoTecnicoCard = document.getElementById('btnDesenhoTecnicoCard');
     const sectionTitle = document.getElementById('currentSectionTitle');
-    
+
     if (!hamburger || !navGrid || !cards.length) return false;
 
     // Mapeamento de títulos
@@ -73989,7 +74577,7 @@ window.adicionarNovaLinhaPIR = adicionarNovaLinhaPIR;
       card.addEventListener('click', (e) => {
         e.preventDefault();
         e.stopPropagation();
-        
+
         // Remove active de todos
         cards.forEach(c => c.classList.remove('active'));
         // Adiciona active no clicado
@@ -74002,7 +74590,7 @@ window.adicionarNovaLinhaPIR = adicionarNovaLinhaPIR;
         // Mostra o pane correspondente
         const targetId = card.dataset.target;
         const targetPane = document.getElementById(targetId);
-        
+
         if (targetPane) {
           targetPane.style.display = 'block';
 
@@ -74026,30 +74614,30 @@ window.adicionarNovaLinhaPIR = adicionarNovaLinhaPIR;
               renderizarTabelaPIR([]);
             }
           }
-          
+
           // Atualiza título da seção
           if (sectionTitle && titleMap[targetId]) {
             sectionTitle.textContent = titleMap[targetId];
           }
-          
+
           console.log(`[Nav Card] Navegou para: ${targetId}`);
 
           // Trigger especial para estrutura (carrega dados)
           if (targetId === 'estruturaProduto') {
-            const cod = window.codigoSelecionado || 
+            const cod = window.codigoSelecionado ||
                        document.getElementById('productTitle')?.textContent?.trim() || '';
             if (cod && typeof window.loadEstruturaProduto === 'function') {
               window.loadEstruturaProduto(cod);
             }
           }
-          
+
           // Trigger especial para Check-Proj
           if (targetId === 'checkProjTab') {
             if (typeof window.checkProj?.loadCheckProj === 'function') {
               window.checkProj.loadCheckProj();
             }
           }
-          
+
           // Trigger especial para Check-Compras
           if (targetId === 'checkComprasTab') {
             if (typeof window.checkCompras?.loadCheckCompras === 'function') {
@@ -74106,10 +74694,10 @@ window.adicionarNovaLinhaPIR = adicionarNovaLinhaPIR;
       btnNovoCard.addEventListener('click', (e) => {
         e.preventDefault();
         e.stopPropagation();
-        
+
         // Dispara o evento do botão original
         if (typeof window.abrirCadastroProduto === 'function') window.abrirCadastroProduto();
-        
+
         // Fecha o menu
         navGrid.style.display = 'none';
         hamburger.classList.remove('active');
@@ -74138,18 +74726,243 @@ window.adicionarNovaLinhaPIR = adicionarNovaLinhaPIR;
 })();
 
 // ===== HANDLER PARA SIDEBAR HAMBÚRGUER =====
+(function initShellNavigationMirrors() {
+  function setup() {
+    const mirrors = document.querySelectorAll('[data-mirror-nav]');
+    if (!mirrors.length) return false;
+
+    mirrors.forEach((mirror) => {
+      if (mirror.dataset.mirrorBound === '1') return;
+      const source = document.querySelector(mirror.dataset.mirrorNav || '');
+      if (!source) return;
+
+      mirror.dataset.mirrorBound = '1';
+      mirror.title = mirror.dataset.shellLabel || mirror.textContent.trim();
+      const wrapper = mirror.closest('.side-wrapper');
+
+      const syncPermission = () => {
+        const hidden = source.hidden
+          || source.classList.contains('perm-hidden')
+          || source.style.display === 'none';
+        mirror.classList.toggle('perm-hidden', hidden);
+        mirror.style.display = hidden ? 'none' : '';
+        if (wrapper && !hidden && wrapper.classList.contains('perm-hidden')) {
+          wrapper.classList.remove('perm-hidden');
+        }
+      };
+      mirror._syncShellPermission = syncPermission;
+
+      mirror.addEventListener('click', (event) => {
+        event.preventDefault();
+        if (mirror.classList.contains('perm-hidden')) return;
+
+        // A Home possui mais de um handler legado no link oculto do topo.
+        // Acionar esse link por proxy pode fazer um handler mostrar o painel e
+        // outro escondê-lo logo depois. Use a função canônica da própria Home.
+        if (source.id === 'menu-inicio' && typeof window.forceShowInicio === 'function') {
+          window.forceShowInicio();
+          try {
+            if (location.hash !== '#inicio') history.replaceState(null, '', '#inicio');
+          } catch (_) {}
+        } else {
+          source.click();
+        }
+        document.getElementById('sidebarContent')?.classList.add('collapsed');
+        document.getElementById('sidebarHamburger')?.classList.remove('active');
+      });
+
+      new MutationObserver(syncPermission).observe(source, {
+        attributes: true,
+        attributeFilter: ['class', 'style', 'hidden']
+      });
+      if (wrapper) {
+        new MutationObserver(syncPermission).observe(wrapper, {
+          attributes: true,
+          attributeFilter: ['class']
+        });
+      }
+      syncPermission();
+    });
+
+    [1000, 3000].forEach((delay) => {
+      setTimeout(() => mirrors.forEach((item) => item._syncShellPermission?.()), delay);
+    });
+
+    document.querySelectorAll('#sidebarContent [data-nav-label]').forEach((item) => {
+      if (!item.title) item.title = item.dataset.navLabel;
+    });
+    return true;
+  }
+
+  if (!setup()) document.addEventListener('DOMContentLoaded', setup, { once: true });
+})();
+
+(function initHomeModuleLauncher() {
+  const modules = [
+    {
+      id: 'logistica', title: 'Log\u00edstica',
+      description: 'Produtos, estoque, compras e expedi\u00e7\u00e3o.', icon: 'fa-truck-fast', color: '#ff5a4f',
+      groups: [
+        { id: 'produtos', title: 'Produtos', description: 'Cadastro e consulta de produtos.', icon: 'fa-box-open', selectors: ['#btn-omie-list1', '#menu-produto', '#btn-definicoes'] },
+        { id: 'estoque', title: 'Estoque', description: 'Armaz\u00e9ns, recebimento e movimenta\u00e7\u00f5es.', icon: 'fa-boxes-stacked', selectors: ['#menu-armazens', '#menu-recebimento', '#menu-produto-recebido', '#menu-estoque-minimo', '#menu-guardar-materiais', '#menu-identificacao-produto', '#menu-solicitacao-ajuste'] },
+        { id: 'compras', title: 'Compras', description: 'Solicita\u00e7\u00f5es e acompanhamento de compras.', icon: 'fa-bag-shopping', selectors: ['#cart-icon', '#menu-compras-contas-utilizadas', '#menu-compras-configuracoes'] },
+        { id: 'expedicao', title: 'Expedi\u00e7\u00e3o', description: 'Transfer\u00eancias, envios e relat\u00f3rios.', icon: 'fa-truck-ramp-box', selectors: ['#menu-solicitacao-transferencia', '#menu-envio-mercadoria', '#menu-log-relatorio'] }
+      ]
+    },
+    { id: 'producao', title: 'Produ\u00e7\u00e3o', description: 'Registros, inspe\u00e7\u00e3o e acompanhamento da produ\u00e7\u00e3o.', icon: 'fa-industry', color: '#0f766e', selectors: ['#menu-producao-primeira-peca-ok', '#menu-registrar-producao', '#menu-producao-3d', '#menu-monta-producao', '#menu-ri-registro-inspecao'] },
+    { id: 'qualidade', title: 'Qualidade', description: 'Inspe\u00e7\u00f5es, documentos e controles de qualidade.', icon: 'fa-clipboard-check', color: '#15803d', selectors: ['#menu-qualidade-fabrica', '#menu-qualidade-manuais'] },
+    { id: 'vendas', title: 'Vendas', description: 'Pedidos, mapas, indicadores e relat\u00f3rios comerciais.', icon: 'fa-chart-column', color: '#a16207', selectors: ['#menu-vendas-graficos', '#menu-vendas-controle', '#menu-vendas-mapa', '#menu-vendas-relatorio'] },
+    { id: 'sac', title: 'SAC e assist\u00eancia', description: 'Atendimento t\u00e9cnico, solicita\u00e7\u00f5es e relat\u00f3rios.', icon: 'fa-headset', color: '#be185d', selectors: ['#menu-sac-solicitacao-envio', '#menu-sac-at', '#menu-sac-at-relatorio'] },
+    { id: 'rh', title: 'Recursos humanos', description: 'Colaboradores, cargos, f\u00e9rias e informa\u00e7\u00f5es internas.', icon: 'fa-users', color: '#0e7490', selectors: ['#btn-colaboradores', '#btn-rh-config-cargos', '#btn-rh-colaboradores', '#btn-rh-controle-ferias'] }
+  ];
+
+  const allowed = (source) => source && !source.hidden
+    && !source.classList.contains('perm-hidden')
+    && source.style.display !== 'none';
+  const label = (source) => source.dataset.navLabel || source.dataset.shellLabel
+    || source.getAttribute('aria-label') || source.title
+    || source.textContent.replace(/\s+/g, ' ').trim();
+
+  function setup() {
+    const moduleGrid = document.getElementById('homeModuleGrid');
+    const routinePanel = document.getElementById('homeRoutinePanel');
+    const routineGrid = document.getElementById('homeRoutineGrid');
+    const routineTitle = document.getElementById('homeRoutineTitle');
+    const routineDescription = document.getElementById('homeRoutineDescription');
+    const routineIcon = document.getElementById('homeRoutineIcon');
+    const backButton = document.getElementById('homeModuleBack');
+    const reservationsSection = document.querySelector('#paginaInicio .home-reservations-section');
+    if (!moduleGrid || !routinePanel || !routineGrid || !routineTitle || !routineIcon || !backButton) return false;
+
+    let activeId = null;
+    let queued = false;
+    const sourcesForSelectors = (selectors = []) => selectors.map((selector) => document.querySelector(selector)).filter(allowed);
+    const groupsFor = (module) => (module.groups || []).filter((group) => sourcesForSelectors(group.selectors).length);
+    const sourcesFor = (module) => module.groups
+      ? groupsFor(module).flatMap((group) => sourcesForSelectors(group.selectors))
+      : sourcesForSelectors(module.selectors);
+
+    const showModules = () => {
+      activeId = null;
+      moduleGrid.hidden = false;
+      routinePanel.hidden = true;
+      backButton.hidden = true;
+      backButton.innerHTML = '<i class="fa-solid fa-arrow-left" aria-hidden="true"></i> Todos os m\u00f3dulos';
+      if (reservationsSection) reservationsSection.hidden = false;
+      const homeScroller = document.querySelector('#paginaInicio > .content-wrapper');
+      if (homeScroller) homeScroller.scrollTop = 0;
+    };
+    window.showHomeModuleRoot = showModules;
+
+    const renderRoutineButtons = (sources) => {
+      routineGrid.classList.remove('is-area-grid');
+      routineGrid.replaceChildren(...sources.map((source) => {
+        const button = document.createElement('button');
+        const sourceIcon = source.querySelector('i')?.className || 'fa-solid fa-arrow-right';
+        button.type = 'button';
+        button.className = 'home-routine-card';
+        button.innerHTML = `<span class="home-routine-card-icon"><i class="${sourceIcon}"></i></span><span>${label(source)}</span><i class="fa-solid fa-chevron-right home-routine-arrow" aria-hidden="true"></i>`;
+        button.addEventListener('click', () => { if (allowed(source)) source.click(); });
+        return button;
+      }));
+    };
+
+    const showModule = (module) => {
+      const sources = sourcesFor(module);
+      if (!sources.length) return;
+      activeId = module.id;
+      moduleGrid.hidden = true;
+      routinePanel.hidden = false;
+      backButton.hidden = false;
+      backButton.innerHTML = '<i class="fa-solid fa-arrow-left" aria-hidden="true"></i> Todos os m\u00f3dulos';
+      routineTitle.textContent = module.title;
+      if (routineDescription) routineDescription.textContent = module.groups
+        ? 'Acesse diretamente as rotinas de cada \u00e1rea.'
+        : 'Selecione a rotina que deseja abrir.';
+      routinePanel.style.setProperty('--module-color', module.color);
+      routineIcon.innerHTML = `<i class="fa-solid ${module.icon}"></i>`;
+      routineIcon.style.setProperty('--module-color', module.color);
+      if (reservationsSection) reservationsSection.hidden = true;
+      if (module.groups) {
+        const groups = groupsFor(module);
+        routineGrid.classList.add('is-area-grid');
+        routineGrid.replaceChildren(...groups.map((group) => {
+          const section = document.createElement('section');
+          const groupSources = sourcesForSelectors(group.selectors);
+          section.className = 'home-area-section';
+          section.innerHTML = `<div class="home-area-heading"><span class="home-area-card-icon"><i class="fa-solid ${group.icon}"></i></span><span><strong>${group.title}</strong><small>${group.description}</small></span></div><div class="home-area-routines"></div>`;
+          const list = section.querySelector('.home-area-routines');
+          groupSources.forEach((source) => {
+            const button = document.createElement('button');
+            const sourceIcon = source.querySelector('i')?.className || 'fa-solid fa-arrow-right';
+            button.type = 'button';
+            button.className = 'home-area-routine';
+            button.innerHTML = `<i class="${sourceIcon}" aria-hidden="true"></i><span>${label(source)}</span><i class="fa-solid fa-chevron-right" aria-hidden="true"></i>`;
+            button.addEventListener('click', () => { if (allowed(source)) source.click(); });
+            list.appendChild(button);
+          });
+          return section;
+        }));
+      } else {
+        renderRoutineButtons(sources);
+      }
+    };
+
+    const render = () => {
+      queued = false;
+      const available = modules.map((module) => ({ module, sources: sourcesFor(module) })).filter(({ sources }) => sources.length);
+      moduleGrid.replaceChildren(...available.map(({ module, sources }) => {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'home-module-card';
+        button.style.setProperty('--module-color', module.color);
+        const quantity = module.groups ? groupsFor(module).length : sources.length;
+        const quantityLabel = module.groups ? (quantity === 1 ? '\u00e1rea' : '\u00e1reas') : (quantity === 1 ? 'rotina' : 'rotinas');
+        button.innerHTML = `<span class="home-module-card-icon"><i class="fa-solid ${module.icon}"></i></span><span class="home-module-card-copy"><strong>${module.title}</strong><small>${module.description}</small><em>${quantity} ${quantityLabel}</em></span><i class="fa-solid fa-chevron-right home-module-card-arrow" aria-hidden="true"></i>`;
+        button.addEventListener('click', () => showModule(module));
+        return button;
+      }));
+      if (activeId) {
+        const active = modules.find((module) => module.id === activeId);
+        if (active && sourcesFor(active).length) showModule(active);
+        else showModules();
+      }
+    };
+
+    const queueRender = () => {
+      if (queued) return;
+      queued = true;
+      requestAnimationFrame(render);
+    };
+    backButton.addEventListener('click', showModules);
+    new MutationObserver(queueRender).observe(document.getElementById('sidebarContent') || document.body, {
+      subtree: true,
+      attributes: true,
+      attributeFilter: ['class', 'style', 'hidden']
+    });
+    render();
+    [800, 2000].forEach((delay) => setTimeout(queueRender, delay));
+    return true;
+  }
+
+  if (!setup()) document.addEventListener('DOMContentLoaded', setup, { once: true });
+})();
+
 (function initSidebarHamburger() {
   function setupSidebar() {
     const hamburger = document.getElementById('sidebarHamburger');
     const sidebarContent = document.getElementById('sidebarContent');
-    
+
     if (!hamburger || !sidebarContent) return false;
 
     // Toggle do menu lateral
     hamburger.addEventListener('click', (e) => {
       e.stopPropagation();
+      document.querySelectorAll('[data-mirror-nav]').forEach((item) => {
+        item._syncShellPermission?.();
+      });
       const isCollapsed = sidebarContent.classList.contains('collapsed');
-      
+
       if (isCollapsed) {
         sidebarContent.classList.remove('collapsed');
         hamburger.classList.add('active');
@@ -74202,13 +75015,13 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Chama endpoint de status de autenticação (mais rápido e confiável)
     const response = await fetch('/api/auth/status', { credentials: 'include' });
     const statusData = response.ok ? await response.json() : { loggedIn: false };
-    
+
     console.log('[LOGIN CHECK] Status de autenticação:', statusData.loggedIn ? 'Logado' : 'Deslogado');
-    
+
     // Se não está logado, abre o modal de login
     if (!statusData.loggedIn) {
       console.log('[LOGIN CHECK] Usuário deslogado, abrindo modal de login');
-      
+
       // Chama função de login diretamente se disponível
       if (typeof window.openLoginModal === 'function') {
         window.openLoginModal();
@@ -74257,19 +75070,19 @@ window.__updatePending = false; // Flag para saber se há atualização pendente
 async function clearCacheAndReload() {
   try {
     console.log('[UPDATE-CHECK] Iniciando limpeza de cache...');
-    
+
     // 1. Limpar localStorage
     if (localStorage) {
       localStorage.clear();
       console.log('[UPDATE-CHECK] localStorage limpo');
     }
-    
+
     // 2. Limpar sessionStorage
     if (sessionStorage) {
       sessionStorage.clear();
       console.log('[UPDATE-CHECK] sessionStorage limpo');
     }
-    
+
     // 3. Limpar IndexedDB
     if (window.indexedDB) {
       try {
@@ -74284,7 +75097,7 @@ async function clearCacheAndReload() {
         console.warn('[UPDATE-CHECK] Erro ao limpar IndexedDB:', err);
       }
     }
-    
+
     // 4. Limpar Service Workers (se existentes)
     if ('serviceWorker' in navigator) {
       try {
@@ -74297,20 +75110,20 @@ async function clearCacheAndReload() {
         console.warn('[UPDATE-CHECK] Erro ao limpar Service Workers:', err);
       }
     }
-    
+
     // 5. Resetar flags antes de recarregar
     window.__appVersion = null;
     window.__updatePending = false;
-    
+
     // 6. Recarregar a página com hard-refresh (bypass cache)
     console.log('[UPDATE-CHECK] Recarregando página...');
     window.location.href = window.location.href;
-    
+
     // Força reload ignorando cache
     setTimeout(() => {
       window.location.reload(true);
     }, 500);
-    
+
   } catch (err) {
     console.error('[UPDATE-CHECK] Erro ao limpar cache:', err);
     // Fallback: apenas recarrega
@@ -74323,33 +75136,33 @@ async function checkForUpdates() {
   try {
     console.log('[UPDATE-CHECK] ========================================');
     console.log('[UPDATE-CHECK] Iniciando verificação de atualização...');
-    
-    const response = await fetch('/api/check-version', { 
+
+    const response = await fetch('/api/check-version', {
       credentials: 'include',
       cache: 'no-store' // Força o navegador a não cachear
     });
-    
+
     if (!response.ok) {
       console.warn('[UPDATE-CHECK] ❌ Falha ao verificar versão:', response.status);
       console.log('[UPDATE-CHECK] Resposta:', await response.text());
       return;
     }
-    
+
     const data = await response.json();
     const serverVersion = data.version;
-    
+
     console.log('[UPDATE-CHECK] ✓ Resposta do servidor:', data);
     console.log('[UPDATE-CHECK] Versão no servidor (BD): ', serverVersion);
     console.log('[UPDATE-CHECK] Versão no cliente: ', window.__appVersion);
-    
+
     const updateIcon = document.getElementById('config-icon');
-    
+
     // Se é a primeira verificação
     if (window.__appVersion === null) {
       console.log('[UPDATE-CHECK] 🔄 PRIMEIRA VERIFICAÇÃO - Sincronizando...');
       window.__appVersion = serverVersion;
       window.__updatePending = false;
-      
+
       // Garante que ícone fica escondido
       if (updateIcon) {
         updateIcon.style.display = 'none';
@@ -74357,52 +75170,52 @@ async function checkForUpdates() {
         updateIcon.removeAttribute('data-update-available');
         console.log('[UPDATE-CHECK] ✓ Ícone escondido (primeira verificação)');
       }
-      
+
       console.log('[UPDATE-CHECK] ✓ Versão do cliente definida para:', window.__appVersion);
       console.log('[UPDATE-CHECK] ========================================');
       return;
     }
-    
+
     console.log('[UPDATE-CHECK] Comparando versões...');
     console.log('[UPDATE-CHECK] Servidor: "' + serverVersion + '" vs Cliente: "' + window.__appVersion + '"');
     console.log('[UPDATE-CHECK] São diferentes?', serverVersion !== window.__appVersion);
-    
+
     // Se versão é DIFERENTE
     if (serverVersion !== window.__appVersion) {
       console.log('[UPDATE-CHECK] ⚠️ VERSÕES DIFERENTES!');
       console.log('[UPDATE-CHECK] ⚠️ ATUALIZAÇÃO DISPONÍVEL!');
       console.log('[UPDATE-CHECK] Servidor:', serverVersion, '≠ Cliente:', window.__appVersion);
-      
+
       if (updateIcon) {
         console.log('[UPDATE-CHECK] Mostrando ícone de atualização...');
         updateIcon.style.display = 'inline-block';
         updateIcon.title = '✨ Atualização disponível! Clique para aplicar.';
         updateIcon.setAttribute('data-update-available', 'true');
         updateIcon.classList.add('update-available');
-        
+
         console.log('[UPDATE-CHECK] ✨ Ícone exibido e animando');
       }
-      
+
       window.__updatePending = true;
       console.log('[UPDATE-CHECK] ✓ Flag updatePending = true');
-    } 
+    }
     // Se versão é IGUAL
     else {
       console.log('[UPDATE-CHECK] ✓ Versões iguais - Sistema sincronizado');
-      
+
       if (updateIcon) {
         updateIcon.style.display = 'none';
         updateIcon.classList.remove('update-available');
         updateIcon.removeAttribute('data-update-available');
         console.log('[UPDATE-CHECK] ✓ Ícone escondido');
       }
-      
+
       window.__updatePending = false;
       console.log('[UPDATE-CHECK] ✓ Flag updatePending = false');
     }
-    
+
     console.log('[UPDATE-CHECK] ========================================');
-    
+
   } catch (err) {
     console.error('[UPDATE-CHECK] ❌ ERRO ao verificar atualizações:', err);
     console.log('[UPDATE-CHECK] ========================================');
@@ -74416,20 +75229,20 @@ function startVersionCheckLoop() {
     clearInterval(window.__versionCheckInterval);
     console.log('[UPDATE-CHECK] Intervalo anterior cancelado');
   }
-  
+
   console.log('[UPDATE-CHECK] Iniciando verificação imediata...');
   // Verifica imediatamente na primeira vez
   checkForUpdates();
-  
+
   // Depois verifica a cada 5 minutos (300000 ms)
   // Você pode ajustar esse valor conforme necessário
   const CHECK_INTERVAL = 5 * 60 * 1000; // 5 minutos
-  
+
   window.__versionCheckInterval = setInterval(() => {
     console.log('[UPDATE-CHECK] ⏱️ Verificação periódica (a cada 5 min)...');
     checkForUpdates();
   }, CHECK_INTERVAL);
-  
+
   console.log('[UPDATE-CHECK] ✓ Loop de verificação iniciado (intervalo: 5 minutos)');
 }
 
@@ -74807,7 +75620,7 @@ async function salvarTemaNoServidor(theme) {
       credentials: 'include',
       body: JSON.stringify({ theme })
     });
-    
+
     if (!resp.ok) {
       console.warn('[DARK-LIGHT] Falha ao salvar tema no servidor:', resp.status);
     } else {
@@ -74842,16 +75655,16 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // Adiciona evento de clique no botão
   const darkLightBtn = document.querySelector('.dark-light');
-  
+
   if (!darkLightBtn) {
     console.warn('[DARK-LIGHT] Botão .dark-light não encontrado no DOM');
     return;
   }
-  
+
   darkLightBtn.addEventListener('click', async () => {
     const isDark = !document.documentElement.classList.contains('light-mode');
     const novoTema = isDark ? 'light' : 'dark';
-    
+
     // Aplica tema localmente
     aplicarTema(novoTema);
 
@@ -74864,17 +75677,17 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (typeof window._loadKanbanSolicitacoesTab === 'function') {
       try { window._loadKanbanSolicitacoesTab.force = true; window._loadKanbanSolicitacoesTab(); } catch (_) {}
     }
-    
+
     // Salva no servidor
     await salvarTemaNoServidor(novoTema);
-    
+
     // Fallback: salva no localStorage também
     localStorage.setItem('themeMode', novoTema);
-    
+
     const mensagem = novoTema === 'light' ? 'Mudou para modo claro' : 'Mudou para modo escuro';
     console.log('[DARK-LIGHT]', mensagem);
   });
-  
+
   // ===== Iniciar loop de verificação de atualização =====
   // Inicia o monitoramento de versão automaticamente quando usuário estiver logado
   if (window.__sessionUser && window.__sessionUser.id) {
@@ -75006,6 +75819,8 @@ document.addEventListener('DOMContentLoaded', () => {
   let _codigoProdutoAtual = null;
   let _descricaoProdutoAtual = null;
   let _codigoProdutoOmieAtual = null;
+  let _movimFluxoExpedicao = false;
+  let _ultimaTransferenciaId = null;
   let _monSessaoId = null;
   let _monSessaoIniciando = null;
 
@@ -75176,6 +75991,8 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   const MOVIM_DEFAULT_ORIGEM = '10717096386'; // 2. PORTA PALLET (ALMOXARIFADO)
+  const MOVIM_EXPEDICAO_ORIGEM = '10408747829'; // 4. ESTOQUE MAQUINAS
+  const MOVIM_EXPEDICAO_DESTINO = '10440426539'; // 5. EXPEDIÇÃO
   const MOVIM_MOTIVOS = {
     ENT: [
       { v: 'INV', l: 'INV | Ajuste por Inventário' },
@@ -76961,6 +77778,9 @@ document.addEventListener('DOMContentLoaded', () => {
         linhas: linhasRetorno
       }), 'ok');
       if (msg) { msg.textContent = 'Transfer�ncia conclu�da.'; msg.className = 'movim-mensagem ok'; }
+      _ultimaTransferenciaId = idSolicitacao;
+      const reverterBtn = document.getElementById('movimReverterTransferenciaBtn');
+      if (reverterBtn) reverterBtn.style.display = _movimFluxoExpedicao ? 'flex' : 'none';
       aplicarEstoqueOtimistaMovim('TRANSFERENCIA', { origem, destino, qtd });
       if (enderecos.length >= 2) {
         limparSelecoesListaEtq();
@@ -77482,11 +78302,44 @@ document.addEventListener('DOMContentLoaded', () => {
   window._movimAbrirConfigImpressoras = movimAbrirConfigImpressoras;
   window._movimObterPrefsImpressora = movimObterPrefsImpressora;
 
+  document.getElementById('movimReverterTransferenciaBtn')?.addEventListener('click', async function () {
+    if (!_ultimaTransferenciaId || this.disabled) return;
+    const motivo = prompt('Motivo da reversão da transferência:', 'Transferência realizada por engano');
+    if (motivo === null) return;
+    if (String(motivo).trim().length < 5) return alert('Informe um motivo com pelo menos 5 caracteres.');
+    if (!confirm('Confirmar reversão? Será criada uma transferência inversa de Expedição para Estoque Máquinas.')) return;
+    this.disabled = true;
+    const textoOriginal = this.innerHTML;
+    this.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Revertendo...';
+    try {
+      const resp = await fetch(`/api/transferencias/${_ultimaTransferenciaId}/reverter`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' }, credentials: 'include',
+        body: JSON.stringify({ motivo: String(motivo).trim() })
+      });
+      const json = await resp.json().catch(() => ({}));
+      if (!resp.ok || !json.ok) throw new Error(json.error || 'Falha ao reverter transferência.');
+      this.style.display = 'none';
+      const msg = document.getElementById('movimMensagem');
+      if (msg) { msg.textContent = `Transferência revertida. Registro inverso #${json.reversao?.id || '-'}.`; msg.className = 'movim-mensagem ok'; }
+      aplicarEstoqueOtimistaMovim('TRANSFERENCIA', {
+        origem: MOVIM_EXPEDICAO_DESTINO, destino: MOVIM_EXPEDICAO_ORIGEM, qtd: obterQtdDaExpressao()
+      });
+    } catch (err) {
+      alert(err.message || 'Falha ao reverter transferência.');
+      this.disabled = false;
+      this.innerHTML = textoOriginal;
+    }
+  });
+
   // Abre o modal
-  window.abrirModalMovimentacao = async function(codigo, descricao, codigoProduto) {
+  window.abrirModalMovimentacao = async function(codigo, descricao, codigoProduto, opcoes = {}) {
     _codigoProdutoAtual = codigo;
     _descricaoProdutoAtual = descricao || codigo;
     _codigoProdutoOmieAtual = codigoProduto || null;
+    _movimFluxoExpedicao = opcoes?.fluxo === 'expedicao';
+    _ultimaTransferenciaId = null;
+    const reverterBtn = document.getElementById('movimReverterTransferenciaBtn');
+    if (reverterBtn) { reverterBtn.style.display = 'none'; reverterBtn.disabled = false; reverterBtn.innerHTML = '<i class="fa-solid fa-rotate-left"></i> Reverter transferência'; }
     document.querySelectorAll('.movimModoBtn').forEach(b => b.classList.remove('ativo'));
     if (executarBtn) { executarBtn.disabled = false; executarBtn.classList.remove('processando'); }
     _movimModoInterno = null;
@@ -77503,8 +78356,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const titulo   = document.getElementById('movimTitulo');
     const subtitulo= document.getElementById('movimSubtitulo');
-    if (titulo)    titulo.textContent    = descricao || codigo;
-    if (subtitulo) subtitulo.textContent = 'Codigo: ' + codigo;
+    if (titulo)    titulo.textContent    = _movimFluxoExpedicao ? `Expedição · ${descricao || codigo}` : (descricao || codigo);
+    if (subtitulo) subtitulo.textContent = _movimFluxoExpedicao
+      ? `Código: ${codigo} · Estoque Máquinas → Expedição`
+      : 'Codigo: ' + codigo;
     if (overlay)   overlay.style.display = 'flex';
 
     await monIniciarSessao();
@@ -77514,6 +78369,19 @@ document.addEventListener('DOMContentLoaded', () => {
       carregarEstoqueModal(codigo),
       movimAtualizarListboxImpressora()
     ]);
+    document.querySelectorAll('.movimMotivoBtn').forEach(btn => {
+      btn.style.display = _movimFluxoExpedicao && btn.dataset.value !== 'TRF:TRF' ? 'none' : '';
+    });
+    if (_movimFluxoExpedicao) {
+      if (omieMotivoSel) omieMotivoSel.value = 'TRF:TRF';
+      if (origemSel) { origemSel.value = MOVIM_EXPEDICAO_ORIGEM; origemSel.disabled = true; }
+      if (localSel) { localSel.value = MOVIM_EXPEDICAO_DESTINO; localSel.disabled = true; }
+      if (mostrarOutrosLocaisBtn) mostrarOutrosLocaisBtn.style.display = 'none';
+      atualizarLayoutMovim();
+    } else {
+      if (origemSel) origemSel.disabled = false;
+      if (localSel) localSel.disabled = false;
+    }
     atualizarUiMesmoArmazem();
   };
 })();

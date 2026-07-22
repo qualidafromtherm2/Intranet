@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 
-const { dbQuery } = require('../src/db');
+const { dbQuery, dbGetClient } = require('../src/db');
 const { OMIE_APP_KEY, OMIE_APP_SECRET } = require('../config.server');
 const { registrarEventoReq: monEventoReq } = require('../utils/monitoramento');
 const { validarPermissaoMovimentacao } = require('../utils/movimentacaoPermissoes');
@@ -9,6 +9,7 @@ const { validarPermissaoMovimentacao } = require('../utils/movimentacaoPermissoe
 const STATUS_AGUARDANDO = 'Aguardando aprovação';
 const STATUS_TRANSFERIDO = 'Transferido';
 const STATUS_REPROVADO = 'Reprovado';
+const STATUS_REVERTIDO = 'Revertido';
 const ERROS_OMIE_SEM_RETRY_IMEDIATO = [
   /api bloqueada por consumo indevido/i,
   /consumo redundante detectado/i,
@@ -28,6 +29,15 @@ async function ensureTransferenciasSchema() {
       ADD COLUMN IF NOT EXISTS reprovado_por TEXT,
       ADD COLUMN IF NOT EXISTS reprovado_em TIMESTAMPTZ,
       ADD COLUMN IF NOT EXISTS motivo_reprovacao TEXT
+  `);
+  await dbQuery(`
+    ALTER TABLE mensagens.transferencias
+      ADD COLUMN IF NOT EXISTS reversao_status TEXT,
+      ADD COLUMN IF NOT EXISTS reversao_id BIGINT,
+      ADD COLUMN IF NOT EXISTS revertida_por TEXT,
+      ADD COLUMN IF NOT EXISTS revertida_em TIMESTAMPTZ,
+      ADD COLUMN IF NOT EXISTS motivo_reversao TEXT,
+      ADD COLUMN IF NOT EXISTS transferencia_origem_id BIGINT
   `);
   await dbQuery(`
     ALTER TABLE mensagens.transferencias
@@ -657,6 +667,91 @@ router.patch('/:id/aprovar', express.json(), async (req, res) => {
     res.status(err.status || 500).json({
       error: err.message || 'Falha ao aprovar solicitação de transferência.'
     });
+  }
+});
+
+router.patch('/:id/reverter', express.json(), async (req, res) => {
+  const client = await dbGetClient();
+  try {
+    await ensureTransferenciasSchema();
+    const id = Number(req.params.id);
+    const usuario = String(req.session?.user?.username || '').trim();
+    const roles = Array.isArray(req.session?.user?.roles) ? req.session.user.roles : [];
+    const motivo = String(req.body?.motivo || '').trim();
+    if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'Identificador inválido.' });
+    if (!usuario) return res.status(401).json({ error: 'Não autenticado.' });
+    if (motivo.length < 5) return res.status(400).json({ error: 'Informe o motivo da reversão (mínimo de 5 caracteres).' });
+
+    await client.query('BEGIN');
+    const { rows } = await client.query(`
+      SELECT id, codigo_produto, codigo, descricao, qtd, origem, destino,
+             data_movimentacao, cmc, solicitante, status, reversao_status, reversao_id
+        FROM mensagens.transferencias
+       WHERE id = $1
+       FOR UPDATE
+    `, [id]);
+    if (!rows.length) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Transferência não encontrada.' });
+    }
+    const original = rows[0];
+    if (String(original.status || '').toLowerCase() !== STATUS_TRANSFERIDO.toLowerCase()) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({ error: 'Somente transferências concluídas podem ser revertidas.' });
+    }
+    if (original.reversao_id || ['processando', 'revertido'].includes(String(original.reversao_status || '').toLowerCase())) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({ error: 'Esta transferência já foi revertida ou está sendo processada.' });
+    }
+    const podeReverter = roles.includes('admin')
+      || String(original.solicitante || '').trim().toLowerCase() === usuario.toLowerCase();
+    if (!podeReverter) {
+      await client.query('ROLLBACK');
+      return res.status(403).json({ error: 'Somente o solicitante original ou um administrador pode reverter.' });
+    }
+
+    await client.query(`UPDATE mensagens.transferencias SET reversao_status='Processando' WHERE id=$1`, [id]);
+    const respostaOmie = await incluirAjusteEstoqueOmie({
+      ...original,
+      origem: original.destino,
+      destino: original.origem,
+      data_movimentacao: new Date(),
+      motivo: 'TRF'
+    }, usuario);
+
+    const { rows: reversoes } = await client.query(`
+      INSERT INTO mensagens.transferencias
+        (codigo_produto, codigo, descricao, qtd, origem, destino, data_movimentacao, cmc,
+         solicitante, status, aprovado_pro, transferencia_origem_id, motivo_reversao)
+      VALUES ($1,$2,$3,$4,$5,$6,CURRENT_DATE,$7,$8,$9,$8,$10,$11)
+      RETURNING id, codigo, descricao, qtd, origem, destino, status, transferencia_origem_id
+    `, [
+      original.codigo_produto, original.codigo, original.descricao, original.qtd,
+      original.destino, original.origem, original.cmc, usuario, STATUS_TRANSFERIDO, id, motivo
+    ]);
+    const reversao = reversoes[0];
+    await client.query(`
+      UPDATE mensagens.transferencias
+         SET reversao_status=$1, reversao_id=$2, revertida_por=$3, revertida_em=NOW(), motivo_reversao=$4
+       WHERE id=$5
+    `, [STATUS_REVERTIDO, reversao.id, usuario, motivo, id]);
+    await client.query('COMMIT');
+
+    res.json({ ok: true, original_id: id, reversao, omie: respostaOmie || null });
+    void monEventoReq(req, {
+      categoria: 'API', acao: 'transferencia_omie_revertida',
+      codigo_produto: original.codigo,
+      codigo_produto_omie: String(original.codigo_produto || ''), sucesso: true,
+      detalhe: { transferencia_id: id, reversao_id: reversao.id, qtd: original.qtd,
+        armazem_origem: original.destino, armazem_destino: original.origem,
+        motivo, revertida_por: usuario, mexeu_omie: true }
+    });
+  } catch (err) {
+    try { await client.query('ROLLBACK'); } catch (_) {}
+    console.error('[transferencias] falha ao reverter transferência', err);
+    res.status(err.status || 500).json({ error: err.message || 'Falha ao reverter transferência.' });
+  } finally {
+    client.release();
   }
 });
 

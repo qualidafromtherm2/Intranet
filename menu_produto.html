@@ -19,7 +19,7 @@
   referrerpolicy="no-referrer"
 />
   <!-- Seu CSS principal -->
-  <link rel="stylesheet" href="menu_produto.css?v=20260719-compras-redesign-v4"/>
+  <link rel="stylesheet" href="menu_produto.css?v=20260722-shell-pilot-v41-compras-fotos-v2"/>
   <!-- Anti-flicker: esconde menus até as permissões serem aplicadas -->
   <style id="boot-anti-flicker">
     /* Enquanto o app não está pronto, esconde elementos sujeitos a permissões */
@@ -191,6 +191,7 @@
   <div class="header-profile">
     <button id="sgf-ai-btn" title="Assistente SGF" aria-label="Abrir assistente SGF">
       <img src="{{STORAGE_PUBLIC_BASE_URL}}/produtos/assets/Gif_chatbot2.gif" alt="Chatbot Fromtherm">
+      <i class="fa-solid fa-robot" aria-hidden="true"></i>
       <span class="sgf-ai-badge" id="sgf-ai-badge">!</span>
     </button>
     <i id="home-icon" class="fa-solid fa-house" title="Início" style="display:none;"></i>
@@ -224,6 +225,16 @@
         <!-- Container do menu lateral (inicialmente expandido) -->
         <div class="sidebar-content collapsed" id="sidebarContent">
 
+<div class="shell-primary-section side-primary-wrapper">
+  <div class="side-title">Navega&ccedil;&atilde;o</div>
+  <div class="side-menu">
+    <button type="button" class="shell-nav-button" id="side-inicio" data-mirror-nav="#menu-inicio" data-shell-label="In&iacute;cio">
+      <i class="fa-solid fa-house" style="margin-right:8px;"></i>
+      In&iacute;cio
+    </button>
+  </div>
+</div>
+
 <div class="side-wrapper mobile-ready-group">
   <div class="side-title"
        data-nav-key="side:produtos"
@@ -242,6 +253,14 @@
       <i class="fa-solid fa-box-open" style="margin-right:8px;"></i>
       Lista de produtos
     </a>
+
+    <button type="button" class="shell-nav-button"
+       id="side-cadastrar-produto"
+       data-mirror-nav="#menu-produto"
+       data-shell-label="Cadastrar produto">
+      <i class="fa-solid fa-square-plus" style="margin-right:8px;"></i>
+      Cadastrar produto
+    </button>
 
     <a href="#"
        id="btn-definicoes"
@@ -674,6 +693,14 @@
        data-nav-label="Compras">Compras</div>
 
   <div class="side-menu">
+    <button type="button" class="shell-nav-button"
+       id="side-painel-compras"
+       data-mirror-nav="#cart-icon"
+       data-shell-label="Kanban de compras">
+      <i class="fa-solid fa-bag-shopping" style="margin-right:8px;"></i>
+      Kanban de compras
+    </button>
+
     <a href="#"
        id="menu-compras-contas-utilizadas"
        class="menu-link"
@@ -973,14 +1000,10 @@
               </div>
 
               <div class="compras-board-overview" aria-label="Visão do fluxo de compras">
-                <div class="compras-board-tabs" role="tablist" aria-label="Visualização do painel">
+                <div class="compras-board-tabs" aria-label="Visualização do painel">
                   <button id="comprasBoardAtivasBtn" class="compras-board-tab is-active" type="button" role="tab" aria-selected="true" onclick="alterarVisaoComprasKanban('ativas')">
                     <i class="fa-solid fa-wave-square"></i>
-                    Em andamento
-                  </button>
-                  <button id="comprasBoardHistoricoBtn" class="compras-board-tab" type="button" role="tab" aria-selected="false" onclick="alterarVisaoComprasKanban('historico')">
-                    <i class="fa-solid fa-box-archive"></i>
-                    Histórico
+                    Fluxo completo
                   </button>
                 </div>
                 <div class="compras-board-metrics" aria-label="Resumo das compras">
@@ -1210,6 +1233,18 @@
             </div>
             <div class="modal-body">
               <div id="comprasAcoesContainer" class="compras-acoes-grid">
+                <button class="content-button compras-acao-btn" type="button" onclick="fecharModalComprasAcoes();toggleVisualizacao()" title="Alternar entre Kanban e lista">
+                  <i class="fa-solid fa-table-columns"></i>
+                  <span class="compras-acao-text">Alternar visualização</span>
+                </button>
+                <button class="content-button compras-acao-btn" type="button" onclick="fecharModalComprasAcoes();abrirModalFiltrarData()" title="Filtrar por período">
+                  <i class="fa-solid fa-calendar-days"></i>
+                  <span class="compras-acao-text">Filtrar por período</span>
+                </button>
+                <button class="content-button compras-acao-btn" type="button" onclick="fecharModalComprasAcoes();toggleGraficoHistorico()" title="Exibir gráfico de compras">
+                  <i class="fa-solid fa-chart-line"></i>
+                  <span class="compras-acao-text">Gráfico de compras</span>
+                </button>
                 <button id="comprasFiltroKanbanBtn" class="content-button compras-acao-btn" type="button" title="Filtrar Kanbans">
                   <i class="fa-solid fa-filter"></i>
                   <span class="compras-acao-text">Filtrar Kanban</span>
@@ -1432,6 +1467,9 @@
               <i class="fa-solid fa-check"></i> Executar
             </button>
             <div id="movimRetornoOmie" class="movim-retorno-omie" style="display:none;"></div>
+            <button type="button" id="movimReverterTransferenciaBtn" class="movim-executar-btn" style="display:none;background:#7f1d1d;">
+              <i class="fa-solid fa-rotate-left"></i> Reverter transferência
+            </button>
           </div>
         </div>
         <!-- ===================== FIM MODAL MOVIMENTAÇÃO ===================== -->
@@ -1926,76 +1964,75 @@
         </div>
 
         <!-- Modal Detalhes do Pedido -->
-        <div id="modalDetalhesPedidoCompras" class="modal" style="display:none;justify-content:center;align-items:center;">
-          <div class="modal-content" style="max-width:1800px;width:95%;max-height:90vh;overflow-y:auto;">
-            <div class="modal-header">
-              <h3 style="margin:0;display:flex;align-items:center;gap:8px;">
-                <i class="fa-solid fa-file-invoice" style="color:#3b82f6;"></i>
+        <div id="modalDetalhesPedidoCompras" class="modal cp-detail-modal" style="display:none;justify-content:center;align-items:center;">
+          <div class="modal-content cp-detail-shell cp-purchase-sheet">
+            <div class="modal-header cp-detail-header">
+              <h3>
+                <i class="fa-solid fa-cart-shopping"></i>
                 <span id="modalPedidoTitulo">Detalhes do Pedido</span>
               </h3>
-              <button class="modal-close" onclick="fecharModalDetalhesPedidoCompras()">&times;</button>
+              <div class="cp-detail-header-actions">
+                <button class="modal-close" aria-label="Fechar detalhes" onclick="fecharModalDetalhesPedidoCompras()">&times;</button>
+              </div>
             </div>
-            <div class="modal-body" id="modalPedidoBody" style="padding:20px;">
+            <div class="modal-body cp-detail-body" id="modalPedidoBody">
               <!-- Conteúdo será inserido dinamicamente -->
-            </div>
-            <div class="modal-footer">
-              <button class="btn-secondary" onclick="fecharModalDetalhesPedidoCompras()">Fechar</button>
             </div>
           </div>
         </div>
 
         <!-- Modal Detalhes do Item (Cotado aguardando escolha) -->
-        <div id="modalCotadoEscolhaItem" class="modal" style="display:none;justify-content:center;align-items:center;">
-          <div class="modal-content" style="max-width:1200px;width:95%;max-height:90vh;overflow-y:auto;">
-            <div class="modal-header">
+        <div id="modalCotadoEscolhaItem" class="modal cp-detail-modal" style="display:none;justify-content:center;align-items:center;">
+          <div class="modal-content cp-detail-shell" style="max-width:1200px;width:95%;max-height:90vh;overflow-y:auto;">
+            <div class="modal-header cp-detail-header">
               <h3 style="margin:0;display:flex;align-items:center;gap:8px;">
                 <i class="fa-solid fa-clipboard-check" style="color:#8b5cf6;"></i>
                 <span id="modalCotadoEscolhaTitulo">Detalhes do Item Cotado</span>
               </h3>
               <button class="modal-close" onclick="fecharModalCotadoEscolhaItem()">&times;</button>
             </div>
-            <div class="modal-body" id="modalCotadoEscolhaBody" style="padding:20px;">
+            <div class="modal-body cp-detail-body" id="modalCotadoEscolhaBody" style="padding:20px;">
               <!-- Conteúdo será inserido dinamicamente -->
             </div>
-            <div class="modal-footer">
+            <div class="modal-footer cp-detail-footer">
               <button class="btn-secondary" onclick="fecharModalCotadoEscolhaItem()">Fechar</button>
             </div>
           </div>
         </div>
 
         <!-- Modal Análise de Cadastro -->
-        <div id="modalAnaliseCadastro" class="modal" style="display:none;justify-content:center;align-items:center;">
-          <div class="modal-content" style="max-width:1000px;width:95%;">
-            <div class="modal-header">
+        <div id="modalAnaliseCadastro" class="modal cp-detail-modal" style="display:none;justify-content:center;align-items:center;">
+          <div class="modal-content cp-detail-shell" style="max-width:1000px;width:95%;">
+            <div class="modal-header cp-detail-header">
               <h3 style="margin:0;display:flex;align-items:center;gap:8px;">
                 <i class="fa-solid fa-clipboard-list" style="color:#3b82f6;"></i>
                 <span id="modalAnaliseCadastroTitulo">Análise de Cadastro</span>
               </h3>
               <button class="modal-close" onclick="fecharModalAnaliseCadastro()">&times;</button>
             </div>
-            <div class="modal-body" id="modalAnaliseCadastroBody" style="padding:20px;">
+            <div class="modal-body cp-detail-body" id="modalAnaliseCadastroBody" style="padding:20px;">
               <!-- Conteúdo será inserido dinamicamente -->
             </div>
-            <div class="modal-footer">
+            <div class="modal-footer cp-detail-footer">
               <button class="btn-secondary" onclick="fecharModalAnaliseCadastro()">Fechar</button>
             </div>
           </div>
         </div>
 
         <!-- Modal Kanban Cotação -->
-        <div id="modalCotacaoKanban" class="modal" style="display:none;justify-content:center;align-items:center;">
-          <div class="modal-content" style="max-width:1200px;width:95%;max-height:90vh;display:flex;flex-direction:column;overflow:hidden;">
-            <div class="modal-header" style="position:sticky;top:0;z-index:20;background:#ffffff;">
+        <div id="modalCotacaoKanban" class="modal cp-detail-modal" style="display:none;justify-content:center;align-items:center;">
+          <div class="modal-content cp-detail-shell" style="max-width:1200px;width:95%;max-height:90vh;display:flex;flex-direction:column;overflow:hidden;">
+            <div class="modal-header cp-detail-header" style="position:sticky;top:0;z-index:20;background:#ffffff;">
               <h3 style="margin:0;display:flex;align-items:center;gap:8px;">
                 <i class="fa-solid fa-file-invoice-dollar" style="color:#fbbf24;"></i>
                 <span id="modalCotacaoKanbanTitulo">Cotação</span>
               </h3>
               <button class="modal-close" onclick="fecharModalCotacaoKanban()">&times;</button>
             </div>
-            <div class="modal-body" id="modalCotacaoKanbanBody" style="padding:20px;overflow-y:auto;flex:1;">
+            <div class="modal-body cp-detail-body" id="modalCotacaoKanbanBody" style="padding:20px;overflow-y:auto;flex:1;">
               <!-- Conteúdo será inserido dinamicamente -->
             </div>
-            <div class="modal-footer" style="position:sticky;bottom:0;background:#ffffff;z-index:20;">
+            <div class="modal-footer cp-detail-footer" style="position:sticky;bottom:0;background:#ffffff;z-index:20;">
               <button class="btn-secondary" onclick="fecharModalCotacaoKanban()">Fechar</button>
             </div>
           </div>
@@ -6759,12 +6796,33 @@
                 As demais áreas continuam disponíveis na versão para computador.
               </div>
             </section>
-            <div class="content-section">
-
-            </div>
+            <section class="home-module-launcher" id="homeModuleLauncher" aria-labelledby="homeModuleTitle">
+              <div class="home-module-heading">
+                <div>
+                  <span class="home-module-eyebrow">M&oacute;dulos</span>
+                  <h1 id="homeModuleTitle">Onde vamos trabalhar?</h1>
+                  <p>Escolha um setor para acessar as rotinas liberadas para voc&ecirc;.</p>
+                </div>
+                <button type="button" class="home-module-back" id="homeModuleBack" hidden>
+                  <i class="fa-solid fa-arrow-left" aria-hidden="true"></i>
+                  Todos os m&oacute;dulos
+                </button>
+              </div>
+              <div class="home-module-grid" id="homeModuleGrid"></div>
+              <div class="home-routine-panel" id="homeRoutinePanel" hidden>
+                <div class="home-routine-heading">
+                  <span class="home-routine-icon" id="homeRoutineIcon" aria-hidden="true"></span>
+                  <div>
+                    <h2 id="homeRoutineTitle"></h2>
+                    <p id="homeRoutineDescription">Selecione a rotina que deseja abrir.</p>
+                  </div>
+                </div>
+                <div class="home-routine-grid" id="homeRoutineGrid"></div>
+              </div>
+            </section>
 
             <!-- Calendário Semanal de Produção -->
-            <div class="content-section" style="margin-top: 24px;">
+            <div class="content-section home-weekly-production" id="homeWeeklyProduction" hidden aria-hidden="true">
               <div class="title-wrapper" style="display: flex; align-items: center; gap: 12px; margin-bottom: 16px;">
                 <div class="content-section-title">Visão Semanal de Produção</div>
                 <button id="btnVoltarHoje" class="content-button" style="display: flex; align-items: center; gap: 6px; padding: 6px 12px; font-size: 13px;">
@@ -6782,7 +6840,7 @@
             </div>
 
             <!-- Calendário Mensal de Reservas -->
-            <div class="content-section" style="margin-top: 20px;">
+            <div class="content-section home-reservations-section">
               <!-- Título: fica acima do layout -->
               <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;">
                 <span class="content-section-title" style="display:flex;align-items:center;gap:8px;">
@@ -7493,32 +7551,34 @@
                   <div style="display:flex;flex-direction:column;gap:14px;">
                     <div>
                       <label for="familySelect" style="display:block;font-size:13px;font-weight:600;color:#374151;margin-bottom:5px;">Família:</label>
-                      <select id="familySelect" style="width:100%;padding:8px 10px;border:1px solid #d1d5db;border-radius:8px;font-size:14px;color:#374151;background:#f9fafb;"><option value="">– todas –</option></select>
+                      <select id="familySelect" multiple size="5" aria-describedby="familySelectHint" style="width:100%;padding:8px 10px;border:1px solid #d1d5db;border-radius:8px;font-size:14px;color:#374151;background:#f9fafb;"></select>
+                      <small id="familySelectHint" style="display:block;margin-top:5px;color:#6b7280;font-size:11px;line-height:1.35;">Selecione uma ou mais opções. Sem seleção exibe todas.</small>
                     </div>
                     <div>
                       <label for="tipoItemSelect" style="display:block;font-size:13px;font-weight:600;color:#374151;margin-bottom:5px;">Tipo de Item:</label>
-                      <select id="tipoItemSelect" style="width:100%;padding:8px 10px;border:1px solid #d1d5db;border-radius:8px;font-size:14px;color:#374151;background:#f9fafb;"><option value="">– todos –</option></select>
+                      <select id="tipoItemSelect" multiple size="5" aria-describedby="tipoItemSelectHint" style="width:100%;padding:8px 10px;border:1px solid #d1d5db;border-radius:8px;font-size:14px;color:#374151;background:#f9fafb;"></select>
+                      <small id="tipoItemSelectHint" style="display:block;margin-top:5px;color:#6b7280;font-size:11px;line-height:1.35;">Selecione um ou mais tipos. Sem seleção exibe todos.</small>
                     </div>
                     <div>
                       <label for="filterOrigemProduto" style="display:block;font-size:13px;font-weight:600;color:#374151;margin-bottom:5px;">Origem do produto:</label>
-                      <select id="filterOrigemProduto" style="width:100%;padding:8px 10px;border:1px solid #d1d5db;border-radius:8px;font-size:14px;color:#374151;background:#f9fafb;">
-                        <option value="">– todos –</option>
+                      <select id="filterOrigemProduto" multiple size="2" aria-describedby="filterOrigemProdutoHint" style="width:100%;padding:8px 10px;border:1px solid #d1d5db;border-radius:8px;font-size:14px;color:#374151;background:#f9fafb;">
                         <option value="N">Nacional</option>
                         <option value="I">Importado</option>
                       </select>
+                      <small id="filterOrigemProdutoHint" style="display:block;margin-top:5px;color:#6b7280;font-size:11px;line-height:1.35;">Selecione uma ou mais origens. Sem seleção exibe todas.</small>
                     </div>
                     <div>
                       <label for="filterSituacaoCompra" style="display:block;font-size:13px;font-weight:600;color:#374151;margin-bottom:5px;">Situação de compra:</label>
-                      <select id="filterSituacaoCompra" style="width:100%;padding:8px 10px;border:1px solid #d1d5db;border-radius:8px;font-size:14px;color:#374151;background:#f9fafb;">
-                        <option value="">– todas –</option>
+                      <select id="filterSituacaoCompra" multiple size="2" aria-describedby="filterSituacaoCompraHint" style="width:100%;padding:8px 10px;border:1px solid #d1d5db;border-radius:8px;font-size:14px;color:#374151;background:#f9fafb;">
                         <option value="sem_compra">Não comprado ainda</option>
                         <option value="em_compra">Em compra</option>
                       </select>
+                      <small id="filterSituacaoCompraHint" style="display:block;margin-top:5px;color:#6b7280;font-size:11px;line-height:1.35;">Selecione uma ou mais situações. Sem seleção exibe todas.</small>
                     </div>
                     <div>
                       <label for="filterLocalSelect" style="display:block;font-size:13px;font-weight:600;color:#374151;margin-bottom:5px;">Com saldo positivo no estoque:</label>
-                      <select id="filterLocalSelect" style="width:100%;padding:8px 10px;border:1px solid #d1d5db;border-radius:8px;font-size:14px;color:#374151;background:#f9fafb;"><option value="">– todos –</option></select>
-                      <small style="display:block;margin-top:5px;color:#6b7280;font-size:11px;line-height:1.35;">Selecione um local para ver somente produtos com saldo maior que zero nele.</small>
+                      <select id="filterLocalSelect" multiple size="5" aria-describedby="filterLocalSelectHint" style="width:100%;padding:8px 10px;border:1px solid #d1d5db;border-radius:8px;font-size:14px;color:#374151;background:#f9fafb;"></select>
+                      <small id="filterLocalSelectHint" style="display:block;margin-top:5px;color:#6b7280;font-size:11px;line-height:1.35;">Selecione um ou mais locais. O produto será exibido se tiver saldo positivo em qualquer um deles.</small>
                     </div>
                   </div>
                   <div style="display:flex;gap:8px;margin-top:22px;justify-content:flex-end;">
@@ -12381,7 +12441,7 @@
   <script src="/public/js/at-masp-relatorio.js?v=20260718g" defer></script>
   <script src="/public/js/vendas-relatorio-gerencial.js?v=20260709a" defer></script>
   <script src="/public/js/logistica-relatorio-gerencial.js?v=20260712a" defer></script>
-  <script type="module" src="menu_produto.js?v=20260718-minimos-compras-2"></script>
+  <script type="module" src="menu_produto.js?v=20260722-shell-pilot-v47-compras-fotos-acoes-v1"></script>
   
   <script type="module" src="./requisicoes_omie/filtro_produto.js?v=20260718-faixa-minimo"></script>
   <script type="module" src="./requisicoes_omie/ListarProdutos.js?v=20260718-faixa-minimo"></script>
@@ -13711,6 +13771,18 @@ function attachDropZone(ul) {
 
         <div class="form-row">
           <div class="form-field full">
+            <span class="label">Escopo da lista de separação</span>
+            <label class="chip" style="width:max-content">
+              <input id="colab-separacao-restringir" type="checkbox">
+              Mostrar somente destinos selecionados
+            </label>
+            <select id="colab-separacao-destinos" multiple size="5" aria-label="Destinos permitidos para separação"></select>
+            <small>Sem restrição, o colaborador continua vendo todos os destinos. Use Ctrl para selecionar mais de um.</small>
+          </div>
+        </div>
+
+        <div class="form-row">
+          <div class="form-field full">
             <span class="label">Operações selecionadas</span>
             <div id="colab-operacao-list" class="operacao-list">
               <div class="operacao-empty">Nenhuma operação adicionada.</div>
@@ -13736,7 +13808,8 @@ function attachDropZone(ul) {
 <style>
   /* ====== ESTILOS SOMENTE DO MODAL DE COLABORADOR ======
      Tudo fica sob #colabModal para não afetar o restante da página. */
-  #colabModal .modal-content { max-width: 720px; border-radius: 14px; padding: 0; }
+  #colabModal .modal-content { max-width: 720px; max-height:calc(100dvh - 24px); border-radius: 14px; padding: 0;
+    display:flex; flex-direction:column; overflow:hidden; }
   #colabModal .modal-header { display:flex; align-items:center; justify-content:space-between;
     padding:16px 18px; border-bottom:1px solid rgba(0,0,0,.08); }
   #colabModal .modal-header h3 { margin:0; font-size:1.15rem; font-weight:700; }
@@ -13744,7 +13817,7 @@ function attachDropZone(ul) {
     width:36px; height:36px; border-radius:50%; cursor:pointer; }
   #colabModal .modal-close:hover { background:rgba(0,0,0,.06); }
 
-  #colabModal .modal-body { padding:18px; }
+  #colabModal .modal-body { padding:18px; overflow-y:auto; min-height:0; }
   #colabModal .modal-footer { display:flex; gap:10px; justify-content:flex-end; padding:14px 18px 18px;
     border-top:1px solid rgba(0,0,0,.06); }
 
@@ -13753,6 +13826,14 @@ function attachDropZone(ul) {
   #colabModal .form-field { display:flex; flex-direction:column; gap:6px; }
   #colabModal .form-field.sm { max-width:220px; }
   #colabModal .form-field.full { grid-column:1 / -1; }
+  #colabModal label.chip:has(#colab-separacao-restringir) { display:flex; align-items:center; gap:8px; }
+  #colabModal #colab-separacao-restringir { width:18px; height:18px; min-width:18px; margin:0; }
+  #colabModal #colab-separacao-destinos { min-height:96px; }
+  @media (max-width: 600px) {
+    #colabModal .modal-content { width:calc(100% - 16px); max-height:calc(100dvh - 16px); margin:8px; }
+    #colabModal .form-row { grid-template-columns:1fr; }
+    #colabModal .form-field.sm { max-width:none; }
+  }
   #colabModal .form-field .label { font-size:.85rem; font-weight:600; color:#333; }
   #colabModal .form-field input,
   #colabModal .form-field select {
@@ -18985,12 +19066,12 @@ function attachDropZone(ul) {
 <style>
 /* ── Botão flutuante ── */
 #sgf-ai-btn {
-  position: fixed;
-  left: 40px;
-  bottom: 16px;
+  position: relative;
+  left: auto;
+  bottom: auto;
   z-index: 998;
-  width: 116px;
-  height: 116px;
+  width: 44px;
+  height: 44px;
   border-radius: 50%;
   background: transparent;
   border: none;
@@ -19000,17 +19081,18 @@ function attachDropZone(ul) {
   align-items: center;
   justify-content: center;
   transition: transform .2s, box-shadow .2s;
-  transform: translateX(-50%);
+  transform: none;
   color: #fff;
   font-size: 22px;
 }
-#sgf-ai-btn:hover { transform: translateX(-50%) scale(1.08); box-shadow: none; }
+#sgf-ai-btn:hover { transform: scale(1.04); box-shadow: none; }
 #sgf-ai-btn img {
-  width: 104px;
-  height: 104px;
+  width: 40px;
+  height: 40px;
   object-fit: contain;
-  display: block;
+  display: none;
 }
+#sgf-ai-btn > i { font-size: 20px; color: var(--theme-color); }
 #sgf-ai-btn .sgf-ai-badge {
   position: absolute;
   top: -4px;
@@ -19510,16 +19592,17 @@ function attachDropZone(ul) {
   }
   #sgf-ai-btn {
     position: static;
-    width: 64px;
-    height: 64px;
+    width: 44px;
+    height: 44px;
     transform: none;
     flex-shrink: 0;
     padding: 0;
     overflow: visible;
   }
   #sgf-ai-btn img {
-    width: 64px;
-    height: 64px;
+    display: none;
+    width: 40px;
+    height: 40px;
   }
   #sgf-ai-btn:hover {
     transform: scale(1.08);
