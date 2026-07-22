@@ -46176,7 +46176,7 @@ async function abrirModalDetalhesPedidoMinhas(numeroPedido, statusColuna, itemId
       });
       modalTitulo.textContent = tipoFicha === 'pedido'
         ? `Pedido de Compra Nº ${numeroPedido}`
-        : `Requisição Nº ${primeiro.grupo_requisicao || primeiro.id || '-'}`;
+        : `${statusColunaLower === 'aguardando aprovação da requisição' ? 'Aguardando aprovação' : 'Requisição'} Nº ${primeiro.grupo_requisicao || primeiro.id || '-'}`;
       return;
     }
 
