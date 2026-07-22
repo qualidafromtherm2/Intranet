@@ -19,7 +19,7 @@
   referrerpolicy="no-referrer"
 />
   <!-- Seu CSS principal -->
-  <link rel="stylesheet" href="menu_produto.css?v=20260719-compras-redesign-v4"/>
+  <link rel="stylesheet" href="menu_produto.css?v=20260721-compras-detalhes-omie-1"/>
   <!-- Anti-flicker: esconde menus até as permissões serem aplicadas -->
   <style id="boot-anti-flicker">
     /* Enquanto o app não está pronto, esconde elementos sujeitos a permissões */
@@ -1937,26 +1937,23 @@
         </div>
 
         <!-- Modal Detalhes do Pedido -->
-        <div id="modalDetalhesPedidoCompras" class="modal" style="display:none;justify-content:center;align-items:center;">
-          <div class="modal-content" style="max-width:1800px;width:95%;max-height:90vh;overflow-y:auto;">
-            <div class="modal-header">
-              <h3 style="margin:0;display:flex;align-items:center;gap:8px;">
-                <i class="fa-solid fa-file-invoice" style="color:#3b82f6;"></i>
+        <div id="modalDetalhesPedidoCompras" class="modal cp-detail-modal" style="display:none;justify-content:center;align-items:center;">
+          <div class="modal-content cp-detail-shell cp-purchase-sheet">
+            <div class="modal-header cp-detail-header">
+              <h3>
+                <i class="fa-solid fa-cart-shopping"></i>
                 <span id="modalPedidoTitulo">Detalhes do Pedido</span>
               </h3>
-              <div style="display:flex;align-items:center;gap:10px;">
+              <div class="cp-detail-header-actions">
                 <button id="btnExcluirPedidoComprasDetalhes" type="button" onclick="excluirPedidoComprasKanban('btnExcluirPedidoComprasDetalhes')"
                   style="display:none;background:#dc2626;color:#fff;border:none;border-radius:8px;padding:6px 12px;font-size:12px;font-weight:700;cursor:pointer;align-items:center;gap:6px;">
                   <i class="fa-solid fa-trash"></i> Excluir
                 </button>
-                <button class="modal-close" onclick="fecharModalDetalhesPedidoCompras()">&times;</button>
+                <button class="modal-close" aria-label="Fechar detalhes do pedido" onclick="fecharModalDetalhesPedidoCompras()">&times;</button>
               </div>
             </div>
-            <div class="modal-body" id="modalPedidoBody" style="padding:20px;">
+            <div class="modal-body cp-detail-body" id="modalPedidoBody">
               <!-- Conteúdo será inserido dinamicamente -->
-            </div>
-            <div class="modal-footer">
-              <button class="btn-secondary" onclick="fecharModalDetalhesPedidoCompras()">Fechar</button>
             </div>
           </div>
         </div>
@@ -12491,7 +12488,7 @@
   <script src="/public/js/at-masp-relatorio.js?v=20260718g" defer></script>
   <script src="/public/js/vendas-relatorio-gerencial.js?v=20260709a" defer></script>
   <script src="/public/js/logistica-relatorio-gerencial.js?v=20260712a" defer></script>
-  <script type="module" src="menu_produto.js?v=20260721-pre-cadastro-3"></script>
+  <script type="module" src="menu_produto.js?v=20260721-compras-detalhes-omie-1"></script>
   
   <script type="module" src="./requisicoes_omie/filtro_produto.js?v=20260718-faixa-minimo"></script>
   <script type="module" src="./requisicoes_omie/ListarProdutos.js?v=20260718-faixa-minimo"></script>

@@ -35365,7 +35365,7 @@ app.get('/api/compras/pedido-detalhes/:nCodPed', async (req, res) => {
     
     // Busca o pedido
     const { rows: pedidoRows } = await pool.query(
-      'SELECT n_cod_ped, c_cod_int_ped, d_inc_data, d_dt_previsao, created_at, n_cod_for FROM compras.pedidos_omie WHERE n_cod_ped = $1',
+      'SELECT n_cod_ped, c_cod_int_ped, d_inc_data, d_dt_previsao, created_at, n_cod_for, n_valor FROM compras.pedidos_omie WHERE n_cod_ped = $1',
       [nCodPedInt]
     );
     
@@ -35400,7 +35400,7 @@ app.get('/api/compras/pedido-detalhes/:nCodPed', async (req, res) => {
     // Busca os produtos/itens do pedido
     console.log('[PedidoDetalhes] Buscando itens para n_cod_ped:', nCodPedInt);
     const { rows: produtosRows } = await pool.query(
-      `SELECT c_produto, c_descricao, n_qtde FROM compras.pedidos_omie_produtos 
+      `SELECT c_produto, c_descricao, n_qtde, n_val_unit, n_val_tot FROM compras.pedidos_omie_produtos
        WHERE n_cod_ped = $1
        ORDER BY id ASC`,
       [nCodPedInt]
@@ -35411,7 +35411,9 @@ app.get('/api/compras/pedido-detalhes/:nCodPed', async (req, res) => {
     const itens = produtosRows.map(row => ({
       produto_codigo: row.c_produto,
       produto_descricao: row.c_descricao,
-      quantidade: row.n_qtde || '-'
+      quantidade: row.n_qtde || '-',
+      preco_unitario: row.n_val_unit,
+      valor_total_item: row.n_val_tot
     }));
     
     let solicitante = '-';
@@ -35498,6 +35500,7 @@ app.get('/api/compras/pedido-detalhes/:nCodPed', async (req, res) => {
       d_inc_data: pedido.d_inc_data,
       d_dt_previsao: pedido.d_dt_previsao,
       createdAt: pedido.created_at,
+      valorTotalPedido: pedido.n_valor,
       itens: itens
     });
   } catch (err) {

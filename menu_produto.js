@@ -45594,6 +45594,92 @@ async function excluirPedidoComprasKanban(btnId) {
 window.excluirPedidoComprasKanban = excluirPedidoComprasKanban;
 
 // Modal específico para "Kanban de compras" (visualização do usuário solicitante)
+function renderizarFichaCompraOmie({ tipo = 'pedido', numero = '', status = '', dados = {}, itens = [], linksHtml = '' } = {}) {
+  const valorSeguro = (valor, fallback = '-') => {
+    const texto = String(valor ?? '').trim();
+    return escapeHtml(texto && texto.toLowerCase() !== 'null' ? texto : fallback);
+  };
+  const possuiValor = (valor) => {
+    const texto = String(valor ?? '').trim().toLowerCase();
+    return Boolean(texto && texto !== '-' && texto !== 'null' && texto !== 'undefined');
+  };
+  const formatarDataFicha = (valor) => {
+    if (!valor) return '-';
+    const data = new Date(valor);
+    return Number.isNaN(data.getTime()) ? valorSeguro(valor) : data.toLocaleDateString('pt-BR');
+  };
+  const formatarMoedaFicha = (valor) => {
+    if (valor === null || valor === undefined || valor === '') return '-';
+    const texto = String(valor).trim();
+    if (/^R\$/i.test(texto)) return valorSeguro(texto);
+    const normalizado = texto.includes(',') ? texto.replace(/\./g, '').replace(',', '.') : texto;
+    const numeroMoeda = Number(normalizado);
+    return Number.isFinite(numeroMoeda) ? numeroMoeda.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) : valorSeguro(texto);
+  };
+  const formatarQuantidadeFicha = (valor) => {
+    try {
+      if (typeof formatarQuantidadeExibicao === 'function') return escapeHtml(formatarQuantidadeExibicao(valor));
+    } catch (_) {}
+    return valorSeguro(valor);
+  };
+  const tipoNormalizado = String(tipo || 'pedido').toLowerCase();
+  const rotuloDocumento = tipoNormalizado === 'nfe' ? 'NF-e' : (tipoNormalizado === 'requisicao' ? 'Requisição' : 'Pedido de Compra');
+  const fornecedor = dados.fornecedorNome || dados.fornecedor_nome || dados.fornecedor || '-';
+  const solicitante = dados.solicitante || '-';
+  const comprador = dados.comprador || dados.responsavel || solicitante;
+  const categoria = dados.categoria || dados.departamento || '-';
+  const previsao = dados.d_dt_previsao || dados.previsao_chegada || dados.prazo_solicitado || dados.previsao;
+  const inclusao = dados.d_inc_data || dados.created_at || dados.createdAt || dados.data_criacao;
+  const centroCusto = dados.centroCusto || dados.centro_custo || '-';
+  const objetivo = dados.objetivoCompra || dados.objetivo_compra || '-';
+  const valorTotal = dados.valorTotalPedido || dados.valor_total || dados.valor_total_pedido || dados.n_valor || dados.total || dados.valor || '';
+  const parcelas = dados.numero_parcelas || dados.parcelas || dados.condicao_pagamento || '-';
+  const statusTexto = status || dados.status || 'Em andamento';
+  const linhas = (Array.isArray(itens) ? itens : []).map((item, indice) => `
+    <tr>
+      <td class="cp-sheet-item-index">${indice + 1}</td>
+      <td>${valorSeguro(item.produto_codigo || item.c_produto)}</td>
+      <td class="cp-sheet-product">${valorSeguro(item.produto_descricao || item.c_descricao || item.descricao)}</td>
+      <td class="cp-sheet-quantity">${formatarQuantidadeFicha(item.quantidade ?? item.n_qtde)}</td>
+      <td class="cp-sheet-money">${formatarMoedaFicha(item.preco_unitario ?? item.n_val_unit ?? item.valor_unitario)}</td>
+      <td class="cp-sheet-money cp-sheet-money--total">${formatarMoedaFicha(item.valor_total_item ?? item.n_val_tot ?? item.valor_total)}</td>
+    </tr>
+  `).join('');
+
+  return `
+    <div class="cp-sheet-layout"><main class="cp-sheet-main">
+      <section class="cp-sheet-summary" aria-label="Resumo do documento">
+        <div class="cp-sheet-avatar" aria-hidden="true">${valorSeguro(String(fornecedor).slice(0, 2).toUpperCase(), 'PC')}</div>
+        <div class="cp-sheet-fields">
+          <div class="cp-sheet-field cp-sheet-field--wide"><span>Fornecedor</span><strong title="${valorSeguro(fornecedor)}">${valorSeguro(fornecedor)}</strong></div>
+          <div class="cp-sheet-field"><span>Previsão de entrega</span><strong>${formatarDataFicha(previsao)}</strong></div>
+          ${possuiValor(categoria) ? `<div class="cp-sheet-field"><span>Categoria da compra</span><strong>${valorSeguro(categoria)}</strong></div>` : ''}
+          <div class="cp-sheet-field"><span>Comprador</span><strong>${valorSeguro(comprador)}</strong></div>
+          ${possuiValor(parcelas) ? `<div class="cp-sheet-field"><span>Condição de pagamento</span><strong>${valorSeguro(parcelas)}</strong></div>` : ''}
+          <div class="cp-sheet-status-inline"><span>Status</span><strong>${valorSeguro(statusTexto)}</strong></div>
+        </div>
+      </section>
+      <section class="cp-sheet-totals" aria-label="Totais do documento">
+        <div><span>Documento</span><strong>${valorSeguro(rotuloDocumento)} Nº ${valorSeguro(numero)}</strong></div>
+        <div><span>Itens</span><strong>${itens.length}</strong></div>
+        <div><span>Data de inclusão</span><strong>${formatarDataFicha(inclusao)}</strong></div>
+        <div><span>Centro de custo</span><strong>${valorSeguro(centroCusto)}</strong></div>
+        <div class="cp-sheet-total-primary"><span>Valor total da compra</span><strong>${valorTotal !== '' ? formatarMoedaFicha(valorTotal) : 'Não informado'}</strong></div>
+      </section>
+      <section class="cp-sheet-items">
+        <h4 class="cp-sheet-section-title">Itens da compra</h4>
+        <div class="cp-sheet-table-wrap"><table>
+          <thead><tr><th>Item</th><th>Código</th><th>Descrição do produto</th><th>Quantidade</th><th>Preço unitário</th><th>Total do item</th></tr></thead>
+          <tbody>${linhas || '<tr><td colspan="6" class="cp-sheet-empty">Nenhum item encontrado</td></tr>'}</tbody>
+        </table></div>
+        <div class="cp-sheet-record-count">${itens.length} ${itens.length === 1 ? 'registro' : 'registros'}</div>
+      </section>
+      <section class="cp-sheet-note"><i class="fa-regular fa-note-sticky"></i><div><span>Objetivo da compra</span><strong>${valorSeguro(objetivo)}</strong></div></section>
+      ${linksHtml ? `<section class="cp-sheet-links"><span>Anexos e links</span><div>${linksHtml}</div></section>` : ''}
+    </main></div>
+  `;
+}
+
 async function abrirModalDetalhesPedidoMinhas(numeroPedido, statusColuna, itemIds = null) {
   const modal = document.getElementById('modalDetalhesPedidoCompras');
   const modalBody = document.getElementById('modalPedidoBody');
@@ -45601,7 +45687,17 @@ async function abrirModalDetalhesPedidoMinhas(numeroPedido, statusColuna, itemId
   
   if (!modal || !modalBody || !modalTitulo) return;
   
-  modalBody.innerHTML = '<div style="text-align:center;padding:40px;"><i class="fa-solid fa-spinner fa-spin" style="font-size:32px;color:#3b82f6;"></i><br><br>Carregando...</div>';
+  const limiteMenu = Math.max(
+    Number(document.querySelector('.left-side')?.getBoundingClientRect()?.right) || 0,
+    Number(document.getElementById('sidebarContent')?.getBoundingClientRect()?.right) || 0
+  );
+  modal.style.setProperty('--cp-detail-nav-offset', `${Math.max(0, Math.round(limiteMenu))}px`);
+  modalBody.innerHTML = `
+    <div class="cp-sheet-loading" role="status" aria-live="polite">
+      <i class="fa-solid fa-spinner fa-spin" aria-hidden="true"></i>
+      <strong>Carregando pedido</strong>
+      <span>Aguarde enquanto buscamos os dados e itens da compra.</span>
+    </div>`;
   modal.style.display = 'flex';
 
   const btnExcluirDetalhes = document.getElementById('btnExcluirPedidoComprasDetalhes');
@@ -45842,6 +45938,14 @@ async function abrirModalDetalhesPedidoMinhas(numeroPedido, statusColuna, itemId
                   </div>
                 </div>
               `;
+              modalBody.innerHTML = renderizarFichaCompraOmie({
+                tipo: 'pedido',
+                numero: numeroPedido,
+                status: statusColuna,
+                dados: { ...primeiroItemPedido, ...detalhes },
+                itens: itensParaMostrar
+              });
+              modalTitulo.textContent = `Pedido de Compra Nº ${numeroPedido}`;
               return;
             }
           } catch (err) {
@@ -46003,6 +46107,18 @@ async function abrirModalDetalhesPedidoMinhas(numeroPedido, statusColuna, itemId
           </div>
         </div>
       `;
+      const tipoFicha = numeroPedido && numeroPedido !== 'undefined' && numeroPedido !== 'null' ? 'pedido' : 'requisicao';
+      modalBody.innerHTML = renderizarFichaCompraOmie({
+        tipo: tipoFicha,
+        numero: numeroPedido || primeiro.numero_pedido || primeiro.grupo_requisicao || primeiro.id || '-',
+        status: statusColuna,
+        dados: primeiro,
+        itens: itensTabela,
+        linksHtml: linksSemCadastro.length ? montarHtmlLinks(linksSemCadastro) : ''
+      });
+      modalTitulo.textContent = tipoFicha === 'pedido'
+        ? `Pedido de Compra Nº ${numeroPedido}`
+        : `Requisição Nº ${primeiro.grupo_requisicao || primeiro.id || '-'}`;
       return;
     }
 
