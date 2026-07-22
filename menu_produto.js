@@ -43711,7 +43711,9 @@ async function abrirModalDetalhesPedidoCompras(numeroPedido) {
     };
     
     // Verifica se pelo menos um item está em "aguardando compra" para mostrar dados da compra
-    const temItemAguardandoCompra = itensPedido.some(item => item.status === 'aguardando compra');
+    const temItemAguardandoCompra = itensPedido.some(item =>
+      ['aguardando compra', 'aguardando compra preparação'].includes(String(item.status || '').trim().toLowerCase())
+    );
     
     let html = `
       <!-- Informações do Pedido -->
@@ -44709,7 +44711,7 @@ async function abrirModalDetalhesPedidoCompras(numeroPedido) {
         }
         
         // Configura autocomplete e campos para itens em "aguardando compra"
-        if (item.status === 'aguardando compra') {
+        if (['aguardando compra', 'aguardando compra preparação'].includes(String(item.status || '').trim().toLowerCase())) {
           console.log('[MODAL] Configurando campos para pedido:', item.numero_pedido);
           console.log('[MODAL] Fornecedores disponíveis:', window.fornecedoresCache?.length || 0);
           setupFornecedorAutocompleteModal(item.numero_pedido);
@@ -45603,8 +45605,13 @@ function renderizarAcoesOperacionaisCompra(tipo = 'pedido', opcoes = {}) {
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '');
   const ehNfeRecebidaOuConferida = ehNfe && ['recebido', 'concluido', 'conferido'].includes(statusNormalizado);
+  const numeroPreparacao = String(opcoes.prepararPedidoNumero || '').trim();
+  const acaoPrepararPedido = numeroPreparacao
+    ? [['Preparar pedido de compra', 'fa-cart-shopping', encodeURIComponent(numeroPreparacao), opcoes.podePrepararPedido ? 'preparar-pedido' : 'sem-permissao']]
+    : [];
   const acoes = ehRequisicao
     ? [
+        ...acaoPrepararPedido,
         ['Salvar', 'fa-cloud-arrow-up'], ['Incluir', 'fa-circle-plus'], ['Imprimir', 'fa-print'],
         ['Duplicar', 'fa-copy'], ['Anexos', 'fa-paperclip'], ['E-mails enviados', 'fa-envelope'],
         ['Histórico de alterações', 'fa-clock-rotate-left'], ['Excluir', 'fa-trash-can', '', 'header']
@@ -45630,8 +45637,12 @@ function renderizarAcoesOperacionaisCompra(tipo = 'pedido', opcoes = {}) {
 
   return `<aside class="cp-sheet-actions" aria-label="Ações do documento">
     <div class="cp-sheet-actions-title"><span>Ações</span><small>Integrações previstas</small></div>
-    ${acoes.map(([rotulo, icone, href, modo]) => href
-      ? `<a class="cp-sheet-action is-ready" href="${escapeHtml(href)}" target="_blank" rel="noopener"><i class="fa-solid ${icone}"></i><span>${rotulo}</span><small>Disponível</small></a>`
+    ${acoes.map(([rotulo, icone, href, modo]) => modo === 'preparar-pedido'
+      ? `<button class="cp-sheet-action is-ready" type="button" onclick="abrirModalDetalhesPedidoCompras(decodeURIComponent('${href}'))"><i class="fa-solid ${icone}"></i><span>${rotulo}</span><small>Disponível</small></button>`
+      : modo === 'sem-permissao'
+        ? `<button class="cp-sheet-action is-planned" type="button" disabled title="Permissão pedido_compra necessária"><i class="fa-solid ${icone}"></i><span>${rotulo}</span><small>Sem permissão</small></button>`
+        : href
+          ? `<a class="cp-sheet-action is-ready" href="${escapeHtml(href)}" target="_blank" rel="noopener"><i class="fa-solid ${icone}"></i><span>${rotulo}</span><small>Disponível</small></a>`
       : modo === 'header'
         ? `<div class="cp-sheet-action is-ready"><i class="fa-solid ${icone}"></i><span>${rotulo}</span><small>No cabeçalho</small></div>`
         : `<button class="cp-sheet-action is-planned" type="button" disabled title="Aguardando implementação do backend"><i class="fa-solid ${icone}"></i><span>${rotulo}</span><small>A construir</small></button>`
@@ -46166,13 +46177,21 @@ async function abrirModalDetalhesPedidoMinhas(numeroPedido, statusColuna, itemId
         </div>
       `;
       const tipoFicha = numeroPedido && numeroPedido !== 'undefined' && numeroPedido !== 'null' ? 'pedido' : 'requisicao';
+      const ehPreparacaoPedido = statusColunaLower === 'aguardando compra preparação';
+      const acoesPreparacaoPedido = ehPreparacaoPedido
+        ? renderizarAcoesOperacionaisCompra('requisicao', {
+            prepararPedidoNumero: numeroPedido,
+            podePrepararPedido: usuarioPodeGerarPedidoCompra(primeiro.departamento || '')
+          })
+        : '';
       modalBody.innerHTML = renderizarFichaCompraOmie({
         tipo: tipoFicha,
         numero: numeroPedido || primeiro.numero_pedido || primeiro.grupo_requisicao || primeiro.id || '-',
         status: statusColuna,
         dados: primeiro,
         itens: itensTabela,
-        linksHtml: linksSemCadastro.length ? montarHtmlLinks(linksSemCadastro) : ''
+        linksHtml: linksSemCadastro.length ? montarHtmlLinks(linksSemCadastro) : '',
+        acoesHtml: acoesPreparacaoPedido
       });
       modalTitulo.textContent = tipoFicha === 'pedido'
         ? `Pedido de Compra Nº ${numeroPedido}`
@@ -58206,6 +58225,16 @@ function usuarioPodeGerenciarSolicitacao(departamento) {
 
   return permissoesAcessoCache.some(p =>
     p.tipo_botao === 'gestao_solicitacao' &&
+    String(p.responsavel_username || '').trim().toLowerCase() === String(username).trim().toLowerCase() &&
+    String(p.departamento_nome || '').trim().toLowerCase() === departamentoNormalizado
+  );
+}
+
+function usuarioPodeGerarPedidoCompra(departamento) {
+  const username = window.__sessionUser?.username || document.getElementById('userNameDisplay')?.textContent?.trim() || '';
+  const departamentoNormalizado = String(departamento || '').trim().toLowerCase();
+  return permissoesAcessoCache.some(p =>
+    p.tipo_botao === 'pedido_compra' &&
     String(p.responsavel_username || '').trim().toLowerCase() === String(username).trim().toLowerCase() &&
     String(p.departamento_nome || '').trim().toLowerCase() === departamentoNormalizado
   );
