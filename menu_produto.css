@@ -18154,6 +18154,152 @@ html.light-mode #minhasComprasWrapper {
   }
 }
 
+/* Versão minimalista: mais etapas visíveis e cards com leitura vertical. */
+#minhasComprasWrapper #comprasListaToolbar.compras-workspace-toolbar {
+  min-height: 44px !important;
+  height: 44px !important;
+  gap: 10px !important;
+  padding: 3px 0 !important;
+}
+
+#minhasComprasWrapper .compras-toolbar-main {
+  gap: 8px !important;
+  flex-wrap: nowrap;
+}
+
+#minhasComprasWrapper .compras-workspace-title {
+  min-width: 0;
+}
+
+#minhasComprasWrapper .compras-workspace-title strong {
+  font-size: 16px;
+}
+
+#minhasComprasWrapper .compras-workspace-title small {
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+#minhasComprasWrapper .compras-title-icon {
+  width: 26px;
+  height: 26px;
+  font-size: 12px;
+  border-radius: 6px;
+}
+
+#minhasComprasWrapper .compras-global-search {
+  width: min(300px, 100%);
+}
+
+#minhasComprasWrapper #kanbanFiltroGlobal {
+  height: 32px;
+  padding: 0 32px !important;
+  font-size: 11px !important;
+  border-radius: 6px !important;
+}
+
+#minhasComprasWrapper .compras-global-search > i {
+  left: 11px;
+  font-size: 12px;
+}
+
+#minhasComprasWrapper .compras-toolbar-actions {
+  gap: 5px !important;
+  flex-wrap: nowrap;
+}
+
+#minhasComprasWrapper .compras-toolbar-actions > .content-button {
+  width: 32px !important;
+  height: 32px !important;
+  min-width: 32px;
+  border-radius: 7px !important;
+}
+
+#minhasComprasWrapper .compras-toolbar-actions > .content-button i {
+  font-size: 14px !important;
+}
+
+#minhasComprasWrapper #comprasToggleSolicitanteBtn {
+  min-width: 78px;
+  padding: 0 9px !important;
+  font-size: 11px;
+}
+
+#minhasComprasWrapper .compras-board-metrics--toolbar > span,
+:root:not(.light-mode) #minhasComprasWrapper .compras-board-metrics--toolbar > span {
+  min-height: 26px;
+  padding: 4px 6px;
+  font-size: 8px;
+}
+
+#minhasComprasWrapper .compras-board-metrics--toolbar strong,
+:root:not(.light-mode) #minhasComprasWrapper .compras-board-metrics--toolbar strong {
+  font-size: 11px;
+}
+
+#minhasComprasWrapper[data-board-view="todos"] #kanbanMinhasSolicitacoes .kanban-column-minhas {
+  flex-basis: 218px !important;
+  min-width: 218px !important;
+  padding: 8px !important;
+}
+
+#minhasComprasWrapper #kanbanMinhasSolicitacoes .kanban-column-minhas > div:first-child {
+  min-height: 42px !important;
+  padding: 7px 7px 6px !important;
+}
+
+#minhasComprasWrapper #kanbanMinhasSolicitacoes .kanban-cards-minhas {
+  padding: 7px 6px 10px !important;
+  gap: 5px !important;
+}
+
+#minhasComprasWrapper #kanbanMinhasSolicitacoes .kanban-card {
+  grid-template-columns: minmax(0, 1fr) !important;
+  row-gap: 2px;
+  min-height: 74px !important;
+  padding: 6px 7px !important;
+}
+
+#minhasComprasWrapper #kanbanMinhasSolicitacoes .cp-card-number,
+#minhasComprasWrapper #kanbanMinhasSolicitacoes .cp-card-supplier {
+  grid-column: 1 / -1;
+  margin: 0 !important;
+  min-width: 0;
+}
+
+#minhasComprasWrapper #kanbanMinhasSolicitacoes .cp-card-number {
+  font-size: 10px !important;
+  white-space: nowrap;
+}
+
+#minhasComprasWrapper #kanbanMinhasSolicitacoes .cp-card-number > span {
+  display: flex !important;
+  flex-wrap: nowrap;
+  gap: 4px !important;
+  white-space: nowrap;
+}
+
+#minhasComprasWrapper #kanbanMinhasSolicitacoes .cp-card-supplier {
+  padding-right: 20px !important;
+  font-size: 10px !important;
+}
+
+#minhasComprasWrapper #kanbanMinhasSolicitacoes .cp-card-dates {
+  flex-wrap: nowrap !important;
+  gap: 1px 4px !important;
+  margin: 1px 0 !important;
+  font-size: 8px !important;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+#minhasComprasWrapper #kanbanMinhasSolicitacoes .cp-card-summary {
+  min-height: 17px !important;
+  font-size: 10px !important;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
 #minhasComprasWrapper #kanbanMinhasSolicitacoes .kanban-column-minhas > div:first-child {
   min-height: 36px !important;
   margin-bottom: 2px !important;
@@ -18276,6 +18422,30 @@ html.light-mode #minhasComprasWrapper {
   width: 22px;
   height: 22px;
   padding: 0 !important;
+}
+
+/* Deve vir após as regras legadas do card para preservar a grade de uma coluna. */
+#minhasComprasWrapper #kanbanMinhasSolicitacoes .kanban-card {
+  grid-template-columns: minmax(0, 1fr) !important;
+  row-gap: 2px !important;
+  min-height: 74px !important;
+  padding: 6px 7px !important;
+}
+
+#minhasComprasWrapper #kanbanMinhasSolicitacoes .cp-card-number,
+#minhasComprasWrapper #kanbanMinhasSolicitacoes .cp-card-supplier,
+#minhasComprasWrapper #kanbanMinhasSolicitacoes .cp-card-dates,
+#minhasComprasWrapper #kanbanMinhasSolicitacoes .cp-card-requester,
+#minhasComprasWrapper #kanbanMinhasSolicitacoes .cp-card-summary {
+  grid-column: 1 / -1 !important;
+  min-width: 0;
+}
+
+#minhasComprasWrapper #kanbanMinhasSolicitacoes .cp-card-number > span,
+#minhasComprasWrapper #kanbanMinhasSolicitacoes .cp-card-dates,
+#minhasComprasWrapper #kanbanMinhasSolicitacoes .cp-card-summary {
+  flex-wrap: nowrap !important;
+  white-space: nowrap;
 }
 
 #modalDetalhesPedidoCompras.cp-detail-modal {
