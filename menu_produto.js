@@ -43826,11 +43826,14 @@ async function abrirModalDetalhesPedidoCompras(numeroPedido) {
       html += `
         <div style="background:white;border:1px solid #e5e7eb;border-radius:8px;padding:16px;">
           <!-- Cabeçalho do Item -->
-          <div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:12px;">
-            <div>
+          <div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:12px;gap:12px;">
+            <div style="display:flex;align-items:flex-start;gap:10px;min-width:0;">
+              ${renderizarMiniaturaProdutoCompra(item)}
+              <div style="min-width:0;">
               <div style="font-size:12px;color:#6b7280;margin-bottom:4px;">Item ${index + 1}</div>
               <div style="font-size:16px;font-weight:700;color:#1f2937;">${escapeHtml(item.produto_codigo || '-')}</div>
               <div style="font-size:13px;color:#6b7280;margin-top:4px;">${escapeHtml(item.descricao || item.produto_descricao || '-')}</div>
+              </div>
             </div>
             <div style="background:${item.status === 'aguardando cotação' ? '#fef3c7' : item.status === 'aguardando compra' ? '#d1fae5' : '#dbeafe'};color:${item.status === 'aguardando cotação' ? '#92400e' : item.status === 'aguardando compra' ? '#065f46' : '#1e40af'};padding:6px 12px;border-radius:12px;font-size:11px;font-weight:700;text-transform:uppercase;white-space:nowrap;">
               ${escapeHtml(item.status || '-')}
@@ -44429,14 +44432,15 @@ async function abrirModalDetalhesPedidoCompras(numeroPedido) {
     if (temItemAguardandoCompra) {
       html += `
         <!-- Seção de Frete e Ações Globais -->
-        <div style="padding:16px;background:#eff6ff;border:2px solid #3b82f6;border-radius:8px;margin-top:20px;">
-          <div style="font-size:14px;color:#1e40af;text-transform:uppercase;font-weight:700;margin-bottom:16px;display:flex;align-items:center;gap:8px;">
+        <div class="cp-prep-actions" style="padding:16px;background:#eff6ff;border:2px solid #3b82f6;border-radius:8px;margin-top:20px;">
+          <div class="cp-prep-actions-title" style="font-size:14px;color:#1e40af;text-transform:uppercase;font-weight:700;margin-bottom:16px;display:flex;align-items:center;gap:8px;">
             <i class="fa-solid fa-truck"></i> Frete e Ações
           </div>
           
           <!-- Botão Incluir Frete -->
-          <div style="margin-bottom:16px;">
+          <div class="cp-prep-freight-toggle" style="margin-bottom:16px;">
             <button 
+              class="cp-prep-action cp-prep-action--secondary"
               id="btn-incluir-frete-${numeroPedido}"
               onclick="toggleFreteFields('${numeroPedido}')"
               style="width:100%;display:flex;align-items:center;justify-content:center;gap:8px;background:#3b82f6;color:white;border:none;padding:12px 16px;border-radius:6px;cursor:pointer;font-size:13px;font-weight:600;">
@@ -44670,8 +44674,9 @@ async function abrirModalDetalhesPedidoCompras(numeroPedido) {
           </div>
           
           <!-- Botões Globais de Ação -->
-          <div style="display:grid;gap:10px;">
+          <div class="cp-prep-actions-grid" style="display:grid;gap:10px;">
             <button 
+              class="cp-prep-action cp-prep-action--save"
               id="btn-salvar-dados-compra-${numeroPedido}"
               onclick="salvarDadosCompraModal('${numeroPedido}')"
               style="width:100%;display:flex;align-items:center;justify-content:center;gap:8px;background:#10b981;color:white;border:none;padding:12px 16px;border-radius:6px;cursor:pointer;font-size:13px;font-weight:600;"
@@ -44681,6 +44686,7 @@ async function abrirModalDetalhesPedidoCompras(numeroPedido) {
             </button>
             
             <button 
+              class="cp-prep-action cp-prep-action--primary"
               id="btn-gerar-compra-${numeroPedido}"
               onclick="gerarPedidoCompraOmie('${numeroPedido}')"
               style="width:100%;display:flex;align-items:center;justify-content:center;gap:8px;background:#6366f1;color:white;border:none;padding:12px 16px;border-radius:6px;cursor:pointer;font-size:13px;font-weight:600;"
@@ -44689,16 +44695,16 @@ async function abrirModalDetalhesPedidoCompras(numeroPedido) {
               Gerar Compra na Omie
             </button>
             
-            <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;">
-              <button onclick="enviarEmailCompra(null, '${numeroPedido}')" style="display:flex;align-items:center;justify-content:center;gap:6px;background:#3b82f6;color:white;border:none;padding:10px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600;" title="Enviar por e-mail">
+            <div class="cp-prep-actions-aux" style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;">
+              <button class="cp-prep-action cp-prep-action--quiet" onclick="enviarEmailCompra(null, '${numeroPedido}')" style="display:flex;align-items:center;justify-content:center;gap:6px;background:#3b82f6;color:white;border:none;padding:10px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600;" title="Enviar por e-mail">
                 <i class="fa-solid fa-envelope"></i>
                 E-mail
               </button>
-              <button onclick="enviarWhatsAppCompra(null, '${numeroPedido}')" style="display:flex;align-items:center;justify-content:center;gap:6px;background:#10b981;color:white;border:none;padding:10px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600;" title="Enviar por WhatsApp">
+              <button class="cp-prep-action cp-prep-action--quiet" onclick="enviarWhatsAppCompra(null, '${numeroPedido}')" style="display:flex;align-items:center;justify-content:center;gap:6px;background:#10b981;color:white;border:none;padding:10px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600;" title="Enviar por WhatsApp">
                 <i class="fa-brands fa-whatsapp"></i>
                 WhatsApp
               </button>
-              <button onclick="anexarArquivoCompra(null, '${numeroPedido}')" style="display:flex;align-items:center;justify-content:center;gap:6px;background:#8b5cf6;color:white;border:none;padding:10px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600;" title="Anexar arquivo">
+              <button class="cp-prep-action cp-prep-action--quiet" onclick="anexarArquivoCompra(null, '${numeroPedido}')" style="display:flex;align-items:center;justify-content:center;gap:6px;background:#8b5cf6;color:white;border:none;padding:10px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600;" title="Anexar arquivo">
                 <i class="fa-solid fa-paperclip"></i>
                 Anexar
               </button>
@@ -44709,6 +44715,7 @@ async function abrirModalDetalhesPedidoCompras(numeroPedido) {
     }
     
     modalBody.innerHTML = html;
+    hidratarMiniaturasProdutosCompra(modalBody);
     
     // Aguarda o DOM ser atualizado antes de configurar autocomplete
     setTimeout(() => {
@@ -45658,6 +45665,41 @@ function renderizarAcoesOperacionaisCompra(tipo = 'pedido', opcoes = {}) {
   </aside>`;
 }
 
+function renderizarMiniaturaProdutoCompra(item = {}) {
+  const codigo = String(item.produto_codigo || item.c_produto || item.cCodigoProduto || item.codigo || '').trim();
+  const descricao = String(item.produto_descricao || item.c_descricao || item.cDescricaoProduto || item.descricao || 'Produto').trim();
+  if (!codigo) return '<span class="cp-product-thumb cp-product-thumb--empty" title="Produto sem código"><i class="fa-regular fa-image"></i></span>';
+  return `<button type="button" class="cp-product-thumb" data-product-code="${escapeHtml(codigo)}" data-product-description="${escapeHtml(descricao)}" aria-label="Ver foto do produto ${escapeHtml(codigo)}" title="Ver e ampliar foto"><i class="fa-regular fa-image"></i><img alt="Foto de ${escapeHtml(descricao)}" hidden></button>`;
+}
+
+async function hidratarMiniaturasProdutosCompra(container = document) {
+  const botoes = Array.from(container.querySelectorAll('.cp-product-thumb[data-product-code]:not([data-image-loaded])'));
+  await Promise.all(botoes.map(async (botao) => {
+    botao.dataset.imageLoaded = 'loading';
+    const codigo = String(botao.dataset.productCode || '').trim();
+    try {
+      const resposta = await fetch(`/api/produtos/imagem/${encodeURIComponent(codigo)}`, { credentials: 'include' });
+      const dadosImagem = resposta.ok ? await resposta.json() : null;
+      const url = String(dadosImagem?.url_imagem || '').trim();
+      if (!url) throw new Error('Imagem indisponível');
+      const img = botao.querySelector('img');
+      const icone = botao.querySelector('i');
+      if (!img) return;
+      img.src = url; img.hidden = false;
+      if (icone) icone.hidden = true;
+      botao.dataset.imageLoaded = 'true';
+      botao.addEventListener('click', (event) => {
+        event.stopPropagation();
+        ampliarImagemProduto(url, `${codigo} - ${botao.dataset.productDescription || ''}`, codigo);
+      });
+    } catch (_) {
+      botao.dataset.imageLoaded = 'false';
+      botao.classList.add('cp-product-thumb--empty');
+      botao.title = 'Produto sem foto cadastrada';
+    }
+  }));
+}
+
 function renderizarFichaCompraOmie({ tipo = 'pedido', numero = '', status = '', dados = {}, itens = [], linksHtml = '', acoesHtml = '' } = {}) {
   const valorSeguro = (valor, fallback = '-') => {
     const texto = String(valor ?? '').trim();
@@ -45701,9 +45743,11 @@ function renderizarFichaCompraOmie({ tipo = 'pedido', numero = '', status = '', 
   const valorTotal = dados.valorTotalPedido || dados.valor_total || dados.valor_total_pedido || dados.n_valor || dados.total || dados.valor || '';
   const parcelas = dados.numero_parcelas || dados.parcelas || dados.condicao_pagamento || '-';
   const statusTexto = status || dados.status || 'Em andamento';
+  setTimeout(() => hidratarMiniaturasProdutosCompra(document), 0);
   const linhas = (Array.isArray(itens) ? itens : []).map((item, indice) => `
     <tr>
       <td class="cp-sheet-item-index">${indice + 1}</td>
+      <td class="cp-sheet-image-cell">${renderizarMiniaturaProdutoCompra(item)}</td>
       <td>${valorSeguro(item.produto_codigo || item.c_produto)}</td>
       <td class="cp-sheet-product">${valorSeguro(item.produto_descricao || item.c_descricao || item.descricao)}</td>
       <td class="cp-sheet-quantity">${formatarQuantidadeFicha(item.quantidade ?? item.n_qtde)}</td>
@@ -45746,8 +45790,8 @@ function renderizarFichaCompraOmie({ tipo = 'pedido', numero = '', status = '', 
       <section class="cp-sheet-items">
         <h4 class="cp-sheet-section-title">${ehRequisicao ? 'Itens da requisição' : 'Itens da compra'}</h4>
         <div class="cp-sheet-table-wrap"><table>
-          <thead><tr><th>Item</th><th>Código</th><th>Descrição do produto</th><th>Quantidade</th><th>${ehRequisicao ? 'Preço unit. sugerido' : 'Preço unitário'}</th><th>${ehRequisicao ? 'Valor total do item' : 'Total do item'}</th></tr></thead>
-          <tbody>${linhas || '<tr><td colspan="6" class="cp-sheet-empty">Nenhum item encontrado</td></tr>'}</tbody>
+              <thead><tr><th>Item</th><th aria-label="Foto">Foto</th><th>Código</th><th>Descrição do produto</th><th>Quantidade</th><th>${ehRequisicao ? 'Preço unit. sugerido' : 'Preço unitário'}</th><th>${ehRequisicao ? 'Valor total do item' : 'Total do item'}</th></tr></thead>
+              <tbody>${linhas || '<tr><td colspan="7" class="cp-sheet-empty">Nenhum item encontrado</td></tr>'}</tbody>
         </table></div>
         <div class="cp-sheet-record-count">${itens.length} ${itens.length === 1 ? 'registro' : 'registros'}</div>
       </section>
@@ -65398,6 +65442,7 @@ function renderTabelaItensModalNfePedidos(itens = []) {
 
   const linhas = itens.map((item) => `
     <tr style="border-bottom:1px solid #e2e8f0;">
+      <td class="cp-sheet-image-cell">${renderizarMiniaturaProdutoCompra(item)}</td>
       <td style="padding:8px;font-size:12px;color:#0f172a;">${escapeHtml(String(item?.cCodigoProduto || '-'))}</td>
       <td style="padding:8px;font-size:12px;color:#0f172a;">${escapeHtml(String(item?.cDescricaoProduto || '-'))}</td>
       <td style="padding:8px;font-size:12px;color:#334155;">${escapeHtml(String(item?.cNCM || '-'))}</td>
@@ -65418,9 +65463,10 @@ function renderTabelaItensModalNfePedidos(itens = []) {
 
   return `
     <div class="cp-nfe-table-wrap" style="border:1px solid #e2e8f0;border-radius:8px;overflow:auto;max-height:320px;">
-      <table class="cp-nfe-items-table" style="width:100%;border-collapse:collapse;min-width:1480px;">
+      <table class="cp-nfe-items-table" style="width:100%;border-collapse:collapse;min-width:1520px;">
         <thead>
           <tr style="position:sticky;top:0;background:#f8fafc;border-bottom:1px solid #e2e8f0;">
+            <th style="padding:8px;text-align:center;font-size:12px;color:#334155;">Foto</th>
             <th style="padding:8px;text-align:left;font-size:12px;color:#334155;">Código</th>
             <th style="padding:8px;text-align:left;font-size:12px;color:#334155;">Descrição</th>
             <th style="padding:8px;text-align:left;font-size:12px;color:#334155;">NCM</th>
@@ -65837,6 +65883,7 @@ async function abrirModalNfePedidos(nIdReceb, numeroNfeRef = '', statusRef = '')
     }
 
     itensEl.innerHTML = renderTabelaItensModalNfePedidos(dados?.itens || []);
+    hidratarMiniaturasProdutosCompra(itensEl);
   } catch (err) {
     infoEl.innerHTML = `<div style="grid-column:1/-1;font-size:13px;color:#b91c1c;background:#fef2f2;border:1px solid #fecaca;border-radius:8px;padding:10px;">${escapeHtml(String(err?.message || 'Erro ao carregar dados da NF-e'))}</div>`;
     cfopInfoEl.innerHTML = '';
