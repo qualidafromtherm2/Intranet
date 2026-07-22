@@ -11,7 +11,8 @@
 //   node scripts/sync_produtos_omie_rapido.js
 // ============================================================================
 
-const { dbQuery } = require('../src/db');
+const { dbQuery, dbGetClient } = require('../src/db');
+const { reconciliarProdutosOmieAusentes } = require('../utils/produtosOmieFantasmas');
 
 // Configurações
 const OMIE_APP_KEY = process.env.OMIE_APP_KEY || '';
@@ -29,8 +30,10 @@ const stats = {
   processados: 0,
   sucesso: 0,
   erros: 0,
+  fantasmas: 0,
   inicio: Date.now()
 };
+const idsVistosNaOmie = new Set();
 
 // ============================================================================
 // Helpers
@@ -133,18 +136,28 @@ async function main() {
       
       console.log(`📄 Página ${pagina}/${stats.total_paginas} - ${produtos.length} produtos`);
       
-      // Processa produtos em batch
-      for (const produto of produtos) {
-        try {
-          const obj = ensureIntegrationKey({ ...produto });
-          await dbQuery('SELECT omie_upsert_produto($1::jsonb)', [obj]);
-          stats.sucesso++;
-          stats.processados++;
-        } catch (error) {
-          stats.erros++;
-          stats.processados++;
-          console.error(`   ❌ Erro: ${produto.codigo} - ${error.message}`);
+      // Processa produtos em batch — cliente dedicado com source de sessão,
+      // pois set_config(..., true) fora de transação não tem efeito e o
+      // gatilho guard bloqueia a escrita.
+      const client = await dbGetClient();
+      try {
+        await client.query("SELECT set_config('app.produtos_omie_write_source', 'omie_manual', false)");
+        for (const produto of produtos) {
+          try {
+            const obj = ensureIntegrationKey({ ...produto });
+            await client.query('SELECT omie_upsert_produto($1::jsonb)', [obj]);
+            if (produto.codigo_produto) idsVistosNaOmie.add(String(produto.codigo_produto));
+            stats.sucesso++;
+            stats.processados++;
+          } catch (error) {
+            stats.erros++;
+            stats.processados++;
+            console.error(`   ❌ Erro: ${produto.codigo} - ${error.message}`);
+          }
         }
+      } finally {
+        try { await client.query("SELECT set_config('app.produtos_omie_write_source', '', false)"); } catch (_) {}
+        client.release();
       }
       
       const progresso = ((stats.processados / stats.total_produtos) * 100).toFixed(1);
@@ -153,6 +166,18 @@ async function main() {
       // Delay entre páginas
       if (pagina < stats.total_paginas) {
         await sleep(DELAY_MS);
+      }
+    }
+
+    if (idsVistosNaOmie.size > 0) {
+      console.log('\n🧹 Removendo fantasmas (ativos locais ausentes na Omie)...');
+      const client = await dbGetClient();
+      try {
+        const rec = await reconciliarProdutosOmieAusentes(client, idsVistosNaOmie, 'omie_manual');
+        stats.fantasmas = rec.marcados;
+        console.log(`   ✓ ${rec.marcados} fantasma(s) marcado(s) como inativo`);
+      } finally {
+        client.release();
       }
     }
     
@@ -166,6 +191,7 @@ async function main() {
     console.log(`   Total: ${stats.total_produtos}`);
     console.log(`   ✅ Sucesso: ${stats.sucesso} (${((stats.sucesso/stats.total_produtos)*100).toFixed(1)}%)`);
     console.log(`   ❌ Erros: ${stats.erros} (${((stats.erros/stats.total_produtos)*100).toFixed(1)}%)`);
+    console.log(`   🧹 Fantasmas inativos: ${stats.fantasmas}`);
     console.log(`   ⏱️  Duração: ${duracao}\n`);
     
     console.log('✅ Tabela public.produtos_omie atualizada!\n');

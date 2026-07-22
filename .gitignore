@@ -24,6 +24,8 @@ diagrama.puml
 .cursor/
 .continue/
 .agents/
+.superpowers/
+docs/superpowers/
 AGENTS.md
 ORIENTACAO-RAPIDA.md
 iniciar-ia.sh
@@ -156,4 +158,23 @@ relatorios/
 # modelo 3D exportado localmente (arquivo grande)
 prateleiras-3d/modelo/
 prateleiras-3d/exportar-modelo.mjs
+
+# backups de .env / dumps com segredos (nunca versionar)
+.env.render-backup*
+.env.*backup*
+.env.*.backup*
+
+# lixo / rascunhos locais
+Transferindo
+
+# ferramentas só da máquina (tunnel Cloudflare, Postgres local, API local)
+ecosystem.tunnel.config.js
+scripts/*-tunnel-*.sh
+scripts/cloudflared-*.sh
+scripts/setup-cloudflare-tunnel.sh
+scripts/setup-postgres-local.sh
+scripts/fixar-dono-postgres-local.sh
+scripts/restaurar-postgres-local.sh
+scripts/iniciar-api-local.sh
+scripts/parar-api-local.sh
 

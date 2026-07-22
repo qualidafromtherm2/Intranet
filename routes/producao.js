@@ -180,6 +180,7 @@ async function garantirSchemaKanbanProgramacao() {
   await dbQuery(`ALTER TABLE "Producao"."Kanban_programacao" ADD COLUMN IF NOT EXISTS status TEXT`);
   await dbQuery(`ALTER TABLE "Producao"."Kanban_programacao" ADD COLUMN IF NOT EXISTS observacao TEXT`);
   await dbQuery(`ALTER TABLE "Producao"."Kanban_programacao" ADD COLUMN IF NOT EXISTS postos TEXT`);
+  await dbQuery(`ALTER TABLE "Producao"."Kanban_programacao" ADD COLUMN IF NOT EXISTS ri BOOLEAN NOT NULL DEFAULT FALSE`);
   await dbQuery(`
     CREATE INDEX IF NOT EXISTS idx_kanban_prog_op_iapp
       ON "Producao"."Kanban_programacao" (op_iapp_id);
@@ -187,6 +188,9 @@ async function garantirSchemaKanbanProgramacao() {
       ON "Producao"."Kanban_programacao" (op_producao_id);
     CREATE INDEX IF NOT EXISTS idx_kanban_prog_numero_op
       ON "Producao"."Kanban_programacao" (numero_op);
+    CREATE INDEX IF NOT EXISTS idx_kanban_prog_ri
+      ON "Producao"."Kanban_programacao" (ri)
+      WHERE ri = TRUE;
   `);
   kanbanProgSchemaOk = true;
 }
@@ -1990,6 +1994,7 @@ router.get('/kanban-programacao', async (req, res) => {
         status,
         observacao,
         postos,
+        COALESCE(ri, FALSE) AS ri,
         created_at
       FROM "Producao"."Kanban_programacao"
       ORDER BY created_at DESC, id DESC
@@ -2535,6 +2540,7 @@ router.post('/tempo/ativos-por-ops', express.json(), async (req, res) => {
  * --------------------------------------------------------------- */
 router.post('/finalizar-operacao', express.json(), async (req, res) => {
   try {
+    await garantirSchemaKanbanProgramacao();
     const opProducaoId = Number(req.body?.op_producao_id) || 0;
     const numeroOp = String(req.body?.numero_op || '').trim();
     const proximoStatus = String(req.body?.proximo_status || req.body?.operacao || '').trim();
@@ -2599,11 +2605,27 @@ router.post('/finalizar-operacao', express.json(), async (req, res) => {
     }
 
     if (kanbanProgramacaoId) {
+      const postoNorm = String(proximoStatus || '')
+        .trim()
+        .toLowerCase()
+        .normalize('NFD')
+        .replace(/\p{M}/gu, '');
+      const ativarRi = postoNorm
+        && postoNorm !== 'finalizado'
+        && postoNorm !== 'programado'
+        && postoNorm !== 'pedidos'
+        && postoNorm !== 'embalagem';
+      const forcarRiOff = postoNorm === 'embalagem' || postoNorm === 'finalizado';
       await dbQuery(
         `UPDATE "Producao"."Kanban_programacao"
-            SET status = $1
+            SET status = $1,
+                ri = CASE
+                  WHEN $4::boolean THEN FALSE
+                  WHEN $3::boolean THEN TRUE
+                  ELSE ri
+                END
           WHERE id = $2`,
-        [proximoStatus, kanbanProgramacaoId]
+        [proximoStatus, kanbanProgramacaoId, ativarRi, forcarRiOff]
       );
     }
 
@@ -2668,7 +2690,12 @@ const RETROCEDER_KANBAN_POR_COL_KEY = {
   inspecao_final: {
     status_destino: 'Teste',
     posto_desfeito: 'Teste',
-    operacoes_desfeitas: ['Inspeção final', 'Teste OK'],
+    operacoes_desfeitas: ['Inspeção final', 'Teste OK', 'Teste final'],
+  },
+  embalagem: {
+    status_destino: 'Inspeção final',
+    posto_desfeito: 'Inspeção final',
+    operacoes_desfeitas: ['Embalagem', 'Inspeção final', 'Teste OK', 'Teste final'],
   },
 };
 
@@ -2677,6 +2704,7 @@ const RETROCEDER_KANBAN_POR_COL_KEY = {
  * --------------------------------------------------------------- */
 router.post('/retroceder-op', express.json(), async (req, res) => {
   try {
+    await garantirSchemaKanbanProgramacao();
     const opProducaoId = Number(req.body?.op_producao_id) || 0;
     const numeroOp = String(req.body?.numero_op || '').trim();
     const colKey = String(req.body?.col_key || '').trim();
@@ -2691,7 +2719,7 @@ router.post('/retroceder-op', express.json(), async (req, res) => {
     if (!cfg) {
       return res.status(400).json({
         success: false,
-        error: 'Retroceder OP só está disponível em Montagem hermetica, Montagem eletrica, Teste ou Inspeção final.',
+        error: 'Retroceder OP só está disponível em Montagem hermetica, Montagem eletrica, Teste, Inspeção final ou Embalagem.',
       });
     }
 
@@ -2724,7 +2752,8 @@ router.post('/retroceder-op', express.json(), async (req, res) => {
     if (kanbanProgramacaoId) {
       await dbQuery(
         `UPDATE "Producao"."Kanban_programacao"
-            SET status = $1
+            SET status = $1,
+                ri = TRUE
           WHERE id = $2`,
         [cfg.status_destino, kanbanProgramacaoId]
       );
