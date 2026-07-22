@@ -19,7 +19,7 @@
   referrerpolicy="no-referrer"
 />
   <!-- Seu CSS principal -->
-  <link rel="stylesheet" href="menu_produto.css?v=20260713-carrinho-v6-auditar"/>
+  <link rel="stylesheet" href="menu_produto.css?v=20260722-compras-ficha-unificada-9"/>
   <!-- Anti-flicker: esconde menus até as permissões serem aplicadas -->
   <style id="boot-anti-flicker">
     /* Enquanto o app não está pronto, esconde elementos sujeitos a permissões */
@@ -919,14 +919,17 @@
             <div id="minhasComprasWrapper" class="content-section" style="margin-top:0px;display:none;">
               
               <!-- Título e Botões de Ação -->
-              <div id="comprasListaToolbar" class="title-wrapper" style="display:flex;align-items:center;justify-content:space-between;margin-bottom:0;gap:16px;">
-                <div style="display:flex;align-items:center;gap:12px;flex:1;">
-                  <div class="content-section-title" style="display:flex;align-items:center;gap:8px;margin:0;">
-                    <i class="fa-solid fa-shopping-bag" style="color:#22c55e;"></i>
-                    Compras
+              <div id="comprasListaToolbar" class="title-wrapper compras-workspace-toolbar" style="display:flex;align-items:center;justify-content:space-between;margin-bottom:0;gap:16px;">
+                <div class="compras-toolbar-main" style="display:flex;align-items:center;gap:12px;flex:1;">
+                  <div class="content-section-title compras-workspace-title" style="display:flex;align-items:center;gap:8px;margin:0;">
+                    <span class="compras-title-icon"><i class="fa-solid fa-bag-shopping"></i></span>
+                    <span>
+                      <strong>Fluxo de compras</strong>
+                      <small>Acompanhe solicitações, pedidos e recebimentos</small>
+                    </span>
                   </div>
                   <!-- Campo de Filtro Global -->
-                  <div style="display:flex;align-items:center;gap:8px;max-width:350px;">
+                  <div class="compras-global-search" style="display:flex;align-items:center;gap:8px;max-width:350px;">
                     <i class="fa-solid fa-magnifying-glass" style="color:#9ca3af;font-size:14px;"></i>
                     <input 
                       type="text" 
@@ -945,7 +948,7 @@
                     </button>
                   </div>
                 </div>
-                <div style="display:flex;align-items:center;gap:12px;">
+                <div class="compras-toolbar-actions" style="display:flex;align-items:center;gap:12px;">
                   <button id="comprasCatalogoOmieBtn" class="content-button" type="button" onclick="abrirModalCatalogoOmie()" style="background:linear-gradient(135deg,#22c55e 0%,#16a34a 100%);color:white;display:flex;align-items:center;justify-content:center;width:44px;height:44px;padding:0;border-radius:50%;" title="Solicitação">
                     <i class="fa-solid fa-file-circle-plus" style="font-size:20px;"></i>
                   </button>
@@ -968,6 +971,24 @@
                   <button id="comprasAcoesHamburgerBtn" class="content-button" type="button" style="background:linear-gradient(135deg,#0f172a 0%,#1f2937 100%);color:white;display:flex;align-items:center;justify-content:center;width:44px;height:44px;padding:0;border-radius:50%;" title="Mais ações">
                     <i class="fa-solid fa-bars" style="font-size:20px;"></i>
                   </button>
+                </div>
+              </div>
+
+              <div class="compras-board-overview" aria-label="Visão do fluxo de compras">
+                <div class="compras-board-tabs" role="tablist" aria-label="Visualização do painel">
+                  <button id="comprasBoardAtivasBtn" class="compras-board-tab is-active" type="button" role="tab" aria-selected="true" onclick="alterarVisaoComprasKanban('ativas')">
+                    <i class="fa-solid fa-wave-square"></i>
+                    Em andamento
+                  </button>
+                  <button id="comprasBoardHistoricoBtn" class="compras-board-tab" type="button" role="tab" aria-selected="false" onclick="alterarVisaoComprasKanban('historico')">
+                    <i class="fa-solid fa-box-archive"></i>
+                    Histórico
+                  </button>
+                </div>
+                <div class="compras-board-metrics" aria-label="Resumo das compras">
+                  <span><strong id="comprasMetricaAtivas">0</strong> em andamento</span>
+                  <span><strong id="comprasMetricaAguardando">0</strong> aguardando ação</span>
+                  <span><strong id="comprasMetricaHistorico">0</strong> concluídas</span>
                 </div>
               </div>
 
@@ -1871,6 +1892,7 @@
                         <option value="">Selecione...</option>
                         <option value="aprovacao">Aprovação</option>
                         <option value="pedido_compra">Pedido de Compra</option>
+                        <option value="gestao_solicitacao">Gestao de solicitacoes</option>
                       </select>
                     </div>
                     <div class="form-field">
@@ -1915,26 +1937,23 @@
         </div>
 
         <!-- Modal Detalhes do Pedido -->
-        <div id="modalDetalhesPedidoCompras" class="modal" style="display:none;justify-content:center;align-items:center;">
-          <div class="modal-content" style="max-width:1800px;width:95%;max-height:90vh;overflow-y:auto;">
-            <div class="modal-header">
-              <h3 style="margin:0;display:flex;align-items:center;gap:8px;">
-                <i class="fa-solid fa-file-invoice" style="color:#3b82f6;"></i>
+        <div id="modalDetalhesPedidoCompras" class="modal cp-detail-modal" style="display:none;justify-content:center;align-items:center;">
+          <div class="modal-content cp-detail-shell cp-purchase-sheet">
+            <div class="modal-header cp-detail-header">
+              <h3>
+                <i class="fa-solid fa-cart-shopping"></i>
                 <span id="modalPedidoTitulo">Detalhes do Pedido</span>
               </h3>
-              <div style="display:flex;align-items:center;gap:10px;">
+              <div class="cp-detail-header-actions">
                 <button id="btnExcluirPedidoComprasDetalhes" type="button" onclick="excluirPedidoComprasKanban('btnExcluirPedidoComprasDetalhes')"
                   style="display:none;background:#dc2626;color:#fff;border:none;border-radius:8px;padding:6px 12px;font-size:12px;font-weight:700;cursor:pointer;align-items:center;gap:6px;">
                   <i class="fa-solid fa-trash"></i> Excluir
                 </button>
-                <button class="modal-close" onclick="fecharModalDetalhesPedidoCompras()">&times;</button>
+                <button class="modal-close" aria-label="Fechar detalhes do pedido" onclick="fecharModalDetalhesPedidoCompras()">&times;</button>
               </div>
             </div>
-            <div class="modal-body" id="modalPedidoBody" style="padding:20px;">
+            <div class="modal-body cp-detail-body" id="modalPedidoBody">
               <!-- Conteúdo será inserido dinamicamente -->
-            </div>
-            <div class="modal-footer">
-              <button class="btn-secondary" onclick="fecharModalDetalhesPedidoCompras()">Fechar</button>
             </div>
           </div>
         </div>
@@ -12483,7 +12502,7 @@
   <script src="/public/js/at-masp-relatorio.js?v=20260718g" defer></script>
   <script src="/public/js/vendas-relatorio-gerencial.js?v=20260709a" defer></script>
   <script src="/public/js/logistica-relatorio-gerencial.js?v=20260712a" defer></script>
-  <script type="module" src="menu_produto.js?v=20260721-pre-cadastro-3"></script>
+  <script type="module" src="menu_produto.js?v=20260722-compras-ficha-unificada-11"></script>
   
   <script type="module" src="./requisicoes_omie/filtro_produto.js?v=20260718-faixa-minimo"></script>
   <script type="module" src="./requisicoes_omie/ListarProdutos.js?v=20260718-faixa-minimo"></script>

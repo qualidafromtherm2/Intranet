@@ -41123,7 +41123,11 @@ function renderizarListaPermissoes() {
   
   lista.innerHTML = permissoes.map(p => {
     const tipoBotaoLabel = p.tipo_botao === 'aprovacao' ? 'Aprovação' : 'Pedido de Compra';
-    const corBotao = p.tipo_botao === 'aprovacao' ? '#9333ea' : '#10b981';
+    const corBotao = p.tipo_botao === 'aprovacao'
+      ? '#9333ea'
+      : p.tipo_botao === 'gestao_solicitacao'
+        ? '#b45309'
+        : '#10b981';
     
     return `
       <div class="produto-catalogo-card" data-product-code="${escapeHtml(produto.codigo)}" style="
@@ -43752,6 +43756,8 @@ async function abrirModalDetalhesPedidoCompras(numeroPedido) {
   
   if (!modal || !modalBody || !modalTitulo) return;
 
+  modal.classList.add('cp-purchase-preparation-modal');
+
   renderizarNavegacaoModalKanban({ modalId: 'modalDetalhesPedidoCompras', status: '', currentItemId: '', openType: '' });
   
   modalBody.innerHTML = '<div style="text-align:center;padding:40px;"><i class="fa-solid fa-spinner fa-spin" style="font-size:32px;color:#3b82f6;"></i><br><br>Carregando...</div>';
@@ -43820,7 +43826,15 @@ async function abrirModalDetalhesPedidoCompras(numeroPedido) {
     };
     
     // Verifica se pelo menos um item está em "aguardando compra" para mostrar dados da compra
-    const temItemAguardandoCompra = itensPedido.some(item => item.status === 'aguardando compra');
+    const ehStatusPreparacaoPedido = (status) => {
+      const normalizado = String(status || '')
+        .trim()
+        .toLowerCase()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '');
+      return ['aguardando compra', 'aguardando compra preparacao', 'requisicao'].includes(normalizado);
+    };
+    const temItemAguardandoCompra = itensPedido.some(item => ehStatusPreparacaoPedido(item.status));
     
     let html = `
       <!-- Informações do Pedido -->
@@ -43925,11 +43939,14 @@ async function abrirModalDetalhesPedidoCompras(numeroPedido) {
       html += `
         <div style="background:white;border:1px solid #e5e7eb;border-radius:8px;padding:16px;">
           <!-- Cabeçalho do Item -->
-          <div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:12px;">
-            <div>
+          <div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:12px;gap:12px;">
+            <div style="display:flex;align-items:flex-start;gap:10px;min-width:0;">
+              ${renderizarMiniaturaProdutoCompra(item)}
+              <div style="min-width:0;">
               <div style="font-size:12px;color:#6b7280;margin-bottom:4px;">Item ${index + 1}</div>
               <div style="font-size:16px;font-weight:700;color:#1f2937;">${escapeHtml(item.produto_codigo || '-')}</div>
               <div style="font-size:13px;color:#6b7280;margin-top:4px;">${escapeHtml(item.descricao || item.produto_descricao || '-')}</div>
+              </div>
             </div>
             <div style="background:${item.status === 'aguardando cotação' ? '#fef3c7' : item.status === 'aguardando compra' ? '#d1fae5' : '#dbeafe'};color:${item.status === 'aguardando cotação' ? '#92400e' : item.status === 'aguardando compra' ? '#065f46' : '#1e40af'};padding:6px 12px;border-radius:12px;font-size:11px;font-weight:700;text-transform:uppercase;white-space:nowrap;">
               ${escapeHtml(item.status || '-')}
@@ -44528,14 +44545,15 @@ async function abrirModalDetalhesPedidoCompras(numeroPedido) {
     if (temItemAguardandoCompra) {
       html += `
         <!-- Seção de Frete e Ações Globais -->
-        <div style="padding:16px;background:#eff6ff;border:2px solid #3b82f6;border-radius:8px;margin-top:20px;">
-          <div style="font-size:14px;color:#1e40af;text-transform:uppercase;font-weight:700;margin-bottom:16px;display:flex;align-items:center;gap:8px;">
+        <div class="cp-prep-actions" style="padding:16px;background:#eff6ff;border:2px solid #3b82f6;border-radius:8px;margin-top:20px;">
+          <div class="cp-prep-actions-title" style="font-size:14px;color:#1e40af;text-transform:uppercase;font-weight:700;margin-bottom:16px;display:flex;align-items:center;gap:8px;">
             <i class="fa-solid fa-truck"></i> Frete e Ações
           </div>
           
           <!-- Botão Incluir Frete -->
-          <div style="margin-bottom:16px;">
+          <div class="cp-prep-freight-toggle" style="margin-bottom:16px;">
             <button 
+              class="cp-prep-action cp-prep-action--secondary"
               id="btn-incluir-frete-${numeroPedido}"
               onclick="toggleFreteFields('${numeroPedido}')"
               style="width:100%;display:flex;align-items:center;justify-content:center;gap:8px;background:#3b82f6;color:white;border:none;padding:12px 16px;border-radius:6px;cursor:pointer;font-size:13px;font-weight:600;">
@@ -44769,8 +44787,9 @@ async function abrirModalDetalhesPedidoCompras(numeroPedido) {
           </div>
           
           <!-- Botões Globais de Ação -->
-          <div style="display:grid;gap:10px;">
+          <div class="cp-prep-actions-grid" style="display:grid;gap:10px;">
             <button 
+              class="cp-prep-action cp-prep-action--save"
               id="btn-salvar-dados-compra-${numeroPedido}"
               onclick="salvarDadosCompraModal('${numeroPedido}')"
               style="width:100%;display:flex;align-items:center;justify-content:center;gap:8px;background:#10b981;color:white;border:none;padding:12px 16px;border-radius:6px;cursor:pointer;font-size:13px;font-weight:600;"
@@ -44780,6 +44799,7 @@ async function abrirModalDetalhesPedidoCompras(numeroPedido) {
             </button>
             
             <button 
+              class="cp-prep-action cp-prep-action--primary"
               id="btn-gerar-compra-${numeroPedido}"
               onclick="gerarPedidoCompraOmie('${numeroPedido}')"
               style="width:100%;display:flex;align-items:center;justify-content:center;gap:8px;background:#6366f1;color:white;border:none;padding:12px 16px;border-radius:6px;cursor:pointer;font-size:13px;font-weight:600;"
@@ -44788,16 +44808,16 @@ async function abrirModalDetalhesPedidoCompras(numeroPedido) {
               Gerar Compra na Omie
             </button>
             
-            <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;">
-              <button onclick="enviarEmailCompra(null, '${numeroPedido}')" style="display:flex;align-items:center;justify-content:center;gap:6px;background:#3b82f6;color:white;border:none;padding:10px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600;" title="Enviar por e-mail">
+            <div class="cp-prep-actions-aux" style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;">
+              <button class="cp-prep-action cp-prep-action--quiet" onclick="enviarEmailCompra(null, '${numeroPedido}')" style="display:flex;align-items:center;justify-content:center;gap:6px;background:#3b82f6;color:white;border:none;padding:10px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600;" title="Enviar por e-mail">
                 <i class="fa-solid fa-envelope"></i>
                 E-mail
               </button>
-              <button onclick="enviarWhatsAppCompra(null, '${numeroPedido}')" style="display:flex;align-items:center;justify-content:center;gap:6px;background:#10b981;color:white;border:none;padding:10px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600;" title="Enviar por WhatsApp">
+              <button class="cp-prep-action cp-prep-action--quiet" onclick="enviarWhatsAppCompra(null, '${numeroPedido}')" style="display:flex;align-items:center;justify-content:center;gap:6px;background:#10b981;color:white;border:none;padding:10px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600;" title="Enviar por WhatsApp">
                 <i class="fa-brands fa-whatsapp"></i>
                 WhatsApp
               </button>
-              <button onclick="anexarArquivoCompra(null, '${numeroPedido}')" style="display:flex;align-items:center;justify-content:center;gap:6px;background:#8b5cf6;color:white;border:none;padding:10px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600;" title="Anexar arquivo">
+              <button class="cp-prep-action cp-prep-action--quiet" onclick="anexarArquivoCompra(null, '${numeroPedido}')" style="display:flex;align-items:center;justify-content:center;gap:6px;background:#8b5cf6;color:white;border:none;padding:10px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600;" title="Anexar arquivo">
                 <i class="fa-solid fa-paperclip"></i>
                 Anexar
               </button>
@@ -44808,6 +44828,7 @@ async function abrirModalDetalhesPedidoCompras(numeroPedido) {
     }
     
     modalBody.innerHTML = html;
+    hidratarMiniaturasProdutosCompra(modalBody);
     
     // Aguarda o DOM ser atualizado antes de configurar autocomplete
     setTimeout(() => {
@@ -44818,7 +44839,7 @@ async function abrirModalDetalhesPedidoCompras(numeroPedido) {
         }
         
         // Configura autocomplete e campos para itens em "aguardando compra"
-        if (item.status === 'aguardando compra') {
+        if (ehStatusPreparacaoPedido(item.status)) {
           console.log('[MODAL] Configurando campos para pedido:', item.numero_pedido);
           console.log('[MODAL] Fornecedores disponíveis:', window.fornecedoresCache?.length || 0);
           setupFornecedorAutocompleteModal(item.numero_pedido);
@@ -45703,14 +45724,215 @@ async function excluirPedidoComprasKanban(btnId) {
 window.excluirPedidoComprasKanban = excluirPedidoComprasKanban;
 
 // Modal específico para "Kanban de compras" (visualização do usuário solicitante)
+function renderizarAcoesOperacionaisCompra(tipo = 'pedido', opcoes = {}) {
+  const ehNfe = String(tipo).toLowerCase() === 'nfe';
+  const ehRequisicao = String(tipo).toLowerCase() === 'requisicao';
+  const statusNormalizado = String(opcoes.status || '')
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+  const ehNfeRecebidaOuConferida = ehNfe && ['recebido', 'concluido', 'conferido'].includes(statusNormalizado);
+  const numeroPreparacao = String(opcoes.prepararPedidoNumero || '').trim();
+  const acaoPrepararPedido = numeroPreparacao
+    ? [['Preparar pedido de compra', 'fa-cart-shopping', encodeURIComponent(numeroPreparacao), opcoes.podePrepararPedido ? 'preparar-pedido' : 'sem-permissao']]
+    : [];
+  const acoes = ehRequisicao
+    ? [
+        ...acaoPrepararPedido,
+        ['Salvar', 'fa-cloud-arrow-up'], ['Incluir', 'fa-circle-plus'], ['Imprimir', 'fa-print'],
+        ['Duplicar', 'fa-copy'], ['Anexos', 'fa-paperclip'], ['E-mails enviados', 'fa-envelope'],
+        ['Histórico de alterações', 'fa-clock-rotate-left'], ['Excluir', 'fa-trash-can', '', 'header']
+      ]
+    : ehNfe
+    ? (ehNfeRecebidaOuConferida ? [
+        ['Salvar', 'fa-cloud-arrow-up'], ['Novo recebimento', 'fa-circle-plus'], ['Devolver', 'fa-rotate-left'],
+        ['Histórico de processamento', 'fa-list'], ['Anexos', 'fa-paperclip'],
+        ['Histórico de alterações', 'fa-clock-rotate-left'], ['Eventos da reforma tributária', 'fa-pen-to-square'],
+        ['Excluir', 'fa-trash-can'], ['Reverter recebimento', 'fa-arrow-rotate-left']
+      ] : [
+        ['Salvar', 'fa-cloud-arrow-up'], ['Novo recebimento', 'fa-circle-plus'], ['Concluir', 'fa-bolt'],
+        ['Exibir DANFE do fornecedor', 'fa-barcode', opcoes.danfeUrl], ['Exibir XML da NF-e', 'fa-file-code'],
+        ['Manifestação da NF-e', 'fa-paper-plane'], ['Acessar no Portal Omie', 'fa-arrow-up-right-from-square'],
+        ['Histórico de processamento', 'fa-list'], ['Anexos', 'fa-paperclip'],
+        ['Histórico de alterações', 'fa-clock-rotate-left'], ['Excluir', 'fa-trash-can']
+      ])
+    : [
+        ['Salvar', 'fa-cloud-arrow-up'], ['Novo pedido de compra', 'fa-circle-plus'], ['Concluir', 'fa-bolt'],
+        ['Exibir pedido na Omie', 'fa-arrow-up-right-from-square'], ['Histórico de processamento', 'fa-list'],
+        ['Anexos', 'fa-paperclip'], ['Histórico de alterações', 'fa-clock-rotate-left'], ['Excluir', 'fa-trash-can', '', 'header']
+      ];
+
+  return `<aside class="cp-sheet-actions" aria-label="Ações do documento">
+    <div class="cp-sheet-actions-title"><span>Ações</span><small>Integrações previstas</small></div>
+    ${acoes.map(([rotulo, icone, href, modo]) => modo === 'preparar-pedido'
+      ? `<button class="cp-sheet-action is-ready" type="button" onclick="abrirModalDetalhesPedidoCompras(decodeURIComponent('${href}'))"><i class="fa-solid ${icone}"></i><span>${rotulo}</span><small>Disponível</small></button>`
+      : modo === 'sem-permissao'
+        ? `<button class="cp-sheet-action is-planned" type="button" disabled title="Permissão pedido_compra necessária"><i class="fa-solid ${icone}"></i><span>${rotulo}</span><small>Sem permissão</small></button>`
+        : href
+          ? `<a class="cp-sheet-action is-ready" href="${escapeHtml(href)}" target="_blank" rel="noopener"><i class="fa-solid ${icone}"></i><span>${rotulo}</span><small>Disponível</small></a>`
+      : modo === 'header'
+        ? `<div class="cp-sheet-action is-ready"><i class="fa-solid ${icone}"></i><span>${rotulo}</span><small>No cabeçalho</small></div>`
+        : `<button class="cp-sheet-action is-planned" type="button" disabled title="Aguardando implementação do backend"><i class="fa-solid ${icone}"></i><span>${rotulo}</span><small>A construir</small></button>`
+    ).join('')}
+  </aside>`;
+}
+
+function renderizarMiniaturaProdutoCompra(item = {}) {
+  const codigo = String(item.produto_codigo || item.c_produto || item.cCodigoProduto || item.codigo || '').trim();
+  const descricao = String(item.produto_descricao || item.c_descricao || item.cDescricaoProduto || item.descricao || 'Produto').trim();
+  if (!codigo) return '<span class="cp-product-thumb cp-product-thumb--empty" title="Produto sem código"><i class="fa-regular fa-image"></i></span>';
+  return `<button type="button" class="cp-product-thumb" data-product-code="${escapeHtml(codigo)}" data-product-description="${escapeHtml(descricao)}" aria-label="Ver foto do produto ${escapeHtml(codigo)}" title="Ver e ampliar foto"><i class="fa-regular fa-image"></i><img alt="Foto de ${escapeHtml(descricao)}" hidden></button>`;
+}
+
+async function hidratarMiniaturasProdutosCompra(container = document) {
+  const botoes = Array.from(container.querySelectorAll('.cp-product-thumb[data-product-code]:not([data-image-loaded])'));
+  await Promise.all(botoes.map(async (botao) => {
+    botao.dataset.imageLoaded = 'loading';
+    const codigo = String(botao.dataset.productCode || '').trim();
+    try {
+      const resposta = await fetch(`/api/produtos/imagem/${encodeURIComponent(codigo)}`, { credentials: 'include' });
+      const dadosImagem = resposta.ok ? await resposta.json() : null;
+      const url = String(dadosImagem?.url_imagem || '').trim();
+      if (!url) throw new Error('Imagem indisponível');
+      const img = botao.querySelector('img');
+      const icone = botao.querySelector('i');
+      if (!img) return;
+      img.src = url; img.hidden = false;
+      if (icone) icone.hidden = true;
+      botao.dataset.imageLoaded = 'true';
+      botao.addEventListener('click', (event) => {
+        event.stopPropagation();
+        ampliarImagemProduto(url, `${codigo} - ${botao.dataset.productDescription || ''}`, codigo);
+      });
+    } catch (_) {
+      botao.dataset.imageLoaded = 'false';
+      botao.classList.add('cp-product-thumb--empty');
+      botao.title = 'Produto sem foto cadastrada';
+    }
+  }));
+}
+
+function renderizarFichaCompraOmie({ tipo = 'pedido', numero = '', status = '', dados = {}, itens = [], linksHtml = '', acoesHtml = '' } = {}) {
+  const valorSeguro = (valor, fallback = '-') => {
+    const texto = String(valor ?? '').trim();
+    return escapeHtml(texto && texto.toLowerCase() !== 'null' ? texto : fallback);
+  };
+  const possuiValor = (valor) => {
+    const texto = String(valor ?? '').trim().toLowerCase();
+    return Boolean(texto && texto !== '-' && texto !== 'null' && texto !== 'undefined');
+  };
+  const formatarDataFicha = (valor) => {
+    if (!valor) return '-';
+    const data = new Date(valor);
+    return Number.isNaN(data.getTime()) ? valorSeguro(valor) : data.toLocaleDateString('pt-BR');
+  };
+  const formatarMoedaFicha = (valor) => {
+    if (valor === null || valor === undefined || valor === '') return '-';
+    const texto = String(valor).trim();
+    if (/^R\$/i.test(texto)) return valorSeguro(texto);
+    const normalizado = texto.includes(',') ? texto.replace(/\./g, '').replace(',', '.') : texto;
+    const numeroMoeda = Number(normalizado);
+    return Number.isFinite(numeroMoeda) ? numeroMoeda.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) : valorSeguro(texto);
+  };
+  const formatarQuantidadeFicha = (valor) => {
+    try {
+      if (typeof formatarQuantidadeExibicao === 'function') return escapeHtml(formatarQuantidadeExibicao(valor));
+    } catch (_) {}
+    return valorSeguro(valor);
+  };
+  const tipoNormalizado = String(tipo || 'pedido').toLowerCase();
+  const ehRequisicao = tipoNormalizado === 'requisicao';
+  const rotuloDocumento = tipoNormalizado === 'nfe' ? 'NF-e' : (tipoNormalizado === 'requisicao' ? 'Requisição' : 'Pedido de Compra');
+  const fornecedor = dados.fornecedorNome || dados.fornecedor_nome || dados.fornecedor || '-';
+  const solicitante = dados.solicitante || '-';
+  const comprador = dados.comprador || dados.responsavel || solicitante;
+  const categoria = dados.categoria || dados.departamento || '-';
+  const projeto = dados.projeto || dados.projeto_nome || dados.nome_projeto || '-';
+  const previsao = dados.d_dt_previsao || dados.previsao_chegada || dados.prazo_solicitado || dados.previsao;
+  const inclusao = dados.d_inc_data || dados.created_at || dados.createdAt || dados.data_criacao;
+  const centroCusto = dados.centroCusto || dados.centro_custo || '-';
+  const objetivo = dados.objetivoCompra || dados.objetivo_compra || '-';
+  const valorTotal = dados.valorTotalPedido || dados.valor_total || dados.valor_total_pedido || dados.n_valor || dados.total || dados.valor || '';
+  const parcelas = dados.numero_parcelas || dados.parcelas || dados.condicao_pagamento || '-';
+  const statusTexto = status || dados.status || 'Em andamento';
+  setTimeout(() => hidratarMiniaturasProdutosCompra(document), 0);
+  const linhas = (Array.isArray(itens) ? itens : []).map((item, indice) => `
+    <tr>
+      <td class="cp-sheet-item-index">${indice + 1}</td>
+      <td class="cp-sheet-image-cell">${renderizarMiniaturaProdutoCompra(item)}</td>
+      <td>${valorSeguro(item.produto_codigo || item.c_produto)}</td>
+      <td class="cp-sheet-product">${valorSeguro(item.produto_descricao || item.c_descricao || item.descricao)}</td>
+      <td class="cp-sheet-quantity">${formatarQuantidadeFicha(item.quantidade ?? item.n_qtde)}</td>
+      <td class="cp-sheet-money">${formatarMoedaFicha(item.preco_unitario ?? item.n_val_unit ?? item.valor_unitario)}</td>
+      <td class="cp-sheet-money cp-sheet-money--total">${formatarMoedaFicha(item.valor_total_item ?? item.n_val_tot ?? item.valor_total)}</td>
+    </tr>
+  `).join('');
+
+  return `
+    <div class="cp-sheet-layout"><main class="cp-sheet-main">
+      <section class="cp-sheet-summary" aria-label="Resumo do documento">
+        <div class="cp-sheet-avatar" aria-hidden="true">${ehRequisicao ? 'RQ' : valorSeguro(String(fornecedor).slice(0, 2).toUpperCase(), 'PC')}</div>
+        <div class="cp-sheet-fields">
+          ${ehRequisicao ? `
+            <div class="cp-sheet-field cp-sheet-field--wide"><span>Categoria da compra</span><strong title="${valorSeguro(categoria)}">${valorSeguro(categoria)}</strong></div>
+            <div class="cp-sheet-field"><span>Projeto</span><strong>${valorSeguro(projeto)}</strong></div>
+            <div class="cp-sheet-field"><span>Sugestão de entrega</span><strong>${formatarDataFicha(previsao)}</strong></div>
+            <div class="cp-sheet-field"><span>Solicitante</span><strong>${valorSeguro(solicitante)}</strong></div>
+          ` : `
+            <div class="cp-sheet-field cp-sheet-field--wide"><span>Fornecedor</span><strong title="${valorSeguro(fornecedor)}">${valorSeguro(fornecedor)}</strong></div>
+            <div class="cp-sheet-field"><span>Previsão de entrega</span><strong>${formatarDataFicha(previsao)}</strong></div>
+            ${possuiValor(categoria) ? `<div class="cp-sheet-field"><span>Categoria da compra</span><strong>${valorSeguro(categoria)}</strong></div>` : ''}
+            <div class="cp-sheet-field"><span>Comprador</span><strong>${valorSeguro(comprador)}</strong></div>
+            ${possuiValor(parcelas) ? `<div class="cp-sheet-field"><span>Condição de pagamento</span><strong>${valorSeguro(parcelas)}</strong></div>` : ''}
+          `}
+          <div class="cp-sheet-status-inline"><span>Status</span><strong>${valorSeguro(statusTexto)}</strong></div>
+        </div>
+      </section>
+      <section class="cp-sheet-totals" aria-label="Totais do documento">
+        <div><span>Documento</span><strong>${valorSeguro(rotuloDocumento)} Nº ${valorSeguro(numero)}</strong></div>
+        <div><span>Itens</span><strong>${itens.length}</strong></div>
+        <div><span>Data de inclusão</span><strong>${formatarDataFicha(inclusao)}</strong></div>
+        <div><span>Centro de custo</span><strong>${valorSeguro(centroCusto)}</strong></div>
+        <div class="cp-sheet-total-primary"><span>${ehRequisicao ? 'Valor total sugerido' : 'Valor total da compra'}</span><strong>${valorTotal !== '' ? formatarMoedaFicha(valorTotal) : (ehRequisicao ? 'R$ 0,00' : 'Não informado')}</strong></div>
+      </section>
+      <nav class="cp-nfe-tabs cp-order-tabs" aria-label="Seções do documento">
+        <button type="button" class="is-active">${ehRequisicao ? 'Itens da requisição' : 'Itens da compra'}</button>
+        ${(ehRequisicao ? ['Observações'] : ['Transporte','Totais','Parcelas','Departamentos','Informações adicionais','Observações']).map(label => `<button type="button" disabled title="Aguardando implementação do backend">${label}<small>A construir</small></button>`).join('')}
+      </nav>
+      <section class="cp-sheet-items">
+        <h4 class="cp-sheet-section-title">${ehRequisicao ? 'Itens da requisição' : 'Itens da compra'}</h4>
+        <div class="cp-sheet-table-wrap"><table>
+              <thead><tr><th>Item</th><th aria-label="Foto">Foto</th><th>Código</th><th>Descrição do produto</th><th>Quantidade</th><th>${ehRequisicao ? 'Preço unit. sugerido' : 'Preço unitário'}</th><th>${ehRequisicao ? 'Valor total do item' : 'Total do item'}</th></tr></thead>
+              <tbody>${linhas || '<tr><td colspan="7" class="cp-sheet-empty">Nenhum item encontrado</td></tr>'}</tbody>
+        </table></div>
+        <div class="cp-sheet-record-count">${itens.length} ${itens.length === 1 ? 'registro' : 'registros'}</div>
+      </section>
+      <section class="cp-sheet-note"><i class="fa-regular fa-note-sticky"></i><div><span>${ehRequisicao ? 'Observações' : 'Objetivo da compra'}</span><strong>${valorSeguro(objetivo)}</strong></div></section>
+      ${linksHtml ? `<section class="cp-sheet-links"><span>Anexos e links</span><div>${linksHtml}</div></section>` : ''}
+    </main>${acoesHtml || renderizarAcoesOperacionaisCompra(tipo)}</div>
+  `;
+}
+
 async function abrirModalDetalhesPedidoMinhas(numeroPedido, statusColuna, itemIds = null) {
   const modal = document.getElementById('modalDetalhesPedidoCompras');
   const modalBody = document.getElementById('modalPedidoBody');
   const modalTitulo = document.getElementById('modalPedidoTitulo');
   
   if (!modal || !modalBody || !modalTitulo) return;
+  modal.classList.remove('cp-purchase-preparation-modal');
   
-  modalBody.innerHTML = '<div style="text-align:center;padding:40px;"><i class="fa-solid fa-spinner fa-spin" style="font-size:32px;color:#3b82f6;"></i><br><br>Carregando...</div>';
+  const limiteMenu = Math.max(
+    Number(document.querySelector('.left-side')?.getBoundingClientRect()?.right) || 0,
+    Number(document.getElementById('sidebarContent')?.getBoundingClientRect()?.right) || 0
+  );
+  modal.style.setProperty('--cp-detail-nav-offset', `${Math.max(0, Math.round(limiteMenu))}px`);
+  modalBody.innerHTML = `
+    <div class="cp-sheet-loading" role="status" aria-live="polite">
+      <i class="fa-solid fa-spinner fa-spin" aria-hidden="true"></i>
+      <strong>Carregando pedido</strong>
+      <span>Aguarde enquanto buscamos os dados e itens da compra.</span>
+    </div>`;
   modal.style.display = 'flex';
 
   const btnExcluirDetalhes = document.getElementById('btnExcluirPedidoComprasDetalhes');
@@ -45728,6 +45950,7 @@ async function abrirModalDetalhesPedidoMinhas(numeroPedido, statusColuna, itemId
   });
   
   const currentUser = (document.getElementById('userNameDisplay')?.textContent || '').trim();
+  await carregarPermissoesAcessoParaAprovacao();
   
   try {
     const fmtQtdModal = (v) => {
@@ -45843,6 +46066,8 @@ async function abrirModalDetalhesPedidoMinhas(numeroPedido, statusColuna, itemId
     };
 
     const statusColunaLower = (statusColuna || '').toLowerCase().trim();
+    const statusColunaNormalizado = String(statusColuna || '')
+      .normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
     if (
       statusColunaLower === 'aguardando aprovação da requisição' ||
       statusColunaLower === 'aguardando compra preparação' ||
@@ -45948,6 +46173,14 @@ async function abrirModalDetalhesPedidoMinhas(numeroPedido, statusColuna, itemId
                   </div>
                 </div>
               `;
+              modalBody.innerHTML = renderizarFichaCompraOmie({
+                tipo: 'pedido',
+                numero: numeroPedido,
+                status: statusColuna,
+                dados: { ...primeiroItemPedido, ...detalhes },
+                itens: itensParaMostrar
+              });
+              modalTitulo.textContent = `Pedido de Compra Nº ${numeroPedido}`;
               return;
             }
           } catch (err) {
@@ -46109,6 +46342,26 @@ async function abrirModalDetalhesPedidoMinhas(numeroPedido, statusColuna, itemId
           </div>
         </div>
       `;
+      const tipoFicha = numeroPedido && numeroPedido !== 'undefined' && numeroPedido !== 'null' ? 'pedido' : 'requisicao';
+      const ehPreparacaoPedido = statusColunaLower === 'aguardando compra preparação';
+      const acoesPreparacaoPedido = ehPreparacaoPedido
+        ? renderizarAcoesOperacionaisCompra('requisicao', {
+            prepararPedidoNumero: numeroPedido,
+            podePrepararPedido: usuarioPodeGerarPedidoCompra(primeiro.departamento || '')
+          })
+        : '';
+      modalBody.innerHTML = renderizarFichaCompraOmie({
+        tipo: tipoFicha,
+        numero: numeroPedido || primeiro.numero_pedido || primeiro.grupo_requisicao || primeiro.id || '-',
+        status: statusColuna,
+        dados: primeiro,
+        itens: itensTabela,
+        linksHtml: linksSemCadastro.length ? montarHtmlLinks(linksSemCadastro) : '',
+        acoesHtml: acoesPreparacaoPedido
+      });
+      modalTitulo.textContent = tipoFicha === 'pedido'
+        ? `Pedido de Compra Nº ${numeroPedido}`
+        : `${statusColunaLower === 'aguardando aprovação da requisição' ? 'Aguardando aprovação' : 'Requisição'} Nº ${primeiro.grupo_requisicao || primeiro.id || '-'}`;
       return;
     }
 
@@ -46324,6 +46577,19 @@ async function abrirModalDetalhesPedidoMinhas(numeroPedido, statusColuna, itemId
             </button>
           </div>
           ` : ''}
+
+          ${statusColunaNormalizado === 'aguardando aprovacao da requisicao' && usuarioPodeGerenciarSolicitacao(item.departamento) ? `
+          <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap;">
+            <button onclick="cancelarSolicitacaoGerenciada('${item.id}', '${item.table_source || 'solicitacao_compras'}', 'modalDetalhesPedidoCompras')"
+              style="display:flex;align-items:center;gap:6px;background:#b45309;color:#fff;border:none;padding:8px 14px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:700;">
+              <i class="fa-solid fa-rotate-left"></i> Cancelar
+            </button>
+            <button onclick="excluirSolicitacaoGerenciada('${item.id}', '${item.table_source || 'solicitacao_compras'}', 'modalDetalhesPedidoCompras')"
+              style="display:flex;align-items:center;gap:6px;background:#dc2626;color:#fff;border:none;padding:8px 14px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:700;">
+              <i class="fa-solid fa-trash"></i> Excluir
+            </button>
+          </div>
+          ` : ''}
         </div>
       `;
     });
@@ -46356,6 +46622,7 @@ async function abrirModalAnaliseCadastro(itemId) {
   });
 
   const currentUser = (document.getElementById('userNameDisplay')?.textContent || '').trim();
+  await carregarPermissoesAcessoParaAprovacao();
 
   try {
     const alvoId = String(itemId || '').trim();
@@ -46432,6 +46699,7 @@ async function abrirModalAnaliseCadastro(itemId) {
     };
 
     const tableSourceAnalise = String(item.table_source || 'solicitacao_compras').trim() || 'solicitacao_compras';
+    const podeGerenciarAnalise = usuarioPodeGerenciarSolicitacao(item.departamento);
     const grupoRequisicaoAnalise = String(item.grupo_requisicao || '').trim();
 
     configurarBotaoExcluirPedidoCompras('btnExcluirPedidoComprasAnalise', {
@@ -46547,6 +46815,15 @@ async function abrirModalAnaliseCadastro(itemId) {
             Salvar alterações
           </button>
         </div>
+        ${podeGerenciarAnalise ? `
+        <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:10px;flex-wrap:wrap;">
+          <button onclick="cancelarSolicitacaoGerenciada('${item.id}', '${tableSourceAnalise}', 'modalAnaliseCadastro')" style="background:#b45309;color:#fff;border:none;padding:8px 14px;border-radius:6px;font-size:12px;font-weight:700;cursor:pointer;">
+            <i class="fa-solid fa-rotate-left"></i> Cancelar solicitação
+          </button>
+          <button onclick="excluirSolicitacaoGerenciada('${item.id}', '${tableSourceAnalise}', 'modalAnaliseCadastro')" style="background:#dc2626;color:#fff;border:none;padding:8px 14px;border-radius:6px;font-size:12px;font-weight:700;cursor:pointer;">
+            <i class="fa-solid fa-trash"></i> Excluir solicitação
+          </button>
+        </div>` : ''}
       </div>
     `;
 
@@ -49964,6 +50241,51 @@ async function excluirItemMinhas(itemId, tableSource = 'solicitacao_compras') {
   }
 }
 
+async function cancelarSolicitacaoGerenciada(itemId, tableSource = 'solicitacao_compras', modalId = '') {
+  const motivo = prompt('Informe o motivo do cancelamento:');
+  if (!motivo || !motivo.trim()) return;
+
+  try {
+    const endpoint = tableSource === 'compras_sem_cadastro'
+      ? `/api/compras/sem-cadastro/${itemId}`
+      : `/api/compras/itens/${itemId}/status`;
+    const resp = await fetch(endpoint, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({
+        status: tableSource === 'compras_sem_cadastro' ? 'Carrinho' : 'carrinho',
+        observacao_reprovacao: motivo.trim(),
+        usuario_comentario: window.__sessionUser?.username || ''
+      })
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) throw new Error(data.error || 'Erro ao cancelar solicitação');
+    document.getElementById(modalId)?.style && (document.getElementById(modalId).style.display = 'none');
+    loadMinhasSolicitacoes();
+  } catch (err) {
+    alert('Erro ao cancelar solicitação: ' + err.message);
+  }
+}
+
+async function excluirSolicitacaoGerenciada(itemId, tableSource = 'solicitacao_compras', modalId = '') {
+  if (!confirm('Excluir esta solicitação permanentemente?')) return;
+  try {
+    const resp = await fetch(`/api/compras/itens/${itemId}`, {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ table_source: tableSource })
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) throw new Error(data.error || 'Erro ao excluir solicitação');
+    document.getElementById(modalId)?.style && (document.getElementById(modalId).style.display = 'none');
+    loadMinhasSolicitacoes();
+  } catch (err) {
+    alert('Erro ao excluir solicitação: ' + err.message);
+  }
+}
+
 // Função para retificar item de "solicitado revisão" para "aguardando aprovação da requisição"
 // Objetivo: Receber o parâmetro table_source para saber qual tabela atualizar (solicitacao_compras ou compras_sem_cadastro)
 async function voltarParaAguardandoCompra(itemId, tableSource = 'solicitacao_compras') {
@@ -50036,6 +50358,8 @@ window.excluirCotacaoKanban = excluirCotacaoKanban;
 window.enviarEscolhaMinhas = enviarEscolhaMinhas;
 window.editarItemMinhas = editarItemMinhas;
 window.excluirItemMinhas = excluirItemMinhas;
+window.cancelarSolicitacaoGerenciada = cancelarSolicitacaoGerenciada;
+window.excluirSolicitacaoGerenciada = excluirSolicitacaoGerenciada;
 window.voltarParaAguardandoCompra = voltarParaAguardandoCompra;
 window.toggleAprovacaoItensMinhas = toggleAprovacaoItensMinhas;
 window.toggleRequisicoesItensMinhas = toggleRequisicoesItensMinhas;
@@ -58060,6 +58384,28 @@ function usuarioPodeAprovarDepartamento(departamento) {
   return temPermissao;
 }
 
+function usuarioPodeGerenciarSolicitacao(departamento) {
+  const username = window.__sessionUser?.username ||
+    document.getElementById('userNameDisplay')?.textContent?.trim() || '';
+  const departamentoNormalizado = String(departamento || '').trim().toLowerCase();
+
+  return permissoesAcessoCache.some(p =>
+    p.tipo_botao === 'gestao_solicitacao' &&
+    String(p.responsavel_username || '').trim().toLowerCase() === String(username).trim().toLowerCase() &&
+    String(p.departamento_nome || '').trim().toLowerCase() === departamentoNormalizado
+  );
+}
+
+function usuarioPodeGerarPedidoCompra(departamento) {
+  const username = window.__sessionUser?.username || document.getElementById('userNameDisplay')?.textContent?.trim() || '';
+  const departamentoNormalizado = String(departamento || '').trim().toLowerCase();
+  return permissoesAcessoCache.some(p =>
+    p.tipo_botao === 'pedido_compra' &&
+    String(p.responsavel_username || '').trim().toLowerCase() === String(username).trim().toLowerCase() &&
+    String(p.departamento_nome || '').trim().toLowerCase() === departamentoNormalizado
+  );
+}
+
 // Carrega permissões de acesso do servidor
 async function carregarPermissoesAcessoParaAprovacao() {
   try {
@@ -64846,6 +65192,51 @@ function ajustarAlturaKanban() {
   }
 }
 
+function atualizarResumoComprasKanban() {
+  const wrapper = document.getElementById('minhasComprasWrapper');
+  if (!wrapper) return;
+
+  const colunas = Array.from(wrapper.querySelectorAll('.kanban-column-minhas'));
+  const totalPorStatus = new Map(colunas.map(coluna => {
+    const status = String(coluna.dataset.status || '').trim().toLowerCase();
+    const total = Number(coluna.querySelector('.kanban-count-minhas')?.textContent || 0);
+    return [status, Number.isFinite(total) ? total : 0];
+  }));
+
+  const concluidas = totalPorStatus.get('concluído') || totalPorStatus.get('concluido') || 0;
+  const aguardando = [...totalPorStatus.entries()]
+    .filter(([status]) => status.includes('aprova') || status.includes('analise') || status.includes('prepara'))
+    .reduce((soma, [, total]) => soma + total, 0);
+  const ativas = [...totalPorStatus.entries()]
+    .filter(([status]) => status !== 'concluído' && status !== 'concluido')
+    .reduce((soma, [, total]) => soma + total, 0);
+
+  const ativasEl = document.getElementById('comprasMetricaAtivas');
+  const aguardandoEl = document.getElementById('comprasMetricaAguardando');
+  const historicoEl = document.getElementById('comprasMetricaHistorico');
+  if (ativasEl) ativasEl.textContent = ativas.toLocaleString('pt-BR');
+  if (aguardandoEl) aguardandoEl.textContent = aguardando.toLocaleString('pt-BR');
+  if (historicoEl) historicoEl.textContent = concluidas.toLocaleString('pt-BR');
+}
+
+function alterarVisaoComprasKanban(visao = 'ativas') {
+  const modo = visao === 'historico' ? 'historico' : 'ativas';
+  const wrapper = document.getElementById('minhasComprasWrapper');
+  if (!wrapper) return;
+
+  wrapper.dataset.boardView = modo;
+  const btnAtivas = document.getElementById('comprasBoardAtivasBtn');
+  const btnHistorico = document.getElementById('comprasBoardHistoricoBtn');
+  btnAtivas?.classList.toggle('is-active', modo === 'ativas');
+  btnHistorico?.classList.toggle('is-active', modo === 'historico');
+  btnAtivas?.setAttribute('aria-selected', String(modo === 'ativas'));
+  btnHistorico?.setAttribute('aria-selected', String(modo === 'historico'));
+  localStorage.setItem('comprasBoardView', modo);
+  requestAnimationFrame(ajustarAlturaKanban);
+}
+
+window.alterarVisaoComprasKanban = alterarVisaoComprasKanban;
+
 // Reajusta ao redimensionar a janela (apenas no modo kanban)
 window.addEventListener('resize', () => {
   atualizarOffsetCabecalhoListaCompras();
@@ -65059,6 +65450,8 @@ function renderizarKanbanPrimeiraFaseRapida(kanbanContainer, lista, filtroStatus
 
   kanbanContainer.innerHTML = htmlPrimeiraFase + htmlSegundaFase;
 
+  alterarVisaoComprasKanban(localStorage.getItem('comprasBoardView') || 'ativas');
+  atualizarResumoComprasKanban();
   aplicarFiltroKanbans();
 
   if (!modoVisualizacaoKanban) {
@@ -65089,7 +65482,8 @@ function obterListaNavegacaoModalNfePedidos() {
     .map((card) => {
       const nIdReceb = String(card.getAttribute('data-n-id-receb') || '').trim();
       const numero = String(card.getAttribute('data-numero-pedido') || '').trim();
-      return { nIdReceb, numero };
+      const status = String(card.closest('.kanban-column-minhas')?.getAttribute('data-status') || '').trim();
+      return { nIdReceb, numero, status };
     })
     .filter((item) => {
       if (!item.nIdReceb || vistos.has(item.nIdReceb)) return false;
@@ -65117,13 +65511,13 @@ function atualizarControlesNavegacaoModalNfePedidos() {
   }
 }
 
-function configurarNavegacaoModalNfePedidos(nIdRecebAtual, numeroAtual = '') {
+function configurarNavegacaoModalNfePedidos(nIdRecebAtual, numeroAtual = '', statusAtual = '') {
   const atual = String(nIdRecebAtual || '').trim();
   const lista = obterListaNavegacaoModalNfePedidos();
 
   let index = lista.findIndex((item) => item.nIdReceb === atual);
   if (atual && index === -1) {
-    lista.push({ nIdReceb: atual, numero: String(numeroAtual || '').trim() });
+    lista.push({ nIdReceb: atual, numero: String(numeroAtual || '').trim(), status: String(statusAtual || '').trim() });
     index = lista.length - 1;
   }
 
@@ -65145,7 +65539,7 @@ async function abrirProximoModalNfePedidos() {
   const proximo = lista[idx + 1];
   if (!proximo?.nIdReceb) return;
 
-  await abrirModalNfePedidos(proximo.nIdReceb, proximo.numero || '');
+  await abrirModalNfePedidos(proximo.nIdReceb, proximo.numero || '', proximo.status || '');
 }
 
 function formatarValorMoedaNfePedidos(valor) {
@@ -65161,33 +65555,43 @@ function renderTabelaItensModalNfePedidos(itens = []) {
 
   const linhas = itens.map((item) => `
     <tr style="border-bottom:1px solid #e2e8f0;">
+      <td class="cp-sheet-image-cell">${renderizarMiniaturaProdutoCompra(item)}</td>
       <td style="padding:8px;font-size:12px;color:#0f172a;">${escapeHtml(String(item?.cCodigoProduto || '-'))}</td>
       <td style="padding:8px;font-size:12px;color:#0f172a;">${escapeHtml(String(item?.cDescricaoProduto || '-'))}</td>
       <td style="padding:8px;font-size:12px;color:#334155;">${escapeHtml(String(item?.cNCM || '-'))}</td>
       <td style="padding:8px;font-size:12px;color:#334155;text-align:center;">${escapeHtml(String(item?.cUnidadeNfe || '-'))}</td>
       <td style="padding:8px;font-size:12px;color:#334155;text-align:right;">${Number.isFinite(Number(item?.nPrecoUnit)) ? Number(item.nPrecoUnit).toLocaleString('pt-BR', { minimumFractionDigits: 4, maximumFractionDigits: 6 }) : '-'}</td>
       <td style="padding:8px;font-size:12px;color:#334155;text-align:right;">${Number.isFinite(Number(item?.nQtdeNFe)) ? Number(item.nQtdeNFe).toLocaleString('pt-BR') : '-'}</td>
+      <td class="cp-nfe-planned-cell"><span>A construir</span><small>Associação do produto</small></td>
       <td style="padding:8px;font-size:12px;color:#334155;">${escapeHtml(String(item?.cCFOPEntrada || '-'))}</td>
       <td style="padding:8px;font-size:12px;color:#334155;line-height:1.4;">
         ${escapeHtml(String(item?.cCFOPDescricao || '-'))}
         ${item?.cCFOP ? `<div style="font-size:11px;color:#64748b;margin-top:2px;">CFOP item: ${escapeHtml(String(item.cCFOP))}</div>` : ''}
       </td>
+      <td class="cp-nfe-planned-cell"><span>A construir</span><small>Categoria</small></td>
+      <td class="cp-nfe-planned-cell"><span>A construir</span><small>Estoque</small></td>
+      <td class="cp-nfe-planned-cell"><span>A construir</span><small>Conta a pagar</small></td>
     </tr>
   `).join('');
 
   return `
-    <div style="border:1px solid #e2e8f0;border-radius:8px;overflow:auto;max-height:320px;">
-      <table style="width:100%;border-collapse:collapse;min-width:980px;">
+    <div class="cp-nfe-table-wrap" style="border:1px solid #e2e8f0;border-radius:8px;overflow:auto;max-height:320px;">
+      <table class="cp-nfe-items-table" style="width:100%;border-collapse:collapse;min-width:1520px;">
         <thead>
           <tr style="position:sticky;top:0;background:#f8fafc;border-bottom:1px solid #e2e8f0;">
+            <th style="padding:8px;text-align:center;font-size:12px;color:#334155;">Foto</th>
             <th style="padding:8px;text-align:left;font-size:12px;color:#334155;">Código</th>
             <th style="padding:8px;text-align:left;font-size:12px;color:#334155;">Descrição</th>
             <th style="padding:8px;text-align:left;font-size:12px;color:#334155;">NCM</th>
             <th style="padding:8px;text-align:center;font-size:12px;color:#334155;">Unid.</th>
             <th style="padding:8px;text-align:right;font-size:12px;color:#334155;">Preço Unit.</th>
             <th style="padding:8px;text-align:right;font-size:12px;color:#334155;">Qtd NF-e</th>
+            <th style="padding:8px;text-align:left;font-size:12px;color:#334155;">Situação</th>
             <th style="padding:8px;text-align:left;font-size:12px;color:#334155;">CFOP Entrada</th>
             <th style="padding:8px;text-align:left;font-size:12px;color:#334155;">Descrição CFOP (item)</th>
+            <th style="padding:8px;text-align:left;font-size:12px;color:#334155;">Categoria</th>
+            <th style="padding:8px;text-align:left;font-size:12px;color:#334155;">Movimenta estoque</th>
+            <th style="padding:8px;text-align:left;font-size:12px;color:#334155;">Gera conta a pagar</th>
           </tr>
         </thead>
         <tbody>${linhas}</tbody>
@@ -65201,6 +65605,7 @@ function criarModalNfePedidosSeNecessario() {
 
   const modal = document.createElement('div');
   modal.id = 'modalNfePedidos';
+  modal.className = 'cp-detail-modal cp-detail-modal--nfe';
   modal.style.display = 'none';
   modal.style.position = 'fixed';
   modal.style.inset = '0';
@@ -65208,32 +65613,40 @@ function criarModalNfePedidosSeNecessario() {
   modal.style.zIndex = '10045';
   modal.style.alignItems = 'center';
   modal.style.justifyContent = 'center';
-  modal.style.padding = '18px';
 
   modal.innerHTML = `
-    <div style="width:min(1020px,100%);max-height:92vh;overflow:auto;background:#ffffff;border-radius:12px;box-shadow:0 20px 50px rgba(2,6,23,.35);border:1px solid #d1d5db;overflow:hidden;">
-      <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 16px;border-bottom:1px solid #e5e7eb;background:#f8fafc;">
-        <strong style="font-size:15px;color:#0f172a;display:flex;align-items:center;gap:8px;">
-          <i class="fa-solid fa-file-invoice-dollar" style="color:#92400e;"></i>
-          <span>NFe dos pedidos</span>
+    <div class="cp-detail-shell cp-purchase-sheet cp-nfe-sheet">
+      <div class="cp-detail-header">
+        <strong>
+          <i class="fa-solid fa-file-invoice-dollar"></i>
+          <span>Recebimento NF-e Nº</span>
           <span id="modalNfePedidosNumero" style="color:#92400e;"></span>
         </strong>
-        <div style="display:flex;align-items:center;gap:8px;">
+        <div class="cp-detail-header-actions">
           <span id="modalNfePedidosNavInfo" style="font-size:12px;color:#64748b;min-width:36px;text-align:center;">0/0</span>
-          <button type="button" id="modalNfePedidosProximo" style="border:1px solid #cbd5e1;background:#ffffff;color:#334155;font-size:12px;cursor:pointer;border-radius:6px;padding:6px 10px;display:inline-flex;align-items:center;gap:6px;">
+          <button type="button" id="modalNfePedidosProximo" class="cp-detail-next">
             Próximo
             <i class="fa-solid fa-arrow-right"></i>
           </button>
-          <button type="button" id="modalNfePedidosFechar" style="border:none;background:transparent;color:#475569;font-size:18px;cursor:pointer;">
+          <button type="button" id="modalNfePedidosFechar" class="modal-close" aria-label="Fechar recebimento da NF-e">
             <i class="fa-solid fa-xmark"></i>
           </button>
         </div>
       </div>
-
-      <div style="padding:16px;display:flex;flex-direction:column;gap:12px;">
-        <div id="modalNfePedidosInfo" style="display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px;"></div>
-        <div id="modalNfePedidosCfopInfo"></div>
-        <div id="modalNfePedidosItens"></div>
+      <div class="cp-nfe-layout">
+        <main class="cp-nfe-main">
+          <div id="modalNfePedidosInfo" class="cp-nfe-info"></div>
+          <nav class="cp-nfe-tabs" aria-label="Seções do recebimento">
+            <button type="button" class="is-active">Itens da NF-e</button>
+            ${['Transporte','Totais','Parcelas','Departamentos','Informações adicionais','Observações'].map(label => `<button type="button" disabled title="Aguardando implementação do backend">${label}<small>A construir</small></button>`).join('')}
+          </nav>
+          <div id="modalNfePedidosCfopInfo" class="cp-nfe-cfop"></div>
+          <section class="cp-nfe-items-section">
+            <div class="cp-nfe-import-guidance"><strong>Itens recebidos do fornecedor</strong><span>Associação de produtos, situação fiscal e movimentações serão integradas pelo backend.</span></div>
+            <div id="modalNfePedidosItens"></div>
+          </section>
+        </main>
+        <div id="modalNfePedidosAcoes"></div>
       </div>
     </div>
   `;
@@ -65321,7 +65734,7 @@ async function atualizarComprasRecebimentoNfe(nIdReceb, compras) {
   return data;
 }
 
-async function abrirModalNfePedidos(nIdReceb, numeroNfeRef = '') {
+async function abrirModalNfePedidos(nIdReceb, numeroNfeRef = '', statusRef = '') {
   criarModalNfePedidosSeNecessario();
   const modal = obterModalNfePedidosEl();
   if (!modal) return;
@@ -65330,14 +65743,21 @@ async function abrirModalNfePedidos(nIdReceb, numeroNfeRef = '') {
   const infoEl = document.getElementById('modalNfePedidosInfo');
   const cfopInfoEl = document.getElementById('modalNfePedidosCfopInfo');
   const itensEl = document.getElementById('modalNfePedidosItens');
-  if (!numeroEl || !infoEl || !cfopInfoEl || !itensEl) return;
+  const acoesEl = document.getElementById('modalNfePedidosAcoes');
+  if (!numeroEl || !infoEl || !cfopInfoEl || !itensEl || !acoesEl) return;
 
+  const limiteMenu = Math.max(
+    Number(document.querySelector('.left-side')?.getBoundingClientRect()?.right) || 0,
+    Number(document.getElementById('sidebarContent')?.getBoundingClientRect()?.right) || 0
+  );
+  modal.style.setProperty('--cp-detail-nav-offset', `${Math.max(0, Math.round(limiteMenu))}px`);
   modal.style.display = 'flex';
-  numeroEl.textContent = numeroNfeRef ? `• ${numeroNfeRef}` : '';
-  configurarNavegacaoModalNfePedidos(nIdReceb, numeroNfeRef);
+  numeroEl.textContent = numeroNfeRef || '';
+  configurarNavegacaoModalNfePedidos(nIdReceb, numeroNfeRef, statusRef);
   infoEl.innerHTML = '<div style="grid-column:1/-1;font-size:13px;color:#64748b;">Carregando dados da NF-e na Omie...</div>';
   cfopInfoEl.innerHTML = '';
   itensEl.innerHTML = '';
+  acoesEl.innerHTML = renderizarAcoesOperacionaisCompra('nfe', { status: statusRef });
 
   try {
     const resp = await fetch(`/api/compras/recebimentos-nfe/detalhes/${encodeURIComponent(String(nIdReceb || ''))}`, {
@@ -65357,19 +65777,20 @@ async function abrirModalNfePedidos(nIdReceb, numeroNfeRef = '') {
       : '';
     if (cNumeroNFe) {
       const numeroLimpo = cNumeroNFe.replace(/^0+/, '') || cNumeroNFe;
-      numeroEl.textContent = `• ${numeroLimpo}`;
+      numeroEl.textContent = numeroLimpo;
     }
+    acoesEl.innerHTML = renderizarAcoesOperacionaisCompra('nfe', { danfeUrl: linkPdfPorNumeroNfe, status: statusRef });
 
     const chaveNfeTexto = String(dados?.cChaveNFe || '-');
     const chaveNfeHtml = (linkPdfPorNumeroNfe && chaveNfeTexto !== '-')
       ? `
-        <div style="display:inline-flex;align-items:center;gap:6px;word-break:break-all;">
+        <div class="cp-nfe-key-value">
           <a
             href="${linkPdfPorNumeroNfe}"
             target="_blank"
             rel="noopener"
             title="Abrir PDF da NF-e"
-            style="color:#0f172a;font-weight:700;text-decoration:underline;word-break:break-all;">
+            class="cp-nfe-key-link">
             ${escapeHtml(chaveNfeTexto)}
           </a>
           <a
@@ -65382,7 +65803,7 @@ async function abrirModalNfePedidos(nIdReceb, numeroNfeRef = '') {
           </a>
         </div>
       `
-      : `<div style="font-size:12px;color:#0f172a;font-weight:700;word-break:break-all;">${escapeHtml(chaveNfeTexto)}</div>`;
+      : `<div class="cp-nfe-key-value cp-nfe-key-value--plain">${escapeHtml(chaveNfeTexto)}</div>`;
 
     infoEl.innerHTML = `
       <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:8px;">
@@ -65435,6 +65856,49 @@ async function abrirModalNfePedidos(nIdReceb, numeroNfeRef = '') {
         <div style="font-size:11px;color:#64748b;">cObs</div>
         <div style="font-size:12px;color:#0f172a;font-weight:700;line-height:1.5;white-space:pre-wrap;">${escapeHtml(String(dados?.cObs || '-'))}</div>
       </div>
+    `;
+
+    // A NF-e usa o mesmo esqueleto operacional dos pedidos; os dados fiscais ficam
+    // em uma faixa compacta para preservar a maior área possível para os itens.
+    const iniciaisFornecedorNfe = String(dados?.cNome || 'NF').trim().slice(0, 2).toUpperCase();
+    const possiveisComprasNfe = Array.isArray(dados?.possiveisComprasMesmoValor)
+      ? dados.possiveisComprasMesmoValor
+      : [];
+    infoEl.innerHTML = `
+      <section class="cp-sheet-summary cp-nfe-summary" aria-label="Resumo da nota fiscal">
+        <div class="cp-sheet-avatar" aria-hidden="true">${escapeHtml(iniciaisFornecedorNfe)}</div>
+        <div class="cp-sheet-fields">
+          <div class="cp-sheet-field cp-sheet-field--wide"><span>Fornecedor</span><strong title="${escapeHtml(String(dados?.cNome || '-'))}">${escapeHtml(String(dados?.cNome || '-'))}</strong></div>
+          <div class="cp-sheet-field cp-sheet-field--planned"><span>CNPJ</span><strong>A construir</strong><small>Backend: documento do fornecedor</small></div>
+          <div class="cp-sheet-field"><span>Emissão</span><strong>${escapeHtml(String(dados?.dEmissaoNFe || '-'))}</strong></div>
+          <div class="cp-sheet-field"><span>Categoria da compra</span><strong title="${escapeHtml(String(dados?.categoriaCompra?.descricao || '-'))}">${escapeHtml(String(dados?.categoriaCompra?.descricao || '-'))}</strong></div>
+          <div class="cp-sheet-status-inline"><span>Status</span><strong>Faturada pelo fornecedor</strong></div>
+        </div>
+      </section>
+      <section class="cp-sheet-totals cp-nfe-totals" aria-label="Totais da nota fiscal">
+        <div><span>Documento</span><strong>NF-e Nº ${escapeHtml(String(dados?.cNumeroNFe || '-'))}</strong></div>
+        <div><span>Itens</span><strong>${Array.isArray(dados?.itens) ? dados.itens.length : 0}</strong></div>
+        <div><span>Valor da NF-e</span><strong>${escapeHtml(formatarValorMoedaNfePedidos(dados?.nValorNFe))}</strong></div>
+        <div class="cp-nfe-purchase-control">
+          <label for="modalNfePedidosComprasSelect">Documento de compras?</label>
+          <select id="modalNfePedidosComprasSelect">
+            <option value="" ${normalizarComprasNfe(dados?.compras) === '' ? 'selected' : ''}>Selecione</option>
+            <option value="sim" ${normalizarComprasNfe(dados?.compras) === 'sim' ? 'selected' : ''}>Sim</option>
+            <option value="nao" ${normalizarComprasNfe(dados?.compras) === 'nao' ? 'selected' : ''}>Não</option>
+          </select>
+          <small id="modalNfePedidosComprasMsg"></small>
+        </div>
+      </section>
+      <section class="cp-nfe-document-meta">
+        <div><span>Chave da NF-e</span>${chaveNfeHtml}</div>
+        <div class="cp-nfe-meta-natureza"><span>Natureza da categoria</span><strong title="${escapeHtml(String(dados?.categoriaCompra?.natureza || '-'))}">${escapeHtml(String(dados?.categoriaCompra?.natureza || '-'))}</strong></div>
+        <div><span>Possíveis compras do mesmo valor</span><strong>${possiveisComprasNfe.length ? escapeHtml(possiveisComprasNfe.join(', ')) : '-'}</strong></div>
+        <div class="is-planned"><span>Série, modelo, IE e UF</span><strong>A construir</strong><small>Backend: ampliar retorno do recebimento Omie</small></div>
+        <div class="is-planned"><span>Reforma tributária</span><strong>A construir</strong><small>Backend: IS, IBS e CBS</small></div>
+      </section>
+      ${String(dados?.cObs || '').trim() && String(dados?.cObs || '').trim() !== '-'
+        ? `<section class="cp-sheet-note cp-nfe-note"><i class="fa-regular fa-note-sticky"></i><div><span>Observações da NF-e</span><strong>${escapeHtml(String(dados.cObs))}</strong></div></section>`
+        : ''}
     `;
 
     const comprasSelectEl = document.getElementById('modalNfePedidosComprasSelect');
@@ -65532,6 +65996,7 @@ async function abrirModalNfePedidos(nIdReceb, numeroNfeRef = '') {
     }
 
     itensEl.innerHTML = renderTabelaItensModalNfePedidos(dados?.itens || []);
+    hidratarMiniaturasProdutosCompra(itensEl);
   } catch (err) {
     infoEl.innerHTML = `<div style="grid-column:1/-1;font-size:13px;color:#b91c1c;background:#fef2f2;border:1px solid #fecaca;border-radius:8px;padding:10px;">${escapeHtml(String(err?.message || 'Erro ao carregar dados da NF-e'))}</div>`;
     cfopInfoEl.innerHTML = '';
@@ -66261,7 +66726,7 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
           const statusesRecebimentoNfe = ['faturada pelo fornecedor', 'recebido', 'concluído', 'concluido'];
           const onclickCard = (
             (statusesRecebimentoNfe.includes(status) && primeiroItem.origem_recebimento_nfe && primeiroItem.n_id_receb)
-              ? `abrirModalNfePedidos('${String(primeiroItem.n_id_receb)}', '${String(primeiroItem.numero || '').replace(/'/g, "\\'")}')`
+              ? `abrirModalNfePedidos('${String(primeiroItem.n_id_receb)}', '${String(primeiroItem.numero || '').replace(/'/g, "\\'")}', '${String(status || '').replace(/'/g, "\\'")}')`
               :
             status === 'analise de cadastro'
               ? `abrirModalAnaliseCadastro('${primeiroItem.id}')`
@@ -66324,7 +66789,7 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
               
               <!-- Objetivo: Não exibir esse div para os 5 kanbans especiais que usam apenas chaveGrupo -->
               ${!(status === 'aguardando aprovação da requisição' || status === 'solicitado revisão' || status === 'aguardando cotação' || status === 'cotado aguardando escolha' || status === 'analise de cadastro' || status === 'aguardando compra preparação') ? `
-              <div style="font-size:12px;color:#374151;margin-bottom:8px;font-weight:600;">
+              <div class="cp-card-number" style="font-size:12px;color:#374151;margin-bottom:8px;font-weight:600;">
                 <span style="display:inline-flex;align-items:center;gap:6px;">
                   <span>${escapeHtml(
                     primeiroItem.isPedidoCompra ? (primeiroItem.numero || primeiroItem.n_cod_ped || '-') :
@@ -66340,14 +66805,14 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
               ` : ''}
               
               ${(primeiroItem.isPedidoCompra || primeiroItem.isCompraRealizada) && primeiroItem.fornecedor_nome ? `
-                <div style="font-size:11px;color:#6b7280;margin-bottom:8px;padding:4px 8px;background:#f3f4f6;border-radius:4px;">
+                <div class="cp-card-supplier" style="font-size:11px;color:#6b7280;margin-bottom:8px;padding:4px 8px;background:#f3f4f6;border-radius:4px;">
                   <i class="fa-solid fa-building" style="margin-right:4px;color:#9ca3af;"></i>
                   ${escapeHtml(primeiroItem.fornecedor_nome)}
                 </div>
               ` : ''}
               
               ${(primeiroItem.isPedidoCompra || primeiroItem.isCompraRealizada) && primeiroItem.d_inc_data ? `
-                <div style="font-size:11px;color:#6b7280;margin-bottom:8px;padding:4px 8px;background:#fef3c7;border-radius:4px;display:flex;flex-direction:column;gap:4px;">
+                <div class="cp-card-dates" style="font-size:11px;color:#6b7280;margin-bottom:8px;padding:4px 8px;background:#fef3c7;border-radius:4px;display:flex;flex-direction:column;gap:4px;">
                   <span style="display:flex;align-items:center;gap:4px;">
                     <i class="fa-solid fa-calendar" style="color:#f59e0b;"></i>
                     <span>${new Date(primeiroItem.d_inc_data).toLocaleDateString('pt-BR')}</span>
@@ -66362,7 +66827,7 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
               ` : ''}
               
               ${(primeiroItem.isPedidoCompra || primeiroItem.isCompraRealizada) && primeiroItem.solicitante ? `
-                <div style="font-size:11px;color:#6b7280;margin-bottom:8px;padding:4px 8px;background:#e0f2fe;border-radius:4px;display:flex;align-items:center;">
+                <div class="cp-card-requester" style="font-size:11px;color:#6b7280;margin-bottom:8px;padding:4px 8px;background:#e0f2fe;border-radius:4px;display:flex;align-items:center;">
                   <i class="fa-solid fa-user" style="margin-right:4px;color:#0284c7;"></i>
                   <span style="font-weight:600;">Solicitante:</span>
                   <span style="margin-left:4px;color:#0284c7;">${escapeHtml(primeiroItem.solicitante)}</span>
@@ -66371,7 +66836,7 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
               
               <!-- Objetivo: Exibir o valor de agrupamento (grupo_requisicao ou nCodPed) nos 5 kanbans específicos + Requisições + Pedido de Compra + Compra Realizada -->
               ${(status === 'aguardando aprovação da requisição' || status === 'solicitado revisão' || status === 'aguardando cotação' || status === 'cotado aguardando escolha' || status === 'analise de cadastro' || status === 'aguardando compra preparação' || status === 'aguardando compra' || status === 'compra realizada' || status === 'faturada pelo fornecedor' || status === 'recebido' || status === 'concluído') && chaveGrupo && chaveGrupo !== '-' ? `
-                <div style="font-size:11px;color:#6b7280;margin-bottom:8px;padding:4px 8px;background:#f3f4f6;border-radius:4px;word-break:break-all;display:flex;align-items:center;justify-content:space-between;gap:8px;">
+                <div class="cp-card-summary" style="font-size:11px;color:#6b7280;margin-bottom:8px;padding:4px 8px;background:#f3f4f6;border-radius:4px;word-break:break-all;display:flex;align-items:center;justify-content:space-between;gap:8px;">
                   ${status === 'aguardando compra preparação'
                     ? `
                       ${(() => {
@@ -66616,6 +67081,9 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
     aplicarFiltroKanbans();
 
     // Objetivo: Após carregar os dados, exibe a visualização correta (lista ou kanban)
+    alterarVisaoComprasKanban(localStorage.getItem('comprasBoardView') || 'ativas');
+    atualizarResumoComprasKanban();
+
     if (!modoVisualizacaoKanban) {
       mostrarVisualizacaoLista();
     } else {
@@ -75638,6 +76106,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const movimEstoqueLocaisEl = document.getElementById('movimEstoqueLocais');
   let _movimEstoqueLocais = [];
   let _movimLocaisDisponiveis = [];
+  let _movimRegraUsuario = null;
   let _mostrarOutrosDestinos = false;
   let _codigoProdutoAtual = null;
   let _descricaoProdutoAtual = null;
@@ -77002,6 +77471,7 @@ document.addEventListener('DOMContentLoaded', () => {
       document.querySelectorAll('.movimModoBtn').forEach(b => b.classList.remove('ativo'));
       limparEnderecosInternos();
       atualizarLayoutMovim();
+      preencherDestinosMovim();
     });
   }
 
@@ -77015,6 +77485,7 @@ document.addEventListener('DOMContentLoaded', () => {
       });
       limparEnderecosInternos();
       atualizarLayoutMovim();
+      preencherDestinosMovim();
       monEvento('click_modo_interno', { modo: _movimModoInterno });
     });
   }
@@ -77141,9 +77612,17 @@ document.addEventListener('DOMContentLoaded', () => {
   function preencherDestinosMovim() {
     if (!localSel) return;
     const valorAtual = localSel.value;
-    const locaisVisiveis = _mostrarOutrosDestinos
-      ? _movimLocaisDisponiveis
-      : _movimLocaisDisponiveis.filter(l => MOVIM_DESTINOS_PRINCIPAIS.has(String(l.codigo_local_estoque)));
+    const tipoAtivo = isMotivoInterno() ? _movimModoInterno : obterTipoExecutarOmie();
+    const localRestrito = _movimRegraUsuario?.origem_local_codigo
+      ? String(tipoAtivo === 'TRANSFERENCIA'
+        ? _movimRegraUsuario.destino_transferencia_codigo
+        : _movimRegraUsuario.origem_local_codigo)
+      : '';
+    const locaisVisiveis = localRestrito
+      ? _movimLocaisDisponiveis.filter(l => String(l.codigo_local_estoque) === localRestrito)
+      : (_mostrarOutrosDestinos
+        ? _movimLocaisDisponiveis
+        : _movimLocaisDisponiveis.filter(l => MOVIM_DESTINOS_PRINCIPAIS.has(String(l.codigo_local_estoque))));
     localSel.innerHTML = '<option value="">Selecione o destino...</option>';
     locaisVisiveis.forEach(l => {
       const opt = document.createElement('option');
@@ -77156,7 +77635,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     if (mostrarOutrosLocaisBtn) {
       const existemOutros = _movimLocaisDisponiveis.some(l => !MOVIM_DESTINOS_PRINCIPAIS.has(String(l.codigo_local_estoque)));
-      mostrarOutrosLocaisBtn.style.display = existemOutros ? 'inline-flex' : 'none';
+      mostrarOutrosLocaisBtn.style.display = !_movimRegraUsuario?.origem_local_codigo && existemOutros ? 'inline-flex' : 'none';
       mostrarOutrosLocaisBtn.innerHTML = _mostrarOutrosDestinos
         ? '<i class="fa-solid fa-eye-slash"></i> Ocultar outros armazéns'
         : '<i class="fa-solid fa-eye"></i> Desocultar outros armazéns';
@@ -77172,15 +77651,23 @@ document.addEventListener('DOMContentLoaded', () => {
   async function carregarLocais() {
     if (!localSel && !origemSel) return;
     try {
-      const r = await fetch('/api/armazem/locais?fonte=db');
+      const [r, permissaoResp] = await Promise.all([
+        fetch('/api/armazem/locais?fonte=db'),
+        fetch('/api/movimentacoes/permissao-atual', { credentials: 'include' })
+      ]);
       const d = await r.json();
+      const permissaoJson = await permissaoResp.json().catch(() => ({}));
+      _movimRegraUsuario = permissaoJson?.regra || null;
       const locais = (d.locais || []).filter(l => !l.inativo);
       _movimLocaisDisponiveis = locais;
 
       function preencherOrigem(sel) {
         if (!sel) return;
         sel.innerHTML = '';
-        locais.forEach(l => {
+        const origens = _movimRegraUsuario?.origem_local_codigo
+          ? locais.filter(l => String(l.codigo_local_estoque) === String(_movimRegraUsuario.origem_local_codigo))
+          : locais;
+        origens.forEach(l => {
           const opt = document.createElement('option');
           opt.value = l.codigo_local_estoque;
           opt.textContent = l.descricao || l.codigo_local_estoque;
