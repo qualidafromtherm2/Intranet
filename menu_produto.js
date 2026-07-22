@@ -65678,12 +65678,14 @@ async function abrirModalNfePedidos(nIdReceb, numeroNfeRef = '', statusRef = '')
       </section>
       <section class="cp-nfe-document-meta">
         <div><span>Chave da NF-e</span>${chaveNfeHtml}</div>
-        <div><span>Natureza da categoria</span><strong>${escapeHtml(String(dados?.categoriaCompra?.natureza || '-'))}</strong></div>
+        <div class="cp-nfe-meta-natureza"><span>Natureza da categoria</span><strong title="${escapeHtml(String(dados?.categoriaCompra?.natureza || '-'))}">${escapeHtml(String(dados?.categoriaCompra?.natureza || '-'))}</strong></div>
         <div><span>Possíveis compras do mesmo valor</span><strong>${possiveisComprasNfe.length ? escapeHtml(possiveisComprasNfe.join(', ')) : '-'}</strong></div>
         <div class="is-planned"><span>Série, modelo, IE e UF</span><strong>A construir</strong><small>Backend: ampliar retorno do recebimento Omie</small></div>
         <div class="is-planned"><span>Reforma tributária</span><strong>A construir</strong><small>Backend: IS, IBS e CBS</small></div>
       </section>
-      <section class="cp-sheet-note cp-nfe-note"><i class="fa-regular fa-note-sticky"></i><div><span>Observações da NF-e</span><strong>${escapeHtml(String(dados?.cObs || '-'))}</strong></div></section>
+      ${String(dados?.cObs || '').trim() && String(dados?.cObs || '').trim() !== '-'
+        ? `<section class="cp-sheet-note cp-nfe-note"><i class="fa-regular fa-note-sticky"></i><div><span>Observações da NF-e</span><strong>${escapeHtml(String(dados.cObs))}</strong></div></section>`
+        : ''}
     `;
 
     const comprasSelectEl = document.getElementById('modalNfePedidosComprasSelect');

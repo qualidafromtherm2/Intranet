@@ -17229,26 +17229,32 @@ html.light-mode #minhasComprasWrapper {
 .cp-nfe-purchase-control small { grid-column:1/-1; min-height:12px; font-size:9px; }
 .cp-sheet-field--planned strong, .cp-nfe-document-meta .is-planned strong { display:inline-flex; width:max-content; padding:2px 6px; color:#8a4d16; background:#fff3d6; border-radius:999px; font-size:10px; }
 .cp-sheet-field--planned small, .cp-nfe-document-meta small { display:block; margin-top:3px; color:#667085; font-size:9px; }
-.cp-nfe-document-meta { margin:7px 0 0 64px; display:grid; grid-template-columns:2fr 1fr 1.3fr 1fr 1fr; gap:6px 12px; }
-.cp-nfe-document-meta > div { min-width:0; padding-bottom:5px; border-bottom:1px solid #d8dee8; }
+.cp-nfe-document-meta { margin:6px 0 0 64px; display:grid; grid-template-columns:2fr 1fr 1.3fr 1fr 1fr; gap:4px 12px; }
+.cp-nfe-document-meta > div { min-width:0; min-height:42px; max-height:46px; padding-bottom:4px; overflow:hidden; border-bottom:1px solid #d8dee8; }
 .cp-nfe-document-meta span { display:block; margin-bottom:3px; color:#667085; font-size:10px; }
 .cp-nfe-document-meta strong, .cp-nfe-document-meta a { display:block; overflow:hidden; color:#273142 !important; font-size:11px !important; font-weight:600; text-overflow:ellipsis; white-space:nowrap; }
 .cp-nfe-key-value { width:100%; min-width:0; max-width:100%; display:flex; align-items:flex-start; gap:6px; overflow:hidden; }
-.cp-nfe-key-value .cp-nfe-key-link { min-width:0; max-width:100%; color:#0f172a !important; font-weight:700; line-height:1.25; text-decoration:underline; overflow-wrap:anywhere; word-break:break-word; white-space:normal; }
+.cp-nfe-key-value .cp-nfe-key-link { min-width:0; max-width:100%; display:-webkit-box; color:#0f172a !important; font-weight:700; line-height:1.2; text-decoration:underline; overflow:hidden; overflow-wrap:anywhere; word-break:break-word; white-space:normal; -webkit-box-orient:vertical; -webkit-line-clamp:2; }
 .cp-nfe-key-value > a:last-child { flex:0 0 22px; }
 .cp-nfe-key-value--plain { color:#0f172a; font-size:11px; font-weight:700; line-height:1.25; overflow-wrap:anywhere; word-break:break-word; white-space:normal; }
 .cp-nfe-document-meta > div:not(:first-child) strong { white-space:normal; overflow-wrap:anywhere; }
+.cp-nfe-meta-natureza strong { display:-webkit-box; line-height:1.2; -webkit-box-orient:vertical; -webkit-line-clamp:2; }
+.cp-nfe-document-meta .is-planned small { display:none; }
 .cp-nfe-note { width:min(900px,100%); margin:7px 0 0 64px; }
 .cp-order-tabs { width:min(1180px,100%); margin-top:2px; }
-.cp-nfe-tabs { margin-top:10px; display:flex; overflow-x:auto; border-bottom:1px solid #cbd5e1; }
+.cp-nfe-tabs { margin-top:6px; display:flex; overflow-x:auto; border-bottom:1px solid #cbd5e1; }
 .cp-nfe-tabs button { min-height:38px; padding:6px 10px; display:flex; align-items:center; gap:5px; color:#667085; background:transparent; border:0; border-bottom:2px solid transparent; font-size:11px; white-space:nowrap; }
 .cp-nfe-tabs button.is-active { color:#a53c36; border-bottom-color:#d04f45; font-weight:700; }
 .cp-nfe-tabs button:disabled { opacity:1; cursor:not-allowed; }
 .cp-nfe-tabs small { padding:2px 4px; color:#8a4d16; background:#fff3d6; border-radius:999px; font-size:8px; }
-.cp-nfe-cfop { margin-top:8px; }
-.cp-nfe-cfop > div { padding:7px 9px !important; border-radius:5px !important; }
-.cp-nfe-items-section { min-height:0; margin-top:8px; flex:1 1 auto; display:flex; flex-direction:column; overflow:hidden; }
-.cp-nfe-import-guidance { padding:7px 9px; display:flex; align-items:center; justify-content:space-between; gap:12px; background:#fff8d8; color:#5e4a13; font-size:11px; }
+.cp-nfe-cfop { margin-top:5px; }
+.cp-nfe-cfop > div { padding:5px 8px !important; border-radius:5px !important; }
+.cp-nfe-cfop > div > div:first-child { margin-bottom:4px !important; }
+.cp-nfe-cfop > div > div:nth-child(2) { gap:6px !important; }
+.cp-nfe-cfop > div > div:nth-child(2) > div { padding:5px 7px !important; }
+.cp-nfe-cfop > div > div:nth-child(2) > div > div:last-child { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.cp-nfe-items-section { min-height:0; margin-top:5px; flex:1 1 auto; display:flex; flex-direction:column; overflow:hidden; }
+.cp-nfe-import-guidance { padding:5px 9px; display:flex; align-items:center; justify-content:space-between; gap:12px; background:#fff8d8; color:#5e4a13; font-size:11px; }
 .cp-nfe-import-guidance span { color:#667085; }
 #modalNfePedidosItens { min-height:0; flex:1 1 auto; }
 #modalNfePedidosItens > div { height:100%; max-height:none !important; border-radius:0 0 5px 5px !important; }
