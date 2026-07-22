@@ -17233,6 +17233,11 @@ html.light-mode #minhasComprasWrapper {
 .cp-nfe-document-meta > div { min-width:0; padding-bottom:5px; border-bottom:1px solid #d8dee8; }
 .cp-nfe-document-meta span { display:block; margin-bottom:3px; color:#667085; font-size:10px; }
 .cp-nfe-document-meta strong, .cp-nfe-document-meta a { display:block; overflow:hidden; color:#273142 !important; font-size:11px !important; font-weight:600; text-overflow:ellipsis; white-space:nowrap; }
+.cp-nfe-key-value { width:100%; min-width:0; max-width:100%; display:flex; align-items:flex-start; gap:6px; overflow:hidden; }
+.cp-nfe-key-value .cp-nfe-key-link { min-width:0; max-width:100%; color:#0f172a !important; font-weight:700; line-height:1.25; text-decoration:underline; overflow-wrap:anywhere; word-break:break-word; white-space:normal; }
+.cp-nfe-key-value > a:last-child { flex:0 0 22px; }
+.cp-nfe-key-value--plain { color:#0f172a; font-size:11px; font-weight:700; line-height:1.25; overflow-wrap:anywhere; word-break:break-word; white-space:normal; }
+.cp-nfe-document-meta > div:not(:first-child) strong { white-space:normal; overflow-wrap:anywhere; }
 .cp-nfe-note { width:min(900px,100%); margin:7px 0 0 64px; }
 .cp-order-tabs { width:min(1180px,100%); margin-top:2px; }
 .cp-nfe-tabs { margin-top:10px; display:flex; overflow-x:auto; border-bottom:1px solid #cbd5e1; }
@@ -17255,6 +17260,11 @@ html.light-mode #minhasComprasWrapper {
 .cp-nfe-planned-cell { min-width:120px; padding:7px 8px; color:#64748b; }
 .cp-nfe-planned-cell span { display:inline-block; padding:2px 5px; color:#8a4d16; background:#fff3d6; border-radius:999px; font-size:9px; }
 .cp-nfe-planned-cell small { display:block; margin-top:3px; font-size:9px; }
+
+@media (max-width: 1500px) {
+  .cp-nfe-summary .cp-sheet-fields { grid-template-columns:minmax(220px,2fr) repeat(2,minmax(130px,1fr)); }
+  .cp-nfe-document-meta { grid-template-columns:minmax(240px,1.5fr) repeat(2,minmax(150px,1fr)); }
+}
 
 /* A ficha operacional é sempre clara, inclusive quando o shell está em modo escuro. */
 :root:not(.light-mode) #modalDetalhesPedidoCompras .cp-sheet-field span,

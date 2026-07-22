@@ -45596,14 +45596,25 @@ window.excluirPedidoComprasKanban = excluirPedidoComprasKanban;
 // Modal específico para "Kanban de compras" (visualização do usuário solicitante)
 function renderizarAcoesOperacionaisCompra(tipo = 'pedido', opcoes = {}) {
   const ehNfe = String(tipo).toLowerCase() === 'nfe';
+  const statusNormalizado = String(opcoes.status || '')
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+  const ehNfeRecebidaOuConferida = ehNfe && ['recebido', 'concluido', 'conferido'].includes(statusNormalizado);
   const acoes = ehNfe
-    ? [
+    ? (ehNfeRecebidaOuConferida ? [
+        ['Salvar', 'fa-cloud-arrow-up'], ['Novo recebimento', 'fa-circle-plus'], ['Devolver', 'fa-rotate-left'],
+        ['Histórico de processamento', 'fa-list'], ['Anexos', 'fa-paperclip'],
+        ['Histórico de alterações', 'fa-clock-rotate-left'], ['Eventos da reforma tributária', 'fa-pen-to-square'],
+        ['Excluir', 'fa-trash-can'], ['Reverter recebimento', 'fa-arrow-rotate-left']
+      ] : [
         ['Salvar', 'fa-cloud-arrow-up'], ['Novo recebimento', 'fa-circle-plus'], ['Concluir', 'fa-bolt'],
         ['Exibir DANFE do fornecedor', 'fa-barcode', opcoes.danfeUrl], ['Exibir XML da NF-e', 'fa-file-code'],
         ['Manifestação da NF-e', 'fa-paper-plane'], ['Acessar no Portal Omie', 'fa-arrow-up-right-from-square'],
         ['Histórico de processamento', 'fa-list'], ['Anexos', 'fa-paperclip'],
         ['Histórico de alterações', 'fa-clock-rotate-left'], ['Excluir', 'fa-trash-can']
-      ]
+      ])
     : [
         ['Salvar', 'fa-cloud-arrow-up'], ['Novo pedido de compra', 'fa-circle-plus'], ['Concluir', 'fa-bolt'],
         ['Exibir pedido na Omie', 'fa-arrow-up-right-from-square'], ['Histórico de processamento', 'fa-list'],
@@ -65260,7 +65271,8 @@ function obterListaNavegacaoModalNfePedidos() {
     .map((card) => {
       const nIdReceb = String(card.getAttribute('data-n-id-receb') || '').trim();
       const numero = String(card.getAttribute('data-numero-pedido') || '').trim();
-      return { nIdReceb, numero };
+      const status = String(card.closest('.kanban-column-minhas')?.getAttribute('data-status') || '').trim();
+      return { nIdReceb, numero, status };
     })
     .filter((item) => {
       if (!item.nIdReceb || vistos.has(item.nIdReceb)) return false;
@@ -65288,13 +65300,13 @@ function atualizarControlesNavegacaoModalNfePedidos() {
   }
 }
 
-function configurarNavegacaoModalNfePedidos(nIdRecebAtual, numeroAtual = '') {
+function configurarNavegacaoModalNfePedidos(nIdRecebAtual, numeroAtual = '', statusAtual = '') {
   const atual = String(nIdRecebAtual || '').trim();
   const lista = obterListaNavegacaoModalNfePedidos();
 
   let index = lista.findIndex((item) => item.nIdReceb === atual);
   if (atual && index === -1) {
-    lista.push({ nIdReceb: atual, numero: String(numeroAtual || '').trim() });
+    lista.push({ nIdReceb: atual, numero: String(numeroAtual || '').trim(), status: String(statusAtual || '').trim() });
     index = lista.length - 1;
   }
 
@@ -65316,7 +65328,7 @@ async function abrirProximoModalNfePedidos() {
   const proximo = lista[idx + 1];
   if (!proximo?.nIdReceb) return;
 
-  await abrirModalNfePedidos(proximo.nIdReceb, proximo.numero || '');
+  await abrirModalNfePedidos(proximo.nIdReceb, proximo.numero || '', proximo.status || '');
 }
 
 function formatarValorMoedaNfePedidos(valor) {
@@ -65509,7 +65521,7 @@ async function atualizarComprasRecebimentoNfe(nIdReceb, compras) {
   return data;
 }
 
-async function abrirModalNfePedidos(nIdReceb, numeroNfeRef = '') {
+async function abrirModalNfePedidos(nIdReceb, numeroNfeRef = '', statusRef = '') {
   criarModalNfePedidosSeNecessario();
   const modal = obterModalNfePedidosEl();
   if (!modal) return;
@@ -65528,11 +65540,11 @@ async function abrirModalNfePedidos(nIdReceb, numeroNfeRef = '') {
   modal.style.setProperty('--cp-detail-nav-offset', `${Math.max(0, Math.round(limiteMenu))}px`);
   modal.style.display = 'flex';
   numeroEl.textContent = numeroNfeRef || '';
-  configurarNavegacaoModalNfePedidos(nIdReceb, numeroNfeRef);
+  configurarNavegacaoModalNfePedidos(nIdReceb, numeroNfeRef, statusRef);
   infoEl.innerHTML = '<div style="grid-column:1/-1;font-size:13px;color:#64748b;">Carregando dados da NF-e na Omie...</div>';
   cfopInfoEl.innerHTML = '';
   itensEl.innerHTML = '';
-  acoesEl.innerHTML = renderizarAcoesOperacionaisCompra('nfe');
+  acoesEl.innerHTML = renderizarAcoesOperacionaisCompra('nfe', { status: statusRef });
 
   try {
     const resp = await fetch(`/api/compras/recebimentos-nfe/detalhes/${encodeURIComponent(String(nIdReceb || ''))}`, {
@@ -65554,18 +65566,18 @@ async function abrirModalNfePedidos(nIdReceb, numeroNfeRef = '') {
       const numeroLimpo = cNumeroNFe.replace(/^0+/, '') || cNumeroNFe;
       numeroEl.textContent = numeroLimpo;
     }
-    acoesEl.innerHTML = renderizarAcoesOperacionaisCompra('nfe', { danfeUrl: linkPdfPorNumeroNfe });
+    acoesEl.innerHTML = renderizarAcoesOperacionaisCompra('nfe', { danfeUrl: linkPdfPorNumeroNfe, status: statusRef });
 
     const chaveNfeTexto = String(dados?.cChaveNFe || '-');
     const chaveNfeHtml = (linkPdfPorNumeroNfe && chaveNfeTexto !== '-')
       ? `
-        <div style="display:inline-flex;align-items:center;gap:6px;word-break:break-all;">
+        <div class="cp-nfe-key-value">
           <a
             href="${linkPdfPorNumeroNfe}"
             target="_blank"
             rel="noopener"
             title="Abrir PDF da NF-e"
-            style="color:#0f172a;font-weight:700;text-decoration:underline;word-break:break-all;">
+            class="cp-nfe-key-link">
             ${escapeHtml(chaveNfeTexto)}
           </a>
           <a
@@ -65578,7 +65590,7 @@ async function abrirModalNfePedidos(nIdReceb, numeroNfeRef = '') {
           </a>
         </div>
       `
-      : `<div style="font-size:12px;color:#0f172a;font-weight:700;word-break:break-all;">${escapeHtml(chaveNfeTexto)}</div>`;
+      : `<div class="cp-nfe-key-value cp-nfe-key-value--plain">${escapeHtml(chaveNfeTexto)}</div>`;
 
     infoEl.innerHTML = `
       <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:8px;">
@@ -66498,7 +66510,7 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
           const statusesRecebimentoNfe = ['faturada pelo fornecedor', 'recebido', 'concluído', 'concluido'];
           const onclickCard = (
             (statusesRecebimentoNfe.includes(status) && primeiroItem.origem_recebimento_nfe && primeiroItem.n_id_receb)
-              ? `abrirModalNfePedidos('${String(primeiroItem.n_id_receb)}', '${String(primeiroItem.numero || '').replace(/'/g, "\\'")}')`
+              ? `abrirModalNfePedidos('${String(primeiroItem.n_id_receb)}', '${String(primeiroItem.numero || '').replace(/'/g, "\\'")}', '${String(status || '').replace(/'/g, "\\'")}')`
               :
             status === 'analise de cadastro'
               ? `abrirModalAnaliseCadastro('${primeiroItem.id}')`
