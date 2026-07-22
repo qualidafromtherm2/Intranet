@@ -17365,6 +17365,9 @@ html.light-mode #minhasComprasWrapper {
 }
 .cp-product-thumb:hover, .cp-product-thumb:focus-visible { border-color:#c34237; outline:2px solid rgba(195,66,55,.18); }
 .cp-product-thumb img { width:100%; height:100%; object-fit:cover; }
+.cp-product-thumb > i[hidden],
+.cp-product-thumb > img[hidden] { display:none !important; }
+.cp-product-thumb[data-image-loaded="true"] > i { display:none !important; }
 .cp-product-thumb--empty { cursor:default; background:#f1f5f9; color:#94a3b8; }
 .cp-product-thumb--empty:hover { border-color:#cbd5e1; outline:0; }
 #modalDetalhesPedidoCompras.cp-purchase-preparation-modal .cp-prep-actions {
