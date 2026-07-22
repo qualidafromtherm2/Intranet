@@ -141,6 +141,23 @@ document.addEventListener('DOMContentLoaded', () => {
       window.forceShowInicio?.();
     }, true);
   }
+
+  // Logo da Fromtherm leva para o Início (substitui o botão "Início" do topo).
+  // Delegação no document: sobrevive mesmo se o cabeçalho for recriado/clonado.
+  if (!document.body.dataset.logoInicioBound) {
+    document.body.dataset.logoInicioBound = '1';
+    const menuLogo = document.querySelector('.header .menu-logo');
+    if (menuLogo) menuLogo.style.cursor = 'pointer';
+    document.addEventListener('click', (ev) => {
+      const logo = ev.target?.closest?.('.header .menu-logo');
+      if (!logo) return;
+      ev.preventDefault();
+      try { window.restoreStashedPanes?.(); } catch (_) {}
+      try { window.showMainTab?.('paginaInicio'); } catch (_) {}
+      // forceShowInicio por último: esconde abas de produto/kanban e destaca o Início
+      window.forceShowInicio?.();
+    });
+  }
 });
 
 // Central mobile: cards da Início são montados pelo sistema de preferências (flag_inicio).
@@ -1001,15 +1018,17 @@ function _solRenderOrigemSepFase(locais, enderecoMap, codigoProd, princArmz) {
     return `<div style="font-size:.63rem;color:#6b7280;font-style:italic;">Sem origem com saldo</div>`;
   }
   const temAlmox = sorted.some(l => String(l.local_codigo) === princArmz);
-  const origensHtml = sorted.map((l, idx) => {
+  // Padrão só Porta Pallet — sem saldo nele, origem fica em branco (não escolhe outro sozinho).
+  const primaryParts = [];
+  const extraParts = [];
+  sorted.forEach((l) => {
     const cod = String(l.local_codigo || '');
     const isAlmox = cod === princArmz;
     const nome = (l.local_nome || cod).replace(/"/g, '&quot;');
     const qty2 = Number(l.saldo).toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
     const endHtml = isAlmox ? _solEnderecamentoSepInline(codigoProd, enderecoMap) : '';
-    const isDefault = isAlmox || (!temAlmox && idx === 0);
-    const isExtra = temAlmox ? !isAlmox : idx > 0;
-    return `<div class="sol-origem-sep-wrap${isExtra ? ' sep-origem-extra' : ''}" style="display:${isExtra ? 'none' : 'flex'};flex-direction:column;gap:4px;width:100%;">
+    const isDefault = isAlmox;
+    const html = `<div class="sol-origem-sep-wrap${isAlmox ? '' : ' sep-origem-extra'}" style="display:flex;flex-direction:column;gap:4px;width:100%;">
       <button type="button" class="sol-origem-sep-btn" data-cod="${cod}" data-nome="${nome}" data-is-almox="${isAlmox ? '1' : '0'}" data-selected="${isDefault ? '1' : '0'}"
         style="padding:5px 9px;border-radius:6px;font-size:.65rem;font-weight:700;cursor:pointer;white-space:normal;word-break:break-word;text-align:left;line-height:1.35;width:100%;
                border:2px solid ${isDefault ? '#16a34a' : '#374151'};
@@ -1019,12 +1038,23 @@ function _solRenderOrigemSepFase(locais, enderecoMap, codigoProd, princArmz) {
       </button>
       ${isAlmox ? `<div class="sol-origem-sep-etq" style="display:${isDefault ? 'block' : 'none'};">${endHtml}</div>` : ''}
     </div>`;
-  }).join('');
-  const extras = sorted.length - 1;
-  const toggle = extras > 0
-    ? `<button type="button" class="sep-origem-toggle" data-expanded="0"><i class="fa-solid fa-eye"></i> Desocultar outros armazéns (${extras})</button>`
+    if (isAlmox) primaryParts.push(html);
+    else extraParts.push(html);
+  });
+  const blankHtml = !temAlmox
+    ? `<div class="sep-origem-vazio" style="font-size:.63rem;color:#fbbf24;font-style:italic;padding:2px 0;">
+         Selecione o armazém de origem
+       </div>`
     : '';
-  return origensHtml + toggle;
+  const extrasCount = extraParts.length;
+  const toggleBlock = extrasCount > 0
+    ? `<button type="button" class="sep-origem-toggle" data-expanded="0"><i class="fa-solid fa-eye"></i> Desocultar outros armazéns (${extrasCount})</button>
+       <div class="sep-origem-extras-panel" style="display:none;flex-direction:column;gap:5px;padding:8px 10px;margin-top:4px;border:1px solid rgba(148,163,184,.25);border-radius:10px;background:rgba(15,23,42,.98);box-shadow:0 8px 24px rgba(2,6,23,.35);max-height:180px;overflow:auto;">
+         <div style="font-size:.58rem;color:#94a3b8;font-weight:700;text-transform:uppercase;letter-spacing:.04em;">Outras origens</div>
+         ${extraParts.join('')}
+       </div>`
+    : '';
+  return blankHtml + primaryParts.join('') + toggleBlock;
 }
 
 function _solDestinoHtml(it, compact = false) {
@@ -2035,7 +2065,8 @@ async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) 
       .slice()
       .sort((a, b) => String(a.local_codigo) === PRINC_ARMZ ? -1 : String(b.local_codigo) === PRINC_ARMZ ? 1 : 0);
     const temAlmoxOrigem = locais.some(l => String(l.local_codigo) === PRINC_ARMZ);
-    const usarOrigemSepFase = isFaseSeparacao && temAlmoxOrigem;
+    // Em fase de separação: sempre seletor interativo (padrão Porta Pallet; sem ele, em branco).
+    const usarOrigemSepFase = isFaseSeparacao;
     const enderecamentoHtml = isFaseSeparacao
       ? ''
       : _solEnderecamentoHtml(it.codigo_produto, enderecoBatch, it);
@@ -2161,8 +2192,8 @@ async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) 
            data-descricao="${encodeURIComponent(it.descricao || '')}"
            data-observacao="${encodeURIComponent(obsText)}"
            data-unidade="${String(it.unidade || 'UN').replace(/"/g, '&quot;')}"
-           data-requer-etq="${usarOrigemSepFase ? '1' : '0'}"
-           data-origem-cod="${usarOrigemSepFase ? PRINC_ARMZ : ''}"
+           data-requer-etq="${(usarOrigemSepFase && temAlmoxOrigem) ? '1' : '0'}"
+           data-origem-cod="${(usarOrigemSepFase && temAlmoxOrigem) ? PRINC_ARMZ : ''}"
            data-etq-id=""
            data-etq-endereco=""
            data-etq-qtd=""
@@ -3087,12 +3118,18 @@ async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) 
     if (toggleOrigens) {
       const box = toggleOrigens.closest('.sep-loc-box--origin');
       const expanded = toggleOrigens.dataset.expanded === '1';
-      box?.querySelectorAll('.sep-origem-extra').forEach(el => {
-        el.style.display = expanded ? 'none' : 'flex';
-      });
+      const panel = box?.querySelector('.sep-origem-extras-panel');
+      if (panel) {
+        panel.style.display = expanded ? 'none' : 'flex';
+      } else {
+        box?.querySelectorAll('.sep-origem-extra').forEach(el => {
+          el.style.display = expanded ? 'none' : 'flex';
+        });
+      }
       toggleOrigens.dataset.expanded = expanded ? '0' : '1';
+      const nExtras = box?.querySelectorAll('.sep-origem-extra').length || 0;
       toggleOrigens.innerHTML = expanded
-        ? '<i class="fa-solid fa-eye"></i> Desocultar outros armazéns'
+        ? `<i class="fa-solid fa-eye"></i> Desocultar outros armazéns${nExtras ? ` (${nExtras})` : ''}`
         : '<i class="fa-solid fa-eye-slash"></i> Ocultar outros armazéns';
       return;
     }
@@ -3101,6 +3138,9 @@ async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) 
       const row = btnOrigemSep.closest('[data-item-row]');
       if (!row) return;
       const wrap = btnOrigemSep.closest('.sep-loc-box--origin') || btnOrigemSep.closest('.sep-loc-box');
+      const selectedWrap = btnOrigemSep.closest('.sol-origem-sep-wrap');
+      const panel = wrap?.querySelector('.sep-origem-extras-panel');
+      const toggleBtn = wrap?.querySelector('.sep-origem-toggle');
       if (wrap) {
         wrap.querySelectorAll('.sol-origem-sep-btn').forEach(b => {
           const active = b === btnOrigemSep;
@@ -3112,11 +3152,37 @@ async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) 
         wrap.querySelectorAll('.sol-origem-sep-etq').forEach(p => {
           p.style.display = 'none';
         });
+        // Origem escolhida fica visível; demais voltam para "Outras origens".
+        const vazio = wrap.querySelector('.sep-origem-vazio');
+        if (vazio) vazio.style.display = 'none';
+        wrap.querySelectorAll('.sol-origem-sep-wrap').forEach(w => {
+          if (w === selectedWrap) {
+            w.classList.remove('sep-origem-extra');
+            w.style.display = 'flex';
+            if (panel && w.parentElement === panel && toggleBtn) {
+              toggleBtn.before(w);
+            }
+          } else if (panel) {
+            w.classList.add('sep-origem-extra');
+            panel.appendChild(w);
+          } else {
+            w.classList.add('sep-origem-extra');
+            w.style.display = 'none';
+          }
+        });
+        if (panel && toggleBtn) {
+          panel.style.display = 'none';
+          toggleBtn.dataset.expanded = '0';
+          const nExtras = wrap.querySelectorAll('.sep-origem-extra').length || 0;
+          toggleBtn.innerHTML = `<i class="fa-solid fa-eye"></i> Desocultar outros armazéns${nExtras ? ` (${nExtras})` : ''}`;
+          toggleBtn.style.display = nExtras > 0 ? '' : 'none';
+        }
       }
       const etqPanel = btnOrigemSep.parentElement?.querySelector('.sol-origem-sep-etq');
       if (etqPanel) etqPanel.style.display = 'block';
       const cod = btnOrigemSep.dataset.cod || '';
       row.dataset.origemCod = cod;
+      row.dataset.requerEtq = cod === PRINC_ARMZ ? '1' : '0';
       if (cod !== PRINC_ARMZ) {
         row.dataset.etqId = '';
         row.dataset.etqEndereco = '';
@@ -10278,6 +10344,7 @@ const qualidadeNfeLista = document.getElementById('qualidadeNfeLista');
 const qualidadeQuantidadeOk = document.getElementById('qualidadeQuantidadeOk');
 const qualidadeQuantidadeNok = document.getElementById('qualidadeQuantidadeNok');
 const qualidadeProdutoCustomizadoCheck = document.getElementById('qualidadeProdutoCustomizadoCheck');
+const qualidadeVaiDiretoIdentificacaoCheck = document.getElementById('qualidadeVaiDiretoIdentificacaoCheck');
 const qualidadeAbrirDadosProdutoBtn = document.getElementById('qualidadeAbrirDadosProdutoBtn');
 const qualidadePirVerificacaoCheckbox = document.getElementById('qualidadePirVerificacaoCheckbox');
 const qualidadeManuaisPrincipaisBtn = document.getElementById('qualidadeManuaisPrincipaisBtn');
@@ -11581,6 +11648,49 @@ async function carregarStatusProdutoCustomizadoInspecao(codigoProduto) {
   }
 }
 
+async function salvarPirVaiDiretoIdentificacao(codigoProduto, valor) {
+  const codigo = String(codigoProduto || '').trim();
+  if (!codigo) throw new Error('Informe o Cod_produto para marcar o destino.');
+  const resp = await fetch(`/api/produtos/${encodeURIComponent(codigo)}/pir-vai-direto-identificacao`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',
+    body: JSON.stringify({ pir_vai_direto_identificacao: valor === true })
+  });
+  const data = await resp.json().catch(() => ({}));
+  if (!resp.ok || data.ok === false) {
+    throw new Error(data.error || `Falha ao salvar destino PIR (HTTP ${resp.status})`);
+  }
+  return data;
+}
+
+async function carregarStatusPirVaiDiretoIdentificacao(codigoProduto) {
+  if (!qualidadeVaiDiretoIdentificacaoCheck) return;
+  const codigo = String(codigoProduto || '').trim();
+  if (!codigo) {
+    qualidadeVaiDiretoIdentificacaoCheck.checked = false;
+    qualidadeVaiDiretoIdentificacaoCheck.disabled = true;
+    return;
+  }
+  qualidadeVaiDiretoIdentificacaoCheck.disabled = true;
+  try {
+    const resp = await fetch(`/api/produtos/${encodeURIComponent(codigo)}/pir-vai-direto-identificacao`, {
+      credentials: 'include'
+    });
+    if (resp.status === 404) {
+      qualidadeVaiDiretoIdentificacaoCheck.checked = false;
+      return;
+    }
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const data = await resp.json();
+    qualidadeVaiDiretoIdentificacaoCheck.checked = data?.pir_vai_direto_identificacao === true;
+  } catch (err) {
+    console.warn('[QUALIDADE] falha ao carregar pir_vai_direto_identificacao', err);
+  } finally {
+    qualidadeVaiDiretoIdentificacaoCheck.disabled = false;
+  }
+}
+
 // Salva na hora ao marcar/desmarcar no modal Registro de inspeção
 let qualidadeProdutoCustomizadoSalvando = false;
 qualidadeProdutoCustomizadoCheck?.addEventListener('change', async (event) => {
@@ -11615,11 +11725,69 @@ qualidadeProdutoCustomizadoCheck?.addEventListener('change', async (event) => {
   }
 });
 
+// Vai direto para Identificação — salva no cadastro do produto (próximas NF-e também)
+let qualidadeVaiDiretoIdentificacaoSalvando = false;
+qualidadeVaiDiretoIdentificacaoCheck?.addEventListener('change', async (event) => {
+  if (qualidadeVaiDiretoIdentificacaoSalvando) return;
+  const marcado = event.target.checked === true;
+  const codigo = String(
+    qualidadeCodigoProdutoReal?.value ||
+    qualidadeCodProduto?.value ||
+    ''
+  ).trim();
+  const etqId = Number(qualidadeEtqRecebimentoId?.value || qualidadePirEtqAtualId || 0) || 0;
+
+  if (!codigo) {
+    alert('Informe o Cod_produto antes de marcar o destino.');
+    event.target.checked = false;
+    return;
+  }
+
+  if (marcado) {
+    const ok = window.confirm(
+      'Marcar este produto para ir direto para Identificação do produto?\n\n' +
+      '• Este item sai da lista PIR agora\n' +
+      '• Nas próximas compras, ele também não aparece no PIR — vai direto para Identificação'
+    );
+    if (!ok) {
+      event.target.checked = false;
+      return;
+    }
+  }
+
+  qualidadeVaiDiretoIdentificacaoSalvando = true;
+  event.target.disabled = true;
+  try {
+    await salvarPirVaiDiretoIdentificacao(codigo, marcado);
+    // Libera o item atual da lista (se aberto a partir de um pendente)
+    if (marcado && etqId) {
+      await marcarEtqRecebimentoPir(etqId, true);
+      fecharModalInspecaoQualidade();
+      carregarQualidadePirPendentes(qualidadePirPendentesBusca?.value?.trim() || '');
+    } else if (!marcado && qualidadePirPendentesWrap?.style.display !== 'none') {
+      carregarQualidadePirPendentes(qualidadePirPendentesBusca?.value?.trim() || '');
+    }
+  } catch (err) {
+    console.error('[QUALIDADE] erro ao salvar pir_vai_direto_identificacao', err);
+    event.target.checked = !marcado;
+    alert(err?.message || 'Erro ao salvar destino do produto.');
+  } finally {
+    qualidadeVaiDiretoIdentificacaoSalvando = false;
+    if (qualidadeVaiDiretoIdentificacaoCheck) {
+      qualidadeVaiDiretoIdentificacaoCheck.disabled = false;
+    }
+  }
+});
+
 function abrirModalInspecaoQualidade(item = null) {
   resetFormularioInspecaoQualidade();
   qualidadePirEtqAtualId = item?.id ? Number(item.id) : null;
   if (qualidadeEtqRecebimentoId) {
     qualidadeEtqRecebimentoId.value = qualidadePirEtqAtualId ? String(qualidadePirEtqAtualId) : '';
+  }
+  if (qualidadeVaiDiretoIdentificacaoCheck) {
+    qualidadeVaiDiretoIdentificacaoCheck.checked = item?.pir_vai_direto_identificacao === true;
+    qualidadeVaiDiretoIdentificacaoCheck.disabled = true;
   }
 
   if (item) {
@@ -11641,6 +11809,7 @@ function abrirModalInspecaoQualidade(item = null) {
     if (codigo) {
       carregarStatusVerificacaoPirQualidade(codigo);
       carregarStatusProdutoCustomizadoInspecao(codigo);
+      carregarStatusPirVaiDiretoIdentificacao(codigo);
       // Resolve id Omie para carregar plano PIR / imagem / NFe
       (async () => {
         try {
@@ -11667,6 +11836,7 @@ function abrirModalInspecaoQualidade(item = null) {
               if (match.codigo_produto || match.codigo) {
                 carregarStatusProdutoCustomizadoInspecao(match.codigo_produto || match.codigo);
                 carregarStatusVerificacaoPirQualidade(match.codigo_produto || match.codigo);
+                carregarStatusPirVaiDiretoIdentificacao(match.codigo_produto || match.codigo);
               }
               return;
             }
@@ -11688,14 +11858,14 @@ function fecharModalInspecaoQualidade() {
   resetFormularioInspecaoQualidade();
 }
 
-async function marcarEtqRecebimentoPir(id) {
+async function marcarEtqRecebimentoPir(id, pir = true) {
   const etqId = Number(id);
   if (!etqId) return;
   const resp = await fetch(`/api/etiquetas/recebimento/${etqId}/pir`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     credentials: 'include',
-    body: JSON.stringify({ pir: true })
+    body: JSON.stringify({ pir: pir === true })
   });
   const data = await resp.json().catch(() => ({}));
   if (!resp.ok) throw new Error(data.error || `Falha ao marcar PIR (HTTP ${resp.status})`);
@@ -12060,6 +12230,10 @@ function resetFormularioInspecaoQualidade() {
   if (qualidadeProdutoCustomizadoCheck) {
     qualidadeProdutoCustomizadoCheck.checked = false;
     qualidadeProdutoCustomizadoCheck.disabled = false;
+  }
+  if (qualidadeVaiDiretoIdentificacaoCheck) {
+    qualidadeVaiDiretoIdentificacaoCheck.checked = false;
+    qualidadeVaiDiretoIdentificacaoCheck.disabled = false;
   }
   renderQualidadeImagemProduto('');
   renderQualidadeCarretelPir([]);
@@ -19471,6 +19645,42 @@ function _atEmAtualizarFechamentoIcon(row) {
     : 'Pendente fechamento do técnico';
 }
 
+/** Atualiza UI da NFe na aba Fechamento do modal Editar OS */
+function _atEmAtualizarNfeUi(nfeUrl, dataEnvio) {
+  const url = String(nfeUrl || '').trim();
+  const urlEl = document.getElementById('atEmFechNfeUrl');
+  const linkEl = document.getElementById('atEmFechNfeLink');
+  const remBtn = document.getElementById('atEmFechNfeRemoverBtn');
+  const anexLbl = document.getElementById('atEmFechNfeAnexarLbl');
+  const dataEl = document.getElementById('atEmFechDataEnvioNfe');
+  const statusEl = document.getElementById('atEmFechNfeStatus');
+
+  if (urlEl) urlEl.value = url || '';
+  if (linkEl) {
+    if (url) { linkEl.href = url; linkEl.style.display = ''; }
+    else { linkEl.href = '#'; linkEl.style.display = 'none'; }
+  }
+  if (remBtn) remBtn.style.display = url ? 'inline-flex' : 'none';
+  if (anexLbl) anexLbl.textContent = url ? 'Substituir NFe' : 'Anexar NFe';
+  if (dataEl) {
+    dataEl.value = dataEnvio
+      ? new Date(dataEnvio).toLocaleString('pt-BR')
+      : '';
+  }
+  if (statusEl) {
+    statusEl.textContent = url
+      ? 'NFe anexada. Pode substituir ou excluir para anexar outra.'
+      : 'Sem NFe — use o botão acima para anexar o arquivo (PDF/XML).';
+    statusEl.style.color = url ? '#86efac' : '#fbbf24';
+  }
+
+  const row = (_atAllRows || []).find(r => String(r.id) === String(_atEditModalCurrentId));
+  if (row) {
+    row.fech_nfe_url = url || null;
+    row.fech_data_envio_nfe = dataEnvio || null;
+  }
+}
+
 function _atEmParseDataRef(val) {
   const raw = String(val || '').trim();
   if (!raw) return '';
@@ -19795,15 +20005,7 @@ function _abrirAtEditModal(id) {
   setV('atEmFechObs',        row.fech_obs);
   setV('atEmFechMidias',     row.fech_midias);
   setV('atEmFechObsTecnico', row.fech_observacao_tecnico);
-  setV('atEmFechNfeUrl',     row.fech_nfe_url);
-  // Link NFe
-  const nfeLinkEl = document.getElementById('atEmFechNfeLink');
-  if (nfeLinkEl) {
-    if (row.fech_nfe_url) { nfeLinkEl.href = row.fech_nfe_url; nfeLinkEl.style.display = ''; }
-    else                  { nfeLinkEl.href = '#';              nfeLinkEl.style.display = 'none'; }
-  }
-  setV('atEmFechDataEnvioNfe', row.fech_data_envio_nfe
-    ? new Date(row.fech_data_envio_nfe).toLocaleString('pt-BR') : '');
+  _atEmAtualizarNfeUi(row.fech_nfe_url, row.fech_data_envio_nfe);
   setV('atEmFechTecnico',    row.tecnico_nome);
 
   // Tipo de falha (mesmo combobox do Relatório AT / MASP)
@@ -25071,6 +25273,655 @@ document.querySelectorAll('#atTabelaWrapper thead th[data-col]').forEach(th => {
   };
 })();
 
+// ── Página standalone "Gráfico AT" ──────────────────────────────────────────
+// Espelha a lógica da IIFE acima mas usa os elementos "#atGrafPg*"
+(function () {
+  let _pg1Instance = null;
+  let _pg2Instance = null;
+  let _pgMesesSet  = [];
+  let _pgPeriodo   = 3;
+  let _pgTipo      = 'Qualidade';
+  let _pgInicializado = false;
+
+  // Helpers locais (réplica das funções da IIFE principal)
+  function _mesesRange(n) {
+    const hoje  = new Date();
+    const meses = [];
+    for (let i = 0; i < n; i++) {
+      const d = new Date(hoje.getFullYear(), hoje.getMonth() - i, 1);
+      const mm = String(d.getMonth() + 1).padStart(2, '0');
+      meses.push(`${d.getFullYear()}-${mm}`);
+    }
+    return meses.sort();
+  }
+
+  function _labelMes(yyyymm) {
+    if (!yyyymm) return '';
+    const [y, m] = yyyymm.split('-');
+    const nomes = ['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'];
+    return `${nomes[parseInt(m, 10) - 1]}/${String(y).slice(-2)}`;
+  }
+
+  function _fmtData(raw) {
+    if (!raw) return '-';
+    const d = new Date(raw);
+    if (isNaN(d)) return String(raw).slice(0, 10);
+    const dd = String(d.getUTCDate()).padStart(2, '0');
+    const mm = String(d.getUTCMonth() + 1).padStart(2, '0');
+    const aa = String(d.getUTCFullYear()).slice(-2);
+    return `${dd}/${mm}/${aa}`;
+  }
+
+  function _fmtOs(id) {
+    const aa = String(new Date().getFullYear()).slice(-2);
+    return `${aa} - ${id}`;
+  }
+
+  // ── Gráfico 1 — barras por estado ──────────────────────────────────────
+  async function _carregarPg1() {
+    const status = document.getElementById('atGrafPg1Status');
+    const canvas = document.getElementById('atGrafPg1Canvas');
+    if (!canvas) return;
+    if (status) { status.style.display = 'block'; status.textContent = 'Carregando...'; status.style.color = ''; }
+
+    try {
+      const resp = await fetch('/api/sac/at/graficos/por-estado-mes?tipo=' + encodeURIComponent(_pgTipo), { credentials: 'include' });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok || data.ok === false) throw new Error(data.error || 'Erro ao carregar.');
+
+      let linhas = data.rows || [];
+      const CORES = ['#6366f1','#10b981','#f59e0b','#ef4444','#06b6d4','#a855f7','#f97316','#84cc16'];
+
+      if (_pgPeriodo > 0) {
+        const _hoje = new Date();
+        const _mesAtual = `${_hoje.getFullYear()}-${String(_hoje.getMonth()+1).padStart(2,'0')}`;
+        const _dLim = new Date(_hoje.getFullYear(), _hoje.getMonth() - _pgPeriodo, 1);
+        const _limite = `${_dLim.getFullYear()}-${String(_dLim.getMonth()+1).padStart(2,'0')}`;
+        linhas = linhas.filter(r => r.mes >= _limite && r.mes < _mesAtual);
+      }
+
+      // Top 5 estados por total acumulado no período
+      const _totEst = {};
+      linhas.forEach(r => { _totEst[r.estado||'N/D'] = (_totEst[r.estado||'N/D']||0) + r.total; });
+      const _top5 = Object.keys(_totEst).sort((a,b) => _totEst[b]-_totEst[a]).slice(0,5);
+      linhas = linhas.filter(r => _top5.includes(r.estado||'N/D'));
+
+      const estados = [...new Set(linhas.map(r => r.estado || 'N/D'))].sort();
+      const meses   = [...new Set(linhas.map(r => r.mes))].sort();
+      const labels  = meses.map(_labelMes);
+
+      const datasets = estados.map((est, idx) => ({
+        label: est,
+        data: meses.map(m => {
+          const r = linhas.find(x => (x.estado || 'N/D') === est && x.mes === m);
+          return r ? r.total : 0;
+        }),
+        backgroundColor: CORES[idx % CORES.length] + 'cc',
+        borderColor: CORES[idx % CORES.length],
+        borderWidth: 1,
+        borderRadius: 4,
+      }));
+
+      if (_pg1Instance) { _pg1Instance.destroy(); _pg1Instance = null; }
+      const ctx = canvas.getContext('2d');
+      _pg1Instance = new Chart(ctx, {
+        type: 'bar',
+        data: { labels, datasets },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: { display: true, labels: { color: '#94a3b8', font: { size: 11 }, boxWidth: 10, padding: 12 } },
+            tooltip: { callbacks: { label: (item) => ` ${item.dataset.label}: ${item.raw}` } },
+          },
+          scales: {
+            x: { ticks: { color: '#94a3b8', font: { size: 11 } }, grid: { color: 'rgba(255,255,255,.05)' } },
+            y: { beginAtZero: true, ticks: { color: '#94a3b8', stepSize: 1 }, grid: { color: 'rgba(255,255,255,.07)' } },
+          },
+        },
+      });
+      if (status) status.style.display = 'none';
+    } catch (err) {
+      if (status) { status.textContent = err.message || 'Erro.'; status.style.color = '#f87171'; }
+    }
+  }
+
+  // ── Gráfico 2 — linhas (3 séries) ──────────────────────────────────────
+  async function _carregarPg2() {
+    const status = document.getElementById('atGrafPg2Status');
+    const canvas = document.getElementById('atGrafPg2Canvas');
+    if (!canvas) return;
+    if (status) { status.style.display = 'block'; status.textContent = 'Carregando...'; status.style.color = ''; }
+
+    try {
+      const [rQ, rR, rM] = await Promise.all([
+        fetch('/api/sac/at/graficos/por-mes?tipo=Qualidade',            { credentials: 'include' }),
+        fetch('/api/sac/at/graficos/por-mes?tipo=Atendimento%20Rapido', { credentials: 'include' }),
+        fetch('/api/sac/at/graficos/mencoes-por-mes',                   { credentials: 'include' }),
+      ]);
+      const [dQ, dR, dM] = await Promise.all([rQ.json().catch(() => ({})), rR.json().catch(() => ({})), rM.json().catch(() => ({}))]);
+      if (!rQ.ok || dQ.ok === false) throw new Error(dQ.error || 'Erro.');
+      if (!rR.ok || dR.ok === false) throw new Error(dR.error || 'Erro.');
+      if (!rM.ok || dM.ok === false) throw new Error(dM.error || 'Erro.');
+
+      let linhasQ = dQ.rows || [];
+      let linhasR = dR.rows || [];
+      let linhasM = dM.rows || [];
+
+      if (_pgPeriodo > 0) {
+        const _hoje2 = new Date();
+        const _mesAtual2 = `${_hoje2.getFullYear()}-${String(_hoje2.getMonth()+1).padStart(2,'0')}`;
+        const _dLim2 = new Date(_hoje2.getFullYear(), _hoje2.getMonth() - _pgPeriodo, 1);
+        const _lim2 = `${_dLim2.getFullYear()}-${String(_dLim2.getMonth()+1).padStart(2,'0')}`;
+        linhasQ = linhasQ.filter(r => r.mes >= _lim2 && r.mes < _mesAtual2);
+        linhasR = linhasR.filter(r => r.mes >= _lim2 && r.mes < _mesAtual2);
+        linhasM = linhasM.filter(r => r.mes >= _lim2 && r.mes < _mesAtual2);
+      }
+
+      const mesesSet = [...new Set([...linhasQ, ...linhasR, ...linhasM].map(r => r.mes))].sort();
+      const labels   = mesesSet.map(_labelMes);
+      const valQ = mesesSet.map(m => { const r = linhasQ.find(x => x.mes === m); return r ? r.total : 0; });
+      const valR = mesesSet.map(m => { const r = linhasR.find(x => x.mes === m); return r ? r.total : 0; });
+      const valM = mesesSet.map(m => { const r = linhasM.find(x => x.mes === m); return r ? r.total : 0; });
+
+      _pgMesesSet = mesesSet;
+      if (_pg2Instance) { _pg2Instance.destroy(); _pg2Instance = null; }
+      const ctx = canvas.getContext('2d');
+
+      _pg2Instance = new Chart(ctx, {
+        type: 'line',
+        data: {
+          labels,
+          datasets: [
+            { label: 'Qualidade',              data: valQ, borderColor: '#34d399', backgroundColor: 'rgba(52,211,153,.10)', borderWidth: 2, pointRadius: 4, pointHoverRadius: 6, tension: 0.3, fill: true },
+            { label: 'Atend. Rápido',          data: valR, borderColor: '#fb923c', backgroundColor: 'rgba(251,146,60,.10)',  borderWidth: 2, pointRadius: 4, pointHoverRadius: 6, tension: 0.3, fill: false },
+            { label: 'Menções (OS não-rápido)', data: valM, borderColor: '#a855f7', backgroundColor: 'rgba(168,85,247,.10)',  borderWidth: 2, pointRadius: 4, pointHoverRadius: 6, tension: 0.3, fill: false, borderDash: [5,4] },
+          ],
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          interaction: { mode: 'nearest', intersect: false, axis: 'xy' },
+          onClick: (evt, elements) => {
+            if (!elements || !elements.length) return;
+            const el = elements[0];
+            const mes = _pgMesesSet[el.index];
+            if (!mes) return;
+            const nomes = ['Qualidade', 'Atend. Rápido', 'Menções (OS não-rápido)'];
+            _carregarPgDetalhe(mes, el.datasetIndex, nomes[el.datasetIndex] || '');
+          },
+          plugins: {
+            legend: { display: true, labels: { color: '#94a3b8', font: { size: 12 }, boxWidth: 12, padding: 16 } },
+            tooltip: {
+              mode: 'nearest',
+              intersect: false,
+              callbacks: {
+                title: (items) => items[0]?.label || '',
+                label: (item) => ` ${item.dataset.label}: ${item.raw} registro(s)`,
+              },
+            },
+          },
+          scales: {
+            x: { ticks: { color: '#94a3b8', font: { size: 11 } }, grid: { color: 'rgba(255,255,255,.05)' } },
+            y: { beginAtZero: true, ticks: { color: '#94a3b8', stepSize: 1 }, grid: { color: 'rgba(255,255,255,.07)' } },
+          },
+        },
+      });
+      if (status) status.style.display = 'none';
+    } catch (err) {
+      if (status) { status.textContent = err.message || 'Erro.'; status.style.color = '#f87171'; }
+    }
+  }
+
+  // ── Detalhe ao clicar em nó ─────────────────────────────────────────────
+  async function _carregarPgDetalhe(mes, datasetIdx, labelSerie) {
+    const panel  = document.getElementById('atGrafPgDetalhePanel');
+    const titulo = document.getElementById('atGrafPgDetalheTitulo');
+    const qtdEl  = document.getElementById('atGrafPgDetalheQtd');
+    const status = document.getElementById('atGrafPgDetalheStatus');
+    const tbody  = document.getElementById('atGrafPgDetalheTbody');
+    if (!panel || !tbody) return;
+
+    panel.style.display = 'block';
+    if (titulo) titulo.textContent = `${labelSerie} — ${_labelMes(mes)}`;
+    if (qtdEl)  qtdEl.textContent  = '';
+    if (status) { status.style.display = 'block'; status.textContent = 'Carregando...'; status.style.color = ''; }
+    tbody.innerHTML = '';
+
+    try {
+      let url;
+      if (datasetIdx === 2) {
+        url = `/api/sac/at/graficos/mencoes-detalhe-mes?mes=${encodeURIComponent(mes)}`;
+      } else {
+        const tipos = ['Qualidade', 'Atendimento Rapido'];
+        url = `/api/sac/at/graficos/detalhe-mes?mes=${encodeURIComponent(mes)}&tipo=${encodeURIComponent(tipos[datasetIdx])}`;
+      }
+
+      const resp = await fetch(url, { credentials: 'include' });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok || data.ok === false) throw new Error(data.error || 'Erro.');
+
+      const rows = data.rows || [];
+      if (status) status.style.display = 'none';
+      if (qtdEl)  qtdEl.textContent    = `(${rows.length} registro${rows.length !== 1 ? 's' : ''})`;
+
+      if (!rows.length) {
+        tbody.innerHTML = `<tr><td colspan="3" style="padding:14px;text-align:center;color:var(--inactive-color);">Nenhum registro encontrado.</td></tr>`;
+        return;
+      }
+
+      tbody.innerHTML = rows.map(r => `
+        <tr class="at-graf-detalhe-row" data-id="${r.id}" style="cursor:pointer;border-bottom:1px solid rgba(255,255,255,.04);transition:background .15s;">
+          <td style="padding:8px 10px;white-space:nowrap;color:#a5b4fc;font-weight:700;">${_fmtOs(r.id)}</td>
+          <td style="padding:8px 10px;white-space:nowrap;color:#cbd5e1;">${_fmtData(r.data)}</td>
+          <td style="padding:8px 10px;color:#e5e7eb;max-width:520px;">${r.descreva_reclamacao ? String(r.descreva_reclamacao).slice(0, 200) : '-'}</td>
+        </tr>
+      `).join('');
+
+      tbody.querySelectorAll('.at-graf-detalhe-row').forEach(tr => {
+        tr.addEventListener('mouseenter', () => { tr.style.background = 'rgba(255,255,255,.06)'; });
+        tr.addEventListener('mouseleave', () => { tr.style.background = ''; });
+        tr.addEventListener('click', () => {
+          if (typeof _abrirAtOsModalSoPdf === 'function') _abrirAtOsModalSoPdf(tr.dataset.id);
+        });
+      });
+
+      // Campo de pesquisa
+      const pesqEl = document.getElementById('atGrafPgDetalhePesquisa');
+      if (pesqEl) {
+        const novo = pesqEl.cloneNode(true);
+        pesqEl.parentNode.replaceChild(novo, pesqEl);
+        novo.value = '';
+        novo.addEventListener('input', () => {
+          const q = novo.value.toLowerCase();
+          tbody.querySelectorAll('.at-graf-detalhe-row').forEach(tr => {
+            tr.style.display = tr.textContent.toLowerCase().includes(q) ? '' : 'none';
+          });
+        });
+      }
+
+      panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    } catch (err) {
+      if (status) { status.textContent = err.message || 'Erro.'; status.style.color = '#f87171'; }
+    }
+  }
+
+  // ── Relatório PDF ────────────────────────────────────────────────────────
+  async function _gerarRelatorioGrafAt() {
+    const btn = document.getElementById('atGrafPgRelatorioBtn');
+    if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Gerando...'; }
+
+    try {
+      // ── 1) Ativa gridlines visíveis + cores escuras para captura de impressão ──
+      const GRID_COR   = 'rgba(0,0,0,0.13)';
+      const TICK_COR   = '#333';
+      const LEGEND_COR = '#222';
+
+      function _salvarOpcoes(inst) {
+        if (!inst) return {};
+        const sx = inst.options.scales?.x || {};
+        const sy = inst.options.scales?.y || {};
+        const lbl = inst.options.plugins?.legend?.labels || {};
+        return {
+          xGrid:   sx.grid?.color,
+          yGrid:   sy.grid?.color,
+          xTick:   sx.ticks?.color,
+          yTick:   sy.ticks?.color,
+          xFont:   sx.ticks?.font?.size,
+          yFont:   sy.ticks?.font?.size,
+          legend:  lbl?.color,
+        };
+      }
+
+      function _aplicarOpcoesPrint(inst) {
+        if (!inst) return;
+        const sx = inst.options.scales?.x;
+        const sy = inst.options.scales?.y;
+        const lbl = inst.options.plugins?.legend?.labels;
+        if (sx?.grid)  sx.grid.color           = GRID_COR;
+        if (sy?.grid)  sy.grid.color           = GRID_COR;
+        if (sx?.ticks) { sx.ticks.color       = TICK_COR; if (sx.ticks.font) sx.ticks.font.size = 11; }
+        if (sy?.ticks) { sy.ticks.color       = TICK_COR; if (sy.ticks.font) sy.ticks.font.size = 11; }
+        if (lbl)       lbl.color              = LEGEND_COR;
+        inst.update('none');
+      }
+
+      function _restaurarOpcoes(inst, saved) {
+        if (!inst) return;
+        const sx = inst.options.scales?.x;
+        const sy = inst.options.scales?.y;
+        const lbl = inst.options.plugins?.legend?.labels;
+        if (sx?.grid)  sx.grid.color           = saved.xGrid;
+        if (sy?.grid)  sy.grid.color           = saved.yGrid;
+        if (sx?.ticks) { sx.ticks.color        = saved.xTick; if (sx.ticks.font) sx.ticks.font.size = saved.xFont; }
+        if (sy?.ticks) { sy.ticks.color        = saved.yTick; if (sy.ticks.font) sy.ticks.font.size = saved.yFont; }
+        if (lbl)       lbl.color              = saved.legend;
+        inst.update('none');
+      }
+
+      // Helper: captura canvas com fundo branco (garante impressão limpa)
+      function _canvasParaImg(canvas) {
+        if (!canvas) return '';
+        const tmp = document.createElement('canvas');
+        tmp.width  = canvas.width;
+        tmp.height = canvas.height;
+        const ctx = tmp.getContext('2d');
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, tmp.width, tmp.height);
+        ctx.drawImage(canvas, 0, 0);
+        return tmp.toDataURL('image/png');
+      }
+
+      const saved1 = _salvarOpcoes(_pg1Instance);
+      const saved2 = _salvarOpcoes(_pg2Instance);
+      _aplicarOpcoesPrint(_pg1Instance);
+      _aplicarOpcoesPrint(_pg2Instance);
+
+      const c1 = document.getElementById('atGrafPg1Canvas');
+      const c2 = document.getElementById('atGrafPg2Canvas');
+      const img1 = _canvasParaImg(c1);
+      const img2 = _canvasParaImg(c2);
+
+      _restaurarOpcoes(_pg1Instance, saved1);
+      _restaurarOpcoes(_pg2Instance, saved2);
+
+      // ── 2) Busca dados com breakdown por mês ──
+      const resp = await fetch('/api/sac/at/graficos/relatorio', { credentials: 'include' });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok || data.ok === false) throw new Error(data.error || 'Erro ao carregar dados.');
+
+      const meses   = data.meses  || [];
+      const periodo = data.periodo || '';
+
+      // ── 3) Pivot: tabela com colunas de mês lado a lado ──
+      function pivotHtml(titulo, cor, rows) {
+        if (!rows || !rows.length) {
+          return `<div class="rs">
+            <div class="rs-title" style="border-color:${cor};">${titulo}</div>
+            <p class="rs-empty">Nenhum registro no período.</p>
+          </div>`;
+        }
+        const totaisPorTag = {};
+        rows.forEach(r => { totaisPorTag[r.tag] = (totaisPorTag[r.tag] || 0) + r.total; });
+        const tags = Object.keys(totaisPorTag).sort((a, b) => totaisPorTag[b] - totaisPorTag[a]);
+
+        const thMeses = meses.map(m =>
+          `<th class="th-mes" style="background:${cor};">${m.label}</th>`
+        ).join('');
+
+        const linhas = tags.map((tag, idx) => {
+          const par = idx % 2 === 0;
+          const cells = meses.map(m => {
+            const found = rows.find(r => r.tag === tag && r.mes === m.yyyymm);
+            const v = found ? found.total : 0;
+            return `<td class="td-num${par ? ' par' : ''}">${v || '<span class="zero">—</span>'}</td>`;
+          }).join('');
+          const soma = totaisPorTag[tag];
+          return `<tr>
+            <td class="td-tag${par ? ' par' : ''}">${tag}</td>
+            ${cells}
+            <td class="td-total${par ? ' par' : ''}" style="color:${cor};">${soma}</td>
+          </tr>`;
+        }).join('');
+
+        const totCells = meses.map(m => {
+          const v = rows.filter(r => r.mes === m.yyyymm).reduce((s, r) => s + r.total, 0);
+          return `<td class="td-num footer">${v || '—'}</td>`;
+        }).join('');
+        const totalGeral = Object.values(totaisPorTag).reduce((s, v) => s + v, 0);
+
+        return `<div class="rs">
+          <div class="rs-title" style="border-color:${cor};">${titulo}</div>
+          <table class="rt">
+            <thead>
+              <tr>
+                <th class="th-tag" style="background:${cor};">Tag / Problema</th>
+                ${thMeses}
+                <th class="th-mes" style="background:${cor};">Total</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${linhas}
+              <tr>
+                <td class="td-tag footer">Total</td>
+                ${totCells}
+                <td class="td-total footer">${totalGeral}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>`;
+      }
+
+      // ── 4) HTML do relatório ──
+      const html = `<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<title>Relatório AT — ${periodo}</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: 'Segoe UI', Arial, sans-serif;
+    font-size: 12px;
+    color: #1a1a1a;
+    background: #fff;
+    padding: 28px 36px;
+    line-height: 1.4;
+  }
+
+  /* ── Cabeçalho ── */
+  .header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    border-bottom: 3px solid #1e3a5f;
+    padding-bottom: 12px;
+    margin-bottom: 22px;
+  }
+  .header h1 { font-size: 20px; color: #1e3a5f; font-weight: 700; margin-bottom: 3px; }
+  .header .sub { font-size: 11px; color: #666; }
+  .header .badge {
+    background: #1e3a5f;
+    color: #fff;
+    padding: 5px 14px;
+    border-radius: 20px;
+    font-size: 11px;
+    white-space: nowrap;
+  }
+
+  /* ── Gráficos lado a lado ── */
+  .graficos-row {
+    display: flex;
+    gap: 18px;
+    margin-bottom: 30px;
+    align-items: stretch;
+  }
+  .grafico-card {
+    flex: 1;
+    min-width: 0;
+    border: 1px solid #dde3ef;
+    border-radius: 8px;
+    padding: 14px 16px;
+    background: #fafbfd;
+  }
+  .grafico-card .gc-title {
+    font-size: 11px;
+    font-weight: 700;
+    color: #1e3a5f;
+    text-transform: uppercase;
+    letter-spacing: .04em;
+    margin-bottom: 10px;
+    padding-bottom: 6px;
+    border-bottom: 1px solid #dde3ef;
+  }
+  .grafico-card img {
+    width: 100%;
+    display: block;
+    border-radius: 4px;
+  }
+
+  /* ── Seções de tabela ── */
+  .rs { margin-bottom: 26px; page-break-inside: avoid; }
+  .rs-title {
+    font-size: 13px;
+    font-weight: 700;
+    color: #1a1a1a;
+    border-left: 4px solid #999;
+    padding-left: 10px;
+    margin-bottom: 10px;
+    line-height: 1.3;
+  }
+  .rs-empty { color: #888; font-size: 11px; padding-left: 14px; }
+
+  /* ── Tabela pivot ── */
+  .rt {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+    border: 1px solid #d1d9e6;
+    border-radius: 6px;
+    overflow: hidden;
+  }
+  .rt thead tr { border-bottom: 2px solid rgba(0,0,0,.2); }
+  .th-tag {
+    text-align: left;
+    padding: 7px 12px;
+    color: #fff;
+    font-size: 11px;
+    font-weight: 700;
+    min-width: 180px;
+  }
+  .th-mes {
+    text-align: center;
+    padding: 7px 14px;
+    color: #fff;
+    font-size: 11px;
+    font-weight: 700;
+    min-width: 72px;
+    white-space: nowrap;
+  }
+  .td-tag {
+    padding: 6px 12px;
+    border-bottom: 1px solid #e8ecf4;
+    color: #2d3748;
+  }
+  .td-num {
+    text-align: center;
+    padding: 6px 14px;
+    border-bottom: 1px solid #e8ecf4;
+    font-weight: 600;
+    color: #2d3748;
+  }
+  .td-total {
+    text-align: center;
+    padding: 6px 14px;
+    border-bottom: 1px solid #e8ecf4;
+    font-weight: 800;
+    font-size: 13px;
+  }
+  .par { background: #f7f9fc; }
+  .zero { color: #bbb; font-weight: 400; }
+  .footer {
+    background: #eef2fb !important;
+    font-weight: 700 !important;
+    color: #1e3a5f !important;
+    border-top: 2px solid #c9d4eb;
+  }
+
+  /* ── Print ── */
+  @media print {
+    @page { margin: 12mm 14mm; size: A4 landscape; }
+    body { padding: 0; font-size: 11px; }
+    .no-print { display: none !important; }
+    .rt { font-size: 11px; }
+    .graficos-row { break-inside: avoid; }
+    .rs { break-inside: avoid; }
+  }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div>
+    <h1>Relatório — Gráfico AT</h1>
+    <div class="sub">Gerado em ${new Date().toLocaleString('pt-BR')}</div>
+  </div>
+  <div class="badge">Período: ${periodo}</div>
+</div>
+
+<div class="graficos-row">
+  <div class="grafico-card">
+    <div class="gc-title">Gráfico 1 — Atendimentos por Estado / Mês (Qualidade)</div>
+    ${img1 ? `<img src="${img1}" alt="Gráfico 1">` : '<p style="color:#aaa;font-size:11px;">Gráfico não disponível.</p>'}
+  </div>
+  <div class="grafico-card">
+    <div class="gc-title">Gráfico 2 — Picos de Atendimento por Mês</div>
+    ${img2 ? `<img src="${img2}" alt="Gráfico 2">` : '<p style="color:#aaa;font-size:11px;">Gráfico não disponível.</p>'}
+  </div>
+</div>
+
+${pivotHtml('OS aberta', '#1d6a2f', data.qualidade)}
+${pivotHtml('Atendimento Rápido', '#7c2d12', data.rapido)}
+${pivotHtml('Menções (Pós abertura de OS)', '#4c1d95', data.mencoes)}
+
+<div class="no-print" style="margin-top:24px;padding-top:16px;border-top:1px solid #e5e7eb;">
+  <button onclick="window.print()"
+    style="padding:9px 22px;background:#1e3a5f;color:#fff;border:none;border-radius:7px;cursor:pointer;font-size:13px;font-weight:600;">
+    &#128438; Imprimir / Salvar PDF
+  </button>
+</div>
+
+</body>
+</html>`;
+
+      // ── 5) Abre janela de impressão ──
+      const win = window.open('', '_blank', 'width=1150,height=780');
+      if (!win) { alert('Permita pop-ups para gerar o relatório.'); return; }
+      win.document.write(html);
+      win.document.close();
+      win.focus();
+
+    } catch (err) {
+      alert('Erro ao gerar relatório: ' + (err.message || err));
+    } finally {
+      if (btn) {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="fa-solid fa-file-pdf"></i> Relatório';
+      }
+    }
+  }
+
+  // ── API pública chamada pelo listener do menu lateral ────────────────────
+  window._iniciarGrafAtPagina = function () {
+    if (!_pgInicializado) {
+      _pgInicializado = true;
+
+      // Botões de período
+      document.querySelectorAll('.at-graf-periodo-btn-pg').forEach(btn => {
+        btn.addEventListener('click', () => {
+          _pgPeriodo = parseInt(btn.dataset.per, 10);
+          document.querySelectorAll('.at-graf-periodo-btn-pg').forEach(b => {
+            const ativo = b === btn;
+            b.style.borderColor = ativo ? '#4f46e5' : '#374151';
+            b.style.background  = ativo ? 'rgba(79,70,229,.25)' : 'rgba(255,255,255,.04)';
+            b.style.color       = ativo ? '#a5b4fc' : '#9ca3af';
+          });
+          _carregarPg1();
+          _carregarPg2();
+        });
+      });
+
+      const refreshBtn = document.getElementById('atGrafPgRefreshBtn');
+      if (refreshBtn) refreshBtn.addEventListener('click', () => { _carregarPg1(); _carregarPg2(); });
+
+      const relatorioBtn = document.getElementById('atGrafPgRelatorioBtn');
+      if (relatorioBtn) relatorioBtn.addEventListener('click', _gerarRelatorioGrafAt);
+    }
+    _carregarPg1();
+    _carregarPg2();
+  };
+})();
+
 // Listeners modal edição AT
 const _atEditModal      = document.getElementById('atEditModal');
 const _atEditModalClose = document.getElementById('atEditModalClose');
@@ -25253,6 +26104,91 @@ if (_atEmAnexarBtn && _atEmAnexarInput) {
     _atEmAtualizarAnexosCount(existentes + _atEmAnexosPendentes.length);
   });
 }
+
+// NFe do fechamento — anexar / substituir / excluir no modal Editar OS
+(function () {
+  const btn = document.getElementById('atEmFechNfeAnexarBtn');
+  const input = document.getElementById('atEmFechNfeInput');
+  const remBtn = document.getElementById('atEmFechNfeRemoverBtn');
+  const statusEl = document.getElementById('atEmFechNfeStatus');
+  if (!btn || !input) return;
+
+  const setBusy = (busy, msg) => {
+    btn.disabled = !!busy;
+    if (remBtn) remBtn.disabled = !!busy;
+    if (statusEl && msg) statusEl.textContent = msg;
+  };
+
+  btn.addEventListener('click', () => {
+    if (!_atEditModalCurrentId) {
+      alert('Abra uma OS antes de anexar a NFe.');
+      return;
+    }
+    input.click();
+  });
+
+  input.addEventListener('change', async () => {
+    const file = input.files && input.files[0];
+    input.value = '';
+    const id = _atEditModalCurrentId;
+    if (!file || !id) return;
+    setBusy(true, 'Enviando NFe...');
+    try {
+      const fd = new FormData();
+      fd.append('nfe', file);
+      const r = await fetch(`/api/sac/at/fechamento/${id}/nfe`, {
+        method: 'POST',
+        credentials: 'include',
+        body: fd,
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok || !d.ok) {
+        alert(d.error || 'Erro ao anexar NFe.');
+        setBusy(false, 'Falha no envio.');
+        return;
+      }
+      _atEmAtualizarNfeUi(d.nfe_url, d.data_envio_nfe || new Date().toISOString());
+      setBusy(false);
+    } catch (err) {
+      console.error('[AT] upload NFe', err);
+      alert('Erro de rede ao anexar NFe.');
+      setBusy(false, 'Erro de rede.');
+    }
+  });
+
+  if (remBtn) {
+    remBtn.addEventListener('click', async () => {
+      const id = _atEditModalCurrentId;
+      if (!id) return;
+      if (!confirm('Excluir a NFe desta OS?\nO campo ficará livre para anexar a nota correta.')) return;
+      setBusy(true, 'Removendo NFe...');
+      try {
+        const r = await fetch(`/api/sac/at/fechamento/${id}/nfe`, {
+          method: 'DELETE',
+          credentials: 'include',
+        });
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok || !d.ok) {
+          alert(d.error || 'Erro ao excluir NFe.');
+          setBusy(false, 'Falha ao excluir.');
+          return;
+        }
+        _atEmAtualizarNfeUi(null, null);
+        if (d.status) {
+          _atStatusOsAtualizarBadge(d.status);
+          const row = (_atAllRows || []).find(x => String(x.id) === String(id));
+          if (row) row.status = d.status;
+          _atRenderCurrent();
+        }
+        setBusy(false);
+      } catch (err) {
+        console.error('[AT] excluir NFe', err);
+        alert('Erro de rede ao excluir NFe.');
+        setBusy(false, 'Erro de rede.');
+      }
+    });
+  }
+})();
 
 // Botão Fechamento PJ — anexa PDF OS e preenche campos de fechamento
 (function () {
@@ -33086,11 +34022,7 @@ window.preloadLocaisEstoqueCache = async function preloadLocaisEstoqueCache(forc
     const option = el('cadProdFamilia').selectedOptions[0];
     const nome = option?.dataset.nome || option?.textContent || '';
     const tipo = normalizarDescricao(nome) === 'MOVEIS' ? 'AI' : (option?.dataset.tipo || 'MP');
-    return option?.value ? {
-      codigo: option.value,
-      tipo,
-      nome
-    } : null;
+    return option?.value ? { codigo: option.value, tipo, nome } : null;
   }
   function familiaUsaFaixaPadrao(familia) {
     const codigo = String(familia?.codigo || '').padStart(2, '0');
@@ -33108,13 +34040,7 @@ window.preloadLocaisEstoqueCache = async function preloadLocaisEstoqueCache(forc
   function payloadBase() {
     const familia = familiaAtual();
     if (!familia) throw new Error('Selecione uma familia.');
-    return {
-      familia_codigo: familia.codigo,
-      familia_tipo: familia.tipo,
-      familia_nome: familia.nome,
-      origem: state.origem,
-      filtro: el('cadProdFiltro').value.trim()
-    };
+    return { familia_codigo: familia.codigo, familia_tipo: familia.tipo, familia_nome: familia.nome, origem: state.origem, filtro: el('cadProdFiltro').value.trim() };
   }
   function tipoPadraoFamilia(familia) {
     const codigo = String(familia?.codigo || '').padStart(2, '0');
@@ -35018,23 +35944,24 @@ window.openRegistros = async function() {
 
   function _etqRenderCards(etiquetas) {
     if (!etqGrid) return;
-    if (!etiquetas || etiquetas.length === 0) {
+    const lista = (etiquetas || []).filter(e => (Number(e.qtd) || 0) > 0);
+    if (!lista.length) {
       etqGrid.innerHTML = '<div class="etiquetas-loading">Nenhuma etiqueta pendente encontrada.</div>';
       if (etqStatus) etqStatus.textContent = '';
       return;
     }
 
-    const pendentes = etiquetas.filter(e => !e.impressa).length;
-    const impressas = etiquetas.filter(e => e.impressa).length;
+    const pendentes = lista.filter(e => !e.impressa).length;
+    const impressas = lista.filter(e => e.impressa).length;
     if (etqStatus) {
-      let txt = `${etiquetas.length} etiqueta(s)`;
+      let txt = `${lista.length} etiqueta(s)`;
       if (pendentes && impressas) txt += ` · ${pendentes} pendente(s), ${impressas} impressa(s)`;
       else if (impressas) txt += ` impressa(s)`;
       else txt += ` pendente(s)`;
       etqStatus.textContent = txt;
     }
 
-    etqGrid.innerHTML = etiquetas.map(e => {
+    etqGrid.innerHTML = lista.map(e => {
       const cod     = escapeHtml(String(e.codigo_produto  || '—'));
       const desc    = escapeHtml(String(e.descricao_produto || '—'));
       const lote    = escapeHtml(String(e.lote || '—'));
@@ -35044,15 +35971,11 @@ window.openRegistros = async function() {
       const id      = Number(e.id);
       const qtdRaw  = e.qtd != null ? Number(e.qtd) || 0 : 0;
       const impressa    = !!e.impressa;
-      const idImpresso  = e.id_impresso ? Number(e.id_impresso) : 0;
 
       const acoes = impressa
         ? `<div class="etq-card-actions">
             <button class="etq-btn-reimprimir" data-id="${id}" title="Marcar como não impresso e reabrir para impressão">
               <i class="fa-solid fa-rotate-left"></i> Reimprimir
-            </button>
-            <button class="etq-btn-armazenar" data-id="${id}" data-id-impresso="${idImpresso}" title="Armazenar produto">
-              <i class="fa-solid fa-box-archive"></i> Armazenar
             </button>
           </div>`
         : `<div class="etq-card-actions">
@@ -35097,8 +36020,8 @@ window.openRegistros = async function() {
     // Clique no card seleciona
     etqGrid.querySelectorAll('.etq-card').forEach(card => {
       card.addEventListener('click', e => {
-        if (e.target.matches('.etq-check-sel') || e.target.matches('.etq-btn-imprimir-unit') || e.target.closest('.etq-btn-imprimir-unit') || e.target.matches('.etq-btn-multiplo') || e.target.closest('.etq-btn-multiplo') || e.target.matches('.etq-btn-ocultar') || e.target.closest('.etq-btn-ocultar') || e.target.matches('.etq-btn-reimprimir') || e.target.closest('.etq-btn-reimprimir') || e.target.matches('.etq-btn-armazenar') || e.target.closest('.etq-btn-armazenar')) return;
-        // Não selecionar cards impressos (só têm reimprimir/armazenar)
+        if (e.target.matches('.etq-check-sel') || e.target.matches('.etq-btn-imprimir-unit') || e.target.closest('.etq-btn-imprimir-unit') || e.target.matches('.etq-btn-multiplo') || e.target.closest('.etq-btn-multiplo') || e.target.matches('.etq-btn-ocultar') || e.target.closest('.etq-btn-ocultar') || e.target.matches('.etq-btn-reimprimir') || e.target.closest('.etq-btn-reimprimir')) return;
+        // Não selecionar cards impressos (só têm reimprimir)
         if (card.dataset.impressa === 'true') return;
         const id = Number(card.dataset.id);
         const cb = card.querySelector('.etq-check-sel');
@@ -35201,19 +36124,6 @@ window.openRegistros = async function() {
           if (etqStatus) { etqStatus.textContent = err.message; etqStatus.style.color = '#f87171'; setTimeout(() => { if (etqStatus) { etqStatus.textContent = ''; etqStatus.style.color = ''; } }, 4000); }
           btn.disabled = false;
         }
-      });
-    });
-
-    // Botão Armazenar (abre modal de câmera/local direto no passo 2)
-    etqGrid.querySelectorAll('.etq-btn-armazenar').forEach(btn => {
-      btn.addEventListener('click', async e => {
-        e.stopPropagation();
-        const idImpresso = Number(btn.dataset.idImpresso);
-        if (!idImpresso) {
-          if (etqStatus) { etqStatus.textContent = 'Nenhum registro de impressão encontrado para este item.'; etqStatus.style.color = '#f87171'; setTimeout(() => { if (etqStatus) { etqStatus.textContent = ''; etqStatus.style.color = ''; } }, 4000); }
-          return;
-        }
-        _armAbrirComId(idImpresso);
       });
     });
   }
@@ -36009,14 +36919,15 @@ window.openRegistros = async function() {
 
   function _etqImpressoRenderCards(etiquetas) {
     if (!etqImpressoGrid) return;
-    if (!etiquetas || etiquetas.length === 0) {
+    const lista = (etiquetas || []).filter(e => (Number(e.qtd) || 0) > 0);
+    if (!lista.length) {
       etqImpressoGrid.innerHTML = '<div class="etiquetas-loading">Nenhuma etiqueta impressa encontrada.</div>';
       if (etqImpressoStatus) etqImpressoStatus.textContent = '';
       return;
     }
-    if (etqImpressoStatus) etqImpressoStatus.textContent = `${etiquetas.length} etiqueta(s) impressa(s)`;
+    if (etqImpressoStatus) etqImpressoStatus.textContent = `${lista.length} etiqueta(s) impressa(s)`;
 
-    etqImpressoGrid.innerHTML = etiquetas.map(e => {
+    etqImpressoGrid.innerHTML = lista.map(e => {
       const cod      = escapeHtml(String(e.codigo_produto   || '—'));
       const desc     = escapeHtml(String(e.descricao_produto || '—'));
       const lote     = escapeHtml(String(e.lote             || '—'));
@@ -36026,16 +36937,20 @@ window.openRegistros = async function() {
       const nfe      = escapeHtml(String(e.numero_nfe       || ''));
       const pedido   = escapeHtml(String(e.numero_pedido    || ''));
       const dataEmis = escapeHtml(String(e.data_emissao     || ''));
+      const idEtq    = Number(e.id) || 0;
       const impresso = e.impresso_em
         ? new Date(e.impresso_em).toLocaleString('pt-BR', { day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit' })
         : '';
       const usuario  = escapeHtml(String(e.usuario_criacao  || ''));
 
       return `
-      <div class="etq-card" data-id="${e.id}" style="cursor:pointer;" title="Clique para armazenar">
+      <div class="etq-card" data-id="${idEtq}" style="cursor:pointer;" title="Clique para armazenar">
         <div class="etq-card-thumbnail">
           <div class="etq-thumb-row">
-            <div class="etq-thumb-qr"><i class="fa-solid fa-qrcode" style="font-size:18px;color:#888;"></i></div>
+            <div class="etq-thumb-qr" title="ID desta ETQ" style="display:flex;flex-direction:column;align-items:center;justify-content:center;min-width:52px;padding:4px 2px;text-align:center;line-height:1.15;">
+              <span style="font-size:9px;font-weight:700;color:#94a3b8;letter-spacing:.02em;">ID desta ETQ</span>
+              <span style="font-size:15px;font-weight:800;color:#a78bfa;">${idEtq || '—'}</span>
+            </div>
             <div class="etq-thumb-dados">
               <div class="etq-thumb-line label">Cod. Produto:</div>
               <div class="etq-thumb-line value">${cod}</div>
@@ -36106,12 +37021,82 @@ window.openRegistros = async function() {
   const etqArmazenarInput       = document.getElementById('etqArmazenarInput');
   const etqArmazenarComplemento = document.getElementById('etqArmazenarComplemento');
   const etqArmazenarOk          = document.getElementById('etqArmazenarOk');
-  const btnArmazenarProduto     = document.getElementById('btnArmazenarProduto');
+  const etqArmazenarRetornarWrap = document.getElementById('etqArmazenarRetornarWrap');
+  const etqBtnRetornarEtiqueta  = document.getElementById('etqBtnRetornarEtiqueta');
+  const etqRetornarEscolha      = document.getElementById('etqRetornarEscolha');
+  const etqRetornarUma          = document.getElementById('etqRetornarUma');
+  const etqRetornarTodas        = document.getElementById('etqRetornarTodas');
+  const etqRetornarCancelar     = document.getElementById('etqRetornarCancelar');
 
   let _armStep = 1;          // 1 = ler QR do produto, 2 = ler barcode do local
   let _armIdImpresso = null; // id de ETQ_rec_impresso
   let _armStream = null;
   let _armScanInterval = null;
+  let _armRetornando = false;
+
+  function _armMostrarRetornar(show) {
+    if (etqArmazenarRetornarWrap) etqArmazenarRetornarWrap.style.display = show ? 'block' : 'none';
+    if (etqRetornarEscolha) etqRetornarEscolha.style.display = 'none';
+  }
+
+  function _armEscolhaRetornar(show) {
+    if (etqRetornarEscolha) etqRetornarEscolha.style.display = show ? 'block' : 'none';
+  }
+
+  async function _armExecutarRetornar(modo) {
+    if (_armRetornando) return;
+    const id = Number(_armIdImpresso) || 0;
+    if (!id) {
+      if (etqArmazenarStatus) {
+        etqArmazenarStatus.textContent = 'Nenhuma etiqueta selecionada para retornar.';
+        etqArmazenarStatus.style.color = '#f87171';
+      }
+      return;
+    }
+    _armRetornando = true;
+    await _armPararCamera();
+    if (etqArmazenarStatus) {
+      etqArmazenarStatus.textContent = modo === 'todas'
+        ? 'Retornando todas as etiquetas deste produto...'
+        : 'Retornando esta etiqueta...';
+      etqArmazenarStatus.style.color = '#94a3b8';
+    }
+    try {
+      const resp = await fetch(`/api/etiquetas/rec-impresso/${id}/retornar`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ modo }),
+      });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok) throw new Error(data.error || `Erro ${resp.status}`);
+      const saldo = data.saldo_retornado != null ? data.saldo_retornado : '';
+      if (etqArmazenarStatus) {
+        etqArmazenarStatus.textContent = saldo !== ''
+          ? `✓ Saldo ${saldo} devolvido para Etiquetas disponíveis.`
+          : '✓ Etiqueta(s) retornada(s) para Etiquetas disponíveis.';
+        etqArmazenarStatus.style.color = '#4ade80';
+      }
+      _armMostrarRetornar(false);
+      setTimeout(() => {
+        _armFechar();
+        _etqImpressoCarregar(etqImpressoBusca?.value || '');
+        if (etqModal && etqModal.style.display !== 'none') {
+          _etqCarregar(etqBusca?.value || '');
+        }
+      }, 1200);
+    } catch (err) {
+      if (etqArmazenarStatus) {
+        etqArmazenarStatus.textContent = `Erro: ${escapeHtml(err.message || 'Falha ao retornar')}`;
+        etqArmazenarStatus.style.color = '#f87171';
+      }
+      _armEscolhaRetornar(false);
+      const ok = await _armIniciarCamera();
+      if (ok) _armIniciarScan(_armProcessarCodigo);
+    } finally {
+      _armRetornando = false;
+    }
+  }
 
   async function _armPararCamera() {
     clearInterval(_armScanInterval);
@@ -36232,6 +37217,7 @@ window.openRegistros = async function() {
       if (etqArmazenarIcone)  { etqArmazenarIcone.className = 'fa-solid fa-barcode'; etqArmazenarIcone.style.color = '#a78bfa'; }
       if (etqArmazenarStatus) { etqArmazenarStatus.textContent = `Produto ID ${id} lido. Alinhe o código de barras na faixa horizontal.`; etqArmazenarStatus.style.color = '#4ade80'; }
       if (etqArmazenarInput)  { etqArmazenarInput.placeholder = 'Ou digite o local manualmente...'; etqArmazenarInput.value = ''; etqArmazenarInput.focus(); }
+      _armMostrarRetornar(true);
       _armIniciarScan(_armProcessarCodigo);
     } else {
       // Passo 2: valor lido é o endereço
@@ -36292,6 +37278,7 @@ window.openRegistros = async function() {
   async function _armAbrir() {
     _armStep = 1;
     _armIdImpresso = null;
+    _armMostrarRetornar(false);
     if (etqArmazenarTitle)  etqArmazenarTitle.textContent  = 'Leia o QR Code do produto';
     if (etqArmazenarIcone)  { etqArmazenarIcone.className = 'fa-solid fa-qrcode'; etqArmazenarIcone.style.color = '#34d399'; }
     if (etqArmazenarStatus) { etqArmazenarStatus.textContent = ''; etqArmazenarStatus.style.color = '#94a3b8'; }
@@ -36314,6 +37301,7 @@ window.openRegistros = async function() {
     if (etqArmazenarInput)       { etqArmazenarInput.placeholder = 'Ou digite o local manualmente...'; etqArmazenarInput.value = ''; etqArmazenarInput.focus(); }
     if (etqArmazenarComplemento) etqArmazenarComplemento.value = '';
     if (etqArmazenarMira)        etqArmazenarMira.style.borderColor = 'rgba(52,211,153,.85)';
+    _armMostrarRetornar(true);
     if (etqArmazenarModal)       etqArmazenarModal.style.display = 'flex';
     const ok = await _armIniciarCamera();
     if (ok) _armIniciarScan(_armProcessarCodigo);
@@ -36321,13 +37309,19 @@ window.openRegistros = async function() {
 
   function _armFechar() {
     _armPararCamera();
+    _armMostrarRetornar(false);
     if (etqArmazenarModal) etqArmazenarModal.style.display = 'none';
   }
 
-  btnArmazenarProduto?.addEventListener('click', _armAbrir);
-  document.getElementById('etqBtnArmazenarToolbar')?.addEventListener('click', _armAbrir);
   etqArmazenarFechar?.addEventListener('click', _armFechar);
   etqArmazenarModal?.addEventListener('click', e => { if (e.target === etqArmazenarModal) _armFechar(); });
+
+  etqBtnRetornarEtiqueta?.addEventListener('click', () => {
+    _armEscolhaRetornar(true);
+  });
+  etqRetornarUma?.addEventListener('click', () => { _armExecutarRetornar('uma'); });
+  etqRetornarTodas?.addEventListener('click', () => { _armExecutarRetornar('todas'); });
+  etqRetornarCancelar?.addEventListener('click', () => { _armEscolhaRetornar(false); });
 
   // Clique em card da lista → abre modal já no passo 2 (pula leitura de QR)
   etqImpressoGrid?.addEventListener('click', e => {
@@ -45385,7 +46379,86 @@ window.adicionarCotacaoComSpinner = adicionarCotacaoComSpinner;
 window.aprovarGrupoRequisicao = aprovarGrupoRequisicao;
 window.atualizarGrupoRequisicaoItem = atualizarGrupoRequisicaoItem;
 
-// Ações da Omie expostas como roteiro de integração: só ficam ativas quando já existe suporte real.
+// ===== Exclusão lógica de pedido (colunas antes de Requisições) =====
+const STATUS_EXCLUIVEL_PEDIDO_COMPRAS = [
+  'aguardando aprovação da requisição',
+  'solicitado revisão',
+  'retificar',
+  'aguardando cotação',
+  'cotado aguardando escolha',
+  'cotado',
+  'analise de cadastro'
+];
+
+function podeExcluirPedidoComprasKanban(solicitante) {
+  if (usuarioEhAdminSistema()) return true;
+  const sectorId = Number(window.__sessionUser?.sector_id);
+  if (sectorId === 5 || sectorId === 9) return true;
+  const norm = (v) => String(v || '').trim().toLowerCase();
+  const solicitanteNorm = norm(solicitante);
+  if (!solicitanteNorm) return false;
+  return [
+    window.__sessionUser?.username,
+    document.getElementById('userNameDisplay')?.textContent
+  ].some(c => norm(c) === solicitanteNorm);
+}
+
+// Mostra o botão Excluir no cabeçalho do modal quando o status/permissão permitem
+function configurarBotaoExcluirPedidoCompras(btnId, ctx) {
+  const btn = document.getElementById(btnId);
+  if (!btn) return;
+  const statusNorm = String(ctx?.status || '').toLowerCase().trim();
+  const permitido = STATUS_EXCLUIVEL_PEDIDO_COMPRAS.includes(statusNorm)
+    && podeExcluirPedidoComprasKanban(ctx?.solicitante);
+  if (!permitido) {
+    btn.style.display = 'none';
+    window.__excluirPedidoComprasCtx = null;
+    return;
+  }
+  window.__excluirPedidoComprasCtx = ctx;
+  btn.disabled = false;
+  btn.innerHTML = '<i class="fa-solid fa-trash"></i> Excluir';
+  btn.style.display = 'inline-flex';
+}
+
+async function excluirPedidoComprasKanban(btnId) {
+  const ctx = window.__excluirPedidoComprasCtx;
+  if (!ctx) return;
+  const btn = btnId ? document.getElementById(btnId) : null;
+  if (btn) {
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Excluindo...';
+  }
+  try {
+    const resp = await fetch('/api/compras/pedido/excluir', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({
+        grupo_requisicao: ctx.grupoRequisicao || '',
+        table_source: ctx.tableSource || 'solicitacao_compras',
+        item_ids: Array.isArray(ctx.itemIds) ? ctx.itemIds : []
+      })
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok || !data.ok) throw new Error(data.error || 'Erro ao excluir pedido');
+
+    window.__excluirPedidoComprasCtx = null;
+    if (typeof fecharModalDetalhesPedidoCompras === 'function') fecharModalDetalhesPedidoCompras();
+    if (typeof fecharModalAnaliseCadastro === 'function') fecharModalAnaliseCadastro();
+    if (typeof loadMinhasSolicitacoes === 'function') loadMinhasSolicitacoes();
+    alert(`Pedido excluído (${data.excluidos} item(ns)). Registrado por ${data.excluido_por}.`);
+  } catch (err) {
+    alert('Não foi possível excluir: ' + (err?.message || 'erro desconhecido'));
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = '<i class="fa-solid fa-trash"></i> Excluir';
+    }
+  }
+}
+window.excluirPedidoComprasKanban = excluirPedidoComprasKanban;
+
+// Modal específico para "Kanban de compras" (visualização do usuário solicitante)
 function renderizarAcoesOperacionaisCompra(tipo = 'pedido', opcoes = {}) {
   const ehNfe = String(tipo).toLowerCase() === 'nfe';
   const ehRequisicao = String(tipo).toLowerCase() === 'requisicao';
@@ -45397,12 +46470,7 @@ function renderizarAcoesOperacionaisCompra(tipo = 'pedido', opcoes = {}) {
   const ehNfeRecebidaOuConferida = ehNfe && ['recebido', 'concluido', 'conferido'].includes(statusNormalizado);
   const numeroPreparacao = String(opcoes.prepararPedidoNumero || '').trim();
   const acaoPrepararPedido = numeroPreparacao
-    ? [[
-        'Preparar pedido de compra',
-        'fa-cart-shopping',
-        encodeURIComponent(numeroPreparacao),
-        opcoes.podePrepararPedido ? 'preparar-pedido' : 'sem-permissao'
-      ]]
+    ? [['Preparar pedido de compra', 'fa-cart-shopping', encodeURIComponent(numeroPreparacao), opcoes.podePrepararPedido ? 'preparar-pedido' : 'sem-permissao']]
     : [];
   const acoes = ehRequisicao
     ? [
@@ -45445,7 +46513,6 @@ function renderizarAcoesOperacionaisCompra(tipo = 'pedido', opcoes = {}) {
   </aside>`;
 }
 
-// Modal específico para "Kanban de compras" (visualização do usuário solicitante)
 function renderizarMiniaturaProdutoCompra(item = {}) {
   const codigo = String(item.produto_codigo || item.c_produto || item.cCodigoProduto || item.codigo || '').trim();
   const descricao = String(item.produto_descricao || item.c_descricao || item.cDescricaoProduto || item.descricao || 'Produto').trim();
@@ -45466,8 +46533,7 @@ async function hidratarMiniaturasProdutosCompra(container = document) {
       const img = botao.querySelector('img');
       const icone = botao.querySelector('i');
       if (!img) return;
-      img.src = url;
-      img.hidden = false;
+      img.src = url; img.hidden = false;
       if (icone) icone.hidden = true;
       botao.dataset.imageLoaded = 'true';
       botao.addEventListener('click', (event) => {
@@ -45500,13 +46566,9 @@ function renderizarFichaCompraOmie({ tipo = 'pedido', numero = '', status = '', 
     if (valor === null || valor === undefined || valor === '') return '-';
     const texto = String(valor).trim();
     if (/^R\$/i.test(texto)) return valorSeguro(texto);
-    const normalizado = texto.includes(',')
-      ? texto.replace(/\./g, '').replace(',', '.')
-      : texto;
-    const numero = Number(normalizado);
-    return Number.isFinite(numero)
-      ? numero.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
-      : valorSeguro(texto);
+    const normalizado = texto.includes(',') ? texto.replace(/\./g, '').replace(',', '.') : texto;
+    const numeroMoeda = Number(normalizado);
+    return Number.isFinite(numeroMoeda) ? numeroMoeda.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) : valorSeguro(texto);
   };
   const formatarQuantidadeFicha = (valor) => {
     try {
@@ -45543,59 +46605,47 @@ function renderizarFichaCompraOmie({ tipo = 'pedido', numero = '', status = '', 
   `).join('');
 
   return `
-    <div class="cp-sheet-layout">
-      <main class="cp-sheet-main">
-        <section class="cp-sheet-summary" aria-label="Resumo do documento">
-          <div class="cp-sheet-avatar" aria-hidden="true">${ehRequisicao ? 'RQ' : valorSeguro(String(fornecedor).slice(0, 2).toUpperCase(), 'PC')}</div>
-          <div class="cp-sheet-fields">
-            ${ehRequisicao ? `
-              <div class="cp-sheet-field cp-sheet-field--wide"><span>Categoria da compra</span><strong title="${valorSeguro(categoria)}">${valorSeguro(categoria)}</strong></div>
-              <div class="cp-sheet-field"><span>Projeto</span><strong>${valorSeguro(projeto)}</strong></div>
-              <div class="cp-sheet-field"><span>Sugestão de entrega</span><strong>${formatarDataFicha(previsao)}</strong></div>
-              <div class="cp-sheet-field"><span>Solicitante</span><strong>${valorSeguro(solicitante)}</strong></div>
-            ` : `
-              <div class="cp-sheet-field cp-sheet-field--wide"><span>Fornecedor</span><strong title="${valorSeguro(fornecedor)}">${valorSeguro(fornecedor)}</strong></div>
-              <div class="cp-sheet-field"><span>Previsão de entrega</span><strong>${formatarDataFicha(previsao)}</strong></div>
-              ${possuiValor(categoria) ? `<div class="cp-sheet-field"><span>Categoria da compra</span><strong>${valorSeguro(categoria)}</strong></div>` : ''}
-              <div class="cp-sheet-field"><span>Comprador</span><strong>${valorSeguro(comprador)}</strong></div>
-              ${possuiValor(parcelas) ? `<div class="cp-sheet-field"><span>Condição de pagamento</span><strong>${valorSeguro(parcelas)}</strong></div>` : ''}
-            `}
-            <div class="cp-sheet-status-inline"><span>Status</span><strong>${valorSeguro(statusTexto)}</strong></div>
-          </div>
-        </section>
-
-        <section class="cp-sheet-totals" aria-label="Totais do documento">
-          <div><span>Documento</span><strong>${valorSeguro(rotuloDocumento)} Nº ${valorSeguro(numero)}</strong></div>
-          <div><span>Itens</span><strong>${itens.length}</strong></div>
-          <div><span>Data de inclusão</span><strong>${formatarDataFicha(inclusao)}</strong></div>
-          <div><span>Centro de custo</span><strong>${valorSeguro(centroCusto)}</strong></div>
-          <div class="cp-sheet-total-primary"><span>${ehRequisicao ? 'Valor total sugerido' : 'Valor total da compra'}</span><strong>${valorTotal !== '' ? formatarMoedaFicha(valorTotal) : (ehRequisicao ? 'R$ 0,00' : 'Não informado')}</strong></div>
-        </section>
-
-        <nav class="cp-nfe-tabs cp-order-tabs" aria-label="Seções do documento">
-          <button type="button" class="is-active">${ehRequisicao ? 'Itens da requisição' : 'Itens da compra'}</button>
-          ${(ehRequisicao ? ['Observações'] : ['Transporte','Totais','Parcelas','Departamentos','Informações adicionais','Observações']).map(label => `<button type="button" disabled title="Aguardando implementação do backend">${label}<small>A construir</small></button>`).join('')}
-        </nav>
-
-        <section class="cp-sheet-items">
-          <h4 class="cp-sheet-section-title">${ehRequisicao ? 'Itens da requisição' : 'Itens da compra'}</h4>
-          <div class="cp-sheet-table-wrap">
-            <table>
+    <div class="cp-sheet-layout"><main class="cp-sheet-main">
+      <section class="cp-sheet-summary" aria-label="Resumo do documento">
+        <div class="cp-sheet-avatar" aria-hidden="true">${ehRequisicao ? 'RQ' : valorSeguro(String(fornecedor).slice(0, 2).toUpperCase(), 'PC')}</div>
+        <div class="cp-sheet-fields">
+          ${ehRequisicao ? `
+            <div class="cp-sheet-field cp-sheet-field--wide"><span>Categoria da compra</span><strong title="${valorSeguro(categoria)}">${valorSeguro(categoria)}</strong></div>
+            <div class="cp-sheet-field"><span>Projeto</span><strong>${valorSeguro(projeto)}</strong></div>
+            <div class="cp-sheet-field"><span>Sugestão de entrega</span><strong>${formatarDataFicha(previsao)}</strong></div>
+            <div class="cp-sheet-field"><span>Solicitante</span><strong>${valorSeguro(solicitante)}</strong></div>
+          ` : `
+            <div class="cp-sheet-field cp-sheet-field--wide"><span>Fornecedor</span><strong title="${valorSeguro(fornecedor)}">${valorSeguro(fornecedor)}</strong></div>
+            <div class="cp-sheet-field"><span>Previsão de entrega</span><strong>${formatarDataFicha(previsao)}</strong></div>
+            ${possuiValor(categoria) ? `<div class="cp-sheet-field"><span>Categoria da compra</span><strong>${valorSeguro(categoria)}</strong></div>` : ''}
+            <div class="cp-sheet-field"><span>Comprador</span><strong>${valorSeguro(comprador)}</strong></div>
+            ${possuiValor(parcelas) ? `<div class="cp-sheet-field"><span>Condição de pagamento</span><strong>${valorSeguro(parcelas)}</strong></div>` : ''}
+          `}
+          <div class="cp-sheet-status-inline"><span>Status</span><strong>${valorSeguro(statusTexto)}</strong></div>
+        </div>
+      </section>
+      <section class="cp-sheet-totals" aria-label="Totais do documento">
+        <div><span>Documento</span><strong>${valorSeguro(rotuloDocumento)} Nº ${valorSeguro(numero)}</strong></div>
+        <div><span>Itens</span><strong>${itens.length}</strong></div>
+        <div><span>Data de inclusão</span><strong>${formatarDataFicha(inclusao)}</strong></div>
+        <div><span>Centro de custo</span><strong>${valorSeguro(centroCusto)}</strong></div>
+        <div class="cp-sheet-total-primary"><span>${ehRequisicao ? 'Valor total sugerido' : 'Valor total da compra'}</span><strong>${valorTotal !== '' ? formatarMoedaFicha(valorTotal) : (ehRequisicao ? 'R$ 0,00' : 'Não informado')}</strong></div>
+      </section>
+      <nav class="cp-nfe-tabs cp-order-tabs" aria-label="Seções do documento">
+        <button type="button" class="is-active">${ehRequisicao ? 'Itens da requisição' : 'Itens da compra'}</button>
+        ${(ehRequisicao ? ['Observações'] : ['Transporte','Totais','Parcelas','Departamentos','Informações adicionais','Observações']).map(label => `<button type="button" disabled title="Aguardando implementação do backend">${label}<small>A construir</small></button>`).join('')}
+      </nav>
+      <section class="cp-sheet-items">
+        <h4 class="cp-sheet-section-title">${ehRequisicao ? 'Itens da requisição' : 'Itens da compra'}</h4>
+        <div class="cp-sheet-table-wrap"><table>
               <thead><tr><th>Item</th><th aria-label="Foto">Foto</th><th>Código</th><th>Descrição do produto</th><th>Quantidade</th><th>${ehRequisicao ? 'Preço unit. sugerido' : 'Preço unitário'}</th><th>${ehRequisicao ? 'Valor total do item' : 'Total do item'}</th></tr></thead>
               <tbody>${linhas || '<tr><td colspan="7" class="cp-sheet-empty">Nenhum item encontrado</td></tr>'}</tbody>
-            </table>
-          </div>
-          <div class="cp-sheet-record-count">${itens.length} ${itens.length === 1 ? 'registro' : 'registros'}</div>
-        </section>
-
-        <section class="cp-sheet-note">
-          <i class="fa-regular fa-note-sticky"></i>
-          <div><span>${ehRequisicao ? 'Observações' : 'Objetivo da compra'}</span><strong>${valorSeguro(objetivo)}</strong></div>
-        </section>
-        ${linksHtml ? `<section class="cp-sheet-links"><span>Anexos e links</span><div>${linksHtml}</div></section>` : ''}
-      </main>
-      ${acoesHtml || renderizarAcoesOperacionaisCompra(tipo)}
-    </div>
+        </table></div>
+        <div class="cp-sheet-record-count">${itens.length} ${itens.length === 1 ? 'registro' : 'registros'}</div>
+      </section>
+      <section class="cp-sheet-note"><i class="fa-regular fa-note-sticky"></i><div><span>${ehRequisicao ? 'Observações' : 'Objetivo da compra'}</span><strong>${valorSeguro(objetivo)}</strong></div></section>
+      ${linksHtml ? `<section class="cp-sheet-links"><span>Anexos e links</span><div>${linksHtml}</div></section>` : ''}
+    </main>${acoesHtml || renderizarAcoesOperacionaisCompra(tipo)}</div>
   `;
 }
 
@@ -45607,13 +46657,9 @@ async function abrirModalDetalhesPedidoMinhas(numeroPedido, statusColuna, itemId
   if (!modal || !modalBody || !modalTitulo) return;
   modal.classList.remove('cp-purchase-preparation-modal');
 
-  const sidebar = document.querySelector('.left-side');
-  const sidebarContent = document.getElementById('sidebarContent');
-  const sidebarRect = sidebar?.getBoundingClientRect();
-  const sidebarContentRect = sidebarContent?.getBoundingClientRect();
   const limiteMenu = Math.max(
-    Number(sidebarRect?.right) || 0,
-    Number(sidebarContentRect?.right) || 0
+    Number(document.querySelector('.left-side')?.getBoundingClientRect()?.right) || 0,
+    Number(document.getElementById('sidebarContent')?.getBoundingClientRect()?.right) || 0
   );
   modal.style.setProperty('--cp-detail-nav-offset', `${Math.max(0, Math.round(limiteMenu))}px`);
   modalBody.innerHTML = `
@@ -45621,9 +46667,11 @@ async function abrirModalDetalhesPedidoMinhas(numeroPedido, statusColuna, itemId
       <i class="fa-solid fa-spinner fa-spin" aria-hidden="true"></i>
       <strong>Carregando pedido</strong>
       <span>Aguarde enquanto buscamos os dados e itens da compra.</span>
-    </div>
-  `;
+    </div>`;
   modal.style.display = 'flex';
+
+  const btnExcluirDetalhes = document.getElementById('btnExcluirPedidoComprasDetalhes');
+  if (btnExcluirDetalhes) btnExcluirDetalhes.style.display = 'none';
 
   const itemIdAtualNavegacao = String(itemIds || '')
     .split(',')
@@ -45711,6 +46759,15 @@ async function abrirModalDetalhesPedidoMinhas(numeroPedido, statusColuna, itemId
     const primeiroItemPedido = itensPedido[0] || null;
     const grupoRequisicaoModal = String(primeiroItemPedido?.grupo_requisicao || '').trim();
     const tableSourceModal = String(primeiroItemPedido?.table_source || 'solicitacao_compras').trim() || 'solicitacao_compras';
+
+    configurarBotaoExcluirPedidoCompras('btnExcluirPedidoComprasDetalhes', {
+      status: statusColuna,
+      solicitante: primeiroItemPedido?.solicitante,
+      grupoRequisicao: grupoRequisicaoModal,
+      tableSource: tableSourceModal,
+      itemIds: itensPedido.map(i => i.id)
+    });
+
     if (grupoRequisicaoModal && ['solicitacao_compras', 'compras_sem_cadastro'].includes(tableSourceModal)) {
       try {
         const respGrupo = await fetch(
@@ -46030,16 +47087,16 @@ async function abrirModalDetalhesPedidoMinhas(numeroPedido, statusColuna, itemId
         : '';
       modalBody.innerHTML = renderizarFichaCompraOmie({
         tipo: tipoFicha,
-        numero: tipoFicha === 'pedido' ? numeroPedido : (primeiro.grupo_requisicao || primeiro.id || ''),
+        numero: numeroPedido || primeiro.numero_pedido || primeiro.grupo_requisicao || primeiro.id || '-',
         status: statusColuna,
         dados: primeiro,
         itens: itensTabela,
-        linksHtml: itemSemCadastro ? montarHtmlLinks(linksSemCadastro) : '',
+        linksHtml: linksSemCadastro.length ? montarHtmlLinks(linksSemCadastro) : '',
         acoesHtml: acoesPreparacaoPedido
       });
       modalTitulo.textContent = tipoFicha === 'pedido'
         ? `Pedido de Compra Nº ${numeroPedido}`
-        : `${statusColunaLower === 'aguardando aprovação da requisição' ? 'Aguardando aprovação' : 'Requisição'} Nº ${primeiro.grupo_requisicao || primeiro.id || ''}`;
+        : `${statusColunaLower === 'aguardando aprovação da requisição' ? 'Aguardando aprovação' : 'Requisição'} Nº ${primeiro.grupo_requisicao || primeiro.id || '-'}`;
       return;
     }
 
@@ -46290,6 +47347,8 @@ async function abrirModalAnaliseCadastro(itemId) {
 
   modalBody.innerHTML = '<div style="text-align:center;padding:40px;"><i class="fa-solid fa-spinner fa-spin" style="font-size:32px;color:#3b82f6;"></i><br><br>Carregando...</div>';
   modal.style.display = 'flex';
+  const btnExcluirAnalise = document.getElementById('btnExcluirPedidoComprasAnalise');
+  if (btnExcluirAnalise) btnExcluirAnalise.style.display = 'none';
   renderizarNavegacaoModalKanban({
     modalId: 'modalAnaliseCadastro',
     status: 'analise de cadastro',
@@ -46377,6 +47436,15 @@ async function abrirModalAnaliseCadastro(itemId) {
     const tableSourceAnalise = String(item.table_source || 'solicitacao_compras').trim() || 'solicitacao_compras';
     const podeGerenciarAnalise = usuarioPodeGerenciarSolicitacao(item.departamento);
     const grupoRequisicaoAnalise = String(item.grupo_requisicao || '').trim();
+
+    configurarBotaoExcluirPedidoCompras('btnExcluirPedidoComprasAnalise', {
+      status: 'analise de cadastro',
+      solicitante: item.solicitante,
+      grupoRequisicao: grupoRequisicaoAnalise,
+      tableSource: tableSourceAnalise,
+      itemIds: [item.id]
+    });
+
     let itensGrupoAnalise = [];
 
     if (grupoRequisicaoAnalise) {
@@ -46837,8 +47905,13 @@ window.criarRequisicaoCompraAnaliseCadastro = async function() {
   }
 
   // Para sem-cadastro: varredura automática — resolve codigo_omie para itens que ainda não têm
+  // Itens PRECAD / pré-cadastro completo são finalizados no backend ao criar a requisição
   if (tableSource === 'compras_sem_cadastro') {
-    const itensSemOmie = itens.filter((i) => !i.codigo_omie && i.produto_codigo);
+    const ehPreCadastro = (i) =>
+      i?.pre_cadastro_completo === true
+      || /^PRECAD/i.test(String(i?.produto_codigo || '').trim());
+
+    const itensSemOmie = itens.filter((i) => !i.codigo_omie && i.produto_codigo && !ehPreCadastro(i));
     if (itensSemOmie.length) {
       try {
         const respResolver = await fetch('/api/compras/resolver-codigos-omie', {
@@ -46862,8 +47935,8 @@ window.criarRequisicaoCompraAnaliseCadastro = async function() {
       }
     }
 
-    // Após varredura, verifica se ainda há itens sem codigo_omie
-    const aindaSemOmie = itens.filter((i) => !i.codigo_omie);
+    // Após varredura, verifica se ainda há itens sem codigo_omie (exceto pré-cadastro)
+    const aindaSemOmie = itens.filter((i) => !i.codigo_omie && !ehPreCadastro(i));
     if (aindaSemOmie.length) {
       const nomes = aindaSemOmie.map((i) => `"${i.descricao || i.produto_codigo || '?'}"`).join(', ');
       alert(`Os seguintes itens não foram encontrados na Omie e precisam ser cadastrados antes:\n${nomes}`);
@@ -51747,7 +52820,13 @@ function atualizarLayoutModeloCompraCatalogo() {
   const retornoTexto = String(selectRetorno.value || '').trim().toLowerCase();
   const ocultarColuna3 = retornoTexto === 'compra ja realizada' || retornoTexto === 'registro rapido de compra';
 
-  coluna3.style.display = ocultarColuna3 ? 'none' : 'flex';
+  // Esconde só os campos da coluna 3 (o botão Realizar solicitação fica sempre visível)
+  ['catalogoCampoObservacaoRecebimento', 'catalogoCampoRespInspecao', 'catalogoCampoLink'].forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) el.style.display = ocultarColuna3 ? 'none' : 'flex';
+  });
+  coluna3.style.display = 'flex';
+  coluna3.style.gridColumn = ocultarColuna3 ? '1 / -1' : '';
   gridConfig.style.gridTemplateColumns = ocultarColuna3 ? 'repeat(2, 1fr)' : 'repeat(3, 1fr)';
   modalContent.style.maxWidth = ocultarColuna3 ? '1400px' : '1800px';
 }
@@ -51866,11 +52945,12 @@ async function abrirModalCatalogoOmie() {
   }
 
   try {
-    // Carrega departamentos e categorias de compra
+    // Carrega departamentos, categorias e config do pré-cadastro
     await Promise.all([
       carregarDepartamentosCatalogo(),
       loadModalComprasCategoriasCompra(),
-      carregarResponsaveisCatalogoInspecao()
+      carregarResponsaveisCatalogoInspecao(),
+      carregarConfigCatalogoPreCadastro()
     ]);
 
     // Define "Produção" como padrão após carregar departamentos
@@ -51900,6 +52980,200 @@ async function abrirModalCatalogoOmie() {
 
   // Inicializa sistema de keywords/tags para descrição
   inicializarDescricaoKeywords();
+}
+
+// Abre Solicitação de compra (produto sem cadastro) a partir do modal Compras
+async function abrirModalProdutoSemCadastroCompras() {
+  try { fecharModalCarrinhoCompras(); } catch (_) {}
+  await abrirModalCatalogoOmie();
+}
+window.abrirModalProdutoSemCadastroCompras = abrirModalProdutoSemCadastroCompras;
+
+// ===== Pré-cadastro no modal Solicitação (sem gerar 5 dígitos agora) =====
+window.__catalogoPreCad = window.__catalogoPreCad || {
+  config: null,
+  origem: 'N',
+  todasFamilias: false
+};
+
+function tipoPadraoFamiliaCatalogo(familia) {
+  const codigo = String(familia?.codigo || '').padStart(2, '0');
+  const nome = String(familia?.nome || familia?.nome_familia || '')
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase();
+  if (['01', '02', '03', '04', '05', '06'].includes(codigo)) return '01';
+  if (codigo === '08') return '02';
+  if (codigo === '09' && /MOVEIS|MOBILIARIO/.test(nome)) return '08';
+  if (codigo === '09') return '07';
+  return '';
+}
+
+function montarPrefixoCatalogoPreCad(familiaCodigo, familiaTipo, origem) {
+  const fam = String(familiaCodigo || '').trim().toUpperCase();
+  const tipo = String(familiaTipo || 'MP').trim().toUpperCase() || 'MP';
+  const ori = String(origem || 'N').trim().toUpperCase() === 'I' ? 'I' : 'N';
+  if (!fam) return '—';
+  if (/^[A-Z]{1,3}$/.test(fam)) return fam;
+  return `${fam.padStart(2, '0')}.${tipo}.${ori}`;
+}
+
+function renderCatalogoPreCadFamilias() {
+  const select = document.getElementById('catalogoPreCadFamilia');
+  const btn = document.getElementById('catalogoPreCadMostrarFamilias');
+  const cfg = window.__catalogoPreCad?.config;
+  if (!select || !cfg) return;
+  const principais = new Set(['01', '02', '03', '04', '05', '06', '08', '09']);
+  const lista = [...(cfg.familias || [])].sort((a, b) => {
+    const aCod = String(a.codigo || '').padStart(2, '0');
+    const bCod = String(b.codigo || '').padStart(2, '0');
+    const aP = principais.has(aCod), bP = principais.has(bCod);
+    if (aP !== bP) return aP ? -1 : 1;
+    return String(a.nome_familia || '').localeCompare(String(b.nome_familia || ''), 'pt-BR');
+  }).filter(f => window.__catalogoPreCad.todasFamilias || principais.has(String(f.codigo || '').padStart(2, '0')));
+  const atual = select.value;
+  select.innerHTML = '<option value="">-- Selecione uma família --</option>' + lista.map(f =>
+    `<option value="${escapeHtml(String(f.codigo || ''))}" data-tipo="${escapeHtml(String(f.tipo || 'MP'))}" data-nome="${escapeHtml(String(f.nome_familia || ''))}">${escapeHtml(`${f.codigo} - ${f.nome_familia}`)}</option>`
+  ).join('');
+  if ([...select.options].some(o => o.value === atual)) select.value = atual;
+  if (btn) {
+    btn.innerHTML = window.__catalogoPreCad.todasFamilias
+      ? '<i class="fa-regular fa-eye-slash"></i> Ocultar famílias restantes'
+      : '<i class="fa-regular fa-eye"></i> Desocultar famílias restantes';
+  }
+  atualizarPrefixoCatalogoPreCad();
+}
+
+function atualizarPrefixoCatalogoPreCad() {
+  const select = document.getElementById('catalogoPreCadFamilia');
+  const hint = document.getElementById('catalogoPreCadPrefixo');
+  if (!select || !hint) return;
+  const opt = select.selectedOptions[0];
+  const prefixo = montarPrefixoCatalogoPreCad(
+    opt?.value,
+    opt?.dataset?.tipo || 'MP',
+    window.__catalogoPreCad?.origem || 'N'
+  );
+  hint.textContent = prefixo;
+}
+
+function selecionarCatalogoPreCadOrigem(origem) {
+  window.__catalogoPreCad.origem = origem === 'I' ? 'I' : 'N';
+  document.querySelectorAll('.catalogo-pre-cad-origem').forEach(btn => {
+    const ativo = btn.dataset.origin === window.__catalogoPreCad.origem;
+    btn.classList.toggle('active', ativo);
+    btn.style.background = ativo ? '#3b82f6' : '#fff';
+    btn.style.color = ativo ? '#fff' : '#334155';
+    btn.style.borderColor = ativo ? '#3b82f6' : '#cbd5e1';
+  });
+  atualizarPrefixoCatalogoPreCad();
+}
+window.selecionarCatalogoPreCadOrigem = selecionarCatalogoPreCadOrigem;
+
+function toggleCatalogoPreCadFamilias() {
+  window.__catalogoPreCad.todasFamilias = !window.__catalogoPreCad.todasFamilias;
+  renderCatalogoPreCadFamilias();
+}
+window.toggleCatalogoPreCadFamilias = toggleCatalogoPreCadFamilias;
+
+async function carregarConfigCatalogoPreCadastro() {
+  const selectFam = document.getElementById('catalogoPreCadFamilia');
+  const selectUn = document.getElementById('catalogoPreCadUnidade');
+  const selectTipo = document.getElementById('catalogoPreCadTipo');
+  if (!selectFam) return;
+  try {
+    if (!window.__catalogoPreCad.config) {
+      const resp = await fetch('/api/produtos/cadastro/config', { credentials: 'include' });
+      const json = await resp.json();
+      if (!resp.ok || !json?.ok) throw new Error(json?.error || 'Falha ao carregar config');
+      window.__catalogoPreCad.config = json;
+    }
+    const cfg = window.__catalogoPreCad.config;
+    renderCatalogoPreCadFamilias();
+    if (selectUn) {
+      selectUn.innerHTML = '<option value="">Selecione...</option>' +
+        (cfg.unidades || []).map(u => `<option value="${escapeHtml(u.codigo)}">${escapeHtml(`${u.codigo} - ${u.descricao || ''}`)}</option>`).join('');
+    }
+    if (selectTipo) {
+      selectTipo.innerHTML = (cfg.tipos || []).map(t =>
+        `<option value="${escapeHtml(t.value)}">${escapeHtml(`${t.value} - ${t.label}`)}</option>`
+      ).join('');
+      if ([...selectTipo.options].some(o => o.value === '00')) selectTipo.value = '00';
+    }
+    if (!selectFam.dataset.bound) {
+      selectFam.dataset.bound = '1';
+      selectFam.addEventListener('change', () => {
+        const opt = selectFam.selectedOptions[0];
+        const tipo = tipoPadraoFamiliaCatalogo({
+          codigo: opt?.value,
+          nome: opt?.dataset?.nome
+        });
+        if (tipo && selectTipo && [...selectTipo.options].some(o => o.value === tipo)) {
+          selectTipo.value = tipo;
+        }
+        atualizarPrefixoCatalogoPreCad();
+      });
+    }
+    const fotoInput = document.getElementById('catalogoPreCadFoto');
+    if (fotoInput && !fotoInput.dataset.bound) {
+      fotoInput.dataset.bound = '1';
+      fotoInput.addEventListener('change', () => {
+        const nomeEl = document.getElementById('catalogoPreCadFotoNome');
+        const file = fotoInput.files?.[0];
+        if (nomeEl) nomeEl.textContent = file ? `${file.name} · ${Math.ceil(file.size / 1024)} KB` : '';
+      });
+    }
+    selecionarCatalogoPreCadOrigem(window.__catalogoPreCad.origem || 'N');
+  } catch (err) {
+    console.error('[Pré-cadastro] Erro ao carregar config:', err);
+    selectFam.innerHTML = '<option value="">Erro ao carregar famílias</option>';
+  }
+}
+
+function obterDadosCatalogoPreCadastro() {
+  const selectFam = document.getElementById('catalogoPreCadFamilia');
+  const opt = selectFam?.selectedOptions?.[0];
+  const unidade = (document.getElementById('catalogoPreCadUnidade')?.value || '').trim();
+  const tipoItem = (document.getElementById('catalogoPreCadTipo')?.value || '').trim();
+  const familiaCodigo = String(opt?.value || '').trim();
+  const familiaTipo = String(opt?.dataset?.tipo || 'MP').trim() || 'MP';
+  const familiaNome = String(opt?.dataset?.nome || opt?.textContent || '').trim();
+  const origem = window.__catalogoPreCad?.origem === 'I' ? 'I' : 'N';
+  const codigoPrefixo = montarPrefixoCatalogoPreCad(familiaCodigo, familiaTipo, origem);
+  const fotoFile = document.getElementById('catalogoPreCadFoto')?.files?.[0] || null;
+  return {
+    familia_codigo: familiaCodigo,
+    familia_tipo: familiaTipo,
+    familia_nome: familiaNome,
+    origem,
+    unidade,
+    tipo_item_omie: tipoItem,
+    codigo_prefixo: codigoPrefixo === '—' ? '' : codigoPrefixo,
+    fotoFile,
+    pre_cadastro_completo: true
+  };
+}
+
+function limparCatalogoPreCadastro() {
+  const selectFam = document.getElementById('catalogoPreCadFamilia');
+  if (selectFam) selectFam.value = '';
+  const selectUn = document.getElementById('catalogoPreCadUnidade');
+  if (selectUn) selectUn.value = '';
+  const selectTipo = document.getElementById('catalogoPreCadTipo');
+  if (selectTipo) selectTipo.value = '';
+  const fotoInput = document.getElementById('catalogoPreCadFoto');
+  if (fotoInput) fotoInput.value = '';
+  const fotoNome = document.getElementById('catalogoPreCadFotoNome');
+  if (fotoNome) fotoNome.textContent = '';
+  if (window.__catalogoPreCad) window.__catalogoPreCad.origem = 'N';
+  if (typeof selecionarCatalogoPreCadOrigem === 'function') selecionarCatalogoPreCadOrigem('N');
+  if (typeof atualizarPrefixoCatalogoPreCad === 'function') atualizarPrefixoCatalogoPreCad();
+}
+
+function validarCatalogoPreCadastro() {
+  const d = obterDadosCatalogoPreCadastro();
+  if (!d.familia_codigo) return 'Selecione a família do pré-cadastro.';
+  if (!d.unidade) return 'Selecione a unidade do pré-cadastro.';
+  if (!d.tipo_item_omie) return 'Selecione o tipo de item (Omie).';
+  return null;
 }
 
 // ========== FUNÇÕES PARA GERENCIAR KEYWORDS/TAGS DE DESCRIÇÃO ==========
@@ -54987,6 +56261,13 @@ async function adicionarProdutoNaoCadastradoAoCarrinho(event) {
     return;
   }
 
+  const erroPreCad = validarCatalogoPreCadastro();
+  if (erroPreCad) {
+    alert(erroPreCad);
+    return;
+  }
+  const preCad = obterDadosCatalogoPreCadastro();
+
   // Feedback visual no botão durante processamento
   const btn = event?.target?.closest('button');
   if (btn) {
@@ -55086,6 +56367,17 @@ async function adicionarProdutoNaoCadastradoAoCarrinho(event) {
       }
     }
 
+    // Foto do pré-cadastro (opcional)
+    let fotoUrlPreCad = null;
+    if (preCad.fotoFile) {
+      try {
+        fotoUrlPreCad = await uploadCatalogoAnexo(preCad.fotoFile, `PRECAD-${Date.now()}`);
+      } catch (errFoto) {
+        console.error('[Catálogo] Erro ao enviar foto do pré-cadastro:', errFoto);
+        alert(`Erro ao enviar a foto do produto. Continuando sem a foto.`);
+      }
+    }
+
     const linksCatalogo = Array.isArray(window.catalogoLinksAcumulados)
       ? window.catalogoLinksAcumulados.filter(l => l && String(l).trim().length > 0)
       : [];
@@ -55106,7 +56398,16 @@ async function adicionarProdutoNaoCadastradoAoCarrinho(event) {
       observacao_recebimento: observacaoRecebimento,
       valor_gasto: valorGastoRegistroRapido,
       anexos: anexosUrls,
-      link: linksCatalogo
+      link: linksCatalogo,
+      pre_cadastro_completo: true,
+      familia_codigo: preCad.familia_codigo,
+      familia_tipo: preCad.familia_tipo,
+      familia_nome: preCad.familia_nome,
+      origem: preCad.origem,
+      unidade: preCad.unidade,
+      tipo_item_omie: preCad.tipo_item_omie,
+      codigo_prefixo: preCad.codigo_prefixo,
+      foto_url: fotoUrlPreCad
     };
 
     console.log('[Catálogo] Enviando para /api/compras/sem-cadastro:', payload);
@@ -55148,6 +56449,7 @@ async function adicionarProdutoNaoCadastradoAoCarrinho(event) {
 
     // Limpa os campos após adicionar
     limparDescricaoKeywords();
+    limparCatalogoPreCadastro();
     const objetivoGlobal = document.getElementById('catalogoObservacaoGlobal');
     const obsRecebimentoInput = document.getElementById('catalogoObservacaoRecebimento');
     if (objetivoGlobal) objetivoGlobal.value = '';
@@ -57840,10 +59142,8 @@ function usuarioPodeGerenciarSolicitacao(departamento) {
 }
 
 function usuarioPodeGerarPedidoCompra(departamento) {
-  const username = window.__sessionUser?.username ||
-    document.getElementById('userNameDisplay')?.textContent?.trim() || '';
+  const username = window.__sessionUser?.username || document.getElementById('userNameDisplay')?.textContent?.trim() || '';
   const departamentoNormalizado = String(departamento || '').trim().toLowerCase();
-
   return permissoesAcessoCache.some(p =>
     p.tipo_botao === 'pedido_compra' &&
     String(p.responsavel_username || '').trim().toLowerCase() === String(username).trim().toLowerCase() &&
@@ -57962,6 +59262,8 @@ async function abrirModalAprovacaoRequisicao() {
       alert('Nenhuma solicitação aguardando aprovação');
       return;
     }
+
+    window._itensAprovacaoModal = itensAprovacao;
 
     // Debug: verifica estrutura dos dados
     console.log('[Modal Aprovação] Exemplo de item:', itensAprovacao[0]);
@@ -58256,19 +59558,58 @@ async function aprovarItemRequisicao(itemId, tableSource, retornoCotacaoRawOrigi
   const novoStatusSolicitacao = retornoCotacaoEhSimSolicitacao ? 'aguardando cotação' : 'Requisição';
 
   const mensagemConfirmacao = isSemCadastro
-    ? `Deseja aprovar este item? O status será atualizado para ${retornoCotacaoEhSim ? 'aguardando cotação' : 'Organizando requisição'}.`
+    ? `Deseja aprovar este item? O status será atualizado para ${retornoCotacaoEhSim ? 'aguardando cotação' : 'Requisição Omie'}.`
     : 'Deseja aprovar este item? Será criada uma requisição na Omie e o item será movido para "Pedido de compra".';
 
   if (!confirm(mensagemConfirmacao)) return;
 
   try {
     if (isSemCadastro) {
-      const novoStatus = retornoCotacaoEhSim ? 'aguardando cotação' : 'Analise de cadastro';
+      if (retornoCotacaoEhSim) {
+        const resp = await fetch(`/api/compras/sem-cadastro/${itemId}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ status: 'aguardando cotação' })
+        });
+        if (!resp.ok) {
+          const error = await resp.json();
+          throw new Error(error.error || 'Falha ao atualizar status');
+        }
+        alert('Item aprovado e status atualizado para aguardando cotação.');
+        removerItemModalAprovacao(itemId);
+        atualizarKanbanMinhasAposMudanca(itemId, 'aguardando cotação');
+        return;
+      }
+
+      // Sem cotação: pré-cadastro gera código + Omie e cria requisição; legado vai para Análise
+      const itemLocal = (window._itensAprovacaoModal || []).find((i) => Number(i?.id) === Number(itemId))
+        || null;
+      const ehPreCadastro = itemLocal?.pre_cadastro_completo === true
+        || /^PRECAD/i.test(String(itemLocal?.produto_codigo || '').trim());
+
+      if (ehPreCadastro) {
+        const respReq = await fetch(`/api/compras/sem-cadastro/${itemId}/criar-requisicao-omie`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ itens: [] })
+        });
+        const dataReq = await respReq.json().catch(() => ({}));
+        if (!respReq.ok || !dataReq.ok) {
+          throw new Error(dataReq.error || 'Falha ao criar requisição Omie do pré-cadastro');
+        }
+        alert(`Item aprovado!\nRequisição Omie: ${dataReq.codIntReqCompra || dataReq.numero_pedido || '-'}`);
+        removerItemModalAprovacao(itemId);
+        atualizarKanbanMinhasAposMudanca(itemId, 'Requisição');
+        return;
+      }
+
       const resp = await fetch(`/api/compras/sem-cadastro/${itemId}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
-        body: JSON.stringify({ status: novoStatus })
+        body: JSON.stringify({ status: 'Analise de cadastro' })
       });
 
       if (!resp.ok) {
@@ -58276,9 +59617,9 @@ async function aprovarItemRequisicao(itemId, tableSource, retornoCotacaoRawOrigi
         throw new Error(error.error || 'Falha ao atualizar status');
       }
 
-      alert(`Item aprovado e status atualizado para ${novoStatus}.`);
+      alert('Item aprovado e status atualizado para Análise de cadastro.');
       removerItemModalAprovacao(itemId);
-      atualizarKanbanMinhasAposMudanca(itemId, novoStatus);
+      atualizarKanbanMinhasAposMudanca(itemId, 'Analise de cadastro');
       return;
     }
 
@@ -58517,25 +59858,67 @@ async function aprovarGrupoRequisicao(itemIdsCsv, grupoRequisicaoEncoded = '', t
 
     let totalSemCadastroCotacao = 0;
     let totalSemCadastroAnalise = 0;
+    let totalSemCadastroRequisicao = 0;
+    const idsPreCadastroJaProcessados = new Set();
+
     for (const item of itensSemCadastro) {
+      const itemIdNum = Number(item.id);
+      if (idsPreCadastroJaProcessados.has(itemIdNum)) continue;
+
       const retornoCotacaoRaw = String(item?.retorno_cotacao || '').trim();
       const vaiCotacao = retornoCotacaoIndicaCotacao(retornoCotacaoRaw, 'compras_sem_cadastro');
-      const novoStatus = vaiCotacao ? 'aguardando cotação' : 'Analise de cadastro';
+      const ehPreCadastro = item?.pre_cadastro_completo === true
+        || /^PRECAD/i.test(String(item?.produto_codigo || '').trim());
+
+      if (vaiCotacao) {
+        const respSemCadastro = await fetch(`/api/compras/sem-cadastro/${item.id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ status: 'aguardando cotação' })
+        });
+        if (!respSemCadastro.ok) {
+          const errorSemCadastro = await respSemCadastro.json().catch(() => ({}));
+          throw new Error(errorSemCadastro.error || `Falha ao aprovar item sem cadastro ${item.id}`);
+        }
+        totalSemCadastroCotacao += 1;
+        continue;
+      }
+
+      if (ehPreCadastro) {
+        // Uma chamada por grupo: o backend finaliza todos os PRECAD do grupo e cria 1 requisição Omie
+        const respReq = await fetch(`/api/compras/sem-cadastro/${item.id}/criar-requisicao-omie`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ itens: [] })
+        });
+        const dataReq = await respReq.json().catch(() => ({}));
+        if (!respReq.ok || !dataReq.ok) {
+          throw new Error(dataReq.error || `Falha ao criar requisição Omie do pré-cadastro ${item.id}`);
+        }
+        const grupo = String(item.grupo_requisicao || '').trim();
+        itensSemCadastro.forEach((outro) => {
+          if (String(outro.grupo_requisicao || '').trim() === grupo) {
+            idsPreCadastroJaProcessados.add(Number(outro.id));
+            totalSemCadastroRequisicao += 1;
+          }
+        });
+        continue;
+      }
 
       const respSemCadastro = await fetch(`/api/compras/sem-cadastro/${item.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
-        body: JSON.stringify({ status: novoStatus })
+        body: JSON.stringify({ status: 'Analise de cadastro' })
       });
 
       if (!respSemCadastro.ok) {
         const errorSemCadastro = await respSemCadastro.json().catch(() => ({}));
         throw new Error(errorSemCadastro.error || `Falha ao aprovar item sem cadastro ${item.id}`);
       }
-
-      if (vaiCotacao) totalSemCadastroCotacao += 1;
-      else totalSemCadastroAnalise += 1;
+      totalSemCadastroAnalise += 1;
     }
 
     const itensRequisicao = resultadoSolicitacao.itens_requisicao || [];
@@ -58549,10 +59932,11 @@ async function aprovarGrupoRequisicao(itemIdsCsv, grupoRequisicaoEncoded = '', t
     if (itensCotacao.length > 0) {
       mensagem += `\nItens aguardando cotação: ${itensCotacao.length}`;
     }
-    if (totalSemCadastroCotacao > 0 || totalSemCadastroAnalise > 0) {
+    if (totalSemCadastroCotacao > 0 || totalSemCadastroAnalise > 0 || totalSemCadastroRequisicao > 0) {
       mensagem += `\n\nItens sem cadastro aprovados via grupo:`;
       if (totalSemCadastroCotacao > 0) mensagem += `\n- Aguardando cotação: ${totalSemCadastroCotacao}`;
-      if (totalSemCadastroAnalise > 0) mensagem += `\n- Organizando requisição: ${totalSemCadastroAnalise}`;
+      if (totalSemCadastroRequisicao > 0) mensagem += `\n- Requisição Omie (pré-cadastro): ${totalSemCadastroRequisicao}`;
+      if (totalSemCadastroAnalise > 0) mensagem += `\n- Análise de cadastro (legado): ${totalSemCadastroAnalise}`;
     }
 
     alert(mensagem);
@@ -59304,12 +60688,14 @@ function montarCardsKanbanMinhas(status, itens) {
     const todosIds = itensGrupo.map(i => i.id).join(',');
 
     const listaProdutos = itensGrupo.map((item, itemIdx) => {
-      const codigo = item.produto_codigo || '-';
+      const codigoBruto = String(item.produto_codigo || '').trim();
+      const ehPreCad = item.pre_cadastro_completo === true || /^PRECAD/i.test(codigoBruto);
+      const codigo = ehPreCad ? 'Pré-cadastro' : (codigoBruto || '-');
       const desc = item.produto_descricao || item.descricao || '-';
       const tooltipId = `tooltip-${status.replace(/\s+/g, '-')}-${chaveGrupo}-${itemIdx}`;
       return `
         <div style="margin-bottom:4px;padding-bottom:4px;${itensGrupo.length > 1 ? 'border-bottom:1px solid #f3f4f6;' : ''}">
-          <div style="font-size:12px;color:#374151;font-weight:600;">${escapeHtml(codigo)}</div>
+          <div style="font-size:12px;color:${ehPreCad ? '#1d4ed8' : '#374151'};font-weight:600;">${escapeHtml(codigo)}</div>
           <div>
             <div
               class="desc-truncada"
@@ -65273,8 +66659,12 @@ async function abrirModalNfePedidos(nIdReceb, numeroNfeRef = '', statusRef = '')
       </div>
     `;
 
+    // A NF-e usa o mesmo esqueleto operacional dos pedidos; os dados fiscais ficam
+    // em uma faixa compacta para preservar a maior área possível para os itens.
     const iniciaisFornecedorNfe = String(dados?.cNome || 'NF').trim().slice(0, 2).toUpperCase();
-    const possiveisComprasNfe = Array.isArray(dados?.possiveisComprasMesmoValor) ? dados.possiveisComprasMesmoValor : [];
+    const possiveisComprasNfe = Array.isArray(dados?.possiveisComprasMesmoValor)
+      ? dados.possiveisComprasMesmoValor
+      : [];
     infoEl.innerHTML = `
       <section class="cp-sheet-summary cp-nfe-summary" aria-label="Resumo da nota fiscal">
         <div class="cp-sheet-avatar" aria-hidden="true">${escapeHtml(iniciaisFornecedorNfe)}</div>
@@ -65290,7 +66680,15 @@ async function abrirModalNfePedidos(nIdReceb, numeroNfeRef = '', statusRef = '')
         <div><span>Documento</span><strong>NF-e Nº ${escapeHtml(String(dados?.cNumeroNFe || '-'))}</strong></div>
         <div><span>Itens</span><strong>${Array.isArray(dados?.itens) ? dados.itens.length : 0}</strong></div>
         <div><span>Valor da NF-e</span><strong>${escapeHtml(formatarValorMoedaNfePedidos(dados?.nValorNFe))}</strong></div>
-        <div class="cp-nfe-purchase-control"><label for="modalNfePedidosComprasSelect">Documento de compras?</label><select id="modalNfePedidosComprasSelect"><option value="" ${normalizarComprasNfe(dados?.compras) === '' ? 'selected' : ''}>Selecione</option><option value="sim" ${normalizarComprasNfe(dados?.compras) === 'sim' ? 'selected' : ''}>Sim</option><option value="nao" ${normalizarComprasNfe(dados?.compras) === 'nao' ? 'selected' : ''}>Não</option></select><small id="modalNfePedidosComprasMsg"></small></div>
+        <div class="cp-nfe-purchase-control">
+          <label for="modalNfePedidosComprasSelect">Documento de compras?</label>
+          <select id="modalNfePedidosComprasSelect">
+            <option value="" ${normalizarComprasNfe(dados?.compras) === '' ? 'selected' : ''}>Selecione</option>
+            <option value="sim" ${normalizarComprasNfe(dados?.compras) === 'sim' ? 'selected' : ''}>Sim</option>
+            <option value="nao" ${normalizarComprasNfe(dados?.compras) === 'nao' ? 'selected' : ''}>Não</option>
+          </select>
+          <small id="modalNfePedidosComprasMsg"></small>
+        </div>
       </section>
       <section class="cp-nfe-document-meta">
         <div><span>Chave da NF-e</span>${chaveNfeHtml}</div>
@@ -81131,6 +82529,8 @@ window.verOperacao = function(osId) {
   const cntAguardando = document.getElementById('kanbanAguardandoCount');
   const colInspecaoFinal = document.getElementById('kanbanInspecaoFinal');
   const cntInspecaoFinal = document.getElementById('kanbanInspecaoFinalCount');
+  const colEmbalagem = document.getElementById('kanbanEmbalagem');
+  const cntEmbalagem = document.getElementById('kanbanEmbalagemCount');
 
   // Nomes exibidos no kanban Registrar produção — ao criar coluna nova, incluir aqui
   const PRODUCAO_KANBAN_COLUNAS = [
@@ -81140,6 +82540,7 @@ window.verOperacao = function(osId) {
     { key: 'produzindo', nome: 'Montagem eletrica' },
     { key: 'teste', nome: 'Teste' },
     { key: 'inspecao_final', nome: 'Inspeção final' },
+    { key: 'embalagem', nome: 'Embalagem' },
   ];
 
   function producaoNomeKanbanPorKey(colKey) {
@@ -81347,7 +82748,13 @@ window.verOperacao = function(osId) {
 
     const statuses = regs.map(r => normStatusKanban(r.status)).filter(Boolean);
     if (statuses.includes('finalizado')) return 'finalizado';
-    if (statuses.includes('inspecao final') || statuses.includes('teste ok')) return 'inspecao_final';
+    if (statuses.includes('embalagem')) return 'embalagem';
+    // Teste final / Inspeção final / Teste OK → mesma coluna Inspeção final
+    if (
+      statuses.includes('inspecao final')
+      || statuses.includes('teste ok')
+      || statuses.includes('teste final')
+    ) return 'inspecao_final';
     if (statuses.includes('teste')) return 'teste';
     if (statuses.includes('montagem eletrica')) return 'produzindo';
     if (statuses.includes('montagem hermetica')) return 'solicitado';
@@ -81364,6 +82771,7 @@ window.verOperacao = function(osId) {
     const ops = (ordens || []).map(op => ({ op_producao_id: op.id }));
     if (!ops.length) {
       window._montaRiStatusPorOp = {};
+      window._montaRiPorOp = {};
       window._producaoKanbanRiHabilitado = false;
       return;
     }
@@ -81375,12 +82783,16 @@ window.verOperacao = function(osId) {
         body: JSON.stringify({ ops }),
       });
       const data = await resp.json();
+      window._montaRiPorOp = (resp.ok && data.ok && data.ri_por_op)
+        ? data.ri_por_op
+        : {};
       window._montaRiStatusPorOp = (resp.ok && data.ok && data.status_por_op)
         ? data.status_por_op
         : {};
       window._producaoKanbanRiHabilitado = true;
     } catch (_) {
       window._montaRiStatusPorOp = {};
+      window._montaRiPorOp = {};
       window._producaoKanbanRiHabilitado = false;
     }
   }
@@ -81422,7 +82834,7 @@ window.verOperacao = function(osId) {
 
   async function carregarTemposPostoPorOps(ordens, progOverride) {
     const prog = Array.isArray(progOverride) ? progOverride : programacaoCarregada;
-    const postoCols = ['solicitado', 'produzindo', 'teste', 'inspecao_final'];
+    const postoCols = ['solicitado', 'produzindo', 'teste', 'inspecao_final', 'embalagem'];
     const ops = (ordens || []).filter(op => postoCols.includes(opColunaAtual(op))).map((op) => {
       const reg = (prog || []).find((r) =>
         Number(r.op_producao_id) === Number(op.id)
@@ -81500,11 +82912,17 @@ window.verOperacao = function(osId) {
   function opMontagemRiLiberada(op, colKey) {
     if (!window._producaoVerificarRiKanban) return true;
     if (colKey === 'programado') return true;
+    // Liberada quando checkbox RI em Kanban_programacao está desativado
+    const riMap = window._montaRiPorOp || {};
+    if (Object.prototype.hasOwnProperty.call(riMap, String(op.id))) {
+      return !riMap[String(op.id)];
+    }
+    // Fallback legado: compara status RI com posto do kanban
     const nomeKanban = producaoNomeKanbanPorKey(colKey);
     if (!nomeKanban) return true;
     const map = window._montaRiStatusPorOp || {};
     const riStatus = map[String(op.id)] || '';
-    if (!riStatus) return false;
+    if (!riStatus || riStatus === 'pendente') return riStatus !== 'pendente';
     return normStatusKanban(riStatus) === normStatusKanban(nomeKanban);
   }
 
@@ -81898,6 +83316,8 @@ window.verOperacao = function(osId) {
       'Nenhuma OP em Teste.', false, filtroCodigoProduto);
     renderKanbanCol(colInspecaoFinal, cntInspecaoFinal, ordens, 'inspecao_final',
       'Nenhuma OP em Inspeção final.', false, filtroCodigoProduto);
+    renderKanbanCol(colEmbalagem, cntEmbalagem, ordens, 'embalagem',
+      'Nenhuma OP em Embalagem.', false, filtroCodigoProduto);
 
     attachProducaoKanbanActionButtons('#registrarProducaoPane', ordens);
     attachOpCardClickHandlers('#registrarProducaoPane', ordens);
@@ -82791,6 +84211,10 @@ window.verOperacao = function(osId) {
         renderKanbanCol(colInspecaoFinal, cntInspecaoFinal, ordensCarregadas, 'inspecao_final',
           'Nenhuma OP em Inspeção final.', false, filtroCodigoProduto);
       }
+      if (keys.includes('embalagem')) {
+        renderKanbanCol(colEmbalagem, cntEmbalagem, ordensCarregadas, 'embalagem',
+          'Nenhuma OP em Embalagem.', false, filtroCodigoProduto);
+      }
       attachProducaoKanbanActionButtons('#registrarProducaoPane', ordensCarregadas);
       attachOpCardClickHandlers('#registrarProducaoPane', ordensCarregadas);
       return true;
@@ -82885,7 +84309,7 @@ window.verOperacao = function(osId) {
     }
     let op = encontrarOpPorEtiqueta(dados.lote, dados.codigo);
     if (!op) {
-      await recarregarColunasKanban(['programado', 'solicitado', 'produzindo', 'teste', 'inspecao_final']);
+      await recarregarColunasKanban(['programado', 'solicitado', 'produzindo', 'teste', 'inspecao_final', 'embalagem']);
       op = encontrarOpPorEtiqueta(dados.lote, dados.codigo);
     }
     if (!op) {
@@ -83027,7 +84451,7 @@ window.verOperacao = function(osId) {
     return cols[idx - 1];
   };
   window._producaoColunasRetrocederOp = function () {
-    return ['solicitado', 'produzindo', 'teste', 'inspecao_final'];
+    return ['solicitado', 'produzindo', 'teste', 'inspecao_final', 'embalagem'];
   };
   window._producaoMsgVaziaColuna = function (colKey) {
     const msgs = {
@@ -83036,6 +84460,7 @@ window.verOperacao = function(osId) {
       produzindo: 'Nenhuma OP em Montagem eletrica.',
       teste: 'Nenhuma OP em Teste.',
       inspecao_final: 'Nenhuma OP em Inspeção final.',
+      embalagem: 'Nenhuma OP em Embalagem.',
     };
     return msgs[colKey] || `Nenhuma OP em ${producaoNomeKanbanPorKey(colKey) || colKey}.`;
   };
@@ -83064,6 +84489,7 @@ window.verOperacao = function(osId) {
     produzindo:     { bg: '#052e16', border: '#166534', dot: '#22c55e', title: '#86efac', badgeBg: '#14532d', badgeTxt: '#bbf7d0', bodyBg: 'rgba(34,197,94,.04)' },
     teste:          { bg: '#431407', border: '#9a3412', dot: '#f97316', title: '#fdba74', badgeBg: '#7c2d12', badgeTxt: '#fed7aa', bodyBg: 'rgba(249,115,22,.04)' },
     inspecao_final: { bg: '#1e1b4b', border: '#6d28d9', dot: '#a855f7', title: '#d8b4fe', badgeBg: '#4c1d95', badgeTxt: '#e9d5ff', bodyBg: 'rgba(168,85,247,.04)' },
+    embalagem:      { bg: '#064e3b', border: '#059669', dot: '#34d399', title: '#6ee7b7', badgeBg: '#065f46', badgeTxt: '#a7f3d0', bodyBg: 'rgba(52,211,153,.04)' },
   };
   const MONTA_COL_DEFAULT = { bg: '#1c1917', border: '#44403c', dot: '#78716c', title: '#d6d3d1', badgeBg: '#292524', badgeTxt: '#d6d3d1', bodyBg: 'rgba(120,113,108,.04)' };
 
@@ -83083,6 +84509,7 @@ window.verOperacao = function(osId) {
       { key: 'produzindo', nome: 'Montagem eletrica' },
       { key: 'teste', nome: 'Teste' },
       { key: 'inspecao_final', nome: 'Inspeção final' },
+      { key: 'embalagem', nome: 'Embalagem' },
     ];
   }
 
@@ -83295,6 +84722,7 @@ window.verOperacao = function(osId) {
     produzindo:     { bg: '#052e16', border: '#166534', dot: '#22c55e', title: '#86efac', badgeBg: '#14532d', badgeTxt: '#bbf7d0', bodyBg: 'rgba(34,197,94,.04)' },
     teste:          { bg: '#431407', border: '#9a3412', dot: '#f97316', title: '#fdba74', badgeBg: '#7c2d12', badgeTxt: '#fed7aa', bodyBg: 'rgba(249,115,22,.04)' },
     inspecao_final: { bg: '#1e1b4b', border: '#6d28d9', dot: '#a855f7', title: '#d8b4fe', badgeBg: '#4c1d95', badgeTxt: '#e9d5ff', bodyBg: 'rgba(168,85,247,.04)' },
+    embalagem:      { bg: '#064e3b', border: '#059669', dot: '#34d399', title: '#6ee7b7', badgeBg: '#065f46', badgeTxt: '#a7f3d0', bodyBg: 'rgba(52,211,153,.04)' },
   };
   const RI_COL_DEFAULT = { bg: '#1c1917', border: '#44403c', dot: '#78716c', title: '#d6d3d1', badgeBg: '#292524', badgeTxt: '#d6d3d1', bodyBg: 'rgba(120,113,108,.04)' };
 
@@ -83314,6 +84742,7 @@ window.verOperacao = function(osId) {
       { key: 'produzindo', nome: 'Montagem eletrica' },
       { key: 'teste', nome: 'Teste' },
       { key: 'inspecao_final', nome: 'Inspeção final' },
+      { key: 'embalagem', nome: 'Embalagem' },
     ];
   }
 
@@ -84080,6 +85509,7 @@ window.verOperacao = function(osId) {
         { key: 'produzindo', nome: 'Montagem eletrica' },
         { key: 'teste', nome: 'Teste' },
         { key: 'inspecao_final', nome: 'Inspeção final' },
+        { key: 'embalagem', nome: 'Embalagem' },
       ];
     }
     const idx = cols.findIndex((c) =>
@@ -86039,12 +87469,14 @@ window.verOperacao = function(osId) {
     let riCheckData = null;
     let riDadosProntos = false;
     let riJaRegistrado = false;
+    let riAtivo = false;
     let riProdutoMeta = null;
 
     function atualizarBtnRegistrarVisivel() {
       if (!btnRegistrar || !isRiAvancar) return;
       if (spinnerRegistrarEl?.style.display === 'flex') return;
-      if (riJaRegistrado) {
+      // Botão Registrar RI só aparece com checkbox RI ativo no Kanban_programacao
+      if (!riAtivo || riJaRegistrado) {
         btnRegistrar.style.display = 'none';
         return;
       }
@@ -86173,15 +87605,11 @@ window.verOperacao = function(osId) {
           <div><span style="color:#64748b;">Código:</span> <b>${escapeHtml(check.codigo || codigo)}</b></div>
           ${check.codigo_produto ? `<div><span style="color:#64748b;">ID produto:</span> <b>${escapeHtml(String(check.codigo_produto))}</b></div>` : ''}
           <div><span style="color:#64748b;">Status:</span> <b style="color:${stCor};">${escapeHtml(st)}</b></div>
-          <div><span style="color:#64748b;">Usuário:</span> <b>${escapeHtml(check.usuario || '—')}</b></div>
         </div>
         ${check.descricao ? `<div style="margin-top:8px;color:#cbd5e1;">${escapeHtml(check.descricao)}</div>` : ''}`;
       if (btnRegistrar && isRiAvancar) {
-        const bloqueado = kanbanLocal
-          && normStKanban(st) === normStKanban(kanbanLocal);
-        riJaRegistrado = bloqueado;
-        btnRegistrar.disabled = bloqueado;
-        btnRegistrar.style.opacity = bloqueado ? '0.5' : '1';
+        btnRegistrar.disabled = !riAtivo || riJaRegistrado;
+        btnRegistrar.style.opacity = (!riAtivo || riJaRegistrado) ? '0.5' : '1';
       }
       atualizarBtnRegistrarVisivel();
     };
@@ -86200,6 +87628,7 @@ window.verOperacao = function(osId) {
     const carregar = async () => {
       riDadosProntos = false;
       riJaRegistrado = false;
+      riAtivo = false;
       riCheckId = null;
       riCheckData = null;
       atualizarBtnRegistrarVisivel();
@@ -86223,14 +87652,17 @@ window.verOperacao = function(osId) {
         const data = await resp.json();
         if (!resp.ok || !data.ok) throw new Error(data.error || `Erro ${resp.status}`);
         riProdutoMeta = data.produto || null;
-        riJaRegistrado = !!data.ja_registrado;
+        riAtivo = data.ri_ativo === true;
+        riJaRegistrado = !riAtivo || !!data.ja_registrado;
         renderInfo(data.check || null);
         renderLista(data.verificacoes);
         renderListaNiq(data.ocorrencias || []);
-        statusEl.textContent = data.template_apenas
-          ? 'Verificações carregadas — clique em Registrar RI para gravar.'
-          : (riJaRegistrado ? 'RI já registrado neste posto.' : '');
-        if (riJaRegistrado) statusEl.style.color = '#4ade80';
+        statusEl.textContent = !riAtivo
+          ? 'RI já liberada (checkbox desativado).'
+          : (data.template_apenas
+            ? 'Verificações carregadas — clique em Registrar RI para gravar.'
+            : (riJaRegistrado ? 'RI já registrado neste posto.' : ''));
+        if (!riAtivo || riJaRegistrado) statusEl.style.color = '#4ade80';
         else statusEl.style.color = '#94a3b8';
       } catch (err) {
         statusEl.textContent = err.message || 'Falha ao carregar RI.';
@@ -86423,7 +87855,7 @@ window.verOperacao = function(osId) {
     btnOcorrencia?.addEventListener('click', abrirModalRegistrarOcorrencia);
 
     btnRegistrar?.addEventListener('click', async () => {
-      if (!riDadosProntos || riJaRegistrado) return;
+      if (!riDadosProntos || riJaRegistrado || !riAtivo) return;
       if (isRiAvancar) {
         const postoLabel = kanbanLocal || 'atual';
         if (!confirm(`Confirmar registro do RI no posto ${postoLabel}?`)) return;
@@ -86475,6 +87907,8 @@ window.verOperacao = function(osId) {
           });
           const dataLib = await respLib.json();
           if (!respLib.ok || !dataLib.ok) throw new Error(dataLib.error || `Erro ${respLib.status}`);
+          riAtivo = false;
+          riJaRegistrado = true;
           renderInfo(dataLib.check);
           renderLista(dataLib.verificacoes);
           const postoRegistrado = dataLib.kanban_status || kanbanLocal || 'atual';
@@ -86754,7 +88188,7 @@ window.verOperacao = function(osId) {
     if (!lista.length) throw new Error('Nenhuma OP selecionada.');
     const retrocedeCols = (typeof window._producaoColunasRetrocederOp === 'function')
       ? window._producaoColunasRetrocederOp()
-      : ['solicitado', 'produzindo', 'teste', 'inspecao_final'];
+      : ['solicitado', 'produzindo', 'teste', 'inspecao_final', 'embalagem'];
     if (!retrocedeCols.includes(colKey)) {
       throw new Error('Retroceder OP não está disponível neste kanban.');
     }
@@ -87049,7 +88483,7 @@ window.verOperacao = function(osId) {
     const colKeyMonta = options.colKey || '';
     const retrocedeCols = (typeof window._producaoColunasRetrocederOp === 'function')
       ? window._producaoColunasRetrocederOp()
-      : ['solicitado', 'produzindo', 'teste', 'inspecao_final'];
+      : ['solicitado', 'produzindo', 'teste', 'inspecao_final', 'embalagem'];
     const mostrarRetrocederOp = modoRegistrarProducao
       && !modoMontagem
       && !modoRiRegistro
@@ -87059,16 +88493,31 @@ window.verOperacao = function(osId) {
       ? (window._producaoAnteriorKanbanPorKey(colKeyMonta)?.nome || 'Programado')
       : '';
     const mostrarImprimirOpMonta = modoMontagem && colKeyMonta === 'programado';
-    const mostrarFinalizarMonta = modoMontagem && colKeyMonta !== 'programado' && colKeyMonta !== 'finalizado';
+    const mostrarFinalizarMonta = modoMontagem
+      && colKeyMonta !== 'programado'
+      && colKeyMonta !== 'finalizado'
+      && colKeyMonta !== 'embalagem';
     const mostrarParadaMonta = mostrarFinalizarMonta;
     const mostrarImprimirOp = !modoMontagem && !modoRiRegistro && colKeyMonta === 'programado';
-    const colsFichaTecnica = ['programado', 'solicitado', 'produzindo', 'teste', 'inspecao_final'];
+    const colsFichaTecnica = ['programado', 'solicitado', 'produzindo', 'teste', 'inspecao_final', 'embalagem'];
     const mostrarImprimirFicha = modoRegistrarProducao
       && !modoMontagem
       && !modoRiRegistro
       && !somenteEstrutura
       && colsFichaTecnica.includes(colKeyMonta);
-    const mostrarRi = modoRiRegistro || (!modoMontagem && (colKeyMonta === 'solicitado' || colKeyMonta === 'produzindo' || colKeyMonta === 'teste' || colKeyMonta === 'inspecao_final') && ops.length === 1);
+    const programacaoAcoes = (typeof window._montaProgramacaoCarregada === 'function')
+      ? window._montaProgramacaoCarregada()
+      : (typeof window._producaoProgramacaoCarregada === 'function'
+        ? window._producaoProgramacaoCarregada()
+        : []);
+    const op0Acoes = ops && ops[0];
+    const regRiAcoes = op0Acoes && (programacaoAcoes || []).find((r) =>
+      Number(r.op_producao_id) === Number(op0Acoes.id)
+      || String(r.numero_op || '').trim().toUpperCase() === String(op0Acoes.identificacao || '').trim().toUpperCase()
+    );
+    const riCheckboxAtivo = !!(regRiAcoes && (regRiAcoes.ri === true || regRiAcoes.ri === 't' || regRiAcoes.ri === 1 || regRiAcoes.ri === 'true'));
+    const mostrarRi = modoRiRegistro
+      || (!modoMontagem && riCheckboxAtivo && ops.length === 1);
     const tituloModal = options.titulo || 'Ações do grupo';
     const overlay = document.createElement('div');
     overlay.className = 'kanban-modal-overlay';

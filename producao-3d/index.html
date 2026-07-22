@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
   <title>Produção 3D — Esteira</title>
-  <link rel="stylesheet" href="style.css?v=4" />
+  <link rel="stylesheet" href="style.css?v=5" />
   <script type="importmap">
   {
     "imports": {
@@ -27,6 +27,11 @@
 
     <!-- Balões de RI pendente (mesmo critério do kanban RI — Registro de inspeção) -->
     <div id="riBalloons" class="ri-balloons" aria-hidden="true"></div>
+
+    <!-- Atualizar manual (sem poll automático — alivia o Postgres) -->
+    <button type="button" id="btnRefreshOps" class="btn-refresh-3d" hidden title="Atualizar OPs da esteira">
+      ↻ Atualizar
+    </button>
 
     <div id="hud" class="hud" hidden>
       <p class="hud-pc"><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> — andar &nbsp;·&nbsp; <kbd>Espaço</kbd>/<kbd>E</kbd> — subir &nbsp;·&nbsp; <kbd>C</kbd>/<kbd>Q</kbd> — descer</p>
@@ -91,6 +96,6 @@
     </div>
   </div>
 
-  <script type="module" src="main.js?v=13"></script>
+  <script type="module" src="main.js?v=14"></script>
 </body>
 </html>

@@ -5796,7 +5796,20 @@ async function sincronizarProdutoParaPostgres(produto) {
     produto.codInt_familia || null
   ];
 
-  await pool.query(sql, valores);
+  // set_config com is_local=true só vale dentro de transação — sem BEGIN o
+  // gatilho trg_guard_produtos_omie_webhook_only rejeita a escrita.
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query("SELECT set_config('app.produtos_omie_write_source', 'omie_sync', true)");
+    await client.query(sql, valores);
+    await client.query('COMMIT');
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw err;
+  } finally {
+    client.release();
+  }
 
   // Imagens NÃO são mais sincronizadas a partir da Omie.
   // O storage oficial das fotos é o Supabase (bucket produtos/Fotos_produto/<codigo_produto>),
@@ -6419,11 +6432,23 @@ app.post(['/webhooks/omie/produtos', '/api/webhooks/omie/produtos'],
 
       console.log(`[webhooks/omie/produtos] Processando evento "${topic}" para produto ${codigoProduto}`);
 
-      // Mesmo se o produto foi excluído/inativado na Omie, NÃO mexemos nas imagens locais
-      // (o Supabase é a fonte oficial; remoções devem ser feitas via UI de fotos).
-      if (topic === 'Produto.Excluido' || body.inativo === 'S' || body.bloqueado === 'S') {
-        console.log(`[webhooks/omie/produtos] Produto ${codigoProduto} excluído/inativo na Omie — imagens locais preservadas`);
-        return res.json({ ok: true, codigo_produto: codigoProduto, acao: 'inativo_sem_remover_imagens' });
+      // Excluído no Omie → marca fantasma local como inativo (não apaga imagens/anexos).
+      // bloqueado='S' ainda existe no Omie — segue o fluxo normal de consulta/upsert.
+      if (topic === 'Produto.Excluido' || body.inativo === 'S') {
+        const { marcarProdutosOmieInativos } = require('./utils/produtosOmieFantasmas');
+        const client = await pool.connect();
+        try {
+          const r = await marcarProdutosOmieInativos(client, [codigoProduto], 'omie_webhook');
+          console.log(`[webhooks/omie/produtos] Produto ${codigoProduto} marcado inativo (fantasma). marcados=${r.marcados}`);
+        } finally {
+          client.release();
+        }
+        return res.json({
+          ok: true,
+          codigo_produto: codigoProduto,
+          acao: 'marcado_inativo',
+          imagens: 'preservadas (Supabase)'
+        });
       }
 
       // Consulta produto na Omie para pegar imagens atualizadas
@@ -6457,8 +6482,13 @@ app.post(['/webhooks/omie/produtos', '/api/webhooks/omie/produtos'],
 
         const client = await pool.connect();
         try {
+          await client.query('BEGIN');
           await client.query("SELECT set_config('app.produtos_omie_write_source', 'omie_webhook', true)");
           await client.query('SELECT omie_upsert_produto($1::jsonb)', [upsertObj]);
+          await client.query('COMMIT');
+        } catch (txErr) {
+          await client.query('ROLLBACK').catch(() => {});
+          throw txErr;
         } finally {
           client.release();
         }
@@ -6929,6 +6959,7 @@ app.post(['/webhooks/omie/pedidos-compra', '/api/webhooks/omie/pedidos-compra'],
         await pool.query(`
           UPDATE compras.pedidos_omie
           SET inativo = true,
+              pendente_omie = FALSE,
               evento_webhook = $1,
               evento_webhook_message_id = $2,
               data_webhook = NOW(),
@@ -6994,7 +7025,9 @@ app.post(['/webhooks/omie/pedidos-compra', '/api/webhooks/omie/pedidos-compra'],
           });
 
           let pedido = null;
+          let pedidoAusenteNaOmie = false;
           const maxTentativas = 4;
+          const ehPedidoAusenteOmie = (txt) => /n[aã]o cadastrad/i.test(String(txt || ''));
 
           for (let tentativa = 1; tentativa <= maxTentativas; tentativa++) {
             if (!nCodPed) {
@@ -7018,6 +7051,11 @@ app.post(['/webhooks/omie/pedidos-compra', '/api/webhooks/omie/pedidos-compra'],
               const ehConsumoRedundante = /Consumo redundante|Client-[68]/i.test(errorText || '');
               console.error(`[webhooks/omie/pedidos-compra] Erro na API Omie: ${response.status} - ${errorText}`);
 
+              if (ehPedidoAusenteOmie(errorText)) {
+                pedidoAusenteNaOmie = true;
+                break;
+              }
+
               if (ehConsumoRedundante && tentativa < maxTentativas) {
                 const matchSegundos = errorText.match(/Aguarde (\d+) segundos/i);
                 const esperaMs = matchSegundos ? (parseInt(matchSegundos[1], 10) * 1000 + 1000) : (tentativa * 3000);
@@ -7036,6 +7074,11 @@ app.post(['/webhooks/omie/pedidos-compra', '/api/webhooks/omie/pedidos-compra'],
               const ehConsumoRedundante = /Consumo redundante|Client-[68]/i.test(`${faultstring} ${faultcode}`);
               console.error(`[webhooks/omie/pedidos-compra] Falha ConsultarPedCompra: ${faultstring}${faultcode ? ` (${faultcode})` : ''}`);
 
+              if (ehPedidoAusenteOmie(faultstring)) {
+                pedidoAusenteNaOmie = true;
+                break;
+              }
+
               if (ehConsumoRedundante && tentativa < maxTentativas) {
                 const matchSegundos = faultstring.match(/Aguarde (\d+) segundos/i);
                 const esperaMs = matchSegundos ? (parseInt(matchSegundos[1], 10) * 1000 + 1000) : (tentativa * 3000);
@@ -7050,9 +7093,39 @@ app.post(['/webhooks/omie/pedidos-compra', '/api/webhooks/omie/pedidos-compra'],
             break;
           }
 
+          // Omie confirmou que o pedido não existe mais — NÃO usar fallback do webhook
+          // (isso recriava "fantasma" e mantinha a badge Em compra sem pedido real).
+          if (pedidoAusenteNaOmie) {
+            await pool.query(`
+              UPDATE compras.pedidos_omie
+                 SET inativo = TRUE,
+                     pendente_omie = FALSE,
+                     evento_webhook = $1,
+                     evento_webhook_message_id = $2,
+                     data_webhook = NOW(),
+                     updated_at = NOW()
+               WHERE (n_cod_ped = $3)
+                  OR (TRIM(COALESCE(c_numero, '')) = TRIM($4))
+            `, [
+              `${topic || 'webhook'}:omie-ausente`,
+              messageId || null,
+              nCodPed || null,
+              cNumero || null
+            ]);
+            console.warn(`[webhooks/omie/pedidos-compra] Pedido ${identificadorPedido} inativado (Omie: não cadastrado)`);
+            return;
+          }
+
           if (!pedido || typeof pedido !== 'object') {
             console.warn(`[webhooks/omie/pedidos-compra] ConsultarPedCompra sem payload válido para ${identificadorPedido}. Usando fallback do webhook.`);
             pedido = montarPedidoFallbackDoWebhook();
+            // Fallback não confirma existência na Omie — evita reativar fantasma já inativado.
+            await upsertPedidoCompra(pedido, topic, messageId, { confirmadoOmie: false });
+            if (nCodPed) {
+              await sincronizarPedidoComSolicitacao(nCodPed);
+            }
+            console.log(`[webhooks/omie/pedidos-compra] Pedido ${nCodPed} ${acao} com fallback (sem confirmação Omie)`);
+            return;
           }
 
           // Webhook tem prioridade para etapa/numero quando vier preenchido,
@@ -7076,8 +7149,8 @@ app.post(['/webhooks/omie/pedidos-compra', '/api/webhooks/omie/pedidos-compra'],
             pedido.cabecalho.cNumero = numeroWebhook;
           }
 
-          // Atualiza no banco com messageId
-          await upsertPedidoCompra(pedido, topic, messageId);
+          // Atualiza no banco com messageId (pedido confirmado via ConsultarPedCompra)
+          await upsertPedidoCompra(pedido, topic, messageId, { confirmadoOmie: true });
 
           // Sincroniza com solicitacao_compras
           if (nCodPed) {
@@ -11943,6 +12016,11 @@ app.post('/api/etiquetas/recebimento/preview', express.json(), async (req, res) 
     const ignorados   = [];
     const gerados     = [];
 
+    await pool.query(`
+      ALTER TABLE public.produtos_omie
+      ADD COLUMN IF NOT EXISTS pir_vai_direto_identificacao BOOLEAN NOT NULL DEFAULT FALSE
+    `).catch(() => {});
+
     for (const item of itens) {
       const codProdRaw = String(item?.codigo_produto  || '').trim();
       const descProdRaw = String(item?.descricao_produto || '').trim();
@@ -11968,24 +12046,38 @@ app.post('/api/etiquetas/recebimento/preview', express.json(), async (req, res) 
       const qtdTxt   = sanitize(qtdRaw,  15);
       const unidTxt  = sanitize(unidRaw, 10);
 
+      // Produto marcado para pular PIR → já nasce liberado em Identificação
+      let pirInicial = false;
+      try {
+        const flag = await pool.query(
+          `SELECT COALESCE(pir_vai_direto_identificacao, FALSE) AS vai_direto
+             FROM public.produtos_omie
+            WHERE TRIM(COALESCE(codigo, '')) = TRIM($1)
+               OR TRIM(COALESCE(codigo_produto::text, '')) = TRIM($1)
+            LIMIT 1`,
+          [codProdRaw]
+        );
+        pirInicial = flag.rows[0]?.vai_direto === true;
+      } catch (_) { /* segue com pir=false */ }
+
       // ── Salva no banco primeiro para obter o ID ───────────────────────────
       let idEtq = null;
       try {
         const ins = await pool.query(
           `INSERT INTO etiqueta."ETQ_recebimento"
              (numero_nfe, numero_pedido, lote, codigo_produto, descricao_produto,
-              qtd, unidade, data_emissao, conteudo_zpl, usuario_criacao)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+              qtd, unidade, data_emissao, conteudo_zpl, usuario_criacao, pir)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
            RETURNING id`,
           [
             String(nfe), String(pedido), lote,
             codProdRaw, descProdRaw,
             qtdRaw !== '' ? Number(String(qtdRaw).replace(',', '.')) || null : null,
-            unidRaw, dataExibir, '', usuario,
+            unidRaw, dataExibir, '', usuario, pirInicial,
           ]
         );
         idEtq = ins.rows[0]?.id;
-        gerados.push({ cod: codProdRaw, id: idEtq });
+        gerados.push({ cod: codProdRaw, id: idEtq, pir: pirInicial });
       } catch (dbErr) {
         console.error('[etiquetas/recebimento/preview] falha ao salvar item:', codProdRaw, dbErr?.message || dbErr);
         continue;
@@ -12060,6 +12152,8 @@ app.get('/api/etiquetas/recebimento/pendentes', async (req, res) => {
       : `(er.oculto = false OR er.oculto IS NULL) AND (er.codigo_produto IS NULL OR er.codigo_produto NOT IN (${_aoSub}))`;
     // Só exibe no modal Etiquetas disponíveis após PIR aprovado
     const pirCond = `COALESCE(er.pir, false) = true`;
+    // qtd=0 = todas as etiquetas já impressas — não listar
+    const saldoCond = `COALESCE(er.qtd, 0) > 0`;
     const semMp = req.query.sem_mp === '1' || req.query.sem_mp === 'true';
     // MP = família Omie MP OU código no padrão xx.MP.x.xxxxx (2º segmento = MP)
     const isMpSql = `(
@@ -12100,6 +12194,7 @@ app.get('/api/etiquetas/recebimento/pendentes', async (req, res) => {
            FROM etiqueta."ETQ_recebimento" er
           WHERE ${ocultoCond}
             AND ${pirCond}
+            AND ${saldoCond}
             AND ${familiaMpCond}
             AND (er.lote ILIKE $1 OR er.codigo_produto ILIKE $1 OR er.descricao_produto ILIKE $1)
           ORDER BY er.impressa DESC, er.criado_em DESC
@@ -12115,6 +12210,7 @@ app.get('/api/etiquetas/recebimento/pendentes', async (req, res) => {
            FROM etiqueta."ETQ_recebimento" er
           WHERE ${ocultoCond}
             AND ${pirCond}
+            AND ${saldoCond}
             AND ${familiaMpCond}
           ORDER BY er.impressa DESC, er.criado_em DESC
           LIMIT 200`
@@ -12138,6 +12234,10 @@ app.get('/api/etiquetas/recebimento/pendentes-pir', async (req, res) => {
       ALTER TABLE public.produtos_omie
       ADD COLUMN IF NOT EXISTS produto_customizado BOOLEAN NOT NULL DEFAULT FALSE
     `).catch(() => {});
+    await pool.query(`
+      ALTER TABLE public.produtos_omie
+      ADD COLUMN IF NOT EXISTS pir_vai_direto_identificacao BOOLEAN NOT NULL DEFAULT FALSE
+    `).catch(() => {});
 
     const q = String(req.query.q || '').trim();
     const semMp = req.query.sem_mp === '1' || req.query.sem_mp === 'true';
@@ -12148,6 +12248,7 @@ app.get('/api/etiquetas/recebimento/pendentes-pir', async (req, res) => {
                po.codigo AS po_codigo,
                po.codigo_produto AS po_codigo_produto,
                COALESCE(po.produto_customizado, FALSE) AS produto_customizado,
+               COALESCE(po.pir_vai_direto_identificacao, FALSE) AS pir_vai_direto_identificacao,
                po.dinc AS po_dinc,
                UPPER(TRIM(COALESCE(po.codint_familia, ''))) AS codint_familia,
                (
@@ -12188,13 +12289,14 @@ app.get('/api/etiquetas/recebimento/pendentes-pir', async (req, res) => {
                ) AS qtd_alteracoes
           FROM etiqueta."ETQ_recebimento" er
           LEFT JOIN LATERAL (
-            SELECT p.codigo, p.codigo_produto, p.produto_customizado, p.dinc, p.codint_familia
+            SELECT p.codigo, p.codigo_produto, p.produto_customizado, p.pir_vai_direto_identificacao, p.dinc, p.codint_familia
               FROM public.produtos_omie p
              WHERE TRIM(COALESCE(p.codigo, '')) = TRIM(COALESCE(er.codigo_produto, ''))
                 OR TRIM(COALESCE(p.codigo_produto::text, '')) = TRIM(COALESCE(er.codigo_produto, ''))
              LIMIT 1
           ) po ON TRUE
          WHERE COALESCE(er.pir, false) = false
+           AND COALESCE(po.pir_vai_direto_identificacao, FALSE) = FALSE
            AND (
              ($2::boolean = false AND (
                UPPER(TRIM(COALESCE(po.codint_familia, ''))) = 'MP'
@@ -12223,6 +12325,7 @@ app.get('/api/etiquetas/recebimento/pendentes-pir', async (req, res) => {
         id, numero_nfe, numero_pedido, lote, codigo_produto, descricao_produto,
         qtd, unidade, data_emissao, criado_em, pir,
         produto_customizado,
+        pir_vai_direto_identificacao,
         fornecedor_atual,
         fornecedor_anterior,
         qtd_recebimentos_anteriores,
@@ -12263,6 +12366,7 @@ app.get('/api/etiquetas/recebimento/pendentes-pir', async (req, res) => {
         primeira_vez: r.primeira_vez === true,
         fornecedor_mudou: r.fornecedor_mudou === true,
         produto_customizado: r.produto_customizado === true,
+        pir_vai_direto_identificacao: r.pir_vai_direto_identificacao === true,
         tem_alteracao: r.tem_alteracao === true,
         qtd_alteracoes: Number(r.qtd_alteracoes || 0)
       })),
@@ -12789,6 +12893,7 @@ app.get('/api/etiquetas/rec-impresso', async (req, res) => {
       const result = await pool.query(
         `${baseSql}
          WHERE (i.endereco IS NULL OR i.endereco = '')
+           AND COALESCE(i.qtd, 0) > 0
            AND (r.lote ILIKE $1 OR r.codigo_produto ILIKE $1 OR r.descricao_produto ILIKE $1)
          ORDER BY i.impresso_em DESC
          LIMIT 200`,
@@ -12799,6 +12904,7 @@ app.get('/api/etiquetas/rec-impresso', async (req, res) => {
       const result = await pool.query(
         `${baseSql}
          WHERE (i.endereco IS NULL OR i.endereco = '')
+           AND COALESCE(i.qtd, 0) > 0
          ORDER BY i.impresso_em DESC
          LIMIT 200`
       );
@@ -12808,6 +12914,142 @@ app.get('/api/etiquetas/rec-impresso', async (req, res) => {
   } catch (err) {
     console.error('[etiquetas/rec-impresso]', err);
     res.status(500).json({ error: err?.message || 'Falha ao buscar etiquetas impressas' });
+  }
+});
+
+// POST /api/etiquetas/rec-impresso/:id/retornar
+// Body: { modo: 'uma' | 'todas' }
+// Devolve o saldo para ETQ_recebimento (Etiquetas disponíveis) e remove o(s) impresso(s).
+// modo=todas: consolida no menor origem_id e remove os IDs maiores sem impressão restante.
+app.post('/api/etiquetas/rec-impresso/:id/retornar', express.json(), async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const id = Number(req.params.id);
+    const modo = String(req.body?.modo || 'uma').trim().toLowerCase() === 'todas' ? 'todas' : 'uma';
+    if (!id) return res.status(400).json({ error: 'ID inválido.' });
+
+    await client.query('BEGIN');
+
+    const { rows: baseRows } = await client.query(
+      `SELECT i.id, i.qtd, i.origem_id, i.unidade,
+              TRIM(COALESCE(NULLIF(TRIM(i.codigo_produto), ''), r.codigo_produto, '')) AS codigo_produto,
+              TRIM(COALESCE(r.lote, '')) AS lote,
+              TRIM(COALESCE(i.endereco, '')) AS endereco
+         FROM etiqueta."ETQ_rec_impresso" i
+         LEFT JOIN etiqueta."ETQ_recebimento" r ON r.id = i.origem_id
+        WHERE i.id = $1
+        FOR UPDATE OF i`,
+      [id]
+    );
+    if (!baseRows.length) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Etiqueta impressa não encontrada.' });
+    }
+    const base = baseRows[0];
+    if (base.endereco) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'Etiqueta já armazenada em local. Não é possível retornar.' });
+    }
+    if (!base.origem_id) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'Etiqueta sem origem de recebimento.' });
+    }
+
+    let impressos = [base];
+    if (modo === 'todas') {
+      const codigo = String(base.codigo_produto || '').trim();
+      const lote = String(base.lote || '').trim();
+      if (!codigo) {
+        await client.query('ROLLBACK');
+        return res.status(400).json({ error: 'Código do produto não encontrado para retornar todas.' });
+      }
+      // Mesmo produto + mesmo lote (evita misturar NF/lotes diferentes)
+      const { rows: todas } = await client.query(
+        `SELECT i.id, i.qtd, i.origem_id, i.unidade,
+                TRIM(COALESCE(NULLIF(TRIM(i.codigo_produto), ''), r.codigo_produto, '')) AS codigo_produto,
+                TRIM(COALESCE(r.lote, '')) AS lote
+           FROM etiqueta."ETQ_rec_impresso" i
+           LEFT JOIN etiqueta."ETQ_recebimento" r ON r.id = i.origem_id
+          WHERE (i.endereco IS NULL OR TRIM(i.endereco) = '')
+            AND COALESCE(i.qtd, 0) > 0
+            AND TRIM(COALESCE(NULLIF(TRIM(i.codigo_produto), ''), r.codigo_produto, '')) = $1
+            AND TRIM(COALESCE(r.lote, '')) = $2
+          ORDER BY i.id ASC
+          FOR UPDATE OF i`,
+        [codigo, lote]
+      );
+      impressos = todas.length ? todas : [base];
+    }
+
+    const idsImpresso = impressos.map((r) => Number(r.id)).filter((n) => n > 0);
+    const origemIds = [...new Set(impressos.map((r) => Number(r.origem_id)).filter((n) => n > 0))];
+    const saldoTotal = impressos.reduce((acc, r) => acc + (parseFloat(r.qtd) || 0), 0);
+    const origemMin = Math.min(...origemIds);
+    const unidade = impressos.find((r) => r.unidade)?.unidade || null;
+
+    if (!(saldoTotal > 0) || !origemMin) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'Sem saldo para retornar.' });
+    }
+
+    // Saldo já devolvido em retornos parciais (nas origens envolvidas)
+    const { rows: saldoOrigemRows } = await client.query(
+      `SELECT COALESCE(SUM(COALESCE(qtd, 0)), 0)::float AS saldo
+         FROM etiqueta."ETQ_recebimento"
+        WHERE id = ANY($1::int[])`,
+      [origemIds]
+    );
+    const saldoJaNasOrigens = parseFloat(saldoOrigemRows[0]?.saldo) || 0;
+    const saldoFinal = saldoTotal + saldoJaNasOrigens;
+
+    // Remove impressos retornados
+    await client.query(
+      `DELETE FROM etiqueta."ETQ_rec_impresso" WHERE id = ANY($1::int[])`,
+      [idsImpresso]
+    );
+
+    // Consolida saldo no menor origem_id e libera para reimpressão / múltiplo
+    await client.query(
+      `UPDATE etiqueta."ETQ_recebimento"
+          SET qtd = $1,
+              impressa = false,
+              unidade = COALESCE(NULLIF(TRIM(unidade), ''), $2, unidade)
+        WHERE id = $3`,
+      [saldoFinal, unidade, origemMin]
+    );
+
+    // Zera origens maiores antes de apagar (evita perder saldo no consolidate)
+    const origensMaiores = origemIds.filter((oid) => oid !== origemMin);
+    if (origensMaiores.length) {
+      await client.query(
+        `UPDATE etiqueta."ETQ_recebimento" SET qtd = 0 WHERE id = ANY($1::int[])`,
+        [origensMaiores]
+      );
+      await client.query(
+        `DELETE FROM etiqueta."ETQ_recebimento" r
+          WHERE r.id = ANY($1::int[])
+            AND NOT EXISTS (
+              SELECT 1 FROM etiqueta."ETQ_rec_impresso" i WHERE i.origem_id = r.id
+            )`,
+        [origensMaiores]
+      );
+    }
+
+    await client.query('COMMIT');
+    res.json({
+      ok: true,
+      modo,
+      saldo_retornado: saldoFinal,
+      origem_id: origemMin,
+      impressos_removidos: idsImpresso.length,
+      origens_consolidadas: origemIds.length,
+    });
+  } catch (err) {
+    try { await client.query('ROLLBACK'); } catch (_) {}
+    console.error('[etiquetas/rec-impresso/retornar]', err);
+    res.status(500).json({ error: err?.message || 'Falha ao retornar etiqueta.' });
+  } finally {
+    client.release();
   }
 });
 
@@ -13184,6 +13426,90 @@ async function _etqDebitarEndereco(client, { codigo, endereco, qtd, usuario }) {
 }
 
 const LOGISTICA_ALMOX_LOCAL_COD = '10717096386';
+const LOGISTICA_PRODUCAO_LOCAL_COD = '10431538872'; // 3. ESTOQUE PRODUÇÃO
+const LOGISTICA_PRODUCAO_LOCAL_NOME = '3. ESTOQUE PRODUÇÃO';
+const LOGISTICA_AT_LOCAL_COD = '10445659161'; // 10. SAC ASSISTENCIA E GARANTIAS
+const LOGISTICA_AT_LOCAL_NOME = '10. SAC ASSISTENCIA E GARANTIAS';
+
+/**
+ * Destino para SEP derivada (SEP-NNNN.X) ao ir para Stund-by:
+ * 1) herda dos itens da operação / família da SEP origem
+ * 2) se não houver, usa 3. ESTOQUE PRODUÇÃO (ou SAC se for portal AT)
+ */
+async function _logisticaResolverDestinoSepDerivada(client, { nSolicOrigem, sIds = [], cIds = [], fallbackAt = false } = {}) {
+  const ids = (sIds || []).map(id => parseInt(id, 10)).filter(id => !isNaN(id));
+  const carrIds = (cIds || []).map(id => parseInt(id, 10)).filter(id => !isNaN(id));
+
+  if (ids.length || carrIds.length) {
+    const { rows } = await client.query(
+      `SELECT cod_local, nome_local, motivo
+         FROM solicitacao_produto.itens_solicitados
+        WHERE ($1::bigint[] <> '{}'::bigint[] AND id = ANY($1::bigint[]))
+           OR ($2::bigint[] <> '{}'::bigint[] AND id_carr = ANY($2::bigint[]))
+        ORDER BY
+          CASE WHEN cod_local IS NOT NULL AND TRIM(cod_local) <> '' THEN 0 ELSE 1 END,
+          id ASC
+        LIMIT 1`,
+      [ids, carrIds]
+    );
+    const cod = String(rows[0]?.cod_local || '').trim();
+    if (cod) {
+      return {
+        cod_local: cod,
+        nome_local: String(rows[0]?.nome_local || '').trim() || LOGISTICA_PRODUCAO_LOCAL_NOME,
+        motivo: rows[0]?.motivo || null
+      };
+    }
+  }
+
+  const baseN = String(nSolicOrigem || '').replace(/\.\d+$/, '');
+  if (baseN) {
+    const { rows } = await client.query(
+      `SELECT cod_local, nome_local, motivo
+         FROM solicitacao_produto.itens_solicitados
+        WHERE (n_solic = $1 OR n_solic LIKE ($1 || '.%'))
+          AND cod_local IS NOT NULL AND TRIM(cod_local) <> ''
+        ORDER BY
+          CASE WHEN n_solic = $1 THEN 0 ELSE 1 END,
+          id ASC
+        LIMIT 1`,
+      [baseN]
+    );
+    const cod = String(rows[0]?.cod_local || '').trim();
+    if (cod) {
+      return {
+        cod_local: cod,
+        nome_local: String(rows[0]?.nome_local || '').trim() || LOGISTICA_PRODUCAO_LOCAL_NOME,
+        motivo: rows[0]?.motivo || null
+      };
+    }
+  }
+
+  if (fallbackAt) {
+    return { cod_local: LOGISTICA_AT_LOCAL_COD, nome_local: LOGISTICA_AT_LOCAL_NOME, motivo: 'AT' };
+  }
+  return {
+    cod_local: LOGISTICA_PRODUCAO_LOCAL_COD,
+    nome_local: LOGISTICA_PRODUCAO_LOCAL_NOME,
+    motivo: null
+  };
+}
+
+/** Backfill idempotente: SEP-NNNN.X já registradas sem destino → 3. ESTOQUE PRODUÇÃO. */
+async function _logisticaBackfillDestinoSepDerivadas(client = pool) {
+  const { rowCount } = await client.query(
+    `UPDATE solicitacao_produto.itens_solicitados
+        SET cod_local = $1,
+            nome_local = $2
+      WHERE n_solic ~ '^SEP-[0-9]+\\.[0-9]+$'
+        AND (cod_local IS NULL OR TRIM(cod_local) = '')`,
+    [LOGISTICA_PRODUCAO_LOCAL_COD, LOGISTICA_PRODUCAO_LOCAL_NOME]
+  );
+  if (rowCount) {
+    console.log(`[logistica/backfill-destino-sep] ${rowCount} SEP(s) derivada(s) sem destino → ${LOGISTICA_PRODUCAO_LOCAL_NOME}`);
+  }
+  return rowCount || 0;
+}
 
 function _omieNormalizaNumeroSeparacao(value) {
   if (value === null || value === undefined) return null;
@@ -14397,6 +14723,10 @@ app.post('/api/etiquetas/iapp-op/imprimir', express.json(), async (req, res) => 
                   status = CASE
                     WHEN COALESCE(TRIM(status), '') IN ('', 'Montagem hermetica') THEN 'Montagem hermetica'
                     ELSE status
+                  END,
+                  ri = CASE
+                    WHEN COALESCE(TRIM(status), '') IN ('', 'Montagem hermetica') THEN FALSE
+                    ELSE ri
                   END
             WHERE op_producao_id = $1`,
           [opProducaoId, codigoProdutoNum, codigo, descricao, numeroOpTxt]
@@ -14404,8 +14734,8 @@ app.post('/api/etiquetas/iapp-op/imprimir', express.json(), async (req, res) => 
         if (!updKanban.rowCount) {
           await pool.query(
             `INSERT INTO "Producao"."Kanban_programacao"
-               (codigo_produto, codigo, descricao, codigo_pedido, quantidade, numero_op, op_producao_id, status)
-             VALUES ($1, $2, $3, 0, 1, $4, $5, 'Montagem hermetica')`,
+               (codigo_produto, codigo, descricao, codigo_pedido, quantidade, numero_op, op_producao_id, status, ri)
+             VALUES ($1, $2, $3, 0, 1, $4, $5, 'Montagem hermetica', FALSE)`,
             [codigoProdutoNum, codigo, descricao, numeroOpTxt, opProducaoId]
           );
         }
@@ -14430,6 +14760,10 @@ app.post('/api/etiquetas/iapp-op/imprimir', express.json(), async (req, res) => 
                   status = CASE
                     WHEN COALESCE(TRIM(status), '') IN ('', 'Montagem hermetica') THEN 'Montagem hermetica'
                     ELSE status
+                  END,
+                  ri = CASE
+                    WHEN COALESCE(TRIM(status), '') IN ('', 'Montagem hermetica') THEN FALSE
+                    ELSE ri
                   END
             WHERE op_iapp_id = $1`,
           [opIappId, codigoProdutoNum, codigo, descricao, numeroOpTxt]
@@ -14437,8 +14771,8 @@ app.post('/api/etiquetas/iapp-op/imprimir', express.json(), async (req, res) => 
         if (!updKanban.rowCount) {
           await pool.query(
             `INSERT INTO "Producao"."Kanban_programacao"
-               (codigo_produto, codigo, descricao, codigo_pedido, quantidade, numero_op, op_iapp_id, status)
-             VALUES ($1, $2, $3, 0, 1, $4, $5, 'Montagem hermetica')`,
+               (codigo_produto, codigo, descricao, codigo_pedido, quantidade, numero_op, op_iapp_id, status, ri)
+             VALUES ($1, $2, $3, 0, 1, $4, $5, 'Montagem hermetica', FALSE)`,
             [codigoProdutoNum, codigo, descricao, numeroOpTxt, opIappId]
           );
         }
@@ -14473,7 +14807,6 @@ app.post('/api/etiquetas/iapp-op/imprimir', express.json(), async (req, res) => 
             codigo,
             codigoProduto: idOmie ? Number(idOmie) : null,
             descricao,
-            usuario,
             statusRi: 'Montagem hermetica',
           });
         } catch (riErr) {
@@ -19023,14 +19356,17 @@ async function ensureSolicitacaoProdutoQtyColumns() {
   await pool.query(`ALTER TABLE logistica.carrinho ADD COLUMN IF NOT EXISTS retirada_por TEXT`);
   await pool.query(`ALTER TABLE logistica.carrinho ADD COLUMN IF NOT EXISTS comentario TEXT`);
   await pool.query(`ALTER TABLE logistica.carrinho ADD COLUMN IF NOT EXISTS urgente BOOLEAN DEFAULT FALSE`);
+  await pool.query(`ALTER TABLE solicitacao_produto.itens_solicitados ADD COLUMN IF NOT EXISTS cod_local TEXT`);
+  await pool.query(`ALTER TABLE solicitacao_produto.itens_solicitados ADD COLUMN IF NOT EXISTS nome_local TEXT`);
 }
 
 // Inicializa schema na primeira requisição
 let schemaMigrated = false;
 let schemaColumnsEnsured = false;
+let schemaDestinoSepBackfilled = false;
 let schemaMigrationPromise = null;
 async function ensureSchemaMigrated() {
-  if (schemaMigrated && schemaColumnsEnsured) return;
+  if (schemaMigrated && schemaColumnsEnsured && schemaDestinoSepBackfilled) return;
   if (!schemaMigrationPromise) {
     schemaMigrationPromise = (async () => {
       if (!schemaMigrated) {
@@ -19040,6 +19376,10 @@ async function ensureSchemaMigrated() {
       if (!schemaColumnsEnsured) {
         await ensureSolicitacaoProdutoQtyColumns();
         schemaColumnsEnsured = true;
+      }
+      if (!schemaDestinoSepBackfilled) {
+        await _logisticaBackfillDestinoSepDerivadas(pool);
+        schemaDestinoSepBackfilled = true;
       }
     })().finally(() => {
       schemaMigrationPromise = null;
@@ -20022,33 +20362,16 @@ app.post('/api/logistica/itens_solicitados/separar-parcial', async (req, res) =>
       newNSolic = `${baseN}.${maxSuffix + 1}`;
     }
 
-    let codLocalOrig = null;
-    let nomeLocalOrig = null;
-    let motivoOrig = null;
-    {
-      const { rows: origRows } = await client.query(
-        `SELECT cod_local, nome_local, motivo
-           FROM solicitacao_produto.itens_solicitados
-          WHERE ($1::bigint[] <> '{}'::bigint[] AND id = ANY($1::bigint[]))
-             OR id_carr = ANY($2::bigint[])
-          ORDER BY
-            CASE WHEN cod_local IS NOT NULL AND TRIM(cod_local) <> '' THEN 0 ELSE 1 END,
-            id ASC
-          LIMIT 1`,
-        [sIds, cIds]
-      );
-      const origItem = origRows[0];
-      codLocalOrig = origItem?.cod_local || null;
-      nomeLocalOrig = origItem?.nome_local || null;
-      motivoOrig = origItem?.motivo || null;
-    }
-
-    // Portal AT (at-link): se ainda sem destino, aplica o armazém padrão do técnico
-    if ((!codLocalOrig || !String(codLocalOrig).trim()) && String(base.id_user || '').startsWith('at:')) {
-      codLocalOrig = '10445659161';
-      nomeLocalOrig = '10. SAC ASSISTENCIA E GARANTIAS';
-      if (!motivoOrig) motivoOrig = 'AT';
-    }
+    // Destino da SEP derivada: herda da SEP origem; se faltar, 3. ESTOQUE PRODUÇÃO (ou SAC no portal AT)
+    const destDerivada = await _logisticaResolverDestinoSepDerivada(client, {
+      nSolicOrigem: nSolic || newNSolic,
+      sIds,
+      cIds,
+      fallbackAt: String(base.id_user || '').startsWith('at:')
+    });
+    const codLocalOrig = destDerivada.cod_local;
+    const nomeLocalOrig = destDerivada.nome_local;
+    const motivoOrig = destDerivada.motivo;
 
     // Cria novo carrinho com o restante (qtyRemainder) → volta para a fila como pendente
     const { rows: [newCarr] } = await client.query(
@@ -20902,7 +21225,8 @@ app.post('/api/logistica/itens_solicitados/nao-separar', express.json(), async (
 
     // Busca o item que será marcado como "Não separado"
     const { rows: itemRows } = await client.query(`
-      SELECT i.id, i.n_solic, c.id AS carr_id, c.id_user, c.nome_user, c.retirada_por,
+      SELECT i.id, i.n_solic, i.cod_local, i.nome_local, i.motivo,
+             c.id AS carr_id, c.id_user, c.nome_user, c.retirada_por,
              c.codigo_produto, c.descricao, c.unidade, c.quantidade,
              c.data_prevista, c.horario, c.cod_omie
         FROM solicitacao_produto.itens_solicitados i
@@ -20935,6 +21259,14 @@ app.post('/api/logistica/itens_solicitados/nao-separar', express.json(), async (
 
     const newNSolic = `${baseN}.${maxSuffix + 1}`;
 
+    // Destino: herda da SEP origem; se faltar, 3. ESTOQUE PRODUÇÃO (ou SAC no portal AT)
+    const destDerivada = await _logisticaResolverDestinoSepDerivada(client, {
+      nSolicOrigem,
+      sIds: [item.id],
+      cIds: [item.carr_id],
+      fallbackAt: String(item.id_user || '').startsWith('at:')
+    });
+
     // Cria novo carrinho com o item "não separado"
     const { rows: newCarrRows } = await client.query(`
       INSERT INTO logistica.carrinho
@@ -20950,9 +21282,17 @@ app.post('/api/logistica/itens_solicitados/nao-separar', express.json(), async (
 
     // Cria novo item_solicitado com a nova SEP e status "Stund-by" (sem separador ativo)
     await client.query(`
-      INSERT INTO solicitacao_produto.itens_solicitados (id_carr, n_solic, status, observacao, usuario_separando)
-      VALUES ($1, $2, 'Stund-by', $3, NULL)
-    `, [newCarrId, newNSolic, justificativa || null]);
+      INSERT INTO solicitacao_produto.itens_solicitados
+        (id_carr, n_solic, status, observacao, usuario_separando, cod_local, nome_local, motivo)
+      VALUES ($1, $2, 'Stund-by', $3, NULL, $4, $5, $6)
+    `, [
+      newCarrId,
+      newNSolic,
+      justificativa || null,
+      destDerivada.cod_local,
+      destDerivada.nome_local,
+      destDerivada.motivo || item.motivo || null
+    ]);
 
     // Registra na tabela solicitacoes_separacao com status "Não separado" e a justificativa
     await client.query(`
@@ -26715,7 +27055,9 @@ function convertOmieDate(omieDate) {
   return null;
 }
 
-async function upsertPedidoCompra(pedido, eventoWebhook = '', messageId = null) {
+async function upsertPedidoCompra(pedido, eventoWebhook = '', messageId = null, opcoes = {}) {
+  // confirmadoOmie=false: fallback de webhook sem ConsultarPedCompra — não reativa fantasma.
+  const confirmadoOmie = opcoes.confirmadoOmie !== false;
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -26760,7 +27102,8 @@ async function upsertPedidoCompra(pedido, eventoWebhook = '', messageId = null) 
         c_cod_categ, n_cod_compr, c_contato, c_contrato,
         n_cod_cc, n_cod_int_cc, n_cod_proj,
         c_num_pedido, c_obs, c_obs_int, c_email_aprovador,
-        evento_webhook, evento_webhook_message_id, data_webhook, updated_at
+        evento_webhook, evento_webhook_message_id, data_webhook, updated_at,
+        inativo, pendente_omie
       )
       VALUES (
         $1, $2, $3,
@@ -26771,7 +27114,8 @@ async function upsertPedidoCompra(pedido, eventoWebhook = '', messageId = null) 
         $15, $16, $17, $18,
         $19, $20, $21,
         $22, $23, $24, $25,
-        $26, $27, NOW(), NOW()
+        $26, $27, NOW(), NOW(),
+        FALSE, TRUE
       )
       ON CONFLICT (n_cod_ped) DO UPDATE SET
         c_cod_int_ped = EXCLUDED.c_cod_int_ped,
@@ -26801,7 +27145,12 @@ async function upsertPedidoCompra(pedido, eventoWebhook = '', messageId = null) 
         evento_webhook = EXCLUDED.evento_webhook,
         evento_webhook_message_id = EXCLUDED.evento_webhook_message_id,
         data_webhook = NOW(),
-        updated_at = NOW()
+        updated_at = NOW(),
+        inativo = CASE WHEN $28::boolean THEN FALSE ELSE compras.pedidos_omie.inativo END,
+        pendente_omie = CASE
+          WHEN $28::boolean THEN COALESCE(compras.pedidos_omie.pendente_omie, TRUE)
+          ELSE compras.pedidos_omie.pendente_omie
+        END
     `, [
       nCodPed,
       cabecalho.cCodIntPed || cabecalho.c_cod_int_ped || null,
@@ -26829,7 +27178,8 @@ async function upsertPedidoCompra(pedido, eventoWebhook = '', messageId = null) 
       cabecalho.cObsInt || cabecalho.c_obs_int || null,
       cabecalho.cEmailAprovador || cabecalho.c_email_aprovador || null,
       eventoWebhook,
-      messageId
+      messageId,
+      confirmadoOmie
     ]);
 
     // 2. Atualiza itens do pedido somente quando o payload traz produtos.
@@ -29732,6 +30082,36 @@ app.post('/api/compras/sem-cadastro', express.json(), async (req, res) => {
     const retornoSemValores = 'apenas realizar compra sem retorno de valores ou caracteristica';
     const compraJaRealizadaSelecionada = retornoTexto === retornoCompraJaRealizada;
     const registroRapidoSelecionado = retornoTexto === retornoRegistroRapido;
+    const preCadastroCompleto = item.pre_cadastro_completo === true
+      || String(item.pre_cadastro_completo || '').trim().toLowerCase() === 'true'
+      || String(item.pre_cadastro_completo || '').trim() === '1';
+
+    const familiaCodigo = String(item.familia_codigo || '').trim();
+    const familiaTipo = String(item.familia_tipo || 'MP').trim() || 'MP';
+    const familiaNome = String(item.familia_nome || '').trim();
+    const origemPreCad = String(item.origem || 'N').trim().toUpperCase() === 'I' ? 'I' : 'N';
+    const unidadePreCad = String(item.unidade || '').trim();
+    const tipoItemOmie = String(item.tipo_item_omie || '').trim();
+    const fotoUrlPreCad = String(item.foto_url || '').trim() || null;
+    let codigoPrefixo = String(item.codigo_prefixo || '').trim();
+    if (preCadastroCompleto && !codigoPrefixo && familiaCodigo) {
+      codigoPrefixo = /^[A-Z]{1,3}$/i.test(familiaCodigo)
+        ? familiaCodigo.toUpperCase()
+        : `${familiaCodigo.padStart(2, '0')}.${familiaTipo.toUpperCase()}.${origemPreCad}`;
+    }
+
+    if (preCadastroCompleto) {
+      if (!familiaCodigo) {
+        return res.status(400).json({ ok: false, error: 'familia_codigo é obrigatório no pré-cadastro' });
+      }
+      if (!unidadePreCad) {
+        return res.status(400).json({ ok: false, error: 'unidade é obrigatória no pré-cadastro' });
+      }
+      if (!tipoItemOmie) {
+        return res.status(400).json({ ok: false, error: 'tipo_item_omie é obrigatório no pré-cadastro' });
+      }
+    }
+
     let statusInicial = 'pendente';
     let historicoCompraIdSemCadastro = null;
 
@@ -29741,9 +30121,14 @@ app.post('/api/compras/sem-cadastro', express.json(), async (req, res) => {
       statusInicial = 'Concluido';
     } else if (retornoTexto) {
       if (isDiretor) {
-        statusInicial = (retornoTexto === retornoSemValores)
-          ? 'Analise de cadastro'
-          : 'aguardando cotação';
+        if (retornoTexto === retornoSemValores) {
+          // Pré-cadastro completo: não passa por Análise de cadastro
+          statusInicial = preCadastroCompleto
+            ? 'aguardando compra preparação'
+            : 'Analise de cadastro';
+        } else {
+          statusInicial = 'aguardando cotação';
+        }
       } else {
         statusInicial = 'aguardando aprovação da requisição';
       }
@@ -29844,6 +30229,12 @@ app.post('/api/compras/sem-cadastro', express.json(), async (req, res) => {
         ...it,
         produto_codigo: `CMPR${String(sequencialInicial + idx).padStart(5, '0')}`
       }));
+    } else if (preCadastroCompleto) {
+      // Sem CODPROV: placeholder até gerar código definitivo antes da Requisição Omie
+      itensComCodigo = itensSemCadastro.map((it, idx) => ({
+        ...it,
+        produto_codigo: itensSemCadastro.length > 1 ? `PRECAD.${idx + 1}` : 'PRECAD'
+      }));
     } else {
       const baseCodigo = (!produtoCodigoPayload || /^codprov\s*-?/i.test(produtoCodigoPayload))
         ? await obterBaseCodprovDisponivel()
@@ -29856,6 +30247,18 @@ app.post('/api/compras/sem-cadastro', express.json(), async (req, res) => {
     }
 
     log('Itens com código provisório:', itensComCodigo.map((it, idx) => ({ index: idx, codigo: it.produto_codigo, descricao: it.descricao, quantidade: it.quantidade })));
+
+    // Colunas do pré-cadastro (ADD COLUMN IF NOT EXISTS)
+    await pool.query(`ALTER TABLE compras.compras_sem_cadastro ADD COLUMN IF NOT EXISTS pre_cadastro_completo BOOLEAN DEFAULT FALSE`);
+    await pool.query(`ALTER TABLE compras.compras_sem_cadastro ADD COLUMN IF NOT EXISTS familia_codigo TEXT`);
+    await pool.query(`ALTER TABLE compras.compras_sem_cadastro ADD COLUMN IF NOT EXISTS familia_tipo TEXT`);
+    await pool.query(`ALTER TABLE compras.compras_sem_cadastro ADD COLUMN IF NOT EXISTS familia_nome TEXT`);
+    await pool.query(`ALTER TABLE compras.compras_sem_cadastro ADD COLUMN IF NOT EXISTS origem TEXT`);
+    await pool.query(`ALTER TABLE compras.compras_sem_cadastro ADD COLUMN IF NOT EXISTS unidade TEXT`);
+    await pool.query(`ALTER TABLE compras.compras_sem_cadastro ADD COLUMN IF NOT EXISTS tipo_item_omie TEXT`);
+    await pool.query(`ALTER TABLE compras.compras_sem_cadastro ADD COLUMN IF NOT EXISTS codigo_prefixo TEXT`);
+    await pool.query(`ALTER TABLE compras.compras_sem_cadastro ADD COLUMN IF NOT EXISTS foto_url TEXT`);
+    await pool.query(`ALTER TABLE compras.compras_sem_cadastro ADD COLUMN IF NOT EXISTS codigo_omie TEXT`);
 
     const inserirItensNoBanco = async ({ statusParaInsercao, numeroPedido = null, ncodped = null, codReqCompra = null }) => {
       const ids = [];
@@ -29883,10 +30286,20 @@ app.post('/api/compras/sem-cadastro', express.json(), async (req, res) => {
             numero_pedido,
             ncodped,
             cod_req_compra,
+            pre_cadastro_completo,
+            familia_codigo,
+            familia_tipo,
+            familia_nome,
+            origem,
+            unidade,
+            tipo_item_omie,
+            codigo_prefixo,
+            foto_url,
             created_at,
             updated_at
           ) VALUES (
-            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, NOW(), NOW()
+            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19,
+            $20, $21, $22, $23, $24, $25, $26, $27, $28, NOW(), NOW()
           )
           RETURNING id, grupo_requisicao
         `, [
@@ -29908,7 +30321,16 @@ app.post('/api/compras/sem-cadastro', express.json(), async (req, res) => {
           grupoRequisicao,
           numeroPedido,
           ncodped,
-          codReqCompra
+          codReqCompra,
+          preCadastroCompleto,
+          preCadastroCompleto ? familiaCodigo : null,
+          preCadastroCompleto ? familiaTipo : null,
+          preCadastroCompleto ? (familiaNome || null) : null,
+          preCadastroCompleto ? origemPreCad : null,
+          preCadastroCompleto ? unidadePreCad : null,
+          preCadastroCompleto ? tipoItemOmie : null,
+          preCadastroCompleto ? (codigoPrefixo || null) : null,
+          preCadastroCompleto ? fotoUrlPreCad : null
         ]);
 
         const novoIdLinha = result.rows[0]?.id;
@@ -30279,6 +30701,48 @@ app.post('/api/compras/sem-cadastro', express.json(), async (req, res) => {
           WHERE grupo_requisicao = $2`,
         [valorGastoInformado, grupoFinal]
       );
+    }
+
+    // Diretor + sem retorno + pré-cadastro: gera código definitivo e cria requisição Omie já nesta etapa
+    if (
+      preCadastroCompleto
+      && statusInicial === 'aguardando compra preparação'
+      && idsInseridos.length > 0
+    ) {
+      try {
+        const cookie = String(req.headers.cookie || '');
+        const port = process.env.PORT || 5001;
+        const respReqOmie = await fetch(
+          `http://127.0.0.1:${port}/api/compras/sem-cadastro/${idsInseridos[0]}/criar-requisicao-omie`,
+          {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              ...(cookie ? { Cookie: cookie } : {})
+            },
+            body: JSON.stringify({ itens: [] })
+          }
+        );
+        const dataReqOmie = await respReqOmie.json().catch(() => ({}));
+        if (respReqOmie.ok && dataReqOmie.ok) {
+          omieNumeroPedido = dataReqOmie.codIntReqCompra || dataReqOmie.numero_pedido || omieNumeroPedido;
+          omieCodPed = dataReqOmie.codReqCompra || dataReqOmie.ncodped || omieCodPed;
+          omieCodIntPed = dataReqOmie.codReqCompra || omieCodIntPed;
+          await upsertStatusHistoricoCompras({
+            grupoRequisicao: grupoFinal,
+            status: 'Requisição',
+            tableSource: 'compras_sem_cadastro'
+          });
+          log('Pré-cadastro: requisição Omie criada na solicitação', {
+            ids: idsInseridos,
+            numero: omieNumeroPedido
+          });
+        } else {
+          console.warn('[Pré-cadastro] Não foi possível criar requisição Omie agora:', dataReqOmie.error || respReqOmie.status);
+        }
+      } catch (errPreCadReq) {
+        console.warn('[Pré-cadastro] Omie adiado (item permanece em preparação):', errPreCadReq.message || errPreCadReq);
+      }
     }
 
     log(`🏁 Finalizado em ${Date.now() - t0}ms`, { idsInseridos, grupoFinal, solicitante });
@@ -30693,6 +31157,128 @@ app.post('/api/compras/sem-cadastro/:id/cadastrar-omie', express.json(), async (
   }
 });
 
+// Gera código definitivo (família.tipo.origem.#####) + cadastra na Omie para itens PRECAD
+async function finalizarPreCadastroSemCadastro(itemId) {
+  await pool.query(`ALTER TABLE compras.compras_sem_cadastro ADD COLUMN IF NOT EXISTS codigo_omie TEXT`);
+  const { rows } = await pool.query(
+    `SELECT id, produto_codigo, produto_descricao, pre_cadastro_completo,
+            familia_codigo, familia_tipo, origem, unidade, tipo_item_omie, codigo_prefixo, codigo_omie
+     FROM compras.compras_sem_cadastro WHERE id = $1`,
+    [itemId]
+  );
+  if (!rows.length) throw new Error(`Item ${itemId} não encontrado`);
+  const item = rows[0];
+  if (item.codigo_omie && item.produto_codigo && !/^PRECAD/i.test(String(item.produto_codigo))) {
+    return { codigo: item.produto_codigo, codigo_omie: String(item.codigo_omie) };
+  }
+  if (!item.pre_cadastro_completo) {
+    throw new Error(`Item ${itemId} não possui pré-cadastro completo para gerar código definitivo`);
+  }
+
+  const familiaCodigo = String(item.familia_codigo || '').trim().toUpperCase();
+  const familiaTipo = String(item.familia_tipo || 'MP').trim().toUpperCase() || 'MP';
+  const origem = String(item.origem || 'N').trim().toUpperCase() === 'I' ? 'I' : 'N';
+  const unidade = String(item.unidade || 'UN').trim() || 'UN';
+  const tipoItem = String(item.tipo_item_omie || '00').trim() || '00';
+  const descricao = _cadastroNormalizarDescricao(item.produto_descricao);
+  if (!familiaCodigo || !descricao) {
+    throw new Error(`Pré-cadastro incompleto no item ${itemId} (família/descrição)`);
+  }
+
+  const prefixo = /^[A-Z]{1,3}$/.test(familiaCodigo)
+    ? familiaCodigo
+    : `${familiaCodigo.padStart(2, '0')}.${familiaTipo}.${origem}`;
+
+  // Mesma lógica de sequencial do /api/produtos/cadastro/preview
+  const client = await pool.connect();
+  let codigoFinal;
+  try {
+    await client.query('BEGIN');
+    await client.query(`SELECT pg_advisory_xact_lock(hashtext('produto_codigo_reserva'))`);
+    await _cadastroGarantirReservas(client);
+    const { rows: existentes } = await client.query(`
+      SELECT codigo, descricao FROM public.produtos_omie WHERE codigo IS NOT NULL
+      UNION ALL
+      SELECT codigo, descricao_referencia AS descricao FROM public.produto_codigo_reserva
+      WHERE confirmada = TRUE
+    `);
+    const usados = new Set();
+    const itens = [];
+    for (const ex of existentes) {
+      const codigo = String(ex.codigo || '').trim().toUpperCase();
+      const match = codigo.match(/(?:^|\.)(\d{1,5})$/);
+      if (!match) continue;
+      const sequencial = Number(match[1]);
+      usados.add(sequencial);
+      itens.push({ sequencial, descricao: _cadastroNormalizarDescricao(ex.descricao), codigo });
+    }
+    const semelhantes = itens.filter(i => descricao && i.descricao.startsWith(descricao));
+    const prefixados = itens.filter(i => i.codigo.startsWith(prefixo + '.'));
+    let sequencial = semelhantes.length
+      ? Math.max(...semelhantes.map(i => i.sequencial)) + 1
+      : (prefixados.length ? Math.max(...prefixados.map(i => i.sequencial)) + 1 : 10000);
+    while (usados.has(sequencial)) sequencial++;
+    codigoFinal = `${prefixo}.${String(sequencial).padStart(5, '0')}`;
+    await client.query(
+      `INSERT INTO public.produto_codigo_reserva (codigo, sequencial, prefixo, descricao_referencia, confirmada)
+       VALUES ($1, $2, $3, $4, TRUE)
+       ON CONFLICT (codigo) DO UPDATE SET confirmada = TRUE, descricao_referencia = EXCLUDED.descricao_referencia`,
+      [codigoFinal, sequencial, prefixo, descricao]
+    );
+    await client.query('COMMIT');
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw err;
+  } finally {
+    client.release();
+  }
+
+  // Cadastra na Omie com unidade/tipo do pré-cadastro
+  const OMIE_APP_KEY = process.env.OMIE_APP_KEY;
+  const OMIE_APP_SECRET = process.env.OMIE_APP_SECRET;
+  if (!OMIE_APP_KEY || !OMIE_APP_SECRET) {
+    throw new Error('Credenciais Omie não configuradas');
+  }
+  const omieResp = await fetch('https://app.omie.com.br/api/v1/geral/produtos/', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      call: 'IncluirProduto',
+      app_key: OMIE_APP_KEY,
+      app_secret: OMIE_APP_SECRET,
+      param: [{
+        codigo_produto_integracao: codigoFinal,
+        codigo: codigoFinal,
+        descricao,
+        unidade,
+        tipoItem,
+        ncm: '0000.00.00'
+      }]
+    })
+  });
+  const omieJson = await omieResp.json();
+  if (!omieResp.ok || omieJson?.faultstring) {
+    throw new Error(omieJson?.faultstring || omieJson?.error || 'Falha ao cadastrar produto na Omie');
+  }
+  const codigoOmie = String(omieJson.codigo_produto || '').trim();
+  if (!codigoOmie) {
+    throw new Error('Omie não retornou codigo_produto ao cadastrar o pré-cadastro');
+  }
+
+  await pool.query(
+    `UPDATE compras.compras_sem_cadastro
+        SET produto_codigo = $1,
+            codigo_omie = $2,
+            codigo_prefixo = $3,
+            updated_at = NOW()
+      WHERE id = $4`,
+    [codigoFinal, codigoOmie, prefixo, itemId]
+  );
+
+  console.log(`[Pré-cadastro] Item ${itemId}: ${codigoFinal} → Omie ${codigoOmie}`);
+  return { codigo: codigoFinal, codigo_omie: codigoOmie };
+}
+
 // POST /api/compras/sem-cadastro/:id/criar-requisicao-omie - Cria requisição de compra na Omie
 app.post('/api/compras/sem-cadastro/:id/criar-requisicao-omie', express.json(), async (req, res) => {
   try {
@@ -30711,8 +31297,13 @@ app.post('/api/compras/sem-cadastro/:id/criar-requisicao-omie', express.json(), 
     const { itens: itensRequest } = req.body || {};
     const itensPayload = Array.isArray(itensRequest) ? itensRequest : [];
 
+    await pool.query(`ALTER TABLE compras.compras_sem_cadastro ADD COLUMN IF NOT EXISTS codigo_omie TEXT`);
+    await pool.query(`ALTER TABLE compras.compras_sem_cadastro ADD COLUMN IF NOT EXISTS pre_cadastro_completo BOOLEAN DEFAULT FALSE`);
+
     const { rows } = await pool.query(
-      `SELECT id, grupo_requisicao, categoria_compra_codigo, objetivo_compra, solicitante, resp_inspecao_recebimento, observacao_recebimento
+      `SELECT id, grupo_requisicao, categoria_compra_codigo, objetivo_compra, solicitante,
+              resp_inspecao_recebimento, observacao_recebimento, produto_codigo, produto_descricao,
+              quantidade, codigo_omie, pre_cadastro_completo
        FROM compras.compras_sem_cadastro
        WHERE id = $1`,
       [id]
@@ -30723,6 +31314,21 @@ app.post('/api/compras/sem-cadastro/:id/criar-requisicao-omie', express.json(), 
     }
 
     const itemDb = rows[0];
+
+    // Carrega o grupo inteiro (quando houver) para finalizar PRECAD e montar a requisição
+    let itensGrupo = [itemDb];
+    if (itemDb.grupo_requisicao) {
+      const { rows: rowsGrupo } = await pool.query(
+        `SELECT id, grupo_requisicao, categoria_compra_codigo, objetivo_compra, solicitante,
+                resp_inspecao_recebimento, observacao_recebimento, produto_codigo, produto_descricao,
+                quantidade, codigo_omie, pre_cadastro_completo
+         FROM compras.compras_sem_cadastro
+         WHERE grupo_requisicao = $1
+         ORDER BY id`,
+        [itemDb.grupo_requisicao]
+      );
+      if (rowsGrupo.length) itensGrupo = rowsGrupo;
+    }
 
     const historicoCompraId = await obterIdHistoricoComprasParaOmie({
       db: pool,
@@ -30742,12 +31348,47 @@ app.post('/api/compras/sem-cadastro/:id/criar-requisicao-omie', express.json(), 
       return res.status(400).json({ ok: false, error: 'Item sem categoria da compra. Por favor, edite o item e adicione a categoria antes de criar a requisição.' });
     }
 
-    if (!itensPayload.length) {
+    // Finaliza pré-cadastro (PRECAD → código definitivo + Omie) antes de IncluirReq
+    const codigoOmiePorId = new Map();
+    for (const itemG of itensGrupo) {
+      const jaTemOmie = String(itemG.codigo_omie || '').trim();
+      const codigoTxt = String(itemG.produto_codigo || '').trim();
+      const precisaFinalizar = itemG.pre_cadastro_completo && (!jaTemOmie || /^PRECAD/i.test(codigoTxt));
+      if (precisaFinalizar) {
+        const finalizado = await finalizarPreCadastroSemCadastro(itemG.id);
+        codigoOmiePorId.set(itemG.id, finalizado.codigo_omie);
+        itemG.codigo_omie = finalizado.codigo_omie;
+        itemG.produto_codigo = finalizado.codigo;
+      } else if (jaTemOmie) {
+        codigoOmiePorId.set(itemG.id, jaTemOmie);
+      }
+    }
+
+    // Preferência: payload do front; senão monta a partir do banco
+    const fontesItens = itensPayload.length
+      ? itensPayload.map((i) => {
+          const itemIdPayload = Number(i?.id || i?.item_origem_id || id);
+          const doGrupo = itensGrupo.find((g) => g.id === itemIdPayload) || itemDb;
+          return {
+            id: doGrupo.id,
+            codigo_omie: String(i?.codigo_omie || codigoOmiePorId.get(doGrupo.id) || doGrupo.codigo_omie || '').trim(),
+            descricao: String(i?.descricao || doGrupo.produto_descricao || '').trim(),
+            quantidade: i?.quantidade != null ? i.quantidade : doGrupo.quantidade
+          };
+        })
+      : itensGrupo.map((g) => ({
+          id: g.id,
+          codigo_omie: String(codigoOmiePorId.get(g.id) || g.codigo_omie || '').trim(),
+          descricao: String(g.produto_descricao || '').trim(),
+          quantidade: g.quantidade
+        }));
+
+    if (!fontesItens.length) {
       return res.status(400).json({ ok: false, error: 'Nenhum item informado para criar requisição' });
     }
 
     const itensReqCompra = [];
-    for (const i of itensPayload) {
+    for (const i of fontesItens) {
       const codigoOmie = String(i?.codigo_omie || '').trim();
       if (!codigoOmie) {
         return res.status(400).json({ ok: false, error: 'Todos os itens precisam ter código Omie antes de criar a requisição.' });
@@ -30828,12 +31469,7 @@ app.post('/api/compras/sem-cadastro/:id/criar-requisicao-omie', express.json(), 
     const codReqCompraOmie = omieResult.codReqCompra || null;
     const novoNumeroPedido = omieResult.codIntReqCompra || numeroPedido;
 
-    // Captura valores atuais antes de alterar
-    const { rows: antesUpdateSemCad } = await pool.query(
-      `SELECT id, status, numero_pedido, ncodped, cod_req_compra FROM compras.compras_sem_cadastro WHERE id = $1`,
-      [id]
-    );
-
+    const idsGrupo = itensGrupo.map((g) => g.id);
     await pool.query(
       `UPDATE compras.compras_sem_cadastro
        SET status = 'Requisição',
@@ -30841,9 +31477,17 @@ app.post('/api/compras/sem-cadastro/:id/criar-requisicao-omie', express.json(), 
            ncodped = $2,
            cod_req_compra = $3,
            updated_at = NOW()
-       WHERE id = $4`,
-      [novoNumeroPedido, omieResult.codReqCompra || null, codReqCompraOmie, id]
+       WHERE id = ANY($4::int[])`,
+      [novoNumeroPedido, omieResult.codReqCompra || null, codReqCompraOmie, idsGrupo]
     );
+
+    if (itemDb.grupo_requisicao) {
+      await upsertStatusHistoricoCompras({
+        grupoRequisicao: itemDb.grupo_requisicao,
+        status: 'Requisição',
+        tableSource: 'compras_sem_cadastro'
+      });
+    }
 
     // Consulta a Omie para obter o cNumero (numero sequencial visivel na plataforma, ex: "2500")
     let numeroRequisicaoOmie = null;
@@ -31555,6 +32199,9 @@ app.post('/api/admin/sync/imagens-omie', express.json(), (_req, res) => {
 // GET /api/compras/minhas - Lista solicitações do usuário logado
 app.get('/api/compras/minhas', async (req, res) => {
   try {
+    await pool.query(`ALTER TABLE compras.compras_sem_cadastro ADD COLUMN IF NOT EXISTS codigo_omie TEXT`);
+    await pool.query(`ALTER TABLE compras.compras_sem_cadastro ADD COLUMN IF NOT EXISTS pre_cadastro_completo BOOLEAN DEFAULT FALSE`);
+
     const solicitante = req.query.solicitante;
 
     if (!solicitante) {
@@ -31575,6 +32222,7 @@ app.get('/api/compras/minhas', async (req, res) => {
         FROM compras.historico_compras hc
         WHERE hc.tabela_origem IN ('solicitacao_compras', 'compras_sem_cadastro')
           AND TRIM(COALESCE(hc.grupo_requisicao, '')) <> ''
+          AND LOWER(TRIM(COALESCE(hc.status, ''))) NOT IN ('excluido', 'excluído')
         ORDER BY
           hc.tabela_origem,
           LOWER(TRIM(COALESCE(hc.grupo_requisicao, ''))),
@@ -31617,7 +32265,8 @@ app.get('/api/compras/minhas', async (req, res) => {
           sc.created_at,
           sc.updated_at,
           'solicitacao_compras'::text AS table_source,
-          LOWER(TRIM(COALESCE(sc.grupo_requisicao, ''))) AS grupo_key
+          LOWER(TRIM(COALESCE(sc.grupo_requisicao, ''))) AS grupo_key,
+          FALSE AS pre_cadastro_completo
         FROM compras.solicitacao_compras sc
         LEFT JOIN LATERAL (
           SELECT po.unidade
@@ -31667,7 +32316,7 @@ app.get('/api/compras/minhas', async (req, res) => {
           csc.retorno_cotacao::text AS retorno_cotacao,
           csc.categoria_compra_codigo::text AS categoria_compra_codigo,
           csc.categoria_compra_nome,
-          NULL::text AS codigo_omie,
+          csc.codigo_omie::text AS codigo_omie,
           NULL::text AS codigo_produto_omie,
           NULL::boolean AS requisicao_direta,
           csc.anexos::text AS anexos,
@@ -31677,7 +32326,8 @@ app.get('/api/compras/minhas', async (req, res) => {
           csc.created_at,
           csc.updated_at,
           'compras_sem_cadastro'::text AS table_source,
-          LOWER(TRIM(COALESCE(csc.grupo_requisicao, ''))) AS grupo_key
+          LOWER(TRIM(COALESCE(csc.grupo_requisicao, ''))) AS grupo_key,
+          COALESCE(csc.pre_cadastro_completo, FALSE) AS pre_cadastro_completo
         FROM compras.compras_sem_cadastro csc
         WHERE TRIM(LOWER(COALESCE(csc.solicitante, ''))) = TRIM(LOWER($1))
           AND TRIM(COALESCE(csc.grupo_requisicao, '')) <> ''
@@ -31725,7 +32375,8 @@ app.get('/api/compras/minhas', async (req, res) => {
         COALESCE(opi.updated_at, hr.created_at) AS updated_at,
         hr.table_source,
         hr.historico_id,
-        hr.historico_id::text AS id_solicitante
+        hr.historico_id::text AS id_solicitante,
+        COALESCE(opi.pre_cadastro_completo, FALSE) AS pre_cadastro_completo
       FROM historico_recente hr
       LEFT JOIN origem_primeiro_item opi
         ON opi.table_source = hr.table_source
@@ -32378,6 +33029,9 @@ app.post('/api/compras/aprovar-grupo', express.json(), async (req, res) => {
 // GET /api/compras/todas - Lista todas as solicitações (para gestores)
 app.get('/api/compras/todas', async (req, res) => {
   try {
+    await pool.query(`ALTER TABLE compras.compras_sem_cadastro ADD COLUMN IF NOT EXISTS codigo_omie TEXT`);
+    await pool.query(`ALTER TABLE compras.compras_sem_cadastro ADD COLUMN IF NOT EXISTS pre_cadastro_completo BOOLEAN DEFAULT FALSE`);
+
     const { rows: solicitacoesHistorico } = await pool.query(`
       WITH historico_recente AS (
         SELECT DISTINCT ON (
@@ -32392,6 +33046,7 @@ app.get('/api/compras/todas', async (req, res) => {
         FROM compras.historico_compras hc
         WHERE hc.tabela_origem IN ('solicitacao_compras', 'compras_sem_cadastro')
           AND TRIM(COALESCE(hc.grupo_requisicao, '')) <> ''
+          AND LOWER(TRIM(COALESCE(hc.status, ''))) NOT IN ('excluido', 'excluído')
         ORDER BY
           hc.tabela_origem,
           LOWER(TRIM(COALESCE(hc.grupo_requisicao, ''))),
@@ -32434,7 +33089,8 @@ app.get('/api/compras/todas', async (req, res) => {
           sc.created_at,
           sc.updated_at,
           'solicitacao_compras'::text AS table_source,
-          LOWER(TRIM(COALESCE(sc.grupo_requisicao, ''))) AS grupo_key
+          LOWER(TRIM(COALESCE(sc.grupo_requisicao, ''))) AS grupo_key,
+          FALSE AS pre_cadastro_completo
         FROM compras.solicitacao_compras sc
         LEFT JOIN LATERAL (
           SELECT po.unidade
@@ -32483,7 +33139,7 @@ app.get('/api/compras/todas', async (req, res) => {
           csc.retorno_cotacao::text AS retorno_cotacao,
           csc.categoria_compra_codigo::text AS categoria_compra_codigo,
           csc.categoria_compra_nome,
-          NULL::text AS codigo_omie,
+          csc.codigo_omie::text AS codigo_omie,
           NULL::text AS codigo_produto_omie,
           NULL::boolean AS requisicao_direta,
           csc.anexos::text AS anexos,
@@ -32493,7 +33149,8 @@ app.get('/api/compras/todas', async (req, res) => {
           csc.created_at,
           csc.updated_at,
           'compras_sem_cadastro'::text AS table_source,
-          LOWER(TRIM(COALESCE(csc.grupo_requisicao, ''))) AS grupo_key
+          LOWER(TRIM(COALESCE(csc.grupo_requisicao, ''))) AS grupo_key,
+          COALESCE(csc.pre_cadastro_completo, FALSE) AS pre_cadastro_completo
         FROM compras.compras_sem_cadastro csc
         WHERE TRIM(COALESCE(csc.grupo_requisicao, '')) <> ''
       )
@@ -32534,7 +33191,8 @@ app.get('/api/compras/todas', async (req, res) => {
         COALESCE(o.updated_at, hr.created_at) AS updated_at,
         hr.table_source,
         hr.historico_id,
-        hr.historico_id::text AS id_solicitante
+        hr.historico_id::text AS id_solicitante,
+        COALESCE(o.pre_cadastro_completo, FALSE) AS pre_cadastro_completo
       FROM historico_recente hr
       LEFT JOIN origem o
         ON o.table_source = hr.table_source
@@ -32555,6 +33213,151 @@ app.get('/api/compras/todas', async (req, res) => {
   } catch (err) {
     console.error('[Compras] Erro ao listar todas solicitações:', err);
     res.status(500).json({ ok: false, error: 'Erro ao listar solicitações' });
+  }
+});
+
+// POST /api/compras/pedido/excluir - Exclusão lógica do pedido inteiro (colunas antes de Requisições)
+// Permissão: solicitante do pedido, setor 5 ou 9 (auth_sector.id), ou role admin.
+// Marca status='excluído' + excluido_por + excluido_em; o card some de todos os kanbans de compra.
+const STATUSES_EXCLUIVEIS_COMPRAS = new Set([
+  'aguardando aprovacao da requisicao',
+  'solicitado revisao',
+  'retificar',
+  'aguardando cotacao',
+  'cotado aguardando escolha',
+  'cotado',
+  'analise de cadastro',
+  'carrinho'
+]);
+
+function normalizarStatusComprasExclusao(valor) {
+  return String(valor || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim();
+}
+
+app.post('/api/compras/pedido/excluir', express.json(), async (req, res) => {
+  const sessUser = req.session?.user;
+  if (!sessUser?.username) {
+    return res.status(401).json({ ok: false, error: 'Usuário não autenticado' });
+  }
+
+  const grupoRequisicao = String(req.body?.grupo_requisicao || '').trim();
+  const tableSource = String(req.body?.table_source || 'solicitacao_compras').trim();
+  const itemIds = (Array.isArray(req.body?.item_ids) ? req.body.item_ids : [])
+    .map(v => parseInt(String(v).trim(), 10))
+    .filter(Number.isInteger);
+
+  if (!grupoRequisicao && itemIds.length === 0) {
+    return res.status(400).json({ ok: false, error: 'Informe grupo_requisicao ou item_ids' });
+  }
+  if (!['solicitacao_compras', 'compras_sem_cadastro'].includes(tableSource)) {
+    return res.status(400).json({ ok: false, error: 'table_source inválido' });
+  }
+
+  const client = await pool.connect();
+  try {
+    // Migração: colunas de auditoria da exclusão
+    await client.query(`ALTER TABLE compras.solicitacao_compras ADD COLUMN IF NOT EXISTS excluido_por TEXT`);
+    await client.query(`ALTER TABLE compras.solicitacao_compras ADD COLUMN IF NOT EXISTS excluido_em TIMESTAMPTZ`);
+    await client.query(`ALTER TABLE compras.compras_sem_cadastro ADD COLUMN IF NOT EXISTS excluido_por TEXT`);
+    await client.query(`ALTER TABLE compras.compras_sem_cadastro ADD COLUMN IF NOT EXISTS excluido_em TIMESTAMPTZ`);
+
+    // Carrega itens do pedido nas duas tabelas (o grupo pode ter itens em ambas)
+    const buscarItens = async (tabela) => {
+      const where = grupoRequisicao
+        ? `TRIM(COALESCE(grupo_requisicao, '')) = $1`
+        : `id = ANY($1::int[])`;
+      const param = grupoRequisicao ? [grupoRequisicao] : [itemIds];
+      const { rows } = await client.query(
+        `SELECT id, status, solicitante, grupo_requisicao FROM ${tabela} WHERE ${where}`,
+        param
+      );
+      return rows;
+    };
+
+    const itensSol = await buscarItens('compras.solicitacao_compras');
+    const itensSem = await buscarItens('compras.compras_sem_cadastro');
+    const todosItens = [...itensSol, ...itensSem];
+
+    if (todosItens.length === 0) {
+      return res.status(404).json({ ok: false, error: 'Itens do pedido não encontrados' });
+    }
+
+    // Permissão: admin, setor 5/9 ou solicitante
+    const roles = Array.isArray(sessUser.roles)
+      ? sessUser.roles
+      : String(sessUser.roles || '').split(',');
+    const isAdmin = roles.some(r => String(r || '').trim().toLowerCase() === 'admin');
+    const sectorId = Number(sessUser.sector_id);
+    const isSetorPermitido = sectorId === 5 || sectorId === 9;
+    const usernameNorm = String(sessUser.username || '').trim().toLowerCase();
+    const isSolicitante = todosItens.every(item =>
+      String(item.solicitante || '').trim().toLowerCase() === usernameNorm
+    );
+
+    if (!isAdmin && !isSetorPermitido && !isSolicitante) {
+      return res.status(403).json({ ok: false, error: 'Sem permissão para excluir este pedido' });
+    }
+
+    // Só permite excluir em etapas antes de Requisições
+    const statusBloqueado = todosItens.find(item =>
+      !STATUSES_EXCLUIVEIS_COMPRAS.has(normalizarStatusComprasExclusao(item.status))
+    );
+    if (statusBloqueado) {
+      return res.status(409).json({
+        ok: false,
+        error: `Pedido não pode ser excluído: item ${statusBloqueado.id} está em "${statusBloqueado.status}" (etapa Requisições ou posterior)`
+      });
+    }
+
+    await client.query('BEGIN');
+    await client.query(`SELECT set_config('app.current_user', $1, true)`, [sessUser.username]);
+
+    const excluirEm = async (tabela, ids) => {
+      if (!ids.length) return 0;
+      const { rowCount } = await client.query(
+        `UPDATE ${tabela}
+            SET status = 'excluído',
+                excluido_por = $1,
+                excluido_em = NOW()
+          WHERE id = ANY($2::int[])`,
+        [sessUser.username, ids]
+      );
+      return rowCount;
+    };
+
+    const totalSol = await excluirEm('compras.solicitacao_compras', itensSol.map(i => i.id));
+    const totalSem = await excluirEm('compras.compras_sem_cadastro', itensSem.map(i => i.id));
+
+    // Atualiza o status consolidado (kanban lê o status daqui)
+    const gruposAfetados = [...new Set(
+      todosItens.map(i => String(i.grupo_requisicao || '').trim()).filter(Boolean)
+    )];
+    for (const grupo of gruposAfetados) {
+      await client.query(
+        `UPDATE compras.historico_compras SET status = 'excluído' WHERE grupo_requisicao = $1`,
+        [grupo]
+      );
+    }
+
+    await client.query('COMMIT');
+
+    console.log(`[Compras/Excluir] Pedido excluído por ${sessUser.username}: grupo=${grupoRequisicao || '-'} ids=${todosItens.map(i => i.id).join(',')} (${totalSol + totalSem} itens)`);
+    res.json({
+      ok: true,
+      excluidos: totalSol + totalSem,
+      excluido_por: sessUser.username,
+      excluido_em: new Date().toISOString()
+    });
+  } catch (err) {
+    try { await client.query('ROLLBACK'); } catch (_) {}
+    console.error('[Compras/Excluir] Erro:', err);
+    res.status(500).json({ ok: false, error: 'Erro ao excluir pedido' });
+  } finally {
+    client.release();
   }
 });
 
@@ -32937,108 +33740,178 @@ app.get('/api/compras/requisicoes/debug/:id', async (req, res) => {
 // Aqui espelhamos: pedidos_omie c_etapa='20', pendentes, não faturados.
 app.get('/api/compras/requisicoes', async (req, res) => {
   try {
-    console.log('[Compras/Requisições] Listando requisições (pedidos Omie etapa 20)...');
+    // Coluna "Requisições" = mesma lista da Omie (PesquisarReq):
+    // requisições abertas em compras.requisicoes_omie + pedidos etapa 20 sem registro de requisição.
+    // Não usar só pedidos_omie etapa 20 — isso omitia requisições ainda sem pedido (ex.: 2996–3001).
+    console.log('[Compras/Requisições] Listando requisições abertas (alinhado à Omie)...');
 
     await pool.query(`
       ALTER TABLE compras.pedidos_omie
       ADD COLUMN IF NOT EXISTS pendente_omie BOOLEAN
     `);
 
-    const { rows } = await pool.query(`
+    const { rows: cabecalhos } = await pool.query(`
+      WITH abertas AS (
+        SELECT
+          r.cod_req_compra::text AS cod_req_compra,
+          COALESCE(NULLIF(BTRIM(r.numero), ''), NULLIF(BTRIM(p.c_numero), '')) AS numero,
+          COALESCE(NULLIF(BTRIM(r.cod_int_req_compra), ''), NULLIF(BTRIM(p.c_cod_int_ped), '')) AS cod_int_req_compra,
+          r.obs_req_compra AS c_obs,
+          r.dt_sugestao AS d_dt_previsao,
+          r.created_at,
+          r.updated_at,
+          p.n_valor,
+          p.n_cod_for,
+          COALESCE(NULLIF(BTRIM(p.c_etapa), ''), NULLIF(BTRIM(r.etapa), ''), '20') AS c_etapa
+        FROM compras.requisicoes_omie r
+        LEFT JOIN compras.pedidos_omie p
+          ON p.n_cod_ped::text = r.cod_req_compra::text
+         AND COALESCE(p.inativo, FALSE) = FALSE
+        WHERE COALESCE(r.inativo, FALSE) = FALSE
+          AND NOT EXISTS (
+            SELECT 1
+            FROM compras.pedidos_omie po
+            WHERE COALESCE(po.inativo, FALSE) = FALSE
+              AND po.n_cod_ped::text = r.cod_req_compra::text
+              AND BTRIM(COALESCE(po.c_etapa, '')) IN ('10', '15')
+          )
+          AND (
+            NULLIF(BTRIM(r.numero), '') IS NOT NULL
+            OR BTRIM(COALESCE(p.c_etapa, '')) = '20'
+          )
+
+        UNION ALL
+
+        SELECT
+          p.n_cod_ped::text,
+          NULLIF(BTRIM(p.c_numero), ''),
+          NULLIF(BTRIM(p.c_cod_int_ped), ''),
+          p.c_obs,
+          p.d_dt_previsao,
+          p.created_at,
+          p.updated_at,
+          p.n_valor,
+          p.n_cod_for,
+          p.c_etapa
+        FROM compras.pedidos_omie p
+        WHERE COALESCE(p.inativo, FALSE) = FALSE
+          AND BTRIM(COALESCE(p.c_etapa, '')) = '20'
+          AND NOT EXISTS (
+            SELECT 1
+            FROM compras.requisicoes_omie r
+            WHERE r.cod_req_compra::text = p.n_cod_ped::text
+          )
+      )
       SELECT
-        po.n_cod_ped,
-        po.c_numero,
-        po.c_cod_int_ped,
-        po.c_obs,
-        po.c_etapa,
-        po.n_cod_for,
-        po.d_inc_data,
-        po.d_dt_previsao,
-        po.n_valor,
+        a.*,
         cc.nome_fantasia AS fornecedor_nome,
-        pop.c_produto,
-        pop.c_descricao,
-        pop.c_unidade,
-        pop.n_qtde,
-        pop.n_val_tot,
         origem.solicitante,
-        origem.grupo_requisicao,
-        po.created_at,
-        po.updated_at
-      FROM compras.pedidos_omie po
+        origem.grupo_requisicao
+      FROM abertas a
       LEFT JOIN omie.fornecedores cc
-        ON cc.codigo_cliente_omie = po.n_cod_for
-      LEFT JOIN compras.pedidos_omie_produtos pop
-        ON pop.n_cod_ped = po.n_cod_ped
+        ON cc.codigo_cliente_omie = a.n_cod_for
       LEFT JOIN LATERAL (
         SELECT src.solicitante, src.grupo_requisicao
         FROM (
           SELECT sc.solicitante, sc.grupo_requisicao, sc.created_at
           FROM compras.solicitacao_compras sc
-          WHERE TRIM(COALESCE(po.c_cod_int_ped, '')) <> ''
-            AND TRIM(COALESCE(sc.numero_pedido, '')) = TRIM(COALESCE(po.c_cod_int_ped, ''))
+          WHERE TRIM(COALESCE(a.cod_int_req_compra, '')) <> ''
+            AND TRIM(COALESCE(sc.numero_pedido, '')) = TRIM(COALESCE(a.cod_int_req_compra, ''))
           UNION ALL
           SELECT csc.solicitante, csc.grupo_requisicao, csc.created_at
           FROM compras.compras_sem_cadastro csc
-          WHERE TRIM(COALESCE(po.c_cod_int_ped, '')) <> ''
-            AND TRIM(COALESCE(csc.numero_pedido, '')) = TRIM(COALESCE(po.c_cod_int_ped, ''))
+          WHERE TRIM(COALESCE(a.cod_int_req_compra, '')) <> ''
+            AND TRIM(COALESCE(csc.numero_pedido, '')) = TRIM(COALESCE(a.cod_int_req_compra, ''))
         ) src
         ORDER BY src.created_at DESC NULLS LAST
         LIMIT 1
       ) origem ON TRUE
-      WHERE COALESCE(po.inativo, FALSE) = FALSE
-        AND (po."Etapa_NF" IS NULL OR BTRIM(po."Etapa_NF") = '')
-        AND COALESCE(po.pendente_omie, TRUE) = TRUE
-        AND BTRIM(COALESCE(po.c_etapa, '')) = '20'
       ORDER BY
-        CASE WHEN po.c_numero ~ '^\\d+$' THEN po.c_numero::INT ELSE NULL END DESC,
-        po.c_numero DESC
+        CASE WHEN a.numero ~ '^\\d+$' THEN a.numero::INT ELSE NULL END DESC NULLS LAST,
+        a.numero DESC NULLS LAST
     `);
 
-    const porNumero = new Map();
-    const requisicoes = [];
+    const codigos = cabecalhos.map(r => r.cod_req_compra).filter(Boolean);
+    const itensPorCod = new Map();
 
-    for (const row of rows) {
-      const numero = row.c_numero || 'SEM_NUMERO';
-      if (!porNumero.has(numero)) {
-        const nova = {
-          numero,
-          grupo_requisicao: row.grupo_requisicao || row.c_cod_int_ped || numero,
-          numero_requisicao_omie: numero,
-          cod_req_compra: row.n_cod_ped,
-          cod_int_req_compra: row.c_cod_int_ped || null,
-          n_cod_ped: row.n_cod_ped,
-          c_cod_int_ped: row.c_cod_int_ped,
-          n_valor: row.n_valor,
-          c_obs: row.c_obs || null,
-          c_etapa: row.c_etapa,
-          d_inc_data: row.d_inc_data,
-          d_dt_previsao: row.d_dt_previsao,
-          solicitante: row.solicitante || null,
-          fornecedor_nome: row.fornecedor_nome || 'Sem fornecedor',
-          created_at: row.created_at,
-          updated_at: row.updated_at,
-          itens: []
-        };
-        porNumero.set(numero, nova);
-        requisicoes.push(nova);
+    if (codigos.length) {
+      const { rows: itensReq } = await pool.query(`
+        SELECT
+          ri.cod_req_compra::text AS cod_req_compra,
+          ri.id,
+          COALESCE(NULLIF(BTRIM(p.codigo), ''), ri.cod_prod::text) AS produto_codigo,
+          COALESCE(NULLIF(BTRIM(p.descricao), ''), 'Sem descrição') AS produto_descricao,
+          ri.qtde AS n_qtde,
+          ri.preco_unit,
+          (COALESCE(ri.qtde, 0) * COALESCE(ri.preco_unit, 0)) AS n_val_tot,
+          ri.obs_item
+        FROM compras.requisicoes_omie_itens ri
+        LEFT JOIN public.produtos_omie p ON p.codigo_produto::text = ri.cod_prod::text
+        WHERE ri.cod_req_compra::text = ANY($1::text[])
+        ORDER BY ri.id
+      `, [codigos]);
+
+      for (const item of itensReq) {
+        if (!itensPorCod.has(item.cod_req_compra)) itensPorCod.set(item.cod_req_compra, []);
+        itensPorCod.get(item.cod_req_compra).push(item);
       }
-      if (row.c_produto) {
-        porNumero.get(numero).itens.push({
-          id: `${row.n_cod_ped}_${row.c_produto}`,
-          produto_codigo: row.c_produto,
-          produto_descricao: row.c_descricao || 'Sem descrição',
-          solicitante: row.solicitante || null,
-          status: 'Requisição',
-          c_unidade: row.c_unidade || '-',
-          n_qtde: row.n_qtde || 0,
-          n_val_tot: row.n_val_tot || 0,
-          table_source: 'pedidos_omie'
-        });
+
+      // Fallback: se a requisição não tem itens locais, usa produtos do pedido etapa 20
+      const semItens = codigos.filter(c => !itensPorCod.has(c) || itensPorCod.get(c).length === 0);
+      if (semItens.length) {
+        const { rows: itensPed } = await pool.query(`
+          SELECT
+            pop.n_cod_ped::text AS cod_req_compra,
+            pop.c_produto AS produto_codigo,
+            pop.c_descricao AS produto_descricao,
+            pop.c_unidade,
+            pop.n_qtde,
+            pop.n_val_tot
+          FROM compras.pedidos_omie_produtos pop
+          WHERE pop.n_cod_ped::text = ANY($1::text[])
+        `, [semItens]);
+        for (const item of itensPed) {
+          if (!itensPorCod.has(item.cod_req_compra)) itensPorCod.set(item.cod_req_compra, []);
+          itensPorCod.get(item.cod_req_compra).push(item);
+        }
       }
     }
 
-    console.log(`[Compras/Requisições] Retornando ${requisicoes.length} requisições (etapa 20 Omie)`);
+    const requisicoes = cabecalhos.map(row => {
+      const numero = row.numero || 'SEM_NUMERO';
+      const cod = row.cod_req_compra;
+      const itensRaw = itensPorCod.get(cod) || [];
+      return {
+        numero,
+        grupo_requisicao: row.grupo_requisicao || row.cod_int_req_compra || numero,
+        numero_requisicao_omie: numero,
+        cod_req_compra: cod,
+        cod_int_req_compra: row.cod_int_req_compra || null,
+        n_cod_ped: cod,
+        c_cod_int_ped: row.cod_int_req_compra || null,
+        n_valor: row.n_valor,
+        c_obs: row.c_obs || null,
+        c_etapa: row.c_etapa || '20',
+        d_dt_previsao: row.d_dt_previsao,
+        solicitante: row.solicitante || null,
+        fornecedor_nome: row.fornecedor_nome || 'Sem fornecedor',
+        created_at: row.created_at,
+        updated_at: row.updated_at,
+        itens: itensRaw.map((item, idx) => ({
+          id: item.id != null ? `reqitem_${item.id}` : `${cod}_${item.produto_codigo || idx}`,
+          produto_codigo: item.produto_codigo || '-',
+          produto_descricao: item.produto_descricao || 'Sem descrição',
+          solicitante: row.solicitante || null,
+          status: 'Requisição',
+          c_unidade: item.c_unidade || '-',
+          n_qtde: item.n_qtde || 0,
+          n_val_tot: item.n_val_tot || 0,
+          table_source: 'requisicoes_omie'
+        }))
+      };
+    });
+
+    console.log(`[Compras/Requisições] Retornando ${requisicoes.length} requisições abertas`);
     res.json({ ok: true, requisicoes });
   } catch (err) {
     console.error('[Compras/Requisições] Erro ao listar requisições:', err);
@@ -34170,7 +35043,7 @@ async function varrerFaturadasOmieKanban() {
     if (etapaOmie === undefined) {
       await pool.query(
         `UPDATE compras.pedidos_omie
-            SET inativo = TRUE, updated_at = NOW()
+            SET inativo = TRUE, pendente_omie = FALSE, updated_at = NOW()
           WHERE n_cod_ped = $1`,
         [ped.n_cod_ped]
       );
@@ -34762,6 +35635,7 @@ app.get('/api/compras/pedido-detalhes/:nCodPed', async (req, res) => {
       d_inc_data: pedido.d_inc_data,
       d_dt_previsao: pedido.d_dt_previsao,
       createdAt: pedido.created_at,
+      valorTotalPedido: pedido.n_valor,
       itens: itens
     });
   } catch (err) {
@@ -39465,7 +40339,9 @@ async function syncProdutosOmieIncremental(paginasPorExecucao = 1) {
 
     const client = await pool.connect();
     try {
-      await client.query("SELECT set_config('app.produtos_omie_write_source', 'omie_webhook', true)");
+      // is_local=false: setting de sessão — set_config(..., true) fora de
+      // transação não tem efeito e o gatilho guard bloqueava os upserts.
+      await client.query("SELECT set_config('app.produtos_omie_write_source', 'omie_sync', false)");
 
       for (const produto of produtos) {
         processados++;
@@ -39482,6 +40358,7 @@ async function syncProdutosOmieIncremental(paginasPorExecucao = 1) {
         }
       }
     } finally {
+      try { await client.query("SELECT set_config('app.produtos_omie_write_source', '', false)"); } catch (_) {}
       try { client.release(); } catch (_) {}
     }
 

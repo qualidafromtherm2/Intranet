@@ -15,6 +15,7 @@
  */
 
 const { dbQuery } = require('../src/db');
+const { enviarWhatsappNotificacao } = require('../utils/whatsappEnvio');
 
 const WHATSAPP_CLOUD_ACCESS_TOKEN = String(
   process.env.WHATSAPP_CLOUD_ACCESS_TOKEN ||
@@ -61,30 +62,6 @@ async function getPhoneNumberId() {
 }
 
 // ─── Envio WhatsApp ───────────────────────────────────────────────────────────
-
-async function enviarWhatsappTexto(phoneNumberId, toPhone, text) {
-  const resp = await fetch(
-    `https://graph.facebook.com/${WHATSAPP_GRAPH_API_VERSION}/${encodeURIComponent(phoneNumberId)}/messages`,
-    {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${WHATSAPP_CLOUD_ACCESS_TOKEN}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        messaging_product: 'whatsapp',
-        to: toPhone,
-        type: 'text',
-        text: { body: text }
-      })
-    }
-  );
-  if (!resp.ok) {
-    const err = await resp.text().catch(() => '');
-    throw new Error(`WhatsApp API ${resp.status}: ${err}`);
-  }
-  return true;
-}
 
 async function enviarWhatsappComBotao(phoneNumberId, toPhone, bodyText, buttons) {
   const btns = buttons.slice(0, 3).map((b) => ({
@@ -277,21 +254,27 @@ async function executarNotificacaoDiaria() {
 
       const mensagemFinal = partes.join('\n');
 
-      // Envia a mensagem principal
-      await enviarWhatsappTexto(phoneNumberId, phone, mensagemFinal);
+      // Envia a mensagem principal.
+      // Dentro da janela de 24h → texto livre.
+      // Fora da janela → template aprovado (WHATSAPP_TEMPLATE_NOTIF), senão a Meta bloqueia.
+      const envio = await enviarWhatsappNotificacao(phone, mensagemFinal, phoneNumberId);
 
-      // Se tem mensagens não lidas, envia botão interativo
-      if (temMensagensNaoLidas) {
-        await enviarWhatsappComBotao(
-          phoneNumberId,
-          phone,
-          'Deseja marcar as mensagens como lidas?',
-          [{ id: `sgf_marcar_lidas_${user.id}`, title: 'Marcar como lidas' }]
-        );
+      // Botão interativo só é aceito dentro da janela de 24h (fora dela a Meta rejeita).
+      if (temMensagensNaoLidas && envio?.dentro_janela_24h) {
+        try {
+          await enviarWhatsappComBotao(
+            phoneNumberId,
+            phone,
+            'Deseja marcar as mensagens como lidas?',
+            [{ id: `sgf_marcar_lidas_${user.id}`, title: 'Marcar como lidas' }]
+          );
+        } catch (btnErr) {
+          console.warn(TAG, `Botão não enviado para ${user.username}:`, btnErr?.message || btnErr);
+        }
       }
 
       telefonesNotificados.add(phone);
-      console.log(TAG, `✓ Notificação enviada para ${user.username} (${phone})`);
+      console.log(TAG, `✓ Notificação enviada para ${user.username} (${phone}) [${envio?.modo || 'texto'}]`);
     } catch (err) {
       console.error(TAG, `✗ Erro ao enviar para ${user.username}:`, err?.message || err);
     }

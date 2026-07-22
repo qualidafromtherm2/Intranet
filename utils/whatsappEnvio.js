@@ -27,6 +27,22 @@ function normalizePhoneDigits(value) {
   return String(value || '').replace(/\D/g, '');
 }
 
+/**
+ * Sanitiza o texto que vai dentro de uma variável de template ({{...}}).
+ * A Meta rejeita parâmetros de template com \n, \t ou 4+ espaços seguidos
+ * ("Param text cannot have new-line/tab characters or more than 4 consecutive spaces").
+ * Trocamos \n por \r (aceito pela Meta e ainda quebra linha no app) e normalizamos espaços.
+ */
+function sanitizeTemplateParam(text) {
+  return String(text || '')
+    .replace(/\t/g, ' ')
+    .replace(/\r\n?/g, '\n')
+    .replace(/\n/g, '\r')
+    .replace(/ {4,}/g, '   ')
+    .trim()
+    .slice(0, 1024);
+}
+
 /** Gera variações do número (com/sem 9º dígito) — mesmo padrão do SAC */
 function buildWhatsappPhoneCandidates(value) {
   const digits = normalizePhoneDigits(value);
@@ -187,7 +203,7 @@ async function enviarWhatsappTemplate(toPhone, text, phoneNumberId = null, templ
   const pid = phoneNumberId || await getWhatsappPhoneNumberId();
   if (!pid) throw new Error('Phone Number ID não encontrado.');
 
-  const corpo = String(text || '').trim().slice(0, 1024);
+  const corpo = sanitizeTemplateParam(text);
   if (!corpo) throw new Error('Mensagem vazia.');
 
   const paramName = WHATSAPP_TEMPLATE_NOTIF_PARAM;

@@ -19,7 +19,7 @@
   referrerpolicy="no-referrer"
 />
   <!-- Seu CSS principal -->
-  <link rel="stylesheet" href="menu_produto.css?v=20260722-shell-pilot-v41-compras-fotos-v2"/>
+  <link rel="stylesheet" href="menu_produto.css?v=20260722-logistica-filtros-v1"/>
   <!-- Anti-flicker: esconde menus até as permissões serem aplicadas -->
   <style id="boot-anti-flicker">
     /* Enquanto o app não está pronto, esconde elementos sujeitos a permissões */
@@ -138,13 +138,15 @@
     <!-- Cabeçalho principal -->
 <!-- ===== CABEÇALHO PRINCIPAL ===== -->
 <div class="header" id="appHeader">
-  <img class="menu-logo" src="../img/logo.png" alt="Logo da empresa" />
+  <img class="menu-logo" src="../img/logo.png" alt="Logo da empresa" title="Início" />
 
   <!-- Links que podem “sobrar” -->
 <nav id="mainMenu" class="header-menu">
 
+  <!-- Botão oculto: o Início agora é acessado clicando na logo (mantido no DOM porque outras partes do código dependem dele) -->
   <a id="menu-inicio"
      class="menu-link is-active"
+     style="display:none !important;"
      data-target="paginaInicio"
      data-nav-key="top:inicio"
      data-nav-pos="top"
@@ -216,7 +218,7 @@
     <div class="wrapper">
       <!-- Menu lateral -->
   <div class="left-side">
-        
+
         <!-- Botão Hambúrguer do Menu Lateral -->
         <button class="sidebar-hamburger" id="sidebarHamburger" title="Menu lateral">
           <i class="fa-solid fa-bars"></i>
@@ -942,7 +944,7 @@
 
             <!-- Kanban de compras (somente do usuário logado) -->
             <div id="minhasComprasWrapper" class="content-section" style="margin-top:0px;display:none;">
-              
+
               <!-- Título e Botões de Ação -->
               <div id="comprasListaToolbar" class="title-wrapper compras-workspace-toolbar" style="display:flex;align-items:center;justify-content:space-between;margin-bottom:0;gap:16px;">
                 <div class="compras-toolbar-main" style="display:flex;align-items:center;gap:12px;flex:1;">
@@ -956,13 +958,13 @@
                   <!-- Campo de Filtro Global -->
                   <div class="compras-global-search" style="display:flex;align-items:center;gap:8px;max-width:350px;">
                     <i class="fa-solid fa-magnifying-glass" style="color:#9ca3af;font-size:14px;"></i>
-                    <input 
-                      type="text" 
+                    <input
+                      type="text"
                       id="kanbanFiltroGlobal"
-                      placeholder="Filtrar cards (3+ caracteres)…" 
+                      placeholder="Filtrar cards (3+ caracteres)…"
                       style="flex:1;padding:8px 12px;font-size:12px;border:1px solid #d1d5db;border-radius:6px;background:#ffffff;color:#111827;transition:all 0.2s;"
                       onkeyup="filtrarTodosKanbans(this.value)">
-                    <button 
+                    <button
                       id="kanbanLimparFiltroGlobal"
                       onclick="limparFiltroGlobal()"
                       title="Limpar filtro"
@@ -1623,7 +1625,7 @@
                   </div>
                 </div>
               </div>
-              
+
               <!-- Cabeçalho das colunas de filtro -->
               <div style="display:grid;grid-template-columns:1fr 110px 160px 120px;gap:10px;align-items:center;padding:8px 10px;background:#0f172a;border:1px solid #1e293b;border-radius:6px;margin-bottom:10px;">
                 <span style="font-size:12px;color:#cbd5e1;font-weight:600;">Kanban</span>
@@ -1631,7 +1633,7 @@
                 <span style="font-size:12px;color:#cbd5e1;font-weight:600;text-align:center;">Visível mesmo vazio</span>
                 <span style="font-size:12px;color:#cbd5e1;font-weight:600;text-align:center;">Data limite</span>
               </div>
-              
+
               <div id="listaFiltroKanbans" style="display:flex;flex-direction:column;gap:10px;">
                 <!-- Checkboxes serão inseridos dinamicamente -->
               </div>
@@ -1649,7 +1651,7 @@
                   <input type="date" id="kanbanDataLimiteGlobalPicker" style="position:absolute;opacity:0;pointer-events:none;width:0;height:0;">
                 </div>
               </div>
-              
+
               <div style="display:flex;justify-content:space-between;gap:10px;margin-top:24px;padding-top:20px;border-top:1px solid #e5e7eb;">
                 <button id="filtroKanbanSelecionarTodos" class="content-button" type="button" style="background:#6b7280;color:white;flex:1;">
                   <i class="fa-solid fa-check-double"></i>
@@ -1674,7 +1676,7 @@
             <div class="modal-header carrinho-header">
               <h3 style="margin:0;display:flex;align-items:center;gap:8px;">
                 <i class="fa-solid fa-cart-shopping" style="color:#f59e0b;"></i>
-                Meu Carrinho de Compras
+                Compras
               </h3>
               <div style="display:flex;align-items:center;gap:8px;">
                 <button id="modalCarrinhoFecharBtn" class="modal-close-btn" type="button">
@@ -1765,9 +1767,18 @@
                            placeholder="Digite o número da nota fiscal"
                            style="width:100%;padding:10px;border:1px solid #334155;border-radius:6px;font-size:13px;background:#020617;font-weight:600;color:#e5e7eb;">
                   </div>
-                  
+
+                  <!-- Produto sem cadastro → abre Solicitação mesclada com pré-cadastro -->
+                  <button id="btnProdutoSemCadastroCarrinho" type="button" onclick="abrirModalProdutoSemCadastroCompras()"
+                          style="width:100%;padding:10px;background:#f59e0b;color:#111827;border:none;border-radius:6px;cursor:pointer;font-weight:700;font-size:12px;display:flex;align-items:center;justify-content:center;gap:8px;transition:all 0.2s;"
+                          onmouseover="this.style.background='#d97706'"
+                          onmouseout="this.style.background='#f59e0b'">
+                    <i class="fa-solid fa-box-open"></i>
+                    Produto sem cadastro
+                  </button>
+
                   <!-- Botão Colar Lista de Compra -->
-                  <button id="btnColarListaCompra" onclick="abrirModalColarLista()" 
+                  <button id="btnColarListaCompra" onclick="abrirModalColarLista()"
                           style="width:100%;padding:10px;background:#10b981;color:white;border:none;border-radius:6px;cursor:pointer;font-weight:700;font-size:12px;display:flex;align-items:center;justify-content:center;gap:8px;transition:all 0.2s;"
                           onmouseover="this.style.background='#059669'"
                           onmouseout="this.style.background='#10b981'">
@@ -1856,14 +1867,14 @@
               <button class="modal-close" id="modalConfigResponsavelFechar">&times;</button>
             </div>
             <div class="modal-body" style="padding:24px;">
-              
+
               <!-- Seção 1: Responsável por Categoria -->
               <div style="background:#f3f4f6;padding:16px;border-radius:8px;margin-bottom:24px;">
                 <h4 style="margin:0 0 16px 0;font-size:15px;color:#1f2937;display:flex;align-items:center;gap:8px;">
                   <i class="fa-solid fa-user-tag" style="color:#3b82f6;"></i>
                   Responsável por Categoria
                 </h4>
-              
+
                 <!-- Formulário para adicionar configuração -->
                 <div style="background:#f9fafb;padding:20px;border-radius:8px;margin-bottom:20px;border:2px solid #e5e7eb;">
                   <h5 style="margin:0 0 16px 0;font-size:13px;color:#374151;">Nova Configuração</h5>
@@ -1908,7 +1919,7 @@
                   <i class="fa-solid fa-shield-halved" style="color:#3b82f6;"></i>
                   Permissões de Acesso aos Botões
                 </h4>
-                
+
                 <!-- Formulário para adicionar permissão -->
                 <div style="background:#ffffff;padding:20px;border-radius:8px;margin-bottom:20px;border:2px solid #dbeafe;">
                   <h5 style="margin:0 0 16px 0;font-size:13px;color:#374151;">Nova Permissão</h5>
@@ -1972,7 +1983,11 @@
                 <span id="modalPedidoTitulo">Detalhes do Pedido</span>
               </h3>
               <div class="cp-detail-header-actions">
-                <button class="modal-close" aria-label="Fechar detalhes" onclick="fecharModalDetalhesPedidoCompras()">&times;</button>
+                <button id="btnExcluirPedidoComprasDetalhes" type="button" onclick="excluirPedidoComprasKanban('btnExcluirPedidoComprasDetalhes')"
+                  style="display:none;background:#dc2626;color:#fff;border:none;border-radius:8px;padding:6px 12px;font-size:12px;font-weight:700;cursor:pointer;align-items:center;gap:6px;">
+                  <i class="fa-solid fa-trash"></i> Excluir
+                </button>
+                <button class="modal-close" aria-label="Fechar detalhes do pedido" onclick="fecharModalDetalhesPedidoCompras()">&times;</button>
               </div>
             </div>
             <div class="modal-body cp-detail-body" id="modalPedidoBody">
@@ -2008,7 +2023,13 @@
                 <i class="fa-solid fa-clipboard-list" style="color:#3b82f6;"></i>
                 <span id="modalAnaliseCadastroTitulo">Análise de Cadastro</span>
               </h3>
-              <button class="modal-close" onclick="fecharModalAnaliseCadastro()">&times;</button>
+              <div style="display:flex;align-items:center;gap:10px;">
+                <button id="btnExcluirPedidoComprasAnalise" type="button" onclick="excluirPedidoComprasKanban('btnExcluirPedidoComprasAnalise')"
+                  style="display:none;background:#dc2626;color:#fff;border:none;border-radius:8px;padding:6px 12px;font-size:12px;font-weight:700;cursor:pointer;align-items:center;gap:6px;">
+                  <i class="fa-solid fa-trash"></i> Excluir
+                </button>
+                <button class="modal-close" onclick="fecharModalAnaliseCadastro()">&times;</button>
+              </div>
             </div>
             <div class="modal-body cp-detail-body" id="modalAnaliseCadastroBody" style="padding:20px;">
               <!-- Conteúdo será inserido dinamicamente -->
@@ -2121,9 +2142,9 @@
               <button class="modal-close" onclick="fecharModalInserirCotacoes()">&times;</button>
             </div>
             <div class="modal-body" style="padding:20px;">
-              
+
               <div style="display:grid;grid-template-columns:0.8fr 450px;gap:20px;">
-                
+
                 <!-- Coluna Esquerda: Formulário -->
                 <div>
                   <div style="background:#f9fafb;border:2px solid #e5e7eb;border-radius:8px;padding:20px;margin-bottom:20px;">
@@ -2131,21 +2152,21 @@
                       <i class="fa-solid fa-edit" style="color:#fbbf24;"></i>
                       Registrar Nova Cotação
                     </h4>
-                    
+
                     <div style="margin-bottom:12px;">
                       <label style="display:block;font-size:12px;color:#6b7280;font-weight:600;margin-bottom:6px;">Fornecedor *</label>
-                      <input 
-                        type="text" 
+                      <input
+                        type="text"
                         id="cotacaoFornecedor"
                         placeholder="Nome do fornecedor..."
                         style="width:100%;padding:10px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;"
                       />
                     </div>
-                    
+
                     <div style="margin-bottom:12px;">
                       <label style="display:block;font-size:12px;color:#6b7280;font-weight:600;margin-bottom:6px;">Valor Unitário (R$) *</label>
-                      <input 
-                        type="number" 
+                      <input
+                        type="number"
                         id="cotacaoValor"
                         placeholder="0.00"
                         step="0.01"
@@ -2153,11 +2174,11 @@
                         style="width:100%;padding:10px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;"
                       />
                     </div>
-                    
+
                     <div style="margin-bottom:16px;">
                       <label style="display:block;font-size:12px;color:#6b7280;font-weight:600;margin-bottom:6px;">Anexos (opcional)</label>
-                      <input 
-                        type="file" 
+                      <input
+                        type="file"
                         id="cotacaoAnexo"
                         accept=".pdf,.jpg,.jpeg,.png,.xlsx,.xls,.doc,.docx"
                         onchange="adicionarAnexoCotacao()"
@@ -2168,15 +2189,15 @@
                         <!-- Anexos serão inseridos aqui dinamicamente -->
                       </div>
                     </div>
-                    
-                    <button 
+
+                    <button
                       onclick="registrarCotacao()"
                       style="width:100%;background:linear-gradient(135deg,#10b981 0%,#059669 100%);color:white;border:none;padding:12px 20px;border-radius:6px;font-size:14px;font-weight:600;cursor:pointer;">
                       <i class="fa-solid fa-plus"></i>
                       Registrar Cotação
                     </button>
                   </div>
-                  
+
                   <!-- Lista de Cotações Registradas -->
                   <div>
                     <h4 style="margin:0 0 12px 0;font-size:13px;font-weight:700;color:#6b7280;text-transform:uppercase;">
@@ -2190,7 +2211,7 @@
                     </div>
                   </div>
                 </div>
-                
+
                 <!-- Coluna Direita: Listbox de Itens -->
                 <div>
                   <div style="background:#fef3c7;border:2px solid #fbbf24;border-radius:8px;padding:16px;position:sticky;top:20px;">
@@ -2207,32 +2228,32 @@
                     </div>
                   </div>
                 </div>
-                
+
               </div>
-              
+
               <!-- Observações Gerais -->
               <div style="margin-top:20px;background:#f0fdf4;border:2px solid #86efac;border-radius:8px;padding:16px;">
                 <label style="display:block;font-size:12px;color:#166534;font-weight:600;margin-bottom:8px;">
                   <i class="fa-solid fa-comment-dots"></i>
                   Observações Gerais (aplicam-se a todos os itens)
                 </label>
-                <textarea 
+                <textarea
                   id="cotacaoObservacoesGerais"
                   rows="3"
                   placeholder="Observações que se aplicam a todas as cotações deste lote..."
                   style="width:100%;padding:10px;border:1px solid #86efac;border-radius:6px;font-size:13px;resize:vertical;"
                 ></textarea>
               </div>
-              
+
             </div>
             <div class="modal-footer" style="display:flex;justify-content:space-between;align-items:center;padding:16px 20px;border-top:1px solid #e5e7eb;">
               <button class="btn-secondary" onclick="fecharModalInserirCotacoes()">
                 <i class="fa-solid fa-times"></i>
                 Cancelar
               </button>
-              <button 
+              <button
                 id="btnEnviarCotacoes"
-                onclick="enviarCotacoes()" 
+                onclick="enviarCotacoes()"
                 style="background:linear-gradient(135deg,#fbbf24 0%,#f59e0b 100%);color:#000;padding:12px 28px;border:none;border-radius:6px;font-size:14px;font-weight:700;cursor:pointer;display:flex;align-items:center;gap:8px;">
                 <i class="fa-solid fa-paper-plane"></i>
                 <span>Enviar Cotações</span>
@@ -2254,12 +2275,69 @@
               </div>
             </div>
             <div class="modal-body" style="padding:20px;">
-              
+
               <!-- Configurações Globais em 2 Colunas -->
               <div id="catalogoGridConfiguracoes" style="display:grid;grid-template-columns:repeat(3, 1fr);gap:16px;margin-bottom:20px;padding:16px;background:#f9fafb;border:2px solid #3b82f6;border-radius:8px;align-items:flex-start;">
-                
-                <!-- COLUNA ESQUERDA -->
+
+                <!-- COLUNA 1 — Pré-cadastro -->
                 <div style="display:flex;flex-direction:column;gap:12px;">
+                  <!-- Pré-cadastro (família + origem = prefixo; 5 dígitos só na Requisição Omie) -->
+                  <div id="catalogoPreCadastroBloco" style="display:flex;flex-direction:column;gap:10px;padding:12px;background:#eff6ff;border:1px solid #93c5fd;border-radius:8px;">
+                    <div style="font-size:12px;font-weight:700;color:#1e40af;">
+                      <i class="fa-solid fa-tags" style="margin-right:4px;"></i>
+                      Pré-cadastro do produto
+                    </div>
+                    <div style="display:flex;flex-direction:column;gap:6px;">
+                      <label style="font-size:11px;color:#1f2937;font-weight:700;">Família *</label>
+                      <select id="catalogoPreCadFamilia" style="width:100%;padding:10px;border:2px solid #3b82f6;border-radius:6px;font-size:13px;background:white;font-weight:600;">
+                        <option value="">Carregando...</option>
+                      </select>
+                      <button type="button" id="catalogoPreCadMostrarFamilias" onclick="toggleCatalogoPreCadFamilias()"
+                        style="align-self:flex-start;background:none;border:none;color:#2563eb;font-size:11px;cursor:pointer;padding:0;">
+                        <i class="fa-regular fa-eye"></i> Desocultar famílias restantes
+                      </button>
+                    </div>
+                    <div style="display:flex;flex-direction:column;gap:6px;">
+                      <label style="font-size:11px;color:#1f2937;font-weight:700;">Origem *</label>
+                      <div id="catalogoPreCadOrigem" style="display:flex;gap:8px;">
+                        <button type="button" data-origin="N" class="catalogo-pre-cad-origem active"
+                          onclick="selecionarCatalogoPreCadOrigem('N')"
+                          style="flex:1;padding:8px;border:2px solid #3b82f6;border-radius:6px;background:#3b82f6;color:#fff;font-weight:700;font-size:12px;cursor:pointer;">Nacional</button>
+                        <button type="button" data-origin="I" class="catalogo-pre-cad-origem"
+                          onclick="selecionarCatalogoPreCadOrigem('I')"
+                          style="flex:1;padding:8px;border:2px solid #cbd5e1;border-radius:6px;background:#fff;color:#334155;font-weight:700;font-size:12px;cursor:pointer;">Importado</button>
+                      </div>
+                    </div>
+                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+                      <div style="display:flex;flex-direction:column;gap:6px;">
+                        <label style="font-size:11px;color:#1f2937;font-weight:700;">Unidade *</label>
+                        <select id="catalogoPreCadUnidade" style="width:100%;padding:10px;border:2px solid #3b82f6;border-radius:6px;font-size:13px;background:white;font-weight:600;">
+                          <option value="">Selecione...</option>
+                        </select>
+                      </div>
+                      <div style="display:flex;flex-direction:column;gap:6px;">
+                        <label style="font-size:11px;color:#1f2937;font-weight:700;">Tipo de item *</label>
+                        <select id="catalogoPreCadTipo" style="width:100%;padding:10px;border:2px solid #3b82f6;border-radius:6px;font-size:13px;background:white;font-weight:600;">
+                          <option value="">Selecione...</option>
+                        </select>
+                      </div>
+                    </div>
+                    <div style="display:flex;flex-direction:column;gap:6px;">
+                      <label style="font-size:11px;color:#1f2937;font-weight:700;">Foto (opcional)</label>
+                      <input type="file" id="catalogoPreCadFoto" accept="image/*" style="font-size:12px;" />
+                      <div id="catalogoPreCadFotoNome" style="font-size:11px;color:#64748b;"></div>
+                    </div>
+                    <div id="catalogoPreCadPrefixoHint" style="font-size:11px;line-height:1.45;color:#1e40af;background:#fff;border:1px dashed #93c5fd;border-radius:6px;padding:8px;">
+                      Prefixo: <strong id="catalogoPreCadPrefixo">—</strong><br>
+                      Código definitivo (5 dígitos) será gerado na hora da Requisição Omie.
+                    </div>
+                  </div>
+
+                </div>
+
+                <!-- COLUNA 2 — Modelo de compra + Objetivo -->
+                <div style="display:flex;flex-direction:column;gap:12px;">
+
                   <div style="display:flex;flex-direction:column;gap:6px;">
                     <label style="display:flex;align-items:center;gap:6px;font-size:11px;color:#1f2937;font-weight:700;">
                       <i class="fa-solid fa-clipboard-question" style="color:#3b82f6;"></i>
@@ -2268,7 +2346,7 @@
                         ?
                       </span>
                     </label>
-                    <select 
+                    <select
                       id="catalogoRetornoCotacoesGlobal"
                       style="width:100%;padding:10px;border:2px solid #3b82f6;border-radius:6px;font-size:13px;background:white;font-weight:600;">
                       <option value="">Selecione...</option>
@@ -2287,7 +2365,7 @@
                       <i class="fa-solid fa-building" style="color:#3b82f6;margin-right:4px;"></i>
                       Departamento
                     </label>
-                    <select 
+                    <select
                       id="catalogoDepartamentoGlobal"
                       style="width:100%;padding:10px;border:2px solid #3b82f6;border-radius:6px;font-size:13px;background:white;font-weight:600;">
                       <option value="">Selecione...</option>
@@ -2299,24 +2377,19 @@
                       <i class="fa-solid fa-coins" style="color:#3b82f6;margin-right:4px;"></i>
                       Categoria *
                     </label>
-                    <select 
+                    <select
                       id="catalogoCentroCustoGlobal"
                       style="width:100%;padding:10px;border:2px solid #3b82f6;border-radius:6px;font-size:13px;background:white;font-weight:600;">
                       <option value="">Selecione...</option>
                     </select>
                   </div>
 
-                </div>
-
-                <!-- COLUNA 2 -->
-                <div style="display:flex;flex-direction:column;gap:12px;">
-
                   <div style="display:flex;flex-direction:column;gap:6px;">
                     <label style="display:block;font-size:11px;color:#1f2937;font-weight:700;">
                       <i class="fa-solid fa-bullseye" style="color:#3b82f6;margin-right:4px;"></i>
                       Objetivo da Compra/Observações
                     </label>
-                    <textarea 
+                    <textarea
                       id="catalogoObservacaoGlobal"
                       rows="2"
                       placeholder="Descreva o objetivo/finalidade desta compra que será aplicado a todos os itens..."
@@ -2329,20 +2402,20 @@
                       Adicionar itens e quantidades
                     </label>
                     <div style="display:flex;gap:6px;align-items:center;">
-                      <input 
+                      <input
                         type="text"
                         id="catalogoDescricaoNaoCadastrado"
                         autocomplete="off"
                         placeholder="Descrição do item..."
                         style="flex:1;padding:10px;border:2px solid #3b82f6;border-radius:6px;font-size:13px;background:white;font-weight:500;" />
-                      <input 
+                      <input
                         type="number"
                         id="catalogoDescricaoQtd"
                         min="1"
                         value="1"
                         placeholder="Qtd"
                         style="width:80px;padding:10px;border:2px solid #3b82f6;border-radius:6px;font-size:13px;background:white;font-weight:600;text-align:center;" />
-                      <button 
+                      <button
                         type="button"
                         id="catalogoDescricaoAddBtn"
                         title="Adicionar novo item"
@@ -2359,15 +2432,15 @@
                       Anexar arquivo (opcional)
                     </label>
                     <div style="position:relative;">
-                      <input 
-                        type="file" 
+                      <input
+                        type="file"
                         id="catalogoAnexo"
                         accept="image/*,.pdf,.xlsx,.xls"
                         multiple
                         style="display:none;"
                         onchange="handleCatalogoAnexoChange(this)"
                       />
-                      <button 
+                      <button
                         type="button"
                         onclick="document.getElementById('catalogoAnexo').click()"
                         style="width:100%;padding:10px;background:white;border:2px dashed #3b82f6;border-radius:6px;cursor:pointer;font-size:13px;font-weight:600;color:#1e40af;display:flex;align-items:center;justify-content:center;gap:8px;">
@@ -2389,7 +2462,7 @@
                       <i class="fa-solid fa-comment-dots" style="color:#3b82f6;margin-right:4px;"></i>
                       Observação para recebimento
                     </label>
-                    <textarea 
+                    <textarea
                       id="catalogoObservacaoRecebimento"
                       rows="2"
                       placeholder="Observações sobre o recebimento do produto..."
@@ -2401,7 +2474,7 @@
                       <i class="fa-solid fa-user-check" style="color:#3b82f6;margin-right:4px;"></i>
                       Responsável pela inspeção do produto ao chegar na fábrica
                     </label>
-                    <select 
+                    <select
                       id="catalogoRespInspecaoRecebimento"
                       style="width:100%;padding:10px;border:2px solid #3b82f6;border-radius:6px;font-size:13px;background:white;font-weight:600;">
                       <option value="">Selecione o responsável...</option>
@@ -2422,22 +2495,22 @@
                       style="width:100%;padding:10px;border:2px solid #3b82f6;border-radius:6px;font-size:13px;background:white;font-weight:500;" />
                     <div id="catalogoLinkPreview" style="display:none;margin-top:8px;"></div>
                   </div>
+
+                  <!-- Botão Realizar solicitação (aparece apenas quando Possui cadastro na Omie? = Não) -->
+                  <div id="catalogoBotaoAdicionarNaoCadastrado" style="display:none;margin-top:4px;text-align:center;">
+                    <button
+                      type="button"
+                      onclick="adicionarProdutoNaoCadastradoAoCarrinho(event)"
+                      style="width:100%;padding:14px 32px;background:linear-gradient(135deg,#10b981 0%,#059669 100%);color:white;border:none;border-radius:8px;cursor:pointer;font-size:15px;font-weight:700;display:inline-flex;align-items:center;justify-content:center;gap:10px;box-shadow:0 4px 12px rgba(16,185,129,0.3);transition:all 0.2s;"
+                      onmouseover="this.style.transform='translateY(-2px)';this.style.boxShadow='0 6px 16px rgba(16,185,129,0.4)'"
+                      onmouseout="this.style.transform='translateY(0)';this.style.boxShadow='0 4px 12px rgba(16,185,129,0.3)'">
+                      <i class="fa-solid fa-cart-plus" style="font-size:18px;"></i>
+                      <span>Realizar solicitação de compra</span>
+                    </button>
+                  </div>
                 </div>
               </div>
-              
-              <!-- Botão Adicionar ao Carrinho (aparece apenas quando Possui cadastro na Omie? = Não) -->
-              <div id="catalogoBotaoAdicionarNaoCadastrado" style="display:none;margin-bottom:16px;text-align:center;">
-                <button 
-                  type="button"
-                  onclick="adicionarProdutoNaoCadastradoAoCarrinho(event)"
-                  style="padding:14px 32px;background:linear-gradient(135deg,#10b981 0%,#059669 100%);color:white;border:none;border-radius:8px;cursor:pointer;font-size:15px;font-weight:700;display:inline-flex;align-items:center;gap:10px;box-shadow:0 4px 12px rgba(16,185,129,0.3);transition:all 0.2s;"
-                  onmouseover="this.style.transform='translateY(-2px)';this.style.boxShadow='0 6px 16px rgba(16,185,129,0.4)'"
-                  onmouseout="this.style.transform='translateY(0)';this.style.boxShadow='0 4px 12px rgba(16,185,129,0.3)'">
-                  <i class="fa-solid fa-cart-plus" style="font-size:18px;"></i>
-                  <span>Realizar solicitação de compra</span>
-                </button>
-              </div>
-              
+
               <!-- Seção de Filtros (aparece apenas quando Possui cadastro na Omie? = Sim) -->
               <div id="catalogoSecaoFiltros" style="display:none;margin-bottom:16px;">
                 <div style="display:flex;justify-content:flex-end;margin-bottom:10px;">
@@ -2450,8 +2523,8 @@
                 <div id="catalogoFiltrosContainer" class="catalogo-filtros-container is-collapsed" style="display:grid;grid-template-columns:1fr 1fr 1fr auto;gap:12px;">
                   <div>
                     <label style="display:block;font-size:11px;color:#6b7280;font-weight:600;margin-bottom:6px;">Buscar Produto</label>
-                    <input 
-                      type="text" 
+                    <input
+                      type="text"
                       id="catalogoBuscaProduto"
                       placeholder="Código ou Descrição..."
                       onkeyup="filtrarCatalogoOmie()"
@@ -2460,7 +2533,7 @@
                   </div>
                   <div>
                     <label style="display:block;font-size:11px;color:#6b7280;font-weight:600;margin-bottom:6px;">Família</label>
-                    <select 
+                    <select
                       id="catalogoFamilia"
                       onchange="filtrarCatalogoOmie()"
                       style="width:100%;padding:10px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;background:white;">
@@ -2469,8 +2542,8 @@
                   </div>
                   <div style="display:flex;flex-direction:column;justify-content:flex-end;">
                     <label style="display:flex;align-items:center;gap:8px;padding:10px;background:#fef3c7;border:1px solid #fbbf24;border-radius:6px;cursor:pointer;font-size:13px;font-weight:600;color:#92400e;">
-                      <input 
-                        type="checkbox" 
+                      <input
+                        type="checkbox"
                         id="catalogoAbaixoMinimo"
                         onchange="filtrarCatalogoOmie()"
                         style="width:16px;height:16px;cursor:pointer;"
@@ -2480,7 +2553,7 @@
                     </label>
                   </div>
                   <div style="display:flex;align-items:flex-end;">
-                    <button 
+                    <button
                       onclick="limparFiltrosCatalogo()"
                       style="padding:10px 16px;background:#6b7280;color:white;border:none;border-radius:6px;cursor:pointer;font-size:13px;font-weight:600;">
                       <i class="fa-solid fa-eraser"></i>
@@ -2489,7 +2562,7 @@
                   </div>
                 </div>
               </div>
-              
+
               <!-- Lista de Produtos -->
               <div id="listaProdutosCatalogo" style="display:grid;grid-template-columns:repeat(5,1fr);gap:16px;max-height:500px;overflow-y:auto;">
                 <!-- Produtos serão inseridos dinamicamente -->
@@ -2509,9 +2582,9 @@
             padding:20px;
           ">
             <div onclick="event.stopPropagation();" style="position:relative;display:flex;flex-direction:column;align-items:center;gap:14px;max-width:95%;max-height:95vh;">
-              <img 
-                id="imagemAmpliada" 
-                src="" 
+              <img
+                id="imagemAmpliada"
+                src=""
                 alt="Imagem ampliada"
                 style="
                   max-width:100%;
@@ -2597,7 +2670,7 @@
                 </h3>
                 <div class="content-text">Gerencie os departamentos e suas categorias associadas.</div>
               </div>
-              <button 
+              <button
                 onclick="adicionarNovoDepartamento()"
                 class="content-button"
                 style="background:linear-gradient(135deg,#10b981 0%,#059669 100%);color:white;display:flex;align-items:center;gap:8px;">
@@ -2949,9 +3022,14 @@
                               <input id="qualidadeProdutoCustomizadoCheck" type="checkbox" style="width:16px;height:16px;cursor:pointer;" />
                               <span><i class="fa-solid fa-puzzle-piece" style="color:#7e22ce;margin-right:6px;"></i>Produto customizado</span>
                             </label>
+                            <label for="qualidadeVaiDiretoIdentificacaoCheck" style="display:inline-flex;align-items:center;gap:10px;cursor:pointer;font-weight:600;padding:10px 12px;border:1px solid var(--border-color);border-radius:10px;background:var(--content-bg);flex:1;min-width:220px;">
+                              <input id="qualidadeVaiDiretoIdentificacaoCheck" type="checkbox" style="width:16px;height:16px;cursor:pointer;" />
+                              <span><i class="fa-solid fa-print" style="color:#0ea5e9;margin-right:6px;"></i>Vai direto para Identificação</span>
+                            </label>
                           </div>
                           <div style="grid-column:1 / -1;font-size:12px;color:var(--inactive-color);margin-top:-4px;">
                             Ao marcar customizado, ativa a coluna no cadastro do produto. Use “Dados do produto” para ver o cadastro completo.
+                            “Vai direto para Identificação” fica salvo no cadastro do produto: este item e as próximas compras pulam a lista PIR e vão para Logística → Identificação do produto.
                           </div>
 
                           <div class="form-field" style="position:relative;">
@@ -5246,16 +5324,30 @@
                     <label class="at-em-lbl">Mídias (URLs)</label>
                     <input type="text" id="atEmFechMidias" class="at-em-input" placeholder="URLs separadas por vírgula">
                   </div>
-                  <div class="at-em-wrap">
-                    <label class="at-em-lbl">URL da NFe</label>
-                    <div id="atEmFechNfeUrlWrap" style="display:flex;align-items:center;gap:8px;">
-                      <input type="text" id="atEmFechNfeUrl" class="at-em-input" placeholder="—" readonly style="opacity:.8;cursor:default;flex:1;">
-                      <a id="atEmFechNfeLink" href="#" target="_blank" style="display:none;white-space:nowrap;font-size:12px;color:#38bdf8;text-decoration:none;" title="Abrir NFe">📄 Abrir</a>
+                  <div class="at-em-wrap" style="grid-column:1/-1;">
+                    <label class="at-em-lbl">NFe do fechamento</label>
+                    <div id="atEmFechNfeBox" style="display:flex;flex-direction:column;gap:8px;padding:10px 12px;border-radius:8px;border:1px solid rgba(59,130,246,.35);background:rgba(30,58,95,.25);">
+                      <div id="atEmFechNfeUrlWrap" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+                        <input type="text" id="atEmFechNfeUrl" class="at-em-input" placeholder="Nenhuma NFe anexada" readonly style="opacity:.8;cursor:default;flex:1;min-width:180px;">
+                        <a id="atEmFechNfeLink" href="#" target="_blank" rel="noopener" style="display:none;white-space:nowrap;font-size:12px;color:#38bdf8;text-decoration:none;" title="Abrir NFe">📄 Abrir</a>
+                        <button type="button" id="atEmFechNfeRemoverBtn" title="Excluir NFe e liberar novo anexo"
+                          style="display:none;padding:6px 10px;border-radius:8px;border:1px solid rgba(239,68,68,.45);background:rgba(239,68,68,.12);color:#f87171;cursor:pointer;font-size:12px;font-weight:600;white-space:nowrap;">
+                          <i class="fa-solid fa-trash-can"></i> Excluir NFe
+                        </button>
+                      </div>
+                      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+                        <input type="file" id="atEmFechNfeInput" accept=".pdf,.xml,application/pdf,text/xml,application/xml" style="display:none;">
+                        <button type="button" id="atEmFechNfeAnexarBtn"
+                          style="display:inline-flex;align-items:center;gap:6px;padding:7px 12px;border-radius:8px;border:1px solid rgba(59,130,246,.55);background:rgba(37,99,235,.2);color:#93c5fd;cursor:pointer;font-size:12px;font-weight:600;">
+                          <i class="fa-solid fa-file-invoice"></i> <span id="atEmFechNfeAnexarLbl">Anexar NFe</span>
+                        </button>
+                        <span id="atEmFechNfeStatus" style="font-size:12px;color:#94a3b8;"></span>
+                      </div>
+                      <div class="at-em-wrap" style="margin:0;">
+                        <label class="at-em-lbl" style="margin-bottom:4px;">Data Envio NFe</label>
+                        <input type="text" id="atEmFechDataEnvioNfe" class="at-em-input" placeholder="—" readonly style="opacity:.8;cursor:default;">
+                      </div>
                     </div>
-                  </div>
-                  <div class="at-em-wrap">
-                    <label class="at-em-lbl">Data Envio NFe</label>
-                    <input type="text" id="atEmFechDataEnvioNfe" class="at-em-input" placeholder="—" readonly style="opacity:.8;cursor:default;">
                   </div>
                   <div class="at-em-wrap" style="grid-column:1/-1;">
                     <label class="at-em-lbl">Técnico</label>
@@ -6517,6 +6609,88 @@
           </div>
         </div>
 
++        <!-- Painel Gráfico AT -->
+        <div id="sacAtGraficosPane" class="tab-pane" style="display:none;">
+          <div class="content-wrapper">
+            <div class="content-section" style="margin-top:0;">
+              <div class="title-wrapper" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:0;">
+                <div class="content-section-title" style="display:flex;align-items:center;gap:8px;">
+                  <i class="fa-solid fa-chart-line" style="color:#818cf8;"></i>
+                  Gráfico AT
+                </div>
+                <div style="display:flex;gap:8px;align-items:center;margin-left:auto;">
+                  <div style="display:flex;gap:6px;">
+                    <button class="at-graf-periodo-btn-pg" data-per="3" style="padding:5px 12px;border-radius:8px;border:1px solid #4f46e5;background:rgba(79,70,229,.25);color:#a5b4fc;font-size:12px;cursor:pointer;">3 meses</button>
+                    <button class="at-graf-periodo-btn-pg" data-per="6" style="padding:5px 12px;border-radius:8px;border:1px solid #374151;background:rgba(255,255,255,.04);color:#9ca3af;font-size:12px;cursor:pointer;">6 meses</button>
+                    <button class="at-graf-periodo-btn-pg" data-per="12" style="padding:5px 12px;border-radius:8px;border:1px solid #374151;background:rgba(255,255,255,.04);color:#9ca3af;font-size:12px;cursor:pointer;">12 meses</button>
+                    <button class="at-graf-periodo-btn-pg" data-per="0" style="padding:5px 12px;border-radius:8px;border:1px solid #374151;background:rgba(255,255,255,.04);color:#9ca3af;font-size:12px;cursor:pointer;">Tudo</button>
+                  </div>
+                  <button id="atGrafPgRefreshBtn" type="button" title="Atualizar"
+                    style="padding:6px 12px;border-radius:8px;border:1px solid #374151;background:rgba(255,255,255,.04);color:#9ca3af;cursor:pointer;display:flex;align-items:center;gap:6px;font-size:13px;">
+                    <i class="fa-solid fa-rotate"></i>
+                  </button>
+                  <button id="atGrafPgRelatorioBtn" type="button" title="Gerar relatório PDF"
+                    style="padding:6px 14px;border-radius:8px;border:1px solid #f59e0b;background:rgba(245,158,11,.15);color:#fbbf24;cursor:pointer;display:flex;align-items:center;gap:6px;font-size:13px;font-weight:600;">
+                    <i class="fa-solid fa-file-pdf"></i> Relatório
+                  </button>
+                </div>
+              </div>
+
+              <!-- Gráfico 1 -->
+              <div style="background:rgba(255,255,255,.03);border:1px solid #1e293b;border-radius:12px;padding:16px;margin-top:16px;">
+                <div style="font-size:13px;font-weight:700;color:#a5b4fc;margin-bottom:12px;display:flex;align-items:center;gap:6px;">
+                  <i class="fa-solid fa-map-location-dot"></i>
+                  Gráfico 1 — Atendimentos por Estado / Mês (Qualidade)
+                </div>
+                <div id="atGrafPg1Status" style="font-size:12px;color:var(--inactive-color);margin-bottom:8px;display:none;">Carregando...</div>
+                <div style="position:relative;height:340px;">
+                  <canvas id="atGrafPg1Canvas"></canvas>
+                </div>
+              </div>
+
+              <!-- Gráfico 2 -->
+              <div style="background:rgba(255,255,255,.03);border:1px solid #1e293b;border-radius:12px;padding:16px;margin-top:18px;">
+                <div style="font-size:13px;font-weight:700;color:#34d399;margin-bottom:12px;display:flex;align-items:center;gap:6px;">
+                  <i class="fa-solid fa-chart-line"></i>
+                  Gráfico 2 — Picos de Atendimento por Mês
+                </div>
+                <div id="atGrafPg2Status" style="font-size:12px;color:var(--inactive-color);margin-bottom:8px;display:none;">Carregando...</div>
+                <div style="position:relative;height:280px;">
+                  <canvas id="atGrafPg2Canvas"></canvas>
+                </div>
+              </div>
+
+              <!-- Detalhes do nó clicado -->
+              <div id="atGrafPgDetalhePanel" style="display:none;margin-top:18px;background:rgba(255,255,255,.03);border:1px solid #1e293b;border-radius:12px;padding:16px;">
+                <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap;">
+                  <i class="fa-solid fa-list-ul" style="color:#94a3b8;"></i>
+                  <span id="atGrafPgDetalheTitulo" style="font-size:13px;font-weight:700;color:#e5e7eb;"></span>
+                  <span id="atGrafPgDetalheQtd" style="font-size:11px;color:#94a3b8;margin-left:4px;"></span>
+                  <div style="margin-left:auto;position:relative;">
+                    <i class="fa-solid fa-magnifying-glass" style="position:absolute;left:10px;top:50%;transform:translateY(-50%);color:#6b7280;pointer-events:none;font-size:12px;"></i>
+                    <input id="atGrafPgDetalhePesquisa" type="text" placeholder="Pesquisar OS..."
+                      style="padding:6px 10px 6px 30px;background:#111827;border:1px solid #374151;border-radius:8px;color:#e5e7eb;font-size:12px;width:200px;">
+                  </div>
+                </div>
+                <div id="atGrafPgDetalheStatus" style="font-size:12px;color:var(--inactive-color);display:none;">Carregando...</div>
+                <div style="overflow-x:auto;">
+                  <table style="width:100%;border-collapse:collapse;font-size:13px;">
+                    <thead>
+                      <tr>
+                        <th style="text-align:left;padding:6px 10px;border-bottom:1px solid #374151;color:#94a3b8;font-size:11px;text-transform:uppercase;letter-spacing:.04em;white-space:nowrap;">OS</th>
+                        <th style="text-align:left;padding:6px 10px;border-bottom:1px solid #374151;color:#94a3b8;font-size:11px;text-transform:uppercase;letter-spacing:.04em;white-space:nowrap;">Data</th>
+                        <th style="text-align:left;padding:6px 10px;border-bottom:1px solid #374151;color:#94a3b8;font-size:11px;text-transform:uppercase;letter-spacing:.04em;">Reclamação</th>
+                      </tr>
+                    </thead>
+                    <tbody id="atGrafPgDetalheTbody"></tbody>
+                  </table>
+                </div>
+              </div>
+
+            </div>
+          </div>
+        </div>
+
         <!-- Painel Logística: Envio de mercadoria (tabela) -->
         </div>
       </div>
@@ -7492,7 +7666,7 @@
                     <rect x="14" y="14" width="7" height="7" rx="1"></rect>
                   </svg>
                 </button>
-                <button id="listaProdutosAbrirCarrinhoBtn" type="button" class="filter-icon carrinho-btn" title="Meu Carrinho de Compras" aria-label="Abrir carrinho de compras">
+                <button id="listaProdutosAbrirCarrinhoBtn" type="button" class="filter-icon carrinho-btn" title="Compras" aria-label="Abrir Compras">
                   <i class="fa-solid fa-cart-shopping"></i>
                   <span class="mobile-filter-label">Carrinho</span>
                   <span id="listaProdutosCarrinhoCount" class="carrinho-badge">0</span>
@@ -7693,27 +7867,27 @@
                 transform: translateY(-2px);
                 box-shadow: 0 4px 16px rgba(0,0,0,0.2);
               }
-              
+
               #familiaTable tbody tr {
                 transition: all 0.2s;
                 border-bottom: 1px solid var(--border-color);
               }
-              
+
               #familiaTable tbody tr:hover {
                 background: linear-gradient(135deg, rgba(245, 158, 11, 0.04) 0%, rgba(217, 119, 6, 0.02) 100%);
                 transform: scale(1.01);
               }
-              
+
               #familiaTable tbody tr:last-child {
                 border-bottom: none;
               }
-              
+
               #familiaTable tbody td {
                 padding: 14px 20px;
                 font-size: 14px;
                 color: var(--content-title-color);
               }
-              
+
               #familiaTable tbody td:first-child {
                 font-weight: 600;
                 color: #f59e0b;
@@ -7858,7 +8032,7 @@
             <!-- Modal: Adicionar/Editar Atividade -->
             <div id="modalAtividade" class="modal" style="display: none; position: fixed; z-index: 9999; left: 0; top: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.6); overflow: auto; backdrop-filter: blur(4px); animation: fadeIn 0.2s ease-in-out;">
               <div class="modal-content" style="background: linear-gradient(135deg, var(--content-bg) 0%, rgba(16, 185, 129, 0.02) 100%); margin: 5% auto; padding: 0; border: 1px solid var(--border-color); width: 90%; max-width: 650px; border-radius: 16px; box-shadow: 0 8px 32px rgba(0,0,0,0.3); animation: slideDown 0.3s ease-out;">
-                
+
                 <!-- Header do Modal -->
                 <div style="background: linear-gradient(135deg, #10b981 0%, #059669 100%); padding: 24px 30px; border-radius: 16px 16px 0 0; display: flex; justify-content: space-between; align-items: center;">
                   <div style="display: flex; align-items: center; gap: 12px;">
@@ -7869,7 +8043,7 @@
                   </div>
                   <button id="closeModalAtividade" style="background: rgba(255,255,255,0.2); border: none; width: 36px; height: 36px; border-radius: 8px; font-size: 24px; cursor: pointer; color: white; line-height: 1; transition: all 0.2s; display: flex; align-items: center; justify-content: center;">&times;</button>
                 </div>
-                
+
                 <!-- Corpo do Modal -->
                 <div style="padding: 30px;">
                   <div style="margin-bottom: 24px;">
@@ -7881,7 +8055,7 @@
                       <i class="fa-solid fa-info-circle"></i> Digite um nome claro e objetivo para a atividade
                     </small>
                   </div>
-                  
+
                   <div style="margin-bottom: 24px;">
                     <label for="inputDescricaoAtividade" style="display: flex; align-items: center; gap: 8px; margin-bottom: 10px; font-weight: 600; color: var(--content-title-color); font-size: 14px;">
                       <i class="fa-solid fa-align-left" style="color: #10b981;"></i> Descrição
@@ -7892,7 +8066,7 @@
                     </small>
                   </div>
                 </div>
-                
+
                 <!-- Footer do Modal -->
                 <div style="background: rgba(0,0,0,0.02); padding: 20px 30px; border-radius: 0 0 16px 16px; display: flex; gap: 12px; justify-content: flex-end; border-top: 1px solid var(--border-color);">
                   <button id="cancelModalAtividade" class="btn" type="button" style="padding: 10px 24px; background: linear-gradient(135deg, #6b7280 0%, #4b5563 100%); border: none; border-radius: 8px; color: white; font-weight: 500; display: flex; align-items: center; gap: 8px; transition: all 0.2s; box-shadow: 0 2px 8px rgba(107, 114, 128, 0.3);">
@@ -8717,11 +8891,11 @@
                 to { opacity: 1; }
               }
               @keyframes slideDown {
-                from { 
+                from {
                   opacity: 0;
                   transform: translateY(-30px);
                 }
-                to { 
+                to {
                   opacity: 1;
                   transform: translateY(0);
                 }
@@ -9548,7 +9722,7 @@
 
         <!-- Dashboard de Navegação com Cards -->
 <div class="main-header" style="flex-direction: row; padding: 15px 20px; gap: 16px; height: auto; border-bottom: 1px solid var(--card-border-color); align-items: center;">
-  
+
   <!-- Botão do menu interno da aba Produto (diferente do menu lateral) -->
   <button class="nav-hamburger" id="navHamburger" title="Menu interno do produto" aria-label="Abrir menu interno do produto">
     <i class="fa-solid fa-table-cells-large"></i>
@@ -9556,9 +9730,9 @@
 
   <!-- Grid de Cards de Navegação (inicialmente colapsado) -->
   <div class="product-nav-grid collapsed" id="productNavGrid" style="display: none; position: absolute; top: 70px; left: 20px; z-index: 1000; background: var(--modal-bg-color); border: 2px solid var(--card-border-color); border-radius: 12px; padding: 20px; box-shadow: 0 8px 24px rgba(0,0,0,0.3); grid-template-columns: repeat(3, 140px); gap: 16px; width: auto; backdrop-filter: blur(10px);">
-    
+
     <!-- Card: Dados -->
-    <div class="nav-card active" data-target="dadosProduto" 
+    <div class="nav-card active" data-target="dadosProduto"
          data-nav-key="produto:dados"
          data-nav-parent="top:produto"
          data-nav-pos="top"
@@ -9703,7 +9877,7 @@
   <!-- Título da seção atual + Informações do produto -->
   <div style="flex: 1; text-align: center;">
     <h2 id="currentSectionTitle" style="margin: 0 0 8px 0; color: var(--content-title-color); font-size: 18px; font-weight: 600;">Dados do produto</h2>
-    
+
     <!-- Informações do produto (código, código OMIE e descrição) -->
     <div id="productHeaderInfo" style="display: none; align-items: center; justify-content: center; gap: 12px; margin-top: 4px; font-size: 13px; color: var(--inactive-color);">
       <div style="display: flex; align-items: center; gap: 6px;">
@@ -9753,13 +9927,13 @@
                       <!-- Círculo de fundo -->
                       <circle cx="25" cy="25" r="20" fill="none" stroke="#e0e0e0" stroke-width="4"/>
                       <!-- Círculo de progresso -->
-                      <circle id="completudeProgress" cx="25" cy="25" r="20" fill="none" 
+                      <circle id="completudeProgress" cx="25" cy="25" r="20" fill="none"
                               stroke="#10b981" stroke-width="4" stroke-linecap="round"
                               stroke-dasharray="125.6" stroke-dashoffset="125.6"
                               transform="rotate(-90 25 25)"
                               style="transition: stroke-dashoffset 0.5s ease;"/>
                       <!-- Texto de porcentagem -->
-                      <text id="completudeText" x="25" y="29" text-anchor="middle" 
+                      <text id="completudeText" x="25" y="29" text-anchor="middle"
                             font-size="12" font-weight="bold" fill="#333">0%</text>
                     </svg>
                     <div style="font-size: 13px; color: #666;">Completude do cadastro</div>
@@ -10308,7 +10482,7 @@
                     <i class="fa-solid fa-plus"></i> Adicionar item
                   </button>
                 </div>
-                
+
                 <div id="riConteudo" style="overflow-x: auto;">
                   <table id="tabelaRI" class="ri-table" style="width:100%; border-collapse: collapse; margin-top: 1rem;">
                     <thead>
@@ -10353,7 +10527,7 @@
                     </button>
                   </div>
                 </div>
-                
+
                 <div id="pirConteudo" style="overflow-x: auto;">
                   <table id="tabelaPIR" class="pir-table" style="width:100%; border-collapse: collapse; margin-top: 1rem;">
                     <thead>
@@ -10373,8 +10547,8 @@
               </div>
             </div>
           </div>
-            
-          
+
+
 <!-- Painel de notificações ------------------------------------------------>
 <div id="notificacoes" class="tab-pane" style="display:none;">
   <div class="content-wrapper">
@@ -10387,8 +10561,8 @@
   </div>
 </div>
 
-          
-            
+
+
 
 
 
@@ -11785,6 +11959,18 @@
                 </div>
               </div>
 
+              <!-- Coluna: Embalagem -->
+              <div style="flex:0 0 340px;min-width:300px;">
+                <div style="display:flex;align-items:center;gap:8px;padding:10px 14px;background:#064e3b;border-radius:10px 10px 0 0;border:1px solid #059669;border-bottom:none;">
+                  <span style="width:10px;height:10px;border-radius:50%;background:#34d399;display:inline-block;flex-shrink:0;"></span>
+                  <span style="font-size:12px;font-weight:700;color:#6ee7b7;text-transform:uppercase;letter-spacing:.5px;">Embalagem</span>
+                  <span id="kanbanEmbalagemCount" style="margin-left:auto;font-size:11px;background:#065f46;color:#a7f3d0;padding:2px 9px;border-radius:10px;font-weight:600;">0</span>
+                </div>
+                <div id="kanbanEmbalagem" style="min-height:220px;background:rgba(52,211,153,.04);border:1px solid #059669;border-top:none;border-radius:0 0 10px 10px;padding:10px;display:flex;flex-direction:column;gap:10px;">
+                  <div style="text-align:center;padding:24px 0;color:var(--inactive-color);font-size:12px;">Nenhuma OP em Embalagem.</div>
+                </div>
+              </div>
+
             </div>
 
           </div>
@@ -11853,6 +12039,7 @@
                   <option value="Montagem eletrica">Montagem eletrica</option>
                   <option value="Teste">Teste</option>
                   <option value="Inspeção final">Inspeção final</option>
+                  <option value="Embalagem">Embalagem</option>
                 </select>
                 <div id="producaoGerarOpPostosLista" style="display:flex;flex-direction:column;gap:6px;margin-top:8px;"></div>
 
@@ -12090,7 +12277,7 @@
                   <i class="fa-solid fa-clipboard-check" style="color:#6366f1;"></i>
                   <span>RI — Registro de inspeção</span>
                 </h3>
-                <div class="content-text">OPs no posto atual aguardando registro de inspeção (RI) para liberar a Produção montagem.</div>
+                <div class="content-text">OPs com checkbox RI ativo no kanban (após Finalizar operação ou Imprimir OP). Registrar RI desativa o checkbox e libera a montagem.</div>
               </div>
               <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px;">
                 <div style="display:flex;gap:8px;align-items:center;">
@@ -12227,10 +12414,6 @@
       </div>
       <!-- Toggle grade / lista -->
       <div class="etq-view-toggle">
-      <!-- Botão Armazenar produto (QR → local) -->
-      <button id="etqBtnArmazenarToolbar" class="etq-view-btn" title="Armazenar produto — leia o QR Code do produto e depois o código do local" style="color:#34d399;">
-        <i class="fa-solid fa-boxes-packing"></i>
-      </button>
       <!-- Botão único de configurações + dropdown -->
       <div class="etq-config-menu-wrap" id="etqConfigMenuWrap">
         <button id="etqBtnConfig" class="etq-view-btn" title="Configurações">
@@ -12365,12 +12548,7 @@
         <i class="fa-solid fa-warehouse" style="font-size:1.2rem;color:#34d399;"></i>
         <h3 style="margin:0;font-size:1.1rem;font-weight:700;color:#f1f5f9;">Etiquetas impressas — Estoque</h3>
       </div>
-      <div style="display:flex;align-items:center;gap:8px;">
-        <button id="btnArmazenarProduto" type="button" style="display:flex;align-items:center;gap:6px;background:linear-gradient(135deg,#0891b2 0%,#0e7490 100%);color:#fff;border:none;border-radius:8px;padding:7px 14px;font-size:13px;font-weight:600;cursor:pointer;" title="Armazenar produto — ler QR e local">
-          <i class="fa-solid fa-boxes-packing"></i> Armazenar produto
-        </button>
-        <button id="etqImpressoModalFechar" class="etiquetas-modal-close" title="Fechar">&times;</button>
-      </div>
+      <button id="etqImpressoModalFechar" class="etiquetas-modal-close" title="Fechar">&times;</button>
     </div>
     <div class="etiquetas-modal-search-row">
       <div class="etiquetas-search-wrap">
@@ -12415,9 +12593,35 @@
       </button>
     </div>
     <!-- Campo complemento opcional -->
-    <div style="padding:0 18px 16px;">
+    <div style="padding:0 18px 10px;">
       <input id="etqArmazenarComplemento" type="text" placeholder="Complemento (opcional)..."
         style="width:100%;background:#0f172a;border:1px solid #1e3a5f;border-radius:8px;padding:8px 12px;color:#94a3b8;font-size:.82rem;outline:none;box-sizing:border-box;" autocomplete="off" />
+    </div>
+    <!-- Retornar etiqueta → Etiquetas disponíveis -->
+    <div id="etqArmazenarRetornarWrap" style="display:none;padding:0 18px 16px;border-top:1px solid #334155;padding-top:12px;">
+      <button id="etqBtnRetornarEtiqueta" type="button"
+        style="width:100%;display:flex;align-items:center;justify-content:center;gap:8px;background:linear-gradient(135deg,#7c3aed 0%,#6d28d9 100%);color:#fff;border:none;border-radius:8px;padding:10px 14px;font-size:13px;font-weight:700;cursor:pointer;">
+        <i class="fa-solid fa-rotate-left"></i> Retornar etiqueta
+      </button>
+      <div id="etqRetornarEscolha" style="display:none;margin-top:10px;padding:12px;background:#0f172a;border:1px solid #334155;border-radius:10px;">
+        <div style="color:#e2e8f0;font-size:.86rem;font-weight:600;margin-bottom:10px;text-align:center;">
+          Voltar saldo para Etiquetas disponíveis?
+        </div>
+        <div style="display:flex;flex-direction:column;gap:8px;">
+          <button id="etqRetornarUma" type="button"
+            style="background:#334155;color:#f1f5f9;border:1px solid #475569;border-radius:8px;padding:9px 12px;font-size:13px;font-weight:600;cursor:pointer;">
+            Só esta etiqueta
+          </button>
+          <button id="etqRetornarTodas" type="button"
+            style="background:#1e3a5f;color:#93c5fd;border:1px solid #2563eb;border-radius:8px;padding:9px 12px;font-size:13px;font-weight:600;cursor:pointer;">
+            Todas deste produto
+          </button>
+          <button id="etqRetornarCancelar" type="button"
+            style="background:transparent;color:#94a3b8;border:none;padding:6px;font-size:12px;cursor:pointer;">
+            Cancelar
+          </button>
+        </div>
+      </div>
     </div>
   </div>
 </div>
@@ -12441,8 +12645,8 @@
   <script src="/public/js/at-masp-relatorio.js?v=20260718g" defer></script>
   <script src="/public/js/vendas-relatorio-gerencial.js?v=20260709a" defer></script>
   <script src="/public/js/logistica-relatorio-gerencial.js?v=20260712a" defer></script>
-  <script type="module" src="menu_produto.js?v=20260722-shell-pilot-v47-compras-fotos-acoes-v1"></script>
-  
+  <script type="module" src="menu_produto.js?v=20260722-logistica-filtros-v1"></script>
+
   <script type="module" src="./requisicoes_omie/filtro_produto.js?v=20260718-faixa-minimo"></script>
   <script type="module" src="./requisicoes_omie/ListarProdutos.js?v=20260718-faixa-minimo"></script>
   <script type="module" src="./requisicoes_omie/Dados_produto.js?v=20260710c" defer></script>
@@ -12858,39 +13062,39 @@
     box-shadow:0 6px 14px rgba(14,165,233,.25);
   }
   .mp-header .mp-back:hover{ filter:brightness(1.05); }
-  
+
   /* Animação para item selecionado no listbox de cotação */
 @keyframes rotatingBorder {
         0% {
-          box-shadow: 
+          box-shadow:
             3px 0 0 0 #3b82f6,
             0 0 0 0 transparent,
             0 0 0 0 transparent,
             0 0 0 0 transparent;
         }
         25% {
-          box-shadow: 
+          box-shadow:
             3px 0 0 0 #3b82f6,
             0 3px 0 0 #3b82f6,
             0 0 0 0 transparent,
             0 0 0 0 transparent;
         }
         50% {
-          box-shadow: 
+          box-shadow:
             3px 0 0 0 #3b82f6,
             0 3px 0 0 #3b82f6,
             -3px 0 0 0 #3b82f6,
             0 0 0 0 transparent;
         }
         75% {
-          box-shadow: 
+          box-shadow:
             3px 0 0 0 #3b82f6,
             0 3px 0 0 #3b82f6,
             -3px 0 0 0 #3b82f6,
             0 -3px 0 0 #3b82f6;
         }
         100% {
-          box-shadow: 
+          box-shadow:
             3px 0 0 0 #3b82f6,
             0 3px 0 0 #3b82f6,
             -3px 0 0 0 #3b82f6,
@@ -12911,7 +13115,7 @@
     background: #1f2937;
     border-radius: 8px;
   }
-  
+
   .calendar-controls select,
   .calendar-controls input {
     padding: 6px 12px;
@@ -12921,7 +13125,7 @@
     color: #e5e7eb;
     font-size: 14px;
   }
-  
+
   .calendar-controls .icon-btn {
     padding: 6px 12px;
     background: #374151;
@@ -12931,11 +13135,11 @@
     cursor: pointer;
     transition: background 0.2s;
   }
-  
+
   .calendar-controls .icon-btn:hover {
     background: #4b5563;
   }
-  
+
   .calendar-grid {
     display: grid;
     grid-template-columns: repeat(7, 1fr);
@@ -12944,7 +13148,7 @@
     padding: 8px;
     border-radius: 8px;
   }
-  
+
   .dow {
     background: #374151;
     padding: 12px 4px;
@@ -12954,7 +13158,7 @@
     font-size: 13px;
     border-radius: 4px;
   }
-  
+
   .cal-day {
     min-height: 100px;
     background: #1f2937;
@@ -12965,37 +13169,37 @@
     transition: background 0.2s, transform 0.1s;
     overflow: hidden;
   }
-  
+
   .cal-day:hover {
     background: #374151;
     transform: scale(1.02);
   }
-  
+
   .cal-day.empty {
     background: transparent;
     cursor: default;
   }
-  
+
   .cal-day.empty:hover {
     transform: none;
   }
-  
+
   .cal-day.hoje {
     border: 2px solid #3b82f6;
     background: #1e3a8a;
   }
-  
+
   .cal-day.has-impressao {
     background: #1e40af;
   }
-  
+
   .day-num {
     font-size: 16px;
     font-weight: 600;
     color: #e5e7eb;
     margin-bottom: 4px;
   }
-  
+
   .codes {
     display: flex;
     flex-direction: column;
@@ -13004,7 +13208,7 @@
     overflow: hidden;
     max-height: 70px;
   }
-  
+
   .code {
     background: #4b5563;
     padding: 2px 6px;
@@ -13018,31 +13222,31 @@
     gap: 4px;
     position: relative;
   }
-  
+
   .code.impressao {
     background: #059669;
   }
-  
+
   .status-produzido {
     color: #10b981;
   }
-  
+
   .status-produzindo {
     color: #f59e0b;
   }
-  
+
   .status-excluido {
     color: #ef4444;
   }
-  
+
   .status-aguardando {
     color: #9ca3af;
   }
-  
+
   .status-novo {
     color: #60a5fa;
   }
-  
+
   /* Modal do calendário */
   .cal-modal {
     position: fixed;
@@ -13056,7 +13260,7 @@
     justify-content: center;
     z-index: 10000;
   }
-  
+
   .cal-modal-content {
     background: #1f2937;
     border-radius: 12px;
@@ -13067,7 +13271,7 @@
     position: relative;
     box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
   }
-  
+
   .cal-modal-close {
     position: absolute;
     top: 12px;
@@ -13084,40 +13288,40 @@
     align-items: center;
     justify-content: center;
   }
-  
+
   .cal-modal-close:hover {
     background: #4b5563;
   }
-  
+
   .cal-modal h3 {
     color: #e5e7eb;
     margin-bottom: 16px;
   }
-  
+
   .cal-modal-body {
     color: #d1d5db;
   }
-  
+
   .mod-local {
     margin-bottom: 24px;
     padding: 12px;
     background: #374151;
     border-radius: 8px;
   }
-  
+
   .mod-local h4 {
     color: #60a5fa;
     margin-bottom: 12px;
     border-bottom: 1px solid #4b5563;
     padding-bottom: 8px;
   }
-  
+
   .mod-prod-ops {
     list-style: none;
     padding: 0;
     margin: 0;
   }
-  
+
   .mod-prod-ops li {
     padding: 8px;
     margin: 6px 0;
@@ -13125,7 +13329,7 @@
     border-radius: 6px;
     border-left: 3px solid #3b82f6;
   }
-  
+
   .mod-prod-ops .badge {
     display: inline-flex;
     align-items: center;
@@ -13136,38 +13340,38 @@
     font-weight: 600;
     margin-right: 8px;
   }
-  
+
   .badge.etapa-aguardando {
     background: #374151;
     color: #9ca3af;
   }
-  
+
   .badge.etapa-fila {
     background: #1e40af;
     color: #93c5fd;
   }
-  
+
   .badge.etapa-produzindo {
     background: #92400e;
     color: #fbbf24;
   }
-  
+
   .badge.etapa-produzido {
     background: #064e3b;
     color: #34d399;
   }
-  
+
   .badge.etapa-em-andamento {
     background: #1e3a8a;
     color: #60a5fa;
   }
-  
+
   .loading-cal {
     text-align: center;
     padding: 40px;
     color: #9ca3af;
   }
-  
+
   /* Tooltip do calendário */
   .cal-tip {
     position: fixed;
@@ -13185,7 +13389,7 @@
     word-wrap: break-word;
     box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.3), 0 2px 4px -1px rgba(0, 0, 0, 0.2);
   }
-  
+
   .cal-tip.show {
     opacity: 1;
   }
@@ -13201,7 +13405,7 @@
     overflow: hidden;
     box-sizing: border-box;
   }
-  
+
   .semana-carousel {
     display: flex;
     gap: 12px;
@@ -13212,11 +13416,11 @@
     will-change: transform;
     box-sizing: border-box;
   }
-  
+
   .semana-carousel:active {
     cursor: grabbing;
   }
-  
+
   .semana-day-card {
     min-width: 150px;
     max-width: 150px;
@@ -13228,27 +13432,27 @@
     border: 2px solid transparent;
     transition: transform 0.2s ease, border-color 0.2s ease;
   }
-  
+
   .semana-day-card.center {
     background: #1e40af;
     transform: scale(1.05);
     border-color: #3b82f6;
     box-shadow: 0 8px 24px rgba(59, 130, 246, 0.3);
   }
-  
+
   .semana-day-card.hoje {
     border-color: #10b981;
   }
-  
+
   .semana-day-card:hover {
     transform: translateY(-4px);
     box-shadow: 0 8px 16px rgba(0, 0, 0, 0.3);
   }
-  
+
   .semana-day-card.center:hover {
     transform: scale(1.05) translateY(-4px);
   }
-  
+
   .semana-day-header {
     display: flex;
     justify-content: space-between;
@@ -13257,19 +13461,19 @@
     padding-bottom: 10px;
     border-bottom: 1px solid #374151;
   }
-  
+
   .semana-day-date {
     font-size: 16px;
     font-weight: 600;
     color: #e5e7eb;
   }
-  
+
   .semana-day-dow {
     font-size: 12px;
     color: #9ca3af;
     font-weight: 500;
   }
-  
+
   .semana-day-badge {
     background: #374151;
     padding: 3px 8px;
@@ -13278,12 +13482,12 @@
     color: #9ca3af;
     font-weight: 600;
   }
-  
+
   .semana-day-card.center .semana-day-badge {
     background: #2563eb;
     color: #e0e7ff;
   }
-  
+
   .semana-produtos {
     display: flex;
     flex-direction: column;
@@ -13293,21 +13497,21 @@
     scrollbar-width: thin;
     scrollbar-color: #4b5563 #1f2937;
   }
-  
+
   .semana-produtos::-webkit-scrollbar {
     width: 6px;
   }
-  
+
   .semana-produtos::-webkit-scrollbar-track {
     background: #1f2937;
     border-radius: 3px;
   }
-  
+
   .semana-produtos::-webkit-scrollbar-thumb {
     background: #4b5563;
     border-radius: 3px;
   }
-  
+
   .semana-produto-item {
     background: #374151;
     padding: 6px 8px;
@@ -13319,19 +13523,19 @@
     color: #e5e7eb;
     transition: background 0.2s;
   }
-  
+
   .semana-day-card.center .semana-produto-item {
     background: #1e3a8a;
   }
-  
+
   .semana-produto-item:hover {
     background: #4b5563;
   }
-  
+
   .semana-day-card.center .semana-produto-item:hover {
     background: #1e40af;
   }
-  
+
   .semana-empty {
     text-align: center;
     padding: 16px;
@@ -15206,7 +15410,7 @@ function attachDropZone(ul) {
       <h2>Novo Produto</h2>
       <button class="modal-close" aria-label="Fechar">&times;</button>
     </div>
-    
+
     <div class="modal-body">
       <form id="formNovoProduto">
         <!-- Preview do Código (gerado automaticamente) -->
@@ -15249,8 +15453,8 @@ function attachDropZone(ul) {
               <option value="1">Importado</option>
             </select>
             <!-- Campo alternativo (para famílias com prefixo de letras) -->
-            <input 
-              type="text" 
+            <input
+              type="text"
               id="novoProd_resto"
               name="resto_codigo"
               inputmode="text"
@@ -15269,11 +15473,11 @@ function attachDropZone(ul) {
         <div class="form-row full-width">
           <div class="form-group">
             <label for="novoProd_descricaoPrincipal">Descrição Principal <span style="color:#f87171;">*</span></label>
-            <input 
-              type="text" 
-              id="novoProd_descricaoPrincipal" 
-              name="descricao_principal" 
-              required 
+            <input
+              type="text"
+              id="novoProd_descricaoPrincipal"
+              name="descricao_principal"
+              required
               maxlength="50"
               pattern="^\S+$"
               title="Digite apenas uma palavra (sem espaços)"
@@ -15289,9 +15493,9 @@ function attachDropZone(ul) {
         <div class="form-row full-width">
           <div class="form-group">
             <label for="novoProd_unidade">Unidade <span style="color:#f87171;">*</span></label>
-            <select 
-              id="novoProd_unidade" 
-              name="unidade" 
+            <select
+              id="novoProd_unidade"
+              name="unidade"
               required
               style="width: 100%; padding: 10px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px;"
             >
@@ -15330,15 +15534,15 @@ function attachDropZone(ul) {
         <i class="fa-solid fa-times"></i>
       </button>
     </div>
-    
+
     <div style="margin-bottom:16px;">
       <label style="display:block; margin-bottom:6px; font-size:13px; font-weight:600; color:var(--content-title-color);">
         Descrição da Tarefa <span style="color:#dc2626;">*</span>
       </label>
-      <input type="text" id="novaTarefaDescricao" placeholder="Ex: Validar desenho técnico" 
+      <input type="text" id="novaTarefaDescricao" placeholder="Ex: Validar desenho técnico"
         style="width:100%; padding:10px 12px; border:1px solid var(--border-color); border-radius:8px; font-size:14px; background:var(--content-bg); color:var(--content-title-color);">
     </div>
-    
+
     <div style="margin-bottom:20px;">
       <label style="display:block; margin-bottom:6px; font-size:13px; font-weight:600; color:var(--content-title-color);">
         Observações (opcional)
@@ -15346,7 +15550,7 @@ function attachDropZone(ul) {
       <textarea id="novaTarefaObs" placeholder="Detalhes adicionais sobre a tarefa..." rows="3"
         style="width:100%; padding:10px 12px; border:1px solid var(--border-color); border-radius:8px; font-size:14px; background:var(--content-bg); color:var(--content-title-color); resize:vertical;"></textarea>
     </div>
-    
+
     <div style="display:flex; gap:8px; justify-content:flex-end;">
       <button id="modalNovaTarefaCancelar" style="padding:10px 20px; background:var(--content-bg); border:1px solid var(--border-color); border-radius:8px; color:var(--content-title-color); font-weight:600; cursor:pointer;">
         Cancelar
@@ -15369,15 +15573,15 @@ function attachDropZone(ul) {
         <i class="fa-solid fa-times"></i>
       </button>
     </div>
-    
+
     <div style="margin-bottom:16px;">
       <label style="display:block; margin-bottom:6px; font-size:13px; font-weight:600; color:var(--content-title-color);">
         Descrição da Tarefa <span style="color:#dc2626;">*</span>
       </label>
-      <input type="text" id="novaTarefaComprasDescricao" placeholder="Ex: Solicitar cotação de fornecedores" 
+      <input type="text" id="novaTarefaComprasDescricao" placeholder="Ex: Solicitar cotação de fornecedores"
         style="width:100%; padding:10px 12px; border:1px solid var(--border-color); border-radius:8px; font-size:14px; background:var(--content-bg); color:var(--content-title-color);">
     </div>
-    
+
     <div style="margin-bottom:20px;">
       <label style="display:block; margin-bottom:6px; font-size:13px; font-weight:600; color:var(--content-title-color);">
         Observações (opcional)
@@ -15385,7 +15589,7 @@ function attachDropZone(ul) {
       <textarea id="novaTarefaComprasObs" placeholder="Detalhes adicionais sobre a tarefa..." rows="3"
         style="width:100%; padding:10px 12px; border:1px solid var(--border-color); border-radius:8px; font-size:14px; background:var(--content-bg); color:var(--content-title-color); resize:vertical;"></textarea>
     </div>
-    
+
     <div style="display:flex; gap:8px; justify-content:flex-end;">
       <button id="modalNovaTarefaComprasCancelar" style="padding:10px 20px; background:var(--content-bg); border:1px solid var(--border-color); border-radius:8px; color:var(--content-title-color); font-weight:600; cursor:pointer;">
         Cancelar
@@ -15484,16 +15688,16 @@ function attachDropZone(ul) {
     try {
       const response = await fetch('/api/sincronizacao/agendamento/config');
       if (!response.ok) throw new Error('Erro ao carregar configuração');
-      
+
       const config = await response.json();
-      
+
       if (config.ativo) {
         checkboxAtivo.checked = true;
         configDiv.style.display = 'block';
         statusDiv.innerHTML = '<i class="fa-solid fa-circle-check"></i> Ativado';
         statusDiv.style.background = '#dcfce7';
         statusDiv.style.color = '#166534';
-        
+
         // Marcar dias da semana
         if (config.dias_semana && Array.isArray(config.dias_semana)) {
           config.dias_semana.forEach(dia => {
@@ -15506,7 +15710,7 @@ function attachDropZone(ul) {
             }
           });
         }
-        
+
         // Definir horário
         if (config.horario) {
           horarioInput.value = config.horario;
@@ -15566,7 +15770,7 @@ function attachDropZone(ul) {
     try {
       btnSalvar.disabled = true;
       btnSalvar.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Salvando...';
-      
+
       const response = await fetch('/api/sincronizacao/agendamento/config', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -15574,12 +15778,12 @@ function attachDropZone(ul) {
       });
 
       if (!response.ok) throw new Error('Erro ao salvar configuração');
-      
+
       const result = await response.json();
-      
+
       btnSalvar.innerHTML = '<i class="fa-solid fa-check"></i> Salvo!';
       btnSalvar.style.background = 'linear-gradient(135deg,#10b981 0%,#059669 100%)';
-      
+
       setTimeout(() => {
         btnSalvar.innerHTML = '<i class="fa-solid fa-save"></i> Salvar Configuração';
         btnSalvar.style.background = 'linear-gradient(135deg,#22c55e 0%,#16a34a 100%)';
@@ -15610,7 +15814,7 @@ function attachDropZone(ul) {
         hour: '2-digit',
         minute: '2-digit'
       });
-      
+
       proximaExecucaoTexto.textContent = dataFormatada;
       proximaExecucaoDiv.style.display = 'block';
     } catch (error) {
@@ -15626,7 +15830,7 @@ function attachDropZone(ul) {
   const btnIniciar = document.getElementById('btnIniciarSincronizacao');
   const menuLink = document.getElementById('menu-sincronizar-produtos');
   const painel = document.getElementById('sincronizacaoProdutosPane');
-  
+
   // Elementos de UI
   const sincStatus = document.getElementById('sincStatus');
   const sincStatusIcon = document.getElementById('sincStatusIcon');
@@ -15674,7 +15878,7 @@ function attachDropZone(ul) {
       ${icone}
       <span style="color:${cor};margin-left:6px;">${texto}</span>
     `;
-    
+
     sincLog.appendChild(div);
     sincLog.scrollTop = sincLog.scrollHeight;
   }
@@ -15684,7 +15888,7 @@ function attachDropZone(ul) {
     const segundos = Math.floor(ms / 1000);
     const minutos = Math.floor(segundos / 60);
     const horas = Math.floor(minutos / 60);
-    
+
     if (horas > 0) {
       return `${horas}h ${minutos % 60}m ${segundos % 60}s`;
     } else if (minutos > 0) {
@@ -15723,7 +15927,7 @@ function attachDropZone(ul) {
     sincSucesso.textContent = sucesso.toLocaleString('pt-BR');
     sincErros.textContent = erros.toLocaleString('pt-BR');
     sincFaltam.textContent = faltam.toLocaleString('pt-BR');
-    
+
     // Atualiza barra de progresso
     sincProgressBar.style.width = progresso + '%';
     sincProgressText.textContent = `${progresso}%`;
@@ -15734,7 +15938,7 @@ function attachDropZone(ul) {
     // Atualiza título e subtítulo
     if (processados < total) {
       sincStatusTitulo.textContent = `Sincronizando... ${progresso}%`;
-      sincStatusSubtitulo.textContent = produto_atual 
+      sincStatusSubtitulo.textContent = produto_atual
         ? `Processando: ${produto_atual.codigo} - ${(produto_atual.descricao || '').substring(0, 50)}...`
         : `${processados} de ${total} produtos processados`;
     }
@@ -15748,13 +15952,13 @@ function attachDropZone(ul) {
   // Finaliza sincronização
   function finalizarSincronizacao(sucesso, mensagem, dados = {}) {
     sincEmAndamento = false;
-    
+
     if (intervalTempo) {
       clearInterval(intervalTempo);
       intervalTempo = null;
     }
 
-    sincStatusIcon.className = sucesso 
+    sincStatusIcon.className = sucesso
       ? 'fa-solid fa-check-circle'
       : 'fa-solid fa-exclamation-circle';
     sincStatusIcon.style.color = sucesso ? '#10b981' : '#ef4444';
@@ -15763,7 +15967,7 @@ function attachDropZone(ul) {
     sincStatusSubtitulo.textContent = mensagem;
 
     sincProgressBar.style.width = sucesso ? '100%' : sincProgressBar.style.width;
-    sincProgressBar.style.background = sucesso 
+    sincProgressBar.style.background = sucesso
       ? 'linear-gradient(90deg,#10b981 0%,#059669 100%)'
       : 'linear-gradient(90deg,#ef4444 0%,#dc2626 100%)';
 
@@ -15800,16 +16004,16 @@ function attachDropZone(ul) {
     sincLog.innerHTML = '';
     sincStatus.style.display = 'block';
     sincLogWrapper.style.display = 'block';
-    
+
     sincStatusIcon.className = 'fa-solid fa-spinner fa-spin';
     sincStatusIcon.style.color = '#3b82f6';
     sincStatusTitulo.textContent = 'Iniciando sincronização...';
     sincStatusSubtitulo.textContent = 'Consultando total de produtos na Omie...';
-    
+
     sincProgressBar.style.width = '0%';
     sincProgressBar.style.background = 'linear-gradient(90deg,#3b82f6 0%,#2563eb 100%)';
     sincProgressText.textContent = '0%';
-    
+
     sincTotalProdutos.textContent = '-';
     sincProcessados.textContent = '0';
     sincSucesso.textContent = '0';
@@ -15842,17 +16046,17 @@ function attachDropZone(ul) {
 
       while (true) {
         const { done, value } = await reader.read();
-        
+
         if (done) break;
-        
+
         const chunk = decoder.decode(value);
         const linhas = chunk.split('\n').filter(l => l.trim());
-        
+
         for (const linha of linhas) {
           if (linha.startsWith('data: ')) {
             try {
               const dados = JSON.parse(linha.substring(6));
-              
+
               if (dados.tipo === 'progresso') {
                 atualizarProgresso(dados);
               } else if (dados.tipo === 'concluido') {
@@ -15883,15 +16087,15 @@ function attachDropZone(ul) {
   if (menuLink) {
     menuLink.addEventListener('click', (e) => {
       e.preventDefault();
-      
+
       // Esconde todos os painéis
       document.querySelectorAll('.tab-pane').forEach(p => p.style.display = 'none');
-      
+
       // Mostra o painel de sincronização
       if (painel) {
         painel.style.display = 'block';
       }
-      
+
       // Atualiza menu ativo
       document.querySelectorAll('.menu-link').forEach(link => {
         link.classList.remove('is-active');
@@ -16988,7 +17192,7 @@ function attachDropZone(ul) {
     const descreverIntegracaoCartao = (codigo) => {
       const mapa = {
         '1': 'Integrado com automação (TEF)',
-        '2': 'Não integrado (POS)' 
+        '2': 'Não integrado (POS)'
       };
       const c = String(codigo || '').trim();
       if (!c) return '-';
@@ -17570,7 +17774,7 @@ function attachDropZone(ul) {
         const previsao = pedido.previsao_chegada
           ? new Date(pedido.previsao_chegada).toLocaleDateString('pt-BR')
           : '-';
-        
+
         const criadoEm = (() => {
           const val = pedido.d_inc_data;
           if (!val) return '-';
@@ -17614,7 +17818,7 @@ function attachDropZone(ul) {
         trPedido.style.transition = 'all 0.2s';
         trPedido.dataset.pedido = pedidoNum;
         trPedido.dataset.expandido = 'false';
-        
+
         trPedido.innerHTML = `
           <td style="padding:12px 16px;text-align:center;">
             <i class="fa-solid fa-chevron-right" style="color:#64748b;font-size:12px;transition:transform 0.3s;"></i>
@@ -17652,7 +17856,7 @@ function attachDropZone(ul) {
           const expandido = this.dataset.expandido === 'true';
           const icone = this.querySelector('i');
           const itensLinhas = tbody.querySelectorAll(`tr[data-pedido-pai="${pedidoNum}"]`);
-          
+
           if (expandido) {
             // Colapsar
             icone.style.transform = 'rotate(0deg)';
@@ -17727,7 +17931,7 @@ function attachDropZone(ul) {
           trItem.style.opacity = '0';
           trItem.style.overflow = 'hidden';
           trItem.style.transition = 'all 0.3s ease-out';
-          
+
           trItem.innerHTML = `
             <td style="padding:8px 16px;"></td>
             <td colspan="10" style="padding:8px 16px;">
@@ -17755,7 +17959,7 @@ function attachDropZone(ul) {
               </div>
             </td>
           `;
-          
+
           tbody.appendChild(trItem);
         });
       });
@@ -18883,7 +19087,7 @@ function attachDropZone(ul) {
         <i class="fa-solid fa-xmark"></i>
       </button>
     </div>
-    
+
     <!-- Corpo do Modal com scroll -->
     <div style="padding:24px;overflow-y:auto;flex:1;min-height:0;">
       <div id="modalRecebimentoItens" style="display:flex;flex-direction:column;gap:12px;">
@@ -18900,7 +19104,7 @@ function attachDropZone(ul) {
   window.fecharModalRecebimento = function() {
     const modal = document.getElementById('modalRecebimentoProdutos');
     if (!modal) return;
-    
+
     modal.style.opacity = '0';
     const modalContent = modal.querySelector('div > div');
     if (modalContent) {
@@ -18970,12 +19174,12 @@ function attachDropZone(ul) {
           </div>
         </div>
       </div>
-      
+
       <div style="margin-bottom:16px;">
         <label style="display:block;font-size:13px;color:#374151;font-weight:600;margin-bottom:8px;">
           Cole a lista abaixo (Código + TAB + Quantidade) <span style="color:#ef4444;">*</span>
         </label>
-        <textarea 
+        <textarea
           id="colarListaCompraTexto"
           rows="10"
           placeholder="Cole aqui a lista no formato:
@@ -18996,10 +19200,10 @@ function attachDropZone(ul) {
     </div>
     <div class="modal-footer" style="display:flex;justify-content:space-between;align-items:center;">
       <button class="btn-secondary" onclick="fecharModalColarLista()">Cancelar</button>
-      <button 
+      <button
         id="btnProcessarListaCompra"
-        class="content-button" 
-        onclick="processarListaCompra()" 
+        class="content-button"
+        onclick="processarListaCompra()"
         style="background:linear-gradient(135deg,#10b981 0%,#059669 100%);color:white;padding:10px 20px;">
         <i class="fa-solid fa-cart-plus"></i>
         Adicionar ao Carrinho
@@ -19025,12 +19229,12 @@ function attachDropZone(ul) {
           <span style="font-size:13px;color:#92400e;">Por favor, informe o motivo da retificação. Esta informação ajudará na correção do item.</span>
         </div>
       </div>
-      
+
       <div style="margin-bottom:16px;">
         <label style="display:block;font-size:13px;color:#374151;font-weight:600;margin-bottom:8px;">
           Motivo da Retificação <span style="color:#ef4444;">*</span>
         </label>
-        <textarea 
+        <textarea
           id="observacaoRetificacaoTexto"
           rows="4"
           placeholder="Descreva o motivo da retificação..."
@@ -19041,17 +19245,17 @@ function attachDropZone(ul) {
           A observação é obrigatória
         </div>
       </div>
-      
+
       <div style="font-size:11px;color:#6b7280;">
         <strong>Item:</strong> <span id="observacaoRetificacaoItem"></span>
       </div>
     </div>
     <div class="modal-footer" style="display:flex;justify-content:space-between;align-items:center;">
       <button class="btn-secondary" onclick="fecharModalObservacaoRetificacao()">Cancelar</button>
-      <button 
+      <button
         id="btnConfirmarRetificacao"
-        class="content-button" 
-        onclick="confirmarRetificacao()" 
+        class="content-button"
+        onclick="confirmarRetificacao()"
         style="background:linear-gradient(135deg,#f59e0b 0%,#d97706 100%);color:white;padding:10px 20px;">
         <i class="fa-solid fa-check"></i>
         <span>Confirmar Retificação</span>

@@ -17980,1463 +17980,298 @@ html.light-mode #minhasComprasWrapper {
     transition-duration: .01ms !important;
   }
 }
-
-/* Fluxo de compras 2026: quadro operacional inspirado no padrão Omie. */
-#minhasComprasWrapper,
-html.light-mode #minhasComprasWrapper {
-  --cp-bg: #f5f6f8;
-  --cp-panel: #ffffff;
-  --cp-column: #f7f7f8;
-  --cp-card: #ffffff;
-  --cp-card-hover: #fbfcfd;
-  --cp-border: #d7dce2;
-  --cp-border-soft: #e8ebef;
-  --cp-text: #20252b;
-  --cp-muted: #66717d;
-  --cp-subtle: #8a949f;
-  --cp-accent: #fe5b4a;
-  --cp-accent-soft: #fff0ed;
-  --cp-warning: #a96714;
-  --cp-danger: #bd4141;
-  --cp-shadow: 0 8px 20px rgba(25, 42, 55, .09);
-  color-scheme: light;
-  color: var(--cp-text) !important;
-  background: var(--cp-bg) !important;
-  border: 1px solid var(--cp-border-soft);
-  border-radius: 0;
-  padding: 0 0 10px !important;
-  overflow: hidden;
-}
-
-#comprasListaToolbar.compras-workspace-toolbar {
-  min-height: 58px;
-  margin: 0 !important;
-  padding: 9px 12px !important;
-  align-items: center !important;
-  background: #063849;
-  border-bottom: 0;
-}
-
-.compras-toolbar-main {
-  align-items: center !important;
-  flex-wrap: nowrap;
-}
-
-.compras-workspace-title,
-.compras-workspace-title strong {
-  color: #ffffff !important;
-}
-
-.compras-workspace-title small { color: #b9d2da !important; }
-.compras-title-icon {
-  width: 34px;
-  height: 34px;
-  color: #ffffff;
-  background: rgba(255,255,255,.12);
-  border-radius: 6px;
-}
-
-.compras-global-search { width: min(370px, 34vw); }
-#kanbanFiltroGlobal {
-  height: 38px;
-  color: #27313a !important;
-  background: #ffffff !important;
-  border-color: rgba(255,255,255,.72) !important;
-  border-radius: 5px !important;
-}
-#kanbanFiltroGlobal::placeholder { color: #87919c; }
-
-.compras-toolbar-actions > .content-button {
-  width: 36px !important;
-  height: 36px !important;
-  min-width: 36px;
-  color: #d6e4e8 !important;
-  background: transparent !important;
-  border-color: rgba(255,255,255,.18) !important;
-  border-radius: 6px !important;
-}
-.compras-toolbar-actions > .content-button:hover {
-  color: #ffffff !important;
-  background: rgba(255,255,255,.10) !important;
-  border-color: rgba(255,255,255,.38) !important;
-}
-#comprasCatalogoOmieBtn {
-  color: #ffffff !important;
-  background: #fe5b4a !important;
-  border-color: #fe5b4a !important;
-}
-#comprasToggleSolicitanteBtn {
+/* Ficha operacional de compras: familiaridade com a Omie e prioridade para os itens. */
+#modalDetalhesPedidoCompras.cp-detail-modal {
+  left: var(--cp-detail-nav-offset, 0px) !important;
+  right: 0 !important;
   width: auto !important;
-  color: #ffffff !important;
+  padding: 18px !important;
+  background: rgba(15, 23, 42, .68) !important;
 }
 
-.compras-board-overview {
-  min-height: 49px;
-  margin: 0 !important;
-  padding: 6px 12px !important;
-  background: #ffffff;
-  border-bottom: 1px solid var(--cp-border);
-}
-.compras-board-tabs {
-  padding: 0 !important;
-  background: transparent !important;
-  border: 0 !important;
-  border-radius: 0 !important;
-}
-.compras-board-tab {
-  height: 37px;
-  padding: 0 13px !important;
-  color: var(--cp-muted) !important;
-  background: transparent !important;
-  border: 0 !important;
-  border-bottom: 2px solid transparent !important;
-  border-radius: 0 !important;
-}
-.compras-board-tab.is-active {
-  color: var(--cp-text) !important;
-  background: transparent !important;
-  border-bottom-color: #fe5b4a !important;
-  box-shadow: none !important;
-}
-.compras-board-metrics span {
-  color: var(--cp-muted) !important;
-  background: #f7f8f9 !important;
-  border-color: var(--cp-border-soft) !important;
-  border-radius: 5px !important;
-}
-.compras-board-metrics strong { color: var(--cp-text) !important; }
-
-#kanbanMinhasSolicitacoes.kanban-container {
-  gap: 0 !important;
-  padding: 0 0 10px !important;
-  background: #f3f4f6;
-  scroll-padding-inline: 0;
-}
-
-#kanbanMinhasSolicitacoes .kanban-column-minhas {
-  flex: 0 0 326px !important;
-  min-width: 326px !important;
-  padding: 0 !important;
-  background: #f7f7f8 !important;
-  border: 0 !important;
-  border-right: 1px solid #d4d8dd !important;
-  border-radius: 0 !important;
-  box-shadow: none !important;
-}
-#kanbanMinhasSolicitacoes .kanban-column-minhas::before { display: none; }
-
-#kanbanMinhasSolicitacoes .kanban-column-minhas > div:first-child {
-  min-height: 50px;
-  padding: 8px 12px 7px !important;
-  background: linear-gradient(180deg, #fff 0%, #fff4f2 100%);
-  border-bottom: 1px solid #dfdfe1 !important;
-}
-#kanbanMinhasSolicitacoes .kanban-column-minhas h3 {
-  color: #22272d !important;
-  font-family: "Open Sans", Arial, sans-serif;
-  font-size: 14px !important;
-  letter-spacing: 0;
-}
-#kanbanMinhasSolicitacoes .kanban-column-minhas h3 i {
-  color: var(--cp-stage) !important;
-}
-#kanbanMinhasSolicitacoes .kanban-count-minhas {
-  min-width: 23px;
-  color: #4f5963 !important;
-  background: rgba(255,255,255,.78) !important;
-  border-color: #dadddf;
-}
-
-#kanbanMinhasSolicitacoes .kanban-column-minhas > div:nth-last-child(2) {
-  min-height: 0;
-  margin: 0 !important;
-  padding: 5px 8px !important;
-  background: #ffffff;
-  border-top: 0 !important;
-  border-bottom: 1px solid var(--cp-border-soft) !important;
-}
-#kanbanMinhasSolicitacoes .kanban-column-minhas > div:nth-last-child(2):empty {
-  display: none !important;
-}
-
-#kanbanMinhasSolicitacoes .kanban-cards-minhas {
-  gap: 0 !important;
-  padding: 0 !important;
-  background: #f7f7f8;
-}
-#kanbanMinhasSolicitacoes .kanban-card {
-  min-height: 86px;
-  padding: 10px 11px !important;
-  color: #252a30 !important;
-  background: #ffffff !important;
-  border: 0 !important;
-  border-bottom: 1px solid #dfe3e7 !important;
-  border-left: 3px solid var(--cp-stage) !important;
-  border-radius: 0 !important;
-  box-shadow: none !important;
-  transform: none !important;
-}
-#kanbanMinhasSolicitacoes .kanban-card:hover {
-  background: #f8fbfc !important;
-  border-left-color: var(--cp-stage) !important;
-  box-shadow: inset 0 0 0 1px #cbd5dc !important;
-  transform: none !important;
-}
-#kanbanMinhasSolicitacoes .cp-card-number {
-  margin-bottom: 3px !important;
-  color: #303840 !important;
-  font-family: "Open Sans", Arial, sans-serif;
-  font-size: 12px !important;
-  font-weight: 700 !important;
-}
-#kanbanMinhasSolicitacoes .cp-card-supplier {
-  margin-bottom: 7px !important;
-  color: #161a1e !important;
-  font-family: "Open Sans", Arial, sans-serif;
-  font-size: 12px !important;
-  font-weight: 700 !important;
-  text-transform: uppercase;
-}
-#kanbanMinhasSolicitacoes .cp-card-dates {
-  margin-bottom: 6px !important;
-  padding-top: 5px !important;
-  color: #59636d !important;
-  border-top-color: #edf0f2;
-}
-#kanbanMinhasSolicitacoes .cp-card-requester {
-  margin-bottom: 5px !important;
-  color: #68727c !important;
-}
-#kanbanMinhasSolicitacoes .cp-card-summary {
-  padding-top: 6px !important;
-  color: #20262c !important;
-  border-top-color: #edf0f2;
-}
-#kanbanMinhasSolicitacoes .kanban-card button[aria-label="Expandir"] {
-  width: 25px;
-  height: 25px;
-  color: #626d77 !important;
-  border-color: #d9dee3 !important;
-}
-
-/* O quadro de compras usa a paleta operacional clara em ambos os temas. */
-:root:not(.light-mode) #minhasComprasWrapper #kanbanMinhasSolicitacoes .kanban-column-minhas {
-  background: #f7f7f8 !important;
-  box-shadow: none !important;
-}
-:root:not(.light-mode) #minhasComprasWrapper #kanbanMinhasSolicitacoes .kanban-card {
-  color: #252a30 !important;
-  background: #ffffff !important;
-  box-shadow: none !important;
-}
-:root:not(.light-mode) #minhasComprasWrapper #kanbanMinhasSolicitacoes .kanban-card:hover {
-  background: #f8fbfc !important;
-  box-shadow: inset 0 0 0 1px #cbd5dc !important;
-}
-:root:not(.light-mode) #minhasComprasWrapper #kanbanMinhasSolicitacoes .kanban-card [style*="background:#f3f4f6"],
-:root:not(.light-mode) #minhasComprasWrapper #kanbanMinhasSolicitacoes .kanban-card [style*="background:#e5e7eb"] {
-  background: transparent !important;
-  border-color: #d9dee3 !important;
-}
-:root:not(.light-mode) #minhasComprasWrapper #kanbanMinhasSolicitacoes .kanban-card [style*="color:#6b7280"] {
-  color: #66717d !important;
-}
-:root:not(.light-mode) #minhasComprasWrapper #kanbanMinhasSolicitacoes .kanban-card [style*="color:#374151"] {
-  color: #303840 !important;
-}
-:root:not(.light-mode) #minhasComprasWrapper #kanbanMinhasSolicitacoes .kanban-column-minhas [style*="background:#f8fafc"] {
-  color: #8a949f !important;
-  background: #f7f7f8 !important;
-  border-color: #d7dce2 !important;
-}
-
-@media (max-width: 900px) {
-  #minhasComprasWrapper { padding: 0 0 10px !important; }
-  #comprasListaToolbar.compras-workspace-toolbar { align-items: center !important; }
-  .compras-toolbar-main { flex-wrap: wrap; }
-  .compras-global-search { width: min(100%, 420px); }
-  #kanbanMinhasSolicitacoes .kanban-column-minhas {
-    flex-basis: min(88vw, 326px) !important;
-    min-width: min(88vw, 326px) !important;
-  }
-}
-
-@media (max-width: 560px) {
-  #comprasListaToolbar.compras-workspace-toolbar { padding: 10px !important; }
-  .compras-workspace-title small { display: none; }
-  .compras-toolbar-main { min-width: 0; }
-  .compras-global-search { width: 100%; }
-  .compras-board-overview { align-items: stretch; gap: 6px; }
-  .compras-board-metrics { display: none; }
-  #kanbanMinhasSolicitacoes .kanban-column-minhas {
-    flex-basis: calc(100vw - 42px) !important;
-    min-width: calc(100vw - 42px) !important;
-  }
-}
-
-/* Último passe de especificidade para a hierarquia tipográfica do Kanban. */
-#minhasComprasWrapper #kanbanMinhasSolicitacoes .kanban-column-minhas h3 {
-  font: 500 12px/1.15 "Open Sans", Arial, sans-serif !important;
-}
-#minhasComprasWrapper #kanbanMinhasSolicitacoes .kanban-column-minhas h3 i {
-  margin-right: 5px !important;
-  font-size: 11px !important;
-}
-#minhasComprasWrapper #kanbanMinhasSolicitacoes .kanban-count-minhas {
-  min-width: 21px;
-  padding: 2px 6px !important;
-  font-size: 10px !important;
-  font-weight: 600 !important;
-}
-#minhasComprasWrapper #kanbanMinhasSolicitacoes .kanban-card {
-  min-height: 0;
-  padding: 9px 8px !important;
-  font-family: "Open Sans", Arial, sans-serif !important;
-}
-#minhasComprasWrapper #kanbanMinhasSolicitacoes .kanban-card > div,
-#minhasComprasWrapper #kanbanMinhasSolicitacoes .kanban-card span {
-  font-family: "Open Sans", Arial, sans-serif !important;
-}
-#minhasComprasWrapper #kanbanMinhasSolicitacoes .cp-card-number,
-#minhasComprasWrapper #kanbanMinhasSolicitacoes .cp-card-number span {
-  margin-bottom: 4px !important;
-  color: #20252b !important;
-  font-size: 13px !important;
-  font-weight: 500 !important;
-  line-height: 1.1 !important;
-}
-#minhasComprasWrapper #kanbanMinhasSolicitacoes .cp-card-supplier {
-  margin-bottom: 6px !important;
-  color: #000 !important;
-  font-size: 12px !important;
-  font-weight: 700 !important;
-  line-height: 1.2 !important;
-}
-#minhasComprasWrapper #kanbanMinhasSolicitacoes .cp-card-dates,
-#minhasComprasWrapper #kanbanMinhasSolicitacoes .cp-card-dates span {
-  margin-bottom: 5px !important;
-  color: #4f5963 !important;
-  font-size: 10px !important;
-  font-weight: 400 !important;
-  line-height: 1.4 !important;
-}
-#minhasComprasWrapper #kanbanMinhasSolicitacoes .cp-card-requester,
-#minhasComprasWrapper #kanbanMinhasSolicitacoes .cp-card-requester span {
-  margin-bottom: 5px !important;
-  color: #808994 !important;
-  font-size: 12px !important;
-  font-weight: 400 !important;
-  line-height: 1.35 !important;
-}
-#minhasComprasWrapper #kanbanMinhasSolicitacoes .cp-card-summary,
-#minhasComprasWrapper #kanbanMinhasSolicitacoes .cp-card-summary span {
-  color: #20252b !important;
-  font-size: 13px !important;
-  font-weight: 500 !important;
-  line-height: 1.25 !important;
-}
-#minhasComprasWrapper #kanbanMinhasSolicitacoes .kanban-column-minhas:is([data-status="compra realizada"],[data-status="faturada pelo fornecedor"],[data-status="recebido"],[data-status="concluído"]) .cp-card-summary,
-#minhasComprasWrapper #kanbanMinhasSolicitacoes .kanban-column-minhas:is([data-status="compra realizada"],[data-status="faturada pelo fornecedor"],[data-status="recebido"],[data-status="concluído"]) .cp-card-summary span {
-  font-weight: 700 !important;
-}
-:root:not(.light-mode) #minhasComprasWrapper #kanbanMinhasSolicitacoes .kanban-card .cp-card-number,
-:root:not(.light-mode) #minhasComprasWrapper #kanbanMinhasSolicitacoes .kanban-card .cp-card-number span {
-  color: #20252b !important;
-}
-:root:not(.light-mode) #minhasComprasWrapper #kanbanMinhasSolicitacoes .kanban-card .cp-card-supplier {
-  color: #000 !important;
-}
-:root:not(.light-mode) #minhasComprasWrapper #kanbanMinhasSolicitacoes .kanban-card .cp-card-dates,
-:root:not(.light-mode) #minhasComprasWrapper #kanbanMinhasSolicitacoes .kanban-card .cp-card-dates span {
-  color: #4f5963 !important;
-}
-:root:not(.light-mode) #minhasComprasWrapper #kanbanMinhasSolicitacoes .kanban-card .cp-card-requester,
-:root:not(.light-mode) #minhasComprasWrapper #kanbanMinhasSolicitacoes .kanban-card .cp-card-requester span {
-  color: #808994 !important;
-}
-:root:not(.light-mode) #minhasComprasWrapper #kanbanMinhasSolicitacoes .kanban-card .cp-card-summary,
-:root:not(.light-mode) #minhasComprasWrapper #kanbanMinhasSolicitacoes .kanban-card .cp-card-summary span {
-  color: #20252b !important;
-}
-
-/* Kanban sem grade: separação por espaço, fundo e hierarquia, não por bordas. */
-#minhasComprasWrapper,
-html.light-mode #minhasComprasWrapper {
-  width: 100% !important;
+#modalDetalhesPedidoCompras .cp-purchase-sheet {
+  width: min(1880px, 98vw) !important;
+  height: min(900px, 94vh) !important;
   max-width: none !important;
-  border: 0 !important;
-  border-radius: 0 !important;
-  box-shadow: none !important;
+  max-height: none !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  overflow: hidden !important;
+  display: grid !important;
+  grid-template-rows: 58px minmax(0, 1fr);
+  background: #f8fafc !important;
+  color: #273142 !important;
+  border: 1px solid #d8dee8 !important;
+  border-radius: 8px !important;
+  box-shadow: 0 24px 70px rgba(2, 6, 23, .34) !important;
 }
-#minhasComprasWrapper .compras-workspace-toolbar,
-#minhasComprasWrapper .compras-board-overview,
-#minhasComprasWrapper .compras-board-tabs,
-#minhasComprasWrapper .compras-board-metrics span {
-  border: 0 !important;
-  box-shadow: none !important;
-}
-#minhasComprasWrapper .compras-board-overview {
-  padding-block: 5px !important;
-}
-#minhasComprasWrapper #kanbanMinhasSolicitacoes.kanban-container {
-  align-items: flex-start !important;
-  gap: 8px !important;
-  padding: 10px 10px 14px !important;
-  background: #f1f3f5 !important;
-  scrollbar-gutter: stable;
-}
-#minhasComprasWrapper #kanbanMinhasSolicitacoes .kanban-column-minhas,
-:root:not(.light-mode) #minhasComprasWrapper #kanbanMinhasSolicitacoes .kanban-column-minhas {
-  flex: 0 0 clamp(218px, 12.5vw, 236px) !important;
-  min-width: clamp(218px, 12.5vw, 236px) !important;
-  width: clamp(218px, 12.5vw, 236px) !important;
-  height: auto !important;
-  max-height: 100% !important;
-  align-self: flex-start !important;
-  overflow: hidden;
-  background: #e9edf1 !important;
-  border: 0 !important;
-  border-radius: 6px !important;
-  box-shadow: none !important;
-}
-#minhasComprasWrapper #kanbanMinhasSolicitacoes .kanban-column-minhas:has(.kanban-card:nth-child(4)) {
-  height: 100% !important;
-  align-self: stretch !important;
-}
-#minhasComprasWrapper #kanbanMinhasSolicitacoes .kanban-column-minhas::before {
-  display: none !important;
-}
-#minhasComprasWrapper #kanbanMinhasSolicitacoes .kanban-column-minhas > div:first-child {
-  min-height: 42px !important;
-  padding: 9px 10px !important;
-  background: #fff8f6 !important;
-  border: 0 !important;
-  border-radius: 6px 6px 0 0;
-}
-#minhasComprasWrapper #kanbanMinhasSolicitacoes .kanban-column-minhas > div:nth-last-child(2) {
-  min-height: 0 !important;
-  padding: 5px 8px !important;
-  background: transparent !important;
-  border: 0 !important;
-}
-#minhasComprasWrapper #kanbanMinhasSolicitacoes .kanban-cards-minhas {
-  gap: 6px !important;
-  padding: 6px !important;
-  background: transparent !important;
-  border: 0 !important;
-}
-#minhasComprasWrapper #kanbanMinhasSolicitacoes .kanban-cards-minhas > div[style*="text-align:center"] {
-  min-height: 54px;
-  display: grid;
-  place-items: center;
-  padding: 10px !important;
-  color: #8a949f !important;
-  background: transparent !important;
-  border: 0 !important;
-}
-#minhasComprasWrapper #kanbanMinhasSolicitacoes .kanban-card,
-:root:not(.light-mode) #minhasComprasWrapper #kanbanMinhasSolicitacoes .kanban-card {
-  padding: 8px !important;
+
+#modalDetalhesPedidoCompras .cp-detail-header {
+  min-height: 58px !important;
+  padding: 0 18px !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
   background: #fff !important;
   border: 0 !important;
-  border-radius: 6px !important;
-  box-shadow: 0 1px 2px rgba(33, 43, 54, .08) !important;
-  transform: none !important;
+  border-bottom: 1px solid #e2e8f0 !important;
 }
-#minhasComprasWrapper #kanbanMinhasSolicitacoes .kanban-card:hover,
-#minhasComprasWrapper #kanbanMinhasSolicitacoes .kanban-card:focus-within,
-:root:not(.light-mode) #minhasComprasWrapper #kanbanMinhasSolicitacoes .kanban-card:hover {
-  background: #fff !important;
+
+#modalDetalhesPedidoCompras .cp-detail-header h3 {
+  margin: 0 !important;
+  display: flex !important;
+  align-items: center !important;
+  gap: 10px !important;
+  color: #a53c36 !important;
+  font-size: 18px !important;
+  font-weight: 650 !important;
+}
+
+#modalDetalhesPedidoCompras .cp-detail-header h3 > i { color: #d04f45 !important; font-size: 17px !important; }
+#modalDetalhesPedidoCompras .cp-detail-header-actions { display: flex; align-items: center; gap: 6px; }
+#modalDetalhesPedidoCompras .cp-detail-header .modal-close {
+  position: static !important;
+  width: 34px !important;
+  height: 34px !important;
+  padding: 0 !important;
+  display: grid !important;
+  place-items: center !important;
+  background: transparent !important;
+  color: #64748b !important;
   border: 0 !important;
-  box-shadow: 0 4px 12px rgba(33, 43, 54, .13) !important;
-  transform: translateY(-1px) !important;
-}
-#minhasComprasWrapper #kanbanMinhasSolicitacoes .cp-card-dates,
-#minhasComprasWrapper #kanbanMinhasSolicitacoes .cp-card-summary {
-  border: 0 !important;
-}
-#minhasComprasWrapper #kanbanMinhasSolicitacoes .cp-card-dates {
-  padding-top: 2px !important;
-}
-#minhasComprasWrapper #kanbanMinhasSolicitacoes .cp-card-summary {
-  padding-top: 3px !important;
-}
-#minhasComprasWrapper #kanbanMinhasSolicitacoes .kanban-card button[aria-label="Expandir"] {
-  width: 24px !important;
-  height: 24px !important;
-  color: #66717d !important;
-  background: #f1f3f5 !important;
-  border: 0 !important;
-  border-radius: 50% !important;
-  box-shadow: none !important;
-}
-#minhasComprasWrapper #kanbanMinhasSolicitacoes .kanban-card button[aria-label="Expandir"]:hover {
-  color: #20252b !important;
-  background: #e2e7eb !important;
+  font-size: 24px !important;
 }
 
-@media (max-width: 900px) {
-  #minhasComprasWrapper #kanbanMinhasSolicitacoes .kanban-column-minhas,
-  :root:not(.light-mode) #minhasComprasWrapper #kanbanMinhasSolicitacoes .kanban-column-minhas {
-    flex-basis: min(86vw, 292px) !important;
-    min-width: min(86vw, 292px) !important;
-    width: min(86vw, 292px) !important;
-  }
+#modalDetalhesPedidoCompras .cp-detail-body { position: relative !important; min-height: 0 !important; padding: 0 !important; overflow: hidden !important; background: #fff !important; color: #273142 !important; }
+#modalDetalhesPedidoCompras .cp-sheet-loading { position: absolute; inset: 0; z-index: 2; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 7px; background: #f8fafc; color: #475569; text-align: center; }
+#modalDetalhesPedidoCompras .cp-sheet-loading i { margin-bottom: 7px; color: #cf493f; font-size: 28px; }
+#modalDetalhesPedidoCompras .cp-sheet-loading strong { color: #273142; font-size: 14px; font-weight: 650; }
+#modalDetalhesPedidoCompras .cp-sheet-loading span { color: #667085; font-size: 12px; }
+.cp-sheet-layout { height: 100%; min-height: 100%; display: grid; grid-template-columns:minmax(0,1fr) 250px; background: #fff; }
+.cp-sheet-main { min-width: 0; min-height: 0; height: 100%; padding: 14px 18px 12px; display: flex; flex-direction: column; overflow: hidden; }
+.cp-sheet-summary { display: grid; grid-template-columns: 52px minmax(0, 1fr); gap: 12px; align-items: start; max-width: 1080px; }
+.cp-sheet-avatar { width: 46px; height: 46px; display: grid; place-items: center; border-radius: 6px; background: #f1b44c; color: #fff; font-size: 18px; }
+.cp-sheet-fields { display: grid; grid-template-columns: minmax(220px, 2fr) repeat(4, minmax(130px, 1fr)); gap: 8px 14px; }
+.cp-sheet-field, .cp-sheet-status-inline { min-width: 0; padding-bottom: 5px; border-bottom: 1px solid #cbd5e1; }
+.cp-sheet-field--wide { grid-column: span 2; }
+.cp-sheet-field span, .cp-sheet-totals span, .cp-sheet-note span, .cp-sheet-links > span, .cp-sheet-status-inline span { display: block; margin-bottom: 4px; color: #667085 !important; font-size: 11px; font-weight: 500; }
+.cp-sheet-field strong { display: block; overflow: hidden; color: #273142; font-size: 13px; font-weight: 550; text-overflow: ellipsis; white-space: nowrap; }
+.cp-sheet-status-inline strong { display: inline-flex; max-width: 100%; padding: 3px 8px; background: #fff3d6; color: #8a4d16; border-radius: 999px; font-size: 11px; }
+.cp-sheet-totals { width: min(920px, 100%); margin: 8px 0 8px 64px; padding: 7px 10px; display: grid; grid-template-columns: repeat(5, minmax(110px, 1fr)); background: #fff8d8; border-radius: 6px; }
+.cp-sheet-totals > div { min-width: 0; padding: 0 8px; text-align: center; border-right: 1px solid rgba(148, 116, 24, .15); }
+.cp-sheet-totals > div:last-child { border-right: 0; }
+.cp-sheet-totals strong { color: #374151; font-size: 12px; font-weight: 650; }
+.cp-sheet-items { width: min(1180px, 100%); min-height: 0; margin-top: 4px; flex: 1 1 auto; display: flex; flex-direction: column; border: 1px solid #d5dbe5; border-radius: 5px; overflow: hidden; }
+.cp-sheet-section-title { margin: 0 !important; padding: 10px 12px !important; color: #273142 !important; background: #fff !important; border: 0 !important; border-bottom: 1px solid #d8dee8 !important; font-size: 12px !important; }
+.cp-sheet-table-wrap { flex: 1 1 auto; min-height: 0; overflow: auto; }
+.cp-sheet-items table { width: 100% !important; border-collapse: collapse !important; font-size: 12px !important; }
+.cp-sheet-items th { height: 34px !important; padding: 7px 10px !important; text-align: left !important; color: #52606d !important; background: #f4f6f8 !important; border: 0 !important; border-right: 1px solid #d8dee8 !important; border-bottom: 1px solid #d8dee8 !important; font-size: 11px !important; font-weight: 600 !important; }
+.cp-sheet-items td { height: 34px !important; padding: 7px 10px !important; color: #26323d !important; background: #fff !important; border: 0 !important; border-right: 1px solid #e1e6ed !important; border-bottom: 1px solid #e1e6ed !important; font-size: 12px !important; }
+.cp-sheet-items tbody tr:first-child td { background: #fff0ee !important; }
+.cp-sheet-item-index { width: 54px; text-align: center; }
+.cp-sheet-product { min-width: 360px; }
+.cp-sheet-quantity { width: 130px; text-align: center; }
+.cp-sheet-money { width: 140px; text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.cp-sheet-money--total { font-weight: 650; }
+.cp-sheet-empty { padding: 40px !important; text-align: center; color: #94a3b8 !important; }
+.cp-sheet-record-count { margin-top: auto; padding: 10px; color: #667085; font-size: 11px; }
+.cp-sheet-note, .cp-sheet-links { width: min(760px, 100%); margin-top: 8px; padding: 7px 10px; display: flex; align-items: flex-start; gap: 10px; background: #fff8d8; color: #5e4a13; border-radius: 5px; }
+.cp-sheet-note strong, .cp-sheet-links div { color: #4b5563; font-size: 12px; font-weight: 550; }
+.cp-sheet-actions { min-width:0; padding:14px 10px; overflow-y:auto; background:#f4fbfc; border-left:1px solid #d7e2e6; }
+.cp-sheet-actions-title { margin:0 6px 10px; padding-bottom:9px; border-bottom:1px solid #d7e2e6; }
+.cp-sheet-actions-title span { display:block; color:#334155; font-size:12px; font-weight:700; }
+.cp-sheet-actions-title small { color:#64748b; font-size:10px; }
+.cp-sheet-action { width:100%; min-height:38px; padding:7px 8px; display:grid; grid-template-columns:18px minmax(0,1fr) auto; align-items:center; gap:7px; color:#a53c36; background:transparent; border:0; border-radius:5px; text-align:left; text-decoration:none; }
+.cp-sheet-action i { text-align:center; }
+.cp-sheet-action > span { font-size:12px; font-weight:550; }
+.cp-sheet-action small { padding:2px 5px; border-radius:999px; font-size:9px; white-space:nowrap; }
+.cp-sheet-action.is-ready:hover { background:#fff; }
+.cp-sheet-action.is-ready small { color:#067647; background:#dcfae6; }
+.cp-sheet-action.is-planned { color:#7c8798; cursor:not-allowed; opacity:1; }
+.cp-sheet-action.is-planned small { color:#8a4d16; background:#fff3d6; }
+
+.cp-detail-modal--nfe { left:var(--cp-detail-nav-offset, 0px) !important; right:0 !important; width:auto !important; padding:18px !important; }
+.cp-detail-modal--nfe .cp-nfe-sheet { width:min(1880px,98vw) !important; height:min(900px,94vh) !important; max-width:none !important; max-height:none !important; display:grid !important; grid-template-rows:58px minmax(0,1fr); overflow:hidden !important; border-radius:8px !important; background:#fff !important; }
+.cp-detail-modal--nfe .cp-detail-header { min-height:58px; padding:0 18px; display:flex; align-items:center; justify-content:space-between; background:#fff; border-bottom:1px solid #e2e8f0; }
+.cp-detail-modal--nfe .cp-detail-header > strong { display:flex; align-items:center; gap:8px; color:#a53c36; font-size:18px; }
+.cp-detail-modal--nfe .cp-detail-header > strong i { color:#d04f45; font-size:17px; }
+.cp-detail-modal--nfe .cp-detail-header-actions { display:flex; align-items:center; gap:7px; }
+.cp-detail-modal--nfe .modal-close { position:static !important; width:34px; height:34px; padding:0; display:grid; place-items:center; color:#64748b; background:transparent; border:0; font-size:18px; }
+.cp-detail-next { min-height:34px; padding:0 11px; display:inline-flex; align-items:center; gap:6px; color:#334155; background:#fff; border:1px solid #cbd5e1; border-radius:5px; font-size:12px; }
+.cp-nfe-layout { min-height:0; display:grid; grid-template-columns:minmax(0,1fr) 250px; }
+.cp-nfe-main { min-width:0; min-height:0; padding:12px 14px; display:flex; flex-direction:column; overflow:hidden; }
+.cp-nfe-info { display:block !important; }
+.cp-nfe-summary { max-width:none; }
+.cp-nfe-totals { width:min(900px,100%); grid-template-columns:1.15fr .55fr .9fr 1.4fr; }
+.cp-nfe-purchase-control { display:grid; grid-template-columns:auto 110px; align-items:center; gap:3px 8px; text-align:left !important; }
+.cp-nfe-purchase-control label { color:#667085; font-size:11px; }
+.cp-nfe-purchase-control select { min-height:28px; padding:3px 7px; color:#273142; background:#fff; border:1px solid #cbd5e1; border-radius:4px; font-size:11px; }
+.cp-nfe-purchase-control small { grid-column:1/-1; min-height:12px; font-size:9px; }
+.cp-sheet-field--planned strong, .cp-nfe-document-meta .is-planned strong { display:inline-flex; width:max-content; padding:2px 6px; color:#8a4d16; background:#fff3d6; border-radius:999px; font-size:10px; }
+.cp-sheet-field--planned small, .cp-nfe-document-meta small { display:block; margin-top:3px; color:#667085; font-size:9px; }
+.cp-nfe-document-meta { margin:6px 0 0 64px; display:grid; grid-template-columns:2fr 1fr 1.3fr 1fr 1fr; gap:4px 12px; }
+.cp-nfe-document-meta > div { min-width:0; min-height:42px; max-height:46px; padding-bottom:4px; overflow:hidden; border-bottom:1px solid #d8dee8; }
+.cp-nfe-document-meta span { display:block; margin-bottom:3px; color:#667085; font-size:10px; }
+.cp-nfe-document-meta strong, .cp-nfe-document-meta a { display:block; overflow:hidden; color:#273142 !important; font-size:11px !important; font-weight:600; text-overflow:ellipsis; white-space:nowrap; }
+.cp-nfe-key-value { width:100%; min-width:0; max-width:100%; display:flex; align-items:flex-start; gap:6px; overflow:hidden; }
+.cp-nfe-key-value .cp-nfe-key-link { min-width:0; max-width:100%; display:-webkit-box; color:#0f172a !important; font-weight:700; line-height:1.2; text-decoration:underline; overflow:hidden; overflow-wrap:anywhere; word-break:break-word; white-space:normal; -webkit-box-orient:vertical; -webkit-line-clamp:2; }
+.cp-nfe-key-value > a:last-child { flex:0 0 22px; }
+.cp-nfe-key-value--plain { color:#0f172a; font-size:11px; font-weight:700; line-height:1.25; overflow-wrap:anywhere; word-break:break-word; white-space:normal; }
+.cp-nfe-document-meta > div:not(:first-child) strong { white-space:normal; overflow-wrap:anywhere; }
+.cp-nfe-meta-natureza strong { display:-webkit-box; line-height:1.2; -webkit-box-orient:vertical; -webkit-line-clamp:2; }
+.cp-nfe-document-meta .is-planned small { display:none; }
+.cp-nfe-note { width:min(900px,100%); margin:7px 0 0 64px; }
+.cp-order-tabs { width:min(1180px,100%); margin-top:2px; }
+.cp-nfe-tabs { margin-top:6px; display:flex; overflow-x:auto; border-bottom:1px solid #cbd5e1; }
+.cp-nfe-tabs button { min-height:38px; padding:6px 10px; display:flex; align-items:center; gap:5px; color:#667085; background:transparent; border:0; border-bottom:2px solid transparent; font-size:11px; white-space:nowrap; }
+.cp-nfe-tabs button.is-active { color:#a53c36; border-bottom-color:#d04f45; font-weight:700; }
+.cp-nfe-tabs button:disabled { opacity:1; cursor:not-allowed; }
+.cp-nfe-tabs small { padding:2px 4px; color:#8a4d16; background:#fff3d6; border-radius:999px; font-size:8px; }
+.cp-nfe-cfop { margin-top:5px; }
+.cp-nfe-cfop > div { padding:5px 8px !important; border-radius:5px !important; }
+.cp-nfe-cfop > div > div:first-child { margin-bottom:4px !important; }
+.cp-nfe-cfop > div > div:nth-child(2) { gap:6px !important; }
+.cp-nfe-cfop > div > div:nth-child(2) > div { padding:5px 7px !important; }
+.cp-nfe-cfop > div > div:nth-child(2) > div > div:last-child { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.cp-nfe-items-section { min-height:0; margin-top:5px; flex:1 1 auto; display:flex; flex-direction:column; overflow:hidden; }
+.cp-nfe-import-guidance { padding:5px 9px; display:flex; align-items:center; justify-content:space-between; gap:12px; background:#fff8d8; color:#5e4a13; font-size:11px; }
+.cp-nfe-import-guidance span { color:#667085; }
+#modalNfePedidosItens { min-height:0; flex:1 1 auto; }
+#modalNfePedidosItens > div { height:100%; max-height:none !important; border-radius:0 0 5px 5px !important; }
+.cp-nfe-table-wrap { background:#fff; }
+.cp-nfe-items-table thead tr { background:#f4f6f8 !important; }
+.cp-nfe-items-table th { height:34px; padding:7px 9px !important; color:#52606d !important; background:#f4f6f8 !important; border-right:1px solid #d8dee8; font-size:11px !important; font-weight:600; white-space:nowrap; }
+.cp-nfe-items-table td { height:34px; padding:7px 9px !important; color:#26323d !important; background:#fff; border-right:1px solid #e1e6ed; border-bottom:1px solid #e1e6ed; font-size:12px !important; }
+.cp-nfe-items-table tbody tr:first-child td { background:#fff0ee; }
+.cp-nfe-planned-cell { min-width:120px; padding:7px 8px; color:#64748b; }
+.cp-nfe-planned-cell span { display:inline-block; padding:2px 5px; color:#8a4d16; background:#fff3d6; border-radius:999px; font-size:9px; }
+.cp-nfe-planned-cell small { display:block; margin-top:3px; font-size:9px; }
+
+@media (max-width: 1500px) {
+  .cp-nfe-summary .cp-sheet-fields { grid-template-columns:minmax(220px,2fr) repeat(2,minmax(130px,1fr)); }
+  .cp-nfe-document-meta { grid-template-columns:minmax(240px,1.5fr) repeat(2,minmax(150px,1fr)); }
 }
 
-@media (max-width: 560px) {
-  #minhasComprasWrapper #kanbanMinhasSolicitacoes.kanban-container {
-    padding-inline: 8px !important;
-    scroll-padding-inline: 8px;
-  }
-  #minhasComprasWrapper #kanbanMinhasSolicitacoes .kanban-column-minhas,
-  :root:not(.light-mode) #minhasComprasWrapper #kanbanMinhasSolicitacoes .kanban-column-minhas {
-    flex-basis: calc(100vw - 38px) !important;
-    min-width: calc(100vw - 38px) !important;
-    width: calc(100vw - 38px) !important;
-  }
-}
-
-#minhasComprasWrapper #kanbanMinhasSolicitacoes .kanban-column-minhas > div:first-child {
-  min-height: 52px !important;
-}
-
-#minhasComprasWrapper #kanbanMinhasSolicitacoes .cp-load-more {
-  width: 100%;
-  min-height: 48px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  padding: 8px 10px;
-  color: #31506f;
-  background: #f8fafc;
-  border: 1px dashed #b9c5d1;
-  border-radius: 6px;
-  cursor: pointer;
-  font: 600 11px/1.2 "Open Sans", Arial, sans-serif;
-}
-
-#minhasComprasWrapper #kanbanMinhasSolicitacoes .cp-load-more:hover,
-#minhasComprasWrapper #kanbanMinhasSolicitacoes .cp-load-more:focus-visible {
-  color: #153c63;
-  background: #edf5fc;
-  border-color: #7ba7ce;
-  outline: none;
-}
-
-#minhasComprasWrapper #kanbanMinhasSolicitacoes .cp-load-more strong {
-  font-size: 14px;
-}
-
-#minhasComprasWrapper #kanbanMinhasSolicitacoes .cp-load-more span {
-  color: #66717d;
-  font-size: 10px;
-  font-weight: 500;
-}
-
-#minhasComprasWrapper #kanbanMinhasSolicitacoes .cp-kanban-empty {
-  min-height: 54px;
-  display: grid;
-  place-items: center;
-  padding: 10px;
-  color: #8a949f;
-  font-size: 12px;
-  text-align: center;
-}
-
-/* Densidade operacional desktop: aproveita a altura útil como no fluxo da Omie. */
-@media (min-width: 901px) {
-  #comprasFormPane .content-wrapper > .content-section:not(#minhasComprasWrapper) {
-    display: none !important;
-  }
-
-  #minhasComprasWrapper .compras-board-overview {
-    display: none !important;
-  }
-
-  #minhasComprasWrapper #kanbanMinhasSolicitacoes .cp-column-total {
-    display: none !important;
-  }
-
-  #minhasComprasWrapper #comprasListaToolbar.compras-workspace-toolbar {
-    min-height: 46px !important;
-    padding: 5px 10px !important;
-  }
-
-  #minhasComprasWrapper .compras-toolbar-main {
-    gap: 9px !important;
-  }
-
-  #minhasComprasWrapper .compras-workspace-title {
-    min-width: 238px;
-  }
-
-  #minhasComprasWrapper .compras-workspace-title strong {
-    font-size: 15px !important;
-    line-height: 1.1 !important;
-  }
-
-  #minhasComprasWrapper .compras-workspace-title small {
-    margin-top: 1px;
-    font-size: 10px !important;
-    line-height: 1.1 !important;
-  }
-
-  #minhasComprasWrapper .compras-title-icon {
-    width: 28px !important;
-    height: 28px !important;
-    font-size: 12px !important;
-  }
-
-  #minhasComprasWrapper .compras-global-search {
-    height: 32px !important;
-  }
-
-  #minhasComprasWrapper #kanbanFiltroGlobal {
-    height: 32px !important;
-    padding-block: 5px !important;
-    font-size: 11px !important;
-  }
-
-  #minhasComprasWrapper .compras-toolbar-actions > .content-button {
-    width: 32px !important;
-    height: 32px !important;
-    min-width: 32px !important;
-  }
-
-  #minhasComprasWrapper #comprasToggleSolicitanteBtn {
-    width: auto !important;
-    padding-inline: 10px !important;
-    font-size: 11px !important;
-  }
-
-  #minhasComprasWrapper .compras-board-overview {
-    min-height: 36px !important;
-    padding: 3px 10px !important;
-  }
-
-  #minhasComprasWrapper .compras-board-tab {
-    min-height: 30px !important;
-    padding: 5px 9px !important;
-    font-size: 11px !important;
-  }
-
-  #minhasComprasWrapper .compras-board-metrics span {
-    min-height: 28px !important;
-    padding: 4px 9px !important;
-    font-size: 10px !important;
-  }
-
-  #minhasComprasWrapper #kanbanMinhasSolicitacoes.kanban-container {
-    gap: 5px !important;
-    padding: 5px 5px 8px !important;
-  }
-
-  #minhasComprasWrapper #kanbanMinhasSolicitacoes .kanban-column-minhas,
-  :root:not(.light-mode) #minhasComprasWrapper #kanbanMinhasSolicitacoes .kanban-column-minhas {
-    flex-basis: clamp(240px, 15vw, 252px) !important;
-    min-width: clamp(240px, 15vw, 252px) !important;
-    width: clamp(240px, 15vw, 252px) !important;
-  }
-
-  #minhasComprasWrapper #kanbanMinhasSolicitacoes .kanban-column-minhas > div:first-child {
-    min-height: 39px !important;
-    padding: 5px 7px !important;
-  }
-
-  #minhasComprasWrapper #kanbanMinhasSolicitacoes .kanban-column-minhas h3 {
-    font-size: 10px !important;
-    line-height: 1.05 !important;
-  }
-
-  #minhasComprasWrapper #kanbanMinhasSolicitacoes .kanban-column-minhas h3::after {
-    margin-top: 2px !important;
-    font-size: 8px !important;
-    line-height: 1.05 !important;
-  }
-
-  #minhasComprasWrapper #kanbanMinhasSolicitacoes .kanban-count-minhas {
-    min-width: 18px !important;
-    padding: 1px 5px !important;
-    font-size: 9px !important;
-  }
-
-  #minhasComprasWrapper #kanbanMinhasSolicitacoes .kanban-column-minhas > div:nth-last-child(2) {
-    padding: 2px 5px !important;
-  }
-
-  #minhasComprasWrapper #kanbanMinhasSolicitacoes .kanban-cards-minhas {
-    gap: 3px !important;
-    padding: 3px !important;
-  }
-
-  #minhasComprasWrapper #kanbanMinhasSolicitacoes .kanban-card,
-  :root:not(.light-mode) #minhasComprasWrapper #kanbanMinhasSolicitacoes .kanban-card {
-    min-height: 0 !important;
-    padding: 4px 6px !important;
-    border-radius: 3px !important;
-  }
-
-  #minhasComprasWrapper #kanbanMinhasSolicitacoes .cp-card-number,
-  #minhasComprasWrapper #kanbanMinhasSolicitacoes .cp-card-number span {
-    margin: 0 0 1px !important;
-    font-size: 11px !important;
-    line-height: 1.1 !important;
-  }
-
-  #minhasComprasWrapper #kanbanMinhasSolicitacoes .cp-card-number {
-    height: 15px !important;
-    min-height: 15px !important;
-    display: flex !important;
-    align-items: center;
-    overflow: hidden;
-  }
-
-  #minhasComprasWrapper #kanbanMinhasSolicitacoes .cp-card-number .cp-card-number-label {
-    color: #59636d !important;
-    font-weight: 500 !important;
-    white-space: nowrap;
-  }
-
-  #minhasComprasWrapper #kanbanMinhasSolicitacoes .cp-card-number .cp-card-number-value {
-    color: #111827 !important;
-    font-weight: 700 !important;
-    white-space: nowrap;
-  }
-
-  #minhasComprasWrapper #kanbanMinhasSolicitacoes .cp-card-supplier {
-    margin: 0 20px 2px 0 !important;
-    display: block !important;
-    max-height: 11.2px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    font-size: 10px !important;
-    line-height: 1.12 !important;
-  }
-
-  #minhasComprasWrapper #kanbanMinhasSolicitacoes .cp-card-dates {
-    gap: 2px 5px !important;
-    margin: 0 0 2px !important;
-    padding: 0 !important;
-    font-size: 8px !important;
-    line-height: 1.1 !important;
-  }
-
-  #minhasComprasWrapper #kanbanMinhasSolicitacoes .cp-card-dates > span,
-  #minhasComprasWrapper #kanbanMinhasSolicitacoes .cp-card-dates > span > span,
-  #minhasComprasWrapper #kanbanMinhasSolicitacoes .cp-card-date-label {
-    margin: 0 !important;
-    font-size: 8px !important;
-    line-height: 1.1 !important;
-  }
-
-  #minhasComprasWrapper #kanbanMinhasSolicitacoes .cp-card-date-label {
-    display: none !important;
-  }
-
-  #minhasComprasWrapper #kanbanMinhasSolicitacoes .cp-card-requester,
-  #minhasComprasWrapper #kanbanMinhasSolicitacoes .cp-card-requester span {
-    margin: 0 0 3px !important;
-    padding: 0 !important;
-    font-size: 9px !important;
-    line-height: 1.1 !important;
-  }
-
-  #minhasComprasWrapper #kanbanMinhasSolicitacoes .cp-card-requester {
-    display: none !important;
-  }
-
-  #minhasComprasWrapper #kanbanMinhasSolicitacoes .cp-card-summary,
-  #minhasComprasWrapper #kanbanMinhasSolicitacoes .cp-card-summary span {
-    margin: 0 !important;
-    padding-top: 1px !important;
-    font-size: 10px !important;
-    line-height: 1.1 !important;
-  }
-
-  #minhasComprasWrapper #kanbanMinhasSolicitacoes .cp-card-summary .cp-card-state {
-    min-height: 14px !important;
-    height: 14px !important;
-    padding: 1px 5px !important;
-    font-size: 8px !important;
-    line-height: 1.1 !important;
-  }
-
-  #minhasComprasWrapper #kanbanMinhasSolicitacoes .cp-card-menu-trigger {
-    width: 18px !important;
-    height: 18px !important;
-    font-size: 9px !important;
-  }
-
-  #minhasComprasWrapper #kanbanMinhasSolicitacoes .kanban-card button[aria-label="Expandir"] {
-    display: none !important;
-  }
-}
-
-/* Precedência final do interior de compras sobre o tema global legado. */
-:root:not(.light-mode) .cp-detail-modal .cp-detail-shell,
-html.light-mode .cp-detail-modal .cp-detail-shell {
-  color: #1f2933 !important;
-  background: #f3f5f7 !important;
-}
-
-:root:not(.light-mode) .cp-detail-modal .cp-detail-header,
-html.light-mode .cp-detail-modal .cp-detail-header,
-:root:not(.light-mode) .cp-detail-modal .cp-detail-footer,
-html.light-mode .cp-detail-modal .cp-detail-footer {
-  color: #18212b !important;
-  background: #ffffff !important;
-  border-color: #dce2e8 !important;
-}
-
-:root:not(.light-mode) .cp-detail-modal .cp-detail-body,
-html.light-mode .cp-detail-modal .cp-detail-body {
-  color: #26323d !important;
-  background: #f3f5f7 !important;
-}
-
-:root:not(.light-mode) .cp-detail-modal .cp-detail-body > div,
-html.light-mode .cp-detail-modal .cp-detail-body > div {
-  color: #26323d !important;
-}
-
+/* A ficha operacional é sempre clara, inclusive quando o shell está em modo escuro. */
 :root:not(.light-mode) #modalDetalhesPedidoCompras .cp-sheet-field span,
 :root:not(.light-mode) #modalDetalhesPedidoCompras .cp-sheet-totals span,
 :root:not(.light-mode) #modalDetalhesPedidoCompras .cp-sheet-note span,
+:root:not(.light-mode) #modalDetalhesPedidoCompras .cp-sheet-status-inline span,
 :root:not(.light-mode) #modalNfePedidos .cp-sheet-field span,
 :root:not(.light-mode) #modalNfePedidos .cp-sheet-totals span,
 :root:not(.light-mode) #modalNfePedidos .cp-sheet-note span,
 :root:not(.light-mode) #modalNfePedidos .cp-nfe-document-meta span { color:#667085 !important; }
+:root:not(.light-mode) #modalDetalhesPedidoCompras .cp-sheet-actions-title span,
+:root:not(.light-mode) #modalNfePedidos .cp-sheet-actions-title span { color:#334155 !important; }
+:root:not(.light-mode) #modalDetalhesPedidoCompras .cp-sheet-actions-title small,
+:root:not(.light-mode) #modalNfePedidos .cp-sheet-actions-title small { color:#64748b !important; }
 
-/* ========================================================================
-   Shell operacional compacto — piloto: Lista de produtos
-   Mantém a estrutura, IDs, rotas e eventos legados; altera somente a moldura.
-   ======================================================================== */
-:root {
-  --shell-topbar-height: 52px;
-  --shell-sidebar-width: 60px;
-  --shell-gutter: 16px;
-  --shell-divider: color-mix(in srgb, var(--border-color) 82%, transparent);
+@media (max-width: 900px) {
+  #modalDetalhesPedidoCompras.cp-detail-modal { left: 0 !important; padding: 0 !important; }
+  #modalDetalhesPedidoCompras .cp-detail-body { overflow: auto !important; }
+  #modalDetalhesPedidoCompras .cp-purchase-sheet { width: 100vw !important; height: 100dvh !important; border: 0 !important; border-radius: 0 !important; }
+  .cp-sheet-main { height: auto; min-height: 100%; padding: 16px 12px; overflow: visible; }
+  .cp-sheet-layout, .cp-nfe-layout { grid-template-columns:1fr; }
+  .cp-sheet-actions { border-top:1px solid #d7e2e6; border-left:0; }
+  .cp-sheet-summary { grid-template-columns: 48px minmax(0, 1fr); gap: 10px; }
+  .cp-sheet-fields { grid-template-columns: 1fr 1fr; gap: 12px; }
+  .cp-sheet-field--wide { grid-column: 1 / -1; }
+  .cp-sheet-totals { margin: 16px 0 10px; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .cp-sheet-totals > div { padding: 5px; border-right: 0; text-align: left; }
+  .cp-sheet-items { min-height: 240px; }
+  .cp-detail-modal--nfe { left:0 !important; padding:0 !important; }
+  .cp-detail-modal--nfe .cp-nfe-sheet { width:100vw !important; height:100dvh !important; border-radius:0 !important; }
+  .cp-nfe-main { overflow:auto; }
+  .cp-nfe-totals { grid-template-columns:1fr 1fr; }
+  .cp-nfe-document-meta { margin:10px 0 0; grid-template-columns:1fr 1fr; }
+  .cp-nfe-note { margin-left:0; }
 }
-
-/* A janela deixa de simular um card: o conteúdo passa a usar o viewport útil. */
-.app {
-  border: 0;
-  border-radius: 0;
-  background: var(--theme-bg-color);
-  backdrop-filter: none;
-  -webkit-backdrop-filter: none;
-}
-.light-mode .app { box-shadow: none; }
-
-/* Barra global: 56 px, com ações preservadas e menos espaço desperdiçado. */
-.header {
-  height: var(--shell-topbar-height);
-  padding: 0 12px;
-  gap: 8px;
-  background: var(--theme-bg-color);
-}
-.menu-logo {
-  max-width: 122px;
-  max-height: 32px;
-  object-fit: contain;
-}
-.header-menu a {
-  min-height: 44px;
-  display: inline-flex;
-  align-items: center;
-  padding: 0 12px;
-}
-.header-profile {
-  gap: 10px;
-  padding-left: 12px;
-  flex-basis: auto;
-}
-.profile-img { margin-left: 0; }
-
-/* Navegação lateral compacta: a largura permanece estável e o menu abre como painel. */
-.left-side {
-  box-sizing: border-box;
-  flex-basis: var(--shell-sidebar-width);
-  width: var(--shell-sidebar-width);
-  padding: 8px;
-  background: var(--theme-bg-color);
-}
-.sidebar-hamburger {
-  width: 44px;
-  height: 44px;
-  border-radius: 8px;
-  box-shadow: none;
-}
-.sidebar-content {
-  left: calc(var(--shell-sidebar-width) + 8px);
-  top: 8px;
-  bottom: 8px;
-  width: min(288px, calc(100vw - var(--shell-sidebar-width) - 24px));
-  padding: 12px;
-  border: 1px solid var(--shell-divider);
-  border-radius: 8px;
-  box-shadow: 0 16px 36px rgba(15, 23, 42, .22);
-}
-.side-wrapper + .side-wrapper { margin-top: 14px; }
-.side-title { margin: 4px 6px 8px; font-size: 12px; }
-.side-menu a { min-height: 40px; padding: 8px; }
-
-/* O piloto remove a moldura externa sem tocar nos componentes internos da lista. */
-#listaProdutos > .content-wrapper {
-  box-sizing: border-box;
-  padding: 12px var(--shell-gutter) 16px;
-  background: transparent;
-  overflow: auto;
-  scrollbar-gutter: stable;
-}
-#listaProdutos .content-section.lista-produtos-alta {
-  width: 100%;
-  max-width: none;
-  margin: 0;
-  padding: 0;
-  border: 0;
-  border-radius: 0;
-  background: transparent;
-  box-shadow: none;
-}
-#listaProdutos .lp-tabs-nav {
-  min-height: 40px;
-  margin: 0 0 8px;
-  padding: 0;
-  border-bottom: 1px solid var(--shell-divider);
-  background: transparent;
-}
-#listaProdutos .filter-bar {
-  min-height: 44px;
-  margin: 0 0 8px;
-  padding: 0;
-  background: transparent;
-}
-
-/* Elementos fixos continuam acessíveis, mas sem encobrir o rodapé operacional. */
-.floating-shortcut-zone {
-  right: 68px;
-  bottom: 12px;
-  gap: 6px;
-}
-.shortcut-manage-btn--fixed {
-  right: 16px;
-  bottom: 12px;
-  width: 44px;
-  height: 44px;
-}
-#listaProdutos .lista-produtos-fab {
-  right: 124px;
-  bottom: 12px;
-}
-#listaProdutos #listaProdutosConteudo,
-#listaProdutos #solicitacoesConteudo,
-#listaProdutos #kanbanSolicitacoesConteudo {
-  padding-bottom: 60px;
-}
-
-@media (max-width: 945px) {
-  .header { padding: 0 10px; }
-  .menu-logo { max-width: 100px; }
-  .left-side {
-    top: calc(var(--shell-topbar-height) + 8px);
-    left: 8px;
-    width: 44px;
-    padding: 0;
-  }
-  .sidebar-content {
-    left: 52px;
-    top: 0;
-    bottom: auto;
-    width: min(300px, calc(100vw - 68px));
-    max-height: calc(100dvh - var(--shell-topbar-height) - 24px);
-  }
-  #listaProdutos > .content-wrapper { padding: 12px; }
-}
-
-@media (max-width: 640px) {
-  :root { --shell-gutter: 10px; }
-  .header-menu { display: none; }
-  .header { justify-content: space-between; }
-  .header-profile { margin-left: auto; padding-left: 0; }
-  .user-badge { display: none; }
-  #listaProdutos > .content-wrapper { padding: 8px var(--shell-gutter) 12px; }
-  #listaProdutos .lp-tabs-nav { overflow-x: auto; scrollbar-width: none; }
-  #listaProdutos .filter-bar { gap: 6px; }
-  #listaProdutos .lista-produtos-fab { right: 12px; bottom: 64px; }
-  .floating-shortcut-zone { right: 64px; bottom: 10px; }
-  .shortcut-manage-btn--fixed { right: 10px; bottom: 10px; }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .sidebar-content, .sidebar-hamburger, .shortcut-btn, .shortcut-manage-btn { transition: none; }
-}
-
-/* Segundo passe do shell: o menu recolhido passa a ser uma navegação real,
-   em vez de deixar somente um botão solto ocupando uma coluna vazia. */
-@media (min-width: 946px) {
-  .left-side {
-    padding: 4px 8px 8px;
-    overflow: hidden;
-  }
-
-  .sidebar-hamburger {
-    flex: 0 0 44px;
-    background: transparent;
-    color: var(--theme-color);
-  }
-
-  .sidebar-hamburger:hover {
-    background: var(--hover-menu-bg);
-    box-shadow: none;
-    transform: none;
-  }
-
-  .sidebar-content.collapsed {
-    visibility: visible;
-    opacity: 1;
-    pointer-events: auto;
-    transform: none;
-    left: 0;
-    top: 52px;
-    bottom: 0;
-    width: var(--shell-sidebar-width);
-    padding: 4px 8px 8px;
-    border: 0;
-    border-radius: 0;
-    background: transparent;
-    box-shadow: none;
-    backdrop-filter: none;
-    -webkit-backdrop-filter: none;
-    scrollbar-width: none;
-  }
-
-  .sidebar-content.collapsed::-webkit-scrollbar { display: none; }
-  .sidebar-content.collapsed .side-title { display: none; }
-  .sidebar-content.collapsed .side-wrapper + .side-wrapper { margin-top: 4px; }
-  .sidebar-content.collapsed .side-menu { gap: 4px; }
-  .sidebar-content.collapsed .side-menu a,
-  .sidebar-content.collapsed .side-menu .shell-nav-button {
-    width: 44px;
-    min-height: 44px;
-    justify-content: center;
-    padding: 0;
-    overflow: hidden;
-    font-size: 0;
-  }
-  .sidebar-content.collapsed .side-menu a i,
-  .sidebar-content.collapsed .side-menu .shell-nav-button i {
-    margin: 0 !important;
-    font-size: 16px;
-  }
-
-  .sidebar-content:not(.collapsed) {
-    left: calc(var(--shell-sidebar-width) + 8px);
-    top: 8px;
-    bottom: 8px;
-    width: 272px;
-  }
-
-  .sidebar-content:not(.collapsed) .side-menu a i {
-    margin-right: 8px !important;
-  }
-
-  /* Dock vertical: preserva todos os atalhos sem cobrir paginação e ações. */
-  .floating-shortcut-zone {
-    top: calc(var(--shell-topbar-height) + 12px);
-    right: 8px;
-    bottom: auto;
-    flex-direction: column;
-  }
-  .floating-shortcut-zone .shortcut-items-container {
-    width: 42px;
-    flex-direction: column;
-    gap: 6px;
-  }
-  .shortcut-manage-btn--fixed { right: 7px; bottom: 12px; }
-  #listaProdutos > .content-wrapper { padding-right: 68px; }
-  #listaProdutos .lista-produtos-fab { right: 14px; bottom: 66px; }
-  #listaProdutos #listaProdutosConteudo,
-  #listaProdutos #solicitacoesConteudo,
-  #listaProdutos #kanbanSolicitacoesConteudo { padding-bottom: 12px; }
-}
-
-@media (max-width: 945px) {
-  :root { --shell-topbar-height: 56px; }
-}
-
-/* Terceiro passe: uma navegaÃ§Ã£o global e uma Ãºnica barra local no piloto. */
-.header > #mainMenu { display: none; }
-.header .user-badge { margin-left: auto; }
-.header .header-profile { margin-left: 8px; }
-#cart-icon {
-  position: absolute !important;
-  width: 1px !important;
-  height: 1px !important;
-  margin: 0 !important;
-  padding: 0 !important;
-  clip-path: inset(50%);
-  opacity: 0;
-  pointer-events: none;
-}
-
-.side-primary-wrapper {
-  padding-bottom: 6px;
-  border-bottom: 1px solid var(--shell-divider);
-}
-
-.side-menu .shell-nav-button {
-  width: 100%;
-  min-height: 40px;
-  display: flex;
-  align-items: center;
-  padding: 8px;
-  border: 0;
-  border-radius: 6px;
-  background: transparent;
-  color: var(--theme-color);
-  font: inherit;
-  font-size: 14px;
-  font-weight: 400;
-  text-align: left;
-  white-space: nowrap;
-  cursor: pointer;
-}
-.side-menu .shell-nav-button:hover { background: var(--hover-menu-bg); }
-
-@media (min-width: 946px) {
-  .left-side { overflow: visible; }
-
-  .sidebar-content:not(.collapsed) {
-    overflow-x: hidden;
-  }
-
-  .sidebar-content:not(.collapsed) .side-title { display: block; }
-  .sidebar-content:not(.collapsed) .side-menu a,
-  .sidebar-content:not(.collapsed) .side-menu .shell-nav-button {
-    width: 100%;
-    justify-content: flex-start;
-    font-size: 14px;
-  }
-
-  #listaProdutos .content-section.lista-produtos-alta {
-    position: relative;
-  }
-
-  #listaProdutos .lp-tabs-nav {
-    min-height: 48px;
-    padding-right: min(55vw, 780px);
-  }
-
-  #listaProdutos #listaProdutosConteudo > .filter-bar {
-    position: absolute;
-    z-index: 3;
-    top: 0;
-    right: 0;
-    width: min(54vw, 760px);
-    min-height: 44px;
-    margin: 0;
-    justify-content: flex-end;
-  }
-
-  #listaProdutos #listaProdutosConteudo > .filter-bar > div:first-child {
-    min-width: 220px;
-    max-width: 380px;
-  }
-
-  #listaProdutos #listaProdutosGrid {
-    max-height: calc(100dvh - 148px) !important;
-  }
-
-  #listaProdutos .product-details {
-    max-height: calc(100dvh - 156px);
-  }
-}
-
-@media (min-width: 946px) and (max-width: 1180px) {
-  #listaProdutos .lp-tabs-nav { padding-right: 0; }
-  #listaProdutos #listaProdutosConteudo > .filter-bar {
-    position: static;
-    width: 100%;
-    margin-bottom: 8px;
-  }
-}
-
-/* Home modular: camada de navega\u00e7\u00e3o sobre os handlers legados. */
-#paginaInicio > .content-wrapper {
-  box-sizing: border-box;
-  padding: 18px var(--shell-gutter) 24px;
-  background: transparent;
-  overflow: auto;
-}
-.mobile-operations-home { display: none !important; }
-.home-module-launcher { width: 100%; margin: 0 0 18px; }
-.home-module-launcher [hidden] { display: none !important; }
-.home-module-heading {
-  min-height: 54px; display: flex; align-items: flex-end; justify-content: space-between;
-  gap: 16px; margin-bottom: 14px; padding-right: 62px;
-}
-.home-module-eyebrow {
-  display: block; margin-bottom: 3px; color: #60a5fa; font-size: 11px;
-  font-weight: 700; letter-spacing: .08em; text-transform: uppercase;
-}
-.home-module-heading h1, .home-routine-heading h2 {
-  margin: 0; color: var(--content-title-color); font-size: clamp(19px, 2vw, 25px); line-height: 1.2;
-}
-.home-module-heading p, .home-routine-heading p {
-  margin: 5px 0 0; color: var(--inactive-color); font-size: 13px;
-}
-.home-module-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 10px; }
-.home-module-card, .home-routine-card, .home-module-back { font: inherit; cursor: pointer; }
-.home-module-card {
-  min-height: 118px; display: grid; grid-template-columns: 42px 1fr 18px; align-items: start;
-  gap: 12px; padding: 16px; border: 1px solid var(--module-color);
-  border-radius: 8px; background: var(--module-color);
-  color: #fff; text-align: left; box-shadow: 0 8px 20px rgba(0, 0, 0, .2);
-  transition: background .16s ease, border-color .16s ease, transform .16s ease;
-}
-.home-module-card:hover, .home-module-card:focus-visible {
-  border-color: #fff; background: var(--module-color); transform: translateY(-2px); outline: none;
-}
-.home-module-card-icon, .home-routine-icon {
-  width: 40px; height: 40px; display: inline-flex; align-items: center; justify-content: center;
-  border-radius: 8px; background: #fff; color: var(--module-color); font-size: 18px;
-}
-.home-module-card-copy { display: grid; gap: 5px; }
-.home-module-card-copy strong { font-size: 15px; line-height: 1.2; }
-.home-module-card-copy small { color: #fff; font-size: 12px; line-height: 1.35; }
-.home-module-card-copy em { color: #fff; font-size: 11px; font-style: normal; font-weight: 700; }
-.home-module-card-arrow { align-self: center; color: #fff; font-size: 11px; }
-.home-module-back {
-  min-height: 36px; display: inline-flex; align-items: center; gap: 7px; padding: 7px 11px;
-  border: 1px solid var(--border-color); border-radius: 6px; background: transparent; color: var(--theme-color);
-}
-.home-routine-panel {
-  padding: 0 12px 12px; border: 1px solid var(--module-color); border-radius: 8px;
-  background: #0f172a; overflow: hidden;
-}
-.home-routine-heading {
-  min-height: 54px; display: flex; align-items: center; gap: 10px; margin: 0 -12px 10px;
-  padding: 10px 12px; background: var(--module-color); color: #fff;
-}
-.home-routine-heading h2, .home-routine-heading p { color: #fff; }
-.home-routine-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 8px; }
-.home-routine-grid.is-area-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
-.home-area-card {
-  min-height: 136px; display: grid; grid-template-columns: 42px 1fr 14px; align-items: start;
-  gap: 12px; padding: 16px; border: 1px solid #334155; border-top: 4px solid var(--module-color);
-  border-radius: 8px; background: #172033; color: #f8fafc; text-align: left; font: inherit; cursor: pointer;
-}
-.home-area-card:hover, .home-area-card:focus-visible { border-color: var(--module-color); outline: none; }
-.home-area-card > span:nth-child(2) { display: grid; gap: 6px; }
-.home-area-card strong { font-size: 16px; }
-.home-area-card small { color: #cbd5e1; font-size: 12px; line-height: 1.35; }
-.home-area-card em { color: var(--module-color); font-size: 11px; font-style: normal; font-weight: 700; }
-.home-area-card-icon {
-  width: 40px; height: 40px; display: inline-flex; align-items: center; justify-content: center;
-  border-radius: 8px; background: var(--module-color); color: #fff; font-size: 17px;
-}
-.home-area-card > .fa-chevron-right { align-self: center; color: #94a3b8; font-size: 11px; }
-.home-area-section {
-  min-width: 0; padding: 14px; border: 1px solid #334155; border-top: 4px solid var(--module-color);
-  border-radius: 8px; background: #172033; color: #f8fafc;
-}
-.home-area-heading { display: grid; grid-template-columns: 40px 1fr; align-items: center; gap: 11px; margin-bottom: 12px; }
-.home-area-heading > span:last-child { display: grid; gap: 3px; min-width: 0; }
-.home-area-heading strong { font-size: 16px; }
-.home-area-heading small { color: #cbd5e1; font-size: 12px; line-height: 1.3; }
-.home-area-routines { display: grid; gap: 7px; }
-.home-area-routine {
-  width: 100%; min-height: 42px; display: grid; grid-template-columns: 22px 1fr 12px;
-  align-items: center; gap: 8px; padding: 8px 10px; border: 1px solid #334155; border-radius: 6px;
-  background: #0f172a; color: #f8fafc; text-align: left; font: inherit; font-size: 13px; cursor: pointer;
-}
-.home-area-routine:hover, .home-area-routine:focus-visible {
-  border-color: var(--module-color); background: #111c31; outline: none;
-}
-.home-area-routine > i:first-child { color: var(--module-color); text-align: center; }
-.home-area-routine > i:last-child { color: #94a3b8; font-size: 10px; }
-.light-mode .home-area-section { background: #f8fafc; color: #111827; border-color: #d1d5db; border-top-color: var(--module-color); }
-.light-mode .home-area-heading small { color: #475569; }
-.light-mode .home-area-routine { background: #fff; color: #111827; border-color: #d1d5db; }
-.home-routine-card {
-  min-height: 52px; display: grid; grid-template-columns: 32px 1fr 14px; align-items: center;
-  gap: 9px; padding: 10px 12px; border: 1px solid var(--border-color); border-radius: 7px;
-  background: #172033; color: #f8fafc; text-align: left;
-}
-.home-routine-card:hover, .home-routine-card:focus-visible { border-color: var(--module-color); outline: 2px solid var(--module-color); }
-.home-routine-card-icon { color: var(--module-color); text-align: center; }
-.home-routine-arrow { color: #64748b; font-size: 10px; }
-.light-mode .home-routine-panel { background: #eef2f7; }
-.light-mode .home-routine-card { background: #fff; color: #111827; }
-.home-weekly-production { display: none !important; }
-.home-reservations-section {
-  width: 100%; max-width: none; margin: 0; padding: 14px; border: 0; border-radius: 8px;
-  background: #0f172a; box-shadow: none; color: #f8fafc;
-}
-.home-reservations-section[hidden] { display: none !important; }
-.home-reservations-section .content-section-title { color: #f8fafc; }
-.home-reservations-section .agenda-cal-day {
-  background: #1f2937;
-  border-color: #374151;
-  color: #f8fafc;
-}
-.home-reservations-section .agenda-cal-day.is-today {
-  background: #1e3a5f;
-  border-color: #60a5fa;
-}
-.home-reservations-section .agenda-sidebar-nav,
-.home-reservations-section .agenda-sidebar-legenda,
-.home-reservations-section #agendaFiltroUsuario {
-  background: #172033 !important;
-  border-color: #374151 !important;
-  color: #f8fafc !important;
-}
-.home-reservations-section .agenda-cal-head,
-.home-reservations-section .agenda-legenda-titulo { color: #94a3b8; }
-.home-reservations-section .agenda-legenda-item { color: #f8fafc; }
-.light-mode .home-reservations-section { background: #f8fafc; color: #111827; }
-.light-mode .home-reservations-section .agenda-cal-day { background: #fff; color: #111827; border-color: #d1d5db; }
-.light-mode .home-reservations-section .agenda-cal-day.is-today { background: #eff6ff; }
-.light-mode .home-reservations-section .agenda-sidebar-nav,
-.light-mode .home-reservations-section .agenda-sidebar-legenda,
-.light-mode .home-reservations-section #agendaFiltroUsuario { background: #fff !important; color: #111827 !important; border-color: #d1d5db !important; }
 
 /* Compras: contraste operacional das ações em todos os painéis de detalhe. */
 #modalDetalhesPedidoCompras .cp-sheet-actions,
-#modalNfePedidos .cp-sheet-actions {
-  background: #f4fbfc !important;
-  color: #334155 !important;
-}
+#modalNfePedidos .cp-sheet-actions { background:#f4fbfc !important; color:#334155 !important; }
 #modalDetalhesPedidoCompras .cp-sheet-actions-title span,
-#modalNfePedidos .cp-sheet-actions-title span { color: #26323d !important; opacity: 1 !important; }
+#modalNfePedidos .cp-sheet-actions-title span { color:#26323d !important; opacity:1 !important; }
 #modalDetalhesPedidoCompras .cp-sheet-actions-title small,
-#modalNfePedidos .cp-sheet-actions-title small { color: #526579 !important; opacity: 1 !important; }
+#modalNfePedidos .cp-sheet-actions-title small { color:#526579 !important; opacity:1 !important; }
 #modalDetalhesPedidoCompras .cp-sheet-action > span,
-#modalNfePedidos .cp-sheet-action > span { color: #64748b !important; opacity: 1 !important; }
+#modalNfePedidos .cp-sheet-action > span { color:#64748b !important; opacity:1 !important; }
 #modalDetalhesPedidoCompras .cp-sheet-action > i,
-#modalNfePedidos .cp-sheet-action > i { color: #7c8798 !important; opacity: 1 !important; }
+#modalNfePedidos .cp-sheet-action > i { color:#7c8798 !important; opacity:1 !important; }
 #modalDetalhesPedidoCompras .cp-sheet-action.is-ready > span,
-#modalNfePedidos .cp-sheet-action.is-ready > span { color: #a53c36 !important; font-weight: 650 !important; }
+#modalNfePedidos .cp-sheet-action.is-ready > span { color:#a53c36 !important; font-weight:650 !important; }
 #modalDetalhesPedidoCompras .cp-sheet-action.is-ready > i,
-#modalNfePedidos .cp-sheet-action.is-ready > i { color: #c34237 !important; }
+#modalNfePedidos .cp-sheet-action.is-ready > i { color:#c34237 !important; }
 #modalDetalhesPedidoCompras .cp-sheet-action small,
-#modalNfePedidos .cp-sheet-action small { opacity: 1 !important; }
+#modalNfePedidos .cp-sheet-action small { opacity:1 !important; }
 
 /* Preparação do pedido legado no mesmo padrão claro e compacto dos detalhes Omie. */
 #modalDetalhesPedidoCompras.cp-purchase-preparation-modal .cp-detail-body {
-  padding: 12px 14px 16px !important;
-  overflow: auto !important;
-  background: #f4f6f8 !important;
-  color: #26323d !important;
+  padding:12px 14px 16px !important; overflow:auto !important;
+  background:#f4f6f8 !important; color:#26323d !important;
 }
 #modalDetalhesPedidoCompras.cp-purchase-preparation-modal #modalPedidoBody > div {
-  border: 1px solid #d8dee8 !important;
-  border-radius: 6px !important;
-  background: #fff !important;
-  box-shadow: none !important;
+  border:1px solid #d8dee8 !important; border-radius:6px !important;
+  background:#fff !important; box-shadow:none !important;
 }
 #modalDetalhesPedidoCompras.cp-purchase-preparation-modal #modalPedidoBody [style*="background:#f0fdf4"],
 #modalDetalhesPedidoCompras.cp-purchase-preparation-modal #modalPedidoBody [style*="background:#eff6ff"],
 #modalDetalhesPedidoCompras.cp-purchase-preparation-modal #modalPedidoBody [style*="background:#f8fafc"],
 #modalDetalhesPedidoCompras.cp-purchase-preparation-modal #modalPedidoBody [style*="background:#f9fafb"],
 #modalDetalhesPedidoCompras.cp-purchase-preparation-modal #modalPedidoBody [style*="background:#ffffff"] {
-  background: #fff !important;
-  border-color: #d8dee8 !important;
-  box-shadow: none !important;
+  background:#fff !important; border-color:#d8dee8 !important; box-shadow:none !important;
 }
 #modalDetalhesPedidoCompras.cp-purchase-preparation-modal #modalPedidoBody [style*="background:#f9fafb"] * {
-  color: #334155 !important;
-  opacity: 1 !important;
+  color:#334155 !important; opacity:1 !important;
 }
 #modalDetalhesPedidoCompras.cp-purchase-preparation-modal #modalPedidoBody [style*="color:#1f2937"],
-#modalDetalhesPedidoCompras.cp-purchase-preparation-modal #modalPedidoBody [style*="color:#374151"] {
-  color: #26323d !important;
-  opacity: 1 !important;
-}
-#modalDetalhesPedidoCompras.cp-purchase-preparation-modal #modalPedidoBody [style*="color:#6b7280"] {
-  color: #526579 !important;
-  opacity: 1 !important;
-}
+#modalDetalhesPedidoCompras.cp-purchase-preparation-modal #modalPedidoBody [style*="color:#374151"] { color:#26323d !important; opacity:1 !important; }
+#modalDetalhesPedidoCompras.cp-purchase-preparation-modal #modalPedidoBody [style*="color:#6b7280"] { color:#526579 !important; opacity:1 !important; }
 #modalDetalhesPedidoCompras.cp-purchase-preparation-modal #modalPedidoBody [style*="color:#047857"],
-#modalDetalhesPedidoCompras.cp-purchase-preparation-modal #modalPedidoBody [style*="color:#1e40af"] {
-  color: #a53c36 !important;
-}
+#modalDetalhesPedidoCompras.cp-purchase-preparation-modal #modalPedidoBody [style*="color:#1e40af"] { color:#a53c36 !important; }
 #modalDetalhesPedidoCompras.cp-purchase-preparation-modal #modalPedidoBody input,
 #modalDetalhesPedidoCompras.cp-purchase-preparation-modal #modalPedidoBody select,
 #modalDetalhesPedidoCompras.cp-purchase-preparation-modal #modalPedidoBody textarea {
-  background: #fff !important;
-  border-color: #b8c4d1 !important;
-  color: #26323d !important;
+  background:#fff !important; border-color:#b8c4d1 !important; color:#26323d !important;
 }
 #modalDetalhesPedidoCompras.cp-purchase-preparation-modal #modalPedidoBody input::placeholder,
-#modalDetalhesPedidoCompras.cp-purchase-preparation-modal #modalPedidoBody textarea::placeholder { color: #7c8798 !important; }
+#modalDetalhesPedidoCompras.cp-purchase-preparation-modal #modalPedidoBody textarea::placeholder { color:#7c8798 !important; }
 
-.cp-sheet-image-cell { width: 44px; padding: 5px 4px !important; text-align: center; }
+.cp-sheet-image-cell { width:44px; padding:5px 4px !important; text-align:center; }
 .cp-product-thumb {
-  width: 34px; height: 34px; padding: 0; display: inline-flex; align-items: center; justify-content: center;
-  overflow: hidden; border: 1px solid #cbd5e1; border-radius: 5px; background: #fff; color: #7c8798;
-  cursor: zoom-in; vertical-align: middle;
+  width:34px; height:34px; padding:0; display:inline-flex; align-items:center; justify-content:center;
+  overflow:hidden; border:1px solid #cbd5e1; border-radius:5px; background:#fff; color:#7c8798;
+  cursor:zoom-in; vertical-align:middle;
 }
-.cp-product-thumb:hover, .cp-product-thumb:focus-visible { border-color: #c34237; outline: 2px solid rgba(195,66,55,.18); }
-.cp-product-thumb img { width: 100%; height: 100%; object-fit: cover; }
+.cp-product-thumb:hover, .cp-product-thumb:focus-visible { border-color:#c34237; outline:2px solid rgba(195,66,55,.18); }
+.cp-product-thumb img { width:100%; height:100%; object-fit:cover; }
 .cp-product-thumb > i[hidden],
-.cp-product-thumb > img[hidden] { display: none !important; }
-.cp-product-thumb[data-image-loaded="true"] > i { display: none !important; }
-.cp-product-thumb--empty { cursor: default; background: #f1f5f9; color: #94a3b8; }
-.cp-product-thumb--empty:hover { border-color: #cbd5e1; outline: 0; }
-
+.cp-product-thumb > img[hidden] { display:none !important; }
+.cp-product-thumb[data-image-loaded="true"] > i { display:none !important; }
+.cp-product-thumb--empty { cursor:default; background:#f1f5f9; color:#94a3b8; }
+.cp-product-thumb--empty:hover { border-color:#cbd5e1; outline:0; }
 #modalDetalhesPedidoCompras.cp-purchase-preparation-modal .cp-prep-actions {
-  display: grid !important; grid-template-columns: auto minmax(0,1fr) !important; align-items: center !important;
-  gap: 8px 12px !important; margin-top: 10px !important; padding: 10px 12px !important;
-  background: #fff !important; border: 1px solid #d8dee8 !important;
+  display:grid !important; grid-template-columns:auto minmax(0,1fr) !important; align-items:center !important;
+  gap:8px 12px !important; margin-top:10px !important; padding:10px 12px !important;
+  background:#fff !important; border:1px solid #d8dee8 !important;
 }
 #modalDetalhesPedidoCompras.cp-purchase-preparation-modal .cp-prep-actions-title {
-  grid-column: 1 / -1; margin: 0 0 2px !important; padding-bottom: 7px; border-bottom: 1px solid #e2e8f0;
-  color: #a53c36 !important; font-size: 12px !important;
+  grid-column:1/-1; margin:0 0 2px !important; padding-bottom:7px; border-bottom:1px solid #e2e8f0;
+  color:#a53c36 !important; font-size:12px !important;
 }
-#modalDetalhesPedidoCompras.cp-purchase-preparation-modal .cp-prep-freight-toggle { margin: 0 !important; }
-#modalDetalhesPedidoCompras.cp-purchase-preparation-modal .cp-prep-actions-grid {
-  display: flex !important; flex-wrap: wrap; justify-content: flex-end; gap: 6px !important;
-}
-#modalDetalhesPedidoCompras.cp-purchase-preparation-modal .cp-prep-actions-aux { display: flex !important; gap: 6px !important; }
+#modalDetalhesPedidoCompras.cp-purchase-preparation-modal .cp-prep-freight-toggle { margin:0 !important; }
+#modalDetalhesPedidoCompras.cp-purchase-preparation-modal .cp-prep-actions-grid { display:flex !important; flex-wrap:wrap; justify-content:flex-end; gap:6px !important; }
+#modalDetalhesPedidoCompras.cp-purchase-preparation-modal .cp-prep-actions-aux { display:flex !important; gap:6px !important; }
 #modalDetalhesPedidoCompras.cp-purchase-preparation-modal .cp-prep-action {
-  width: auto !important; min-height: 32px !important; padding: 6px 10px !important; gap: 6px !important;
-  border: 1px solid #cbd5e1 !important; border-radius: 5px !important; background: #fff !important;
-  color: #475569 !important; font-size: 11px !important; white-space: nowrap;
+  width:auto !important; min-height:32px !important; padding:6px 10px !important; gap:6px !important;
+  border:1px solid #cbd5e1 !important; border-radius:5px !important; background:#fff !important;
+  color:#475569 !important; font-size:11px !important; white-space:nowrap;
 }
-#modalDetalhesPedidoCompras.cp-purchase-preparation-modal .cp-prep-action > span { color: inherit !important; opacity: 1 !important; }
-#modalDetalhesPedidoCompras.cp-purchase-preparation-modal .cp-prep-action--primary {
-  border-color: #c34237 !important; background: #c34237 !important; color: #fff !important;
-}
-#modalDetalhesPedidoCompras.cp-purchase-preparation-modal .cp-prep-action--save {
-  border-color: #55a18e !important; color: #28715f !important;
-}
-#modalDetalhesPedidoCompras.cp-purchase-preparation-modal .cp-prep-action:hover { filter: brightness(.97); }
-@media (max-width: 720px) {
-  #modalDetalhesPedidoCompras.cp-purchase-preparation-modal .cp-prep-actions { grid-template-columns: 1fr !important; }
-  #modalDetalhesPedidoCompras.cp-purchase-preparation-modal .cp-prep-actions-grid { justify-content: flex-start; }
-}
-@media (max-width: 945px) {
-  #paginaInicio > .content-wrapper { padding: 14px 12px 22px 64px; }
-  .home-module-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .home-routine-grid.is-area-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-}
-@media (max-width: 640px) {
-  #paginaInicio > .content-wrapper { padding: 60px 10px 18px; }
-  #paginaInicio .content-wrapper > .home-module-launcher,
-  #paginaInicio .content-wrapper > .home-reservations-section { display: block !important; }
-  #paginaInicio .content-wrapper > .home-reservations-section[hidden] { display: none !important; }
-  .home-module-heading { align-items: flex-start; }
-  .home-module-heading { padding-right: 0; }
-  .home-module-heading p { max-width: 260px; }
-  .home-module-grid, .home-routine-grid { grid-template-columns: 1fr; }
-  .home-routine-grid.is-area-grid { grid-template-columns: 1fr; }
-  .home-module-card { min-height: 98px; }
-  .home-module-back { padding: 7px 9px; font-size: 0; }
-  .home-module-back i { font-size: 13px; }
-  .home-reservations-section { padding: 10px; }
+#modalDetalhesPedidoCompras.cp-purchase-preparation-modal .cp-prep-action > span { color:inherit !important; opacity:1 !important; }
+#modalDetalhesPedidoCompras.cp-purchase-preparation-modal .cp-prep-action--primary { border-color:#c34237 !important; background:#c34237 !important; color:#fff !important; }
+#modalDetalhesPedidoCompras.cp-purchase-preparation-modal .cp-prep-action--save { border-color:#55a18e !important; color:#28715f !important; }
+#modalDetalhesPedidoCompras.cp-purchase-preparation-modal .cp-prep-action:hover { filter:brightness(.97); }
+@media (max-width:720px) {
+  #modalDetalhesPedidoCompras.cp-purchase-preparation-modal .cp-prep-actions { grid-template-columns:1fr !important; }
+  #modalDetalhesPedidoCompras.cp-purchase-preparation-modal .cp-prep-actions-grid { justify-content:flex-start; }
 }
