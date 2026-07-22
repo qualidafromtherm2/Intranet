@@ -13381,6 +13381,90 @@ async function _etqDebitarEndereco(client, { codigo, endereco, qtd, usuario }) {
 }
 
 const LOGISTICA_ALMOX_LOCAL_COD = '10717096386';
+const LOGISTICA_PRODUCAO_LOCAL_COD = '10431538872'; // 3. ESTOQUE PRODUÇÃO
+const LOGISTICA_PRODUCAO_LOCAL_NOME = '3. ESTOQUE PRODUÇÃO';
+const LOGISTICA_AT_LOCAL_COD = '10445659161'; // 10. SAC ASSISTENCIA E GARANTIAS
+const LOGISTICA_AT_LOCAL_NOME = '10. SAC ASSISTENCIA E GARANTIAS';
+
+/**
+ * Destino para SEP derivada (SEP-NNNN.X) ao ir para Stund-by:
+ * 1) herda dos itens da operação / família da SEP origem
+ * 2) se não houver, usa 3. ESTOQUE PRODUÇÃO (ou SAC se for portal AT)
+ */
+async function _logisticaResolverDestinoSepDerivada(client, { nSolicOrigem, sIds = [], cIds = [], fallbackAt = false } = {}) {
+  const ids = (sIds || []).map(id => parseInt(id, 10)).filter(id => !isNaN(id));
+  const carrIds = (cIds || []).map(id => parseInt(id, 10)).filter(id => !isNaN(id));
+
+  if (ids.length || carrIds.length) {
+    const { rows } = await client.query(
+      `SELECT cod_local, nome_local, motivo
+         FROM solicitacao_produto.itens_solicitados
+        WHERE ($1::bigint[] <> '{}'::bigint[] AND id = ANY($1::bigint[]))
+           OR ($2::bigint[] <> '{}'::bigint[] AND id_carr = ANY($2::bigint[]))
+        ORDER BY
+          CASE WHEN cod_local IS NOT NULL AND TRIM(cod_local) <> '' THEN 0 ELSE 1 END,
+          id ASC
+        LIMIT 1`,
+      [ids, carrIds]
+    );
+    const cod = String(rows[0]?.cod_local || '').trim();
+    if (cod) {
+      return {
+        cod_local: cod,
+        nome_local: String(rows[0]?.nome_local || '').trim() || LOGISTICA_PRODUCAO_LOCAL_NOME,
+        motivo: rows[0]?.motivo || null
+      };
+    }
+  }
+
+  const baseN = String(nSolicOrigem || '').replace(/\.\d+$/, '');
+  if (baseN) {
+    const { rows } = await client.query(
+      `SELECT cod_local, nome_local, motivo
+         FROM solicitacao_produto.itens_solicitados
+        WHERE (n_solic = $1 OR n_solic LIKE ($1 || '.%'))
+          AND cod_local IS NOT NULL AND TRIM(cod_local) <> ''
+        ORDER BY
+          CASE WHEN n_solic = $1 THEN 0 ELSE 1 END,
+          id ASC
+        LIMIT 1`,
+      [baseN]
+    );
+    const cod = String(rows[0]?.cod_local || '').trim();
+    if (cod) {
+      return {
+        cod_local: cod,
+        nome_local: String(rows[0]?.nome_local || '').trim() || LOGISTICA_PRODUCAO_LOCAL_NOME,
+        motivo: rows[0]?.motivo || null
+      };
+    }
+  }
+
+  if (fallbackAt) {
+    return { cod_local: LOGISTICA_AT_LOCAL_COD, nome_local: LOGISTICA_AT_LOCAL_NOME, motivo: 'AT' };
+  }
+  return {
+    cod_local: LOGISTICA_PRODUCAO_LOCAL_COD,
+    nome_local: LOGISTICA_PRODUCAO_LOCAL_NOME,
+    motivo: null
+  };
+}
+
+/** Backfill idempotente: SEP-NNNN.X já registradas sem destino → 3. ESTOQUE PRODUÇÃO. */
+async function _logisticaBackfillDestinoSepDerivadas(client = pool) {
+  const { rowCount } = await client.query(
+    `UPDATE solicitacao_produto.itens_solicitados
+        SET cod_local = $1,
+            nome_local = $2
+      WHERE n_solic ~ '^SEP-[0-9]+\\.[0-9]+$'
+        AND (cod_local IS NULL OR TRIM(cod_local) = '')`,
+    [LOGISTICA_PRODUCAO_LOCAL_COD, LOGISTICA_PRODUCAO_LOCAL_NOME]
+  );
+  if (rowCount) {
+    console.log(`[logistica/backfill-destino-sep] ${rowCount} SEP(s) derivada(s) sem destino → ${LOGISTICA_PRODUCAO_LOCAL_NOME}`);
+  }
+  return rowCount || 0;
+}
 
 function _omieNormalizaNumeroSeparacao(value) {
   if (value === null || value === undefined) return null;
@@ -19217,14 +19301,17 @@ async function ensureSolicitacaoProdutoQtyColumns() {
   await pool.query(`ALTER TABLE logistica.carrinho ADD COLUMN IF NOT EXISTS retirada_por TEXT`);
   await pool.query(`ALTER TABLE logistica.carrinho ADD COLUMN IF NOT EXISTS comentario TEXT`);
   await pool.query(`ALTER TABLE logistica.carrinho ADD COLUMN IF NOT EXISTS urgente BOOLEAN DEFAULT FALSE`);
+  await pool.query(`ALTER TABLE solicitacao_produto.itens_solicitados ADD COLUMN IF NOT EXISTS cod_local TEXT`);
+  await pool.query(`ALTER TABLE solicitacao_produto.itens_solicitados ADD COLUMN IF NOT EXISTS nome_local TEXT`);
 }
 
 // Inicializa schema na primeira requisição
 let schemaMigrated = false;
 let schemaColumnsEnsured = false;
+let schemaDestinoSepBackfilled = false;
 let schemaMigrationPromise = null;
 async function ensureSchemaMigrated() {
-  if (schemaMigrated && schemaColumnsEnsured) return;
+  if (schemaMigrated && schemaColumnsEnsured && schemaDestinoSepBackfilled) return;
   if (!schemaMigrationPromise) {
     schemaMigrationPromise = (async () => {
       if (!schemaMigrated) {
@@ -19234,6 +19321,10 @@ async function ensureSchemaMigrated() {
       if (!schemaColumnsEnsured) {
         await ensureSolicitacaoProdutoQtyColumns();
         schemaColumnsEnsured = true;
+      }
+      if (!schemaDestinoSepBackfilled) {
+        await _logisticaBackfillDestinoSepDerivadas(pool);
+        schemaDestinoSepBackfilled = true;
       }
     })().finally(() => {
       schemaMigrationPromise = null;
@@ -20208,33 +20299,16 @@ app.post('/api/logistica/itens_solicitados/separar-parcial', async (req, res) =>
       newNSolic = `${baseN}.${maxSuffix + 1}`;
     }
 
-    let codLocalOrig = null;
-    let nomeLocalOrig = null;
-    let motivoOrig = null;
-    {
-      const { rows: origRows } = await client.query(
-        `SELECT cod_local, nome_local, motivo
-           FROM solicitacao_produto.itens_solicitados
-          WHERE ($1::bigint[] <> '{}'::bigint[] AND id = ANY($1::bigint[]))
-             OR id_carr = ANY($2::bigint[])
-          ORDER BY
-            CASE WHEN cod_local IS NOT NULL AND TRIM(cod_local) <> '' THEN 0 ELSE 1 END,
-            id ASC
-          LIMIT 1`,
-        [sIds, cIds]
-      );
-      const origItem = origRows[0];
-      codLocalOrig = origItem?.cod_local || null;
-      nomeLocalOrig = origItem?.nome_local || null;
-      motivoOrig = origItem?.motivo || null;
-    }
-
-    // Portal AT (at-link): se ainda sem destino, aplica o armazém padrão do técnico
-    if ((!codLocalOrig || !String(codLocalOrig).trim()) && String(base.id_user || '').startsWith('at:')) {
-      codLocalOrig = '10445659161';
-      nomeLocalOrig = '10. SAC ASSISTENCIA E GARANTIAS';
-      if (!motivoOrig) motivoOrig = 'AT';
-    }
+    // Destino da SEP derivada: herda da SEP origem; se faltar, 3. ESTOQUE PRODUÇÃO (ou SAC no portal AT)
+    const destDerivada = await _logisticaResolverDestinoSepDerivada(client, {
+      nSolicOrigem: nSolic || newNSolic,
+      sIds,
+      cIds,
+      fallbackAt: String(base.id_user || '').startsWith('at:')
+    });
+    const codLocalOrig = destDerivada.cod_local;
+    const nomeLocalOrig = destDerivada.nome_local;
+    const motivoOrig = destDerivada.motivo;
 
     // Cria novo carrinho com o restante (qtyRemainder) → volta para a fila como pendente
     const { rows: [newCarr] } = await client.query(
@@ -21069,7 +21143,8 @@ app.post('/api/logistica/itens_solicitados/nao-separar', express.json(), async (
 
     // Busca o item que será marcado como "Não separado"
     const { rows: itemRows } = await client.query(`
-      SELECT i.id, i.n_solic, c.id AS carr_id, c.id_user, c.nome_user, c.retirada_por,
+      SELECT i.id, i.n_solic, i.cod_local, i.nome_local, i.motivo,
+             c.id AS carr_id, c.id_user, c.nome_user, c.retirada_por,
              c.codigo_produto, c.descricao, c.unidade, c.quantidade,
              c.data_prevista, c.horario, c.cod_omie
         FROM solicitacao_produto.itens_solicitados i
@@ -21102,6 +21177,14 @@ app.post('/api/logistica/itens_solicitados/nao-separar', express.json(), async (
 
     const newNSolic = `${baseN}.${maxSuffix + 1}`;
 
+    // Destino: herda da SEP origem; se faltar, 3. ESTOQUE PRODUÇÃO (ou SAC no portal AT)
+    const destDerivada = await _logisticaResolverDestinoSepDerivada(client, {
+      nSolicOrigem,
+      sIds: [item.id],
+      cIds: [item.carr_id],
+      fallbackAt: String(item.id_user || '').startsWith('at:')
+    });
+
     // Cria novo carrinho com o item "não separado"
     const { rows: newCarrRows } = await client.query(`
       INSERT INTO logistica.carrinho
@@ -21117,9 +21200,17 @@ app.post('/api/logistica/itens_solicitados/nao-separar', express.json(), async (
 
     // Cria novo item_solicitado com a nova SEP e status "Stund-by" (sem separador ativo)
     await client.query(`
-      INSERT INTO solicitacao_produto.itens_solicitados (id_carr, n_solic, status, observacao, usuario_separando)
-      VALUES ($1, $2, 'Stund-by', $3, NULL)
-    `, [newCarrId, newNSolic, justificativa || null]);
+      INSERT INTO solicitacao_produto.itens_solicitados
+        (id_carr, n_solic, status, observacao, usuario_separando, cod_local, nome_local, motivo)
+      VALUES ($1, $2, 'Stund-by', $3, NULL, $4, $5, $6)
+    `, [
+      newCarrId,
+      newNSolic,
+      justificativa || null,
+      destDerivada.cod_local,
+      destDerivada.nome_local,
+      destDerivada.motivo || item.motivo || null
+    ]);
 
     // Registra na tabela solicitacoes_separacao com status "Não separado" e a justificativa
     await client.query(`

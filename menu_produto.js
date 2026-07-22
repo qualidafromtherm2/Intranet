@@ -19591,6 +19591,42 @@ function _atEmAtualizarFechamentoIcon(row) {
     : 'Pendente fechamento do técnico';
 }
 
+/** Atualiza UI da NFe na aba Fechamento do modal Editar OS */
+function _atEmAtualizarNfeUi(nfeUrl, dataEnvio) {
+  const url = String(nfeUrl || '').trim();
+  const urlEl = document.getElementById('atEmFechNfeUrl');
+  const linkEl = document.getElementById('atEmFechNfeLink');
+  const remBtn = document.getElementById('atEmFechNfeRemoverBtn');
+  const anexLbl = document.getElementById('atEmFechNfeAnexarLbl');
+  const dataEl = document.getElementById('atEmFechDataEnvioNfe');
+  const statusEl = document.getElementById('atEmFechNfeStatus');
+
+  if (urlEl) urlEl.value = url || '';
+  if (linkEl) {
+    if (url) { linkEl.href = url; linkEl.style.display = ''; }
+    else { linkEl.href = '#'; linkEl.style.display = 'none'; }
+  }
+  if (remBtn) remBtn.style.display = url ? 'inline-flex' : 'none';
+  if (anexLbl) anexLbl.textContent = url ? 'Substituir NFe' : 'Anexar NFe';
+  if (dataEl) {
+    dataEl.value = dataEnvio
+      ? new Date(dataEnvio).toLocaleString('pt-BR')
+      : '';
+  }
+  if (statusEl) {
+    statusEl.textContent = url
+      ? 'NFe anexada. Pode substituir ou excluir para anexar outra.'
+      : 'Sem NFe — use o botão acima para anexar o arquivo (PDF/XML).';
+    statusEl.style.color = url ? '#86efac' : '#fbbf24';
+  }
+
+  const row = (_atAllRows || []).find(r => String(r.id) === String(_atEditModalCurrentId));
+  if (row) {
+    row.fech_nfe_url = url || null;
+    row.fech_data_envio_nfe = dataEnvio || null;
+  }
+}
+
 function _atEmParseDataRef(val) {
   const raw = String(val || '').trim();
   if (!raw) return '';
@@ -19915,15 +19951,7 @@ function _abrirAtEditModal(id) {
   setV('atEmFechObs',        row.fech_obs);
   setV('atEmFechMidias',     row.fech_midias);
   setV('atEmFechObsTecnico', row.fech_observacao_tecnico);
-  setV('atEmFechNfeUrl',     row.fech_nfe_url);
-  // Link NFe
-  const nfeLinkEl = document.getElementById('atEmFechNfeLink');
-  if (nfeLinkEl) {
-    if (row.fech_nfe_url) { nfeLinkEl.href = row.fech_nfe_url; nfeLinkEl.style.display = ''; }
-    else                  { nfeLinkEl.href = '#';              nfeLinkEl.style.display = 'none'; }
-  }
-  setV('atEmFechDataEnvioNfe', row.fech_data_envio_nfe
-    ? new Date(row.fech_data_envio_nfe).toLocaleString('pt-BR') : '');
+  _atEmAtualizarNfeUi(row.fech_nfe_url, row.fech_data_envio_nfe);
   setV('atEmFechTecnico',    row.tecnico_nome);
 
   // Tipo de falha (mesmo combobox do Relatório AT / MASP)
@@ -25373,6 +25401,91 @@ if (_atEmAnexarBtn && _atEmAnexarInput) {
     _atEmAtualizarAnexosCount(existentes + _atEmAnexosPendentes.length);
   });
 }
+
+// NFe do fechamento — anexar / substituir / excluir no modal Editar OS
+(function () {
+  const btn = document.getElementById('atEmFechNfeAnexarBtn');
+  const input = document.getElementById('atEmFechNfeInput');
+  const remBtn = document.getElementById('atEmFechNfeRemoverBtn');
+  const statusEl = document.getElementById('atEmFechNfeStatus');
+  if (!btn || !input) return;
+
+  const setBusy = (busy, msg) => {
+    btn.disabled = !!busy;
+    if (remBtn) remBtn.disabled = !!busy;
+    if (statusEl && msg) statusEl.textContent = msg;
+  };
+
+  btn.addEventListener('click', () => {
+    if (!_atEditModalCurrentId) {
+      alert('Abra uma OS antes de anexar a NFe.');
+      return;
+    }
+    input.click();
+  });
+
+  input.addEventListener('change', async () => {
+    const file = input.files && input.files[0];
+    input.value = '';
+    const id = _atEditModalCurrentId;
+    if (!file || !id) return;
+    setBusy(true, 'Enviando NFe...');
+    try {
+      const fd = new FormData();
+      fd.append('nfe', file);
+      const r = await fetch(`/api/sac/at/fechamento/${id}/nfe`, {
+        method: 'POST',
+        credentials: 'include',
+        body: fd,
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok || !d.ok) {
+        alert(d.error || 'Erro ao anexar NFe.');
+        setBusy(false, 'Falha no envio.');
+        return;
+      }
+      _atEmAtualizarNfeUi(d.nfe_url, d.data_envio_nfe || new Date().toISOString());
+      setBusy(false);
+    } catch (err) {
+      console.error('[AT] upload NFe', err);
+      alert('Erro de rede ao anexar NFe.');
+      setBusy(false, 'Erro de rede.');
+    }
+  });
+
+  if (remBtn) {
+    remBtn.addEventListener('click', async () => {
+      const id = _atEditModalCurrentId;
+      if (!id) return;
+      if (!confirm('Excluir a NFe desta OS?\nO campo ficará livre para anexar a nota correta.')) return;
+      setBusy(true, 'Removendo NFe...');
+      try {
+        const r = await fetch(`/api/sac/at/fechamento/${id}/nfe`, {
+          method: 'DELETE',
+          credentials: 'include',
+        });
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok || !d.ok) {
+          alert(d.error || 'Erro ao excluir NFe.');
+          setBusy(false, 'Falha ao excluir.');
+          return;
+        }
+        _atEmAtualizarNfeUi(null, null);
+        if (d.status) {
+          _atStatusOsAtualizarBadge(d.status);
+          const row = (_atAllRows || []).find(x => String(x.id) === String(id));
+          if (row) row.status = d.status;
+          _atRenderCurrent();
+        }
+        setBusy(false);
+      } catch (err) {
+        console.error('[AT] excluir NFe', err);
+        alert('Erro de rede ao excluir NFe.');
+        setBusy(false, 'Erro de rede.');
+      }
+    });
+  }
+})();
 
 // Botão Fechamento PJ — anexa PDF OS e preenche campos de fechamento
 (function () {

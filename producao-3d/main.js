@@ -591,6 +591,10 @@ function boot(renderer) {
   floor.userData.tipo = 'chao';
   scene.add(floor);
 
+  // Linha de produção deslocada para perto da parede esquerda (−X):
+  // abre espaço para a esteira de Inspeção final e a área de Embalagem.
+  const LINE_X = -floorW / 2 + 3.8;
+
   const wallH = 6.5 * HALL_HEIGHT_MUL;
   const eyeMax = wallH - 0.6;
   function addWall(cx, cz, sx, sz) {
@@ -612,10 +616,9 @@ function boot(renderer) {
   ceiling.position.y = wallH - 0.05;
   scene.add(ceiling);
 
-  // Faixas no chão (linha de produção)
+  // Faixas no chão (linha de produção) — acompanham a linha deslocada
   const stripeMat = new THREE.MeshBasicMaterial({ color: 0xfbbf24 });
-  const STRIPE_X = 4.2;
-  for (const x of [-STRIPE_X, STRIPE_X]) {
+  for (const x of [LINE_X - 2.6, LINE_X + 4.2]) {
     const stripe = new THREE.Mesh(new THREE.PlaneGeometry(0.12, floorD * 0.7), stripeMat);
     stripe.rotation.x = -Math.PI / 2;
     stripe.position.set(x, 0.015, 0);
@@ -649,7 +652,7 @@ function boot(renderer) {
       new THREE.MeshBasicMaterial({ map: tex, transparent: true })
     );
     label.rotation.x = -Math.PI / 2;
-    label.position.set(0, 0.02, floorD / 2 - 4);
+    label.position.set(LINE_X, 0.02, floorD / 2 - 4);
     scene.add(label);
   }
 
@@ -811,39 +814,30 @@ function boot(renderer) {
     return group;
   }
 
-  // Layout tipo "F" + Programado no início do hermético (−Z):
-  //      eletrica              hermetica              programado
-  // |---------|--------------------------------|------|
-  // |inspecao |teste
-  // |         |   →  [retângulo Embalagem no chão]
+  // Layout tipo "F" encostado na parede esquerda (−X). Programado NÃO fica mais
+  // na esteira — vira painel na parede (−Z). Ramais em X (de cima p/ baixo):
+  //      eletrica                    hermetica
+  // |---------|--------------------------------------|   ← principal em Z (x = LINE_X)
+  // |espera
+  // |inspecao final  ★ nova — grudada no Teste
+  // |teste           →  [retângulo Embalagem no chão, à frente]
   // Divisor elétrica|hermético = entrada TESTE
-  // Divisor hermético|programado = um pouco antes do hermético
-  const branchCenterX = BELT_W / 2 + BRANCH_LEN / 2;
+  const branchCenterX = LINE_X + BELT_W / 2 + BRANCH_LEN / 2;
   const BRANCH_GAP = 3.6;
-  const PROG_LEN = 7.5; // trecho Programado (cabe várias placas)
   const zPonta = BELT_LEN / 2 - 0.9;
-  const zInspecao = zPonta;
-  const zEspera = zInspecao; // alias legado
-  const zTeste = zPonta - BRANCH_GAP;
+  const zEspera = zPonta;
+  const zInspecao = zPonta - BRANCH_GAP;      // nova esteira — colada no Teste
+  const zTeste = zPonta - 2 * BRANCH_GAP;
 
   const zEleIni = zTeste;
   const zEleFim = BELT_LEN / 2;
   const lenEle = Math.max(2, zEleFim - zEleIni);
   const czEle = (zEleIni + zEleFim) / 2;
 
-  const zProgIni = -BELT_LEN / 2;
-  const zProgFim = zProgIni + PROG_LEN;
-  const lenProg = PROG_LEN;
-  const czProg = (zProgIni + zProgFim) / 2;
-
-  const zHermIni = zProgFim;
+  const zHermIni = -BELT_LEN / 2;
   const zHermFim = zTeste;
   const lenHerm = Math.max(2, zHermFim - zHermIni);
   const czHerm = (zHermIni + zHermFim) / 2;
-
-  // aliases legados
-  const zAntesFaixa = zInspecao;
-  const zFinal = zTeste;
 
   // Zona Embalagem: retângulo no chão na frente das esteiras de ramal (+X)
   const EMB_W = 5.2;
@@ -851,19 +845,27 @@ function boot(renderer) {
   const embCenterX = branchCenterX + BRANCH_LEN / 2 + 0.9 + EMB_W / 2;
   const embCenterZ = (zTeste + zInspecao) / 2;
 
+  // Painel PROGRAMAÇÃO na parede −Z (substitui o trecho de esteira Programado)
+  const PANEL_W = 12;
+  const PANEL_H = 3.4;
+  const PANEL_CX = LINE_X + 7.2;
+  const PANEL_CY = 2.6;
+  const PANEL_Z = -floorD / 2 + wallT / 2 + 0.06;
+  const PANEL_CARDS_Z = PANEL_Z + 0.5;
+
   createBeltSegment({
-    axis: 'z', length: lenProg, cx: 0, cz: czProg,
-    nome: 'Programado', labelSide: 'left',
+    axis: 'z', length: lenHerm, cx: LINE_X, cz: czHerm,
+    nome: 'Hermético', labelSide: 'right',
   });
   createBeltSegment({
-    axis: 'z', length: lenHerm, cx: 0, cz: czHerm,
-    nome: 'Hermético', labelSide: 'left',
-  });
-  createBeltSegment({
-    axis: 'z', length: lenEle, cx: 0, cz: czEle,
-    nome: 'Elétrica', labelSide: 'left',
+    axis: 'z', length: lenEle, cx: LINE_X, cz: czEle,
+    nome: 'Elétrica', labelSide: 'right',
   });
 
+  createBeltSegment({
+    axis: 'x', length: BRANCH_LEN, cx: branchCenterX, cz: zEspera,
+    nome: 'Espera', labelSide: 'right',
+  });
   createBeltSegment({
     axis: 'x', length: BRANCH_LEN, cx: branchCenterX, cz: zInspecao,
     nome: 'Inspeção final', labelSide: 'right',
@@ -872,6 +874,50 @@ function boot(renderer) {
     axis: 'x', length: BRANCH_LEN, cx: branchCenterX, cz: zTeste,
     nome: 'Teste', labelSide: 'right',
   });
+
+  // Painel grande na parede — máquinas em Programado
+  (function createProgramacaoPanel() {
+    const panel = new THREE.Mesh(
+      new THREE.PlaneGeometry(PANEL_W, PANEL_H),
+      new THREE.MeshBasicMaterial({ color: 0x1e1b4b, side: THREE.DoubleSide })
+    );
+    panel.position.set(PANEL_CX, PANEL_CY, PANEL_Z);
+    scene.add(panel);
+
+    const frameMat = new THREE.MeshBasicMaterial({ color: 0x6366f1 });
+    const ft = 0.1;
+    const frames = [
+      { w: PANEL_W + ft, h: ft, x: 0, y: PANEL_H / 2 },
+      { w: PANEL_W + ft, h: ft, x: 0, y: -PANEL_H / 2 },
+      { w: ft, h: PANEL_H + ft, x: PANEL_W / 2, y: 0 },
+      { w: ft, h: PANEL_H + ft, x: -PANEL_W / 2, y: 0 },
+    ];
+    for (const f of frames) {
+      const bar = new THREE.Mesh(new THREE.PlaneGeometry(f.w, f.h), frameMat);
+      bar.position.set(PANEL_CX + f.x, PANEL_CY + f.y, PANEL_Z + 0.01);
+      scene.add(bar);
+    }
+
+    const c = document.createElement('canvas');
+    c.width = 1024;
+    c.height = 128;
+    const ctx = c.getContext('2d');
+    ctx.fillStyle = '#312e81';
+    ctx.fillRect(0, 0, c.width, c.height);
+    ctx.fillStyle = '#c7d2fe';
+    ctx.font = 'bold 72px ui-sans-serif, system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('PROGRAMAÇÃO', c.width / 2, c.height / 2);
+    const tex = new THREE.CanvasTexture(c);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    const title = new THREE.Mesh(
+      new THREE.PlaneGeometry(PANEL_W * 0.6, PANEL_W * 0.6 * (128 / 1024)),
+      new THREE.MeshBasicMaterial({ map: tex, transparent: true })
+    );
+    title.position.set(PANEL_CX, PANEL_CY + PANEL_H / 2 + 0.55, PANEL_Z + 0.01);
+    scene.add(title);
+  })();
 
   // Demarcação no chão — Embalagem (retângulo)
   (function createEmbalagemZone() {
@@ -1278,6 +1324,30 @@ function boot(renderer) {
     const list = Array.isArray(items) ? items : [];
     if (!list.length) return [];
 
+    // Programado → grade de cards no painel da parede (não fica mais na esteira)
+    if (posto === 'programado') {
+      const gapX = 1.0;
+      const gapY = 1.05;
+      const maxCols = Math.max(1, Math.floor((PANEL_W - 0.8) / gapX));
+      const maxRows = Math.max(1, Math.floor((PANEL_H - 0.5) / gapY));
+      const maxSlots = maxCols * maxRows;
+      const nSlots = Math.min(list.length, maxSlots);
+      const groups = chunkEvenly(list, nSlots);
+      const cols = Math.min(groups.length, maxCols);
+      const rows = Math.max(1, Math.ceil(groups.length / cols));
+      const x0 = PANEL_CX - ((cols - 1) * gapX) / 2;
+      const yTop = PANEL_CY + ((rows - 1) * gapY) / 2;
+      return groups.map((ops, i) => ({
+        x: x0 + (i % cols) * gapX,
+        y: yTop - Math.floor(i / cols) * gapY,
+        z: PANEL_CARDS_Z,
+        posto,
+        ops,
+        scale: 1,
+        noStand: true,
+      }));
+    }
+
     let usable;
     let alongX = false;
     let onFloorGrid = false;
@@ -1286,9 +1356,9 @@ function boot(renderer) {
     let zFixed = 0;
     let xCenter = 0;
 
-    if (posto === 'programado' || posto === 'hermetico' || posto === 'eletrica') {
-      zIni = posto === 'programado' ? zProgIni : posto === 'hermetico' ? zHermIni : zEleIni;
-      zFim = posto === 'programado' ? zProgFim : posto === 'hermetico' ? zHermFim : zEleFim;
+    if (posto === 'hermetico' || posto === 'eletrica') {
+      zIni = posto === 'hermetico' ? zHermIni : zEleIni;
+      zFim = posto === 'hermetico' ? zHermFim : zEleFim;
       const len = Math.max(0.5, zFim - zIni);
       usable = Math.max(0.8, len - 0.6);
     } else if (posto === 'embalagem') {
@@ -1298,7 +1368,7 @@ function boot(renderer) {
       usable = Math.max(0.8, Math.min(EMB_W, EMB_D) - 0.5);
     } else {
       alongX = true;
-      zFixed = posto === 'teste' ? zTeste : zInspecao;
+      zFixed = posto === 'teste' ? zTeste : posto === 'inspecao' ? zInspecao : zEspera;
       xCenter = branchCenterX;
       usable = Math.max(0.8, BRANCH_LEN - 0.6);
     }
@@ -1350,7 +1420,7 @@ function boot(renderer) {
       const z0 = mid - span / 2;
       groups.forEach((ops, i) => {
         out.push({
-          x: 0,
+          x: LINE_X,
           z: z0 + i * gap,
           posto,
           ops,
@@ -1419,7 +1489,7 @@ function boot(renderer) {
         new THREE.PlaneGeometry(1.4, 0.7),
         new THREE.MeshBasicMaterial({ map: tex, side: THREE.DoubleSide })
       );
-      mesh.position.set(0, BELT_Y + 0.55, czProg);
+      mesh.position.set(LINE_X, BELT_Y + 0.55, czHerm);
       mesh.userData.tipo = 'info';
       beltGroup.add(mesh);
       productMeshes.push(mesh);
@@ -1458,14 +1528,16 @@ function boot(renderer) {
         tex,
       };
 
-      const stand = new THREE.Mesh(
-        new THREE.BoxGeometry(0.14 * scale, 0.04, 0.14 * scale),
-        steelDarkMat
-      );
-      const standY = Number.isFinite(slot.y) ? 0.04 : (BELT_Y + 0.02);
-      stand.position.set(slot.x, standY, slot.z);
-      beltGroup.add(stand);
-      productMeshes.push(stand);
+      if (!slot.noStand) {
+        const stand = new THREE.Mesh(
+          new THREE.BoxGeometry(0.14 * scale, 0.04, 0.14 * scale),
+          steelDarkMat
+        );
+        const standY = Number.isFinite(slot.y) ? 0.04 : (BELT_Y + 0.02);
+        stand.position.set(slot.x, standY, slot.z);
+        beltGroup.add(stand);
+        productMeshes.push(stand);
+      }
 
       beltGroup.add(mesh);
       productMeshes.push(mesh);

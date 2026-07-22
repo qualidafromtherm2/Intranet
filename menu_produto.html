@@ -5267,16 +5267,30 @@
                     <label class="at-em-lbl">Mídias (URLs)</label>
                     <input type="text" id="atEmFechMidias" class="at-em-input" placeholder="URLs separadas por vírgula">
                   </div>
-                  <div class="at-em-wrap">
-                    <label class="at-em-lbl">URL da NFe</label>
-                    <div id="atEmFechNfeUrlWrap" style="display:flex;align-items:center;gap:8px;">
-                      <input type="text" id="atEmFechNfeUrl" class="at-em-input" placeholder="—" readonly style="opacity:.8;cursor:default;flex:1;">
-                      <a id="atEmFechNfeLink" href="#" target="_blank" style="display:none;white-space:nowrap;font-size:12px;color:#38bdf8;text-decoration:none;" title="Abrir NFe">📄 Abrir</a>
+                  <div class="at-em-wrap" style="grid-column:1/-1;">
+                    <label class="at-em-lbl">NFe do fechamento</label>
+                    <div id="atEmFechNfeBox" style="display:flex;flex-direction:column;gap:8px;padding:10px 12px;border-radius:8px;border:1px solid rgba(59,130,246,.35);background:rgba(30,58,95,.25);">
+                      <div id="atEmFechNfeUrlWrap" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+                        <input type="text" id="atEmFechNfeUrl" class="at-em-input" placeholder="Nenhuma NFe anexada" readonly style="opacity:.8;cursor:default;flex:1;min-width:180px;">
+                        <a id="atEmFechNfeLink" href="#" target="_blank" rel="noopener" style="display:none;white-space:nowrap;font-size:12px;color:#38bdf8;text-decoration:none;" title="Abrir NFe">📄 Abrir</a>
+                        <button type="button" id="atEmFechNfeRemoverBtn" title="Excluir NFe e liberar novo anexo"
+                          style="display:none;padding:6px 10px;border-radius:8px;border:1px solid rgba(239,68,68,.45);background:rgba(239,68,68,.12);color:#f87171;cursor:pointer;font-size:12px;font-weight:600;white-space:nowrap;">
+                          <i class="fa-solid fa-trash-can"></i> Excluir NFe
+                        </button>
+                      </div>
+                      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+                        <input type="file" id="atEmFechNfeInput" accept=".pdf,.xml,application/pdf,text/xml,application/xml" style="display:none;">
+                        <button type="button" id="atEmFechNfeAnexarBtn"
+                          style="display:inline-flex;align-items:center;gap:6px;padding:7px 12px;border-radius:8px;border:1px solid rgba(59,130,246,.55);background:rgba(37,99,235,.2);color:#93c5fd;cursor:pointer;font-size:12px;font-weight:600;">
+                          <i class="fa-solid fa-file-invoice"></i> <span id="atEmFechNfeAnexarLbl">Anexar NFe</span>
+                        </button>
+                        <span id="atEmFechNfeStatus" style="font-size:12px;color:#94a3b8;"></span>
+                      </div>
+                      <div class="at-em-wrap" style="margin:0;">
+                        <label class="at-em-lbl" style="margin-bottom:4px;">Data Envio NFe</label>
+                        <input type="text" id="atEmFechDataEnvioNfe" class="at-em-input" placeholder="—" readonly style="opacity:.8;cursor:default;">
+                      </div>
                     </div>
-                  </div>
-                  <div class="at-em-wrap">
-                    <label class="at-em-lbl">Data Envio NFe</label>
-                    <input type="text" id="atEmFechDataEnvioNfe" class="at-em-input" placeholder="—" readonly style="opacity:.8;cursor:default;">
                   </div>
                   <div class="at-em-wrap" style="grid-column:1/-1;">
                     <label class="at-em-lbl">Técnico</label>

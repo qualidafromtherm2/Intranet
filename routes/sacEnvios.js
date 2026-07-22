@@ -6870,6 +6870,123 @@ router.delete('/at/anexos/:id_at/:id_anexo', async (req, res) => {
   }
 });
 
+/**
+ * Garante linha em sac.fechamento e aplica NFe (intranet / sessão).
+ * Substitui arquivo anterior se houver path diferente.
+ */
+async function _atAplicarNfeIntranet(idAt, nfeUrl, pathKey) {
+  const { rows: existing } = await pool.query(
+    `SELECT id, nfe_path_key FROM sac.fechamento WHERE id_at = $1 LIMIT 1`,
+    [idAt]
+  );
+  let oldKey = null;
+  if (existing.length) {
+    oldKey = existing[0].nfe_path_key || null;
+    await pool.query(
+      `UPDATE sac.fechamento
+       SET nfe_url = $2, nfe_path_key = $3, status_os = 'finalizado', data_envio_nfe = NOW()
+       WHERE id_at = $1`,
+      [idAt, nfeUrl, pathKey]
+    );
+  } else {
+    await pool.query(
+      `INSERT INTO sac.fechamento (id_at, nfe_url, nfe_path_key, status_os, data_envio_nfe)
+       VALUES ($1, $2, $3, 'finalizado', NOW())`,
+      [idAt, nfeUrl, pathKey]
+    );
+  }
+  if (oldKey && oldKey !== pathKey) {
+    const { rows: still } = await pool.query(
+      `SELECT 1 FROM sac.fechamento WHERE nfe_path_key = $1 LIMIT 1`,
+      [oldKey]
+    );
+    if (!still.length) {
+      supabase.storage.from(AT_BUCKET).remove([oldKey]).catch(() => {});
+    }
+  }
+}
+
+// POST /at/fechamento/:id_at/nfe — anexa/substitui NFe pelo modal Editar OS (intranet)
+router.post('/at/fechamento/:id_at/nfe', atUpload.single('nfe'), async (req, res) => {
+  const idAt = parseInt(req.params.id_at, 10);
+  if (!Number.isFinite(idAt) || idAt <= 0) {
+    return res.status(400).json({ ok: false, error: 'id_at inválido.' });
+  }
+  if (!req.file) return res.status(400).json({ ok: false, error: 'Nenhum arquivo enviado.' });
+
+  try {
+    const { rows: atRows } = await pool.query(`SELECT id FROM sac.at WHERE id = $1`, [idAt]);
+    if (!atRows.length) return res.status(404).json({ ok: false, error: 'OS não encontrada.' });
+
+    const file = req.file;
+    const mimeExt = mime.extension(file.mimetype);
+    const originalExt = (file.originalname || '').split('.').pop();
+    const ext = (mimeExt || originalExt || 'bin').replace(/[^a-zA-Z0-9]/g, '').toLowerCase().slice(0, 8) || 'bin';
+    const safeName = atSanitizeFileName(file.originalname, ext);
+    const pathKey = `at-nfe/${idAt}/${uuidv4()}_${safeName}`;
+    const { error: upErr } = await supabase.storage.from(AT_BUCKET).upload(pathKey, file.buffer, {
+      contentType: file.mimetype || 'application/octet-stream',
+      upsert: false
+    });
+    if (upErr) throw new Error(`Storage upload: ${upErr.message}`);
+    const { data: pubData } = supabase.storage.from(AT_BUCKET).getPublicUrl(pathKey);
+    const nfeUrl = pubData?.publicUrl || '';
+
+    await _atAplicarNfeIntranet(idAt, nfeUrl, pathKey);
+    return res.json({
+      ok: true,
+      nfe_url: nfeUrl,
+      data_envio_nfe: new Date().toISOString(),
+    });
+  } catch (err) {
+    console.error('[SAC/AT] erro upload NFe intranet:', err);
+    return res.status(500).json({ ok: false, error: 'Falha no upload da NFe.', detail: String(err.message || err) });
+  }
+});
+
+// DELETE /at/fechamento/:id_at/nfe — remove NFe e reabre para novo anexo
+router.delete('/at/fechamento/:id_at/nfe', async (req, res) => {
+  const idAt = parseInt(req.params.id_at, 10);
+  if (!Number.isFinite(idAt) || idAt <= 0) {
+    return res.status(400).json({ ok: false, error: 'id_at inválido.' });
+  }
+  try {
+    const { rows } = await pool.query(
+      `SELECT nfe_path_key FROM sac.fechamento WHERE id_at = $1 LIMIT 1`,
+      [idAt]
+    );
+    if (!rows.length) {
+      return res.json({ ok: true, nfe_url: null });
+    }
+    const oldKey = rows[0].nfe_path_key || null;
+    await pool.query(
+      `UPDATE sac.fechamento
+       SET nfe_url = NULL, nfe_path_key = NULL, data_envio_nfe = NULL, status_os = 'aguardando_nfe'
+       WHERE id_at = $1`,
+      [idAt]
+    );
+    // Mantém a OS na fila de NF no painel AT
+    await pool.query(
+      `UPDATE sac.at SET status = 'Aguardando NF AT'
+       WHERE id = $1 AND COALESCE(TRIM(status), '') NOT IN ('Excluido', 'Fechado')`,
+      [idAt]
+    );
+    if (oldKey) {
+      const { rows: still } = await pool.query(
+        `SELECT 1 FROM sac.fechamento WHERE nfe_path_key = $1 LIMIT 1`,
+        [oldKey]
+      );
+      if (!still.length) {
+        supabase.storage.from(AT_BUCKET).remove([oldKey]).catch(() => {});
+      }
+    }
+    return res.json({ ok: true, nfe_url: null, status: 'Aguardando NF AT' });
+  } catch (err) {
+    console.error('[SAC/AT] erro ao remover NFe:', err);
+    return res.status(500).json({ ok: false, error: 'Falha ao remover NFe.' });
+  }
+});
+
 // ── MENÇÕES ──────────────────────────────────────────────────────────────────
 // POST /at/mencoes — registra uma menção vinculada a um AT
 router.post('/at/mencoes', async (req, res) => {

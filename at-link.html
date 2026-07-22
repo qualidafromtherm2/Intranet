@@ -2345,7 +2345,16 @@
     }
 
     function _htmlCelulaNfe(a) {
-      if (a.nfe_url) return _htmlVerNfe(a.nfe_url);
+      if (a.nfe_url) {
+        return (
+          '<div style="display:flex;flex-direction:column;gap:4px;align-items:flex-start;">' +
+            _htmlVerNfe(a.nfe_url) +
+            '<button type="button" class="tbl-nfe-ver-btn" style="border-color:#f59e0b;color:#fbbf24;" ' +
+              'onclick="event.stopPropagation();abrirNfeUpload(' + Number(a.id_at) + ')" title="Trocar por outra NFe">' +
+              'Trocar</button>' +
+          '</div>'
+        );
+      }
       if (_aguardaNfe(a)) {
         return '<span class="tbl-nfe-pendente" title="Use o botão Anexar NFe no topo">Aguardando</span>';
       }
