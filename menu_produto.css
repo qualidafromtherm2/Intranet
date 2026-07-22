@@ -17990,6 +17990,27 @@ html.light-mode #minhasComprasWrapper {
 /* Ficha operacional de compras: familiaridade com a Omie e prioridade para os itens. */
 
 /* Kanban de compras: densidade operacional próxima da Omie. */
+#minhasComprasWrapper {
+  --cp-bg: #f3f5f7;
+  --cp-panel: #ffffff;
+  --cp-column: #e9edf1;
+  --cp-card: #ffffff;
+  --cp-card-hover: #fbfcfd;
+  --cp-border: #d8dee5;
+  --cp-border-soft: #e5e9ee;
+  --cp-text: #18212b;
+  --cp-muted: #637080;
+  --cp-subtle: #8792a0;
+  --cp-accent: #187c6d;
+  --cp-accent-soft: #dcefe9;
+  --cp-warning: #a96714;
+  --cp-danger: #bd4141;
+  --cp-shadow: 0 8px 24px rgba(32, 45, 58, .08);
+  background: var(--cp-bg) !important;
+  color: var(--cp-text) !important;
+  color-scheme: light;
+}
+
 #minhasComprasWrapper #comprasListaToolbar.compras-workspace-toolbar {
   min-height: 56px !important;
   height: 56px !important;
