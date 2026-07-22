@@ -36271,7 +36271,6 @@ window.openRegistros = async function() {
     }
   }
 
-  // Abre o modal
   printBtn?.addEventListener('click', async e => {
     e.preventDefault(); e.stopPropagation();
     if (!etqModal) return;
@@ -55267,7 +55266,7 @@ window.renderizarCatalogoOmie = renderizarCatalogoOmie;
   document.getElementById('modalAcoesBtnExpedicao').addEventListener('click', () => {
     const {codigo, descricao, codigo_produto} = _ctx;
     fechar();
-    abrirModalMovimentacao(codigo, descricao, codigo_produto, { fluxo: 'expedicao' });
+    abrirModalExpedicaoRapida(codigo, descricao, codigo_produto);
   });
   document.getElementById('modalAcoesBtnCarrinho').addEventListener('click', () => abrirQuantidade('carrinho'));
 
@@ -79729,6 +79728,170 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
+  // Fluxo dedicado de Expedição rápida. Não compartilha a interface de Movimentações.
+  const expRapidaModal = document.getElementById('expRapidaModal');
+  const expRapidaQtd = document.getElementById('expRapidaQuantidade');
+  const expRapidaObs = document.getElementById('expRapidaObservacao');
+  const expRapidaMsg = document.getElementById('expRapidaMensagem');
+  const expRapidaEnviar = document.getElementById('expRapidaEnviarBtn');
+  const expRapidaReverter = document.getElementById('expRapidaReverterBtn');
+  let _expRapidaCtx = null;
+  let _expRapidaTransferenciaId = null;
+
+  function expRapidaMensagem(texto = '', tipo = '') {
+    if (!expRapidaMsg) return;
+    expRapidaMsg.textContent = texto;
+    expRapidaMsg.className = `exp-rapida-mensagem${tipo ? ` is-${tipo}` : ''}`;
+  }
+
+  function fecharExpedicaoRapida() {
+    if (expRapidaModal) expRapidaModal.style.display = 'none';
+    _expRapidaCtx = null;
+    _expRapidaTransferenciaId = null;
+    if (expRapidaQtd) expRapidaQtd.value = '';
+    if (expRapidaObs) expRapidaObs.value = '';
+    if (expRapidaReverter) expRapidaReverter.style.display = 'none';
+    expRapidaMensagem();
+  }
+
+  function numeroExpedicaoRapida(valor) {
+    const texto = String(valor || '').trim().replace(',', '.');
+    if (!/^\d+(?:\.\d+)?$/.test(texto)) return null;
+    const numero = Number(texto);
+    return Number.isFinite(numero) && numero > 0 ? numero : null;
+  }
+
+  async function carregarSaldoExpedicaoRapida(codigo) {
+    const saldoEl = document.getElementById('expRapidaSaldo');
+    if (saldoEl) saldoEl.textContent = 'Carregando…';
+    try {
+      const resp = await fetch('/api/logistica/estoque/batch?codigos=' + encodeURIComponent(codigo), { credentials: 'include' });
+      const json = await resp.json().catch(() => ({}));
+      if (!resp.ok) throw new Error(json.error || 'Falha ao carregar saldo.');
+      const locais = Array.isArray(json.dados?.[codigo]) ? json.dados[codigo] : [];
+      const origem = locais.find(local => String(local.local_codigo || '').trim() === MOVIM_EXPEDICAO_ORIGEM);
+      const saldo = Number(origem?.saldo ?? origem?.quantidade ?? 0);
+      const unidade = String(origem?.unidade || 'UN').trim();
+      if (_expRapidaCtx) _expRapidaCtx.saldo = Number.isFinite(saldo) ? saldo : 0;
+      if (saldoEl) saldoEl.textContent = `${Number.isFinite(saldo) ? saldo.toLocaleString('pt-BR') : '0'} ${unidade}`;
+    } catch (err) {
+      if (saldoEl) saldoEl.textContent = 'Indisponível';
+      expRapidaMensagem(err.message || 'Não foi possível consultar o saldo.', 'error');
+    }
+  }
+
+  window.abrirModalExpedicaoRapida = function(codigo, descricao, codigoProduto) {
+    _expRapidaCtx = { codigo, descricao: descricao || codigo, codigoProduto: codigoProduto || null, saldo: null };
+    _expRapidaTransferenciaId = null;
+    document.getElementById('expRapidaDescricao').textContent = _expRapidaCtx.descricao;
+    document.getElementById('expRapidaCodigo').textContent = `Código: ${codigo}`;
+    if (expRapidaQtd) expRapidaQtd.value = '';
+    if (expRapidaObs) expRapidaObs.value = '';
+    if (expRapidaEnviar) { expRapidaEnviar.disabled = false; expRapidaEnviar.innerHTML = '<i class="fa-solid fa-arrow-right"></i> Enviar para Expedição'; }
+    if (expRapidaReverter) expRapidaReverter.style.display = 'none';
+    expRapidaMensagem();
+    if (expRapidaModal) expRapidaModal.style.display = 'flex';
+    void carregarSaldoExpedicaoRapida(codigo);
+    setTimeout(() => expRapidaQtd?.focus(), 0);
+  };
+
+  async function enviarExpedicaoRapida() {
+    if (!_expRapidaCtx || expRapidaEnviar?.disabled) return;
+    const qtd = numeroExpedicaoRapida(expRapidaQtd?.value);
+    if (!qtd) return expRapidaMensagem('Informe uma quantidade válida maior que zero.', 'error');
+    if (Number.isFinite(_expRapidaCtx.saldo) && qtd > _expRapidaCtx.saldo) {
+      return expRapidaMensagem('A quantidade informada é maior que o saldo disponível no Estoque Máquinas.', 'error');
+    }
+
+    const solicitante = obterSolicitanteMovim();
+    if (!solicitante || solicitante === 'Usuário') return expRapidaMensagem('Não foi possível identificar o usuário logado.', 'error');
+    expRapidaEnviar.disabled = true;
+    expRapidaEnviar.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Enviando…';
+    expRapidaMensagem('Registrando transferência…', 'info');
+    try {
+      const cmc = await buscarCmcOrigem(_expRapidaCtx.codigo, MOVIM_EXPEDICAO_ORIGEM);
+      const resp = await fetch('/api/transferencias', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          origem: MOVIM_EXPEDICAO_ORIGEM,
+          destino: MOVIM_EXPEDICAO_DESTINO,
+          data_movimentacao: new Date().toISOString().slice(0, 10),
+          solicitante,
+          itens: [{
+            codigo: _expRapidaCtx.codigo,
+            descricao: _expRapidaCtx.descricao,
+            qtd,
+            cmc: cmc || null,
+            codigo_produto: _expRapidaCtx.codigoProduto,
+            codOmie: _expRapidaCtx.codigoProduto
+          }]
+        })
+      });
+      const registroJson = await resp.json().catch(() => ({}));
+      if (!resp.ok || !registroJson.ok) throw new Error(registroJson.error || registroJson.detail || 'Falha ao registrar transferência.');
+      const transferenciaId = registroJson.registros?.[0]?.id;
+      if (!transferenciaId) throw new Error('Transferência criada sem identificador.');
+
+      expRapidaMensagem('Confirmando movimentação na Omie…', 'info');
+      const respAprovar = await fetch(`/api/transferencias/${transferenciaId}/aprovar`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ aprovadoPor: solicitante, motivo: 'TRF', observacao: String(expRapidaObs?.value || '').trim() })
+      });
+      const aprovadoJson = await respAprovar.json().catch(() => ({}));
+      if (!respAprovar.ok || !aprovadoJson.ok) {
+        throw new Error(aprovadoJson.error || 'A solicitação foi registrada, mas a Omie não confirmou a transferência.');
+      }
+
+      _expRapidaTransferenciaId = transferenciaId;
+      expRapidaMensagem('Produto enviado para Expedição com sucesso.', 'success');
+      expRapidaEnviar.innerHTML = '<i class="fa-solid fa-check"></i> Enviado';
+      if (expRapidaReverter) expRapidaReverter.style.display = 'block';
+      if (Number.isFinite(_expRapidaCtx.saldo)) {
+        _expRapidaCtx.saldo -= qtd;
+        const saldoEl = document.getElementById('expRapidaSaldo');
+        if (saldoEl) saldoEl.textContent = `${_expRapidaCtx.saldo.toLocaleString('pt-BR')} UN`;
+      }
+    } catch (err) {
+      expRapidaMensagem(err.message || 'Falha ao enviar para Expedição.', 'error');
+      expRapidaEnviar.disabled = false;
+      expRapidaEnviar.innerHTML = '<i class="fa-solid fa-arrow-right"></i> Tentar novamente';
+    }
+  }
+
+  async function reverterExpedicaoRapida() {
+    if (!_expRapidaTransferenciaId || expRapidaReverter?.disabled) return;
+    const motivo = prompt('Informe o motivo da reversão:', 'Envio realizado por engano');
+    if (motivo === null) return;
+    if (String(motivo).trim().length < 5) return expRapidaMensagem('Informe um motivo com pelo menos 5 caracteres.', 'error');
+    if (!confirm('Reverter este envio e devolver o saldo ao Estoque Máquinas?')) return;
+    expRapidaReverter.disabled = true;
+    try {
+      const resp = await fetch(`/api/transferencias/${_expRapidaTransferenciaId}/reverter`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' }, credentials: 'include',
+        body: JSON.stringify({ motivo: String(motivo).trim() })
+      });
+      const json = await resp.json().catch(() => ({}));
+      if (!resp.ok || !json.ok) throw new Error(json.error || 'Falha ao reverter o envio.');
+      expRapidaReverter.style.display = 'none';
+      expRapidaMensagem('Envio revertido. O saldo retornou ao Estoque Máquinas.', 'success');
+    } catch (err) {
+      expRapidaReverter.disabled = false;
+      expRapidaMensagem(err.message || 'Falha ao reverter o envio.', 'error');
+    }
+  }
+
+  document.getElementById('expRapidaFecharBtn')?.addEventListener('click', fecharExpedicaoRapida);
+  document.getElementById('expRapidaCancelarBtn')?.addEventListener('click', fecharExpedicaoRapida);
+  expRapidaEnviar?.addEventListener('click', enviarExpedicaoRapida);
+  expRapidaReverter?.addEventListener('click', reverterExpedicaoRapida);
+  expRapidaModal?.addEventListener('click', event => { if (event.target === expRapidaModal) fecharExpedicaoRapida(); });
+  expRapidaQtd?.addEventListener('keydown', event => { if (event.key === 'Enter') void enviarExpedicaoRapida(); });
+
+  // Abre o modal completo de movimentações.
   // Abre o modal
   window.abrirModalMovimentacao = async function(codigo, descricao, codigoProduto, opcoes = {}) {
     _codigoProdutoAtual = codigo;

@@ -19,7 +19,7 @@
   referrerpolicy="no-referrer"
 />
   <!-- Seu CSS principal -->
-  <link rel="stylesheet" href="menu_produto.css?v=20260722-logistica-filtros-v1"/>
+  <link rel="stylesheet" href="menu_produto.css?v=20260722-expedicao-rapida-v2"/>
   <!-- Anti-flicker: esconde menus até as permissões serem aplicadas -->
   <style id="boot-anti-flicker">
     /* Enquanto o app não está pronto, esconde elementos sujeitos a permissões */
@@ -1475,6 +1475,51 @@
           </div>
         </div>
         <!-- ===================== FIM MODAL MOVIMENTAÇÃO ===================== -->
+        <!-- ===================== EXPEDIÇÃO RÁPIDA ===================== -->
+        <div id="expRapidaModal" class="exp-rapida-overlay" style="display:none;" role="dialog" aria-modal="true" aria-labelledby="expRapidaTitulo">
+          <div class="exp-rapida-panel">
+            <header class="exp-rapida-header">
+              <div>
+                <span class="exp-rapida-eyebrow"><i class="fa-solid fa-truck-ramp-box"></i> Expedição rápida</span>
+                <h2 id="expRapidaTitulo">Enviar produto para Expedição</h2>
+              </div>
+              <button id="expRapidaFecharBtn" type="button" class="exp-rapida-close" aria-label="Fechar Expedição rápida">
+                <i class="fa-solid fa-xmark"></i>
+              </button>
+            </header>
+            <section class="exp-rapida-produto" aria-label="Produto selecionado">
+              <strong id="expRapidaDescricao">-</strong>
+              <span id="expRapidaCodigo">-</span>
+            </section>
+            <div class="exp-rapida-rota" aria-label="Rota fixa da transferência">
+              <div><span>Origem</span><strong>Estoque Máquinas</strong></div>
+              <i class="fa-solid fa-arrow-right" aria-hidden="true"></i>
+              <div><span>Destino</span><strong>Expedição</strong></div>
+            </div>
+            <div class="exp-rapida-saldo">
+              <span>Disponível no Estoque Máquinas</span>
+              <strong id="expRapidaSaldo">Carregando…</strong>
+            </div>
+            <label class="exp-rapida-field" for="expRapidaQuantidade">
+              <span>Quantidade a enviar</span>
+              <input id="expRapidaQuantidade" type="text" inputmode="decimal" autocomplete="off" placeholder="Ex.: 12 ou 2,5">
+            </label>
+            <label class="exp-rapida-field" for="expRapidaObservacao">
+              <span>Observação <small>(opcional)</small></span>
+              <textarea id="expRapidaObservacao" rows="2" maxlength="300" placeholder="Ex.: material para o pedido 1234"></textarea>
+            </label>
+            <div id="expRapidaMensagem" class="exp-rapida-mensagem" aria-live="polite"></div>
+            <footer class="exp-rapida-actions">
+              <button id="expRapidaCancelarBtn" type="button" class="exp-rapida-btn exp-rapida-btn--secondary">Cancelar</button>
+              <button id="expRapidaEnviarBtn" type="button" class="exp-rapida-btn exp-rapida-btn--primary">
+                <i class="fa-solid fa-arrow-right"></i> Enviar para Expedição
+              </button>
+            </footer>
+            <button id="expRapidaReverterBtn" type="button" class="exp-rapida-reverter" style="display:none;">
+              <i class="fa-solid fa-rotate-left"></i> Reverter este envio
+            </button>
+          </div>
+        </div>
         <!-- Câmera: ler endereço (QR / código de barras) -->
         <div id="movimScanEnderecoModal" class="movim-scan-overlay" style="display:none;">
           <div class="movim-scan-panel">
@@ -6609,7 +6654,7 @@
           </div>
         </div>
 
-+        <!-- Painel Gráfico AT -->
+        <!-- Painel Gráfico AT -->
         <div id="sacAtGraficosPane" class="tab-pane" style="display:none;">
           <div class="content-wrapper">
             <div class="content-section" style="margin-top:0;">
@@ -12645,7 +12690,7 @@
   <script src="/public/js/at-masp-relatorio.js?v=20260718g" defer></script>
   <script src="/public/js/vendas-relatorio-gerencial.js?v=20260709a" defer></script>
   <script src="/public/js/logistica-relatorio-gerencial.js?v=20260712a" defer></script>
-  <script type="module" src="menu_produto.js?v=20260722-logistica-filtros-v1"></script>
+  <script type="module" src="menu_produto.js?v=20260722-expedicao-rapida-v2"></script>
 
   <script type="module" src="./requisicoes_omie/filtro_produto.js?v=20260718-faixa-minimo"></script>
   <script type="module" src="./requisicoes_omie/ListarProdutos.js?v=20260718-faixa-minimo"></script>
