@@ -45594,7 +45594,34 @@ async function excluirPedidoComprasKanban(btnId) {
 window.excluirPedidoComprasKanban = excluirPedidoComprasKanban;
 
 // Modal específico para "Kanban de compras" (visualização do usuário solicitante)
-function renderizarFichaCompraOmie({ tipo = 'pedido', numero = '', status = '', dados = {}, itens = [], linksHtml = '' } = {}) {
+function renderizarAcoesOperacionaisCompra(tipo = 'pedido', opcoes = {}) {
+  const ehNfe = String(tipo).toLowerCase() === 'nfe';
+  const acoes = ehNfe
+    ? [
+        ['Salvar', 'fa-cloud-arrow-up'], ['Novo recebimento', 'fa-circle-plus'], ['Concluir', 'fa-bolt'],
+        ['Exibir DANFE do fornecedor', 'fa-barcode', opcoes.danfeUrl], ['Exibir XML da NF-e', 'fa-file-code'],
+        ['Manifestação da NF-e', 'fa-paper-plane'], ['Acessar no Portal Omie', 'fa-arrow-up-right-from-square'],
+        ['Histórico de processamento', 'fa-list'], ['Anexos', 'fa-paperclip'],
+        ['Histórico de alterações', 'fa-clock-rotate-left'], ['Excluir', 'fa-trash-can']
+      ]
+    : [
+        ['Salvar', 'fa-cloud-arrow-up'], ['Novo pedido de compra', 'fa-circle-plus'], ['Concluir', 'fa-bolt'],
+        ['Exibir pedido na Omie', 'fa-arrow-up-right-from-square'], ['Histórico de processamento', 'fa-list'],
+        ['Anexos', 'fa-paperclip'], ['Histórico de alterações', 'fa-clock-rotate-left'], ['Excluir', 'fa-trash-can', '', 'header']
+      ];
+
+  return `<aside class="cp-sheet-actions" aria-label="Ações do documento">
+    <div class="cp-sheet-actions-title"><span>Ações</span><small>Integrações previstas</small></div>
+    ${acoes.map(([rotulo, icone, href, modo]) => href
+      ? `<a class="cp-sheet-action is-ready" href="${escapeHtml(href)}" target="_blank" rel="noopener"><i class="fa-solid ${icone}"></i><span>${rotulo}</span><small>Disponível</small></a>`
+      : modo === 'header'
+        ? `<div class="cp-sheet-action is-ready"><i class="fa-solid ${icone}"></i><span>${rotulo}</span><small>No cabeçalho</small></div>`
+        : `<button class="cp-sheet-action is-planned" type="button" disabled title="Aguardando implementação do backend"><i class="fa-solid ${icone}"></i><span>${rotulo}</span><small>A construir</small></button>`
+    ).join('')}
+  </aside>`;
+}
+
+function renderizarFichaCompraOmie({ tipo = 'pedido', numero = '', status = '', dados = {}, itens = [], linksHtml = '', acoesHtml = '' } = {}) {
   const valorSeguro = (valor, fallback = '-') => {
     const texto = String(valor ?? '').trim();
     return escapeHtml(texto && texto.toLowerCase() !== 'null' ? texto : fallback);
@@ -45676,7 +45703,7 @@ function renderizarFichaCompraOmie({ tipo = 'pedido', numero = '', status = '', 
       </section>
       <section class="cp-sheet-note"><i class="fa-regular fa-note-sticky"></i><div><span>Objetivo da compra</span><strong>${valorSeguro(objetivo)}</strong></div></section>
       ${linksHtml ? `<section class="cp-sheet-links"><span>Anexos e links</span><div>${linksHtml}</div></section>` : ''}
-    </main></div>
+    </main>${acoesHtml || renderizarAcoesOperacionaisCompra(tipo)}</div>
   `;
 }
 
@@ -65307,11 +65334,15 @@ function renderTabelaItensModalNfePedidos(itens = []) {
       <td style="padding:8px;font-size:12px;color:#334155;text-align:center;">${escapeHtml(String(item?.cUnidadeNfe || '-'))}</td>
       <td style="padding:8px;font-size:12px;color:#334155;text-align:right;">${Number.isFinite(Number(item?.nPrecoUnit)) ? Number(item.nPrecoUnit).toLocaleString('pt-BR', { minimumFractionDigits: 4, maximumFractionDigits: 6 }) : '-'}</td>
       <td style="padding:8px;font-size:12px;color:#334155;text-align:right;">${Number.isFinite(Number(item?.nQtdeNFe)) ? Number(item.nQtdeNFe).toLocaleString('pt-BR') : '-'}</td>
+      <td class="cp-nfe-planned-cell"><span>A construir</span><small>Associação do produto</small></td>
       <td style="padding:8px;font-size:12px;color:#334155;">${escapeHtml(String(item?.cCFOPEntrada || '-'))}</td>
       <td style="padding:8px;font-size:12px;color:#334155;line-height:1.4;">
         ${escapeHtml(String(item?.cCFOPDescricao || '-'))}
         ${item?.cCFOP ? `<div style="font-size:11px;color:#64748b;margin-top:2px;">CFOP item: ${escapeHtml(String(item.cCFOP))}</div>` : ''}
       </td>
+      <td class="cp-nfe-planned-cell"><span>A construir</span><small>Categoria</small></td>
+      <td class="cp-nfe-planned-cell"><span>A construir</span><small>Estoque</small></td>
+      <td class="cp-nfe-planned-cell"><span>A construir</span><small>Conta a pagar</small></td>
     </tr>
   `).join('');
 
@@ -65326,8 +65357,12 @@ function renderTabelaItensModalNfePedidos(itens = []) {
             <th style="padding:8px;text-align:center;font-size:12px;color:#334155;">Unid.</th>
             <th style="padding:8px;text-align:right;font-size:12px;color:#334155;">Preço Unit.</th>
             <th style="padding:8px;text-align:right;font-size:12px;color:#334155;">Qtd NF-e</th>
+            <th style="padding:8px;text-align:left;font-size:12px;color:#334155;">Situação</th>
             <th style="padding:8px;text-align:left;font-size:12px;color:#334155;">CFOP Entrada</th>
             <th style="padding:8px;text-align:left;font-size:12px;color:#334155;">Descrição CFOP (item)</th>
+            <th style="padding:8px;text-align:left;font-size:12px;color:#334155;">Categoria</th>
+            <th style="padding:8px;text-align:left;font-size:12px;color:#334155;">Movimenta estoque</th>
+            <th style="padding:8px;text-align:left;font-size:12px;color:#334155;">Gera conta a pagar</th>
           </tr>
         </thead>
         <tbody>${linhas}</tbody>
@@ -65341,6 +65376,7 @@ function criarModalNfePedidosSeNecessario() {
 
   const modal = document.createElement('div');
   modal.id = 'modalNfePedidos';
+  modal.className = 'cp-detail-modal cp-detail-modal--nfe';
   modal.style.display = 'none';
   modal.style.position = 'fixed';
   modal.style.inset = '0';
@@ -65348,32 +65384,40 @@ function criarModalNfePedidosSeNecessario() {
   modal.style.zIndex = '10045';
   modal.style.alignItems = 'center';
   modal.style.justifyContent = 'center';
-  modal.style.padding = '18px';
 
   modal.innerHTML = `
-    <div style="width:min(1020px,100%);max-height:92vh;overflow:auto;background:#ffffff;border-radius:12px;box-shadow:0 20px 50px rgba(2,6,23,.35);border:1px solid #d1d5db;overflow:hidden;">
-      <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 16px;border-bottom:1px solid #e5e7eb;background:#f8fafc;">
-        <strong style="font-size:15px;color:#0f172a;display:flex;align-items:center;gap:8px;">
-          <i class="fa-solid fa-file-invoice-dollar" style="color:#92400e;"></i>
-          <span>NFe dos pedidos</span>
+    <div class="cp-detail-shell cp-purchase-sheet cp-nfe-sheet">
+      <div class="cp-detail-header">
+        <strong>
+          <i class="fa-solid fa-file-invoice-dollar"></i>
+          <span>Recebimento NF-e Nº</span>
           <span id="modalNfePedidosNumero" style="color:#92400e;"></span>
         </strong>
-        <div style="display:flex;align-items:center;gap:8px;">
+        <div class="cp-detail-header-actions">
           <span id="modalNfePedidosNavInfo" style="font-size:12px;color:#64748b;min-width:36px;text-align:center;">0/0</span>
-          <button type="button" id="modalNfePedidosProximo" style="border:1px solid #cbd5e1;background:#ffffff;color:#334155;font-size:12px;cursor:pointer;border-radius:6px;padding:6px 10px;display:inline-flex;align-items:center;gap:6px;">
+          <button type="button" id="modalNfePedidosProximo" class="cp-detail-next">
             Próximo
             <i class="fa-solid fa-arrow-right"></i>
           </button>
-          <button type="button" id="modalNfePedidosFechar" style="border:none;background:transparent;color:#475569;font-size:18px;cursor:pointer;">
+          <button type="button" id="modalNfePedidosFechar" class="modal-close" aria-label="Fechar recebimento da NF-e">
             <i class="fa-solid fa-xmark"></i>
           </button>
         </div>
       </div>
-
-      <div style="padding:16px;display:flex;flex-direction:column;gap:12px;">
-        <div id="modalNfePedidosInfo" style="display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px;"></div>
-        <div id="modalNfePedidosCfopInfo"></div>
-        <div id="modalNfePedidosItens"></div>
+      <div class="cp-nfe-layout">
+        <main class="cp-nfe-main">
+          <div id="modalNfePedidosInfo" class="cp-nfe-info"></div>
+          <nav class="cp-nfe-tabs" aria-label="Seções do recebimento">
+            <button type="button" class="is-active">Itens da NF-e</button>
+            ${['Transporte','Totais','Parcelas','Departamentos','Informações adicionais','Observações'].map(label => `<button type="button" disabled title="Aguardando implementação do backend">${label}<small>A construir</small></button>`).join('')}
+          </nav>
+          <div id="modalNfePedidosCfopInfo" class="cp-nfe-cfop"></div>
+          <section class="cp-nfe-items-section">
+            <div class="cp-nfe-import-guidance"><strong>Itens recebidos do fornecedor</strong><span>Associação de produtos, situação fiscal e movimentações serão integradas pelo backend.</span></div>
+            <div id="modalNfePedidosItens"></div>
+          </section>
+        </main>
+        <div id="modalNfePedidosAcoes"></div>
       </div>
     </div>
   `;
@@ -65470,14 +65514,21 @@ async function abrirModalNfePedidos(nIdReceb, numeroNfeRef = '') {
   const infoEl = document.getElementById('modalNfePedidosInfo');
   const cfopInfoEl = document.getElementById('modalNfePedidosCfopInfo');
   const itensEl = document.getElementById('modalNfePedidosItens');
-  if (!numeroEl || !infoEl || !cfopInfoEl || !itensEl) return;
+  const acoesEl = document.getElementById('modalNfePedidosAcoes');
+  if (!numeroEl || !infoEl || !cfopInfoEl || !itensEl || !acoesEl) return;
 
+  const limiteMenu = Math.max(
+    Number(document.querySelector('.left-side')?.getBoundingClientRect()?.right) || 0,
+    Number(document.getElementById('sidebarContent')?.getBoundingClientRect()?.right) || 0
+  );
+  modal.style.setProperty('--cp-detail-nav-offset', `${Math.max(0, Math.round(limiteMenu))}px`);
   modal.style.display = 'flex';
-  numeroEl.textContent = numeroNfeRef ? `• ${numeroNfeRef}` : '';
+  numeroEl.textContent = numeroNfeRef || '';
   configurarNavegacaoModalNfePedidos(nIdReceb, numeroNfeRef);
   infoEl.innerHTML = '<div style="grid-column:1/-1;font-size:13px;color:#64748b;">Carregando dados da NF-e na Omie...</div>';
   cfopInfoEl.innerHTML = '';
   itensEl.innerHTML = '';
+  acoesEl.innerHTML = renderizarAcoesOperacionaisCompra('nfe');
 
   try {
     const resp = await fetch(`/api/compras/recebimentos-nfe/detalhes/${encodeURIComponent(String(nIdReceb || ''))}`, {
@@ -65497,8 +65548,9 @@ async function abrirModalNfePedidos(nIdReceb, numeroNfeRef = '') {
       : '';
     if (cNumeroNFe) {
       const numeroLimpo = cNumeroNFe.replace(/^0+/, '') || cNumeroNFe;
-      numeroEl.textContent = `• ${numeroLimpo}`;
+      numeroEl.textContent = numeroLimpo;
     }
+    acoesEl.innerHTML = renderizarAcoesOperacionaisCompra('nfe', { danfeUrl: linkPdfPorNumeroNfe });
 
     const chaveNfeTexto = String(dados?.cChaveNFe || '-');
     const chaveNfeHtml = (linkPdfPorNumeroNfe && chaveNfeTexto !== '-')

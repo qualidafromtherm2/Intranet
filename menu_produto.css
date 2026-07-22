@@ -17167,7 +17167,7 @@ html.light-mode #minhasComprasWrapper {
 #modalDetalhesPedidoCompras .cp-sheet-loading i { margin-bottom: 7px; color: #cf493f; font-size: 28px; }
 #modalDetalhesPedidoCompras .cp-sheet-loading strong { color: #273142; font-size: 14px; font-weight: 650; }
 #modalDetalhesPedidoCompras .cp-sheet-loading span { color: #667085; font-size: 12px; }
-.cp-sheet-layout { height: 100%; min-height: 100%; display: grid; background: #fff; }
+.cp-sheet-layout { height: 100%; min-height: 100%; display: grid; grid-template-columns:minmax(0,1fr) 250px; background: #fff; }
 .cp-sheet-main { min-width: 0; min-height: 0; height: 100%; padding: 14px 18px 12px; display: flex; flex-direction: column; overflow: hidden; }
 .cp-sheet-summary { display: grid; grid-template-columns: 52px minmax(0, 1fr); gap: 12px; align-items: start; max-width: 1080px; }
 .cp-sheet-avatar { width: 46px; height: 46px; display: grid; place-items: center; border-radius: 6px; background: #f1b44c; color: #fff; font-size: 18px; }
@@ -17197,16 +17197,63 @@ html.light-mode #minhasComprasWrapper {
 .cp-sheet-record-count { margin-top: auto; padding: 10px; color: #667085; font-size: 11px; }
 .cp-sheet-note, .cp-sheet-links { width: min(760px, 100%); margin-top: 8px; padding: 7px 10px; display: flex; align-items: flex-start; gap: 10px; background: #fff8d8; color: #5e4a13; border-radius: 5px; }
 .cp-sheet-note strong, .cp-sheet-links div { color: #4b5563; font-size: 12px; font-weight: 550; }
+.cp-sheet-actions { min-width:0; padding:14px 10px; overflow-y:auto; background:#f4fbfc; border-left:1px solid #d7e2e6; }
+.cp-sheet-actions-title { margin:0 6px 10px; padding-bottom:9px; border-bottom:1px solid #d7e2e6; }
+.cp-sheet-actions-title span { display:block; color:#334155; font-size:12px; font-weight:700; }
+.cp-sheet-actions-title small { color:#64748b; font-size:10px; }
+.cp-sheet-action { width:100%; min-height:38px; padding:7px 8px; display:grid; grid-template-columns:18px minmax(0,1fr) auto; align-items:center; gap:7px; color:#a53c36; background:transparent; border:0; border-radius:5px; text-align:left; text-decoration:none; }
+.cp-sheet-action i { text-align:center; }
+.cp-sheet-action > span { font-size:12px; font-weight:550; }
+.cp-sheet-action small { padding:2px 5px; border-radius:999px; font-size:9px; white-space:nowrap; }
+.cp-sheet-action.is-ready:hover { background:#fff; }
+.cp-sheet-action.is-ready small { color:#067647; background:#dcfae6; }
+.cp-sheet-action.is-planned { color:#7c8798; cursor:not-allowed; opacity:1; }
+.cp-sheet-action.is-planned small { color:#8a4d16; background:#fff3d6; }
+
+.cp-detail-modal--nfe { left:var(--cp-detail-nav-offset, 0px) !important; right:0 !important; width:auto !important; padding:18px !important; }
+.cp-detail-modal--nfe .cp-nfe-sheet { width:min(1880px,98vw) !important; height:min(900px,94vh) !important; max-width:none !important; max-height:none !important; display:grid !important; grid-template-rows:58px minmax(0,1fr); overflow:hidden !important; border-radius:8px !important; background:#fff !important; }
+.cp-detail-modal--nfe .cp-detail-header { min-height:58px; padding:0 18px; display:flex; align-items:center; justify-content:space-between; background:#fff; border-bottom:1px solid #e2e8f0; }
+.cp-detail-modal--nfe .cp-detail-header > strong { display:flex; align-items:center; gap:8px; color:#a53c36; font-size:18px; }
+.cp-detail-modal--nfe .cp-detail-header > strong i { color:#d04f45; font-size:17px; }
+.cp-detail-modal--nfe .cp-detail-header-actions { display:flex; align-items:center; gap:7px; }
+.cp-detail-modal--nfe .modal-close { position:static !important; width:34px; height:34px; padding:0; display:grid; place-items:center; color:#64748b; background:transparent; border:0; font-size:18px; }
+.cp-detail-next { min-height:34px; padding:0 11px; display:inline-flex; align-items:center; gap:6px; color:#334155; background:#fff; border:1px solid #cbd5e1; border-radius:5px; font-size:12px; }
+.cp-nfe-layout { min-height:0; display:grid; grid-template-columns:minmax(0,1fr) 250px; }
+.cp-nfe-main { min-width:0; min-height:0; padding:12px 14px; display:flex; flex-direction:column; overflow:hidden; }
+.cp-nfe-info { display:grid !important; grid-template-columns:repeat(6,minmax(0,1fr)) !important; gap:7px !important; }
+.cp-nfe-info > div { min-height:55px; padding:7px 8px !important; background:#fff !important; border:0 !important; border-bottom:1px solid #cbd5e1 !important; border-radius:0 !important; }
+.cp-nfe-info > div:last-child { min-height:40px; }
+.cp-nfe-tabs { margin-top:10px; display:flex; overflow-x:auto; border-bottom:1px solid #cbd5e1; }
+.cp-nfe-tabs button { min-height:38px; padding:6px 10px; display:flex; align-items:center; gap:5px; color:#667085; background:transparent; border:0; border-bottom:2px solid transparent; font-size:11px; white-space:nowrap; }
+.cp-nfe-tabs button.is-active { color:#a53c36; border-bottom-color:#d04f45; font-weight:700; }
+.cp-nfe-tabs button:disabled { opacity:1; cursor:not-allowed; }
+.cp-nfe-tabs small { padding:2px 4px; color:#8a4d16; background:#fff3d6; border-radius:999px; font-size:8px; }
+.cp-nfe-cfop { margin-top:8px; }
+.cp-nfe-cfop > div { padding:7px 9px !important; border-radius:5px !important; }
+.cp-nfe-items-section { min-height:0; margin-top:8px; flex:1 1 auto; display:flex; flex-direction:column; overflow:hidden; }
+.cp-nfe-import-guidance { padding:7px 9px; display:flex; align-items:center; justify-content:space-between; gap:12px; background:#fff8d8; color:#5e4a13; font-size:11px; }
+.cp-nfe-import-guidance span { color:#667085; }
+#modalNfePedidosItens { min-height:0; flex:1 1 auto; }
+#modalNfePedidosItens > div { height:100%; max-height:none !important; border-radius:0 0 5px 5px !important; }
+.cp-nfe-planned-cell { min-width:120px; padding:7px 8px; color:#64748b; }
+.cp-nfe-planned-cell span { display:inline-block; padding:2px 5px; color:#8a4d16; background:#fff3d6; border-radius:999px; font-size:9px; }
+.cp-nfe-planned-cell small { display:block; margin-top:3px; font-size:9px; }
 
 @media (max-width: 900px) {
   #modalDetalhesPedidoCompras.cp-detail-modal { left: 0 !important; padding: 0 !important; }
   #modalDetalhesPedidoCompras .cp-detail-body { overflow: auto !important; }
   #modalDetalhesPedidoCompras .cp-purchase-sheet { width: 100vw !important; height: 100dvh !important; border: 0 !important; border-radius: 0 !important; }
   .cp-sheet-main { height: auto; min-height: 100%; padding: 16px 12px; overflow: visible; }
+  .cp-sheet-layout, .cp-nfe-layout { grid-template-columns:1fr; }
+  .cp-sheet-actions { border-top:1px solid #d7e2e6; border-left:0; }
   .cp-sheet-summary { grid-template-columns: 48px minmax(0, 1fr); gap: 10px; }
   .cp-sheet-fields { grid-template-columns: 1fr 1fr; gap: 12px; }
   .cp-sheet-field--wide { grid-column: 1 / -1; }
   .cp-sheet-totals { margin: 16px 0 10px; grid-template-columns: 1fr 1fr; gap: 10px; }
   .cp-sheet-totals > div { padding: 5px; border-right: 0; text-align: left; }
   .cp-sheet-items { min-height: 240px; }
+  .cp-detail-modal--nfe { left:0 !important; padding:0 !important; }
+  .cp-detail-modal--nfe .cp-nfe-sheet { width:100vw !important; height:100dvh !important; border-radius:0 !important; }
+  .cp-nfe-main { overflow:auto; }
+  .cp-nfe-info { grid-template-columns:1fr 1fr !important; }
 }
