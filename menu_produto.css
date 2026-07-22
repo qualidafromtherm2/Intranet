@@ -18011,6 +18011,91 @@ html.light-mode #minhasComprasWrapper {
   color-scheme: light;
 }
 
+/*
+ * Compras mantém a superfície operacional clara mesmo quando o shell está
+ * escuro. Estas regras neutralizam os antigos catch-alls globais do tema que
+ * recolorem fundos brancos inline com !important.
+ */
+:root:not(.light-mode) #minhasComprasWrapper {
+  background: #f3f4f6 !important;
+  color: #18212b !important;
+}
+
+:root:not(.light-mode) #minhasComprasWrapper .compras-board-overview {
+  background: #ffffff !important;
+  color: #18212b !important;
+  border-color: #e5e7eb !important;
+}
+
+:root:not(.light-mode) #minhasComprasWrapper .compras-board-tab,
+:root:not(.light-mode) #minhasComprasWrapper .compras-board-metrics > span {
+  background: #f8fafc !important;
+  color: #526173 !important;
+  border-color: #e2e8f0 !important;
+}
+
+:root:not(.light-mode) #minhasComprasWrapper .compras-board-tab.is-active,
+:root:not(.light-mode) #minhasComprasWrapper .compras-board-metrics strong {
+  color: #18212b !important;
+}
+
+:root:not(.light-mode) #minhasComprasWrapper #kanbanMinhasSolicitacoes {
+  background: #f3f4f6 !important;
+}
+
+:root:not(.light-mode) #minhasComprasWrapper #kanbanMinhasSolicitacoes .kanban-column-minhas {
+  background: #e9edf1 !important;
+  color: #18212b !important;
+  border-color: #d8dee5 !important;
+}
+
+:root:not(.light-mode) #minhasComprasWrapper #kanbanMinhasSolicitacoes .kanban-column-minhas > div:first-child {
+  background: #fff8f6 !important;
+  border-color: #e5e9ee !important;
+}
+
+:root:not(.light-mode) #minhasComprasWrapper #kanbanMinhasSolicitacoes .kanban-column-minhas h3,
+:root:not(.light-mode) #minhasComprasWrapper #kanbanMinhasSolicitacoes .kanban-column-minhas h3 i {
+  color: #334155 !important;
+}
+
+:root:not(.light-mode) #minhasComprasWrapper #kanbanMinhasSolicitacoes .kanban-card,
+:root:not(.light-mode) #minhasComprasWrapper #kanbanMinhasSolicitacoes .kanban-card[style*="background"] {
+  background: #ffffff !important;
+  color: #18212b !important;
+  border-color: #e5e9ee !important;
+}
+
+:root:not(.light-mode) #minhasComprasWrapper #kanbanMinhasSolicitacoes .kanban-card .cp-card-number,
+:root:not(.light-mode) #minhasComprasWrapper #kanbanMinhasSolicitacoes .kanban-card .cp-card-supplier,
+:root:not(.light-mode) #minhasComprasWrapper #kanbanMinhasSolicitacoes .kanban-card .cp-card-summary,
+:root:not(.light-mode) #minhasComprasWrapper #kanbanMinhasSolicitacoes .kanban-card span[style*="color:#374151"],
+:root:not(.light-mode) #minhasComprasWrapper #kanbanMinhasSolicitacoes .kanban-card div[style*="color:#374151"] {
+  color: #18212b !important;
+}
+
+:root:not(.light-mode) #minhasComprasWrapper #kanbanMinhasSolicitacoes .kanban-card .cp-card-dates {
+  background: #fff5cc !important;
+  color: #526173 !important;
+}
+
+:root:not(.light-mode) #minhasComprasWrapper #kanbanMinhasSolicitacoes .kanban-card .cp-card-requester {
+  background: #e7f4fb !important;
+  color: #315e87 !important;
+}
+
+:root:not(.light-mode) #minhasComprasWrapper #kanbanMinhasSolicitacoes .kanban-card .cp-card-summary {
+  background: #ffffff !important;
+  color: #18212b !important;
+  border-color: #e5e9ee !important;
+}
+
+:root:not(.light-mode) #minhasComprasWrapper #kanbanMinhasSolicitacoes .kanban-card button[aria-label="Expandir"] {
+  background: #f1f5f9 !important;
+  color: #475569 !important;
+  border-color: #d8dee5 !important;
+}
+
 #minhasComprasWrapper #comprasListaToolbar.compras-workspace-toolbar {
   min-height: 56px !important;
   height: 56px !important;
