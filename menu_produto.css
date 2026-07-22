@@ -18113,6 +18113,8 @@ html.light-mode #minhasComprasWrapper {
 #minhasComprasWrapper[data-board-view="todos"] #kanbanMinhasSolicitacoes .kanban-column-minhas {
   display: flex !important;
   flex-direction: column !important;
+  flex: 0 0 304px !important;
+  min-width: 304px !important;
   height: 100% !important;
   max-height: 100% !important;
   align-self: stretch !important;
@@ -18152,7 +18154,7 @@ html.light-mode #minhasComprasWrapper {
   grid-template-columns: auto minmax(0, 1fr);
   column-gap: 6px;
   min-height: 0 !important;
-  padding: 3px 6px !important;
+  padding: 4px 7px !important;
 }
 
 #minhasComprasWrapper #kanbanMinhasSolicitacoes .cp-card-context {
@@ -18167,7 +18169,7 @@ html.light-mode #minhasComprasWrapper {
 
 #minhasComprasWrapper #kanbanMinhasSolicitacoes .cp-card-number {
   grid-column: 1;
-  margin-bottom: 1px !important;
+  margin-bottom: 2px !important;
   padding: 0 22px 0 0 !important;
   font-size: 10px !important;
   line-height: 1.15 !important;
@@ -18175,7 +18177,7 @@ html.light-mode #minhasComprasWrapper {
 
 #minhasComprasWrapper #kanbanMinhasSolicitacoes .cp-card-supplier {
   grid-column: 2;
-  margin: 0 0 1px !important;
+  margin: 0 0 2px !important;
   padding: 0 !important;
   font-size: 11px !important;
   line-height: 1.2 !important;
@@ -18190,15 +18192,15 @@ html.light-mode #minhasComprasWrapper {
   flex-direction: row !important;
   flex-wrap: wrap !important;
   gap: 1px 6px !important;
-  margin: 0 !important;
-  padding: 0 !important;
+  margin: 0 0 1px !important;
+  padding: 1px 0 !important;
   font-size: 9px !important;
   line-height: 1.15 !important;
 }
 
 #minhasComprasWrapper #kanbanMinhasSolicitacoes .cp-card-requester {
   grid-column: 1 / -1;
-  margin: 0 !important;
+  margin: 0 0 1px !important;
   padding: 0 !important;
   font-size: 9px !important;
   line-height: 1.15 !important;
@@ -18206,9 +18208,9 @@ html.light-mode #minhasComprasWrapper {
 
 #minhasComprasWrapper #kanbanMinhasSolicitacoes .cp-card-summary {
   grid-column: 1 / -1;
-  min-height: 16px !important;
+  min-height: 18px !important;
   margin: 0 !important;
-  padding: 0 !important;
+  padding: 1px 0 0 !important;
   font-size: 11px !important;
   line-height: 1.15 !important;
 }
