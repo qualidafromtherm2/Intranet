@@ -17580,6 +17580,12 @@ body.mobile-modal-open {
     font-size: 1.05rem;
   }
 }
+/*
+ * Tema legado de compras preservado apenas como referência histórica.
+ * Ele entrou pela branch de logística e, por estar no fim do arquivo com
+ * vários !important, sobrescrevia o redesign Omie entregue pela PR #74.
+ */
+@media not all {
 /* Compras workspace: operational, calm and intentionally dense. */
 #minhasComprasWrapper {
   --cp-bg: #101318;
@@ -17979,6 +17985,7 @@ html.light-mode #minhasComprasWrapper {
     scroll-behavior: auto !important;
     transition-duration: .01ms !important;
   }
+}
 }
 /* Ficha operacional de compras: familiaridade com a Omie e prioridade para os itens. */
 #modalDetalhesPedidoCompras.cp-detail-modal {
