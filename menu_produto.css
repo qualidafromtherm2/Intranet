@@ -17306,3 +17306,53 @@ html.light-mode #minhasComprasWrapper {
   .cp-nfe-document-meta { margin:10px 0 0; grid-template-columns:1fr 1fr; }
   .cp-nfe-note { margin-left:0; }
 }
+
+/* Compras: contraste operacional das ações em todos os painéis de detalhe. */
+#modalDetalhesPedidoCompras .cp-sheet-actions,
+#modalNfePedidos .cp-sheet-actions { background:#f4fbfc !important; color:#334155 !important; }
+#modalDetalhesPedidoCompras .cp-sheet-actions-title span,
+#modalNfePedidos .cp-sheet-actions-title span { color:#26323d !important; opacity:1 !important; }
+#modalDetalhesPedidoCompras .cp-sheet-actions-title small,
+#modalNfePedidos .cp-sheet-actions-title small { color:#526579 !important; opacity:1 !important; }
+#modalDetalhesPedidoCompras .cp-sheet-action > span,
+#modalNfePedidos .cp-sheet-action > span { color:#64748b !important; opacity:1 !important; }
+#modalDetalhesPedidoCompras .cp-sheet-action > i,
+#modalNfePedidos .cp-sheet-action > i { color:#7c8798 !important; opacity:1 !important; }
+#modalDetalhesPedidoCompras .cp-sheet-action.is-ready > span,
+#modalNfePedidos .cp-sheet-action.is-ready > span { color:#a53c36 !important; font-weight:650 !important; }
+#modalDetalhesPedidoCompras .cp-sheet-action.is-ready > i,
+#modalNfePedidos .cp-sheet-action.is-ready > i { color:#c34237 !important; }
+#modalDetalhesPedidoCompras .cp-sheet-action small,
+#modalNfePedidos .cp-sheet-action small { opacity:1 !important; }
+
+/* Preparação do pedido legado no mesmo padrão claro e compacto dos detalhes Omie. */
+#modalDetalhesPedidoCompras.cp-purchase-preparation-modal .cp-detail-body {
+  padding:12px 14px 16px !important; overflow:auto !important;
+  background:#f4f6f8 !important; color:#26323d !important;
+}
+#modalDetalhesPedidoCompras.cp-purchase-preparation-modal #modalPedidoBody > div {
+  border:1px solid #d8dee8 !important; border-radius:6px !important;
+  background:#fff !important; box-shadow:none !important;
+}
+#modalDetalhesPedidoCompras.cp-purchase-preparation-modal #modalPedidoBody [style*="background:#f0fdf4"],
+#modalDetalhesPedidoCompras.cp-purchase-preparation-modal #modalPedidoBody [style*="background:#eff6ff"],
+#modalDetalhesPedidoCompras.cp-purchase-preparation-modal #modalPedidoBody [style*="background:#f8fafc"],
+#modalDetalhesPedidoCompras.cp-purchase-preparation-modal #modalPedidoBody [style*="background:#f9fafb"],
+#modalDetalhesPedidoCompras.cp-purchase-preparation-modal #modalPedidoBody [style*="background:#ffffff"] {
+  background:#fff !important; border-color:#d8dee8 !important; box-shadow:none !important;
+}
+#modalDetalhesPedidoCompras.cp-purchase-preparation-modal #modalPedidoBody [style*="background:#f9fafb"] * {
+  color:#334155 !important; opacity:1 !important;
+}
+#modalDetalhesPedidoCompras.cp-purchase-preparation-modal #modalPedidoBody [style*="color:#1f2937"],
+#modalDetalhesPedidoCompras.cp-purchase-preparation-modal #modalPedidoBody [style*="color:#374151"] { color:#26323d !important; opacity:1 !important; }
+#modalDetalhesPedidoCompras.cp-purchase-preparation-modal #modalPedidoBody [style*="color:#6b7280"] { color:#526579 !important; opacity:1 !important; }
+#modalDetalhesPedidoCompras.cp-purchase-preparation-modal #modalPedidoBody [style*="color:#047857"],
+#modalDetalhesPedidoCompras.cp-purchase-preparation-modal #modalPedidoBody [style*="color:#1e40af"] { color:#a53c36 !important; }
+#modalDetalhesPedidoCompras.cp-purchase-preparation-modal #modalPedidoBody input,
+#modalDetalhesPedidoCompras.cp-purchase-preparation-modal #modalPedidoBody select,
+#modalDetalhesPedidoCompras.cp-purchase-preparation-modal #modalPedidoBody textarea {
+  background:#fff !important; border-color:#b8c4d1 !important; color:#26323d !important;
+}
+#modalDetalhesPedidoCompras.cp-purchase-preparation-modal #modalPedidoBody input::placeholder,
+#modalDetalhesPedidoCompras.cp-purchase-preparation-modal #modalPedidoBody textarea::placeholder { color:#7c8798 !important; }

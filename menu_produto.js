@@ -43643,6 +43643,8 @@ async function abrirModalDetalhesPedidoCompras(numeroPedido) {
   
   if (!modal || !modalBody || !modalTitulo) return;
 
+  modal.classList.add('cp-purchase-preparation-modal');
+
   renderizarNavegacaoModalKanban({ modalId: 'modalDetalhesPedidoCompras', status: '', currentItemId: '', openType: '' });
   
   modalBody.innerHTML = '<div style="text-align:center;padding:40px;"><i class="fa-solid fa-spinner fa-spin" style="font-size:32px;color:#3b82f6;"></i><br><br>Carregando...</div>';
@@ -43711,9 +43713,15 @@ async function abrirModalDetalhesPedidoCompras(numeroPedido) {
     };
     
     // Verifica se pelo menos um item está em "aguardando compra" para mostrar dados da compra
-    const temItemAguardandoCompra = itensPedido.some(item =>
-      ['aguardando compra', 'aguardando compra preparação'].includes(String(item.status || '').trim().toLowerCase())
-    );
+    const ehStatusPreparacaoPedido = (status) => {
+      const normalizado = String(status || '')
+        .trim()
+        .toLowerCase()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '');
+      return ['aguardando compra', 'aguardando compra preparacao', 'requisicao'].includes(normalizado);
+    };
+    const temItemAguardandoCompra = itensPedido.some(item => ehStatusPreparacaoPedido(item.status));
     
     let html = `
       <!-- Informações do Pedido -->
@@ -44711,7 +44719,7 @@ async function abrirModalDetalhesPedidoCompras(numeroPedido) {
         }
         
         // Configura autocomplete e campos para itens em "aguardando compra"
-        if (['aguardando compra', 'aguardando compra preparação'].includes(String(item.status || '').trim().toLowerCase())) {
+        if (ehStatusPreparacaoPedido(item.status)) {
           console.log('[MODAL] Configurando campos para pedido:', item.numero_pedido);
           console.log('[MODAL] Fornecedores disponíveis:', window.fornecedoresCache?.length || 0);
           setupFornecedorAutocompleteModal(item.numero_pedido);
@@ -45755,6 +45763,7 @@ async function abrirModalDetalhesPedidoMinhas(numeroPedido, statusColuna, itemId
   const modalTitulo = document.getElementById('modalPedidoTitulo');
   
   if (!modal || !modalBody || !modalTitulo) return;
+  modal.classList.remove('cp-purchase-preparation-modal');
   
   const limiteMenu = Math.max(
     Number(document.querySelector('.left-side')?.getBoundingClientRect()?.right) || 0,
