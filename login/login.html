@@ -214,15 +214,18 @@ label:has(#rememberMe) {
         <div class="perfil-dados" style="text-align:left;margin:12px auto 0;max-width:280px;">
           <p><strong>Cargo:</strong> <span id="uiCargo">—</span></p>
           <p><strong>Setor:</strong> <span id="uiSetor">—</span></p>
-          <p><strong>Email:</strong> <span id="uiEmail">—</span></p>
-          <p><strong>Conta Google:</strong> <span id="uiContaGoogle">Não conectada</span></p>
+          <div style="margin-top:8px;">
+            <label for="uiEmailInput" style="display:block;font-size:13px;margin-bottom:4px;">
+              <strong>Email (recebe avisos)</strong>
+            </label>
+            <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
+              <input id="uiEmailInput" type="email" placeholder="seu@email.com"
+                     style="flex:1;min-width:160px;padding:6px 8px;border-radius:6px;border:1px solid rgba(255,255,255,.35);background:rgba(0,0,0,.2);color:inherit;font-size:13px;" />
+              <button id="btnSalvarEmail" type="button" class="ghost" style="padding:6px 10px;font-size:12px;">Salvar</button>
+            </div>
+            <p id="uiEmailStatus" style="font-size:11px;opacity:.85;margin:4px 0 0;">Avisos de reunião chegam neste e-mail.</p>
+          </div>
         </div>
-
-        <div style="display:flex;align-items:center;justify-content:center;gap:8px;flex-wrap:wrap;margin:10px 0 4px;">
-          <button id="profileGoogleCalendarConectarBtn" type="button" class="ghost" style="padding:6px 10px;font-size:12px;">Conectar Google</button>
-          <button id="profileGoogleCalendarDesconectarBtn" type="button" class="ghost" style="display:none;padding:6px 10px;font-size:12px;">Desconectar Google</button>
-        </div>
-        <p id="profileGoogleCalendarStatus" style="font-size:12px;opacity:.85;margin-top:0;text-align:center;">Verificando conexão com Google...</p>
 
         <!-- Versão em produção (PR#) — para conferir se está na última atualização -->
         <p id="uiVersaoApp" title="Versão do sistema em produção"

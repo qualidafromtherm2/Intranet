@@ -4376,7 +4376,28 @@ app.post('/api/rh/reservas', async (req, res) => {
       }
     }
 
-    return res.json({ ok: true, ids: [reservaId], googleAgenda });
+    let emailAviso = null;
+    try {
+      const { notificarNovaReserva } = require('./utils/reservasEmail');
+      emailAviso = await notificarNovaReserva({
+        id: reservaId,
+        tipo: tipoEspaco,
+        tema,
+        data: dataReserva,
+        inicio: horaInicio,
+        fim: horaFim,
+        cafe,
+        descricao,
+        visitantes,
+        linkReuniao,
+        participantes,
+        criadoPor: userLogado
+      });
+    } catch (errEmail) {
+      console.error('[API] /api/rh/reservas POST e-mail aviso falhou:', errEmail?.message || errEmail);
+    }
+
+    return res.json({ ok: true, ids: [reservaId], googleAgenda, emailAviso });
   } catch (err) {
     try { await client.query('ROLLBACK'); } catch {}
     console.error('[API] /api/rh/reservas POST erro:', err);
@@ -40732,6 +40753,8 @@ async function startServer() {
       iniciarCronNotificacaoDiaria();
       const { iniciarCronTurnoDiaAutomatico } = require('./cron/turno_dia_automatico');
       iniciarCronTurnoDiaAutomatico();
+      const { iniciarCronLembreteReservasEmail } = require('./cron/lembrete_reservas_email');
+      iniciarCronLembreteReservasEmail();
     }, 15000);
   });
 }

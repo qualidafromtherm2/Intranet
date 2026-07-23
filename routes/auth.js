@@ -131,6 +131,40 @@ router.post('/first-password', async (req, res) => {
 });
 
 
+// PUT /auth/meu-email — usuário logado altera o e-mail que recebe avisos
+router.put('/meu-email', async (req, res) => {
+  try {
+    const userId = req.session?.user?.id;
+    if (!userId) {
+      return res.status(401).json({ error: 'Não autenticado' });
+    }
+
+    const emailRaw = String(req.body?.email || '').trim().toLowerCase();
+    if (!emailRaw) {
+      return res.status(400).json({ error: 'Informe um e-mail' });
+    }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailRaw)) {
+      return res.status(400).json({ error: 'E-mail inválido' });
+    }
+
+    await pool.query(
+      `UPDATE public.auth_user
+          SET email = $1, updated_at = NOW()
+        WHERE id = $2`,
+      [emailRaw, userId]
+    );
+
+    if (req.session.user) {
+      req.session.user.email = emailRaw;
+    }
+
+    return res.json({ ok: true, email: emailRaw });
+  } catch (err) {
+    console.error('[auth/meu-email]', err);
+    return res.status(500).json({ error: 'Falha ao atualizar e-mail' });
+  }
+});
+
 router.get('/status', (req, res) => {
   const finish = (user) => res.json({ loggedIn: !!user, user: user || null });
 

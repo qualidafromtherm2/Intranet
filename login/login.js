@@ -250,8 +250,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   const uiSetor        = overlay.querySelector('#uiSetor');
   const uiNomeCompleto = overlay.querySelector('#uiNomeCompleto');
   const uiUsername     = overlay.querySelector('#uiUsername');
-  const uiEmail        = overlay.querySelector('#uiEmail');
-  const uiContaGoogle  = overlay.querySelector('#uiContaGoogle');
+  const uiEmailInput   = overlay.querySelector('#uiEmailInput');
+  const btnSalvarEmail = overlay.querySelector('#btnSalvarEmail');
+  const uiEmailStatus  = overlay.querySelector('#uiEmailStatus');
   const uiVersaoApp    = overlay.querySelector('#uiVersaoApp');
 
   /* Mostra a versão em produção (PR# + commit) para conferir atualização.
@@ -304,113 +305,52 @@ document.addEventListener('DOMContentLoaded', async () => {
   const profilePhotoPlaceholder = overlay.querySelector('#profilePhotoPlaceholder');
   const profilePhotoInput = overlay.querySelector('#profilePhotoInput');
   const profilePhotoStatus = overlay.querySelector('#profilePhotoStatus');
-  const profileGoogleConectarBtn = overlay.querySelector('#profileGoogleCalendarConectarBtn');
-  const profileGoogleDesconectarBtn = overlay.querySelector('#profileGoogleCalendarDesconectarBtn');
-  const profileGoogleStatus = overlay.querySelector('#profileGoogleCalendarStatus');
 
-  let profileGoogleCalendarState = {
-    configured: false,
-    connected: false,
-    email: null,
-    carregado: false
-  };
-
-  function atualizarUiGoogleCalendarPerfil() {
-    if (!uiContaGoogle || !profileGoogleStatus || !profileGoogleConectarBtn || !profileGoogleDesconectarBtn) return;
-
-    if (!profileGoogleCalendarState.carregado) {
-      uiContaGoogle.textContent = 'Não conectada';
-      profileGoogleStatus.textContent = 'Verificando conexão com Google...';
-      profileGoogleConectarBtn.style.display = '';
-      profileGoogleDesconectarBtn.style.display = 'none';
+  async function salvarEmailPerfil() {
+    if (!uiEmailInput || !btnSalvarEmail) return;
+    const email = String(uiEmailInput.value || '').trim().toLowerCase();
+    if (!email) {
+      if (uiEmailStatus) uiEmailStatus.textContent = 'Informe um e-mail.';
+      return;
+    }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      if (uiEmailStatus) uiEmailStatus.textContent = 'E-mail inválido.';
       return;
     }
 
-    if (!profileGoogleCalendarState.configured) {
-      uiContaGoogle.textContent = profileGoogleCalendarState.email || 'Não conectada';
-      profileGoogleStatus.textContent = 'Integração Google não configurada no servidor.';
-      profileGoogleConectarBtn.style.display = 'none';
-      profileGoogleDesconectarBtn.style.display = 'none';
-      return;
-    }
-
-    if (profileGoogleCalendarState.connected) {
-      uiContaGoogle.textContent = profileGoogleCalendarState.email || 'Conectada';
-      profileGoogleStatus.textContent = profileGoogleCalendarState.email
-        ? `Conta vinculada: ${profileGoogleCalendarState.email}`
-        : 'Conta Google conectada.';
-      profileGoogleConectarBtn.style.display = 'none';
-      profileGoogleDesconectarBtn.style.display = '';
-      return;
-    }
-
-    uiContaGoogle.textContent = profileGoogleCalendarState.email || 'Não conectada';
-    profileGoogleStatus.textContent = 'Conta Google não conectada.';
-    profileGoogleConectarBtn.style.display = '';
-    profileGoogleDesconectarBtn.style.display = 'none';
-  }
-
-  async function carregarStatusGoogleCalendarPerfil(force = false) {
-    if (profileGoogleCalendarState.carregado && !force) {
-      atualizarUiGoogleCalendarPerfil();
-      return profileGoogleCalendarState;
-    }
-
+    btnSalvarEmail.disabled = true;
+    if (uiEmailStatus) uiEmailStatus.textContent = 'Salvando...';
     try {
-      const resp = await fetch('/api/google-calendar/status', { credentials: 'include' });
-      if (!resp.ok) {
-        throw new Error(`Falha ao consultar status do Google Calendar (${resp.status})`);
-      }
-      const payload = await resp.json();
-      profileGoogleCalendarState = {
-        configured: payload?.configured !== false,
-        connected: !!payload?.connected,
-        email: payload?.email || payload?.contaGoogle || null,
-        carregado: true
-      };
-    } catch (err) {
-      console.warn('[Perfil] Não foi possível consultar status Google Calendar:', err);
-      profileGoogleCalendarState = {
-        configured: false,
-        connected: false,
-        email: null,
-        carregado: false
-      };
-    }
-
-    atualizarUiGoogleCalendarPerfil();
-    return profileGoogleCalendarState;
-  }
-
-  function conectarGoogleCalendarPerfil() {
-    const returnTo = window.location.pathname + window.location.search + window.location.hash;
-    window.location.href = `/api/google-calendar/connect?returnTo=${encodeURIComponent(returnTo)}`;
-  }
-
-  async function desconectarGoogleCalendarPerfil() {
-    if (!confirm('Deseja desconectar a conta Google deste usuário?')) return;
-    try {
-      const resp = await fetch('/api/google-calendar/disconnect', {
-        method: 'POST',
-        credentials: 'include'
+      const resp = await fetch(`${BASE}/api/auth/meu-email`, {
+        method: 'PUT',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email })
       });
+      const data = await resp.json().catch(() => ({}));
       if (!resp.ok) {
-        const payload = await resp.json().catch(() => ({}));
-        throw new Error(payload?.error || `Erro ao desconectar (${resp.status})`);
+        throw new Error(data.error || `Erro ao salvar (${resp.status})`);
       }
-
-      profileGoogleCalendarState = {
-        configured: true,
-        connected: false,
-        email: null,
-        carregado: true
-      };
-      atualizarUiGoogleCalendarPerfil();
+      if (uiEmailInput) uiEmailInput.value = data.email || email;
+      if (uiEmailStatus) uiEmailStatus.textContent = 'E-mail salvo. Avisos de reunião chegarão aqui.';
       window.dispatchEvent(new Event('auth:changed'));
-      alert('Conta Google desconectada com sucesso.');
     } catch (err) {
-      alert(`Não foi possível desconectar a conta Google: ${err.message}`);
+      if (uiEmailStatus) uiEmailStatus.textContent = err.message || 'Falha ao salvar e-mail.';
+    } finally {
+      btnSalvarEmail.disabled = false;
     }
+  }
+
+  if (btnSalvarEmail) {
+    btnSalvarEmail.addEventListener('click', salvarEmailPerfil);
+  }
+  if (uiEmailInput) {
+    uiEmailInput.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Enter') {
+        ev.preventDefault();
+        salvarEmailPerfil();
+      }
+    });
   }
 
   /* =========================================================
@@ -439,25 +379,17 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (uiUsername)     uiUsername.textContent = u.username ? `@${u.username}` : '';
         if (uiCargo)        uiCargo.textContent = u.funcao_nome || '—';
         if (uiSetor)        uiSetor.textContent = u.setor || '—';
-        if (uiEmail)        uiEmail.textContent = u.email || '—';
+        if (uiEmailInput)   uiEmailInput.value = u.email || '';
+        if (uiEmailStatus)  uiEmailStatus.textContent = 'Avisos de reunião chegam neste e-mail.';
         loadProfilePhoto(u.id);
         // Atualiza também o profile-icon do header usando o foto_perfil_url do objeto
         updateHeaderProfileIconFromUser(u);
-        profileGoogleCalendarState.carregado = false;
-        await carregarStatusGoogleCalendarPerfil(true);
         carregarVersaoApp();
       }
 
     } catch (err) {
       console.warn('[loadUserInfo]', err);
     }
-  }
-
-  if (profileGoogleConectarBtn) {
-    profileGoogleConectarBtn.addEventListener('click', conectarGoogleCalendarPerfil);
-  }
-  if (profileGoogleDesconectarBtn) {
-    profileGoogleDesconectarBtn.addEventListener('click', desconectarGoogleCalendarPerfil);
   }
   
   /* =========================================================

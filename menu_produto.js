@@ -484,7 +484,7 @@ function _solRenderIdsFifoHtml(idsFifo, unidade) {
       style="margin-top:6px;width:100%;padding:5px 8px;border:none;border-radius:6px;background:#059669;color:#ecfdf5;font-size:.68rem;font-weight:700;cursor:pointer;">
       <i class="fa-solid fa-qrcode" style="margin-right:4px;"></i>Ler próxima etiqueta
     </button>
-    <button type="button" class="btn-sem-leitura-etq" title="Consome automaticamente os menores IDs, sem escanear"
+    <button type="button" class="btn-sem-leitura-etq" title="Ignora o ID: tira a quantidade do endereço (soma de todos os registros), sem escanear"
       style="margin-top:5px;width:100%;padding:5px 8px;border:1px solid #475569;border-radius:6px;background:#1e293b;color:#cbd5e1;font-size:.66rem;font-weight:700;cursor:pointer;">
       <i class="fa-solid fa-forward" style="margin-right:4px;"></i>Sem leitura
     </button>
@@ -1900,6 +1900,17 @@ async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) 
       : `Em Separação — ${nSolicHdr}`;
   const isFaseSeparacao = origemStatus === 'Em Separação' || origemStatus === 'Separado';
 
+  function _solQtyEfetivaSepRow(row) {
+    const qtyTotal = parseFloat(row?.dataset?.qtyTotal || '0') || 0;
+    const qtySepReg = parseFloat(row?.dataset?.qtySepReg || '');
+    const qtyOrigReg = parseFloat(row?.dataset?.qtyOrig || '');
+    if (Number.isFinite(qtySepReg) && Number.isFinite(qtyOrigReg)
+      && Math.abs(qtyOrigReg - qtySepReg) > 0.0001) {
+      return qtySepReg;
+    }
+    return qtyTotal;
+  }
+
   function _solSepPayloadFromRow(row) {
     const cod = String(row.dataset.origemCod || '').trim();
     const base = {
@@ -1907,27 +1918,29 @@ async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) 
       codigo_produto: row.dataset.codigo || undefined
     };
     if (!row || row.dataset.requerEtq !== '1' || cod !== PRINC_ARMZ) return base;
+    const semLeitura = row.dataset.etqSemLeitura === '1';
     let alocs = [];
     try { alocs = JSON.parse(row.dataset.etqAlocacoes || '[]'); } catch (_) { alocs = []; }
     if (!Array.isArray(alocs) || !alocs.length) {
-      const calc = _solAplicarVisualAlocacaoEtq(row, parseFloat(row.dataset.qtyTotal || '0') || 0);
+      const calc = _solAplicarVisualAlocacaoEtq(row, _solQtyEfetivaSepRow(row));
       alocs = (calc?.alocs || []).filter(a => a.tirar > 0);
     }
     if (alocs.length) {
       return {
         ...base,
         etq_enderecos: alocs.map(a => ({
-          etq_id: a.id ? parseInt(a.id, 10) : undefined,
+          // Sem leitura: só endereço — backend debita FIFO no endereço (ignora ID)
+          etq_id: (!semLeitura && a.id) ? parseInt(a.id, 10) : undefined,
           endereco: a.endereco || undefined,
           qtd: Number(a.tirar) || 0
         })),
-        etq_id: alocs[0].id ? parseInt(alocs[0].id, 10) : undefined,
+        etq_id: (!semLeitura && alocs[0].id) ? parseInt(alocs[0].id, 10) : undefined,
         endereco_origem: alocs[0].endereco || undefined
       };
     }
     return {
       ...base,
-      etq_id: row.dataset.etqId ? parseInt(row.dataset.etqId, 10) : undefined,
+      etq_id: (!semLeitura && row.dataset.etqId) ? parseInt(row.dataset.etqId, 10) : undefined,
       endereco_origem: row.dataset.etqEndereco || undefined
     };
   }
@@ -1955,23 +1968,36 @@ async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) 
     const codOrigem = String(row.dataset.origemCod || '').trim();
     if (codOrigem !== PRINC_ARMZ) return true;
     const qtd = parseFloat(qty);
-    const calc = _solAplicarVisualAlocacaoEtq(row, Number.isFinite(qtd) ? qtd : (parseFloat(row.dataset.qtyTotal || '0') || 0));
+    const calc = _solAplicarVisualAlocacaoEtq(row, Number.isFinite(qtd) ? qtd : _solQtyEfetivaSepRow(row));
     const selecoes = _solLerSelecoesEtq(row);
+    const semLeitura = row.dataset.etqSemLeitura === '1';
     if (!selecoes.length) {
-      alert('Leia o QR das etiquetas (IDs) na ordem do menor para o maior antes de separar.');
+      alert(semLeitura
+        ? 'Selecione o endereço de origem (ou use "Sem leitura") antes de separar.'
+        : 'Leia o QR das etiquetas (IDs) na ordem do menor para o maior antes de separar.');
       return false;
     }
-    const semId = selecoes.filter(s => !String(s.id || '').trim());
-    if (semId.length) {
-      alert('Leia o QR Code da etiqueta (ID) antes de separar.');
-      return false;
+    if (semLeitura) {
+      const semEnd = selecoes.filter(s => !String(s.endereco || '').trim());
+      if (semEnd.length) {
+        alert('Selecione o endereço de origem no Porta Pallet.');
+        return false;
+      }
+    } else {
+      const semId = selecoes.filter(s => !String(s.id || '').trim());
+      if (semId.length) {
+        alert('Leia o QR Code da etiqueta (ID) antes de separar.');
+        return false;
+      }
     }
     if (!Number.isFinite(qtd) || qtd <= 0) return true;
     if (calc && calc.remaining > 1e-9) {
       const cod = row.dataset.codigo || 'item';
-      alert(
-        `Item ${cod}: os IDs lidos somam ${_solFmtQty(calc.totalTirar)}, ` +
-        `mas são necessários ${_solFmtQty(qtd)}. Use "Ler próxima etiqueta".`
+      alert(semLeitura
+        ? `Item ${cod}: o saldo nos endereços cobre ${_solFmtQty(calc.totalTirar)}, ` +
+          `mas são necessários ${_solFmtQty(qtd)}. Toque em outro endereço ou marque "Permitir sem saldo".`
+        : `Item ${cod}: os IDs lidos somam ${_solFmtQty(calc.totalTirar)}, ` +
+          `mas são necessários ${_solFmtQty(qtd)}. Use "Ler próxima etiqueta".`
       );
       return false;
     }
@@ -2339,7 +2365,16 @@ async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) 
 
   async function _abrirLeituraFifoDoRow(row) {
     if (!row) return;
-    const qty = parseFloat(row.dataset.qtyTotal || '0') || 0;
+    // Volta ao modo com leitura de ID
+    row.dataset.etqSemLeitura = '0';
+    const btnSem = row.querySelector('.btn-sem-leitura-etq');
+    if (btnSem) {
+      btnSem.style.background = '#1e293b';
+      btnSem.style.borderColor = '#475569';
+      btnSem.style.color = '#cbd5e1';
+      btnSem.innerHTML = '<i class="fa-solid fa-forward" style="margin-right:4px;"></i>Sem leitura';
+    }
+    const qty = _solQtyEfetivaSepRow(row);
     const codigo = row.dataset.codigo || '';
     const unidade = row.dataset.unidade || 'UN';
     const idsEsperados = _idsFifoDoItem({ codigo_produto: codigo }, qty);
@@ -2397,46 +2432,65 @@ async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) 
     });
   }
 
-  /* "Sem leitura": consome automaticamente os menores IDs (FIFO), sem escanear.
-     Paliativo até os IDs físicos estarem organizados nos produtos. */
+  /* "Sem leitura": ignora ID — tira a qtd do saldo do endereço (soma de todos os registros). */
   function _aplicarSemLeituraDoRow(row) {
     if (!row) return;
-    const qty = parseFloat(row.dataset.qtyTotal || '0') || 0;
-    const codigo = row.dataset.codigo || '';
-    const idsEsperados = _idsFifoDoItem({ codigo_produto: codigo }, qty);
-    if (!idsEsperados.length) {
-      alert('Não há IDs com saldo no Porta Pallet para este produto.');
+    const qty = _solQtyEfetivaSepRow(row);
+    const unidade = row.dataset.unidade || 'UN';
+    const enderecosDom = [...row.querySelectorAll('.sep-etq-endereco-row')]
+      .map(el => ({
+        endereco: String(el.dataset.etqEndereco || '').trim(),
+        saldo: Math.max(0, parseFloat(el.dataset.etqQtd) || 0)
+      }))
+      .filter(e => e.endereco && e.saldo > 0);
+    if (!enderecosDom.length) {
+      alert('Não há endereço com saldo no Porta Pallet para este produto.');
       return;
     }
-    let selecoes = _solLerSelecoesEtq(row);
-    const lidos = new Set(selecoes.map(s => Number(s.id)).filter(Boolean));
-    const pendentes = idsEsperados.filter(e => !lidos.has(Number(e.id)));
-    const falta = Math.max(0, qty - selecoes.reduce((s, a) => s + (Number(a.tirar) || 0), 0));
-    if (!pendentes.length || falta <= 1e-9) {
-      alert('Quantidade já completa com os IDs lidos.');
+
+    const prev = _solLerSelecoesEtq(row);
+    const prevEnds = new Set(prev.map(s => String(s.endereco || '').trim()).filter(Boolean));
+    const ordenados = [
+      ...enderecosDom.filter(e => prevEnds.has(e.endereco)),
+      ...enderecosDom.filter(e => !prevEnds.has(e.endereco))
+    ];
+    const seen = new Set();
+    const uniq = [];
+    for (const e of ordenados) {
+      if (seen.has(e.endereco)) continue;
+      seen.add(e.endereco);
+      uniq.push(e);
+    }
+
+    let remaining = qty;
+    const selecoes = [];
+    for (const e of uniq) {
+      if (remaining <= 1e-9) break;
+      // Sem id e sem tirar fixo → alocação usa o saldo total do endereço
+      selecoes.push({ id: '', endereco: e.endereco, saldo: e.saldo });
+      remaining = Math.max(0, remaining - e.saldo);
+    }
+
+    if ((!selecoes.length || remaining > 1e-9) && !_modalSepIgnorarSaldoEtq()) {
+      alert(
+        `Saldo nos endereços (${_solFmtQty(qty - remaining)} ${unidade}) é menor que a quantidade a separar (${_solFmtQty(qty)} ${unidade}). ` +
+        `Marque "Permitir sem saldo no endereço" ou escolha outro endereço.`
+      );
       return;
     }
+    if (!selecoes.length && uniq[0]) {
+      selecoes.push({ id: '', endereco: uniq[0].endereco, saldo: uniq[0].saldo });
+    }
+
     if (!confirm(
-      `Dar baixa SEM leitura?\n\nO sistema vai consumir automaticamente os menores IDs:\n` +
-      pendentes.map(p => `• ID ${p.id} → ${_solFmtQty(p.tirar)} ${p.unidade || 'UN'}`).join('\n')
+      `Dar baixa SEM leitura de ID?\n\n` +
+      `O sistema vai tirar ${_solFmtQty(qty)} ${unidade} do endereço (sem limitar ao ID):\n` +
+      selecoes.map(s => `• ${s.endereco} · até ${_solFmtQty(s.saldo)} ${unidade}`).join('\n')
     )) return;
-    for (const p of pendentes) {
-      selecoes.push({
-        id: String(p.id),
-        endereco: String(p.endereco || ''),
-        saldo: Number(p.qtd) || 0,
-        tirar: Number(p.tirar) || 0
-      });
-    }
+
+    row.dataset.etqSemLeitura = '1';
     row.dataset.etqSelecoes = JSON.stringify(selecoes);
     _solAplicarVisualAlocacaoEtq(row, qty);
-    _marcarIdsLidosNaLista(row, selecoes);
-    // Marca o endereço do Porta Pallet como selecionado visualmente
-    row.querySelectorAll('.sep-etq-endereco-row').forEach(el => {
-      el.dataset.selected = '1';
-      el.style.borderColor = '#22c55e';
-      el.style.background = '#1a2e1a';
-    });
     const btnSem = row.querySelector('.btn-sem-leitura-etq');
     if (btnSem) {
       btnSem.style.background = '#14532d';
@@ -3189,6 +3243,7 @@ async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) 
         row.dataset.etqQtd = '';
         row.dataset.etqSelecoes = '[]';
         row.dataset.etqAlocacoes = '[]';
+        row.dataset.etqSemLeitura = '0';
         row.querySelectorAll('.sep-etq-endereco-row').forEach(el => {
           el.style.borderColor = '#854d0e33';
           el.style.background = '#1a1508';
@@ -3207,12 +3262,27 @@ async function _abrirModalSeparacao(grupoAtual, gruposConflito, preloaded = {}) 
       const endereco = String(btnEtq.dataset.etqEndereco || '').trim();
       if (!endereco) return;
 
+      // Modo "Baixa sem leitura": só marca/desmarca o endereço (sem ID / sem QR)
+      if (row.dataset.etqSemLeitura === '1') {
+        let selecoes = _solLerSelecoesEtq(row);
+        const jaNoEndereco = selecoes.some(s => String(s.endereco || '').trim() === endereco);
+        if (jaNoEndereco) {
+          selecoes = selecoes.filter(s => String(s.endereco || '').trim() !== endereco);
+        } else {
+          const saldo = Math.max(0, parseFloat(btnEtq.dataset.etqQtd) || 0);
+          selecoes.push({ id: '', endereco, saldo });
+        }
+        row.dataset.etqSelecoes = JSON.stringify(selecoes);
+        _solAplicarVisualAlocacaoEtq(row, _solQtyEfetivaSepRow(row));
+        return;
+      }
+
       let selecoes = _solLerSelecoesEtq(row);
       const jaNoEndereco = selecoes.filter(s => String(s.endereco || '').trim() === endereco);
       if (jaNoEndereco.length) {
         selecoes = selecoes.filter(s => String(s.endereco || '').trim() !== endereco);
         row.dataset.etqSelecoes = JSON.stringify(selecoes);
-        const qty = parseFloat(row.dataset.qtyTotal || '0') || 0;
+        const qty = _solQtyEfetivaSepRow(row);
         _solAplicarVisualAlocacaoEtq(row, qty);
         return;
       }
