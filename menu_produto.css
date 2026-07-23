@@ -18469,9 +18469,20 @@ html.light-mode #minhasComprasWrapper {
 }
 
 #minhasComprasWrapper #comprasListaToolbar.compras-workspace-toolbar {
+  align-items: center !important;
   min-height: 38px !important;
   height: 38px !important;
   padding: 2px 0 !important;
+  box-sizing: border-box;
+  overflow: visible;
+}
+
+#minhasComprasWrapper .compras-toolbar-main,
+#minhasComprasWrapper .compras-toolbar-actions {
+  align-items: center !important;
+  align-self: center;
+  min-height: 0;
+  height: 32px;
 }
 
 #minhasComprasWrapper .compras-workspace-title strong {
@@ -18492,6 +18503,7 @@ html.light-mode #minhasComprasWrapper {
   width: 28px !important;
   height: 28px !important;
   min-width: 28px;
+  margin: 0 !important;
   border-radius: 6px !important;
 }
 
