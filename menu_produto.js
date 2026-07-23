@@ -42971,53 +42971,6 @@ document.getElementById('modalConfigResponsavelCategoria')?.addEventListener('cl
 
 // Binds dos botões de filtro de kanbans
 
-// Botão toggle para filtrar por solicitante (Minhas / Todas)
-document.getElementById('comprasToggleSolicitanteBtn')?.addEventListener('click', async () => {
-  const btn = document.getElementById('comprasToggleSolicitanteBtn');
-  const textElement = document.getElementById('comprasToggleSolicitanteText');
-  const iconElement = btn?.querySelector('i');
-
-  if (!btn || !textElement) return;
-
-  try {
-    // Alterna o filtro entre 'minhas' e 'todas'
-    const filtroAtual = window.kanbanFiltroSolicitante || 'minhas';
-    const novoFiltro = filtroAtual === 'minhas' ? 'todas' : 'minhas';
-
-    // Salva a preferência
-    window.kanbanFiltroSolicitante = novoFiltro;
-
-    // Atualiza o texto e ícone do botão
-    if (novoFiltro === 'todas') {
-      textElement.textContent = 'Todas';
-      if (iconElement) iconElement.className = 'fa-solid fa-users';
-      btn.style.background = 'linear-gradient(135deg,#3b82f6 0%,#2563eb 100%)';
-    } else {
-      textElement.textContent = 'Minhas';
-      if (iconElement) iconElement.className = 'fa-solid fa-user';
-      btn.style.background = 'linear-gradient(135deg,#8b5cf6 0%,#7c3aed 100%)';
-    }
-
-    // Feedback visual durante carregamento
-    const originalText = textElement.textContent;
-    textElement.textContent = '...';
-    btn.disabled = true;
-
-    // Recarrega os dados com o novo filtro (loadMinhasSolicitacoes já exibe a view correta)
-    await loadMinhasSolicitacoes();
-
-    // Restaura o botão com o texto atualizado (minhas ou todas)
-    const filtroFinal = window.kanbanFiltroSolicitante || 'minhas';
-    textElement.textContent = filtroFinal === 'todas' ? 'Todas' : 'Minhas';
-    btn.disabled = false;
-
-  } catch (err) {
-    console.error('[Kanban] Erro ao alternar filtro de solicitante:', err);
-    alert('Erro ao alternar filtro. Tente novamente.');
-    btn.disabled = false;
-  }
-});
-
 document.getElementById('comprasAtualizarKanbansBtn')?.addEventListener('click', async () => {
   const btn = document.getElementById('comprasAtualizarKanbansBtn');
   if (!btn) return;
@@ -43073,7 +43026,6 @@ document.getElementById('comprasAtualizarKanbansBtn')?.addEventListener('click',
 });
 
 document.getElementById('comprasFiltroKanbanBtn')?.addEventListener('click', () => {
-  fecharModalComprasAcoes();
   abrirModalFiltroKanbans();
 });
 document.getElementById('comprasVarrerFaturadasBtn')?.addEventListener('click', () => {
@@ -59146,7 +59098,7 @@ async function salvarPreferenciasKanbans() {
     fecharModalFiltroKanbans();
 
     // Feedback visual
-    const btn = document.querySelector('[onclick="abrirModalFiltroKanbans()"]');
+    const btn = document.getElementById('comprasFiltroKanbanBtn');
     if (btn) {
       const originalBg = btn.style.background;
       btn.style.background = '#10b981';
@@ -59196,7 +59148,9 @@ function aplicarFiltroKanbans() {
     // 1. Se o kanban não está na lista de visíveis: oculta
     // 2. Se está na lista de visíveis mas tem 0 itens e "mostrarVazios" está desativado: oculta
     // 3. Caso contrário: mostra
-    coluna.style.display = deveExibirKanbanPorFiltro(statusNormalizado, count) ? '' : 'none';
+    const deveExibir = deveExibirKanbanPorFiltro(statusNormalizado, count);
+    coluna.classList.toggle('is-hidden-by-config', !deveExibir);
+    coluna.setAttribute('aria-hidden', deveExibir ? 'false' : 'true');
   });
 }
 
@@ -61295,6 +61249,7 @@ window.__comprasKanbanCardsCache = window.__comprasKanbanCardsCache || {};
 window.__comprasKanbanLimites = window.__comprasKanbanLimites || {};
 window.__comprasKanbanFiltroAtual = '';
 window.__comprasKanbanOrdenarPrevisao = false;
+window.__comprasOcultarNotasKeepers = localStorage.getItem('comprasOcultarNotasKeepers') === '1';
 window.__comprasKanbanCfopsSelecionados = new Set(
   JSON.parse(localStorage.getItem('comprasKanbanCfops') || '[]').map(valor => String(valor || '').trim()).filter(Boolean)
 );
@@ -61334,6 +61289,9 @@ function renderizarPaginaColunaCompras(status, textoFiltro = '') {
   let cardsFiltrados = filtro.length >= 3
     ? cache.filter(card => card.texto.includes(filtro))
     : cache;
+  if (status === 'faturada pelo fornecedor' && window.__comprasOcultarNotasKeepers) {
+    cardsFiltrados = cardsFiltrados.filter(card => !card.fornecedor.includes('keepers'));
+  }
   if (status === 'faturada pelo fornecedor' && window.__comprasKanbanCfopsSelecionados.size > 0) {
     cardsFiltrados = cardsFiltrados.filter(card =>
       card.cfops.some(cfop => window.__comprasKanbanCfopsSelecionados.has(cfop))
@@ -61352,6 +61310,9 @@ function renderizarPaginaColunaCompras(status, textoFiltro = '') {
   );
   const cardsVisiveis = cardsFiltrados.slice(0, limite);
   const restantes = Math.max(0, cardsFiltrados.length - cardsVisiveis.length);
+  const contador = coluna.querySelector('.kanban-count-minhas');
+  if (contador) contador.textContent = String(cardsFiltrados.length);
+  if (typeof atualizarResumoComprasKanban === 'function') atualizarResumoComprasKanban();
 
   if (!cardsVisiveis.length) {
     container.innerHTML = `<div class="cp-kanban-empty">${filtro.length >= 3 ? 'Nenhum resultado' : 'Nenhum item'}</div>`;
@@ -61391,6 +61352,29 @@ function alternarOrdenacaoPrevisaoCompras() {
 }
 
 window.alternarOrdenacaoPrevisaoCompras = alternarOrdenacaoPrevisaoCompras;
+
+function atualizarBotaoNotasKeepersCompras() {
+  const botao = document.getElementById('comprasOcultarKeepersBtn');
+  if (!botao) return;
+  const ocultando = window.__comprasOcultarNotasKeepers;
+  botao.classList.toggle('is-active', ocultando);
+  botao.setAttribute('aria-pressed', String(ocultando));
+  botao.title = ocultando ? 'Voltar a exibir notas da Keepers' : 'Ocultar notas da Keepers';
+  const texto = botao.querySelector('span');
+  if (texto) texto.textContent = ocultando ? 'Exibir notas da Keepers' : 'Ocultar notas da Keepers';
+  const icone = botao.querySelector('i');
+  if (icone) icone.className = ocultando ? 'fa-solid fa-eye' : 'fa-solid fa-eye-slash';
+}
+
+function alternarNotasKeepersCompras() {
+  window.__comprasOcultarNotasKeepers = !window.__comprasOcultarNotasKeepers;
+  localStorage.setItem('comprasOcultarNotasKeepers', window.__comprasOcultarNotasKeepers ? '1' : '0');
+  atualizarBotaoNotasKeepersCompras();
+  window.__comprasKanbanLimites['faturada pelo fornecedor'] = COMPRAS_CARDS_POR_PAGINA;
+  renderizarPaginaColunaCompras('faturada pelo fornecedor', window.__comprasKanbanFiltroAtual);
+}
+
+window.alternarNotasKeepersCompras = alternarNotasKeepersCompras;
 
 function alternarMenuCfopCompras(event) {
   event?.stopPropagation();
@@ -67105,7 +67089,8 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
 
     // Aplica filtro por solicitante se filtroSolicitante não for 'todas'
     // Variável global controla se mostra apenas do usuário logado ou todas
-    const filtroSolicitante = window.kanbanFiltroSolicitante || 'minhas';
+    const filtroSolicitante = 'todas';
+    window.kanbanFiltroSolicitante = 'todas';
 
     if (filtroSolicitante === 'minhas') {
       // Filtra apenas itens onde o solicitante é o usuário logado
@@ -68096,14 +68081,18 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
           return {
             html: htmlCard,
             texto: normalizarTextoBuscaCompras(`${chaveGrupo} ${JSON.stringify(itensGrupo)}`),
+            fornecedor: normalizarTextoBuscaCompras(primeiroItem.fornecedor_nome || ''),
             previsaoTs,
             cfops: obterCfopsCardCompras(primeiroItem)
           };
         });
         window.__comprasKanbanCardsCache[status] = cardsRenderizados;
         window.__comprasKanbanLimites[status] = COMPRAS_CARDS_POR_PAGINA;
-        totalCardsColuna = cardsRenderizados.length;
-        const cardsIniciais = cardsRenderizados.slice(0, COMPRAS_CARDS_POR_PAGINA);
+        const cardsDisponiveis = status === 'faturada pelo fornecedor' && window.__comprasOcultarNotasKeepers
+          ? cardsRenderizados.filter(card => !card.fornecedor.includes('keepers'))
+          : cardsRenderizados;
+        totalCardsColuna = cardsDisponiveis.length;
+        const cardsIniciais = cardsDisponiveis.slice(0, COMPRAS_CARDS_POR_PAGINA);
         const restantesIniciais = Math.max(0, totalCardsColuna - cardsIniciais.length);
         cardsHtml = cardsIniciais.map(card => card.html).join('') + (restantesIniciais > 0 ? `
           <button type="button" class="cp-load-more" onclick="mostrarMais50CardsCompras('${String(status).replace(/'/g, "\\'")}')">
@@ -68233,7 +68222,7 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
               <i class="fa-solid ${cor.icon}" style="margin-right:6px;color:${cor.bg};"></i>
               ${tituloExibir}
             </h3>
-            <span class="kanban-count-minhas" style="background:${cor.bgLight};color:${cor.text};padding:4px 10px;border-radius:12px;font-size:12px;font-weight:700;">${itens.length}</span>
+            <span class="kanban-count-minhas" style="background:${cor.bgLight};color:${cor.text};padding:4px 10px;border-radius:12px;font-size:12px;font-weight:700;">${totalCardsColuna}</span>
           </div>
           ${(badgeSomaTotal || status === 'compra realizada' || status === 'faturada pelo fornecedor') ? `
             <div class="cp-column-tools${(status === 'compra realizada' || status === 'faturada pelo fornecedor') ? ' has-sort' : ''}">
@@ -68260,6 +68249,7 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
 
     // Aplica o filtro de kanbans visíveis após renderizar
     aplicarFiltroKanbans();
+    atualizarBotaoNotasKeepersCompras();
 
     // Objetivo: Após carregar os dados, exibe a visualização correta (lista ou kanban)
     alterarVisaoComprasKanban('todos');
