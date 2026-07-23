@@ -18565,6 +18565,89 @@ html.light-mode #minhasComprasWrapper {
   border-color: #d97706;
 }
 
+#minhasComprasWrapper #kanbanMinhasSolicitacoes .cp-cfop-filter {
+  position: relative;
+  min-width: 0;
+}
+
+#minhasComprasWrapper #kanbanMinhasSolicitacoes .cp-cfop-filter-btn {
+  height: 22px;
+  margin: 0;
+  padding: 0 7px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: #7c4a11;
+  background: #fff7df;
+  border: 1px solid #f4c96b;
+  border-radius: 5px;
+  font-size: 8px;
+  font-weight: 700;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+#minhasComprasWrapper #kanbanMinhasSolicitacoes .cp-cfop-filter-btn.is-active {
+  color: #ffffff;
+  background: #b45309;
+  border-color: #b45309;
+}
+
+#minhasComprasWrapper #kanbanMinhasSolicitacoes .cp-cfop-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 80;
+  width: 190px;
+  max-height: 260px;
+  padding: 7px;
+  overflow-y: auto;
+  color: #334155;
+  background: #ffffff;
+  border: 1px solid #d9e0e7;
+  border-radius: 7px;
+  box-shadow: 0 12px 28px rgba(15, 23, 42, .18);
+}
+
+#minhasComprasWrapper #kanbanMinhasSolicitacoes .cp-cfop-menu[hidden] {
+  display: none !important;
+}
+
+#minhasComprasWrapper #kanbanMinhasSolicitacoes .cp-cfop-menu-header {
+  margin-bottom: 5px;
+  padding-bottom: 5px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  border-bottom: 1px solid #e5e7eb;
+  font-size: 9px;
+}
+
+#minhasComprasWrapper #kanbanMinhasSolicitacoes .cp-cfop-menu-header button {
+  padding: 0;
+  color: #b45309;
+  background: transparent;
+  border: 0;
+  font-size: 8px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+#minhasComprasWrapper #kanbanMinhasSolicitacoes .cp-cfop-menu label {
+  padding: 4px 3px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border-radius: 4px;
+  font-size: 9px;
+  cursor: pointer;
+}
+
+#minhasComprasWrapper #kanbanMinhasSolicitacoes .cp-cfop-menu label:hover {
+  background: #fff7ed;
+}
+
 #minhasComprasWrapper #kanbanMinhasSolicitacoes .kanban-card.cp-card-overdue,
 :root:not(.light-mode) #minhasComprasWrapper #kanbanMinhasSolicitacoes .kanban-card.cp-card-overdue {
   background: #fff1f2 !important;

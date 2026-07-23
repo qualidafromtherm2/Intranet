@@ -27765,6 +27765,9 @@ async function ensureRecebimentosNfeDadosAdicionaisColumn(client) {
   await client.query(`
     ALTER TABLE logistica.recebimentos_nfe_omie
     ADD COLUMN IF NOT EXISTS c_dados_adicionais TEXT;
+
+    ALTER TABLE logistica.recebimentos_nfe_itens
+    ADD COLUMN IF NOT EXISTS c_cfop_documento VARCHAR(20);
   `);
   _recebimentosNfeDadosAdicionaisColReady = true;
 }
@@ -28014,7 +28017,7 @@ async function upsertRecebimentoNFe(recebimento, eventoWebhook = '', messageId =
           n_preco_unit, v_total_item, v_desconto, v_frete, v_seguro, v_outras,
           v_icms, v_ipi, v_pis, v_cofins, v_icms_st,
           n_num_ped_compra, n_id_pedido, n_id_it_pedido,
-          c_cfop_entrada, c_categoria_item,
+          c_cfop_entrada, c_cfop_documento, c_categoria_item,
           codigo_local_estoque, c_local_estoque,
           c_nao_gerar_financeiro, c_nao_gerar_mov_estoque,
           c_obs_item
@@ -28026,10 +28029,10 @@ async function upsertRecebimentoNFe(recebimento, eventoWebhook = '', messageId =
           $12, $13, $14, $15, $16, $17,
           $18, $19, $20, $21, $22,
           $23, $24, $25,
-          $26, $27,
-          $28, $29,
-          $30, $31,
-          $32
+          $26, $27, $28,
+          $29, $30,
+          $31, $32,
+          $33
         )
       `, [
         nIdReceb,
@@ -28058,6 +28061,7 @@ async function upsertRecebimentoNFe(recebimento, eventoWebhook = '', messageId =
         itemCabec.nIdPedido || null,
         itemCabec.nIdItPedido || null,
         itemInfoAdic.cCfopEntrada || null,
+        itemCabec.cCFOP || itemCabec.cCfop || null,
         itemInfoAdic.cCategoriaItem || null,
         itemInfoAdic.codigoLocalEstoque || null,
         itemInfoAdic.cLocalEstoque || null,
@@ -34680,6 +34684,7 @@ Retorne SOMENTE um array JSON válido (sem texto adicional), ordenado do MAIS ao
 app.get('/api/compras/pedidos-etapa-nf', async (req, res) => {
   try {
     console.log('[Compras/PedidosEtapaNF] Listando recebimentos NF-e (Faturada/Recebido/Concluído)...');
+    await ensureRecebimentosNfeDadosAdicionaisColumn(pool);
 
     const { dataInicio: diNF, dataFim: dfNF } = req.query;
 
@@ -34722,8 +34727,16 @@ app.get('/api/compras/pedidos-etapa-nf', async (req, res) => {
         LOWER(BTRIM(COALESCE(r.compras, ''))) AS compras,
         r.c_etapa,
         r.c_recebido,
+        r.c_cfop_entrada,
         r.d_emissao_nfe,
         r.d_rec,
+        ARRAY(
+          SELECT DISTINCT BTRIM(COALESCE(i.c_cfop_documento, i.c_cfop_entrada))
+          FROM logistica.recebimentos_nfe_itens i
+          WHERE i.n_id_receb = r.n_id_receb
+            AND BTRIM(COALESCE(i.c_cfop_documento, i.c_cfop_entrada, '')) <> ''
+          ORDER BY BTRIM(COALESCE(i.c_cfop_documento, i.c_cfop_entrada))
+        ) AS cfops_entrada,
         r.updated_at
     `;
 
@@ -34808,6 +34821,10 @@ app.get('/api/compras/pedidos-etapa-nf', async (req, res) => {
         c_chave_nfe: row.c_chave_nfe || null,
         c_dados_adicionais: row.c_dados_adicionais || null,
         n_valor_nfe: row.n_valor_nfe ?? null,
+        cfops_entrada: [...new Set([
+          row.c_cfop_entrada,
+          ...(Array.isArray(row.cfops_entrada) ? row.cfops_entrada : [])
+        ].map(valor => String(valor || '').trim()).filter(Boolean))],
         compras: row.compras || null,
         origem_recebimento_nfe: true,
         created_at: null,

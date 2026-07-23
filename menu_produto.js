@@ -61135,6 +61135,24 @@ window.__comprasKanbanCardsCache = window.__comprasKanbanCardsCache || {};
 window.__comprasKanbanLimites = window.__comprasKanbanLimites || {};
 window.__comprasKanbanFiltroAtual = '';
 window.__comprasKanbanOrdenarPrevisao = false;
+window.__comprasKanbanCfopsSelecionados = new Set(
+  JSON.parse(localStorage.getItem('comprasKanbanCfops') || '[]').map(valor => String(valor || '').trim()).filter(Boolean)
+);
+
+function normalizarCfopCompras(valor) {
+  return String(valor || '').trim().replace(/\s+/g, '');
+}
+
+function obterCfopsCardCompras(item = {}) {
+  const diretos = Array.isArray(item.cfops_entrada) ? item.cfops_entrada : [];
+  const itens = Array.isArray(item.itens) ? item.itens : [];
+  return [...new Set([
+    ...diretos,
+    item.c_cfop_entrada,
+    item.cCFOPEntrada,
+    ...itens.flatMap(produto => [produto?.c_cfop_entrada, produto?.cCFOPEntrada])
+  ].map(normalizarCfopCompras).filter(Boolean))];
+}
 
 function normalizarTextoBuscaCompras(valor) {
   return String(valor || '')
@@ -61156,6 +61174,11 @@ function renderizarPaginaColunaCompras(status, textoFiltro = '') {
   let cardsFiltrados = filtro.length >= 3
     ? cache.filter(card => card.texto.includes(filtro))
     : cache;
+  if (status === 'faturada pelo fornecedor' && window.__comprasKanbanCfopsSelecionados.size > 0) {
+    cardsFiltrados = cardsFiltrados.filter(card =>
+      card.cfops.some(cfop => window.__comprasKanbanCfopsSelecionados.has(cfop))
+    );
+  }
   if (window.__comprasKanbanOrdenarPrevisao) {
     cardsFiltrados = [...cardsFiltrados].sort((a, b) => {
       const dataA = Number.isFinite(a.previsaoTs) ? a.previsaoTs : Number.POSITIVE_INFINITY;
@@ -61208,6 +61231,47 @@ function alternarOrdenacaoPrevisaoCompras() {
 }
 
 window.alternarOrdenacaoPrevisaoCompras = alternarOrdenacaoPrevisaoCompras;
+
+function alternarMenuCfopCompras(event) {
+  event?.stopPropagation();
+  const menu = document.getElementById('comprasCfopMenu');
+  if (!menu) return;
+  menu.hidden = !menu.hidden;
+}
+
+function atualizarFiltroCfopCompras(input, cfopsDisponiveis = []) {
+  const todos = [...new Set((Array.isArray(cfopsDisponiveis) ? cfopsDisponiveis : []).map(normalizarCfopCompras).filter(Boolean))];
+  const selecionados = window.__comprasKanbanCfopsSelecionados;
+  if (selecionados.size === 0) todos.forEach(cfop => selecionados.add(cfop));
+  const cfop = normalizarCfopCompras(input?.value);
+  if (input?.checked) selecionados.add(cfop);
+  else selecionados.delete(cfop);
+  if (selecionados.size === todos.length) selecionados.clear();
+  localStorage.setItem('comprasKanbanCfops', JSON.stringify([...selecionados]));
+  renderizarPaginaColunaCompras('faturada pelo fornecedor', window.__comprasKanbanFiltroAtual);
+  const botao = document.getElementById('comprasCfopFiltroBtn');
+  if (botao) {
+    botao.classList.toggle('is-active', selecionados.size > 0);
+    botao.querySelector('span').textContent = selecionados.size > 0 ? `CFOP (${selecionados.size})` : 'Todos os CFOPs';
+  }
+}
+
+function limparFiltroCfopCompras(event) {
+  event?.stopPropagation();
+  window.__comprasKanbanCfopsSelecionados.clear();
+  localStorage.removeItem('comprasKanbanCfops');
+  document.querySelectorAll('#comprasCfopMenu input[type="checkbox"]').forEach(input => { input.checked = true; });
+  renderizarPaginaColunaCompras('faturada pelo fornecedor', window.__comprasKanbanFiltroAtual);
+  const botao = document.getElementById('comprasCfopFiltroBtn');
+  if (botao) {
+    botao.classList.remove('is-active');
+    botao.querySelector('span').textContent = 'Todos os CFOPs';
+  }
+}
+
+window.alternarMenuCfopCompras = alternarMenuCfopCompras;
+window.atualizarFiltroCfopCompras = atualizarFiltroCfopCompras;
+window.limparFiltroCfopCompras = limparFiltroCfopCompras;
 
 // Objetivo: Filtrar TODOS os kanbans simultaneamente pela palavra inserida no campo de busca
 function filtrarTodosKanbans(textoFiltro) {
@@ -66969,11 +67033,14 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
       const s = p.toString();
       return s ? `?${s}` : '';
     })();
+    const _etapaNfParams = _filtroDataParams
+      ? `${_filtroDataParams}&incluirCfops=2`
+      : '?incluirCfops=2';
     // Segunda fase: carrega dados mais pesados de pedidos/compras em paralelo.
     // Nota: 'pedidos-compra' (kanban Pedido de compra) foi removido — agora só compras-realizadas e etapa-nf.
     const [respCompra, respEtapaNf] = await Promise.all([
       fetch(`/api/compras/compras-realizadas${_filtroDataParams}`, { credentials: 'include' }),
-      fetch(`/api/compras/pedidos-etapa-nf${_filtroDataParams}`, { credentials: 'include' })
+      fetch(`/api/compras/pedidos-etapa-nf${_etapaNfParams}`, { credentials: 'include' })
     ]);
 
     // Busca compras realizadas da tabela pedidos_omie (c_etapa = '15' e Etapa_NF vazia)
@@ -67867,7 +67934,8 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
           return {
             html: htmlCard,
             texto: normalizarTextoBuscaCompras(`${chaveGrupo} ${JSON.stringify(itensGrupo)}`),
-            previsaoTs
+            previsaoTs,
+            cfops: obterCfopsCardCompras(primeiroItem)
           };
         });
         window.__comprasKanbanCardsCache[status] = cardsRenderizados;
@@ -67969,6 +68037,31 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
         }
       }
 
+      const cfopsDisponiveisColuna = status === 'faturada pelo fornecedor'
+        ? [...new Set(itens.flatMap(obterCfopsCardCompras))].sort((a, b) => a.localeCompare(b, 'pt-BR', { numeric: true }))
+        : [];
+      const cfopsSelecionados = window.__comprasKanbanCfopsSelecionados;
+      const filtroCfopHtml = status === 'faturada pelo fornecedor' ? `
+        <div class="cp-cfop-filter" onclick="event.stopPropagation();">
+          <button id="comprasCfopFiltroBtn" class="cp-cfop-filter-btn${cfopsSelecionados.size > 0 ? ' is-active' : ''}" type="button" onclick="alternarMenuCfopCompras(event)" aria-haspopup="true" title="Escolher CFOPs exibidos">
+            <i class="fa-solid fa-filter"></i>
+            <span>${cfopsSelecionados.size > 0 ? `CFOP (${cfopsSelecionados.size})` : 'Todos os CFOPs'}</span>
+          </button>
+          <div id="comprasCfopMenu" class="cp-cfop-menu" hidden>
+            <div class="cp-cfop-menu-header">
+              <strong>CFOPs exibidos</strong>
+              <button type="button" onclick="limparFiltroCfopCompras(event)">Mostrar todos</button>
+            </div>
+            ${cfopsDisponiveisColuna.length > 0 ? cfopsDisponiveisColuna.map(cfop => `
+              <label>
+                <input type="checkbox" value="${escapeHtml(cfop)}" ${(cfopsSelecionados.size === 0 || cfopsSelecionados.has(cfop)) ? 'checked' : ''} onchange='event.stopPropagation();atualizarFiltroCfopCompras(this, ${JSON.stringify(cfopsDisponiveisColuna)})'>
+                <span>CFOP ${escapeHtml(cfop)}</span>
+              </label>
+            `).join('') : '<small>Nenhum CFOP informado nas notas.</small>'}
+          </div>
+        </div>
+      ` : '';
+
       return `
         <div class="kanban-column-minhas"
           data-status="${status}"
@@ -67980,14 +68073,15 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
             </h3>
             <span class="kanban-count-minhas" style="background:${cor.bgLight};color:${cor.text};padding:4px 10px;border-radius:12px;font-size:12px;font-weight:700;">${itens.length}</span>
           </div>
-          ${(badgeSomaTotal || status === 'compra realizada') ? `
-            <div class="cp-column-tools${status === 'compra realizada' ? ' has-sort' : ''}">
+          ${(badgeSomaTotal || status === 'compra realizada' || status === 'faturada pelo fornecedor') ? `
+            <div class="cp-column-tools${(status === 'compra realizada' || status === 'faturada pelo fornecedor') ? ' has-sort' : ''}">
               ${status === 'compra realizada' ? `
                 <button id="comprasOrdenarPrevisaoBtn" class="cp-sort-by-deadline${window.__comprasKanbanOrdenarPrevisao ? ' is-active' : ''}" type="button" onclick="event.stopPropagation();alternarOrdenacaoPrevisaoCompras()" aria-pressed="${window.__comprasKanbanOrdenarPrevisao ? 'true' : 'false'}" title="Ordenar por previsão de entrega">
                   <i class="fa-solid fa-arrow-down-wide-short"></i>
                   <span>${window.__comprasKanbanOrdenarPrevisao ? 'Por previsão' : 'Ordenar por previsão'}</span>
                 </button>
               ` : ''}
+              ${filtroCfopHtml}
               ${badgeSomaTotal ? `<div class="cp-column-total">${badgeSomaTotal}</div>` : ''}
             </div>
           ` : ''}
