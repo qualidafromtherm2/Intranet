@@ -1708,7 +1708,7 @@ function boot(renderer) {
           ctx.font = `21px ${KFONT}`;
           ctx.fillText(`De: ${String(card.nome_user || '').slice(0, 20)}`, x + 24, y + 56);
           ctx.fillStyle = '#6b7280';
-          const dt = fmtDataHora(card.criado_em_min);
+          const dt = fmtDataHora(card.item_criado_em || card.criado_em_min);
           ctx.fillText(
             `${card.total_itens} ite${Number(card.total_itens) === 1 ? 'm' : 'ns'}${dt ? ' · ' + dt : ''}`,
             x + 24, y + 84

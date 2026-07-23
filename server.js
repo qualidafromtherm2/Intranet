@@ -20523,6 +20523,8 @@ app.get('/api/logistica/kanban', async (req, res) => {
         COALESCE(c.retirada_por, c.nome_user) AS nome_user,
         MIN(c.data_prevista)::text            AS data_prevista,
         COUNT(*)                              AS total_itens,
+        MIN(c.criado_em)                      AS criado_em_min,
+        MIN(i.criado_em)                      AS item_criado_em,
         bool_or(
           EXISTS (
             SELECT 1
@@ -20547,7 +20549,7 @@ app.get('/api/logistica/kanban', async (req, res) => {
         AND LOWER(TRIM(COALESCE(i.status, ''))) NOT IN ('excluido', 'excluído')
         AND (c.id_user = $1 OR c.retirada_por = $2)
       GROUP BY i.n_solic, COALESCE(c.retirada_por, c.nome_user)
-      ORDER BY MAX(c.criado_em) ASC
+      ORDER BY COALESCE(MIN(i.criado_em), MIN(c.criado_em)) ASC
     `, [id_user, nome_user]);
 
     const mapCols = {
@@ -20819,7 +20821,7 @@ app.get('/api/logistica/solicitacoes-kanban', async (req, res) => {
                      COALESCE(seps.itens_busca, '')
                    ) NOT ILIKE '%' || termo || '%'
           )
-       ORDER BY criado_em_min ASC
+       ORDER BY COALESCE(item_criado_em, criado_em_min) ASC
     `, [q, destinosSep]);
 
     const colunas = { 'Solicitado': [], 'Stund-by': [], 'Em Separação': [], 'Separado': [], 'Aguardando retirada': [], 'Concluído': [] };
@@ -20937,6 +20939,7 @@ app.get('/api/logistica/solicitacoes-pendentes-sep', async (req, res) => {
         COUNT(*)                               AS total_itens,
         SUM(c.quantidade)::numeric             AS quantidade_total,
         MIN(c.criado_em)                       AS criado_em_min,
+        MIN(i.criado_em)                       AS item_criado_em,
         CASE
           WHEN bool_or(i.status = 'pendente')  THEN 'pendente'
           WHEN bool_or(i.status = 'Separação') THEN 'Separação'
@@ -20947,7 +20950,7 @@ app.get('/api/logistica/solicitacoes-pendentes-sep', async (req, res) => {
       WHERE i.n_solic IS NOT NULL
         AND i.status IN ('pendente', 'Separação', 'Separado')
       GROUP BY i.n_solic, COALESCE(c.retirada_por, c.nome_user)
-      ORDER BY MIN(c.criado_em) ASC
+      ORDER BY COALESCE(MIN(i.criado_em), MIN(c.criado_em)) ASC
     `);
 
     res.json({ ok: true, seps: sepsRow });

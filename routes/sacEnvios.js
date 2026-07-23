@@ -10352,45 +10352,29 @@ function _emailValidoDevolucao(raw) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e) ? e : null;
 }
 
-async function _obterEmailRemetenteDevolucao(req) {
-  // Brevo só entrega confiável se o From for remetente/domínio verificado.
-  // Usamos sempre SMTP_FROM (ex.: calidadefromtherm2@gmail.com) e o e-mail
-  // do usuário logado como Reply-To (quando existir).
+async function _obterReplyToDevolucao(req) {
+  // Remetente (From) = SMTP_FROM do .env (Hostinger / leandro.santos@fromtherm.com.br),
+  // igual às reservas — não reescrever o From, senão cai em spam.
+  // Reply-To = e-mail do usuário logado (quando existir), para respostas voltarem a ele.
   const uid = req.session?.user?.id || null;
   const uname = String(req.session?.user?.username || '').trim();
   let email = null;
-  let nome = req.session?.user?.fullName || uname || 'Intranet';
   try {
     if (uid) {
       const { rows } = await pool.query(
-        `SELECT email, nome_completo, username FROM public.auth_user WHERE id = $1 LIMIT 1`,
+        `SELECT email FROM public.auth_user WHERE id = $1 LIMIT 1`,
         [uid]
       );
-      if (rows[0]) {
-        email = _emailValidoDevolucao(rows[0].email);
-        nome = String(rows[0].nome_completo || rows[0].username || nome).trim() || nome;
-      }
+      if (rows[0]) email = _emailValidoDevolucao(rows[0].email);
     } else if (uname) {
       const { rows } = await pool.query(
-        `SELECT email, nome_completo, username FROM public.auth_user WHERE LOWER(username) = LOWER($1) LIMIT 1`,
+        `SELECT email FROM public.auth_user WHERE LOWER(username) = LOWER($1) LIMIT 1`,
         [uname]
       );
-      if (rows[0]) {
-        email = _emailValidoDevolucao(rows[0].email);
-        nome = String(rows[0].nome_completo || rows[0].username || nome).trim() || nome;
-      }
+      if (rows[0]) email = _emailValidoDevolucao(rows[0].email);
     }
   } catch (_) { /* ignora */ }
-
-  const smtpFrom = String(process.env.SMTP_FROM || '').trim();
-  if (!smtpFrom) {
-    return { from: null, email, nome, usadoFallback: true };
-  }
-  // Mantém o nome amigável do usuário no From, mas o endereço deve ser o verificado no Brevo
-  const matchAddr = smtpFrom.match(/<([^>]+)>/);
-  const addrFixo = matchAddr ? matchAddr[1].trim() : smtpFrom.replace(/^.*<|>$/g, '').trim() || smtpFrom;
-  const from = `${nome} <${addrFixo}>`;
-  return { from, email, nome, usadoFallback: true, replyTo: email || undefined };
+  return { replyTo: email || undefined, email };
 }
 
 /**
@@ -10655,7 +10639,8 @@ router.delete('/at/devolucao-destinatarios/:id', async (req, res) => {
  * Envia e-mail de devolução com dados da OS + PDF anexado (base64).
  * Body: { pdf_base64: string, pdf_filename?: string }
  * Destinatários: auth_user com email_devolucao = true (+ fallback AT_DEVOLUCAO_EMAILS)
- * Remetente: e-mail do usuário logado (+ fallback SMTP_FROM)
+ * Remetente: SMTP_FROM (Hostinger / leandro.santos) — mesmo processo das reservas
+ * Reply-To: e-mail do usuário logado (quando cadastrado)
  */
 router.post('/at/devolucao/:id', async (req, res) => {
   const id = parseInt(req.params.id, 10);
@@ -10664,7 +10649,7 @@ router.post('/at/devolucao/:id', async (req, res) => {
   if (!smtpConfigurado()) {
     return res.status(503).json({
       ok: false,
-      error: 'SMTP não configurado. Defina SMTP_HOST, SMTP_USER, SMTP_PASS e SMTP_FROM no .env (Brevo gratuito recomendado).',
+      error: 'SMTP não configurado. Defina SMTP_HOST, SMTP_USER, SMTP_PASS e SMTP_FROM no .env (Hostinger / @fromtherm.com.br).',
     });
   }
 
@@ -10707,13 +10692,14 @@ router.post('/at/devolucao/:id', async (req, res) => {
       });
     }
 
-    const remetente = await _obterEmailRemetenteDevolucao(req);
-    if (!remetente.from) {
+    const smtpFrom = String(process.env.SMTP_FROM || process.env.SMTP_USER || '').trim();
+    if (!smtpFrom) {
       return res.status(503).json({
         ok: false,
-        error: 'Seu usuário não tem e-mail cadastrado e SMTP_FROM não está definido. Cadastre o e-mail em RH ou defina SMTP_FROM no .env.',
+        error: 'SMTP_FROM não está definido no .env. Use o mesmo remetente Hostinger (ex.: leandro.santos@fromtherm.com.br).',
       });
     }
+    const replyInfo = await _obterReplyToDevolucao(req);
 
     const { rows } = await pool.query(
       `SELECT a.id, a.data, a.tipo, a.status, a.nome_revenda_cliente, a.numero_telefone,
@@ -10780,10 +10766,10 @@ router.post('/at/devolucao/:id', async (req, res) => {
     ].join('\n');
 
     const usuario = req.session?.user?.fullName || req.session?.user?.username || 'sistema';
+    // From = SMTP_FROM (Hostinger / leandro.santos) — mesmo processo das reservas (não cai em spam)
     const result = await enviarEmail({
       to: destinatarios,
-      from: remetente.from,
-      replyTo: remetente.replyTo || remetente.email || undefined,
+      replyTo: replyInfo.replyTo,
       subject: `Devolução — OS #${id} — ${at.nome_revenda_cliente || at.modelo || 'Fromtherm'}`,
       text,
       html,
@@ -10808,7 +10794,7 @@ router.post('/at/devolucao/:id', async (req, res) => {
       ok: true,
       enviados: result.to,
       from: result.from,
-      remetente_fallback: remetente.usadoFallback,
+      reply_to: replyInfo.replyTo || null,
       messageId: result.messageId,
       enviada_em: new Date().toISOString(),
     });

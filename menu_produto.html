@@ -6082,7 +6082,19 @@
               <div id="atDevolucaoDestMsg" style="display:none;margin-top:8px;font-size:12px;"></div>
             </div>
             <div style="flex:1;min-height:0;overflow:auto;padding:10px 16px 16px;">
-              <div style="font-size:11px;color:var(--inactive-color);margin-bottom:8px;text-transform:uppercase;letter-spacing:.04em;">Lista (ativos recebem o e-mail)</div>
+              <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px;flex-wrap:wrap;">
+                <div style="font-size:11px;color:var(--inactive-color);text-transform:uppercase;letter-spacing:.04em;">Lista (ativos recebem o e-mail)</div>
+                <div style="display:flex;align-items:center;gap:6px;">
+                  <button id="atDevolucaoDestMarcarTodos" type="button" title="Ativar todos da lista"
+                    style="padding:5px 10px;border-radius:7px;border:1px solid rgba(34,197,94,.4);background:rgba(34,197,94,.12);color:#4ade80;font-size:11px;font-weight:600;cursor:pointer;display:inline-flex;align-items:center;gap:5px;">
+                    <i class="fa-solid fa-check-double"></i> Marcar todos
+                  </button>
+                  <button id="atDevolucaoDestDesmarcarTodos" type="button" title="Desativar todos da lista"
+                    style="padding:5px 10px;border-radius:7px;border:1px solid rgba(148,163,184,.35);background:rgba(148,163,184,.08);color:#cbd5e1;font-size:11px;font-weight:600;cursor:pointer;display:inline-flex;align-items:center;gap:5px;">
+                    <i class="fa-solid fa-square"></i> Desmarcar todos
+                  </button>
+                </div>
+              </div>
               <div id="atDevolucaoDestList"></div>
               <div id="atDevolucaoDestEmpty" style="display:none;text-align:center;padding:28px 12px;color:var(--inactive-color);font-size:13px;">
                 Ninguém na lista ainda. Pesquise um usuário acima.

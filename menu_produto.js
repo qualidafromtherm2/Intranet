@@ -1389,7 +1389,8 @@ window._loadSolicitacoesTab = async function() {
       const cardsHtml = cards.length === 0
         ? `<div style="padding:14px;text-align:center;color:#374151;font-size:.73rem;">Nenhum</div>`
         : cards.map(sep => {
-            const criadoEm = _solFmtDataHora(sep.criado_em_min);
+            // Data da SEP (quando pediu / criou postagem), não a data do carrinho
+            const criadoEm = _solFmtDataHora(sep.item_criado_em || sep.criado_em_min);
             const cursor   = col.acao ? 'cursor:pointer;' : 'cursor:default;';
             const hint     = col.acao === 'iniciar'
               ? `<span style="font-size:.65rem;color:#22c55e88;margin-top:3px;display:block;"><i class="fa-solid fa-eye" style="margin-right:2px;"></i>Clique para ver itens</span>
@@ -3613,7 +3614,8 @@ window._loadKanbanSolicitacoesTab = async function() {
         ? `<div style="padding:14px;text-align:center;color:${emptyColor};font-size:.73rem;">Nenhum</div>`
         : cards.map(card => {
             const dataPrev = _solFmtDataPrevista(card.data_prevista);
-            const criadoEm = _solFmtDataHora(card.criado_em_min);
+            // Data da SEP (quando pediu), não a data do carrinho
+            const criadoEm = _solFmtDataHora(card.item_criado_em || card.criado_em_min);
             const sepLabel = card.n_solic
               ? `<span style="font-weight:800;font-size:.85rem;color:${sepColor};letter-spacing:.03em;">${card.n_solic}</span>`
               : `<span style="font-weight:700;font-size:.78rem;color:${noCarrinhoColor};font-style:italic;">No carrinho</span>`;
@@ -18406,9 +18408,12 @@ async function _atEnviarDevolucao(idAt) {
   const emailInp = document.getElementById('atDevolucaoDestEmailInp');
   const emailSalvar = document.getElementById('atDevolucaoDestEmailSalvar');
   const emailCancel = document.getElementById('atDevolucaoDestEmailCancel');
+  const btnMarcarTodos = document.getElementById('atDevolucaoDestMarcarTodos');
+  const btnDesmarcarTodos = document.getElementById('atDevolucaoDestDesmarcarTodos');
 
   let buscaTimer = null;
   let pendingUserId = null;
+  let bulkBusy = false;
 
   function esc(s) {
     return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -18584,6 +18589,65 @@ async function _atEnviarDevolucao(idAt) {
   }
   if (emailCancel) emailCancel.addEventListener('click', hideEmailBox);
 
+  async function setAtivoUsuario(id, ativo) {
+    const r = await fetch(`/api/sac/at/devolucao-destinatarios/${id}`, {
+      method: 'PUT',
+      credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ativo: !!ativo }),
+    });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok || !d.ok) throw new Error(d.error || 'Falha ao atualizar');
+    return d;
+  }
+
+  async function aplicarTodos(ativo) {
+    if (!listEl || bulkBusy) return;
+    const rows = Array.from(listEl.querySelectorAll('[data-id]'));
+    if (!rows.length) {
+      showMsg('A lista está vazia.', false);
+      return;
+    }
+    bulkBusy = true;
+    if (btnMarcarTodos) btnMarcarTodos.disabled = true;
+    if (btnDesmarcarTodos) btnDesmarcarTodos.disabled = true;
+    showMsg(ativo ? 'Marcando todos...' : 'Desmarcando todos...', true);
+    let ok = 0;
+    let falhas = 0;
+    try {
+      for (const row of rows) {
+        const id = Number(row.dataset.id);
+        const cb = row.querySelector('.at-dev-dest-ativo');
+        if (!id || !cb) continue;
+        if (!!cb.checked === !!ativo) { ok += 1; continue; }
+        try {
+          await setAtivoUsuario(id, ativo);
+          cb.checked = !!ativo;
+          ok += 1;
+        } catch (_) {
+          falhas += 1;
+        }
+      }
+      await loadLista();
+      if (falhas) {
+        showMsg(`${ativo ? 'Marcados' : 'Desmarcados'}: ${ok}. Não foi possível em ${falhas} (verifique e-mail).`, false);
+      } else {
+        showMsg(ativo ? `Todos marcados (${ok}).` : `Todos desmarcados (${ok}).`, true);
+      }
+    } finally {
+      bulkBusy = false;
+      if (btnMarcarTodos) btnMarcarTodos.disabled = false;
+      if (btnDesmarcarTodos) btnDesmarcarTodos.disabled = false;
+    }
+  }
+
+  if (btnMarcarTodos) {
+    btnMarcarTodos.addEventListener('click', () => aplicarTodos(true));
+  }
+  if (btnDesmarcarTodos) {
+    btnDesmarcarTodos.addEventListener('click', () => aplicarTodos(false));
+  }
+
   if (listEl) {
     listEl.addEventListener('change', async (e) => {
       const cb = e.target.closest('.at-dev-dest-ativo');
@@ -18593,20 +18657,11 @@ async function _atEnviarDevolucao(idAt) {
       if (!id) return;
       cb.disabled = true;
       try {
-        const r = await fetch(`/api/sac/at/devolucao-destinatarios/${id}`, {
-          method: 'PUT',
-          credentials: 'same-origin',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ ativo: !!cb.checked }),
-        });
-        const d = await r.json().catch(() => ({}));
-        if (!r.ok || !d.ok) {
-          cb.checked = !cb.checked;
-          throw new Error(d.error || 'Falha ao atualizar');
-        }
+        await setAtivoUsuario(id, !!cb.checked);
         showMsg(cb.checked ? 'Ativado: passará a receber o e-mail.' : 'Desativado.', true);
         await loadLista();
       } catch (err) {
+        cb.checked = !cb.checked;
         showMsg(err.message || 'Erro', false);
       } finally {
         cb.disabled = false;
