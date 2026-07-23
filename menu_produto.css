@@ -18121,6 +18121,34 @@ html.light-mode #minhasComprasWrapper {
   overflow: hidden !important;
 }
 
+#minhasComprasWrapper[data-board-view="todos"] #kanbanMinhasSolicitacoes .kanban-column-minhas.is-hidden-by-config {
+  display: none !important;
+}
+
+#minhasComprasWrapper .compras-kanban-settings-btn {
+  width: 30px;
+  height: 30px;
+  flex: 0 0 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  color: #cbd5e1;
+  background: rgba(255, 255, 255, .05);
+  border: 1px solid rgba(148, 163, 184, .32);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: color .16s ease, background .16s ease, border-color .16s ease;
+}
+
+#minhasComprasWrapper .compras-kanban-settings-btn:hover,
+#minhasComprasWrapper .compras-kanban-settings-btn:focus-visible {
+  color: #ffffff;
+  background: rgba(59, 130, 246, .2);
+  border-color: #60a5fa;
+  outline: none;
+}
+
 /* O painel tem uma única visão: resumo e ações compartilham a barra do módulo. */
 #minhasComprasWrapper .compras-board-metrics--toolbar {
   display: flex;

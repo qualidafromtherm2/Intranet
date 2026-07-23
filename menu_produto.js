@@ -43073,7 +43073,6 @@ document.getElementById('comprasAtualizarKanbansBtn')?.addEventListener('click',
 });
 
 document.getElementById('comprasFiltroKanbanBtn')?.addEventListener('click', () => {
-  fecharModalComprasAcoes();
   abrirModalFiltroKanbans();
 });
 document.getElementById('comprasVarrerFaturadasBtn')?.addEventListener('click', () => {
@@ -59146,7 +59145,7 @@ async function salvarPreferenciasKanbans() {
     fecharModalFiltroKanbans();
 
     // Feedback visual
-    const btn = document.querySelector('[onclick="abrirModalFiltroKanbans()"]');
+    const btn = document.getElementById('comprasFiltroKanbanBtn');
     if (btn) {
       const originalBg = btn.style.background;
       btn.style.background = '#10b981';
@@ -59196,7 +59195,9 @@ function aplicarFiltroKanbans() {
     // 1. Se o kanban não está na lista de visíveis: oculta
     // 2. Se está na lista de visíveis mas tem 0 itens e "mostrarVazios" está desativado: oculta
     // 3. Caso contrário: mostra
-    coluna.style.display = deveExibirKanbanPorFiltro(statusNormalizado, count) ? '' : 'none';
+    const deveExibir = deveExibirKanbanPorFiltro(statusNormalizado, count);
+    coluna.classList.toggle('is-hidden-by-config', !deveExibir);
+    coluna.setAttribute('aria-hidden', deveExibir ? 'false' : 'true');
   });
 }
 

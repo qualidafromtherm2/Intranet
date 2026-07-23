@@ -19,7 +19,7 @@
   referrerpolicy="no-referrer"
 />
   <!-- Seu CSS principal -->
-  <link rel="stylesheet" href="menu_produto.css?v=20260722-compras-cfop-v16"/>
+  <link rel="stylesheet" href="menu_produto.css?v=20260723-compras-config-v17"/>
   <!-- Anti-flicker: esconde menus até as permissões serem aplicadas -->
   <style id="boot-anti-flicker">
     /* Enquanto o app não está pronto, esconde elementos sujeitos a permissões */
@@ -973,6 +973,14 @@
                       onmouseout="this.style.background='#f3f4f6'">
                       <i class="fa-solid fa-xmark"></i>
                     </button>
+                    <button
+                      id="comprasFiltroKanbanBtn"
+                      class="compras-kanban-settings-btn"
+                      type="button"
+                      title="Configurações do Kanban"
+                      aria-label="Abrir configurações do Kanban">
+                      <i class="fa-solid fa-gear"></i>
+                    </button>
                   </div>
                 </div>
                 <div class="compras-toolbar-actions" style="display:flex;align-items:center;gap:12px;">
@@ -1237,10 +1245,6 @@
                 <button class="content-button compras-acao-btn" type="button" onclick="fecharModalComprasAcoes();toggleGraficoHistorico()" title="Exibir gráfico de compras">
                   <i class="fa-solid fa-chart-line"></i>
                   <span class="compras-acao-text">Gráfico de compras</span>
-                </button>
-                <button id="comprasFiltroKanbanBtn" class="content-button compras-acao-btn" type="button" title="Filtrar Kanbans">
-                  <i class="fa-solid fa-filter"></i>
-                  <span class="compras-acao-text">Filtrar Kanban</span>
                 </button>
                 <button id="comprasVarrerFaturadasBtn" class="content-button compras-acao-btn" type="button" title="Atualiza a coluna Faturada com a Omie (varredura leve)">
                   <i class="fa-solid fa-magnifying-glass-chart"></i>
@@ -1644,8 +1648,8 @@
           <div class="modal-container" style="max-width:600px;">
             <div class="modal-header">
               <h3 style="margin:0;display:flex;align-items:center;gap:8px;">
-                <i class="fa-solid fa-filter" style="color:#3b82f6;"></i>
-                Filtrar Kanbans Visíveis
+                <i class="fa-solid fa-gear" style="color:#3b82f6;"></i>
+                Configurações do Kanban
               </h3>
               <button id="modalFiltroKanbansFecharBtn" class="modal-close-btn" type="button">
                 <i class="fa-solid fa-xmark"></i>
@@ -12693,7 +12697,7 @@
   <script src="/public/js/at-masp-relatorio.js?v=20260718g" defer></script>
   <script src="/public/js/vendas-relatorio-gerencial.js?v=20260709a" defer></script>
   <script src="/public/js/logistica-relatorio-gerencial.js?v=20260712a" defer></script>
-  <script type="module" src="menu_produto.js?v=20260723-compras-cfop-v9"></script>
+  <script type="module" src="menu_produto.js?v=20260723-compras-config-v10"></script>
 
   <script type="module" src="./requisicoes_omie/filtro_produto.js?v=20260718-faixa-minimo"></script>
   <script type="module" src="./requisicoes_omie/ListarProdutos.js?v=20260718-faixa-minimo"></script>
