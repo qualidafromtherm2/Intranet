@@ -19495,8 +19495,7 @@ html.light-mode #minhasComprasWrapper {
 
 .exp-rapida-header,
 .exp-rapida-actions,
-.exp-rapida-rota,
-.exp-rapida-saldo {
+.exp-rapida-rota {
   display: flex;
   align-items: center;
 }
@@ -19567,12 +19566,34 @@ html.light-mode #minhasComprasWrapper {
 .exp-rapida-rota span { display: block; color: #94a3b8; font-size: 11px; }
 .exp-rapida-rota strong { display: block; color: #e0f2fe; font-size: 13px; }
 
-.exp-rapida-saldo {
-  justify-content: space-between;
-  gap: 12px;
+.exp-rapida-saldos {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
   margin-bottom: 16px;
+}
+
+.exp-rapida-saldo {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  padding: 10px 12px;
+  border: 1px solid #2b3445;
+  border-radius: 8px;
+  background: #1e2431;
   color: #aeb8c8;
   font-size: 12px;
+}
+
+.exp-rapida-saldo:last-child {
+  text-align: right;
+}
+
+.exp-rapida-saldo span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .exp-rapida-saldo strong { color: #fbbf24; font-size: 14px; }
@@ -19633,4 +19654,6 @@ html.light-mode #minhasComprasWrapper {
   .exp-rapida-panel { max-height: calc(100vh - 16px); padding: 16px; }
   .exp-rapida-actions { flex-direction: column-reverse; }
   .exp-rapida-btn { width: 100%; }
+  .exp-rapida-saldos { grid-template-columns: 1fr; }
+  .exp-rapida-saldo:last-child { text-align: left; }
 }

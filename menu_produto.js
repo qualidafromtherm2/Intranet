@@ -79990,25 +79990,35 @@ document.addEventListener('DOMContentLoaded', () => {
 
   async function carregarSaldoExpedicaoRapida(codigo) {
     const saldoEl = document.getElementById('expRapidaSaldo');
+    const saldoDestinoEl = document.getElementById('expRapidaSaldoDestino');
     if (saldoEl) saldoEl.textContent = 'Carregando…';
+    if (saldoDestinoEl) saldoDestinoEl.textContent = 'Carregando…';
     try {
       const resp = await fetch('/api/logistica/estoque/batch?codigos=' + encodeURIComponent(codigo), { credentials: 'include' });
       const json = await resp.json().catch(() => ({}));
       if (!resp.ok) throw new Error(json.error || 'Falha ao carregar saldo.');
       const locais = Array.isArray(json.dados?.[codigo]) ? json.dados[codigo] : [];
       const origem = locais.find(local => String(local.local_codigo || '').trim() === MOVIM_EXPEDICAO_ORIGEM);
+      const destino = locais.find(local => String(local.local_codigo || '').trim() === MOVIM_EXPEDICAO_DESTINO);
       const saldo = Number(origem?.saldo ?? origem?.quantidade ?? 0);
-      const unidade = String(origem?.unidade || 'UN').trim();
-      if (_expRapidaCtx) _expRapidaCtx.saldo = Number.isFinite(saldo) ? saldo : 0;
+      const saldoDestino = Number(destino?.saldo ?? destino?.quantidade ?? 0);
+      const unidade = String(origem?.unidade || destino?.unidade || 'UN').trim();
+      if (_expRapidaCtx) {
+        _expRapidaCtx.saldo = Number.isFinite(saldo) ? saldo : 0;
+        _expRapidaCtx.saldoDestino = Number.isFinite(saldoDestino) ? saldoDestino : 0;
+        _expRapidaCtx.unidade = unidade;
+      }
       if (saldoEl) saldoEl.textContent = `${Number.isFinite(saldo) ? saldo.toLocaleString('pt-BR') : '0'} ${unidade}`;
+      if (saldoDestinoEl) saldoDestinoEl.textContent = `${Number.isFinite(saldoDestino) ? saldoDestino.toLocaleString('pt-BR') : '0'} ${unidade}`;
     } catch (err) {
       if (saldoEl) saldoEl.textContent = 'Indisponível';
+      if (saldoDestinoEl) saldoDestinoEl.textContent = 'Indisponível';
       expRapidaMensagem(err.message || 'Não foi possível consultar o saldo.', 'error');
     }
   }
 
   window.abrirModalExpedicaoRapida = function(codigo, descricao, codigoProduto) {
-    _expRapidaCtx = { codigo, descricao: descricao || codigo, codigoProduto: codigoProduto || null, saldo: null };
+    _expRapidaCtx = { codigo, descricao: descricao || codigo, codigoProduto: codigoProduto || null, saldo: null, saldoDestino: null, unidade: 'UN' };
     _expRapidaTransferenciaId = null;
     document.getElementById('expRapidaDescricao').textContent = _expRapidaCtx.descricao;
     document.getElementById('expRapidaCodigo').textContent = `Código: ${codigo}`;
@@ -80080,7 +80090,18 @@ document.addEventListener('DOMContentLoaded', () => {
       if (Number.isFinite(_expRapidaCtx.saldo)) {
         _expRapidaCtx.saldo -= qtd;
         const saldoEl = document.getElementById('expRapidaSaldo');
-        if (saldoEl) saldoEl.textContent = `${_expRapidaCtx.saldo.toLocaleString('pt-BR')} UN`;
+        if (saldoEl) saldoEl.textContent = `${_expRapidaCtx.saldo.toLocaleString('pt-BR')} ${_expRapidaCtx.unidade}`;
+      }
+      if (Number.isFinite(_expRapidaCtx.saldoDestino)) {
+        _expRapidaCtx.saldoDestino += qtd;
+        const saldoDestinoEl = document.getElementById('expRapidaSaldoDestino');
+        if (saldoDestinoEl) saldoDestinoEl.textContent = `${_expRapidaCtx.saldoDestino.toLocaleString('pt-BR')} ${_expRapidaCtx.unidade}`;
+      }
+      if (typeof window.aplicarDeltaEstoqueOtimista === 'function') {
+        window.aplicarDeltaEstoqueOtimista(_expRapidaCtx.codigo, [
+          { local_codigo: MOVIM_EXPEDICAO_ORIGEM, local_nome: 'ESTOQUE MAQUINAS', delta: -qtd, unidade: _expRapidaCtx.unidade },
+          { local_codigo: MOVIM_EXPEDICAO_DESTINO, local_nome: 'EXPEDIÇÃO', delta: qtd, unidade: _expRapidaCtx.unidade }
+        ]);
       }
     } catch (err) {
       expRapidaMensagem(err.message || 'Falha ao enviar para Expedição.', 'error');
@@ -80105,6 +80126,16 @@ document.addEventListener('DOMContentLoaded', () => {
       if (!resp.ok || !json.ok) throw new Error(json.error || 'Falha ao reverter o envio.');
       expRapidaReverter.style.display = 'none';
       expRapidaMensagem('Envio revertido. O saldo retornou ao Estoque Máquinas.', 'success');
+      const codigo = _expRapidaCtx?.codigo;
+      const unidade = _expRapidaCtx?.unidade || 'UN';
+      const qtd = numeroExpedicaoRapida(expRapidaQtd?.value);
+      if (codigo && qtd && typeof window.aplicarDeltaEstoqueOtimista === 'function') {
+        window.aplicarDeltaEstoqueOtimista(codigo, [
+          { local_codigo: MOVIM_EXPEDICAO_DESTINO, local_nome: 'EXPEDIÇÃO', delta: -qtd, unidade },
+          { local_codigo: MOVIM_EXPEDICAO_ORIGEM, local_nome: 'ESTOQUE MAQUINAS', delta: qtd, unidade }
+        ]);
+      }
+      if (codigo) void carregarSaldoExpedicaoRapida(codigo);
     } catch (err) {
       expRapidaReverter.disabled = false;
       expRapidaMensagem(err.message || 'Falha ao reverter o envio.', 'error');
