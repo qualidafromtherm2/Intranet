@@ -61296,6 +61296,7 @@ window.__comprasKanbanCardsCache = window.__comprasKanbanCardsCache || {};
 window.__comprasKanbanLimites = window.__comprasKanbanLimites || {};
 window.__comprasKanbanFiltroAtual = '';
 window.__comprasKanbanOrdenarPrevisao = false;
+window.__comprasOcultarNotasKeepers = localStorage.getItem('comprasOcultarNotasKeepers') === '1';
 window.__comprasKanbanCfopsSelecionados = new Set(
   JSON.parse(localStorage.getItem('comprasKanbanCfops') || '[]').map(valor => String(valor || '').trim()).filter(Boolean)
 );
@@ -61335,6 +61336,9 @@ function renderizarPaginaColunaCompras(status, textoFiltro = '') {
   let cardsFiltrados = filtro.length >= 3
     ? cache.filter(card => card.texto.includes(filtro))
     : cache;
+  if (status === 'faturada pelo fornecedor' && window.__comprasOcultarNotasKeepers) {
+    cardsFiltrados = cardsFiltrados.filter(card => !card.fornecedor.includes('keepers'));
+  }
   if (status === 'faturada pelo fornecedor' && window.__comprasKanbanCfopsSelecionados.size > 0) {
     cardsFiltrados = cardsFiltrados.filter(card =>
       card.cfops.some(cfop => window.__comprasKanbanCfopsSelecionados.has(cfop))
@@ -61392,6 +61396,29 @@ function alternarOrdenacaoPrevisaoCompras() {
 }
 
 window.alternarOrdenacaoPrevisaoCompras = alternarOrdenacaoPrevisaoCompras;
+
+function atualizarBotaoNotasKeepersCompras() {
+  const botao = document.getElementById('comprasOcultarKeepersBtn');
+  if (!botao) return;
+  const ocultando = window.__comprasOcultarNotasKeepers;
+  botao.classList.toggle('is-active', ocultando);
+  botao.setAttribute('aria-pressed', String(ocultando));
+  botao.title = ocultando ? 'Voltar a exibir notas da Keepers' : 'Ocultar notas da Keepers';
+  const texto = botao.querySelector('span');
+  if (texto) texto.textContent = ocultando ? 'Exibir notas da Keepers' : 'Ocultar notas da Keepers';
+  const icone = botao.querySelector('i');
+  if (icone) icone.className = ocultando ? 'fa-solid fa-eye' : 'fa-solid fa-eye-slash';
+}
+
+function alternarNotasKeepersCompras() {
+  window.__comprasOcultarNotasKeepers = !window.__comprasOcultarNotasKeepers;
+  localStorage.setItem('comprasOcultarNotasKeepers', window.__comprasOcultarNotasKeepers ? '1' : '0');
+  atualizarBotaoNotasKeepersCompras();
+  window.__comprasKanbanLimites['faturada pelo fornecedor'] = COMPRAS_CARDS_POR_PAGINA;
+  renderizarPaginaColunaCompras('faturada pelo fornecedor', window.__comprasKanbanFiltroAtual);
+}
+
+window.alternarNotasKeepersCompras = alternarNotasKeepersCompras;
 
 function alternarMenuCfopCompras(event) {
   event?.stopPropagation();
@@ -68097,14 +68124,18 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
           return {
             html: htmlCard,
             texto: normalizarTextoBuscaCompras(`${chaveGrupo} ${JSON.stringify(itensGrupo)}`),
+            fornecedor: normalizarTextoBuscaCompras(primeiroItem.fornecedor_nome || ''),
             previsaoTs,
             cfops: obterCfopsCardCompras(primeiroItem)
           };
         });
         window.__comprasKanbanCardsCache[status] = cardsRenderizados;
         window.__comprasKanbanLimites[status] = COMPRAS_CARDS_POR_PAGINA;
-        totalCardsColuna = cardsRenderizados.length;
-        const cardsIniciais = cardsRenderizados.slice(0, COMPRAS_CARDS_POR_PAGINA);
+        const cardsDisponiveis = status === 'faturada pelo fornecedor' && window.__comprasOcultarNotasKeepers
+          ? cardsRenderizados.filter(card => !card.fornecedor.includes('keepers'))
+          : cardsRenderizados;
+        totalCardsColuna = cardsDisponiveis.length;
+        const cardsIniciais = cardsDisponiveis.slice(0, COMPRAS_CARDS_POR_PAGINA);
         const restantesIniciais = Math.max(0, totalCardsColuna - cardsIniciais.length);
         cardsHtml = cardsIniciais.map(card => card.html).join('') + (restantesIniciais > 0 ? `
           <button type="button" class="cp-load-more" onclick="mostrarMais50CardsCompras('${String(status).replace(/'/g, "\\'")}')">
@@ -68261,6 +68292,7 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
 
     // Aplica o filtro de kanbans visíveis após renderizar
     aplicarFiltroKanbans();
+    atualizarBotaoNotasKeepersCompras();
 
     // Objetivo: Após carregar os dados, exibe a visualização correta (lista ou kanban)
     alterarVisaoComprasKanban('todos');

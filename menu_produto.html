@@ -19,7 +19,7 @@
   referrerpolicy="no-referrer"
 />
   <!-- Seu CSS principal -->
-  <link rel="stylesheet" href="menu_produto.css?v=20260723-compras-config-v18"/>
+  <link rel="stylesheet" href="menu_produto.css?v=20260723-compras-config-v19"/>
   <!-- Anti-flicker: esconde menus até as permissões serem aplicadas -->
   <style id="boot-anti-flicker">
     /* Enquanto o app não está pronto, esconde elementos sujeitos a permissões */
@@ -977,6 +977,16 @@
                       title="Configurações do Kanban"
                       aria-label="Abrir configurações do Kanban">
                       <i class="fa-solid fa-gear"></i>
+                    </button>
+                    <button
+                      id="comprasOcultarKeepersBtn"
+                      class="compras-keepers-toggle"
+                      type="button"
+                      onclick="alternarNotasKeepersCompras()"
+                      aria-pressed="false"
+                      title="Ocultar notas da Keepers">
+                      <i class="fa-solid fa-eye-slash"></i>
+                      <span>Ocultar notas da Keepers</span>
                     </button>
                   </div>
                 </div>
@@ -12694,7 +12704,7 @@
   <script src="/public/js/at-masp-relatorio.js?v=20260718g" defer></script>
   <script src="/public/js/vendas-relatorio-gerencial.js?v=20260709a" defer></script>
   <script src="/public/js/logistica-relatorio-gerencial.js?v=20260712a" defer></script>
-  <script type="module" src="menu_produto.js?v=20260723-compras-config-v10"></script>
+  <script type="module" src="menu_produto.js?v=20260723-compras-config-v11"></script>
 
   <script type="module" src="./requisicoes_omie/filtro_produto.js?v=20260718-faixa-minimo"></script>
   <script type="module" src="./requisicoes_omie/ListarProdutos.js?v=20260718-faixa-minimo"></script>

@@ -18151,7 +18151,7 @@ html.light-mode #minhasComprasWrapper {
 }
 
 #minhasComprasWrapper .compras-global-search {
-  width: min(330px, 100%);
+  width: min(520px, 100%);
 }
 
 #minhasComprasWrapper #kanbanFiltroGlobal {
@@ -18174,6 +18174,37 @@ html.light-mode #minhasComprasWrapper {
 
 #minhasComprasWrapper .compras-global-search > i {
   color: #e2e8f0 !important;
+}
+
+#minhasComprasWrapper .compras-keepers-toggle {
+  height: 30px;
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 0 9px;
+  color: #e2e8f0;
+  background: rgba(255, 255, 255, .08);
+  border: 1px solid #64748b;
+  border-radius: 6px;
+  font-size: 10px;
+  font-weight: 700;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+#minhasComprasWrapper .compras-keepers-toggle:hover,
+#minhasComprasWrapper .compras-keepers-toggle:focus-visible {
+  color: #ffffff;
+  border-color: #fbbf24;
+  outline: none;
+}
+
+#minhasComprasWrapper .compras-keepers-toggle.is-active {
+  color: #422006;
+  background: #fbbf24;
+  border-color: #fcd34d;
 }
 
 /* O painel tem uma única visão: resumo e ações compartilham a barra do módulo. */
