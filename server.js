@@ -12,6 +12,7 @@ if (IS_CHAT_SERVICE) {
 require('./utils/supabase');
 const { resolveNumeroPedidoFromWebhook } = require('./utils/vendasNfJoin');
 const { obterPermissaoMovimentacao } = require('./utils/movimentacaoPermissoes');
+const { obterPermissaoSeparacao, assertAcessoSeparacao } = require('./utils/separacaoPermissoes');
 const { uploadPublicFile, removePublicFiles } = require('./utils/storage');
 const { registrarControleOperacaoImpressaoOp } = require('./utils/controleOperacoes');
 const { iniciarCicloPosto } = require('./utils/tempoProducao');
@@ -403,22 +404,22 @@ app.get('/api/check-version', async (req, res) => {
     const result = await pool.query(
       'SELECT versao, data_atualizacao FROM configuracoes.versao_sistema LIMIT 1'
     );
-    
+
     if (result.rows.length === 0) {
       // Se tabela não existe, retorna erro instruindo a criação
-      return res.status(500).json({ 
-        ok: false, 
+      return res.status(500).json({
+        ok: false,
         error: 'Tabela versao_sistema não encontrada. Execute: sql/create_versao_sistema.sql',
         version: null
       });
     }
-    
+
     const row = result.rows[0];
     const version = row.versao;
     const dataAtualizacao = row.data_atualizacao;
-    
+
     console.log('[VERSION-CHECK] Versão atual do sistema:', version);
-    
+
     res.json({
       ok: true,
       version: version,
@@ -428,8 +429,8 @@ app.get('/api/check-version', async (req, res) => {
     });
   } catch (err) {
     console.error('[VERSION-CHECK] Erro ao buscar versão:', err);
-    res.status(500).json({ 
-      ok: false, 
+    res.status(500).json({
+      ok: false,
       error: err.message || 'Erro ao buscar versão do sistema',
       version: null
     });
@@ -1999,32 +2000,32 @@ app.get('/api/engenharia/em-criacao', async (req, res) => {
     // Busca produtos "Em criação" com suas atividades de engenharia (Check-Proj) e compras
     const sql = `
       WITH produtos_eng AS (
-        SELECT 
-          codigo::text AS codigo, 
+        SELECT
+          codigo::text AS codigo,
           descricao::text AS descricao,
           codigo_familia::text AS familia
         FROM public.produtos_omie
-        WHERE descricao ILIKE 'Em criação%' 
+        WHERE descricao ILIKE 'Em criação%'
         ORDER BY codigo ASC
         LIMIT 1000
       ),
       stats_check_eng AS (
         -- Atividades de engenharia da família
-        SELECT 
+        SELECT
           pe.codigo,
           COUNT(af.id) AS total_atividades,
           COUNT(CASE WHEN s.concluido = true OR s.nao_aplicavel = true THEN 1 END) AS concluidas
         FROM produtos_eng pe
-        LEFT JOIN engenharia.atividades_familia af 
+        LEFT JOIN engenharia.atividades_familia af
           ON af.familia_codigo = pe.familia AND af.ativo = true
         LEFT JOIN engenharia.atividades_produto_status s
           ON s.atividade_id = af.id AND s.produto_codigo = pe.codigo
         GROUP BY pe.codigo
-        
+
         UNION ALL
-        
+
         -- Atividades de engenharia específicas do produto
-        SELECT 
+        SELECT
           ap.produto_codigo AS codigo,
           COUNT(ap.id) AS total_atividades,
           COUNT(CASE WHEN aps.concluido = true OR aps.nao_aplicavel = true THEN 1 END) AS concluidas
@@ -2036,21 +2037,21 @@ app.get('/api/engenharia/em-criacao', async (req, res) => {
       ),
       stats_check_compras AS (
         -- Atividades de compras da família
-        SELECT 
+        SELECT
           pe.codigo,
           COUNT(af.id) AS total_atividades,
           COUNT(CASE WHEN s.concluido = true OR s.nao_aplicavel = true THEN 1 END) AS concluidas
         FROM produtos_eng pe
-        LEFT JOIN compras.atividades_familia af 
+        LEFT JOIN compras.atividades_familia af
           ON af.familia_codigo = pe.familia AND af.ativo = true
         LEFT JOIN compras.atividades_produto_status s
           ON s.atividade_id = af.id AND s.produto_codigo = pe.codigo
         GROUP BY pe.codigo
-        
+
         UNION ALL
-        
+
         -- Atividades de compras específicas do produto
-        SELECT 
+        SELECT
           ap.produto_codigo AS codigo,
           COUNT(ap.id) AS total_atividades,
           COUNT(CASE WHEN aps.concluido = true OR aps.nao_aplicavel = true THEN 1 END) AS concluidas
@@ -2061,7 +2062,7 @@ app.get('/api/engenharia/em-criacao', async (req, res) => {
         GROUP BY ap.produto_codigo
       ),
       stats_agregadas_eng AS (
-        SELECT 
+        SELECT
           codigo,
           SUM(total_atividades) AS total_atividades,
           SUM(concluidas) AS concluidas
@@ -2069,26 +2070,26 @@ app.get('/api/engenharia/em-criacao', async (req, res) => {
         GROUP BY codigo
       ),
       stats_agregadas_compras AS (
-        SELECT 
+        SELECT
           codigo,
           SUM(total_atividades) AS total_atividades,
           SUM(concluidas) AS concluidas
         FROM stats_check_compras
         GROUP BY codigo
       )
-      SELECT 
+      SELECT
         pe.codigo,
         pe.descricao,
         pe.familia,
         COALESCE(sae.concluidas, 0)::int AS eng_concluidas,
         COALESCE(sae.total_atividades, 0)::int AS eng_total,
-        CASE 
+        CASE
           WHEN COALESCE(sae.total_atividades, 0) = 0 THEN 0
           ELSE ROUND((COALESCE(sae.concluidas, 0)::decimal / sae.total_atividades) * 100)
         END AS eng_percentual,
         COALESCE(sac.concluidas, 0)::int AS compras_concluidas,
         COALESCE(sac.total_atividades, 0)::int AS compras_total,
-        CASE 
+        CASE
           WHEN COALESCE(sac.total_atividades, 0) = 0 THEN 0
           ELSE ROUND((COALESCE(sac.concluidas, 0)::decimal / sac.total_atividades) * 100)
         END AS compras_percentual
@@ -2098,7 +2099,7 @@ app.get('/api/engenharia/em-criacao', async (req, res) => {
       ORDER BY pe.codigo ASC;
     `;
     const { rows: produtos } = await pool.query(sql);
-    
+
     // Para cada produto, calcular completude (gráfico circular)
     const resultado = [];
     for (const produto of produtos) {
@@ -2121,9 +2122,9 @@ app.get('/api/engenharia/em-criacao', async (req, res) => {
           });
           continue;
         }
-        
+
         const dados = await detalhesResp.json();
-        
+
         // Busca campos obrigatórios da família
         const camposQuery = `
           SELECT cg.chave
@@ -2132,10 +2133,10 @@ app.get('/api/engenharia/em-criacao', async (req, res) => {
           WHERE fco.familia_codigo = $1 AND fco.obrigatorio = true
         `;
         const { rows: campos } = await pool.query(camposQuery, [produto.familia]);
-        
+
         const totalCampos = campos.length;
         let camposPreenchidos = 0;
-        
+
         // Verifica cada campo obrigatório
         campos.forEach(campo => {
           const chave = campo.chave;
@@ -2146,9 +2147,9 @@ app.get('/api/engenharia/em-criacao', async (req, res) => {
             camposPreenchidos++;
           }
         });
-        
+
         const percentual = totalCampos > 0 ? Math.round((camposPreenchidos / totalCampos) * 100) : 0;
-        
+
         resultado.push({
           codigo: produto.codigo,
           descricao: produto.descricao,
@@ -2179,7 +2180,7 @@ app.get('/api/engenharia/em-criacao', async (req, res) => {
         });
       }
     }
-    
+
     res.json({ itens: resultado });
   } catch (err) {
     console.error('[API] /api/engenharia/em-criacao erro:', err);
@@ -2191,7 +2192,7 @@ app.get('/api/engenharia/em-criacao', async (req, res) => {
 app.get('/api/engenharia/produto-cadastro/:codigo', async (req, res) => {
   try {
     const { codigo } = req.params;
-    
+
     // Busca dados completos do produto
     const detalhesResp = await fetch(`http://localhost:5001/api/produtos/detalhe?codigo=${encodeURIComponent(codigo)}`);
     if (!detalhesResp.ok) {
@@ -2199,11 +2200,11 @@ app.get('/api/engenharia/produto-cadastro/:codigo', async (req, res) => {
     }
     const dados = await detalhesResp.json();
     const familia = dados.codigo_familia;
-    
+
     if (!familia) {
       return res.json({ campos_pendentes: [], campos_preenchidos: [] });
     }
-    
+
     // Busca campos obrigatórios da família
     const camposQuery = `
       SELECT cg.chave, cg.rotulo
@@ -2213,16 +2214,16 @@ app.get('/api/engenharia/produto-cadastro/:codigo', async (req, res) => {
       ORDER BY cg.rotulo
     `;
     const { rows: campos } = await pool.query(camposQuery, [familia]);
-    
+
     const camposPendentes = [];
     const camposPreenchidos = [];
-    
+
     // Verifica cada campo obrigatório
     campos.forEach(campo => {
       const chave = campo.chave;
       const valor = chave.split('.').reduce((o, k) => o?.[k], dados);
       const preenchido = valor !== null && valor !== undefined && String(valor).trim() !== '';
-      
+
       if (preenchido) {
         camposPreenchidos.push({
           chave: campo.chave,
@@ -2236,7 +2237,7 @@ app.get('/api/engenharia/produto-cadastro/:codigo', async (req, res) => {
         });
       }
     });
-    
+
     res.json({ campos_pendentes: camposPendentes, campos_preenchidos: camposPreenchidos });
   } catch (err) {
     console.error('[API] /api/engenharia/produto-cadastro erro:', err);
@@ -2248,21 +2249,21 @@ app.get('/api/engenharia/produto-cadastro/:codigo', async (req, res) => {
 app.get('/api/engenharia/produto-tarefas/:codigo', async (req, res) => {
   try {
     const { codigo } = req.params;
-    
+
     // Busca produto para pegar a família
     const produtoQuery = `SELECT codigo_familia FROM public.produtos_omie
       WHERE TRIM(codigo_produto::text) = TRIM($1) OR TRIM(codigo) = TRIM($1)
       ORDER BY CASE WHEN TRIM(codigo_produto::text) = TRIM($1) THEN 0 ELSE 1 END
       LIMIT 1`;
     const { rows: [produto] } = await pool.query(produtoQuery, [codigo]);
-    
+
     if (!produto) {
       return res.status(404).json({ error: 'Produto não encontrado' });
     }
-    
+
     // Busca atividades da família
     const atividadesFamiliaQuery = `
-      SELECT 
+      SELECT
         af.id,
         af.nome_atividade,
         af.descricao_atividade,
@@ -2281,10 +2282,10 @@ app.get('/api/engenharia/produto-tarefas/:codigo', async (req, res) => {
       ORDER BY af.ordem ASC, af.created_at ASC
     `;
     const { rows: atividadesFamilia } = await pool.query(atividadesFamiliaQuery, [codigo, produto.codigo_familia]);
-    
+
     // Busca atividades específicas do produto
     const atividadesProdutoQuery = `
-      SELECT 
+      SELECT
         ap.id,
         ap.descricao AS nome_atividade,
         ap.observacoes AS descricao_atividade,
@@ -2303,11 +2304,11 @@ app.get('/api/engenharia/produto-tarefas/:codigo', async (req, res) => {
       ORDER BY ap.criado_em DESC
     `;
     const { rows: atividadesProduto } = await pool.query(atividadesProdutoQuery, [codigo]);
-    
+
     const todasAtividades = [...atividadesFamilia, ...atividadesProduto];
     const concluidas = todasAtividades.filter(a => a.concluido || a.nao_aplicavel);
     const pendentes = todasAtividades.filter(a => !a.concluido && !a.nao_aplicavel);
-    
+
     res.json({ concluidas, pendentes, total: todasAtividades.length });
   } catch (err) {
     console.error('[API] /api/engenharia/produto-tarefas erro:', err);
@@ -2319,21 +2320,21 @@ app.get('/api/engenharia/produto-tarefas/:codigo', async (req, res) => {
 app.get('/api/engenharia/produto-compras/:codigo', async (req, res) => {
   try {
     const { codigo } = req.params;
-    
+
     // Busca produto para pegar a família
     const produtoQuery = `SELECT codigo_familia FROM public.produtos_omie
       WHERE TRIM(codigo_produto::text) = TRIM($1) OR TRIM(codigo) = TRIM($1)
       ORDER BY CASE WHEN TRIM(codigo_produto::text) = TRIM($1) THEN 0 ELSE 1 END
       LIMIT 1`;
     const { rows: [produto] } = await pool.query(produtoQuery, [codigo]);
-    
+
     if (!produto) {
       return res.status(404).json({ error: 'Produto não encontrado' });
     }
-    
+
     // Busca atividades da família
     const atividadesFamiliaQuery = `
-      SELECT 
+      SELECT
         af.id,
         af.nome_atividade,
         af.descricao_atividade,
@@ -2352,10 +2353,10 @@ app.get('/api/engenharia/produto-compras/:codigo', async (req, res) => {
       ORDER BY af.ordem ASC, af.created_at ASC
     `;
     const { rows: atividadesFamilia } = await pool.query(atividadesFamiliaQuery, [codigo, produto.codigo_familia]);
-    
+
     // Busca atividades específicas do produto
     const atividadesProdutoQuery = `
-      SELECT 
+      SELECT
         ap.id,
         ap.descricao AS nome_atividade,
         ap.observacoes AS descricao_atividade,
@@ -2374,11 +2375,11 @@ app.get('/api/engenharia/produto-compras/:codigo', async (req, res) => {
       ORDER BY ap.criado_em DESC
     `;
     const { rows: atividadesProduto } = await pool.query(atividadesProdutoQuery, [codigo]);
-    
+
     const todasAtividades = [...atividadesFamilia, ...atividadesProduto];
     const concluidas = todasAtividades.filter(a => a.concluido || a.nao_aplicavel);
     const pendentes = todasAtividades.filter(a => !a.concluido && !a.nao_aplicavel);
-    
+
     res.json({ concluidas, pendentes, total: todasAtividades.length });
   } catch (err) {
     console.error('[API] /api/engenharia/produto-compras erro:', err);
@@ -2539,7 +2540,11 @@ app.post('/api/produtos/cadastro/preview', express.json(), async (req, res) => {
     const rows = [];
     for (let index = 0; index < descricoes.length; index++) {
       const referencia = filtro || descricoes[index];
-      const semelhantes = faixaPadraoSemFiltro ? [] : itens.filter(item => referencia && item.descricao.startsWith(referencia));
+      // Sem filtro explícito, famílias de uso interno continuam na própria faixa.
+      // A descrição do novo produto não deve puxar outra faixa por coincidência textual.
+      const semelhantes = faixaPadraoSemFiltro
+        ? []
+        : itens.filter(item => referencia && item.descricao.startsWith(referencia));
       const prefixados = itens.filter(item => item.codigo.startsWith(prefixo + '.'));
       const itensNaFaixaPadrao = faixaPadraoSemFiltro
         ? prefixados.filter(item => item.sequencial >= faixaPadraoSemFiltro.inicio && item.sequencial <= faixaPadraoSemFiltro.fim)
@@ -2665,7 +2670,7 @@ app.post('/api/produtos/incluir-omie', async (req, res) => {
     }
 
     const omieData = await omieResp.json();
-    
+
     console.log('[API] /api/produtos/incluir-omie → sucesso:', omieData);
     res.json(omieData);
   } catch (err) {
@@ -2710,9 +2715,9 @@ app.get('/api/produtos/consultar-omie/:codigoProduto', async (req, res) => {
     }
 
     const omieData = await omieResp.json();
-    
+
     console.log('[API] /api/produtos/consultar-omie → encontrado:', omieData.codigo_produto);
-    
+
     // Sincroniza produto para o PostgreSQL
     try {
       await sincronizarProdutoParaPostgres(omieData);
@@ -2721,7 +2726,7 @@ app.get('/api/produtos/consultar-omie/:codigoProduto', async (req, res) => {
       console.error('[API] Erro ao sincronizar produto:', syncErr);
       // Não falha a requisição se a sincronização der erro
     }
-    
+
     res.json({ ...omieData, encontrado: true });
   } catch (err) {
     console.error('[API] /api/produtos/consultar-omie erro:', err);
@@ -2833,7 +2838,7 @@ app.get('/api/compras/solicitacoes', async (_req, res) => {
     await pool.query(`ALTER TABLE compras.solicitacao_compras ADD COLUMN IF NOT EXISTS observacao_reprovacao TEXT;`);
 
     const { rows } = await pool.query(`
-      SELECT 
+      SELECT
         id,
         produto_codigo,
         produto_descricao,
@@ -3223,7 +3228,7 @@ app.put('/api/compras/solicitacoes/:id', express.json(), async (req, res) => {
     if (!Number.isInteger(id)) return res.status(400).json({ error: 'ID inválido' });
 
     const { status, prazo_estipulado, quem_recebe, quantidade, grupo_requisicao, retorno_cotacao, produto_descricao, produto_codigo } = req.body || {};
-    
+
     const allowedStatus = [
       'aguardando aprovação',
       'aguardando cotação',
@@ -3304,7 +3309,7 @@ app.put('/api/compras/solicitacoes/:id', express.json(), async (req, res) => {
       fields.push(`produto_codigo = $${idx++}`);
       values.push(produto_codigo || null);
     }
-    
+
     if (!fields.length) return res.status(400).json({ error: 'Nada para atualizar' });
 
     await client.query('CREATE SCHEMA IF NOT EXISTS compras');
@@ -3350,7 +3355,7 @@ app.post('/api/compras/solicitacoes/:id/enviar-requisicao', express.json(), asyn
     }
 
     const { rows } = await pool.query(
-      `SELECT 
+      `SELECT
         id,
         produto_codigo,
         produto_descricao,
@@ -4371,7 +4376,28 @@ app.post('/api/rh/reservas', async (req, res) => {
       }
     }
 
-    return res.json({ ok: true, ids: [reservaId], googleAgenda });
+    let emailAviso = null;
+    try {
+      const { notificarNovaReserva } = require('./utils/reservasEmail');
+      emailAviso = await notificarNovaReserva({
+        id: reservaId,
+        tipo: tipoEspaco,
+        tema,
+        data: dataReserva,
+        inicio: horaInicio,
+        fim: horaFim,
+        cafe,
+        descricao,
+        visitantes,
+        linkReuniao,
+        participantes,
+        criadoPor: userLogado
+      });
+    } catch (errEmail) {
+      console.error('[API] /api/rh/reservas POST e-mail aviso falhou:', errEmail?.message || errEmail);
+    }
+
+    return res.json({ ok: true, ids: [reservaId], googleAgenda, emailAviso });
   } catch (err) {
     try { await client.query('ROLLBACK'); } catch {}
     console.error('[API] /api/rh/reservas POST erro:', err);
@@ -5721,7 +5747,7 @@ async function sincronizarProdutoParaPostgres(produto) {
     if (partes.length !== 3) return null;
     return `${partes[2]}-${partes[1]}-${partes[0]}`; // YYYY-MM-DD
   };
-  
+
   const sql = `
     INSERT INTO public.produtos_omie (
       codigo_produto, codigo_produto_integracao, codigo, descricao, descricao_familia, unidade,
@@ -5758,7 +5784,7 @@ async function sincronizarProdutoParaPostgres(produto) {
       halt = EXCLUDED.halt,
       ualt = EXCLUDED.ualt
   `;
-  
+
   const valores = [
     produto.codigo_produto || null,
     produto.codigo_produto_integracao || produto.codigo || null,
@@ -5790,7 +5816,7 @@ async function sincronizarProdutoParaPostgres(produto) {
     produto.codigo_familia || null,
     produto.codInt_familia || null
   ];
-  
+
   // set_config com is_local=true só vale dentro de transação — sem BEGIN o
   // gatilho trg_guard_produtos_omie_webhook_only rejeita a escrita.
   const client = await pool.connect();
@@ -6292,44 +6318,44 @@ app.post(['/webhooks/omie/clientes', '/api/webhooks/omie/clientes'],
     try {
       const body = req.body || {};
       const event = body.event || body;
-      
+
       // Log do webhook recebido
       console.log('[webhooks/omie/clientes] Webhook recebido:', JSON.stringify(body, null, 2));
-      
+
       // Campos que podem vir no webhook da Omie
       const topic = body.topic || event.topic || '';  // Ex: "ClienteFornecedor.Incluido"
-      const codigoClienteOmie = event.codigo_cliente_omie || 
-                                 event.codigoClienteOmie || 
+      const codigoClienteOmie = event.codigo_cliente_omie ||
+                                 event.codigoClienteOmie ||
                                  event.nCodCli ||
                                  body.codigo_cliente_omie ||
                                  body.codigoClienteOmie ||
                                  body.nCodCli;
-      
+
       if (!codigoClienteOmie) {
         console.warn('[webhooks/omie/clientes] Webhook sem codigo_cliente_omie:', JSON.stringify(body));
         return res.json({ ok: true, msg: 'Sem codigo_cliente_omie para processar' });
       }
-      
+
       console.log(`[webhooks/omie/clientes] Processando evento "${topic}" para cliente ${codigoClienteOmie}`);
-      
+
       // Se for exclusão, apenas marca como inativo no banco
       if (topic.includes('Excluido') || event.excluido || body.excluido) {
         await pool.query(`
-          UPDATE omie.fornecedores 
+          UPDATE omie.fornecedores
           SET inativo = true, updated_at = NOW()
           WHERE codigo_cliente_omie = $1
         `, [codigoClienteOmie]);
-        
+
         console.log(`[webhooks/omie/clientes] Cliente ${codigoClienteOmie} marcado como inativo (excluído)`);
-        
-        return res.json({ 
-          ok: true, 
+
+        return res.json({
+          ok: true,
           codigo_cliente_omie: codigoClienteOmie,
           acao: 'excluido',
-          atualizado: true 
+          atualizado: true
         });
       }
-      
+
       // Para inclusão ou alteração, busca dados completos na API da Omie
       const response = await fetch('https://app.omie.com.br/api/v1/geral/clientes/', {
         method: 'POST',
@@ -6343,26 +6369,26 @@ app.post(['/webhooks/omie/clientes', '/api/webhooks/omie/clientes'],
           }]
         })
       });
-      
+
       if (!response.ok) {
         const errorText = await response.text();
         console.error(`[webhooks/omie/clientes] Erro na API Omie: ${response.status} - ${errorText}`);
         throw new Error(`Omie API retornou ${response.status}`);
       }
-      
+
       const cliente = await response.json();
-      
+
       // Atualiza no banco
       await upsertFornecedor(cliente);
-      
+
       const acao = topic.includes('Incluido') ? 'incluido' : 'alterado';
       console.log(`[webhooks/omie/clientes] Cliente ${codigoClienteOmie} ${acao} com sucesso`);
-      
-      res.json({ 
-        ok: true, 
+
+      res.json({
+        ok: true,
         codigo_cliente_omie: codigoClienteOmie,
         acao: acao,
-        atualizado: true 
+        atualizado: true
       });
     } catch (err) {
       console.error('[webhooks/omie/clientes] erro:', err);
@@ -6386,13 +6412,13 @@ app.get('/api/fornecedores/status', async (req, res) => {
     const { rows: ultimoUpdate } = await pool.query(
       'SELECT MAX(updated_at) AS ultima_atualizacao FROM omie.fornecedores'
     );
-    
+
     // inativo é BOOLEAN, então usamos conversão correta
     const { rows: inativoCount } = await pool.query(`
-      SELECT COUNT(*) AS count FROM omie.fornecedores 
+      SELECT COUNT(*) AS count FROM omie.fornecedores
       WHERE inativo = true
     `);
-    
+
     res.json({
       ok: true,
       total_fornecedores: parseInt(fornecedoresCount[0]?.count || 0),
@@ -6414,19 +6440,19 @@ app.post(['/webhooks/omie/produtos', '/api/webhooks/omie/produtos'],
     try {
       const body = req.body || {};
       const { topic, author, appKey, event, messageId } = body;
-      
+
       console.log('[webhooks/omie/produtos] Webhook recebido:', JSON.stringify(body, null, 2));
-      
+
       // Campos que podem vir no webhook da Omie
       const codigoProduto = body.codigo_produto || body.nCodProd;
-      
+
       if (!codigoProduto) {
         console.warn('[webhooks/omie/produtos] Webhook sem codigo_produto:', JSON.stringify(body));
         return res.json({ ok: true, message: 'Webhook sem codigo_produto, ignorado' });
       }
-      
+
       console.log(`[webhooks/omie/produtos] Processando evento "${topic}" para produto ${codigoProduto}`);
-      
+
       // Excluído no Omie → marca fantasma local como inativo (não apaga imagens/anexos).
       // bloqueado='S' ainda existe no Omie — segue o fluxo normal de consulta/upsert.
       if (topic === 'Produto.Excluido' || body.inativo === 'S') {
@@ -6445,7 +6471,7 @@ app.post(['/webhooks/omie/produtos', '/api/webhooks/omie/produtos'],
           imagens: 'preservadas (Supabase)'
         });
       }
-      
+
       // Consulta produto na Omie para pegar imagens atualizadas
       const omieBody = {
         call: 'ConsultarProduto',
@@ -6453,19 +6479,19 @@ app.post(['/webhooks/omie/produtos', '/api/webhooks/omie/produtos'],
         app_secret: process.env.OMIE_APP_SECRET,
         param: [{ codigo_produto: parseInt(codigoProduto) }]
       };
-      
+
       const response = await fetch('https://app.omie.com.br/api/v1/geral/produtos/', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(omieBody)
       });
-      
+
       if (!response.ok) {
         const errorText = await response.text();
         console.error(`[webhooks/omie/produtos] Erro na API Omie: ${response.status} - ${errorText}`);
         return res.status(500).json({ ok: false, error: 'Erro ao consultar produto na Omie' });
       }
-      
+
       const omieData = await response.json();
 
       // Atualiza também o cadastro do produto na tabela principal
@@ -6490,7 +6516,7 @@ app.post(['/webhooks/omie/produtos', '/api/webhooks/omie/produtos'],
       } catch (syncErr) {
         console.error(`[webhooks/omie/produtos] Erro ao atualizar public.produtos_omie (${codigoProduto}):`, syncErr?.message || syncErr);
       }
-      
+
       // Imagens NÃO são mais atualizadas via Omie — Supabase é a fonte oficial.
       console.log(`[webhooks/omie/produtos] Produto ${codigoProduto} cadastro atualizado (imagens ignoradas — gerenciadas pelo Supabase)`);
 
@@ -6610,10 +6636,10 @@ app.post(['/webhooks/omie/pedidos-compra', '/api/webhooks/omie/pedidos-compra'],
       const body = req.body || {};
       // event pode ser body.event, body.evento, ou o próprio body
       const event = body.evento || (typeof body.event === 'object' ? body.event : null) || body;
-      
+
       // Log do webhook recebido
       console.log('[webhooks/omie/pedidos-compra] Webhook recebido:', JSON.stringify(body, null, 2));
-      
+
       // Campos que podem vir no webhook da Omie
       const topic = body.topic || event.topic || '';  // Ex: "CompraProduto.Incluida"
       const isRequisicaoTopic = topic.startsWith('RequisicaoProduto.');
@@ -6622,7 +6648,7 @@ app.post(['/webhooks/omie/pedidos-compra', '/api/webhooks/omie/pedidos-compra'],
       if (isRequisicaoTopic) {
         // Extrai dados do cabecalho_consulta se existir
         const cabecalho = event.cabecalho_consulta || event.cabecalho || {};
-        
+
         const codReqCompra = event.codReqCompra
           || event.cod_req_compra
           || body.codReqCompra
@@ -6664,7 +6690,7 @@ app.post(['/webhooks/omie/pedidos-compra', '/api/webhooks/omie/pedidos-compra'],
             if (topic.includes('Alterada')) {
               console.log(`[webhooks/omie/pedidos-compra] 🔄 Requisição ALTERADA - verificará se há novos itens`);
             }
-            
+
             // Se for exclusão, apenas marca como inativo
             if (topic.includes('Excluida') || event.excluido || body.excluido) {
               if (codReqCompra) {
@@ -6693,11 +6719,11 @@ app.post(['/webhooks/omie/pedidos-compra', '/api/webhooks/omie/pedidos-compra'],
 
             // Para inclusão/alteração, busca dados completos na API da Omie
             // Implementa retry com delay pois a Omie pode demorar para processar os itens
-        
+
             // Função auxiliar para mapear campos do cabecalho_consulta para nomes esperados
             const mapearCabecalhoParaRequisicao = (cabecalho) => {
               if (!cabecalho) return {};
-              
+
               return {
                 nCodPed: cabecalho.nCodPed,
                 cCodIntPed: cabecalho.cCodIntPed,
@@ -6713,7 +6739,7 @@ app.post(['/webhooks/omie/pedidos-compra', '/api/webhooks/omie/pedidos-compra'],
                 nCodFor: cabecalho.nCodFor || null
               };
             };
-            
+
             const param = codReqCompra
               ? { codReqCompra: parseInt(codReqCompra) }
               : { codIntReqCompra: String(codIntReqCompra) };
@@ -6727,7 +6753,7 @@ app.post(['/webhooks/omie/pedidos-compra', '/api/webhooks/omie/pedidos-compra'],
             const buscarRequisicaoComRetry = async () => {
               while (tentativa < maxTentativas) {
                 tentativa++;
-                
+
                 if (tentativa > 1) {
                   console.log(`[webhooks/omie/pedidos-compra] 🔄 Tentativa ${tentativa}/${maxTentativas} após ${(tentativa - 1) * 5}s de delay...`);
                   await new Promise(resolve => setTimeout(resolve, delayEntreTentativas));
@@ -6735,7 +6761,7 @@ app.post(['/webhooks/omie/pedidos-compra', '/api/webhooks/omie/pedidos-compra'],
 
                 // Tenta com codReqCompra primeiro
                 let param = { codReqCompra: parseInt(codReqCompra) };
-                
+
                 const responseReq = await fetch('https://app.omie.com.br/api/v1/produtos/requisicaocompra/', {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
@@ -6750,7 +6776,7 @@ app.post(['/webhooks/omie/pedidos-compra', '/api/webhooks/omie/pedidos-compra'],
                 if (!responseReq.ok) {
                   const errorText = await responseReq.text();
                   console.error(`[webhooks/omie/pedidos-compra] ❌ Erro na API Omie (tentativa ${tentativa}): ${responseReq.status} - ${errorText}`);
-                  
+
                   // Se for a última tentativa e temos dados no webhook, usa fallback
                   if (tentativa === maxTentativas && (event.cabecalho_consulta || body.requisicaoCadastro)) {
                     console.log('[webhooks/omie/pedidos-compra] Usando dados do webhook como fallback após todas tentativas');
@@ -6768,26 +6794,26 @@ app.post(['/webhooks/omie/pedidos-compra', '/api/webhooks/omie/pedidos-compra'],
                 }
 
                 const reqData = await responseReq.json();
-                
+
                 // Log detalhado da resposta da API (somente no desenvolvimento)
                 console.log(`[webhooks/omie/pedidos-compra] 🔍 Resposta da API (tentativa ${tentativa}):`, JSON.stringify(reqData, null, 2));
-                
+
                 // Tenta múltiplas localizações dos itens
-                let itens = reqData?.requisicaoCadastro?.ItensReqCompra 
-                         || reqData?.requisicaoCadastro?.itens_req_compra 
+                let itens = reqData?.requisicaoCadastro?.ItensReqCompra
+                         || reqData?.requisicaoCadastro?.itens_req_compra
                          || reqData?.ItensReqCompra
-                         || reqData?.itens_req_compra 
+                         || reqData?.itens_req_compra
                          || [];
-                
+
                 // Se ainda não encontrou itens, tenta com codIntReqCompra (para requisições que só têm ID interno)
                 if ((!itens || itens.length === 0) && codIntReqCompra && tentativa < maxTentativas) {
                   console.log(`[webhooks/omie/pedidos-compra] ⚠️ Nenhum item com codReqCompra na tentativa ${tentativa}, tentando com codIntReqCompra...`);
-                  
+
                   // Aguarda um pouco mais antes de tentar com outro parâmetro
                   await new Promise(resolve => setTimeout(resolve, 2000));
-                  
+
                   param = { codIntReqCompra: String(codIntReqCompra) };
-                  
+
                   const responseReq2 = await fetch('https://app.omie.com.br/api/v1/produtos/requisicaocompra/', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -6798,17 +6824,17 @@ app.post(['/webhooks/omie/pedidos-compra', '/api/webhooks/omie/pedidos-compra'],
                       param: [param]
                     })
                   });
-                  
+
                   if (responseReq2.ok) {
                     const reqData2 = await responseReq2.json();
                     console.log(`[webhooks/omie/pedidos-compra] 🔍 Resposta com codIntReqCompra:`, JSON.stringify(reqData2, null, 2));
-                    
-                    itens = reqData2?.requisicaoCadastro?.ItensReqCompra 
-                         || reqData2?.requisicaoCadastro?.itens_req_compra 
+
+                    itens = reqData2?.requisicaoCadastro?.ItensReqCompra
+                         || reqData2?.requisicaoCadastro?.itens_req_compra
                          || reqData2?.ItensReqCompra
-                         || reqData2?.itens_req_compra 
+                         || reqData2?.itens_req_compra
                          || [];
-                    
+
                     if (itens.length > 0) {
                       // Usa dados do segundo response
                       return {
@@ -6821,7 +6847,7 @@ app.post(['/webhooks/omie/pedidos-compra', '/api/webhooks/omie/pedidos-compra'],
                     }
                   }
                 }
-                
+
                 // Se encontrou itens, retorna sucesso
                 if (itens.length > 0) {
                   console.log(`[webhooks/omie/pedidos-compra] ✅ ${itens.length} item(ns) encontrado(s) na tentativa ${tentativa}`);
@@ -6832,29 +6858,29 @@ app.post(['/webhooks/omie/pedidos-compra', '/api/webhooks/omie/pedidos-compra'],
                     }
                   };
                 }
-                
+
                 // Se não tem itens e não é a última tentativa, tenta novamente
                 if (tentativa < maxTentativas) {
                   console.log(`[webhooks/omie/pedidos-compra] ⚠️ Nenhum item encontrado na tentativa ${tentativa}, aguardando para tentar novamente...`);
                   continue;
                 }
-                
+
                 // Última tentativa sem itens - usa fallback do webhook se disponível
                 console.log('[webhooks/omie/pedidos-compra] ⚠️ Nenhum item encontrado após todas tentativas');
                 return reqData;
               }
-              
+
               throw new Error('Máximo de tentativas atingido sem sucesso');
             };
 
             requisicao = await buscarRequisicaoComRetry();
-            
+
             // Se recebemos cabecalho_consulta no webhook, mesclamos com os dados da API
             if (event.cabecalho_consulta) {
               // Garante que requisicaoCadastro existe
               if (!requisicao) requisicao = {};
               if (!requisicao.requisicaoCadastro) requisicao.requisicaoCadastro = {};
-              
+
               // Sobrescreve campos específicos do webhook (prioridade para webhook)
               // cNumero e cEtapa vêm do webhook e têm prioridade
               if (event.cabecalho_consulta.cNumero) {
@@ -6863,7 +6889,7 @@ app.post(['/webhooks/omie/pedidos-compra', '/api/webhooks/omie/pedidos-compra'],
               if (event.cabecalho_consulta.cEtapa) {
                 requisicao.requisicaoCadastro.cEtapa = event.cabecalho_consulta.cEtapa;
               }
-              
+
               // Garante que nCodPed e cCodIntPed estejam definidos
               if (!requisicao.requisicaoCadastro.nCodPed && event.cabecalho_consulta.nCodPed) {
                 requisicao.requisicaoCadastro.nCodPed = event.cabecalho_consulta.nCodPed;
@@ -6872,7 +6898,7 @@ app.post(['/webhooks/omie/pedidos-compra', '/api/webhooks/omie/pedidos-compra'],
                 requisicao.requisicaoCadastro.cCodIntPed = event.cabecalho_consulta.cCodIntPed;
               }
             }
-            
+
             await upsertRequisicaoCompra(requisicao, topic);
 
             const acaoReq = topic.includes('Incluida') ? 'incluida' : 'alterada';
@@ -6901,11 +6927,11 @@ app.post(['/webhooks/omie/pedidos-compra', '/api/webhooks/omie/pedidos-compra'],
                       body['cNúmero'] ||
                       event.codigo_numero ||
                       body.codigo_numero;
-      
+
       let nCodPed = cabecalho.nCodPed ||        // PRIORIDADE: dentro do cabecalho primeiro
                     cabecalho.n_cod_ped ||
-                    event.nCodPed || 
-                    event.n_cod_ped || 
+                    event.nCodPed ||
+                    event.n_cod_ped ||
                     body.nCodPed ||
                     body.n_cod_ped ||
                     event.codigo_pedido ||
@@ -6931,9 +6957,9 @@ app.post(['/webhooks/omie/pedidos-compra', '/api/webhooks/omie/pedidos-compra'],
         console.warn('[webhooks/omie/pedidos-compra] Webhook sem identificador de pedido (nCodPed/cNumero):', JSON.stringify(body));
         return res.json({ ok: true, msg: 'Sem nCodPed/cNumero para processar' });
       }
-      
+
       const identificadorPedido = cNumero || nCodPed;
-      
+
       // ===== DEDUPLICAÇÃO: Verifica se já processamos este messageId =====
       const messageId = body.messageId;
       if (messageId) {
@@ -6946,13 +6972,13 @@ app.post(['/webhooks/omie/pedidos-compra', '/api/webhooks/omie/pedidos-compra'],
           return res.json({ ok: true, msg: 'Webhook duplicado - já processado' });
         }
       }
-      
+
       console.log(`[webhooks/omie/pedidos-compra] Processando evento "${topic}" para pedido ${identificadorPedido}`);
-      
+
       // Se for exclusão ou cancelamento, apenas marca como inativo no banco
       if (topic.includes('Excluida') || topic.includes('Cancelada') || event.excluido || body.excluido) {
         await pool.query(`
-          UPDATE compras.pedidos_omie 
+          UPDATE compras.pedidos_omie
           SET inativo = true,
               pendente_omie = FALSE,
               evento_webhook = $1,
@@ -6962,32 +6988,32 @@ app.post(['/webhooks/omie/pedidos-compra', '/api/webhooks/omie/pedidos-compra'],
           WHERE (n_cod_ped = $3)
              OR (TRIM(COALESCE(c_numero, '')) = TRIM($4))
         `, [topic, messageId || null, nCodPed || null, cNumero || null]);
-        
+
         const acao = topic.includes('Excluida') ? 'excluido' : 'cancelado';
         console.log(`[webhooks/omie/pedidos-compra] Pedido ${identificadorPedido} marcado como inativo (${acao})`);
-        
-        return res.json({ 
-          ok: true, 
+
+        return res.json({
+          ok: true,
           n_cod_ped: nCodPed || null,
           c_numero: cNumero || null,
           acao: acao,
-          atualizado: true 
+          atualizado: true
         });
       }
-      
+
       // ===== RESPOSTA ASSÍNCRONA: Responde imediatamente para evitar timeout =====
-      const acao = topic.includes('Incluida') ? 'incluido' : 
+      const acao = topic.includes('Incluida') ? 'incluido' :
                    topic.includes('Encerrada') ? 'encerrado' :
                    topic.includes('EtapaAlterada') ? 'etapa alterada' : 'alterado';
-      
-      res.json({ 
-        ok: true, 
+
+      res.json({
+        ok: true,
         n_cod_ped: nCodPed || null,
         c_numero: cNumero || null,
         acao: acao,
-        atualizado: true 
+        atualizado: true
       });
-      
+
       // ===== PROCESSAMENTO EM BACKGROUND =====
       // Para inclusão, alteração, encerramento ou mudança de etapa, busca dados completos na API da Omie
       (async () => {
@@ -7143,15 +7169,15 @@ app.post(['/webhooks/omie/pedidos-compra', '/api/webhooks/omie/pedidos-compra'],
           if (numeroWebhook) {
             pedido.cabecalho.cNumero = numeroWebhook;
           }
-          
+
           // Atualiza no banco com messageId (pedido confirmado via ConsultarPedCompra)
           await upsertPedidoCompra(pedido, topic, messageId, { confirmadoOmie: true });
-          
+
           // Sincroniza com solicitacao_compras
           if (nCodPed) {
             await sincronizarPedidoComSolicitacao(nCodPed);
           }
-          
+
           console.log(`[webhooks/omie/pedidos-compra] Pedido ${nCodPed} ${acao} com sucesso`);
         } catch (err) {
           console.error(`[webhooks/omie/pedidos-compra] Erro no processamento assíncrono do pedido ${nCodPed}:`, err);
@@ -7178,28 +7204,28 @@ app.post(['/webhooks/omie/recebimentos-nfe', '/api/webhooks/omie/recebimentos-nf
         || (body.payload && typeof body.payload.event === 'object' ? body.payload.event : null)
         || (body.data && typeof body.data.event === 'object' ? body.data.event : null)
         || body;
-      
+
       // Log do webhook recebido
       console.log('[webhooks/omie/recebimentos-nfe] Webhook recebido:', JSON.stringify(body, null, 2));
-      
+
       const topic = body.topic || event.topic || '';  // Ex: "RecebimentoProduto.Incluido" ou "NotaEntrada.Incluida"
       const messageId = body.messageId || body.message_id || null;
       const author = body.author || event.author || null;
       const statusPorTopic = inferNotaEntradaStatusFromTopic(topic);
-      
+
       // Extrai nIdReceb ou cChaveNfe do evento
       // Omie pode enviar em: event.nIdReceb, event.cabec.nIdReceb, event.cabecalho.nIdReceb, etc
       // Procura em múltiplas localizações possíveis
-      const nIdReceb = event.nIdReceb 
-        || event.n_id_receb 
-        || body.nIdReceb 
+      const nIdReceb = event.nIdReceb
+        || event.n_id_receb
+        || body.nIdReceb
         || body.n_id_receb
         || event.cabec?.nIdReceb
         || body.cabec?.nIdReceb
         || event.cabecalho?.nIdReceb        // ← Webhook real envia aqui!
         || body.cabecalho?.nIdReceb
         || null;
-        
+
       const cChaveNfe = event.cChaveNfe
         || event.cChaveNFe
         || event.c_chave_nfe
@@ -7227,7 +7253,7 @@ app.post(['/webhooks/omie/recebimentos-nfe', '/api/webhooks/omie/recebimentos-nf
         || body.cabecalho?.cDadosAdicionais
         || body.cabecalho?.c_dados_adicionais
         || null;
-      
+
       if (!nIdReceb && !cChaveNfe) {
         console.warn('[webhooks/omie/recebimentos-nfe] Webhook sem nIdReceb/cChaveNfe:', JSON.stringify(body));
         return res.json({ ok: true, msg: 'Sem nIdReceb/cChaveNfe para processar' });
@@ -7236,17 +7262,17 @@ app.post(['/webhooks/omie/recebimentos-nfe', '/api/webhooks/omie/recebimentos-nf
       if (!isRecebimentoNfeLifecycleTopic(topic)) {
         return res.json({ ok: true, msg: 'Topic nao tratado por este endpoint', topic });
       }
-      
+
       console.log(`[webhooks/omie/recebimentos-nfe] Processando evento "${topic}" para recebimento ${nIdReceb || cChaveNfe}`);
-      
+
       // ===== RESPOSTA IMEDIATA =====
-      res.json({ 
-        ok: true, 
-        n_id_receb: nIdReceb || null, 
-        c_chave_nfe: cChaveNfe || null, 
-        status: 'processing' 
+      res.json({
+        ok: true,
+        n_id_receb: nIdReceb || null,
+        c_chave_nfe: cChaveNfe || null,
+        status: 'processing'
       });
-      
+
       // ===== PROCESSAMENTO ASSÍNCRONO =====
       (async () => {
         let processadoComSucesso = false;
@@ -7386,7 +7412,7 @@ app.post(['/webhooks/omie/recebimentos-nfe', '/api/webhooks/omie/recebimentos-nf
           }
         }
       })();
-      
+
     } catch (err) {
       console.error('[webhooks/omie/recebimentos-nfe] erro:', err);
       return res.status(500).json({ ok: false, error: String(err?.message || err) });
@@ -7580,10 +7606,10 @@ app.post('/api/fornecedores/sync', express.json(), async (req, res) => {
 app.post('/api/compras/pedidos-omie/sync', express.json(), async (req, res) => {
   try {
     const filtros = req.body || {};
-    
+
     console.log('[API] Iniciando sincronização de pedidos de compra da Omie...');
     const result = await syncPedidosCompraOmie(filtros);
-    
+
     res.json(result);
   } catch (err) {
     console.error('[API /api/compras/pedidos-omie/sync] erro:', err);
@@ -7597,10 +7623,10 @@ app.post('/api/compras/pedidos-omie/sync', express.json(), async (req, res) => {
 app.post('/api/logistica/recebimentos-nfe/sync', express.json(), async (req, res) => {
   try {
     const filtros = req.body || {};
-    
+
     console.log('[API] Iniciando sincronização de recebimentos de NF-e da Omie...');
     const result = await syncRecebimentosNFeOmie(filtros);
-    
+
     res.json(result);
   } catch (err) {
     console.error('[API /api/logistica/recebimentos-nfe/sync] erro:', err);
@@ -7653,15 +7679,15 @@ app.post('/api/compras/requisicoes-omie/upsert', express.json(), async (req, res
     const requisicao = req.body || {};
 
     // Aceita codReqCompra, cod_req_compra, nCodPed, ou qualquer variação
-    const hasCodReqCompra = requisicao.codReqCompra 
-      || requisicao.cod_req_compra 
+    const hasCodReqCompra = requisicao.codReqCompra
+      || requisicao.cod_req_compra
       || requisicao.nCodPed
       || requisicao.n_cod_ped;
-    
+
     if (!hasCodReqCompra) {
-      return res.status(400).json({ 
-        ok: false, 
-        error: 'codReqCompra/nCodPed é obrigatório' 
+      return res.status(400).json({
+        ok: false,
+        error: 'codReqCompra/nCodPed é obrigatório'
       });
     }
 
@@ -7675,11 +7701,11 @@ app.post('/api/compras/requisicoes-omie/upsert', express.json(), async (req, res
     }
 
     console.log(`[API /api/compras/requisicoes-omie/upsert] Inserindo requisição: ${requisicao.codReqCompra}`);
-    
+
     await upsertRequisicaoCompra(requisicao, 'manual-api');
 
-    res.json({ 
-      ok: true, 
+    res.json({
+      ok: true,
       cod_req_compra: requisicao.codReqCompra,
       msg: 'Requisição inserida/atualizada com sucesso'
     });
@@ -7694,7 +7720,7 @@ app.get('/api/compras/requisicoes-omie/get', async (req, res) => {
   try {
     const { codReqCompra, nCodPed } = req.query;
     const cod = codReqCompra || nCodPed;
-    
+
     if (!cod) {
       return res.status(400).json({ ok: false, error: 'codReqCompra ou nCodPed obrigatório' });
     }
@@ -7720,7 +7746,7 @@ app.get('/api/compras/pedidos-omie/get', async (req, res) => {
   try {
     const { nCodPed, n_cod_ped } = req.query;
     const cod = nCodPed || n_cod_ped;
-    
+
     if (!cod) {
       return res.status(400).json({ ok: false, error: 'nCodPed obrigatório' });
     }
@@ -7745,7 +7771,7 @@ app.get('/api/compras/pedidos-omie/get', async (req, res) => {
 app.get('/api/compras/pedidos-omie/teste-api', async (req, res) => {
   try {
     console.log('[API] Testando TODAS as combinações de filtros da API Omie...');
-    
+
     const analisarEtapas = (pedidos) => {
       const etapas = {};
       for (const ped of (pedidos || [])) {
@@ -7754,7 +7780,7 @@ app.get('/api/compras/pedidos-omie/teste-api', async (req, res) => {
       }
       return etapas;
     };
-    
+
     const testarFiltro = async (nome, filtros) => {
       const response = await fetch('https://app.omie.com.br/api/v1/produtos/pedidocompra/', {
         method: 'POST',
@@ -7780,7 +7806,7 @@ app.get('/api/compras/pedidos-omie/teste-api', async (req, res) => {
         tem_etapa_40_60_80: Object.keys(analisarEtapas(data.pedidos_pesquisa)).some(e => ['40', '60', '80'].includes(e))
       };
     };
-    
+
     // Testa todas as combinações possíveis
     const testes = [
       { nome: "1. Sem filtros (padrão)", filtros: {} },
@@ -7789,15 +7815,15 @@ app.get('/api/compras/pedidos-omie/teste-api', async (req, res) => {
       { nome: "4. Apenas recebidos", filtros: { lExibirPedidosRecebidos: true } },
       { nome: "5. Apenas cancelados", filtros: { lExibirPedidosCancelados: true } },
       { nome: "6. Apenas encerrados", filtros: { lExibirPedidosEncerrados: true } },
-      { nome: "7. Faturados + Recebidos", filtros: { 
+      { nome: "7. Faturados + Recebidos", filtros: {
         lExibirPedidosFaturados: true,
-        lExibirPedidosRecebidos: true 
+        lExibirPedidosRecebidos: true
       }},
       { nome: "8. Parciais (RecParciais)", filtros: { lExibirPedidosRecParciais: true } },
       { nome: "9. Parciais (FatParciais)", filtros: { lExibirPedidosFatParciais: true } },
-      { nome: "10. Ambos parciais", filtros: { 
+      { nome: "10. Ambos parciais", filtros: {
         lExibirPedidosRecParciais: true,
-        lExibirPedidosFatParciais: true 
+        lExibirPedidosFatParciais: true
       }},
       { nome: "11. Todos = true", filtros: {
         lExibirPedidosPendentes: true,
@@ -7826,7 +7852,7 @@ app.get('/api/compras/pedidos-omie/teste-api', async (req, res) => {
         lExibirPedidosFatParciais: true
       }}
     ];
-    
+
     const resultados = [];
     for (const teste of testes) {
       const resultado = await testarFiltro(teste.nome, teste.filtros);
@@ -7835,10 +7861,10 @@ app.get('/api/compras/pedidos-omie/teste-api', async (req, res) => {
       // Pequeno delay para não sobrecarregar a API
       await new Promise(resolve => setTimeout(resolve, 200));
     }
-    
+
     // Encontra qual teste retornou etapas 40, 60, 80
     const testeComEtapas = resultados.find(r => r.tem_etapa_40_60_80);
-    
+
     const resposta = {
       ok: true,
       resumo: {
@@ -7848,10 +7874,10 @@ app.get('/api/compras/pedidos-omie/teste-api', async (req, res) => {
       },
       resultados_completos: resultados
     };
-    
+
     console.log('[API] Testes concluídos:', JSON.stringify(resposta.resumo, null, 2));
     res.json(resposta);
-    
+
   } catch (err) {
     console.error('[API /api/compras/pedidos-omie/teste-api] erro:', err);
     res.status(500).json({ ok: false, error: err.message });
@@ -7862,87 +7888,87 @@ app.get('/api/compras/pedidos-omie/teste-api', async (req, res) => {
 // Endpoint para listar pedidos de compra do banco local
 app.get('/api/compras/pedidos-omie', async (req, res) => {
   try {
-    const { 
-      fornecedor, 
-      etapa, 
-      data_de, 
-      data_ate, 
+    const {
+      fornecedor,
+      etapa,
+      data_de,
+      data_ate,
       limit = 100,
       offset = 0
     } = req.query;
-    
+
     let query = 'SELECT * FROM compras.pedidos_omie WHERE 1=1';
     const params = [];
     let paramCount = 1;
-    
+
     // Filtro por fornecedor
     if (fornecedor) {
       query += ` AND n_cod_for = $${paramCount}`;
       params.push(fornecedor);
       paramCount++;
     }
-    
+
     // Filtro por etapa
     if (etapa) {
       query += ` AND c_etapa = $${paramCount}`;
       params.push(etapa);
       paramCount++;
     }
-    
+
     // Filtro por data inicial
     if (data_de) {
       query += ` AND d_inc_data >= $${paramCount}`;
       params.push(data_de);
       paramCount++;
     }
-    
+
     // Filtro por data final
     if (data_ate) {
       query += ` AND d_inc_data <= $${paramCount}`;
       params.push(data_ate);
       paramCount++;
     }
-    
+
     // Ordenação e paginação
     query += ` ORDER BY d_inc_data DESC, n_cod_ped DESC LIMIT $${paramCount} OFFSET $${paramCount + 1}`;
     params.push(limit, offset);
-    
+
     const { rows } = await pool.query(query, params);
-    
+
     // Buscar total de registros
     let countQuery = 'SELECT COUNT(*) as total FROM compras.pedidos_omie WHERE 1=1';
     const countParams = [];
     let countParamCount = 1;
-    
+
     if (fornecedor) {
       countQuery += ` AND n_cod_for = $${countParamCount}`;
       countParams.push(fornecedor);
       countParamCount++;
     }
-    
+
     if (etapa) {
       countQuery += ` AND c_etapa = $${countParamCount}`;
       countParams.push(etapa);
       countParamCount++;
     }
-    
+
     if (data_de) {
       countQuery += ` AND d_inc_data >= $${countParamCount}`;
       countParams.push(data_de);
       countParamCount++;
     }
-    
+
     if (data_ate) {
       countQuery += ` AND d_inc_data <= $${countParamCount}`;
       countParams.push(data_ate);
       countParamCount++;
     }
-    
+
     const countResult = await pool.query(countQuery, countParams);
     const total = parseInt(countResult.rows[0].total);
-    
-    res.json({ 
-      ok: true, 
+
+    res.json({
+      ok: true,
       pedidos: rows,
       total: total,
       limit: parseInt(limit),
@@ -7958,43 +7984,43 @@ app.get('/api/compras/pedidos-omie', async (req, res) => {
 app.get('/api/compras/pedidos-omie/:nCodPed(\\d+)', async (req, res) => {
   try {
     const { nCodPed } = req.params;
-    
+
     // Buscar cabeçalho
     const pedidoResult = await pool.query(
       'SELECT * FROM compras.pedidos_omie WHERE n_cod_ped = $1',
       [nCodPed]
     );
-    
+
     if (pedidoResult.rows.length === 0) {
       return res.status(404).json({ ok: false, error: 'Pedido não encontrado' });
     }
-    
+
     const pedido = pedidoResult.rows[0];
-    
+
     // Buscar produtos
     const produtosResult = await pool.query(
       'SELECT * FROM compras.pedidos_omie_produtos WHERE n_cod_ped = $1 ORDER BY id',
       [nCodPed]
     );
-    
+
     // Buscar frete
     const freteResult = await pool.query(
       'SELECT * FROM compras.pedidos_omie_frete WHERE n_cod_ped = $1',
       [nCodPed]
     );
-    
+
     // Buscar parcelas
     const parcelasResult = await pool.query(
       'SELECT * FROM compras.pedidos_omie_parcelas WHERE n_cod_ped = $1 ORDER BY n_parcela',
       [nCodPed]
     );
-    
+
     // Buscar departamentos
     const departamentosResult = await pool.query(
       'SELECT * FROM compras.pedidos_omie_departamentos WHERE n_cod_ped = $1',
       [nCodPed]
     );
-    
+
     res.json({
       ok: true,
       pedido: {
@@ -8015,38 +8041,38 @@ app.get('/api/compras/pedidos-omie/:nCodPed(\\d+)', async (req, res) => {
 app.get('/api/fornecedores', async (req, res) => {
   try {
     const { ativo, search, limit = 100 } = req.query;
-    
+
     let query = 'SELECT * FROM omie.fornecedores WHERE 1=1';
     const params = [];
     let paramCount = 1;
-    
+
     // Filtro por ativo/inativo
     if (ativo === 'true' || ativo === '1') {
       query += ` AND inativo = false`;
     } else if (ativo === 'false' || ativo === '0') {
       query += ` AND inativo = true`;
     }
-    
+
     // Busca por nome, razão social ou CNPJ
     if (search && search.trim()) {
       query += ` AND (
-        razao_social ILIKE $${paramCount} OR 
-        nome_fantasia ILIKE $${paramCount} OR 
+        razao_social ILIKE $${paramCount} OR
+        nome_fantasia ILIKE $${paramCount} OR
         cnpj_cpf ILIKE $${paramCount}
       )`;
       params.push(`%${search.trim()}%`);
       paramCount++;
     }
-    
+
     query += ` ORDER BY razao_social LIMIT $${paramCount}`;
     params.push(parseInt(limit) || 100);
-    
+
     const { rows } = await pool.query(query, params);
-    
-    res.json({ 
-      ok: true, 
+
+    res.json({
+      ok: true,
       total: rows.length,
-      fornecedores: rows 
+      fornecedores: rows
     });
   } catch (err) {
     console.error('[API /api/fornecedores] erro:', err);
@@ -8058,19 +8084,19 @@ app.get('/api/fornecedores', async (req, res) => {
 app.get('/api/fornecedores/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    
+
     const { rows } = await pool.query(
       'SELECT * FROM omie.fornecedores WHERE codigo_cliente_omie = $1',
       [id]
     );
-    
+
     if (!rows.length) {
       return res.status(404).json({ ok: false, error: 'Fornecedor não encontrado' });
     }
-    
-    res.json({ 
-      ok: true, 
-      fornecedor: rows[0] 
+
+    res.json({
+      ok: true,
+      fornecedor: rows[0]
     });
   } catch (err) {
     console.error('[API /api/fornecedores/:id] erro:', err);
@@ -8084,7 +8110,7 @@ app.get('/api/fornecedores/:id', async (req, res) => {
 app.get('/api/compras/parcelas', async (req, res) => {
   try {
     console.log('[API /api/compras/parcelas] Buscando parcelas da Omie...');
-    
+
     const omiePayload = {
       call: 'ListarParcelas',
       app_key: OMIE_APP_KEY,
@@ -8094,30 +8120,30 @@ app.get('/api/compras/parcelas', async (req, res) => {
         registros_por_pagina: 200
       }]
     };
-    
+
     const resp = await fetch('https://app.omie.com.br/api/v1/geral/parcelas/', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(omiePayload)
     });
-    
+
     if (!resp.ok) {
       throw new Error(`Erro na API Omie: ${resp.status}`);
     }
-    
+
     const data = await resp.json();
-    
+
     console.log('[API /api/compras/parcelas] Resposta da Omie:', JSON.stringify(data).substring(0, 500));
-    
+
     if (data.faultstring) {
       throw new Error(data.faultstring);
     }
-    
+
     const parcelas = data.cadastros || []; // Omie retorna em "cadastros", não "lista_parcelas"
     console.log(`[API /api/compras/parcelas] ${parcelas.length} parcelas encontradas`);
-    
+
     res.json({ ok: true, parcelas });
-    
+
   } catch (err) {
     console.error('[API /api/compras/parcelas] Erro:', err);
     res.status(500).json({ ok: false, error: err.message });
@@ -8362,17 +8388,17 @@ app.get('/api/compras/categoria-por-produto/:codigo_produto', async (req, res) =
 
     // Se não encontrar, usa categoria padrão para itens não localizados
     const codigoCat = rows[0]?.c_categoria_item || '2.14.94'; // Categoria padrão: Outros Materiais
-    
+
     // Busca a descrição da categoria
     const { rows: catRows } = await pool.query(`
       SELECT codigo, descricao
       FROM configuracoes."ListarCategorias"
       WHERE codigo = $1
     `, [codigoCat]);
-    
+
     const descricao = catRows[0]?.descricao || '';
     const categoriaCompleta = descricao ? `${codigoCat} - ${descricao}` : codigoCat;
-    
+
     console.log('[Compras/Categoria] Resultado:', {
       codigo_produto: codigoProduto,
       categoria_codigo: codigoCat,
@@ -8381,8 +8407,8 @@ app.get('/api/compras/categoria-por-produto/:codigo_produto', async (req, res) =
       encontrado_na_base: rows.length > 0
     });
 
-    res.json({ 
-      ok: true, 
+    res.json({
+      ok: true,
       categoria: codigoCat,
       categoria_codigo: codigoCat,
       categoria_descricao: descricao,
@@ -8402,7 +8428,7 @@ app.get('/api/compras/config-responsavel-categoria', async (req, res) => {
       FROM compras.config_responsavel_categoria
       ORDER BY categoria_compra_nome
     `);
-    
+
     res.json({ ok: true, configuracoes: rows });
   } catch (err) {
     console.error('[Compras] Erro ao listar configurações:', err);
@@ -8414,23 +8440,23 @@ app.get('/api/compras/config-responsavel-categoria', async (req, res) => {
 app.post('/api/compras/config-responsavel-categoria', express.json(), async (req, res) => {
   try {
     const { categoria_compra_codigo, categoria_compra_nome, responsavel_username } = req.body;
-    
+
     if (!categoria_compra_codigo || !categoria_compra_nome || !responsavel_username) {
       return res.status(400).json({ ok: false, error: 'Campos obrigatórios: categoria_compra_codigo, categoria_compra_nome, responsavel_username' });
     }
-    
+
     // Usa UPSERT (INSERT com ON CONFLICT UPDATE) para adicionar ou atualizar
     const { rows } = await pool.query(`
       INSERT INTO compras.config_responsavel_categoria (categoria_compra_codigo, categoria_compra_nome, responsavel_username, updated_at)
       VALUES ($1, $2, $3, NOW())
       ON CONFLICT (categoria_compra_codigo)
-      DO UPDATE SET 
+      DO UPDATE SET
         categoria_compra_nome = EXCLUDED.categoria_compra_nome,
         responsavel_username = EXCLUDED.responsavel_username,
         updated_at = NOW()
       RETURNING *
     `, [categoria_compra_codigo, categoria_compra_nome, responsavel_username]);
-    
+
     console.log(`[Compras] Configuração salva: ${categoria_compra_nome} → ${responsavel_username}`);
     res.json({ ok: true, configuracao: rows[0] });
   } catch (err) {
@@ -8443,21 +8469,21 @@ app.post('/api/compras/config-responsavel-categoria', express.json(), async (req
 app.delete('/api/compras/config-responsavel-categoria/:id', async (req, res) => {
   try {
     const id = parseInt(req.params.id);
-    
+
     if (!id || isNaN(id)) {
       return res.status(400).json({ ok: false, error: 'ID inválido' });
     }
-    
+
     const { rows } = await pool.query(`
       DELETE FROM compras.config_responsavel_categoria
       WHERE id = $1
       RETURNING *
     `, [id]);
-    
+
     if (rows.length === 0) {
       return res.status(404).json({ ok: false, error: 'Configuração não encontrada' });
     }
-    
+
     console.log(`[Compras] Configuração removida: ID ${id}`);
     res.json({ ok: true, configuracao: rows[0] });
   } catch (err) {
@@ -8503,7 +8529,7 @@ app.get('/api/compras/config-acesso-botoes', async (req, res) => {
       SELECT * FROM compras.config_acesso_botoes
       ORDER BY tipo_botao, departamento_nome, responsavel_username
     `);
-    
+
     console.log(`[Compras] Listando ${rows.length} permissões de acesso`);
     res.json({ ok: true, permissoes: rows });
   } catch (err) {
@@ -8516,26 +8542,26 @@ app.get('/api/compras/config-acesso-botoes', async (req, res) => {
 app.post('/api/compras/config-acesso-botoes', express.json(), async (req, res) => {
   try {
     const { tipo_botao, responsavel_username, departamento_nome } = req.body;
-    
+
     if (!tipo_botao || !responsavel_username || !departamento_nome) {
       return res.status(400).json({ ok: false, error: 'Dados incompletos' });
     }
-    
+
     if (!['aprovacao', 'pedido_compra', 'gestao_solicitacao'].includes(tipo_botao)) {
       return res.status(400).json({ ok: false, error: 'Tipo de botão inválido' });
     }
-    
+
     const { rows } = await pool.query(`
       INSERT INTO compras.config_acesso_botoes (tipo_botao, responsavel_username, departamento_nome)
       VALUES ($1, $2, $3)
       ON CONFLICT (tipo_botao, responsavel_username, departamento_nome) DO NOTHING
       RETURNING *
     `, [tipo_botao, responsavel_username, departamento_nome]);
-    
+
     if (rows.length === 0) {
       return res.status(409).json({ ok: false, error: 'Permissão já existe' });
     }
-    
+
     console.log(`[Compras] Permissão adicionada: ${tipo_botao} - ${responsavel_username} - ${departamento_nome}`);
     res.json({ ok: true, permissao: rows[0] });
   } catch (err) {
@@ -8548,21 +8574,21 @@ app.post('/api/compras/config-acesso-botoes', express.json(), async (req, res) =
 app.delete('/api/compras/config-acesso-botoes/:id', async (req, res) => {
   try {
     const id = parseInt(req.params.id);
-    
+
     if (!id || isNaN(id)) {
       return res.status(400).json({ ok: false, error: 'ID inválido' });
     }
-    
+
     const { rows } = await pool.query(`
       DELETE FROM compras.config_acesso_botoes
       WHERE id = $1
       RETURNING *
     `, [id]);
-    
+
     if (rows.length === 0) {
       return res.status(404).json({ ok: false, error: 'Permissão não encontrada' });
     }
-    
+
     console.log(`[Compras] Permissão removida: ID ${id}`);
     res.json({ ok: true, permissao: rows[0] });
   } catch (err) {
@@ -8883,7 +8909,7 @@ app.get('/api/compras/departamentos', async (req, res) => {
       SELECT nome FROM configuracoes.departamento
       ORDER BY nome
     `);
-    
+
     console.log(`[Compras] Listando ${rows.length} departamentos`);
     res.json({ ok: true, departamentos: rows });
   } catch (err) {
@@ -9557,7 +9583,7 @@ app.get('/api/compras/historico/resumo', async (req, res) => {
     const tableSource = String(table_source || '').trim();
 
     let query = `
-      SELECT 
+      SELECT
         operacao,
         campo_alterado,
         COUNT(*) as total,
@@ -9581,7 +9607,7 @@ app.get('/api/compras/historico/resumo', async (req, res) => {
     `;
 
     const { rows } = await pool.query(query, params);
-    
+
     console.log(`[Compras] Resumo do histórico: ${rows.length} tipos de operações`);
     res.json({ ok: true, resumo: rows });
   } catch (err) {
@@ -9597,9 +9623,9 @@ app.get('/api/compras/historico', async (req, res) => {
     const diasInt = Number.parseInt(dias, 10) || 30;
     const limitInt = Number.parseInt(limit, 10) || 100;
     const tableSource = String(table_source || '').trim();
-    
+
     let query = `
-      SELECT 
+      SELECT
         id,
         solicitacao_id,
         table_source,
@@ -9615,33 +9641,33 @@ app.get('/api/compras/historico', async (req, res) => {
       FROM compras.historico_solicitacao_compras
       WHERE created_at >= NOW() - ($1::INT * INTERVAL '1 day')
     `;
-    
+
     const params = [diasInt];
     let paramIndex = 2;
-    
+
     if (tableSource) {
       query += ` AND table_source = $${paramIndex}`;
       params.push(tableSource);
       paramIndex++;
     }
-    
+
     if (usuario) {
       query += ` AND usuario = $${paramIndex}`;
       params.push(usuario);
       paramIndex++;
     }
-    
+
     if (operacao) {
       query += ` AND operacao = $${paramIndex}`;
       params.push(operacao.toUpperCase());
       paramIndex++;
     }
-    
+
     query += ` ORDER BY created_at DESC LIMIT $${paramIndex}`;
     params.push(limitInt);
-    
+
     const { rows } = await pool.query(query, params);
-    
+
     console.log(`[Compras] Histórico geral: ${rows.length} registros (últimos ${dias} dias)`);
     res.json({ ok: true, historico: rows });
   } catch (err) {
@@ -9655,13 +9681,13 @@ app.get('/api/compras/historico/:solicitacaoId', async (req, res) => {
   try {
     const { solicitacaoId } = req.params;
     const tableSource = String(req.query?.table_source || '').trim();
-    
+
     if (!solicitacaoId || isNaN(solicitacaoId)) {
       return res.status(400).json({ ok: false, error: 'ID da solicitação inválido' });
     }
 
     let query = `
-      SELECT 
+      SELECT
         id,
         solicitacao_id,
         table_source,
@@ -9687,7 +9713,7 @@ app.get('/api/compras/historico/:solicitacaoId', async (req, res) => {
     query += ` ORDER BY created_at DESC`;
 
     const { rows } = await pool.query(query, params);
-    
+
     console.log(`[Compras] Histórico da solicitação ${solicitacaoId}: ${rows.length} registros`);
     res.json({ ok: true, historico: rows });
   } catch (err) {
@@ -9701,15 +9727,15 @@ app.get('/api/compras/historico/:solicitacaoId', async (req, res) => {
 app.get('/api/compras/familias', async (req, res) => {
   try {
     console.log('[API /api/compras/familias] Buscando famílias do banco...');
-    
+
     const result = await pool.query(
       'SELECT codigo, nome_familia FROM public.familia ORDER BY nome_familia ASC'
     );
-    
+
     console.log('[API /api/compras/familias] Total de famílias encontradas:', result.rows.length);
-    
-    res.json({ 
-      ok: true, 
+
+    res.json({
+      ok: true,
       total: result.rows.length,
       familias: result.rows
     });
@@ -9724,7 +9750,7 @@ app.get('/api/compras/familias', async (req, res) => {
 app.get('/api/compras/parcelas', async (req, res) => {
   try {
     console.log('[API /api/compras/parcelas] Buscando parcelas da Omie...');
-    
+
     const response = await fetch('https://app.omie.com.br/api/v1/geral/parcelas/', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -9738,27 +9764,27 @@ app.get('/api/compras/parcelas', async (req, res) => {
         }]
       })
     });
-    
+
     const data = await response.json();
-    
+
     if (data.faultstring) {
       throw new Error(data.faultstring);
     }
-    
+
     console.log('[API /api/compras/parcelas] Total de parcelas retornadas:', data.total_de_registros);
-    
+
     // Mapeia as parcelas retornadas
     const parcelas = (data.lista_parcelas || []).map(parc => ({
       codigo: parc.codigo,
       descricao: parc.descricao
     }));
-    
+
     console.log('[API /api/compras/parcelas] Parcelas mapeadas:', parcelas.length);
-    
-    res.json({ 
-      ok: true, 
+
+    res.json({
+      ok: true,
       total: parcelas.length,
-      parcelas 
+      parcelas
     });
   } catch (err) {
     console.error('[API /api/compras/parcelas] Erro:', err.message);
@@ -9771,12 +9797,12 @@ app.get('/api/compras/parcelas', async (req, res) => {
 app.get('/api/compras/pedido/:numero_pedido', async (req, res) => {
   try {
     const { numero_pedido } = req.params;
-    
+
     const { rows } = await pool.query(
       'SELECT * FROM compras.ped_compra WHERE numero_pedido = $1',
       [numero_pedido]
     );
-    
+
     res.json({ ok: true, pedido: rows[0] || null });
   } catch (err) {
     console.error('[API /api/compras/pedido GET] Erro:', err);
@@ -9817,15 +9843,15 @@ app.post('/api/compras/pedido/dados', express.json(), async (req, res) => {
       lacre,
       outras_despesas
     } = req.body;
-    
+
     if (!numero_pedido) {
       return res.status(400).json({ ok: false, error: 'numero_pedido é obrigatório' });
     }
-    
+
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
-      
+
       // UPSERT dos dados gerais do pedido (sem valor_unitario na tabela ped_compra)
       const queryPedido = `
         INSERT INTO compras.ped_compra (
@@ -9867,7 +9893,7 @@ app.post('/api/compras/pedido/dados', express.json(), async (req, res) => {
           updated_at = NOW()
         RETURNING *
       `;
-      
+
       const { rows } = await client.query(queryPedido, [
         numero_pedido, fornecedor_nome, fornecedor_id, previsao_entrega,
         categoria_compra, categoria_compra_codigo, cod_parcela, descricao_parcela,
@@ -9876,7 +9902,7 @@ app.post('/api/compras/pedido/dados', express.json(), async (req, res) => {
         numero_volumes, peso_liquido, peso_bruto, valor_frete, valor_seguro,
         lacre, outras_despesas
       ]);
-      
+
       // Cria coluna valor_unitario se não existir (migration)
       try {
         await client.query('ALTER TABLE compras.solicitacao_compras ADD COLUMN IF NOT EXISTS valor_unitario DECIMAL(15,2)');
@@ -9884,7 +9910,7 @@ app.post('/api/compras/pedido/dados', express.json(), async (req, res) => {
       } catch (err) {
         console.log('[MIGRATION] Erro ao criar coluna valor_unitario:', err.message);
       }
-      
+
       // Atualiza valores unitários de cada item na tabela solicitacao_compras
       if (valores_unitarios && typeof valores_unitarios === 'object') {
         for (const [itemId, valor] of Object.entries(valores_unitarios)) {
@@ -9896,10 +9922,10 @@ app.post('/api/compras/pedido/dados', express.json(), async (req, res) => {
           console.log(`[SALVAR DADOS] Atualizado valor unitário ${valor} para item ${itemId}`);
         }
       }
-      
+
       await client.query('COMMIT');
       res.json({ ok: true, pedido: rows[0] });
-      
+
     } catch (err) {
       await client.query('ROLLBACK');
       throw err;
@@ -10041,12 +10067,12 @@ function montarObsInternaComGrupo(grupoRequisicao, observacaoOriginal = null) {
 app.post('/api/compras/pedido/gerar-omie/:numero_pedido', express.json(), async (req, res) => {
   try {
     const { numero_pedido } = req.params;
-    
+
     console.log('\n========================================');
     console.log('🚀 [GERAR PEDIDO OMIE] Iniciando...');
     console.log('📋 Número do Pedido:', numero_pedido);
     console.log('========================================\n');
-    
+
     // Busca email do usuário logado para campo cEmailAprovador
     let emailAprovador = null;
     if (req.session && req.session.user && req.session.user.id) {
@@ -10062,19 +10088,19 @@ app.post('/api/compras/pedido/gerar-omie/:numero_pedido', express.json(), async 
         console.log('   ⚠️ Email não encontrado para o usuário logado');
       }
     }
-    
+
     // Busca dados do pedido
     console.log('📥 Buscando dados do pedido na tabela compras.ped_compra...');
     const { rows: pedidoRows } = await pool.query(
       'SELECT * FROM compras.ped_compra WHERE numero_pedido = $1',
       [numero_pedido]
     );
-    
+
     if (!pedidoRows.length) {
       console.log('❌ Pedido não encontrado no banco!');
       return res.status(404).json({ ok: false, error: 'Dados do pedido não encontrados. Salve os dados antes de gerar a compra.' });
     }
-    
+
     const pedido = pedidoRows[0];
     console.log('✅ Dados do pedido encontrados:');
     console.log('   Fornecedor:', pedido.fornecedor_nome, '(ID:', pedido.fornecedor_id + ')');
@@ -10082,7 +10108,7 @@ app.post('/api/compras/pedido/gerar-omie/:numero_pedido', express.json(), async 
     console.log('   Categoria:', pedido.categoria_compra, '(Código:', pedido.categoria_compra_codigo + ')');
     console.log('   Condição de Pagamento:', pedido.descricao_parcela, '(Código:', pedido.cod_parcela + ')');
     console.log('   Incluir Frete:', pedido.incluir_frete);
-    
+
     // Busca itens do pedido
     console.log('\n📦 Buscando itens do pedido...');
     const { rows: itens } = await pool.query(
@@ -10091,7 +10117,7 @@ app.post('/api/compras/pedido/gerar-omie/:numero_pedido', express.json(), async 
       WHERE numero_pedido = $1`,
       [numero_pedido]
     );
-    
+
     if (!itens.length) {
       console.log('❌ Nenhum item encontrado para este pedido!');
       return res.status(400).json({ ok: false, error: 'Nenhum item encontrado no pedido' });
@@ -10108,14 +10134,14 @@ app.post('/api/compras/pedido/gerar-omie/:numero_pedido', express.json(), async 
     if (!historicoCompraId) {
       throw new Error('Não foi possível determinar o id de compras.historico_compras para preencher cNumPedido.');
     }
-    
+
     console.log(`✅ ${itens.length} item(ns) encontrado(s):`);
     itens.forEach((item, idx) => {
       console.log(`   ${idx + 1}. Produto: ${item.produto_descricao} (Código: ${item.produto_codigo}) - Qtd: ${item.quantidade}`);
       console.log(`      Código Omie: ${item.codigo_produto_omie || 'Não encontrado'}`);
       console.log(`      Valor Unitário: ${item.valor_unitario || 'Não informado'}`);
     });
-    
+
     // Monta o cabeçalho do pedido
     console.log('\n🔧 Montando JSON para envio à Omie...');
     const cabecalho = {
@@ -10130,13 +10156,13 @@ app.post('/api/compras/pedido/gerar-omie/:numero_pedido', express.json(), async 
         pedido.obsIntReqCompra || pedido.cObsInt || pedido.c_obs_int || null
       )
     };
-    
+
     // Adiciona email do aprovador se disponível
     if (emailAprovador) {
       cabecalho.cEmailAprovador = emailAprovador;
       console.log('   ✅ Email aprovador incluído:', emailAprovador);
     }
-    
+
     // Monta os produtos (usa valor_unitario de cada item)
     const produtos = itens.map((item, index) => {
       const produto = {
@@ -10144,7 +10170,7 @@ app.post('/api/compras/pedido/gerar-omie/:numero_pedido', express.json(), async 
         nValUnit: item.valor_unitario || null,
         cObs: item.observacao || null
       };
-      
+
       // Prioriza nCodProd (código Omie numérico), senão usa cProduto (código interno)
       if (item.codigo_produto_omie) {
         produto.nCodProd = item.codigo_produto_omie;
@@ -10154,10 +10180,10 @@ app.post('/api/compras/pedido/gerar-omie/:numero_pedido', express.json(), async 
       } else {
         console.log(`   ❌ Item ${index + 1}: Sem código Omie nem código interno!`);
       }
-      
+
       return produto;
     });
-    
+
     // Monta o frete se incluído
     let frete = null;
     if (pedido.incluir_frete) {
@@ -10181,73 +10207,73 @@ app.post('/api/compras/pedido/gerar-omie/:numero_pedido', express.json(), async 
       console.log('   Transportadora ID:', pedido.transportadora_id);
       console.log('   Tipo Frete:', pedido.tipo_frete);
     }
-    
+
     // Monta o JSON completo para a Omie
     const pedidoCompra = {
       cabecalho_incluir: cabecalho,
       produtos_incluir: produtos
     };
-    
+
     if (frete) {
       pedidoCompra.frete_incluir = frete;
     }
-    
+
     console.log('\n📤 JSON COMPLETO PARA ENVIO À OMIE:');
     console.log(JSON.stringify(pedidoCompra, null, 2));
-    
+
     const omiePayload = {
       call: 'IncluirPedCompra',
       app_key: OMIE_APP_KEY,
       app_secret: OMIE_APP_SECRET,
       param: [pedidoCompra]
     };
-    
+
     // Chama a API da Omie
     console.log('\n🌐 Enviando requisição para Omie...');
     console.log('   URL: https://app.omie.com.br/api/v1/produtos/pedidocompra/');
-    
+
     let tentativa = 1;
     let maxTentativas = 2; // Primeira tentativa + 1 retry após cadastrar produto
     let data;
-    
+
     while (tentativa <= maxTentativas) {
       console.log(`\n🔄 Tentativa ${tentativa} de ${maxTentativas}...`);
-      
+
       const response = await fetch('https://app.omie.com.br/api/v1/produtos/pedidocompra/', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(omiePayload)
       });
-      
+
       data = await response.json();
-      
+
       console.log('\n📥 RESPOSTA DA OMIE:');
       console.log('   Status HTTP:', response.status);
       console.log('   Dados:', JSON.stringify(data, null, 2));
-      
+
       if (data.faultstring) {
         console.log('❌ Erro na API da Omie!');
         console.log('   Código:', data.faultcode);
         console.log('   Mensagem:', data.faultstring);
-        
+
         // Verifica se é erro de produto não cadastrado (aceita qualquer encoding)
         const erroMatch = data.faultstring.match(/Produto n.{1,3}o cadastrado para o C.{1,3}digo \[(.*?)\]/i);
-        
+
         if (erroMatch && tentativa < maxTentativas) {
           const codigoNaoCadastrado = erroMatch[1];
           console.log(`\n⚠️ Produto não cadastrado detectado: ${codigoNaoCadastrado}`);
-          
+
           // Busca a descrição do produto nos itens
           const itemNaoCadastrado = itens.find(item => item.produto_codigo === codigoNaoCadastrado);
           const descricaoProduto = itemNaoCadastrado ? itemNaoCadastrado.produto_descricao : 'Produto provisório';
-          
+
           console.log(`\n🔧 Tentando cadastrar produto automaticamente...`);
           const resultadoCadastro = await cadastrarProdutoNaOmie(codigoNaoCadastrado, descricaoProduto);
-          
+
           if (resultadoCadastro.ok) {
             console.log(`\n⏳ Aguardando 5 segundos antes de tentar novamente...`);
             await new Promise(resolve => setTimeout(resolve, 5000));
-            
+
             // Atualiza o nCodProd no JSON se foi obtido
             if (resultadoCadastro.codigo_produto) {
               const produtoIndex = produtos.findIndex(p => p.cProduto === codigoNaoCadastrado);
@@ -10255,7 +10281,7 @@ app.post('/api/compras/pedido/gerar-omie/:numero_pedido', express.json(), async 
                 produtos[produtoIndex].nCodProd = resultadoCadastro.codigo_produto;
                 delete produtos[produtoIndex].cProduto;
                 console.log(`✅ Item atualizado com nCodProd: ${resultadoCadastro.codigo_produto}`);
-                
+
                 // Recria o payload atualizado
                 const pedidoCompraAtualizado = {
                   cabecalho_incluir: cabecalho,
@@ -10267,7 +10293,7 @@ app.post('/api/compras/pedido/gerar-omie/:numero_pedido', express.json(), async 
                 omiePayload.param = [pedidoCompraAtualizado];
               }
             }
-            
+
             tentativa++;
             continue; // Tenta novamente
           } else {
@@ -10283,16 +10309,16 @@ app.post('/api/compras/pedido/gerar-omie/:numero_pedido', express.json(), async 
         break;
       }
     }
-    
+
     console.log('✅ Pedido criado com sucesso na Omie!');
     console.log('   Número Pedido:', data.cNumero);
     console.log('   Código Pedido:', data.nCodPed || data.cCodIntPed);
-    
+
     // Atualiza status dos itens para "compra realizada" e salva dados do pedido Omie
     console.log('\n🔄 Atualizando status e dados do pedido Omie nos itens...');
     await pool.query(
-      `UPDATE compras.solicitacao_compras 
-       SET status = $1, nCodPed = $2, cNumero = $3 
+      `UPDATE compras.solicitacao_compras
+       SET status = $1, nCodPed = $2, cNumero = $3
        WHERE numero_pedido = $4`,
       ['compra realizada', data.nCodPed, data.cNumero, numero_pedido]
     );
@@ -10300,18 +10326,18 @@ app.post('/api/compras/pedido/gerar-omie/:numero_pedido', express.json(), async 
     console.log(`   - Status: 'compra realizada'`);
     console.log(`   - nCodPed: ${data.nCodPed}`);
     console.log(`   - cNumero: ${data.cNumero}`);
-    
+
     console.log('\n========================================');
     console.log('✅ PROCESSO CONCLUÍDO COM SUCESSO!');
     console.log('========================================\n');
-    
+
     res.json({
       ok: true,
       numero: data.cNumero,
       codigo: data.nCodPed || data.cCodIntPed,
       mensagem: 'Pedido de compra gerado com sucesso na Omie'
     });
-    
+
   } catch (err) {
     console.error('\n========================================');
     console.error('❌ ERRO NO PROCESSO:');
@@ -15263,18 +15289,18 @@ async function handleUploadStorage(req, res) {
     if (!req.file) return res.status(400).json({ error: 'Nenhum arquivo enviado' });
 
     const storageClient = require('./utils/supabase');
-    
+
     // Permite especificar o bucket via body; padrão: 'compras-anexos'
     const ALLOWED_BUCKETS = ['compras-anexos', 'Funcionarios'];
     const requestedBucket = String(req.body.bucket || '').trim();
     const bucketName = ALLOWED_BUCKETS.includes(requestedBucket) ? requestedBucket : 'compras-anexos';
     const filePath = req.body.path || `uploads/${Date.now()}_${req.file.originalname}`;
-    
+
     // Verifica se o bucket existe, se não existir, cria
     try {
       const { data: buckets } = await storageClient.storage.listBuckets();
       const bucketExists = buckets?.some(b => b.name === bucketName);
-      
+
       const allowedMimes = [
         'image/*', 'application/pdf',
         'application/msword',
@@ -15304,25 +15330,25 @@ async function handleUploadStorage(req, res) {
       console.warn('[storage] Erro ao verificar bucket:', bucketError.message);
       // Continua com o upload de qualquer forma
     }
-    
+
     const { data, error } = await storageClient.storage
       .from(bucketName)
       .upload(filePath, req.file.buffer, {
         contentType: req.file.mimetype,
         upsert: false
       });
-    
+
     if (error) {
       console.error('[Storage Upload Error]', error);
       return res.status(500).json({ error: error.message });
     }
-    
+
     const { data: publicData } = storageClient.storage
       .from(bucketName)
       .getPublicUrl(filePath);
-    
-    res.json({ 
-      ok: true, 
+
+    res.json({
+      ok: true,
       path: filePath,
       url: publicData.publicUrl
     });
@@ -15921,7 +15947,7 @@ app.post('/api/etiquetas/:id/printed', (req, res) => {
 });
 
 /**
- * Quebra um texto em linhas de até maxChars caracteres, 
+ * Quebra um texto em linhas de até maxChars caracteres,
  * sempre respeitando os espaços.
  */
 function wrapText(text, maxChars) {
@@ -19157,7 +19183,7 @@ async function initSolicitacaoProdutoSchema() {
   try {
     // Cria schema
     await pool.query(`CREATE SCHEMA IF NOT EXISTS solicitacao_produto`);
-    
+
     // Cria tabela Registro_troca
     await pool.query(`
       CREATE TABLE IF NOT EXISTS solicitacao_produto.Registro_troca (
@@ -19175,12 +19201,12 @@ async function initSolicitacaoProdutoSchema() {
         motivo              TEXT
       )
     `);
-    
+
     // Migra tabelas do schema logistica se existirem e ainda não estiverem no novo schema
     const { rows: checkTab } = await pool.query(
       `SELECT EXISTS(SELECT 1 FROM information_schema.tables WHERE table_schema='solicitacao_produto' AND table_name='carrinho')`
     );
-    
+
     if (!checkTab[0]?.exists) {
       // Carrinho sempre em logistica (ou cria se não existe)
       await pool.query(`
@@ -19201,12 +19227,12 @@ async function initSolicitacaoProdutoSchema() {
           urgente        BOOLEAN DEFAULT FALSE
         )
       `);
-      
+
       // Move itens_solicitados para novo schema
       const { rows: oldData } = await pool.query(
         `SELECT EXISTS(SELECT 1 FROM information_schema.tables WHERE table_schema='logistica' AND table_name='itens_solicitados')`
       );
-      
+
       if (oldData[0]?.exists) {
         // Cria a tabela no novo schema e copia dados
         await pool.query(`
@@ -19220,14 +19246,14 @@ async function initSolicitacaoProdutoSchema() {
             criado_em TIMESTAMPTZ DEFAULT now()
           )
         `);
-        
+
         await pool.query(`
           INSERT INTO solicitacao_produto.itens_solicitados (id, id_carr, n_solic, status, observacao, criado_em)
           SELECT id, id_carr, n_solic, status, observacao, COALESCE(criado_em, now())
           FROM solicitacao_produto.itens_solicitados
           ON CONFLICT DO NOTHING
         `);
-        
+
         console.log('[Schema] Migração de itens_solicitados concluída');
       } else {
         // Tabela nova, cria direto
@@ -19243,12 +19269,12 @@ async function initSolicitacaoProdutoSchema() {
           )
         `);
       }
-      
+
       // Move solicitacoes_separacao para novo schema
       const { rows: sepData } = await pool.query(
         `SELECT EXISTS(SELECT 1 FROM information_schema.tables WHERE table_schema='logistica' AND table_name='solicitacoes_separacao')`
       );
-      
+
       if (sepData[0]?.exists) {
         await pool.query(`
           CREATE TABLE IF NOT EXISTS solicitacao_produto.solicitacoes_separacao (
@@ -19268,7 +19294,7 @@ async function initSolicitacaoProdutoSchema() {
             criado_em      TIMESTAMPTZ NOT NULL DEFAULT now()
           )
         `);
-        
+
         await pool.query(`
           INSERT INTO solicitacao_produto.solicitacoes_separacao
             (id, id_user, nome_user, solicitado_para, codigo_produto, descricao, unidade, quantidade,
@@ -19278,7 +19304,7 @@ async function initSolicitacaoProdutoSchema() {
           FROM solicitacao_produto.solicitacoes_separacao
           ON CONFLICT DO NOTHING
         `);
-        
+
         console.log('[Schema] Migração de solicitacoes_separacao concluída');
       } else {
         await pool.query(`
@@ -19386,6 +19412,8 @@ async function ensureSchemaMigrated() {
 async function assertUsuarioSeparandoPodeAgir(client, solicIds, req) {
   const ids = (solicIds || []).map(id => parseInt(id, 10)).filter(id => !isNaN(id));
   if (!ids.length) return { ok: true };
+  const acesso = await assertAcessoSeparacao(client, ids, req);
+  if (!acesso.ok) return acesso;
   const nome_user = String(req.session?.user?.username || req.session?.user?.nome || '').trim();
   const { rows } = await client.query(
     `SELECT DISTINCT TRIM(usuario_separando) AS usuario_separando
@@ -19620,6 +19648,8 @@ app.patch('/api/logistica/itens_solicitados/separacao', async (req, res) => {
       });
     }
     const idsElegiveis = elegiveis.map(r => r.id);
+    const acesso = await assertAcessoSeparacao(pool, idsElegiveis, req);
+    if (!acesso.ok) return res.status(acesso.status || 403).json(acesso);
     await registrarMovimentacaoKanbanItens(pool, idsElegiveis, 'Separação', req);
     await pool.query(
       `UPDATE solicitacao_produto.itens_solicitados
@@ -19662,6 +19692,8 @@ app.patch('/api/logistica/itens_solicitados/cancelar-separacao', async (req, res
       return res.status(400).json({ ok: false, error: 'Nenhum item em separação encontrado para cancelar.' });
 
     const idsElegiveis = itens.map(r => r.id);
+    const acesso = await assertAcessoSeparacao(pool, idsElegiveis, req);
+    if (!acesso.ok) return res.status(acesso.status || 403).json(acesso);
     const bloqueado = itens.some(r => String(r.usuario_separando || '').trim() !== nome_user);
     if (bloqueado)
       return res.status(403).json({ ok: false, error: 'Só quem iniciou a separação pode cancelar.' });
@@ -19746,6 +19778,8 @@ app.patch('/api/logistica/itens_solicitados/assumir-separacao', async (req, res)
       return res.status(400).json({ ok: false, error: 'Nenhum item em separação encontrado.' });
 
     const idsElegiveis = itens.map(r => r.id);
+    const acesso = await assertAcessoSeparacao(pool, idsElegiveis, req);
+    if (!acesso.ok) return res.status(acesso.status || 403).json(acesso);
     await pool.query(
       `UPDATE solicitacao_produto.itens_solicitados
           SET usuario_separando = $2
@@ -20591,6 +20625,8 @@ app.get('/api/logistica/kanban/itens', async (req, res) => {
     const includeDerivados = String(req.query?.include_derivados || '').toLowerCase();
 
     if (n_solic) {
+      const regraSep = await obterPermissaoSeparacao(id_user);
+      const destinosSep = regraSep?.restringir_destinos ? regraSep.destinos_chaves : null;
       // Itens de uma SEP específica
       const { rows } = await pool.query(`
         SELECT DISTINCT ON (i.id)
@@ -20612,8 +20648,13 @@ app.get('/api/logistica/kanban/itens', async (req, res) => {
                  ON ss.n_solic = i.n_solic AND ss.codigo_produto = c.codigo_produto
           LEFT JOIN solicitacao_produto.Registro_troca rt ON rt.id_item_original = i.id
          WHERE i.n_solic = $1
+           AND ($2::text[] IS NULL OR CONCAT(TRIM(COALESCE(i.cod_local, '')), '|', TRIM(COALESCE(i.nome_local, ''))) = ANY($2::text[]))
          ORDER BY i.id, c.criado_em ASC, rt.data_troca DESC NULLS LAST
-      `, [n_solic]);
+      `, [n_solic, destinosSep]);
+
+      if (!rows.length && destinosSep) {
+        return res.status(403).json({ ok: false, error: 'Esta separação não está liberada para o seu usuário.' });
+      }
 
       let itensDerivados = [];
       if (includeDerivados === '1' || includeDerivados === 'true' || includeDerivados === 'yes') {
@@ -20633,8 +20674,9 @@ app.get('/api/logistica/kanban/itens', async (req, res) => {
             FROM solicitacao_produto.itens_solicitados i
             JOIN logistica.carrinho c ON c.id = i.id_carr
            WHERE i.n_solic ~ ($1 || '\\.[0-9]+$')
+             AND ($2::text[] IS NULL OR CONCAT(TRIM(COALESCE(i.cod_local, '')), '|', TRIM(COALESCE(i.nome_local, ''))) = ANY($2::text[]))
            ORDER BY i.n_solic ASC, c.criado_em ASC
-        `, [baseNSolic]);
+        `, [baseNSolic, destinosSep]);
         itensDerivados = derivRows;
       }
 
@@ -20715,6 +20757,8 @@ app.get('/api/logistica/solicitacoes-kanban', async (req, res) => {
     const id_user = req.session?.user?.id;
     if (!id_user) return res.status(401).json({ ok: false, error: 'Não autenticado.' });
     const q = String(req.query?.q || '').trim().slice(0, 200);
+    const regraSep = await obterPermissaoSeparacao(id_user);
+    const destinosSep = regraSep?.restringir_destinos ? regraSep.destinos_chaves : null;
 
     const { rows } = await pool.query(`
       WITH seps AS (
@@ -20758,6 +20802,7 @@ app.get('/api/logistica/solicitacoes-kanban', async (req, res) => {
         JOIN logistica.carrinho c ON c.id = i.id_carr
         WHERE i.n_solic IS NOT NULL
           AND LOWER(TRIM(COALESCE(i.status, ''))) NOT IN ('excluido', 'excluído')
+          AND ($2::text[] IS NULL OR CONCAT(TRIM(COALESCE(i.cod_local, '')), '|', TRIM(COALESCE(i.nome_local, ''))) = ANY($2::text[]))
         GROUP BY i.n_solic, COALESCE(c.retirada_por, c.nome_user)
       )
       SELECT *
@@ -20775,7 +20820,7 @@ app.get('/api/logistica/solicitacoes-kanban', async (req, res) => {
                    ) NOT ILIKE '%' || termo || '%'
           )
        ORDER BY criado_em_min ASC
-    `, [q]);
+    `, [q, destinosSep]);
 
     const colunas = { 'Solicitado': [], 'Stund-by': [], 'Em Separação': [], 'Separado': [], 'Aguardando retirada': [], 'Concluído': [] };
     rows.forEach(r => {
@@ -20800,6 +20845,8 @@ app.get('/api/logistica/solicitacoes-kanban', async (req, res) => {
 app.get('/api/logistica/solicitacoes-kanban-destinos', async (req, res) => {
   try {
     const id_user = req.session?.user?.id;
+    const regraSep = id_user ? await obterPermissaoSeparacao(id_user) : null;
+    const destinosSep = regraSep?.restringir_destinos ? regraSep.destinos_chaves : null;
     if (!id_user) return res.status(401).json({ ok: false, error: 'Não autenticado.' });
 
     const { rows } = await pool.query(`
@@ -20817,9 +20864,10 @@ app.get('/api/logistica/solicitacoes-kanban-destinos', async (req, res) => {
         AND i.status IN ('pendente', 'Stund-by', 'Separação')
         -- Mesma regra do kanban 2D: pendente sem local ainda não está pronto p/ separar
         AND NOT (i.status = 'pendente' AND (i.cod_local IS NULL OR TRIM(i.cod_local) = ''))
+        AND ($1::text[] IS NULL OR CONCAT(TRIM(COALESCE(i.cod_local, '')), '|', TRIM(COALESCE(i.nome_local, ''))) = ANY($1::text[]))
       GROUP BY COALESCE(NULLIF(TRIM(i.nome_local), ''), NULLIF(TRIM(i.cod_local), ''), 'Sem destino')
       ORDER BY MIN(c.criado_em) ASC
-    `);
+    `, [destinosSep]);
 
     res.json({ ok: true, destinos: rows });
   } catch (err) {
@@ -20832,14 +20880,17 @@ app.get('/api/logistica/solicitacoes-kanban-destinos', async (req, res) => {
 app.get('/api/logistica/planejar-sep/codigos', async (req, res) => {
   try {
     const id_user = req.session?.user?.id;
+    const regraSep = id_user ? await obterPermissaoSeparacao(id_user) : null;
+    const destinosSep = regraSep?.restringir_destinos ? regraSep.destinos_chaves : null;
     if (!id_user) return res.status(401).json({ ok: false, error: 'Não autenticado.' });
 
     const nSolic = String(req.query.n_solic || '').trim();
-    const params = [];
+    const params = [destinosSep];
     let whereSep = `
          WHERE i.n_solic IS NOT NULL
            AND i.status IN ('pendente', 'Stund-by', 'Separação', 'Separado')
-           AND TRIM(COALESCE(c.codigo_produto, '')) <> ''`;
+           AND TRIM(COALESCE(c.codigo_produto, '')) <> ''
+           AND ($1::text[] IS NULL OR CONCAT(TRIM(COALESCE(i.cod_local, '')), '|', TRIM(COALESCE(i.nome_local, ''))) = ANY($1::text[]))`;
     if (nSolic) {
       params.push(nSolic);
       whereSep += ` AND i.n_solic = $${params.length}`;
@@ -20989,6 +21040,8 @@ app.patch('/api/logistica/itens_solicitados/concluido', async (req, res) => {
     if (!Array.isArray(solic_ids) || !solic_ids.length)
       return res.status(400).json({ ok: false, error: 'solic_ids inválido.' });
     const ids = solic_ids.map(id => parseInt(id, 10)).filter(id => !isNaN(id));
+    const acesso = await assertAcessoSeparacao(pool, ids, req);
+    if (!acesso.ok) return res.status(acesso.status || 403).json(acesso);
     await registrarMovimentacaoKanbanItens(pool, ids, 'Concluído', req);
     await pool.query(
       `UPDATE solicitacao_produto.itens_solicitados SET status = 'Concluído' WHERE id = ANY($1::bigint[])`, [ids]
@@ -21175,12 +21228,12 @@ app.post('/api/logistica/itens_solicitados/nao-separar', express.json(), async (
   try {
     const id_user = req.session?.user?.id;
     if (!id_user) return res.status(401).json({ ok: false, error: 'Não autenticado.' });
-    
+
     const { solic_id, justificativa } = req.body;
     if (!solic_id) return res.status(400).json({ ok: false, error: 'solic_id inválido.' });
     const lock = await assertUsuarioSeparandoPodeAgir(pool, [solic_id], req);
     if (!lock.ok) return res.status(403).json(lock);
-    
+
     await client.query('BEGIN');
 
     // Garante que a coluna existe
@@ -21219,9 +21272,9 @@ app.post('/api/logistica/itens_solicitados/nao-separar', express.json(), async (
     let maxSuffix = 0;
     existSeps.forEach(r => {
       const m = r.n_solic.match(/\.(\d+)$/);
-      if (m) { 
-        const v = parseInt(m[1]); 
-        if (v > maxSuffix) maxSuffix = v; 
+      if (m) {
+        const v = parseInt(m[1]);
+        if (v > maxSuffix) maxSuffix = v;
       }
     });
 
@@ -21238,7 +21291,7 @@ app.post('/api/logistica/itens_solicitados/nao-separar', express.json(), async (
     // Cria novo carrinho com o item "não separado"
     const { rows: newCarrRows } = await client.query(`
       INSERT INTO logistica.carrinho
-        (id_user, nome_user, retirada_por, codigo_produto, descricao, unidade, quantidade, 
+        (id_user, nome_user, retirada_por, codigo_produto, descricao, unidade, quantidade,
          data_prevista, horario, cod_omie)
       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
       RETURNING id
@@ -21316,10 +21369,10 @@ app.post('/api/logistica/itens_solicitados/trocar', express.json(), async (req, 
     // Registra a troca
     await client.query(
       `INSERT INTO solicitacao_produto.Registro_troca
-         (id_item_original, codigo_produto_ant, descricao_ant, codigo_produto_novo, descricao_novo, 
+         (id_item_original, codigo_produto_ant, descricao_ant, codigo_produto_novo, descricao_novo,
           unidade_novo, quantidade_novo, id_user, nome_user, motivo)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
-      [item.id, item.codigo_produto, item.descricao, codigo_novo, descricao_novo, 
+      [item.id, item.codigo_produto, item.descricao, codigo_novo, descricao_novo,
        unidade_novo || 'UN', quantidade_nova || null, id_user, nome_user, motivo || null]
     );
 
@@ -21898,7 +21951,7 @@ app.post('/api/armazem/producao', express.json(), async (req, res) => {
 app.post('/api/ops/all', express.json(), async (req, res) => {
   try {
     const { rows } = await pool.query(`
-      SELECT 
+      SELECT
         id,
         numero_op,
         codigo_produto,
@@ -21944,22 +21997,22 @@ app.post('/api/ops/all', express.json(), async (req, res) => {
 app.post('/api/ops/atualizar-prazo', express.json(), async (req, res) => {
   try {
     const { opId, prazo } = req.body;
-    
+
     if (!opId) {
       return res.status(400).json({ success: false, error: 'ID da OP não informado' });
     }
-    
+
     // Atualiza o campo de observações com o prazo (ou crie um campo específico se necessário)
     const { rowCount } = await pool.query(`
       UPDATE "OrdemProducao".tab_op
       SET observacoes = COALESCE(observacoes, '') || ' | Prazo: ' || $2
       WHERE id = $1
     `, [opId, prazo]);
-    
+
     if (rowCount === 0) {
       return res.status(404).json({ success: false, error: 'OP não encontrada' });
     }
-    
+
     res.json({ success: true, message: 'Prazo atualizado com sucesso' });
   } catch (err) {
     console.error('[/api/ops/atualizar-prazo] Erro:', err);
@@ -21971,28 +22024,28 @@ app.post('/api/ops/atualizar-prazo', express.json(), async (req, res) => {
 app.post('/api/ops/atualizar-data-impressao', express.json(), async (req, res) => {
   try {
     const { id, numero_op, data_impressao } = req.body;
-    
+
     if (!id && !numero_op) {
       return res.status(400).json({ success: false, error: 'ID ou número da OP não informado' });
     }
-    
+
     if (!data_impressao) {
       return res.status(400).json({ success: false, error: 'Data de impressão não informada' });
     }
-    
+
     const whereClause = id ? 'id = $1' : 'numero_op = $1';
     const whereValue = id || numero_op;
-    
+
     const { rowCount } = await pool.query(`
       UPDATE "OrdemProducao".tab_op
       SET data_impressao = $2
       WHERE ${whereClause}
     `, [whereValue, data_impressao]);
-    
+
     if (rowCount === 0) {
       return res.status(404).json({ success: false, error: 'OP não encontrada' });
     }
-    
+
     res.json({ success: true, message: 'Data de impressão atualizada com sucesso' });
   } catch (err) {
     console.error('[/api/ops/atualizar-data-impressao] Erro:', err);
@@ -22438,14 +22491,14 @@ app.post(
   // ============================================================================
   // ROTAS DE CHAT - Sistema de mensagens interno
   // ============================================================================
-  
+
   // Lista usuários ativos disponíveis para chat (exclui o próprio usuário logado)
   app.get('/api/chat/users', ensureLoggedIn, async (req, res) => {
     try {
       const currentUserId = req.session.user.id;
       if (CHAT_DEBUG) console.log('[CHAT API] Buscando usuários para user ID:', currentUserId);
       let users = [];
-      
+
       if (isDbEnabled) {
         try {
           if (CHAT_DEBUG) console.log('[CHAT API] Consultando banco de dados...');
@@ -22465,7 +22518,7 @@ app.post(
           console.error('[CHAT] Erro ao buscar usuários ativos:', err);
         }
       }
-      
+
       // Fallback para users.json se DB falhar ou não estiver disponível
       if (!users.length) {
         if (CHAT_DEBUG) console.log('[CHAT API] Usando fallback users.json');
@@ -22473,13 +22526,13 @@ app.post(
         const arr = JSON.parse(raw);
         users = (arr || [])
           .filter(u => String(u.id) !== String(currentUserId))
-          .map(u => ({ 
-            id: String(u.id), 
+          .map(u => ({
+            id: String(u.id),
             username: u.username,
-            unreadCount: 0 
+            unreadCount: 0
           }));
       }
-      
+
       if (CHAT_DEBUG) console.log('[CHAT API] Total de usuários a retornar:', users.length);
       res.json({ users });
     } catch (e) {
@@ -22493,13 +22546,13 @@ app.post(
     try {
       const me = req.session.user.id;
       const other = req.query.userId;
-      
+
       if (!other) {
         return res.status(400).json({ error: 'userId obrigatório' });
       }
-      
+
       let messages = [];
-      
+
       if (isDbEnabled) {
         try {
           // Usa função SQL para obter histórico da conversa
@@ -22507,7 +22560,7 @@ app.post(
             'SELECT * FROM get_conversation($1, $2, 100)',
             [me, other]
           );
-          
+
           messages = rows.map(r => ({
             id: String(r.id),
             from: String(r.from_user_id),
@@ -22516,27 +22569,27 @@ app.post(
             timestamp: r.created_at,
             read: r.is_read
           }));
-          
+
           // Marca mensagens como lidas quando abre a conversa
           await pool.query(
             'SELECT mark_messages_as_read($1, $2)',
             [me, other]
           );
-          
+
         } catch (err) {
           console.error('[CHAT] Erro ao buscar conversa:', err);
         }
       }
-      
+
       // Fallback para arquivo JSON
       if (!messages.length && !isDbEnabled) {
         const all = loadChatMessages();
         messages = all
-          .filter(m => (m.from === String(me) && m.to === String(other)) || 
+          .filter(m => (m.from === String(me) && m.to === String(other)) ||
                        (m.from === String(other) && m.to === String(me)))
           .sort((a,b) => new Date(a.timestamp) - new Date(b.timestamp));
       }
-      
+
       res.json({ messages });
     } catch (e) {
       console.error('[CHAT] Erro ao carregar conversa:', e);
@@ -22550,13 +22603,13 @@ app.post(
       const me = req.session.user.id;
       const { to, text } = req.body || {};
       const content = String(text || '').trim();
-      
+
       if (!to || !content) {
         return res.status(400).json({ error: 'Parâmetros inválidos' });
       }
-      
+
       let message = null;
-      
+
       if (isDbEnabled) {
         try {
           // Usa função SQL para enviar mensagem (valida usuários ativos automaticamente)
@@ -22564,15 +22617,15 @@ app.post(
             'SELECT send_chat_message($1, $2, $3) as message_id',
             [me, to, content]
           );
-          
+
           const messageId = rows[0].message_id;
-          
+
           // Busca a mensagem recém criada para retornar
           const { rows: msgRows } = await pool.query(
             'SELECT * FROM chat_messages WHERE id = $1',
             [messageId]
           );
-          
+
           if (msgRows.length > 0) {
             const r = msgRows[0];
             message = {
@@ -22584,7 +22637,7 @@ app.post(
               read: r.is_read
             };
           }
-          
+
         } catch (err) {
           console.error('[CHAT] Erro ao enviar mensagem:', err);
           // Se erro SQL for de validação, retorna erro específico
@@ -22593,7 +22646,7 @@ app.post(
           }
         }
       }
-      
+
       // Fallback para arquivo JSON
       if (!message && !isDbEnabled) {
         const all = loadChatMessages();
@@ -22608,13 +22661,13 @@ app.post(
         all.push(message);
         saveChatMessages(all);
       }
-      
+
       if (message) {
         res.json({ ok: true, message });
       } else {
         res.status(500).json({ error: 'Falha ao enviar mensagem' });
       }
-      
+
     } catch (e) {
       console.error('[CHAT] Erro ao enviar mensagem:', e);
       res.status(500).json({ error: 'Falha ao enviar mensagem' });
@@ -22626,7 +22679,7 @@ app.post(
     try {
       const userId = req.session.user.id;
       let count = 0;
-      
+
       if (isDbEnabled) {
         try {
           const { rows } = await pool.query(
@@ -22642,7 +22695,7 @@ app.post(
         const all = loadChatMessages();
         count = all.filter(m => m.to === String(userId) && !m.read).length;
       }
-      
+
       res.json({ count });
     } catch (e) {
       console.error('[CHAT] Erro ao contar mensagens não lidas:', e);
@@ -22758,13 +22811,13 @@ app.post('/api/config/campos-produto/scan', express.json(), async (req, res) => 
   const client = await pool.connect();
   try {
     const campos = req.body.campos || [];
-    
+
     if (!campos.length) {
       return res.json({ ok: true, novos: 0 });
     }
 
     await client.query('BEGIN');
-    
+
     await client.query('CREATE SCHEMA IF NOT EXISTS configuracoes');
     await client.query(`
       CREATE TABLE IF NOT EXISTS configuracoes.campos_guias (
@@ -22780,7 +22833,7 @@ app.post('/api/config/campos-produto/scan', express.json(), async (req, res) => 
     `);
 
     let novos = 0;
-    
+
     for (const campo of campos) {
       const result = await client.query(`
         INSERT INTO configuracoes.campos_guias (guia, chave, rotulo, habilitado)
@@ -22790,15 +22843,15 @@ app.post('/api/config/campos-produto/scan', express.json(), async (req, res) => 
             updated_at = now()
         RETURNING (xmax = 0) AS inserted
       `, [campo.guia, campo.chave, campo.rotulo]);
-      
+
       if (result.rows[0]?.inserted) {
         novos++;
       }
     }
-    
+
     await client.query('COMMIT');
     res.json({ ok: true, novos, total: campos.length });
-    
+
   } catch (e) {
     await client.query('ROLLBACK').catch(() => {});
     console.error('[POST /api/config/campos-produto/scan] erro:', e);
@@ -22813,13 +22866,13 @@ app.post('/api/config/campos-produto', express.json(), async (req, res) => {
   const client = await pool.connect();
   try {
     const updates = req.body.updates || [];
-    
+
     if (!updates.length) {
       return res.json({ ok: true });
     }
 
     await client.query('BEGIN');
-    
+
     for (const upd of updates) {
       await client.query(`
         UPDATE configuracoes.campos_guias
@@ -22827,10 +22880,10 @@ app.post('/api/config/campos-produto', express.json(), async (req, res) => {
         WHERE id = $2
       `, [upd.habilitado, upd.id]);
     }
-    
+
     await client.query('COMMIT');
     res.json({ ok: true });
-    
+
   } catch (e) {
     await client.query('ROLLBACK').catch(() => {});
     console.error('[POST /api/config/campos-produto] erro:', e);
@@ -22844,29 +22897,29 @@ app.post('/api/config/campos-produto', express.json(), async (req, res) => {
 app.get('/api/config/familia-campos/:familiaCodigo', async (req, res) => {
   try {
     const { familiaCodigo } = req.params;
-    
+
     // Busca todos os campos disponíveis
     const camposResult = await pool.query(`
       SELECT id, guia, chave, rotulo, habilitado
       FROM configuracoes.campos_guias
       ORDER BY guia, rotulo
     `);
-    
+
     // Busca campos marcados como obrigatórios para esta família
     const obrigatoriosResult = await pool.query(`
       SELECT campo_chave
       FROM configuracoes.familia_campos_obrigatorios
       WHERE familia_codigo = $1 AND obrigatorio = true
     `, [familiaCodigo]);
-    
+
     const obrigatorios = new Set(obrigatoriosResult.rows.map(r => r.campo_chave));
-    
+
     // Adiciona flag 'obrigatorio' em cada campo
     const campos = camposResult.rows.map(c => ({
       ...c,
       obrigatorio: obrigatorios.has(c.chave)
     }));
-    
+
     res.json(campos);
   } catch (e) {
     console.error('[GET /api/config/familia-campos] erro:', e);
@@ -22879,36 +22932,36 @@ app.post('/api/config/familia-campos', express.json(), async (req, res) => {
   const client = await pool.connect();
   try {
     const { familiaCodigo, camposObrigatorios } = req.body;
-    
+
     if (!familiaCodigo) {
       return res.status(400).json({ error: 'familiaCodigo é obrigatório' });
     }
-    
+
     await client.query('BEGIN');
-    
+
     // Remove configuração anterior desta família
     await client.query(`
       DELETE FROM configuracoes.familia_campos_obrigatorios
       WHERE familia_codigo = $1
     `, [familiaCodigo]);
-    
+
     // Insere novos campos obrigatórios
     if (Array.isArray(camposObrigatorios) && camposObrigatorios.length > 0) {
       const values = camposObrigatorios
         .map((chave, idx) => `($1, $${idx + 2}, true)`)
         .join(',');
-      
+
       const params = [familiaCodigo, ...camposObrigatorios];
-      
+
       await client.query(`
         INSERT INTO configuracoes.familia_campos_obrigatorios (familia_codigo, campo_chave, obrigatorio)
         VALUES ${values}
       `, params);
     }
-    
+
     await client.query('COMMIT');
     res.json({ ok: true, campos: camposObrigatorios.length });
-    
+
   } catch (e) {
     await client.query('ROLLBACK').catch(() => {});
     console.error('[POST /api/config/familia-campos] erro:', e);
@@ -22995,43 +23048,43 @@ app.post('/api/config/familia-campos', express.json(), async (req, res) => {
     const { newCod } = req.body;
     if (!codigo) return res.status(400).json({ ok:false, error:'Código original obrigatório' });
     if (!newCod) return res.status(400).json({ ok:false, error:'Novo código obrigatório' });
-    
+
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
-      
+
       // Verifica se o novo código já existe
       const check = await client.query(
         `SELECT cod FROM configuracoes.familia WHERE cod = $1`,
         [newCod]
       );
-      
+
       if (check.rowCount > 0 && newCod !== codigo) {
         throw new Error('Código já existe');
       }
-      
+
       // Atualiza o código (como é chave primária, precisa criar novo registro e deletar o antigo)
       const oldData = await client.query(
         `SELECT nome_familia, tipo, created_at FROM configuracoes.familia WHERE cod = $1`,
         [codigo]
       );
-      
+
       if (!oldData.rowCount) {
         throw new Error('Família não encontrada');
       }
-      
+
       const { nome_familia, tipo, created_at } = oldData.rows[0];
-      
+
       // Deleta o antigo
       await client.query(`DELETE FROM configuracoes.familia WHERE cod = $1`, [codigo]);
-      
+
       // Insere com novo código
       await client.query(
         `INSERT INTO configuracoes.familia (cod, nome_familia, tipo, created_at, updated_at)
          VALUES ($1, $2, $3, $4, now())`,
         [newCod, nome_familia, tipo, created_at]
       );
-      
+
       await client.query('COMMIT');
       res.json({ ok:true });
     } catch(e){
@@ -23135,7 +23188,7 @@ app.get('/api/produtos/detalhes/:codigo', async (req, res) => {
           const usuarioAudit = userFromReq(req);
           const payload = req.body?.produto_servico_cadastro || {};
           const codigoTxt  = String(payload?.codigo || payload?.cod_int || '').trim();
-        
+
           let produtoAntes = null, codigoId = null;
           if (codigoTxt) {
             try {
@@ -23195,15 +23248,15 @@ app.get('/api/produtos/detalhes/:codigo', async (req, res) => {
           if (produtoAntes) {
             Object.keys(payload).forEach(key => {
               if (key === 'codigo') return; // código é o identificador, não mudança
-            
+
               const dbKey = Object.keys(dbParaPayload).find(k => dbParaPayload[k] === key) || key;
               const valorAntes = produtoAntes[dbKey];
               const valorDepois = payload[key];
-            
+
               // Normaliza valores para comparação (null, undefined, '' são equivalentes)
               const antesNorm = (valorAntes === null || valorAntes === undefined || valorAntes === '') ? null : String(valorAntes).trim();
               const depoisNorm = (valorDepois === null || valorDepois === undefined || valorDepois === '') ? null : String(valorDepois).trim();
-            
+
               if (antesNorm !== depoisNorm) {
                 const label = campoLabels[key] || key;
                 camposAlterados.push({
@@ -23219,14 +23272,14 @@ app.get('/api/produtos/detalhes/:codigo', async (req, res) => {
           if (camposAlterados.length > 0 && (codigoTxt || codigoId)) {
             const listaCampos = camposAlterados.map(c => c.campo).join(', ');
             const detalhesLinhas = ['Origem: OMIE', `Campos: ${listaCampos}`, ''];
-          
+
             camposAlterados.forEach(c => {
               detalhesLinhas.push(`${c.campo}:`);
               detalhesLinhas.push(`  antes: ${c.antes}`);
               detalhesLinhas.push(`  depois: ${c.depois}`);
               detalhesLinhas.push('');
             });
-          
+
             const detalhes = detalhesLinhas.join('\n');
 
             await registrarModificacao({
@@ -23252,10 +23305,10 @@ app.get('/api/produtos/detalhes/:codigo', async (req, res) => {
   app.get('/api/produtos/:codigo', async (req, res) => {
     try {
       const codigo = req.params.codigo;
-      
+
       // Busca no banco local primeiro
       const result = await pool.query(
-        `SELECT 
+        `SELECT
           p.codigo,
           p.descricao,
           p.lead_time,
@@ -23283,11 +23336,11 @@ app.get('/api/produtos/detalhes/:codigo', async (req, res) => {
         LIMIT 1`,
         [codigo]
       );
-      
+
       if (result.rowCount === 0) {
         return res.status(404).json({ error: 'Produto não encontrado' });
       }
-      
+
       res.json(result.rows[0]);
     } catch (err) {
       console.error('[API] GET /api/produtos/:codigo erro:', err);
@@ -23300,7 +23353,7 @@ app.get('/api/produtos/detalhes/:codigo', async (req, res) => {
     try {
       const codigo = req.params.codigo;
       const { descricao, lead_time, estoque_minimo, url_imagem } = req.body;
-      
+
       // Valida se o produto existe
       const checkResult = await pool.query(
         `SELECT codigo FROM public.produtos_omie
@@ -23309,11 +23362,11 @@ app.get('/api/produtos/detalhes/:codigo', async (req, res) => {
           LIMIT 1`,
         [codigo]
       );
-      
+
       if (checkResult.rowCount === 0) {
         return res.status(404).json({ error: 'Produto não encontrado' });
       }
-      
+
       // Atualiza apenas os campos permitidos
       // A coluna de imagem pode variar entre ambientes (url_imagem ou primeira_imagem)
       const colResult = await pool.query(
@@ -23359,7 +23412,7 @@ app.get('/api/produtos/detalhes/:codigo', async (req, res) => {
       } finally {
         client.release();
       }
-      
+
       // Auditoria
       try {
         const usuarioAudit = userFromReq(req);
@@ -23368,7 +23421,7 @@ app.get('/api/produtos/detalhes/:codigo', async (req, res) => {
         if (lead_time !== undefined) campos.push(`Lead time: ${lead_time}`);
         if (estoque_minimo !== undefined) campos.push(`Estoque mínimo: ${estoque_minimo}`);
         if (url_imagem !== undefined) campos.push('URL imagem atualizada');
-        
+
         await registrarModificacao({
           codigo_omie: codigo,
           codigo_texto: codigo,
@@ -23381,9 +23434,9 @@ app.get('/api/produtos/detalhes/:codigo', async (req, res) => {
       } catch (e) {
         console.warn('[auditoria][produtos/:codigo PUT] falhou:', e?.message || e);
       }
-      
-      res.json({ 
-        success: true, 
+
+      res.json({
+        success: true,
         message: 'Produto atualizado com sucesso',
         produto: updateResult.rows[0]
       });
@@ -23695,7 +23748,7 @@ app.post('/api/omie/malha/call', express.json(), async (req, res) => {
   }
 });
 
-  
+
   // ─────────────────────────────────────────────────────────────────────────────
 // Resolve o ID OMIE do produto (para usar como idProdMalha / idProduto)
 // usando as fontes na ORDEM especificada pelo usuário:
@@ -25176,20 +25229,20 @@ app.post('/api/webhooks/omie/pedidos', express.json({ limit: '5mb' }), async (re
 app.post('/api/engenharia/atividade-produto', express.json(), async (req, res) => {
   try {
     const { produto_codigo, descricao, observacoes } = req.body;
-    
+
     if (!produto_codigo || !descricao) {
       return res.status(400).json({ error: 'produto_codigo e descricao são obrigatórios' });
     }
-    
+
     const insertQuery = `
-      INSERT INTO engenharia.atividades_produto 
+      INSERT INTO engenharia.atividades_produto
         (produto_codigo, descricao, observacoes, ativo, criado_em)
       VALUES ($1, $2, $3, true, NOW())
       RETURNING id, produto_codigo, descricao, observacoes, ativo, criado_em
     `;
-    
+
     const { rows } = await pool.query(insertQuery, [produto_codigo, descricao, observacoes || null]);
-    
+
     console.log(`[API] Nova atividade criada para produto ${produto_codigo}: ${descricao}`);
     res.json({ success: true, atividade: rows[0] });
   } catch (err) {
@@ -25202,9 +25255,9 @@ app.post('/api/engenharia/atividade-produto', express.json(), async (req, res) =
 app.get('/api/engenharia/atividades-produto/:codigo', async (req, res) => {
   try {
     const { codigo } = req.params;
-    
+
     const query = `
-      SELECT 
+      SELECT
         ap.id,
         ap.produto_codigo,
         ap.descricao AS nome,
@@ -25224,7 +25277,7 @@ app.get('/api/engenharia/atividades-produto/:codigo', async (req, res) => {
       WHERE ap.produto_codigo = $1 AND ap.ativo = true
       ORDER BY ap.criado_em DESC
     `;
-    
+
     const { rows } = await pool.query(query, [codigo]);
     res.json({ atividades: rows });
   } catch (err) {
@@ -25237,22 +25290,22 @@ app.get('/api/engenharia/atividades-produto/:codigo', async (req, res) => {
 app.post('/api/engenharia/atividade-produto-status/bulk', express.json(), async (req, res) => {
   try {
     const { produto_codigo, itens } = req.body;
-    
+
     if (!produto_codigo || !Array.isArray(itens)) {
       return res.status(400).json({ error: 'produto_codigo e itens são obrigatórios' });
     }
-    
+
     const client = await pool.connect();
-    
+
     try {
       await client.query('BEGIN');
-      
+
       for (const item of itens) {
         const { atividade_produto_id, concluido, nao_aplicavel, observacao, responsavel, autor, prazo } = item;
         const prazoDate = prazo ? new Date(prazo) : null;
-        
+
         await client.query(`
-          INSERT INTO engenharia.atividades_produto_status_especificas 
+          INSERT INTO engenharia.atividades_produto_status_especificas
             (atividade_produto_id, produto_codigo, concluido, nao_aplicavel, observacao_status, atualizado_em, responsavel_username, autor_username, prazo)
           VALUES ($1, $2, $3, $4, $5, NOW(), $6, $7, $8)
           ON CONFLICT (atividade_produto_id, produto_codigo)
@@ -25275,9 +25328,9 @@ app.post('/api/engenharia/atividade-produto-status/bulk', express.json(), async 
           prazoDate
         ]);
       }
-      
+
       await client.query('COMMIT');
-      
+
       console.log(`[API] Status de ${itens.length} atividade(s) específica(s) salvo para produto ${produto_codigo}`);
       res.json({ success: true });
     } catch (err) {
@@ -25298,7 +25351,7 @@ app.post('/api/engenharia/atividade-produto-status/bulk', express.json(), async 
 async function ensureComprasSchema() {
   try {
     await pool.query(`CREATE SCHEMA IF NOT EXISTS compras`);
-    
+
     // Cria tabela se não existir
     await pool.query(`
       CREATE TABLE IF NOT EXISTS compras.solicitacao_compras (
@@ -25318,165 +25371,165 @@ async function ensureComprasSchema() {
         updated_at TIMESTAMPTZ DEFAULT NOW()
       )
     `);
-    
+
     // Adiciona coluna numero_pedido se não existir (migração)
     await pool.query(`
       DO $$
       BEGIN
         IF NOT EXISTS (
-          SELECT 1 FROM information_schema.columns 
-          WHERE table_schema = 'compras' 
-          AND table_name = 'solicitacao_compras' 
+          SELECT 1 FROM information_schema.columns
+          WHERE table_schema = 'compras'
+          AND table_name = 'solicitacao_compras'
           AND column_name = 'numero_pedido'
         ) THEN
-          ALTER TABLE compras.solicitacao_compras 
+          ALTER TABLE compras.solicitacao_compras
           ADD COLUMN numero_pedido TEXT;
         END IF;
       END $$;
     `);
-    
+
     // Renomeia colunas antigas se existirem
     await pool.query(`
       DO $$
       BEGIN
         IF NOT EXISTS (
-          SELECT 1 FROM information_schema.columns 
-          WHERE table_schema = 'compras' 
-          AND table_name = 'solicitacao_compras' 
+          SELECT 1 FROM information_schema.columns
+          WHERE table_schema = 'compras'
+          AND table_name = 'solicitacao_compras'
           AND column_name = 'observacao_reprovacao'
         ) THEN
-          ALTER TABLE compras.solicitacao_compras 
+          ALTER TABLE compras.solicitacao_compras
           ADD COLUMN observacao_reprovacao TEXT;
         END IF;
 
         -- Renomeia prazo_estipulado para previsao_chegada se existir
         IF EXISTS (
-          SELECT 1 FROM information_schema.columns 
-          WHERE table_schema = 'compras' 
-          AND table_name = 'solicitacao_compras' 
+          SELECT 1 FROM information_schema.columns
+          WHERE table_schema = 'compras'
+          AND table_name = 'solicitacao_compras'
           AND column_name = 'prazo_estipulado'
         ) THEN
-          ALTER TABLE compras.solicitacao_compras 
+          ALTER TABLE compras.solicitacao_compras
           RENAME COLUMN prazo_estipulado TO previsao_chegada;
         END IF;
-        
+
         -- Renomeia criado_em para created_at se existir
         IF EXISTS (
-          SELECT 1 FROM information_schema.columns 
-          WHERE table_schema = 'compras' 
-          AND table_name = 'solicitacao_compras' 
+          SELECT 1 FROM information_schema.columns
+          WHERE table_schema = 'compras'
+          AND table_name = 'solicitacao_compras'
           AND column_name = 'criado_em'
         ) THEN
-          ALTER TABLE compras.solicitacao_compras 
+          ALTER TABLE compras.solicitacao_compras
           RENAME COLUMN criado_em TO created_at;
         END IF;
-        
+
         -- Renomeia responsavel para resp_inspecao_recebimento se existir
         IF EXISTS (
-          SELECT 1 FROM information_schema.columns 
-          WHERE table_schema = 'compras' 
-          AND table_name = 'solicitacao_compras' 
+          SELECT 1 FROM information_schema.columns
+          WHERE table_schema = 'compras'
+          AND table_name = 'solicitacao_compras'
           AND column_name = 'responsavel'
         ) THEN
-          ALTER TABLE compras.solicitacao_compras 
+          ALTER TABLE compras.solicitacao_compras
           RENAME COLUMN responsavel TO resp_inspecao_recebimento;
         END IF;
-        
+
         -- Remove coluna quem_recebe (substituída por resp_inspecao_recebimento)
         IF EXISTS (
-          SELECT 1 FROM information_schema.columns 
-          WHERE table_schema = 'compras' 
-          AND table_name = 'solicitacao_compras' 
+          SELECT 1 FROM information_schema.columns
+          WHERE table_schema = 'compras'
+          AND table_name = 'solicitacao_compras'
           AND column_name = 'quem_recebe'
         ) THEN
           -- Copia dados de quem_recebe para resp_inspecao_recebimento se estiver vazio
-          UPDATE compras.solicitacao_compras 
-          SET resp_inspecao_recebimento = quem_recebe 
+          UPDATE compras.solicitacao_compras
+          SET resp_inspecao_recebimento = quem_recebe
           WHERE resp_inspecao_recebimento IS NULL AND quem_recebe IS NOT NULL;
-          
-          ALTER TABLE compras.solicitacao_compras 
+
+          ALTER TABLE compras.solicitacao_compras
           DROP COLUMN quem_recebe;
         END IF;
-        
+
         -- Adiciona coluna updated_at se não existir
         IF NOT EXISTS (
-          SELECT 1 FROM information_schema.columns 
-          WHERE table_schema = 'compras' 
-          AND table_name = 'solicitacao_compras' 
+          SELECT 1 FROM information_schema.columns
+          WHERE table_schema = 'compras'
+          AND table_name = 'solicitacao_compras'
           AND column_name = 'updated_at'
         ) THEN
-          ALTER TABLE compras.solicitacao_compras 
+          ALTER TABLE compras.solicitacao_compras
           ADD COLUMN updated_at TIMESTAMPTZ DEFAULT NOW();
         END IF;
-        
+
         -- Adiciona coluna fornecedor_nome se não existir
         IF NOT EXISTS (
-          SELECT 1 FROM information_schema.columns 
-          WHERE table_schema = 'compras' 
-          AND table_name = 'solicitacao_compras' 
+          SELECT 1 FROM information_schema.columns
+          WHERE table_schema = 'compras'
+          AND table_name = 'solicitacao_compras'
           AND column_name = 'fornecedor_nome'
         ) THEN
-          ALTER TABLE compras.solicitacao_compras 
+          ALTER TABLE compras.solicitacao_compras
           ADD COLUMN fornecedor_nome TEXT;
         END IF;
-        
+
         -- Adiciona coluna fornecedor_id se não existir
         IF NOT EXISTS (
-          SELECT 1 FROM information_schema.columns 
-          WHERE table_schema = 'compras' 
-          AND table_name = 'solicitacao_compras' 
+          SELECT 1 FROM information_schema.columns
+          WHERE table_schema = 'compras'
+          AND table_name = 'solicitacao_compras'
           AND column_name = 'fornecedor_id'
         ) THEN
-          ALTER TABLE compras.solicitacao_compras 
+          ALTER TABLE compras.solicitacao_compras
           ADD COLUMN fornecedor_id TEXT;
         END IF;
-        
+
         -- Adiciona coluna anexos se não existir (JSONB para armazenar array de objetos)
         IF NOT EXISTS (
-          SELECT 1 FROM information_schema.columns 
-          WHERE table_schema = 'compras' 
-          AND table_name = 'solicitacao_compras' 
+          SELECT 1 FROM information_schema.columns
+          WHERE table_schema = 'compras'
+          AND table_name = 'solicitacao_compras'
           AND column_name = 'anexos'
         ) THEN
-          ALTER TABLE compras.solicitacao_compras 
+          ALTER TABLE compras.solicitacao_compras
           ADD COLUMN anexos JSONB;
         END IF;
-        
+
         -- Adiciona coluna categoria_compra se não existir
         IF NOT EXISTS (
-          SELECT 1 FROM information_schema.columns 
-          WHERE table_schema = 'compras' 
-          AND table_name = 'solicitacao_compras' 
+          SELECT 1 FROM information_schema.columns
+          WHERE table_schema = 'compras'
+          AND table_name = 'solicitacao_compras'
           AND column_name = 'categoria_compra'
         ) THEN
-          ALTER TABLE compras.solicitacao_compras 
+          ALTER TABLE compras.solicitacao_compras
           ADD COLUMN categoria_compra TEXT;
         END IF;
-        
+
         -- Adiciona coluna categoria_compra_codigo se não existir
         IF NOT EXISTS (
-          SELECT 1 FROM information_schema.columns 
-          WHERE table_schema = 'compras' 
-          AND table_name = 'solicitacao_compras' 
+          SELECT 1 FROM information_schema.columns
+          WHERE table_schema = 'compras'
+          AND table_name = 'solicitacao_compras'
           AND column_name = 'categoria_compra_codigo'
         ) THEN
-          ALTER TABLE compras.solicitacao_compras 
+          ALTER TABLE compras.solicitacao_compras
           ADD COLUMN categoria_compra_codigo TEXT;
         END IF;
 
         -- Adiciona coluna grupo_requisicao se não existir
         IF NOT EXISTS (
-          SELECT 1 FROM information_schema.columns 
-          WHERE table_schema = 'compras' 
-          AND table_name = 'solicitacao_compras' 
+          SELECT 1 FROM information_schema.columns
+          WHERE table_schema = 'compras'
+          AND table_name = 'solicitacao_compras'
           AND column_name = 'grupo_requisicao'
         ) THEN
-          ALTER TABLE compras.solicitacao_compras 
+          ALTER TABLE compras.solicitacao_compras
           ADD COLUMN grupo_requisicao TEXT;
         END IF;
       END $$;
     `);
-    
+
     // Cria tabela para armazenar dados do pedido de compra
     // Objetivo: Separar dados do pedido (que são únicos por numero_pedido) dos itens
     await pool.query(`
@@ -25490,7 +25543,7 @@ async function ensureComprasSchema() {
         categoria_compra_codigo TEXT,
         cod_parcela TEXT,
         descricao_parcela TEXT,
-        
+
         -- Dados de Frete
         incluir_frete BOOLEAN DEFAULT false,
         transportadora_nome TEXT,
@@ -25508,18 +25561,18 @@ async function ensureComprasSchema() {
         valor_seguro DECIMAL(15,2),
         lacre TEXT,
         outras_despesas DECIMAL(15,2),
-        
+
         created_at TIMESTAMPTZ DEFAULT NOW(),
         updated_at TIMESTAMPTZ DEFAULT NOW()
       );
     `);
-    
+
     // Cria índice para busca rápida por numero_pedido
     await pool.query(`
-      CREATE INDEX IF NOT EXISTS idx_ped_compra_numero 
+      CREATE INDEX IF NOT EXISTS idx_ped_compra_numero
       ON compras.ped_compra(numero_pedido);
     `);
-    
+
     // Cria tabela de cotações para armazenar múltiplos fornecedores por item
     await pool.query(`
       CREATE TABLE IF NOT EXISTS compras.cotacoes (
@@ -25536,11 +25589,11 @@ async function ensureComprasSchema() {
         criado_em TIMESTAMPTZ DEFAULT NOW(),
         atualizado_em TIMESTAMPTZ DEFAULT NOW()
       );
-      
+
       -- Cria índice para busca rápida por solicitacao_id
-      CREATE INDEX IF NOT EXISTS idx_cotacoes_solicitacao 
+      CREATE INDEX IF NOT EXISTS idx_cotacoes_solicitacao
       ON compras.cotacoes(solicitacao_id);
-      
+
       -- Cria índice para busca rápida por status_aprovacao
       CREATE INDEX IF NOT EXISTS idx_cotacoes_status_aprovacao
       ON compras.cotacoes(status_aprovacao);
@@ -25569,37 +25622,37 @@ async function ensureComprasSchema() {
 
     // Migration: Remove constraint de foreign key se existir (para aceitar IDs de compras_sem_cadastro também)
     await pool.query(`
-      DO $$ 
+      DO $$
       BEGIN
         IF EXISTS (
-          SELECT 1 FROM information_schema.table_constraints 
-          WHERE constraint_schema = 'compras' 
-          AND table_name = 'cotacoes' 
+          SELECT 1 FROM information_schema.table_constraints
+          WHERE constraint_schema = 'compras'
+          AND table_name = 'cotacoes'
           AND constraint_name = 'cotacoes_solicitacao_id_fkey'
           AND constraint_type = 'FOREIGN KEY'
         ) THEN
-          ALTER TABLE compras.cotacoes 
+          ALTER TABLE compras.cotacoes
           DROP CONSTRAINT cotacoes_solicitacao_id_fkey;
         END IF;
       END $$;
     `);
-    
+
     // Migration: Adiciona coluna status_aprovacao se não existir
     await pool.query(`
-      DO $$ 
+      DO $$
       BEGIN
         IF NOT EXISTS (
-          SELECT 1 FROM information_schema.columns 
-          WHERE table_schema = 'compras' 
-          AND table_name = 'cotacoes' 
+          SELECT 1 FROM information_schema.columns
+          WHERE table_schema = 'compras'
+          AND table_name = 'cotacoes'
           AND column_name = 'status_aprovacao'
         ) THEN
-          ALTER TABLE compras.cotacoes 
-          ADD COLUMN status_aprovacao VARCHAR(20) DEFAULT 'pendente' 
+          ALTER TABLE compras.cotacoes
+          ADD COLUMN status_aprovacao VARCHAR(20) DEFAULT 'pendente'
           CHECK (status_aprovacao IN ('pendente', 'aprovado', 'reprovado'));
-          
+
           -- Cria índice para a nova coluna
-          CREATE INDEX idx_cotacoes_status_aprovacao 
+          CREATE INDEX idx_cotacoes_status_aprovacao
           ON compras.cotacoes(status_aprovacao);
         END IF;
       END $$;
@@ -25623,15 +25676,15 @@ async function ensureComprasSchema() {
 
     // Migration: Adiciona coluna link se não existir (armazena links da cotação em JSON string)
     await pool.query(`
-      DO $$ 
+      DO $$
       BEGIN
         IF NOT EXISTS (
-          SELECT 1 FROM information_schema.columns 
-          WHERE table_schema = 'compras' 
-          AND table_name = 'cotacoes' 
+          SELECT 1 FROM information_schema.columns
+          WHERE table_schema = 'compras'
+          AND table_name = 'cotacoes'
           AND column_name = 'link'
         ) THEN
-          ALTER TABLE compras.cotacoes 
+          ALTER TABLE compras.cotacoes
           ADD COLUMN link TEXT;
         END IF;
       END $$;
@@ -25639,15 +25692,15 @@ async function ensureComprasSchema() {
 
     // Migration: Adiciona coluna produto_codigo se não existir e faz backfill
     await pool.query(`
-      DO $$ 
+      DO $$
       BEGIN
         IF NOT EXISTS (
-          SELECT 1 FROM information_schema.columns 
-          WHERE table_schema = 'compras' 
-          AND table_name = 'cotacoes' 
+          SELECT 1 FROM information_schema.columns
+          WHERE table_schema = 'compras'
+          AND table_name = 'cotacoes'
           AND column_name = 'produto_codigo'
         ) THEN
-          ALTER TABLE compras.cotacoes 
+          ALTER TABLE compras.cotacoes
           ADD COLUMN produto_codigo TEXT;
 
           -- Backfill inicial com base na solicitacao_compras
@@ -25661,15 +25714,15 @@ async function ensureComprasSchema() {
 
     // Migration: Adiciona coluna numero_pedido se não existir e faz backfill
     await pool.query(`
-      DO $$ 
+      DO $$
       BEGIN
         IF NOT EXISTS (
-          SELECT 1 FROM information_schema.columns 
-          WHERE table_schema = 'compras' 
-          AND table_name = 'cotacoes' 
+          SELECT 1 FROM information_schema.columns
+          WHERE table_schema = 'compras'
+          AND table_name = 'cotacoes'
           AND column_name = 'numero_pedido'
         ) THEN
-          ALTER TABLE compras.cotacoes 
+          ALTER TABLE compras.cotacoes
           ADD COLUMN numero_pedido TEXT;
 
           -- Backfill inicial com base na solicitacao_compras
@@ -25683,23 +25736,23 @@ async function ensureComprasSchema() {
 
     // Migration: Adiciona coluna table_source se não existir (identifica origem da cotação)
     await pool.query(`
-      DO $$ 
+      DO $$
       BEGIN
         IF NOT EXISTS (
-          SELECT 1 FROM information_schema.columns 
-          WHERE table_schema = 'compras' 
-          AND table_name = 'cotacoes' 
+          SELECT 1 FROM information_schema.columns
+          WHERE table_schema = 'compras'
+          AND table_name = 'cotacoes'
           AND column_name = 'table_source'
         ) THEN
-          ALTER TABLE compras.cotacoes 
+          ALTER TABLE compras.cotacoes
           ADD COLUMN table_source VARCHAR(50) DEFAULT 'solicitacao_compras';
         END IF;
       END $$;
     `);
-    
+
     // Cria schema configuracoes se não existir
     await pool.query(`CREATE SCHEMA IF NOT EXISTS configuracoes`);
-    
+
     // Cria tabela de departamentos
     await pool.query(`
       CREATE TABLE IF NOT EXISTS configuracoes.departamento (
@@ -25740,14 +25793,14 @@ async function ensureComprasSchema() {
 
     // Insere departamentos padrão se não existirem
     await pool.query(`
-      INSERT INTO configuracoes.departamento (nome) 
-      VALUES 
+      INSERT INTO configuracoes.departamento (nome)
+      VALUES
         ('Administrativo'),
         ('Produção'),
         ('Comercial')
       ON CONFLICT (nome) DO NOTHING
     `);
-    
+
     // Cria tabela de centro de custo
     await pool.query(`
       CREATE TABLE IF NOT EXISTS configuracoes.centro_custo (
@@ -25757,7 +25810,7 @@ async function ensureComprasSchema() {
         created_at TIMESTAMPTZ DEFAULT NOW()
       )
     `);
-    
+
     // Insere centros de custo padrão se não existirem
     await pool.query(`
       INSERT INTO configuracoes.centro_custo (nome)
@@ -25773,7 +25826,7 @@ async function ensureComprasSchema() {
         ('Outros')
       ON CONFLICT (nome) DO NOTHING
     `);
-    
+
     // Cria tabela de status de compras
     await pool.query(`
       CREATE TABLE IF NOT EXISTS configuracoes.status_compras (
@@ -25784,7 +25837,7 @@ async function ensureComprasSchema() {
         created_at TIMESTAMPTZ DEFAULT NOW()
       )
     `);
-    
+
     // Insere status padrão se não existirem
     await pool.query(`
       INSERT INTO configuracoes.status_compras (nome, ordem)
@@ -25800,80 +25853,80 @@ async function ensureComprasSchema() {
         ('revisão', 9)
       ON CONFLICT (nome) DO NOTHING
     `);
-    
+
     // Adiciona colunas departamento, centro_custo e objetivo_compra na tabela solicitacao_compras
     await pool.query(`
       DO $$
       BEGIN
         IF NOT EXISTS (
-          SELECT 1 FROM information_schema.columns 
-          WHERE table_schema = 'compras' 
-          AND table_name = 'solicitacao_compras' 
+          SELECT 1 FROM information_schema.columns
+          WHERE table_schema = 'compras'
+          AND table_name = 'solicitacao_compras'
           AND column_name = 'departamento'
         ) THEN
-          ALTER TABLE compras.solicitacao_compras 
+          ALTER TABLE compras.solicitacao_compras
           ADD COLUMN departamento TEXT;
         END IF;
-        
+
         IF NOT EXISTS (
-          SELECT 1 FROM information_schema.columns 
-          WHERE table_schema = 'compras' 
-          AND table_name = 'solicitacao_compras' 
+          SELECT 1 FROM information_schema.columns
+          WHERE table_schema = 'compras'
+          AND table_name = 'solicitacao_compras'
           AND column_name = 'centro_custo'
         ) THEN
-          ALTER TABLE compras.solicitacao_compras 
+          ALTER TABLE compras.solicitacao_compras
           ADD COLUMN centro_custo TEXT;
         END IF;
-        
+
         IF NOT EXISTS (
-          SELECT 1 FROM information_schema.columns 
-          WHERE table_schema = 'compras' 
-          AND table_name = 'solicitacao_compras' 
+          SELECT 1 FROM information_schema.columns
+          WHERE table_schema = 'compras'
+          AND table_name = 'solicitacao_compras'
           AND column_name = 'objetivo_compra'
         ) THEN
-          ALTER TABLE compras.solicitacao_compras 
+          ALTER TABLE compras.solicitacao_compras
           ADD COLUMN objetivo_compra TEXT;
         END IF;
-        
+
         IF NOT EXISTS (
-          SELECT 1 FROM information_schema.columns 
-          WHERE table_schema = 'compras' 
-          AND table_name = 'solicitacao_compras' 
+          SELECT 1 FROM information_schema.columns
+          WHERE table_schema = 'compras'
+          AND table_name = 'solicitacao_compras'
           AND column_name = 'anexo_url'
         ) THEN
-          ALTER TABLE compras.solicitacao_compras 
+          ALTER TABLE compras.solicitacao_compras
           ADD COLUMN anexo_url TEXT;
         END IF;
-        
+
         IF NOT EXISTS (
-          SELECT 1 FROM information_schema.columns 
-          WHERE table_schema = 'compras' 
-          AND table_name = 'solicitacao_compras' 
+          SELECT 1 FROM information_schema.columns
+          WHERE table_schema = 'compras'
+          AND table_name = 'solicitacao_compras'
           AND column_name = 'retorno_cotacao'
         ) THEN
-          ALTER TABLE compras.solicitacao_compras 
+          ALTER TABLE compras.solicitacao_compras
           ADD COLUMN retorno_cotacao TEXT;
         END IF;
 
         IF NOT EXISTS (
-          SELECT 1 FROM information_schema.columns 
-          WHERE table_schema = 'compras' 
-          AND table_name = 'solicitacao_compras' 
+          SELECT 1 FROM information_schema.columns
+          WHERE table_schema = 'compras'
+          AND table_name = 'solicitacao_compras'
           AND column_name = 'grupo_requisicao'
         ) THEN
-          ALTER TABLE compras.solicitacao_compras 
+          ALTER TABLE compras.solicitacao_compras
           ADD COLUMN grupo_requisicao TEXT;
         END IF;
       END $$;
     `);
-    
+
     // Cria índices se não existirem
     await pool.query(`
-      CREATE INDEX IF NOT EXISTS idx_solicitacao_compras_numero_pedido 
+      CREATE INDEX IF NOT EXISTS idx_solicitacao_compras_numero_pedido
         ON compras.solicitacao_compras(numero_pedido);
-      CREATE INDEX IF NOT EXISTS idx_solicitacao_compras_solicitante 
+      CREATE INDEX IF NOT EXISTS idx_solicitacao_compras_solicitante
         ON compras.solicitacao_compras(solicitante);
-      CREATE INDEX IF NOT EXISTS idx_solicitacao_compras_status 
+      CREATE INDEX IF NOT EXISTS idx_solicitacao_compras_status
         ON compras.solicitacao_compras(status);
     `);
 
@@ -26367,21 +26420,21 @@ async function ensureComprasSchema() {
         console.warn('[Compras] Aviso no backfill de produto_descricao:', backfillErr.message);
       }
     }
-    
+
     // Migration: Corrigir tipo de n_qtde_parc de INTEGER para BIGINT
     // Motivo: Omie envia IDs grandes que não cabem em INTEGER (máximo ~2 bilhões)
     try {
       const typeCheck = await pool.query(`
-        SELECT data_type FROM information_schema.columns 
-        WHERE table_schema = 'compras' 
-        AND table_name = 'pedidos_omie' 
+        SELECT data_type FROM information_schema.columns
+        WHERE table_schema = 'compras'
+        AND table_name = 'pedidos_omie'
         AND column_name = 'n_qtde_parc'
       `);
-      
+
       if (typeCheck.rows.length > 0 && typeCheck.rows[0].data_type === 'integer') {
         console.log('[Compras] Migrando n_qtde_parc de INTEGER para BIGINT...');
         await pool.query(`
-          ALTER TABLE compras.pedidos_omie 
+          ALTER TABLE compras.pedidos_omie
           ALTER COLUMN n_qtde_parc TYPE BIGINT USING n_qtde_parc::BIGINT
         `);
         console.log('[Compras] ✓ Migração de n_qtde_parc concluída');
@@ -26392,7 +26445,7 @@ async function ensureComprasSchema() {
         console.error('[Compras] Erro na migração de n_qtde_parc:', migErr.message);
       }
     }
-    
+
     // Migration: Adicionar colunas numero e etapa na tabela requisicoes_omie
     // Objetivo: Armazenar número do pedido e etapa do processo vindo do webhook Omie
     try {
@@ -26400,22 +26453,22 @@ async function ensureComprasSchema() {
         DO $$
         BEGIN
           IF NOT EXISTS (
-            SELECT 1 FROM information_schema.columns 
-            WHERE table_schema = 'compras' 
-            AND table_name = 'requisicoes_omie' 
+            SELECT 1 FROM information_schema.columns
+            WHERE table_schema = 'compras'
+            AND table_name = 'requisicoes_omie'
             AND column_name = 'numero'
           ) THEN
-            ALTER TABLE compras.requisicoes_omie 
+            ALTER TABLE compras.requisicoes_omie
             ADD COLUMN numero VARCHAR(50);
           END IF;
-          
+
           IF NOT EXISTS (
-            SELECT 1 FROM information_schema.columns 
-            WHERE table_schema = 'compras' 
-            AND table_name = 'requisicoes_omie' 
+            SELECT 1 FROM information_schema.columns
+            WHERE table_schema = 'compras'
+            AND table_name = 'requisicoes_omie'
             AND column_name = 'etapa'
           ) THEN
-            ALTER TABLE compras.requisicoes_omie 
+            ALTER TABLE compras.requisicoes_omie
             ADD COLUMN etapa VARCHAR(50);
           END IF;
         END $$;
@@ -26767,7 +26820,7 @@ async function ensureComprasSchema() {
         END IF;
       END $$;
     `);
-    
+
     console.log('[Compras] Schema e tabela garantidos com migrações aplicadas');
   } catch (e) {
     console.error('[Compras] Erro ao criar schema:', e);
@@ -26783,7 +26836,7 @@ async function ensureFornecedoresSchema() {
   try {
     // Cria schema omie se não existir
     await pool.query(`CREATE SCHEMA IF NOT EXISTS omie`);
-    
+
     // Cria tabela de fornecedores
     await pool.query(`
       CREATE TABLE IF NOT EXISTS omie.fornecedores (
@@ -26810,17 +26863,17 @@ async function ensureFornecedoresSchema() {
         updated_at TIMESTAMPTZ DEFAULT NOW()
       )
     `);
-    
+
     // Cria índices
     await pool.query(`
-      CREATE INDEX IF NOT EXISTS idx_fornecedores_codigo_omie 
+      CREATE INDEX IF NOT EXISTS idx_fornecedores_codigo_omie
         ON omie.fornecedores(codigo_cliente_omie);
-      CREATE INDEX IF NOT EXISTS idx_fornecedores_cnpj 
+      CREATE INDEX IF NOT EXISTS idx_fornecedores_cnpj
         ON omie.fornecedores(cnpj_cpf);
-      CREATE INDEX IF NOT EXISTS idx_fornecedores_nome 
+      CREATE INDEX IF NOT EXISTS idx_fornecedores_nome
         ON omie.fornecedores(razao_social);
     `);
-    
+
     console.log('[Fornecedores] Schema e tabela garantidos');
   } catch (e) {
     console.error('[Fornecedores] Erro ao criar schema:', e);
@@ -26835,7 +26888,7 @@ async function syncFornecedoresOmie() {
     let pagina = 1;
     let totalSincronizados = 0;
     let continuar = true;
-    
+
     while (continuar) {
       const body = {
         call: 'ListarClientes',
@@ -26847,42 +26900,42 @@ async function syncFornecedoresOmie() {
           apenas_importado_api: 'N'
         }]
       };
-      
+
       console.log(`[Fornecedores] Buscando página ${pagina}...`);
-      
+
       const response = await fetch('https://app.omie.com.br/api/v1/geral/clientes/', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body)
       });
-      
+
       if (!response.ok) {
         throw new Error(`Omie API retornou ${response.status}`);
       }
-      
+
       const data = await response.json();
       const clientes = data.clientes_cadastro || [];
       const totalPaginas = data.total_de_paginas || 1;
       const totalRegistros = data.total_de_registros || 0;
-      
+
       console.log(`[Fornecedores] Página ${pagina}/${totalPaginas} - ${clientes.length} registros (Total na Omie: ${totalRegistros})`);
-      
+
       if (!clientes.length) {
         continuar = false;
         break;
       }
-      
+
       // Upsert em batch
       for (const cliente of clientes) {
         await upsertFornecedor(cliente);
         totalSincronizados++;
-        
+
         // Log a cada 500 itens
         if (totalSincronizados % 500 === 0) {
           console.log(`[Fornecedores] ✓ Progresso: ${totalSincronizados} fornecedores sincronizados...`);
         }
       }
-      
+
       // Verifica se tem mais páginas
       if (pagina >= totalPaginas) {
         continuar = false;
@@ -26890,7 +26943,7 @@ async function syncFornecedoresOmie() {
         pagina++;
       }
     }
-    
+
     console.log(`[Fornecedores] ✓✓✓ Sincronização concluída: ${totalSincronizados} fornecedores sincronizados com sucesso!`);
     return { ok: true, total: totalSincronizados };
   } catch (e) {
@@ -26929,7 +26982,7 @@ async function upsertFornecedor(cliente) {
       pessoa_fisica,
       codigo_pais
     } = cliente;
-    
+
     // Atualizar omie.fornecedores
     await pool.query(`
       INSERT INTO omie.fornecedores (
@@ -26953,7 +27006,7 @@ async function upsertFornecedor(cliente) {
         info,
         updated_at
       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, NOW())
-      ON CONFLICT (codigo_cliente_omie) 
+      ON CONFLICT (codigo_cliente_omie)
       DO UPDATE SET
         codigo_cliente_integracao = EXCLUDED.codigo_cliente_integracao,
         razao_social = EXCLUDED.razao_social,
@@ -26993,7 +27046,7 @@ async function upsertFornecedor(cliente) {
       Array.isArray(tags) ? tags : [],
       JSON.stringify(cliente)
     ]);
-    
+
     console.log('[upsertFornecedor] Cliente', codigo_cliente_omie, 'sincronizado com sucesso');
   } catch (e) {
     console.error('[Fornecedores] Erro ao fazer upsert:', e);
@@ -27007,19 +27060,19 @@ async function upsertFornecedor(cliente) {
 // Função auxiliar para converter data do formato Omie (DD/MM/YYYY) para PostgreSQL (YYYY-MM-DD)
 function convertOmieDate(omieDate) {
   if (!omieDate) return null;
-  
+
   // Se já estiver no formato YYYY-MM-DD, retorna como está
   if (omieDate.match(/^\d{4}-\d{2}-\d{2}$/)) {
     return omieDate;
   }
-  
+
   // Converte DD/MM/YYYY para YYYY-MM-DD
   const match = omieDate.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
   if (match) {
     const [, dia, mes, ano] = match;
     return `${ano}-${mes}-${dia}`;
   }
-  
+
   return null;
 }
 
@@ -27029,14 +27082,14 @@ async function upsertPedidoCompra(pedido, eventoWebhook = '', messageId = null, 
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-    
+
     // Extrai os dados do cabeçalho
     const cabecalho = pedido.cabecalho || pedido.cabecalho_consulta || {};
     const produtos = pedido.produtos || pedido.produtos_consulta || [];
     const frete = pedido.frete || pedido.frete_consulta || {};
     const parcelas = pedido.parcelas || pedido.parcelas_consulta || [];
     const departamentos = pedido.departamentos || pedido.departamentos_consulta || [];
-    
+
     const cNumero = cabecalho.cNumero || cabecalho.c_numero || cabecalho['cNúmero'] || null;
     let nCodPed = cabecalho.nCodPed || cabecalho.n_cod_ped;
 
@@ -27054,11 +27107,11 @@ async function upsertPedidoCompra(pedido, eventoWebhook = '', messageId = null, 
         nCodPed = pedidoExistente.rows[0].n_cod_ped;
       }
     }
-    
+
     if (!nCodPed) {
       throw new Error(`nCodPed não encontrado no pedido (cNumero: ${cNumero || 'N/A'})`);
     }
-    
+
     // 1. Upsert do cabeçalho
     await client.query(`
       INSERT INTO compras.pedidos_omie (
@@ -27149,7 +27202,7 @@ async function upsertPedidoCompra(pedido, eventoWebhook = '', messageId = null, 
       messageId,
       confirmadoOmie
     ]);
-    
+
     // 2. Atualiza itens do pedido somente quando o payload traz produtos.
     // Em alguns eventos (ex.: EtapaAlterada), a Omie pode retornar cabeçalho sem itens;
     // nesse caso, preservamos os itens locais para evitar zerar a compra na UI.
@@ -27211,10 +27264,10 @@ async function upsertPedidoCompra(pedido, eventoWebhook = '', messageId = null, 
     } else {
       console.log(`[PedidosCompra] ⚠️ Pedido ${nCodPed} recebido sem itens no payload (${eventoWebhook || 'sem-evento'}). Itens locais preservados.`);
     }
-    
+
     // 3. Upsert do frete (1:1 com pedido)
     await client.query('DELETE FROM compras.pedidos_omie_frete WHERE n_cod_ped = $1', [nCodPed]);
-    
+
     if (frete && Object.keys(frete).length > 0) {
       await client.query(`
         INSERT INTO compras.pedidos_omie_frete (
@@ -27242,10 +27295,10 @@ async function upsertPedidoCompra(pedido, eventoWebhook = '', messageId = null, 
         frete.cLacre || frete.c_lacre || null
       ]);
     }
-    
+
     // 4. Remove parcelas antigas e insere novas
     await client.query('DELETE FROM compras.pedidos_omie_parcelas WHERE n_cod_ped = $1', [nCodPed]);
-    
+
     if (Array.isArray(parcelas) && parcelas.length > 0) {
       for (const parc of parcelas) {
         await client.query(`
@@ -27264,10 +27317,10 @@ async function upsertPedidoCompra(pedido, eventoWebhook = '', messageId = null, 
         ]);
       }
     }
-    
+
     // 5. Remove departamentos antigos e insere novos
     await client.query('DELETE FROM compras.pedidos_omie_departamentos WHERE n_cod_ped = $1', [nCodPed]);
-    
+
     if (Array.isArray(departamentos) && departamentos.length > 0) {
       for (const dept of departamentos) {
         await client.query(`
@@ -27283,10 +27336,10 @@ async function upsertPedidoCompra(pedido, eventoWebhook = '', messageId = null, 
         ]);
       }
     }
-    
+
     await client.query('COMMIT');
     console.log(`[PedidosCompra] ✓ Pedido ${nCodPed} sincronizado com sucesso`);
-    
+
   } catch (e) {
     await client.query('ROLLBACK');
     console.error('[PedidosCompra] ✗ Erro ao fazer upsert do pedido:', e);
@@ -27306,43 +27359,43 @@ async function sincronizarPedidoComSolicitacao(nCodPed) {
       'SELECT c_etapa, n_cod_for, c_numero FROM compras.pedidos_omie WHERE n_cod_ped = $1',
       [nCodPed]
     );
-    
+
     if (pedidoResult.rows.length === 0) {
       console.warn(`[sincronizarPedido] Pedido ${nCodPed} não encontrado em pedidos_omie`);
       return;
     }
-    
+
     const etapa = pedidoResult.rows[0].c_etapa;
     const codFornecedor = pedidoResult.rows[0].n_cod_for;
     const numeroPedido = pedidoResult.rows[0].c_numero;
-    
+
     if (!etapa) {
       console.warn(`[sincronizarPedido] Pedido ${nCodPed} sem etapa definida`);
       return;
     }
-    
+
     // 2. Busca descrição da etapa
     const etapaResult = await pool.query(
       'SELECT descricao_padrao FROM compras.etapas_pedido_compra WHERE codigo = $1',
       [etapa]
     );
-    
-    const descricaoEtapa = etapaResult.rows.length > 0 
-      ? etapaResult.rows[0].descricao_padrao 
+
+    const descricaoEtapa = etapaResult.rows.length > 0
+      ? etapaResult.rows[0].descricao_padrao
       : `Etapa ${etapa}`;
-    
+
     // 3. Atualiza solicitacao_compras
     let updateQuery;
     let updateParams;
-    
+
     if (etapa === '10' && codFornecedor) {
       // Etapa 10: busca dados do fornecedor na API Omie
       let fornecedorNome = null;
       let fornecedorContato = null;
-      
+
       try {
         console.log(`[sincronizarPedido] Buscando dados do fornecedor ${codFornecedor} na API Omie...`);
-        
+
         const fornecedorResp = await fetch('https://app.omie.com.br/api/v1/geral/clientes/', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -27355,12 +27408,12 @@ async function sincronizarPedidoComSolicitacao(nCodPed) {
             }]
           })
         });
-        
+
         if (fornecedorResp.ok) {
           const fornecedorData = await fornecedorResp.json();
           fornecedorNome = fornecedorData.nome_fantasia || fornecedorData.razao_social || null;
           fornecedorContato = fornecedorData.contato || null;
-          
+
           console.log(`[sincronizarPedido] Dados do fornecedor obtidos: nome="${fornecedorNome}", contato="${fornecedorContato}"`);
         } else {
           const errorText = await fornecedorResp.text();
@@ -27369,11 +27422,11 @@ async function sincronizarPedidoComSolicitacao(nCodPed) {
       } catch (err) {
         console.warn(`[sincronizarPedido] Falha ao consultar fornecedor na API Omie:`, err.message);
       }
-      
+
       // Atualiza status, fornecedor_id, fornecedor_nome e contato
       updateQuery = `
-        UPDATE compras.solicitacao_compras 
-        SET status = $1, 
+        UPDATE compras.solicitacao_compras
+        SET status = $1,
             fornecedor_id = $2,
             fornecedor_nome = $3,
             contato = $4,
@@ -27384,16 +27437,16 @@ async function sincronizarPedidoComSolicitacao(nCodPed) {
     } else {
       // Outras etapas: atualiza status e cnumero
       updateQuery = `
-        UPDATE compras.solicitacao_compras 
+        UPDATE compras.solicitacao_compras
         SET status = $1,
             cnumero = $2,
             updated_at = NOW()
         WHERE ncodped = $3`;
       updateParams = [descricaoEtapa, numeroPedido || null, nCodPed];
     }
-    
+
     const result = await pool.query(updateQuery, updateParams);
-    
+
     if (result.rowCount > 0) {
       if (etapa === '10' && codFornecedor) {
         console.log(`[sincronizarPedido] ✓ Solicitação atualizada: ncodped=${nCodPed}, etapa ${etapa} → status="${descricaoEtapa}", fornecedor_id=${codFornecedor}, fornecedor_nome="${updateParams[2]}", contato="${updateParams[3]}", cnumero="${updateParams[4]}"`);
@@ -27403,7 +27456,7 @@ async function sincronizarPedidoComSolicitacao(nCodPed) {
     } else {
       console.warn(`[sincronizarPedido] ⚠ Nenhuma solicitação encontrada com ncodped=${nCodPed}`);
     }
-    
+
   } catch (err) {
     console.error(`[sincronizarPedido] ✗ Erro ao sincronizar pedido ${nCodPed}:`, err);
   }
@@ -27575,14 +27628,14 @@ async function syncPedidosCompraOmie(filtros = {}) {
 
       return { ok: false, status: 500, errorText: 'Máximo de tentativas atingido' };
     };
-    
+
     while (continuar) {
       // Monta os parâmetros da requisição
       const param = {
         nPagina: pagina,
         nRegsPorPagina: 50
       };
-      
+
       // Filtros de status:
       // - Se vierem explicitamente no body, respeita.
       // - Se não vier nenhum, força todos = true para trazer o conjunto completo.
@@ -27626,7 +27679,7 @@ async function syncPedidosCompraOmie(filtros = {}) {
         param.lExibirPedidosRecParciais = true;
         param.lExibirPedidosFatParciais = true;
       }
-      
+
       // Filtros de data (sempre adiciona se definidos)
       if (filtros.data_inicial) {
         param.dDataInicial = filtros.data_inicial;
@@ -27634,7 +27687,7 @@ async function syncPedidosCompraOmie(filtros = {}) {
       if (filtros.data_final) {
         param.dDataFinal = filtros.data_final;
       }
-      
+
       console.log(`[PedidosCompra] Buscando página ${pagina}...`);
 
       const pesquisa = await chamarOmieComRetry('PesquisarPedCompra', param, 4);
@@ -27651,24 +27704,24 @@ async function syncPedidosCompraOmie(filtros = {}) {
       const pedidos = data.pedidos_pesquisa || [];
       const totalPaginas = data.nTotalPaginas || 1;
       const totalRegistros = data.nTotalRegistros || 0;
-      
+
       console.log(`[PedidosCompra] Página ${pagina}/${totalPaginas} - ${pedidos.length} pedidos (Total na Omie: ${totalRegistros})`);
-      
+
       if (!pedidos.length) {
         continuar = false;
         break;
       }
-      
+
       // Para cada pedido da pesquisa, busca os detalhes completos
       for (const pedidoResumo of pedidos) {
         try {
           const nCodPed = pedidoResumo.cabecalho?.nCodPed || pedidoResumo.cabecalho_consulta?.nCodPed;
-          
+
           if (!nCodPed) {
             console.warn('[PedidosCompra] Pedido sem nCodPed, pulando:', pedidoResumo);
             continue;
           }
-          
+
           // Consulta detalhes completos do pedido
           const detalhes = await chamarOmieComRetry('ConsultarPedCompra', { nCodPed: parseInt(nCodPed) }, 4);
 
@@ -27678,25 +27731,25 @@ async function syncPedidosCompraOmie(filtros = {}) {
           }
 
           const pedidoCompleto = detalhes.data;
-          
+
           // Faz o upsert no banco
           await upsertPedidoCompra(pedidoCompleto, 'sync');
           totalSincronizados++;
-          
+
           // Log a cada 10 pedidos
           if (totalSincronizados % 10 === 0) {
             console.log(`[PedidosCompra] ✓ Progresso: ${totalSincronizados} pedidos sincronizados...`);
           }
-          
+
           // Pequeno delay para não sobrecarregar a API da Omie
           await new Promise(resolve => setTimeout(resolve, 100));
-          
+
         } catch (pedidoError) {
           console.error('[PedidosCompra] Erro ao processar pedido:', pedidoError);
           // Continua com o próximo pedido
         }
       }
-      
+
       // Verifica se tem mais páginas
       if (pagina >= totalPaginas) {
         continuar = false;
@@ -27704,7 +27757,7 @@ async function syncPedidosCompraOmie(filtros = {}) {
         pagina++;
       }
     }
-    
+
     console.log(`[PedidosCompra] ✓✓✓ Sincronização concluída: ${totalSincronizados} pedidos sincronizados com sucesso!`);
     return { ok: true, total: totalSincronizados };
   } catch (e) {
@@ -27733,6 +27786,9 @@ async function ensureRecebimentosNfeDadosAdicionaisColumn(client) {
   await client.query(`
     ALTER TABLE logistica.recebimentos_nfe_omie
     ADD COLUMN IF NOT EXISTS c_dados_adicionais TEXT;
+
+    ALTER TABLE logistica.recebimentos_nfe_itens
+    ADD COLUMN IF NOT EXISTS c_cfop_documento VARCHAR(20);
   `);
   _recebimentosNfeDadosAdicionaisColReady = true;
 }
@@ -27796,7 +27852,7 @@ async function upsertRecebimentoNFe(recebimento, eventoWebhook = '', messageId =
     await ensureRecebimentosNfeDadosAdicionaisColumn(client);
     await ensurePedidosOmieProdutosNfeVinculo(client);
     await client.query('BEGIN');
-    
+
     // Extrai os dados das diferentes seções
     const cabec = recebimento.cabec || {};
     const fornecedor = recebimento.fornecedor || {};
@@ -27816,13 +27872,13 @@ async function upsertRecebimentoNFe(recebimento, eventoWebhook = '', messageId =
       || (rawBody.cabecalho && typeof rawBody.cabecalho === 'object' ? rawBody.cabecalho : null)
       || (rawBody.cabec && typeof rawBody.cabec === 'object' ? rawBody.cabec : null)
       || {};
-    
+
     const nIdReceb = cabec.nIdReceb;
-    
+
     if (!nIdReceb) {
       throw new Error('nIdReceb não encontrado no recebimento');
     }
-    
+
     // Usa cChaveNfe do webhook (se disponível) ou do cabec da API (raramente vem)
     const cChaveNfeFinal = cChaveNfeWebhook || cabec.cChaveNFe || cabec.cChaveNfe || null;
     const cDadosAdicionaisFinal = cabec.cDadosAdicionais || cabec.c_dados_adicionais || cabec.cObsNFe || cDadosAdicionaisWebhook || null;
@@ -27838,7 +27894,7 @@ async function upsertRecebimentoNFe(recebimento, eventoWebhook = '', messageId =
       cNomeFornecedor: fornecedor.cNomeFornecedor || cabec.cNome || cabec.cRazaoSocial || rawCab.cNome || rawCab.cRazaoSocial || null,
       cCnpjCpfFornecedor: fornecedor.cCnpjCpfFornecedor || cabec.cCNPJ_CPF || cabec.cCNPJ || cabec.cCpfCnpj || rawCab.cCNPJ_CPF || rawCab.cCNPJ || rawCab.cCpfCnpj || null,
     }, client);
-    
+
     // 1. Upsert do cabeçalho do recebimento
     await client.query(`
       INSERT INTO logistica.recebimentos_nfe_omie (
@@ -27966,14 +28022,14 @@ async function upsertRecebimentoNFe(recebimento, eventoWebhook = '', messageId =
       cDadosAdicionaisFinal,
       infoCadastro.cObsRec || null
     ]);
-    
+
     // 2. Remove itens antigos e insere novos
     await client.query('DELETE FROM logistica.recebimentos_nfe_itens WHERE n_id_receb = $1', [nIdReceb]);
-    
+
     for (const item of itens) {
       const itemCabec = item.itensCabec || {};
       const itemInfoAdic = item.itensInfoAdic || {};
-      
+
       await client.query(`
         INSERT INTO logistica.recebimentos_nfe_itens (
           n_id_receb, n_id_item, n_sequencia,
@@ -27982,7 +28038,7 @@ async function upsertRecebimentoNFe(recebimento, eventoWebhook = '', messageId =
           n_preco_unit, v_total_item, v_desconto, v_frete, v_seguro, v_outras,
           v_icms, v_ipi, v_pis, v_cofins, v_icms_st,
           n_num_ped_compra, n_id_pedido, n_id_it_pedido,
-          c_cfop_entrada, c_categoria_item,
+          c_cfop_entrada, c_cfop_documento, c_categoria_item,
           codigo_local_estoque, c_local_estoque,
           c_nao_gerar_financeiro, c_nao_gerar_mov_estoque,
           c_obs_item
@@ -27994,10 +28050,10 @@ async function upsertRecebimentoNFe(recebimento, eventoWebhook = '', messageId =
           $12, $13, $14, $15, $16, $17,
           $18, $19, $20, $21, $22,
           $23, $24, $25,
-          $26, $27,
-          $28, $29,
-          $30, $31,
-          $32
+          $26, $27, $28,
+          $29, $30,
+          $31, $32,
+          $33
         )
       `, [
         nIdReceb,
@@ -28026,6 +28082,7 @@ async function upsertRecebimentoNFe(recebimento, eventoWebhook = '', messageId =
         itemCabec.nIdPedido || null,
         itemCabec.nIdItPedido || null,
         itemInfoAdic.cCfopEntrada || null,
+        itemCabec.cCFOP || itemCabec.cCfop || null,
         itemInfoAdic.cCategoriaItem || null,
         itemInfoAdic.codigoLocalEstoque || null,
         itemInfoAdic.cLocalEstoque || null,
@@ -28034,10 +28091,10 @@ async function upsertRecebimentoNFe(recebimento, eventoWebhook = '', messageId =
         itemInfoAdic.cObsItem || null
       ]);
     }
-    
+
     // 3. Remove parcelas antigas e insere novas
     await client.query('DELETE FROM logistica.recebimentos_nfe_parcelas WHERE n_id_receb = $1', [nIdReceb]);
-    
+
     for (const parcela of parcelas) {
       await client.query(`
         INSERT INTO logistica.recebimentos_nfe_parcelas (
@@ -28064,10 +28121,10 @@ async function upsertRecebimentoNFe(recebimento, eventoWebhook = '', messageId =
         parcela.cNomeCategoria || null
       ]);
     }
-    
+
     // 4. Remove frete antigo e insere novo (se existir)
     await client.query('DELETE FROM logistica.recebimentos_nfe_frete WHERE n_id_receb = $1', [nIdReceb]);
-    
+
     if (frete && Object.keys(frete).length > 0) {
       await client.query(`
         INSERT INTO logistica.recebimentos_nfe_frete (
@@ -28121,7 +28178,7 @@ async function upsertRecebimentoNFe(recebimento, eventoWebhook = '', messageId =
 
     await client.query('COMMIT');
     console.log(`[RecebimentosNFe] ✓ Recebimento ${nIdReceb} sincronizado`);
-    
+
   } catch (error) {
     await client.query('ROLLBACK');
     console.error(`[RecebimentosNFe] Erro ao fazer upsert do recebimento:`, error);
@@ -28207,14 +28264,14 @@ async function syncRecebimentosNFeOmie(filtros = {}) {
     console.log(
       `[RecebimentosNFe] Filtros aplicados -> tipo_data=${usarFiltroPorAlteracao ? 'alteracao' : 'emissao'} | data_de=${dataInicialOmie || '-'} | data_ate=${dataFinalOmie || '-'} | nRegistrosPorPagina=${nRegistrosPorPagina}`
     );
-    
+
     while (continuar) {
       // Monta os parâmetros da requisição
       const param = {
         nPagina: pagina,
         nRegistrosPorPagina
       };
-      
+
       // Adiciona filtros se definidos
       if (dataInicialOmie) {
         if (usarFiltroPorAlteracao) {
@@ -28230,23 +28287,23 @@ async function syncRecebimentosNFeOmie(filtros = {}) {
           param.dtEmissaoAte = dataFinalOmie;
         }
       }
-      
+
       const body = {
         call: 'ListarRecebimentos',
         app_key: OMIE_APP_KEY,
         app_secret: OMIE_APP_SECRET,
         param: [param]
       };
-      
+
       console.log(`[RecebimentosNFe] Buscando página ${pagina}...`);
-      
+
       const response = await fetch('https://app.omie.com.br/api/v1/produtos/recebimentonfe/', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body)
       });
       await new Promise(resolve => setTimeout(resolve, OMIE_REQUEST_DELAY_MS));
-      
+
       if (!response.ok) {
         const errorText = await response.text();
         let faultMsg = '';
@@ -28259,7 +28316,7 @@ async function syncRecebimentosNFeOmie(filtros = {}) {
         console.error(`[RecebimentosNFe] Erro na API Omie: ${response.status} - ${faultMsg || errorText}`);
         throw new Error(faultMsg || `Omie API retornou ${response.status}`);
       }
-      
+
       const data = await response.json();
       const recebimentos = data.recebimentos || [];
       const totalPaginas = data.nTotalPaginas || 1;
@@ -28267,14 +28324,14 @@ async function syncRecebimentosNFeOmie(filtros = {}) {
       if (!totalRegistrosOmie && Number.isFinite(Number(totalRegistros))) {
         totalRegistrosOmie = Number(totalRegistros);
       }
-      
+
       console.log(`[RecebimentosNFe] Página ${pagina}/${totalPaginas} - ${recebimentos.length} recebimentos (Total na Omie: ${totalRegistros})`);
-      
+
       if (!recebimentos.length) {
         continuar = false;
         break;
       }
-      
+
       // Para cada recebimento, busca os detalhes completos
       for (let indice = 0; indice < recebimentos.length; indice++) {
         const recebimentoResumo = recebimentos[indice];
@@ -28286,14 +28343,14 @@ async function syncRecebimentosNFeOmie(filtros = {}) {
           }
 
           const nIdReceb = recebimentoResumo.cabec?.nIdReceb;
-          
+
           if (!nIdReceb) {
             console.warn('[RecebimentosNFe] Recebimento sem nIdReceb, pulando:', recebimentoResumo);
             continue;
           }
 
           totalAvaliados++;
-          
+
           // Consulta detalhes completos do recebimento
           const detalhesResponse = await fetch('https://app.omie.com.br/api/v1/produtos/recebimentonfe/', {
             method: 'POST',
@@ -28306,23 +28363,23 @@ async function syncRecebimentosNFeOmie(filtros = {}) {
             })
           });
           await new Promise(resolve => setTimeout(resolve, OMIE_REQUEST_DELAY_MS));
-          
+
           if (!detalhesResponse.ok) {
             console.error(`[RecebimentosNFe] Erro ao consultar recebimento ${nIdReceb}:`, detalhesResponse.status);
             continue;
           }
-          
+
           const recebimentoCompleto = await detalhesResponse.json();
-          
+
           // Faz o upsert no banco
           await upsertRecebimentoNFe(recebimentoCompleto, 'sync');
           totalSincronizados++;
-          
+
           // Log a cada 10 recebimentos
           if (totalSincronizados % 10 === 0) {
             console.log(`[RecebimentosNFe] ✓ Progresso: atualizados ${totalSincronizados}/${totalAvaliados} recebimentos...`);
           }
-          
+
         } catch (recebimentoError) {
           console.error('[RecebimentosNFe] Erro ao processar recebimento:', recebimentoError);
           // Continua com o próximo recebimento
@@ -28332,7 +28389,7 @@ async function syncRecebimentosNFeOmie(filtros = {}) {
       console.log(
         `[RecebimentosNFe] Página ${pagina}/${totalPaginas} concluída | atualizados=${totalSincronizados}/${totalAvaliados}`
       );
-      
+
       // Verifica se tem mais páginas
       if (pagina >= totalPaginas) {
         continuar = false;
@@ -28340,7 +28397,7 @@ async function syncRecebimentosNFeOmie(filtros = {}) {
         pagina++;
       }
     }
-    
+
     console.log(`[RecebimentosNFe] ✓✓✓ Sincronização concluída: atualizados ${totalSincronizados}/${totalAvaliados}`);
     return {
       ok: true,
@@ -28361,14 +28418,14 @@ async function syncRecebimentosNFeOmie(filtros = {}) {
 // ============================================================================
 app.post('/api/admin/sync/recebimentos-nfe', express.json(), async (req, res) => {
   const startTime = Date.now();
-  
+
   try {
     console.log('[API] Iniciando sincronização de recebimentos de NF-e...');
-    
+
     const resultado = await syncRecebimentosNFeOmie(req.body || {});
-    
+
     const duracao = Date.now() - startTime;
-    
+
     res.json({
       ok: resultado.ok,
       total_sincronizados: resultado.total || 0,
@@ -28376,14 +28433,14 @@ app.post('/api/admin/sync/recebimentos-nfe', express.json(), async (req, res) =>
       duracao_ms: duracao,
       tempo_formatado: `${Math.floor(duracao / 1000)}s`
     });
-    
+
     // Log de conclusão
     if (resultado.ok) {
       console.log(`[API] ✓ Sincronização concluída em ${duracao}ms`);
     } else {
       console.error(`[API] ✗ Erro na sincronização:`, resultado.error);
     }
-    
+
   } catch (err) {
     console.error('[API] Erro no endpoint /api/admin/sync/recebimentos-nfe:', err);
     res.status(500).json({
@@ -28562,7 +28619,7 @@ async function cadastrarProdutoNaOmie(codigoProduto, descricaoProduto, contexto 
     console.log(`\n${pfx}🆕 Cadastrando produto provisório na Omie...`);
     console.log(`${pfx}   Código: ${codigoProduto}`);
     console.log(`${pfx}   Descrição: ${descricaoProduto}`);
-    
+
     const payload = {
       call: 'IncluirProduto',
       app_key: OMIE_APP_KEY,
@@ -28575,23 +28632,23 @@ async function cadastrarProdutoNaOmie(codigoProduto, descricaoProduto, contexto 
         unidade: 'UN'
       }]
     };
-    
+
     console.log(`${pfx}📤 Enviando para API Omie (IncluirProduto)...`);
     const response = await fetch('https://app.omie.com.br/api/v1/geral/produtos/', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
     });
-    
+
     const data = await response.json();
-    
+
     console.log(`${pfx}📥 Resposta da Omie (IncluirProduto):`);
     console.log(`${pfx}${JSON.stringify(data, null, 2)}`);
-    
+
     if (data.codigo_status === '0' || data.descricao_status?.includes('sucesso')) {
       console.log(`${pfx}✅ Produto cadastrado com sucesso!`);
       console.log(`${pfx}   Código Produto Omie: ${data.codigo_produto}`);
-      
+
       // Atualiza a tabela produtos_omie com o novo produto
       try {
         const { rowCount: updatedCount } = await pool.query(
@@ -28615,7 +28672,7 @@ async function cadastrarProdutoNaOmie(codigoProduto, descricaoProduto, contexto 
       } catch (dbErr) {
         console.warn(`${pfx}⚠️ Erro ao salvar na tabela local (não crítico):`, dbErr.message);
       }
-      
+
       return { ok: true, codigo_produto: data.codigo_produto };
     } else {
       console.error(`${pfx}❌ Erro ao cadastrar produto:`, data);
@@ -28730,17 +28787,17 @@ app.get('/api/compras/proximo-codigo-provisorio', async (req, res) => {
     `);
 
     const maiorNumero = Number(rows?.[0]?.maior_numero || 0);
-    
+
     // Próximo número é o maior encontrado + 1
     const proximoNumero = maiorNumero + 1;
-    
+
     // Formata com 5 dígitos (ex: 00001, 00002, etc.)
     const codigoFormatado = `CODPROV - ${String(proximoNumero).padStart(5, '0')}`;
-    
+
     console.log(`[API] Código provisório gerado: ${codigoFormatado} (maior anterior: ${maiorNumero})`);
-    
+
     res.json({ ok: true, codigo: codigoFormatado });
-    
+
   } catch (err) {
     console.error('[API] Erro ao gerar código provisório:', err);
     res.status(500).json({ ok: false, erro: 'Erro ao gerar código provisório' });
@@ -28751,34 +28808,34 @@ app.get('/api/compras/proximo-codigo-provisorio', async (req, res) => {
 app.get('/api/compras/validar-codigo-omie', async (req, res) => {
   try {
     const { codigo } = req.query;
-    
+
     if (!codigo) {
       return res.status(400).json({ ok: false, erro: 'Código não informado' });
     }
-    
+
     // Verifica se o código existe na tabela produtos_omie
     const query = `
-      SELECT codigo, descricao, codigo_produto 
-      FROM produtos_omie 
-      WHERE codigo = $1 
+      SELECT codigo, descricao, codigo_produto
+      FROM produtos_omie
+      WHERE codigo = $1
       LIMIT 1
     `;
-    
+
     const result = await pool.query(query, [codigo]);
-    
+
     if (result.rows.length > 0) {
-      res.json({ 
-        ok: true, 
-        existe: true, 
-        produto: result.rows[0] 
+      res.json({
+        ok: true,
+        existe: true,
+        produto: result.rows[0]
       });
     } else {
-      res.json({ 
-        ok: true, 
-        existe: false 
+      res.json({
+        ok: true,
+        existe: false
       });
     }
-    
+
   } catch (err) {
     console.error('[API] Erro ao validar código Omie:', err);
     res.status(500).json({ ok: false, erro: 'Erro ao validar código' });
@@ -28789,9 +28846,9 @@ app.get('/api/compras/validar-codigo-omie', async (req, res) => {
 app.get('/api/compras/departamentos', async (req, res) => {
   try {
     const { rows } = await pool.query(`
-      SELECT id, nome 
-      FROM configuracoes.departamento 
-      WHERE ativo = true 
+      SELECT id, nome
+      FROM configuracoes.departamento
+      WHERE ativo = true
       ORDER BY nome
     `);
     res.json({ ok: true, departamentos: rows });
@@ -28805,9 +28862,9 @@ app.get('/api/compras/departamentos', async (req, res) => {
 app.get('/api/compras/centros-custo', async (req, res) => {
   try {
     const { rows } = await pool.query(`
-      SELECT id, nome 
-      FROM configuracoes.centro_custo 
-      WHERE ativo = true 
+      SELECT id, nome
+      FROM configuracoes.centro_custo
+      WHERE ativo = true
       ORDER BY nome
     `);
     res.json({ ok: true, centros: rows });
@@ -28821,9 +28878,9 @@ app.get('/api/compras/centros-custo', async (req, res) => {
 app.get('/api/compras/status', async (req, res) => {
   try {
     const { rows } = await pool.query(`
-      SELECT id, nome 
-      FROM configuracoes.status_compras 
-      WHERE ativo = true 
+      SELECT id, nome
+      FROM configuracoes.status_compras
+      WHERE ativo = true
       ORDER BY ordem, nome
     `);
     res.json({ ok: true, status: rows });
@@ -28837,8 +28894,8 @@ app.get('/api/compras/status', async (req, res) => {
 app.get('/api/compras/usuarios', async (req, res) => {
   try {
     const { rows } = await pool.query(`
-      SELECT username 
-      FROM public.auth_user 
+      SELECT username
+      FROM public.auth_user
       WHERE username IS NOT NULL AND username != ''
       ORDER BY username
     `);
@@ -28853,22 +28910,22 @@ app.get('/api/compras/usuarios', async (req, res) => {
 app.get('/api/produtos-omie/buscar-codigo', async (req, res) => {
   try {
     const { codigo } = req.query;
-    
+
     if (!codigo) {
       return res.status(400).json({ ok: false, error: 'Código é obrigatório' });
     }
-    
+
     const { rows } = await pool.query(`
       SELECT codigo_produto
       FROM public.produtos_omie
       WHERE codigo = $1
       LIMIT 1
     `, [codigo]);
-    
+
     if (rows.length === 0) {
       return res.json({ ok: true, codigo_produto: null });
     }
-    
+
     res.json({ ok: true, codigo_produto: rows[0].codigo_produto });
   } catch (err) {
     console.error('[Produtos Omie] Erro ao buscar codigo_produto:', err);
@@ -28880,22 +28937,22 @@ app.get('/api/produtos-omie/buscar-codigo', async (req, res) => {
 app.post('/api/compras/pedido', async (req, res) => {
   try {
     const { itens, solicitante } = req.body || {};
-    
+
     if (!Array.isArray(itens) || itens.length === 0) {
       return res.status(400).json({ ok: false, error: 'Nenhum item no carrinho' });
     }
-    
+
     if (!solicitante) {
       return res.status(400).json({ ok: false, error: 'Solicitante é obrigatório' });
     }
-    
+
     // Não gera mais numero_pedido aqui - será gerado em outra etapa
     const client = await pool.connect();
     const idsInseridos = [];
-    
+
     try {
       await client.query('BEGIN');
-      
+
       for (const item of itens) {
         const {
           produto_codigo,
@@ -28919,12 +28976,12 @@ app.post('/api/compras/pedido', async (req, res) => {
           status_pedido,
           anexo
         } = item;
-        
+
         // Aceita quantidade vazia (para casos de 'Não incluir quantidade')
         if (!produto_codigo || quantidade === undefined || quantidade === null) {
           throw new Error('Cada item precisa ter produto_codigo');
         }
-        
+
         // Define status baseado no checkbox "Requisição Direta":
         // - requisicao_direta = true (marcado) → "aguardando compra"
         // - requisicao_direta = false/undefined (desmarcado) → "aguardando aprovação da requisição"
@@ -28940,12 +28997,12 @@ app.post('/api/compras/pedido', async (req, res) => {
             statusInicial = 'aguardando aprovação da requisição';
           }
         }
-        
+
         // Marca para criação automática na Omie se requisicao_direta estiver marcado
         const deveCriarRequisicaoAutomatica = requisicao_direta === true && !status_pedido;
-        
+
         console.log(`[Compras] Item ${produto_codigo} - Requisição Direta: ${requisicao_direta} - Status Final: ${statusInicial}`);
-        
+
         // Processa anexo se houver
         let anexosArray = null;
         if (anexo && anexo.base64) {
@@ -28969,7 +29026,7 @@ app.post('/api/compras/pedido', async (req, res) => {
             console.error('[Compras] Erro ao processar anexo:', errAnexo);
           }
         }
-        
+
         // Insere item sem numero_pedido (NULL) - será preenchido em etapa posterior
         const result = await client.query(`
           INSERT INTO compras.solicitacao_compras (
@@ -29019,9 +29076,9 @@ app.post('/api/compras/pedido', async (req, res) => {
           requisicao_direta || false,
           anexosArray ? JSON.stringify(anexosArray) : null
         ]);
-        
+
         idsInseridos.push(result.rows[0].id);
-        
+
         // Armazena informação de requisição direta para processamento posterior
         // Só marca para criação automática se requisicao_direta = true E status_pedido não foi informado manualmente
         if (deveCriarRequisicaoAutomatica) {
@@ -29037,19 +29094,19 @@ app.post('/api/compras/pedido', async (req, res) => {
           };
         }
       }
-      
+
       await client.query('COMMIT');
-      
+
       // Extrai apenas os IDs para log e resposta
       const idsSimples = idsInseridos.map(item => typeof item === 'object' ? item.id : item);
       const idsRequisicaoDireta = idsInseridos.filter(item => typeof item === 'object' && item.requisicao_direta === true).map(item => item.id);
-      
+
       console.log(`[Compras] ${itens.length} item(ns) criado(s) por ${solicitante} - IDs: ${idsSimples.join(', ')}`);
-      
+
       if (idsRequisicaoDireta.length > 0) {
         console.log(`[Compras] ${idsRequisicaoDireta.length} item(ns) marcado(s) para requisição direta (aguardando compra)`);
       }
-      
+
       res.json({
         ok: true,
         total_itens: itens.length,
@@ -29075,10 +29132,10 @@ app.post('/api/compras/solicitacao', express.json(), async (req, res) => {
     const compraAutorizada = compra_autorizada === true;
     const compraRealizada = compra_realizada === true;
     const notaFiscalGlobal = String(n_nota_fiscal || '').trim();
-    
+
     // Obtém usuário da sessão (fallback para body.solicitante — usado pelo chatbot WhatsApp)
     const solicitante = req.session?.user?.username || req.session?.user?.id || req.body?.solicitante || 'sistema';
-    
+
     console.log('[Compras-Solicitacao] Recebido:', {
       totalItens: itens?.length,
       compraAutorizada,
@@ -29093,10 +29150,10 @@ app.post('/api/compras/solicitacao', express.json(), async (req, res) => {
     const idsRequisicaoDireta = [];
     const itensDiretosParaProcessar = [];
     const statusPorGrupo = new Map();
-    
+
     try {
       await client.query('BEGIN');
-      
+
       for (const item of itens) {
         const {
           id_db,
@@ -29127,12 +29184,12 @@ app.post('/api/compras/solicitacao', express.json(), async (req, res) => {
         if (compraRealizada && !notaFiscalItem) {
           throw new Error('N nota fiscal é obrigatório quando Compra já realizada estiver marcado');
         }
-        
+
         // Aceita quantidade vazia (para casos de 'Não incluir quantidade')
         if (!produto_codigo || quantidade === undefined || quantidade === null) {
           throw new Error('Cada item precisa ter produto_codigo');
         }
-        
+
         const requisicaoDiretaFinal = compraRealizada || compraAutorizada || requisicao_direta === true;
 
         // Regras:
@@ -29151,9 +29208,9 @@ app.post('/api/compras/solicitacao', express.json(), async (req, res) => {
         } else {
           statusInicial = 'aguardando aprovação da requisição';
         }
-        
+
         console.log(`[Compras-Solicitacao] Item ${produto_codigo} - NP: ${np} - Requisição Direta Item: ${requisicao_direta} - Compra Autorizada: ${compraAutorizada} - Requisição Direta Final: ${requisicaoDiretaFinal} - Status: ${statusInicial}`);
-        
+
         // Processa anexo(s) se houver
         let anexosArray = null;
         if (anexo) {
@@ -29182,7 +29239,7 @@ app.post('/api/compras/solicitacao', express.json(), async (req, res) => {
                 console.error(`[Compras-Solicitacao] Erro no upload de ${arq.nome}:`, uploadError.message);
               }
             }
-            
+
             // Se nenhum anexo foi processado com sucesso, define como null
             if (anexosArray.length === 0) {
               anexosArray = null;
@@ -29192,7 +29249,7 @@ app.post('/api/compras/solicitacao', express.json(), async (req, res) => {
             anexosArray = null;
           }
         }
-        
+
         const categoriaCompraCodigo = item.categoria_compra_codigo || categoria_compra || null;
         const categoriaCompraNome = item.categoria_compra_nome || item.categoria_compra_label || item.categoria_compra_texto || null;
         const objetivoCompraRaw = item.objetivo_compra || item.objetivo_compra_nome || '';
@@ -29316,10 +29373,10 @@ app.post('/api/compras/solicitacao', express.json(), async (req, res) => {
           anexosArray ? JSON.stringify(anexosArray) : null,
           anexoUrlFinal
         ]);
-        
+
         const itemId = result.rows[0].id;
         idsInseridos.push(itemId);
-        
+
         // Se checkbox Requisição Direta estiver marcado, marca para criar na Omie
         if (requisicaoDiretaFinal) {
           idsRequisicaoDireta.push(itemId);
@@ -29329,12 +29386,12 @@ app.post('/api/compras/solicitacao', express.json(), async (req, res) => {
           });
         }
       }
-      
+
       await client.query('COMMIT');
-      
+
       console.log(`[Compras-Solicitacao] ${itens.length} item(ns) criado(s) por ${solicitante} - IDs: ${idsInseridos.join(', ')}`);
       console.log(`[Compras-Solicitacao] ${idsRequisicaoDireta.length} item(ns) com Requisição Direta para processar na Omie`);
-      
+
       // APÓS inserir/atualizar no banco, processa os itens diretos na Omie (agrupados por NP)
       const gruposNP = {};
       const omieResultados = [];
@@ -29343,7 +29400,7 @@ app.post('/api/compras/solicitacao', express.json(), async (req, res) => {
         if (!gruposNP[np]) gruposNP[np] = [];
         gruposNP[np].push(itemGroup);
       });
-      
+
       // Processa cada grupo de NP
       for (const [np, itemsGroup] of Object.entries(gruposNP)) {
         try {
@@ -29367,7 +29424,7 @@ app.post('/api/compras/solicitacao', express.json(), async (req, res) => {
           client
         });
       }
-      
+
       res.json({
         ok: true,
         total_itens: itens.length,
@@ -29420,7 +29477,7 @@ app.post('/api/compras/carrinho', express.json(), async (req, res) => {
     const anexosArray = normalizarAnexos(item.anexo || item.anexos);
     const anexoUrlFinal = item.anexo_url || null;
     const grupoRequisicaoRaw = item.grupo_requisicao || item.np || null;
-    
+
     // Comentário: Verifica se existe grupo_requisicao do mesmo dia antes de gerar novo
     let grupoRequisicao = grupoRequisicaoRaw;
     if (!grupoRequisicaoRaw || String(grupoRequisicaoRaw).toLowerCase() === 'unica') {
@@ -29438,7 +29495,7 @@ app.post('/api/compras/carrinho', express.json(), async (req, res) => {
         ORDER BY sc.created_at DESC
         LIMIT 1
       `, [solicitante, dataHoje]);
-      
+
       if (buscaGrupoResult.rows.length > 0 && buscaGrupoResult.rows[0].grupo_requisicao) {
         grupoRequisicao = buscaGrupoResult.rows[0].grupo_requisicao;
         console.log(`[Carrinho] Reutilizando grupo_requisicao mais recente do dia: ${grupoRequisicao}`);
@@ -29815,7 +29872,7 @@ class OmieRateLimiter {
    */
   async aguardarDisponibilidade() {
     const agora = Date.now();
-    
+
     // Remove requisições mais antigas que o intervalo
     this.requisicoes = this.requisicoes.filter(timestamp => {
       return agora - timestamp < this.intervaloMs;
@@ -29825,11 +29882,11 @@ class OmieRateLimiter {
     if (this.requisicoes.length >= this.maxRequisicoes) {
       const tempoMaisAntigo = this.requisicoes[0];
       const tempoEspera = this.intervaloMs - (agora - tempoMaisAntigo);
-      
+
       console.log(`[Omie-RateLimit] Limite atingido (${this.requisicoes.length}/${this.maxRequisicoes}). Aguardando ${Math.ceil(tempoEspera / 1000)}s antes de enviar...`);
-      
+
       await new Promise(resolve => setTimeout(resolve, tempoEspera));
-      
+
       // Após aguardar, remove requisições expiradas
       this.requisicoes = this.requisicoes.filter(timestamp => {
         return Date.now() - timestamp < this.intervaloMs;
@@ -29922,7 +29979,7 @@ app.post('/api/compras/sem-cadastro', express.json(), async (req, res) => {
     const logErr = (...args) => console.error(`[Compras Direta][${reqId}]`, ...args);
 
     log('🚀 Início processamento');
-    
+
     // Comentário: gera código provisório sequencial (CODPROV - 00001) considerando ambas as tabelas.
     const obterProximoCodigoProvisorio = async () => {
       const { rows: maxRows } = await pool.query(`
@@ -29995,7 +30052,7 @@ app.post('/api/compras/sem-cadastro', express.json(), async (req, res) => {
     if (!centroCusto) {
       return res.status(400).json({ ok: false, error: 'centro_custo (categoria) é obrigatório' });
     }
-    
+
     const solicitante = req.session?.user?.username || req.session?.user?.id || item.solicitante || 'sistema';
     const categoriaCompraCodigo = item.categoria_compra_codigo || item.categoria_compra || '2.14.94';
     const categoriaCompraNome = item.categoria_compra_nome || 'Outros Materiais';
@@ -30101,12 +30158,12 @@ app.post('/api/compras/sem-cadastro', express.json(), async (req, res) => {
         statusInicial = 'aguardando aprovação da requisição';
       }
     }
-    
+
     // Normaliza anexos - aceita URLs (strings) do Supabase ou array de objetos legados
     const normalizarAnexos = (raw) => {
       if (!raw) return null;
       const arr = Array.isArray(raw) ? raw : [raw];
-      
+
       // Se for array de strings (URLs do Supabase), converte para objeto {nome, url, tipo}
       if (arr.length > 0 && typeof arr[0] === 'string') {
         return arr
@@ -30123,7 +30180,7 @@ app.post('/api/compras/sem-cadastro', express.json(), async (req, res) => {
             return { nome: nomeLimpo, url, tipo };
           });
       }
-      
+
       // Se for array de objetos legados (com base64), processa
       const limpos = arr.map(a => ({
         nome: a?.nome || null,
@@ -30131,18 +30188,18 @@ app.post('/api/compras/sem-cadastro', express.json(), async (req, res) => {
         tamanho: a?.tamanho || null,
         base64: null
       })).filter(a => a.nome);
-      
+
       return limpos.length ? limpos : null;
     };
-    
+
     const anexosArray = normalizarAnexos(item.anexo || item.anexos);
-    
+
     // Grupo de requisição: gera novo se for 'unica' ou não informado
     const grupoRequisicaoRaw = item.grupo_requisicao || item.np || null;
     const grupoRequisicao = (!grupoRequisicaoRaw || String(grupoRequisicaoRaw).toLowerCase() === 'unica')
       ? gerarNumeroGrupoRequisicao()
       : grupoRequisicaoRaw;
-    
+
     const obterBaseCodprovDisponivel = async () => {
       const { rows: maxOmie } = await pool.query(
         `SELECT MAX(CAST(regexp_replace(codigo, '^\\D*(\\d+).*$','\\1') AS INTEGER)) AS max_num
@@ -30712,11 +30769,11 @@ app.post('/api/compras/sem-cadastro', express.json(), async (req, res) => {
         console.warn('[Pré-cadastro] Omie adiado (item permanece em preparação):', errPreCadReq.message || errPreCadReq);
       }
     }
-    
+
     log(`🏁 Finalizado em ${Date.now() - t0}ms`, { idsInseridos, grupoFinal, solicitante });
-    
-    res.json({ 
-      ok: true, 
+
+    res.json({
+      ok: true,
       id: novoId,
       ids: idsInseridos,
       grupo_requisicao: grupoFinal,
@@ -30725,7 +30782,7 @@ app.post('/api/compras/sem-cadastro', express.json(), async (req, res) => {
       cod_req_compra: omieCodIntPed,
       message: `Solicitação de compra registrada com sucesso (${idsInseridos.length} item(ns))`
     });
-    
+
   } catch (err) {
     console.error('[Compras Sem Cadastro] Erro ao registrar:', err);
     res.status(500).json({ ok: false, error: err.message || 'Erro ao registrar solicitação' });
@@ -30737,13 +30794,13 @@ app.get('/api/compras/sem-cadastro', async (req, res) => {
   console.log('[DEBUG] GET /api/compras/sem-cadastro chamado com query:', req.query);
   try {
     const solicitante = req.query.solicitante;
-    
+
     if (!solicitante) {
       return res.status(400).json({ ok: false, error: 'Parâmetro solicitante é obrigatório' });
     }
-    
+
     const { rows } = await pool.query(`
-      SELECT 
+      SELECT
         id,
         produto_codigo,
         produto_descricao,
@@ -30767,7 +30824,7 @@ app.get('/api/compras/sem-cadastro', async (req, res) => {
       ORDER BY created_at DESC
       LIMIT 500
     `, [solicitante]);
-    
+
     res.json({ ok: true, itens: rows });
   } catch (err) {
     console.error('[Compras Sem Cadastro] Erro ao listar:', err);
@@ -30782,7 +30839,7 @@ app.put('/api/compras/sem-cadastro/:id', express.json(), async (req, res) => {
     if (!Number.isInteger(id)) {
       return res.status(400).json({ ok: false, error: 'ID inválido' });
     }
-    
+
     const { status, produto_descricao, produto_codigo, quantidade, observacao_reprovacao, usuario_comentario } = req.body || {};
     if (!status && typeof produto_descricao === 'undefined' && typeof produto_codigo === 'undefined' && typeof quantidade === 'undefined' && !observacao_reprovacao) {
       return res.status(400).json({ ok: false, error: 'Informe status, produto_descricao, quantidade ou observacao_reprovacao' });
@@ -30800,7 +30857,7 @@ app.put('/api/compras/sem-cadastro/:id', express.json(), async (req, res) => {
         return res.status(403).json({ ok: false, error: 'Voce nao possui permissao para cancelar esta solicitacao' });
       }
     }
-    
+
     const sets = [];
     const values = [];
     let idx = 1;
@@ -30830,18 +30887,18 @@ app.put('/api/compras/sem-cadastro/:id', express.json(), async (req, res) => {
     }
     sets.push('updated_at = NOW()');
     values.push(id);
-    
+
     const result = await pool.query(`
       UPDATE compras.compras_sem_cadastro
       SET ${sets.join(', ')}
       WHERE id = $${idx}
       RETURNING *
     `, values);
-    
+
     if (result.rows.length === 0) {
       return res.status(404).json({ ok: false, error: 'Item não encontrado' });
     }
-    
+
     if (status) {
       console.log(`[Compras Sem Cadastro] Status atualizado: ID ${id} -> ${status}`);
     }
@@ -30857,13 +30914,13 @@ app.put('/api/compras/sem-cadastro/:id', express.json(), async (req, res) => {
     if (observacao_reprovacao) {
       console.log(`[Compras Sem Cadastro] observacao_reprovacao registrada: ID ${id}`);
     }
-    
-    res.json({ 
-      ok: true, 
+
+    res.json({
+      ok: true,
       item: result.rows[0],
       message: 'Item atualizado com sucesso'
     });
-    
+
   } catch (err) {
     console.error('[Compras Sem Cadastro] Erro ao atualizar:', err);
     res.status(500).json({ ok: false, error: err.message || 'Erro ao atualizar item' });
@@ -31663,11 +31720,11 @@ async function garantirCodigoOmieParaItem(client, item, itemId) {
 // FUNÇÃO AUXILIAR: Processa requisição direta na Omie para um grupo de itens com mesmo NP
 async function processarRequisicaoDiretaNaOmie(client, itemsGroup, solicitante) {
   if (!itemsGroup || itemsGroup.length === 0) return;
-  
+
   const np = itemsGroup[0].item.np || 'A';
   const compraRealizadaSelecionada = itemsGroup.some((group) => group?.item?.compra_realizada === true);
   console.log(`[Compras-Solicitacao-Omie] Processando ${itemsGroup.length} itens para NP: ${np}`);
-  
+
   // Gera número de pedido único
   const agora = new Date();
   const ano = agora.getFullYear();
@@ -31678,10 +31735,10 @@ async function processarRequisicaoDiretaNaOmie(client, itemsGroup, solicitante) 
   const segundo = String(agora.getSeconds()).padStart(2, '0');
   const milisegundo = String(agora.getMilliseconds()).padStart(3, '0');
   const numeroPedido = `${ano}${mes}${dia}-${hora}${minuto}${segundo}-${milisegundo}`;
-  
+
   // Monta itens para Omie
   const itensOmie = [];
-  
+
   for (const itemGroup of itemsGroup) {
     const item = itemGroup.item;
     const idDb = itemGroup.idDb;
@@ -31694,16 +31751,16 @@ async function processarRequisicaoDiretaNaOmie(client, itemsGroup, solicitante) 
         console.error(`[Compras-Solicitacao-Omie] Falha ao garantir codigo_omie (item ${idDb}):`, errCod.message || errCod);
       }
     }
-    
+
     // Busca CMC do produto
     let precoUnitario = 0;
     if (item.codigo_omie) {
       try {
         const { rows } = await client.query(`
-          SELECT cmc FROM public.omie_estoque_posicao 
+          SELECT cmc FROM public.omie_estoque_posicao
           WHERE omie_prod_id = $1 LIMIT 1
         `, [item.codigo_omie]);
-        
+
         if (rows.length > 0 && rows[0].cmc) {
           precoUnitario = parseFloat(rows[0].cmc) || 0;
           console.log(`[Compras-Solicitacao-Omie] CMC encontrado para ${item.codigo_omie}: R$ ${precoUnitario}`);
@@ -31712,7 +31769,7 @@ async function processarRequisicaoDiretaNaOmie(client, itemsGroup, solicitante) 
         console.warn(`[Compras-Solicitacao-Omie] Erro ao buscar CMC para ${item.codigo_omie}:`, err.message);
       }
     }
-    
+
     // Determina data de sugestão
     let dtSugestao;
     if (item.prazo_solicitado) {
@@ -31723,7 +31780,7 @@ async function processarRequisicaoDiretaNaOmie(client, itemsGroup, solicitante) 
       dt.setDate(dt.getDate() + 5);
       dtSugestao = `${String(dt.getDate()).padStart(2, '0')}/${String(dt.getMonth() + 1).padStart(2, '0')}/${dt.getFullYear()}`;
     }
-    
+
     itensOmie.push({
       codProd: item.codigo_omie || null,
        obsItem: item.obsItem || item.objetivo_compra || '',
@@ -31735,7 +31792,7 @@ async function processarRequisicaoDiretaNaOmie(client, itemsGroup, solicitante) 
       observacao: item.observacao || ''
     });
   }
-  
+
   // Monta observação formatada com dados do primeiro item (mantida para compatibilidade de log/uso interno)
   const primeiroItem = itemsGroup[0].item;
   const historicoCompraId = await obterIdHistoricoComprasParaOmie({
@@ -31755,7 +31812,7 @@ async function processarRequisicaoDiretaNaOmie(client, itemsGroup, solicitante) 
   const aPedidoBaseObsReq = String(primeiroItem?.resp_inspecao_recebimento || '').trim();
   const aPedidoObsReq = (aPedidoBaseObsReq.replace(/^a pedido de:\s*/i, '').trim()) || solicitanteObsReq;
   const obsReqCompra = `Solicitante: ${solicitanteObsReq}\nObjetivo: ${objetivoObsReq}\nA pedido de: ${aPedidoObsReq}`.trim();
-  
+
   // Pega a categoria de compra do primeiro item (todos do mesmo NP devem ter a mesma categoria)
   // Fallback: alguns fluxos enviam "categoria_compra_codigo" em vez de "categoria_compra".
   const categoriaCompra = primeiroItem.categoria_compra || primeiroItem.categoria_compra_codigo || '';
@@ -31862,7 +31919,7 @@ async function processarRequisicaoDiretaNaOmie(client, itemsGroup, solicitante) 
       ncodped: nCodPed || null
     };
   }
-  
+
   // Monta payload para Omie - IncluirReq (seguindo o padrão do aprovar-item)
   const requisicaoOmie = {
     codIntReqCompra: numeroPedido,
@@ -31877,12 +31934,12 @@ async function processarRequisicaoDiretaNaOmie(client, itemsGroup, solicitante) 
       qtde: it.qtde
     }))
   };
-  
+
   console.log(`[Compras-Solicitacao-Omie] Enviando para Omie IncluirReq (NP: ${np}):`, JSON.stringify(requisicaoOmie, null, 2));
-  
+
   // Aguarda disponibilidade respeitando rate limit da Omie (3 requisições por minuto)
   await omieRateLimiter.aguardarDisponibilidade();
-  
+
   // Envia para Omie
   const omieResponse = await fetch('https://app.omie.com.br/api/v1/produtos/requisicaocompra/', {
     method: 'POST',
@@ -31894,31 +31951,31 @@ async function processarRequisicaoDiretaNaOmie(client, itemsGroup, solicitante) 
       param: [requisicaoOmie]
     })
   });
-  
+
   const omieResult = await omieResponse.json();
-  
+
   if (!omieResponse.ok || omieResult.faultstring) {
     console.error(`[Compras-Solicitacao-Omie] Erro Omie para NP ${np}:`, omieResult);
     throw new Error(omieResult.faultstring || `Erro ao criar requisição Omie para NP ${np}`);
   }
-  
+
   console.log(`[Compras-Solicitacao-Omie] Resposta Omie para NP ${np}:`, omieResult);
-  
+
   // Atualiza todos os itens deste grupo no banco com status 'Requisição'
   const codReqCompra = omieResult.codReqCompra || null;
   const codIntReqCompra = omieResult.codIntReqCompra || numeroPedido;
-  
+
   for (const itemGroup of itemsGroup) {
     await client.query(`
       UPDATE compras.solicitacao_compras
-      SET 
+      SET
         status = 'Requisição',
         numero_pedido = $1,
         ncodped = $2,
         updated_at = NOW()
       WHERE id = $3
     `, [codIntReqCompra, codReqCompra, itemGroup.idDb]);
-    
+
     console.log(`[Compras-Solicitacao-Omie] Item ${itemGroup.idDb} atualizado - numero_pedido: ${codIntReqCompra}, ncodped: ${codReqCompra}`);
   }
 
@@ -31934,15 +31991,15 @@ async function processarRequisicaoDiretaNaOmie(client, itemsGroup, solicitante) 
 app.post('/api/compras/agrupar-itens', express.json(), async (req, res) => {
   try {
     const { ids, numero_pedido } = req.body;
-    
+
     if (!ids || !Array.isArray(ids) || ids.length === 0) {
       return res.status(400).json({ ok: false, error: 'Lista de IDs é obrigatória' });
     }
-    
+
     if (!numero_pedido) {
       return res.status(400).json({ ok: false, error: 'Número do pedido é obrigatório' });
     }
-    
+
     // Atualiza os itens com o numero_pedido
     const placeholders = ids.map((_, i) => `$${i + 1}`).join(',');
     const { rowCount } = await pool.query(`
@@ -31950,11 +32007,11 @@ app.post('/api/compras/agrupar-itens', express.json(), async (req, res) => {
       SET numero_pedido = $${ids.length + 1}
       WHERE id IN (${placeholders})
     `, [...ids, numero_pedido]);
-    
+
     console.log(`[Compras] ${rowCount} itens agrupados no pedido ${numero_pedido}`);
-    
+
     res.json({ ok: true, itens_atualizados: rowCount, numero_pedido });
-    
+
   } catch (err) {
     console.error('[Compras] Erro ao agrupar itens:', err);
     res.status(500).json({ ok: false, error: err.message || 'Erro ao agrupar itens' });
@@ -32001,7 +32058,7 @@ app.get('/api/compras/catalogo-omie', async (req, res) => {
       WHERE p.bloqueado = 'N'
       ORDER BY p.descricao
     `);
-    
+
     res.json({ ok: true, produtos: rows });
   } catch (err) {
     console.error('[Compras] Erro ao buscar catálogo Omie:', err);
@@ -32171,11 +32228,11 @@ app.get('/api/compras/minhas', async (req, res) => {
     await pool.query(`ALTER TABLE compras.compras_sem_cadastro ADD COLUMN IF NOT EXISTS pre_cadastro_completo BOOLEAN DEFAULT FALSE`);
 
     const solicitante = req.query.solicitante;
-    
+
     if (!solicitante) {
       return res.status(400).json({ ok: false, error: 'Parâmetro solicitante é obrigatório' });
     }
-    
+
     const { rows } = await pool.query(`
       WITH historico_recente AS (
         SELECT DISTINCT ON (
@@ -32352,7 +32409,7 @@ app.get('/api/compras/minhas', async (req, res) => {
       ORDER BY COALESCE(opi.created_at, hr.created_at) DESC
       LIMIT 1000
     `, [solicitante]);
-    
+
     res.json({ ok: true, solicitacoes: rows });
   } catch (err) {
     console.error('[Compras] Erro ao listar minhas solicitações:', err);
@@ -32405,11 +32462,11 @@ app.post('/api/compras/filtro-kanbans', async (req, res) => {
     // Pega username da sessão do usuário logado
     const username = req.session?.user?.username;
     const { kanbans_visiveis } = req.body;
-    
+
     if (!username) {
       return res.status(401).json({ ok: false, error: 'Usuário não autenticado' });
     }
-    
+
     if (!Array.isArray(kanbans_visiveis)) {
       return res.status(400).json({ ok: false, error: 'kanbans_visiveis deve ser um array' });
     }
@@ -32419,7 +32476,7 @@ app.post('/api/compras/filtro-kanbans', async (req, res) => {
       INSERT INTO compras.filtro_kanbans_usuario (username, kanbans_visiveis, updated_at)
       VALUES ($1, $2, NOW())
       ON CONFLICT (username)
-      DO UPDATE SET 
+      DO UPDATE SET
         kanbans_visiveis = $2,
         updated_at = NOW()
     `, [username, JSON.stringify(kanbans_visiveis)]);
@@ -32565,8 +32622,8 @@ async function criarRequisicaoOmieParaItem(item, itemId) {
   if (item.codigo_omie) {
     try {
       const { rows: rowsEstoque } = await pool.query(`
-        SELECT cmc 
-        FROM public.omie_estoque_posicao 
+        SELECT cmc
+        FROM public.omie_estoque_posicao
         WHERE omie_prod_id = $1
         LIMIT 1
       `, [item.codigo_omie]);
@@ -32626,7 +32683,7 @@ async function criarRequisicaoOmieParaItem(item, itemId) {
 
   await pool.query(`
     UPDATE compras.solicitacao_compras
-    SET 
+    SET
       status = 'Requisição',
       numero_pedido = $1,
       ncodped = $2,
@@ -32718,8 +32775,8 @@ async function criarRequisicaoOmieParaItens(itens) {
     if (item.codigo_omie) {
       try {
         const { rows: rowsEstoque } = await pool.query(`
-          SELECT cmc 
-          FROM public.omie_estoque_posicao 
+          SELECT cmc
+          FROM public.omie_estoque_posicao
           WHERE omie_prod_id = $1
           LIMIT 1
         `, [item.codigo_omie]);
@@ -32802,7 +32859,7 @@ async function criarRequisicaoOmieParaItens(itens) {
 
   await pool.query(`
     UPDATE compras.solicitacao_compras
-    SET 
+    SET
       status = 'Requisição',
       numero_pedido = $1,
       ncodped = $2,
@@ -32822,7 +32879,7 @@ app.post('/api/compras/aprovar-item/:id', express.json(), async (req, res) => {
 
     // Busca dados do item
     const { rows } = await pool.query(`
-      SELECT 
+      SELECT
         id,
         produto_codigo,
         produto_descricao,
@@ -32848,38 +32905,38 @@ app.post('/api/compras/aprovar-item/:id', express.json(), async (req, res) => {
     }
 
     const item = rows[0];
-    
+
     // Validação: categoria_compra_codigo é obrigatória para Omie
     if (!item.categoria_compra_codigo || item.categoria_compra_codigo.trim() === '') {
-      return res.status(400).json({ 
-        ok: false, 
-        error: 'Item sem categoria da compra. Por favor, edite o item e adicione a categoria antes de aprovar.' 
+      return res.status(400).json({
+        ok: false,
+        error: 'Item sem categoria da compra. Por favor, edite o item e adicione a categoria antes de aprovar.'
       });
     }
 
     // Verifica se veio uma cotação aprovada (do kanban "Cotado aguardando escolha")
     const cotacaoAprovadaId = req.body?.cotacao_aprovada_id;
-    
+
     // REGRA 1: Se retorno_cotacao indica "sim" → Apenas muda status para "aguardando cotação" (não cria requisição Omie)
     // REGRA 2: Caso contrário, se veio com cotacao_aprovada_id → Cria requisição na Omie
     // REGRA 3: Caso contrário → Cria requisição na Omie
     const retornoCotacao = String(item.retorno_cotacao || '').trim().toLowerCase();
     const retornoCotacaoSim = ['s', 'sim', 'yes', 'true', '1'].includes(retornoCotacao);
-    
+
     if (retornoCotacaoSim) {
       // Apenas atualiza status para "aguardando cotação" sem criar requisição na Omie
       await pool.query(`
         UPDATE compras.solicitacao_compras
-        SET 
+        SET
           status = 'aguardando cotação',
           updated_at = NOW()
         WHERE id = $1
       `, [itemId]);
-      
+
       console.log(`[Aprovar Item] Item ${itemId} aprovado - aguardando cotação (sem requisição Omie)`);
-      
-      return res.json({ 
-        ok: true, 
+
+      return res.json({
+        ok: true,
         message: 'Item aprovado. Status: aguardando cotação'
       });
     }
@@ -32917,7 +32974,7 @@ app.post('/api/compras/aprovar-grupo', express.json(), async (req, res) => {
     }
 
     const { rows } = await pool.query(`
-      SELECT 
+      SELECT
         id,
         produto_codigo,
         produto_descricao,
@@ -32960,7 +33017,7 @@ app.post('/api/compras/aprovar-grupo', express.json(), async (req, res) => {
     if (itensAguardarCotacao.length > 0) {
       await pool.query(`
         UPDATE compras.solicitacao_compras
-        SET 
+        SET
           status = 'aguardando cotação',
           updated_at = NOW()
         WHERE id = ANY($1)
@@ -33176,7 +33233,7 @@ app.get('/api/compras/todas', async (req, res) => {
     const todasSolicitacoes = [...solicitacoesHistorico]
       .sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0))
       .slice(0, 1000);
-    
+
     res.json({ ok: true, solicitacoes: todasSolicitacoes });
   } catch (err) {
     console.error('[Compras] Erro ao listar todas solicitações:', err);
@@ -33661,34 +33718,34 @@ app.post('/api/compras/grupo-itens', express.json(), async (req, res) => {
 app.get('/api/compras/requisicoes/debug/:id', async (req, res) => {
   try {
     const id = parseInt(req.params.id);
-    
+
     // 1. Busca o item em compras_sem_cadastro
     const { rows: item } = await pool.query(
       'SELECT * FROM compras.compras_sem_cadastro WHERE id = $1',
       [id]
     );
-    
+
     if (!item.length) {
       return res.json({ ok: false, error: 'Item não encontrado' });
     }
-    
+
     const itemData = item[0];
-    
+
     // 2. Verifica se tem cod_req_compra
     const codReqCompra = itemData.cod_req_compra;
-    
+
     // 3. Busca em requisicoes_omie
     const { rows: requisicao } = await pool.query(
       'SELECT * FROM compras.requisicoes_omie WHERE cod_req_compra = $1',
       [codReqCompra]
     );
-    
+
     // 4. Verifica se existe em pedidos_omie
     const { rows: pedido } = await pool.query(
       'SELECT n_cod_ped FROM compras.pedidos_omie WHERE n_cod_ped::text = $1::text',
       [codReqCompra]
     );
-    
+
     res.json({
       ok: true,
       item: itemData,
@@ -33893,17 +33950,17 @@ app.get('/api/compras/pedidos-compra', async (req, res) => {
     // Objetivo: Retornar pedidos da tabela compras.pedidos_omie com inativo=false e Etapa_NF nulo
     // Agrupar por c_numero e incluir fornecedor e produtos
     console.log('[Compras/PedidosCompra] Iniciando busca de pedidos de compra (inativo=false, Etapa_NF IS NULL)...');
-    
+
     // Filtro de data opcional via query params (dataInicio / dataFim) — filtra por d_inc_data
     const { dataInicio: diPC, dataFim: dfPC } = req.query;
     const paramsPC = [];
     let whereDataPC = '';
     if (diPC) { paramsPC.push(diPC); whereDataPC += ` AND po.d_inc_data::date >= $${paramsPC.length}::date`; }
     if (dfPC) { paramsPC.push(dfPC); whereDataPC += ` AND po.d_inc_data::date <= $${paramsPC.length}::date`; }
-    
+
     // Busca pedidos com c_etapa = '10' com produtos
     const { rows: pedidosComProdutos } = await pool.query(`
-      SELECT 
+      SELECT
         po.n_cod_ped,
         po.c_numero,
         po.c_cod_int_ped,
@@ -33950,16 +34007,16 @@ app.get('/api/compras/pedidos-compra', async (req, res) => {
         CASE WHEN po.c_numero ~ '^\d+$' THEN po.c_numero::INT ELSE NULL END DESC,
         po.c_numero DESC
     `, paramsPC);
-    
+
     console.log(`[Compras/PedidosCompra] Encontrados ${pedidosComProdutos.length} registros de pedidos com produtos`);
 
     // Agrupa os pedidos por c_numero preservando a ordem com Map
     const pedidosPorNumero = new Map();
     const pedidos = [];
-    
+
     pedidosComProdutos.forEach(row => {
       const numero = row.c_numero || 'SEM_NUMERO';
-      
+
       if (!pedidosPorNumero.has(numero)) {
         const novoPedido = {
           numero: numero,
@@ -33980,7 +34037,7 @@ app.get('/api/compras/pedidos-compra', async (req, res) => {
         pedidosPorNumero.set(numero, novoPedido);
         pedidos.push(novoPedido);
       }
-      
+
       // Adiciona produto se existir (evita duplicatas de pedidos sem produtos)
       if (row.c_produto) {
         pedidosPorNumero.get(numero).itens.push({
@@ -34011,7 +34068,7 @@ app.get('/api/compras/pedidos-compra', async (req, res) => {
       if (numB !== null) return 1;
       return String(b.numero).localeCompare(String(a.numero));
     });
-    
+
     console.log(`[Compras/PedidosCompra] Retornando ${pedidos.length} pedidos agrupados por número`);
 
     res.json({ ok: true, pedidos: pedidos });
@@ -34050,7 +34107,7 @@ app.get('/api/compras/compras-realizadas', async (req, res) => {
     if (dfCR) { paramsCR.push(dfCR); whereDataCR += ` AND po.d_inc_data::date <= $${paramsCR.length}::date`; }
 
     const query = `
-      SELECT 
+      SELECT
         po.n_cod_ped,
         po.c_numero,
         po.c_cod_int_ped,
@@ -34166,7 +34223,7 @@ app.get('/api/compras/compras-realizadas', async (req, res) => {
       if (numB !== null) return 1;
       return String(b.numero).localeCompare(String(a.numero));
     });
-    
+
     console.log(`[Compras/ComprasRealizadas] Retornando ${compras.length} compras agrupadas por número`);
 
     res.json({ ok: true, compras: compras });
@@ -34647,7 +34704,9 @@ Retorne SOMENTE um array JSON válido (sem texto adicional), ordenado do MAIS ao
  */
 app.get('/api/compras/pedidos-etapa-nf', async (req, res) => {
   try {
+    res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
     console.log('[Compras/PedidosEtapaNF] Listando recebimentos NF-e (Faturada/Recebido/Concluído)...');
+    await ensureRecebimentosNfeDadosAdicionaisColumn(pool);
 
     const { dataInicio: diNF, dataFim: dfNF } = req.query;
 
@@ -34690,8 +34749,16 @@ app.get('/api/compras/pedidos-etapa-nf', async (req, res) => {
         LOWER(BTRIM(COALESCE(r.compras, ''))) AS compras,
         r.c_etapa,
         r.c_recebido,
+        r.c_cfop_entrada,
         r.d_emissao_nfe,
         r.d_rec,
+        ARRAY(
+          SELECT DISTINCT BTRIM(COALESCE(i.c_cfop_documento, i.c_cfop_entrada))
+          FROM logistica.recebimentos_nfe_itens i
+          WHERE i.n_id_receb = r.n_id_receb
+            AND BTRIM(COALESCE(i.c_cfop_documento, i.c_cfop_entrada, '')) <> ''
+          ORDER BY BTRIM(COALESCE(i.c_cfop_documento, i.c_cfop_entrada))
+        ) AS cfops_entrada,
         r.updated_at
     `;
 
@@ -34776,6 +34843,10 @@ app.get('/api/compras/pedidos-etapa-nf', async (req, res) => {
         c_chave_nfe: row.c_chave_nfe || null,
         c_dados_adicionais: row.c_dados_adicionais || null,
         n_valor_nfe: row.n_valor_nfe ?? null,
+        cfops_entrada: [...new Set([
+          row.c_cfop_entrada,
+          ...(Array.isArray(row.cfops_entrada) ? row.cfops_entrada : [])
+        ].map(valor => String(valor || '').trim()).filter(Boolean))],
         compras: row.compras || null,
         origem_recebimento_nfe: true,
         created_at: null,
@@ -35428,17 +35499,17 @@ app.get('/api/compras/debug/grupo-requisicao/:valor', async (req, res) => {
   try {
     const { valor } = req.params;
     console.log('[DEBUG] Buscando grupo_requisicao:', valor);
-    
+
     const { rows: solicitRows } = await pool.query(
       `SELECT * FROM compras.solicitacao_compras WHERE grupo_requisicao = $1 LIMIT 3`,
       [valor]
     );
-    
+
     const { rows: semCadRows } = await pool.query(
       `SELECT * FROM compras.compras_sem_cadastro WHERE grupo_requisicao = $1 OR CAST(id AS TEXT) = $1 LIMIT 3`,
       [valor]
     );
-    
+
     res.json({
       valor,
       solicitacao_compras: solicitRows.length,
@@ -35462,25 +35533,25 @@ app.get('/api/compras/pedido-detalhes/:nCodPed', async (req, res) => {
   try {
     const { nCodPed } = req.params;
     const nCodPedInt = parseInt(nCodPed, 10);
-    
+
     console.log('[PedidoDetalhes] Buscando n_cod_ped:', nCodPedInt);
-    
+
     // Busca o pedido
     const { rows: pedidoRows } = await pool.query(
       'SELECT n_cod_ped, c_cod_int_ped, d_inc_data, d_dt_previsao, created_at, n_cod_for, n_valor FROM compras.pedidos_omie WHERE n_cod_ped = $1',
       [nCodPedInt]
     );
-    
+
     if (pedidoRows.length === 0) {
       console.log('[PedidoDetalhes] Pedido não encontrado:', nCodPedInt);
       return res.status(404).json({ ok: false, error: 'Pedido não encontrado' });
     }
-    
+
     const pedido = pedidoRows[0];
     const cCodIntPed = (pedido.c_cod_int_ped || '').toString().trim();
-    
+
     console.log('[PedidoDetalhes] Pedido encontrado:', { n_cod_ped: pedido.n_cod_ped, c_cod_int_ped: cCodIntPed });
-    
+
     // Busca o nome do fornecedor usando n_cod_for
     let fornecedorNome = 'Sem fornecedor';
     if (pedido.n_cod_for) {
@@ -35498,7 +35569,7 @@ app.get('/api/compras/pedido-detalhes/:nCodPed', async (req, res) => {
         fornecedorNome = `Fornecedor ID: ${pedido.n_cod_for}`;
       }
     }
-    
+
     // Busca os produtos/itens do pedido
     console.log('[PedidoDetalhes] Buscando itens para n_cod_ped:', nCodPedInt);
     const { rows: produtosRows } = await pool.query(
@@ -35507,9 +35578,9 @@ app.get('/api/compras/pedido-detalhes/:nCodPed', async (req, res) => {
        ORDER BY id ASC`,
       [nCodPedInt]
     );
-    
+
     console.log('[PedidoDetalhes] Encontrados', produtosRows.length, 'produtos');
-    
+
     const itens = produtosRows.map(row => ({
       produto_codigo: row.c_produto,
       produto_descricao: row.c_descricao,
@@ -35517,12 +35588,12 @@ app.get('/api/compras/pedido-detalhes/:nCodPed', async (req, res) => {
       preco_unitario: row.n_val_unit,
       valor_total_item: row.n_val_tot
     }));
-    
+
     let solicitante = '-';
     let departamento = '-';
     let centroCusto = '-';
     let objetivoCompra = '-';
-    
+
     if (cCodIntPed === '' || cCodIntPed === 'null') {
       // Vazio = Realizado na omie
       console.log('[PedidoDetalhes] c_cod_int_ped vazio - Realizado na omie');
@@ -35536,13 +35607,13 @@ app.get('/api/compras/pedido-detalhes/:nCodPed', async (req, res) => {
       // O c_cod_int_ped contém o identificador único que foi armazenado como numero_pedido
       console.log('[PedidoDetalhes] Procurando em solicitacao_compras com numero_pedido:', cCodIntPed);
       const { rows: solicitRows } = await pool.query(
-        `SELECT solicitante, departamento, centro_custo, objetivo_compra 
-         FROM compras.solicitacao_compras 
-         WHERE numero_pedido = $1 
+        `SELECT solicitante, departamento, centro_custo, objetivo_compra
+         FROM compras.solicitacao_compras
+         WHERE numero_pedido = $1
          LIMIT 1`,
         [cCodIntPed]
       );
-      
+
       if (solicitRows.length > 0) {
         console.log('[PedidoDetalhes] Encontrado em solicitacao_compras por numero_pedido');
         solicitante = solicitRows[0].solicitante || '-';
@@ -35553,13 +35624,13 @@ app.get('/api/compras/pedido-detalhes/:nCodPed', async (req, res) => {
         // Fallback: Procurar por grupo_requisicao
         console.log('[PedidoDetalhes] Não encontrado por numero_pedido, tentando grupo_requisicao');
         const { rows: solicitRows2 } = await pool.query(
-          `SELECT solicitante, departamento, centro_custo, objetivo_compra 
-           FROM compras.solicitacao_compras 
-           WHERE grupo_requisicao = $1 
+          `SELECT solicitante, departamento, centro_custo, objetivo_compra
+           FROM compras.solicitacao_compras
+           WHERE grupo_requisicao = $1
            LIMIT 1`,
           [cCodIntPed]
         );
-        
+
         if (solicitRows2.length > 0) {
           console.log('[PedidoDetalhes] Encontrado em solicitacao_compras por grupo_requisicao');
           solicitante = solicitRows2[0].solicitante || '-';
@@ -35570,13 +35641,13 @@ app.get('/api/compras/pedido-detalhes/:nCodPed', async (req, res) => {
           // Fallback: Procurar em compras_sem_cadastro
           console.log('[PedidoDetalhes] Não encontrado em solicitacao_compras, procurando em compras_sem_cadastro');
           const { rows: semCadastroRows } = await pool.query(
-            `SELECT solicitante, departamento, centro_custo, objetivo_compra 
-             FROM compras.compras_sem_cadastro 
+            `SELECT solicitante, departamento, centro_custo, objetivo_compra
+             FROM compras.compras_sem_cadastro
              WHERE CAST(grupo_requisicao AS TEXT) = $1 OR CAST(id AS TEXT) = $1
              LIMIT 1`,
             [cCodIntPed]
           );
-          
+
           if (semCadastroRows.length > 0) {
             console.log('[PedidoDetalhes] Encontrado em compras_sem_cadastro');
             solicitante = semCadastroRows[0].solicitante || '-';
@@ -35591,7 +35662,7 @@ app.get('/api/compras/pedido-detalhes/:nCodPed', async (req, res) => {
         }
       }
     }
-    
+
     res.json({
       ok: true,
       solicitante,
@@ -35599,6 +35670,7 @@ app.get('/api/compras/pedido-detalhes/:nCodPed', async (req, res) => {
       centroCusto,
       objetivoCompra,
       fornecedorNome,
+      valorTotalPedido: pedido.n_valor,
       d_inc_data: pedido.d_inc_data,
       d_dt_previsao: pedido.d_dt_previsao,
       createdAt: pedido.created_at,
@@ -37991,7 +38063,7 @@ app.get('/api/compras/pedidos-omie/nfe-pdf-redirect-por-numero', async (req, res
 app.post('/api/compras/requisicoes/sincronizar', async (req, res) => {
   try {
     console.log('[Compras/Requisições/Sync] Iniciando sincronização de requisições...');
-    
+
     // Busca requisições sem numero
     const { rows: requisicoesSemNumero } = await pool.query(`
       SELECT cod_req_compra, cod_int_req_compra
@@ -38000,17 +38072,17 @@ app.post('/api/compras/requisicoes/sincronizar', async (req, res) => {
       ORDER BY created_at DESC
       LIMIT 20
     `);
-    
+
     console.log(`[Compras/Requisições/Sync] Encontradas ${requisicoesSemNumero.length} requisições sem numero`);
-    
+
     let sucessos = 0;
     let erros = 0;
-    
+
     // Para cada requisição, busca dados completos da API
     for (const req of requisicoesSemNumero) {
       try {
         const param = { codReqCompra: parseInt(req.cod_req_compra) };
-        
+
         const response = await fetch('https://app.omie.com.br/api/v1/produtos/requisicaocompra/', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -38021,16 +38093,16 @@ app.post('/api/compras/requisicoes/sincronizar', async (req, res) => {
             param: [param]
           })
         });
-        
+
         if (!response.ok) {
           console.error(`[Compras/Requisições/Sync] Erro na API para ${req.cod_req_compra}: ${response.status}`);
           erros++;
           continue;
         }
-        
+
         const data = await response.json();
         const reqData = data?.requisicaoCadastro || {};
-        
+
         // Atualiza apenas o campo numero se encontrado
         if (reqData.cNumero) {
           await pool.query(`
@@ -38038,32 +38110,32 @@ app.post('/api/compras/requisicoes/sincronizar', async (req, res) => {
             SET numero = $1, updated_at = NOW()
             WHERE cod_req_compra = $2
           `, [reqData.cNumero, req.cod_req_compra]);
-          
+
           console.log(`[Compras/Requisições/Sync] ✓ Requisição ${req.cod_req_compra} atualizada com numero: ${reqData.cNumero}`);
           sucessos++;
         } else {
           console.log(`[Compras/Requisições/Sync] ⚠ Requisição ${req.cod_req_compra} não tem cNumero na API`);
         }
-        
+
         // Delay para não sobrecarregar API da Omie
         await new Promise(resolve => setTimeout(resolve, 500));
-        
+
       } catch (err) {
         console.error(`[Compras/Requisições/Sync] Erro ao processar ${req.cod_req_compra}:`, err);
         erros++;
       }
     }
-    
+
     console.log(`[Compras/Requisições/Sync] Sincronização concluída: ${sucessos} sucessos, ${erros} erros`);
-    
-    res.json({ 
-      ok: true, 
+
+    res.json({
+      ok: true,
       total: requisicoesSemNumero.length,
       sucessos,
       erros,
       message: `Sincronizadas ${sucessos} de ${requisicoesSemNumero.length} requisições`
     });
-    
+
   } catch (err) {
     console.error('[Compras/Requisições/Sync] Erro na sincronização:', err);
     res.status(500).json({ ok: false, error: 'Erro ao sincronizar requisições' });
@@ -38074,33 +38146,33 @@ app.post('/api/compras/requisicoes/sincronizar', async (req, res) => {
 app.post('/api/compras/requisicoes/sincronizar-itens', async (req, res) => {
   try {
     console.log('[Compras/Requisições/SyncItens] Iniciando sincronização de itens...');
-    
+
     // Busca requisições sem itens
     const { rows: requisicoesSemItens } = await pool.query(`
       SELECT ro.cod_req_compra, ro.cod_int_req_compra, ro.created_at
       FROM compras.requisicoes_omie ro
       WHERE ro.inativo = false
         AND NOT EXISTS (
-          SELECT 1 FROM compras.requisicoes_omie_itens roi 
+          SELECT 1 FROM compras.requisicoes_omie_itens roi
           WHERE roi.cod_req_compra = ro.cod_req_compra
         )
       ORDER BY ro.created_at DESC
       LIMIT 10
     `);
-    
+
     console.log(`[Compras/Requisições/SyncItens] Encontradas ${requisicoesSemItens.length} requisições sem itens`);
-    
+
     let sucessos = 0;
     let erros = 0;
     let semItensNaApi = 0;
-    
+
     // Para cada requisição, busca dados completos da API
     for (const req of requisicoesSemItens) {
       try {
         const param = { codReqCompra: parseInt(req.cod_req_compra) };
-        
+
         console.log(`[Compras/Requisições/SyncItens] Buscando itens da requisição ${req.cod_req_compra}...`);
-        
+
         const response = await fetch('https://app.omie.com.br/api/v1/produtos/requisicaocompra/', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -38111,24 +38183,24 @@ app.post('/api/compras/requisicoes/sincronizar-itens', async (req, res) => {
             param: [param]
           })
         });
-        
+
         if (!response.ok) {
           console.error(`[Compras/Requisições/SyncItens] Erro na API para ${req.cod_req_compra}: ${response.status}`);
           erros++;
           continue;
         }
-        
+
         const data = await response.json();
-        const itens = data?.requisicaoCadastro?.ItensReqCompra 
-                   || data?.requisicaoCadastro?.itens_req_compra 
-                   || data?.ItensReqCompra 
-                   || data?.itens_req_compra 
+        const itens = data?.requisicaoCadastro?.ItensReqCompra
+                   || data?.requisicaoCadastro?.itens_req_compra
+                   || data?.ItensReqCompra
+                   || data?.itens_req_compra
                    || [];
-        
+
         // Se encontrou itens, insere no banco
         if (itens && itens.length > 0) {
           console.log(`[Compras/Requisições/SyncItens] 📦 ${itens.length} itens encontrados para requisição ${req.cod_req_compra}`);
-          
+
           // Insere cada item
           for (const item of itens) {
             await pool.query(`
@@ -38149,34 +38221,34 @@ app.post('/api/compras/requisicoes/sincronizar-itens', async (req, res) => {
               item.obsItem || item.obs_item || null
             ]);
           }
-          
+
           console.log(`[Compras/Requisições/SyncItens] ✓ Requisição ${req.cod_req_compra} atualizada com ${itens.length} itens`);
           sucessos++;
         } else {
           console.log(`[Compras/Requisições/SyncItens] ⚠ Requisição ${req.cod_req_compra} não tem itens na API da Omie`);
           semItensNaApi++;
         }
-        
+
         // Delay para não sobrecarregar API da Omie
         await new Promise(resolve => setTimeout(resolve, 1000));
-        
+
       } catch (err) {
         console.error(`[Compras/Requisições/SyncItens] Erro ao processar ${req.cod_req_compra}:`, err);
         erros++;
       }
     }
-    
+
     console.log(`[Compras/Requisições/SyncItens] Sincronização concluída: ${sucessos} com itens, ${semItensNaApi} sem itens na API, ${erros} erros`);
-    
-    res.json({ 
-      ok: true, 
+
+    res.json({
+      ok: true,
       total: requisicoesSemItens.length,
       sucessos,
       semItensNaApi,
       erros,
       message: `Processadas ${requisicoesSemItens.length} requisições: ${sucessos} atualizadas, ${semItensNaApi} sem itens na API`
     });
-    
+
   } catch (err) {
     console.error('[Compras/Requisições/SyncItens] Erro na sincronização:', err);
     res.status(500).json({ ok: false, error: 'Erro ao sincronizar itens de requisições' });
@@ -38192,7 +38264,7 @@ app.put('/api/compras/item/:id', express.json(), async (req, res) => {
     }
 
     const { status, previsao_chegada, observacao, resp_inspecao_recebimento, responsavel_pela_compra, fornecedor_nome, fornecedor_id, categoria_compra, categoria_compra_codigo, anexos, cod_parc, qtde_parc, contato, contrato, obs_interna, cotacoes_aprovadas_ids } = req.body || {};
-    
+
     const allowedStatus = [
       'pendente',
       'aguardando aprovação',
@@ -38209,7 +38281,7 @@ app.put('/api/compras/item/:id', express.json(), async (req, res) => {
     const fields = [];
     const values = [];
     let idx = 1;
-    
+
     // Processa anexos se houver
     let anexosUrls = null;
     if (anexos && Array.isArray(anexos) && anexos.length > 0) {
@@ -38263,53 +38335,53 @@ app.put('/api/compras/item/:id', express.json(), async (req, res) => {
       fields.push(`resp_inspecao_recebimento = $${idx++}`);
       values.push(resp_inspecao_recebimento || null);
     }
-    
+
     if (typeof responsavel_pela_compra !== 'undefined') {
       fields.push(`responsavel_pela_compra = $${idx++}`);
       values.push(responsavel_pela_compra || null);
     }
-    
+
     if (typeof fornecedor_nome !== 'undefined') {
       fields.push(`fornecedor_nome = $${idx++}`);
       values.push(fornecedor_nome || null);
     }
-    
+
     if (typeof fornecedor_id !== 'undefined') {
       fields.push(`fornecedor_id = $${idx++}`);
       values.push(fornecedor_id || null);
     }
-    
+
     if (typeof categoria_compra !== 'undefined') {
       fields.push(`categoria_compra = $${idx++}`);
       values.push(categoria_compra || null);
     }
-    
+
     if (typeof categoria_compra_codigo !== 'undefined') {
       fields.push(`categoria_compra_codigo = $${idx++}`);
       values.push(categoria_compra_codigo || null);
     }
-    
+
     // Novos campos do PedidoCompraJsonClient
     if (typeof cod_parc !== 'undefined') {
       fields.push(`cod_parc = $${idx++}`);
       values.push(cod_parc || null);
     }
-    
+
     if (typeof qtde_parc !== 'undefined') {
       fields.push(`qtde_parc = $${idx++}`);
       values.push(qtde_parc || null);
     }
-    
+
     if (typeof contato !== 'undefined') {
       fields.push(`contato = $${idx++}`);
       values.push(contato || null);
     }
-    
+
     if (typeof contrato !== 'undefined') {
       fields.push(`contrato = $${idx++}`);
       values.push(contrato || null);
     }
-    
+
     if (typeof obs_interna !== 'undefined') {
       fields.push(`obs_interna = $${idx++}`);
       values.push(obs_interna || null);
@@ -38330,7 +38402,7 @@ app.put('/api/compras/item/:id', express.json(), async (req, res) => {
     `;
 
     const { rows } = await pool.query(sql, values);
-    
+
     if (!rows.length) {
       return res.status(404).json({ ok: false, error: 'Solicitação não encontrada' });
     }
@@ -38338,22 +38410,22 @@ app.put('/api/compras/item/:id', express.json(), async (req, res) => {
     // Se recebeu cotacoes_aprovadas_ids, atualiza o status_aprovacao das cotações
     if (cotacoes_aprovadas_ids && Array.isArray(cotacoes_aprovadas_ids) && cotacoes_aprovadas_ids.length > 0) {
       console.log(`[Compras] Atualizando status de aprovação das cotações do item ${id}:`, cotacoes_aprovadas_ids);
-      
+
       try {
         // Marca as cotações aprovadas com status_aprovacao = 'aprovado'
         await pool.query(`
-          UPDATE compras.cotacoes 
+          UPDATE compras.cotacoes
           SET status_aprovacao = 'aprovado', atualizado_em = NOW()
           WHERE id = ANY($1::int[]) AND solicitacao_id = $2
         `, [cotacoes_aprovadas_ids, id]);
-        
+
         // Marca as outras cotações do mesmo item como 'reprovado'
         await pool.query(`
-          UPDATE compras.cotacoes 
+          UPDATE compras.cotacoes
           SET status_aprovacao = 'reprovado', atualizado_em = NOW()
           WHERE id != ALL($1::int[]) AND solicitacao_id = $2
         `, [cotacoes_aprovadas_ids, id]);
-        
+
         console.log(`[Compras] Status de aprovação atualizado com sucesso para item ${id}`);
       } catch (cotacaoErr) {
         console.error('[Compras] Erro ao atualizar status das cotações:', cotacaoErr);
@@ -38402,11 +38474,11 @@ app.post('/api/compras/cotacoes', express.json(), async (req, res) => {
         const linksCotacao = normalizarLinksCotacao(link);
         const linkParaSalvar = linksCotacao.length > 0 ? JSON.stringify(linksCotacao) : null;
 
-    
+
     if (!solicitacao_id || !fornecedor_nome) {
       return res.status(400).json({ ok: false, error: 'solicitacao_id e fornecedor_nome são obrigatórios' });
     }
-    
+
     // Processa anexos se houver
     let anexosUrls = null;
     if (anexos && Array.isArray(anexos) && anexos.length > 0) {
@@ -38440,13 +38512,13 @@ app.post('/api/compras/cotacoes', express.json(), async (req, res) => {
         anexosUrls = null;
       }
     }
-    
+
     // Busca produto_codigo da solicitação (ambas as tabelas podem ter dados)
     // Objetivo: compras_sem_cadastro não tem numero_pedido, então busca apenas produto_codigo
     let produtoCodigo = null;
     let numeroPedido = null;
     const tableToUse = table_source === 'compras_sem_cadastro' ? 'compras.compras_sem_cadastro' : 'compras.solicitacao_compras';
-    
+
     if (table_source === 'compras_sem_cadastro') {
       // compras_sem_cadastro tem apenas produto_codigo
       const { rows: rowsSolic } = await pool.query(`
@@ -38455,7 +38527,7 @@ app.post('/api/compras/cotacoes', express.json(), async (req, res) => {
         WHERE id = $1
         LIMIT 1
       `, [solicitacao_id]);
-      
+
       if (rowsSolic.length > 0) {
         produtoCodigo = rowsSolic[0]?.produto_codigo || null;
       }
@@ -38467,7 +38539,7 @@ app.post('/api/compras/cotacoes', express.json(), async (req, res) => {
         WHERE id = $1
         LIMIT 1
       `, [solicitacao_id]);
-      
+
       if (rowsSolic.length > 0) {
         produtoCodigo = rowsSolic[0]?.produto_codigo || null;
         numeroPedido = rowsSolic[0]?.numero_pedido || null;
@@ -38484,7 +38556,7 @@ app.post('/api/compras/cotacoes', express.json(), async (req, res) => {
       await client.query('BEGIN');
 
       const { rows } = await client.query(`
-        INSERT INTO compras.cotacoes 
+        INSERT INTO compras.cotacoes
           (solicitacao_id, produto_codigo, numero_pedido, fornecedor_nome, fornecedor_id, valor_cotado, moeda, observacao, link, anexos, criado_por, table_source)
         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
         RETURNING *
@@ -38532,14 +38604,14 @@ app.post('/api/compras/cotacoes', express.json(), async (req, res) => {
     } finally {
       client.release();
     }
-    
+
     console.log('[Cotações] Cotação salva:', {
       id: cotacaoSalva.id,
       fornecedor: cotacaoSalva.fornecedor_nome,
       table_source: cotacaoSalva.table_source,
       anexos_count: anexosUrls ? anexosUrls.length : 0
     });
-    
+
     res.json({ ok: true, cotacao: cotacaoSalva });
   } catch (err) {
     console.error('[Cotações] Erro ao adicionar cotação:', err);
@@ -38554,10 +38626,10 @@ app.get('/api/compras/cotacoes/:solicitacao_id', async (req, res) => {
     if (!Number.isInteger(solicitacao_id)) {
       return res.status(400).json({ ok: false, error: 'ID inválido' });
     }
-    
+
     // Comentário: aceita table_source como query parameter para filtrar cotações
     const table_source = req.query.table_source || 'solicitacao_compras';
-    
+
     const { rows } = await pool.query(`
       SELECT c.*,
              COALESCE((
@@ -38590,7 +38662,7 @@ app.get('/api/compras/cotacoes/:solicitacao_id', async (req, res) => {
         )
       ORDER BY c.criado_em DESC
     `, [solicitacao_id, table_source]);
-    
+
     res.json({ cotacoes: rows });
   } catch (err) {
     console.error('[Cotações] Erro ao listar cotações:', err);
@@ -38626,13 +38698,13 @@ app.put('/api/compras/cotacoes/:id', express.json(), async (req, res) => {
     if (!Number.isInteger(id)) {
       return res.status(400).json({ ok: false, error: 'ID inválido' });
     }
-    
+
     const { fornecedor_nome, fornecedor_id, valor_cotado, observacao, anexos, link, moeda, itens_cotacao } = req.body || {};
-    
+
     const fields = [];
     const values = [];
     let idx = 1;
-    
+
     // Processa anexos se houver
     let anexosUrls = null;
     if (anexos && Array.isArray(anexos) && anexos.length > 0) {
@@ -38660,7 +38732,7 @@ app.put('/api/compras/cotacoes/:id', express.json(), async (req, res) => {
               console.error('[Cotações] Erro no upload de anexo:', uploadErr.message);
             }
           }
-          
+
           if (anexosUrls.length > 0) {
             fields.push(`anexos = $${idx++}`);
             values.push(JSON.stringify(anexosUrls));
@@ -38670,22 +38742,22 @@ app.put('/api/compras/cotacoes/:id', express.json(), async (req, res) => {
         console.error('[Cotações] Erro ao fazer upload de anexos:', uploadErr);
       }
     }
-    
+
     if (fornecedor_nome) {
       fields.push(`fornecedor_nome = $${idx++}`);
       values.push(fornecedor_nome);
     }
-    
+
     if (typeof fornecedor_id !== 'undefined') {
       fields.push(`fornecedor_id = $${idx++}`);
       values.push(fornecedor_id || null);
     }
-    
+
     if (typeof valor_cotado !== 'undefined') {
       fields.push(`valor_cotado = $${idx++}`);
       values.push(valor_cotado || null);
     }
-    
+
     if (typeof observacao !== 'undefined') {
       fields.push(`observacao = $${idx++}`);
       values.push(observacao || null);
@@ -38724,7 +38796,7 @@ app.put('/api/compras/cotacoes/:id', express.json(), async (req, res) => {
       fields.push(`moeda = $${idx++}`);
       values.push(moedaNormalizada);
     }
-    
+
     const deveAtualizarItens = Array.isArray(itens_cotacao);
     if (fields.length === 0 && !deveAtualizarItens) {
       return res.status(400).json({ ok: false, error: 'Nenhum campo para atualizar' });
@@ -38740,7 +38812,7 @@ app.put('/api/compras/cotacoes/:id', express.json(), async (req, res) => {
         values.push(id);
 
         const result = await client.query(`
-          UPDATE compras.cotacoes 
+          UPDATE compras.cotacoes
           SET ${fields.join(', ')}
           WHERE id = $${idx}
           RETURNING *
@@ -38820,7 +38892,7 @@ app.put('/api/compras/cotacoes/:id', express.json(), async (req, res) => {
     } finally {
       client.release();
     }
-    
+
     res.json({ ok: true, cotacao: rows[0] });
   } catch (err) {
     console.error('[Cotações] Erro ao atualizar cotação:', err);
@@ -38835,17 +38907,17 @@ app.delete('/api/compras/cotacoes/:id', async (req, res) => {
     if (!Number.isInteger(id)) {
       return res.status(400).json({ ok: false, error: 'ID inválido' });
     }
-    
+
     const { rows } = await pool.query(`
-      DELETE FROM compras.cotacoes 
+      DELETE FROM compras.cotacoes
       WHERE id = $1
       RETURNING *
     `, [id]);
-    
+
     if (rows.length === 0) {
       return res.status(404).json({ ok: false, error: 'Cotação não encontrada' });
     }
-    
+
     res.json({ ok: true, message: 'Cotação removida com sucesso' });
   } catch (err) {
     console.error('[Cotações] Erro ao remover cotação:', err);
@@ -38858,29 +38930,29 @@ app.put('/api/compras/cotacoes/:id/status', async (req, res) => {
   try {
     const { id } = req.params;
     const { status } = req.body;
-    
+
     // Valida status
     if (!status || !['pendente', 'aprovado', 'reprovado'].includes(status)) {
-      return res.status(400).json({ 
-        ok: false, 
-        error: 'Status inválido. Use: pendente, aprovado ou reprovado' 
+      return res.status(400).json({
+        ok: false,
+        error: 'Status inválido. Use: pendente, aprovado ou reprovado'
       });
     }
-    
+
     // Atualiza status da cotação
     const { rows } = await pool.query(`
-      UPDATE compras.cotacoes 
+      UPDATE compras.cotacoes
       SET status_aprovacao = $1, atualizado_em = NOW()
       WHERE id = $2
       RETURNING *
     `, [status, id]);
-    
+
     if (rows.length === 0) {
       return res.status(404).json({ ok: false, error: 'Cotação não encontrada' });
     }
-    
+
     res.json({ ok: true, cotacao: rows[0] });
-    
+
   } catch (err) {
     console.error('[Cotações] Erro ao atualizar status:', err);
     res.status(500).json({ ok: false, error: 'Erro ao atualizar status da cotação' });
@@ -39388,45 +39460,45 @@ app.put('/api/compras/itens/:id/observacao-retificacao', async (req, res) => {
   try {
     const { id } = req.params;
     const { observacao_retificacao, usuario_comentario } = req.body;
-    
+
     // Valida observação obrigatória
     if (!observacao_retificacao || observacao_retificacao.trim() === '') {
-      return res.status(400).json({ 
-        ok: false, 
-        error: 'Observação não pode estar vazia' 
+      return res.status(400).json({
+        ok: false,
+        error: 'Observação não pode estar vazia'
       });
     }
-    
+
     // Busca histórico existente
     const { rows: existingRows } = await pool.query(
       'SELECT observacao_retificacao FROM compras.solicitacao_compras WHERE id = $1',
       [id]
     );
-    
+
     const historicoExistente = existingRows[0]?.observacao_retificacao || '';
     const nomeUsuario = usuario_comentario || 'Usuário';
     const dataHora = new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' });
-    
+
     // Acrescenta novo comentário ao histórico
     const novaLinha = `User ${nomeUsuario} - ${dataHora}\n${observacao_retificacao}\n`;
     const novoHistorico = historicoExistente ? `${historicoExistente}\n${novaLinha}` : novaLinha;
-    
+
     // Atualiza observação
     const query = `
-      UPDATE compras.solicitacao_compras 
+      UPDATE compras.solicitacao_compras
       SET observacao_retificacao = $1, updated_at = NOW()
       WHERE id = $2
       RETURNING *
     `;
-    
+
     const { rows } = await pool.query(query, [novoHistorico, id]);
-    
+
     if (rows.length === 0) {
       return res.status(404).json({ ok: false, error: 'Item não encontrado' });
     }
-    
+
     res.json({ ok: true, item: rows[0] });
-    
+
   } catch (err) {
     console.error('[Compras] Erro ao atualizar observação de retificação:', err);
     res.status(500).json({ ok: false, error: 'Erro ao atualizar observação' });
@@ -39438,18 +39510,18 @@ app.delete('/api/compras/itens/:id', async (req, res) => {
   try {
     const { id } = req.params;
     const { table_source } = req.body || {};
-    
+
     // Objetivo: Detectar de qual tabela o item vem (solicitacao_compras ou compras_sem_cadastro)
     // e fazer a exclusão na tabela correta
     let tableSource = table_source;
-    
+
     if (!tableSource) {
       // Tenta encontrar em solicitacao_compras primeiro
       const { rows: fromSolicitacao } = await pool.query(
         'SELECT id FROM compras.solicitacao_compras WHERE id = $1',
         [id]
       );
-      
+
       if (fromSolicitacao.length > 0) {
         tableSource = 'solicitacao_compras';
       } else {
@@ -39463,20 +39535,20 @@ app.delete('/api/compras/itens/:id', async (req, res) => {
         }
       }
     }
-    
+
     if (!tableSource) {
       return res.status(404).json({ ok: false, error: 'Item não encontrado em nenhuma tabela' });
     }
-    
+
     const tableName = tableSource === 'solicitacao_compras' ? 'compras.solicitacao_compras' : 'compras.compras_sem_cadastro';
-    
+
     // Exclui o item (as cotações serão excluídas automaticamente por CASCADE se for solicitacao_compras)
     await pool.query(`
       DELETE FROM ${tableName} WHERE id = $1
     `, [id]);
-    
+
     res.json({ ok: true, message: 'Item excluído com sucesso', table_source: tableSource });
-    
+
   } catch (err) {
     console.error('[Compras] Erro ao excluir item:', err);
     res.status(500).json({ ok: false, error: 'Erro ao excluir item' });
@@ -39509,16 +39581,16 @@ app.delete('/api/compras/itens/:id', async (req, res) => {
         created_at TIMESTAMP DEFAULT NOW(),
         updated_at TIMESTAMP DEFAULT NOW()
       );
-      
-      CREATE INDEX IF NOT EXISTS idx_compras_sem_cadastro_solicitante 
+
+      CREATE INDEX IF NOT EXISTS idx_compras_sem_cadastro_solicitante
         ON compras.compras_sem_cadastro(solicitante);
-      CREATE INDEX IF NOT EXISTS idx_compras_sem_cadastro_status 
+      CREATE INDEX IF NOT EXISTS idx_compras_sem_cadastro_status
         ON compras.compras_sem_cadastro(status);
-      CREATE INDEX IF NOT EXISTS idx_compras_sem_cadastro_departamento 
+      CREATE INDEX IF NOT EXISTS idx_compras_sem_cadastro_departamento
         ON compras.compras_sem_cadastro(departamento);
-      CREATE INDEX IF NOT EXISTS idx_compras_sem_cadastro_grupo 
+      CREATE INDEX IF NOT EXISTS idx_compras_sem_cadastro_grupo
         ON compras.compras_sem_cadastro(grupo_requisicao);
-      CREATE INDEX IF NOT EXISTS idx_compras_sem_cadastro_created 
+      CREATE INDEX IF NOT EXISTS idx_compras_sem_cadastro_created
         ON compras.compras_sem_cadastro(created_at DESC);
     `);
 
@@ -40681,6 +40753,8 @@ async function startServer() {
       iniciarCronNotificacaoDiaria();
       const { iniciarCronTurnoDiaAutomatico } = require('./cron/turno_dia_automatico');
       iniciarCronTurnoDiaAutomatico();
+      const { iniciarCronLembreteReservasEmail } = require('./cron/lembrete_reservas_email');
+      iniciarCronLembreteReservasEmail();
     }, 15000);
   });
 }

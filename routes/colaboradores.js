@@ -2,6 +2,11 @@
 const express = require('express');
 const router  = express.Router();
 const { pool } = require('../src/db');
+const {
+  garantirSchemaPermissoesSeparacao,
+  obterPermissaoSeparacao,
+  salvarPermissaoSeparacao
+} = require('../utils/separacaoPermissoes');
 
 let _hasOperacaoProfileCol = null;
 async function hasOperacaoProfileColumn() {
@@ -291,6 +296,7 @@ router.get('/operacoes', async (_req, res) => {
 /* ======= CRIAR COLABORADOR ======= */
 router.post('/', async (req, res) => {
   const { username, senha, roles, funcao_id, setor_id, email } = req.body || {};
+  const separacao_permissao = req.body?.separacao_permissao;
   const bodyOperacaoId = req.body?.operacao_id;
   const rawOperIds = Array.isArray(req.body?.operacao_ids)
     ? req.body.operacao_ids
@@ -369,6 +375,9 @@ SELECT * FROM upsert;
   // 3) vincula permissões de produto
   try { console.log('[POST sync] user=', userRow.id, 'perms=', produto_permissao_codigos); } catch {}
   await syncUserProdutoPermissoes(cx, userRow.id, produto_permissao_codigos);
+  if (separacao_permissao !== undefined) {
+    await salvarPermissaoSeparacao(cx, userRow.id, separacao_permissao);
+  }
   try {
     const check = await cx.query('SELECT array_agg(permissao_codigo) arr FROM public.auth_user_produto_permissao WHERE user_id=$1', [userRow.id]);
     console.log('[POST sync check]', check.rows?.[0]?.arr || null);
@@ -394,6 +403,7 @@ SELECT * FROM upsert;
 router.put('/:id', async (req, res) => {
   const { id } = req.params;
   const { username, funcao_id, setor_id, roles, email } = req.body || {};
+  const separacao_permissao = req.body?.separacao_permissao;
   try { console.log('[PUT /api/colaboradores/:id] RAW BODY', req.body); } catch {}
   const bodyOperacaoId = req.body?.operacao_id;
   const rawOperIds = Array.isArray(req.body?.operacao_ids)
@@ -482,6 +492,9 @@ router.put('/:id', async (req, res) => {
           console.log('[PUT sync check]', check.rows?.[0]?.arr || null);
         } catch(e){ console.warn('[PUT sync check ERR]', e.message); }
       }
+      if (separacao_permissao !== undefined) {
+        await salvarPermissaoSeparacao(cx, id, separacao_permissao);
+      }
     });
 
     res.json({ ok: true });
@@ -568,6 +581,36 @@ router.put('/api/users/update-password-by-username', express.json(), async (req,
 // ========== Endpoints de Permissões de Produto ==========
 
 // GET /api/colaboradores/produto-permissoes - Lista todas as permissões de produto disponíveis
+router.get('/separacao-destinos', async (_req, res) => {
+  try {
+    const { rows } = await pool.query(`
+      SELECT TRIM(cod_local) AS codigo,
+             TRIM(nome_local) AS nome,
+             CONCAT(TRIM(cod_local), '|', TRIM(nome_local)) AS chave
+        FROM solicitacao_produto.itens_solicitados
+       WHERE NULLIF(TRIM(cod_local), '') IS NOT NULL
+         AND NULLIF(TRIM(nome_local), '') IS NOT NULL
+       GROUP BY TRIM(cod_local), TRIM(nome_local)
+       ORDER BY TRIM(nome_local), TRIM(cod_local)
+    `);
+    res.json(rows);
+  } catch (e) {
+    console.error('[separacao-destinos]', e);
+    res.status(500).json({ error: 'Erro ao listar destinos de separação' });
+  }
+});
+
+router.get('/:id/separacao-permissao', async (req, res) => {
+  try {
+    await garantirSchemaPermissoesSeparacao();
+    const regra = await obterPermissaoSeparacao(req.params.id);
+    res.json(regra || { user_id: String(req.params.id), restringir_destinos: false, destinos_codigos: [], destinos_chaves: [] });
+  } catch (e) {
+    console.error('[separacao-permissao/get]', e);
+    res.status(500).json({ error: 'Erro ao carregar permissão de separação' });
+  }
+});
+
 router.get('/produto-permissoes', async (req, res) => {
   try {
     const { rows } = await pool.query(`

@@ -1,7 +1,7 @@
 # Exclusão lógica de pedidos no Kanban de Compras (antes de Requisições)
 
-**Data:** 2026-07-21  
-**Status:** aprovado pelo usuário (design)  
+**Data:** 2026-07-21
+**Status:** aprovado pelo usuário (design)
 **Módulo:** Compras — kanban de pedidos
 
 ## Problema

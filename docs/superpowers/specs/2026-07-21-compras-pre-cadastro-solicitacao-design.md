@@ -1,7 +1,7 @@
 # Pré-cadastro na Solicitação de compra (sem Análise de cadastro)
 
-**Data:** 2026-07-21  
-**Status:** aprovado pelo usuário (design)  
+**Data:** 2026-07-21
+**Status:** aprovado pelo usuário (design)
 **Módulo:** Compras — modal Compras + Solicitação de compra + cadastro Omie
 
 ## Problema
@@ -53,13 +53,13 @@ Modal Compras
 
 ### Mantém (Solicitação — foto 2)
 
-- Modelo de compra  
-- Departamento / Categoria  
-- Objetivo da Compra / Observações  
-- Adicionar itens e quantidades  
-- Anexar arquivo / Link  
-- Observação para recebimento  
-- Responsável pela inspeção  
+- Modelo de compra
+- Departamento / Categoria
+- Objetivo da Compra / Observações
+- Adicionar itens e quantidades
+- Anexar arquivo / Link
+- Observação para recebimento
+- Responsável pela inspeção
 - Botão **Realizar solicitação de compra**
 
 ### Inclui (Cadastro Omie — foto 3)
@@ -75,12 +75,12 @@ Modal Compras
 
 ### Não inclui nesta etapa
 
-- Botão **Gerar código** que cria os 5 dígitos / `CODPROV`  
+- Botão **Gerar código** que cria os 5 dígitos / `CODPROV`
 - Toggle **Cadastro em lote** (só produto único nesta entrega)
 
 ### Preview de código
 
-Mostrar apenas o **prefixo** derivado de família + origem (ex.: `01.N.`), com texto:  
+Mostrar apenas o **prefixo** derivado de família + origem (ex.: `01.N.`), com texto:
 *“Código definitivo será gerado na hora da Requisição Omie.”*
 
 ## Dados e backend
@@ -100,24 +100,24 @@ Continuar usando `compras.compras_sem_cadastro` (e histórico associado), com ca
 
 Ajustar `POST /api/compras/sem-cadastro` para:
 
-- Aceitar e gravar os campos de pré-cadastro  
-- **Não** chamar `obterBaseCodprovDisponivel` / não gerar `CODPROV` quando `pre_cadastro_completo = true`  
+- Aceitar e gravar os campos de pré-cadastro
+- **Não** chamar `obterBaseCodprovDisponivel` / não gerar `CODPROV` quando `pre_cadastro_completo = true`
 - Definir status inicial **sem** mandar para `Analise de cadastro` (ex.: Aprovação ou fluxo já usado quando diretor/retorno — mas nunca Análise para itens novos deste fluxo)
 
 ### Status / kanban
 
-- Novos itens com pré-cadastro completo: **não** usam status `analise de cadastro` / `Analise de cadastro`  
-- Coluna Análise de cadastro permanece só para registros antigos  
+- Novos itens com pré-cadastro completo: **não** usam status `analise de cadastro` / `Analise de cadastro`
+- Coluna Análise de cadastro permanece só para registros antigos
 - Nas listagens do kanban, cards sem código definitivo exibem rótulo tipo **Pré-cadastro** + descrição
 
 ### Geração do código definitivo
 
 Ponto único, imediatamente antes de criar requisição/pedido na Omie (mesmo gancho onde hoje se exige produto cadastrado):
 
-1. Validar pré-cadastro completo (família, origem, descrição, unidade, tipo)  
-2. Gerar sequencial de 5 dígitos + montar código definitivo (regra atual de família+origem+sequencial)  
-3. `cadastrarProdutoNaOmie(...)`  
-4. Atualizar `produto_codigo` / vínculo Omie no registro  
+1. Validar pré-cadastro completo (família, origem, descrição, unidade, tipo)
+2. Gerar sequencial de 5 dígitos + montar código definitivo (regra atual de família+origem+sequencial)
+3. `cadastrarProdutoNaOmie(...)`
+4. Atualizar `produto_codigo` / vínculo Omie no registro
 5. Prosseguir criação da requisição/pedido
 
 Se falhar o cadastro Omie: **não** criar a requisição; retornar erro claro para o usuário.
@@ -132,12 +132,12 @@ Se falhar o cadastro Omie: **não** criar a requisição; retornar erro claro pa
 
 ## Critérios de aceite
 
-1. Modal do carrinho exibe título **Compras**.  
-2. Existe botão **Produto sem cadastro** que abre a Solicitação mesclada.  
-3. Usuário consegue enviar solicitação com família, origem, descrição, unidade e tipo (foto opcional).  
-4. Nenhum `CODPROV - #####` é gerado nesse envio.  
-5. Item novo **não** aparece na coluna Análise de cadastro.  
-6. Antes da Requisição Omie, o sistema gera o código definitivo, cadastra na Omie e só então cria a requisição.  
+1. Modal do carrinho exibe título **Compras**.
+2. Existe botão **Produto sem cadastro** que abre a Solicitação mesclada.
+3. Usuário consegue enviar solicitação com família, origem, descrição, unidade e tipo (foto opcional).
+4. Nenhum `CODPROV - #####` é gerado nesse envio.
+5. Item novo **não** aparece na coluna Análise de cadastro.
+6. Antes da Requisição Omie, o sistema gera o código definitivo, cadastra na Omie e só então cria a requisição.
 7. Itens antigos ainda em Análise de cadastro continuam funcionando como hoje.
 
 ## Riscos e mitigação
@@ -151,8 +151,8 @@ Se falhar o cadastro Omie: **não** criar a requisição; retornar erro claro pa
 
 ## Referências de código
 
-- Modal carrinho: `#modalCarrinhoCompras`, `abrirModalCarrinhoCompras`  
-- Solicitação sem cadastro: `POST /api/compras/sem-cadastro`  
-- Código provisório atual: `/api/compras/proximo-codigo-provisorio`, `CODPROV - #####`  
-- Cadastro Omie: `cadastrarProdutoNaOmie`  
+- Modal carrinho: `#modalCarrinhoCompras`, `abrirModalCarrinhoCompras`
+- Solicitação sem cadastro: `POST /api/compras/sem-cadastro`
+- Código provisório atual: `/api/compras/proximo-codigo-provisorio`, `CODPROV - #####`
+- Cadastro Omie: `cadastrarProdutoNaOmie`
 - Kanban Análise: status `analise de cadastro` / modal `abrirModalAnaliseCadastro`

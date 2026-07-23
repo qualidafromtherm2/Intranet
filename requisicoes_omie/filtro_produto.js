@@ -4,8 +4,8 @@ let allItems = [];
 let lastFiltered = [];
 
 // Filtros ativos (aplicados ao clicar em "Aplicar")
-let activeFamilyValue     = '';
-let activeTipoValue       = '';
+let activeFamilyValues    = [];
+let activeTipoValues      = [];
 let activeShowInactive    = false;
 let activeSemEstoqueMin   = false;
 let activeAbaixoEstoqueMin = false;
@@ -15,9 +15,9 @@ let activeProximoEstoqueMinPercent = 10;
 let activeEstoqueNegativo = false;
 let activeHideObsolete    = false;
 let activeHideEngineering = false;
-let activeLocalValue      = '';
-let activeOrigemValue     = '';
-let activeCompraValue     = '';
+let activeLocalValues     = [];
+let activeOrigemValues    = [];
+let activeCompraValues    = [];
 
 // Cache dos locais com saldo positivo: Map<local_codigo, Set<codigo_produto>>
 let _locaisCache = null;
@@ -48,6 +48,18 @@ let codeInput, familySelect, tipoItemSelect, filterBtn, filterOverlay, filterLoc
 let filterShowInactiveCb, filterSemEstoqueMinCb, filterAbaixoEstoqueMinCb, filterAcimaEstoqueMinCb;
 let filterProximoEstoqueMinCb, filterProximoEstoqueMinPercentInput, filterEstoqueNegativoCb, filterHideObsoleteCb, filterHideEngineeringCb;
 let _onFiltered;
+
+function getSelectedValues(select) {
+  return select ? Array.from(select.selectedOptions, option => option.value).filter(Boolean) : [];
+}
+
+function setSelectedValues(select, values) {
+  if (!select) return;
+  const selecionados = new Set(Array.isArray(values) ? values : []);
+  Array.from(select.options).forEach(option => {
+    option.selected = selecionados.has(option.value);
+  });
+}
 
 /**
  * Extrai os 2 caracteres apos o primeiro ponto do codigo do produto.
@@ -144,10 +156,10 @@ export function initFiltros({
   const limparBtn = document.getElementById('filterPanelLimparBtn');
   if (limparBtn) {
     limparBtn.addEventListener('click', () => {
-      if (familySelect)   familySelect.value   = '';
-      if (tipoItemSelect) tipoItemSelect.value = '';
-      activeFamilyValue     = '';
-      activeTipoValue       = '';
+      setSelectedValues(familySelect, []);
+      setSelectedValues(tipoItemSelect, []);
+      activeFamilyValues    = [];
+      activeTipoValues      = [];
       activeShowInactive    = false;
       activeSemEstoqueMin   = false;
       activeAbaixoEstoqueMin = false;
@@ -170,12 +182,12 @@ export function initFiltros({
       if (filterEstoqueNegativoCb) filterEstoqueNegativoCb.checked = false;
       if (filterHideObsoleteCb)    filterHideObsoleteCb.checked    = false;
       if (filterHideEngineeringCb) filterHideEngineeringCb.checked = false;
-      if (filterLocalSel)          filterLocalSel.value            = '';
-      if (filterOrigemSel)         filterOrigemSel.value           = '';
-      if (filterCompraSel)         filterCompraSel.value           = '';
-      activeLocalValue = '';
-      activeOrigemValue = '';
-      activeCompraValue = '';
+      setSelectedValues(filterLocalSel, []);
+      setSelectedValues(filterOrigemSel, []);
+      setSelectedValues(filterCompraSel, []);
+      activeLocalValues = [];
+      activeOrigemValues = [];
+      activeCompraValues = [];
       fecharModalFiltro(true);
     });
   }
@@ -184,8 +196,8 @@ export function initFiltros({
   const aplicarBtn = document.getElementById('filterPanelAplicarBtn');
   if (aplicarBtn) {
     aplicarBtn.addEventListener('click', () => {
-      activeFamilyValue     = familySelect?.value   || '';
-      activeTipoValue       = tipoItemSelect?.value || '';
+      activeFamilyValues    = getSelectedValues(familySelect);
+      activeTipoValues      = getSelectedValues(tipoItemSelect);
       activeShowInactive    = filterShowInactiveCb?.checked    || false;
       activeSemEstoqueMin   = filterSemEstoqueMinCb?.checked   || false;
       activeAbaixoEstoqueMin = filterAbaixoEstoqueMinCb?.checked || false;
@@ -201,9 +213,9 @@ export function initFiltros({
       activeEstoqueNegativo = filterEstoqueNegativoCb?.checked || false;
       activeHideObsolete    = filterHideObsoleteCb?.checked    || false;
       activeHideEngineering = filterHideEngineeringCb?.checked || false;
-      activeLocalValue      = filterLocalSel?.value            || '';
-      activeOrigemValue     = filterOrigemSel?.value           || '';
-      activeCompraValue     = filterCompraSel?.value           || '';
+      activeLocalValues     = getSelectedValues(filterLocalSel);
+      activeOrigemValues    = getSelectedValues(filterOrigemSel);
+      activeCompraValues    = getSelectedValues(filterCompraSel);
       fecharModalFiltro(true);
     });
   }
@@ -212,8 +224,8 @@ export function initFiltros({
 function abrirModalFiltro() {
   if (!filterOverlay) return;
   // Restaura selecoes ativas
-  if (familySelect)   familySelect.value   = activeFamilyValue;
-  if (tipoItemSelect) tipoItemSelect.value = activeTipoValue;
+  setSelectedValues(familySelect, activeFamilyValues);
+  setSelectedValues(tipoItemSelect, activeTipoValues);
   if (filterShowInactiveCb)    filterShowInactiveCb.checked    = activeShowInactive;
   if (filterSemEstoqueMinCb)   filterSemEstoqueMinCb.checked   = activeSemEstoqueMin;
   if (filterAbaixoEstoqueMinCb) filterAbaixoEstoqueMinCb.checked = activeAbaixoEstoqueMin;
@@ -227,9 +239,9 @@ function abrirModalFiltro() {
   if (filterEstoqueNegativoCb) filterEstoqueNegativoCb.checked = activeEstoqueNegativo;
   if (filterHideObsoleteCb)    filterHideObsoleteCb.checked    = activeHideObsolete;
   if (filterHideEngineeringCb) filterHideEngineeringCb.checked = activeHideEngineering;
-  if (filterLocalSel)          filterLocalSel.value            = activeLocalValue;
-  if (filterOrigemSel)         filterOrigemSel.value           = activeOrigemValue;
-  if (filterCompraSel)         filterCompraSel.value           = activeCompraValue;
+  setSelectedValues(filterLocalSel, activeLocalValues);
+  setSelectedValues(filterOrigemSel, activeOrigemValues);
+  setSelectedValues(filterCompraSel, activeCompraValues);
   // Carrega opcoes
   popularFamilias();
   popularTipoItem();
@@ -252,8 +264,8 @@ function fecharModalFiltro(aplicar) {
  */
 function popularFamilias() {
   if (!familySelect) return;
-  const selAtual = familySelect.value;
-  familySelect.innerHTML = '<option value="">-- todas --</option>';
+  const selecoesAtuais = getSelectedValues(familySelect);
+  familySelect.innerHTML = '';
 
   // Coleta familias distintas e conta produtos por familia
   const famMap = new Map();
@@ -272,9 +284,7 @@ function popularFamilias() {
       familySelect.appendChild(o);
     });
 
-  if (familySelect.querySelector('option[value="' + selAtual + '"]')) {
-    familySelect.value = selAtual;
-  }
+  setSelectedValues(familySelect, selecoesAtuais);
 }
 
 /**
@@ -284,8 +294,8 @@ function popularFamilias() {
  */
 function popularTipoItem() {
   if (!tipoItemSelect) return;
-  const selAtual = tipoItemSelect.value;
-  tipoItemSelect.innerHTML = '<option value="">-- todos --</option>';
+  const selecoesAtuais = getSelectedValues(tipoItemSelect);
+  tipoItemSelect.innerHTML = '';
 
   const tiposMap = new Map();
   let outrosCount = 0;
@@ -315,9 +325,7 @@ function popularTipoItem() {
     tipoItemSelect.appendChild(o);
   }
 
-  if (tipoItemSelect.querySelector('option[value="' + selAtual + '"]')) {
-    tipoItemSelect.value = selAtual;
-  }
+  setSelectedValues(tipoItemSelect, selecoesAtuais);
 }
 
 /**
@@ -326,10 +334,10 @@ function popularTipoItem() {
  */
 async function popularLocais() {
   if (!filterLocalSel) return;
-  const selAtual = filterLocalSel.value;
+  const selecoesAtuais = getSelectedValues(filterLocalSel);
 
   const mapa = await getLocaisInventario();
-  filterLocalSel.innerHTML = '<option value="">– todos –</option>';
+  filterLocalSel.innerHTML = '';
 
   Object.entries(mapa)
     .sort(([, a], [, b]) => a.local_nome.localeCompare(b.local_nome))
@@ -340,9 +348,7 @@ async function popularLocais() {
       filterLocalSel.appendChild(o);
     });
 
-  if (filterLocalSel.querySelector('option[value="' + selAtual + '"]')) {
-    filterLocalSel.value = selAtual;
-  }
+  setSelectedValues(filterLocalSel, selecoesAtuais);
 }
 
 /**
@@ -386,31 +392,30 @@ function applyFilters() {
   }
 
   // Filtro de Familia (por descricao_familia)
-  if (activeFamilyValue) {
+  if (activeFamilyValues.length) {
     filtered = filtered.filter(i =>
-      (i.descricao_familia || '').trim() === activeFamilyValue
+      activeFamilyValues.includes((i.descricao_familia || '').trim())
     );
   }
 
   // Filtro de Tipo de Item (extraido do codigo)
-  if (activeTipoValue) {
-    if (activeTipoValue === '__outros__') {
-      filtered = filtered.filter(i => extractTipoFromCodigo(i.codigo) === null);
-    } else {
-      filtered = filtered.filter(i =>
-        extractTipoFromCodigo(i.codigo) === activeTipoValue
-      );
-    }
+  if (activeTipoValues.length) {
+    filtered = filtered.filter(i => {
+      const tipo = extractTipoFromCodigo(i.codigo);
+      return activeTipoValues.includes(tipo || '__outros__');
+    });
   }
 
-  if (activeOrigemValue) {
-    filtered = filtered.filter(i => extractOrigemFromCodigo(i.codigo) === activeOrigemValue);
+  if (activeOrigemValues.length) {
+    filtered = filtered.filter(i => activeOrigemValues.includes(extractOrigemFromCodigo(i.codigo)));
   }
 
   // Filtro por local de estoque (produto deve ter saldo > 0 naquele local)
-  if (activeLocalValue && _locaisCache && _locaisCache[activeLocalValue]) {
-    const codigosNoLocal = _locaisCache[activeLocalValue].codigos;
-    filtered = filtered.filter(i => codigosNoLocal.has(i.codigo));
+  if (activeLocalValues.length && _locaisCache) {
+    const codigosNosLocais = activeLocalValues
+      .map(codigo => _locaisCache[codigo]?.codigos)
+      .filter(Boolean);
+    filtered = filtered.filter(i => codigosNosLocais.some(codigos => codigos.has(i.codigo)));
   }
 
   // Inativos: por padrão oculta produtos com inativo='S'
@@ -444,10 +449,12 @@ function applyFilters() {
     });
   }
 
-  if (activeCompraValue === 'em_compra') {
-    filtered = filtered.filter(i => i.em_compra === true || i.em_compra === 'true');
-  } else if (activeCompraValue === 'sem_compra') {
-    filtered = filtered.filter(i => !(i.em_compra === true || i.em_compra === 'true'));
+  if (activeCompraValues.length === 1) {
+    const somenteEmCompra = activeCompraValues[0] === 'em_compra';
+    filtered = filtered.filter(i => {
+      const emCompra = i.em_compra === true || i.em_compra === 'true';
+      return somenteEmCompra ? emCompra : !emCompra;
+    });
   }
 
   if (activeEstoqueNegativo) {
