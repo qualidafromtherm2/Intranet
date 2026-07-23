@@ -20308,8 +20308,7 @@ async function _salvarAtEditModal() {
     if (emSaved) { emSaved.style.display = 'inline'; }
     if (saveBtn) { saveBtn.disabled = false; saveBtn.innerHTML = '<i class="fa-solid fa-floppy-disk"></i> Salvar'; }
     setTimeout(() => {
-      const modal = document.getElementById('atEditModal');
-      if (modal) modal.style.display = 'none';
+      _fecharAtEditModal();
     }, 1200);
   } catch (err) {
     console.error('[SAC/AT] erro ao salvar modal', err);
@@ -20689,9 +20688,37 @@ function _atAtualizarBuscaSelecionadaNoCache(idStr, rowData) {
   };
 }
 
+function _atEditModalEstaAberto() {
+  const modal = document.getElementById('atEditModal');
+  if (!modal) return false;
+  const display = (modal.style.display || '').trim().toLowerCase();
+  if (display === 'none') return false;
+  if (display === 'flex' || display === 'block') return true;
+  try {
+    return window.getComputedStyle(modal).display !== 'none';
+  } catch (_) {
+    return false;
+  }
+}
+
+function _fecharAtEditModal() {
+  const modal = document.getElementById('atEditModal');
+  if (modal) modal.style.display = 'none';
+  _atEditModalCurrentId = null;
+  if (atSerieSelectionContext?.mode === 'edit') {
+    setAtSerieSelectionContext('create', null);
+  }
+}
+
 async function _atAplicarBuscaSelecionadaNoEditModal(rowData) {
-  const id = _atEditModalCurrentId;
+  // Preferir o id do contexto da busca (evita aplicar na OS errada se o modal mudou).
+  const id = atSerieSelectionContext?.mode === 'edit' && atSerieSelectionContext.idAt
+    ? atSerieSelectionContext.idAt
+    : _atEditModalCurrentId;
   if (!id || !rowData) return;
+  if (String(_atEditModalCurrentId || '') !== String(id)) {
+    throw new Error(`A busca era para a OS #${id}, mas o modal aberto é outro. Feche e tente de novo.`);
+  }
 
   _atEditBuscaSetFeedback('Associando Dados da Busca...', false);
 
@@ -21164,8 +21191,14 @@ if (atSerieModalTbody) {
     const rowData = atSerieRenderedRows[idx];
     if (!rowData) return;
 
-    // Se o modal de edição está aberto, SEMPRE aplica na OS em edição (não abre Nova OS)
-    if (_atEditModalCurrentId) {
+    // Só aplica na OS em edição se a busca foi feita NO modal de edição
+    // e o modal ainda está visível. Antes: bastava _atEditModalCurrentId
+    // residual (ex.: após Salvar o modal some mas o id ficava) e o clique
+    // de uma Nova OS sobrescrevia a OS anterior (caso 7878←7879).
+    const _buscaParaEdit = atSerieSelectionContext?.mode === 'edit'
+      && _atEditModalCurrentId
+      && _atEditModalEstaAberto();
+    if (_buscaParaEdit) {
       // Spinner na linha clicada
       const _origHtml = rowEl.innerHTML;
       rowEl.innerHTML = `<td colspan="7" style="text-align:center;padding:8px;">
@@ -21232,7 +21265,10 @@ _atBindBuscaEditField('atEmOrdemProducao');
 
 if (atNewOsBtn) {
   atNewOsBtn.addEventListener('click', () => {
+    // Evita que seleção de série vá para uma OS editada antes (id residual).
+    _fecharAtEditModal();
     resetAtFormulario();
+    setAtSerieSelectionContext('create', null);
     const modalTitle = document.getElementById('atFormModalTitle');
     if (modalTitle) modalTitle.textContent = 'Nova OS';
     abrirTelaAtFormulario();
@@ -26132,8 +26168,7 @@ if (_atExcluirOsBtn) {
       if (!r.ok) { alert(d.error || 'Erro ao excluir OS.'); return; }
       const rowIdx = _atAllRows.findIndex(x => String(x.id) === String(id));
       if (rowIdx >= 0) _atAllRows[rowIdx].status = d.status;
-      if (_atEditModal) _atEditModal.style.display = 'none';
-      _atEditModalCurrentId = null;
+      _fecharAtEditModal();
       _atRenderCurrent();
     } catch (err) {
       console.error('[AT] erro ao excluir OS', err);
@@ -26143,12 +26178,12 @@ if (_atExcluirOsBtn) {
     }
   });
 }
-if (_atEditModalClose) _atEditModalClose.addEventListener('click', () => { if (_atEditModal) _atEditModal.style.display = 'none'; _atEditModalCurrentId = null; });
-if (_atEmCancelBtn)    _atEmCancelBtn.addEventListener('click',    () => { if (_atEditModal) _atEditModal.style.display = 'none'; _atEditModalCurrentId = null; });
+if (_atEditModalClose) _atEditModalClose.addEventListener('click', () => { _fecharAtEditModal(); });
+if (_atEmCancelBtn)    _atEmCancelBtn.addEventListener('click',    () => { _fecharAtEditModal(); });
 if (_atEmSaveBtn)      _atEmSaveBtn.addEventListener('click',      () => _salvarAtEditModal());
 const _atEmTipoSel = document.getElementById('atEmTipo');
 if (_atEmTipoSel) _atEmTipoSel.addEventListener('change', () => _atEmAplicarVisibilidadeRapido(_atEmTipoSel.value));
-if (_atEditModal)      _atEditModal.addEventListener('click', e => { if (e.target === _atEditModal) { _atEditModal.style.display = 'none'; _atEditModalCurrentId = null; } });
+if (_atEditModal)      _atEditModal.addEventListener('click', e => { if (e.target === _atEditModal) { _fecharAtEditModal(); } });
 
 const _atEmTabsBar = document.getElementById('atEmTabs');
 if (_atEmTabsBar) {
