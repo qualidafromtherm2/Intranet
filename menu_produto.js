@@ -67628,6 +67628,9 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
           const diasAtraso = compraComPrevisaoAtrasada
             ? Math.max(1, Math.floor((hojeInicio.getTime() - new Date(previsaoTs).setHours(0, 0, 0, 0)) / 86400000))
             : 0;
+          const rotuloDataDocumento = ['faturada pelo fornecedor', 'recebido', 'concluido'].includes(statusNormalizado)
+            ? 'Emissão:'
+            : 'Pedido:';
           const htmlCard = `
             <div class="kanban-card${compraComPrevisaoAtrasada ? ' cp-card-overdue' : ''}"
               data-item-id="${primeiroItem.id}"
@@ -67699,7 +67702,7 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
                 <div class="cp-card-dates" style="font-size:11px;color:#6b7280;margin-bottom:8px;padding:4px 8px;background:#fef3c7;border-radius:4px;display:flex;flex-direction:column;gap:4px;">
                   <span style="display:flex;align-items:center;gap:4px;">
                     <i class="fa-solid fa-calendar" style="color:#f59e0b;"></i>
-                    <span><span class="cp-card-date-label">Pedido:</span> ${new Date(primeiroItem.d_inc_data).toLocaleDateString('pt-BR')}</span>
+                    <span><span class="cp-card-date-label">${rotuloDataDocumento}</span> ${new Date(primeiroItem.d_inc_data).toLocaleDateString('pt-BR')}</span>
                   </span>
                   ${primeiroItem.d_dt_previsao ? `
                     <span style="display:flex;align-items:center;gap:4px;color:#059669;">
