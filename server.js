@@ -34683,6 +34683,7 @@ Retorne SOMENTE um array JSON válido (sem texto adicional), ordenado do MAIS ao
  */
 app.get('/api/compras/pedidos-etapa-nf', async (req, res) => {
   try {
+    res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
     console.log('[Compras/PedidosEtapaNF] Listando recebimentos NF-e (Faturada/Recebido/Concluído)...');
     await ensureRecebimentosNfeDadosAdicionaisColumn(pool);
 

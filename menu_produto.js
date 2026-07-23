@@ -67033,14 +67033,16 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
       const s = p.toString();
       return s ? `?${s}` : '';
     })();
-    const _etapaNfParams = _filtroDataParams
-      ? `${_filtroDataParams}&incluirCfops=2`
-      : '?incluirCfops=2';
+    const _etapaNfParams = _filtroDataParams || '';
     // Segunda fase: carrega dados mais pesados de pedidos/compras em paralelo.
     // Nota: 'pedidos-compra' (kanban Pedido de compra) foi removido — agora só compras-realizadas e etapa-nf.
     const [respCompra, respEtapaNf] = await Promise.all([
       fetch(`/api/compras/compras-realizadas${_filtroDataParams}`, { credentials: 'include' }),
-      fetch(`/api/compras/pedidos-etapa-nf${_etapaNfParams}`, { credentials: 'include' })
+      fetch(`/api/compras/pedidos-etapa-nf${_etapaNfParams}`, {
+        credentials: 'include',
+        cache: 'no-store',
+        headers: { 'Cache-Control': 'no-cache' }
+      })
     ]);
 
     // Busca compras realizadas da tabela pedidos_omie (c_etapa = '15' e Etapa_NF vazia)
