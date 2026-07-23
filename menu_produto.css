@@ -18523,19 +18523,46 @@ html.light-mode #minhasComprasWrapper {
   padding: 3px 5px;
 }
 
-#minhasComprasWrapper #comprasOrdenarPrevisaoBtn.is-active {
-  color: #ffffff !important;
-  background: #d97706 !important;
-  border-color: #f59e0b !important;
+#minhasComprasWrapper #kanbanMinhasSolicitacoes .cp-column-tools {
+  min-height: 22px;
+  margin: 0 0 3px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 5px;
 }
 
-#minhasComprasWrapper #comprasOrdenarPrevisaoBtn {
-  display: grid !important;
-  width: 28px !important;
-  height: 28px !important;
-  min-width: 28px !important;
-  padding: 0 !important;
-  place-items: center;
+#minhasComprasWrapper #kanbanMinhasSolicitacoes .cp-column-tools.has-sort {
+  justify-content: space-between;
+}
+
+#minhasComprasWrapper #kanbanMinhasSolicitacoes .cp-column-tools .cp-column-total {
+  min-height: 0 !important;
+  margin: 0 !important;
+}
+
+#minhasComprasWrapper #comprasOrdenarPrevisaoBtn.cp-sort-by-deadline {
+  height: 22px;
+  margin: 0;
+  padding: 0 7px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: #8a4d16;
+  background: #fff7df;
+  border: 1px solid #f4c96b;
+  border-radius: 5px;
+  font-size: 8px;
+  font-weight: 700;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+#minhasComprasWrapper #comprasOrdenarPrevisaoBtn.cp-sort-by-deadline:hover,
+#minhasComprasWrapper #comprasOrdenarPrevisaoBtn.cp-sort-by-deadline.is-active {
+  color: #ffffff;
+  background: #d97706;
+  border-color: #d97706;
 }
 
 #minhasComprasWrapper #kanbanMinhasSolicitacoes .kanban-card.cp-card-overdue,
@@ -18976,6 +19003,9 @@ html.light-mode #minhasComprasWrapper {
 
   .sidebar-content.collapsed::-webkit-scrollbar { display: none; }
   .sidebar-content.collapsed .side-title { display: none; }
+  /* No dock recolhido, a Home é o único atalho persistente. As rotinas
+     continuam disponíveis no painel expandido e nos módulos da página inicial. */
+  .sidebar-content.collapsed > .side-wrapper { display: none !important; }
   .sidebar-content.collapsed .side-wrapper + .side-wrapper { margin-top: 4px; }
   .sidebar-content.collapsed .side-menu { gap: 4px; }
   .sidebar-content.collapsed .side-menu a,

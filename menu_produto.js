@@ -61199,6 +61199,8 @@ function alternarOrdenacaoPrevisaoCompras() {
     botao.title = window.__comprasKanbanOrdenarPrevisao
       ? 'Restaurar ordenação original'
       : 'Ordenar por previsão de entrega';
+    const textoBotao = botao.querySelector('span');
+    if (textoBotao) textoBotao.textContent = window.__comprasKanbanOrdenarPrevisao ? 'Por previsão' : 'Ordenar por previsão';
   }
   Object.keys(window.__comprasKanbanCardsCache || {}).forEach(status => {
     renderizarPaginaColunaCompras(status, window.__comprasKanbanFiltroAtual);
@@ -67978,7 +67980,17 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
             </h3>
             <span class="kanban-count-minhas" style="background:${cor.bgLight};color:${cor.text};padding:4px 10px;border-radius:12px;font-size:12px;font-weight:700;">${itens.length}</span>
           </div>
-          ${badgeSomaTotal ? `<div class="cp-column-total" style="text-align:right;margin-bottom:10px;">${badgeSomaTotal}</div>` : ''}
+          ${(badgeSomaTotal || status === 'compra realizada') ? `
+            <div class="cp-column-tools${status === 'compra realizada' ? ' has-sort' : ''}">
+              ${status === 'compra realizada' ? `
+                <button id="comprasOrdenarPrevisaoBtn" class="cp-sort-by-deadline${window.__comprasKanbanOrdenarPrevisao ? ' is-active' : ''}" type="button" onclick="event.stopPropagation();alternarOrdenacaoPrevisaoCompras()" aria-pressed="${window.__comprasKanbanOrdenarPrevisao ? 'true' : 'false'}" title="Ordenar por previsão de entrega">
+                  <i class="fa-solid fa-arrow-down-wide-short"></i>
+                  <span>${window.__comprasKanbanOrdenarPrevisao ? 'Por previsão' : 'Ordenar por previsão'}</span>
+                </button>
+              ` : ''}
+              ${badgeSomaTotal ? `<div class="cp-column-total">${badgeSomaTotal}</div>` : ''}
+            </div>
+          ` : ''}
           <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;padding-bottom:0px;border-top:3px solid ${cor.bg};padding-top:12px;">
             ${badgeIdentificacao}
             ${botaoAbrirTudo}
@@ -76183,9 +76195,13 @@ window.adicionarNovaLinhaPIR = adicionarNovaLinhaPIR;
       const wrapper = mirror.closest('.side-wrapper');
 
       const syncPermission = () => {
-        const hidden = source.hidden
-          || source.classList.contains('perm-hidden')
-          || source.style.display === 'none';
+        // O link legado de Início fica propositalmente oculto na barra superior;
+        // isso não deve ocultar seu botão persistente no dock lateral.
+        const hidden = source.id === 'menu-inicio'
+          ? false
+          : source.hidden
+            || source.classList.contains('perm-hidden')
+            || source.style.display === 'none';
         mirror.classList.toggle('perm-hidden', hidden);
         mirror.style.display = hidden ? 'none' : '';
         if (wrapper && !hidden && wrapper.classList.contains('perm-hidden')) {
