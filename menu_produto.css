@@ -18274,14 +18274,28 @@ html.light-mode #minhasComprasWrapper {
 }
 
 #minhasComprasWrapper .compras-global-search {
-  width: min(300px, 100%);
+  width: auto !important;
+  max-width: none !important;
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
 #minhasComprasWrapper #kanbanFiltroGlobal {
+  flex: 0 1 320px !important;
+  width: 320px;
+  min-width: 220px;
   height: 32px;
   padding: 0 32px !important;
   font-size: 11px !important;
   border-radius: 6px !important;
+}
+
+@media (max-width: 900px) {
+  #minhasComprasWrapper #kanbanFiltroGlobal {
+    flex-basis: 220px !important;
+    width: 220px;
+    min-width: 160px;
+  }
 }
 
 #minhasComprasWrapper .compras-global-search > i {
