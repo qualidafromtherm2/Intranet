@@ -18549,6 +18549,21 @@ html.light-mode #minhasComprasWrapper {
   background: #ffe4e6 !important;
 }
 
+#minhasComprasWrapper #kanbanMinhasSolicitacoes .cp-card-overdue-days {
+  display: inline-flex !important;
+  width: auto !important;
+  margin-top: 1px;
+  padding: 2px 5px;
+  align-items: center;
+  gap: 4px !important;
+  color: #a52f36 !important;
+  background: #fecdd3;
+  border-radius: 4px;
+  font-size: 8px;
+  font-weight: 700;
+  line-height: 1.1;
+}
+
 #modalDetalhesPedidoCompras.cp-detail-modal {
   left: var(--cp-detail-nav-offset, 0px) !important;
   right: 0 !important;

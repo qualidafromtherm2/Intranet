@@ -67625,6 +67625,9 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
           const compraComPrevisaoAtrasada = statusNormalizado === 'compra realizada'
             && Number.isFinite(previsaoTs)
             && previsaoTs < hojeInicio.getTime();
+          const diasAtraso = compraComPrevisaoAtrasada
+            ? Math.max(1, Math.floor((hojeInicio.getTime() - new Date(previsaoTs).setHours(0, 0, 0, 0)) / 86400000))
+            : 0;
           const htmlCard = `
             <div class="kanban-card${compraComPrevisaoAtrasada ? ' cp-card-overdue' : ''}"
               data-item-id="${primeiroItem.id}"
@@ -67702,6 +67705,12 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
                     <span style="display:flex;align-items:center;gap:4px;color:#059669;">
                       <i class="fa-solid fa-clock" style="color:#059669;"></i>
                       <span><span class="cp-card-date-label">Previsão:</span> ${new Date(primeiroItem.d_dt_previsao).toLocaleDateString('pt-BR')}</span>
+                    </span>
+                  ` : ''}
+                  ${compraComPrevisaoAtrasada ? `
+                    <span class="cp-card-overdue-days">
+                      <i class="fa-solid fa-triangle-exclamation"></i>
+                      ${diasAtraso} ${diasAtraso === 1 ? 'dia atrasado' : 'dias atrasados'}
                     </span>
                   ` : ''}
                 </div>
