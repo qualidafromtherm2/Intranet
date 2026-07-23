@@ -61134,6 +61134,7 @@ const COMPRAS_CARDS_POR_PAGINA = 50;
 window.__comprasKanbanCardsCache = window.__comprasKanbanCardsCache || {};
 window.__comprasKanbanLimites = window.__comprasKanbanLimites || {};
 window.__comprasKanbanFiltroAtual = '';
+window.__comprasKanbanOrdenarPrevisao = false;
 
 function normalizarTextoBuscaCompras(valor) {
   return String(valor || '')
@@ -61152,9 +61153,16 @@ function renderizarPaginaColunaCompras(status, textoFiltro = '') {
   if (!container) return;
 
   const filtro = normalizarTextoBuscaCompras(textoFiltro);
-  const cardsFiltrados = filtro.length >= 3
+  let cardsFiltrados = filtro.length >= 3
     ? cache.filter(card => card.texto.includes(filtro))
     : cache;
+  if (window.__comprasKanbanOrdenarPrevisao) {
+    cardsFiltrados = [...cardsFiltrados].sort((a, b) => {
+      const dataA = Number.isFinite(a.previsaoTs) ? a.previsaoTs : Number.POSITIVE_INFINITY;
+      const dataB = Number.isFinite(b.previsaoTs) ? b.previsaoTs : Number.POSITIVE_INFINITY;
+      return dataA - dataB;
+    });
+  }
   const limite = Math.max(
     COMPRAS_CARDS_POR_PAGINA,
     Number(window.__comprasKanbanLimites?.[status]) || COMPRAS_CARDS_POR_PAGINA
@@ -61181,6 +61189,23 @@ function mostrarMais50CardsCompras(status) {
 }
 
 window.mostrarMais50CardsCompras = mostrarMais50CardsCompras;
+
+function alternarOrdenacaoPrevisaoCompras() {
+  window.__comprasKanbanOrdenarPrevisao = !window.__comprasKanbanOrdenarPrevisao;
+  const botao = document.getElementById('comprasOrdenarPrevisaoBtn');
+  if (botao) {
+    botao.classList.toggle('is-active', window.__comprasKanbanOrdenarPrevisao);
+    botao.setAttribute('aria-pressed', String(window.__comprasKanbanOrdenarPrevisao));
+    botao.title = window.__comprasKanbanOrdenarPrevisao
+      ? 'Restaurar ordenação original'
+      : 'Ordenar por previsão de entrega';
+  }
+  Object.keys(window.__comprasKanbanCardsCache || {}).forEach(status => {
+    renderizarPaginaColunaCompras(status, window.__comprasKanbanFiltroAtual);
+  });
+}
+
+window.alternarOrdenacaoPrevisaoCompras = alternarOrdenacaoPrevisaoCompras;
 
 // Objetivo: Filtrar TODOS os kanbans simultaneamente pela palavra inserida no campo de busca
 function filtrarTodosKanbans(textoFiltro) {
@@ -67594,8 +67619,14 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
                 .filter(i => i.produto_codigo || i.produto_descricao);
 
           const produtosData = encodeURIComponent(JSON.stringify(itensProdutos));
+          const previsaoTs = primeiroItem.d_dt_previsao ? new Date(primeiroItem.d_dt_previsao).getTime() : Number.NaN;
+          const hojeInicio = new Date();
+          hojeInicio.setHours(0, 0, 0, 0);
+          const compraComPrevisaoAtrasada = statusNormalizado === 'compra realizada'
+            && Number.isFinite(previsaoTs)
+            && previsaoTs < hojeInicio.getTime();
           const htmlCard = `
-            <div class="kanban-card"
+            <div class="kanban-card${compraComPrevisaoAtrasada ? ' cp-card-overdue' : ''}"
               data-item-id="${primeiroItem.id}"
               data-n-id-receb="${escapeHtml(String(primeiroItem.n_id_receb || ''))}"
               data-grupo-requisicao="${escapeHtml(grupoRequisicaoCard)}"
@@ -67821,7 +67852,8 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
           `;
           return {
             html: htmlCard,
-            texto: normalizarTextoBuscaCompras(`${chaveGrupo} ${JSON.stringify(itensGrupo)}`)
+            texto: normalizarTextoBuscaCompras(`${chaveGrupo} ${JSON.stringify(itensGrupo)}`),
+            previsaoTs
           };
         });
         window.__comprasKanbanCardsCache[status] = cardsRenderizados;

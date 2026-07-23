@@ -18468,6 +18468,75 @@ html.light-mode #minhasComprasWrapper {
   gap: 2px !important;
 }
 
+#minhasComprasWrapper #comprasListaToolbar.compras-workspace-toolbar {
+  min-height: 38px !important;
+  height: 38px !important;
+  padding: 2px 0 !important;
+}
+
+#minhasComprasWrapper .compras-workspace-title strong {
+  font-size: 15px;
+}
+
+#minhasComprasWrapper .compras-title-icon {
+  width: 22px;
+  height: 22px;
+  font-size: 10px;
+}
+
+#minhasComprasWrapper #kanbanFiltroGlobal {
+  height: 28px;
+}
+
+#minhasComprasWrapper .compras-toolbar-actions > .content-button {
+  width: 28px !important;
+  height: 28px !important;
+  min-width: 28px;
+  border-radius: 6px !important;
+}
+
+#minhasComprasWrapper .compras-toolbar-actions > .content-button i {
+  font-size: 12px !important;
+}
+
+#minhasComprasWrapper #comprasToggleSolicitanteBtn {
+  min-width: 70px;
+  padding: 0 7px !important;
+  font-size: 10px;
+}
+
+#minhasComprasWrapper .compras-board-metrics--toolbar > span,
+:root:not(.light-mode) #minhasComprasWrapper .compras-board-metrics--toolbar > span {
+  min-height: 24px;
+  padding: 3px 5px;
+}
+
+#minhasComprasWrapper #comprasOrdenarPrevisaoBtn.is-active {
+  color: #ffffff !important;
+  background: #d97706 !important;
+  border-color: #f59e0b !important;
+}
+
+#minhasComprasWrapper #comprasOrdenarPrevisaoBtn {
+  display: grid !important;
+  width: 28px !important;
+  height: 28px !important;
+  min-width: 28px !important;
+  padding: 0 !important;
+  place-items: center;
+}
+
+#minhasComprasWrapper #kanbanMinhasSolicitacoes .kanban-card.cp-card-overdue,
+:root:not(.light-mode) #minhasComprasWrapper #kanbanMinhasSolicitacoes .kanban-card.cp-card-overdue {
+  background: #fff1f2 !important;
+  border-color: #f3a6aa !important;
+  box-shadow: inset 3px 0 0 #dc5a61, 0 1px 3px rgba(127, 29, 29, .08) !important;
+}
+
+#minhasComprasWrapper #kanbanMinhasSolicitacoes .kanban-card.cp-card-overdue .cp-card-dates {
+  background: #ffe4e6 !important;
+}
+
 #modalDetalhesPedidoCompras.cp-detail-modal {
   left: var(--cp-detail-nav-offset, 0px) !important;
   right: 0 !important;

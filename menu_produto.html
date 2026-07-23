@@ -19,7 +19,7 @@
   referrerpolicy="no-referrer"
 />
   <!-- Seu CSS principal -->
-  <link rel="stylesheet" href="menu_produto.css?v=20260722-compras-datas-v11"/>
+  <link rel="stylesheet" href="menu_produto.css?v=20260722-compras-previsao-v12"/>
   <!-- Anti-flicker: esconde menus até as permissões serem aplicadas -->
   <style id="boot-anti-flicker">
     /* Enquanto o app não está pronto, esconde elementos sujeitos a permissões */
@@ -986,6 +986,9 @@
                   </button>
                   <button id="comprasAtualizarKanbansBtn" class="content-button" type="button" style="background:linear-gradient(135deg,#3b82f6 0%,#2563eb 100%);color:white;display:flex;align-items:center;justify-content:center;width:44px;height:44px;padding:0;border-radius:50%;" title="Atualizar Kanbans">
                     <i class="fa-solid fa-rotate" style="font-size:20px;"></i>
+                  </button>
+                  <button id="comprasOrdenarPrevisaoBtn" class="content-button" type="button" onclick="alternarOrdenacaoPrevisaoCompras()" aria-pressed="false" title="Ordenar por previsão de entrega">
+                    <i class="fa-solid fa-calendar-days"></i>
                   </button>
                   <button id="comprasAlternarVisualizacaoBtn" class="content-button" type="button" onclick="toggleVisualizacao()" style="background:linear-gradient(135deg,#f59e0b 0%,#d97706 100%);color:white;display:flex;align-items:center;justify-content:center;width:44px;height:44px;padding:0;border-radius:50%;" title="Alternar para Visualização em Lista">
                     <i class="fa-solid fa-columns" style="font-size:20px;"></i>
@@ -12681,7 +12684,7 @@
   <script src="/public/js/at-masp-relatorio.js?v=20260718g" defer></script>
   <script src="/public/js/vendas-relatorio-gerencial.js?v=20260709a" defer></script>
   <script src="/public/js/logistica-relatorio-gerencial.js?v=20260712a" defer></script>
-  <script type="module" src="menu_produto.js?v=20260722-compras-datas-v3"></script>
+  <script type="module" src="menu_produto.js?v=20260722-compras-previsao-v4"></script>
 
   <script type="module" src="./requisicoes_omie/filtro_produto.js?v=20260718-faixa-minimo"></script>
   <script type="module" src="./requisicoes_omie/ListarProdutos.js?v=20260718-faixa-minimo"></script>
