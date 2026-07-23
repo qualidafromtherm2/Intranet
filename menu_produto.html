@@ -19,7 +19,7 @@
   referrerpolicy="no-referrer"
 />
   <!-- Seu CSS principal -->
-  <link rel="stylesheet" href="menu_produto.css?v=20260722-compras-cfop-v16"/>
+  <link rel="stylesheet" href="menu_produto.css?v=20260723-expedicao-saldos-v1"/>
   <!-- Anti-flicker: esconde menus até as permissões serem aplicadas -->
   <style id="boot-anti-flicker">
     /* Enquanto o app não está pronto, esconde elementos sujeitos a permissões */
@@ -1487,9 +1487,15 @@
               <i class="fa-solid fa-arrow-right" aria-hidden="true"></i>
               <div><span>Destino</span><strong>Expedição</strong></div>
             </div>
-            <div class="exp-rapida-saldo">
-              <span>Disponível no Estoque Máquinas</span>
-              <strong id="expRapidaSaldo">Carregando…</strong>
+            <div class="exp-rapida-saldos" aria-label="Saldos da transferência">
+              <div class="exp-rapida-saldo">
+                <span>Estoque Máquinas</span>
+                <strong id="expRapidaSaldo">Carregando…</strong>
+              </div>
+              <div class="exp-rapida-saldo">
+                <span>Estoque Expedição</span>
+                <strong id="expRapidaSaldoDestino">Carregando…</strong>
+              </div>
             </div>
             <label class="exp-rapida-field" for="expRapidaQuantidade">
               <span>Quantidade a enviar</span>
@@ -12681,7 +12687,7 @@
   <script src="/public/js/at-masp-relatorio.js?v=20260718g" defer></script>
   <script src="/public/js/vendas-relatorio-gerencial.js?v=20260709a" defer></script>
   <script src="/public/js/logistica-relatorio-gerencial.js?v=20260712a" defer></script>
-  <script type="module" src="menu_produto.js?v=20260723-compras-cfop-v9"></script>
+  <script type="module" src="menu_produto.js?v=20260723-expedicao-saldos-v1"></script>
 
   <script type="module" src="./requisicoes_omie/filtro_produto.js?v=20260718-faixa-minimo"></script>
   <script type="module" src="./requisicoes_omie/ListarProdutos.js?v=20260718-faixa-minimo"></script>
