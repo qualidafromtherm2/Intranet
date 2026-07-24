@@ -35814,6 +35814,7 @@ window.openRegistros = async function() {
   // ── Estado do modal ────────────────────────────────────────────────────
   let _etqSelecionadas = new Set(); // ids selecionados
   let _etqDebounce = null;
+  let _etqCarregada = false; // preserva lista e miniaturas ao alternar entre etapas
   let _etqViewMode = 'list'; // 'list' | 'grid'
   let _etqMostrarOcultos = false; // quando true, mostra apenas itens ocultos
   let _etqMostrarSemMp = false; // quando true, mostra itens que NÃO são MP (família ou xx.MP....)
@@ -35879,6 +35880,18 @@ window.openRegistros = async function() {
       btn.innerHTML = '<i class="fa-solid fa-print"></i><i class="fa-solid fa-question" style="font-size:.6rem;margin-left:1px;"></i>';
       btn.classList.remove('etq-pref-set');
     }
+  }
+
+  function _etqRotuloImpressora(printer) {
+    if (!printer) return 'nenhuma impressora selecionada';
+    if (printer === '__PDF__') return 'PDF (baixar arquivo)';
+    if (printer === '__BP__') return 'impressora local do agente';
+    return _etqGetDisplayName(printer) || _etqValParaLabel(printer) || printer;
+  }
+
+  function _etqConfirmarImpressao(printer, descricao) {
+    const destino = _etqRotuloImpressora(printer);
+    return window.confirm(`Confirmar impressão de ${descricao} em:\n\n${destino}?`);
   }
 
   const etqModal     = document.getElementById('etiquetasModal');
@@ -36011,6 +36024,9 @@ window.openRegistros = async function() {
     if (!etqBtnSel || !etqSelCount) return;
     const n = _etqSelecionadas.size;
     etqSelCount.textContent = String(n);
+    const label = document.getElementById('etiquetasSelLabel');
+    if (label) label.textContent = n === 1 ? 'etiqueta' : 'etiquetas';
+    etqBtnSel.setAttribute('aria-label', `Imprimir ${n} ${n === 1 ? 'etiqueta selecionada' : 'etiquetas selecionadas'}`);
     etqBtnSel.style.display = n > 0 ? 'flex' : 'none';
   }
 
@@ -36121,7 +36137,7 @@ window.openRegistros = async function() {
       etqStatus.textContent = txt;
     }
 
-    etqGrid.innerHTML = lista.map(e => {
+    const linhasTabela = lista.map(e => {
       const cod     = escapeHtml(String(e.codigo_produto  || '—'));
       const desc    = escapeHtml(String(e.descricao_produto || '—'));
       const lote    = escapeHtml(String(e.lote || '—'));
@@ -36131,6 +36147,15 @@ window.openRegistros = async function() {
       const id      = Number(e.id);
       const qtdRaw  = e.qtd != null ? Number(e.qtd) || 0 : 0;
       const impressa    = !!e.impressa;
+      const documento = e.numero_nfe
+        ? `NF-e Nº ${escapeHtml(String(e.numero_nfe))}`
+        : e.numero_pedido
+          ? `Pedido Nº ${escapeHtml(String(e.numero_pedido))}`
+          : 'Documento não informado';
+      const foto = renderizarMiniaturaProdutoCompra({
+        produto_codigo: e.codigo_produto,
+        produto_descricao: e.descricao_produto,
+      });
 
       const acoes = impressa
         ? `<div class="etq-card-actions">
@@ -36140,11 +36165,8 @@ window.openRegistros = async function() {
           </div>`
         : `<div class="etq-card-actions">
             <input type="checkbox" class="etq-check-sel" data-id="${id}" title="Selecionar">
-            <button class="etq-btn-imprimir-unit" data-id="${id}" title="Imprimir esta etiqueta">
-              <i class="fa-solid fa-print"></i> Imprimir
-            </button>
             <button class="etq-btn-multiplo" data-id="${id}" title="Dividir em múltiplas etiquetas">
-              <i class="fa-solid fa-layer-group"></i> Múltiplo
+              <i class="fa-solid fa-boxes-stacked"></i> Dividir volumes
             </button>
             <button class="etq-btn-ocultar" data-id="${id}" title="${_etqMostrarOcultos ? 'Desocultar esta etiqueta' : 'Ocultar esta etiqueta'}">
               <i class="fa-solid ${_etqMostrarOcultos ? 'fa-eye' : 'fa-eye-slash'}"></i>
@@ -36153,34 +36175,45 @@ window.openRegistros = async function() {
 
       return `
       <div class="etq-card${impressa ? ' etq-card--impressa' : ''}" data-id="${id}" data-qtd="${qtdRaw}" data-cod="${cod}" data-desc="${desc}" data-lote="${lote}" data-unid="${unid}" data-data="${data}" data-impressa="${impressa}">
-        <div class="etq-card-thumbnail">
-          <div class="etq-thumb-row">
-            <div class="etq-thumb-qr"><i class="fa-solid fa-qrcode" style="font-size:18px;color:#888;"></i></div>
-            <div class="etq-thumb-dados">
-              <div class="etq-thumb-line label">Cod. Produto:</div>
-              <div class="etq-thumb-line value">${cod}</div>
-              <div class="etq-thumb-line label">Descricao:</div>
-              <div class="etq-thumb-line value">${desc.length > 22 ? desc.slice(0,22)+'…' : desc}</div>
-              <div class="etq-thumb-line">Qtd: ${qtd} ${unid}</div>
-              <div class="etq-thumb-line">Lote: ${lote.length > 18 ? lote.slice(0,18)+'…' : lote}</div>
-              ${data ? `<div class="etq-thumb-line">Emissao: ${data}</div>` : ''}
-            </div>
-          </div>
+        <div class="etq-table-photo">${foto}</div>
+        <div class="etq-table-product">
+          <strong>${cod}</strong>
+          <span title="${desc}">${desc}</span>
         </div>
-        <div class="etq-card-footer">
-          <div class="etq-card-cod">${cod}</div>
-          <div class="etq-card-desc" title="${desc}">${desc}</div>
-          <div class="etq-card-lote">Lote: ${lote}</div>
-          <div class="etq-card-qty">${qtd}${unid ? ' '+unid : ''}${impressa ? ' <span class="etq-badge-impressa"><i class="fa-solid fa-check"></i> Impresso</span>' : ''}</div>
+        <div class="etq-table-lote">
+          <small>LOTE</small>
+          <strong>${lote}</strong>
         </div>
-        ${acoes}
+        <div class="etq-table-document">
+          <strong>${documento}</strong>
+          ${data ? `<span>Emissão: ${data}</span>` : ''}
+        </div>
+        <div class="etq-table-qty">
+          <strong>${qtd}${unid ? ' '+unid : ''}</strong>
+          ${impressa ? '<span class="etq-badge-impressa"><i class="fa-solid fa-check"></i> Impresso</span>' : ''}
+        </div>
+        <div class="etq-table-actions">
+          ${acoes}
+        </div>
       </div>`;
     }).join('');
+
+    etqGrid.innerHTML = `
+      <div class="etq-table-head" aria-hidden="true">
+        <span>Foto</span>
+        <span>Produto</span>
+        <span>Lote</span>
+        <span>Origem</span>
+        <span>Quantidade</span>
+        <span>Ações</span>
+      </div>
+      ${linhasTabela}`;
+    hidratarMiniaturasProdutosCompra(etqGrid);
 
     // Clique no card seleciona
     etqGrid.querySelectorAll('.etq-card').forEach(card => {
       card.addEventListener('click', e => {
-        if (e.target.matches('.etq-check-sel') || e.target.matches('.etq-btn-imprimir-unit') || e.target.closest('.etq-btn-imprimir-unit') || e.target.matches('.etq-btn-multiplo') || e.target.closest('.etq-btn-multiplo') || e.target.matches('.etq-btn-ocultar') || e.target.closest('.etq-btn-ocultar') || e.target.matches('.etq-btn-reimprimir') || e.target.closest('.etq-btn-reimprimir')) return;
+        if (e.target.closest('.cp-product-thumb') || e.target.matches('.etq-check-sel') || e.target.matches('.etq-btn-multiplo') || e.target.closest('.etq-btn-multiplo') || e.target.matches('.etq-btn-ocultar') || e.target.closest('.etq-btn-ocultar') || e.target.matches('.etq-btn-reimprimir') || e.target.closest('.etq-btn-reimprimir')) return;
         // Não selecionar cards impressos (só têm reimprimir)
         if (card.dataset.impressa === 'true') return;
         const id = Number(card.dataset.id);
@@ -36209,15 +36242,6 @@ window.openRegistros = async function() {
       });
     });
 
-    // Botão imprimir unitário
-    etqGrid.querySelectorAll('.etq-btn-imprimir-unit').forEach(btn => {
-      btn.addEventListener('click', async e => {
-        e.stopPropagation();
-        const id = Number(btn.dataset.id);
-        await _etqImprimirIds([id], btn);
-      });
-    });
-
     // Botão Múltiplo
     etqGrid.querySelectorAll('.etq-btn-multiplo').forEach(btn => {
       btn.addEventListener('click', e => {
@@ -36241,6 +36265,14 @@ window.openRegistros = async function() {
         e.stopPropagation();
         const id = Number(btn.dataset.id);
         const novoOculto = !_etqMostrarOcultos; // ocultar quando em modo normal; desocultar quando em modo ocultos
+        if (novoOculto) {
+          const card = btn.closest('.etq-card');
+          const codigo = String(card?.dataset.cod || 'este item');
+          const confirmou = window.confirm(
+            `Tem certeza que deseja ocultar ${codigo}?\n\nO item deixará de aparecer nesta lista, mas poderá ser recuperado em “Exibir itens ocultos”.`
+          );
+          if (!confirmou) return;
+        }
         btn.disabled = true;
         try {
           const resp = await fetch(`/api/etiquetas/recebimento/${id}/oculto`, {
@@ -36303,7 +36335,9 @@ window.openRegistros = async function() {
       if (!resp.ok) throw new Error(`Erro ${resp.status}`);
       const data = await resp.json();
       _etqRenderCards(data.etiquetas || []);
+      _etqCarregada = true;
     } catch (err) {
+      _etqCarregada = false;
       if (etqGrid) etqGrid.innerHTML = `<div class="etiquetas-loading" style="color:#f87171;">Erro ao carregar: ${escapeHtml(err.message)}</div>`;
     }
   }
@@ -36353,6 +36387,11 @@ window.openRegistros = async function() {
     if (!ids || ids.length === 0) return;
     // Aplicar preferência salva se nenhuma impressora foi explicitamente passada
     if (printer === null || printer === undefined) printer = _etqPrinterPref || null;
+    if (!printer) {
+      _etqMostrarSeletorImpressora('Escolha a impressora antes de continuar.', (p) => _etqImprimirIds(ids, btnRef, p));
+      return;
+    }
+    if (!_etqConfirmarImpressao(printer, `${ids.length} etiqueta(s)`)) return;
     // Impressão via agente: __BP__ genérico ou __AGENT__:pcName:impressora
     const agentDest = _etqParseAgentPref(printer);
     if (printer === '__BP__' || agentDest) {
@@ -36434,10 +36473,16 @@ window.openRegistros = async function() {
   printBtn?.addEventListener('click', async e => {
     e.preventDefault(); e.stopPropagation();
     if (!etqModal) return;
-    etqModal.style.display = 'flex';
-    if (etqBusca) etqBusca.value = '';
+    const mainContainer = document.querySelector('.main-container');
+    if (mainContainer && etqModal.parentElement !== mainContainer) {
+      mainContainer.appendChild(etqModal);
+    }
+    showMainTab('etiquetasModal');
     _etqCarregarPref(); // carrega preferência de impressora do usuário
-    await _etqCarregar();
+    if (!_etqCarregada) {
+      if (etqBusca) etqBusca.value = '';
+      await _etqCarregar();
+    }
   });
 
   // Botão de configuração de impressora padrão
@@ -36533,6 +36578,14 @@ window.openRegistros = async function() {
     }
   }
 
+  function _etqSincronizarListboxMultiplo() {
+    const principal = document.getElementById('etqListboxImpressora');
+    const multiplo = document.getElementById('etqMultiploImpressora');
+    if (!principal || !multiplo) return;
+    multiplo.innerHTML = principal.innerHTML;
+    multiplo.value = principal.value || _etqPrinterPref || '';
+  }
+
   // Atualiza o listbox com as impressoras ativas da config do usuário
   async function _etqAtualizarListbox() {
     const sel = document.getElementById('etqListboxImpressora');
@@ -36584,6 +36637,7 @@ window.openRegistros = async function() {
     // Pré-seleciona a preferência atual
     const pref = _etqPrinterPref || padrao || '';
     if (pref) sel.value = pref;
+    _etqSincronizarListboxMultiplo();
   }
 
   // Reverteu para a impressora padrão da config após cada impressão
@@ -36593,11 +36647,21 @@ window.openRegistros = async function() {
     _etqPrinterPref = padrao;
     const sel = document.getElementById('etqListboxImpressora');
     if (sel) sel.value = padrao || '';
+    _etqSincronizarListboxMultiplo();
+    _etqAtualizarBtnPref();
   }
 
   // Evento: mudar impressora pelo listbox — sobrescrita TEMPORÁRIA (não salva no localStorage)
   document.getElementById('etqListboxImpressora')?.addEventListener('change', function () {
     _etqPrinterPref = this.value || null;  // temp: volta para padrão após impressão
+    const multiplo = document.getElementById('etqMultiploImpressora');
+    if (multiplo) multiplo.value = this.value;
+  });
+
+  document.getElementById('etqMultiploImpressora')?.addEventListener('change', function () {
+    _etqPrinterPref = this.value || null;
+    const principal = document.getElementById('etqListboxImpressora');
+    if (principal) principal.value = this.value;
   });
 
   // Botão refresh do listbox
@@ -36748,7 +36812,9 @@ window.openRegistros = async function() {
 
   // Fechar
   etqFechar?.addEventListener('click', () => { if (etqModal) etqModal.style.display = 'none'; });
-  etqModal?.addEventListener('click', e => { if (e.target === etqModal) etqModal.style.display = 'none'; });
+  etqModal?.addEventListener('click', e => {
+    if (!etqModal.classList.contains('etiquetas-page') && e.target === etqModal) etqModal.style.display = 'none';
+  });
 
   // Busca com debounce
   etqBusca?.addEventListener('input', () => {
@@ -36760,6 +36826,7 @@ window.openRegistros = async function() {
   etqBtnSel?.addEventListener('click', async () => {
     const ids = [..._etqSelecionadas];
     if (ids.length === 0) return;
+    _etqImpressoCarregada = false;
     await _etqImprimirIds(ids, etqBtnSel);
   });
 
@@ -36845,9 +36912,15 @@ window.openRegistros = async function() {
   const etqMplGerar    = document.getElementById('etqMultiploGerar');
   const etqMplQtdTotal = document.getElementById('etqMultiploQtdTotal');
   const etqMplMiniatura= document.getElementById('etqMultiploMiniatura');
+  const etqMplLabel    = document.getElementById('etqMultiploLabel');
+  const etqMplSugestaoLabel = document.getElementById('etqMultiploSugestaoLabel');
+  const etqModoQtdEtiquetas = document.getElementById('etqModoQtdEtiquetas');
+  const etqModoQtdEmbalagem = document.getElementById('etqModoQtdEmbalagem');
 
   let _etqMplIdAtual  = null;
   let _etqMplQtdAtual = 0;
+  let _etqMplModo = 'etiquetas';
+  let _etqMplMultiploEnvio = 0;
 
   function calcularDivisores(qtd) {
     const n = Math.floor(Math.abs(qtd));
@@ -36866,22 +36939,114 @@ window.openRegistros = async function() {
     return arr;
   }
 
+  function _etqMplFormatarQtd(valor) {
+    return Number(valor).toLocaleString('pt-BR', { maximumFractionDigits: 4 });
+  }
+
+  function _etqMplEhUnidadeInteira() {
+    return /^(UN|UND|PC|PCS|PÇ|PÇS|PEÇA|PEÇAS|CT)$/i.test(String(_etqMplUnidAtual || '').trim());
+  }
+
+  function _etqMplRenderizarSugestoes() {
+    if (!etqMplChips) return;
+    const divisores = _etqMplQtdAtual > 0 ? calcularDivisores(_etqMplQtdAtual) : [1];
+    etqMplChips.innerHTML = divisores.map(d =>
+      `<button type="button" class="etq-multiplo-chip" data-val="${d}">${_etqMplFormatarQtd(d)}</button>`
+    ).join('');
+    etqMplChips.querySelectorAll('.etq-multiplo-chip').forEach(c => {
+      c.addEventListener('click', () => {
+        if (etqMplInput) etqMplInput.value = c.dataset.val;
+        _etqMplAtualizarPreview();
+      });
+    });
+  }
+
+  function _etqMplAplicarModo(modo) {
+    _etqMplModo = modo === 'embalagem' ? 'embalagem' : 'etiquetas';
+    const porEtiquetas = _etqMplModo === 'etiquetas';
+    etqModoQtdEtiquetas?.classList.toggle('ativo', porEtiquetas);
+    etqModoQtdEmbalagem?.classList.toggle('ativo', !porEtiquetas);
+    etqModoQtdEtiquetas?.setAttribute('aria-checked', String(porEtiquetas));
+    etqModoQtdEmbalagem?.setAttribute('aria-checked', String(!porEtiquetas));
+    if (etqMplLabel) etqMplLabel.textContent = porEtiquetas
+      ? 'Quantas etiquetas deseja imprimir?'
+      : `Qual quantidade vai em cada embalagem${_etqMplUnidAtual ? ` (${_etqMplUnidAtual})` : ''}?`;
+    if (etqMplSugestaoLabel) etqMplSugestaoLabel.textContent = porEtiquetas
+      ? 'Sugestões de número de etiquetas:'
+      : 'Sugestões de quantidade por embalagem:';
+    if (etqMplInput) {
+      etqMplInput.value = '';
+      etqMplInput.step = porEtiquetas ? '1' : 'any';
+      etqMplInput.placeholder = porEtiquetas ? 'Ex.: 4' : 'Ex.: 200';
+    }
+    _etqMplMultiploEnvio = 0;
+    _etqMplRenderizarSugestoes();
+    if (etqMplPreview) etqMplPreview.textContent = porEtiquetas
+      ? 'Informe quantas etiquetas deseja para visualizar a divisão.'
+      : 'Informe a quantidade de cada caixa ou embalagem para calcular as etiquetas.';
+    if (etqMplGerar) etqMplGerar.disabled = true;
+  }
+
   function _etqMplAtualizarPreview() {
-    const m = Number(etqMplInput?.value);
-    if (!m || m <= 0 || !_etqMplQtdAtual) {
-      if (etqMplPreview) etqMplPreview.textContent = 'Informe um múltiplo válido.';
+    const valorInformado = Number(etqMplInput?.value);
+    _etqMplMultiploEnvio = 0;
+    if (!valorInformado || valorInformado <= 0 || !_etqMplQtdAtual) {
+      if (etqMplPreview) etqMplPreview.textContent = _etqMplModo === 'etiquetas'
+        ? 'Informe um número válido de etiquetas.'
+        : 'Informe uma quantidade válida por embalagem.';
       if (etqMplGerar) etqMplGerar.disabled = true;
       return;
     }
-    const n = Math.max(1, Math.round(_etqMplQtdAtual / m));
+
+    const unidade = escapeHtml(_etqMplUnidAtual || 'unidade(s)');
+    let quantidadeEtiquetas;
+    let quantidadePorEtiqueta;
+    let resto = 0;
+
+    if (_etqMplModo === 'etiquetas') {
+      if (!Number.isInteger(valorInformado)) {
+        if (etqMplPreview) etqMplPreview.innerHTML = '<span class="etq-preview-alerta">O número de etiquetas precisa ser inteiro.</span>';
+        if (etqMplGerar) etqMplGerar.disabled = true;
+        return;
+      }
+      quantidadeEtiquetas = valorInformado;
+      quantidadePorEtiqueta = _etqMplQtdAtual / quantidadeEtiquetas;
+      if (_etqMplEhUnidadeInteira() && !Number.isInteger(quantidadePorEtiqueta)) {
+        if (etqMplPreview) etqMplPreview.innerHTML =
+          `<span class="etq-preview-alerta">${_etqMplFormatarQtd(_etqMplQtdAtual)} ${unidade} não podem ser divididas igualmente em ${quantidadeEtiquetas} etiquetas. Escolha outro número ou use “quantidade por embalagem”.</span>`;
+        if (etqMplGerar) etqMplGerar.disabled = true;
+        return;
+      }
+      _etqMplMultiploEnvio = quantidadePorEtiqueta;
+    } else {
+      quantidadePorEtiqueta = valorInformado;
+      const completas = Math.floor(_etqMplQtdAtual / quantidadePorEtiqueta);
+      resto = Number((_etqMplQtdAtual - (completas * quantidadePorEtiqueta)).toFixed(6));
+      quantidadeEtiquetas = completas + (resto > 0.000001 ? 1 : 0);
+      if (quantidadeEtiquetas < 1) quantidadeEtiquetas = 1;
+      _etqMplMultiploEnvio = quantidadePorEtiqueta;
+    }
+
     if (etqMplPreview) {
-      etqMplPreview.innerHTML =
-        `Serão geradas <strong style="color:#a78bfa">${n}</strong> etiqueta(s),
-         cada uma com quantidade <strong style="color:#a78bfa">${m}</strong> ${escapeHtml(_etqMplUnidAtual || '')}.`;
+      if (_etqMplModo === 'etiquetas') {
+        etqMplPreview.innerHTML =
+          `<strong>Resultado:</strong> serão impressas <b>${quantidadeEtiquetas} etiquetas</b>, ` +
+          `cada uma identificando <b>${_etqMplFormatarQtd(quantidadePorEtiqueta)} ${unidade}</b>.`;
+      } else if (resto > 0.000001) {
+        const completas = quantidadeEtiquetas - 1;
+        etqMplPreview.innerHTML =
+          `<strong>Resultado:</strong> serão impressas <b>${quantidadeEtiquetas} etiquetas</b>: ` +
+          `<b>${completas}</b> com ${_etqMplFormatarQtd(quantidadePorEtiqueta)} ${unidade} e ` +
+          `<b>1</b> com o restante de ${_etqMplFormatarQtd(resto)} ${unidade}.`;
+      } else {
+        etqMplPreview.innerHTML =
+          `<strong>Resultado:</strong> serão impressas <b>${quantidadeEtiquetas} etiquetas</b>, ` +
+          `cada uma identificando <b>${_etqMplFormatarQtd(quantidadePorEtiqueta)} ${unidade}</b>.`;
+      }
     }
     if (etqMplGerar) etqMplGerar.disabled = false;
     etqMplChips?.querySelectorAll('.etq-multiplo-chip').forEach(c => {
-      c.classList.toggle('ativo', Number(c.dataset.val) === m);
+      c.classList.toggle('ativo', Number(c.dataset.val) === valorInformado);
     });
   }
 
@@ -36908,25 +37073,10 @@ window.openRegistros = async function() {
         </div>`;
     }
 
-    if (etqMplQtdTotal) etqMplQtdTotal.textContent = String(qtd || '?');
-
-    if (etqMplChips) {
-      const divisores = qtd > 0 ? calcularDivisores(qtd) : [1];
-      etqMplChips.innerHTML = divisores.map(d =>
-        `<button class="etq-multiplo-chip" data-val="${d}">${d}</button>`
-      ).join('');
-      etqMplChips.querySelectorAll('.etq-multiplo-chip').forEach(c => {
-        c.addEventListener('click', () => {
-          if (etqMplInput) etqMplInput.value = c.dataset.val;
-          _etqMplAtualizarPreview();
-        });
-      });
-    }
-
-    if (etqMplInput)   etqMplInput.value = '';
-    if (etqMplPreview) etqMplPreview.textContent = 'Selecione ou digite um múltiplo para ver a prévia.';
-    if (etqMplGerar)   etqMplGerar.disabled = true;
+    if (etqMplQtdTotal) etqMplQtdTotal.textContent = `${_etqMplFormatarQtd(qtd || 0)} ${unid || ''}`.trim();
+    _etqMplAplicarModo('etiquetas');
     if (etqMplModal)   etqMplModal.style.display = 'flex';
+    _etqSincronizarListboxMultiplo();
     // Verificar versão do agente de forma não-blocante
     _etqVerificarVersaoAgente();
   }
@@ -36940,10 +37090,13 @@ window.openRegistros = async function() {
   etqMplCancel?.addEventListener('click', _etqMplFecharFn);
   etqMplModal?.addEventListener('click', e => { if (e.target === etqMplModal) _etqMplFecharFn(); });
   etqMplInput?.addEventListener('input', _etqMplAtualizarPreview);
+  etqModoQtdEtiquetas?.addEventListener('click', () => _etqMplAplicarModo('etiquetas'));
+  etqModoQtdEmbalagem?.addEventListener('click', () => _etqMplAplicarModo('embalagem'));
 
   etqMplGerar?.addEventListener('click', async () => {
-    const m = Number(etqMplInput?.value);
+    const m = Number(_etqMplMultiploEnvio);
     if (!_etqMplIdAtual || !m || m <= 0) return;
+    _etqImpressoCarregada = false;
     // Usar preferência salva; se não houver, abrir seletor
     if (_etqPrinterPref) {
       await _etqMplImprimirComImpressora(_etqMplIdAtual, m, _etqPrinterPref);
@@ -36958,6 +37111,11 @@ window.openRegistros = async function() {
   // Dispara impressão múltiplo, com retry para impressora alternativa
   async function _etqMplImprimirComImpressora(idEtq, multiplo, printer) {
     if (!etqMplGerar) return;
+    if (!printer) {
+      _etqMostrarSeletorImpressora('Escolha a impressora antes de continuar.', (p) => _etqMplImprimirComImpressora(idEtq, multiplo, p), etqMplPreview);
+      return;
+    }
+    if (!_etqConfirmarImpressao(printer, 'as etiquetas divididas deste produto')) return;
     // Apenas enfileira — o agente faz polling e imprime sozinho
     if (printer === '__BP__' || _etqParseAgentPref(printer)) {
       const origHtml = etqMplGerar.innerHTML;
@@ -37010,7 +37168,7 @@ window.openRegistros = async function() {
         await _etqCarregar(etqBusca?.value || '');
       } catch (err) {
         etqMplGerar.disabled = false;
-        etqMplGerar.innerHTML = '<i class="fa-solid fa-print"></i> Gerar etiquetas';
+        etqMplGerar.innerHTML = '<i class="fa-solid fa-print"></i> Imprimir etiquetas';
         alert('Erro ao gerar PDF: ' + err.message);
       }
       return;
@@ -37075,8 +37233,9 @@ window.openRegistros = async function() {
   const btnGuardarMateriais = document.getElementById('menu-guardar-materiais');
 
   let _etqImpressoDebounce = null;
+  let _etqImpressoCarregada = false; // evita refazer consulta e fotos a cada troca de aba
 
-  function _etqImpressoRenderCards(etiquetas) {
+  function _etqImpressoRenderCardsLegado(etiquetas) {
     if (!etqImpressoGrid) return;
     const lista = (etiquetas || []).filter(e => (Number(e.qtd) || 0) > 0);
     if (!lista.length) {
@@ -37134,6 +37293,62 @@ window.openRegistros = async function() {
     }).join('');
   }
 
+  function _etqImpressoRenderCards(etiquetas) {
+    if (!etqImpressoGrid) return;
+    const lista = (etiquetas || []).filter(e => (Number(e.qtd) || 0) > 0);
+    if (!lista.length) {
+      etqImpressoGrid.innerHTML = '<div class="etiquetas-loading">Nenhum material aguardando armazenamento.</div>';
+      if (etqImpressoStatus) etqImpressoStatus.textContent = '';
+      return;
+    }
+    if (etqImpressoStatus) etqImpressoStatus.textContent = `${lista.length} material(is) aguardando armazenamento`;
+
+    const linhas = lista.map(e => {
+      const cod = escapeHtml(String(e.codigo_produto || '—'));
+      const desc = escapeHtml(String(e.descricao_produto || '—'));
+      const lote = escapeHtml(String(e.lote || '—'));
+      const qtd = escapeHtml(String(e.qtd != null ? e.qtd : ''));
+      const unid = escapeHtml(String(e.unidade || ''));
+      const forn = escapeHtml(String(e.fornecedor || ''));
+      const nfe = escapeHtml(String(e.numero_nfe || ''));
+      const pedido = escapeHtml(String(e.numero_pedido || ''));
+      const dataEmis = escapeHtml(String(e.data_emissao || ''));
+      const idEtq = Number(e.id) || 0;
+      const usuario = escapeHtml(String(e.usuario_criacao || ''));
+      const impresso = e.impresso_em
+        ? new Date(e.impresso_em).toLocaleString('pt-BR', { day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit' })
+        : '';
+      const foto = renderizarMiniaturaProdutoCompra({ produto_codigo: e.codigo_produto, produto_descricao: e.descricao_produto });
+      const documento = nfe ? `NF-e Nº ${nfe}` : (pedido ? `Pedido Nº ${pedido}` : 'Sem documento');
+      const endereco = escapeHtml(String(e.endereco || ''));
+
+      return `
+        <div class="etq-card etq-store-row" data-id="${idEtq}" tabindex="0" role="button" aria-label="Guardar ${cod}">
+          <div class="etq-table-photo">${foto}</div>
+          <div class="etq-table-product"><strong>${cod}</strong><span title="${desc}">${desc}</span></div>
+          <div class="etq-table-lote"><small>LOTE</small><strong>${lote}</strong></div>
+          <div class="etq-table-document">
+            <strong>${documento}</strong>
+            ${forn ? `<span title="${forn}">${forn}</span>` : ''}
+            ${dataEmis ? `<span>Emissão: ${dataEmis}</span>` : ''}
+          </div>
+          <div class="etq-table-qty"><strong>${qtd}${unid ? ' '+unid : ''}</strong></div>
+          <div class="etq-store-meta">
+            <strong class="etq-store-id">ETQ ${idEtq || '—'}</strong>
+            ${impresso ? `<span><i class="fa-solid fa-print"></i> ${impresso}${usuario ? ' · '+usuario : ''}</span>` : ''}
+            ${endereco ? `<span class="is-address"><i class="fa-solid fa-location-dot"></i> ${endereco}</span>` : '<span>Aguardando endereço</span>'}
+          </div>
+          <div class="etq-table-actions"><button type="button" class="etq-btn-guardar" data-id="${idEtq}"><i class="fa-solid fa-dolly"></i> Guardar material</button></div>
+        </div>`;
+    }).join('');
+
+    etqImpressoGrid.innerHTML = `
+      <div class="etq-table-head etq-store-head" aria-hidden="true">
+        <span>Foto</span><span>Produto</span><span>Lote</span><span>Origem</span><span>Quantidade</span><span>Situação</span><span>Ação</span>
+      </div>${linhas}`;
+    hidratarMiniaturasProdutosCompra(etqImpressoGrid);
+  }
+
   async function _etqImpressoCarregar(q = '') {
     if (!etqImpressoGrid) return;
     etqImpressoGrid.innerHTML = '<div class="etiquetas-loading"><i class="fa-solid fa-spinner fa-spin"></i> Carregando...</div>';
@@ -37143,19 +37358,27 @@ window.openRegistros = async function() {
       if (!resp.ok) throw new Error(`Erro ${resp.status}`);
       const data = await resp.json();
       _etqImpressoRenderCards(data.etiquetas || []);
+      _etqImpressoCarregada = true;
     } catch (err) {
+      _etqImpressoCarregada = false;
       if (etqImpressoGrid) etqImpressoGrid.innerHTML = `<div class="etiquetas-loading" style="color:#f87171;">Erro ao carregar: ${escapeHtml(err.message)}</div>`;
     }
   }
 
   function _abrirGuardarMateriais() {
     if (!etqImpressoModal) return;
-    etqImpressoModal.style.display = 'flex';
-    if (etqImpressoBusca) etqImpressoBusca.value = '';
-    _etqImpressoCarregar();
+    const mainContainer = document.querySelector('.main-container');
+    if (mainContainer && etqImpressoModal.parentElement !== mainContainer) mainContainer.appendChild(etqImpressoModal);
+    showMainTab('etqImpressoModal');
+    if (!_etqImpressoCarregada) {
+      if (etqImpressoBusca) etqImpressoBusca.value = '';
+      _etqImpressoCarregar();
+    }
   }
 
   btnGuardarMateriais?.addEventListener('click', (e) => { e.preventDefault(); _abrirGuardarMateriais(); });
+  document.getElementById('etqAtalhoGuardarMateriais')?.addEventListener('click', _abrirGuardarMateriais);
+  document.getElementById('etqAtalhoIdentificacaoProduto')?.addEventListener('click', () => printBtn?.click());
 
   // Expor para atalhos flutuantes
   window.__atalhoAction = window.__atalhoAction || {};
@@ -37180,6 +37403,11 @@ window.openRegistros = async function() {
   const etqArmazenarInput       = document.getElementById('etqArmazenarInput');
   const etqArmazenarComplemento = document.getElementById('etqArmazenarComplemento');
   const etqArmazenarOk          = document.getElementById('etqArmazenarOk');
+  const etqArmazenarConfirmacao = document.getElementById('etqArmazenarConfirmacao');
+  const etqArmazenarConfirmacaoTitulo = document.getElementById('etqArmazenarConfirmacaoTitulo');
+  const etqArmazenarConfirmarEndereco = document.getElementById('etqArmazenarConfirmarEndereco');
+  const etqArmazenarVerLocais = document.getElementById('etqArmazenarVerLocais');
+  const etqArmazenarLocais = document.getElementById('etqArmazenarLocais');
   const etqArmazenarRetornarWrap = document.getElementById('etqArmazenarRetornarWrap');
   const etqBtnRetornarEtiqueta  = document.getElementById('etqBtnRetornarEtiqueta');
   const etqRetornarEscolha      = document.getElementById('etqRetornarEscolha');
@@ -37192,6 +37420,44 @@ window.openRegistros = async function() {
   let _armStream = null;
   let _armScanInterval = null;
   let _armRetornando = false;
+  const _armLocaisCache = new Map();
+
+  function _armResetarLocais() {
+    if (etqArmazenarVerLocais) etqArmazenarVerLocais.style.display = 'none';
+    if (etqArmazenarLocais) { etqArmazenarLocais.style.display = 'none'; etqArmazenarLocais.innerHTML = ''; }
+  }
+
+  async function _armCarregarLocaisProduto(id) {
+    if (!id || !etqArmazenarVerLocais || !etqArmazenarLocais) return;
+    try {
+      const detalheResp = await fetch(`/api/etiquetas/rec-impresso/${id}`, { credentials: 'include' });
+      const detalhe = await detalheResp.json().catch(() => ({}));
+      if (!detalheResp.ok || !detalhe?.ok) return;
+      const codigo = String(detalhe.etiqueta?.codigo || detalhe.etiqueta?.codigo_omie || '').trim();
+      if (!codigo) return;
+
+      let enderecos = _armLocaisCache.get(codigo);
+      if (!enderecos) {
+        const locaisResp = await fetch(`/api/etiquetas/rec-impresso/enderecos-referencia-por-produto?codigo=${encodeURIComponent(codigo)}`, { credentials: 'include' });
+        const locais = await locaisResp.json().catch(() => ({}));
+        if (!locaisResp.ok || !locais?.ok) throw new Error(locais?.error || 'Falha ao consultar endereços.');
+        enderecos = Array.isArray(locais.enderecos) ? locais.enderecos : [];
+        _armLocaisCache.set(codigo, enderecos);
+      }
+
+      etqArmazenarVerLocais.style.display = 'flex';
+      etqArmazenarLocais.innerHTML = enderecos.length
+        ? `<div class="etq-scan-locations-title">Locais com saldo deste produto</div>${enderecos.map(local => `
+            <div class="etq-scan-location-row">
+              <span><i class="fa-solid fa-location-dot"></i><strong>${escapeHtml(String(local.endereco || '—'))}</strong>${local.complemento ? `<small>${escapeHtml(String(local.complemento))}</small>` : ''}</span>
+              <b>${escapeHtml(String(local.qtd ?? 0))} ${escapeHtml(String(local.unidade || 'UN'))}</b>
+            </div>`).join('')}`
+        : '<div class="etq-scan-location-empty"><i class="fa-solid fa-box-open"></i> Este produto ainda não possui saldo endereçado.</div>';
+    } catch (err) {
+      etqArmazenarVerLocais.style.display = 'flex';
+      etqArmazenarLocais.innerHTML = `<div class="etq-scan-location-empty is-error">${escapeHtml(err.message || 'Não foi possível consultar os endereços.')}</div>`;
+    }
+  }
 
   function _armMostrarRetornar(show) {
     if (etqArmazenarRetornarWrap) etqArmazenarRetornarWrap.style.display = show ? 'block' : 'none';
@@ -37304,8 +37570,10 @@ window.openRegistros = async function() {
         etqArmazenarVideo.srcObject = _armStream;
         await etqArmazenarVideo.play().catch(() => {});
       }
+      etqArmazenarModal?.classList.remove('is-camera-unavailable');
       return true;
     } catch (_) {
+      etqArmazenarModal?.classList.add('is-camera-unavailable');
       if (etqArmazenarStatus) {
         etqArmazenarStatus.textContent = 'Câmera não disponível. Use o campo de texto abaixo.';
         etqArmazenarStatus.style.color = '#f59e0b';
@@ -37369,15 +37637,15 @@ window.openRegistros = async function() {
         return;
       }
       _armIdImpresso = id;
-      _armStep = 2;
-      _armAtualizarMira();
-      // Atualiza UI para passo 2
-      if (etqArmazenarTitle)  etqArmazenarTitle.textContent  = 'Leia o código do local';
-      if (etqArmazenarIcone)  { etqArmazenarIcone.className = 'fa-solid fa-barcode'; etqArmazenarIcone.style.color = '#a78bfa'; }
-      if (etqArmazenarStatus) { etqArmazenarStatus.textContent = `Produto ID ${id} lido. Alinhe o código de barras na faixa horizontal.`; etqArmazenarStatus.style.color = '#4ade80'; }
-      if (etqArmazenarInput)  { etqArmazenarInput.placeholder = 'Ou digite o local manualmente...'; etqArmazenarInput.value = ''; etqArmazenarInput.focus(); }
-      _armMostrarRetornar(true);
-      _armIniciarScan(_armProcessarCodigo);
+      _armCarregarLocaisProduto(id);
+      clearInterval(_armScanInterval);
+      _armScanInterval = null;
+      if (etqArmazenarConfirmacaoTitulo) etqArmazenarConfirmacaoTitulo.textContent = `ETQ ${id} identificada`;
+      if (etqArmazenarConfirmacao) etqArmazenarConfirmacao.style.display = 'grid';
+      if (etqArmazenarStatus) {
+        etqArmazenarStatus.textContent = 'Etiqueta lida corretamente. Confirme para seguir para o endereço.';
+        etqArmazenarStatus.style.color = '#4ade80';
+      }
     } else {
       // Passo 2: valor lido é o endereço
       _armRegistrarEndereco(String(valor).trim());
@@ -37418,6 +37686,7 @@ window.openRegistros = async function() {
         etqArmazenarStatus.textContent = msg;
         etqArmazenarStatus.style.color = '#4ade80';
       }
+      _armLocaisCache.clear();
       setTimeout(() => {
         if (etqArmazenarModal) etqArmazenarModal.style.display = 'none';
         _etqImpressoCarregar(etqImpressoBusca?.value || '');
@@ -37438,21 +37707,27 @@ window.openRegistros = async function() {
     _armStep = 1;
     _armIdImpresso = null;
     _armMostrarRetornar(false);
+    _armResetarLocais();
+    if (etqArmazenarConfirmacao) etqArmazenarConfirmacao.style.display = 'none';
     if (etqArmazenarTitle)  etqArmazenarTitle.textContent  = 'Leia o QR Code do produto';
     if (etqArmazenarIcone)  { etqArmazenarIcone.className = 'fa-solid fa-qrcode'; etqArmazenarIcone.style.color = '#34d399'; }
     if (etqArmazenarStatus) { etqArmazenarStatus.textContent = ''; etqArmazenarStatus.style.color = '#94a3b8'; }
-    if (etqArmazenarInput)       { etqArmazenarInput.placeholder = 'Ou digite o código manualmente...'; etqArmazenarInput.value = ''; }
+    if (etqArmazenarInput)       { etqArmazenarInput.placeholder = 'Bipe, leia pela câmera ou digite o ID da ETQ...'; etqArmazenarInput.value = ''; }
     if (etqArmazenarComplemento) etqArmazenarComplemento.value = '';
     if (etqArmazenarMira)        etqArmazenarMira.style.borderColor = 'rgba(52,211,153,.85)';
     _armAtualizarMira();
     if (etqArmazenarModal)       etqArmazenarModal.style.display = 'flex';
     const ok = await _armIniciarCamera();
     if (ok) _armIniciarScan(_armProcessarCodigo);
+    etqArmazenarInput?.focus();
   }
 
   async function _armAbrirComId(id) {
     _armStep = 2;
+    if (etqArmazenarConfirmacao) etqArmazenarConfirmacao.style.display = 'none';
     _armIdImpresso = id;
+    _armResetarLocais();
+    _armCarregarLocaisProduto(id);
     _armAtualizarMira();
     if (etqArmazenarTitle)  etqArmazenarTitle.textContent  = 'Leia o código do local';
     if (etqArmazenarIcone)  { etqArmazenarIcone.className = 'fa-solid fa-barcode'; etqArmazenarIcone.style.color = '#a78bfa'; }
@@ -37469,11 +37744,32 @@ window.openRegistros = async function() {
   function _armFechar() {
     _armPararCamera();
     _armMostrarRetornar(false);
+    if (etqArmazenarConfirmacao) etqArmazenarConfirmacao.style.display = 'none';
+    _armResetarLocais();
     if (etqArmazenarModal) etqArmazenarModal.style.display = 'none';
   }
 
   etqArmazenarFechar?.addEventListener('click', _armFechar);
   etqArmazenarModal?.addEventListener('click', e => { if (e.target === etqArmazenarModal) _armFechar(); });
+  document.getElementById('etqBtnLerEtiqueta')?.addEventListener('click', _armAbrir);
+  etqArmazenarConfirmarEndereco?.addEventListener('click', () => {
+    if (!_armIdImpresso) return;
+    _armStep = 2;
+    if (etqArmazenarConfirmacao) etqArmazenarConfirmacao.style.display = 'none';
+    _armAtualizarMira();
+    if (etqArmazenarTitle) etqArmazenarTitle.textContent = 'Leia o código do endereço';
+    if (etqArmazenarIcone) { etqArmazenarIcone.className = 'fa-solid fa-barcode'; etqArmazenarIcone.style.color = '#a78bfa'; }
+    if (etqArmazenarStatus) { etqArmazenarStatus.textContent = `ETQ ${_armIdImpresso} confirmada. Bipe ou leia o endereço.`; etqArmazenarStatus.style.color = '#4ade80'; }
+    if (etqArmazenarInput) { etqArmazenarInput.placeholder = 'Bipe ou digite o endereço...'; etqArmazenarInput.value = ''; etqArmazenarInput.focus(); }
+    _armMostrarRetornar(true);
+    _armIniciarScan(_armProcessarCodigo);
+  });
+  etqArmazenarVerLocais?.addEventListener('click', () => {
+    if (!etqArmazenarLocais) return;
+    const abrir = etqArmazenarLocais.style.display === 'none';
+    etqArmazenarLocais.style.display = abrir ? 'block' : 'none';
+    etqArmazenarVerLocais.classList.toggle('is-open', abrir);
+  });
 
   etqBtnRetornarEtiqueta?.addEventListener('click', () => {
     _armEscolhaRetornar(true);
@@ -37489,6 +37785,15 @@ window.openRegistros = async function() {
       const id = Number(card.dataset.id);
       if (id) _armAbrirComId(id);
     }
+  });
+
+  etqImpressoGrid?.addEventListener('keydown', e => {
+    if (e.key !== 'Enter' && e.key !== ' ') return;
+    const card = e.target.closest('.etq-card[data-id]');
+    if (!card || e.target.closest('.cp-product-thumb')) return;
+    e.preventDefault();
+    const id = Number(card.dataset.id);
+    if (id) _armAbrirComId(id);
   });
 
   etqArmazenarOk?.addEventListener('click', () => {
