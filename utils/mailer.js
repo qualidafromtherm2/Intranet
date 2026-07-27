@@ -53,6 +53,9 @@ async function enviarEmail({ to, subject, text, html, attachments = [], from: fr
     port,
     secure,
     auth: { user, pass },
+    connectionTimeout: 15000,
+    greetingTimeout: 15000,
+    socketTimeout: 30000,
   });
 
   const destinatarios = Array.isArray(to) ? to : parseListaEmails(to);
@@ -78,7 +81,21 @@ async function enviarEmail({ to, subject, text, html, attachments = [], from: fr
   const reply = String(replyTo || '').trim();
   if (reply) mailOpts.replyTo = reply;
 
-  const info = await transporter.sendMail(mailOpts);
+  let info;
+  try {
+    info = await transporter.sendMail(mailOpts);
+  } catch (e) {
+    const code = String(e?.code || '');
+    const resp = String(e?.response || e?.message || '');
+    if (code === 'EAUTH' || /535|authentication failed/i.test(resp)) {
+      const err = new Error(
+        `Falha na autenticação SMTP (${user}). Confira SMTP_USER e SMTP_PASS no .env (senha do e-mail Hostinger).`
+      );
+      err.code = 'EAUTH';
+      throw err;
+    }
+    throw e;
+  }
 
   return {
     messageId: info.messageId,

@@ -17114,8 +17114,16 @@ function _atOsRenderPecaEnvioHtml(env) {
   // Move o modal para <body> direto, escapando o backdrop-filter do .app
   // que cria stacking context e prende position:fixed dentro dos limites do .app
   document.body.appendChild(modal);
-  if (closeBtn) closeBtn.addEventListener('click', () => { modal.style.display = 'none'; });
-  modal.addEventListener('click', e => { if (e.target === modal) modal.style.display = 'none'; });
+
+  function _fecharAtOsModal() {
+    modal.style.display = 'none';
+    // Limpa id residual — senão "Copiar link do técnico" em Configuração
+    // ainda vincula o técnico à OS fechada (aparece no at-link.html).
+    delete modal.dataset.osId;
+  }
+
+  if (closeBtn) closeBtn.addEventListener('click', _fecharAtOsModal);
+  modal.addEventListener('click', e => { if (e.target === modal) _fecharAtOsModal(); });
   document.addEventListener('keydown', e => {
     if (modal.style.display === 'none') return;
     // Se o lightbox de evidência estiver aberto, Escape fecha só ele
@@ -17124,7 +17132,7 @@ function _atOsRenderPecaEnvioHtml(env) {
       lb.style.display = 'none';
       return;
     }
-    if (e.key === 'Escape') { modal.style.display = 'none'; return; }
+    if (e.key === 'Escape') { _fecharAtOsModal(); return; }
     if (e.key === 'ArrowLeft')  { document.getElementById('atOsNavPrev')?.click(); return; }
     if (e.key === 'ArrowRight') { document.getElementById('atOsNavNext')?.click(); return; }
   });
@@ -17383,10 +17391,17 @@ async function _atAguardarOsCarregada(idAt, timeoutMs = 25000) {
 
 /**
  * Devolução: gera o PDF da OS (igual Salvar PDF) e envia e-mail automático.
+ * @param {number|string} idAt
+ * @param {{ emails?: string[], onProgress?: (fase:'pdf'|'email') => void }} [opts]
  */
-async function _atEnviarDevolucao(idAt) {
+async function _atEnviarDevolucao(idAt, opts) {
   const id = idAt || _atEditModalCurrentId;
   if (!id) throw new Error('Abra uma OS antes de enviar a devolução.');
+
+  const emails = Array.isArray(opts?.emails)
+    ? opts.emails.map((e) => String(e || '').trim()).filter(Boolean)
+    : null;
+  const onProgress = typeof opts?.onProgress === 'function' ? opts.onProgress : null;
 
   const osModal = document.getElementById('atOsModal');
   const editModal = document.getElementById('atEditModal');
@@ -17399,6 +17414,7 @@ async function _atEnviarDevolucao(idAt) {
     if (typeof _abrirAtOsModal !== 'function') {
       throw new Error('Modal Solicitação de AT indisponível.');
     }
+    if (onProgress) onProgress('pdf');
     if (osModal) {
       // Mantém o modal OS "escondido" enquanto gera o PDF (evita atrapalhar o usuário)
       osModal.style.opacity = '0';
@@ -17410,15 +17426,34 @@ async function _atEnviarDevolucao(idAt) {
     const pdfBlob = await _atGerarOsPdfBlob();
     const pdfBase64 = await _atBlobToBase64(pdfBlob);
 
-    const r = await fetch(`/api/sac/at/devolucao/${id}`, {
-      method: 'POST',
-      credentials: 'include',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        pdf_base64: pdfBase64,
-        pdf_filename: `OS_${id}_devolucao.pdf`,
-      }),
-    });
+    const body = {
+      pdf_base64: pdfBase64,
+      pdf_filename: `OS_${id}_devolucao.pdf`,
+    };
+    if (emails && emails.length) body.emails = emails;
+
+    if (onProgress) onProgress('email');
+
+    const ctrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    const timer = ctrl ? setTimeout(() => ctrl.abort(), 90000) : null;
+    let r;
+    try {
+      r = await fetch(`/api/sac/at/devolucao/${id}`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+        signal: ctrl ? ctrl.signal : undefined,
+      });
+    } catch (fetchErr) {
+      if (fetchErr?.name === 'AbortError') {
+        throw new Error('Tempo esgotado ao enviar o e-mail (90s). Verifique o SMTP e tente de novo.');
+      }
+      throw new Error(fetchErr?.message || 'Falha de rede ao enviar devolução.');
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+
     const data = await r.json().catch(() => ({}));
     if (!r.ok || data.ok === false) {
       throw new Error(data.error || `Falha ao enviar devolução (${r.status}).`);
@@ -17428,6 +17463,7 @@ async function _atEnviarDevolucao(idAt) {
     if (osModal) {
       if (abriuOs) {
         osModal.style.display = 'none';
+        delete osModal.dataset.osId;
       } else {
         osModal.style.display = prevOsDisplay || 'flex';
       }
@@ -17773,13 +17809,16 @@ async function _atEnviarDevolucao(idAt) {
   };
 
   // Função global para copiar link da OS — usada nos onclick dos popups Leaflet
+  // e no botão "Copiar link" em Configuração → Atualizar técnico.
   window._atCopiarLinkOs = async function(btn) {
     var tecNome = btn.getAttribute('data-tec') || '';
     if (!tecNome) { alert('Nome do técnico não encontrado.'); return; }
-    var osModal = document.getElementById('atOsModal');
-    var osId    = (osModal && osModal.dataset.osId)
-      || (typeof _atEditModalCurrentId !== 'undefined' && _atEditModalCurrentId)
-      || '';
+    // Só vincula técnico↔OS se um modal de OS estiver REALMENTE aberto.
+    // Antes: usava dataset.osId / _atEditModalCurrentId residuais após fechar,
+    // e a OS antiga aparecia no at-link.html no lugar da correta.
+    var osId = (typeof _atOsIdAtivaParaVinculo === 'function')
+      ? _atOsIdAtivaParaVinculo()
+      : '';
     var orig = btn.innerHTML;
     var iconBtn = btn.classList.contains('at-tec-icon-btn');
     btn.disabled = true;
@@ -18686,6 +18725,379 @@ async function _atEnviarDevolucao(idAt) {
         await loadLista();
       } catch (err) {
         showMsg(err.message || 'Erro', false);
+      }
+    });
+  }
+})();
+
+// ── Modal E-mail de devolução (compose) — botão Devolução no Editar OS ────────
+(function() {
+  const modal = document.getElementById('atDevolucaoEmailModal');
+  if (!modal) return;
+  const closeBtn = document.getElementById('atDevolucaoEmailClose');
+  const cancelBtn = document.getElementById('atDevolucaoEmailCancel');
+  const enviarBtn = document.getElementById('atDevolucaoEmailEnviar');
+  const tituloEl = document.getElementById('atDevolucaoEmailTitulo');
+  const assuntoEl = document.getElementById('atDevolucaoEmailAssunto');
+  const bodyEl = document.getElementById('atDevolucaoEmailBody');
+  const chipsEl = document.getElementById('atDevolucaoEmailChips');
+  const paraBox = document.getElementById('atDevolucaoEmailParaBox');
+  const paraInp = document.getElementById('atDevolucaoEmailParaInp');
+  const sugestoesEl = document.getElementById('atDevolucaoEmailSugestoes');
+  const emptyEl = document.getElementById('atDevolucaoEmailDestEmpty');
+  const msgEl = document.getElementById('atDevolucaoEmailMsg');
+  const anexoTxt = document.getElementById('atDevolucaoEmailAnexoTxt');
+  const btnGerenciar = document.getElementById('atDevolucaoEmailGerenciarBtn');
+
+  let currentOsId = null;
+  let enviando = false;
+  /** @type {{id:number,nome:string,email:string,username:string,ativo:boolean}[]} */
+  let allDests = [];
+  /** @type {{id:number,nome:string,email:string,username:string}[]} */
+  let selectedDests = [];
+
+  function esc(s) {
+    return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+  function gV(id) {
+    const el = document.getElementById(id);
+    return el ? String(el.value || '').trim() : '';
+  }
+  function showMsg(text, ok) {
+    if (!msgEl) return;
+    msgEl.style.display = text ? 'block' : 'none';
+    msgEl.style.color = ok ? '#4ade80' : '#f87171';
+    msgEl.textContent = text || '';
+  }
+  function setEnviarIdle() {
+    if (!enviarBtn) return;
+    enviarBtn.disabled = false;
+    enviarBtn.innerHTML = '<i class="fa-solid fa-paper-plane"></i> <span>Enviar</span>';
+  }
+  function setEnviarBusy(label) {
+    if (!enviarBtn) return;
+    enviarBtn.disabled = true;
+    enviarBtn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> <span>${esc(label || 'Enviando...')}</span>`;
+  }
+  function fechar() {
+    if (enviando) return;
+    modal.style.display = 'none';
+    currentOsId = null;
+    hideSugestoes();
+  }
+  function emailsSelecionados() {
+    return selectedDests.map((d) => d.email).filter(Boolean);
+  }
+  function isSelected(id) {
+    return selectedDests.some((d) => Number(d.id) === Number(id));
+  }
+  function addDest(dest) {
+    const email = String(dest.email || '').trim();
+    if (!email || isSelected(dest.id)) return;
+    selectedDests.push({
+      id: Number(dest.id),
+      nome: dest.nome || dest.username || email,
+      email,
+      username: dest.username || '',
+    });
+    renderChips();
+  }
+  function removeDest(id) {
+    selectedDests = selectedDests.filter((d) => Number(d.id) !== Number(id));
+    renderChips();
+    if (sugestoesEl && sugestoesEl.style.display === 'block') renderSugestoes(paraInp?.value || '');
+  }
+  function renderChips() {
+    if (!chipsEl) return;
+    if (!selectedDests.length) {
+      chipsEl.innerHTML = '';
+    } else {
+      chipsEl.innerHTML = selectedDests.map((d) => `
+        <span class="at-dev-email-chip" title="${esc(d.email)}">
+          <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:180px;">${esc(d.nome || d.email)}</span>
+          <button type="button" class="at-dev-email-chip-x" data-rm-id="${d.id}" title="Remover" aria-label="Remover">
+            <i class="fa-solid fa-xmark"></i>
+          </button>
+        </span>`).join('');
+    }
+    if (emptyEl) {
+      emptyEl.style.display = (!allDests.length && !selectedDests.length) ? 'block' : 'none';
+    }
+  }
+  function hideSugestoes() {
+    if (!sugestoesEl) return;
+    sugestoesEl.style.display = 'none';
+    sugestoesEl.innerHTML = '';
+  }
+  function renderSugestoes(q) {
+    if (!sugestoesEl) return;
+    const query = String(q || '').trim().toLowerCase();
+    const disponiveis = allDests.filter((d) => {
+      if (!d.email || isSelected(d.id)) return false;
+      if (!query) return true;
+      return (
+        String(d.nome || '').toLowerCase().includes(query)
+        || String(d.email || '').toLowerCase().includes(query)
+        || String(d.username || '').toLowerCase().includes(query)
+      );
+    });
+    if (!disponiveis.length) {
+      sugestoesEl.innerHTML = `<div style="padding:10px 12px;font-size:12px;color:#94a3b8;">${
+        allDests.length ? 'Nenhum destinatário restante.' : 'Lista vazia — use Gerenciar.'
+      }</div>`;
+      sugestoesEl.style.display = 'block';
+      return;
+    }
+    sugestoesEl.innerHTML = disponiveis.map((d) => `
+      <button type="button" class="at-dev-email-pick" data-id="${d.id}"
+        style="width:100%;text-align:left;padding:9px 12px;background:transparent;border:none;border-bottom:1px solid rgba(255,255,255,.06);color:#e5e7eb;cursor:pointer;font-size:13px;">
+        <div style="font-weight:600;">${esc(d.nome)}${d.ativo ? ' <span style="color:#4ade80;font-size:10px;">(ativo)</span>' : ''}</div>
+        <div style="font-size:11px;color:#94a3b8;">${esc(d.email)} · @${esc(d.username)}</div>
+      </button>`).join('');
+    sugestoesEl.style.display = 'block';
+  }
+
+  function montarPreview(id) {
+    const row = (typeof _atAllRows !== 'undefined' && Array.isArray(_atAllRows))
+      ? (_atAllRows.find((r) => String(r.id) === String(id)) || {})
+      : {};
+    const cliente = gV('atEmNome') || row.nome_revenda_cliente || '';
+    const modelo = gV('atEmModelo') || row.modelo || '';
+    const tipo = gV('atEmTipo') || row.tipo || '';
+    const status = (document.getElementById('atStatusOsBadge')?.textContent || '').trim() || row.status || '';
+    const telefone = gV('atEmTelefone') || row.telefone || row.numero_telefone || '';
+    const cpf = gV('atEmCpf') || row.cpf_cnpj || '';
+    const cidade = gV('atEmCidade') || row.cidade || '';
+    const estado = gV('atEmEstado') || row.estado || '';
+    const tag = gV('atEmTag') || row.tag_problema || '';
+    const atendimento = gV('atEmAtendimentoInicial') || row.atendimento_inicial || '';
+    const motivo = gV('atEmMotivoSolicitacao') || row.motivo_solicitacao || '';
+    const acao = gV('atEmAcaoTomada') || row.acao_tomada || '';
+    const reclamacao = gV('atEmReclamacao') || row.descreva_reclamacao || '';
+    const pedido = gV('atEmPedido') || row.pedido || '';
+    const op = gV('atEmOrdemProducao') || row.ordem_producao || '';
+    const nf = gV('atEmNotaFiscal') || row.nota_fiscal || '';
+    const dataEntrega = gV('atEmDataEntrega') || row.data_entrega || '';
+    const dataRaw = gV('atEmData') || (row.data ? String(row.data).slice(0, 10) : '');
+    let dataBr = dataRaw;
+    if (/^\d{4}-\d{2}-\d{2}/.test(dataRaw)) {
+      const [y, m, d] = dataRaw.slice(0, 10).split('-');
+      dataBr = `${d}/${m}/${y}`;
+    }
+
+    if (tituloEl) tituloEl.textContent = `Enviar devolução — OS #${id}`;
+    if (assuntoEl) {
+      assuntoEl.value = `Devolução — OS #${id} — ${cliente || modelo || 'Fromtherm'}`;
+    }
+    if (anexoTxt) anexoTxt.textContent = `OS_${id}_devolucao.pdf — PDF da Solicitação de AT será anexado no envio.`;
+
+    const linha = (lbl, val) => {
+      const v = String(val ?? '').trim();
+      if (!v) return '';
+      return `<tr><td style="padding:4px 8px;font-weight:700;color:#334155;white-space:nowrap;">${esc(lbl)}</td><td style="padding:4px 8px;color:#0f172a;">${esc(v)}</td></tr>`;
+    };
+    const cidadeUf = [cidade, estado].filter(Boolean).join(' / ');
+
+    if (bodyEl) {
+      bodyEl.innerHTML = `
+        <h2 style="margin:0 0 8px;color:#0ea5e9;font-size:18px;">Devolução — OS #${esc(String(id))}</h2>
+        <p style="margin:0 0 14px;color:#475569;">Solicitação pela Intranet (modal Editar OS).</p>
+        <table style="border-collapse:collapse;width:100%;border:1px solid #e2e8f0;">
+          ${linha('OS', `#${id}`)}
+          ${linha('Data', dataBr)}
+          ${linha('Tipo', tipo)}
+          ${linha('Status', status)}
+          ${linha('Cliente / Revenda', cliente)}
+          ${linha('Telefone', telefone)}
+          ${linha('CPF/CNPJ', cpf)}
+          ${linha('Modelo', modelo)}
+          ${linha('Cidade/UF', cidadeUf)}
+          ${linha('Pedido', pedido)}
+          ${linha('Ordem de Produção', op)}
+          ${linha('Nota Fiscal', nf)}
+          ${linha('Data Entrega', dataEntrega)}
+          ${linha('Tag', tag)}
+          ${linha('Atendimento inicial', atendimento)}
+          ${linha('Motivo', motivo)}
+          ${linha('Ação tomada', acao)}
+          ${linha('Reclamação', reclamacao)}
+        </table>
+        <p style="margin:14px 0 0;color:#64748b;font-size:12px;">PDF da Solicitação de AT anexado a este e-mail.</p>`;
+    }
+  }
+
+  async function loadDestinatarios() {
+    try {
+      const r = await fetch('/api/sac/at/devolucao-destinatarios', { credentials: 'same-origin' });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok || !d.ok) throw new Error(d.error || 'Falha ao carregar destinatários');
+      allDests = (Array.isArray(d.itens) ? d.itens : [])
+        .map((it) => ({
+          id: Number(it.id),
+          nome: it.nome || it.username || '',
+          email: String(it.email || '').trim(),
+          username: it.username || '',
+          ativo: !!it.ativo,
+        }))
+        .filter((it) => it.id);
+
+      // Mantém seleção atual se ainda existir; senão pré-seleciona ativos com e-mail
+      const prevIds = new Set(selectedDests.map((s) => Number(s.id)));
+      if (prevIds.size) {
+        selectedDests = allDests
+          .filter((d) => prevIds.has(Number(d.id)) && d.email)
+          .map((d) => ({ id: d.id, nome: d.nome, email: d.email, username: d.username }));
+      } else {
+        selectedDests = allDests
+          .filter((d) => d.ativo && d.email)
+          .map((d) => ({ id: d.id, nome: d.nome, email: d.email, username: d.username }));
+      }
+      renderChips();
+    } catch (e) {
+      allDests = [];
+      selectedDests = [];
+      renderChips();
+      showMsg(e.message || 'Erro ao carregar destinatários.', false);
+    }
+  }
+
+  async function abrir(id) {
+    currentOsId = id;
+    enviando = false;
+    showMsg('');
+    setEnviarIdle();
+    selectedDests = [];
+    montarPreview(id);
+    modal.style.display = 'flex';
+    await loadDestinatarios();
+  }
+
+  document.addEventListener('atDevolucaoEmailOpen', (ev) => {
+    const id = ev?.detail?.id || _atEditModalCurrentId;
+    if (!id) {
+      alert('Abra uma OS antes de enviar a devolução.');
+      return;
+    }
+    abrir(id);
+  });
+
+  // Ao fechar o modal de gerenciar destinatários, atualiza chips se o compose estiver aberto
+  const destModal = document.getElementById('atDevolucaoDestModal');
+  if (destModal) {
+    const obs = new MutationObserver(() => {
+      if (modal.style.display === 'flex' && destModal.style.display === 'none') {
+        loadDestinatarios();
+      }
+    });
+    obs.observe(destModal, { attributes: true, attributeFilter: ['style'] });
+  }
+
+  if (closeBtn) closeBtn.addEventListener('click', fechar);
+  if (cancelBtn) cancelBtn.addEventListener('click', fechar);
+  modal.addEventListener('click', (e) => { if (e.target === modal && !enviando) fechar(); });
+
+  if (chipsEl) {
+    chipsEl.addEventListener('click', (e) => {
+      const btn = e.target.closest('[data-rm-id]');
+      if (!btn || enviando) return;
+      e.preventDefault();
+      e.stopPropagation();
+      removeDest(Number(btn.dataset.rmId));
+    });
+  }
+  if (paraBox) {
+    paraBox.addEventListener('click', (e) => {
+      if (enviando) return;
+      if (e.target.closest('#atDevolucaoEmailGerenciarBtn')) return;
+      if (e.target.closest('[data-rm-id]')) return;
+      paraInp?.focus();
+      renderSugestoes(paraInp?.value || '');
+    });
+  }
+  if (paraInp) {
+    paraInp.addEventListener('focus', () => renderSugestoes(paraInp.value || ''));
+    paraInp.addEventListener('input', () => renderSugestoes(paraInp.value || ''));
+    paraInp.addEventListener('keydown', (e) => {
+      if (e.key === 'Backspace' && !paraInp.value && selectedDests.length) {
+        removeDest(selectedDests[selectedDests.length - 1].id);
+      }
+      if (e.key === 'Escape') hideSugestoes();
+    });
+  }
+  if (sugestoesEl) {
+    sugestoesEl.addEventListener('click', (e) => {
+      const btn = e.target.closest('.at-dev-email-pick');
+      if (!btn) return;
+      const dest = allDests.find((d) => Number(d.id) === Number(btn.dataset.id));
+      if (dest) addDest(dest);
+      if (paraInp) paraInp.value = '';
+      renderSugestoes('');
+      paraInp?.focus();
+    });
+  }
+  document.addEventListener('click', (e) => {
+    if (!sugestoesEl || sugestoesEl.style.display !== 'block') return;
+    if (paraBox?.contains(e.target) || sugestoesEl.contains(e.target)) return;
+    hideSugestoes();
+  });
+
+  if (btnGerenciar) {
+    btnGerenciar.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      document.dispatchEvent(new CustomEvent('atDevolucaoDestOpen'));
+    });
+  }
+
+  if (enviarBtn) {
+    enviarBtn.addEventListener('click', async () => {
+      if (enviando) return;
+      const id = currentOsId || _atEditModalCurrentId;
+      if (!id) {
+        showMsg('OS não identificada.', false);
+        return;
+      }
+      const emails = emailsSelecionados();
+      if (!emails.length) {
+        showMsg('Inclua ao menos um destinatário no campo Para.', false);
+        paraInp?.focus();
+        renderSugestoes('');
+        return;
+      }
+      enviando = true;
+      hideSugestoes();
+      setEnviarBusy('Gerando PDF...');
+      showMsg('Gerando PDF da OS...', true);
+      try {
+        const data = await _atEnviarDevolucao(id, {
+          emails,
+          onProgress: (fase) => {
+            if (fase === 'pdf') {
+              setEnviarBusy('Gerando PDF...');
+              showMsg('Gerando PDF da OS...', true);
+            } else if (fase === 'email') {
+              setEnviarBusy('Enviando...');
+              showMsg('Enviando e-mail...', true);
+            }
+          },
+        });
+        const para = Array.isArray(data.enviados) ? data.enviados.join(', ') : emails.join(', ');
+        enviando = false;
+        fechar();
+        alert(`Devolução enviada com sucesso.${para ? `\n\nPara: ${para}` : ''}`);
+        const saved = document.getElementById('atEmSavedMsg');
+        if (saved) {
+          saved.style.display = '';
+          saved.textContent = 'E-mail de devolução enviado.';
+          setTimeout(() => { saved.style.display = 'none'; }, 4000);
+        }
+      } catch (err) {
+        const msg = err?.message || 'Erro ao enviar devolução.';
+        showMsg(msg, false);
+        alert(msg);
+      } finally {
+        enviando = false;
+        setEnviarIdle();
       }
     });
   }
@@ -20699,6 +21111,31 @@ function _atEditModalEstaAberto() {
   } catch (_) {
     return false;
   }
+}
+
+function _atOsModalEstaAberto() {
+  const modal = document.getElementById('atOsModal');
+  if (!modal) return false;
+  const display = (modal.style.display || '').trim().toLowerCase();
+  if (display === 'none') return false;
+  if (display === 'flex' || display === 'block') return !!modal.dataset.osId;
+  try {
+    return window.getComputedStyle(modal).display !== 'none' && !!modal.dataset.osId;
+  } catch (_) {
+    return false;
+  }
+}
+
+/** Id da OS só se Solicitação AT ou Editar OS estiver aberto na tela. */
+function _atOsIdAtivaParaVinculo() {
+  const osModal = document.getElementById('atOsModal');
+  if (_atOsModalEstaAberto() && osModal?.dataset?.osId) {
+    return String(osModal.dataset.osId);
+  }
+  if (_atEditModalEstaAberto() && _atEditModalCurrentId) {
+    return String(_atEditModalCurrentId);
+  }
+  return '';
 }
 
 function _fecharAtEditModal() {
@@ -26216,34 +26653,13 @@ if (_atEmAdicionarTecnicoBtn) {
 
 const _atDevolucaoBtn = document.getElementById('atDevolucaoBtn');
 if (_atDevolucaoBtn) {
-  _atDevolucaoBtn.addEventListener('click', async () => {
+  _atDevolucaoBtn.addEventListener('click', () => {
     const id = _atEditModalCurrentId;
     if (!id) {
       alert('Abra uma OS antes de enviar a devolução.');
       return;
     }
-    if (!confirm(`Enviar e-mail de devolução da OS #${id}?\n\nSerá anexado o PDF da Solicitação de AT e os dados serão enviados aos destinatários configurados.`)) {
-      return;
-    }
-    const orig = _atDevolucaoBtn.innerHTML;
-    _atDevolucaoBtn.disabled = true;
-    _atDevolucaoBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i><span style="font-size:11px;font-weight:600;">Enviando...</span>';
-    try {
-      const data = await _atEnviarDevolucao(id);
-      const para = Array.isArray(data.enviados) ? data.enviados.join(', ') : '';
-      alert(`Devolução enviada com sucesso.${para ? `\n\nPara: ${para}` : ''}`);
-      const saved = document.getElementById('atEmSavedMsg');
-      if (saved) {
-        saved.style.display = '';
-        saved.textContent = 'E-mail de devolução enviado.';
-        setTimeout(() => { saved.style.display = 'none'; }, 4000);
-      }
-    } catch (err) {
-      alert(err.message || 'Erro ao enviar devolução.');
-    } finally {
-      _atDevolucaoBtn.disabled = false;
-      _atDevolucaoBtn.innerHTML = orig;
-    }
+    document.dispatchEvent(new CustomEvent('atDevolucaoEmailOpen', { detail: { id } }));
   });
 }
 
@@ -90524,9 +90940,18 @@ window.initOscilacaoEstoque = (function () {
   }
 
   function _vippOsIdAtual() {
-    if (typeof _atEditModalCurrentId !== 'undefined' && _atEditModalCurrentId) return String(_atEditModalCurrentId);
+    if (typeof _atOsIdAtivaParaVinculo === 'function') {
+      return _atOsIdAtivaParaVinculo() || '';
+    }
+    if (typeof _atEditModalEstaAberto === 'function' && _atEditModalEstaAberto()
+        && typeof _atEditModalCurrentId !== 'undefined' && _atEditModalCurrentId) {
+      return String(_atEditModalCurrentId);
+    }
     var osModal = document.getElementById('atOsModal');
-    return (osModal && osModal.dataset.osId) ? String(osModal.dataset.osId) : '';
+    if (osModal && osModal.style.display !== 'none' && osModal.dataset.osId) {
+      return String(osModal.dataset.osId);
+    }
+    return '';
   }
 
   function _vippCepDoModalOs() {

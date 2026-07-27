@@ -2,13 +2,14 @@
 /* eslint-disable no-console */
 
 // ============================================================================
-// Sincroniza fotos SOMENTE de produtos sem imagem no R2/banco
+// Sincroniza fotos da Omie → Cloudflare R2 → public.produtos_omie_imagens
 // ----------------------------------------------------------------------------
 // Fluxo:
-//   1. Lista codigo_produto sem foto em public.produtos_omie_imagens
-//   2. Varre ListarProdutos (Omie) e, para os faltantes com imagem, faz upload R2
-//   3. Insere em public.produtos_omie_imagens (sem apagar registros existentes)
-//   4. Fase 2: ConsultarProduto nos que ainda faltam (caso a listagem não traga imagem)
+//   1. Carrega posições de foto já gravadas no banco (por codigo_produto)
+//   2. Varre ListarProdutos (Omie) respeitando ≤4 req/s
+//   3. Para cada produto com imagem na Omie, baixa só as posições que faltam
+//   4. Upload no R2 (Fotos_produto/<codigo_produto>/...) e INSERT no banco
+//   5. (opcional) CONSULTAR=1 — ConsultarProduto nos que ainda estão zerados
 //
 // USO:
 //   node scripts/sync_fotos_faltantes_omie.js
@@ -17,7 +18,9 @@
 //   OMIE_APP_KEY, OMIE_APP_SECRET, DATABASE_URL
 //   R2_* (Cloudflare R2 via utils/storage)
 //   DRY_RUN=1          → simula sem gravar
-//   MAX_PRODUTOS=N     → limita quantos faltantes processar (0 = todos)
+//   MAX_PRODUTOS=N     → limita quantos produtos receberão upload (0 = todos)
+//   CONSULTAR=1        → fase extra ConsultarProduto (lenta; raramente necessária)
+//   SOMENTE_SEM_FOTO=1 → ignora produtos que já têm alguma foto (só zerados)
 // ============================================================================
 
 require('dotenv/config');
@@ -35,27 +38,28 @@ const BUCKET = process.env.STORAGE_BUCKET || process.env.R2_DEFAULT_PREFIX || 'p
 const PASTA_BASE = 'Fotos_produto';
 const DRY_RUN = String(process.env.DRY_RUN || '').trim() === '1';
 const MAX_PRODUTOS = Number(process.env.MAX_PRODUTOS || 0);
+const CONSULTAR = String(process.env.CONSULTAR || '').trim() === '1';
+const SOMENTE_SEM_FOTO = String(process.env.SOMENTE_SEM_FOTO || '').trim() === '1';
 const REGISTROS_POR_PAGINA = 100;
-// Omie: máx. 4 req/s → intervalo mínimo 250 ms; usamos 300 ms com margem
-const OMIE_MIN_INTERVAL_MS = 300;
+// Omie: máx. 4 req/s → intervalo mínimo 250 ms; usamos 280 ms com margem
+const OMIE_MIN_INTERVAL_MS = 280;
 const LOCK_FILE = path.join(os.tmpdir(), 'sync_fotos_faltantes_omie.lock');
 const MAX_RETRIES = 5;
 
 const stats = {
-  faltantes_inicio: 0,
-  paginas: 0,
-  omie_com_imagem: 0,
+  produtos_omie_com_imagem: 0,
+  produtos_com_gap: 0,
+  posicoes_faltantes: 0,
   uploads_ok: 0,
   uploads_falha: 0,
   inseridos: 0,
   consultas_ok: 0,
-  ainda_sem_foto: 0,
+  paginas: 0,
   erros: []
 };
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-// Fila global: no máximo 1 chamada Omie a cada 300 ms (≈3,3 req/s)
 let omieQueue = Promise.resolve();
 let lastOmieAt = 0;
 
@@ -94,25 +98,31 @@ function logErro(contexto, codigoProduto, msg) {
   console.error(`   ❌ [${contexto}] codigo_produto=${codigoProduto || '-'} :: ${msg}`);
 }
 
-async function carregarFaltantes() {
-  const { rows } = await dbQuery(`
-    SELECT p.codigo_produto, p.codigo
-    FROM public.produtos_omie p
-    WHERE NOT EXISTS (
-      SELECT 1
-      FROM public.produtos_omie_imagens i
-      WHERE i.codigo_produto = p.codigo_produto
-        AND i.ativo IS DISTINCT FROM false
-        AND i.url_imagem IS NOT NULL
-        AND TRIM(i.url_imagem) <> ''
-    )
-    ORDER BY p.codigo_produto
+/** @returns {Map<string, { codigo: string, posicoes: Set<number> }>} */
+async function carregarEstadoLocal() {
+  const { rows: produtos } = await dbQuery(`
+    SELECT codigo_produto::text AS id, COALESCE(codigo, '') AS codigo
+    FROM public.produtos_omie
   `);
 
   const map = new Map();
-  for (const r of rows) {
-    map.set(Number(r.codigo_produto), String(r.codigo || ''));
+  for (const r of produtos) {
+    map.set(String(r.id), { codigo: String(r.codigo || ''), posicoes: new Set() });
   }
+
+  const { rows: imgs } = await dbQuery(`
+    SELECT codigo_produto::text AS id, pos
+    FROM public.produtos_omie_imagens
+    WHERE ativo IS DISTINCT FROM false
+      AND url_imagem IS NOT NULL
+      AND TRIM(url_imagem) <> ''
+  `);
+
+  for (const r of imgs) {
+    const rec = map.get(String(r.id));
+    if (rec) rec.posicoes.add(Number(r.pos));
+  }
+
   return map;
 }
 
@@ -155,6 +165,7 @@ async function omiePost(call, param, tentativa = 1) {
     }
     return JSON.parse(text);
   } catch (err) {
+    if (err.omieBlockedSec) throw err;
     if (tentativa < MAX_RETRIES && !String(err.message || '').includes('Aguarde')) {
       await sleep(1200 * tentativa);
       return omiePost(call, param, tentativa + 1);
@@ -237,8 +248,8 @@ async function inserirImagem(reg) {
 
   await dbQuery(
     `INSERT INTO public.produtos_omie_imagens
-       (codigo_produto, pos, url_imagem, path_key, ativo)
-     VALUES ($1, $2, $3, $4, true)
+       (codigo_produto, pos, url_imagem, path_key, ativo, visivel_producao, visivel_assistencia_tecnica)
+     VALUES ($1::bigint, $2, $3, $4, true, true, true)
      ON CONFLICT (codigo_produto, pos) WHERE (ativo IS TRUE)
      DO UPDATE SET
        url_imagem = EXCLUDED.url_imagem,
@@ -248,11 +259,26 @@ async function inserirImagem(reg) {
   stats.inseridos++;
 }
 
-async function processarImagensProduto(codigoProduto, imagens) {
-  if (!imagens.length) return false;
+function imagensFaltantes(estadoLocal, codigoProduto, imagensOmie) {
+  const rec = estadoLocal.get(String(codigoProduto));
+  if (!rec) return []; // produto ainda não está em produtos_omie
+  if (SOMENTE_SEM_FOTO && rec.posicoes.size > 0) return [];
+
+  return imagensOmie.filter((img) => !rec.posicoes.has(Number(img.pos)));
+}
+
+async function processarImagensProduto(estadoLocal, codigoProduto, codigo, imagensOmie) {
+  const faltam = imagensFaltantes(estadoLocal, codigoProduto, imagensOmie);
+  if (!faltam.length) return false;
+
+  stats.produtos_com_gap++;
+  stats.posicoes_faltantes += faltam.length;
 
   let okAlguma = false;
-  for (const img of imagens) {
+  const rec = estadoLocal.get(String(codigoProduto));
+
+  for (const img of faltam) {
+    if (MAX_PRODUTOS > 0 && stats.uploads_ok >= MAX_PRODUTOS) break;
     try {
       const { pathKey, publicUrl } = await uploadR2(codigoProduto, img.pos, img.url);
       await inserirImagem({
@@ -261,8 +287,10 @@ async function processarImagensProduto(codigoProduto, imagens) {
         url_imagem: publicUrl,
         path_key: pathKey
       });
+      if (rec) rec.posicoes.add(Number(img.pos));
       stats.uploads_ok++;
       okAlguma = true;
+      console.log(`   ✅ ${codigo || codigoProduto} pos=${img.pos} → R2`);
     } catch (err) {
       stats.uploads_falha++;
       logErro('upload', codigoProduto, err.message);
@@ -271,7 +299,7 @@ async function processarImagensProduto(codigoProduto, imagens) {
   return okAlguma;
 }
 
-async function faseListarProdutos(faltantes) {
+async function faseListarProdutos(estadoLocal) {
   const primeira = await omiePost('ListarProdutos', {
     pagina: 1,
     registros_por_pagina: REGISTROS_POR_PAGINA,
@@ -282,36 +310,37 @@ async function faseListarProdutos(faltantes) {
   const totalPaginas = Number(primeira.total_de_paginas || 1);
   const totalRegistros = Number(primeira.total_de_registros || 0);
   stats.paginas = totalPaginas;
-  console.log(`\n═══ FASE 1/2 — ListarProdutos ═══`);
-  console.log(`Omie: ${totalRegistros} produtos em ${totalPaginas} páginas`);
-  console.log(`Sem foto no banco: ${faltantes.size}\n`);
+  console.log(`\n═══ FASE 1 — ListarProdutos ═══`);
+  console.log(`Omie: ${totalRegistros} produtos em ${totalPaginas} páginas\n`);
 
   const processarLote = async (lista) => {
     for (const produto of lista || []) {
-      const codigoProduto = Number(produto.codigo_produto);
-      if (!codigoProduto || !faltantes.has(codigoProduto)) continue;
       if (MAX_PRODUTOS > 0 && stats.uploads_ok >= MAX_PRODUTOS) return;
+
+      const codigoProduto = String(produto.codigo_produto || '');
+      if (!codigoProduto || !estadoLocal.has(codigoProduto)) continue;
 
       const imagens = extrairImagens(produto);
       if (!imagens.length) continue;
 
-      stats.omie_com_imagem++;
-      const ok = await processarImagensProduto(codigoProduto, imagens);
-      if (ok) {
-        faltantes.delete(codigoProduto);
-        console.log(`   ✅ foto importada: ${produto.codigo || codigoProduto} (total fotos novas: ${stats.uploads_ok})`);
-      }
+      stats.produtos_omie_com_imagem++;
+      await processarImagensProduto(
+        estadoLocal,
+        codigoProduto,
+        produto.codigo,
+        imagens
+      );
     }
   };
 
-  console.log(`   Fase 1 — página 1/${totalPaginas}`);
+  console.log(`   página 1/${totalPaginas}`);
   await processarLote(primeira.produto_servico_cadastro);
 
   for (let p = 2; p <= totalPaginas; p++) {
     if (MAX_PRODUTOS > 0 && stats.uploads_ok >= MAX_PRODUTOS) break;
-    if (!faltantes.size) break;
-
-    console.log(`   Fase 1 — página ${p}/${totalPaginas} | sem foto: ${faltantes.size} | fotos novas: ${stats.uploads_ok}`);
+    console.log(
+      `   página ${p}/${totalPaginas} | gaps: ${stats.produtos_com_gap} | uploads: ${stats.uploads_ok}`
+    );
     const lote = await omiePost('ListarProdutos', {
       pagina: p,
       registros_por_pagina: REGISTROS_POR_PAGINA,
@@ -322,39 +351,31 @@ async function faseListarProdutos(faltantes) {
   }
 }
 
-async function faseConsultarProduto(faltantes) {
-  if (!faltantes.size) return;
-  if (MAX_PRODUTOS > 0 && stats.uploads_ok >= MAX_PRODUTOS) return;
+async function faseConsultarProduto(estadoLocal) {
+  const zerados = [...estadoLocal.entries()]
+    .filter(([, rec]) => rec.posicoes.size === 0)
+    .map(([id, rec]) => [id, rec.codigo]);
 
-  const lista = [...faltantes.entries()];
-  const totalFase2 = lista.length;
-  const LOG_CADA = 50;
+  if (!zerados.length) return;
 
-  console.log(`\n═══ FASE 2/2 — ConsultarProduto ═══`);
-  console.log(`Consultando ${totalFase2} produtos sem foto...\n`);
+  console.log(`\n═══ FASE 2 — ConsultarProduto (${zerados.length} sem foto local) ═══\n`);
 
-  for (let i = 0; i < lista.length; i++) {
+  for (let i = 0; i < zerados.length; i++) {
     if (MAX_PRODUTOS > 0 && stats.uploads_ok >= MAX_PRODUTOS) break;
 
-    const [codigoProduto, codigo] = lista[i];
+    const [codigoProduto, codigo] = zerados[i];
     const atual = i + 1;
-
-    if (atual === 1 || atual % LOG_CADA === 0 || atual === totalFase2) {
-      console.log(`   ${atual}/${totalFase2} | fotos novas: ${stats.uploads_ok} | sem foto: ${faltantes.size}`);
+    if (atual === 1 || atual % 50 === 0 || atual === zerados.length) {
+      console.log(`   ${atual}/${zerados.length} | uploads: ${stats.uploads_ok}`);
     }
 
-    const chave = codigo || String(codigoProduto);
+    const chave = codigo || codigoProduto;
     try {
       const detalhe = await omiePost('ConsultarProduto', { codigo: chave });
       const imagens = extrairImagens(detalhe);
       if (!imagens.length) continue;
-
       stats.consultas_ok++;
-      const ok = await processarImagensProduto(codigoProduto, imagens);
-      if (ok) {
-        faltantes.delete(codigoProduto);
-        console.log(`   ✅ ${atual}/${totalFase2} — foto importada: ${codigo} (total: ${stats.uploads_ok})`);
-      }
+      await processarImagensProduto(estadoLocal, codigoProduto, codigo, imagens);
     } catch (err) {
       if (err.omieBlockedSec) throw err;
       logErro('consultar', codigoProduto, err.message);
@@ -371,35 +392,38 @@ async function main() {
   adquirirLock();
 
   const inicio = Date.now();
-  const faltantes = await carregarFaltantes();
-  stats.faltantes_inicio = faltantes.size;
+  const estadoLocal = await carregarEstadoLocal();
 
-  const estimativaOmieSec = Math.ceil((32 + faltantes.size) * OMIE_MIN_INTERVAL_MS / 1000);
-  console.log(`[sync-fotos-faltantes] bucket=${BUCKET} dry_run=${DRY_RUN}`);
-  console.log(`[sync-fotos-faltantes] Rate Omie: 1 req / ${OMIE_MIN_INTERVAL_MS}ms (máx ~3,3/s)`);
-  console.log(`[sync-fotos-faltantes] Tempo estimado só API Omie: ~${Math.ceil(estimativaOmieSec / 60)} min`);
-  console.log(`[sync-fotos-faltantes] Produtos sem foto: ${faltantes.size}`);
-
-  if (!faltantes.size) {
-    console.log('Nada a fazer.');
-    process.exit(0);
+  let comFoto = 0;
+  let semFoto = 0;
+  for (const rec of estadoLocal.values()) {
+    if (rec.posicoes.size > 0) comFoto++;
+    else semFoto++;
   }
 
-  await faseListarProdutos(faltantes);
-  await faseConsultarProduto(faltantes);
+  console.log(`[sync-fotos-faltantes] bucket=${BUCKET} dry_run=${DRY_RUN}`);
+  console.log(`[sync-fotos-faltantes] Rate Omie: 1 req / ${OMIE_MIN_INTERVAL_MS}ms (máx ~${(1000 / OMIE_MIN_INTERVAL_MS).toFixed(1)}/s)`);
+  console.log(`[sync-fotos-faltantes] Produtos locais: ${estadoLocal.size} (com foto: ${comFoto}, sem foto: ${semFoto})`);
+  console.log(`[sync-fotos-faltantes] Modo: ${SOMENTE_SEM_FOTO ? 'só zerados' : 'gaps de posição + zerados'} | CONSULTAR=${CONSULTAR}`);
 
-  stats.ainda_sem_foto = faltantes.size;
+  await faseListarProdutos(estadoLocal);
+
+  if (CONSULTAR) {
+    await faseConsultarProduto(estadoLocal);
+  } else {
+    console.log('\n(Fase ConsultarProduto pulada — use CONSULTAR=1 se precisar.)');
+  }
 
   const dur = ((Date.now() - inicio) / 1000).toFixed(1);
   console.log('\n=========================================');
-  console.log(`Duração:              ${dur}s`);
-  console.log(`Sem foto (início):    ${stats.faltantes_inicio}`);
-  console.log(`Omie c/ imagem:       ${stats.omie_com_imagem}`);
-  console.log(`Consultas c/ imagem:  ${stats.consultas_ok}`);
-  console.log(`Uploads OK:           ${stats.uploads_ok}`);
-  console.log(`Uploads falha:        ${stats.uploads_falha}`);
-  console.log(`Registros gravados:   ${stats.inseridos}`);
-  console.log(`Ainda sem foto:       ${stats.ainda_sem_foto}`);
+  console.log(`Duração:                 ${dur}s`);
+  console.log(`Omie c/ imagem (vistos):  ${stats.produtos_omie_com_imagem}`);
+  console.log(`Produtos com gap:         ${stats.produtos_com_gap}`);
+  console.log(`Posições faltantes:       ${stats.posicoes_faltantes}`);
+  console.log(`Uploads OK:               ${stats.uploads_ok}`);
+  console.log(`Uploads falha:            ${stats.uploads_falha}`);
+  console.log(`Registros gravados:       ${stats.inseridos}`);
+  console.log(`Consultas c/ imagem:      ${stats.consultas_ok}`);
   console.log('=========================================');
 
   if (stats.erros.length) {

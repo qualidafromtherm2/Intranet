@@ -10637,8 +10637,9 @@ router.delete('/at/devolucao-destinatarios/:id', async (req, res) => {
 /**
  * POST /at/devolucao/:id
  * Envia e-mail de devolução com dados da OS + PDF anexado (base64).
- * Body: { pdf_base64: string, pdf_filename?: string }
- * Destinatários: auth_user com email_devolucao = true (+ fallback AT_DEVOLUCAO_EMAILS)
+ * Body: { pdf_base64: string, pdf_filename?: string, emails?: string[] }
+ * Destinatários: emails do body (selecionados no modal) OU auth_user com email_devolucao = true
+ *   (+ fallback AT_DEVOLUCAO_EMAILS)
  * Remetente: SMTP_FROM (Hostinger / leandro.santos) — mesmo processo das reservas
  * Reply-To: e-mail do usuário logado (quando cadastrado)
  */
@@ -10670,26 +10671,47 @@ router.post('/at/devolucao/:id', async (req, res) => {
   try {
     await ensureSchema();
 
-    const { rows: destRows } = await pool.query(
-      `SELECT email
-         FROM public.auth_user
-        WHERE email_devolucao = true
-          AND COALESCE(is_active, true) = true
-          AND email IS NOT NULL
-          AND TRIM(email) <> ''`
-    );
-    let destinatarios = destRows
-      .map((r) => _emailValidoDevolucao(r.email))
-      .filter(Boolean);
-    // Fallback opcional do .env enquanto a lista ainda não foi configurada na tela
-    if (!destinatarios.length) {
-      destinatarios = parseListaEmails(process.env.AT_DEVOLUCAO_EMAILS || '');
-    }
-    if (!destinatarios.length) {
-      return res.status(400).json({
-        ok: false,
-        error: 'Nenhum destinatário ativo. Em AT → Configuração → Destinatários de devolução, marque quem deve receber.',
-      });
+    // Preferência: e-mails marcados no modal de compose
+    const emailsBody = Array.isArray(req.body?.emails) ? req.body.emails : null;
+    let destinatarios = [];
+    if (emailsBody && emailsBody.length) {
+      const vistos = new Set();
+      for (const raw of emailsBody) {
+        const em = _emailValidoDevolucao(raw);
+        if (!em) continue;
+        const key = em.toLowerCase();
+        if (vistos.has(key)) continue;
+        vistos.add(key);
+        destinatarios.push(em);
+      }
+      if (!destinatarios.length) {
+        return res.status(400).json({
+          ok: false,
+          error: 'Nenhum e-mail válido selecionado. Marque ao menos um destinatário.',
+        });
+      }
+    } else {
+      const { rows: destRows } = await pool.query(
+        `SELECT email
+           FROM public.auth_user
+          WHERE email_devolucao = true
+            AND COALESCE(is_active, true) = true
+            AND email IS NOT NULL
+            AND TRIM(email) <> ''`
+      );
+      destinatarios = destRows
+        .map((r) => _emailValidoDevolucao(r.email))
+        .filter(Boolean);
+      // Fallback opcional do .env enquanto a lista ainda não foi configurada na tela
+      if (!destinatarios.length) {
+        destinatarios = parseListaEmails(process.env.AT_DEVOLUCAO_EMAILS || '');
+      }
+      if (!destinatarios.length) {
+        return res.status(400).json({
+          ok: false,
+          error: 'Nenhum destinatário ativo. Em AT → Configuração → Destinatários de devolução, marque quem deve receber.',
+        });
+      }
     }
 
     const smtpFrom = String(process.env.SMTP_FROM || process.env.SMTP_USER || '').trim();
