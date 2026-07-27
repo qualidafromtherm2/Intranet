@@ -81262,14 +81262,14 @@ document.addEventListener('DOMContentLoaded', () => {
   ov.style.cssText = 'display:none;position:fixed;inset:0;background:rgba(2,6,23,.58);backdrop-filter:blur(6px);z-index:10300;align-items:center;justify-content:center;padding:24px;';
 
   ov.innerHTML = `
-    <div id="modalCarrinhoSepPanel" style="width:min(840px,86vw);background:linear-gradient(180deg,rgba(15,23,42,.98) 0%,rgba(15,23,42,.94) 100%);border:1px solid rgba(148,163,184,.22);border-radius:22px;padding:0;max-height:82vh;display:flex;flex-direction:column;transform:translateY(16px) scale(.985);opacity:0;transition:transform .22s ease,opacity .22s ease;overflow:hidden;box-shadow:0 26px 80px rgba(2,6,23,.42);">
+    <div id="modalCarrinhoSepPanel" role="dialog" aria-modal="true" aria-label="Solicitação de separação">
       <!-- Header -->
       <div style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid rgba(148,163,184,.16);flex-shrink:0;background:rgba(15,23,42,.72);">
         <div style="display:flex;align-items:center;gap:10px;min-width:0;">
           <h2 style="margin:0;font-size:1.05rem;color:#f0f0f0;font-weight:700;white-space:nowrap;">Sol. de separação</h2>
           <span id="modalCarrinhoSepCount" style="background:rgba(30,41,59,.92);color:#cbd5e1;border:1px solid rgba(71,85,105,.85);border-radius:999px;padding:4px 10px;font-size:.74rem;font-weight:800;white-space:nowrap;">0 itens</span>
         </div>
-        <button id="modalCarrinhoSepClose" style="background:transparent;border:none;cursor:pointer;color:#94a3b8;font-size:22px;line-height:1;padding:6px 8px;border-radius:10px;">&#x2715;</button>
+        <button id="modalCarrinhoSepClose" type="button" aria-label="Fechar solicitação">&#x2715;</button>
       </div>
       <!-- Itens do carrinho -->
       <div id="modalCarrinhoSepItems" style="flex:1;min-height:150px;overflow-y:auto;padding:14px 18px 10px;display:flex;flex-direction:column;gap:10px;background:rgba(15,23,42,.28);"></div>
@@ -81278,14 +81278,15 @@ document.addEventListener('DOMContentLoaded', () => {
       <div id="modalCarrinhoSepForm" style="border-top:1px solid #2a2a2a;padding:10px 18px 12px;display:flex;flex-direction:column;gap:9px;flex-shrink:0;">
         <div id="modalCarrinhoSepFields" style="display:grid;grid-template-columns:1.1fr 1fr 1.1fr;gap:9px;align-items:end;">
         <div style="display:flex;flex-direction:column;gap:5px;min-width:0;">
-          <label style="color:#d1d5db;font-size:.85rem;font-weight:600;">Resp. retirada</label>
+          <label>Responsável pela retirada</label>
           <select id="modalCarrinhoSepRequester" style="background:#2a2a2a;color:#f0f0f0;border:1px solid #3a3a3a;border-radius:10px;padding:8px 12px;font-size:.9rem;width:100%;"></select>
         </div>
         <div style="display:flex;flex-direction:column;gap:5px;min-width:0;">
-          <label style="color:#d1d5db;font-size:.85rem;font-weight:600;">Local de estoque</label>
+          <label>Destino do material</label>
           <select id="modalCarrinhoSepMotivo" style="background:#2a2a2a;color:#f0f0f0;border:1px solid #3a3a3a;border-radius:10px;padding:8px 12px;font-size:.9rem;width:100%;">
             <option value="">— carregando... —</option>
           </select>
+          <small class="sep-request-helper">Local para onde o material será enviado.</small>
         </div>
         <div style="display:flex;flex-direction:column;gap:6px;">
           <label style="color:#d1d5db;font-size:.85rem;font-weight:600;">Data prevista</label>
@@ -81312,6 +81313,12 @@ document.addEventListener('DOMContentLoaded', () => {
     </div>
   `;
   document.body.appendChild(ov);
+
+  const headingSep = ov.querySelector('h2');
+  if (headingSep) {
+    headingSep.textContent = 'Solicitação de separação';
+    headingSep.parentElement?.classList.add('sep-request-heading');
+  }
 
   const panel = document.getElementById('modalCarrinhoSepPanel');
   const responsiveStyle = document.createElement('style');
@@ -81430,13 +81437,154 @@ document.addEventListener('DOMContentLoaded', () => {
     .sep-cart-comment-status {
       color: #94a3b8 !important;
     }
+    #modalCarrinhoSepOverlay {
+      padding: 20px !important;
+      background: rgba(15, 23, 42, .56) !important;
+    }
+    #modalCarrinhoSepPanel {
+      display: flex;
+      flex-direction: column;
+      width: min(820px, calc(100vw - 40px)) !important;
+      max-height: min(88dvh, 820px) !important;
+      overflow: hidden;
+      border: 1px solid #cbd5e1;
+      border-radius: 8px;
+      background: #f8fafc;
+      box-shadow: 0 24px 64px rgba(15, 23, 42, .3);
+      transform: translateY(16px) scale(.985);
+      opacity: 0;
+      transition: transform .22s ease, opacity .22s ease;
+    }
+    #modalCarrinhoSepPanel > div:first-child {
+      padding: 14px 18px !important;
+      background: #0f2747 !important;
+      border-bottom: 3px solid #f5a800 !important;
+    }
+    #modalCarrinhoSepPanel > div:first-child h2 {
+      color: #fff !important;
+      font-size: 1.05rem !important;
+      letter-spacing: 0 !important;
+    }
+    .sep-request-heading::after {
+      content: 'Revise os itens e defina o destino da retirada.';
+      display: block;
+      margin-top: 2px;
+      color: #cbd5e1;
+      font-size: .76rem;
+      font-weight: 500;
+    }
+    #modalCarrinhoSepCount {
+      background: #fff7d6 !important;
+      color: #854d0e !important;
+      border: 1px solid #f5c451 !important;
+      border-radius: 6px !important;
+    }
+    #modalCarrinhoSepClose {
+      display: grid;
+      place-items: center;
+      width: 44px;
+      height: 44px;
+      padding: 0 !important;
+      border: 1px solid rgba(255,255,255,.28) !important;
+      border-radius: 6px !important;
+      background: rgba(255,255,255,.08) !important;
+      color: #fff !important;
+      cursor: pointer;
+    }
+    #modalCarrinhoSepItems {
+      min-height: 150px !important;
+      padding: 14px 18px !important;
+      gap: 8px !important;
+      background: #eef2f6 !important;
+    }
+    #modalCarrinhoSepEmpty {
+      color: #64748b !important;
+      background: #fff;
+    }
+    #modalCarrinhoSepForm {
+      border-top: 1px solid #cbd5e1 !important;
+      padding: 14px 18px 16px !important;
+      gap: 12px !important;
+      background: #fff !important;
+    }
+    #modalCarrinhoSepFields label,
+    #modalCarrinhoSepObsWrap summary {
+      color: #334155 !important;
+      font-weight: 700 !important;
+    }
+    .sep-request-helper {
+      display: block;
+      color: #64748b;
+      font-size: .72rem;
+      line-height: 1.25;
+    }
+    #modalCarrinhoSepRequester,
+    #modalCarrinhoSepMotivo,
+    #modalCarrinhoSepDate,
+    #modalCarrinhoSepHorario,
+    #modalCarrinhoSepObs,
+    .sep-cart-qty-input,
+    .sep-cart-comment {
+      min-height: 42px;
+      background: #fff !important;
+      color: #0f172a !important;
+      border: 1px solid #94a3b8 !important;
+      border-radius: 6px !important;
+      box-shadow: none !important;
+    }
+    #modalCarrinhoSepObsWrap {
+      border: 1px solid #cbd5e1 !important;
+      border-radius: 6px !important;
+      background: #f8fafc !important;
+    }
+    .sep-cart-row {
+      border: 1px solid #d7dee8 !important;
+      border-left: 4px solid #f5a800 !important;
+      border-radius: 6px !important;
+      background: #fff !important;
+      box-shadow: 0 2px 8px rgba(15, 23, 42, .06) !important;
+    }
+    .sep-cart-row span { color: #475569 !important; }
+    .sep-cart-row span:first-child { color: #9a5b00 !important; }
+    .sep-cart-row textarea { color: #0f172a !important; }
+    .sep-cart-thumb {
+      border-radius: 6px !important;
+      border-color: #cbd5e1 !important;
+      background: #f8fafc !important;
+    }
+    .sep-cart-qty-dec,
+    .sep-cart-qty-inc {
+      min-width: 36px;
+      min-height: 36px;
+      background: #e8eef6 !important;
+      color: #0f2747 !important;
+      border: 1px solid #b8c5d6 !important;
+    }
+    .sep-cart-comment-status { color: #64748b !important; }
+    #modalCarrinhoSepClear {
+      min-height: 44px;
+      border-radius: 6px !important;
+      background: #fff !important;
+      color: #b42318 !important;
+      border-color: #f0aaa4 !important;
+    }
+    #modalCarrinhoSepSend {
+      min-height: 44px;
+      border-radius: 6px !important;
+      background: #f5a800 !important;
+      color: #251800 !important;
+      box-shadow: none !important;
+    }
     @media (max-width: 760px) {
       #modalCarrinhoSepFields { grid-template-columns: 1fr !important; }
-      #modalCarrinhoSepPanel { width: 100% !important; max-height: 90vh !important; }
+      #modalCarrinhoSepOverlay { padding: 0 !important; align-items: flex-end !important; }
+      #modalCarrinhoSepPanel { width: 100% !important; max-height: 94dvh !important; border-radius: 8px 8px 0 0 !important; }
       .sep-cart-row { grid-template-columns: minmax(0,1fr) auto !important; }
       .sep-cart-thumb { display: none !important; }
       .sep-cart-info-grid { grid-template-columns: 1fr !important; }
       .sep-cart-actions-row { flex-wrap: wrap !important; }
+      #modalCarrinhoSepPanel > div:first-child { padding-top: max(12px, env(safe-area-inset-top)) !important; }
+      #modalCarrinhoSepForm { padding-bottom: max(16px, env(safe-area-inset-bottom)) !important; }
     }
     @media (max-width: 520px) {
       #modalCarrinhoSepActions { grid-template-columns: 1fr !important; }
