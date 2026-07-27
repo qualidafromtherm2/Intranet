@@ -1,0 +1,347 @@
+'use strict';
+
+const express = require('express');
+const router = express.Router();
+const multer = require('multer');
+const { v4: uuidv4 } = require('uuid');
+const mime = require('mime-types');
+
+const { dbQuery } = require('../src/db');
+const { uploadPublicFile } = require('../utils/storage');
+
+const BUCKET = process.env.STORAGE_BUCKET || process.env.SUPABASE_BUCKET || 'produtos';
+const STORAGE_PREFIX = 'suporte_chamados';
+
+const CRITICIDADES = new Set(['urgente', 'normal', 'baixa']);
+const STATUS_VALIDOS = new Set(['aberto', 'em_andamento', 'fechado']);
+
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 50 * 1024 * 1024 },
+});
+
+let schemaReady = false;
+
+function requireAuth(req, res, next) {
+  if (!req.session?.user?.username && !req.session?.user?.id) {
+    return res.status(401).json({ error: 'Não autenticado.' });
+  }
+  next();
+}
+
+function isAdmin(req) {
+  const raw = req.session?.user?.roles ?? [];
+  const roles = Array.isArray(raw)
+    ? raw
+    : String(raw || '').split(',').map((s) => s.trim()).filter(Boolean);
+  return roles.some((r) => String(r || '').trim().toLowerCase() === 'admin');
+}
+
+function getUsuario(req) {
+  return String(req.session?.user?.username || req.session?.user?.id || '').trim();
+}
+
+function getNomeUsuario(req) {
+  const u = req.session?.user || {};
+  return String(u.nome || u.name || u.displayName || u.username || u.id || '').trim();
+}
+
+function sanitizePathPart(str) {
+  return String(str || '')
+    .replace(/[^a-zA-Z0-9_.-]/g, '_')
+    .replace(/_+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .slice(0, 80) || 'arquivo';
+}
+
+function inferTipoAnexo(file) {
+  const mt = String(file?.mimetype || '').toLowerCase();
+  if (mt.startsWith('image/')) return 'foto';
+  if (mt.startsWith('video/')) return 'video';
+  const name = String(file?.originalname || '').toLowerCase();
+  if (/\.(jpe?g|png|gif|webp|bmp|heic)$/i.test(name)) return 'foto';
+  if (/\.(mp4|webm|mov|avi|mkv|m4v)$/i.test(name)) return 'video';
+  return 'arquivo';
+}
+
+async function ensureSchema() {
+  if (schemaReady) return;
+  await dbQuery(`CREATE SCHEMA IF NOT EXISTS "Suporte_tecnico"`);
+  await dbQuery(`
+    CREATE TABLE IF NOT EXISTS "Suporte_tecnico"."Chamado" (
+      id                BIGSERIAL PRIMARY KEY,
+      descricao         TEXT NOT NULL,
+      criticidade       TEXT NOT NULL DEFAULT 'normal',
+      status            TEXT NOT NULL DEFAULT 'aberto',
+      prazo             TIMESTAMPTZ,
+      anexos            JSONB NOT NULL DEFAULT '[]'::jsonb,
+      criado_por        TEXT NOT NULL,
+      criado_por_nome   TEXT,
+      criado_em         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      atualizado_em     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      fechado_em        TIMESTAMPTZ,
+      fechado_por       TEXT,
+      fechado_por_nome  TEXT,
+      observacao_admin  TEXT
+    )
+  `);
+  await dbQuery(`
+    CREATE INDEX IF NOT EXISTS idx_suporte_chamado_criado_por
+      ON "Suporte_tecnico"."Chamado" (criado_por)
+  `);
+  await dbQuery(`
+    CREATE INDEX IF NOT EXISTS idx_suporte_chamado_status
+      ON "Suporte_tecnico"."Chamado" (status)
+  `);
+  await dbQuery(`
+    CREATE INDEX IF NOT EXISTS idx_suporte_chamado_criado_em
+      ON "Suporte_tecnico"."Chamado" (criado_em DESC)
+  `);
+  schemaReady = true;
+}
+
+async function uploadAnexo(file, chamadoTempId) {
+  const tipo = inferTipoAnexo(file);
+  const mimeExt = mime.extension(file.mimetype) || '';
+  const originalExt = (file.originalname || '').split('.').pop();
+  const ext = (mimeExt || originalExt || 'bin')
+    .replace(/[^a-zA-Z0-9]/g, '')
+    .toLowerCase() || 'bin';
+  const safeOriginal = sanitizePathPart(file.originalname || `${tipo}.${ext}`);
+  const pathKey = `${STORAGE_PREFIX}/${chamadoTempId}/${uuidv4()}-${safeOriginal}`;
+
+  const { url } = await uploadPublicFile(BUCKET, pathKey, file.buffer, {
+    contentType: file.mimetype || 'application/octet-stream',
+    upsert: false,
+  });
+
+  return {
+    tipo,
+    url,
+    path: pathKey,
+    nome: file.originalname || safeOriginal,
+    mime: file.mimetype || null,
+    tamanho: file.size || null,
+  };
+}
+
+// GET /api/suporte/chamados
+router.get('/chamados', requireAuth, async (req, res) => {
+  try {
+    await ensureSchema();
+    const admin = isAdmin(req);
+    const usuario = getUsuario(req);
+    const statusFiltro = String(req.query.status || '').trim().toLowerCase();
+
+    const params = [];
+    const where = [];
+
+    if (!admin) {
+      params.push(usuario);
+      where.push(`criado_por = $${params.length}`);
+    }
+
+    if (statusFiltro && STATUS_VALIDOS.has(statusFiltro)) {
+      params.push(statusFiltro);
+      where.push(`status = $${params.length}`);
+    }
+
+    const sql = `
+      SELECT id, descricao, criticidade, status, prazo, anexos,
+             criado_por, criado_por_nome, criado_em, atualizado_em,
+             fechado_em, fechado_por, fechado_por_nome, observacao_admin
+        FROM "Suporte_tecnico"."Chamado"
+       ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
+       ORDER BY
+         CASE status WHEN 'aberto' THEN 0 WHEN 'em_andamento' THEN 1 ELSE 2 END,
+         CASE criticidade WHEN 'urgente' THEN 0 WHEN 'normal' THEN 1 ELSE 2 END,
+         criado_em DESC
+       LIMIT 200
+    `;
+
+    const { rows } = await dbQuery(sql, params);
+    res.json({ ok: true, admin, chamados: rows });
+  } catch (err) {
+    console.error('[suporte/chamados] listar:', err);
+    res.status(500).json({ error: err.message || 'Falha ao listar chamados' });
+  }
+});
+
+// GET /api/suporte/chamados/:id
+router.get('/chamados/:id', requireAuth, async (req, res) => {
+  try {
+    await ensureSchema();
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id) || id <= 0) {
+      return res.status(400).json({ error: 'ID inválido.' });
+    }
+
+    const { rows } = await dbQuery(
+      `SELECT id, descricao, criticidade, status, prazo, anexos,
+              criado_por, criado_por_nome, criado_em, atualizado_em,
+              fechado_em, fechado_por, fechado_por_nome, observacao_admin
+         FROM "Suporte_tecnico"."Chamado"
+        WHERE id = $1`,
+      [id]
+    );
+
+    const chamado = rows[0];
+    if (!chamado) return res.status(404).json({ error: 'Chamado não encontrado.' });
+
+    const admin = isAdmin(req);
+    if (!admin && chamado.criado_por !== getUsuario(req)) {
+      return res.status(403).json({ error: 'Sem permissão para ver este chamado.' });
+    }
+
+    res.json({ ok: true, admin, chamado });
+  } catch (err) {
+    console.error('[suporte/chamados] detalhe:', err);
+    res.status(500).json({ error: err.message || 'Falha ao carregar chamado' });
+  }
+});
+
+// POST /api/suporte/chamados
+router.post(
+  '/chamados',
+  requireAuth,
+  upload.fields([
+    { name: 'foto', maxCount: 5 },
+    { name: 'video', maxCount: 3 },
+    { name: 'anexo', maxCount: 5 },
+  ]),
+  async (req, res) => {
+    try {
+      await ensureSchema();
+
+      const descricao = String(req.body?.descricao || '').trim();
+      let criticidade = String(req.body?.criticidade || 'normal').trim().toLowerCase();
+      if (!CRITICIDADES.has(criticidade)) criticidade = 'normal';
+
+      if (!descricao) {
+        return res.status(400).json({ error: 'Descreva o chamado.' });
+      }
+
+      const files = [
+        ...(req.files?.foto || []),
+        ...(req.files?.video || []),
+        ...(req.files?.anexo || []),
+      ];
+
+      const tempId = `tmp-${Date.now()}-${uuidv4().slice(0, 8)}`;
+      const anexos = [];
+      for (const file of files) {
+        try {
+          anexos.push(await uploadAnexo(file, tempId));
+        } catch (upErr) {
+          console.error('[suporte/chamados] upload:', upErr);
+          return res.status(500).json({
+            error: 'Falha ao enviar anexo: ' + (upErr.message || upErr),
+          });
+        }
+      }
+
+      const { rows } = await dbQuery(
+        `INSERT INTO "Suporte_tecnico"."Chamado"
+           (descricao, criticidade, status, anexos, criado_por, criado_por_nome)
+         VALUES ($1, $2, 'aberto', $3::jsonb, $4, $5)
+         RETURNING id, descricao, criticidade, status, prazo, anexos,
+                   criado_por, criado_por_nome, criado_em, atualizado_em,
+                   fechado_em, fechado_por, fechado_por_nome, observacao_admin`,
+        [
+          descricao,
+          criticidade,
+          JSON.stringify(anexos),
+          getUsuario(req),
+          getNomeUsuario(req),
+        ]
+      );
+
+      res.json({ ok: true, chamado: rows[0] });
+    } catch (err) {
+      console.error('[suporte/chamados] criar:', err);
+      res.status(500).json({ error: err.message || 'Falha ao abrir chamado' });
+    }
+  }
+);
+
+// PATCH /api/suporte/chamados/:id  (admin: prazo, status, fechar, observação)
+router.patch('/chamados/:id', requireAuth, async (req, res) => {
+  try {
+    await ensureSchema();
+
+    if (!isAdmin(req)) {
+      return res.status(403).json({ error: 'Apenas admin pode alterar chamado.' });
+    }
+
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id) || id <= 0) {
+      return res.status(400).json({ error: 'ID inválido.' });
+    }
+
+    const { rows: existing } = await dbQuery(
+      `SELECT id, status FROM "Suporte_tecnico"."Chamado" WHERE id = $1`,
+      [id]
+    );
+    if (!existing[0]) return res.status(404).json({ error: 'Chamado não encontrado.' });
+
+    const body = req.body || {};
+    const sets = ['atualizado_em = NOW()'];
+    const params = [];
+
+    if (Object.prototype.hasOwnProperty.call(body, 'prazo')) {
+      const prazoRaw = body.prazo;
+      if (prazoRaw === null || prazoRaw === '') {
+        sets.push('prazo = NULL');
+      } else {
+        const d = new Date(prazoRaw);
+        if (Number.isNaN(d.getTime())) {
+          return res.status(400).json({ error: 'Prazo inválido.' });
+        }
+        params.push(d.toISOString());
+        sets.push(`prazo = $${params.length}`);
+      }
+    }
+
+    if (Object.prototype.hasOwnProperty.call(body, 'observacao_admin')) {
+      params.push(String(body.observacao_admin || '').trim() || null);
+      sets.push(`observacao_admin = $${params.length}`);
+    }
+
+    let status = body.status != null ? String(body.status).trim().toLowerCase() : null;
+    if (body.fechar === true || body.fechar === 'true') {
+      status = 'fechado';
+    }
+    if (status) {
+      if (!STATUS_VALIDOS.has(status)) {
+        return res.status(400).json({ error: 'Status inválido.' });
+      }
+      params.push(status);
+      sets.push(`status = $${params.length}`);
+      if (status === 'fechado') {
+        params.push(getUsuario(req));
+        sets.push(`fechado_por = $${params.length}`);
+        params.push(getNomeUsuario(req));
+        sets.push(`fechado_por_nome = $${params.length}`);
+        sets.push('fechado_em = NOW()');
+      }
+    }
+
+    params.push(id);
+    const { rows } = await dbQuery(
+      `UPDATE "Suporte_tecnico"."Chamado"
+          SET ${sets.join(', ')}
+        WHERE id = $${params.length}
+        RETURNING id, descricao, criticidade, status, prazo, anexos,
+                  criado_por, criado_por_nome, criado_em, atualizado_em,
+                  fechado_em, fechado_por, fechado_por_nome, observacao_admin`,
+      params
+    );
+
+    res.json({ ok: true, chamado: rows[0] });
+  } catch (err) {
+    console.error('[suporte/chamados] atualizar:', err);
+    res.status(500).json({ error: err.message || 'Falha ao atualizar chamado' });
+  }
+});
+
+module.exports = router;

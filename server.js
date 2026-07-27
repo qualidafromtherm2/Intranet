@@ -11144,6 +11144,7 @@ app.use('/api/transferencias', transferenciasRouter);
 app.use('/api/ajustes', ajustesRouter);
 app.use('/api/monitoramento', monitoramentoRouter);
 app.use('/api/primeira-pc-ok', require('./routes/primeiraPcOk'));
+app.use('/api/suporte', require('./routes/suporteChamados'));
 app.use('/api/engenharia', engenhariaRouter);
 app.use('/api/compras', comprasRouter);
 

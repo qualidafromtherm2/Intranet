@@ -202,6 +202,7 @@
       <i id="bell-icon" class="fa-solid fa-bell" title="Mensagens"></i>
     </div>
     <i id="cart-icon" class="fa-solid fa-shopping-bag" title="Painel de compras" style="display:none;"></i>
+    <i id="chamado-icon" class="fa-solid fa-headset" title="Chamado de suporte" data-nav-key="top-shortcut:chamado"></i>
     <i id="links-icon" class="fa-solid fa-link" title="Links rápidos"></i>
     <i id="config-icon" class="fa-solid fa-rotate-right" title="Atualização disponível - clique para limpar cache e atualizar" style="cursor:pointer;display:none;"></i>
     <img id="profile-icon" class="profile-img"
@@ -7756,6 +7757,71 @@
             <div>
               <div style="font-size:12px;color:var(--inactive-color);margin-bottom:8px;">Lista de links registrados:</div>
               <div id="linksRapidosLista" class="agenda-participantes-selecionados"></div>
+            </div>
+          </div>
+        </div>
+
+        <div id="chamadoSuporteModal" class="agenda-modal-overlay" style="display:none;">
+          <div class="agenda-modal-card" style="max-width:720px;max-height:90vh;overflow:auto;">
+            <button id="chamadoSuporteFecharModal" type="button" class="agenda-modal-close" aria-label="Fechar">×</button>
+            <h3 style="margin:0 0 14px 0;color:var(--content-title-color);font-size:18px;">
+              <i class="fa-solid fa-headset" style="margin-right:8px;color:#38bdf8;"></i>Chamado de suporte
+            </h3>
+
+            <div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap;">
+              <button type="button" id="chamadoTabNovo" class="content-button chamado-tab-btn chamado-tab-active" style="border:none;">
+                Novo chamado
+              </button>
+              <button type="button" id="chamadoTabLista" class="content-button chamado-tab-btn" style="border:none;">
+                Meus chamados
+              </button>
+            </div>
+
+            <div id="chamadoPainelNovo">
+              <label style="display:block;margin-bottom:12px;">
+                <span style="display:block;font-size:12px;margin-bottom:6px;color:var(--inactive-color);">Descreva o chamado</span>
+                <textarea id="chamadoDescricao" rows="5" placeholder="Conte o que aconteceu, em qual tela, e o que precisa de ajuda..."
+                  style="width:100%;resize:vertical;padding:10px;border-radius:8px;border:1px solid rgba(148,163,184,.35);background:transparent;color:inherit;box-sizing:border-box;"></textarea>
+              </label>
+
+              <div style="margin-bottom:14px;">
+                <div style="font-size:12px;margin-bottom:8px;color:var(--inactive-color);">Prioridade</div>
+                <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                  <label class="chamado-prio-opt" style="display:flex;align-items:center;gap:6px;padding:8px 12px;border-radius:8px;border:1px solid rgba(239,68,68,.45);cursor:pointer;">
+                    <input type="radio" name="chamadoCriticidade" value="urgente" />
+                    <span style="color:#f87171;font-weight:600;">Urgente</span>
+                  </label>
+                  <label class="chamado-prio-opt" style="display:flex;align-items:center;gap:6px;padding:8px 12px;border-radius:8px;border:1px solid rgba(59,130,246,.45);cursor:pointer;">
+                    <input type="radio" name="chamadoCriticidade" value="normal" checked />
+                    <span style="color:#60a5fa;font-weight:600;">Normal</span>
+                  </label>
+                  <label class="chamado-prio-opt" style="display:flex;align-items:center;gap:6px;padding:8px 12px;border-radius:8px;border:1px solid rgba(148,163,184,.45);cursor:pointer;">
+                    <input type="radio" name="chamadoCriticidade" value="baixa" />
+                    <span style="color:#94a3b8;font-weight:600;">Baixa</span>
+                  </label>
+                </div>
+              </div>
+
+              <div class="agenda-form-grid" style="margin-bottom:14px;">
+                <label>
+                  <span>Anexar foto</span>
+                  <input id="chamadoFoto" type="file" accept="image/*" multiple />
+                </label>
+                <label>
+                  <span>Anexar vídeo</span>
+                  <input id="chamadoVideo" type="file" accept="video/*" multiple />
+                </label>
+              </div>
+
+              <div style="display:flex;justify-content:flex-end;gap:10px;">
+                <button id="chamadoEnviarBtn" type="button" class="content-button" style="background:#2563eb;color:#fff;border:none;">
+                  <i class="fa-solid fa-paper-plane" style="margin-right:6px;"></i>Abrir chamado
+                </button>
+              </div>
+            </div>
+
+            <div id="chamadoPainelLista" style="display:none;">
+              <div id="chamadoLista" style="display:flex;flex-direction:column;gap:10px;"></div>
             </div>
           </div>
         </div>

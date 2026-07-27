@@ -35975,6 +35975,296 @@ async function salvarLinkRapido() {
     });
   }
 
+  /* –– CHAMADO DE SUPORTE –– */
+  const chamadoBtn = document.getElementById('chamado-icon');
+  const chamadoModal = document.getElementById('chamadoSuporteModal');
+  const chamadoFecharBtn = document.getElementById('chamadoSuporteFecharModal');
+  const chamadoTabNovo = document.getElementById('chamadoTabNovo');
+  const chamadoTabLista = document.getElementById('chamadoTabLista');
+  const chamadoPainelNovo = document.getElementById('chamadoPainelNovo');
+  const chamadoPainelLista = document.getElementById('chamadoPainelLista');
+  const chamadoListaEl = document.getElementById('chamadoLista');
+  const chamadoDescricaoEl = document.getElementById('chamadoDescricao');
+  const chamadoFotoEl = document.getElementById('chamadoFoto');
+  const chamadoVideoEl = document.getElementById('chamadoVideo');
+  const chamadoEnviarBtn = document.getElementById('chamadoEnviarBtn');
+
+  let chamadoEhAdmin = false;
+  let chamadoCache = [];
+
+  function chamadoEsc(txt) {
+    if (typeof escapeHtml === 'function') return escapeHtml(String(txt ?? ''));
+    return String(txt ?? '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+
+  function chamadoLabelCriticidade(c) {
+    const v = String(c || '').toLowerCase();
+    if (v === 'urgente') return { txt: 'Urgente', cor: '#f87171' };
+    if (v === 'baixa') return { txt: 'Baixa', cor: '#94a3b8' };
+    return { txt: 'Normal', cor: '#60a5fa' };
+  }
+
+  function chamadoLabelStatus(s) {
+    const v = String(s || '').toLowerCase();
+    if (v === 'fechado') return { txt: 'Fechado', cor: '#94a3b8' };
+    if (v === 'em_andamento') return { txt: 'Em andamento', cor: '#fbbf24' };
+    return { txt: 'Aberto', cor: '#34d399' };
+  }
+
+  function formatarPrazoChamado(prazo) {
+    if (!prazo) return 'Sem prazo definido';
+    try {
+      return new Date(prazo).toLocaleString('pt-BR', {
+        day: '2-digit', month: '2-digit', year: 'numeric',
+        hour: '2-digit', minute: '2-digit'
+      });
+    } catch (_e) {
+      return String(prazo);
+    }
+  }
+
+  function prazoParaInputLocal(prazo) {
+    if (!prazo) return '';
+    const d = new Date(prazo);
+    if (Number.isNaN(d.getTime())) return '';
+    const pad = (n) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  }
+
+  function mostrarAbaChamado(aba) {
+    const isNovo = aba === 'novo';
+    if (chamadoPainelNovo) chamadoPainelNovo.style.display = isNovo ? '' : 'none';
+    if (chamadoPainelLista) chamadoPainelLista.style.display = isNovo ? 'none' : '';
+    chamadoTabNovo?.classList.toggle('chamado-tab-active', isNovo);
+    chamadoTabLista?.classList.toggle('chamado-tab-active', !isNovo);
+    if (chamadoTabLista) {
+      chamadoTabLista.textContent = chamadoEhAdmin ? 'Todos os chamados' : 'Meus chamados';
+    }
+  }
+
+  function renderAnexosChamado(anexos) {
+    const list = Array.isArray(anexos) ? anexos : [];
+    if (!list.length) return '<div style="font-size:12px;color:var(--inactive-color);">Sem anexos</div>';
+    return list.map((a) => {
+      const tipo = String(a?.tipo || 'arquivo');
+      const nome = chamadoEsc(a?.nome || tipo);
+      const url = chamadoEsc(a?.url || '#');
+      const icon = tipo === 'video' ? 'fa-video' : (tipo === 'foto' ? 'fa-image' : 'fa-paperclip');
+      return `<a href="${url}" target="_blank" rel="noopener noreferrer" style="display:inline-flex;align-items:center;gap:6px;margin:2px 8px 2px 0;font-size:12px;color:#38bdf8;text-decoration:none;">
+        <i class="fa-solid ${icon}"></i>${nome}
+      </a>`;
+    }).join('');
+  }
+
+  function renderListaChamados() {
+    if (!chamadoListaEl) return;
+    if (!chamadoCache.length) {
+      chamadoListaEl.innerHTML = '<div style="font-size:13px;color:var(--inactive-color);padding:12px 0;">Nenhum chamado encontrado.</div>';
+      return;
+    }
+
+    chamadoListaEl.innerHTML = chamadoCache.map((c) => {
+      const crit = chamadoLabelCriticidade(c.criticidade);
+      const st = chamadoLabelStatus(c.status);
+      const desc = chamadoEsc(c.descricao || '');
+      const abertoEm = c.criado_em ? new Date(c.criado_em).toLocaleString('pt-BR') : '';
+      const autor = chamadoEsc(c.criado_por_nome || c.criado_por || '');
+      const prazoTxt = formatarPrazoChamado(c.prazo);
+      const fechado = String(c.status || '').toLowerCase() === 'fechado';
+      const adminBlock = chamadoEhAdmin && !fechado ? `
+        <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:flex-end;margin-top:10px;padding-top:10px;border-top:1px solid rgba(148,163,184,.25);">
+          <label style="flex:1;min-width:180px;">
+            <span style="display:block;font-size:11px;color:var(--inactive-color);margin-bottom:4px;">Prazo (visível para o solicitante)</span>
+            <input type="datetime-local" class="chamado-prazo-input" data-id="${c.id}" value="${prazoParaInputLocal(c.prazo)}"
+              style="width:100%;padding:8px;border-radius:8px;border:1px solid rgba(148,163,184,.35);background:transparent;color:inherit;box-sizing:border-box;" />
+          </label>
+          <button type="button" class="content-button chamado-salvar-prazo" data-id="${c.id}" style="background:#2563eb;color:#fff;border:none;">Salvar prazo</button>
+          <button type="button" class="content-button chamado-fechar-btn" data-id="${c.id}" style="background:#7f1d1d;color:#fca5a5;border:none;">
+            <i class="fa-solid fa-check" style="margin-right:4px;"></i>Fechar
+          </button>
+        </div>
+      ` : '';
+
+      return `
+        <div class="chamado-card" data-id="${c.id}" style="padding:12px;border-radius:10px;border:1px solid rgba(148,163,184,.28);background:rgba(15,23,42,.18);">
+          <div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:8px;">
+            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+              <span style="font-size:12px;font-weight:700;color:${crit.cor};">${crit.txt}</span>
+              <span style="font-size:11px;padding:2px 8px;border-radius:999px;background:rgba(148,163,184,.15);color:${st.cor};">${st.txt}</span>
+              <span style="font-size:11px;color:var(--inactive-color);">#${c.id}</span>
+            </div>
+            <div style="font-size:11px;color:var(--inactive-color);">${chamadoEsc(abertoEm)}</div>
+          </div>
+          ${chamadoEhAdmin ? `<div style="font-size:12px;color:var(--inactive-color);margin-bottom:6px;">Por: <strong>${autor}</strong></div>` : ''}
+          <div style="font-size:13px;white-space:pre-wrap;line-height:1.4;margin-bottom:8px;">${desc}</div>
+          <div style="margin-bottom:8px;">${renderAnexosChamado(c.anexos)}</div>
+          <div style="font-size:12px;color:var(--inactive-color);">
+            <i class="fa-regular fa-clock" style="margin-right:4px;"></i>
+            Prazo: <strong style="color:inherit;">${chamadoEsc(prazoTxt)}</strong>
+            ${!chamadoEhAdmin ? ' <span style="opacity:.75;">(definido pelo suporte)</span>' : ''}
+          </div>
+          ${fechado && c.fechado_em ? `<div style="font-size:11px;color:var(--inactive-color);margin-top:6px;">Fechado em ${chamadoEsc(new Date(c.fechado_em).toLocaleString('pt-BR'))}${c.fechado_por_nome ? ` por ${chamadoEsc(c.fechado_por_nome)}` : ''}</div>` : ''}
+          ${adminBlock}
+        </div>
+      `;
+    }).join('');
+  }
+
+  async function carregarChamados() {
+    try {
+      const resp = await fetch('/api/suporte/chamados', { credentials: 'include' });
+      const payload = await resp.json().catch(() => ({}));
+      if (!resp.ok) throw new Error(payload.error || `Erro ${resp.status}`);
+      chamadoEhAdmin = !!payload.admin;
+      chamadoCache = Array.isArray(payload.chamados) ? payload.chamados : [];
+      if (chamadoTabLista) {
+        chamadoTabLista.textContent = chamadoEhAdmin ? 'Todos os chamados' : 'Meus chamados';
+      }
+    } catch (err) {
+      console.error('[CHAMADO] Falha ao listar:', err);
+      chamadoCache = [];
+      if (chamadoListaEl) {
+        chamadoListaEl.innerHTML = `<div style="color:#f87171;font-size:13px;">Não foi possível carregar: ${chamadoEsc(err.message)}</div>`;
+      }
+      return;
+    }
+    renderListaChamados();
+  }
+
+  function limparFormChamado() {
+    if (chamadoDescricaoEl) chamadoDescricaoEl.value = '';
+    if (chamadoFotoEl) chamadoFotoEl.value = '';
+    if (chamadoVideoEl) chamadoVideoEl.value = '';
+    const radioNormal = document.querySelector('input[name="chamadoCriticidade"][value="normal"]');
+    if (radioNormal) radioNormal.checked = true;
+  }
+
+  async function abrirModalChamado() {
+    if (!chamadoModal) return;
+    limparFormChamado();
+    mostrarAbaChamado('novo');
+    chamadoModal.style.display = 'flex';
+    await carregarChamados();
+  }
+
+  function fecharModalChamado() {
+    if (!chamadoModal) return;
+    chamadoModal.style.display = 'none';
+  }
+
+  async function enviarChamado() {
+    const descricao = String(chamadoDescricaoEl?.value || '').trim();
+    if (!descricao) {
+      alert('Descreva o chamado.');
+      chamadoDescricaoEl?.focus();
+      return;
+    }
+
+    const critEl = document.querySelector('input[name="chamadoCriticidade"]:checked');
+    const criticidade = critEl?.value || 'normal';
+
+    const fd = new FormData();
+    fd.append('descricao', descricao);
+    fd.append('criticidade', criticidade);
+
+    const fotos = chamadoFotoEl?.files ? Array.from(chamadoFotoEl.files) : [];
+    const videos = chamadoVideoEl?.files ? Array.from(chamadoVideoEl.files) : [];
+    fotos.forEach((f) => fd.append('foto', f));
+    videos.forEach((f) => fd.append('video', f));
+
+    const prevTxt = chamadoEnviarBtn?.innerHTML;
+    if (chamadoEnviarBtn) {
+      chamadoEnviarBtn.disabled = true;
+      chamadoEnviarBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin" style="margin-right:6px;"></i>Enviando...';
+    }
+
+    try {
+      const resp = await fetch('/api/suporte/chamados', {
+        method: 'POST',
+        credentials: 'include',
+        body: fd
+      });
+      const payload = await resp.json().catch(() => ({}));
+      if (!resp.ok) throw new Error(payload.error || `Erro ${resp.status}`);
+
+      limparFormChamado();
+      alert('Chamado aberto com sucesso!');
+      mostrarAbaChamado('lista');
+      await carregarChamados();
+    } catch (err) {
+      alert(`Não foi possível abrir o chamado: ${err.message}`);
+    } finally {
+      if (chamadoEnviarBtn) {
+        chamadoEnviarBtn.disabled = false;
+        if (prevTxt) chamadoEnviarBtn.innerHTML = prevTxt;
+      }
+    }
+  }
+
+  async function atualizarChamadoAdmin(id, body) {
+    const resp = await fetch(`/api/suporte/chamados/${id}`, {
+      method: 'PATCH',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+    const payload = await resp.json().catch(() => ({}));
+    if (!resp.ok) throw new Error(payload.error || `Erro ${resp.status}`);
+    return payload.chamado;
+  }
+
+  chamadoBtn?.addEventListener('click', (e) => {
+    e.preventDefault();
+    abrirModalChamado();
+  });
+  chamadoFecharBtn?.addEventListener('click', fecharModalChamado);
+  chamadoTabNovo?.addEventListener('click', () => mostrarAbaChamado('novo'));
+  chamadoTabLista?.addEventListener('click', async () => {
+    mostrarAbaChamado('lista');
+    await carregarChamados();
+  });
+  chamadoEnviarBtn?.addEventListener('click', enviarChamado);
+
+  if (chamadoModal) {
+    chamadoModal.addEventListener('click', (event) => {
+      if (event.target === chamadoModal) fecharModalChamado();
+    });
+  }
+
+  chamadoListaEl?.addEventListener('click', async (e) => {
+    const btnPrazo = e.target.closest('.chamado-salvar-prazo');
+    const btnFechar = e.target.closest('.chamado-fechar-btn');
+    if (!btnPrazo && !btnFechar) return;
+
+    const id = Number((btnPrazo || btnFechar)?.dataset?.id);
+    if (!id) return;
+
+    try {
+      if (btnPrazo) {
+        const input = chamadoListaEl.querySelector(`.chamado-prazo-input[data-id="${id}"]`);
+        const valor = input?.value || '';
+        await atualizarChamadoAdmin(id, { prazo: valor || null });
+        alert('Prazo salvo.');
+      } else if (btnFechar) {
+        if (!confirm('Fechar este chamado?')) return;
+        const input = chamadoListaEl.querySelector(`.chamado-prazo-input[data-id="${id}"]`);
+        const valor = input?.value || '';
+        await atualizarChamadoAdmin(id, {
+          fechar: true,
+          ...(valor ? { prazo: valor } : {})
+        });
+        alert('Chamado fechado.');
+      }
+      await carregarChamados();
+    } catch (err) {
+      alert(`Não foi possível atualizar: ${err.message}`);
+    }
+  });
+
   /* –– ÍCONE DE ATUALIZAÇÃO –– */
   const updateIcon = document.getElementById('config-icon');
   if (updateIcon) {
@@ -91002,6 +91292,12 @@ window.initOscilacaoEstoque = (function () {
       nav_label: 'Painel de compras',
       nav_selector: '#cart-icon',
       icon_class: 'fa-solid fa-shopping-bag'
+    },
+    'chamado-icon': {
+      nav_key: 'top-shortcut:chamado',
+      nav_label: 'Chamado de suporte',
+      nav_selector: '#chamado-icon',
+      icon_class: 'fa-solid fa-headset'
     },
     'links-icon': {
       nav_key: 'top-shortcut:links-rapidos',
