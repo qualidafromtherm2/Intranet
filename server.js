@@ -15275,8 +15275,15 @@ app.use('/agente-impressao', requireSessionForStatic, express.static(path.join(_
 }));
 
 // Retorna URL pública do instalador Windows + versão atual do agente
-const _AGENTE_VERSAO_ATUAL    = process.env.AGENTE_VERSAO || '2.6';
-const _AGENTE_EXE_URL_DEFAULT = process.env.AGENTE_EXE_URL || agenteExeUrl(_AGENTE_VERSAO_ATUAL);
+const _AGENTE_VERSAO_ATUAL = process.env.AGENTE_VERSAO || '2.7';
+const _agenteUrlFromVer = agenteExeUrl(_AGENTE_VERSAO_ATUAL);
+// Preferir URL da versão atual no R2. AGENTE_EXE_URL só vale se já apontar para essa versão
+// (evita ficar preso em URL antiga tipo v2.6 no env do Render).
+const _AGENTE_EXE_URL_DEFAULT = (() => {
+  const envUrl = String(process.env.AGENTE_EXE_URL || '').trim();
+  if (envUrl && envUrl.includes(`agente-impressao-v${_AGENTE_VERSAO_ATUAL}`)) return envUrl;
+  return _agenteUrlFromVer;
+})();
 app.get('/api/etiquetas/agente-url', (req, res) => {
   res.json({ ok: true, url: _AGENTE_EXE_URL_DEFAULT, versao: _AGENTE_VERSAO_ATUAL });
 });

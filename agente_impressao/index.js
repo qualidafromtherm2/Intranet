@@ -1,11 +1,13 @@
 'use strict';
 /**
- * Agente de Impressão SGF v2.6
+ * Agente de Impressão SGF v2.7
  *
  * MODOS:
  *   (sem args)   → Instalador: copia para AppData, agenda tarefa, cria atalho, inicia serviço
  *   --service    → Serviço: polling da fila no servidor + UI de config em localhost:9200
  *   --config     → Abre http://localhost:9200 no browser padrão
+ *
+ * v2.7 — Histórico local de etiquetas impressas + reimpressão com quantidade
  */
 
 const http   = require('http');
@@ -15,18 +17,72 @@ const fs     = require('fs');
 const os     = require('os');
 const path   = require('path');
 
-const AGENT_VERSION = '2.6';
+const AGENT_VERSION = '2.7';
 const PORT       = 9200;
 const TASK_NAME  = 'AgenteImpressaoSGF';
 const EXE_NAME   = 'agente-impressao.exe';
 const SHORTCUT   = 'Agente Impressão SGF.lnk';
+const HISTORY_MAX = 80; // máximo de etiquetas guardadas no histórico local
 
 const INSTALL_DIR = path.join(
   process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'),
   'AgenteImpressaoSGF'
 );
-const CONFIG_PATH = path.join(INSTALL_DIR, 'config.json');
-const LOG_PATH    = path.join(INSTALL_DIR, 'agent.log');
+const CONFIG_PATH  = path.join(INSTALL_DIR, 'config.json');
+const LOG_PATH     = path.join(INSTALL_DIR, 'agent.log');
+const HISTORY_PATH = path.join(INSTALL_DIR, 'print-history.json');
+
+// ─── Histórico local de etiquetas (com ZPL para reimpressão) ─────────────────
+function extractLabelTitle(zpl) {
+  const matches = String(zpl || '').match(/\^FD([^^\r\n]+)\^FS/gi) || [];
+  const texts = matches
+    .map(m => m.replace(/^\^FD/i, '').replace(/\^FS$/i, '').trim())
+    .filter(t => t && t.length > 1 && !/^Agente SGF/i.test(t) && !/impressao funcionando/i.test(t));
+  return texts.slice(0, 3).join(' · ').slice(0, 90) || 'Etiqueta';
+}
+
+function loadPrintHistory() {
+  try {
+    const data = JSON.parse(fs.readFileSync(HISTORY_PATH, 'utf8'));
+    return Array.isArray(data) ? data : [];
+  } catch { return []; }
+}
+
+function savePrintHistory(list) {
+  try {
+    fs.mkdirSync(INSTALL_DIR, { recursive: true });
+    fs.writeFileSync(HISTORY_PATH, JSON.stringify(list.slice(-HISTORY_MAX)), 'utf8');
+  } catch (e) { log(`[history] Falha ao salvar: ${e.message}`); }
+}
+
+function addPrintHistoryEntry({ jobId, zpl, quantidade, ok, printer }) {
+  const now = new Date();
+  const entry = {
+    id: `${now.getTime()}-${jobId || 'x'}`,
+    jobId: jobId || null,
+    ts: now.getTime(),
+    time: now.toLocaleTimeString('pt-BR'),
+    date: now.toLocaleDateString('pt-BR'),
+    quantidade: Number(quantidade) || 1,
+    ok: !!ok,
+    printer: printer || '',
+    titulo: extractLabelTitle(zpl),
+    zpl: String(zpl || ''),
+  };
+  if (!entry.zpl) return entry;
+  const list = loadPrintHistory();
+  list.push(entry);
+  savePrintHistory(list);
+  return entry;
+}
+
+function findHistoryEntry(id) {
+  return loadPrintHistory().find(h => String(h.id) === String(id)) || null;
+}
+
+function historyForApi() {
+  return loadPrintHistory().map(({ zpl, ...rest }) => rest).reverse();
+}
 
 // ─── Defaults de configuração ────────────────────────────────────────────────
 const DEFAULT_CONFIG = {
@@ -321,8 +377,19 @@ function buildConfigHtml(cfg, printers, status) {
   .offset-display{font-size:.78rem;color:var(--muted);text-align:center;margin-top:6px}
 
   /* Histórico */
-  .hist-row{padding:5px 8px;border-bottom:1px solid var(--border);display:flex;gap:8px;align-items:center;font-size:.82rem}
+  .hist-row{padding:8px 8px;border-bottom:1px solid var(--border);display:flex;flex-direction:column;gap:6px;font-size:.82rem}
   .hist-row:last-child{border:none}
+  .hist-row:hover{background:rgba(124,58,237,.06)}
+  .hist-meta{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  .hist-title{color:var(--text);font-size:.8rem;line-height:1.3;word-break:break-word}
+  .hist-actions{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+  .hist-actions input[type=number]{width:64px;padding:5px 8px;font-size:.8rem}
+  .btn-sm{padding:5px 10px;font-size:.75rem;border-radius:6px}
+  .btn-preview{background:transparent;color:var(--muted);border:1px solid var(--border)}
+  .btn-preview:hover{border-color:var(--accent);color:var(--text)}
+  .hist-preview-box{display:none;margin-top:4px;background:#111;border:1px solid var(--border);border-radius:6px;padding:6px;text-align:center}
+  .hist-preview-box img{max-width:100%;height:auto;border-radius:4px}
+  .hist-preview-box.show{display:block}
 </style>
 </head>
 <body>
@@ -490,10 +557,13 @@ function buildConfigHtml(cfg, printers, status) {
       </div>
     </div>
 
-    <!-- Histórico de hoje -->
+    <!-- Histórico de etiquetas (reimpressão) -->
     <div class="card">
-      <h2>📅 Impressões de hoje</h2>
-      <div id="historyBox" style="max-height:200px;overflow-y:auto">
+      <h2>🏷️ Histórico de etiquetas</h2>
+      <p style="font-size:.78rem;color:var(--muted);margin-bottom:10px">
+        Etiquetas já enviadas para impressão neste PC. Escolha a quantidade e reimprima.
+      </p>
+      <div id="historyBox" style="max-height:380px;overflow-y:auto">
         <div style="color:var(--muted);font-size:.82rem;padding:6px 0">Carregando...</div>
       </div>
       <div class="btn-row" style="margin-top:10px">
@@ -700,12 +770,48 @@ async function reprintLast() {
   const btn = document.getElementById('btnReprint');
   if (btn) { btn.disabled = true; btn.textContent = '⏳ Reimprimindo...'; }
   try {
-    const r = await fetch('/api/reprint-last', { method: 'POST' });
+    const r = await fetch('/api/reprint-last', { method: 'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ quantidade: 1 }) });
     const j = await r.json();
     toast(j.ok ? 'Última etiqueta reimpressa com sucesso!' : (j.error || 'Erro'), j.ok);
     if (j.ok) { setTimeout(refreshHistory, 500); }
   } catch { toast('Erro ao reimprimir', false); }
   finally { if (btn) { btn.disabled = false; btn.textContent = '🔁 Reimprimir última'; } }
+}
+
+// ── Reimprimir item do histórico (com quantidade) ─────────────────────────────
+async function reprintHistory(id, btn) {
+  const row = btn && btn.closest ? btn.closest('.hist-row') : null;
+  const qtyInp = row ? row.querySelector('.hist-qty') : null;
+  const quantidade = Math.max(1, Math.min(99, parseInt(qtyInp && qtyInp.value, 10) || 1));
+  if (btn) { btn.disabled = true; btn.textContent = '⏳...'; }
+  try {
+    const r = await fetch('/api/reprint', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: id, quantidade: quantidade })
+    });
+    const j = await r.json();
+    toast(j.ok ? ('Reimpresso: ' + quantidade + ' cópia(s)') : (j.error || 'Erro'), j.ok);
+    if (j.ok) setTimeout(refreshHistory, 400);
+  } catch { toast('Erro ao reimprimir', false); }
+  finally { if (btn) { btn.disabled = false; btn.textContent = '🔁 Reimprimir'; } }
+}
+
+async function toggleHistPreview(id, btn) {
+  const row = btn && btn.closest ? btn.closest('.hist-row') : null;
+  const box = row ? row.querySelector('.hist-preview-box') : null;
+  if (!box) return;
+  if (box.classList.contains('show')) {
+    box.classList.remove('show');
+    box.innerHTML = '';
+    btn.textContent = '👁 Preview';
+    return;
+  }
+  btn.textContent = '⏳...';
+  box.innerHTML = '<img alt="preview" src="/api/label-preview?id=' + encodeURIComponent(id) + '&t=' + Date.now() + '">' +
+    '<div style="font-size:.7rem;color:var(--muted);margin-top:4px">Clique em Preview de novo para fechar</div>';
+  box.classList.add('show');
+  btn.textContent = '👁 Fechar';
 }
 
 // ── Teste de impressão ────────────────────────────────────────────────────────
@@ -747,7 +853,7 @@ async function reloadQueue() {
   } catch {}
 }
 
-// ── Histórico do dia ──────────────────────────────────────────────────────────
+// ── Histórico de etiquetas (persistente) ──────────────────────────────────────
 async function refreshHistory() {
   try {
     const r = await fetch('/api/history');
@@ -755,19 +861,33 @@ async function refreshHistory() {
     const box   = document.getElementById('historyBox');
     const count = document.getElementById('histCount');
     const prints = j.prints || [];
-    if (count) count.textContent = prints.length + ' impressão(ões) hoje';
+    if (count) count.textContent = prints.length + ' no histórico (máx. ' + (j.max || 80) + ')';
     if (!prints.length) {
-      box.innerHTML = '<div style="color:var(--muted);font-size:.82rem;padding:6px 0">Nenhuma etiqueta impressa hoje.</div>';
+      box.innerHTML = '<div style="color:var(--muted);font-size:.82rem;padding:6px 0">Nenhuma etiqueta no histórico ainda.<br><span style="font-size:.75rem">Quando a intranet enviar etiquetas, elas aparecem aqui para reimprimir.</span></div>';
       return;
     }
-    box.innerHTML = prints.slice().reverse().slice(0, 30).map(p =>
-      '<div class="hist-row">' +
-        '<span style="color:' + (p.ok ? 'var(--green)' : 'var(--red)') + ';font-size:.9rem">' + (p.ok ? '✓' : '✗') + '</span>' +
-        '<span style="color:var(--muted)">' + p.time + '</span>' +
-        '<span>Job <b>#' + p.jobId + '</b></span>' +
-        '<span style="margin-left:auto;color:var(--muted)">' + p.quantidade + ' etq.</span>' +
-      '</div>'
-    ).join('');
+    box.innerHTML = prints.map(function(p) {
+      const okIcon = p.ok ? '✓' : '✗';
+      const okColor = p.ok ? 'var(--green)' : 'var(--red)';
+      const titulo = (p.titulo || 'Etiqueta').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+      const idAttr = String(p.id).replace(/"/g, '&quot;');
+      return '<div class="hist-row" data-id="' + idAttr + '">' +
+        '<div class="hist-meta">' +
+          '<span style="color:' + okColor + ';font-size:.9rem">' + okIcon + '</span>' +
+          '<span style="color:var(--muted)">' + (p.date || '') + ' ' + (p.time || '') + '</span>' +
+          (p.jobId ? '<span>Job <b>#' + p.jobId + '</b></span>' : '') +
+          '<span style="margin-left:auto;color:var(--muted)">' + (p.quantidade || 1) + ' etq. orig.</span>' +
+        '</div>' +
+        '<div class="hist-title">' + titulo + '</div>' +
+        '<div class="hist-actions">' +
+          '<label style="font-size:.72rem;color:var(--muted)">Qtd</label>' +
+          '<input type="number" class="hist-qty" min="1" max="99" value="1" title="Quantidade de cópias">' +
+          '<button class="btn btn-green btn-sm" onclick="reprintHistory(\'' + idAttr.replace(/'/g, "\\'") + '\', this)">🔁 Reimprimir</button>' +
+          '<button class="btn btn-preview btn-sm" onclick="toggleHistPreview(\'' + idAttr.replace(/'/g, "\\'") + '\', this)">👁 Preview</button>' +
+        '</div>' +
+        '<div class="hist-preview-box"></div>' +
+      '</div>';
+    }).join('');
   } catch {}
 }
 
@@ -816,9 +936,22 @@ function runService() {
     lastQueueAt: null,      // timestamp da última consulta
     lastZpl: null,          // ZPL do último job impresso
     lastJobId: null,        // id do último job impresso
-    todayPrints: [],        // histórico do dia
+    todayPrints: [],        // histórico do dia (contadores)
     todayDate: new Date().toDateString(),
   };
+
+  // Restaura última etiqueta do histórico em disco (sobrevive a reinício)
+  try {
+    const hist = loadPrintHistory();
+    const lastOk = [...hist].reverse().find(h => h.ok && h.zpl);
+    if (lastOk) {
+      state.lastZpl = lastOk.zpl;
+      state.lastJobId = lastOk.jobId;
+      state.lastPrint = `${lastOk.date || ''} ${lastOk.time || ''}`.trim();
+      state.lastPrintOk = true;
+      log(`[history] ${hist.length} etiqueta(s) no histórico; última job #${lastOk.jobId}`);
+    }
+  } catch {}
 
   // ─── Heartbeat ─────────────────────────────────────────────────────────────
   function sendHeartbeat() {
@@ -885,7 +1018,7 @@ function runService() {
           printZpl(zplToUse, targetPrinter, (err2) => {
             const ok = !err2;
             const erroMsg = err2?.message || null;
-            // Atualiza histórico do dia
+            // Atualiza contadores do dia (UI status)
             const today = new Date().toDateString();
             if (state.todayDate !== today) { state.todayPrints = []; state.todayDate = today; }
             state.todayPrints.push({ time: new Date().toLocaleTimeString('pt-BR'), jobId: job.id, quantidade: job.quantidade, ok });
@@ -893,13 +1026,28 @@ function runService() {
               state.totalPrinted++;
               state.lastPrint = new Date().toLocaleString('pt-BR');
               state.lastPrintOk = true;
-              state.lastZpl = job.zpl;   // guarda ZPL original (sem LH) para reprint
+              state.lastZpl = job.zpl;   // guarda ZPL original (sem LH) para reprint rápido
               state.lastJobId = job.id;
+              // Histórico persistente com ZPL (para reimprimir qualquer etiqueta)
+              addPrintHistoryEntry({
+                jobId: job.id,
+                zpl: job.zpl,
+                quantidade: job.quantidade,
+                ok: true,
+                printer: targetPrinter,
+              });
               log(`[poll] Job #${job.id} → OK`);
             } else {
               state.totalErrors++;
               state.lastPrint = new Date().toLocaleString('pt-BR');
               state.lastPrintOk = false;
+              addPrintHistoryEntry({
+                jobId: job.id,
+                zpl: job.zpl,
+                quantidade: job.quantidade,
+                ok: false,
+                printer: targetPrinter,
+              });
               log(`[poll] Job #${job.id} → ERRO: ${erroMsg}`);
             }
 
@@ -1046,37 +1194,92 @@ function runService() {
       return;
     }
 
-    // POST /api/reprint-last — reimprime o último ZPL na impressora configurada
+    // POST /api/reprint-last — reimprime o último ZPL (aceita quantidade)
     if (req.method === 'POST' && req.url === '/api/reprint-last') {
-      const cfg = readConfig();
-      if (!cfg.printer) return respJson(res, 400, { error: 'Nenhuma impressora configurada' });
-      if (!state.lastZpl) return respJson(res, 404, { error: 'Nenhuma etiqueta na memória para reimprimir' });
-      const pcfgReprint = getPrinterConfig(cfg, cfg.printer);
-      const zplToUse = injectLH(state.lastZpl, pcfgReprint);
-      printZpl(zplToUse, cfg.printer, (err2) => {
-        if (err2) return respJson(res, 500, { error: err2.message });
-        log(`[reprint] Última etiqueta (job #${state.lastJobId}) reimpressa em "${cfg.printer}"`);
-        const today = new Date().toDateString();
-        if (state.todayDate !== today) { state.todayPrints = []; state.todayDate = today; }
-        state.todayPrints.push({ time: new Date().toLocaleTimeString('pt-BR'), jobId: state.lastJobId, quantidade: '(reimpressão)', ok: true });
-        respJson(res, 200, { ok: true });
+      let body = '';
+      req.on('data', c => (body += c));
+      req.on('end', () => {
+        let quantidade = 1;
+        try { quantidade = JSON.parse(body || '{}').quantidade; } catch {}
+        quantidade = Math.max(1, Math.min(99, Number(quantidade) || 1));
+        const cfg = readConfig();
+        if (!cfg.printer) return respJson(res, 400, { error: 'Nenhuma impressora configurada' });
+        if (!state.lastZpl) return respJson(res, 404, { error: 'Nenhuma etiqueta na memória para reimprimir' });
+        const pcfgReprint = getPrinterConfig(cfg, cfg.printer);
+        const one = injectLH(state.lastZpl, pcfgReprint);
+        const zplToUse = Array(quantidade).fill(one).join('\n');
+        printZpl(zplToUse, cfg.printer, (err2) => {
+          if (err2) return respJson(res, 500, { error: err2.message });
+          log(`[reprint] Última etiqueta (job #${state.lastJobId}) ×${quantidade} em "${cfg.printer}"`);
+          const today = new Date().toDateString();
+          if (state.todayDate !== today) { state.todayPrints = []; state.todayDate = today; }
+          state.todayPrints.push({ time: new Date().toLocaleTimeString('pt-BR'), jobId: state.lastJobId, quantidade: quantidade + ' (reimpressão)', ok: true });
+          state.totalPrinted += quantidade;
+          respJson(res, 200, { ok: true, quantidade });
+        });
       });
       return;
     }
 
-    // GET /api/history — histórico de impressões do dia
-    if (req.method === 'GET' && req.url === '/api/history') {
-      const today = new Date().toDateString();
-      if (state.todayDate !== today) { state.todayPrints = []; state.todayDate = today; }
-      return respJson(res, 200, { ok: true, prints: state.todayPrints, date: state.todayDate });
+    // POST /api/reprint — reimprime etiqueta do histórico { id, quantidade }
+    if (req.method === 'POST' && req.url === '/api/reprint') {
+      let body = '';
+      req.on('data', c => (body += c));
+      req.on('end', () => {
+        try {
+          const data = JSON.parse(body || '{}');
+          const id = data.id;
+          const quantidade = Math.max(1, Math.min(99, Number(data.quantidade) || 1));
+          const cfg = readConfig();
+          if (!cfg.printer) return respJson(res, 400, { error: 'Nenhuma impressora configurada' });
+          const entry = findHistoryEntry(id);
+          if (!entry || !entry.zpl) return respJson(res, 404, { error: 'Etiqueta não encontrada no histórico' });
+          const pcfg = getPrinterConfig(cfg, cfg.printer);
+          const one = injectLH(entry.zpl, pcfg);
+          const zplToUse = Array(quantidade).fill(one).join('\n');
+          printZpl(zplToUse, cfg.printer, (err2) => {
+            if (err2) return respJson(res, 500, { error: err2.message });
+            log(`[reprint] Histórico ${entry.id} (job #${entry.jobId}) ×${quantidade} em "${cfg.printer}"`);
+            const today = new Date().toDateString();
+            if (state.todayDate !== today) { state.todayPrints = []; state.todayDate = today; }
+            state.todayPrints.push({ time: new Date().toLocaleTimeString('pt-BR'), jobId: entry.jobId, quantidade: quantidade + ' (reimpressão)', ok: true });
+            state.lastZpl = entry.zpl;
+            state.lastJobId = entry.jobId;
+            state.lastPrint = new Date().toLocaleString('pt-BR');
+            state.lastPrintOk = true;
+            state.totalPrinted += quantidade;
+            respJson(res, 200, { ok: true, quantidade, id: entry.id });
+          });
+        } catch (e) {
+          return respJson(res, 400, { error: e.message });
+        }
+      });
+      return;
     }
 
-    // GET /api/label-preview — proxy para Labelary (ZPL → PNG da última etiqueta)
+    // GET /api/history — histórico persistente (sem ZPL; use /api/reprint e preview por id)
+    if (req.method === 'GET' && req.url === '/api/history') {
+      return respJson(res, 200, {
+        ok: true,
+        prints: historyForApi(),
+        max: HISTORY_MAX,
+        // compat: também envia resumo do dia em memória
+        todayPrints: state.todayPrints,
+        date: state.todayDate,
+      });
+    }
+
+    // GET /api/label-preview — proxy Labelary (última etiqueta ou ?id= do histórico)
     if (req.method === 'GET' && req.url.startsWith('/api/label-preview')) {
       const cfg = readConfig();
-      const zpl = state.lastZpl;
+      const urlObj = new URL('http://localhost' + req.url);
+      const histId = urlObj.searchParams.get('id');
+      let zpl = state.lastZpl;
+      if (histId) {
+        const entry = findHistoryEntry(histId);
+        zpl = entry ? entry.zpl : null;
+      }
       if (!zpl) {
-        // Retorna placeholder 1x1 transparente
         res.writeHead(404, { 'Content-Type': 'text/plain' });
         return res.end('no-label');
       }
@@ -1124,7 +1327,7 @@ function runService() {
 async function install() {
   const LINE = '═'.repeat(52);
   console.log(`\n╔${LINE}╗`);
-  console.log('║  Agente de Impressão SGF v2.6 — Instalador          ║');
+  console.log('║  Agente de Impressão SGF v2.7 — Instalador          ║');
   console.log(`╚${LINE}╝\n`);
 
   const step = msg => process.stdout.write(`  ► ${msg}... `);
