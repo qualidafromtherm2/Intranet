@@ -40563,7 +40563,9 @@ function configurarCompraRealizadaGlobalCarrinho() {
       inputNfe.value = '';
 
       if (wrapperCompraAutorizada) wrapperCompraAutorizada.style.display = 'flex';
-      if (checkboxCompraAutorizada) checkboxCompraAutorizada.checked = true;
+      if (checkboxCompraAutorizada) {
+        checkboxCompraAutorizada.checked = window.usuarioTemPermissaoSistema(SYSTEM_PERMISSION_KEYS.compraDireta);
+      }
       if (wrapperRetornoCotacao) wrapperRetornoCotacao.style.display = 'flex';
       if (wrapperPrazoSolicitado) wrapperPrazoSolicitado.style.display = 'flex';
     }
@@ -40582,7 +40584,9 @@ function prepararPadroesAberturaCarrinhoCompras() {
   const compraAutorizada = document.getElementById('carrinhoCompraAutorizada');
 
   if (compraRealizada) compraRealizada.checked = false;
-  if (compraAutorizada) compraAutorizada.checked = true;
+  if (compraAutorizada) {
+    compraAutorizada.checked = window.usuarioTemPermissaoSistema(SYSTEM_PERMISSION_KEYS.compraDireta);
+  }
 }
 
 // Abre o modal do carrinho e sincroniza com os dados atuais
@@ -40700,6 +40704,10 @@ async function abrirModalCarrinhoComprasLegado() {
 }
 
 window.abrirModalCarrinhoCompras = async function() {
+  if (!exigirPermissaoSistema(
+    SYSTEM_PERMISSION_KEYS.compras,
+    'Seu usuário não possui permissão para solicitar compras.'
+  )) return;
   const modal = document.getElementById('modalCarrinhoCompras');
   if (!modal) return;
 
@@ -41714,6 +41722,11 @@ async function enviarPedidoModal() {
     || null;
   const compraRealizada = document.getElementById('carrinhoCompraRealizada')?.checked === true;
   const compraAutorizada = (document.getElementById('carrinhoCompraAutorizada')?.checked === true) && !compraRealizada;
+  if ((compraAutorizada || compraRealizada)
+      && !window.usuarioTemPermissaoSistema(SYSTEM_PERMISSION_KEYS.compraDireta)) {
+    alert('Seu usuário pode solicitar compras, mas elas precisam passar pela aprovação no Kanban de Compras.');
+    return;
+  }
   const prazoSolicitadoGlobal = compraRealizada ? null : prazoSolicitadoGlobalBruto;
   const retornoCotacaoGlobal = compraRealizada ? 'Não' : retornoCotacaoGlobalBruto;
   const notaFiscalGlobal = document.getElementById('carrinhoNfeGlobal')?.value?.trim() || '';
@@ -55334,6 +55347,10 @@ window.renderizarCatalogoOmie = renderizarCatalogoOmie;
   });
 
   window.abrirModalSeparacaoQtd = function(codigo, descricao, unidade) {
+    if (!exigirPermissaoSistema(
+      SYSTEM_PERMISSION_KEYS.separacao,
+      'Seu usuário não possui permissão para solicitar separação.'
+    )) return;
     _sepCtx = { codigo, descricao, unidade: (unidade || 'UN').toUpperCase() };
     const el = id => document.getElementById(id);
     el('sepQtyTitle').textContent = 'Quantidade para separação';
@@ -55606,6 +55623,10 @@ window.renderizarCatalogoOmie = renderizarCatalogoOmie;
   }
 
   async function mostrarEditarRapido() {
+    if (!exigirPermissaoSistema(
+      SYSTEM_PERMISSION_KEYS.editarProduto,
+      'Seu usuário não possui permissão para editar produtos.'
+    )) return;
     document.getElementById('modalAcoesBotoes').style.display = 'none';
     document.getElementById('modalAcoesManuais').style.display = 'none';
     document.getElementById('modalAcoesEditarRapido').style.display = 'block';
@@ -55979,6 +56000,13 @@ window.renderizarCatalogoOmie = renderizarCatalogoOmie;
   }
 
   function abrirQuantidade(tipo) {
+    const navKey = tipo === 'carrinho'
+      ? SYSTEM_PERMISSION_KEYS.compras
+      : SYSTEM_PERMISSION_KEYS.separacao;
+    const mensagem = tipo === 'carrinho'
+      ? 'Seu usuário não possui permissão para solicitar compras.'
+      : 'Seu usuário não possui permissão para solicitar separação.';
+    if (!exigirPermissaoSistema(navKey, mensagem)) return;
     _qtyCtx = { tipo, ..._ctx, multiplo: null };
     document.getElementById('modalAcoesQtdTitulo').textContent = tipo === 'carrinho'
       ? 'Quantidade para compra'
@@ -56208,10 +56236,11 @@ window.renderizarCatalogoOmie = renderizarCatalogoOmie;
     document.getElementById('modalAcoesDescricao').textContent = descricao;
     resetBotaoSeparacao();
     document.getElementById('modalManualStatus').textContent = '';
+    atualizarAcoesSistemaPorPermissao();
     mostrarBotoes();
     ov.style.display = 'flex';
     document.body.classList.add('mobile-modal-open');
-    document.getElementById('modalAcoesBtnCarrinho')?.focus({ preventScroll: true });
+    document.querySelector('#modalAcoesBotoes button:not(.perm-hidden)')?.focus({ preventScroll: true });
   };
 })();
 
@@ -71121,13 +71150,55 @@ async function markEstruturaButtons(containerEl) {
 })();
 
 // Deslogado: esconde tudo e mostra só Início + Login
+const SYSTEM_PERMISSION_KEYS = Object.freeze({
+  compras: 'system-shortcut:compras-carrinho',
+  separacao: 'system-shortcut:separacao-carrinho',
+  compraDireta: 'system-action:compras-direta',
+  movimentacao: 'side:log:solicitacao-ajuste',
+  expedicao: 'side:log:envio-mercadoria',
+  editarProduto: 'top:produto'
+});
+
+window.__navPermissionsByKey = Object.create(null);
+window.usuarioTemPermissaoSistema = function usuarioTemPermissaoSistema(navKey) {
+  return window.__navPermissionsByKey?.[navKey] === true;
+};
+
+function atualizarAcoesSistemaPorPermissao() {
+  const regras = [
+    ['#listaProdutosAbrirCarrinhoBtn', SYSTEM_PERMISSION_KEYS.compras],
+    ['#listaProdutosAbrirSeparacaoBtn', SYSTEM_PERMISSION_KEYS.separacao],
+    ['#modalAcoesBtnCarrinho', SYSTEM_PERMISSION_KEYS.compras],
+    ['#modalAcoesBtnSeparacao', SYSTEM_PERMISSION_KEYS.separacao],
+    ['#modalAcoesBtnMovimentar', SYSTEM_PERMISSION_KEYS.movimentacao],
+    ['#modalAcoesBtnExpedicao', SYSTEM_PERMISSION_KEYS.expedicao],
+    ['#modalAcoesBtnEditarRapido', SYSTEM_PERMISSION_KEYS.editarProduto],
+    ['#carrinhoCompraAutorizadaWrapper', SYSTEM_PERMISSION_KEYS.compraDireta],
+    ['#carrinhoCompraRealizadaWrapper', SYSTEM_PERMISSION_KEYS.compraDireta]
+  ];
+  regras.forEach(([selector, navKey]) => {
+    document.querySelectorAll(selector).forEach((el) => {
+      el.classList.toggle('perm-hidden', !window.usuarioTemPermissaoSistema(navKey));
+    });
+  });
+  document.dispatchEvent(new CustomEvent('permissions:system-actions-changed'));
+}
+
+function exigirPermissaoSistema(navKey, mensagem) {
+  if (window.usuarioTemPermissaoSistema(navKey)) return true;
+  alert(mensagem || 'Seu usuário não possui permissão para realizar esta ação.');
+  return false;
+}
+
 function applyLoggedOutUI(){
+  window.__navPermissionsByKey = Object.create(null);
   const gated = findGatedCandidates();
   gated.forEach(el => el.classList.add('perm-hidden'));
   PUBLIC_WHEN_LOGGED_OUT.forEach(sel => {
     document.querySelectorAll(sel).forEach(el => el.classList.remove('perm-hidden'));
   });
   aplicarVisibilidadeMenuChatbotAdmin();
+  atualizarAcoesSistemaPorPermissao();
 }
 
 function aplicarVisibilidadeMenuChatbotAdmin() {
@@ -71157,6 +71228,10 @@ function aplicarVisibilidadeMenuChatbotAdmin() {
 
 // Aplica uma árvore de permissões (já carregada) à UI
 function _applyPermissionTreeToUI(data){
+  window.__navPermissionsByKey = Object.create(null);
+  for (const n of (data && data.nodes) || []) {
+    if (n?.key) window.__navPermissionsByKey[n.key] = n.allowed === true;
+  }
   // começa escondendo tudo
   const gated = findGatedCandidates();
   gated.forEach(el => el.classList.add('perm-hidden'));
@@ -71179,6 +71254,7 @@ function _applyPermissionTreeToUI(data){
   });
 
   aplicarVisibilidadeMenuChatbotAdmin();
+  atualizarAcoesSistemaPorPermissao();
 
   // Se a guia ativa do produto ficou escondida, ativa a primeira guia visível
   const prodTabs = document.querySelector('#produtoTabs .main-header');
@@ -80982,6 +81058,10 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   window.abrirModalExpedicaoRapida = function(codigo, descricao, codigoProduto) {
+    if (!exigirPermissaoSistema(
+      SYSTEM_PERMISSION_KEYS.expedicao,
+      'Seu usuário não possui permissão para realizar expedições.'
+    )) return;
     _expRapidaCtx = { codigo, descricao: descricao || codigo, codigoProduto: codigoProduto || null, saldo: null, saldoDestino: null, unidade: 'UN' };
     _expRapidaTransferenciaId = null;
     document.getElementById('expRapidaDescricao').textContent = _expRapidaCtx.descricao;
@@ -81116,6 +81196,10 @@ document.addEventListener('DOMContentLoaded', () => {
   // Abre o modal completo de movimentações.
   // Abre o modal
   window.abrirModalMovimentacao = async function(codigo, descricao, codigoProduto, opcoes = {}) {
+    if (!exigirPermissaoSistema(
+      SYSTEM_PERMISSION_KEYS.movimentacao,
+      'Seu usuário não possui permissão para movimentar produtos.'
+    )) return;
     _codigoProdutoAtual = codigo;
     _descricaoProdutoAtual = descricao || codigo;
     _codigoProdutoOmieAtual = codigoProduto || null;
@@ -81870,7 +81954,13 @@ document.addEventListener('DOMContentLoaded', () => {
   });
   ov.addEventListener('click', e => { if (e.target === ov) fechar(); });
 
-  window.abrirModalCarrinhoSeparacao = abrir;
+  window.abrirModalCarrinhoSeparacao = function abrirCarrinhoSeparacaoComPermissao() {
+    if (!exigirPermissaoSistema(
+      SYSTEM_PERMISSION_KEYS.separacao,
+      'Seu usuário não possui permissão para solicitar separação.'
+    )) return;
+    return abrir();
+  };
 
   function _precarregarCarrinhoSeparacao() {
     if (window.__carrinhoSepPreloading) return;
@@ -90735,7 +90825,8 @@ window.initOscilacaoEstoque = (function () {
     });
 
     _systemShortcuts
-      .filter((atalho) => _isSystemShortcutEnabled(atalho.nav_key))
+      .filter((atalho) => _isSystemShortcutEnabled(atalho.nav_key)
+        && window.usuarioTemPermissaoSistema?.(atalho.nav_key))
       .forEach((atalho) => {
         container.appendChild(criarBotaoAtalho({
           ...atalho,
@@ -90744,6 +90835,8 @@ window.initOscilacaoEstoque = (function () {
         }));
       });
   }
+
+  document.addEventListener('permissions:system-actions-changed', renderizarAtalhosDoSistema);
 
   function renderizarAtalhosFlutuantes() {
     container.querySelectorAll('.shortcut-btn:not([data-system-shortcut="1"])').forEach((btn) => {

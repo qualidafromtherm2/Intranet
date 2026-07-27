@@ -4,6 +4,7 @@ const router  = express.Router();
 
 const { dbQuery, dbGetClient } = require('../src/db'); // usa DATABASE_URL com SSL quando em produção
 const { registrarModificacao } = require('../utils/auditoria');
+const { exigirPermissaoNav } = require('../utils/navPermissions');
 
 const multer = require('multer');
 const { v4: uuidv4 } = require('uuid');
@@ -54,6 +55,12 @@ router.get('/db-ping',  async (_req, res) => {
 // -----------------------------------------------------------------------------
 // POST /api/produtos/:codigo/fotos  (campo form: "foto")
 router.post('/:codigo/fotos', upload.single('foto'), async (req, res) => {
+  if (!await exigirPermissaoNav(
+    req,
+    res,
+    'top:produto',
+    'Seu usuário não possui permissão para editar produtos.'
+  )) return;
   try {
     if (!req.file) return res.status(400).json({ error: 'Envie a foto no campo "foto"' });
 
@@ -139,6 +146,12 @@ router.post('/:codigo/fotos', upload.single('foto'), async (req, res) => {
 // -----------------------------------------------------------------------------
 // DELETE /api/produtos/:codigo/fotos/:pos?  (pos padrão = 0) -> apenas inativa
 router.delete('/:codigo/fotos/:pos?', async (req, res) => {
+  if (!await exigirPermissaoNav(
+    req,
+    res,
+    'top:produto',
+    'Seu usuário não possui permissão para editar produtos.'
+  )) return;
   try {
     const codigoNum = await resolveCodigoProduto(req.params.codigo);
     const pos       = Number(req.params.pos ?? 0);

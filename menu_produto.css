@@ -14395,6 +14395,314 @@ table.tabela td.num {
   border-color: #334155 !important;
 }
 
+/* Lista de produtos: filtros progressivos em todas as telas. */
+.product-filter-mobile-toggle {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto 18px;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 46px;
+  padding: 9px 11px;
+  color: #26364a;
+  background: #f8fafc;
+  border: 0;
+  text-align: left;
+  cursor: pointer;
+}
+
+#filterPanel {
+  max-height: min(90vh, 760px);
+  overflow-y: auto;
+  box-sizing: border-box;
+}
+
+#filterPanel .product-filter-quick {
+  display: grid !important;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 10px !important;
+}
+
+#filterPanel .product-filter-quick > label,
+#filterPanel .product-filter-quick > div {
+  min-height: 38px;
+  margin: 0;
+  padding: 7px 8px;
+  background: #f6f8fb;
+  border: 1px solid #dbe3ec;
+  border-radius: 7px;
+  box-sizing: border-box;
+}
+
+#filterPanel .product-filter-quick > div {
+  grid-column: 1 / -1;
+}
+
+#filterPanel .product-filter-fields {
+  gap: 8px !important;
+  padding-top: 8px;
+}
+
+#filterPanel .product-filter-field {
+  padding: 0;
+  background: #fff;
+  border: 1px solid #cfd9e4;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+#filterPanel .product-filter-mobile-name {
+  font-size: 14px;
+  font-weight: 700;
+}
+
+#filterPanel .product-filter-mobile-state {
+  color: #65758a;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+#filterPanel .product-filter-field.has-selection .product-filter-mobile-state {
+  color: #1d4ed8;
+}
+
+#filterPanel .product-filter-mobile-toggle i {
+  transition: transform .18s ease;
+}
+
+#filterPanel .product-filter-field.is-mobile-open .product-filter-mobile-toggle i {
+  transform: rotate(180deg);
+}
+
+#filterPanel .product-filter-field > label,
+#filterPanel .product-filter-field > select,
+#filterPanel .product-filter-field > small {
+  display: none !important;
+}
+
+#filterPanel .product-filter-field.is-mobile-open > select,
+#filterPanel .product-filter-field.is-mobile-open > small {
+  display: block !important;
+}
+
+#filterPanel .product-filter-field.is-mobile-open > select {
+  width: calc(100% - 20px) !important;
+  min-height: 118px;
+  max-height: 190px;
+  margin: 2px 10px 7px;
+  padding: 8px !important;
+  background: #fff !important;
+  font-size: 15px !important;
+}
+
+#filterPanel .product-filter-field.is-mobile-open > small {
+  margin: 0 10px 10px !important;
+}
+
+#filterPanel .product-filter-actions {
+  position: sticky;
+  bottom: -24px;
+  z-index: 4;
+  padding: 10px 0 0;
+  background: #fff;
+  border-top: 1px solid #dbe3ec;
+}
+
+:root:not(.light-mode) #filterPanel .product-filter-field,
+:root:not(.light-mode) #filterPanel .product-filter-actions {
+  background: #0f172a !important;
+  border-color: #334155 !important;
+}
+
+:root:not(.light-mode) #filterPanel .product-filter-quick > label,
+:root:not(.light-mode) #filterPanel .product-filter-quick > div,
+:root:not(.light-mode) #filterPanel .product-filter-mobile-toggle {
+  color: #e2e8f0;
+  background: #172033;
+  border-color: #334155;
+}
+
+@media (max-width: 768px) {
+  #filterPanelOverlay {
+    align-items: stretch !important;
+    justify-content: stretch !important;
+    padding: 0 !important;
+  }
+
+  #filterPanel {
+    display: flex;
+    flex-direction: column;
+    width: 100% !important;
+    min-width: 0 !important;
+    max-width: none !important;
+    height: 100dvh;
+    max-height: 100dvh;
+    padding: 0 14px calc(10px + env(safe-area-inset-bottom)) !important;
+    overflow-y: auto;
+    border: 0 !important;
+    border-radius: 0 !important;
+    box-sizing: border-box;
+  }
+
+  #filterPanel .product-filter-header {
+    position: sticky;
+    top: 0;
+    z-index: 4;
+    min-height: 58px;
+    margin: 0 -14px !important;
+    padding: max(8px, env(safe-area-inset-top)) 16px 8px;
+    background: #fff;
+    border-bottom: 1px solid #dbe3ec;
+  }
+
+  #filterPanel #filterPanelCloseBtn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 42px;
+    height: 42px;
+    padding: 0 !important;
+    border-radius: 8px;
+  }
+
+  #filterPanel .product-filter-quick {
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px 10px !important;
+    padding: 12px 0 !important;
+  }
+
+  #filterPanel .product-filter-quick > label,
+  #filterPanel .product-filter-quick > div {
+    min-height: 38px;
+    margin: 0;
+    padding: 7px 8px;
+    background: #f6f8fb;
+    border: 1px solid #dbe3ec;
+    border-radius: 7px;
+    box-sizing: border-box;
+  }
+
+  #filterPanel .product-filter-quick > div {
+    grid-column: 1 / -1;
+  }
+
+  #filterPanel .product-filter-quick input[type="checkbox"] {
+    flex: 0 0 20px;
+    width: 20px !important;
+    height: 20px !important;
+  }
+
+  #filterPanel .product-filter-fields {
+    gap: 8px !important;
+    padding: 8px 0 4px;
+  }
+
+  #filterPanel .product-filter-field {
+    padding: 0;
+    background: #fff;
+    border: 1px solid #cfd9e4;
+    border-radius: 8px;
+    overflow: hidden;
+  }
+
+  #filterPanel .product-filter-mobile-toggle {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto 18px;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    min-height: 48px;
+    padding: 9px 11px;
+    color: #26364a;
+    background: #f8fafc;
+    border: 0;
+    text-align: left;
+  }
+
+  #filterPanel .product-filter-mobile-name {
+    font-size: 14px;
+    font-weight: 700;
+  }
+
+  #filterPanel .product-filter-mobile-state {
+    color: #65758a;
+    font-size: 12px;
+    font-weight: 600;
+  }
+
+  #filterPanel .product-filter-field.has-selection .product-filter-mobile-state {
+    color: #1d4ed8;
+  }
+
+  #filterPanel .product-filter-mobile-toggle i {
+    transition: transform .18s ease;
+  }
+
+  #filterPanel .product-filter-field.is-mobile-open .product-filter-mobile-toggle i {
+    transform: rotate(180deg);
+  }
+
+  #filterPanel .product-filter-field > label,
+  #filterPanel .product-filter-field > select,
+  #filterPanel .product-filter-field > small {
+    display: none !important;
+  }
+
+  #filterPanel .product-filter-field.is-mobile-open > select,
+  #filterPanel .product-filter-field.is-mobile-open > small {
+    display: block !important;
+  }
+
+  #filterPanel .product-filter-field.is-mobile-open > select {
+    width: calc(100% - 20px) !important;
+    min-height: 118px;
+    max-height: 190px;
+    margin: 2px 10px 7px;
+    padding: 8px !important;
+    background: #fff !important;
+    font-size: 16px !important;
+  }
+
+  #filterPanel .product-filter-field.is-mobile-open > small {
+    margin: 0 10px 10px !important;
+  }
+
+  #filterPanel .product-filter-actions {
+    position: sticky;
+    bottom: calc(-10px - env(safe-area-inset-bottom));
+    z-index: 4;
+    display: grid !important;
+    grid-template-columns: .85fr 1.15fr;
+    margin: 10px -14px 0 !important;
+    padding: 10px 14px calc(10px + env(safe-area-inset-bottom));
+    background: #fff;
+    border-top: 1px solid #dbe3ec;
+    box-shadow: 0 -8px 18px rgba(15, 23, 42, .08);
+  }
+
+  #filterPanel .product-filter-actions button {
+    width: 100%;
+    min-height: 44px;
+    padding: 9px 12px !important;
+  }
+
+  :root:not(.light-mode) #filterPanel .product-filter-header,
+  :root:not(.light-mode) #filterPanel .product-filter-actions,
+  :root:not(.light-mode) #filterPanel .product-filter-field {
+    background: #0f172a !important;
+    border-color: #334155 !important;
+  }
+
+  :root:not(.light-mode) #filterPanel .product-filter-quick > label,
+  :root:not(.light-mode) #filterPanel .product-filter-quick > div,
+  :root:not(.light-mode) #filterPanel .product-filter-mobile-toggle {
+    color: #e2e8f0;
+    background: #172033;
+    border-color: #334155;
+  }
+}
+
 /* --- Modal Cotacao Kanban: contraste no modo preto --- */
 :root:not(.light-mode) #modalCotacaoKanban .modal-content {
   background: #0f172a !important;

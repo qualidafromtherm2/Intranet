@@ -15,6 +15,7 @@ const { OMIE_APP_KEY, OMIE_APP_SECRET } = require('../config.server');
 const omieCall = require('../utils/omieCall');
 const { registrarEventoReq: monEventoReq } = require('../utils/monitoramento');
 const { validarPermissaoMovimentacao } = require('../utils/movimentacaoPermissoes');
+const { exigirPermissaoNav } = require('../utils/navPermissions');
 
 const STATUS_AGUARDANDO = 'Aguardando aprovação';
 const STATUS_EXECUTADO  = 'Executado';
@@ -654,6 +655,12 @@ router.get('/', async (_req, res) => {
 // Body: { tipo_operacao, local_estoque, data_movimentacao?, solicitante?, obs?, itens:[{codigo,descricao?,qtd,cmc?,codigo_produto?,codOmie?}] }
 router.post('/', express.json(), async (req, res) => {
   try {
+    if (!await exigirPermissaoNav(
+      req,
+      res,
+      'side:log:solicitacao-ajuste',
+      'Seu usuário não possui permissão para movimentar produtos.'
+    )) return;
     await ensureAjustesSchema();
 
     const tipo_operacao  = String(req.body?.tipo_operacao || '').trim().toUpperCase();

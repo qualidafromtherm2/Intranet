@@ -2,6 +2,7 @@
 const express  = require('express');
 const router   = express.Router();
 const { dbQuery, dbGetClient } = require('../src/db');
+const { exigirPermissaoNav } = require('../utils/navPermissions');
 const {
   sqlWhereProdutosOmieIdentidade,
   sqlOrderPreferCodigoProduto,
@@ -1309,6 +1310,12 @@ router.put('/:codigo/pir-vai-direto-identificacao', express.json(), async (req, 
 
 router.put('/:codigo/item-limitado', express.json(), async (req, res) => {
   try {
+    if (!await exigirPermissaoNav(
+      req,
+      res,
+      'top:produto',
+      'Seu usuário não possui permissão para editar produtos.'
+    )) return;
     await ensureProdutosOmieItemLimitadoColumn();
     const codigo = String(req.params.codigo || '').trim();
     if (!codigo) return res.status(400).json({ ok: false, error: 'Código obrigatório' });

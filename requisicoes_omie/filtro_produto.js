@@ -61,6 +61,54 @@ function setSelectedValues(select, values) {
   });
 }
 
+function prepararFiltrosMobile() {
+  const campos = [familySelect, tipoItemSelect, filterOrigemSel, filterCompraSel, filterLocalSel].filter(Boolean);
+  campos.forEach(select => {
+    const campo = select.parentElement;
+    if (!campo) return;
+    campo.classList.add('product-filter-field');
+    if (!campo.querySelector('.product-filter-mobile-toggle')) {
+      const label = campo.querySelector(`label[for="${select.id}"]`);
+      const botao = document.createElement('button');
+      botao.type = 'button';
+      botao.className = 'product-filter-mobile-toggle';
+      botao.setAttribute('aria-controls', select.id);
+      botao.innerHTML = `
+        <span class="product-filter-mobile-name">${label?.textContent?.replace(/:\s*$/, '') || 'Filtro'}</span>
+        <span class="product-filter-mobile-state">Todos</span>
+        <i class="fa-solid fa-chevron-down" aria-hidden="true"></i>`;
+      botao.addEventListener('click', () => {
+        const deveAbrir = !campo.classList.contains('is-mobile-open');
+        campo.parentElement?.querySelectorAll('.product-filter-field.is-mobile-open').forEach(outroCampo => {
+          outroCampo.classList.remove('is-mobile-open');
+          outroCampo.querySelector('.product-filter-mobile-toggle')?.setAttribute('aria-expanded', 'false');
+        });
+        campo.classList.toggle('is-mobile-open', deveAbrir);
+        const abriu = deveAbrir;
+        botao.setAttribute('aria-expanded', String(abriu));
+      });
+      botao.setAttribute('aria-expanded', 'false');
+      campo.insertBefore(botao, campo.firstChild);
+    }
+    if (!select.dataset.mobileFilterSync) {
+      select.addEventListener('change', atualizarResumoFiltrosMobile);
+      select.dataset.mobileFilterSync = '1';
+    }
+  });
+  atualizarResumoFiltrosMobile();
+}
+
+function atualizarResumoFiltrosMobile() {
+  [familySelect, tipoItemSelect, filterOrigemSel, filterCompraSel, filterLocalSel].filter(Boolean).forEach(select => {
+    const campo = select.closest('.product-filter-field');
+    const estado = campo?.querySelector('.product-filter-mobile-state');
+    if (!estado) return;
+    const total = getSelectedValues(select).length;
+    estado.textContent = total ? `${total} selecionado${total > 1 ? 's' : ''}` : 'Todos';
+    campo.classList.toggle('has-selection', total > 0);
+  });
+}
+
 /**
  * Extrai os 2 caracteres apos o primeiro ponto do codigo do produto.
  * Ex.: "04.MP.N.90557" -> "MP"
@@ -113,6 +161,7 @@ export function initFiltros({
   filterOrigemSel          = document.getElementById('filterOrigemProduto');
   filterCompraSel          = document.getElementById('filterSituacaoCompra');
   _onFiltered    = onFiltered;
+  prepararFiltrosMobile();
 
   const syncProximoPercentState = () => {
     if (!filterProximoEstoqueMinPercentInput) return;
@@ -188,6 +237,7 @@ export function initFiltros({
       activeLocalValues = [];
       activeOrigemValues = [];
       activeCompraValues = [];
+      atualizarResumoFiltrosMobile();
       fecharModalFiltro(true);
     });
   }
@@ -246,6 +296,8 @@ function abrirModalFiltro() {
   popularFamilias();
   popularTipoItem();
   popularLocais();
+  prepararFiltrosMobile();
+  atualizarResumoFiltrosMobile();
   filterOverlay.style.display = 'flex';
 }
 
@@ -285,6 +337,7 @@ function popularFamilias() {
     });
 
   setSelectedValues(familySelect, selecoesAtuais);
+  atualizarResumoFiltrosMobile();
 }
 
 /**
@@ -326,6 +379,7 @@ function popularTipoItem() {
   }
 
   setSelectedValues(tipoItemSelect, selecoesAtuais);
+  atualizarResumoFiltrosMobile();
 }
 
 /**
@@ -349,6 +403,7 @@ async function popularLocais() {
     });
 
   setSelectedValues(filterLocalSel, selecoesAtuais);
+  atualizarResumoFiltrosMobile();
 }
 
 /**

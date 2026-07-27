@@ -1803,7 +1803,7 @@
                     <span style="font-weight:700;color:#e5e7eb;font-size:12px;">Compra já autorizada</span>
                   </label>
 
-                  <label style="display:flex;align-items:center;gap:8px;cursor:pointer;padding:10px;background:#0f172a;border:1px solid #334155;border-radius:6px;">
+                  <label id="carrinhoCompraRealizadaWrapper" style="display:flex;align-items:center;gap:8px;cursor:pointer;padding:10px;background:#0f172a;border:1px solid #334155;border-radius:6px;">
                     <input type="checkbox" id="carrinhoCompraRealizada" style="width:18px;height:18px;cursor:pointer;">
                     <span style="font-weight:700;color:#e5e7eb;font-size:12px;">Compra já realizada</span>
                   </label>
@@ -7854,11 +7854,11 @@
               <!-- Modal Filtro de Produtos -->
               <div id="filterPanelOverlay" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:9998;align-items:center;justify-content:center;">
                 <div id="filterPanel" style="background:#fff;border-radius:12px;padding:24px;min-width:320px;max-width:420px;width:90%;box-shadow:0 8px 32px rgba(0,0,0,0.25);position:relative;">
-                  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:18px;">
+                  <div class="product-filter-header" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:18px;">
                     <span style="font-weight:700;font-size:16px;color:#111;">Filtrar Produtos</span>
                     <button id="filterPanelCloseBtn" style="background:none;border:none;cursor:pointer;color:#9ca3af;font-size:22px;line-height:1;padding:2px 6px;" title="Fechar">&#x2715;</button>
                   </div>
-                  <div style="display:flex;flex-direction:column;gap:8px;padding:12px 0 14px;border-bottom:1px solid #e5e7eb;margin-bottom:4px;">
+                  <div class="product-filter-quick" style="display:flex;flex-direction:column;gap:8px;padding:12px 0 14px;border-bottom:1px solid #e5e7eb;margin-bottom:4px;">
                     <label style="display:flex;align-items:center;gap:8px;font-size:13px;font-weight:500;color:#374151;cursor:pointer;">
                       <input type="checkbox" id="filterShowInactive" style="width:15px;height:15px;cursor:pointer;accent-color:#3b82f6;">Mostrar inativos
                     </label>
@@ -7891,7 +7891,7 @@
                       <input type="checkbox" id="filterHideEngineering" style="width:15px;height:15px;cursor:pointer;accent-color:#3b82f6;">Ocultar engenharia
                     </label>
                   </div>
-                  <div style="display:flex;flex-direction:column;gap:14px;">
+                  <div class="product-filter-fields" style="display:flex;flex-direction:column;gap:14px;">
                     <div>
                       <label for="familySelect" style="display:block;font-size:13px;font-weight:600;color:#374151;margin-bottom:5px;">Família:</label>
                       <select id="familySelect" multiple size="5" aria-describedby="familySelectHint" style="width:100%;padding:8px 10px;border:1px solid #d1d5db;border-radius:8px;font-size:14px;color:#374151;background:#f9fafb;"></select>
@@ -7924,7 +7924,7 @@
                       <small id="filterLocalSelectHint" style="display:block;margin-top:5px;color:#6b7280;font-size:11px;line-height:1.35;">Selecione um ou mais locais. O produto será exibido se tiver saldo positivo em qualquer um deles.</small>
                     </div>
                   </div>
-                  <div style="display:flex;gap:8px;margin-top:22px;justify-content:flex-end;">
+                  <div class="product-filter-actions" style="display:flex;gap:8px;margin-top:22px;justify-content:flex-end;">
                     <button id="filterPanelLimparBtn" style="padding:9px 18px;border:1.5px solid #d1d5db;border-radius:8px;background:#f9fafb;color:#374151;font-weight:600;font-size:14px;cursor:pointer;">Limpar</button>
                     <button id="filterPanelAplicarBtn" style="padding:9px 22px;border:none;border-radius:8px;background:linear-gradient(135deg,#3b82f6,#2563eb);color:#fff;font-weight:600;font-size:14px;cursor:pointer;">Aplicar</button>
                   </div>

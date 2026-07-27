@@ -54,6 +54,11 @@ const multer        = require('multer');
 // logo após os outros requires:
 const archiver = require('archiver');
 const crypto   = require('crypto');
+// Token efêmero usado somente por chamadas entre módulos deste mesmo processo.
+// Evita manter as rotas de compra abertas para requisições anônimas.
+if (!process.env.INTERNAL_API_TOKEN) {
+  process.env.INTERNAL_API_TOKEN = crypto.randomBytes(32).toString('hex');
+}
 // (se você usar fetch no Node <18, também faça: const fetch = require('node-fetch');)
 const { parse: csvParse }         = require('csv-parse/sync');
 const estoquePath = path.join(__dirname, 'data', 'estoque_acabado.json');
@@ -442,6 +447,40 @@ if (!pool) {
   console.warn('[pg] DATABASE_URL ausente — rotas que dependem do Postgres ficarão limitadas.');
 }
 const PG_ACTIVE_CLIENT_ERROR_HANDLER = Symbol('pgActiveClientErrorHandler');
+
+const SYSTEM_PERMISSION_KEYS = Object.freeze({
+  compras: 'system-shortcut:compras-carrinho',
+  separacao: 'system-shortcut:separacao-carrinho',
+  compraDireta: 'system-action:compras-direta'
+});
+
+async function usuarioTemPermissaoNav(userId, navKey, queryable = pool) {
+  if (!userId || !navKey || !queryable) return false;
+  const { rows } = await queryable.query(
+    `SELECT COALESCE((
+       SELECT t.allowed
+         FROM public.auth_user_permissions_tree($1) t
+        WHERE t.key = $2
+        LIMIT 1
+     ), false) AS allowed`,
+    [userId, navKey]
+  );
+  return rows[0]?.allowed === true;
+}
+
+async function exigirPermissaoNav(req, res, navKey, mensagem, queryable = pool) {
+  const internalToken = String(req.get?.('x-internal-api-token') || '');
+  if (internalToken && internalToken === process.env.INTERNAL_API_TOKEN) return true;
+  const userId = req.session?.user?.id;
+  if (!userId) {
+    res.status(401).json({ ok: false, error: 'Não autenticado.' });
+    return false;
+  }
+  if (await usuarioTemPermissaoNav(userId, navKey, queryable)) return true;
+  res.status(403).json({ ok: false, error: mensagem });
+  return false;
+}
+
 function protegerPgClientAtivo(client, origem = 'pool.connect') {
   if (!client || typeof client.on !== 'function' || client[PG_ACTIVE_CLIENT_ERROR_HANDLER]) {
     return client;
@@ -19572,7 +19611,13 @@ async function registrarMovimentacaoKanbanItens(client, solicIds, statusDestino,
 app.post('/api/logistica/separacao', express.json(), async (req, res) => {
   try {
     await ensureSchemaMigrated();
-    const id_user   = req.session?.user?.id || 'desconhecido';
+    if (!await exigirPermissaoNav(
+      req,
+      res,
+      SYSTEM_PERMISSION_KEYS.separacao,
+      'Seu usuário não possui permissão para solicitar separação.'
+    )) return;
+    const id_user   = req.session.user.id;
     const nome_user = req.session?.user?.username || req.session?.user?.nome || 'desconhecido';
     const { codigo, descricao, quantidade, unidade } = req.body || {};
     if (!codigo || !quantidade || Number(quantidade) <= 0) {
@@ -21595,6 +21640,13 @@ app.post('/api/logistica/separacao/enviar', express.json(), async (req, res) => 
     const id_user   = req.session?.user?.id;
     const nome_user = req.session?.user?.username || req.session?.user?.nome || 'desconhecido';
     if (!id_user) return res.status(401).json({ ok: false, error: 'Não autenticado.' });
+    if (!await exigirPermissaoNav(
+      req,
+      res,
+      SYSTEM_PERMISSION_KEYS.separacao,
+      'Seu usuário não possui permissão para solicitar separação.',
+      client
+    )) return;
     const { solicitado_para, motivo, data_prevista, horario, observacao, item_ids, forcar_novo_sep, os_num, id_vipp, conteudo, origem_vipp, local_estoque, local_estoque_nome, metodo_envio } = req.body || {};
     // Quando item_ids for fornecido (ex: VIPP), processa apenas esses itens do carrinho
     const filtroIds = Array.isArray(item_ids) && item_ids.length > 0
@@ -23246,6 +23298,12 @@ app.get('/api/produtos/detalhes/:codigo', async (req, res) => {
 
   app.post('/api/produtos/alterar', async (req, res) => {
     try {
+      if (!await exigirPermissaoNav(
+        req,
+        res,
+        'top:produto',
+        'Seu usuário não possui permissão para editar produtos.'
+      )) return;
       const data = await omieCall(
         'https://app.omie.com.br/api/v1/geral/produtos/',
         {
@@ -23423,6 +23481,12 @@ app.get('/api/produtos/detalhes/:codigo', async (req, res) => {
   // Endpoint PUT: Atualizar produto (apenas campos permitidos)
   app.put('/api/produtos/:codigo', express.json(), async (req, res) => {
     try {
+      if (!await exigirPermissaoNav(
+        req,
+        res,
+        'top:produto',
+        'Seu usuário não possui permissão para editar produtos.'
+      )) return;
       const codigo = req.params.codigo;
       const { descricao, lead_time, estoque_minimo, url_imagem } = req.body;
 
@@ -29200,9 +29264,27 @@ app.post('/api/compras/pedido', async (req, res) => {
 // POST /api/compras/solicitacao - Cria solicitações agrupadas por NP (do modal de carrinho)
 app.post('/api/compras/solicitacao', express.json(), async (req, res) => {
   try {
+    if (!await exigirPermissaoNav(
+      req,
+      res,
+      SYSTEM_PERMISSION_KEYS.compras,
+      'Seu usuário não possui permissão para solicitar compras.'
+    )) return;
     const { itens, compra_autorizada, compra_realizada, n_nota_fiscal } = req.body || {};
     const compraAutorizada = compra_autorizada === true;
     const compraRealizada = compra_realizada === true;
+    const requisicaoDiretaSolicitada = compraAutorizada
+      || compraRealizada
+      || (Array.isArray(itens) && itens.some(item => item?.requisicao_direta === true));
+    if (requisicaoDiretaSolicitada && !await usuarioTemPermissaoNav(
+      req.session?.user?.id,
+      SYSTEM_PERMISSION_KEYS.compraDireta
+    )) {
+      return res.status(403).json({
+        ok: false,
+        error: 'Seu usuário pode solicitar compras, mas elas precisam passar pela aprovação no Kanban de Compras.'
+      });
+    }
     const notaFiscalGlobal = String(n_nota_fiscal || '').trim();
 
     // Obtém usuário da sessão (fallback para body.solicitante — usado pelo chatbot WhatsApp)
@@ -30044,6 +30126,12 @@ async function obterStatusHistoricoPorGrupo({ grupoRequisicao, client = null }) 
 // POST /api/compras/sem-cadastro - Registra solicitação de compra para produto SEM cadastro na Omie
 app.post('/api/compras/sem-cadastro', express.json(), async (req, res) => {
   try {
+    if (!await exigirPermissaoNav(
+      req,
+      res,
+      SYSTEM_PERMISSION_KEYS.compras,
+      'Seu usuário não possui permissão para solicitar compras.'
+    )) return;
     const item = req.body || {};
     const reqId = `SEM-CAD-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
     const t0 = Date.now();
@@ -30179,6 +30267,13 @@ app.post('/api/compras/sem-cadastro', express.json(), async (req, res) => {
     const retornoSemValores = 'apenas realizar compra sem retorno de valores ou caracteristica';
     const compraJaRealizadaSelecionada = retornoTexto === retornoCompraJaRealizada;
     const registroRapidoSelecionado = retornoTexto === retornoRegistroRapido;
+    const podeCompraDireta = await usuarioTemPermissaoNav(userId, SYSTEM_PERMISSION_KEYS.compraDireta);
+    if ((compraJaRealizadaSelecionada || registroRapidoSelecionado) && !podeCompraDireta) {
+      return res.status(403).json({
+        ok: false,
+        error: 'Seu usuário pode solicitar compras, mas elas precisam passar pela aprovação no Kanban de Compras.'
+      });
+    }
     const preCadastroCompleto = item.pre_cadastro_completo === true
       || String(item.pre_cadastro_completo || '').trim().toLowerCase() === 'true'
       || String(item.pre_cadastro_completo || '').trim() === '1';
@@ -30217,7 +30312,7 @@ app.post('/api/compras/sem-cadastro', express.json(), async (req, res) => {
     } else if (registroRapidoSelecionado) {
       statusInicial = 'Concluido';
     } else if (retornoTexto) {
-      if (isDiretor) {
+      if (isDiretor && podeCompraDireta) {
         if (retornoTexto === retornoSemValores) {
           // Pré-cadastro completo: não passa por Análise de cadastro
           statusInicial = preCadastroCompleto

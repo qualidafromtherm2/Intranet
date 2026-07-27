@@ -1221,7 +1221,10 @@ async function processarFluxoCompras({ phoneDigits, userMessage, contatoInfo, bu
             `http://localhost:${process.env.PORT || 5001}/api/compras/sem-cadastro`,
             {
               method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
+              headers: {
+                'Content-Type': 'application/json',
+                'X-Internal-Api-Token': process.env.INTERNAL_API_TOKEN || ''
+              },
               body: JSON.stringify({
                 produto_descricao: d.produto_descricao,
                 quantidade: d.quantidade,
@@ -1244,7 +1247,10 @@ async function processarFluxoCompras({ phoneDigits, userMessage, contatoInfo, bu
             `http://localhost:${process.env.PORT || 5001}/api/compras/solicitacao`,
             {
               method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
+              headers: {
+                'Content-Type': 'application/json',
+                'X-Internal-Api-Token': process.env.INTERNAL_API_TOKEN || ''
+              },
               body: JSON.stringify({
                 itens: [{
                   produto_codigo: d.produto_codigo,
