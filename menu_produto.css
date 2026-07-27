@@ -20989,14 +20989,89 @@ html.light-mode #minhasComprasWrapper {
   }
 
   .home-module-heading { min-height: 0; align-items: flex-start; padding-right: 0; }
-  .home-module-heading p { max-width: 280px; }
+  .home-module-heading h1 { font-size: 23px; line-height: 1.15; }
+  .home-module-heading p { max-width: 300px; font-size: 13px; line-height: 1.4; }
   .home-module-grid,
   .home-routine-grid,
   .home-routine-grid.is-area-grid { grid-template-columns: 1fr; }
-  .home-module-card { min-height: 104px; }
+  .home-module-grid { gap: 10px; }
+  .home-module-card { min-height: 112px; padding: 15px; gap: 13px; }
+  .home-module-card-icon { width: 42px; height: 42px; font-size: 18px; }
+  .home-module-card-copy strong { font-size: 16px; }
+  .home-module-card-copy small { font-size: 13px; line-height: 1.35; }
+  .home-module-card-copy em { font-size: 12px; }
+  .home-module-card-arrow { font-size: 13px; }
   .home-module-back { padding: 7px 9px; font-size: 0; }
   .home-module-back i { font-size: 13px; }
   .home-reservations-section { padding: 10px; }
+
+  /* A grade mensal de sete colunas não é legível no celular. Mantém os
+     mesmos dias e ações, apresentados como agenda vertical. */
+  .home-reservations-section .content-section-title { font-size: 15px; }
+  .agenda-cal-layout { overflow: visible; }
+  .home-reservations-section .agenda-cal-sidebar {
+    order: -1;
+    display: flex;
+    width: 100%;
+    margin: 0 0 8px;
+  }
+  .home-reservations-section .agenda-sidebar-nav {
+    display: flex !important;
+    width: 100%;
+    min-height: 44px;
+    margin: 0;
+  }
+  .home-reservations-section .agenda-sidebar-nav .content-button {
+    min-width: 44px;
+    min-height: 44px;
+  }
+  .home-reservations-section #agendaMesTitulo { font-size: 14px !important; }
+  .agenda-cal-main { width: 100%; }
+  .agenda-calendario-grid.is-mobile-agenda {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .agenda-calendario-grid.is-mobile-agenda .agenda-cal-day {
+    width: 100%;
+    min-height: 72px;
+    display: grid;
+    grid-template-columns: 54px minmax(0, 1fr);
+    align-items: center;
+    gap: 10px;
+    padding: 9px;
+    text-align: left;
+    border-radius: 8px;
+  }
+  .agenda-calendario-grid.is-mobile-agenda .agenda-cal-num {
+    align-self: stretch;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 1px;
+    margin: 0;
+    border-right: 1px solid rgba(148, 163, 184, .22);
+    font-size: 11px;
+    text-transform: uppercase;
+  }
+  .agenda-calendario-grid.is-mobile-agenda .agenda-cal-num strong { font-size: 22px; line-height: 1; }
+  .agenda-calendario-grid.is-mobile-agenda .agenda-cal-num small { font-size: 10px; color: #94a3b8; }
+  .agenda-calendario-grid.is-mobile-agenda .agenda-cal-reservas { min-width: 0; gap: 5px; }
+  .agenda-calendario-grid.is-mobile-agenda .agenda-cal-reserva-item.is-mobile-stack {
+    min-height: 36px;
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 9px;
+    border-radius: 6px;
+  }
+  .agenda-mobile-reserva-hora { font-size: 12px; font-weight: 800; white-space: nowrap; }
+  .agenda-mobile-reserva-assunto { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; font-weight: 600; }
+  .agenda-mobile-reserva-icones { display: inline-flex; align-items: center; gap: 6px; font-size: 10px; }
+  .agenda-mobile-reserva-icones .agenda-chip-convocado-icon { display: inline-block; font-size: 11px; }
+  .agenda-mobile-empty { margin: 0; font-size: 12px; color: #94a3b8; }
 }
 
 

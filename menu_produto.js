@@ -74047,9 +74047,12 @@ function renderAgendaCalendarioMensal() {
         const clsMobile = reservaJaPassou(reserva)
           ? `agenda-cal-reserva-item ${cls} is-mobile-min is-mobile-stack is-past-chip${!reserva.realizada ? ' is-nao-realizada' : ''}`
           : `agenda-cal-reserva-item ${cls} is-mobile-min is-mobile-stack`;
+        const horaFim = String(reserva?.fim || '').slice(0, 5);
+        const assunto = String(reserva?.tema || title || 'Reserva').trim();
         return `<div class="${clsMobile}" ${idAttr} title="${tituloChip}">
-          ${horaInicio ? `<span class="agenda-chip-hora">${escapeHtml(horaInicio)}</span>` : ''}
-          ${convocadoHtml}
+          <span class="agenda-mobile-reserva-hora">${escapeHtml(horaInicio || '--:--')}${horaFim ? `–${escapeHtml(horaFim)}` : ''}</span>
+          <span class="agenda-mobile-reserva-assunto">${escapeHtml(assunto)}</span>
+          <span class="agenda-mobile-reserva-icones">${reserva?.cafe ? '<i class="fa-solid fa-mug-hot" title="Com café"></i>' : ''}${convocadoHtml}<i class="fa-solid fa-chevron-right" aria-hidden="true"></i></span>
         </div>`;
       }
 
@@ -74106,20 +74109,23 @@ function renderAgendaCalendarioMensal() {
           ${chipsPassados.length > 0 ? `<div class="agenda-cal-past-row">${chipsPassados.join('')}</div>` : ''}
         </div>
       `
-      : (isMobileView ? '' : '<div class="agenda-cal-meta">Clique para reservar</div>');
+      : (isMobileView ? '<div class="agenda-cal-meta agenda-mobile-empty">Toque para reservar</div>' : '<div class="agenda-cal-meta">Clique para reservar</div>');
 
     const lembretesHtml = '';
 
     htmlDias += `
       <button type="button" class="${classes.join(' ')}" data-agenda-date="${dataIso}">
-        <div class="agenda-cal-num">${diaExibicao}</div>
+        <div class="agenda-cal-num">${isMobileView
+          ? `<span>${escapeHtml(nomesDia[dataCelula.getDay()])}</span><strong>${diaExibicao}</strong><small>${escapeHtml(dataCelula.toLocaleDateString('pt-BR', { month: 'short' }).replace('.', ''))}</small>`
+          : diaExibicao}</div>
         ${reservasHtml}
         ${lembretesHtml}
       </button>
     `;
   }
 
-  grid.innerHTML = `${htmlCabecalho}${htmlDias}`;
+  grid.classList.toggle('is-mobile-agenda', isMobileView);
+  grid.innerHTML = `${isMobileView ? '' : htmlCabecalho}${htmlDias}`;
 }
 
 async function carregarUsuariosAtivosAgenda() {
