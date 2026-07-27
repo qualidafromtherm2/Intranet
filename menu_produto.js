@@ -11583,7 +11583,7 @@ function renderQualidadePirPendentes(itens = []) {
   if (!lista.length) {
     qualidadePirPendentesBody.innerHTML = `
       <tr>
-        <td colspan="7" style="text-align:center;padding:36px;color:#94a3b8;">
+        <td colspan="9" style="text-align:center;padding:36px;color:#94a3b8;">
           Nenhum item aguardando inspeção PIR.
         </td>
       </tr>`;
@@ -11600,6 +11600,8 @@ function renderQualidadePirPendentes(itens = []) {
       : '-';
     const un = item?.unidade ? ` ${qualidadePirEscapeHtml(item.unidade)}` : '';
     const criado = qualidadePirEscapeHtml(formatarDataPirPendente(item?.criado_em));
+    const fotoRaw = String(item?.produto_url_imagem || '').trim();
+    const fotoUrl = qualidadePirEscapeHtml(fotoRaw || `/imagens_produtos/${encodeURIComponent(String(item?.codigo_produto || '').trim())}.jpg`);
 
     const icons = [];
     if (item?.primeira_vez) {
@@ -11631,6 +11633,12 @@ function renderQualidadePirPendentes(itens = []) {
       <tr class="qualidade-pir-pendente-row" data-id="${id}"
           style="cursor:pointer;border-bottom:1px solid var(--border-color);"
           title="Abrir registro de inspeção">
+        <td class="pir-cell-photo" data-label="Foto">
+          <button type="button" class="pir-product-photo" data-url="${fotoUrl}" data-title="${codigo} — ${desc}" aria-label="Ampliar foto de ${codigo}">
+            <img src="${fotoUrl}" alt="Foto do produto ${codigo}" loading="lazy" />
+            <span aria-hidden="true"><i class="fa-regular fa-image"></i></span>
+          </button>
+        </td>
         <td class="pir-cell-alerts" data-label="Alertas" style="padding:10px 12px;text-align:center;vertical-align:middle;">${alertasHtml}</td>
         <td class="pir-cell-lot" data-label="Lote" style="padding:12px 14px;white-space:nowrap;">${lote}</td>
         <td class="pir-cell-nfe" data-label="NFe" style="padding:12px 14px;white-space:nowrap;">${nfe}</td>
@@ -11638,6 +11646,7 @@ function renderQualidadePirPendentes(itens = []) {
         <td class="pir-cell-description" data-label="Descrição" style="padding:12px 14px;">${desc}</td>
         <td class="pir-cell-quantity" data-label="Quantidade" style="padding:12px 14px;text-align:right;white-space:nowrap;">${qtd}${un}</td>
         <td class="pir-cell-created" data-label="Criado em" style="padding:12px 14px;white-space:nowrap;color:var(--inactive-color);font-size:12px;">${criado}</td>
+        <td class="pir-cell-action" data-label="Ação"><button type="button" class="pir-inspect-btn"><i class="fa-solid fa-clipboard-check"></i><span>Inspecionar</span></button></td>
       </tr>`;
   }).join('');
 
@@ -11660,13 +11669,24 @@ function renderQualidadePirPendentes(itens = []) {
       abrirModalAlteracoesProdutoPir(codigo, desc);
     });
   });
+
+  qualidadePirPendentesBody.querySelectorAll('.pir-product-photo').forEach((btn) => {
+    const img = btn.querySelector('img');
+    img?.addEventListener('error', () => btn.classList.add('is-missing'));
+    btn.addEventListener('click', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      if (btn.classList.contains('is-missing')) return;
+      abrirImagemPirFullscreen(btn.dataset.url || '', btn.dataset.title || 'Foto do produto');
+    });
+  });
 }
 
 async function carregarQualidadePirPendentes(q = '') {
   if (!qualidadePirPendentesBody) return;
   qualidadePirPendentesBody.innerHTML = `
     <tr>
-      <td colspan="7" style="text-align:center;padding:36px;color:#94a3b8;">
+      <td colspan="9" style="text-align:center;padding:36px;color:#94a3b8;">
         <i class="fa-solid fa-spinner fa-spin" style="font-size:22px;margin-bottom:8px;"></i>
         <div>Carregando pendentes...</div>
       </td>
@@ -11684,7 +11704,7 @@ async function carregarQualidadePirPendentes(q = '') {
     console.error('[QUALIDADE] erro ao carregar pendentes PIR', err);
     qualidadePirPendentesBody.innerHTML = `
       <tr>
-        <td colspan="7" style="text-align:center;padding:36px;color:#f87171;">
+        <td colspan="9" style="text-align:center;padding:36px;color:#f87171;">
           Erro ao carregar: ${qualidadePirEscapeHtml(err?.message || 'falha')}
         </td>
       </tr>`;
@@ -11894,6 +11914,8 @@ function abrirModalInspecaoQualidade(item = null) {
     const desc = String(item.descricao_produto || '').trim();
     const nfe = String(item.numero_nfe || '').trim();
     const qtd = item.qtd != null ? formatarQuantidadeExibicao(item.qtd) : '';
+    const fotoProduto = String(item.produto_url_imagem || '').trim();
+    if (fotoProduto) renderQualidadeImagemProduto(fotoProduto);
     const pareceIdOmie = /^\d{8,}$/.test(codigo);
     if (qualidadeCodProduto) qualidadeCodProduto.value = pareceIdOmie ? '' : codigo;
     if (qualidadeCodigoProdutoReal) qualidadeCodigoProdutoReal.value = pareceIdOmie ? codigo : '';
@@ -11948,6 +11970,9 @@ function abrirModalInspecaoQualidade(item = null) {
   }
 
   if (qualidadeInspecaoModal) qualidadeInspecaoModal.style.display = 'flex';
+  if (qualidadeInspecaoForm) qualidadeInspecaoForm.scrollTop = 0;
+  const qualidadeInspecaoContainer = qualidadeInspecaoModal?.querySelector('.modal-container');
+  if (qualidadeInspecaoContainer) qualidadeInspecaoContainer.scrollTop = 0;
 }
 
 function fecharModalInspecaoQualidade() {

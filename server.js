@@ -12387,6 +12387,7 @@ app.get('/api/etiquetas/recebimento/pendentes-pir', async (req, res) => {
                er.descricao_produto, er.qtd, er.unidade, er.data_emissao, er.criado_em, er.pir,
                po.codigo AS po_codigo,
                po.codigo_produto AS po_codigo_produto,
+               po.url_imagem AS produto_url_imagem,
                COALESCE(po.produto_customizado, FALSE) AS produto_customizado,
                COALESCE(po.pir_vai_direto_identificacao, FALSE) AS pir_vai_direto_identificacao,
                po.dinc AS po_dinc,
@@ -12429,8 +12430,19 @@ app.get('/api/etiquetas/recebimento/pendentes-pir', async (req, res) => {
                ) AS qtd_alteracoes
           FROM etiqueta."ETQ_recebimento" er
           LEFT JOIN LATERAL (
-            SELECT p.codigo, p.codigo_produto, p.produto_customizado, p.pir_vai_direto_identificacao, p.dinc, p.codint_familia
+            SELECT p.codigo, p.codigo_produto, img.url_imagem, p.produto_customizado, p.pir_vai_direto_identificacao, p.dinc, p.codint_familia
               FROM public.produtos_omie p
+              LEFT JOIN LATERAL (
+                SELECT TRIM(pi.url_imagem) AS url_imagem
+                  FROM public.produtos_omie_imagens pi
+                 WHERE pi.codigo_produto::text IN (
+                   p.codigo_produto::text,
+                   TRIM(COALESCE(p.codigo, '')),
+                   COALESCE(p.codigo_produto_integracao, '')
+                 )
+                 ORDER BY pi.pos NULLS LAST, pi.id ASC
+                 LIMIT 1
+              ) img ON TRUE
              WHERE TRIM(COALESCE(p.codigo, '')) = TRIM(COALESCE(er.codigo_produto, ''))
                 OR TRIM(COALESCE(p.codigo_produto::text, '')) = TRIM(COALESCE(er.codigo_produto, ''))
              LIMIT 1
@@ -12472,6 +12484,7 @@ app.get('/api/etiquetas/recebimento/pendentes-pir', async (req, res) => {
         qtd_alteracoes,
         po_codigo,
         po_codigo_produto,
+        produto_url_imagem,
         (COALESCE(qtd_alteracoes, 0) > 0) AS tem_alteracao,
         (
           qtd_recebimentos_anteriores = 0

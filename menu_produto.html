@@ -19,7 +19,7 @@
   referrerpolicy="no-referrer"
 />
   <!-- Seu CSS principal -->
-  <link rel="stylesheet" href="menu_produto.css?v=20260727-merge-prs-v2"/>
+  <link rel="stylesheet" href="menu_produto.css?v=20260727-pir-v3"/>
   <!-- Anti-flicker: esconde menus até as permissões serem aplicadas -->
   <style id="boot-anti-flicker">
     /* Enquanto o app não está pronto, esconde elementos sujeitos a permissões */
@@ -2981,6 +2981,7 @@
                       <table class="pir-pending-table" style="width:100%;border-collapse:collapse;min-width:720px;font-size:14px;">
                         <thead>
                           <tr style="background:linear-gradient(135deg,#1e293b 0%,#334155 100%);color:white;">
+                            <th class="pir-head-photo" style="padding:12px 14px;text-align:center;position:sticky;top:0;background:#1e293b;width:78px;">Foto</th>
                             <th style="padding:12px 14px;text-align:center;position:sticky;top:0;background:#1e293b;width:110px;">Alertas</th>
                             <th style="padding:12px 14px;text-align:left;position:sticky;top:0;background:#1e293b;">Lote</th>
                             <th style="padding:12px 14px;text-align:left;position:sticky;top:0;background:#1e293b;">NFe</th>
@@ -2988,11 +2989,12 @@
                             <th style="padding:12px 14px;text-align:left;position:sticky;top:0;background:#1e293b;">Descrição</th>
                             <th style="padding:12px 14px;text-align:right;position:sticky;top:0;background:#1e293b;">Qtd</th>
                             <th style="padding:12px 14px;text-align:left;position:sticky;top:0;background:#1e293b;">Criado em</th>
+                            <th style="padding:12px 14px;text-align:center;position:sticky;top:0;background:#1e293b;width:118px;">Ação</th>
                           </tr>
                         </thead>
                         <tbody id="qualidadePirPendentesBody">
                           <tr>
-                            <td colspan="7" style="text-align:center;padding:40px;color:#94a3b8;">
+                            <td colspan="9" style="text-align:center;padding:40px;color:#94a3b8;">
                               <i class="fa-solid fa-spinner fa-spin" style="font-size:22px;margin-bottom:8px;"></i>
                               <div>Carregando pendentes...</div>
                             </td>
@@ -12872,7 +12874,7 @@
   <script src="/public/js/at-masp-relatorio.js?v=20260718g" defer></script>
   <script src="/public/js/vendas-relatorio-gerencial.js?v=20260709a" defer></script>
   <script src="/public/js/logistica-relatorio-gerencial.js?v=20260712a" defer></script>
-  <script type="module" src="menu_produto.js?v=20260727-merge-prs-v2"></script>
+  <script type="module" src="menu_produto.js?v=20260727-pir-v3"></script>
 
   <script type="module" src="./requisicoes_omie/filtro_produto.js?v=20260718-faixa-minimo"></script>
   <script type="module" src="./requisicoes_omie/ListarProdutos.js?v=20260718-faixa-minimo"></script>

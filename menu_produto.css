@@ -12,6 +12,212 @@
   box-shadow: 0 2px 8px rgba(16,185,129,0.15);
 }
 
+/* PIR v2 — interior da inspeção alinhado às telas operacionais */
+#qualidadeInspecaoModal {
+  padding: 24px !important;
+  background: rgba(5, 14, 29, .62) !important;
+  backdrop-filter: blur(4px);
+}
+#qualidadeInspecaoModal .modal-container {
+  width: min(1180px, 96vw) !important;
+  max-width: 1180px !important;
+  max-height: 92vh !important;
+  overflow: hidden !important;
+  border: 1px solid #cfd9e5 !important;
+  border-radius: 16px !important;
+  background: #f4f7fa !important;
+  color: #172033 !important;
+  box-shadow: 0 28px 70px rgba(4, 12, 26, .34) !important;
+}
+#qualidadeInspecaoModal .modal-header {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  min-height: 58px;
+  padding: 12px 18px !important;
+  border-bottom: 3px solid #10a486 !important;
+  background: #0c1b33 !important;
+  color: #fff !important;
+}
+#qualidadeInspecaoModal .modal-header h3 { color: #fff !important; font-size: 17px !important; }
+#qualidadeInspecaoModal .modal-header h3 i { color: #63e6be !important; }
+#qualidadeInspecaoModal #qualidadeInspecaoModalFechar {
+  width: 38px;
+  height: 38px;
+  border-radius: 10px !important;
+  color: #fff !important;
+  background: rgba(255,255,255,.1) !important;
+}
+#qualidadeInspecaoModal #qualidadeInspecaoForm {
+  max-height: calc(92vh - 61px);
+  overflow-y: auto;
+  padding: 18px !important;
+  background: #eef3f7;
+}
+#qualidadeInspecaoModal .qualidade-inspecao-top {
+  grid-template-columns: 230px minmax(0, 1fr) !important;
+  gap: 18px !important;
+}
+#qualidadeInspecaoModal .form-field label {
+  display: block;
+  margin-bottom: 5px;
+  color: #52647c !important;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: .035em;
+  text-transform: uppercase;
+}
+#qualidadeInspecaoModal .qualidade-imagem-box {
+  min-height: 210px !important;
+  padding: 10px !important;
+  border: 1px solid #d5dfeb !important;
+  border-radius: 12px !important;
+  background: #fff !important;
+  color: #8593a6 !important;
+  overflow: hidden;
+}
+#qualidadeInspecaoModal .qualidade-imagem-box img {
+  width: 100% !important;
+  height: 210px !important;
+  max-height: 210px !important;
+  object-fit: contain !important;
+  cursor: zoom-in;
+}
+#qualidadeInspecaoModal .qualidade-inspecao-campos {
+  grid-template-columns: repeat(6, minmax(0, 1fr)) !important;
+  gap: 10px !important;
+}
+#qualidadeInspecaoModal .qualidade-inspecao-acoes-produto { grid-column: 1 / -1 !important; }
+#qualidadeInspecaoModal #qualidadeAbrirDadosProdutoBtn,
+#qualidadeInspecaoModal label[for="qualidadeProdutoCustomizadoCheck"],
+#qualidadeInspecaoModal label[for="qualidadeVaiDiretoIdentificacaoCheck"] {
+  min-width: 0 !important;
+  min-height: 42px;
+  justify-content: center;
+  border: 1px solid #ccd7e3 !important;
+  border-radius: 9px !important;
+  background: #fff !important;
+  color: #24344b !important;
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 12px;
+}
+#qualidadeInspecaoModal #qualidadeAbrirDadosProdutoBtn {
+  background: #2573df !important;
+  color: #fff !important;
+}
+#qualidadeInspecaoModal .qualidade-inspecao-campos > .form-field { grid-column: span 2; }
+#qualidadeInspecaoModal input,
+#qualidadeInspecaoModal select,
+#qualidadeInspecaoModal textarea {
+  min-height: 40px;
+  border: 1px solid #c8d4e1 !important;
+  border-radius: 8px !important;
+  background: #fff !important;
+  color: #172033 !important;
+  box-shadow: none !important;
+}
+#qualidadeInspecaoModal #qualidadeCarretelImagemPlaceholder {
+  min-height: 76px;
+  border: 1px solid #d5dfeb !important;
+  background: #fff !important;
+  color: #65758b !important;
+}
+#qualidadeInspecaoModal #qualidadeInspecaoAcoes {
+  position: sticky;
+  bottom: -18px;
+  z-index: 15;
+  margin: 16px -18px -18px !important;
+  padding: 12px 18px !important;
+  border-top: 1px solid #d5dfeb;
+  background: rgba(255,255,255,.96);
+}
+#qualidadeInspecaoModal #qualidadeInspecaoCancelarBtn,
+#qualidadeInspecaoModal #qualidadeInspecaoRegistrarBtn {
+  min-width: 130px;
+  min-height: 42px;
+  border-radius: 9px !important;
+  font-weight: 800;
+}
+#qualidadeInspecaoModal #qualidadeInspecaoRegistrarBtn { background: #0a9a76 !important; }
+
+@media (max-width: 760px) {
+  #qualidadeInspecaoModal { padding: 0 !important; align-items: stretch !important; }
+  #qualidadeInspecaoModal .modal-container {
+    width: 100% !important;
+    height: 100dvh !important;
+    max-width: none !important;
+    max-height: 100dvh !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+  }
+  #qualidadeInspecaoModal .modal-header { min-height: 54px; padding: 9px 12px !important; }
+  #qualidadeInspecaoModal .modal-header h3 { font-size: 15px !important; }
+  #qualidadeInspecaoModal #qualidadeInspecaoForm {
+    max-height: calc(100dvh - 54px);
+    padding: 10px !important;
+  }
+  #qualidadeInspecaoModal .qualidade-inspecao-top {
+    display: grid !important;
+    grid-template-columns: 86px minmax(0, 1fr) !important;
+    gap: 10px !important;
+  }
+  #qualidadeInspecaoModal .qualidade-inspecao-top > .form-field:first-child { grid-column: 1; }
+  #qualidadeInspecaoModal .qualidade-imagem-box {
+    width: 86px;
+    min-height: 86px !important;
+    height: 86px;
+    padding: 4px !important;
+  }
+  #qualidadeInspecaoModal .qualidade-imagem-box img {
+    height: 76px !important;
+    max-height: 76px !important;
+  }
+  #qualidadeInspecaoModal .qualidade-inspecao-campos {
+    grid-column: 2;
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    gap: 8px !important;
+  }
+  #qualidadeInspecaoModal .qualidade-inspecao-acoes-produto {
+    grid-column: 1 / -1 !important;
+    display: grid !important;
+    grid-template-columns: 1fr 1fr !important;
+    gap: 6px !important;
+  }
+  #qualidadeInspecaoModal #qualidadeAbrirDadosProdutoBtn {
+    grid-column: 1 / -1;
+    min-height: 38px;
+  }
+  #qualidadeInspecaoModal label[for="qualidadeProdutoCustomizadoCheck"],
+  #qualidadeInspecaoModal label[for="qualidadeVaiDiretoIdentificacaoCheck"] {
+    width: 100% !important;
+    min-height: 42px;
+    padding: 6px !important;
+    font-size: 10px;
+    line-height: 1.15;
+  }
+  #qualidadeInspecaoModal .qualidade-inspecao-campos > div:nth-child(2) {
+    grid-column: 1 / -1 !important;
+    display: none;
+  }
+  #qualidadeInspecaoModal .qualidade-inspecao-campos > .form-field { grid-column: 1 / -1; }
+  #qualidadeInspecaoModal .qualidade-inspecao-campos > .form-field:nth-last-of-type(-n+2) { grid-column: span 1; }
+  #qualidadeInspecaoModal input { min-height: 42px; font-size: 16px !important; }
+  #qualidadeInspecaoModal #qualidadeCarretelImagemPlaceholder .qualidade-pir-galeria {
+    grid-template-columns: 1fr !important;
+  }
+  #qualidadeInspecaoModal #qualidadeInspecaoAcoes {
+    bottom: -10px;
+    display: grid !important;
+    grid-template-columns: 1fr 1.35fr;
+    margin: 12px -10px -10px !important;
+    padding: 10px !important;
+  }
+  #qualidadeInspecaoModal #qualidadeInspecaoCancelarBtn,
+  #qualidadeInspecaoModal #qualidadeInspecaoRegistrarBtn { min-width: 0; width: 100%; }
+}
+
 /* Ficha operacional de compras — estrutura inspirada no fluxo da Omie. */
 #modalDetalhesPedidoCompras.cp-detail-modal {
   left: var(--cp-detail-nav-offset, 0px) !important;
@@ -21987,4 +22193,304 @@ html.light-mode #minhasComprasWrapper {
   #qualidadeFabricaPane .pir-pending-panel { padding: 10px !important; }
   #qualidadeFabricaPane .pir-pending-header > div:first-child { min-width: 0 !important; }
   #qualidadeFabricaPane .pir-pending-table tbody { grid-template-columns: 1fr; }
+}
+
+/* PIR v2 — mesma linguagem operacional de Identificação e Armazenamento. */
+#qualidadeFabricaPane {
+  --pir-navy: #0c1b33;
+  --pir-teal: #087f6b;
+  --pir-teal-soft: #dff5ef;
+  --pir-ink: #152338;
+  --pir-muted: #607086;
+  --pir-line: #d4dde8;
+  --pir-surface: #ffffff;
+  --pir-canvas: #edf2f7;
+  color: var(--pir-ink) !important;
+  background: var(--pir-canvas) !important;
+}
+
+#qualidadeFabricaPane .content-wrapper {
+  padding-top: 18px !important;
+  background: var(--pir-canvas) !important;
+}
+
+#qualidadeFabricaPane .content-section {
+  overflow: hidden;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 1px solid #c7d2e0;
+  border-radius: 8px;
+  background: var(--pir-surface);
+  box-shadow: 0 3px 14px rgba(15, 35, 60, .08);
+}
+
+#qualidadeFabricaPane .pir-page-heading {
+  min-height: 62px;
+  margin: 0;
+  padding: 12px 16px;
+  color: #fff;
+  background: var(--pir-navy);
+  border-bottom: 3px solid #25b99a;
+}
+
+#qualidadeFabricaPane .pir-page-heading .content-section-title {
+  color: #fff !important;
+  font-size: 18px;
+  font-weight: 800;
+}
+
+#qualidadeFabricaPane .pir-page-heading .content-section-title i { color: #60dfbf !important; }
+#qualidadeFabricaPane .pir-page-subtitle { color: #c5d1e1 !important; }
+#qualidadeFabricaPane #qualidadePirPendentesCount {
+  padding: 6px 10px !important;
+  color: #063b31 !important;
+  background: #8ce9d1 !important;
+  border: 1px solid #b9f2e4;
+  border-radius: 6px !important;
+  box-shadow: none !important;
+}
+
+#qualidadeFabricaPane #qualidadeAcoesRapidas.pir-action-toolbar {
+  margin: 0 !important;
+  padding: 10px 16px;
+  background: #fff;
+  border-bottom: 1px solid var(--pir-line);
+}
+
+#qualidadeFabricaPane .pir-action-toolbar .content-button,
+#qualidadeFabricaPane .pir-action-toolbar label {
+  min-height: 38px;
+  color: var(--pir-ink) !important;
+  background: #f5f8fb !important;
+  border: 1px solid #b9c7d8 !important;
+  border-radius: 6px !important;
+  box-shadow: none !important;
+}
+
+#qualidadeFabricaPane #qualidadeNovoRegistroBtn {
+  color: #fff !important;
+  background: var(--pir-teal) !important;
+  border-color: var(--pir-teal) !important;
+}
+
+#qualidadeFabricaPane .pir-action-more > summary {
+  border-color: #b9c7d8 !important;
+  background: #eef3f8 !important;
+  color: #33465e !important;
+}
+
+#qualidadeFabricaPane #qualidadePirPendentesWrap { margin: 0 !important; padding: 14px; background: var(--pir-canvas); }
+#qualidadeFabricaPane .pir-pending-panel {
+  padding: 0 !important;
+  overflow: hidden;
+  border: 1px solid var(--pir-line) !important;
+  background: #fff !important;
+}
+
+#qualidadeFabricaPane .pir-pending-header { margin: 0 !important; padding: 12px 14px 8px; }
+#qualidadeFabricaPane .pir-pending-header > div:first-child { color: var(--pir-ink); }
+#qualidadeFabricaPane #qualidadePirPendentesBusca {
+  min-height: 42px;
+  color: var(--pir-ink) !important;
+  background: #fff !important;
+  border-color: #aebdd0 !important;
+}
+#qualidadeFabricaPane .pir-alert-legend { margin: 0 !important; padding: 0 14px 10px; color: var(--pir-muted) !important; }
+#qualidadeFabricaPane .pir-pending-list { max-height: calc(100dvh - 270px) !important; border: 0 !important; border-top: 1px solid var(--pir-line) !important; }
+#qualidadeFabricaPane .pir-pending-table { color: var(--pir-ink); background: #fff; }
+#qualidadeFabricaPane .pir-pending-table thead tr { color: #33465e !important; background: #e8eef5 !important; }
+#qualidadeFabricaPane .pir-pending-table thead th {
+  padding: 10px 12px !important;
+  color: #41546d !important;
+  background: #e8eef5 !important;
+  border-bottom: 1px solid #becbdd;
+  font-size: 11px;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+#qualidadeFabricaPane .qualidade-pir-pendente-row { color: var(--pir-ink); background: #fff; }
+#qualidadeFabricaPane .qualidade-pir-pendente-row:hover { background: #f1faf7 !important; }
+#qualidadeFabricaPane .pir-cell-code { color: #075c9c !important; }
+#qualidadeFabricaPane .pir-cell-created { color: var(--pir-muted) !important; }
+
+#qualidadeFabricaPane .pir-cell-photo { width: 76px; padding: 7px 9px; }
+#qualidadeFabricaPane .pir-product-photo {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 58px;
+  height: 58px;
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid #c7d3e1;
+  border-radius: 6px;
+  background: #f3f6fa;
+  cursor: zoom-in;
+}
+#qualidadeFabricaPane .pir-product-photo img { width: 100%; height: 100%; object-fit: contain; background: #fff; }
+#qualidadeFabricaPane .pir-product-photo span { display: none; color: #8a9aaf; font-size: 20px; }
+#qualidadeFabricaPane .pir-product-photo.is-missing img { display: none; }
+#qualidadeFabricaPane .pir-product-photo.is-missing span { display: inline-flex; }
+#qualidadeFabricaPane .pir-cell-action { padding: 8px 10px; text-align: center; }
+#qualidadeFabricaPane .pir-inspect-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 38px;
+  padding: 7px 10px;
+  color: #fff;
+  background: var(--pir-teal);
+  border: 1px solid var(--pir-teal);
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+@media (max-width: 900px) {
+  #qualidadeFabricaPane .content-wrapper { padding: 12px !important; }
+  #qualidadeFabricaPane #qualidadeAcoesRapidas.pir-action-toolbar { padding: 10px 12px; }
+  #qualidadeFabricaPane #qualidadePirPendentesWrap { padding: 10px; }
+  #qualidadeFabricaPane .pir-pending-table tbody { gap: 10px; padding: 10px; background: var(--pir-canvas); }
+  #qualidadeFabricaPane .pir-pending-table .qualidade-pir-pendente-row {
+    grid-template-columns: 72px minmax(0, 1fr) auto !important;
+    grid-template-areas:
+      "photo code action"
+      "photo description action"
+      "alerts alerts alerts"
+      "lot nfe quantity"
+      "created created created";
+    gap: 0 10px;
+    padding: 10px !important;
+    background: #fff !important;
+    border-left: 4px solid #21a88c !important;
+    box-shadow: 0 2px 8px rgba(15, 35, 60, .07);
+  }
+  #qualidadeFabricaPane .pir-pending-table .qualidade-pir-pendente-row > td::before { margin-bottom: 2px; color: #708198; }
+  #qualidadeFabricaPane .pir-cell-photo { grid-area: photo; width: auto; padding: 0 !important; }
+  #qualidadeFabricaPane .pir-product-photo { width: 70px; height: 70px; }
+  #qualidadeFabricaPane .pir-cell-code { grid-area: code !important; padding-top: 2px !important; font-size: 15px !important; }
+  #qualidadeFabricaPane .pir-cell-description { grid-area: description !important; padding-top: 1px !important; }
+  #qualidadeFabricaPane .pir-cell-alerts { grid-area: alerts !important; padding: 8px 0 5px !important; border-top: 1px solid #e4eaf1 !important; }
+  #qualidadeFabricaPane .pir-cell-lot { grid-area: lot !important; }
+  #qualidadeFabricaPane .pir-cell-nfe { grid-area: nfe !important; }
+  #qualidadeFabricaPane .pir-cell-quantity { grid-area: quantity !important; }
+  #qualidadeFabricaPane .pir-cell-created { grid-area: created !important; padding-bottom: 0 !important; }
+  #qualidadeFabricaPane .pir-cell-action { grid-area: action; align-self: center; padding: 0 !important; }
+  #qualidadeFabricaPane .pir-inspect-btn { min-height: 44px; }
+}
+
+@media (max-width: 640px) {
+  #qualidadeFabricaPane .content-wrapper { padding: 0 0 calc(76px + env(safe-area-inset-bottom)) 48px !important; }
+  #qualidadeFabricaPane .content-section { border: 0; border-radius: 0; box-shadow: none; }
+  #qualidadeFabricaPane .pir-page-heading { min-height: 56px; padding: 9px 10px; }
+  #qualidadeFabricaPane .pir-page-heading .content-section-title { font-size: 16px; }
+  #qualidadeFabricaPane .pir-page-subtitle { display: none; }
+  #qualidadeFabricaPane #qualidadeAcoesRapidas.pir-action-toolbar { grid-template-columns: minmax(0, 1fr) auto !important; padding: 8px 10px; }
+  #qualidadeFabricaPane .pir-action-primary > #qualidadeNovoRegistroBtn { grid-column: auto; }
+  #qualidadeFabricaPane .pir-action-primary > label,
+  #qualidadeFabricaPane .pir-action-primary > #qualidadePirSemMpBtn,
+  #qualidadeFabricaPane .pir-action-primary > #qualidadePirRefreshBtn { display: none !important; }
+  #qualidadeFabricaPane .pir-action-more[open] { grid-column: 1 / -1; }
+  #qualidadeFabricaPane #qualidadePirPendentesWrap { padding: 8px; }
+  #qualidadeFabricaPane .pir-pending-header { padding: 10px; }
+  #qualidadeFabricaPane .pir-pending-header > div:first-child { font-size: 13px; }
+  #qualidadeFabricaPane .pir-alert-legend { grid-template-columns: 1fr 1fr !important; padding: 0 10px 9px; font-size: 10px !important; }
+  #qualidadeFabricaPane .pir-pending-table tbody { padding: 0; background: transparent; }
+  #qualidadeFabricaPane .pir-pending-table .qualidade-pir-pendente-row {
+    grid-template-columns: 64px minmax(0, 1fr) !important;
+    grid-template-areas:
+      "photo code"
+      "photo description"
+      "quantity quantity"
+      "alerts alerts"
+      "lot nfe"
+      "created created"
+      "action action";
+    margin-bottom: 8px;
+    padding: 10px !important;
+  }
+  #qualidadeFabricaPane .pir-product-photo { width: 62px; height: 62px; }
+  #qualidadeFabricaPane .pir-cell-quantity {
+    display: flex !important;
+    align-items: baseline;
+    justify-content: space-between;
+    margin-top: 7px;
+    padding: 7px 0 !important;
+    color: #0b6555;
+    border-top: 1px solid #e4eaf1 !important;
+    border-bottom: 1px solid #e4eaf1 !important;
+    font-size: 15px;
+    font-weight: 900;
+  }
+  #qualidadeFabricaPane .pir-cell-quantity::before { margin: 0 !important; }
+  #qualidadeFabricaPane .pir-cell-alerts { border-top: 0 !important; }
+  #qualidadeFabricaPane .pir-cell-action { width: 100%; padding-top: 8px !important; }
+  #qualidadeFabricaPane .pir-inspect-btn { width: 100%; min-height: 44px; font-size: 13px; }
+}
+
+/* Override final: o modal PIR permanece claro e compacto em qualquer tema. */
+#qualidadeInspecaoModal .modal-container { background: #f4f7fa !important; color: #172033 !important; }
+#qualidadeInspecaoModal #qualidadeInspecaoForm { background: #eef3f7 !important; color: #172033 !important; }
+#qualidadeInspecaoModal #qualidadeCarretelImagemPlaceholder,
+#qualidadeInspecaoModal .qualidade-pir-carretel-wrap,
+#qualidadeInspecaoModal .qualidade-pir-galeria { background: #fff !important; color: #172033 !important; }
+#qualidadeInspecaoModal .qualidade-pir-card {
+  overflow: hidden;
+  border: 1px solid #d2dce8 !important;
+  border-radius: 11px !important;
+  background: #fff !important;
+}
+#qualidadeInspecaoModal .qualidade-pir-img-wrap { background: #f7f9fb !important; }
+#qualidadeInspecaoModal .qualidade-pir-oque-box {
+  min-height: 58px;
+  border: 0 !important;
+  border-top: 1px solid #e1e7ee !important;
+  border-radius: 0 !important;
+  background: #fff !important;
+  color: #172033 !important;
+}
+#qualidadeInspecaoModal .qualidade-pir-oque-title { color: #607086 !important; }
+#qualidadeInspecaoModal .qualidade-pir-oque-text { color: #172033 !important; }
+
+@media (max-width: 760px) {
+  #qualidadeInspecaoModal .modal-container { height: 100dvh !important; max-height: 100dvh !important; }
+  #qualidadeInspecaoModal #qualidadeInspecaoForm { max-height: calc(100dvh - 54px) !important; padding: 10px !important; }
+  #qualidadeInspecaoModal .qualidade-inspecao-top {
+    display: grid !important;
+    grid-template-columns: 86px minmax(0, 1fr) !important;
+    gap: 10px !important;
+  }
+  #qualidadeInspecaoModal .qualidade-inspecao-top > .form-field:first-child { grid-column: 1 !important; }
+  #qualidadeInspecaoModal .qualidade-imagem-box { width: 86px !important; height: 86px !important; min-height: 86px !important; }
+  #qualidadeInspecaoModal .qualidade-imagem-box img { height: 76px !important; max-height: 76px !important; }
+  #qualidadeInspecaoModal .qualidade-inspecao-campos {
+    grid-column: 2 !important;
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    gap: 8px !important;
+  }
+  #qualidadeInspecaoModal .qualidade-inspecao-acoes-produto {
+    grid-column: 1 / -1 !important;
+    display: grid !important;
+    grid-template-columns: 1fr 1fr !important;
+    gap: 6px !important;
+  }
+  #qualidadeInspecaoModal #qualidadeAbrirDadosProdutoBtn { grid-column: 1 / -1 !important; }
+  #qualidadeInspecaoModal .qualidade-inspecao-campos > div:nth-child(2) { display: none !important; }
+  #qualidadeInspecaoModal .qualidade-inspecao-campos > .form-field { grid-column: 1 / -1 !important; }
+  #qualidadeInspecaoModal .qualidade-inspecao-campos > .form-field:nth-last-of-type(-n+2) { grid-column: span 1 !important; }
+  #qualidadeInspecaoModal #qualidadeCarretelImagemPlaceholder .qualidade-pir-galeria { grid-template-columns: 1fr !important; }
+  #qualidadeInspecaoModal #qualidadeCarretelImagemPlaceholder .qualidade-pir-img,
+  #qualidadeInspecaoModal #qualidadeCarretelImagemPlaceholder .qualidade-pir-img-wrap {
+    min-height: 150px !important;
+    max-height: 210px !important;
+  }
+  #qualidadeInspecaoModal #qualidadeInspecaoAcoes {
+    display: grid !important;
+    grid-template-columns: 1fr 1.35fr !important;
+    position: sticky !important;
+    bottom: -10px !important;
+  }
 }
