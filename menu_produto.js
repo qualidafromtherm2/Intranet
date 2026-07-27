@@ -10431,12 +10431,27 @@ const qualidadeProdutoCustomizadoCheck = document.getElementById('qualidadeProdu
 const qualidadeVaiDiretoIdentificacaoCheck = document.getElementById('qualidadeVaiDiretoIdentificacaoCheck');
 const qualidadeAbrirDadosProdutoBtn = document.getElementById('qualidadeAbrirDadosProdutoBtn');
 const qualidadePirVerificacaoCheckbox = document.getElementById('qualidadePirVerificacaoCheckbox');
+const qualidadePirMaisAcoes = document.querySelector('#qualidadeFabricaPane .pir-action-more');
 const qualidadeManuaisPrincipaisBtn = document.getElementById('qualidadeManuaisPrincipaisBtn');
 const qualidadeManuaisRecarregarBtn = document.getElementById('qualidadeManuaisRecarregarBtn');
 const qualidadeManuaisListaWrap = document.getElementById('qualidadeManuaisListaWrap');
 const qualidadeManuaisLista = document.getElementById('qualidadeManuaisLista');
 const qualidadeManuaisMeta = document.getElementById('qualidadeManuaisMeta');
 let qualidadePirVerificacaoSalvando = false;
+
+if (qualidadePirMaisAcoes) {
+  const pirAcoesMobileMedia = window.matchMedia('(max-width: 900px)');
+  const sincronizarMaisAcoesPir = (mobile) => {
+    if (mobile) qualidadePirMaisAcoes.removeAttribute('open');
+    else qualidadePirMaisAcoes.setAttribute('open', '');
+  };
+  sincronizarMaisAcoesPir(pirAcoesMobileMedia.matches);
+  if (typeof pirAcoesMobileMedia.addEventListener === 'function') {
+    pirAcoesMobileMedia.addEventListener('change', (event) => sincronizarMaisAcoesPir(event.matches));
+  } else if (typeof pirAcoesMobileMedia.addListener === 'function') {
+    pirAcoesMobileMedia.addListener((event) => sincronizarMaisAcoesPir(event.matches));
+  }
+}
 let qualidadeListaPirOrigem = 'pir';
 let qualidadeManuaisCarregando = false;
 let qualidadePirPendentesDebounce = null;
@@ -11616,13 +11631,13 @@ function renderQualidadePirPendentes(itens = []) {
       <tr class="qualidade-pir-pendente-row" data-id="${id}"
           style="cursor:pointer;border-bottom:1px solid var(--border-color);"
           title="Abrir registro de inspeção">
-        <td style="padding:10px 12px;text-align:center;vertical-align:middle;">${alertasHtml}</td>
-        <td style="padding:12px 14px;white-space:nowrap;">${lote}</td>
-        <td style="padding:12px 14px;white-space:nowrap;">${nfe}</td>
-        <td style="padding:12px 14px;white-space:nowrap;color:#93c5fd;font-weight:600;">${codigo}</td>
-        <td style="padding:12px 14px;">${desc}</td>
-        <td style="padding:12px 14px;text-align:right;white-space:nowrap;">${qtd}${un}</td>
-        <td style="padding:12px 14px;white-space:nowrap;color:var(--inactive-color);font-size:12px;">${criado}</td>
+        <td class="pir-cell-alerts" data-label="Alertas" style="padding:10px 12px;text-align:center;vertical-align:middle;">${alertasHtml}</td>
+        <td class="pir-cell-lot" data-label="Lote" style="padding:12px 14px;white-space:nowrap;">${lote}</td>
+        <td class="pir-cell-nfe" data-label="NFe" style="padding:12px 14px;white-space:nowrap;">${nfe}</td>
+        <td class="pir-cell-code" data-label="Código" style="padding:12px 14px;white-space:nowrap;color:#93c5fd;font-weight:600;">${codigo}</td>
+        <td class="pir-cell-description" data-label="Descrição" style="padding:12px 14px;">${desc}</td>
+        <td class="pir-cell-quantity" data-label="Quantidade" style="padding:12px 14px;text-align:right;white-space:nowrap;">${qtd}${un}</td>
+        <td class="pir-cell-created" data-label="Criado em" style="padding:12px 14px;white-space:nowrap;color:var(--inactive-color);font-size:12px;">${criado}</td>
       </tr>`;
   }).join('');
 

@@ -21832,3 +21832,159 @@ html.light-mode #minhasComprasWrapper {
   .exp-rapida-saldos { grid-template-columns: 1fr; }
   .exp-rapida-saldo:last-child { text-align: left; }
 }
+
+/* === PIR / Qualidade: shell operacional responsivo ====================== */
+#qualidadeFabricaPane .pir-page-heading { min-height: 42px; }
+#qualidadeFabricaPane .pir-page-subtitle { max-width: 760px; line-height: 1.4; }
+#qualidadeFabricaPane .pir-action-toolbar { justify-content: space-between; }
+#qualidadeFabricaPane .pir-action-primary,
+#qualidadeFabricaPane .pir-action-secondary { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+#qualidadeFabricaPane .pir-action-more { display: contents; }
+#qualidadeFabricaPane .pir-action-more > summary { display: none; }
+#qualidadeFabricaPane .pir-action-toolbar .content-button,
+#qualidadeFabricaPane .pir-action-toolbar label { min-height: 40px; border-radius: 8px !important; }
+#qualidadeFabricaPane .pir-pending-panel,
+#qualidadeFabricaPane .pir-pending-list { border-radius: 8px !important; }
+#qualidadeFabricaPane .pir-pending-table tbody tr:last-child { border-bottom: 0 !important; }
+#qualidadeFabricaPane .qualidade-pir-pendente-row:focus-within { outline: 2px solid #2dd4bf; outline-offset: -2px; }
+
+@media (max-width: 900px) {
+  #qualidadeFabricaPane .content-wrapper { padding-inline: 12px !important; }
+  #qualidadeFabricaPane .content-section { padding-inline: 0 !important; }
+  #qualidadeFabricaPane .pir-page-heading { align-items: flex-start !important; }
+
+  #qualidadeFabricaPane #qualidadeAcoesRapidas.pir-action-toolbar {
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    gap: 8px !important;
+    width: 100%;
+  }
+  #qualidadeFabricaPane .pir-action-primary { display: contents; }
+  #qualidadeFabricaPane .pir-action-primary > #qualidadeNovoRegistroBtn { grid-column: 1 / -1; }
+  #qualidadeFabricaPane .pir-action-primary > label,
+  #qualidadeFabricaPane .pir-action-primary > .content-button {
+    display: inline-flex !important;
+    width: 100%;
+    min-width: 0;
+    min-height: 44px;
+    justify-content: center;
+  }
+  #qualidadeFabricaPane .pir-action-more { display: block; min-width: 0; }
+  #qualidadeFabricaPane .pir-action-more[open] { grid-column: 1 / -1; }
+  #qualidadeFabricaPane .pir-action-more > summary {
+    min-height: 44px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 8px 12px;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    background: #334155;
+    color: #fff;
+    font-size: 13px;
+    font-weight: 700;
+    cursor: pointer;
+    list-style: none;
+  }
+  #qualidadeFabricaPane .pir-action-more > summary::-webkit-details-marker { display: none; }
+  #qualidadeFabricaPane .pir-action-more[open] > summary { margin-bottom: 8px; }
+  #qualidadeFabricaPane .pir-action-secondary { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  #qualidadeFabricaPane .pir-action-secondary .content-button {
+    display: inline-flex !important;
+    width: 100%;
+    min-width: 0;
+    min-height: 44px;
+    justify-content: center;
+  }
+  #qualidadeFabricaPane .pir-action-more[open] #qualidadeCriarBtn,
+  #qualidadeFabricaPane .pir-action-more[open] #qualidadeRelatorioBtn,
+  #qualidadeFabricaPane .pir-action-more[open] #qualidadeRelatorioTabelaBtn,
+  #qualidadeFabricaPane .pir-action-more[open] #qualidadeListaPirCodigosBtn {
+    display: inline-flex !important;
+  }
+  #qualidadeFabricaPane .pir-action-secondary #qualidadeRegistroBtn[style*="none"] { display: none !important; }
+
+  #qualidadeFabricaPane .pir-pending-panel { padding: 12px !important; }
+  #qualidadeFabricaPane .pir-pending-header { align-items: stretch !important; }
+  #qualidadeFabricaPane #qualidadePirPendentesBusca {
+    flex-basis: 100% !important;
+    width: 100% !important;
+    max-width: none !important;
+    min-width: 0 !important;
+    min-height: 44px;
+    font-size: 16px;
+  }
+  #qualidadeFabricaPane .pir-alert-legend {
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 7px !important;
+    overflow: visible;
+    padding-bottom: 2px;
+  }
+  #qualidadeFabricaPane .pir-alert-legend > span { min-width: 0; }
+  #qualidadeFabricaPane .pir-pending-list { max-height: none !important; overflow: visible !important; border: 0 !important; }
+  #qualidadeFabricaPane .pir-pending-table,
+  #qualidadeFabricaPane .pir-pending-table tbody { display: block; width: 100%; min-width: 0 !important; }
+  #qualidadeFabricaPane #qualidadePirPendentesWrap table.pir-pending-table { min-width: 0 !important; }
+  #qualidadeFabricaPane .pir-pending-table thead { display: none; }
+  #qualidadeFabricaPane .pir-pending-table tbody {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+  }
+  #qualidadeFabricaPane .pir-pending-table .qualidade-pir-pendente-row {
+    min-width: 0;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0 12px;
+    padding: 12px;
+    border: 1px solid var(--border-color) !important;
+    border-radius: 8px;
+    background: var(--content-bg);
+  }
+  #qualidadeFabricaPane .pir-pending-table .qualidade-pir-pendente-row > td {
+    min-width: 0;
+    padding: 7px 0 !important;
+    text-align: left !important;
+    white-space: normal !important;
+    border: 0;
+  }
+  #qualidadeFabricaPane .pir-pending-table .qualidade-pir-pendente-row > td::before {
+    content: attr(data-label);
+    display: block;
+    margin-bottom: 3px;
+    color: #94a3b8;
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: .05em;
+    text-transform: uppercase;
+  }
+  #qualidadeFabricaPane .pir-pending-table .pir-cell-code,
+  #qualidadeFabricaPane .pir-pending-table .pir-cell-description,
+  #qualidadeFabricaPane .pir-pending-table .pir-cell-alerts,
+  #qualidadeFabricaPane .pir-pending-table .pir-cell-created { grid-column: 1 / -1; }
+  #qualidadeFabricaPane .pir-pending-table .pir-cell-code { order: 1; font-size: 14px; }
+  #qualidadeFabricaPane .pir-pending-table .pir-cell-description { order: 2; line-height: 1.4; overflow-wrap: anywhere; }
+  #qualidadeFabricaPane .pir-pending-table .pir-cell-alerts { order: 3; }
+  #qualidadeFabricaPane .pir-pending-table .pir-cell-alerts > div { justify-content: flex-start !important; }
+  #qualidadeFabricaPane .pir-pending-table .pir-cell-lot { order: 4; }
+  #qualidadeFabricaPane .pir-pending-table .pir-cell-nfe { order: 5; }
+  #qualidadeFabricaPane .pir-pending-table .pir-cell-quantity { order: 6; }
+  #qualidadeFabricaPane .pir-pending-table .pir-cell-created { order: 7; }
+  #qualidadeFabricaPane .pir-pending-table tbody > tr:not(.qualidade-pir-pendente-row) { display: block; grid-column: 1 / -1; }
+  #qualidadeFabricaPane .pir-pending-table tbody > tr:not(.qualidade-pir-pendente-row) td { display: block; width: 100%; }
+}
+
+@media (max-width: 640px) {
+  #qualidadeFabricaPane .content-wrapper { padding: 58px 8px 20px 56px !important; }
+  #qualidadeFabricaPane .pir-page-heading { gap: 6px !important; }
+  #qualidadeFabricaPane .pir-page-heading .content-section-title { font-size: 17px; }
+  #qualidadeFabricaPane .pir-page-subtitle { font-size: 12px !important; }
+  #qualidadeFabricaPane #qualidadePirPendentesCount { font-size: 12px !important; }
+  #qualidadeFabricaPane .pir-action-secondary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  #qualidadeFabricaPane .pir-action-secondary .content-button { padding-inline: 8px; font-size: 12px; }
+  #qualidadeFabricaPane .pir-pending-panel { padding: 10px !important; }
+  #qualidadeFabricaPane .pir-pending-header > div:first-child { min-width: 0 !important; }
+  #qualidadeFabricaPane .pir-pending-table tbody { grid-template-columns: 1fr; }
+}
