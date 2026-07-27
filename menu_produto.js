@@ -34762,16 +34762,33 @@ window.preloadLocaisEstoqueCache = async function preloadLocaisEstoqueCache(forc
     if (!unidade || !tipoItem) return status('Selecione unidade e tipo de item.', 'error');
     const btn = el('cadProdLoteCadastrar'); btn.disabled = true;
     let sucessos = 0;
+    let bloqueadoPorConsumo = false;
     for (const row of state.lote) {
       row.status = 'Enviando'; renderLote(); status(`Cadastrando ${row.index} de ${state.lote.length}...`);
       try {
         const resp = await fetch('/api/produtos/incluir-omie', { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ codigo_produto_integracao: row.codigo, codigo: row.codigo, descricao: row.descricao, unidade, tipoItem }) });
-        const json = await resp.json(); if (!resp.ok || json?.faultstring) throw new Error(json?.faultstring || json?.error || 'Erro Omie');
+        const json = await resp.json();
+        if (!resp.ok || json?.faultstring) {
+          const erroOmie = new Error(json?.faultstring || json?.error || 'Erro Omie');
+          erroOmie.code = json?.code || '';
+          throw erroOmie;
+        }
         row.status = 'Criado'; sucessos++;
-      } catch (err) { row.status = `Erro: ${err.message}`; }
+      } catch (err) {
+        row.status = `Erro: ${err.message}`;
+        if (err.code === 'OMIE_CONSUMPTION_BLOCKED') {
+          bloqueadoPorConsumo = true;
+          state.lote.slice(state.lote.indexOf(row) + 1).forEach(item => { item.status = 'Aguardando liberação da Omie'; });
+          renderLote();
+          status(err.message, 'error');
+          break;
+        }
+      }
       renderLote();
     }
-    status(`Lote concluido: ${sucessos} criado(s), ${state.lote.length - sucessos} falha(s).`, sucessos === state.lote.length ? 'ok' : 'error');
+    if (!bloqueadoPorConsumo) {
+      status(`Lote concluido: ${sucessos} criado(s), ${state.lote.length - sucessos} falha(s).`, sucessos === state.lote.length ? 'ok' : 'error');
+    }
     btn.disabled = false;
   }
 
