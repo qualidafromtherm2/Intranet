@@ -11629,23 +11629,25 @@ app.post('/api/etiquetas/fila', express.json(), async (req, res) => {
       const loteTxt    = sanitize(row.lote, 40);
       const dataExibir = sanitize(row.data_emissao, 10);
 
-      let lotes;
       if (multiplo > 0) {
-        const qtdTotal = Number(row.qtd) || 0;
-        const nCheias  = Math.floor(qtdTotal / multiplo);
-        const resto    = qtdTotal % multiplo;
-        lotes = [];
-        for (let i = 0; i < nCheias; i++) lotes.push(multiplo);
-        if (resto > 0) lotes.push(resto);
-        if (lotes.length === 0) lotes.push(qtdTotal || 1);
+        // Dividir volumes: N etiquetas físicas, 1 ID por produto+lote
+        const gerado = await _gerarVolumesComMesmoId(pool, {
+          origemId: row.id,
+          qtdTotal: Number(row.qtd) || 0,
+          multiplo,
+          unidade: row.unidade,
+          dataEmissao: row.data_emissao,
+          usuario,
+          codProd,
+          descProd,
+          loteTxt,
+          dataExibir
+        });
+        zplBlocks.push(...gerado.zplBlocks);
       } else {
-        lotes = [Number(row.qtd) || 1];
-      }
-
-      for (const qtdEtq of lotes) {
         const idImpresso = await _insertEtqRecImpressoRecebimento(pool, {
           origemId: row.id,
-          qtd: qtdEtq,
+          qtd: Number(row.qtd) || 1,
           unidade: row.unidade,
           dataEmissao: row.data_emissao,
           usuario,
@@ -11966,6 +11968,54 @@ function _gerarZplParaImpressao({ codProd, descProd, idImpresso, loteTxt, dataEx
     `^FO${descX},${descY}^A0N,18,18^FD${descTxt}^FS`,
     '^XZ',
   ].join('\n');
+}
+
+/** Calcula volumes (floor + resto) a partir de qtdTotal e multiplo. */
+function _calcularLotesVolumes(qtdTotal, multiplo) {
+  const total = Number(qtdTotal) || 0;
+  const m = Number(multiplo) || 0;
+  if (m <= 0) return [total || 1];
+  const nCheias = Math.floor(total / m);
+  const resto = total % m;
+  const lotes = [];
+  for (let i = 0; i < nCheias; i++) lotes.push(m);
+  if (resto > 0) lotes.push(resto);
+  if (lotes.length === 0) lotes.push(total || 1);
+  return lotes;
+}
+
+/**
+ * Divide volumes imprimindo N etiquetas com O MESMO idImpresso.
+ * Regra: 1 ID por produto + lote (ex.: 04.MP.N.71040 + 3030-000776823).
+ * Volumes do mesmo produto/lote = mesmo ID; produtos diferentes na mesma NF-e = IDs diferentes.
+ * Grava um único registro em ETQ_rec_impresso com a quantidade total.
+ */
+async function _gerarVolumesComMesmoId(db, {
+  origemId, qtdTotal, multiplo, unidade, dataEmissao, usuario,
+  codProd, descProd, loteTxt, dataExibir
+}) {
+  const lotes = _calcularLotesVolumes(qtdTotal, multiplo);
+  const qtdGravar = Number(qtdTotal) || lotes.reduce((acc, v) => acc + Number(v || 0), 0);
+  const idImpresso = await _insertEtqRecImpressoRecebimento(db, {
+    origemId,
+    qtd: qtdGravar,
+    unidade,
+    dataEmissao,
+    usuario,
+    codProd,
+    descProd
+  });
+  const zpl = _gerarZplParaImpressao({ codProd, descProd, idImpresso, loteTxt, dataExibir });
+  await db.query(
+    `UPDATE etiqueta."ETQ_rec_impresso" SET conteudo_zpl = $1 WHERE id = $2`,
+    [zpl, idImpresso]
+  );
+  return {
+    idImpresso,
+    zpl,
+    zplBlocks: lotes.map(() => zpl),
+    lotes,
+  };
 }
 
 async function _zplCombinadoParaPdf(zplCombinado, labelSize = '4x0.9') {
@@ -12544,38 +12594,36 @@ app.get('/api/etiquetas/recebimento/pdf-download', async (req, res) => {
       const loteTxt    = sanitize(row.lote, 40);
       const dataExibir = sanitize(row.data_emissao, 10);
 
-      // Se multiplo informado: floor+remainder igual ao imprimir-multiplo
-      let lotes;
+      // Se multiplo informado: N etiquetas com 1 ID por produto+lote
       if (multiplo > 0) {
-        const qtdTotal = Number(row.qtd) || 0;
-        const nCheias  = Math.floor(qtdTotal / multiplo);
-        const resto    = qtdTotal % multiplo;
-        lotes = [];
-        for (let i = 0; i < nCheias; i++) lotes.push(multiplo);
-        if (resto > 0) lotes.push(resto);
-        if (lotes.length === 0) lotes.push(qtdTotal || 1);
+        const gerado = await _gerarVolumesComMesmoId(pool, {
+          origemId: row.id,
+          qtdTotal: Number(row.qtd) || 0,
+          multiplo,
+          unidade: row.unidade,
+          dataEmissao: row.data_emissao,
+          usuario: usuarioImpressao,
+          codProd,
+          descProd,
+          loteTxt,
+          dataExibir
+        });
+        zplBlocks.push(...gerado.zplBlocks);
       } else {
-        lotes = [Number(row.qtd) || 1];
-      }
-
-      for (const qtdEtq of lotes) {
         const idImpresso = await _insertEtqRecImpressoRecebimento(pool, {
           origemId: row.id,
-          qtd: qtdEtq,
+          qtd: Number(row.qtd) || 1,
           unidade: row.unidade,
           dataEmissao: row.data_emissao,
           usuario: usuarioImpressao,
           codProd,
           descProd
         });
-
         const zpl = _gerarZplParaImpressao({ codProd, descProd, idImpresso, loteTxt, dataExibir });
-
         await pool.query(
           `UPDATE etiqueta."ETQ_rec_impresso" SET conteudo_zpl = $1 WHERE id = $2`,
           [zpl, idImpresso]
         );
-
         zplBlocks.push(zpl);
       }
     }
@@ -12700,23 +12748,25 @@ app.post('/api/etiquetas/recebimento/imprimir-local', express.json(), async (req
       const loteTxt    = sanitize(row.lote, 40);
       const dataExibir = sanitize(row.data_emissao, 10);
 
-      let lotes;
       if (multiplo > 0) {
-        const qtdTotal = Number(row.qtd) || 0;
-        const nCheias  = Math.floor(qtdTotal / multiplo);
-        const resto    = qtdTotal % multiplo;
-        lotes = [];
-        for (let i = 0; i < nCheias; i++) lotes.push(multiplo);
-        if (resto > 0) lotes.push(resto);
-        if (lotes.length === 0) lotes.push(qtdTotal || 1);
+        // Dividir volumes: N etiquetas físicas, 1 ID por produto+lote
+        const gerado = await _gerarVolumesComMesmoId(pool, {
+          origemId: row.id,
+          qtdTotal: Number(row.qtd) || 0,
+          multiplo,
+          unidade: row.unidade,
+          dataEmissao: row.data_emissao,
+          usuario: usuarioImpressao,
+          codProd,
+          descProd,
+          loteTxt,
+          dataExibir
+        });
+        zplBlocks.push(...gerado.zplBlocks);
       } else {
-        lotes = [Number(row.qtd) || 1];
-      }
-
-      for (const qtdEtq of lotes) {
         const idImpresso = await _insertEtqRecImpressoRecebimento(pool, {
           origemId: row.id,
-          qtd: qtdEtq,
+          qtd: Number(row.qtd) || 1,
           unidade: row.unidade,
           dataEmissao: row.data_emissao,
           usuario: usuarioImpressao,
@@ -14894,7 +14944,7 @@ app.post('/api/etiquetas/iapp-op/imprimir', express.json(), async (req, res) => 
 // POST /api/etiquetas/recebimento/imprimir-multiplo
 // Body: { id: number, multiplo: number }
 // Lógica: floor(qtd/multiplo) etiquetas completas + 1 etiqueta com o resto (se > 0)
-// Cada etiqueta recebe ID único de ETQ_rec_impresso; QR sem qtd.
+// 1 ID por produto+lote: volumes do mesmo item compartilham o ID; produtos distintos na NF-e têm IDs diferentes.
 // Subtrai toda a quantidade de ETQ_recebimento (zera o saldo).
 app.post('/api/etiquetas/recebimento/imprimir-multiplo', express.json(), async (req, res) => {
   try {
@@ -14914,13 +14964,9 @@ app.post('/api/etiquetas/recebimento/imprimir-multiplo', express.json(), async (
 
     const etq      = result.rows[0];
     const qtdTotal = Number(etq.qtd) || 0;
-    const nCheias  = Math.floor(qtdTotal / multiplo);   // etiquetas completas
-    const resto    = qtdTotal % multiplo;               // sobra (< multiplo)
-
-    // Lista de quantidades: n etiquetas de `multiplo` + opcionalmente 1 de `resto`
-    const lotes = [];
-    for (let i = 0; i < nCheias; i++) lotes.push(multiplo);
-    if (resto > 0) lotes.push(resto);
+    const lotes = _calcularLotesVolumes(qtdTotal, multiplo);
+    const nCheias = Math.floor(qtdTotal / multiplo);
+    const resto = qtdTotal % multiplo;
 
     if (lotes.length === 0) {
       return res.status(400).json({ error: 'Quantidade insuficiente para gerar etiquetas.' });
@@ -14938,31 +14984,24 @@ app.post('/api/etiquetas/recebimento/imprimir-multiplo', express.json(), async (
     const usuarioImpressao = String(req.body?.usuario || req.session?.user?.login || req.session?.usuario || '').trim();
     const erros       = [];
 
-    for (let i = 0; i < lotes.length; i++) {
-      const qtdEtq = lotes[i];
+    // Um único ID para todos os volumes; N cópias físicas do mesmo ZPL
+    const gerado = await _gerarVolumesComMesmoId(pool, {
+      origemId: etq.id,
+      qtdTotal,
+      multiplo,
+      unidade: etq.unidade,
+      dataEmissao: etq.data_emissao,
+      usuario: usuarioImpressao,
+      codProd,
+      descProd,
+      loteTxt,
+      dataExibir
+    });
+    const { idImpresso, zpl, lotes: lotesGerados } = gerado;
 
-      // 1. Insere placeholder → obtém id da impressão
-      const idImpresso = await _insertEtqRecImpressoRecebimento(pool, {
-        origemId: etq.id,
-        qtd: qtdEtq,
-        unidade: etq.unidade,
-        dataEmissao: etq.data_emissao,
-        usuario: usuarioImpressao,
-        codProd,
-        descProd
-      });
-
-      // 2. Gera ZPL com ID (sem qtd)
-      const zpl = _gerarZplParaImpressao({ codProd, descProd, idImpresso, loteTxt, dataExibir });
-
-      // 3. Atualiza ZPL
-      await pool.query(
-        `UPDATE etiqueta."ETQ_rec_impresso" SET conteudo_zpl = $1 WHERE id = $2`,
-        [zpl, idImpresso]
-      );
-
-      // 4. Envia para a impressora
-      const fname = `receb_multiplo_${id}_imp${idImpresso}_${Date.now()}.zpl`;
+    for (let i = 0; i < lotesGerados.length; i++) {
+      const qtdEtq = lotesGerados[i];
+      const fname = `receb_multiplo_${id}_imp${idImpresso}_${i + 1}_${Date.now()}.zpl`;
       const fpath = path.join(dirPrint, fname);
       fs.writeFileSync(fpath, zpl, 'utf8');
       await new Promise((resolve) => {
@@ -14971,18 +15010,17 @@ app.post('/api/etiquetas/recebimento/imprimir-multiplo', express.json(), async (
           if (err) {
             erros.push(_friendlyLprError(err.message));
             console.error(`[etiquetas/imprimir-multiplo] lpr falhou etiqueta ${i + 1}:`, err.message);
-            // Remove o registro criado para que re-tentativa não gere duplicata
-            pool.query('DELETE FROM etiqueta."ETQ_rec_impresso" WHERE id = $1', [idImpresso]).catch(() => {});
           } else {
-            console.log(`[etiquetas/imprimir-multiplo] impressão enviada idImpresso=${idImpresso} qtd=${qtdEtq}`);
+            console.log(`[etiquetas/imprimir-multiplo] impressão enviada idImpresso=${idImpresso} qtdVolume=${qtdEtq} (${i + 1}/${lotesGerados.length})`);
           }
           resolve();
         });
       });
     }
 
-    // Se TODAS falharam, retorna erro amigável sem HTTP 500
-    if (erros.length === lotes.length) {
+    // Se TODAS falharam, remove o registro único e retorna erro amigável
+    if (erros.length === lotesGerados.length) {
+      await pool.query('DELETE FROM etiqueta."ETQ_rec_impresso" WHERE id = $1', [idImpresso]).catch(() => {});
       return res.status(200).json({ ok: false, error: erros[0] });
     }
 
@@ -14996,10 +15034,11 @@ app.post('/api/etiquetas/recebimento/imprimir-multiplo', express.json(), async (
 
     res.json({
       ok: true,
-      impressas: lotes.length - erros.length,
+      impressas: lotesGerados.length - erros.length,
       etiquetas_cheias: nCheias,
       etiqueta_resto: resto > 0 ? 1 : 0,
       multiplo,
+      id_impresso: idImpresso,
       erros: erros.length > 0 ? erros : undefined,
     });
   } catch (err) {
@@ -37245,7 +37284,7 @@ app.post('/api/compras/pedidos-omie/nfe-associar-pedido', express.json(), async 
     const itemMetaPorCodItem = {};
     if (codItensPedidoAssociados.length > 0) {
       const itensPedidosMeta = await pool.query(
-        `SELECT n_cod_item, n_cod_ped, c_unidade
+        `SELECT n_cod_item, n_cod_ped, c_unidade, n_qtde
            FROM compras.pedidos_omie_produtos
           WHERE n_cod_item = ANY($1::bigint[])`,
         [[...new Set(codItensPedidoAssociados)]]
@@ -37254,9 +37293,11 @@ app.post('/api/compras/pedidos-omie/nfe-associar-pedido', express.json(), async 
       itensPedidosMeta.rows.forEach((row) => {
         const codItem = Number(row?.n_cod_item || 0);
         if (!codItem) return;
+        const nQtdeMeta = Number(row?.n_qtde);
         itemMetaPorCodItem[String(codItem)] = {
           n_cod_ped: Number(row?.n_cod_ped || 0) || null,
-          c_unidade: String(row?.c_unidade || '').trim() || null
+          c_unidade: String(row?.c_unidade || '').trim() || null,
+          n_qtde: Number.isFinite(nQtdeMeta) && nQtdeMeta > 0 ? nQtdeMeta : null
         };
       });
     }
@@ -37500,12 +37541,16 @@ app.post('/api/compras/pedidos-omie/nfe-associar-pedido', express.json(), async 
           console.warn('[Compras/NFeAssociarPedido] Falha ao calcular CFOP:', errCfop?.message);
         }
 
-        // --- EDITAR cada item: cUnidade + nQtde (do pedido ou override do user) ---
+        // --- EDITAR cada item: cUnidade + nQtdeRecebida (do pedido ou override do user) ---
+        // Conversão de unidade (ex.: KG na NF → MTS no pedido) exige os dois campos
+        // em itensAjustes, conforme API Omie AlterarRecebimento.
         // Sempre aplica codigo_local_estoque = ALMOX_LOCAL_PADRAO para itens físicos (não-serviço)
         itensEditarEstoque = plano.itensRecebimentoEditar.map(itemEditar => {
           const nSeq = itemEditar.itensIde?.nSequencia;
           const nIdItPed = itemEditar.itensIde?.nIdItPedidoExistente;
-          const cUnidadePedido = nIdItPed ? itemMetaPorCodItem[String(nIdItPed)]?.c_unidade : null;
+          const metaItemPed = nIdItPed ? itemMetaPorCodItem[String(nIdItPed)] : null;
+          const cUnidadePedido = metaItemPed?.c_unidade || null;
+          const nQtdePedidoMeta = metaItemPed?.n_qtde || null;
 
           // Override do user tem prioridade sobre o valor do pedido
           const override = overrideMap.get(nSeq);
@@ -37515,9 +37560,32 @@ app.post('/api/compras/pedidos-omie/nfe-associar-pedido', express.json(), async 
           const isServico = !!(previewItem?.item_servico);
           const cfopServicoEntrada = isServico ? previewItem?.servico_cfop_entrada : null;
 
+          const nQtdeOverride = Number(override?.nQtde);
+          const nQtdePreview = Number(previewItem?.pedido_qtde);
+          const nQtdeRecebidaFinal = (
+            (Number.isFinite(nQtdeOverride) && nQtdeOverride > 0) ? nQtdeOverride
+            : (Number.isFinite(nQtdePreview) && nQtdePreview > 0) ? nQtdePreview
+            : (Number.isFinite(Number(nQtdePedidoMeta)) && Number(nQtdePedidoMeta) > 0) ? Number(nQtdePedidoMeta)
+            : null
+          );
+
+          const nfUnidade = String(previewItem?.nf_unidade || '').trim().toUpperCase();
+          const unidFinalNorm = String(cUnidadeFinal || '').trim().toUpperCase();
+          const nfQtde = Number(previewItem?.nf_qtde);
+          const precisaConversaoQtdUnid = !isServico && (
+            (cUnidadeFinal && unidFinalNorm && nfUnidade && unidFinalNorm !== nfUnidade)
+            || (nQtdeRecebidaFinal != null && Number.isFinite(nfQtde) && Math.abs(nQtdeRecebidaFinal - nfQtde) > 0.0001)
+            || (Number.isFinite(nQtdeOverride) && nQtdeOverride > 0)
+            || !!(override?.cUnidade)
+          );
+
           const ajustes = {};
           if (!isServico) ajustes.codigo_local_estoque = ESTOQUE_LOCAL_ESPECIAL;
           if (cUnidadeFinal) ajustes.cUnidade = cUnidadeFinal;
+          // Campo correto na Omie: nQtdeRecebida (não nQtde) — grava a qtd convertida
+          if (precisaConversaoQtdUnid && nQtdeRecebidaFinal != null) {
+            ajustes.nQtdeRecebida = nQtdeRecebidaFinal;
+          }
           if (cfopServicoEntrada || cfopCalculado) ajustes.cCFOPEntrada = cfopServicoEntrada || cfopCalculado;
 
           // Só incluir o item se tiver ajustes
@@ -37590,24 +37658,24 @@ app.post('/api/compras/pedidos-omie/nfe-associar-pedido', express.json(), async 
       }
     }
 
-    // ─── Passo 3: EDITAR itens com codigo_local_estoque + cUnidade + cCFOPEntrada ───
-    // Define armazém (Recebimento) e unidade conforme o pedido.
-    // A Omie não suporta alterar nQtde via AlterarRecebimento — a qtd é calculada pela Omie.
+    // ─── Passo 3: EDITAR itens com codigo_local_estoque + cUnidade + nQtdeRecebida + cCFOPEntrada ───
+    // Define armazém (Recebimento), unidade e quantidade recebida (conversão) conforme o pedido/override.
+    // Omie grava a conversão em itensAjustes.nQtdeRecebida + itensAjustes.cUnidade.
     if (itensEditarEstoque && itensEditarEstoque.length > 0) {
       try {
         const payloadEstoque = {
           ide: { nIdReceb: Number(plano.n_id_receb) },
           itensRecebimentoEditar: itensEditarEstoque
         };
-        console.log('[Compras/NFeAssociarPedido] ===== PASSO 3: estoque + unidade =====');
+        console.log('[Compras/NFeAssociarPedido] ===== PASSO 3: estoque + unidade + qtd recebida =====');
         console.log(JSON.stringify(payloadEstoque, null, 2));
         console.log('[Compras/NFeAssociarPedido] ===================================');
         await chamarApiRecebimentoNfeOmieComRetryRedundant('AlterarRecebimento', payloadEstoque, {
           tentativasMaximas: 2
         });
-        console.log('[Compras/NFeAssociarPedido] Local estoque/unidade atualizados com sucesso.');
+        console.log('[Compras/NFeAssociarPedido] Local estoque/unidade/qtd recebida atualizados com sucesso.');
       } catch (errEstoque) {
-        console.warn('[Compras/NFeAssociarPedido] Falha ao atualizar local estoque:', errEstoque?.message);
+        console.warn('[Compras/NFeAssociarPedido] Falha ao atualizar local estoque/conversão:', errEstoque?.message);
       }
     }
 

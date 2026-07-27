@@ -65382,11 +65382,28 @@ async function confirmarAssociacaoPedidoNfeOmie() {
       const nIdItPedidoExistente = Number(item?.pedido_n_cod_item || 0);
       if (!seq || !Number.isFinite(nIdItPedidoExistente) || nIdItPedidoExistente <= 0) return;
       const nIdPedidoExistente = Number(item?.pedido_n_cod_ped || 0);
-      itensOverrideMap.set(seq, {
+      const overrideCampos = window.__associarNfeCamposEditados?.[seq] || {};
+      const unidadePedidoBase = obterUnidadePedidoPreviewAssociacao(item);
+      const cUnidadePedido = String(overrideCampos?.cUnidade || unidadePedidoBase || '').trim().toUpperCase() || null;
+      const nQtdePedido = Number(
+        Number.isFinite(Number(overrideCampos?.nQtde)) ? overrideCampos.nQtde : item?.pedido_qtde
+      );
+      const entryPedido = {
         n_sequencia: seq,
         nIdPedidoExistente: Number.isFinite(nIdPedidoExistente) && nIdPedidoExistente > 0 ? nIdPedidoExistente : null,
         nIdItPedidoExistente
-      });
+      };
+      // Se NF e pedido divergem em qtd/unidade, já envia a conversão do pedido
+      // (os inputs da prévia podem sobrescrever depois).
+      const nfUnid = String(item?.nf_unidade || '').trim().toUpperCase();
+      const nfQtde = Number(item?.nf_qtde);
+      const divergiuUnid = !!(cUnidadePedido && nfUnid && !unidadesEquivalentesPreview(nfUnid, cUnidadePedido));
+      const divergiuQtd = Number.isFinite(nQtdePedido) && Number.isFinite(nfQtde) && Math.abs(nQtdePedido - nfQtde) > 0.0001;
+      if (divergiuUnid || divergiuQtd) {
+        if (Number.isFinite(nQtdePedido) && nQtdePedido > 0) entryPedido.nQtde = nQtdePedido;
+        if (cUnidadePedido) entryPedido.cUnidade = cUnidadePedido;
+      }
+      itensOverrideMap.set(seq, entryPedido);
     });
 
     const previewConteudo = document.getElementById('modalAssociarPedidoNfePreviewConteudo');
