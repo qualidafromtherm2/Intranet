@@ -165,7 +165,13 @@ async function lookupEquipamentoPorSerie(pool, serieRaw) {
      WHERE TRIM(pedido) = $1
         OR TRIM(COALESCE(numero_op_informacoes, '')) = $1
         OR TRIM(COALESCE(nfe, '')) = $1
-     ORDER BY CASE WHEN TRIM(pedido) = $1 THEN 0 ELSE 1 END
+        OR TRIM(COALESCE(numero_ordem_coleta, '')) = $1
+     ORDER BY CASE
+       WHEN TRIM(pedido) = $1 THEN 0
+       WHEN TRIM(COALESCE(numero_op_informacoes, '')) = $1 THEN 1
+       WHEN TRIM(COALESCE(nfe, '')) = $1 THEN 2
+       ELSE 3
+     END
      LIMIT 5
     `,
     [serie]

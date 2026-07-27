@@ -20,6 +20,12 @@ const { registrarRiCheckImpressaoOp } = require('./routes/qualidadeRiCheck');
 const { injectStoragePublicUrls, getStoragePublicBaseUrl, ASSETS, agenteExeUrl } = require('./utils/storageUrls');
 const etqRecImpressoBackfill = require('./utils/etqRecImpressoBackfill');
 const {
+  atualizarFlagsRecebimentoPedido,
+  fecharSolicitacoesDePedidosFechados,
+  sincronizarSolicitacaoPorPedido,
+  refrescarPedidoFechadoDaOmie
+} = require('./utils/syncPedidosCompraOmie');
+const {
   MSG_FORMATO: ETQ_ENDERECO_MSG_FORMATO,
   assertEnderecoEtq,
   resolverEnderecoEtq,
@@ -7059,6 +7065,14 @@ app.post(['/webhooks/omie/pedidos-compra', '/api/webhooks/omie/pedidos-compra'],
         const acao = topic.includes('Excluida') ? 'excluido' : 'cancelado';
         console.log(`[webhooks/omie/pedidos-compra] Pedido ${identificadorPedido} marcado como inativo (${acao})`);
 
+        if (nCodPed) {
+          await sincronizarPedidoComSolicitacao(nCodPed, {
+            statusFinalForcado: acao === 'excluido' ? 'excluido' : 'cancelado'
+          });
+        } else {
+          await fecharSolicitacoesDePedidosFechados(pool);
+        }
+
         return res.json({
           ok: true,
           n_cod_ped: nCodPed || null,
@@ -7201,6 +7215,9 @@ app.post(['/webhooks/omie/pedidos-compra', '/api/webhooks/omie/pedidos-compra'],
               cNumero || null
             ]);
             console.warn(`[webhooks/omie/pedidos-compra] Pedido ${identificadorPedido} inativado (Omie: não cadastrado)`);
+            if (nCodPed) {
+              await sincronizarPedidoComSolicitacao(nCodPed, { statusFinalForcado: 'excluido' });
+            }
             return;
           }
 
@@ -11194,6 +11211,7 @@ app.use('/api/transferencias', transferenciasRouter);
 app.use('/api/ajustes', ajustesRouter);
 app.use('/api/monitoramento', monitoramentoRouter);
 app.use('/api/primeira-pc-ok', require('./routes/primeiraPcOk'));
+app.use('/api/suporte', require('./routes/suporteChamados'));
 app.use('/api/engenharia', engenhariaRouter);
 app.use('/api/compras', comprasRouter);
 
@@ -11696,23 +11714,25 @@ app.post('/api/etiquetas/fila', express.json(), async (req, res) => {
       const loteTxt    = sanitize(row.lote, 40);
       const dataExibir = sanitize(row.data_emissao, 10);
 
-      let lotes;
       if (multiplo > 0) {
-        const qtdTotal = Number(row.qtd) || 0;
-        const nCheias  = Math.floor(qtdTotal / multiplo);
-        const resto    = qtdTotal % multiplo;
-        lotes = [];
-        for (let i = 0; i < nCheias; i++) lotes.push(multiplo);
-        if (resto > 0) lotes.push(resto);
-        if (lotes.length === 0) lotes.push(qtdTotal || 1);
+        // Dividir volumes: N etiquetas físicas, 1 ID por produto+lote
+        const gerado = await _gerarVolumesComMesmoId(pool, {
+          origemId: row.id,
+          qtdTotal: Number(row.qtd) || 0,
+          multiplo,
+          unidade: row.unidade,
+          dataEmissao: row.data_emissao,
+          usuario,
+          codProd,
+          descProd,
+          loteTxt,
+          dataExibir
+        });
+        zplBlocks.push(...gerado.zplBlocks);
       } else {
-        lotes = [Number(row.qtd) || 1];
-      }
-
-      for (const qtdEtq of lotes) {
         const idImpresso = await _insertEtqRecImpressoRecebimento(pool, {
           origemId: row.id,
-          qtd: qtdEtq,
+          qtd: Number(row.qtd) || 1,
           unidade: row.unidade,
           dataEmissao: row.data_emissao,
           usuario,
@@ -12035,6 +12055,54 @@ function _gerarZplParaImpressao({ codProd, descProd, idImpresso, loteTxt, dataEx
   ].join('\n');
 }
 
+/** Calcula volumes (floor + resto) a partir de qtdTotal e multiplo. */
+function _calcularLotesVolumes(qtdTotal, multiplo) {
+  const total = Number(qtdTotal) || 0;
+  const m = Number(multiplo) || 0;
+  if (m <= 0) return [total || 1];
+  const nCheias = Math.floor(total / m);
+  const resto = total % m;
+  const lotes = [];
+  for (let i = 0; i < nCheias; i++) lotes.push(m);
+  if (resto > 0) lotes.push(resto);
+  if (lotes.length === 0) lotes.push(total || 1);
+  return lotes;
+}
+
+/**
+ * Divide volumes imprimindo N etiquetas com O MESMO idImpresso.
+ * Regra: 1 ID por produto + lote (ex.: 04.MP.N.71040 + 3030-000776823).
+ * Volumes do mesmo produto/lote = mesmo ID; produtos diferentes na mesma NF-e = IDs diferentes.
+ * Grava um único registro em ETQ_rec_impresso com a quantidade total.
+ */
+async function _gerarVolumesComMesmoId(db, {
+  origemId, qtdTotal, multiplo, unidade, dataEmissao, usuario,
+  codProd, descProd, loteTxt, dataExibir
+}) {
+  const lotes = _calcularLotesVolumes(qtdTotal, multiplo);
+  const qtdGravar = Number(qtdTotal) || lotes.reduce((acc, v) => acc + Number(v || 0), 0);
+  const idImpresso = await _insertEtqRecImpressoRecebimento(db, {
+    origemId,
+    qtd: qtdGravar,
+    unidade,
+    dataEmissao,
+    usuario,
+    codProd,
+    descProd
+  });
+  const zpl = _gerarZplParaImpressao({ codProd, descProd, idImpresso, loteTxt, dataExibir });
+  await db.query(
+    `UPDATE etiqueta."ETQ_rec_impresso" SET conteudo_zpl = $1 WHERE id = $2`,
+    [zpl, idImpresso]
+  );
+  return {
+    idImpresso,
+    zpl,
+    zplBlocks: lotes.map(() => zpl),
+    lotes,
+  };
+}
+
 async function _zplCombinadoParaPdf(zplCombinado, labelSize = '4x0.9') {
   const labelaryResp = await fetch(
     `http://api.labelary.com/v1/printers/8dpmm/labels/${labelSize}/`,
@@ -12117,22 +12185,52 @@ app.post('/api/etiquetas/recebimento/preview', express.json(), async (req, res) 
 
       if (!codProdRaw) continue; // item sem código: ignora silenciosamente
 
+      const codProd  = sanitize(codProdRaw,  30);
+      const descProd = sanitize(descProdRaw, 70);
+      const novaQtdNum = qtdRaw !== '' ? Number(String(qtdRaw).replace(',', '.')) || null : null;
+
       // ── Deduplicação: mesmo nfe + pedido + codigo_produto ────────────────
+      // Se já existe e ainda não impressa, atualiza qtd/unidade (ex.: conversão KG→MTS)
       const existe = await pool.query(
-        `SELECT 1 FROM etiqueta."ETQ_recebimento"
+        `SELECT id, impressa FROM etiqueta."ETQ_recebimento"
           WHERE numero_nfe=$1 AND numero_pedido=$2 AND codigo_produto=$3
           LIMIT 1`,
         [String(nfe), String(pedido), codProdRaw]
       );
       if (existe.rows.length > 0) {
-        ignorados.push(codProdRaw);
+        const rowExist = existe.rows[0];
+        if (rowExist.impressa) {
+          ignorados.push(codProdRaw);
+          continue;
+        }
+        try {
+          await pool.query(
+            `UPDATE etiqueta."ETQ_recebimento"
+                SET qtd = COALESCE($1, qtd),
+                    unidade = CASE WHEN NULLIF(TRIM($2), '') IS NOT NULL THEN TRIM($2) ELSE unidade END,
+                    descricao_produto = COALESCE(NULLIF(TRIM($3), ''), descricao_produto)
+              WHERE id = $4`,
+            [novaQtdNum, unidRaw, descProdRaw, rowExist.id]
+          );
+          const zplUpd = _gerarZplRecebimentoBloco({
+            codProd,
+            descProd,
+            loteTxt,
+            dataExibir,
+            idEtq: rowExist.id
+          });
+          await pool.query(
+            `UPDATE etiqueta."ETQ_recebimento" SET conteudo_zpl=$1 WHERE id=$2`,
+            [zplUpd, rowExist.id]
+          );
+          zplBlocks.push(zplUpd);
+          gerados.push({ cod: codProdRaw, id: rowExist.id, atualizado: true, pir: false });
+        } catch (updConvErr) {
+          console.error('[etiquetas/recebimento/preview] falha ao atualizar conversão:', codProdRaw, updConvErr?.message || updConvErr);
+          ignorados.push(codProdRaw);
+        }
         continue;
       }
-
-      const codProd  = sanitize(codProdRaw,  30);
-      const descProd = sanitize(descProdRaw, 70);
-      const qtdTxt   = sanitize(qtdRaw,  15);
-      const unidTxt  = sanitize(unidRaw, 10);
 
       // Produto marcado para pular PIR → já nasce liberado em Identificação
       let pirInicial = false;
@@ -12611,38 +12709,36 @@ app.get('/api/etiquetas/recebimento/pdf-download', async (req, res) => {
       const loteTxt    = sanitize(row.lote, 40);
       const dataExibir = sanitize(row.data_emissao, 10);
 
-      // Se multiplo informado: floor+remainder igual ao imprimir-multiplo
-      let lotes;
+      // Se multiplo informado: N etiquetas com 1 ID por produto+lote
       if (multiplo > 0) {
-        const qtdTotal = Number(row.qtd) || 0;
-        const nCheias  = Math.floor(qtdTotal / multiplo);
-        const resto    = qtdTotal % multiplo;
-        lotes = [];
-        for (let i = 0; i < nCheias; i++) lotes.push(multiplo);
-        if (resto > 0) lotes.push(resto);
-        if (lotes.length === 0) lotes.push(qtdTotal || 1);
+        const gerado = await _gerarVolumesComMesmoId(pool, {
+          origemId: row.id,
+          qtdTotal: Number(row.qtd) || 0,
+          multiplo,
+          unidade: row.unidade,
+          dataEmissao: row.data_emissao,
+          usuario: usuarioImpressao,
+          codProd,
+          descProd,
+          loteTxt,
+          dataExibir
+        });
+        zplBlocks.push(...gerado.zplBlocks);
       } else {
-        lotes = [Number(row.qtd) || 1];
-      }
-
-      for (const qtdEtq of lotes) {
         const idImpresso = await _insertEtqRecImpressoRecebimento(pool, {
           origemId: row.id,
-          qtd: qtdEtq,
+          qtd: Number(row.qtd) || 1,
           unidade: row.unidade,
           dataEmissao: row.data_emissao,
           usuario: usuarioImpressao,
           codProd,
           descProd
         });
-
         const zpl = _gerarZplParaImpressao({ codProd, descProd, idImpresso, loteTxt, dataExibir });
-
         await pool.query(
           `UPDATE etiqueta."ETQ_rec_impresso" SET conteudo_zpl = $1 WHERE id = $2`,
           [zpl, idImpresso]
         );
-
         zplBlocks.push(zpl);
       }
     }
@@ -12767,23 +12863,25 @@ app.post('/api/etiquetas/recebimento/imprimir-local', express.json(), async (req
       const loteTxt    = sanitize(row.lote, 40);
       const dataExibir = sanitize(row.data_emissao, 10);
 
-      let lotes;
       if (multiplo > 0) {
-        const qtdTotal = Number(row.qtd) || 0;
-        const nCheias  = Math.floor(qtdTotal / multiplo);
-        const resto    = qtdTotal % multiplo;
-        lotes = [];
-        for (let i = 0; i < nCheias; i++) lotes.push(multiplo);
-        if (resto > 0) lotes.push(resto);
-        if (lotes.length === 0) lotes.push(qtdTotal || 1);
+        // Dividir volumes: N etiquetas físicas, 1 ID por produto+lote
+        const gerado = await _gerarVolumesComMesmoId(pool, {
+          origemId: row.id,
+          qtdTotal: Number(row.qtd) || 0,
+          multiplo,
+          unidade: row.unidade,
+          dataEmissao: row.data_emissao,
+          usuario: usuarioImpressao,
+          codProd,
+          descProd,
+          loteTxt,
+          dataExibir
+        });
+        zplBlocks.push(...gerado.zplBlocks);
       } else {
-        lotes = [Number(row.qtd) || 1];
-      }
-
-      for (const qtdEtq of lotes) {
         const idImpresso = await _insertEtqRecImpressoRecebimento(pool, {
           origemId: row.id,
-          qtd: qtdEtq,
+          qtd: Number(row.qtd) || 1,
           unidade: row.unidade,
           dataEmissao: row.data_emissao,
           usuario: usuarioImpressao,
@@ -14961,7 +15059,7 @@ app.post('/api/etiquetas/iapp-op/imprimir', express.json(), async (req, res) => 
 // POST /api/etiquetas/recebimento/imprimir-multiplo
 // Body: { id: number, multiplo: number }
 // Lógica: floor(qtd/multiplo) etiquetas completas + 1 etiqueta com o resto (se > 0)
-// Cada etiqueta recebe ID único de ETQ_rec_impresso; QR sem qtd.
+// 1 ID por produto+lote: volumes do mesmo item compartilham o ID; produtos distintos na NF-e têm IDs diferentes.
 // Subtrai toda a quantidade de ETQ_recebimento (zera o saldo).
 app.post('/api/etiquetas/recebimento/imprimir-multiplo', express.json(), async (req, res) => {
   try {
@@ -14981,13 +15079,9 @@ app.post('/api/etiquetas/recebimento/imprimir-multiplo', express.json(), async (
 
     const etq      = result.rows[0];
     const qtdTotal = Number(etq.qtd) || 0;
-    const nCheias  = Math.floor(qtdTotal / multiplo);   // etiquetas completas
-    const resto    = qtdTotal % multiplo;               // sobra (< multiplo)
-
-    // Lista de quantidades: n etiquetas de `multiplo` + opcionalmente 1 de `resto`
-    const lotes = [];
-    for (let i = 0; i < nCheias; i++) lotes.push(multiplo);
-    if (resto > 0) lotes.push(resto);
+    const lotes = _calcularLotesVolumes(qtdTotal, multiplo);
+    const nCheias = Math.floor(qtdTotal / multiplo);
+    const resto = qtdTotal % multiplo;
 
     if (lotes.length === 0) {
       return res.status(400).json({ error: 'Quantidade insuficiente para gerar etiquetas.' });
@@ -15005,31 +15099,24 @@ app.post('/api/etiquetas/recebimento/imprimir-multiplo', express.json(), async (
     const usuarioImpressao = String(req.body?.usuario || req.session?.user?.login || req.session?.usuario || '').trim();
     const erros       = [];
 
-    for (let i = 0; i < lotes.length; i++) {
-      const qtdEtq = lotes[i];
+    // Um único ID para todos os volumes; N cópias físicas do mesmo ZPL
+    const gerado = await _gerarVolumesComMesmoId(pool, {
+      origemId: etq.id,
+      qtdTotal,
+      multiplo,
+      unidade: etq.unidade,
+      dataEmissao: etq.data_emissao,
+      usuario: usuarioImpressao,
+      codProd,
+      descProd,
+      loteTxt,
+      dataExibir
+    });
+    const { idImpresso, zpl, lotes: lotesGerados } = gerado;
 
-      // 1. Insere placeholder → obtém id da impressão
-      const idImpresso = await _insertEtqRecImpressoRecebimento(pool, {
-        origemId: etq.id,
-        qtd: qtdEtq,
-        unidade: etq.unidade,
-        dataEmissao: etq.data_emissao,
-        usuario: usuarioImpressao,
-        codProd,
-        descProd
-      });
-
-      // 2. Gera ZPL com ID (sem qtd)
-      const zpl = _gerarZplParaImpressao({ codProd, descProd, idImpresso, loteTxt, dataExibir });
-
-      // 3. Atualiza ZPL
-      await pool.query(
-        `UPDATE etiqueta."ETQ_rec_impresso" SET conteudo_zpl = $1 WHERE id = $2`,
-        [zpl, idImpresso]
-      );
-
-      // 4. Envia para a impressora
-      const fname = `receb_multiplo_${id}_imp${idImpresso}_${Date.now()}.zpl`;
+    for (let i = 0; i < lotesGerados.length; i++) {
+      const qtdEtq = lotesGerados[i];
+      const fname = `receb_multiplo_${id}_imp${idImpresso}_${i + 1}_${Date.now()}.zpl`;
       const fpath = path.join(dirPrint, fname);
       fs.writeFileSync(fpath, zpl, 'utf8');
       await new Promise((resolve) => {
@@ -15038,18 +15125,17 @@ app.post('/api/etiquetas/recebimento/imprimir-multiplo', express.json(), async (
           if (err) {
             erros.push(_friendlyLprError(err.message));
             console.error(`[etiquetas/imprimir-multiplo] lpr falhou etiqueta ${i + 1}:`, err.message);
-            // Remove o registro criado para que re-tentativa não gere duplicata
-            pool.query('DELETE FROM etiqueta."ETQ_rec_impresso" WHERE id = $1', [idImpresso]).catch(() => {});
           } else {
-            console.log(`[etiquetas/imprimir-multiplo] impressão enviada idImpresso=${idImpresso} qtd=${qtdEtq}`);
+            console.log(`[etiquetas/imprimir-multiplo] impressão enviada idImpresso=${idImpresso} qtdVolume=${qtdEtq} (${i + 1}/${lotesGerados.length})`);
           }
           resolve();
         });
       });
     }
 
-    // Se TODAS falharam, retorna erro amigável sem HTTP 500
-    if (erros.length === lotes.length) {
+    // Se TODAS falharam, remove o registro único e retorna erro amigável
+    if (erros.length === lotesGerados.length) {
+      await pool.query('DELETE FROM etiqueta."ETQ_rec_impresso" WHERE id = $1', [idImpresso]).catch(() => {});
       return res.status(200).json({ ok: false, error: erros[0] });
     }
 
@@ -15063,10 +15149,11 @@ app.post('/api/etiquetas/recebimento/imprimir-multiplo', express.json(), async (
 
     res.json({
       ok: true,
-      impressas: lotes.length - erros.length,
+      impressas: lotesGerados.length - erros.length,
       etiquetas_cheias: nCheias,
       etiqueta_resto: resto > 0 ? 1 : 0,
       multiplo,
+      id_impresso: idImpresso,
       erros: erros.length > 0 ? erros : undefined,
     });
   } catch (err) {
@@ -15256,8 +15343,15 @@ app.use('/agente-impressao', requireSessionForStatic, express.static(path.join(_
 }));
 
 // Retorna URL pública do instalador Windows + versão atual do agente
-const _AGENTE_VERSAO_ATUAL    = process.env.AGENTE_VERSAO || '2.6';
-const _AGENTE_EXE_URL_DEFAULT = process.env.AGENTE_EXE_URL || agenteExeUrl(_AGENTE_VERSAO_ATUAL);
+const _AGENTE_VERSAO_ATUAL = process.env.AGENTE_VERSAO || '2.7';
+const _agenteUrlFromVer = agenteExeUrl(_AGENTE_VERSAO_ATUAL);
+// Preferir URL da versão atual no R2. AGENTE_EXE_URL só vale se já apontar para essa versão
+// (evita ficar preso em URL antiga tipo v2.6 no env do Render).
+const _AGENTE_EXE_URL_DEFAULT = (() => {
+  const envUrl = String(process.env.AGENTE_EXE_URL || '').trim();
+  if (envUrl && envUrl.includes(`agente-impressao-v${_AGENTE_VERSAO_ATUAL}`)) return envUrl;
+  return _agenteUrlFromVer;
+})();
 app.get('/api/etiquetas/agente-url', (req, res) => {
   res.json({ ok: true, url: _AGENTE_EXE_URL_DEFAULT, versao: _AGENTE_VERSAO_ATUAL });
 });
@@ -27335,6 +27429,15 @@ async function upsertPedidoCompra(pedido, eventoWebhook = '', messageId = null, 
       console.log(`[PedidosCompra] ⚠️ Pedido ${nCodPed} recebido sem itens no payload (${eventoWebhook || 'sem-evento'}). Itens locais preservados.`);
     }
 
+    // Se veio lista de itens da Omie, recalcula pendente_omie / Pedido recebido
+    // (ex.: pedido 3000 já 100% recebido na Omie mas ainda aberto localmente).
+    if (Array.isArray(produtos) && produtos.length > 0 && confirmadoOmie) {
+      const flags = await atualizarFlagsRecebimentoPedido(client, nCodPed);
+      if (flags.fullyReceived) {
+        console.log(`[PedidosCompra] ✓ Pedido ${nCodPed} 100% recebido na Omie — sai de Compra realizada`);
+      }
+    }
+
     // 3. Upsert do frete (1:1 com pedido)
     await client.query('DELETE FROM compras.pedidos_omie_frete WHERE n_cod_ped = $1', [nCodPed]);
 
@@ -27422,111 +27525,62 @@ async function upsertPedidoCompra(pedido, eventoWebhook = '', messageId = null, 
 // ============================================================================
 // Sincroniza pedido Omie com solicitacao_compras
 // ============================================================================
-async function sincronizarPedidoComSolicitacao(nCodPed) {
+async function sincronizarPedidoComSolicitacao(nCodPed, opts = {}) {
   try {
-    // 1. Busca etapa e fornecedor do pedido
+    // Fecha/atualiza status (recebido/excluido/etapa) — util compartilhado
+    await sincronizarSolicitacaoPorPedido(pool, nCodPed, {
+      log: (...a) => console.log(...a),
+      statusFinalForcado: opts.statusFinalForcado || null
+    });
+
+    // Etapa 10 ainda aberta: enriquece fornecedor (comportamento legado)
     const pedidoResult = await pool.query(
-      'SELECT c_etapa, n_cod_for, c_numero FROM compras.pedidos_omie WHERE n_cod_ped = $1',
+      `SELECT c_etapa, n_cod_for, c_numero, pendente_omie,
+              COALESCE("Pedido recebido", FALSE) AS pedido_recebido, inativo
+         FROM compras.pedidos_omie WHERE n_cod_ped = $1`,
       [nCodPed]
     );
+    if (pedidoResult.rows.length === 0) return;
+    const ped = pedidoResult.rows[0];
+    if (ped.inativo || ped.pedido_recebido || ped.pendente_omie === false) return;
+    if (String(ped.c_etapa || '').trim() !== '10' || !ped.n_cod_for) return;
 
-    if (pedidoResult.rows.length === 0) {
-      console.warn(`[sincronizarPedido] Pedido ${nCodPed} não encontrado em pedidos_omie`);
-      return;
-    }
-
-    const etapa = pedidoResult.rows[0].c_etapa;
-    const codFornecedor = pedidoResult.rows[0].n_cod_for;
-    const numeroPedido = pedidoResult.rows[0].c_numero;
-
-    if (!etapa) {
-      console.warn(`[sincronizarPedido] Pedido ${nCodPed} sem etapa definida`);
-      return;
-    }
-
-    // 2. Busca descrição da etapa
-    const etapaResult = await pool.query(
-      'SELECT descricao_padrao FROM compras.etapas_pedido_compra WHERE codigo = $1',
-      [etapa]
-    );
-
-    const descricaoEtapa = etapaResult.rows.length > 0
-      ? etapaResult.rows[0].descricao_padrao
-      : `Etapa ${etapa}`;
-
-    // 3. Atualiza solicitacao_compras
-    let updateQuery;
-    let updateParams;
-
-    if (etapa === '10' && codFornecedor) {
-      // Etapa 10: busca dados do fornecedor na API Omie
-      let fornecedorNome = null;
-      let fornecedorContato = null;
-
-      try {
-        console.log(`[sincronizarPedido] Buscando dados do fornecedor ${codFornecedor} na API Omie...`);
-
-        const fornecedorResp = await fetch('https://app.omie.com.br/api/v1/geral/clientes/', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            call: 'ConsultarCliente',
-            app_key: OMIE_APP_KEY,
-            app_secret: OMIE_APP_SECRET,
-            param: [{
-              codigo_cliente_omie: parseInt(codFornecedor)
-            }]
-          })
-        });
-
-        if (fornecedorResp.ok) {
-          const fornecedorData = await fornecedorResp.json();
-          fornecedorNome = fornecedorData.nome_fantasia || fornecedorData.razao_social || null;
-          fornecedorContato = fornecedorData.contato || null;
-
-          console.log(`[sincronizarPedido] Dados do fornecedor obtidos: nome="${fornecedorNome}", contato="${fornecedorContato}"`);
-        } else {
-          const errorText = await fornecedorResp.text();
-          console.warn(`[sincronizarPedido] Erro ao buscar fornecedor na API Omie: ${fornecedorResp.status} - ${errorText}`);
-        }
-      } catch (err) {
-        console.warn(`[sincronizarPedido] Falha ao consultar fornecedor na API Omie:`, err.message);
+    let fornecedorNome = null;
+    let fornecedorContato = null;
+    try {
+      const fornecedorResp = await fetch('https://app.omie.com.br/api/v1/geral/clientes/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          call: 'ConsultarCliente',
+          app_key: OMIE_APP_KEY,
+          app_secret: OMIE_APP_SECRET,
+          param: [{ codigo_cliente_omie: parseInt(ped.n_cod_for, 10) }]
+        })
+      });
+      if (fornecedorResp.ok) {
+        const fornecedorData = await fornecedorResp.json();
+        fornecedorNome = fornecedorData.nome_fantasia || fornecedorData.razao_social || null;
+        fornecedorContato = fornecedorData.contato || null;
       }
-
-      // Atualiza status, fornecedor_id, fornecedor_nome e contato
-      updateQuery = `
-        UPDATE compras.solicitacao_compras
-        SET status = $1,
-            fornecedor_id = $2,
-            fornecedor_nome = $3,
-            contato = $4,
-            cnumero = $5,
-            updated_at = NOW()
-        WHERE ncodped = $6`;
-      updateParams = [descricaoEtapa, codFornecedor, fornecedorNome, fornecedorContato, numeroPedido || null, nCodPed];
-    } else {
-      // Outras etapas: atualiza status e cnumero
-      updateQuery = `
-        UPDATE compras.solicitacao_compras
-        SET status = $1,
-            cnumero = $2,
-            updated_at = NOW()
-        WHERE ncodped = $3`;
-      updateParams = [descricaoEtapa, numeroPedido || null, nCodPed];
+    } catch (err) {
+      console.warn(`[sincronizarPedido] Falha ao consultar fornecedor:`, err.message);
     }
 
-    const result = await pool.query(updateQuery, updateParams);
-
-    if (result.rowCount > 0) {
-      if (etapa === '10' && codFornecedor) {
-        console.log(`[sincronizarPedido] ✓ Solicitação atualizada: ncodped=${nCodPed}, etapa ${etapa} → status="${descricaoEtapa}", fornecedor_id=${codFornecedor}, fornecedor_nome="${updateParams[2]}", contato="${updateParams[3]}", cnumero="${updateParams[4]}"`);
-      } else {
-        console.log(`[sincronizarPedido] ✓ Solicitação atualizada: ncodped=${nCodPed}, etapa ${etapa} → status="${descricaoEtapa}", cnumero="${updateParams[1]}"`);
-      }
-    } else {
-      console.warn(`[sincronizarPedido] ⚠ Nenhuma solicitação encontrada com ncodped=${nCodPed}`);
+    if (fornecedorNome || fornecedorContato) {
+      await pool.query(
+        `
+        UPDATE compras.solicitacao_compras
+           SET fornecedor_id = $1,
+               fornecedor_nome = COALESCE($2, fornecedor_nome),
+               contato = COALESCE($3, contato),
+               cnumero = COALESCE($4, cnumero),
+               updated_at = NOW()
+         WHERE ncodped::text = TRIM($5::text)
+        `,
+        [ped.n_cod_for, fornecedorNome, fornecedorContato, ped.c_numero || null, String(nCodPed)]
+      );
     }
-
   } catch (err) {
     console.error(`[sincronizarPedido] ✗ Erro ao sincronizar pedido ${nCodPed}:`, err);
   }
@@ -34221,10 +34275,8 @@ app.get('/api/compras/compras-realizadas', async (req, res) => {
         LIMIT 1
       ) origem ON TRUE
       WHERE COALESCE(po.inativo, FALSE) = FALSE
-        AND (
-          po.pendente_omie IS TRUE
-          OR (po.pendente_omie IS NULL AND (po."Etapa_NF" IS NULL OR BTRIM(po."Etapa_NF") = ''))
-        )
+        AND po.pendente_omie IS TRUE
+        AND COALESCE(po."Pedido recebido", FALSE) = FALSE
         AND BTRIM(COALESCE(po.c_etapa, '')) IN ('10', '15')
         AND po.d_inc_data >= '2026-01-01'${whereDataCR}
       ORDER BY
@@ -35158,6 +35210,7 @@ async function varrerFaturadasOmieKanban() {
       );
       pedidosInativados += 1;
       console.log(`[VarrerFaturadas] Pedido ${ped.c_numero} inativado (excluído na Omie)`);
+      await sincronizarPedidoComSolicitacao(ped.n_cod_ped, { statusFinalForcado: 'excluido' });
       continue;
     }
 
@@ -35183,6 +35236,29 @@ async function varrerFaturadasOmieKanban() {
       if (!pendenteAgora) {
         pedidosFaturadosMarcados += 1;
         console.log(`[VarrerFaturadas] Pedido ${ped.c_numero} fechado na Omie (recebido/cancelado/encerrado — sai de Compra realizada)`);
+        // Atualiza itens (n_qtde_rec) + solicitações para o banco refletir a Omie
+        await refrescarPedidoFechadoDaOmie({
+          pool,
+          nCodPed: ped.n_cod_ped,
+          cNumero: ped.c_numero,
+          delayMs: OMIE_REQUEST_DELAY_MS,
+          log: (...a) => console.log(...a),
+          omieConsultarPedCompra: async (nCod) => {
+            const respostaPed = await fetch('https://app.omie.com.br/api/v1/produtos/pedidocompra/', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                call: 'ConsultarPedCompra',
+                app_key: OMIE_APP_KEY,
+                app_secret: OMIE_APP_SECRET,
+                param: [{ nCodPed: Number(nCod) }]
+              })
+            });
+            return respostaPed.json().catch(() => ({}));
+          }
+        });
+      } else {
+        await sincronizarPedidoComSolicitacao(ped.n_cod_ped);
       }
     }
   }
@@ -35219,6 +35295,7 @@ async function varrerFaturadasOmieKanban() {
           WHERE n_cod_ped = $1`,
         [idPed]
       );
+      await sincronizarPedidoComSolicitacao(idPed);
       pedidosImportados += 1;
       const numImp = dadosPed?.cabecalho_consulta?.cNumero || idPed;
       console.log(`[VarrerFaturadas] Pedido ${numImp} importado da Omie (não existia localmente)`);
@@ -35228,11 +35305,15 @@ async function varrerFaturadasOmieKanban() {
     }
   }
 
+  // Solicitações órfãs ("Compra realizada" sem pedido aberto) → recebido/excluido
+  const solFechadas = await fecharSolicitacoesDePedidosFechados(pool, (...a) => console.log(...a));
+
   const duracaoMs = Date.now() - inicio;
   console.log(
     `[VarrerFaturadas] Concluído em ${Math.round(duracaoMs / 1000)}s — ` +
     `listados=${listados} upsertados=${upsertados} orfaos=${atualizadosOrfaos} removidos=${removidos} ` +
-    `pedidos=${pedidosVerificados} inativados=${pedidosInativados} etapaAjustada=${pedidosEtapaAtualizada} importados=${pedidosImportados} erros=${erros}`
+    `pedidos=${pedidosVerificados} inativados=${pedidosInativados} etapaAjustada=${pedidosEtapaAtualizada} importados=${pedidosImportados} ` +
+    `solFechadas=${(solFechadas.fechadas_pedido || 0) + (solFechadas.fechadas_item_sumiu || 0)} erros=${erros}`
   );
 
   return {
@@ -35246,6 +35327,7 @@ async function varrerFaturadasOmieKanban() {
     pedidos_etapa_atualizada: pedidosEtapaAtualizada,
     pedidos_faturados_marcados: pedidosFaturadosMarcados,
     pedidos_importados: pedidosImportados,
+    solicitacoes_fechadas: solFechadas,
     erros,
     paginas,
     duracao_ms: duracaoMs
@@ -37312,7 +37394,7 @@ app.post('/api/compras/pedidos-omie/nfe-associar-pedido', express.json(), async 
     const itemMetaPorCodItem = {};
     if (codItensPedidoAssociados.length > 0) {
       const itensPedidosMeta = await pool.query(
-        `SELECT n_cod_item, n_cod_ped, c_unidade
+        `SELECT n_cod_item, n_cod_ped, c_unidade, n_qtde
            FROM compras.pedidos_omie_produtos
           WHERE n_cod_item = ANY($1::bigint[])`,
         [[...new Set(codItensPedidoAssociados)]]
@@ -37321,9 +37403,11 @@ app.post('/api/compras/pedidos-omie/nfe-associar-pedido', express.json(), async 
       itensPedidosMeta.rows.forEach((row) => {
         const codItem = Number(row?.n_cod_item || 0);
         if (!codItem) return;
+        const nQtdeMeta = Number(row?.n_qtde);
         itemMetaPorCodItem[String(codItem)] = {
           n_cod_ped: Number(row?.n_cod_ped || 0) || null,
-          c_unidade: String(row?.c_unidade || '').trim() || null
+          c_unidade: String(row?.c_unidade || '').trim() || null,
+          n_qtde: Number.isFinite(nQtdeMeta) && nQtdeMeta > 0 ? nQtdeMeta : null
         };
       });
     }
@@ -37567,12 +37651,16 @@ app.post('/api/compras/pedidos-omie/nfe-associar-pedido', express.json(), async 
           console.warn('[Compras/NFeAssociarPedido] Falha ao calcular CFOP:', errCfop?.message);
         }
 
-        // --- EDITAR cada item: cUnidade + nQtde (do pedido ou override do user) ---
+        // --- EDITAR cada item: cUnidade + nQtdeRecebida (do pedido ou override do user) ---
+        // Conversão de unidade (ex.: KG na NF → MTS no pedido) exige os dois campos
+        // em itensAjustes, conforme API Omie AlterarRecebimento.
         // Sempre aplica codigo_local_estoque = ALMOX_LOCAL_PADRAO para itens físicos (não-serviço)
         itensEditarEstoque = plano.itensRecebimentoEditar.map(itemEditar => {
           const nSeq = itemEditar.itensIde?.nSequencia;
           const nIdItPed = itemEditar.itensIde?.nIdItPedidoExistente;
-          const cUnidadePedido = nIdItPed ? itemMetaPorCodItem[String(nIdItPed)]?.c_unidade : null;
+          const metaItemPed = nIdItPed ? itemMetaPorCodItem[String(nIdItPed)] : null;
+          const cUnidadePedido = metaItemPed?.c_unidade || null;
+          const nQtdePedidoMeta = metaItemPed?.n_qtde || null;
 
           // Override do user tem prioridade sobre o valor do pedido
           const override = overrideMap.get(nSeq);
@@ -37582,9 +37670,32 @@ app.post('/api/compras/pedidos-omie/nfe-associar-pedido', express.json(), async 
           const isServico = !!(previewItem?.item_servico);
           const cfopServicoEntrada = isServico ? previewItem?.servico_cfop_entrada : null;
 
+          const nQtdeOverride = Number(override?.nQtde);
+          const nQtdePreview = Number(previewItem?.pedido_qtde);
+          const nQtdeRecebidaFinal = (
+            (Number.isFinite(nQtdeOverride) && nQtdeOverride > 0) ? nQtdeOverride
+            : (Number.isFinite(nQtdePreview) && nQtdePreview > 0) ? nQtdePreview
+            : (Number.isFinite(Number(nQtdePedidoMeta)) && Number(nQtdePedidoMeta) > 0) ? Number(nQtdePedidoMeta)
+            : null
+          );
+
+          const nfUnidade = String(previewItem?.nf_unidade || '').trim().toUpperCase();
+          const unidFinalNorm = String(cUnidadeFinal || '').trim().toUpperCase();
+          const nfQtde = Number(previewItem?.nf_qtde);
+          const precisaConversaoQtdUnid = !isServico && (
+            (cUnidadeFinal && unidFinalNorm && nfUnidade && unidFinalNorm !== nfUnidade)
+            || (nQtdeRecebidaFinal != null && Number.isFinite(nfQtde) && Math.abs(nQtdeRecebidaFinal - nfQtde) > 0.0001)
+            || (Number.isFinite(nQtdeOverride) && nQtdeOverride > 0)
+            || !!(override?.cUnidade)
+          );
+
           const ajustes = {};
           if (!isServico) ajustes.codigo_local_estoque = ESTOQUE_LOCAL_ESPECIAL;
           if (cUnidadeFinal) ajustes.cUnidade = cUnidadeFinal;
+          // Campo correto na Omie: nQtdeRecebida (não nQtde) — grava a qtd convertida
+          if (precisaConversaoQtdUnid && nQtdeRecebidaFinal != null) {
+            ajustes.nQtdeRecebida = nQtdeRecebidaFinal;
+          }
           if (cfopServicoEntrada || cfopCalculado) ajustes.cCFOPEntrada = cfopServicoEntrada || cfopCalculado;
 
           // Só incluir o item se tiver ajustes
@@ -37657,24 +37768,24 @@ app.post('/api/compras/pedidos-omie/nfe-associar-pedido', express.json(), async 
       }
     }
 
-    // ─── Passo 3: EDITAR itens com codigo_local_estoque + cUnidade + cCFOPEntrada ───
-    // Define armazém (Recebimento) e unidade conforme o pedido.
-    // A Omie não suporta alterar nQtde via AlterarRecebimento — a qtd é calculada pela Omie.
+    // ─── Passo 3: EDITAR itens com codigo_local_estoque + cUnidade + nQtdeRecebida + cCFOPEntrada ───
+    // Define armazém (Recebimento), unidade e quantidade recebida (conversão) conforme o pedido/override.
+    // Omie grava a conversão em itensAjustes.nQtdeRecebida + itensAjustes.cUnidade.
     if (itensEditarEstoque && itensEditarEstoque.length > 0) {
       try {
         const payloadEstoque = {
           ide: { nIdReceb: Number(plano.n_id_receb) },
           itensRecebimentoEditar: itensEditarEstoque
         };
-        console.log('[Compras/NFeAssociarPedido] ===== PASSO 3: estoque + unidade =====');
+        console.log('[Compras/NFeAssociarPedido] ===== PASSO 3: estoque + unidade + qtd recebida =====');
         console.log(JSON.stringify(payloadEstoque, null, 2));
         console.log('[Compras/NFeAssociarPedido] ===================================');
         await chamarApiRecebimentoNfeOmieComRetryRedundant('AlterarRecebimento', payloadEstoque, {
           tentativasMaximas: 2
         });
-        console.log('[Compras/NFeAssociarPedido] Local estoque/unidade atualizados com sucesso.');
+        console.log('[Compras/NFeAssociarPedido] Local estoque/unidade/qtd recebida atualizados com sucesso.');
       } catch (errEstoque) {
-        console.warn('[Compras/NFeAssociarPedido] Falha ao atualizar local estoque:', errEstoque?.message);
+        console.warn('[Compras/NFeAssociarPedido] Falha ao atualizar local estoque/conversão:', errEstoque?.message);
       }
     }
 
