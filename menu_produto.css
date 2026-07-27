@@ -20968,6 +20968,37 @@ html.light-mode #minhasComprasWrapper {
 .light-mode .home-reservations-section .agenda-sidebar-legenda,
 .light-mode .home-reservations-section #agendaFiltroUsuario { background: #fff !important; color: #111827 !important; border-color: #d1d5db !important; }
 
+/* A Home modular substituiu a antiga central mobile. Reexibe os módulos e o
+   calendário no celular, que eram ocultados pela regra legada acima. */
+@media (max-width: 640px), (max-width: 900px) and (max-height: 500px) {
+  #paginaInicio > .content-wrapper {
+    padding: 60px 10px calc(18px + env(safe-area-inset-bottom, 0px)) 56px;
+  }
+
+  #paginaInicio .content-wrapper > .mobile-operations-home {
+    display: none !important;
+  }
+
+  #paginaInicio .content-wrapper > .home-module-launcher,
+  #paginaInicio .content-wrapper > .home-reservations-section {
+    display: block !important;
+  }
+
+  #paginaInicio .content-wrapper > .home-reservations-section[hidden] {
+    display: none !important;
+  }
+
+  .home-module-heading { min-height: 0; align-items: flex-start; padding-right: 0; }
+  .home-module-heading p { max-width: 280px; }
+  .home-module-grid,
+  .home-routine-grid,
+  .home-routine-grid.is-area-grid { grid-template-columns: 1fr; }
+  .home-module-card { min-height: 104px; }
+  .home-module-back { padding: 7px 9px; font-size: 0; }
+  .home-module-back i { font-size: 13px; }
+  .home-reservations-section { padding: 10px; }
+}
+
 
 /* Compras: contraste operacional das ações em todos os painéis de detalhe. */
 #modalDetalhesPedidoCompras .cp-sheet-actions,

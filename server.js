@@ -2474,6 +2474,37 @@ function _cadastroNormalizarDescricao(value) {
     .toUpperCase().replace(/[^A-Z0-9 .,/()\-]/g, ' ').replace(/\s+/g, ' ').trim();
 }
 
+function _cadastroOmieNaoEncontrado(data) {
+  return /(?:produto|c[oó]digo).*n[aã]o cadastrad/i.test(String(data?.faultstring || data?.error || ''));
+}
+
+async function _cadastroConsultarCodigoNaOmie(codigo) {
+  const appKey = process.env.OMIE_APP_KEY;
+  const appSecret = process.env.OMIE_APP_SECRET;
+  if (!appKey || !appSecret) throw new Error('Credenciais Omie não configuradas.');
+
+  const codigoNormalizado = String(codigo || '').trim().toUpperCase();
+  for (const campo of ['codigo_produto_integracao', 'codigo']) {
+    const omieResp = await fetch('https://app.omie.com.br/api/v1/geral/produtos/', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        call: 'ConsultarProduto',
+        app_key: appKey,
+        app_secret: appSecret,
+        param: [{ [campo]: codigoNormalizado }]
+      })
+    });
+    const data = await omieResp.json().catch(() => ({}));
+    if (omieResp.ok && data?.codigo_produto) {
+      return { disponivel: false, campo, produto: data };
+    }
+    if (_cadastroOmieNaoEncontrado(data)) continue;
+    throw new Error(data?.faultstring || data?.error || `Falha ao consultar o código na Omie (${omieResp.status}).`);
+  }
+  return { disponivel: true, campo: null, produto: null };
+}
+
 async function _cadastroGarantirReservas(client) {
   await client.query(`CREATE TABLE IF NOT EXISTS public.produto_codigo_reserva (
     codigo TEXT PRIMARY KEY, sequencial INT NOT NULL, prefixo TEXT NOT NULL,
@@ -2555,8 +2586,22 @@ app.post('/api/produtos/cadastro/preview', express.json(), async (req, res) => {
           ? (itensNaFaixaPadrao.length ? Math.max(...itensNaFaixaPadrao.map(item => item.sequencial)) + 1 : faixaPadraoSemFiltro.inicio)
           : (prefixados.length ? Math.max(...prefixados.map(item => item.sequencial)) + 1 : 10000));
       while (usados.has(sequencial)) sequencial++;
+      let codigo = `${prefixo}.${String(sequencial).padStart(5, '0')}`;
+      // No cadastro unitário, confirme ao vivo o código visível e o código de
+      // integração. O cache local pode estar atrasado em relação à Omie.
+      if (descricoes.length === 1) {
+        let tentativas = 0;
+        while (tentativas < 100) {
+          const disponibilidade = await _cadastroConsultarCodigoNaOmie(codigo);
+          if (disponibilidade.disponivel) break;
+          usados.add(sequencial);
+          do { sequencial++; } while (usados.has(sequencial));
+          codigo = `${prefixo}.${String(sequencial).padStart(5, '0')}`;
+          tentativas++;
+        }
+        if (tentativas >= 100) throw new Error('Não foi possível localizar um código livre na Omie nesta faixa.');
+      }
       usados.add(sequencial);
-      const codigo = `${prefixo}.${String(sequencial).padStart(5, '0')}`;
       itens.push({ sequencial, descricao: descricoes[index], codigo });
       rows.push({ index: index + 1, codigo, code: codigo, sequencial, sequence: sequencial, descricao: descricoes[index], origem });
     }
@@ -2591,6 +2636,18 @@ app.post('/api/produtos/incluir-omie', async (req, res) => {
     const matchCodigo = codigoNormalizado.match(/^(.*)\.(\d{1,5})$/);
     if (!matchCodigo) {
       return res.status(400).json({ error: 'Formato de codigo invalido.' });
+    }
+
+    const disponibilidadeOmie = await _cadastroConsultarCodigoNaOmie(codigoNormalizado);
+    if (!disponibilidadeOmie.disponivel) {
+      const conflito = disponibilidadeOmie.campo === 'codigo_produto_integracao'
+        ? 'código de integração'
+        : 'código do produto';
+      const codigoAtual = String(disponibilidadeOmie.produto?.codigo || '').trim();
+      return res.status(409).json({
+        error: `O código ${codigoNormalizado} já está vinculado na Omie como ${conflito}${codigoAtual ? ` (produto ${codigoAtual})` : ''}. Gere uma nova prévia.`,
+        code: 'OMIE_PRODUCT_CODE_CONFLICT'
+      });
     }
 
     const client = await pool.connect();
@@ -2666,7 +2723,17 @@ app.post('/api/produtos/incluir-omie', async (req, res) => {
         [codigoReservadoAgora]
       ).catch(() => {});
       codigoReservadoAgora = '';
-      return res.status(omieResp.status).json({ error: 'Erro ao incluir produto na Omie' });
+      let omieError = '';
+      try {
+        const errData = JSON.parse(errText);
+        omieError = String(errData?.faultstring || errData?.error || '').trim();
+      } catch (_) {
+        omieError = String(errText || '').trim();
+      }
+      return res.status(omieResp.status).json({
+        error: omieError || 'Erro ao incluir produto na Omie',
+        code: 'OMIE_INCLUDE_FAILED'
+      });
     }
 
     const omieData = await omieResp.json();
