@@ -5706,6 +5706,119 @@ async function enriquecerResultadosSerieComVendas(resultados) {
   return resultados;
 }
 
+/** Formata data do historico_pre2024 para exibição na lista da OS (pt-BR). */
+function formatDateBrSerie(value) {
+  if (value == null || value === '') return '';
+  if (typeof value === 'string' && /^\d{2}\/\d{2}\/\d{4}/.test(value.trim())) return value.trim();
+  const d = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(d.getTime())) return String(value);
+  return d.toLocaleDateString('pt-BR');
+}
+
+/**
+ * Máquinas antigas (até ~2022) ficam em public.historico_pre2024, fora do cache/planilhas.
+ * Busca por pedido (série), OP, NF-e e ordem de coleta — mesmos campos usados no agente técnico.
+ */
+async function buscarSerieHistoricoPre2024(termoNorm, limit = 10) {
+  const like = `${termoNorm}%`;
+  const { rows } = await pool.query(
+    `
+    SELECT pedido, numero_op_informacoes, nfe, numero_ordem_coleta, modelo,
+           nome_fantasia_revende, razao_social_faturamento,
+           data_entrega, data_aprovacao_pedido, data_entrada_pedido, ano
+      FROM public.historico_pre2024
+     WHERE UPPER(TRIM(COALESCE(pedido, ''))) LIKE $1
+        OR UPPER(TRIM(COALESCE(numero_op_informacoes, ''))) LIKE $1
+        OR UPPER(TRIM(COALESCE(nfe, ''))) LIKE $1
+        OR UPPER(TRIM(COALESCE(numero_ordem_coleta, ''))) LIKE $1
+     ORDER BY
+       CASE
+         WHEN UPPER(TRIM(COALESCE(pedido, ''))) LIKE $1 THEN 0
+         WHEN UPPER(TRIM(COALESCE(numero_op_informacoes, ''))) LIKE $1 THEN 1
+         WHEN UPPER(TRIM(COALESCE(nfe, ''))) LIKE $1 THEN 2
+         ELSE 3
+       END,
+       ano DESC NULLS LAST
+     LIMIT $2
+    `,
+    [like, limit]
+  );
+
+  return rows.map((r) => {
+    const pedido = String(r.pedido || '').trim();
+    const op = String(r.numero_op_informacoes || '').trim();
+    const nfe = String(r.nfe || '').trim();
+    const ordemColeta = String(r.numero_ordem_coleta || '').trim();
+    const cliente = String(r.nome_fantasia_revende || r.razao_social_faturamento || '').trim();
+    const dataVenda = formatDateBrSerie(r.data_aprovacao_pedido || r.data_entrada_pedido);
+    const dataEntrega = formatDateBrSerie(r.data_entrega) || dataVenda;
+
+    let descricao = '';
+    if (normalizeText(pedido).startsWith(termoNorm)) descricao = pedido.toUpperCase();
+    else if (normalizeText(op).startsWith(termoNorm)) descricao = op.toUpperCase();
+    else if (normalizeText(nfe).startsWith(termoNorm)) descricao = nfe.toUpperCase();
+    else if (normalizeText(ordemColeta).startsWith(termoNorm)) descricao = ordemColeta.toUpperCase();
+    else descricao = (pedido || op || nfe || ordemColeta).toUpperCase();
+
+    return {
+      descricao,
+      numero_serie: pedido,
+      op,
+      modelo: String(r.modelo || '').trim(),
+      revenda: cliente,
+      data_venda: dataVenda,
+      cliente,
+      nota_fiscal: nfe,
+      chave_nfe: '',
+      data_entrega: dataEntrega,
+      teste_tipo_gas: '',
+      pedido,
+      ordem_producao: op,
+      numero_ordem_coleta: ordemColeta,
+      fonte_cache: 'historico_pre2024',
+    };
+  });
+}
+
+async function enriquecerResultadosSerieComJaExiste(resultados) {
+  if (!Array.isArray(resultados) || !resultados.length) return;
+  const pairs = resultados.filter((r) => r.ordem_producao || r.modelo);
+  if (!pairs.length) return;
+
+  const conditions = pairs.map((_, i) => `(s.ordem_producao = $${i * 2 + 1} AND s.modelo = $${i * 2 + 2})`).join(' OR ');
+  const params = pairs.flatMap((p) => [
+    String(p.ordem_producao || '').trim() || null,
+    String(p.modelo || '').trim() || null,
+  ]);
+  const dbResult = await pool.query(
+    `SELECT DISTINCT ON (s.ordem_producao, s.modelo)
+       s.ordem_producao, s.modelo, s.id_at,
+       a.tipo, a.nome_revenda_cliente, a.numero_telefone, a.cpf_cnpj,
+       a.cep, a.bairro, a.cidade, a.estado, a.numero, a.rua,
+       a.agendar_atendimento_com, a.modelo AS at_modelo,
+       a.tag_problema, a.plataforma_atendimento
+     FROM sac.at_busca_selecionada s
+     JOIN sac.at a ON a.id = s.id_at
+     WHERE ${conditions}
+     ORDER BY s.ordem_producao, s.modelo, s.id_at DESC`,
+    params
+  );
+  const existMap = new Map();
+  for (const row of dbResult.rows) {
+    existMap.set(`${row.ordem_producao || ''}|${row.modelo || ''}`, { id_at: row.id_at, at_data: row });
+  }
+  for (const r of resultados) {
+    const key = `${r.ordem_producao || ''}|${r.modelo || ''}`;
+    if (existMap.has(key)) {
+      r.ja_existe = true;
+      r.id_at = existMap.get(key).id_at;
+      r.at_data = existMap.get(key).at_data;
+    } else {
+      r.ja_existe = false;
+    }
+  }
+}
+
 router.get('/at/busca-serie', async (req, res) => {
   const termo = String(req.query?.termo || '').trim();
   if (termo.length < 2) {
@@ -5748,39 +5861,30 @@ router.get('/at/busca-serie', async (req, res) => {
             fonte_cache: r.fonte,
           }));
 
-          // Enriquece com flag ja_existe (mesmo código do bloco original)
-          try {
-            const pairs = resultados.filter(r => r.ordem_producao || r.modelo);
-            if (pairs.length > 0) {
-              const conditions = pairs.map((_, i) => `(s.ordem_producao = $${i*2+1} AND s.modelo = $${i*2+2})`).join(' OR ');
-              const params = pairs.flatMap(p => [String(p.ordem_producao||'').trim()||null, String(p.modelo||'').trim()||null]);
-              const dbResult = await pool.query(
-                `SELECT DISTINCT ON (s.ordem_producao, s.modelo)
-                   s.ordem_producao, s.modelo, s.id_at,
-                   a.tipo, a.nome_revenda_cliente, a.numero_telefone, a.cpf_cnpj,
-                   a.cep, a.bairro, a.cidade, a.estado, a.numero, a.rua,
-                   a.agendar_atendimento_com, a.modelo AS at_modelo,
-                   a.tag_problema, a.plataforma_atendimento
-                 FROM sac.at_busca_selecionada s
-                 JOIN sac.at a ON a.id = s.id_at
-                 WHERE ${conditions}
-                 ORDER BY s.ordem_producao, s.modelo, s.id_at DESC`,
-                params
-              );
-              const existMap = new Map();
-              for (const row of dbResult.rows) {
-                existMap.set(`${row.ordem_producao||''}|${row.modelo||''}`, { id_at: row.id_at, at_data: row });
+          // Completa com máquinas antigas (pré-2024) se ainda houver vaga na lista
+          if (resultados.length < maxResultados) {
+            try {
+              const seen = new Set(resultados.map((r) => `${r.numero_serie}|${r.op}|${r.modelo}`));
+              const preRows = await buscarSerieHistoricoPre2024(termoNorm, maxResultados - resultados.length + 5);
+              for (const row of preRows) {
+                const key = `${row.numero_serie}|${row.op}|${row.modelo}`;
+                if (seen.has(key)) continue;
+                resultados.push(row);
+                seen.add(key);
+                if (resultados.length >= maxResultados) break;
               }
-              for (const r of resultados) {
-                const key = `${r.ordem_producao||''}|${r.modelo||''}`;
-                if (existMap.has(key)) { r.ja_existe = true; r.id_at = existMap.get(key).id_at; r.at_data = existMap.get(key).at_data; }
-                else { r.ja_existe = false; }
-              }
+            } catch (preErr) {
+              console.warn('[SAC/AT] historico_pre2024 indisponível no merge do cache:', preErr?.message || preErr);
             }
+          }
+
+          try {
+            await enriquecerResultadosSerieComJaExiste(resultados);
           } catch (_) { /* enriquecimento opcional */ }
 
           await enriquecerResultadosSerieComVendas(resultados);
-          return res.json({ ok: true, rows: resultados, source: 'cache' });
+          const hasPre = resultados.some((r) => r.fonte_cache === 'historico_pre2024');
+          return res.json({ ok: true, rows: resultados, source: hasPre ? 'cache+historico_pre2024' : 'cache' });
         }
 
         // Cache existe mas não encontrou o termo → sincroniza em background
@@ -5793,7 +5897,7 @@ router.get('/at/busca-serie', async (req, res) => {
     } catch (cacheErr) {
       console.warn('[SAC/AT] cache SQL indisponível, usando planilhas:', cacheErr?.message);
     }
-    // ── Fim busca SQL — continua com lógica original (planilhas) como fallback ──
+    // ── Fim busca SQL — continua com histórico pré-2024 + planilhas como fallback ──
 
     const resultados = [];
     const seen = new Set();
@@ -5820,7 +5924,19 @@ router.get('/at/busca-serie', async (req, res) => {
       return true;
     };
 
+    // Histórico pré-2024 primeiro (SQL rápido) — cobre máquinas que não estão nas planilhas novas
+    try {
+      const preRows = await buscarSerieHistoricoPre2024(termoNorm, maxResultados);
+      for (const row of preRows) {
+        upsertResultado(row);
+        if (resultados.length >= maxResultados) break;
+      }
+    } catch (preErr) {
+      console.warn('[SAC/AT] historico_pre2024 indisponível na busca de série:', preErr?.message || preErr);
+    }
+
     for (const sheetName of AT_SERIE_SHEETS) {
+      if (resultados.length >= maxResultados) break;
       const sheetNameNorm = normalizeText(sheetName);
       let rows = [];
       try {
@@ -6051,45 +6167,10 @@ router.get('/at/busca-serie', async (req, res) => {
       }
 
     // Enriquece resultados com flag ja_existe (registro em sac.at_busca_selecionada)
-    if (resultados.length > 0) {
-      try {
-        const pairs = resultados.filter(r => r.ordem_producao || r.modelo);
-        if (pairs.length > 0) {
-          const conditions = pairs.map((_, i) => `(s.ordem_producao = $${i * 2 + 1} AND s.modelo = $${i * 2 + 2})`).join(' OR ');
-          const params = pairs.flatMap(p => [String(p.ordem_producao || '').trim() || null, String(p.modelo || '').trim() || null]);
-          const dbResult = await pool.query(
-            `SELECT DISTINCT ON (s.ordem_producao, s.modelo)
-               s.ordem_producao, s.modelo, s.id_at,
-               a.tipo, a.nome_revenda_cliente, a.numero_telefone, a.cpf_cnpj,
-               a.cep, a.bairro, a.cidade, a.estado, a.numero, a.rua,
-               a.agendar_atendimento_com,
-               a.modelo AS at_modelo,
-               a.tag_problema, a.plataforma_atendimento
-             FROM sac.at_busca_selecionada s
-             JOIN sac.at a ON a.id = s.id_at
-             WHERE ${conditions}
-             ORDER BY s.ordem_producao, s.modelo, s.id_at DESC`,
-            params
-          );
-          const existMap = new Map();
-          for (const row of dbResult.rows) {
-            const key = `${row.ordem_producao || ''}|${row.modelo || ''}`;
-            existMap.set(key, { id_at: row.id_at, at_data: row });
-          }
-          for (const r of resultados) {
-            const key = `${r.ordem_producao || ''}|${r.modelo || ''}`;
-            if (existMap.has(key)) {
-              r.ja_existe = true;
-              r.id_at = existMap.get(key).id_at;
-              r.at_data = existMap.get(key).at_data;
-            } else {
-              r.ja_existe = false;
-            }
-          }
-        }
-      } catch (enrichErr) {
-        console.warn('[SAC/AT] falha ao enriquecer resultados com at_busca_selecionada:', enrichErr?.message || enrichErr);
-      }
+    try {
+      await enriquecerResultadosSerieComJaExiste(resultados);
+    } catch (enrichErr) {
+      console.warn('[SAC/AT] falha ao enriquecer resultados com at_busca_selecionada:', enrichErr?.message || enrichErr);
     }
 
     await enriquecerResultadosSerieComVendas(resultados);
