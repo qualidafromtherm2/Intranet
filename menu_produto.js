@@ -64103,6 +64103,43 @@ function obterUnidadePedidoPreviewAssociacao(item) {
   return String(encontrado?.unidade || '-').trim() || '-';
 }
 
+/**
+ * Qtd/unidade para etiqueta (Identificação do produto).
+ * Com conversão de unidade (ex.: KG na NF → MTS no pedido), usa a quantidade convertida.
+ * Sem conversão (mesma unidade), mantém a quantidade da NF-e (recebimento parcial).
+ */
+function obterQtdUnidadeEtiquetaRecebimento(item, overrideExtra = null) {
+  const seq = Number(item?.n_sequencia || 0);
+  const overrideCampos = {
+    ...((seq && window.__associarNfeCamposEditados?.[seq]) || {}),
+    ...(overrideExtra && typeof overrideExtra === 'object' ? overrideExtra : {}),
+  };
+  const nfQtde = item?.nf_qtde;
+  const nfUnid = String(item?.nf_unidade || '').trim();
+  const pedUnidBase = obterUnidadePedidoPreviewAssociacao(item);
+  const pedUnid = String(overrideCampos?.cUnidade || pedUnidBase || '').trim();
+  const pedQtdeRaw = Number.isFinite(Number(overrideCampos?.nQtde))
+    ? Number(overrideCampos.nQtde)
+    : Number(item?.pedido_qtde);
+  const temOverride = Number.isFinite(Number(overrideCampos?.nQtde)) || !!(overrideCampos?.cUnidade);
+  const divergiuUnid = !!(nfUnid && pedUnid && pedUnid !== '-' && !unidadesEquivalentesPreview(nfUnid, pedUnid));
+
+  if (divergiuUnid || temOverride) {
+    const qtdConv = Number.isFinite(pedQtdeRaw) && pedQtdeRaw > 0
+      ? pedQtdeRaw
+      : nfQtde;
+    return {
+      qtd: String(qtdConv ?? ''),
+      unidade: pedUnid && pedUnid !== '-' ? pedUnid : nfUnid,
+    };
+  }
+
+  return {
+    qtd: String(nfQtde ?? item?.pedido_qtde ?? ''),
+    unidade: nfUnid || (pedUnid !== '-' ? pedUnid : ''),
+  };
+}
+
 const DICIONARIO_EQUIVALENCIA_UNIDADE_PREVIEW = {
   UN: ['UN', 'UND', 'UNID', 'UNIDADE', 'UNIDAD', 'UNIT', 'PC', 'PÇ', 'PECA', 'PEÇA', 'PCS', 'PÇS', 'PECAS', 'PEÇAS'],
   PAR: ['PAR', 'PARES', 'PR'],
@@ -65234,15 +65271,20 @@ async function imprimirEtiquetaRecebimentoPreview() {
   const preview = window.__associarNfePreviewAtual?.preview || {};
   const itensPreview = Array.isArray(preview.itens) ? preview.itens : [];
 
-  // Quantidade da etiqueta/PIR = sempre a da NF-e (recebimento parcial é normal)
+  snapshotEdicoesQtdUnidAssociacaoNfe();
+
+  // Com conversão de unidade → qtd convertida; senão → qtd da NF-e (parcial)
   const itensParaImprimir = itensPreview
     .filter(it => it?.pedido_codigo_produto)
-    .map(it => ({
-      codigo_produto:    String(it.pedido_codigo_produto  || '').trim(),
-      descricao_produto: String(it.pedido_descricao_produto || '').trim(),
-      qtd:     String(it.nf_qtde ?? it.pedido_qtde ?? ''),
-      unidade: String(it.nf_unidade ?? it.pedido_unidade ?? '').trim(),
-    }));
+    .map(it => {
+      const qu = obterQtdUnidadeEtiquetaRecebimento(it);
+      return {
+        codigo_produto:    String(it.pedido_codigo_produto  || '').trim(),
+        descricao_produto: String(it.pedido_descricao_produto || '').trim(),
+        qtd:     qu.qtd,
+        unidade: qu.unidade,
+      };
+    });
 
   if (itensParaImprimir.length === 0) {
     setStatusModalAssociarPedidoNfe('Nenhum item com código de produto identificado. Gere a prévia antes de imprimir.', 'erro');
@@ -65460,17 +65502,23 @@ async function confirmarAssociacaoPedidoNfeOmie() {
 
     // ── Registra etiquetas automaticamente após associar ─────────────────
     try {
+      snapshotEdicoesQtdUnidAssociacaoNfe();
       const _previewEtq = window.__associarNfePreviewAtual?.preview || {};
       const _itensEtq   = Array.isArray(_previewEtq.itens) ? _previewEtq.itens : [];
       const _itensParaEtq = _itensEtq
         .filter(it => it?.pedido_codigo_produto)
-        .map(it => ({
-          codigo_produto:    String(it.pedido_codigo_produto  || '').trim(),
-          descricao_produto: String(it.pedido_descricao_produto || '').trim(),
-          // Sempre quantidade da NF-e (pedido pode ser maior; outra NF completa depois)
-          qtd:     String(it.nf_qtde ?? it.pedido_qtde ?? ''),
-          unidade: String(it.nf_unidade ?? it.pedido_unidade ?? '').trim(),
-        }));
+        .map(it => {
+          const seq = Number(it?.n_sequencia || 0);
+          const ov = seq ? (itensOverrideMap.get(seq) || null) : null;
+          const qu = obterQtdUnidadeEtiquetaRecebimento(it, ov);
+          return {
+            codigo_produto:    String(it.pedido_codigo_produto  || '').trim(),
+            descricao_produto: String(it.pedido_descricao_produto || '').trim(),
+            // Conversão de unidade → qtd convertida; senão → qtd da NF-e
+            qtd:     qu.qtd,
+            unidade: qu.unidade,
+          };
+        });
       if (_itensParaEtq.length > 0) {
         fetch('/api/etiquetas/recebimento/preview', {
           method: 'POST',

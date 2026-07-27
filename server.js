@@ -12100,22 +12100,52 @@ app.post('/api/etiquetas/recebimento/preview', express.json(), async (req, res) 
 
       if (!codProdRaw) continue; // item sem código: ignora silenciosamente
 
+      const codProd  = sanitize(codProdRaw,  30);
+      const descProd = sanitize(descProdRaw, 70);
+      const novaQtdNum = qtdRaw !== '' ? Number(String(qtdRaw).replace(',', '.')) || null : null;
+
       // ── Deduplicação: mesmo nfe + pedido + codigo_produto ────────────────
+      // Se já existe e ainda não impressa, atualiza qtd/unidade (ex.: conversão KG→MTS)
       const existe = await pool.query(
-        `SELECT 1 FROM etiqueta."ETQ_recebimento"
+        `SELECT id, impressa FROM etiqueta."ETQ_recebimento"
           WHERE numero_nfe=$1 AND numero_pedido=$2 AND codigo_produto=$3
           LIMIT 1`,
         [String(nfe), String(pedido), codProdRaw]
       );
       if (existe.rows.length > 0) {
-        ignorados.push(codProdRaw);
+        const rowExist = existe.rows[0];
+        if (rowExist.impressa) {
+          ignorados.push(codProdRaw);
+          continue;
+        }
+        try {
+          await pool.query(
+            `UPDATE etiqueta."ETQ_recebimento"
+                SET qtd = COALESCE($1, qtd),
+                    unidade = CASE WHEN NULLIF(TRIM($2), '') IS NOT NULL THEN TRIM($2) ELSE unidade END,
+                    descricao_produto = COALESCE(NULLIF(TRIM($3), ''), descricao_produto)
+              WHERE id = $4`,
+            [novaQtdNum, unidRaw, descProdRaw, rowExist.id]
+          );
+          const zplUpd = _gerarZplRecebimentoBloco({
+            codProd,
+            descProd,
+            loteTxt,
+            dataExibir,
+            idEtq: rowExist.id
+          });
+          await pool.query(
+            `UPDATE etiqueta."ETQ_recebimento" SET conteudo_zpl=$1 WHERE id=$2`,
+            [zplUpd, rowExist.id]
+          );
+          zplBlocks.push(zplUpd);
+          gerados.push({ cod: codProdRaw, id: rowExist.id, atualizado: true, pir: false });
+        } catch (updConvErr) {
+          console.error('[etiquetas/recebimento/preview] falha ao atualizar conversão:', codProdRaw, updConvErr?.message || updConvErr);
+          ignorados.push(codProdRaw);
+        }
         continue;
       }
-
-      const codProd  = sanitize(codProdRaw,  30);
-      const descProd = sanitize(descProdRaw, 70);
-      const qtdTxt   = sanitize(qtdRaw,  15);
-      const unidTxt  = sanitize(unidRaw, 10);
 
       // Produto marcado para pular PIR → já nasce liberado em Identificação
       let pirInicial = false;
