@@ -15,6 +15,8 @@ async function garantirSchemaPermissoesSeparacao(client = null) {
     )
   `);
   await query(`ALTER TABLE logistica.separacao_permissoes ADD COLUMN IF NOT EXISTS destinos_chaves TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[]`);
+  await query(`ALTER TABLE logistica.separacao_permissoes ADD COLUMN IF NOT EXISTS destino_padrao_codigo TEXT`);
+  await query(`ALTER TABLE logistica.separacao_permissoes ADD COLUMN IF NOT EXISTS destino_padrao_nome TEXT`);
   schemaPronto = true;
 }
 
@@ -28,7 +30,8 @@ async function obterPermissaoSeparacao(userId, client = null) {
   await garantirSchemaPermissoesSeparacao(client);
   const query = client ? client.query.bind(client) : dbQuery;
   const { rows } = await query(`
-    SELECT user_id::text, restringir_destinos, destinos_codigos, destinos_chaves
+    SELECT user_id::text, restringir_destinos, destinos_codigos, destinos_chaves,
+           destino_padrao_codigo, destino_padrao_nome
       FROM logistica.separacao_permissoes
      WHERE user_id = $1
      LIMIT 1

@@ -81714,13 +81714,26 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!sel || sel.options.length <= 1) return;
 
     let me = window.__authStatusCache;
-    if (!me?.user?.sector_id) {
+    if (!me?.user?.id) {
       try {
         const r = await fetch('/api/auth/status', { credentials: 'include' });
         me = await r.json();
         window.__authStatusCache = me;
       } catch { return; }
     }
+    const userId = me?.user?.id;
+    if (userId) {
+      try {
+        const r = await fetch(`/api/colaboradores/${encodeURIComponent(userId)}/separacao-permissao`, { credentials: 'include' });
+        const regra = r.ok ? await r.json() : null;
+        const destinoIndividual = String(regra?.destino_padrao_codigo || '').trim();
+        if (destinoIndividual && Array.from(sel.options).some(o => o.value === destinoIndividual)) {
+          sel.value = destinoIndividual;
+          return;
+        }
+      } catch (_) {}
+    }
+
     const sectorId = me?.user?.sector_id;
     if (!sectorId) return;
 
