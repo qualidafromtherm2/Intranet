@@ -18,6 +18,13 @@
  */
 
 const { Pool } = require('pg');
+const {
+  fecharSolicitacoesDePedidosFechados,
+  sincronizarSolicitacaoPorPedido,
+  refrescarPedidoFechadoDaOmie,
+  substituirItensPedido,
+  atualizarFlagsRecebimentoPedido
+} = require('../utils/syncPedidosCompraOmie');
 
 // ─── Credenciais ──────────────────────────────────────────────────────────────
 const DATABASE_URL    = process.env.DATABASE_URL;
@@ -309,6 +316,10 @@ async function reconciliarPedidosCompraAbertos() {
       );
       inativados++;
       log(`  ✓ [pedidos_omie] Pedido ${ped.c_numero} inativado (excluído na Omie)`);
+      await sincronizarSolicitacaoPorPedido(pool, ped.n_cod_ped, {
+        statusFinalForcado: 'excluido',
+        log
+      });
       continue;
     }
 
@@ -330,6 +341,17 @@ async function reconciliarPedidosCompraAbertos() {
       if (!pendenteAgora) {
         faturadosMarcados++;
         log(`  ✓ [pedidos_omie] Pedido ${ped.c_numero} fechado na Omie (sai de Compra realizada)`);
+        await refrescarPedidoFechadoDaOmie({
+          pool,
+          nCodPed: ped.n_cod_ped,
+          cNumero: ped.c_numero,
+          delayMs: DELAY_MS,
+          log,
+          omieConsultarPedCompra: async (nCod) =>
+            omiePost('produtos/pedidocompra', 'ConsultarPedCompra', { nCodPed: Number(nCod) })
+        });
+      } else {
+        await sincronizarSolicitacaoPorPedido(pool, ped.n_cod_ped, { log });
       }
     }
   }
@@ -366,19 +388,12 @@ async function reconciliarPedidosCompraAbertos() {
         cab.cObs || null, cab.cObsInt || null
       ]);
 
-      await pool.query('DELETE FROM compras.pedidos_omie_produtos WHERE n_cod_ped = $1', [cab.nCodPed]);
-      for (const prod of produtos) {
-        await pool.query(`
-          INSERT INTO compras.pedidos_omie_produtos (
-            n_cod_ped, n_cod_item, c_produto, c_descricao, c_unidade,
-            n_qtde, n_val_unit, n_val_tot
-          ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
-        `, [
-          cab.nCodPed, prod.nCodItem || null, prod.cProduto || null,
-          prod.cDescricao || null, prod.cUnidade || null,
-          prod.nQtde || null, prod.nValUnit || null, prod.nValTot || null
-        ]);
-      }
+      await substituirItensPedido(pool, cab.nCodPed, produtos.map(p => ({
+        ...p,
+        nQtdeRec: p.nQtdeRec || p.n_qtde_rec || null
+      })));
+      await atualizarFlagsRecebimentoPedido(pool, cab.nCodPed);
+      await sincronizarSolicitacaoPorPedido(pool, cab.nCodPed, { log });
       importados++;
       log(`  ✓ [pedidos_omie] Pedido ${cab.cNumero || idPed} importado da Omie (não existia localmente)`);
     } catch (e) {
@@ -386,8 +401,16 @@ async function reconciliarPedidosCompraAbertos() {
     }
   }
 
-  log(`── [pedidos_omie] Concluído: inativados=${inativados} etapaAjustada=${etapaAjustada} faturados=${faturadosMarcados} importados=${importados}`);
-  return { pedidos_inativados: inativados, pedidos_etapa_ajustada: etapaAjustada, pedidos_faturados: faturadosMarcados, pedidos_importados: importados };
+  const solFechadas = await fecharSolicitacoesDePedidosFechados(pool, log);
+
+  log(`── [pedidos_omie] Concluído: inativados=${inativados} etapaAjustada=${etapaAjustada} faturados=${faturadosMarcados} importados=${importados} solFechadas=${(solFechadas.fechadas_pedido || 0) + (solFechadas.fechadas_item_sumiu || 0)}`);
+  return {
+    pedidos_inativados: inativados,
+    pedidos_etapa_ajustada: etapaAjustada,
+    pedidos_faturados: faturadosMarcados,
+    pedidos_importados: importados,
+    solicitacoes_fechadas: solFechadas
+  };
 }
 
 /**

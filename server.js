@@ -20,6 +20,12 @@ const { registrarRiCheckImpressaoOp } = require('./routes/qualidadeRiCheck');
 const { injectStoragePublicUrls, getStoragePublicBaseUrl, ASSETS, agenteExeUrl } = require('./utils/storageUrls');
 const etqRecImpressoBackfill = require('./utils/etqRecImpressoBackfill');
 const {
+  atualizarFlagsRecebimentoPedido,
+  fecharSolicitacoesDePedidosFechados,
+  sincronizarSolicitacaoPorPedido,
+  refrescarPedidoFechadoDaOmie
+} = require('./utils/syncPedidosCompraOmie');
+const {
   MSG_FORMATO: ETQ_ENDERECO_MSG_FORMATO,
   assertEnderecoEtq,
   resolverEnderecoEtq,
@@ -6992,6 +6998,14 @@ app.post(['/webhooks/omie/pedidos-compra', '/api/webhooks/omie/pedidos-compra'],
         const acao = topic.includes('Excluida') ? 'excluido' : 'cancelado';
         console.log(`[webhooks/omie/pedidos-compra] Pedido ${identificadorPedido} marcado como inativo (${acao})`);
 
+        if (nCodPed) {
+          await sincronizarPedidoComSolicitacao(nCodPed, {
+            statusFinalForcado: acao === 'excluido' ? 'excluido' : 'cancelado'
+          });
+        } else {
+          await fecharSolicitacoesDePedidosFechados(pool);
+        }
+
         return res.json({
           ok: true,
           n_cod_ped: nCodPed || null,
@@ -7134,6 +7148,9 @@ app.post(['/webhooks/omie/pedidos-compra', '/api/webhooks/omie/pedidos-compra'],
               cNumero || null
             ]);
             console.warn(`[webhooks/omie/pedidos-compra] Pedido ${identificadorPedido} inativado (Omie: não cadastrado)`);
+            if (nCodPed) {
+              await sincronizarPedidoComSolicitacao(nCodPed, { statusFinalForcado: 'excluido' });
+            }
             return;
           }
 
@@ -27337,6 +27354,15 @@ async function upsertPedidoCompra(pedido, eventoWebhook = '', messageId = null, 
       console.log(`[PedidosCompra] ⚠️ Pedido ${nCodPed} recebido sem itens no payload (${eventoWebhook || 'sem-evento'}). Itens locais preservados.`);
     }
 
+    // Se veio lista de itens da Omie, recalcula pendente_omie / Pedido recebido
+    // (ex.: pedido 3000 já 100% recebido na Omie mas ainda aberto localmente).
+    if (Array.isArray(produtos) && produtos.length > 0 && confirmadoOmie) {
+      const flags = await atualizarFlagsRecebimentoPedido(client, nCodPed);
+      if (flags.fullyReceived) {
+        console.log(`[PedidosCompra] ✓ Pedido ${nCodPed} 100% recebido na Omie — sai de Compra realizada`);
+      }
+    }
+
     // 3. Upsert do frete (1:1 com pedido)
     await client.query('DELETE FROM compras.pedidos_omie_frete WHERE n_cod_ped = $1', [nCodPed]);
 
@@ -27424,111 +27450,62 @@ async function upsertPedidoCompra(pedido, eventoWebhook = '', messageId = null, 
 // ============================================================================
 // Sincroniza pedido Omie com solicitacao_compras
 // ============================================================================
-async function sincronizarPedidoComSolicitacao(nCodPed) {
+async function sincronizarPedidoComSolicitacao(nCodPed, opts = {}) {
   try {
-    // 1. Busca etapa e fornecedor do pedido
+    // Fecha/atualiza status (recebido/excluido/etapa) — util compartilhado
+    await sincronizarSolicitacaoPorPedido(pool, nCodPed, {
+      log: (...a) => console.log(...a),
+      statusFinalForcado: opts.statusFinalForcado || null
+    });
+
+    // Etapa 10 ainda aberta: enriquece fornecedor (comportamento legado)
     const pedidoResult = await pool.query(
-      'SELECT c_etapa, n_cod_for, c_numero FROM compras.pedidos_omie WHERE n_cod_ped = $1',
+      `SELECT c_etapa, n_cod_for, c_numero, pendente_omie,
+              COALESCE("Pedido recebido", FALSE) AS pedido_recebido, inativo
+         FROM compras.pedidos_omie WHERE n_cod_ped = $1`,
       [nCodPed]
     );
+    if (pedidoResult.rows.length === 0) return;
+    const ped = pedidoResult.rows[0];
+    if (ped.inativo || ped.pedido_recebido || ped.pendente_omie === false) return;
+    if (String(ped.c_etapa || '').trim() !== '10' || !ped.n_cod_for) return;
 
-    if (pedidoResult.rows.length === 0) {
-      console.warn(`[sincronizarPedido] Pedido ${nCodPed} não encontrado em pedidos_omie`);
-      return;
-    }
-
-    const etapa = pedidoResult.rows[0].c_etapa;
-    const codFornecedor = pedidoResult.rows[0].n_cod_for;
-    const numeroPedido = pedidoResult.rows[0].c_numero;
-
-    if (!etapa) {
-      console.warn(`[sincronizarPedido] Pedido ${nCodPed} sem etapa definida`);
-      return;
-    }
-
-    // 2. Busca descrição da etapa
-    const etapaResult = await pool.query(
-      'SELECT descricao_padrao FROM compras.etapas_pedido_compra WHERE codigo = $1',
-      [etapa]
-    );
-
-    const descricaoEtapa = etapaResult.rows.length > 0
-      ? etapaResult.rows[0].descricao_padrao
-      : `Etapa ${etapa}`;
-
-    // 3. Atualiza solicitacao_compras
-    let updateQuery;
-    let updateParams;
-
-    if (etapa === '10' && codFornecedor) {
-      // Etapa 10: busca dados do fornecedor na API Omie
-      let fornecedorNome = null;
-      let fornecedorContato = null;
-
-      try {
-        console.log(`[sincronizarPedido] Buscando dados do fornecedor ${codFornecedor} na API Omie...`);
-
-        const fornecedorResp = await fetch('https://app.omie.com.br/api/v1/geral/clientes/', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            call: 'ConsultarCliente',
-            app_key: OMIE_APP_KEY,
-            app_secret: OMIE_APP_SECRET,
-            param: [{
-              codigo_cliente_omie: parseInt(codFornecedor)
-            }]
-          })
-        });
-
-        if (fornecedorResp.ok) {
-          const fornecedorData = await fornecedorResp.json();
-          fornecedorNome = fornecedorData.nome_fantasia || fornecedorData.razao_social || null;
-          fornecedorContato = fornecedorData.contato || null;
-
-          console.log(`[sincronizarPedido] Dados do fornecedor obtidos: nome="${fornecedorNome}", contato="${fornecedorContato}"`);
-        } else {
-          const errorText = await fornecedorResp.text();
-          console.warn(`[sincronizarPedido] Erro ao buscar fornecedor na API Omie: ${fornecedorResp.status} - ${errorText}`);
-        }
-      } catch (err) {
-        console.warn(`[sincronizarPedido] Falha ao consultar fornecedor na API Omie:`, err.message);
+    let fornecedorNome = null;
+    let fornecedorContato = null;
+    try {
+      const fornecedorResp = await fetch('https://app.omie.com.br/api/v1/geral/clientes/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          call: 'ConsultarCliente',
+          app_key: OMIE_APP_KEY,
+          app_secret: OMIE_APP_SECRET,
+          param: [{ codigo_cliente_omie: parseInt(ped.n_cod_for, 10) }]
+        })
+      });
+      if (fornecedorResp.ok) {
+        const fornecedorData = await fornecedorResp.json();
+        fornecedorNome = fornecedorData.nome_fantasia || fornecedorData.razao_social || null;
+        fornecedorContato = fornecedorData.contato || null;
       }
-
-      // Atualiza status, fornecedor_id, fornecedor_nome e contato
-      updateQuery = `
-        UPDATE compras.solicitacao_compras
-        SET status = $1,
-            fornecedor_id = $2,
-            fornecedor_nome = $3,
-            contato = $4,
-            cnumero = $5,
-            updated_at = NOW()
-        WHERE ncodped = $6`;
-      updateParams = [descricaoEtapa, codFornecedor, fornecedorNome, fornecedorContato, numeroPedido || null, nCodPed];
-    } else {
-      // Outras etapas: atualiza status e cnumero
-      updateQuery = `
-        UPDATE compras.solicitacao_compras
-        SET status = $1,
-            cnumero = $2,
-            updated_at = NOW()
-        WHERE ncodped = $3`;
-      updateParams = [descricaoEtapa, numeroPedido || null, nCodPed];
+    } catch (err) {
+      console.warn(`[sincronizarPedido] Falha ao consultar fornecedor:`, err.message);
     }
 
-    const result = await pool.query(updateQuery, updateParams);
-
-    if (result.rowCount > 0) {
-      if (etapa === '10' && codFornecedor) {
-        console.log(`[sincronizarPedido] ✓ Solicitação atualizada: ncodped=${nCodPed}, etapa ${etapa} → status="${descricaoEtapa}", fornecedor_id=${codFornecedor}, fornecedor_nome="${updateParams[2]}", contato="${updateParams[3]}", cnumero="${updateParams[4]}"`);
-      } else {
-        console.log(`[sincronizarPedido] ✓ Solicitação atualizada: ncodped=${nCodPed}, etapa ${etapa} → status="${descricaoEtapa}", cnumero="${updateParams[1]}"`);
-      }
-    } else {
-      console.warn(`[sincronizarPedido] ⚠ Nenhuma solicitação encontrada com ncodped=${nCodPed}`);
+    if (fornecedorNome || fornecedorContato) {
+      await pool.query(
+        `
+        UPDATE compras.solicitacao_compras
+           SET fornecedor_id = $1,
+               fornecedor_nome = COALESCE($2, fornecedor_nome),
+               contato = COALESCE($3, contato),
+               cnumero = COALESCE($4, cnumero),
+               updated_at = NOW()
+         WHERE ncodped::text = TRIM($5::text)
+        `,
+        [ped.n_cod_for, fornecedorNome, fornecedorContato, ped.c_numero || null, String(nCodPed)]
+      );
     }
-
   } catch (err) {
     console.error(`[sincronizarPedido] ✗ Erro ao sincronizar pedido ${nCodPed}:`, err);
   }
@@ -34223,10 +34200,8 @@ app.get('/api/compras/compras-realizadas', async (req, res) => {
         LIMIT 1
       ) origem ON TRUE
       WHERE COALESCE(po.inativo, FALSE) = FALSE
-        AND (
-          po.pendente_omie IS TRUE
-          OR (po.pendente_omie IS NULL AND (po."Etapa_NF" IS NULL OR BTRIM(po."Etapa_NF") = ''))
-        )
+        AND po.pendente_omie IS TRUE
+        AND COALESCE(po."Pedido recebido", FALSE) = FALSE
         AND BTRIM(COALESCE(po.c_etapa, '')) IN ('10', '15')
         AND po.d_inc_data >= '2026-01-01'${whereDataCR}
       ORDER BY
@@ -35160,6 +35135,7 @@ async function varrerFaturadasOmieKanban() {
       );
       pedidosInativados += 1;
       console.log(`[VarrerFaturadas] Pedido ${ped.c_numero} inativado (excluído na Omie)`);
+      await sincronizarPedidoComSolicitacao(ped.n_cod_ped, { statusFinalForcado: 'excluido' });
       continue;
     }
 
@@ -35185,6 +35161,29 @@ async function varrerFaturadasOmieKanban() {
       if (!pendenteAgora) {
         pedidosFaturadosMarcados += 1;
         console.log(`[VarrerFaturadas] Pedido ${ped.c_numero} fechado na Omie (recebido/cancelado/encerrado — sai de Compra realizada)`);
+        // Atualiza itens (n_qtde_rec) + solicitações para o banco refletir a Omie
+        await refrescarPedidoFechadoDaOmie({
+          pool,
+          nCodPed: ped.n_cod_ped,
+          cNumero: ped.c_numero,
+          delayMs: OMIE_REQUEST_DELAY_MS,
+          log: (...a) => console.log(...a),
+          omieConsultarPedCompra: async (nCod) => {
+            const respostaPed = await fetch('https://app.omie.com.br/api/v1/produtos/pedidocompra/', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                call: 'ConsultarPedCompra',
+                app_key: OMIE_APP_KEY,
+                app_secret: OMIE_APP_SECRET,
+                param: [{ nCodPed: Number(nCod) }]
+              })
+            });
+            return respostaPed.json().catch(() => ({}));
+          }
+        });
+      } else {
+        await sincronizarPedidoComSolicitacao(ped.n_cod_ped);
       }
     }
   }
@@ -35221,6 +35220,7 @@ async function varrerFaturadasOmieKanban() {
           WHERE n_cod_ped = $1`,
         [idPed]
       );
+      await sincronizarPedidoComSolicitacao(idPed);
       pedidosImportados += 1;
       const numImp = dadosPed?.cabecalho_consulta?.cNumero || idPed;
       console.log(`[VarrerFaturadas] Pedido ${numImp} importado da Omie (não existia localmente)`);
@@ -35230,11 +35230,15 @@ async function varrerFaturadasOmieKanban() {
     }
   }
 
+  // Solicitações órfãs ("Compra realizada" sem pedido aberto) → recebido/excluido
+  const solFechadas = await fecharSolicitacoesDePedidosFechados(pool, (...a) => console.log(...a));
+
   const duracaoMs = Date.now() - inicio;
   console.log(
     `[VarrerFaturadas] Concluído em ${Math.round(duracaoMs / 1000)}s — ` +
     `listados=${listados} upsertados=${upsertados} orfaos=${atualizadosOrfaos} removidos=${removidos} ` +
-    `pedidos=${pedidosVerificados} inativados=${pedidosInativados} etapaAjustada=${pedidosEtapaAtualizada} importados=${pedidosImportados} erros=${erros}`
+    `pedidos=${pedidosVerificados} inativados=${pedidosInativados} etapaAjustada=${pedidosEtapaAtualizada} importados=${pedidosImportados} ` +
+    `solFechadas=${(solFechadas.fechadas_pedido || 0) + (solFechadas.fechadas_item_sumiu || 0)} erros=${erros}`
   );
 
   return {
@@ -35248,6 +35252,7 @@ async function varrerFaturadasOmieKanban() {
     pedidos_etapa_atualizada: pedidosEtapaAtualizada,
     pedidos_faturados_marcados: pedidosFaturadosMarcados,
     pedidos_importados: pedidosImportados,
+    solicitacoes_fechadas: solFechadas,
     erros,
     paginas,
     duracao_ms: duracaoMs
