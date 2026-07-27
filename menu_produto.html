@@ -2622,6 +2622,15 @@
 
         <!-- Modal Lightbox para Ampliar Imagem -->
         <div id="modalImagemAmpliada" class="modal" style="display:none;z-index:10050;" onclick="fecharImagemAmpliada()">
+          <button
+            type="button"
+            class="imagem-ampliada-fechar"
+            aria-label="Fechar foto ampliada"
+            title="Fechar foto"
+            onclick="event.stopPropagation();fecharImagemAmpliada();"
+          >
+            <i class="fa-solid fa-xmark" aria-hidden="true"></i>
+          </button>
           <div style="
             width:100%;
             height:100%;

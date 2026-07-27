@@ -29,10 +29,22 @@ window.storagePublicUrl = function storagePublicUrl(relativePath) {
 // ============================================================================
 // SISTEMA CENTRAL DE NAVEGAÇÃO - Garante que só 1 página seja visível por vez
 // ============================================================================
+window.hideLogisticsOperationalPages = function(exceptId = '') {
+  ['etiquetasModal', 'etqImpressoModal'].forEach((id) => {
+    if (id === exceptId) return;
+    const page = document.getElementById(id);
+    if (page) page.style.display = 'none';
+  });
+};
+
 window.clearMainContainer = function() {
   try {
     const main = document.querySelector('.main-container');
     if (!main) return;
+
+    // As páginas operacionais nasceram como modais e são movidas para este
+    // container. Elas não podem permanecer abertas ao trocar de módulo.
+    window.hideLogisticsOperationalPages?.();
 
     // Força TODOS os filhos a ficarem invisíveis
     Array.from(main.children).forEach(el => {
@@ -32441,6 +32453,7 @@ function onAlmoxRowClick(ev) {
 if (btnCache) {
 btnCache.addEventListener('click', async e => {
   e.preventDefault();
+  window.hideLogisticsOperationalPages?.();
   hideKanban();
   if (typeof hideArmazem === 'function') hideArmazem();
   const armTabsEl = document.getElementById('armazemTabs');
@@ -36560,6 +36573,15 @@ window.openRegistros = async function() {
       const qtd     = escapeHtml(String(e.qtd  != null ? e.qtd : ''));
       const unid    = escapeHtml(String(e.unidade || ''));
       const data    = escapeHtml(String(e.data_emissao || ''));
+      const recebidoEm = (() => {
+        if (!e.criado_em) return '';
+        const valor = new Date(e.criado_em);
+        if (Number.isNaN(valor.getTime())) return escapeHtml(String(e.criado_em));
+        return escapeHtml(valor.toLocaleString('pt-BR', {
+          day: '2-digit', month: '2-digit', year: 'numeric',
+          hour: '2-digit', minute: '2-digit'
+        }));
+      })();
       const id      = Number(e.id);
       const qtdRaw  = e.qtd != null ? Number(e.qtd) || 0 : 0;
       const impressa    = !!e.impressa;
@@ -36604,6 +36626,10 @@ window.openRegistros = async function() {
           <strong>${documento}</strong>
           ${data ? `<span>Emissão: ${data}</span>` : ''}
         </div>
+        <div class="etq-table-received">
+          <strong>${recebidoEm || '—'}</strong>
+          <span>Entrada no recebimento</span>
+        </div>
         <div class="etq-table-qty">
           <strong>${qtd}${unid ? ' '+unid : ''}</strong>
           ${impressa ? '<span class="etq-badge-impressa"><i class="fa-solid fa-check"></i> Impresso</span>' : ''}
@@ -36620,6 +36646,7 @@ window.openRegistros = async function() {
         <span>Produto</span>
         <span>Lote</span>
         <span>Origem</span>
+        <span>Recebido em</span>
         <span>Quantidade</span>
         <span>Ações</span>
       </div>
@@ -37754,7 +37781,10 @@ window.openRegistros = async function() {
             ${impresso ? `<span><i class="fa-solid fa-print"></i> ${impresso}${usuario ? ' · '+usuario : ''}</span>` : ''}
             ${endereco ? `<span class="is-address"><i class="fa-solid fa-location-dot"></i> ${endereco}</span>` : '<span>Aguardando endereço</span>'}
           </div>
-          <div class="etq-table-actions"><button type="button" class="etq-btn-guardar" data-id="${idEtq}"><i class="fa-solid fa-dolly"></i> Guardar material</button></div>
+          <div class="etq-table-actions">
+            <button type="button" class="etq-btn-reimprimir" data-id="${idEtq}" aria-label="Reimprimir etiqueta ETQ ${idEtq}" title="Reimprimir sem criar outro ID"><i class="fa-solid fa-print"></i> Reimprimir</button>
+            <button type="button" class="etq-btn-guardar" data-id="${idEtq}"><i class="fa-solid fa-dolly"></i> Guardar material</button>
+          </div>
         </div>`;
     }).join('');
 
@@ -37783,6 +37813,7 @@ window.openRegistros = async function() {
 
   function _abrirGuardarMateriais() {
     if (!etqImpressoModal) return;
+    _etqCarregarPref();
     const mainContainer = document.querySelector('.main-container');
     if (mainContainer && etqImpressoModal.parentElement !== mainContainer) mainContainer.appendChild(etqImpressoModal);
     showMainTab('etqImpressoModal');
@@ -38195,7 +38226,74 @@ window.openRegistros = async function() {
   etqRetornarCancelar?.addEventListener('click', () => { _armEscolhaRetornar(false); });
 
   // Clique em card da lista → abre modal já no passo 2 (pula leitura de QR)
+  async function _etqReimprimirExistente(id, btn, printer = _etqPrinterPref) {
+    if (!id) return;
+    if (!printer || printer === '__PDF__') {
+      _etqMostrarSeletorImpressora(
+        printer === '__PDF__' ? 'Para reimprimir uma ETQ existente, escolha uma impressora.' : 'Escolha a impressora para reimprimir.',
+        (selecionada) => {
+          _etqSalvarPref(selecionada);
+          _etqReimprimirExistente(id, btn, selecionada);
+        },
+        etqImpressoStatus
+      );
+      return;
+    }
+    if (!_etqConfirmarImpressao(printer, `a etiqueta ETQ ${id}`)) return;
+
+    const original = btn?.innerHTML || '';
+    if (btn) {
+      btn.disabled = true;
+      btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Enviando';
+    }
+    try {
+      const body = {
+        ids: [id],
+        usuario: (document.getElementById('userNameDisplay')?.textContent || '').trim(),
+        via_fila: true
+      };
+      const agente = _etqParseAgentPref(printer);
+      if (agente) {
+        body.destino_agente = agente.pcName;
+        body.impressora = agente.impressora;
+      } else if (printer !== '__BP__') {
+        body.printer = printer;
+        body.via_fila = false;
+      }
+
+      const resp = await fetch('/api/etiquetas/rec-impresso/imprimir-ids', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify(body)
+      });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok || !data?.ok) throw new Error(data?.error || `Erro ${resp.status}`);
+      if (etqImpressoStatus) {
+        etqImpressoStatus.textContent = `ETQ ${id} enviada para reimpressão. O ID foi preservado.`;
+        etqImpressoStatus.style.color = '#08775a';
+      }
+    } catch (err) {
+      if (etqImpressoStatus) {
+        etqImpressoStatus.textContent = `Falha ao reimprimir ETQ ${id}: ${err.message || err}`;
+        etqImpressoStatus.style.color = '#b42318';
+      }
+    } finally {
+      if (btn) {
+        btn.disabled = false;
+        btn.innerHTML = original;
+      }
+    }
+  }
+
   etqImpressoGrid?.addEventListener('click', e => {
+    const reimprimir = e.target.closest('.etq-btn-reimprimir[data-id]');
+    if (reimprimir) {
+      e.preventDefault();
+      e.stopPropagation();
+      _etqReimprimirExistente(Number(reimprimir.dataset.id), reimprimir);
+      return;
+    }
     const card = e.target.closest('.etq-card[data-id]');
     if (card) {
       const id = Number(card.dataset.id);
@@ -38206,7 +38304,7 @@ window.openRegistros = async function() {
   etqImpressoGrid?.addEventListener('keydown', e => {
     if (e.key !== 'Enter' && e.key !== ' ') return;
     const card = e.target.closest('.etq-card[data-id]');
-    if (!card || e.target.closest('.cp-product-thumb')) return;
+    if (!card || e.target.closest('.cp-product-thumb, .etq-btn-reimprimir')) return;
     e.preventDefault();
     const id = Number(card.dataset.id);
     if (id) _armAbrirComId(id);
