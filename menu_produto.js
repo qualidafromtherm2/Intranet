@@ -81276,6 +81276,10 @@ document.addEventListener('DOMContentLoaded', () => {
       <div id="modalCarrinhoSepEmpty" style="display:none;color:#94a3b8;font-size:.94rem;padding:38px 24px;text-align:center;">Nenhum produto adicionado.</div>
       <!-- Formulário de envio -->
       <div id="modalCarrinhoSepForm" style="border-top:1px solid #2a2a2a;padding:10px 18px 12px;display:flex;flex-direction:column;gap:9px;flex-shrink:0;">
+        <button id="modalCarrinhoSepContinue" type="button">
+          <span><i class="fa-solid fa-arrow-right"></i> Continuar para retirada</span>
+          <small>Responsável, destino e prazo</small>
+        </button>
         <div id="modalCarrinhoSepFields" style="display:grid;grid-template-columns:1.1fr 1fr 1.1fr;gap:9px;align-items:end;">
         <div style="display:flex;flex-direction:column;gap:5px;min-width:0;">
           <label>Responsável pela retirada</label>
@@ -81321,6 +81325,16 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   const panel = document.getElementById('modalCarrinhoSepPanel');
+  const continueBtn = document.getElementById('modalCarrinhoSepContinue');
+  continueBtn?.addEventListener('click', () => {
+    const form = document.getElementById('modalCarrinhoSepForm');
+    if (!form) return;
+    const vaiAbrir = form.classList.contains('sep-mobile-collapsed');
+    form.classList.toggle('sep-mobile-collapsed', !vaiAbrir);
+    continueBtn.innerHTML = vaiAbrir
+      ? '<span><i class="fa-solid fa-arrow-left"></i> Voltar aos produtos</span><small>Revise ou altere os dados da retirada</small>'
+      : '<span><i class="fa-solid fa-arrow-right"></i> Continuar para retirada</span><small>Responsável, destino e prazo</small>';
+  });
   const responsiveStyle = document.createElement('style');
   responsiveStyle.textContent = `
     #modalCarrinhoSepOverlay {
@@ -81507,6 +81521,22 @@ document.addEventListener('DOMContentLoaded', () => {
       gap: 12px !important;
       background: #fff !important;
     }
+    #modalCarrinhoSepContinue {
+      display: none;
+      width: 100%;
+      min-height: 48px;
+      padding: 8px 12px;
+      border: 0;
+      border-radius: 6px;
+      background: #0f2747;
+      color: #fff;
+      cursor: pointer;
+      text-align: left;
+    }
+    #modalCarrinhoSepContinue span,
+    #modalCarrinhoSepContinue small { display: block; color: inherit !important; }
+    #modalCarrinhoSepContinue span { font-weight: 800; }
+    #modalCarrinhoSepContinue small { margin-top: 2px; color: #cbd5e1 !important; }
     #modalCarrinhoSepFields label,
     #modalCarrinhoSepObsWrap summary {
       color: #334155 !important;
@@ -81576,11 +81606,18 @@ document.addEventListener('DOMContentLoaded', () => {
       box-shadow: none !important;
     }
     @media (max-width: 760px) {
+      .sep-request-heading::after { display: none; }
+      #modalCarrinhoSepPanel > div:first-child h2 { font-size: .98rem !important; }
       #modalCarrinhoSepFields { grid-template-columns: 1fr !important; }
       #modalCarrinhoSepOverlay { padding: 0 !important; align-items: flex-end !important; }
-      #modalCarrinhoSepPanel { width: 100% !important; max-height: 94dvh !important; border-radius: 8px 8px 0 0 !important; }
-      .sep-cart-row { grid-template-columns: minmax(0,1fr) auto !important; }
-      .sep-cart-thumb { display: none !important; }
+      #modalCarrinhoSepPanel { width: 100% !important; height: 96dvh !important; max-height: 96dvh !important; border-radius: 8px 8px 0 0 !important; }
+      #modalCarrinhoSepItems { flex: 1 1 auto !important; min-height: 0 !important; }
+      #modalCarrinhoSepForm { flex: 0 0 auto !important; max-height: 48dvh; overflow-y: auto; }
+      #modalCarrinhoSepContinue { display: block; }
+      #modalCarrinhoSepForm.sep-mobile-collapsed { padding: 10px 14px max(10px, env(safe-area-inset-bottom)) !important; }
+      #modalCarrinhoSepForm.sep-mobile-collapsed > :not(#modalCarrinhoSepContinue) { display: none !important; }
+      .sep-cart-row { grid-template-columns: 56px minmax(0,1fr) auto !important; }
+      .sep-cart-thumb { display: grid !important; }
       .sep-cart-info-grid { grid-template-columns: 1fr !important; }
       .sep-cart-actions-row { flex-wrap: wrap !important; }
       #modalCarrinhoSepPanel > div:first-child { padding-top: max(12px, env(safe-area-inset-top)) !important; }
@@ -81588,6 +81625,9 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     @media (max-width: 520px) {
       #modalCarrinhoSepActions { grid-template-columns: 1fr !important; }
+      #modalCarrinhoSepItems { padding: 10px !important; }
+      .sep-cart-row { grid-template-columns: 48px minmax(0,1fr) auto !important; padding: 9px !important; gap: 8px !important; }
+      .sep-cart-thumb { width: 48px !important; height: 48px !important; }
     }
   `;
   document.head.appendChild(responsiveStyle);
@@ -82002,6 +82042,14 @@ document.addEventListener('DOMContentLoaded', () => {
     // Preenche data de hoje por padrão
     const dateEl = document.getElementById('modalCarrinhoSepDate');
     if (dateEl && !dateEl.value) dateEl.value = new Date().toISOString().slice(0, 10);
+
+    const formEl = document.getElementById('modalCarrinhoSepForm');
+    if (window.matchMedia('(max-width: 760px)').matches) {
+      formEl?.classList.add('sep-mobile-collapsed');
+      if (continueBtn) continueBtn.innerHTML = '<span><i class="fa-solid fa-arrow-right"></i> Continuar para retirada</span><small>Responsável, destino e prazo</small>';
+    } else {
+      formEl?.classList.remove('sep-mobile-collapsed');
+    }
 
     if (Array.isArray(window.__carrinhoSepCache)) {
       _renderItens(window.__carrinhoSepCache);
