@@ -13,6 +13,7 @@ require('./utils/supabase');
 const { resolveNumeroPedidoFromWebhook } = require('./utils/vendasNfJoin');
 const { obterPermissaoMovimentacao } = require('./utils/movimentacaoPermissoes');
 const { obterPermissaoSeparacao, assertAcessoSeparacao } = require('./utils/separacaoPermissoes');
+const { exigirGestaoEnderecos } = require('./utils/produtoEnderecosPermissoes');
 const { uploadPublicFile, removePublicFiles } = require('./utils/storage');
 const { registrarControleOperacaoImpressaoOp } = require('./utils/controleOperacoes');
 const { iniciarCicloPosto } = require('./utils/tempoProducao');
@@ -12939,6 +12940,169 @@ app.use('/api/etiquetas/rec-impresso', async (req, res, next) => {
   } catch (err) {
     console.error('[etiquetas/rec-impresso] ensure cols:', err);
     res.status(500).json({ ok: false, error: err?.message || 'Falha schema ETQ_rec_impresso' });
+  }
+});
+
+// Gestão restrita dos endereços internos de um produto. Estas rotas não chamam a Omie:
+// consultam e movimentam somente etiqueta."ETQ_rec_impresso".
+app.get('/api/logistica/produtos/:codigo/enderecos', exigirGestaoEnderecos, async (req, res) => {
+  try {
+    const codigo = String(req.params.codigo || '').trim();
+    if (!codigo) return res.status(400).json({ ok: false, error: 'Código do produto é obrigatório.' });
+
+    const codigoOmie = await _resolveProdutoOmieCodigoProduto(pool, codigo);
+    if (!codigoOmie) return res.status(404).json({ ok: false, error: 'Produto não encontrado.' });
+
+    const [{ rows: produtos }, { rows: enderecos }] = await Promise.all([
+      pool.query(
+        `SELECT codigo, descricao, COALESCE(NULLIF(TRIM(unidade), ''), 'UN') AS unidade
+           FROM public.produtos_omie
+          WHERE codigo = $1 OR codigo_produto::text = $1 OR codigo_produto_integracao = $1
+          LIMIT 1`,
+        [codigo]
+      ),
+      pool.query(
+        `SELECT TRIM(i.endereco) AS endereco,
+                SUM(COALESCE(i.qtd, 0))::numeric AS saldo,
+                COALESCE(NULLIF(TRIM(MAX(i.unidade)), ''), 'UN') AS unidade,
+                COUNT(*)::int AS registros,
+                MAX(i.impresso_em) AS atualizado_em
+           FROM etiqueta."ETQ_rec_impresso" i
+          WHERE TRIM(COALESCE(i.codigo_produto, '')) IN ($1, $2)
+            AND i.endereco IS NOT NULL AND TRIM(i.endereco) <> ''
+          GROUP BY TRIM(i.endereco)
+          ORDER BY TRIM(i.endereco)`,
+        [String(codigoOmie).trim(), codigo]
+      )
+    ]);
+
+    const lista = enderecos.map((item) => ({
+      ...item,
+      saldo: Number(item.saldo || 0),
+      pode_excluir: Math.abs(Number(item.saldo || 0)) < 0.000001
+    }));
+    return res.json({
+      ok: true,
+      produto: produtos[0] || { codigo, descricao: '', unidade: 'UN' },
+      saldo_total: lista.reduce((total, item) => total + item.saldo, 0),
+      enderecos: lista
+    });
+  } catch (err) {
+    console.error('[produtos/enderecos] listar', err);
+    return res.status(500).json({ ok: false, error: err?.message || 'Falha ao carregar endereços.' });
+  }
+});
+
+app.delete('/api/logistica/produtos/:codigo/enderecos', exigirGestaoEnderecos, express.json(), async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const codigo = String(req.params.codigo || '').trim();
+    const endereco = String(req.body?.endereco || '').trim();
+    if (!codigo || !endereco) return res.status(400).json({ ok: false, error: 'Produto e endereço são obrigatórios.' });
+
+    await client.query('BEGIN');
+    const codigoOmie = await _resolveProdutoOmieCodigoProduto(client, codigo);
+    if (!codigoOmie) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ ok: false, error: 'Produto não encontrado.' });
+    }
+    const { rows } = await client.query(
+      `SELECT id, COALESCE(qtd, 0) AS qtd
+         FROM etiqueta."ETQ_rec_impresso"
+        WHERE TRIM(COALESCE(codigo_produto, '')) IN ($1, $2)
+          AND TRIM(COALESCE(endereco, '')) = $3
+        FOR UPDATE`,
+      [String(codigoOmie).trim(), codigo, endereco]
+    );
+    if (!rows.length) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ ok: false, error: 'Endereço não encontrado para este produto.' });
+    }
+    const saldo = rows.reduce((total, item) => total + Number(item.qtd || 0), 0);
+    if (Math.abs(saldo) >= 0.000001) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({ ok: false, error: 'Somente endereços sem saldo podem ser excluídos.', saldo });
+    }
+    const ids = rows.map((item) => Number(item.id)).filter(Number.isInteger);
+    await client.query(`DELETE FROM etiqueta."ETQ_rec_impresso" WHERE id = ANY($1::bigint[])`, [ids]);
+    await client.query('COMMIT');
+    void monEventoReq(req, {
+      categoria: 'API', acao: 'produto_endereco_excluido', codigo_produto: codigo,
+      sucesso: true, detalhe: { endereco, saldo, registros_excluidos: ids }
+    });
+    return res.json({ ok: true, endereco, removidos: ids.length });
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    console.error('[produtos/enderecos] excluir', err);
+    return res.status(500).json({ ok: false, error: err?.message || 'Falha ao excluir endereço.' });
+  } finally {
+    client.release();
+  }
+});
+
+app.patch('/api/logistica/produtos/:codigo/enderecos', exigirGestaoEnderecos, express.json(), async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const codigo = String(req.params.codigo || '').trim();
+    const origem = String(req.body?.origem || '').trim();
+    let destino;
+    try {
+      destino = assertEnderecoEtq(req.body?.destino);
+    } catch (err) {
+      return res.status(400).json({ ok: false, error: err?.message || ETQ_ENDERECO_MSG_FORMATO });
+    }
+    if (!codigo || !origem) return res.status(400).json({ ok: false, error: 'Produto e endereço de origem são obrigatórios.' });
+    if (origem === destino) return res.status(400).json({ ok: false, error: 'O destino deve ser diferente da origem.' });
+
+    await client.query('BEGIN');
+    const codigoOmie = await _resolveProdutoOmieCodigoProduto(client, codigo);
+    if (!codigoOmie) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ ok: false, error: 'Produto não encontrado.' });
+    }
+    const { rows: origemRows } = await client.query(
+      `SELECT id, COALESCE(qtd, 0) AS qtd
+         FROM etiqueta."ETQ_rec_impresso"
+        WHERE TRIM(COALESCE(codigo_produto, '')) IN ($1, $2)
+          AND TRIM(COALESCE(endereco, '')) = $3
+        FOR UPDATE`,
+      [String(codigoOmie).trim(), codigo, origem]
+    );
+    const saldo = origemRows.reduce((total, item) => total + Number(item.qtd || 0), 0);
+    if (saldo <= 0) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({ ok: false, error: 'Este endereço não possui saldo para transferir.', saldo });
+    }
+    const { rows: produtos } = await client.query(
+      `SELECT codigo, descricao FROM public.produtos_omie
+        WHERE codigo = $1 OR codigo_produto::text = $1 OR codigo_produto::text = $2 LIMIT 1`,
+      [codigo, String(codigoOmie).trim()]
+    );
+    const produto = produtos[0] || { codigo, descricao: codigo };
+    const hoje = new Date();
+    const dataEmissao = `${String(hoje.getDate()).padStart(2, '0')}/${String(hoje.getMonth() + 1).padStart(2, '0')}/${hoje.getFullYear()}`;
+    const sanitize = (valor, max = 999) => String(valor || '').slice(0, max).replace(/[\\^~]/g, ' ');
+    const resultado = await _processarMovimentacaoEtqInterna(client, {
+      codigo: String(codigoOmie).trim(), codigoTexto: codigo,
+      descricao: produto.descricao, qtd: saldo, tipoMov: 'TRF',
+      enderecoOrigem: origem, enderecoDestino: destino,
+      complemento: `Troca de endereço ${origem} → ${destino}`,
+      usuario: resolverUsuarioAuditoria(req), dataEmissao,
+      codProd: produto.codigo || codigo, descProd: produto.descricao || codigo, sanitize
+    });
+    await client.query('COMMIT');
+    void monEventoReq(req, {
+      categoria: 'API', acao: 'produto_endereco_transferido', codigo_produto: codigo,
+      codigo_produto_omie: codigoOmie, sucesso: true,
+      detalhe: { origem, destino, saldo, omie: 'nao', registros: resultado.registros }
+    });
+    return res.json({ ok: true, origem, destino, saldo_movido: saldo, ...resultado });
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    console.error('[produtos/enderecos] transferir', err);
+    return res.status(500).json({ ok: false, error: err?.message || 'Falha ao trocar endereço.' });
+  } finally {
+    client.release();
   }
 });
 
