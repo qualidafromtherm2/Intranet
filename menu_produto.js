@@ -80342,13 +80342,17 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!localSel) return;
     const valorAtual = localSel.value;
     const tipoAtivo = isMotivoInterno() ? _movimModoInterno : obterTipoExecutarOmie();
-    const localRestrito = _movimRegraUsuario?.origem_local_codigo
-      ? String(tipoAtivo === 'TRANSFERENCIA'
-        ? _movimRegraUsuario.destino_transferencia_codigo
-        : _movimRegraUsuario.origem_local_codigo)
-      : '';
-    const locaisVisiveis = localRestrito
-      ? _movimLocaisDisponiveis.filter(l => String(l.codigo_local_estoque) === localRestrito)
+    const regraLocais = tipoAtivo === 'TRANSFERENCIA'
+      ? (_movimRegraUsuario?.destino_transferencia_codigos?.length
+        ? _movimRegraUsuario.destino_transferencia_codigos
+        : _movimRegraUsuario?.destino_transferencia_codigo)
+      : (_movimRegraUsuario?.origem_local_codigos?.length
+        ? _movimRegraUsuario.origem_local_codigos
+        : _movimRegraUsuario?.origem_local_codigo);
+    const locaisRestritos = (Array.isArray(regraLocais) ? regraLocais : String(regraLocais || '').split(','))
+      .map(codigo => String(codigo).trim()).filter(Boolean);
+    const locaisVisiveis = locaisRestritos.length
+      ? _movimLocaisDisponiveis.filter(l => locaisRestritos.includes(String(l.codigo_local_estoque)))
       : (_mostrarOutrosDestinos
         ? _movimLocaisDisponiveis
         : _movimLocaisDisponiveis.filter(l => MOVIM_DESTINOS_PRINCIPAIS.has(String(l.codigo_local_estoque))));
@@ -80393,8 +80397,13 @@ document.addEventListener('DOMContentLoaded', () => {
       function preencherOrigem(sel) {
         if (!sel) return;
         sel.innerHTML = '';
-        const origens = _movimRegraUsuario?.origem_local_codigo
-          ? locais.filter(l => String(l.codigo_local_estoque) === String(_movimRegraUsuario.origem_local_codigo))
+        const regraOrigens = _movimRegraUsuario?.origem_local_codigos?.length
+          ? _movimRegraUsuario.origem_local_codigos
+          : _movimRegraUsuario?.origem_local_codigo;
+        const origensRestritas = (Array.isArray(regraOrigens) ? regraOrigens : String(regraOrigens || '').split(','))
+          .map(codigo => String(codigo).trim()).filter(Boolean);
+        const origens = origensRestritas.length
+          ? locais.filter(l => origensRestritas.includes(String(l.codigo_local_estoque)))
           : locais;
         origens.forEach(l => {
           const opt = document.createElement('option');
