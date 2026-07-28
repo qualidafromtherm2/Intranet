@@ -3,7 +3,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { pool } = require('../src/db');
 const { exigirPermissaoNav } = require('../utils/navPermissions');
-const { calcularRomaneio, normalizarCep, normalizarTexto, simularTransportadora } = require('../utils/freteEngine');
+const { calcularRomaneio, normalizarCep, normalizarTexto, parseCurrencyBR, simularTransportadora } = require('../utils/freteEngine');
 
 const router = express.Router();
 const NAV_KEY = 'side:log:simulador-frete';
@@ -210,6 +210,7 @@ router.get('/localidades', async (req, res) => {
   try {
     const uf = String(req.query.uf || '').trim().toUpperCase();
     const busca = normalizarTexto(req.query.q || '');
+    const limite = Math.min(1000, Math.max(10, Number(req.query.limit) || 500));
     if (!/^[A-Z]{2}$/.test(uf)) return res.status(400).json({ ok: false, error: 'Informe uma UF válida.' });
     const { rows } = await pool.query(`
       SELECT cidade, cidade_normalizada, uf, MIN(codigo_ibge) AS codigo_ibge,
@@ -222,8 +223,8 @@ router.get('/localidades', async (req, res) => {
         AND cidade IS NOT NULL
       GROUP BY cidade, cidade_normalizada, uf
       ORDER BY cidade
-      LIMIT 50
-    `, [uf, busca]);
+      LIMIT $3
+    `, [uf, busca, limite]);
     res.json({ ok: true, itens: rows });
   } catch (erro) {
     console.error('[frete/localidades]', erro);
@@ -277,7 +278,8 @@ router.post('/simular', async (req, res) => {
       return res.status(422).json({ ok: false, error: erro.message, code: erro.code, detalhes: erro.detalhes || [] });
     }
 
-    const valorMercadoria = Math.max(0, Number(req.body?.valor_mercadoria) || 0);
+    const valorMercadoriaInformado = parseCurrencyBR(req.body?.valor_mercadoria);
+    const valorMercadoria = Math.max(0, Number.isFinite(valorMercadoriaInformado) ? valorMercadoriaInformado : 0);
     const { rows: tabelas } = await pool.query(`
       SELECT t.*, tr.nome AS transportadora, tr.slug AS transportadora_slug
       FROM frete.tabela_preco t

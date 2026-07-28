@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { calcularRomaneio, escolherCobertura, simularTransportadora } = require('../utils/freteEngine');
+const { calcularRomaneio, escolherCobertura, parseCurrencyBR, simularTransportadora } = require('../utils/freteEngine');
 
 test('calcula peso e cubagem do romaneio em centímetros', () => {
   const resultado = calcularRomaneio([
@@ -52,4 +52,12 @@ test('aceita cobertura por cidade quando a transportadora nao informa faixa de C
     { id: 3, uf: 'SC', cidade: 'Sao Jose', cidade_normalizada: 'SAO JOSE', cep_inicio: null, cep_fim: null, atendida: true }
   ], { uf: 'SC', cidade: 'Sao Jose', cep: '88101-000' });
   assert.equal(cobertura.id, 3);
+});
+
+test('entende formatos monetarios brasileiros usados pelo Comercial', () => {
+  assert.equal(parseCurrencyBR('12.000,00'), 12000);
+  assert.equal(parseCurrencyBR('12000'), 12000);
+  assert.equal(parseCurrencyBR('12000,00'), 12000);
+  assert.equal(parseCurrencyBR('R$ 12.000,00'), 12000);
+  assert.equal(parseCurrencyBR('12000.00'), 12000);
 });

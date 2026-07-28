@@ -14,6 +14,8 @@ Somente produtos ativos de `public.produtos_omie` com tipo fiscal `00` ou `04` p
 4. Comparar apenas tabelas homologadas e ativas que tenham cobertura compatível.
 5. Registrar a cotação, os itens e a memória de cálculo no schema `frete`.
 
+A UF possui pesquisa por sigla e a cidade é sugerida a partir das coberturas cadastradas daquela UF. A cidade continua aceitando digitação manual quando ainda não houver cobertura importada. O valor da mercadoria aceita formatos como `12.000,00`, `12000` e `12000,00` e é normalizado antes do cálculo.
+
 ## Modelo SQL
 
 O arquivo `sql/20260728_create_frete_simulador.sql` cria o schema `frete` e as estruturas abaixo:
@@ -86,6 +88,14 @@ Ainda é necessário confirmar com o setor responsável:
 - pelo menos três cotações conhecidas por transportadora para conferência do valor e prazo.
 
 Somente depois dessa conferência a versão correta deve mudar de `em_revisao` para `ativa`. Até lá, a interface identifica a transportadora, mas informa que ela não participa da comparação.
+
+### Ordem recomendada de homologação
+
+1. **Bristot Rocha**: faixas e coberturas já normalizadas; falta confirmar a chave final entre classificação da cidade e tarifa e comparar cotações conhecidas.
+2. **Mengue Express**: cobertura extensa já importada; falta consolidar o vínculo entre cidade, sigla de praça e tarifas.
+3. **Fitlog**: precisa definir a aba de saída oficial e congelar os resultados das fórmulas cruzadas antes da normalização.
+4. **Expresso EJL**: tabela simples, mas precisa confirmar a fórmula comercial e as chaves geográficas.
+5. **Rodonaves**: o PDF confirma cubagem, frete valor, TAS, GRIS, pedágio e várias taxas; permanecem pendentes a exceção de Camboriú, listas completas de CEP e prazos.
 
 ## Acesso e navegação
 

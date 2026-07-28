@@ -25,6 +25,27 @@ function normalizarCep(valor) {
   return Number(digitos);
 }
 
+function parseCurrencyBR(valor) {
+  if (typeof valor === 'number') return Number.isFinite(valor) ? valor : NaN;
+  let texto = String(valor ?? '').trim().replace(/[^\d,.-]/g, '');
+  if (!texto || texto.startsWith('-')) return NaN;
+
+  const ultimaVirgula = texto.lastIndexOf(',');
+  const ultimoPonto = texto.lastIndexOf('.');
+  if (ultimaVirgula >= 0) {
+    const inteiro = texto.slice(0, ultimaVirgula).replace(/[.,]/g, '');
+    const decimal = texto.slice(ultimaVirgula + 1).replace(/\D/g, '');
+    texto = `${inteiro || '0'}.${decimal || '0'}`;
+  } else if (ultimoPonto >= 0) {
+    const partes = texto.split('.');
+    const pareceMilhar = partes.length > 2 || partes.at(-1).length === 3;
+    texto = pareceMilhar ? partes.join('') : `${partes.slice(0, -1).join('') || '0'}.${partes.at(-1) || '0'}`;
+  }
+
+  const resultado = Number(texto);
+  return Number.isFinite(resultado) ? resultado : NaN;
+}
+
 function validarItem(item, opts = {}) {
   const codigo = String(item?.codigo || '').trim();
   const quantidade = numero(item?.quantidade);
@@ -237,6 +258,7 @@ module.exports = {
   arredondar,
   normalizarTexto,
   normalizarCep,
+  parseCurrencyBR,
   validarItem,
   calcularRomaneio,
   escolherCobertura,

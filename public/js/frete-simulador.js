@@ -6,8 +6,13 @@ const freteState = {
   cotacao: null,
   status: null,
   buscaTimer: null,
-  buscaController: null
+  buscaController: null,
+  localidadesTimer: null,
+  localidadesController: null,
+  ultimaUf: ''
 };
+
+const FRETE_UFS = ['AC','AL','AP','AM','BA','CE','DF','ES','GO','MA','MT','MS','MG','PA','PB','PR','PE','PI','RJ','RN','RS','RO','RR','SC','SP','SE','TO'];
 
 const esc = (valor) => String(valor ?? '')
   .replaceAll('&', '&amp;')
@@ -21,6 +26,24 @@ const moeda = (valor) => numero(valor).toLocaleString('pt-BR', { style: 'currenc
 const decimal = (valor, casas = 2) => numero(valor).toLocaleString('pt-BR', { minimumFractionDigits: casas, maximumFractionDigits: casas });
 const limparCep = (valor) => String(valor || '').replace(/\D/g, '').slice(0, 8);
 const formatarCep = (valor) => limparCep(valor).replace(/^(\d{5})(\d{0,3}).*/, (_, a, b) => b ? `${a}-${b}` : a);
+
+function parseValorMercadoria(valor) {
+  let texto = String(valor ?? '').trim().replace(/[^\d,.-]/g, '');
+  if (!texto || texto.startsWith('-')) return 0;
+  const ultimaVirgula = texto.lastIndexOf(',');
+  const ultimoPonto = texto.lastIndexOf('.');
+  if (ultimaVirgula >= 0) {
+    texto = `${texto.slice(0, ultimaVirgula).replace(/[.,]/g, '') || '0'}.${texto.slice(ultimaVirgula + 1).replace(/\D/g, '') || '0'}`;
+  } else if (ultimoPonto >= 0) {
+    const partes = texto.split('.');
+    const ultimo = partes[partes.length - 1];
+    texto = partes.length > 2 || ultimo.length === 3 ? partes.join('') : `${partes.slice(0, -1).join('') || '0'}.${ultimo || '0'}`;
+  }
+  const resultado = Number(texto);
+  return Number.isFinite(resultado) && resultado >= 0 ? resultado : 0;
+}
+
+const formatarValorMercadoria = (valor) => parseValorMercadoria(valor).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 async function fetchJson(url, options = {}) {
   const response = await fetch(url, { credentials: 'include', ...options });
@@ -172,8 +195,8 @@ function template() {
           <div class="frete-panel-head"><div><h2>Destino</h2><p id="freteOrigem">A origem Fromtherm é fixa.</p></div><span class="frete-step">1</span></div>
           <div class="frete-panel-body">
             <div class="frete-field"><label for="freteCep">CEP</label><div class="frete-inline"><input id="freteCep" class="frete-input" inputmode="numeric" maxlength="9" placeholder="00000-000" autocomplete="postal-code"><button id="freteBuscarCep" class="frete-btn frete-btn-secondary" type="button"><i class="fa-solid fa-magnifying-glass"></i>Buscar</button></div><small id="freteCepStatus">O CEP define a faixa de atendimento com maior precisão.</small></div>
-            <div class="frete-grid-2"><div class="frete-field"><label for="freteUf">UF</label><select id="freteUf" class="frete-select"><option value="">UF</option>${['AC','AL','AP','AM','BA','CE','DF','ES','GO','MA','MT','MS','MG','PA','PB','PR','PE','PI','RJ','RN','RS','RO','RR','SC','SP','SE','TO'].map((uf) => `<option>${uf}</option>`).join('')}</select></div><div class="frete-field"><label for="freteCidade">Cidade</label><input id="freteCidade" class="frete-input" placeholder="Cidade de destino" autocomplete="address-level2"></div></div>
-            <div class="frete-field"><label for="freteValorMercadoria">Valor da mercadoria</label><input id="freteValorMercadoria" class="frete-input" type="number" min="0" step="0.01" placeholder="0,00"><small>Necessário para ad valorem, GRIS e outras taxas percentuais.</small></div>
+            <div class="frete-grid-2"><div class="frete-field"><label for="freteUf">UF</label><input id="freteUf" class="frete-input" list="freteUfOpcoes" maxlength="2" placeholder="Digite a UF" autocomplete="address-level1" aria-describedby="freteUfStatus"><datalist id="freteUfOpcoes">${FRETE_UFS.map((uf) => `<option value="${uf}"></option>`).join('')}</datalist><small id="freteUfStatus">Digite para pesquisar, por exemplo: S.</small></div><div class="frete-field"><label for="freteCidade">Cidade</label><input id="freteCidade" class="frete-input" list="freteCidadeOpcoes" placeholder="Selecione primeiro a UF" autocomplete="address-level2" aria-describedby="freteCidadeStatus" disabled><datalist id="freteCidadeOpcoes"></datalist><small id="freteCidadeStatus">As sugestões mostram cidades atendidas pelas tabelas cadastradas.</small></div></div>
+            <div class="frete-field"><label for="freteValorMercadoria">Valor da mercadoria</label><input id="freteValorMercadoria" class="frete-input" type="text" inputmode="decimal" placeholder="0,00" autocomplete="off" aria-describedby="freteValorStatus"><small id="freteValorStatus">Aceita 12.000,00, 12000 ou 12000,00.</small></div>
           </div>
         </section>
         <section class="frete-panel">
@@ -229,6 +252,64 @@ async function pesquisarProdutos(termo) {
   }
 }
 
+function renderCidades(localidades) {
+  const lista = document.getElementById('freteCidadeOpcoes');
+  if (!lista) return;
+  lista.innerHTML = (Array.isArray(localidades) ? localidades : [])
+    .map((item) => `<option value="${esc(item.cidade)}">${numero(item.transportadoras)} tabela(s)</option>`)
+    .join('');
+}
+
+async function carregarCidades(uf, busca = '') {
+  const cidade = document.getElementById('freteCidade');
+  const status = document.getElementById('freteCidadeStatus');
+  freteState.localidadesController?.abort();
+  if (!FRETE_UFS.includes(uf)) {
+    if (cidade) cidade.disabled = true;
+    renderCidades([]);
+    return;
+  }
+
+  freteState.localidadesController = new AbortController();
+  if (cidade) cidade.disabled = false;
+  if (status) status.textContent = 'Carregando cidades atendidas...';
+  try {
+    const data = await fetchJson(`/api/frete/localidades?uf=${encodeURIComponent(uf)}&q=${encodeURIComponent(busca)}&limit=1000`, { signal: freteState.localidadesController.signal });
+    if (document.getElementById('freteUf')?.value !== uf) return;
+    renderCidades(data.itens || []);
+    if (status) status.textContent = data.itens?.length
+      ? `${data.itens.length} cidade(s) atendida(s). Digite para filtrar.`
+      : 'Nenhuma cidade coberta encontrada; ainda é possível informar a cidade manualmente.';
+  } catch (erro) {
+    if (erro.name === 'AbortError') return;
+    renderCidades([]);
+    if (status) status.textContent = 'Não foi possível carregar as cidades; informe manualmente.';
+  }
+}
+
+function atualizarUf({ preservarCidade = false, buscaCidade = '' } = {}) {
+  const ufInput = document.getElementById('freteUf');
+  const cidade = document.getElementById('freteCidade');
+  const status = document.getElementById('freteUfStatus');
+  const uf = String(ufInput?.value || '').replace(/[^a-z]/gi, '').toUpperCase().slice(0, 2);
+  if (ufInput) ufInput.value = uf;
+
+  if (!FRETE_UFS.includes(uf)) {
+    if (freteState.ultimaUf && !preservarCidade && cidade) cidade.value = '';
+    freteState.ultimaUf = '';
+    if (cidade) cidade.disabled = true;
+    renderCidades([]);
+    if (status) status.textContent = uf ? 'Continue digitando ou escolha uma UF sugerida.' : 'Digite para pesquisar, por exemplo: S.';
+    return;
+  }
+
+  if (!preservarCidade && uf !== freteState.ultimaUf && cidade) cidade.value = '';
+  freteState.ultimaUf = uf;
+  ufInput?.removeAttribute('aria-invalid');
+  if (status) status.textContent = `UF ${uf} selecionada.`;
+  carregarCidades(uf, buscaCidade);
+}
+
 async function buscarCep() {
   const input = document.getElementById('freteCep');
   const status = document.getElementById('freteCepStatus');
@@ -245,6 +326,7 @@ async function buscarCep() {
     if (data.erro) throw new Error('CEP não encontrado.');
     document.getElementById('freteUf').value = data.uf || '';
     document.getElementById('freteCidade').value = data.localidade || '';
+    atualizarUf({ preservarCidade: true, buscaCidade: data.localidade || '' });
     if (status) status.textContent = `${data.localidade || ''}${data.uf ? ` / ${data.uf}` : ''}${data.bairro ? ` · ${data.bairro}` : ''}`;
   } catch (erro) {
     if (status) status.textContent = erro.message || 'Não foi possível consultar o CEP.';
@@ -258,13 +340,15 @@ async function simular() {
   const container = document.getElementById('freteResultados');
   const destino = {
     cep: limparCep(document.getElementById('freteCep')?.value),
-    uf: document.getElementById('freteUf')?.value,
+    uf: String(document.getElementById('freteUf')?.value || '').toUpperCase(),
     cidade: document.getElementById('freteCidade')?.value.trim()
   };
-  if (!destino.uf || !destino.cidade) {
+  if (!FRETE_UFS.includes(destino.uf) || !destino.cidade) {
+    if (!FRETE_UFS.includes(destino.uf)) document.getElementById('freteUf')?.setAttribute('aria-invalid', 'true');
     document.getElementById('freteCidade')?.setAttribute('aria-invalid', 'true');
     return;
   }
+  document.getElementById('freteCidade')?.removeAttribute('aria-invalid');
   botao.disabled = true;
   botao.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>Calculando...';
   painel.hidden = false;
@@ -272,7 +356,7 @@ async function simular() {
   try {
     const data = await fetchJson('/api/frete/simular', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ destino, valor_mercadoria: numero(document.getElementById('freteValorMercadoria')?.value), itens: freteState.itens.map((item) => ({ codigo: item.codigo, quantidade: item.quantidade })) })
+      body: JSON.stringify({ destino, valor_mercadoria: parseValorMercadoria(document.getElementById('freteValorMercadoria')?.value), itens: freteState.itens.map((item) => ({ codigo: item.codigo, quantidade: item.quantidade })) })
     });
     freteState.cotacao = data;
     renderResultados(data);
@@ -314,6 +398,23 @@ function bind() {
   document.getElementById('freteCep')?.addEventListener('input', (event) => { event.target.value = formatarCep(event.target.value); });
   document.getElementById('freteBuscarCep')?.addEventListener('click', buscarCep);
   document.getElementById('freteCep')?.addEventListener('keydown', (event) => { if (event.key === 'Enter') buscarCep(); });
+  document.getElementById('freteUf')?.addEventListener('input', () => atualizarUf());
+  document.getElementById('freteUf')?.addEventListener('change', () => atualizarUf());
+  document.getElementById('freteCidade')?.addEventListener('focus', (event) => {
+    const uf = document.getElementById('freteUf')?.value;
+    if (FRETE_UFS.includes(uf) && !event.target.value) carregarCidades(uf);
+  });
+  document.getElementById('freteCidade')?.addEventListener('input', (event) => {
+    event.target.removeAttribute('aria-invalid');
+    clearTimeout(freteState.localidadesTimer);
+    const uf = document.getElementById('freteUf')?.value;
+    if (FRETE_UFS.includes(uf)) {
+      freteState.localidadesTimer = setTimeout(() => carregarCidades(uf, event.target.value.trim()), 250);
+    }
+  });
+  document.getElementById('freteValorMercadoria')?.addEventListener('blur', (event) => {
+    if (event.target.value.trim()) event.target.value = formatarValorMercadoria(event.target.value);
+  });
   document.getElementById('freteSimularBtn')?.addEventListener('click', simular);
 }
 
