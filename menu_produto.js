@@ -38202,6 +38202,11 @@ window.openRegistros = async function() {
   const etqArmazenarConfirmarEndereco = document.getElementById('etqArmazenarConfirmarEndereco');
   const etqArmazenarVerLocais = document.getElementById('etqArmazenarVerLocais');
   const etqArmazenarLocais = document.getElementById('etqArmazenarLocais');
+  const etqArmazenarLote = document.getElementById('etqArmazenarLote');
+  const etqArmazenarLoteResumo = document.getElementById('etqArmazenarLoteResumo');
+  const etqArmazenarLoteLista = document.getElementById('etqArmazenarLoteLista');
+  const etqArmazenarLoteLimpar = document.getElementById('etqArmazenarLoteLimpar');
+  const etqArmazenarLoteFinalizar = document.getElementById('etqArmazenarLoteFinalizar');
   const etqArmazenarRetornarWrap = document.getElementById('etqArmazenarRetornarWrap');
   const etqBtnRetornarEtiqueta  = document.getElementById('etqBtnRetornarEtiqueta');
   const etqRetornarEscolha      = document.getElementById('etqRetornarEscolha');
@@ -38214,7 +38219,85 @@ window.openRegistros = async function() {
   let _armStream = null;
   let _armScanInterval = null;
   let _armRetornando = false;
+  let _armModoLote = false;
+  let _armLoteItens = [];
+  let _armLoteProcessando = false;
+  const _armIdsConsultando = new Set();
   const _armLocaisCache = new Map();
+
+  function _armRenderizarLote() {
+    if (!etqArmazenarLote) return;
+    etqArmazenarLote.style.display = _armModoLote ? 'block' : 'none';
+    const quantidade = _armLoteItens.reduce((total, item) => total + (Number(item.qtd) || 0), 0);
+    if (etqArmazenarLoteResumo) {
+      etqArmazenarLoteResumo.textContent = `${_armLoteItens.length} ID${_armLoteItens.length === 1 ? '' : 's'} · ${quantidade} ${quantidade === 1 ? 'item' : 'itens'}`;
+    }
+    if (etqArmazenarLoteLista) {
+      etqArmazenarLoteLista.innerHTML = _armLoteItens.length
+        ? _armLoteItens.map(item => `
+            <div class="etq-batch-store__item" data-id="${item.id}">
+              <span class="etq-batch-store__id">ID ${item.id}</span>
+              <span class="etq-batch-store__product">
+                <strong>${escapeHtml(String(item.codigo || 'Produto'))}</strong>
+                <small title="${escapeHtml(String(item.descricao || ''))}">${escapeHtml(String(item.descricao || 'Sem descrição'))}</small>
+              </span>
+              <b class="etq-batch-store__qty">${escapeHtml(String(item.qtd))} ${escapeHtml(String(item.unidade || 'UN'))}</b>
+              <button type="button" class="etq-batch-store__remove" data-id="${item.id}" aria-label="Remover ID ${item.id}" title="Remover do lote">
+                <i class="fa-solid fa-xmark"></i>
+              </button>
+            </div>`).join('')
+        : '<div class="etq-batch-store__empty">Bipe os IDs que serão guardados no mesmo endereço.</div>';
+    }
+    if (etqArmazenarLoteLimpar) etqArmazenarLoteLimpar.disabled = !_armLoteItens.length || _armLoteProcessando;
+    if (etqArmazenarLoteFinalizar) etqArmazenarLoteFinalizar.disabled = !_armLoteItens.length || _armLoteProcessando;
+  }
+
+  async function _armAdicionarAoLote(id) {
+    if (_armLoteItens.some(item => item.id === id) || _armIdsConsultando.has(id)) {
+      if (etqArmazenarStatus) {
+        etqArmazenarStatus.textContent = `ID ${id} já está no lote. Continue bipando ou finalize para ler o endereço.`;
+        etqArmazenarStatus.style.color = '#f59e0b';
+      }
+      if (etqArmazenarInput) etqArmazenarInput.value = '';
+      _armIniciarScan(_armProcessarCodigo);
+      return;
+    }
+    _armIdsConsultando.add(id);
+    if (etqArmazenarStatus) {
+      etqArmazenarStatus.textContent = `Consultando ID ${id}...`;
+      etqArmazenarStatus.style.color = '#53657a';
+    }
+    try {
+      const resp = await fetch(`/api/etiquetas/rec-impresso/${id}`, { credentials: 'include' });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok || !data?.ok) throw new Error(data?.error || `ID ${id} não encontrado.`);
+      const etq = data.etiqueta || {};
+      const qtd = Number(etq.qtd) || 0;
+      if (qtd <= 0) throw new Error(`O ID ${id} não possui quantidade disponível para guardar.`);
+      if (String(etq.endereco || '').trim()) throw new Error(`O ID ${id} já está guardado em ${etq.endereco}.`);
+      _armLoteItens.push({
+        id,
+        qtd,
+        unidade: etq.unidade || 'UN',
+        codigo: etq.codigo || etq.codigo_omie || '',
+        descricao: etq.descricao || ''
+      });
+      _armRenderizarLote();
+      if (etqArmazenarStatus) {
+        etqArmazenarStatus.textContent = `ID ${id} adicionado. Bipe o próximo ou finalize o lote.`;
+        etqArmazenarStatus.style.color = '#08775a';
+      }
+    } catch (err) {
+      if (etqArmazenarStatus) {
+        etqArmazenarStatus.textContent = err.message || `Não foi possível adicionar o ID ${id}.`;
+        etqArmazenarStatus.style.color = '#b42318';
+      }
+    } finally {
+      _armIdsConsultando.delete(id);
+      if (etqArmazenarInput) { etqArmazenarInput.value = ''; etqArmazenarInput.focus(); }
+      if (_armModoLote && _armStep === 1) _armIniciarScan(_armProcessarCodigo);
+    }
+  }
 
   function _armResetarLocais() {
     if (etqArmazenarVerLocais) etqArmazenarVerLocais.style.display = 'none';
@@ -38430,6 +38513,10 @@ window.openRegistros = async function() {
         _armIniciarScan(_armProcessarCodigo);
         return;
       }
+      if (_armModoLote) {
+        _armAdicionarAoLote(id);
+        return;
+      }
       _armIdImpresso = id;
       _armCarregarLocaisProduto(id);
       clearInterval(_armScanInterval);
@@ -38459,6 +38546,10 @@ window.openRegistros = async function() {
       return;
     }
     const complemento = etqArmazenarComplemento?.value?.trim() || '';
+    if (_armModoLote) {
+      await _armRegistrarEnderecoLote(enderecoOk, complemento);
+      return;
+    }
     if (etqArmazenarStatus) { etqArmazenarStatus.textContent = 'Registrando...'; etqArmazenarStatus.style.color = '#94a3b8'; }
     try {
       const body = { endereco: enderecoOk };
@@ -38497,15 +38588,74 @@ window.openRegistros = async function() {
     }
   }
 
+  async function _armRegistrarEnderecoLote(endereco, complemento) {
+    if (_armLoteProcessando || !_armLoteItens.length) return;
+    _armLoteProcessando = true;
+    _armRenderizarLote();
+    const pendentes = [..._armLoteItens];
+    const falhas = [];
+    let concluidos = 0;
+    for (const item of pendentes) {
+      if (etqArmazenarStatus) {
+        etqArmazenarStatus.textContent = `Guardando ${concluidos + 1} de ${pendentes.length} no endereço ${endereco}...`;
+        etqArmazenarStatus.style.color = '#53657a';
+      }
+      try {
+        const body = { endereco };
+        if (complemento) body.complemento = complemento;
+        const resp = await fetch(`/api/etiquetas/rec-impresso/${item.id}/endereco`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify(body),
+        });
+        const data = await resp.json().catch(() => ({}));
+        if (!resp.ok || !data?.ok) throw new Error(data?.error || `Erro ${resp.status}`);
+        concluidos += 1;
+        _armLoteItens = _armLoteItens.filter(loteItem => loteItem.id !== item.id);
+        _armRenderizarLote();
+      } catch (err) {
+        falhas.push({ id: item.id, erro: err.message || 'Falha ao guardar' });
+      }
+    }
+    _armLoteProcessando = false;
+    _armLocaisCache.clear();
+    _armRenderizarLote();
+    if (!falhas.length) {
+      if (etqArmazenarStatus) {
+        etqArmazenarStatus.textContent = `✓ ${concluidos} ID${concluidos === 1 ? '' : 's'} guardado${concluidos === 1 ? '' : 's'} em ${endereco}.`;
+        etqArmazenarStatus.style.color = '#08775a';
+      }
+      setTimeout(() => {
+        _armFechar();
+        _etqImpressoCarregar(etqImpressoBusca?.value || '');
+        if (etqModal && etqModal.style.display !== 'none') _etqCarregar(etqBusca?.value || '');
+      }, 1400);
+      return;
+    }
+    const idsFalha = falhas.map(falha => falha.id).join(', ');
+    if (etqArmazenarStatus) {
+      etqArmazenarStatus.textContent = `${concluidos} concluído(s). Falha nos IDs ${idsFalha}. Verifique e tente novamente.`;
+      etqArmazenarStatus.style.color = '#b42318';
+    }
+    _armRenderizarLote();
+    if (etqArmazenarInput) { etqArmazenarInput.value = ''; etqArmazenarInput.focus(); }
+  }
+
   async function _armAbrir() {
     _armStep = 1;
     _armIdImpresso = null;
+    _armModoLote = true;
+    _armLoteItens = [];
+    _armLoteProcessando = false;
+    _armIdsConsultando.clear();
+    _armRenderizarLote();
     _armMostrarRetornar(false);
     _armResetarLocais();
     if (etqArmazenarConfirmacao) etqArmazenarConfirmacao.style.display = 'none';
-    if (etqArmazenarTitle)  etqArmazenarTitle.textContent  = 'Leia o QR Code do produto';
+    if (etqArmazenarTitle)  etqArmazenarTitle.textContent  = 'Bipe os materiais do lote';
     if (etqArmazenarIcone)  { etqArmazenarIcone.className = 'fa-solid fa-qrcode'; etqArmazenarIcone.style.color = '#34d399'; }
-    if (etqArmazenarStatus) { etqArmazenarStatus.textContent = ''; etqArmazenarStatus.style.color = '#94a3b8'; }
+    if (etqArmazenarStatus) { etqArmazenarStatus.textContent = 'Bipe quantos IDs quiser guardar no mesmo endereço.'; etqArmazenarStatus.style.color = '#53657a'; }
     if (etqArmazenarInput)       { etqArmazenarInput.placeholder = 'Bipe, leia pela câmera ou digite o ID da ETQ...'; etqArmazenarInput.value = ''; }
     if (etqArmazenarComplemento) etqArmazenarComplemento.value = '';
     if (etqArmazenarMira)        etqArmazenarMira.style.borderColor = 'rgba(52,211,153,.85)';
@@ -38518,6 +38668,11 @@ window.openRegistros = async function() {
 
   async function _armAbrirComId(id) {
     _armStep = 2;
+    _armModoLote = false;
+    _armLoteItens = [];
+    _armLoteProcessando = false;
+    _armIdsConsultando.clear();
+    _armRenderizarLote();
     if (etqArmazenarConfirmacao) etqArmazenarConfirmacao.style.display = 'none';
     _armIdImpresso = id;
     _armResetarLocais();
@@ -38540,12 +38695,56 @@ window.openRegistros = async function() {
     _armMostrarRetornar(false);
     if (etqArmazenarConfirmacao) etqArmazenarConfirmacao.style.display = 'none';
     _armResetarLocais();
+    _armModoLote = false;
+    _armLoteItens = [];
+    _armLoteProcessando = false;
+    _armIdsConsultando.clear();
+    _armRenderizarLote();
     if (etqArmazenarModal) etqArmazenarModal.style.display = 'none';
   }
 
   etqArmazenarFechar?.addEventListener('click', _armFechar);
   etqArmazenarModal?.addEventListener('click', e => { if (e.target === etqArmazenarModal) _armFechar(); });
   document.getElementById('etqBtnLerEtiqueta')?.addEventListener('click', _armAbrir);
+  etqArmazenarLoteLista?.addEventListener('click', e => {
+    const remover = e.target.closest('.etq-batch-store__remove[data-id]');
+    if (!remover || _armLoteProcessando) return;
+    const id = Number(remover.dataset.id);
+    _armLoteItens = _armLoteItens.filter(item => item.id !== id);
+    _armRenderizarLote();
+    if (etqArmazenarStatus) {
+      etqArmazenarStatus.textContent = `ID ${id} removido do lote.`;
+      etqArmazenarStatus.style.color = '#53657a';
+    }
+  });
+  etqArmazenarLoteLimpar?.addEventListener('click', () => {
+    if (_armLoteProcessando) return;
+    _armLoteItens = [];
+    _armRenderizarLote();
+    if (etqArmazenarStatus) {
+      etqArmazenarStatus.textContent = 'Lote limpo. Bipe os materiais que deseja guardar.';
+      etqArmazenarStatus.style.color = '#53657a';
+    }
+  });
+  etqArmazenarLoteFinalizar?.addEventListener('click', () => {
+    if (!_armLoteItens.length || _armLoteProcessando) return;
+    clearInterval(_armScanInterval);
+    _armScanInterval = null;
+    _armStep = 2;
+    _armAtualizarMira();
+    if (etqArmazenarTitle) etqArmazenarTitle.textContent = 'Bipe o endereço do lote';
+    if (etqArmazenarIcone) { etqArmazenarIcone.className = 'fa-solid fa-barcode'; etqArmazenarIcone.style.color = '#a78bfa'; }
+    if (etqArmazenarStatus) {
+      etqArmazenarStatus.textContent = `${_armLoteItens.length} ID(s) no lote. Agora bipe um único endereço.`;
+      etqArmazenarStatus.style.color = '#08775a';
+    }
+    if (etqArmazenarInput) {
+      etqArmazenarInput.placeholder = 'Bipe ou digite o endereço do lote...';
+      etqArmazenarInput.value = '';
+      etqArmazenarInput.focus();
+    }
+    _armIniciarScan(_armProcessarCodigo);
+  });
   etqArmazenarConfirmarEndereco?.addEventListener('click', () => {
     if (!_armIdImpresso) return;
     _armStep = 2;
