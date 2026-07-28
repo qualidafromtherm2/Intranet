@@ -54,6 +54,30 @@ test('aceita cobertura por cidade quando a transportadora nao informa faixa de C
   assert.equal(cobertura.id, 3);
 });
 
+test('calcula tabela em revisão somente quando solicitada como prévia técnica', () => {
+  const entrada = {
+    tabela: { status: 'em_revisao', fator_cubagem_kg_m3: 300 },
+    destino: { uf: 'MT', cidade: 'Cuiabá' },
+    romaneio: { peso_real_kg: 51, volume_m3: 0.23808 },
+    valorMercadoria: 7000,
+    coberturas: [{ id: 9, uf: 'MT', cidade_normalizada: 'CUIABA', codigo_regiao: 'CUIABA VARZEA GRANDE MT', atendida: true }],
+    tarifas: [{ codigo_regiao: 'CUIABA VARZEA GRANDE MT', peso_de_kg: 50, peso_ate_kg: 75, valor_base: 120.8, ad_valorem_aliquota: 0.004, taxa_despacho: 30 }],
+    regras: [
+      { codigo: 'GRIS', nome: 'GRIS', tipo_calculo: 'maior_entre_percentual_e_minimo', valor: 0.0025, valor_minimo: 6.62, ativo: true },
+      { codigo: 'PEDAGIO_MS_MT', nome: 'Pedágio MS/MT', tipo_calculo: 'por_100kg', valor: 6.62, condicoes: { ufs: ['MS', 'MT'] }, ativo: true },
+      { codigo: 'TSO', nome: 'TSO', tipo_calculo: 'maior_entre_percentual_e_minimo', valor: 0.001, valor_minimo: 3.99, ativo: true }
+    ]
+  };
+  const bloqueada = simularTransportadora(entrada);
+  assert.equal(bloqueada.ok, false);
+  const previa = simularTransportadora({ ...entrada, permitirRevisao: true });
+  assert.equal(previa.ok, true);
+  assert.equal(previa.homologado, false);
+  assert.equal(previa.tipo_resultado, 'previa_em_revisao');
+  assert.equal(previa.peso_cobravel_kg, 71.424);
+  assert.equal(previa.valor_total, 209.92);
+});
+
 test('entende formatos monetarios brasileiros usados pelo Comercial', () => {
   assert.equal(parseCurrencyBR('12.000,00'), 12000);
   assert.equal(parseCurrencyBR('12000'), 12000);

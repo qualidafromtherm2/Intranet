@@ -105,6 +105,9 @@
 .frete-quotes-grid { display: grid; grid-template-columns: repeat(3,minmax(260px,1fr)); gap: 10px; }
 .frete-quote { border: 1px solid #30394a; border-radius: 8px; padding: 13px; background: #141922; }
 .frete-quote.is-best { border-color: rgba(34,197,94,.6); box-shadow: inset 3px 0 #22c55e; }
+.frete-quote.is-preview { border-color: rgba(245,158,11,.5); box-shadow: inset 3px 0 #f59e0b; }
+.frete-quote.is-preview .frete-quote-price { color: #fbbf24; }
+.frete-quote .is-preview-note { margin-top: 10px; }
 .frete-quote-head { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; }
 .frete-quote h3 { margin: 0; font-size: 14px; }
 .frete-quote small { color: var(--frete-muted); font-size: 10px; }

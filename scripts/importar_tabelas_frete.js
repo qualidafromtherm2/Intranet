@@ -210,6 +210,24 @@ async function normalizarBristot(client, tabelaId, grupos) {
       despacho NUMERIC, metadados JSONB
     )
   `, [tabelaId, JSON.stringify(faixaDados)]);
+  const regrasDados = [
+    { codigo: 'GRIS', nome: 'GRIS', tipo: 'maior_entre_percentual_e_minimo', valor: 0.0025, minimo: 6.62, condicoes: {}, prioridade: 20, observacao: '0,25% sobre o valor mercantil, mínimo de R$ 6,62.' },
+    { codigo: 'PEDAGIO_MS_MT', nome: 'Pedágio MS/MT', tipo: 'por_100kg', valor: 6.62, minimo: null, condicoes: { ufs: ['MS', 'MT'] }, prioridade: 30, observacao: 'R$ 6,62 por fração de 100 kg.' },
+    { codigo: 'PEDAGIO_RO_AC', nome: 'Pedágio RO/AC', tipo: 'por_100kg', valor: 9.93, minimo: null, condicoes: { ufs: ['RO', 'AC'] }, prioridade: 30, observacao: 'R$ 9,93 por fração de 100 kg.' },
+    { codigo: 'TSO', nome: 'Taxa de seguro operacional', tipo: 'maior_entre_percentual_e_minimo', valor: 0.001, minimo: 3.99, condicoes: {}, prioridade: 40, observacao: '0,10% sobre o valor mercantil, mínimo de R$ 3,99.' }
+  ];
+  await client.query(`
+    INSERT INTO frete.regra_adicional (
+      tabela_preco_id, codigo, nome, tipo_calculo, valor, valor_minimo,
+      condicoes, prioridade, ativo, observacao
+    )
+    SELECT $1, x.codigo, x.nome, x.tipo, x.valor, x.minimo,
+           x.condicoes, x.prioridade, TRUE, x.observacao
+    FROM jsonb_to_recordset($2::jsonb) AS x(
+      codigo TEXT, nome TEXT, tipo TEXT, valor NUMERIC, minimo NUMERIC,
+      condicoes JSONB, prioridade INTEGER, observacao TEXT
+    )
+  `, [tabelaId, JSON.stringify(regrasDados)]);
   const classificacoesSemTarifa = [...classificacoesCobertura].filter((item) => !classificacoesTarifa.has(item)).sort();
   const tarifasSemCobertura = [...classificacoesTarifa].filter((item) => !classificacoesCobertura.has(item)).sort();
   const cidadesComConflito = [...classificacoesPorCidade.entries()]
@@ -223,6 +241,7 @@ async function normalizarBristot(client, tabelaId, grupos) {
   return {
     coberturas: coberturaDados.length,
     faixas: faixaDados.length,
+    regras: regrasDados.length,
     diagnostico_chaves: {
       classificacoes_cobertura: classificacoesCobertura.size,
       classificacoes_tarifa: classificacoesTarifa.size,
@@ -237,21 +256,28 @@ async function normalizarBristot(client, tabelaId, grupos) {
 
 async function normalizarMengueCobertura(client, tabelaId, grupos) {
   const base = grupos.find((grupo) => grupo.aba === 'BD CIDADE+PRAÇA+TAXAS+FREQ+PREV');
-  if (!base) return { coberturas: 0, alertas: ['Base de cidades Mengue ausente.'] };
+  const tabelaGrupo = grupos.find((grupo) => grupo.aba === 'TABELA MENGUE SSW');
+  if (!base || !tabelaGrupo) return { coberturas: 0, faixas: 0, alertas: ['Abas obrigatórias da Mengue ausentes.'] };
   const coberturaDados = [];
+  let divergenciasSiglaComercialPraca = 0;
   for (const linha of base.linhas.filter((item) => item.numero_linha >= 2)) {
     const uf = String(celula(linha, 'A') || '').trim().toUpperCase();
     const cidade = String(celula(linha, 'B') || '').trim();
     if (!/^[A-Z]{2}$/.test(uf) || !cidade) continue;
+    const siglaComercial = normalizarTexto(celula(linha, 'K'));
+    const siglaPraca = normalizarTexto(celula(linha, 'L'));
+    if (siglaComercial && siglaPraca && siglaComercial !== siglaPraca) divergenciasSiglaComercialPraca += 1;
     coberturaDados.push({
-      codigo_regiao: normalizarTexto(celula(linha, 'L') || celula(linha, 'K')), uf, cidade,
+      // A tabela tarifaria usa a SIGLA PRACA (L). A praca comercial (K) fica
+      // preservada para auditoria e serve apenas de fallback quando L estiver vazia.
+      codigo_regiao: siglaPraca || siglaComercial, uf, cidade,
       cidade_normalizada: normalizarTexto(cidade), codigo_ibge: Number(celula(linha, 'E')) || null,
       cep_inicio: Number(String(celula(linha, 'C') || '').replace(/\D/g, '')) || null,
       cep_fim: Number(String(celula(linha, 'D') || '').replace(/\D/g, '')) || null,
       prazo_min: Number(celula(linha, 'F')) || null, prazo_max: Number(celula(linha, 'G')) || null,
-      frequencia: celula(linha, 'H') || null, tde: Number(celula(linha, 'I')) || null,
-      trt: Number(celula(linha, 'J')) || null, observacao: celula(linha, 'N') || null,
-      metadados: { sigla_praca_comercial: celula(linha, 'K'), sigla_praca: celula(linha, 'L'), sigla_unidade: celula(linha, 'M') }
+      frequencia: celula(linha, 'H') || null, tde: null,
+      trt: null, observacao: celula(linha, 'N') || null,
+      metadados: { tde_fonte: celula(linha, 'I'), trt_fonte: celula(linha, 'J'), sigla_praca_comercial: celula(linha, 'K'), sigla_praca: celula(linha, 'L'), sigla_unidade: celula(linha, 'M') }
     });
   }
   if (coberturaDados.length) await client.query(`
@@ -267,7 +293,97 @@ async function normalizarMengueCobertura(client, tabelaId, grupos) {
       frequencia TEXT, tde NUMERIC, trt NUMERIC, observacao TEXT, metadados JSONB
     )
   `, [tabelaId, JSON.stringify(coberturaDados)]);
-  return { coberturas: coberturaDados.length, alertas: ['Cobertura e prazo importados; preços permanecem em revisão até validar COD_MERCAD, SOMA e faixas da tabela SSW.'] };
+
+  const regioesCobertura = new Set(coberturaDados.map((item) => item.codigo_regiao).filter(Boolean));
+  const paresFaixa = [['Y', 'Z'], ['AA', 'AB'], ['AC', 'AD'], ['AE', 'AF'], ['AG', 'AH']];
+  const faixaDados = [];
+  const regrasDados = [];
+  const regioesTarifa = new Set();
+  for (const linha of tabelaGrupo.linhas.filter((item) => item.numero_linha >= 5)) {
+    if (String(celula(linha, 'E') || '').trim().toUpperCase() !== 'N') continue;
+    const regioes = String(celula(linha, 'C') || '').split(',').map((item) => normalizarTexto(item)).filter(Boolean);
+    if (!regioes.length) continue;
+    const adValorem = Number(celula(linha, 'V')) / 100 || null;
+    const despacho = Number(celula(linha, 'P')) || null;
+    const pedagio = Number(celula(linha, 'N')) || null;
+    const gris = Number(celula(linha, 'Q')) / 100 || null;
+    const grisMinimo = Number(celula(linha, 'R')) || null;
+    const tas = Number(celula(linha, 'U')) || null;
+    for (const codigoRegiao of regioes) {
+      regioesTarifa.add(codigoRegiao);
+      let pesoAnterior = 0;
+      let ultimoLimite = null;
+      let ultimoValor = null;
+      for (const [colunaLimite, colunaValor] of paresFaixa) {
+        const pesoAte = Number(celula(linha, colunaLimite));
+        const valorBase = Number(celula(linha, colunaValor));
+        if (!(pesoAte > 0) || !(valorBase >= 0)) continue;
+        faixaDados.push({
+          codigo_regiao: codigoRegiao, peso_de: pesoAnterior, peso_ate: pesoAte,
+          valor_base: valorBase, valor_excedente: null, peso_referencia: null,
+          ad_valorem: adValorem, despacho, pedagio,
+          metadados: { arquivo_linha: linha.numero_linha, faixa_tipo: celula(linha, 'X'), aplica_se: celula(linha, 'M'), pos: celula(linha, 'S'), pos_minimo: celula(linha, 'T'), cod_mercad: celula(linha, 'D') }
+        });
+        pesoAnterior = pesoAte;
+        ultimoLimite = pesoAte;
+        ultimoValor = valorBase;
+      }
+      const valorToneladaExcedente = Number(celula(linha, 'AI'));
+      if (ultimoLimite != null && ultimoValor != null && valorToneladaExcedente > 0 && String(celula(linha, 'AJ') || '').trim().toUpperCase() === 'E') {
+        faixaDados.push({
+          codigo_regiao: codigoRegiao, peso_de: ultimoLimite, peso_ate: null,
+          valor_base: ultimoValor, valor_excedente: valorToneladaExcedente / 1000,
+          peso_referencia: ultimoLimite, ad_valorem: adValorem, despacho, pedagio,
+          metadados: { arquivo_linha: linha.numero_linha, excedente_por_kg: true, valor_tonelada: valorToneladaExcedente, faixa_tipo: celula(linha, 'X'), aplica_se: celula(linha, 'M'), pos: celula(linha, 'S'), pos_minimo: celula(linha, 'T'), cod_mercad: celula(linha, 'D') }
+        });
+      }
+      if (gris) regrasDados.push({ codigo: `GRIS_${codigoRegiao}`, nome: 'GRIS', tipo: 'maior_entre_percentual_e_minimo', valor: gris, minimo: grisMinimo, condicoes: { codigos_regiao: [codigoRegiao] }, prioridade: 20, observacao: `Linha ${linha.numero_linha} da TABELA MENGUE SSW.` });
+      if (tas) regrasDados.push({ codigo: `TAS_${codigoRegiao}`, nome: 'TAS', tipo: 'fixo', valor: tas, minimo: null, condicoes: { codigos_regiao: [codigoRegiao] }, prioridade: 40, observacao: `Linha ${linha.numero_linha} da TABELA MENGUE SSW.` });
+    }
+  }
+  if (faixaDados.length) await client.query(`
+    INSERT INTO frete.tarifa_faixa (
+      tabela_preco_id, codigo_regiao, peso_de_kg, peso_ate_kg, valor_base,
+      valor_kg_excedente, peso_referencia_excedente_kg, ad_valorem_aliquota,
+      taxa_despacho, pedagio_por_100kg, prioridade, metadados
+    )
+    SELECT $1, x.codigo_regiao, x.peso_de, x.peso_ate, x.valor_base,
+           x.valor_excedente, x.peso_referencia, x.ad_valorem,
+           x.despacho, x.pedagio, 100, x.metadados
+    FROM jsonb_to_recordset($2::jsonb) AS x(
+      codigo_regiao TEXT, peso_de NUMERIC, peso_ate NUMERIC, valor_base NUMERIC,
+      valor_excedente NUMERIC, peso_referencia NUMERIC, ad_valorem NUMERIC,
+      despacho NUMERIC, pedagio NUMERIC, metadados JSONB
+    )
+  `, [tabelaId, JSON.stringify(faixaDados)]);
+  if (regrasDados.length) await client.query(`
+    INSERT INTO frete.regra_adicional (
+      tabela_preco_id, codigo, nome, tipo_calculo, valor, valor_minimo,
+      condicoes, prioridade, ativo, observacao
+    )
+    SELECT $1, x.codigo, x.nome, x.tipo, x.valor, x.minimo,
+           x.condicoes, x.prioridade, TRUE, x.observacao
+    FROM jsonb_to_recordset($2::jsonb) AS x(
+      codigo TEXT, nome TEXT, tipo TEXT, valor NUMERIC, minimo NUMERIC,
+      condicoes JSONB, prioridade INTEGER, observacao TEXT
+    )
+  `, [tabelaId, JSON.stringify(regrasDados)]);
+  const regioesSemTarifa = [...regioesCobertura].filter((item) => !regioesTarifa.has(item)).sort();
+  const tarifasSemCobertura = [...regioesTarifa].filter((item) => !regioesCobertura.has(item)).sort();
+  return {
+    coberturas: coberturaDados.length,
+    faixas: faixaDados.length,
+    regras: regrasDados.length,
+    diagnostico_chaves: {
+      regioes_cobertura: regioesCobertura.size,
+      regioes_tarifa: regioesTarifa.size,
+      regioes_conciliadas: [...regioesCobertura].filter((item) => regioesTarifa.has(item)).length,
+      divergencias_sigla_comercial_praca: divergenciasSiglaComercialPraca,
+      regioes_sem_tarifa: regioesSemTarifa,
+      tarifas_sem_cobertura: tarifasSemCobertura
+    },
+    alertas: ['Prévia parcial: POS, TDE, TRT, TDE mínimo, TAR mínimo, APLICA-SE e COD_MERCAD permanecem apenas nos metadados até validação.']
+  };
 }
 
 async function persistirFonte(client, fonte, caminho, grupos, sha) {

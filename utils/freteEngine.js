@@ -199,8 +199,10 @@ function calcularRegra(regra, contexto) {
   return arredondar(calculado, 2);
 }
 
-function simularTransportadora({ tabela, coberturas, tarifas, regras, destino, romaneio, valorMercadoria = 0 }) {
-  if (tabela?.status !== 'ativa') return { ok: false, motivo: 'Tabela ainda não está ativa para cotação.' };
+function simularTransportadora({ tabela, coberturas, tarifas, regras, destino, romaneio, valorMercadoria = 0, permitirRevisao = false }) {
+  const homologado = tabela?.status === 'ativa';
+  const previaEmRevisao = tabela?.status === 'em_revisao' && permitirRevisao;
+  if (!homologado && !previaEmRevisao) return { ok: false, homologado: false, tipo_resultado: 'indisponivel', motivo: 'Tabela ainda não está ativa para cotação.' };
   const cobertura = escolherCobertura(coberturas, destino);
   if (!cobertura) return { ok: false, motivo: 'Destino não atendido pela tabela.' };
 
@@ -241,6 +243,8 @@ function simularTransportadora({ tabela, coberturas, tarifas, regras, destino, r
 
   return {
     ok: true,
+    homologado,
+    tipo_resultado: homologado ? 'homologado' : 'previa_em_revisao',
     cobertura,
     tarifa,
     peso_cubado_kg: pesoCubadoKg,

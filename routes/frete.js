@@ -64,7 +64,7 @@ async function salvarCotacao({ usuarioId, destino, valorMercadoria, romaneio, re
       )
     `, [cotacaoId, JSON.stringify(romaneio.itens.map((item) => ({ ...item, produto_snapshot: item })))]);
 
-    const validos = resultados.filter((item) => item.ok);
+    const validos = resultados.filter((item) => item.ok && item.homologado);
     if (validos.length) {
       await client.query(`
         INSERT INTO frete.cotacao_resultado (
@@ -400,6 +400,7 @@ router.post('/simular', async (req, res) => {
     const resultados = tabelas.map((tabela) => {
       const calculo = simularTransportadora({
         tabela,
+        permitirRevisao: true,
         destino,
         romaneio,
         valorMercadoria,
@@ -415,7 +416,8 @@ router.post('/simular', async (req, res) => {
         ...calculo
       };
     }).sort((a, b) => {
-      if (a.ok !== b.ok) return a.ok ? -1 : 1;
+      const ordem = (item) => item.ok && item.homologado ? 0 : item.ok ? 1 : 2;
+      if (ordem(a) !== ordem(b)) return ordem(a) - ordem(b);
       return (a.valor_total || Infinity) - (b.valor_total || Infinity);
     });
 
@@ -434,8 +436,8 @@ router.post('/simular', async (req, res) => {
       valor_mercadoria: valorMercadoria,
       romaneio,
       resultados,
-      avisos: resultados.some((item) => item.status === 'em_revisao')
-        ? ['Há tabelas em revisão que não participam da comparação de preço.']
+      avisos: resultados.some((item) => item.tipo_resultado === 'previa_em_revisao')
+        ? ['Valores de tabelas em revisão são prévias técnicas e não representam preços homologados.']
         : []
     });
   } catch (erro) {

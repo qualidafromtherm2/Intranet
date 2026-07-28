@@ -159,17 +159,19 @@ function renderResultados(cotacao) {
   }
   let marcouMelhor = false;
   container.innerHTML = resultados.map((item) => {
-    const melhor = item.ok && !marcouMelhor;
+    const melhor = item.ok && item.homologado && !marcouMelhor;
     if (melhor) marcouMelhor = true;
     if (!item.ok) {
       return `<article class="frete-quote is-unavailable"><div class="frete-quote-head"><div><h3>${esc(item.transportadora)}</h3><small>Tabela ${esc(item.versao || 'sem versão')}</small></div><span class="frete-quote-price">Não participa</span></div><div class="frete-alert" style="margin-top:10px"><i class="fa-solid fa-circle-info"></i><span>${esc(item.motivo)}</span></div></article>`;
     }
+    const previa = !item.homologado;
     return `
-      <article class="frete-quote ${melhor ? 'is-best' : ''}">
+      <article class="frete-quote ${melhor ? 'is-best' : ''} ${previa ? 'is-preview' : ''}">
         <div class="frete-quote-head">
-          <div><h3>${esc(item.transportadora)}</h3><small>${melhor ? 'Melhor valor estimado · ' : ''}Tabela ${esc(item.versao)}</small></div>
+          <div><h3>${esc(item.transportadora)}</h3><small>${previa ? 'Prévia técnica · ' : melhor ? 'Melhor valor homologado · ' : ''}Tabela ${esc(item.versao)}</small></div>
           <span class="frete-quote-price">${moeda(item.valor_total)}</span>
         </div>
+        ${previa ? '<div class="frete-alert is-preview-note"><i class="fa-solid fa-flask"></i><span>Valor em validação. Não utilize como preço homologado para o cliente.</span></div>' : ''}
         <div class="frete-quote-meta">
           <span class="frete-chip"><i class="fa-solid fa-clock"></i>${item.prazo_min_dias == null ? 'Prazo não informado' : `${item.prazo_min_dias}${item.prazo_max_dias && item.prazo_max_dias !== item.prazo_min_dias ? `–${item.prazo_max_dias}` : ''} dias`}</span>
           <span class="frete-chip"><i class="fa-solid fa-weight-hanging"></i>${decimal(item.peso_cobravel_kg, 1)} kg cobrados</span>
@@ -271,7 +273,7 @@ function template() {
         <section class="frete-panel frete-summary-panel">
           <div class="frete-panel-head"><div><h2>Resumo da carga</h2><p>Pré-romaneio calculado automaticamente.</p></div><span class="frete-step">3</span></div>
           <div class="frete-panel-body">
-            <div class="frete-summary"><div class="frete-metric-grid"><div class="frete-metric"><span>Volumes</span><strong id="freteResumoVolumes">0</strong></div><div class="frete-metric"><span>Peso real</span><strong id="freteResumoPeso">0,0 kg</strong></div><div class="frete-metric"><span>Cubagem</span><strong id="freteResumoCubagem">0,000 m³</strong></div><div class="frete-metric"><span>Tabelas ativas</span><strong id="freteResumoTransportadoras">0</strong></div></div><div id="freteCadastroAviso" class="frete-alert" hidden></div></div>
+            <div class="frete-summary"><div class="frete-metric-grid"><div class="frete-metric"><span>Volumes</span><strong id="freteResumoVolumes">0</strong></div><div class="frete-metric"><span>Peso real</span><strong id="freteResumoPeso">0,0 kg</strong></div><div class="frete-metric"><span>Cubagem</span><strong id="freteResumoCubagem">0,000 m³</strong></div><div class="frete-metric"><span>Homologadas</span><strong id="freteResumoTransportadoras">0</strong></div></div><div id="freteCadastroAviso" class="frete-alert" hidden></div></div>
             <button id="freteSimularBtn" class="frete-btn frete-btn-primary frete-simulate" type="button" disabled><i class="fa-solid fa-bolt"></i>Comparar fretes</button>
           </div>
         </section>

@@ -11,8 +11,8 @@ Somente produtos ativos de `public.produtos_omie` com tipo fiscal `00` ou `04` p
 1. Informar CEP ou cidade/UF e o valor da mercadoria.
 2. Pesquisar máquinas e mercadorias dos tipos fiscais permitidos.
 3. Informar quantidades e revisar peso, volumes e cubagem.
-4. Comparar apenas tabelas homologadas e ativas que tenham cobertura compatível.
-5. Registrar a cotação, os itens e a memória de cálculo no schema `frete`.
+4. Comparar tabelas homologadas e visualizar, separadamente, prévias técnicas das tabelas ainda em revisão.
+5. Registrar a cotação, os itens e somente os resultados homologados no schema `frete`.
 6. Reabrir uma das últimas cotações do próprio usuário para ajustar destino, valor ou quantidades e simular novamente.
 
 A UF possui pesquisa por sigla e a cidade é sugerida pelo catálogo oficial de municípios do IBGE. Cada sugestão informa se já existe cobertura de transportadora, sem impedir a seleção de um município ainda não atendido. A cidade continua aceitando digitação manual. O valor da mercadoria aceita formatos como `12.000,00`, `12000` e `12000,00` e é normalizado antes do cálculo.
@@ -40,8 +40,8 @@ Cada nova planilha cria uma nova versão de tabela. Uma importação nunca sobre
 | Expresso EJL — tabela | 41 | staging auditável | Em revisão |
 | Expresso EJL — TDE | 54 | staging auditável | Em revisão |
 | Fitlog | 473 | staging auditável | Em revisão |
-| Bristot Rocha | 371 | 305 coberturas e 104 faixas | Em revisão |
-| Mengue Express | 2.289 | 2.222 coberturas | Em revisão |
+| Bristot Rocha | 371 | 305 coberturas, 104 faixas e 4 regras | Em revisão |
+| Mengue Express | 2.289 | 2.222 coberturas, 492 faixas e 164 regras | Em revisão |
 | Rodonaves XLSM | 7.835 | staging auditável | Em revisão |
 | Rodonaves PDF atualizado | 103 | staging auditável | Em revisão |
 
@@ -56,7 +56,8 @@ Total: 11.166 linhas de fonte preservadas. Nenhuma tabela foi ativada automatica
 - frete mínimo, excedente por kg, ad valorem, despacho, pedágio por 100 kg, TDE e TRT são armazenados separadamente e exibidos na memória;
 - dimensão maior que 500 cm é bloqueada como provável divergência de unidade;
 - produtos sem todas as dimensões ou sem peso não podem ser simulados;
-- tabela com status `em_revisao` nunca gera preço, mesmo que já possua cobertura ou faixa importada.
+- tabela com status `em_revisao` pode gerar somente uma **prévia técnica**, sinalizada como não homologada e excluída dos resultados persistidos como preço oficial;
+- apenas tabela `ativa` participa do ranking de melhor valor homologado.
 
 ## Qualidade dos produtos
 
@@ -94,7 +95,7 @@ Somente depois dessa conferência a versão correta deve mudar de `em_revisao` p
 ### Ordem recomendada de homologação
 
 1. **Bristot Rocha**: faixas e coberturas já normalizadas; falta confirmar a chave final entre classificação da cidade e tarifa e comparar cotações conhecidas.
-2. **Mengue Express**: cobertura extensa já importada; falta consolidar o vínculo entre cidade, sigla de praça e tarifas.
+2. **Mengue Express**: cobertura, faixas, GRIS e TAS já geram prévia parcial; POS, TDE, TRT e mínimos associados continuam fora do preço até validação.
 3. **Fitlog**: precisa definir a aba de saída oficial e congelar os resultados das fórmulas cruzadas antes da normalização.
 4. **Expresso EJL**: tabela simples, mas precisa confirmar a fórmula comercial e as chaves geográficas.
 5. **Rodonaves**: o PDF confirma cubagem, frete valor, TAS, GRIS, pedágio e várias taxas; permanecem pendentes a exceção de Camboriú, listas completas de CEP e prazos.
@@ -102,6 +103,8 @@ Somente depois dessa conferência a versão correta deve mudar de `em_revisao` p
 O importador da Bristot também audita automaticamente classificações de cobertura sem tarifa, tarifas sem cobertura, cidades com classificações conflitantes e linhas sem classificação. O diagnóstico fica salvo em `frete.importacao.resumo`, mantendo a tabela em revisão mesmo quando todas as chaves estruturais fecham.
 
 Na carga atual, as 13 classificações de cobertura encontram as 13 classificações tarifárias. Seis aliases explícitos de interior (`MS`, `MT` e `RO`, níveis 1/2) são normalizados porque as abas escrevem a mesma região em ordens diferentes; os textos originais permanecem nos metadados. Não há cobertura sem classificação, tarifa órfã ou cidade com classificação conflitante.
+
+Na Mengue, a chave tarifária usa explicitamente `SIGLA PRAÇA`; `SIGLA PRAÇA COMERCIAL` permanece como dado de auditoria. A carga encontrou 63 regiões conciliadas entre cobertura e tarifa e 115 linhas em que as duas siglas diferem. Essas divergências não são tratadas como equivalentes automaticamente. A prévia foi exercitada com Florianópolis/SC e permaneceu identificada como não homologada.
 
 ## Acesso e navegação
 
@@ -116,4 +119,5 @@ O histórico recente é individual: a API lista e reabre apenas cotações vincu
 - carga real das sete fontes no SQL, todas em revisão;
 - busca e seleção de produto real, consulta de CEP e simulação controlada;
 - 1920×1080, 1366×768, tablet 768×1024 e celular 390×844 sem overflow horizontal;
-- confirmação de que tabelas não homologadas não geram preço.
+- confirmação de que tabelas não homologadas geram apenas prévia técnica, sem ranking nem persistência como preço oficial;
+- reprodução real de Cuiabá/MT com memória de cálculo Bristot e de Florianópolis/SC com memória de cálculo Mengue.
